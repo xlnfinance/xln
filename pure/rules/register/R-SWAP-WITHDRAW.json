@@ -1,6 +1,6 @@
 {
  "id": "R-SWAP-WITHDRAW",
- "statement": "Only the maker withdraws what is left of its offer, at any time (a deadline long past included); the remainder and its reservations go, the offdeltas of what was filled stay, and a fill after it is refused. The Arrival cell holds the withdraw: only the maker, returning at most the remainder and moving no offdelta, its reservations released (no payment is refused for a reservation no open offer holds), and a withdrawn offer never changing again.",
+ "statement": "Only the maker withdraws what is left of its offer, at any time (a deadline long past included); the remainder and its reservations go, the offdeltas of what was filled stay, and a fill after it is refused. The Arrival cell holds the withdraw: only the maker, of a quote or an accepted offer, returning at most the remainder and moving no offdelta, its reservations released (no payment is refused for a reservation no live offer holds: a quote only the maker's give), and a withdrawn offer never changing again.",
  "source": "Arthur 10-01 02:53 (D3: two-party swap inside an Account); plan/swap-onchain.md; coordinator 10-01",
  "layers": {
   "arrival": "hold",

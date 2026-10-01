@@ -1298,40 +1298,40 @@ pipeline, where cumulative acks cross over three heights, is where exhaustive se
 
 ## Swap (`account/swap.scm`, R-SWAP-*)
 
-A two-party swap inside one Account: offer, partial fill, withdraw, lapse, and a dispute that honours what was filled. Sources:
+A two-party swap inside one Account: quote, acceptance by the first fill, partial fill, withdraw, lapse, and a dispute that honours what was filled. Sources:
 plan/swap-onchain.md (what the stock DeltaTransformer swap clause does), plan/contracts-decisions.md "Swap inside an Account" (the
 decisions), review/swap/handoff-swap.md (the kernel, PR #111: txs `offer`, `fill`, `retract` (here `withdraw`), `lapse`) and review/pr-91/review-a.md
-(the 1500-for-1000 double fill that the contract cannot see). Capacity of the base page: 2,048 states, 2,840 transitions, 1,536 goals; the
-wider bound `account/configs/swap-wide.scm` 7,524 / 10,649 / 5,643.
+(the 1500-for-1000 double fill that the contract cannot see). The consent rule (R-SWAP-CONSENT, kernel PR #132) is on the page: a maker's offer is a quote that reserves only its give and is no clause; the taker's first fill is the acceptance. Capacity of the base page: 2,128 states, 2,998 transitions, 1,596 goals; the
+wider bound `account/configs/swap-wide.scm` 7,864 / 11,335 / 5,898.
 
 **Q-S-1. The world.**
 Choice: two tokens (`:a` owned by Left, `:b` by Right, collateral 3 each, credit 1 each way), two offer slots (Left gives 3 of `:a` for 2 of `:b`,
 Right gives 2 of `:b` for 1 of `:a`), a clock of 3 J heights, one payment of 1 (to put RCPAN against the reservations) and one dispute. Offers are made at height
 0 with deadline 1, so a lapse (strictly past deadline + reserve 1) needs height 3. The two offers just fit together (Left's holds on `:a` are 3 + 1 against a balance of 3
-and a credit of 1); `swap-no-credit.scm` removes the credit so they exclude each other. Amounts are 2 and 3 on purpose: a ratio of 32768 takes (1, 1) of (3, 2), floors
+and a credit of 1); `swap-no-credit.scm` removes the credit so the two cannot both be accepted (both quotes can stand: a quote reserves only its give). Amounts are 2 and 3 on purpose: a ratio of 32768 takes (1, 1) of (3, 2), floors
 each leg and leaves (2, 1); ratio 1 and 21845 take nothing of a leg and are refused. The checker handles the page; the state of an offer is a record in `:book`.
 
 **Q-S-2. Two descriptions of an offer: the book and the signed clause.**
-Choice: `:book` is the Account's record (status, deadline, legs filled); `:clauses` is the swap clause of the signed body (what a dispute fills, with the allowance on each leg). Every
+Choice: `:book` is the Account's record (status :quote or :open, deadline, legs filled); `:clauses` is the swap clause of the signed body (what a dispute fills, with the allowance on each leg). Every
 rule moves both, and the properties read them apart. This is what makes R-SWAP-CLAUSE-WITH-FILL a statement and not a definition: the contract keeps no memory of fills, so a frame
 that moves the offdeltas and keeps the old clause lets a dispute fill the same amount again (plan/swap-onchain.md section 3; contract evidence
 `test_R_SWAP_ONCHAIN_aClauseLeftInAStateThatAlreadyHoldsTheFillFillsAgain`, 1500 against 1000). Planted bug `swap-fill-leaves-clause`. It is killed twice: by the world property over any
-order of offers, fills, withdrawals and lapses (the clause of an offer exists exactly while it is open and never fills what the offdeltas hold), and, with that property removed
+order of offers, fills, withdrawals and lapses (the clause of an offer exists exactly while it is accepted and open, never for a quote, and never fills what the offdeltas hold), and, with that property removed
 (`account/configs/swap-no-clause-property.scm`), by the dispute path alone: the settlement must equal the payments, the legs filled and the taker's fill of the remainder.
 
 **Q-S-3. The fill.**
-Choice: only the other side, a ratio 1..65535 of what REMAINS, while the offer is open and now is not past its deadline (R-SWAP-FILL "live in the judge's view": the page has one
+Choice: only the other side, a ratio 1..65535 of what REMAINS, while it is a quote or an accepted offer and now is not past its deadline (R-SWAP-FILL "live in the judge's view": the page has one
 clock; the per-party views are the clock page's). Each leg is `floor(remainder * r / 65535)` on its own (DeltaTransformer's `WideMath.fill`), so the rounding loss stays with the leg that
 rounded down; a fill that takes nothing of a leg is refused (`fill_too_small`); 65535 takes the rest and drops the offer. Between the deadline and deadline + reserve an offer is neither
 fillable nor lapsable (only withdrawable): that gap is the reserve of R-HTLC-CLOCK. The fill moves the offdeltas by the legs, releases those legs from the reservations and shrinks the clause.
 Planted bugs: `swap-fill-beyond-remainder` (the whole fill takes the amounts offered), `swap-fill-leg-rounds-up` (the want leg rounds up), `swap-fill-ratio-unchecked` (ratio 0 or 65536).
 
 **Q-S-4. Reservations, RCPAN and conservation (R-SWAP-OFFER).**
-Choice: the maker's give is held against the maker in its token, the taker's want against the taker in the other token (`Ledger.reserved`); RCPAN counts the holds as locked, so an offer is kept
+Choice: a quote's give is held against the maker in its token; the taker's want is held against the taker in the other token only once the taker's first fill accepts the quote (`Ledger.reserved`; see Q-S-9); RCPAN counts the holds as locked, so a quote is kept
 only if RCPAN still holds with it and a fill never fails on funds. Three properties, each written from the open offers and not from the `:held` field the rules keep: the holds are exactly what
-the open offers could still take; RCPAN holds in the worst case over the open offers; the offdeltas hold exactly the payments (a ghost the rules never read) and the legs filled, so nothing is created or
-lost. A fourth is about payments: a payment is refused exactly when RCPAN, counting only the open offers as held, refuses it, for amounts 1 to 3. Planted bug
-`swap-withdraw-keeps-reservation`: the reservation outlives the offer and RCPAN refuses a payment it has room for.
+the quotes and accepted offers could still take (a quote only its maker's give); RCPAN holds in the worst case over the open offers; the offdeltas hold exactly the payments (a ghost the rules never read) and the legs filled, so nothing is created or
+lost. A fourth is about payments: a payment is refused exactly when RCPAN, counting only the open offers as held, refuses it, for amounts 1 to 3. Planted bugs
+`swap-withdraw-keeps-reservation` (the reservation outlives the offer and RCPAN refuses a payment it has room for) and `swap-offer-without-rcpan` (a quote is kept without asking RCPAN).
 
 **Q-S-5. Withdraw and lapse (R-SWAP-WITHDRAW, R-SWAP-EXPIRE).**
 Choice: withdraw by the maker at any time, a past deadline included; it returns the remainder's reservations, drops the clause, keeps what was filled, and a fill after it is refused. Lapse by anyone once now
@@ -1348,15 +1348,20 @@ a dispute. The page settles; it does not run the payout (collateral, reserves, d
 the n-th ratio of several swaps in one clause, the starter's committed ratio (all three are contract tests of R-SWAP-ONCHAIN).
 
 **Q-S-7. Not in the page (scope).**
-Several tokens beyond one pair (the Account of the page has two); the hub book and its lots, prices and dust (PR #92; rows R-BOOK-*); loans; a clause among HTLC clauses (the only holds here are offers; R-HOLD-CAP's 32 is not counted); several offers in one slot;
+Several tokens beyond one pair (the Account of the page has two); the hub book and its lots, prices and dust (PR #92; rows R-BOOK-*); loans; a clause among HTLC clauses (the only holds here are quotes and offers; R-HOLD-CAP's 32 is not counted, nor the 33rd clause of a first fill, too_many_holds); the cap of 4 quotes per maker (the menu has one quote per maker, too_many_quotes); several offers in one slot;
 a stale proof (a maker who starts a dispute on a state from before the fill is answered by the taker's counter, the dispute page). Runtime duties, none of them checkable on a page: WHEN to lapse (the lapse is a frame the Runtime must propose; the page shows only
 that it is allowed from `deadline + reserve` on), retract before a dispute, the taker's choice of ratio, and R-SIGNED-IS-LIVE for the fill's frame: the proof signed before the fill (with the larger clause) stays enforceable on chain until the fill's frame
 commits, so a fill is only as final as its frame; the page holds the frame that commits.
 
 **Q-S-8. Register.**
-The ids R-SWAP-OFFER, R-SWAP-FILL, R-SWAP-CLAUSE-WITH-FILL, R-SWAP-ALLOWANCES, R-SWAP-WITHDRAW and R-SWAP-EXPIRE appear in property names. Their rows are not on main (the kernel thread, PR #111, owns them), so this page adds none; the names wait for the rows.
+The ids R-SWAP-OFFER, R-SWAP-FILL, R-SWAP-CLAUSE-WITH-FILL, R-SWAP-ALLOWANCES, R-SWAP-WITHDRAW, R-SWAP-EXPIRE and R-SWAP-CONSENT appear in property names. The rows are the kernel's (PR #111 and #132); this page promotes their Arrival cells, each with a sentence naming what the page leaves out.
 Rows on main whose Arrival cell this page carries, narrowed in their statements: R-SWAP-ONCHAIN (floor legs and ratio 0; allowance clamp, n-th ratio and committed ratio on no page), R-BOOK-CLAUSE-LOCKSTEP and R-BOOK-DISPUTE-HONORS (the one-Account half; the hub book's
 lots and prices on no page).
+
+**Q-S-9. Consent (R-SWAP-CONSENT).**
+Choice: the rule of record (the kernel, PR #132, decided 10-01): a quote binds the taker to nothing. It reserves only the maker's give, takes none of the taker's room and is no clause of the signed body, so a maker cannot lock the taker's funds or fill a proof body with clauses the taker never saw. The taker's first fill is the acceptance:
+the offer becomes a clause and the taker's WHOLE remaining want is reserved against the taker, only if its RCPAN still holds (insufficient_capacity otherwise, the quote unchanged). A taker with room for only part of a quote's want cannot take part of it: the signed body needs the whole. A first fill that takes everything never becomes a clause.
+Planted bugs: `swap-quote-reserves-taker` (the quote reserves the taker's want too; caught by the payment property, which now carries R-SWAP-CONSENT), `swap-quote-is-clause` (the quote is written into the body), `swap-accept-without-room` (the acceptance does not ask RCPAN; `swap-no-credit.scm`, a step property). Not on the page: the cap of 4 quotes per maker and the 33rd clause on a first fill.
 
 ## Checker (`lib/check.scm`)
 

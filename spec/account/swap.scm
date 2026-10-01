@@ -1,8 +1,8 @@
 ;; A two-party swap inside one Account: a description, not an implementation.
 ;;
-;; The maker OFFERS `give` of one token for `want` of another; the other side, the taker, FILLS a ratio r of the
-;; remainder (a whole number of 65535ths); the maker may WITHDRAW what is left; anyone may LAPSE an offer once the
-;; deciding party's view is strictly past `deadline + reserve`. A DISPUTE settles the signed body, which carries one
+;; The maker QUOTES `give` of one token for `want` of another; the other side, the taker, FILLS a ratio r of the
+;; remainder (a whole number of 65535ths), and its first fill is its ACCEPTANCE; the maker may WITHDRAW what is left;
+;; anyone may LAPSE a quote or offer once the deciding party's view is strictly past `deadline + reserve`. A DISPUTE settles the signed body, which carries one
 ;; swap clause per open offer, and the taker chooses a ratio for each clause on chain.
 ;;
 ;; Sources: plan/swap-onchain.md (the stock DeltaTransformer swap clause: uint16 ratio of 65535, each leg is
@@ -11,9 +11,15 @@
 ;; The kernel is PR #111 (txs offer, fill, retract, lapse; here `withdraw` is its retract).
 ;;
 ;; What the page says:
-;;   R-SWAP-OFFER   an offer RESERVES the maker's give (against the maker, in its token) and the taker's want
-;;                  (against the taker, in the other token); RCPAN counts the reservations as held, so a fill never
-;;                  fails on funds. An offer is kept only if RCPAN still holds with it.
+;;   R-SWAP-OFFER   a quote RESERVES the maker's give (against the maker, in its token); RCPAN counts the
+;;                  reservation as held. A quote is kept only if RCPAN still holds with it.
+;;   R-SWAP-CONSENT a quote binds the taker to nothing: it takes none of the taker's room and is no clause of the signed
+;;                  body, so a maker cannot lock the taker's funds or fill a proof body with clauses the taker never
+;;                  saw. The taker's first fill is its acceptance: it reserves the taker's WHOLE remaining want (a taker
+;;                  with room for only part of it cannot take part of a quote: the signed body needs the whole) and
+;;                  only if RCPAN still holds with it (insufficient_capacity otherwise, the quote unchanged); from then
+;;                  on the offer is a clause. A fill that takes everything never becomes a clause. Then a fill never
+;;                  fails on funds.
 ;;   R-SWAP-FILL    only the taker fills, a ratio 1..65535 of what REMAINS, while the offer is open and not past its
 ;;                  deadline. Each leg is floor(remainder * r / 65535) on its own; a fill that takes nothing of a leg
 ;;                  is refused; 65535 takes the rest and drops the offer. The fill moves the offdeltas by the legs.
@@ -30,11 +36,13 @@
 ;;   R-SWAP-ONCHAIN  the dispute: the chain settles the body's offdeltas plus, for each clause, the taker's ratio of
 ;;                  its amounts, floor on each leg; ratio 0 fills nothing.
 ;;
-;; The world keeps two descriptions of every offer on purpose. `:book` is the Account's record of an offer (what it
-;; gave and wanted, what was filled); `:clauses` is the swap clause of the signed body (what a dispute would fill).
+;; The world keeps two descriptions of every quote and offer on purpose. `:book` is the Account's record (its status
+;; :quote or :open, what it gave and wanted, what was filled); `:clauses` is the swap clause of the signed body (what a
+;; dispute would fill: none for a quote).
 ;; A rule moves them together, and the properties read them separately.
 ;;
-;; Not modelled: more than two tokens (the Account has two, one pair), the hub book, loans, HTLC clauses (the only
+;; Not modelled: the cap of 4 quotes per maker (the menu has one quote per maker), the 33rd clause on a first fill
+;; (too_many_holds), more than two tokens (the Account has two, one pair), the hub book, loans, HTLC clauses (the only
 ;; holds are offers), several offers per slot, the clamp of an allowance below the fill (here an allowance is the
 ;; remainder, so it never bites), the n-th ratio of several swaps in one clause, the starter's committed ratio, a
 ;; stale proof (the dispute page's counter answers it), and the Runtime duties: when to lapse, retract before a
@@ -77,7 +85,11 @@
 ;; The OFFER RECORD of the Account: (status deadline filled-give filled-want), #f before the offer exists.
 ;; The amounts offered are in the menu; the remainder is what is left of them.
 (define (book-of w i) (list-ref (:book w) i))
-(define (open? o) (and o (equal? (:status o) :open)))
+;; a QUOTE is an offer no taker has filled (R-SWAP-CONSENT): it reserves only the maker's give and is no clause. The
+;; taker's first fill accepts it: the offer is then :open, reserves the taker's want too, and carries a clause.
+(define (quote? o) (and o (equal? (:status o) :quote)))
+(define (open? o) (and o (equal? (:status o) :open)))      ; accepted: a clause of the signed body
+(define (live? o) (or (quote? o) (open? o)))                ; a quote or an accepted offer: it can still change
 (define (rem-give i o) (- (:give (menu-ref i)) (:fg o)))
 (define (rem-want i o) (- (:want (menu-ref i)) (:fw o)))
 
@@ -90,9 +102,9 @@
 (define (hold-of held tok side) (get-in held (list tok side)))
 (define (add-hold held tok side n) (update-in held (list tok side) (lambda (x) (+ x n))))
 ;; sign 1 reserves, -1 releases: the maker's give in its token, the taker's want in the other token
-(define (reserve-offer held i give want sign)
-  (let ((m (menu-ref i)))
-    (-> held (add-hold (:gt m) (maker-of i) (* sign give)) (add-hold (:wt m) (taker-of i) (* sign want)))))
+(define (reserve-give held i give sign) (add-hold held (:gt (menu-ref i)) (maker-of i) (* sign give)))
+(define (reserve-want held i want sign) (add-hold held (:wt (menu-ref i)) (taker-of i) (* sign want)))
+(define (reserve-offer held i give want sign) (reserve-want (reserve-give held i give sign) i want sign))
 
 ;; RCPAN on both tokens with the given holds counted as locked (money/core.scm)
 (define (rcpan-ok? off held)
@@ -117,15 +129,19 @@
         (update-in (list :clauses) (lambda (cs) (set-nth cs i c)))))
 
 ;; ---- offer
+;; R-SWAP-CONSENT: a quote reserves only the maker's give, takes none of the taker's room and is no clause
+;; (bugs `swap-quote-reserves-taker`, `swap-quote-is-clause`)
+(define (quote-reserve held i m) (reserve-give held i (:give m) 1))
+(define (quote-clause i o) #f)
 (define (offer-enabled? w side i)
   (let ((m (menu-ref i)))
     (and (equal? side (maker-of i)) (not (book-of w i)) (<= (:now w) max-offer-now)
-         (rcpan-ok? (:off w) (reserve-offer (:held w) i (:give m) (:want m) 1)))))
+         (rcpan-ok? (:off w) (quote-reserve (:held w) i m)))))
 (define (offer-step w i)
   (let* ((m (menu-ref i))
-         (o (dict :status :open :deadline (+ (:now w) offer-span) :fg 0 :fw 0)))
-    (-> (set-offer w i o (clause-for i o))
-        (update-in (list :held) (lambda (h) (reserve-offer h i (:give m) (:want m) 1))))))
+         (o (dict :status :quote :deadline (+ (:now w) offer-span) :fg 0 :fw 0)))
+    (-> (set-offer w i o (quote-clause i o))
+        (update-in (list :held) (lambda (h) (quote-reserve h i m))))))
 
 ;; ---- fill
 ;; R-SWAP-FILL: DeltaTransformer's WideMath.fill, which is floor(amount * r / 65535)
@@ -134,34 +150,40 @@
 (define (ratio-valid? r) (and (>= r 1) (<= r max-ratio)))
 (define (takes-something? i o r) (every (lambda (leg) (> leg 0)) (fill-amounts i o r)))
 ;; the offer is live in the judge's view: open, and not past its deadline
-(define (fillable? w o) (and (open? o) (<= (:now w) (:deadline o))))
+(define (fillable? w o) (and (live? o) (<= (:now w) (:deadline o))))
+;; R-SWAP-CONSENT: the first fill of a quote reserves the taker's whole want, only if its RCPAN still holds
+;; (insufficient_capacity otherwise; bug `swap-accept-without-room`)
+(define (accept-fits? w i o)
+  (or (not (quote? o)) (rcpan-ok? (:off w) (reserve-want (:held w) i (:want (menu-ref i)) 1))))
 (define (fill-enabled? w side i r)
   (let ((o (book-of w i)))
-    (and o (equal? side (taker-of i)) (fillable? w o) (ratio-valid? r) (takes-something? i o r))))
+    (and o (equal? side (taker-of i)) (fillable? w o) (ratio-valid? r) (takes-something? i o r) (accept-fits? w i o))))
 (define (after-fill i o gl wl)
   (let ((fg (+ (:fg o) gl)) (fw (+ (:fw o) wl)) (m (menu-ref i)))
     (dict :status (if (and (>= fg (:give m)) (>= fw (:want m))) :filled :open) :deadline (:deadline o) :fg fg :fw fw)))
 ;; R-SWAP-CLAUSE-WITH-FILL: the clause of the frame that folds the fill is the remainder, or none (bug `swap-fill-leaves-clause`)
 (define (clause-after-fill w i o2) (clause-for i o2))
+(define (accept-held held i o) (if (quote? o) (reserve-want held i (:want (menu-ref i)) 1) held))
 (define (fill-step w i r)
   (let* ((m (menu-ref i)) (o (book-of w i)) (legs (fill-amounts i o r)) (gl (car legs)) (wl (cadr legs)) (o2 (after-fill i o gl wl)))
     (-> (set-offer w i o2 (clause-after-fill w i o2))
         (update-in (list :off (:gt m)) (lambda (x) (ledger-pay x (maker-of i) gl)))
         (update-in (list :off (:wt m)) (lambda (x) (ledger-pay x (taker-of i) wl)))
-        (update-in (list :held) (lambda (h) (reserve-offer h i gl wl -1))))))
+        (update-in (list :held) (lambda (h) (reserve-offer (accept-held h i o) i gl wl -1))))))
 
 ;; ---- withdraw and lapse: the remainder's reservations go, the clause goes, what was filled stays
 (define (withdraw-returns i o) (list (rem-give i o) (rem-want i o)))
 (define (lapse-returns i o) (list (rem-give i o) (rem-want i o)))
+;; a quote held only the maker's give, an accepted offer the taker's want as well
 (define (close-step w i status returns)
   (let ((o (book-of w i)))
     (-> (set-offer w i (assoc-in o (list :status) status) #f)
-        (update-in (list :held) (lambda (h) (reserve-offer h i (car returns) (cadr returns) -1))))))
-(define (withdraw-enabled? w side i) (and (equal? side (maker-of i)) (open? (book-of w i))))
+        (update-in (list :held) (lambda (h) (reserve-offer h i (car returns) (if (open? o) (cadr returns) 0) -1))))))
+(define (withdraw-enabled? w side i) (and (equal? side (maker-of i)) (live? (book-of w i))))
 (define (withdraw-step w i) (close-step w i :withdrawn (withdraw-returns i (book-of w i))))
 ;; R-SWAP-EXPIRE: strictly past deadline + reserve (bug `swap-lapse-early`)
 (define (lapse-due? w o) (> (:now w) (+ (:deadline o) lapse-reserve)))
-(define (lapse-enabled? w side i) (let ((o (book-of w i))) (and (open? o) (lapse-due? w o))))
+(define (lapse-enabled? w side i) (let ((o (book-of w i))) (and (live? o) (lapse-due? w o))))
 (define (lapse-step w i) (close-step w i :lapsed (lapse-returns i (book-of w i))))
 
 ;; ---- a payment (the rules pay 1; `pay-fits?` answers for any amount): RCPAN with the reservations counted
@@ -240,15 +262,16 @@
 (define (next w) (successors (rules) sides w))
 
 ;; ---- properties: from the offers and the ghost, never through the guards or the reservation field
-(define (offers-open w) (filter (lambda (i) (open? (book-of w i))) indexes))
+(define (offers-open w) (filter (lambda (i) (open? (book-of w i))) indexes))   ; accepted: the clauses
+(define (offers-live w) (filter (lambda (i) (live? (book-of w i))) indexes))     ; quotes and accepted offers
 (define (booked w) (filter (lambda (i) (book-of w i)) indexes))
-;; what the open offers could still take from `side` in `tok`
+;; what the quotes and accepted offers could still take from `side` in `tok` (a quote only the maker's give)
 (define (open-holds w tok side)
   (apply + (map (lambda (i)
                   (let ((m (menu-ref i)) (o (book-of w i)))
                     (+ (if (and (equal? (:gt m) tok) (equal? (maker-of i) side)) (rem-give i o) 0)
-                       (if (and (equal? (:wt m) tok) (equal? (taker-of i) side)) (rem-want i o) 0))))
-                (offers-open w))))
+                       (if (and (equal? (:wt m) tok) (equal? (taker-of i) side) (open? o)) (rem-want i o) 0))))
+                (offers-live w))))
 ;; the offdelta the legs `(gives wants)` of each offer make in `tok`
 (define (legs-delta w tok leg-of)
   (apply + (map (lambda (i)
@@ -269,9 +292,9 @@
 
 (define invariants
   (list
-   ;; a payment is refused exactly when RCPAN refuses it with the open offers alone counted as held (a closed
-   ;; offer keeps no reservation); the formula is written out again from the offers and `ledger-rcpan-ok?`
-   (property "R-SWAP-WITHDRAW: no payment is refused for a reservation that no open offer holds" (w)
+   ;; a payment is refused exactly when RCPAN refuses it with the live offers alone counted as held (a closed
+   ;; offer keeps no reservation, a quote none of the taker's room); the formula is written out again from the offers and `ledger-rcpan-ok?`
+   (property "R-SWAP-WITHDRAW R-SWAP-CONSENT: no payment is refused for a reservation that no live offer holds (a withdrawn offer's, a quote's room of the taker)" (w)
      (every (lambda (side)
               (every (lambda (tok)
                        (every (lambda (n)
@@ -283,6 +306,9 @@
                               (list 1 2 3)))
                      tokens))
             sides))
+   ;; R-SWAP-CONSENT, from the offers: a quote is no clause of the signed body
+   (property "R-SWAP-CONSENT: a quote is no clause of the signed body" (w)
+     (every (lambda (i) (or (not (quote? (book-of w i))) (not (list-ref (:clauses w) i)))) indexes))
    (property "R-SWAP-OFFER: the reservations are exactly what the open offers could still take" (w)
      (every (lambda (tok) (and (= (hold-of (:held w) tok :left) (open-holds w tok :left))
                                (= (hold-of (:held w) tok :right) (open-holds w tok :right))))
@@ -351,6 +377,11 @@
      (or (not (rule-is? "fill" rname))
          (let* ((i (rule-offer rname)) (o (book-of w i)) (l (moved-legs w w2 i)) (r (fill-ratio rname)))
            (and (= (car l) (share (rem-give i o) r)) (= (cadr l) (share (rem-want i o) r))))))
+   (step-property "R-SWAP-CONSENT: a first fill needs room for the taker's whole want: no fill of a quote that RCPAN refuses" (w rname side w2)
+     (or (not (rule-is? "fill" rname))
+         (let* ((i (rule-offer rname)) (o (book-of w i)))
+           (or (not (quote? o))
+               (rcpan-ok? (:off w) (reserve-want (:held w) i (:want (menu-ref i)) 1))))))
    (step-property "R-SWAP-WITHDRAW: a withdrawn offer never changes again" (w rname side w2)
      (every (lambda (i) (or (not (book-of w i)) (not (equal? (:status (book-of w i)) :withdrawn)) (equal? (book-of w i) (book-of w2 i))))
             indexes))
