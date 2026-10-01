@@ -2,9 +2,10 @@
 import { describe, expect, test } from "bun:test";
 import { MAX_ENCODED_BYTES } from "../op/limits.ts";
 import {
-  ME, LEFT_PEER, RIGHT_PEER, bigStart, deposit, finalize, reserveToReserve, reveal, start,
+  ME, LEFT_PEER, RIGHT_PEER, bigStart, deposit, finalize, fundSpread, reserveToReserve, reveal, start,
 } from "../fixtures.ts";
-import { encodedBytes, fitFault } from "./fit.ts";
+import type { JOp } from "../op/ops.ts";
+import { encodedBytes, fitFault, fitPrefix } from "./fit.ts";
 
 const orZero = (size: ReturnType<typeof encodedBytes>): number => (size.ok ? size.value : 0);
 
@@ -58,5 +59,16 @@ describe("R-J3 the counts are judged per group, and the draft by the most one ba
     const fifty = Array.from({ length: 51 }, (_, i) => deposit(BigInt(i + 1)));
     const fault = fitFault(ME, fifty);
     expect(fault._tag === "some" && fault.value._tag).toBe("too_many_ops");
+  });
+});
+
+describe("R-J3 fitPrefix: the longest front of a group that is one batch", () => {
+  const funding = (): JOp => fundSpread(64);
+  test("four fundings of 64 pairs are 256 pairs: three go, the fourth waits", () => {
+    expect(fitPrefix([funding(), funding(), funding(), funding()]).length).toBe(3);
+  });
+  test("a group that fits goes whole, and an empty group stays empty", () => {
+    expect(fitPrefix([funding(), funding()]).length).toBe(2);
+    expect(fitPrefix([]).length).toBe(0);
   });
 });

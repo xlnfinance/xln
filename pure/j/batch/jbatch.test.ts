@@ -8,7 +8,8 @@ import {
 import type { JOp } from "../op/ops.ts";
 import { MIN_GAS_BUDGET } from "./sealed.ts";
 import {
-  ME, LEFT_PEER, RIGHT_PEER, bigStart, counter, pick, deposit, finalize, fund, holdings, idOf, reserveToReserve, reveal,
+  ME, LEFT_PEER, RIGHT_PEER, bigStart, counter, fundSpread, pick, deposit, finalize, fund, holdings, idOf,
+  reserveToReserve, reveal,
   settle, start, withdraw,
 } from "../fixtures.ts";
 
@@ -21,6 +22,8 @@ const queued = (j: JBatch, ...ops: readonly JOp[]): JBatch =>
     const outcome = queue(acc, op);
     return outcome._tag === "refused" ? expect.unreachable(JSON.stringify(outcome.fault)) : outcome.jbatch;
   }, j);
+
+const tags = (ops: readonly JOp[]): readonly string[] => ops.map((op) => op._tag);
 
 const sealedOf = (j: JBatch, c = ctx()) => {
   const outcome = seal(j, c);
@@ -269,5 +272,49 @@ describe("R-J3 a group too large for one batch is refused when it is queued, so 
   test("a refusal is not a nonce for the command", () => {
     const outcome = queue(queued(empty, bigStart(LEFT_PEER, 1n, 140)), bigStart(RIGHT_PEER, 1n, 140));
     expect(advancesCommandNonce(outcome)).toBe(false);
+  });
+});
+
+const ones = (n: number): readonly bigint[] => Array.from({ length: n }, () => 1n);
+
+describe("R-J3 a draft that could be sealed once can still be sealed after a send regroups it", () => {
+  const pairsOf = (ops: readonly JOp[]): number =>
+    ops.reduce((sum, op) => sum + (op._tag === "reserve_to_collateral" ? op.funding.pairs.length : 0), 0);
+
+  test("fundings that rode with a settlement fall into the soft group: what is sent is cut to 250 pairs", () => {
+    const toX = [fund(LEFT_PEER, ...ones(64)), fund(LEFT_PEER, ...ones(64))];
+    const spread = [fundSpread(64, 200), fundSpread(64, 300), fundSpread(64, 400), fund(LEFT_PEER, ...ones(64))];
+    const draft = queued(openJBatch(ME, 0n), settle(LEFT_PEER, 0n, 1n), ...toX, ...spread);
+    const first = sealedOf(draft, ctx(0n));
+    expect(tags(first.batch.ops)).toEqual(["settle"]);
+    const idle = { ...first.jbatch, phase: { _tag: "idle" } } as const;
+    const second = sealedOf(idle, ctx(10_000n));
+    expect(pairsOf(second.batch.ops)).toBeLessThanOrEqual(250);
+    expect(second.batch.ops.length).toBeGreaterThan(0);
+  });
+  test("what was cut waits in the draft and goes in the next batch: nothing is lost and nothing wedges", () => {
+    const draft = queued(openJBatch(ME, 0n), settle(LEFT_PEER, 0n, 1n), fund(LEFT_PEER, ...ones(64)),
+      fund(LEFT_PEER, ...ones(64)), fundSpread(64, 200), fundSpread(64, 300), fundSpread(64, 400));
+    const first = sealedOf(draft, ctx(0n));
+    const second = sealedOf({ ...first.jbatch, phase: { _tag: "idle" } }, ctx(10_000n));
+    const third = sealedOf({ ...second.jbatch, phase: { _tag: "idle" } }, ctx(10_000n));
+    const sent = [...first.batch.ops, ...second.batch.ops, ...third.batch.ops];
+    expect(sent.length).toBe(6);
+    expect(third.jbatch.draft).toEqual([]);
+  });
+});
+
+describe("R-J3 payments waiting for funding never refuse a dispute step", () => {
+  test("50 payments the reserve cannot cover, then a dispute start: queued, and it is what seals", () => {
+    const unfunded = Array.from({ length: 50 }, (_, i) => reserveToReserve(1_000_000n + BigInt(i)));
+    const waiting = queued(openJBatch(ME, 0n), ...unfunded);
+    expect(queue(waiting, reserveToReserve(1n))._tag).toBe("refused");
+    const withStart = queued(waiting, start(LEFT_PEER, 1n));
+    expect(tags(sealedOf(withStart, ctx(1n)).batch.ops)).toEqual(["dispute_start"]);
+  });
+  test("a draft of 50 hard ops is full for hard ops and not for payments", () => {
+    const hard = queued(openJBatch(ME, 0n), ...Array.from({ length: 50 }, (_, i) => deposit(BigInt(i + 1))));
+    expect(queue(hard, deposit(99n))._tag).toBe("refused");
+    expect(queue(hard, reserveToReserve(1n))._tag).toBe("queued");
   });
 });

@@ -12,7 +12,7 @@ import { match, type Tagged } from "../../kernel/core/tagged.ts";
 import { orElse } from "../../kernel/core/option.ts";
 import { fundedFirst, type Treasury } from "../plan/funded.ts";
 import { groupsOf } from "../plan/group.ts";
-import { fitFault, type FitFault } from "../plan/fit.ts";
+import { fitFault, fitPrefix, type FitFault } from "../plan/fit.ts";
 import { assemble } from "../op/assemble.ts";
 import { requestKey, type JOp } from "../op/ops.ts";
 import { encodeBatch } from "../../chain/batch/batch.ts";
@@ -95,7 +95,7 @@ export type SealOutcome =
 /** The ops of the first group that has a funded part: that part goes, the rest wait in the draft. */
 const firstSendable = (j: JBatch, treasury: Treasury): readonly JOp[] =>
   groupsOf(j.entity, j.draft)
-    .map((group) => fundedFirst(j.entity, treasury, group).funded)
+    .map((group) => fitPrefix(fundedFirst(j.entity, treasury, group).funded))
     .find((funded) => funded.length > 0) ?? [];
 
 /** The draft without the ops that were sent, one match for each: the same object queued twice is two ops. */

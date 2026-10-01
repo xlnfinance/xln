@@ -14,7 +14,7 @@ import { map, type Result } from "../../kernel/core/result.ts";
 import type { Tagged } from "../../kernel/core/tagged.ts";
 import { assemble } from "../op/assemble.ts";
 import { MAX_ENCODED_BYTES, TOTAL_LIMIT, withinLimits, type LimitFault } from "../op/limits.ts";
-import type { JOp } from "../op/ops.ts";
+import { classOf, type JOp } from "../op/ops.ts";
 import { groupsOf, type Group } from "./group.ts";
 
 export type SizeFault =
@@ -41,8 +41,30 @@ const groupFault = (group: Group): Option<FitFault> => {
   return counted.ok ? sizeFault(group) : some(counted.error);
 };
 
+/**
+ * The most ops of one class a draft holds: the most one batch carries. Each class has its own, so a draft full of
+ * payments that wait for funding never refuses a dispute step, the one op that must not be refused for payments.
+ */
+const classFault = (draft: readonly JOp[]): Option<FitFault> => {
+  const worst = Math.max(...(["hard", "soft"] as const).map((c) => draft.filter((op) => classOf(op) === c).length));
+  return worst > TOTAL_LIMIT ? some({ _tag: "too_many_ops", total: worst, max: TOTAL_LIMIT }) : none;
+};
+
 /** The first limit this draft passes, or none when every batch made from it is one the Depository accepts. */
 export const fitFault = (self: string, draft: readonly JOp[]): Option<FitFault> => {
-  if (draft.length > TOTAL_LIMIT) return some({ _tag: "too_many_ops", total: draft.length, max: TOTAL_LIMIT });
+  const counted = classFault(draft);
+  if (counted._tag === "some") return counted;
   return groupsOf(self, draft).map(groupFault).find((fault) => fault._tag === "some") ?? none;
+};
+
+/**
+ * The longest front of a group that is a batch the Depository accepts. Groups change when ops leave the draft (the
+ * fundings that rode with a settlement fall into the soft group once it is sent), so a group judged at queue time is
+ * judged again at sealing: what does not fit waits for the next batch, and the batch that goes is never one the
+ * contract would refuse.
+ */
+export const fitPrefix = (group: Group): Group => {
+  const sizes = Array.from({ length: group.length }, (_, i) => group.length - i);
+  const longest = sizes.find((n) => groupFault(group.slice(0, n))._tag === "none");
+  return group.slice(0, longest ?? 0);
 };

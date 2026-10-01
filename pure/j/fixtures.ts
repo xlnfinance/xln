@@ -47,6 +47,15 @@ export const fund = (peer: string, ...amounts: readonly bigint[]): JOp => ({
   funding: { tokenId: TOKEN, receivingEntity: ME, pairs: amounts.map((amount) => ({ entity: peer, amount })) },
 });
 
+/** `me` funds `count` different Accounts in one funding: several counterparties, so no Account's group takes it. */
+export const fundSpread = (count: number, firstPeer = 100): JOp => ({
+  _tag: "reserve_to_collateral",
+  funding: {
+    tokenId: TOKEN, receivingEntity: ME,
+    pairs: Array.from({ length: count }, (_, i) => ({ entity: idOf(firstPeer + i), amount: 1n })),
+  },
+});
+
 export const withdraw = (peer: string, amount: bigint, nonce = 1n): JOp => ({
   _tag: "collateral_to_reserve",
   withdrawal: { counterparty: peer, tokenId: TOKEN, amount, nonce, sig: SIG },

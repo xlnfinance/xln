@@ -507,6 +507,31 @@
      "kind": "test",
      "layer": "ts",
      "name": "R-J3 a group too large for one batch is refused when it is queued, so the draft can always be sealed"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-J3 a draft that could be sealed once can still be sealed after a send regroups it"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-J3 payments waiting for funding never refuse a dispute step"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-J3 every group of the draft is judged, not the first or the last"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-J3 the size limit is inclusive: exactly 256 KiB is one batch, 32 bytes more is not"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-J3 fitPrefix: the longest front of a group that is one batch"
     }
    ]
   },
