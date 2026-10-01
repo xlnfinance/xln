@@ -104,6 +104,21 @@
    "kind": "test",
    "layer": "ts",
    "name": "R-DURABLE after a crash the Host is the durable rows alone, and every committed output leaves again"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DURABLE a staged row asks nothing of the chain: its actions leave once it is committed"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DURABLE a WAL whose row lost its chain actions does not replay: the Runtime halts on it"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DURABLE a flush after a crash asks for the rows in row order, each row's own actions in order"
   }
  ]
 }

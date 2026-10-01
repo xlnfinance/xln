@@ -7,7 +7,7 @@
   "quint": "owed: spec thread (a Quint model for the refused-proposal release)",
   "contract": "n/a: freeing a payer is an off-chain Entity and Runtime duty",
   "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
-  "ts": "owed: Entity/Runtime cut"
+  "ts": "hold"
  },
  "killers": [
   {
@@ -15,6 +15,21 @@
    "layer": "ts",
    "name": "to be named",
    "owed": "Entity/Runtime cut"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-REFUSED-RELEASES-PAYER a lock waiting to be retried holds Alice's capacity against a payment"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-REFUSED-RELEASES-PAYER MAX_ATTEMPTS refusals drop the lock with a notice and leave nothing queued"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-REFUSED-RELEASES-PAYER the capacity is Alice's again and a payment commits on both sides"
   }
  ]
 }

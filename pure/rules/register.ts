@@ -12,15 +12,18 @@ const fail = (where: string, detail: string): Result<never, ParseError> => ({
 
 const pass = <T>(value: T): Result<T, never> => ({ ok: true, value });
 
-// "-" is unstated (the gate is red on it for a live rule), "hold" is hold, "owed: <who brings it>" is owed, "n/a: <why>" is not applicable.
+// "-" is unstated (the gate is red on it for a live rule), "hold" is hold, "owed: <who brings it>" is owed, "stale: <why>" is a name that models an earlier
+// version of the rule, "n/a: <why>" is not applicable.
 export const parseCell = (where: string, text: unknown): Result<Cell, ParseError> => {
   if (text === "-") return pass({ _tag: "unstated" });
   if (text === "hold") return pass({ _tag: "hold" });
   const owed = typeof text === "string" ? /^owed:\s*(\S.*)$/.exec(text) : null;
   if (owed?.[1] !== undefined) return pass({ _tag: "owed", by: owed[1] });
+  const stale = typeof text === "string" ? /^stale:\s*(\S.*)$/.exec(text) : null;
+  if (stale?.[1] !== undefined) return pass({ _tag: "stale", why: stale[1].trim() });
   const na = typeof text === "string" ? /^n\/a:\s*(\S.*)$/.exec(text) : null;
   return na?.[1] === undefined
-    ? fail(where, `cell must be "hold", "owed: <by>", "n/a: <reason>" or "-", got ${JSON.stringify(text)}`)
+    ? fail(where, `cell must be "hold", "owed: <by>", "stale: <why>", "n/a: <reason>" or "-", got ${JSON.stringify(text)}`)
     : pass({ _tag: "na", reason: na[1].trim() });
 };
 
