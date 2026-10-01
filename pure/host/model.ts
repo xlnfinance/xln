@@ -26,14 +26,19 @@ export type HostNotice =
   | Tagged<"misrouted", { to: EntityId; from: EntityId }>
   | Tagged<"queue_full", { from: EntityId }>;
 
+/** Which chain action of which committed row an effect came from: the WAL height and the place in the row's `chain`. */
+export type RowId = Readonly<{ height: bigint; index: number }>;
+
 /**
  * What the Host asks of its shell. The shell reports a `persist` durable by calling `persisted`. A `send` puts a
- * message on the link and a `chain` hands an action to the J batch builder; both leave only from a committed row.
+ * message on the link and a `chain` hands an action to the J batch builder; both leave only from a committed row. A
+ * `chain` carries the identity of that row's action, which a crash and a reopen leave unchanged: a shell that is asked
+ * the same action twice knows it is one action and not two (R-DURABLE, a deposit that is not made twice).
  */
 export type Effect =
   | Tagged<"persist", { row: Row }>
   | Tagged<"send", { message: Outbound }>
-  | Tagged<"chain", { action: JAction }>;
+  | Tagged<"chain", { action: JAction; row: RowId }>;
 
 /**
  * `height` is the highest J height the J loop has handed over and no frame has taken yet, above the Runtime's view.
