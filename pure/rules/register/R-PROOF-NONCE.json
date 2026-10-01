@@ -1,0 +1,35 @@
+{
+ "id": "R-PROOF-NONCE",
+ "statement": "The proof nonce is its own counter (a frame's slot); gaps appear only after a refused attempt (R-RETRY-NEW-NONCE, the retry signs at a fresh slot) and between the two sides' lanes (Left's first slot is the last committed one + 2, Right's + 1, Q-A-14); signatures are one per (signer, nonce, author side). The Arrival cell holds this on spec/account/frames.scm through the slot lane (bugs retry-reuses-the-nonce, slots-shared-lane).",
+ "source": "contracts-decisions.md, Account-layer decisions 09-30 D-AC-11",
+ "layers": {
+  "arrival": "hold",
+  "quint": "owed: spec thread, new Quint branch (id not in a name yet)",
+  "contract": "n/a: the counter discipline is the signers'; the chain accepts a higher nonce and keeps its gap (A18)",
+  "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
+  "ts": "owed: A4 (the frame nonce is the signed body's)"
+ },
+ "killers": [
+  {
+   "kind": "mutant",
+   "layer": "quint",
+   "name": "proposer-may-skip-nonces"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "to be named",
+   "owed": "A4"
+  },
+  {
+   "kind": "bug",
+   "layer": "arrival",
+   "name": "retry-reuses-the-nonce"
+  },
+  {
+   "kind": "bug",
+   "layer": "arrival",
+   "name": "slots-shared-lane"
+  }
+ ]
+}

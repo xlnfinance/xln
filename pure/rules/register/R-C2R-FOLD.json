@@ -1,0 +1,35 @@
+{
+ "id": "R-C2R-FOLD",
+ "statement": "A collateral-to-reserve shortcut advances the epoch without folding offdelta, so a payment still held as offdelta is erased: the node co-signs a C2R only while offdelta is zero, otherwise the withdrawal goes as a settlement that folds it. The Arrival cell holds it on the dispute page (spec/dispute/dispute.scm: a withdrawal lowers Left's position by exactly the amount withdrawn and moves nothing else; bug c2r-unfolded, config withdraw); the Runtime refusing to co-sign a C2R while offdelta is not zero is the ts cell's.",
+ "source": "contracts-decisions.md R-C2R-FOLD (coordinator 10-01 04:34, Arrival #41 review round 3)",
+ "layers": {
+  "arrival": "hold",
+  "quint": "owed: spec thread, new Quint branch",
+  "contract": "hold",
+  "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
+  "ts": "owed: the cut (Entity and Runtime)"
+ },
+ "killers": [
+  {
+   "kind": "test",
+   "layer": "contract",
+   "name": "test_R_C2R_FOLD_aWithdrawalErasesTheOffdeltaOfTheOldEpoch"
+  },
+  {
+   "kind": "test",
+   "layer": "contract",
+   "name": "test_R_C2R_FOLD_controlWithoutTheWithdrawalTheSignedOffdeltaIsHonored"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "a Runtime test refusing to co-sign a C2R while offdelta is not zero",
+   "owed": "the cut (Entity and Runtime)"
+  },
+  {
+   "kind": "bug",
+   "layer": "arrival",
+   "name": "c2r-unfolded"
+  }
+ ]
+}
