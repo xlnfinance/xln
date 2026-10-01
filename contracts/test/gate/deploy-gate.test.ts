@@ -33,7 +33,7 @@ const constantAst = (value: unknown) => ({ nodeType: "SourceUnit", nodes: [{ nod
 const named = (chainId: number, id = "chain") => ({ id, chainId });
 const floorOf = (seconds: number | null) => () => seconds as number;
 
-describe("the floor is read from solc's AST", () => {
+describe("N3 the floor is read from solc's AST", () => {
   test("literals, units and arithmetic", () => {
     expect(gate.floorFromAst(constantAst(literal("60")))).toBe(60);
     expect(gate.floorFromAst(constantAst(literal("6", "hours")))).toBe(21600);
@@ -63,7 +63,7 @@ describe("the floor is read from solc's AST", () => {
   });
 });
 
-describe("the gate is keyed by chain id", () => {
+describe("N3 the gate is keyed by chain id", () => {
   test("named testnets and local nets may carry the testnet floor", () => {
     expect(gate.assertResponseFloor([named(31337), named(11155111), named(84532), named(3448148188)], floorOf(60))).toBeNull();
   });
@@ -90,7 +90,7 @@ describe("the gate is keyed by chain id", () => {
   });
 });
 
-describe("the batch gas budget fits the chain's transaction gas cap (J5)", () => {
+describe("N3 the batch gas budget fits the chain's transaction gas cap (J5)", () => {
   const gas = { minBudget: 500_000, reserve: 30_000 };
   const readGas = () => gas;
   const capsOf = (caps: Record<number, number>) => (chain: { chainId: number }) => caps[Number(chain.chainId)] ?? null;
@@ -130,7 +130,7 @@ describe("the batch gas budget fits the chain's transaction gas cap (J5)", () =>
   });
 });
 
-describe("every deploy path runs the gate", () => {
+describe("N3 every deploy path runs the gate", () => {
   const run = (args: string[], command = "bun") => runInSandbox(contractsRoot, command, args, {
     env: { DEPLOYER_PRIVATE_KEY: "", ETH_MAINNET_RPC: "", ETH_SEPOLIA_RPC: "", HARDHAT_EXPERIMENTAL_ALLOW_NON_LOCAL_INSTALLATION: "true" },
   });
@@ -138,7 +138,7 @@ describe("every deploy path runs the gate", () => {
   const matrix = (...flags: string[]) => () => run(["scripts/deploy-chain-matrix.cjs", "--profile=mainnet", "--dry-run", ...flags]);
   // The Sepolia deploy (deploy/) takes a manifest: a mainnet one must be refused by the gate before any RPC call (the RPC here is a closed port).
   const mainnetDir = mkdtempSync(path.join(tmpdir(), "xln-gate-manifest-"));
-  const sepolia = JSON.parse(readFileSync(path.join(contractsRoot, "deploy", "sepolia.manifest.json"), "utf8")) as Record<string, unknown>;
+  const sepolia = JSON.parse(readFileSync(path.join(contractsRoot, "deploy", "sepolia.prepared.manifest.json"), "utf8")) as Record<string, unknown>;
   const mainnetPrepared = { ...sepolia, network: "ethereum-mainnet", chainId: 1 };
   const address = "0x1111111111111111111111111111111111111111", hash = `0x${"22".repeat(32)}`;
   const placed = { address, deploymentBlock: 1, transactionHash: hash, gasUsed: "1", codeHash: hash };
@@ -177,7 +177,7 @@ describe("every deploy path runs the gate", () => {
   // Scripts that never deploy or broadcast. Each one is asserted below to match none of the sinks, so a script cannot
   // hide on this list after it grows a deploy path.
   const nonDeploying = ["build.sh", "compile-tron.cjs", "deploy-gate.cjs", "foundation-hanko.cjs", "generate-typechain.cjs", "setup-forge-std.sh", "write-vectors.ts",
-    "deploy/README.md", "deploy/dry-run.ts", "deploy/manifest.ts", "deploy/sepolia.manifest.json"];
+    "deploy/README.md", "deploy/dry-run.ts", "deploy/manifest.ts", "deploy/sepolia.manifest.json", "deploy/sepolia.prepared.manifest.json"];
   const sinks = /\.deploy\(|getContractFactory\(|deployContract\(|createSmartContract\(|broadcastTronTransaction\(|\bbroadcast(?:Hex|Transaction)?\(|\{[^}]*\bbroadcast(?:Hex)?\b[^}]*\}\s*=|=\s*\w*\.trx\b|sendRawTransaction\(|sendHexTransaction\(|sendTransaction\(|eth_sendRawTransaction|eth_sendTransaction|\bcast (send|create)\b|forge (create|script)\b|hardhat (ignition|run)\b/;
   const scriptsRoot = path.join(contractsRoot, "scripts");
   const filesUnder = (dir: string): string[] => readdirSync(dir).flatMap((name) => {

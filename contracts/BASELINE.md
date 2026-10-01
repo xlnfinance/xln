@@ -463,3 +463,7 @@ Decisions and the 12-site table: `plan/contracts-decisions.md`, "Swallowed failu
   (accepted); `HANKO_PRELUDE_GAS` 4.9M excludes ERC-1271 member gas (up to 8 x 1,000,000) so R-SIMULATE must simulate the prelude for boards with contract members.
 - Folder width: `contracts/test/foundry` has 17 files and `contracts/test/vm` 23 (the limit is 10). The record of those counts is og's `check-folder-width.ts`, which we do not edit, so `check:folder-width` stays red here until the subfolder split (#61) lands.
 
+
+## Moved into a gate (10-01)
+
+Three tests sat in folders no gate runs. `test/a12/a12-two-cosigned-proofs.test.ts` is now `test/vm/disputes/`, `test/deploy/{guards,dry-run}.test.ts` are `test/gate/deploy-{guards,dry-run}.test.ts`, and the Hardhat `test/dispute/DisputeHashVector.test.ts` (1 passing in the tables above) is replaced by the BrowserVM `test/vm/vectors/DisputeHashVector.test.ts` (2 tests: the Solidity `Account.encodeDisputeHash` against the watchtower's TS packing, and the packing's sensitivity to every slot). The tables above keep the old path as the baseline record. What is left in `test/dispute`, `test/governance` and `test/protocol` is the Hardhat-only list in `pure/rules/checks/contract-tests.ts`.

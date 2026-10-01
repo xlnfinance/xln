@@ -1,15 +1,15 @@
 // Deploy the frozen contract set (contracts/, the fork of jurisdictions/) from a manifest and write the result back as a manifest.
 //
-//   bun contracts/deploy/deploy-set.ts --rpc http://127.0.0.1:8545 [--manifest deploy/sepolia.manifest.json] [--out <path>] [--live]
+//   bun contracts/deploy/deploy-set.ts --rpc http://127.0.0.1:8545 [--manifest deploy/sepolia.prepared.manifest.json] [--out <path>] [--live]
 //
-// What it refuses, before anything is sent (each is a test in test/deploy/guards.test.ts):
+// What it refuses, before anything is sent (each is a test in test/gate/deploy-guards.test.ts):
 //   - a node whose chain id is not the manifest's (a fork of Sepolia reports Sepolia's id, so a dry run on a fork passes the same gates);
 //   - a chain the deploy gate refuses (a floor below the mainnet one on a chain that is not a named testnet, an unknown tx gas cap);
 //   - a manifest whose floors or HANKO_PRELUDE_GAS differ from the compiled build, or whose batch gas total is above maxRequiredTxGas;
 //   - an RPC that is not this machine without --live. A live deploy waits for the owner's word; nothing here broadcasts by itself.
-// The key comes from DEPLOYER_PRIVATE_KEY and is never written anywhere. On a loopback node with no key set, anvil's public dev account #0 signs.
+// The key comes from DEPLOYER_PRIVATE_KEY, only with --live, and is never written anywhere. Without --live anvil's public dev account #0 signs and the variable is ignored.
 import { createRequire } from "node:module";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { ethers } from "ethers";
 import {
@@ -34,7 +34,7 @@ const foundation = require("../scripts/foundation-hanko.cjs") as {
 };
 
 /** Anvil's public dev account #0 (the mnemonic "test test ... junk"). Only ever used against a loopback node. */
-const ANVIL_DEV_KEY = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
+export const ANVIL_DEV_KEY = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
 const EIP_170_CODE_LIMIT = 24_576;
 
 export const isLoopback = (rpcUrl: string): boolean => ["127.0.0.1", "localhost", "::1", "[::1]"].includes(new URL(rpcUrl).hostname);
@@ -44,12 +44,18 @@ export const refuseRemoteWithoutLive = (rpcUrl: string, live: boolean, what: str
   if (!isLoopback(rpcUrl) && !live) throw new Error(`${new URL(rpcUrl).hostname} is not this machine: ${what} needs --live, and the owner's word`);
 };
 
-/** The key that signs: DEPLOYER_PRIVATE_KEY, or on a loopback node alone anvil's dev key. Anything else is refused. */
-export const resolveDeployerKey = (env: Readonly<Record<string, string | undefined>>, rpcUrl: string): string => {
+/** The key that signs. DEPLOYER_PRIVATE_KEY is read only with --live (a live node, or a loopback node asked for live); without --live
+ *  the node is this machine and anvil's public dev account signs, whatever the environment holds. With --live and no key, a loopback node
+ *  still gets the dev key and any other gets none. */
+export const resolveDeployerKey = (env: Readonly<Record<string, string | undefined>>, rpcUrl: string, live: boolean): string => {
+  if (!live) {
+    if (isLoopback(rpcUrl)) return ANVIL_DEV_KEY;
+    throw new Error("a node that is not this machine is touched only with --live; DEPLOYER_PRIVATE_KEY is read only then");
+  }
   const configured = (env["DEPLOYER_PRIVATE_KEY"] ?? "").trim();
   if (configured !== "") return configured.startsWith("0x") ? configured : `0x${configured}`;
   if (isLoopback(rpcUrl)) return ANVIL_DEV_KEY;
-  throw new Error("DEPLOYER_PRIVATE_KEY is not set (a key is read from the environment only; none is stored in the repository)");
+  throw new Error("DEPLOYER_PRIVATE_KEY is not set (a key is read from the environment only, and only with --live; none is stored in the repository)");
 };
 
 /** The deploy gate on the manifest's own chain, judged before any network call: a chain that is not a named testnet refuses the build's testnet floor. */
@@ -96,7 +102,7 @@ export const deploySet = async ({ rpcUrl, manifest, live = false, privateKey, lo
   const provider = new ethers.JsonRpcProvider(rpcUrl, undefined, { cacheTimeout: -1 });
   const nodeChainId = Number((await provider.getNetwork()).chainId);
   const build = assertTarget({ manifest, nodeChainId, rpcUrl, live });
-  const signer = new ethers.Wallet(privateKey ?? resolveDeployerKey(process.env, rpcUrl), provider);
+  const signer = new ethers.Wallet(privateKey ?? resolveDeployerKey(process.env, rpcUrl, live), provider);
   const deployer = signer.address;
   log(`deploying ${manifest.network} (chain ${nodeChainId}) from ${deployer}; response floor ${build.floor}s, a batch needs ${build.requiredTxGas} gas`);
 
@@ -175,10 +181,21 @@ export const deploySet = async ({ rpcUrl, manifest, live = false, privateKey, lo
   return deployedManifest(result);
 };
 
+/** The input of a deploy: the prepared manifest. The result goes to the deployed record next to it (sepolia.prepared.manifest.json -> sepolia.manifest.json). */
+export const PREPARED_SEPOLIA = resolve(import.meta.dir, "sepolia.prepared.manifest.json");
+export const recordPathOf = (preparedPath: string): string => preparedPath.replace(/\.prepared\.manifest\.json$/, ".manifest.json");
+
+/** The live record is never written over: a second deploy would replace the only account of the first one. Judged from the file alone, before any network call. */
+export const assertRecordFree = (out: string): void => {
+  if (!existsSync(out)) return;
+  const held = parseManifest(JSON.parse(readFileSync(out, "utf8")));
+  if (held.ok && held.value.status === "deployed") throw new Error(`${out} already holds a deployed manifest (the live record): refusing to write over it`);
+};
+
 type Args = { readonly rpc: string | null; readonly manifest: string; readonly out: string | null; readonly live: boolean };
 const parseArgs = (argv: readonly string[]): Args => {
   const value = (flag: string): string | null => { const at = argv.indexOf(flag); return at >= 0 ? argv[at + 1] ?? null : null; };
-  return { rpc: value("--rpc") ?? process.env["XLN_DEPLOY_RPC"] ?? null, manifest: value("--manifest") ?? resolve(import.meta.dir, "sepolia.manifest.json"), out: value("--out"), live: argv.includes("--live") };
+  return { rpc: value("--rpc") ?? process.env["XLN_DEPLOY_RPC"] ?? null, manifest: value("--manifest") ?? PREPARED_SEPOLIA, out: value("--out"), live: argv.includes("--live") };
 };
 
 if (import.meta.main) {
@@ -186,7 +203,8 @@ if (import.meta.main) {
   if (args.rpc === null) throw new Error("--rpc <url> (or XLN_DEPLOY_RPC) is required");
   // The manifest in the repository is the prepared one: a dry run must not overwrite it with a throw-away chain's addresses.
   if (args.out === null && !args.live) throw new Error("--out <path> is required for a dry run (only --live writes back to the manifest)");
-  const out = args.out ?? args.manifest;
+  const out = args.out ?? recordPathOf(args.manifest);
+  assertRecordFree(out);
   const verdict = parseManifest(JSON.parse(readFileSync(args.manifest, "utf8")));
   if (!verdict.ok) throw new Error(`manifest: ${verdict.problems.join("; ")}`);
   const result = await deploySet({ rpcUrl: args.rpc, manifest: verdict.value, live: args.live, log: console.log });
