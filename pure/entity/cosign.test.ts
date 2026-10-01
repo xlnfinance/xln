@@ -1,17 +1,21 @@
 // R-C2R-FOLD and R-COSIGN-FREEZE at the Entity: what the node signs about collateral, and what it stops doing after.
 import { describe, expect, test } from "bun:test";
 import { emptyReplica } from "../account/frame/account.ts";
+import type { Msg } from "../account/frame/frame.ts";
+import type { AccountTx } from "../account/tx.ts";
 import { emptyLedger } from "../account/ledger.ts";
-import { tokenOf } from "../account/fixtures.ts";
+import { tokenOf, viewOf } from "../account/fixtures.ts";
 import type { AccountState, Ledger, TokenId } from "../account/model.ts";
 import { credit, entityOf, GOLD, judge, open, pay } from "./fixtures.ts";
 import { entityFrame } from "./frame.ts";
+import { entityRules, type Standing } from "./rules.ts";
 import { emptyEntity, type CosignOp, type EntityInput, type EntityState, type JAction, type Notice } from "./model.ts";
 
 const ALICE = entityOf(1);
 const BOB = entityOf(2);
 const CAROL = entityOf(3);
 const SILVER = tokenOf(2n);
+const UNFROZEN_LEFT: Standing = { self: "left", frozen: false };
 
 const run = (state: EntityState, ...inputs: readonly EntityInput[]) => entityFrame(judge, state, inputs);
 
@@ -149,5 +153,57 @@ describe("entity/cosign R-COSIGN-FREEZE after a signature the Account proposes n
     expect(stranger.notices.map((n) => n._tag)).toEqual(["command_refused"]);
     const strangerAsk = run(owing, { _tag: "cosign_ask", from: entityOf(9), op: settle });
     expect(strangerAsk.notices.map((n) => n._tag)).toEqual(["unknown_peer"]);
+  });
+});
+
+describe("entity/cosign R-COSIGN-FREEZE the other way: the peer's frames are refused while it is out", () => {
+  const frozen = run(owing, withdraw(30n)).state;
+  const bob = run(emptyEntity(BOB), open(ALICE)).state;
+  const sent = run(bob, credit(ALICE, 50n));
+  const frame = sent.outputs[0]?.msg ?? expect.unreachable("Bob proposed nothing");
+  const fromBob: EntityInput = { _tag: "peer_message", from: BOB, msg: frame };
+  const rules = entityRules(judge, UNFROZEN_LEFT);
+  const hashOf = frame._tag === "frame" ? rules.hash(frame.frame) : expect.unreachable("no frame");
+
+  test("R-COSIGN-FREEZE a peer's frame is refused with the frozen fault, naming the frame and its first tx", () => {
+    const refused = run(frozen, fromBob);
+    const refusal: Msg<AccountTx> = { _tag: "refusal", hash: hashOf, index: 0, fault: "frozen", mark: 0 };
+    expect(refused.outputs.map((o) => o.msg)).toEqual([refusal]);
+    expect(refused.state.accounts.get(BOB)?.head).toBe(frozen.accounts.get(BOB)?.head);
+    expect(refused.notices.map((n) => n._tag)).toEqual(["message_refused"]);
+  });
+
+  test("R-COSIGN-FREEZE the same frame on an Account that is not frozen is taken and acked", () => {
+    const taken = run(owing, fromBob);
+    expect(taken.outputs.map((o) => o.msg._tag)).toEqual(["ack"]);
+    expect(taken.state.accounts.get(BOB)?.head).not.toBe(owing.accounts.get(BOB)?.head);
+  });
+
+  test("R-COSIGN-FREEZE the refusal can pass: Bob takes the frame back, keeps its tx, drops nothing", () => {
+    const refused = run(frozen, fromBob).outputs[0]?.msg ?? expect.unreachable("no refusal");
+    const back = run(sent.state, { _tag: "peer_message", from: ALICE, msg: refused });
+    const account = back.state.accounts.get(ALICE);
+    expect(account?.pending).toBeUndefined();
+    expect(account?.mempool).toHaveLength(1);
+    expect(back.notices.map((n) => n._tag)).toEqual([]);
+  });
+
+  test("R-COSIGN-FREEZE after a lapse Bob's retry at the next attempt commits, the refused frame stays refused", () => {
+    const refused = run(frozen, fromBob).outputs[0]?.msg ?? expect.unreachable("no refusal");
+    const rolled = run(sent.state, { _tag: "peer_message", from: ALICE, msg: refused }).state;
+    const later = entityFrame({ ...judge, view: viewOf(101n) }, rolled, []);
+    const retry = later.outputs[0]?.msg ?? expect.unreachable("Bob did not retry");
+    const lapsed = run(run(frozen, fromBob).state, { _tag: "j_op_lapsed", peer: BOB });
+    const again = run(lapsed.state, { _tag: "peer_message", from: BOB, msg: retry });
+    expect(again.outputs.map((o) => o.msg._tag)).toEqual(["ack"]);
+    const repeat = run(lapsed.state, fromBob);
+    expect(repeat.outputs.map((o) => o.msg._tag)).toEqual(["refusal"]);
+  });
+
+  test("R-COSIGN-FREEZE a refusal that is not about the freeze is no more retryable than before", () => {
+    const rules = entityRules(judge, UNFROZEN_LEFT);
+    expect(rules.retryable("frozen")).toBe(true);
+    expect(rules.retryable("not_expired")).toBe(true);
+    expect(rules.retryable("insufficient_capacity")).toBe(false);
   });
 });

@@ -3108,7 +3108,7 @@
   },
   {
    "id": "R-COSIGN-FREEZE",
-   "statement": "Once the node co-signs a settlement or collateral-to-reserve it proposes no new frames on that Account until the operation lands on chain or is superseded: the signature commits to the epoch and the nonce, not to the off-chain height, so frames signed after it would be lost when it lands.",
+   "statement": "Once the node co-signs a settlement or collateral-to-reserve it proposes no new frames on that Account until the operation lands on chain or is superseded, and it refuses every frame its peer proposes meanwhile (R-FRAME-REFUSAL, fault frozen, retryable; coordinator 10-01 06:18): the signature commits to the epoch and the nonce, not to the off-chain height, so frames signed after it would be lost when it lands, and a peer frame accepted after the fold was signed makes the fold disagree with the off-chain state.",
    "source": "coordinator 10-01 04:54 (answer to pr-41-review Round 3 item 4.2)",
    "layers": {
     "arrival": "owed: spec thread",
@@ -3166,12 +3166,42 @@
     {
      "kind": "test",
      "layer": "ts",
+     "name": "R-COSIGN-FREEZE a peer's frame is refused with the frozen fault, naming the frame and its first tx"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-COSIGN-FREEZE the same frame on an Account that is not frozen is taken and acked"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-COSIGN-FREEZE the refusal can pass: Bob takes the frame back, keeps its tx, drops nothing"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-COSIGN-FREEZE after a lapse Bob's retry at the next attempt commits, the refused frame stays refused"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-COSIGN-FREEZE a refusal that is not about the freeze is no more retryable than before"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
      "name": "R-COSIGN-FREEZE a payment made after the signature is not proposed: Bob hears nothing"
     },
     {
      "kind": "test",
      "layer": "ts",
      "name": "R-COSIGN-FREEZE once the chain has moved the epoch on, the payment goes out and both sides commit it"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-COSIGN-FREEZE a frame Bob proposes while Alice's signature is out is refused, his retry then commits"
     },
     {
      "kind": "test",

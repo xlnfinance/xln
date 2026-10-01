@@ -15,7 +15,7 @@ import type { JView } from "../account/clause/clock.ts";
 import {
   emptyEntity, type Command, type EntityId, type EntityInput, type EntityState, type Outbound,
 } from "../entity/model.ts";
-import type { AccountReplica } from "../account/frame/account.ts";
+import type { EntityReplica } from "../entity/model.ts";
 import type { Msg } from "../account/frame/frame.ts";
 import type { AccountTx } from "../account/tx.ts";
 import type { Halt, Input, Row, Runtime, Setup, Timestamp } from "./model.ts";
@@ -70,7 +70,7 @@ type Step = Readonly<{ input: (at: Timestamp) => Input; ready: (w: World, name: 
 type Scenario = Readonly<{
   views: Readonly<Record<Name, JView>>;
   script: Readonly<Record<Name, readonly Step[]>>;
-  done: (a: AccountReplica, b: AccountReplica) => boolean;
+  done: (a: EntityReplica, b: EntityReplica) => boolean;
 }>;
 
 const commandStep = (to: EntityId, command: Command, ready: Step["ready"] = always): Step =>

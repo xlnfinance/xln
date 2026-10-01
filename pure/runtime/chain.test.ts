@@ -239,6 +239,15 @@ describe("runtime/chain R-COSIGN-FREEZE after the signature nothing is proposed 
     expect(committed(landed, ALICE)).not.toBe(committed(queued, ALICE));
   });
 
+  test("R-COSIGN-FREEZE a frame Bob proposes while Alice's signature is out is refused, his retry then commits", () => {
+    const raced = settle(feed(signed, BOB, credit(ALICE, 150n)));
+    expect(committed(raced, BOB)).toBe(committed(signed, BOB));
+    expect(hostOf(raced, BOB).entities.get(BOB)?.accounts.get(ALICE)?.mempool).toHaveLength(1);
+    const landed = settle(rise(feed(raced, ALICE, epochOf(BOB, 1n, 6n)), BOB, 111n));
+    expect(committed(landed, BOB)).toBe(committed(landed, ALICE));
+    expect(committed(landed, BOB)).not.toBe(committed(raced, BOB));
+  });
+
   test("R-COSIGN-FREEZE a Host that crashes after the signature comes back frozen and asks for it again", () => {
     const back = restarted(queued, ALICE);
     const account = hostOf(back, ALICE).entities.get(ALICE)?.accounts.get(BOB);

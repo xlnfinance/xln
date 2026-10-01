@@ -6,8 +6,7 @@ import { err, ok, type Result } from "../kernel/core/result.ts";
 import { match } from "../kernel/core/tagged.ts";
 import { MAX_AMOUNT } from "../account/ledger.ts";
 import type { AccountState, TokenId } from "../account/model.ts";
-import type { AccountReplica } from "../account/frame/account.ts";
-import type { ChainFacts, CosignOp, EntityFault, EntityId, Fold, JAction } from "./model.ts";
+import type { ChainFacts, CosignOp, EntityFault, EntityId, EntityReplica, Fold, JAction } from "./model.ts";
 
 const byToken = (a: Fold, b: Fold): number => {
   if (a.token === b.token) return 0;
@@ -21,7 +20,7 @@ export const foldsOf = (state: AccountState): readonly Fold[] =>
     .toSorted(byToken);
 
 /** At most one operation at a time, and never over a frame still in flight: its ack may move the offdelta. */
-export const cosignFault = (account: AccountReplica, facts: ChainFacts, amount: bigint): EntityFault | undefined => {
+export const cosignFault = (account: EntityReplica, facts: ChainFacts, amount: bigint): EntityFault | undefined => {
   if (facts.frozen) return { _tag: "already_cosigned" };
   if (account.pending !== undefined) return { _tag: "frame_in_flight" };
   if (amount >= 1n && amount <= MAX_AMOUNT) return undefined;

@@ -10,10 +10,9 @@
 // A refusal is a value (`Notice`) the owner of the input is told, never a halt (R-X1, R-NOTICE).
 import { err, ok, type Result } from "../kernel/core/result.ts";
 import type { Brand, Tagged } from "../kernel/core/tagged.ts";
-import type { AccountReplica } from "../account/frame/account.ts";
-import type { FrameHash, Msg, Outcome, Refused } from "../account/frame/frame.ts";
+import type { FrameHash, Msg, Outcome, Refused, Replica } from "../account/frame/frame.ts";
 import type { JView } from "../account/clause/clock.ts";
-import type { AccountFault, Hold, HoldId, Side, TokenId } from "../account/model.ts";
+import type { AccountFault, AccountState, Hold, HoldId, Side, TokenId } from "../account/model.ts";
 import type { AccountTx } from "../account/tx.ts";
 
 /** A 32-byte id, `0x` and 64 lowercase hex digits: the text order of two ids is their numeric order, as the chain's. */
@@ -27,6 +26,12 @@ export const entityId = (text: string): Result<EntityId, BadEntityId> =>
 /** The Account of two Entities has the smaller id on its Left, as the contract's account key does. */
 export const sideOf = (self: EntityId, peer: EntityId): Side => (self < peer ? "left" : "right");
 
+/** What a frame of an Account can be refused for: the Account's own faults, and that the node's signature is out. */
+export type PeerFault = AccountFault | Tagged<"frozen">;
+
+/** One side of an Account as the Entity holds it. */
+export type EntityReplica = Replica<AccountTx, AccountState, PeerFault>;
+
 /**
  * An Entity: the Accounts it holds, by the peer's id; the Accounts that wait for their J view to move; and the
  * hashlocks it has asked the chain to reveal. A peer refused a frame for a fault that can pass with its view of J
@@ -36,7 +41,7 @@ export const sideOf = (self: EntityId, peer: EntityId): Side => (self < peer ? "
  */
 export type EntityState = Readonly<{
   id: EntityId;
-  accounts: ReadonlyMap<EntityId, AccountReplica>;
+  accounts: ReadonlyMap<EntityId, EntityReplica>;
   waiting: ReadonlyMap<EntityId, JView>;
   revealed: ReadonlyMap<EntityId, readonly string[]>;
   chain: ReadonlyMap<EntityId, ChainFacts>;
@@ -127,7 +132,7 @@ export type EntityFault =
   | Tagged<"self_account">
   | Tagged<"account_exists", { peer: EntityId }>
   | Tagged<"no_account", { peer: EntityId }>
-  | Tagged<"account_refused", { fault: AccountFault }>
+  | Tagged<"account_refused", { fault: PeerFault }>
   | Tagged<"deposit_before_cosign">
   | Tagged<"bad_windows", { windows: Windows }>
   | Tagged<"windows_shorten", { current: Windows }>
@@ -140,5 +145,5 @@ export type Notice =
   | Tagged<"command_refused", { command: Command; fault: EntityFault }>
   | Tagged<"unknown_peer", { from: EntityId }>
   | Tagged<"cosign_refused", { from: EntityId; op: CosignOp; fault: EntityFault }>
-  | Tagged<"message_refused", { from: EntityId; outcome: Outcome<AccountFault> }>
-  | Tagged<"tx_refused", { peer: EntityId; refused: Refused<AccountTx, AccountFault> }>;
+  | Tagged<"message_refused", { from: EntityId; outcome: Outcome<PeerFault> }>
+  | Tagged<"tx_refused", { peer: EntityId; refused: Refused<AccountTx, PeerFault> }>;
