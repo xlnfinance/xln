@@ -105,4 +105,9 @@ module compose {
     existsBody(b => a::rcpan(b) and SIDES2.exists(by => WITHDRAWALS.exists(w => not(a::settlementOk(b, by, w)))))
 
   run settlementKeepsCreditTest = c::init.expect(and { COVERS_BOTH_ANSWERS, SETTLEMENT_KEEPS_CREDIT })
+
+  // the approver never co-signs a withdrawal of more than the collateral, whatever the credit (the bound `w <= COLLATERAL` of `settlementOk`)
+  pure val NO_WITHDRAWAL_BEYOND_COLLATERAL: bool =
+    forallBodies(b => not(a::rcpan(b)) or SIDES2.forall(by => not(a::settlementOk(b, by, a::COLLATERAL + 1))))
+  run noWithdrawalBeyondTheCollateralTest = c::init.expect(NO_WITHDRAWAL_BEYOND_COLLATERAL)
 }

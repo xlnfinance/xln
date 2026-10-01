@@ -55,6 +55,11 @@ for m in $MODULES; do
   echo "== $m: invariant '$inv' over $SAMPLES traces of $steps steps"
   $Q run "$m.qnt" --backend typescript --init $init --step $step --invariant $inv --max-steps $steps --max-samples "$SAMPLES" --seed 0x1 --verbosity 1 \
     | grep -E "^\[|Use --seed"
+  if [ "$m" = chain ]; then
+    echo "== $m: invariant '$inv' from an Account that just opened epoch 1 with no signed frame (initE1)"
+    $Q run "$m.qnt" --backend typescript --init initE1 --step $step --invariant $inv --max-steps $steps --max-samples "$SAMPLES" --seed 0x1 --verbosity 1 \
+      | grep -E "^\[|Use --seed"
+  fi
   echo "== $m: witnesses (each must be violated, or the path is unreachable)"
   for w in $(grep -oE '^  val w_[a-z_]+' "$m.qnt" | awk '{print $2}'); do
     out=$($Q run "$m.qnt" --backend typescript --init $init --step $step --invariant "$w" --max-steps $steps --max-samples 3000 --seed 0x7 --verbosity 1 2>&1 || true)

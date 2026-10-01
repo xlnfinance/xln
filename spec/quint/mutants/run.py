@@ -72,7 +72,7 @@ def run_mutant(module, m, files, test_file, cfg):
     if rc != 0:
         return "BAD MUTANT", "does not typecheck: " + out[-300:]
     kind, name = m["killedBy"].split(":", 1)
-    cfg = {**cfg, **{k: m[k] for k in ("step", "samples", "steps") if k in m}}       # a mutant may be hunted with its own step and budget
+    cfg = {**cfg, **{k: m[k] for k in ("init", "step", "samples", "steps") if k in m}}       # a mutant may be hunted with its own step and budget
     killed, note = (check_invariant(d, main_file_of(module), name, cfg) if kind == "invariant"
                     else check_test(d, test_file, name, cfg))
     shutil.rmtree(d, ignore_errors=True)

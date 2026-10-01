@@ -179,6 +179,13 @@ module chain_test {
     .expect(rank(arena.get(6)) == rank(dispute.p0))
     .then(counterWith(Left, 6))
     .fail()
+  // The same tie on the other door: the non-starter closes with the tying frame as its final body (path 2). A tie is refused there too.
+  run rightAuthoredFrameAtStoredPlusOneIsRefusedAsAFinalBodyTest =
+    epoch1(E0.set(6, pe(3, false, 2, MIN_WINDOW, MIN_WINDOW)))
+    .then(r2c(Right, Right, 2))
+    .then(implicitStart)
+    .then(finalizeWith(Left, 2, 6, false))
+    .fail()
   run theTrapLosesTheFramesValueTest =
     epoch1(E0.set(6, pe(3, false, 2, MIN_WINDOW, MIN_WINDOW)))
     .then(r2c(Right, Right, 2))

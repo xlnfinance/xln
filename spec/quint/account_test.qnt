@@ -80,6 +80,16 @@ module account_test {
     }
   })
 
+  // a slot holds one clause whatever its hashlock: a different hashlock in an occupied slot is refused, not written over the open clause
+  // (the same-hashlock case is now refused by R-ONE-LOCK-PER-HASH first, so htlcLockHoldsRoomTest no longer reaches the slot check)
+  run lockInAnOccupiedSlotIsRefusedWhateverItsHashlockTest = init.expect({
+    val locked = match applyTx(funded, lockL, Left, 1) { | Ok(b) => b | Refused(_) => GENESIS }
+    and {
+      applyTx(locked, HtlcLock({ id: 1, payer: Left, amount: 1, hashlock: hashOf(2), deadline: 3 }), Left, 1) == Refused("lock_exists"),
+      lockCount(locked) == 1
+    }
+  })
+
   run htlcResolveMovesOffdeltaOnceTest = init.expect({
     val locked = match applyTx(funded, lockL, Left, 1) { | Ok(b) => b | Refused(_) => GENESIS }
     val paid = applyTx(locked, HtlcResolve({ id: 1, secret: 1 }), Right, 2)

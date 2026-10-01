@@ -289,13 +289,30 @@ module chain {
     )
   }
 
+  // An Account that has just opened epoch 1 and holds NO signed frame of it (a settlement, a finalize or a withdrawal moved the epoch and nothing
+  // was signed since): the only proof anyone can start from is the implicit one. The stored nonce is whatever the opening event left (2 to 5,
+  // as for epoch 1 in `init`), the collateral and ondelta are what the event left, and the arena holds no proof at all. From here the simulation
+  // reaches every body the chain must refuse (the adversary tries the canonical body and its one-field variants, `adversaryStartImplicit`) and
+  // every outcome of the one start that is allowed, so `safe` alone judges the implicit-proof rules (no scenario test needed).
+  action initE1 = {
+    nondet st = 2.to(5).oneOf()
+    nondet hon = SIDES.oneOf()
+    nondet resL = 0.to(RESERVE_MAX).oneOf()
+    nondet resR = 0.to(RESERVE_MAX).oneOf()
+    nondet coll = 1.to(2).oneOf()
+    nondet od = 0.to(coll).oneOf()
+    initAt({ nonce: st, epoch: 1, coll: coll, ondelta: od, via: 0 }, Map(0 -> NO_PROOF), hon, resL, resR, coll, Left, [])
+  }
+
   // The state before anything happened, for a given arena: scenario tests start here with a hand-made history.
   action initFrom(ar: int -> SignedProof, hon: Side, resL: int, resR: int, coll: int): bool = initFromD(ar, hon, resL, resR, coll, Left, [])
-  action initFromD(ar: int -> SignedProof, hon: Side, resL: int, resR: int, coll: int, debtor: Side, queue: List[int]): bool = all {
+  action initFromD(ar: int -> SignedProof, hon: Side, resL: int, resR: int, coll: int, debtor: Side, queue: List[int]): bool =
+    initAt({ nonce: 0, epoch: 0, coll: coll, ondelta: 0, via: 0 }, ar, hon, resL, resR, coll, debtor, queue)
+  action initAt(a: Acct, ar: int -> SignedProof, hon: Side, resL: int, resR: int, coll: int, debtor: Side, queue: List[int]): bool = all {
     arena' = SLOTS.mapBy(i => if (ar.keys().contains(i)) ar.get(i) else NO_PROOF),      // slots a history does not use stay empty
     honest' = hon,
     now' = 1,
-    acct' = { nonce: 0, epoch: 0, coll: coll, ondelta: 0, via: 0 },
+    acct' = a,
     money' = { res: Map(Left -> resL, Right -> resR), debt: Map(Left -> 0, Right -> 0).set(debtor, sumOf(queue)), dq: Map(Left -> [], Right -> []).set(debtor, queue) },
     total' = resL + resR + coll,
     dispute' = NO_DISPUTE,

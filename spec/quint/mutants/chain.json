@@ -596,6 +596,59 @@
       "old": "    val aNew = { ...acct, coll: acct.coll + amt, ondelta: acct.ondelta + (if (isLeft(rcv)) amt else 0) }",
       "new": "    val aNew = { ...acct, epoch: acct.epoch + 1, coll: acct.coll + amt, ondelta: acct.ondelta + (if (isLeft(rcv)) amt else 0) }",
       "killedBy": "test:depositInsideTheEpochKeepsTheFramesTest"
+    },
+    {
+      "id": "implicit-path2-tie",
+      "why": "R-IMPLICIT-BASELINE: the final-body door (path 2, the non-starter closes with a newer proof) takes a tie with the implicit proof (>= instead of >), so a Right-authored frame at stored + 1 settles over it",
+      "file": "chain.qnt",
+      "old": "        rank(r) > rank(dispute.p0)\n",
+      "new": "        rank(r) >= rank(dispute.p0)\n",
+      "killedBy": "test:rightAuthoredFrameAtStoredPlusOneIsRefusedAsAFinalBodyTest"
+    },
+    {
+      "id": "implicit-left-authored-allowed-from-epoch-1",
+      "why": "the implicit proof may be Left-authored (it would then outrank a Right-authored frame) [hunted by the invariant alone, from an Account that opened epoch 1 with no signed frame]",
+      "file": "chain.qnt",
+      "old": "\n    not(r.leftAuthored), r.offdelta == 0, not(r.clause.on), r.wl == MIN_WINDOW, r.wr == MIN_WINDOW\n  }",
+      "new": "\n    r.offdelta == 0, not(r.clause.on), r.wl == MIN_WINDOW, r.wr == MIN_WINDOW\n  }",
+      "killedBy": "invariant:safe",
+      "init": "initE1"
+    },
+    {
+      "id": "implicit-offdelta-unchecked-from-epoch-1",
+      "why": "the implicit proof may carry an offdelta [hunted by the invariant alone, from an Account that opened epoch 1 with no signed frame]",
+      "file": "chain.qnt",
+      "old": "\n    not(r.leftAuthored), r.offdelta == 0, not(r.clause.on), r.wl == MIN_WINDOW, r.wr == MIN_WINDOW\n  }",
+      "new": "\n    not(r.leftAuthored), not(r.clause.on), r.wl == MIN_WINDOW, r.wr == MIN_WINDOW\n  }",
+      "killedBy": "invariant:safe",
+      "init": "initE1"
+    },
+    {
+      "id": "implicit-clause-allowed-from-epoch-1",
+      "why": "the implicit proof may carry a clause [hunted by the invariant alone, from an Account that opened epoch 1 with no signed frame]",
+      "file": "chain.qnt",
+      "old": "\n    not(r.leftAuthored), r.offdelta == 0, not(r.clause.on), r.wl == MIN_WINDOW, r.wr == MIN_WINDOW\n  }",
+      "new": "\n    not(r.leftAuthored), r.offdelta == 0, r.wl == MIN_WINDOW, r.wr == MIN_WINDOW\n  }",
+      "killedBy": "invariant:safe",
+      "init": "initE1"
+    },
+    {
+      "id": "implicit-left-window-longer-from-epoch-1",
+      "why": "the implicit proof may name a longer left window than the floor [hunted by the invariant alone, from an Account that opened epoch 1 with no signed frame]",
+      "file": "chain.qnt",
+      "old": "\n    not(r.leftAuthored), r.offdelta == 0, not(r.clause.on), r.wl == MIN_WINDOW, r.wr == MIN_WINDOW\n  }",
+      "new": "\n    not(r.leftAuthored), r.offdelta == 0, not(r.clause.on), r.wl >= MIN_WINDOW, r.wr == MIN_WINDOW\n  }",
+      "killedBy": "invariant:safe",
+      "init": "initE1"
+    },
+    {
+      "id": "implicit-right-window-longer-from-epoch-1",
+      "why": "the implicit proof may name a longer right window than the floor [hunted by the invariant alone, from an Account that opened epoch 1 with no signed frame]",
+      "file": "chain.qnt",
+      "old": "\n    not(r.leftAuthored), r.offdelta == 0, not(r.clause.on), r.wl == MIN_WINDOW, r.wr == MIN_WINDOW\n  }",
+      "new": "\n    not(r.leftAuthored), r.offdelta == 0, not(r.clause.on), r.wl == MIN_WINDOW, r.wr >= MIN_WINDOW\n  }",
+      "killedBy": "invariant:safe",
+      "init": "initE1"
     }
   ]
 }

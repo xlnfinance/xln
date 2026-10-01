@@ -60,6 +60,14 @@
       "old": "    val d = delta(b) - (if (by == Left) w else 0)\n    and {\n      w >= 1",
       "new": "    val d = delta(b)\n    and {\n      w >= 1",
       "killedBy": "test:settlementKeepsCreditTest"
+    },
+    {
+      "id": "settlement-withdraws-past-collateral",
+      "why": "R-SETTLE-CREDIT: the approver co-signs a withdrawal of more than the collateral (the bound w <= COLLATERAL is dropped)",
+      "file": "account_core.qnt",
+      "old": "      w >= 1, w <= COLLATERAL,\n",
+      "new": "      w >= 1,\n",
+      "killedBy": "test:noWithdrawalBeyondTheCollateralTest"
     }
   ],
   "init": "init",
