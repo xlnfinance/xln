@@ -1,0 +1,28 @@
+{
+  "manifestVersion": 1,
+  "stack": "xln-contracts-v1",
+  "status": "prepared",
+  "network": "ethereum-sepolia",
+  "chainId": 11155111,
+  "token": {
+    "symbol": "USDT",
+    "decimals": 6,
+    "address": null,
+    "deployFaucet": true,
+    "tokenId": null
+  },
+  "dispute": {
+    "responseFloorSeconds": 60,
+    "mainnetResponseFloorSeconds": 21600
+  },
+  "gas": {
+    "hankoPreludeGas": 4900000,
+    "requiredTxGas": 5437937,
+    "maxRequiredTxGas": 5437937
+  },
+  "deployer": null,
+  "foundationRecipient": null,
+  "contracts": null,
+  "deploymentGasTotal": null,
+  "peers": []
+}

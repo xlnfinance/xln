@@ -1,10 +1,14 @@
 import { describe, expect, test } from "bun:test";
 import { err, ok, type Result, unwrapOr } from "../kernel/core/result.ts";
-import { holdOf } from "./fixtures.ts";
+import { admitted, holdOf } from "./fixtures.ts";
 import {
-  allocation, deposit, emptyLedger, expire, lock, MAX_AMOUNT, MAX_HOLDS, pay, resolve, room, setCredit, withdraw,
+  allocation, deposit, emptyLedger, expire, lock as openHold, MAX_AMOUNT, MAX_HOLDS, pay, resolve, room, setCredit,
+  withdraw,
 } from "./ledger.ts";
 import { holdId, type AccountFault, type Hold, type Ledger } from "./model.ts";
+
+/** The money rules' own tests open holds directly, through the test seam: clause rules are tested in clause/. */
+const lock = (l: Ledger, hold: Hold): Result<Ledger, AccountFault> => openHold(l, admitted(hold));
 
 const refused = (fault: AccountFault): Result<never, AccountFault> => err(fault);
 
