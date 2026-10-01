@@ -1,0 +1,29 @@
+{
+ "id": "R-GATE-WIDTH",
+ "statement": "No folder holds more than ten direct source files except at its recorded debt, counted on the files git lists, and a directory that is not a git checkout is red.",
+ "source": "coordinator 09-30 (PR #71 review: a skipped or deleted gate test must turn the gate red)",
+ "layers": {
+  "arrival": "n/a: a repository gate rule, not protocol behaviour; no spec page models it",
+  "quint": "n/a: a repository gate rule, not protocol behaviour; no spec models it",
+  "contract": "n/a: a gate over the repository (pure/rules); it is not contract code",
+  "rig": "n/a: a gate over the repository, with no system state for the walk",
+  "ts": "hold"
+ },
+ "killers": [
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-GATE-WIDTH a folder of 11 untracked source files is red and names the folder"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "too wide without debt is red; the debt must match exactly; an unused debt is stale"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "a directory that is not a git checkout is red, not an empty pass"
+  }
+ ]
+}
