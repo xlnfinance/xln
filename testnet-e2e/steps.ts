@@ -358,7 +358,7 @@ const htlc: Step<World> = {
 
 // ---- S6 ----------------------------------------------------------------------------------------------------------
 const reveal: Step<World> = {
-  id: "reveal", title: "Payee reveals the secret on chain when its resolve is not acked in time", needs: ["htlc"],
+  id: "reveal", title: "Payee reveals the secret on chain when its resolve is not acked in time", needs: ["open"],
   run: async (w) => {
     const chain = chainOf(w);
     const net = netOf(w);
@@ -375,8 +375,8 @@ const reveal: Step<World> = {
     const sinceLock = net.askedBy(b).length;
     const transformer = new ethers.Contract(chain.manifest.contracts.deltaTransformer.address, ["function hashToTimestamp(bytes32) view returns (uint256)"], chain.provider);
     const hash = keccakHex(secret);
-    // The link loses everything bob sends until the reveal is on the chain: the node's resend timer would otherwise end the wait.
-    const asked = await net.losing(() => true, async () => {
+    // Only bob's sends are lost, until the reveal is on the chain; every other node behaves normally: the node's resend timer would otherwise end the wait.
+    const asked = await net.losing((message) => message.from === b, async () => {
       await net.tell(b, { _tag: "resolve", peer: y, token: t, id: holdId(2n), secret });
       await net.settle({ pending: true });
       if (net.account(b, y).pending === undefined) throw new Error("bob's resolve frame is not pending: it was acked");
