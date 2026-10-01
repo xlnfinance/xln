@@ -1,6 +1,6 @@
 {
  "id": "R-GATE-CI-TRIGGERS",
- "statement": "GitHub's One gate starts on every pull request whatever base it targets or files it touches, and no job behind it can be skipped: the gate workflow runs on pull_request with no branches, branches-ignore, paths, paths-ignore or types filter, no gate job has a job-level if, and one-gate has none but always(). The five One gate checks are required, so a PR that never got them would stay blocked forever. Pushes to a PR branch that conflicts with its base get no pull_request run from GitHub itself; the conflict blocks the merge on its own and clears with the next push.",
+ "statement": "GitHub's One gate starts on every pull request whatever base it targets or files it touches, and no job behind it can be skipped: the gate workflow runs on pull_request with no branches, branches-ignore, paths, paths-ignore or types filter, no gate job has a job-level if but the slow-lane one (R-GATE-CI-SPLIT: it skips only on a pull request into development, where no slow job is required), and one-gate has none but always(). The five One gate checks are required, so a PR that never got them would stay blocked forever. Pushes to a PR branch that conflicts with its base get no pull_request run from GitHub itself; the conflict blocks the merge on its own and clears with the next push.",
  "source": "coordinator 10-01 09:15 (PR 65 head 3cf41b4 got no checks; the five One gate checks are about to be required)",
  "layers": {
   "arrival": "n/a: a repository gate rule, not protocol behaviour; no spec page models it",
