@@ -1,9 +1,9 @@
 {
  "id": "R-SWAP-ONCHAIN",
- "statement": "A swap clause in a signed ProofBody settles in a dispute finalize at the taker's fill ratio: each leg is floor(amount * ratio / 65535) on its own, a missing or malformed taker argument is a 0% fill, a clause that moves a delta it has no allowance for reverts the whole finalize, an allowance below the fill caps that delta (clamp, no revert), the n-th ratio is for the n-th swap of its owner, and a ratio the taker committed at the start is the one applied (another is refused).",
+ "statement": "A swap clause in a signed ProofBody settles in a dispute finalize at the taker's fill ratio: each leg is floor(amount * ratio / 65535) on its own, a missing or malformed taker argument is a 0% fill, a clause that moves a delta it has no allowance for reverts the whole finalize, an allowance below the fill caps that delta (clamp, no revert), the n-th ratio is for the n-th swap of its owner, and a ratio the taker committed at the start is the one applied (another is refused). The Arrival cell holds the settlement of a clause at the taker's ratio (each leg floor(amount * ratio / 65535) on its own, a ratio of 0 fills nothing); a clause with no allowance is a refused dispute there (R-SWAP-ALLOWANCES), and the allowance clamp, the n-th ratio of several swaps in one clause and the starter's committed ratio are on no spec page.",
  "source": "plan/swap-onchain.md (coordinator decision 10-01 03:11: stock DeltaTransformer, no contract change, expiry off-chain)",
  "layers": {
-  "arrival": "owed: spec thread, next Arrival page",
+  "arrival": "hold",
   "quint": "owed: spec thread, new Quint branch",
   "contract": "hold",
   "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
@@ -130,6 +130,21 @@
    "kind": "test",
    "layer": "contract",
    "name": "test_R_SWAP_ONCHAIN_aRatioOtherThanTheCommittedOneIsRefused"
+  },
+  {
+   "kind": "bug",
+   "layer": "arrival",
+   "name": "swap-chain-leg-rounds-up"
+  },
+  {
+   "kind": "bug",
+   "layer": "arrival",
+   "name": "swap-chain-no-argument-fills"
+  },
+  {
+   "kind": "bug",
+   "layer": "arrival",
+   "name": "swap-finalize-ignores-allowance"
   }
  ]
 }

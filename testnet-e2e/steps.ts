@@ -1,6 +1,7 @@
 // The scenario, in the order money flows. Each step does as much as main allows on the real contracts and says, by
 // name, what it needed that main does not have (lib/gaps.ts). A step that cannot run at all throws `Blocked`.
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ethers } from "ethers";
 import { CONTRACT_NAMES, deployedManifest } from "../contracts/deploy/manifest.ts";
@@ -15,15 +16,21 @@ import { accountMessageHash } from "../pure/chain/proof/payload.ts";
 import { keccakHex } from "../pure/kernel/encoding/bytes.ts";
 import { startAnvil, assertLoopback, scrubbedEnv, type Anvil } from "./lib/anvil.ts";
 import {
-  accountKeyOf, accountOnChain, advanceTime, asHex, collateralOf, connect, hankoOf, heldBy, leftOf, must, partyOf, reserveOf, sendOps,
-  unit, type Chain, type Manifest, type Party,
+  accountKeyOf, accountOnChain, advanceTime, collateralOf, connect, hankoOf, heldBy, leftOf, must, partyOf, reserveOf, sendOps,
+  unit, worldOf, type Chain, type Manifest, type Party,
 } from "./lib/chain.ts";
 import { GAPS, REPO } from "./lib/gaps.ts";
 import { Blocked, type Step } from "./lib/runner.ts";
 import { entityId, type EntityId, type JAction } from "../pure/entity/model.ts";
+import { opOf } from "../pure/host/ops.ts";
 import type { ClockParams, JView } from "../pure/account/clause/clock.ts";
 import { JLoop } from "./lib/jloop.ts";
 import { Net } from "./lib/net.ts";
+import { Seat } from "./lib/seat.ts";
+import { openWal } from "../pure/host/shell/disk/store.ts";
+import { fileDisk } from "../pure/host/shell/node/file-disk.ts";
+import { scanJournal, type JournalRecord } from "../pure/host/shell/submit/journal.ts";
+import type { Setup } from "../pure/runtime/model.ts";
 
 export type Options = Readonly<{ rpc: string | null; fork: string }>;
 
@@ -116,27 +123,59 @@ const world: Step<World> = {
 };
 
 // ---- S2 ----------------------------------------------------------------------------------------------------------
+/** Where each party's seat keeps its WAL and its journal: real files, new for every run. */
+const seatsDir = (): string => mkdtempSync(join(tmpdir(), "xln-e2e-seats-"));
+
+/** What the files of a seat hold after the run: the WAL's rows and the journal's records, read back by the shell's own readers. */
+const filesOf = async (dir: string, name: string): Promise<Readonly<{ rows: number; journal: readonly JournalRecord[] }>> => {
+  const wal = must(await fileDisk(join(dir, "wal.log")), `${name}'s WAL`);
+  const rows = must(await openWal(wal), `${name}'s WAL rows`);
+  must(await wal.close(), "close WAL");
+  const held = must(scanJournal(readFileSync(join(dir, "journal.log"))), `${name}'s journal`);
+  return { rows: rows.length, journal: held.items };
+};
+
 const deposits: Step<World> = {
   id: "deposit", title: "Everyone moves tokens into the Depository as reserve", needs: ["world"],
   run: async (w) => {
     const chain = chainOf(w);
     const parties = Object.values(partiesOf(w));
+    const { alice, hubX } = partiesOf(w);
+    const signing = await signingFor(chain, alice, hubX);
+    const setup: Setup = { ...(await view(chain)), anchor: { deployment: signing.deployment, terms: signing.terms } };
+    const amount = DEPOSIT * unit(chain);
+    const t = token(chain);
+    const root = seatsDir();
     const checks = await parties.reduce<Promise<string[]>>(async (done, p) => {
       const lines = await done;
-      await (await chain.token.connect(p.wallet).approve(chain.manifest.contracts.depository.address, DEPOSIT * unit(chain))).wait();
+      // The wallet's own approval: the Depository pulls the tokens from the key that signs the batch.
+      await (await chain.token.connect(p.wallet).approve(chain.manifest.contracts.depository.address, amount)).wait();
       const before = await reserveOf(chain, p);
-      const sent = await sendOps(chain, p, [{
-        _tag: "deposit",
-        leg: {
-          entity: p.id, contractAddress: chain.manifest.token.address!, externalTokenId: 0n, tokenType: 0n,
-          internalTokenId: chain.tokenId, amount: DEPOSIT * unit(chain),
-        },
-      }], `deposit ${p.name}`);
+      const dir = join(root, p.name);
+      const seat = await Seat.open(chain, p, eid(p), setup, dir);
+      const turn = await seat.tell({ _tag: "fund", token: t, amount });
+      await seat.close();
       const gained = (await reserveOf(chain, p)) - before;
-      if (gained !== DEPOSIT * unit(chain)) throw new Error(`${p.name}: reserve rose by ${gained}, not ${DEPOSIT * unit(chain)}`);
-      return [...lines, `${p.name}: externalTokenToReserve ${fmt(chain, gained)}, batch nonce ${sent.nonce}, gas ${sent.gasUsed}`];
+      if (gained !== amount) throw new Error(`${p.name}: reserve rose by ${gained}, not ${amount}`);
+      const queued = turn.taken.filter((x) => x._tag === "queued").length;
+      if (queued !== 1 || turn.returned.length > 0 || turn.skipped.length > 0) {
+        throw new Error(`${p.name}: the builder took ${queued} asks, returned ${turn.returned.length}, skipped ${turn.skipped.length}`);
+      }
+      const files = await filesOf(dir, p.name);
+      const [sealed, answered] = files.journal;
+      if (files.journal.length !== 2 || sealed?._tag !== "sealed" || answered?._tag !== "answered" || answered.outcome !== "landed" || sealed.digest !== answered.digest) {
+        throw new Error(`${p.name}: the journal holds ${JSON.stringify(files.journal, (_, x) => (typeof x === "bigint" ? x.toString() : x))}, not one sealed record and its landed answer`);
+      }
+      if (files.rows < 1) throw new Error(`${p.name}: the WAL on disk holds no row for the fund command`);
+      return [...lines, `${p.name}: fund command, WAL ${files.rows} row(s) on disk, journal sealed then landed (nonce ${sealed.nonce}), reserve +${fmt(chain, gained)}`];
     }, Promise.resolve([]));
-    return { checks, gaps: [] };
+    return {
+      checks: [
+        ...checks,
+        "each fund went from a Runtime command to a durable WAL row, to a batch the Host sealed (simulated at the head through eth_simulateV1), signed with the party's key and sent over JSON-RPC, and was read back as landed",
+      ],
+      gaps: [],
+    };
   },
 };
 
@@ -182,12 +221,11 @@ const open: Step<World> = {
     const t = token(chain);
     const v = await view(chain);
     const legs = [[alice, hubX], [hubX, hubY], [hubY, bob]] as const;
-    // Every Account starts at the chain's baseline, so ONE SigningContext fits all of them (gap `per-account-signing`).
+    // The Runtimes sign each Account under its own key, epoch and first nonce (R-FRAME-SIGNATURE-NAMES-ACCOUNT); the
+    // harness keeps alice-hubX's context to rebuild the digest of the head that Account's chain proof names.
     const signing = await signingFor(chain, alice, hubX);
-    const starts = await Promise.all(legs.map(([a, b]) => accountOnChain(chain, a, b)));
-    if (starts.some((s) => s.epoch !== signing.ondeltaEpoch || s.nonce + 2n !== signing.firstNonce)) throw new Error("the three Accounts do not start at the same chain epoch and nonce");
     w.signing = signing;
-    const net = w.net = new Net({ clock: v.clock, view: v.view, signing }, all.map(eid));
+    const net = w.net = new Net({ clock: v.clock, view: v.view, anchor: { deployment: signing.deployment, terms: signing.terms } }, all.map(eid));
     w.loop = await JLoop.at(chain, all);
     legs.forEach(([a, b]) => { net.tell(eid(a), { _tag: "open_account", peer: eid(b) }); net.tell(eid(b), { _tag: "open_account", peer: eid(a) }); });
     net.settle();
@@ -209,10 +247,8 @@ const open: Step<World> = {
       if (asked.length !== 1 || action?._tag !== "deposit" || action.peer !== eid(peer) || action.token !== t || action.amount !== amount) {
         throw new Error(`${funder.name}'s deposit command did not ask the chain for exactly one deposit of ${amount} against ${peer.name}: ${JSON.stringify(asked, (_, x) => (typeof x === "bigint" ? x.toString() : x))}`);
       }
-      await sendOps(chain, funder, [{
-        _tag: "reserve_to_collateral",
-        funding: { tokenId: chain.tokenId, receivingEntity: funder.id, pairs: [{ entity: peer.id, amount: action.amount }] },
-      }], `fund ${funder.name}-${peer.name}`);
+      // The Host's op for the action (pure/host/ops.ts); the harness queues, simulates, signs and sends it (gap `host-shell`).
+      await sendOps(chain, funder, [must(opOf(eid(funder), action, worldOf(chain)), "op of the deposit action")], `fund ${funder.name}-${peer.name}`);
       const side = net.account(eid(funder), eid(peer)).side;
       const base = expected.get(key) ?? ledgerOf(net.account(eid(funder), eid(peer)).state, t);
       const ledger = must(deposit(base, side, amount), "deposit rule");
@@ -233,7 +269,7 @@ const open: Step<World> = {
         `money held for the four entities (reserves plus collateral) is ${fmt(chain, w.held)}, equal to what they deposited`,
         "the Runtimes' ledgers hold collateral 0: nothing tells an Account about the chain's collateral, so the payments below run on credit",
       ],
-      gaps: ["jDepositFacts", "jActionOps", "jLoop", "hostShell", "perAccountSigning"],
+      gaps: ["jDepositFacts", "jLoop", "hostShell"],
     };
   },
 };
@@ -263,7 +299,7 @@ const pay: Step<World> = {
         `alice pay 30 to hubX: one frame, both Runtimes committed head ${ra.head.slice(0, 12)} (the digest of the dispute proof of the state, slot ${ra.used}), allocation moved ${moved} for the ${ra.side} side`,
         `hubY-bob: bob's credit of 50 from the opening frame is in both ledgers (hubY may owe bob ${limit})`,
       ],
-      gaps: ["jDepositFacts", "hostShell", "perAccountSigning"],
+      gaps: ["jDepositFacts", "hostShell"],
     };
   },
 };
@@ -304,7 +340,7 @@ const htlc: Step<World> = {
       return `${payer.name} to ${payee.name}: lock deadline view+${deadlines[i]! - at}, resolved by ${payee.name}, both Runtimes at head ${rp.head.slice(0, 12)}, payer's allocation fell by ${fmt(chain, amount)}`;
     });
     quiet(net, [alice, hubX, hubY, bob], "htlc");
-    return { checks: [`hashlock ${hashlock.slice(0, 12)} on three hops through the Entities' lock and resolve commands, J view ${at}, deadlines step down toward bob`, ...checks, "hubs end flat: each received 10 on one Account and paid 10 on the next (no fee modelled)"], gaps: ["htlcRoute", "jDepositFacts", "hostShell", "perAccountSigning"] };
+    return { checks: [`hashlock ${hashlock.slice(0, 12)} on three hops through the Entities' lock and resolve commands, J view ${at}, deadlines step down toward bob`, ...checks, "hubs end flat: each received 10 on one Account and paid 10 on the next (no fee modelled)"], gaps: ["htlcRoute", "jDepositFacts", "hostShell"] };
   },
 };
 
@@ -335,11 +371,11 @@ const reveal: Step<World> = {
     const asked = askedSince(net, bob, sinceLock);
     const action = asked[0];
     if (asked.length !== 1 || action?._tag !== "reveal") throw new Error(`at view ${net.view()} bob should ask for exactly one reveal: ${JSON.stringify(asked.map((x) => x._tag))}`);
-    // The action becomes a revealSecrets op (gap `j-action-ops`) and the Depository's canonical transformer records the secret.
+    // The Host makes the revealSecrets op from the action (pure/host/ops.ts); the Depository's canonical transformer records the secret.
     const hash = ethers.keccak256(ethers.hexlify(action.secret));
     const transformer = new ethers.Contract(chain.manifest.contracts.deltaTransformer.address, ["function hashToTimestamp(bytes32) view returns (uint256)"], chain.provider);
     if ((await transformer.hashToTimestamp!(hash)) !== 0n) throw new Error("the secret was already revealed on chain before bob asked");
-    const sent = await sendOps(chain, bob, [{ _tag: "reveal_secret", reveal: { transformer: chain.manifest.contracts.deltaTransformer.address, secret: asHex(action.secret) } }], "bob reveals");
+    const sent = await sendOps(chain, bob, [must(opOf(b, action, worldOf(chain)), "op of the reveal action")], "bob reveals");
     if (!sent.events.includes("SecretRevealed")) throw new Error(`no SecretRevealed in ${sent.events.join(", ")}`);
     const at = await transformer.hashToTimestamp!(hash);
     if (at === 0n) throw new Error("the transformer holds no reveal time for the secret after the batch");
@@ -355,7 +391,7 @@ const reveal: Step<World> = {
         `bob's reveal_secret batch (nonce ${sent.nonce}, gas ${sent.gasUsed}) emits SecretRevealed; the transformer holds the secret's hash from block time ${at}`,
         "after the resend timer hubY acks the resolve: the Account is at one head with no open clause",
       ],
-      gaps: ["jActionOps", "hostShell", "perAccountSigning"],
+      gaps: ["hostShell"],
     };
   },
 };
@@ -524,7 +560,7 @@ const nodes: Step<World> = {
         `the ${resent} committed outputs it re-sent were dropped by the peers as copies they already hold (${copies.length} refused_not_next notices, no other), and the link went quiet`,
         `bob then extended hubY 60 of credit over the link: one frame, both at head ${rb.head.slice(0, 12)}`,
       ],
-      gaps: ["hostShell", "perAccountSigning"],
+      gaps: ["hostShell"],
     };
   },
 };

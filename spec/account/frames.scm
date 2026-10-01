@@ -64,6 +64,17 @@
 ;;     peer frame with a RETRYABLE `frozen` refusal (the attempt and mark rules of R-FRAME-REFUSAL: every tx goes back, no
 ;;     notice, within the retry budget) until the operation lands or lapses (the host reports it). A frame accepted in
 ;;     between would move offdelta away from the fold that was signed.
+;;   - FRAME EPOCH (R-FRAME-EPOCH, R-FRAME-EPOCH-WEDGE): a frame carries the CONTEXT its proof is signed under, the pair
+;;     (epoch . first nonce), part of its hash; a replica signs under the pair it last read from the chain (`hear`: a report is
+;;     taken only if its epoch is HIGHER than the replica's own, so a report of the same epoch is ignored). A replica judges
+;;     only a frame of its own pair: any other is refused as `wrong_epoch` BEFORE any tx is looked at (the refuser notes the
+;;     frame's slot, forgets nothing and remembers no mark, and names its own floor and mark). The proposer whose own pair is
+;;     still the frame's PARKS it as it is (every tx kept, the same slot, no new proof) and the resend sends the same bytes;
+;;     one whose own pair moved since it sealed takes the frame back (every tx kept, no notice) and seals it anew at the next
+;;     attempt. So the two sides never commit one frame under two contexts, and a Host that hears the chain first costs a
+;;     wait. The same epoch under two stored nonces never mends by reports: the Account WEDGES (a loss of liveness, no head
+;;     splits and no tx is lost) until the Runtime closes the epoch on the chain (`close the epoch`), after which both read the
+;;     chain's own pair. Configs epoch (the chain moves on) and epoch-wedge (its nonce rises within an epoch, the Runtime heals).
 ;;   - The link may lose and duplicate messages (bounded budgets); a proposer with a
 ;;     pending frame may always resend it (a timeout, abstracted as "at any time").
 ;;
@@ -93,8 +104,11 @@
 ;;   - a Byzantine proposer (a frame that is invalid on content) is refused by the same
 ;;     path as a stale one; it is not a separate rule. Its forged frame is at attempt 0;
 ;;   - a refusal index that names no tx of the pending frame is ignored (kernel F3);
-;;   - the proofs are a slot: no chain, no presenter, no signature, no epoch, no Account id (so the rule that a signature
-;;     names chain, depository, Account and epoch is an open point, Q-A-14); the upstream hold of a lock is the
+;;   - the proofs are a slot and a context pair: no chain, no presenter, no signature, no Account id (so the rule that a signature
+;;     names chain, depository, Account and epoch is an open point, Q-A-14); the epoch is a number the chain may advance and its
+;;     stored nonce a number that may rise within it; the closing of an epoch by a dispute is one step, not a dispute (the dispute
+;;     page's); a frame acked after its proposer's view moved on is committed and, on the kernel's books, not counted as a proof
+;;     of the new epoch: the signed-proof cap is not modelled here; the upstream hold of a lock is the
 ;;     proposer's `:refused` notice (R-NOTICE) and the peer's enforcement is the property's reading of what is signed;
 ;;   - the nonce ceiling (the kernel refuses a frame it cannot sign at the contract's nonce limit) is not modelled;
 ;;   - the kernel's attempt cap on the receiver side is not modelled: attempts keep counting.
@@ -133,6 +147,11 @@
 (define/overridable pay-txs (s/array (s/string)) (list "x"))
 ;; the retry budget per head (MAX_ATTEMPTS is 8 in the kernel)
 (define/overridable max-attempt (s/number) 2)
+;; R-FRAME-EPOCH: times the chain moves on to a higher epoch, times its stored nonce rises within an epoch, times the Runtime
+;; closes the epoch on the chain (0 in the default world: every context is (0 . 0); configs epoch and epoch-wedge)
+(define/overridable max-epoch-moves (s/number) 0)
+(define/overridable max-nonce-ups   (s/number) 0)
+(define/overridable max-closes      (s/number) 0)
 
 ;; ---- the world
 (define sides (list :left :right))
@@ -141,7 +160,7 @@
 (define (conflict-pairs) (map vector->list (vector->list conflicts)))
 (define (replica) (dict :head (list) :mempool (list) :pending #f :refused (list) :attempt 0 :mark #f
                         :dead 0 :above #t :peer-high 0 :reach #t :parked (list) :signed (list)
-                        :fold #f))
+                        :fold #f :ctx (list 0 0) :ctx-ok #t))
 (define init
   (dict :left   (replica)
         :right  (replica)
@@ -153,11 +172,13 @@
         :byz    0
         :reflect 0
         :jumps  0
-        :settles 0))
+        :settles 0
+        :chain  (list 0 0)     ; the chain's epoch and its stored nonce (R-FRAME-EPOCH)
+        :epochs 0 :nups 0 :closes 0))
 
 ;; ---- frames and messages
 ;; the hash of a frame is the history it makes: its entry (txs, attempt, author, slot) on top of its prev
-(define (frame-entry f) (dict :txs (:txs f) :attempt (:attempt f) :author (:author f) :slot (:slot f)))
+(define (frame-entry f) (dict :txs (:txs f) :attempt (:attempt f) :author (:author f) :slot (:slot f) :ctx (:ctx f)))
 (define (frame-hash f) (cons (frame-entry f) (:prev f)))
 (define (frame-msg f) (dict :kind :frame :frame f))
 (define (ack-msg h) (dict :kind :ack :hash h))
@@ -262,7 +283,9 @@
 (define (ignore r) (dict :replica r :sent (list)))
 ;; `ok` says whether the frame was within reach of what the receiver knew when it arrived (for the property)
 (define (accept r f ok)
-  (dict :replica (assoc-in (commit (if (:pending r) (roll-back r) r) (frame-hash f)) (list :reach) (and (:reach r) ok))
+  (dict :replica (-> (commit (if (:pending r) (roll-back r) r) (frame-hash f))
+                     (assoc-in (list :reach) (and (:reach r) ok))
+                     (assoc-in (list :ctx-ok) (and (:ctx-ok r) (equal? (:ctx r) (:ctx f)))))
         :sent    (list (ack-msg (frame-hash f)))))
 
 ;; the receiver's mark: the highest attempt it refused on this head, with the fault. A frame
@@ -289,13 +312,21 @@
 (define (extends-head? r f) (equal? (:prev f) (:head r)))
 (define (reack? r f) (equal? (frame-hash f) (:head r)))
 
+;; R-FRAME-EPOCH: a replica judges only a frame sealed under the context it signs under (bug `epoch-accepts-wrong`); a frame of
+;; another context is refused before it is judged and the slot is noted (bug `epoch-forgets-slot`), the mark is not
+;; remembered (bug `epoch-remembers-mark`)
+(define (sealed-here? r f) (equal? (:ctx r) (:ctx f)))
+(define (note-epoch-slot r f) (note-peer r f))
+(define (refuse-epoch r f) (refuse r f 0 :wrong_epoch (mark-attempt r)))
+
 (define (on-next-frame side r0 f view)
   (if (honest-slot? r0 (:author f) (:slot f))
-      (on-honest-frame side (note-peer r0 f) f view (reach-ok? r0 f))
+      (on-honest-frame side (if (sealed-here? r0 f) (note-peer r0 f) (note-epoch-slot r0 f)) f view (reach-ok? r0 f))
       (refuse r0 f 0 :bad_slot (mark-attempt r0))))
 
 (define (on-honest-frame side r f view reach)
   (cond
+    ((not (sealed-here? r f)) (refuse-epoch r f))
     ((at-or-below-mark? r f) (answer-from-mark r f))
     ((refuses-frozen? r) (refuse (remember r f 0 :frozen) f 0 :frozen (:attempt f)))
     ((keeps-own? side r f) (ignore r))
@@ -328,13 +359,20 @@
         (release (list tx)))))
 ;; the next attempt: past my own and past the receiver's mark
 (define (next-attempt r m) (+ (max (:attempt r) (:mark m)) 1))
+;; R-FRAME-EPOCH: a wrong_epoch refusal of a frame still sealed under my own context parks it as it is (bug
+;; `epoch-refusal-rolls-back` signs a new proof for every try); if my context moved since, the frame goes back and is sealed
+;; anew. The faults that judged nothing and cost no tx (bug `epoch-refusal-drops-tx` drops one with notice)
+(define (epoch-parks? r m) (and (equal? (:fault m) :wrong_epoch) (equal? (:ctx (:pending r)) (:ctx r))))
+(define (judged-nothing) (list :stale_attempt :stale_slot :wrong_epoch))
 (define (handle-refusal r m)
-  (let* ((fault (:fault m))
-         (r2 (cond ((member fault (list :stale_attempt :stale_slot)) (roll-back r))
-                   ((and (retryable? fault) (< (:attempt r) max-attempt)) (roll-back r))
-                   (else (drop-named r (:index m))))))
-    (-> r2 (assoc-in (list :attempt) (next-attempt r m))
-           (assoc-in (list :peer-high) (max (:peer-high r2) (:floor m))))))
+  (if (epoch-parks? r m)
+      (assoc-in r (list :peer-high) (max (:peer-high r) (:floor m)))
+      (let* ((fault (:fault m))
+             (r2 (cond ((member fault (judged-nothing)) (roll-back r))
+                       ((and (retryable? fault) (< (:attempt r) max-attempt)) (roll-back r))
+                       (else (drop-named r (:index m))))))
+        (-> r2 (assoc-in (list :attempt) (next-attempt r m))
+               (assoc-in (list :peer-high) (max (:peer-high r2) (:floor m)))))))
 ;; a floor is believed only if an honest peer could have signed it
 (define (floor-believed? r m)
   (and (>= (:floor m) 0) (<= (:floor m) (slot-above (peer (:author (:pending r))) (used-slot r) (floor-of r)))))
@@ -383,7 +421,7 @@
                   (if (null? (:valid split))
                       #f
                       (dict :txs (:valid split) :prev (:head r) :attempt (:attempt r) :author side
-                            :slot (proposal-slot side r)))))))
+                            :slot (proposal-slot side r) :ctx (:ctx r)))))))
 (define (can-propose? side r view)
   (and (not (:pending r)) (not (frozen? r)) (pair? (:mempool r))
        (let ((split (split-proposal view (committed-in-order r) (:mempool r))))
@@ -462,7 +500,7 @@
     (then (-> (enqueue w (peer side)
                        (list (frame-msg (dict :txs (get-in w (list side :mempool)) :prev (get-in w (list side :head))
                                               :attempt 0 :author side
-                                              :slot (proposal-slot side (side w))))))
+                                              :slot (proposal-slot side (side w)) :ctx (get-in w (list side :ctx))))))
               (update-in (list :byz) (lambda (n) (+ n 1)))))))
 
 ;; the link hands a replica its OWN pending frame back, as if the peer had sent it (frame author)
@@ -505,10 +543,39 @@
             (-> (enqueue w (peer side)
                          (list (frame-msg (dict :txs (:valid split) :prev (get-in w (list side :head))
                                                 :attempt 0 :author side
-                                                :slot (+ (used-slot (side w)) 100 (lane side))))))
+                                                :slot (+ (used-slot (side w)) 100 (lane side))
+                                                :ctx (get-in w (list side :ctx))))))
                 (update-in (list :jumps) (lambda (n) (+ n 1))))))))
 
-(define (base-rules) (list submit tick resend lose duplicate byz-frame jump reflect lapse cosign unfreeze))
+;; R-FRAME-EPOCH: the chain moves on to a higher epoch, its stored nonce rises within an epoch, a replica reads the chain (only an
+;; epoch ABOVE its own is taken: a report of the same epoch is ignored), and the Runtime closes the epoch on the chain when a
+;; frame is pending and the two replicas read one epoch under two nonces (a replica behind in epoch cures itself by hearing)
+(define (chain-epoch w) (car (:chain w)))
+(define advance-chain
+  (rule "the chain moves on to a higher epoch" (w side)
+    (when (and (equal? side :left) (< (:epochs w) max-epoch-moves)))
+    (then (-> w (assoc-in (list :chain) (list (+ (chain-epoch w) 1) 0)) (update-in (list :epochs) (lambda (n) (+ n 1)))))))
+(define raise-nonce
+  (rule "the chain's stored nonce rises within the epoch" (w side)
+    (when (and (equal? side :left) (< (:nups w) max-nonce-ups)))
+    (then (-> w (assoc-in (list :chain) (list (chain-epoch w) (+ (cadr (:chain w)) 1))) (update-in (list :nups) (lambda (n) (+ n 1)))))))
+(define hear-chain
+  (rule "hear the chain" (w side)
+    (when (> (chain-epoch w) (car (get-in w (list side :ctx)))))
+    (then (assoc-in w (list side :ctx) (:chain w)))))
+;; the close is a chain event: nothing off-chain moves until a replica hears it (bug `epoch-close-takes-frames-back` takes every pending frame back)
+(define (close-effect w) w)
+(define close-epoch
+  (rule "the Runtime closes the epoch on the chain" (w side)
+    (when (and (equal? side :left) (< (:closes w) max-closes)
+               (some (lambda (s) (and (get-in w (list s :pending)) #t)) sides)
+               ;; the same epoch under two nonces: a replica behind in epoch cures itself by hearing the chain
+               (equal? (car (get-in w (list :left :ctx))) (car (get-in w (list :right :ctx))))
+               (not (equal? (get-in w (list :left :ctx)) (get-in w (list :right :ctx))))))
+    (then (-> (close-effect w) (assoc-in (list :chain) (list (+ (chain-epoch w) 1) 0)) (update-in (list :closes) (lambda (n) (+ n 1)))))))
+
+(define (base-rules) (list submit tick resend lose duplicate byz-frame jump reflect lapse cosign unfreeze
+                           advance-chain raise-nonce hear-chain close-epoch))
 (define (lag-rules)
   (append-map (lambda (k) (list (propose-lag k) (deliver-lag k))) (iota (+ view-lag 1))))
 (define (all-rules) (append (base-rules) (lag-rules)))
@@ -573,6 +640,10 @@
    ;; settlement is signed, the fold it carries is the offdelta of the head both sides hold
    (property "R-COSIGN-FREEZE: while a settlement is signed, its fold equals the off-chain offdelta of the head" (w)
      (every (lambda (side) (or (not (frozen? (side w))) (= (:fold (side w)) (offdelta (side w))))) sides))
+   ;; R-FRAME-EPOCH, from what each replica recorded at its own accept (against the context it held then): a frame is
+   ;; judged, and so committed, only under the pair its receiver signs under (the two sides never commit one frame under two)
+   (property "R-FRAME-EPOCH: a frame is committed only under the epoch and first nonce its receiver signs under" (w)
+     (every (lambda (side) (:ctx-ok (side w))) sides))
    (property "no submitted tx is lost: committed, held, or refused" (w)
      (every (lambda (side) (every (lambda (tx) (member tx (held (side w)))) (submitted w side)))
             sides))
@@ -617,6 +688,40 @@
               (every (lambda (tx) (not (member tx (committed (side w))))) (:refused (side w))))
             sides))))
 
+;; ---- step properties: what a delivery of a frame of another context, and of its refusal, did
+(define (rule-is? verb rname) (string-prefix? verb rname))
+(define (next-msg w side) (car (inbox-of w side)))
+;; a delivery of a frame, next on the head, at a slot an honest peer could take, sealed under another context than the receiver's
+(define (epoch-refused-delivery? w rname side)
+  (and (rule-is? "deliver" rname) (pair? (inbox-of w side))
+       (let ((m (next-msg w side)) (r (side w)))
+         (and (equal? (:kind m) :frame) (not (own-frame? side (:frame m))) (extends-head? r (:frame m))
+              (honest-slot? r (:author (:frame m)) (:slot (:frame m)))
+              (not (equal? (:ctx r) (:ctx (:frame m))))))))
+;; a delivery of a wrong_epoch refusal of my pending frame, believed, while my own context is still the frame's
+(define (epoch-parked-delivery? w rname side)
+  (and (rule-is? "deliver" rname) (pair? (inbox-of w side))
+       (let ((m (next-msg w side)) (r (side w)))
+         (and (equal? (:kind m) :refusal) (equal? (:fault m) :wrong_epoch) (:pending r)
+              (equal? (frame-hash (:pending r)) (:hash m)) (< (:index m) (length (:txs (:pending r))))
+              (floor-believed? r m) (equal? (:ctx (:pending r)) (:ctx r))))))
+(define steps
+  (list
+   (step-property "R-FRAME-EPOCH: a frame of another context is refused before it is judged: the slot is noted, the mark, the mempool, the notices and the head are untouched" (w rname side w2)
+     (or (not (epoch-refused-delivery? w rname side))
+         (let ((r (side w)) (r2 (side w2)) (f (:frame (next-msg w side))))
+           (and (equal? (:mark r2) (:mark r)) (equal? (:refused r2) (:refused r)) (equal? (:mempool r2) (:mempool r))
+                (equal? (:head r2) (:head r)) (>= (:peer-high r2) (:slot f))))))
+   (step-property "R-FRAME-EPOCH-WEDGE: the Runtime's close of the epoch moves only the chain: both replicas keep their pending frame, mempool, head and context" (w rname side w2)
+     (or (not (rule-is? "the Runtime closes" rname))
+         (every (lambda (s) (let ((r (s w)) (r2 (s w2)))
+                              (and (equal? (:pending r2) (:pending r)) (equal? (:mempool r2) (:mempool r))
+                                   (equal? (:head r2) (:head r)) (equal? (:ctx r2) (:ctx r)))))
+                sides)))
+   (step-property "R-FRAME-EPOCH: a wrong_epoch refusal of the frame as sealed costs a resend, not a proof: the proposer parks it, the same frame, every tx kept" (w rname side w2)
+     (or (not (epoch-parked-delivery? w rname side))
+         (and (equal? (:pending (side w2)) (:pending (side w))) (equal? (:mempool (side w2)) (:mempool (side w))))))))
+
 (define (done? w)
   (and (equal? (head-of w :left) (head-of w :right))
        (every (lambda (side) (and (not (get-in w (list side :pending)))
@@ -633,4 +738,4 @@
   (list (property "at rest: both sides committed the same history, every tx accounted for" (w) (done? w))))
 
 (define account-frames
-  (dict :init init :next next :invariants invariants :at-rest at-rest :goal done?))
+  (dict :init init :next next :invariants invariants :steps steps :at-rest at-rest :goal done?))

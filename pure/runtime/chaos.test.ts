@@ -488,7 +488,9 @@ describe("runtime/chaos two Hosts over a link that loses, repeats and reorders, 
     if (behind === undefined) return expect.unreachable("Alice committed no frame");
     expect(oneChain(retold("bob", { ...bob, head: behind, last: undefined }))).toEqual([]);
     // Bob's head is a frame no WAL ever sent: neither side is one frame ahead of the other
-    const unsent = frameName({ author: "left", parent: alice.head, attempt: 7, slot: 2, txs: [] });
+    const unsent = frameName({
+      author: "left", parent: alice.head, attempt: 7, slot: 2, epoch: 0n, firstNonce: 2n, txs: [],
+    });
     expect(oneChain(retold("bob", { ...bob, head: unsent, last: unsent })))
       .toEqual(["the two sides committed different frames"]);
   });

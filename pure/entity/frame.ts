@@ -6,8 +6,8 @@ import { emptyReplica } from "../account/frame/account.ts";
 import type { JView } from "../account/clause/clock.ts";
 import { propose, receive, resend, submit, type Heard, type Msg, type Outcome } from "../account/frame/frame.ts";
 import { revealOnChainDue } from "../account/clause/clock.ts";
-import type { AccountState } from "../account/model.ts";
-import type { SigningContext } from "../account/proof/signing.ts";
+import type { AccountState, Side } from "../account/model.ts";
+import { signingOf, type Anchor } from "./signing/signing.ts";
 import { holderOf, ledgerOf } from "../account/state.ts";
 import { MAX_AMOUNT } from "../account/ledger.ts";
 import {
@@ -79,9 +79,15 @@ const factsOf = (w: Work, peer: EntityId): ChainFacts => w.state.chain.get(peer)
 const withFacts = (w: Work, peer: EntityId, facts: ChainFacts): Work =>
   ({ ...w, state: { ...w.state, chain: mapSet(w.state.chain, peer, facts) } });
 
-/** A frame is co-signed when the peer's frame is taken or my own is acked: one more proof of the epoch. */
-const cosigned = (outcome: Outcome<PeerFault>): boolean =>
-  outcome._tag === "accepted" || outcome._tag === "accepted_over_own" || outcome._tag === "committed_own";
+/**
+ * A frame is co-signed when the peer's frame is taken or my own is acked: one more proof of the epoch. A frame of mine
+ * acked after my view of the chain moved on is committed but was sealed under the old epoch: it is no proof of the new
+ * one, and counts for nothing (R-FRAME-EPOCH). A peer's frame is taken only under my own view. (Within an epoch the
+ * stored nonce, and so the first nonce, does not change: a report of the same epoch is ignored.)
+ */
+const cosigned = (outcome: Outcome<PeerFault>, own: EntityReplica["pending"], facts: ChainFacts): boolean =>
+  outcome._tag === "accepted" || outcome._tag === "accepted_over_own"
+  || (outcome._tag === "committed_own" && own?.frame.epoch === facts.epoch);
 
 const hearing = (rules: Rulebook, view: JView, w: Work, a: PeerMessage): Work => {
   const account = w.state.accounts.get(a.from);
@@ -90,7 +96,8 @@ const hearing = (rules: Rulebook, view: JView, w: Work, a: PeerMessage): Work =>
   const refused = refusal(heard.outcome);
   const heardBy = sending(withReplica(w, a.from, heard.replica), a.from, heard.sent);
   const waiting = waitingForJ(heardBy, a.from, view, heard);
-  const counted = cosigned(heard.outcome) ? withFacts(waiting, a.from, framed(factsOf(waiting, a.from))) : waiting;
+  const facts = factsOf(waiting, a.from);
+  const counted = cosigned(heard.outcome, account.pending, facts) ? withFacts(waiting, a.from, framed(facts)) : waiting;
   return refused === undefined ? counted : noting(counted, { _tag: "message_refused", from: a.from, outcome: refused });
 };
 
@@ -154,8 +161,8 @@ const opened = (w: Work, command: Extract<Command, { _tag: "open_account" }>): W
   return withReplica(w, command.peer, emptyReplica(sideOf(w.state.id, command.peer)));
 };
 
-/** The tx a command asks its Account for. */
-const txOf = (command: AccountCommand): AccountTx => {
+/** The tx a command asks its Account for; an offer's maker is this node's side, whatever a caller would like. */
+const txOf = (self: Side, command: AccountCommand): AccountTx => {
   switch (command._tag) {
     case "pay":
       return { _tag: "pay", token: command.token, amount: command.amount };
@@ -169,6 +176,17 @@ const txOf = (command: AccountCommand): AccountTx => {
       return { _tag: "cancel", token: command.token, id: command.id };
     case "expire":
       return { _tag: "expire", token: command.token, id: command.id };
+    case "offer":
+      return {
+        _tag: "offer",
+        offer: { id: command.id, maker: self, give: command.give, want: command.want, deadline: command.deadline },
+      };
+    case "fill":
+      return { _tag: "fill", id: command.id, ratio: command.ratio };
+    case "retract":
+      return { _tag: "retract", id: command.id };
+    case "lapse":
+      return { _tag: "lapse", id: command.id };
   }
 };
 
@@ -176,7 +194,7 @@ const txOf = (command: AccountCommand): AccountTx => {
 const queued = (rules: Rulebook, w: Work, command: AccountCommand): Work => {
   const account = w.state.accounts.get(command.peer);
   if (account === undefined) return refusedCommand(w, command, { _tag: "no_account", peer: command.peer });
-  const admitted = submit(rules(w, command.peer), account, txOf(command));
+  const admitted = submit(rules(w, command.peer), account, txOf(sideOf(w.state.id, command.peer), command));
   return admitted.ok
     ? touching(withReplica(w, command.peer, admitted.value), command.peer)
     : refusedCommand(w, command, { _tag: "account_refused", fault: admitted.error });
@@ -211,8 +229,16 @@ const withdrawn = (w: Work, command: Extract<ChainCommand, { _tag: "withdraw" }>
   return asked(withFacts(w, peer, cosignFrozen(facts)), op);
 };
 
+/** The node's own tokens into its reserve: it names no peer and needs no Account, so it asks the chain at once. */
+const funded = (w: Work, command: Extract<ChainCommand, { _tag: "fund" }>): Work => {
+  const { token, amount } = command;
+  return amount >= 1n && amount <= MAX_AMOUNT
+    ? asked(w, { _tag: "fund", token, amount })
+    : refusedCommand(w, command, { _tag: "bad_fund", amount });
+};
+
 /** A command about the chain needs an Account with the peer, as an Account command does. */
-const chained = (w: Work, command: ChainCommand): Work => {
+const chained = (w: Work, command: Exclude<ChainCommand, { _tag: "fund" }>): Work => {
   const { peer } = command;
   if (!w.state.accounts.has(peer)) return refusedCommand(w, command, { _tag: "no_account", peer });
   switch (command._tag) {
@@ -229,6 +255,8 @@ const commanded = (rules: Rulebook, w: Work, command: Command): Work => {
   switch (command._tag) {
     case "open_account":
       return opened(w, command);
+    case "fund":
+      return funded(w, command);
     case "deposit":
     case "set_windows":
     case "withdraw":
@@ -332,14 +360,17 @@ const commandsOf = (inputs: readonly EntityInput[]): readonly Command[] =>
 
 /**
  * The frame: arrivals, then hooks, then commands, then proposals, then the refusals the Accounts hold are told, then
- * what the Entity owes the chain. `signing` is one interim context for all of the Entity's Accounts; a per-Account,
- * per-epoch one is owed by the Runtime (the cut), see Setup.signing and R-FRAME-SIGNATURE-NAMES-ACCOUNT.
+ * what the Entity owes the chain. Each Account signs in a context of its own, read off the chain facts the Entity holds
+ * for it: its key, its epoch and its first nonce (R-FRAME-SIGNATURE-NAMES-ACCOUNT).
  */
 export const entityFrame = (
-  judge: Judge, signing: SigningContext, state: EntityState, inputs: readonly EntityInput[],
+  judge: Judge, anchor: Anchor, state: EntityState, inputs: readonly EntityInput[],
 ): Frame => {
-  const rules: Rulebook = (w, peer) =>
-    entityRules(judge, signing, { self: sideOf(w.state.id, peer), frozen: factsOf(w, peer).frozen });
+  const rules: Rulebook = (w, peer) => {
+    const facts = factsOf(w, peer);
+    return entityRules(judge, signingOf(anchor, w.state.id, peer, facts),
+      { self: sideOf(w.state.id, peer), frozen: facts.frozen });
+  };
   const arrived = arrivalsOf(inputs).reduce((w, a) => arrive(rules, judge.view, w, a), start(state));
   const afterHooks = hooksOf(inputs).reduce(hooked, arrived);
   const afterCommands = commandsOf(inputs).reduce((w, c) => commanded(rules, w, c), afterHooks);

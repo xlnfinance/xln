@@ -1,0 +1,54 @@
+{
+ "id": "R-FRAME-EPOCH",
+ "statement": "A frame names the epoch and the first nonce its proof is signed under, and a replica judges only frames of the pair it signs under itself: a frame of another pair is refused with wrong_epoch before any tx is looked at, and the refuser notes the frame's slot and names its own floor and mark. The proposer parks the frame as it is (every tx kept, the same slot, no new proof signed) and sends the same bytes again when the Host asks, so a peer that lags costs a resend, never a proof per try; a proposer whose own view moved since it sealed takes the frame back and seals it anew. A frame of mine acked after my view of the chain moved on is committed but is no proof of the new epoch: it is not counted. So the two sides never seal one frame under two contexts: a Host that hears the chain move on before its peer does costs a wait, not a head the two sides disagree on. The Arrival cell holds the one-Account half: a frame carries its pair, a frame of another pair is refused as wrong_epoch before it is judged (slot noted, mark and mempool untouched, no tx dropped), the proposer parks the frame as sealed when its own pair still matches and takes it back when its pair moved, and no replica commits a frame sealed under another pair; the sentence about a frame acked after my view moved on is on no page (the page records the pair at the accept and has no proof counter). A mismatch that never mends wedges the Account: that is R-FRAME-EPOCH-WEDGE, owed to the Runtime dispute duties slice.",
+ "source": "cut thread, from the per-Account signing context (R-FRAME-SIGNATURE-NAMES-ACCOUNT); Review A of PR 135 (blockers B1, B2, B3)",
+ "layers": {
+  "arrival": "hold",
+  "quint": "owed: spec thread, new Quint branch",
+  "contract": "n/a: an off-chain Account rule; the chain sees only signed proofs",
+  "rig": "owed: test rig (a walk predicate: two replicas never commit one frame under two epochs)",
+  "ts": "hold"
+ },
+ "killers": [
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "account/frame R-FRAME-EPOCH a frame is judged only under its own epoch and first nonce"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "runtime/chain R-FRAME-EPOCH a frame is judged only under its own epoch and first nonce"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-FRAME-EPOCH a frame changed in epoch or first nonce after signing is refused, the Account stays"
+  },
+  {
+   "kind": "bug",
+   "layer": "arrival",
+   "name": "epoch-accepts-wrong"
+  },
+  {
+   "kind": "bug",
+   "layer": "arrival",
+   "name": "epoch-remembers-mark"
+  },
+  {
+   "kind": "bug",
+   "layer": "arrival",
+   "name": "epoch-forgets-slot"
+  },
+  {
+   "kind": "bug",
+   "layer": "arrival",
+   "name": "epoch-refusal-rolls-back"
+  },
+  {
+   "kind": "bug",
+   "layer": "arrival",
+   "name": "epoch-refusal-drops-tx"
+  }
+ ]
+}

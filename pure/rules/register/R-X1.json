@@ -74,6 +74,51 @@
    "kind": "test",
    "layer": "ts",
    "name": "R-X1 a row refused for an Entity the Runtime does not host asks nothing of the chain"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-X1 a text nested thousands deep is a fault, not a stack overflow, and the bound is exact"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-X1 a value nested past the bound is refused at the write: no row is stored that cannot be read"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-X1 a bigint of hundreds of thousands of digits is a fault, not a throw, and the bound is exact"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-X1 a bigint past the bound is refused at the write: no row is stored that cannot be read"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-X1 a frame with a bigint of hundreds of thousands of digits is refused, not thrown, link lives"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-X1 a hello, a reply and a finish nested thousands deep or far over the bound are refused, not thrown"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-X1 a text nested thousands deep, or far over the bound, is refused before anything is believed"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-X1 a tx tag that every object has is no message: refused, and the link still hears the next record"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-X1 a tx tag that is a property of every object is a wrong shape, never a thrown error"
   }
  ]
 }

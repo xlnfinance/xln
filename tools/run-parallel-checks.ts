@@ -9,6 +9,11 @@ if (gateNames.length === 0 || gateNames.some(name => !/^[a-z0-9:-]+$/.test(name)
 // gates do not serialize past the repository's 30s hard budget. Smaller nested
 // groups stay at two lanes, keeping compiler/test fan-out bounded.
 const MAX_CONCURRENT_GATES = gateNames.length > 10 ? 3 : 2;
+// A test with a fixed time limit inside frozen core cannot be given more time.
+// canonical-payment-surface reads every tracked file within 15s and took 16s
+// beside the Rust compile in Runtime Checks (run 36901597856). Quiet gates run
+// first and alone, before the lanes start.
+const QUIET_GATES: ReadonlySet<string> = new Set(['check:canonical-payment-surface']);
 const active = new Set<ReturnType<typeof Bun.spawn>>();
 let stopped = false;
 
@@ -29,35 +34,46 @@ type Result = Readonly<{
 const results: Result[] = [];
 let nextIndex = 0;
 
+const runGate = async (name: string): Promise<void> => {
+  const startedAt = performance.now();
+  const child = Bun.spawn(['bun', 'run', name], {
+    cwd: process.cwd(),
+    // Nested gates must expose the first failure even while another lane
+    // is still running. Inherited streams also cannot hold result delivery
+    // hostage to an unrelated descendant keeping a captured pipe open.
+    stdout: 'inherit',
+    stderr: 'inherit',
+  });
+  active.add(child);
+  const exitCode = await child.exited;
+  active.delete(child);
+  const result: Result = {
+    name,
+    exitCode,
+    durationMs: Math.round(performance.now() - startedAt),
+  };
+  results.push(result);
+  console.log(`${exitCode === 0 ? 'PASS' : 'FAIL'} ${name} ${result.durationMs}ms`);
+  if (exitCode !== 0) stopChildren();
+};
+
+const quietNames = gateNames.filter(name => QUIET_GATES.has(name));
+const laneNames = gateNames.filter(name => !QUIET_GATES.has(name));
+
 const runLane = async (): Promise<void> => {
-  while (!stopped && nextIndex < gateNames.length) {
-    const name = gateNames[nextIndex++];
+  while (!stopped && nextIndex < laneNames.length) {
+    const name = laneNames[nextIndex++];
     if (!name) break;
-    const startedAt = performance.now();
-    const child = Bun.spawn(['bun', 'run', name], {
-      cwd: process.cwd(),
-      // Nested gates must expose the first failure even while another lane
-      // is still running. Inherited streams also cannot hold result delivery
-      // hostage to an unrelated descendant keeping a captured pipe open.
-      stdout: 'inherit',
-      stderr: 'inherit',
-    });
-    active.add(child);
-    const exitCode = await child.exited;
-    active.delete(child);
-    const result: Result = {
-      name,
-      exitCode,
-      durationMs: Math.round(performance.now() - startedAt),
-    };
-    results.push(result);
-    console.log(`${exitCode === 0 ? 'PASS' : 'FAIL'} ${name} ${result.durationMs}ms`);
-    if (exitCode !== 0) stopChildren();
+    await runGate(name);
   }
 };
 
+for (const name of quietNames) {
+  if (!stopped) await runGate(name);
+}
+
 await Promise.all(Array.from(
-  { length: Math.min(MAX_CONCURRENT_GATES, gateNames.length) },
+  { length: Math.min(MAX_CONCURRENT_GATES, laneNames.length) },
   runLane,
 ));
 

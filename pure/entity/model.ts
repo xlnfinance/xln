@@ -11,8 +11,8 @@
 import { err, ok, type Result } from "../kernel/core/result.ts";
 import type { Brand, Tagged } from "../kernel/core/tagged.ts";
 import type { FrameHash, Msg, Outcome, Refused, Replica } from "../account/frame/frame.ts";
-import type { JView } from "../account/clause/clock.ts";
-import type { AccountFault, AccountState, Hold, HoldId, Side, TokenId } from "../account/model.ts";
+import type { JHeight, JView } from "../account/clause/clock.ts";
+import type { AccountFault, AccountState, Hold, HoldId, Leg, Side, TokenId } from "../account/model.ts";
 import type { AccountTx } from "../account/tx.ts";
 
 /** A 32-byte id, `0x` and 64 lowercase hex digits: the text order of two ids is their numeric order, as the chain's. */
@@ -95,17 +95,31 @@ export type Arrival = PeerMessage | JEvent | CosignAsk;
 /** The Host's timer for `peer`'s Account ran out: its pending frame is sent again, so a lost frame cannot wedge it. */
 export type Hook = Tagged<"resend_due", { peer: EntityId }>;
 
-/** A command that becomes a tx of the Account's next frame. */
+/**
+ * A command that becomes a tx of the Account's next frame. The swap commands (R-ENTITY-SWAP-COMMANDS) are a quote
+ * (`offer`, its maker always this node), the taker's fill (the first one accepts the quote), the maker's withdrawal
+ * (`retract`) and `lapse`, which anyone may ask once the offer is past due.
+ */
 export type AccountCommand =
   | Tagged<"set_credit", { peer: EntityId; token: TokenId; limit: bigint }>
   | Tagged<"pay", { peer: EntityId; token: TokenId; amount: bigint }>
   | Tagged<"lock", { peer: EntityId; token: TokenId; hold: Hold }>
   | Tagged<"resolve", { peer: EntityId; token: TokenId; id: HoldId; secret: Uint8Array }>
   | Tagged<"cancel", { peer: EntityId; token: TokenId; id: HoldId }>
-  | Tagged<"expire", { peer: EntityId; token: TokenId; id: HoldId }>;
+  | Tagged<"expire", { peer: EntityId; token: TokenId; id: HoldId }>
+  | Tagged<"offer", { peer: EntityId; id: HoldId; give: Leg; want: Leg; deadline: JHeight }>
+  | Tagged<"fill", { peer: EntityId; id: HoldId; ratio: number }>
+  | Tagged<"retract", { peer: EntityId; id: HoldId }>
+  | Tagged<"lapse", { peer: EntityId; id: HoldId }>;
 
-/** A command that is about the chain, not the Account's frames. */
+/**
+ * A command that is about the chain, not the Account's frames. `fund` is the one that names no peer: the node's own
+ * tokens move from the wallet that holds them into its reserve in the Depository, and the reserve is what a `deposit`
+ * then moves to an Account's collateral. The approval that lets the Depository pull the tokens is the wallet's, not
+ * the Entity's.
+ */
 export type ChainCommand =
+  | Tagged<"fund", { token: TokenId; amount: bigint }>
   | Tagged<"deposit", { peer: EntityId; token: TokenId; amount: bigint }>
   | Tagged<"set_windows", { peer: EntityId; windows: Windows }>
   | Tagged<"withdraw", { peer: EntityId; token: TokenId; amount: bigint }>;
@@ -123,6 +137,7 @@ export type Outbound = Readonly<{ from: EntityId; to: EntityId; msg: Msg<Account
  * (R-HTLC-CLOCK c); `revealed` on the Entity keeps a hashlock asked once for as long as its hold is open.
  */
 export type JAction =
+  | Tagged<"fund", { token: TokenId; amount: bigint }>
   | Tagged<"reveal", { peer: EntityId; token: TokenId; id: HoldId; hashlock: string; secret: Uint8Array }>
   | Tagged<"deposit", { peer: EntityId; token: TokenId; amount: bigint }>
   | Tagged<"counter", { peer: EntityId; nonce: bigint; head: FrameHash }>
@@ -137,6 +152,7 @@ export type EntityFault =
   | Tagged<"account_exists", { peer: EntityId }>
   | Tagged<"no_account", { peer: EntityId }>
   | Tagged<"account_refused", { fault: PeerFault }>
+  | Tagged<"bad_fund", { amount: bigint }>
   | Tagged<"deposit_before_cosign">
   | Tagged<"bad_windows", { windows: Windows }>
   | Tagged<"windows_shorten", { current: Windows }>
