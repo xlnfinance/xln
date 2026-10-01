@@ -3,8 +3,9 @@
 // frame's commands does not matter, and a command always sees what the arrivals of its own frame did (R-E1).
 import { mapSet } from "../kernel/core/collections.ts";
 import { accountRules, emptyReplica, type AccountReplica, type AccountRules } from "../account/frame/account.ts";
-import { propose, receive, resend, submit, type Msg, type Outcome } from "../account/frame/frame.ts";
-import type { AccountFault } from "../account/model.ts";
+import type { JView } from "../account/clause/clock.ts";
+import { propose, receive, resend, submit, type Heard, type Msg, type Outcome } from "../account/frame/frame.ts";
+import type { AccountFault, AccountState } from "../account/model.ts";
 import type { AccountTx, Judge } from "../account/tx.ts";
 import {
   sideOf, type Arrival, type Command, type EntityFault, type EntityId, type EntityInput, type EntityState, type Hook,
@@ -47,13 +48,20 @@ const refusal = (outcome: Outcome<AccountFault>): Outcome<AccountFault> | undefi
   }
 };
 
-const arrive = (rules: AccountRules, w: Work, a: Arrival): Work => {
+/** A refusal took my frame back and left txs to try again: they wait for the view of J to move (retry pacing). */
+const waitingForJ = (w: Work, peer: EntityId, view: JView, heard: Heard<AccountTx, AccountState, AccountFault>): Work =>
+  (heard.outcome._tag === "rolled_back" && heard.replica.mempool.length > 0
+    ? { ...w, state: { ...w.state, waiting: mapSet(w.state.waiting, peer, view) } }
+    : w);
+
+const arrive = (rules: AccountRules, view: JView, w: Work, a: Arrival): Work => {
   const account = w.state.accounts.get(a.from);
   if (account === undefined) return noting(w, { _tag: "unknown_peer", from: a.from });
   const heard = receive(rules, account, a.msg);
   const refused = refusal(heard.outcome);
   const heardBy = sending(withReplica(w, a.from, heard.replica), a.from, heard.sent);
-  return refused === undefined ? heardBy : noting(heardBy, { _tag: "message_refused", from: a.from, outcome: refused });
+  const waiting = waitingForJ(heardBy, a.from, view, heard);
+  return refused === undefined ? waiting : noting(waiting, { _tag: "message_refused", from: a.from, outcome: refused });
 };
 
 // ---- phase 2: hooks
@@ -79,10 +87,22 @@ const opened = (w: Work, command: Extract<Command, { _tag: "open_account" }>): W
 type OnAccount = Exclude<Command, { _tag: "open_account" }>;
 
 /** The tx a command asks its Account for. */
-const txOf = (command: OnAccount): AccountTx =>
-  (command._tag === "pay"
-    ? { _tag: "pay", token: command.token, amount: command.amount }
-    : { _tag: "set_credit", token: command.token, limit: command.limit });
+const txOf = (command: OnAccount): AccountTx => {
+  switch (command._tag) {
+    case "pay":
+      return { _tag: "pay", token: command.token, amount: command.amount };
+    case "set_credit":
+      return { _tag: "set_credit", token: command.token, limit: command.limit };
+    case "lock":
+      return { _tag: "lock", token: command.token, hold: command.hold };
+    case "resolve":
+      return { _tag: "resolve", token: command.token, id: command.id, secret: command.secret };
+    case "cancel":
+      return { _tag: "cancel", token: command.token, id: command.id };
+    case "expire":
+      return { _tag: "expire", token: command.token, id: command.id };
+  }
+};
 
 /** The Account checks the tx against its planning state at the door (R-ADMIT); a refusal is the command's notice. */
 const queued = (rules: AccountRules, w: Work, command: OnAccount): Work => {
@@ -105,11 +125,26 @@ const proposalOrder = (w: Work): readonly EntityId[] => {
   return [...w.touched, ...rest];
 };
 
-const proposing = (rules: AccountRules, w: Work, peer: EntityId): Work => {
+/** An Account that waits for its view of J to move proposes nothing until the view is above the one it waited at. */
+const paced = (w: Work, view: JView, peer: EntityId, account: AccountReplica): boolean => {
+  const since = w.state.waiting.get(peer);
+  return since !== undefined && account.attempt > 0 && view <= since;
+};
+
+const proposing = (rules: AccountRules, view: JView, w: Work, peer: EntityId): Work => {
   const account = w.state.accounts.get(peer);
-  if (account === undefined) return w;
+  if (account === undefined || paced(w, view, peer, account)) return w;
   const proposed = propose(rules, account);
   return sending(withReplica(w, peer, proposed.replica), peer, proposed.sent);
+};
+
+/** What still waits is what is still paced; the rest of the rows say nothing any more. */
+const stillWaiting = (w: Work, view: JView): Work => {
+  const kept = [...w.state.waiting].filter(([peer]) => {
+    const account = w.state.accounts.get(peer);
+    return account !== undefined && paced(w, view, peer, account);
+  });
+  return { ...w, state: { ...w.state, waiting: new Map(kept) } };
 };
 
 /** Every tx an Account refused is told to the Entity (R-NOTICE), and the Account forgets it. */
@@ -132,10 +167,11 @@ const commandsOf = (inputs: readonly EntityInput[]): readonly Command[] =>
 /** The frame: arrivals, then hooks, then commands, then proposals, then the refusals the Accounts hold are told. */
 export const entityFrame = (judge: Judge, state: EntityState, inputs: readonly EntityInput[]): Frame => {
   const rules = accountRules(judge);
-  const arrived = arrivalsOf(inputs).reduce((w, a) => arrive(rules, w, a), start(state));
+  const arrived = arrivalsOf(inputs).reduce((w, a) => arrive(rules, judge.view, w, a), start(state));
   const afterHooks = hooksOf(inputs).reduce(hooked, arrived);
   const afterCommands = commandsOf(inputs).reduce((w, c) => commanded(rules, w, c), afterHooks);
-  const proposed = proposalOrder(afterCommands).reduce((w, peer) => proposing(rules, w, peer), afterCommands);
-  const done = [...proposed.state.accounts.keys()].toSorted().reduce(told, proposed);
+  const propose = (w: Work, peer: EntityId): Work => proposing(rules, judge.view, w, peer);
+  const proposed = proposalOrder(afterCommands).reduce(propose, afterCommands);
+  const done = [...proposed.state.accounts.keys()].toSorted().reduce(told, stillWaiting(proposed, judge.view));
   return { state: done.state, outputs: done.outputs, notices: done.notices };
 };

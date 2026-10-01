@@ -1,0 +1,69 @@
+{
+ "id": "R-WATCH-CLOSED",
+ "statement": "The watcher reads a closed list of the Depository's events, checked against the deployed ABI: an event it does not know, a log of another address or a log of the wrong shape refuses the delivery and never reads as nothing.",
+ "source": "consolidation-plan.md D9 (no silent refusals); lessons.md (a check that lives only in a CLI looks gated but is not)",
+ "layers": {
+  "arrival": "n/a: the watcher is Host code that reads a node; the Arrival specs take J events as given",
+  "quint": "n/a: which kinds of event are read is R-WATCH-READS-ALL (QUESTIONS R7); a closed list that refuses an unknown event is the Host's, which the Quint model does not have",
+  "contract": "n/a: no contract code takes part; the watcher reads the deployed Depository's events",
+  "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
+  "ts": "hold"
+ },
+ "killers": [
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-WATCH-CLOSED a topic that is not lowercase bytes32 is a fault, not an event of Entities nobody hosts"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-WATCH-CLOSED a topic more than the event has is a fault, for each of the four events"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-WATCH-CLOSED data of the wrong length is a fault for a counter and a finalize, a word more or fewer"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-WATCH-CLOSED a dispute start shorter than its slots is a fault, as is half a word"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-WATCH-CLOSED an address is exactly twenty bytes"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-WATCH-CLOSED every event of the deployed Depository is read or named as ignored, and none is both"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-WATCH-CLOSED the topic 0 of each listed signature is the one the ABI computes"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-WATCH-CLOSED every log of the real lifecycle decodes: the four events are read, the rest are ignored"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-WATCH-CLOSED an event the Depository has never emitted is a fault, not a miss"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-WATCH-CLOSED a log of another address is a fault: the node is asked for the Depository's logs"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-WATCH-CLOSED an event the watcher does not know is a fault of the whole delivery and moves no cursor"
+  }
+ ]
+}
