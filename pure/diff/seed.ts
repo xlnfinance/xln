@@ -1,7 +1,7 @@
 // The one source of randomness for the differential tests: every PRNG seed goes through seedOf, so one
 // environment variable replays a different sample everywhere. SEEDX=0 (the default) replays the committed
 // sample exactly; any other value moves every stream at once:
-//   SEEDX=12345 bun test --timeout 600000 ./diff
+//   SEEDX=12345 bun test ./diff
 // Every describe that draws random input is named through seedTag, so a failure names the seed that reproduces it.
 
 const parseSeedx = (raw: string | undefined): number => {
