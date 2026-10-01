@@ -1,15 +1,25 @@
 {
  "id": "R-FRAME-EPOCH-WEDGE",
- "statement": "Two replicas that hold the same epoch with different stored nonces refuse each other's frames for good (R-FRAME-EPOCH, wrong_epoch), and the proposer parks its frame: the Account wedges, a loss of liveness and not of safety (no head splits and no tx is dropped), because a report of the same epoch is ignored and no Host input moves either view. The heal is the Runtime's dispute path, as for the signed-proof cap wedge (R-SIGNED-IS-LIVE): the Runtime that cannot get its peer to sign a frame closes the epoch on the chain, and both views then read the chain's own nonce.",
+ "statement": "Two replicas that hold the same epoch with different stored nonces refuse each other's frames for good (R-FRAME-EPOCH, wrong_epoch), and the proposer parks its frame: the Account wedges, a loss of liveness and not of safety (no head splits and no tx is dropped), because a report of the same epoch is ignored and no Host input moves either view. The heal is the Runtime's dispute path, as for the signed-proof cap wedge (R-SIGNED-IS-LIVE): the Runtime that cannot get its peer to sign a frame closes the epoch on the chain, and both views then read the chain's own nonce. The Arrival cell holds the wedge and its heal: with the nonce risen and no close left the Account can never finish (safety holds), and the Runtime's close of the epoch on the chain lets every tx commit, and the close itself moves only the chain (both replicas keep their pending frame, mempool, head and context until they hear it); the dispute's own steps are the dispute page's.",
  "source": "Review A of PR 135 (B3) and coordinator 10-01 18:25: fail on the side of liveness; the heal belongs with the Runtime dispute duties slice, like the cap wedge",
  "layers": {
-  "arrival": "owed: spec thread, with the R-FRAME-EPOCH page",
+  "arrival": "hold",
   "quint": "owed: spec thread, with the R-FRAME-EPOCH branch",
   "contract": "n/a: an off-chain Account rule; the chain only sees the dispute that heals it",
   "rig": "owed: test rig (a walk predicate: a parked frame is eventually committed or the epoch is closed on the chain)",
   "ts": "owed: Runtime dispute duties slice"
  },
  "killers": [
+  {
+   "kind": "bug",
+   "layer": "arrival",
+   "name": "epoch-no-heal"
+  },
+  {
+   "kind": "bug",
+   "layer": "arrival",
+   "name": "epoch-close-takes-frames-back"
+  },
   {
    "kind": "test",
    "layer": "ts",
