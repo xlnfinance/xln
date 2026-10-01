@@ -30,7 +30,12 @@ export type Row = Readonly<{
   height: bigint; stamp: Timestamp; input: Input; outputs: readonly Outbound[]; notices: readonly RuntimeNotice[];
 }>;
 
-/** What a Runtime is started with and keeps: the clock's parameters and its own view of the J chain. */
+/**
+ * What a Runtime is started with and keeps: the clock's parameters and its own view of the J chain. `signing` is ONE
+ * interim SigningContext for every Account of every Entity this Runtime hosts. R-FRAME-SIGNATURE-NAMES-ACCOUNT needs
+ * one per Account and per epoch (chain, depository, both entity ids, epoch, first nonce = stored + 2 from the chain);
+ * until the cut supplies them, two Accounts of one Entity sign frames under the same key and epoch.
+ */
 export type Setup = Readonly<{ clock: ClockParams; view: JView; signing: SigningContext }>;
 
 /**

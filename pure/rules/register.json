@@ -3554,7 +3554,7 @@
   },
   {
    "id": "R-FRAME-SIGNATURE-NAMES-ACCOUNT",
-   "statement": "The bytes a frame signature covers name the Account fully (chain id, Depository address, both entity ids in canonical order, the epoch) and the proof nonce: a frame signed for one Account is refused when replayed into another Account of the same signer, into another epoch, or at another nonce, because the verifier recovers another signer.",
+   "statement": "The bytes a frame signature covers name the Account fully (chain id, Depository address, both entity ids in canonical order, the epoch) and the proof nonce: a frame signed for one Account is refused when replayed into another Account of the same signer, into another epoch, or at another nonce, because the verifier recovers another signer. The ts cell is the Account layer only: Entity and Runtime still hand every Account of an Entity one interim SigningContext (Setup.signing, entityFrame), so until the cut supplies a per-Account, per-epoch context two Accounts of one Entity sign under the same key and epoch.",
    "source": "coordinator 10-01 06:25 (Review A of PR 93: a frame's hash did not name its Account)",
    "layers": {
     "arrival": "owed: spec thread (slots, floors and higher slot wins, from #97)",

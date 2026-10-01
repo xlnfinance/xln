@@ -130,7 +130,11 @@ const hooksOf = (inputs: readonly EntityInput[]): readonly Hook[] =>
 const commandsOf = (inputs: readonly EntityInput[]): readonly Command[] =>
   inputs.flatMap((i) => (i._tag === "peer_message" || i._tag === "resend_due" ? [] : [i]));
 
-/** The frame: arrivals, then hooks, then commands, then proposals, then the refusals the Accounts hold are told. */
+/**
+ * The frame: arrivals, then hooks, then commands, then proposals, then the refusals the Accounts hold are told.
+ * `signing` is one interim context for all of the Entity's Accounts; a per-Account, per-epoch one is owed by the
+ * Runtime (the cut), see Setup.signing and R-FRAME-SIGNATURE-NAMES-ACCOUNT.
+ */
 export const entityFrame = (
   judge: Judge, signing: SigningContext, state: EntityState, inputs: readonly EntityInput[],
 ): Frame => {
