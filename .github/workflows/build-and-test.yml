@@ -2,15 +2,17 @@ name: build-and-test
 
 on:
   push:
-    branches: [main, develop]
+    branches: [main, development]
   # Every pull request, whatever base it targets or files it touches: the One gate checks are required, so a PR that never
   # got them would sit blocked forever. rules/ci/ci-triggers.ts refuses a branches, paths or types filter here.
   pull_request:
   workflow_dispatch:
 
+# Pull requests cancel their own older run. A push to main or development is never cancelled (a full run always finishes): a newer push
+# waits as the one pending run, and replaces an older pending one. rules/ci/split/ci-split.ts pins this.
 concurrency:
-  group: build-and-test-${{ github.ref }}
-  cancel-in-progress: true
+  group: build-and-test-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   # The one gate: the same commands a contributor runs from pure/, in three parallel jobs. `one-gate` is the single
@@ -172,6 +174,7 @@ jobs:
   # `bun run test:seeds` runs these three seeds in turn (pure/package.json); one job per seed makes them parallel.
   gate-seeds:
     name: One gate (seed ${{ matrix.seed }})
+    if: ${{ github.event_name != 'pull_request' || github.base_ref != 'development' }}
     runs-on: ubuntu-latest
     timeout-minutes: 60
     strategy:
@@ -231,7 +234,8 @@ jobs:
         working-directory: pure
         run: SEEDS="${{ matrix.seed }}" bun run test:seeds
 
-  # The single result to require. It fails when any part of the gate failed, was cancelled or was skipped.
+  # The single result to require. It fails when any part of the gate failed, was cancelled or was skipped, except on a pull request into
+  # development, where the slow parts are skipped by design (their `if`) and only the two fast parts, which never skip, must pass.
   one-gate:
     name: One gate
     if: ${{ always() }}
@@ -240,18 +244,23 @@ jobs:
     steps:
       - name: Every part passed
         env:
+          FAST: ${{ github.event_name == 'pull_request' && github.base_ref == 'development' }}
           STATIC: ${{ needs.gate-static.result }}
           TESTS: ${{ needs.gate-tests.result }}
           SEEDS: ${{ needs.gate-seeds.result }}
           FORK: ${{ needs.contracts-fork.result }}
         run: |
-          echo "static=$STATIC tests=$TESTS seeds=$SEEDS contracts-fork=$FORK"
-          test "$STATIC" = success && test "$TESTS" = success && test "$SEEDS" = success && test "$FORK" = success
+          echo "fast-lane=$FAST static=$STATIC tests=$TESTS seeds=$SEEDS contracts-fork=$FORK"
+          test "$STATIC" = success
+          test "$TESTS" = success
+          test "$SEEDS" = success || { test "$FAST" = true && test "$SEEDS" = skipped; }
+          test "$FORK" = success || { test "$FAST" = true && test "$FORK" = skipped; }
 
   # og's inherited Hardhat suite is frozen at 566c850 and known red (122 pass, 79 fail). It is reported, never a gate:
   # no other job needs it, and continue-on-error keeps its red from failing the run that carries our own signals.
   contracts-test:
     name: Contracts (og, known red, informational)
+    if: ${{ github.event_name != 'pull_request' || github.base_ref != 'development' }}
     runs-on: ubuntu-latest
     continue-on-error: true
     steps:
@@ -297,6 +306,7 @@ jobs:
 
   contracts-fork:
     name: Contracts (fork) BrowserVM
+    if: ${{ github.event_name != 'pull_request' || github.base_ref != 'development' }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -362,6 +372,7 @@ jobs:
 
   build-xln:
     name: Runtime Checks
+    if: ${{ github.event_name != 'pull_request' || github.base_ref != 'development' }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -407,6 +418,7 @@ jobs:
 
   frontend-build:
     name: Frontend Build
+    if: ${{ github.event_name != 'pull_request' || github.base_ref != 'development' }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -449,6 +461,7 @@ jobs:
 
   e2e-tests:
     name: E2E Tests (og, informational)
+    if: ${{ github.event_name != 'pull_request' || github.base_ref != 'development' }}
     runs-on: ubuntu-latest
     timeout-minutes: 60
     # og's Playwright suite is og's: its first run in CI failed one test (e2e-radapter-remote-part-2 "runtime dropdown
