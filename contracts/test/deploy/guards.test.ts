@@ -1,0 +1,123 @@
+// What the Sepolia deploy prepares for and what it refuses, before a single transaction is sent. Nothing here needs a node: every refusal is
+// judged from the manifest, the RPC address and the compiled build alone.
+import { describe, expect, test } from "bun:test";
+import { spawnSync } from "node:child_process";
+import { readdirSync, readFileSync } from "node:fs";
+import path from "node:path";
+import { assertTarget, deploySet, resolveDeployerKey } from "../../deploy/deploy-set.ts";
+import { manifestProblems, parseManifest, type Manifest } from "../../deploy/manifest.ts";
+
+const deployDir = path.join(import.meta.dir, "..", "..", "deploy");
+const committed = JSON.parse(readFileSync(path.join(deployDir, "sepolia.manifest.json"), "utf8")) as Manifest;
+const ANVIL_DEV_KEY = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
+const LOOPBACK = "http://127.0.0.1:8545";
+const target = (patch: Partial<Manifest> = {}, over: { nodeChainId?: number; rpcUrl?: string; live?: boolean } = {}) =>
+  ({ manifest: { ...committed, ...patch }, nodeChainId: over.nodeChainId ?? committed.chainId, rpcUrl: over.rpcUrl ?? LOOPBACK, live: over.live ?? false });
+
+describe("the committed Sepolia manifest", () => {
+  test("is prepared: parameters only, no address, no key, an empty peer slot", () => {
+    expect(parseManifest(committed).ok).toBe(true);
+    expect(committed.status).toBe("prepared");
+    expect(committed.chainId).toBe(11155111);
+    expect(committed.contracts).toBeNull();
+    expect(committed.token.address).toBeNull();
+    expect(committed.deployer).toBeNull();
+    expect(committed.peers).toEqual([]);
+    expect(readFileSync(path.join(deployDir, "sepolia.manifest.json"), "utf8")).not.toMatch(/0x[0-9a-fA-F]{40}/);
+  });
+
+  test("agrees with the compiled build and the deploy gate (floors, HANKO_PRELUDE_GAS, total batch gas at most 5,437,937)", () => {
+    const build = assertTarget(target());
+    expect(build.floor).toBe(60);
+    expect(build.requiredTxGas).toBe(5_437_937);
+    expect(build.requiredTxGas).toBeLessThanOrEqual(5_437_937);
+    expect(committed.gas.hankoPreludeGas).toBe(4_900_000);
+    expect(committed.dispute.mainnetResponseFloorSeconds).toBe(21_600);
+  });
+
+  test("no deploy file holds a key (anvil's public dev key excepted)", () => {
+    for (const file of readdirSync(deployDir)) {
+      const text = readFileSync(path.join(deployDir, file), "utf8");
+      const keys = (text.match(/0x[0-9a-fA-F]{64}/g) ?? []).filter((hex) => hex.toLowerCase() !== ANVIL_DEV_KEY);
+      expect(keys, file).toEqual([]);
+    }
+  });
+});
+
+describe("assertTarget refuses before anything is sent", () => {
+  test("a node on another chain than the manifest's", () => {
+    expect(() => assertTarget(target({}, { nodeChainId: 31337 }))).toThrow("chain id 31337");
+  });
+
+  test("an RPC that is not this machine, unless --live", () => {
+    expect(() => assertTarget(target({}, { rpcUrl: "https://sepolia.example.org" }))).toThrow("--live");
+    expect(() => assertTarget(target({}, { rpcUrl: "https://sepolia.example.org", live: true }))).not.toThrow();
+  });
+
+  test("mainnet: the testnet floor is refused on a chain that is not a named testnet", () => {
+    expect(() => assertTarget(target({ chainId: 1, network: "ethereum-mainnet" }, { nodeChainId: 1, live: true }))).toThrow("mainnet floor of 21600s");
+  });
+
+  test("a floor that drifted from the build", () => {
+    expect(() => assertTarget(target({ dispute: { ...committed.dispute, responseFloorSeconds: 30 } }))).toThrow("compiled build");
+    expect(() => assertTarget(target({ dispute: { ...committed.dispute, mainnetResponseFloorSeconds: 60 } }))).toThrow("mainnet floor");
+  });
+
+  test("HANKO_PRELUDE_GAS or the batch gas total that drifted from the build, or above the manifest's ceiling", () => {
+    expect(() => assertTarget(target({ gas: { ...committed.gas, hankoPreludeGas: 4_800_000 } }))).toThrow("HANKO_PRELUDE_GAS");
+    expect(() => assertTarget(target({ gas: { ...committed.gas, requiredTxGas: 5_000_000 } }))).toThrow("a batch needs");
+    expect(() => assertTarget(target({ gas: { ...committed.gas, maxRequiredTxGas: 5_437_936 } }))).toThrow("ceiling");
+  });
+});
+
+describe("the deployer key", () => {
+  test("comes from DEPLOYER_PRIVATE_KEY, with or without 0x", () => {
+    const key = "11".repeat(32);
+    expect(resolveDeployerKey({ DEPLOYER_PRIVATE_KEY: key }, "https://sepolia.example.org")).toBe(`0x${key}`);
+    expect(resolveDeployerKey({ DEPLOYER_PRIVATE_KEY: `0x${key}` }, LOOPBACK)).toBe(`0x${key}`);
+  });
+
+  test("anvil's dev key signs on a loopback node only; anywhere else no key means no deploy", () => {
+    expect(resolveDeployerKey({}, LOOPBACK)).toBe(ANVIL_DEV_KEY);
+    expect(resolveDeployerKey({}, "http://localhost:8545")).toBe(ANVIL_DEV_KEY);
+    expect(() => resolveDeployerKey({}, "https://sepolia.example.org")).toThrow("DEPLOYER_PRIVATE_KEY");
+    expect(() => resolveDeployerKey({ DEPLOYER_PRIVATE_KEY: "  " }, "https://10.0.0.5:8545")).toThrow("DEPLOYER_PRIVATE_KEY");
+  });
+});
+
+describe("the manifest's shape", () => {
+  const deployedPatch = { status: "deployed" as const };
+  test("a prepared manifest holds no contracts; a deployed one must hold the whole set", () => {
+    expect(manifestProblems({ ...committed, contracts: {} })).toContain("a prepared manifest has no contracts");
+    const problems = manifestProblems({ ...committed, ...deployedPatch });
+    expect(problems).toContain("a deployed manifest names its deployer");
+    expect(problems.some((problem) => problem.startsWith("contracts.depository"))).toBe(true);
+  });
+
+  test("the static peer table slot (Q-T-4) takes { entityId, endpoint } rows and nothing else", () => {
+    const entityId = `0x${"ab".repeat(32)}`;
+    expect(manifestProblems({ ...committed, peers: [{ entityId, endpoint: "wss://hub.example.org/ws" }] })).toEqual([]);
+    expect(manifestProblems({ ...committed, peers: [{ entityId: "0x12", endpoint: "wss://hub.example.org/ws" }] })).not.toEqual([]);
+    expect(manifestProblems({ ...committed, peers: [{ entityId, endpoint: "" }] })).not.toEqual([]);
+    expect(manifestProblems({ ...committed, peers: "hub" })).not.toEqual([]);
+  });
+
+  test("malformed floors, gas, chain id and a token with nowhere to come from are refused", () => {
+    expect(manifestProblems({ ...committed, chainId: 0 })).not.toEqual([]);
+    expect(manifestProblems({ ...committed, dispute: { responseFloorSeconds: "60" } })).not.toEqual([]);
+    expect(manifestProblems({ ...committed, gas: {} })).not.toEqual([]);
+    expect(manifestProblems({ ...committed, token: { ...committed.token, deployFaucet: false } })).toContain("token has neither an address nor deployFaucet");
+  });
+});
+
+describe("the entry points", () => {
+  test("deploySet refuses a manifest that is already deployed", async () => {
+    await expect(deploySet({ rpcUrl: LOOPBACK, manifest: { ...committed, status: "deployed" } })).rejects.toThrow("already deployed");
+  });
+
+  test("the CLI refuses a dry run without --out before it touches the network (it cannot overwrite the prepared manifest)", () => {
+    const run = spawnSync("bun", [path.join(deployDir, "deploy-set.ts"), "--rpc", "http://127.0.0.1:1"], { encoding: "utf8" });
+    expect(run.status).not.toBe(0);
+    expect(run.stderr).toContain("--out");
+  });
+});
