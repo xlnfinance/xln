@@ -748,8 +748,8 @@ bug `signs-before-gate`: property "a finalize is signed only after its gate open
 first (Runtime rule)". Not checked: the estimator itself (a simulation on a stale head can still fail; that
 failure is the soft path above).
 CLOSED 10-01 (coordinator): the question whether "every failure is BatchFailed once the gas budget is given" covers hard batches is
-answered by the deployed contract and the page matches it: a dispute, reveal, ladder or deposit batch reverts whole on out-of-gas
-and keeps its nonce; only a money-only batch has the soft path (Q-J-14 (1)). Evidence: the contract tests under register row F16
+answered by the deployed contract and the page matches it: a dispute or deposit batch reverts whole on out-of-gas
+and keeps its nonce (the contract does the same for a reveal and a hash-ladder batch; the page has no such batch op); only a money-only batch has the soft path (Q-J-14 (1)). Evidence: the contract tests under register row F16
 (`test_gasSweep_erc20Deposit_depthTwo`, `test_F16_gasSweep_erc721Deposit_depthThree`, `F16 V revert-whole batches ignore the
 budget but keep the minimum`) and the Arrival bugs `gas-soft`, `starved-silent`, `hard-starved-event`, `starved-at-floor`.
 Source: coordinator 23:42.
@@ -832,10 +832,10 @@ spendable reserve (`spends-owed-reserve` is its bug).
 (1) Gas failure is split by batch kind. A money-only batch (payments, settlements, no deposit leg) takes the soft path: given
 less gas than `budget*64/63 + 30,000` it emits `BatchGasStarved`, the transaction succeeds, NO nonce is spent, the signed
 batch can be sent again. From the floor up any failure is `BatchFailed` and consumes the nonce. A batch that carries a
-dispute, reveal, hash-ladder or deposit op runs in processBatch's own frame: out of gas reverts the whole transaction, nothing
+dispute (start, counter, finalize) or deposit op runs in processBatch's own frame (reveal and hash-ladder batches: contract only): out of gas reverts the whole transaction, nothing
 is emitted, the nonce stays unspent. Rules `gas-nth` (level 0: one below the floor; level 1: the floor itself, which runs).
 Properties: "gas below the floor spends no nonce, whatever the batch carries", "a money-only batch starved of gas emits
-BatchGasStarved; a batch with a dispute, reveal, ladder or deposit op reverts whole and emits nothing" and "a batch given at
+BatchGasStarved; a batch with a dispute or deposit op reverts whole and emits nothing" and "a batch given at
 least the floor is never gas-starved". The Entity reads BatchGasStarved as a J fact: the batch did not run, so it stays sent
 and is resent at its own nonce. Planted bugs `gas-soft` (a gas revert takes the nonce), `starved-silent`,
 `hard-starved-event`, `starved-at-floor`. Bound `j/configs/gas-kinds.scm` (a deposit and a payment, two gas events;
@@ -861,7 +861,7 @@ listed token whose heads cannot be forgiven"; all restated from queue snapshots,
 `forgive-one-blocked.scm` (+ witness), `forgive-third-head.scm` (+ witness), `forgive-cap.scm`, `forgive-repeat.scm`,
 `forgive-past-head.scm`. The first version of this page (09-30) took claim ids and one queue; the contract differs in four places
 (token ids, both directions, revert only when nothing was forgiven, E10 and E2), and the coordinator ruled that the contract wins.
-Not modelled: gas amounts beyond the floor, the size of the debt queue beyond the bound, debts in more than one token.
+Not modelled: gas amounts beyond the floor, the size of the debt queue beyond the bound, debts in more than one token (so the per-token revert across two listed tokens, one forgiven and one blocked, is not modelled: with one debt-bearing token a revert on "nothing forgiven across the list" looks the same).
 Source: coordinator 09-30 16:12.
 
 **Q-R-1. When does an output leave (lessons R-X2 area, AGENTS.md).**

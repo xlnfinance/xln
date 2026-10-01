@@ -42,7 +42,7 @@
 ;;              lacked (open question 3) are gone.
 ;;
 ;; A FAILED PAYMENT BATCH TAKES ITS NONCE (coordinator R-J5, 20:29; refined 22:31) AND BATCHES ARE SPLIT (R-SPLIT).
-;; Two classes. HARD ops: dispute ops (finalize, counter, reveal, hash ladder) and DEPOSIT LEGS
+;; Two classes. HARD ops: dispute ops (start, counter, finalize) and DEPOSIT LEGS
 ;; (externalTokenToReserve). A batch carrying any hard op that fails reverts whole and takes NO nonce: the
 ;; deadline wait (H1) is the dispute case, and a deposit leg never soft-fails, so a relayer cannot burn
 ;; the Entity's nonce with a batch whose token pull it made fail. SOFT ops: payment, settlement, reserve.
@@ -107,7 +107,7 @@
 ;; GAS SPLIT BY BATCH KIND (coordinator, 09-30 16:12, pinned against the contracts in #54). A money-only batch (payments,
 ;; settlements, no deposit leg) takes the soft path: given less gas than `budget*64/63 + 30,000` it emits BatchGasStarved, the
 ;; transaction succeeds, NO nonce is spent, and the signed batch can be sent again. From that floor up any failure is BatchFailed
-;; and consumes the nonce. A batch that carries a dispute, reveal, hash-ladder or deposit op runs in processBatch's own frame:
+;; and consumes the nonce. A batch that carries a dispute (start, counter, finalize) or deposit op runs in processBatch's own frame (the contract does the same for a reveal and a hash-ladder op; the page has no such batch op):
 ;; out of gas reverts the whole transaction, nothing is emitted, the nonce stays unspent. Rules `gas-nth` with `signed-budget`
 ;; (bugs `starved-silent`, `hard-starved-event`, `starved-at-floor`).
 ;;
@@ -117,7 +117,7 @@
 ;; (`:cp-debts`): a head owed to the other side of this Account is deleted, a head owed to a third party is left. The
 ;; settlement reverts whole (E2: a soft failure, the settlement goes back to its Account) only when NOTHING was forgiven for a
 ;; listed token and some debt exists there. More than `forgive-cap` ids revert it (E10, 32 in the contract) and so does a token
-;; listed twice (E2). One token (`debt-token`) carries debts; a listed token without debts changes nothing. Bugs
+;; listed twice (E2). One token (`debt-token`) carries debts (the contract's per-token revert across two listed tokens is not modelled); a listed token without debts changes nothing. Bugs
 ;; `forgives-third-party`, `forgives-one-direction`, `forgives-past-head`, `forgive-blocked-lands`, `reverts-on-either-block`,
 ;; `forgive-uncapped`, `forgive-repeat-ok`.
 ;;
@@ -666,7 +666,7 @@
    (property "gas below the floor (budget*64/63 + 30,000) spends no nonce, whatever the batch carries (F16)" (w)
      (every (lambda (r) (or (not (:gas r)) (not (:took? r)))) (:failures w)))
    ;; restated from the kinds of op, not through `starved-event?` (a planted bug redefines that one)
-   (property "a money-only batch starved of gas emits BatchGasStarved; a batch with a dispute, reveal, ladder or deposit op reverts whole and emits nothing (F16)" (w)
+   (property "a money-only batch starved of gas emits BatchGasStarved; a batch with a dispute or deposit op reverts whole and emits nothing (F16)" (w)
      (every (lambda (r) (or (not (:gas r))
                             (equal? (:evented r) (not (some (lambda (op) (or (dispute-op? op) (leg? op))) (:ops r))))))
             (:failures w)))

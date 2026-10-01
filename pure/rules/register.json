@@ -1018,7 +1018,7 @@
   },
   {
    "id": "F16",
-   "statement": "Contract as built: the soft gas path exists only for money-only batches; dispute, reveal, ladder and deposit batches revert whole on out-of-gas and keep their nonce.",
+   "statement": "Contract as built: the soft gas path exists only for money-only batches; dispute, reveal, ladder and deposit batches revert whole on out-of-gas and keep their nonce. The Arrival J page models the dispute (start, counter, finalize) and deposit batches; reveal and ladder batches are held by the contract layer only.",
    "source": "contracts-decisions.md F16 (memory)",
    "layers": {
     "arrival": "hold",
@@ -1443,7 +1443,7 @@
   },
   {
    "id": "R2C-DEBT-FIRST",
-   "statement": "Every outflow of a debtor's reserve enforces its debt queue first, oldest first and at most 32 claims per call, and what is spendable is the reserve less all outstanding debt; a part-paid claim stays at the head. The calls that enforce are the permissionless enforceDebts, and inside a batch a reserve-to-external-token transfer, a reserve-to-reserve transfer, a reserve-to-collateral deposit, a settlement outflow and a dispute payout. The Arrival pages hold the reserve-to-collateral deposit (J page) and the dispute payout (dispute page); the other calls are the contract's and no layer here kills them yet.",
+   "statement": "Every outflow of a debtor's reserve enforces its debt queue first, oldest first and at most 32 claims per call, and what is spendable is the reserve less all outstanding debt; a part-paid claim stays at the head. The calls that enforce are the permissionless enforceDebts, and inside a batch a reserve-to-external-token transfer, a reserve-to-reserve transfer, a reserve-to-collateral deposit, a settlement outflow and a dispute payout. The Arrival pages hold the reserve-to-collateral deposit (J page: cap, oldest first, part-paid stays at the head) and the dispute payout (dispute page, one older-debt amount per side in both directions: enforcement before payment, the per-call cap, the peer paid all of the spendable reserve it can); the other calls are the contract's and no layer here kills them yet.",
    "source": "contracts-decisions.md (memory, #62); coordinator 10-01 07:20 (Depository._enforceDebts, _settleShortfall)",
    "layers": {
     "arrival": "hold",
@@ -1472,12 +1472,47 @@
      "kind": "mutant",
      "layer": "quint",
      "name": "r2c-skips-enforce"
+    },
+    {
+     "kind": "bug",
+     "layer": "arrival",
+     "name": "debts-lifo"
+    },
+    {
+     "kind": "bug",
+     "layer": "arrival",
+     "name": "debts-uncapped"
+    },
+    {
+     "kind": "bug",
+     "layer": "arrival",
+     "name": "partial-moves-back"
+    },
+    {
+     "kind": "bug",
+     "layer": "arrival",
+     "name": "dispute-enforcement-uncapped"
+    },
+    {
+     "kind": "bug",
+     "layer": "arrival",
+     "name": "shortfall-never-pays"
+    },
+    {
+     "kind": "bug",
+     "layer": "arrival",
+     "name": "shortfall-underpays"
+    },
+    {
+     "kind": "bug",
+     "layer": "arrival",
+     "name": "enforcement-left-only"
     }
    ]
   },
   {
    "id": "R-SETTLE-FORGIVE",
-   "statement": "A settlement lists token ids, at most 32 and none twice; for each it forgives the current head debt of each side toward the other when that debt is owed to the other side of the Account, and a head owed to a third party is never touched; the whole settlement fails (BatchFailed, nothing of it applies) only when nothing was forgiven for a listed token and a debt exists there. The Arrival page models one token with debts.",
+   "statement": "A settlement lists token ids, at most 32 and none twice; for each it forgives the current head debt of each side toward the other when that debt is owed to the other side of the Account, and a head owed to a third party is never touched; the whole settlement fails (BatchFailed, nothing of it applies) only when nothing was forgiven for a listed token and a debt exists there. The Arrival page models one token with debts, so the per-token revert across two listed tokens (one forgiven, one blocked) is not modelled.",
    "source": "coordinator 09-30 16:12 and 10-01 07:20; Depository._forgiveDebtsBetweenEntities, Account MAX_SETTLEMENT_FORGIVENESS_IDS",
    "layers": {
     "arrival": "hold",
@@ -1521,6 +1556,31 @@
      "kind": "bug",
      "layer": "arrival",
      "name": "forgive-repeat-ok"
+    },
+    {
+     "kind": "bug",
+     "layer": "arrival",
+     "name": "forgive-ignores-token"
+    },
+    {
+     "kind": "bug",
+     "layer": "arrival",
+     "name": "forgive-nothing-reverts"
+    },
+    {
+     "kind": "bug",
+     "layer": "arrival",
+     "name": "forgive-cap-off-by-one"
+    },
+    {
+     "kind": "bug",
+     "layer": "arrival",
+     "name": "forgives-cp-third"
+    },
+    {
+     "kind": "bug",
+     "layer": "arrival",
+     "name": "repeat-adjacent-only"
     }
    ]
   },

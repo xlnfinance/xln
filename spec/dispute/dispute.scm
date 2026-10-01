@@ -24,8 +24,8 @@
 ;;            are at least the started ones too (E9).
 ;;   payout   Δ = ondelta + offdelta (+ the clause, if its secret was public by the deadline).
 ;;            Δ <= 0: Right takes the collateral and Left owes -Δ. 0 < Δ < c: Δ / c-Δ.
-;;            Δ >= c: Left takes c and Right owes Δ-c. A shortfall is paid from the debtor's
-;;            reserve first; the rest becomes debt. The epoch advances: every older proof dies (N1);
+;;            Δ >= c: Left takes c and Right owes Δ-c. A shortfall first enforces the debtor's
+;;            older debts, then is paid from what is left of its reserve; the rest becomes debt. The epoch advances: every older proof dies (N1);
 ;;            each side holds the implicit proof of the new epoch (see start).
 ;;   deposit  R2C during a dispute is not blocked (H4, accepted): it changes the payout, and only
 ;;            in favour of the beneficiary of the deposit. A deposit does NOT advance the epoch: every signed
@@ -440,7 +440,7 @@
          (w1 (-> w0 (add-reserve debtor (- pay)) (add-reserve (peer debtor) pay)
                     (update-in (list :debt debtor) (lambda (d) (+ d (- amount pay)))))))
     (update-in w1 (list :shortfalls)
-               (lambda (l) (append l (list (dict :reserve (get-in w (list :reserve debtor)) :older (older-of w debtor)
+               (lambda (l) (append l (list (dict :amount amount :reserve (get-in w (list :reserve debtor)) :older (older-of w debtor)
                                                  :got (- (get-in w1 (list :reserve (peer debtor))) (get-in w (list :reserve (peer debtor))))
                                                  :reserve-after (get-in w1 (list :reserve debtor)) :older-after (older-of w1 debtor)
                                                  :enforced (- (:third-paid w1) (:third-paid w)))))))))
@@ -617,6 +617,10 @@
      (every (lambda (s) (<= (:got s) (max 0 (- (:reserve s) (:older s))))) (:shortfalls w)))
    (property "a shortfall enforces the debtor's older debts first: afterwards they are paid, its reserve is empty, or the call's cap was reached (R2C-DEBT-FIRST)" (w)
      (every (lambda (s) (or (= (:older-after s) 0) (= (:reserve-after s) 0) (>= (:enforced s) older-per-call))) (:shortfalls w)))
+   (property "a shortfall pays the peer all of the debtor's spendable reserve it can: the smaller of the amount and the reserve less its older debts (R2C-DEBT-FIRST)" (w)
+     (every (lambda (s) (= (:got s) (min (:amount s) (max 0 (- (:reserve s) (:older s)))))) (:shortfalls w)))
+   (property "one enforcement call pays at most the call's cap of older debt (R2C-DEBT-FIRST)" (w)
+     (every (lambda (s) (<= (:enforced s) older-per-call)) (:shortfalls w)))
    (property "money is conserved: reserves + collateral never change" (w)
      (= (total-funds w) (+ collateral0 reserve-left0 reserve-right0)))
    (property "credit holds: what a side owes never exceeds the credit extended to it" (w)
