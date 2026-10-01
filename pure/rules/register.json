@@ -748,7 +748,7 @@
   },
   {
    "id": "H3",
-   "statement": "A retired board keeps 7 days of dispute evidence, clamped one way only: what the retired side would pay from reserves is removed, what it is owed is paid as signed.",
+   "statement": "A retired board keeps 7 days of dispute evidence, clamped one way only: what the retired side would pay from reserves is removed, what it is owed is paid as signed. The Arrival cell holds the one-way clamp only (spec/dispute/dispute.scm, bugs h3-no-clamp and h3-symmetric); the 7-day evidence window is on no spec page.",
    "source": "contracts-decisions.md H3",
    "layers": {
     "arrival": "hold",
@@ -1145,7 +1145,7 @@
   },
   {
    "id": "R-SPLIT",
-   "statement": "Dispute, reveal, hash-ladder and deposit ops never share a batch with payment, settlement or reserve ops.",
+   "statement": "Dispute, reveal, hash-ladder and deposit ops never share a batch with payment, settlement or reserve ops. The Arrival cell holds the J page's dispute, reveal and deposit ops against the soft ops (spec/j/batch.scm, bug mixed-batch); hash-ladder ops are not an op kind on any page.",
    "source": "contracts-decisions.md J5 (spec rule)",
    "layers": {
     "arrival": "hold",
@@ -2650,7 +2650,7 @@
   },
   {
    "id": "R-ONE-LOCK-PER-HASH",
-   "statement": "One clause is open per hashlock in an Account: a second lock on a hashlock that is already open is refused with lock_exists (naming the slot that holds it), whichever slot or side it names; the slot id stays the address of a clause, and a hashlock opens again once its clause is resolved, cancelled or expired. Multi-path payments are unaffected: each path runs over a different Account.",
+   "statement": "One clause is open per hashlock in an Account: a second lock on a hashlock that is already open is refused with lock_exists (naming the slot that holds it), whichever slot or side it names; the slot id stays the address of a clause, and a hashlock opens again once its clause is resolved, cancelled or expired. Multi-path payments are unaffected: each path runs over a different Account. The Arrival cell holds only that at most one clause is open per hashlock and a second lock is refused (spec/money/ledger.scm, bug duplicate-hashlock); that the refusal names the open slot and that a hashlock opens again are owed on the Arrival page.",
    "source": "coordinator 09-30 22:42 (A2 cross-check of Quint account_core.qnt against og xln.ts lockId == hashlock)",
    "layers": {
     "arrival": "hold",
