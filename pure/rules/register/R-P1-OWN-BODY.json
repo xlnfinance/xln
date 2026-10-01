@@ -1,0 +1,20 @@
+{
+ "id": "R-P1-OWN-BODY",
+ "statement": "P1 judges the rewrite's own proof: it recomputes the ProofBody from the rewrite's committed Account state and compares its hash with the one the chain recorded for the dispute, so a fault in the rewrite's proof body is seen without og.",
+ "source": "Review A of PR 69, F2 (a proof body offdelta +1 planted in xln.ts stays green under P1 today: P1 reads the chain's payout, fed by og's bytes, and only the lane's hash comparison with og sees the fault)",
+ "layers": {
+  "arrival": "n/a: a rig oracle rule; it judges the rewrite and does not constrain the protocol",
+  "quint": "n/a: a rig oracle rule; it judges the rewrite and does not constrain the protocol",
+  "contract": "n/a: a rig oracle rule; it judges the rewrite and does not constrain the protocol",
+  "rig": "owed: the oracle switch (the change that takes the rig's oracle from og to the spec properties)",
+  "ts": "n/a: a rig oracle rule; it judges the rewrite and does not constrain the protocol"
+ },
+ "killers": [
+  {
+   "kind": "test",
+   "layer": "rig",
+   "name": "to be named: a rewrite proof body that differs from the committed state is red in P1 with the lane blinded",
+   "owed": "the oracle switch (the change that takes the rig's oracle from og to the spec properties)"
+  }
+ ]
+}

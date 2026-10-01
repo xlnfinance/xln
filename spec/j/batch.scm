@@ -42,7 +42,7 @@
 ;;              lacked (open question 3) are gone.
 ;;
 ;; A FAILED PAYMENT BATCH TAKES ITS NONCE (coordinator R-J5, 20:29; refined 22:31) AND BATCHES ARE SPLIT (R-SPLIT).
-;; Two classes. HARD ops: dispute ops (finalize, counter, reveal, hash ladder) and DEPOSIT LEGS
+;; Two classes. HARD ops: dispute ops (start, counter, finalize) and DEPOSIT LEGS
 ;; (externalTokenToReserve). A batch carrying any hard op that fails reverts whole and takes NO nonce: the
 ;; deadline wait (H1) is the dispute case, and a deposit leg never soft-fails, so a relayer cannot burn
 ;; the Entity's nonce with a batch whose token pull it made fail. SOFT ops: payment, settlement, reserve.
@@ -107,15 +107,19 @@
 ;; GAS SPLIT BY BATCH KIND (coordinator, 09-30 16:12, pinned against the contracts in #54). A money-only batch (payments,
 ;; settlements, no deposit leg) takes the soft path: given less gas than `budget*64/63 + 30,000` it emits BatchGasStarved, the
 ;; transaction succeeds, NO nonce is spent, and the signed batch can be sent again. From that floor up any failure is BatchFailed
-;; and consumes the nonce. A batch that carries a dispute, reveal, hash-ladder or deposit op runs in processBatch's own frame:
+;; and consumes the nonce. A batch that carries a dispute (start, counter, finalize) or deposit op runs in processBatch's own frame (the contract does the same for a reveal and a hash-ladder op; the page has no such batch op):
 ;; out of gas reverts the whole transaction, nothing is emitted, the nonce stays unspent. Rules `gas-nth` with `signed-budget`
 ;; (bugs `starved-silent`, `hard-starved-event`, `starved-at-floor`).
 ;;
-;; SETTLEMENT DEBT FORGIVENESS (coordinator, 09-30 16:12): a settlement (`stl-a`) may carry a list of claim ids to forgive
-;; (`forgive`). It deletes only the HEAD claim of the debt queue, and only if its creditor is the settling counterparty (:cp),
-;; at most `forgive-cap` ids (32 in the contract), and a third party's claim at the head reverts the whole settlement: nothing
-;; of it applies (a soft failure, the settlement goes back to its Account). Bugs `forgives-third-party`, `forgives-past-head`,
-;; `forgiveness-skips-third-party`, `forgive-uncapped`.
+;; SETTLEMENT DEBT FORGIVENESS (coordinator, 09-30 16:12; read against Depository._forgiveDebtsBetweenEntities, 10-01). A
+;; settlement (`stl-a`) lists TOKEN ids (`forgive`). For each listed token the contract looks at the current HEAD debt of each
+;; side toward the other, the entity's debt to the settling counterparty (`:debts`) and the counterparty's debt to the entity
+;; (`:cp-debts`): a head owed to the other side of this Account is deleted, a head owed to a third party is left. The
+;; settlement reverts whole (E2: a soft failure, the settlement goes back to its Account) only when NOTHING was forgiven for a
+;; listed token and some debt exists there. More than `forgive-cap` ids revert it (E10, 32 in the contract) and so does a token
+;; listed twice (E2). One token (`debt-token`) carries debts (the contract's per-token revert across two listed tokens is not modelled); a listed token without debts changes nothing. Bugs
+;; `forgives-third-party`, `forgives-one-direction`, `forgives-past-head`, `forgive-blocked-lands`, `reverts-on-either-block`,
+;; `forgive-uncapped`, `forgive-repeat-ok`.
 ;;
 ;; Faults: the chain may fail a batch that has no dispute op for a reason outside the batch (a reserve spent
 ;; elsewhere, a token pull refused), `faults` times, and drop a submitted batch, `drops` times. The
@@ -144,7 +148,7 @@
 (define/overridable enforce-cap (s/number) 32)
 ;; the gas the signer budgeted; the chain's floor for a money-only batch is budget*64/63 + 30,000 (126 keeps it a whole number)
 (define/overridable signed-budget (s/number) 126)
-;; claim ids a settlement forgives, and the most it takes (32 in the contract)
+;; token ids a settlement forgives, and the most it lists (32 in the contract)
 (define/overridable forgive (s/array (s/number)) (list))
 (define/overridable forgive-cap (s/number) 32)
 (define/overridable a-deadline (s/number) 1)
@@ -180,7 +184,7 @@
         :secret #f :finalized (list) :epoch 0 :moves 0 :returned (list) :gas gas-starves :starts (list)
         :signed-max 0 :signed (list) :abandoned (list)
         :paused #f :pauses 0 :seed 3 :debts (list) :debt0 0 :enforcements (list) :paid 0 :after-r2c (list) :skipped-unfit (list)
-        :settled (list) :forgiven (list) :forgiven-total 0
+        :settled (list) :forgiven (list) :forgiven-total 0 :cp-debts (list) :cp-debt0 0 :cp-forgiven-total 0
         :unfunded (list) :paused-signed (list)))
 
 ;; ---- the chain
@@ -240,34 +244,55 @@
               (loop (cdr todo) (- reserve pay) (+ n 1) cleared
                     (append updated (list (dict :id (:id d) :amount (- (:amount d) pay))))))))))
 
-;; ---- settlement debt forgiveness (coordinator, 09-30 16:12). The plan walks the listed ids from the head of the queue:
-;; a listed id that is not the head stops the walk (only the head claim is ever deleted); a head whose creditor is not the
-;; settling counterparty (:cp) makes the whole settlement revert; more ids than `forgive-cap` revert it too. Bugs
-;; `forgives-third-party`, `forgives-past-head`, `forgiveness-skips-third-party`, `forgive-uncapped`.
+;; ---- settlement debt forgiveness (see the header). The plan says, for the listed tokens, whether the settlement lands and which
+;; head claims go: the entity's (`:entity`, owed to the counterparty) and the counterparty's (`:cp`, owed to the entity).
+(define debt-token 1)
+(define (head-creditor queue) (if (pair? queue) (:creditor (car queue)) #f))
 (define (forgive-ids) (vector->list forgive))
-(define (forgive-walk queue ids)
-  (let loop ((ids ids) (queue queue) (removed (list)))
-    (cond ((or (null? ids) (null? queue) (not (= (car ids) (:id (car queue))))) (dict :ok? #t :removed removed))
-          ((not (equal? (:creditor (car queue)) :cp)) (dict :ok? #f :removed (list)))
-          (else (loop (cdr ids) (cdr queue) (append removed (list (car ids))))))))
+(define (repeated? ids) (not (= (length ids) (length (delete-duplicates ids)))))
+;; a head whose creditor is the other side of this Account can be forgiven (bug `forgives-third-party`: any head; bug
+;; `forgives-one-direction`: never the counterparty's own debt)
+(define (forgivable? queue creditor) (equal? (head-creditor queue) creditor))
+(define (forgivable-entity? w) (forgivable? (:debts w) :cp))
+(define (forgivable-cp? w) (forgivable? (:cp-debts w) :entity))
+(define (no-debts? w) (and (null? (:debts w)) (null? (:cp-debts w))))
+;; the settlement lands unless a listed token has a debt and nothing there can be forgiven (bug `forgive-blocked-lands`: it
+;; lands anyway; bug `reverts-on-either-block`: it reverts when either head is owed to a third party)
+(define (forgive-lands? w fe fc) (or fe fc (no-debts? w)))
+(define (forgive-over-cap? ids) (> (length ids) forgive-cap))
 (define (forgive-plan w)
-  (if (> (length (forgive-ids)) forgive-cap)
-      (dict :ok? #f :removed (list))
-      (forgive-walk (:debts w) (forgive-ids))))
+  (let ((ids (forgive-ids)))
+    (cond ((forgive-over-cap? ids) (dict :ok? #f :entity #f :cp #f))
+          ((repeated? ids) (dict :ok? #f :entity #f :cp #f))
+          ((not (member debt-token ids)) (dict :ok? #t :entity #f :cp #f))
+          (else (let ((fe (forgivable-entity? w)) (fc (forgivable-cp? w)))
+                  (dict :ok? (forgive-lands? w fe fc) :entity fe :cp fc))))))
 (define (forgiveness-ok? w) (:ok? (forgive-plan w)))
 (define (settle-ok? w op) (and (sig-ok? w op) (forgiveness-ok? w)))
-;; the settlement takes the planned claims out of the queue, recording each as it goes, and how many it took
+;; the claims a settlement deletes from one queue: its head only (bug `forgives-past-head`: every claim owed to the creditor)
+(define (forgiven-claims queue creditor)
+  (if (forgivable? queue creditor) (list (car queue)) (list)))
+(define (without queue claims)
+  (filter (lambda (d) (not (member (:id d) (map (lambda (c) (:id c)) claims)))) queue))
+(define (claims-total claims) (reduce (lambda (d acc) (+ acc (:amount d))) 0 claims))
+(define (claim-ids queue) (map (lambda (d) (list (:id d) (:creditor d))) queue))
+;; the settlement takes the planned head claims out, recording each and the queues before and after
 (define (apply-forgiveness w)
-  (let loop ((ids (:removed (forgive-plan w))) (acc w))
-    (if (null? ids)
-        (update-in acc (list :settled) (lambda (l) (append l (list (dict :ids (forgive-ids) :count (length (:removed (forgive-plan w)))
-                                                                         :queue (map (lambda (d) (list (:id d) (:creditor d))) (:debts w)))))))
-        (let ((d (find (lambda (x) (= (:id x) (car ids))) (:debts acc))))
-          (loop (cdr ids)
-                (-> acc (update-in (list :forgiven) (lambda (l) (append l (list (dict :id (car ids) :creditor (:creditor d)
-                                                                                     :head? (equal? (:id (car (:debts acc))) (car ids)))))))
-                        (update-in (list :forgiven-total) (lambda (t) (+ t (:amount d))))
-                        (assoc-in (list :debts) (filter (lambda (x) (not (= (:id x) (car ids)))) (:debts acc)))))))))
+  (let* ((plan (forgive-plan w))
+         (ge (if (:entity plan) (forgiven-claims (:debts w) :cp) (list)))
+         (gc (if (:cp plan) (forgiven-claims (:cp-debts w) :entity) (list)))
+         (w1 (-> w (assoc-in (list :debts) (without (:debts w) ge))
+                   (assoc-in (list :cp-debts) (without (:cp-debts w) gc))
+                   (update-in (list :forgiven-total) (lambda (t) (+ t (claims-total ge))))
+                   (update-in (list :cp-forgiven-total) (lambda (t) (+ t (claims-total gc))))
+                   (update-in (list :forgiven)
+                              (lambda (l) (append (append l (map (lambda (c) (dict :side :entity :id (:id c) :creditor (:creditor c))) ge))
+                                                  (map (lambda (c) (dict :side :cp :id (:id c) :creditor (:creditor c))) gc)))))))
+    (update-in w1 (list :settled)
+               (lambda (l) (append l (list (dict :ids (forgive-ids)
+                                                 :before-e (claim-ids (:debts w)) :before-c (claim-ids (:cp-debts w))
+                                                 :after-e (map (lambda (d) (:id d)) (:debts w1))
+                                                 :after-c (map (lambda (d) (:id d)) (:cp-debts w1)))))))))
 
 ;; as many internal calls as it takes: until the queue is empty or a call pays nothing (the reserve is gone)
 (define (enforce-all w)
@@ -361,6 +386,8 @@
          (hard (or (and gas? (gas-hard? w b)) (fail-hard? w (:ops b) bad)))
          (evented (and gas? (starved-event? w b)))
          (rec (dict :ops (:ops b) :now (:now w) :nonce (:nonce b) :took? (not hard) :bad bad :secret (:secret w) :gas gas?
+                    :sigbad (filter (lambda (op) (not (sig-ok? w op))) bad) :ids (forgive-ids)
+                    :ehead (head-creditor (:debts w)) :chead (head-creditor (:cp-debts w))
                     :evented (if evented #t #f)
                     :stale-only? (and (not fault?) (some (lambda (op) (stale-op? w op)) (:ops b))
                                       (batch-ok? w (filter (lambda (op) (not (stale-op? w op))) (:ops b)))))))
@@ -599,11 +626,19 @@
 (define (position x lst)
   (let loop ((rest lst) (i 0))
     (cond ((null? rest) -1) ((equal? (car rest) x) i) (else (loop (cdr rest) (+ i 1))))))
-(define (third-party-reached? queue ids)
-  (let loop ((ids ids) (q queue))
-    (cond ((or (null? ids) (null? q) (not (= (car ids) (car (car q))))) #f)
-          ((not (equal? (cadr (car q)) :cp)) #t)
-          (else (loop (cdr ids) (cdr q))))))
+(define (removed-claims before after) (filter (lambda (x) (not (member (car x) after))) before))
+;; one queue lost at most its head, and only to the creditor the settlement stands for
+(define (removed-ok? before after creditor)
+  (let ((gone (removed-claims before after)))
+    (or (null? gone)
+        (and (= (length gone) 1) (equal? (car (car gone)) (car (car before))) (equal? (cadr (car gone)) creditor)))))
+;; a revert on forgiveness is justified by the list (over the cap, a repeat) or by a listed token whose debts cannot be forgiven
+(define (revert-justified? r)
+  (let ((ids (:ids r)))
+    (or (> (length ids) forgive-cap)
+        (not (= (length ids) (length (delete-duplicates ids))))
+        (and (member debt-token ids) (or (:ehead r) (:chead r))
+             (not (equal? (:ehead r) :cp)) (not (equal? (:chead r) :entity))))))
 (define invariants
   (list
    (property "the chain is atomic: every applied op came from a batch that succeeded" (w)
@@ -628,14 +663,14 @@
    (property "a finalize is signed only after its gate opened when the Entity simulates first (Runtime rule, 01:16)" (w)
      (or (= simulate-first 0)
          (every (lambda (s) (or (not (member "fin-a" (list-ref s 2))) (list-ref s 4) (> (list-ref s 3) a-deadline))) (:signed w))))
-   (property "gas below the floor (budget*64/63 + 30,000) spends no nonce, whatever the batch carries (contracts #54)" (w)
+   (property "gas below the floor (budget*64/63 + 30,000) spends no nonce, whatever the batch carries (F16)" (w)
      (every (lambda (r) (or (not (:gas r)) (not (:took? r)))) (:failures w)))
    ;; restated from the kinds of op, not through `starved-event?` (a planted bug redefines that one)
-   (property "a money-only batch starved of gas emits BatchGasStarved; a batch with a dispute, reveal, ladder or deposit op reverts whole and emits nothing (contracts #54)" (w)
+   (property "a money-only batch starved of gas emits BatchGasStarved; a batch with a dispute or deposit op reverts whole and emits nothing (F16)" (w)
      (every (lambda (r) (or (not (:gas r))
                             (equal? (:evented r) (not (some (lambda (op) (or (dispute-op? op) (leg? op))) (:ops r))))))
             (:failures w)))
-   (property "a batch given at least the floor is never gas-starved: it runs, and a failure is BatchFailed with the nonce spent (contracts #54)" (w)
+   (property "a batch given at least the floor is never gas-starved: it runs, and a failure is BatchFailed with the nonce spent (F16)" (w)
      (every (lambda (r) (or (not (:gas r)) (< (:gas r) (+ (quotient (* signed-budget 64) 63) 30000)))) (:failures w)))
    (property "a deposit leg travels alone in its batch (J6)" (w)
      (every (lambda (s) (or (not (some (lambda (op) (string-prefix? "x" op)) (list-ref s 2))) (= (length (list-ref s 2)) 1)))
@@ -684,13 +719,30 @@
      (every (lambda (r) (or (:empty? r) (= (:net r) 0))) (:after-r2c w)))
    (property "a debt leaves the queue only when paid or forgiven: paid, forgiven and outstanding equal the debts the entity started with" (w)
      (= (+ (:paid w) (:forgiven-total w) (total-debt w)) (:debt0 w)))
-   (property "a settlement deletes only the head claim of the queue, and only when its creditor is the settling counterparty (contracts #54)" (w)
-     (every (lambda (r) (and (:head? r) (equal? (:creditor r) :cp))) (:forgiven w)))
-   ;; restated from the queue snapshot, not through `forgive-walk` (a planted bug redefines that one)
-   (property "a settlement whose forgiveness reaches a third party's claim at the head never lands: it reverts whole (contracts #54)" (w)
-     (every (lambda (r) (not (third-party-reached? (:queue r) (:ids r)))) (:settled w)))
-   (property "a settlement that lands lists at most the cap of claim ids (32 in the contract) (contracts #54)" (w)
-     (every (lambda (r) (<= (length (:ids r)) forgive-cap)) (:settled w)))
+   (property "a debt leaves the counterparty's queue only when forgiven: forgiven and outstanding equal what it owed the entity at the start" (w)
+     (= (+ (:cp-forgiven-total w) (reduce (lambda (d acc) (+ acc (:amount d))) 0 (:cp-debts w))) (:cp-debt0 w)))
+   ;; the next three are restated from the queue snapshots, not through `forgive-plan` (a planted bug redefines that one)
+   (property "a settlement deletes only the head claim of a listed token's queue, and only when it is owed to the other side of the Account (R-SETTLE-FORGIVE)" (w)
+     (every (lambda (r)
+              (and (removed-ok? (:before-e r) (:after-e r) :cp) (removed-ok? (:before-c r) (:after-c r) :entity)
+                   (or (member debt-token (:ids r))
+                       (and (null? (removed-claims (:before-e r) (:after-e r))) (null? (removed-claims (:before-c r) (:after-c r)))))))
+            (:settled w)))
+   (property "a settlement that lists a token forgives each side's head claim that is owed to the other side of the Account (R-SETTLE-FORGIVE)" (w)
+     (every (lambda (r)
+              (or (not (member debt-token (:ids r)))
+                  (and (or (not (and (pair? (:before-e r)) (equal? (cadr (car (:before-e r))) :cp))) (pair? (removed-claims (:before-e r) (:after-e r))))
+                       (or (not (and (pair? (:before-c r)) (equal? (cadr (car (:before-c r))) :entity))) (pair? (removed-claims (:before-c r) (:after-c r)))))))
+            (:settled w)))
+   (property "a settlement that lists a token with debts and forgives nothing never lands: it reverts whole (R-SETTLE-FORGIVE)" (w)
+     (every (lambda (r)
+              (or (not (member debt-token (:ids r))) (and (null? (:before-e r)) (null? (:before-c r)))
+                  (pair? (removed-claims (:before-e r) (:after-e r))) (pair? (removed-claims (:before-c r) (:after-c r)))))
+            (:settled w)))
+   (property "a settlement that lands lists at most the cap of token ids and none twice (E10, E2; R-SETTLE-FORGIVE)" (w)
+     (every (lambda (r) (and (<= (length (:ids r)) forgive-cap) (= (length (:ids r)) (length (delete-duplicates (:ids r)))))) (:settled w)))
+   (property "a settlement reverts on forgiveness only for a list over the cap, a repeated token, or a listed token whose heads cannot be forgiven (R-SETTLE-FORGIVE)" (w)
+     (every (lambda (r) (or (null? (:bad r)) (pair? (:sigbad r)) (revert-justified? r))) (:failures w)))
    (property "the reserve is conserved: seed and deposits equal reserve, collateral and debts paid" (w)
      (= (+ (:seed w) (* leg-amount (length (filter leg? (:applied w)))))
         (+ (:reserve w) (:collateral w) (:paid w))))

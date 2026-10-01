@@ -6,7 +6,7 @@
   "arrival": "owed: spec thread (an Arrival page for a deposit during a dispute)",
   "quint": "owed: spec thread (a Quint model for a deposit during a dispute)",
   "contract": "hold",
-  "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
+  "rig": "owed: test rig (a walk predicate that deposits into a disputed pair and asserts the chain accepted it and only the depositor's side rose)",
   "ts": "n/a: an on-chain acceptance rule; xln.ts reads the resulting reserve event (R-J1)"
  },
  "killers": [
