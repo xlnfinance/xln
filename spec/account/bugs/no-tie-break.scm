@@ -1,6 +1,4 @@
-;; Planted bug: both sides yield to the peer (no tie-break).
-(define (on-frame side r f)
-  (if (not (equal? (:prev f) (:head r)))
-      (dict :replica r :sent (list (fault "frame does not extend head")))
-      (dict :replica (commit (if (:pending r) (roll-back r) r) (frame-hash f))
-            :sent    (list (ack-msg (frame-hash f))))))
+;; Planted bug: both sides yield to the peer's frame (no tie-break), so a collision commits two different frames at the same height.
+;; Since the slots (R-PROOF-NONCE-ABOVE-SIGNED) the first yield already commits below the proof the yielder signed, so that is the property it is
+;; caught by first; the fork follows one step later.
+(define (keeps-own? side r f) #f)

@@ -1,0 +1,85 @@
+{
+  "manifestVersion": 1,
+  "stack": "xln-contracts-v1",
+  "status": "deployed",
+  "network": "ethereum-sepolia",
+  "chainId": 11155111,
+  "token": {
+    "symbol": "USDT",
+    "decimals": 6,
+    "address": "0x76376A20608C50a47b15fFd36140E7F2D498B180",
+    "deployFaucet": true,
+    "tokenId": 1
+  },
+  "dispute": {
+    "responseFloorSeconds": 60,
+    "mainnetResponseFloorSeconds": 21600
+  },
+  "gas": {
+    "hankoPreludeGas": 4900000,
+    "requiredTxGas": 5437937,
+    "maxRequiredTxGas": 5437937
+  },
+  "deployer": "0x7Ce583457fb0bDa973b7d1d5309E7A987317B991",
+  "foundationRecipient": "0x7Ce583457fb0bDa973b7d1d5309E7A987317B991",
+  "contracts": {
+    "account": {
+      "address": "0xED34A147a0a480B0B006A4266E8bA0d6e995000C",
+      "deploymentBlock": 11818823,
+      "transactionHash": "0x9deb5d57800ea16d30f0ed057c31a8ecaf0c3b029c3342fdeefd5f93e1f15f61",
+      "gasUsed": "5343476",
+      "codeHash": "0x4133d0699b5269a2a6dee26caab109d70b43db5d9d60e4d361f6f55593de36bc"
+    },
+    "hankoVerifier": {
+      "address": "0xe73a6d6A170d914aA41B8281CE073938DFdA7Dd4",
+      "deploymentBlock": 11818825,
+      "transactionHash": "0x5ce757b47670856c8138c97e167976f597e182d8618e0c15abdeea467a5ac612",
+      "gasUsed": "1188251",
+      "codeHash": "0x02413ad800e58e168089146dd8b10a7e36316bfbe35a201f1e6f02c12a2ed717"
+    },
+    "entityProvider": {
+      "address": "0x61E59E2f7c379F6FEb0Bb0a0Dc3D90Cf0FAd2Bf8",
+      "deploymentBlock": 11818826,
+      "transactionHash": "0x5f77ac2b5aedab3e79d96c8c81f1aff7d39bee217b4d83a79440d08e2d74fa22",
+      "gasUsed": "4493296",
+      "codeHash": "0xe942a67798ab2043e8d73414b607054fecf195e93681e4864f6ff082cb175709"
+    },
+    "deltaTransformer": {
+      "address": "0xBfCe324F62C5EC59CB5ab2CaBB92883B5FF23936",
+      "deploymentBlock": 11818827,
+      "transactionHash": "0xe1929666cbbe6fa25084e0f98ca48eaebf5f304dbbea3fb755a15d43b433c048",
+      "gasUsed": "1546165",
+      "codeHash": "0x2676d603f4d479e453ad40bd0acd05726424b1f8e56e059cf9198e5bed147e54"
+    },
+    "depositoryBounds": {
+      "address": "0xEf0c3f3e113B4f3E2a79035eD7FDB86DaCAF3067",
+      "deploymentBlock": 11818829,
+      "transactionHash": "0x858550209cb01a9d36e0afcd6134a0620953c1b2d83cd1d8985e7dc0d15a4f75",
+      "gasUsed": "1050197",
+      "codeHash": "0xc4270655476ebf296485c4142b95f6dc84b31590726108110e1444b0a8c3e8c6"
+    },
+    "hashLadderRegistry": {
+      "address": "0xB5957150C570fd80b18484BC1dB1a601db5aE3d4",
+      "deploymentBlock": 11818830,
+      "transactionHash": "0xe12579148f6499b220f0636d1f6f93fc57c7c1e25d37c30aba6f00608e5428f6",
+      "gasUsed": "427039",
+      "codeHash": "0xf7c732e0bba226a22da8f21a8836c8a390b14084f098f9291a5b14a5c8e2907c"
+    },
+    "nftCustody": {
+      "address": "0x994b9Cd24bC6CeB0d3a7Ed6302da7d353D7a07D5",
+      "deploymentBlock": 11818832,
+      "transactionHash": "0xeeaf26e290b73291f1d49352550e39d801f5baf4483a99526963d49ad0f7e0a8",
+      "gasUsed": "497526",
+      "codeHash": "0x2453918c1073eca8f0a6149e185e3645082686fdd5823fbefb0ec4900fbb62dd"
+    },
+    "depository": {
+      "address": "0x7cE4A385D7C7d1D7964e31D95a4Ef734e5a4a14e",
+      "deploymentBlock": 11818833,
+      "transactionHash": "0xf95f39d73f000dbabb89cdf1c82f719a40c2f2853b5ce023fe0ae59f7ab9c257",
+      "gasUsed": "5104381",
+      "codeHash": "0x36b7c755d13dd2ce15d3a5f14e93bfac5ed59040ea27dec7322154ee76367f87"
+    }
+  },
+  "deploymentGasTotal": "19650331",
+  "peers": []
+}

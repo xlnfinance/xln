@@ -1,0 +1,44 @@
+{
+ "id": "R-ADMIT",
+ "statement": "A local tx is checked at enqueue against the planning state plus everything queued, and again at propose against the committed head. A bound on the txs of one frame and on the tokens of an Account is not here: it belongs to the transport queue (Q-T-9) and the proof body (A4).",
+ "source": "contracts-decisions.md, Account-layer decisions 09-30 D-AC-6",
+ "layers": {
+  "arrival": "owed: spec thread, next Arrival page (id not in a name yet)",
+  "quint": "owed: spec thread, new Quint branch (id not in a name yet)",
+  "contract": "n/a: an off-chain Account rule; the chain sees only signed proofs",
+  "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
+  "ts": "hold"
+ },
+ "killers": [
+  {
+   "kind": "bug",
+   "layer": "arrival",
+   "name": "skip-revalidation"
+  },
+  {
+   "kind": "mutant",
+   "layer": "quint",
+   "name": "queue-guard-reads-committed-only"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-ADMIT a tx is checked at the door against the committed state plus everything queued"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-ADMIT a tx behind a pending frame is checked against the state that frame makes"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-ADMIT no committed tx is invalid against the history before it, in every state of the page"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-NOTICE R-ADMIT a refused tx has a conflicting predecessor in the submitted txs, in every state of the page"
+  }
+ ]
+}

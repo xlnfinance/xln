@@ -1,6 +1,6 @@
 # account-tx: og per-transaction Account transitions vs pure/xln.ts
 
-Tests: `pure/diff/account-tx.test.ts`. Run from `pure/` with `bun test diff/account-tx.test.ts`: 33 pass, 0 fail, about 10.4k expects.
+Tests: `pure/diff/account/account-tx.test.ts`. Run from `pure/` with `bun test diff/account/account-tx.test.ts`: 33 pass, 0 fail, about 10.4k expects.
 
 Every test is `MATCH:`. It runs og's own handler and the rewrite `applyAccountBody` on the same input and asserts they agree. Most tests are lockstep tests. They seed a persistent og replica from the rewrite's committed view (`ogHarness`) and drive og through the real transition overlay:
 

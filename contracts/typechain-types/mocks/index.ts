@@ -3,6 +3,8 @@
 /* eslint-disable */
 import type * as noReturnErc20MockSol from "./NoReturnERC20Mock.sol";
 export type { noReturnErc20MockSol };
+import type * as fault from "./fault";
+export type { fault };
 import type * as token from "./token";
 export type { token };
 export type { DepositoryDebtHarness } from "./DepositoryDebtHarness";

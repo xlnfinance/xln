@@ -1,0 +1,75 @@
+{
+ "id": "R-J3",
+ "statement": "A batch op checks the contract's batch limits when it is queued, and a full batch is a refusal, not a throw. The TS builder has no hash-ladder registration op kind yet: their limit of 32 and their place in the total of 50 are not checked there (J builder backlog).",
+ "source": "lessons.md section 4",
+ "layers": {
+  "arrival": "owed: spec thread, next Arrival page (id not in a name yet)",
+  "quint": "owed: spec thread, new Quint branch (id not in a name yet)",
+  "contract": "n/a: the check is made off-chain when the op is queued; the limits themselves are the contract's, held by J5 (the signed gas budget) and R-OOG (a cap bounds gas), tested in stress/BatchBounds.t.sol",
+  "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
+  "ts": "hold"
+ },
+ "killers": [
+  {
+   "kind": "test",
+   "layer": "arrival",
+   "name": "to be named",
+   "owed": "thread 'Account spec comparison'"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-J3 the limits are the ones DepositoryBounds and the Depository carry"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-J3 a full draft is a refusal, never a throw"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-J3 a full draft refuses with a notice and keeps what it had"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-J3 the encoded size of a group is judged when an op is queued"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-J3 the counts are judged per group, and the draft by the most one batch carries"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-J3 a group too large for one batch is refused when it is queued, so the draft can always be sealed"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-J3 a draft that could be sealed once can still be sealed after a send regroups it"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-J3 payments waiting for funding never refuse a dispute step"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-J3 every group of the draft is judged, not the first or the last"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-J3 the size limit is inclusive: exactly 256 KiB is one batch, 32 bytes more is not"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-J3 fitPrefix: the longest front of a group that is one batch"
+  }
+ ]
+}

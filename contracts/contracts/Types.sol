@@ -39,6 +39,7 @@ interface IDepositoryDelegateErrorAbi {
   error E6(); // DisputeInProgress
   error E9(); // HashMismatch
   error ResponseWindowTooShort(uint256 minSeconds); // a proof body's response window is below MIN_RESPONSE_SECONDS
+  error NotTheImplicitBaseline(); // a dispute start with no signature that is not the canonical implicit proof (R-IMPLICIT-BASELINE)
   error TransformerGasBudgetUnavailable();
   error TransformerExecutionFailed();
 }
@@ -81,6 +82,13 @@ struct AccountInfo {
   // and cooperative updates commit to it, so a proof signed for an earlier baseline can never be applied to a later one.
   // R2C does not advance it: it needs no counterparty signature, so anyone could otherwise void every signed proof.
   uint256 ondeltaEpoch;
+  // H3: which side's board was RETIRED on the proof that would settle the active dispute (0 none, 1 Left, 2 Right).
+  // Evidence signed by a retired board is still valid (seven-day grace, see EntityProvider), but it settles clamped in
+  // the one direction where that side would pay from reserves: retired Left cannot be made to owe beyond the collateral,
+  // retired Right likewise. The other direction is never clamped: a rotation must not forgive what the rotating entity
+  // is owed. The signer of start, counter and final evidence is the counterentity of the entity that submits it.
+  // Set by start, counter registration and a signed finalization; read and cleared by Depository at finalization.
+  uint8 disputeRetiredSide;
 }
 
 struct AccountCollateral {
@@ -163,6 +171,9 @@ struct ProofBody {
 struct InitialDisputeProof {
   bytes32 counterentity;
   uint nonce;              // Unified nonce at time of signing
+  // S1: the Account's ondelta epoch the proof was signed at. The signature binds it (C1); carrying it lets the Account judge
+  // staleness BEFORE the signature, as it judges the nonce: another epoch is a skip, the same epoch makes a bad signature a real error.
+  uint ondeltaEpoch;
   bool proposerIsLeft;     // Signed branch author; LEFT wins equal-nonce collisions
   bytes32 proofbodyHash;
   // Reveal the exact signed body at start. A hash-only start can otherwise
@@ -337,6 +348,10 @@ struct CollateralToReserve {
 }
 
 struct Batch {
+  // J5: the gas the batch's ops may use, chosen by the signer from its own simulation at the head plus a margin (Runtime rule).
+  // processBatch gives the ops exactly this much (and requires the transaction to carry it), so the outcome does not depend on the
+  // relayer's gas limit. Ignored by batches that revert whole (no self-call), but bounded for every batch (DepositoryBounds).
+  uint64 gasBudget;
   ReserveToReserve[] reserveToReserve;
   ReserveToCollateral[] reserveToCollateral;
   CollateralToReserve[] collateralToReserve;  // C2R shortcut (expands to Settlement)

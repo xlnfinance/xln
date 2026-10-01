@@ -2,8 +2,8 @@
 // and hub config). Owner: thread "Independent review of main".
 import { drawn, arises, pending, type Moves, type Step, type WorldMoves } from "./areas.ts";
 import { PARTIES, activePairs, pick, amount, one, tx, sealed, queued, batchRoom, reserveAdmits } from "./world-view.ts";
-import { HUB, SPOKES, TOKEN, type World } from "../world.ts";
-import { SIGNERS } from "../lane.ts";
+import { HUB, SPOKES, TOKEN, type World } from "../rig/world.ts";
+import { SIGNERS } from "../rig/lane.ts";
 
 /** Entity x can queue a reserve op: it holds reserve, its batch is not sealed, and the batch has room. */
 const canQueue = (w: World, x: number): boolean => w.reserveOf(x) > 0n && !sealed(w, x) && batchRoom(w, x);

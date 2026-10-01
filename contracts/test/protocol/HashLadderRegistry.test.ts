@@ -14,18 +14,28 @@ import {
   deployEntityProvider,
   deriveHardhatPrivateKey,
   emptyBatch,
-  encodeBatch,
+  encodeForkBatch,
+  FORK_PROOF_BODY_ABI,
   singleSignerLazyEntityId,
+  submitBatch,
+  toForkProofBody,
 } from '../helpers/hanko.ts';
 
 const abi = ethers.AbiCoder.defaultAbiCoder();
 
 const DISPUTE_PROOF = 1;
+/** DisputeOpSkipped codes of a hash-ladder registration (HashLadderRegistry.sol). */
+const REVEAL_OP = 3n;
+const REVEAL_SKIP_WINDOW = 9n;
+const REVEAL_SKIP_CONFLICT = 10n;
 const MAX_FILL_RATIO = 65535n;
 const TEST_WATCH_SEED = ethers.keccak256(ethers.toUtf8Bytes('xln:test-watch-seed'));
 
-const PROOF_BODY_ABI =
-  'tuple(bytes32 watchSeed,uint32 leftResponseSeconds,uint32 rightResponseSeconds,int256[] offdeltas,uint256[] tokenIds,tuple(address transformerAddress,bytes encodedBatch,tuple(uint256 deltaIndex,uint256 rightAllowance,uint256 leftAllowance)[] allowances)[] transformers)';
+// H2: a response window below 60 s is rejected (ResponseWindowTooShort(60)); each side's window is the floor here.
+const WINDOW_SECONDS = 60;
+
+// The transformer's pull amount is a SignedAmount {negative, magnitude}, not an int256.
+const signedAmount = (value: bigint) => ({ negative: value < 0n, magnitude: value < 0n ? -value : value });
 
 type TestActor = {
   signer: HardhatEthersSigner;
@@ -45,17 +55,25 @@ function orderedActors(a: TestActor, b: TestActor): [TestActor, TestActor] {
   return BigInt(a.entityId) < BigInt(b.entityId) ? [a, b] : [b, a];
 }
 
+type SignedBatch = { entityId: string; encodedBatch: string; hankoData: string; nonce: bigint; batchHash: string };
+
+/** processBatch(entityId, ...) for a batch signed by signDepositoryBatch (C2: the acting entity is the first argument). */
+function send(depository: Depository, signer: HardhatEthersSigner, signed: SignedBatch) {
+  return submitBatch(depository, signer, signed.entityId, signed);
+}
+
 async function signDepositoryBatch(
   depository: Depository,
   entityId: string,
   privateKey: string,
   batch: Record<string, unknown>,
   nonce?: bigint,
-): Promise<{ encodedBatch: string; hankoData: string; nonce: bigint; batchHash: string }> {
-  const encodedBatch = encodeBatch(batch);
+): Promise<SignedBatch> {
+  const encodedBatch = encodeForkBatch(batch);
   const nextNonce = nonce ?? (await depository.entityNonces(entityId)) + 1n;
-  const batchHash = await computeDepositoryBatchHash(depository, encodedBatch, nextNonce);
+  const batchHash = await computeDepositoryBatchHash(depository, entityId, encodedBatch, nextNonce);
   return {
+    entityId,
     encodedBatch,
     hankoData: buildSingleSignerHanko(entityId, batchHash, privateKey),
     nonce: nextNonce,
@@ -64,14 +82,14 @@ async function signDepositoryBatch(
 }
 
 function proofBodyHash(proofbody: Record<string, unknown>): string {
-  return ethers.keccak256(abi.encode([PROOF_BODY_ABI], [proofbody]));
+  return ethers.keccak256(abi.encode([FORK_PROOF_BODY_ABI], [toForkProofBody(proofbody)]));
 }
 
 function proofBody(offdeltas: bigint[], tokenIds: bigint[], transformers: unknown[] = []): Record<string, unknown> {
   return {
     watchSeed: TEST_WATCH_SEED,
-    leftResponseSeconds: 50,
-    rightResponseSeconds: 50,
+    leftResponseSeconds: WINDOW_SECONDS,
+    rightResponseSeconds: WINDOW_SECONDS,
     offdeltas,
     tokenIds,
     transformers,
@@ -112,6 +130,7 @@ function buildHashLadderProof(label: string, fillRatio: number) {
 const ladderHashOf = (proof: { fullHash: string; partialRoot: string }): string =>
   ethers.keccak256(ethers.solidityPacked(['bytes32', 'bytes32'], [proof.fullHash, proof.partialRoot]));
 
+// C1: the payload binds the Account's ondeltaEpoch, read at the moment of signing.
 async function disputeProofHashFor(
   depository: Depository,
   acctKey: string,
@@ -122,8 +141,12 @@ async function disputeProofHashFor(
   const chainId = (await ethers.provider.getNetwork()).chainId;
   return ethers.keccak256(
     abi.encode(
-      ['uint8', 'uint256', 'address', 'bytes', 'uint256', 'bool', 'bytes32', 'bytes32'],
-      [DISPUTE_PROOF, chainId, await depository.getAddress(), acctKey, nonce, proposerIsLeft, bodyHash, TEST_WATCH_SEED],
+      ['uint8', 'uint256', 'address', 'bytes', 'uint256', 'uint256', 'bool', 'bytes32', 'bytes32'],
+      [
+        DISPUTE_PROOF, chainId, await depository.getAddress(), acctKey,
+        await depository.ondeltaEpoch(ethers.dataSlice(acctKey, 0, 32), ethers.dataSlice(acctKey, 32, 64)),
+        nonce, proposerIsLeft, bodyHash, TEST_WATCH_SEED,
+      ],
     ),
   );
 }
@@ -191,7 +214,7 @@ describe('HashLadderRegistry (cross-j pull settlement authority)', function () {
       ],
     });
     const signed = await signDepositoryBatch(depository, left.entityId, left.privateKey, fund);
-    await depository.connect(left.signer).processBatch(signed.encodedBatch, signed.hankoData, signed.nonce);
+    await send(depository, left.signer, signed);
 
     const pullProof = buildHashLadderProof(options.label, options.fillRatio);
     const pullAmount = options.pullAmount ?? -MAX_FILL_RATIO;
@@ -201,7 +224,7 @@ describe('HashLadderRegistry (cross-j pull settlement authority)', function () {
       pull: [
         {
           deltaIndex: 0,
-          amount: pullAmount,
+          amount: signedAmount(pullAmount),
           claimedRatio: 0,
           fullHash: pullProof.fullHash,
           partialRoot: pullProof.partialRoot,
@@ -251,6 +274,7 @@ describe('HashLadderRegistry (cross-j pull settlement authority)', function () {
           sig: counterpartySig,
           starterInitialArguments: '0x',
           starterCounterArguments: '0x',
+        ondeltaEpoch: 0n,
         starterCounterProofCommitment: '0x0000000000000000000000000000000000000000000000000000000000000000',
         },
       ],
@@ -276,7 +300,7 @@ describe('HashLadderRegistry (cross-j pull settlement authority)', function () {
       starter.privateKey,
       startBatch,
     );
-    await depository.connect(starter.signer).processBatch(start.encodedBatch, start.hankoData, start.nonce);
+    await send(depository, starter.signer, start);
     return {
       depository,
       transformer,
@@ -325,7 +349,7 @@ describe('HashLadderRegistry (cross-j pull settlement authority)', function () {
       ],
     });
     const signed = await signDepositoryBatch(dispute.depository, signer.entityId, signer.privateKey, revealBatch);
-    return dispute.depository.connect(signer.signer).processBatch(signed.encodedBatch, signed.hankoData, signed.nonce);
+    return send(dispute.depository, signer.signer, signed);
   }
 
   async function finalizeDispute(dispute: PullDispute, by: TestActor) {
@@ -344,7 +368,7 @@ describe('HashLadderRegistry (cross-j pull settlement authority)', function () {
     };
     const finalBatch = emptyBatch({ disputeFinalizations: [finalization] });
     const signed = await signDepositoryBatch(dispute.depository, by.entityId, by.privateKey, finalBatch);
-    return dispute.depository.connect(by.signer).processBatch(signed.encodedBatch, signed.hankoData, signed.nonce);
+    return send(dispute.depository, by.signer, signed);
   }
 
   async function minePastTimeout(depository: Depository, acctKey: string) {
@@ -392,7 +416,7 @@ describe('HashLadderRegistry (cross-j pull settlement authority)', function () {
     }] });
     const signed = await signDepositoryBatch(dispute.depository, dispute.right.entityId, dispute.right.privateKey, zeroBatch);
     await expect(
-      dispute.depository.connect(dispute.right.signer).processBatch(signed.encodedBatch, signed.hankoData, signed.nonce),
+      send(dispute.depository, dispute.right.signer, signed),
     ).to.be.revertedWithCustomError(dispute.depository, 'E1');
   });
 
@@ -411,11 +435,12 @@ describe('HashLadderRegistry (cross-j pull settlement authority)', function () {
     expect(await dispute.depository._reserves(dispute.right.entityId, 1n)).to.equal(0n);
   });
 
-  it('rejects a first Source write for a declared pair without an active dispute', async function () {
+  it('skips a first Source write for a declared pair without an active dispute (S1: op 3, reason 9), nothing recorded', async function () {
     const dispute = await openPullDispute({ label: 'registry-account-scope', fillRatio: 0x0123 });
     const falseCounterparty = ethers.zeroPadValue('0xbeef', 32);
     await expect(registerReveal(dispute, dispute.right, { counterpartyEntity: falseCounterparty }))
-      .to.be.revertedWithCustomError(dispute.depository, 'E12');
+      .to.emit(dispute.depository, 'DisputeOpSkipped')
+      .withArgs(dispute.right.entityId, falseCounterparty, REVEAL_OP, REVEAL_SKIP_WINDOW, BigInt(dispute.fillRatio));
 
     const ladder = ladderHashOf(dispute.pullProof);
     expect((await dispute.depository.getHashLadderReveal(
@@ -430,7 +455,7 @@ describe('HashLadderRegistry (cross-j pull settlement authority)', function () {
     expect(await dispute.depository._reserves(dispute.right.entityId, 1n)).to.equal(0n);
   });
 
-  it('single-shot: a higher ratio overwrite on the same ladder reverts', async function () {
+  it('single-shot: a higher ratio overwrite on the same ladder is skipped and changes nothing', async function () {
     const dispute = await openPullDispute({ label: 'registry-overwrite', fillRatio: 0x0123 });
     await registerReveal(dispute, dispute.right, { fillRatio: 0x0123 });
     const ladder = ladderHashOf(dispute.pullProof);
@@ -442,10 +467,12 @@ describe('HashLadderRegistry (cross-j pull settlement authority)', function () {
     );
     await time.increase(5);
     const higherProof = buildHashLadderProof('registry-overwrite', 0x0234);
+    // S1: a conflicting retry can never replace the immutable record, so inside a batch it is skipped (op 3, reason 10)
     await expect(registerReveal(dispute, dispute.right, {
       fillRatio: 0x0234,
       reveals: higherProof.reveals,
-    })).to.be.revertedWithCustomError(dispute.depository, 'E12');
+    })).to.emit(dispute.depository, 'DisputeOpSkipped')
+      .withArgs(dispute.right.entityId, dispute.left.entityId, REVEAL_OP, REVEAL_SKIP_CONFLICT, 0x0234n);
     const [ratio, raisedAt] = await dispute.depository.getHashLadderReveal(
       dispute.right.entityId,
       dispute.left.entityId,
@@ -454,6 +481,28 @@ describe('HashLadderRegistry (cross-j pull settlement authority)', function () {
     );
     expect(ratio).to.equal(firstRatio);
     expect(raisedAt).to.equal(firstAt);
+  });
+
+  it('target: a lower ratio replay is skipped and changes nothing (S1: op 3, reason 10), not a revert', async function () {
+    const dispute = await openPullDispute({ label: 'registry-target-lower', fillRatio: 0x0123, targetRole: true });
+    await registerReveal(dispute, dispute.right, {});
+    const ladder = ladderHashOf(dispute.pullProof);
+    const [firstRatio, firstAt] = await dispute.depository.getHashLadderReveal(
+      dispute.right.entityId, dispute.left.entityId, ladder, true,
+    );
+    await time.increase(5);
+    const lowerProof = buildHashLadderProof('registry-target-lower', 0x0100);
+    // a lower witness can never lift the record; inside a batch a revert would pin the entity's nonce (F1), so it is skipped
+    await expect(registerReveal(dispute, dispute.right, {
+      fillRatio: 0x0100,
+      reveals: lowerProof.reveals,
+    })).to.emit(dispute.depository, 'DisputeOpSkipped')
+      .withArgs(dispute.right.entityId, dispute.left.entityId, REVEAL_OP, REVEAL_SKIP_CONFLICT, 0x0100n);
+    const [ratio, at] = await dispute.depository.getHashLadderReveal(
+      dispute.right.entityId, dispute.left.entityId, ladder, true,
+    );
+    expect(ratio).to.equal(firstRatio);
+    expect(at).to.equal(firstAt);
   });
 
   it('target: a higher ratio replaces even after timeout and the late timestamp settles zero', async function () {
@@ -502,7 +551,7 @@ describe('HashLadderRegistry (cross-j pull settlement authority)', function () {
     );
     expect(ratio).to.equal(0x0123);
     expect(secondAt).to.equal(firstAt);
-    await time.increase(51);
+    await time.increase(WINDOW_SECONDS + 1);
     await finalizeDispute(dispute, dispute.right);
     expect(await dispute.depository._reserves(dispute.right.entityId, 1n)).to.equal(0x0123n);
   });
@@ -549,13 +598,14 @@ describe('HashLadderRegistry (cross-j pull settlement authority)', function () {
     expect(await target.depository._reserves(target.left.entityId, 1n)).to.equal(100_000n);
   });
 
-  it('rejects a late first Source registration without consuming its immutable slot', async function () {
+  it('skips a late first Source registration without consuming its immutable slot', async function () {
     const dispute = await openPullDispute({ label: 'registry-late', fillRatio: 0x0123 });
-    // Right is the Pull beneficiary, so its signed 50-second side window is the
+    // Right is the Pull beneficiary, so its signed 60-second side window is the
     // Source deadline. A late first write must not poison the single-shot slot.
-    await time.increase(51);
+    await time.increase(WINDOW_SECONDS + 1);
     await expect(registerReveal(dispute, dispute.right, {}))
-      .to.be.revertedWithCustomError(dispute.depository, 'E12');
+      .to.emit(dispute.depository, 'DisputeOpSkipped')
+      .withArgs(dispute.right.entityId, dispute.left.entityId, REVEAL_OP, REVEAL_SKIP_WINDOW, BigInt(dispute.fillRatio));
     const [ratio, revealedAt] = await dispute.depository.getHashLadderReveal(
       dispute.right.entityId,
       dispute.left.entityId,
@@ -564,7 +614,7 @@ describe('HashLadderRegistry (cross-j pull settlement authority)', function () {
     );
     expect(ratio).to.equal(0n);
     expect(revealedAt).to.equal(0n);
-    await time.increase(51);
+    await time.increase(WINDOW_SECONDS + 1);
     await finalizeDispute(dispute, dispute.right);
     expect(await dispute.depository._reserves(dispute.right.entityId, 1n)).to.equal(0n);
   });
@@ -572,7 +622,7 @@ describe('HashLadderRegistry (cross-j pull settlement authority)', function () {
   it('accepts a first Source registration at the inclusive owner deadline', async function () {
     const dispute = await openPullDispute({ label: 'registry-source-deadline', fillRatio: 0x0123 });
     const account = await dispute.depository._accounts(dispute.acctKey);
-    await time.setNextBlockTimestamp(Number(account.disputeStartTimestamp) + 50);
+    await time.setNextBlockTimestamp(Number(account.disputeStartTimestamp) + WINDOW_SECONDS);
     await expect(registerReveal(dispute, dispute.right, {}))
       .to.emit(dispute.depository, 'HashLadderRevealRegistered');
     const [, revealedAt] = await dispute.depository.getHashLadderReveal(
@@ -581,7 +631,7 @@ describe('HashLadderRegistry (cross-j pull settlement authority)', function () {
       ladderHashOf(dispute.pullProof),
       false,
     );
-    expect(revealedAt).to.equal(account.disputeStartTimestamp + 50n);
+    expect(revealedAt).to.equal(account.disputeStartTimestamp + BigInt(WINDOW_SECONDS));
   });
 
   it('accepts Source registration in the exact batch and block that starts its dispute', async function () {
@@ -680,7 +730,7 @@ describe('HashLadderRegistry (cross-j pull settlement authority)', function () {
     const counterBatch = emptyBatch({ counterDisputes: [counterLock] });
     const counterSigned = await signDepositoryBatch(dispute.depository, dispute.left.entityId, dispute.left.privateKey, counterBatch);
     await expect(
-      dispute.depository.connect(dispute.left.signer).processBatch(counterSigned.encodedBatch, counterSigned.hankoData, counterSigned.nonce),
+      send(dispute.depository, dispute.left.signer, counterSigned),
     ).to.emit(dispute.depository, 'CounterDisputeRegistered');
 
     // The lock selects N+1 but cannot execute Pull settlement before T.
@@ -689,16 +739,16 @@ describe('HashLadderRegistry (cross-j pull settlement authority)', function () {
       dispute.depository, dispute.left.entityId, dispute.left.privateKey, earlySelectedBatch,
     );
     await expect(
-      dispute.depository.connect(dispute.left.signer).processBatch(
-        earlySelected.encodedBatch, earlySelected.hankoData, earlySelected.nonce,
-      ),
+      send(dispute.depository, dispute.left.signer, earlySelected),
     ).to.be.revertedWithCustomError(dispute.depository, 'E2');
 
     // After full T the selected counter-proof settles; the starter can no
     // longer race the obsolete initial body.
     await minePastTimeout(dispute.depository, dispute.acctKey);
+    // S1: the obsolete initial-state finalize can never win now, so it is skipped (op 2, reason 8), not reverted
     await expect(finalizeDispute(dispute, dispute.right))
-      .to.be.revertedWithCustomError(dispute.depository, 'E2');
+      .to.emit(dispute.depository, 'DisputeOpSkipped')
+      .withArgs(dispute.right.entityId, dispute.left.entityId, 2n, 8n, dispute.disputeNonce);
     // Registration already authenticated the selected branch. If the
     // non-starter disappears, the starter must still be able to execute that
     // exact stored identity at T without possessing another inner signature.
@@ -714,11 +764,7 @@ describe('HashLadderRegistry (cross-j pull settlement authority)', function () {
       dispute.right.privateKey,
       retryBatch,
     );
-    await dispute.depository.connect(dispute.right.signer).processBatch(
-      starterRetrySigned.encodedBatch,
-      starterRetrySigned.hankoData,
-      starterRetrySigned.nonce,
-    );
+    await send(dispute.depository, dispute.right.signer, starterRetrySigned);
     expect(await dispute.depository._reserves(dispute.right.entityId, 1n)).to.equal(BigInt(dispute.fillRatio));
   });
 
@@ -750,8 +796,7 @@ describe('HashLadderRegistry (cross-j pull settlement authority)', function () {
         dispute.left.privateKey,
         emptyBatch({ counterDisputes: [counterProof] }),
       );
-      return dispute.depository.connect(dispute.left.signer)
-        .processBatch(signed.encodedBatch, signed.hankoData, signed.nonce);
+      return send(dispute.depository, dispute.left.signer, signed);
     };
     await expect(submit())
       .to.emit(dispute.depository, 'CounterDisputeRegistered')
@@ -776,17 +821,15 @@ describe('HashLadderRegistry (cross-j pull settlement authority)', function () {
     const conflictingSig = buildSingleSignerHanko(
       dispute.right.entityId, conflictingDigest, dispute.right.privateKey,
     );
-    const accountErrorAbi = await ethers.getContractAt(
-      'Account', await dispute.depository.getAddress(),
-    );
+    // S1: a rival body at the registered counter's nonce and side can never replace it: skipped (op 1, reason 6)
     await expect(submit({
       ...leftCounter,
       counterProofbody: conflictingBody,
       sig: conflictingSig,
-    })).to.be.revertedWithCustomError(accountErrorAbi, 'E9');
+    })).to.emit(dispute.depository, 'DisputeOpSkipped');
   });
 
-  it('rejects a RIGHT same-nonce branch when the initial proposer was LEFT', async function () {
+  it('skips a RIGHT same-nonce branch when the initial proposer was LEFT', async function () {
     const dispute = await openPullDispute({
       label: 'same-nonce-right-loses', fillRatio: 0x1111, starter: 'left', proposerIsLeft: true,
     });
@@ -812,13 +855,16 @@ describe('HashLadderRegistry (cross-j pull settlement authority)', function () {
         sig: rightSig,
       }] }),
     );
-    const accountErrorAbi = await ethers.getContractAt(
-      'Account', await dispute.depository.getAddress(),
-    );
-    await expect(
-      dispute.depository.connect(dispute.right.signer)
-        .processBatch(signed.encodedBatch, signed.hankoData, signed.nonce),
-    ).to.be.revertedWithCustomError(accountErrorAbi, 'E2');
+    // J2: a counter that is not newer than the opening state (same nonce) is skipped (op 1, reason 5), not reverted;
+    // nothing is registered and the dispute is unchanged.
+    const before = await dispute.depository._accounts(dispute.acctKey);
+    const skipped = send(dispute.depository, dispute.right.signer, signed);
+    await expect(skipped).to.emit(dispute.depository, 'DisputeOpSkipped')
+      .withArgs(dispute.right.entityId, dispute.left.entityId, 1n, 5n, dispute.disputeNonce);
+    await expect(skipped).to.not.emit(dispute.depository, 'CounterDisputeRegistered');
+    const after = await dispute.depository._accounts(dispute.acctKey);
+    expect([after.nonce, after.disputeHash, after.disputeTimeout])
+      .to.deep.equal([before.nonce, before.disputeHash, before.disputeTimeout]);
   });
 
   it('counts a registration written inside this dispute window', async function () {
@@ -842,7 +888,7 @@ describe('HashLadderRegistry (cross-j pull settlement authority)', function () {
       ],
     });
     const signed = await signDepositoryBatch(depository, left.entityId, left.privateKey, fund);
-    await depository.connect(left.signer).processBatch(signed.encodedBatch, signed.hankoData, signed.nonce);
+    await send(depository, left.signer, signed);
 
     const proofA = buildHashLadderProof('registry-multi-a', 0x0100);
     const proofB = buildHashLadderProof('registry-multi-b', 0x0200);
@@ -850,8 +896,8 @@ describe('HashLadderRegistry (cross-j pull settlement authority)', function () {
       payment: [],
       swap: [],
       pull: [
-        { deltaIndex: 0, amount: -MAX_FILL_RATIO, claimedRatio: 0, fullHash: proofA.fullHash, partialRoot: proofA.partialRoot, targetRole: false },
-        { deltaIndex: 0, amount: -MAX_FILL_RATIO, claimedRatio: 0, fullHash: proofB.fullHash, partialRoot: proofB.partialRoot, targetRole: false },
+        { deltaIndex: 0, amount: signedAmount(-MAX_FILL_RATIO), claimedRatio: 0, fullHash: proofA.fullHash, partialRoot: proofA.partialRoot, targetRole: false },
+        { deltaIndex: 0, amount: signedAmount(-MAX_FILL_RATIO), claimedRatio: 0, fullHash: proofB.fullHash, partialRoot: proofB.partialRoot, targetRole: false },
       ],
     });
     const body = proofBody(
@@ -882,12 +928,13 @@ describe('HashLadderRegistry (cross-j pull settlement authority)', function () {
           sig: counterpartySig,
           starterInitialArguments: '0x',
           starterCounterArguments: '0x',
+        ondeltaEpoch: 0n,
         starterCounterProofCommitment: '0x0000000000000000000000000000000000000000000000000000000000000000',
         },
       ],
     });
     const start = await signDepositoryBatch(depository, right.entityId, right.privateKey, startBatch);
-    await depository.connect(right.signer).processBatch(start.encodedBatch, start.hankoData, start.nonce);
+    await send(depository, right.signer, start);
 
     const register = async (
       proof: ReturnType<typeof buildHashLadderProof>,
@@ -907,7 +954,7 @@ describe('HashLadderRegistry (cross-j pull settlement authority)', function () {
         }],
       });
       const signedReveal = await signDepositoryBatch(depository, right.entityId, right.privateKey, batch);
-      await depository.connect(right.signer).processBatch(signedReveal.encodedBatch, signedReveal.hankoData, signedReveal.nonce);
+      await send(depository, right.signer, signedReveal);
     };
     await register(proofA, 0x0100);
     await register(proofB, 0x0200);
@@ -938,13 +985,13 @@ describe('HashLadderRegistry (cross-j pull settlement authority)', function () {
     const attempt = emptyBatch({ disputeFinalizations: [finalization] });
     const attemptSigned = await signDepositoryBatch(depository, right.entityId, right.privateKey, attempt);
     await expect(
-      depository.connect(right.signer).processBatch(attemptSigned.encodedBatch, attemptSigned.hankoData, attemptSigned.nonce),
+      send(depository, right.signer, attemptSigned),
     ).to.be.revertedWithCustomError(depository, 'E2');
 
     await minePastTimeout(depository, acctKey);
     const fin = emptyBatch({ disputeFinalizations: [finalization] });
     const finSigned = await signDepositoryBatch(depository, right.entityId, right.privateKey, fin);
-    await depository.connect(right.signer).processBatch(finSigned.encodedBatch, finSigned.hankoData, finSigned.nonce);
+    await send(depository, right.signer, finSigned);
     expect(await depository._reserves(right.entityId, 1n)).to.equal(BigInt(0x0100 + 0x0200));
   });
 
@@ -957,19 +1004,22 @@ describe('HashLadderRegistry (cross-j pull settlement authority)', function () {
     expect(await dispute.depository._reserves(dispute.left.entityId, 1n)).to.equal(100_000n - 499n);
   });
 
-  it('cannot claim twice: a second finalization of the same dispute reverts', async function () {
+  it('cannot claim twice: a second finalization of the same dispute is skipped and pays nothing', async function () {
     const dispute = await openPullDispute({ label: 'registry-double', fillRatio: 0x0123 });
     await registerReveal(dispute, dispute.right, {});
     await minePastTimeout(dispute.depository, dispute.acctKey);
     await finalizeDispute(dispute, dispute.right);
-    // Account is a linked library, so its bubbled E5 selector is absent from
-    // Depository's generated ABI. Decode the exact revert with Account's ABI
-    // while still executing the real Depository call.
-    const accountErrorAbi = await ethers.getContractAt(
-      'Account',
-      await dispute.depository.getAddress(),
-    );
+    const paid = [
+      await dispute.depository._reserves(dispute.right.entityId, 1n),
+      await dispute.depository._reserves(dispute.left.entityId, 1n),
+    ];
+    // J2: the second finalization finds no open dispute and is skipped (op 2, reason 2), not reverted; nothing is paid twice.
     await expect(finalizeDispute(dispute, dispute.right))
-      .to.be.revertedWithCustomError(accountErrorAbi, 'E5');
+      .to.emit(dispute.depository, 'DisputeOpSkipped')
+      .withArgs(dispute.right.entityId, dispute.left.entityId, 2n, 2n, dispute.disputeNonce);
+    expect([
+      await dispute.depository._reserves(dispute.right.entityId, 1n),
+      await dispute.depository._reserves(dispute.left.entityId, 1n),
+    ]).to.deep.equal(paid);
   });
 });

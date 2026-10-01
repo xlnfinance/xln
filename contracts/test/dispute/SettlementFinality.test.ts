@@ -1,10 +1,11 @@
 import { expect } from 'chai';
 import hre from 'hardhat';
 import type { HardhatEthersSigner } from '@nomicfoundation/hardhat-ethers/signers.js';
-import type { Depository } from '../../typechain-types/index.js';
 import {
   buildSingleSignerHanko,
   canonicalAccountKey,
+  accountEpoch,
+  computeCooperativeUpdateHash,
   computeDepositoryBatchHash,
   deriveHardhatPrivateKey,
   deployDepositoryStack,
@@ -12,12 +13,11 @@ import {
   emptyBatch,
   encodeBatch,
   singleSignerLazyEntityId,
+  submitBatch,
 } from '../helpers/hanko.ts';
 
 const { ethers, networkHelpers } = await hre.network.getOrCreate('hardhat');
 const { loadFixture } = networkHelpers;
-const abi = ethers.AbiCoder.defaultAbiCoder();
-const COOPERATIVE_UPDATE = 0;
 const SETTLEMENT_DIFFS_ABI =
   'tuple(uint256 tokenId,int256 leftDiff,int256 rightDiff,int256 collateralDiff,int256 ondeltaDiff)[]';
 
@@ -43,19 +43,6 @@ const deployFixture = async () => {
   return { depository, signer0, signer1 };
 };
 
-const cooperativeUpdateHash = async (
-  depository: Depository,
-  accountKey: string,
-  nonce: bigint,
-  forgiveTokenIds: bigint[],
-): Promise<string> => {
-  const chainId = (await ethers.provider.getNetwork()).chainId;
-  return ethers.keccak256(abi.encode(
-    ['uint8', 'uint256', 'address', 'bytes', 'uint256', SETTLEMENT_DIFFS_ABI, 'uint256[]'],
-    [COOPERATIVE_UPDATE, chainId, await depository.getAddress(), accountKey, nonce, [], forgiveTokenIds],
-  ));
-};
-
 describe('settlement finality events', function () {
   it('emits AccountSettled for a successful pure-forgiveness settlement', async function () {
     const { depository, signer0, signer1 } = await loadFixture(deployFixture);
@@ -63,11 +50,14 @@ describe('settlement finality events', function () {
     const settlementNonce = 1n;
     const forgiveTokenIds = [1n];
     const accountKey = canonicalAccountKey(left.entityId, right.entityId);
-    const settlementHash = await cooperativeUpdateHash(
+    const settlementHash = await computeCooperativeUpdateHash(
       depository,
       accountKey,
+      await accountEpoch(depository, left.entityId, right.entityId),
       settlementNonce,
+      [],
       forgiveTokenIds,
+      SETTLEMENT_DIFFS_ABI,
     );
     const settlementHanko = buildSingleSignerHanko(right.entityId, settlementHash, right.privateKey);
     const batch = emptyBatch({
@@ -82,11 +72,11 @@ describe('settlement finality events', function () {
     });
     const encodedBatch = encodeBatch(batch);
     const batchNonce = 1n;
-    const batchHash = await computeDepositoryBatchHash(depository, encodedBatch, batchNonce);
+    const batchHash = await computeDepositoryBatchHash(depository, left.entityId, encodedBatch, batchNonce);
     const batchHanko = buildSingleSignerHanko(left.entityId, batchHash, left.privateKey);
 
     await expect(
-      depository.connect(left.signer).processBatch(encodedBatch, batchHanko, batchNonce),
+      submitBatch(depository, left.signer, left.entityId, { encodedBatch, hankoData: batchHanko, nonce: batchNonce }),
     ).to.emit(depository, 'AccountSettled');
 
     expect((await depository._accounts(accountKey)).nonce).to.equal(settlementNonce);

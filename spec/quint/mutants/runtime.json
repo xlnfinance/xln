@@ -46,7 +46,7 @@
     },
     {
       "id": "frame-in-arrival-order",
-      "why": "R1: the frame applies its inputs in another order than the canonical one",
+      "why": "R-R1: the frame applies its inputs in another order than the canonical one",
       "file": "runtime.qnt",
       "old": "    val batch = sorted(due)",
       "new": "    val batch = sorted(due).foldl([], (acc, k) => [k].concat(acc))",
@@ -54,7 +54,7 @@
     },
     {
       "id": "empty-frame",
-      "why": "R1: a frame opens with nothing due (no idle gate)",
+      "why": "R-R1: a frame opens with nothing due (no idle gate)",
       "file": "runtime.qnt",
       "old": "      phase == Idle, due.size() > 0, frames < MAXF,",
       "new": "      phase == Idle, frames < MAXF,",

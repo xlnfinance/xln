@@ -8,10 +8,12 @@ import {
   ONCHAIN_HANKO_GOLDEN_HASHES,
   ONCHAIN_HANKO_GOLDEN_PAYLOADS,
   ONCHAIN_HANKO_VECTOR,
-} from '../../../tests/fixtures/onchain-hanko-golden.ts';
+} from '../fixtures/onchain-hanko-golden.ts';
 
+import { SIGNED_AMOUNT_ABI_COMPONENTS } from '../../../core/protocol/crypto/abi-money.ts';
 import {
   encodeCooperativeDisputeProofHankoPayload,
+  encodeCooperativeUpdateDiff,
   encodeBoardProposalCancelHankoPayload,
   encodeBoardProposalHankoPayload,
   encodeCancelEntityProviderActionHankoPayload,
@@ -37,6 +39,7 @@ import {
 import type { EntityProvider } from '../../typechain-types/EntityProvider.ts';
 import {
   buildSingleSignerHanko,
+  computeDepositoryBatchHash,
   deriveHardhatPrivateKey,
   deployDepositoryStack,
   deployEntityProvider,
@@ -44,11 +47,12 @@ import {
   encodeBatch,
   entityTreasuryAddress,
   singleSignerLazyEntityId,
+  submitBatch,
 } from '../helpers/hanko.ts';
 
 const { ethers, networkHelpers } = await hre.network.getOrCreate('hardhat');
 const { loadFixture } = networkHelpers;
-const DEPOSITORY_BATCH_HANKO_DOMAIN = ethers.keccak256(ethers.toUtf8Bytes('XLN_DEPOSITORY_HANKO_V1'));
+const DEPOSITORY_BATCH_HANKO_DOMAIN = ethers.keccak256(ethers.toUtf8Bytes('XLN_DEPOSITORY_HANKO_V2'));
 const WATCHTOWER_COUNTER_DISPUTE_HANKO_DOMAIN = ethers.keccak256(
   ethers.toUtf8Bytes('XLN_WATCHTOWER_COUNTER_DISPUTE_V1'),
 );
@@ -71,6 +75,57 @@ const encodeSingleSignerBoard = (signerAddress: string): string =>
     0,
     0,
   ]]);
+
+// The fork's settlement, dispute and batch payloads (C1, C2) are not og's frozen TS encoders' output: the payload binds the
+// Account's ondelta epoch (settlement, dispute) and the acting entity (batch). These are written out here with ethers
+// directly, never through the Solidity codec under test, and never from og's encoders.
+const forkCoder = ethers.AbiCoder.defaultAbiCoder();
+const COOPERATIVE_UPDATE_DIFFS = ethers.ParamType.from({
+  type: 'tuple[]',
+  components: [
+    { name: 'tokenId', type: 'uint256' },
+    ...['leftDiff', 'rightDiff', 'collateralDiff', 'ondeltaDiff'].map((name) => ({
+      name,
+      type: 'tuple',
+      components: SIGNED_AMOUNT_ABI_COMPONENTS,
+    })),
+  ],
+});
+const forkCooperativeUpdatePayload = (
+  chainId: bigint,
+  depository: string,
+  accountKey: string,
+  epoch: number,
+  nonce: number,
+  diffs: Parameters<typeof encodeCooperativeUpdateDiff>[0][],
+  forgiveDebtsInTokenIds: number[],
+): string => forkCoder.encode(
+  ['uint256', 'uint256', 'address', 'bytes', 'uint256', 'uint256', COOPERATIVE_UPDATE_DIFFS, 'uint256[]'],
+  [0, chainId, depository, accountKey, epoch, nonce, diffs.map(encodeCooperativeUpdateDiff), forgiveDebtsInTokenIds],
+);
+const forkDisputeProofPayload = (
+  chainId: bigint,
+  depository: string,
+  accountKey: string,
+  epoch: number,
+  nonce: number,
+  proposerIsLeft: boolean,
+  proofbodyHash: string,
+  watchSeed: string,
+): string => forkCoder.encode(
+  ['uint256', 'uint256', 'address', 'bytes', 'uint256', 'uint256', 'bool', 'bytes32', 'bytes32'],
+  [1, chainId, depository, accountKey, epoch, nonce, proposerIsLeft, proofbodyHash, watchSeed],
+);
+const forkBatchPayload = (
+  chainId: bigint,
+  depository: string,
+  entityId: string,
+  encodedBatch: string,
+  nonce: number,
+): string => ethers.solidityPacked(
+  ['bytes32', 'uint256', 'address', 'bytes32', 'bytes', 'uint256'],
+  [DEPOSITORY_BATCH_HANKO_DOMAIN, chainId, depository, entityId, encodedBatch, nonce],
+);
 
 // Shares are minted to the namespaced treasury, never to address(uint160(N)).
 const entityAddress = (entityNumber: bigint): string => entityTreasuryAddress(entityNumber);
@@ -132,26 +187,27 @@ describe('canonical on-chain Hanko domains', function () {
     const { hankoCodec } = await loadFixture(deployFixture);
     const vector = ONCHAIN_HANKO_VECTOR;
     const accountKey = `${vector.leftEntity}${vector.rightEntity.slice(2)}`;
-    const diffs = vector.diffs.map((diff) => ({ ...diff }));
+    // The codec takes SettlementDiff (SignedAmount {negative, magnitude} per amount), not bigints.
+    const diffs = vector.diffs.map((diff) => encodeCooperativeUpdateDiff(diff));
     const forgiveDebts = [...vector.forgiveDebtsInTokenIds];
     const fixedVectors = [
       {
         bytes: await hankoCodec.encodeCooperativeUpdateHankoPayloadForDomain(
-          vector.chainId, vector.depositoryAddress, accountKey, vector.accountNonce, diffs, forgiveDebts,
+          vector.chainId, vector.depositoryAddress, accountKey, vector.ondeltaEpoch, vector.accountNonce, diffs, forgiveDebts,
         ),
         hash: await hankoCodec.computeCooperativeUpdateHankoHashForDomain(
-          vector.chainId, vector.depositoryAddress, accountKey, vector.accountNonce, diffs, forgiveDebts,
+          vector.chainId, vector.depositoryAddress, accountKey, vector.ondeltaEpoch, vector.accountNonce, diffs, forgiveDebts,
         ),
         expectedBytes: ONCHAIN_HANKO_GOLDEN_PAYLOADS.settlement,
         expectedHash: ONCHAIN_HANKO_GOLDEN_HASHES.settlement,
       },
       {
         bytes: await hankoCodec.encodeDisputeProofHankoPayloadForDomain(
-          vector.chainId, vector.depositoryAddress, accountKey, vector.accountNonce,
+          vector.chainId, vector.depositoryAddress, accountKey, vector.ondeltaEpoch, vector.accountNonce,
           true, vector.proofBodyHash, vector.watchSeed,
         ),
         hash: await hankoCodec.computeDisputeProofHankoHashForDomain(
-          vector.chainId, vector.depositoryAddress, accountKey, vector.accountNonce,
+          vector.chainId, vector.depositoryAddress, accountKey, vector.ondeltaEpoch, vector.accountNonce,
           true, vector.proofBodyHash, vector.watchSeed,
         ),
         expectedBytes: ONCHAIN_HANKO_GOLDEN_PAYLOADS.dispute,
@@ -182,11 +238,11 @@ describe('canonical on-chain Hanko domains', function () {
       {
         bytes: await hankoCodec.encodeBatchHankoPayloadForDomain(
           DEPOSITORY_BATCH_HANKO_DOMAIN, vector.chainId, vector.depositoryAddress,
-          vector.encodedBatch, vector.batchNonce,
+          vector.batchEntity, vector.encodedBatch, vector.batchNonce,
         ),
         hash: await hankoCodec.computeBatchHankoHashForDomain(
           DEPOSITORY_BATCH_HANKO_DOMAIN, vector.chainId, vector.depositoryAddress,
-          vector.encodedBatch, vector.batchNonce,
+          vector.batchEntity, vector.encodedBatch, vector.batchNonce,
         ),
         expectedBytes: ONCHAIN_HANKO_GOLDEN_PAYLOADS.batch,
         expectedHash: ONCHAIN_HANKO_GOLDEN_HASHES.batch,
@@ -363,26 +419,35 @@ describe('canonical on-chain Hanko domains', function () {
     const diffs = [{ tokenId: 9, leftDiff: -7n, rightDiff: 2n, collateralDiff: 5n, ondeltaDiff: -3n }];
 
     const depositoryDomain = { chainId, depositoryAddress };
+    const epoch = 5;
     const accountVectors = [
       {
         solidityBytes: await hankoCodec.encodeCooperativeUpdateHankoPayloadForDomain(
-          chainId, depositoryAddress, accountKey, 7, diffs, [12],
+          chainId, depositoryAddress, accountKey, epoch, 7, diffs.map(encodeCooperativeUpdateDiff), [12],
         ),
         solidityHash: await hankoCodec.computeCooperativeUpdateHankoHashForDomain(
-          chainId, depositoryAddress, accountKey, 7, diffs, [12],
+          chainId, depositoryAddress, accountKey, epoch, 7, diffs.map(encodeCooperativeUpdateDiff), [12],
         ),
-        tsBytes: encodeCooperativeUpdateHankoPayload(depositoryDomain, accountKey, 7, diffs, [12]),
-        tsHash: hashCooperativeUpdateHankoPayload(depositoryDomain, accountKey, 7, diffs, [12]),
+        tsBytes: forkCooperativeUpdatePayload(chainId, depositoryAddress, accountKey, epoch, 7, diffs, [12]),
+        tsHash: ethers.keccak256(
+          forkCooperativeUpdatePayload(chainId, depositoryAddress, accountKey, epoch, 7, diffs, [12]),
+        ),
+        ogBytes: encodeCooperativeUpdateHankoPayload(depositoryDomain, accountKey, 7, diffs, [12]),
+        ogHash: hashCooperativeUpdateHankoPayload(depositoryDomain, accountKey, 7, diffs, [12]),
       },
       {
         solidityBytes: await hankoCodec.encodeDisputeProofHankoPayloadForDomain(
-          chainId, depositoryAddress, accountKey, 7, true, proofbodyHash, watchSeed,
+          chainId, depositoryAddress, accountKey, epoch, 7, true, proofbodyHash, watchSeed,
         ),
         solidityHash: await hankoCodec.computeDisputeProofHankoHashForDomain(
-          chainId, depositoryAddress, accountKey, 7, true, proofbodyHash, watchSeed,
+          chainId, depositoryAddress, accountKey, epoch, 7, true, proofbodyHash, watchSeed,
         ),
-        tsBytes: encodeDisputeProofHankoPayload(depositoryDomain, accountKey, 7, true, proofbodyHash, watchSeed),
-        tsHash: hashDisputeProofHankoPayload(depositoryDomain, accountKey, 7, true, proofbodyHash, watchSeed),
+        tsBytes: forkDisputeProofPayload(chainId, depositoryAddress, accountKey, epoch, 7, true, proofbodyHash, watchSeed),
+        tsHash: ethers.keccak256(
+          forkDisputeProofPayload(chainId, depositoryAddress, accountKey, epoch, 7, true, proofbodyHash, watchSeed),
+        ),
+        ogBytes: encodeDisputeProofHankoPayload(depositoryDomain, accountKey, 7, true, proofbodyHash, watchSeed),
+        ogHash: hashDisputeProofHankoPayload(depositoryDomain, accountKey, 7, true, proofbodyHash, watchSeed),
       },
       {
         // FinalDisputeProof is deliberately pinned but has no Depository caller today.
@@ -411,19 +476,27 @@ describe('canonical on-chain Hanko domains', function () {
       },
       {
         solidityBytes: await hankoCodec.encodeBatchHankoPayloadForDomain(
-          DEPOSITORY_BATCH_HANKO_DOMAIN, chainId, depositoryAddress, '0x1234abcd', 8,
+          DEPOSITORY_BATCH_HANKO_DOMAIN, chainId, depositoryAddress, left, '0x1234abcd', 8,
         ),
         solidityHash: await hankoCodec.computeBatchHankoHashForDomain(
-          DEPOSITORY_BATCH_HANKO_DOMAIN, chainId, depositoryAddress, '0x1234abcd', 8,
+          DEPOSITORY_BATCH_HANKO_DOMAIN, chainId, depositoryAddress, left, '0x1234abcd', 8,
         ),
-        tsBytes: encodeDepositoryBatchHankoPayload(depositoryDomain, '0x1234abcd', 8),
-        tsHash: hashDepositoryBatchHankoPayload(depositoryDomain, '0x1234abcd', 8),
+        tsBytes: forkBatchPayload(chainId, depositoryAddress, left, '0x1234abcd', 8),
+        tsHash: ethers.keccak256(forkBatchPayload(chainId, depositoryAddress, left, '0x1234abcd', 8)),
+        ogBytes: encodeDepositoryBatchHankoPayload(depositoryDomain, '0x1234abcd', 8),
+        ogHash: hashDepositoryBatchHankoPayload(depositoryDomain, '0x1234abcd', 8),
       },
     ];
     for (const vector of accountVectors) {
       expect(vector.solidityBytes).to.equal(vector.tsBytes);
       expect(vector.solidityHash).to.equal(vector.tsHash);
       expect(ethers.keccak256(vector.solidityBytes)).to.equal(vector.solidityHash);
+      if ('ogBytes' in vector) {
+        // C1/C2 changed this payload on purpose: og's frozen encoding is a different signature domain, so a signature
+        // for it can never verify against the fork's.
+        expect(vector.solidityBytes).to.not.equal(vector.ogBytes);
+        expect(vector.solidityHash).to.not.equal(vector.ogHash);
+      }
     }
 
     const watchtowerAuthorization = {
@@ -634,9 +707,12 @@ describe('canonical on-chain Hanko domains', function () {
     const batch = emptyBatch();
     const encodedBatch = encodeBatch(batch);
     const lazyEntityId = singleSignerLazyEntityId(recipient.address);
-    const batchHash = hashDepositoryBatchHankoPayload(depositoryDomain, encodedBatch, 1);
+    const batchHash = ethers.keccak256(forkBatchPayload(chainId, depositoryAddress, lazyEntityId, encodedBatch, 1));
+    // The independent payload above is the exact digest the Depository computes for this entity.
+    expect(batchHash).to.equal(await computeDepositoryBatchHash(depository, lazyEntityId, encodedBatch, 1n));
     const batchHanko = buildSingleSignerHanko(lazyEntityId, batchHash, deriveHardhatPrivateKey(2));
-    await expect(depository.processBatch(encodedBatch, batchHanko, 1)).to.not.revert(ethers);
+    await expect(submitBatch(depository, recipient, lazyEntityId, { encodedBatch, hankoData: batchHanko, nonce: 1n }))
+      .to.not.revert(ethers);
     expect(await depository.entityNonces(lazyEntityId)).to.equal(1);
   });
 

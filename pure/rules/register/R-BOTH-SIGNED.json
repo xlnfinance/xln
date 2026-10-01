@@ -1,0 +1,20 @@
+{
+ "id": "R-BOTH-SIGNED",
+ "statement": "At each side's committed head both signatures exist over the proof of that committed body: the ProofBody hash recomputed from the committed state equals the signed one (Quint P4c both_signed).",
+ "source": "Review B of PR 69; spec/quint/account.qnt",
+ "layers": {
+  "arrival": "owed: spec thread, next Arrival page (id not in a name yet)",
+  "quint": "owed: spec thread, new Quint branch (id not in a name yet)",
+  "contract": "n/a: the chain checks the signature of the proof it is given; whether each side's committed head holds both signatures is off-chain bookkeeping",
+  "rig": "owed: test rig",
+  "ts": "owed: the cut (Entity and Runtime)"
+ },
+ "killers": [
+  {
+   "kind": "test",
+   "layer": "rig",
+   "name": "to be named: a head whose signed ProofBody differs from the recomputed one is red",
+   "owed": "test rig"
+  }
+ ]
+}

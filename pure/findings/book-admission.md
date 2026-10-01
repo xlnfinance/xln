@@ -1,6 +1,6 @@
 # book-admission: Account admission timing, proposeAccountsNow, and the hub order book inside entity consensus
 
-og (`core/` at 566c850) is the spec. Every row marked FIXED has a `MATCH:` test in `pure/diff/book-admission.test.ts` that runs og live.
+og (`core/` at 566c850) is the spec. Every row marked FIXED has a `MATCH:` test in `pure/diff/books/book-admission.test.ts` that runs og live.
 
 | Area | og | rewrite before | Status |
 |---|---|---|---|

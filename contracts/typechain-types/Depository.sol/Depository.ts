@@ -222,6 +222,7 @@ export interface DepositoryInterface extends Interface {
       | "_tokens"
       | "activeDebts"
       | "adminRegisterExternalToken"
+      | "applyBatch"
       | "computeWatchtowerCounterDisputeHash"
       | "debtOutstanding"
       | "deltaTransformer"
@@ -242,12 +243,14 @@ export interface DepositoryInterface extends Interface {
     nameOrSignatureOrTopic:
       | "AccountEpochAdvanced"
       | "AccountSettled"
+      | "BatchFailed"
       | "CooperativeClose"
       | "CounterDisputeRegistered"
       | "DebtCreated"
       | "DebtEnforced"
       | "DebtForgiven"
       | "DisputeFinalized"
+      | "DisputeOpSkipped"
       | "DisputeStarted"
       | "HankoBatchProcessed"
       | "HashLadderRevealRegistered"
@@ -298,6 +301,10 @@ export interface DepositoryInterface extends Interface {
   encodeFunctionData(
     functionFragment: "adminRegisterExternalToken",
     values: [ExternalTokenToReserveStruct]
+  ): string;
+  encodeFunctionData(
+    functionFragment: "applyBatch",
+    values: [BytesLike, BytesLike]
   ): string;
   encodeFunctionData(
     functionFragment: "computeWatchtowerCounterDisputeHash",
@@ -396,6 +403,7 @@ export interface DepositoryInterface extends Interface {
     functionFragment: "adminRegisterExternalToken",
     data: BytesLike
   ): Result;
+  decodeFunctionResult(functionFragment: "applyBatch", data: BytesLike): Result;
   decodeFunctionResult(
     functionFragment: "computeWatchtowerCounterDisputeHash",
     data: BytesLike
@@ -477,6 +485,24 @@ export namespace AccountSettledEvent {
   export type OutputTuple = [settled: AccountSettlementStructOutput[]];
   export interface OutputObject {
     settled: AccountSettlementStructOutput[];
+  }
+  export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
+  export type Filter = TypedDeferredTopicFilter<Event>;
+  export type Log = TypedEventLog<Event>;
+  export type LogDescription = TypedLogDescription<Event>;
+}
+
+export namespace BatchFailedEvent {
+  export type InputTuple = [
+    entityId: BytesLike,
+    nonce: BigNumberish,
+    reason: BytesLike
+  ];
+  export type OutputTuple = [entityId: string, nonce: bigint, reason: string];
+  export interface OutputObject {
+    entityId: string;
+    nonce: bigint;
+    reason: string;
   }
   export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
   export type Filter = TypedDeferredTopicFilter<Event>;
@@ -642,6 +668,34 @@ export namespace DisputeFinalizedEvent {
     nonce: bigint;
     finalProofbodyHash: string;
     finalizationEvidenceHash: string;
+  }
+  export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
+  export type Filter = TypedDeferredTopicFilter<Event>;
+  export type Log = TypedEventLog<Event>;
+  export type LogDescription = TypedLogDescription<Event>;
+}
+
+export namespace DisputeOpSkippedEvent {
+  export type InputTuple = [
+    sender: BytesLike,
+    counterentity: BytesLike,
+    op: BigNumberish,
+    reason: BigNumberish,
+    nonce: BigNumberish
+  ];
+  export type OutputTuple = [
+    sender: string,
+    counterentity: string,
+    op: bigint,
+    reason: bigint,
+    nonce: bigint
+  ];
+  export interface OutputObject {
+    sender: string;
+    counterentity: string;
+    op: bigint;
+    reason: bigint;
+    nonce: bigint;
   }
   export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
   export type Filter = TypedDeferredTopicFilter<Event>;
@@ -958,6 +1012,7 @@ export interface Depository extends BaseContract {
         string,
         string,
         boolean,
+        bigint,
         bigint
       ] & {
         nonce: bigint;
@@ -976,6 +1031,7 @@ export interface Depository extends BaseContract {
         starterCounterProofCommitment: string;
         disputeStartedByLeft: boolean;
         ondeltaEpoch: bigint;
+        disputeRetiredSide: bigint;
       }
     ],
     "view"
@@ -1033,6 +1089,12 @@ export interface Depository extends BaseContract {
 
   adminRegisterExternalToken: TypedContractMethod<
     [params: ExternalTokenToReserveStruct],
+    [void],
+    "nonpayable"
+  >;
+
+  applyBatch: TypedContractMethod<
+    [entityId: BytesLike, encodedBatch: BytesLike],
     [void],
     "nonpayable"
   >;
@@ -1170,6 +1232,7 @@ export interface Depository extends BaseContract {
         string,
         string,
         boolean,
+        bigint,
         bigint
       ] & {
         nonce: bigint;
@@ -1188,6 +1251,7 @@ export interface Depository extends BaseContract {
         starterCounterProofCommitment: string;
         disputeStartedByLeft: boolean;
         ondeltaEpoch: bigint;
+        disputeRetiredSide: bigint;
       }
     ],
     "view"
@@ -1253,6 +1317,13 @@ export interface Depository extends BaseContract {
     nameOrSignature: "adminRegisterExternalToken"
   ): TypedContractMethod<
     [params: ExternalTokenToReserveStruct],
+    [void],
+    "nonpayable"
+  >;
+  getFunction(
+    nameOrSignature: "applyBatch"
+  ): TypedContractMethod<
+    [entityId: BytesLike, encodedBatch: BytesLike],
     [void],
     "nonpayable"
   >;
@@ -1384,6 +1455,13 @@ export interface Depository extends BaseContract {
     AccountSettledEvent.OutputObject
   >;
   getEvent(
+    key: "BatchFailed"
+  ): TypedContractEvent<
+    BatchFailedEvent.InputTuple,
+    BatchFailedEvent.OutputTuple,
+    BatchFailedEvent.OutputObject
+  >;
+  getEvent(
     key: "CooperativeClose"
   ): TypedContractEvent<
     CooperativeCloseEvent.InputTuple,
@@ -1424,6 +1502,13 @@ export interface Depository extends BaseContract {
     DisputeFinalizedEvent.InputTuple,
     DisputeFinalizedEvent.OutputTuple,
     DisputeFinalizedEvent.OutputObject
+  >;
+  getEvent(
+    key: "DisputeOpSkipped"
+  ): TypedContractEvent<
+    DisputeOpSkippedEvent.InputTuple,
+    DisputeOpSkippedEvent.OutputTuple,
+    DisputeOpSkippedEvent.OutputObject
   >;
   getEvent(
     key: "DisputeStarted"
@@ -1505,6 +1590,17 @@ export interface Depository extends BaseContract {
       AccountSettledEvent.OutputObject
     >;
 
+    "BatchFailed(bytes32,uint256,bytes4)": TypedContractEvent<
+      BatchFailedEvent.InputTuple,
+      BatchFailedEvent.OutputTuple,
+      BatchFailedEvent.OutputObject
+    >;
+    BatchFailed: TypedContractEvent<
+      BatchFailedEvent.InputTuple,
+      BatchFailedEvent.OutputTuple,
+      BatchFailedEvent.OutputObject
+    >;
+
     "CooperativeClose(bytes32,bytes32,uint256)": TypedContractEvent<
       CooperativeCloseEvent.InputTuple,
       CooperativeCloseEvent.OutputTuple,
@@ -1569,6 +1665,17 @@ export interface Depository extends BaseContract {
       DisputeFinalizedEvent.InputTuple,
       DisputeFinalizedEvent.OutputTuple,
       DisputeFinalizedEvent.OutputObject
+    >;
+
+    "DisputeOpSkipped(bytes32,bytes32,uint8,uint8,uint256)": TypedContractEvent<
+      DisputeOpSkippedEvent.InputTuple,
+      DisputeOpSkippedEvent.OutputTuple,
+      DisputeOpSkippedEvent.OutputObject
+    >;
+    DisputeOpSkipped: TypedContractEvent<
+      DisputeOpSkippedEvent.InputTuple,
+      DisputeOpSkippedEvent.OutputTuple,
+      DisputeOpSkippedEvent.OutputObject
     >;
 
     "DisputeStarted(bytes32,bytes32,uint256,bool,bytes32,bytes32,bytes,bytes,bytes32,uint256,uint256,uint32,uint32)": TypedContractEvent<

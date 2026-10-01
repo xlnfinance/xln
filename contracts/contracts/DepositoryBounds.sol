@@ -20,9 +20,13 @@ library DepositoryBounds {
   uint256 private constant MAX_BATCH_HASH_LADDER_REGISTRATIONS = 32;
   uint256 private constant MAX_BATCH_TOTAL_OPS = 50;
   uint256 private constant MAX_RESERVE_TO_COLLATERAL_PAIRS = 64;
-  uint256 private constant MAX_BATCH_RESERVE_TO_COLLATERAL_PAIRS_TOTAL = 256;
+  uint256 private constant MAX_BATCH_RESERVE_TO_COLLATERAL_PAIRS_TOTAL = 250;
+  /// @dev J5: the smallest gasBudget a batch may sign (the Runtime never signs less). The deploy gate reads it from the compiled build and
+  ///      checks that the chain's transaction gas cap carries it beside the largest supported hanko prelude.
+  uint256 private constant MIN_BATCH_GAS_BUDGET = 500_000;
 
   function assertBatch(Batch memory batch) external pure {
+    if (batch.gasBudget < MIN_BATCH_GAS_BUDGET) revert E10();
     if (
       batch.reserveToReserve.length +
       batch.reserveToCollateral.length +

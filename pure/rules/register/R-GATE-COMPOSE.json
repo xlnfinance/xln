@@ -1,0 +1,59 @@
+{
+ "id": "R-GATE-COMPOSE",
+ "statement": "bun rules/check.ts is one command whose exit code is red when the register, the style gate or folder width is red, each alone.",
+ "source": "coordinator 09-30 (PR #71 review: a skipped or deleted gate test must turn the gate red)",
+ "layers": {
+  "arrival": "n/a: a repository gate rule, not protocol behaviour; no spec page models it",
+  "quint": "n/a: a repository gate rule, not protocol behaviour; no spec models it",
+  "contract": "n/a: a gate over the repository (pure/rules); it is not contract code",
+  "rig": "n/a: a gate over the repository, with no system state for the walk",
+  "ts": "hold"
+ },
+ "killers": [
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-GATE-COMPOSE a failing register alone is 1"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "a failing style gate alone is 1"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "a failing folder width alone is 1"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "a throw planted in kernel/ exits 1 and names the file"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "a throw planted in chain/ exits 1 (chain is inside the gate)"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "a folder of 11 source files exits 1 and names the folder"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "the register part alone turns the command red: a scratch copy has no contract tests to carry the ids"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "an ignored folder planted before the copy stays out of it, and what git lists comes along"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "the real pure/ copies without the ignored folders a seeds run leaves in it"
+  }
+ ]
+}

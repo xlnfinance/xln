@@ -9,8 +9,14 @@ contract WideTransformerTest is Test {
   DeltaTransformer internal transformer;
   uint256 internal constant MAX = type(uint256).max;
 
+  /// @dev The Payment deadline in every fixture below.
+  uint256 internal constant DEADLINE = 10;
+
   function setUp() public {
     transformer = new DeltaTransformer();
+    // H1: an unrevealed Payment makes finalization wait until its deadline has passed. Forge starts at timestamp 1,
+    // inside every fixture's deadline, so run at the first second after it; the H1 tests below warp explicitly.
+    vm.warp(DEADLINE + 1);
   }
 
   function _assertDelta(Int768 memory actual, int256 high, uint256 middle, uint256 low) internal pure {
@@ -52,6 +58,60 @@ contract WideTransformerTest is Test {
     _assertDelta(_oppositePayments(true, false, 1), 0, 1, 6);
     _assertDelta(_oppositePayments(false, true, 1), -1, MAX, 8);
     _assertDelta(_oppositePayments(true, true, 1), 0, 0, 7);
+  }
+
+  /// H1 (rewritten expectation): before this fork an unrevealed HTLC settled as unpaid at any time. Now finalization
+  /// waits through the deadline second itself (a reveal AT the deadline still counts), and settles unpaid after it.
+  function test_h1_unrevealedHtlcWaitsThroughItsDeadline() public {
+    vm.warp(DEADLINE);
+    vm.expectRevert(abi.encodeWithSelector(DeltaTransformer.PaymentRevealWindowActive.selector, DEADLINE));
+    transformer.applyBatch(
+      _oneDelta(), _oneToken(), _paymentBatch(bytes32("wait")), "", "", DEADLINE, DEADLINE,
+      bytes32(uint256(1)), bytes32(uint256(2)), 0, 0, 0, 0
+    );
+    vm.warp(1);
+    vm.expectRevert(abi.encodeWithSelector(DeltaTransformer.PaymentRevealWindowActive.selector, DEADLINE));
+    transformer.applyBatch(
+      _oneDelta(), _oneToken(), _paymentBatch(bytes32("wait")), "", "", 1, 1,
+      bytes32(uint256(1)), bytes32(uint256(2)), 0, 0, 0, 0
+    );
+    vm.warp(DEADLINE + 1);
+    Int768[] memory result = transformer.applyBatch(
+      _oneDelta(), _oneToken(), _paymentBatch(bytes32("wait")), "", "", 0, 0,
+      bytes32(uint256(1)), bytes32(uint256(2)), 0, 0, 0, 0
+    );
+    _assertDelta(result[0], 0, 0, 7);
+  }
+
+  /// H1: the wait is only for UNREVEALED payments. A revealed one applies inside its window without waiting.
+  function test_h1_revealedHtlcSettlesInsideItsWindow() public {
+    vm.warp(5);
+    _assertDelta(_oppositePayments(true, true, 1), 0, 0, 7);
+    vm.expectRevert(abi.encodeWithSelector(DeltaTransformer.PaymentRevealWindowActive.selector, DEADLINE));
+    this.oppositePaymentsExternal(true, false, 1);
+  }
+
+  function oppositePaymentsExternal(bool p, bool n, uint256 ts) external view returns (Int768 memory) {
+    return _oppositePayments(p, n, ts);
+  }
+
+  function _oneDelta() internal pure returns (Int768[] memory deltas) {
+    deltas = new Int768[](1);
+    deltas[0] = WideMath.expand(WideMath.fromInt(7));
+  }
+
+  function _oneToken() internal pure returns (uint256[] memory tokenIds) {
+    tokenIds = new uint256[](1);
+    tokenIds[0] = 1;
+  }
+
+  function _paymentBatch(bytes32 hash) internal pure returns (bytes memory) {
+    DeltaTransformer.Batch memory batch;
+    batch.payment = new DeltaTransformer.Payment[](1);
+    batch.payment[0] = DeltaTransformer.Payment(0, SignedAmount(false, 5), uint32(DEADLINE), hash);
+    batch.swap = new DeltaTransformer.Swap[](0);
+    batch.pull = new DeltaTransformer.Pull[](0);
+    return abi.encode(batch);
   }
 
   function test_lateSecretsDoNotApplyEitherFullWidthHtlc() public view {

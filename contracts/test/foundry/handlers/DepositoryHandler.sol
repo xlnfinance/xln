@@ -7,6 +7,7 @@ import {StdUtils} from "forge-std/StdUtils.sol";
 import "../../../contracts/Depository.sol";
 import "../../../contracts/EntityProvider.sol";
 import {ERC20Mock} from "../../../contracts/ERC20Mock.sol";
+import {DeltaTransformer} from "../../../contracts/DeltaTransformer.sol";
 import "../../../contracts/Types.sol";
 import {XlnHanko} from "../helpers/XlnHanko.sol";
 
@@ -21,8 +22,8 @@ import {XlnHanko} from "../helpers/XlnHanko.sol";
 contract DepositoryHandler is CommonBase, StdCheats, StdUtils {
   uint256 public constant ACTORS = 4;
   uint256 public constant PAIRS = 6; // C(4,2)
-  uint32 public constant LEFT_RESPONSE_SECONDS = 50;
-  uint32 public constant RIGHT_RESPONSE_SECONDS = 50;
+  uint32 public constant LEFT_RESPONSE_SECONDS = 60;
+  uint32 public constant RIGHT_RESPONSE_SECONDS = 60;
   uint256 public constant DISPUTE_WINDOW_SECONDS =
     uint256(LEFT_RESPONSE_SECONDS) + uint256(RIGHT_RESPONSE_SECONDS);
 
@@ -44,6 +45,13 @@ contract DepositoryHandler is CommonBase, StdCheats, StdUtils {
   uint256 public disputeEarlyFinalizeViolations;
   uint256 public disputeDoubleFinalizeViolations;
   uint256 public disputeOverwriteViolations;
+  /// @dev H1 oracles. `htlcEarlyFinalizeViolations`: a dispute carrying an unrevealed HTLC finalized while its payment
+  /// deadline was still open. `htlcLivenessViolations`: the finalize that H1 allows (secret public, or deadline passed)
+  /// was rejected. `htlcEarlyRejections` proves the wait branch actually ran.
+  uint256 public htlcCycles;
+  uint256 public htlcEarlyFinalizeViolations;
+  uint256 public htlcLivenessViolations;
+  uint256 public htlcEarlyRejections;
 
   /// @dev Coverage probe: counts states in which at least one entity carries
   /// outstanding debt, so a green debt invariant cannot be vacuously green.
@@ -128,13 +136,15 @@ contract DepositoryHandler is CommonBase, StdCheats, StdUtils {
   }
 
   /// @dev Submits with the correct next nonce. Returns false when the
-  ///      Depository rejected the whole batch.
+  ///      Depository rejected the whole batch or the batch failed soft (BatchFailed).
   function _submit(uint256 actor, Batch memory batch) internal returns (bool ok) {
     bytes memory encoded = abi.encode(batch);
     uint256 nonce = dep.entityNonces(entityOf[actor]) + 1;
-    bytes32 h = XlnHanko.batchHash(dep.DOMAIN_SEPARATOR(), address(dep), encoded, nonce);
-    try dep.processBatch(encoded, _hanko(actor, h), nonce) {
-      return true;
+    bytes32 h = XlnHanko.batchHash(dep.DOMAIN_SEPARATOR(), address(dep), entityOf[actor], encoded, nonce);
+    vm.recordLogs();
+    try dep.processBatch(entityOf[actor], encoded, _hanko(actor, h), nonce) {
+      // J5: a batch whose ops fail returns normally with BatchFailed and applies nothing
+      return !XlnHanko.batchFailed(vm.getRecordedLogs());
     } catch {
       return false;
     }
@@ -159,15 +169,24 @@ contract DepositoryHandler is CommonBase, StdCheats, StdUtils {
   }
 
   function _accountNonce(bytes32 e1, bytes32 e2) internal view returns (uint256 n) {
-    (n, , , , , , , , , , , , , , ) = dep._accounts(XlnHanko.accountKey(e1, e2));
+    (n, , , , , , , , , , , , , , , , ) = dep._accounts(XlnHanko.accountKey(e1, e2));
   }
 
   function _disputeHash(bytes32 e1, bytes32 e2) internal view returns (bytes32 h) {
-    (, h, , , , , , , , , , , , , ) = dep._accounts(XlnHanko.accountKey(e1, e2));
+    (, h, , , , , , , , , , , , , , , ) = dep._accounts(XlnHanko.accountKey(e1, e2));
   }
 
   function _collateral(bytes32 e1, bytes32 e2, uint256 tokenId) internal view returns (uint256 c) {
     (c,) = dep._collaterals(XlnHanko.accountKey(e1, e2), tokenId);
+  }
+
+  /// @dev J2: a stale or already-applied dispute op lands as a skip (DisputeOpSkipped), so "the batch succeeded" no longer
+  /// means "the op acted". A skipped op must leave this fingerprint alone: the Account (nonce, dispute hash), both reserves
+  /// and the collateral of the token.
+  function _pairFingerprint(bytes32 a, bytes32 b, uint256 tokenId) internal view returns (bytes32) {
+    return keccak256(abi.encode(
+      _accountNonce(a, b), _disputeHash(a, b), dep._reserves(a, tokenId), dep._reserves(b, tokenId), _collateral(a, b, tokenId)
+    ));
   }
 
   // ═══════════════════════════ actions ═══════════════════════════
@@ -452,13 +471,19 @@ contract DepositoryHandler is CommonBase, StdCheats, StdUtils {
 
     bytes memory encoded = abi.encode(b);
     uint256 nonce = dep.entityNonces(entityOf[a]) + 1;
-    bytes32 h = XlnHanko.batchHash(dep.DOMAIN_SEPARATOR(), address(dep), encoded, nonce);
+    bytes32 h = XlnHanko.batchHash(dep.DOMAIN_SEPARATOR(), address(dep), entityOf[a], encoded, nonce);
+    vm.recordLogs();
     vm.prank(caller);
-    try dep.processBatch(encoded, _hanko(a, h), nonce) {
-      _bump("flashDepositOverdrawWithdraw");
-      if (pull < overdraw) flashViolations++;
-      else if (withdrawAmount > pull - overdraw) flashViolations++;
-      else if (_reserve(a, t) != pull - overdraw - withdrawAmount) flashViolations++;
+    try dep.processBatch(entityOf[a], encoded, _hanko(a, h), nonce) {
+      // J5: a batch whose ops fail returns normally with BatchFailed and applies nothing
+      if (XlnHanko.batchFailed(vm.getRecordedLogs())) {
+        if (_reserve(a, t) != pre) flashViolations++;
+      } else {
+        _bump("flashDepositOverdrawWithdraw");
+        if (pull < overdraw) flashViolations++;
+        else if (withdrawAmount > pull - overdraw) flashViolations++;
+        else if (_reserve(a, t) != pull - overdraw - withdrawAmount) flashViolations++;
+      }
     } catch {
       if (_reserve(a, t) != pre) flashViolations++;
     }
@@ -513,9 +538,12 @@ contract DepositoryHandler is CommonBase, StdCheats, StdUtils {
 
     bytes memory encoded = abi.encode(b);
     uint256 nonce = dep.entityNonces(entityOf[a]) + 1;
-    bytes32 h = XlnHanko.batchHash(dep.DOMAIN_SEPARATOR(), address(dep), encoded, nonce);
+    bytes32 h = XlnHanko.batchHash(dep.DOMAIN_SEPARATOR(), address(dep), entityOf[a], encoded, nonce);
+    vm.recordLogs();
     vm.prank(caller); // transferFrom pulls from msg.sender
-    try dep.processBatch(encoded, _hanko(a, h), nonce) { _bump("depositExternal"); } catch {}
+    try dep.processBatch(entityOf[a], encoded, _hanko(a, h), nonce) {
+      if (!XlnHanko.batchFailed(vm.getRecordedLogs())) _bump("depositExternal");
+    } catch {}
   }
 
   function withdrawExternal(uint256 actorSeed, bool useA, uint256 amount) external {
@@ -584,6 +612,7 @@ contract DepositoryHandler is CommonBase, StdCheats, StdUtils {
     b.disputeStarts[0] = InitialDisputeProof({
       counterentity: other,
       nonce: nonce,
+      ondeltaEpoch: XlnHanko.currentEpoch(address(dep), key),
       proposerIsLeft: proposerIsLeft,
       proofbodyHash: pbHash,
       initialProofbody: pb,
@@ -596,11 +625,17 @@ contract DepositoryHandler is CommonBase, StdCheats, StdUtils {
 
     uint256 pi = pairIndex(from, cp);
     bool wasActive = disputes[pi].active && _disputeHash(me, other) != bytes32(0);
+    bytes32 before_ = _pairFingerprint(me, other, t);
 
     if (_submit(from, b)) {
+      // Oracle: a dispute must never be startable on top of a live one. J2: a start beside a live dispute lands as a skip,
+      // which must leave the pair untouched; the ghost keeps the dispute that is open.
+      if (wasActive) {
+        if (_pairFingerprint(me, other, t) != before_) disputeOverwriteViolations++;
+        _bump("disputeStartSkipped");
+        return;
+      }
       _bump("disputeStart");
-      // Oracle: a dispute must never be startable on top of a live one.
-      if (wasActive) disputeOverwriteViolations++;
       disputes[pi] = DisputeGhost({
         active: true,
         starter: from,
@@ -659,8 +694,17 @@ contract DepositoryHandler is CommonBase, StdCheats, StdUtils {
     bool wasActive = g.active && _disputeHash(me, other) != bytes32(0);
     bool wasEarly = vm.getBlockTimestamp() < g.startTimestamp + DISPUTE_WINDOW_SECONDS;
     if (byStarter && wasEarly && wasActive) starterEarlyFinalizeAttempts++;
+    bytes32 before_ = _pairFingerprint(me, other, g.tokenId);
 
     if (_submit(caller, b)) {
+      // Oracle 2: the same dispute may not be finalized twice. J2: a finalize for a dispute that is no longer open lands as
+      // a skip, which must leave the pair untouched.
+      if (!wasActive) {
+        if (_pairFingerprint(me, other, g.tokenId) != before_) disputeDoubleFinalizeViolations++;
+        _bump("disputeFinalizeSkipped");
+        disputes[pi].active = false;
+        return;
+      }
       _bump("disputeFinalizeTimeout");
       // Oracle 1: the starter may not finalize before the delay elapsed.
       if (byStarter) {
@@ -669,8 +713,6 @@ contract DepositoryHandler is CommonBase, StdCheats, StdUtils {
       } else {
         counterpartyTimeoutFinalizes++;
       }
-      // Oracle 2: the same dispute may not be finalized twice.
-      if (!wasActive) disputeDoubleFinalizeViolations++;
       disputes[pi].active = false;
       _observeDebt();
     }
@@ -757,6 +799,7 @@ contract DepositoryHandler is CommonBase, StdCheats, StdUtils {
     start.disputeStarts[0] = InitialDisputeProof({
       counterentity: other,
       nonce: nonce,
+      ondeltaEpoch: XlnHanko.currentEpoch(address(dep), key),
       proposerIsLeft: proposerIsLeft,
       proofbodyHash: pbHash,
       initialProofbody: pb,
@@ -800,8 +843,113 @@ contract DepositoryHandler is CommonBase, StdCheats, StdUtils {
       _bump("disputeFullCycle");
       starterTimeoutFinalizes++;
       _observeDebt();
-      // Step 3: the same dispute must not finalize a second time.
-      if (_submit(from, fin)) disputeDoubleFinalizeViolations++;
+      // Step 3: the same dispute must not finalize a second time. J2: the replay lands as a skip and moves nothing.
+      bytes32 closed = _pairFingerprint(me, other, t);
+      if (_submit(from, fin) && _pairFingerprint(me, other, t) != closed) disputeDoubleFinalizeViolations++;
+    }
+  }
+
+  /// @notice H1 cycle: a dispute whose signed body carries one unrevealed HTLC. Both response windows elapse well before
+  ///         the payment deadline, yet the finalize must wait (PaymentRevealWindowActive). It is then released either by a
+  ///         public reveal before the deadline or by the deadline passing, and must succeed.
+  function htlcCycle(
+    uint256 fromSeed,
+    uint256 cpSeed,
+    uint256 tokenSeed,
+    uint256 amount,
+    bool reveal,
+    uint256 seedNoise
+  ) external {
+    (uint256 from, uint256 cp) = _distinct(fromSeed, cpSeed);
+    uint256 t = _token(tokenSeed);
+    bytes32 me = entityOf[from];
+    bytes32 other = entityOf[cp];
+    if (_disputeHash(me, other) != bytes32(0)) return; // already disputing
+    amount = bound(amount, 1, 1e21);
+
+    bytes32 secret = keccak256(abi.encode("h1-secret", htlcCycles));
+    uint256 deadline = vm.getBlockTimestamp() + DISPUTE_WINDOW_SECONDS + 1000;
+    ProofBody memory pb = _proofBody(keccak256(abi.encodePacked("htlc", seedNoise)), t, 0);
+    {
+      DeltaTransformer.Batch memory tb;
+      tb.payment = new DeltaTransformer.Payment[](1);
+      tb.payment[0] = DeltaTransformer.Payment({
+        deltaIndex: 0, amount: SignedAmount(false, amount), revealedUntilTimestamp: deadline,
+        hash: keccak256(abi.encode(secret))
+      });
+      tb.swap = new DeltaTransformer.Swap[](0);
+      tb.pull = new DeltaTransformer.Pull[](0);
+      Allowance[] memory allowances = new Allowance[](1);
+      allowances[0] = Allowance({deltaIndex: 0, rightAllowance: amount, leftAllowance: amount});
+      pb.transformers = new TransformerClause[](1);
+      pb.transformers[0] = TransformerClause({
+        transformerAddress: dep.deltaTransformer(),
+        encodedBatch: abi.encode(tb),
+        allowances: allowances
+      });
+    }
+    bytes32 pbHash = keccak256(abi.encode(pb));
+    uint256 nonce = _accountNonce(me, other) + 1;
+    bool proposerIsLeft = other < me;
+
+    Batch memory start = XlnHanko.emptyBatch();
+    start.disputeStarts = new InitialDisputeProof[](1);
+    start.disputeStarts[0] = InitialDisputeProof({
+      counterentity: other,
+      nonce: nonce,
+      ondeltaEpoch: XlnHanko.currentEpoch(address(dep), XlnHanko.accountKey(me, other)),
+      proposerIsLeft: proposerIsLeft,
+      proofbodyHash: pbHash,
+      initialProofbody: pb,
+      watchSeed: pb.watchSeed,
+      sig: _hanko(cp, XlnHanko.disputeProofHash(
+        address(dep), XlnHanko.accountKey(me, other), nonce, proposerIsLeft, pbHash, pb.watchSeed
+      )),
+      starterInitialArguments: "",
+      starterCounterArguments: "",
+      starterCounterProofCommitment: bytes32(0)
+    });
+    if (!_submit(from, start)) return;
+    htlcCycles++;
+    _bump("htlcStart");
+    vm.warp(vm.getBlockTimestamp() + DISPUTE_WINDOW_SECONDS); // both windows elapsed, deadline still 1000 s away
+
+    Batch memory fin = XlnHanko.emptyBatch();
+    fin.disputeFinalizations = new FinalDisputeProof[](1);
+    fin.disputeFinalizations[0] = FinalDisputeProof({
+      counterentity: other,
+      initialNonce: nonce,
+      finalNonce: nonce,
+      proposerIsLeft: proposerIsLeft,
+      initialProofbodyHash: pbHash,
+      finalProofbody: pb,
+      starterArguments: "",
+      otherArguments: "",
+      sig: "",
+      startedByLeft: me < other,
+      cooperative: false
+    });
+
+    // H1: unrevealed and before the deadline -> the finalize waits.
+    if (_submit(from, fin)) {
+      htlcEarlyFinalizeViolations++;
+      return;
+    }
+    htlcEarlyRejections++;
+
+    if (reveal) {
+      Batch memory rb = XlnHanko.emptyBatch();
+      rb.revealSecrets = new SecretReveal[](1);
+      rb.revealSecrets[0] = SecretReveal({transformer: dep.deltaTransformer(), secret: secret});
+      if (!_submit(from, rb)) return;
+    } else {
+      vm.warp(deadline + 1);
+    }
+    if (_submit(from, fin)) {
+      _bump("htlcFinalize");
+      _observeDebt();
+    } else {
+      htlcLivenessViolations++;
     }
   }
 

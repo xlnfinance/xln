@@ -1,0 +1,119 @@
+{
+ "id": "R-GATE-REGISTER",
+ "statement": "The register gate reads only names of checks that run (never comments, strings, skipped or unreachable tests), finds each killer by its whole name in a layer the row claims, and only lets the register grow. A live rule states every layer as held, owed, stale (a name carries the id but the layer models an earlier version of the rule; counted as owed) or not applicable with a reason: a cell left unstated is red, and so is an n/a cell in a layer where a name already carries the id.",
+ "source": "coordinator 09-30 (PR #71 review: a skipped or deleted gate test must turn the gate red)",
+ "layers": {
+  "arrival": "n/a: a repository gate rule, not protocol behaviour; no spec page models it",
+  "quint": "n/a: a repository gate rule, not protocol behaviour; no spec models it",
+  "contract": "n/a: a gate over the repository (pure/rules); it is not contract code",
+  "rig": "n/a: a gate over the repository, with no system state for the walk",
+  "ts": "hold"
+ },
+ "killers": [
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-GATE-REGISTER it.skip, test.todo, it.skipIf and xit do not count"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "describe.skip drops itself and the tests inside it"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "an empty test file named after a rule carries nothing"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "red: the owed cell is already carried, so it must be promoted to hold"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "red: a named killer that no name matches"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "red: a row deleted"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "red: hold weakened to owed; owed weakened to absent"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "red: a cell left unstated, in every layer it is left"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "red: an unstated cell stays red when a name in that layer already carries the id"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "red: a layer said to be not applicable that a name already carries the id in"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "red: a claim may not be dropped into not applicable: hold and owed both stay claims, so the denominator cannot shrink by a reason"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "red: a stated cell, even not applicable, may not go back to unstated"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "n/a takes a one-line reason, and a bare n/a is refused"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "every live row states every layer, and every not-applicable cell gives a reason"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "red: a killer in a layer left unstated is a killer in a layer the row does not hold, besides the unstated cell"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "a not-applicable cell that a name carries is still counted as not applicable, besides being red"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "the matrix prints UNSTATED for an unstated cell and n/a for a not-applicable one"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "stale: a name carries the id but the layer models an earlier rule; no problem, counted as owed and never as held"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "red: a stale cell no name carries is an owed cell, and still counts as required"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "a held cell may go stale when its rule is revised, and a stale cell may not fall back to owed; owed may become stale"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "stale is printed with its hits, its reason is trimmed, its problem names the layer, and a killer may sit in a stale layer"
+  }
+ ]
+}

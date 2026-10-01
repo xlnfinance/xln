@@ -17,6 +17,7 @@ import {
   encodeBatch,
   encodeSingleSignerBoard,
   singleSignerLazyEntityId,
+  submitBatch,
 } from "../helpers/hanko.ts";
 
 // Single envelope: abi.encode(HankoBytes{placeholders, packedSignatures, claims, memberSignatures}).
@@ -129,7 +130,7 @@ describe("Hanko Authorization", function () {
   }
 
   it("processBatch rejects invalid Hanko", async function () {
-    const { depository } = await loadFixture(deployFixture);
+    const { depository, entity1 } = await loadFixture(deployFixture);
 
     const coder = ethers.AbiCoder.defaultAbiCoder();
     const emptyHanko = coder.encode(
@@ -147,7 +148,11 @@ describe("Hanko Authorization", function () {
     );
 
     await expect(
-      depository.processBatch(encodeBatch(emptyBatch()), emptyHanko, 1)
+      submitBatch(depository, entity1, singleSignerLazyEntityId(entity1.address), {
+        encodedBatch: encodeBatch(emptyBatch()),
+        hankoData: emptyHanko,
+        nonce: 1n,
+      })
     ).to.be.revertedWithCustomError(depository, "E4");
   });
 
@@ -189,13 +194,11 @@ describe("Hanko Authorization", function () {
     const encodedBatch = encodeBatch(batch);
     const entityNonce = await depository.entityNonces(entity1Id);
     const nextNonce = entityNonce + 1n;
-    const batchHash = await computeDepositoryBatchHash(depository, encodedBatch, nextNonce);
+    const batchHash = await computeDepositoryBatchHash(depository, entity1Id, encodedBatch, nextNonce);
     const hankoData = buildSingleSignerHanko(entity1Id, batchHash, deriveHardhatPrivateKey(1));
 
     await expect(
-      depository
-        .connect(entity1)
-        .processBatch(encodedBatch, hankoData, nextNonce)
+      submitBatch(depository, entity1, entity1Id, { encodedBatch, hankoData, nonce: nextNonce })
     ).to.not.revert(ethers);
 
     const entity1Balance = await depository._reserves(entity1Id, tokenId);
@@ -217,11 +220,11 @@ describe("Hanko Authorization", function () {
     });
     const encodedBatch = encodeBatch(batch);
     const nextNonce = (await depository.entityNonces(entity1Id)) + 1n;
-    const batchHash = await computeDepositoryBatchHash(depository, encodedBatch, nextNonce);
+    const batchHash = await computeDepositoryBatchHash(depository, entity1Id, encodedBatch, nextNonce);
     const hankoData = buildHighSHanko(entity1Id, batchHash, deriveHardhatPrivateKey(1));
 
     await expect(
-      depository.connect(entity1).processBatch(encodedBatch, hankoData, nextNonce)
+      submitBatch(depository, entity1, entity1Id, { encodedBatch, hankoData, nonce: nextNonce })
     ).to.be.revertedWithCustomError(depository, "E4");
 
     expect(await depository.entityNonces(entity1Id)).to.equal(0n);
@@ -457,11 +460,11 @@ describe("Hanko Authorization", function () {
       reserveToReserve: [{ receivingEntity: recipient, tokenId, amount: 100n }],
     }));
     for (const [nonce, useRaw] of [[1n, true], [2n, false], [3n, true]] as const) {
-      const batchHash = await computeDepositoryBatchHash(depository, encoded, nonce);
+      const batchHash = await computeDepositoryBatchHash(depository, lazyId, encoded, nonce);
       const hankoData = useRaw
         ? buildRawSignerHanko(batchHash, privateKey)
         : buildSingleSignerHanko(lazyId, batchHash, privateKey);
-      await expect(depository.processBatch(encoded, hankoData, nonce))
+      await expect(submitBatch(depository, entity1, lazyId, { encodedBatch: encoded, hankoData, nonce }))
         .to.emit(depository, "HankoBatchProcessed")
         .withArgs(lazyId, batchHash, nonce);
     }
@@ -476,7 +479,7 @@ describe("Hanko Authorization", function () {
     const lazyId = singleSignerLazyEntityId(entity1.address);
     const encoded = encodeBatch(emptyBatch());
     const nonce = 1n;
-    const batchHash = await computeDepositoryBatchHash(depository, encoded, nonce);
+    const batchHash = await computeDepositoryBatchHash(depository, lazyId, encoded, nonce);
     const signature = new ethers.SigningKey(privateKey).sign(ethers.getBytes(batchHash));
     const good = signature.serialized;
     expect(await entityProvider.verifyHankoSignature(good, batchHash)).to.deep.equal([lazyId, true]);
@@ -487,19 +490,19 @@ describe("Hanko Authorization", function () {
       ethers.toBeHex(signature.v === 28 ? 27 : 28, 1),
     ]);
     expect(await entityProvider.verifyHankoSignature(highS, batchHash)).to.deep.equal([ethers.ZeroHash, false]);
-    await expect(depository.processBatch(encoded, highS, nonce)).to.be.revertedWithCustomError(depository, "E4");
+    await expect(submitBatch(depository, entity1, lazyId, { encodedBatch: encoded, hankoData: highS, nonce })).to.be.revertedWithCustomError(depository, "E4");
 
     const badV = ethers.concat([signature.r, signature.s, "0x1d"]); // v = 29
     expect(await entityProvider.verifyHankoSignature(badV, batchHash)).to.deep.equal([ethers.ZeroHash, false]);
-    await expect(depository.processBatch(encoded, badV, nonce)).to.be.revertedWithCustomError(depository, "E4");
+    await expect(submitBatch(depository, entity1, lazyId, { encodedBatch: encoded, hankoData: badV, nonce })).to.be.revertedWithCustomError(depository, "E4");
 
     // 64 or 66 bytes are neither the raw shape nor a valid abi.encode(HankoBytes).
     const short = ethers.dataSlice(good, 0, 64);
     const long = ethers.concat([good, "0x00"]);
     await expect(entityProvider.verifyHankoSignature(short, batchHash)).to.be.revert(ethers);
     await expect(entityProvider.verifyHankoSignature(long, batchHash)).to.be.revert(ethers);
-    await expect(depository.processBatch(encoded, short, nonce)).to.be.revert(ethers);
-    await expect(depository.processBatch(encoded, long, nonce)).to.be.revert(ethers);
+    await expect(submitBatch(depository, entity1, lazyId, { encodedBatch: encoded, hankoData: short, nonce })).to.be.revert(ethers);
+    await expect(submitBatch(depository, entity1, lazyId, { encodedBatch: encoded, hankoData: long, nonce })).to.be.revert(ethers);
     expect(await depository.entityNonces(lazyId)).to.equal(0n);
   });
 

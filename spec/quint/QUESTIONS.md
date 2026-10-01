@@ -512,7 +512,7 @@ Epoch 0 has no implicit proof (`epoch0RefusesAnImplicitStartTest`): a fresh Acco
 Single token: the contract's starter names the tokens of an implicit start (a token it omits keeps its collateral); that needs multi-token Accounts and is v2 (V2.md).
 Not modelled: that the non-starter reads the implicit body from the start calldata (the event carries only the hash): a J-watcher duty of the Entity/Runtime layers. The honest side's counter
 needs windows at least the dispute's; `honestCounterId` does not check it, so a tip with shorter windows than an implicit start's leaves time stopped rather than a visible loss (the Runtime never signs below the floor).
-Mutants: see `mutants/chain.json` (`implicit-*`, `n3-*`, `deposit-advances-the-epoch`) and `mutants/settle.json` (`first-proof-*`, `acker-signs-first-proof-*`).
+Mutants: see `mutants/chain.json` (`implicit-*`, `r-windows-never-shorten-*`, `deposit-advances-the-epoch`) and `mutants/settle.json` (`first-proof-*`, `acker-signs-first-proof-*`).
 
 **E11. Found while writing it.**
 (a) The first version treated any lock in OUT slot k as the onward lock: peer 2's own lock in that slot broke `deadline_chain`

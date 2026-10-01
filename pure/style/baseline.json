@@ -2,9 +2,16 @@
   "long-line": 2,
   "no-assign-member": 1,
   "no-class": 1,
+  "no-comma-sequence": 0,
   "no-let": 0,
   "no-loop": 0,
   "no-mutating-call": 5,
+  "no-nested-ternary": 19,
+  "no-og-source-ref": 31,
+  "no-problems-list": 7,
+  "no-string-error": 88,
   "no-throw": 29,
+  "no-try": 9,
+  "no-unknown-cast": 61,
   "unreachable": 0
 }

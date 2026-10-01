@@ -2,19 +2,367 @@ name: build-and-test
 
 on:
   push:
-    branches: [main, develop]
+    branches: [main, development]
+  # Every pull request, whatever base it targets or files it touches: the One gate checks are required, so a PR that never
+  # got them would sit blocked forever. rules/ci/workflow/ci-triggers.ts refuses a branches, paths or types filter here.
   pull_request:
-    branches: [main, develop]
+  # The full set once a night on main: the spec jobs then ignore their pass marker, and og's informational suites run (they are not run on PRs).
+  schedule:
+    - cron: '17 2 * * *'
   workflow_dispatch:
 
+# Pull requests cancel their own earlier run. A push to main or development is never cancelled (a full run always finishes): a newer push
+# waits as the one pending run, and replaces an earlier pending one. rules/ci/split/ci-split.ts pins this.
 concurrency:
-  group: build-and-test-${{ github.ref }}
-  cancel-in-progress: true
+  group: build-and-test-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' && !startsWith(github.head_ref, 'promote/') }}
 
 jobs:
-  contracts-test:
-    name: Contracts
+  # The one gate: the same commands a contributor runs from pure/, in three parallel jobs. `one-gate` is the single
+  # result to require; it also holds the fork's contract job (contracts-fork: BrowserVM and deploy-gate tests). The
+  # Foundry suite joins the gate in `bun rules/check.ts` (PR 89), so gate-static sets Foundry and forge-std up.
+  # Bun is pinned to 1.4.0 in every job. pure/rules/ci/ci-drift.test.ts keeps each bun-version equal to the root
+  # package.json's packageManager, and `bun rules/check.ts` refuses a Bun older than pure/package.json's engines.bun
+  # (older Bun segfaults on Worker termination mid-run).
+  gate-static:
+    name: One gate (tsc, rules, frozen, style)
     runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          # rules/check.ts reads the register at the merge base with origin/main; frozen.ts diffs against og at 566c850.
+          fetch-depth: 0
+
+      - name: Setup Node 22
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22.13.0'
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: 1.4.0
+
+      # rules/ calls `ast-grep` from PATH (also from its tests); style/check.ts runs the same version through `uvx --from ast-grep-cli==0.45.3`.
+      # The pins are the arguments of the script below; the cache key repeats them, and a new pin is a new key. The script uses what the
+      # cache restored (uvx finds the pinned ast-grep offline) and otherwise installs with retries, so a slow PyPI cannot turn a lane red.
+      - name: Cache uv and ast-grep
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            ~/.local/bin
+            ~/.local/share/uv
+            ~/.local/share/pipx
+            ~/.cache/uv
+          key: '${{ runner.os }}-uv-0.8.17-ast-grep-cli==0.45.3'
+
+      - name: Setup ast-grep
+        env:
+          PIP_DEFAULT_TIMEOUT: '120'
+          UV_HTTP_TIMEOUT: '120'
+        run: bash .github/scripts/setup-ast-grep.sh uv==0.8.17 ast-grep-cli==0.45.3
+
+      - name: Cache dependencies
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ~/.bun/install/cache
+          key: ${{ runner.os }}-bun-${{ hashFiles('**/bun.lock', '**/package.json') }}
+          restore-keys: |
+            ${{ runner.os }}-bun-
+
+      - name: Install dependencies
+        run: |
+          bun install --frozen-lockfile
+          cd pure
+          bun install --frozen-lockfile
+
+      # `bun rules/check.ts` runs `forge test --root contracts` (PR 89) and is red without forge or forge-std.
+      - name: Setup Foundry
+        uses: foundry-rs/foundry-toolchain@908c540300062bd5a7e473851cdb4282204cee09 # v1
+        with:
+          version: v1.7.1
+
+      # forge-std is a pinned git checkout (contracts/scripts/setup-forge-std.sh), which fetches from GitHub; the cached checkout is verified by the same script.
+      - name: Cache forge-std
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: contracts/lib/forge-std
+          key: ${{ runner.os }}-forge-std-${{ hashFiles('contracts/scripts/setup-forge-std.sh') }}
+
+      # Hardhat downloads the solc named in contracts/hardhat.config.ts when it compiles (the contracts/ part of the gate builds typechain).
+      - name: Cache solc
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ~/.cache/hardhat-nodejs
+          key: ${{ runner.os }}-solc-${{ hashFiles('contracts/hardhat.config.ts') }}
+
+      - name: Setup forge-std
+        run: cd contracts && bun run forge:setup
+
+      - name: Typecheck
+        working-directory: pure
+        run: ../node_modules/.bin/tsc --noEmit -p .
+
+      - name: Rule register, tree style, folder width, contract-test placement
+        working-directory: pure
+        run: bun rules/check.ts
+
+      - name: og is untouched
+        working-directory: pure
+        run: bun rules/checks/frozen.ts
+
+      - name: Style ratchet
+        working-directory: pure
+        run: bun style/check.ts
+
+  gate-tests:
+    name: One gate (bun test)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node 22
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22.13.0'
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: 1.4.0
+
+      # rules/ calls `ast-grep` from PATH (also from its tests); style/check.ts runs the same version through `uvx --from ast-grep-cli==0.45.3`.
+      # The pins are the arguments of the script below; the cache key repeats them, and a new pin is a new key. The script uses what the
+      # cache restored (uvx finds the pinned ast-grep offline) and otherwise installs with retries, so a slow PyPI cannot turn a lane red.
+      - name: Cache uv and ast-grep
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            ~/.local/bin
+            ~/.local/share/uv
+            ~/.local/share/pipx
+            ~/.cache/uv
+          key: '${{ runner.os }}-uv-0.8.17-ast-grep-cli==0.45.3'
+
+      - name: Setup ast-grep
+        env:
+          PIP_DEFAULT_TIMEOUT: '120'
+          UV_HTTP_TIMEOUT: '120'
+        run: bash .github/scripts/setup-ast-grep.sh uv==0.8.17 ast-grep-cli==0.45.3
+
+      - name: Cache dependencies
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ~/.bun/install/cache
+          key: ${{ runner.os }}-bun-${{ hashFiles('**/bun.lock', '**/package.json') }}
+          restore-keys: |
+            ${{ runner.os }}-bun-
+
+      - name: Install dependencies
+        run: |
+          bun install --frozen-lockfile
+          cd pure
+          bun install --frozen-lockfile
+
+      - name: Test
+        working-directory: pure
+        run: bun test
+
+  # `bun run test:seeds` runs these three seeds in turn (pure/package.json); one job per seed makes them parallel.
+  gate-seeds:
+    name: One gate (seed ${{ matrix.seed }})
+    if: ${{ github.event_name != 'pull_request' || github.base_ref != 'development' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        seed: ['0', '12345', '987654']
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node 22
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22.13.0'
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: 1.4.0
+
+      # rules/ calls `ast-grep` from PATH (also from its tests); style/check.ts runs the same version through `uvx --from ast-grep-cli==0.45.3`.
+      # The pins are the arguments of the script below; the cache key repeats them, and a new pin is a new key. The script uses what the
+      # cache restored (uvx finds the pinned ast-grep offline) and otherwise installs with retries, so a slow PyPI cannot turn a lane red.
+      - name: Cache uv and ast-grep
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            ~/.local/bin
+            ~/.local/share/uv
+            ~/.local/share/pipx
+            ~/.cache/uv
+          key: '${{ runner.os }}-uv-0.8.17-ast-grep-cli==0.45.3'
+
+      - name: Setup ast-grep
+        env:
+          PIP_DEFAULT_TIMEOUT: '120'
+          UV_HTTP_TIMEOUT: '120'
+        run: bash .github/scripts/setup-ast-grep.sh uv==0.8.17 ast-grep-cli==0.45.3
+
+      - name: Cache dependencies
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ~/.bun/install/cache
+          key: ${{ runner.os }}-bun-${{ hashFiles('**/bun.lock', '**/package.json') }}
+          restore-keys: |
+            ${{ runner.os }}-bun-
+
+      - name: Install dependencies
+        run: |
+          bun install --frozen-lockfile
+          cd pure
+          bun install --frozen-lockfile
+
+      - name: Test with seed ${{ matrix.seed }}
+        working-directory: pure
+        run: SEEDS="${{ matrix.seed }}" bun run test:seeds
+
+  # The spec suites, the same commands a contributor runs in spec/ (spec/README.md). Each job keeps a marker in the Actions cache keyed on
+  # a hash of the files it reads, saved only when the job passed: a run over the same spec files reads the marker and skips the work, and
+  # still reports success, so a PR that leaves spec/ alone costs about a minute and a required check is never missing.
+  gate-quint:
+    name: One gate (quint)
+    if: ${{ github.event_name != 'pull_request' || github.base_ref != 'development' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Setup Node 22
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22.13.0'
+
+      - name: Marker of a pass on these files
+        id: marker
+        if: github.event_name != 'schedule'
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: .spec-passed
+          key: ${{ runner.os }}-node-22.13.0-quint-${{ hashFiles('spec/quint/**') }}
+
+      - name: Install Quint
+        if: steps.marker.outputs.cache-hit != 'true'
+        working-directory: spec/quint
+        run: npm ci
+
+      # Typecheck, scenario tests, invariants and witnesses by simulation, every module (spec/quint/check.sh).
+      - name: Quint spec
+        if: steps.marker.outputs.cache-hit != 'true'
+        working-directory: spec/quint
+        run: bash check.sh
+
+      - name: Record the pass
+        if: steps.marker.outputs.cache-hit != 'true'
+        run: mkdir -p .spec-passed && echo ok > .spec-passed/quint
+
+  # The Arrival spec: `node test.mjs` in spec/ runs every page and every planted bug, 167 cases. One case (J batch with deposit legs) takes
+  # about 85 minutes alone, so it is shard 0 by itself and shards 1 to 3 split the rest (spec/tools/shard.mjs). Memory is why the pool is two wide.
+  gate-arrival:
+    name: One gate (arrival shard ${{ matrix.shard }})
+    if: ${{ github.event_name != 'pull_request' || github.base_ref != 'development' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: ['0', '1', '2', '3']
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Setup Node 22
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22.13.0'
+
+      - name: Marker of a pass on these files
+        id: marker
+        if: github.event_name != 'schedule'
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: .spec-passed
+          key: ${{ runner.os }}-node-22.13.0-arrival-${{ matrix.shard }}-of-4-${{ hashFiles('spec/**') }}
+
+      - name: Install the spec's dependencies
+        if: steps.marker.outputs.cache-hit != 'true'
+        working-directory: spec
+        run: npm ci
+
+      - name: Build Arrival
+        if: steps.marker.outputs.cache-hit != 'true'
+        working-directory: spec/arrival
+        # pnpm at the version spec/arrival/package.json pins, from npm: corepack of Node 22.13 fails its signature check ("Cannot find matching keyid").
+        run: |
+          npm install --global "pnpm@$(node -p "require('./package.json').packageManager.replace('pnpm@','')")"
+          pnpm install --frozen-lockfile
+          pnpm build
+
+      - name: Arrival spec, shard ${{ matrix.shard }} of 4
+        if: steps.marker.outputs.cache-hit != 'true'
+        working-directory: spec
+        env:
+          TEST_JOBS: '2'
+        run: SHARD="${{ matrix.shard }}/4" node test.mjs
+
+      - name: Record the pass
+        if: steps.marker.outputs.cache-hit != 'true'
+        run: mkdir -p .spec-passed && echo ok > .spec-passed/arrival
+
+  # The single result to require. It fails when any part of the gate failed, was cancelled or was skipped, except on a pull request into
+  # development, where the slow parts are skipped by design (their `if`) and only the two fast parts, which never skip, must pass.
+  one-gate:
+    name: One gate
+    if: ${{ always() }}
+    needs: [gate-static, gate-tests, gate-seeds, contracts-fork, gate-quint, gate-arrival]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Every part passed
+        env:
+          FAST: ${{ github.event_name == 'pull_request' && github.base_ref == 'development' }}
+          STATIC: ${{ needs.gate-static.result }}
+          TESTS: ${{ needs.gate-tests.result }}
+          SEEDS: ${{ needs.gate-seeds.result }}
+          FORK: ${{ needs.contracts-fork.result }}
+          QUINT: ${{ needs.gate-quint.result }}
+          ARRIVAL: ${{ needs.gate-arrival.result }}
+        run: |
+          echo "fast-lane=$FAST static=$STATIC tests=$TESTS seeds=$SEEDS contracts-fork=$FORK quint=$QUINT arrival=$ARRIVAL"
+          test "$STATIC" = success
+          test "$TESTS" = success
+          test "$SEEDS" = success || test "$FAST:$SEEDS" = true:skipped
+          test "$FORK" = success || test "$FAST:$FORK" = true:skipped
+          test "$QUINT" = success || test "$FAST:$QUINT" = true:skipped
+          test "$ARRIVAL" = success || test "$FAST:$ARRIVAL" = true:skipped
+
+  # og's inherited Hardhat suite is frozen at 566c850 and known red (122 pass, 79 fail). It is reported, never a gate:
+  # no other job needs it, and continue-on-error keeps its red from failing the run that carries our own signals.
+  contracts-test:
+    name: Contracts (og, known red, informational)
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    continue-on-error: true
     steps:
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -56,8 +404,75 @@ jobs:
       - name: Run full contract tests
         run: bun run test:contracts:full
 
+  contracts-fork:
+    name: Contracts (fork) BrowserVM
+    if: ${{ github.event_name != 'pull_request' || github.base_ref != 'development' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Setup Node 22
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22.13.0'
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: 1.4.0
+
+      - name: Cache dependencies
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ~/.bun/install/cache
+          key: ${{ runner.os }}-bun-${{ hashFiles('**/bun.lock', '**/package.json') }}
+          restore-keys: |
+            ${{ runner.os }}-bun-
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      # deploy-dry-run.test.ts starts anvil.
+      - name: Setup Foundry
+        uses: foundry-rs/foundry-toolchain@908c540300062bd5a7e473851cdb4282204cee09 # v1
+        with:
+          version: v1.7.1
+
+      # Hardhat downloads the solc named in contracts/hardhat.config.ts when it compiles.
+      - name: Cache solc
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ~/.cache/hardhat-nodejs
+          key: ${{ runner.os }}-solc-${{ hashFiles('contracts/hardhat.config.ts') }}
+
+      - name: Cache forge-std
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: contracts/lib/forge-std
+          key: ${{ runner.os }}-forge-std-${{ hashFiles('contracts/scripts/setup-forge-std.sh') }}
+
+      # The contracts/ part of the gate, the same command as locally: `bun rules/check.ts --contracts-only` rebuilds the fork (the
+      # committed typechain-types are its ABI and bytecode: a source change without a rebuild is red) and runs every BrowserVM and
+      # deploy-gate test, one file per process (several BrowserVM stacks in one process exhaust memory). Not a loop written here again:
+      # a test run only in this workflow went red on GitHub alone once.
+      - name: Run the contracts/ part of the gate
+        run: |
+          cd pure
+          bun install --frozen-lockfile
+          bun rules/check.ts --contracts-only
+
+      # The Foundry suite (test/foundry) counts as gated, so it runs here through the gate's own forge part (pin script for forge-std,
+      # then forge test, with the skip and test-count checks), the same command as locally: `bun rules/check.ts --forge-only`.
+      - name: Run the Foundry suite through the gate
+        run: |
+          cd contracts && bun run forge:setup
+          cd ../pure && bun install --frozen-lockfile && bun rules/check.ts --forge-only
+
   build-xln:
     name: Runtime Checks
+    if: ${{ github.event_name != 'pull_request' || github.base_ref != 'development' }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -103,6 +518,7 @@ jobs:
 
   frontend-build:
     name: Frontend Build
+    if: ${{ github.event_name != 'pull_request' || github.base_ref != 'development' }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -144,10 +560,18 @@ jobs:
           bun run build:static
 
   e2e-tests:
-    name: E2E Tests
+    name: E2E Tests (og, informational)
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
-    timeout-minutes: 30
-    needs: [build-xln, frontend-build, contracts-test]
+    timeout-minutes: 60
+    # og's Playwright suite is og's: its first run in CI failed one test (e2e-radapter-remote-part-2 "runtime dropdown
+    # switches app-imported remote runtimes without manager route") and og's flow coverage contract and audit pack fail
+    # on og's frozen tree. Reported, never a gate. Promote it by deleting continue-on-error once it is green.
+    continue-on-error: true
+    # Not contracts-test: og's Hardhat suite is known red and was skipping this job. `bun run gate:ci` cannot be used
+    # either, because its step list (core/, frozen) runs that same suite first and stops at its first failure. The job
+    # runs gate:ci's own steps minus the ones other jobs already run (check:src, frontend check) and the contract suite.
+    needs: [build-xln, frontend-build]
     steps:
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -214,10 +638,68 @@ jobs:
           # Clear any existing deployment cache to avoid reconciliation issues in CI
           rm -rf jurisdictions/ignition/deployments/chain-* || true
 
-      - name: Run CI release gate
-        run: bun run gate:ci
+      - name: Generate frontend aliases
+        run: cd frontend && bunx svelte-kit sync
+
+      - name: Fast E2E
+        run: bun run test:e2e:fast
         env:
           CI: true
+
+      # gate:ci's other steps. Each is reported below even when it fails (og's flow coverage contract and
+      # security audit pack fail on og's own tree at 566c850).
+      - name: Flow E2E coverage contract
+        id: og-coverage
+        if: ${{ always() }}
+        continue-on-error: true
+        run: bun run test:e2e:coverage
+
+      - name: RPC settlement parity
+        id: og-rpc
+        if: ${{ always() }}
+        continue-on-error: true
+        run: bun run test:rpc-settlement
+
+      - name: Security audit pack
+        id: og-audit
+        if: ${{ always() }}
+        continue-on-error: true
+        run: bun run security:audit-pack
+
+      - name: Storage WAL smoke
+        id: og-wal
+        if: ${{ always() }}
+        continue-on-error: true
+        run: bun run test:persistence:cli
+
+      - name: Watchtower smoke
+        id: og-watchtower
+        if: ${{ always() }}
+        continue-on-error: true
+        run: bun run test:watchtower:smoke
+
+      - name: Bootstrap soundcheck
+        id: og-bootstrap
+        if: ${{ always() }}
+        continue-on-error: true
+        run: bun run prod:bootstrap:soundcheck
+
+      - name: Report og steps (informational)
+        if: ${{ always() }}
+        env:
+          OUTCOMES: >-
+            coverage=${{ steps.og-coverage.outcome }}
+            rpc=${{ steps.og-rpc.outcome }}
+            audit=${{ steps.og-audit.outcome }}
+            wal=${{ steps.og-wal.outcome }}
+            watchtower=${{ steps.og-watchtower.outcome }}
+            bootstrap=${{ steps.og-bootstrap.outcome }}
+        run: |
+          echo "### og steps (informational)" >> "$GITHUB_STEP_SUMMARY"
+          for o in $OUTCOMES; do
+            echo "- $o" >> "$GITHUB_STEP_SUMMARY"
+            case "$o" in *=success) ;; *) echo "::warning::og step $o" ;; esac
+          done
 
       - name: Print logs on failure
         if: failure()

@@ -1,0 +1,54 @@
+{
+ "id": "J2",
+ "statement": "A stale or already-applied dispute op is skipped inside processBatch with DisputeOpSkipped; the rest of the batch lands; the runtime reads the skip event.",
+ "source": "contracts-decisions.md J2",
+ "layers": {
+  "arrival": "hold",
+  "quint": "hold",
+  "contract": "hold",
+  "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
+  "ts": "hold"
+ },
+ "killers": [
+  {
+   "kind": "test",
+   "layer": "contract",
+   "name": "J2 a stale or already-applied dispute op is skipped, the rest of the batch lands"
+  },
+  {
+   "kind": "mutant",
+   "layer": "quint",
+   "name": "contract-reverts-on-moved-dispute"
+  },
+  {
+   "kind": "mutant",
+   "layer": "quint",
+   "name": "entity-ignores-the-skip-event"
+  },
+  {
+   "kind": "bug",
+   "layer": "arrival",
+   "name": "stale-reverts"
+  },
+  {
+   "kind": "bug",
+   "layer": "arrival",
+   "name": "ignores-skip"
+  },
+  {
+   "kind": "mutant",
+   "layer": "quint",
+   "name": "skip-outcome-not-read"
+  },
+  {
+   "kind": "mutant",
+   "layer": "quint",
+   "name": "skip-read-as-started"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "J2: a dispute op the chain skipped is told to its Account, and the batch is done all the same"
+  }
+ ]
+}
