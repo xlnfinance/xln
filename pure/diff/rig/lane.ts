@@ -614,7 +614,8 @@ export const createLane = (cfg: LaneConfig): Lane => {
     );
     cmp("advanced", rec !== undefined, c !== null);
     if (rec !== undefined && c !== null && !rec.materializedState) {
-      cmp("postStateHash", rec.postStateHash, c.frame.postStateHash);
+      // equal or not: the digest differs from one run to the next (og and the rewrite alike), so a printed pair could never be a known finding
+      cmp("postStateHash", true, rec.postStateHash === c.frame.postStateHash);
     }
     const planWake = c === null ? undefined : runtimeWake(after, Number(after.timestamp), undefined, keyed);
     const pings = planWake?.input.entityInputs ?? [];
