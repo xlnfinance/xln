@@ -65,10 +65,10 @@ const persist = (row: Row | undefined): readonly Effect[] => (row === undefined 
 export const begin = (host: Host, at: Timestamp, ops: Tick = TICK): Result<Stepped, Halt> => {
   const first = host.queue[0];
   if (first === undefined || !idle(host)) return ok({ host, effects: [] });
-  const taken = host.queue.filter((item) => item.to === first.to).slice(0, host.limits.perFrame);
-  const input = { at, to: first.to, inputs: taken.map((item) => item.input) };
+  const places = host.queue.flatMap((item, i) => (item.to === first.to ? [i] : [])).slice(0, host.limits.perFrame);
+  const input = { at, to: first.to, inputs: places.map((i) => (host.queue[i] as Item).input) };
   return map(ops.apply(host.runtime, input), (runtime) => ({
-    host: { ...host, runtime, queue: host.queue.filter((item) => !taken.includes(item)) },
+    host: { ...host, runtime, queue: host.queue.filter((_, i) => !places.includes(i)) },
     effects: persist(runtime.staged),
   }));
 };

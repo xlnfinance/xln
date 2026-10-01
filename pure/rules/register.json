@@ -101,6 +101,11 @@
      "kind": "test",
      "layer": "ts",
      "name": "R-X1 a forged ack, a future frame and a stranger's message are rows with notices, never a halt"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-X1 one input queued three times is three inputs: the third stays queued"
     }
    ]
   },
@@ -4048,8 +4053,8 @@
    "statement": "The Host queues each peer's messages up to a bound and drops the rest with a notice; the Host's own commands and timers have no peer's bound; a bound below one is refused.",
    "source": "spec/transport/link.scm (v1: a bounded inbound queue per peer, over the bound is loss); R-X1",
    "layers": {
-    "arrival": "n/a: the transport page takes the bound as loss, which its channel already has; it models no queue",
-    "quint": "n/a: the Quint model has an unordered network with free redelivery and no Host queue",
+    "arrival": "n/a: link.scm models no queue (a bound is loss, which its channel has) and spec/runtime/tick.scm has a lossless, unbounded queue with no sender's bound",
+    "quint": "n/a: spec/quint/runtime.qnt has a volatile inbox set (line 50), unbounded, not per sender, with no drop; a bound that drops is the Host's",
     "contract": "n/a: a Host queue is off-chain",
     "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
     "ts": "hold"

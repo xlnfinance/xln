@@ -105,6 +105,13 @@ describe("host", () => {
     expect(begun.host.queue.map((i) => i.to)).toEqual([BOB, ALICE]);
   });
 
+  test("R-X1 one input queued three times is three inputs: the third stays queued", () => {
+    const item = command(ALICE, open(BOB));
+    const begun = unhalted(begin([item, item, item].reduce(submit, hostFor(ALICE)), stamp(1n)));
+    expect(begun.host.runtime.staged?.input.inputs).toHaveLength(BOUNDS.perFrame);
+    expect(begun.host.queue).toHaveLength(3 - BOUNDS.perFrame);
+  });
+
   test("R-DURABLE after a crash the Host is the durable rows alone, and every committed output leaves again", () => {
     const { alice } = aliceToBob();
     const staged = unhalted(begin(submit(alice, command(ALICE, credit(BOB, 9n))), stamp(90n)));
