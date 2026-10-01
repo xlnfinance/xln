@@ -1,0 +1,64 @@
+{
+ "id": "R-HTLC-FORWARD",
+ "statement": "An Entity that is told how a payment passes through it acts on it by itself, as frames of its Accounts: a hub that holds a lock for a hashlock it has a forward entry for locks the same amount and hashlock on the next hop with a deadline one hop (reserve plus lag) sooner, passes the secret to the lock it came in on when the next hop shows it, and gives that lock up when the next hop gives its own up or its Account refuses the lock; a lock too near its deadline for another hop is given up, not forwarded. A payee with an entry resolves a lock for the token and at least the amount it asked, and gives any other up. An entry belongs to one hashlock and one peer: only that peer's lock is forwarded, and a second entry for a hashlock is refused. Owed: a next hop that never answers (expiry and the on-chain reveal of a hub that learned the secret), entries that outlive a payment, and where an entry comes from (a route on the lock).",
+ "source": "consolidation-plan.md e2e rows 4 and 5 (deadlines chain by HOP plus window; a downstream failure reaches A); R-HTLC-CLOCK; R-ONE-LOCK-PER-HASH; testnet-e2e step S5 (gap htlc-route)",
+ "layers": {
+  "arrival": "owed: spec thread (the entity page has no paybook)",
+  "quint": "owed: spec thread (the Quint model has no multi-hop Entity)",
+  "contract": "n/a: no contract code takes part; the chain sees only the clause of each Account's proof",
+  "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
+  "ts": "hold"
+ },
+ "killers": [
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-HTLC-FORWARD a lock made to the hub is forwarded and resolved back to Alice"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-HTLC-FORWARD the next hop's lock is one hop sooner and carries the same amount and hashlock"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-HTLC-FORWARD a payee asked for more than the lock holds gives it up and the hub gives up Alice's"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-HTLC-FORWARD a lock too near its deadline for another hop is given up, not forwarded"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-HTLC-FORWARD a payee that was asked for another token gives the lock up"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-HTLC-FORWARD a lock the next hop's Account refuses is told and given up upstream"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-HTLC-FORWARD one next hop giving its lock up fails only the payment that went to it"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-HTLC-FORWARD an entry forwards only a lock of the peer it names"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-HTLC-FORWARD a second entry for one hashlock is refused and the first stands"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-HTLC-FORWARD a payment with no hop to forward to waits and moves nothing"
+  }
+ ]
+}
