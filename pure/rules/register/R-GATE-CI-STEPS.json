@@ -1,0 +1,84 @@
+{
+ "id": "R-GATE-CI-STEPS",
+ "statement": "Every command of a job behind GitHub's `One gate` is a command of the gate or listed set-up (installs, cd, the ast-grep script, the spec dependencies and build, the spec pass marker), and every gate command (tsc, bun rules/check.ts, frozen, style, bun test, test:seeds, the Quint check.sh, the Arrival node test.mjs) runs in some such job, so a step only CI runs, such as a test loop, or a gate step CI drops, is a problem on the next run of the drift test.",
+ "source": "coordinator 10-01 08:48 (same hole: a CI-only test loop); 10:12 (Quint and Arrival join required CI)",
+ "layers": {
+  "arrival": "n/a: a repository gate rule, not protocol behaviour; no spec page models it",
+  "quint": "n/a: a repository gate rule, not protocol behaviour; no spec models it",
+  "contract": "n/a: a gate over the repository (pure/rules and CI); it is not contract code",
+  "rig": "n/a: a gate over the repository, with no system state for the walk",
+  "ts": "hold"
+ },
+ "killers": [
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-GATE-CI-STEPS jobs are cut at their ids, and one-gate names the jobs it needs"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-GATE-CI-STEPS a run is one line, or a block read to its dedent; && and ; split it, a continuation joins it, other keys are not read"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-GATE-CI-STEPS a command in a comment is not a command: the workflow is read without its comments"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-GATE-CI-STEPS a workflow whose gate jobs run exactly the gate commands, with set-up, agrees"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-GATE-CI-STEPS a loop that runs tests in the workflow only is named, with its job and each command of it"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-GATE-CI-STEPS any other command in a gate job is named, a gate flag that is not a part flag included"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-GATE-CI-STEPS set-up is exact too: a cd into a substitution, an install that adds a package, a script given other arguments"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-GATE-CI-STEPS a command in a job that one-gate does not need is not judged"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-GATE-CI-STEPS a gate command that no gate job runs any more is named"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-GATE-CI-STEPS a one-gate that needs a job the workflow does not have is named"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-GATE-CI-STEPS a workflow with no one-gate job is not judged"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-GATE-CI-STEPS the step comparison is part of the drift check"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-GATE-CI-STEPS the jobs behind One gate run the gate's commands and set-up only"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-GATE-CI-STEPS the check is not vacuous: the real one-gate needs jobs, and they run the gate's commands"
+  }
+ ]
+}

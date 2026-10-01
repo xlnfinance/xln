@@ -1,0 +1,54 @@
+{
+ "id": "R-SETTLE-CREDIT",
+ "statement": "A settlement that takes collateral out (C2R) is co-signed only if both sides stay within their credit afterwards, the same RCPAN bound a payment meets; otherwise it is refused, never signed. The ts cell holds the ledger-level refusal; the approver that maps signed diffs to a withdrawal is owed A4. The Quint cell holds the predicate `settlementOk`, checked against the chain's payout in compose.qnt; no Account or settle action calls it, so the co-signing path itself is not in the model.",
+ "source": "contracts-decisions.md, Account-layer decisions 09-30 (Q-X-3 closed)",
+ "layers": {
+  "arrival": "owed: spec thread, next Arrival page (id not in a name yet)",
+  "quint": "hold",
+  "contract": "n/a: co-signing is an off-chain decision; the chain pays out the signed settlement (R-CONSERVE)",
+  "rig": "owed: #69 (known finding, owner A1 cut)",
+  "ts": "hold"
+ },
+ "killers": [
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-SETTLE-CREDIT a withdrawal that leaves the allocation above the collateral is refused"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-SETTLE-CREDIT a Left withdrawal that leaves Left past its credit is refused"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-SETTLE-CREDIT a withdrawal counts the open holds as paid"
+  },
+  {
+   "kind": "mutant",
+   "layer": "quint",
+   "name": "settlement-ignores-credit"
+  },
+  {
+   "kind": "mutant",
+   "layer": "quint",
+   "name": "settlement-ignores-open-clauses"
+  },
+  {
+   "kind": "mutant",
+   "layer": "quint",
+   "name": "settlement-checks-the-old-collateral"
+  },
+  {
+   "kind": "mutant",
+   "layer": "quint",
+   "name": "settlement-left-keeps-its-claim"
+  },
+  {
+   "kind": "mutant",
+   "layer": "quint",
+   "name": "settlement-withdraws-past-collateral"
+  }
+ ]
+}

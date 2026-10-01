@@ -1,0 +1,34 @@
+{
+ "id": "R-GATE-FROZEN",
+ "statement": "Nothing under core/ or jurisdictions/ differs from og 566c850 in any way, with an empty allowlist, and a failing git is red.",
+ "source": "coordinator 09-30 (PR #71 review: a skipped or deleted gate test must turn the gate red)",
+ "layers": {
+  "arrival": "n/a: a repository gate rule, not protocol behaviour; no spec page models it",
+  "quint": "n/a: a repository gate rule, not protocol behaviour; no spec models it",
+  "contract": "n/a: a gate over the repository (pure/rules); it is not contract code",
+  "rig": "n/a: a gate over the repository, with no system state for the walk",
+  "ts": "hold"
+ },
+ "killers": [
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-GATE-FROZEN the allowlist is empty for good"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "a rename out of core/ is caught: the old path is listed"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "a deletion, a mode change, a dirty edit and an untracked file are caught"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "a failing git is red, never ok: an unknown pin is an error"
+  }
+ ]
+}
