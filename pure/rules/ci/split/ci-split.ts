@@ -4,15 +4,17 @@
 //   CI_SPLIT_PUSH         the `push` trigger lists both main and development, so the full set runs on every push to either
 //   CI_SPLIT_CONCURRENCY  the group names the event and the ref, and only a pull_request run cancels a run in progress, so a full
 //                         run on main or development always finishes (a newer push waits as the one pending run)
-//   CI_SPLIT_IF           the only job-level `if` is the one slow-lane condition: not a pull request into development
+//   CI_SPLIT_IF           the only job-level `if`s are the slow-lane condition (not a pull request into development) and the nightly-or-manual one of og's suites
 //   CI_SPLIT_AGGREGATE    `one-gate` fails a skipped fast job, and accepts a skipped slow job only on a pull request into development
 // The names the development ruleset requires are `fastChecks`: every job without an `if`, which the test compares with
 // `development` in .github/required-checks.json.
-import { jobCheckNames } from "../ci-checks.ts";
-import { gateJobs, jobBlocks } from "../ci-steps.ts";
+import { jobCheckNames } from "../workflow/ci-checks.ts";
+import { gateJobs, jobBlocks } from "../workflow/ci-steps.ts";
 
 export const SLOW_IF = "github.event_name != 'pull_request' || github.base_ref != 'development'";
 export const FAST_FLAG = "github.event_name == 'pull_request' && github.base_ref == 'development'";
+// The other `if` a job may carry: og's informational suites run nightly or by hand only (rules/ci/workflow/ci-triggers.ts pins which jobs).
+export const NIGHTLY_IF = "github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'";
 export const CANCEL_ONLY_PRS = "github.event_name == 'pull_request'";
 
 // An expression with its `${{ }}` and extra spaces removed.
@@ -73,7 +75,7 @@ export const splitProblems = (name: string, workflow: string): readonly string[]
     ...(cancel !== undefined && expression(cancel) === CANCEL_ONLY_PRS ? [] : [`CI_SPLIT_CONCURRENCY ${name} cancel-in-progress must be \`\${{ ${CANCEL_ONLY_PRS} }}\`, so a full run on main or development is never cancelled`]),
     ...Object.entries(jobs).flatMap(([id, job]) => {
       const condition = id === "one-gate" ? undefined : jobIf(job);
-      return condition === undefined || condition === SLOW_IF ? [] : [`CI_SPLIT_IF ${name} job ${id} has \`if: ${condition}\`; the only job-level if allowed is \`${SLOW_IF}\``];
+      return condition === undefined || condition === SLOW_IF || condition === NIGHTLY_IF ? [] : [`CI_SPLIT_IF ${name} job ${id} has \`if: ${condition}\`; the only job-level ifs allowed are \`${SLOW_IF}\` and \`${NIGHTLY_IF}\``];
     }),
     ...aggregateProblems(name, workflow, jobs),
   ];

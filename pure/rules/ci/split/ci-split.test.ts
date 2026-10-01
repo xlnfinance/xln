@@ -1,9 +1,9 @@
 // The two lanes of the gate workflow: each way the split could change without anyone noticing, planted, and the real workflow.
 import { describe, expect, test } from "bun:test";
 import { readdirSync, readFileSync } from "node:fs";
-import { checkProblems } from "../ci-checks.ts";
+import { checkProblems } from "../workflow/ci-checks.ts";
 import { ciDriftProblems, isWorkflowFile, withoutComments, type CiFiles } from "../ci-drift.ts";
-import { triggerProblems } from "../ci-triggers.ts";
+import { triggerProblems } from "../workflow/ci-triggers.ts";
 import { fastChecks, SLOW_IF, splitProblems } from "./ci-split.ts";
 
 const repo = `${import.meta.dir}/../../../..`;
@@ -111,6 +111,9 @@ describe("planted changes of the split are problems", () => {
     expect(ifs(workflow({ fastIf: "github.event_name == 'push'" }))).toEqual([expect.stringContaining("job gate-static")]);
     expect(ifs(workflow().replace("  og:\n    name: Runtime Checks (og)\n" + SLOW, "  og:\n    name: Runtime Checks (og)\n    if: false"))).toEqual([expect.stringContaining("job og")]);
     expect(ifs(workflow().replace("    if: ${{ always() }}", "    if: ${{ failure() }}"))).toEqual([]);
+    const og = (condition: string): string => workflow().replace("  og:\n    name: Runtime Checks (og)\n" + SLOW, `  og:\n    name: Runtime Checks (og)\n    if: ${condition}`);
+    expect(ifs(og("github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'"))).toEqual([]);
+    expect(ifs(og("github.event_name == 'schedule'"))).toEqual([expect.stringContaining("job og")]);
   });
 
   test("R-GATE-CI-SPLIT a skipped fast job must fail the aggregate: its line may only be the bare test, never the skip allowance", () => {
@@ -194,13 +197,23 @@ describe("the aggregate, run", () => {
   test("R-GATE-CI-SPLIT the aggregate step passes exactly when every part passed, or a slow part was skipped on a pull request into development", () => {
     const script = body();
     expect(script).toContain("test");
+    const allowed = (fast: string, result: string): boolean => result === "success" || (fast === "true" && result === "skipped");
     for (const fast of ["true", "false"]) {
       for (const seeds of results) {
         for (const fork of results) {
-          const allowed = (result: string): boolean => result === "success" || (fast === "true" && result === "skipped");
-          const status = Bun.spawnSync(["bash", "-e", "-c", script], { env: { PATH: process.env.PATH ?? "", FAST: fast, STATIC: "success", TESTS: "success", SEEDS: seeds, FORK: fork } }).exitCode;
-          expect({ fast, seeds, fork, passed: status === 0 }).toEqual({ fast, seeds, fork, passed: allowed(seeds) && allowed(fork) });
+          for (const quint of results) {
+            for (const arrival of results) {
+              const env = { PATH: process.env.PATH ?? "", FAST: fast, STATIC: "success", TESTS: "success", SEEDS: seeds, FORK: fork, QUINT: quint, ARRIVAL: arrival };
+              const status = Bun.spawnSync(["bash", "-e", "-c", script], { env }).exitCode;
+              expect({ fast, seeds, fork, quint, arrival, passed: status === 0 }).toEqual({ fast, seeds, fork, quint, arrival, passed: [seeds, fork, quint, arrival].every((result) => allowed(fast, result)) });
+            }
+          }
         }
+      }
+      for (const result of results.filter((value) => value !== "success")) {
+        const slow = { SEEDS: "success", FORK: "success", QUINT: "success", ARRIVAL: "success" };
+        expect(Bun.spawnSync(["bash", "-e", "-c", script], { env: { PATH: process.env.PATH ?? "", FAST: fast, STATIC: result, TESTS: "success", ...slow } }).exitCode, `static ${result} fast=${fast}`).not.toBe(0);
+        expect(Bun.spawnSync(["bash", "-e", "-c", script], { env: { PATH: process.env.PATH ?? "", FAST: fast, STATIC: "success", TESTS: result, ...slow } }).exitCode, `tests ${result} fast=${fast}`).not.toBe(0);
       }
     }
   }, 60_000);

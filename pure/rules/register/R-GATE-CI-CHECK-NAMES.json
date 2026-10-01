@@ -1,7 +1,7 @@
 {
  "id": "R-GATE-CI-CHECK-NAMES",
- "statement": "Every check the ruleset requires on the default branch (the five One gate checks, listed in .github/required-checks.json) is reported by a job of the gate workflow under exactly that name, a matrix job once per value: renaming a job, or dropping a seed from the matrix, is red in the drift tests instead of leaving a required check that never reports and a PR that waits on it forever.",
- "source": "coordinator 10-01 09:32 (the five One gate checks are now required through a ruleset)",
+ "statement": "The aggregate `One gate` is the one name to require, and nothing can sit outside it: every job named One gate ... is a need of the aggregate, which reads each need's result, so a new gate job needs no ruleset change; the five names the ruleset requires today (.github/required-checks.json) and the planned `One gate` are each reported by a job of the gate workflow under exactly that name (a matrix job once per value), so renaming a job, or dropping a seed from the matrix, is red in the drift tests instead of leaving a required check that never reports.",
+ "source": "coordinator 10-01 09:32 (the five One gate checks are required through a ruleset); 10:12 (one aggregate name)",
  "layers": {
   "arrival": "n/a: a repository gate rule, not protocol behaviour; no spec page models it",
   "quint": "n/a: a repository gate rule, not protocol behaviour; no spec models it",
@@ -58,7 +58,42 @@
   {
    "kind": "test",
    "layer": "ts",
+   "name": "R-GATE-CI-CHECK-NAMES a one-gate that needs every One gate (...) job and reads each result agrees"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-GATE-CI-CHECK-NAMES a One gate (...) job that one-gate does not need is named, so adding a job cannot leave it out"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-GATE-CI-CHECK-NAMES a need whose result one-gate never reads is named"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-GATE-CI-CHECK-NAMES a result that is only mentioned, never compared with success, is not tested; an env variable mapped to it is"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-GATE-CI-CHECK-NAMES a gate job, or a step of one, with continue-on-error is named, false is not"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
    "name": "R-GATE-CI-CHECK-NAMES every check the ruleset requires is reported by a job of the real workflow"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-GATE-CI-CHECK-NAMES every check planned for the ruleset is reported by a job of the real workflow"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-GATE-CI-CHECK-NAMES the real one-gate needs every One gate (...) job and reads every result"
   },
   {
    "kind": "test",
