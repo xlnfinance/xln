@@ -40,8 +40,8 @@ export const GAPS = {
   jBatchBuilder: {
     id: "j-batch-builder", kind: "scaffold", layer: "J",
     piece: "J batch builder: JAction (deposit, reveal, counter, c2r, settle) to Batch to a signed processBatch call, with the Entity's batch nonce. The harness builds each Batch by hand from pure/chain/batch encoders and signs it itself.",
-    supplier: "J batch planner slice (not started; the cut thread owns it, takes R-FUNDED from #62)",
-    landed: () => has("j/plan.ts") || has("chain/batch/plan.ts") || has("chain/plan.ts"),
+    supplier: "J batch builder thread, branch claude/j-batch-builder-hbb9x1 (pure/j/batch/jbatch.ts: queue, seal; sealed.ts: sealBatch, processBatchCall; gas budget choice in its PR 2)",
+    landed: () => has("j/batch/jbatch.ts"),
   },
   jEvents: {
     id: "j-events", kind: "scaffold", layer: "J",
