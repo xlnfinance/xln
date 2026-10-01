@@ -31,7 +31,7 @@ import { knownHalt } from "./rig/departures.ts";
 import { judgeFrame, NO_MEMORY, type Memory, type Plant } from "./rig/frame-checks.ts";
 import { probeCapacity } from "./rig/probe.ts";
 import { unfired } from "./rig/properties/fired.ts";
-import { closeSettlements, enforceOne, settleBelief, type Enforced } from "./rig/properties/enforce.ts";
+import { closeOut, drain, enforceOne, settleBelief, type Enforced } from "./rig/properties/enforce.ts";
 import { stableJson } from "../xln.ts";
 
 /** The walk seeds, through seedOf like every stream in diff/ (SEEDX=0 walks 0x30de1, 0x30de2, ...). */
@@ -101,21 +101,27 @@ export const walk = async (
       return diffs.length > 0 || framed.violations.length > 0 ? { lines: [...diffs, ...framed.violations], memory: framed.memory } : loop(i + 1, framed.memory);
     };
     const looped = await loop(0, NO_MEMORY);
-    // P-BELIEF at rest: a walk that ended clean leaves every Account holding what the chain holds
+    // the draws are over: clean so far means the lane agreed, nothing halted or departed
     const quiet = looped.lines.length === 0 && coverage.halts === 0 && coverage.departures.length === 0;
-    // settlement workspaces are closed first (rig/properties/enforce.ts closeSettlements): an Account holding one is not clause-free, so P1 would skip it
-    const closed = quiet ? await closeSettlements(w) : [];
-    // then the capacity edge, which no draw reaches (rig/probe.ts); its frames are judged like the walk's
-    const probed = quiet && closed.length === 0 ? (await probeCapacity(w, looped.memory)).lines : [];
+    // a walk that ended clean is taken through what its draws cannot reach, each step only while the ones before it said nothing:
     const atRest = async (): Promise<readonly string[]> => {
       coverage.actions["P-BELIEF:atRest"] = 1;
       return (await settleBelief(w)).map((l) => `${w.tag} frame ${lane.frames()} at rest: ${l}`);
     };
-    const walked = !quiet ? looped.lines : closed.length > 0 ? closed : probed.length > 0 ? probed : await atRest();
-    // last, P1: one Account's dispute runs to finalize on the Depository, whose payout must match the Account
-    const clean = walked.length === 0 && coverage.halts === 0 && coverage.departures.length === 0;
-    const p1 = clean ? p1Lines(w.tag, coverage, await enforceOne(w)) : [];
-    const diffs = [...walked, ...p1];
+    const steps: readonly (() => Promise<readonly string[]>)[] = [
+      // open settlements and unsent batches are closed out (rig/properties/enforce.ts closeOut): an Account holding a workspace or an Entity with a batch in flight is not ready, so P1 would skip it
+      () => closeOut(w),
+      // the capacity edge, which no draw reaches (rig/probe.ts); its frames are judged like the walk's
+      async () => (await probeCapacity(w, looped.memory)).lines,
+      // the probe's payments set the hub rebalancing on its own clock, and a batch of its landing inside P1's window would move the reserves P1 reads: waited out (no settlement draws: the Entity's own work is what is waited for)
+      () => drain(w),
+      // P1: one Account's dispute runs to finalize on the Depository, whose payout must match the Account (last of the checks that freeze an Account: the probe needs them free)
+      async () => p1Lines(w.tag, coverage, await enforceOne(w)),
+      // P-BELIEF at rest: every Account holds what the chain holds
+      atRest,
+    ];
+    const walked = !quiet ? looped.lines : await steps.reduce<Promise<readonly string[]>>(async (said, step) => ((await said).length > 0 ? said : step()), Promise.resolve([]));
+    const diffs = walked;
     // an agreed halt ends the walk; one that is not a known og bug is a draw og refuses
     const unguarded = coverage.haltTexts
       .filter((h) => knownHalt(h) === undefined)

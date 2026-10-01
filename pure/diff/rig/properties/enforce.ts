@@ -13,6 +13,7 @@ import type { BrowserVMProvider } from "../../../../core/jurisdiction/adapter/br
 import type { AccountReplica, EntityId, EntityTx } from "../../../xln.ts";
 import { HUB, SPOKES, type World } from "../world.ts";
 import { SETTLEMENT } from "../../draws/settlement.ts";
+import { one, pairs, PARTIES, queued, quiet, sealed } from "../../draws/world-view.ts";
 import { beliefLines, lagging } from "./belief.ts";
 
 /** Ticks the lifecycle may take for each phase before the sample gives up (and says so). */
@@ -147,16 +148,43 @@ const workspaceOpen = (w: World): boolean =>
   [...w.lane.runtime().entities.values()].some((e) => [...e.accountReplicas.values()].some((r) => r.state.settlement !== undefined));
 /** The settlement draws that close a workspace: an unsigned one is rejected, a half-signed one approved, a signed one executed. */
 const CLOSERS = [SETTLEMENT.settle_reject, SETTLEMENT.settle_approve, SETTLEMENT.settle_execute];
+/** Parties holding J batch ops no broadcast has sealed yet. */
+const unsent = (w: World): readonly number[] => PARTIES.filter((x) => queued(w, x) && !sealed(w, x));
+const inFlight = (w: World): boolean => PARTIES.some((x) => sealed(w, x));
+/** An Account tx still waiting in a mempool or a frame still unacknowledged: what it does (a settlement's execute, say) may yet reach a batch. */
+const pending = (w: World): boolean => pairs(w).some(([x, y]) => !quiet(w, x, y));
+/** Quiet frames in a row nothing may be open for: an Entity acts on its own clock, and a batch it seals just after the last tx was sent would land inside P1's window. */
+const CALM = 4;
+const open = (w: World): boolean => workspaceOpen(w) || unsent(w).length > 0 || inFlight(w) || pending(w);
 
 /**
  * At the end of a clean walk, settlement workspaces are driven to their end with the settlement draws themselves (reject, approve, execute), and
  * quiet frames wait for the chain's result: an Account that still holds a workspace is not clause-free, so P1 would skip every Account of an area
  * whose walks leave workspaces open. Lane diffs along the way come back as they are; workspaces that outlast patience are left (P1 then reports its skip).
  */
-export const closeSettlements = async (w: World, left = PATIENCE * 4): Promise<readonly string[]> => {
+const closeSettlements = async (w: World, left = PATIENCE * 4): Promise<readonly string[]> => {
   if (left === 0 || !workspaceOpen(w)) return [];
   const closer = CLOSERS.find((move) => move._tag === "drawn" && move.enabled(w));
   const step = closer?._tag === "drawn" ? closer.draw(w) : { runtimeTxs: [], users: [] };
   const diffs = await w.lane.tick(step.runtimeTxs, step.users);
   return diffs.length > 0 ? diffs : closeSettlements(w, left - 1);
+};
+
+/**
+ * Then what is left of the batches: queued J batch ops are broadcast, and quiet frames wait until nothing is unsent, in flight or pending, for
+ * CALM frames in a row (an Entity acts on its own clock, and a batch it seals just after the last tx was sent would land inside P1's window).
+ * An Account whose Entity has an unsent or unconfirmed batch is not ready for P1 (batch idle), so P1 would skip every Account of an area whose
+ * walks leave batch ops queued.
+ */
+export const drain = async (w: World, left = PATIENCE * 4, calm = 0): Promise<readonly string[]> => {
+  if (left === 0 || (calm >= CALM && !open(w))) return [];
+  const sender = unsent(w)[0];
+  const diffs = await w.lane.tick([], sender === undefined ? [] : one(w, sender, [BROADCAST]).users);
+  return diffs.length > 0 ? diffs : drain(w, left - 1, open(w) ? 0 : calm + 1);
+};
+
+/** An open settlement closed, then the batches drained: the walk's end state is at rest, so P1 and the probe start from it. */
+export const closeOut = async (w: World): Promise<readonly string[]> => {
+  const closed = await closeSettlements(w);
+  return closed.length > 0 ? closed : drain(w);
 };

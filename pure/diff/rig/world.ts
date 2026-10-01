@@ -22,6 +22,7 @@ import { registrationEvidenceKey } from "../../../core/jurisdiction/machine/regi
 import { unwrap } from "../../xln_run.ts";
 import { contractSet } from "./contracts.ts";
 import { NOTHING_SENT, shimBatchSubmission, type Sent } from "./fork-shim.ts";
+import { watchSettled, type Settled } from "./properties/belief.ts";
 import {
   bootChain,
   createLane,
@@ -159,6 +160,8 @@ export type World = {
   readonly refusals: () => readonly string[];
   /** What the shim saw go by: batches landed, every dispute start with its declared and current epoch, the peak batch gas. */
   readonly sent: Sent;
+  /** Every AccountSettled row the chain emitted, as the collateral and ondelta it left (P-BELIEF). */
+  readonly settled: Settled;
   /** Whether this world draws a dispute only on an Account whose epoch has moved (see WorldOptions). */
   readonly disputeAfterEpoch: boolean;
   /** The Account epoch the chain's AccountEpochAdvanced events last said (C1; always 0 under og's own contracts, which have none). */
@@ -188,6 +191,7 @@ export const openWorld = async (seed: number, name: string, options: WorldOption
   const sent = contractSet() === "contracts"
     ? shimBatchSubmission(chain.getBrowserVM(), BigInt(chain.chainId), chain.addresses.depository, KEYS)
     : NOTHING_SENT;
+  const settled = watchSettled(chain.getBrowserVM() as never);
   KEYS.forEach((k, i) => registerSignerKey(env, SIGNERS[i]!, Buffer.from(k.slice(2), "hex")));
   const members = boardJoins(options) ? MEMBERS : MEMBERS.slice(0, BOARD);
   /** og ConsensusConfig of Entity x: its board members, one share each, and its threshold. */
@@ -355,6 +359,7 @@ export const openWorld = async (seed: number, name: string, options: WorldOption
     importAll,
     refusals: () => sent(),
     sent,
+    settled,
     disputeAfterEpoch: options.disputeAfterEpoch === true,
     epochOf: (x, y) => sent.epochOf(ids[x]!, ids[y]!),
     close,

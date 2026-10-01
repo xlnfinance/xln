@@ -17,7 +17,7 @@ export type Framed = Readonly<{ violations: readonly string[]; memory: Memory }>
 
 /** The lines a walk prints for a frame whose checks failed, and the memory the next frame judges against. */
 export const judgeFrame = async (
-  w: Pick<World, "tag" | "lane" | "coverage" | "chain">,
+  w: Pick<World, "tag" | "lane" | "coverage" | "chain" | "settled">,
   name: string,
   memory: Memory,
   plant?: Plant,
@@ -25,7 +25,7 @@ export const judgeFrame = async (
   const frame = w.lane.frames();
   const rt = plant === undefined ? w.lane.runtime() : plant(w.lane.runtime(), frame);
   const checked = checkProperties(rt, memory.signed);
-  const believed = await checkBelief(vmOf(w as World), rt, memory.trail);
+  const believed = await checkBelief(vmOf(w as World), rt, memory.trail, w.settled);
   const bump = (counter: string, by: number): void => { w.coverage.actions[counter] = (w.coverage.actions[counter] ?? 0) + by; };
   bump("P2:ledgers", checked.looked.ledgers);
   bump("P4:heightPairs", checked.looked.heightPairs);

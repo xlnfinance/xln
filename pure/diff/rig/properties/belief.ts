@@ -41,16 +41,41 @@ export const chainHolds = async (vm: CollateralView, r: AccountReplica): Promise
  * Runtime learns the chain's state from J events that arrive after the chain moved, so a belief may lag; it may not hold a value the
  * chain never held, nor go back to an older one (an event applied twice, out of order, or with the wrong number).
  */
-export type Trail = ReadonlyMap<string, { readonly seen: readonly Held[]; readonly at: number }>;
+export type Trail = ReadonlyMap<string, { readonly seen: readonly Held[]; readonly at: number; readonly fed: number }>;
 export const NOTHING_SEEN: Trail = new Map();
 const EMPTY: Held = { collateral: 0n, ondelta: 0n };
 const same = (a: Held, b: Held): boolean => a.collateral === b.collateral && a.ondelta === b.ondelta;
 const show = (h: Held): string => `${h.collateral}/${h.ondelta}`;
 
+/** The pair-and-token key a trail and the settled history share: left→right, as the Runtime names an Account. */
+const keyOf = (left: string, right: string, tokenId: number | bigint | string): string => `${left}→${right} token ${tokenId}`;
+
+/** The collateral and ondelta every AccountSettled row left behind, in the order the chain emitted them. */
+export type Settled = ReadonlyMap<string, readonly Held[]>;
+type Settling = { readonly onAny: (callback: (events: readonly { readonly name: string; readonly args: unknown }[]) => void) => unknown };
+const int512 = (hi: unknown, lo: unknown): bigint => (BigInt(hi as bigint) << 256n) + BigInt(lo as bigint);
+/**
+ * Listen to the chain for AccountSettled rows. A batch with two ops on one pair passes through the state between them, which no read after the
+ * block sees, and an Account that applies the events one by one holds it for a frame: so each row's post-state is a value the chain held.
+ * Returns the live history; the walk reads it after each frame.
+ */
+export const watchSettled = (vm: Settling): Settled => {
+  const history = new Map<string, Held[]>();
+  vm.onAny((events) => events.filter((e) => e.name === "AccountSettled").forEach((e) => {
+    const rows = (e.args as { settled: readonly (readonly unknown[])[] }).settled;
+    rows.forEach((row) => (row[2] as readonly (readonly unknown[])[]).forEach((token) => {
+      const key = keyOf(String(row[0]), String(row[1]), token[0] as bigint);
+      history.set(key, [...(history.get(key) ?? []), { collateral: BigInt(token[3] as bigint), ondelta: int512((token[4] as readonly unknown[])[0], (token[4] as readonly unknown[])[1]) }]);
+    }));
+  }));
+  return history;
+};
+export const NOTHING_SETTLED: Settled = new Map();
+
 export type Believed = { readonly trail: Trail; readonly violations: readonly string[] };
 
 /** P-BELIEF over a whole Runtime after one frame: every Account (one side per pair), every token. */
-export const checkBelief = async (vm: CollateralView, rt: Runtime, before: Trail): Promise<Believed> => {
+export const checkBelief = async (vm: CollateralView, rt: Runtime, before: Trail, settled: Settled = NOTHING_SETTLED): Promise<Believed> => {
   const replicas = [...rt.entities.values()].flatMap((e) =>
     [...e.accountReplicas].filter(([peer]) => e.state.id < peer).map(([peer, r]) => ({ at: `${e.state.id}→${peer}`, r })));
   const rows = (await Promise.all(replicas.map(async ({ at, r }) => {
@@ -58,18 +83,19 @@ export const checkBelief = async (vm: CollateralView, rt: Runtime, before: Trail
     const view = committedView(r.state);
     return [...chain].map(([tokenId, onChain]) => {
       const d = view.ok ? view.value.deltas.get(tokenId) : undefined;
-      return { key: `${at} token ${tokenId}`, onChain, belief: d === undefined ? undefined : { collateral: d.collateral, ondelta: d.ondelta } };
+      return { key: keyOf(...(at.split("→") as [string, string]), tokenId), onChain, belief: d === undefined ? undefined : { collateral: d.collateral, ondelta: d.ondelta } };
     });
   }))).flat();
   return rows.reduce<Believed>((acc, { key, onChain, belief }) => {
-    const had = acc.trail.get(key) ?? { seen: [EMPTY], at: 0 };
-    const last = had.seen[had.seen.length - 1]!;
-    const seen = same(last, onChain) ? had.seen : [...had.seen, onChain];
+    const had = acc.trail.get(key) ?? { seen: [EMPTY], at: 0, fed: 0 };
+    const rows = settled.get(key) ?? [];
+    // the rows emitted since the last frame, then what the chain holds now (a change no row announced, a dispute's payout, is only seen by the read)
+    const seen = [...rows.slice(had.fed), onChain].reduce((held, h) => (same(held[held.length - 1]!, h) ? held : [...held, h]), had.seen);
     const at = belief === undefined ? -1 : seen.findIndex((h, i) => i >= had.at && same(h, belief));
     const lines = belief !== undefined && at >= 0
       ? []
       : [`P-BELIEF ${key}: Account believes ${belief === undefined ? "nothing" : show(belief)}; since the Account last agreed with the chain (${show(seen[had.at]!)}) the chain held ${seen.slice(had.at).map(show).join(", ")} (collateral/ondelta)`];
-    return { trail: new Map([...acc.trail, [key, { seen, at: at >= 0 ? at : had.at }]]), violations: [...acc.violations, ...lines] };
+    return { trail: new Map([...acc.trail, [key, { seen, at: at >= 0 ? at : had.at, fed: rows.length }]]), violations: [...acc.violations, ...lines] };
   }, { trail: before, violations: [] });
 };
 
