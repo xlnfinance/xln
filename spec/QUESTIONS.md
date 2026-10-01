@@ -10,11 +10,16 @@ Ids are `Q-<layer>-<n>`. Lessons ids (`R-`, `Q-`, `B-`) refer to `plan/lessons.m
 
 **Q-A-1. What does a refusal cost the sender?**
 Options: (a) the receiver stays silent and the sender learns nothing; (b) the receiver answers
-with a reject message.
-Choice: (a). A stale, future or invalid frame changes nothing at the receiver and is never fatal.
-The sender's resend and the peer's re-ack are what make progress; a reject message would add a
-third message kind for no safety gain. Refusal cost in general is lessons Q-X1, still open.
-Source: lessons R-X1 (no peer input halts a Runtime), og issues 1, 3, 4, 6, 7, 8.
+with a refusal message.
+Choice: (b) since R-FRAME-REFUSAL (Q-A-11). The first version of the page took (a): a stale, future or invalid
+frame changed nothing at the receiver and the sender's resend and the peer's re-ack made progress. That held only
+while nothing could make an honest frame unappliable. With a clock (a deadline that passes while the frame is in
+flight) the silent refusal wedges the Account for good: the proposer's frame stays pending, the receiver refuses
+its resend again, and a stuck Left frame blocks Right too. A frame that is not the next one and a frame the replica
+authored itself stay silent (a stale or reflected frame costs nothing and no honest proposer sends one), a frame already
+at my head is re-acked (Q-A-2); what a replica judges and refuses on content or on the clock is answered. Refusal cost in
+general is lessons Q-X1, still open.
+Source: lessons R-X1 (no peer input halts a Runtime), og issues 1, 3, 4, 6, 7, 8; R-FRAME-REFUSAL.
 
 **Q-A-2. A duplicate of the frame at my head.**
 Options: (a) ignore it; (b) answer with the same ack again.
@@ -44,18 +49,23 @@ does not have yet.
 Source: lessons R-A1 (Right re-proposes its txs at the next height), Q-X1.
 
 **Q-A-5. Does the receiver validate frame content?**
-Choice: yes, with the same function the proposer uses. For an honest proposer the verdict is the
-same (equal head means equal state), so this never fires; it is the path a Byzantine or buggy
-proposer hits, and it is the same path as a stale frame.
+Choice: yes, with the same predicate the proposer uses (`tx-fault`: the conflicts, then the clock). For an honest
+proposer the verdict on content is the same (equal head means equal state), so the conflict check never fires; it
+is the path a Byzantine or buggy proposer hits. The clock check can fire for an honest one (the receiver's view
+differs from the proposer's), and the answer is a refusal (Q-A-11). Since the refusal path exists the proposer's
+own re-validation (Q-A-4) is defence in depth: with `skip-revalidation` the peer refuses the tx with `tx_conflict`
+and the proposer drops it with notice, so the bug no longer wedges (the case stays in test.mjs as a clean run).
 Source: design/account-model.md section 5 (P4: no two proofs per nonce).
 
 **Q-A-6. The link.**
-Choice: FIFO with bounded loss and duplication (`max-losses`, `max-dups`, default 1 and 1).
+Choice: FIFO with bounded loss and duplication (`max-losses`, `max-dups`; the first page's bound is the config
+`account/configs/lossy.scm`: 1 and 1, 3651 states; the default clock world has 1 loss and no repeat, and the config
+`repeats` has 1 repeat: with the clock the two together are an order of magnitude larger).
 Reordering is not in the base page: the `prev` hash makes a frame from the future refusable, so
 reordering can only add stale copies, which duplication already covers. Evidence (R-NET, D-AC-8): the config
 `account/configs/reorder.scm` lets the receiver take any of the first three messages of its inbox (Quint's
-network is a set and delivers any message in flight) and the page still checks clean: 7312 states, 33183
-transitions, 16 goals. The base stays FIFO; Quint records its set network as an explicit choice (its A14).
+network is a set and delivers any message in flight) and the page still checks clean (on the first page's world,
+the clock off): 7312 states, 33183 transitions, 16 goals, unchanged by R-FRAME-REFUSAL. The base stays FIFO; Quint records its set network as an explicit choice (its A14).
 Source: design/account-model.md P4 ("loss, duplication and simultaneous proposals").
 
 **Q-A-7. Frame protocol shape (lessons Q-A4).**
@@ -107,10 +117,75 @@ conflicting txs slips through). The refusal is final with notice. If the predece
 cross-open that Left wins), the refused tx would have been valid: the sender resubmits it. Choice: no
 re-admission (a refusal is an event, not a state), stated as the property "a refused tx has a conflicting
 predecessor among the submitted txs": it checks the pair, not the state at the time of the check.
-Bound: `account/configs/same-side-conflict.scm` (Right's own txs "x" then "y" conflict, 3423 states) and a
+Bound: `account/configs/same-side-conflict.scm` (Right's own txs "x" then "y" conflict; 4694 states since the refusal
+messages and the mark, Q-A-11, Q-A-12) and a
 Byzantine frame rule (`byz-frame`: a proposer sends its whole mempool as one invalid frame), so the receiver's
 validation is the only thing between the frame and the history. Planted bug `frame-order`.
 Source: review of PR #41 round 2, a6.
+
+**Q-A-11. R-FRAME-REFUSAL: a frame the receiver cannot apply (coordinator 10-01 01:03, kernel handoff A4a).**
+The page has a coarse J clock (`:clock`, 0..`max-clock` = 2, a rule ticks it, so it can move between a frame's proposal
+and its receipt) and each side reads it when it proposes and when it receives, the read lagging it by 0..`view-lag` (= 1,
+LAG; the lag is not remembered between reads). Two clock-dependent tx kinds: a LOCK (`lock-txs`) is applicable while
+view < deadline <= view + horizon (`lock-deadline` = 1, `lock-horizon` = 1), an EXPIRE (`expire-txs`) only when the view is
+past the deadline. The faults: `tx_conflict`, `deadline_passed` (a lock whose deadline is now too near), `not_expired` (an
+expire the receiver's view does not yet allow), `deadline_too_far`; the last two are RETRYABLE (they pass with the peer's
+view moving). A receiver that cannot apply a frame answers with a refusal naming the frame hash, the index of the first tx it
+refused, the fault and its mark (Q-A-12). The proposer commits only on an ack, so on a refusal that names its pending frame
+it rolls the frame back and re-proposes: a retryable fault puts EVERY tx back with no notice, up to the budget
+(`max-attempt` = 2; MAX_ATTEMPTS is 8 in the kernel); any other fault, or a spent budget, drops the named tx WITH NOTICE
+(R-NOTICE, `:refused`; it releases the payer) and puts the rest back ahead of the mempool. A refusal that does not name the
+pending frame (it committed, or was rolled back already), or whose index names no tx of it (kernel F3), is ignored. The
+proposer judges its own mempool by its own view at proposal: a tx with a non-retryable fault is refused with notice, one with
+a retryable fault WAITS and holds back the txs behind it (submission order). Left wins (R-A1) still decides simultaneous
+proposals, and the mark is checked before it (a refusal is answered even while Left holds its own frame out).
+Properties: the existing ones, and "can always still finish" now WITH the clock moving (default world: Left's lock and expire,
+Right's x; `lock` and `x` conflict; 3070 states, 12950 transitions, 32 goals). Planted bug `ignores-refusal` (the proposer
+ignores the refusal: the frame stays pending, the receiver refuses its resend again, the Account wedges): red on "can always
+still finish". Config `far-lock`: the other retryable fault (a lock beyond the horizon), 2711 states.
+Not modelled: signed refusals and the signature-before-memory order (A4b, R-FRAME-HASH-SIGNED), pacing of retries by the Runtime
+(a retry is cheap only if the Runtime waits for the peer's view to move), the attempt cap on the receiver (attempts keep counting
+past `max-attempt`).
+Source: contracts-decisions.md R-FRAME-REFUSAL; handoff-a4.md (A4a, rounds 1-3).
+
+**Q-A-12. Attempt number (kernel A4a, rounds 2 and 3).**
+A frame carries `attempt`: the refusals its proposer has handled on this head (0..MAX, bounded here by `max-attempt` for the
+retry budget; the number itself keeps counting). The attempt is part of the frame's content and of its hash (the head is the list
+of (txs, attempt, author) entries). The receiver keeps ONE mark per head: the highest attempt it refused, with the fault
+(`:mark` = attempt, index, fault). A frame at or below the mark is not judged: an equal attempt is refused again with the same
+refusal (index and fault of the mark); a lower one is answered with a refusal of fault `stale_attempt`, index 0, carrying the mark.
+A frame above the mark is judged afresh. The mark is forgotten whenever the head moves (a commit, either way); a repeat of the
+frame at my head (the re-ack) does not touch it. The proposer sets its next attempt to max(own, mark) + 1; a stale answer costs
+no tx and no retry budget. Why: an honest proposer never sends two different frames at one attempt, so a forged frame refused at
+attempt 0 also refuses a genuine frame at attempt 0 on that head; and the mark makes a refusal final for its head, so a
+receiver whose view moves later cannot commit a frame whose proposer already took it back (it would fork from it).
+Planted bugs: `refusal-forgotten` (the receiver keeps no mark: it commits the frame it refused while its peer committed another at
+the same head, red on "committed histories agree"), `below-mark-judged` (config `repeats`: a late copy of an earlier attempt is
+judged afresh, the same fork), `attempt-not-bumped` (the proposer re-proposes at the same attempt: refused again for ever, red on
+"can always still finish").
+Replay against the kernel thread's count: the kernel's same-side-conflict replay of the attempt rule is 3167 states / 9603
+transitions / 22 goals against the first page's 3423 / 10383 / 24. This page's same-side-conflict config
+(`account/configs/same-side-conflict.scm`, which is the first page's world with the clock off) is 4694 / 14434 / 26: it does NOT
+match, and the difference is known. (1) This page DELIVERS refusals (the proposer must handle them), so a refusal message is
+a state of the link; the kernel's replay filters refusal messages out of the link. With the refusals filtered out the page
+explores 3507 states / 10570 transitions / 22 goals (the goal count matches) and the liveness check FAILS: a genuine frame
+refused at the forged frame's attempt is never answered and Right's frame stays pending (so the replay's 22 goals count the
+`done` worlds, not liveness). (2) Leaving the mark out of the world key (what the replay seems to do, though it changes
+behaviour) gives 3164 / 9595 / 22, three states and eight transitions short of the replay's count: not an exact match,
+and the remaining difference is not explained from this side.
+Source: handoff-a4.md rounds 2 and 3 (F1, F4, N1, N2); review of PR 85 (Review B round 2).
+
+**Q-A-13. Frame author (kernel `refused_own`, Quint `f.author != self`).**
+Arrival's frames carried no author, so the page could not see a replica commit its OWN frame when it is handed back as the
+peer's (the pending frame accepted as received): under one head a state fork that flips the credit direction. The frame now
+carries `:author` and the author is in its hash (the head's entries are (txs, attempt, author)). A replica refuses (silently:
+nothing honest sends it) a frame whose author is itself. To make it reachable the link has a `reflect` rule: it hands a replica
+its own pending frame back (`max-reflect`, 0 in the default world, 1 in the config `reflect`). Property "a replica commits its
+own frame only after the peer did (frame author)": every entry of a replica's history that it authored is already in the peer's
+history (the author commits on the peer's ack, and the peer acks after it committed). Planted bug `accepts-own-frame`
+(config `reflect`): red on that property. (The page has no ledger, so the flipped credit is not shown; the fork is the author
+holding the frame before its peer did.)
+Source: kernel `refused_own`; Quint account_core.qnt (`f.author != self`).
 
 ## Money (`money/ledger.scm`)
 
@@ -1065,6 +1140,12 @@ Relayed 2026-09-29 15:19 from the review of the contracts PR (#40).
 - **R1-R3** (18:10): see Q-RT-1 to Q-RT-3.
 - **N2 bound: MAX_LOCK_HORIZON** (21:50): see Q-D-20, Q-RT-7.
 - **R-CLOCK** (21:56) and **R-HTLC-CLOCK** (09-30): see Q-A-9. **R-REACK**: Q-A-2. **R-SETTLE-CREDIT** (09-30): Q-X-3. **R-ONE-LOCK-PER-HASH** (09-30, coordinator): an Account holds at most one open clause per hashlock, whoever the payer; a second lock on an open hashlock is refused (`lock_exists`) and a clause is still addressed by its slot. Page: `money/ledger.scm` (the lock rule takes a hashlock `h`; property "at most one open clause per hashlock"; planted bug `duplicate-hashlock`; 1440 states, 12918 transitions). The frames and clock pages carry one lock, so the rule does not bite there. Follows og (xln.ts 7457-7458). **R-NET**: Q-A-6.
+- **R-FRAME-REFUSAL, attempt number, frame author** (10-01, coordinator; kernel A4a rounds 1-3): a receiver that cannot apply a
+  frame refuses it with the frame hash, the index of the first tx refused and a fault tag; the proposer rolls its pending frame
+  back, requeues every tx on a retryable fault (`not_expired`, `deadline_too_far`) up to the budget or drops the named tx with
+  notice on any other, and re-proposes at attempt max(own, mark) + 1; the receiver keeps one mark per head, judges only frames
+  above it and forgets it when the head moves; a frame names its author, in its hash, and a replica refuses its own. Page:
+  Q-A-11, Q-A-12, Q-A-13 (default world 3070 states, 12950 transitions, 32 goals; bounds: clock 0..2, lag 1, retry budget 2).
 - **H1.** Finalize waits until an unrevealed HTLC's deadline unless the secret is public.
 - **H3.** Retired-board evidence is capped at collateral.
 - **A12** (00:49): two co-signed proofs can exist at one nonce only with opposite proposer flags, and the contract
