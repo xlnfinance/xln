@@ -11,7 +11,7 @@ import { readFileSync } from "node:fs";
 import { ethers } from "ethers";
 import { Depository__factory, DepositoryBounds__factory, ERC20Mock__factory } from "../typechain-types/index.ts";
 import { deployedManifest, type Manifest } from "./manifest.ts";
-import { assertGatedChain, isLoopback, resolveDeployerKey } from "./deploy-set.ts";
+import { assertGatedChain, refuseRemoteWithoutLive, resolveDeployerKey } from "./deploy-set.ts";
 
 const coder = ethers.AbiCoder.defaultAbiCoder();
 const TOKEN_ID = 1n;
@@ -62,7 +62,7 @@ export type SmokeOptions = {
 export const smokeSet = async ({ rpcUrl, manifest: given, privateKey, salt = ethers.hexlify(ethers.randomBytes(8)), live = false, log = () => undefined }: SmokeOptions): Promise<SmokeReport> => {
   const manifest = deployedManifest(given);
   assertGatedChain(manifest);
-  if (!isLoopback(rpcUrl) && !live) throw new Error(`${new URL(rpcUrl).hostname} is not this machine: a live smoke test needs --live`);
+  refuseRemoteWithoutLive(rpcUrl, live, "a live smoke test");
   const provider = new ethers.JsonRpcProvider(rpcUrl, undefined, { cacheTimeout: -1 });
   const chainId = (await provider.getNetwork()).chainId;
   if (Number(chainId) !== manifest.chainId) throw new Error(`the node reports chain id ${chainId}, the manifest is for ${manifest.chainId}`);

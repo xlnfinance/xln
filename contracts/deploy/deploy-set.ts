@@ -39,6 +39,11 @@ const EIP_170_CODE_LIMIT = 24_576;
 
 export const isLoopback = (rpcUrl: string): boolean => ["127.0.0.1", "localhost", "::1", "[::1]"].includes(new URL(rpcUrl).hostname);
 
+/** A node that is not this machine is only ever touched with --live. Judged from the address alone, so it runs before the first network call. */
+export const refuseRemoteWithoutLive = (rpcUrl: string, live: boolean, what: string): void => {
+  if (!isLoopback(rpcUrl) && !live) throw new Error(`${new URL(rpcUrl).hostname} is not this machine: ${what} needs --live, and the owner's word`);
+};
+
 /** The key that signs: DEPLOYER_PRIVATE_KEY, or on a loopback node alone anvil's dev key. Anything else is refused. */
 export const resolveDeployerKey = (env: Readonly<Record<string, string | undefined>>, rpcUrl: string): string => {
   const configured = (env["DEPLOYER_PRIVATE_KEY"] ?? "").trim();
@@ -55,7 +60,7 @@ export type Target = { readonly manifest: Manifest; readonly nodeChainId: number
 /** Everything that can be refused before a transaction is sent. Returns what the build says (floor, batch gas total, tx gas cap). */
 export const assertTarget = ({ manifest, nodeChainId, rpcUrl, live }: Target): { floor: number; requiredTxGas: number; txGasCap: number | null } => {
   if (nodeChainId !== manifest.chainId) throw new Error(`the node reports chain id ${nodeChainId}, the manifest is for ${manifest.chainId} (${manifest.network})`);
-  if (!isLoopback(rpcUrl) && !live) throw new Error(`${new URL(rpcUrl).hostname} is not this machine: a live deploy needs --live, and the owner's word`);
+  refuseRemoteWithoutLive(rpcUrl, live, "a live deploy");
   assertGatedChain(manifest);
   const floor = gate.readCompiledFloor();
   if (floor === null || floor !== manifest.dispute.responseFloorSeconds) {
@@ -86,6 +91,7 @@ export type DeployOptions = {
 export const deploySet = async ({ rpcUrl, manifest, live = false, privateKey, log = () => undefined }: DeployOptions): Promise<Manifest> => {
   if (manifest.status !== "prepared") throw new Error("the manifest is already deployed: refusing to deploy over it");
   assertGatedChain(manifest);
+  refuseRemoteWithoutLive(rpcUrl, live, "a live deploy");
   // cacheTimeout -1: the default 250 ms call cache would answer a second nonce query with the first one's answer.
   const provider = new ethers.JsonRpcProvider(rpcUrl, undefined, { cacheTimeout: -1 });
   const nodeChainId = Number((await provider.getNetwork()).chainId);

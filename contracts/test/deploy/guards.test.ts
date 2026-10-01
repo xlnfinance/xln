@@ -2,10 +2,12 @@
 // judged from the manifest, the RPC address and the compiled build alone.
 import { describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
-import { readdirSync, readFileSync } from "node:fs";
+import { ethers } from "ethers";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { assertTarget, deploySet, resolveDeployerKey } from "../../deploy/deploy-set.ts";
-import { manifestProblems, parseManifest, type Manifest } from "../../deploy/manifest.ts";
+import { smokeSet } from "../../deploy/smoke.ts";
+import { CONTRACT_NAMES, manifestProblems, parseManifest, type Deployed, type Manifest } from "../../deploy/manifest.ts";
 
 const deployDir = path.join(import.meta.dir, "..", "..", "deploy");
 const committed = JSON.parse(readFileSync(path.join(deployDir, "sepolia.manifest.json"), "utf8")) as Manifest;
@@ -119,5 +121,53 @@ describe("the entry points", () => {
     const run = spawnSync("bun", [path.join(deployDir, "deploy-set.ts"), "--rpc", "http://127.0.0.1:1"], { encoding: "utf8" });
     expect(run.status).not.toBe(0);
     expect(run.stderr).toContain("--out");
+  });
+});
+
+// Review A of PR 81: the refusals that stand between a script and a live network, and the deploy set itself.
+describe("a remote node is refused before any call to it", () => {
+  // `.invalid` never resolves: were the node asked anything first, the error would be a network one, not the refusal.
+  const REMOTE = "https://sepolia.invalid";
+  const filler = (index: number): Deployed => ({
+    address: ethers.getAddress(`0x${(index + 1).toString(16).padStart(40, "0")}`), deploymentBlock: 1, transactionHash: `0x${"11".repeat(32)}`, gasUsed: "1", codeHash: `0x${"22".repeat(32)}`,
+  });
+  const deployed: Manifest = {
+    ...committed, status: "deployed", deployer: ethers.getAddress(`0x${"aa".repeat(20)}`), foundationRecipient: ethers.getAddress(`0x${"aa".repeat(20)}`),
+    contracts: Object.fromEntries(CONTRACT_NAMES.map((name, index) => [name, filler(index)])) as Manifest["contracts"], deploymentGasTotal: "8",
+    token: { ...committed.token, address: ethers.getAddress(`0x${"bb".repeat(20)}`), tokenId: 1 },
+  };
+
+  test("deploySet without --live", async () => {
+    await expect(deploySet({ rpcUrl: REMOTE, manifest: committed, privateKey: `0x${"11".repeat(32)}` })).rejects.toThrow("needs --live");
+  });
+
+  test("smokeSet without --live, even with a key in hand", async () => {
+    expect(manifestProblems(deployed)).toEqual([]);
+    await expect(smokeSet({ rpcUrl: REMOTE, manifest: deployed, privateKey: `0x${"11".repeat(32)}` })).rejects.toThrow("needs --live");
+  });
+});
+
+describe("the deploy set is the frozen contract set", () => {
+  const build = path.join(import.meta.dir, "..", "..", "artifacts", "contracts");
+  const artifact = (file: string): { deployedBytecode: string; deployedLinkReferences: Record<string, Record<string, unknown>> } =>
+    JSON.parse(readFileSync(path.join(build, file), "utf8"));
+  const sourceOf = (name: string): string => {
+    const contract = name[0]!.toUpperCase() + name.slice(1);
+    const nested = path.join("custody", `${contract}.sol`, `${contract}.json`);
+    return existsSync(path.join(build, nested)) ? nested : path.join(`${contract}.sol`, `${contract}.json`);
+  };
+
+  test("the eight names are the eight deployable, non-mock contracts of the build", () => {
+    expect([...CONTRACT_NAMES].sort()).toEqual(["account", "deltaTransformer", "depository", "depositoryBounds", "entityProvider", "hankoVerifier", "hashLadderRegistry", "nftCustody"]);
+    for (const name of CONTRACT_NAMES) expect(artifact(sourceOf(name)).deployedBytecode.length, name).toBeGreaterThan(100);
+  });
+
+  test("every library or contract the Depository and the EntityProvider link to is in the set", () => {
+    const set = new Set(CONTRACT_NAMES.map((name) => `${name[0]!.toUpperCase()}${name.slice(1)}`));
+    for (const holder of ["depository", "entityProvider"] as const) {
+      const links = Object.values(artifact(sourceOf(holder)).deployedLinkReferences).flatMap((byName) => Object.keys(byName));
+      expect(links.length, holder).toBeGreaterThan(0);
+      for (const link of links) expect(set.has(link), `${holder} links ${link}`).toBe(true);
+    }
   });
 });
