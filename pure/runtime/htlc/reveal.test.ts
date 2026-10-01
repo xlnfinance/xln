@@ -3,13 +3,13 @@
 // Alice locks 30 for Bob until height 115; the clock's LAG is 1, so Bob's reveal is due at his view 114. Bob resolves
 // and Alice's ack does not come: what Bob's Host is asked to send to the chain is the subject here.
 import { describe, expect, test } from "bun:test";
-import { hashlockOf, holdOf, secretOf, viewOf } from "../account/fixtures.ts";
-import { holdId } from "../account/model.ts";
-import { apply, commit, flush, recover } from "./tick.ts";
-import { emptyEntity, type Command, type EntityId, type JAction } from "../entity/model.ts";
+import { hashlockOf, holdOf, secretOf, viewOf } from "../../account/fixtures.ts";
+import { holdId } from "../../account/model.ts";
+import { apply, commit, flush, recover } from "../tick.ts";
+import { emptyEntity, type Command, type EntityId, type JAction } from "../../entity/model.ts";
 import {
   type Cluster, credit, entityOf, feed, GOLD, heightAt, hostOf, open, restarted, rise, settle, start, unhalted,
-} from "./fixtures.ts";
+} from "../fixtures.ts";
 
 const ALICE = entityOf(1);
 const BOB = entityOf(2);
