@@ -55,7 +55,7 @@ const aggregateProblems = (name: string, workflow: string, jobs: Readonly<Record
       if (variable === undefined) return [`CI_SPLIT_AGGREGATE ${name} one-gate has no env variable for needs.${id}.result`];
       const bare = `test "$${variable}" = success`;
       const slow = jobIf(jobs[id] ?? "") !== undefined;
-      const wanted = slow ? `${bare} || { test "$FAST" = true && test "$${variable}" = skipped; }` : bare;
+      const wanted = slow ? `${bare} || test "$FAST:$${variable}" = true:skipped` : bare;
       return lines.includes(wanted) ? [] : [`CI_SPLIT_AGGREGATE ${name} one-gate must have the line \`${wanted}\` for ${slow ? "the slow job" : "the fast job"} ${id}${slow ? "" : " (a skipped fast job must fail the aggregate)"}`];
     }),
   ];

@@ -253,8 +253,8 @@ jobs:
           echo "fast-lane=$FAST static=$STATIC tests=$TESTS seeds=$SEEDS contracts-fork=$FORK"
           test "$STATIC" = success
           test "$TESTS" = success
-          test "$SEEDS" = success || { test "$FAST" = true && test "$SEEDS" = skipped; }
-          test "$FORK" = success || { test "$FAST" = true && test "$FORK" = skipped; }
+          test "$SEEDS" = success || test "$FAST:$SEEDS" = true:skipped
+          test "$FORK" = success || test "$FAST:$FORK" = true:skipped
 
   # og's inherited Hardhat suite is frozen at 566c850 and known red (122 pass, 79 fail). It is reported, never a gate:
   # no other job needs it, and continue-on-error keeps its red from failing the run that carries our own signals.

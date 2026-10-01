@@ -9,7 +9,7 @@ import { fastChecks, SLOW_IF, splitProblems } from "./ci-split.ts";
 const repo = `${import.meta.dir}/../../../..`;
 const SLOW = `    if: \${{ ${SLOW_IF} }}`;
 const FAST = "          FAST: ${{ github.event_name == 'pull_request' && github.base_ref == 'development' }}";
-const ALLOW = (variable: string): string => `          test "$${variable}" = success || { test "$FAST" = true && test "$${variable}" = skipped; }`;
+const ALLOW = (variable: string): string => `          test "$${variable}" = success || test "$FAST:$${variable}" = true:skipped`;
 
 type Plant = Readonly<{ push?: string; group?: string; cancel?: string; slowIf?: string; fastIf?: string; fastFlag?: string; lines?: readonly string[] }>;
 
@@ -127,7 +127,7 @@ describe("planted changes of the split are problems", () => {
     expect(aggregate(workflow({ lines: [...base, '          test "$SEEDS" = success'] }))).toEqual([expect.stringContaining("the slow job gate-seeds")]);
     expect(aggregate(workflow({ lines: [...base, '          test "$SEEDS" = success || test "$SEEDS" = skipped'] }))).toHaveLength(1);
     expect(aggregate(workflow({ lines: [...base, '          test "$SEEDS" = success || { test "$FAST" = true; }'] }))).toHaveLength(1);
-    expect(aggregate(workflow({ lines: [...base, ALLOW("SEEDS").replace("= true", "= false")] }))).toHaveLength(1);
+    expect(aggregate(workflow({ lines: [...base, ALLOW("SEEDS").replace("true:skipped", "false:skipped")] }))).toHaveLength(1);
     expect(aggregate(workflow({ lines: [...base, ALLOW("SEEDS").replace("skipped", "cancelled")] }))).toHaveLength(1);
     expect(aggregate(workflow({ lines: base }))).toHaveLength(1);
   });
@@ -179,4 +179,29 @@ describe("the real workflow and the real ruleset names", () => {
     expect(gate?.text).toMatch(/branches: \[main, development\]/);
     expect(splitProblems("x", (gate?.text ?? "").replace("[main, development]", "[main]")).length).toBeGreaterThan(0);
   });
+});
+
+describe("the aggregate, run", () => {
+  // The step is a bash script (`bash -e`), so what counts is what it does, not how it reads: every combination of lane and part results,
+  // run through the real `run:` block of the real workflow. A failed part must fail it on a full run, whatever the line looks like.
+  const body = (): string => {
+    const text = readFileSync(`${import.meta.dir}/../../../../.github/workflows/build-and-test.yml`, "utf8");
+    const block = /one-gate:[\s\S]*?\n {8}run: \|\n((?: {10}.*\n)+)/.exec(text)?.[1] ?? "";
+    return block.split("\n").map((line) => line.slice(10)).join("\n");
+  };
+  const results = ["success", "failure", "cancelled", "skipped"];
+
+  test("R-GATE-CI-SPLIT the aggregate step passes exactly when every part passed, or a slow part was skipped on a pull request into development", () => {
+    const script = body();
+    expect(script).toContain("test");
+    for (const fast of ["true", "false"]) {
+      for (const seeds of results) {
+        for (const fork of results) {
+          const allowed = (result: string): boolean => result === "success" || (fast === "true" && result === "skipped");
+          const status = Bun.spawnSync(["bash", "-e", "-c", script], { env: { PATH: process.env.PATH ?? "", FAST: fast, STATIC: "success", TESTS: "success", SEEDS: seeds, FORK: fork } }).exitCode;
+          expect({ fast, seeds, fork, passed: status === 0 }).toEqual({ fast, seeds, fork, passed: allowed(seeds) && allowed(fork) });
+        }
+      }
+    }
+  }, 60_000);
 });
