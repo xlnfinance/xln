@@ -81,6 +81,11 @@
      "kind": "mutant",
      "layer": "quint",
      "name": "halt-on-refusal"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-X1 a row refused for an Entity the Runtime does not host asks nothing of the chain"
     }
    ]
   },
@@ -1566,6 +1571,11 @@
      "kind": "mutant",
      "layer": "quint",
      "name": "ack-before-persist"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-DURABLE a flush after a crash asks for the rows in row order, each row's own actions in order"
     }
    ]
   },
@@ -1780,6 +1790,11 @@
      "kind": "mutant",
      "layer": "quint",
      "name": "escalation-too-late"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-HTLC-CLOCK a resolve names the hold of its own token: the same slot in another token is not it"
     }
    ]
   },
