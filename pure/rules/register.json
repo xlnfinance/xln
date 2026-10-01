@@ -1118,6 +1118,16 @@
      "name": "J5 review: a dispute start or counter beside a failing payment reverts the whole batch (R-SPLIT)"
     },
     {
+     "kind": "test",
+     "layer": "contract",
+     "name": "test_R_SPLIT_revealBesideFailingPaymentRevertsWhole"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "test_R_SPLIT_counterBesideFailingPaymentRevertsWhole"
+    },
+    {
      "kind": "mutant",
      "layer": "quint",
      "name": "urgent-batch-carries-payments",
