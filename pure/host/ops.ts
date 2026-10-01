@@ -26,10 +26,17 @@ export const opOf = (self: EntityId, action: JAction, world: ChainWorld): Result
     case "deposit":
       return ok({
         _tag: "reserve_to_collateral",
-        funding: { tokenId: action.token, receivingEntity: self, pairs: [{ entity: action.peer, amount: action.amount }] },
+        funding: {
+          tokenId: action.token,
+          receivingEntity: self,
+          pairs: [{ entity: action.peer, amount: action.amount }],
+        },
       });
     case "reveal":
-      return ok({ _tag: "reveal_secret", reveal: { transformer: world.transformer, secret: bytesToHex(action.secret) } });
+      return ok({
+        _tag: "reveal_secret",
+        reveal: { transformer: world.transformer, secret: bytesToHex(action.secret) },
+      });
     case "counter":
     case "c2r":
     case "settle":

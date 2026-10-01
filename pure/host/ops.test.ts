@@ -23,7 +23,19 @@ const resolveOf = (id: bigint): Command =>
   ({ _tag: "resolve", peer: ALICE, token: GOLD, id: holdId(id), secret: secretOf(1) });
 
 const unacked = feed(
-  settle(feed(settle(feed(settle(feed(feed(start(viewOf(110n), viewOf(110n)), ALICE, open(BOB)), BOB, open(ALICE))), BOB, credit(ALICE, 100n))), ALICE, lockIn(1n, 115n))),
+  settle(
+    feed(
+      settle(
+        feed(
+          settle(feed(feed(start(viewOf(110n), viewOf(110n)), ALICE, open(BOB)), BOB, open(ALICE))),
+          BOB,
+          credit(ALICE, 100n),
+        ),
+      ),
+      ALICE,
+      lockIn(1n, 115n),
+    ),
+  ),
   BOB, resolveOf(1n),
 );
 
@@ -46,7 +58,8 @@ describe("host/ops an Entity's action is the Depository's op", () => {
     const reveal = asked[0] ?? expect.unreachable("no reveal asked");
     expect(reveal._tag).toBe("reveal");
     expect(opOf(BOB, reveal, WORLD)).toEqual({
-      ok: true, value: { _tag: "reveal_secret", reveal: { transformer: WORLD.transformer, secret: `0x${"01".repeat(32)}` } },
+      ok: true,
+      value: { _tag: "reveal_secret", reveal: { transformer: WORLD.transformer, secret: `0x${"01".repeat(32)}` } },
     });
   });
 
@@ -77,7 +90,10 @@ describe("host/ops an Entity's action is the Depository's op", () => {
   test("a deposit of token 7 names token 7 in the funding, not the faucet token's id", () => {
     expect(opOf(ALICE, { _tag: "deposit", peer: BOB, token: tokenOf(7n), amount: 5n }, WORLD)).toEqual({
       ok: true,
-      value: { _tag: "reserve_to_collateral", funding: { tokenId: 7n, receivingEntity: ALICE, pairs: [{ entity: BOB, amount: 5n }] } },
+      value: {
+        _tag: "reserve_to_collateral",
+        funding: { tokenId: 7n, receivingEntity: ALICE, pairs: [{ entity: BOB, amount: 5n }] },
+      },
     });
   });
 
