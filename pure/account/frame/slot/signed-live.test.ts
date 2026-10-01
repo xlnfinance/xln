@@ -11,7 +11,7 @@ import { holdId, type Ledger, type Side } from "../../model.ts";
 import { emptyAccount, withLedger } from "../../state.ts";
 import type { AccountTx } from "../../tx.ts";
 import { accountRules, emptyReplica, liveLocks, type AccountReplica } from "../account.ts";
-import { MAX_UNSUPERSEDED, propose, queue, receive, type Msg } from "../frame.ts";
+import { MAX_UNSUPERSEDED, propose, queue, receive, stalled, type Msg } from "../frame.ts";
 
 const clock = unwrapOr(clockParams(1n, 2n, 10n), () => expect.unreachable("params"));
 const rulesAt = (view: bigint) => accountRules({ clock, view: viewOf(view) }, signing);
@@ -78,12 +78,17 @@ describe("account/frame R-SIGNED-IS-LIVE a lock in a signed proof stays live unt
     expect(yielded.replica.mempool).toEqual([lock(1n)]);
   });
 
-  test("past the cap a side proposes nothing more and keeps its txs, so the state it holds stays bounded", () => {
+  test("at the cap a side signs nothing more: its txs are refused with notice, and the stall shows", () => {
     const signed = Array.from({ length: MAX_UNSUPERSEDED }, (_, i) => ({ slot: i + 1, txs: [pay(1n)] }));
     const full = { ...funded("right"), unsuperseded: signed };
+    expect(stalled(full)).toBe(true);
     const blocked = propose(rulesAt(100n), queue(full, pay(1n)));
-    expect([blocked.sent, blocked.replica.pending, blocked.replica.mempool]).toEqual([[], undefined, [pay(1n)]]);
+    const notice = { _tag: "signed_cap", first: 1, last: MAX_UNSUPERSEDED } as const;
+    expect([blocked.sent, blocked.replica.pending, blocked.replica.mempool]).toEqual([[], undefined, []]);
+    expect(blocked.replica.refused).toEqual([{ tx: pay(1n), fault: notice }]);
+    expect(blocked.replica.unsuperseded).toEqual(signed);
     const room = { ...full, unsuperseded: signed.slice(1) };
+    expect(stalled(room)).toBe(false);
     expect(propose(rulesAt(100n), queue(room, pay(1n))).sent).toHaveLength(1);
   });
 });
