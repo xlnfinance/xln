@@ -1,0 +1,29 @@
+{
+ "id": "R-HORIZON-RESERVE",
+ "statement": "A lock is refused if deadline > own view + MAX_LOCK_HORIZON + reserve.",
+ "source": "contracts-decisions.md, Account-layer decisions 09-30 D-AC-12",
+ "layers": {
+  "arrival": "owed: Arrival aligns the constant at the ledger merge",
+  "quint": "owed: spec thread, new Quint branch (id not in a name yet)",
+  "contract": "n/a: the contracts have no lock horizon; it is an off-chain refusal",
+  "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
+  "ts": "hold"
+ },
+ "killers": [
+  {
+   "kind": "mutant",
+   "layer": "quint",
+   "name": "horizon-off"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-HORIZON-RESERVE and N2 a deadline is refused past the view plus the horizon plus the reserve"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-HORIZON-RESERVE the latest admitted deadline is the view plus the horizon plus the reserve"
+  }
+ ]
+}

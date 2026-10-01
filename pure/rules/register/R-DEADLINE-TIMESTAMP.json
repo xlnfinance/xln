@@ -1,0 +1,19 @@
+{
+ "id": "R-DEADLINE-TIMESTAMP",
+ "statement": "A hold's deadline is a J height (R-HTLC-CLOCK) and the contract counts a reveal only if it reached the chain by the payment's revealedUntilTimestamp, in seconds. The body maps one to the other with one function, a line through an anchor block of the J chain: the anchor's second, a block time per block after it, and a slack on top, all fixed by the deployment (the manifest's values, measured, not chosen here). Every hop uses the same line, so an earlier deadline is an earlier second, strictly, and the order a forwarding hub relies on is kept; the slack errs in the payee's favour (more time to reveal, a longer wait to finalize, never a lost payment) and must cover the drift of real block times from the line, so the anchor must be recent. A map that could run backwards is refused, and a deadline that maps to no positive second has no body.",
+ "source": "Review A of PR 79 F6 (A2); A4b (the function is the A4b thread's proposal, for the reviewers to attack)",
+ "layers": {
+  "arrival": "owed: spec thread (slots, floors and higher slot wins, from #97)",
+  "quint": "owed: spec thread (slots, floors and higher slot wins, from #97)",
+  "contract": "n/a: the deploy manifest's timestamp line is the chain's own (Runtime/deploy owes the measured values)",
+  "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
+  "ts": "hold"
+ },
+ "killers": [
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "account/proof R-DEADLINE-TIMESTAMP a deadline in J height is one function of the time map"
+  }
+ ]
+}

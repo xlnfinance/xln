@@ -1,0 +1,24 @@
+{
+ "id": "R-FUNDED",
+ "statement": "The planner signs a reserve payment only if the reserve covers it, always; oldest first, skipping one that does not fit.",
+ "source": "contracts-decisions.md (memory, #62)",
+ "layers": {
+  "arrival": "hold",
+  "quint": "owed: spec thread, new Quint branch",
+  "contract": "n/a: a planner choice made before signing; the chain's debt handling is R2C-DEBT-FIRST",
+  "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
+  "ts": "owed: the cut (J batch-planner slice)"
+ },
+ "killers": [
+  {
+   "kind": "bug",
+   "layer": "arrival",
+   "name": "unfunded-payments"
+  },
+  {
+   "kind": "mutant",
+   "layer": "quint",
+   "name": "unfunded-payment-is-signed"
+  }
+ ]
+}

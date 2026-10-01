@@ -1,0 +1,19 @@
+{
+ "id": "R-RETRY-NEW-NONCE",
+ "statement": "A refused frame is retried at a fresh proof nonce: the retry's slot is above every slot its proposer signed and above the floor the refusal names, never a second different proof at one nonce, because the peer holds the proposer's signature on the refused attempt's proof. The contract takes any nonce above the stored one (start nonce > stored, counter nonce >= the opening nonce, finalize by a newer signed proof), so a gap costs nothing; a nonce not below the JS-safe ceiling has no digest.",
+ "source": "contracts-decisions.md, R-RETRY-NEW-NONCE (coordinator 10-01 05:18); Account.sol _disputeStart, _registerCounterDispute",
+ "layers": {
+  "arrival": "owed: spec thread (slots, floors and higher slot wins, from #97)",
+  "quint": "owed: spec thread (slots, floors and higher slot wins, from #97)",
+  "contract": "n/a: an off-chain Account rule; the chain sees only signed proofs",
+  "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
+  "ts": "hold"
+ },
+ "killers": [
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-RETRY-NEW-NONCE the retry is signed two slots above the refused attempt, at another digest"
+  }
+ ]
+}

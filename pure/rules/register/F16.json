@@ -1,0 +1,39 @@
+{
+ "id": "F16",
+ "statement": "Contract as built: the soft gas path exists only for money-only batches; dispute, reveal, ladder and deposit batches revert whole on out-of-gas and keep their nonce.",
+ "source": "contracts-decisions.md F16 (memory)",
+ "layers": {
+  "arrival": "owed: spec thread, next Arrival page (id not in a name yet)",
+  "quint": "hold",
+  "contract": "hold",
+  "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
+  "ts": "n/a: a fact about the contract as built; the planner's use of it is J5 and R-SIMULATE"
+ },
+ "killers": [
+  {
+   "kind": "test",
+   "layer": "contract",
+   "name": "test_gasSweep_erc20Deposit_depthTwo"
+  },
+  {
+   "kind": "test",
+   "layer": "contract",
+   "name": "test_F16_gasSweep_erc721Deposit_depthThree"
+  },
+  {
+   "kind": "test",
+   "layer": "contract",
+   "name": "F16 V revert-whole batches ignore the budget but keep the minimum"
+  },
+  {
+   "kind": "mutant",
+   "layer": "quint",
+   "name": "gas-fail-burns-an-urgent-batch"
+  },
+  {
+   "kind": "mutant",
+   "layer": "quint",
+   "name": "gas-fail-burns-a-deposit-batch"
+  }
+ ]
+}

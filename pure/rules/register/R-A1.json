@@ -1,0 +1,79 @@
+{
+ "id": "R-A1",
+ "statement": "Same-height collision: the frame with the higher proof slot wins, and at the first collision on a head that is Left's, so Left wins; the loser rolls back and re-proposes its txs at the next height. Quint (#44) still models the slot-free collision (Left keeps its own frame); the slot rule is owed to the spec page that follows.",
+ "source": "lessons.md section 2",
+ "layers": {
+  "arrival": "owed: spec thread, next Arrival page (slots and higher slot wins)",
+  "quint": "hold",
+  "contract": "n/a: simultaneous frame proposals are an off-chain Account rule; the chain sees only signed proofs",
+  "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
+  "ts": "hold"
+ },
+ "killers": [
+  {
+   "kind": "bug",
+   "layer": "arrival",
+   "name": "no-tie-break"
+  },
+  {
+   "kind": "mutant",
+   "layer": "quint",
+   "name": "collision-both-roll-back"
+  },
+  {
+   "kind": "mutant",
+   "layer": "quint",
+   "name": "tie-break-reversed"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-A1 Left ignores Right's frame and keeps its own"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-A1 Right rolls its frame back, commits Left's and acks it"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-A1 Left commits on the ack, and Right proposes its txs again at the next height"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-A1 the rolled-back txs go ahead of what Right queued later"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-A1 R-PARENT committed histories agree: one extends the other, in every state of the page"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-A1 R-PARENT heights differ by at most one, in every state of the page"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-A1 R-PARENT no tx committed twice, in every state of the page"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-A1 each side's txs commit in submission order, in every state of the page"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-A1 R-REACK nothing wedges: a finished world is reachable from every state"
+  },
+  {
+   "kind": "mutant",
+   "layer": "quint",
+   "name": "rollback-drops-txs"
+  }
+ ]
+}

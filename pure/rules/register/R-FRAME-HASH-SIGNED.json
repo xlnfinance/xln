@@ -1,0 +1,24 @@
+{
+ "id": "R-FRAME-HASH-SIGNED",
+ "statement": "A frame has two names. Its head, the hash it is acked and chained by, is the digest of the dispute-proof message both sides sign: the Account's proof body after the frame, at the nonce the first signed frame's plus its height minus one, authored by the frame's proposer, so the bytes bind the author side, the state and the height. Its content name (author, parent, attempt, txs) needs no state, and a refusal, a repeat and the refusal memory use it, never the head; an ack names the head and one that names the content is ignored. A state that has no proof body is refused before anyone signs it (fault unsignable) and a frame whose digest cannot be made is refused with notice. Each replica builds both from its own state: nothing signed comes from the wire. Signing, and checking the signature before the memory is consulted, are the Runtime's (T0).",
+ "source": "coordinator decision 10-01 on A3 (provisional frame hash)",
+ "layers": {
+  "arrival": "owed: spec thread (an Arrival page for the bytes both sides sign)",
+  "quint": "owed: spec thread (a Quint model for the signed frame)",
+  "contract": "n/a: frame hashes are off-chain; the chain verifies proof signatures, not frame hashes",
+  "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
+  "ts": "hold"
+ },
+ "killers": [
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "account/proof R-FRAME-HASH-SIGNED the head a frame gives is the digest its signers sign"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "account/proof R-FRAME-HASH-SIGNED a state with no proof body is refused before anyone signs it"
+  }
+ ]
+}
