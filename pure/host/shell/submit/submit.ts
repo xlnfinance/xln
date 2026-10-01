@@ -7,18 +7,18 @@
 // action again after a crash, so an action whose row is in a batch that is on its way or landed is known, and is not
 // queued a second time: a deposit is not made twice. A batch that failed (it applied nothing and spent its nonce)
 // forgets its rows, and the action is queued again at a fresh nonce.
-import type { JAction } from "../../entity/model.ts";
-import type { EntityId } from "../../entity/model.ts";
-import type { Deployment } from "../../chain/proof/deployment.ts";
-import { observe, type JAnswer, type Observed, type Returned, type Skipped } from "../../j/batch/answer.ts";
-import { openJBatch, queue, type JBatch, type QueueFault } from "../../j/batch/jbatch.ts";
-import { sealBatch, type SealedBatch, type SealFault } from "../../j/batch/sealed.ts";
-import type { JOp } from "../../j/op/ops.ts";
-import { err, flatMap, foldResult, map, ok, traverse, type Result } from "../../kernel/core/result.ts";
-import type { Tagged } from "../../kernel/core/tagged.ts";
-import type { Row } from "../../runtime/model.ts";
-import { opOf, type ChainWorld, type OpFault } from "../ops.ts";
-import type { RowId } from "../model.ts";
+import type { JAction } from "../../../entity/model.ts";
+import type { EntityId } from "../../../entity/model.ts";
+import type { Deployment } from "../../../chain/proof/deployment.ts";
+import { observe, type JAnswer, type Observed, type Returned, type Skipped } from "../../../j/batch/answer.ts";
+import { openJBatch, queue, type JBatch, type QueueFault } from "../../../j/batch/jbatch.ts";
+import { sealBatch, type SealedBatch, type SealFault } from "../../../j/batch/sealed.ts";
+import type { JOp } from "../../../j/op/ops.ts";
+import { err, flatMap, foldResult, map, ok, traverse, type Result } from "../../../kernel/core/result.ts";
+import type { Tagged } from "../../../kernel/core/tagged.ts";
+import type { Row } from "../../../runtime/model.ts";
+import { opOf, type ChainWorld, type OpFault } from "../../ops.ts";
+import type { RowId } from "../../model.ts";
 import type { Answered, JournalRecord, Sealed } from "./journal.ts";
 
 const keyOf = (id: RowId): string => `${id.height}:${id.index}`;

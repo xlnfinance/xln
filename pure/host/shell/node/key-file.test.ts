@@ -3,9 +3,9 @@
 import { describe, expect, test } from "bun:test";
 import { chmodSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { unwrapOr } from "../../kernel/core/result.ts";
-import { keyOf } from "./link.ts";
-import { loadKey } from "./node/key-file.ts";
+import { unwrapOr } from "../../../kernel/core/result.ts";
+import { keyOf } from "../link/link.ts";
+import { loadKey } from "./key-file.ts";
 
 const SECRET = Uint8Array.from({ length: 32 }, (_, i) => i + 1);
 const HEX = Array.from(SECRET, (byte) => byte.toString(16).padStart(2, "0")).join("");

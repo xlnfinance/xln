@@ -3,14 +3,14 @@
 import { describe, expect, test } from "bun:test";
 import { mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { err, ok } from "../../kernel/core/result.ts";
-import { emptyEntity } from "../../entity/model.ts";
-import type { Row } from "../../runtime/model.ts";
-import { reopen } from "../host.ts";
-import { BOUNDS, unhalted } from "../fixtures.ts";
+import { err, ok } from "../../../kernel/core/result.ts";
+import { emptyEntity } from "../../../entity/model.ts";
+import type { Row } from "../../../runtime/model.ts";
+import { reopen } from "../../host.ts";
+import { BOUNDS, unhalted } from "../../fixtures.ts";
 import { type Disk, type DiskOp, failStop, sequence } from "./disk.ts";
-import { fileDisk } from "./node/file-disk.ts";
-import { aliceRun, ALICE, bobRun, BOB, walOf } from "./fixtures.ts";
+import { fileDisk } from "../node/file-disk.ts";
+import { aliceRun, ALICE, bobRun, BOB, walOf } from "../fixtures.ts";
 import { appendOps, keep, openWal } from "./store.ts";
 import { recordOf } from "./wal.ts";
 

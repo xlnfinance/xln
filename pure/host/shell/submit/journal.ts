@@ -7,12 +7,12 @@
 //   sealed    a batch was signed. It is written, and synced, BEFORE it is sent: a batch that may be on the chain is
 //             never one the journal does not know.
 //   answered  the chain said what became of it: it landed, or it failed (and spent its nonce).
-import { all, flatMap, map, ok, traverse, type Result } from "../../kernel/core/result.ts";
-import type { Tagged } from "../../kernel/core/tagged.ts";
-import type { RowId } from "../model.ts";
-import { bad, big, count, field, record, text, type Fields, type ReadFault } from "./read.ts";
-import { scanRecords, type RecordFault } from "./records.ts";
-import type { Held } from "./store.ts";
+import { all, flatMap, map, ok, traverse, type Result } from "../../../kernel/core/result.ts";
+import type { Tagged } from "../../../kernel/core/tagged.ts";
+import type { RowId } from "../../model.ts";
+import { bad, big, count, field, record, text, type Fields, type ReadFault } from "../codec/read.ts";
+import { scanRecords, type RecordFault } from "../disk/records.ts";
+import type { Held } from "../disk/store.ts";
 
 export type Answer = "landed" | "failed";
 

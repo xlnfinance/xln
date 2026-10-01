@@ -4,8 +4,8 @@
 import { open, readFile, type FileHandle } from "node:fs/promises";
 import { dirname } from "node:path";
 import { err, ok, type Result } from "../../../kernel/core/result.ts";
-import type { Disk, DiskFault, DiskOp, Exec } from "../disk.ts";
-import { failStop, sequence } from "../disk.ts";
+import type { Disk, DiskFault, DiskOp, Exec } from "../disk/disk.ts";
+import { failStop, sequence } from "../disk/disk.ts";
 
 type Step = DiskFault["op"];
 

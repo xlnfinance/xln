@@ -1,8 +1,8 @@
 // What every reader of untrusted text has in common: a fault that names the place, a record that has exactly the keys
 // its type has, and the plain kinds a field can be. wire.ts reads messages with them, link.ts the handshake and the
 // sealed records, so a stranger's text is judged by one set of rules.
-import { err, ok, type Result } from "../../kernel/core/result.ts";
-import type { Tagged } from "../../kernel/core/tagged.ts";
+import { err, ok, type Result } from "../../../kernel/core/result.ts";
+import type { Tagged } from "../../../kernel/core/tagged.ts";
 import type { ValueFault } from "./value.ts";
 
 export type ReadFault =

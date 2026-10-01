@@ -1,13 +1,13 @@
 // What signs for the Host's Entity, as the one thing the shell holds that can spend (R-LINK-AUTH, F1). The Host's core
 // never signs and never sees a key; the shell hands the J path this and nothing else: the Hanko of a batch digest.
 // The key itself is read from an owner-only file by node/key-file.ts and kept as bytes in a `Key`.
-import { lazyHanko } from "../../chain/hanko/hanko.ts";
-import type { EntityId } from "../../entity/model.ts";
-import { err, mapErr, type Result } from "../../kernel/core/result.ts";
-import { signDigest } from "../../kernel/crypto/signature.ts";
-import type { Tagged } from "../../kernel/core/tagged.ts";
-import { hexToBytes } from "../../kernel/encoding/bytes.ts";
-import type { Key } from "./link.ts";
+import { lazyHanko } from "../../../chain/hanko/hanko.ts";
+import type { EntityId } from "../../../entity/model.ts";
+import { err, mapErr, type Result } from "../../../kernel/core/result.ts";
+import { signDigest } from "../../../kernel/crypto/signature.ts";
+import type { Tagged } from "../../../kernel/core/tagged.ts";
+import { hexToBytes } from "../../../kernel/encoding/bytes.ts";
+import type { Key } from "../link/link.ts";
 
 export type SignFault = Tagged<"cannot_sign", { digest: string; reason: string }>;
 

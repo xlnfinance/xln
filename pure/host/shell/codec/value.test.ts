@@ -1,6 +1,6 @@
 // The text of a row and back: nothing changes in the round trip, and what has no exact text is refused at the write.
 import { describe, expect, test } from "bun:test";
-import { aliceRun, ALICE, BOB, bobRun, walOf } from "./fixtures.ts";
+import { aliceRun, ALICE, BOB, bobRun, walOf } from "../fixtures.ts";
 import { decodeValue, encodeValue, MAX_DEPTH } from "./value.ts";
 
 const roundTrip = (v: unknown) => {

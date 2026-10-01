@@ -14,10 +14,10 @@
 // header check and the file is refused, never read as a short file and cut.
 //
 // The WAL (wal.ts) and the chain journal (journal.ts) are files of such records; each says what a value is.
-import { err, flatMap, mapAccumResult, ok, type Result } from "../../kernel/core/result.ts";
-import type { Tagged } from "../../kernel/core/tagged.ts";
-import { concat, keccak256, utf8 } from "../../kernel/encoding/bytes.ts";
-import { decodeValue, encodeValue, type ValueFault } from "./value.ts";
+import { err, flatMap, mapAccumResult, ok, type Result } from "../../../kernel/core/result.ts";
+import type { Tagged } from "../../../kernel/core/tagged.ts";
+import { concat, keccak256, utf8 } from "../../../kernel/encoding/bytes.ts";
+import { decodeValue, encodeValue, type ValueFault } from "../codec/value.ts";
 
 export type RecordFault<E> =
   | Tagged<"corrupt", { offset: number }>

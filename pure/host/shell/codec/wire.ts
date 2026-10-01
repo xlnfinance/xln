@@ -3,15 +3,15 @@
 // everything else is checked here, field by field, with exactly the keys the type has and the bounds the Runtime and
 // the ledger do not give (a count, a length). What the ledger judges (an amount, a deadline's meaning) stays the
 // ledger's: here a number is only a number of the right kind.
-import type { AccountTx } from "../../account/tx.ts";
-import type { Msg, Frame, FrameHash } from "../../account/frame/frame.ts";
-import { jHeight, type JHeight } from "../../account/clause/clock.ts";
+import type { AccountTx } from "../../../account/tx.ts";
+import type { Msg, Frame, FrameHash } from "../../../account/frame/frame.ts";
+import { jHeight, type JHeight } from "../../../account/clause/clock.ts";
 import {
   holdId, tokenId, type Hold, type HoldId, type Leg, type Offer, type Side, type TokenId,
-} from "../../account/model.ts";
-import { entityId, type EntityId, type Outbound } from "../../entity/model.ts";
-import { all, err, flatMap, mapErr, ok, traverse, type Result } from "../../kernel/core/result.ts";
-import type { Tagged } from "../../kernel/core/tagged.ts";
+} from "../../../account/model.ts";
+import { entityId, type EntityId, type Outbound } from "../../../entity/model.ts";
+import { all, err, flatMap, mapErr, ok, traverse, type Result } from "../../../kernel/core/result.ts";
+import type { Tagged } from "../../../kernel/core/tagged.ts";
 import { bad, big, bytesOf, count, field, record, text, type Fields, type Reader, type ReadFault } from "./read.ts";
 import { decodeValue, encodeValue, type ValueFault } from "./value.ts";
 

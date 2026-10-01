@@ -3,9 +3,9 @@
 // replay that diverges for no reason the Runtime could name. JSON has no bigint, no bytes and no `undefined`; each gets
 // a one-key tag, and an object that already has a key of that shape is refused, so no plain value reads as a tag.
 // Anything else (a Map, a function, a NaN) is refused at the write, never stored.
-import { err, flatMap, ok, traverse, type Result } from "../../kernel/core/result.ts";
-import type { Tagged } from "../../kernel/core/tagged.ts";
-import { bytesToHex, hexToBytes } from "../../kernel/encoding/bytes.ts";
+import { err, flatMap, ok, traverse, type Result } from "../../../kernel/core/result.ts";
+import type { Tagged } from "../../../kernel/core/tagged.ts";
+import { bytesToHex, hexToBytes } from "../../../kernel/encoding/bytes.ts";
 
 export type ValueFault =
   | Tagged<"unsupported", { at: string; kind: string }>

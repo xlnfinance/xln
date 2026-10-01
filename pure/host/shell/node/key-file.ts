@@ -7,7 +7,7 @@ import { readFile, stat } from "node:fs/promises";
 import { err, flatMap, mapErr, ok, type Result } from "../../../kernel/core/result.ts";
 import type { Tagged } from "../../../kernel/core/tagged.ts";
 import { hexToBytes } from "../../../kernel/encoding/bytes.ts";
-import { keyOf, type Key } from "../link.ts";
+import { keyOf, type Key } from "../link/link.ts";
 
 export type KeyFileFault =
   | Tagged<"key_file_unreadable", { path: string; reason: string }>

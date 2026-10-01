@@ -2,11 +2,11 @@
 // for and no other, and a digest that is not 32 bytes of hex is a fault the caller can read (F1: only what was sealed
 // is signed).
 import { describe, expect, test } from "bun:test";
-import { lazyEntityId } from "../../chain/hanko/hanko.ts";
-import { entityId } from "../../entity/model.ts";
-import { verifyHankoSignature } from "../../chain/hanko/hanko-verify.ts";
-import { ok, unwrapOr } from "../../kernel/core/result.ts";
-import { keyOf } from "./link.ts";
+import { lazyEntityId } from "../../../chain/hanko/hanko.ts";
+import { entityId } from "../../../entity/model.ts";
+import { verifyHankoSignature } from "../../../chain/hanko/hanko-verify.ts";
+import { ok, unwrapOr } from "../../../kernel/core/result.ts";
+import { keyOf } from "../link/link.ts";
 import { lazySigner } from "./signer.ts";
 
 const KEY = unwrapOr(keyOf(Uint8Array.from({ length: 32 }, (_, i) => i + 1)), () => expect.unreachable("key"));

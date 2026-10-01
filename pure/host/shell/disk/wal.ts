@@ -1,11 +1,11 @@
 // The WAL's rows on a disk (R-DURABLE): records of rows, in row order (records.ts says what a record is and how a tear
 // is told from damage). A row is what the Runtime wrote, so a value is a row only when it has a row's own fields; the
 // rest of what a row says is judged when `recover` replays it.
-import type { Row } from "../../runtime/model.ts";
-import { err, map, ok, type Result } from "../../kernel/core/result.ts";
-import type { Tagged } from "../../kernel/core/tagged.ts";
+import type { Row } from "../../../runtime/model.ts";
+import { err, map, ok, type Result } from "../../../kernel/core/result.ts";
+import type { Tagged } from "../../../kernel/core/tagged.ts";
 import { frame, scanRecords, type RecordFault, type Scanned as Records } from "./records.ts";
-import type { ValueFault } from "./value.ts";
+import type { ValueFault } from "../codec/value.ts";
 
 export type WalFault = RecordFault<Tagged<"not_a_row">>;
 

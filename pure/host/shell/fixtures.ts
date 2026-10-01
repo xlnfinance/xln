@@ -11,7 +11,7 @@ import {
 } from "../../runtime/fixtures.ts";
 import type { Row } from "../../runtime/model.ts";
 import type { ChainWorld } from "../ops.ts";
-import type { Asked } from "./submit.ts";
+import type { Asked } from "./submit/submit.ts";
 
 export const ALICE = entityOf(1);
 export const BOB = entityOf(2);

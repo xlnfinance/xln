@@ -18,16 +18,16 @@
 import { secp256k1 } from "@noble/curves/secp256k1";
 import { hmac } from "@noble/hashes/hmac";
 import { sha256 } from "@noble/hashes/sha256";
-import type { EntityId, Outbound } from "../../entity/model.ts";
-import { all, err, flatMap, map, mapErr, ok, type Result } from "../../kernel/core/result.ts";
-import { signDigest, recoverPublicKey, addressOf } from "../../kernel/crypto/signature.ts";
-import type { Tagged } from "../../kernel/core/tagged.ts";
-import { concat, hexToBytes, keccak256, utf8 } from "../../kernel/encoding/bytes.ts";
-import { bytesOf, count, field, record, text, type Fields, type ReadFault } from "./read.ts";
-import { decodeValue, encodeValue, type ValueFault } from "./value.ts";
-import { MAX_WIRE_BYTES, readWire, writeOutbound } from "./wire.ts";
-import { receive } from "../host.ts";
-import type { Host, HostNotice } from "../model.ts";
+import type { EntityId, Outbound } from "../../../entity/model.ts";
+import { all, err, flatMap, map, mapErr, ok, type Result } from "../../../kernel/core/result.ts";
+import { signDigest, recoverPublicKey, addressOf } from "../../../kernel/crypto/signature.ts";
+import type { Tagged } from "../../../kernel/core/tagged.ts";
+import { concat, hexToBytes, keccak256, utf8 } from "../../../kernel/encoding/bytes.ts";
+import { bytesOf, count, field, record, text, type Fields, type ReadFault } from "../codec/read.ts";
+import { decodeValue, encodeValue, type ValueFault } from "../codec/value.ts";
+import { MAX_WIRE_BYTES, readWire, writeOutbound } from "../codec/wire.ts";
+import { receive } from "../../host.ts";
+import type { Host, HostNotice } from "../../model.ts";
 
 /** A Runtime's address: the lower-case Ethereum address of its key. */
 export type RuntimeId = string;

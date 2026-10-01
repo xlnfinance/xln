@@ -1,9 +1,9 @@
 // The bytes of the WAL: records in order, the tear a crash leaves at the tail cut off, a damaged file refused.
 import { describe, expect, test } from "bun:test";
-import { ok } from "../../kernel/core/result.ts";
-import { concat } from "../../kernel/encoding/bytes.ts";
-import type { Row } from "../../runtime/model.ts";
-import { aliceRun, ALICE, walOf } from "./fixtures.ts";
+import { ok } from "../../../kernel/core/result.ts";
+import { concat } from "../../../kernel/encoding/bytes.ts";
+import type { Row } from "../../../runtime/model.ts";
+import { aliceRun, ALICE, walOf } from "../fixtures.ts";
 import { recordOf, scanWal } from "./wal.ts";
 
 const rows = walOf(aliceRun, ALICE);

@@ -5,16 +5,16 @@
 import { describe, expect, test } from "bun:test";
 import { appendFileSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import type { JAnswer } from "../../j/batch/answer.ts";
-import { MIN_GAS_BUDGET, type SealedBatch } from "../../j/batch/sealed.ts";
-import { requirement } from "../../j/gas/gas.ts";
-import type { Simulation } from "../../j/gas/simulate.ts";
-import { err, ok, unwrapOr, type Result } from "../../kernel/core/result.ts";
+import type { JAnswer } from "../../../j/batch/answer.ts";
+import { MIN_GAS_BUDGET, type SealedBatch } from "../../../j/batch/sealed.ts";
+import { requirement } from "../../../j/gas/gas.ts";
+import type { Simulation } from "../../../j/gas/simulate.ts";
+import { err, ok, unwrapOr, type Result } from "../../../kernel/core/result.ts";
 import { settle, resume, step, type Arrival, type ChainPort, type Io, type PortFault } from "./chain.ts";
-import { aliceRun, ALICE, DEPOSIT, GAS, TREASURY, walOf, DEPLOYED, WORLD } from "./fixtures.ts";
+import { aliceRun, ALICE, DEPOSIT, GAS, TREASURY, walOf, DEPLOYED, WORLD } from "../fixtures.ts";
 import { scanJournal } from "./journal.ts";
-import { keyOf } from "./link.ts";
-import { fileDisk } from "./node/file-disk.ts";
+import { keyOf } from "../link/link.ts";
+import { fileDisk } from "../node/file-disk.ts";
 import { lazySigner, type Signer } from "./signer.ts";
 import { take, openSubmitter, type Submitter } from "./submit.ts";
 

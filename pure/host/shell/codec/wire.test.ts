@@ -1,12 +1,12 @@
 // What crosses the link: every message a Runtime makes comes back as it went, and what a stranger can write is refused
 // at the first field that is wrong, before the Host or a Runtime has seen it (Q-T-6).
 import { describe, expect, test } from "bun:test";
-import { holdOf, secretOf } from "../../account/fixtures.ts";
-import type { Hold, Offer } from "../../account/model.ts";
-import type { AccountTx } from "../../account/tx.ts";
-import type { Outbound } from "../../entity/model.ts";
-import { GOLD } from "../../runtime/fixtures.ts";
-import { aliceRun, ALICE, BOB, bobRun, walOf } from "./fixtures.ts";
+import { holdOf, secretOf } from "../../../account/fixtures.ts";
+import type { Hold, Offer } from "../../../account/model.ts";
+import type { AccountTx } from "../../../account/tx.ts";
+import type { Outbound } from "../../../entity/model.ts";
+import { GOLD } from "../../../runtime/fixtures.ts";
+import { aliceRun, ALICE, BOB, bobRun, walOf } from "../fixtures.ts";
 import { MAX_FRAME_TXS, MAX_WIRE_BYTES, readWire, writeOutbound } from "./wire.ts";
 import { encodeValue } from "./value.ts";
 

@@ -2,13 +2,13 @@
 // carries the rows it was made from, and what a restart rebuilds from the journal and the WAL is what was in flight
 // (R-DURABLE: a deposit is not made twice; F1: a signed batch is final at its nonce).
 import { describe, expect, test } from "bun:test";
-import type { JAction } from "../../entity/model.ts";
-import { seal, type JBatch, type SealContext } from "../../j/batch/jbatch.ts";
-import type { SealedBatch } from "../../j/batch/sealed.ts";
-import { unwrapOr } from "../../kernel/core/result.ts";
-import type { Row } from "../../runtime/model.ts";
-import type { RowId } from "../model.ts";
-import { aliceRun, ALICE, BOB, bobRun, DEPLOYED, GAS, TREASURY, walOf, WORLD } from "./fixtures.ts";
+import type { JAction } from "../../../entity/model.ts";
+import { seal, type JBatch, type SealContext } from "../../../j/batch/jbatch.ts";
+import type { SealedBatch } from "../../../j/batch/sealed.ts";
+import { unwrapOr } from "../../../kernel/core/result.ts";
+import type { Row } from "../../../runtime/model.ts";
+import type { RowId } from "../../model.ts";
+import { aliceRun, ALICE, BOB, bobRun, DEPLOYED, GAS, TREASURY, walOf, WORLD } from "../fixtures.ts";
 import type { JournalRecord } from "./journal.ts";
 import { answeredBy, openSubmitter, sealedBy, take, type Chain, type Submitter } from "./submit.ts";
 

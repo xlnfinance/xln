@@ -1,8 +1,8 @@
 // The chain journal's records as the file holds them: a sealed batch and an answer come back as written, a record that
 // is not exactly one of the two is refused with the path that is wrong, and a tear at the tail is cut (R-DURABLE).
 import { describe, expect, test } from "bun:test";
-import { concat } from "../../kernel/encoding/bytes.ts";
-import { frame } from "./records.ts";
+import { concat } from "../../../kernel/encoding/bytes.ts";
+import { frame } from "../disk/records.ts";
 import { journalRecord, scanJournal, type JournalRecord } from "./journal.ts";
 
 const DIGEST = `0x${"ab".repeat(32)}`;

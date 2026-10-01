@@ -2,16 +2,16 @@
 // reaches a Host only as the proved peer's own (Q-T-5, R-LINK-AUTH). The forged ack and the replay go through the
 // shell's receive path, handshake and sealed record first and Host.receive after, with real Hosts.
 import { describe, expect, test } from "bun:test";
-import { GENESIS } from "../../account/frame/account.ts";
-import { credit, open } from "../../entity/fixtures.ts";
-import type { Outbound } from "../../entity/model.ts";
-import { err, ok, unwrapOr } from "../../kernel/core/result.ts";
-import { begin, persisted, receive } from "../host.ts";
-import { entityOf, hostFor, meet, stamp, tell, turn, unhalted } from "../fixtures.ts";
+import { GENESIS } from "../../../account/frame/account.ts";
+import { credit, open } from "../../../entity/fixtures.ts";
+import type { Outbound } from "../../../entity/model.ts";
+import { err, ok, unwrapOr } from "../../../kernel/core/result.ts";
+import { begin, persisted, receive } from "../../host.ts";
+import { entityOf, hostFor, meet, stamp, tell, turn, unhalted } from "../../fixtures.ts";
 import {
   accept, answer, dial, finish, hear, keyOf, open as openRecord, seal, type Key, type Link, type Peer,
 } from "./link.ts";
-import { decodeValue, encodeValue } from "./value.ts";
+import { decodeValue, encodeValue } from "../codec/value.ts";
 
 const ALICE = entityOf(1);
 const BOB = entityOf(2);

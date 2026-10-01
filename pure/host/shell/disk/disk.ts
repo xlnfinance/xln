@@ -1,9 +1,9 @@
 // What the shell asks of a disk, as data (R-DURABLE). A row is made durable by a short list of operations that run in
 // order, and the shell reports the row durable only once the whole list has completed, the last of which is a sync. The
 // operations are values, so the order a crash can cut and the bytes a tear can leave are tested without a disk.
-import type { Result } from "../../kernel/core/result.ts";
-import { err, ok } from "../../kernel/core/result.ts";
-import type { Tagged } from "../../kernel/core/tagged.ts";
+import type { Result } from "../../../kernel/core/result.ts";
+import { err, ok } from "../../../kernel/core/result.ts";
+import type { Tagged } from "../../../kernel/core/tagged.ts";
 
 export type DiskOp =
   | Tagged<"write", { bytes: Uint8Array }>

@@ -2,13 +2,13 @@
 // when the record is synced. The Host reports a row durable (`persisted`) only from the completion of `keep`; every
 // `send` and `chain` effect follows that, so nothing leaves on a row that a crash could still take back. The WAL and
 // the chain journal are such files.
-import type { Row } from "../../runtime/model.ts";
-import { flatMap, map, mapErr, ok, type Result } from "../../kernel/core/result.ts";
-import type { Tagged } from "../../kernel/core/tagged.ts";
+import type { Row } from "../../../runtime/model.ts";
+import { flatMap, map, mapErr, ok, type Result } from "../../../kernel/core/result.ts";
+import type { Tagged } from "../../../kernel/core/tagged.ts";
 import type { Disk, DiskFault, DiskOp } from "./disk.ts";
 import { frame } from "./records.ts";
 import { scanWal, type WalFault } from "./wal.ts";
-import type { ValueFault } from "./value.ts";
+import type { ValueFault } from "../codec/value.ts";
 
 export type Unwritable = Tagged<"unwritable", { fault: ValueFault }>;
 
