@@ -128,4 +128,17 @@ describe("forms the comparison cannot read are problems, not passes", () => {
     const byFile = text.replace(/^(\s*)bun-version:.*$/m, "$1bun-version-file: .bun-version");
     expect(ciDriftProblems({ ...real, workflows: { "build-and-test.yml": byFile } }).map((problem) => problem.split(" ")[0])).toContain("CI_DRIFT_BUN_FILE");
   });
+
+  test("R-GATE-CI-DRIFT a comment that names ast-grep-cli without a pin is not an install, so it is no problem", () => {
+    expect(ciDriftProblems(withWorkflow("# installs ast-grep-cli via uv for rules/\n  uv tool install ast-grep-cli==0.45.3\n"))).toEqual([]);
+    expect(ciDriftProblems(withWorkflow("  uv tool install ast-grep-cli==0.45.3 # not just ast-grep-cli\n"))).toEqual([]);
+  });
+
+  test("R-GATE-CI-DRIFT the setup-bun action is found in any case, as GitHub reads action names without case", () => {
+    const shout = setupBun("").replace("oven-sh/setup-bun@", "Oven-sh/Setup-Bun@");
+    expect(shout).not.toBe(setupBun(""));
+    expect(setupBunSteps(shout)).toHaveLength(1);
+    expect(ciDriftProblems(withWorkflow(shout))).toEqual(["CI_DRIFT_BUN_UNSET ci.yml has a setup-bun step with no bun-version"]);
+  });
 });
+
