@@ -6,7 +6,7 @@ import { err, flatMap, map, ok, type Result } from "../kernel/core/result.ts";
 import { match, type Tagged } from "../kernel/core/tagged.ts";
 import {
   opposite, type Book, type CancelFault, type DropReason, type Fill, type Limits, type Market, type Order,
-  type OrderId, type Owner, type PlaceFault, type Placed, type Remainder, type Resting, type Side,
+  type OrderId, type Owner, type PlaceFault, type Placed, type Unfilled, type Resting, type Side,
 } from "./model.ts";
 
 /** A market names two different tokens and positive steps; the limits are positive. */
@@ -93,32 +93,32 @@ const fillOf = (order: Order, maker: Resting, lots: bigint): Fill => ({
 type Sweep = Readonly<{ fills: readonly Fill[]; left: bigint; stop: Stop }>;
 
 /** Where the sweep stands: the next offer to meet, the fills so far, and the lots still to trade. */
-type Walk = Readonly<{ at: number; fills: readonly Fill[]; left: bigint }>;
+type Progress = Readonly<{ at: number; fills: readonly Fill[]; left: bigint }>;
 
-const sweep = (order: Order, makers: readonly Resting[], walk: Walk): Sweep =>
-  match(nextStep(order, makers[walk.at], walk.left), {
-    stop: ({ stop }) => ({ fills: walk.fills, left: walk.left, stop }),
+const sweep = (order: Order, makers: readonly Resting[], progress: Progress): Sweep =>
+  match(nextStep(order, makers[progress.at], progress.left), {
+    stop: ({ stop }) => ({ fills: progress.fills, left: progress.left, stop }),
     trade: ({ maker }) => {
-      const lots = walk.left < maker.lots ? walk.left : maker.lots;
+      const lots = progress.left < maker.lots ? progress.left : maker.lots;
       return sweep(order, makers, {
-        at: walk.at + 1, fills: [...walk.fills, fillOf(order, maker, lots)], left: walk.left - lots,
+        at: progress.at + 1, fills: [...progress.fills, fillOf(order, maker, lots)], left: progress.left - lots,
       });
     },
   });
 
-/** The offers that are left after the fills: the ones met are gone, and the last one met may be partly open. */
-const survivors = (makers: readonly Resting[], fills: readonly Fill[]): readonly Resting[] => {
+/** The offers still open after the fills. Each offer met is gone, unless the last is only partly taken. */
+const offersLeft = (makers: readonly Resting[], fills: readonly Fill[]): readonly Resting[] => {
   const last = fills.at(-1);
-  const partlyOpen = last !== undefined && last.makerLotsLeft > 0n;
-  const reduced = makers.map((m, i) => (partlyOpen && i === fills.length - 1 ? { ...m, lots: last.makerLotsLeft } : m));
-  return reduced.slice(partlyOpen ? fills.length - 1 : fills.length);
+  const partlyTaken = last !== undefined && last.makerLotsLeft > 0n;
+  const firstLeft = partlyTaken ? fills.length - 1 : fills.length;
+  return makers.slice(firstLeft).map((m, i) => (partlyTaken && i === 0 ? { ...m, lots: last.makerLotsLeft } : m));
 };
 
 // ---- what becomes of the part that did not trade ----
 
 const dropWhy = (stop: Stop): DropReason => (stop === "own_order" ? "own_order" : "no_liquidity");
 
-const remainderOf = (order: Order, swept: Sweep): Remainder => {
+const unfilledOf = (order: Order, swept: Sweep): Unfilled => {
   if (swept.left === 0n) return { _tag: "none" };
   if (order.terms === "rest" && swept.stop !== "own_order") return { _tag: "rested", lots: swept.left };
   return { _tag: "dropped", lots: swept.left, why: dropWhy(swept.stop) };
@@ -138,21 +138,32 @@ const inserted = (queue: readonly Resting[], offer: Resting): readonly Resting[]
 const sweepFits = (market: Market, fills: readonly Fill[]): boolean =>
   fills.reduce((sum, f) => sum + f.lots * f.price * market.quoteTick, 0n) <= MAX_AMOUNT;
 
-const traded = (book: Book, order: Order): Result<Placed, PlaceFault> => {
-  const makers = sideOf(book, opposite(order.side));
-  const swept = sweep(order, makers, { at: 0, fills: [], left: order.lots });
-  if (!sweepFits(book.market, swept.fills)) return err({ _tag: "amount_too_large" });
+/** A finished sweep refuses its order if its quote overflows an amount, or an all-or-nothing order falls short. */
+const sweepAccepted = (market: Market, order: Order, swept: Sweep): Result<Sweep, PlaceFault> => {
+  if (!sweepFits(market, swept.fills)) return err({ _tag: "amount_too_large" });
   if (order.terms === "all_or_nothing" && swept.left > 0n) {
     return err({ _tag: "not_fillable", lots: order.lots, fillable: order.lots - swept.left });
   }
-  const remainder = remainderOf(order, swept);
+  return ok(swept);
+};
+
+/** The book once the sweep is done: the offers met are taken out, then what is left of the order rests if it may. */
+const bookAfter = (book: Book, order: Order, swept: Sweep): Result<Placed, PlaceFault> => {
+  const unfilled = unfilledOf(order, swept);
   const mine = sideOf(book, order.side);
-  const after = withSides(book, order.side, mine, survivors(makers, swept.fills));
-  if (remainder._tag !== "rested") return ok({ book: after, fills: swept.fills, remainder });
-  const joined = inserted(mine, restingOf(order, remainder.lots));
-  return map(hasRoom(after, order), () => ({
-    book: withSides(after, order.side, joined, sideOf(after, opposite(order.side))), fills: swept.fills, remainder,
+  const theirs = offersLeft(sideOf(book, opposite(order.side)), swept.fills);
+  const left = withSides(book, order.side, mine, theirs);
+  if (unfilled._tag !== "rested") return ok({ book: left, fills: swept.fills, unfilled });
+  const joined = inserted(mine, restingOf(order, unfilled.lots));
+  return map(hasRoom(left, order), () => ({
+    book: withSides(left, order.side, joined, theirs), fills: swept.fills, unfilled,
   }));
+};
+
+const traded = (book: Book, order: Order): Result<Placed, PlaceFault> => {
+  const makers = sideOf(book, opposite(order.side));
+  const swept = sweep(order, makers, { at: 0, fills: [], left: order.lots });
+  return flatMap(sweepAccepted(book.market, order, swept), (accepted) => bookAfter(book, order, accepted));
 };
 
 export const place = (book: Book, order: Order): Result<Placed, PlaceFault> =>
