@@ -1,7 +1,8 @@
 // What the Host tests share: Hosts over fresh Runtimes, and a shell that never fails. Only tests import this.
 import { expect } from "bun:test";
 import { entityOf, started, stamp, unhalted } from "../runtime/fixtures.ts";
-import type { EntityId, EntityInput, Outbound } from "../entity/model.ts";
+import type { EntityId, EntityInput, JAction, Outbound } from "../entity/model.ts";
+import type { Input } from "../runtime/model.ts";
 import { unwrapOr } from "../kernel/core/result.ts";
 import { begin, limits, persisted, receive, startHost, submit } from "./host.ts";
 import type { Effect, Host } from "./model.ts";
@@ -14,6 +15,12 @@ export const hostFor = (...ids: readonly EntityId[]): Host => startHost(started(
 
 export const sentIn = (effects: readonly Effect[]): readonly Outbound[] =>
   effects.flatMap((effect) => (effect._tag === "send" ? [effect.message] : []));
+
+export const chainIn = (effects: readonly Effect[]): readonly JAction[] =>
+  effects.flatMap((effect) => (effect._tag === "chain" ? [effect.action] : []));
+
+/** The Entity inputs a Runtime input carries: none for a J height. */
+export const inputsOf = (input: Input): readonly EntityInput[] => (input._tag === "entity" ? input.inputs : []);
 
 export type Turn = Readonly<{ host: Host; sent: readonly Outbound[] }>;
 

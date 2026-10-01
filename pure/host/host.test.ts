@@ -8,7 +8,9 @@ import { err, ok } from "../kernel/core/result.ts";
 import { setup } from "../runtime/fixtures.ts";
 import { begin, idle, limits, persisted, receive, reopen, submit } from "./host.ts";
 import type { Host, Item } from "./model.ts";
-import { BOUNDS, entityOf, hostFor, hostOf, meet, sentIn, settle, stamp, tell, turn, unhalted } from "./fixtures.ts";
+import {
+  BOUNDS, entityOf, hostFor, hostOf, inputsOf, meet, sentIn, settle, stamp, tell, turn, unhalted,
+} from "./fixtures.ts";
 
 const ALICE = entityOf(1);
 const BOB = entityOf(2);
@@ -100,15 +102,16 @@ describe("host", () => {
     ];
     const begun = unhalted(begin(items.reduce(submit, hostFor(ALICE, BOB)), stamp(1n)));
     const row = begun.host.runtime.staged;
-    expect(row?.input.to).toBe(ALICE);
-    expect(row?.input.inputs.map((i) => i._tag)).toEqual(["open_account", "set_credit"]);
+    expect(row?.input).toMatchObject({ _tag: "entity", to: ALICE });
+    expect(row === undefined ? [] : inputsOf(row.input).map((i) => i._tag)).toEqual(["open_account", "set_credit"]);
     expect(begun.host.queue.map((i) => i.to)).toEqual([BOB, ALICE]);
   });
 
   test("R-X1 one input queued three times is three inputs: the third stays queued", () => {
     const item = command(ALICE, open(BOB));
     const begun = unhalted(begin([item, item, item].reduce(submit, hostFor(ALICE)), stamp(1n)));
-    expect(begun.host.runtime.staged?.input.inputs).toHaveLength(BOUNDS.perFrame);
+    const staged = begun.host.runtime.staged;
+    expect(staged === undefined ? [] : inputsOf(staged.input)).toHaveLength(BOUNDS.perFrame);
     expect(begun.host.queue).toHaveLength(3 - BOUNDS.perFrame);
   });
 

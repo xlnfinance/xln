@@ -18,7 +18,7 @@ import { setup } from "../runtime/fixtures.ts";
 import { messageId } from "../runtime/tick.ts";
 import { begin, persisted, receive, reopen, submit, TICK, type Tick } from "./host.ts";
 import type { Effect, Host } from "./model.ts";
-import { BOUNDS, entityOf, hostFor, sentIn, stamp } from "./fixtures.ts";
+import { BOUNDS, entityOf, hostFor, inputsOf, sentIn, stamp } from "./fixtures.ts";
 
 const NAMES = ["alice", "bob"] as const;
 type Name = (typeof NAMES)[number];
@@ -183,7 +183,7 @@ const hashesOf = (msg: Msg<AccountTx>): readonly string[] =>
 /** Every frame a durable row of this node holds: the ones it took in, and the ones it made. */
 const framesHeld = (node: Node): ReadonlySet<string> =>
   new Set(node.store.flatMap((row) => [
-    ...row.input.inputs.flatMap((i) => (i._tag === "peer_message" ? hashesOf(i.msg) : [])),
+    ...inputsOf(row.input).flatMap((i) => (i._tag === "peer_message" ? hashesOf(i.msg) : [])),
     ...row.outputs.flatMap((o) => hashesOf(o.msg)),
   ]));
 

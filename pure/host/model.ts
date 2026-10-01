@@ -10,7 +10,8 @@
 // authenticates its peer, the content authenticates itself). Without it a forged ack naming a real frame's hash would
 // advance an Account head the peer never made durable (R-LINK-AUTH). The queue is volatile: a crash loses it,
 // and the link's loss and repeats are what the page already assumes.
-import type { EntityId, EntityInput, Outbound } from "../entity/model.ts";
+import type { JHeight } from "../account/clause/clock.ts";
+import type { EntityId, EntityInput, JAction, Outbound } from "../entity/model.ts";
 import type { Tagged } from "../kernel/core/tagged.ts";
 import type { Row, Runtime } from "../runtime/model.ts";
 
@@ -25,12 +26,22 @@ export type HostNotice =
   | Tagged<"misrouted", { to: EntityId; from: EntityId }>
   | Tagged<"queue_full", { from: EntityId }>;
 
-/** What the Host asks of its shell. The shell reports a `persist` durable by calling `persisted`. */
+/**
+ * What the Host asks of its shell. The shell reports a `persist` durable by calling `persisted`. A `send` puts a
+ * message on the link and a `chain` hands an action to the J batch builder; both leave only from a committed row.
+ */
 export type Effect =
   | Tagged<"persist", { row: Row }>
-  | Tagged<"send", { message: Outbound }>;
+  | Tagged<"send", { message: Outbound }>
+  | Tagged<"chain", { action: JAction }>;
 
-export type Host = Readonly<{ runtime: Runtime; limits: Limits; queue: readonly Item[] }>;
+/**
+ * `height` is the highest J height the J loop has handed over and no frame has taken yet. Heights only rise, so one
+ * waiting height stands for all that came before it, and it goes into the next frame ahead of the queue.
+ */
+export type Host = Readonly<{
+  runtime: Runtime; limits: Limits; queue: readonly Item[]; height: JHeight | undefined;
+}>;
 
 /** One step of the Host: where it is now and what its shell must do. */
 export type Stepped = Readonly<{ host: Host; effects: readonly Effect[] }>;
