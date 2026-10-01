@@ -1,0 +1,44 @@
+{
+ "id": "R2C-DEBT-FIRST",
+ "statement": "A reserve-to-collateral deposit enforces the debt queue first: part-paid claim stays at the head, spendable nets all debt, 32 claims per call.",
+ "source": "contracts-decisions.md (memory)",
+ "layers": {
+  "arrival": "hold",
+  "quint": "owed: spec thread, new Quint branch",
+  "contract": "hold",
+  "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
+  "ts": "owed: the cut (J batch-planner slice)"
+ },
+ "killers": [
+  {
+   "kind": "bug",
+   "layer": "arrival",
+   "name": "r2c-skips-enforcement"
+  },
+  {
+   "kind": "mutant",
+   "layer": "quint",
+   "name": "r2c-skips-enforce"
+  },
+  {
+   "kind": "test",
+   "layer": "contract",
+   "name": "test_R2C_DEBT_FIRST_theCreditorIsPaidBeforeAnythingMovesToCollateral"
+  },
+  {
+   "kind": "test",
+   "layer": "contract",
+   "name": "test_R2C_DEBT_FIRST_aCallPaysThirtyTwoClaimsAndTheRestStaysNetted"
+  },
+  {
+   "kind": "test",
+   "layer": "contract",
+   "name": "test_R2C_DEBT_FIRST_aDepositAboveWhatIsSpendableAfterAllDebtIsRefused"
+  },
+  {
+   "kind": "test",
+   "layer": "contract",
+   "name": "test_R2C_DEBT_FIRST_aPartPaidClaimStaysAtTheHeadUntilTheNextDepositPaysItOff"
+  }
+ ]
+}

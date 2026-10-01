@@ -11,7 +11,7 @@ import { compare, isOff, longLines, type Exceptions, type Hit, type Row } from "
 import { isSource, syntaxHits } from "./syntax.ts";
 
 // A layer is a directory or a single file directly under pure/ (entity.ts is as much a layer as entity/ is).
-export const TREE = ["kernel", "chain", "account", "j", "market", "entity", "runtime"] as const;
+export const TREE = ["kernel", "chain", "account", "market", "entity", "runtime", "j"] as const;
 
 // Every other entry under pure/ is named here as deliberately outside this gate, so a new layer (account/, entity/,
 // entity.ts, ...) cannot land ungated by accident: it is a failing row until it joins TREE or this list.

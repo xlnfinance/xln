@@ -41,6 +41,18 @@ describe("what is heavy", () => {
     ["walkLine(seed, c)", "uncovered(ROWS, seen)", "walkSeeds(3)", "o.walk(1)", "unexplored(1)"].forEach((call) => expect(offenders(`test("t", () => { ${call}; });\n`)).toEqual([]));
   });
 
+  test("R-GATE-TEST-TIMEOUTS a test that lists or copies a tree of files is heavy though it starts no process, directly and through a helper (a scratch copy of pure/ was the one that hit the default)", () => {
+    ["existingFiles(root)", "cpSync(a, b, { recursive: true })", "fs.cpSync(a, b)", "copyFileSync(a, b)", "readdirSync(root, { recursive: true })"].forEach((call) =>
+      expect(offenders(`test("t", () => { ${call}; });\n`)).toEqual([`1 "t"`]),
+    );
+    const copy = 'const copyListed = (from, to) => existingFiles(from).forEach((file) => copyFileSync(from + file, to + file));\n';
+    expect(offenders(`${copy}test("copies", () => { copyListed(a, b); });\n`)).toEqual([`2 "copies"`]);
+    expect(offenders(`${copy}test("copies", () => { copyListed(a, b); }, 30_000);\n`)).toEqual([]);
+    ["readdirSync(root)", "readdirSync(root, { withFileTypes: true })", "readdirSync(root, { recursive: false })", "o.existingFiles(x)", "unlinkSync(a)", "copyFile(a, b)"].forEach((call) =>
+      expect(offenders(`test("t", () => { ${call}; });\n`)).toEqual([]),
+    );
+  });
+
   test("R-GATE-TEST-TIMEOUTS a heavy call in a comment or a string is not a call", () => {
     expect(offenders('test("t", () => {\n  // openWorld(seed, "x") is slow\n  expect("Bun.spawnSync([\\"bun\\"]) and walk(1)").toBe("x");\n});\n')).toEqual([]);
     expect(offenders('test("a test that calls walk(1) and Bun.spawnSync([\\"bun\\"])", () => {});\n')).toEqual([]);

@@ -1,0 +1,20 @@
+{
+ "id": "R-P5",
+ "statement": "An offer is resolved at most once (order book, v2).",
+ "source": "lessons.md section 6",
+ "layers": {
+  "arrival": "owed: v2 (no thread yet)",
+  "quint": "owed: v2 (no thread yet)",
+  "contract": "n/a: an offer is a clause inside an Account; the chain sees only the signed swap clause (R-SWAP-ONCHAIN)",
+  "rig": "owed: v2 (no thread yet)",
+  "ts": "owed: v2 (no thread yet)"
+ },
+ "killers": [
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "to be named",
+   "owed": "v2, no thread yet"
+  }
+ ]
+}

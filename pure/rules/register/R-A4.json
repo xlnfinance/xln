@@ -1,0 +1,20 @@
+{
+ "id": "R-A4",
+ "statement": "A settlement transition aimed at a workspace that already settled on chain is stale and is dropped with a message.",
+ "source": "lessons.md section 2",
+ "layers": {
+  "arrival": "owed: spec thread, next Arrival page (id not in a name yet)",
+  "quint": "owed: spec thread, new Quint branch (id not in a name yet)",
+  "contract": "n/a: the stale transition is dropped off-chain; the chain's own refusal of an old-epoch proof is C1",
+  "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
+  "ts": "owed: the cut (Account slice)"
+ },
+ "killers": [
+  {
+   "kind": "test",
+   "layer": "arrival",
+   "name": "to be named",
+   "owed": "thread 'Account spec comparison'"
+  }
+ ]
+}

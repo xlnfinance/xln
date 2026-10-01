@@ -1,0 +1,180 @@
+{
+ "id": "R-HTLC-CLOCK",
+ "statement": "Every HTLC time judgment is made in J height: a lock is live through its deadline height; an expiry needs own view > deadline + reserve (reserve >= LAG >= 0); a payee with an unacked resolve reveals on chain at deadline - LAG. Part (c) is the payee's Runtime duty plus a J-layer fact: clause.ts has no input that says the payee knows the secret or has revealed, so the ts cell holds (a) and (b) and (c) is owed to the Runtime cut.",
+ "source": "contracts-decisions.md, Account-layer decisions 09-30 D-AC-2, D-AC-3",
+ "layers": {
+  "arrival": "hold",
+  "quint": "hold",
+  "contract": "n/a: the judgments are made off-chain in J height; the chain's own deadline is H1",
+  "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
+  "ts": "hold"
+ },
+ "killers": [
+  {
+   "kind": "bug",
+   "layer": "arrival",
+   "name": "expire-at-deadline"
+  },
+  {
+   "kind": "bug",
+   "layer": "arrival",
+   "name": "expire-no-reserve"
+  },
+  {
+   "kind": "bug",
+   "layer": "arrival",
+   "name": "resolve-by-chain-height"
+  },
+  {
+   "kind": "bug",
+   "layer": "arrival",
+   "name": "payee-idle"
+  },
+  {
+   "kind": "bug",
+   "layer": "arrival",
+   "name": "resolve-late-by-stamp"
+  },
+  {
+   "kind": "bug",
+   "layer": "arrival",
+   "name": "expire-by-frame-stamp"
+  },
+  {
+   "kind": "mutant",
+   "layer": "quint",
+   "name": "expire-at-deadline"
+  },
+  {
+   "kind": "mutant",
+   "layer": "quint",
+   "name": "expiry-reserve-off"
+  },
+  {
+   "kind": "mutant",
+   "layer": "quint",
+   "name": "resolve-after-deadline"
+  },
+  {
+   "kind": "mutant",
+   "layer": "quint",
+   "name": "receiver-judges-by-the-frame-stamp"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-HTLC-CLOCK the reserve is at least the lag, and the horizon is positive"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-HTLC-CLOCK a clause is live through its deadline, expirable strictly past deadline plus reserve"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-HTLC-CLOCK and R-DRIFT views within the lag never see a clause both live and expirable"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-HTLC-CLOCK a payee reveals on chain once its view reaches the deadline minus the lag"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-HTLC-CLOCK a clause is live through its deadline height and refused one height later"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-HTLC-CLOCK an expiry needs the view strictly past the deadline plus the reserve"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-HTLC-CLOCK b an expiry commits only when both parties' views are strictly past the deadline"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-HTLC-CLOCK a a resolve is refused only when the payer's own view is past the deadline"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-HTLC-CLOCK c the replay harness blocks the expiry while the payee owes the on-chain reveal"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-HTLC-CLOCK c a payee that owes the reveal has revealed before an expiry commits, in the Runtime walk",
+   "owed": "Runtime cut (R1), walk-level"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-HTLC-CLOCK a negative lag is refused, so no clause is ever live and expirable at once"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-HTLC-CLOCK the reveal is due a lag before the deadline, not a reserve before it"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-CLOCK a frame stamp is a bigint, and a view or a deadline has to be made: the types refuse the stamp"
+  },
+  {
+   "kind": "mutant",
+   "layer": "quint",
+   "name": "escalation-too-late"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-HTLC-CLOCK a resolve unacked with the deadline more than LAG away asks nothing"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-HTLC-CLOCK at the deadline minus LAG the payee asks for a reveal of the secret of the clause"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-HTLC-CLOCK the reveal is asked once however many heights follow, and never by the payer"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-HTLC-CLOCK a resolve the payer acks in time asks nothing, whatever the height"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-HTLC-CLOCK a Host that restarts after the reveal row was committed is asked again"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-HTLC-CLOCK a hashlock is forgotten once its hold is gone: its next clause is asked for again"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-HTLC-CLOCK a resolve still in the queue behind a pending frame of its own is watched too"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-HTLC-CLOCK a resolve that comes when the deadline is already near asks in the frame of its command"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-HTLC-CLOCK a resolve names the hold of its own token: the same slot in another token is not it"
+  }
+ ]
+}

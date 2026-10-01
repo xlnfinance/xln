@@ -1,0 +1,59 @@
+{
+ "id": "R-EVERY-REFUSAL-ANSWERED",
+ "statement": "A frame of the peer's at my head that I do not judge afresh is answered with a refusal that names it and carries my mark for this head (the highest attempt I refused), never with silence: a frame that does not apply, a repeat of the frame I refused (the same frame, and only it, gets the same index and fault again), and any other frame at or below my mark (the fault stale_attempt, index 0) all get one. A stale answer judged nothing, so it costs the proposer no tx and no retry budget, and its next attempt is above the mark, so a proposer whose attempt count is behind (a restart that dropped it) catches up in one round trip and is never left pending, whatever frame it sends. A mark is trusted only while the proposer's next attempt stays a safe integer; a forged mark can wedge the proposer, as withholding acks can, and signed refusals (A4b) are the remedy. Silent on purpose, because there is no honest proposer to tell or nothing to take back: my own frame, an empty frame, a frame whose attempt is not a countable number, and a frame not at my head (R-REACK answers the one at my head with its ack).",
+ "source": "coordinator 10-01 02:52 on Review A of PR 85 (N1, N2)",
+ "layers": {
+  "arrival": "owed: spec thread (Account spec comparison)",
+  "quint": "owed: spec thread (Account spec comparison)",
+  "contract": "n/a: an off-chain Account rule; the chain sees only signed proofs",
+  "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
+  "ts": "hold"
+ },
+ "killers": [
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-EVERY-REFUSAL-ANSWERED a different frame at the refused attempt gets the stale answer, not a refusal"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-EVERY-REFUSAL-ANSWERED the attempt count stays a safe integer however the peer's marks climb"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-EVERY-REFUSAL-ANSWERED a proposer refused MAX_ATTEMPTS + 1 times is answered and ends quiet"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-EVERY-REFUSAL-ANSWERED a Left proposer refused MAX_ATTEMPTS + 1 times does not block Right"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-EVERY-REFUSAL-ANSWERED a frame at the mark is refused again, one below it is told the mark"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-EVERY-REFUSAL-ANSWERED a proposer whose attempt count is behind is told the mark and commits next"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-EVERY-REFUSAL-ANSWERED a stale answer costs no tx, whatever the retry budget"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-EVERY-REFUSAL-ANSWERED the frame after the budget is spent is judged, never left pending"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "Alice lost the refusal and what she re-sent: her resend timer brings it back and the round goes on"
+  }
+ ]
+}
