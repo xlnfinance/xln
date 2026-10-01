@@ -1,8 +1,8 @@
 // The gate's judgment: a register and the names found in each layer in, problems and a matrix out.
 import { carries } from "./names/names.ts";
-import { LAYERS, byLayer, type Killer, type Layer, type Name, type Problem, type Register, type Row } from "./model.ts";
+import { LAYERS, byLayer, type Cell, type Killer, type Layer, type Name, type Problem, type Register, type Row } from "./model.ts";
 
-export type CellVerdict = "held" | "owed" | "missing" | "stale-owed" | "unclaimed" | "unclaimed-but-present";
+export type CellVerdict = "held" | "owed" | "missing" | "stale-owed" | "unstated" | "na" | "na-but-present";
 
 export type KillerVerdict = "found" | "owed" | "missing" | "stale-owed";
 
@@ -18,8 +18,10 @@ const hitsFor = (id: string, layer: Layer, names: readonly Name[]): number =>
 const cellVerdict = (row: Row, layer: Layer, hits: number): CellVerdict => {
   const cell = row.cells[layer];
   switch (cell._tag) {
-    case "absent":
-      return hits > 0 ? "unclaimed-but-present" : "unclaimed";
+    case "unstated":
+      return "unstated";
+    case "na":
+      return hits > 0 ? "na-but-present" : "na";
     case "hold":
       return hits > 0 ? "held" : "missing";
     case "owed":
@@ -63,14 +65,20 @@ const cellProblem = (report: RowReport, layer: Layer): readonly Problem[] => {
       return [{ _tag: "MissingInLayer", id, layer }];
     case "stale-owed":
       return [{ _tag: "OwedButPresent", id, layer, by: cell._tag === "owed" ? cell.by : "" }];
+    case "unstated":
+      return [{ _tag: "UnstatedCell", id, layer }];
+    case "na-but-present":
+      return [{ _tag: "NotApplicableButPresent", id, layer, reason: cell._tag === "na" ? cell.reason : "" }];
     default:
       return [];
   }
 };
 
+const isNoClaim = (cell: Cell): boolean => cell._tag === "unstated" || cell._tag === "na";
+
 const killerProblem = (row: Row, { killer, verdict }: RowReport["killers"][number]): readonly Problem[] => {
   const id = row.id;
-  if (row.cells[killer.layer]._tag === "absent") return [{ _tag: "KillerInUnclaimedLayer", id, killer }];
+  if (isNoClaim(row.cells[killer.layer])) return [{ _tag: "KillerInUnclaimedLayer", id, killer }];
   switch (verdict) {
     case "missing":
       return [{ _tag: "KillerNotFound", id, killer }];
@@ -111,14 +119,22 @@ export const evaluate = (register: Register, names: readonly Name[]): Evaluation
   return { reports, problems: [...duplicateIds(register), ...retirementProblems(register), ...reports.flatMap(problemsOf)] };
 };
 
-export type LayerCount = Readonly<{ layer: Layer; held: number; owed: number; required: number }>;
+// `na` and `unstated` are counted apart from `required` (a rule that says not applicable, or says nothing, is not required of the layer).
+export type LayerCount = Readonly<{ layer: Layer; held: number; owed: number; required: number; na: number; unstated: number }>;
 
-// The progress meter: per layer, how many rules that must be held are held, and how many are still owed.
+// The progress meter: per layer, how many rules that must be held are held, how many are still owed, how many say not applicable, how many say nothing.
 export const layerCounts = (reports: readonly RowReport[]): readonly LayerCount[] =>
   LAYERS.map((layer) => {
-    const verdicts = reports.map((report) => report.cells[layer].verdict);
+    const verdicts = reports.filter((report) => report.row.retiredBy === undefined).map((report) => report.cells[layer].verdict);
     const held = verdicts.filter((verdict) => verdict === "held").length;
     const owed = verdicts.filter((verdict) => verdict === "owed" || verdict === "stale-owed").length;
     const missing = verdicts.filter((verdict) => verdict === "missing").length;
-    return { layer, held, owed, required: held + owed + missing };
+    return {
+      layer,
+      held,
+      owed,
+      required: held + owed + missing,
+      na: verdicts.filter((verdict) => verdict === "na" || verdict === "na-but-present").length,
+      unstated: verdicts.filter((verdict) => verdict === "unstated").length,
+    };
   });
