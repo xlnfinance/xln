@@ -4,7 +4,7 @@ import { evaluate, layerCounts } from "./evaluate.ts";
 import { LAYERS, describeProblem, type Cell, type Name, type Register, type Row } from "./model.ts";
 import { carries, arrivalNames, quintNames, testFileNames } from "./names/names.ts";
 import { parseCell, parseRegister } from "./register.ts";
-import { readBase } from "./base.ts";
+import { commitExists, defaultBase, readBase } from "./base.ts";
 import { readRegisterFolder } from "./layout/store.ts";
 import { renderMarkdown, renderText } from "./render.ts";
 import { ratchet } from "./ratchet.ts";
@@ -482,5 +482,45 @@ describe("the base register is read from git, and a git failure is red", () => {
     run("commit", "-q", "--allow-empty", "-m", "two");
     const based = readBase(folder, "base");
     expect(based.ok && based.value._tag === "Base" && based.value.register.map((each) => each.id)).toEqual(["H1"]);
+  });
+});
+
+describe("the ref the register may only grow from", () => {
+  const sha = "a".repeat(40);
+  const known = (...shas: string[]) => (candidate: string): boolean => shas.includes(candidate);
+
+  test("R-GATE-RATCHET-BASE a pull request is held to its own target branch, development or main, never to main by default", () => {
+    expect(defaultBase({ GITHUB_EVENT_NAME: "pull_request", GITHUB_BASE_REF: "development" }, known())).toBe("origin/development");
+    expect(defaultBase({ GITHUB_EVENT_NAME: "pull_request", GITHUB_BASE_REF: "main" }, known())).toBe("origin/main");
+    expect(defaultBase({ GITHUB_EVENT_NAME: "pull_request", GITHUB_BASE_REF: "" }, known())).toBe("origin/main");
+  });
+
+  test("R-GATE-RATCHET-BASE a push is held to the tip it replaced, and to origin/main when that tip is missing, zero or not a sha", () => {
+    expect(defaultBase({ GITHUB_EVENT_NAME: "push", GATE_BASE_BEFORE: sha }, known(sha))).toBe(sha);
+    expect(defaultBase({ GITHUB_EVENT_NAME: "push", GATE_BASE_BEFORE: sha }, known())).toBe("origin/main");
+    expect(defaultBase({ GITHUB_EVENT_NAME: "push", GATE_BASE_BEFORE: "0".repeat(40) }, known("0".repeat(40)))).toBe("origin/main");
+    expect(defaultBase({ GITHUB_EVENT_NAME: "push", GATE_BASE_BEFORE: "origin/development" }, known("origin/development"))).toBe("origin/main");
+    expect(defaultBase({ GITHUB_EVENT_NAME: "push" }, known(sha))).toBe("origin/main");
+  });
+
+  test("R-GATE-RATCHET-BASE a local run, the nightly run and a manual run are held to origin/main, whatever else the environment holds", () => {
+    expect(defaultBase({}, known(sha))).toBe("origin/main");
+    expect(defaultBase({ GITHUB_EVENT_NAME: "schedule", GITHUB_BASE_REF: "development", GATE_BASE_BEFORE: sha }, known(sha))).toBe("origin/main");
+    expect(defaultBase({ GITHUB_EVENT_NAME: "workflow_dispatch", GATE_BASE_BEFORE: sha }, known(sha))).toBe("origin/main");
+  });
+
+  test("R-GATE-RATCHET-BASE the gate step that runs rules/check.ts hands it the tip a push replaced, and passes no --base of its own", () => {
+    const workflow = readFileSync(`${import.meta.dir}/../../.github/workflows/build-and-test.yml`, "utf8");
+    expect(workflow).toContain("        env:\n          GATE_BASE_BEFORE: ${{ github.event.before }}\n        run: bun rules/check.ts\n");
+    expect(workflow).not.toMatch(/rules\/check\.ts[^\n]*--base/);
+  });
+
+  test("R-GATE-RATCHET-BASE a commit is found by its sha in a clone, and an unknown one is not", () => {
+    const repo = mkdtempSync(`${tmpdir()}/rules-exists-`);
+    const sh = (...args: string[]): string => Bun.spawnSync(["git", "-c", "user.email=t@t", "-c", "user.name=t", ...args], { cwd: repo, stdout: "pipe" }).stdout.toString().trim();
+    sh("init", "-q", "-b", "main");
+    sh("commit", "-q", "--allow-empty", "-m", "one");
+    expect(commitExists(repo, sh("rev-parse", "HEAD"))).toBe(true);
+    expect(commitExists(repo, sha)).toBe(false);
   });
 });
