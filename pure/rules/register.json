@@ -10,7 +10,7 @@
     "quint": "owed: spec thread, new Quint branch (id not in a name yet)",
     "contract": "n/a: the frame pipeline is off-chain Entity logic; no contract code takes part",
     "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
-    "ts": "owed: the cut (Entity and Runtime)"
+    "ts": "hold"
    },
    "killers": [
     {
@@ -22,12 +22,22 @@
      "kind": "bug",
      "layer": "arrival",
      "name": "arrivals-in-place"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-E1 a command sees what the arrivals of its own frame did, wherever the arrival sits among the inputs"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-E1 the ack of an arrival goes out ahead of the frame the commands propose"
     }
    ]
   },
   {
    "id": "R-X1",
-   "statement": "No peer input can halt a Runtime: malformed, stale or racing input is refused, and only a broken local invariant halts. The Quint cell holds the Entity part only: a refused peer frame is a value and never halts the Entity (refusalNeverHaltsTest, no_peer_halt); the Runtime's halt taxonomy (malformed or racing input is refused, only a broken local invariant halts) is a comment in runtime.qnt, not a modelled property.",
+   "statement": "No peer input can halt a Runtime: malformed, stale or racing input is refused, and only a broken local invariant halts.",
    "source": "lessons.md section 1",
    "layers": {
     "arrival": "hold",
@@ -51,6 +61,26 @@
      "kind": "bug",
      "layer": "arrival",
      "name": "bad-halts"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-X1 no peer input halts the Runtime: strangers, stale acks and repeats are refused in place"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-X1 an input for an Entity this Runtime does not host is refused with notice, as a row"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-X1 a message from a stranger is refused with notice and changes nothing"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-DURABLE R-X1 in every world: no halt, no leak, every WAL replays, equal heads mean equal states"
     }
    ]
   },
@@ -341,13 +371,23 @@
     "quint": "owed: spec thread, new Quint branch (id not in a name yet)",
     "contract": "n/a: the publication order of Account work is off-chain Entity logic",
     "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
-    "ts": "owed: the cut (Entity and Runtime)"
+    "ts": "hold"
    },
    "killers": [
     {
      "kind": "bug",
      "layer": "arrival",
      "name": "sorted-proposals"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-E4 Accounts propose in the order a command first touched them, then the rest by id"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-E4 an Account touched twice proposes once, with both txs in one frame"
     }
    ]
   },
@@ -1454,7 +1494,7 @@
     "quint": "owed: spec thread, new Quint branch (id not in a name yet)",
     "contract": "n/a: persisting a frame is Runtime behaviour, off-chain",
     "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
-    "ts": "owed: the cut (Runtime slice)"
+    "ts": "hold"
    },
    "killers": [
     {
@@ -1476,6 +1516,46 @@
      "kind": "mutant",
      "layer": "quint",
      "name": "ack-before-persist"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-DURABLE a staged row sends nothing: its outputs leave once it is committed"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-DURABLE the outputs of committed rows leave once each, in row order"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-DURABLE a crash before flush loses the belief, not the outputs: they all leave again"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-DURABLE a crash between apply and commit loses the staged frame and nothing durable"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-DURABLE every world nothing can move in is the finished one, and a finished world is reached"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-DURABLE planted bug: a flush that lets a staged frame's outputs leave is caught"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-DURABLE planted bug: a flush that never marks its rows sent repeats them without end"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-DURABLE planted bug: a recovery that forgets the last row is caught"
     }
    ]
   },
@@ -1681,7 +1761,7 @@
   },
   {
    "id": "R-NOTICE",
-   "statement": "A tx that stops applying while it waits in the mempool is refused with notice to its owner at propose and leaves the mempool; never dropped silently. A tx the peer refuses inside a frame (R-FRAME-REFUSAL) is either retried (a fault that passes with the peer's view) or dropped with notice (fault peer_refused, carrying the peer's fault tag): every tx that enters a mempool ends committed or refused with notice, which the liveness simulation counts. The Quint cell holds the drop with notice (every tx ends committed or refused, `refused` is a list of txs); the fault peer_refused and the peer's fault tag on the notice are not in the model.",
+   "statement": "A tx that stops applying while it waits in the mempool is refused with notice to its owner at propose and leaves the mempool; never dropped silently. A tx the peer refuses inside a frame (R-FRAME-REFUSAL) is either retried (a fault that passes with the peer's view) or dropped with notice (fault peer_refused, carrying the peer's fault tag): every tx that enters a mempool ends committed or refused with notice, which the liveness simulation counts.",
    "source": "contracts-decisions.md, Account-layer decisions 09-30 D-AC-5",
    "layers": {
     "arrival": "owed: spec thread, next Arrival page (id not in a name yet)",
@@ -1760,6 +1840,26 @@
      "kind": "mutant",
      "layer": "quint",
      "name": "revise-loses-the-notice"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-NOTICE an Account opened twice, with oneself, or a command to a stranger is refused with notice"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-NOTICE a payment beyond the room is refused at the door with its fault, and nothing is queued"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-NOTICE a queued tx the Account refuses at propose is told to the Entity, and the Account forgets it"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-NOTICE a payment before any credit is refused to Alice with its fault, and Bob never hears of it"
     }
    ]
   },
@@ -2036,6 +2136,11 @@
      "kind": "test",
      "layer": "ts",
      "name": "R-NET reorder: the receiver may take any of the first three messages, every property and liveness hold"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-NET planted bug: with no timer, a frame refused before its peer opened wedges"
     }
    ]
   },
