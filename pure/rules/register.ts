@@ -1,4 +1,4 @@
-// register.json to a typed Register. The file is data the coordinator edits, so it is parsed, not trusted.
+// The rule files (register/<id>.json, or the single register.json they were split from) to a typed Register. The files are data people edit, so they are parsed, not trusted.
 import { LAYERS, byLayer, type Cell, type Killer, type KillerKind, type Layer, type Register, type Row } from "./model.ts";
 
 export type Result<T, E> = Readonly<{ ok: true; value: T }> | Readonly<{ ok: false; error: E }>;
@@ -60,11 +60,10 @@ const parseCells = (where: string, raw: unknown): Result<Row["cells"], ParseErro
   }));
 };
 
-const parseRow = (raw: unknown, index: number): Result<Row, ParseError> => {
-  const where = `rows[${index}]`;
+const parseRow = (raw: unknown, where: string): Result<Row, ParseError> => {
   if (!isRaw(raw)) return fail(where, "row must be an object");
   const { id, statement, source, layers, killers, retired_by: retiredBy } = raw;
-  if (typeof id !== "string" || id === "") return fail(where, "row needs an id");
+  if (typeof id !== "string" || !isRuleId(id)) return fail(where, `a rule id is letters, digits and hyphens, starting with a letter or digit (it names the file), got ${JSON.stringify(id)}`);
   if (typeof statement !== "string" || statement === "") return fail(id, "row needs a statement");
   if (typeof source !== "string" || source === "") return fail(id, "row needs a source decision");
   if (!Array.isArray(killers)) return fail(id, "killers must be a list (it may be empty; the gate then fails the row)");
@@ -94,5 +93,45 @@ export const parseRegister = (text: string): Result<Register, ParseError> => {
   if (!json.ok) return json;
   const parsed = json.value;
   if (!isRaw(parsed) || !Array.isArray(parsed["rows"])) return fail("register", 'the file must be { "rows": [...] }');
-  return collect(parsed["rows"].map(parseRow));
+  return collect(parsed["rows"].map((raw, index) => parseRow(raw, `rows[${index}]`)));
+};
+
+// A rule on disk is one file named by its id, so two changes that add or edit different rules touch different files and cannot conflict.
+export type RegisterFile = Readonly<{ name: string; text: string }>;
+
+// An id names a file in the register folder, so it may not carry a path: letters, digits and hyphens only.
+export const isRuleId = (id: string): boolean => /^[A-Za-z0-9][A-Za-z0-9-]*$/.test(id);
+
+// The first two ids that differ only in case, if there are any: a Mac or a Windows checkout would give both the same file.
+export const sameWhenCaseIsIgnored = (ids: readonly string[]): readonly [string, string] | undefined => {
+  const seen = new Map<string, string>();
+  for (const id of ids) {
+    const earlier = seen.get(id.toLowerCase());
+    if (earlier !== undefined && earlier !== id) return [earlier, id];
+    seen.set(id.toLowerCase(), id);
+  }
+  return undefined;
+};
+
+export const ruleFileName = (id: string): string => `${id}.json`;
+
+const parseRuleFile = (file: RegisterFile): Result<Row, ParseError> => {
+  const json = parseJson(file.text);
+  if (!json.ok) return fail(file.name, json.error.detail);
+  const row = parseRow(json.value, file.name);
+  return row.ok && ruleFileName(row.value.id) !== file.name
+    ? fail(file.name, `the file holds rule ${row.value.id}, so it must be named ${ruleFileName(row.value.id)}`)
+    : row;
+};
+
+const byId = (left: Row, right: Row): number => (left.id < right.id ? -1 : left.id > right.id ? 1 : 0);
+
+// The register as the folder holds it: every file is a rule named by its id and nothing else is allowed there. Rows come in id order,
+// whatever order the files were listed in.
+export const parseRegisterFiles = (files: readonly RegisterFile[]): Result<Register, ParseError> => {
+  if (files.length === 0) return fail("register", "the register folder holds no rule");
+  const rows = collect(files.map(parseRuleFile));
+  if (!rows.ok) return rows;
+  const clash = sameWhenCaseIsIgnored(rows.value.map((row) => row.id));
+  return clash !== undefined ? fail("register", `rules ${clash[0]} and ${clash[1]} differ only in case: on a case-insensitive file system their files are one file`) : pass(rows.value.toSorted(byId));
 };

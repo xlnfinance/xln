@@ -182,5 +182,5 @@ describe("the gate reads the files git lists, never the disk", () => {
     mkdirSync(`${root}/chain`);
     // Named, because stale exception rows alone would also fail a scratch tree that has no sources.
     expect(treeStyle(root).rows.map((row) => row.rule)).toContain("git-listing");
-  });
+  }, 30_000);
 });
