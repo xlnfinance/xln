@@ -1,0 +1,2002 @@
+// SPDX-License-Identifier: UNLICENSED
+pragma solidity ^0.8.24;
+
+import "./Types.sol";
+import "./DeltaTransformer.sol";
+import "./IEntityProvider.sol";
+import "./HankoEncoding.sol";
+import "./EntityTypes.sol";
+
+/**
+ * Account.sol - Library for bilateral account operations
+ * EXTERNAL functions execute via DELEGATECALL - bytecode doesn't count toward Depository limit
+ *
+ * NONCE MODEL (unified, non-sequential):
+ *   All state-authorizing signatures include a nonce.
+ *   Contract checks: signedNonce > storedNonce (strictly greater).
+ *   On success: storedNonce = signedNonce (not +1).
+ *   Jumps like 10 → 15 → 234 are valid. Replays fail automatically.
+ */
+library Account {
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // CANONICAL J-EVENTS (Single Source of Truth - must match j-event-watcher.ts)
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  /**
+   * @notice Emitted when bilateral account state changes via settlement.
+   * @dev Unionified: one entry per account pair, multiple tokens inside.
+   *      Includes post-update nonce for watcher correlation.
+   */
+  event AccountSettled(AccountSettlement[] settled);
+
+  /// @notice The Account's ondelta baseline was rebased; proofs signed for `ondeltaEpoch - 1` and earlier are void.
+  event AccountEpochAdvanced(bytes32 indexed left, bytes32 indexed right, uint256 ondeltaEpoch);
+
+  /**
+   * @notice Emitted when reserves change during settlement.
+   * @dev Mirror of Depository.sol ReserveUpdated - emitted here via DELEGATECALL.
+   */
+  event ReserveUpdated(bytes32 indexed entity, uint indexed tokenId, uint newBalance);
+
+  // ========== OTHER EVENTS ==========
+  event DisputeStarted(
+    bytes32 indexed sender,
+    bytes32 indexed counterentity,
+    uint indexed nonce,
+    bool proposerIsLeft,
+    bytes32 proofbodyHash,
+    bytes32 watchSeed,
+    bytes starterInitialArguments,
+    bytes starterCounterArguments,
+    bytes32 starterCounterProofCommitment,
+    uint256 disputeTimeout,
+    uint256 disputeStartTimestamp,
+    uint32 leftResponseSeconds,
+    uint32 rightResponseSeconds
+  );
+  event CounterDisputeRegistered(
+    bytes32 indexed sender,
+    bytes32 indexed counterentity,
+    uint256 indexed nonce,
+    bool proposerIsLeft,
+    bytes32 proofbodyHash
+  );
+  // J2: inside a batch a dispute op that is stale or already applied is skipped, not reverted, so it cannot take the
+  // rest of the batch (an urgent HTLC secret reveal) down with it. Same signature as Depository's event: this library
+  // executes by DELEGATECALL, so the log comes from Depository. `op` and `reason` are the DISPUTE_OP_* and
+  // DISPUTE_SKIP_* codes below; `nonce` is the op's own (start nonce, counter nonce, final nonce).
+  event DisputeOpSkipped(bytes32 indexed sender, bytes32 indexed counterentity, uint8 op, uint8 reason, uint256 nonce);
+  uint8 internal constant DISPUTE_OP_START = 0;
+  uint8 internal constant DISPUTE_OP_COUNTER = 1;
+  uint8 internal constant DISPUTE_OP_FINALIZE = 2;
+  uint8 internal constant DISPUTE_SKIP_NONCE_NOT_ABOVE_STORED = 0; // start: the stored nonce already reached it
+  uint8 internal constant DISPUTE_SKIP_DISPUTE_ACTIVE = 1;         // start: a dispute is already open on the Account
+  uint8 internal constant DISPUTE_SKIP_NO_ACTIVE_DISPUTE = 2;      // counter/finalize: none open (finalized, or never started)
+  uint8 internal constant DISPUTE_SKIP_DISPUTE_MOVED = 3;          // counter/finalize: names another dispute's nonce
+  uint8 internal constant DISPUTE_SKIP_WINDOW_CLOSED = 4;          // counter: the challenge window already ended
+  uint8 internal constant DISPUTE_SKIP_COUNTER_NOT_NEWER = 5;      // counter: not newer than the state the dispute opened on
+  uint8 internal constant DISPUTE_SKIP_COUNTER_SUPERSEDED = 6;     // counter: a newer counter is already registered
+  uint8 internal constant DISPUTE_SKIP_COUNTER_REGISTERED = 7;     // counter: this exact body is already registered
+  uint8 internal constant DISPUTE_SKIP_FINAL_EVIDENCE_OUTDATED = 8; // finalize: the window is over and the evidence is not the state that settles
+  // 9 and 10 are the reveal reasons (HashLadderRegistry.sol)
+  uint8 internal constant DISPUTE_SKIP_EPOCH_MOVED = 11;            // start: signed at an ondelta epoch the Account has left
+  event DebtCreated(bytes32 indexed debtor, bytes32 indexed creditor, uint256 indexed tokenId, Uint512 amount, uint256 debtIndex);
+  event DebtEnforced(bytes32 indexed debtor, bytes32 indexed creditor, uint256 indexed tokenId, uint256 amountPaid, Uint512 remainingAmount, uint256 newDebtIndex);
+  // This signature intentionally matches Depository's public event ABI. The
+  // library executes by DELEGATECALL, so logs are emitted from Depository.
+  event TransformerDeltaClamped(
+    bytes32 indexed accountKeyHash,
+    uint256 indexed clauseIndex,
+    address indexed transformer,
+    uint256 tokenId,
+    Int768 requestedValue,
+    Int768 appliedValue
+  );
+
+  // Shared errors (E2..E10, transformer) live in Types.sol.
+
+  uint256 private constant MAX_SETTLEMENT_DIFFS = 32;
+  uint256 private constant MAX_SETTLEMENT_FORGIVENESS_IDS = 32;
+  uint256 private constant TOKEN_SUPPLY_GAS_LIMIT = 30_000;
+  // Runtime heights/nonces are exact JavaScript safe integers. Keep the top
+  // representable value reserved for the one unilateral finalization successor
+  // so every live Account state remains closable without emitting an unsafe J
+  // event. Financial uint256 values are intentionally not subject to this cap.
+  function _requireLiveAccountNonce(uint256 nonce) private pure {
+    if (nonce >= JS_SAFE_NONCE_MAX) revert E10();
+  }
+
+  function _requireStoredAccountNonce(uint256 nonce) private pure {
+    if (nonce > JS_SAFE_NONCE_MAX) revert E10();
+  }
+
+  function _readFixedTokenSupply(
+    uint8 tokenType,
+    address token,
+    uint256 externalTokenId,
+    address entityProvider
+  )
+    private view returns (uint256 supply, bool valid)
+  {
+    if (tokenType > 2) return (0, false);
+    if (tokenType == 1) return (1, true);
+    bool entityProviderShare = tokenType == 2 && token == entityProvider;
+    bytes4 selector = entityProviderShare
+      ? bytes4(keccak256("balanceOf(address,uint256)"))
+      : tokenType == 0
+        ? bytes4(keccak256("totalSupply()"))
+        : bytes4(keccak256("totalSupply(uint256)"));
+    bytes memory callData = entityProviderShare
+      ? abi.encodeWithSelector(selector, entityTreasury(uint256(uint160(externalTokenId))), externalTokenId)
+      : tokenType == 0
+        ? abi.encodeWithSelector(selector)
+        : abi.encodeWithSelector(selector, externalTokenId);
+    bool success;
+    uint256 returnSize;
+    uint256 gasLimit = TOKEN_SUPPLY_GAS_LIMIT;
+    // A token can be upgraded after registration. Never let its getter consume
+    // the finalization gas reserve or make Solidity allocate arbitrary return
+    // data: both let the token hold an unrelated bilateral dispute hostage.
+    assembly ("memory-safe") {
+      let data := add(callData, 0x20)
+      success := staticcall(gasLimit, token, data, mload(callData), data, 0x20)
+      returnSize := returndatasize()
+      supply := mload(data)
+    }
+    if (!success || returnSize != 32) return (0, false);
+    valid = supply > 0;
+  }
+
+  function readFixedTokenSupply(
+    uint8 tokenType,
+    address token,
+    uint256 externalTokenId,
+    address entityProvider
+  )
+    external view returns (uint256 supply, bool valid)
+  {
+    return _readFixedTokenSupply(tokenType, token, externalTokenId, entityProvider);
+  }
+
+  function addDebt(
+    mapping(bytes32 => mapping(uint256 => Debt[])) storage debts,
+    mapping(bytes32 => mapping(uint256 => uint256)) storage debtIndex,
+    mapping(bytes32 => mapping(uint256 => Uint768)) storage debtOutstanding,
+    bytes32 debtor,
+    uint256 tokenId,
+    bytes32 creditor,
+    Uint512 memory amount
+  ) external {
+    if (WideMath.isZero(amount)) return;
+    Uint768 memory outstanding = debtOutstanding[debtor][tokenId];
+    debts[debtor][tokenId].push(Debt({ amount: amount, creditor: creditor }));
+    uint256 index = debts[debtor][tokenId].length - 1;
+    if (index == 0) debtIndex[debtor][tokenId] = 0;
+    debtOutstanding[debtor][tokenId] = WideMath.add(outstanding, WideMath.expand(amount));
+    emit DebtCreated(debtor, creditor, tokenId, amount, index);
+  }
+
+  /// @notice Enforce one debtor/token FIFO without exposing Depository internals.
+  /// @dev This is account-owned queue logic. The mappings remain in Depository
+  ///      storage and are reached through DELEGATECALL, preserving the layout.
+  function enforceDebts(
+    mapping(bytes32 => mapping(uint256 => uint256)) storage reserves,
+    mapping(bytes32 => mapping(uint256 => Debt[])) storage debts,
+    mapping(bytes32 => mapping(uint256 => uint256)) storage debtIndex,
+    mapping(bytes32 => mapping(uint256 => Uint768)) storage debtOutstanding,
+    mapping(bytes32 => uint256) storage activeDebts,
+    bytes32 entity,
+    uint256 tokenId,
+    uint256 maxIterations
+  ) external {
+    Debt[] storage queue = debts[entity][tokenId];
+    uint256 length = queue.length;
+    if (length == 0) {
+      debtIndex[entity][tokenId] = 0;
+      return;
+    }
+
+    uint256 cursor = debtIndex[entity][tokenId];
+    if (cursor >= length) cursor = 0;
+    uint256 available = reserves[entity][tokenId];
+    uint256 iterationCap = maxIterations == 0 ? type(uint256).max : maxIterations;
+    uint256 steps;
+
+    while (cursor < length && steps < iterationCap) {
+      steps++;
+      Debt storage debt = queue[cursor];
+      Uint512 memory amount = debt.amount;
+      if (WideMath.isZero(amount)) {
+        cursor++;
+        continue;
+      }
+      if (available == 0) break;
+
+      bytes32 creditor = debt.creditor;
+      uint256 payableAmount = WideMath.payableAmount(amount, available);
+      _decreaseReserve(reserves, entity, tokenId, payableAmount);
+      _increaseReserve(reserves, creditor, tokenId, payableAmount);
+      debtOutstanding[entity][tokenId] = WideMath.sub(
+        debtOutstanding[entity][tokenId], Uint768(0, 0, payableAmount)
+      );
+      available -= payableAmount;
+      amount = WideMath.subtract(amount, payableAmount);
+
+      if (WideMath.isZero(amount)) {
+        delete debt.amount;
+        emit DebtEnforced(entity, creditor, tokenId, payableAmount, amount, cursor + 1);
+        uint256 active = activeDebts[entity];
+        if (active > 0) {
+          unchecked {
+            activeDebts[entity] = active - 1;
+          }
+        }
+        delete queue[cursor];
+        cursor++;
+      } else {
+        debt.amount = amount;
+        emit DebtEnforced(entity, creditor, tokenId, payableAmount, amount, cursor);
+      }
+    }
+
+    if (cursor >= length) {
+      debtIndex[entity][tokenId] = 0;
+      delete debts[entity][tokenId];
+    } else {
+      debtIndex[entity][tokenId] = cursor;
+    }
+  }
+
+  function increaseReserve(
+    mapping(bytes32 => mapping(uint256 => uint256)) storage reserves,
+    bytes32 entity,
+    uint256 tokenId,
+    uint256 amount
+  ) external {
+    _increaseReserve(reserves, entity, tokenId, amount);
+  }
+
+  function _increaseReserve(
+    mapping(bytes32 => mapping(uint256 => uint256)) storage reserves,
+    bytes32 entity,
+    uint256 tokenId,
+    uint256 amount
+  ) private {
+    if (amount == 0) return;
+    // Implicit flash: an inflow to the batch initiator first repays what it
+    // spent ahead of holding it.
+    BatchScratch storage scratch = BatchScratchLib.get();
+    if (entity == scratch.initiator) {
+      Uint512 memory owed = scratch.deficit[tokenId];
+      if (!WideMath.isZero(owed)) {
+        uint256 repaid = WideMath.payableAmount(owed, amount);
+        scratch.deficit[tokenId] = WideMath.subtract(owed, repaid);
+        amount -= repaid;
+        if (amount == 0) return;
+      }
+    }
+    uint256 current = reserves[entity][tokenId];
+    reserves[entity][tokenId] = current + amount;
+    emit ReserveUpdated(entity, tokenId, current + amount);
+  }
+
+  function decreaseReserve(
+    mapping(bytes32 => mapping(uint256 => uint256)) storage reserves,
+    bytes32 entity,
+    uint256 tokenId,
+    uint256 amount
+  ) external {
+    _decreaseReserve(reserves, entity, tokenId, amount);
+  }
+
+  function _decreaseReserve(
+    mapping(bytes32 => mapping(uint256 => uint256)) storage reserves,
+    bytes32 entity,
+    uint256 tokenId,
+    uint256 amount
+  ) private {
+    if (amount == 0) return;
+    uint256 current = reserves[entity][tokenId];
+    if (current >= amount) {
+      reserves[entity][tokenId] = current - amount;
+      emit ReserveUpdated(entity, tokenId, current - amount);
+      return;
+    }
+    // Implicit flash: only the batch initiator may overdraw, and only inside
+    // processBatch (initiator is zero otherwise). Callers gate this on the
+    // initiator having no outstanding debt for the token, so a debtor cannot
+    // route value around FIFO enforcement. Depository reverts the batch unless
+    // every deficit is repaid by its end.
+    BatchScratch storage scratch = BatchScratchLib.get();
+    if (entity == bytes32(0) || entity != scratch.initiator) revert E3();
+    uint256 shortfall = amount - current;
+    Uint512 memory owed = scratch.deficit[tokenId];
+    if (WideMath.isZero(owed)) scratch.tokens.push(tokenId);
+    scratch.deficit[tokenId] = WideMath.add(owed, Uint512(0, shortfall));
+    reserves[entity][tokenId] = 0;
+    emit ReserveUpdated(entity, tokenId, 0);
+  }
+
+  /// @dev Spendable-balance gate shared by every reserve outflow: the plain
+  ///      reserve net of outstanding debt, or unlimited for a debt-free batch
+  ///      initiator (implicit flash, repaid before the batch ends).
+  function _canSpend(
+    mapping(bytes32 => mapping(uint256 => uint256)) storage reserves,
+    mapping(bytes32 => mapping(uint256 => Uint768)) storage debtOutstanding,
+    bytes32 entity,
+    uint256 tokenId,
+    Uint512 memory amount
+  ) private view returns (bool) {
+    if (amount.high == 0 && amount.low <= _spendableReserve(reserves, debtOutstanding, entity, tokenId)) return true;
+    return entity != bytes32(0)
+      && entity == BatchScratchLib.get().initiator
+      && WideMath.isZero(debtOutstanding[entity][tokenId]);
+  }
+
+  function canSpend(
+    mapping(bytes32 => mapping(uint256 => uint256)) storage reserves,
+    mapping(bytes32 => mapping(uint256 => Uint768)) storage debtOutstanding,
+    bytes32 entity,
+    uint256 tokenId,
+    uint256 amount
+  ) external view returns (bool) {
+    return _canSpend(reserves, debtOutstanding, entity, tokenId, Uint512(0, amount));
+  }
+
+  /// @dev Custody uses the exact uint256 asset representation.
+  function _increaseCollateral(AccountCollateral storage col, uint256 amount) private returns (uint256 updated) {
+    updated = col.collateral;
+    if (amount == 0) return updated;
+    updated += amount;
+    col.collateral = updated;
+  }
+
+  function _decreaseCollateral(AccountCollateral storage col, uint256 amount) private {
+    if (amount == 0) return;
+    uint256 current = col.collateral;
+    if (current < amount) revert E3();
+    col.collateral = current - amount;
+  }
+  uint256 private constant MAX_DISPUTE_PROOF_BODY_BYTES = 176 * 1024;
+  uint256 private constant MAX_DISPUTE_STARTER_ARGUMENT_BYTES = 64 * 1024;
+  uint256 private constant MAX_DISPUTE_PROOF_TOKENS = 128;
+  uint256 private constant MAX_DISPUTE_TRANSFORMERS = 32;
+  // Response windows live in the signed proof body, and the starter of a dispute picks which proof to start with.
+  // A zero window would let the starter open and finalize in one batch and skip the counterparty's answer (H2), so
+  // both windows of every proof body must reach this floor.
+  //
+  // TESTNET VALUE. 60 seconds is only enough to exercise the dispute path end to end. A real deployment needs a
+  // floor in hours, not seconds: a counterparty who is offline for a night must still be able to answer a dispute.
+  uint256 private constant MIN_RESPONSE_SECONDS = 60;
+  // The other technical guard rejects an obviously accidental lock longer than one year.
+  uint256 private constant MAX_DISPUTE_SECONDS = 365 days;
+  // The account's left/right entity ids ride every transformer call: the stock
+  // DeltaTransformer resolves cross-j pull ratios from the Depository reveal
+  // registry keyed by the pull beneficiary, and a transformer must never derive
+  // them from untrusted argument bytes.
+  bytes4 private constant APPLY_TRANSFORMER_BATCH_SELECTOR =
+    bytes4(keccak256("applyBatch((int256,uint256,uint256)[],uint256[],bytes,bytes,bytes,uint256,uint256,bytes32,bytes32,uint256,uint256,uint32,uint32)"));
+  bytes4 private constant DECODE_TRANSFORMER_ARGUMENT_LIST_SELECTOR =
+    bytes4(keccak256("decodeTransformerArgumentListStrict(bytes)"));
+  bytes4 private constant CONTAINS_PULL_SELECTOR = bytes4(keccak256("containsPull(bytes)"));
+  uint256 private constant TRANSFORMER_POST_CALL_GAS_RESERVE = 2_000_000;
+  uint256 private constant TRANSFORMER_ARGUMENT_DECODE_GAS_LIMIT = 500_000;
+
+  // ========== PURE HELPERS ==========
+
+  function _advanceOndeltaEpoch(
+    mapping(bytes => AccountInfo) storage _accounts,
+    bytes32 e1,
+    bytes32 e2
+  ) private {
+    (bytes32 left, bytes32 right) = e1 < e2 ? (e1, e2) : (e2, e1);
+    AccountInfo storage account = _accounts[_accountKey(left, right)];
+    account.ondeltaEpoch += 1;
+    emit AccountEpochAdvanced(left, right, account.ondeltaEpoch);
+  }
+
+  function _accountKey(bytes32 e1, bytes32 e2) internal pure returns (bytes memory) {
+    return e1 < e2 ? abi.encodePacked(e1, e2) : abi.encodePacked(e2, e1);
+  }
+
+  function encodeDisputeHash(
+    uint nonce, bool startedByLeft,
+    bool initialProposerIsLeft,
+    uint256 timeout,
+    uint32 leftResponseSeconds,
+    uint32 rightResponseSeconds,
+    bytes32 proofbodyHash,
+    uint256 disputeStartTimestamp,
+    bytes memory starterInitialArguments,
+    bytes memory starterCounterArguments,
+    bytes32 starterCounterProofCommitment
+  ) external pure returns (bytes32) {
+    bytes32 initialCommitment = _argumentCommitment(
+      starterInitialArguments,
+      startedByLeft,
+      disputeStartTimestamp
+    );
+    bytes32 counterCommitment = _argumentCommitment(
+      starterCounterArguments,
+      startedByLeft,
+      disputeStartTimestamp
+    );
+    return _encodeDisputeHash(
+      nonce,
+      startedByLeft,
+      initialProposerIsLeft,
+      timeout,
+      leftResponseSeconds,
+      rightResponseSeconds,
+      proofbodyHash,
+      disputeStartTimestamp,
+      initialCommitment,
+      counterCommitment,
+      starterCounterProofCommitment,
+      0,
+      bytes32(0),
+      false
+    );
+  }
+
+  function _encodeDisputeHash(
+    uint nonce, bool startedByLeft,
+    bool initialProposerIsLeft,
+    uint256 timeout,
+    uint32 leftResponseSeconds,
+    uint32 rightResponseSeconds,
+    bytes32 proofbodyHash,
+    uint256 disputeStartTimestamp,
+    bytes32 starterInitialArgumentsCommitment,
+    bytes32 starterCounterArgumentsCommitment,
+    bytes32 starterCounterProofCommitment,
+    uint256 counterNonce,
+    bytes32 counterProofbodyHash,
+    bool counterProposerIsLeft
+  ) internal pure returns (bytes32) {
+    return keccak256(abi.encodePacked(
+      nonce,
+      startedByLeft,
+      initialProposerIsLeft,
+      timeout,
+      leftResponseSeconds,
+      rightResponseSeconds,
+      proofbodyHash,
+      disputeStartTimestamp,
+      starterInitialArgumentsCommitment,
+      starterCounterArgumentsCommitment,
+      starterCounterProofCommitment,
+      counterNonce,
+      counterProofbodyHash,
+      counterProposerIsLeft
+    ));
+  }
+
+  function _argumentCommitment(
+    bytes memory arguments,
+    bool startedByLeft,
+    uint256 disputeStartTimestamp
+  ) internal pure returns (bytes32) {
+    return keccak256(abi.encode(arguments, startedByLeft, disputeStartTimestamp));
+  }
+
+  function _counterProofCommitment(
+    uint256 counterNonce,
+    bool counterProposerIsLeft,
+    bytes32 counterProofbodyHash
+  ) internal pure returns (bytes32) {
+    return keccak256(abi.encode(counterNonce, counterProposerIsLeft, counterProofbodyHash));
+  }
+
+  function _counterStarterArgumentsCommitment(
+    AccountInfo storage account,
+    uint256 counterNonce,
+    bool counterProposerIsLeft,
+    bytes32 counterProofbodyHash
+  ) private view returns (bytes32) {
+    // The starter can precommit positional evidence for exactly one known
+    // newer branch, but must never gain veto power over another valid newer
+    // bilateral proof. A different selected branch therefore receives empty
+    // starter-side evidence instead of mismatched positional arguments.
+    return _counterProofCommitment(
+      counterNonce,
+      counterProposerIsLeft,
+      counterProofbodyHash
+    ) == account.starterCounterProofCommitment
+      ? account.starterCounterArgumentsCommitment
+      : _argumentCommitment("", account.disputeStartedByLeft, account.disputeStartTimestamp);
+  }
+
+  function _validateProofBody(ProofBody memory proofbody) private pure returns (bytes32 bodyHash) {
+    if (proofbody.leftResponseSeconds < MIN_RESPONSE_SECONDS || proofbody.rightResponseSeconds < MIN_RESPONSE_SECONDS) {
+      revert IDepositoryDelegateErrorAbi.ResponseWindowTooShort(MIN_RESPONSE_SECONDS);
+    }
+    if (uint256(proofbody.leftResponseSeconds) + uint256(proofbody.rightResponseSeconds) > MAX_DISPUTE_SECONDS) {
+      revert E10();
+    }
+    if (proofbody.tokenIds.length != proofbody.offdeltas.length) revert E8();
+    if (proofbody.tokenIds.length > MAX_DISPUTE_PROOF_TOKENS) revert E10();
+    if (proofbody.transformers.length > MAX_DISPUTE_TRANSFORMERS) revert E10();
+    for (uint256 i = 0; i < proofbody.tokenIds.length; i++) {
+      if (i > 0 && proofbody.tokenIds[i - 1] >= proofbody.tokenIds[i]) revert E8();
+    }
+    bytes memory encodedProofbody = abi.encode(proofbody);
+    if (encodedProofbody.length > MAX_DISPUTE_PROOF_BODY_BYTES) revert E10();
+    bodyHash = keccak256(encodedProofbody);
+  }
+
+  function _validateInitialDisputeProof(InitialDisputeProof memory params) private pure {
+    if (_validateProofBody(params.initialProofbody) != params.proofbodyHash) revert IDepositoryDelegateErrorAbi.E9();
+    if (params.initialProofbody.watchSeed != params.watchSeed) revert IDepositoryDelegateErrorAbi.E9();
+    if (
+      params.starterInitialArguments.length + params.starterCounterArguments.length
+        > MAX_DISPUTE_STARTER_ARGUMENT_BYTES
+    ) revert E10();
+  }
+
+  function validateDisputeProofs(
+    InitialDisputeProof[] memory disputeStarts,
+    CounterDisputeProof[] memory counterDisputes,
+    FinalDisputeProof[] memory disputeFinalizations
+  ) external pure {
+    for (uint256 i = 0; i < disputeStarts.length; i++) {
+      _requireLiveAccountNonce(disputeStarts[i].nonce);
+      _validateInitialDisputeProof(disputeStarts[i]);
+    }
+    for (uint256 i = 0; i < counterDisputes.length; i++) {
+      _requireLiveAccountNonce(counterDisputes[i].initialNonce);
+      _requireLiveAccountNonce(counterDisputes[i].counterNonce);
+      _validateProofBody(counterDisputes[i].counterProofbody);
+    }
+    for (uint256 i = 0; i < disputeFinalizations.length; i++) {
+      _requireLiveAccountNonce(disputeFinalizations[i].initialNonce);
+      _requireLiveAccountNonce(disputeFinalizations[i].finalNonce);
+      _validateProofBody(disputeFinalizations[i].finalProofbody);
+      if (
+        disputeFinalizations[i].starterArguments.length > MAX_DISPUTE_STARTER_ARGUMENT_BYTES ||
+        disputeFinalizations[i].otherArguments.length > MAX_DISPUTE_STARTER_ARGUMENT_BYTES
+      ) revert E10();
+    }
+  }
+
+  function _encodeBatchHankoPayload(
+    bytes32 domainSep,
+    bytes32 entityId,
+    bytes memory encodedBatch,
+    uint256 nonce
+  ) private view returns (bytes memory) {
+    return HankoEncoding.encodeBatch(
+      domainSep,
+      block.chainid,
+      address(this),
+      entityId,
+      encodedBatch,
+      nonce
+    );
+  }
+
+  function computeBatchHankoHash(
+    bytes32 domainSep,
+    bytes32 entityId,
+    bytes memory encodedBatch,
+    uint256 nonce
+  ) external view returns (bytes32) {
+    return keccak256(_encodeBatchHankoPayload(domainSep, entityId, encodedBatch, nonce));
+  }
+
+  // Account is a linked library, so production entry points execute by
+  // DELEGATECALL and address(this) is the Depository. Never pass either domain
+  // component into a verifier: a caller-controlled chain/address would make it
+  // accept a signature for a different jurisdiction.
+  function _encodeCooperativeUpdateHankoPayload(
+    bytes memory acct_key,
+    uint256 ondeltaEpoch,
+    uint nonce,
+    SettlementDiff[] memory diffs,
+    uint[] memory forgiveDebtsInTokenIds
+  ) private view returns (bytes memory) {
+    return HankoEncoding.encodeCooperativeUpdate(
+      block.chainid,
+      address(this),
+      acct_key,
+      ondeltaEpoch,
+      nonce,
+      diffs,
+      forgiveDebtsInTokenIds
+    );
+  }
+
+  function _cooperativeUpdateHankoHash(
+    bytes memory acct_key,
+    uint256 ondeltaEpoch,
+    uint nonce,
+    SettlementDiff[] memory diffs,
+    uint[] memory forgiveDebtsInTokenIds
+  ) private view returns (bytes32) {
+    return keccak256(_encodeCooperativeUpdateHankoPayload(acct_key, ondeltaEpoch, nonce, diffs, forgiveDebtsInTokenIds));
+  }
+
+  function _encodeDisputeProofHankoPayload(
+    bytes memory acct_key,
+    uint256 ondeltaEpoch,
+    uint nonce,
+    bool proposerIsLeft,
+    bytes32 proofbodyHash,
+    bytes32 watchSeed
+  ) private view returns (bytes memory) {
+    return HankoEncoding.encodeDisputeProof(
+      block.chainid,
+      address(this),
+      acct_key,
+      ondeltaEpoch,
+      nonce,
+      proposerIsLeft,
+      proofbodyHash,
+      watchSeed
+    );
+  }
+
+  function _disputeProofHankoHash(
+    bytes memory acct_key,
+    uint256 ondeltaEpoch,
+    uint nonce,
+    bool proposerIsLeft,
+    bytes32 proofbodyHash,
+    bytes32 watchSeed
+  ) private view returns (bytes32) {
+    return keccak256(_encodeDisputeProofHankoPayload(
+      acct_key,
+      ondeltaEpoch,
+      nonce,
+      proposerIsLeft,
+      proofbodyHash,
+      watchSeed
+    ));
+  }
+
+  // ========== HANKO VERIFICATION ==========
+
+  /// @notice Verify dispute proof with hanko (entity-level signature)
+  function verifyDisputeProofHanko(
+    address entityProvider,
+    bytes memory acct_key,
+    uint256 ondeltaEpoch,
+    uint nonce,
+    bool proposerIsLeft,
+    bytes32 proofbodyHash,
+    bytes32 watchSeed,
+    bytes memory hanko,
+    bytes32 expectedEntity
+  ) private view returns (bool success, bool retired) {
+    bytes32 hash = _disputeProofHankoHash(
+      acct_key,
+      ondeltaEpoch,
+      nonce,
+      proposerIsLeft,
+      proofbodyHash,
+      watchSeed
+    );
+    return _historicalEvidence(entityProvider, hanko, hash, expectedEntity);
+  }
+
+  /// @dev The signer of dispute evidence is the counterentity of the entity submitting it. Left is the smaller entity id.
+  function _retiredSide(bool retired, bytes32 submitter, bytes32 signer) private pure returns (uint8) {
+    if (!retired) return 0;
+    return signer < submitter ? 1 : 2;
+  }
+
+  /// @dev The counterparty's current-board signature over a fresh cooperative movement (C2R, settlement). Anything but a valid
+  /// signature by `expected` is E4, including a check that reverts (an empty or undecodable signature).
+  function _requireCounterpartySignature(address entityProvider, bytes memory sig, bytes32 hash, bytes32 expected) private view {
+    try IEntityProvider(entityProvider).verifyCurrentHankoSignature(sig, hash) returns (bytes32 recoveredEntity, bool valid) {
+      if (!valid || recoveredEntity != expected) revert E4();
+    } catch {
+      revert E4();
+    }
+  }
+
+  /// @dev Verifies historical bilateral evidence. Previous-board signatures must remain valid during the grace window or
+  /// a board rotation could erase an already signed account state before either side can enforce it. `retired` says the
+  /// signature verifies only under a previous board; H3 settles such evidence clamped to the Account's collateral.
+  function _historicalEvidence(
+    address entityProvider,
+    bytes memory hanko,
+    bytes32 hash,
+    bytes32 expectedEntity
+  ) private view returns (bool valid, bool retired) {
+    (bytes32 currentEntity, bool currentValid) = IEntityProvider(entityProvider).verifyCurrentHankoSignature(hanko, hash);
+    if (currentValid && currentEntity == expectedEntity) return (true, false);
+    (bytes32 graceEntity, bool graceValid) = IEntityProvider(entityProvider).verifyHankoSignature(hanko, hash);
+    return (graceValid && graceEntity == expectedEntity, true);
+  }
+
+  /// @notice Validate a finalization against durable dispute commitments and
+  /// return the exact left/right transformer evidence to apply.
+  /// @dev Kept in the linked library so the Depository remains deployable under
+  /// EIP-170. This function executes by DELEGATECALL over Depository storage.
+  /// Signed state (body/hash/nonce) and transformer execution are strict. Only
+  /// a malformed dynamic argument wrapper decodes to empty evidence; the signed
+  /// transformer then decides whether that evidence is sufficient.
+  function prepareDisputeFinalization(
+    mapping(bytes => AccountInfo) storage _accounts,
+    bytes32 entityId,
+    FinalDisputeProof memory params,
+    address entityProvider,
+    address canonicalDeltaTransformer
+  ) external returns (
+    bytes memory leftArguments,
+    bytes memory rightArguments,
+    uint256 leftArgumentsTimestamp,
+    uint256 rightArgumentsTimestamp,
+    uint256 eventInitialNonce,
+    bytes32 finalProofbodyHash,
+    uint256 disputeStartTimestamp,
+    uint256 disputeTimeout,
+    uint32 leftResponseSeconds,
+    uint32 rightResponseSeconds
+  ) {
+    _requireLiveAccountNonce(params.initialNonce);
+    _requireLiveAccountNonce(params.finalNonce);
+    finalProofbodyHash = _validateProofBody(params.finalProofbody);
+    if (
+      params.starterArguments.length > MAX_DISPUTE_STARTER_ARGUMENT_BYTES ||
+      params.otherArguments.length > MAX_DISPUTE_STARTER_ARGUMENT_BYTES
+    ) revert E10();
+    bytes memory acct_key = _accountKey(entityId, params.counterentity);
+    AccountInfo storage account = _accounts[acct_key];
+    _requireStoredAccountNonce(account.nonce);
+    uint256 starterArgumentsTimestamp = block.timestamp;
+    eventInitialNonce = params.initialNonce;
+
+    // There is one canonical finalization path: an observed dispute followed by
+    // either the non-starter's newer jointly signed state or the committed
+    // initial state under the timeout rules below. A historical pair of ordinary
+    // state signatures is not fresh consent to bypass the challenge window.
+    if (params.cooperative) revert E2();
+    {
+      bytes32 storedHash = account.disputeHash;
+      if (storedHash == bytes32(0)) revert IDepositoryDelegateErrorAbi.E5();
+      if (params.initialNonce != account.nonce) revert E2();
+      if (params.initialProofbodyHash != account.disputeInitialProofbodyHash) revert IDepositoryDelegateErrorAbi.E9();
+      if (params.startedByLeft != account.disputeStartedByLeft) revert IDepositoryDelegateErrorAbi.E9();
+
+      bytes32 expectedHash = _encodeDisputeHash(
+        account.nonce,
+        account.disputeStartedByLeft,
+        account.disputeInitialProposerIsLeft,
+        account.disputeTimeout,
+        account.leftResponseSeconds,
+        account.rightResponseSeconds,
+        account.disputeInitialProofbodyHash,
+        account.disputeStartTimestamp,
+        account.starterInitialArgumentsCommitment,
+        account.starterCounterArgumentsCommitment,
+        account.starterCounterProofCommitment,
+        account.disputeCounterNonce,
+        account.disputeCounterProofbodyHash,
+        account.disputeCounterProposerIsLeft
+      );
+      if (storedHash != expectedHash) revert IDepositoryDelegateErrorAbi.E9();
+      if (
+        params.finalProofbody.leftResponseSeconds < account.leftResponseSeconds ||
+        params.finalProofbody.rightResponseSeconds < account.rightResponseSeconds
+      ) revert IDepositoryDelegateErrorAbi.E9();
+      bool senderIsCounterparty = params.startedByLeft != (entityId < params.counterentity);
+      // Dynamic `otherArguments` belong exclusively to the non-starter. A
+      // starter timing out its own dispute may execute signed logic, but may
+      // never impersonate the peer's live fill/secret choices. A delegated
+      // watchtower acts under the non-starter Entity and remains authorized.
+      if (!senderIsCounterparty && params.otherArguments.length != 0) revert E2();
+      bytes32 expectedStarterArgumentsCommitment;
+      bool hasSelectedCounterProof = account.disputeCounterNonce != 0;
+      if (hasSelectedCounterProof) {
+        // A registered response wins state selection before T. At T either
+        // party may execute it, but neither may race the obsolete initial body
+        // or substitute another newer body at the mining boundary.
+        if (block.timestamp < account.disputeTimeout) revert E2();
+        if (params.finalNonce != account.disputeCounterNonce) revert E2();
+        if (params.proposerIsLeft != account.disputeCounterProposerIsLeft) {
+          revert IDepositoryDelegateErrorAbi.E9();
+        }
+        if (finalProofbodyHash != account.disputeCounterProofbodyHash) {
+          revert IDepositoryDelegateErrorAbi.E9();
+        }
+        // Counter registration already verified the exact body identity under
+        // the starter's inner Hanko and the non-starter's fresh outer Hanko.
+        // Requiring that inner signature again against the *finalizer's*
+        // counterentity would let the registering non-starter disappear and
+        // lock the Account forever. After T either current-board outer caller
+        // may execute the stored identity; no second inner authority exists.
+        // `sig` is deliberately ignored here: one watchtower transaction can
+        // land on either side of T and must carry it for pre-T registration,
+        // while the post-T selected path has already authenticated it.
+        expectedStarterArgumentsCommitment = _counterStarterArgumentsCommitment(
+          account,
+          params.finalNonce,
+          params.proposerIsLeft,
+          finalProofbodyHash
+        );
+      } else if (params.sig.length > 0) {
+        // The starter necessarily holds older counterparty signatures. Letting
+        // the starter submit one here would turn any stale N+1 into an immediate
+        // close and deny the counterparty its window to reveal N+2. The outer
+        // batch signature therefore must belong to the non-starter.
+        if (!senderIsCounterparty) revert E2();
+        if (params.finalNonce < account.nonce) revert E2();
+        if (
+          params.finalNonce == account.nonce &&
+          (!params.proposerIsLeft || account.disputeInitialProposerIsLeft)
+        ) revert E2();
+        (bool finalValid, bool finalRetired) = verifyDisputeProofHanko(
+          entityProvider,
+          acct_key,
+          account.ondeltaEpoch,
+          params.finalNonce,
+          params.proposerIsLeft,
+          finalProofbodyHash,
+          params.finalProofbody.watchSeed,
+          params.sig,
+          params.counterentity
+        );
+        if (!finalValid) revert E4();
+        account.disputeRetiredSide = _retiredSide(finalRetired, entityId, params.counterentity);
+        // Pull-free mutual consent still closes immediately. A newer state
+        // containing Pulls must have been locked by processCounterDisputes
+        // before T; accepting it for the first time at T would recreate the
+        // exact miner-ordering race this lock exists to remove.
+        if (_proofBodyContainsPull(params.finalProofbody, canonicalDeltaTransformer)) revert E2();
+        expectedStarterArgumentsCommitment = _counterStarterArgumentsCommitment(
+          account,
+          params.finalNonce,
+          params.proposerIsLeft,
+          finalProofbodyHash
+        );
+      } else {
+        if (params.finalNonce != account.nonce) revert E2();
+        if (params.proposerIsLeft != account.disputeInitialProposerIsLeft) {
+          revert IDepositoryDelegateErrorAbi.E9();
+        }
+        if (finalProofbodyHash != account.disputeInitialProofbodyHash) revert IDepositoryDelegateErrorAbi.E9();
+        // The starter has no fresh response from the non-starter and must wait.
+        // The non-starter may immediately accept the exact state the starter
+        // chose. Pull still forces both callers to wait for reveal publication.
+        if (
+          block.timestamp < account.disputeTimeout &&
+          (
+            !senderIsCounterparty ||
+            _proofBodyContainsPull(params.finalProofbody, canonicalDeltaTransformer)
+          )
+        ) revert E2();
+        expectedStarterArgumentsCommitment = account.starterInitialArgumentsCommitment;
+      }
+
+      if (
+        _argumentCommitment(
+          params.starterArguments,
+          account.disputeStartedByLeft,
+          account.disputeStartTimestamp
+        ) != expectedStarterArgumentsCommitment
+      ) revert IDepositoryDelegateErrorAbi.E9();
+      starterArgumentsTimestamp = account.disputeStartTimestamp;
+      eventInitialNonce = account.nonce;
+    }
+
+    leftArguments = params.startedByLeft ? params.starterArguments : params.otherArguments;
+    rightArguments = params.startedByLeft ? params.otherArguments : params.starterArguments;
+    leftArgumentsTimestamp = block.timestamp;
+    rightArgumentsTimestamp = block.timestamp;
+    if (params.startedByLeft) {
+      leftArgumentsTimestamp = starterArgumentsTimestamp;
+    } else {
+      rightArgumentsTimestamp = starterArgumentsTimestamp;
+    }
+
+    // Capture the dispute clock BEFORE clearing. applyPull validates both the
+    // lower bound (this dispute's start) and the signed role-specific upper
+    // bound; finalization uses the signed sum of the two response windows.
+    disputeStartTimestamp = account.disputeStartTimestamp;
+    disputeTimeout = account.disputeTimeout;
+    leftResponseSeconds = account.leftResponseSeconds;
+    rightResponseSeconds = account.rightResponseSeconds;
+
+    // Publish no partially-cleared dispute state. Any later failure reverts the
+    // entire processBatch transaction and restores these fields atomically.
+    account.disputeHash = bytes32(0);
+    account.disputeTimeout = 0;
+    account.disputeStartTimestamp = 0;
+    account.leftResponseSeconds = 0;
+    account.rightResponseSeconds = 0;
+    account.disputeInitialProofbodyHash = bytes32(0);
+    account.disputeInitialProposerIsLeft = false;
+    account.disputeCounterNonce = 0;
+    account.disputeCounterProofbodyHash = bytes32(0);
+    account.disputeCounterProposerIsLeft = false;
+    account.starterInitialArgumentsCommitment = bytes32(0);
+    account.starterCounterArgumentsCommitment = bytes32(0);
+    account.starterCounterProofCommitment = bytes32(0);
+    account.disputeStartedByLeft = false;
+    // disputeRetiredSide is left for Depository, which reads it to clamp this settlement and then clears it.
+    // Finalization pays the Account out (collateral and ondelta reset), so every proof signed for the old baseline dies.
+    _advanceOndeltaEpoch(_accounts, entityId, params.counterentity);
+  }
+
+  /// @dev Pull is a protocol semantic of the immutable canonical
+  /// DeltaTransformer only. Arbitrary signed transformers do not gain an
+  /// implicit delay merely by using a similar private ABI. Conversely, a
+  /// malformed canonical batch cannot masquerade as pull-free: the strict
+  /// decoder failure is converted into the same fatal transformer error used
+  /// during execution, leaving the active dispute untouched.
+  function _proofBodyContainsPull(ProofBody memory proofbody, address canonicalDeltaTransformer)
+    private
+    view
+    returns (bool)
+  {
+    for (uint256 i = 0; i < proofbody.transformers.length; i++) {
+      TransformerClause memory clause = proofbody.transformers[i];
+      if (clause.transformerAddress != canonicalDeltaTransformer) continue;
+      (bool ok, bytes memory result) = canonicalDeltaTransformer.staticcall(
+        abi.encodeWithSelector(CONTAINS_PULL_SELECTOR, clause.encodedBatch)
+      );
+      if (!ok || result.length != 32) {
+        revert IDepositoryDelegateErrorAbi.TransformerExecutionFailed();
+      }
+      if (abi.decode(result, (bool))) return true;
+    }
+    return false;
+  }
+
+  /// @notice Execute one user-signed transformer clause.
+  /// @dev A transformer is the executable meaning of the signed dispute state,
+  /// not optional evidence. Missing code, revert/OOG, or malformed output must
+  /// revert the whole finalization and leave the dispute active. We forward all
+  /// remaining gas except the fixed Depository settlement reserve.
+  function _applyTransformer(
+    Int768[] memory deltas,
+    uint[] memory tokenIds,
+    TransformerClause memory tc,
+    bytes memory leftArguments,
+    bytes memory rightArguments,
+    uint256 leftArgumentsTimestamp,
+    uint256 rightArgumentsTimestamp,
+    bytes32 leftEntity,
+    bytes32 rightEntity,
+    uint256 disputeStartTimestamp,
+    uint256 disputeTimeout,
+    uint32 leftResponseSeconds,
+    uint32 rightResponseSeconds
+  ) private view returns (Int768[] memory newDeltas) {
+    if (tc.transformerAddress.code.length == 0) revert IDepositoryDelegateErrorAbi.TransformerExecutionFailed();
+    if (tc.encodedBatch.length + leftArguments.length + rightArguments.length >> 18 != 0) {
+      revert IDepositoryDelegateErrorAbi.TransformerExecutionFailed();
+    }
+
+    bytes memory callData = abi.encodeWithSelector(
+      APPLY_TRANSFORMER_BATCH_SELECTOR,
+      deltas,
+      tokenIds,
+      tc.encodedBatch,
+      leftArguments,
+      rightArguments,
+      leftArgumentsTimestamp,
+      rightArgumentsTimestamp,
+      leftEntity,
+      rightEntity,
+      disputeStartTimestamp,
+      disputeTimeout,
+      leftResponseSeconds,
+      rightResponseSeconds
+    );
+    uint256 remainingGas = gasleft();
+    if (remainingGas <= TRANSFORMER_POST_CALL_GAS_RESERVE) revert IDepositoryDelegateErrorAbi.TransformerGasBudgetUnavailable();
+    uint256 callGas = remainingGas - TRANSFORMER_POST_CALL_GAS_RESERVE;
+
+    bool callOk;
+    uint256 returnSize;
+    address transformer = tc.transformerAddress;
+    assembly ("memory-safe") {
+      callOk := staticcall(callGas, transformer, add(callData, 0x20), mload(callData), 0, 0)
+      returnSize := returndatasize()
+    }
+    if (!callOk) {
+      // The reveal-window barriers (pull and open-deadline payment) and a missing registry are scheduling
+      // and evidence conditions, not transformer faults. Bubble them verbatim
+      // so operators and the runtime's finalize scheduler see the true reason
+      // instead of a generic execution failure. Every other transformer
+      // failure still collapses to TransformerExecutionFailed.
+      if (returnSize >= 4) {
+        bytes memory reason = new bytes(returnSize);
+        assembly ("memory-safe") {
+          returndatacopy(add(reason, 0x20), 0, returnSize)
+        }
+        bytes4 reasonSelector;
+        assembly ("memory-safe") {
+          reasonSelector := mload(add(reason, 0x20))
+        }
+        if (
+          reasonSelector == DeltaTransformer.PullRevealWindowActive.selector ||
+          reasonSelector == DeltaTransformer.PaymentRevealWindowActive.selector ||
+          reasonSelector == DeltaTransformer.PullRevealRegistryUnavailable.selector
+        ) {
+          assembly ("memory-safe") {
+            revert(add(reason, 0x20), returnSize)
+          }
+        }
+      }
+      revert IDepositoryDelegateErrorAbi.TransformerExecutionFailed();
+    }
+
+    uint256 expectedReturnSize = 0x40 + deltas.length * 0x60;
+    if (returnSize != expectedReturnSize) revert IDepositoryDelegateErrorAbi.TransformerExecutionFailed();
+
+    bytes memory returnData = new bytes(returnSize);
+    assembly ("memory-safe") {
+      returndatacopy(add(returnData, 0x20), 0, returnSize)
+    }
+    uint256 arrayOffset;
+    uint256 arrayLength;
+    assembly ("memory-safe") {
+      arrayOffset := mload(add(returnData, 0x20))
+      arrayLength := mload(add(returnData, 0x40))
+    }
+    if (arrayOffset != 0x20 || arrayLength != deltas.length) revert IDepositoryDelegateErrorAbi.TransformerExecutionFailed();
+
+    newDeltas = abi.decode(returnData, (Int768[]));
+    return newDeltas;
+  }
+
+  function _applyTransformers(
+    bytes32 accountKeyHash,
+    ProofBody memory proofbody,
+    Int768[] memory deltas,
+    bytes memory leftArguments,
+    bytes memory rightArguments,
+    uint256 leftArgumentsTimestamp,
+    uint256 rightArgumentsTimestamp,
+    bytes32 leftEntity,
+    bytes32 rightEntity,
+    address argumentDecoder,
+    uint256 disputeStartTimestamp,
+    uint256 disputeTimeout,
+    uint32 leftResponseSeconds,
+    uint32 rightResponseSeconds
+  ) private returns (Int768[] memory) {
+    if (proofbody.transformers.length == 0) return deltas;
+    bytes[] memory decodedLeft = _decodeTransformerArgumentList(leftArguments, argumentDecoder);
+    bytes[] memory decodedRight = _decodeTransformerArgumentList(rightArguments, argumentDecoder);
+    for (uint256 i = 0; i < proofbody.transformers.length; i++) {
+      TransformerClause memory tc = proofbody.transformers[i];
+      if (!_validTransformerAllowances(tc.allowances, deltas.length)) {
+        revert IDepositoryDelegateErrorAbi.TransformerExecutionFailed();
+      }
+
+      Int768[] memory newDeltas = _applyTransformer(
+        deltas,
+        proofbody.tokenIds,
+        tc,
+        i < decodedLeft.length ? decodedLeft[i] : bytes(""),
+        i < decodedRight.length ? decodedRight[i] : bytes(""),
+        leftArgumentsTimestamp,
+        rightArgumentsTimestamp,
+        leftEntity,
+        rightEntity,
+        disputeStartTimestamp,
+        disputeTimeout,
+        leftResponseSeconds,
+        rightResponseSeconds
+      );
+
+      for (uint256 j = 0; j < deltas.length; j++) {
+        if (!WideMath.equal(newDeltas[j], deltas[j]) && !_hasTransformerAllowance(tc.allowances, j)) {
+          revert IDepositoryDelegateErrorAbi.TransformerExecutionFailed();
+        }
+      }
+
+      for (uint256 j = 0; j < tc.allowances.length; j++) {
+        Allowance memory allow = tc.allowances[j];
+        uint256 deltaIndex = allow.deltaIndex;
+        Int768 memory requestedValue = newDeltas[deltaIndex];
+        Int768 memory appliedValue = _clampTransformerValue(
+          deltas[deltaIndex],
+          requestedValue,
+          allow.rightAllowance,
+          allow.leftAllowance
+        );
+        if (!WideMath.equal(appliedValue, requestedValue)) {
+          emit TransformerDeltaClamped(
+            accountKeyHash,
+            i,
+            tc.transformerAddress,
+            proofbody.tokenIds[deltaIndex],
+            requestedValue,
+            appliedValue
+          );
+          newDeltas[deltaIndex] = appliedValue;
+        }
+      }
+      deltas = newDeltas;
+    }
+    return deltas;
+  }
+
+  /// @notice Derive the exact bilateral settlement deltas before custody effects.
+  /// @dev Account owns signed delta arithmetic and execution of every transformer
+  ///      clause signed in ProofBody. Depository consumes only the resulting
+  ///      signed-magnitude values when moving collateral, reserves, and debt.
+  ///      Every signed admission calls _validateProofBody; finalization repeats
+  ///      that validation, including the watchtower path. Its <=32 clauses each
+  ///      permit at most uint256.max movement per token. Starting from signed512
+  ///      offdelta + reachable |ondelta|<2^310, every applied result has magnitude
+  ///      <2^511 + 2^310 + 32*2^256 <2^512. Arbitrary transformer return values
+  ///      are compared/clamped in Int768 BEFORE narrowing the final magnitude.
+  ///      In particular, a signed offdelta at its positive endpoint followed by
+  ///      a left R2C remains executable; later custody never invalidates its sum.
+  function prepareSettlementDeltas(
+    mapping(bytes => mapping(uint256 => AccountCollateral)) storage collaterals,
+    bytes memory acctKey,
+    ProofBody memory proofbody,
+    bytes memory leftArguments,
+    bytes memory rightArguments,
+    uint256 leftArgumentsTimestamp,
+    uint256 rightArgumentsTimestamp,
+    bytes32 leftEntity,
+    bytes32 rightEntity,
+    address argumentDecoder,
+    uint256 disputeStartTimestamp,
+    uint256 disputeTimeout,
+    uint32 leftResponseSeconds,
+    uint32 rightResponseSeconds
+  ) external returns (Int768[] memory deltas) {
+    uint256 tokenCount = proofbody.tokenIds.length;
+    deltas = new Int768[](tokenCount);
+    for (uint256 i = 0; i < tokenCount; i++) {
+      uint256 tokenId = proofbody.tokenIds[i];
+      if (i > 0 && proofbody.tokenIds[i - 1] >= tokenId) revert E8();
+      deltas[i] = WideMath.add(
+        WideMath.expand(collaterals[acctKey][tokenId].ondelta),
+        WideMath.expand(proofbody.offdeltas[i])
+      );
+    }
+
+    // Every signed clause must execute. Missing code, revert/OOG, malformed
+    // output, or invalid allowances revert the entire dispute finalization.
+    deltas = _applyTransformers(
+      keccak256(acctKey),
+      proofbody,
+      deltas,
+      leftArguments,
+      rightArguments,
+      leftArgumentsTimestamp,
+      rightArgumentsTimestamp,
+      leftEntity,
+      rightEntity,
+      argumentDecoder,
+      disputeStartTimestamp,
+      disputeTimeout,
+      leftResponseSeconds,
+      rightResponseSeconds
+    );
+  }
+
+  function _decodeTransformerArgumentList(bytes memory encoded, address argumentDecoder) private view returns (bytes[] memory) {
+    if (encoded.length == 0) return new bytes[](0);
+    if (encoded.length >> 18 != 0) return new bytes[](0);
+    // Malformed evidence is optional and decodes to an empty list. Insufficient
+    // caller gas is different: it must never silently erase otherwise valid
+    // evidence and thereby change the settlement result.
+    if (gasleft() <= TRANSFORMER_POST_CALL_GAS_RESERVE + TRANSFORMER_ARGUMENT_DECODE_GAS_LIMIT) {
+      revert IDepositoryDelegateErrorAbi.TransformerGasBudgetUnavailable();
+    }
+    (bool ok, bytes memory result) = argumentDecoder.staticcall{
+      gas: TRANSFORMER_ARGUMENT_DECODE_GAS_LIMIT
+    }(abi.encodeWithSelector(DECODE_TRANSFORMER_ARGUMENT_LIST_SELECTOR, encoded));
+    if (!ok) return new bytes[](0);
+    return abi.decode(result, (bytes[]));
+  }
+
+  function _hasTransformerAllowance(Allowance[] memory allowances, uint256 deltaIndex)
+    private pure returns (bool)
+  {
+    for (uint256 i = 0; i < allowances.length; i++) {
+      if (allowances[i].deltaIndex == deltaIndex) return true;
+    }
+    return false;
+  }
+
+  function _validTransformerAllowances(Allowance[] memory allowances, uint256 deltaCount)
+    private pure returns (bool)
+  {
+    if (allowances.length > deltaCount) return false;
+    for (uint256 i = 0; i < allowances.length; i++) {
+      if (allowances[i].deltaIndex >= deltaCount) return false;
+      for (uint256 j = 0; j < i; j++) {
+        if (allowances[j].deltaIndex == allowances[i].deltaIndex) return false;
+      }
+    }
+    return true;
+  }
+
+  /// Each signed clause authorizes at most one uint256 swing per token. The
+  /// next clause sees the exact previous result; opposite allowances never net.
+  function _clampTransformerValue(
+    Int768 memory previousValue,
+    Int768 memory requestedValue,
+    uint256 rightAllowance,
+    uint256 leftAllowance
+  ) private pure returns (Int768 memory) {
+    Int768 memory lower = WideMath.subUint(previousValue, rightAllowance);
+    Int768 memory upper = WideMath.addUint(previousValue, leftAllowance);
+    if (WideMath.compare(requestedValue, lower) < 0) return lower;
+    if (WideMath.compare(requestedValue, upper) > 0) return upper;
+    return requestedValue;
+  }
+
+  // ========== ENTRY POINTS ==========
+
+  /// @notice Process settlements - diffs only (debt handled by Depository).
+  /// @dev Any rejected settlement reverts the whole batch (E4 signature,
+  ///      E3 balance) directly from the library; there is no soft-fail path.
+  function processSettlements(
+    mapping(bytes32 => mapping(uint256 => uint256)) storage _reserves,
+    mapping(bytes32 => mapping(uint256 => Uint768)) storage debtOutstanding,
+    mapping(bytes => AccountInfo) storage _accounts,
+    mapping(bytes => mapping(uint256 => AccountCollateral)) storage _collaterals,
+    bytes32 entityId,
+    Settlement[] memory settlements,
+    address entityProvider
+  ) external {
+    for (uint i = 0; i < settlements.length; i++) {
+      _settleDiffs(
+        _reserves,
+        debtOutstanding,
+        _accounts,
+        _collaterals,
+        entityId,
+        settlements[i],
+        entityProvider
+      );
+    }
+  }
+
+  /// Depository has checked the receiving party and enforced existing debts.
+  /// Keep each pair's reserve debit, collateral update and two event snapshots
+  /// in their original order. One delegatecall owns the whole item; no repeated
+  /// ABI roundtrip is needed for each Account-local custody helper.
+  function processR2C(
+    mapping(bytes32 => mapping(uint256 => uint256)) storage _reserves,
+    mapping(bytes32 => mapping(uint256 => Uint768)) storage debtOutstanding,
+    mapping(bytes => AccountInfo) storage _accounts,
+    mapping(bytes => mapping(uint256 => AccountCollateral)) storage _collaterals,
+    bytes32 entity,
+    ReserveToCollateral memory params
+  ) external returns (bool) {
+    uint256 tokenId = params.tokenId;
+    bytes32 receivingEntity = params.receivingEntity;
+    Uint512 memory totalAmount;
+    for (uint i = 0; i < params.pairs.length; i++) {
+      uint256 amount = params.pairs[i].amount;
+      if (amount == 0) revert E1();
+      if (params.pairs[i].entity == bytes32(0) || params.pairs[i].entity == receivingEntity) revert E7();
+      totalAmount = WideMath.add(totalAmount, Uint512(0, amount));
+    }
+    if (!_canSpend(_reserves, debtOutstanding, entity, tokenId, totalAmount)) return false;
+
+    // Reuse only the transient fixed-shape event buffers. Each emit encodes
+    // its own immutable bytes before the next pair changes these fields.
+    TokenSettlement[] memory tokens = new TokenSettlement[](1);
+    AccountSettlement[] memory settled = new AccountSettlement[](1);
+    tokens[0].tokenId = tokenId;
+    settled[0].tokens = tokens;
+    for (uint i = 0; i < params.pairs.length; i++) {
+      bytes32 counterentity = params.pairs[i].entity;
+      uint amount = params.pairs[i].amount;
+
+      bytes memory acct_key = _accountKey(receivingEntity, counterentity);
+      AccountCollateral storage col = _collaterals[acct_key][tokenId];
+
+      _decreaseReserve(_reserves, entity, tokenId, amount);
+      // Reuse the exact values just stored for this pair's event, avoiding
+      // rereads while preserving the intermediate custody/allocation snapshot.
+      uint256 collateral = _increaseCollateral(col, amount);
+      Int512 memory ondelta = col.ondelta;
+      bool receiverIsLeft = receivingEntity < counterentity;
+      if (receiverIsLeft) {
+        ondelta = WideMath.addAmount(ondelta, SignedAmount(false, amount));
+        col.ondelta = ondelta;
+      }
+
+      bytes32 leftEntity = receiverIsLeft ? receivingEntity : counterentity;
+      bytes32 rightEntity = receiverIsLeft ? counterentity : receivingEntity;
+      // R2C doesn't increment nonce (no bilateral signature required).
+      tokens[0].leftReserve = _reserves[leftEntity][tokenId];
+      tokens[0].rightReserve = _reserves[rightEntity][tokenId];
+      tokens[0].collateral = collateral;
+      tokens[0].ondelta = ondelta;
+      uint256 nonce = _accounts[acct_key].nonce;
+      if (nonce > JS_SAFE_NONCE_MAX) revert E10();
+      settled[0].left = leftEntity;
+      settled[0].right = rightEntity;
+      settled[0].nonce = nonce;
+      emit AccountSettled(settled);
+    }
+
+    return true;
+  }
+
+  /// @notice Process C2R shortcut directly (skip Settlement[] allocation)
+  function processC2R(
+    mapping(bytes32 => mapping(uint256 => uint256)) storage _reserves,
+    mapping(bytes => AccountInfo) storage _accounts,
+    mapping(bytes => mapping(uint256 => AccountCollateral)) storage _collaterals,
+    bytes32 entityId,
+    CollateralToReserve memory c2r,
+    address entityProvider
+  ) external {
+    bool isLeft = entityId < c2r.counterparty;
+    bytes32 leftEntity = isLeft ? entityId : c2r.counterparty;
+    bytes32 rightEntity = isLeft ? c2r.counterparty : entityId;
+    bytes memory acct_key = _accountKey(leftEntity, rightEntity);
+
+    if (_accounts[acct_key].disputeHash != bytes32(0)) revert IDepositoryDelegateErrorAbi.E6();
+
+    _requireStoredAccountNonce(_accounts[acct_key].nonce);
+    _requireLiveAccountNonce(c2r.nonce);
+    // NONCE CHECK: signedNonce > storedNonce (strictly greater)
+    if (c2r.nonce <= _accounts[acct_key].nonce) revert E2();
+
+    uint amount = c2r.amount;
+    SignedAmount memory positive = SignedAmount(false, amount);
+    SignedAmount memory negative = SignedAmount(amount != 0, amount);
+    SignedAmount memory zero;
+
+    // Reconstruct diffs for signature verification (C2R is a calldata shortcut).
+    // Sign+magnitude keeps the entire ERC20 uint256 domain without a cast.
+    SettlementDiff[] memory diffs = new SettlementDiff[](1);
+    diffs[0] = SettlementDiff({
+      tokenId: c2r.tokenId,
+      leftDiff: isLeft ? positive : zero,
+      rightDiff: isLeft ? zero : positive,
+      collateralDiff: negative,
+      ondeltaDiff: isLeft ? negative : zero
+    });
+
+    // Verify counterparty signature (hash includes signedNonce, not storedNonce)
+    bytes32 hash = _cooperativeUpdateHankoHash(acct_key, _accounts[acct_key].ondeltaEpoch, c2r.nonce, diffs, new uint[](0));
+
+    // C2R authorizes a fresh movement of funds, not historical evidence. A
+    // rotated-out board must never retain spending authority during its grace.
+    // An empty or undecodable signature makes the check revert with no data; that is a bad counterparty signature (E4), the
+    // same as in a settlement, and must not look like the empty revert of a frame that ran out of gas (see Depository.processBatch).
+    _requireCounterpartySignature(entityProvider, c2r.sig, hash, c2r.counterparty);
+
+    // Apply diffs
+    uint tokenId = c2r.tokenId;
+    AccountCollateral storage col = _collaterals[acct_key][tokenId];
+    if (col.collateral < amount) revert E3();
+
+    _increaseReserve(_reserves, entityId, tokenId, amount);
+    _decreaseCollateral(col, amount);
+    if (isLeft) {
+      col.ondelta = WideMath.addAmount(col.ondelta, negative);
+    }
+
+    // SET nonce (not increment)
+    _accounts[acct_key].nonce = c2r.nonce;
+    _advanceOndeltaEpoch(_accounts, leftEntity, rightEntity);
+
+    // Emit unionified AccountSettled
+    TokenSettlement[] memory tokens = new TokenSettlement[](1);
+    tokens[0] = TokenSettlement({
+      tokenId: tokenId,
+      leftReserve: _reserves[leftEntity][tokenId],
+      rightReserve: _reserves[rightEntity][tokenId],
+      collateral: col.collateral,
+      ondelta: col.ondelta
+    });
+    AccountSettlement[] memory settled = new AccountSettlement[](1);
+    settled[0] = AccountSettlement({
+      left: leftEntity,
+      right: rightEntity,
+      tokens: tokens,
+      nonce: _accounts[acct_key].nonce
+    });
+    emit AccountSettled(settled);
+  }
+
+  /// @notice Process dispute starts only
+  function processDisputeStarts(
+    mapping(bytes => AccountInfo) storage _accounts,
+    bytes32 entityId,
+    InitialDisputeProof[] memory disputeStarts,
+    address entityProvider
+  ) external {
+    for (uint i = 0; i < disputeStarts.length; i++) {
+      _disputeStart(_accounts, entityId, disputeStarts[i], entityProvider);
+    }
+  }
+
+  /// @notice Lock the highest mutually signed counter-proof before T.
+  /// @dev This is deliberately separate from finalization. Pull settlement
+  /// cannot execute before its reveal window closes, but rejecting the newer
+  /// proof until T would let the starter race an obsolete proof at T. The
+  /// compact nonce+hash lock removes that race without extending the dispute.
+  function processCounterDisputes(
+    mapping(bytes => AccountInfo) storage _accounts,
+    bytes32 entityId,
+    CounterDisputeProof[] memory counterDisputes,
+    address entityProvider
+  ) external {
+    for (uint256 i = 0; i < counterDisputes.length; i++) {
+      _registerCounterDispute(_accounts, entityId, counterDisputes[i], entityProvider, true);
+    }
+  }
+
+  /// @dev Compact tower adapter kept in the linked library so Depository stays
+  /// below EIP-170. Returns false at/after T, when Depository must execute the
+  /// already-selected proof instead of registering it.
+  function registerWatchtowerCounterDispute(
+    mapping(bytes => AccountInfo) storage _accounts,
+    bytes32 watchtowerDomainSeparator,
+    address tower,
+    bytes32 entityId,
+    FinalDisputeProof memory params,
+    uint256 lastResortWindowSeconds,
+    uint256 appointmentSequence,
+    bytes memory ownerAuthorizationHanko,
+    address entityProvider
+  ) external returns (bool) {
+    bytes memory acctKey = _accountKey(entityId, params.counterentity);
+    AccountInfo storage account = _accounts[acctKey];
+    _requireStoredAccountNonce(account.nonce);
+    if (account.disputeHash == bytes32(0)) revert IDepositoryDelegateErrorAbi.E5();
+    if (params.cooperative || params.sig.length == 0) revert E2();
+    if (
+      lastResortWindowSeconds == 0 ||
+      lastResortWindowSeconds > account.disputeTimeout - account.disputeStartTimestamp ||
+      block.timestamp + lastResortWindowSeconds < account.disputeTimeout
+    ) revert E2();
+    bool ownerIsNonstarter = account.disputeStartedByLeft != (entityId < params.counterentity);
+    if (!ownerIsNonstarter) revert E2();
+    // Revocation fence: the entity raises watchtowerMinSequence with one
+    // current-board action; every older appointment stops working at once.
+    if (appointmentSequence < IEntityProvider(entityProvider).watchtowerMinSequence(entityId)) revert E2();
+    if (
+      params.finalNonce < account.nonce ||
+      (
+        params.finalNonce == account.nonce &&
+        (!params.proposerIsLeft || account.disputeInitialProposerIsLeft)
+      )
+    ) revert E2();
+    bytes32 finalProofbodyHash = keccak256(abi.encode(params.finalProofbody));
+    bytes32 ownerHash = keccak256(HankoEncoding.encodeWatchtowerCounterDispute(
+      watchtowerDomainSeparator,
+      block.chainid,
+      address(this),
+      tower,
+      entityId,
+      params.counterentity,
+      params.finalNonce,
+      finalProofbodyHash,
+      lastResortWindowSeconds,
+      appointmentSequence
+    ));
+    (bytes32 recoveredEntity, bool valid) =
+      IEntityProvider(entityProvider).verifyCurrentHankoSignature(ownerAuthorizationHanko, ownerHash);
+    if (!valid || recoveredEntity != entityId) revert E4();
+    if (block.timestamp >= account.disputeTimeout) return false;
+    _registerCounterDispute(
+      _accounts,
+      entityId,
+      CounterDisputeProof({
+        counterentity: params.counterentity,
+        initialNonce: params.initialNonce,
+        initialProofbodyHash: params.initialProofbodyHash,
+        counterNonce: params.finalNonce,
+        proposerIsLeft: params.proposerIsLeft,
+        counterProofbody: params.finalProofbody,
+        sig: params.sig
+      }),
+      entityProvider,
+      false
+    );
+    return true;
+  }
+
+  /// @dev `skipStale`: inside a batch (J2) a counter the dispute has moved past is skipped with DisputeOpSkipped; the
+  /// single-op watchtower entrypoint keeps reverting, because it has no batch to protect and returns success to its caller.
+  function _registerCounterDispute(
+    mapping(bytes => AccountInfo) storage _accounts,
+    bytes32 entityId,
+    CounterDisputeProof memory params,
+    address entityProvider,
+    bool skipStale
+  ) private {
+    _requireLiveAccountNonce(params.initialNonce);
+    _requireLiveAccountNonce(params.counterNonce);
+    bytes32 bodyHash = _validateProofBody(params.counterProofbody);
+    bytes memory acctKey = _accountKey(entityId, params.counterentity);
+    AccountInfo storage account = _accounts[acctKey];
+    if (account.disputeHash == bytes32(0)) {
+      if (!skipStale) revert IDepositoryDelegateErrorAbi.E5();
+      return _skipCounter(entityId, params, DISPUTE_SKIP_NO_ACTIVE_DISPUTE);
+    }
+    if (block.timestamp >= account.disputeTimeout) {
+      if (!skipStale) revert E2();
+      return _skipCounter(entityId, params, DISPUTE_SKIP_WINDOW_CLOSED);
+    }
+    if (params.initialNonce != account.nonce) {
+      if (!skipStale) revert E2();
+      return _skipCounter(entityId, params, DISPUTE_SKIP_DISPUTE_MOVED);
+    }
+    if (params.initialProofbodyHash != account.disputeInitialProofbodyHash) {
+      // the dispute's opening state never changes: this counter answers another one (S1: permanent, so a skip in a batch)
+      if (!skipStale) revert IDepositoryDelegateErrorAbi.E9();
+      return _skipCounter(entityId, params, DISPUTE_SKIP_DISPUTE_MOVED);
+    }
+    if (
+      params.counterProofbody.leftResponseSeconds < account.leftResponseSeconds ||
+      params.counterProofbody.rightResponseSeconds < account.rightResponseSeconds
+    ) revert IDepositoryDelegateErrorAbi.E9();
+    bool senderIsNonstarter = account.disputeStartedByLeft != (entityId < params.counterentity);
+    if (!senderIsNonstarter) revert E2();
+    if (params.counterNonce < account.nonce) {
+      if (!skipStale) revert E2();
+      return _skipCounter(entityId, params, DISPUTE_SKIP_COUNTER_NOT_NEWER);
+    }
+    if (params.counterNonce == account.nonce) {
+      // Equal nonce is not automatically stale: bilateral consensus resolves
+      // simultaneous branches by LEFT proposer priority. Only a LEFT proof may
+      // replace a RIGHT initial proof at the same nonce.
+      if (!params.proposerIsLeft || account.disputeInitialProposerIsLeft) {
+        if (!skipStale) revert E2();
+        return _skipCounter(entityId, params, DISPUTE_SKIP_COUNTER_NOT_NEWER);
+      }
+    }
+    (bool counterValid, bool counterRetired) = verifyDisputeProofHanko(
+      entityProvider,
+      acctKey,
+      account.ondeltaEpoch,
+      params.counterNonce,
+      params.proposerIsLeft,
+      bodyHash,
+      params.counterProofbody.watchSeed,
+      params.sig,
+      params.counterentity
+    );
+    if (!counterValid) revert E4();
+    uint8 counterSide = _retiredSide(counterRetired, entityId, params.counterentity);
+
+    uint256 selectedNonce = account.disputeCounterNonce;
+    if (selectedNonce != 0) {
+      if (params.counterNonce < selectedNonce) {
+        if (!skipStale) revert E2();
+        return _skipCounter(entityId, params, DISPUTE_SKIP_COUNTER_SUPERSEDED);
+      }
+      if (params.counterNonce == selectedNonce) {
+        if (params.proposerIsLeft != account.disputeCounterProposerIsLeft) {
+          if (!params.proposerIsLeft) {
+            if (!skipStale) revert E2();
+            return _skipCounter(entityId, params, DISPUTE_SKIP_COUNTER_SUPERSEDED);
+          }
+          // LEFT replaces RIGHT at equal nonce; continue to the atomic update.
+        } else if (bodyHash != account.disputeCounterProofbodyHash) {
+          // a rival body at the registered counter's nonce and side can never replace it (S1: permanent)
+          if (!skipStale) revert IDepositoryDelegateErrorAbi.E9();
+          return _skipCounter(entityId, params, DISPUTE_SKIP_COUNTER_SUPERSEDED);
+        } else {
+          // The same body again. Current-board evidence of it is strictly stronger than a retired signature of it, so
+          // a re-registration may upgrade the grade to none; it can never downgrade it.
+          if (counterSide == 0) account.disputeRetiredSide = 0;
+          if (skipStale) _skipCounter(entityId, params, DISPUTE_SKIP_COUNTER_REGISTERED);
+          return;
+        }
+      }
+    }
+    account.disputeCounterNonce = params.counterNonce;
+    account.disputeCounterProofbodyHash = bodyHash;
+    account.disputeCounterProposerIsLeft = params.proposerIsLeft;
+    // The registered counter-proof replaces the initial proof as the state that settles, so its grade replaces too.
+    account.disputeRetiredSide = counterSide;
+    account.disputeHash = _encodeDisputeHash(
+      account.nonce,
+      account.disputeStartedByLeft,
+      account.disputeInitialProposerIsLeft,
+      account.disputeTimeout,
+      account.leftResponseSeconds,
+      account.rightResponseSeconds,
+      account.disputeInitialProofbodyHash,
+      account.disputeStartTimestamp,
+      account.starterInitialArgumentsCommitment,
+      account.starterCounterArgumentsCommitment,
+      account.starterCounterProofCommitment,
+      params.counterNonce,
+      bodyHash,
+      params.proposerIsLeft
+    );
+    emit CounterDisputeRegistered(
+      entityId,
+      params.counterentity,
+      params.counterNonce,
+      params.proposerIsLeft,
+      bodyHash
+    );
+  }
+
+  function _skipCounter(bytes32 entityId, CounterDisputeProof memory params, uint8 reason) private {
+    emit DisputeOpSkipped(entityId, params.counterentity, DISPUTE_OP_COUNTER, reason, params.counterNonce);
+  }
+
+  // ========== SETTLEMENT (diffs only - debt handled by Depository) ==========
+
+  function _settleDiffs(
+    mapping(bytes32 => mapping(uint256 => uint256)) storage _reserves,
+    mapping(bytes32 => mapping(uint256 => Uint768)) storage debtOutstanding,
+    mapping(bytes => AccountInfo) storage _accounts,
+    mapping(bytes => mapping(uint256 => AccountCollateral)) storage _collaterals,
+    bytes32 initiator,
+    Settlement memory s,
+    address entityProvider
+  ) internal {
+    bytes32 leftEntity = s.leftEntity;
+    bytes32 rightEntity = s.rightEntity;
+    if (leftEntity == rightEntity || leftEntity >= rightEntity) revert E2();
+    if (initiator != leftEntity && initiator != rightEntity) revert E7();
+
+    bytes memory acct_key = _accountKey(leftEntity, rightEntity);
+    bytes32 counterparty = (initiator == leftEntity) ? rightEntity : leftEntity;
+
+    if (_accounts[acct_key].disputeHash != bytes32(0)) revert IDepositoryDelegateErrorAbi.E6();
+
+    if (s.diffs.length > MAX_SETTLEMENT_DIFFS) revert E10();
+    if (s.forgiveDebtsInTokenIds.length > MAX_SETTLEMENT_FORGIVENESS_IDS) revert E10();
+    for (uint j = 0; j < s.diffs.length; j++) {
+      for (uint k = 0; k < j; k++) {
+        if (s.diffs[j].tokenId == s.diffs[k].tokenId) revert E2();
+      }
+    }
+    for (uint j = 0; j < s.forgiveDebtsInTokenIds.length; j++) {
+      for (uint k = 0; k < j; k++) {
+        if (s.forgiveDebtsInTokenIds[j] == s.forgiveDebtsInTokenIds[k]) revert E2();
+      }
+    }
+
+    _requireStoredAccountNonce(_accounts[acct_key].nonce);
+    _requireLiveAccountNonce(s.nonce);
+    // NONCE CHECK: signedNonce > storedNonce (strictly greater)
+    if (s.nonce <= _accounts[acct_key].nonce) revert E2();
+
+    if (s.sig.length == 0) revert E4();
+    // A signed empty settlement would advance the account nonce without any
+    // token snapshot for the watcher to finalize. Reject that invisible state
+    // transition instead of manufacturing a dummy token event.
+    if (s.diffs.length == 0 && s.forgiveDebtsInTokenIds.length == 0) revert E2();
+    // Hash includes signedNonce (from settlement struct), not storedNonce
+    bytes32 hash = _cooperativeUpdateHankoHash(
+      acct_key,
+      _accounts[acct_key].ondeltaEpoch,
+      s.nonce,
+      s.diffs,
+      s.forgiveDebtsInTokenIds
+    );
+
+    // Cooperative settlement creates a fresh financial state, so only the
+    // counterparty's current board may authorize it. Historical board grace is
+    // reserved for dispute evidence below.
+    _requireCounterpartySignature(entityProvider, s.sig, hash, counterparty);
+
+    // A settlement is one signed bilateral state transition. Check every
+    // balance first so an expected state race rejects the whole settlement,
+    // never a prefix of its token diffs.
+    for (uint j = 0; j < s.diffs.length; j++) {
+      SettlementDiff memory diff = s.diffs[j];
+      uint tokenId = diff.tokenId;
+      Int768 memory conservation = WideMath.add(
+        WideMath.add(WideMath.expand(diff.leftDiff), WideMath.expand(diff.rightDiff)),
+        WideMath.expand(diff.collateralDiff)
+      );
+      if (!WideMath.equal(conservation, Int768(0, 0, 0))) revert E2();
+      // Validate the independent, signed allocation movement before any write.
+      WideMath.expand(diff.ondeltaDiff);
+      if (
+        diff.leftDiff.negative &&
+        !_canSpend(_reserves, debtOutstanding, leftEntity, tokenId, Uint512(0, diff.leftDiff.magnitude))
+      ) revert E3();
+      if (
+        diff.rightDiff.negative &&
+        !_canSpend(_reserves, debtOutstanding, rightEntity, tokenId, Uint512(0, diff.rightDiff.magnitude))
+      ) revert E3();
+      if (
+        diff.collateralDiff.negative &&
+        _collaterals[acct_key][tokenId].collateral < diff.collateralDiff.magnitude
+      ) revert E3();
+    }
+
+    // Custody helpers preserve uint256 balances and emit each reserve update.
+    // Allocation arithmetic is wider than an individual asset movement.
+    for (uint j = 0; j < s.diffs.length; j++) {
+      SettlementDiff memory diff = s.diffs[j];
+      uint tokenId = diff.tokenId;
+
+      if (diff.leftDiff.negative) {
+        _decreaseReserve(_reserves, leftEntity, tokenId, diff.leftDiff.magnitude);
+      } else if (diff.leftDiff.magnitude != 0) {
+        _increaseReserve(_reserves, leftEntity, tokenId, diff.leftDiff.magnitude);
+      }
+
+      if (diff.rightDiff.negative) {
+        _decreaseReserve(_reserves, rightEntity, tokenId, diff.rightDiff.magnitude);
+      } else if (diff.rightDiff.magnitude != 0) {
+        _increaseReserve(_reserves, rightEntity, tokenId, diff.rightDiff.magnitude);
+      }
+
+      AccountCollateral storage col = _collaterals[acct_key][tokenId];
+      if (diff.collateralDiff.negative) {
+        _decreaseCollateral(col, diff.collateralDiff.magnitude);
+      } else if (diff.collateralDiff.magnitude != 0) {
+        _increaseCollateral(col, diff.collateralDiff.magnitude);
+      }
+      col.ondelta = WideMath.addAmount(col.ondelta, diff.ondeltaDiff);
+    }
+
+    // SET nonce = signedNonce (not +1)
+    _accounts[acct_key].nonce = s.nonce;
+    _advanceOndeltaEpoch(_accounts, leftEntity, rightEntity);
+
+    // Every successful nonce transition must be observable. A pure debt
+    // forgiveness has no diffs, but it still invalidates old proofs and must
+    // therefore publish AccountSettled with snapshots for the forgiven tokens.
+    // Compute forgiveness dedup once; the emission pass must reuse it so the
+    // AccountSettled payload stays byte-identical to the previous dual-scan.
+    uint tokenCount = s.diffs.length;
+    bool[] memory alreadyIncluded = new bool[](s.forgiveDebtsInTokenIds.length);
+    for (uint i = 0; i < s.forgiveDebtsInTokenIds.length; i++) {
+      uint forgiveTokenId = s.forgiveDebtsInTokenIds[i];
+      bool included = false;
+      for (uint j = 0; j < s.diffs.length; j++) {
+        if (s.diffs[j].tokenId == forgiveTokenId) included = true;
+      }
+      for (uint j = 0; j < i; j++) {
+        if (s.forgiveDebtsInTokenIds[j] == forgiveTokenId) included = true;
+      }
+      alreadyIncluded[i] = included;
+      if (!included) tokenCount++;
+    }
+
+    TokenSettlement[] memory tokens = new TokenSettlement[](tokenCount);
+    uint tokenIndex = 0;
+    for (uint i = 0; i < s.diffs.length; i++) {
+      uint tokenId = s.diffs[i].tokenId;
+      AccountCollateral storage col = _collaterals[acct_key][tokenId];
+      tokens[tokenIndex++] = TokenSettlement({
+        tokenId: tokenId,
+        leftReserve: _reserves[leftEntity][tokenId],
+        rightReserve: _reserves[rightEntity][tokenId],
+        collateral: col.collateral,
+        ondelta: col.ondelta
+      });
+    }
+    for (uint i = 0; i < s.forgiveDebtsInTokenIds.length; i++) {
+      if (alreadyIncluded[i]) continue;
+      uint tokenId = s.forgiveDebtsInTokenIds[i];
+      AccountCollateral storage col = _collaterals[acct_key][tokenId];
+      tokens[tokenIndex++] = TokenSettlement({
+        tokenId: tokenId,
+        leftReserve: _reserves[leftEntity][tokenId],
+        rightReserve: _reserves[rightEntity][tokenId],
+        collateral: col.collateral,
+        ondelta: col.ondelta
+      });
+    }
+    AccountSettlement[] memory settled = new AccountSettlement[](1);
+    settled[0] = AccountSettlement({
+      left: leftEntity,
+      right: rightEntity,
+      tokens: tokens,
+      nonce: _accounts[acct_key].nonce
+    });
+    emit AccountSettled(settled);
+  }
+
+  function _spendableReserve(
+    mapping(bytes32 => mapping(uint256 => uint256)) storage _reserves,
+    mapping(bytes32 => mapping(uint256 => Uint768)) storage debtOutstanding,
+    bytes32 entity,
+    uint256 tokenId
+  ) private view returns (uint256) {
+    uint256 reserve = _reserves[entity][tokenId];
+    return WideMath.spendable(debtOutstanding[entity][tokenId], reserve);
+  }
+
+  // ========== DISPUTE START ==========
+
+  /// @dev R-IMPLICIT-BASELINE (Q-D-21). From the epoch after any advance (a dispute finalize, a collateral-to-reserve withdrawal or a
+  /// settlement; a deposit does not advance the epoch), the empty state of the Account is a valid dispute proof for both
+  /// sides without a signature, because every field of it is on chain: offdelta 0, no clause, and the nonce one above the stored one. A
+  /// dispute from it settles at Delta = ondelta as it stands when the dispute settles (a deposit inside the epoch moves it), and any signed
+  /// frame of the epoch outranks it through a counter. Two disputes in a row, and a deposit made after an advance, therefore always have a proof to dispute with.
+  /// Canonical means exactly: epoch >= 1 (epoch 0's first frames are its proofs); nonce = stored + 1; authored by Right, the lowest rank at
+  /// that nonce (a Left-authored signed proof of the same nonce outranks it); watchSeed 0; both windows at the floor, since no signed body
+  /// carries any policy; every offdelta 0, no clause, no starter arguments. The starter names the tokens it settles: a token left out keeps
+  /// its collateral and ondelta and is settled by a later dispute or a cooperative update, exactly as for a signed body that predates it.
+  function _requireImplicitBaseline(AccountInfo storage account, InitialDisputeProof memory params) private view {
+    ProofBody memory body = params.initialProofbody;
+    // _validateInitialDisputeProof has already held both windows to the floor, so their sum is 2 * floor only if each is the floor.
+    bool canonical = account.ondeltaEpoch != 0 && params.nonce == account.nonce + 1 && !params.proposerIsLeft
+      && body.watchSeed == bytes32(0) && uint256(body.leftResponseSeconds) + body.rightResponseSeconds == 2 * MIN_RESPONSE_SECONDS
+      && body.transformers.length == 0 && params.starterInitialArguments.length + params.starterCounterArguments.length == 0
+      && params.starterCounterProofCommitment == bytes32(0);
+    for (uint256 i = 0; canonical && i < body.offdeltas.length; i++) {
+      canonical = body.offdeltas[i].high == 0 && body.offdeltas[i].low == 0;
+    }
+    if (!canonical) revert IDepositoryDelegateErrorAbi.NotTheImplicitBaseline();
+  }
+
+  function _disputeStart(
+    mapping(bytes => AccountInfo) storage _accounts,
+    bytes32 entityId,
+    InitialDisputeProof memory params,
+    address entityProvider
+  ) internal {
+    // Validate the full signed body and every gas-bound before touching nonce
+    // or dispute storage. Reverts roll back anyway, but this ordering also
+    // keeps the mutation boundary auditable and prevents hash-only gas bombs.
+    _requireLiveAccountNonce(params.nonce);
+    _validateInitialDisputeProof(params);
+    bytes memory acct_key = _accountKey(entityId, params.counterentity);
+
+    // Intentionally no explicit self-dispute reject here.
+    // If an entity signs a dispute against itself, that is treated as a
+    // self-inflicted/degenerate workflow rather than a protocol safety issue.
+    // We keep the account-key semantics uniform and prefer not to add another
+    // branch unless self-dispute becomes a real operational problem.
+
+    _requireStoredAccountNonce(_accounts[acct_key].nonce);
+    // NONCE CHECK: signedNonce > storedNonce (strictly greater). J2: a start the Account already moved past (this very
+    // start applied, a settlement or finalize since) is skipped, not reverted. It is judged before the evidence
+    // signature on purpose: a stale start's signature is bound to an epoch or nonce the Account has left, so it would
+    // fail as a bad signature and revert the batch for a reason that is only staleness.
+    AccountInfo storage account = _accounts[acct_key];
+    uint8 skipReason = 255;
+    if (params.nonce <= account.nonce) skipReason = DISPUTE_SKIP_NONCE_NOT_ABOVE_STORED;
+    else if (account.disputeHash != bytes32(0)) skipReason = DISPUTE_SKIP_DISPUTE_ACTIVE;
+    // S1: the same for the epoch. A start signed at another ondelta epoch than the Account's fails its signature for good (epochs only
+    // grow), which would revert the batch and pin the entity's nonce; carried in the start, it is judged first and skipped.
+    // The signature below is then checked at the Account's own epoch, so a bad one is a real, bytes-only error.
+    else if (params.ondeltaEpoch != account.ondeltaEpoch) skipReason = DISPUTE_SKIP_EPOCH_MOVED;
+    if (skipReason != 255) {
+      emit DisputeOpSkipped(entityId, params.counterentity, DISPUTE_OP_START, skipReason, params.nonce);
+      return;
+    }
+
+    bool startedByLeft = entityId < params.counterentity;
+    // The proof author is consensus data, not a caller hint. The current
+    // processBatch Hanko authenticates entityId, while the inner historical
+    // Hanko binds this bit into the bilateral proof. Both must identify the
+    // same proposer or equal-nonce LEFT priority could be forged.
+
+    // R-IMPLICIT-BASELINE (Q-D-21): with no signature the start is valid only as THE implicit proof of the epoch.
+    bool implicitBaseline = params.sig.length == 0;
+    if (implicitBaseline) _requireImplicitBaseline(account, params);
+
+    bytes32 hash = _disputeProofHankoHash(
+      acct_key,
+      account.ondeltaEpoch,
+      params.nonce,
+      params.proposerIsLeft,
+      params.proofbodyHash,
+      params.initialProofbody.watchSeed
+    );
+    // The outer processBatch Hanko is current-board-only. This inner Hanko is
+    // historical bilateral evidence held by the counterparty, so the current or
+    // immediate previous board remains provable for the exact seven-day grace.
+    //
+    // This is a deliberate asymmetric trade-off, not an oversight. Both sides
+    // of it are real and neither can be removed without paying for the other:
+    //
+    //   grace on  - a quorum of an entity's *retired* board can, for seven
+    //               days, sign a proofbody against any counterparty account it
+    //               can pair with. The damage is not capped by that account's
+    //               collateral: Depository._settleShortfall drains the debtor's
+    //               reserves and books the remainder as debt. Nonce choice is
+    //               free, so a near-maximum nonce additionally denies the
+    //               victim any counter-proof, because finalization requires
+    //               finalNonce > account.nonce.
+    //
+    //   grace off - an entity repudiates every obligation it ever signed simply
+    //               by rotating its board, because all outstanding evidence
+    //               against it stops verifying at once. For a hub that is every
+    //               user it ever promised anything to, unilaterally and free.
+    //
+    // Grace stays on because the second attack is broader, cheaper, and needs
+    // no collusion: one innocent-looking rotation dumps the entire counterparty
+    // set, while the first needs a retired quorum, a funded account with the
+    // victim, and action inside the window. Seven days is kept because it is a
+    // widely understood revocation horizon and long enough for a counterparty
+    // to observe a rotation and force its state on-chain.
+    //
+    // A counterparty that does not trust an entity's retired board must force
+    // its latest state within boardChangeDelay instead of relying on this path.
+    // Do not narrow this to verifyCurrentHankoSignature without first replacing
+    // the repudiation defence it provides.
+    //
+    // H3 caps the damage of the first attack without closing the second: evidence that verifies only under a retired
+    // board is accepted, and the dispute it starts records which side's board was retired; Depository then refuses to
+    // settle a shortfall against that side from reserves (_capRetiredSide). The retired quorum can never draw on its
+    // entity's reserves or create debt for it, and the direction in which the retired entity is OWED is never clamped,
+    // so a rotation cannot be used by a debtor to forgive its own debt.
+    bool retired;
+    if (!implicitBaseline) {
+      bool valid;
+      (valid, retired) = _historicalEvidence(entityProvider, params.sig, hash, params.counterentity);
+      if (!valid) revert E4();
+    }
+
+    uint256 startTimestamp = block.timestamp;
+    uint32 leftResponseSeconds = params.initialProofbody.leftResponseSeconds;
+    uint32 rightResponseSeconds = params.initialProofbody.rightResponseSeconds;
+    uint256 timeout = startTimestamp + uint256(leftResponseSeconds) + uint256(rightResponseSeconds);
+    bytes32 initialArgumentsCommitment = _argumentCommitment(
+      params.starterInitialArguments,
+      startedByLeft,
+      startTimestamp
+    );
+    bytes32 counterArgumentsCommitment = _argumentCommitment(
+      params.starterCounterArguments,
+      startedByLeft,
+      startTimestamp
+    );
+    account.disputeHash = _encodeDisputeHash(
+      params.nonce, startedByLeft,
+      params.proposerIsLeft,
+      timeout,
+      leftResponseSeconds,
+      rightResponseSeconds,
+      params.proofbodyHash,
+      startTimestamp,
+      initialArgumentsCommitment,
+      counterArgumentsCommitment,
+      params.starterCounterProofCommitment,
+      0,
+      bytes32(0),
+      false
+    );
+    account.disputeTimeout = timeout;
+    account.disputeStartTimestamp = startTimestamp;
+    account.leftResponseSeconds = leftResponseSeconds;
+    account.rightResponseSeconds = rightResponseSeconds;
+    account.disputeInitialProofbodyHash = params.proofbodyHash;
+    account.disputeInitialProposerIsLeft = params.proposerIsLeft;
+    account.disputeCounterNonce = 0;
+    account.disputeCounterProofbodyHash = bytes32(0);
+    account.disputeCounterProposerIsLeft = false;
+    account.starterInitialArgumentsCommitment = initialArgumentsCommitment;
+    account.starterCounterArgumentsCommitment = counterArgumentsCommitment;
+    account.starterCounterProofCommitment = params.starterCounterProofCommitment;
+    account.disputeStartedByLeft = startedByLeft;
+    account.disputeRetiredSide = _retiredSide(retired, entityId, params.counterentity);
+
+    // SET nonce = signedNonce (any settlement signed at ≤ this nonce is now dead)
+    account.nonce = params.nonce;
+
+    emit DisputeStarted(
+      entityId,
+      params.counterentity,
+      params.nonce,
+      params.proposerIsLeft,
+      params.proofbodyHash,
+      params.initialProofbody.watchSeed,
+      params.starterInitialArguments,
+      params.starterCounterArguments,
+      params.starterCounterProofCommitment,
+      timeout,
+      startTimestamp,
+      leftResponseSeconds,
+      rightResponseSeconds
+    );
+  }
+
+  /**
+   * DESIGN DECISION: Dispute finalization stays in Depository.sol
+   * Reason: requires deep storage access (debt/reserve interactions)
+   */
+}

@@ -51,7 +51,7 @@ Needs Node 20+, pnpm (`corepack enable`) and npm or bun.
 
 ```sh
 cd spec
-npm install            # or: bun install    (MCP server dependencies)
+npm install            # or: bun install    (MCP server dependencies; `npm ci` in a boot script)
 npm run setup          # pnpm install + build inside arrival/ (dist/ is not committed)
 npm run check          # about 2 minutes: {:ok #t :states 3070 :transitions 12950 :goals 32}
 npm test               # about 15 minutes (4 cores, a pool of TEST_JOBS=4): each page passes; each planted bug fails with its property
@@ -179,3 +179,7 @@ step. A thread with the independent Quint spec replays them there.
 ## Questions
 
 Every open point and the reading the spec took is in `QUESTIONS.md`.
+
+Lockfiles: `package-lock.json` (npm) and `bun.lock` (bun) pin the same versions of the MCP server
+dependencies, so `npm install` gives the same tree on every boot. When you change `spec/package.json`,
+update both files.

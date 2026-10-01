@@ -1,6 +1,6 @@
 # j-layer: og vs pure/xln.ts
 
-Tests: `pure/diff/j-layer.test.ts` (17 tests). Run it from `pure/` with `bun test diff/j-layer.test.ts`. They use a seeded PRNG. Every MATCH test runs live og code from `core/` or the typechain ABI. The two PORT tests cover og functions that are module-private or that need og's runtime jurisdiction registry.
+Tests: `pure/diff/j/j-layer.test.ts` (17 tests). Run it from `pure/` with `bun test diff/j/j-layer.test.ts`. They use a seeded PRNG. Every MATCH test runs live og code from `core/` or the typechain ABI. The two PORT tests cover og functions that are module-private or that need og's runtime jurisdiction registry.
 
 ## Findings
 
