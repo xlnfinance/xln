@@ -31,79 +31,59 @@ const mentions = (dir: string, pattern: RegExp): boolean =>
   sourcesUnder(join(PURE, dir)).some((file) => pattern.test(readFileSync(file, "utf8")));
 
 export const GAPS = {
-  entityChainFacts: {
-    id: "entity-chain-facts", kind: "missing", layer: "Entity",
-    piece: "What the Entity learns from the chain and does about it: the deposit command, JEvent (j_epoch, j_dispute, j_dispute_over, j_op_lapsed), ChainFacts (epoch, stored nonce, windows, freeze), the co-sign freeze. Main's Entity takes open_account, set_credit and pay only, so a Runtime cannot be told that 100 USDT of collateral sits behind an Account; the harness copies deposits into the Account ledgers by hand and the Runtime payment runs on credit.",
-    supplier: "#99 (chain facts, dispute watch, deposit gate), #100 (C2R folds offdelta, co-sign freeze)",
-    landed: () => mentions("entity", /j_epoch/),
+  jDepositFacts: {
+    id: "j-deposit-facts", kind: "missing", layer: "J + Entity",
+    piece: "What the chain says about money, to the Entities: the watcher reads four events (epoch advanced, dispute started, countered, finalized) and none for a funding or a deposit, and no Account tx or JEvent sets an Account's collateral or ondelta. So a Runtime's Account holds collateral 0 after 100 USDT of collateral sits behind it, and every payment here runs on credit; the harness reads the chain and compares it with the ledger rule (pure/account/ledger deposit) instead.",
+    supplier: "transport thread: J watcher deposit and collateral events (slice 2); the cut thread: the Entity side that turns them into the Account's collateral and ondelta",
+    landed: () => mentions("entity", /j_deposit|j_collateral/) || mentions("j", /deposit_confirmed|collateral_funded/),
   },
-  jBatchBuilder: {
-    id: "j-batch-builder", kind: "scaffold", layer: "J",
-    piece: "J batch builder: JAction (deposit, reveal, counter, c2r, settle) to Batch to a signed processBatch call, with the Entity's batch nonce. The harness builds each Batch by hand from pure/chain/batch encoders and signs it itself.",
-    supplier: "J batch builder thread, branch claude/j-batch-builder-hbb9x1 (pure/j/batch/jbatch.ts: queue, seal; sealed.ts: sealBatch, processBatchCall; gas budget choice in its PR 2)",
-    landed: () => has("j/batch/jbatch.ts"),
+  jActionOps: {
+    id: "j-action-ops", kind: "scaffold", layer: "Host",
+    piece: "The Host's `chain` effect to the J batch builder: a JAction (deposit, reveal, counter, c2r, settle) becomes a JOp, is queued, sealed and sent. The harness converts the two actions this run asks for (deposit to reserve_to_collateral, reveal to reveal_secret) by hand, and queues them itself.",
+    supplier: "transport thread, Host shell: the `chain` effect handed to pure/j/batch (the J builder thread owns the queue)",
+    landed: () => has("host/chain.ts") || has("host/shell/chain.ts"),
   },
-  jEvents: {
-    id: "j-events", kind: "scaffold", layer: "J",
-    piece: "J watcher: chain logs to JEvent (j_epoch, j_dispute, j_dispute_over, j_op_lapsed) and a finalized J height for the Runtime. The harness reads _collaterals/_accounts directly and copies a deposit into both Account ledgers by hand.",
-    supplier: "transport thread: J watcher core in PR 116 (pure/j/watch.ts); the Host loop that fetches blocks is its next slice; Entity side is chain facts in #99",
-    landed: () => has("host/watch.ts") || has("j/watch.ts") || has("chain/watch.ts"),
+  jLoop: {
+    id: "j-loop", kind: "scaffold", layer: "Host",
+    piece: "The J loop: fetch blocks and logs, answer the watcher's readings by block hash (EIP-1898), hand the Runtime the J events and then the height, and move the cursor only after a committed j_height row holds the height. pure/j/watch.ts is the core; the harness runs the loop in memory against anvil, at depth 1.",
+    supplier: "transport thread: J loop in the Host shell (after the shell's file and socket pieces)",
+    landed: () => mentions("host", /eth_getLogs|getLogs/),
   },
-  signedFrames: {
-    id: "signed-frames", kind: "missing", layer: "Account",
-    piece: "Signed frames: a committed frame is named by the digest of the dispute-proof message of its state (R-FRAME-HASH-SIGNED), and both sides hold the other's signature. Main names frames by provisionalFrameHash, so no frame is signed during pay or HTLC; the harness signs the proof of the final state itself.",
-    supplier: "#97 (A4b: pure/account/proof/signing.ts, messages.ts)",
-    landed: () => has("account/proof/signing.ts"),
+  hostShell: {
+    id: "host-shell", kind: "scaffold", layer: "Host",
+    piece: "The Host's shell: a disk that keeps rows before outputs leave, a link between peers, a peer table (Q-T-4), and the keys that sign (R-LINK-AUTH). The harness keeps rows in an array, the link is a list that loses nothing, and it signs the digest of a frame head with a party's key when the chain needs the signature.",
+    supplier: "transport thread: file and socket shell in pure/host/shell/",
+    landed: () => has("host/shell"),
   },
-  proofBody: {
-    id: "proof-body", kind: "scaffold", layer: "Account",
-    piece: "Ledger to ProofBody (offdeltas, token ids, one transformer clause per open hold, J deadline to timestamp). The harness builds the body for a ledger with no open hold only.",
-    supplier: "#97 (pure/account/proof/body.ts, deadline.ts); R-DEADLINE-TIMESTAMP is open in contracts-decisions",
-    landed: () => has("account/proof/body.ts"),
+  perAccountSigning: {
+    id: "per-account-signing", kind: "missing", layer: "Runtime",
+    piece: "One SigningContext per Account (R-FRAME-SIGNATURE-NAMES-ACCOUNT): a Runtime's Setup carries ONE for every Account of every Entity it hosts. All four Runtimes here sign under the alice-hubX Account's key and epoch, so only alice-hubX frames are valid proofs for the chain; hubX-hubY and hubY-bob frames name the wrong Account.",
+    supplier: "the cut thread: per-Account context, before multi-hop",
+    landed: () => !/signing: SigningContext/.test(readFileSync(join(PURE, "runtime", "model.ts"), "utf8")),
   },
-  entityHtlcCommands: {
-    id: "entity-htlc-commands", kind: "missing", layer: "Entity",
-    piece: "The Entity commands lock, resolve, cancel and expire, with the J view and retry pacing: main's Entity takes open_account, set_credit and pay only, so no HTLC hop can go through a Runtime.",
-    supplier: "#94 (cut slice 2, bottom of the cut thread's stack)",
-    landed: () => mentions("entity", /Tagged<"lock"/),
+  ledgerRebase: {
+    id: "ledger-rebase", kind: "missing", layer: "Entity",
+    piece: "After a finalized dispute the Entity learns the new epoch (j_epoch) and that the dispute is over, but nothing rebases the Account: its ledger still says offdelta and collateral as they were, its frame counter is not reset to the new epoch's base, and the settlement fold into ondelta is not there.",
+    supplier: "the cut thread: settlement fold and epoch rebase, after multi-hop",
+    landed: () => mentions("entity", /rebased|rebaseLedger/) || mentions("account", /rebased|rebaseLedger/),
   },
   htlcRoute: {
     id: "htlc-route", kind: "scaffold", layer: "Entity",
-    piece: "HTLC forwarding: on an incoming lock, open the next hop with a shorter deadline; on a resolve, pass the secret upstream; hold duty while a signed proof carries the lock (R-SIGNED-IS-LIVE). The harness walks the route by hand, hop by hop.",
+    piece: "HTLC forwarding: on an incoming lock, open the next hop with a shorter deadline; on a resolve, pass the secret upstream; hold duty while a signed proof carries the lock (R-SIGNED-IS-LIVE). The harness decides each hop's lock and deadline and gives each resolve to the payee, hop by hop.",
     supplier: "the cut thread's multi-hop slice (the coordinator gave it that owner); hold duty is the A4b Runtime slice after #97",
     landed: () => has("runtime/htlc/route.ts") || has("entity/route.ts"),
   },
-  onChainReveal: {
-    id: "on-chain-reveal", kind: "missing", layer: "Runtime",
-    piece: "Payee's on-chain reveal when its resolve is unacked near the deadline (R-HTLC-CLOCK c), as a revealSecrets batch op. Not exercised: every resolve here is acked.",
-    supplier: "#96 (cut slice 3a: chain actions and the payee's on-chain reveal)",
-    // #96 puts the decision in pure/entity/frame.ts (revealOnChainDue, a `reveal` JAction); pure/runtime/chain.ts never exists in the stack.
-    landed: () => mentions("entity", /revealOnChainDue/),
-  },
-  swapTx: {
-    id: "swap-tx", kind: "missing", layer: "Account",
-    piece: "Swap inside an Account: AccountTx has pay, set_credit, lock, resolve, cancel, expire and nothing for swap offer, partial fill or cancel; the clause shape the ledger keeps for an open offer does not exist, so no proof body can carry a swap clause (R-SWAP-CLAUSE-WITH-FILL).",
-    supplier: "#111 (kernel thread swap step, on top of #97); spec: plan/swap-onchain.md",
-    // The word "swap" is already in pure/account/proof/body.ts (`swaps: []`) at #97, so look for the tx itself.
-    landed: () => mentions("account", /Tagged<"(swap|offer)"/),
+  entitySwapCommands: {
+    id: "entity-swap-commands", kind: "missing", layer: "Entity",
+    piece: "Swap inside an Account through a Runtime: AccountTx has offer, fill, retract and lapse (#111, pure/account/swap), but the Entity takes no command that queues them, so no swap offer, partial fill or cancel can go through a Runtime and nothing on the Account's frames is signed for one. The proof body carries the swap clause already; the chain side is plan/swap-onchain.md.",
+    supplier: "kernel thread (swap on the Account, #111) then the cut thread (Entity commands offer, fill, retract)",
+    landed: () => mentions("entity", /Tagged<"(offer|fill|retract)"/),
   },
   disputeWithClause: {
-    id: "dispute-with-clause", kind: "missing", layer: "Account + Runtime",
-    piece: "Forced dispute with an open clause in the signed proof (HTLC pending when the counterparty goes quiet): needs the proof body with transformer clauses, the J-deadline-to-timestamp map and the Runtime's dispute duties.",
-    supplier: "#97 (proof body) then the A4b Runtime duties slice",
-    landed: () => has("account/proof/body.ts") && has("runtime/dispute.ts"),
-  },
-  disputeRebase: {
-    id: "dispute-rebase", kind: "missing", layer: "Entity",
-    piece: "After a dispute finalizes, the Account's ledger must be rebased from the J event (collateral paid out, epoch advanced, frames reset), and the Entity's dispute duties (counter, hold) must run. Main has no event-to-Account path; the harness only checks the chain's payout against the ledger as it stood.",
-    supplier: "#99 (chain facts, dispute watch); the counter and dispute duties move onto the committed slot when #97 merges (per the cut thread)",
-    landed: () => mentions("entity", /counterFor/),
-  },
-  hostTransport: {
-    id: "host-transport", kind: "missing", layer: "Host",
-    piece: "Transport and durability: peers find each other (peer table, Q-T-4), messages travel between Runtimes, the WAL is written before outputs leave. The harness hands messages across in memory.",
-    supplier: "transport thread: Host core in PR 118 (pure/host/host.ts); file and socket shell later in pure/host/shell/",
-    landed: () => has("host/host.ts"),
+    id: "dispute-with-clause", kind: "missing", layer: "Runtime",
+    piece: "Forced dispute with an open clause in the signed proof (HTLC pending when the counterparty goes quiet): the proof body carries one transformer clause per open hold (pure/account/proof/body.ts), but no Runtime duty starts the dispute or holds a lock a signed proof carries (R-SIGNED-IS-LIVE).",
+    supplier: "the A4b Runtime duties slice after #97 (pure/runtime/dispute.ts)",
+    landed: () => has("runtime/dispute.ts"),
   },
   hubMatching: {
     id: "hub-matching", kind: "missing", layer: "Hub",

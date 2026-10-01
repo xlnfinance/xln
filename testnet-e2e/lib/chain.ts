@@ -1,14 +1,18 @@
-// The J side of the run, as a stand-in (gaps `j-batch-builder`, `j-events`): parties with anvil-dev style keys, signed
-// batches sent to the deployed Depository, and reads of what the chain holds. Everything that is bytes comes from the
-// rewrite on main (pure/chain: Batch, the batch and dispute-proof payloads, the lazy Hanko, signatures); this file only
-// decides which Batch to build and sends it.
+// The J side of the run: parties with anvil-dev style keys, batches built and sealed by the rewrite's J builder
+// (pure/j/batch: queue, seal), the Host's part of sealing (simulate at the head, R-SIMULATE) done on the fork, signed
+// with a lazy Hanko and sent to the deployed Depository, and reads of what the chain holds. Everything that is bytes
+// comes from the rewrite (pure/chain: Batch, the payloads, the lazy Hanko, signatures); this file only decides which
+// ops to queue and sends what the builder sealed. The reads of the chain's state stay a stand-in (gap `j-deposit-facts`).
 import { ethers } from "ethers";
 import { Depository__factory, ERC20Mock__factory } from "../../contracts/typechain-types/index.ts";
 import type { deployedManifest } from "../../contracts/deploy/manifest.ts";
-import { emptyBatch, encodeBatch, type Batch } from "../../pure/chain/batch/batch.ts";
 import { lazyEntityId, lazyHanko } from "../../pure/chain/hanko/hanko.ts";
 import { deployment, accountKey, type Deployment } from "../../pure/chain/proof/deployment.ts";
-import { batchHash } from "../../pure/chain/proof/payload.ts";
+import { openJBatch, queue, seal, type SealContext } from "../../pure/j/batch/jbatch.ts";
+import { processBatchCall, type SealedBatch } from "../../pure/j/batch/sealed.ts";
+import { requirement } from "../../pure/j/gas/gas.ts";
+import type { Gas, Simulation } from "../../pure/j/gas/simulate.ts";
+import type { JOp } from "../../pure/j/op/ops.ts";
 import { signDigest } from "../../pure/kernel/crypto/signature.ts";
 import { bytesToHex, hexToBytes } from "../../pure/kernel/encoding/bytes.ts";
 import type { Result } from "../../pure/kernel/core/result.ts";
@@ -46,8 +50,8 @@ export const accountKeyOf = (a: Party, b: Party): string => must(accountKey(a.id
 /** Left is the smaller id, as in the contract's account key. */
 export const leftOf = (a: Party, b: Party): Party => (BigInt(a.id) < BigInt(b.id) ? a : b);
 
-const GAS_BUDGET = 3_000_000n;
-const TX_GAS_LIMIT = 8_000_000n;
+/** The chain's transaction gas cap (EIP-7825) and the outer Hanko check an entity's lazy board costs: the harness's choice. */
+const GAS: Gas = { txGasCap: 16_777_216n, prelude: 200_000n };
 const REFUSAL_EVENTS = ["BatchFailed", "BatchGasStarved", "DisputeOpSkipped"];
 
 export type Chain = Readonly<{
@@ -77,23 +81,66 @@ export const unit = (chain: Chain): bigint => 10n ** BigInt(chain.manifest.token
 
 export type Sent = Readonly<{ events: readonly string[]; gasUsed: bigint; nonce: bigint }>;
 
-/** One Batch of `party`, built from pure/chain, signed with a lazy Hanko, sent by the party's own wallet. A batch
- * that does not fully apply (BatchFailed, a gas shortfall, a skipped dispute op) is an error, as in contracts/deploy/smoke.ts. */
-export const sendBatch = async (chain: Chain, party: Party, patch: Partial<Batch>, label: string): Promise<Sent> => {
-  const encoded = must(encodeBatch({ ...emptyBatch(GAS_BUDGET), ...patch }), `${label}: encode`);
-  const nonce = (await chain.depository.entityNonces(party.id)) + 1n;
-  const digest = must(batchHash(chain.dep, party.id, encoded, nonce), `${label}: batch hash`);
-  const hanko = hankoOf(party, digest);
-  const tx = await chain.depository.connect(party.wallet).processBatch(party.id, encoded, hanko, nonce, { gasLimit: TX_GAS_LIMIT });
-  const receipt = await tx.wait();
-  if (receipt === null || receipt.status !== 1) throw new Error(`${label}: the transaction reverted`);
-  const events = receipt.logs
+const eventsOf = (chain: Chain, receipt: ethers.TransactionReceipt): readonly string[] =>
+  receipt.logs
     .filter((log) => log.address.toLowerCase() === chain.manifest.contracts.depository.address.toLowerCase())
     .map((log) => chain.depository.interface.parseLog(log)?.name ?? "?");
+
+/** The Host's answer to "simulate this sealed batch at the head" (R-SIMULATE): run it on the fork at the cap, read the gas, undo it. */
+const simulate = async (chain: Chain, party: Party, candidate: SealedBatch): Promise<Simulation> => {
+  const call = processBatchCall(candidate, hankoOf(party, candidate.digest));
+  const snapshot = await chain.provider.send("evm_snapshot", []);
+  try {
+    const tx = await chain.depository.connect(party.wallet).processBatch(call.entityId, call.encodedBatch, call.hankoData, call.nonce, { gasLimit: GAS.txGasCap });
+    const receipt = await tx.wait();
+    const events = receipt === null ? ["no receipt"] : eventsOf(chain, receipt);
+    const refused = events.filter((e) => REFUSAL_EVENTS.includes(e));
+    if (receipt === null || receipt.status !== 1 || refused.length > 0) {
+      return { digest: candidate.digest, outcome: { _tag: "reverts", reason: refused.join(", ") || "the transaction reverted" } };
+    }
+    // The whole transaction's gas is an upper bound of the self-call's: the budget is sized a little high, never low.
+    return { digest: candidate.digest, outcome: { _tag: "ok", applyGas: receipt.gasUsed } };
+  } catch (e) {
+    return { digest: candidate.digest, outcome: { _tag: "reverts", reason: e instanceof Error ? e.message.slice(0, 120) : String(e) } };
+  } finally {
+    await chain.provider.send("evm_revert", [snapshot]);
+  }
+};
+
+/**
+ * The ops of `party`, through the rewrite's J builder: queued, sealed at the next nonce (the Host simulates what the
+ * builder asks it to, on the fork), signed with a lazy Hanko, sent by the party's own wallet. A batch that does not fully
+ * apply (BatchFailed, a gas shortfall, a skipped dispute op) is an error, as in contracts/deploy/smoke.ts.
+ */
+export const sendOps = async (chain: Chain, party: Party, ops: readonly JOp[], label: string): Promise<Sent> => {
+  const stored = await chain.depository.entityNonces(party.id);
+  const queued = ops.reduce((j, op) => {
+    const out = queue(j, op);
+    if (out._tag !== "queued") throw new Error(`${label}: the J builder did not queue ${op._tag}: ${JSON.stringify(out, (_, v) => (typeof v === "bigint" ? v.toString() : v))}`);
+    return out.jbatch;
+  }, openJBatch(party.id, stored));
+  // The Entity's holdings for the funded check: reserve of the one token; the harness holds no debts.
+  const treasury = new Map([[chain.tokenId, { reserve: await reserveOf(chain, party), debt: 0n }]]);
+  const sealed = async (answers: readonly Simulation[]): Promise<SealedBatch> => {
+    const ctx: SealContext = { deployment: chain.dep, treasury, gas: GAS, answers };
+    const out = seal(queued, ctx);
+    switch (out._tag) {
+      case "sealed": return out.batch;
+      case "simulate": return sealed([...answers, await simulate(chain, party, out.candidate)]);
+      default: throw new Error(`${label}: the J builder answered ${out._tag} ${JSON.stringify(out, (_, v) => (typeof v === "bigint" ? v.toString() : v))}`);
+    }
+  };
+  const batch = await sealed([]);
+  const call = processBatchCall(batch, hankoOf(party, batch.digest));
+  const need = requirement(GAS.prelude, batch.gasBudget);
+  const tx = await chain.depository.connect(party.wallet).processBatch(call.entityId, call.encodedBatch, call.hankoData, call.nonce, { gasLimit: need < GAS.txGasCap ? need + 100_000n : GAS.txGasCap });
+  const receipt = await tx.wait();
+  if (receipt === null || receipt.status !== 1) throw new Error(`${label}: the transaction reverted`);
+  const events = eventsOf(chain, receipt);
   const refused = events.filter((e) => REFUSAL_EVENTS.includes(e));
   if (refused.length > 0) throw new Error(`${label}: the Depository answered ${refused.join(", ")} (events: ${events.join(", ")})`);
   if (!events.includes("HankoBatchProcessed")) throw new Error(`${label}: no HankoBatchProcessed (events: ${events.join(", ")})`);
-  return { events, gasUsed: receipt.gasUsed, nonce };
+  return { events, gasUsed: receipt.gasUsed, nonce: batch.nonce };
 };
 
 export const reserveOf = (chain: Chain, p: Party): Promise<bigint> => chain.depository._reserves(p.id, chain.tokenId);
