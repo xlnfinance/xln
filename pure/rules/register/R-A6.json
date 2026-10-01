@@ -1,0 +1,59 @@
+{
+ "id": "R-A6",
+ "statement": "Credit is off-chain and enforced before signing: RCPAN (-leftCredit <= delta <= collateral + rightCredit, worst case over open clauses) is checked before a party signs.",
+ "source": "lessons.md section 2",
+ "layers": {
+  "arrival": "owed: spec thread, next Arrival page (id not in a name yet)",
+  "quint": "hold",
+  "contract": "n/a: credit is off-chain and checked before signing; the chain applies the signed result (R-CONSERVE)",
+  "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
+  "ts": "hold"
+ },
+ "killers": [
+  {
+   "kind": "mutant",
+   "layer": "quint",
+   "name": "pay-ignores-capacity"
+  },
+  {
+   "kind": "mutant",
+   "layer": "quint",
+   "name": "credit-drop-unchecked"
+  },
+  {
+   "kind": "bug",
+   "layer": "arrival",
+   "name": "core-rcpan-no-floor"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-A6 a payment moves the payer's allocation and stops at the payer's room"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-A6 a hold counts against its payer's room before it pays, and lapsing gives the room back"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-A6 and R-CREDIT-REVOKE-FLOOR a credit limit cannot fall below what the other side is using"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-A6 credit holds in every state: RCPAN in the worst case over the open holds"
+  },
+  {
+   "kind": "mutant",
+   "layer": "quint",
+   "name": "room-ignores-clauses"
+  },
+  {
+   "kind": "mutant",
+   "layer": "quint",
+   "name": "spend-others-funds"
+  }
+ ]
+}

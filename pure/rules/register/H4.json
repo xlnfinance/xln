@@ -1,0 +1,19 @@
+{
+ "id": "H4",
+ "statement": "A deposit during an open dispute is accepted and raises only the depositor's side.",
+ "source": "contracts-decisions.md H4 (accepted as is)",
+ "layers": {
+  "arrival": "owed: spec thread (an Arrival page for a deposit during a dispute)",
+  "quint": "owed: spec thread (a Quint model for a deposit during a dispute)",
+  "contract": "hold",
+  "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
+  "ts": "n/a: an on-chain acceptance rule; xln.ts reads the resulting reserve event (R-J1)"
+ },
+ "killers": [
+  {
+   "kind": "test",
+   "layer": "contract",
+   "name": "H4 a deposit during a dispute raises only the depositor's side"
+  }
+ ]
+}

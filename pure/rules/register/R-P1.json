@@ -1,0 +1,25 @@
+{
+ "id": "R-P1",
+ "statement": "A hub whose onward HTLC is refused fails the incoming lock back at once (outcome error, forward_failed:<reason>).",
+ "source": "lessons.md section 6",
+ "layers": {
+  "arrival": "owed: spec thread, next Arrival page (id not in a name yet)",
+  "quint": "hold",
+  "contract": "n/a: forwarding and failing back an HTLC is hub behaviour, off-chain",
+  "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
+  "ts": "owed: the cut (Entity and Runtime)"
+ },
+ "killers": [
+  {
+   "kind": "test",
+   "layer": "arrival",
+   "name": "to be named",
+   "owed": "thread 'Account spec comparison'"
+  },
+  {
+   "kind": "mutant",
+   "layer": "quint",
+   "name": "no-failback-when-tight"
+  }
+ ]
+}

@@ -1,0 +1,24 @@
+{
+ "id": "R-BOOK-NO-SELF-TRADE",
+ "statement": "An order never trades with an offer of its own owner: the sweep stops at it and the rest is dropped; an all-or-nothing order that would is refused.",
+ "source": "Hub matching engine thread, coordinator brief 10-01 02:56 (Arthur: the matching engine is a parallel job; the swap clause stays the Account's)",
+ "layers": {
+  "arrival": "n/a: a hub-local matching engine: no peer sees the book, only the swap clauses it produces (R-SWAP-ONCHAIN)",
+  "quint": "n/a: a hub-local matching engine: no peer sees the book, only the swap clauses it produces (R-SWAP-ONCHAIN)",
+  "contract": "n/a: an off-chain hub engine; the chain sees only the signed swap clause (R-SWAP-ONCHAIN)",
+  "rig": "owed: matching engine thread (when the engine is wired into money state)",
+  "ts": "hold"
+ },
+ "killers": [
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-BOOK-NO-SELF-TRADE a taker never trades with its own offer: it stops there and the rest is dropped"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-BOOK-NO-SELF-TRADE an all-or-nothing order that would meet itself is refused"
+  }
+ ]
+}

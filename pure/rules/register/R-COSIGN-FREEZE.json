@@ -1,0 +1,20 @@
+{
+ "id": "R-COSIGN-FREEZE",
+ "statement": "Once the node co-signs a settlement or collateral-to-reserve it proposes no new frames on that Account until the operation lands on chain or is superseded: the signature commits to the epoch and the nonce, not to the off-chain height, so frames signed after it would be lost when it lands.",
+ "source": "coordinator 10-01 04:54 (answer to pr-41-review Round 3 item 4.2)",
+ "layers": {
+  "arrival": "owed: spec thread, next Arrival page",
+  "quint": "owed: spec thread, new Quint branch",
+  "contract": "n/a: the freeze is the node's off-chain duty after it signs; the contract only sees the landed batch",
+  "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
+  "ts": "owed: the cut (Entity and Runtime)"
+ },
+ "killers": [
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "a Runtime test: after co-signing a settlement the Account proposes nothing until the settlement lands",
+   "owed": "Entity/Runtime cut slice 3"
+  }
+ ]
+}

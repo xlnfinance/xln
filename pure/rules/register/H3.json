@@ -1,0 +1,29 @@
+{
+ "id": "H3",
+ "statement": "A retired board keeps 7 days of dispute evidence, clamped one way only: what the retired side would pay from reserves is removed, what it is owed is paid as signed. The Arrival cell holds the one-way clamp only (spec/dispute/dispute.scm, bugs h3-no-clamp and h3-symmetric); the 7-day evidence window is on no spec page.",
+ "source": "contracts-decisions.md H3",
+ "layers": {
+  "arrival": "hold",
+  "quint": "owed: spec thread, new Quint branch (id not in a name yet)",
+  "contract": "hold",
+  "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
+  "ts": "n/a: an on-chain payout rule; xln.ts reads its outcome as J-events (R-J1)"
+ },
+ "killers": [
+  {
+   "kind": "test",
+   "layer": "contract",
+   "name": "H3 a retired board cannot be made to pay from reserves, and is never denied what it is owed"
+  },
+  {
+   "kind": "bug",
+   "layer": "arrival",
+   "name": "h3-no-clamp"
+  },
+  {
+   "kind": "bug",
+   "layer": "arrival",
+   "name": "h3-symmetric"
+  }
+ ]
+}

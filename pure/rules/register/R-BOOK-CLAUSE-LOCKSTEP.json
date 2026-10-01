@@ -1,0 +1,34 @@
+{
+ "id": "R-BOOK-CLAUSE-LOCKSTEP",
+ "statement": "Every party that trades gets one execution: its Account moves by what it gave and got, and its swap clause is rebuilt from the lots still open at the offer's own price (or dropped when filled or withdrawn), never subtracted.",
+ "source": "Hub matching engine thread, coordinator brief 10-01 02:56 (Arthur: the matching engine is a parallel job; the swap clause stays the Account's)",
+ "layers": {
+  "arrival": "owed: spec thread (the swap step: R-SWAP-CLAUSE-WITH-FILL)",
+  "quint": "owed: spec thread (the swap step: R-SWAP-CLAUSE-WITH-FILL)",
+  "contract": "n/a: an off-chain hub engine; the chain sees only the signed swap clause (R-SWAP-ONCHAIN)",
+  "rig": "owed: matching engine thread (when the engine is wired into money state)",
+  "ts": "hold"
+ },
+ "killers": [
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-BOOK-CLAUSE-LOCKSTEP a partial fill re-signs the clause of the lots left, and a full fill drops it"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-BOOK-CLAUSE-LOCKSTEP a taker that rests keeps a clause for what is left, at its own limit price"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-BOOK-CLAUSE-LOCKSTEP a dropped remainder withdraws the clause, with its reason"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-BOOK-PRICE-TIME R-BOOK-NEVER-CROSSED R-BOOK-CLAUSE-LOCKSTEP the book matches the oracle"
+  }
+ ]
+}
