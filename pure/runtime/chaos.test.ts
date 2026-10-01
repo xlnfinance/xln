@@ -11,13 +11,14 @@
 import { describe, expect, test } from "bun:test";
 import { draw } from "../account/fixtures.ts";
 import { frameName } from "../account/frame/account.ts";
-import type { Msg } from "../account/frame/frame.ts";
+import type { FrameHash, Msg } from "../account/frame/frame.ts";
 import { ledgerOf } from "../account/state.ts";
 import type { AccountTx } from "../account/tx.ts";
 import { GOLD, entityOf } from "../entity/fixtures.ts";
 import {
   emptyEntity, type Command, type EntityId, type EntityInput, type EntityState, type JAction,
 } from "../entity/model.ts";
+import { mapSet } from "../kernel/core/collections.ts";
 import type { Result } from "../kernel/core/result.ts";
 import type { Halt, Input, Row, Runtime } from "./model.ts";
 import { apply, commit, flush, messageId, recover, startRuntime } from "./tick.ts";
@@ -134,14 +135,14 @@ const stampsOf = (w: World): readonly string[] =>
   }));
 
 /** Every frame either WAL says it sent, by content name, with its parent head: both sides' frames are in these WALs. */
-const parents = (w: World): ReadonlyMap<string, string> =>
+const parents = (w: World): ReadonlyMap<string, FrameHash> =>
   new Map(NAMES.flatMap((n) => w.hosts[n].runtime.wal.flatMap((row: Row) => row.outputs.flatMap((o) =>
     (o.msg._tag === "frame" ? [[frameName(o.msg.frame), o.msg.frame.parent] as const] : [])))));
 
 type Replica = NonNullable<ReturnType<typeof accountOf>>;
 
 /** `x` has committed one frame more than `y`: the frame `x` committed last has `y`'s head as its parent. */
-const oneAhead = (up: ReadonlyMap<string, string>, x: Replica, y: Replica): boolean =>
+const oneAhead = (up: ReadonlyMap<string, FrameHash>, x: Replica, y: Replica): boolean =>
   x.last !== undefined && up.get(x.last) === y.head;
 
 /** The committed heads (of the Hosts that are between frames) are one chain: the same head, or one frame apart. */
@@ -469,6 +470,28 @@ describe("runtime/chaos two Hosts over a link that loses, repeats and reorders, 
     expect(v.settledRuns).toBe(RUNS);
     expect(v.frames).toBeGreaterThan(RUNS * 4);
   }, BUDGET_MS);
+
+  test("R-NET planted fork: two Hosts that committed different frames are red; one frame apart is not", () => {
+    const w = primed({ ops: REAL, weather: WITHDRAWING, seed: SEED, run: 1 });
+    const alice = accountOf(w, "alice") ?? expect.unreachable("no Account");
+    const bob = accountOf(w, "bob") ?? expect.unreachable("no Account");
+    const retold = (n: Name, replica: Replica): World => {
+      const rt = w.hosts[n].runtime;
+      const entity = rt.entities.get(ID[n]) ?? expect.unreachable("no entity");
+      const accounts = mapSet(entity.accounts, ID[PEER[n]], replica);
+      const entities = mapSet(rt.entities, ID[n], { ...entity, accounts });
+      return withHost(w, n, { ...w.hosts[n], runtime: { ...rt, entities } });
+    };
+    const behind = alice.last === undefined ? undefined : parents(w).get(alice.last);
+    expect([alice.head === bob.head, alice.last !== undefined, behind !== undefined]).toEqual([true, true, true]);
+    expect(oneChain(w)).toEqual([]);
+    if (behind === undefined) return expect.unreachable("Alice committed no frame");
+    expect(oneChain(retold("bob", { ...bob, head: behind, last: undefined }))).toEqual([]);
+    // Bob's head is a frame no WAL ever sent: neither side is one frame ahead of the other
+    const unsent = frameName({ author: "left", parent: alice.head, attempt: 7, slot: 2, txs: [] });
+    expect(oneChain(retold("bob", { ...bob, head: unsent, last: unsent })))
+      .toEqual(["the two sides committed different frames"]);
+  });
 
   test("R-DURABLE planted bug: a flush that lets a staged frame's outputs leave is a leak", () => {
     const leaking: Ops = { ...REAL, flush: (rt) => {

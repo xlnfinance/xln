@@ -6,7 +6,7 @@ import { mapSet } from "../kernel/core/collections.ts";
 import { emptyLedger, MAX_HOLDS } from "./ledger.ts";
 import type { AccountFault, AccountState, Hold, Ledger, TokenId } from "./model.ts";
 
-export const emptyAccount: AccountState = { ledgers: new Map(), offers: [] };
+export const emptyAccount: AccountState = { ledgers: new Map(), quotes: [], offers: [] };
 
 export const ledgerOf = (s: AccountState, token: TokenId): Ledger => s.ledgers.get(token) ?? emptyLedger;
 
@@ -16,7 +16,7 @@ export const withLedger = (s: AccountState, token: TokenId, l: Ledger): AccountS
 /** Every open hold of the Account, whatever its token, in token order of first use. */
 export const openHolds = (s: AccountState): readonly Hold[] => [...s.ledgers.values()].flatMap((l) => l.holds);
 
-/** Every open clause of the Account: its holds and its swap offers, each one clause of a proof body. */
+/** Every open clause of the Account: its holds and accepted swap offers, each a clause of a proof body. */
 export const clauseCount = (s: AccountState): number => openHolds(s).length + s.offers.length;
 
 /** The Account's clause cap, checked on a state a lock or an offer has just produced: MAX_HOLDS in all, all tokens. */
