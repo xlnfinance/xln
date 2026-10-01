@@ -120,9 +120,11 @@ const reconciled = (w: Work, peer: EntityId): Work => {
   });
 };
 
-/** The chain's collateral and ondelta for one token, kept; a token past the cap is told and dropped. */
+/** The chain's collateral and ondelta for one token, kept; one with no ledger past the cap is told and dropped. */
 const holding = (w: Work, e: Extract<JEvent, { _tag: "j_collateral" }>): Work => {
-  const kept = keepHolding(factsOf(w, e.peer), e.token, { collateral: e.collateral, ondelta: e.ondelta });
+  const ledgered = new Set(w.state.accounts.get(e.peer)?.state.ledgers.keys());
+  const amounts = { collateral: e.collateral, ondelta: e.ondelta };
+  const kept = keepHolding(factsOf(w, e.peer), e.token, amounts, ledgered);
   return kept === undefined
     ? noting(w, { _tag: "holding_dropped", peer: e.peer, token: e.token })
     : reconciled(withFacts(w, e.peer, kept), e.peer);
