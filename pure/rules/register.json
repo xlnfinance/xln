@@ -1123,6 +1123,11 @@
      "name": "test_R_SPLIT_revealBesideFailingPaymentRevertsWhole"
     },
     {
+     "kind": "test",
+     "layer": "contract",
+     "name": "test_R_SPLIT_counterBesideFailingPaymentRevertsWhole"
+    },
+    {
      "kind": "mutant",
      "layer": "quint",
      "name": "urgent-batch-carries-payments",
