@@ -80,6 +80,11 @@ export const CRYPTO = { ...verifiers, sign, verifyMember };
 // makes node-gyp-build find no binary, so the secp256k1 package falls back to its own JS build (its index.js): the
 // same API and deterministic signatures. og's crypto.ts already treats the addon as optional
 process.env["SECP256K1_PREBUILD"] = process.env["SECP256K1_PREBUILD"] ?? "/nonexistent";
+// Bun 1.3.11 segfaults the same way once enough Workers that loaded the native msgpackr-extract addon have been
+// terminated (every og Account worker imports msgpackr; SEEDX=0 of the full suite died about 600 s in, in
+// open-account.test.ts; 8 Workers importing msgpackr, terminated and respawned, die within seconds). Bun 1.3.14 and
+// 1.4.x do not. msgpackr falls back to its own JS codec with the same bytes; og reads the variable at import.
+process.env["MSGPACKR_NATIVE_ACCELERATION_DISABLED"] = process.env["MSGPACKR_NATIVE_ACCELERATION_DISABLED"] ?? "true";
 
 /**
  * og's Account worker pool for one Runtime, installed the way og installTsAccountWorkerAuthority
