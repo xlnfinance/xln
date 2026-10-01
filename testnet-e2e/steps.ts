@@ -186,12 +186,11 @@ const open: Step<World> = {
     const t = token(chain);
     const v = await view(chain);
     const legs = [[alice, hubX], [hubX, hubY], [hubY, bob]] as const;
-    // Every Account starts at the chain's baseline, so ONE SigningContext fits all of them (gap `per-account-signing`).
+    // The Runtimes sign each Account under its own key, epoch and first nonce (R-FRAME-SIGNATURE-NAMES-ACCOUNT); the
+    // harness keeps alice-hubX's context to rebuild the digest of the head that Account's chain proof names.
     const signing = await signingFor(chain, alice, hubX);
-    const starts = await Promise.all(legs.map(([a, b]) => accountOnChain(chain, a, b)));
-    if (starts.some((s) => s.epoch !== signing.ondeltaEpoch || s.nonce + 2n !== signing.firstNonce)) throw new Error("the three Accounts do not start at the same chain epoch and nonce");
     w.signing = signing;
-    const net = w.net = new Net({ clock: v.clock, view: v.view, signing }, all.map(eid));
+    const net = w.net = new Net({ clock: v.clock, view: v.view, anchor: { deployment: signing.deployment, terms: signing.terms } }, all.map(eid));
     w.loop = await JLoop.at(chain, all);
     legs.forEach(([a, b]) => { net.tell(eid(a), { _tag: "open_account", peer: eid(b) }); net.tell(eid(b), { _tag: "open_account", peer: eid(a) }); });
     net.settle();
@@ -235,7 +234,7 @@ const open: Step<World> = {
         `money held for the four entities (reserves plus collateral) is ${fmt(chain, w.held)}, equal to what they deposited`,
         "the Runtimes' ledgers hold collateral 0: nothing tells an Account about the chain's collateral, so the payments below run on credit",
       ],
-      gaps: ["jDepositFacts", "jLoop", "hostShell", "perAccountSigning"],
+      gaps: ["jDepositFacts", "jLoop", "hostShell"],
     };
   },
 };
@@ -265,7 +264,7 @@ const pay: Step<World> = {
         `alice pay 30 to hubX: one frame, both Runtimes committed head ${ra.head.slice(0, 12)} (the digest of the dispute proof of the state, slot ${ra.used}), allocation moved ${moved} for the ${ra.side} side`,
         `hubY-bob: bob's credit of 50 from the opening frame is in both ledgers (hubY may owe bob ${limit})`,
       ],
-      gaps: ["jDepositFacts", "hostShell", "perAccountSigning"],
+      gaps: ["jDepositFacts", "hostShell"],
     };
   },
 };
@@ -306,7 +305,7 @@ const htlc: Step<World> = {
       return `${payer.name} to ${payee.name}: lock deadline view+${deadlines[i]! - at}, resolved by ${payee.name}, both Runtimes at head ${rp.head.slice(0, 12)}, payer's allocation fell by ${fmt(chain, amount)}`;
     });
     quiet(net, [alice, hubX, hubY, bob], "htlc");
-    return { checks: [`hashlock ${hashlock.slice(0, 12)} on three hops through the Entities' lock and resolve commands, J view ${at}, deadlines step down toward bob`, ...checks, "hubs end flat: each received 10 on one Account and paid 10 on the next (no fee modelled)"], gaps: ["htlcRoute", "jDepositFacts", "hostShell", "perAccountSigning"] };
+    return { checks: [`hashlock ${hashlock.slice(0, 12)} on three hops through the Entities' lock and resolve commands, J view ${at}, deadlines step down toward bob`, ...checks, "hubs end flat: each received 10 on one Account and paid 10 on the next (no fee modelled)"], gaps: ["htlcRoute", "jDepositFacts", "hostShell"] };
   },
 };
 
@@ -357,7 +356,7 @@ const reveal: Step<World> = {
         `bob's reveal_secret batch (nonce ${sent.nonce}, gas ${sent.gasUsed}) emits SecretRevealed; the transformer holds the secret's hash from block time ${at}`,
         "after the resend timer hubY acks the resolve: the Account is at one head with no open clause",
       ],
-      gaps: ["hostShell", "perAccountSigning"],
+      gaps: ["hostShell"],
     };
   },
 };
@@ -526,7 +525,7 @@ const nodes: Step<World> = {
         `the ${resent} committed outputs it re-sent were dropped by the peers as copies they already hold (${copies.length} refused_not_next notices, no other), and the link went quiet`,
         `bob then extended hubY 60 of credit over the link: one frame, both at head ${rb.head.slice(0, 12)}`,
       ],
-      gaps: ["hostShell", "perAccountSigning"],
+      gaps: ["hostShell"],
     };
   },
 };

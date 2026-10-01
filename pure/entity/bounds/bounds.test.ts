@@ -4,12 +4,12 @@
 // counter asked ahead of a reveal.
 import { describe, expect, test } from "bun:test";
 import { emptyReplica } from "../../account/frame/account.ts";
-import { holdOf, secretOf, signing, viewOf } from "../../account/fixtures.ts";
+import { holdOf, secretOf, viewOf } from "../../account/fixtures.ts";
 import { emptyLedger, MAX_AMOUNT } from "../../account/ledger.ts";
 import { holdId } from "../../account/model.ts";
 import { emptyAccount, withLedger } from "../../account/state.ts";
 import { withWindows, freshChain } from "../chain.ts";
-import { entityOf, GOLD, judge } from "../fixtures.ts";
+import { anchor, entityOf, GOLD, judge } from "../fixtures.ts";
 import { entityFrame } from "../frame.ts";
 import { emptyEntity, type ChainFacts, type EntityInput, type EntityState } from "../model.ts";
 
@@ -19,7 +19,7 @@ const BOB = entityOf(2);
 const UINT32 = 2n ** 32n - 1n;
 
 const run = (state: EntityState, view: bigint, ...inputs: readonly EntityInput[]) =>
-  entityFrame({ ...judge, view: viewOf(view) }, signing, state, inputs);
+  entityFrame({ ...judge, view: viewOf(view) }, anchor, state, inputs);
 
 describe("entity/bounds the windows and amounts an Entity tells the chain are whole numbers that fit", () => {
   test("R-WINDOWS-NEVER-SHORTEN the largest window a uint32 holds is taken, one second more is not", () => {

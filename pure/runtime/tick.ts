@@ -22,7 +22,7 @@ export const startRuntime = (setup: Setup, entities: readonly EntityState[]): Ru
 const later = (a: Timestamp, b: Timestamp): Timestamp => (a > b ? a : b);
 
 const frameOf = (rt: Runtime, entity: EntityState, inputs: readonly EntityInput[]): Frame =>
-  entityFrame({ clock: rt.setup.clock, view: rt.view }, rt.setup.signing, entity, inputs);
+  entityFrame({ clock: rt.setup.clock, view: rt.view }, rt.setup.anchor, entity, inputs);
 
 /** The frame an input makes on the Runtime as it stands: the entities' next states and the row that records it. */
 const stageEntity = (rt: Runtime, stamp: Timestamp, input: EntityBatch): Runtime => {

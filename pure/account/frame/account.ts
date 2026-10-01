@@ -45,7 +45,8 @@ const txItem = (tx: AccountTx): Rlp =>
 /** What a frame says, not what it signs: a refusal and a repeat name a frame by it (R-FRAME-REFUSAL, R-REACK). */
 export const frameName = (f: Frame<AccountTx>): FrameHash =>
   bytesToHex(keccak256(rlp([
-    utf8(f.author), utf8(f.parent), text(BigInt(f.attempt)), text(BigInt(f.slot)), f.txs.map(txItem),
+    utf8(f.author), utf8(f.parent), text(BigInt(f.attempt)), text(BigInt(f.slot)), text(f.epoch), text(f.firstNonce),
+    f.txs.map(txItem),
   ]))) as FrameHash;
 
 /** A lock this side signed and the peer may still hold live: the proof it is in is signed and unsuperseded. */
@@ -80,6 +81,8 @@ const signable = (signing: SigningContext, after: AccountState): Result<AccountS
  * terms its frames are signed is in `signing`. A frame's head is its signed digest (R-FRAME-HASH-SIGNED).
  */
 export const accountRules = (judge: Judge, signing: SigningContext): AccountRules => ({
+  epoch: signing.ondeltaEpoch,
+  firstNonce: signing.firstNonce,
   apply: (s, author, tx) => flatMap(applyTx(s, judge, author, tx), (after) => signable(signing, after)),
   name: frameName,
   seal: (f, after) =>
