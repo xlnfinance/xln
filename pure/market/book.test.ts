@@ -32,7 +32,7 @@ describe("market/book price-time priority", () => {
     expect(idsOf(buyers.buys)).toEqual(["y", "x", "z"]);
     const placed = must(place(buyers, orderOf(ask("t", "dan", 9n, 5n))));
     expect(placed.fills.map((f) => [String(f.maker.order), f.price])).toEqual([["y", 10n], ["x", 9n]]);
-    expect(placed.remainder).toEqual({ _tag: "rested", lots: 1n });
+    expect(placed.unfilled).toEqual({ _tag: "rested", lots: 1n });
     expect(idsOf(placed.book.sells)).toEqual(["t"]);
     expect(idsOf(placed.book.buys)).toEqual(["z"]);
   });
@@ -52,7 +52,7 @@ describe("market/book lots", () => {
       price: 11n, lots: 2n, maker: { owner: owner("bob"), order: orderId("b") },
       taker: { owner: owner("dan"), order: orderId("t"), side: "buy" }, makerLotsLeft: 1n,
     }]);
-    expect(placed.remainder).toEqual({ _tag: "none" });
+    expect(placed.unfilled).toEqual({ _tag: "none" });
     expect(placed.book.sells.map((r) => [String(r.id), r.lots])).toEqual([["b", 1n], ["a", 4n], ["c", 5n]]);
   });
 
@@ -60,7 +60,7 @@ describe("market/book lots", () => {
     const placed = must(place(sellers, orderOf(bid("t", "dan", 12n, 20n))));
     const filled = placed.fills.reduce((sum, f) => sum + f.lots, 0n);
     expect(filled).toBe(12n);
-    expect(placed.remainder).toEqual({ _tag: "rested", lots: 8n });
+    expect(placed.unfilled).toEqual({ _tag: "rested", lots: 8n });
     expect(placed.book.sells).toEqual([]);
     expect(placed.book.buys.map((r) => [String(r.id), r.lots])).toEqual([["t", 8n]]);
   });
@@ -75,7 +75,7 @@ describe("market/book terms", () => {
   test("R-BOOK-NO-SILENT-DROP an immediate order drops what it cannot trade, and says why", () => {
     const placed = must(place(sellers, orderOf({ ...bid("t", "dan", 11n, 5n), terms: "immediate" })));
     expect(placed.fills.map((f) => f.lots)).toEqual([3n]);
-    expect(placed.remainder).toEqual({ _tag: "dropped", lots: 2n, why: "no_liquidity" });
+    expect(placed.unfilled).toEqual({ _tag: "dropped", lots: 2n, why: "no_liquidity" });
     expect(placed.book.buys).toEqual([]);
   });
 
@@ -83,21 +83,21 @@ describe("market/book terms", () => {
     const refused = place(sellers, orderOf({ ...bid("t", "dan", 11n, 5n), terms: "all_or_nothing" }));
     expect(refused).toEqual(err({ _tag: "not_fillable", lots: 5n, fillable: 3n }));
     const whole = must(place(sellers, orderOf({ ...bid("t", "dan", 11n, 3n), terms: "all_or_nothing" })));
-    expect(whole.remainder).toEqual({ _tag: "none" });
+    expect(whole.unfilled).toEqual({ _tag: "none" });
   });
 
   test("R-BOOK-NO-SELF-TRADE a taker never trades with its own offer: it stops there and the rest is dropped", () => {
     const book = placeAll(newBook(), [ask("b", "bob", 10n, 2n), ask("a", "ann", 11n, 2n), ask("c", "cat", 12n, 2n)]);
     const placed = must(place(book, orderOf({ ...bid("t", "ann", 12n, 6n), terms: "rest" })));
     expect(placed.fills.map((f) => [f.maker.owner, f.maker.order])).toEqual([[owner("bob"), orderId("b")]]);
-    expect(placed.remainder).toEqual({ _tag: "dropped", lots: 4n, why: "own_order" });
+    expect(placed.unfilled).toEqual({ _tag: "dropped", lots: 4n, why: "own_order" });
     expect(idsOf(placed.book.sells)).toEqual(["a", "c"]);
     expect(placed.book.buys).toEqual([]);
     const sweptLast = executions(MARKET, orderOf({ ...bid("t", "ann", 12n, 6n), terms: "rest" }), placed).at(-1);
-    expect(sweptLast?.remaining).toEqual({ _tag: "withdrawn", why: "own_order" });
+    expect(sweptLast?.after).toEqual({ _tag: "withdrawn", why: "own_order" });
     const first = must(place(book, orderOf(bid("u", "bob", 12n, 1n))));
     expect(first.fills).toEqual([]);
-    expect(first.remainder).toEqual({ _tag: "dropped", lots: 1n, why: "own_order" });
+    expect(first.unfilled).toEqual({ _tag: "dropped", lots: 1n, why: "own_order" });
   });
 
   test("R-BOOK-NO-SELF-TRADE an all-or-nothing order that would meet itself is refused", () => {
@@ -180,10 +180,10 @@ describe("market/settlement", () => {
     const [maker, taker] = exec(sellers, bid("t", "dan", 12n, 2n));
     expect(maker).toEqual({
       owner: owner("bob"), order: orderId("b"), gives: base(2000n), gets: quote(22n),
-      remaining: { _tag: "open", clause: { gives: base(1000n), wants: quote(11n) } },
+      after: { _tag: "open", clause: { gives: base(1000n), wants: quote(11n) } },
     });
     expect(taker).toEqual({
-      owner: owner("dan"), order: orderId("t"), gives: quote(22n), gets: base(2000n), remaining: { _tag: "filled" },
+      owner: owner("dan"), order: orderId("t"), gives: quote(22n), gets: base(2000n), after: { _tag: "filled" },
     });
   });
 
@@ -198,24 +198,24 @@ describe("market/settlement", () => {
   test("R-BOOK-CLAUSE-LOCKSTEP a partial fill re-signs the clause of the lots left, and a full fill drops it", () => {
     const [partial] = exec(sellers, bid("t", "dan", 12n, 1n));
     const left = clauseOf(MARKET, { side: "sell", price: 11n, lots: 2n });
-    expect(partial?.remaining).toEqual({ _tag: "open", clause: left });
+    expect(partial?.after).toEqual({ _tag: "open", clause: left });
     const [whole] = exec(sellers, bid("t", "dan", 12n, 3n));
-    expect(whole?.remaining).toEqual({ _tag: "filled" });
+    expect(whole?.after).toEqual({ _tag: "filled" });
   });
 
   test("R-BOOK-CLAUSE-LOCKSTEP a taker that rests keeps a clause for what is left, at its own limit price", () => {
     const taker = exec(sellers, bid("t", "dan", 12n, 20n)).at(-1);
-    expect(taker?.remaining).toEqual({ _tag: "open", clause: clauseOf(MARKET, { side: "buy", price: 12n, lots: 8n }) });
+    expect(taker?.after).toEqual({ _tag: "open", clause: clauseOf(MARKET, { side: "buy", price: 12n, lots: 8n }) });
     expect(taker?.gives).toEqual(quote(3n * 11n + 4n * 12n + 5n * 12n));
   });
 
   test("R-BOOK-CLAUSE-LOCKSTEP a dropped remainder withdraws the clause, with its reason", () => {
     const taker = exec(sellers, { ...bid("t", "dan", 11n, 5n), terms: "immediate" }).at(-1);
-    expect(taker?.remaining).toEqual({ _tag: "withdrawn", why: "no_liquidity" });
+    expect(taker?.after).toEqual({ _tag: "withdrawn", why: "no_liquidity" });
     const none = exec(newBook(), { ...bid("t", "dan", 11n, 5n), terms: "immediate" });
     expect(none).toEqual([{
       owner: owner("dan"), order: orderId("t"), gives: quote(0n), gets: base(0n),
-      remaining: { _tag: "withdrawn", why: "no_liquidity" },
+      after: { _tag: "withdrawn", why: "no_liquidity" },
     }]);
   });
 

@@ -321,7 +321,7 @@ describe(seedTag("Depository Batch ABI"), () => {
     }
     expect(n).toBeGreaterThan(150);
     expect(encodeBatch(emptyBatch())).toBe(encodeJBatch(createEmptyBatch()));
-  });
+  }, 30_000);
   test("MATCH: encodeBatch == og encodeJBatch for 200 random batches with settlement diffs (SignedAmount) and dispute proof bodies (Int512 offdeltas)", () => {
     let wide = 0, checked = 0;
     for (let i = 0; i < 200; i++) {

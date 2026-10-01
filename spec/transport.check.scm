@@ -1,0 +1,5 @@
+;; Check the node-to-node link page.   node arrival/packages/arrival-cli/dist/cli.js run transport.check.scm   (from spec/)
+(require "lib/vocabulary.scm")
+(require "lib/check.scm")
+(require "transport/link.scm")
+(check transport)
