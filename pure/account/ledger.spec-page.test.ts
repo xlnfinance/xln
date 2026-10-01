@@ -1,22 +1,30 @@
-// The whole state space of the Arrival money page (spec/money/ledger.scm), walked again on the TypeScript ledger.
+// The whole state space of the Arrival money page (spec/money/ledger.scm at 3010ca3), walked again on the TypeScript
+// ledger.
 //
-// The page has a model with two reserves, credit up to 1 and two holds at most. Its checker found 820 states and 7094
-// transitions, and its four invariants and six step properties hold on all of them. This file rebuilds the same rules
+// The page has a model with two reserves, credit up to 1 and two holds at most, each on one of two hashlocks (one
+// open clause per hashlock, R-ONE-LOCK-PER-HASH). Its checker found 1440 states and 12918 transitions, and its five
+// invariants and six step properties hold on all of them. This file rebuilds the same rules
 // on `Ledger`, walks every state, and holds each world and each step to the same properties, written out again from
 // the formula. The page's two counts are pinned too: a rule the TypeScript takes and the page refuses, or the other
 // way round, changes a count.
 import { describe, expect, test } from "bun:test";
-import type { Result } from "../kernel/core/result.ts";
-import { deposit, emptyLedger, expire, lock, pay, resolve, setCredit, withdraw } from "./ledger.ts";
-import { holdOf as holdWith } from "./fixtures.ts";
+import { unwrapOr, type Result } from "../kernel/core/result.ts";
+import { lockClause } from "./clause/clause.ts";
+import { clockParams, type ClockParams } from "./clause/clock.ts";
+import { deposit, emptyLedger, expire, pay, resolve, setCredit, withdraw } from "./ledger.ts";
+import { hashlockOf, holdOf as holdWith, secretOf, viewOf } from "./fixtures.ts";
 import { holdId, other, type AccountFault, type HoldId, type Ledger, type Side } from "./model.ts";
 
-/** A broken guard lets the walk run away; the page's own space is 820 states, and past this the walk is a failure. */
-const WALK_LIMIT = 5_000;
+/** A broken guard lets the walk run away; the page's own space is 1440 states, and past this the walk is a failure. */
+const WALK_LIMIT = 10_000;
 const START_RESERVE = 2n;
 const MAX_CREDIT = 1n;
 const MAX_HOLDS = 2;
 const SIDES: readonly Side[] = ["left", "right"];
+/** The page's two hashlocks, as the secret numbers they are made from. */
+const HASHES: readonly number[] = [1, 2];
+/** A lock is signed at view 0 with deadline 1: the page has no clock (the clock page does). */
+const params: ClockParams = unwrapOr(clockParams(0n, 0n, 1n), () => expect.unreachable("params"));
 
 /** One token's ledger and the two reserves the chain keeps outside it. */
 type World = Readonly<{ ledger: Ledger; reserve: Readonly<Record<Side, bigint>> }>;
@@ -50,10 +58,10 @@ const rulesFor = (side: Side): readonly Rule[] => [
     verb: "credit", arg, side, enabled: (w) => arg <= MAX_CREDIT && creditFor(w.ledger, side) !== arg,
     step: (w) => setCredit(w.ledger, side, arg),
   })),
-  {
-    verb: "lock", arg: 1n, side, enabled: (w) => w.ledger.holds.length < MAX_HOLDS,
-    step: (w) => lock(w.ledger, holdWith(side, 1n, freeSlot(w))),
-  },
+  ...HASHES.map((h): Rule => ({
+    verb: "lock", arg: BigInt(h), side, enabled: (w) => w.ledger.holds.length < MAX_HOLDS,
+    step: (w) => lockClause(w.ledger, params, viewOf(0n), side, holdWith(side, 1n, freeSlot(w), 1n, h)),
+  })),
   ...[0, 1].flatMap((i): readonly Rule[] => [
     {
       verb: "resolve", arg: BigInt(i), side, enabled: (w) => payerAt(w, i) === side,
@@ -70,9 +78,9 @@ const rulesFor = (side: Side): readonly Rule[] => [
 
 const RULES: readonly Rule[] = SIDES.flatMap(rulesFor);
 
-/** A world as the page sees it: holds by payer and amount in order, without the slots the ledger adds. */
+/** A world as the page sees it: holds by payer, amount and hashlock in order, without the slots the ledger adds. */
 const keyOf = (w: World): string =>
-  JSON.stringify([{ ...w.ledger, holds: w.ledger.holds.map((h) => [h.payer, h.amount]) }, w.reserve],
+  JSON.stringify([{ ...w.ledger, holds: w.ledger.holds.map((h) => [h.payer, h.amount, h.hashlock]) }, w.reserve],
     (_, v) => (typeof v === "bigint" ? `${v}n` : v));
 
 /** What a rule moves between the payer's reserve and the collateral: a deposit draws the reserve down. */
@@ -116,9 +124,11 @@ const stepChecks: Readonly<Record<Verb, (t: Taken) => void>> = {
       .toEqual([payerSign(rule.side) * rule.arg, before.collateral, before.holds]),
   credit: ({ before, after }) =>
     expect([delta(after), after.collateral, after.holds]).toEqual([delta(before), before.collateral, before.holds]),
-  lock: ({ rule, before, after }) =>
+  lock: ({ rule, before, after }) => {
     expect([delta(after), after.collateral, after.holds.length, after.holds.at(-1)?.payer])
-      .toEqual([delta(before), before.collateral, before.holds.length + 1, rule.side]),
+      .toEqual([delta(before), before.collateral, before.holds.length + 1, rule.side]);
+    expect(after.holds.at(-1)?.hashlock).toBe(hashlockOf(secretOf(Number(rule.arg))));
+  },
   resolve: ({ rule, before, after }) => {
     const named = before.holds[Number(rule.arg)] ?? expect.unreachable("resolve of a missing hold");
     expect([delta(after), after.collateral, after.holds])
@@ -144,9 +154,15 @@ const refusalTag: Readonly<Record<Verb, AccountFault["_tag"]>> = {
   resolve: "no_such_hold", expire: "no_such_hold", r2c: "bad_amount", c2r: "settlement_breaks_credit",
 };
 
+/** A lock on a hashlock that is open is `lock_exists`, whatever the capacity; any other refusal is the verb's own. */
+const expectedRefusal = (a: Attempt): AccountFault["_tag"] =>
+  (a.rule.verb === "lock" && a.from.ledger.holds.some((h) => h.hashlock === hashlockOf(secretOf(Number(a.rule.arg))))
+    ? "lock_exists"
+    : refusalTag[a.rule.verb]);
+
 describe("account/ledger against the Arrival money page", () => {
-  test("the walk reaches the page's 820 states through its 7094 transitions", () => {
-    expect([walked.worlds.size, taken.length]).toEqual([820, 7094]);
+  test("the walk reaches the page's 1440 states through its 12918 transitions", () => {
+    expect([walked.worlds.size, taken.length]).toEqual([1440, 12918]);
   });
 
   test("R-A6 credit holds in every state: RCPAN in the worst case over the open holds", () => {
@@ -176,8 +192,16 @@ describe("account/ledger against the Arrival money page", () => {
   });
 
   test("every refused attempt names the rule that refuses it", () => {
-    const refused = walked.attempts.flatMap((a) => (a.outcome.ok ? [] : [{ rule: a.rule, fault: a.outcome.error }]));
+    const refused = walked.attempts.filter((a) => !a.outcome.ok);
     expect(refused.length).toBeGreaterThan(0);
-    refused.forEach((r) => expect(r.fault._tag).toBe(refusalTag[r.rule.verb]));
+    refused.forEach((a) => expect(a.outcome.ok ? undefined : a.outcome.error._tag).toBe(expectedRefusal(a)));
+  });
+
+  test("R-ONE-LOCK-PER-HASH at most one open clause per hashlock in every state, and a second lock is refused", () => {
+    [...walked.worlds.values()].forEach(({ ledger: l }) =>
+      expect(new Set(l.holds.map((h) => h.hashlock)).size).toBe(l.holds.length));
+    const duplicates = walked.attempts.filter((a) => expectedRefusal(a) === "lock_exists");
+    expect(duplicates.length).toBeGreaterThan(0);
+    duplicates.forEach((a) => expect(a.outcome.ok).toBe(false));
   });
 });

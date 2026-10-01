@@ -1280,14 +1280,14 @@
   },
   {
    "id": "R-HTLC-CLOCK",
-   "statement": "Every HTLC time judgment is made in J height: a lock is live through its deadline height; an expiry needs own view > deadline + reserve (reserve >= LAG); a payee with an unacked resolve reveals on chain at deadline - LAG.",
+   "statement": "Every HTLC time judgment is made in J height: a lock is live through its deadline height; an expiry needs own view > deadline + reserve (reserve >= LAG >= 0); a payee with an unacked resolve reveals on chain at deadline - LAG. Part (c) is the payee's Runtime duty plus a J-layer fact: clause.ts has no input that says the payee knows the secret or has revealed, so the ts cell holds (a) and (b) and (c) is owed to the Runtime cut.",
    "source": "contracts-decisions.md, Account-layer decisions 09-30 D-AC-2, D-AC-3",
    "layers": {
     "arrival": "owed: #41 (id not in a name yet)",
     "quint": "owed: #44 (id not in a name yet)",
     "contract": "-",
     "rig": "-",
-    "ts": "-"
+    "ts": "hold"
    },
    "killers": [
     {
@@ -1349,6 +1349,72 @@
      "layer": "quint",
      "name": "receiver-judges-by-the-frame-stamp",
      "owed": "#44"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-HTLC-CLOCK the reserve is at least the lag, and the horizon is positive"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-HTLC-CLOCK a clause is live through its deadline, expirable strictly past deadline plus reserve"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-HTLC-CLOCK and R-DRIFT views within the lag never see a clause both live and expirable"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-HTLC-CLOCK a payee reveals on chain once its view reaches the deadline minus the lag"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-HTLC-CLOCK a clause is live through its deadline height and refused one height later"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-HTLC-CLOCK an expiry needs the view strictly past the deadline plus the reserve"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-HTLC-CLOCK b an expiry commits only when both parties' views are strictly past the deadline"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-HTLC-CLOCK a a resolve is refused only when the payer's own view is past the deadline"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-HTLC-CLOCK c the replay harness blocks the expiry while the payee owes the on-chain reveal"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-HTLC-CLOCK c a payee that owes the reveal has revealed before an expiry commits, in the Runtime walk",
+     "owed": "Runtime cut (R1), walk-level"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-HTLC-CLOCK a negative lag is refused, so no clause is ever live and expirable at once"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-HTLC-CLOCK the reveal is due a lag before the deadline, not a reserve before it"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-CLOCK a frame stamp is a bigint, and a view or a deadline has to be made: the types refuse the stamp"
     }
    ]
   },
@@ -1516,7 +1582,7 @@
     "quint": "owed: #44 (id not in a name yet)",
     "contract": "-",
     "rig": "-",
-    "ts": "-"
+    "ts": "hold"
    },
    "killers": [
     {
@@ -1530,6 +1596,16 @@
      "layer": "quint",
      "name": "resolve-by-payer",
      "owed": "#44"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-CANCEL only the payee resolves"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-CANCEL the payee cancels and the allocation stays; the payer cannot"
     }
    ]
   },
@@ -1568,7 +1644,7 @@
     "quint": "owed: #44 (id not in a name yet)",
     "contract": "-",
     "rig": "-",
-    "ts": "-"
+    "ts": "hold"
    },
    "killers": [
     {
@@ -1576,6 +1652,16 @@
      "layer": "quint",
      "name": "horizon-off",
      "owed": "#44"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-HORIZON-RESERVE and N2 a deadline is refused past the view plus the horizon plus the reserve"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-HORIZON-RESERVE the latest admitted deadline is the view plus the horizon plus the reserve"
     }
    ]
   },
@@ -2017,7 +2103,7 @@
   },
   {
    "id": "R-HOLD-CAP",
-   "statement": "A ledger carries at most 32 open holds and refuses the 33rd with too_many_holds; a dispute proof with more reverts (E10).",
+   "statement": "Open holds are capped at 32 and the 33rd is refused with too_many_holds; a dispute proof with more reverts (E10), and a proof body carries the transformers of every token, so the decided rule counts open holds across every token of the Account. The ts cell holds the per-token check; the Account-level count is owed by A3 (the first AccountState transition).",
    "source": "Review B of PR 73; contracts Account.sol MAX_DISPUTE_TRANSFORMERS = 32; Quint LOCK_SLOTS",
    "layers": {
     "arrival": "-",
@@ -2031,12 +2117,18 @@
      "kind": "test",
      "layer": "ts",
      "name": "R-HOLD-CAP at most 32 holds are open, matching the contract's proof bound"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-HOLD-CAP two tokens with 16 holds each: a 33rd lock in either token is refused",
+     "owed": "A3"
     }
    ]
   },
   {
    "id": "R-LOCK-EXISTS",
-   "statement": "A hold whose slot is already open is refused with lock_exists; a slot freed by resolve or expire opens again (A2 adds the same refusal for an open hashlock).",
+   "statement": "A hold whose slot is already open is refused with lock_exists; a slot freed by resolve or expire opens again (R-ONE-LOCK-PER-HASH adds the refusal for an open hashlock).",
    "source": "Review B of PR 73; Quint HtlcLock lock_exists",
    "layers": {
     "arrival": "-",
@@ -2074,6 +2166,41 @@
      "kind": "test",
      "layer": "ts",
      "name": "R-HOLD-SLOT expiring a hold removes the one it names and keeps the others in order"
+    }
+   ]
+  },
+  {
+   "id": "R-ONE-LOCK-PER-HASH",
+   "statement": "One clause is open per hashlock in an Account (the ts cell holds it per token ledger; the Account-wide count across tokens is owed by A3): a second lock on a hashlock that is already open is refused with lock_exists (naming the slot that holds it), whichever slot or side it names; the slot id stays the address of a clause, and a hashlock opens again once its clause is resolved, cancelled or expired. Multi-path payments are unaffected: each path runs over a different Account.",
+   "source": "coordinator 09-30 22:42 (A2 cross-check of Quint account_core.qnt against og xln.ts lockId == hashlock)",
+   "layers": {
+    "arrival": "owed: #41 (coordinator 09-30)",
+    "quint": "owed: #44 (coordinator 09-30)",
+    "contract": "-",
+    "rig": "-",
+    "ts": "hold"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-ONE-LOCK-PER-HASH a second lock on an open hashlock is refused, whichever slot or side it names"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-ONE-LOCK-PER-HASH a hashlock opens again once its clause is gone"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-ONE-LOCK-PER-HASH at most one open clause per hashlock in every state, and a second lock is refused"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-ONE-LOCK-PER-HASH an open hashlock is refused in every token and opens again when it is gone",
+     "owed": "A3"
     }
    ]
   },

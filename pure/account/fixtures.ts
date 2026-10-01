@@ -1,5 +1,20 @@
-// What the account tests share: the holds they lock. Only tests import this.
-import { holdId, type Hold, type Side } from "./model.ts";
+// What the account tests share: 32-byte secrets and the holds they lock. Only tests import this.
+import { keccakHex } from "../kernel/encoding/bytes.ts";
+import type { JHeight, JView } from "./clause/clock.ts";
+import { holdId, type ClauseHold, type Hold, type Side } from "./model.ts";
 
-/** A hold in slot `id`. */
-export const holdOf = (payer: Side, amount: bigint, id = 1n): Hold => ({ id: holdId(id), payer, amount });
+/** A height or a view, by a cast: tests use small numbers in range; the real constructor is tested in clock.test.ts. */
+export const heightOf = (n: bigint): JHeight => n as JHeight;
+export const viewOf = (n: bigint): JView => n as bigint as JView;
+
+/** The secret number `n`: `length` bytes, all `n`; 32 unless a test wants a malformed one. */
+export const secretOf = (n: number, length = 32): Uint8Array => Uint8Array.from({ length }, () => n);
+
+export const hashlockOf = (secret: Uint8Array): string => keccakHex(secret);
+
+/** A hold in slot `id` on secret number `n` (the slot's number unless given); the money tests do not care which. */
+export const holdOf = (payer: Side, amount: bigint, id = 1n, deadline = 100n, n = Number(id)): Hold =>
+  ({ id: holdId(id), payer, amount, hashlock: hashlockOf(secretOf(n)), deadline: heightOf(deadline) });
+
+/** The ledger's own tests open holds the clause rules have not looked at: this is their seam, only tests have it. */
+export const admitted = (hold: Hold): ClauseHold => hold as ClauseHold;
