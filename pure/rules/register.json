@@ -3483,6 +3483,26 @@
      "kind": "test",
      "layer": "ts",
      "name": "R-COSIGN-FREEZE a Host that crashes after the signature comes back frozen and asks for it again"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-COSIGN-FREEZE each operation of an Account has its own serial, counting from one"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-COSIGN-FREEZE a repeated lapse of the first operation thaws nothing while the second is out"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-COSIGN-FREEZE a report naming an operation never signed changes nothing, the right one thaws"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-COSIGN-FREEZE the serial goes on when the epoch moves: the next operation is not the first again"
     }
    ]
   },

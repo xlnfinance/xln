@@ -209,7 +209,7 @@ describe("entity/cosign R-COSIGN-FREEZE the other way: the peer's frames are ref
   });
 });
 
-describe("entity/cosign R-COSIGN-FREEZE a lapse names its operation: only the one that is out can end the freeze", () => {
+describe("entity/cosign R-COSIGN-FREEZE a lapse names its operation: only the one out ends the freeze", () => {
   const lapse = (serial: bigint): EntityInput => ({ _tag: "j_op_lapsed", peer: BOB, serial });
   const factsOf = (s: EntityState) => s.chain.get(BOB);
   const first = run(owing, withdraw(30n));
@@ -224,7 +224,7 @@ describe("entity/cosign R-COSIGN-FREEZE a lapse names its operation: only the on
     expect(second.chain.map((a) => (a._tag === "settle" ? a.serial : undefined))).toEqual([2n]);
   });
 
-  test("R-COSIGN-FREEZE the report that the first operation lapsed, repeated while the second is out, thaws nothing", () => {
+  test("R-COSIGN-FREEZE a repeated lapse of the first operation thaws nothing while the second is out", () => {
     const repeated = run(second.state, lapse(1n)).state;
     expect(factsOf(repeated)?.frozen).toBe(true);
     const heard = run(repeated, fromBob);

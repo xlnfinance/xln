@@ -60,6 +60,6 @@ export const cosignFrozen = (f: ChainFacts): ChainFacts => ({ ...f, frozen: true
 /** The serial the next operation of this Account will have. */
 export const nextSerial = (f: ChainFacts): bigint => f.cosigned + 1n;
 
-/** An operation lapsed: it ends the freeze only if it is the one that is out, so a repeated or older report is no-op. */
+/** An operation lapsed: it ends the freeze only if it is the one that is out; a repeated or older report is a no-op. */
 export const cosignLapsed = (f: ChainFacts, serial: bigint): ChainFacts =>
   (f.frozen && f.cosigned === serial ? { ...f, frozen: false } : f);
