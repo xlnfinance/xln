@@ -9,9 +9,9 @@ import type { Plant } from "../rig/frame-checks.ts";
 import { walk } from "../walk.ts";
 
 /** One seed a test, none the model walk uses: a walk run twice in one process meets its own persisted storage. */
-const SEEDS = [0x30dea, 0x30deb, 0x30dec] as const;
+const SEEDS = [0x30dea, 0x30deb, 0x30dec, 0x30ded] as const;
 /** The first frame whose Runtime each plant changes: every Account has opened by then. One is odd and two are even, so a hookup that judges only the even or only the odd frames shows. */
-const FRAME = { P2: 9, BELIEF: 8, P4: 8 } as const;
+const FRAME = { P2: 9, BELIEF: 8, P4: 8, BACK: 30 } as const;
 
 /** The same change to every replica of every Account, so the two sides of an Account never disagree with each other. */
 const onAccounts = (rt: Runtime, change: (replica: AccountReplica) => AccountReplica): Runtime => ({
@@ -55,4 +55,12 @@ test("P4 is wired into the walk, with its memory kept from frame to frame: one s
   expect(spoken(lines).length).toBeGreaterThan(0);
   expect(lines[0]).toContain(` frame ${FRAME.P4 + 1} `);
   expect(lines[0]).toContain(": P4 ");
+}, 600_000);
+
+test("P-BELIEF keeps its memory from frame to frame: an Account that goes back to an older value is red on the frame it goes back", async () => {
+  // from the frame on, every Account believes no collateral and no ondelta: the chain held something by then, and the Account had learned it
+  const lines = await walked(SEEDS[3], (rt, frame) => (frame < FRAME.BACK ? rt : onAccounts(rt, onRows((row) => ({ ...(row as object), collateral: 0n, ondelta: 0n })))));
+  expect(spoken(lines).length).toBeGreaterThan(0);
+  expect(lines[0]).toContain(` frame ${FRAME.BACK} `);
+  expect(lines[0]).toContain("P-BELIEF");
 }, 600_000);

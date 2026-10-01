@@ -5,6 +5,10 @@
 //   a lock one above the out capacity (refused);
 //   a lock whose amount fits the capacity but not what an open lock's hold leaves of it, sent in the same input as that lock (refused);
 //   a lock one above what a committed open lock's hold leaves, sent while that lock is still open (refused at the Entity, before any Account frame).
+// A lock costs its sender the amount plus the hub's fee, a share of the amount (11,200 on 200 million; the draws set under 100 ppm), which would let the
+// fee alone refuse a lock the hold is meant to refuse and test no hold. So the lock probes first pay the Account's capacity down to SMALL, where every
+// amount is under 6,666 and a fee of under 100 ppm of it rounds to nothing: the window between "what the capacity admits" and "what the hold leaves"
+// is then exactly HOLD wide.
 // It runs after the draws, so the walk's own random stream, and every pinned seed's frames, are the ones they were. A step that was not
 // refused (og's capacity moved by more than the step meant to take) counts for nothing, so a property that never saw a refusal shows as unfired (fired.ts).
 import { deriveDelta } from "../../../core/account/utils.ts";
@@ -15,7 +19,8 @@ import { HUB, SPOKES, type World } from "./world.ts";
 
 /** Quiet frames to wait for the Accounts to settle after an input. */
 const PATIENCE = 12;
-/** A hold the probe opens, and how far under the raw capacity the lock beside it sits (the hub's fee on it stays inside the gap). */
+/** The capacity the lock probes work at, a hold the probe opens on it, and how far under the raw capacity the lock beside it sits. */
+const SMALL = 5000n;
 const HOLD = 100n;
 const SLACK = 10n;
 
@@ -77,14 +82,23 @@ export const probeCapacity = async (w: World, memory: Memory): Promise<Probed> =
   const lock = async (run: Probed): Promise<Probed> => {
     if (route === undefined || run.lines.length > 0) return run;
     const [s, u] = route;
+    const down = await payDown(run, s);
+    if (down.lines.length > 0) return down;
     const cap = outCapacity(w, s, HUB);
     // the lock above the capacity, alone; then a lock the raw capacity admits beside one whose hold it does not
-    const over = await refused(w, "capacity probe", run, "P2:probeLock", s, [w.htlc(s, u, cap + 1n)], [s, HUB]);
+    const over = await refused(w, "capacity probe", down, "P2:probeLock", s, [w.htlc(s, u, cap + 1n)], [s, HUB]);
     const held = over.lines.length === 0 && free(w, s, HUB) ? outCapacity(w, s, HUB) : 0n;
     const same = held > HOLD + SLACK
       ? await refused(w, "capacity probe", over, "P2:probeHoldSame", s, [w.htlc(s, u, HOLD), w.htlc(s, u, held - SLACK)], [s, HUB], HOLD + SLACK)
       : over;
     return same.lines.length === 0 ? beside(same, s, u) : same;
+  };
+  /** Pay s's Account with the hub down to SMALL by a direct payment, which both sides accept and the lane and the properties judge. */
+  const payDown = async (run: Probed, s: number): Promise<Probed> => {
+    const cap = outCapacity(w, s, HUB);
+    return run.lines.length > 0 || cap <= SMALL
+      ? run
+      : settle(w, "capacity probe", await tickJudged(w, "capacity probe", run.memory, one(w, s, [w.direct(s, HUB, cap - SMALL)]).users));
   };
   /** A lock open and committed: one more above what its hold leaves is refused at the Entity, which reads the committed hold. */
   const beside = async (run: Probed, s: number, u: number): Promise<Probed> => {
