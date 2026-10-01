@@ -1397,6 +1397,16 @@
      "kind": "test",
      "layer": "ts",
      "name": "R-DURABLE planted bug: a recovery that forgets the last row is caught"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-DURABLE a staged row asks nothing of the chain: its actions leave once it is committed"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-DURABLE a WAL whose row lost its chain actions does not replay: the Runtime halts on it"
     }
    ]
   },
@@ -1573,6 +1583,46 @@
      "kind": "test",
      "layer": "ts",
      "name": "R-CLOCK a frame stamp is a bigint, and a view or a deadline has to be made: the types refuse the stamp"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-HTLC-CLOCK a resolve unacked with the deadline more than LAG away asks nothing"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-HTLC-CLOCK at the deadline minus LAG the payee asks for a reveal of the secret of the clause"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-HTLC-CLOCK the reveal is asked once however many heights follow, and never by the payer"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-HTLC-CLOCK a resolve the payer acks in time asks nothing, whatever the height"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-HTLC-CLOCK a Host that restarts after the reveal row was committed is asked again"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-HTLC-CLOCK a hashlock is forgotten once its hold is gone: its next clause is asked for again"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-HTLC-CLOCK a resolve still in the queue behind a pending frame of its own is watched too"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-HTLC-CLOCK a resolve that comes when the deadline is already near asks in the frame of its command"
     }
    ]
   },

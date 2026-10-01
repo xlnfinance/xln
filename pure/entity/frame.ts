@@ -5,21 +5,26 @@ import { mapSet } from "../kernel/core/collections.ts";
 import { accountRules, emptyReplica, type AccountReplica, type AccountRules } from "../account/frame/account.ts";
 import type { JView } from "../account/clause/clock.ts";
 import { propose, receive, resend, submit, type Heard, type Msg, type Outcome } from "../account/frame/frame.ts";
+import { revealOnChainDue } from "../account/clause/clock.ts";
 import type { AccountFault, AccountState } from "../account/model.ts";
+import { holderOf, ledgerOf } from "../account/state.ts";
 import type { AccountTx, Judge } from "../account/tx.ts";
 import {
   sideOf, type Arrival, type Command, type EntityFault, type EntityId, type EntityInput, type EntityState, type Hook,
-  type Notice, type Outbound,
+  type JAction, type Notice, type Outbound,
 } from "./model.ts";
 
-export type Frame = Readonly<{ state: EntityState; outputs: readonly Outbound[]; notices: readonly Notice[] }>;
+export type Frame = Readonly<{
+  state: EntityState; outputs: readonly Outbound[]; notices: readonly Notice[]; chain: readonly JAction[];
+}>;
 
 /** A frame in progress: what it has built so far, and which Accounts a command has touched, in order. */
 type Work = Readonly<{
-  state: EntityState; outputs: readonly Outbound[]; notices: readonly Notice[]; touched: readonly EntityId[];
+  state: EntityState; outputs: readonly Outbound[]; notices: readonly Notice[]; chain: readonly JAction[];
+  touched: readonly EntityId[];
 }>;
 
-const start = (state: EntityState): Work => ({ state, outputs: [], notices: [], touched: [] });
+const start = (state: EntityState): Work => ({ state, outputs: [], notices: [], chain: [], touched: [] });
 
 const noting = (w: Work, notice: Notice): Work => ({ ...w, notices: [...w.notices, notice] });
 
@@ -155,6 +160,37 @@ const told = (w: Work, peer: EntityId): Work => {
   return account.refused.reduce((acc, refused) => noting(acc, { _tag: "tx_refused", peer, refused }), cleared);
 };
 
+// ---- phase 5: duties to the chain
+
+type Resolve = Extract<AccountTx, { _tag: "resolve" }>;
+
+/** My resolves that no ack has covered yet: those in the pending frame, then those still queued. */
+const unackedResolves = (account: AccountReplica): readonly Resolve[] =>
+  [...(account.pending?.frame.txs ?? []), ...account.mempool].flatMap((tx) => (tx._tag === "resolve" ? [tx] : []));
+
+type Asked = Readonly<{ hashlocks: readonly string[]; actions: readonly JAction[] }>;
+
+/** A payee with an unacked resolve reveals once its view is within LAG of the deadline, once per hashlock. */
+const asking = (judge: Judge, peer: EntityId, account: AccountReplica) => (acc: Asked, tx: Resolve): Asked => {
+  const hold = ledgerOf(account.state, tx.token).holds.find((h) => h.id === tx.id);
+  if (hold === undefined || acc.hashlocks.includes(hold.hashlock)) return acc;
+  const { token, id, secret } = tx;
+  const reveal: JAction = { _tag: "reveal", peer, token, id, hashlock: hold.hashlock, secret };
+  return revealOnChainDue(judge.clock, hold.deadline, judge.view)
+    ? { hashlocks: [...acc.hashlocks, hold.hashlock], actions: [...acc.actions, reveal] }
+    : acc;
+};
+
+/** What the Entity owes the chain on `peer`'s Account; a hashlock whose hold is gone is forgotten. */
+const dutiful = (judge: Judge) => (w: Work, peer: EntityId): Work => {
+  const account = w.state.accounts.get(peer);
+  if (account === undefined) return w;
+  const open = (w.state.revealed.get(peer) ?? []).filter((hashlock) => holderOf(account.state, hashlock) !== undefined);
+  const asked = unackedResolves(account).reduce(asking(judge, peer, account), { hashlocks: open, actions: [] });
+  const revealed = mapSet(w.state.revealed, peer, asked.hashlocks);
+  return { ...w, chain: [...w.chain, ...asked.actions], state: { ...w.state, revealed } };
+};
+
 const arrivalsOf = (inputs: readonly EntityInput[]): readonly Arrival[] =>
   inputs.flatMap((i) => (i._tag === "peer_message" ? [i] : []));
 
@@ -164,7 +200,10 @@ const hooksOf = (inputs: readonly EntityInput[]): readonly Hook[] =>
 const commandsOf = (inputs: readonly EntityInput[]): readonly Command[] =>
   inputs.flatMap((i) => (i._tag === "peer_message" || i._tag === "resend_due" ? [] : [i]));
 
-/** The frame: arrivals, then hooks, then commands, then proposals, then the refusals the Accounts hold are told. */
+/**
+ * The frame: arrivals, then hooks, then commands, then proposals, then the refusals the Accounts hold are told, then
+ * what the Entity owes the chain.
+ */
 export const entityFrame = (judge: Judge, state: EntityState, inputs: readonly EntityInput[]): Frame => {
   const rules = accountRules(judge);
   const arrived = arrivalsOf(inputs).reduce((w, a) => arrive(rules, judge.view, w, a), start(state));
@@ -172,6 +211,7 @@ export const entityFrame = (judge: Judge, state: EntityState, inputs: readonly E
   const afterCommands = commandsOf(inputs).reduce((w, c) => commanded(rules, w, c), afterHooks);
   const propose = (w: Work, peer: EntityId): Work => proposing(rules, judge.view, w, peer);
   const proposed = proposalOrder(afterCommands).reduce(propose, afterCommands);
-  const done = [...proposed.state.accounts.keys()].toSorted().reduce(told, stillWaiting(proposed, judge.view));
-  return { state: done.state, outputs: done.outputs, notices: done.notices };
+  const peers = [...proposed.state.accounts.keys()].toSorted();
+  const done = peers.reduce(dutiful(judge), peers.reduce(told, stillWaiting(proposed, judge.view)));
+  return { state: done.state, outputs: done.outputs, notices: done.notices, chain: done.chain };
 };

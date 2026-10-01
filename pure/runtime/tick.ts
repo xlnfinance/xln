@@ -9,7 +9,7 @@ import { provisionalFrameHash } from "../account/frame/account.ts";
 import type { Msg } from "../account/frame/frame.ts";
 import type { AccountTx } from "../account/tx.ts";
 import { entityFrame } from "../entity/frame.ts";
-import type { EntityId, EntityInput, EntityState, Outbound } from "../entity/model.ts";
+import type { EntityId, EntityInput, EntityState, JAction, Outbound } from "../entity/model.ts";
 import type { Frame } from "../entity/frame.ts";
 import { ownView } from "../account/clause/clock.ts";
 import type { EntityBatch, Halt, NewHeight, Input, Row, Runtime, Setup, Timestamp } from "./model.ts";
@@ -29,11 +29,12 @@ const stageEntity = (rt: Runtime, stamp: Timestamp, input: EntityBatch): Runtime
   const height = BigInt(rt.wal.length) + 1n;
   const entity = rt.entities.get(input.to);
   if (entity === undefined) {
-    const refused: Row = { height, stamp, input, outputs: [], notices: [{ _tag: "unknown_entity", entity: input.to }] };
+    const unknown = { _tag: "unknown_entity", entity: input.to } as const;
+    const refused: Row = { height, stamp, input, outputs: [], chain: [], notices: [unknown] };
     return { ...rt, stamp, staged: refused };
   }
   const frame = frameOf(rt, entity, input.inputs);
-  const row: Row = { height, stamp, input, outputs: frame.outputs, notices: frame.notices };
+  const row: Row = { height, stamp, input, outputs: frame.outputs, chain: frame.chain, notices: frame.notices };
   return { ...rt, stamp, entities: mapSet(rt.entities, input.to, frame.state), staged: row };
 };
 
@@ -46,7 +47,8 @@ const stageHeight = (rt: Runtime, stamp: Timestamp, input: NewHeight): Runtime =
   const frames = [...rt.entities].toSorted(byId).map(([id, entity]) => [id, frameOf(raised, entity, [])] as const);
   const row: Row = {
     height: BigInt(rt.wal.length) + 1n, stamp, input,
-    outputs: frames.flatMap(([, f]) => f.outputs), notices: frames.flatMap(([, f]) => f.notices),
+    outputs: frames.flatMap(([, f]) => f.outputs), chain: frames.flatMap(([, f]) => f.chain),
+    notices: frames.flatMap(([, f]) => f.notices),
   };
   return { ...raised, stamp, entities: new Map(frames.map(([id, f]) => [id, f.state])), staged: row };
 };
@@ -66,11 +68,17 @@ export const commit = (rt: Runtime): Result<Runtime, Halt> =>
     ? err({ _tag: "nothing_staged" })
     : ok({ ...rt, wal: [...rt.wal, rt.staged], staged: undefined }));
 
-export type Flushed = Readonly<{ runtime: Runtime; leaving: readonly Outbound[] }>;
+export type Flushed = Readonly<{ runtime: Runtime; leaving: readonly Outbound[]; chain: readonly JAction[] }>;
 
-/** The outputs of the committed rows not yet sent, in row order; the Runtime then believes them sent. */
-export const flush = (rt: Runtime): Flushed =>
-  ({ runtime: { ...rt, sent: rt.wal.length }, leaving: rt.wal.slice(rt.sent).flatMap((row) => row.outputs) });
+/** The outputs and chain actions of the committed rows not yet sent, in row order; then it believes them sent. */
+export const flush = (rt: Runtime): Flushed => {
+  const unsent = rt.wal.slice(rt.sent);
+  return {
+    runtime: { ...rt, sent: rt.wal.length },
+    leaving: unsent.flatMap((row) => row.outputs),
+    chain: unsent.flatMap((row) => row.chain),
+  };
+};
 
 /** What names a message to whoever compares two runs of the same frame: not the bytes, which are the transport's. */
 export const messageId = (msg: Msg<AccountTx>): string =>
@@ -82,9 +90,15 @@ export const messageId = (msg: Msg<AccountTx>): string =>
 
 const outputIds = (row: Row): readonly string[] => row.outputs.map((o) => `${o.from} ${o.to} ${messageId(o.msg)}`);
 
-const sameOutputs = (a: Row, b: Row): boolean => outputIds(a).join("\n") === outputIds(b).join("\n");
+const chainId = (action: JAction): string =>
+  match(action, { reveal: (r) => `reveal ${r.peer} ${r.token} ${r.id} ${r.hashlock}` });
 
-/** One row again: its own stamp, its own input, and it has to make the outputs it made the first time. */
+const chainIds = (row: Row): readonly string[] => row.chain.map(chainId);
+
+const sameOutputs = (a: Row, b: Row): boolean =>
+  outputIds(a).join("\n") === outputIds(b).join("\n") && chainIds(a).join("\n") === chainIds(b).join("\n");
+
+/** One row again: its own stamp and input, and it has to make the outputs and chain actions it made before. */
 const replayed = (rt: Runtime, row: Row): Result<Runtime, Halt> => {
   const expected = BigInt(rt.wal.length) + 1n;
   if (row.height !== expected) return err({ _tag: "wal_gap", expected, found: row.height });

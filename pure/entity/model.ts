@@ -28,16 +28,21 @@ export const entityId = (text: string): Result<EntityId, BadEntityId> =>
 export const sideOf = (self: EntityId, peer: EntityId): Side => (self < peer ? "left" : "right");
 
 /**
- * An Entity: the Accounts it holds, by the peer's id, and the Accounts that wait for their J view to move. A peer
- * refused a frame for a fault that can pass with its view of J (R-FRAME-REFUSAL): the txs are queued again, and the
- * Account proposes them once the Entity's view is above the one it had at the refusal, not before (retry pacing). A
- * row counts only while its Account's `attempt` is above zero: the head moving ends the wait.
+ * An Entity: the Accounts it holds, by the peer's id; the Accounts that wait for their J view to move; and the
+ * hashlocks it has asked the chain to reveal. A peer refused a frame for a fault that can pass with its view of J
+ * (R-FRAME-REFUSAL): the txs are queued again, and the Account proposes them once the Entity's view is above the one it
+ * had at the refusal, not before (retry pacing). A row counts only while its Account's `attempt` is above zero: the
+ * head moving ends the wait.
  */
 export type EntityState = Readonly<{
-  id: EntityId; accounts: ReadonlyMap<EntityId, AccountReplica>; waiting: ReadonlyMap<EntityId, JView>;
+  id: EntityId;
+  accounts: ReadonlyMap<EntityId, AccountReplica>;
+  waiting: ReadonlyMap<EntityId, JView>;
+  revealed: ReadonlyMap<EntityId, readonly string[]>;
 }>;
 
-export const emptyEntity = (id: EntityId): EntityState => ({ id, accounts: new Map(), waiting: new Map() });
+export const emptyEntity = (id: EntityId): EntityState =>
+  ({ id, accounts: new Map(), waiting: new Map(), revealed: new Map() });
 
 // What a frame takes in.
 export type Arrival = Tagged<"peer_message", { from: EntityId; msg: Msg<AccountTx> }>;
@@ -58,6 +63,14 @@ export type EntityInput = Arrival | Hook | Command;
 
 /** What leaves an Entity: an Account message for a peer. */
 export type Outbound = Readonly<{ from: EntityId; to: EntityId; msg: Msg<AccountTx> }>;
+
+/**
+ * What an Entity asks of the J chain: data the Host turns into a batch (the bytes are the chain layer's). A `reveal` is
+ * a payee showing a secret on chain because its resolve is still unacked when the clause's deadline comes near
+ * (R-HTLC-CLOCK c); `revealed` on the Entity keeps a hashlock asked once for as long as its hold is open.
+ */
+export type JAction =
+  Tagged<"reveal", { peer: EntityId; token: TokenId; id: HoldId; hashlock: string; secret: Uint8Array }>;
 
 export type EntityFault =
   | Tagged<"self_account">
