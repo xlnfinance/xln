@@ -299,8 +299,10 @@ makes a newer frame uncounterable against a stale start with longer windows (rev
 (nonce proposer off clause rival? epoch wl wr implicit?), `frame-extra` is the policy (the base signs at the floor, the
 config `window-policy` lengthens the later frames), `windows-keep-ok?` is the signing rule (neither side signs a frame
 that shortens the newest committed windows), `windows-ok?` the contract's E9 check on a counter and on the immediate
-close, and the property "windows never shorten inside an epoch" covers both; planted bug `counter-shortens-window` (with
-`window-policy`). Windows take two values at most (floor, floor + 1). The contract uses the windows only as a sum
+close, and two properties cover the two halves: "windows never shorten inside an epoch: a later co-signed proof carries at
+least the windows of an earlier one (the signing guard)" and "a counter or final body carries at least the started windows:
+the chain's E9 check, whoever signed it" (Q-D-25); planted bugs `counter-shortens-window` (with `window-policy`, the signing
+guard) and `e9-dropped` (with `byz-window`, the chain's check). Windows take two values at most (floor, floor + 1). The contract uses the windows only as a sum
 T = S + left + right (GAP-4): there is no per-side sub-window, and the non-starter may counter anywhere in [S, T).
 Options: (a) keep the sum; (b) give each side its own interval. Choice: (a), it is what the fixed contracts do. The floor
 is the real response guarantee: a Runtime must land its counter inside it (a Runtime duty to watch its own disputes
@@ -499,7 +501,10 @@ implicit proof and is presented). Rules the page now carries, each with a plante
 - The implicit proof must carry a nonce above the stored one (planted bug `implicit-nonce-stale`, caught by "after an epoch
   advance each side still holds a valid proof of the new epoch").
 Not modelled: the starter naming the tokens (one token), the seven contract reasons for refusing a non-canonical implicit
-proof (the page only builds the canonical one), a withdrawal (collateral-to-reserve) as an advance.
+proof (the page only builds the canonical one). A withdrawal (collateral-to-reserve) as an advance is modelled since
+review round 3: Q-D-26 (R-C2R-FOLD). The Right author is pinned at contract level only (review round 3, m2: authored by Left
+the model's runs are identical, because the Runtime rule never signs at stored + 1, which is the only place the author
+shows).
 Source: review of PR #41 round 2 (item 6); coordinator N1; decision D2; Review A and B of PR 76.
 
 **Q-D-22. H3: retired-board evidence is capped at collateral, in one direction only (coordinator H3, modelled).**
@@ -529,6 +534,53 @@ plays five scripted txs; the frames page plays arbitrary submissions), because l
 frames from the frames page multiplies both state spaces.
 Right's reserve: `dispute/configs/right-reserve.scm` gives Right a reserve of 1, so a Right-funded deposit (H4) and
 a shortfall paid from Right's reserve first can occur.
+
+**Q-D-24. The implicit-tie property (review round 3 of PR 41, m4).**
+The implicit proof exists from epoch 1 on. Offered at epoch 0 (m4, planted bug `implicit-at-epoch-0`) it is the same trap
+as `post-nonce-low`, one epoch earlier: Right pays Left (n1R, Right-authored, rank 2), the implicit proof at nonce 1 is
+Right-authored too and ties it, Left's counter with n1R is refused as a tie, and a start from the empty state erases the
+payment (trace `propose :right`, `start I1 :left`, `finalize initial :right`). Nothing noticed it: "the responder is never
+worse off than the newest proof it held" compares ranks and a tie is not worse, and the `post-nonce-low` property only looks
+at the frame after a settlement. The property: "a dispute that settles on the implicit proof leaves no signed proof of its
+epoch at or above it". It holds on the page (the counts of the base and every config are unchanged), kills `implicit-at-epoch-0`
+in three steps, and pins both "epoch >= 1" and the first signed proof at stored + 2 for every epoch and every holder.
+Source: review of PR #41 round 3 (`x-implicit-tie`).
+
+**Q-D-25. E9 against a Byzantine signer (review round 3 of PR 41, w1 and w2).**
+`counter-shortens-window` died at the SIGNING guard (`windows-keep-ok?`): the first frame an honest party signed with shorter
+windows broke the property, and no counter was ever involved. With only the guard dropped the bug is the same; with only E9
+dropped (`windows-ok?`) the run was identical to the clean one: no honest proof ever has shorter windows than the proof it
+counters, so the chain's check never fired, and E9 (Account.sol: windows may lengthen, never shorten) was dead code in the model.
+The page now has a Byzantine signer: `byz-window` (bound `max-byz-windows`, 0 in the base, 1 in the config `byz-window`) lets
+Right sign a proof ALONE, with the floor windows, on top of the newest committed state, and hand it to Left. Nobody co-signed
+it, so no signing guard ever saw it; Left holds a proof signed by its counterparty, which is all the chain asks. The two
+conjuncts of the old property are now two properties: the signing guard's one ranges over the CO-SIGNED proofs (the lone
+signature is recorded in `:alone`), and "a counter or final body carries at least the started windows: the chain's E9 check,
+whoever signed it" ranges over the dispute results. `counterable?` (the proof is usable and E9 lets it counter) replaces the
+rank of the best proof held when the page asks whether the responder must act, or what it could have answered with: a
+responder holding a proof E9 refuses is not a responder that has to answer, so the clock is not held for it. Config
+`byz-window` (two Right frames, the second on windows one longer than the floor, clock 4, no rival, no settlement): 7812
+states, 11503 transitions, 4818 goals, clean. Planted bug `e9-dropped` (E9 removed on the chain side only, loaded after
+`byz-window`) goes red on the E9 property: Right starts from the long-window frame and Left closes at once on the lone
+floor-window proof (`finalize with n3R`). Both `counter-shortens-window` (signing guard) and `e9-dropped` (chain) are kept.
+Source: review of PR #41 round 3 (`w1-e9-dropped`, `w2-sign-guard-dropped`, section 2).
+
+**Q-D-26. R-C2R-FOLD: a collateral-to-reserve withdrawal does not fold offdelta (decided; review round 3 of PR 41, item 4).**
+In Account.sol `processC2R` the signed diff of a withdrawal is only the withdrawn amount (`ondeltaDiff = isLeft ? -amount : 0`),
+the nonce is the C2R's own and the epoch advances (`_advanceOndeltaEpoch`). Nothing folds the off-chain offdelta: after the
+advance the epoch's offdelta is gone and a dispute from the implicit proof settles at Δ = ondelta. A settlement carries an
+`ondeltaDiff` that can fold offdelta (the page's `settle` does); the C2R shortcut cannot. C2R is co-signed, so the approver is
+the only guard (the shape of R-SETTLE-CREDIT, Q-X-3). The rule (coordinator): **a C2R is co-signed only while offdelta is zero;
+otherwise the withdrawal goes as a settlement that folds offdelta into ondelta.** Page: the rule `withdraw` (Left withdraws one
+unit of collateral to its reserve at a quiescent height with no open clause and no dispute; bound `max-withdrawals`, 0 in the
+base, 1 in the config `withdraw`), whose ondelta update goes through `withdraw-fold` (the folded offdelta: a plain C2R when it is
+zero, a settlement otherwise), and the property "R-C2R-FOLD: a withdrawal lowers Left's position by exactly the amount withdrawn
+and moves nothing else: Δ after = Δ before - 1, money unchanged". Config `withdraw`: 5460 states, 10033 transitions, 2528
+goals, clean. Planted bug `c2r-unfolded` (the shortcut co-signed with a nonzero offdelta, nothing folded) goes red on that
+property in three steps: Right's payment to Left is erased (`propose :right`, `ack :right`, `withdraw :left`). Not modelled:
+the stale co-signed op that lands after more frames (review item 4.2, a question for the Runtime owner), a C2R during a dispute
+(E6 on chain: `disputeHash != 0` reverts; the page forbids it too), more than one withdrawal.
+Source: review of PR #41 round 3 (`x-c2r-advance`, `x-c2r-advance-folded`); Account.sol processC2R.
 
 ## Entity consensus (`entity/consensus.scm`)
 
@@ -1133,8 +1185,9 @@ Relayed 2026-09-29 15:19 from the review of the contracts PR (#40).
   contracts H2). Each proof carries its own windows (D2 supersedes "every proof carries the same values"): they may
   LENGTHEN and never SHORTEN inside an epoch, and the counter's and the final body's windows are at least the started
   ones (E9). The floor is the real response guarantee (a Runtime duty to watch its own disputes within it). Page:
-  `windows-ok?`, `frame-extra`, the property "windows never shorten inside an epoch", planted bug
-  `counter-shortens-window`; Q-D-21.
+  `windows-ok?`, `frame-extra`, the properties "windows never shorten inside an epoch ... (the signing guard)" and "a counter or
+  final body carries at least the started windows: the chain's E9 check", planted bugs `counter-shortens-window` and
+  `e9-dropped` (a Byzantine signer, Q-D-25); Q-D-21.
 - **R-J2, R-C11, R-NONCE, R-DURABLE** (18:57): see Q-J-8, Q-D-17, Q-J-9, Q-R-7.
 - **R-J5** (20:29) and **R-SPLIT** (21:01): see Q-J-10.
 - **R1-R3** (18:10): see Q-RT-1 to Q-RT-3.
@@ -1146,6 +1199,10 @@ Relayed 2026-09-29 15:19 from the review of the contracts PR (#40).
   notice on any other, and re-proposes at attempt max(own, mark) + 1; the receiver keeps one mark per head, judges only frames
   above it and forgets it when the head moves; a frame names its author, in its hash, and a replica refuses its own. Page:
   Q-A-11, Q-A-12, Q-A-13 (default world 3070 states, 12950 transitions, 32 goals; bounds: clock 0..2, lag 1, retry budget 2).
+- **R-C2R-FOLD** (10-01, coordinator; review round 3 of PR 41): a collateral-to-reserve withdrawal is co-signed only while
+  offdelta is zero; otherwise it goes as a settlement that folds offdelta into ondelta. Page: Q-D-26 (`withdraw`, config
+  `withdraw`, bug `c2r-unfolded`). The same review's other two follow-ups are Q-D-24 (the implicit-tie property) and Q-D-25 (E9
+  against a Byzantine signer).
 - **H1.** Finalize waits until an unrevealed HTLC's deadline unless the secret is public.
 - **H3.** Retired-board evidence is capped at collateral.
 - **A12** (00:49): two co-signed proofs can exist at one nonce only with opposite proposer flags, and the contract
