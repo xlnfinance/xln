@@ -7,12 +7,22 @@
    "source": "lessons.md section 0",
    "layers": {
     "arrival": "hold",
-    "quint": "owed: #44 (id not in a name yet)",
-    "contract": "-",
-    "rig": "-",
+    "quint": "owed: spec thread, new Quint branch (id not in a name yet)",
+    "contract": "n/a: the frame pipeline is off-chain Entity logic; no contract code takes part",
+    "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
     "ts": "hold"
    },
    "killers": [
+    {
+     "kind": "mutant",
+     "layer": "quint",
+     "name": "hooks-read-pre-arrival"
+    },
+    {
+     "kind": "bug",
+     "layer": "arrival",
+     "name": "arrivals-in-place"
+    },
     {
      "kind": "test",
      "layer": "ts",
@@ -22,16 +32,6 @@
      "kind": "test",
      "layer": "ts",
      "name": "R-E1 the ack of an arrival goes out ahead of the frame the commands propose"
-    },
-    {
-     "kind": "bug",
-     "layer": "arrival",
-     "name": "arrivals-in-place"
-    },
-    {
-     "kind": "mutant",
-     "layer": "quint",
-     "name": "hooks-read-pre-arrival"
     }
    ]
   },
@@ -42,11 +42,26 @@
    "layers": {
     "arrival": "hold",
     "quint": "hold",
-    "contract": "-",
-    "rig": "-",
+    "contract": "n/a: what a Runtime does with a peer input is off-chain; the chain halts nothing of the Runtime",
+    "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
     "ts": "hold"
    },
    "killers": [
+    {
+     "kind": "mutant",
+     "layer": "quint",
+     "name": "halt-on-refusal"
+    },
+    {
+     "kind": "bug",
+     "layer": "arrival",
+     "name": "full-halts"
+    },
+    {
+     "kind": "bug",
+     "layer": "arrival",
+     "name": "bad-halts"
+    },
     {
      "kind": "test",
      "layer": "ts",
@@ -66,21 +81,6 @@
      "kind": "test",
      "layer": "ts",
      "name": "R-DURABLE R-X1 in every world: no halt, no leak, every WAL replays, equal heads mean equal states"
-    },
-    {
-     "kind": "bug",
-     "layer": "arrival",
-     "name": "full-halts"
-    },
-    {
-     "kind": "bug",
-     "layer": "arrival",
-     "name": "bad-halts"
-    },
-    {
-     "kind": "mutant",
-     "layer": "quint",
-     "name": "halt-on-refusal"
     },
     {
      "kind": "test",
@@ -111,10 +111,10 @@
    "statement": "Same-height collision: Left wins; Right rolls back and re-proposes its txs at the next height.",
    "source": "lessons.md section 2",
    "layers": {
-    "arrival": "owed: #41 (id not in a name yet)",
+    "arrival": "owed: spec thread, next Arrival page (id not in a name yet)",
     "quint": "hold",
-    "contract": "-",
-    "rig": "-",
+    "contract": "n/a: simultaneous frame proposals are an off-chain Account rule; the chain sees only signed proofs",
+    "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
     "ts": "hold"
    },
    "killers": [
@@ -190,10 +190,10 @@
    "statement": "Settlement ops are bounded by collateral where they are admitted, on both sides; a c2r above collateral is refused as malformed.",
    "source": "lessons.md section 2",
    "layers": {
-    "arrival": "owed: #41 (id not in a name yet)",
-    "quint": "owed: #44 (id not in a name yet)",
-    "contract": "-",
-    "rig": "-",
+    "arrival": "owed: spec thread, next Arrival page (id not in a name yet)",
+    "quint": "owed: spec thread, new Quint branch (id not in a name yet)",
+    "contract": "n/a: admission is checked off-chain before signing; the chain applies only what was signed",
+    "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
     "ts": "hold"
    },
    "killers": [
@@ -215,11 +215,11 @@
    "statement": "A party signs a settlement approval only over a proof that no queued work can change; if queued work changes it, the approval expires and is signed again, never a halt.",
    "source": "lessons.md section 2",
    "layers": {
-    "arrival": "owed: #41 (id not in a name yet)",
-    "quint": "owed: #44 (id not in a name yet)",
-    "contract": "-",
-    "rig": "-",
-    "ts": "-"
+    "arrival": "owed: spec thread, next Arrival page (id not in a name yet)",
+    "quint": "owed: spec thread, new Quint branch (id not in a name yet)",
+    "contract": "n/a: when to sign a settlement approval is an off-chain decision",
+    "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
+    "ts": "owed: the cut (Account slice)"
    },
    "killers": [
     {
@@ -235,11 +235,11 @@
    "statement": "A settlement transition aimed at a workspace that already settled on chain is stale and is dropped with a message.",
    "source": "lessons.md section 2",
    "layers": {
-    "arrival": "owed: #41 (id not in a name yet)",
-    "quint": "owed: #44 (id not in a name yet)",
-    "contract": "-",
-    "rig": "-",
-    "ts": "-"
+    "arrival": "owed: spec thread, next Arrival page (id not in a name yet)",
+    "quint": "owed: spec thread, new Quint branch (id not in a name yet)",
+    "contract": "n/a: the stale transition is dropped off-chain; the chain's own refusal of an old-epoch proof is C1",
+    "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
+    "ts": "owed: the cut (Account slice)"
    },
    "killers": [
     {
@@ -255,11 +255,11 @@
    "statement": "Opening an Account that already exists is a refusal.",
    "source": "lessons.md section 2",
    "layers": {
-    "arrival": "owed: #41 (id not in a name yet)",
-    "quint": "owed: #44 (id not in a name yet)",
-    "contract": "-",
-    "rig": "-",
-    "ts": "-"
+    "arrival": "owed: spec thread, next Arrival page (id not in a name yet)",
+    "quint": "owed: spec thread, new Quint branch (id not in a name yet)",
+    "contract": "n/a: opening an existing Account is refused off-chain, between the two sides",
+    "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
+    "ts": "owed: the cut (Account slice)"
    },
    "killers": [
     {
@@ -275,10 +275,10 @@
    "statement": "Credit is off-chain and enforced before signing: RCPAN (-leftCredit <= delta <= collateral + rightCredit, worst case over open clauses) is checked before a party signs.",
    "source": "lessons.md section 2",
    "layers": {
-    "arrival": "owed: #41 (id not in a name yet)",
+    "arrival": "owed: spec thread, next Arrival page (id not in a name yet)",
     "quint": "hold",
-    "contract": "-",
-    "rig": "-",
+    "contract": "n/a: credit is off-chain and checked before signing; the chain applies the signed result (R-CONSERVE)",
+    "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
     "ts": "hold"
    },
    "killers": [
@@ -335,10 +335,10 @@
    "source": "lessons.md section 3",
    "layers": {
     "arrival": "hold",
-    "quint": "owed: #44 (id not in a name yet)",
-    "contract": "-",
-    "rig": "-",
-    "ts": "-"
+    "quint": "owed: spec thread, new Quint branch (id not in a name yet)",
+    "contract": "n/a: the order of Account work in a frame is off-chain Entity logic",
+    "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
+    "ts": "owed: the cut (Entity and Runtime)"
    },
    "killers": [
     {
@@ -353,11 +353,11 @@
    "statement": "A replica drops its own uncommitted proposal when a certified frame commits at that height.",
    "source": "lessons.md section 3",
    "layers": {
-    "arrival": "owed: #41 (id not in a name yet)",
-    "quint": "owed: #44 (id not in a name yet)",
-    "contract": "-",
-    "rig": "-",
-    "ts": "-"
+    "arrival": "owed: spec thread, next Arrival page (id not in a name yet)",
+    "quint": "owed: spec thread, new Quint branch (id not in a name yet)",
+    "contract": "n/a: a replica dropping its own proposal is off-chain Entity logic",
+    "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
+    "ts": "owed: the cut (Entity and Runtime)"
    },
    "killers": [
     {
@@ -373,12 +373,17 @@
    "source": "lessons.md section 3",
    "layers": {
     "arrival": "hold",
-    "quint": "owed: #44 (id not in a name yet)",
-    "contract": "-",
-    "rig": "-",
+    "quint": "owed: spec thread, new Quint branch (id not in a name yet)",
+    "contract": "n/a: the publication order of Account work is off-chain Entity logic",
+    "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
     "ts": "hold"
    },
    "killers": [
+    {
+     "kind": "bug",
+     "layer": "arrival",
+     "name": "sorted-proposals"
+    },
     {
      "kind": "test",
      "layer": "ts",
@@ -388,11 +393,6 @@
      "kind": "test",
      "layer": "ts",
      "name": "R-E4 an Account touched twice proposes once, with both txs in one frame"
-    },
-    {
-     "kind": "bug",
-     "layer": "arrival",
-     "name": "sorted-proposals"
     }
    ]
   },
@@ -401,11 +401,11 @@
    "statement": "Chain facts reach an Account only through J-events.",
    "source": "lessons.md section 4",
    "layers": {
-    "arrival": "owed: #41 (id not in a name yet)",
-    "quint": "owed: #44 (id not in a name yet)",
-    "contract": "-",
-    "rig": "-",
-    "ts": "-"
+    "arrival": "owed: spec thread, next Arrival page (id not in a name yet)",
+    "quint": "owed: spec thread, new Quint branch (id not in a name yet)",
+    "contract": "owed: contracts thread (event completeness: every chain fact an Account needs is in an event; no test names it yet)",
+    "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
+    "ts": "owed: the cut (Account slice)"
    },
    "killers": [
     {
@@ -421,10 +421,10 @@
    "statement": "There are two signed objects, the dispute proof and the cooperative update, and every encoding is the contract's.",
    "source": "lessons.md section 4",
    "layers": {
-    "arrival": "owed: #41",
-    "quint": "owed: #44 (id not in a name yet)",
+    "arrival": "owed: spec thread, next Arrival page",
+    "quint": "owed: spec thread, new Quint branch (id not in a name yet)",
     "contract": "hold",
-    "rig": "-",
+    "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
     "ts": "hold"
    },
    "killers": [
@@ -470,11 +470,11 @@
    "statement": "A batch op checks the contract's batch limits when it is queued, and a full batch is a refusal, not a throw.",
    "source": "lessons.md section 4",
    "layers": {
-    "arrival": "owed: #41 (id not in a name yet)",
-    "quint": "owed: #44 (id not in a name yet)",
-    "contract": "-",
-    "rig": "-",
-    "ts": "-"
+    "arrival": "owed: spec thread, next Arrival page (id not in a name yet)",
+    "quint": "owed: spec thread, new Quint branch (id not in a name yet)",
+    "contract": "n/a: the check is made off-chain when the op is queued; the limits themselves are the contract's, held by J5 (the signed gas budget) and R-OOG (a cap bounds gas), tested in stress/BatchBounds.t.sol",
+    "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
+    "ts": "owed: the cut (Runtime slice)"
    },
    "killers": [
     {
@@ -490,11 +490,11 @@
    "statement": "Determinism: the same inputs at the same frame timestamps give the same state and outputs; a frame opens only when work is due at the committed clock. The Quint cell holds the canonical order of a frame's inputs and the idle gate (a frame opens only when an input is due); that the same inputs at the same timestamps give the same state and outputs is not a property of the spec.",
    "source": "lessons.md section 5",
    "layers": {
-    "arrival": "owed: #41 (id not in a name yet)",
+    "arrival": "owed: spec thread, next Arrival page (id not in a name yet)",
     "quint": "hold",
-    "contract": "-",
-    "rig": "-",
-    "ts": "-"
+    "contract": "n/a: determinism of the off-chain Runtime; no contract code takes part",
+    "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
+    "ts": "owed: the cut (Runtime slice)"
    },
    "killers": [
     {
@@ -514,11 +514,11 @@
    "statement": "A hub whose onward HTLC is refused fails the incoming lock back at once (outcome error, forward_failed:<reason>).",
    "source": "lessons.md section 6",
    "layers": {
-    "arrival": "owed: #41 (id not in a name yet)",
+    "arrival": "owed: spec thread, next Arrival page (id not in a name yet)",
     "quint": "hold",
-    "contract": "-",
-    "rig": "-",
-    "ts": "-"
+    "contract": "n/a: forwarding and failing back an HTLC is hub behaviour, off-chain",
+    "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
+    "ts": "owed: the cut (Entity and Runtime)"
    },
    "killers": [
     {
@@ -539,11 +539,11 @@
    "statement": "HTLC deadlines chain across hops: the incoming revealBefore is at least the outgoing one plus the dispute windows. The Quint cell holds the hop margin HOP = 2 * LAG between the inbound and the onward deadline; the dispute-window term of the rule is not modelled.",
    "source": "lessons.md section 6",
    "layers": {
-    "arrival": "owed: #41 (id not in a name yet)",
+    "arrival": "owed: spec thread, next Arrival page (id not in a name yet)",
     "quint": "hold",
-    "contract": "-",
-    "rig": "-",
-    "ts": "-"
+    "contract": "n/a: the hop margin is off-chain policy; the chain's windows are H2",
+    "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
+    "ts": "owed: the cut (Entity and Runtime)"
    },
    "killers": [
     {
@@ -563,11 +563,11 @@
    "statement": "A dispute start carries every secret the starter knows for the locks in its proof.",
    "source": "lessons.md section 6",
    "layers": {
-    "arrival": "owed: #41 (id not in a name yet)",
+    "arrival": "owed: spec thread, next Arrival page (id not in a name yet)",
     "quint": "hold",
-    "contract": "-",
-    "rig": "-",
-    "ts": "-"
+    "contract": "n/a: what a starter puts into a dispute start is decided off-chain; the chain applies reveals as given (H1)",
+    "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
+    "ts": "owed: the cut (Runtime slice)"
    },
    "killers": [
     {
@@ -592,11 +592,11 @@
    "statement": "A party never disputes over a deadline that an ack arriving in the same frame already resolved (follows from R-E1).",
    "source": "lessons.md section 6",
    "layers": {
-    "arrival": "owed: #41 (id not in a name yet)",
+    "arrival": "owed: spec thread, next Arrival page (id not in a name yet)",
     "quint": "hold",
-    "contract": "-",
-    "rig": "-",
-    "ts": "-"
+    "contract": "n/a: when to dispute is an off-chain decision",
+    "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
+    "ts": "owed: the cut (Runtime slice)"
    },
    "killers": [
     {
@@ -617,10 +617,10 @@
    "statement": "An offer is resolved at most once (order book, v2).",
    "source": "lessons.md section 6",
    "layers": {
-    "arrival": "-",
-    "quint": "-",
-    "contract": "-",
-    "rig": "-",
+    "arrival": "owed: v2 (no thread yet)",
+    "quint": "owed: v2 (no thread yet)",
+    "contract": "n/a: an offer is a clause inside an Account; the chain sees only the signed swap clause (R-SWAP-ONCHAIN)",
+    "rig": "owed: v2 (no thread yet)",
     "ts": "owed: v2 (no thread yet)"
    },
    "killers": [
@@ -637,10 +637,10 @@
    "statement": "A cancel for an unknown offer is dropped at the Account and never enters a frame (order book, v2).",
    "source": "lessons.md section 6",
    "layers": {
-    "arrival": "-",
-    "quint": "-",
-    "contract": "-",
-    "rig": "-",
+    "arrival": "owed: v2 (no thread yet)",
+    "quint": "owed: v2 (no thread yet)",
+    "contract": "n/a: a cancel is dropped at the off-chain Account",
+    "rig": "owed: v2 (no thread yet)",
     "ts": "owed: v2 (no thread yet)"
    },
    "killers": [
@@ -657,10 +657,10 @@
    "statement": "A single loan never halts the hub: a default is settled, a repay of a non-active loan is refused and refunded (lending, v2).",
    "source": "lessons.md section 6",
    "layers": {
-    "arrival": "-",
-    "quint": "-",
-    "contract": "-",
-    "rig": "-",
+    "arrival": "owed: v2 (no thread yet)",
+    "quint": "owed: v2 (no thread yet)",
+    "contract": "n/a: a loan is off-chain Account state; v2",
+    "rig": "owed: v2 (no thread yet)",
     "ts": "owed: v2 (no thread yet)"
    },
    "killers": [
@@ -677,10 +677,10 @@
    "statement": "AccountInfo.ondeltaEpoch advances on every cooperative settlement, C2R and dispute finalization (not on R2C); proofs and updates commit to it, so a proof for an earlier baseline fails E4.",
    "source": "contracts-decisions.md C1",
    "layers": {
-    "arrival": "owed: #41 (id not in a name yet)",
+    "arrival": "owed: spec thread, next Arrival page (id not in a name yet)",
     "quint": "hold",
     "contract": "hold",
-    "rig": "-",
+    "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
     "ts": "hold"
    },
    "killers": [
@@ -716,10 +716,10 @@
    "statement": "processBatch takes the entityId; the batch payload commits to it and the hanko must verify to exactly that entity.",
    "source": "contracts-decisions.md C2",
    "layers": {
-    "arrival": "owed: #41 (id not in a name yet)",
-    "quint": "owed: #44 (id not in a name yet)",
+    "arrival": "owed: spec thread, next Arrival page (id not in a name yet)",
+    "quint": "owed: spec thread, new Quint branch (id not in a name yet)",
     "contract": "hold",
-    "rig": "-",
+    "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
     "ts": "hold"
    },
    "killers": [
@@ -740,11 +740,11 @@
    "statement": "Every dispute window stays above LAG (the 60 s testnet floor of H2 meets it). The Quint cell holds the two windows together exceeding the honest side's answer time, REACT = 2 * LAG, in ticks; the 60 s floor is the Rig's.",
    "source": "contracts-decisions.md J2 (C11 pinned)",
    "layers": {
-    "arrival": "owed: #41 (id not in a name yet)",
+    "arrival": "owed: spec thread, next Arrival page (id not in a name yet)",
     "quint": "hold",
-    "contract": "-",
+    "contract": "n/a: the contracts' part is the floor itself, H2; C11 is the relation to LAG, held by Quint and the rig",
     "rig": "hold",
-    "ts": "-"
+    "ts": "owed: the cut (Runtime slice)"
    },
    "killers": [
     {
@@ -777,8 +777,8 @@
     "arrival": "hold",
     "quint": "hold",
     "contract": "hold",
-    "rig": "-",
-    "ts": "-"
+    "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
+    "ts": "n/a: the wait is the contract's, in block time; the Runtime's own deadline judgments are R-HTLC-CLOCK"
    },
    "killers": [
     {
@@ -823,11 +823,11 @@
    "statement": "Response windows come from the starter's proof; the floor is 60 s on testnet (6 h on mainnet, gated by N3); zero is refused as ResponseWindowTooShort. The Quint cell holds the floor as a parameter in ticks (a zero window is refused, the windows come from the starter's proof); the 60 s testnet and 6 h mainnet values and the N3 mainnet gate are not in it.",
    "source": "contracts-decisions.md H2",
    "layers": {
-    "arrival": "owed: #41 (id not in a name yet)",
+    "arrival": "owed: spec thread, next Arrival page (id not in a name yet)",
     "quint": "hold",
     "contract": "hold",
-    "rig": "-",
-    "ts": "-"
+    "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
+    "ts": "owed: the cut (Account slice)"
    },
    "killers": [
     {
@@ -848,10 +848,10 @@
    "source": "contracts-decisions.md H3",
    "layers": {
     "arrival": "hold",
-    "quint": "owed: #44 (id not in a name yet)",
+    "quint": "owed: spec thread, new Quint branch (id not in a name yet)",
     "contract": "hold",
-    "rig": "-",
-    "ts": "-"
+    "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
+    "ts": "n/a: an on-chain payout rule; xln.ts reads its outcome as J-events (R-J1)"
    },
    "killers": [
     {
@@ -876,11 +876,11 @@
    "statement": "A deposit during an open dispute is accepted and raises only the depositor's side.",
    "source": "contracts-decisions.md H4 (accepted as is)",
    "layers": {
-    "arrival": "-",
-    "quint": "-",
+    "arrival": "owed: spec thread (an Arrival page for a deposit during a dispute)",
+    "quint": "owed: spec thread (a Quint model for a deposit during a dispute)",
     "contract": "hold",
-    "rig": "-",
-    "ts": "-"
+    "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
+    "ts": "n/a: an on-chain acceptance rule; xln.ts reads the resulting reserve event (R-J1)"
    },
    "killers": [
     {
@@ -898,8 +898,8 @@
     "arrival": "hold",
     "quint": "hold",
     "contract": "hold",
-    "rig": "-",
-    "ts": "-"
+    "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
+    "ts": "hold"
    },
    "killers": [
     {
@@ -947,8 +947,8 @@
     "arrival": "hold",
     "quint": "hold",
     "contract": "hold",
-    "rig": "-",
-    "ts": "-"
+    "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
+    "ts": "hold"
    },
    "killers": [
     {
@@ -991,8 +991,8 @@
     "arrival": "hold",
     "quint": "hold",
     "contract": "hold",
-    "rig": "-",
-    "ts": "-"
+    "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
+    "ts": "owed: the cut (J batch-planner slice)"
    },
    "killers": [
     {
@@ -1037,11 +1037,11 @@
    "statement": "A signed batch is final at its nonce: anyone can land it (possibly as a no-op), so a replacement is always signed at a fresh nonce (widens R-NONCE).",
    "source": "contracts-decisions.md F1",
    "layers": {
-    "arrival": "owed: #41",
-    "quint": "owed: #44",
+    "arrival": "owed: spec thread, next Arrival page",
+    "quint": "owed: spec thread, new Quint branch",
     "contract": "hold",
-    "rig": "-",
-    "ts": "-"
+    "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
+    "ts": "hold"
    },
    "killers": [
     {
@@ -1066,11 +1066,11 @@
    "statement": "Contract as built: the soft gas path exists only for money-only batches; dispute, reveal, ladder and deposit batches revert whole on out-of-gas and keep their nonce.",
    "source": "contracts-decisions.md F16 (memory)",
    "layers": {
-    "arrival": "owed: #41 (id not in a name yet)",
+    "arrival": "owed: spec thread, next Arrival page (id not in a name yet)",
     "quint": "hold",
     "contract": "hold",
-    "rig": "-",
-    "ts": "-"
+    "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
+    "ts": "n/a: a fact about the contract as built; the planner's use of it is J5 and R-SIMULATE"
    },
    "killers": [
     {
@@ -1108,8 +1108,8 @@
     "arrival": "hold",
     "quint": "hold",
     "contract": "hold",
-    "rig": "-",
-    "ts": "-"
+    "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
+    "ts": "hold"
    },
    "killers": [
     {
@@ -1139,10 +1139,10 @@
    "statement": "A side that already holds the peer's ack of its own frame at height h never acks a different frame at h (the contract cannot enforce it: a second acked body outranks the first if the peer proposes as LEFT).",
    "source": "contracts-decisions.md A12 (Runtime and spec rule)",
    "layers": {
-    "arrival": "owed: #41 (id not in a name yet)",
-    "quint": "owed: #44 (id not in a name yet)",
-    "contract": "-",
-    "rig": "-",
+    "arrival": "owed: spec thread, next Arrival page (id not in a name yet)",
+    "quint": "owed: spec thread, new Quint branch (id not in a name yet)",
+    "contract": "n/a: the rule says the contract cannot enforce it: a second acked body outranks the first (A12)",
+    "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
     "ts": "hold"
    },
    "killers": [
@@ -1164,10 +1164,10 @@
    "statement": "Parties sign proofs only for the current epoch, each frame co-signed with a baseline proof for epoch+1 (nonce = frame nonce + 3); the proof nonce is its own counter. The Quint cell holds signing only for the current epoch and the proof nonce as its own counter (stale and leaping nonces refused, no skips); it does not hold the co-signed baseline for epoch + 1 at frame nonce + 3: the spec models R-IMPLICIT-BASELINE instead, where no baseline is co-signed.",
    "source": "contracts-decisions.md / Arrival Q-D-4, Q-D-19; Quint A13",
    "layers": {
-    "arrival": "owed: #41 (id not in a name yet)",
+    "arrival": "owed: spec thread, next Arrival page (id not in a name yet)",
     "quint": "hold",
-    "contract": "-",
-    "rig": "-",
+    "contract": "n/a: signing is off-chain; the chain's own epoch check is C1",
+    "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
     "ts": "owed: A4 (the frame nonce is the signed body's)"
    },
    "killers": [
@@ -1175,7 +1175,7 @@
      "kind": "bug",
      "layer": "arrival",
      "name": "baseline-too-low",
-     "owed": "#41"
+     "owed": "spec thread, next Arrival page"
     },
     {
      "kind": "mutant",
@@ -1217,9 +1217,9 @@
    "layers": {
     "arrival": "hold",
     "quint": "hold",
-    "contract": "-",
-    "rig": "-",
-    "ts": "-"
+    "contract": "n/a: the contracts have no lock horizon; it is an off-chain refusal",
+    "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
+    "ts": "hold"
    },
    "killers": [
     {
@@ -1239,11 +1239,11 @@
    "statement": "The deploy gate refuses a chain that is not a named testnet while the response floor is under 6 hours, and checks the batch gas cap; keyed by chain id, read from the compiled build.",
    "source": "contracts-decisions.md N3",
    "layers": {
-    "arrival": "-",
-    "quint": "-",
+    "arrival": "n/a: a deploy-time gate of the contracts, not protocol behaviour",
+    "quint": "n/a: a deploy-time gate of the contracts, not protocol behaviour",
     "contract": "hold",
-    "rig": "-",
-    "ts": "-"
+    "rig": "n/a: a deploy-time check with no system state for the walk",
+    "ts": "n/a: deploy tooling lives under contracts/deploy; xln.ts takes no part"
    },
    "killers": [
     {
@@ -1259,10 +1259,10 @@
    "source": "contracts-decisions.md J2/F1",
    "layers": {
     "arrival": "hold",
-    "quint": "owed: #44 (id not in a name yet)",
-    "contract": "-",
-    "rig": "-",
-    "ts": "-"
+    "quint": "owed: spec thread, new Quint branch (id not in a name yet)",
+    "contract": "n/a: the contract's part (a signed batch never expires and is final at its nonce) is R-FINAL-NONCE, which widens this rule",
+    "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
+    "ts": "owed: the cut (J batch-planner slice)"
    },
    "killers": [
     {
@@ -1285,8 +1285,8 @@
     "arrival": "hold",
     "quint": "hold",
     "contract": "hold",
-    "rig": "-",
-    "ts": "-"
+    "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
+    "ts": "owed: the cut (J batch-planner slice)"
    },
    "killers": [
     {
@@ -1323,9 +1323,9 @@
    "layers": {
     "arrival": "hold",
     "quint": "hold",
-    "contract": "-",
-    "rig": "-",
-    "ts": "-"
+    "contract": "n/a: the chain applies a batch as given; keeping co-signed ops to one Account is the planner's choice (the burnt nonce is J5)",
+    "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
+    "ts": "owed: the cut (J batch-planner slice)"
    },
    "killers": [
     {
@@ -1350,11 +1350,11 @@
    "statement": "Sign a batch only after it simulates successfully at the head, at the final signed budget, sized from the applyBatch self-call gas plus a named margin.",
    "source": "contracts-decisions.md third round of #54",
    "layers": {
-    "arrival": "owed: #41 (id not in a name yet)",
-    "quint": "owed: #44 (id not in a name yet)",
-    "contract": "-",
-    "rig": "-",
-    "ts": "-"
+    "arrival": "owed: spec thread, next Arrival page (id not in a name yet)",
+    "quint": "owed: spec thread, new Quint branch (id not in a name yet)",
+    "contract": "n/a: signing after a simulation is the planner's duty; the chain's gas behaviour is J5 and F16",
+    "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
+    "ts": "owed: the cut (J batch-planner slice)"
    },
    "killers": [
     {
@@ -1374,11 +1374,11 @@
    "statement": "Out-of-gas is never a normal outcome: no try/catch or low-level call may turn an out-of-gas into a normal outcome.",
    "source": "contracts-decisions.md swallowed failures (PR 'Transformer decode gas guard', #64)",
    "layers": {
-    "arrival": "-",
-    "quint": "-",
+    "arrival": "n/a: a property of the contract source (no try/catch may swallow out-of-gas), not of the protocol model",
+    "quint": "n/a: a property of the contract source, not of the protocol model",
     "contract": "hold",
-    "rig": "-",
-    "ts": "-"
+    "rig": "n/a: a property of the contract source, checked by the contract tests; the walk picks no gas",
+    "ts": "n/a: the rule is about contract code; xln.ts runs none"
    },
    "killers": [
     {
@@ -1415,8 +1415,8 @@
    "layers": {
     "arrival": "hold",
     "quint": "hold",
-    "contract": "-",
-    "rig": "-",
+    "contract": "n/a: the clock rules are off-chain (watermark, receiver stamp, host door); the contract reads only block.timestamp (H1)",
+    "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
     "ts": "hold"
    },
    "killers": [
@@ -1493,10 +1493,10 @@
    "source": "contracts-decisions.md (memory, #62)",
    "layers": {
     "arrival": "hold",
-    "quint": "owed: #44",
-    "contract": "-",
-    "rig": "-",
-    "ts": "-"
+    "quint": "owed: spec thread, new Quint branch",
+    "contract": "n/a: a planner choice made before signing; the chain's debt handling is R2C-DEBT-FIRST",
+    "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
+    "ts": "owed: the cut (J batch-planner slice)"
    },
    "killers": [
     {
@@ -1517,10 +1517,10 @@
    "source": "contracts-decisions.md (memory)",
    "layers": {
     "arrival": "hold",
-    "quint": "owed: #44",
-    "contract": "-",
-    "rig": "-",
-    "ts": "-"
+    "quint": "owed: spec thread, new Quint branch",
+    "contract": "owed: contracts thread (a test carrying the id; the debt queue is tested under other names, e.g. DebtChunking.t.sol)",
+    "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
+    "ts": "owed: the cut (J batch-planner slice)"
    },
    "killers": [
     {
@@ -1541,12 +1541,32 @@
    "source": "consolidation-plan.md section on the Runtime; Quint Runtime R3",
    "layers": {
     "arrival": "hold",
-    "quint": "owed: #44 (id not in a name yet)",
-    "contract": "-",
-    "rig": "-",
+    "quint": "owed: spec thread, new Quint branch (id not in a name yet)",
+    "contract": "n/a: persisting a frame is Runtime behaviour, off-chain",
+    "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
     "ts": "hold"
    },
    "killers": [
+    {
+     "kind": "bug",
+     "layer": "arrival",
+     "name": "send-before-persist"
+    },
+    {
+     "kind": "bug",
+     "layer": "arrival",
+     "name": "ack-before-persist"
+    },
+    {
+     "kind": "mutant",
+     "layer": "quint",
+     "name": "send-before-persist"
+    },
+    {
+     "kind": "mutant",
+     "layer": "quint",
+     "name": "ack-before-persist"
+    },
     {
      "kind": "test",
      "layer": "ts",
@@ -1598,26 +1618,6 @@
      "name": "R-DURABLE a WAL whose row lost its chain actions does not replay: the Runtime halts on it"
     },
     {
-     "kind": "bug",
-     "layer": "arrival",
-     "name": "send-before-persist"
-    },
-    {
-     "kind": "bug",
-     "layer": "arrival",
-     "name": "ack-before-persist"
-    },
-    {
-     "kind": "mutant",
-     "layer": "quint",
-     "name": "send-before-persist"
-    },
-    {
-     "kind": "mutant",
-     "layer": "quint",
-     "name": "ack-before-persist"
-    },
-    {
      "kind": "test",
      "layer": "ts",
      "name": "R-DURABLE a flush after a crash asks for the rows in row order, each row's own actions in order"
@@ -1629,10 +1629,10 @@
    "statement": "A repeat of the frame at my head is answered with the same ack in any replica state (Open, Proposed or Received).",
    "source": "contracts-decisions.md, Account-layer decisions 09-30 D-AC-1",
    "layers": {
-    "arrival": "owed: #41 (id not in a name yet)",
+    "arrival": "owed: spec thread, next Arrival page (id not in a name yet)",
     "quint": "hold",
-    "contract": "-",
-    "rig": "-",
+    "contract": "n/a: answering a repeated frame is off-chain Account behaviour",
+    "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
     "ts": "hold"
    },
    "killers": [
@@ -1670,8 +1670,8 @@
    "layers": {
     "arrival": "hold",
     "quint": "hold",
-    "contract": "-",
-    "rig": "-",
+    "contract": "n/a: the judgments are made off-chain in J height; the chain's own deadline is H1",
+    "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
     "ts": "hold"
    },
    "killers": [
@@ -1704,6 +1704,26 @@
      "kind": "bug",
      "layer": "arrival",
      "name": "expire-by-frame-stamp"
+    },
+    {
+     "kind": "mutant",
+     "layer": "quint",
+     "name": "expire-at-deadline"
+    },
+    {
+     "kind": "mutant",
+     "layer": "quint",
+     "name": "expiry-reserve-off"
+    },
+    {
+     "kind": "mutant",
+     "layer": "quint",
+     "name": "resolve-after-deadline"
+    },
+    {
+     "kind": "mutant",
+     "layer": "quint",
+     "name": "receiver-judges-by-the-frame-stamp"
     },
     {
      "kind": "test",
@@ -1772,6 +1792,11 @@
      "name": "R-CLOCK a frame stamp is a bigint, and a view or a deadline has to be made: the types refuse the stamp"
     },
     {
+     "kind": "mutant",
+     "layer": "quint",
+     "name": "escalation-too-late"
+    },
+    {
      "kind": "test",
      "layer": "ts",
      "name": "R-HTLC-CLOCK a resolve unacked with the deadline more than LAG away asks nothing"
@@ -1812,31 +1837,6 @@
      "name": "R-HTLC-CLOCK a resolve that comes when the deadline is already near asks in the frame of its command"
     },
     {
-     "kind": "mutant",
-     "layer": "quint",
-     "name": "expire-at-deadline"
-    },
-    {
-     "kind": "mutant",
-     "layer": "quint",
-     "name": "expiry-reserve-off"
-    },
-    {
-     "kind": "mutant",
-     "layer": "quint",
-     "name": "resolve-after-deadline"
-    },
-    {
-     "kind": "mutant",
-     "layer": "quint",
-     "name": "receiver-judges-by-the-frame-stamp"
-    },
-    {
-     "kind": "mutant",
-     "layer": "quint",
-     "name": "escalation-too-late"
-    },
-    {
      "kind": "test",
      "layer": "ts",
      "name": "R-HTLC-CLOCK a resolve names the hold of its own token: the same slot in another token is not it"
@@ -1848,24 +1848,24 @@
    "statement": "The two views never differ by more than LAG; the goal is stated on its own: no expiry commits while either view is at or before the deadline.",
    "source": "contracts-decisions.md, Account-layer decisions 09-30 D-AC-4",
    "layers": {
-    "arrival": "owed: #41 (id not in a name yet)",
-    "quint": "owed: #44 (id not in a name yet)",
-    "contract": "-",
-    "rig": "-",
-    "ts": "-"
+    "arrival": "owed: spec thread, next Arrival page (id not in a name yet)",
+    "quint": "owed: spec thread, new Quint branch (id not in a name yet)",
+    "contract": "n/a: a relation between two off-chain views",
+    "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
+    "ts": "hold"
    },
    "killers": [
     {
      "kind": "test",
      "layer": "arrival",
      "name": "an expiry commits only when both views are strictly past the deadline",
-     "owed": "#41"
+     "owed": "spec thread, next Arrival page"
     },
     {
      "kind": "test",
      "layer": "quint",
      "name": "expiredEarly",
-     "owed": "#44"
+     "owed": "spec thread, new Quint branch"
     }
    ]
   },
@@ -1874,10 +1874,10 @@
    "statement": "A tx that stops applying while it waits in the mempool is refused with notice to its owner at propose and leaves the mempool; never dropped silently. A tx the peer refuses inside a frame (R-FRAME-REFUSAL) is either retried (a fault that passes with the peer's view) or dropped with notice (fault peer_refused, carrying the peer's fault tag): every tx that enters a mempool ends committed or refused with notice, which the liveness simulation counts.",
    "source": "contracts-decisions.md, Account-layer decisions 09-30 D-AC-5",
    "layers": {
-    "arrival": "owed: #41 (id not in a name yet)",
+    "arrival": "owed: spec thread, next Arrival page (id not in a name yet)",
     "quint": "hold",
-    "contract": "-",
-    "rig": "-",
+    "contract": "n/a: a mempool rule of the off-chain Entity",
+    "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
     "ts": "hold"
    },
    "killers": [
@@ -1885,6 +1885,21 @@
      "kind": "bug",
      "layer": "arrival",
      "name": "drop-on-rollback"
+    },
+    {
+     "kind": "mutant",
+     "layer": "quint",
+     "name": "propose-drops-silently"
+    },
+    {
+     "kind": "mutant",
+     "layer": "quint",
+     "name": "dead-tx-stays"
+    },
+    {
+     "kind": "mutant",
+     "layer": "quint",
+     "name": "rollback-drops-txs"
     },
     {
      "kind": "test",
@@ -1927,6 +1942,16 @@
      "name": "account/frame R-FRAME-REFUSAL a frame the peer cannot apply is taken back"
     },
     {
+     "kind": "mutant",
+     "layer": "quint",
+     "name": "refusal-drops-without-notice"
+    },
+    {
+     "kind": "mutant",
+     "layer": "quint",
+     "name": "revise-loses-the-notice"
+    },
+    {
      "kind": "test",
      "layer": "ts",
      "name": "R-NOTICE an Account opened twice, with oneself, or a command to a stranger is refused with notice"
@@ -1952,31 +1977,6 @@
      "name": "R-NOTICE Bob's frame with an attempt of -1 is refused to Alice with the outcome, and changes nothing"
     },
     {
-     "kind": "mutant",
-     "layer": "quint",
-     "name": "propose-drops-silently"
-    },
-    {
-     "kind": "mutant",
-     "layer": "quint",
-     "name": "dead-tx-stays"
-    },
-    {
-     "kind": "mutant",
-     "layer": "quint",
-     "name": "rollback-drops-txs"
-    },
-    {
-     "kind": "mutant",
-     "layer": "quint",
-     "name": "refusal-drops-without-notice"
-    },
-    {
-     "kind": "mutant",
-     "layer": "quint",
-     "name": "revise-loses-the-notice"
-    },
-    {
      "kind": "test",
      "layer": "ts",
      "name": "R-NOTICE a tx that no longer applies when the view rises is refused with notice in that height's row"
@@ -1988,10 +1988,10 @@
    "statement": "The hash a frame is acked and chained by is the hash of the bytes both sides sign, and those bytes bind the author side. Until then the TS hash is provisionalFrameHash, a stand-in that covers the author, parent and every field of every tx and nothing more; it must not be signed, sent on the wire or stored.",
    "source": "coordinator decision 10-01 on A3 (provisional frame hash)",
    "layers": {
-    "arrival": "-",
-    "quint": "-",
-    "contract": "-",
-    "rig": "-",
+    "arrival": "owed: spec thread (an Arrival page for the bytes both sides sign)",
+    "quint": "owed: spec thread (a Quint model for the signed frame)",
+    "contract": "n/a: frame hashes are off-chain; the chain verifies proof signatures, not frame hashes",
+    "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
     "ts": "owed: A4 (signed bytes) and T0 (wire)"
    },
    "killers": [
@@ -2008,10 +2008,10 @@
    "statement": "A refused proposal releases the payer: when a counterparty refuses a proposed tx, the proposer's funds and the payment waiting on it are freed, never left locked. The Account does its part (R-FRAME-REFUSAL: the refusal message, the rollback, the refused tx noticed with fault peer_refused and the peer's fault tag); freeing the payer from that notice is an Entity/Runtime duty (owed to the cut).",
    "source": "coordinator decision 10-01 on A3 (R-NOTICE follow-up)",
    "layers": {
-    "arrival": "-",
-    "quint": "-",
-    "contract": "-",
-    "rig": "-",
+    "arrival": "owed: spec thread (an Arrival page for the refused-proposal release)",
+    "quint": "owed: spec thread (a Quint model for the refused-proposal release)",
+    "contract": "n/a: freeing a payer is an off-chain Entity and Runtime duty",
+    "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
     "ts": "hold"
    },
    "killers": [
@@ -2045,8 +2045,8 @@
    "layers": {
     "arrival": "owed: spec thread (Account spec comparison)",
     "quint": "hold",
-    "contract": "-",
-    "rig": "-",
+    "contract": "n/a: an off-chain Account rule; the chain sees only signed proofs",
+    "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
     "ts": "hold"
    },
    "killers": [
@@ -2064,6 +2064,47 @@
      "kind": "test",
      "layer": "ts",
      "name": "account/frame R-FRAME-REFUSAL no run is stuck while J moves and the views drift"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "to be named",
+     "owed": "A4 (frame exchange step)"
+    },
+    {
+     "kind": "mutant",
+     "layer": "quint",
+     "name": "proposer-ignores-refusal"
+    },
+    {
+     "kind": "mutant",
+     "layer": "quint",
+     "name": "receiver-commits-a-refused-frame"
+    },
+    {
+     "kind": "mutant",
+     "layer": "quint",
+     "name": "refused-frame-judged-afresh-at-same-attempt"
+    },
+    {
+     "kind": "mutant",
+     "layer": "quint",
+     "name": "stale-attempt-silent"
+    },
+    {
+     "kind": "mutant",
+     "layer": "quint",
+     "name": "mark-kept-across-head-moves"
+    },
+    {
+     "kind": "mutant",
+     "layer": "quint",
+     "name": "retryable-fault-drops-the-tx"
+    },
+    {
+     "kind": "mutant",
+     "layer": "quint",
+     "name": "retry-budget-unbounded"
     },
     {
      "kind": "test",
@@ -2119,47 +2160,6 @@
      "kind": "test",
      "layer": "ts",
      "name": "R-FRAME-REFUSAL the walk includes the refusal: its worlds are many and it ends before its limit"
-    },
-    {
-     "kind": "test",
-     "layer": "ts",
-     "name": "to be named",
-     "owed": "A4 (frame exchange step)"
-    },
-    {
-     "kind": "mutant",
-     "layer": "quint",
-     "name": "proposer-ignores-refusal"
-    },
-    {
-     "kind": "mutant",
-     "layer": "quint",
-     "name": "receiver-commits-a-refused-frame"
-    },
-    {
-     "kind": "mutant",
-     "layer": "quint",
-     "name": "refused-frame-judged-afresh-at-same-attempt"
-    },
-    {
-     "kind": "mutant",
-     "layer": "quint",
-     "name": "stale-attempt-silent"
-    },
-    {
-     "kind": "mutant",
-     "layer": "quint",
-     "name": "mark-kept-across-head-moves"
-    },
-    {
-     "kind": "mutant",
-     "layer": "quint",
-     "name": "retryable-fault-drops-the-tx"
-    },
-    {
-     "kind": "mutant",
-     "layer": "quint",
-     "name": "retry-budget-unbounded"
     }
    ]
   },
@@ -2170,8 +2170,8 @@
    "layers": {
     "arrival": "owed: spec thread (Account spec comparison)",
     "quint": "owed: spec thread (Account spec comparison)",
-    "contract": "-",
-    "rig": "-",
+    "contract": "n/a: an off-chain Account rule; the chain sees only signed proofs",
+    "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
     "ts": "hold"
    },
    "killers": [
@@ -2227,10 +2227,10 @@
    "statement": "A local tx is checked at enqueue against the planning state plus everything queued, and again at propose against the committed head. A bound on the txs of one frame and on the tokens of an Account is not here: it belongs to the transport queue (Q-T-9) and the proof body (A4).",
    "source": "contracts-decisions.md, Account-layer decisions 09-30 D-AC-6",
    "layers": {
-    "arrival": "owed: #41 (id not in a name yet)",
-    "quint": "owed: #44 (id not in a name yet)",
-    "contract": "-",
-    "rig": "-",
+    "arrival": "owed: spec thread, next Arrival page (id not in a name yet)",
+    "quint": "owed: spec thread, new Quint branch (id not in a name yet)",
+    "contract": "n/a: an off-chain Account rule; the chain sees only signed proofs",
+    "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
     "ts": "hold"
    },
    "killers": [
@@ -2271,10 +2271,10 @@
    "statement": "A frame names its parent by hash; the receiver refuses a frame whose parent is not its head.",
    "source": "contracts-decisions.md, Account-layer decisions 09-30 D-AC-7",
    "layers": {
-    "arrival": "owed: #41 (id not in a name yet)",
+    "arrival": "owed: spec thread, next Arrival page (id not in a name yet)",
     "quint": "hold",
-    "contract": "-",
-    "rig": "-",
+    "contract": "n/a: an off-chain Account rule; the chain sees only signed proofs",
+    "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
     "ts": "hold"
    },
    "killers": [
@@ -2315,13 +2315,18 @@
    "statement": "Arrival keeps a FIFO link with bounded loss and duplication (widening keeps every property); Quint keeps an unordered network with free redelivery as a recorded choice.",
    "source": "contracts-decisions.md, Account-layer decisions 09-30 D-AC-8",
    "layers": {
-    "arrival": "owed: #41 (id not in a name yet)",
-    "quint": "owed: #44 (id not in a name yet)",
-    "contract": "-",
-    "rig": "-",
+    "arrival": "owed: spec thread, next Arrival page (id not in a name yet)",
+    "quint": "owed: spec thread, new Quint branch (id not in a name yet)",
+    "contract": "n/a: what the network may do is a modelling choice of the specs",
+    "rig": "n/a: a modelling choice of the specs, with no system state for the walk",
     "ts": "hold"
    },
    "killers": [
+    {
+     "kind": "test",
+     "layer": "arrival",
+     "name": "reorder"
+    },
     {
      "kind": "test",
      "layer": "ts",
@@ -2331,11 +2336,6 @@
      "kind": "test",
      "layer": "ts",
      "name": "R-NET planted bug: with no timer, a frame refused before its peer opened wedges"
-    },
-    {
-     "kind": "test",
-     "layer": "arrival",
-     "name": "reorder"
     }
    ]
   },
@@ -2345,9 +2345,9 @@
    "source": "contracts-decisions.md, Account-layer decisions 09-30 D-AC-9",
    "layers": {
     "arrival": "owed: Arrival ledger merge",
-    "quint": "owed: #44 (id not in a name yet)",
-    "contract": "-",
-    "rig": "-",
+    "quint": "owed: spec thread, new Quint branch (id not in a name yet)",
+    "contract": "n/a: an off-chain Account rule; the chain sees only signed proofs",
+    "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
     "ts": "hold"
    },
    "killers": [
@@ -2355,7 +2355,7 @@
      "kind": "test",
      "layer": "quint",
      "name": "authority",
-     "owed": "#44"
+     "owed": "spec thread, new Quint branch"
     },
     {
      "kind": "test",
@@ -2385,9 +2385,9 @@
    "source": "contracts-decisions.md, Account-layer decisions 09-30 D-AC-10",
    "layers": {
     "arrival": "owed: Arrival ledger merge",
-    "quint": "owed: #44 (id not in a name yet)",
-    "contract": "-",
-    "rig": "-",
+    "quint": "owed: spec thread, new Quint branch (id not in a name yet)",
+    "contract": "n/a: an off-chain Account rule about who may resolve; the chain settles a lock by its secret and deadline (H1)",
+    "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
     "ts": "hold"
    },
    "killers": [
@@ -2418,10 +2418,10 @@
    "statement": "The proof nonce is its own counter; nothing skips it inside an epoch (MAX_NONCE_GAP = 0); signatures are one per (signer, nonce, author side).",
    "source": "contracts-decisions.md, Account-layer decisions 09-30 D-AC-11",
    "layers": {
-    "arrival": "owed: #41 (id not in a name yet)",
-    "quint": "owed: #44 (id not in a name yet)",
-    "contract": "-",
-    "rig": "-",
+    "arrival": "owed: spec thread, next Arrival page (id not in a name yet)",
+    "quint": "owed: spec thread, new Quint branch (id not in a name yet)",
+    "contract": "n/a: the counter discipline is the signers'; the chain accepts a higher nonce and keeps its gap (A18)",
+    "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
     "ts": "owed: A4 (the frame nonce is the signed body's)"
    },
    "killers": [
@@ -2434,7 +2434,7 @@
      "kind": "bug",
      "layer": "arrival",
      "name": "baseline-too-low",
-     "owed": "#41"
+     "owed": "spec thread, next Arrival page"
     },
     {
      "kind": "test",
@@ -2450,9 +2450,9 @@
    "source": "contracts-decisions.md, Account-layer decisions 09-30 D-AC-12",
    "layers": {
     "arrival": "owed: Arrival aligns the constant at the ledger merge",
-    "quint": "owed: #44 (id not in a name yet)",
-    "contract": "-",
-    "rig": "-",
+    "quint": "owed: spec thread, new Quint branch (id not in a name yet)",
+    "contract": "n/a: the contracts have no lock horizon; it is an off-chain refusal",
+    "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
     "ts": "hold"
    },
    "killers": [
@@ -2478,18 +2478,18 @@
    "statement": "Reserves plus collateral never change on one Account, and any RCPAN body settled by the chain's payout keeps debt within the credit granted (two killers).",
    "source": "contracts-decisions.md, Account-layer decisions 09-30 D-AC-14",
    "layers": {
-    "arrival": "owed: #41 (id not in a name yet)",
-    "quint": "owed: #44 (id not in a name yet)",
-    "contract": "-",
-    "rig": "-",
-    "ts": "-"
+    "arrival": "owed: spec thread, next Arrival page (id not in a name yet)",
+    "quint": "owed: spec thread, new Quint branch (id not in a name yet)",
+    "contract": "owed: contracts thread (a test carrying the id; conservation is tested under other names, e.g. the DepositoryConservation invariants)",
+    "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
+    "ts": "hold"
    },
    "killers": [
     {
      "kind": "test",
      "layer": "arrival",
      "name": "money is conserved",
-     "owed": "#41"
+     "owed": "spec thread, next Arrival page"
     },
     {
      "kind": "mutant",
@@ -2500,13 +2500,13 @@
   },
   {
    "id": "R-GATE-REGISTER",
-   "statement": "The register gate reads only names of checks that run (never comments, strings, skipped or unreachable tests), finds each killer by its whole name in a layer the row claims, and only lets the register grow.",
+   "statement": "The register gate reads only names of checks that run (never comments, strings, skipped or unreachable tests), finds each killer by its whole name in a layer the row claims, and only lets the register grow. A live rule states every layer as held, owed or not applicable with a reason: a cell left unstated is red, and so is an n/a cell in a layer where a name already carries the id.",
    "source": "coordinator 09-30 (PR #71 review: a skipped or deleted gate test must turn the gate red)",
    "layers": {
-    "arrival": "-",
-    "quint": "-",
-    "contract": "-",
-    "rig": "-",
+    "arrival": "n/a: a repository gate rule, not protocol behaviour; no spec page models it",
+    "quint": "n/a: a repository gate rule, not protocol behaviour; no spec models it",
+    "contract": "n/a: a gate over the repository (pure/rules); it is not contract code",
+    "rig": "n/a: a gate over the repository, with no system state for the walk",
     "ts": "hold"
    },
    "killers": [
@@ -2544,6 +2544,56 @@
      "kind": "test",
      "layer": "ts",
      "name": "red: hold weakened to owed; owed weakened to absent"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "red: a cell left unstated, in every layer it is left"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "red: an unstated cell stays red when a name in that layer already carries the id"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "red: a layer said to be not applicable that a name already carries the id in"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "red: a claim may not be dropped into not applicable: hold and owed both stay claims, so the denominator cannot shrink by a reason"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "red: a stated cell, even not applicable, may not go back to unstated"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "n/a takes a one-line reason, and a bare n/a is refused"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "every live row states every layer, and every not-applicable cell gives a reason"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "red: a killer in a layer left unstated is a killer in a layer the row does not hold, besides the unstated cell"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "a not-applicable cell that a name carries is still counted as not applicable, besides being red"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "the matrix prints UNSTATED for an unstated cell and n/a for a not-applicable one"
     }
    ]
   },
@@ -2552,10 +2602,10 @@
    "statement": "Nothing under core/ or jurisdictions/ differs from og 566c850 in any way, with an empty allowlist, and a failing git is red.",
    "source": "coordinator 09-30 (PR #71 review: a skipped or deleted gate test must turn the gate red)",
    "layers": {
-    "arrival": "-",
-    "quint": "-",
-    "contract": "-",
-    "rig": "-",
+    "arrival": "n/a: a repository gate rule, not protocol behaviour; no spec page models it",
+    "quint": "n/a: a repository gate rule, not protocol behaviour; no spec models it",
+    "contract": "n/a: a gate over the repository (pure/rules); it is not contract code",
+    "rig": "n/a: a gate over the repository, with no system state for the walk",
     "ts": "hold"
    },
    "killers": [
@@ -2583,13 +2633,13 @@
   },
   {
    "id": "R-GATE-STYLE",
-   "statement": "The new tree sits at zero on every style rule except registered exceptions used exactly; a scan that did not run cannot pass, and a new directory under pure/ is gated until it is named as outside the gate.",
+   "statement": "The new tree sits at zero on every style rule except registered exceptions used exactly; a scan that did not run cannot pass, and a new directory under pure/ is gated until it is named as outside the gate; a run leaves no planted canary files behind.",
    "source": "coordinator 09-30 (PR #71 review: a skipped or deleted gate test must turn the gate red)",
    "layers": {
-    "arrival": "-",
-    "quint": "-",
-    "contract": "-",
-    "rig": "-",
+    "arrival": "n/a: a repository gate rule, not protocol behaviour; no spec page models it",
+    "quint": "n/a: a repository gate rule, not protocol behaviour; no spec models it",
+    "contract": "n/a: a gate over the repository (pure/rules); it is not contract code",
+    "rig": "n/a: a gate over the repository, with no system state for the walk",
     "ts": "hold"
    },
    "killers": [
@@ -2752,6 +2802,11 @@
      "kind": "test",
      "layer": "ts",
      "name": "an interface that is not exported is measured like one that is"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "a run removes the canary files it planted: the temp folder holds no tree-canary directory afterwards"
     }
    ]
   },
@@ -2760,10 +2815,10 @@
    "statement": "No folder holds more than ten direct source files except at its recorded debt, counted on the files git lists, and a directory that is not a git checkout is red.",
    "source": "coordinator 09-30 (PR #71 review: a skipped or deleted gate test must turn the gate red)",
    "layers": {
-    "arrival": "-",
-    "quint": "-",
-    "contract": "-",
-    "rig": "-",
+    "arrival": "n/a: a repository gate rule, not protocol behaviour; no spec page models it",
+    "quint": "n/a: a repository gate rule, not protocol behaviour; no spec models it",
+    "contract": "n/a: a gate over the repository (pure/rules); it is not contract code",
+    "rig": "n/a: a gate over the repository, with no system state for the walk",
     "ts": "hold"
    },
    "killers": [
@@ -2789,10 +2844,10 @@
    "statement": "bun rules/check.ts is one command whose exit code is red when the register, the style gate or folder width is red, each alone.",
    "source": "coordinator 09-30 (PR #71 review: a skipped or deleted gate test must turn the gate red)",
    "layers": {
-    "arrival": "-",
-    "quint": "-",
-    "contract": "-",
-    "rig": "-",
+    "arrival": "n/a: a repository gate rule, not protocol behaviour; no spec page models it",
+    "quint": "n/a: a repository gate rule, not protocol behaviour; no spec models it",
+    "contract": "n/a: a gate over the repository (pure/rules); it is not contract code",
+    "rig": "n/a: a gate over the repository, with no system state for the walk",
     "ts": "hold"
    },
    "killers": [
@@ -2844,13 +2899,226 @@
    ]
   },
   {
+   "id": "R-GATE-CI-DRIFT",
+   "statement": "What GitHub CI repeats from files it cannot read (the Bun version, the seed matrix, the ast-grep version) is compared with its source from code, never from a comment, in every workflow file whatever its extension, and a form the comparison cannot read (a setup-bun step with no bun-version, a bun-version-file) is a problem, not a pass.",
+   "source": "coordinator 10-01 (PR #90 review: the reviewer planted four drifts that stayed green)",
+   "layers": {
+    "arrival": "n/a: a repository gate rule, not protocol behaviour; no spec page models it",
+    "quint": "n/a: a repository gate rule, not protocol behaviour; no spec models it",
+    "contract": "n/a: a gate over the repository (pure/rules and CI); it is not contract code",
+    "rig": "n/a: a gate over the repository, with no system state for the walk",
+    "ts": "hold"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-DRIFT packageManager, bun-version, the seed matrix, the default seeds and the pins are read from their own syntax"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-DRIFT the real workflows, package.json files and style/check.ts agree"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-DRIFT the real files hold at least one copy of each thing compared (the comparison is not vacuous)"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-DRIFT the planted baseline agrees"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-DRIFT a job on another Bun than packageManager"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-DRIFT a seed matrix that is not the default of test:seeds"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-DRIFT an ast-grep on PATH that is not the one style/check.ts runs"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-DRIFT an unpinned ast-grep in style/check.ts, a missing packageManager and a missing default are problems, not silence"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-DRIFT a setup-bun step with no bun-version is a problem, and a bun-version in another step does not rescue it"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-DRIFT bun-version-file is a problem: the file cannot be compared with packageManager"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-DRIFT a setup-bun step is found with its with-block, whatever else sits around it"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-DRIFT a workflow named .yaml is read, and so is every file in .github/workflows"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-DRIFT an install that lost its pin is a problem even when a comment still names the pin"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-DRIFT a comment is never a copy: a commented bun-version, seed matrix or pin counts for nothing"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-DRIFT the same plants on the real build-and-test.yml go red (its own syntax, its own comments)"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-DRIFT a comment that names ast-grep-cli without a pin is not an install, so it is no problem"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-DRIFT the setup-bun action is found in any case, as GitHub reads action names without case"
+    }
+   ]
+  },
+  {
+   "id": "R-GATE-TEST-TIMEOUTS",
+   "statement": "A heavy test or hook (one that starts a bun, forge, ast-grep, quint or uvx process, opens og's world or lane, walks or calls an explorer, directly or through a helper of its file) names its own timeout (the third argument of a test, the second of a hook), so a loaded machine cannot turn the gate red, and the suite runs with no --timeout flag.",
+   "source": "coordinator 10-01 06:52 (two threads hit Bun's 5 s default on the rules tests and the chaos explorers and worked around it by hand with a flag)",
+   "layers": {
+    "arrival": "n/a: a repository gate rule, not protocol behaviour; no spec page models it",
+    "quint": "n/a: a repository gate rule, not protocol behaviour; no spec models it",
+    "contract": "n/a: a gate over the repository (pure/rules); it is not contract code",
+    "rig": "n/a: a gate over the repository, with no system state for the walk",
+    "ts": "hold"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-TEST-TIMEOUTS a test that starts a bun, forge, ast-grep, quint or uvx process, or process.execPath, is heavy"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-TEST-TIMEOUTS the object form of a spawn, a command line given to execSync or exec, and a helper declared with let, var or class are heavy too"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-TEST-TIMEOUTS git, cat and rm are cheap: a test that only runs them is not heavy"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-TEST-TIMEOUTS a test that opens og's world or lane, walks or calls an explorer is heavy; a name that only starts like one is not"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-TEST-TIMEOUTS a heavy call in a comment or a string is not a call"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-TEST-TIMEOUTS a test is heavy through a helper of its own file, even two helpers away, and not through a cheap one"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-TEST-TIMEOUTS a third argument is a timeout: a number, a constant or an object, with or without a trailing comma"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-TEST-TIMEOUTS commas inside the callback, its parameters and its default values are not arguments"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-TEST-TIMEOUTS a test in a loop or a describe is read, it() and test.only() too, test.skip() and test.each() are not"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-TEST-TIMEOUTS testCalls says where each call is, whether it names a timeout, and where its callback ends"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-TEST-TIMEOUTS a heavy beforeAll, beforeEach, afterAll or afterEach hook needs a timeout as its second argument, a cheap hook needs none"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-TEST-TIMEOUTS a heavy test with no timeout is red and named with its file and line"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-TEST-TIMEOUTS a .test.tsx and a .test.mts file are test files too"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-TEST-TIMEOUTS the same test with a timeout is green, and a file that is not a test file is not read"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-TEST-TIMEOUTS a tree git does not list is red, not an empty pass"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-TEST-TIMEOUTS every heavy test of pure/ names its own timeout"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-TEST-TIMEOUTS the check is not vacuous: the real compose and forge tests are read as heavy, each with its timeout"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-TEST-TIMEOUTS a heavy test with no timeout alone is 1"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-TEST-TIMEOUTS a heavy test with no timeout exits 1 and names the file and line"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-TEST-TIMEOUTS the same test with a timeout passes the timeouts part"
+    }
+   ]
+  },
+  {
    "id": "R-SETTLE-CREDIT",
    "statement": "A settlement that takes collateral out (C2R) is co-signed only if both sides stay within their credit afterwards, the same RCPAN bound a payment meets; otherwise it is refused, never signed. The ts cell holds the ledger-level refusal; the approver that maps signed diffs to a withdrawal is owed A4. The Quint cell holds the predicate `settlementOk`, checked against the chain's payout in compose.qnt; no Account or settle action calls it, so the co-signing path itself is not in the model.",
    "source": "contracts-decisions.md, Account-layer decisions 09-30 (Q-X-3 closed)",
    "layers": {
-    "arrival": "owed: #41 (id not in a name yet)",
+    "arrival": "owed: spec thread, next Arrival page (id not in a name yet)",
     "quint": "hold",
-    "contract": "-",
+    "contract": "n/a: co-signing is an off-chain decision; the chain pays out the signed settlement (R-CONSERVE)",
     "rig": "owed: #69 (known finding, owner A1 cut)",
     "ts": "hold"
    },
@@ -2902,9 +3170,9 @@
    "statement": "A credit limit cannot be lowered below what the counterparty is currently using, open holds counted as used; the refusal is credit_below_usage.",
    "source": "contracts-decisions.md, Account-layer decisions 09-30; rig finding (2) lending credit revoked below used",
    "layers": {
-    "arrival": "owed: #41 (id not in a name yet)",
-    "quint": "owed: #44",
-    "contract": "-",
+    "arrival": "owed: spec thread, next Arrival page (id not in a name yet)",
+    "quint": "owed: spec thread, new Quint branch",
+    "contract": "n/a: credit limits are off-chain Account state",
     "rig": "owed: #69 (known finding, owner v2 lending)",
     "ts": "hold"
    },
@@ -2931,10 +3199,10 @@
    "statement": "Open holds are capped at 32 and the 33rd is refused with too_many_holds; a dispute proof with more reverts (E10), and a proof body carries the transformers of every token, so the decided rule counts open holds across every token of the Account. The ts cell holds both halves: the per-token check (ledger.ts) and the Account-level count (state.ts, applied by tx.ts).",
    "source": "Review B of PR 73; contracts Account.sol MAX_DISPUTE_TRANSFORMERS = 32; Quint LOCK_SLOTS",
    "layers": {
-    "arrival": "-",
-    "quint": "owed: #44 (id not in a name yet)",
-    "contract": "-",
-    "rig": "-",
+    "arrival": "owed: spec thread (an Arrival page for the hold cap)",
+    "quint": "owed: spec thread, new Quint branch (id not in a name yet)",
+    "contract": "owed: contracts thread (a test carrying the id; the E10 revert at 32 transformers is the contract side)",
+    "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
     "ts": "hold"
    },
    "killers": [
@@ -2965,10 +3233,10 @@
    "statement": "A hold whose slot is already open is refused with lock_exists; a slot freed by resolve or expire opens again (R-ONE-LOCK-PER-HASH adds the refusal for an open hashlock).",
    "source": "Review B of PR 73; Quint HtlcLock lock_exists",
    "layers": {
-    "arrival": "-",
-    "quint": "owed: #44 (id not in a name yet)",
-    "contract": "-",
-    "rig": "-",
+    "arrival": "owed: spec thread (an Arrival page for a hold in an open slot)",
+    "quint": "owed: spec thread, new Quint branch (id not in a name yet)",
+    "contract": "n/a: an off-chain Account refusal; the chain reads the holds of a proof body as signed",
+    "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
     "ts": "hold"
    },
    "killers": [
@@ -2984,10 +3252,10 @@
    "statement": "A hold is addressed by the slot it sits in, never by position: resolving or expiring one hold leaves every other hold in its slot and in its order.",
    "source": "Review B of PR 73 (coordinator decision 09-30); Quint HtlcResolve{id}, the contract's slot ids",
    "layers": {
-    "arrival": "-",
-    "quint": "owed: #44 (id not in a name yet)",
-    "contract": "-",
-    "rig": "-",
+    "arrival": "owed: spec thread (an Arrival page for addressing a hold by slot)",
+    "quint": "owed: spec thread, new Quint branch (id not in a name yet)",
+    "contract": "n/a: an off-chain Account addressing rule; the chain reads the holds of a proof body as signed",
+    "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
     "ts": "hold"
    },
    "killers": [
@@ -3010,8 +3278,8 @@
    "layers": {
     "arrival": "hold",
     "quint": "hold",
-    "contract": "-",
-    "rig": "-",
+    "contract": "n/a: an off-chain Account refusal; the chain sees only the signed proof",
+    "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
     "ts": "hold"
    },
    "killers": [
@@ -3067,11 +3335,11 @@
    "statement": "From ondelta epoch 1 the empty state (offdelta 0, no clause, nonce = stored + 1, Right author, floor windows) is a valid dispute start proof with no signature and settles at ondelta; signed frames outrank it through counters; a counter's windows may lengthen, never shorten.",
    "source": "contracts-decisions.md Q-D-21 (D2), PR 'Implicit baseline'",
    "layers": {
-    "arrival": "owed: #41",
+    "arrival": "owed: spec thread, next Arrival page",
     "quint": "hold",
     "contract": "hold",
-    "rig": "-",
-    "ts": "-"
+    "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
+    "ts": "n/a: an on-chain rule; the Runtime's part is R-IMPLICIT-NONCE-FROM-CHAIN"
    },
    "killers": [
     {
@@ -3203,7 +3471,7 @@
      "kind": "bug",
      "layer": "arrival",
      "name": "a spec bug for the implicit start",
-     "owed": "#41"
+     "owed": "spec thread, next Arrival page"
     },
     {
      "kind": "test",
@@ -3252,10 +3520,10 @@
    "statement": "The Runtime reads the account's stored nonce from the chain and never derives it, and refuses to sign any proof at stored + 1 (either author): the first signed proof of a new epoch takes nonce stored + 2 or higher, because a Right-authored proof at stored + 1 only ties the implicit proof and cannot outrank it.",
    "source": "contracts-decisions.md R-IMPLICIT-BASELINE (Review B of PR 76, coordinator 09-30)",
    "layers": {
-    "arrival": "owed: #41",
+    "arrival": "owed: spec thread, next Arrival page",
     "quint": "hold",
     "contract": "hold",
-    "rig": "-",
+    "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
     "ts": "hold"
    },
    "killers": [
@@ -3278,13 +3546,18 @@
      "kind": "bug",
      "layer": "arrival",
      "name": "post-nonce-low (retargeted to the trap)",
-     "owed": "#41"
+     "owed": "spec thread, next Arrival page"
     },
     {
      "kind": "test",
      "layer": "ts",
      "name": "a Runtime test refusing a proof at stored + 1",
      "owed": "the cut (Account and Runtime slices)"
+    },
+    {
+     "kind": "mutant",
+     "layer": "quint",
+     "name": "first-proof-nonce-derived-from-the-tip"
     },
     {
      "kind": "test",
@@ -3310,11 +3583,6 @@
      "kind": "test",
      "layer": "ts",
      "name": "R-IMPLICIT-NONCE-FROM-CHAIN a report of an epoch the Entity already knows changes nothing"
-    },
-    {
-     "kind": "mutant",
-     "layer": "quint",
-     "name": "first-proof-nonce-derived-from-the-tip"
     }
    ]
   },
@@ -3323,10 +3591,10 @@
    "statement": "Inside an epoch the response windows of a dispute never decrease: a counter and a signed final body may carry longer windows than the dispute started with, never shorter ones (E9).",
    "source": "contracts-decisions.md R-IMPLICIT-BASELINE item 5 (coordinator 09-30)",
    "layers": {
-    "arrival": "owed: #41",
-    "quint": "owed: #44",
+    "arrival": "owed: spec thread, next Arrival page",
+    "quint": "hold",
     "contract": "hold",
-    "rig": "-",
+    "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
     "ts": "hold"
    },
    "killers": [
@@ -3341,10 +3609,29 @@
      "name": "REVIEW-B R-WINDOWS-NEVER-SHORTEN: the survivor of the author's mutation run is not equivalent: the immediate-close path (a signed final body, no registered counter) is guarded by the FINAL window check alone"
     },
     {
+     "kind": "bug",
+     "layer": "arrival",
+     "name": "counter-shortens-window"
+    },
+    {
      "kind": "mutant",
      "layer": "quint",
-     "name": "a mutant that shortens the windows",
-     "owed": "#44"
+     "name": "r-windows-never-shorten-counter-shortens-left-window"
+    },
+    {
+     "kind": "mutant",
+     "layer": "quint",
+     "name": "r-windows-never-shorten-counter-shortens-right-window"
+    },
+    {
+     "kind": "mutant",
+     "layer": "quint",
+     "name": "r-windows-never-shorten-path2-shortens-left-window"
+    },
+    {
+     "kind": "mutant",
+     "layer": "quint",
+     "name": "r-windows-never-shorten-path2-shortens-right-window"
     },
     {
      "kind": "test",
@@ -3365,26 +3652,178 @@
      "kind": "test",
      "layer": "ts",
      "name": "R-WINDOWS-NEVER-SHORTEN a window of zero seconds, or beyond the proof's uint32, is refused"
+    }
+   ]
+  },
+  {
+   "id": "R-SWAP-ONCHAIN",
+   "statement": "A swap clause in a signed ProofBody settles in a dispute finalize at the taker's fill ratio: each leg is floor(amount * ratio / 65535) on its own, a missing or malformed taker argument is a 0% fill, a clause that moves a delta it has no allowance for reverts the whole finalize, an allowance below the fill caps that delta (clamp, no revert), the n-th ratio is for the n-th swap of its owner, and a ratio the taker committed at the start is the one applied (another is refused).",
+   "source": "plan/swap-onchain.md (coordinator decision 10-01 03:11: stock DeltaTransformer, no contract change, expiry off-chain)",
+   "layers": {
+    "arrival": "owed: spec thread, next Arrival page",
+    "quint": "owed: spec thread, new Quint branch",
+    "contract": "hold",
+    "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
+    "ts": "owed: kernel thread (the swap step)"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "test_R_SWAP_ONCHAIN_partialFillLeftMaker"
     },
     {
-     "kind": "bug",
-     "layer": "arrival",
-     "name": "counter-shortens-window"
+     "kind": "test",
+     "layer": "contract",
+     "name": "test_R_SWAP_ONCHAIN_partialFillRightMaker"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "test_R_SWAP_ONCHAIN_fullFillMovesTheWholeOrder"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "test_R_SWAP_ONCHAIN_legsRoundDownIndependentlyMakerGivesForNothing"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "test_R_SWAP_ONCHAIN_legsRoundDownIndependentlyTakerPaysForNothing"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "test_R_SWAP_ONCHAIN_oneUnitOfRatioOnAnOrderOf65535IsOneOfEachLeg"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "test_R_SWAP_ONCHAIN_oneUnitOfRatioOnAnOrderOf65534IsZeroOfEachLeg"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "test_R_SWAP_ONCHAIN_zeroRatioMovesNothing"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "test_R_SWAP_ONCHAIN_noArgumentIsZeroFill"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "test_R_SWAP_ONCHAIN_malformedArgumentIsZeroFill"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "test_R_SWAP_ONCHAIN_missingAllowanceOnTheWantLegRevertsWholeFinalize"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "test_R_SWAP_ONCHAIN_missingAllowanceOnTheGiveLegRevertsWholeFinalize"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "test_R_SWAP_ONCHAIN_noAllowanceAtAllRevertsWholeFinalize"
+    },
+    {
+     "kind": "mutant",
+     "layer": "quint",
+     "name": "swap-fill-rounds-up",
+     "owed": "spec thread, new Quint branch"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "test_R_SWAP_ONCHAIN_giveAllowanceBelowTheFillCapsWhatTheMakerGives"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "test_R_SWAP_ONCHAIN_wantAllowanceBelowTheFillCapsWhatTheMakerReceives"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "test_R_SWAP_ONCHAIN_allowanceInTheWrongDirectionMovesNothing"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "test_R_SWAP_ONCHAIN_twoSwapsLeftMakerTheFirstFillsAndTheSecondDoesNot"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "test_R_SWAP_ONCHAIN_twoSwapsLeftMakerTheSecondFillsAndTheFirstDoesNot"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "test_R_SWAP_ONCHAIN_twoSwapsRightMakerTheFirstFillsAndTheSecondDoesNot"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "test_R_SWAP_ONCHAIN_twoSwapsRightMakerTheSecondFillsAndTheFirstDoesNot"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "test_R_SWAP_ONCHAIN_takerWhoStartsFillsAtTheRatioItCommittedLeftMaker"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "test_R_SWAP_ONCHAIN_takerWhoStartsFillsAtTheRatioItCommittedRightMaker"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "test_R_SWAP_ONCHAIN_aRatioOtherThanTheCommittedOneIsRefused"
     }
    ]
   },
   {
    "id": "R-C2R-FOLD",
    "statement": "The node co-signs a collateral-to-reserve only while the Account's offdelta is zero; otherwise it sends the withdrawal as a settlement that folds offdelta. The contract's processC2R applies only the withdrawn amount and does not fold offdelta, so a C2R co-signed with a nonzero offdelta lets a later dispute from the implicit proof erase the other side's payment.",
-   "source": "coordinator 10-01 04:34 on pr-41-review-2026-09-29.md Round 3 point 5",
+   "source": "contracts-decisions.md R-C2R-FOLD (coordinator 10-01 04:34, Arrival #41 review round 3)",
    "layers": {
-    "arrival": "owed: #41",
-    "quint": "owed: #44",
+    "arrival": "owed: spec thread, next Arrival page",
+    "quint": "owed: spec thread, new Quint branch",
     "contract": "hold",
-    "rig": "-",
+    "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
     "ts": "hold"
    },
    "killers": [
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "test_R_C2R_FOLD_aWithdrawalErasesTheOffdeltaOfTheOldEpoch"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "test_R_C2R_FOLD_controlWithoutTheWithdrawalTheSignedOffdeltaIsHonored"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "a Runtime test refusing to co-sign a C2R while offdelta is not zero",
+     "owed": "the cut (Entity and Runtime)"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "a Runtime test: a withdrawal with a nonzero offdelta is sent as a settlement that folds it, never as a C2R",
+     "owed": "Entity/Runtime cut slice 3"
+    },
     {
      "kind": "test",
      "layer": "ts",
@@ -3432,18 +3871,771 @@
     },
     {
      "kind": "test",
-     "layer": "contract",
-     "name": "test_R_C2R_FOLD_aWithdrawalErasesTheOffdeltaOfTheOldEpoch"
-    },
+     "layer": "ts",
+     "name": "R-COSIGN-FREEZE R-C2R-FOLD a storm of withdrawals, asks and landings: signed Accounts hold still"
+    }
+   ]
+  },
+  {
+   "id": "R-BOOK-PRICE-TIME",
+   "statement": "An order trades against the best-priced resting offers it reaches, the earlier offer first within a price, and every trade is at the resting offer's price.",
+   "source": "Hub matching engine thread, coordinator brief 10-01 02:56 (Arthur: the matching engine is a parallel job; the swap clause stays the Account's)",
+   "layers": {
+    "arrival": "n/a: a hub-local matching engine: no peer sees the book, only the swap clauses it produces (R-SWAP-ONCHAIN)",
+    "quint": "n/a: a hub-local matching engine: no peer sees the book, only the swap clauses it produces (R-SWAP-ONCHAIN)",
+    "contract": "n/a: an off-chain hub engine; the chain sees only the signed swap clause (R-SWAP-ONCHAIN)",
+    "rig": "owed: matching engine thread (when the engine is wired into money state)",
+    "ts": "hold"
+   },
+   "killers": [
     {
      "kind": "test",
-     "layer": "contract",
-     "name": "test_R_C2R_FOLD_controlWithoutTheWithdrawalTheSignedOffdeltaIsHonored"
+     "layer": "ts",
+     "name": "R-BOOK-PRICE-TIME the best price fills first, and the earlier offer first within a price"
     },
     {
      "kind": "test",
      "layer": "ts",
-     "name": "R-COSIGN-FREEZE R-C2R-FOLD a storm of withdrawals, asks and landings: signed Accounts hold still"
+     "name": "R-BOOK-PRICE-TIME a trade is at the resting offer's price, so the taker gets any improvement"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-BOOK-PRICE-TIME a seller meets the highest bids first, and a bid below its limit is out of reach"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-BOOK-PRICE-TIME a resting order joins behind the equal prices and in front of the worse ones"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-BOOK-PRICE-TIME R-BOOK-NEVER-CROSSED R-BOOK-CLAUSE-LOCKSTEP the book matches the oracle"
+    }
+   ]
+  },
+  {
+   "id": "R-BOOK-LOTS-CONSERVED",
+   "statement": "Every lot of an order is either filled (and leaves its maker's offer by the same lots), rests, or is dropped with a reason; no lot is created or lost.",
+   "source": "Hub matching engine thread, coordinator brief 10-01 02:56 (Arthur: the matching engine is a parallel job; the swap clause stays the Account's)",
+   "layers": {
+    "arrival": "n/a: a hub-local matching engine: no peer sees the book, only the swap clauses it produces (R-SWAP-ONCHAIN)",
+    "quint": "n/a: a hub-local matching engine: no peer sees the book, only the swap clauses it produces (R-SWAP-ONCHAIN)",
+    "contract": "n/a: an off-chain hub engine; the chain sees only the signed swap clause (R-SWAP-ONCHAIN)",
+    "rig": "owed: matching engine thread (when the engine is wired into money state)",
+    "ts": "hold"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-BOOK-LOTS-CONSERVED a partial fill leaves the maker's rest in place, at the front of its price"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-BOOK-LOTS-CONSERVED a taker's unfilled lots rest, and the fills plus the rest are the order"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-BOOK-LOTS-CONSERVED an offer that fills exactly leaves the book"
+    }
+   ]
+  },
+  {
+   "id": "R-BOOK-NEVER-CROSSED",
+   "statement": "After every order and cancel, the best buy in a hub book is priced below its best sell.",
+   "source": "Hub matching engine thread, coordinator brief 10-01 02:56 (Arthur: the matching engine is a parallel job; the swap clause stays the Account's)",
+   "layers": {
+    "arrival": "n/a: a hub-local matching engine: no peer sees the book, only the swap clauses it produces (R-SWAP-ONCHAIN)",
+    "quint": "n/a: a hub-local matching engine: no peer sees the book, only the swap clauses it produces (R-SWAP-ONCHAIN)",
+    "contract": "n/a: an off-chain hub engine; the chain sees only the signed swap clause (R-SWAP-ONCHAIN)",
+    "rig": "owed: matching engine thread (when the engine is wired into money state)",
+    "ts": "hold"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-BOOK-PRICE-TIME R-BOOK-NEVER-CROSSED R-BOOK-CLAUSE-LOCKSTEP the book matches the oracle"
+    }
+   ]
+  },
+  {
+   "id": "R-BOOK-NO-SELF-TRADE",
+   "statement": "An order never trades with an offer of its own owner: the sweep stops at it and the rest is dropped; an all-or-nothing order that would is refused.",
+   "source": "Hub matching engine thread, coordinator brief 10-01 02:56 (Arthur: the matching engine is a parallel job; the swap clause stays the Account's)",
+   "layers": {
+    "arrival": "n/a: a hub-local matching engine: no peer sees the book, only the swap clauses it produces (R-SWAP-ONCHAIN)",
+    "quint": "n/a: a hub-local matching engine: no peer sees the book, only the swap clauses it produces (R-SWAP-ONCHAIN)",
+    "contract": "n/a: an off-chain hub engine; the chain sees only the signed swap clause (R-SWAP-ONCHAIN)",
+    "rig": "owed: matching engine thread (when the engine is wired into money state)",
+    "ts": "hold"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-BOOK-NO-SELF-TRADE a taker never trades with its own offer: it stops there and the rest is dropped"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-BOOK-NO-SELF-TRADE an all-or-nothing order that would meet itself is refused"
+    }
+   ]
+  },
+  {
+   "id": "R-BOOK-NO-SILENT-DROP",
+   "statement": "Every lot an order does not trade is named in its result (rested or dropped with a reason), and every refusal carries a tagged fault.",
+   "source": "Hub matching engine thread, coordinator brief 10-01 02:56 (Arthur: the matching engine is a parallel job; the swap clause stays the Account's)",
+   "layers": {
+    "arrival": "n/a: a hub-local matching engine: no peer sees the book, only the swap clauses it produces (R-SWAP-ONCHAIN)",
+    "quint": "n/a: a hub-local matching engine: no peer sees the book, only the swap clauses it produces (R-SWAP-ONCHAIN)",
+    "contract": "n/a: an off-chain hub engine; the chain sees only the signed swap clause (R-SWAP-ONCHAIN)",
+    "rig": "owed: matching engine thread (when the engine is wired into money state)",
+    "ts": "hold"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-BOOK-NO-SILENT-DROP an immediate order drops what it cannot trade, and says why"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-BOOK-NO-SILENT-DROP R-BOOK-EXACT-AMOUNTS an order has lots, a price, and amounts that fit a uint256"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-BOOK-NO-SILENT-DROP an id names one offer in the book"
+    }
+   ]
+  },
+  {
+   "id": "R-BOOK-ALL-OR-NOTHING",
+   "statement": "An all-or-nothing order trades whole or is refused with the lots it could fill, and the book is unchanged.",
+   "source": "Hub matching engine thread, coordinator brief 10-01 02:56 (Arthur: the matching engine is a parallel job; the swap clause stays the Account's)",
+   "layers": {
+    "arrival": "n/a: a hub-local matching engine: no peer sees the book, only the swap clauses it produces (R-SWAP-ONCHAIN)",
+    "quint": "n/a: a hub-local matching engine: no peer sees the book, only the swap clauses it produces (R-SWAP-ONCHAIN)",
+    "contract": "n/a: an off-chain hub engine; the chain sees only the signed swap clause (R-SWAP-ONCHAIN)",
+    "rig": "owed: matching engine thread (when the engine is wired into money state)",
+    "ts": "hold"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-BOOK-ALL-OR-NOTHING an order that cannot fill whole is refused with what it could fill"
+    }
+   ]
+  },
+  {
+   "id": "R-BOOK-BOUNDED",
+   "statement": "A hub book holds at most maxOrders offers and an owner at most maxPerOwner; only an order that may rest needs room, and a cancel frees it.",
+   "source": "Hub matching engine thread, coordinator brief 10-01 02:56 (Arthur: the matching engine is a parallel job; the swap clause stays the Account's)",
+   "layers": {
+    "arrival": "n/a: a hub-local matching engine: no peer sees the book, only the swap clauses it produces (R-SWAP-ONCHAIN)",
+    "quint": "n/a: a hub-local matching engine: no peer sees the book, only the swap clauses it produces (R-SWAP-ONCHAIN)",
+    "contract": "n/a: an off-chain hub engine; the chain sees only the signed swap clause (R-SWAP-ONCHAIN)",
+    "rig": "owed: matching engine thread (when the engine is wired into money state)",
+    "ts": "hold"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-BOOK-BOUNDED an owner holds at most maxPerOwner offers, and the book at most maxOrders"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-BOOK-BOUNDED an order that cannot rest needs no room, and a cancel gives the room back"
+    }
+   ]
+  },
+  {
+   "id": "R-BOOK-CANCEL-OWN",
+   "statement": "Only an offer's owner takes it back, and the book returns what it took.",
+   "source": "Hub matching engine thread, coordinator brief 10-01 02:56 (Arthur: the matching engine is a parallel job; the swap clause stays the Account's)",
+   "layers": {
+    "arrival": "n/a: a hub-local matching engine: no peer sees the book, only the swap clauses it produces (R-SWAP-ONCHAIN)",
+    "quint": "n/a: a hub-local matching engine: no peer sees the book, only the swap clauses it produces (R-SWAP-ONCHAIN)",
+    "contract": "n/a: an off-chain hub engine; the chain sees only the signed swap clause (R-SWAP-ONCHAIN)",
+    "rig": "owed: matching engine thread (when the engine is wired into money state)",
+    "ts": "hold"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-BOOK-CANCEL-OWN only the owner takes an offer back, and what it took is returned"
+    }
+   ]
+  },
+  {
+   "id": "R-BOOK-CLAUSE-LOCKSTEP",
+   "statement": "Every party that trades gets one execution: its Account moves by what it gave and got, and its swap clause is rebuilt from the lots still open at the offer's own price (or dropped when filled or withdrawn), never subtracted.",
+   "source": "Hub matching engine thread, coordinator brief 10-01 02:56 (Arthur: the matching engine is a parallel job; the swap clause stays the Account's)",
+   "layers": {
+    "arrival": "owed: spec thread (the swap step: R-SWAP-CLAUSE-WITH-FILL)",
+    "quint": "owed: spec thread (the swap step: R-SWAP-CLAUSE-WITH-FILL)",
+    "contract": "n/a: an off-chain hub engine; the chain sees only the signed swap clause (R-SWAP-ONCHAIN)",
+    "rig": "owed: matching engine thread (when the engine is wired into money state)",
+    "ts": "hold"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-BOOK-CLAUSE-LOCKSTEP a partial fill re-signs the clause of the lots left, and a full fill drops it"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-BOOK-CLAUSE-LOCKSTEP a taker that rests keeps a clause for what is left, at its own limit price"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-BOOK-CLAUSE-LOCKSTEP a dropped remainder withdraws the clause, with its reason"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-BOOK-PRICE-TIME R-BOOK-NEVER-CROSSED R-BOOK-CLAUSE-LOCKSTEP the book matches the oracle"
+    }
+   ]
+  },
+  {
+   "id": "R-BOOK-EXACT-AMOUNTS",
+   "statement": "Every amount of a fill is an exact integer (lots times the lot, lots times price times the tick) and fits a uint256; across the parties of one order, what is given in each token is what is gotten in it.",
+   "source": "Hub matching engine thread, coordinator brief 10-01 02:56 (Arthur: the matching engine is a parallel job; the swap clause stays the Account's)",
+   "layers": {
+    "arrival": "n/a: a hub-local matching engine: no peer sees the book, only the swap clauses it produces (R-SWAP-ONCHAIN)",
+    "quint": "n/a: a hub-local matching engine: no peer sees the book, only the swap clauses it produces (R-SWAP-ONCHAIN)",
+    "contract": "n/a: an off-chain hub engine; the chain sees only the signed swap clause (R-SWAP-ONCHAIN)",
+    "rig": "owed: matching engine thread (when the engine is wired into money state)",
+    "ts": "hold"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-BOOK-NO-SILENT-DROP R-BOOK-EXACT-AMOUNTS an order has lots, a price, and amounts that fit a uint256"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-BOOK-EXACT-AMOUNTS a buyer gives quote and gets base at the maker's price, each leg exact"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-BOOK-EXACT-AMOUNTS the steps scale the amounts, and a clause is its lots at its own price"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-BOOK-EXACT-AMOUNTS what the parties give in each token is what they get in it"
+    }
+   ]
+  },
+  {
+   "id": "R-BOOK-DISPUTE-HONORS",
+   "statement": "A dispute opened from any Account state the book produced pays each side what both signed: the moved offdeltas, plus (when the taker fills the open clauses in full) exactly the lots still open at the owners' own prices.",
+   "source": "Hub matching engine review B (PR 92), on Arthur's 10-01 02:53 swap decision (a dispute honors what was filled) and plan/swap-onchain.md",
+   "layers": {
+    "arrival": "owed: spec thread (the swap step)",
+    "quint": "owed: spec thread (the swap step)",
+    "contract": "hold",
+    "rig": "owed: matching engine thread (when the engine is wired into money state)",
+    "ts": "owed: matching engine thread (when the engine is wired into the Account)"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "R-BOOK-DISPUTE-HONORS a dispute from any state the book put an Account in pays what both believed"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "R-BOOK-DISPUTE-HONORS a taker's partial ratio rounds each leg down, and the engine's remainder clause never needs one"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "R-BOOK-DISPUTE-HONORS fills as ratios would leave dust in most remainders; the engine lots leave none"
+    }
+   ]
+  },
+  {
+   "id": "R-DEPLOY-VERIFY",
+   "statement": "A deployed manifest is checked against its chain by one read-only command (contracts/deploy/verify.ts: eth_chainId, eth_blockNumber, eth_getCode, no key, nothing behind --live): each contract's runtime code is rebuilt from the compiled artifact with its library links and immutables filled, compared byte for byte with the chain's code and by keccak256 with the manifest's codeHash; any difference, an artifact older than the sources it imports, or a node on another chain is not a match, and the exit code is 0 only when every contract matches. The gate runs it against a fake node; whether main still equals Sepolia is the command's answer, not a gate test.",
+   "source": "coordinator 10-01 08:23 (the progress report cannot call the Sepolia deployment done while nothing compares the deployed code with the current build)",
+   "layers": {
+    "arrival": "n/a: a check of a live deployment against the chain, not protocol behaviour",
+    "quint": "n/a: a check of a live deployment against the chain, not protocol behaviour",
+    "contract": "hold",
+    "rig": "n/a: a check of a live deployment with no system state for the walk",
+    "ts": "n/a: deployment tooling lives under contracts/deploy; xln.ts takes no part"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "R-DEPLOY-VERIFY every contract and the faucet token match, with the manifest's code hashes"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "R-DEPLOY-VERIFY the immutables and link slots are rebuilt from the manifest: the Depository holds 8+4 deploy addresses, the admin once, and 14 library links"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "R-DEPLOY-VERIFY a library's own-address immutable is its deployed address; the token's immutable is its decimals"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "R-DEPLOY-VERIFY one flipped byte of compiled code: that contract differs at that byte, as compiled code, and no other contract does"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "R-DEPLOY-VERIFY a wrong admin in the Depository's immutable slot is named as the admin immutable"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "R-DEPLOY-VERIFY a different library address in a link slot is named as that library's link slot"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "R-DEPLOY-VERIFY an address with no code, and code that is cut short or has a tail added, differ"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "R-DEPLOY-VERIFY code that equals the build but not the manifest's code hash differs too (the manifest names another deployment)"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "R-DEPLOY-VERIFY a manifest address that points at another contract's code differs, even though that code is a deployed contract of ours"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "R-DEPLOY-VERIFY a node on another chain is refused, not read"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "R-DEPLOY-VERIFY an artifact older than its source is refused, not compared"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "R-DEPLOY-VERIFY an immutable the check does not know the value of is an error, not a pass"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "R-DEPLOY-VERIFY a matching chain prints nine matches and exits 0; only the three read methods are ever called"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "R-DEPLOY-VERIFY one differing contract is printed as differ with its first differing byte, the others still match, and the exit is 1"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "R-DEPLOY-VERIFY a node that cannot be read, and a node on the wrong chain, exit 2 and print no match"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "R-DEPLOY-VERIFY it never reads a key: the environment's DEPLOYER_PRIVATE_KEY does not reach its output, and its source holds no signer and no write call"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "R-DEPLOY-VERIFY the EntityProvider the fake chain serves holds the manifest's deployer in both foundationDeployer slots"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "R-DEPLOY-VERIFY a difference in the very last byte of any contract's code, the faucet token's included, is a differ at that byte"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "R-DEPLOY-VERIFY readBuild names a source that was edited after the build: the edited file, one it imports, and not one it does not import"
+    }
+   ]
+  },
+  {
+   "id": "R-GATE-CONTRACTS-VM",
+   "statement": "The contracts/ BrowserVM and deploy-gate tests (contracts/test/vm/<area>/*.test.ts, contracts/test/gate/*.test.ts) run inside the one gate, one file per process after a rebuild that leaves the committed typechain-types as they were: `bun rules/check.ts` (and --contracts-only) is red when one is red, when the rebuild fails or changes typechain-types, or when no test file is found, and CI's contracts job runs that same command.",
+   "source": "coordinator 10-01 08:48 (a contracts/test/gate test went red on GitHub only: the local gate checked where such tests sit but never ran them)",
+   "layers": {
+    "arrival": "n/a: a repository gate rule, not protocol behaviour; no spec page models it",
+    "quint": "n/a: a repository gate rule, not protocol behaviour; no spec models it",
+    "contract": "n/a: a gate over the repository (pure/rules and CI); it is not contract code",
+    "rig": "n/a: a gate over the repository, with no system state for the walk",
+    "ts": "hold"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CONTRACTS-VM a red contracts/ BrowserVM or deploy-gate test, or a stale typechain, alone is 1"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CONTRACTS-VM a red gate test of contracts/ exits 1 and names the file"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CONTRACTS-VM the same test passing, with a quiet rebuild, passes the contracts part"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CONTRACTS-VM a rebuild that writes into typechain-types exits 1 as stale"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CONTRACTS-VM the files are CI's globs: vm/<area>/*.test.ts and gate/*.test.ts, sorted, nothing else"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CONTRACTS-VM a tree with no gate test is red, not an empty pass"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CONTRACTS-VM a green rebuild and green tests pass, the build first and each test file in a process of its own"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CONTRACTS-VM a red test file is named with its exit code and the end of its output, and the other files still run"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CONTRACTS-VM a test that did not start is red, not skipped"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CONTRACTS-VM a failing rebuild is red and says so"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CONTRACTS-VM a rebuild that changes typechain-types is red: the committed files are stale"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CONTRACTS-VM the digest is the same for the same files and differs for a changed, an added and a renamed file"
+    }
+   ]
+  },
+  {
+   "id": "R-GATE-CI-STEPS",
+   "statement": "Every command of a job behind GitHub's `One gate` is a command of the local gate or listed set-up (installs, cd, the ast-grep script), and every gate command (tsc, bun rules/check.ts, frozen, style, bun test, test:seeds) runs in some such job, so a step only CI runs, such as a test loop, or a gate step CI drops, is a problem on the next run of the drift test.",
+   "source": "coordinator 10-01 08:48 (same hole: a CI-only test loop)",
+   "layers": {
+    "arrival": "n/a: a repository gate rule, not protocol behaviour; no spec page models it",
+    "quint": "n/a: a repository gate rule, not protocol behaviour; no spec models it",
+    "contract": "n/a: a gate over the repository (pure/rules and CI); it is not contract code",
+    "rig": "n/a: a gate over the repository, with no system state for the walk",
+    "ts": "hold"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-STEPS jobs are cut at their ids, and one-gate names the jobs it needs"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-STEPS a run is one line, or a block read to its dedent; && and ; split it, a continuation joins it, other keys are not read"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-STEPS a command in a comment is not a command: the workflow is read without its comments"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-STEPS a workflow whose gate jobs run exactly the gate commands, with set-up, agrees"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-STEPS a loop that runs tests in the workflow only is named, with its job and each command of it"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-STEPS any other command in a gate job is named, a gate flag that is not a part flag included"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-STEPS a command in a job that one-gate does not need is not judged"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-STEPS a gate command that no gate job runs any more is named"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-STEPS a one-gate that needs a job the workflow does not have is named"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-STEPS a workflow with no one-gate job is not judged"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-STEPS the step comparison is part of the drift check"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-STEPS the jobs behind One gate run the gate's commands and set-up only"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-STEPS the check is not vacuous: the real one-gate needs jobs, and they run the gate's commands"
+    }
+   ]
+  },
+  {
+   "id": "R-GATE-CI-SETUP-RETRY",
+   "statement": "A gate lane does not go red because a package mirror timed out once: ast-grep and uv come from the CI cache when it holds the pinned version and are otherwise installed with up to three tries (.github/scripts/retry.sh, setup-ast-grep.sh), and the pins stay the workflow's only copy.",
+   "source": "coordinator 10-01 08:36 (the bun test lane died in setup on an ast-grep download timeout)",
+   "layers": {
+    "arrival": "n/a: a repository gate rule, not protocol behaviour; no spec page models it",
+    "quint": "n/a: a repository gate rule, not protocol behaviour; no spec models it",
+    "contract": "n/a: a gate over the repository (pure/rules and CI); it is not contract code",
+    "rig": "n/a: a gate over the repository, with no system state for the walk",
+    "ts": "hold"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-SETUP-RETRY a command that fails once and then works is run twice and passes"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-SETUP-RETRY a command that always fails is run three times, then fails and says so"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-SETUP-RETRY a command that works is run once"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-SETUP-RETRY what the cache restored is used: the pinned ast-grep answers offline, so nothing is installed"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-SETUP-RETRY with nothing cached, uv and then ast-grep are installed at their pins and the result is checked"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-SETUP-RETRY a download that times out once is retried, and the lane stays green"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-SETUP-RETRY a download that never works fails the step after three tries, and the check at the end does not run"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-SETUP-RETRY the versions are arguments, so the workflow's pin is the only copy"
+    }
+   ]
+  },
+  {
+   "id": "R-GATE-CI-TRIGGERS",
+   "statement": "GitHub's One gate starts on every pull request whatever base it targets or files it touches, and no job behind it can be skipped: the gate workflow runs on pull_request with no branches, branches-ignore, paths, paths-ignore or types filter, no gate job has a job-level if, and one-gate has none but always(). The five One gate checks are required, so a PR that never got them would stay blocked forever. Pushes to a PR branch that conflicts with its base get no pull_request run from GitHub itself; the conflict blocks the merge on its own and clears with the next push.",
+   "source": "coordinator 10-01 09:15 (PR 65 head 3cf41b4 got no checks; the five One gate checks are about to be required)",
+   "layers": {
+    "arrival": "n/a: a repository gate rule, not protocol behaviour; no spec page models it",
+    "quint": "n/a: a repository gate rule, not protocol behaviour; no spec models it",
+    "contract": "n/a: a gate over the repository (pure/rules and CI); it is not contract code",
+    "rig": "n/a: a gate over the repository, with no system state for the walk",
+    "ts": "hold"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-TRIGGERS pull_request with no filter, and a one-gate that always runs, agree"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-TRIGGERS the inline forms of on: that include pull_request agree, and a push filter on another event is none of its business"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-TRIGGERS a workflow with no one-gate job is not judged"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-TRIGGERS a workflow that does not run on pull_request is named"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-TRIGGERS every filter on pull_request is named: branches, branches-ignore, paths, paths-ignore, types"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-TRIGGERS a filter that sits under another event, after pull_request, is not read as pull_request's"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-TRIGGERS a filter after a blank line of the pull_request block is still named"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-TRIGGERS only the on: block is read for the trigger: a job or a key that merely ends in pull_request is not one"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-TRIGGERS a gate job with a job-level if is named, one-gate with any if but always() too"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-TRIGGERS an if on a step is not a skipped job"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-TRIGGERS the trigger check is part of the drift check"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-TRIGGERS the real workflows start on every pull request and cannot skip a gate job"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-TRIGGERS the check is not vacuous: the real One gate workflow is judged, and its pull_request trigger is there"
+    }
+   ]
+  },
+  {
+   "id": "R-GATE-CI-CHECK-NAMES",
+   "statement": "Every check the ruleset requires on the default branch (the five One gate checks, listed in .github/required-checks.json) is reported by a job of the gate workflow under exactly that name, a matrix job once per value: renaming a job, or dropping a seed from the matrix, is red in the drift tests instead of leaving a required check that never reports and a PR that waits on it forever.",
+   "source": "coordinator 10-01 09:32 (the five One gate checks are now required through a ruleset)",
+   "layers": {
+    "arrival": "n/a: a repository gate rule, not protocol behaviour; no spec page models it",
+    "quint": "n/a: a repository gate rule, not protocol behaviour; no spec models it",
+    "contract": "n/a: a gate over the repository (pure/rules and CI); it is not contract code",
+    "rig": "n/a: a gate over the repository, with no system state for the walk",
+    "ts": "hold"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-CHECK-NAMES a job reports its name, the job id when it has none, and a matrix name once per value"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-CHECK-NAMES a matrix name with two keys reports every combination, a key used twice is filled everywhere"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-CHECK-NAMES only the job's own name counts: a name: deeper in the job is not it, and a matrix key with no values reports no name"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-CHECK-NAMES a workflow with no one-gate job reports nothing, so it is not judged"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-CHECK-NAMES the required list is read from the contexts of the json, and anything else in it is not a name"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-CHECK-NAMES the workflow that reports every required name agrees"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-CHECK-NAMES a renamed job, a seed gone from the matrix, a changed name are each named"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-CHECK-NAMES a job whose name is dropped reports its id, which is not the required name"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-CHECK-NAMES an empty required list is a problem of its own, not a pass"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-CHECK-NAMES every check the ruleset requires is reported by a job of the real workflow"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-CHECK-NAMES the check is not vacuous: five names are required, and the real One gate workflow reports them"
     }
    ]
   },
@@ -3452,13 +4644,19 @@
    "statement": "Once the node co-signs a settlement or collateral-to-reserve it proposes no new frames on that Account until the operation lands on chain or is superseded, and it refuses every frame its peer proposes meanwhile (R-FRAME-REFUSAL, fault frozen, retryable; coordinator 10-01 06:18): the signature commits to the epoch and the nonce, not to the off-chain height, so frames signed after it would be lost when it lands, and a peer frame accepted after the fold was signed makes the fold disagree with the off-chain state.",
    "source": "coordinator 10-01 04:54 (answer to pr-41-review Round 3 item 4.2)",
    "layers": {
-    "arrival": "owed: spec thread",
-    "quint": "owed: spec thread",
-    "contract": "-",
-    "rig": "-",
+    "arrival": "owed: spec thread, next Arrival page",
+    "quint": "owed: spec thread, new Quint branch",
+    "contract": "n/a: the freeze is the node's off-chain duty after it signs; the contract only sees the landed batch",
+    "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
     "ts": "hold"
    },
    "killers": [
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "a Runtime test: after co-signing a settlement the Account proposes nothing until the settlement lands",
+     "owed": "Entity/Runtime cut slice 3"
+    },
     {
      "kind": "test",
      "layer": "ts",
@@ -3651,762 +4849,6 @@
      "kind": "test",
      "layer": "ts",
      "name": "R-DISPUTE-WATCH a Host that restarts keeps the dispute and is asked to counter again"
-    }
-   ]
-  },
-  {
-   "id": "R-GATE-CI-DRIFT",
-   "statement": "What GitHub CI repeats from files it cannot read (the Bun version, the seed matrix, the ast-grep version) is compared with its source from code, never from a comment, in every workflow file whatever its extension, and a form the comparison cannot read (a setup-bun step with no bun-version, a bun-version-file) is a problem, not a pass.",
-   "source": "coordinator 10-01 (PR #90 review: the reviewer planted four drifts that stayed green)",
-   "layers": {
-    "arrival": "-",
-    "quint": "-",
-    "contract": "-",
-    "rig": "-",
-    "ts": "hold"
-   },
-   "killers": [
-    {
-     "kind": "test",
-     "layer": "ts",
-     "name": "R-GATE-CI-DRIFT packageManager, bun-version, the seed matrix, the default seeds and the pins are read from their own syntax"
-    },
-    {
-     "kind": "test",
-     "layer": "ts",
-     "name": "R-GATE-CI-DRIFT the real workflows, package.json files and style/check.ts agree"
-    },
-    {
-     "kind": "test",
-     "layer": "ts",
-     "name": "R-GATE-CI-DRIFT the real files hold at least one copy of each thing compared (the comparison is not vacuous)"
-    },
-    {
-     "kind": "test",
-     "layer": "ts",
-     "name": "R-GATE-CI-DRIFT the planted baseline agrees"
-    },
-    {
-     "kind": "test",
-     "layer": "ts",
-     "name": "R-GATE-CI-DRIFT a job on another Bun than packageManager"
-    },
-    {
-     "kind": "test",
-     "layer": "ts",
-     "name": "R-GATE-CI-DRIFT a seed matrix that is not the default of test:seeds"
-    },
-    {
-     "kind": "test",
-     "layer": "ts",
-     "name": "R-GATE-CI-DRIFT an ast-grep on PATH that is not the one style/check.ts runs"
-    },
-    {
-     "kind": "test",
-     "layer": "ts",
-     "name": "R-GATE-CI-DRIFT an unpinned ast-grep in style/check.ts, a missing packageManager and a missing default are problems, not silence"
-    },
-    {
-     "kind": "test",
-     "layer": "ts",
-     "name": "R-GATE-CI-DRIFT a setup-bun step with no bun-version is a problem, and a bun-version in another step does not rescue it"
-    },
-    {
-     "kind": "test",
-     "layer": "ts",
-     "name": "R-GATE-CI-DRIFT bun-version-file is a problem: the file cannot be compared with packageManager"
-    },
-    {
-     "kind": "test",
-     "layer": "ts",
-     "name": "R-GATE-CI-DRIFT a setup-bun step is found with its with-block, whatever else sits around it"
-    },
-    {
-     "kind": "test",
-     "layer": "ts",
-     "name": "R-GATE-CI-DRIFT a workflow named .yaml is read, and so is every file in .github/workflows"
-    },
-    {
-     "kind": "test",
-     "layer": "ts",
-     "name": "R-GATE-CI-DRIFT an install that lost its pin is a problem even when a comment still names the pin"
-    },
-    {
-     "kind": "test",
-     "layer": "ts",
-     "name": "R-GATE-CI-DRIFT a comment is never a copy: a commented bun-version, seed matrix or pin counts for nothing"
-    },
-    {
-     "kind": "test",
-     "layer": "ts",
-     "name": "R-GATE-CI-DRIFT the same plants on the real build-and-test.yml go red (its own syntax, its own comments)"
-    },
-    {
-     "kind": "test",
-     "layer": "ts",
-     "name": "R-GATE-CI-DRIFT a comment that names ast-grep-cli without a pin is not an install, so it is no problem"
-    },
-    {
-     "kind": "test",
-     "layer": "ts",
-     "name": "R-GATE-CI-DRIFT the setup-bun action is found in any case, as GitHub reads action names without case"
-    }
-   ]
-  },
-  {
-   "id": "R-SWAP-ONCHAIN",
-   "statement": "A swap clause in a signed ProofBody settles in a dispute finalize at the taker's fill ratio: each leg is floor(amount * ratio / 65535) on its own, a missing or malformed taker argument is a 0% fill, a clause that moves a delta it has no allowance for reverts the whole finalize, an allowance below the fill caps that delta (clamp, no revert), the n-th ratio is for the n-th swap of its owner, and a ratio the taker committed at the start is the one applied (another is refused).",
-   "source": "plan/swap-onchain.md (coordinator decision 10-01 03:11: stock DeltaTransformer, no contract change, expiry off-chain)",
-   "layers": {
-    "arrival": "owed: #41",
-    "quint": "owed: #44",
-    "contract": "hold",
-    "rig": "-",
-    "ts": "-"
-   },
-   "killers": [
-    {
-     "kind": "test",
-     "layer": "contract",
-     "name": "test_R_SWAP_ONCHAIN_partialFillLeftMaker"
-    },
-    {
-     "kind": "test",
-     "layer": "contract",
-     "name": "test_R_SWAP_ONCHAIN_partialFillRightMaker"
-    },
-    {
-     "kind": "test",
-     "layer": "contract",
-     "name": "test_R_SWAP_ONCHAIN_fullFillMovesTheWholeOrder"
-    },
-    {
-     "kind": "test",
-     "layer": "contract",
-     "name": "test_R_SWAP_ONCHAIN_legsRoundDownIndependentlyMakerGivesForNothing"
-    },
-    {
-     "kind": "test",
-     "layer": "contract",
-     "name": "test_R_SWAP_ONCHAIN_legsRoundDownIndependentlyTakerPaysForNothing"
-    },
-    {
-     "kind": "test",
-     "layer": "contract",
-     "name": "test_R_SWAP_ONCHAIN_oneUnitOfRatioOnAnOrderOf65535IsOneOfEachLeg"
-    },
-    {
-     "kind": "test",
-     "layer": "contract",
-     "name": "test_R_SWAP_ONCHAIN_oneUnitOfRatioOnAnOrderOf65534IsZeroOfEachLeg"
-    },
-    {
-     "kind": "test",
-     "layer": "contract",
-     "name": "test_R_SWAP_ONCHAIN_zeroRatioMovesNothing"
-    },
-    {
-     "kind": "test",
-     "layer": "contract",
-     "name": "test_R_SWAP_ONCHAIN_noArgumentIsZeroFill"
-    },
-    {
-     "kind": "test",
-     "layer": "contract",
-     "name": "test_R_SWAP_ONCHAIN_malformedArgumentIsZeroFill"
-    },
-    {
-     "kind": "test",
-     "layer": "contract",
-     "name": "test_R_SWAP_ONCHAIN_missingAllowanceOnTheWantLegRevertsWholeFinalize"
-    },
-    {
-     "kind": "test",
-     "layer": "contract",
-     "name": "test_R_SWAP_ONCHAIN_missingAllowanceOnTheGiveLegRevertsWholeFinalize"
-    },
-    {
-     "kind": "test",
-     "layer": "contract",
-     "name": "test_R_SWAP_ONCHAIN_noAllowanceAtAllRevertsWholeFinalize"
-    },
-    {
-     "kind": "mutant",
-     "layer": "quint",
-     "name": "swap-fill-rounds-up",
-     "owed": "#44"
-    },
-    {
-     "kind": "test",
-     "layer": "contract",
-     "name": "test_R_SWAP_ONCHAIN_giveAllowanceBelowTheFillCapsWhatTheMakerGives"
-    },
-    {
-     "kind": "test",
-     "layer": "contract",
-     "name": "test_R_SWAP_ONCHAIN_wantAllowanceBelowTheFillCapsWhatTheMakerReceives"
-    },
-    {
-     "kind": "test",
-     "layer": "contract",
-     "name": "test_R_SWAP_ONCHAIN_allowanceInTheWrongDirectionMovesNothing"
-    },
-    {
-     "kind": "test",
-     "layer": "contract",
-     "name": "test_R_SWAP_ONCHAIN_twoSwapsLeftMakerTheFirstFillsAndTheSecondDoesNot"
-    },
-    {
-     "kind": "test",
-     "layer": "contract",
-     "name": "test_R_SWAP_ONCHAIN_twoSwapsLeftMakerTheSecondFillsAndTheFirstDoesNot"
-    },
-    {
-     "kind": "test",
-     "layer": "contract",
-     "name": "test_R_SWAP_ONCHAIN_twoSwapsRightMakerTheFirstFillsAndTheSecondDoesNot"
-    },
-    {
-     "kind": "test",
-     "layer": "contract",
-     "name": "test_R_SWAP_ONCHAIN_twoSwapsRightMakerTheSecondFillsAndTheFirstDoesNot"
-    },
-    {
-     "kind": "test",
-     "layer": "contract",
-     "name": "test_R_SWAP_ONCHAIN_takerWhoStartsFillsAtTheRatioItCommittedLeftMaker"
-    },
-    {
-     "kind": "test",
-     "layer": "contract",
-     "name": "test_R_SWAP_ONCHAIN_takerWhoStartsFillsAtTheRatioItCommittedRightMaker"
-    },
-    {
-     "kind": "test",
-     "layer": "contract",
-     "name": "test_R_SWAP_ONCHAIN_aRatioOtherThanTheCommittedOneIsRefused"
-    }
-   ]
-  },
-  {
-   "id": "R-GATE-TEST-TIMEOUTS",
-   "statement": "A heavy test or hook (one that starts a bun, forge, ast-grep, quint or uvx process, opens og's world or lane, walks or calls an explorer, directly or through a helper of its file) names its own timeout (the third argument of a test, the second of a hook), so a loaded machine cannot turn the gate red, and the suite runs with no --timeout flag.",
-   "source": "coordinator 10-01 06:52 (two threads hit Bun's 5 s default on the rules tests and the chaos explorers and worked around it by hand with a flag)",
-   "layers": {
-    "arrival": "-",
-    "quint": "-",
-    "contract": "-",
-    "rig": "-",
-    "ts": "hold"
-   },
-   "killers": [
-    {
-     "kind": "test",
-     "layer": "ts",
-     "name": "R-GATE-TEST-TIMEOUTS a test that starts a bun, forge, ast-grep, quint or uvx process, or process.execPath, is heavy"
-    },
-    {
-     "kind": "test",
-     "layer": "ts",
-     "name": "R-GATE-TEST-TIMEOUTS the object form of a spawn, a command line given to execSync or exec, and a helper declared with let, var or class are heavy too"
-    },
-    {
-     "kind": "test",
-     "layer": "ts",
-     "name": "R-GATE-TEST-TIMEOUTS git, cat and rm are cheap: a test that only runs them is not heavy"
-    },
-    {
-     "kind": "test",
-     "layer": "ts",
-     "name": "R-GATE-TEST-TIMEOUTS a test that opens og's world or lane, walks or calls an explorer is heavy; a name that only starts like one is not"
-    },
-    {
-     "kind": "test",
-     "layer": "ts",
-     "name": "R-GATE-TEST-TIMEOUTS a heavy call in a comment or a string is not a call"
-    },
-    {
-     "kind": "test",
-     "layer": "ts",
-     "name": "R-GATE-TEST-TIMEOUTS a test is heavy through a helper of its own file, even two helpers away, and not through a cheap one"
-    },
-    {
-     "kind": "test",
-     "layer": "ts",
-     "name": "R-GATE-TEST-TIMEOUTS a third argument is a timeout: a number, a constant or an object, with or without a trailing comma"
-    },
-    {
-     "kind": "test",
-     "layer": "ts",
-     "name": "R-GATE-TEST-TIMEOUTS commas inside the callback, its parameters and its default values are not arguments"
-    },
-    {
-     "kind": "test",
-     "layer": "ts",
-     "name": "R-GATE-TEST-TIMEOUTS a test in a loop or a describe is read, it() and test.only() too, test.skip() and test.each() are not"
-    },
-    {
-     "kind": "test",
-     "layer": "ts",
-     "name": "R-GATE-TEST-TIMEOUTS testCalls says where each call is, whether it names a timeout, and where its callback ends"
-    },
-    {
-     "kind": "test",
-     "layer": "ts",
-     "name": "R-GATE-TEST-TIMEOUTS a heavy beforeAll, beforeEach, afterAll or afterEach hook needs a timeout as its second argument, a cheap hook needs none"
-    },
-    {
-     "kind": "test",
-     "layer": "ts",
-     "name": "R-GATE-TEST-TIMEOUTS a heavy test with no timeout is red and named with its file and line"
-    },
-    {
-     "kind": "test",
-     "layer": "ts",
-     "name": "R-GATE-TEST-TIMEOUTS a .test.tsx and a .test.mts file are test files too"
-    },
-    {
-     "kind": "test",
-     "layer": "ts",
-     "name": "R-GATE-TEST-TIMEOUTS the same test with a timeout is green, and a file that is not a test file is not read"
-    },
-    {
-     "kind": "test",
-     "layer": "ts",
-     "name": "R-GATE-TEST-TIMEOUTS a tree git does not list is red, not an empty pass"
-    },
-    {
-     "kind": "test",
-     "layer": "ts",
-     "name": "R-GATE-TEST-TIMEOUTS every heavy test of pure/ names its own timeout"
-    },
-    {
-     "kind": "test",
-     "layer": "ts",
-     "name": "R-GATE-TEST-TIMEOUTS the check is not vacuous: the real compose and forge tests are read as heavy, each with its timeout"
-    },
-    {
-     "kind": "test",
-     "layer": "ts",
-     "name": "R-GATE-TEST-TIMEOUTS a heavy test with no timeout alone is 1"
-    },
-    {
-     "kind": "test",
-     "layer": "ts",
-     "name": "R-GATE-TEST-TIMEOUTS a heavy test with no timeout exits 1 and names the file and line"
-    },
-    {
-     "kind": "test",
-     "layer": "ts",
-     "name": "R-GATE-TEST-TIMEOUTS the same test with a timeout passes the timeouts part"
-    }
-   ]
-  },
-  {
-   "id": "R-BOOK-PRICE-TIME",
-   "statement": "An order trades against the best-priced resting offers it reaches, the earlier offer first within a price, and every trade is at the resting offer's price.",
-   "source": "Hub matching engine thread, coordinator brief 10-01 02:56 (Arthur: the matching engine is a parallel job; the swap clause stays the Account's)",
-   "layers": {
-    "arrival": "-",
-    "quint": "-",
-    "contract": "-",
-    "rig": "-",
-    "ts": "hold"
-   },
-   "killers": [
-    {
-     "kind": "test",
-     "layer": "ts",
-     "name": "R-BOOK-PRICE-TIME the best price fills first, and the earlier offer first within a price"
-    },
-    {
-     "kind": "test",
-     "layer": "ts",
-     "name": "R-BOOK-PRICE-TIME a trade is at the resting offer's price, so the taker gets any improvement"
-    },
-    {
-     "kind": "test",
-     "layer": "ts",
-     "name": "R-BOOK-PRICE-TIME a seller meets the highest bids first, and a bid below its limit is out of reach"
-    },
-    {
-     "kind": "test",
-     "layer": "ts",
-     "name": "R-BOOK-PRICE-TIME a resting order joins behind the equal prices and in front of the worse ones"
-    },
-    {
-     "kind": "test",
-     "layer": "ts",
-     "name": "R-BOOK-PRICE-TIME R-BOOK-NEVER-CROSSED R-BOOK-CLAUSE-LOCKSTEP the book matches the oracle"
-    }
-   ]
-  },
-  {
-   "id": "R-BOOK-LOTS-CONSERVED",
-   "statement": "Every lot of an order is either filled (and leaves its maker's offer by the same lots), rests, or is dropped with a reason; no lot is created or lost.",
-   "source": "Hub matching engine thread, coordinator brief 10-01 02:56 (Arthur: the matching engine is a parallel job; the swap clause stays the Account's)",
-   "layers": {
-    "arrival": "-",
-    "quint": "-",
-    "contract": "-",
-    "rig": "-",
-    "ts": "hold"
-   },
-   "killers": [
-    {
-     "kind": "test",
-     "layer": "ts",
-     "name": "R-BOOK-LOTS-CONSERVED a partial fill leaves the maker's rest in place, at the front of its price"
-    },
-    {
-     "kind": "test",
-     "layer": "ts",
-     "name": "R-BOOK-LOTS-CONSERVED a taker's unfilled lots rest, and the fills plus the rest are the order"
-    },
-    {
-     "kind": "test",
-     "layer": "ts",
-     "name": "R-BOOK-LOTS-CONSERVED an offer that fills exactly leaves the book"
-    }
-   ]
-  },
-  {
-   "id": "R-BOOK-NEVER-CROSSED",
-   "statement": "After every order and cancel, the best buy in a hub book is priced below its best sell.",
-   "source": "Hub matching engine thread, coordinator brief 10-01 02:56 (Arthur: the matching engine is a parallel job; the swap clause stays the Account's)",
-   "layers": {
-    "arrival": "-",
-    "quint": "-",
-    "contract": "-",
-    "rig": "-",
-    "ts": "hold"
-   },
-   "killers": [
-    {
-     "kind": "test",
-     "layer": "ts",
-     "name": "R-BOOK-PRICE-TIME R-BOOK-NEVER-CROSSED R-BOOK-CLAUSE-LOCKSTEP the book matches the oracle"
-    }
-   ]
-  },
-  {
-   "id": "R-BOOK-NO-SELF-TRADE",
-   "statement": "An order never trades with an offer of its own owner: the sweep stops at it and the rest is dropped; an all-or-nothing order that would is refused.",
-   "source": "Hub matching engine thread, coordinator brief 10-01 02:56 (Arthur: the matching engine is a parallel job; the swap clause stays the Account's)",
-   "layers": {
-    "arrival": "-",
-    "quint": "-",
-    "contract": "-",
-    "rig": "-",
-    "ts": "hold"
-   },
-   "killers": [
-    {
-     "kind": "test",
-     "layer": "ts",
-     "name": "R-BOOK-NO-SELF-TRADE a taker never trades with its own offer: it stops there and the rest is dropped"
-    },
-    {
-     "kind": "test",
-     "layer": "ts",
-     "name": "R-BOOK-NO-SELF-TRADE an all-or-nothing order that would meet itself is refused"
-    }
-   ]
-  },
-  {
-   "id": "R-BOOK-NO-SILENT-DROP",
-   "statement": "Every lot an order does not trade is named in its result (rested or dropped with a reason), and every refusal carries a tagged fault.",
-   "source": "Hub matching engine thread, coordinator brief 10-01 02:56 (Arthur: the matching engine is a parallel job; the swap clause stays the Account's)",
-   "layers": {
-    "arrival": "-",
-    "quint": "-",
-    "contract": "-",
-    "rig": "-",
-    "ts": "hold"
-   },
-   "killers": [
-    {
-     "kind": "test",
-     "layer": "ts",
-     "name": "R-BOOK-NO-SILENT-DROP an immediate order drops what it cannot trade, and says why"
-    },
-    {
-     "kind": "test",
-     "layer": "ts",
-     "name": "R-BOOK-NO-SILENT-DROP R-BOOK-EXACT-AMOUNTS an order has lots, a price, and amounts that fit a uint256"
-    },
-    {
-     "kind": "test",
-     "layer": "ts",
-     "name": "R-BOOK-NO-SILENT-DROP an id names one offer in the book"
-    }
-   ]
-  },
-  {
-   "id": "R-BOOK-ALL-OR-NOTHING",
-   "statement": "An all-or-nothing order trades whole or is refused with the lots it could fill, and the book is unchanged.",
-   "source": "Hub matching engine thread, coordinator brief 10-01 02:56 (Arthur: the matching engine is a parallel job; the swap clause stays the Account's)",
-   "layers": {
-    "arrival": "-",
-    "quint": "-",
-    "contract": "-",
-    "rig": "-",
-    "ts": "hold"
-   },
-   "killers": [
-    {
-     "kind": "test",
-     "layer": "ts",
-     "name": "R-BOOK-ALL-OR-NOTHING an order that cannot fill whole is refused with what it could fill"
-    }
-   ]
-  },
-  {
-   "id": "R-BOOK-BOUNDED",
-   "statement": "A hub book holds at most maxOrders offers and an owner at most maxPerOwner; only an order that may rest needs room, and a cancel frees it.",
-   "source": "Hub matching engine thread, coordinator brief 10-01 02:56 (Arthur: the matching engine is a parallel job; the swap clause stays the Account's)",
-   "layers": {
-    "arrival": "-",
-    "quint": "-",
-    "contract": "-",
-    "rig": "-",
-    "ts": "hold"
-   },
-   "killers": [
-    {
-     "kind": "test",
-     "layer": "ts",
-     "name": "R-BOOK-BOUNDED an owner holds at most maxPerOwner offers, and the book at most maxOrders"
-    },
-    {
-     "kind": "test",
-     "layer": "ts",
-     "name": "R-BOOK-BOUNDED an order that cannot rest needs no room, and a cancel gives the room back"
-    }
-   ]
-  },
-  {
-   "id": "R-BOOK-CANCEL-OWN",
-   "statement": "Only an offer's owner takes it back, and the book returns what it took.",
-   "source": "Hub matching engine thread, coordinator brief 10-01 02:56 (Arthur: the matching engine is a parallel job; the swap clause stays the Account's)",
-   "layers": {
-    "arrival": "-",
-    "quint": "-",
-    "contract": "-",
-    "rig": "-",
-    "ts": "hold"
-   },
-   "killers": [
-    {
-     "kind": "test",
-     "layer": "ts",
-     "name": "R-BOOK-CANCEL-OWN only the owner takes an offer back, and what it took is returned"
-    }
-   ]
-  },
-  {
-   "id": "R-BOOK-CLAUSE-LOCKSTEP",
-   "statement": "Every party that trades gets one execution: its Account moves by what it gave and got, and its swap clause is rebuilt from the lots still open at the offer's own price (or dropped when filled or withdrawn), never subtracted.",
-   "source": "Hub matching engine thread, coordinator brief 10-01 02:56 (Arthur: the matching engine is a parallel job; the swap clause stays the Account's)",
-   "layers": {
-    "arrival": "-",
-    "quint": "-",
-    "contract": "-",
-    "rig": "-",
-    "ts": "hold"
-   },
-   "killers": [
-    {
-     "kind": "test",
-     "layer": "ts",
-     "name": "R-BOOK-CLAUSE-LOCKSTEP a partial fill re-signs the clause of the lots left, and a full fill drops it"
-    },
-    {
-     "kind": "test",
-     "layer": "ts",
-     "name": "R-BOOK-CLAUSE-LOCKSTEP a taker that rests keeps a clause for what is left, at its own limit price"
-    },
-    {
-     "kind": "test",
-     "layer": "ts",
-     "name": "R-BOOK-CLAUSE-LOCKSTEP a dropped remainder withdraws the clause, with its reason"
-    },
-    {
-     "kind": "test",
-     "layer": "ts",
-     "name": "R-BOOK-PRICE-TIME R-BOOK-NEVER-CROSSED R-BOOK-CLAUSE-LOCKSTEP the book matches the oracle"
-    }
-   ]
-  },
-  {
-   "id": "R-BOOK-EXACT-AMOUNTS",
-   "statement": "Every amount of a fill is an exact integer (lots times the lot, lots times price times the tick) and fits a uint256; across the parties of one order, what is given in each token is what is gotten in it.",
-   "source": "Hub matching engine thread, coordinator brief 10-01 02:56 (Arthur: the matching engine is a parallel job; the swap clause stays the Account's)",
-   "layers": {
-    "arrival": "-",
-    "quint": "-",
-    "contract": "-",
-    "rig": "-",
-    "ts": "hold"
-   },
-   "killers": [
-    {
-     "kind": "test",
-     "layer": "ts",
-     "name": "R-BOOK-NO-SILENT-DROP R-BOOK-EXACT-AMOUNTS an order has lots, a price, and amounts that fit a uint256"
-    },
-    {
-     "kind": "test",
-     "layer": "ts",
-     "name": "R-BOOK-EXACT-AMOUNTS a buyer gives quote and gets base at the maker's price, each leg exact"
-    },
-    {
-     "kind": "test",
-     "layer": "ts",
-     "name": "R-BOOK-EXACT-AMOUNTS the steps scale the amounts, and a clause is its lots at its own price"
-    },
-    {
-     "kind": "test",
-     "layer": "ts",
-     "name": "R-BOOK-EXACT-AMOUNTS what the parties give in each token is what they get in it"
-    }
-   ]
-  },
-  {
-   "id": "R-BOOK-DISPUTE-HONORS",
-   "statement": "A dispute opened from any Account state the book produced pays each side what both signed: the moved offdeltas, plus (when the taker fills the open clauses in full) exactly the lots still open at the owners' own prices.",
-   "source": "Hub matching engine review B (PR 92), on Arthur's 10-01 02:53 swap decision (a dispute honors what was filled) and plan/swap-onchain.md",
-   "layers": {
-    "arrival": "-",
-    "quint": "-",
-    "contract": "hold",
-    "rig": "-",
-    "ts": "-"
-   },
-   "killers": [
-    {
-     "kind": "test",
-     "layer": "contract",
-     "name": "R-BOOK-DISPUTE-HONORS a dispute from any state the book put an Account in pays what both believed"
-    },
-    {
-     "kind": "test",
-     "layer": "contract",
-     "name": "R-BOOK-DISPUTE-HONORS a taker's partial ratio rounds each leg down, and the engine's remainder clause never needs one"
-    },
-    {
-     "kind": "test",
-     "layer": "contract",
-     "name": "R-BOOK-DISPUTE-HONORS fills as ratios would leave dust in most remainders; the engine lots leave none"
-    }
-   ]
-  },
-  {
-   "id": "R-DEPLOY-VERIFY",
-   "statement": "A deployed manifest is checked against its chain by one read-only command (contracts/deploy/verify.ts: eth_chainId, eth_blockNumber, eth_getCode, no key, nothing behind --live): each contract's runtime code is rebuilt from the compiled artifact with its library links and immutables filled, compared byte for byte with the chain's code and by keccak256 with the manifest's codeHash; any difference, an artifact older than the sources it imports, or a node on another chain is not a match, and the exit code is 0 only when every contract matches. The gate runs it against a fake node; whether main still equals Sepolia is the command's answer, not a gate test.",
-   "source": "coordinator 10-01 08:23 (the progress report cannot call the Sepolia deployment done while nothing compares the deployed code with the current build)",
-   "layers": {
-    "arrival": "-",
-    "quint": "-",
-    "contract": "hold",
-    "rig": "-",
-    "ts": "-"
-   },
-   "killers": [
-    {
-     "kind": "test",
-     "layer": "contract",
-     "name": "R-DEPLOY-VERIFY every contract and the faucet token match, with the manifest's code hashes"
-    },
-    {
-     "kind": "test",
-     "layer": "contract",
-     "name": "R-DEPLOY-VERIFY the immutables and link slots are rebuilt from the manifest: the Depository holds 8+4 deploy addresses, the admin once, and 14 library links"
-    },
-    {
-     "kind": "test",
-     "layer": "contract",
-     "name": "R-DEPLOY-VERIFY a library's own-address immutable is its deployed address; the token's immutable is its decimals"
-    },
-    {
-     "kind": "test",
-     "layer": "contract",
-     "name": "R-DEPLOY-VERIFY one flipped byte of compiled code: that contract differs at that byte, as compiled code, and no other contract does"
-    },
-    {
-     "kind": "test",
-     "layer": "contract",
-     "name": "R-DEPLOY-VERIFY a wrong admin in the Depository's immutable slot is named as the admin immutable"
-    },
-    {
-     "kind": "test",
-     "layer": "contract",
-     "name": "R-DEPLOY-VERIFY a different library address in a link slot is named as that library's link slot"
-    },
-    {
-     "kind": "test",
-     "layer": "contract",
-     "name": "R-DEPLOY-VERIFY an address with no code, and code that is cut short or has a tail added, differ"
-    },
-    {
-     "kind": "test",
-     "layer": "contract",
-     "name": "R-DEPLOY-VERIFY code that equals the build but not the manifest's code hash differs too (the manifest names another deployment)"
-    },
-    {
-     "kind": "test",
-     "layer": "contract",
-     "name": "R-DEPLOY-VERIFY a manifest address that points at another contract's code differs, even though that code is a deployed contract of ours"
-    },
-    {
-     "kind": "test",
-     "layer": "contract",
-     "name": "R-DEPLOY-VERIFY a node on another chain is refused, not read"
-    },
-    {
-     "kind": "test",
-     "layer": "contract",
-     "name": "R-DEPLOY-VERIFY an artifact older than its source is refused, not compared"
-    },
-    {
-     "kind": "test",
-     "layer": "contract",
-     "name": "R-DEPLOY-VERIFY an immutable the check does not know the value of is an error, not a pass"
-    },
-    {
-     "kind": "test",
-     "layer": "contract",
-     "name": "R-DEPLOY-VERIFY a matching chain prints nine matches and exits 0; only the three read methods are ever called"
-    },
-    {
-     "kind": "test",
-     "layer": "contract",
-     "name": "R-DEPLOY-VERIFY one differing contract is printed as differ with its first differing byte, the others still match, and the exit is 1"
-    },
-    {
-     "kind": "test",
-     "layer": "contract",
-     "name": "R-DEPLOY-VERIFY a node that cannot be read, and a node on the wrong chain, exit 2 and print no match"
-    },
-    {
-     "kind": "test",
-     "layer": "contract",
-     "name": "R-DEPLOY-VERIFY it never reads a key: the environment's DEPLOYER_PRIVATE_KEY does not reach its output, and its source holds no signer and no write call"
-    },
-    {
-     "kind": "test",
-     "layer": "contract",
-     "name": "R-DEPLOY-VERIFY the EntityProvider the fake chain serves holds the manifest's deployer in both foundationDeployer slots"
-    },
-    {
-     "kind": "test",
-     "layer": "contract",
-     "name": "R-DEPLOY-VERIFY a difference in the very last byte of any contract's code, the faucet token's included, is a differ at that byte"
-    },
-    {
-     "kind": "test",
-     "layer": "contract",
-     "name": "R-DEPLOY-VERIFY readBuild names a source that was edited after the build: the edited file, one it imports, and not one it does not import"
     }
    ]
   }
