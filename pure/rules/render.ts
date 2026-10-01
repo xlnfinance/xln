@@ -12,6 +12,10 @@ const cellText = (verdict: CellVerdict, hits: number): string => {
       return "MISSING";
     case "stale-owed":
       return `PROMOTE ${hits}`;
+    case "stale":
+      return `stale ${hits}`;
+    case "stale-absent":
+      return "STALE?";
     case "unstated":
       return "UNSTATED";
     case "na":
@@ -54,7 +58,7 @@ export const renderMarkdown = (evaluation: Evaluation): string =>
     `|---|${LAYERS.map(() => "---").join("|")}|---|`,
     ...evaluation.reports.map((report) => `| ${report.row.id} | ${rowCells(report).join(" | ")} | ${killersText(report)} |`),
     "",
-    "Progress per layer (`required` is the rules whose cell is `hold` or `owed`; `n/a` cells give a reason in the register, `unstated` cells are red):",
+    "Progress per layer (`required` is the rules whose cell is `hold`, `stale` or `owed`; `stale` counts as owed; `n/a` cells give a reason in the register, `unstated` cells are red):",
     "",
     ...summaryLines(evaluation).map((line) => `- ${line}`),
     "",

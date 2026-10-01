@@ -46,7 +46,7 @@ export const GAPS = {
   jEvents: {
     id: "j-events", kind: "scaffold", layer: "J",
     piece: "J watcher: chain logs to JEvent (j_epoch, j_dispute, j_dispute_over, j_op_lapsed) and a finalized J height for the Runtime. The harness reads _collaterals/_accounts directly and copies a deposit into both Account ledgers by hand.",
-    supplier: "Host / J watcher (not started); Entity side of it is chain facts in #99",
+    supplier: "transport thread: J watcher core in PR 116 (pure/j/watch.ts); the Host loop that fetches blocks is its next slice; Entity side is chain facts in #99",
     landed: () => has("host/watch.ts") || has("j/watch.ts") || has("chain/watch.ts"),
   },
   signedFrames: {
@@ -102,8 +102,8 @@ export const GAPS = {
   hostTransport: {
     id: "host-transport", kind: "missing", layer: "Host",
     piece: "Transport and durability: peers find each other (peer table, Q-T-4), messages travel between Runtimes, the WAL is written before outputs leave. The harness hands messages across in memory.",
-    supplier: "transport spec #65 merged (T0); no code yet",
-    landed: () => has("host/transport.ts"),
+    supplier: "transport thread: Host core in PR 118 (pure/host/host.ts); file and socket shell later in pure/host/shell/",
+    landed: () => has("host/host.ts"),
   },
   hubMatching: {
     id: "hub-matching", kind: "missing", layer: "Hub",
