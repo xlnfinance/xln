@@ -156,7 +156,8 @@ older ones arrive below it); mutants `receiver-commits-a-refused-frame` (no mark
 now also requires a held frame to be above the mark, and `no_orphan` says a side never holds as committed a frame its author has given up (it has committed it too, or still has it in flight). Not modelled: attempts outside a safe integer (the code
 bounds the receiver's check there; here the attempt is an unbounded integer and only the Byzantine actions pick it, from 0 to `MAX_ATTEMPT + 1`); persistence (the Runtime must persist `attempt` and the mark, or a restart reopens the fork).
 
-**A18. The proof nonce of a retry (found by the model while doing A16; for the coordinator to confirm).**
+**A18. The proof nonce of a retry. DECIDED (coordinator 10-01 05:19, R-RETRY-NEW-NONCE; found by the model while doing A16).**
+Decision: a retry signs its proof at a fresh nonce; the contract never needs stored + 1 for a signed proof (start > stored, counter >= opening, finalize >= stored), so the nonce counter may have gaps, but only after a refused attempt. The model below is that rule; the rest of this entry is how it was found. Still owed from the same review: R-PROOF-NONCE-ABOVE-SIGNED (coordinator 05:45): every committed frame's proof nonce is strictly above every proof nonce either side signed in the epoch, yielded and refused attempts included, and no two different proofs share a nonce. The model's `pnonce + 1 + attempt` covers the retry; the two schedules of Review A on PR 97 (a yield at attempt 1, a refusal then a commit at the same nonce where the stale proof wins the tie) are the next planted bugs.
 The decided rules do not fit together here. R-PROOF-NONCE says the proof nonce is gapless and signatures are one per (signer, nonce, author side); the proposer signs the proof of a frame when it PROPOSES (A5), and a refused frame is rolled back. A
 retry that dropped a tx re-proposes at the same height, so at the same nonce, with a different proof: the proposer signs a second, different proof under one (signer, nonce, side), which is exactly what `no_equivocation` (A13) forbids, and the peer
 holds both signatures (it can start a dispute on the abandoned one, and the retry cannot counter it: the same rank). The first version of the scenario test (b) showed it (`no_equivocation` false at the end of the drop schedule); a retry that drops nothing
@@ -188,7 +189,7 @@ so dropping the restriction is an equivalent mutant, and the restriction is a st
 **A13. The proof nonce is its own counter (N1, coordinator; found while doing it).**
 Choice: a frame carries a `nonce`, the proof nonce a dispute start would use; each replica keeps `pnonce`, the nonce of the frame it committed last. A receiver
 refuses a frame whose nonce is not above its `pnonce`, or leaps more than `MAX_NONCE_GAP`; signatures are keyed by (signer, nonce, branch). Within an epoch the
-nonce follows the tip by exactly one (`MAX_NONCE_GAP = 0`); the one jump is the first proof of a new epoch, stored + 2 by rule (R-IMPLICIT-BASELINE, `settle.qnt` `FIRST_GAP`, C13),
+nonce follows the tip by exactly one (`MAX_NONCE_GAP = 0`; gaps only after a refused attempt, R-RETRY-NEW-NONCE, A18); the one jump is the first proof of a new epoch, stored + 2 by rule (R-IMPLICIT-BASELINE, `settle.qnt` `FIRST_GAP`, C13),
 chosen from the chain's stored nonce and not by a frame's proposer. **Why not
 a free gap:** with `MAX_NONCE_GAP = 1` (mutant `proposer-may-skip-nonces`) a collision loser's abandoned proposal at nonce n+1 outranks the winner's frame at n, and
 the loser's next frame at n+1 signs a second proof under one key: `no_equivocation` fails, simulation finds it. The chain rule the model relies on is "a proof
