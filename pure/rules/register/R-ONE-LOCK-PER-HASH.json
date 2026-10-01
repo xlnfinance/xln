@@ -1,0 +1,59 @@
+{
+ "id": "R-ONE-LOCK-PER-HASH",
+ "statement": "One clause is open per hashlock in an Account: a second lock on a hashlock that is already open is refused with lock_exists (naming the slot that holds it), whichever slot or side it names; the slot id stays the address of a clause, and a hashlock opens again once its clause is resolved, cancelled or expired. Multi-path payments are unaffected: each path runs over a different Account. The Arrival cell holds only that at most one clause is open per hashlock and a second lock is refused (spec/money/ledger.scm, bug duplicate-hashlock); that the refusal names the open slot and that a hashlock opens again are owed on the Arrival page. The Quint cell holds the lock_exists refusal only; it does not name the slot that holds the hashlock and has no test of the hashlock opening again.",
+ "source": "coordinator 09-30 22:42 (A2 cross-check of Quint account_core.qnt against og xln.ts lockId == hashlock)",
+ "layers": {
+  "arrival": "hold",
+  "quint": "hold",
+  "contract": "n/a: an off-chain Account refusal; the chain sees only the signed proof",
+  "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
+  "ts": "hold"
+ },
+ "killers": [
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-ONE-LOCK-PER-HASH a second lock on an open hashlock is refused, whichever slot or side it names"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-ONE-LOCK-PER-HASH a hashlock opens again once its clause is gone"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-ONE-LOCK-PER-HASH at most one open clause per hashlock in every state, and a second lock is refused"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-ONE-LOCK-PER-HASH an open hashlock is refused in every token and opens again when it is gone"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-ONE-LOCK-PER-HASH the fault names the open slot, never the new lock's own, in either token order"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-ONE-LOCK-PER-HASH the very same hold locked into a second token is a second clause on the hashlock"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-ONE-LOCK-PER-HASH a hashlock is one clause in the Account whoever locks it and whatever it holds"
+  },
+  {
+   "kind": "bug",
+   "layer": "arrival",
+   "name": "duplicate-hashlock"
+  },
+  {
+   "kind": "mutant",
+   "layer": "quint",
+   "name": "duplicate-hashlock-allowed"
+  }
+ ]
+}

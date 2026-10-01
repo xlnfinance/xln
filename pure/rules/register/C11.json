@@ -1,0 +1,34 @@
+{
+ "id": "C11",
+ "statement": "Every dispute window stays above LAG (the 60 s testnet floor of H2 meets it). The Quint cell holds the two windows together exceeding the honest side's answer time, REACT = 2 * LAG, in ticks; the 60 s floor is the Rig's.",
+ "source": "contracts-decisions.md J2 (C11 pinned)",
+ "layers": {
+  "arrival": "owed: spec thread, next Arrival page (id not in a name yet)",
+  "quint": "hold",
+  "contract": "n/a: the contracts' part is the floor itself, H2; C11 is the relation to LAG, held by Quint and the rig",
+  "rig": "hold",
+  "ts": "owed: the cut (Runtime slice)"
+ },
+ "killers": [
+  {
+   "kind": "test",
+   "layer": "rig",
+   "name": "every dispute window stays above LAG (C11): the contracts' floor and the default terms"
+  },
+  {
+   "kind": "mutant",
+   "layer": "quint",
+   "name": "window-floor-below-react"
+  },
+  {
+   "kind": "mutant",
+   "layer": "quint",
+   "name": "react-longer-than-windows"
+  },
+  {
+   "kind": "mutant",
+   "layer": "quint",
+   "name": "windows-shorter-than-answer"
+  }
+ ]
+}

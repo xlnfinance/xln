@@ -1,0 +1,34 @@
+{
+ "id": "R-BOOK-EXACT-AMOUNTS",
+ "statement": "Every amount of a fill is an exact integer (lots times the lot, lots times price times the tick) and fits a uint256; across the parties of one order, what is given in each token is what is gotten in it.",
+ "source": "Hub matching engine thread, coordinator brief 10-01 02:56 (Arthur: the matching engine is a parallel job; the swap clause stays the Account's)",
+ "layers": {
+  "arrival": "n/a: a hub-local matching engine: no peer sees the book, only the swap clauses it produces (R-SWAP-ONCHAIN)",
+  "quint": "n/a: a hub-local matching engine: no peer sees the book, only the swap clauses it produces (R-SWAP-ONCHAIN)",
+  "contract": "n/a: an off-chain hub engine; the chain sees only the signed swap clause (R-SWAP-ONCHAIN)",
+  "rig": "owed: matching engine thread (when the engine is wired into money state)",
+  "ts": "hold"
+ },
+ "killers": [
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-BOOK-NO-SILENT-DROP R-BOOK-EXACT-AMOUNTS an order has lots, a price, and amounts that fit a uint256"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-BOOK-EXACT-AMOUNTS a buyer gives quote and gets base at the maker's price, each leg exact"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-BOOK-EXACT-AMOUNTS the steps scale the amounts, and a clause is its lots at its own price"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-BOOK-EXACT-AMOUNTS what the parties give in each token is what they get in it"
+  }
+ ]
+}

@@ -1,0 +1,25 @@
+{
+ "id": "R-ONE-BODY",
+ "statement": "A side that already holds the peer's ack of its own frame at height h never acks a different frame at h (the contract cannot enforce it: a second acked body outranks the first if the peer proposes as LEFT).",
+ "source": "contracts-decisions.md A12 (Runtime and spec rule)",
+ "layers": {
+  "arrival": "owed: spec thread, next Arrival page (id not in a name yet)",
+  "quint": "owed: spec thread, new Quint branch (id not in a name yet)",
+  "contract": "n/a: the rule says the contract cannot enforce it: a second acked body outranks the first (A12)",
+  "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
+  "ts": "hold"
+ },
+ "killers": [
+  {
+   "kind": "test",
+   "layer": "arrival",
+   "name": "to be named",
+   "owed": "thread 'Account spec comparison'"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-ONE-BODY after my frame is acked, a different frame on the same parent gets no ack"
+  }
+ ]
+}

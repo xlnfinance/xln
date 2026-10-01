@@ -1,0 +1,49 @@
+{
+ "id": "J6",
+ "statement": "A deposit leg hard-reverts on failure and travels alone in its batch. The Quint cell holds the hard revert and the sign-only-after-simulation rule with planted bugs; that a deposit leg travels alone in its batch is pinned by a scenario test (depositFundsThePaymentBehindItTest) with no planted bug.",
+ "source": "contracts-decisions.md J6",
+ "layers": {
+  "arrival": "hold",
+  "quint": "hold",
+  "contract": "hold",
+  "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
+  "ts": "owed: the cut (J batch-planner slice)"
+ },
+ "killers": [
+  {
+   "kind": "test",
+   "layer": "contract",
+   "name": "test_relayerWithoutAllowanceCannotBurnTheNonceOfADepositBatch"
+  },
+  {
+   "kind": "test",
+   "layer": "contract",
+   "name": "test_J6_depositBatchWithAFailingPaymentRevertsWhole"
+  },
+  {
+   "kind": "mutant",
+   "layer": "quint",
+   "name": "deposit-signed-without-simulation"
+  },
+  {
+   "kind": "bug",
+   "layer": "arrival",
+   "name": "legs-bundled"
+  },
+  {
+   "kind": "bug",
+   "layer": "arrival",
+   "name": "leg-soft"
+  },
+  {
+   "kind": "mutant",
+   "layer": "quint",
+   "name": "deposit-batch-soft-fails"
+  },
+  {
+   "kind": "mutant",
+   "layer": "quint",
+   "name": "deposit-ignores-the-token"
+  }
+ ]
+}
