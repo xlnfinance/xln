@@ -32,3 +32,11 @@ export const maxBudget = (cap: bigint, prelude: bigint): bigint => {
   const room = cap - prelude - POST_CALL_RESERVE;
   return room > 0n ? (room * 63n) / 64n : 0n;
 };
+
+/**
+ * What the transaction pays for the batch's bytes before the contract runs: the larger of the standard calldata cost
+ * (16 per non-zero byte) and the EIP-7623 floor (40 per non-zero byte), so the bound holds on either rule.
+ */
+const CALLDATA_GAS_PER_BYTE = 40n;
+
+export const calldataGas = (bytes: number): bigint => BigInt(bytes) * CALLDATA_GAS_PER_BYTE;

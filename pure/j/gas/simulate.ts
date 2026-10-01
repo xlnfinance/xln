@@ -7,12 +7,15 @@
 //   2. the budget is that gas plus the margin, and the batch at that budget is simulated again, because an answer that
 //      reads `gasleft()` differs by budget (the final simulation is at the final budget),
 //   3. only then is the batch signable.
+// The transaction pays for the batch's own bytes too (calldata), so the cap is judged on the prelude plus that plus the
+// budget: a batch no transaction can carry would stall every batch signed above it (F1).
 // A batch over the byte limit or over the chain's transaction gas cap is split, never signed; one that would revert is
 // held (a finalize before its gate opens, a paused token), never signed.
 import { match, type Tagged } from "../../kernel/core/tagged.ts";
 import { sealBatch, MIN_GAS_BUDGET, type SealedBatch, type Sealing, type SealFault } from "../batch/sealed.ts";
 import type { JOp } from "../op/ops.ts";
-import { budgetFor, fitsCap, maxBudget } from "./gas.ts";
+import { encodedBytes } from "../plan/fit.ts";
+import { budgetFor, calldataGas, fitsCap, maxBudget } from "./gas.ts";
 
 /** What the Host measured for one batch, named by its digest (which holds the nonce, the ops and the budget). */
 export type Simulation = Readonly<{
@@ -47,10 +50,11 @@ const smaller = (base: Base, gas: Gas, answers: readonly Simulation[], ops: read
   ? stepFor(base, gas, answers, ops.slice(0, Math.ceil(ops.length / 2)))
   : hold({ _tag: "one_op_over_limit", limit });
 
-const afterMeasure = (base: Base, gas: Gas, answers: readonly Simulation[], ops: readonly JOp[], applyGas: bigint):
-  Step => {
+const afterMeasure = (
+  base: Base, gas: Gas, carried: Gas, answers: readonly Simulation[], ops: readonly JOp[], applyGas: bigint,
+): Step => {
   const budget = budgetFor(applyGas);
-  if (!fitsCap(gas.txGasCap, gas.prelude, budget)) return smaller(base, gas, answers, ops, "gas");
+  if (!fitsCap(carried.txGasCap, carried.prelude, budget)) return smaller(base, gas, answers, ops, "gas");
   const final = sealBatch({ ...base, gasBudget: budget }, ops);
   if (!final.ok) return hold({ _tag: "unsealable", fault: final.error });
   const answer = answerFor(answers, final.value);
@@ -63,9 +67,13 @@ const afterMeasure = (base: Base, gas: Gas, answers: readonly Simulation[], ops:
 
 /** What to do next for these ops: simulate a named batch, sign one that was simulated, or hold. */
 export const stepFor = (base: Base, gas: Gas, answers: readonly Simulation[], ops: readonly JOp[]): Step => {
-  const probeBudget = maxBudget(gas.txGasCap, gas.prelude);
+  const bytes = encodedBytes(ops);
+  const carried = bytes.ok ? { ...gas, prelude: gas.prelude + calldataGas(bytes.value) } : gas;
+  const probeBudget = maxBudget(carried.txGasCap, carried.prelude);
   if (probeBudget < MIN_GAS_BUDGET) {
-    return hold({ _tag: "cap_below_minimum", txGasCap: gas.txGasCap, prelude: gas.prelude });
+    return ops.length > 1
+      ? smaller(base, gas, answers, ops, "gas")
+      : hold({ _tag: "cap_below_minimum", txGasCap: gas.txGasCap, prelude: carried.prelude });
   }
   const probe = sealBatch({ ...base, gasBudget: probeBudget }, ops);
   if (!probe.ok) {
@@ -77,6 +85,6 @@ export const stepFor = (base: Base, gas: Gas, answers: readonly Simulation[], op
   if (answer === undefined) return { _tag: "simulate", candidate: probe.value };
   return match(answer.outcome, {
     reverts: ({ reason }) => hold({ _tag: "would_revert", reason }),
-    ok: ({ applyGas }) => afterMeasure(base, gas, answers, ops, applyGas),
+    ok: ({ applyGas }) => afterMeasure(base, gas, carried, answers, ops, applyGas),
   });
 };

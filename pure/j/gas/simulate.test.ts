@@ -5,13 +5,22 @@ import { unwrapOr } from "../../kernel/core/result.ts";
 import { sealBatch, MIN_GAS_BUDGET, type SealedBatch } from "../batch/sealed.ts";
 import { MAX_ENCODED_BYTES } from "../op/limits.ts";
 import type { JOp } from "../op/ops.ts";
-import { APPLY_GAS, GAS, ME, RIGHT_PEER, finalize, idOf, reserveToReserve, settle } from "../fixtures.ts";
-import { budgetFor, fitsCap, maxBudget, requirement } from "./gas.ts";
-import { stepFor, type Simulation, type Step } from "./simulate.ts";
+import {
+  APPLY_GAS, GAS, ME, LEFT_PEER, RIGHT_PEER, bigStart, finalize, idOf, reserveToReserve, settle,
+} from "../fixtures.ts";
+import { encodedBytes } from "../plan/fit.ts";
+import { budgetFor, calldataGas, fitsCap, maxBudget, requirement } from "./gas.ts";
+import { stepFor, type Gas, type Simulation, type Step } from "./simulate.ts";
 
 const chain = unwrapOr(deployment(31337n, `0x${"0b".repeat(20)}`), (e) => expect.unreachable(JSON.stringify(e)));
 const base = { deployment: chain, entity: ME, nonce: 4n };
 const payments = (n: number): readonly JOp[] => Array.from({ length: n }, (_, i) => reserveToReserve(BigInt(i + 1)));
+
+/** The prelude of a transaction that carries these ops: the board's check and the batch's own calldata. */
+const carrying = (gas: Gas, ops: readonly JOp[]): bigint => {
+  const bytes = encodedBytes(ops);
+  return bytes.ok ? gas.prelude + calldataGas(bytes.value) : expect.unreachable(JSON.stringify(bytes.error));
+};
 
 const ok = (digest: string, applyGas = APPLY_GAS): Simulation => ({ digest, outcome: { _tag: "ok", applyGas } });
 const reverts = (digest: string, reason = "0xdeadbeef"): Simulation =>
@@ -35,7 +44,7 @@ describe("R-SIMULATE nothing is signed before the Host has answered a simulation
   const ops = payments(2);
   test("with no answer the first step is a probe at the largest budget the gas cap allows", () => {
     const probe = asked(stepFor(base, GAS, [], ops));
-    expect(probe.gasBudget).toBe(maxBudget(GAS.txGasCap, GAS.prelude));
+    expect(probe.gasBudget).toBe(maxBudget(GAS.txGasCap, carrying(GAS, ops)));
     expect(probe.ops).toEqual(ops);
   });
   test("a successful probe is not enough: the batch is simulated again at the budget it will be signed with", () => {
@@ -116,14 +125,46 @@ describe("R-SIMULATE never sign above the chain's transaction gas cap: split ins
   });
   test("a cap that cannot carry the minimum budget holds everything", () => {
     const gas = { txGasCap: 400_000n, prelude: 100_000n };
-    expect(stepFor(base, gas, [], payments(1))).toEqual({
-      _tag: "hold", why: { _tag: "cap_below_minimum", txGasCap: 400_000n, prelude: 100_000n },
+    const one = payments(1);
+    expect(stepFor(base, gas, [], one)).toEqual({
+      _tag: "hold", why: { _tag: "cap_below_minimum", txGasCap: 400_000n, prelude: carrying(gas, one) },
     });
   });
   test("the budget at the cap itself is allowed: the probe budget is the largest one that fits", () => {
-    const step = settled(payments(1), (b) => ok(b.digest, maxBudget(GAS.txGasCap, GAS.prelude) * 10n / 11n));
+    const one = payments(1);
+    const largest = maxBudget(GAS.txGasCap, carrying(GAS, one));
+    const step = settled(one, (b) => ok(b.digest, largest * 10n / 11n));
     expect(step._tag).toBe("sign");
-    expect(MIN_GAS_BUDGET <= maxBudget(GAS.txGasCap, GAS.prelude)).toBe(true);
+    expect(MIN_GAS_BUDGET <= largest).toBe(true);
+  });
+});
+
+describe("R-SIMULATE the cap counts the batch's own calldata", () => {
+  // A 128-signer board's check, and a 100 KiB proof body: prelude plus budget fits the cap, the bytes do not.
+  const gas = { txGasCap: GAS.txGasCap, prelude: 4_900_000n };
+  const heavyStart = [bigStart(RIGHT_PEER, 1n, 100)];
+  test("a batch that fits by prelude and budget and not with its bytes is held, never signed", () => {
+    const step = settled(heavyStart, (b) => ok(b.digest, 10_000_000n), gas);
+    expect(step).toEqual({ _tag: "hold", why: { _tag: "one_op_over_limit", limit: "gas" } });
+  });
+  test("the same budget in a small batch signs: it is the bytes that matter", () => {
+    expect(settled(payments(1), (b) => ok(b.digest, 10_000_000n), gas)._tag).toBe("sign");
+  });
+  test("whatever is signed, prelude plus calldata plus budget is within the cap", () => {
+    const ops = [bigStart(RIGHT_PEER, 1n, 40), bigStart(LEFT_PEER, 1n, 40), ...payments(3)];
+    const step = settled(ops, (b) => ok(b.digest, 3_000_000n + 1_000_000n * BigInt(b.ops.length)), gas);
+    if (step._tag !== "sign") return expect(step._tag).toBe("hold");
+    return expect(requirement(carrying(gas, step.candidate.ops), step.candidate.gasBudget))
+      .toBeLessThanOrEqual(gas.txGasCap);
+  });
+  test("a pair whose bytes leave no room for the minimum budget is split, not held", () => {
+    const tight = { txGasCap: GAS.txGasCap, prelude: 8_000_000n };
+    const pair = [bigStart(RIGHT_PEER, 1n, 100), bigStart(LEFT_PEER, 1n, 100)];
+    const step = settled(pair, (b) => ok(b.digest), tight);
+    expect(signed(step).ops).toEqual(pair.slice(0, 1));
+  });
+  test("calldata is priced at the dearer of the two rules: 40 gas a byte", () => {
+    expect(calldataGas(1_000)).toBe(40_000n);
   });
 });
 
