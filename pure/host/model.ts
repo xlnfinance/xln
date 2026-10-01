@@ -36,8 +36,10 @@ export type Effect =
   | Tagged<"chain", { action: JAction }>;
 
 /**
- * `height` is the highest J height the J loop has handed over and no frame has taken yet. Heights only rise, so one
- * waiting height stands for all that came before it, and it goes into the next frame ahead of the queue.
+ * `height` is the highest J height the J loop has handed over and no frame has taken yet, above the Runtime's view.
+ * Heights only rise, so one waiting height stands for all that came before it, and it goes into the next frame ahead of
+ * the queue. The J loop hands a height over only after the J events of its delivery are in the WAL, and keeps its
+ * cursor until a committed `j_height` row holds the height: the Host does not keep a waiting height across a crash.
  */
 export type Host = Readonly<{
   runtime: Runtime; limits: Limits; queue: readonly Item[]; height: JHeight | undefined;

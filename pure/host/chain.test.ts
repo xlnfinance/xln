@@ -73,4 +73,37 @@ describe("host/height a J height is a frame of its own, ahead of the queue; the 
     expect(staged === undefined ? [] : inputsOf(staged.input).map((i) => i._tag)).toEqual(["set_credit"]);
     expect(next.host.queue).toEqual([]);
   });
+
+  test("a height that does not rise above the Runtime's view is not kept: no frame and no row", () => {
+    const host = bob();
+    const view = host.runtime.view;
+    expect(heard(host, heightOf(view))).toBe(host);
+    expect(heard(host, heightOf(view - 1n))).toBe(host);
+    const waiting = heard(host, heightOf(view + 2n));
+    expect(heard(waiting, heightOf(view + 2n))).toBe(waiting);
+    expect(heard(waiting, heightOf(view + 1n))).toBe(waiting);
+  });
+
+  test("a quiet chain that announces its height at every poll never starves the queue", () => {
+    const host = submit(bob(), { to: BOB, input: credit(ALICE, 5n) });
+    const polled = Array.from({ length: 20 }).reduce<typeof host>((h) => heard(h, heightOf(host.runtime.view)), host);
+    const staged = unhalted(begin(polled, stamp(100n))).host.runtime.staged;
+    expect(staged?.input._tag).toBe("entity");
+  });
+
+  test("a height heard while a frame is staged waits for the next frame, which carries the later stamp", () => {
+    const staged = unhalted(begin(submit(bob(), { to: BOB, input: credit(ALICE, 5n) }), stamp(100n)));
+    const waiting = heard(staged.host, heightOf(staged.host.runtime.view + 3n));
+    expect(unhalted(begin(waiting, stamp(101n))).effects).toEqual([]);
+    const next = unhalted(begin(unhalted(persisted(waiting)).host, stamp(102n))).host.runtime.staged;
+    expect(next).toMatchObject({ stamp: stamp(102n), input: { _tag: "j_height" } });
+  });
+
+  test("a waiting height is lost in a crash: the Host that comes back holds none", () => {
+    const host = bob();
+    const waiting = heard(host, heightOf(host.runtime.view + 4n));
+    const back = unhalted(reopen(host.runtime.setup, [emptyEntity(BOB)], host.runtime.wal, BOUNDS));
+    expect(waiting.height).toBeDefined();
+    expect(back.host.height).toBeUndefined();
+  });
 });

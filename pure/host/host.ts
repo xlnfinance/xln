@@ -59,9 +59,17 @@ export const receive = (host: Host, message: Outbound): Received => {
   }
 };
 
-/** A J height from the J loop. Heights only rise: the highest one waits, and one frame takes it. */
+/**
+ * A J height from the J loop. It waits only if it is above both the one already waiting and the Runtime's view, since
+ * a height that does not rise would still be a frame of every Entity and a row of the WAL, and a quiet chain announces
+ * its height again at every poll. The highest waiting height is taken by one frame.
+ *
+ * A precondition the J loop delivers, as the shell does `from` (R-HEIGHT-ORDER): it hands a height over only after the
+ * J events of its delivery are in the WAL, because a height goes ahead of the queue, and it moves the watcher's cursor
+ * only once a committed `j_height` row holds the height, because a waiting height is lost in a crash.
+ */
 export const heard = (host: Host, height: JHeight): Host =>
-  ({ ...host, height: host.height === undefined || height > host.height ? height : host.height });
+  (height > host.runtime.view && (host.height === undefined || height > host.height) ? { ...host, height } : host);
 
 /** No frame is staged: the Host can begin one. */
 export const idle = (host: Host): boolean => host.runtime.staged === undefined;
