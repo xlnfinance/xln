@@ -1,0 +1,34 @@
+{
+ "id": "R-CANCEL",
+ "statement": "Only the payee resolves (with the secret, in time) or cancels a lock; anyone expires it after the deadline plus reserve.",
+ "source": "contracts-decisions.md, Account-layer decisions 09-30 D-AC-10",
+ "layers": {
+  "arrival": "owed: Arrival ledger merge",
+  "quint": "owed: spec thread, new Quint branch (id not in a name yet)",
+  "contract": "n/a: an off-chain Account rule about who may resolve; the chain settles a lock by its secret and deadline (H1)",
+  "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
+  "ts": "hold"
+ },
+ "killers": [
+  {
+   "kind": "mutant",
+   "layer": "quint",
+   "name": "cancel-by-anyone"
+  },
+  {
+   "kind": "mutant",
+   "layer": "quint",
+   "name": "resolve-by-payer"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-CANCEL only the payee resolves"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-CANCEL the payee cancels and the allocation stays; the payer cannot"
+  }
+ ]
+}

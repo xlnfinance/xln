@@ -1,0 +1,35 @@
+{
+ "id": "R-REFUSED-RELEASES-PAYER",
+ "statement": "A refused proposal releases the payer: when a counterparty refuses a proposed tx, the proposer's funds and the payment waiting on it are freed, never left locked. The Account does its part (R-FRAME-REFUSAL: the refusal message, the rollback, the refused tx noticed with fault peer_refused and the peer's fault tag); freeing the payer from that notice is an Entity/Runtime duty (owed to the cut).",
+ "source": "coordinator decision 10-01 on A3 (R-NOTICE follow-up)",
+ "layers": {
+  "arrival": "owed: spec thread (an Arrival page for the refused-proposal release)",
+  "quint": "owed: spec thread (a Quint model for the refused-proposal release)",
+  "contract": "n/a: freeing a payer is an off-chain Entity and Runtime duty",
+  "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
+  "ts": "hold"
+ },
+ "killers": [
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "to be named",
+   "owed": "Entity/Runtime cut"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-REFUSED-RELEASES-PAYER a lock waiting to be retried holds Alice's capacity against a payment"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-REFUSED-RELEASES-PAYER MAX_ATTEMPTS refusals drop the lock with a notice and leave nothing queued"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-REFUSED-RELEASES-PAYER the capacity is Alice's again and a payment commits on both sides"
+  }
+ ]
+}

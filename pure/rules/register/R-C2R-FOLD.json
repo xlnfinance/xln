@@ -1,0 +1,36 @@
+{
+ "id": "R-C2R-FOLD",
+ "statement": "The node co-signs a collateral-to-reserve only while the Account's offdelta is zero; otherwise it sends the withdrawal as a settlement that folds offdelta. The contract's processC2R applies only the withdrawn amount and does not fold offdelta, so a C2R co-signed with a nonzero offdelta lets a later dispute from the implicit proof erase the other side's payment.",
+ "source": "contracts-decisions.md R-C2R-FOLD (coordinator 10-01 04:34, Arrival #41 review round 3)",
+ "layers": {
+  "arrival": "owed: spec thread, next Arrival page",
+  "quint": "owed: spec thread, new Quint branch",
+  "contract": "hold",
+  "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
+  "ts": "owed: the cut (Entity and Runtime)"
+ },
+ "killers": [
+  {
+   "kind": "test",
+   "layer": "contract",
+   "name": "test_R_C2R_FOLD_aWithdrawalErasesTheOffdeltaOfTheOldEpoch"
+  },
+  {
+   "kind": "test",
+   "layer": "contract",
+   "name": "test_R_C2R_FOLD_controlWithoutTheWithdrawalTheSignedOffdeltaIsHonored"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "a Runtime test refusing to co-sign a C2R while offdelta is not zero",
+   "owed": "the cut (Entity and Runtime)"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "a Runtime test: a withdrawal with a nonzero offdelta is sent as a settlement that folds it, never as a C2R",
+   "owed": "Entity/Runtime cut slice 3"
+  }
+ ]
+}

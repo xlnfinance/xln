@@ -1,0 +1,19 @@
+{
+ "id": "N3",
+ "statement": "The deploy gate refuses a chain that is not a named testnet while the response floor is under 6 hours, and checks the batch gas cap; keyed by chain id, read from the compiled build.",
+ "source": "contracts-decisions.md N3",
+ "layers": {
+  "arrival": "n/a: a deploy-time gate of the contracts, not protocol behaviour",
+  "quint": "n/a: a deploy-time gate of the contracts, not protocol behaviour",
+  "contract": "hold",
+  "rig": "n/a: a deploy-time check with no system state for the walk",
+  "ts": "n/a: deploy tooling lives under contracts/deploy; xln.ts takes no part"
+ },
+ "killers": [
+  {
+   "kind": "test",
+   "layer": "contract",
+   "name": "deploy-gate"
+  }
+ ]
+}

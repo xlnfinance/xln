@@ -1,0 +1,25 @@
+{
+ "id": "R-P4",
+ "statement": "A party never disputes over a deadline that an ack arriving in the same frame already resolved (follows from R-E1).",
+ "source": "lessons.md section 6",
+ "layers": {
+  "arrival": "owed: spec thread, next Arrival page (id not in a name yet)",
+  "quint": "hold",
+  "contract": "n/a: when to dispute is an off-chain decision",
+  "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
+  "ts": "owed: the cut (Runtime slice)"
+ },
+ "killers": [
+  {
+   "kind": "test",
+   "layer": "arrival",
+   "name": "to be named",
+   "owed": "thread 'Account spec comparison'"
+  },
+  {
+   "kind": "mutant",
+   "layer": "quint",
+   "name": "hooks-read-pre-arrival"
+  }
+ ]
+}

@@ -1,0 +1,69 @@
+{
+ "id": "R-GATE-CI-CHECK-NAMES",
+ "statement": "Every check the ruleset requires on the default branch (the five One gate checks, listed in .github/required-checks.json) is reported by a job of the gate workflow under exactly that name, a matrix job once per value: renaming a job, or dropping a seed from the matrix, is red in the drift tests instead of leaving a required check that never reports and a PR that waits on it forever.",
+ "source": "coordinator 10-01 09:32 (the five One gate checks are now required through a ruleset)",
+ "layers": {
+  "arrival": "n/a: a repository gate rule, not protocol behaviour; no spec page models it",
+  "quint": "n/a: a repository gate rule, not protocol behaviour; no spec models it",
+  "contract": "n/a: a gate over the repository (pure/rules and CI); it is not contract code",
+  "rig": "n/a: a gate over the repository, with no system state for the walk",
+  "ts": "hold"
+ },
+ "killers": [
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-GATE-CI-CHECK-NAMES a job reports its name, the job id when it has none, and a matrix name once per value"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-GATE-CI-CHECK-NAMES a matrix name with two keys reports every combination, a key used twice is filled everywhere"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-GATE-CI-CHECK-NAMES only the job's own name counts: a name: deeper in the job is not it, and a matrix key with no values reports no name"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-GATE-CI-CHECK-NAMES a workflow with no one-gate job reports nothing, so it is not judged"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-GATE-CI-CHECK-NAMES the required list is read from the contexts of the json, and anything else in it is not a name"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-GATE-CI-CHECK-NAMES the workflow that reports every required name agrees"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-GATE-CI-CHECK-NAMES a renamed job, a seed gone from the matrix, a changed name are each named"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-GATE-CI-CHECK-NAMES a job whose name is dropped reports its id, which is not the required name"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-GATE-CI-CHECK-NAMES an empty required list is a problem of its own, not a pass"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-GATE-CI-CHECK-NAMES every check the ruleset requires is reported by a job of the real workflow"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-GATE-CI-CHECK-NAMES the check is not vacuous: five names are required, and the real One gate workflow reports them"
+  }
+ ]
+}
