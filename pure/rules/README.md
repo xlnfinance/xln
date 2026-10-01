@@ -49,6 +49,8 @@ Never add a rule here that a decision did not make: the register records decisio
 - `bun rules/checks/frozen.ts` fails when the tree differs from og at `566c850` under `core/` or `jurisdictions/` in any way (edit, delete, rename out, mode change, untracked file, non-ASCII path). The allowlist is empty for good; a failing git is red.
 - `bun pure/rules/checks/folder-width.ts` is the root `check:folder-width`, and `bun rules/check.ts` runs it too: og's limits and debt table (copied at `566c850`, plus `contracts/contracts` and the generated contracts folders), on the files git lists (tracked plus untracked, never ignored), so a dev machine's gitignored folders (`contracts/.typechain-hardhat`, `contracts/lib/forge-std`) do not widen a folder. It does not read og's script.
 
+- `rules/ci/ci-drift.test.ts` (run by `bun test`) compares what GitHub CI repeats with its source: every `bun-version` in `.github/workflows/` with `packageManager` in the root `package.json`, the gate's seed matrix with the default seeds of `test:seeds` in `pure/package.json`, and the `ast-grep-cli` version the workflow installs with the one `style/check.ts` runs through uvx. A planted drift in each is a named problem (`CI_DRIFT_*`).
+
 ## The gate's own tests are registered
 
 Rows `R-GATE-REGISTER`, `R-GATE-FROZEN`, `R-GATE-STYLE`, `R-GATE-WIDTH` and `R-GATE-COMPOSE` hold the gate's fools as named ts killers (the ts layer reads `pure/rules/` tests too). A skipped or deleted fool is a missing name, so the register gate is red. `rules/checks/compose.ts` turns the parts into one exit code, and `compose.test.ts` runs the real command over a scratch copy of `pure/` with a planted throw and a folder of 11 files.
