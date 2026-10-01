@@ -15,8 +15,9 @@ jobs:
   # The one gate: the same commands a contributor runs from pure/, in three parallel jobs. `one-gate` is the single
   # result to require; it also holds the fork's contract job (contracts-fork: BrowserVM and deploy-gate tests). The
   # Foundry suite joins the gate in `bun rules/check.ts` (PR 89), so gate-static sets Foundry and forge-std up.
-  # Bun is pinned to 1.4.0 (the root package.json's packageManager) in every job; nothing in the gate checks the
-  # version. The Worker-teardown segfault is worked around in pure/diff/rig/lane.ts for 1.3.11 and 1.4.0 alike.
+  # Bun is pinned to 1.4.0 in every job. pure/rules/ci/ci-drift.test.ts keeps each bun-version equal to the root
+  # package.json's packageManager, and `bun rules/check.ts` refuses a Bun older than pure/package.json's engines.bun
+  # (older Bun segfaults on Worker termination mid-run).
   gate-static:
     name: One gate (tsc, rules, frozen, style)
     runs-on: ubuntu-latest
