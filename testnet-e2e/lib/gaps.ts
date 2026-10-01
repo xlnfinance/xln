@@ -61,9 +61,15 @@ export const GAPS = {
     supplier: "#97 (pure/account/proof/body.ts, deadline.ts); R-DEADLINE-TIMESTAMP is open in contracts-decisions",
     landed: () => has("account/proof/body.ts"),
   },
+  entityHtlcCommands: {
+    id: "entity-htlc-commands", kind: "missing", layer: "Entity",
+    piece: "The Entity commands lock, resolve, cancel and expire, with the J view and retry pacing: main's Entity takes open_account, set_credit and pay only, so no HTLC hop can go through a Runtime.",
+    supplier: "#94 (cut slice 2, bottom of the cut thread's stack)",
+    landed: () => mentions("entity", /Tagged<"lock"/),
+  },
   htlcRoute: {
     id: "htlc-route", kind: "scaffold", layer: "Entity",
-    piece: "HTLC through the Runtime: the Entity takes no lock, resolve, cancel or expire command on main (open_account, set_credit, pay only), and nothing forwards: on an incoming lock, open the next hop with a shorter deadline; on a resolve, pass the secret upstream; hold duty while a signed proof carries the lock (R-SIGNED-IS-LIVE). The harness walks the route by hand, hop by hop.",
+    piece: "HTLC forwarding: on an incoming lock, open the next hop with a shorter deadline; on a resolve, pass the secret upstream; hold duty while a signed proof carries the lock (R-SIGNED-IS-LIVE). The harness walks the route by hand, hop by hop.",
     supplier: "the cut thread's multi-hop slice (the coordinator gave it that owner); hold duty is the A4b Runtime slice after #97",
     landed: () => has("runtime/htlc/route.ts") || has("entity/route.ts"),
   },

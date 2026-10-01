@@ -304,7 +304,7 @@ const htlc: Step<World> = {
       if (l.holds.length !== 0 || l.offdelta !== expected) throw new Error(`${k}: holds ${l.holds.length}, offdelta ${l.offdelta}, expected ${expected}`);
       return `${route[i]!.name} to ${route[i + 1]!.name}: clause deadline view+${deadlines[i]! - v.view}, resolved, payer's allocation fell by ${fmt(chain, amount)}`;
     });
-    return { checks: [`hashlock ${hashlock.slice(0, 12)} on three hops, J view ${v.view}, deadlines step down toward bob`, ...checks, "hubs end flat: each received 10 on one Account and paid 10 on the next (no fee modelled)"], gaps: ["htlcRoute", "signedFrames"] };
+    return { checks: [`hashlock ${hashlock.slice(0, 12)} on three hops, J view ${v.view}, deadlines step down toward bob`, ...checks, "hubs end flat: each received 10 on one Account and paid 10 on the next (no fee modelled)"], gaps: ["entityHtlcCommands", "htlcRoute", "signedFrames"] };
   },
 };
 
