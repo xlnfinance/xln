@@ -288,10 +288,10 @@ const onDeliver = (w: World, s: Side, r: Draw): World => {
   const quintSays = quintHears(w, s, fid);
   const heard = receive(rulesOf(w, s), w.t[s], msgAt(w, fid));
   const tsKind = KINDS.find((k) => k === heard.outcome._tag) ?? "refused";
-  // a repeat is a frame at the attempt this replica already refused on this head: a higher attempt is judged afresh
+  // a repeat is the very frame this replica already refused on this head; any other frame is judged afresh or stale
   const earlier = w.t[s].declined;
   const sent = msgAt(w, fid);
-  const repeat = earlier !== undefined && sent._tag === "frame" && sent.frame.attempt === earlier.attempt;
+  const repeat = earlier !== undefined && sent._tag === "frame" && hashOf(sent) === earlier.hash;
   const known = repeat && heard.outcome._tag === "refused_invalid" && quintSays.kind !== "refused";
   const sameRefusal = earlier === undefined ? [] : [{
     _tag: "refusal", hash: hashOf(sent), index: earlier.index,

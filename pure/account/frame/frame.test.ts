@@ -678,6 +678,40 @@ describe("account/frame what Review B of PR 85 found in round 2", () => {
     expect(receive(rulesAt(104n), reacked.replica, only(refused.sent)).outcome._tag).toBe("refused_invalid");
   });
 
+  test("R-EVERY-REFUSAL-ANSWERED a different frame at the refused attempt gets the stale answer, not a refusal", () => {
+    // Right restarted: its pending frame and its attempt count are gone, its queue is not. The new frame has one tx,
+    // so the old refusal's index 1 would name nothing in it and the proposer would wait for ever; in a frame of two
+    // or more it would drop an innocent tx for the old tx's fault.
+    const bad = propose(rulesAt(101n), queue(queue(locked.right, credit(7n)), resolve));
+    const refusedBad = receive(rulesAt(102n), locked.left, only(bad.sent));
+    expect(only(refusedBad.sent)).toMatchObject({ index: 1, fault: "past_deadline", mark: 0 });
+    const restarted = { ...bad.replica, pending: undefined, attempt: 0, mempool: [credit(9n)] };
+    const again = propose(rulesAt(101n), restarted);
+    const answer = receive(rulesAt(102n), refusedBad.replica, only(again.sent));
+    const newName = provisionalFrameHash(frameOf(only(again.sent)));
+    expect(answer.sent).toEqual([{ _tag: "refusal", hash: newName, index: 0, fault: STALE_ATTEMPT, mark: 0 }]);
+    expect(answer.replica).toEqual(refusedBad.replica);
+    const rolled = receive(rulesAt(101n), again.replica, only(answer.sent));
+    expect([rolled.outcome, rolled.replica.refused]).toEqual([{ _tag: "rolled_back" }, []]);
+    const next = propose(rulesAt(101n), rolled.replica);
+    expect(frameOf(only(next.sent)).attempt).toBe(1);
+    expect(receive(rulesAt(102n), answer.replica, only(next.sent)).outcome).toEqual({ _tag: "accepted" });
+  });
+
+  test("R-EVERY-REFUSAL-ANSWERED the attempt count stays a safe integer however the peer's marks climb", () => {
+    const sent = propose(rulesAt(104n), queue(locked.right, expire));
+    const name = provisionalFrameHash(frameOf(only(sent.sent)));
+    const told = (hash: FrameHash, mark: number): Msg<AccountTx> =>
+      ({ _tag: "refusal", hash, index: 0, fault: STALE_ATTEMPT, mark });
+    const top = receive(rulesAt(104n), sent.replica, told(name, Number.MAX_SAFE_INTEGER - 1));
+    expect([top.outcome, top.replica.attempt]).toEqual([{ _tag: "rolled_back" }, Number.MAX_SAFE_INTEGER]);
+    const again = propose(rulesAt(104n), top.replica);
+    const second = told(provisionalFrameHash(frameOf(only(again.sent))), 0);
+    const refused = receive(rulesAt(104n), again.replica, second);
+    expect(refused.outcome).toEqual({ _tag: "refusal_ignored" });
+    expect(refused.replica.attempt).toBe(Number.MAX_SAFE_INTEGER);
+  });
+
   test("R-EVERY-REFUSAL-ANSWERED a proposer refused MAX_ATTEMPTS + 1 times is answered and ends quiet", () => {
     const refusedAgain = (pair: { left: AccountReplica; right: AccountReplica }) => {
       const sent = propose(rulesAt(104n), pair.right);

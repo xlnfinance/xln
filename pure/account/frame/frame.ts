@@ -61,7 +61,7 @@ export type Refused<Tx, F> = Readonly<{ tx: Tx; fault: F | PeerRefused }>;
  * The highest attempt of the peer's that this replica refused on its current head, and why. A frame at or below it is
  * refused without a look: what was refused stays refused, whatever the view of J does later, and the memory is one row.
  */
-type Declined<F> = Readonly<{ attempt: number; index: number; fault: F }>;
+type Declined<F> = Readonly<{ hash: FrameHash; attempt: number; index: number; fault: F }>;
 
 type Proposed<Tx, S> = Readonly<{ frame: Frame<Tx>; after: S }>;
 
@@ -188,7 +188,7 @@ const decline = <Tx, S, F>(
   rules: Rules<Tx, S, F>, r: Replica<Tx, S, F>, name: FrameHash, f: Frame<Tx>,
   failure: Readonly<{ index: number; fault: F }>,
 ): Heard<Tx, S, F> => {
-  const d: Declined<F> = { attempt: f.attempt, ...failure };
+  const d: Declined<F> = { hash: name, attempt: f.attempt, ...failure };
   return refuseWith(rules, { ...r, declined: d }, name, d);
 };
 
@@ -212,7 +212,9 @@ const onFrame = <Tx, S, F>(rules: Rules<Tx, S, F>, r: Replica<Tx, S, F>, f: Fram
   }
   const declined = r.declined;
   if (declined !== undefined && f.attempt <= declined.attempt) {
-    return f.attempt === declined.attempt
+    // The index and the fault are those of the frame I refused: another frame at that attempt (a proposer that lost its
+    // count) gets the stale answer, which carries the mark, not a refusal that names someone else's tx.
+    return declined.hash === name
       ? refuseWith(rules, r, name, declined)
       : heard(r, [refusal({ hash: name, index: 0, fault: STALE_ATTEMPT, mark: declined.attempt })],
         { _tag: "refused_stale" });
@@ -246,14 +248,14 @@ const onRefusal = <Tx, S, F>(
 ): Heard<Tx, S, F> => {
   const pending = r.pending;
   const named = Number.isInteger(index) ? pending?.frame.txs[index] : undefined;
-  const counted = Number.isSafeInteger(mark) && mark >= 0 && mark < Number.MAX_SAFE_INTEGER;
+  const attempt = Math.max(r.attempt, mark) + 1;
+  const counted = Number.isSafeInteger(mark) && mark >= 0 && Number.isSafeInteger(attempt);
   if (pending === undefined || named === undefined || !counted || rules.hash(pending.frame) !== hash) {
     return heard(r, NO_MESSAGES, { _tag: "refusal_ignored" });
   }
   const retry = fault === STALE_ATTEMPT || (rules.retryable(fault) && r.attempt < MAX_ATTEMPTS);
   const kept = retry ? pending.frame.txs : pending.frame.txs.filter((_, i) => i !== index);
   const refused = retry ? r.refused : [...r.refused, { tx: named, fault: { _tag: "peer_refused", fault } as const }];
-  const attempt = Math.max(r.attempt, mark) + 1;
   const rolled = { ...r, mempool: [...kept, ...r.mempool], pending: undefined, refused, attempt };
   return heard(rolled, NO_MESSAGES, { _tag: "rolled_back" });
 };
