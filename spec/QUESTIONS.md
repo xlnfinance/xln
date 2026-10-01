@@ -292,6 +292,49 @@ frozen replica's own frame already out when it co-signed (it stays out; the froz
 after the unfreeze).
 Source: coordinator 10-01 (R-COSIGN-FREEZE); R-C2R-FOLD (Q-D-26).
 
+**Q-A-16. R-FRAME-EPOCH and R-FRAME-EPOCH-WEDGE: a frame carries the epoch and first nonce it is signed under (coordinator 10-01; Review A of PR 135, blockers B1 to B3).**
+The kernel's frame carries `epoch` and `firstNonce`; a replica judges only a frame of the pair it signs under itself, and refuses any
+other as `wrong_epoch` before any tx is looked at. The page: a frame carries `:ctx`, the pair (epoch, first nonce), in its body and so
+in its hash; a replica holds `:ctx` (the pair it last read from the chain) and `:ctx-ok` (true while every frame it committed was
+sealed under the pair it signed under at that moment). The world has `:chain` (the chain's own pair) and three counters with their
+bounds, all 0 in the default world so every older case keeps its state count (default 4563 / 18600 / 44, lossy 4405 / 13955 / 16):
+`max-epoch-moves` (the chain moves on to a higher epoch), `max-nonce-ups` (its stored nonce rises within an epoch), `max-closes` (the
+Runtime closes the epoch on the chain). Rules: `the chain moves on to a higher epoch` (Left's turn, as the only mover), `the
+chain's stored nonce rises within the epoch`, `hear the chain` (a replica takes the chain's pair only if its EPOCH is higher than
+its own: a report of the same epoch is ignored, which is what makes the wedge below), `the Runtime closes the epoch on the chain`
+(enabled when a side has a frame pending and the two replicas read ONE epoch under two nonces, the wedge; a replica behind in epoch
+cures itself by hearing the chain, so the Runtime does not close for it: the chain's pair becomes (epoch + 1, 0)).
+R-FRAME-EPOCH on the page: `on-honest-frame` refuses a frame whose `:ctx` is not the replica's own as `wrong_epoch`, index 0, with
+the replica's floor and its CURRENT mark (the mark is not written), after the slot door and before the mark check; the slot is
+noted (`peer-high` moves). The proposer's `handle-refusal` parks the frame when the fault is `wrong_epoch` and its own `:ctx`
+is still the frame's: the same frame stays pending, every tx kept, no notice, no new attempt number, so the resend sends the same
+bytes (a wait costs a resend, never a proof per try); when its own `:ctx` moved since it sealed, the frame goes back (every tx
+requeued, no notice) and is sealed anew at the next attempt. `wrong_epoch` is in the list of faults that judged nothing and costs no tx.
+Properties: the world property "R-FRAME-EPOCH: a frame is committed only under the epoch and first nonce its receiver signs under"
+(every replica's `:ctx-ok`), and two step properties on the delivery of a message (the first: a frame of another context is refused
+before it is judged, the slot noted, and the mark, the refused list, the mempool and the head untouched; the second: a `wrong_epoch`
+refusal of the frame as sealed leaves it pending, the same frame, every tx kept). Config `epoch` (Left's p, Right's x, no
+conflicts, no clock, one epoch move): 2319 states, 5868 transitions, 20 goals. Planted bugs, all under `epoch`: `epoch-accepts-wrong`
+(the context is not compared; with the step properties off, config `epoch-no-steps`, red on the world property),
+`epoch-remembers-mark` and `epoch-forgets-slot` (red on the first step property), `epoch-refusal-rolls-back` (the second),
+`epoch-refusal-drops-tx` (the refusal costs a tx: "a refused tx has a conflicting predecessor among the submitted txs, or depends
+on the clock").
+R-FRAME-EPOCH-WEDGE on the page: config `epoch-wedge` (Left's p only, no clock; one epoch move, one nonce rise, one close; with Right's x as well the space did not finish in
+an hour): 668 states, 1499 transitions, 36 goals. Left reads (1, 0), Right (0, 0)
+and then (1, 1) from the chain; the two now read one epoch under two nonces, each refuses the other's frames, and the proposer
+parks its own. Safety holds (no head splits, no tx is lost, every older property is on in the same run); only liveness is lost,
+and the checker's "can always still finish" sees it as soon as the nonce rose with no close left (planted bug `epoch-no-heal`:
+`max-closes` 0, red on "can always still finish"). The heal is the Runtime closing the epoch on the chain (the dispute path, as for
+the cap wedge of R-SIGNED-IS-LIVE): one rule here, the dispute page owns the dispute itself.
+The close is a chain event and moves only the chain: a step property says both replicas keep their pending frame, mempool, head and context
+until they hear it (planted bug `epoch-close-takes-frames-back`, red on it).
+Not modelled: the sentence of R-FRAME-EPOCH that a frame of mine acked after my view of the chain moved on is committed but not
+counted as a proof of the new epoch (the page records the pair at the accept and keeps `:ctx-ok`, it has no proof counter); the
+dispute's own steps and what closing the epoch costs on the chain (the dispute page); and a replica reading an epoch BELOW its own
+(the chain only moves up).
+Source: coordinator 10-01 18:25 (fail on the side of liveness; the heal belongs with the Runtime dispute duties slice); cut thread
+and Review A of PR 135 (B1 to B3); R-FRAME-SIGNATURE-NAMES-ACCOUNT.
+
 ## Money (`money/ledger.scm`)
 
 **Q-L-1. Which way does "credit-left" point?**
@@ -1503,6 +1546,11 @@ Relayed 2026-09-29 15:19 from the review of the contracts PR (#40).
 - **R-COSIGN-FREEZE** (10-01, coordinator): after a side co-signs a settlement or a C2R it proposes no frames and refuses every
   peer frame with a retryable `frozen` refusal (the attempt and mark rules of R-FRAME-REFUSAL) until the operation lands, is
   superseded or lapses. Page: Q-A-15 (config `freeze`, planted bug `frozen-accepts`, the property stated on the signed fold).
+- **R-FRAME-EPOCH, R-FRAME-EPOCH-WEDGE** (10-01, coordinator; Review A of PR 135): a frame names the epoch and first nonce it is signed
+  under and a replica judges only frames of its own pair (`wrong_epoch` before any tx is looked at; the proposer parks the frame, no
+  new proof); the same epoch under two stored nonces wedges the Account until the Runtime closes the epoch on the chain. Page: Q-A-16
+  (configs `epoch`, `epoch-wedge`; planted bugs `epoch-accepts-wrong`, `epoch-remembers-mark`, `epoch-forgets-slot`,
+  `epoch-refusal-rolls-back`, `epoch-refusal-drops-tx`, `epoch-no-heal`, `epoch-close-takes-frames-back`).
 - **R-C2R-FOLD** (10-01, coordinator; review round 3 of PR 41): a collateral-to-reserve withdrawal is co-signed only while
   offdelta is zero; otherwise it goes as a settlement that folds offdelta into ondelta. Page: Q-D-26 (`withdraw`, config
   `withdraw`, bug `c2r-unfolded`). The same review's other two follow-ups are Q-D-24 (the implicit-tie property) and Q-D-25 (E9
