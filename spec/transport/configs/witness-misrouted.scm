@@ -1,7 +1,7 @@
-;; Witness: the sender holds a committed frame and a stale directory entry, so its next send is refused ("misrouted"). Adds an
-;; invariant that says it never happens; the check must FAIL on it. It shows the refusal path is reachable.
+;; Witness: a message is refused as "misrouted" in some run: the sender sends a committed frame to a stale address ("misrouted"). Loaded after transport/configs/recording-refuse.scm. It adds an
+;; invariant that says this never happens; the check must FAIL on it (the trace is emit, persist, send 1). It shows the refusal branch RUNS,
+;; so the properties around it are not vacuous.
 (define transport
   (assoc-in transport (list :invariants)
             (append invariants
-                    (list (property "witness T-misrouted: a message is refused as misrouted" (w)
-                            (not (and (equal? (:dir w) "old") (pair? (:wal w)) (> (length (:wal w)) (:acked w)))))))))
+                    (list (witness "witness T-misrouted: a message is refused as misrouted" "misrouted")))))

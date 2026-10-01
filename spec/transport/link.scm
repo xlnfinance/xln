@@ -43,13 +43,14 @@
 ;;
 ;; Abstractions: one sender, one receiver, one Account stream; the frame body is a string and a height; the signature is the
 ;; flag `ok` or `forged`; the directory is one entry, the receiver's address `b` or a stale `old` (a frame sent to `old` reaches
-;; a node that is not the peer, which refuses it: the world records the refusal and the frame is gone); the receiver persists its
-;; own row before its ack leaves (rules `b persist` and `b crash`); encryption, size limits, rate limits and the
+;; a node that is not the peer, which refuses it: the frame is gone and nothing else changes); the receiver persists its
+;; own row before its ack leaves (rules `b persist` and `b crash`); the world keeps no record of refusals (the witnesses add one,
+;; transport/configs/recording-refuse.scm); encryption, size limits, rate limits and the
 ;; WebSocket session fence are not modelled. Loss and duplication are unbounded (a message stays on the channel after a delivery),
 ;; so no budget of losses or duplicates hides a case.
 ;;
 ;; In v1 each peer gets a bounded inbound queue and anything over the bound is dropped: that is loss, which the page already has.
-;; Not in the page: a second Account stream, a receiver crash, several validators, encryption and size caps, the J watcher, a
+;; Not in the page: a second Account stream, several validators, encryption and size caps, the J watcher, a
 ;; relay (see spec/QUESTIONS.md, Q-T-10).
 ;;
 ;; Needs lib/vocabulary.scm and lib/check.scm.
@@ -88,7 +89,7 @@
 (define (put w m)
   (update-in w (list :chan) (lambda (c) (insert-sorted m c (lambda (p q) (string<? (canon p) (canon q)))))))
 (define (take-out w m) (update-in w (list :chan) (lambda (c) (filter (lambda (x) (not (equal? x m))) c))))
-;; a refusal changes nothing (the reason is named for the reader and for the witnesses, which look at what is refusable)
+;; a refusal changes nothing: the reason names it for the reader, and the witnesses override `refuse` to record it (the world has no refusal record)
 (define (refuse w reason) w)
 
 ;; ---- what a receiver does with a message: apply it, answer it, or refuse it in place. Never halt (R-X1).
@@ -107,16 +108,14 @@
           ((<= h n) (put-ack w n))
           (else (refuse w "future")))))
 
+;; every message addressed to the receiver is a frame, and every message addressed to the sender is an ack (the channel carries
+;; nothing else), so there is no "unexpected kind" branch
 (define (b-receive w m)
-  (cond ((not (equal? (m-kind m) "frame")) (refuse w "unexpected"))
-        ((not (frame-authentic? m)) (refuse w "forged"))
-        (else (receive-frame w m))))
+  (if (frame-authentic? m) (receive-frame w m) (refuse w "forged")))
 
 ;; the sender: a cumulative ack raises its belief
 (define (a-receive w m)
-  (cond ((not (equal? (m-kind m) "ack")) (refuse w "unexpected"))
-        ((not (ack-authentic? m)) (refuse w "forged"))
-        (else (assoc-in w (list :acked) (max (:acked w) (m-h m))))))
+  (if (ack-authentic? m) (assoc-in w (list :acked) (max (:acked w) (m-h m))) (refuse w "forged")))
 
 (define (handle w m)
   (if (equal? (m-dst m) "a") (a-receive w m) (b-receive w m)))
