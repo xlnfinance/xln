@@ -104,7 +104,7 @@
     "quint": "owed: #44 (id not in a name yet)",
     "contract": "-",
     "rig": "-",
-    "ts": "-"
+    "ts": "hold"
    },
    "killers": [
     {
@@ -112,6 +112,11 @@
      "layer": "arrival",
      "name": "to be named",
      "owed": "thread 'Account spec comparison'"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-A2 a withdrawal cannot take more than the collateral, on either side"
     }
    ]
   },
@@ -184,7 +189,7 @@
     "quint": "owed: #44",
     "contract": "-",
     "rig": "-",
-    "ts": "-"
+    "ts": "hold"
    },
    "killers": [
     {
@@ -204,6 +209,26 @@
      "layer": "arrival",
      "name": "core-rcpan-no-floor",
      "owed": "#41"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-A6 a payment moves the payer's allocation and stops at the payer's room"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-A6 a hold counts against its payer's room before it pays, and lapsing gives the room back"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-A6 and R-CREDIT-REVOKE-FLOOR a credit limit cannot fall below what the other side is using"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-A6 credit holds in every state: RCPAN in the worst case over the open holds"
     }
    ]
   },
@@ -324,6 +349,16 @@
      "kind": "test",
      "layer": "ts",
      "name": "R-J2 dispute hashes (Account.sol, HankoCodec)"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-J2 encodeBatch equals the bytes the compiled ABI gave for each recorded input (batch.json)"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-J2 the verifier against every verdict in hanko.json (the deployed EntityProvider's)"
     }
    ]
   },
@@ -1789,6 +1824,41 @@
      "kind": "test",
      "layer": "ts",
      "name": "an ast-grep that answers the style canary but never the fact canary fails the gate"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "a rule file that is deleted, with its exception row and its use gone, turns the gate red"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "a rule that no longer matches its canary is silent, and the gate is red"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "a canary that does not trigger its own rule is silent, even when that rule reports on another rule's canary"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "a rule file without a canary is a failing row"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "every rule reports on its canary in both languages, so the real tree is clean"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "an import without an extension, or of a directory, resolves to the file or to its index"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "an interface that is not exported is measured like one that is"
     }
    ]
   },
@@ -1867,6 +1937,143 @@
      "kind": "test",
      "layer": "ts",
      "name": "the register part alone turns the command red: a scratch copy has no contract tests to carry the ids"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "an ignored folder planted before the copy stays out of it, and what git lists comes along"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "the real pure/ copies without the ignored folders a seeds run leaves in it"
+    }
+   ]
+  },
+  {
+   "id": "R-SETTLE-CREDIT",
+   "statement": "A settlement that takes collateral out (C2R) is co-signed only if both sides stay within their credit afterwards, the same RCPAN bound a payment meets; otherwise it is refused, never signed. The ts cell holds the ledger-level refusal; the approver that maps signed diffs to a withdrawal is owed A4.",
+   "source": "contracts-decisions.md, Account-layer decisions 09-30 (Q-X-3 closed)",
+   "layers": {
+    "arrival": "owed: #41 (id not in a name yet)",
+    "quint": "owed: #44 (id not in a name yet)",
+    "contract": "-",
+    "rig": "owed: #69 (known finding, owner A1 cut)",
+    "ts": "hold"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-SETTLE-CREDIT a withdrawal that leaves the allocation above the collateral is refused"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-SETTLE-CREDIT a Left withdrawal that leaves Left past its credit is refused"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-SETTLE-CREDIT a withdrawal counts the open holds as paid"
+    },
+    {
+     "kind": "mutant",
+     "layer": "quint",
+     "name": "settlement-ignores-credit",
+     "owed": "#44"
+    }
+   ]
+  },
+  {
+   "id": "R-CREDIT-REVOKE-FLOOR",
+   "statement": "A credit limit cannot be lowered below what the counterparty is currently using, open holds counted as used; the refusal is credit_below_usage.",
+   "source": "contracts-decisions.md, Account-layer decisions 09-30; rig finding (2) lending credit revoked below used",
+   "layers": {
+    "arrival": "owed: #41 (id not in a name yet)",
+    "quint": "owed: #44",
+    "contract": "-",
+    "rig": "owed: #69 (known finding, owner v2 lending)",
+    "ts": "hold"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-A6 and R-CREDIT-REVOKE-FLOOR a credit limit cannot fall below what the other side is using"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-CREDIT-REVOKE-FLOOR an open hold is used credit too, and Right's side has its own floor"
+    },
+    {
+     "kind": "mutant",
+     "layer": "quint",
+     "name": "credit-drop-unchecked",
+     "owed": "#44"
+    }
+   ]
+  },
+  {
+   "id": "R-HOLD-CAP",
+   "statement": "A ledger carries at most 32 open holds and refuses the 33rd with too_many_holds; a dispute proof with more reverts (E10).",
+   "source": "Review B of PR 73; contracts Account.sol MAX_DISPUTE_TRANSFORMERS = 32; Quint LOCK_SLOTS",
+   "layers": {
+    "arrival": "-",
+    "quint": "owed: #44 (id not in a name yet)",
+    "contract": "-",
+    "rig": "-",
+    "ts": "hold"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-HOLD-CAP at most 32 holds are open, matching the contract's proof bound"
+    }
+   ]
+  },
+  {
+   "id": "R-LOCK-EXISTS",
+   "statement": "A hold whose slot is already open is refused with lock_exists; a slot freed by resolve or expire opens again (A2 adds the same refusal for an open hashlock).",
+   "source": "Review B of PR 73; Quint HtlcLock lock_exists",
+   "layers": {
+    "arrival": "-",
+    "quint": "owed: #44 (id not in a name yet)",
+    "contract": "-",
+    "rig": "-",
+    "ts": "hold"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-LOCK-EXISTS a slot that is open is refused, and a freed slot opens again"
+    }
+   ]
+  },
+  {
+   "id": "R-HOLD-SLOT",
+   "statement": "A hold is addressed by the slot it sits in, never by position: resolving or expiring one hold leaves every other hold in its slot and in its order.",
+   "source": "Review B of PR 73 (coordinator decision 09-30); Quint HtlcResolve{id}, the contract's slot ids",
+   "layers": {
+    "arrival": "-",
+    "quint": "owed: #44 (id not in a name yet)",
+    "contract": "-",
+    "rig": "-",
+    "ts": "hold"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-HOLD-SLOT a hold keeps its slot while others come and go"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-HOLD-SLOT expiring a hold removes the one it names and keeps the others in order"
     }
    ]
   },

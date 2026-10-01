@@ -1,4 +1,4 @@
-// The style gate of the new tree (kernel/, chain/): every rule of the legacy ratchet, plus the tree rules, at zero.
+// The style gate of the new tree (kernel/, chain/, account/): every rule of the legacy ratchet, plus the tree rules, at zero.
 //
 // style/check.ts ratchets xln.ts down from its baseline and scans only that file. The new directories start at zero on
 // every rule, so a hit here is a failure and the only way to allow one is a registered exception: a rule, a file and a
@@ -6,12 +6,12 @@
 // the register gate.
 import { readFileSync } from "node:fs";
 import { existingFiles } from "../checks/folder-width.ts";
-import { astHits, astRun, factRules } from "./ast.ts";
+import { FACT_CANARIES, astHits, astRun, factRules } from "./ast.ts";
 import { compare, isOff, longLines, type Exceptions, type Hit, type Row } from "./counts.ts";
 import { isSource, syntaxHits } from "./syntax.ts";
 
 // A layer is a directory or a single file directly under pure/ (entity.ts is as much a layer as entity/ is).
-export const TREE = ["kernel", "chain"] as const;
+export const TREE = ["kernel", "chain", "account"] as const;
 
 // Every other entry under pure/ is named here as deliberately outside this gate, so a new layer (account/, entity/,
 // entity.ts, ...) cannot land ungated by accident: it is a failing row until it joins TREE or this list.
@@ -48,7 +48,7 @@ export const treeStyle = (root: string, entries: readonly string[] = TREE): Tree
   if (listed.length === 0) return { rows: [{ rule: "git-listing", file: root, now: 1, allowed: 0 }], files: 0, failed: true };
   const sources = entries.flatMap((entry) => sourcesUnder(listed, entry));
   const style = astHits(root, sources);
-  const facts = astRun(root, factRules(), "decl", listed.filter(isUser));
+  const facts = astRun(root, factRules(), FACT_CANARIES, listed.filter(isUser));
   const syntax = syntaxHits(facts.found, new Set(listed), new Set(sources));
   const lines = sources.flatMap((file): readonly Hit[] => longLines(file, textOf(root, file)));
   const exceptions: Exceptions = JSON.parse(readFileSync(`${root}/style/tree-exceptions.json`, "utf8"));

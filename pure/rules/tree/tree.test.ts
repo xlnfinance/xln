@@ -1,6 +1,6 @@
 // Each test plants a fool in a scratch tree and asks the gate whether it notices.
 import { describe, expect, test } from "bun:test";
-import { chmodSync, cpSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { chmodSync, cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { compare, isOff, longLines } from "./counts.ts";
 import { treeStyle } from "./gate.ts";
@@ -85,20 +85,58 @@ describe("the gate cannot be satisfied by doing nothing", () => {
   test("an ast-grep that exits 2 fails the gate", () => expect(withStub("exit 2")).toBe(true));
 
   // A scan that prints the canary's hit and then dies is still a failed scan: the answer is not to be trusted.
-  const PRINTS_CANARY = 'for a in "$@"; do case "$a" in */canary) c="$a";; esac; done\necho "[{\\"ruleId\\":\\"no-throw\\",\\"file\\":\\"$c/canary.ts\\"},{\\"ruleId\\":\\"decl\\",\\"file\\":\\"$c/canary.ts\\"}]"';
+  // A stub answers like ast-grep would for the planted files: one hit per canary file, named by the rule its file is named after.
+  const hitsFor = (skip: string): string =>
+    `for a in "$@"; do case "$a" in */canary) c="$a";; esac; done\nj=""\nfor f in "$c"/*; do b=$(basename "$f"); case "$b" in ${skip}) continue;; esac; j="$j{\\"ruleId\\":\\"\${b%.*}\\",\\"file\\":\\"$f\\"},"; done\necho "[\${j%,}]"`;
+  const PRINTS_CANARY = hitsFor("none");
   test("an ast-grep that prints the canary hit but exits 2 fails the gate", () => expect(withStub(`${PRINTS_CANARY}\nexit 2`)).toBe(true));
   test("an ast-grep that prints the canary hit and is then killed fails the gate", () => expect(withStub(`${PRINTS_CANARY}\nkill -9 $$`)).toBe(true));
-  // The style scan and the fact scan each plant their own canary: one that answers only the style rules has not read the facts.
-  const PRINTS_STYLE_CANARY = 'for a in "$@"; do case "$a" in */canary) c="$a";; esac; done\necho "[{\\"ruleId\\":\\"no-throw\\",\\"file\\":\\"$c/canary.ts\\"}]"';
+  // The style scan and the fact scan each plant their own canaries: one that answers only the style rules has not read the facts.
+  const PRINTS_STYLE_CANARY = hitsFor("decl.*");
   test("an ast-grep that answers the style canary but never the fact canary fails the gate", () => expect(withStub(PRINTS_STYLE_CANARY)).toBe(true));
   test("an ast-grep that prints the canary hit and exits 0 passes a clean tree", () => expect(withStub(`${PRINTS_CANARY}\nexit 0`)).toBe(false));
   test("the real ast-grep passes a clean tree", () => expect(treeStyle(scratch(clean)).failed).toBe(false));
 
   test("a directory under pure/ that is neither gated nor named as outside the gate is a failing row", () => {
     const root = scratch(clean);
-    mkdirSync(`${root}/account`);
-    writeFileSync(`${root}/account/bad.ts`, "export const bad = () => { throw new Error('x'); };\n");
-    expect(treeStyle(root).rows.filter(isOff).map((row) => `${row.rule} ${row.file}`)).toContain("unlisted-dir account");
+    mkdirSync(`${root}/entity`);
+    writeFileSync(`${root}/entity/bad.ts`, "export const bad = () => { throw new Error('x'); };\n");
+    expect(treeStyle(root).rows.filter(isOff).map((row) => `${row.rule} ${row.file}`)).toContain("unlisted-dir entity");
+  });
+});
+
+describe("every style rule has a canary that it must report", () => {
+  const clean = { "a.ts": "export const a = 1;\n", ...used("a") };
+  const canaries = (root: string): Record<string, string> => JSON.parse(readFileSync(`${root}/style/canaries.json`, "utf8"));
+  const planted = (root: string, snippets: Record<string, string>): void =>
+    writeFileSync(`${root}/style/canaries.json`, JSON.stringify({ ...canaries(root), ...snippets }));
+
+  test("a rule file that is deleted, with its exception row and its use gone, turns the gate red", () => {
+    const root = scratch({ ...clean, "t.ts": "export const t = () => { try { return 1; } catch (e) { return 2; } };\n", ...used("t") });
+    rmSync(`${root}/style/rules/no-try.yml`);
+    expect(offRows(root)).toEqual(["canary-orphan no-try"]);
+  });
+
+  test("a rule that no longer matches its canary is silent, and the gate is red", () => {
+    const root = scratch(clean);
+    writeFileSync(`${root}/style/rules/no-let.yml`, readFileSync(`${root}/style/rules/no-let.yml`, "utf8").replace("^let\\s", "^never"));
+    expect(offRows(root)).toEqual(["canary-silent no-let", "canary-silent no-let (Tsx)"]);
+  });
+
+  test("a canary that does not trigger its own rule is silent, even when that rule reports on another rule's canary", () => {
+    const root = scratch(clean);
+    planted(root, { "no-let": "export const a = 1;\n", "no-throw": "let x = 1;\nexport const a = () => { throw new Error(\"x\"); };\n" });
+    expect(offRows(root)).toEqual(["canary-silent no-let", "canary-silent no-let (Tsx)"]);
+  });
+
+  test("a rule file without a canary is a failing row", () => {
+    const root = scratch(clean);
+    writeFileSync(`${root}/style/tree-rules/no-new.yml`, "id: no-new\nlanguage: TypeScript\nseverity: error\nmessage: m\nrule: { kind: debugger_statement }\n");
+    expect(offRows(root)).toEqual(["canary-missing no-new"]);
+  });
+
+  test("every rule reports on its canary in both languages, so the real tree is clean", () => {
+    expect(offRows(scratch(clean))).toEqual([]);
   });
 });
 
