@@ -178,6 +178,23 @@ const holdsStill = (before: World, after: World): readonly string[] =>
     return waiting && moved ? [`${n} signed an operation and its Account moved before the chain did`] : [];
   });
 
+/**
+ * What a step signed must match the Account at the moment it signed, which the freeze keeps until the step is over
+ * (R-C2R-FOLD): a C2R only over no offdelta, a settlement folding exactly the offdelta there is.
+ */
+const folding = (before: World, after: World): readonly string[] =>
+  NAMES.flatMap((n) => {
+    const fresh = after.hosts[n].runtime.wal.slice(before.hosts[n].runtime.wal.length).flatMap(signing);
+    const state = accountOf(after, n)?.state;
+    const owed = state === undefined ? 0n : ledgerOf(state, GOLD).offdelta;
+    return fresh.flatMap((s) => {
+      if (s._tag === "c2r") return owed === 0n ? [] : [`${n} signed a C2R over an offdelta of ${owed}`];
+      const folded = s.folds.map((f) => f.offdelta);
+      const right = owed === 0n ? folded.length === 0 : folded.length === 1 && folded[0] === owed;
+      return right ? [] : [`${n} signed a settlement folding [${folded}] over an offdelta of ${owed}`];
+    });
+  });
+
 const violations = (ops: Ops, w: World): readonly string[] => [
   ...w.halts.map((h) => `halted: ${h}`), ...leaks(w), ...replays(ops, w), ...equalHeads(w), ...oneChain(w),
   ...stampsOf(w), ...NAMES.flatMap((n) => withinCredit(w, n)),
@@ -375,13 +392,25 @@ const moneyFailures = (w: World): readonly string[] => {
   return l === undefined || l.offdelta === owed ? [] : [`offdelta ${l.offdelta}, ${says}`];
 };
 
+/** Every second run of the chain weather starts with an offdelta: the Accounts open, Bob lends, Alice pays him 7. */
+const primed = (c: Chaos): World => {
+  const say = (w: World, n: Name, command: Command): World => {
+    const fed = feed(c.ops, finishHost(c.ops, w, n), n, "command", [], inputOf(w, n, [command]));
+    return finishHost(c.ops, commitHost(c.ops, fed, n), n);
+  };
+  const lend: Command = { _tag: "set_credit", peer: ID.alice, token: GOLD, limit: 50n };
+  const pays: Command = { _tag: "pay", peer: ID.bob, token: GOLD, amount: 7n };
+  const opened = settle(c, openAll(c.ops, START), 50);
+  return settle(c, say(settle(c, say(opened, "bob", lend), 50), "alice", pays), 50);
+};
+
 const runOne = (c: Chaos, steps: number): Run => {
   const steps0 = Array.from({ length: steps }, (_, i) => i);
   const walked = steps0.reduce<Readonly<{ w: World; failures: readonly string[] }>>((acc, i) => {
     const next = randomStep(c, acc.w, i);
-    const broken = [...holdsStill(acc.w, next), ...violations(c.ops, next)];
+    const broken = [...holdsStill(acc.w, next), ...folding(acc.w, next), ...violations(c.ops, next)];
     return { w: next, failures: [...acc.failures, ...broken.map((v) => `step ${i}: ${v}`)] };
-  }, { w: START, failures: [] });
+  }, { w: c.weather.chain === "collateral" && c.run % 2 === 1 ? primed(c) : START, failures: [] });
   const clean = NAMES.reduce((w, n) => (idle(w.hosts[n]) ? w : crashHost(c.ops, w, n)), walked.w);
   const open = openAll(c.ops, clean);
   const end = settle(c, NAMES.some((n) => outstanding(open.hosts[n]) !== undefined) ? landed(c.ops, open) : open, 400);
@@ -469,5 +498,17 @@ describe("runtime/chaos two Hosts over a link that loses, repeats and reorders, 
       return { ok: true, value: { ...applied.value, entities } };
     }, };
     expect(explore(thawing, WITHDRAWING, SEED, RUNS).failures.join("\n")).toContain("moved before the chain did");
+  }, BUDGET_MS);
+
+  test("R-C2R-FOLD planted bug: a Runtime whose settlements go out as C2Rs is seen signing over an offdelta", () => {
+    const bare: Ops = { ...REAL, apply: (rt, input) => {
+      const applied = apply(rt, input);
+      const row = applied.ok ? applied.value.staged : undefined;
+      if (!applied.ok || row === undefined) return applied;
+      const chain = row.chain.map((a): JAction =>
+        (a._tag === "settle" ? { _tag: "c2r", peer: a.peer, serial: a.serial, token: a.token, amount: a.amount } : a));
+      return { ok: true, value: { ...applied.value, staged: { ...row, chain } } };
+    } };
+    expect(explore(bare, WITHDRAWING, SEED, RUNS).failures.join("\n")).toContain("signed a C2R over an offdelta");
   }, BUDGET_MS);
 });
