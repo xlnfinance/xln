@@ -50,6 +50,15 @@ export const fund = (peer: string, ...amounts: readonly bigint[]): JOp => ({
   funding: { tokenId: TOKEN, receivingEntity: ME, pairs: amounts.map((amount) => ({ entity: peer, amount })) },
 });
 
+/** `me` funds `count` different Accounts in one funding: several counterparties, so no Account's group takes it. */
+export const fundSpread = (count: number, firstPeer = 100): JOp => ({
+  _tag: "reserve_to_collateral",
+  funding: {
+    tokenId: TOKEN, receivingEntity: ME,
+    pairs: Array.from({ length: count }, (_, i) => ({ entity: idOf(firstPeer + i), amount: 1n })),
+  },
+});
+
 export const withdraw = (peer: string, amount: bigint, nonce = 1n): JOp => ({
   _tag: "collateral_to_reserve",
   withdrawal: { counterparty: peer, tokenId: TOKEN, amount, nonce, sig: SIG },
@@ -121,4 +130,13 @@ export const drive = (
   if (outcome._tag !== "simulate") return outcome;
   const simulated = { digest: outcome.candidate.digest, outcome: answer(outcome.candidate) };
   return drive(j, { ...ctx, answers: [...ctx.answers, simulated] }, answer);
+};
+
+/** A dispute start whose proof body carries `kib` KiB of clause bytes, under the contract's per-body limit. */
+export const bigStart = (peer: string, nonce: bigint, kib: number): JOp => {
+  const op = start(peer, nonce);
+  const clause = { transformerAddress: TOKEN_ADDRESS, encodedBatch: `0x${"ab".repeat(kib * 1024)}`, allowances: [] };
+  return op._tag === "dispute_start"
+    ? { ...op, start: { ...op.start, initialProofbody: { ...op.start.initialProofbody, transformers: [clause] } } }
+    : op;
 };

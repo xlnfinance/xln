@@ -35,16 +35,17 @@ const cosignedGroups = (self: string, soft: Group): readonly Group[] => {
 };
 
 /**
- * The groups a draft offers, most urgent first: reveals with starts and counters, then each finalize alone, then each
- * deposit leg alone, then one group per co-signed Account, then the soft ops no counterparty signed, together. A
- * caller seals the first group that is funded and simulates well; the rest wait in the draft.
+ * The groups a draft offers, most urgent first, in the order of the J page's pick-ops: each finalize alone, then
+ * reveals with starts and counters, then each deposit leg alone, then one group per co-signed Account, then the soft
+ * ops no counterparty signed, together. A caller seals the first group that is funded; the rest wait in the draft.
+ * Skipping a group that would revert (a finalize before its gate opens) needs a simulation, which is R-SIMULATE.
  */
 export const groupsOf = (self: string, draft: readonly JOp[]): readonly Group[] => {
   const cosigned = cosignedGroups(self, softOps(draft));
   const claimed = new Set(cosigned.flat());
   return [
-    urgent(draft),
     ...alone(draft, "dispute_finalize"),
+    urgent(draft),
     ...alone(draft, "deposit"),
     ...cosigned,
     softOps(draft).filter((op) => !claimed.has(op)),

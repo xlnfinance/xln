@@ -11,7 +11,7 @@
 //            abandoned one that must land before anything signed above it can.
 import { none, orElse, some, type Option } from "../../kernel/core/option.ts";
 import { match, type Tagged } from "../../kernel/core/tagged.ts";
-import { withinLimits, type LimitFault } from "../op/limits.ts";
+import { fitFault, type FitFault } from "../plan/fit.ts";
 import { isCosigned, isIdempotent, requestKey, type JOp } from "../op/ops.ts";
 import { submitted, type JBatch } from "./jbatch.ts";
 import type { SealedBatch } from "./sealed.ts";
@@ -27,7 +27,7 @@ export type JAnswer =
 
 export type ReturnReason =
   | Tagged<"batch_failed", { reason: string }>
-  | Tagged<"draft_full", { fault: LimitFault }>;
+  | Tagged<"draft_full", { fault: FitFault }>;
 
 /** An op the Entity hands back to whoever queued it, with the reason: a new signature or a new request is theirs. */
 export type Returned = Readonly<{ op: JOp; because: ReturnReason }>;
@@ -51,7 +51,8 @@ const without = (j: JBatch, batch: SealedBatch): JBatch => ({
   abandoned: j.abandoned.filter((b) => b !== batch),
 });
 
-const sameKey = (op: JOp, keys: ReadonlySet<string>): boolean => keys.has(orElse(requestKey(op), ""));
+const sameKey = (op: JOp, keys: ReadonlyMap<string, JOp> | ReadonlySet<string>): boolean =>
+  keys.has(orElse(requestKey(op), ""));
 
 const isSkip = (op: JOp, skip: SkipFact): boolean => match(op, {
   dispute_start: ({ start }) =>
@@ -86,9 +87,9 @@ const requeue = (j: JBatch, ops: readonly JOp[]): Observed => {
   const keys = submitted(j);
   const outcome = ops.reduce<{ front: readonly JOp[]; returned: readonly Returned[] }>((acc, op) => {
     if (sameKey(op, keys)) return acc;
-    const checked = withinLimits([...acc.front, op, ...j.draft]);
-    if (checked.ok) return { front: [...acc.front, op], returned: acc.returned };
-    const refused: Returned = { op, because: { _tag: "draft_full", fault: checked.error } };
+    const fault = fitFault(j.entity, [...acc.front, op, ...j.draft]);
+    if (fault._tag === "none") return { front: [...acc.front, op], returned: acc.returned };
+    const refused: Returned = { op, because: { _tag: "draft_full", fault: fault.value } };
     return { front: acc.front, returned: [...acc.returned, refused] };
   }, { front: [], returned: [] });
   return { jbatch: { ...j, draft: [...outcome.front, ...j.draft] }, returned: outcome.returned, skipped: [] };

@@ -43,7 +43,7 @@ describe("a finalize travels alone: its own batch, because an open HTLC deadline
   test("each finalize is a group of its own and no dispute op rides with it", () => {
     const groups = groupsOf(ME, [start(LEFT_PEER), finalize(LEFT_PEER), finalize(RIGHT_PEER), counter(LEFT_PEER)]);
     expect(groups.map(tags))
-      .toEqual([["dispute_start", "dispute_counter"], ["dispute_finalize"], ["dispute_finalize"]]);
+      .toEqual([["dispute_finalize"], ["dispute_finalize"], ["dispute_start", "dispute_counter"]]);
   });
 });
 
@@ -79,11 +79,11 @@ describe("R-COSIGN a batch with a co-signed op carries ops of that one Account o
   });
 });
 
-describe("the groups come most urgent first", () => {
-  test("reveals, starts and counters, then finalizes, then deposits, then co-signed, then the rest", () => {
+describe("the groups come most urgent first, in the order of the J page's pick-ops", () => {
+  test("each finalize, then reveals with starts and counters, then deposits, then co-signed, then the rest", () => {
     expect(groupsOf(ME, mixed).map(tags)).toEqual([
-      ["dispute_start", "reveal_secret", "dispute_counter"],
       ["dispute_finalize"],
+      ["dispute_start", "reveal_secret", "dispute_counter"],
       ["deposit"], ["deposit"],
       ["settle", "reserve_to_collateral"],
       ["collateral_to_reserve"],

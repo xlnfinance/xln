@@ -462,7 +462,7 @@
   },
   {
    "id": "R-J3",
-   "statement": "A batch op checks the contract's batch limits when it is queued, and a full batch is a refusal, not a throw.",
+   "statement": "A batch op checks the contract's batch limits when it is queued, and a full batch is a refusal, not a throw. The TS builder has no hash-ladder registration op kind yet: their limit of 32 and their place in the total of 50 are not checked there (J builder backlog).",
    "source": "lessons.md section 4",
    "layers": {
     "arrival": "owed: spec thread, next Arrival page (id not in a name yet)",
@@ -492,6 +492,46 @@
      "kind": "test",
      "layer": "ts",
      "name": "R-J3 a full draft refuses with a notice and keeps what it had"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-J3 the encoded size of a group is judged when an op is queued"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-J3 the counts are judged per group, and the draft by the most one batch carries"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-J3 a group too large for one batch is refused when it is queued, so the draft can always be sealed"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-J3 a draft that could be sealed once can still be sealed after a send regroups it"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-J3 payments waiting for funding never refuse a dispute step"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-J3 every group of the draft is judged, not the first or the last"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-J3 the size limit is inclusive: exactly 256 KiB is one batch, 32 bytes more is not"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-J3 fitPrefix: the longest front of a group that is one batch"
     }
    ]
   },
@@ -1324,7 +1364,7 @@
   },
   {
    "id": "R-SPLIT",
-   "statement": "Dispute, reveal, hash-ladder and deposit ops never share a batch with payment, settlement or reserve ops. The Quint cell holds urgent ops apart from payments (urgent-batch-carries-payments); co-signed ops and deposits travel apart under R-COSIGN and J6, and reserve ops are not a kind in the model. The Arrival cell holds the J page's dispute, reveal and deposit ops against the soft ops (spec/j/batch.scm, bug mixed-batch); hash-ladder ops are not an op kind on any page.",
+   "statement": "Dispute, reveal, hash-ladder and deposit ops never share a batch with payment, settlement or reserve ops. The Quint cell holds urgent ops apart from payments (urgent-batch-carries-payments); co-signed ops and deposits travel apart under R-COSIGN and J6, and reserve ops are not a kind in the model. The Arrival cell holds the J page's dispute, reveal and deposit ops against the soft ops (spec/j/batch.scm, bug mixed-batch); hash-ladder ops are not an op kind on any page. The TS builder has no hash-ladder registration op kind either: the split of that kind is not checked there (J builder backlog).",
    "source": "contracts-decisions.md J5 (spec rule)",
    "layers": {
     "arrival": "hold",
