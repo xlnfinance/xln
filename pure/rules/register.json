@@ -85,7 +85,7 @@
     {
      "kind": "test",
      "layer": "ts",
-     "name": "R-DURABLE R-X1 every run settles; at every step nothing halted and nothing left ahead of its disk"
+     "name": "R-DURABLE R-X1 every run settles; nothing halts or leaves ahead of its disk, with junk hashes and ids"
     },
     {
      "kind": "test",
@@ -1585,7 +1585,7 @@
     {
      "kind": "test",
      "layer": "ts",
-     "name": "R-DURABLE R-X1 every run settles; at every step nothing halted and nothing left ahead of its disk"
+     "name": "R-DURABLE R-X1 every run settles; nothing halts or leaves ahead of its disk, with junk hashes and ids"
     },
     {
      "kind": "test",
@@ -4069,6 +4069,30 @@
      "kind": "test",
      "layer": "ts",
      "name": "R-HOST-INBOX a bound below one is refused when the limits are made, since such a Host could never move"
+    }
+   ]
+  },
+  {
+   "id": "R-LINK-AUTH",
+   "statement": "The Host trusts a message's `from` only as the link-authenticated peer: the link authenticates its peer, the content authenticates itself.",
+   "source": "spec/QUESTIONS.md Q-T-5; spec/transport/bugs trust-frame-sender and trust-ack-sender; Review A of 118",
+   "layers": {
+    "arrival": "owed: spec thread, name the link page's sender-authentication bugs trust-frame-sender and trust-ack-sender under this id",
+    "quint": "owed: spec thread, say whether runtime.qnt models a forged sender or n/a with the reason",
+    "contract": "n/a: link authentication is off-chain",
+    "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
+    "ts": "owed: transport thread, the shell slice (pure/host/shell/): a link whose `from` is the authenticated peer; pure/host/host.ts receive only trusts it"
+   },
+   "killers": [
+    {
+     "kind": "bug",
+     "layer": "arrival",
+     "name": "trust-frame-sender"
+    },
+    {
+     "kind": "bug",
+     "layer": "arrival",
+     "name": "trust-ack-sender"
     }
    ]
   }

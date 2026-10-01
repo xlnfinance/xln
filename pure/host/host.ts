@@ -43,7 +43,10 @@ export type Received = Readonly<{ host: Host; notices: readonly HostNotice[] }>;
 /** An input of the Host's own, a command or a timer. It has no peer, so no peer's bound applies. */
 export const submit = (host: Host, item: Item): Host => ({ ...host, queue: [...host.queue, item] });
 
-/** A message off the link: queued for its Entity, or refused in place with a notice. */
+/**
+ * A message off the link: queued for its Entity, or refused in place with a notice. `message.from` must be the
+ * link-authenticated peer (Q-T-5, R-LINK-AUTH): the transport shell delivers that, this function only trusts it.
+ */
 export const receive = (host: Host, message: Outbound): Received => {
   const { from, to, msg } = message;
   switch (true) {

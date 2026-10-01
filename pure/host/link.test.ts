@@ -1,9 +1,11 @@
 // Two Hosts over the weakest link (spec/transport/link.scm): messages are lost, repeated, reordered and misrouted, a
-// stranger puts forged acks, future frames and mail for Entities nobody hosts on it, a disk write takes a while, and a
-// node crashes with a write half done. After every step: no peer message halted a Host (R-X1), nothing on the link
-// is an output of a row that is not durable (R-DURABLE), neither side's Account head is a frame the other side has not
-// made durable (R-DURABLE: the sender never believes the peer holds more than the peer persisted), and every idle
-// Host's durable rows replay to what it holds. After the random phase the adversary stops and every run must settle.
+// stranger puts forged acks (junk hashes), future frames (invented ids) and mail for Entities nobody hosts on it, a
+// disk write takes a while, and a node crashes with a write half done. After every step: no peer message halted a
+// Host (R-X1), nothing on the link is an output of a row that is not durable (R-DURABLE), neither side's Account head
+// is a frame the other side has not made durable (R-DURABLE: the sender never believes the peer holds more than the
+// peer persisted), and every idle Host's durable rows replay to what it holds. The adversary never forges a sender:
+// `from` is the link-authenticated peer (Q-T-5, R-LINK-AUTH), which the transport shell owes and this test does not
+// cover. After the random phase the adversary stops and every run must settle.
 import { describe, expect, test } from "bun:test";
 import { draw } from "../account/fixtures.ts";
 import { GENESIS, provisionalFrameHash } from "../account/frame/account.ts";
@@ -320,7 +322,7 @@ const afterAck = (shell: Shell): World => {
 };
 
 describe("host/link two Hosts over a link that loses, repeats, misroutes and has strangers, with crashes", () => {
-  test("R-DURABLE R-X1 every run settles; at every step nothing halted and nothing left ahead of its disk", () => {
+  test("R-DURABLE R-X1 every run settles; nothing halts or leaves ahead of its disk, with junk hashes and ids", () => {
     const v = explore(FAITHFUL, EVERY, RUNS, STEPS);
     expect(v.failures).toEqual([]);
     expect(v.settledRuns).toBe(RUNS);
