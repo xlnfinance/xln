@@ -16,7 +16,7 @@ import type { AccountState, Hold, Ledger, Offer, TokenId } from "../model.ts";
 import { clauseCount, openHolds } from "../state.ts";
 
 /** Account.sol limits on a proof body (`_validateProofBody`). */
-const MAX_PROOF_TOKENS = 128;
+export const MAX_PROOF_TOKENS = 128;
 const MAX_RESPONSE_TOTAL = 365n * 24n * 3600n;
 
 /**

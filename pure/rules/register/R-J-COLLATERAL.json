@@ -1,6 +1,6 @@
 {
  "id": "R-J-COLLATERAL",
- "statement": "What the chain holds for an Account (its collateral and ondelta, per token, from the Depository's AccountSettled) reaches each hosted party as j_collateral, once per token, in the chain's order and only at the confirmation depth; the Entity sets the ledger's collateral and ondelta to those amounts, on its committed state and on a pending frame's state, and changes no other field; the amounts are a state, so a repeat changes nothing. A log of an AccountSettled that is not one settlement of whole six-word rows is a fault.",
+ "statement": "What the chain holds for an Account (its collateral and ondelta, per token, from the Depository's AccountSettled) reaches each hosted party as j_collateral, once per token, in the chain's order and only at the confirmation depth; the Entity sets the ledger's collateral and ondelta to those amounts, on its committed state and on a pending frame's state, and changes no other field; the amounts are a state, so a repeat changes nothing. A log of an AccountSettled that is not one settlement of whole six-word rows is a fault. A token the Account has no ledger for is kept outside the Account until a signed frame gives it one (R-J-COLLATERAL-NO-LEDGER).",
  "source": "plan/contracts-decisions.md R-J-COLLATERAL; D9; R-J1 (chain facts reach an Account only through J events); spec/QUESTIONS.md Q-D-22 (a deposit moves collateral and a Left deposit moves ondelta)",
  "layers": {
   "arrival": "owed: spec thread (the entity page takes j_epoch and j_dispute as J events; j_collateral has no page yet)",
@@ -18,7 +18,7 @@
   {
    "kind": "test",
    "layer": "ts",
-   "name": "R-J-COLLATERAL one token's snapshot leaves the other tokens and the off-chain fields as they were"
+   "name": "R-J-COLLATERAL the credit and holds of the ledger stay as they were"
   },
   {
    "kind": "test",
@@ -33,12 +33,17 @@
   {
    "kind": "test",
    "layer": "ts",
+   "name": "R-J-COLLATERAL a command in the frame that hears the chain sees what it holds"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
    "name": "R-J-COLLATERAL a frame in flight when the chain is heard commits with the chain's amounts"
   },
   {
    "kind": "test",
    "layer": "ts",
-   "name": "R-J-COLLATERAL what the chain holds for an Account reaches the Entity's ledger, and a restart's"
+   "name": "R-J-COLLATERAL what the chain holds reaches the Entity, and a restart from the WAL has it"
   },
   {
    "kind": "test",

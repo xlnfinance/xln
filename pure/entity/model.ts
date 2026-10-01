@@ -13,6 +13,7 @@ import type { Brand, Tagged } from "../kernel/core/tagged.ts";
 import type { FrameHash, Msg, Outcome, Refused, Replica } from "../account/frame/frame.ts";
 import type { JHeight, JView } from "../account/clause/clock.ts";
 import type { AccountFault, AccountState, Hold, HoldId, Leg, Side, TokenId } from "../account/model.ts";
+import type { Held } from "../account/state.ts";
 import type { AccountTx } from "../account/tx.ts";
 
 /** A 32-byte id, `0x` and 64 lowercase hex digits: the text order of two ids is their numeric order, as the chain's. */
@@ -59,11 +60,13 @@ export type Windows = Readonly<{ left: bigint; right: bigint }>;
  * epoch began, the windows its signed proofs carry, whether a dispute the peer started is open against it, and whether
  * the node has co-signed a settlement or a collateral-to-reserve that has not landed yet (`frozen`, R-COSIGN-FREEZE).
  * `cosigned` counts the operations the node has co-signed on this Account, for good: the `cosigned`-th is the serial
- * its action carries, and the only one whose lapse ends a freeze.
+ * its action carries, and the only one whose lapse ends a freeze. `held` is what the chain last said it holds for each
+ * token (R-J-COLLATERAL), at most one row per token and at most as many tokens as a proof body carries: a token waits
+ * there until a signed frame gives the Account a ledger for it.
  */
 export type ChainFacts = Readonly<{
   epoch: bigint; stored: bigint; frames: bigint; windows: Windows | undefined; disputed: boolean; frozen: boolean;
-  cosigned: bigint;
+  cosigned: bigint; held: ReadonlyMap<TokenId, Held>;
 }>;
 
 // What a frame takes in.
@@ -166,6 +169,7 @@ export type EntityFault =
 export type Notice =
   | Tagged<"command_refused", { command: Command; fault: EntityFault }>
   | Tagged<"unknown_peer", { from: EntityId }>
+  | Tagged<"holding_dropped", { peer: EntityId; token: TokenId }>
   | Tagged<"cosign_refused", { from: EntityId; op: CosignOp; fault: EntityFault }>
   | Tagged<"message_refused", { from: EntityId; outcome: Outcome<PeerFault> }>
   | Tagged<"tx_refused", { peer: EntityId; refused: Refused<AccountTx, PeerFault> }>;

@@ -94,17 +94,12 @@ describe("host/shell/node a node with a J loop", () => {
     expect(heightRow).toBeGreaterThan(eventRow);
   });
 
-  test("R-J-COLLATERAL what the chain holds for an Account reaches the Entity's ledger, and a restart's", async () => {
+  test("R-J-COLLATERAL what the chain holds reaches the Entity, and a restart from the WAL has it", async () => {
     const dir = fresh();
     const [first, second] = [`${dir}/first.log`, `${dir}/second.log`];
     writeFileSync(first, "");
     writeFileSync(second, "");
-    const held = (look: Look) => {
-      const account = look.station.host.runtime.entities.get(ALICE)?.accounts.get(BOB);
-      return account === undefined
-        ? undefined
-        : [...account.state.ledgers.values()].map((l) => [l.collateral, l.ondelta]);
-    };
+    const held = (look: Look) => [...(factsOf(look)?.held ?? [])].map(([token, h]) => [token, h.collateral, h.ondelta]);
     const up = `${dir}/up`;
     const alice = await nodeOf(await seatOf(ALICE, dir, 0), NO_PEER, {
       tickMs: QUICK, watch: watchOf({ ...STRAIGHT, down: up }, first, [settled(105n)]),
@@ -112,11 +107,11 @@ describe("host/shell/node a node with a J loop", () => {
     await alice.tell(open(BOB));
     writeFileSync(up, "up");
     expect(await until(async () => delivered(await alice.look()), WAIT)).toBe(true);
-    expect(held(await alice.stop())).toEqual([[100n, 100n]]);
+    expect(held(await alice.stop())).toEqual([[1n, 100n, 100n]]);
     const again = await nodeOf(await seatOf(ALICE, dir, 0), NO_PEER, {
       tickMs: QUICK, watch: watchOf(STRAIGHT, second, []),
     });
-    expect(held(await again.look())).toEqual([[100n, 100n]]);
+    expect(held(await again.look())).toEqual([[1n, 100n, 100n]]);
     await again.stop();
   });
 
