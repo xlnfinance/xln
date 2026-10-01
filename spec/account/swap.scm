@@ -326,6 +326,13 @@
             indexes))
    (property "R-SWAP-FILL: nothing is created or lost: the offdeltas hold exactly the payments and the legs filled" (w)
      (every (lambda (tok) (= (get-in w (list :off tok)) (+ (get-in w (list :pays tok)) (filled-delta w tok)))) tokens))
+   ;; a whole fill drops the offer: an offer is :filled exactly when both legs are taken (and then it has no clause,
+   ;; by the clause property); a whole fill that left the offer open would keep a clause of zero amounts
+   (property "R-SWAP-FILL: an offer is :filled exactly when both legs are taken, and a whole fill drops it" (w)
+     (every (lambda (i) (let ((o (book-of w i)))
+                          (or (not o) (not (member (:status o) (list :quote :open :filled)))
+                              (eq? (equal? (:status o) :filled) (and (= (rem-give i o) 0) (= (rem-want i o) 0))))))
+            indexes))
    ;; the hazard of plan/swap-onchain.md: a clause left at the old amounts fills again. The signed body carries
    ;; a clause for an offer exactly while it is open, and the legs the offdeltas already hold plus the legs the
    ;; clause could still take never exceed the offer.
@@ -382,6 +389,14 @@
          (let* ((i (rule-offer rname)) (o (book-of w i)))
            (or (not (quote? o))
                (rcpan-ok? (:off w) (reserve-want (:held w) i (:want (menu-ref i)) 1))))))
+   (step-property "R-SWAP-WITHDRAW: only the maker withdraws" (w rname side w2)
+     (or (not (rule-is? "withdraw" rname)) (equal? side (maker-of (rule-offer rname)))))
+   (step-property "R-SWAP-EXPIRE: a lapse keeps what was filled and moves no offdelta" (w rname side w2)
+     (or (not (rule-is? "lapse" rname))
+         (and (equal? (:off w2) (:off w)) (equal? (moved-legs w w2 (rule-offer rname)) (list 0 0)))))
+   (step-property "R-SWAP-ONCHAIN R-SWAP-ALLOWANCES: no dispute starts from a clause with no allowance: the finalize would revert" (w rname side w2)
+     (or (not (rule-is? "dispute" rname))
+         (every (lambda (c) (or (not c) (and (:allow-give c) (:allow-want c)))) (:clauses w))))
    (step-property "R-SWAP-WITHDRAW: a withdrawn offer never changes again" (w rname side w2)
      (every (lambda (i) (or (not (book-of w i)) (not (equal? (:status (book-of w i)) :withdrawn)) (equal? (book-of w i) (book-of w2 i))))
             indexes))

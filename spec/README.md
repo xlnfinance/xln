@@ -59,7 +59,7 @@ cd spec
 npm install            # or: bun install    (MCP server dependencies; `npm ci` in a boot script)
 npm run setup          # pnpm install + build inside arrival/ (dist/ is not committed)
 npm run check          # about 11 minutes (650 s measured, three checks at once on a busy box): {:ok #t :states 4563 :transitions 18600 :goals 44}
-npm test               # 265 cases on this tree, one child process each (pool of TEST_JOBS=4), each verdict printed as its case finishes; exits non-zero if any case fails.
+npm test               # 266 cases on this tree, one child process each (pool of TEST_JOBS=4), each verdict printed as its case finishes; exits non-zero if any case fails.
                        # Wall time was 88.7 minutes on 4 cores before the refusal page (the J batch case with deposit legs alone takes 85); the 32 account cases alone now take about 70 minutes at TEST_JOBS=3 on a busy box (the heaviest, lossy clock, 35 minutes). Every case has a fixed budget (150 minutes) and fails by name if it blows it
 ```
 

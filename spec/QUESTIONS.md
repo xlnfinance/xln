@@ -1342,7 +1342,7 @@ Planted bugs: `swap-fill-after-withdraw`, `swap-fill-after-lapse`, `swap-withdra
 **Q-S-6. The dispute (R-SWAP-ONCHAIN, R-BOOK-DISPUTE-HONORS).**
 Choice: one rule, `dispute r`, for a taker ratio r in {0, 32768, 65535}: the chain settles the body's offdeltas plus, for each clause, `floor(amount * r / 65535)` on each leg (0 is a missing argument: no fill).
 A clause with no allowance on a leg reverts the whole finalize, which the page reads as a refused dispute (`finalize-reverts?`); R-SWAP-ALLOWANCES says the clause carries an allowance on both legs, in full, of what remains
-(planted bug `swap-clause-no-allowance`). Properties: the legs the chain fills are floor on each leg of the clause (`swap-chain-leg-rounds-up`, `swap-chain-no-argument-fills`); each token settles at
+(planted bug `swap-clause-no-allowance`; and a dispute step property, so that a finalize that does not revert such a clause is caught alone: `swap-finalize-ignores-allowance`, run with the allowance property removed). Properties: the legs the chain fills are floor on each leg of the clause (`swap-chain-leg-rounds-up`, `swap-chain-no-argument-fills`); each token settles at
 the payments, the legs filled and the taker's fill of what the book says remains (`swap-dispute-drops-filled`: the chain starts from the offdeltas before the fills and a fill is lost); no side is past the credit the other extended after
 a dispute. The page settles; it does not run the payout (collateral, reserves, debt), which is the dispute page. Not modelled: the allowance CLAMP (an allowance below the fill caps the delta; here the allowance is the remainder so it never bites),
 the n-th ratio of several swaps in one clause, the starter's committed ratio (all three are contract tests of R-SWAP-ONCHAIN).

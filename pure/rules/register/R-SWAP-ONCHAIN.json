@@ -140,6 +140,11 @@
    "kind": "bug",
    "layer": "arrival",
    "name": "swap-chain-no-argument-fills"
+  },
+  {
+   "kind": "bug",
+   "layer": "arrival",
+   "name": "swap-finalize-ignores-allowance"
   }
  ]
 }

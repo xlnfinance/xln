@@ -19,6 +19,11 @@
    "kind": "bug",
    "layer": "arrival",
    "name": "swap-clause-no-allowance"
+  },
+  {
+   "kind": "bug",
+   "layer": "arrival",
+   "name": "swap-finalize-ignores-allowance"
   }
  ]
 }
