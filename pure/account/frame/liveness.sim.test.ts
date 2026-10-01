@@ -7,7 +7,7 @@
 import { describe, expect, test } from "bun:test";
 import { unwrapOr } from "../../kernel/core/result.ts";
 import { clockParams } from "../clause/clock.ts";
-import { holdOf, secretOf, tokenOf, viewOf } from "../fixtures.ts";
+import { draw, holdOf, secretOf, tokenOf, viewOf } from "../fixtures.ts";
 import { emptyLedger, MAX_HOLDS } from "../ledger.ts";
 import { holdId, other, type Ledger, type Side } from "../model.ts";
 import { emptyAccount, openHolds, withLedger } from "../state.ts";
@@ -31,14 +31,6 @@ type World = Readonly<{
   time: bigint;
   drift: Sided<bigint>;
 }>;
-
-/** A draw is a pure function of where it is asked: seed, run, step and which question. */
-const draw = (seed: number, run: number, step: number, k: number, n: number): number => {
-  const where = Math.imul(seed * 1000003 + run, 2654435761) ^ Math.imul(step + 1, 1597334677);
-  const a = where ^ Math.imul(k + 7, 3266489917);
-  const b = Math.imul(a ^ (a >>> 15), 2246822507);
-  return (Math.imul(b ^ (b >>> 13), 3266489909) >>> 0) % n;
-};
 
 const viewOfSide = (w: World, side: Side): bigint => w.time + w.drift[side];
 const rulesOf = (w: World, side: Side) => accountRules({ clock, view: viewOf(viewOfSide(w, side)) } satisfies Judge);
@@ -174,8 +166,13 @@ const runOne = (c: Chaos, steps: number) => {
   return { stuck: settle(calm, 60) ? 0 : 1, committed, collisions: stepped.collisions };
 };
 
-const simulate = (seed: number, runs: number, steps: number, maxDrift: bigint, ticks: boolean): Summary => {
-  const each = Array.from({ length: runs }, (_, run) => runOne({ seed, run, maxDrift, ticks }, steps));
+type Weather = Readonly<{ maxDrift: bigint; ticks: boolean }>;
+const FROZEN: Weather = { maxDrift: 0n, ticks: false };
+const MOVING: Weather = { maxDrift: 0n, ticks: true };
+const DRIFTING: Weather = { maxDrift: LAG, ticks: true };
+
+const simulate = (seed: number, runs: number, steps: number, weather: Weather): Summary => {
+  const each = Array.from({ length: runs }, (_, run) => runOne({ seed, run, ...weather }, steps));
   return {
     runs,
     stuck: each.reduce((n, r) => n + r.stuck, 0),
@@ -186,17 +183,17 @@ const simulate = (seed: number, runs: number, steps: number, maxDrift: bigint, t
 
 describe("account/frame R-FRAME-REFUSAL no run is stuck while J moves and the views drift", () => {
   test("R-FRAME-REFUSAL a frozen J: every run settles, and the round did real work", () => {
-    const out = simulate(5, 300, 120, 0n, false);
+    const out = simulate(5, 300, 120, FROZEN);
     expect(out.stuck).toBe(0);
     expect(out.committed).toBeGreaterThan(300);
     expect(out.collisions).toBeGreaterThan(300);
   });
 
   test("R-FRAME-REFUSAL J moves while frames are in flight, the views agree: 0 of 300 runs stuck", () => {
-    expect(simulate(5, 300, 120, 0n, true).stuck).toBe(0);
+    expect(simulate(5, 300, 120, MOVING).stuck).toBe(0);
   });
 
   test("R-FRAME-REFUSAL J moves and the two views drift apart by up to LAG: 0 of 300 runs stuck", () => {
-    expect(simulate(6, 300, 120, LAG, true).stuck).toBe(0);
+    expect(simulate(6, 300, 120, DRIFTING).stuck).toBe(0);
   });
 });
