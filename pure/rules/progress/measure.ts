@@ -103,26 +103,70 @@ const columnMilestone = (name: string, column: Column, note: string): Milestone 
 
 export const SEPOLIA_STEPS = "open, pay, HTLC across hubs, swap, dispute";
 
-// A recorded deployment cannot be called done yet: the manifest's code hashes (the chain's runtime code, immutables and linked libraries
-// filled in) are not compared with the build, and a plain hash of the compiled artifact cannot match them (the Depository carries
-// immutables and links a library). Until a check compares them, a recorded deployment is unverified.
-const contractsMilestone = (contracts: Column, deployment: Deployment): Milestone => {
+// What `bun contracts/deploy/verify.ts` answered: exit 0 every contract matches the current build and the manifest, 1 at least one differs,
+// 2 (or anything else, or a run that never finished) the check could not be made. `block` is the block it read the chain at.
+export type Verification = Readonly<{ result: "match" | "differ" | "cannot-check"; block?: number; detail: string }>;
+
+const lastLine = (text: string): string => text.trim().split("\n").at(-1)?.trim() ?? "";
+
+const firstLine = (text: string): string => text.trim().split("\n")[0]?.trim() ?? "";
+
+export const verificationOf = (exitCode: number | null, stdout: string, stderr: string): Verification => {
+  const found = /at block (\d+)/.exec(stdout)?.[1];
+  const block = found === undefined ? {} : { block: Number(found) };
+  if (exitCode === 0) {
+    return found === undefined
+      ? { result: "cannot-check", detail: "verify.ts exited 0 but printed no block number, so its answer cannot be quoted" }
+      : { result: "match", ...block, detail: lastLine(stdout) };
+  }
+  if (exitCode === 1) return { result: "differ", ...block, detail: lastLine(stdout) === "" ? "at least one contract differs" : lastLine(stdout) };
+  if (exitCode === 2) return { result: "cannot-check", detail: firstLine(stderr).replace(/^verify: could not check: /, "") || "exit 2" };
+  return { result: "cannot-check", detail: exitCode === null ? "verify.ts did not finish (killed or timed out)" : `verify.ts exited ${exitCode}, not 0, 1 or 2` };
+};
+
+const verifierText = (verification: Verification | undefined): string => {
+  if (verification === undefined) return "verify.ts was not run";
+  const at = verification.block === undefined ? "" : ` at block ${verification.block}`;
+  switch (verification.result) {
+    case "match":
+      return `verify.ts exit 0${at}: ${verification.detail}`;
+    case "differ":
+      return `verify.ts exit 1${at}: ${verification.detail}`;
+    case "cannot-check":
+      return `verify.ts could not check: ${verification.detail}`;
+  }
+};
+
+// Done only when the column is complete, the manifest records a deployment, and `bun contracts/deploy/verify.ts` exited 0 (the chain's code at
+// every address is the current build's, read at the block quoted). Exit 1 is not done; exit 2, a run that never finished, or no run is unchecked,
+// never done: an answer that was not obtained is not a yes.
+const contractsMilestone = (contracts: Column, deployment: Deployment, verification: Verification | undefined): Milestone => {
   const complete = isComplete(contracts);
-  const status: Status = !complete || !deployment.recorded ? "not done" : "unchecked";
+  const status = contractsStatus(complete && deployment.recorded, verification);
   return {
     name: "Contracts reviewed and deployed",
     status,
-    by: "by the register's contract column and the manifest, not by a review or a build comparison",
-    detail: `contracts column: ${countsText(contracts)}; manifest: ${deployment.detail}${status === "unchecked" ? "; unverified: the manifest's code hashes are not compared with the current build" : ""}`,
+    by: "by the register's contract column and the manifest, and by verify.ts comparing the chain's code with the current build; not by a review",
+    detail: `contracts column: ${countsText(contracts)}; manifest: ${deployment.detail}; ${verifierText(verification)}`,
   };
 };
 
-// Six milestones, in the order of the goal. Each is decided by a check that already exists: a register column, or the manifest. The
+const contractsStatus = (ready: boolean, verification: Verification | undefined): Status => {
+  if (!ready || verification?.result === "differ") return "not done";
+  return verification?.result === "match" ? "done" : "unchecked";
+};
+
+// Six milestones, in the order of the goal. Each is decided by a check that already exists: a register column, or the verifier. The
 // last has none yet (no recorded run is read by anything), so it says unchecked rather than guessing.
-export const milestonesOf = (columns: readonly Column[], deployment: Deployment, main: SpecAtMain | undefined): readonly Milestone[] => [
+export const milestonesOf = (
+  columns: readonly Column[],
+  deployment: Deployment,
+  main: SpecAtMain | undefined,
+  verification?: Verification,
+): readonly Milestone[] => [
   specMilestone("Arrival on main", "arrival", main),
   specMilestone("Quint on main", "quint", main),
-  contractsMilestone(columnFor(columns, "contract"), deployment),
+  contractsMilestone(columnFor(columns, "contract"), deployment, verification),
   columnMilestone("xln.ts cut to the spec", columnFor(columns, "ts"), " (every ts cell held or not applicable)"),
   columnMilestone("Walk checks the spec against the contracts", columnFor(columns, "rig"), " (the register does not say which contracts the walk ran on)"),
   { name: "End-to-end run on Sepolia", status: "unchecked", detail: `${SEPOLIA_STEPS}: this report has no check for it` },

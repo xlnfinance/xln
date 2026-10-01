@@ -3769,11 +3769,11 @@
    "statement": "A deployed manifest is checked against its chain by one read-only command (contracts/deploy/verify.ts: eth_chainId, eth_blockNumber, eth_getCode, no key, nothing behind --live): each contract's runtime code is rebuilt from the compiled artifact with its library links and immutables filled, compared byte for byte with the chain's code and by keccak256 with the manifest's codeHash; any difference, an artifact older than the sources it imports, or a node on another chain is not a match, and the exit code is 0 only when every contract matches. The gate runs it against a fake node; whether main still equals Sepolia is the command's answer, not a gate test.",
    "source": "coordinator 10-01 08:23 (the progress report cannot call the Sepolia deployment done while nothing compares the deployed code with the current build)",
    "layers": {
-    "arrival": "-",
-    "quint": "-",
+    "arrival": "n/a: a check of a live deployment against the chain, not protocol behaviour",
+    "quint": "n/a: a check of a live deployment against the chain, not protocol behaviour",
     "contract": "hold",
-    "rig": "-",
-    "ts": "-"
+    "rig": "n/a: a check of a live deployment with no system state for the walk",
+    "ts": "n/a: deployment tooling lives under contracts/deploy; xln.ts takes no part"
    },
    "killers": [
     {

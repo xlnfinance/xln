@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { evaluate } from "../evaluate.ts";
 import { LAYERS, type Cell, type Layer, type Name, type Register, type Row } from "../model.ts";
-import { addedSince, columnsOf, milestonesOf, percentOf, registerColumns, renderProgress, retiredSince, totalOf, type Deployment, type SpecAtMain } from "./measure.ts";
+import { addedSince, columnsOf, milestonesOf, percentOf, registerColumns, renderProgress, retiredSince, totalOf, verificationOf, type Deployment, type SpecAtMain, type Verification } from "./measure.ts";
 
 const held: Cell = { _tag: "hold" };
 const owed: Cell = { _tag: "owed", by: "someone" };
@@ -211,11 +211,40 @@ describe("the six goal milestones, each decided by a check that exists", () => {
     const open = allDone.map((each) => (each.layer === "contract" ? column("contract", 21, 1) : each));
     expect(statusOf("Contracts reviewed and deployed", open, recorded)).toBe("not done");
   });
-  test("contracts: a recorded deployment is never done, because nothing compares its code hashes with the build", () => {
+  test("contracts: a recorded deployment nobody has verified is unchecked, never done", () => {
     const found = milestone("Contracts reviewed and deployed", allDone, recorded);
     expect(found?.status).toBe("unchecked");
-    expect(found?.detail).toContain("unverified");
-    expect(found?.detail).toContain("code hashes");
+    expect(found?.detail).toContain("verify.ts was not run");
+  });
+  const verify = (verification: Verification | undefined, columns = allDone, deployment = recorded) =>
+    milestonesOf(columns, deployment, mainDone, verification).find((each) => each.name === "Contracts reviewed and deployed");
+  const matched: Verification = { result: "match", block: 11820663, detail: "all 9 match" };
+  test("contracts: done only when the verifier exited 0, and the block it checked is quoted", () => {
+    const found = verify(matched);
+    expect(found?.status).toBe("done");
+    expect(found?.detail).toContain("block 11820663");
+    expect(found?.by).toContain("verify.ts");
+  });
+  test("contracts: a verifier that found a difference is not done, and says at which block", () => {
+    const found = verify({ result: "differ", block: 11820700, detail: "2 of 9 differ" });
+    expect(found?.status).toBe("not done");
+    expect(found?.detail).toContain("block 11820700");
+    expect(found?.detail).toContain("2 of 9 differ");
+  });
+  test("contracts: a verifier that could not check is unchecked, never done and never not done", () => {
+    const found = verify({ result: "cannot-check", detail: "no compiled artifact" });
+    expect(found?.status).toBe("unchecked");
+    expect(found?.detail).toContain("could not check");
+    expect(found?.detail).toContain("no compiled artifact");
+  });
+  test("contracts: a match does not finish a column that still owes or leaves cells unstated, nor a manifest that is not deployed", () => {
+    expect(verify(matched, allDone.map((each) => (each.layer === "contract" ? column("contract", 21, 1) : each)))?.status).toBe("not done");
+    expect(verify(matched, allDone.map((each) => (each.layer === "contract" ? column("contract", 22, 0, 1) : each)))?.status).toBe("not done");
+    expect(verify(matched, allDone, notRecorded)?.status).toBe("not done");
+  });
+  test("contracts: a difference is not done even when the column is complete, and an incomplete column says so with the verdict", () => {
+    const open = allDone.map((each) => (each.layer === "contract" ? column("contract", 21, 1) : each));
+    expect(verify({ result: "differ", block: 5, detail: "1 of 9 differ" }, open)?.detail).toContain("1 of 9 differ");
   });
   test("the Sepolia run has no check in this report, so it is unchecked whatever else is done, and it makes no claim about records", () => {
     const found = milestone("End-to-end run on Sepolia", allDone, recorded);
@@ -231,6 +260,33 @@ describe("the six goal milestones, each decided by a check that exists", () => {
   test("each detail carries the numbers the status rests on", () => {
     const columns = allDone.map((each) => (each.layer === "arrival" ? column("arrival", 19, 45) : each));
     expect(milestonesOf(allDone, recorded, onMain(columns))[0]?.detail).toContain("19 of 64");
+  });
+});
+
+describe("what the deployment verifier's exit code and output say", () => {
+  const ok = "ethereum-sepolia (chain 11155111), read through x.example at block 11820663\nall 9 match the current build and the manifest";
+  test("exit 0 with a block number is a match at that block", () => {
+    expect(verificationOf(0, ok, "")).toMatchObject({ result: "match", block: 11820663 });
+  });
+  test("exit 1 is a difference, with the block and the last line", () => {
+    const out = "ethereum-sepolia (chain 11155111), read through x.example at block 11820700\n    first differing byte\n2 of 9 differ";
+    expect(verificationOf(1, out, "")).toMatchObject({ result: "differ", block: 11820700, detail: "2 of 9 differ" });
+  });
+  test("exit 2 is could not check, with the reason it printed", () => {
+    expect(verificationOf(2, "", "verify: could not check: no compiled artifact at /x\n")).toMatchObject({ result: "cannot-check", detail: "no compiled artifact at /x" });
+  });
+  test("a killed or timed-out run, and any other exit code, could not check", () => {
+    expect(verificationOf(null, "", "").result).toBe("cannot-check");
+    expect(verificationOf(3, ok, "").result).toBe("cannot-check");
+    expect(verificationOf(137, "", "").result).toBe("cannot-check");
+    expect(verificationOf(null, "", "").detail).toContain("did not finish");
+    expect(verificationOf(3, ok, "").detail).toContain("exited 3");
+  });
+  test("exit 0 without a block number is not a match: the answer cannot be quoted", () => {
+    expect(verificationOf(0, "all match", "").result).toBe("cannot-check");
+  });
+  test("exit 1 without a block number is still a difference", () => {
+    expect(verificationOf(1, "1 of 9 differ", "")).toMatchObject({ result: "differ", detail: "1 of 9 differ" });
   });
 });
 
@@ -320,23 +376,33 @@ describe("the real tree", () => {
   const run = (...args: string[]) => Bun.spawnSync([process.execPath, "rules/progress.ts", ...args], { cwd: `${import.meta.dir}/../..` });
 
   test("prints five columns, a total and the six milestones, and the Sepolia run is unchecked", () => {
-    const done = run();
+    const done = run("--skip-verify");
     const out = done.stdout.toString();
     expect(done.exitCode).toBe(0);
     ["Arrival", "Quint", "ts code", "contracts", "walk", "Total"].forEach((label) => expect(out).toContain(label));
     expect(out).toContain("[unchecked] End-to-end run on Sepolia");
     expect(out.split("\n").filter((line) => /^\[(done|not done|unchecked)\]/.test(line))).toHaveLength(6);
-  });
+  }, 30_000);
   test("names the checkout's branch and says where the spec milestones were read from", () => {
-    const out = run().stdout.toString();
+    const out = run("--skip-verify").stdout.toString();
     expect(out).toMatch(/Progress on branch \S+ at [0-9a-f]{7,}, (clean|dirty)/);
     expect(out).toContain("The Arrival and Quint milestones are read from");
-  });
+  }, 30_000);
   test("--since HEAD adds and retires no rules; a ref that is not there is an error, never an empty answer", () => {
-    expect(run("--since", "HEAD").stdout.toString()).toContain("0 rules added, 0 rules retired");
+    expect(run("--skip-verify", "--since", "HEAD").stdout.toString()).toContain("0 rules added, 0 rules retired");
     const missing = run("--since", "no-such-ref-anywhere");
     expect(missing.exitCode).toBe(1);
     expect(missing.stderr.toString()).toContain("no-such-ref-anywhere");
-  });
-  test("an unknown argument is an error", () => expect(run("--bogus").exitCode).toBe(1));
+  }, 30_000);
+  test("an unknown argument is an error", () => expect(run("--bogus").exitCode).toBe(1), 30_000);
+  test("--skip-verify leaves the verifier out: a recorded deployment is unchecked and the line says verify.ts was not run", () => {
+    const out = run("--skip-verify").stdout.toString();
+    expect(out).toMatch(/\[(unchecked|not done)\]\s+Contracts reviewed and deployed/);
+    expect(out).toContain("verify.ts was not run");
+  }, 30_000);
+  test("a plain run asks the verifier: the contracts line carries its answer, whatever this machine can reach", () => {
+    const line = run().stdout.toString().split("\n").find((each) => each.includes("Contracts reviewed and deployed")) ?? "";
+    expect(line).toMatch(/verify\.ts (exit [01]|could not check)/);
+    expect(line).not.toContain("verify.ts was not run");
+  }, 150_000);
 });
