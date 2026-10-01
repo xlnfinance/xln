@@ -1,0 +1,24 @@
+{
+ "id": "N2",
+ "statement": "MAX_LOCK_HORIZON: a party refuses a lock whose deadline is beyond its horizon (deadline_too_far), and a hub refuses to forward one. The Quint cell holds the Account-level refusal (deadline_too_far past view + horizon + reserve); a hub refusing to forward such a lock is not tested at the Entity layer.",
+ "source": "contracts-decisions.md H1 open point; Arrival Q-D-20; Quint A9",
+ "layers": {
+  "arrival": "hold",
+  "quint": "hold",
+  "contract": "n/a: the contracts have no lock horizon; it is an off-chain refusal",
+  "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
+  "ts": "hold"
+ },
+ "killers": [
+  {
+   "kind": "bug",
+   "layer": "arrival",
+   "name": "no-horizon"
+  },
+  {
+   "kind": "mutant",
+   "layer": "quint",
+   "name": "horizon-off"
+  }
+ ]
+}
