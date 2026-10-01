@@ -1,0 +1,47 @@
+name: lane-label
+
+# The lane rule: every pull request into development carries exactly one of core, chain, spec or process, and a core, chain or
+# spec pull request waits while an earlier one holds its lane (.github/scripts/lane-label.sh, pinned by rules/ci/lanes/).
+# `Lane label` is the one check to require on development, next to the two fast gate checks.
+on:
+  pull_request:
+    branches: [development]
+    types: [opened, reopened, synchronize, edited, labeled, unlabeled, ready_for_review, converted_to_draft, closed]
+
+concurrency:
+  group: lane-label-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: read
+  actions: write
+
+jobs:
+  lane-label:
+    name: Lane label
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: List the open pull requests into development
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh api --paginate "repos/$GITHUB_REPOSITORY/pulls?state=open&base=development&per_page=100" | jq -s 'add // []' > "$RUNNER_TEMP/open-prs.json"
+
+      - name: One open pull request per lane
+        if: github.event.action != 'closed'
+        run: bash .github/scripts/lane-label.sh check "${{ github.event.pull_request.number }}" "$RUNNER_TEMP/open-prs.json"
+
+      # A closed pull request frees its lane: the pull requests that waited get their lane check run again.
+      - name: Run the lane check again for the pull requests that waited
+        if: github.event.action == 'closed'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          bash .github/scripts/lane-label.sh waiting "$GITHUB_EVENT_PATH" "$RUNNER_TEMP/open-prs.json" | while read -r number branch; do
+            run=$(gh run list --workflow lane-label.yml --branch "$branch" --limit 1 --json databaseId --jq '.[0].databaseId')
+            gh run rerun "$run" || echo "lane-label: could not run the check again for pull request $number"
+          done
