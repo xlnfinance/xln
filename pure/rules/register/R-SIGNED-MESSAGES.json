@@ -1,0 +1,19 @@
+{
+ "id": "R-SIGNED-MESSAGES",
+ "statement": "A frame's content name and a refusal are signed under digests of their own, tagged with their kind and scoped to the chain, the Depository, both entities of the Account (smaller id first) and the epoch, and a frame's digest also names its proof nonce, so a signature on one is never valid as the other, as a dispute proof, on another Account, in another epoch or at another nonce; every field is written as text and the fields cannot be shifted into one another, so a digest exists whatever a peer put on the wire. The Runtime signs these and checks the signature before the receiver's refusal memory or the proposer's rollback is consulted (R-FRAME-REFUSAL rests on an authenticated peer).",
+ "source": "Review B of PR 85 (finding 5, note 5); coordinator 10-01 04:24 (A4b: signed bytes for frames and refusals)",
+ "layers": {
+  "arrival": "owed: spec thread (slots, floors and higher slot wins, from #97)",
+  "quint": "owed: spec thread (slots, floors and higher slot wins, from #97)",
+  "contract": "n/a: an off-chain Account rule; the chain sees only signed proofs",
+  "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
+  "ts": "hold"
+ },
+ "killers": [
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "account/proof R-SIGNED-MESSAGES a frame and a refusal are signed under digests of their own"
+  }
+ ]
+}

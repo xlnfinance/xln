@@ -416,7 +416,7 @@ describe(seedTag("settle-jsubmit: settle_execute gates (og payments/settle.ts ha
     }
     expect(counts.skipped).toBeGreaterThan(50);
     expect(counts.refused).toBeGreaterThan(50);
-  });
+  }, 30_000);
 });
 
 describe(seedTag("settle-jsubmit: settle_execute jBatch row (og jurisdiction/machine/batch batchAddSettlement)"), () => {

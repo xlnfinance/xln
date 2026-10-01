@@ -1,0 +1,39 @@
+{
+ "id": "R-PROOF-NONCE-ABOVE-SIGNED",
+ "statement": "Every committed frame's proof nonce is strictly above every proof nonce either side signed before it committed, yielded and refused attempts included, and no two different proofs share a nonce, so the Left-beats-Right tie rule never decides. Mechanism: a frame carries its slot; the slot is in its author's lane (Left's an even distance above the committed slot, Right's an odd one) and above the highest slot its proposer signed and the highest it knows the peer signed (`signed`, `peerSigned`, learned from the peer's frames and from the floor a refusal carries); a collision is won by the higher slot (R-A1: at the first collision on a head, Left's); a receiver acks no slot at or below one it signed (a stale refusal naming its floor), believes a peer slot only in the peer's lane, above the committed slot and at most one lane step above what it knows (else a bad-slot refusal), and believes a refusal's floor on the same terms, so one frame cannot spend the nonce space. The peer's proofs of frames that were children of the committed head (signed after it) are above it by nature: R-SIGNED-IS-LIVE. Persisting used, signed, peerSigned and unsuperseded together is a safety duty of the Runtime (cut thread): losing signed re-signs a slot, losing peerSigned makes an honest floor fall outside the reach.",
+ "source": "coordinator 10-01 05:44 and 06:20 (Review A and Review B of PR 97); contracts-decisions.md, A4b section",
+ "layers": {
+  "arrival": "owed: spec thread (slots, floors and higher slot wins, from #97)",
+  "quint": "owed: spec thread (slots, floors and higher slot wins, from #97)",
+  "contract": "n/a: an off-chain Account rule; the chain sees only signed proofs",
+  "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
+  "ts": "hold"
+ },
+ "killers": [
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "account/frame R-PROOF-NONCE-ABOVE-SIGNED no signed proof outlives a collision above the commit"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "account/frame R-PROOF-NONCE-ABOVE-SIGNED every proof has a slot of its own, above all signed"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "account/frame R-PROOF-NONCE-ABOVE-SIGNED one signer, one proof per nonce, the commit above the rest"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "account/frame R-PROOF-NONCE-ABOVE-SIGNED a receiver believes only a slot an honest peer could take"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "account/frame R-PROOF-NONCE-ABOVE-SIGNED a proposer believes only a floor an honest peer could sign"
+  }
+ ]
+}

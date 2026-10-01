@@ -1,0 +1,24 @@
+{
+ "id": "R-BOOK-BOUNDED",
+ "statement": "A hub book holds at most maxOrders offers and an owner at most maxPerOwner; only an order that may rest needs room, and a cancel frees it.",
+ "source": "Hub matching engine thread, coordinator brief 10-01 02:56 (Arthur: the matching engine is a parallel job; the swap clause stays the Account's)",
+ "layers": {
+  "arrival": "n/a: a hub-local matching engine: no peer sees the book, only the swap clauses it produces (R-SWAP-ONCHAIN)",
+  "quint": "n/a: a hub-local matching engine: no peer sees the book, only the swap clauses it produces (R-SWAP-ONCHAIN)",
+  "contract": "n/a: an off-chain hub engine; the chain sees only the signed swap clause (R-SWAP-ONCHAIN)",
+  "rig": "owed: matching engine thread (when the engine is wired into money state)",
+  "ts": "hold"
+ },
+ "killers": [
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-BOOK-BOUNDED an owner holds at most maxPerOwner offers, and the book at most maxOrders"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-BOOK-BOUNDED an order that cannot rest needs no room, and a cancel gives the room back"
+  }
+ ]
+}

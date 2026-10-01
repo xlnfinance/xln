@@ -1,0 +1,19 @@
+{
+ "id": "R-SWAP-CLAUSE-WITH-FILL",
+ "statement": "The contract has no memory of fills, so the step that moves the offdeltas for a fill also shrinks the offer to its remainder (give and want, both reservations, the clause in the signed body), and a whole fill leaves no clause. The signed state never carries a clause that could fill what the offdeltas already hold: a dispute from it with the taker filling in full yields exactly the offer, never more, in any order of offers, fills, withdrawals and lapses.",
+ "source": "Arthur 10-01 02:53 (D3: two-party swap inside an Account); plan/swap-onchain.md; coordinator 10-01",
+ "layers": {
+  "arrival": "owed: spec thread, swap page",
+  "quint": "owed: spec thread",
+  "contract": "-",
+  "rig": "-",
+  "ts": "hold"
+ },
+ "killers": [
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "account/swap R-SWAP-CLAUSE-WITH-FILL a state that holds a fill carries a clause for what is left"
+  }
+ ]
+}

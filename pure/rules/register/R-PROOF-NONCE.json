@@ -1,0 +1,30 @@
+{
+ "id": "R-PROOF-NONCE",
+ "statement": "The proof nonce is its own counter; a committed frame signs at a slot above every slot either side signed, in its author's lane (Left's an even distance above the committed slot, Right's an odd one), so no two frames of one Account ever share a nonce (a gap appears wherever the other side's slot, or an abandoned attempt's, goes unused); signatures are one per (signer, nonce, author side).",
+ "source": "contracts-decisions.md, Account-layer decisions 09-30 D-AC-11",
+ "layers": {
+  "arrival": "owed: spec thread, next Arrival page (id not in a name yet)",
+  "quint": "owed: spec thread, new Quint branch (id not in a name yet)",
+  "contract": "n/a: the counter discipline is the signers'; the chain accepts a higher nonce and keeps its gap (A18)",
+  "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
+  "ts": "hold"
+ },
+ "killers": [
+  {
+   "kind": "mutant",
+   "layer": "quint",
+   "name": "proposer-may-skip-nonces"
+  },
+  {
+   "kind": "bug",
+   "layer": "arrival",
+   "name": "baseline-too-low",
+   "owed": "spec thread, next Arrival page"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-PROOF-NONCE a frame signs above every slot spent: Left's next is slot 4, no other slot is its digest"
+  }
+ ]
+}

@@ -1,0 +1,19 @@
+{
+ "id": "R-PROOF-BODY",
+ "statement": "The proof body an Account signs is a function of its state and its terms: tokens ascending with their offdeltas, one transformer clause per open hold with one payment in (token, slot) order (the payer on the left moves the delta down), and a body the Account contract would refuse (more than MAX_HOLDS clauses, more than 128 tokens, response windows over a year, a value its types cannot carry) is refused before anyone signs it. Both replicas build the same bytes from the same state, so none of them comes from the wire.",
+ "source": "first-moves.md A4; Account.sol _validateProofBody; coordinator relay 10-01 on A4",
+ "layers": {
+  "arrival": "owed: spec thread (slots, floors and higher slot wins, from #97)",
+  "quint": "owed: spec thread (slots, floors and higher slot wins, from #97)",
+  "contract": "n/a: the Account contract checks the signed body, not how the Account builds it",
+  "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
+  "ts": "hold"
+ },
+ "killers": [
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "account/proof R-PROOF-BODY the body an Account signs is a function of its state and terms"
+  }
+ ]
+}
