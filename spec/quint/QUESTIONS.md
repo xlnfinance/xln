@@ -29,7 +29,8 @@ retransmission exists (`collision.ts:117`).
 Options: (a) refuse silently and count it; (b) send a reject message; (c) treat as dispute evidence and freeze.
 Choice: (a) for this layer. A frame is all-or-nothing: the first tx that does not apply refuses the whole frame, the
 receiver's state is untouched, and no message is sent. Two honest sides never refuse each other's frames in this
-model, so the case is only exercised by stale and duplicate frames. The Byzantine-peer case is now modelled in `account.qnt`
+model, so the case is only exercised by stale and duplicate frames. **Superseded in part by R-FRAME-REFUSAL (A16, A17): a frame that is next in line and cannot be applied is now answered with a refusal, because the silent
+version left the proposer wedged; the silent refusal stays for a frame that is not next in line.** The Byzantine-peer case is now modelled in `account.qnt`
 (a peer that proposes forged state, skipped heights, stamps from the future or the past, wrong acks): every such frame is
 refused and counted, the honest state does not move, and no side ever freezes on it. Option (c) stays available to the Entity
 (the refused frame plus the peer's earlier signature are evidence), but nothing in the Account depends on it. Source: R-X1, Q-E2, Q-A3.
@@ -122,6 +123,48 @@ comes from routing) and is modelled as unconstrained, which over-approximates ho
 `account-model.md` section 4.
 
 **A15. R-ONE-LOCK-PER-HASH (coordinator 09-30).** An Account holds at most one open clause per hashlock, whoever the payer. `applyTx` refuses a second `HtlcLock` on an open hashlock with `lock_exists` (the slot id still addresses the lock). og refuses it (xln.ts 7457-7458); this model allowed it until now. `oneLockPerHashlockTest` pins it (second lock by either payer refused, a different hashlock still fits the other slot); mutant `duplicate-hashlock-allowed`.
+
+**A16. R-FRAME-REFUSAL: the receiver refuses a frame it cannot apply, and the proposer handles the refusal (coordinator 10-01, Review A of PR 82 F2; the kernel's rounds 2 and 3, `review/handoff-a4.md`).**
+The gap: a deadline that passes while a frame is in flight makes the receiver unable to apply it (an expiry its own view says is not yet expired, a lock whose deadline is not after its view). Until now the receiver
+refused and counted (A3) and nothing answered, so the proposer kept its pending frame for ever, and a stuck Left frame also blocks Right (Left keeps its own frame on a collision and ignores Right's). The spec had
+no clock-driven wedge check because no property is a liveness one; `refusedFrameIsRetriedAtTheNextAttemptTest` is the schedule, and mutant `proposer-ignores-refusal` the wedge.
+Choice (as decided): a frame that is next in line (`inLine`: from the peer, the receiver's next height, parent, proof nonce) and that the receiver cannot apply is answered with a `Refusal`
+`{fid, index, fault, mark}`: the frame by its id (the wire's hash), the index of the first tx it refused, a fault tag (the `applyTx` reason; `bad_state` for a frame whose txs apply but not to the state it claims), and
+the mark (A17). The refusal is a message in a set `nacks`, with the same free redelivery and loss as proposals and acks (A14; `loseNack`). A frame that is not next in line (stale, from the future, a wrong parent or nonce, a
+second frame while one is held) is refused as before, counted and silent: nothing honest sends one. The proposer (`onRefusal`) acts only on a refusal that names the frame it has in flight, unacked, with an index that names a tx
+of it; any other refusal (a frame already committed, rolled back, never sent) changes nothing. Then it rolls the frame back (Proposed to Open, the frame's txs ahead of the mempool) and:
+a RETRYABLE fault (`retryable`: `not_expired`, `deadline_too_far`: the ones that pass as the peer's view moves) sends EVERY tx of the frame back for another attempt, with no notice, while its attempt count is below `MAX_ATTEMPT`
+(2 here, stands for 8); any other fault, or a retryable one with the budget spent, drops the named tx WITH NOTICE (`refused`, `no_tx_lost`: the payer is released) and keeps the rest. `propose` then sends the rest as an ordinary frame.
+A refusal for a committed frame is ignored (`refusalForACommittedFrameIsIgnoredTest`, from a peer that acked and then refused: only a Byzantine one; `byzNack` is that peer, any fault, index and mark). Left-wins still decides simultaneous
+proposals: a Right that refuses Left's frame in a collision keeps its own frame in flight (`rightKeepsItsFrameWhenItRefusesLeftsTest`); a Left holding its own frame still ignores Right's (the kernel answers a declined frame before
+keeping its own; here the Left case is unchanged, and the fuzz of the two will show the difference).
+Tests: `refusedFrameIsRetriedAtTheNextAttemptTest` (a deadline passes in flight: refusal, the same tx at attempt 1 after the receiver's clock moves, both commit), `nonRetryableFaultDropsTheNamedTxTest` (index 1 named, dropped
+with notice, the credit tx before it goes out again), `refusalForACommittedFrameIsIgnoredTest`, `retryBudgetIsSpentThenTheTxIsDroppedTest`, `refusalHandlingTest` (the rule by case as a function), `byzantineRefusalOnlyCostsTheNamedTxTest`.
+Mutants: `proposer-ignores-refusal`, `retryable-fault-drops-the-tx`, `retry-budget-unbounded`, `refusal-for-committed-frame-rolls-back`, `refusal-drops-the-first-tx`, `refusal-drops-without-notice`, `right-rolls-back-when-it-refuses`, and `accept-own-frame` (rule C: a replica refuses a frame whose
+author is itself; it had no mutant, and no delivery offers one, so `ownFrameIsNeverTakenTest` calls `acceptable` and `onPropose` directly). Not modelled: spacing the retries (Runtime policy), the refusal's signature (the refusal names the frame by id here; the wire names it by a hash the receiver can compute without applying it, R-FRAME-HASH-SIGNED).
+
+**A17. The attempt number, the receiver's mark and the fork (R-FRAME-REFUSAL, kernel round 2 and 3).**
+A frame carries `attempt` (the refusals its proposer has handled on this head), part of its content: a retry is a different frame. The receiver keeps ONE mark per head (`Replica.mark`): the highest attempt it refused, with the index
+and the fault. A frame next in line is judged by it before anything else: at the mark, it is refused again with the refusal that set the mark; below it, a refusal with fault `stale_attempt`, index 0 and the mark (every refused
+frame is answered: mutant `stale-attempt-silent`); above it, or with no mark, it is judged afresh and a refusal raises the mark. The mark is forgotten whenever the head moves (`commit`: mutant `mark-kept-across-head-moves`), and the
+proposer's attempt with it. The proposer's next attempt is max(own, mark) + 1 (`attempt-ignores-the-mark`); a stale answer costs no tx (`stale-attempt-drops-the-tx`).
+Why: (1) a refused frame at attempt 0 also refuses any other frame at attempt 0 on that head (a forged one must not get a genuine one refused for the price of nothing: the honest proposer never sends two at one attempt, so the rule is free
+for it, and a proposer that restarted behind is moved past the mark by the stale answer: `staleAttemptIsAnsweredWithTheMarkTest`, where `forgetAttempt` stands for the restart); (2) the fork found by the kernel review (A4a): the receiver refuses
+a frame, the proposer (after its budget) drops the tx, the receiver's view of J then moves and the SAME frame becomes applicable. Without the mark the receiver would hold it, ack it and commit a frame its peer dropped: the two replicas
+fork. With the mark the frame is refused again for as long as the head lasts. `refusedFrameIsNeverTakenWhileTheHeadLastsTest` is that schedule (three refusals, the budget spent, the receiver's clock ticks, the frame arrives again at the mark; the
+older ones arrive below it); mutants `receiver-commits-a-refused-frame` (no mark kept) and `refused-frame-judged-afresh-at-same-attempt` (`<` instead of `<=`). Two checks state it on the outcome and not through the guard: the oracle `wellFormed`
+now also requires a held frame to be above the mark, and `no_orphan` says a side never holds as committed a frame its author has given up (it has committed it too, or still has it in flight). Not modelled: attempts outside a safe integer (the code
+bounds the receiver's check there; here the attempt is an unbounded integer and only the Byzantine actions pick it, from 0 to `MAX_ATTEMPT + 1`); persistence (the Runtime must persist `attempt` and the mark, or a restart reopens the fork).
+
+**A18. The proof nonce of a retry (found by the model while doing A16; for the coordinator to confirm).**
+The decided rules do not fit together here. R-PROOF-NONCE says the proof nonce is gapless and signatures are one per (signer, nonce, author side); the proposer signs the proof of a frame when it PROPOSES (A5), and a refused frame is rolled back. A
+retry that dropped a tx re-proposes at the same height, so at the same nonce, with a different proof: the proposer signs a second, different proof under one (signer, nonce, side), which is exactly what `no_equivocation` (A13) forbids, and the peer
+holds both signatures (it can start a dispute on the abandoned one, and the retry cannot counter it: the same rank). The first version of the scenario test (b) showed it (`no_equivocation` false at the end of the drop schedule); a retry that drops nothing
+signs the same proof and is harmless.
+Choice made so that `safe` keeps its meaning (to be confirmed or replaced): a frame at attempt `a` is at proof nonce `pnonce + 1 + a`, so every abandoned attempt keeps its own nonce and the retry outranks it; the receiver's window is widened by the
+frame's own attempt and by nothing else (`inLine`); `nonce_climbs` says a committed frame is above its parent's nonce by one plus its attempt at most; `MAX_NONCE` grows to cover it. Cost: the counter has gaps after a refusal (the one exception to
+"nothing skips"), and a Byzantine proposer can burn its own counter by claiming a high attempt. Mutants `retry-reuses-the-nonce` (killed by the drop test, whose `safe` fails on `no_equivocation`) and `nonce-window-ignores-the-attempt`. The alternative is to keep the nonce
+and let the retry equivocate (an abandoned proposal stays a standing offer anyway, A5), which weakens P4b to "no second proof once the first was acked". The kernel has no proof nonce yet (owed with R-PROOF-NONCE), so nothing there contradicts either.
 
 **A11. Not yet in this layer** (each tracked in PROGRESS.md): cooperative settlement and the on-chain epoch (N1:
 sign proofs only for the current epoch; pause payments until the epoch event is read, then the first proof of the epoch takes the chain's stored

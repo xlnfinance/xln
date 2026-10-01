@@ -32,6 +32,7 @@ module account {
   var nextFid: int
   var proposals: Set[int]            // frame ids in flight to the author's peer; delivery does not consume, so any can repeat
   var acks: Set[int]                 // frame ids acked, in flight to the author
+  var nacks: Set[Refusal]            // refusals in flight to the author of the frame they name [R-FRAME-REFUSAL]; values, so a frame refused twice with one answer is one message
   var signed: SigKey -> int          // the frame each (signer, nonce, branch) signature was made for; 0 = none
   var clock: Side -> int
   var firstCommit: int -> int        // ghost: per height, the frame the first side to commit it committed
@@ -74,7 +75,7 @@ module account {
     replica' = SIDES.mapBy(_ => EMPTY_REPLICA),
     frames' = 0.to(MAX_FRAMES).mapBy(_ => NO_FRAME),
     nextFid' = 1,
-    proposals' = Set(), acks' = Set(),
+    proposals' = Set(), acks' = Set(), nacks' = Set(),
     signed' = tuples(SIDES, 0.to(MAX_NONCE), BRANCHES).mapBy(_ => 0),
     clock' = SIDES.mapBy(_ => 0),
     firstCommit' = 0.to(MAX_HEIGHT).mapBy(_ => 0),
@@ -88,7 +89,7 @@ module account {
     clock' = clock.set(s, clock.get(s) + 1),
     replica' = replica, frames' = frames, nextFid' = nextFid, proposals' = proposals, acks' = acks, signed' = signed,
     firstCommit' = firstCommit, diverged' = diverged, equivocated' = equivocated,
-    rollbacks' = rollbacks, refusals' = refusals, badAccept' = badAccept, badCommit' = badCommit, byz' = byz
+    rollbacks' = rollbacks, refusals' = refusals, nacks' = nacks, badAccept' = badAccept, badCommit' = badCommit, byz' = byz
   }
 
   // Queue `tx` on side `s`. Scripted form, so tests can drive exact scenarios; `enqueue` below tries every tx.
@@ -100,7 +101,7 @@ module account {
       replica' = replica.set(s, { ...r, mempool: r.mempool.append(tx), submitted: r.submitted + 1 }),
       frames' = frames, nextFid' = nextFid, proposals' = proposals, acks' = acks, signed' = signed,
       clock' = clock, firstCommit' = firstCommit, diverged' = diverged, equivocated' = equivocated,
-      rollbacks' = rollbacks, refusals' = refusals, badAccept' = badAccept, badCommit' = badCommit, byz' = byz
+      rollbacks' = rollbacks, refusals' = refusals, nacks' = nacks, badAccept' = badAccept, badCommit' = badCommit, byz' = byz
     }
   }
 
@@ -131,7 +132,7 @@ module account {
       signed' = signed.set(sigKey(s, f), nextFid),
       equivocated' = (equivocated or clashes(signed, frames, sigKey(s, f), f)),
       acks' = acks, clock' = clock, firstCommit' = firstCommit, diverged' = diverged,
-      rollbacks' = rollbacks, refusals' = refusals, badAccept' = badAccept, badCommit' = badCommit, byz' = byz
+      rollbacks' = rollbacks, refusals' = refusals, nacks' = nacks, badAccept' = badAccept, badCommit' = badCommit, byz' = byz
     }
   }
 
@@ -147,7 +148,7 @@ module account {
       replica' = replica.set(s, { ...r, mempool: sel.txs, refused: r.refused.concat(sel.dropped) }),
       frames' = frames, nextFid' = nextFid, proposals' = proposals, acks' = acks, signed' = signed,
       clock' = clock, firstCommit' = firstCommit, diverged' = diverged, equivocated' = equivocated,
-      rollbacks' = rollbacks, refusals' = refusals, badAccept' = badAccept, badCommit' = badCommit, byz' = byz
+      rollbacks' = rollbacks, refusals' = refusals, nacks' = nacks, badAccept' = badAccept, badCommit' = badCommit, byz' = byz
     }
   }
 
@@ -160,7 +161,7 @@ module account {
       proposals' = proposals.union(Set(statusFid(r))),
       replica' = replica, frames' = frames, nextFid' = nextFid, acks' = acks, signed' = signed,
       clock' = clock, firstCommit' = firstCommit, diverged' = diverged, equivocated' = equivocated,
-      rollbacks' = rollbacks, refusals' = refusals, badAccept' = badAccept, badCommit' = badCommit, byz' = byz
+      rollbacks' = rollbacks, refusals' = refusals, nacks' = nacks, badAccept' = badAccept, badCommit' = badCommit, byz' = byz
     }
   }
 
@@ -175,6 +176,7 @@ module account {
       f.author != s,
       replica' = replica.set(s, o.r),
       acks' = if (o.ack) acks.union(Set(fid)) else acks,
+      nacks' = if (o.say.fid != 0) nacks.union(Set(o.say)) else nacks,
       rollbacks' = if (o.rolled) rollbacks + 1 else rollbacks,
       refusals' = if (o.refused) refusals + 1 else refusals,
       badAccept' = (badAccept or (heldNow(r, o.r, fid) and not(wellFormed(r, clock.get(s), f)))), badCommit' = badCommit, byz' = byz,
@@ -184,13 +186,16 @@ module account {
   }
 
   pure def secretOfHash(h: int): int = h - 10        // the adversary knows every secret: the inverse of hashOf
+  pure val FAULTS = Set("not_expired", "deadline_too_far", "deadline_past", "bad_state", "stale_attempt")   // the faults a Byzantine receiver names: two retryable, one stale, two that drop
 
   // What a correct receiver must have checked before it holds a frame for its ack, stated again here on purpose (the mechanism is
   // `acceptable` in account_core): the next height, and a claimed state equal to the replay of the frame's txs on its tip at its OWN
   // clock. The frame's timestamp is not part of it [R-CLOCK]. A frame that fails and is still held is a bug.
   pure def wellFormed(r: Replica, now: int, f: Frame): bool = {
     val replays = match replay(r.tip, f.txs, f.author, now) { | Ok(b) => b == f.after | Refused(_) => false }
-    and { f.parent == r.lastFid, f.height == r.height + 1, f.nonce > r.pnonce, f.nonce <= r.pnonce + 1 + MAX_NONCE_GAP, replays }
+    // R-FRAME-REFUSAL: and above the mark: a frame it has refused (at this attempt or a higher one) on this head is never held
+    val abovePlace = match r.mark { | Declined(m) => f.attempt > m.attempt | NoMark => true }
+    and { f.parent == r.lastFid, f.height == r.height + 1, f.nonce > r.pnonce, f.nonce <= r.pnonce + 1 + MAX_NONCE_GAP + f.attempt, replays, abovePlace }
   }
   pure def heldNow(before: Replica, after: Replica, fid: int): bool =
     isReceived(after) and statusFid(after) == fid and not(isReceived(before) and statusFid(before) == fid)
@@ -205,21 +210,21 @@ module account {
   //   2 an expiry of an open lock, stamped far in the future, before the receiver's own clock is past the deadline and the reserve
   //   3 a resolve of an open lock with its secret, stamped in the past, after the receiver's own clock has passed the deadline
   // (Old and future stamps on frames that are otherwise correct are accepted, by R-CLOCK: `oldFrameIsAcceptedAfterAnOutageTest`.)
-  action byzPropose(a: Side, kind: int, id: int): bool = {
+  action byzProposeAt(a: Side, kind: int, id: int, att: int): bool = {
     val rcv = other(a)
     val r = replica.get(rcv)
     val now = clock.get(rcv)
     val lock = r.tip.locks.get(id)
     val gone = { ...r.tip, locks: r.tip.locks.set(id, NO_LOCK) }
     val f: Frame =
-      if (kind == 0) { height: r.height + 1, parent: r.lastFid, nonce: r.pnonce + 1, ts: now, author: a, txs: List(), after: { ...r.tip, offdelta: r.tip.offdelta + 1 } }
-      else if (kind == 1) { height: r.height + 2, parent: r.lastFid, nonce: r.pnonce + 1, ts: now, author: a, txs: List(), after: r.tip }
-      else if (kind == 2) { height: r.height + 1, parent: r.lastFid, nonce: r.pnonce + 1, ts: now + 100, author: a, txs: [HtlcExpire({ id: id })], after: gone }
+      if (kind == 0) { height: r.height + 1, parent: r.lastFid, nonce: r.pnonce + 1, ts: now, author: a, txs: List(), after: { ...r.tip, offdelta: r.tip.offdelta + 1 }, attempt: att }
+      else if (kind == 1) { height: r.height + 2, parent: r.lastFid, nonce: r.pnonce + 1, ts: now, author: a, txs: List(), after: r.tip, attempt: att }
+      else if (kind == 2) { height: r.height + 1, parent: r.lastFid, nonce: r.pnonce + 1, ts: now + 100, author: a, txs: [HtlcExpire({ id: id })], after: gone, attempt: att }
       else if (kind == 3) { height: r.height + 1, parent: r.lastFid, nonce: r.pnonce + 1, ts: 0, author: a, txs: [HtlcResolve({ id: id, secret: secretOfHash(lock.hashlock) })],
-             after: { ...gone, offdelta: if (lock.payer == Left) r.tip.offdelta - lock.amount else r.tip.offdelta + lock.amount } }
-      else if (kind == 4) { height: r.height + 1, parent: r.lastFid, nonce: r.pnonce, ts: now, author: a, txs: List(), after: r.tip }                            // N1: a proof nonce that is not above the last
-      else if (kind == 5) { height: r.height + 1, parent: r.lastFid, nonce: r.pnonce + 2 + MAX_NONCE_GAP, ts: now, author: a, txs: List(), after: r.tip }   // N1: a leap
-      else { height: r.height + 1, parent: 99, nonce: r.pnonce + 1, ts: now, author: a, txs: List(), after: r.tip }                                      // R-PARENT: a frame that does not extend my head
+             after: { ...gone, offdelta: if (lock.payer == Left) r.tip.offdelta - lock.amount else r.tip.offdelta + lock.amount }, attempt: att }
+      else if (kind == 4) { height: r.height + 1, parent: r.lastFid, nonce: r.pnonce, ts: now, author: a, txs: List(), after: r.tip, attempt: att }                            // N1: a proof nonce that is not above the last
+      else if (kind == 5) { height: r.height + 1, parent: r.lastFid, nonce: r.pnonce + 2 + MAX_NONCE_GAP + att, ts: now, author: a, txs: List(), after: r.tip, attempt: att }   // N1: a leap
+      else { height: r.height + 1, parent: 99, nonce: r.pnonce + 1, ts: now, author: a, txs: List(), after: r.tip, attempt: att }                                      // R-PARENT: a frame that does not extend my head
     all {
       isByz(a), r.height < MAX_HEIGHT,          // the search bound: a frame above MAX_HEIGHT is outside the signature map
       kind >= 0, kind <= 6,
@@ -230,25 +235,26 @@ module account {
       nextFid' = nextFid + 1,
       proposals' = proposals.union(Set(nextFid)),
       replica' = replica, acks' = acks, signed' = signed, clock' = clock, firstCommit' = firstCommit, diverged' = diverged,
-      equivocated' = equivocated, rollbacks' = rollbacks, refusals' = refusals, badAccept' = badAccept, badCommit' = badCommit, byz' = byz
+      equivocated' = equivocated, rollbacks' = rollbacks, refusals' = refusals, nacks' = nacks, badAccept' = badAccept, badCommit' = badCommit, byz' = byz
     }
   }
+  action byzPropose(a: Side, kind: int, id: int): bool = byzProposeAt(a, kind, id, 0)
 
   // One side turns Byzantine (its key is taken) at any moment; from then on only the other side is honest and only it is checked.
   action turnByzantine(a: Side): bool = all {
     byz == 0,
     byz' = (match a { | Left => 1 | Right => 2 }),
     replica' = replica, frames' = frames, nextFid' = nextFid, proposals' = proposals, acks' = acks, signed' = signed, clock' = clock,
-    firstCommit' = firstCommit, diverged' = diverged, equivocated' = equivocated, rollbacks' = rollbacks, refusals' = refusals,
+    firstCommit' = firstCommit, diverged' = diverged, equivocated' = equivocated, rollbacks' = rollbacks, refusals' = refusals, nacks' = nacks,
     badAccept' = badAccept, badCommit' = badCommit
   }
 
   // A Byzantine frame that is correct except for its stamp: the next height, the empty replay, signed by its author. The stamp is
   // 0 or far ahead of every clock. Accepted (R-CLOCK), so it is committed like any other frame and both sides hold both signatures.
-  action byzStamped(a: Side, future: bool): bool = {
+  action byzStampedAt(a: Side, future: bool, att: int): bool = {
     val rcv = other(a)
     val r = replica.get(rcv)
-    val f: Frame = { height: r.height + 1, parent: r.lastFid, nonce: r.pnonce + 1, ts: if (future) clock.get(rcv) + 100 else 0, author: a, txs: List(), after: r.tip }
+    val f: Frame = { height: r.height + 1, parent: r.lastFid, nonce: r.pnonce + 1, ts: if (future) clock.get(rcv) + 100 else 0, author: a, txs: List(), after: r.tip, attempt: att }
     all {
       isByz(a), r.height < MAX_HEIGHT, nextFid <= MAX_FRAMES,
       frames' = frames.set(nextFid, f),
@@ -256,9 +262,11 @@ module account {
       proposals' = proposals.union(Set(nextFid)),
       signed' = signed,
       replica' = replica, acks' = acks, clock' = clock, firstCommit' = firstCommit, diverged' = diverged,
-      equivocated' = equivocated, rollbacks' = rollbacks, refusals' = refusals, badAccept' = badAccept, badCommit' = badCommit, byz' = byz
+      equivocated' = equivocated, rollbacks' = rollbacks, refusals' = refusals, nacks' = nacks, badAccept' = badAccept, badCommit' = badCommit, byz' = byz
     }
   }
+
+  action byzStamped(a: Side, future: bool): bool = byzStampedAt(a, future, 0)
 
   // The same, carrying what the author has queued: the frame its own replica would propose, with the stamp far ahead of every clock. It is a
   // valid replay, so the receiver commits it; only the stamp is odd. (Used by a scenario test, not by the step: byzPropose already draws stamps.)
@@ -272,7 +280,7 @@ module account {
       proposals' = proposals.union(Set(nextFid)),
       signed' = signed,
       replica' = replica, acks' = acks, clock' = clock, firstCommit' = firstCommit, diverged' = diverged,
-      equivocated' = equivocated, rollbacks' = rollbacks, refusals' = refusals, badAccept' = badAccept, badCommit' = badCommit, byz' = byz
+      equivocated' = equivocated, rollbacks' = rollbacks, refusals' = refusals, nacks' = nacks, badAccept' = badAccept, badCommit' = badCommit, byz' = byz
     }
   }
 
@@ -291,7 +299,7 @@ module account {
       signed' = signed.set(sigKey(a, f), if (correct) fid else nextFid),
       acks' = acks.union(Set(fid)),
       replica' = replica, proposals' = proposals, clock' = clock, firstCommit' = firstCommit, diverged' = diverged,
-      equivocated' = equivocated, rollbacks' = rollbacks, refusals' = refusals, badAccept' = badAccept, badCommit' = badCommit, byz' = byz
+      equivocated' = equivocated, rollbacks' = rollbacks, refusals' = refusals, nacks' = nacks, badAccept' = badAccept, badCommit' = badCommit, byz' = byz
     }
   }
 
@@ -328,7 +336,7 @@ module account {
       badCommit' = (badCommit or badCommitOf(r.tip, f, clock)), byz' = byz,
       acks' = acks.union(Set(fid)),
       frames' = frames, nextFid' = nextFid, proposals' = proposals, clock' = clock,
-      rollbacks' = rollbacks, refusals' = refusals, badAccept' = badAccept
+      rollbacks' = rollbacks, refusals' = refusals, nacks' = nacks, badAccept' = badAccept
     }
   }
 
@@ -347,7 +355,7 @@ module account {
       firstCommit' = if (fits and firstCommit.get(f.height) == 0) firstCommit.set(f.height, fid) else firstCommit,
       diverged' = (diverged or (fits and mismatch(firstCommit, frames, f, byz != 0))),
       frames' = frames, nextFid' = nextFid, proposals' = proposals, acks' = acks, signed' = signed,
-      clock' = clock, equivocated' = equivocated, rollbacks' = rollbacks, refusals' = refusals, badAccept' = badAccept, badCommit' = (badCommit or (fits and badCommitOf(r.tip, f, clock))), byz' = byz
+      clock' = clock, equivocated' = equivocated, rollbacks' = rollbacks, refusals' = refusals, nacks' = nacks, badAccept' = badAccept, badCommit' = (badCommit or (fits and badCommitOf(r.tip, f, clock))), byz' = byz
     }
   }
 
@@ -356,23 +364,64 @@ module account {
     deliverAck(s, fid)
   }
 
-  // The network loses a message. Scripted forms name the message; `dropProposal` / `dropAck` lose any one.
+  // [R-FRAME-REFUSAL] The proposer receives the refusal of frame `ref.fid`. `onRefusal` decides: it rolls the pending frame back, requeues or drops with
+  // notice, and sets the next attempt; a refusal for any other frame changes nothing. Scripted form; `receiveRefusal` picks any refusal in flight.
+  action deliverRefusal(s: Side, ref: Refusal): bool = {
+    val r = replica.get(s)
+    all {
+      not(isByz(s)),
+      nacks.contains(ref),
+      frames.get(ref.fid).author == s,
+      replica' = replica.set(s, onRefusal(r, ref, frames.get(ref.fid))),
+      frames' = frames, nextFid' = nextFid, proposals' = proposals, acks' = acks, nacks' = nacks, signed' = signed, clock' = clock,
+      firstCommit' = firstCommit, diverged' = diverged, equivocated' = equivocated, rollbacks' = rollbacks, refusals' = refusals,
+      badAccept' = badAccept, badCommit' = badCommit, byz' = byz
+    }
+  }
+
+  action receiveRefusal(s: Side): bool = {
+    nondet ref = nacks.filter(x => frames.get(x.fid).author == s).oneOf()
+    deliverRefusal(s, ref)
+  }
+
+  // A Byzantine peer answers a frame of the honest side with a refusal of its own making: any fault, any index, any mark. It can only make the honest
+  // proposer roll its pending frame back and drop the tx it names, with notice, or send its txs again: the honest side must neither lose a tx, nor
+  // commit on it, nor hold its Account up for ever by a mark that leaps (the attempt only counts up, a frame is judged again at the next one).
+  action byzNack(a: Side, fid: int, index: int, fault: str, mark: int): bool = all {
+    isByz(a),
+    fid >= 1, fid < nextFid,
+    frames.get(fid).author == other(a),
+    nacks' = nacks.union(Set(refusalFor(fid, index, fault, mark))),
+    replica' = replica, frames' = frames, nextFid' = nextFid, proposals' = proposals, acks' = acks, signed' = signed, clock' = clock,
+    firstCommit' = firstCommit, diverged' = diverged, equivocated' = equivocated, rollbacks' = rollbacks, refusals' = refusals,
+    badAccept' = badAccept, badCommit' = badCommit, byz' = byz
+  }
+
+  // The network loses a message. Scripted forms name the message; `dropProposal` / `dropAck` / `dropNack` lose any one.
   action loseProposal(fid: int): bool = all {
     proposals.contains(fid),
     proposals' = proposals.exclude(Set(fid)),
     replica' = replica, frames' = frames, nextFid' = nextFid, acks' = acks, signed' = signed,
     clock' = clock, firstCommit' = firstCommit, diverged' = diverged, equivocated' = equivocated,
-    rollbacks' = rollbacks, refusals' = refusals, badAccept' = badAccept, badCommit' = badCommit, byz' = byz
+    rollbacks' = rollbacks, refusals' = refusals, nacks' = nacks, badAccept' = badAccept, badCommit' = badCommit, byz' = byz
   }
   action loseAck(fid: int): bool = all {
     acks.contains(fid),
     acks' = acks.exclude(Set(fid)),
     replica' = replica, frames' = frames, nextFid' = nextFid, proposals' = proposals, signed' = signed,
     clock' = clock, firstCommit' = firstCommit, diverged' = diverged, equivocated' = equivocated,
+    rollbacks' = rollbacks, refusals' = refusals, nacks' = nacks, badAccept' = badAccept, badCommit' = badCommit, byz' = byz
+  }
+  action loseNack(ref: Refusal): bool = all {
+    nacks.contains(ref),
+    nacks' = nacks.exclude(Set(ref)),
+    replica' = replica, frames' = frames, nextFid' = nextFid, proposals' = proposals, acks' = acks, signed' = signed,
+    clock' = clock, firstCommit' = firstCommit, diverged' = diverged, equivocated' = equivocated,
     rollbacks' = rollbacks, refusals' = refusals, badAccept' = badAccept, badCommit' = badCommit, byz' = byz
   }
   action dropProposal: bool = { nondet fid = proposals.oneOf() loseProposal(fid) }
   action dropAck: bool = { nondet fid = acks.oneOf() loseAck(fid) }
+  action dropNack: bool = { nondet ref = nacks.oneOf() loseNack(ref) }
 
   action step = any {
     tick(Left), tick(Right),
@@ -383,11 +432,13 @@ module account {
     receiveProposal(Left), receiveProposal(Right),
     ackReceived(Left), ackReceived(Right),
     receiveAck(Left), receiveAck(Right),
-    dropProposal, dropAck,
+    receiveRefusal(Left), receiveRefusal(Right),
+    dropProposal, dropAck, dropNack,
     { nondet a = SIDES.oneOf() turnByzantine(a) },
-    { nondet a = SIDES.oneOf() nondet kind = 0.to(6).oneOf() nondet id = LOCK_SLOTS.oneOf() byzPropose(a, kind, id) },
-    { nondet a = SIDES.oneOf() nondet future = BRANCHES.oneOf() byzStamped(a, future) },
-    { nondet a = SIDES.oneOf() nondet correct = BRANCHES.oneOf() byzAck(a, correct) }
+    { nondet a = SIDES.oneOf() nondet kind = 0.to(6).oneOf() nondet id = LOCK_SLOTS.oneOf() nondet att = 0.to(MAX_ATTEMPT + 1).oneOf() byzProposeAt(a, kind, id, att) },
+    { nondet a = SIDES.oneOf() nondet future = BRANCHES.oneOf() nondet att = 0.to(MAX_ATTEMPT + 1).oneOf() byzStampedAt(a, future, att) },
+    { nondet a = SIDES.oneOf() nondet correct = BRANCHES.oneOf() byzAck(a, correct) },
+    { nondet a = SIDES.oneOf() nondet fid = 1.to(MAX_FRAMES).oneOf() nondet index = 0.to(MAX_MEMPOOL).oneOf() nondet fault = FAULTS.oneOf() nondet mark = 0.to(MAX_ATTEMPT + 1).oneOf() byzNack(a, fid, index, fault, mark) }
   }
 
   // ---------------------------------------------------------------------------------------------------------
@@ -436,13 +487,15 @@ module account {
   // P4e a committed frame never does what its author may not: spend the other side's funds, raise its own credit, expire a lock early.
   val authority: bool = not(badCommit)
 
-  // P4f the proof nonce is its own counter (N1): every committed frame moved it up by at least one and at most 1 + MAX_NONCE_GAP, and the
-  // side's counter is the nonce of the frame it committed last.
+  // P4f the proof nonce is its own counter (N1): every committed frame moved it up by at least one, and by more than 1 + MAX_NONCE_GAP only by the
+  // refusals its own proposer had handled (its attempt, A16), and the side's counter is the nonce of the frame it committed last.
   val nonce_climbs: bool = SIDES.forall(s => {
     val r = replica.get(s)
+    val f = frames.get(r.lastFid)
+    val before = if (f.parent == 0) 0 else frames.get(f.parent).nonce
     and {
-      r.pnonce >= r.height, r.pnonce <= r.height * (1 + MAX_NONCE_GAP),
-      r.lastFid == 0 or frames.get(r.lastFid).nonce == r.pnonce
+      r.pnonce >= r.height,
+      r.lastFid == 0 or and { f.nonce == r.pnonce, f.nonce > before, f.nonce <= before + 1 + MAX_NONCE_GAP + f.attempt }
     }
   })
 
@@ -454,7 +507,17 @@ module account {
     isByz(s) or r.submitted == r.done + r.mempool.length() + inFlight + r.refused.length()
   })
 
-  val safe: bool = and { credit_holds, agreed, no_equivocation, both_signed, no_bad_accept, authority, nonce_climbs, no_tx_lost }
+  // R-FRAME-REFUSAL: no fork by a refused frame. A side never holds as committed a peer's frame that its author has given up: the author has committed it
+  // too (it is at that height or above), or still has it in flight. The author gives a frame up when a refusal for it arrives; the receiver, having refused
+  // it, must therefore never take it on this head, whatever its view of J does later (the mark). Not checked with a Byzantine side, whose replica is not the protocol's.
+  val no_orphan: bool = SIDES.forall(s => {
+    val r = replica.get(s)
+    val f = frames.get(r.lastFid)
+    val a = replica.get(f.author)
+    or { byz != 0, r.lastFid == 0, f.author == s, a.height >= f.height, isProposed(a) and statusFid(a) == r.lastFid }
+  })
+
+  val safe: bool = and { credit_holds, agreed, no_equivocation, both_signed, no_bad_accept, authority, nonce_climbs, no_tx_lost, no_orphan }
 
   // Coverage witnesses: each is false on purpose, and `quint run --invariant` must find a violating trace.
   // A witness that cannot be violated means the path it names is unreachable in this model.
@@ -462,6 +525,8 @@ module account {
   val w_no_two_commits: bool = replica.get(Right).height < 2
   val w_no_rollback: bool = rollbacks == 0
   val w_no_refusal: bool = refusals == 0
+  val w_no_nack: bool = nacks == Set()                                                                   // a refusal was sent back to a proposer
+  val w_no_retry: bool = not(1.to(MAX_FRAMES).exists(i => and { i < nextFid, frames.get(i).attempt > 0 }))  // a refused frame was sent again, at the next attempt
   // a Byzantine frame was sent: some frame in the arena was never signed by its author in the honest ledger
   // a Left-authored frame committed over a Right-authored one at the same height: a peer that acked and then equivocated (A12)
   val superseded: bool = SIDES.exists(s => {
