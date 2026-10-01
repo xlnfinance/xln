@@ -2,7 +2,7 @@
 // the best resting offers it reaches, at their prices, and what is left rests, is dropped, or refuses the whole order.
 // `cancel` takes an offer back. Both return a new book and leave the old one alone.
 import { MAX_AMOUNT } from "../account/ledger.ts";
-import { err, flatMap, ok, type Result } from "../kernel/core/result.ts";
+import { err, flatMap, map, ok, type Result } from "../kernel/core/result.ts";
 import { match, type Tagged } from "../kernel/core/tagged.ts";
 import {
   opposite, type Book, type CancelFault, type DropReason, type Fill, type Limits, type Market, type Order,
@@ -49,22 +49,20 @@ const notInBook = (book: Book, order: Order): Result<Order, PlaceFault> =>
 
 const ownedBy = (book: Book, who: Owner): number => everyOrder(book).filter((r) => r.owner === who).length;
 
-/** Only an order that may rest takes a place in the book. */
-const hasRoom = (book: Book, order: Order): Result<Order, PlaceFault> => {
-  if (order.terms !== "rest") return ok(order);
-  if (ownedBy(book, order.owner) >= book.limits.maxPerOwner) {
-    return err({ _tag: "owner_full", max: book.limits.maxPerOwner });
+/** Only the part of an order that rests takes a place: the room is judged on the book the sweep leaves behind. */
+const hasRoom = (after: Book, order: Order): Result<Order, PlaceFault> => {
+  if (ownedBy(after, order.owner) >= after.limits.maxPerOwner) {
+    return err({ _tag: "owner_full", max: after.limits.maxPerOwner });
   }
-  return everyOrder(book).length >= book.limits.maxOrders
-    ? err({ _tag: "book_full", max: book.limits.maxOrders })
+  return everyOrder(after).length >= after.limits.maxOrders
+    ? err({ _tag: "book_full", max: after.limits.maxOrders })
     : ok(order);
 };
 
 const admitted = (book: Book, order: Order): Result<Order, PlaceFault> =>
   flatMap(lotsInRange(order), () =>
     flatMap(priceInRange(order), () =>
-      flatMap(amountsFit(book.market, order), () =>
-        flatMap(notInBook(book, order), () => hasRoom(book, order)))));
+      flatMap(amountsFit(book.market, order), () => notInBook(book, order))));
 
 // ---- the sweep: the order walks the opposite side from its best offer until something stops it ----
 
@@ -149,8 +147,12 @@ const traded = (book: Book, order: Order): Result<Placed, PlaceFault> => {
   }
   const remainder = remainderOf(order, swept);
   const mine = sideOf(book, order.side);
-  const own = remainder._tag === "rested" ? inserted(mine, restingOf(order, remainder.lots)) : mine;
-  return ok({ book: withSides(book, order.side, own, survivors(makers, swept.fills)), fills: swept.fills, remainder });
+  const after = withSides(book, order.side, mine, survivors(makers, swept.fills));
+  if (remainder._tag !== "rested") return ok({ book: after, fills: swept.fills, remainder });
+  const joined = inserted(mine, restingOf(order, remainder.lots));
+  return map(hasRoom(after, order), () => ({
+    book: withSides(after, order.side, joined, sideOf(after, opposite(order.side))), fills: swept.fills, remainder,
+  }));
 };
 
 export const place = (book: Book, order: Order): Result<Placed, PlaceFault> =>

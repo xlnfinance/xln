@@ -71,3 +71,36 @@ describe("market/book review: cancel", () => {
     expect(cancel(book, { id: orderId("x"), owner: owner("bobby") }).ok).toBe(true);
   });
 });
+
+describe("market/book review: room is for what rests", () => {
+  const sells = (limits: Parameters<typeof newBook>[0]) => placeAll(newBook(limits), [
+    { id: "a", who: "ann", side: "sell", price: 10n, lots: 1n },
+    { id: "b", who: "bob", side: "sell", price: 11n, lots: 1n },
+    { id: "c", who: "cat", side: "sell", price: 12n, lots: 1n },
+  ]);
+
+  test("R-BOOK-BOUNDED an order that fills whole needs no room, even in a full book", () => {
+    const full = sells({ maxOrders: 3, maxPerOwner: 8 });
+    const placed = must(place(full, orderOf({ id: "t", who: "dan", side: "buy", price: 12n, lots: 3n })));
+    expect(placed.remainder).toEqual({ _tag: "none" });
+    expect(placed.book.sells).toEqual([]);
+  });
+
+  test("R-BOOK-BOUNDED an owner at its cap can still take whole offers, but not rest more", () => {
+    const resting = { id: "d", who: "dan", side: "buy" as const, price: 1n, lots: 1n };
+    const capped = placeAll(sells({ maxOrders: 8, maxPerOwner: 1 }), [resting]);
+    const takes = must(place(capped, orderOf({ id: "t", who: "dan", side: "buy", price: 10n, lots: 1n })));
+    expect(takes.remainder).toEqual({ _tag: "none" });
+    const rests = place(capped, orderOf({ id: "u", who: "dan", side: "buy", price: 10n, lots: 2n }));
+    expect(fault(rests)).toEqual({ _tag: "owner_full", max: 1 });
+  });
+
+  test("R-BOOK-BOUNDED the slots an order's own trades free are the slots its remainder may take", () => {
+    const full = sells({ maxOrders: 3, maxPerOwner: 8 });
+    const placed = must(place(full, orderOf({ id: "t", who: "dan", side: "buy", price: 11n, lots: 3n })));
+    expect(placed.remainder).toEqual({ _tag: "rested", lots: 1n });
+    expect([...placed.book.buys, ...placed.book.sells].length).toBe(2);
+    const refused = place(full, orderOf({ id: "u", who: "dan", side: "buy", price: 9n, lots: 1n }));
+    expect(fault(refused)).toEqual({ _tag: "book_full", max: 3 });
+  });
+});

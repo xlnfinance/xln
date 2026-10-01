@@ -30,16 +30,19 @@ const ahead = (side: Order["side"]) => (a: Open, b: Open): number => {
 };
 
 const refusal = (m: Model, order: Order): PlaceFault["_tag"] | undefined => {
-  const mine = m.open.filter((o) => o.offer.owner === order.owner).length;
   if (order.lots < 1n) return "bad_lots";
   if (order.price < 1n) return "bad_price";
   if (order.lots * m.market.baseLot > MAX_AMOUNT || order.lots * order.price * m.market.quoteTick > MAX_AMOUNT) {
     return "amount_too_large";
   }
   if (m.open.some((o) => o.offer.id === order.id)) return "duplicate_order";
-  if (order.terms !== "rest") return undefined;
-  if (mine >= m.limits.maxPerOwner) return "owner_full";
-  return m.open.length >= m.limits.maxOrders ? "book_full" : undefined;
+  return undefined;
+};
+
+/** Room is judged on the offers left after the order's own trades: only a resting remainder needs a place. */
+const roomRefusal = (m: Model, open: readonly Open[], order: Order): PlaceFault["_tag"] | undefined => {
+  if (open.filter((o) => o.offer.owner === order.owner).length >= m.limits.maxPerOwner) return "owner_full";
+  return open.length >= m.limits.maxOrders ? "book_full" : undefined;
 };
 
 type Run = Readonly<{ left: bigint; trades: readonly Trade[]; stopped: "own" | "reach" | undefined }>;
@@ -75,9 +78,12 @@ export const modelPlace = (m: Model, order: Order): Expected => {
   if (quoteMoved > MAX_AMOUNT) return { refused: "amount_too_large" };
   if (order.terms === "all_or_nothing" && run.left > 0n) return { refused: "not_fillable" };
   const resting = order.terms === "rest" && run.stopped !== "own" && run.left > 0n;
+  const left = afterTrades(m.open, run.trades);
+  const noRoom = resting ? roomRefusal(m, left, order) : undefined;
+  if (noRoom !== undefined) return { refused: noRoom };
   const offer: Resting = { id: order.id, owner: order.owner, side: order.side, price: order.price, lots: run.left };
   const arrived: readonly Open[] = resting ? [{ offer, arrival: m.arrivals }] : [];
-  const open = [...afterTrades(m.open, run.trades), ...arrived];
+  const open = [...left, ...arrived];
   const model = { ...m, open, arrivals: m.arrivals + 1 };
   return { model, trades: run.trades, remainder: remainderOf(run, { resting }) };
 };
