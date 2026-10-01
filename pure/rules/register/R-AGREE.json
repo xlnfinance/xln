@@ -1,0 +1,20 @@
+{
+ "id": "R-AGREE",
+ "statement": "Both sides of an Account at one committed height hold the same whole body: deltas, locks, offers, pulls and settlement status, not the deltas alone (Quint P4a).",
+ "source": "Review B of PR 69; spec/quint/account.qnt",
+ "layers": {
+  "arrival": "owed: spec thread, next Arrival page (id not in a name yet)",
+  "quint": "owed: spec thread, new Quint branch (id not in a name yet)",
+  "contract": "n/a: two replicas agreeing at a height is off-chain state; the chain sees only the proof it is given",
+  "rig": "owed: test rig (the rig compares deltas only today)",
+  "ts": "owed: the cut (Entity and Runtime)"
+ },
+ "killers": [
+  {
+   "kind": "test",
+   "layer": "rig",
+   "name": "to be named: two replicas at one height that differ in a lock or a settlement status are red",
+   "owed": "test rig"
+  }
+ ]
+}

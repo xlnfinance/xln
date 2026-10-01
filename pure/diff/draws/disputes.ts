@@ -29,6 +29,8 @@ export const finalizedDisputes = (w: World): number =>
 const ready = (w: World): readonly (readonly [number, number])[] =>
   activePairs(w).filter(([x, y]) =>
     account(w, x, y)?.counterpartyDisputeProofHanko !== undefined
+    // C1: the disputes walk starts only where the epoch has moved, so the start has to carry the one it signed for
+    && (!w.disputeAfterEpoch || w.epochOf(x, y) > 0n)
     // og start.ts: a start whose ProofBody holds Pulls needs an empty draft batch (a halt otherwise), so start from one
     && !queued(w, x) && !sealed(w, x) && batchRoom(w, x) && quiet(w, x, y));
 /** The seconds the earliest observed dispute deadline still has to run, if any. */

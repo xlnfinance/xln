@@ -6,11 +6,11 @@
 //
 // A bad input from a peer is refused in place with a notice and never halts (R-X1). A Halt is a broken local
 // invariant: the list is closed, and each case names the invariant.
-import type { ClockParams, JView } from "../account/clause/clock.ts";
+import type { ClockParams, JHeight, JView } from "../account/clause/clock.ts";
 import type { SigningContext } from "../account/proof/signing.ts";
 import { err, ok, type Result } from "../kernel/core/result.ts";
 import type { Brand, Tagged } from "../kernel/core/tagged.ts";
-import type { EntityId, EntityInput, EntityState, Notice, Outbound } from "../entity/model.ts";
+import type { EntityId, EntityInput, EntityState, JAction, Notice, Outbound } from "../entity/model.ts";
 
 /** The Host's clock in milliseconds, as it stamps an input: it orders frames and decides no deadline (R-CLOCK). */
 export type Timestamp = Brand<bigint, "Timestamp">;
@@ -20,14 +20,23 @@ export type BadTimestamp = Tagged<"bad_timestamp", { ms: bigint }>;
 export const timestamp = (ms: bigint): Result<Timestamp, BadTimestamp> =>
   (ms >= 0n ? ok(ms as Timestamp) : err({ _tag: "bad_timestamp", ms }));
 
-/** What the Host hands the Runtime: the inputs of one Entity frame, with the time the Host saw them. */
-export type Input = Readonly<{ at: Timestamp; to: EntityId; inputs: readonly EntityInput[] }>;
+/**
+ * What the Host hands the Runtime, with the time the Host saw it: the inputs of one Entity frame, or a new height of
+ * the J chain. The Runtime's view of J only rises (R-DRIFT bounds how far it lags the chain, which is the Host's to
+ * watch); a rise is a frame of every Entity, so an Account that waited for it proposes.
+ */
+export type EntityBatch = Tagged<"entity", { at: Timestamp; to: EntityId; inputs: readonly EntityInput[] }>;
+
+export type NewHeight = Tagged<"j_height", { at: Timestamp; height: JHeight }>;
+
+export type Input = EntityBatch | NewHeight;
 
 export type RuntimeNotice = Notice | Tagged<"unknown_entity", { entity: EntityId }>;
 
 /** One frame of the WAL. `stamp` is the frame's: the later of the Runtime's last stamp and the input's (never back). */
 export type Row = Readonly<{
-  height: bigint; stamp: Timestamp; input: Input; outputs: readonly Outbound[]; notices: readonly RuntimeNotice[];
+  height: bigint; stamp: Timestamp; input: Input; outputs: readonly Outbound[]; chain: readonly JAction[];
+  notices: readonly RuntimeNotice[];
 }>;
 
 /**
@@ -45,6 +54,7 @@ export type Setup = Readonly<{ clock: ClockParams; view: JView; signing: Signing
 export type Runtime = Readonly<{
   setup: Setup;
   stamp: Timestamp;
+  view: JView;
   entities: ReadonlyMap<EntityId, EntityState>;
   wal: readonly Row[];
   staged: Row | undefined;

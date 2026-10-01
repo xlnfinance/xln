@@ -1,0 +1,49 @@
+{
+ "id": "R-WATCH-DEPTH",
+ "statement": "J events are delivered only from blocks at least `depth` below the chain head, and a block that does not continue the delivered cursor is a reorg deeper than `depth`: a halt, never a rewrite.",
+ "source": "consolidation-plan.md D9 and Q-X-10 (act on J events only at depth; a deeper reorg is a halt)",
+ "layers": {
+  "arrival": "n/a: the watcher is Host code that reads a node; the Arrival specs take J events as given",
+  "quint": "n/a: the watcher is Host code that reads a node; the Quint model takes J events as given",
+  "contract": "n/a: no contract code takes part; the watcher reads the deployed Depository's events",
+  "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
+  "ts": "hold"
+ },
+ "killers": [
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-WATCH-DEPTH a head behind the cursor with no new blocks is an empty batch, not a fault"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-WATCH-DEPTH a head behind the cursor with a new block is too early"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-WATCH-DEPTH a block is delivered once the head is depth above it, and not before"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-WATCH-DEPTH a chain younger than its depth has nothing final: only a batch with no blocks is allowed"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-WATCH-DEPTH an empty batch is the cursor again: it announces the height it has and moves nothing"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-WATCH-DEPTH a depth below zero is refused when the watch starts"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-WATCH-DEPTH a first block whose parent is not the cursor's block is a reorg deeper than the depth"
+  }
+ ]
+}

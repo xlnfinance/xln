@@ -1,0 +1,89 @@
+{
+ "id": "R-GATE-CI-SPLIT",
+ "statement": "The gate workflow has two lanes, and the split cannot change silently. A pull request into development runs only the two fast jobs (One gate (tsc, rules, frozen, style) and One gate (bun test)); every other event (a push to main or development, a pull request into main, the nightly run, a manual run) runs the whole gate. The slow jobs (the seeds, forge, og's informational jobs) carry one job-level if, not a pull request into development, and no other job-level if exists besides one-gate's always(). A push to main or development is never cancelled, so a full run always finishes (the group names the event and the ref, and only a pull_request run cancels). The aggregate One gate fails a skipped fast job and accepts a skipped slow job only on a pull request into development, and what the aggregate step does is tested by running its real run block under bash -e for every combination of lane and part results (a failure inside a brace group of an || list does not stop bash -e, so each check is a simple command). The names the development ruleset requires, listed under development in .github/required-checks.json, are exactly the jobs that run there.",
+ "source": "Arthur 10-01 12:56 (a development branch merged without long checks, full checks on development and on promotion to main), relayed by the coordinator 12:57",
+ "layers": {
+  "arrival": "n/a: a repository gate rule, not protocol behaviour; no spec page models it",
+  "quint": "n/a: a repository gate rule, not protocol behaviour; no spec models it",
+  "contract": "n/a: a gate over the repository (pure/rules and CI); it is not contract code",
+  "rig": "n/a: a gate over the repository, with no system state for the walk",
+  "ts": "hold"
+ },
+ "killers": [
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-GATE-CI-SPLIT the canonical workflow agrees: both pushes, per-event concurrency, one slow-lane if, an aggregate that allows skips only there"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-GATE-CI-SPLIT a workflow with no one-gate job is not judged"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-GATE-CI-SPLIT the fast checks are the jobs without an if, one-gate aside, and a matrix name is filled in"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-GATE-CI-SPLIT a push trigger that leaves out main or development, or cannot be read, is named"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-GATE-CI-SPLIT a concurrency group without the event or the ref, or a cancel that is not only for pull requests, is named"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-GATE-CI-SPLIT a job-level if that is not the slow-lane condition is named, on a gate job and on any other job"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-GATE-CI-SPLIT a skipped fast job must fail the aggregate: its line may only be the bare test, never the skip allowance"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-GATE-CI-SPLIT a slow job needs exactly the skip allowance: the bare test (red on every development PR), another skip form, or none is named"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-GATE-CI-SPLIT FAST must be exactly a pull request into development, and every need must map to an env variable"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-GATE-CI-SPLIT the trigger check accepts the slow-lane if on a gate job and still names any other"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-GATE-CI-SPLIT the split check is part of the drift check"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-GATE-CI-SPLIT the real workflow keeps the split"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-GATE-CI-SPLIT the development ruleset's names are exactly the jobs that run on a pull request into development, and each is reported"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-GATE-CI-SPLIT the check is not vacuous: two fast names, slow jobs that carry the if, and a push to development"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-GATE-CI-SPLIT the aggregate step passes exactly when every part passed, or a slow part was skipped on a pull request into development"
+  }
+ ]
+}

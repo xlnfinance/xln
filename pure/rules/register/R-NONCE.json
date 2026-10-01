@@ -7,7 +7,7 @@
   "quint": "owed: spec thread, new Quint branch (id not in a name yet)",
   "contract": "n/a: the contract's part (a signed batch never expires and is final at its nonce) is R-FINAL-NONCE, which widens this rule",
   "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
-  "ts": "owed: the cut (J batch-planner slice)"
+  "ts": "hold"
  },
  "killers": [
   {
@@ -19,6 +19,11 @@
    "kind": "mutant",
    "layer": "quint",
    "name": "resign-at-a-signed-nonce"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-FINAL-NONCE and R-NONCE: a batch is signed at a nonce above every nonce this Entity ever signed"
   }
  ]
 }

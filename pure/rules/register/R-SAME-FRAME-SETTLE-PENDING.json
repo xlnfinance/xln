@@ -1,0 +1,20 @@
+{
+ "id": "R-SAME-FRAME-SETTLE-PENDING",
+ "statement": "Inside one Entity frame a settle_execute reads the Account mempool as the frame found it: a settle_transition queued by an earlier tx of the same frame is not yet visible to it (og applies queued Account txs after the tx loop), so a user's execute that races the hub scheduler's in one frame is og's no-op skip and its command advances the nonce; it is not refused and evicted.",
+ "source": "Rig walk settlement 0x30de1 frame 177 (scheduledWake runs the hub scheduler's settle_execute, then the signed command's settle_execute: og skips it as already submitted and commits nonce 41, the rewrite refuses SETTLEMENT_TRANSITION_ALREADY_PENDING and evicts the command, nonce stays 40); og core/entity/tx/handlers/payments/settle.ts:654",
+ "layers": {
+  "arrival": "owed: spec thread, next Arrival page (id not in a name yet)",
+  "quint": "owed: spec thread, new Quint branch (id not in a name yet)",
+  "contract": "n/a: the Account mempool inside one Entity frame is off-chain logic; no contract code takes part",
+  "rig": "owed: #69 (known finding, owner the Entity-frame cut)",
+  "ts": "owed: Entity-frame cut"
+ },
+ "killers": [
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "to be named: two settle_execute txs for one Account in one frame commit as og does",
+   "owed": "Entity-frame cut"
+  }
+ ]
+}

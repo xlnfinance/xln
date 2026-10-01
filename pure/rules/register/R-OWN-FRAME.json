@@ -1,0 +1,20 @@
+{
+ "id": "R-OWN-FRAME",
+ "statement": "An Entity never proposes a frame its own validation rejects: a J-prefix certificate that scans past its base carries the one range tx (J_PREFIX_RANGE_COUNT_INVALID is never reachable from the proposer's own frame).",
+ "source": "Review B of PR 69, B4; rig walk disputes 0x30de6 frame 91 (og and the rewrite build the same empty frame at entity height 51, certificate base 40 scanned 41, then both reject it)",
+ "layers": {
+  "arrival": "owed: spec thread, next Arrival page (id not in a name yet)",
+  "quint": "owed: spec thread, new Quint branch (id not in a name yet)",
+  "contract": "n/a: the proposer's own frame validation is off-chain Entity logic; no contract code takes part",
+  "rig": "owed: #69 (known finding, owner the J1 cut)",
+  "ts": "owed: J1 cut"
+ },
+ "killers": [
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "to be named: a J-prefix certificate past its base is proposed with its range tx",
+   "owed": "J1 cut"
+  }
+ ]
+}

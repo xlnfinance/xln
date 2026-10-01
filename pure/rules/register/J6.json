@@ -7,7 +7,7 @@
   "quint": "hold",
   "contract": "hold",
   "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
-  "ts": "owed: the cut (J batch-planner slice)"
+  "ts": "hold"
  },
  "killers": [
   {
@@ -44,6 +44,16 @@
    "kind": "mutant",
    "layer": "quint",
    "name": "deposit-ignores-the-token"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "J6 a deposit leg travels alone"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "J6 reaches the wire: the sealed batch of a deposit is that deposit alone"
   }
  ]
 }

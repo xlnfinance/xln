@@ -1,0 +1,34 @@
+{
+ "id": "R-NO-DEPOSIT-BEFORE-COSIGN",
+ "statement": "No deposit at epoch 0 before the first co-signed frame: epoch 0 has no implicit proof to fall back to. From epoch 1 on the implicit proof exists and a deposit goes at once. Deposits do not advance the epoch.",
+ "source": "contracts-decisions.md Runtime rules from Review A of PR 76, item 3 (coordinator 09-30 23:53)",
+ "layers": {
+  "arrival": "owed: spec thread, next Arrival page",
+  "quint": "owed: spec thread, new Quint branch",
+  "contract": "n/a: the contract takes a deposit whenever one is sent; holding it back until the first co-signed frame is the node's duty",
+  "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
+  "ts": "hold"
+ },
+ "killers": [
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-NO-DEPOSIT-BEFORE-COSIGN only epoch 0 without a frame cannot take a deposit"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-NO-DEPOSIT-BEFORE-COSIGN at epoch 0 a deposit is refused until a frame is co-signed"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-NO-DEPOSIT-BEFORE-COSIGN from epoch 1 on, the implicit proof is there: a deposit goes at once"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-NO-DEPOSIT-BEFORE-COSIGN a deposit of nothing is refused, and so is one to an Account not held"
+  }
+ ]
+}

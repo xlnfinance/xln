@@ -1,11 +1,11 @@
 {
  "id": "R2C-DEBT-FIRST",
- "statement": "A reserve-to-collateral deposit enforces the debt queue first: part-paid claim stays at the head, spendable nets all debt, 32 claims per call.",
- "source": "contracts-decisions.md (memory)",
+ "statement": "Every outflow of a debtor's reserve enforces its debt queue first, oldest first and at most 32 claims per call, and what is spendable is the reserve less all outstanding debt; a part-paid claim stays at the head. The calls that enforce are the permissionless enforceDebts, and inside a batch a reserve-to-external-token transfer, a reserve-to-reserve transfer, a reserve-to-collateral deposit, a settlement outflow and a dispute payout. The Arrival pages hold the reserve-to-collateral deposit (J page: cap, oldest first, part-paid stays at the head) and the dispute payout (dispute page, one older-debt amount per side in both directions: enforcement before payment, the per-call cap, the peer paid all of the spendable reserve it can); the other calls are the contract's and no layer here kills them yet.",
+ "source": "contracts-decisions.md (memory, #62); coordinator 10-01 07:20 (Depository._enforceDebts, _settleShortfall)",
  "layers": {
   "arrival": "hold",
   "quint": "owed: spec thread, new Quint branch",
-  "contract": "owed: contracts thread (a test carrying the id; the debt queue is tested under other names, e.g. DebtChunking.t.sol)",
+  "contract": "hold",
   "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
   "ts": "owed: the cut (J batch-planner slice)"
  },
@@ -16,9 +16,74 @@
    "name": "r2c-skips-enforcement"
   },
   {
+   "kind": "bug",
+   "layer": "arrival",
+   "name": "shortfall-skips-enforcement"
+  },
+  {
+   "kind": "bug",
+   "layer": "arrival",
+   "name": "shortfall-ahead-of-debt"
+  },
+  {
    "kind": "mutant",
    "layer": "quint",
    "name": "r2c-skips-enforce"
+  },
+  {
+   "kind": "bug",
+   "layer": "arrival",
+   "name": "debts-lifo"
+  },
+  {
+   "kind": "bug",
+   "layer": "arrival",
+   "name": "debts-uncapped"
+  },
+  {
+   "kind": "bug",
+   "layer": "arrival",
+   "name": "partial-moves-back"
+  },
+  {
+   "kind": "bug",
+   "layer": "arrival",
+   "name": "dispute-enforcement-uncapped"
+  },
+  {
+   "kind": "bug",
+   "layer": "arrival",
+   "name": "shortfall-never-pays"
+  },
+  {
+   "kind": "bug",
+   "layer": "arrival",
+   "name": "shortfall-underpays"
+  },
+  {
+   "kind": "bug",
+   "layer": "arrival",
+   "name": "enforcement-left-only"
+  },
+  {
+   "kind": "test",
+   "layer": "contract",
+   "name": "test_R2C_DEBT_FIRST_theCreditorIsPaidBeforeAnythingMovesToCollateral"
+  },
+  {
+   "kind": "test",
+   "layer": "contract",
+   "name": "test_R2C_DEBT_FIRST_aCallPaysThirtyTwoClaimsAndTheRestStaysNetted"
+  },
+  {
+   "kind": "test",
+   "layer": "contract",
+   "name": "test_R2C_DEBT_FIRST_aDepositAboveWhatIsSpendableAfterAllDebtIsRefused"
+  },
+  {
+   "kind": "test",
+   "layer": "contract",
+   "name": "test_R2C_DEBT_FIRST_aPartPaidClaimStaysAtTheHeadUntilTheNextDepositPaysItOff"
   }
  ]
 }

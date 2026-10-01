@@ -44,6 +44,36 @@
    "kind": "test",
    "layer": "ts",
    "name": "R-DURABLE R-X1 in every world: no halt, no leak, every WAL replays, equal heads mean equal states"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DURABLE R-X1 every run settles; nothing halts or leaves ahead of its disk, with junk hashes and ids"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-X1 planted bug: a recovery that forgets the last row does not replay to what the Host holds"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-X1 a message for an Entity this Host does not host is refused in place, and queues nothing"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-X1 a forged ack, a future frame and a stranger's message are rows with notices, never a halt"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-X1 one input queued three times is three inputs: the third stays queued"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-X1 a row refused for an Entity the Runtime does not host asks nothing of the chain"
   }
  ]
 }
