@@ -3,7 +3,7 @@
 // entities of a funding, the canonical transformer). The Host's `chain` effect leaves a committed row only
 // (R-DURABLE), so the op made here is made from a row that is already the WAL's.
 //
-// Two actions are the Host's to make from what the Entity says and the chain's addresses. The others hold signed
+// Three actions are the Host's to make from what the Entity says and the chain's addresses. The others hold signed
 // material the Entity does not keep (a counter needs the proof body and its signature, a C2R or a settlement the
 // counterparty's Hanko), so the Host that holds the signatures makes those; here they are named, never guessed.
 import type { EntityId, JAction } from "../entity/model.ts";
@@ -12,10 +12,18 @@ import type { Tagged } from "../kernel/core/tagged.ts";
 import { err, ok, type Result } from "../kernel/core/result.ts";
 import { bytesToHex } from "../kernel/encoding/bytes.ts";
 
-/** What the chain says that an Entity's action does not: the one transformer a reveal may name (Depository `E2`). */
-export type ChainWorld = Readonly<{ transformer: string }>;
+/** A token as the Depository knows it from outside: the contract that holds it, and which token of that contract. */
+export type ExternalToken = Readonly<{ contractAddress: string; externalTokenId: bigint; tokenType: bigint }>;
 
-export type OpFault = Tagged<"needs_signature", { action: JAction["_tag"] }>;
+/**
+ * What the chain says that an Entity's action does not: the one transformer a reveal may name (Depository `E2`), and
+ * the external token behind each internal token id that a `fund` may name.
+ */
+export type ChainWorld = Readonly<{ transformer: string; tokens: ReadonlyMap<bigint, ExternalToken> }>;
+
+export type OpFault =
+  | Tagged<"needs_signature", { action: JAction["_tag"] }>
+  | Tagged<"unknown_token", { token: bigint }>;
 
 /**
  * The op for an Entity's action. The Entity's token is the Depository's internal token id (the Account layer and the
@@ -23,6 +31,15 @@ export type OpFault = Tagged<"needs_signature", { action: JAction["_tag"] }>;
  */
 export const opOf = (self: EntityId, action: JAction, world: ChainWorld): Result<JOp, OpFault> => {
   switch (action._tag) {
+    case "fund": {
+      const external = world.tokens.get(action.token);
+      return external === undefined
+        ? err({ _tag: "unknown_token", token: action.token })
+        : ok({
+          _tag: "deposit",
+          leg: { entity: self, ...external, internalTokenId: action.token, amount: action.amount },
+        });
+    }
     case "deposit":
       return ok({
         _tag: "reserve_to_collateral",

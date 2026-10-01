@@ -1,0 +1,24 @@
+{
+ "id": "R-SUBMIT-TX",
+ "statement": "The transaction the Host sends is the EIP-1559 encoding of the call to processBatch, signed by the sender's key, byte for byte what an independent library produces for the same fields; a recipient or data that is not hex is a fault the submit path reads, never a throw.",
+ "source": "e2e S2 (the Host's send); R-DURABLE (the batch is journaled sealed before it is sent)",
+ "layers": {
+  "arrival": "n/a: the Arrival specs do not take a chain transaction's bytes",
+  "quint": "n/a: the transaction's encoding is the chain client's, not a state-machine rule",
+  "contract": "n/a: the node validates the transaction; the contract sees only its calldata",
+  "rig": "owed: test rig (the e2e skeleton S2 sends one through anvil; no walk predicate names it)",
+  "ts": "hold"
+ },
+ "killers": [
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-SUBMIT-TX the raw bytes of each signed transaction equal the other library's"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-SUBMIT-TX a recipient or data that is not hex is refused, naming the fault"
+  }
+ ]
+}

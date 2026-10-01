@@ -44,6 +44,11 @@
    "kind": "test",
    "layer": "ts",
    "name": "R-J5: a failed batch applied nothing and spent its nonce"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-J5 a BatchFailed at the batch's nonce is a failure, with the selector of the revert"
   }
  ]
 }

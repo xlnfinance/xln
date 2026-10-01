@@ -112,8 +112,14 @@ export type AccountCommand =
   | Tagged<"retract", { peer: EntityId; id: HoldId }>
   | Tagged<"lapse", { peer: EntityId; id: HoldId }>;
 
-/** A command that is about the chain, not the Account's frames. */
+/**
+ * A command that is about the chain, not the Account's frames. `fund` is the one that names no peer: the node's own
+ * tokens move from the wallet that holds them into its reserve in the Depository, and the reserve is what a `deposit`
+ * then moves to an Account's collateral. The approval that lets the Depository pull the tokens is the wallet's, not
+ * the Entity's.
+ */
 export type ChainCommand =
+  | Tagged<"fund", { token: TokenId; amount: bigint }>
   | Tagged<"deposit", { peer: EntityId; token: TokenId; amount: bigint }>
   | Tagged<"set_windows", { peer: EntityId; windows: Windows }>
   | Tagged<"withdraw", { peer: EntityId; token: TokenId; amount: bigint }>;
@@ -131,6 +137,7 @@ export type Outbound = Readonly<{ from: EntityId; to: EntityId; msg: Msg<Account
  * (R-HTLC-CLOCK c); `revealed` on the Entity keeps a hashlock asked once for as long as its hold is open.
  */
 export type JAction =
+  | Tagged<"fund", { token: TokenId; amount: bigint }>
   | Tagged<"reveal", { peer: EntityId; token: TokenId; id: HoldId; hashlock: string; secret: Uint8Array }>
   | Tagged<"deposit", { peer: EntityId; token: TokenId; amount: bigint }>
   | Tagged<"counter", { peer: EntityId; nonce: bigint; head: FrameHash }>
@@ -145,6 +152,7 @@ export type EntityFault =
   | Tagged<"account_exists", { peer: EntityId }>
   | Tagged<"no_account", { peer: EntityId }>
   | Tagged<"account_refused", { fault: PeerFault }>
+  | Tagged<"bad_fund", { amount: bigint }>
   | Tagged<"deposit_before_cosign">
   | Tagged<"bad_windows", { windows: Windows }>
   | Tagged<"windows_shorten", { current: Windows }>

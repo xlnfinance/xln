@@ -1,0 +1,44 @@
+{
+ "id": "R-FUND",
+ "statement": "An Entity's own tokens move from its wallet into its reserve in the Depository by the `fund` command: a chain ask at once (it names no peer and waits for no Account or frame), refused with notice for an amount of zero or above the amount cap, and a token the chain world does not list is named, never guessed. The approval that lets the Depository pull the tokens is the wallet's, not the Entity's. The deposit leg travels alone in its batch (J6).",
+ "source": "e2e S2 (the skeleton's deposit step); plan/contracts-decisions.md J6; coordinator 10-01 (one builder, e2e steps)",
+ "layers": {
+  "arrival": "owed: spec thread, next Arrival page (the Entity's fund command)",
+  "quint": "owed: spec thread, new Quint branch",
+  "contract": "n/a: externalTokenToReserve is J6; the node's duty is the command, the leg it asks for and the one-leg batch",
+  "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
+  "ts": "hold"
+ },
+ "killers": [
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-FUND a fund command is a WAL row, a sealed batch, a send and a landed answer, in that order"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-FUND a fund of a token the chain world does not list is named and nothing is sealed or sent"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-FUND a fund is the deposit leg of the token's contract, for the asker's own reserve"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-FUND a fund of a token the chain world does not list is named, never guessed"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-FUND a fund asks the chain at once: it names no peer and waits for no Account or frame"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-FUND a fund of nothing, or of more than an Account can hold, is refused with notice and asks nothing"
+  }
+ ]
+}

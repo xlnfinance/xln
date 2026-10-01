@@ -36,7 +36,10 @@ export const DEPLOYED = unwrapOr(
   deployment(11155111n, "0x1111111111111111111111111111111111111111"),
   () => expect.unreachable("deployment"),
 );
-export const WORLD: ChainWorld = { transformer: "0x2222222222222222222222222222222222222222" };
+export const WORLD: ChainWorld = {
+  transformer: "0x2222222222222222222222222222222222222222",
+  tokens: new Map([[1n, { contractAddress: `0x${"33".repeat(20)}`, externalTokenId: 0n, tokenType: 0n }]]),
+};
 
 /** The chain's transaction gas cap and the outer Hanko check, as the harness sets them. */
 export const GAS = { txGasCap: 16_777_216n, prelude: 200_000n };

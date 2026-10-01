@@ -14,7 +14,11 @@ import { opOf } from "./ops.ts";
 
 const ALICE = entityOf(1);
 const BOB = entityOf(2);
-const WORLD = { transformer: "0x1111111111111111111111111111111111111111" };
+const FAUCET = "0x3333333333333333333333333333333333333333";
+const WORLD = {
+  transformer: "0x1111111111111111111111111111111111111111",
+  tokens: new Map([[GOLD, { contractAddress: FAUCET, externalTokenId: 0n, tokenType: 0n }]]),
+};
 
 const lockIn = (id: bigint, deadline: bigint): Command =>
   ({ _tag: "lock", peer: BOB, token: GOLD, hold: holdOf("left", 30n, id, deadline, 1) });
@@ -61,6 +65,24 @@ describe("host/ops an Entity's action is the Depository's op", () => {
       ok: true,
       value: { _tag: "reveal_secret", reveal: { transformer: WORLD.transformer, secret: `0x${"01".repeat(32)}` } },
     });
+  });
+
+  test("R-FUND a fund is the deposit leg of the token's contract, for the asker's own reserve", () => {
+    expect(opOf(ALICE, { _tag: "fund", token: GOLD, amount: 40n }, WORLD)).toEqual({
+      ok: true,
+      value: {
+        _tag: "deposit",
+        leg: {
+          entity: ALICE, contractAddress: FAUCET, externalTokenId: 0n, tokenType: 0n,
+          internalTokenId: GOLD, amount: 40n,
+        },
+      },
+    });
+  });
+
+  test("R-FUND a fund of a token the chain world does not list is named, never guessed", () => {
+    expect(opOf(ALICE, { _tag: "fund", token: tokenOf(9n), amount: 1n }, WORLD))
+      .toEqual({ ok: false, error: { _tag: "unknown_token", token: 9n } });
   });
 
   test("the builder queues what the Host made, and the batch encodes", () => {

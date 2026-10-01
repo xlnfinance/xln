@@ -284,6 +284,56 @@
    "kind": "test",
    "layer": "ts",
    "name": "R-DURABLE the file disk stops at its first fault: a write on a closed file, then runs refused"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DURABLE the Entity's stored nonce is one word of entityNonces(entity)"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DURABLE the raw transaction calls processBatch, signed by the key, at nonce 3 and 2 base + tip"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DURABLE a batch whose HankoBatchProcessed is on the chain has landed, with its own skips"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DURABLE a lost send and a restart ask the chain for the same batch again, not a second deposit"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DURABLE a restart after the batch landed asks nothing of the chain at all"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DURABLE a WAL that cannot be written asks nothing of the chain and says so"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DURABLE a reply with a result is the result, and one with an error is the node's own message"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DURABLE a reply that is not JSON-RPC, or has no result, is a fault"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DURABLE a node that answers is read, and the call carries its method and params"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DURABLE a node that answers text, or is not there, is a fault the submit path reads"
   }
  ]
 }

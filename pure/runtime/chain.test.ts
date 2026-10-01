@@ -3,6 +3,7 @@
 // Account and Bob its Right; Bob extends credit and each frame he proposes is one more co-signed proof of the epoch.
 import { describe, expect, test } from "bun:test";
 import { signing, tokenOf, viewOf } from "../account/fixtures.ts";
+import { MAX_AMOUNT } from "../account/ledger.ts";
 import { frameDigest } from "../account/proof/signing.ts";
 import { accountKey } from "../chain/proof/deployment.ts";
 import {
@@ -156,6 +157,23 @@ describe("runtime/chain no deposit before the first co-signed frame, and windows
     expect(none.chain).toEqual([]);
     const nobody = feed(opened, ALICE, { _tag: "deposit", peer: entityOf(3), token: GOLD, amount: 1n });
     expect(noticesOf(nobody, ALICE).map((n) => n._tag)).toEqual(["command_refused"]);
+  });
+
+  test("R-FUND a fund asks the chain at once: it names no peer and waits for no Account or frame", () => {
+    const funded = feed(start(viewOf(110n), viewOf(110n)), ALICE, { _tag: "fund", token: GOLD, amount: 10n });
+    expect(funded.chain).toEqual([{ _tag: "fund", token: GOLD, amount: 10n }]);
+    expect(noticesOf(funded, ALICE)).toEqual([]);
+  });
+
+  test("R-FUND a fund of nothing, or of more than an Account can hold, is refused with notice and asks nothing", () => {
+    const base = start(viewOf(110n), viewOf(110n));
+    [0n, -1n, MAX_AMOUNT + 1n].forEach((amount) => {
+      const refused = feed(base, ALICE, { _tag: "fund", token: GOLD, amount });
+      expect(refused.chain).toEqual([]);
+      const faults = noticesOf(refused, ALICE).flatMap((n) => (n._tag === "command_refused" ? [n.fault] : []));
+      expect(faults).toEqual([{ _tag: "bad_fund", amount }]);
+    });
+    expect(feed(base, ALICE, { _tag: "fund", token: GOLD, amount: MAX_AMOUNT }).chain).toHaveLength(1);
   });
 
   test("a chain command about an Account the Entity does not hold is refused for that, and keeps no facts", () => {

@@ -50,7 +50,8 @@ export type Taken =
   | Tagged<"queued", { submitter: Submitter }>
   | Tagged<"known">
   | Tagged<"skipped">
-  | Tagged<"needs_signature", { fault: OpFault }>
+  | Tagged<"needs_signature", { fault: Extract<OpFault, { _tag: "needs_signature" }> }>
+  | Tagged<"unknown_token", { token: bigint }>
   | Tagged<"refused", { fault: QueueFault }>;
 
 /** A chain effect: the action and the row it was made from. */
@@ -63,7 +64,11 @@ export type Asked = Readonly<{ action: JAction; row: RowId }>;
 export const take = (s: Submitter, asked: Asked): Taken => {
   if (known(s, asked.row)) return { _tag: "known" };
   const op = opOf(s.entity, asked.action, s.world);
-  if (!op.ok) return { _tag: "needs_signature", fault: op.error };
+  if (!op.ok) {
+    return op.error._tag === "needs_signature"
+      ? { _tag: "needs_signature", fault: op.error }
+      : { _tag: "unknown_token", token: op.error.token };
+  }
   const out = queue(s.jbatch, op.value);
   switch (out._tag) {
     case "queued": {
