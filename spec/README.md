@@ -16,6 +16,7 @@ spec/
   account/frames.scm       Account frames: propose, ack, cross-open tie-break (Left wins)
   account/clock.scm        a frame's timestamp carries no authority (R-CLOCK); every HTLC time judgment is in J height by the party's own view, strict expiry bound with a reserve >= LAG, payee reveals at deadline - LAG (R-HTLC-CLOCK)
   account/bugs/*.scm       deliberately broken variants; the checker must catch each
+  account/swap.scm         a two-party swap inside an Account: offer, partial fill (a ratio of 65535, each leg floors), withdraw, lapse (off-chain expiry), the signed clause that shrinks with every fill (R-SWAP-CLAUSE-WITH-FILL), and a dispute that honours what was filled (R-SWAP-ONCHAIN)
   money/core.scm           the arithmetic both money pages share: payment, worst-case credit bound, deposit (composition)
   money/ledger.scm         the money of one Account: RCPAN credit bound in the worst case, conservation
   money/bugs/*.scm         planted money bugs
@@ -34,6 +35,7 @@ spec/
   j/batch.scm              the J batch: atomic chain, sealing, abort and abandon (a signed batch is final at its nonce), skipped dispute ops, R-J5/R-COSIGN/J6 batch rules, paused-token deposits and funded payments, FIFO debt enforcement, gas by batch kind, settlement debt forgiveness, refusal when full
   j/bugs/*.scm             planted J batch bugs
   account-frames.check.scm entry point: check the Account frames page
+  account-swap.check.scm   entry point: check the swap page
   entity-frame.check.scm   entry point: check the Entity frame page
   runtime.check.scm        entry point: check the Runtime page
   transport.check.scm      entry point: check the transport link page
@@ -57,7 +59,7 @@ cd spec
 npm install            # or: bun install    (MCP server dependencies; `npm ci` in a boot script)
 npm run setup          # pnpm install + build inside arrival/ (dist/ is not committed)
 npm run check          # about 2 minutes: {:ok #t :states 3651 :transitions 11335 :goals 16}
-npm test               # 167 cases, one child process each (pool of TEST_JOBS=4), each verdict printed as its case finishes; exits non-zero if any case fails.
+npm test               # 208 cases, one child process each (pool of TEST_JOBS=4), each verdict printed as its case finishes; exits non-zero if any case fails.
                        # Wall time 88.7 minutes on 4 cores (the J batch case with deposit legs alone takes 85); every case has a fixed budget (150 minutes) and fails by name if it blows it
 ```
 
