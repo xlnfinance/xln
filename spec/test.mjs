@@ -160,7 +160,7 @@ const cases = [
   planted("j", "the Entity counts owed money as spendable", "spends-owed-reserve", "no signed batch carries an unfunded payment: each payment fits the spendable reserve, which nets all outstanding debt (R-FUNDED)", "j/configs/debts.scm"),
   planted("j", "the chain pays the newest debt first", "debts-lifo", "debts are cleared oldest first", "j/configs/debts.scm"),
   planted("j", "one enforcement call has no cap", "debts-uncapped", "one enforcement call visits at most the cap of claims, cleared or part-paid (32 in the contract)", "j/configs/debts.scm"),
-  planted("j", "a debt is cleared and not paid", "debts-cleared-unpaid", "a debt leaves the queue only when paid: debts paid and debts outstanding equal the debts the entity started with", "j/configs/debts.scm"),
+  planted("j", "a debt is cleared and not paid", "debts-cleared-unpaid", "a debt leaves the queue only when paid or forgiven: paid, forgiven and outstanding equal the debts the entity started with", "j/configs/debts.scm"),
   { page: "j", name: "J batch, R-FUNDED: the payment that fits goes out, the one that does not waits (09-30 15:23)", extra: ["j/configs/funded-order.scm"], expect: (r) => assert.deepEqual(r, { ok: true, states: 39, transitions: 78, goals: 12 }) },
   { page: "j", name: "J batch, WITNESS R-FUNDED: a payment is skipped while a later one is signed", extra: ["j/configs/funded-order.scm", "j/configs/funded-order-witness.scm"], expect: (r) => assert.equal(r.violated, "witness R-FUNDED: a payment that does not fit is skipped while a later one is signed") },
   planted("j", "the planner stops at the first payment that does not fit", "funding-blocks-behind-misfit", "can always still finish", "j/configs/funded-order.scm"),
