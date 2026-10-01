@@ -37,6 +37,12 @@ describe("dead exports: only an import that resolves to the file is a user", () 
     expect(failing({ "a.ts": "export const lonely = 1;\n", ...importing("import { lonely } from \"a.ts\";", "lonely;\n") })).toEqual([dead("lonely")]);
   });
 
+  test("an import without an extension, or of a directory, resolves to the file or to its index", () => {
+    expect(failing({ "a.ts": "export const lonely = 1;\n", ...importing("import { lonely } from \"./a\";", "lonely;\n") })).toEqual([]);
+    expect(failing({ "dir/index.ts": "export const x = 1;\n", "b.test.ts": "import { x } from \"./dir\"; x;\n" })).toEqual([]);
+    expect(failing({ "dir/index.ts": "export const x = 1;\n", "b.test.ts": "import { x } from \"./other\"; x;\n" })).toEqual(["unreachable kernel/dir/index.ts (x)"]);
+  });
+
   test("a file importing its own export is not its own user", () => {
     expect(failing({ "a.ts": "import { lonely } from \"./a.ts\";\nexport const lonely = 1;\nlonely;\n" })).toEqual([dead("lonely")]);
   });
@@ -135,6 +141,11 @@ describe("long declarations: measured by the node, whatever its indentation", ()
     expect(plain(`function* g() {\n${body(60)}\n}\n`)).toEqual(LONG);
     expect(plain(`const g = () => {\n${body(60)}\n};\n`)).toEqual(LONG);
     expect(plain(`type G = {\n${fields}\n};\n`)).toEqual(LONG);
+  });
+
+  test("an interface that is not exported is measured like one that is", () => {
+    const fields = Array.from({ length: 60 }, (_, index) => `  readonly k${index}: number;`).join("\n");
+    expect(failing({ "a.ts": `interface I {\n${fields}\n}\nexport const f = 1;\n`, ...importing0 })).toEqual(LONG);
   });
 
   test("a function whose body starts in column 0 is measured to its closing brace", () => {
