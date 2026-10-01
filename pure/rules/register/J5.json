@@ -6,7 +6,7 @@
   "arrival": "hold",
   "quint": "hold",
   "contract": "hold",
-  "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
+  "rig": "owed: test rig (a walk draw that submits a batch that cannot apply and asserts BatchFailed, the consumed nonce and an untouched Account)",
   "ts": "hold"
  },
  "killers": [

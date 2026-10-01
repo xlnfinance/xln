@@ -29,7 +29,7 @@ const sealedOf = (j: JBatch, c = ctx()) => {
   return outcome._tag === "sealed" ? outcome : expect.unreachable(outcome._tag);
 };
 
-describe("R-SAME-FRAME-SETTLE-PENDING (nonce half): a request on its way is skipped and the nonce advances", () => {
+describe("a request on its way is skipped and the nonce advances", () => {
   const empty = openJBatch(ME, 0n);
 
   test("a settlement queued twice is queued once and skipped once, and both advance the command nonce", () => {
@@ -157,7 +157,7 @@ describe("J6 reaches the wire: the sealed batch of a deposit is that deposit alo
   });
 });
 
-describe("R-SAME-FRAME-SETTLE-PENDING a name is a duplicate only when the op is the same op", () => {
+describe("a name is a duplicate only when the op is the same op", () => {
   const empty = openJBatch(ME, 0n);
 
   test("a settlement at the same Account nonce with other diffs is refused as conflicting, not skipped", () => {
@@ -183,7 +183,7 @@ describe("R-SAME-FRAME-SETTLE-PENDING a name is a duplicate only when the op is 
   });
 });
 
-describe("R-SAME-FRAME-SETTLE-PENDING and R-A1 a dispute step is named by who authored it and which kind it is", () => {
+describe("a dispute step is named by who authored it and which kind it is", () => {
   const empty = openJBatch(ME, 0n);
   const startBy = (patch: object): JOp => {
     const op = start(LEFT_PEER, 3n);

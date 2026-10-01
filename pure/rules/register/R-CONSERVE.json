@@ -6,7 +6,7 @@
   "arrival": "owed: spec thread, next Arrival page (id not in a name yet)",
   "quint": "owed: spec thread, new Quint branch (id not in a name yet)",
   "contract": "hold",
-  "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
+  "rig": "owed: test rig (money conserved per frame over the real Depository's events; the specs' P3)",
   "ts": "hold"
  },
  "killers": [
@@ -35,6 +35,12 @@
    "kind": "test",
    "layer": "contract",
    "name": "test_R_CONSERVE_aShortfallIsPaidFromTheDebtorsReserveFirstAndTheRemainderIsBooked"
+  },
+  {
+   "kind": "test",
+   "layer": "rig",
+   "name": "to be named: reserves + collateral + debt per Account conserved after each frame",
+   "owed": "test rig"
   }
  ]
 }

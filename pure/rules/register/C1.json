@@ -6,7 +6,7 @@
   "arrival": "owed: spec thread, next Arrival page (id not in a name yet)",
   "quint": "hold",
   "contract": "hold",
-  "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
+  "rig": "hold",
   "ts": "hold"
  },
  "killers": [
