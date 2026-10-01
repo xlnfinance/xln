@@ -76,6 +76,11 @@
    "kind": "test",
    "layer": "ts",
    "name": "R-C2R-FOLD Bob, asked by Alice for a C2R after a payment, refuses it with notice and signs nothing"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-COSIGN-FREEZE R-C2R-FOLD a storm of withdrawals, asks and landings: signed Accounts hold still"
   }
  ]
 }
