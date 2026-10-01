@@ -136,9 +136,14 @@ const inserted = (queue: readonly Resting[], offer: Resting): readonly Resting[]
   return at < 0 ? [...queue, offer] : [...queue.slice(0, at), offer, ...queue.slice(at)];
 };
 
+/** All the quote a taker moves in one sweep is one amount in its Account, so the sum of its fills must fit too. */
+const sweepFits = (market: Market, fills: readonly Fill[]): boolean =>
+  fills.reduce((sum, f) => sum + f.lots * f.price * market.quoteTick, 0n) <= MAX_AMOUNT;
+
 const traded = (book: Book, order: Order): Result<Placed, PlaceFault> => {
   const makers = sideOf(book, opposite(order.side));
   const swept = sweep(order, makers, { at: 0, fills: [], left: order.lots });
+  if (!sweepFits(book.market, swept.fills)) return err({ _tag: "amount_too_large" });
   if (order.terms === "all_or_nothing" && swept.left > 0n) {
     return err({ _tag: "not_fillable", lots: order.lots, fillable: order.lots - swept.left });
   }

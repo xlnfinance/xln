@@ -3,9 +3,10 @@ import { err } from "../kernel/core/result.ts";
 import { cancel, openBook, place } from "./book.ts";
 import { LIMITS, MARKET, must, newBook, orderOf, placeAll } from "./fixtures.ts";
 import { orderId, owner, type Market } from "./model.ts";
+import { executions } from "./settlement.ts";
 
-// Reviewer B of PR 92: refusals that the walk never draws together,
-// the amount check the walk's market cannot reach, and the cancel owner.
+// Reviewer B of PR 92: refusals that the walk never draws together, the amount checks the walk's market cannot reach,
+// and the one sum no single order's check covers.
 
 const fault = (result: ReturnType<typeof place>) => (result.ok ? expect.unreachable("admitted") : result.error);
 
@@ -37,6 +38,28 @@ describe("market/book review: amounts", () => {
     const book = must(openBook(coarse, LIMITS));
     const refused = place(book, orderOf({ id: "t", who: "bob", side: "buy", price: 2n ** 60n, lots: 2n ** 20n }));
     expect(fault(refused)).toEqual({ _tag: "amount_too_large" });
+  });
+
+  test("R-BOOK-EXACT-AMOUNTS a taker whose fills together move more than a uint256 is refused", () => {
+    const market: Market = { ...MARKET, baseLot: 1n, quoteTick: 2n };
+    const bids = placeAll(must(openBook(market, LIMITS)), [
+      { id: "b1", who: "bob", side: "buy", price: 2n ** 254n, lots: 1n },
+      { id: "b2", who: "cat", side: "buy", price: 2n ** 254n, lots: 1n },
+    ]);
+    const seller = orderOf({ id: "t", who: "dan", side: "sell", price: 1n, lots: 2n, terms: "immediate" });
+    expect(place(bids, seller)).toEqual(err({ _tag: "amount_too_large" }));
+    const one = orderOf({ id: "u", who: "dan", side: "sell", price: 1n, lots: 1n, terms: "immediate" });
+    expect(executions(market, one, must(place(bids, one))).at(-1)?.gets.amount).toBe(2n ** 255n);
+  });
+
+  test("R-BOOK-EXACT-AMOUNTS fills that together move exactly the largest uint256 are accepted", () => {
+    const market: Market = { ...MARKET, baseLot: 1n, quoteTick: 1n };
+    const bids = placeAll(must(openBook(market, LIMITS)), [
+      { id: "b1", who: "bob", side: "buy", price: 2n ** 255n, lots: 1n },
+      { id: "b2", who: "cat", side: "buy", price: 2n ** 255n - 1n, lots: 1n },
+    ]);
+    const seller = orderOf({ id: "t", who: "dan", side: "sell", price: 1n, lots: 2n, terms: "immediate" });
+    expect(executions(market, seller, must(place(bids, seller))).at(-1)?.gets.amount).toBe(2n ** 256n - 1n);
   });
 });
 

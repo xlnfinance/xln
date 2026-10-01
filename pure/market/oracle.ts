@@ -71,6 +71,8 @@ export const modelPlace = (m: Model, order: Order): Expected => {
   const against = order.side === "buy" ? "sell" : "buy";
   const candidates = m.open.filter((o) => o.offer.side === against).toSorted(ahead(against));
   const run = candidates.reduce(meet(order), { left: order.lots, trades: [], stopped: undefined });
+  const quoteMoved = run.trades.reduce((sum, [, lots, price]) => sum + lots * price * m.market.quoteTick, 0n);
+  if (quoteMoved > MAX_AMOUNT) return { refused: "amount_too_large" };
   if (order.terms === "all_or_nothing" && run.left > 0n) return { refused: "not_fillable" };
   const resting = order.terms === "rest" && run.stopped !== "own" && run.left > 0n;
   const offer: Resting = { id: order.id, owner: order.owner, side: order.side, price: order.price, lots: run.left };
