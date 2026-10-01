@@ -3538,6 +3538,12 @@
      "kind": "test",
      "layer": "ts",
      "name": "R-IMPLICIT-NONCE-FROM-CHAIN a report of an epoch the Entity already knows changes nothing"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-IMPLICIT-NONCE-FROM-CHAIN a counter after burned, yielded or refused nonces names the newest co-signed proof",
+     "owed": "the cut, after #97 (the counter nonce is firstNonce + used - 1, not stored + 1 + frames)"
     }
    ]
   },
