@@ -160,6 +160,16 @@ describe("every live rule states every layer: held, owed, or not applicable with
     expect(describeProblem(problems[0]!)).toContain("quint");
   });
 
+  test("a name that carries a longer rule's id is that rule's, not the shorter one it begins with", () => {
+    const cells = { ...stated.cells, contract: notApplicable, ts: { _tag: "owed", by: "the planner" } } as const;
+    const shorter = row("R-COSIGN", { cells });
+    const longer = row("R-COSIGN-FREEZE", { cells: { ...cells, ts: { _tag: "hold" } } });
+    const freeze = name("title", "R-COSIGN-FREEZE waits", "ts");
+    const verdictOf = (rows: readonly Row[]) => evaluate(rows, [freeze]).reports[0]?.cells.ts.verdict;
+    expect(verdictOf([shorter, longer])).toBe("owed");
+    expect(verdictOf([shorter])).toBe("stale-owed");
+  });
+
   test("red: an unstated cell stays red when a name in that layer already carries the id", () => {
     const cells = { ...stated.cells, ts: unstated };
     const { problems } = evaluate([row("J5", { cells })], [carrier, killerName, name("title", "J5 in ts", "ts")]);
