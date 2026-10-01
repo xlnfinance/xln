@@ -14,7 +14,9 @@ import type { AccountReplica, DisputeHanko, EntityId, EntityReplica, Runtime } f
 type Held = { readonly self: EntityId; readonly peer: EntityId; readonly replica: AccountReplica };
 /** Every (Account, signer, proof nonce) the run has seen signed, and the ProofBody hash it signed. */
 export type Signed = ReadonlyMap<string, string>;
-export type Checked = { readonly signed: Signed; readonly violations: readonly string[] };
+/** What a check actually looked at, so a property that silently looks at nothing shows (fired.ts). */
+export type Looked = { readonly ledgers: number; readonly signatures: number; readonly heightPairs: number };
+export type Checked = { readonly signed: Signed; readonly violations: readonly string[]; readonly looked: Looked };
 export const NOTHING_SIGNED: Signed = new Map();
 
 const pairKey = (a: string, b: string): string => (a < b ? `${a}/${b}` : `${b}/${a}`);
@@ -31,7 +33,7 @@ const accountsOf = (rt: Runtime): readonly Held[] =>
 // RCPAN from the contract's side (Depository._applyAccountDelta): with Δ = ondelta + offdelta, Left can owe at most
 // the credit Right extends (Δ ≥ −leftCredit) and Right at most collateral + the credit Left extends
 // (Δ ≤ collateral + rightCredit), in the worst case over the open clauses: every lock, same-j swap offer and pull
-// paying out on its payer's side. A co-signed settlement (ready_to_submit) moves collateral and ondelta on chain (Account._settleDiffs),
+// paying out on its payer's side. A co-signed settlement (ready_to_submit, or submitted once settle_execute queued it) moves collateral and ondelta on chain (Account._settleDiffs),
 // so the state after it must hold RCPAN too. Its reserve legs are not the Account's: a negative leftDiff spends
 // Left's reserve, not its room (og holds it against the room anyway, a stricter local policy).
 
@@ -65,7 +67,7 @@ const overdrawn = (h: Held): readonly string[] => {
   const b = h.replica.state;
   const clauses = clausesOf(b);
   // only a settlement both sides have signed can land: a half-signed workspace is still the approver's to refuse
-  const signed = b.settlement?.status === "ready_to_submit" ? b.settlement.compiledDiffs ?? [] : [];
+  const signed = b.settlement?.status === "ready_to_submit" || b.settlement?.status === "submitted" ? b.settlement.compiledDiffs ?? [] : [];
   return [...b.account.deltas.values()].flatMap((d) => {
     const tokenId = Number(d.tokenId);
     const owes = clauses.get(tokenId) ?? { left: 0n, right: 0n };
@@ -95,8 +97,8 @@ const signedKey = (h: Held, signer: EntityId, w: DisputeHanko): string =>
 /** Each hanko held on one Account, keyed by Account, signer and nonce, with the ProofBody hash it signs. */
 const signedRows = (h: Held): readonly (readonly [string, string])[] =>
   signaturesOf(h).map(([signer, w]) => [signedKey(h, signer, w), w.proofBodyHash.toLowerCase()]);
-const recordSigned = (before: Signed, held: readonly Held[]): Checked =>
-  held.flatMap(signedRows).reduce<Checked>((acc, [key, body]) => {
+const recordSigned = (before: Signed, held: readonly Held[]): Pick<Checked, "signed" | "violations"> =>
+  held.flatMap(signedRows).reduce<Pick<Checked, "signed" | "violations">>((acc, [key, body]) => {
     const seen = acc.signed.get(key);
     if (seen === undefined) return { ...acc, signed: new Map([...acc.signed, [key, body]]) };
     return seen === body ? acc : { ...acc, violations: [...acc.violations, `P4 ${key}: signed ${seen} and ${body}`] };
@@ -107,23 +109,32 @@ const deltasOf = (r: AccountReplica): string => {
   const view = committedView(r.state);
   return view.ok ? stableJson([...view.value.deltas.values()]) : "refused";
 };
-/** Both sides of an Account at one committed height hold the same deltas. */
-const disagreeing = (held: readonly Held[]): readonly string[] => {
+/** Both sides of an Account at one committed height: the pairs compared, and where their deltas differ. */
+const comparedAtOneHeight = (held: readonly Held[]): readonly (readonly [Held, Held])[] => {
   const byKey = new Map(held.map((h) => [`${h.self}→${h.peer}`, h] as const));
   return held.filter((h) => h.self < h.peer).flatMap((h) => {
     const other = byKey.get(`${h.peer}→${h.self}`);
-    if (other === undefined || heightOf(other.replica) !== heightOf(h.replica)) return [];
+    return other === undefined || heightOf(other.replica) !== heightOf(h.replica) ? [] : [[h, other] as const];
+  });
+};
+const disagreeing = (pairs: readonly (readonly [Held, Held])[]): readonly string[] =>
+  pairs.flatMap(([h, other]) => {
     const [mine, theirs] = [deltasOf(h.replica), deltasOf(other.replica)];
     return mine === theirs ? [] : [`P4 ${pairKey(h.self, h.peer)} height ${heightOf(h.replica)}: ${mine} vs ${theirs}`];
   });
-};
 
 /** Every property over one committed Runtime, given what the run has signed so far. */
 export const checkProperties = (rt: Runtime, signed: Signed): Checked => {
   const held = accountsOf(rt);
   const recorded = recordSigned(signed, held);
+  const pairs = comparedAtOneHeight(held);
   return {
     signed: recorded.signed,
-    violations: [...held.flatMap(overdrawn), ...recorded.violations, ...disagreeing(held)],
+    violations: [...held.flatMap(overdrawn), ...recorded.violations, ...disagreeing(pairs)],
+    looked: {
+      ledgers: held.reduce((n, h) => n + h.replica.state.account.deltas.size, 0),
+      signatures: recorded.signed.size,
+      heightPairs: pairs.length,
+    },
   };
 };

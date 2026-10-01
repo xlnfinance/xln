@@ -54,7 +54,7 @@ test("P2: Right owed past collateral plus its credit is red", () => {
 });
 
 /** An Account holding a settlement workspace whose compiled diffs withdraw `amount` from the collateral on Left's side. */
-const withSettlement = (r: AccountReplica, status: "awaiting_counterparty" | "ready_to_submit", amount: bigint): AccountReplica => ({
+const withSettlement = (r: AccountReplica, status: "awaiting_counterparty" | "ready_to_submit" | "submitted", amount: bigint): AccountReplica => ({
   ...r,
   state: {
     ...r.state,
@@ -70,6 +70,12 @@ test("P2: a co-signed settlement that leaves Left owing past the credit Right ex
   const a = withSettlement(replicaWith(honest), "ready_to_submit", 60n);
   const { violations } = checkProperties(runtimeOf(a, a), NOTHING_SIGNED);
   expect(violations.filter((v) => v.includes("after its signed settlement"))).toHaveLength(2);
+});
+
+test("P2: a settlement settle_execute already submitted is co-signed too, and judged the same", () => {
+  const a = withSettlement(replicaWith(honest), "submitted", 60n);
+  const { violations } = checkProperties(runtimeOf(a, a), NOTHING_SIGNED);
+  expect(violations.filter((v) => v.includes("after its signed settlement") && v.includes("workspace submitted"))).toHaveLength(2);
 });
 
 test("P2: the same settlement signed by one side only is not a breach yet: the approver can still refuse it", () => {

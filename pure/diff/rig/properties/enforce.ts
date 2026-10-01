@@ -12,6 +12,7 @@
 import type { BrowserVMProvider } from "../../../../core/jurisdiction/adapter/browservm/browservm-provider.ts";
 import type { AccountReplica, EntityId, EntityTx } from "../../../xln.ts";
 import { HUB, SPOKES, type World } from "../world.ts";
+import { SETTLEMENT } from "../../draws/settlement.ts";
 import { beliefLines, lagging } from "./belief.ts";
 
 /** Ticks the lifecycle may take for each phase before the sample gives up (and says so). */
@@ -131,7 +132,7 @@ export const enforceOne = async (w: World): Promise<Enforced | readonly string[]
 };
 
 /**
- * P3 at rest: with no input the lane polls the chain and ticks until every Account holds what the chain holds. Lane diffs along the way come
+ * P-BELIEF at rest: with no input the lane polls the chain and ticks until every Account holds what the chain holds. Lane diffs along the way come
  * back as they are; an Account still behind when patience runs out is the J event the Runtime never applied.
  */
 export const settleBelief = async (w: World, left = PATIENCE): Promise<readonly string[]> => {
@@ -140,4 +141,22 @@ export const settleBelief = async (w: World, left = PATIENCE): Promise<readonly 
   await w.chain.pollNow?.();
   const diffs = await w.lane.tick([], []);
   return diffs.length > 0 ? diffs : settleBelief(w, left - 1);
+};
+
+const workspaceOpen = (w: World): boolean =>
+  [...w.lane.runtime().entities.values()].some((e) => [...e.accountReplicas.values()].some((r) => r.state.settlement !== undefined));
+/** The settlement draws that close a workspace: an unsigned one is rejected, a half-signed one approved, a signed one executed. */
+const CLOSERS = [SETTLEMENT.settle_reject, SETTLEMENT.settle_approve, SETTLEMENT.settle_execute];
+
+/**
+ * At the end of a clean walk, settlement workspaces are driven to their end with the settlement draws themselves (reject, approve, execute), and
+ * quiet frames wait for the chain's result: an Account that still holds a workspace is not clause-free, so P1 would skip every Account of an area
+ * whose walks leave workspaces open. Lane diffs along the way come back as they are; workspaces that outlast patience are left (P1 then reports its skip).
+ */
+export const closeSettlements = async (w: World, left = PATIENCE * 4): Promise<readonly string[]> => {
+  if (left === 0 || !workspaceOpen(w)) return [];
+  const closer = CLOSERS.find((move) => move._tag === "drawn" && move.enabled(w));
+  const step = closer?._tag === "drawn" ? closer.draw(w) : { runtimeTxs: [], users: [] };
+  const diffs = await w.lane.tick(step.runtimeTxs, step.users);
+  return diffs.length > 0 ? diffs : closeSettlements(w, left - 1);
 };

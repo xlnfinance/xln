@@ -8,7 +8,7 @@
 // halt a walk reaches fails it, even when the rewrite halts too, unless it is a known og bug (departures.ts
 // KNOWN_OG_HALTS): otherwise it is a draw whose guard is weaker than og's.
 //
-// The properties of rig/properties/properties.ts (P2 credit-bounded, P4 agreed) and rig/properties/belief.ts (P3, the Account never believes a value
+// The properties of rig/properties/properties.ts (P2 credit-bounded, P4 agreed) and rig/properties/belief.ts (P-BELIEF, the Account never believes a value
 // the chain did not hold, and at rest holds the chain's) run after every committed frame, and P1 (the chain pays what the
 // Account says) runs a dispute to finalize when the walk ends. The disputes walk draws settlements too and starts its dispute only on
 // an Account whose epoch has moved, so the start has to carry the epoch (C1); rig/shim/sent-checks.ts checks what the fork shim sent.
@@ -28,9 +28,10 @@ import { judge } from "./findings/judge.ts";
 import { KNOWN_FINDINGS } from "./findings/known.ts";
 import { drawnIn, worldIn, type Drawn, type NamedWorldMove, type Scope } from "./draws/index.ts";
 import { knownHalt } from "./rig/departures.ts";
-import { checkProperties, NOTHING_SIGNED, type Signed } from "./rig/properties/properties.ts";
-import { checkBelief, NOTHING_SEEN, type Trail } from "./rig/properties/belief.ts";
-import { enforceOne, settleBelief, vmOf, type Enforced } from "./rig/properties/enforce.ts";
+import { judgeFrame, NO_MEMORY, type Memory, type Plant } from "./rig/frame-checks.ts";
+import { probeCapacity } from "./rig/probe.ts";
+import { unfired } from "./rig/properties/fired.ts";
+import { closeSettlements, enforceOne, settleBelief, type Enforced } from "./rig/properties/enforce.ts";
 import { stableJson } from "../xln.ts";
 
 /** The walk seeds, through seedOf like every stream in diff/ (SEEDX=0 walks 0x30de1, 0x30de2, ...). */
@@ -43,16 +44,19 @@ const FRAMES = 30;
  * `diffs` holds everything else, including a registered expectation that did not appear.
  */
 export type Walked = { readonly coverage: Coverage; readonly diffs: readonly string[]; readonly known: readonly string[] };
+/** What the walk's loop ended with: the lines that stopped it (none when it ran its course) and what its frame checks remembered. */
+type Looped = { readonly lines: readonly string[]; readonly memory: Memory };
 
 /**
  * One walk over the given drawn rows and world moves; it stops at the first diff, an og halt both sides agree on, or a
- * departure.
+ * departure. `plant` is a test's fault in what the properties read (rig/frame-checks.ts): the walk must then say so, and only the properties can.
  */
 export const walk = async (
   seed: number,
   moves: readonly Drawn[],
   world: readonly NamedWorldMove[],
   area?: Area,
+  plant?: Plant,
 ): Promise<Walked> => {
   const w = await openWorld(seed, "model", { disputeAfterEpoch: area === "disputes" });
   const { lane, coverage } = w;
@@ -70,8 +74,8 @@ export const walk = async (
     const more = untilCovered(FRAMES, () => covered() && owing().length === 0, FRAMES * 6);
     // a halted og Runtime refuses every later frame, so a halt both sides agree on ends the run; so does a departure
     // (departures.ts), after which the two states differ
-    const loop = async (i: number, signed: Signed, trail: Trail): Promise<readonly string[]> => {
-      if (!more(i) || coverage.halts > 0 || coverage.departures.length > 0) return [];
+    const loop = async (i: number, memory: Memory): Promise<Looped> => {
+      if (!more(i) || coverage.halts > 0 || coverage.departures.length > 0) return { lines: [], memory };
       const enabled = moves.filter(([, m]) => m.enabled(w));
       // favour the kinds committed least: weight 1 / (1 + times tried)
       const weights = enabled.map(([k]) => 1 / (1 + (tried.get(k) ?? 0)));
@@ -92,17 +96,22 @@ export const walk = async (
       coverage.actions[name] = (coverage.actions[name] ?? 0) + 1;
       if (tracing()) console.log(`frame ${lane.frames() + 1} ${name}`);
       const diffs = await lane.tick(step.runtimeTxs, step.users);
-      // P2 and P4 hold of the rewrite whatever og did (rig/properties/properties.ts)
-      const checked = checkProperties(lane.runtime(), signed);
-      // P3: what each Account believes the chain holds is what it holds (rig/properties/belief.ts)
-      const believed = await checkBelief(vmOf(w), lane.runtime(), trail);
-      const broken = [...checked.violations, ...believed.violations].map((v) => `${w.tag} frame ${lane.frames()} ${name}: ${v}`);
-      return diffs.length > 0 || broken.length > 0 ? [...diffs, ...broken] : loop(i + 1, checked.signed, believed.trail);
+      // P2, P4 and P-BELIEF hold of the rewrite whatever og did (rig/frame-checks.ts)
+      const framed = await judgeFrame(w, name, memory, plant);
+      return diffs.length > 0 || framed.violations.length > 0 ? { lines: [...diffs, ...framed.violations], memory: framed.memory } : loop(i + 1, framed.memory);
     };
-    const looped = await loop(0, NOTHING_SIGNED, NOTHING_SEEN);
-    // P3 at rest: a walk that ended clean leaves every Account holding what the chain holds
-    const quiet = looped.length === 0 && coverage.halts === 0 && coverage.departures.length === 0;
-    const walked = quiet ? (await settleBelief(w)).map((l) => `${w.tag} frame ${lane.frames()} at rest: ${l}`) : looped;
+    const looped = await loop(0, NO_MEMORY);
+    // P-BELIEF at rest: a walk that ended clean leaves every Account holding what the chain holds
+    const quiet = looped.lines.length === 0 && coverage.halts === 0 && coverage.departures.length === 0;
+    // settlement workspaces are closed first (rig/properties/enforce.ts closeSettlements): an Account holding one is not clause-free, so P1 would skip it
+    const closed = quiet ? await closeSettlements(w) : [];
+    // then the capacity edge, which no draw reaches (rig/probe.ts); its frames are judged like the walk's
+    const probed = quiet && closed.length === 0 ? (await probeCapacity(w, looped.memory)).lines : [];
+    const atRest = async (): Promise<readonly string[]> => {
+      coverage.actions["P-BELIEF:atRest"] = 1;
+      return (await settleBelief(w)).map((l) => `${w.tag} frame ${lane.frames()} at rest: ${l}`);
+    };
+    const walked = !quiet ? looped.lines : closed.length > 0 ? closed : probed.length > 0 ? probed : await atRest();
     // last, P1: one Account's dispute runs to finalize on the Depository, whose payout must match the Account
     const clean = walked.length === 0 && coverage.halts === 0 && coverage.departures.length === 0;
     const p1 = clean ? p1Lines(w.tag, coverage, await enforceOne(w)) : [];
@@ -189,7 +198,7 @@ const one = async (area: Area | undefined, seed: number): Promise<number> => {
   console.log(walkLine(seed, coverage));
   known.forEach((k) => console.log(`  KNOWN ${k}`));
   diffs.forEach((d) => console.log(`  DIFF ${d}`));
-  console.log(`WALKED ${JSON.stringify({ seed, diffs: diffs.length, kinds: [...coverage.entityTxs] })}`);
+  console.log(`WALKED ${JSON.stringify({ seed, diffs: diffs.length, kinds: [...coverage.entityTxs], actions: coverage.actions })}`);
   return diffs.length > 0 ? 1 : 0;
 };
 
@@ -201,14 +210,18 @@ const many = (args: Args): number => {
     const out = child.stdout.toString();
     process.stdout.write(out.split("\n").filter((l) => !l.startsWith("WALKED ")).join("\n"));
     const walked = out.split("\n").find((l) => l.startsWith("WALKED "));
-    const kinds: readonly string[] = walked === undefined ? [] : JSON.parse(walked.slice(7)).kinds;
-    return { ok: child.exitCode === 0 && walked !== undefined, kinds };
+    const parsed: { readonly kinds?: readonly string[]; readonly actions?: Readonly<Record<string, number>> } = walked === undefined ? {} : JSON.parse(walked.slice(7));
+    return { ok: child.exitCode === 0 && walked !== undefined, kinds: parsed.kinds ?? [], actions: parsed.actions ?? {} };
   });
   const missed = uncovered(rowsFor(args.area), new Set(runs.flatMap((r) => r.kinds)));
   if (missed.length > 0) console.log(`UNCOVERED ${missed.join(",")}`);
+  // a property that applies to this area but looked at nothing in any of its walks is as red as a diff (rig/properties/fired.ts)
+  const silent = unfired(args.area ?? "model", runs.map((r) => r.actions));
+  silent.forEach((line) => console.log(line));
   const failed = runs.filter((r) => !r.ok).length;
-  console.log(`${failed === 0 && missed.length === 0 ? "OK" : "FAIL"}: ${runs.length} walks, ${failed} failed`);
-  return failed === 0 && missed.length === 0 ? 0 : 1;
+  const green = failed === 0 && missed.length === 0 && silent.length === 0;
+  console.log(`${green ? "OK" : "FAIL"}: ${runs.length} walks, ${failed} failed`);
+  return green ? 0 : 1;
 };
 
 if (import.meta.main) {

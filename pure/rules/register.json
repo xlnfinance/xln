@@ -1541,7 +1541,7 @@
     "arrival": "owed: #41 (id not in a name yet)",
     "quint": "owed: #44 (id not in a name yet)",
     "contract": "-",
-    "rig": "-",
+    "rig": "owed: thread 'Test rig checks spec properties' (P4b every signature made counts, including a proposal later rolled back; P4f the proof nonce climbs by one)",
     "ts": "-"
    },
    "killers": [
@@ -1556,6 +1556,12 @@
      "layer": "arrival",
      "name": "baseline-too-low",
      "owed": "#41"
+    },
+    {
+     "kind": "test",
+     "layer": "rig",
+     "name": "to be named: a second proof signed for a rolled-back frame, and a nonce that skips, are red",
+     "owed": "thread 'Test rig checks spec properties'"
     }
    ]
   },
@@ -1587,7 +1593,7 @@
     "arrival": "owed: #41 (id not in a name yet)",
     "quint": "owed: #44 (id not in a name yet)",
     "contract": "-",
-    "rig": "-",
+    "rig": "owed: thread 'Test rig checks spec properties' (money conserved per frame over the real Depository's events; the specs' P3)",
     "ts": "-"
    },
    "killers": [
@@ -1602,6 +1608,12 @@
      "layer": "quint",
      "name": "payout-forgets-the-debt",
      "owed": "#44"
+    },
+    {
+     "kind": "test",
+     "layer": "rig",
+     "name": "to be named: reserves + collateral + debt per Account conserved after each frame",
+     "owed": "thread 'Test rig checks spec properties'"
     }
    ]
   },
@@ -1958,7 +1970,7 @@
     "arrival": "owed: #41 (id not in a name yet)",
     "quint": "owed: #44 (id not in a name yet)",
     "contract": "-",
-    "rig": "owed: #69 (known finding, owner A1 cut)",
+    "rig": "owed: #69 (known finding, owner the Account cut; the entry goes when the walk drives the new Account ledger)",
     "ts": "hold"
    },
    "killers": [
@@ -2225,6 +2237,126 @@
      "layer": "quint",
      "name": "a mutant for the implicit start",
      "owed": "#44"
+    }
+   ]
+  },
+  {
+   "id": "R-BOTH-SIGNED",
+   "statement": "At each side's committed head both signatures exist over the proof of that committed body: the ProofBody hash recomputed from the committed state equals the signed one (Quint P4c both_signed).",
+   "source": "Review B of PR 69; spec/quint/account.qnt",
+   "layers": {
+    "arrival": "-",
+    "quint": "-",
+    "contract": "-",
+    "rig": "owed: thread 'Test rig checks spec properties'",
+    "ts": "-"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "rig",
+     "name": "to be named: a head whose signed ProofBody differs from the recomputed one is red",
+     "owed": "thread 'Test rig checks spec properties'"
+    }
+   ]
+  },
+  {
+   "id": "R-AGREE",
+   "statement": "Both sides of an Account at one committed height hold the same whole body: deltas, locks, offers, pulls and settlement status, not the deltas alone (Quint P4a).",
+   "source": "Review B of PR 69; spec/quint/account.qnt",
+   "layers": {
+    "arrival": "-",
+    "quint": "-",
+    "contract": "-",
+    "rig": "owed: thread 'Test rig checks spec properties' (the rig compares deltas only today)",
+    "ts": "-"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "rig",
+     "name": "to be named: two replicas at one height that differ in a lock or a settlement status are red",
+     "owed": "thread 'Test rig checks spec properties'"
+    }
+   ]
+  },
+  {
+   "id": "R-OWN-FRAME",
+   "statement": "An Entity never proposes a frame its own validation rejects: a J-prefix certificate that scans past its base carries the one range tx (J_PREFIX_RANGE_COUNT_INVALID is never reachable from the proposer's own frame).",
+   "source": "Review B of PR 69, B4; rig walk disputes 0x30de6 frame 91 (og and the rewrite build the same empty frame at entity height 51, certificate base 40 scanned 41, then both reject it)",
+   "layers": {
+    "arrival": "-",
+    "quint": "-",
+    "contract": "-",
+    "rig": "owed: #69 (known finding, owner the J1 cut)",
+    "ts": "owed: J1 cut"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "to be named: a J-prefix certificate past its base is proposed with its range tx",
+     "owed": "J1 cut"
+    }
+   ]
+  },
+  {
+   "id": "R-SAME-FRAME-SETTLE-PENDING",
+   "statement": "Inside one Entity frame a settle_execute reads the Account mempool as the frame found it: a settle_transition queued by an earlier tx of the same frame is not yet visible to it (og applies queued Account txs after the tx loop), so a user's execute that races the hub scheduler's in one frame is og's no-op skip and its command advances the nonce; it is not refused and evicted.",
+   "source": "Rig walk settlement 0x30de1 frame 177 (scheduledWake runs the hub scheduler's settle_execute, then the signed command's settle_execute: og skips it as already submitted and commits nonce 41, the rewrite refuses SETTLEMENT_TRANSITION_ALREADY_PENDING and evicts the command, nonce stays 40); og core/entity/tx/handlers/payments/settle.ts:654",
+   "layers": {
+    "arrival": "-",
+    "quint": "-",
+    "contract": "-",
+    "rig": "owed: #69 (known finding, owner the Entity-frame cut)",
+    "ts": "owed: Entity-frame cut"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "to be named: two settle_execute txs for one Account in one frame commit as og does",
+     "owed": "Entity-frame cut"
+    }
+   ]
+  },
+  {
+   "id": "R-P1-OWN-BODY",
+   "statement": "P1 judges the rewrite's own proof: it recomputes the ProofBody from the rewrite's committed Account state and compares its hash with the one the chain recorded for the dispute, so a fault in the rewrite's proof body is seen without og.",
+   "source": "Review A of PR 69, F2 (a proof body offdelta +1 planted in xln.ts stays green under P1 today: P1 reads the chain's payout, fed by og's bytes, and only the lane's hash comparison with og sees the fault)",
+   "layers": {
+    "arrival": "-",
+    "quint": "-",
+    "contract": "-",
+    "rig": "owed: the oracle switch (the change that takes the rig's oracle from og to the spec properties)",
+    "ts": "-"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "rig",
+     "name": "to be named: a rewrite proof body that differs from the committed state is red in P1 with the lane blinded",
+     "owed": "the oracle switch (the change that takes the rig's oracle from og to the spec properties)"
+    }
+   ]
+  },
+  {
+   "id": "R-EVERY-FRAME-JUDGED",
+   "statement": "Every committed frame of a walk is judged by P2, P4 and P-BELIEF, including the frames of the dispute lifecycle (P1's ticks) and the at-rest settle ticks; no frame of a walk goes unjudged.",
+   "source": "Review A of PR 69, F4 (core 0x30de1: 34 of 41 frames judged, disputes 0x30de1: 136 of 143; the capacity probe's frames are judged since #69)",
+   "layers": {
+    "arrival": "-",
+    "quint": "-",
+    "contract": "-",
+    "rig": "owed: thread 'Test rig checks spec properties'",
+    "ts": "-"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "rig",
+     "name": "to be named: a fault planted on a frame of P1's lifecycle or of the at-rest ticks is red",
+     "owed": "thread 'Test rig checks spec properties'"
     }
    ]
   }

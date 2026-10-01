@@ -1,13 +1,14 @@
-// P3 believed-equals-chain (design/account-model.md section 5): after each Runtime frame, the collateral and ondelta each Account holds
+// P-BELIEF (the rig's own, not the specs' P3, which is money conserved: see the register rows R-CONSERVE and R-PROOF-NONCE for what the rig still owes):
+// after each Runtime frame, the collateral and ondelta each Account holds
 // for a token are what the Depository holds for that pair and token. An Account learns them from J events, so a difference is a J event
 // the Account missed or applied twice, or a batch the chain ran that the Account never expected.
 //
-// The walk polls the chain for events before it ticks the lane (enforce.ts's `until`, the lane itself), so a frame ends with every event
-// the chain had emitted applied; a batch still in flight (sent, not yet mined) has emitted nothing and moved nothing.
+// Per frame the belief may lag the chain (J events reach an Account after the chain moved), so the frame check only refuses a belief that is not
+// a value the chain held, or goes back to an older one. At rest (`lagging`, driven by enforce.ts's `settleBelief`) it must equal the chain's.
 import { committedView } from "../../../xln.ts";
 import type { AccountReplica, Runtime } from "../../../xln.ts";
 
-/** The one chain read P3 makes: the Depository's collateral and ondelta for a pair and a token. */
+/** The one chain read P-BELIEF makes: the Depository's collateral and ondelta for a pair and a token. */
 export type CollateralView = {
   readonly getCollateral: (left: string, right: string, tokenId: number) => Promise<{ readonly collateral: bigint; readonly ondelta: bigint }>;
 };
@@ -48,7 +49,7 @@ const show = (h: Held): string => `${h.collateral}/${h.ondelta}`;
 
 export type Believed = { readonly trail: Trail; readonly violations: readonly string[] };
 
-/** P3 over a whole Runtime after one frame: every Account (one side per pair), every token. */
+/** P-BELIEF over a whole Runtime after one frame: every Account (one side per pair), every token. */
 export const checkBelief = async (vm: CollateralView, rt: Runtime, before: Trail): Promise<Believed> => {
   const replicas = [...rt.entities.values()].flatMap((e) =>
     [...e.accountReplicas].filter(([peer]) => e.state.id < peer).map(([peer, r]) => ({ at: `${e.state.id}→${peer}`, r })));
@@ -67,13 +68,13 @@ export const checkBelief = async (vm: CollateralView, rt: Runtime, before: Trail
     const at = belief === undefined ? -1 : seen.findIndex((h, i) => i >= had.at && same(h, belief));
     const lines = belief !== undefined && at >= 0
       ? []
-      : [`P3 ${key}: Account believes ${belief === undefined ? "nothing" : show(belief)}; since the Account last agreed with the chain (${show(seen[had.at]!)}) the chain held ${seen.slice(had.at).map(show).join(", ")} (collateral/ondelta)`];
+      : [`P-BELIEF ${key}: Account believes ${belief === undefined ? "nothing" : show(belief)}; since the Account last agreed with the chain (${show(seen[had.at]!)}) the chain held ${seen.slice(had.at).map(show).join(", ")} (collateral/ondelta)`];
     return { trail: new Map([...acc.trail, [key, { seen, at: at >= 0 ? at : had.at }]]), violations: [...acc.violations, ...lines] };
   }, { trail: before, violations: [] });
 };
 
-/** An Account dispute froze (preparing, or started) or finalized (disputed): it takes no more J events. */
-const frozenByDispute = (r: AccountReplica): boolean => r._tag === "preparing" || r._tag === "disputed";
+/** An Account whose dispute is live or finalized (disputed) takes no more J events; a frozen draft that never reached the chain (preparing) is still checked. */
+const frozenByDispute = (r: AccountReplica): boolean => r._tag === "disputed";
 
 /**
  * Every Account whose belief differs from the chain right now: what a run that has gone quiet must not leave behind. Only an Account with a live
@@ -85,5 +86,5 @@ export const lagging = async (vm: CollateralView, rt: Runtime): Promise<readonly
     [...e.accountReplicas]
       .filter(([peer, r]) => e.state.id < peer && !frozenByDispute(r))
       .map(([peer, r]) => ({ at: `${e.state.id}→${peer}`, r })));
-  return (await Promise.all(replicas.map(async ({ at, r }) => beliefLines(`P3 ${at}`, r, await chainHolds(vm, r))))).flat();
+  return (await Promise.all(replicas.map(async ({ at, r }) => beliefLines(`P-BELIEF ${at}`, r, await chainHolds(vm, r))))).flat();
 };

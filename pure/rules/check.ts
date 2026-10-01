@@ -7,10 +7,11 @@
 //   --register-only          run only the register gate
 //   --style-only             run only the style gate of the new tree (kernel/, chain/), see rules/tree/gate.ts
 //   --width-only             run only folder width (rules/checks/folder-width.ts)
-// Runs the register gate, the style gate of the new tree and folder width (rules/checks/folder-width.ts): one
-// command, one exit code.
+//   --findings-only          run only the known-findings ratchet (diff/findings/check.ts)
+// Runs the register gate, the style gate of the new tree, folder width (rules/checks/folder-width.ts) and the known-findings
+// ratchet of the rig (diff/findings/check.ts): one command, one exit code.
 // Exit 1 when an id is missing from a layer that must hold it, an owed cell is already satisfied, a row has
-// no killer, the new tree breaks a style rule, or a folder holds more than its allowed source files. See plan/first-moves.md, brief 3.
+// no killer, the new tree breaks a style rule, a folder holds more than its allowed source files, or the rig registers more known findings than its baseline allows. See plan/first-moves.md, brief 3.
 import { existsSync, readFileSync } from "node:fs";
 import { evaluate } from "./evaluate.ts";
 import { carries } from "./names/names.ts";
@@ -44,6 +45,14 @@ const runFolderWidth = (): boolean => {
 
 const flagValues = (flag: string): readonly string[] =>
   args.flatMap((arg, index) => (arg === flag ? [args[index + 1] ?? ""] : []));
+
+// The rig's registry of known findings may only shrink; its own script holds the rules (diff/findings/check.ts) and its output is ours.
+const runFindings = (): boolean => {
+  const child = Bun.spawnSync([process.execPath, `${here}/../diff/findings/check.ts`, "--base", flagValues("--base")[0] ?? "origin/main"], { cwd: `${here}/..` });
+  process.stdout.write(child.stdout);
+  process.stderr.write(child.stderr);
+  return child.exitCode === 0;
+};
 
 // The register part: parse, scan names, evaluate, ratchet against the base. Returns whether it passed.
 const runRegister = (): boolean => {
@@ -96,7 +105,7 @@ const runRegister = (): boolean => {
 const selection = selectionOf(args);
 
 // One table for every way in; `isWanted` says which parts the command line runs. A part that does not run counts as passed.
-const PARTS: Readonly<Record<Part, () => boolean>> = { register: runRegister, style: runStyle, width: runFolderWidth };
+const PARTS: Readonly<Record<Part, () => boolean>> = { register: runRegister, style: runStyle, width: runFolderWidth, findings: runFindings };
 const passes = (part: Part): boolean => !isWanted(part, selection) || PARTS[part]();
 
-process.exit(gateExit({ register: passes("register"), style: passes("style"), width: passes("width") }));
+process.exit(gateExit({ register: passes("register"), style: passes("style"), width: passes("width"), findings: passes("findings") }));
