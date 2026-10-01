@@ -2,9 +2,9 @@
 // style/rules, whose `files:` line names xln.ts and is dropped here, and style/tree-rules) over the gated sources, and
 // the fact rules (facts.yml) over every user of the tree. Each runs once per language (.ts/.mts/.cts as TypeScript,
 // .tsx as Tsx), every time with one planted file per rule that the rule must report on.
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { resolve } from "node:path";
+import { dirname, resolve } from "node:path";
 import type { Hit } from "./counts.ts";
 
 export type AstFact = Readonly<{
@@ -66,6 +66,8 @@ export const astRun = (root: string, rules: string, canaries: Canaries, files: r
     const silent = Object.keys(canaries).filter((id) => !reported(id)).map((id) => (language === "TypeScript" ? id : `${id} (${language})`));
     return { found: found.filter((fact) => !isCanary(fact)), silent, failed: !exited };
   });
+  // The planted files have been read by now; the folder is the scan's own, so it goes with it.
+  rmSync(dirname(canary), { recursive: true, force: true });
   const silent = runs.flatMap((run) => run.silent);
   return { found: runs.flatMap((run) => run.found), silent, failed: runs.some((run) => run.failed) || silent.length > 0 };
 };

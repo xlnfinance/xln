@@ -17,6 +17,7 @@ const pages = {
   runtime: { files: ["runtime/tick.scm"], spec: "runtime" },
   j: { files: ["j/batch.scm"], spec: "j-batch" },
   routing: { files: ["entity/routing.scm"], spec: "routing" },
+  transport: { files: ["transport/link.scm"], spec: "transport" },
 };
 const check = (page, extra) => evaluate([...lib, ...pages[page].files, ...extra], `(check ${pages[page].spec})`);
 
@@ -27,6 +28,9 @@ const planted = (page, name, file, violated, config) => ({
   expect: (r) => assert.equal(r.violated, violated),
 });
 
+const PREFIX = "the receiver's frames are never contradicted by the sender's committed frames: no equivocation, and nothing forged, repeated or reordered was applied (P4, R-DURABLE)";
+const BELIEF = "the sender never believes the peer holds more than the peer applied: only a genuine ack moves the belief";
+const HALT = "no peer message halts a node: a refusal changes nothing and never stops the Runtime (R-X1; a halt is also a dead end for liveness)";
 const cases = [
   { page: "account", name: "account frames: the J clock moves between a frame's proposal and its receipt, no lost message (R-FRAME-REFUSAL)", extra: [], expect: (r) => assert.deepEqual(r, { ok: true, states: 4563, transitions: 18600, goals: 44 }) },
   { page: "account", name: "account frames, the first page's bound: conflicts, a lost and a repeated message", extra: ["account/configs/lossy.scm"], expect: (r) => assert.deepEqual(r, { ok: true, states: 4405, transitions: 13955, goals: 16 }) },
@@ -163,7 +167,7 @@ const cases = [
   planted("j", "the Entity does not read DisputeOpSkipped", "ignores-skip", "can always still finish"),
   { page: "j", name: "J batch, one payment batch fails (R-J5)", extra: ["j/configs/payment-failure.scm"], expect: (r) => assert.deepEqual(r, { ok: true, states: 9810, transitions: 30151, goals: 1840 }) },
   planted("j", "a failed batch takes no nonce and says nothing (contracts today, R-J5)", "failure-no-nonce", "a failed batch of payment, settlement and reserve ops takes its nonce: the chain has moved past it (R-J5)", "j/configs/payment-failure.scm"),
-  { page: "j", name: "J batch, deposit legs and a bad counterparty signature (J5 refined)", extra: ["j/configs/legs-and-signatures.scm"], expect: (r) => assert.deepEqual(r, { ok: true, states: 34408, transitions: 126288, goals: 10112 }) },
+  { page: "j", heavy: true, name: "J batch, deposit legs and a bad counterparty signature (J5 refined)", extra: ["j/configs/legs-and-signatures.scm"], expect: (r) => assert.deepEqual(r, { ok: true, states: 34408, transitions: 126288, goals: 10112 }) },
   planted("j", "a deposit leg soft-fails and burns the Entity's nonce (J5 refined)", "leg-soft", "a failed batch with a deposit leg or a dispute op reverts whole and takes no nonce (R-J5 refined)", "j/configs/legs-and-signatures.scm"),
   planted("j", "a bad counterparty signature reverts the batch without its nonce (contracts today)", "bad-sig-hard", "a failed batch of payment, settlement and reserve ops takes its nonce: the chain has moved past it (R-J5)", "j/configs/legs-and-signatures.scm"),
   planted("j", "a co-signed op is bundled with another Account's ops (R-COSIGN)", "cosign-bundle", "a batch with a co-signed op carries ops of that one Account only (R-COSIGN)", "j/configs/legs-and-signatures.scm"),
@@ -225,10 +229,34 @@ const cases = [
   planted("money", "deposit from nowhere", "deposit-from-nowhere", "r2c / c2r: one unit between the payer's reserve and the collateral; a Left deposit is Left's allocation"),
   planted("money", "the shared payment arithmetic moves Δ the wrong way (money/core.scm)", "core-pay-flipped", "pay n: the payer's allocation falls by n; nothing else moves"),
   planted("money", "the shared credit bound has no lower side (money/core.scm)", "core-rcpan-no-floor", "credit holds: RCPAN in the worst case over the open clauses"),
+  { page: "transport", name: "transport link", extra: [], expect: (r) => assert.deepEqual(r, { ok: true, states: 3536, transitions: 24328, goals: 512 }) },
+  planted("transport", "a frame is sent before its row is committed, and the sender crashes: an equivocation (R-DURABLE)", "send-before-persist", PREFIX),
+  planted("transport", "the receiver acks a frame before its row is committed, and crashes (R-DURABLE)", "ack-before-persist", BELIEF),
+  planted("transport", "the receiver trusts the sender field of a frame", "trust-frame-sender", PREFIX),
+  planted("transport", "the receiver applies a duplicate frame (exactly-once assumed)", "apply-duplicate", PREFIX),
+  planted("transport", "the receiver applies a frame from the future (order assumed)", "apply-future", PREFIX),
+  planted("transport", "the sender trusts the sender field of an ack", "trust-ack-sender", BELIEF),
+  planted("transport", "the sender counts a frame as held once it left (exactly-once assumed)", "assume-delivered", BELIEF),
+  planted("transport", "a frame from the future halts the receiver (og)", "halt-on-future", HALT),
+  planted("transport", "a forged frame halts the receiver", "forged-halts", HALT),
+  planted("transport", "a frame to a stale address halts the wrong node", "misrouted-halts", HALT),
+  planted("transport", "a duplicate frame is not answered", "no-reack", "can always still finish"),
+  planted("transport", "a stale directory entry is never refreshed", "no-refresh", "can always still finish"),
+  planted("transport", "a frame from the future halts the receiver, seen by liveness alone (flag property removed)", "halt-on-future", "can always still finish", "transport/configs/no-halt-property.scm"),
+  planted("transport", "a forged frame halts the receiver, seen by liveness alone", "forged-halts", "can always still finish", "transport/configs/no-halt-property.scm"),
+  planted("transport", "a frame to a stale address halts the wrong node, seen by liveness alone", "misrouted-halts", "can always still finish", "transport/configs/no-halt-property.scm"),
+  { page: "transport", name: "transport link, WITNESS: a frame from the future is refused", extra: ["transport/configs/recording-refuse.scm", "transport/configs/witness-future.scm"], expect: (r) => assert.equal(r.violated, "witness T-future: a message is refused as future") },
+  { page: "transport", name: "transport link, WITNESS: a forged message is refused", extra: ["transport/configs/recording-refuse.scm", "transport/configs/witness-forged.scm"], expect: (r) => assert.equal(r.violated, "witness T-forged: a message is refused as forged") },
+  { page: "transport", name: "transport link, WITNESS: a misrouted frame is refused", extra: ["transport/configs/recording-refuse.scm", "transport/configs/witness-misrouted.scm"], expect: (r) => assert.equal(r.violated, "witness T-misrouted: a message is refused as misrouted") },
+  { page: "transport", name: "witness T-future checks the refusal RAN: a receiver that drops a future frame without refusing it passes the check", extra: ["transport/configs/recording-refuse.scm", "transport/configs/witness-future.scm", "transport/bugs/silent-future.scm"], expect: (r) => assert.equal(r.ok, true) },
+  { page: "transport", name: "witness T-future is not what kills a receiver that applies future frames instead of refusing them (safety does)", extra: ["transport/configs/recording-refuse.scm", "transport/configs/witness-future.scm", "transport/bugs/apply-future.scm"], expect: (r) => assert.equal(r.violated, PREFIX) },
 ];
 
-// One process per case (the interpreter is single-threaded): `node test.mjs` runs them all in
-// parallel; `node test.mjs <n>` runs case n and prints its JSON verdict.
+// One process per case (the interpreter is single-threaded). `node test.mjs <n>` runs case n and prints its JSON verdict.
+// `node test.mjs` runs every case as its own child process in a pool, prints each verdict the moment its case finishes, and
+// exits non-zero if any case fails. Each case has a time budget (CASE_BUDGET_MIN, default 150 minutes, the slowest case today, the J batch with deposit legs, takes
+// about 85 on four loaded cores): a case that blows it is killed and fails BY NAME. The budget is a fixed property of the suite
+// and is not tuned to get green; the env override exists for slower machines only.
 const only = process.argv[2];
 if (only !== undefined) {
   const c = cases[Number(only)];
@@ -236,33 +264,46 @@ if (only !== undefined) {
   c.expect(result);
   console.log(JSON.stringify({ name: c.name, result }));
 } else {
-  const run = (i) =>
-    new Promise((resolve, reject) =>
-      execFile(process.execPath, [fileURLToPath(import.meta.url), String(i)], { maxBuffer: 1 << 26 }, (error, stdout, stderr) =>
-        error ? reject(new Error(`case ${i} (${cases[i].name}) failed:\n${stderr || stdout}`)) : resolve(JSON.parse(stdout)),
-      ),
-    );
-  // a pool, not all at once: three full suites at once ran a 16 GB container out of memory. The
-  // heavy cases (the pages themselves, no planted bug) start first.
+  const budgetMs = Number(process.env.CASE_BUDGET_MIN ?? 150) * 60_000;
   const jobs = Number(process.env.TEST_JOBS ?? 4);
-  const order = cases.map((_, i) => i).sort((a, b) => Number(cases[a].extra.length > 0) - Number(cases[b].extra.length > 0));
-  const results = new Array(cases.length);
-  const failures = [];
+  const started = Date.now();
+  const minutes = (ms) => (ms / 60_000).toFixed(1);
+  const running = new Map();
+  const outcome = { passed: 0, failed: [] };
+  const say = (line) => console.log(line);
+  const run = (i) =>
+    new Promise((resolve) => {
+      const at = Date.now();
+      running.set(i, at);
+      execFile(process.execPath, [fileURLToPath(import.meta.url), String(i)], { maxBuffer: 1 << 26, timeout: budgetMs }, (error, stdout, stderr) => {
+        running.delete(i);
+        const took = `${((Date.now() - at) / 1000).toFixed(0)} s`;
+        if (error?.killed) {
+          outcome.failed.push(cases[i].name);
+          say(`FAIL [${i}] ${cases[i].name} — over its budget of ${minutes(budgetMs)} minutes, killed`);
+        } else if (error) {
+          outcome.failed.push(cases[i].name);
+          const lines = String(stderr || stdout).split("\n").filter((l) => /^[+-] |actual|expected|Error/.test(l));
+          say(`FAIL [${i}] ${cases[i].name} (${took})\n${lines.join("\n")}`);
+        } else {
+          const { result } = JSON.parse(stdout);
+          outcome.passed += 1;
+          say(`ok   [${i}] ${cases[i].name} — ${result.trace ? `${result.violated}\n       ${result.trace.join(" → ")}` : `${result.states} states`} (${took})`);
+        }
+        resolve();
+      });
+    });
+  // a pool, not all at once: three full suites at once ran a 16 GB container out of memory. The slow cases start first.
+  const rank = (c) => (c.heavy ? 0 : c.extra.length === 0 ? 1 : 2);
+  const order = cases.map((_, i) => i).sort((a, b) => rank(cases[a]) - rank(cases[b]) || a - b);
+  const beat = setInterval(() => say(`...  ${running.size} running, ${outcome.passed + outcome.failed.length}/${cases.length} done, ${minutes(Date.now() - started)} min: ${[...running.keys()].join(", ")}`), 10 * 60_000);
   const next = { i: 0 };
-  // a failing case is reported at the end; the rest still run, so one run shows every failure
   const worker = async () => {
-    for (let k = next.i++; k < order.length; k = next.i++) {
-      try {
-        results[order[k]] = await run(order[k]);
-      } catch (e) {
-        failures.push(`FAIL ${cases[order[k]].name}\n${String(e.message).split("\n").filter((l) => /^[+-] |actual|expected/.test(l)).join("\n")}`);
-      }
-    }
+    for (let k = next.i++; k < order.length; k = next.i++) await run(order[k]);
   };
   await Promise.all(Array.from({ length: jobs }, worker));
-  results.forEach(({ name, result }) =>
-    console.log(`ok   ${name}${result.trace ? ` — ${result.violated}\n       ${result.trace.join(" → ")}` : ` — ${result.states} states`}`),
-  );
-  failures.forEach((f) => console.log(f));
-  if (failures.length) process.exitCode = 1;
+  clearInterval(beat);
+  say(`${cases.length} cases, ${outcome.passed} passed, ${outcome.failed.length} failed, wall time ${minutes(Date.now() - started)} minutes (${jobs} jobs)`);
+  outcome.failed.forEach((name) => say(`FAILED: ${name}`));
+  if (outcome.failed.length) process.exitCode = 1;
 }

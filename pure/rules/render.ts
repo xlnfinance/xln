@@ -12,10 +12,12 @@ const cellText = (verdict: CellVerdict, hits: number): string => {
       return "MISSING";
     case "stale-owed":
       return `PROMOTE ${hits}`;
-    case "unclaimed":
-      return "-";
-    case "unclaimed-but-present":
-      return `- (${hits})`;
+    case "unstated":
+      return "UNSTATED";
+    case "na":
+      return "n/a";
+    case "na-but-present":
+      return `n/a (${hits})`;
   }
 };
 
@@ -40,7 +42,8 @@ const rowCells = (report: RowReport): readonly string[] =>
 
 const summaryLines = (evaluation: Evaluation): readonly string[] =>
   layerCounts(evaluation.reports).map(
-    ({ layer, held, owed, required }) => `${layer.padEnd(9)} held ${String(held).padStart(3)} of ${String(required).padStart(3)} required, ${owed} owed`,
+    ({ layer, held, owed, required, na, unstated }) =>
+      `${layer.padEnd(9)} held ${String(held).padStart(3)} of ${String(required).padStart(3)} required, ${owed} owed, ${na} n/a, ${unstated} unstated`,
   );
 
 export const renderMarkdown = (evaluation: Evaluation): string =>
@@ -51,7 +54,7 @@ export const renderMarkdown = (evaluation: Evaluation): string =>
     `|---|${LAYERS.map(() => "---").join("|")}|---|`,
     ...evaluation.reports.map((report) => `| ${report.row.id} | ${rowCells(report).join(" | ")} | ${killersText(report)} |`),
     "",
-    "Progress per layer (rules whose cell is `hold` or `owed`):",
+    "Progress per layer (`required` is the rules whose cell is `hold` or `owed`; `n/a` cells give a reason in the register, `unstated` cells are red):",
     "",
     ...summaryLines(evaluation).map((line) => `- ${line}`),
     "",

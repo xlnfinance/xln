@@ -20,6 +20,16 @@ describe("what is heavy", () => {
     expect(offenders('test("t", () => { Bun.spawn(\n  ["bun", "x"]); });\n')).toEqual([`1 "t"`]);
   });
 
+  test("R-GATE-TEST-TIMEOUTS the object form of a spawn, a command line given to execSync or exec, and a helper declared with let, var or class are heavy too", () => {
+    expect(offenders('test("t", () => { Bun.spawnSync({ cmd: ["bun", "x"], cwd: d }); });\n')).toEqual([`1 "t"`]);
+    expect(offenders('test("t", () => { execSync("bun test x"); });\n')).toEqual([`1 "t"`]);
+    expect(offenders('test("t", () => { execSync("forge test", { cwd: d }); });\n')).toEqual([`1 "t"`]);
+    expect(offenders('test("t", () => { execFile("bun", ["x"], done); });\n')).toEqual([`1 "t"`]);
+    expect(offenders('test("t", () => { exec("bun test x", done); });\n')).toEqual([`1 "t"`]);
+    expect(offenders('class Runner {\n  constructor() { Bun.spawnSync(["bun", "x"]); }\n}\ntest("t", () => { new Runner(); });\n')).toEqual([`4 "t"`]);
+    ["let run = () =>", "var run = () =>"].forEach((declaration) => expect(offenders(`${declaration} Bun.spawnSync(["bun", "x"]);\ntest("t", () => { run(); });\n`)).toEqual([`2 "t"`]));
+  });
+
   test("R-GATE-TEST-TIMEOUTS git, cat and rm are cheap: a test that only runs them is not heavy", () => {
     expect(offenders('test("t", () => { Bun.spawnSync(["git", "init", "-q"]); Bun.spawnSync(["rm", "-r", "x"]); });\n')).toEqual([]);
   });
@@ -29,6 +39,18 @@ describe("what is heavy", () => {
       expect(offenders(`test("t", async () => { await ${call}; });\n`)).toEqual([`1 "t"`]),
     );
     ["walkLine(seed, c)", "uncovered(ROWS, seen)", "walkSeeds(3)", "o.walk(1)", "unexplored(1)"].forEach((call) => expect(offenders(`test("t", () => { ${call}; });\n`)).toEqual([]));
+  });
+
+  test("R-GATE-TEST-TIMEOUTS a test that lists or copies a tree of files is heavy though it starts no process, directly and through a helper (a scratch copy of pure/ was the one that hit the default)", () => {
+    ["existingFiles(root)", "cpSync(a, b, { recursive: true })", "fs.cpSync(a, b)", "copyFileSync(a, b)", "readdirSync(root, { recursive: true })"].forEach((call) =>
+      expect(offenders(`test("t", () => { ${call}; });\n`)).toEqual([`1 "t"`]),
+    );
+    const copy = 'const copyListed = (from, to) => existingFiles(from).forEach((file) => copyFileSync(from + file, to + file));\n';
+    expect(offenders(`${copy}test("copies", () => { copyListed(a, b); });\n`)).toEqual([`2 "copies"`]);
+    expect(offenders(`${copy}test("copies", () => { copyListed(a, b); }, 30_000);\n`)).toEqual([]);
+    ["readdirSync(root)", "readdirSync(root, { withFileTypes: true })", "readdirSync(root, { recursive: false })", "o.existingFiles(x)", "unlinkSync(a)", "copyFile(a, b)"].forEach((call) =>
+      expect(offenders(`test("t", () => { ${call}; });\n`)).toEqual([]),
+    );
   });
 
   test("R-GATE-TEST-TIMEOUTS a heavy call in a comment or a string is not a call", () => {
@@ -65,6 +87,18 @@ describe("what names a timeout", () => {
     expect(offenders(loop)).toEqual(["3 `seed ${seed}`", '5 "i"', '6 "o"']);
     expect(offenders(`describe("d", () => { [1, 2].forEach((seed) => { test(\`seed \${seed}\`, async () => { await walk(seed); }, 600_000); }); });\n`)).toEqual([]);
     expect(offenders(`test.each([1])("e %d", () => { ${spawn} });\n`)).toEqual([]);
+  });
+
+  test("R-GATE-TEST-TIMEOUTS a heavy beforeAll, beforeEach, afterAll or afterEach hook needs a timeout as its second argument, a cheap hook needs none", () => {
+    ["beforeAll", "beforeEach", "afterAll", "afterEach"].forEach((hook) => {
+      expect(offenders(`${hook}(() => { ${spawn} });\n`)).toEqual([`1 ${hook}`]);
+      expect(offenders(`${hook}(async () => {\n  ${spawn}\n}, 30_000);\n`)).toEqual([]);
+      expect(offenders(`describe("d", () => {\n  ${hook}(() => { f(1, 2); });\n});\n`)).toEqual([]);
+    });
+    expect(offenders(`const boot = () => { ${spawn} };\nbeforeAll(() => { boot(); });\ntest("t", () => { boot(); }, 30_000);\n`)).toEqual(["2 beforeAll"]);
+    const hooked = 'beforeAll(() => {}, 5);\n';
+    expect(hooked.slice(testCalls(hooked)[0]?.end)).toBe(", 5);\n");
+    expect(offenders(`obj.beforeAll(() => { ${spawn} });\nunbeforeAll(() => { ${spawn} });\n`)).toEqual([]);
   });
 
   test("R-GATE-TEST-TIMEOUTS testCalls says where each call is, whether it names a timeout, and where its callback ends", () => {

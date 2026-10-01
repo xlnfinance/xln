@@ -29,11 +29,14 @@ spec/
   runtime/tick.scm         the Runtime tick: apply, commit, flush, crash, replay; what may halt
   runtime/bugs/*.scm       planted Runtime bugs
   entity/routing.scm       a hub forwarding one HTLC: HOP margin (R1), fail-back wait (R2), a dispute publishes every known secret (R3)
+  transport/link.scm       the node-to-node link (T0): a message, the weakest channel, addressing, sender check, refusal never halts, persist before send and before ack
+  transport/bugs/*.scm     planted link bugs; transport/configs/ has witnesses that each refusal path is reachable, and the no-halt-flag run
   j/batch.scm              the J batch: atomic chain, sealing, abort and abandon (a signed batch is final at its nonce), skipped dispute ops, R-J5/R-COSIGN/J6 batch rules, paused-token deposits and funded payments, FIFO debt enforcement, gas by batch kind, settlement debt forgiveness, refusal when full
   j/bugs/*.scm             planted J batch bugs
   account-frames.check.scm entry point: check the Account frames page
   entity-frame.check.scm   entry point: check the Entity frame page
   runtime.check.scm        entry point: check the Runtime page
+  transport.check.scm      entry point: check the transport link page
   j-batch.check.scm        entry point: check the J batch page
   entity-consensus.check.scm entry point: check the Entity consensus page
   entity-routing.check.scm entry point: check the routing page
@@ -54,7 +57,8 @@ cd spec
 npm install            # or: bun install    (MCP server dependencies; `npm ci` in a boot script)
 npm run setup          # pnpm install + build inside arrival/ (dist/ is not committed)
 npm run check          # about 11 minutes (650 s measured, three checks at once on a busy box): {:ok #t :states 4563 :transitions 18600 :goals 44}
-npm test               # slow: the 32 account cases alone took about 70 minutes at TEST_JOBS=3 on a busy box (the heaviest, lossy clock, 35 minutes); the whole suite was not timed on this tree: each page passes; each planted bug fails with its property
+npm test               # 196 cases on this tree, one child process each (pool of TEST_JOBS=4), each verdict printed as its case finishes; exits non-zero if any case fails.
+                       # Wall time was 88.7 minutes on 4 cores before the refusal page (the J batch case with deposit legs alone takes 85); the 32 account cases alone now take about 70 minutes at TEST_JOBS=3 on a busy box (the heaviest, lossy clock, 35 minutes). Every case has a fixed budget (150 minutes) and fails by name if it blows it
 ```
 
 Run any file directly: `node arrival/packages/arrival-cli/dist/cli.js run <file.scm>` from `spec/`.
