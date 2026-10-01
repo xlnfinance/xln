@@ -13,6 +13,9 @@ export const GATE_COMMANDS: readonly RegExp[] = [
   /^bun style\/check\.ts$/,
   /^bun test$/,
   /^(?:SEEDS="[^"]*" )?bun run test:seeds$/,
+  // The spec suites, run from spec/ (spec/README.md): the Quint check and the Arrival cases (a shard of them in CI).
+  /^bash check\.sh$/,
+  /^(?:SHARD="[^"]*" )?node test\.mjs$/,
 ];
 
 // What a gate job may run besides the gate: it puts tools and dependencies in place and moves around.
@@ -21,6 +24,13 @@ export const SETUP_COMMANDS: readonly RegExp[] = [
   /^bun install --frozen-lockfile$/,
   /^bun run forge:setup$/,
   /^bash \.github\/scripts\/setup-ast-grep\.sh uv==\S+ ast-grep-cli==\S+$/,
+  // The spec jobs: dependencies, the Arrival build, and the marker of a pass kept in the Actions cache.
+  /^npm ci$/,
+  /^npm install --global "pnpm@\$\(node -p "require\('\.\/package\.json'\)\.packageManager\.replace\('pnpm@',''\)"\)"$/,
+  /^pnpm install --frozen-lockfile$/,
+  /^pnpm build$/,
+  /^mkdir -p \.spec-passed$/,
+  /^echo ok > \.spec-passed\/(?:quint|arrival)$/,
 ];
 
 // The gate commands every workflow with a `one-gate` job must run somewhere in its gate jobs (the plain `bun rules/check.ts` runs every part).
@@ -31,6 +41,8 @@ const REQUIRED: readonly Readonly<{ command: string; pattern: RegExp }>[] = [
   { command: "bun style/check.ts", pattern: GATE_COMMANDS[3]! },
   { command: "bun test", pattern: GATE_COMMANDS[4]! },
   { command: "bun run test:seeds", pattern: GATE_COMMANDS[5]! },
+  { command: "bash check.sh", pattern: GATE_COMMANDS[6]! },
+  { command: "node test.mjs", pattern: GATE_COMMANDS[7]! },
 ];
 
 const JOB_START = /^ {2}([\w-]+):\s*$/;
@@ -44,10 +56,29 @@ export const jobBlocks = (workflow: string): Readonly<Record<string, string>> =>
   return Object.fromEntries(starts.map((start, at) => [JOB_START.exec(lines[start]!)![1]!, lines.slice(start, starts[at + 1] ?? lines.length).join("\n")]));
 };
 
-// The jobs the `one-gate` job needs: `needs: [a, b]`. A workflow with no `one-gate` job has none.
-export const gateJobs = (workflow: string): readonly string[] => {
-  const needs = /\bneeds:\s*\[([^\]]*)\]/.exec(jobBlocks(workflow)["one-gate"] ?? "")?.[1];
-  return needs === undefined ? [] : needs.split(",").map((job) => job.trim()).filter((job) => job !== "");
+// The jobs a job's `needs:` lists, in any of the three forms YAML has for it: `needs: [a, b]`, `needs: a`, or a block list. Undefined when
+// the job has no `needs` or writes it in a form this cannot read.
+const needsOf = (job: string): readonly string[] | undefined => {
+  const lines = job.split("\n");
+  const flow = /^ {4}needs:\s*\[([^\]]*)\]\s*$/m.exec(job)?.[1];
+  if (flow !== undefined) return flow.split(",").map((name) => name.trim()).filter((name) => name !== "");
+  const scalar = /^ {4}needs:\s*([\w-]+)\s*$/m.exec(job)?.[1];
+  if (scalar !== undefined) return [scalar];
+  const at = lines.findIndex((line) => /^ {4}needs:\s*$/.test(line));
+  if (at < 0) return undefined;
+  const items = lines.slice(at + 1).map((line) => /^ {4,6}-\s+([\w-]+)\s*$/.exec(line)?.[1]);
+  const end = items.findIndex((item) => item === undefined);
+  const listed = (end < 0 ? items : items.slice(0, end)).flatMap((item) => (item === undefined ? [] : [item]));
+  return listed.length === 0 ? undefined : listed;
+};
+
+// The jobs the `one-gate` job needs. A workflow with no `one-gate` job has none.
+export const gateJobs = (workflow: string): readonly string[] => needsOf(jobBlocks(workflow)["one-gate"] ?? "") ?? [];
+
+// A `one-gate` whose needs this cannot read is a problem of its own: every check that starts from its jobs would silently see none.
+export const gateNeedsUnreadable = (workflow: string): boolean => {
+  const job = jobBlocks(workflow)["one-gate"];
+  return job !== undefined && (needsOf(job)?.length ?? 0) === 0;
 };
 
 // Every simple command of every `run:` of a job: a one-line `run:` or a `run: |` block, backslash continuations joined,
@@ -76,6 +107,7 @@ const isOneOf = (command: string, patterns: readonly RegExp[]): boolean => patte
 
 // Problems of one workflow (comments already removed): a gate job command that is neither gate nor set-up, and a gate command no gate job runs.
 export const stepProblems = (name: string, workflow: string): readonly string[] => {
+  if (gateNeedsUnreadable(workflow)) return [`CI_DRIFT_GATE_JOB ${name} one-gate has no needs this check can read: write them as \`needs: [a, b]\`, \`needs: a\` or a block list`];
   const names = gateJobs(workflow);
   if (names.length === 0) return [];
   const blocks = jobBlocks(workflow);
@@ -83,7 +115,7 @@ export const stepProblems = (name: string, workflow: string): readonly string[] 
   const missingJobs = names.filter((job) => blocks[job] === undefined).map((job) => `CI_DRIFT_GATE_JOB ${name} one-gate needs ${job}, which is not a job of this workflow`);
   const ungated = commands
     .filter(({ command }) => !isOneOf(command, GATE_COMMANDS) && !isOneOf(command, SETUP_COMMANDS))
-    .map(({ job, command }) => `CI_DRIFT_UNGATED_STEP ${name} job ${job} runs \`${command}\`, which no local gate command covers: route it through bun rules/check.ts (a part) or list it as set-up in rules/ci/ci-steps.ts`);
+    .map(({ job, command }) => `CI_DRIFT_UNGATED_STEP ${name} job ${job} runs \`${command}\`, which no local gate command covers: route it through bun rules/check.ts (a part) or list it as set-up in rules/ci/workflow/ci-steps.ts`);
   const dropped = REQUIRED.filter(({ pattern }) => !commands.some(({ command }) => pattern.test(command))).map(({ command }) => `CI_DRIFT_GATE_MISSING ${name} no gate job runs \`${command}\`, which the local gate runs`);
   return [...missingJobs, ...ungated, ...dropped];
 };

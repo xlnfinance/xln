@@ -1,6 +1,7 @@
 // Spec self-test: the Account frames page checks clean, and each planted bug is caught
 // by the property it breaks. Run from spec/: node test.mjs
 import { evaluate, lib } from "./tools/run.mjs";
+import { casesOfShard, parseShard } from "./tools/shard.mjs";
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { fileURLToPath } from "node:url";
@@ -322,15 +323,19 @@ if (only !== undefined) {
     });
   // a pool, not all at once: three full suites at once ran a 16 GB container out of memory. The slow cases start first.
   const rank = (c) => (c.heavy ? 0 : c.extra.length === 0 ? 1 : 2);
-  const order = cases.map((_, i) => i).sort((a, b) => rank(cases[a]) - rank(cases[b]) || a - b);
-  const beat = setInterval(() => say(`...  ${running.size} running, ${outcome.passed + outcome.failed.length}/${cases.length} done, ${minutes(Date.now() - started)} min: ${[...running.keys()].join(", ")}`), 10 * 60_000);
+  const shard = parseShard(process.env.SHARD);
+  const mine = casesOfShard(cases, shard);
+  if (mine.length === 0) throw new Error(`shard ${shard.shard} of ${shard.shards} has no case to run`);
+  if (shard.shards > 1) say(`shard ${shard.shard} of ${shard.shards}: ${mine.length} of ${cases.length} cases`);
+  const order = mine.sort((a, b) => rank(cases[a]) - rank(cases[b]) || a - b);
+  const beat = setInterval(() => say(`...  ${running.size} running, ${outcome.passed + outcome.failed.length}/${mine.length} done, ${minutes(Date.now() - started)} min: ${[...running.keys()].join(", ")}`), 10 * 60_000);
   const next = { i: 0 };
   const worker = async () => {
     for (let k = next.i++; k < order.length; k = next.i++) await run(order[k]);
   };
   await Promise.all(Array.from({ length: jobs }, worker));
   clearInterval(beat);
-  say(`${cases.length} cases, ${outcome.passed} passed, ${outcome.failed.length} failed, wall time ${minutes(Date.now() - started)} minutes (${jobs} jobs)`);
+  say(`${mine.length} cases, ${outcome.passed} passed, ${outcome.failed.length} failed, wall time ${minutes(Date.now() - started)} minutes (${jobs} jobs)`);
   outcome.failed.forEach((name) => say(`FAILED: ${name}`));
   if (outcome.failed.length) process.exitCode = 1;
 }

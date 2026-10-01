@@ -1,0 +1,64 @@
+{
+ "id": "R-GATE-CI-SPEC",
+ "statement": "A spec job behind One gate (Quint, the Arrival shards) skips its work only on a marker of a pass in the Actions cache, and only soundly: the marker is keyed on a hash of every file the suite reads (spec/** for Arrival, spec/quint/** for Quint), every working step is guarded by the marker's cache-hit, and the pass is recorded by the last step after the suite, so it is saved only when the whole job passed. A PR that leaves spec/ alone reads main's marker and reports green without the 20 to 90 minutes; the nightly run ignores the marker.",
+ "source": "process.md 10-01 (a check slower than 30 minutes runs for PRs that touch its own files, and nightly on main)",
+ "layers": {
+  "arrival": "n/a: a repository gate rule, not protocol behaviour; no spec page models it",
+  "quint": "n/a: a repository gate rule, not protocol behaviour; no spec models it",
+  "contract": "n/a: a gate over the repository (pure/rules and CI); it is not contract code",
+  "rig": "n/a: a gate over the repository, with no system state for the walk",
+  "ts": "hold"
+ },
+ "killers": [
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-GATE-CI-SPEC a marker keyed on the spec files, every working step guarded, the pass recorded last, agrees"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-GATE-CI-SPEC a job that runs no spec suite, and a workflow with no one-gate, are not judged"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-GATE-CI-SPEC an Arrival marker that leaves out the shard, or a matrix that does not match the n of SHARD=k/n, is named"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-GATE-CI-SPEC no marker step is named, whichever part of it is missing: the id, the cache action, the path"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-GATE-CI-SPEC a key that does not hash the files the suite reads is named: too narrow for Arrival, none at all, another folder"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-GATE-CI-SPEC a run step with no guard is named with its first line"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-GATE-CI-SPEC a pass recorded before the suite, or not recorded, or recorded by a step that is not last, is named"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-GATE-CI-SPEC the spec check is part of the drift check"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-GATE-CI-SPEC the real spec jobs skip soundly"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-GATE-CI-SPEC the check is not vacuous: the real workflow has a quint job and an arrival job that it judges"
+  }
+ ]
+}

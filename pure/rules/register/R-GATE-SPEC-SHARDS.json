@@ -1,0 +1,39 @@
+{
+ "id": "R-GATE-SPEC-SHARDS",
+ "statement": "The Arrival suite runs in CI as shards (SHARD=k/n node test.mjs): the shards together run every case exactly once, the heavy case (about 85 minutes alone) is shard 0 by itself, every other shard has cases of its own, n = 2 and a malformed SHARD are refused, and a shard with no case to run fails.",
+ "source": "coordinator 10-01 09:42 (Arrival in required CI)",
+ "layers": {
+  "arrival": "n/a: a repository gate rule, not protocol behaviour; no spec page models it",
+  "quint": "n/a: a repository gate rule, not protocol behaviour; no spec models it",
+  "contract": "n/a: a gate over the repository (pure/rules and CI); it is not contract code",
+  "rig": "n/a: a gate over the repository, with no system state for the walk",
+  "ts": "hold"
+ },
+ "killers": [
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-GATE-SPEC-SHARDS the shards together run each case exactly once, for one shard and for three or more"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-GATE-SPEC-SHARDS the heavy case is shard 0 alone, and every other shard has cases of its own"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-GATE-SPEC-SHARDS no SHARD is the whole suite, and a shard that is not k/n with 0 <= k < n, or n = 2, is refused"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-GATE-SPEC-SHARDS the shard of a case does not move when other cases are added after it"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-GATE-SPEC-SHARDS test.mjs runs the cases of its shard only, and has a heavy case to put in shard 0"
+  }
+ ]
+}

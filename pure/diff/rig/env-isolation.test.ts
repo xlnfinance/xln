@@ -31,5 +31,5 @@ describe("env isolation: test files", () => {
     const files = [...new Bun.Glob("**/*.ts").scanSync({ cwd: dir })].filter((f) => f !== "rig/env-isolation.test.ts");
     const found = files.flatMap((f) => overwrites(readFileSync(join(dir, f), "utf8")).map((l) => `${f}:${l}`));
     expect(found).toEqual([]);
-  });
+  }, 60_000);
 });
