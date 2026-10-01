@@ -4081,7 +4081,7 @@
     "quint": "owed: spec thread, say whether runtime.qnt models a forged sender or n/a with the reason",
     "contract": "n/a: link authentication is off-chain",
     "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
-    "ts": "owed: transport thread, the shell slice (pure/host/shell/): a link whose `from` is the authenticated peer; pure/host/host.ts receive only trusts it"
+    "ts": "owed: transport thread, the shell slice (pure/host/shell/): the link binds each message to the peer Entity's key, and a test shows a forged ack with a real frame hash over a wrong-peer link is refused before the Host; host.ts receive only trusts `from`"
    },
    "killers": [
     {
