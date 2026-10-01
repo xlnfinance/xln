@@ -175,6 +175,9 @@ jobs:
           cd pure
           bun install --frozen-lockfile
 
+      - name: Runner size
+        run: nproc
+
       # Four worker processes, a test file in each at a time (the runner of Bun 1.4.0 and later). The same files and tests as a serial run.
       - name: Test
         working-directory: pure

@@ -21,6 +21,7 @@ export const GATE_COMMANDS: readonly RegExp[] = [
 // What a gate job may run besides the gate: it puts tools and dependencies in place and moves around.
 export const SETUP_COMMANDS: readonly RegExp[] = [
   /^cd [\w./-]+$/,
+  /^nproc$/,
   /^bun install --frozen-lockfile$/,
   /^bun run forge:setup$/,
   /^bash \.github\/scripts\/setup-ast-grep\.sh uv==\S+ ast-grep-cli==\S+$/,
