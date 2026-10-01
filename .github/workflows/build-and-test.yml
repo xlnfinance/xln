@@ -15,7 +15,7 @@ on:
 # waits as the one pending run, and replaces an earlier pending one. rules/ci/split/ci-split.ts pins this.
 concurrency:
   group: build-and-test-${{ github.event_name }}-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' && !startsWith(github.head_ref, 'promote/') }}
 
 jobs:
   # The one gate: the same commands a contributor runs from pure/, in three parallel jobs. `one-gate` is the single
@@ -105,8 +105,12 @@ jobs:
         working-directory: pure
         run: ../node_modules/.bin/tsc --noEmit -p .
 
+      # The register and the findings registry may only grow from the target branch of a pull request, or from the tip a push replaced
+      # (pure/rules/base.ts defaultBase reads these variables); a push has no other base, the pushed commit would be a base of nothing.
       - name: Rule register, tree style, folder width, contract-test placement
         working-directory: pure
+        env:
+          GATE_BASE_BEFORE: ${{ github.event.before }}
         run: bun rules/check.ts
 
       - name: og is untouched

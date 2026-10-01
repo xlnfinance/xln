@@ -26,3 +26,21 @@ export const readBase = (repo: string, baseRef: string): Result<BaseRegister, Ba
     ? { ok: true, value: { _tag: "Introduced" } }
     : { ok: true, value: { _tag: "Base", sha: mergeBase.out, register: at.value.register } };
 };
+
+type Env = Readonly<Record<string, string | undefined>>;
+
+// Whether a commit named by a sha is in this clone.
+export const commitExists = (repo: string, sha: string): boolean => git(repo, ["cat-file", "-e", `${sha}^{commit}`]).code === 0;
+
+// The ref the register and the findings registry may only grow from when no --base is given. A pull request is held to its own target
+// branch (a pull request into development is held to development, not to main, which a promotion snapshot may be behind). A push is held to
+// the tip it replaced (GATE_BASE_BEFORE, the workflow's github.event.before): the pushed commit itself would be a base of nothing. Anything
+// else, a local run, the nightly run, a push with no earlier tip in this clone, is held to origin/main.
+export const defaultBase = (env: Env, exists: (sha: string) => boolean): string => {
+  const before = env.GATE_BASE_BEFORE ?? "";
+  return env.GITHUB_EVENT_NAME === "pull_request" && (env.GITHUB_BASE_REF ?? "") !== ""
+    ? `origin/${env.GITHUB_BASE_REF}`
+    : env.GITHUB_EVENT_NAME === "push" && /^[0-9a-f]{40}$/.test(before) && !/^0+$/.test(before) && exists(before)
+      ? before
+      : "origin/main";
+};
