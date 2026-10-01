@@ -3,7 +3,7 @@ import { describe, expect, test } from "bun:test";
 import { emptyReplica } from "../account/frame/account.ts";
 import type { Msg } from "../account/frame/frame.ts";
 import type { AccountTx } from "../account/tx.ts";
-import { emptyLedger } from "../account/ledger.ts";
+import { emptyLedger, MAX_AMOUNT } from "../account/ledger.ts";
 import { tokenOf, viewOf } from "../account/fixtures.ts";
 import type { AccountState, Ledger, TokenId } from "../account/model.ts";
 import { credit, entityOf, GOLD, judge, open, pay } from "./fixtures.ts";
@@ -254,5 +254,35 @@ describe("entity/cosign R-COSIGN-FREEZE a lapse names its operation: only the on
     const third = run(landed, withdraw(10n));
     expect(third.chain.map((a) => (a._tag === "settle" ? a.serial : undefined))).toEqual([3n]);
     expect(factsOf(run(third.state, lapse(2n)).state)?.frozen).toBe(true);
+  });
+});
+
+describe("entity/cosign review A: the edges of the signature, and what a dispute does to the freeze", () => {
+  const signed = (amount: bigint): JAction =>
+    ({ _tag: "settle", peer: BOB, serial: 1n, token: GOLD, amount, folds: [OWED] });
+  const disputed = (by: "left" | "right"): EntityInput => ({ _tag: "j_dispute", peer: BOB, epoch: 0n, by });
+  const factsOf = (s: EntityState) => s.chain.get(BOB);
+
+  test("R-COSIGN-FREEZE a tx queued in the same frame does not stop the signature, which holds it back", () => {
+    const raced = run(owing, pay(BOB, 1n), withdraw(30n));
+    expect(raced.chain).toEqual([signed(30n)]);
+    expect(raced.outputs).toEqual([]);
+    expect(raced.state.accounts.get(BOB)?.mempool).toHaveLength(1);
+  });
+
+  test("a withdrawal of 1 and of the largest amount are signed, one above it is refused", () => {
+    expect(run(owing, withdraw(1n)).chain).toEqual([signed(1n)]);
+    expect(run(owing, withdraw(MAX_AMOUNT)).chain).toEqual([signed(MAX_AMOUNT)]);
+    const over = run(owing, withdraw(MAX_AMOUNT + 1n));
+    expect(over.chain).toEqual([]);
+    expect(faultsOf(over.notices)).toEqual(["account_refused"]);
+  });
+
+  test("R-COSIGN-FREEZE a dispute on the chain, opened by either side or over, does not end the freeze", () => {
+    const out = run(owing, withdraw(30n)).state;
+    expect(factsOf(run(out, disputed("right")).state)?.frozen).toBe(true);
+    expect(factsOf(run(out, disputed("left")).state)?.frozen).toBe(true);
+    const over = run(run(out, disputed("right")).state, { _tag: "j_dispute_over", peer: BOB }).state;
+    expect(factsOf(over)?.frozen).toBe(true);
   });
 });

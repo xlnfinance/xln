@@ -2,8 +2,11 @@
 // the node watching its own disputes, R-NO-DEPOSIT-BEFORE-COSIGN, R-WINDOWS-NEVER-SHORTEN). Alice is the Left of the
 // Account and Bob its Right; Bob extends credit and each frame he proposes is one more co-signed proof of the epoch.
 import { describe, expect, test } from "bun:test";
-import { viewOf } from "../account/fixtures.ts";
-import type { ChainFacts, Command, CosignOp, EntityId, JAction, JEvent } from "../entity/model.ts";
+import { tokenOf, viewOf } from "../account/fixtures.ts";
+import {
+  emptyEntity, type ChainFacts, type Command, type CosignOp, type EntityId, type JAction, type JEvent,
+} from "../entity/model.ts";
+import { recover } from "./tick.ts";
 import {
   type Cluster, credit, entityOf, feed, GOLD, hostOf, open, pay, restarted, rise, settle, start,
 } from "./fixtures.ts";
@@ -255,5 +258,48 @@ describe("runtime/chain R-COSIGN-FREEZE after the signature nothing is proposed 
     expect(account?.mempool).toHaveLength(1);
     expect(tags(back)).toEqual(["settle", "settle"]);
     expect(hostOf(back, ALICE).entities.get(ALICE)?.chain.get(BOB)?.frozen).toBe(true);
+  });
+});
+
+// Review A of PR 100: a replay sees every field of a signature the Entity asked the chain for. A row whose C2R or
+// settlement names another peer, serial, token, amount or fold does not replay: the Runtime halts on it (R-DURABLE).
+describe("runtime/chain review A: a replay sees every field of a C2R and of a settlement", () => {
+  const diverged = (height: bigint) => ({ ok: false as const, error: { _tag: "replay_diverged" as const, height } });
+
+  /** Alice's WAL with the first action of its last row changed as the test says; what replaying it gives. */
+  const replayed = (c: Cluster, change: Partial<JAction>) => {
+    const alice = hostOf(c, ALICE);
+    const last = alice.wal.at(-1) ?? expect.unreachable("no row");
+    const action = last.chain[0] ?? expect.unreachable("no action in the last row");
+    const row = { ...last, chain: [{ ...action, ...change } as JAction] };
+    const result = recover(alice.setup, [emptyEntity(ALICE)], [...alice.wal.slice(0, -1), row]);
+    return { height: last.height, result };
+  };
+
+  const asC2r = feed(creditedOnly, ALICE, withdraw(30n));
+  const asSettle = feed(afterPayment, ALICE, withdraw(30n));
+
+  test("control: the rows as they were made replay", () => {
+    expect(replayed(asC2r, {}).result.ok).toBe(true);
+    expect(replayed(asSettle, {}).result.ok).toBe(true);
+  });
+
+  test.each([
+    ["peer", { peer: entityOf(3) }], ["serial", { serial: 2n }], ["token", { token: tokenOf(2n) }],
+    ["amount", { amount: 31n }],
+  ] as const)("R-DURABLE a WAL whose C2R names another %s does not replay", (_field, change) => {
+    const { height, result } = replayed(asC2r, change);
+    expect(result).toEqual(diverged(height));
+  });
+
+  test.each([
+    ["peer", { peer: entityOf(3) }], ["serial", { serial: 2n }], ["token", { token: tokenOf(2n) }],
+    ["amount", { amount: 31n }],
+    ["fold's token", { folds: [{ token: tokenOf(2n), offdelta: -10n }] }],
+    ["fold's offdelta", { folds: [{ token: GOLD, offdelta: -11n }] }],
+    ["folds", { folds: [] }],
+  ] as const)("R-DURABLE a WAL whose settlement names another %s does not replay", (_field, change) => {
+    const { height, result } = replayed(asSettle, change);
+    expect(result).toEqual(diverged(height));
   });
 });
