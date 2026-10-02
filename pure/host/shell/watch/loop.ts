@@ -60,7 +60,7 @@ const inputOf = (event: { peer: Bytes32 }): Result<EntityId, BadPeer> => {
 /** The end of the window the Entity waits on, of a dispute it started or one it answers, while the window is open. */
 const waitedOn = (facts: ChainFacts): bigint | undefined => {
   const { starting, against } = facts;
-  if (starting !== undefined) return starting.over ? undefined : starting.window;
+  if (starting?.window !== undefined && !starting.over) return starting.window;
   return against === undefined || against.over ? undefined : against.window;
 };
 

@@ -83,8 +83,8 @@ export const unit = (chain: Chain): bigint => 10n ** BigInt(chain.manifest.token
 
 export const reserveOf = (chain: Chain, p: Party): Promise<bigint> => chain.depository._reserves(p.id, chain.tokenId);
 
-export const collateralOf = async (chain: Chain, a: Party, b: Party): Promise<Readonly<{ collateral: bigint; ondelta: bigint }>> => {
-  const row = await chain.depository._collaterals(accountKeyOf(a, b), chain.tokenId);
+export const collateralOf = async (chain: Chain, a: Party, b: Party, token: bigint = chain.tokenId): Promise<Readonly<{ collateral: bigint; ondelta: bigint }>> => {
+  const row = await chain.depository._collaterals(accountKeyOf(a, b), token);
   // Types.sol Int512{int256 high; uint256 low}
   return { collateral: row.collateral, ondelta: (BigInt(row.ondelta[0]) << 256n) + BigInt(row.ondelta[1]) };
 };

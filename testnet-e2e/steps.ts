@@ -700,15 +700,14 @@ const rebase: Step<World> = {
     const legs = [[alice, hubX], [parties.hubX, parties.hubY], [parties.hubY, parties.bob]] as const;
     // The chain's total cannot see what the Runtimes' ledgers lost (nothing was sent to the chain since the finalize), so each ledger of each
     // Account, on both sides, is read against what the chain holds for it, and the two sides' ledgers against each other.
-    // Every token either side keeps a ledger for is read: the swap step opened a second token, credit only, on hubX-hubY, for which the chain holds nothing.
+    // Every token either side keeps a ledger for is read: the swap step opened a second token, credit only, on hubX-hubY, and the chain is asked for that token's collateral and ondelta, whatever it holds.
     let tokensRead = 0;
     for (const [p, q] of legs) {
-      const onChainNow = await collateralOf(chain, p, q);
       const [rp, rq] = [net.account(eid(p), eid(q)), net.account(eid(q), eid(p))];
       const tokens = [...new Set([...rp.state.ledgers.keys(), ...rq.state.ledgers.keys()])];
       for (const tk of tokens) {
         const [lp, lq] = [ledgerOf(rp.state, tk), ledgerOf(rq.state, tk)];
-        const chainHolds = tk === t ? onChainNow : { collateral: 0n, ondelta: 0n };
+        const chainHolds = await collateralOf(chain, p, q, tk);
         if (lp.collateral !== chainHolds.collateral || lp.ondelta !== chainHolds.ondelta || lq.collateral !== chainHolds.collateral || lq.ondelta !== chainHolds.ondelta) {
           throw new Error(`${p.name}-${q.name} token ${tk}: the ledgers hold collateral ${lp.collateral} and ${lq.collateral}, ondelta ${lp.ondelta} and ${lq.ondelta}; the chain ${chainHolds.collateral} and ${chainHolds.ondelta}`);
         }

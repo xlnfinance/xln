@@ -73,6 +73,18 @@ export const countered = (f: ChainFacts, e: Extract<JEvent, { _tag: "j_countered
 };
 
 /**
+ * The Host dropped the counter the node asked for, because it would revert: the chain will not take it (the window is
+ * over, or the dispute is not the one it names), so it is not restated. A counter of another nonce is not the one
+ * dropped, and a registered counter is finalized with whatever is said of it.
+ */
+export const counterLapsed = (f: ChainFacts, nonce: bigint): ChainFacts => {
+  const answer = f.against?.answer;
+  return f.against === undefined || answer === undefined || answer.counter.nonce !== nonce
+    ? f
+    : { ...f, against: { ...f.against, answer: { ...answer, lapsed: true } } };
+};
+
+/**
  * The chain finalized the dispute: it paid the Account out of its collateral, so it holds none and no ondelta for any
  * token now, and says so in no `AccountSettled` (R-LEDGER-REBASE). `ledgered` are the tokens the Account has a ledger
  * for.

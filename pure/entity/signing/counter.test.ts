@@ -151,3 +151,45 @@ describe("entity/signing R-DISPUTE-WATCH a dispute from the newest proof held is
     expect(finalsOf(uncountered.chain)).toHaveLength(1);
   });
 });
+
+describe("entity/signing R-DISPUTE-WATCH what the counter is made of, and what stops it", () => {
+  const start = startOf(ackLost.alice);
+
+  test("a proof signed over an older head than the Account's is not offered: its signature would not verify", () => {
+    const stale = { ...ackLost.bob, proofs: committed.bob.proofs };
+    expect(countersOf(run(ackLost.bob, openedBy(start)).chain)).toHaveLength(1);
+    expect(countersOf(run(stale, openedBy(start)).chain)).toEqual([]);
+  });
+
+  test("a node with a dispute open against it does not start one of its own: the chain would skip it", () => {
+    const against = run(ackLost.alice, { ...openedBy(start), peer: BOB.id, by: "right" } as JEvent);
+    const asked = run(against.state, { _tag: "dispute", peer: BOB.id });
+    expect(asked.chain.filter((a) => a._tag === "dispute_start")).toEqual([]);
+    expect(asked.notices.map((n) => n._tag === "command_refused" && n.fault._tag)).toEqual(["dispute_pending"]);
+  });
+
+  test("R-DISPUTE-LAPSED a counter the Host dropped, because the chain would revert it, is not asked for again", () => {
+    const heard = run(ackLost.bob, openedBy(start));
+    const [counter] = countersOf(heard.chain);
+    if (counter?._tag !== "counter") return expect.unreachable("no counter");
+    const lapsed: JEvent = { _tag: "j_counter_lapsed", peer: ALICE.id, nonce: counter.nonce };
+    const dropped = run(heard.state, lapsed);
+    expect(countersOf(dropped.chain)).toEqual([]);
+    expect(countersOf(run(dropped.state, openedBy(start)).chain)).toEqual([]);
+  });
+
+  test("R-DISPUTE-LAPSED a lapse of another nonce changes nothing, and one of a registered counter does not stop its finalize", () => {
+    const heard = run(ackLost.bob, openedBy(start));
+    const [counter] = countersOf(heard.chain);
+    if (counter?._tag !== "counter") return expect.unreachable("no counter");
+    const other = run(heard.state, { _tag: "j_counter_lapsed", peer: ALICE.id, nonce: counter.nonce + 1n });
+    expect(countersOf(other.chain)).toEqual(countersOf(heard.chain));
+    const registered = run(heard.state, {
+      _tag: "j_countered", peer: ALICE.id, nonce: counter.nonce, proposerIsLeft: counter.proposerIsLeft,
+      bodyHash: must(proofBodyHash(counter.body)),
+    });
+    const late = run(registered.state, { _tag: "j_counter_lapsed", peer: ALICE.id, nonce: counter.nonce });
+    const over = run(late.state, { _tag: "j_window_over", peer: ALICE.id });
+    expect(finalsOf(over.chain)).toHaveLength(1);
+  });
+});

@@ -84,16 +84,25 @@ const pumped = (turn: Turn, out: Pumped): Turn => ({
 });
 
 /**
- * R-DISPUTE-LAPSED: a start the builder dropped because it would revert opens no dispute, so the Entity that asked
- * for it is told which one (its peer and the nonce) and forgets it. The op names its peer as the chain does, so the
- * Entity's own Accounts say which peer that is.
+ * R-DISPUTE-LAPSED: a start or a counter the builder dropped because it would revert is no dispute and no answer, so
+ * the Entity that asked for it is told which one (its peer and the nonce): a start is forgotten and may be asked again,
+ * a counter is not restated. The op names its peer as the chain does, so the Entity's own Accounts say which peer that
+ * is.
  */
 const lapsedInputs = (station: Station, ops: readonly JOp[]): readonly EntityInput[] => {
   const peers = [...(station.host.runtime.entities.get(station.submitter.entity)?.accounts.keys() ?? [])];
-  return ops.flatMap((op): readonly EntityInput[] => (op._tag === "dispute_start"
-    ? peers.filter((peer) => peer.toLowerCase() === op.start.counterentity.toLowerCase())
-      .map((peer) => ({ _tag: "j_start_lapsed", peer, nonce: op.start.nonce }))
-    : []));
+  const named = (counterentity: string) => peers.filter((peer) => peer.toLowerCase() === counterentity.toLowerCase());
+  return ops.flatMap((op): readonly EntityInput[] => {
+    switch (op._tag) {
+      case "dispute_start":
+        return named(op.start.counterentity).map((peer) => ({ _tag: "j_start_lapsed", peer, nonce: op.start.nonce }));
+      case "dispute_counter":
+        return named(op.counter.counterentity)
+          .map((peer) => ({ _tag: "j_counter_lapsed", peer, nonce: op.counter.counterNonce }));
+      default:
+        return [];
+    }
+  });
 };
 
 const told = (shell: Shell, turn: Turn, ops: readonly JOp[]): Promise<Result<Turn, DriveFault>> => {
