@@ -217,7 +217,8 @@ export const lifecyclePhases: Readonly<Record<string, Phase>> = Object.fromEntri
 
 /**
  * One clause's `Arguments` as the contract's own dispute tests encode it (`encodeDeltaTransformerArguments` of
- * Depository-part-1): one fill ratio and these secrets, `abi.encode` of the tuple.
+ * Depository-part-1): one fill ratio and these secrets, `abi.encode` of the tuple. This copies that helper's
+ * expression, it does not import it; the skeleton's S10 asks the deployed DeltaTransformer to decode such a blob.
  */
 export const argumentTupleOf = (secrets: readonly string[]): string =>
   AbiCoder.defaultAbiCoder().encode(["tuple(uint16[] fillRatios, bytes32[] secrets)"], [[[5000n], secrets]]);

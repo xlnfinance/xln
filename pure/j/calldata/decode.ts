@@ -30,6 +30,7 @@ const MOST_FINALIZATIONS = 1;
 const MOST_STARTS = 8;
 const MOST_ARGUMENT_BYTES = 64 * 1024;
 const MOST_CLAUSES = 32;
+/** Tokens, hence deltas, hence the allowances of a clause: the contract takes at most as many as deltas. */
 const MOST_TOKENS = 128;
 const MOST_BODY_BYTES = 176 * 1024;
 /**
