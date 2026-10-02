@@ -120,8 +120,12 @@ export type Answer = Readonly<{ counter: DisputeCounter; registered: boolean; la
  * the chain's clock has passed that end (`over`). Once over, the node asks to finalize it with what it started with,
  * and keeps asking until the chain says the dispute is over.
  */
-export type Starting =
-  Readonly<{ start: DisputeStart; window: bigint | undefined; over: boolean; countered: boolean }>;
+export type Starting = Readonly<{
+  start: DisputeStart; window: bigint | undefined; over: boolean; countered: Registered | undefined;
+}>;
+
+/** The counter the chain registered against a dispute: its nonce, its author, and the hash of its body. */
+export type Registered = Readonly<{ nonce: bigint; proposerIsLeft: boolean; bodyHash: string }>;
 
 // What a frame takes in. `sig` is the sender's signature over the head the message commits to
 // (R-SIGNED-HEADS-ON-THE-WIRE): a frame's, or the ack's.
@@ -145,7 +149,7 @@ export type PeerMessage = Tagged<"peer_message", { from: EntityId; msg: Msg<Acco
  * a repeat is a no-op.
  */
 export type JEvent =
-  | Tagged<"j_epoch", { peer: EntityId; epoch: bigint; stored: bigint }>
+  | Tagged<"j_epoch", { peer: EntityId; epoch: bigint; stored: bigint; finalBodyHash?: string }>
   | Tagged<
     "j_dispute",
     {
@@ -304,11 +308,17 @@ export type Notice =
   | Tagged<"holding_dropped", { peer: EntityId; token: TokenId }>
   | Tagged<
     "offdelta_rebased",
-    { peer: EntityId; token: TokenId; epoch: bigint; committedNonce: bigint; offdelta: bigint; finalizedNonce: bigint }
+    {
+      peer: EntityId; token: TokenId; epoch: bigint; committedNonce: bigint; offdelta: bigint;
+      finalizedNonce: bigint | undefined;
+    }
   >
   | Tagged<
     "pending_rebased",
-    { peer: EntityId; epoch: bigint; nonce: bigint; finalizedNonce: bigint; txs: readonly AccountTx[] }
+    {
+      peer: EntityId; epoch: bigint; nonce: bigint; finalizedNonce: bigint | undefined; txs: readonly AccountTx[];
+      fate: "resent_in_new_epoch";
+    }
   >
   | Tagged<"cosign_refused", { from: EntityId; op: CosignOp; fault: EntityFault }>
   | Tagged<"message_refused", { from: EntityId; outcome: Outcome<PeerFault> }>

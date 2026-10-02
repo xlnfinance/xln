@@ -668,8 +668,10 @@ const rebase: Step<World> = {
     });
     // alice's own frame (the payment the link lost) was in flight when the epoch moved: she is told, naming the payment; hubX had none.
     const pendingTold = [a, x].map((id) => pendingNotices(net, id, onChain.epoch));
-    if (pendingTold[0]!.length !== 1 || !pendingTold[0]![0]!.includes("pay") || pendingTold[1]!.length !== 0) {
-      throw new Error(`pending_rebased notices ${shown(pendingTold)} (alice, hubX) when the epoch moved to ${onChain.epoch}, expected one naming alice's payment and none for hubX`);
+    // The chain logged the hash of the proof it paid by and the node named it: the finalized nonce is known, and the notice says the frame is sent again.
+    const named = (n: string): boolean => n.includes("pay") && n.includes('"finalizedNonce":"') && n.includes("resent_in_new_epoch");
+    if (pendingTold[0]!.length !== 1 || !named(pendingTold[0]![0]!) || pendingTold[1]!.length !== 0) {
+      throw new Error(`pending_rebased notices ${shown(pendingTold)} (alice, hubX) when the epoch moved to ${onChain.epoch}, expected one naming alice's payment, a known finalized nonce and the resend, and none for hubX`);
     }
     // What each node's own J loop told its Entity, from the WAL rows the events are in.
     const told = (id: EntityId): readonly string[] => net.rowsOf(id).flatMap((r) => (r.input._tag === "entity" ? r.input.inputs.flatMap((i) => (i._tag.startsWith("j_") ? [i._tag] : [])) : []));

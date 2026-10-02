@@ -237,10 +237,16 @@ describe("j/watch", () => {
   const bothHear = (event: (peer: typeof LEFT) => Addressed["event"]): readonly Addressed[] =>
     [toward(LEFT, event(RIGHT)), toward(RIGHT, event(LEFT))];
 
+  /** The finalize that follows an advance in its block, with no other advance between, makes it a finalize's own. */
+  const finalBodyOf = (plan: Plan, b: number, i: number) =>
+    ((plan[b] ?? []).slice(i + 1).find((d) => d !== "dispute") === "finalize" ? { finalBodyHash: bodyHashOf(5n) } : {});
+
   const toldOf = (plan: Plan, b: number, i: number): readonly Addressed[] => {
     const [nonce, epoch] = [BigInt(b + 1) * 3n, epochBefore(plan, b, i)];
     switch (plan[b]?.[i]) {
-      case "advance": return bothHear((peer) => ({ _tag: "j_epoch", peer, epoch: epoch + 1n, stored: nonce }));
+      case "advance":
+        return bothHear((peer) =>
+          ({ _tag: "j_epoch", peer, epoch: epoch + 1n, stored: nonce, ...finalBodyOf(plan, b, i) }));
       case "dispute":
         return bothHear((peer) =>
           ({ _tag: "j_dispute", peer, epoch, by: "right", nonce: 7n, timeout: 500n, ...OPENED }));

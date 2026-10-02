@@ -48,7 +48,7 @@ export type ChainEvent =
   | Tagged<"account_settled", Place & { left: Bytes32; right: Bytes32; holdings: readonly Holding[] }>
   | Tagged<"dispute_started", Dispute & Proof & { timeout: bigint }>
   | Tagged<"dispute_countered", Dispute & Proof>
-  | Tagged<"dispute_finalized", Dispute>
+  | Tagged<"dispute_finalized", Dispute & { bodyHash: Bytes32 }>
   | Tagged<"secret_revealed", Place & { hashlock: Bytes32; revealer: Bytes32; secret: Bytes32 }>;
 
 export type LogFault =
@@ -156,7 +156,7 @@ const counteredRead: Reader = (at, topics, data) =>
 
 const finalizedRead: Reader = (at, topics, data) =>
   (four(topics) && holdsWords(data, (n) => n === TWO_WORDS)
-    ? some({ _tag: "dispute_finalized", ...disputeIn(at, topics) })
+    ? some({ _tag: "dispute_finalized", ...disputeIn(at, topics), bodyHash: idAt(data, 0) })
     : none);
 
 /** `SecretRevealed(hashlock, revealer, secret)`: the hashlock and the revealer are topics, the secret is the data. */
