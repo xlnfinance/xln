@@ -108,11 +108,6 @@ const NO_METHOD = new RegExp(
   "i",
 );
 
-const NO_TX = `0x${"00".repeat(32)}`;
-
-/** What a node that runs the trace says of a transaction it does not have. */
-const NO_TX_ANSWER = /transaction|not found|unknown/i;
-
 /** `_accounts(bytes)` and `ondeltaEpoch(bytes32,bytes32)`: the two reads the watcher's `reading` is made of. */
 const accountCalls = (left: Bytes32, right: Bytes32): Result<Readonly<{ row: string; epoch: string }>, ReplyFault> =>
   flatMap(mapErr(accountKey(left, right), () => bad("not an account key")), (key) =>
@@ -152,13 +147,15 @@ export const watchPort = (rpc: Rpc, depository: Address): WatchPort => {
       const calls = callsOf(depository)(asked.value);
       return ok(calls.ok ? calls.value : undefined);
     },
-    // The probe asks for the trace of a transaction that does not exist: a node that runs the method says it knows no
-    // such transaction, one that does not says the method is missing, and any other answer is the node's fault.
+    // The probe traces a call of the Depository at the head (`debug_traceCall`, of the same namespace and tracer as the
+    // trace of a transaction, and needing no transaction: on a fork a transaction of the fork's past is the upstream's
+    // to trace). A node that runs it answers with the frame, one that does not says the method is missing, and any
+    // other answer is the node's fault.
     traced: async () => {
-      const asked = await reads.ask("watch trace probe", "debug_traceTransaction", [NO_TX, { tracer: "callTracer" }]);
+      const call = { to: depository, data: "0x" };
+      const asked = await reads.ask("watch trace probe", "debug_traceCall", [call, "latest", { tracer: "callTracer" }]);
       if (asked.ok) return ok(true);
-      if (NO_METHOD.test(asked.error.reason)) return ok(false);
-      return NO_TX_ANSWER.test(asked.error.reason) ? ok(true) : asked;
+      return NO_METHOD.test(asked.error.reason) ? ok(false) : asked;
     },
     accountAt: async (block, left, right): Promise<Result<AccountAt, PortFault>> => {
       const calls = accountCalls(left, right);

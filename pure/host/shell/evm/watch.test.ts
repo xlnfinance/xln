@@ -134,10 +134,9 @@ describe("host/shell/evm/watch the J loop's reads of the chain", () => {
       .toEqual(err({ _tag: "port", call: "watch trace", reason: "connection refused" }));
   });
 
-  test("R-WATCH-CALLDATA the boot probe asks a trace of no transaction: only a missing method is none", async () => {
-    const refuses = (reason: string) => portOf({ debug_traceTransaction: () => err({ _tag: "rpc", reason }) });
-    expect(await portOf({ debug_traceTransaction: () => ok(null) }).traced()).toEqual(ok(true));
-    expect(await refuses("transaction not found").traced()).toEqual(ok(true));
+  test("R-WATCH-CALLDATA the boot probe traces a call at the head: only a missing method is none", async () => {
+    const refuses = (reason: string) => portOf({ debug_traceCall: () => err({ _tag: "rpc", reason }) });
+    expect(await portOf({ debug_traceCall: () => ok({ type: "CALL" }) }).traced()).toEqual(ok(true));
     expect(await refuses("Method not found (JSON-RPC code -32601)").traced()).toEqual(ok(false));
     expect(await refuses("Unsupported method").traced()).toEqual(ok(false));
     expect(await refuses("connection refused").traced())
