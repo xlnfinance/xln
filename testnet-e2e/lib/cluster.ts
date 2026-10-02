@@ -30,7 +30,7 @@ const DEPTH = 1n;
 
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 const nonce = (): Uint8Array => crypto.getRandomValues(new Uint8Array(32));
-const shown = (x: unknown): string => JSON.stringify(x, (_, v) => (typeof v === "bigint" ? v.toString() : v instanceof Uint8Array ? "bytes" : v));
+export const shown = (x: unknown): string => JSON.stringify(x, (_, v) => (typeof v === "bigint" ? v.toString() : v instanceof Uint8Array ? "bytes" : v));
 const eid = (p: Party): EntityId => must(entityId(p.id), `entity id of ${p.name}`);
 
 /** A party and the parties it has an Account with: who it dials and answers. */
