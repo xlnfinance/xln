@@ -4,14 +4,14 @@
 import { describe, expect, test } from "bun:test";
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { err, ok } from "../../../kernel/core/result.ts";
-import { blockOf, DEPOSITORY, entityOf as bytes, logOf, must as made } from "../../../j/fixtures.ts";
+import { blockOf, DEPOSITORY, entityOf as bytes, evidenceOf, finalizeOp, hexOf, logOf, must as made } from "../../../j/fixtures.ts";
 import type { Row } from "../../../runtime/model.ts";
 import { open } from "../../../runtime/fixtures.ts";
 import type { Disk } from "../disk/disk.ts";
 import { callsOf } from "../fixtures.ts";
 import type { PortFault } from "../submit/chain.ts";
 import type { Look } from "./daemon.ts";
-import type { WatchConfig, WatchPort } from "../watch/loop.ts";
+import { MOST_TRIES, type WatchConfig, type WatchPort } from "../watch/loop.ts";
 import { startDaemon } from "./daemon.ts";
 import { ALICE, BOB, configOf, fresh, nodeOf, QUICK, seatOf, until, WAIT } from "./scene.ts";
 
@@ -210,6 +210,28 @@ describe("host/shell/node a node with a J loop", () => {
     writeFileSync(up, "up");
     expect(await until(async () => delivered(await alice.look()), WAIT)).toBe(true);
     expect((await alice.stop()).watchFault).toBeUndefined();
+  });
+
+  test("R-WATCH-CALLDATA a tx the provider refuses for good holds the node MOST_TRIES ticks, then it goes on", async () => {
+    const dir = fresh();
+    const log = `${dir}/calls.log`;
+    writeFileSync(log, "");
+    const op = finalizeOp();
+    const finalize = logOf("DisputeFinalized", {
+      sender: bytes(2n), counterentity: bytes(1n), nonce: 7n, finalProofbodyHash: hexOf(5n),
+      finalizationEvidenceHash: evidenceOf(op),
+    }, 105n, 1n);
+    const watch = watchOf(STRAIGHT, log, [advanced(105n, 1n), finalize]);
+    const alice = await nodeOf(await seatOf(ALICE, dir, 0), NO_PEER, { tickMs: QUICK, watch });
+    expect(await until(async () => (await alice.look()).watchFault !== undefined, WAIT)).toBe(true);
+    expect(await until(async () => delivered(await alice.look()), WAIT)).toBe(true);
+    const look = await alice.stop();
+    expect(look.watchFault).toBeUndefined();
+    expect(look.notices.filter((n) => n._tag === "watch_stalled")).toEqual([
+      { _tag: "watch_stalled", tx: finalize.tx, reason: "connection reset" },
+    ]);
+    expect(callsOf(log).filter((c) => c === "head").length).toBeGreaterThan(MOST_TRIES);
+    expect(factsOf(look)).toMatchObject({ epoch: 1n });
   });
 
   test("R-JLOOP a block off the cursor's chain ends the node, and every request gets that answer", async () => {

@@ -154,6 +154,8 @@ export type PeerMessage = Tagged<"peer_message", { from: EntityId; msg: Msg<Acco
  * could not read from the input of the transaction, nor from a call trace of it, so a secret it showed may have reached
  * the chain unseen by this node (R-WATCH-CALLDATA): told to the owner as a notice naming the Account and the
  * transaction, and changing no fact. Unread is a notice and not a safe state: the node may have lost a lock's payment.
+ * `j_start_unread` is a dispute against this Entity whose opening state the Host could not read the same way: the
+ * Entity holds no body to finalize it with, so the notice names the Account and the transaction, and no fact changes.
  */
 export type JEvent =
   | Tagged<"j_epoch", { peer: EntityId; epoch: bigint; stored: bigint; finalBodyHash?: string }>
@@ -171,7 +173,8 @@ export type JEvent =
   | Tagged<"j_counter_lapsed", { peer: EntityId; nonce: bigint }>
   | Tagged<"j_collateral", { peer: EntityId; token: TokenId; collateral: bigint; ondelta: bigint }>
   | Tagged<"j_op_lapsed", { peer: EntityId; serial: bigint }>
-  | Tagged<"j_finalize_unread", { peer: EntityId; tx: string }>;
+  | Tagged<"j_finalize_unread", { peer: EntityId; tx: string }>
+  | Tagged<"j_start_unread", { peer: EntityId; tx: string }>;
 
 /** What a peer asks the node to co-sign: a withdrawal of collateral as a shortcut (C2R) or as a settlement. */
 export type CosignOp =
@@ -315,6 +318,7 @@ export type Notice =
   | Tagged<"unknown_peer", { from: EntityId }>
   | Tagged<"holding_dropped", { peer: EntityId; token: TokenId }>
   | Tagged<"finalize_unread", { peer: EntityId; tx: string }>
+  | Tagged<"start_unread", { peer: EntityId; tx: string }>
   | Tagged<
     "offdelta_rebased",
     {

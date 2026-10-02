@@ -59,7 +59,42 @@ export type BadPeer = Tagged<"bad_peer", { text: string }>;
 /** A secret the chain showed that is not 32 bytes of hex: the log was read as bytes32, so this is a broken reading. */
 export type BadSecret = Tagged<"bad_secret", { text: string }>;
 
-export type JFault = PortFault | WatchFault | BadPeer | BadSecret;
+/**
+ * The tries a poll spent on each transaction the node could not give: a poll counts one against a tx only when it
+ * reached the tx's reads, so the node answered the head, the blocks and the logs, and the tx's own read is the one that
+ * fails. A tx that is read again (or is past the cursor) is forgotten.
+ */
+export type Tries = ReadonlyMap<Bytes32, number>;
+
+/**
+ * A poll that read nothing new, with the tries it spent: the node's fault holds the delivery at a transaction, and the
+ * Host brings the tries to its next poll.
+ */
+export type Stalled = Tagged<"stalled", { tx: Bytes32; fault: PortFault; tries: Tries }>;
+
+export type JFault = PortFault | WatchFault | BadPeer | BadSecret | Stalled;
+
+/**
+ * The most polls a transaction the node answers with a fault is tried: a finalize whose bytes the node keeps refusing
+ * (an RPC that fails this one tx for good) cannot hold back every later block, a later SecretRevealed among them. Past
+ * it the tx is told unread, loudly, and the delivery goes on (R-WATCH-CALLDATA: unread is never taken as safe).
+ */
+export const MOST_TRIES = 24;
+
+/**
+ * How long the J loop waits on a transaction the node fails: the tries it has spent, and `react`, how many blocks past
+ * the one its log became final (`depth` above it) a hub may still be told a secret and claim upstream with the hop it
+ * has, which is REACT = 2 * lag (R-HTLC-FORWARD: the gap between a hub's inbound and onward deadline). A transaction the
+ * node still fails past that is told unread though it has tries left: waiting longer cannot save the lock it names, and
+ * it would keep the hub blind to every other Account's events meanwhile (the counter windows among them). `undefined`
+ * is no bound but the tries.
+ */
+export type Patience = Readonly<{ tries: Tries; react: bigint | undefined }>;
+
+/** The tries a transaction must have failed before its age cuts the wait: one failure of a node catching up is retried. */
+const FEW_TRIES = 3;
+
+const NO_PATIENCE: Patience = { tries: new Map(), react: undefined };
 
 /** The most blocks one poll reads: a node that was away reads on over several polls, not in one burst of requests. */
 const CATCH_UP = 64n;
@@ -86,22 +121,16 @@ type Gathered = Readonly<{
 
 const NOTHING: Gathered = { found: new Map(), failed: new Map() };
 
-/**
- * A block this far behind the head is one a node that still does not know a transaction of has dropped it (it was
- * pruned): waiting would never read it, so it is told unread and the delivery goes on. A younger one may be a backend
- * that has not indexed it yet, so it stalls like any fault.
- */
-const PRUNED_AFTER = 256n;
-
 const unknown = (tx: Bytes32): PortFault =>
   ({ _tag: "port", call: "watch tx", reason: `the node does not know ${tx}` });
 
-/** The transactions the node did not know and that are too young to be given up on, as the faults they are. */
-const youngMissing = (
-  asked: readonly Bytes32[], got: Gathered, logs: readonly RawLog[], head: bigint,
-): ReadonlyMap<Bytes32, PortFault> =>
-  new Map(asked.filter((tx) => !got.found.has(tx) && !got.failed.has(tx)).filter((tx) =>
-    logs.some((log) => log.tx === tx && head - log.block < PRUNED_AFTER)).map((tx) => [tx, unknown(tx)]));
+/**
+ * The transactions the node did not know, as the faults they are: a backend that has not indexed a young one yet, or a
+ * pruned node that will never give an old one, answer alike (null), and which it is cannot be told from the answer. Each
+ * costs tries like any fault, so a pruned one is told unread once they are spent.
+ */
+const missingOf = (asked: readonly Bytes32[], got: Gathered): ReadonlyMap<Bytes32, PortFault> =>
+  new Map(asked.filter((tx) => !got.found.has(tx) && !got.failed.has(tx)).map((tx) => [tx, unknown(tx)]));
 
 const gather = async (
   txs: readonly Bytes32[], ask: (tx: Bytes32) => Promise<Result<readonly Carried[] | undefined, PortFault>>,
@@ -121,16 +150,16 @@ const joined = (a: Gathered, b: Gathered): Gathered => ({
 });
 
 /** The earliest block that holds a log of a transaction the Host could not read, and why: what lies before is told. */
-type Stall = Readonly<{ block: bigint; fault: PortFault }>;
+type Stall = Readonly<{ block: bigint; tx: Bytes32; fault: PortFault }>;
 
 const firstStall = (logs: readonly RawLog[], failed: ReadonlyMap<Bytes32, PortFault>): Stall | undefined =>
   logs.flatMap((log): readonly Stall[] => {
     const fault = failed.get(log.tx);
-    return fault === undefined ? [] : [{ block: log.block, fault }];
+    return fault === undefined ? [] : [{ block: log.block, tx: log.tx, fault }];
   }).toSorted((x, y) => (x.block < y.block ? -1 : 1)).at(0);
 
 /** One delivery: the J events for the node's Entity, in the chain's order, and then the height they end at. */
-export type Delivery = Readonly<{ watch: Watch; events: readonly EntityInput[]; height: JHeight }>;
+export type Delivery = Readonly<{ watch: Watch; events: readonly EntityInput[]; height: JHeight; tries: Tries }>;
 
 const peerOf = (event: { peer: Bytes32 }): Result<EntityId, BadPeer> => {
   const peer = entityId(event.peer);
@@ -175,7 +204,7 @@ export const windowsOf = (
  * depth) and ends the node.
  */
 export const poll = async (
-  port: WatchPort, watch: Watch, hosted: Bytes32, windows: readonly Window[] = [],
+  port: WatchPort, watch: Watch, hosted: Bytes32, windows: readonly Window[] = [], patience: Patience = NO_PATIENCE,
 ): Promise<Result<Delivery | undefined, JFault>> => {
   const head = await port.head();
   if (!head.ok) return head;
@@ -192,14 +221,25 @@ export const poll = async (
   const wanted = calldataWanted(prepared.value, [hosted]);
   const asked = await gather(wanted, async (tx) =>
     map(await port.input(tx), (i) => (i === undefined ? undefined : [i])));
-  const inputs = joined(asked, { found: new Map(), failed: youngMissing(wanted, asked, logs.value, head.value) });
-  const known = new Set(wanted.filter((tx) => !asked.found.has(tx)));
-  const unread = unreadTxs(withCalldata(prepared.value, inputs.found), [hosted]).filter((tx) => !known.has(tx));
+  const inputs = joined(asked, { found: new Map(), failed: missingOf(wanted, asked) });
+  const unseen = new Set(wanted.filter((tx) => !asked.found.has(tx)));
+  const unread = unreadTxs(withCalldata(prepared.value, inputs.found), [hosted]).filter((tx) => !unseen.has(tx));
   const traces = unread.length === 0 ? NOTHING : await gather(unread, port.trace);
   const gathered = joined(inputs, traces);
-  const stall = firstStall(logs.value, gathered.failed);
+  // Each fault costs its tx one try (this poll got as far as these reads, so the node answered the rest), and a tx that
+  // spent them all is left unread (it is no fault now) so the delivery goes on and says so.
+  const spent = new Map([...gathered.failed].map(([tx]) => [tx, (patience.tries.get(tx) ?? 0) + 1] as const));
+  const aged = (tx: Bytes32): boolean => patience.react !== undefined
+    && logs.value.some((log) => log.tx === tx && head.value - log.block - watch.depth > (patience.react ?? 0n));
+  const failed = new Map([...gathered.failed].filter(([tx]) => {
+    const tried = spent.get(tx) ?? 0;
+    return tried <= MOST_TRIES && !(tried >= FEW_TRIES && aged(tx));
+  }));
+  const stall = firstStall(logs.value, failed);
   const upTo = stall === undefined ? to : stall.block - 1n;
-  if (stall !== undefined && upTo <= watch.applied.number) return err(stall.fault);
+  if (stall !== undefined && upTo <= watch.applied.number) {
+    return err({ _tag: "stalled", tx: stall.tx, fault: stall.fault, tries: spent });
+  }
   const cut = stall === undefined
     ? prepared
     : prepare(watch, {
@@ -215,6 +255,6 @@ export const poll = async (
   const step = advance(watch, read, [hosted], new Map(accounts.value), windows);
   return flatMap(step, (done) => map(
     traverse(done.events, ({ event }) => inputOf(event)),
-    (events): Delivery => ({ watch: done.watch, events, height: done.height }),
+    (events): Delivery => ({ watch: done.watch, events, height: done.height, tries: spent }),
   ));
 };

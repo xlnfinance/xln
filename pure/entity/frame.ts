@@ -469,6 +469,8 @@ const chainFact = (w: Work, terms: ProofTerms, e: JEvent): Work => {
       return withFacts(w, e.peer, cosignLapsed(facts, e.serial));
     case "j_finalize_unread":
       return noting(w, { _tag: "finalize_unread", peer: e.peer, tx: e.tx });
+    case "j_start_unread":
+      return noting(w, { _tag: "start_unread", peer: e.peer, tx: e.tx });
   }
 };
 
@@ -933,7 +935,7 @@ const isArrival = (i: EntityInput): i is Arrival =>
   || i._tag === "j_dispute"
   || i._tag === "j_countered" || i._tag === "j_window_over" || i._tag === "j_dispute_over"
   || i._tag === "j_start_lapsed" || i._tag === "j_counter_lapsed" || i._tag === "j_collateral"
-  || i._tag === "j_op_lapsed" || i._tag === "j_finalize_unread";
+  || i._tag === "j_op_lapsed" || i._tag === "j_finalize_unread" || i._tag === "j_start_unread";
 
 const arrivalsOf = (inputs: readonly EntityInput[]): readonly Arrival[] => inputs.filter(isArrival);
 
