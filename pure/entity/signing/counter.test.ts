@@ -251,6 +251,50 @@ describe("entity/signing R-DISPUTE-WATCH a counter registered by whoever is a fi
   });
 });
 
+describe("entity/signing R-WATCH-CALLDATA the body a start revealed is the one a non-starter accepts with", () => {
+  const start = startOf(ackLost.alice);
+  type Opened = Partial<Extract<JEvent, { _tag: "j_dispute" }>>;
+  const opened = (extra: Opened): JEvent => ({ ...openedBy(start), ...extra }) as JEvent;
+  const strange = { ...start.body, offdeltas: [123n] };
+  const strangeHash = must(proofBodyHash(strange));
+  const over: JEvent = { _tag: "j_window_over", peer: ALICE.id };
+
+  test("R-WATCH-CALLDATA a start whose body no state of the node has is accepted at once with the body", () => {
+    const heard = run(committed.bob, opened({ bodyHash: strangeHash, body: strange }));
+    expect(finalsOf(heard.chain)).toEqual([{
+      _tag: "dispute_finalize", peer: ALICE.id, nonce: start.nonce, proposerIsLeft: start.proposerIsLeft, body: strange,
+      startedByLeft: true, initial: undefined,
+    }]);
+    expect(finalsOf(run(committed.bob, opened({ bodyHash: strangeHash })).chain)).toEqual([]);
+  });
+
+  test("R-WATCH-CALLDATA a node whose counter lapsed accepts the opening state with the revealed body", () => {
+    const heard = run(ackLost.bob, opened({ body: start.body }));
+    const [counter] = countersOf(heard.chain);
+    if (counter?._tag !== "counter") return expect.unreachable("no counter");
+    expect(finalsOf(heard.chain)).toEqual([]);
+    const lapsed = run(heard.state, { _tag: "j_counter_lapsed", peer: ALICE.id, nonce: counter.nonce });
+    const done = run(lapsed.state, over);
+    expect(finalsOf(done.chain)).toEqual([{
+      _tag: "dispute_finalize", peer: ALICE.id, nonce: start.nonce, proposerIsLeft: start.proposerIsLeft,
+      body: start.body, startedByLeft: true, initial: undefined,
+    }]);
+    const bare = run(ackLost.bob, opened({}));
+    const dropped = run(bare.state, { _tag: "j_counter_lapsed", peer: ALICE.id, nonce: counter.nonce });
+    expect(finalsOf(run(dropped.state, over).chain)).toEqual([]);
+  });
+
+  test("R-WATCH-CALLDATA a node whose counter is still asked does not accept the opening state", () => {
+    const heard = run(ackLost.bob, opened({ body: start.body }));
+    expect(finalsOf(run(heard.state, over).chain)).toEqual([]);
+  });
+
+  test("R-WATCH-CALLDATA a body that is not the one the logged hash names is not kept or accepted by", () => {
+    const lying = run(committed.bob, opened({ bodyHash: strangeHash, body: start.body }));
+    expect(finalsOf(lying.chain)).toEqual([]);
+  });
+});
+
 describe("entity/signing R-DISPUTE-WATCH the starter finalizes with the counter when the counterer does not", () => {
   const start = startOf(ackLost.alice);
   const counter = countersOf(run(ackLost.bob, openedBy(start)).chain)[0];

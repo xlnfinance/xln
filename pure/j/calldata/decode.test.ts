@@ -2,9 +2,11 @@ import { describe, expect, test } from "bun:test";
 import type { FinalDisputeProof } from "../../chain/batch/batch.ts";
 import { wordAt } from "../../kernel/encoding/abi-read.ts";
 import { bytesToHex, hexToBytes } from "../../kernel/encoding/bytes.ts";
-import { finalizedSecrets, finalizesIn, secretsIn, startedSecrets } from "./decode.ts";
+import { finalizedSecrets, finalizesIn, secretsIn, startedBody, startedSecrets } from "./decode.ts";
+import { proofBodyHash } from "../../chain/proof/proof.ts";
 import {
-  argumentsOf, entityOf, evidenceOf, finalizeInput, finalizeOp, hexOf, logOf, must, patched,
+  argumentsOf, CLAUSED, entityOf, evidenceOf, finalizeInput, finalizeOp, hexOf, logOf, must, patched, startInput,
+  startOp,
 } from "../fixtures.ts";
 
 const LEFT = entityOf(0x11n);
@@ -71,5 +73,54 @@ describe("j/calldata", () => {
     expect(finalizedSecrets(input, evidenceOf(mine))).toEqual([SECRET_B, SECRET_A]);
     expect(finalizedSecrets(input, evidenceOf(finalizeOp({ finalNonce: 99n })))).toBeUndefined();
     expect(finalizedSecrets(inputOf([]), evidenceOf(mine))).toBeUndefined();
+  });
+
+  const hashOf = (body: typeof CLAUSED) => must(bytes32Of(must(proofBodyHash(body))));
+  const bytes32Of = (hash: string) => ({ ok: true, value: hash as ReturnType<typeof entityOf> }) as const;
+  const other = { ...CLAUSED, offdeltas: [5n], transformers: [] };
+
+  test("R-WATCH-CALLDATA the body a start carried is read back whole: signs, wide numbers, clauses, allowances", () => {
+    const input = startInput(RIGHT, [startOp(CLAUSED)]);
+    expect(startedBody(input, hashOf(CLAUSED))).toStrictEqual(CLAUSED);
+  });
+
+  test("R-WATCH-CALLDATA of several start ops the one whose hash the chain logged is the one read", () => {
+    const input = startInput(RIGHT, [startOp(other), startOp(CLAUSED), startOp(other, { nonce: 9n })]);
+    expect(startedBody(input, hashOf(CLAUSED))).toStrictEqual(CLAUSED);
+    expect(startedBody(input, hashOf(other))).toStrictEqual(other);
+    expect(startedBody(input, entityOf(99n))).toBeUndefined();
+  });
+
+  test("R-WATCH-CALLDATA a start that names a hash its body does not make gives no body", () => {
+    const lying = startInput(RIGHT, [startOp(other, { proofbodyHash: hashOf(CLAUSED) })]);
+    expect(startedBody(lying, hashOf(CLAUSED))).toBeUndefined();
+  });
+
+  test("R-WATCH-CALLDATA an input that is no processBatch call, or is cut short, gives no body", () => {
+    const input = startInput(RIGHT, [startOp(CLAUSED)]);
+    expect(startedBody(patched(input, 0, Uint8Array.of(0xde, 0xad, 0xbe, 0xef)), hashOf(CLAUSED))).toBeUndefined();
+    expect(startedBody(input.subarray(0, 300), hashOf(CLAUSED))).toBeUndefined();
+    expect(startedBody(new Uint8Array(), hashOf(CLAUSED))).toBeUndefined();
+    expect(startedBody(finalizeInput(RIGHT, [finalizeOp()]), hashOf(CLAUSED))).toBeUndefined();
+  });
+
+  test("R-WATCH-CALLDATA a start count the input has no room for gives no body and builds no list", () => {
+    const input = startInput(RIGHT, [startOp(CLAUSED)]);
+    const call = input.subarray(4);
+    const batch = call.subarray(Number(wordAt(call, 32)) + 32);
+    const head = Number(wordAt(batch, 0));
+    const countAt = 4 + Number(wordAt(call, 32)) + 32 + head + Number(wordAt(batch, head + 5 * 32));
+    expect(wordAt(input, countAt)).toBe(1n);
+    expect(startedBody(patched(input, countAt, bytesOf(hexOf(1n << 40n))), hashOf(CLAUSED))).toBeUndefined();
+  });
+
+  test("R-WATCH-CALLDATA whatever is written over the input, a body is read only if its hash is the one named", () => {
+    const input = startInput(RIGHT, [startOp(CLAUSED)]);
+    const garbage = Uint8Array.from({ length: 32 }, () => 0xff);
+    const reads = Array.from({ length: Math.floor(input.length / 16) }, (_, i) =>
+      startedBody(patched(input, i * 16, garbage), hashOf(CLAUSED)));
+    const text = (body: unknown): string => JSON.stringify(body, (_, v) => (typeof v === "bigint" ? `${v}` : v));
+    expect(reads.filter((read) => read !== undefined && text(read) !== text(CLAUSED))).toEqual([]);
+    expect(reads.filter((read) => read === undefined).length).toBeGreaterThan(0);
   });
 });

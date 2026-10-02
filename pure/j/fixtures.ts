@@ -6,9 +6,9 @@ import { AbiCoder, Interface } from "ethers";
 import { expect } from "bun:test";
 import { Depository__factory } from "../../contracts/typechain-types/factories/Depository.sol/Depository__factory.ts";
 import { unwrapOr, type Result } from "../kernel/core/result.ts";
-import { emptyBatch, encodeBatch, type FinalDisputeProof } from "../chain/batch/batch.ts";
+import { emptyBatch, encodeBatch, type FinalDisputeProof, type InitialDisputeProof } from "../chain/batch/batch.ts";
 import { finalizationEvidenceHash } from "../chain/proof/dispute.ts";
-import type { ProofBody } from "../chain/proof/proof.ts";
+import { proofBodyHash, type ProofBody } from "../chain/proof/proof.ts";
 import { hexToBytes } from "../kernel/encoding/bytes.ts";
 import type { SettlementDiff } from "../chain/money.ts";
 import { seal, type JBatch, type SealContext, type SealOutcome } from "./batch/jbatch.ts";
@@ -234,6 +234,33 @@ export const finalizeOp = (over: Partial<FinalDisputeProof> = {}): FinalDisputeP
 /** The input of a `processBatch` call, made by `sender`, that carries these finalize ops. */
 export const finalizeInput = (sender: Bytes32, ops: readonly FinalDisputeProof[]): Uint8Array => {
   const batch = must(encodeBatch({ ...emptyBatch(1_000_000n), disputeFinalizations: ops }));
+  return must(hexToBytes(DEPOSITORY_ABI.encodeFunctionData("processBatch", [sender, batch, "0x1234", 3n])));
+};
+
+/** A body with a negative offdelta, two tokens and a clause with allowances: every shape the decoder must read. */
+export const CLAUSED: ProofBody = {
+  watchSeed: hexOf(0xabn), leftResponseSeconds: 60n, rightResponseSeconds: 3600n,
+  offdeltas: [-123_456_789_012_345_678_901_234_567_890n, 0n, 7n << 200n], tokenIds: [1n, 2n, 3n],
+  transformers: [
+    {
+      transformerAddress: "0x00000000000000000000000000000000000000aa", encodedBatch: "0x1234",
+      allowances: [{ deltaIndex: 1n, rightAllowance: 5n, leftAllowance: 6n }],
+    },
+    { transformerAddress: "0x00000000000000000000000000000000000000bb", encodedBatch: "0x", allowances: [] },
+  ],
+};
+
+/** A start op of a batch for a body, with the hash it names, and the fields a test does not care about filled in. */
+export const startOp = (body: ProofBody, over: Partial<InitialDisputeProof> = {}): InitialDisputeProof => ({
+  counterentity: entityOf(0x11n), nonce: 7n, ondeltaEpoch: 0n, proposerIsLeft: true,
+  proofbodyHash: must(proofBodyHash(body)), initialProofbody: body, watchSeed: body.watchSeed,
+  sig: `0x${"ab".repeat(65)}`, starterInitialArguments: "0x", starterCounterArguments: "0x",
+  starterCounterProofCommitment: hexOf(0n), ...over,
+});
+
+/** The input of a `processBatch` call, made by `sender`, that carries these start ops. */
+export const startInput = (sender: Bytes32, ops: readonly InitialDisputeProof[]): Uint8Array => {
+  const batch = must(encodeBatch({ ...emptyBatch(1_000_000n), disputeStarts: ops }));
   return must(hexToBytes(DEPOSITORY_ABI.encodeFunctionData("processBatch", [sender, batch, "0x1234", 3n])));
 };
 

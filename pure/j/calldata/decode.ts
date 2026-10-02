@@ -8,9 +8,10 @@
 // a finalize op of the input is the one the log is about only if its evidence hash is the one the log carries.
 // Arguments the contract could not decode it treats as empty; here a secret is read wherever the words say one is,
 // which can only hand a hub a preimage it would be handed anyway.
+import { proofBodyHash, type Allowance, type ProofBody, type TransformerClause } from "../../chain/proof/proof.ts";
 import {
-  abiBytes, abiFits, abiLengthRef, abiLengthWord, abiRoot, abiStaticBytes, abiTupleBytes, abiTupleElement,
-  abiTupleRef, type AbiTuple,
+  abiBytes, abiFits, abiLengthRef, abiLengthWord, abiRoot, abiStaticBytes, abiStaticWord, abiTupleBytes,
+  abiTupleElement, abiTupleRef, abiWord, type AbiLength, type AbiTuple,
 } from "../../kernel/encoding/abi-read.ts";
 import { bytesToHex, concat, hexToBytes, keccak256, keccakHex, utf8 } from "../../kernel/encoding/bytes.ts";
 import type { Bytes32 } from "../log.ts";
@@ -29,6 +30,9 @@ const FINAL_STARTER_ARGUMENTS = 6;
 const FINAL_OTHER_ARGUMENTS = 7;
 const FINAL_SIG = 8;
 const FINAL_STARTED_BY_LEFT = 9;
+const BATCH_STARTS = 5;
+const START_BODY_HASH = 4;
+const START_BODY = 5;
 const STARTED_INITIAL_ARGUMENTS = 3;
 const STARTED_COUNTER_ARGUMENTS = 4;
 
@@ -100,4 +104,80 @@ export const finalizedSecrets = (input: Uint8Array, evidence: Bytes32): readonly
   return mine.length === 0
     ? undefined
     : unique(mine.flatMap((f) => [...secretsIn(f.starterArguments), ...secretsIn(f.otherArguments)]));
+};
+
+/** `abi.encode`d words are 32 bytes; an `Int512 {int256 high; uint256 low}` is two of them, an `Allowance` three. */
+const INT512 = 2 * WORD;
+const ALLOWANCE = 3 * WORD;
+const WORD_BITS = 256n;
+
+type Listed = readonly [AbiLength, number] | undefined;
+
+const listOf = (buf: Uint8Array, owner: AbiTuple, slot: number, stride: number): Listed => {
+  const list = abiLengthRef(buf, owner, slot * WORD);
+  const count = abiLengthWord(buf, list);
+  return abiFits(buf, list, count, stride) ? [list, Number(count)] : undefined;
+};
+
+const allowancesIn = (buf: Uint8Array, clause: AbiTuple): readonly Allowance[] => {
+  const found = listOf(buf, clause, 2, ALLOWANCE);
+  if (found === undefined) return [];
+  const [list, count] = found;
+  const at = (i: number, k: number): bigint => abiStaticWord(buf, list, i * 3 + k);
+  return Array.from({ length: count }, (_, i) =>
+    ({ deltaIndex: at(i, 0), rightAllowance: at(i, 1), leftAllowance: at(i, 2) }));
+};
+
+const clauseIn = (buf: Uint8Array, clause: AbiTuple): TransformerClause => ({
+  transformerAddress: bytesToHex(abiTupleBytes(buf, clause, 0).subarray(12)),
+  encodedBatch: bytesToHex(abiBytes(buf, abiLengthRef(buf, clause, WORD))),
+  allowances: allowancesIn(buf, clause),
+});
+
+/**
+ * A `ProofBody` as `abi.encode` lays it out, read from its tuple. What the words say is believed only once the body is
+ * hashed (`startedBody`): a body read from bytes that do not make it has another hash, and is no body of the dispute.
+ */
+const bodyIn = (buf: Uint8Array, body: AbiTuple): ProofBody => {
+  const deltas = listOf(buf, body, 3, INT512);
+  const tokens = listOf(buf, body, 4, WORD);
+  const clauses = listOf(buf, body, 5, WORD);
+  const [deltaList, deltaCount] = deltas ?? [undefined, 0];
+  const [tokenList, tokenCount] = tokens ?? [undefined, 0];
+  const [clauseList, clauseCount] = clauses ?? [undefined, 0];
+  return {
+    watchSeed: bytesToHex(abiTupleBytes(buf, body, 0)),
+    leftResponseSeconds: abiWord(buf, body, WORD), rightResponseSeconds: abiWord(buf, body, 2 * WORD),
+    offdeltas: deltaList === undefined ? [] : Array.from({ length: deltaCount }, (_, i) =>
+      (BigInt.asIntN(Number(WORD_BITS), abiStaticWord(buf, deltaList, 2 * i)) << WORD_BITS)
+      | abiStaticWord(buf, deltaList, 2 * i + 1)),
+    tokenIds: tokenList === undefined
+      ? []
+      : Array.from({ length: tokenCount }, (_, i) => abiStaticWord(buf, tokenList, i)),
+    transformers: clauseList === undefined ? [] : Array.from({ length: clauseCount }, (_, i) =>
+      clauseIn(buf, abiTupleElement(buf, clauseList, i))),
+  };
+};
+
+/**
+ * The proof body a dispute start carried, from the input of its transaction: the body of the start op whose
+ * `proofbodyHash` is the one the chain logged, and that hashes to it (the contract reveals the exact signed body at
+ * start, Types.sol `InitialDisputeProof.initialProofbody`). `undefined` when the input is not a `processBatch` call or
+ * no op of it names the hash with a body that makes it. The Entity may finalize with such a body without having held
+ * the state, because the hash is what the chain compares.
+ */
+export const startedBody = (input: Uint8Array, bodyHash: Bytes32): ProofBody | undefined => {
+  if (!startsWith(input, PROCESS_BATCH)) return undefined;
+  const call = input.subarray(PROCESS_BATCH.length);
+  const batch = abiBytes(call, abiLengthRef(call, abiRoot(), WORD));
+  const list = abiLengthRef(batch, abiTupleRef(batch, abiRoot(), 0), BATCH_STARTS * WORD);
+  const count = abiLengthWord(batch, list);
+  if (!abiFits(batch, list, count, WORD)) return undefined;
+  const ops = Array.from({ length: Number(count) }, (_, i) => abiTupleElement(batch, list, i));
+  const named = ops.filter((op) => bytesToHex(abiTupleBytes(batch, op, START_BODY_HASH * WORD)) === bodyHash);
+  const bodies = named.map((op) => bodyIn(batch, abiTupleRef(batch, op, START_BODY * WORD)));
+  return bodies.find((body) => {
+    const hash = proofBodyHash(body);
+    return hash.ok && hash.value === bodyHash;
+  });
 };

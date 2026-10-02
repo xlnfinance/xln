@@ -14,7 +14,7 @@
 import { err, flatMap, foldResult, map, ok, type Result } from "../kernel/core/result.ts";
 import type { Tagged } from "../kernel/core/tagged.ts";
 import { jHeight, type HeightFault, type JHeight } from "../account/clause/clock.ts";
-import { finalizedSecrets } from "./calldata/decode.ts";
+import { finalizedSecrets, startedBody } from "./calldata/decode.ts";
 import { decodeLogs, type Address, type Bytes32, type ChainEvent, type LogFault, type RawLog } from "./log.ts";
 import {
   observe, readingsOf, type Accounts, type Addressed, type JEvent, type ObserveFault, type Reading,
@@ -99,9 +99,12 @@ export const prepare = (w: Watch, batch: Batch): Result<Prepared, WatchFault> =>
       flatMap(belonging(batch.blocks, batch.logs), () =>
         map(decodeLogs(w.depository, batch.logs), (events) => ({ last, events })))));
 
-/** The transactions whose input the Host must read: the ones that carried a dispute finalize (R-WATCH-CALLDATA). */
+/**
+ * The transactions whose input the Host must read: the ones that carried a dispute start (its body) or a dispute
+ * finalize (its arguments), R-WATCH-CALLDATA.
+ */
 export const calldataWanted = (p: Prepared): readonly Bytes32[] =>
-  [...new Set(p.events.flatMap((e) => (e._tag === "dispute_finalized" ? [e.tx] : [])))];
+  [...new Set(p.events.flatMap((e) => (e._tag === "dispute_finalized" || e._tag === "dispute_started" ? [e.tx] : [])))];
 
 /**
  * The prepared batch with the arguments of its finalizes read from the inputs of their transactions, by transaction
@@ -111,6 +114,10 @@ export const calldataWanted = (p: Prepared): readonly Bytes32[] =>
 export const withCalldata = (p: Prepared, inputs: ReadonlyMap<Bytes32, Uint8Array>): Prepared => ({
   ...p,
   events: p.events.map((e): ChainEvent => {
+    if (e._tag === "dispute_started") {
+      const read = inputs.get(e.tx);
+      return { ...e, body: read === undefined ? undefined : startedBody(read, e.bodyHash) };
+    }
     if (e._tag !== "dispute_finalized") return e;
     const input = inputs.get(e.tx);
     const secrets = input === undefined ? undefined : finalizedSecrets(input, e.evidence);

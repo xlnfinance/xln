@@ -829,7 +829,11 @@ const disputeStale: Step<World> = {
       if (!(await accountOnChain(chain, alice, hubX)).disputeOpen) throw new Error("no dispute is open after alice's start");
       // The nodes act on the chain's start at the confirmation depth: hubX's node is told, asks for the counter, and its batch lands inside the window.
       await net.reach(BigInt(await chain.provider.getBlockNumber()), { pending: true });
-      if (net.entity(x).chain.get(a)?.against === undefined) throw new Error("hubX's node was never told of the dispute against it");
+      const against = net.entity(x).chain.get(a)?.against;
+      if (against === undefined) throw new Error("hubX's node was never told of the dispute against it");
+      if (against.body === undefined || must(proofBodyHash(against.body), "revealed body hash") !== against.bodyHash) {
+        throw new Error("hubX's node was not told the body alice's start revealed: its J loop read none from the start's transaction input, or one that does not make the logged hash");
+      }
       if (!net.askedBy(x).slice(mark.hubX).some((ask) => ask._tag === "counter")) throw new Error("hubX's node did not ask the chain for a counter");
       await net.reach(BigInt(await chain.provider.getBlockNumber()), { pending: true });
       const registered = await chain.depository.queryFilter(chain.depository.filters.CounterDisputeRegistered(), fromBlock);
@@ -937,6 +941,7 @@ const disputeStale: Step<World> = {
       checks: [
         `alice funded alice-hubX with ${fmt(chain, funded)} in epoch ${onChain.epoch}; alice paid hubX ${fmt(chain, STALE_PAY * unit(chain))}, hubX committed the frame (slot ${newSlot}) and its ack to alice was lost: hubX holds alice's signature over a head alice never committed`,
         `alice's own node started the dispute from her older head (nonce ${startNonce}); hubX's node, told of it at depth 1, asked for a counter with the newer proof (nonce ${counter.nonce}, restated ${counters.length} time${counters.length === 1 ? "" : "s"}): one CounterDisputeRegistered naming hubX's Entity, sent from hubX's wallet, inside the window; the counter's head is the dispute-proof digest the chain computes for that nonce and epoch`,
+        "R-WATCH-CALLDATA: hubX's node read the proof body alice's start revealed from the input of the start's transaction (its J loop asked the node for it by transaction hash and found the start op by its logged body hash): the body its Entity holds hashes to the one the chain logged",
         `past both ${floor} s windows hubX's node, told the window was over, finalized with its counter's proof naming the dispute it answers: its journal holds one sealed batch of the counter and one of the finalize, each with its landed answer; alice's node, told of the counter, the finalize that landed was sent by ${(await finished[0]!.getTransaction()).from.toLowerCase() === hubX.wallet.address.toLowerCase() ? "hubX" : "alice"} (both may finalize, alice's node asked ${alicesFinals.length} times, each with the counter's proof); the chain logged one start, one counter, one finalize and ${lostRace.length} skipped finalize`,
         `the chain paid by the newer state: alice ${fmt(chain, aliceGot)} and hubX ${fmt(chain, hubGot)} (ondelta ${held.ondelta} + offdelta ${newOffdelta}, collateral ${held.collateral}); the opening proof would have paid alice ${fmt(chain, stale)}`,
         `R-DISPUTE-FREEZE: inside the window each node was asked for a payment on the Account in dispute and refused it back to whoever asked with a notice (account_disputed): no frame, no new pending frame, the heads stayed, the nodes asked the chain for nothing new`,

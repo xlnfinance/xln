@@ -10,9 +10,11 @@ import { freshChain } from "../../../entity/chain.ts";
 import type { ChainFacts, EntityId, Starting } from "../../../entity/model.ts";
 import { entityId } from "../../../entity/model.ts";
 import type { Bytes32, RawLog } from "../../../j/log.ts";
+import { proofBodyHash } from "../../../chain/proof/proof.ts";
 import { watching, type Block } from "../../../j/watch.ts";
 import {
-  argumentsOf, blockOf, DEPOSITORY, entityOf, finalizedOf, finalizeInput, finalizeOp, hexOf, logOf, must, txOf,
+  argumentsOf, blockOf, CLAUSED, DEPOSITORY, entityOf, finalizedOf, finalizeInput, finalizeOp, hexOf, logOf, must,
+  startInput, startOp, txOf,
 } from "../../../j/fixtures.ts";
 import { callsOf } from "../fixtures.ts";
 import type { PortFault } from "../submit/chain.ts";
@@ -103,19 +105,21 @@ describe("host/shell/watch the J loop's poll", () => {
     expect(callsOf(at).filter((c) => c.startsWith("input"))).toEqual([`input ${tx.slice(-4)}`]);
   });
 
-  test("R-WATCH-CALLDATA a dispute start's arguments show their secret to the Entity, no input asked for", async () => {
+  test("R-WATCH-CALLDATA a dispute start's secret and body reach the Entity, the input asked for once", async () => {
     const at = logPath();
     const opened = logOf("DisputeStarted", {
-      sender: RIGHT, counterentity: LEFT, nonce: 7n, proposerIsLeft: true, proofbodyHash: hexOf(1n),
+      sender: RIGHT, counterentity: LEFT, nonce: 7n, proposerIsLeft: true, proofbodyHash: must(proofBodyHash(CLAUSED)),
       watchSeed: hexOf(2n), starterInitialArguments: argumentsOf([hexOf(8n)]), starterCounterArguments: "0x",
       starterCounterProofCommitment: hexOf(3n), disputeTimeout: 5n, disputeStartTimestamp: 6n,
       leftResponseSeconds: 60n, rightResponseSeconds: 60n,
     }, 2n, 0n);
-    const got = await poll(portOf(straight(6n, [opened]), at), start(2n), LEFT);
+    const inputs = new Map([[txOf(2n, 0n), startInput(RIGHT, [startOp(CLAUSED)])]]);
+    const got = await poll(portOf(straight(6n, [opened]), at, -1n, inputs), start(2n), LEFT);
     const secret = Uint8Array.from({ length: 32 }, (_, i) => (i === 31 ? 8 : 0));
     expect(got.ok ? got.value?.events.map((e) => e._tag) : got).toEqual(["j_secret", "j_dispute"]);
     expect(got.ok ? got.value?.events[0] : got).toEqual({ _tag: "j_secret", secret });
-    expect(callsOf(at).filter((c) => c.startsWith("input"))).toEqual([]);
+    expect(got.ok ? got.value?.events[1] : got).toMatchObject({ _tag: "j_dispute", body: CLAUSED });
+    expect(callsOf(at).filter((c) => c.startsWith("input"))).toEqual([`input ${txOf(2n, 0n).slice(-4)}`]);
   });
 
   test("R-WATCH-CALLDATA an input the node cannot give is the port's fault: nothing is delivered", async () => {

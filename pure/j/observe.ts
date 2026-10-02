@@ -149,7 +149,7 @@ const disputeStarted = (events: readonly ChainEvent[], e: Started, peer: Bytes32
     ? err({ _tag: "no_reading", reading: readingOf(e) })
     : ok([{
       _tag: "j_dispute", peer, epoch: epochAt(events, e, at), by: startedBy(e), nonce: e.nonce, timeout: e.timeout,
-      proposerIsLeft: e.proposerIsLeft, bodyHash: e.bodyHash,
+      proposerIsLeft: e.proposerIsLeft, bodyHash: e.bodyHash, ...(e.body === undefined ? {} : { body: e.body }),
     }]));
 
 /** The dispute is over; and a finalize whose arguments the Host could not read says so (R-WATCH-CALLDATA). */

@@ -903,7 +903,8 @@ const accepting = (terms: ProofTerms, w: Work, peer: EntityId, account: EntityRe
   // the opening state then.
   const dropped = answer === undefined || (answer.lapsed && !answer.registered);
   const unanswered = against?.countered === undefined && dropped;
-  const body = against !== undefined && unanswered ? rebuilt(terms, facts, account, against) : undefined;
+  const held = against !== undefined && unanswered ? rebuilt(terms, facts, account, against) : undefined;
+  const body = held ?? (unanswered ? against?.body : undefined);
   return against !== undefined && body !== undefined
     ? [{
       _tag: "dispute_finalize", peer, nonce: against.nonce, proposerIsLeft: against.proposerIsLeft, body,

@@ -12,6 +12,7 @@ import { err, map, ok, traverse, type Result } from "../kernel/core/result.ts";
 import { none, some, type Option } from "../kernel/core/option.ts";
 import type { Brand, Tagged } from "../kernel/core/tagged.ts";
 import type { TokenId } from "../account/model.ts";
+import type { ProofBody } from "../chain/proof/proof.ts";
 import { keccakHex, utf8 } from "../kernel/encoding/bytes.ts";
 import { startedSecrets } from "./calldata/decode.ts";
 
@@ -54,7 +55,10 @@ export type Shown = Tagged<"unasked"> | Tagged<"read", { secrets: readonly Bytes
 export type ChainEvent =
   | Tagged<"epoch_advanced", Place & { left: Bytes32; right: Bytes32; epoch: bigint }>
   | Tagged<"account_settled", Place & { left: Bytes32; right: Bytes32; holdings: readonly Holding[] }>
-  | Tagged<"dispute_started", Dispute & Proof & { timeout: bigint; secrets: readonly Bytes32[] }>
+  | Tagged<
+    "dispute_started",
+    Dispute & Proof & { timeout: bigint; secrets: readonly Bytes32[]; tx: Bytes32; body: ProofBody | undefined }
+  >
   | Tagged<"dispute_countered", Dispute & Proof>
   | Tagged<"dispute_finalized", Dispute & { bodyHash: Bytes32; evidence: Bytes32; tx: Bytes32; shown: Shown }>
   | Tagged<"secret_revealed", Place & { hashlock: Bytes32; revealer: Bytes32; secret: Bytes32 }>;
@@ -152,11 +156,11 @@ const TWO_WORDS = 2;
 
 const proofIn = (data: string): Proof => ({ proposerIsLeft: wordAt(data, 0) !== 0n, bodyHash: idAt(data, 1) });
 
-const startedRead: Reader = (at, topics, data) =>
+const startedRead: Reader = (at, topics, data, tx) =>
   (four(topics) && holdsWords(data, (n) => n >= STARTED_WORDS)
     ? some({
       _tag: "dispute_started", ...disputeIn(at, topics), ...proofIn(data), timeout: wordAt(data, TIMEOUT_AT),
-      secrets: startedSecrets(data),
+      secrets: startedSecrets(data), tx, body: undefined,
     })
     : none);
 

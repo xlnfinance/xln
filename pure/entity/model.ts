@@ -108,6 +108,8 @@ export type ChainFacts = Readonly<{
 export type Against = Readonly<{
   nonce: bigint; proposerIsLeft: boolean; bodyHash: string; window: bigint; over: boolean; answer: Answer | undefined;
   countered: Registered | undefined;
+  /** The exact body the start revealed in its calldata, when the Host read it and it hashes to `bodyHash`. */
+  body?: ProofBody;
 }>;
 
 /**
@@ -158,7 +160,7 @@ export type JEvent =
     "j_dispute",
     {
       peer: EntityId; epoch: bigint; by: Side; nonce: bigint; timeout: bigint; proposerIsLeft: boolean;
-      bodyHash: string;
+      bodyHash: string; body?: ProofBody;
     }
   >
   | Tagged<"j_countered", { peer: EntityId; nonce: bigint; proposerIsLeft: boolean; bodyHash: string }>
