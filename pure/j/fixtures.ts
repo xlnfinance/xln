@@ -163,8 +163,11 @@ export const DEPOSITORY: Address = must(address(hexOf(0xde0n, 20)));
 /** A block hash that names its height and the fork it is on, so two forks never share one. */
 export const hashOf = (number: bigint, fork = 0n): Bytes32 => must(bytes32(hexOf(number + (fork << 128n))));
 
+/** A block's second is ten times its number: a later block is a later second, on every fork. */
 export const blockOf = (number: bigint, fork = 0n): Block =>
-  ({ number, hash: hashOf(number, fork), parent: hashOf(number > 0n ? number - 1n : 0n, fork) });
+  ({
+    number, hash: hashOf(number, fork), parent: hashOf(number > 0n ? number - 1n : 0n, fork), timestamp: number * 10n,
+  });
 
 /** The blocks `from + 1` to `to`, each on its parent, on one fork; the first's parent is block `from` of that fork. */
 export const blocksBetween = (from: bigint, to: bigint, fork = 0n): readonly Block[] =>

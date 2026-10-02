@@ -24,7 +24,7 @@ import { MAX_LINE, type Key, type Peer, type RuntimeId } from "../link/link.ts";
 import {
   accepted, closed, dialed, line, linked, route, startMesh, wanted, type ConnId, type Mesh, type Refused, type Write,
 } from "../mesh/mesh.ts";
-import { beginAt, poll, type BadPeer, type Delivery, type JFault, type WatchConfig } from "../watch/loop.ts";
+import { beginAt, poll, windowsOf, type BadPeer, type Delivery, type JFault, type WatchConfig } from "../watch/loop.ts";
 import { dialTcp, type Listener, type SocketFault, type Wire } from "./link/socket.ts";
 
 /** What a node is made of: its shell, its Entity, its key, who its peers are, and how often its timer runs. */
@@ -259,7 +259,10 @@ const listening = async (rig: Rig, state: State): Promise<State> => {
   const cursor = await cursorOf(watch, state);
   if (!cursor.ok) return heldUp(state, cursor.error);
   const next = { ...state, cursor: cursor.value };
-  const got = await poll(watch.port, cursor.value, watch.hosted);
+  const chain = state.station.host.runtime.entities.get(rig.self)?.chain ?? new Map();
+  const windows = windowsOf(watch.hosted, chain);
+  if (!windows.ok) return heldUp(next, windows.error);
+  const got = await poll(watch.port, cursor.value, watch.hosted, windows.value);
   if (!got.ok) return heldUp(next, got.error);
   const quiet = { ...next, watchFault: undefined };
   return got.value === undefined ? quiet : delivered(rig, quiet, got.value);

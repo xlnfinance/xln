@@ -22,7 +22,13 @@ const atEpoch = (c: Cluster): Cluster => {
 const deposit: Command = { _tag: "deposit", peer: BOB, token: GOLD, amount: 10n };
 const deposited = feed(framed(opened), ALICE, deposit);
 const started = feed(framed(opened), ALICE, { _tag: "dispute", peer: BOB });
-const countered = feed(framed(atEpoch(opened)), ALICE, { _tag: "j_dispute", peer: BOB, epoch: 1n, by: "right" });
+const finalizing = feed(
+  feed(started, ALICE, { _tag: "j_dispute", peer: BOB, epoch: 0n, by: "left", timeout: 500n }),
+  ALICE, { _tag: "j_window_over", peer: BOB },
+);
+const countered = feed(
+  framed(atEpoch(opened)), ALICE, { _tag: "j_dispute", peer: BOB, epoch: 1n, by: "right", timeout: 5n },
+);
 
 /** Alice's WAL with the actions of its last row changed as the test says; what the Runtime says of replaying it. */
 const replayed = (c: Cluster, change: Partial<JAction>) => {
@@ -40,6 +46,7 @@ describe("runtime/chain replay review A: a replay sees every field of a deposit 
     expect(replayed(deposited, {}).result.ok).toBe(true);
     expect(replayed(countered, {}).result.ok).toBe(true);
     expect(replayed(started, {}).result.ok).toBe(true);
+    expect(replayed(finalizing, {}).result.ok).toBe(true);
   });
 
   test.each([
@@ -64,6 +71,19 @@ describe("runtime/chain replay review A: a replay sees every field of a deposit 
     const body = row?._tag === "dispute_start" ? row.body : expect.unreachable("no dispute start");
     const { height, result } = replayed(started, { body: { ...body, offdeltas: [...body.offdeltas, 1n] } });
     expect(result).toEqual(diverged(height));
+  });
+
+  test("R-DURABLE a WAL whose dispute finalize names another peer, nonce, author, side or body does not replay", () => {
+    const row = hostOf(finalizing, ALICE).wal.at(-1)?.chain[0];
+    const ask = row?._tag === "dispute_finalize" ? row : expect.unreachable("no dispute finalize");
+    const changes = [
+      { peer: CAROL }, { nonce: 99n }, { proposerIsLeft: !ask.proposerIsLeft }, { startedByLeft: !ask.startedByLeft },
+      { body: { ...ask.body, offdeltas: [...ask.body.offdeltas, 1n] } },
+    ] as const;
+    changes.forEach((change) => {
+      const { height, result } = replayed(finalizing, change);
+      expect(result).toEqual(diverged(height));
+    });
   });
 
   test.each([

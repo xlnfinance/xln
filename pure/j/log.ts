@@ -42,7 +42,7 @@ export type Holding = Readonly<{ token: TokenId; collateral: bigint; ondelta: bi
 export type ChainEvent =
   | Tagged<"epoch_advanced", Place & { left: Bytes32; right: Bytes32; epoch: bigint }>
   | Tagged<"account_settled", Place & { left: Bytes32; right: Bytes32; holdings: readonly Holding[] }>
-  | Tagged<"dispute_started", Dispute>
+  | Tagged<"dispute_started", Dispute & { timeout: bigint }>
   | Tagged<"dispute_countered", Dispute>
   | Tagged<"dispute_finalized", Dispute>;
 
@@ -132,13 +132,14 @@ const disputeIn = (at: Place, topics: Four): Dispute =>
   ({ ...at, sender: topics[1], counter: topics[2], nonce: BigInt(topics[3]) });
 
 /** DisputeStarted's data is 10 head slots (13 inputs, three indexed), two of them offsets, two `bytes`, each at least
- * its length word. */
+ * its length word. The seventh slot is `disputeTimeout`: the second at which the dispute's window ends. */
 const STARTED_WORDS = 12;
+const TIMEOUT_AT = 6;
 const TWO_WORDS = 2;
 
 const startedRead: Reader = (at, topics, data) =>
   (four(topics) && holdsWords(data, (n) => n >= STARTED_WORDS)
-    ? some({ _tag: "dispute_started", ...disputeIn(at, topics) })
+    ? some({ _tag: "dispute_started", ...disputeIn(at, topics), timeout: wordAt(data, TIMEOUT_AT) })
     : none);
 
 const counteredRead: Reader = (at, topics, data) =>

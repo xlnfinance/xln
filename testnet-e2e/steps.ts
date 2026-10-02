@@ -17,7 +17,7 @@ import { accountMessageHash } from "../pure/chain/proof/payload.ts";
 import { keccakHex } from "../pure/kernel/encoding/bytes.ts";
 import { startAnvil, assertLoopback, scrubbedEnv, type Anvil } from "./lib/anvil.ts";
 import {
-  accountKeyOf, accountOnChain, advanceTime, collateralOf, connect, eid, hankoOf, heldBy, leftOf, must, partyOf, reserveOf, sendOps,
+  accountKeyOf, accountOnChain, advanceTime, collateralOf, connect, eid, hankoOf, heldBy, leftOf, must, partyOf, reserveOf,
   unit, type Chain, type Manifest, type Party,
 } from "./lib/chain.ts";
 import { GAPS, REPO } from "./lib/gaps.ts";
@@ -512,7 +512,6 @@ const dispute: Step<World> = {
     if (authorIsLeft === undefined) throw new Error(`the head ${replica.head} is the dispute-proof digest of neither author: the frame was not signed as the chain reads it`);
     const digest = digestFor(authorIsLeft);
     const left = leftOf(alice, hubX);
-    const starter = alice;
     const aliceBefore = await reserveOf(chain, alice);
     const hubBefore = await reserveOf(chain, hubX);
     const held = await collateralOf(chain, alice, hubX);
@@ -529,14 +528,19 @@ const dispute: Step<World> = {
     }
     if (net.account(a, x).used !== replica.used) throw new Error("the dispute start moved alice's Account");
     if (!(await accountOnChain(chain, alice, hubX)).disputeOpen) throw new Error("no dispute is open after the start");
+    // The chain's clock runs past both windows (anvil: a clock jump, then blocks to make that second final at depth 1); alice's own
+    // node is told by its J loop that the window it waits on is over, and its Entity asks the chain to finalize with what it started from.
     await advanceTime(chain, Number(2n * floor + 10n));
-    const end = await sendOps(chain, starter, [{
-      _tag: "dispute_finalize",
-      finalization: {
-        counterentity: hubX.id, initialNonce: nonce, finalNonce: nonce, proposerIsLeft: authorIsLeft, initialProofbodyHash: bodyHash, finalProofbody: body,
-        starterArguments: "0x", otherArguments: "0x", sig: "0x", startedByLeft: starter.id === left.id, cooperative: false,
-      },
-    }], `${starter.name} finalizes after both windows`);
+    const finals = (): number => net.askedBy(a).slice(before).filter((ask) => ask._tag === "dispute_finalize").length;
+    for (let tries = 0; tries < 6 && (await accountOnChain(chain, alice, hubX)).disputeOpen; tries += 1) {
+      await net.reach(BigInt(await chain.provider.getBlockNumber()));
+    }
+    if (finals() === 0) throw new Error("alice's node never asked the chain to finalize");
+    const finalAsk = net.askedBy(a).slice(before).flatMap((ask) => (ask._tag === "dispute_finalize" ? [ask] : []))[0];
+    if (finalAsk === undefined || finalAsk.nonce !== nonce || finalAsk.proposerIsLeft !== authorIsLeft || finalAsk.startedByLeft !== (a === eid(left))
+      || must(proofBodyHash(finalAsk.body), "finalize body hash") !== bodyHash) {
+      throw new Error("the finalize alice's node asked for differs from the start (nonce, author, side or body)");
+    }
     // What both sides believed: delta = ondelta + offdelta; Left takes delta clamped to the collateral, Right the rest. The chain's ondelta and collateral, the Runtimes' offdelta.
     const delta = held.ondelta + ledger.offdelta;
     const leftShare = delta < 0n ? 0n : delta > held.collateral ? held.collateral : delta;
@@ -556,10 +560,10 @@ const dispute: Step<World> = {
     return {
       checks: [
         `the head of the last committed frame (slot ${replica.used}, nonce ${nonce}, epoch ${onChain.epoch}, authored by the ${authorIsLeft ? "left" : "right"} side; body from pure/account/proof/body.ts, offdelta ${ledger.offdelta}, one token, no clause) is the dispute-proof digest the chain computes; alice's own node, holding hubX's signature over it from the frame round, asked for the start (nonce, epoch, author and body as the head names them) and the chain opened the dispute`,
-        `after both ${floor} s windows (anvil clock jump) ${starter.name} finalized (gas ${end.gasUsed}); the chain paid alice ${fmt(chain, aliceGot)} and hubX ${fmt(chain, hubGot)}, which is what the chain's ondelta ${held.ondelta} plus the Runtimes' offdelta ${ledger.offdelta} says`,
+        `after both ${floor} s windows (anvil clock jump) alice's own node was told by its J loop that the window was over (a final block's own second at or past the chain's end for the dispute) and asked the chain to finalize with the state it started from (${finals()} ask${finals() === 1 ? "" : "s"}, the nonce, author, side and body of the start); the chain paid alice ${fmt(chain, aliceGot)} and hubX ${fmt(chain, hubGot)}, which is what the chain's ondelta ${held.ondelta} plus the Runtimes' offdelta ${ledger.offdelta} says`,
         `collateral 0, epoch ${onChain.epoch} to ${after.epoch}, dispute closed; money held by the four entities is unchanged at ${fmt(chain, now)}`,
       ],
-      gaps: ["harnessSend"],
+      gaps: [],
     };
   },
 };

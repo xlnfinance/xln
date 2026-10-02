@@ -15,9 +15,12 @@ import { err, flatMap, foldResult, map, ok, type Result } from "../kernel/core/r
 import type { Tagged } from "../kernel/core/tagged.ts";
 import { jHeight, type HeightFault, type JHeight } from "../account/clause/clock.ts";
 import { decodeLogs, type Address, type Bytes32, type ChainEvent, type LogFault, type RawLog } from "./log.ts";
-import { observe, readingsOf, type Accounts, type Addressed, type ObserveFault, type Reading } from "./observe.ts";
+import {
+  observe, readingsOf, type Accounts, type Addressed, type JEvent, type ObserveFault, type Reading,
+} from "./observe.ts";
 
-export type Block = Readonly<{ number: bigint; hash: Bytes32; parent: Bytes32 }>;
+/** A block as the node tells it: `timestamp` is the chain's own second for it, the clock a dispute's window runs on. */
+export type Block = Readonly<{ number: bigint; hash: Bytes32; parent: Bytes32; timestamp: bigint }>;
 
 /** What the Host knows: where it has delivered up to, how deep a block must be buried, and the contract it watches. */
 export type Watch = Readonly<{ depository: Address; depth: bigint; applied: Block }>;
@@ -98,16 +101,41 @@ export const prepare = (w: Watch, batch: Batch): Result<Prepared, WatchFault> =>
 /** The Accounts the chain must be asked about, at the end of which block, before `advance` can run. */
 export const readings = (p: Prepared, hosted: readonly Bytes32[]): readonly Reading[] => readingsOf(p.events, hosted);
 
+/** A dispute window a hosted Entity waits on: its dispute with `peer` ends at the chain's second `timeout`. */
+export type Window = Readonly<{ to: Bytes32; peer: Bytes32; timeout: bigint }>;
+
+/** The windows of the disputes a delivery's own events say the hosted Entity started: the Host cannot know them yet. */
+const opening = (events: readonly Addressed[]): readonly Window[] =>
+  events.flatMap(({ to, event }): readonly Window[] =>
+    (event._tag === "j_dispute" && event.by === (to < event.peer ? "left" : "right")
+      ? [{ to, peer: event.peer, timeout: event.timeout }]
+      : []));
+
+/**
+ * The windows the chain's clock has passed by the delivery's last block, each told to its Entity once per delivery
+ * (R-DISPUTE-FINALIZE). A block's second is the chain's own, so a window is over for the Entity only when a final
+ * block says so: nothing here reads the Host's clock. The windows are those the Host brings and those the delivery's
+ * own events open, so a dispute whose start and window end are in one delivery is not left for the next block.
+ */
+const passed = (
+  at: bigint, hosted: readonly Bytes32[], windows: readonly Window[], events: readonly Addressed[],
+): readonly Addressed[] =>
+  [...windows, ...opening(events)].filter((x) => hosted.includes(x.to) && at >= x.timeout)
+    .map((x): Addressed => ({ to: x.to, event: { _tag: "j_window_over", peer: x.peer } satisfies JEvent }));
+
 /** The J events of one delivery for the hosted Entities, the height they end at, and the cursor to store. */
 export type Step = Readonly<{ watch: Watch; height: JHeight; events: readonly Addressed[] }>;
 
 /**
- * Deliver a prepared batch: the J events of its logs for the hosted Entities, in the chain's order, and the height
- * they end at. The new cursor is the batch's last block; an empty batch is the cursor itself and announces its height
- * again.
+ * Deliver a prepared batch: the J events of its logs for the hosted Entities, in the chain's order, then the windows
+ * the batch's last block has passed, and the height they end at. The new cursor is the batch's last block; an empty
+ * batch is the cursor itself and announces its height again.
  */
 export const advance = (
-  w: Watch, p: Prepared, hosted: readonly Bytes32[], accounts: Accounts,
+  w: Watch, p: Prepared, hosted: readonly Bytes32[], accounts: Accounts, windows: readonly Window[] = [],
 ): Result<Step, WatchFault> =>
   flatMap(observe(p.events, hosted, accounts), (events) =>
-    map(jHeight(p.last.number), (height) => ({ watch: { ...w, applied: p.last }, height, events })));
+    map(jHeight(p.last.number), (height) => ({
+      watch: { ...w, applied: p.last }, height,
+      events: [...events, ...passed(p.last.timestamp, hosted, windows, events)],
+    })));

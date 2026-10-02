@@ -30,6 +30,37 @@ export type OpFault =
   | Tagged<"unknown_token", { token: bigint }>
   | Tagged<"unhashable_proof">;
 
+const startOp = (action: Extract<JAction, { _tag: "dispute_start" }>): Result<JOp, OpFault> => {
+  const hashed = proofBodyHash(action.body);
+  return hashed.ok
+    ? ok({
+      _tag: "dispute_start",
+      start: {
+        counterentity: action.peer, nonce: action.nonce, ondeltaEpoch: action.epoch,
+        proposerIsLeft: action.proposerIsLeft, proofbodyHash: hashed.value, initialProofbody: action.body,
+        watchSeed: action.body.watchSeed, sig: action.sig, starterInitialArguments: "0x",
+        starterCounterArguments: "0x", starterCounterProofCommitment: NO_COMMITMENT,
+      },
+    })
+    : err({ _tag: "unhashable_proof" });
+};
+
+/** The finalize of a dispute no counter changed: the chain settles on the opening proof, its final body too. */
+const finalizeOp = (action: Extract<JAction, { _tag: "dispute_finalize" }>): Result<JOp, OpFault> => {
+  const hashed = proofBodyHash(action.body);
+  return hashed.ok
+    ? ok({
+      _tag: "dispute_finalize",
+      finalization: {
+        counterentity: action.peer, initialNonce: action.nonce, finalNonce: action.nonce,
+        proposerIsLeft: action.proposerIsLeft, initialProofbodyHash: hashed.value, finalProofbody: action.body,
+        starterArguments: "0x", otherArguments: "0x", sig: "0x", startedByLeft: action.startedByLeft,
+        cooperative: false,
+      },
+    })
+    : err({ _tag: "unhashable_proof" });
+};
+
 /**
  * The op for an Entity's action. The Entity's token is the Depository's internal token id (the Account layer and the
  * chain count tokens the same way), and a deposit funds the Account of `self` with `peer` out of `self`'s own reserve.
@@ -59,20 +90,10 @@ export const opOf = (self: EntityId, action: JAction, world: ChainWorld): Result
         _tag: "reveal_secret",
         reveal: { transformer: world.transformer, secret: bytesToHex(action.secret) },
       });
-    case "dispute_start": {
-      const hashed = proofBodyHash(action.body);
-      return hashed.ok
-        ? ok({
-          _tag: "dispute_start",
-          start: {
-            counterentity: action.peer, nonce: action.nonce, ondeltaEpoch: action.epoch,
-            proposerIsLeft: action.proposerIsLeft, proofbodyHash: hashed.value, initialProofbody: action.body,
-            watchSeed: action.body.watchSeed, sig: action.sig, starterInitialArguments: "0x",
-            starterCounterArguments: "0x", starterCounterProofCommitment: NO_COMMITMENT,
-          },
-        })
-        : err({ _tag: "unhashable_proof" });
-    }
+    case "dispute_start":
+      return startOp(action);
+    case "dispute_finalize":
+      return finalizeOp(action);
     case "counter":
     case "c2r":
     case "settle":

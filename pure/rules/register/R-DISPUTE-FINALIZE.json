@@ -1,0 +1,89 @@
+{
+ "id": "R-DISPUTE-FINALIZE",
+ "statement": "The node that started a dispute finalizes it once the chain's clock has passed the dispute's window, with no counter in between. The Entity keeps what it asked the chain to start with (`starting`: the `dispute_start` fields), the end of the window once the chain says one is open (`j_dispute` of the node's own side carries the chain's `disputeTimeout`, the second the window ends; the first one told for the epoch is kept, one of another epoch or of the peer's is not this record's), and whether the window is over. The Host's J loop tells it the window is over (`j_window_over`) when the last block of a delivery, which is final at the configured depth (D9), has a second at or past the end: the block's own timestamp, never the Host's clock, and the windows are read off the Entity's own chain facts, which the WAL rebuilds, so a restart forgets none. Once over, every frame of the Entity asks (`dispute_finalize`) with the start's nonce, author and proof body and whether the node is the Account's Left, and restates it until the chain says the dispute is over (`j_dispute_over`) or the epoch moves on; the Host de-duplicates, and the chain skips a finalize of a dispute that is already over. The Host's op is the chain's finalization of that dispute from the same proof: initial and final nonce equal, the body's own hash, empty arguments, no signature, not cooperative. A window over before the chain gave one, or with no start of the node's own, asks nothing. The WAL row names every field of the ask: a replay with another peer, nonce, author, side or body diverges. Not here: a finalize after the peer countered with a newer proof (the chain skips the starter's evidence as outdated; the counter's body is the peer's, so the starter has nothing to finalize with yet), the counter by the non-starter (R-DISPUTE-WATCH status), and a start or finalize the chain refuses.",
+ "source": "coordinator 10-02 (S8 forced dispute through the node, window and finalize); contracts-decisions.md Dispute window and finalize through the node",
+ "layers": {
+  "arrival": "n/a: the Arrival page models the Account's frames; the window and the finalize are Entity, Host and J-loop rules",
+  "quint": "n/a: the Quint model has the chain's dispute cells; when the node asks to finalize is not one of them",
+  "contract": "n/a: the chain finalizes when block.timestamp is at or past disputeTimeout and the evidence is the state that settles; the e2e dispute step finalizes through the node after the clock passes the window",
+  "rig": "n/a: an off-chain Entity, Host and J-loop rule",
+  "ts": "hold"
+ },
+ "killers": [
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DISPUTE-FINALIZE the node keeps what it started with, and asks nothing more until the window is over"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DISPUTE-FINALIZE the window is the one the chain gave the node's own dispute of this epoch"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DISPUTE-FINALIZE a window over before the chain gave one, or with no start, asks nothing"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DISPUTE-FINALIZE once the window is over the node asks to finalize with the state it started from"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DISPUTE-FINALIZE every frame restates the finalize until the chain says the dispute is over"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DISPUTE-FINALIZE the epoch moving on ends the dispute too: nothing is finalized for the next one"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DISPUTE-FINALIZE a Host that restarts keeps the window and is asked to finalize again"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DISPUTE-FINALIZE the one who is the Account's Right says so in the ask"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DISPUTE-FINALIZE a window the last block has passed is told after the logs, and not before"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DISPUTE-FINALIZE a window the last block has passed is told to the Entity after the events"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DISPUTE-FINALIZE the windows an Entity waits on are the node's own the chain gave an end, until told"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DISPUTE-FINALIZE a window the delivery itself opened for the node's own start is told after it"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "the ask names the start's nonce, author and body, and whether the node is the Account's Left"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "the Host's op is the chain's finalization of that dispute, with its own hash of the body"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DURABLE a WAL whose dispute finalize names another peer, nonce, author, side or body does not replay"
+  }
+ ]
+}

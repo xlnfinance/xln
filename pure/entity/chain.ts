@@ -6,19 +6,19 @@ import { err, ok, type Result } from "../kernel/core/result.ts";
 import { MAX_PROOF_TOKENS } from "../account/proof/body.ts";
 import type { TokenId } from "../account/model.ts";
 import type { Held } from "../account/state.ts";
-import type { ChainFacts, EntityFault, Windows } from "./model.ts";
+import type { ChainFacts, DisputeStart, EntityFault, Windows } from "./model.ts";
 
 export const freshChain: ChainFacts =
   {
     epoch: 0n, stored: 0n, frames: 0n, windows: undefined, disputed: false, frozen: false, cosigned: 0n,
-    held: new Map(),
+    held: new Map(), starting: undefined,
   };
 
 /**
  * The chain moved the epoch on: no proof of the new epoch is signed yet. An older or repeated report changes nothing.
  */
 export const epochAdvanced = (f: ChainFacts, epoch: bigint, stored: bigint): ChainFacts =>
-  (epoch <= f.epoch ? f : { ...f, epoch, stored, frames: 0n, disputed: false, frozen: false });
+  (epoch <= f.epoch ? f : { ...f, epoch, stored, frames: 0n, disputed: false, frozen: false, starting: undefined });
 
 /**
  * What the chain holds for a token, kept as it stands. A token the Account has a ledger for is always kept: the proof
@@ -42,7 +42,28 @@ export const framed = (f: ChainFacts): ChainFacts => ({ ...f, frames: f.frames +
 export const disputeOpened = (f: ChainFacts, epoch: bigint): ChainFacts =>
   (epoch === f.epoch ? { ...f, disputed: true } : f);
 
-export const disputeOver = (f: ChainFacts): ChainFacts => ({ ...f, disputed: false });
+/** The dispute is over, whoever started it: nothing is left to counter or to finalize. */
+export const disputeOver = (f: ChainFacts): ChainFacts => ({ ...f, disputed: false, starting: undefined });
+
+/**
+ * The node asked the chain to open a dispute with `start`. Asking again with the dispute already open keeps what the
+ * chain said of its window.
+ */
+export const disputeAsked = (f: ChainFacts, start: DisputeStart): ChainFacts =>
+  ({ ...f, starting: { start, window: f.starting?.window, over: f.starting?.over ?? false } });
+
+/**
+ * The chain says the dispute the node started has a window ending at `timeout`. A dispute of another epoch, or one the
+ * node did not ask for, is not about this record; an older or repeated report keeps the window it first gave.
+ */
+export const windowOpened = (f: ChainFacts, epoch: bigint, timeout: bigint): ChainFacts =>
+  (f.starting === undefined || epoch !== f.epoch || f.starting.window !== undefined
+    ? f
+    : { ...f, starting: { ...f.starting, window: timeout } });
+
+/** The chain's clock passed the end of the window: only a dispute the chain gave a window is over its window. */
+export const windowOver = (f: ChainFacts): ChainFacts =>
+  (f.starting === undefined || f.starting.window === undefined ? f : { ...f, starting: { ...f.starting, over: true } });
 
 /** The first nonce a proof of an epoch may take: two above the stored nonce, since none is signed at stored + 1. */
 export const firstNonce = (f: ChainFacts): bigint => f.stored + 2n;

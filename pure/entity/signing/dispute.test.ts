@@ -9,6 +9,8 @@ import { proofBodyHash } from "../../chain/proof/proof.ts";
 import { opOf } from "../../host/ops.ts";
 import { proofNonce } from "../chain.ts";
 import { credit, open } from "../fixtures.ts";
+import { entityFrame } from "../frame.ts";
+import { judge } from "../fixtures.ts";
 import { emptyEntity, sideOf, type EntityState, type JAction } from "../model.ts";
 import { accountKeyOf } from "./signing.ts";
 import { ALICE, BOB, hanko, must, real, run, signed } from "./keys.ts";
@@ -76,7 +78,7 @@ describe("entity/signing R-DISPUTE-START a dispute starts from the peer's signat
     });
   });
 
-  test("with no Account, or no committed frame, or a frame still pending, there is nothing to start with", () => {
+  test("with no Account, or no committed frame, there is nothing to start with", () => {
     const noAccount = dispute(emptyEntity(ALICE.id), BOB.id);
     expect(noAccount.chain).toEqual([]);
     expect(noAccount.notices.map((n) => n._tag === "command_refused" && n.fault._tag)).toEqual(["no_account"]);
@@ -87,6 +89,16 @@ describe("entity/signing R-DISPUTE-START a dispute starts from the peer's signat
       const faults = refused.notices.map((n) => n._tag === "command_refused" && n.fault);
       expect(faults).toEqual([{ _tag: "no_proof", why: "none" }]);
     });
+  });
+
+  test("a state the chain would refuse as a proof starts nothing, and the owner is told it cannot be signed", () => {
+    const year = 365n * 24n * 3600n;
+    const longer = { ...real, terms: { ...real.terms, leftResponseSeconds: year + 1n } };
+    const refused = entityFrame(judge, longer, committed.alice, [{ _tag: "dispute", peer: BOB.id }]);
+    expect(refused.chain).toEqual([]);
+    const faults = refused.notices.map((n) => n._tag === "command_refused" && n.fault);
+    expect(faults).toEqual([{ _tag: "no_proof", why: "unsignable" }]);
+    expect(refused.state.chain.get(BOB.id)?.starting).toBeUndefined();
   });
 
   test("a frame pending on top of the committed head leaves the dispute on the committed one", () => {
