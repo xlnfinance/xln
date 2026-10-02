@@ -115,8 +115,9 @@ export type PeerMessage = Tagged<"peer_message", { from: EntityId; msg: Msg<Acco
  * What the Host saw on the J chain about the Account with `peer`. A repeat or an older report changes nothing, so the
  * Host may deliver an event again: `j_epoch` is the chain moving the Account's epoch on (a settlement, a withdrawal
  * or a finished dispute landed), with the nonce it stores now; `j_dispute` is a dispute started in `epoch` by `by`,
- * whose window ends at the chain's second `timeout`; `j_window_over` is the chain's clock having passed that end for a
- * dispute this node started (R-DISPUTE-FINALIZE); `j_dispute_over` is that dispute countered or finalized;
+ * whose start carried `nonce` and whose window ends at the chain's second `timeout`; `j_window_over` is the chain's
+ * clock having passed that end for a dispute this node started (R-DISPUTE-FINALIZE); `j_dispute_over` is that
+ * dispute countered or finalized;
  * `j_op_lapsed` is a co-signed settlement or withdrawal that can no longer land (its batch reverted, its signatures
  * ran out), named by the serial its action carried: a report of an operation that is not the one out (a repeat, or an
  * older one) changes nothing; `j_collateral` is what the chain holds for one token of the Account now
@@ -124,7 +125,7 @@ export type PeerMessage = Tagged<"peer_message", { from: EntityId; msg: Msg<Acco
  */
 export type JEvent =
   | Tagged<"j_epoch", { peer: EntityId; epoch: bigint; stored: bigint }>
-  | Tagged<"j_dispute", { peer: EntityId; epoch: bigint; by: Side; timeout: bigint }>
+  | Tagged<"j_dispute", { peer: EntityId; epoch: bigint; by: Side; nonce: bigint; timeout: bigint }>
   | Tagged<"j_window_over", { peer: EntityId }>
   | Tagged<"j_dispute_over", { peer: EntityId }>
   | Tagged<"j_collateral", { peer: EntityId; token: TokenId; collateral: bigint; ondelta: bigint }>
@@ -242,7 +243,8 @@ export type EntityFault =
   | Tagged<"frame_in_flight">
   | Tagged<"unfolded_c2r", { folds: readonly Fold[] }>
   | Tagged<"entry_exists", { hashlock: string }>
-  | Tagged<"no_proof", { why: "none" | "unsignable" }>;
+  | Tagged<"no_proof", { why: "none" | "unsignable" }>
+  | Tagged<"dispute_pending">;
 
 /** What the owner of an input is told when it did not take effect. */
 export type Notice =

@@ -19,14 +19,17 @@ const committed = (() => {
 })();
 
 const window = { _tag: "j_dispute", epoch: 0n, timeout: 500n } as const;
+const nonceOf = (action: JAction | undefined): bigint =>
+  (action?._tag === "dispute_start" ? action.nonce : expect.unreachable("no dispute start"));
 const over = { _tag: "j_window_over" } as const;
 
 /** What each of the two nodes asks of the chain after it starts a dispute, hears its window and hears it is over. */
 const finalizeOf = (side: "alice" | "bob"): JAction | undefined => {
   const [self, peer, by] =
     side === "alice" ? [committed.alice, BOB, "left"] as const : [committed.bob, ALICE, "right"] as const;
-  const started = run(self, { _tag: "dispute", peer: peer.id }).state;
-  const ended = run(started, { ...window, peer: peer.id, by }, { ...over, peer: peer.id });
+  const started = run(self, { _tag: "dispute", peer: peer.id });
+  const nonce = nonceOf(started.chain[0]);
+  const ended = run(started.state, { ...window, peer: peer.id, by, nonce }, { ...over, peer: peer.id });
   return ended.chain.find((a) => a._tag === "dispute_finalize");
 };
 

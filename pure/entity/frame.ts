@@ -195,7 +195,7 @@ const chainFact = (w: Work, e: JEvent): Work => {
       return withFacts(w, e.peer, epochAdvanced(facts, e.epoch, e.stored));
     case "j_dispute":
       return withFacts(w, e.peer, e.by === sideOf(w.state.id, e.peer)
-        ? windowOpened(facts, e.epoch, e.timeout)
+        ? windowOpened(facts, e.epoch, e.nonce, e.timeout)
         : disputeOpened(facts, e.epoch));
     case "j_window_over":
       return withFacts(w, e.peer, windowOver(facts));
@@ -347,6 +347,7 @@ const funded = (w: Work, command: Extract<ChainCommand, { _tag: "fund" }>): Work
  */
 const disputed = (w: Work, terms: ProofTerms, command: Extract<ChainCommand, { _tag: "dispute" }>): Work => {
   const { peer } = command;
+  if (factsOf(w, peer).starting !== undefined) return refusedCommand(w, command, { _tag: "dispute_pending" });
   const account = w.state.accounts.get(peer);
   const proof = w.state.proofs.get(peer);
   const nonce = proofNonce(factsOf(w, peer), account?.used ?? 0);

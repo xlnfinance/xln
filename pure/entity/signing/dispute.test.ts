@@ -101,6 +101,15 @@ describe("entity/signing R-DISPUTE-START a dispute starts from the peer's signat
     expect(refused.state.chain.get(BOB.id)?.starting).toBeUndefined();
   });
 
+  test("a second dispute ask while the first stands is refused: the chain holds the first start's nonce", () => {
+    const first = dispute(committed.alice, BOB.id).state;
+    const later = run(first, credit(BOB.id, 90n)).state;
+    const second = dispute(later, BOB.id);
+    expect(second.chain).toEqual([]);
+    expect(second.notices.map((n) => n._tag === "command_refused" && n.fault._tag)).toEqual(["dispute_pending"]);
+    expect(second.state.chain.get(BOB.id)?.starting).toEqual(first.chain.get(BOB.id)?.starting);
+  });
+
   test("a frame pending on top of the committed head leaves the dispute on the committed one", () => {
     const next = run(committed.alice, credit(BOB.id, 90n)).state;
     expect(next.accounts.get(BOB.id)?.pending).toBeDefined();

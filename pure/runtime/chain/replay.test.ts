@@ -22,12 +22,18 @@ const atEpoch = (c: Cluster): Cluster => {
 const deposit: Command = { _tag: "deposit", peer: BOB, token: GOLD, amount: 10n };
 const deposited = feed(framed(opened), ALICE, deposit);
 const started = feed(framed(opened), ALICE, { _tag: "dispute", peer: BOB });
+const startNonce = (c: Cluster): bigint => {
+  const action = hostOf(c, ALICE).wal.at(-1)?.chain[0];
+  return action?._tag === "dispute_start" ? action.nonce : expect.unreachable("no dispute start");
+};
 const finalizing = feed(
-  feed(started, ALICE, { _tag: "j_dispute", peer: BOB, epoch: 0n, by: "left", timeout: 500n }),
+  feed(started, ALICE, {
+    _tag: "j_dispute", peer: BOB, epoch: 0n, by: "left", nonce: startNonce(started), timeout: 500n,
+  }),
   ALICE, { _tag: "j_window_over", peer: BOB },
 );
 const countered = feed(
-  framed(atEpoch(opened)), ALICE, { _tag: "j_dispute", peer: BOB, epoch: 1n, by: "right", timeout: 5n },
+  framed(atEpoch(opened)), ALICE, { _tag: "j_dispute", peer: BOB, epoch: 1n, by: "right", nonce: 3n, timeout: 5n },
 );
 
 /** Alice's WAL with the actions of its last row changed as the test says; what the Runtime says of replaying it. */

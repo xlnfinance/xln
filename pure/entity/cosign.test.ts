@@ -261,7 +261,7 @@ describe("entity/cosign review A: the edges of the signature, and what a dispute
   const signed = (amount: bigint): JAction =>
     ({ _tag: "settle", peer: BOB, serial: 1n, token: GOLD, amount, folds: [OWED] });
   const disputed = (by: "left" | "right"): EntityInput =>
-    ({ _tag: "j_dispute", peer: BOB, epoch: 0n, by, timeout: 5n });
+    ({ _tag: "j_dispute", peer: BOB, epoch: 0n, by, nonce: 3n, timeout: 5n });
   const factsOf = (s: EntityState) => s.chain.get(BOB);
 
   test("R-COSIGN-FREEZE a tx queued in the same frame does not stop the signature, which holds it back", () => {

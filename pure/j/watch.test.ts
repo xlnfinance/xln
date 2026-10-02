@@ -66,8 +66,8 @@ describe("j/watch", () => {
     expect(step.events).toEqual([
       toward(LEFT, { _tag: "j_epoch", peer: RIGHT, epoch: 1n, stored: 5n }),
       toward(RIGHT, { _tag: "j_epoch", peer: LEFT, epoch: 1n, stored: 5n }),
-      toward(LEFT, { _tag: "j_dispute", peer: RIGHT, epoch: 1n, by: "right", timeout: 500n }),
-      toward(RIGHT, { _tag: "j_dispute", peer: LEFT, epoch: 1n, by: "right", timeout: 500n }),
+      toward(LEFT, { _tag: "j_dispute", peer: RIGHT, epoch: 1n, by: "right", nonce: 7n, timeout: 500n }),
+      toward(RIGHT, { _tag: "j_dispute", peer: LEFT, epoch: 1n, by: "right", nonce: 7n, timeout: 500n }),
       toward(LEFT, { _tag: "j_dispute_over", peer: RIGHT }),
       toward(RIGHT, { _tag: "j_dispute_over", peer: LEFT }),
       toward(LEFT, { _tag: "j_epoch", peer: RIGHT, epoch: 2n, stored: 8n }),
@@ -236,7 +236,8 @@ describe("j/watch", () => {
     const [nonce, epoch] = [BigInt(b + 1) * 3n, epochBefore(plan, b, i)];
     switch (plan[b]?.[i]) {
       case "advance": return bothHear((peer) => ({ _tag: "j_epoch", peer, epoch: epoch + 1n, stored: nonce }));
-      case "dispute": return bothHear((peer) => ({ _tag: "j_dispute", peer, epoch, by: "right", timeout: 500n }));
+      case "dispute":
+        return bothHear((peer) => ({ _tag: "j_dispute", peer, epoch, by: "right", nonce: 7n, timeout: 500n }));
       default: return bothHear((peer) => ({ _tag: "j_dispute_over", peer }));
     }
   };

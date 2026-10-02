@@ -15,14 +15,19 @@ const opened = settle(feed(feed(start(viewOf(110n), viewOf(110n)), ALICE, open(B
 const framed = (c: Cluster): Cluster => settle(feed(c, BOB, credit(ALICE, 100n)));
 const asked = feed(framed(opened), ALICE, { _tag: "dispute", peer: BOB });
 
-const gave = (epoch: bigint, by: "left" | "right", timeout: bigint): JEvent =>
-  ({ _tag: "j_dispute", peer: BOB, epoch, by, timeout });
+const gave = (epoch: bigint, by: "left" | "right", timeout: bigint, nonce = NONCE): JEvent =>
+  ({ _tag: "j_dispute", peer: BOB, epoch, by, nonce, timeout });
 const windowOver: JEvent = { _tag: "j_window_over", peer: BOB };
 const over: JEvent = { _tag: "j_dispute_over", peer: BOB };
 
 const factsOf = (c: Cluster): ChainFacts | undefined => hostOf(c, ALICE).entities.get(ALICE)?.chain.get(BOB);
 const finalizes = (c: Cluster): readonly JAction[] => c.chain.filter((a: JAction) => a._tag === "dispute_finalize");
 const starts = (c: Cluster): readonly JAction[] => c.chain.filter((a: JAction) => a._tag === "dispute_start");
+
+const NONCE = (() => {
+  const [first] = starts(asked);
+  return first?._tag === "dispute_start" ? first.nonce : expect.unreachable("no start");
+})();
 
 const windowed = feed(asked, ALICE, gave(0n, "left", 500n));
 const ended = feed(windowed, ALICE, windowOver);
@@ -46,6 +51,24 @@ describe("runtime/chain R-DISPUTE-FINALIZE the node that started a dispute final
     expect(factsOf(theirs)?.disputed).toBe(true);
     expect(factsOf(feed(asked, ALICE, gave(1n, "left", 700n)))?.starting?.window).toBeUndefined();
     expect(factsOf(feed(framed(opened), ALICE, gave(0n, "left", 700n)))?.starting).toBeUndefined();
+  });
+
+  test("R-DISPUTE-FINALIZE a window of another dispute nonce than the one the node started is not taken", () => {
+    const other = feed(asked, ALICE, gave(0n, "left", 700n, NONCE + 2n));
+    expect(factsOf(other)?.starting?.window).toBeUndefined();
+    expect(factsOf(feed(other, ALICE, gave(0n, "left", 500n)))?.starting?.window).toBe(500n);
+  });
+
+  test("R-DISPUTE-FINALIZE a second dispute ask while one stands is refused, and the finalize keeps the first", () => {
+    const later = settle(feed(windowed, BOB, credit(ALICE, 150n)));
+    const again = feed(later, ALICE, { _tag: "dispute", peer: BOB });
+    expect(starts(again)).toHaveLength(1);
+    const told = hostOf(again, ALICE).wal.at(-1)?.notices.map((n) => n._tag === "command_refused" && n.fault._tag);
+    expect(told).toEqual(["dispute_pending"]);
+    const [kept] = finalizes(feed(again, ALICE, windowOver));
+    expect(kept?._tag === "dispute_finalize" ? kept.nonce : undefined).toBe(NONCE);
+    const unfreed = feed(feed(windowed, ALICE, over), ALICE, { _tag: "dispute", peer: BOB });
+    expect(starts(unfreed)).toHaveLength(2);
   });
 
   test("R-DISPUTE-FINALIZE a window over before the chain gave one, or with no start, asks nothing", () => {
@@ -93,8 +116,8 @@ describe("runtime/chain R-DISPUTE-FINALIZE the node that started a dispute final
 
   test("R-DISPUTE-FINALIZE the one who is the Account's Right says so in the ask", () => {
     const bob = feed(framed(opened), BOB, { _tag: "dispute", peer: ALICE });
-    const gaveBob = feed(feed(bob, BOB, { _tag: "j_dispute", peer: ALICE, epoch: 0n, by: "right", timeout: 500n }), BOB,
-      { _tag: "j_window_over", peer: ALICE });
+    const heard: JEvent = { _tag: "j_dispute", peer: ALICE, epoch: 0n, by: "right", nonce: NONCE, timeout: 500n };
+    const gaveBob = feed(feed(bob, BOB, heard), BOB, { _tag: "j_window_over", peer: ALICE });
     const ask = finalizes(gaveBob)[0];
     expect(ask?._tag === "dispute_finalize" ? ask.startedByLeft : undefined).toBe(false);
   });

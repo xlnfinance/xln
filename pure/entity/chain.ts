@@ -46,18 +46,19 @@ export const disputeOpened = (f: ChainFacts, epoch: bigint): ChainFacts =>
 export const disputeOver = (f: ChainFacts): ChainFacts => ({ ...f, disputed: false, starting: undefined });
 
 /**
- * The node asked the chain to open a dispute with `start`. Asking again with the dispute already open keeps what the
- * chain said of its window.
+ * The node asked the chain to open a dispute with `start`. The record is kept until the dispute is over or the epoch
+ * moves on, and no second start replaces it: the chain holds the dispute it opened first, with that start's nonce.
  */
 export const disputeAsked = (f: ChainFacts, start: DisputeStart): ChainFacts =>
-  ({ ...f, starting: { start, window: f.starting?.window, over: f.starting?.over ?? false } });
+  ({ ...f, starting: { start, window: undefined, over: false } });
 
 /**
- * The chain says the dispute the node started has a window ending at `timeout`. A dispute of another epoch, or one the
- * node did not ask for, is not about this record; an older or repeated report keeps the window it first gave.
+ * The chain says the dispute opened with `nonce` has a window ending at `timeout`. A dispute of another epoch or
+ * another nonce, or one the node did not ask for, is not about this record; an older or repeated report keeps the
+ * window it first gave.
  */
-export const windowOpened = (f: ChainFacts, epoch: bigint, timeout: bigint): ChainFacts =>
-  (f.starting === undefined || epoch !== f.epoch || f.starting.window !== undefined
+export const windowOpened = (f: ChainFacts, epoch: bigint, nonce: bigint, timeout: bigint): ChainFacts =>
+  (f.starting === undefined || epoch !== f.epoch || nonce !== f.starting.start.nonce || f.starting.window !== undefined
     ? f
     : { ...f, starting: { ...f.starting, window: timeout } });
 
