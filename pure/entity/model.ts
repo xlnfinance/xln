@@ -168,7 +168,13 @@ export type CosignOp =
 
 export type CosignAsk = Tagged<"cosign_ask", { from: EntityId; op: CosignOp }>;
 
-export type Arrival = PeerMessage | JEvent | CosignAsk;
+/**
+ * `j_secret` is a secret the chain showed (a payee's reveal in a batch of its own): the chain names no Account for it,
+ * so every Entity hears it, and the paybook of one that forwarded a lock under its hash passes it up (R-DISPUTE-FREEZE).
+ */
+export type SecretRevealed = Tagged<"j_secret", { secret: Uint8Array }>;
+
+export type Arrival = PeerMessage | JEvent | SecretRevealed | CosignAsk;
 
 /** The Host's timer for `peer`'s Account ran out: its pending frame is sent again, so a lost frame cannot wedge it. */
 export type Hook = Tagged<"resend_due", { peer: EntityId }>;

@@ -10,10 +10,11 @@ import { jHeight } from "../../account/clause/clock.ts";
 import { hopOf, learned } from "./paybook.ts";
 import { keccakHex } from "../../kernel/encoding/bytes.ts";
 import { unwrapOr } from "../../kernel/core/result.ts";
-import { anchor, credit, entityOf, GOLD, judge, open, TEST_SIG } from "../fixtures.ts";
+import { anchor, credit, entityOf, GOLD, judge, open, OPENED_WITH, TEST_SIG } from "../fixtures.ts";
 import { entityFrame } from "../frame.ts";
 import {
-  emptyEntity, type Command, type Entry, type EntityId, type EntityInput, type EntityState, type Notice, type Outbound,
+  emptyEntity, sideOf, type Command, type Entry, type EntityId, type EntityInput, type EntityState, type Notice,
+  type Outbound,
 } from "../model.ts";
 
 const ALICE = entityOf(1);
@@ -346,7 +347,7 @@ describe("entity/paybook what the hub learns from a frame of its next hop (R-HTL
   const forwarded = (net: Net, hashlock: string, from: EntityId, to: EntityId): Net =>
     tell(net, 100n, HUB, { _tag: "forward", hashlock, from, to });
 
-  test("R-HTLC-FORWARD a resolve in a frame that is refused leaves the entry locked and nothing passed up", () => {
+  test("R-DISPUTE-FREEZE a resolve in a frame that is refused is not committed, but its secret is passed up", () => {
     const entries = expecting(forwarded(base(), HASHLOCK, ALICE, BOB), BOB, HASHLOCK, SECRET);
     const sent = hear(step({ net: entries, queue: [] }, ALICE, [lock(entries, 105n)]), ALICE, HUB, "frame");
     const locked = hear(hear(sent, HUB, ALICE, "ack"), HUB, BOB, "frame");
@@ -357,9 +358,9 @@ describe("entity/paybook what the hub learns from a frame of its next hop (R-HTL
     const forgedAck: EntityInput = { _tag: "peer_message", from: BOB, msg: forged, sig: TEST_SIG };
     const refused = step(hear(locked, BOB, HUB, "ack"), HUB, [forgedAck]);
     expect(refused.net.notices.map((n) => n._tag)).toEqual(["message_refused"]);
-    expect(stateOf(refused.net, HUB).paybook.get(HASHLOCK)?._tag).toBe("locked");
+    expect(ledgerBetween(refused.net, HUB, BOB).holds.length).toBe(1);
     expect(ledgerBetween(refused.net, ALICE, HUB).holds.length).toBe(1);
-    expect(stateOf(refused.net, HUB).accounts.get(ALICE)?.pending).toBeUndefined();
+    expect(stateOf(refused.net, HUB).accounts.get(ALICE)?.pending?.frame.txs.map((t) => t._tag)).toEqual(["resolve"]);
   });
 
   test("R-HTLC-FORWARD a resolve in a frame accepted over the hub's own pending frame is learned and passed up", () => {
@@ -378,5 +379,61 @@ describe("entity/paybook what the hub learns from a frame of its next hop (R-HTL
     expect(LINKS.map(([a, b]) => ledgerBetween(done, a!, b!).holds.length)).toEqual(LINKS.map(() => 0));
     expect([[BOB, HUB], [HUB, ALICE]].map(([a, b]) => ledgerBetween(done, a!, b!).offdelta)).toEqual([20n, 20n]);
     expect([HUB, ALICE].map((id) => stateOf(done, id).paybook.size)).toEqual([0, 0]);
+  });
+});
+
+describe("entity/paybook the hub learns a secret whatever the Account in dispute lets through (R-DISPUTE-FREEZE)", () => {
+  const chainOpened = (peer: EntityId, nonce: bigint): EntityInput =>
+    ({ _tag: "j_dispute", peer, epoch: 0n, by: sideOf(BOB, HUB), nonce, timeout: 500n, ...OPENED_WITH });
+
+  /** Only the hub has heard of a dispute on hub-bob that Bob started: Bob has not yet. */
+  const hubHeard = (net: Net): Net => deliver(net, 100n, HUB, [chainOpened(BOB, 3n)]);
+
+  /** Bob asked for the dispute and the chain opened it: Bob and the hub are both frozen on hub-bob. */
+  const bobDisputed = (net: Net): Net => {
+    const asked = tell(net, 100n, BOB, { _tag: "dispute", peer: HUB });
+    const nonce = stateOf(asked, BOB).chain.get(HUB)?.starting?.start.nonce ?? expect.unreachable("no start asked");
+    return [HUB, BOB].reduce((acc, id) => deliver(acc, 100n, id, [chainOpened(id === HUB ? BOB : HUB, nonce)]), asked);
+  };
+
+  /** The chain showed a secret and the hub heard it. */
+  const showing = (net: Net, secret: Uint8Array): Net => deliver(net, 100n, HUB, [{ _tag: "j_secret", secret }]);
+
+  /** Alice's lock reaches Bob through the hub before Bob has said what he will answer. */
+  const forwarded = (): Net => tell(forwardAt(base()), 100n, ALICE, lock(base(), 105n));
+
+  const upstream = (net: Net) => [ledgerBetween(net, ALICE, HUB).offdelta, ledgerBetween(net, ALICE, HUB).holds.length];
+
+  test("R-DISPUTE-FREEZE a secret Bob shows on the chain is passed up: the hub claims Alice's lock", () => {
+    const frozen = expectAt(bobDisputed(forwarded()));
+    expect(upstream(frozen)).toEqual([0n, 1]);
+    const shown = showing(frozen, SECRET);
+    expect(upstream(shown)).toEqual([-AMOUNT, 0]);
+    expect(stateOf(shown, HUB).paybook.size).toBe(0);
+  });
+
+  test("R-DISPUTE-FREEZE a resolve the hub refuses as frozen still gives it the secret to pass up", () => {
+    const refused = expectAt(hubHeard(forwarded()));
+    expect(upstream(refused)).toEqual([-AMOUNT, 0]);
+    expect(ledgerBetween(refused, HUB, BOB).holds.length).toBe(1);
+  });
+
+  test("R-DISPUTE-FREEZE a secret of a hashlock the hub forwarded no lock under, or no secret of it, changes nothing", () => {
+    const frozen = expectAt(bobDisputed(forwarded()));
+    const other = showing(frozen, SECOND);
+    const wrong = showing(frozen, new Uint8Array(32));
+    [other, wrong].forEach((net) => {
+      expect(upstream(net)).toEqual([0n, 1]);
+      expect(stateOf(net, HUB).paybook.get(HASHLOCK)?._tag).toBe("locked");
+    });
+  });
+
+  test("R-DISPUTE-FREEZE a lock forwarded into an Account in dispute is refused with a notice and given up upstream", () => {
+    const refused = tell(hubHeard(forwardAt(base())), 100n, ALICE, lock(base(), 105n));
+    const faults = refused.notices.flatMap((n) => (n._tag === "command_refused" ? [n.fault._tag] : []));
+    expect(faults).toEqual(["account_disputed"]);
+    expect(upstream(refused)).toEqual([0n, 0]);
+    expect(ledgerBetween(refused, HUB, BOB).holds).toEqual([]);
+    expect(stateOf(refused, HUB).paybook.size).toBe(0);
   });
 });

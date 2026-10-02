@@ -24,7 +24,9 @@ import { MAX_LINE, type Key, type Peer, type RuntimeId } from "../link/link.ts";
 import {
   accepted, closed, dialed, line, linked, route, startMesh, wanted, type ConnId, type Mesh, type Refused, type Write,
 } from "../mesh/mesh.ts";
-import { beginAt, poll, windowsOf, type BadPeer, type Delivery, type JFault, type WatchConfig } from "../watch/loop.ts";
+import {
+  beginAt, poll, windowsOf, type BadPeer, type BadSecret, type Delivery, type JFault, type WatchConfig,
+} from "../watch/loop.ts";
 import { dialTcp, type Listener, type SocketFault, type Wire } from "./link/socket.ts";
 
 /** What a node is made of: its shell, its Entity, its key, who its peers are, and how often its timer runs. */
@@ -39,7 +41,7 @@ export type Config = Readonly<{
 export type Stopped = Tagged<"stopped">;
 
 /** What ends a node's work: a disk, the chain's submit path, the Runtime, or a watcher invariant broken. */
-export type NodeFault = DriveFault | WatchFault | BadPeer;
+export type NodeFault = DriveFault | WatchFault | BadPeer | BadSecret;
 
 export type Fault = NodeFault | Stopped;
 

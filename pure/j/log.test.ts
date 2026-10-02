@@ -29,9 +29,11 @@ describe("j/log", () => {
     FRAGMENTS.forEach((fragment) => expect(topicOf(fragment.format("sighash"))).toBe(fragment.topicHash));
   });
 
-  test("R-WATCH-CLOSED every log of the real lifecycle decodes: the four events are read, the rest are ignored", () => {
-    // AccountSettled is the fifth event read and has its own test below (R-J-COLLATERAL).
-    const read = new Set(["AccountEpochAdvanced", "DisputeStarted", "CounterDisputeRegistered", "DisputeFinalized"]);
+  test("R-WATCH-CLOSED every log of the real lifecycle decodes: the five events are read, the rest are ignored", () => {
+    // AccountSettled is the sixth event read and has its own test below (R-J-COLLATERAL).
+    const read = new Set([
+      "AccountEpochAdvanced", "DisputeStarted", "CounterDisputeRegistered", "DisputeFinalized", "SecretRevealed",
+    ]);
     const phases = Object.values(lifecyclePhases);
     const logged = (e: (typeof phases)[number]["events"][number], p: number) =>
       ({ e, log: logOf(e.name, e.args, BigInt(p + 1), BigInt(e.logIndex)) });
@@ -116,6 +118,21 @@ describe("j/log", () => {
         _tag: "epoch_advanced", block: 4n, blockHash: hashOf(4n), index: 2n, left: LEFT, right: RIGHT, epoch: 9n,
       },
     }));
+  });
+
+  test("R-DISPUTE-FREEZE a revealed secret reads its hashlock and revealer from the topics and the secret from the data", () => {
+    const log = logOf("SecretRevealed", { hashlock: hexOf(7n), revealer: LEFT, secret: hexOf(8n) }, 5n, 1n);
+    expect(decodeLog(DEPOSITORY, log)).toEqual(ok({
+      _tag: "some",
+      value: {
+        _tag: "secret_revealed", block: 5n, blockHash: hashOf(5n), index: 1n, hashlock: hexOf(7n), revealer: LEFT,
+        secret: hexOf(8n),
+      },
+    }));
+    const at = { block: 5n, blockHash: hashOf(5n), index: 1n };
+    const fault = err({ _tag: "bad_log" as const, ...at, event: log.topics[0] ?? "" });
+    [{ ...log, topics: log.topics.slice(0, 2) }, { ...log, data: `${log.data}${"00".repeat(32)}` }, { ...log, data: "0x" }]
+      .forEach((bad) => expect(decodeLog(DEPOSITORY, bad)).toEqual(fault));
   });
 
   test("a dispute start, a counter and a finalize read sender, counterentity and nonce from the topics", () => {

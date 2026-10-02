@@ -119,6 +119,17 @@ describe("j/observe", () => {
     ]));
   });
 
+  test("R-DISPUTE-FREEZE a revealed secret is a j_secret for every hosted Entity, party or not, and asks no reading", () => {
+    const shown = logOf("SecretRevealed", { hashlock: hexOf(7n), revealer: THIRD, secret: hexOf(8n) }, 4n, 0n);
+    const events = eventsOf(shown, advance(4n, 1n, 1n));
+    expect(readingsOf(events, [])).toEqual([]);
+    expect(observe(events.slice(0, 1), [LEFT, THIRD], accountsOf())).toEqual(ok([
+      toward(LEFT, { _tag: "j_secret", secret: hexOf(8n) }),
+      toward(THIRD, { _tag: "j_secret", secret: hexOf(8n) }),
+    ]));
+    expect(observe(events.slice(0, 1), [], accountsOf())).toEqual(ok([]));
+  });
+
   test("R-WATCH-TELL a reading that is missing is a fault, and so is one that contradicts the log's epoch", () => {
     const reading: Reading = { block: 2n, blockHash: hashOf(2n), left: LEFT, right: RIGHT };
     expect(observe(eventsOf(advance(2n, 0n, 1n)), [LEFT], accountsOf())).toEqual(err({ _tag: "no_reading", reading }));

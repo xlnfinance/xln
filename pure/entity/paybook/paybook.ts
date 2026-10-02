@@ -140,6 +140,21 @@ const routedBy = (book: Paybook, peer: EntityId, tx: Extract<AccountTx, { _tag: 
 };
 
 /**
+ * A secret shows itself by its hash: whoever it came from (a resolve in a frame the Entity refused, or a reveal on the
+ * chain) and whichever Account it came by, it opens the lock the Entity forwarded under that hashlock, so the secret is
+ * passed up to the one that locked to this Entity (R-DISPUTE-FREEZE: a payee behind a dispute cannot resolve in a frame).
+ */
+export const revealed = (book: Paybook, secret: Uint8Array): Paybook => {
+  const hashlock = keccakHex(secret);
+  const entry = book.get(hashlock);
+  return entry?._tag === "locked" ? withEntry(book, hashlock, { _tag: "pass", from: entry.from, secret }) : book;
+};
+
+/** The secrets of the resolves in a frame the Entity did not take: each one is revealed all the same. */
+export const revealedBy = (book: Paybook, txs: readonly AccountTx[]): Paybook =>
+  txs.reduce((acc, tx) => (tx._tag === "resolve" ? revealed(acc, tx.secret) : acc), book);
+
+/**
  * What a frame the Entity accepted from `peer` tells the paybook: a lock with a route is an entry, a resolve is the
  * secret to pass up, a cancel is a failure.
  */
@@ -147,10 +162,8 @@ export const learned = (book: Paybook, peer: EntityId, txs: readonly AccountTx[]
   txs.reduce((acc, tx) => {
     if (tx._tag === "lock") return routedBy(acc, peer, tx);
     if (tx._tag === "resolve") {
-      const hashlock = keccakHex(tx.secret);
-      const entry = acc.get(hashlock);
-      return entry?._tag === "locked" && entry.to === peer
-        ? withEntry(acc, hashlock, { _tag: "pass", from: entry.from, secret: tx.secret }) : acc;
+      const entry = acc.get(keccakHex(tx.secret));
+      return entry?._tag === "locked" && entry.to === peer ? revealed(acc, tx.secret) : acc;
     }
     if (tx._tag !== "cancel") return acc;
     const found = [...acc].find(([, e]) =>

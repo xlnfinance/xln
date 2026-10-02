@@ -1,6 +1,7 @@
 // What the J layer reads of the Depository's logs (R-WATCH-CLOSED, R-J1). The chain tells an Account five things, and
 // each has one event: its epoch moved (`AccountEpochAdvanced`), a dispute was started, a counter was registered, a
-// dispute was finalized, its collateral and ondelta stand at some amounts (`AccountSettled`). Every other event the
+// dispute was finalized, its collateral and ondelta stand at some amounts (`AccountSettled`). A sixth names no Account:
+// a secret was revealed (`SecretRevealed`), which every Entity hears. Every other event the
 // Depository can emit is named below as read by nobody. A log from the Depository that is on neither list is a fault,
 // so an event the contract adds is a decision here and never a silent miss; log.test.ts holds both lists against the
 // deployed ABI.
@@ -47,7 +48,8 @@ export type ChainEvent =
   | Tagged<"account_settled", Place & { left: Bytes32; right: Bytes32; holdings: readonly Holding[] }>
   | Tagged<"dispute_started", Dispute & Proof & { timeout: bigint }>
   | Tagged<"dispute_countered", Dispute & Proof>
-  | Tagged<"dispute_finalized", Dispute>;
+  | Tagged<"dispute_finalized", Dispute>
+  | Tagged<"secret_revealed", Place & { hashlock: Bytes32; revealer: Bytes32; secret: Bytes32 }>;
 
 export type LogFault =
   | Tagged<"foreign_log", Place & { address: Address }>
@@ -157,6 +159,12 @@ const finalizedRead: Reader = (at, topics, data) =>
     ? some({ _tag: "dispute_finalized", ...disputeIn(at, topics) })
     : none);
 
+/** `SecretRevealed(hashlock, revealer, secret)`: the hashlock and the revealer ride the topics, the secret is the data. */
+const revealedRead: Reader = (at, topics, data) =>
+  (three(topics) && holdsWords(data, (n) => n === 1)
+    ? some({ _tag: "secret_revealed", ...at, hashlock: topics[1], revealer: topics[2], secret: idAt(data, 0) })
+    : none);
+
 type Entry = Readonly<{ signature: string; read: Reader }>;
 
 const READ: readonly Entry[] = [
@@ -178,14 +186,15 @@ const READ: readonly Entry[] = [
     signature: "DisputeFinalized(bytes32,bytes32,uint256,bytes32,bytes32)",
     read: finalizedRead,
   },
+  { signature: "SecretRevealed(bytes32,bytes32,bytes32)", read: revealedRead },
 ];
 
 /**
- * The Depository's events the watcher does not read yet, each named so that the list is closed. Slice 1 reads five:
- * the four that move an Account's epoch or dispute and `AccountSettled`, which says what it holds. The rest are owed
- * (R-WATCH-READS-ALL, Q R7): `DisputeOpSkipped` and `BatchFailed` name an op that did not land, `SecretRevealed` is
- * how a hub learns a payee's reveal, the Debt events change what an Account owes. Reserves, tokens and the like are no
- * Account's chain fact.
+ * The Depository's events the watcher does not read yet, each named so that the list is closed. It reads six: the four
+ * that move an Account's epoch or dispute, `AccountSettled`, which says what it holds, and `SecretRevealed`, which is
+ * how a hub learns a payee's reveal (R-DISPUTE-FREEZE). The rest are owed (R-WATCH-READS-ALL, Q R7): `DisputeOpSkipped`
+ * and `BatchFailed` name an op that did not land, the Debt events change what an Account owes. Reserves, tokens and
+ * the like are no Account's chain fact.
  */
 export const IGNORED: readonly string[] = [
   "BatchFailed(bytes32,uint256,bytes4)",
@@ -197,7 +206,6 @@ export const IGNORED: readonly string[] = [
   "HankoBatchProcessed(bytes32,bytes32,uint256)",
   "HashLadderRevealRegistered(bytes32,bytes32,bytes32,uint16,bytes32,bytes32[4],bool,uint256)",
   "ReserveUpdated(bytes32,uint256,uint256)",
-  "SecretRevealed(bytes32,bytes32,bytes32)",
   "TokenRegistered(uint256,uint8,address,uint256)",
   "TransformerDeltaClamped(bytes32,uint256,address,uint256,(int256,uint256,uint256),(int256,uint256,uint256))",
   "WatchtowerCounterDisputeExecuted(address,bytes32,bytes32,uint256,uint256)",

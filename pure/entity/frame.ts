@@ -20,14 +20,14 @@ import {
   windowOpened, windowOver, withWindows,
 } from "./chain.ts";
 import { entityRules, type EntityRules } from "./rules.ts";
-import { hashlocksOf, intentFor, learned, withEntry, type Intent } from "./paybook/paybook.ts";
+import { hashlocksOf, intentFor, learned, revealed, revealedBy, withEntry, type Intent } from "./paybook/paybook.ts";
 import { askedOf, cosignFault, foldsOf, withdrawalOf } from "./cosign.ts";
 import type { AccountTx, Judge } from "../account/tx.ts";
 import {
   sideOf, type AccountCommand, type Arrival, type ChainCommand, type ChainFacts, type Command, type CosignAsk,
   type DisputeCounter, type DisputeStart, type EntityFault, type Entry, type EntityId, type EntityInput,
   type EntityReplica, type EntityState, type Hook, type JAction, type JEvent, type Notice, type Outbound,
-  type PaybookCommand, type PeerFault, type PeerMessage, type PeerProof,
+  type PaybookCommand, type PeerFault, type PeerMessage, type PeerProof, type SecretRevealed,
 } from "./model.ts";
 
 export type Frame = Readonly<{
@@ -110,11 +110,21 @@ const cosigned = (outcome: Outcome<PeerFault>, own: EntityReplica["pending"], fa
   outcome._tag === "accepted" || outcome._tag === "accepted_over_own"
   || (outcome._tag === "committed_own" && own?.frame.epoch === facts.epoch);
 
-/** A frame of the peer that was taken tells the paybook what the peer answered to the locks made to it. */
-const takenFrom = (w: Work, a: PeerMessage, outcome: Outcome<PeerFault>): Work =>
-  (a.msg._tag === "frame" && (outcome._tag === "accepted" || outcome._tag === "accepted_over_own")
-    ? { ...w, state: { ...w.state, paybook: learned(w.state.paybook, a.from, a.msg.frame.txs) } }
-    : w);
+/**
+ * A frame of the peer that was taken tells the paybook what the peer answered to the locks made to it. A frame that was
+ * not taken (an Account in dispute refuses every frame) still shows the secrets of its resolves: a secret proves itself
+ * by its hash, and the hub that holds the lock upstream must not lose it to a refusal (R-DISPUTE-FREEZE).
+ */
+const takenFrom = (w: Work, a: PeerMessage, outcome: Outcome<PeerFault>): Work => {
+  if (a.msg._tag !== "frame") return w;
+  const taken = outcome._tag === "accepted" || outcome._tag === "accepted_over_own";
+  const paybook = taken ? learned(w.state.paybook, a.from, a.msg.frame.txs) : revealedBy(w.state.paybook, a.msg.frame.txs);
+  return { ...w, state: { ...w.state, paybook } };
+};
+
+/** A secret the chain showed (R-DISPUTE-FREEZE): to the paybook it is the resolve of the payee, on any Account. */
+const secretShown = (w: Work, e: SecretRevealed): Work =>
+  ({ ...w, state: { ...w.state, paybook: revealed(w.state.paybook, e.secret) } });
 
 /** The side whose frame made the head the round took: mine when the peer's ack committed it, the peer's otherwise. */
 const authorOf = (heard: Heard<AccountTx, AccountState, PeerFault>): Side => {
@@ -292,6 +302,8 @@ const arrive = (rules: Rulebook, check: Check, view: JView, w: Work, a: Arrival)
       return hearing(rules, check, view, w, a);
     case "cosign_ask":
       return cosigning(w, a);
+    case "j_secret":
+      return secretShown(w, a);
     default:
       return observed(w, a);
   }
@@ -640,7 +652,7 @@ const dutiful = (judge: Judge, terms: ProofTerms) => (w: Work, peer: EntityId): 
 };
 
 const isArrival = (i: EntityInput): i is Arrival =>
-  i._tag === "peer_message" || i._tag === "cosign_ask" || i._tag === "j_epoch" || i._tag === "j_dispute"
+  i._tag === "peer_message" || i._tag === "cosign_ask" || i._tag === "j_secret" || i._tag === "j_epoch" || i._tag === "j_dispute"
   || i._tag === "j_countered" || i._tag === "j_window_over" || i._tag === "j_dispute_over"
   || i._tag === "j_start_lapsed" || i._tag === "j_counter_lapsed" || i._tag === "j_collateral"
   || i._tag === "j_op_lapsed";
