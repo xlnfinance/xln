@@ -138,6 +138,24 @@ describe("host/shell/chain a batch is journaled before it is sent", () => {
     expect([after.stage, after.lapsed]).toEqual(["idle", []]);
   });
 
+  test("R-DISPUTE-LAPSED a start held for want of gas room, not for a revert, stays in the draft", async () => {
+    const small = { ...GAS, txGasCap: 1n };
+    const moved = await withIo(scene(), CALM, (io) => stepped({ ...io, gas: small }, startAsked(opened())));
+    expect([moved.stage, moved.lapsed]).toEqual(["held", []]);
+    expect(moved.submitter.jbatch.draft.map((op) => op._tag)).toEqual(["dispute_start"]);
+  });
+
+  test("R-DISPUTE-LAPSED a start a signed batch also carries is not dropped: that batch may still land", async () => {
+    const sent = await withIo(scene(), CALM, (io) => stepped(io, startAsked(opened())));
+    const { jbatch } = sent.submitter;
+    const batch = jbatch.phase._tag === "inflight" ? jbatch.phase.sent : expect.unreachable("not sent");
+    const again = { ...sent.submitter, jbatch: { ...jbatch, phase: { _tag: "idle" } as const, draft: batch.ops,
+      abandoned: [batch] } };
+    const moved = await withIo(scene(), { ...CALM, outcome: REVERTS }, (io) => stepped(io, again));
+    expect([moved.stage, moved.lapsed]).toEqual(["held", []]);
+    expect(moved.submitter.jbatch.draft).toEqual(batch.ops);
+  });
+
   test("R-DISPUTE-LAPSED a start that simulates cleanly is sealed and sent, not dropped", async () => {
     const at = scene();
     const moved = await withIo(at, CALM, (io) => stepped(io, startAsked(opened())));

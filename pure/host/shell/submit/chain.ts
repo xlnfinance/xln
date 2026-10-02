@@ -108,7 +108,7 @@ const sealOutcome = async (
  * R-DISPUTE-LAPSED: the starts in the draft that would revert on their own. A start alone is sealed and simulated at
  * the head: one the chain would revert for ever (its signature is no longer the Account's) is dropped from the draft,
  * and named, so the Entity that asked for it is told and may ask again. One that is held for any other reason (a
- * limit, the cap), or only with the ops it is grouped with, stays.
+ * limit, the cap), or only with the ops it is grouped with, or one a signed batch also carries, stays.
  */
 const lapsedStarts = async (io: Io, s: Submitter): Promise<Result<Pumped, ShellFault>> => {
   const starts = s.jbatch.draft.filter((op) => op._tag === "dispute_start");
@@ -121,7 +121,8 @@ const lapsedStarts = async (io: Io, s: Submitter): Promise<Result<Pumped, ShellF
       && probe.value.why.some((why) => why._tag === "would_revert");
   });
   const left = lapsed.reduce<Submitter>((now, op) => dropped(now, op), s);
-  return ok({ submitter: left, stage: lapsed.length > 0 ? "closed" : "held", returned: [], skipped: [], lapsed });
+  const gone = lapsed.filter((op) => !left.jbatch.draft.includes(op));
+  return ok({ submitter: left, stage: gone.length > 0 ? "closed" : "held", returned: [], skipped: [], lapsed: gone });
 };
 
 const sealing = async (io: Io, s: Submitter): Promise<Result<Pumped, ShellFault>> => {
