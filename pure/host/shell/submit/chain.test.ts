@@ -11,7 +11,9 @@ import { requirement } from "../../../j/gas/gas.ts";
 import type { Simulation } from "../../../j/gas/simulate.ts";
 import { err, ok, unwrapOr, type Result } from "../../../kernel/core/result.ts";
 import { settle, resume, step, type Arrival, type ChainPort, type Io, type PortFault } from "./chain.ts";
-import { aliceRun, ALICE, callsOf, DEPOSIT, GAS, journalIn, TREASURY, walOf, DEPLOYED, WORLD } from "../fixtures.ts";
+import {
+  aliceRun, ALICE, callsOf, DEPOSIT, GAS, journalIn, START, TREASURY, walOf, DEPLOYED, WORLD,
+} from "../fixtures.ts";
 import { keyOf } from "../link/link.ts";
 import { fileDisk } from "../node/file-disk.ts";
 import { lazySigner, type Signer } from "./signer.ts";
@@ -83,6 +85,12 @@ const asked = (s: Submitter): Submitter => {
   return out._tag === "queued" ? out.submitter : expect.unreachable(`take ${out._tag}`);
 };
 
+/** The start as asked; a row of its own, since the deposit's row of another Runtime's WAL has the same height. */
+const startAsked = (s: Submitter): Submitter => {
+  const out = take(s, { ...START, row: { ...START.row, height: START.row.height + 100n } });
+  return out._tag === "queued" ? out.submitter : expect.unreachable(`take ${out._tag}`);
+};
+
 const stepped = async (io: Io, s: Submitter, arrival: Arrival = "sure") => {
   const out = await step(io, s, arrival);
   return out.ok ? out.value : expect.unreachable(`step ${JSON.stringify(out.error)}`);
@@ -111,8 +119,30 @@ describe("host/shell/chain a batch is journaled before it is sent", () => {
     const at = scene();
     const moved = await withIo(at, { ...CALM, outcome: REVERTS }, (io) => stepped(io, asked(opened())));
     expect(moved.stage).toBe("held");
+    expect(moved.lapsed).toEqual([]);
     expect(journalIn(at.journal)).toEqual([]);
     expect(callsOf(at.log).filter((c) => c.startsWith("send"))).toEqual([]);
+  });
+
+  test("R-DISPUTE-LAPSED a start that would revert is dropped from the draft and named, nothing is sent", async () => {
+    const at = scene();
+    const held = startAsked(opened());
+    const moved = await withIo(at, { ...CALM, outcome: REVERTS }, (io) => stepped(io, held));
+    expect(moved.lapsed.map((op) => op._tag)).toEqual(["dispute_start"]);
+    expect(moved.stage).toBe("closed");
+    expect(moved.submitter.jbatch.draft).toEqual([]);
+    expect(moved.submitter.waiting.size).toBe(0);
+    expect(journalIn(at.journal)).toEqual([]);
+    expect(callsOf(at.log).filter((c) => c.startsWith("send"))).toEqual([]);
+    const after = await withIo(at, { ...CALM, outcome: REVERTS }, (io) => stepped(io, moved.submitter));
+    expect([after.stage, after.lapsed]).toEqual(["idle", []]);
+  });
+
+  test("R-DISPUTE-LAPSED a start that simulates cleanly is sealed and sent, not dropped", async () => {
+    const at = scene();
+    const moved = await withIo(at, CALM, (io) => stepped(io, startAsked(opened())));
+    expect([moved.stage, moved.lapsed]).toEqual(["waiting", []]);
+    expect(journalIn(at.journal)).toEqual(["sealed@5"]);
   });
 
   test("a Signer that cannot sign stops the step before anything is simulated, journaled or sent", async () => {

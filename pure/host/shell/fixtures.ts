@@ -28,6 +28,9 @@ const resolve: Command = { _tag: "resolve", peer: ALICE, token: GOLD, id: holdId
 /** Alice's Runtime after opening, credit, a payment and a deposit: bigints and an ask of the chain. */
 export const aliceRun: Cluster = feed(paid, ALICE, deposit);
 
+/** Alice's Runtime after she asked to dispute the Account with Bob from the head of the payment. */
+const aliceDisputed: Cluster = feed(paid, ALICE, { _tag: "dispute", peer: BOB });
+
 /** Bob's Runtime after a resolve whose ack never came and a J height near the deadline: a reveal, secret in bytes. */
 export const bobRun: Cluster = rise(feed(settle(feed(credited, ALICE, lockIn)), BOB, resolve), BOB, 114n);
 
@@ -53,6 +56,13 @@ export const TREASURY = new Map([[1n, { reserve: 100n, debt: 0n }]]);
 export const DEPOSIT: Asked = (() => {
   const row = walOf(aliceRun, ALICE).findLast((r) => r.chain.some((a) => a._tag === "deposit")) as Row;
   const index = row.chain.findIndex((a) => a._tag === "deposit");
+  return { action: row.chain[index] as Asked["action"], row: { height: row.height, index } };
+})();
+
+/** Alice's dispute start as the Runtime asks for it: the action and the row it was committed in. */
+export const START: Asked = (() => {
+  const row = walOf(aliceDisputed, ALICE).findLast((r) => r.chain.some((a) => a._tag === "dispute_start")) as Row;
+  const index = row.chain.findIndex((a) => a._tag === "dispute_start");
   return { action: row.chain[index] as Asked["action"], row: { height: row.height, index } };
 })();
 
