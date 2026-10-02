@@ -281,7 +281,8 @@ export type EntityFault =
   | Tagged<"unfolded_c2r", { folds: readonly Fold[] }>
   | Tagged<"entry_exists", { hashlock: string }>
   | Tagged<"no_proof", { why: "none" | "unsignable" }>
-  | Tagged<"dispute_pending">;
+  | Tagged<"dispute_pending">
+  | Tagged<"account_disputed">;
 
 /** What the owner of an input is told when it did not take effect. */
 export type Notice =

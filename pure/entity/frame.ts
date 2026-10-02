@@ -16,7 +16,8 @@ import { holderOf, ledgerOf, rebased, withHeld } from "../account/state.ts";
 import { MAX_AMOUNT } from "../account/ledger.ts";
 import {
   answered, cosignFrozen, cosignLapsed, countered, depositable, disputeAsked, disputeOpened, disputeOver, epochAdvanced,
-  framed, freshChain, keepHolding, nextSerial, paidOut, proofNonce, startLapsed, windowOpened, windowOver, withWindows,
+  framed, freshChain, inDispute, keepHolding, nextSerial, paidOut, proofNonce, quiet, startLapsed, windowOpened,
+  windowOver, withWindows,
 } from "./chain.ts";
 import { entityRules, type EntityRules } from "./rules.ts";
 import { hashlocksOf, intentFor, learned, withEntry, type Intent } from "./paybook/paybook.ts";
@@ -333,10 +334,21 @@ const txOf = (self: Side, command: AccountCommand): AccountTx => {
   }
 };
 
-/** The Account checks the tx against its planning state at the door (R-ADMIT); a refusal is the command's notice. */
+/** A command that takes on value or exposure; a release (a resolve, a cancel, an expire) is not one. */
+const commits = (command: AccountCommand): boolean =>
+  command._tag === "pay" || command._tag === "lock" || command._tag === "offer" || command._tag === "fill";
+
+/**
+ * The Account checks the tx against its planning state at the door (R-ADMIT); a refusal is the command's notice. While
+ * a dispute is open the Account seals nothing (R-DISPUTE-FREEZE), so a command that takes on value is refused back to
+ * whoever asked, not queued to be voided by the epoch move; a release waits in the queue for the new epoch.
+ */
 const queued = (rules: Rulebook, w: Work, command: AccountCommand): Work => {
   const account = w.state.accounts.get(command.peer);
   if (account === undefined) return refusedCommand(w, command, { _tag: "no_account", peer: command.peer });
+  if (commits(command) && inDispute(factsOf(w, command.peer))) {
+    return refusedCommand(w, command, { _tag: "account_disputed" });
+  }
   const admitted = submit(rules(w, command.peer), account, txOf(sideOf(w.state.id, command.peer), command));
   return admitted.ok
     ? touching(withReplica(w, command.peer, admitted.value), command.peer)
@@ -488,7 +500,7 @@ const paced = (w: Work, view: JView, peer: EntityId, account: EntityReplica): bo
 
 const proposing = (rules: Rulebook, view: JView, w: Work, peer: EntityId): Work => {
   const account = w.state.accounts.get(peer);
-  if (account === undefined || paced(w, view, peer, account) || factsOf(w, peer).frozen) return w;
+  if (account === undefined || paced(w, view, peer, account) || quiet(factsOf(w, peer))) return w;
   const proposed = propose(rules(w, peer), account);
   return sending(withReplica(w, peer, proposed.replica), peer, proposed.sent);
 };
@@ -634,7 +646,7 @@ export const entityFrame = (
   const rules: Rulebook = (w, peer) => {
     const facts = factsOf(w, peer);
     return entityRules(judge, signingOf(anchor, w.state.id, peer, facts),
-      { self: sideOf(w.state.id, peer), frozen: facts.frozen });
+      { self: sideOf(w.state.id, peer), frozen: quiet(facts) });
   };
   const arrived = arrivalsOf(inputs).reduce((w, a) => arrive(rules, anchor.check, judge.view, w, a), start(state));
   const afterHooks = hooksOf(inputs).reduce(hooked, arrived);

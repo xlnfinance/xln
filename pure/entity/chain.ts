@@ -161,6 +161,16 @@ export const withWindows = (f: ChainFacts, windows: Windows): Result<ChainFacts,
  */
 export const cosignFrozen = (f: ChainFacts): ChainFacts => ({ ...f, frozen: true, cosigned: f.cosigned + 1n });
 
+/** A dispute is open on the Account, whoever started it: it is the chain's to settle until it is over. */
+export const inDispute = (f: ChainFacts): boolean => f.starting !== undefined || f.against !== undefined;
+
+/**
+ * The node signs nothing new on the Account (R-DISPUTE-FREEZE, R-COSIGN-FREEZE): its signature is out on a settlement
+ * or a C2R, or a dispute is open. The proof a dispute rests on must stay the newest one the node holds, and a frame
+ * committed now would be sealed under an epoch the finalize is about to void.
+ */
+export const quiet = (f: ChainFacts): boolean => f.frozen || inDispute(f);
+
 /** The serial the next operation of this Account will have. */
 export const nextSerial = (f: ChainFacts): bigint => f.cosigned + 1n;
 
