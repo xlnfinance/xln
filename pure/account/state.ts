@@ -28,6 +28,14 @@ const withChain = (s: AccountState, token: TokenId, held: Held): AccountState =>
 export const withHeld = (s: AccountState, held: ReadonlyMap<TokenId, Held>): AccountState =>
   [...held].reduce((acc, [token, one]) => withChain(acc, token, one), s);
 
+/**
+ * The chain moved the Account's epoch on: every proof of the old epoch is void and the new epoch counts offdelta from
+ * zero in every token (R-LEDGER-REBASE). What the chain applied or paid, it holds in ondelta, collateral and reserves;
+ * the rest of the Ledger (limits, holds, reserved) is the Account's own and stays.
+ */
+export const rebased = (s: AccountState): AccountState =>
+  ({ ...s, ledgers: new Map([...s.ledgers].map(([token, l]) => [token, { ...l, offdelta: 0n }])) });
+
 /** Every open hold of the Account, whatever its token, in token order of first use. */
 export const openHolds = (s: AccountState): readonly Hold[] => [...s.ledgers.values()].flatMap((l) => l.holds);
 

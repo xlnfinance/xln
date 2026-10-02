@@ -42,6 +42,16 @@ export const framed = (f: ChainFacts): ChainFacts => ({ ...f, frames: f.frames +
 export const disputeOpened = (f: ChainFacts, epoch: bigint): ChainFacts =>
   (epoch === f.epoch ? { ...f, disputed: true } : f);
 
+/**
+ * The chain finalized the dispute: it paid the Account out of its collateral, so it holds none and no ondelta for any
+ * token now, and says so in no `AccountSettled` (R-LEDGER-REBASE). `ledgered` are the tokens the Account has a ledger
+ * for.
+ */
+export const paidOut = (f: ChainFacts, ledgered: Iterable<TokenId>): ChainFacts => {
+  const none: Held = { collateral: 0n, ondelta: 0n };
+  return { ...f, held: new Map([...f.held.keys(), ...ledgered].map((token): [TokenId, Held] => [token, none])) };
+};
+
 /** The dispute is over, whoever started it: nothing is left to counter or to finalize. */
 export const disputeOver = (f: ChainFacts): ChainFacts => ({ ...f, disputed: false, starting: undefined });
 

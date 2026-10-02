@@ -1,7 +1,7 @@
 // One Entity frame (spec/entity/frame.scm): the inputs of the frame are folded in four phases over one view of every
 // Account, and the Accounts then propose. The phases are the only order there is: where an arrival sits among the
 // frame's commands does not matter, and a command always sees what the arrivals of its own frame did (R-E1).
-import { mapSet } from "../kernel/core/collections.ts";
+import { mapDelete, mapSet } from "../kernel/core/collections.ts";
 import { emptyReplica } from "../account/frame/account.ts";
 import type { JView } from "../account/clause/clock.ts";
 import {
@@ -12,11 +12,11 @@ import type { AccountState, Side } from "../account/model.ts";
 import { proofBodyOf, type ProofTerms } from "../account/proof/body.ts";
 import type { Check } from "./signing/attest.ts";
 import { signingOf, type Anchor } from "./signing/signing.ts";
-import { holderOf, ledgerOf, withHeld } from "../account/state.ts";
+import { holderOf, ledgerOf, rebased, withHeld } from "../account/state.ts";
 import { MAX_AMOUNT } from "../account/ledger.ts";
 import {
   cosignFrozen, cosignLapsed, depositable, disputeAsked, disputeOpened, disputeOver, epochAdvanced, framed, freshChain,
-  keepHolding, nextSerial, proofNonce, startLapsed, windowOpened, windowOver,
+  keepHolding, nextSerial, paidOut, proofNonce, startLapsed, windowOpened, windowOver,
   withWindows,
 } from "./chain.ts";
 import { entityRules, type EntityRules } from "./rules.ts";
@@ -139,10 +139,21 @@ const unsigned = (check: Check, a: PeerMessage, head: FrameHash): "missing" | "w
 const withProof = (w: Work, peer: EntityId, proof: PeerProof): Work =>
   ({ ...w, state: { ...w.state, proofs: mapSet(w.state.proofs, peer, proof) } });
 
+/**
+ * R-LEDGER-REBASE: the peer's signature over a head is a proof only if the frame that made the head was sealed in the
+ * epoch this node signs in now. The ack of a pending frame of mine that commits after the epoch moved is the peer's
+ * signature over a head of the voided epoch: the head stays (the lineage goes on), the proof is not kept, since a
+ * dispute from it would only revert. A frame of the peer's is judged only in my own epoch, so it is always current.
+ */
+const sealedNow = (rules: EntityRules, outcome: Outcome<PeerFault>, pending: EntityReplica["pending"]): boolean =>
+  outcome._tag !== "committed_own"
+  || (pending !== undefined && pending.frame.epoch === rules.epoch && pending.frame.firstNonce === rules.firstNonce);
+
 const hearing = (rules: Rulebook, check: Check, view: JView, w: Work, a: PeerMessage): Work => {
   const account = w.state.accounts.get(a.from);
   if (account === undefined) return noting(w, { _tag: "unknown_peer", from: a.from });
-  const heard = receive(rules(w, a.from), account, a.msg);
+  const rule = rules(w, a.from);
+  const heard = receive(rule, account, a.msg);
   const head = heard.replica.head;
   const why = committed(heard.outcome) ? unsigned(check, a, head) : undefined;
   if (why !== undefined) return noting(w, { _tag: "message_unsigned", from: a.from, head, why });
@@ -152,7 +163,7 @@ const hearing = (rules: Rulebook, check: Check, view: JView, w: Work, a: PeerMes
   const facts = factsOf(waiting, a.from);
   const counted = cosigned(heard.outcome, account.pending, facts) ? withFacts(waiting, a.from, framed(facts)) : waiting;
   const taken = takenFrom(counted, a, heard.outcome);
-  const proved = committed(heard.outcome) && a.sig !== undefined
+  const proved = committed(heard.outcome) && a.sig !== undefined && sealedNow(rule, heard.outcome, account.pending)
     ? withProof(taken, a.from, { head, slot: heard.replica.used, author: authorOf(heard), sig: a.sig })
     : taken;
   return refused === undefined ? proved : noting(proved, { _tag: "message_refused", from: a.from, outcome: refused });
@@ -177,6 +188,24 @@ const reconciled = (w: Work, peer: EntityId): Work => {
   });
 };
 
+/**
+ * R-LEDGER-REBASE: the chain moved the Account's epoch on, so every proof of the old epoch is void and offdelta counts
+ * from zero. The committed state and the state a pending frame of mine would commit both restart there, so the ack of
+ * a frame the peer committed before it heard of the move brings no old offdelta back, and the peer, which rebases the
+ * same way when it hears, holds the same ledger. The frame itself stays: it commits if the peer re-acks it, and is
+ * taken back and sealed again under the new epoch if the peer refuses it as another epoch's. The peer's signature over
+ * a head of the old epoch names a void epoch, so it is forgotten: a dispute from it would only revert.
+ */
+const rebasing = (w: Work, peer: EntityId): Work => {
+  const account = w.state.accounts.get(peer);
+  const forgot = { ...w, state: { ...w.state, proofs: mapDelete(w.state.proofs, peer) } };
+  return account === undefined ? forgot : withReplica(forgot, peer, {
+    ...account,
+    state: rebased(account.state),
+    pending: account.pending === undefined ? undefined : { ...account.pending, after: rebased(account.pending.after) },
+  });
+};
+
 /** The chain's collateral and ondelta for one token, kept; one with no ledger past the cap is told and dropped. */
 const holding = (w: Work, e: Extract<JEvent, { _tag: "j_collateral" }>): Work => {
   const ledgered = new Set(w.state.accounts.get(e.peer)?.state.ledgers.keys());
@@ -187,12 +216,20 @@ const holding = (w: Work, e: Extract<JEvent, { _tag: "j_collateral" }>): Work =>
     : reconciled(withFacts(w, e.peer, kept), e.peer);
 };
 
+/** R-LEDGER-REBASE: a finalized dispute paid the Account out: no collateral and no ondelta are held for any token. */
+const finalized = (w: Work, peer: EntityId): Work => {
+  const ledgered = w.state.accounts.get(peer)?.state.ledgers.keys() ?? [];
+  return reconciled(withFacts(w, peer, paidOut(disputeOver(factsOf(w, peer)), ledgered)), peer);
+};
+
 /** What the chain did to the Account with `peer`, as the facts the Entity holds for the pair say. */
 const chainFact = (w: Work, e: JEvent): Work => {
   const facts = factsOf(w, e.peer);
   switch (e._tag) {
-    case "j_epoch":
-      return withFacts(w, e.peer, epochAdvanced(facts, e.epoch, e.stored));
+    case "j_epoch": {
+      const moved = epochAdvanced(facts, e.epoch, e.stored);
+      return moved === facts ? w : rebasing(withFacts(w, e.peer, moved), e.peer);
+    }
     case "j_dispute":
       return withFacts(w, e.peer, e.by === sideOf(w.state.id, e.peer)
         ? windowOpened(facts, e.epoch, e.nonce, e.timeout)
@@ -200,7 +237,7 @@ const chainFact = (w: Work, e: JEvent): Work => {
     case "j_window_over":
       return withFacts(w, e.peer, windowOver(facts));
     case "j_dispute_over":
-      return withFacts(w, e.peer, disputeOver(facts));
+      return e.finalized ? finalized(w, e.peer) : withFacts(w, e.peer, disputeOver(facts));
     case "j_start_lapsed":
       return withFacts(w, e.peer, startLapsed(facts, e.nonce));
     case "j_collateral":

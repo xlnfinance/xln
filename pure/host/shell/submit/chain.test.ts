@@ -120,6 +120,7 @@ describe("host/shell/chain a batch is journaled before it is sent", () => {
     const moved = await withIo(at, { ...CALM, outcome: REVERTS }, (io) => stepped(io, asked(opened())));
     expect(moved.stage).toBe("held");
     expect(moved.lapsed).toEqual([]);
+    expect(moved.submitter.jbatch.draft.map((op) => op._tag)).toEqual(["reserve_to_collateral"]);
     expect(journalIn(at.journal)).toEqual([]);
     expect(callsOf(at.log).filter((c) => c.startsWith("send"))).toEqual([]);
   });

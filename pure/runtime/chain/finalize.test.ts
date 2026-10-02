@@ -18,7 +18,7 @@ const asked = feed(framed(opened), ALICE, { _tag: "dispute", peer: BOB });
 const gave = (epoch: bigint, by: "left" | "right", timeout: bigint, nonce = NONCE): JEvent =>
   ({ _tag: "j_dispute", peer: BOB, epoch, by, nonce, timeout });
 const windowOver: JEvent = { _tag: "j_window_over", peer: BOB };
-const over: JEvent = { _tag: "j_dispute_over", peer: BOB };
+const over: JEvent = { _tag: "j_dispute_over", peer: BOB, finalized: true };
 
 const factsOf = (c: Cluster): ChainFacts | undefined => hostOf(c, ALICE).entities.get(ALICE)?.chain.get(BOB);
 const finalizes = (c: Cluster): readonly JAction[] => c.chain.filter((a: JAction) => a._tag === "dispute_finalize");

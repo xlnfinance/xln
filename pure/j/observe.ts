@@ -25,7 +25,7 @@ export type JEvent =
   | Tagged<"j_epoch", { peer: Bytes32; epoch: bigint; stored: bigint }>
   | Tagged<"j_dispute", { peer: Bytes32; epoch: bigint; by: Side; nonce: bigint; timeout: bigint }>
   | Tagged<"j_window_over", { peer: Bytes32 }>
-  | Tagged<"j_dispute_over", { peer: Bytes32 }>
+  | Tagged<"j_dispute_over", { peer: Bytes32; finalized: boolean }>
   | Tagged<"j_collateral", { peer: Bytes32; token: TokenId; collateral: bigint; ondelta: bigint }>;
 
 /** A J event for one hosted Entity. */
@@ -121,8 +121,8 @@ const eventFor = (
   switch (e._tag) {
     case "epoch_advanced": return epochMoved(events, e, peer, at);
     case "dispute_started": return disputeStarted(events, e, peer, at);
-    case "dispute_countered": return ok(e.sender === self ? [{ _tag: "j_dispute_over", peer }] : []);
-    case "dispute_finalized": return ok([{ _tag: "j_dispute_over", peer }]);
+    case "dispute_countered": return ok(e.sender === self ? [{ _tag: "j_dispute_over", peer, finalized: false }] : []);
+    case "dispute_finalized": return ok([{ _tag: "j_dispute_over", peer, finalized: true }]);
     case "account_settled": return ok(e.holdings.map((h): JEvent => ({ _tag: "j_collateral", peer, ...h })));
   }
 };

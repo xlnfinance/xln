@@ -252,7 +252,7 @@ describe("entity/cosign R-COSIGN-FREEZE a lapse names its operation: only the on
     expect(factsOf(landed)?.frozen).toBe(false);
     expect(factsOf(landed)?.cosigned).toBe(2n);
     const third = run(landed, withdraw(10n));
-    expect(third.chain.map((a) => (a._tag === "settle" ? a.serial : undefined))).toEqual([3n]);
+    expect(third.chain.map((a) => (a._tag === "c2r" ? a.serial : undefined))).toEqual([3n]);
     expect(factsOf(run(third.state, lapse(2n)).state)?.frozen).toBe(true);
   });
 });
@@ -283,7 +283,7 @@ describe("entity/cosign review A: the edges of the signature, and what a dispute
     const out = run(owing, withdraw(30n)).state;
     expect(factsOf(run(out, disputed("right")).state)?.frozen).toBe(true);
     expect(factsOf(run(out, disputed("left")).state)?.frozen).toBe(true);
-    const over = run(run(out, disputed("right")).state, { _tag: "j_dispute_over", peer: BOB }).state;
+    const over = run(run(out, disputed("right")).state, { _tag: "j_dispute_over", peer: BOB, finalized: false }).state;
     expect(factsOf(over)?.frozen).toBe(true);
   });
 });

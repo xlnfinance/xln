@@ -20,7 +20,7 @@ const BOB = entityOf(2);
 const epochOf = (peer: EntityId, epoch: bigint, stored: bigint): JEvent => ({ _tag: "j_epoch", peer, epoch, stored });
 const disputeBy = (peer: EntityId, epoch: bigint, by: "left" | "right"): JEvent =>
   ({ _tag: "j_dispute", peer, epoch, by, nonce: 3n, timeout: 5n });
-const over = (peer: EntityId): JEvent => ({ _tag: "j_dispute_over", peer });
+const over = (peer: EntityId): JEvent => ({ _tag: "j_dispute_over", peer, finalized: false });
 
 const opened = settle(feed(feed(start(viewOf(110n), viewOf(110n)), ALICE, open(BOB)), BOB, open(ALICE)));
 

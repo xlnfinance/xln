@@ -261,7 +261,12 @@ const risen = (ops: Ops, w: World): World =>
 const landed = (ops: Ops, w: World): World => {
   const epoch = 1n + NAMES.reduce((e, n) => (e > (factsOf(w, n)?.epoch ?? 0n) ? e : (factsOf(w, n)?.epoch ?? 0n)), 0n);
   const event = (n: Name): EntityInput => ({ _tag: "j_epoch", peer: ID[PEER[n]], epoch, stored: epoch * 10n });
-  return risen(ops, NAMES.reduce((acc, n) => told(ops, acc, n, event(n)), w));
+  const folded = (n: Name): EntityInput => {
+    const l = ledgerOf(accountOf(w, n)?.state ?? expect.unreachable("no Account"), GOLD);
+    const ondelta = l.ondelta + l.offdelta;
+    return { _tag: "j_collateral", peer: ID[PEER[n]], token: GOLD, collateral: l.collateral, ondelta };
+  };
+  return risen(ops, NAMES.reduce((acc, n) => told(ops, told(ops, acc, n, event(n)), n, folded(n)), w));
 };
 
 /** The Host of `signer` asks the other for the same signature, as its transport would. */
@@ -392,7 +397,7 @@ const moneyFailures = (w: World): readonly string[] => {
   const l = a === undefined ? undefined : ledgerOf(a.state, GOLD);
   const owed = owedToLeft(w);
   const says = `the payments taken less refused say ${owed}`;
-  return l === undefined || l.offdelta === owed ? [] : [`offdelta ${l.offdelta}, ${says}`];
+  return l === undefined || l.ondelta + l.offdelta === owed ? [] : [`delta ${l.ondelta + l.offdelta}, ${says}`];
 };
 
 /** Every second run of the chain weather starts with an offdelta: the Accounts open, Bob lends, Alice pays him 7. */
