@@ -9,7 +9,8 @@ usage: mutants/run.py <module>      module = account | chain | ...   (reads muta
 
 A mutant is {id, why, file, old, new, killedBy, also?, step?, samples?, steps?}; `old` must occur exactly once in `file`. `also` lists further
 edits [{file, old, new}] for a mutant that must change two places to stay well-formed.
-The module json may set "init" and "step" (action names for `quint run`) and "testSamples" (samples per scenario test).
+The module json may set "init" and "step" (action names for `quint run`), "testSamples" (samples per scenario test) and "testMain" (the module
+`quint test` runs, for a test file whose scenarios are instantiated by switches: mutants/dispute_payall.json uses payall_test).
 killedBy is "invariant:<name>" (quint run must violate it) or "test:<name>" (quint test must fail that test).
 """
 import json, os, shutil, subprocess, sys, tempfile
@@ -55,7 +56,8 @@ def check_invariant(d, main, inv, cfg, seeds=(1, 2, 3)):
 
 
 def check_test(d, test_file, name, cfg):
-    rc, out = sh([QUINT, "test", test_file, "--backend", "typescript", "--match", name,
+    main = ["--main", cfg["testMain"]] if "testMain" in cfg else []
+    rc, out = sh([QUINT, "test", test_file, *main, "--backend", "typescript", "--match", name,
                   "--max-samples", str(cfg.get("testSamples", 10000))], d, 600)
     failed = rc != 0 and ("failed" in out or "Error" in out)
     return failed, ("test failed" if failed else "test passed")
@@ -91,7 +93,8 @@ def main():
     rc, out = sh([QUINT, "typecheck", main_file_of(module)], d, 300)
     assert rc == 0, out
     if test_file:
-        rc, out = sh([QUINT, "test", test_file, "--backend", "typescript", "--max-samples",
+        main = ["--main", spec["testMain"]] if "testMain" in spec else []
+        rc, out = sh([QUINT, "test", test_file, *main, "--backend", "typescript", "--max-samples",
                       str(spec.get("testSamples", 10000))], d, 900)
         assert rc == 0, "baseline tests fail:\n" + out[-800:]
     shutil.rmtree(d, ignore_errors=True)

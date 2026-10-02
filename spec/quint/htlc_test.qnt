@@ -119,6 +119,11 @@ module hscn {
       .then(closeU)
       .then(check(st.paidChain == 1 and route_safe == (SW_SEE and SW_HOP >= 1)))
   }
+
+  // R-CLOCK: the payer cannot expire the lock on U before TU, whatever the hub has done by then. The model's own clock never reaches it (time
+  // passes only when the hub has asked for the claim it owes), so a rule that lets the lock expire at TD survives every random trace; here the
+  // clock is moved to TU and the expiry must be refused.
+  run payerCannotExpireBeforeTUTest = (init.then(jump(TU)).then(expireU)).fail()
 }
 
 module today_htlc_test { import hscn(SW_SEE = false, SW_DISSOLVE = false, SW_HOP = 2).* from "./htlc_test" }
