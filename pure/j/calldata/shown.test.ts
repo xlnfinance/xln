@@ -87,6 +87,7 @@ describe("j/shown", () => {
       finalizedOf(op, 2n, 4n, other),
     );
     expect(calldataWanted(prepared, [LEFT])).toEqual([txOf(2n, 1n), TX, other]);
+    expect(calldataWanted(prepared, [RIGHT])).toEqual([txOf(2n, 1n), TX, other]);
     expect(calldataWanted(prepared, [THIRD])).toEqual([]);
   });
 
