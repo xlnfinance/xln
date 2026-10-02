@@ -77,6 +77,9 @@ const portOf = (
 });
 
 /** The shell over the scene's two files for one piece of work, and the files closed after it. */
+/** The simulation the scene's port answers with when a test names none. */
+const DEFAULT_OUTCOME: Simulation["outcome"] | undefined = undefined;
+
 const withShell = async <T>(
   at: Scene, sends: Result<void, PortFault>, work: (shell: Shell) => Promise<T>,
   outcome?: Simulation["outcome"], skipReason?: number,
@@ -85,7 +88,8 @@ const withShell = async <T>(
   const wal = await fileDisk(at.wal);
   const journal = await fileDisk(at.journal);
   if (!wal.ok || !journal.ok) return expect.unreachable("disks");
-  const io = { port: portOf(at, sends, outcome, skipReason), signer: lazySigner(ALICE, KEY), journal: journal.value, gas: GAS };
+  const port = portOf(at, sends, outcome, skipReason);
+  const io = { port, signer: lazySigner(ALICE, KEY), journal: journal.value, gas: GAS };
   const out = await work({ wal: wal.value, io, now: () => stamp(1_000n) });
   await wal.value.close();
   await journal.value.close();
@@ -233,7 +237,7 @@ describe("host/shell/drive the Host's rows are on the disk before the chain hear
     expect(rowsIn(out.at).flatMap((r) => r.chain.map((a) => a._tag))).toEqual(["counter"]);
   });
 
-  test("R-DISPUTE-LAPSED a counter held for a reason that can heal is not given up: it is asked for again", async () => {
+  test("R-DISPUTE-LAPSED a counter held for a reason that can heal is asked for again", async () => {
     const transient: Cause[] = [{ _tag: "error", name: "E3" }];
     const out = await counterTurns({ _tag: "reverts", reason: "execution failed", causes: transient });
     expect(out.first.lapsed).toEqual([]);
@@ -250,7 +254,7 @@ describe("host/shell/drive the Host's rows are on the disk before the chain hear
     expect(answerOf(out.first)?.lapsed).toBe(false);
   });
 
-  test("R-DISPUTE-LAPSED a counter the batch skipped for good (window closed) lapses, a skip that can heal does not", async () => {
+  test("R-DISPUTE-LAPSED a counter skipped for good in a landed batch lapses, one that can heal does not", async () => {
     const skipped = (reason: number): Simulation["outcome"] =>
       ({ _tag: "reverts", reason: "DisputeOpSkipped", causes: [{ _tag: "skipped", op: 1, reason }] });
     const closed = await counterTurns(skipped(4));
@@ -266,11 +270,11 @@ describe("host/shell/drive the Host's rows are on the disk before the chain hear
     const out = await withShell(at, ok(undefined), async (shell) => {
       const started = turnOf(await start(shell, { ...BOOT, genesis: paid }));
       return turnOf(await pump(shell, turnOf(await command(shell, started.station, ALICE, dispute))));
-    }, undefined, reason);
+    }, DEFAULT_OUTCOME, reason);
     return { at, out, starting: out.station.host.runtime.entities.get(ALICE)?.chain.get(BOB)?.starting };
   };
 
-  test("R-DISPUTE-LAPSED a start the chain skipped for good (stored nonce reached, epoch left) is told as lapsed", async () => {
+  test("R-DISPUTE-LAPSED a start skipped for good (nonce reached, epoch left) is told as lapsed", async () => {
     const [reached, left] = [await startSkipped(0), await startSkipped(11)];
     expect(reached.out.skipped.map(({ op, reason }) => [op._tag, reason])).toEqual([["dispute_start", 0]]);
     expect([reached.starting, left.starting]).toEqual([undefined, undefined]);
@@ -281,7 +285,7 @@ describe("host/shell/drive the Host's rows are on the disk before the chain hear
     expect(open.out.skipped.map(({ reason }) => reason)).toEqual([1]);
     expect(open.starting).toBeDefined();
   });
-  test("R-DISPUTE-LAPSED a counter that landed and was skipped for good lapses, one skipped as unknown does not", async () => {
+  test("R-DISPUTE-LAPSED a counter that landed and was skipped for good lapses, an unknown skip does not", async () => {
     const ok_: Simulation["outcome"] = { _tag: "ok", applyGas: 100_000n };
     const [window, none] = [await counterTurns(ok_, 4), await counterTurns(ok_, 2)];
     expect([answerOf(window.third)?.lapsed, answerOf(none.third)?.lapsed]).toEqual([true, false]);

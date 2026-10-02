@@ -29,7 +29,8 @@ export const DISPUTE_SKIPPED = topicOf("DisputeOpSkipped(bytes32,bytes32,uint8,u
 const ERROR_NAMES: ReadonlyMap<string, string> =
   new Map(Array.from({ length: 13 }, (_, n): [string, string] => [bytesToHex(selector(`E${n}()`)), `E${n}`]));
 
-export const errorNamed = (selected: string): string => ERROR_NAMES.get(selected.toLowerCase()) ?? selected.toLowerCase();
+export const errorNamed = (selected: string): string =>
+  ERROR_NAMES.get(selected.toLowerCase()) ?? selected.toLowerCase();
 
 export const withArguments = (signature: string, values: Parameters<typeof encode>[0]): Result<string, ReplyFault> => {
   const encoded = encode(values);

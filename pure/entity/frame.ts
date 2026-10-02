@@ -26,8 +26,9 @@ import { askedOf, cosignFault, foldsOf, withdrawalOf } from "./cosign.ts";
 import type { AccountTx, Judge } from "../account/tx.ts";
 import {
   sideOf, type AccountCommand, type Arrival, type ChainCommand, type ChainFacts, type Command, type CosignAsk,
-  type DisputeCounter, type DisputeStart, type Registered, type EntityFault, type Entry, type EntityId, type EntityInput,
-  type EntityReplica, type EntityState, type Hook, type JAction, type JEvent, type Notice, type Outbound,
+  type DisputeCounter, type DisputeStart, type Registered, type EntityFault, type Entry, type EntityId,
+  type EntityInput, type EntityReplica, type EntityState, type Hook, type JAction, type JEvent, type Notice,
+  type Outbound,
   type PaybookCommand, type PeerFault, type PeerMessage, type PeerProof, type SecretRevealed,
 } from "./model.ts";
 
@@ -750,11 +751,11 @@ const finalFor = (terms: ProofTerms, w: Work, peer: EntityId, account: EntityRep
 };
 
 /**
- * A dispute the peer started that opened with a state I hold, with no newer proof to answer it with, is one I may accept
- * at once: the chain lets the non-starter finalize the exact state the starter chose before the window is over, when it
- * has no pull (Account.sol, `_disputeFinalizeInternal`). So a starter that goes down leaves the Account no more locked
- * than one that stays up. The body is rebuilt from the states I hold, and only when its hash is the one the chain
- * logged for the start; a start whose body I cannot rebuild is waited out as before.
+ * A dispute the peer started that opened with a state I hold, with no newer proof to answer it with, is one I may
+ * accept at once: the chain lets the non-starter finalize the exact state the starter chose before the window is over,
+ * when it has no pull (Account.sol, `_disputeFinalizeInternal`). So a starter that goes down leaves the Account no
+ * more locked than one that stays up. The body is rebuilt from the states I hold, and only when its hash is the one the
+ * chain logged for the start; a start whose body I cannot rebuild is waited out as before.
  */
 const accepting = (terms: ProofTerms, w: Work, peer: EntityId, account: EntityReplica): readonly JAction[] => {
   const { against } = factsOf(w, peer);

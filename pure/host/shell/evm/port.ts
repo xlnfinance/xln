@@ -69,7 +69,7 @@ export const listOf = <T>(
   raw: unknown, read: (item: unknown) => Result<T, ReplyFault>,
 ): Result<readonly T[], ReplyFault> => (Array.isArray(raw) ? traverse(raw, read) : err(bad("not a list")));
 
-/** What the simulation said of the one call: its status, the gas it used, the logs it made, why it failed, and what it returned. */
+/** What the simulation said of the one call: its status, gas used, logs, why it failed, and what it returned. */
 type Ran = Readonly<{ status: bigint; gas: bigint; logs: readonly Log[]; why: string; data: string }>;
 
 const failureOf = (o: Fields): string => {

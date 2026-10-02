@@ -103,22 +103,22 @@
   {
    "kind": "test",
    "layer": "ts",
-   "name": "R-DISPUTE-WATCH it asks to finalize the state the starter chose, before the window is over, and no counter"
+   "name": "R-DISPUTE-WATCH it asks to finalize the state the starter chose before the window is over"
   },
   {
    "kind": "test",
    "layer": "ts",
-   "name": "R-DISPUTE-WATCH it is restated at every frame until the chain says the dispute is over, and then no more"
+   "name": "R-DISPUTE-WATCH it is restated at every frame until the dispute is over, and then no more"
   },
   {
    "kind": "test",
    "layer": "ts",
-   "name": "R-DISPUTE-WATCH it does not finalize a start whose body it cannot rebuild, nor one it holds a newer proof for"
+   "name": "R-DISPUTE-WATCH it does not finalize a start whose body it cannot rebuild, nor one it can answer"
   },
   {
    "kind": "test",
    "layer": "ts",
-   "name": "R-DISPUTE-WATCH once the window is over the starter finalizes with the registered counter it can rebuild"
+   "name": "R-DISPUTE-WATCH after the window the starter finalizes with the registered counter it can rebuild"
   },
   {
    "kind": "test",
@@ -128,7 +128,7 @@
   {
    "kind": "test",
    "layer": "ts",
-   "name": "R-DISPUTE-WATCH a registered counter whose body the starter cannot rebuild is not finalized with a guess"
+   "name": "R-DISPUTE-WATCH a registered counter whose body is not rebuilt is not finalized with a guess"
   }
  ]
 }

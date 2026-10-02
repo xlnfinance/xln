@@ -67,7 +67,7 @@ export const START: Asked = (() => {
   return { action: row.chain[index] as Asked["action"], row: { height: row.height, index } };
 })();
 
-/** A counter to a dispute, as the Runtime asks for it: the opening body again, a nonce above the start's, a signature. */
+/** A counter to a dispute, as the Runtime asks for it: the opening body again, a nonce above the start's, a sig. */
 export const COUNTER: Asked = (() => {
   const start = START.action._tag === "dispute_start" ? START.action : expect.unreachable("not a start");
   const action: Asked["action"] = {

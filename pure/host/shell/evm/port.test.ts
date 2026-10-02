@@ -111,13 +111,15 @@ describe("host/shell/evm a batch is simulated at the head, and one that does not
   test("R-SIMULATE BatchFailed and DisputeOpSkipped refuse the batch though the call succeeded", async () => {
     const failed = { address: DEPOSITORY.toLowerCase(), topics: [BATCH_FAILED], data: "0x" };
     const skipped = { address: DEPOSITORY, topics: [DISPUTE_SKIPPED], data: "0x" };
-    expect(await outcome([call({ logs: [failed] })])).toEqual(ok({ _tag: "reverts", reason: "BatchFailed", causes: [] }));
-    expect(await outcome([call({ logs: [skipped] })])).toEqual(ok({ _tag: "reverts", reason: "DisputeOpSkipped", causes: [] }));
+    expect(await outcome([call({ logs: [failed] })]))
+      .toEqual(ok({ _tag: "reverts", reason: "BatchFailed", causes: [] }));
+    expect(await outcome([call({ logs: [skipped] })]))
+      .toEqual(ok({ _tag: "reverts", reason: "DisputeOpSkipped", causes: [] }));
     const foreign = { address: "0x1111111111111111111111111111111111111111", topics: [BATCH_FAILED], data: "0x" };
     expect(await outcome([call({ logs: [foreign] })])).toEqual(ok({ _tag: "ok", applyGas: 21_000n }));
   });
 
-  test("R-DISPUTE-LAPSED a revert is named as the contract names it: from the return data, or by its four bytes", async () => {
+  test("R-DISPUTE-LAPSED a revert is named as the contract names it: by return data or four bytes", async () => {
     const reverted = (returnData: string) =>
       call({ status: "0x0", returnData, error: { code: -3200, message: "execution failed" } });
     const named = (name: string) =>
@@ -130,7 +132,7 @@ describe("host/shell/evm a batch is simulated at the head, and one that does not
     } as const));
   });
 
-  test("R-DISPUTE-LAPSED a skipped dispute op names its op and reason, a failed batch the error it reports", async () => {
+  test("R-DISPUTE-LAPSED a skipped dispute op names its op and reason, a failed batch its error", async () => {
     const word = (n: bigint) => n.toString(16).padStart(64, "0");
     const skipped = { address: DEPOSITORY, topics: [DISPUTE_SKIPPED, `0x${word(1n)}`, `0x${word(2n)}`],
       data: `0x${word(1n)}${word(4n)}${word(9n)}` };

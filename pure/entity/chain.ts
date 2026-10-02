@@ -78,8 +78,8 @@ export const countered = (f: ChainFacts, e: Extract<JEvent, { _tag: "j_countered
 /**
  * The Host found that the chain will refuse the counter the node asked for, for good (its window is closed, a newer or
  * the same counter is registered, the dispute moved, its signature or hash is void), so it is not restated. A counter
- * the chain holds for a reason that can heal never gets here: the Host drops it for now and the Entity asks again. A counter of another nonce is not the one
- * dropped, and a registered counter is finalized with whatever is said of it.
+ * the chain holds for a reason that can heal never gets here: the Host drops it for now and the Entity asks again. A
+ * counter of another nonce is not the one dropped, and a registered counter is finalized with whatever is said of it.
  */
 export const counterLapsed = (f: ChainFacts, nonce: bigint): ChainFacts => {
   const answer = f.against?.answer;

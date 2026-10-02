@@ -73,7 +73,7 @@
   {
    "kind": "test",
    "layer": "ts",
-   "name": "R-DISPUTE-LAPSED a counter held for a reason that can heal is not given up: it is asked for again"
+   "name": "R-DISPUTE-LAPSED a counter held for a reason that can heal is asked for again"
   },
   {
    "kind": "test",
@@ -83,12 +83,12 @@
   {
    "kind": "test",
    "layer": "ts",
-   "name": "R-DISPUTE-LAPSED a counter the batch skipped for good (window closed) lapses, a skip that can heal does not"
+   "name": "R-DISPUTE-LAPSED a counter skipped for good in a landed batch lapses, one that can heal does not"
   },
   {
    "kind": "test",
    "layer": "ts",
-   "name": "R-DISPUTE-LAPSED a start the chain skipped for good (stored nonce reached, epoch left) is told as lapsed"
+   "name": "R-DISPUTE-LAPSED a start skipped for good (nonce reached, epoch left) is told as lapsed"
   },
   {
    "kind": "test",
@@ -98,27 +98,27 @@
   {
    "kind": "test",
    "layer": "ts",
-   "name": "R-DISPUTE-LAPSED a counter that landed and was skipped for good lapses, one skipped as unknown does not"
+   "name": "R-DISPUTE-LAPSED a counter that landed and was skipped for good lapses, an unknown skip does not"
   },
   {
    "kind": "test",
    "layer": "ts",
-   "name": "R-DISPUTE-LAPSED a counter that reverts for good is dropped and named though a lower group still seals"
+   "name": "R-DISPUTE-LAPSED a counter that reverts for good is dropped and named; a lower group still seals"
   },
   {
    "kind": "test",
    "layer": "ts",
-   "name": "R-DISPUTE-LAPSED a counter held for a reason that can heal is dropped, not named, and what is behind it seals"
+   "name": "R-DISPUTE-LAPSED a counter held for a reason that can heal is dropped, not named; the rest seals"
   },
   {
    "kind": "test",
    "layer": "ts",
-   "name": "R-DISPUTE-LAPSED a counter that simulates cleanly is not probed away: it is sealed with what is behind it"
+   "name": "R-DISPUTE-LAPSED a counter that simulates cleanly is sealed with what is behind it"
   },
   {
    "kind": "test",
    "layer": "ts",
-   "name": "R-DISPUTE-LAPSED a finalize the other party's landed first is dropped, not named, and asked for again"
+   "name": "R-DISPUTE-LAPSED a finalize the other party's landed first is dropped, not named, asked again"
   },
   {
    "kind": "test",

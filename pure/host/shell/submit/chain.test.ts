@@ -173,11 +173,13 @@ describe("host/shell/chain a batch is journaled before it is sent", () => {
     expect(journalIn(at.journal)).toEqual(["sealed@5"]);
   });
 
-  const E4_LOST: Simulation["outcome"] = { _tag: "reverts", reason: "execution failed", causes: [{ _tag: "error", name: "E4" }] };
-  const E3_KEPT: Simulation["outcome"] = { _tag: "reverts", reason: "execution failed", causes: [{ _tag: "error", name: "E3" }] };
+  const revertedWith = (name: string): Simulation["outcome"] =>
+    ({ _tag: "reverts", reason: "execution failed", causes: [{ _tag: "error", name }] });
+  const E4_LOST = revertedWith("E4");
+  const E3_KEPT = revertedWith("E3");
   const firstOnly = (outcome: Simulation["outcome"]) => (n: number) => (n === 0 ? outcome : ROOM);
 
-  test("R-DISPUTE-LAPSED a counter that reverts for good is dropped and named though a lower group still seals", async () => {
+  test("R-DISPUTE-LAPSED a counter that reverts for good is dropped and named; a lower group still seals", async () => {
     const at = scene();
     const both = counterAsked(asked(opened()));
     const moved = await withIo(at, { ...CALM, nth: firstOnly(E4_LOST) }, (io) => stepped(io, both));
@@ -187,7 +189,7 @@ describe("host/shell/chain a batch is journaled before it is sent", () => {
     expect(journalIn(at.journal)).toEqual([]);
   });
 
-  test("R-DISPUTE-LAPSED a counter held for a reason that can heal is dropped, not named, and what is behind it seals", async () => {
+  test("R-DISPUTE-LAPSED a counter held for a reason that can heal is dropped, not named; the rest seals", async () => {
     const at = scene();
     const both = counterAsked(asked(opened()));
     const moved = await withIo(at, { ...CALM, nth: firstOnly(E3_KEPT) }, (io) => stepped(io, both));
@@ -198,7 +200,7 @@ describe("host/shell/chain a batch is journaled before it is sent", () => {
     expect(journalIn(at.journal)).toEqual(["sealed@5"]);
   });
 
-  test("R-DISPUTE-LAPSED a counter that simulates cleanly is not probed away: it is sealed with what is behind it", async () => {
+  test("R-DISPUTE-LAPSED a counter that simulates cleanly is sealed with what is behind it", async () => {
     const at = scene();
     const moved = await withIo(at, CALM, (io) => stepped(io, counterAsked(asked(opened()))));
     expect([moved.lapsed, moved.stage]).toEqual([[], "waiting"]);
@@ -213,9 +215,10 @@ describe("host/shell/chain a batch is journaled before it is sent", () => {
     return out._tag === "queued" ? out.submitter : expect.unreachable(`take ${out._tag}`);
   };
 
-  test("R-DISPUTE-LAPSED a finalize the other party's landed first is dropped, not named, and asked for again", async () => {
+  test("R-DISPUTE-LAPSED a finalize the other party's landed first is dropped, not named, asked again", async () => {
     const at = scene();
-    const moved = await withIo(at, { ...CALM, outcome: SKIPPED_FINALIZE }, (io) => stepped(io, finalizeAsked(opened())));
+    const moved = await withIo(at, { ...CALM, outcome: SKIPPED_FINALIZE }, (io) =>
+      stepped(io, finalizeAsked(opened())));
     expect([moved.lapsed, moved.stage]).toEqual([[], "closed"]);
     expect(moved.submitter.jbatch.draft).toEqual([]);
     expect(moved.submitter.waiting.size).toBe(0);

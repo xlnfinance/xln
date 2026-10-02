@@ -121,7 +121,7 @@ const told = (shell: Shell, turn: Turn, ops: readonly JOp[]): Promise<Result<Tur
  */
 const START_SKIPPED_FOR_GOOD: ReadonlySet<number> = new Set([0, 11]);
 
-/** The ops a landed batch had skipped for good: the Entity that asked for each is told it lapsed, as for a dropped one. */
+/** The ops a landed batch had skipped for good: the Entity that asked for each is told it lapsed, as if dropped. */
 const skippedForGood = (skipped: readonly Skipped[]): readonly JOp[] =>
   skipped.flatMap(({ op, reason }) => (
     (op._tag === "dispute_start" && START_SKIPPED_FOR_GOOD.has(reason))
@@ -130,7 +130,8 @@ const skippedForGood = (skipped: readonly Skipped[]): readonly JOp[] =>
 /** Move the builder as far as the chain lets it: seal what is waiting, send it, read what became of it. */
 export const pump = async (shell: Shell, turn: Turn): Promise<Result<Turn, DriveFault>> => {
   const out = await settle(shell.io, turn.station.submitter, "sure");
-  return out.ok ? told(shell, pumped(turn, out.value), [...out.value.lapsed, ...skippedForGood(out.value.skipped)]) : out;
+  if (!out.ok) return out;
+  return told(shell, pumped(turn, out.value), [...out.value.lapsed, ...skippedForGood(out.value.skipped)]);
 };
 
 const afterAsks = (shell: Shell, turn: Turn): Promise<Result<Turn, DriveFault>> =>
