@@ -3,16 +3,15 @@
 // created is not lost to a crash that takes its directory entry (R-DURABLE).
 import { open, readFile, type FileHandle } from "node:fs/promises";
 import { dirname } from "node:path";
-import { err, ok, type Result } from "../../../kernel/core/result.ts";
+import { ok, type Result } from "../../../kernel/core/result.ts";
 import type { Disk, DiskFault, DiskOp, Exec } from "../disk/disk.ts";
 import { failStop, sequence } from "../disk/disk.ts";
+import { attempt as settled } from "./attempt.ts";
 
 type Step = DiskFault["op"];
 
-const reasonOf = (cause: unknown): string => (cause instanceof Error ? cause.message : String(cause));
-
 const attempt = <T>(op: Step, work: Promise<T>): Promise<Result<T, DiskFault>> =>
-  work.then((value) => ok(value), (cause): Result<T, DiskFault> => err({ _tag: "disk", op, reason: reasonOf(cause) }));
+  settled(work, (reason): DiskFault => ({ _tag: "disk", op, reason }));
 
 const nothing = (r: Promise<Result<unknown, DiskFault>>): Promise<Result<void, DiskFault>> =>
   r.then((done) => (done.ok ? ok(undefined) : done));

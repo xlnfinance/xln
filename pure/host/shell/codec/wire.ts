@@ -11,8 +11,9 @@ import {
 } from "../../../account/model.ts";
 import { entityId, type EntityId, type Outbound } from "../../../entity/model.ts";
 import { all, err, flatMap, map, mapErr, ok, traverse, type Result } from "../../../kernel/core/result.ts";
-import type { Tagged } from "../../../kernel/core/tagged.ts";
-import { bad, big, bytesOf, count, field, record, text, type Fields, type Reader, type ReadFault } from "./read.ts";
+import {
+  bad, big, bytesOf, count, field, hex32, record, tagOf, text, type Fields, type Reader, type ReadFault,
+} from "./read.ts";
 import { decodeValue, encodeValue, type ValueFault } from "./value.ts";
 
 /** The most a message may be, as text, and the most txs a frame may carry: bounds of the link, not of the Account. */
@@ -20,12 +21,8 @@ export const MAX_WIRE_BYTES = 1 << 20;
 export const MAX_FRAME_TXS = 256;
 const MAX_FAULT_TAG = 64;
 const SECRET_BYTES = 32;
-const HEX32 = /^0x[0-9a-f]{64}$/;
-
-const hash: Reader<FrameHash> = (at, v) =>
-  (typeof v === "string" && HEX32.test(v) ? ok(v as FrameHash) : bad(at, "hash"));
-const hashlock: Reader<string> = (at, v) =>
-  (typeof v === "string" && HEX32.test(v) ? ok(v) : bad(at, "hashlock"));
+const hash = hex32<FrameHash>("hash");
+const hashlock = hex32("hashlock");
 
 const side: Reader<Side> = (at, v) => (v === "left" || v === "right" ? ok(v) : bad(at, "left|right"));
 
@@ -65,9 +62,6 @@ const readOffer: Reader<Offer> = (at, v) => flatMap(record(at, v, ["id", "maker"
     id: field(at, o, "id", hold), maker: field(at, o, "maker", side), give: field(at, o, "give", readLeg),
     want: field(at, o, "want", readLeg), deadline: field(at, o, "deadline", height),
   }));
-
-const tagOf = (at: string, v: unknown): Result<string, ReadFault> =>
-  (typeof v === "object" && v !== null && "_tag" in v ? text(`${at}._tag`, v._tag) : bad(at, "tagged"));
 
 const txOf = (tag: string, at: string, o: Fields): Result<AccountTx, ReadFault> => {
   const f = <T>(key: string, read: Reader<T>) => field(at, o, key, read);

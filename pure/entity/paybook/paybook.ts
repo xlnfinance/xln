@@ -3,7 +3,7 @@
 // same amount on `to` with a deadline one hop sooner; when `to` shows the secret, it shows it to `from`; when `to`
 // gives the lock up, it gives `from`'s up. A payee resolves the lock of a payment it asked for. Every step is a tx of
 // an Account's next frame, so it is signed, acked and refused like any other; this file only says which.
-import { mapSet } from "../../kernel/core/collections.ts";
+import { mapDelete, mapSet } from "../../kernel/core/collections.ts";
 import { keccakHex } from "../../kernel/encoding/bytes.ts";
 import { jHeight, type ClockParams, type JHeight, type JView } from "../../account/clause/clock.ts";
 import { other, type Hold, type HoldId, type TokenId } from "../../account/model.ts";
@@ -92,7 +92,7 @@ const receiveOf = (state: EntityState, hashlock: string, e: Receive): Intent | u
     : cancelUp(e.from, hashlock, c);
 };
 
-const intentOf = (state: EntityState, clock: ClockParams, view: JView, [hashlock, e]: readonly [string, Entry]):
+const intentOf = (state: EntityState, clock: ClockParams, view: JView, hashlock: string, e: Entry):
   Intent | undefined => {
   switch (e._tag) {
     case "forward":
@@ -120,13 +120,12 @@ export const intentFor = (
   state: EntityState, clock: ClockParams, view: JView, hashlock: string,
 ): Intent | undefined => {
   const entry = state.paybook.get(hashlock);
-  return entry === undefined ? undefined : intentOf(state, clock, view, [hashlock, entry]);
+  return entry === undefined ? undefined : intentOf(state, clock, view, hashlock, entry);
 };
 
 /** An entry in place of the one for `hashlock`, or none. */
 export const withEntry = (book: Paybook, hashlock: string, entry: Entry | undefined): Paybook => {
-  if (entry !== undefined) return mapSet(book, hashlock, entry);
-  return new Map([...book].filter(([key]) => key !== hashlock));
+  return entry === undefined ? mapDelete(book, hashlock) : mapSet(book, hashlock, entry);
 };
 
 /**

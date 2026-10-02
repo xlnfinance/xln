@@ -7,17 +7,16 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { JView } from "../../pure/account/clause/clock.ts";
-import { entityId, type EntityId, type EntityInput, type EntityReplica, type EntityState, type JAction, type Outbound } from "../../pure/entity/model.ts";
+import type { EntityId, EntityInput, EntityReplica, EntityState, JAction, Outbound } from "../../pure/entity/model.ts";
 import { watchPort } from "../../pure/host/shell/evm/watch.ts";
 import { startDaemon, type Config, type Daemon, type Look } from "../../pure/host/shell/node/daemon.ts";
 import { httpRpc } from "../../pure/host/shell/node/rpc.ts";
 import { listenTcp, type Listener } from "../../pure/host/shell/node/link/socket.ts";
-import { keyOf, MAX_LINE, type Peer } from "../../pure/host/shell/link/link.ts";
+import { MAX_LINE, type Peer } from "../../pure/host/shell/link/link.ts";
 import type { Turn } from "../../pure/host/shell/drive/drive.ts";
 import { address, bytes32 } from "../../pure/j/log.ts";
-import { hexToBytes } from "../../pure/kernel/encoding/bytes.ts";
 import type { Row, Setup } from "../../pure/runtime/model.ts";
-import { must, type Chain, type Party } from "./chain.ts";
+import { eid, keyOfParty, must, type Chain, type Party } from "./chain.ts";
 import { rigOf } from "./seat.ts";
 
 const LOCAL = "127.0.0.1";
@@ -28,10 +27,8 @@ const PATIENCE_MS = 60_000;
 /** Blocks a J event waits under before the nodes act on it: the anvil node has no reorgs, one is enough to show the rule. */
 const DEPTH = 1n;
 
-const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 const nonce = (): Uint8Array => crypto.getRandomValues(new Uint8Array(32));
 export const shown = (x: unknown): string => JSON.stringify(x, (_, v) => (typeof v === "bigint" ? v.toString() : v instanceof Uint8Array ? "bytes" : v));
-const eid = (p: Party): EntityId => must(entityId(p.id), `entity id of ${p.name}`);
 
 /** A party and the parties it has an Account with: who it dials and answers. */
 export type Member = Readonly<{ party: Party; peers: readonly Party[] }>;
@@ -70,8 +67,7 @@ export class Cluster {
 
   private peerOf(party: Party): Peer {
     const slot = this.slot(eid(party));
-    const key = must(keyOf(must(hexToBytes(party.key), "key bytes")), `${party.name}'s key`);
-    return { runtime: key.runtime, entities: [slot.entity], endpoint: `${LOCAL}:${slot.port}` };
+    return { runtime: keyOfParty(party).runtime, entities: [slot.entity], endpoint: `${LOCAL}:${slot.port}` };
   }
 
   private async launch(slot: Slot, listener: Listener): Promise<Daemon> {
@@ -98,7 +94,7 @@ export class Cluster {
       await this.refresh();
       if (done()) return;
       if (Date.now() > end) throw new Error(`waited ${PATIENCE_MS} ms for ${what}`);
-      await sleep(POLL_MS);
+      await Bun.sleep(POLL_MS);
     }
   }
 
@@ -133,7 +129,7 @@ export class Cluster {
       const why = this.restless(options, finalized);
       if (why !== null && Date.now() > end) throw new Error(`the nodes did not go quiet in ${PATIENCE_MS} ms: ${why}`);
       stable = why === null ? stable + 1 : 0;
-      if (stable < STABLE) await sleep(POLL_MS);
+      if (stable < STABLE) await Bun.sleep(POLL_MS);
     }
   }
 

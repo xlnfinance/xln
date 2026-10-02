@@ -9,10 +9,9 @@ import { on, once } from "node:events";
 import { connect, createServer, type Socket } from "node:net";
 import { err, ok, type Result } from "../../../../kernel/core/result.ts";
 import type { Tagged } from "../../../../kernel/core/tagged.ts";
+import { reasonOf } from "../attempt.ts";
 
 export type SocketFault = Tagged<"socket", { reason: string }>;
-
-const reasonOf = (cause: unknown): string => (cause instanceof Error ? cause.message : String(cause));
 
 const fault = (cause: unknown): SocketFault => ({ _tag: "socket", reason: reasonOf(cause) });
 

@@ -6,7 +6,7 @@
 import { ethers } from "ethers";
 import { Depository__factory, ERC20Mock__factory } from "../../contracts/typechain-types/index.ts";
 import type { deployedManifest } from "../../contracts/deploy/manifest.ts";
-import { lazyEntityId, lazyHanko } from "../../pure/chain/hanko/hanko.ts";
+import { lazyEntityId } from "../../pure/chain/hanko/hanko.ts";
 import { deployment, accountKey, type Deployment } from "../../pure/chain/proof/deployment.ts";
 import { openJBatch, queue, seal, type SealContext } from "../../pure/j/batch/jbatch.ts";
 import { processBatchCall, type SealedBatch } from "../../pure/j/batch/sealed.ts";
@@ -14,8 +14,10 @@ import { requirement } from "../../pure/j/gas/gas.ts";
 import type { Gas, Simulation } from "../../pure/j/gas/simulate.ts";
 import type { ChainWorld } from "../../pure/host/ops.ts";
 import type { JOp } from "../../pure/j/op/ops.ts";
-import { signDigest } from "../../pure/kernel/crypto/signature.ts";
-import { bytesToHex, hexToBytes } from "../../pure/kernel/encoding/bytes.ts";
+import { entityId, type EntityId } from "../../pure/entity/model.ts";
+import { keyOf, type Key } from "../../pure/host/shell/link/link.ts";
+import { lazySigner } from "../../pure/host/shell/submit/signer.ts";
+import { hexToBytes } from "../../pure/kernel/encoding/bytes.ts";
 import type { Result } from "../../pure/kernel/core/result.ts";
 
 /** The rewrite's functions return Result; this harness has no recovery from a bad encoding, so it stops there. */
@@ -36,15 +38,14 @@ export const partyOf = (name: string, provider: ethers.Provider): Party => {
   return { name, wallet, key, id: must(lazyEntityId(wallet.address), `entity id of ${name}`) };
 };
 
-/** r || s || v, v in {27, 28}: what the Hanko packs. The signature itself is the rewrite's (kernel/crypto). */
-export const signHex = (digest: string, key: string): string => {
-  const s = signDigest(must(hexToBytes(digest), "digest"), must(hexToBytes(key), "key"));
-  const word = (n: bigint): string => n.toString(16).padStart(64, "0");
-  return `0x${word(s.r)}${word(s.s)}${(27 + s.recovery).toString(16)}`;
-};
+export const eid = (p: Party): EntityId => must(entityId(p.id), `entity id of ${p.name}`);
 
+/** The party's key as the shell holds it: the one that signs the link, the batch's Hanko and the transaction. */
+export const keyOfParty = (p: Party): Key => must(keyOf(must(hexToBytes(p.key), "key bytes")), `${p.name}'s key`);
+
+/** The lazy Hanko of the party over a batch digest: the shell's own signer, so the harness signs as a node does. */
 export const hankoOf = (party: Party, digest: string): string =>
-  must(lazyHanko(party.id, signHex(digest, party.key)), `hanko of ${party.name}`);
+  must(lazySigner(eid(party), keyOfParty(party)).hanko(digest), `hanko of ${party.name}`);
 
 export const accountKeyOf = (a: Party, b: Party): string => must(accountKey(a.id, b.id), "account key");
 
@@ -176,5 +177,3 @@ export const advanceTime = async (chain: Chain, seconds: number): Promise<void> 
   await chain.provider.send("evm_increaseTime", [seconds]);
   await chain.provider.send("evm_mine", []);
 };
-
-export const asHex = bytesToHex;

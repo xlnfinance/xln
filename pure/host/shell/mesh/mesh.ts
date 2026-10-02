@@ -8,6 +8,7 @@
 // peer that has no connection up is dropped: the link promises nothing, and the Account's own resend (the Host's
 // `resend_due` timer) is what sends a lost frame again.
 import type { Outbound } from "../../../entity/model.ts";
+import { mapDelete, mapSet } from "../../../kernel/core/collections.ts";
 import { err, ok, type Result } from "../../../kernel/core/result.ts";
 import type { Tagged } from "../../../kernel/core/tagged.ts";
 import type { Host, HostNotice } from "../../model.ts";
@@ -29,7 +30,7 @@ export const startMesh = (self: Key, table: readonly Peer[]): Mesh => ({ self, t
 export type Write = Readonly<{ conn: ConnId; text: string }>;
 
 const withConn = (mesh: Mesh, conn: ConnId, state: Conn): Mesh =>
-  ({ ...mesh, conns: new Map([...mesh.conns, [conn, state]]) });
+  ({ ...mesh, conns: mapSet(mesh.conns, conn, state) });
 
 /** The pair is dialed by the Runtime with the smaller id: the one connection both sides agree to make. */
 export const dials = (mesh: Mesh, peer: Peer): boolean => mesh.self.runtime < peer.runtime;
@@ -51,7 +52,7 @@ export const accepted = (mesh: Mesh, conn: ConnId): Mesh => withConn(mesh, conn,
 
 /** The connection is gone, from either end. */
 export const closed = (mesh: Mesh, conn: ConnId): Mesh =>
-  ({ ...mesh, conns: new Map([...mesh.conns].filter(([id]) => id !== conn)) });
+  ({ ...mesh, conns: mapDelete(mesh.conns, conn) });
 
 /** A line the peer's Runtime did not send as its own: its connection is to be closed, and nothing is delivered. */
 export type Refused = Tagged<"refused", { conn: ConnId; fault: LinkFault | Tagged<"unknown_conn"> }>;
