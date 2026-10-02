@@ -9,7 +9,7 @@ import { unwrapOr, type Result } from "../kernel/core/result.ts";
 import { emptyBatch, encodeBatch, type FinalDisputeProof, type InitialDisputeProof } from "../chain/batch/batch.ts";
 import { finalizationEvidenceHash } from "../chain/proof/dispute.ts";
 import { proofBodyHash, type ProofBody } from "../chain/proof/proof.ts";
-import { hexToBytes } from "../kernel/encoding/bytes.ts";
+import { bytesToHex, hexToBytes } from "../kernel/encoding/bytes.ts";
 import type { SettlementDiff } from "../chain/money.ts";
 import { seal, type JBatch, type SealContext, type SealOutcome } from "./batch/jbatch.ts";
 import type { SealedBatch } from "./batch/sealed.ts";
@@ -236,6 +236,16 @@ export const finalizeInput = (sender: Bytes32, ops: readonly FinalDisputeProof[]
   const batch = must(encodeBatch({ ...emptyBatch(1_000_000n), disputeFinalizations: ops }));
   return must(hexToBytes(DEPOSITORY_ABI.encodeFunctionData("processBatch", [sender, batch, "0x1234", 3n])));
 };
+
+const RELAY_ABI = new Interface(["function execute(address target, bytes data)", "function multicall(bytes[] calls)"]);
+
+/** The input of a relay contract's `execute(target, data)` that passes `call` on to the Depository: a wrapped call. */
+export const relayed = (call: Uint8Array): Uint8Array =>
+  must(hexToBytes(RELAY_ABI.encodeFunctionData("execute", [DEPOSITORY, bytesToHex(call)])));
+
+/** The input of a `multicall(bytes[])` whose entries are these calls, the Depository's among them. */
+export const multicalled = (calls: readonly Uint8Array[]): Uint8Array =>
+  must(hexToBytes(RELAY_ABI.encodeFunctionData("multicall", [calls.map((call) => bytesToHex(call))])));
 
 /** A body with a negative offdelta, two tokens and a clause with allowances: every shape the decoder must read. */
 export const CLAUSED: ProofBody = {

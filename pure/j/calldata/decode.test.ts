@@ -5,8 +5,8 @@ import { bytesToHex, hexToBytes } from "../../kernel/encoding/bytes.ts";
 import { finalizedSecrets, finalizesIn, secretsIn, startedBody, startedSecrets } from "./decode.ts";
 import { proofBodyHash } from "../../chain/proof/proof.ts";
 import {
-  argumentsOf, CLAUSED, entityOf, evidenceOf, finalizeInput, finalizeOp, hexOf, logOf, must, patched, startInput,
-  startOp,
+  argumentsOf, CLAUSED, entityOf, evidenceOf, finalizeInput, finalizeOp, hexOf, logOf, multicalled, must, patched,
+  relayed, startInput, startOp,
 } from "../fixtures.ts";
 
 const LEFT = entityOf(0x11n);
@@ -15,6 +15,9 @@ const RIGHT = entityOf(0x52n);
 const SECRET_A = entityOf(0xa1n);
 const SECRET_B = entityOf(0xb2n);
 const SECRET_C = entityOf(0xc3n);
+
+/** Bytes of no batch between two selectors. */
+const NOISE = 200;
 
 const bytesOf = (hex: string): Uint8Array => must(hexToBytes(hex));
 
@@ -78,6 +81,35 @@ describe("j/calldata", () => {
   const hashOf = (body: typeof CLAUSED) => must(bytes32Of(must(proofBodyHash(body))));
   const bytes32Of = (hash: string) => ({ ok: true, value: hash as ReturnType<typeof entityOf> }) as const;
   const other = { ...CLAUSED, offdeltas: [5n], transformers: [] };
+
+  test("R-WATCH-CALLDATA a finalize op is found in a call a relay or a multicall carries, at any offset", () => {
+    const mine = finalizeOp({ otherArguments: argumentsOf([SECRET_A]), starterArguments: argumentsOf([SECRET_B]) });
+    const theirs = finalizeOp({ finalNonce: 9n, otherArguments: argumentsOf([SECRET_C]) });
+    const call = inputOf([mine]);
+    const packed = new Uint8Array([1, 2, 3, ...call, 4, 5]);
+    [relayed(call), multicalled([inputOf([theirs]), call]), packed].forEach((wrapped) => {
+      expect(finalizedSecrets(wrapped, evidenceOf(mine))).toEqual([SECRET_B, SECRET_A]);
+    });
+    expect(finalizesIn(multicalled([inputOf([theirs]), call])).map((f) => f.evidence))
+      .toEqual([evidenceOf(theirs), evidenceOf(mine)]);
+  });
+
+  test("R-WATCH-CALLDATA a wrapped call is believed by its evidence hash only; a selector in noise gives no op", () => {
+    const mine = finalizeOp({ otherArguments: argumentsOf([SECRET_A]) });
+    const liar = finalizeOp({ finalNonce: 99n, otherArguments: argumentsOf([SECRET_C]) });
+    expect(finalizedSecrets(relayed(inputOf([liar])), evidenceOf(mine))).toBeUndefined();
+    const selector = inputOf([mine]).subarray(0, 4);
+    const noise = new Uint8Array([...selector, ...Array.from({ length: NOISE }, () => 0xff), ...selector]);
+    expect(finalizesIn(noise)).toEqual([]);
+    expect(finalizesIn(new Uint8Array([...selector]))).toEqual([]);
+  });
+
+  test("R-WATCH-CALLDATA a start body is found in a wrapped call too, and only by the hash the chain logged", () => {
+    const wrapped = relayed(startInput(RIGHT, [startOp(other), startOp(CLAUSED)]));
+    expect(startedBody(wrapped, hashOf(CLAUSED))).toStrictEqual(CLAUSED);
+    expect(startedBody(wrapped, entityOf(99n))).toBeUndefined();
+    expect(startedBody(relayed(startInput(RIGHT, [startOp(other)])), hashOf(CLAUSED))).toBeUndefined();
+  });
 
   test("R-WATCH-CALLDATA the body a start carried is read back whole: signs, wide numbers, clauses, allowances", () => {
     const input = startInput(RIGHT, [startOp(CLAUSED)]);

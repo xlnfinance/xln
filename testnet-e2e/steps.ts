@@ -15,6 +15,10 @@ import type { SigningContext } from "../pure/account/proof/signing.ts";
 import { proofBodyHash } from "../pure/chain/proof/proof.ts";
 import { accountMessageHash } from "../pure/chain/proof/payload.ts";
 import { keccakHex } from "../pure/kernel/encoding/bytes.ts";
+import { finalizedSecrets } from "../pure/j/calldata/decode.ts";
+import { address, bytes32 } from "../pure/j/log.ts";
+import { watchPort } from "../pure/host/shell/evm/watch.ts";
+import { httpRpc } from "../pure/host/shell/node/rpc.ts";
 import { startAnvil, assertLoopback, scrubbedEnv, type Anvil } from "./lib/anvil.ts";
 import {
   accountKeyOf, accountOnChain, advanceTime, collateralOf, connect, eid, heldBy, leftOf, must, partyOf, reserveOf,
@@ -692,6 +696,16 @@ const rebase: Step<World> = {
     if (!names.some((n) => n.endsWith("j_dispute"))) throw new Error(`nobody was told of the dispute (${names.join(", ")})`);
     // R-WATCH-CALLDATA: each node's loop fetched the finalize's transaction from the node and found the op whose evidence hash the chain logged.
     if (names.some((n) => n.endsWith("j_finalize_unread"))) throw new Error(`a node could not read the finalize's arguments from its transaction (${names.join(", ")})`);
+    // A wrapper may hide the call from the input, so the port also reads the node's call trace: the real node's trace of the finalize names its call to the Depository.
+    const recent = (await chain.provider.getBlockNumber()) - 5_000;
+    const finalized = await chain.depository.queryFilter(chain.depository.filters.DisputeFinalized(), recent);
+    const [finalize] = finalized;
+    if (finalized.length !== 1 || finalize === undefined) throw new Error(`the chain logged ${finalized.length} dispute finalizes, expected the one of the dispute step`);
+    const depositoryAddress = must(address(chain.manifest.contracts.depository.address.toLowerCase()), "depository address");
+    const evidence = must(bytes32(String(finalize.args.finalizationEvidenceHash)), "evidence hash");
+    const traced = await watchPort(httpRpc(chain.rpc), depositoryAddress).trace(must(bytes32(finalize.transactionHash), "finalize transaction"));
+    if (!traced.ok || traced.value === undefined) throw new Error(`the node gave no call trace of the finalize: ${traced.ok ? "no call trace on this node" : traced.error.reason}`);
+    if (!traced.value.some((input) => finalizedSecrets(input, evidence) !== undefined)) throw new Error(`no call of the finalize's trace carries the op whose evidence hash the chain logged (${traced.value.length} calls to the Depository)`);
     // R-LEDGER-REBASE: each Runtime's ledger is the chain's now: no collateral, no ondelta, offdelta counted from zero, and no open clause.
     const pay = PENDING_PAY * unit(chain);
     const ledgers = [a, x].map((id) => ({ id, replica: net.account(id, id === a ? x : a) }));
@@ -758,7 +772,7 @@ const rebase: Step<World> = {
     return {
       checks: [
         `each node's own J loop (pure/host/shell/watch, the watcher core pure/j/watch.ts: blocks and logs by number, readings by block hash) read the Depository's logs at depth 1 up to height ${net.view()} and told its Entity ${names.length} J events, in the WAL before the height: ${names.join(", ")}`,
-        `R-WATCH-CALLDATA: each node's loop fetched the finalize's transaction (eth_getTransactionByHash) and found in its processBatch input the op whose evidence hash the Depository logged, so no node was told the finalize was unread; the arguments carried no secret (the Host's own finalize sends none)`,
+        `R-WATCH-CALLDATA: each node's loop fetched the finalize's transaction (eth_getTransactionByHash) and found in its processBatch input the op whose evidence hash the Depository logged, so no node was told the finalize was unread; the node's call trace (debug_traceTransaction, callTracer) of the same transaction, read by the port the nodes use, lists ${traced.value.length} call to the Depository, and the op is in it by the same hash; the arguments carried no secret (the Host's own finalize sends none)`,
         `both Runtimes hold chain facts epoch ${onChain.epoch}, stored nonce ${onChain.nonce}, no dispute open, the frames of the new epoch counted, for alice-hubX: the same as the chain`,
         `R-LEDGER-REBASE: both ledgers read collateral ${held.collateral}, ondelta ${held.ondelta} (the chain's), offdelta restarted from zero (it was ${before} before the move), no open clause, no frame pending, one head, and the peer's signature kept is over a head of the new epoch only`,
         `the payment of ${PENDING_PAY} alice had pending when the chain finalized (hubX never committed it: the link lost it) ${resealed ? "was refused by hubX as another epoch's and sealed anew: it committed in epoch 1 on both sides" : "was refused back to alice with a notice (both ledgers at offdelta zero)"}`,

@@ -83,8 +83,9 @@ describe("entity/signing R-DISPUTE-FREEZE an Account in dispute proposes nothing
   });
 
   test("R-WATCH-CALLDATA a finalize the Host could not read is told as a notice, and no fact changes", () => {
-    const unread = run(bobDisputed, { _tag: "j_finalize_unread", peer: ALICE.id });
-    expect(unread.notices).toStrictEqual([{ _tag: "finalize_unread", peer: ALICE.id }]);
+    const tx = "0x00000000000000000000000000000000000000000000000000000000000000ee";
+    const unread = run(bobDisputed, { _tag: "j_finalize_unread", peer: ALICE.id, tx });
+    expect(unread.notices).toStrictEqual([{ _tag: "finalize_unread", peer: ALICE.id, tx }]);
     expect(unread.state.chain).toEqual(bobDisputed.chain);
     expect(unread.outputs).toEqual([]);
     expect(unread.chain).toEqual(run(bobDisputed).chain);

@@ -40,7 +40,7 @@ const TX = txOf(2n, 9n);
 describe("j/shown", () => {
   test("R-WATCH-CALLDATA a finalize's secrets are told to every hosted Entity before the epoch advance it made", () => {
     const op = finalizeOp({ otherArguments: argumentsOf([SECRET]) });
-    const inputs = new Map([[TX, finalizeInput(RIGHT, [op])]]);
+    const inputs = new Map([[TX, [finalizeInput(RIGHT, [op])]]]);
     const read = withCalldata(preparedOf(advance(2n, 0n, 1n), finalizedOf(op, 2n, 1n, TX)), inputs);
     expect(observe(read.events, [LEFT, THIRD], accounts)).toEqual(ok([
       toward(LEFT, { _tag: "j_secret", secret: SECRET }),
@@ -53,7 +53,7 @@ describe("j/shown", () => {
   test("R-WATCH-CALLDATA the starter's arguments at a finalize are shown too, and the op is found among others", () => {
     const mine = finalizeOp({ starterArguments: argumentsOf([OTHER_SECRET]) });
     const input = finalizeInput(RIGHT, [finalizeOp({ finalNonce: 99n, otherArguments: argumentsOf([SECRET]) }), mine]);
-    const read = withCalldata(preparedOf(advance(2n, 0n, 1n), finalizedOf(mine, 2n, 1n, TX)), new Map([[TX, input]]));
+    const read = withCalldata(preparedOf(advance(2n, 0n, 1n), finalizedOf(mine, 2n, 1n, TX)), new Map([[TX, [input]]]));
     const told = must(observe(read.events, [LEFT], accounts));
     const shown = told.filter((a) => a.event._tag === "j_secret");
     expect(shown).toEqual([toward(LEFT, { _tag: "j_secret", secret: OTHER_SECRET })]);
@@ -61,7 +61,7 @@ describe("j/shown", () => {
 
   test("R-WATCH-CALLDATA a finalize with no advance before it tells its own secrets, just ahead of itself", () => {
     const op = finalizeOp({ otherArguments: argumentsOf([SECRET]) });
-    const read = withCalldata(preparedOf(finalizedOf(op, 2n, 1n, TX)), new Map([[TX, finalizeInput(RIGHT, [op])]]));
+    const read = withCalldata(preparedOf(finalizedOf(op, 2n, 1n, TX)), new Map([[TX, [finalizeInput(RIGHT, [op])]]]));
     expect(observe(read.events, [LEFT], accounts)).toEqual(ok([
       toward(LEFT, { _tag: "j_secret", secret: SECRET }),
       toward(LEFT, { _tag: "j_dispute_over", peer: RIGHT }),
@@ -86,12 +86,12 @@ describe("j/shown", () => {
   });
 
   const HASH = must(proofBodyHash(CLAUSED));
-  const opened = (inputs: ReadonlyMap<Bytes32, Uint8Array>) =>
+  const opened = (inputs: ReadonlyMap<Bytes32, readonly Uint8Array[]>) =>
     must(observe(withCalldata(preparedOf(started(2n, 0n, [], HASH)), inputs).events, [LEFT], accounts));
   const START_TX = txOf(2n, 0n);
 
   test("R-WATCH-CALLDATA the body a start carried is told with the dispute, read from its transaction's input", () => {
-    const told = opened(new Map([[START_TX, startInput(RIGHT, [startOp(CLAUSED)])]]));
+    const told = opened(new Map([[START_TX, [startInput(RIGHT, [startOp(CLAUSED)])]]]));
     expect(told.map((a) => a.event._tag)).toEqual(["j_dispute"]);
     expect(told[0]?.event).toMatchObject({ _tag: "j_dispute", bodyHash: HASH, body: CLAUSED });
   });
@@ -99,7 +99,7 @@ describe("j/shown", () => {
   test("R-WATCH-CALLDATA a start whose input has no op with the logged hash is told with no body", () => {
     const lying = startInput(RIGHT, [startOp(CLAUSED, { proofbodyHash: hexOf(77n) })]);
     const wrapped = patched(startInput(RIGHT, [startOp(CLAUSED)]), 0, Uint8Array.of(0xca, 0xfe, 0xba, 0xbe));
-    [new Map(), new Map([[START_TX, lying]]), new Map([[START_TX, wrapped]])].forEach((inputs) => {
+    [new Map(), new Map([[START_TX, [lying]]]), new Map([[START_TX, [wrapped]]])].forEach((inputs) => {
       const told = opened(inputs);
       expect(told.map((a) => a.event._tag)).toEqual(["j_dispute"]);
       expect(told[0]?.event).not.toHaveProperty("body");
@@ -110,15 +110,15 @@ describe("j/shown", () => {
     const op = finalizeOp({ otherArguments: argumentsOf([SECRET]) });
     const wrapped = patched(finalizeInput(RIGHT, [op]), 0, Uint8Array.of(0xca, 0xfe, 0xba, 0xbe));
     const missing = withCalldata(preparedOf(advance(2n, 0n, 1n), finalizedOf(op, 2n, 1n, TX)), new Map());
-    const odd = withCalldata(preparedOf(advance(2n, 0n, 1n), finalizedOf(op, 2n, 1n, TX)), new Map([[TX, wrapped]]));
+    const odd = withCalldata(preparedOf(advance(2n, 0n, 1n), finalizedOf(op, 2n, 1n, TX)), new Map([[TX, [wrapped]]]));
     const absent = withCalldata(
       preparedOf(advance(2n, 0n, 1n), finalizedOf(op, 2n, 1n, TX)),
-      new Map([[TX, finalizeInput(RIGHT, [finalizeOp({ finalNonce: 99n })])]]),
+      new Map([[TX, [finalizeInput(RIGHT, [finalizeOp({ finalNonce: 99n })])]]]),
     );
     [missing, odd, absent].forEach((read) => {
       const told = must(observe(read.events, [LEFT, THIRD], accounts));
       expect(told.map((a) => a.event._tag)).toEqual(["j_epoch", "j_dispute_over", "j_finalize_unread"]);
-      expect(told.at(-1)).toEqual(toward(LEFT, { _tag: "j_finalize_unread", peer: RIGHT }));
+      expect(told.at(-1)).toEqual(toward(LEFT, { _tag: "j_finalize_unread", peer: RIGHT, tx: TX }));
     });
   });
 

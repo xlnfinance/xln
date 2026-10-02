@@ -8,6 +8,12 @@
 // a finalize op of the input is the one the log is about only if its evidence hash is the one the log carries.
 // Arguments the contract could not decode it treats as empty; here a secret is read wherever the words say one is,
 // which can only hand a hub a preimage it would be handed anyway.
+//
+// The Depository authorizes a batch by its Hanko, not by who sends it (Depository.sol 340-348), so the call is not
+// always the top of the transaction: a relay contract, a multicall or an `execute(target, data)` carries it inside its
+// own arguments. Every place in an input that begins with the `processBatch` selector is read as a call, whatever
+// wraps it; what a call must prove is the same wherever it was found (an evidence hash or a body hash the log names),
+// so a stray match changes nothing.
 import { proofBodyHash, type Allowance, type ProofBody, type TransformerClause } from "../../chain/proof/proof.ts";
 import {
   abiBytes, abiFits, abiLengthRef, abiLengthWord, abiRoot, abiStaticBytes, abiStaticWord, abiTupleBytes,
@@ -83,9 +89,15 @@ const finalizeOf = (batch: Uint8Array, op: AbiTuple): Finalize => {
 
 const startsWith = (input: Uint8Array, prefix: Uint8Array): boolean => prefix.every((b, i) => input[i] === b);
 
-/** The finalize ops of a `processBatch` call's input, or none when the input is some other call. */
-export const finalizesIn = (input: Uint8Array): readonly Finalize[] => {
-  if (!startsWith(input, PROCESS_BATCH)) return [];
+/**
+ * Every `processBatch` call in an input, as the bytes from its selector on: the input itself when it is one, and each
+ * one a wrapper carries in its arguments, at any offset (an ABI wrapper places it on a word, a packed one does not).
+ */
+const callsIn = (input: Uint8Array): readonly Uint8Array[] =>
+  Array.from({ length: Math.max(0, input.length - PROCESS_BATCH.length + 1) }, (_, at) => input.subarray(at))
+    .filter((from) => startsWith(from, PROCESS_BATCH));
+
+const finalizesOf = (input: Uint8Array): readonly Finalize[] => {
   const call = input.subarray(PROCESS_BATCH.length);
   const batch = abiBytes(call, abiLengthRef(call, abiRoot(), WORD));
   const list = abiLengthRef(batch, abiTupleRef(batch, abiRoot(), 0), BATCH_FINALIZATIONS * WORD);
@@ -94,6 +106,9 @@ export const finalizesIn = (input: Uint8Array): readonly Finalize[] => {
     ? Array.from({ length: Number(count) }, (_, i) => finalizeOf(batch, abiTupleElement(batch, list, i)))
     : [];
 };
+
+/** The finalize ops of every `processBatch` call in an input, or none when it holds none. */
+export const finalizesIn = (input: Uint8Array): readonly Finalize[] => callsIn(input).flatMap(finalizesOf);
 
 /**
  * The secrets a finalize showed, from the input of the transaction that carried it: the ops whose evidence hash is
@@ -162,21 +177,23 @@ const bodyIn = (buf: Uint8Array, body: AbiTuple): ProofBody => {
 /**
  * The proof body a dispute start carried, from the input of its transaction: the body of the start op whose
  * `proofbodyHash` is the one the chain logged, and that hashes to it (the contract reveals the exact signed body at
- * start, Types.sol `InitialDisputeProof.initialProofbody`). `undefined` when the input is not a `processBatch` call or
- * no op of it names the hash with a body that makes it. The Entity may finalize with such a body without having held
+ * start, Types.sol `InitialDisputeProof.initialProofbody`). `undefined` when the input holds no `processBatch` call or
+ * no op of one names the hash with a body that makes it. The Entity may finalize with such a body without having held
  * the state, because the hash is what the chain compares.
  */
-export const startedBody = (input: Uint8Array, bodyHash: Bytes32): ProofBody | undefined => {
-  if (!startsWith(input, PROCESS_BATCH)) return undefined;
+export const startedBody = (input: Uint8Array, bodyHash: Bytes32): ProofBody | undefined =>
+  callsIn(input).flatMap((call) => startedBodyOf(call, bodyHash)).at(0);
+
+const startedBodyOf = (input: Uint8Array, bodyHash: Bytes32): readonly ProofBody[] => {
   const call = input.subarray(PROCESS_BATCH.length);
   const batch = abiBytes(call, abiLengthRef(call, abiRoot(), WORD));
   const list = abiLengthRef(batch, abiTupleRef(batch, abiRoot(), 0), BATCH_STARTS * WORD);
   const count = abiLengthWord(batch, list);
-  if (!abiFits(batch, list, count, WORD)) return undefined;
+  if (!abiFits(batch, list, count, WORD)) return [];
   const ops = Array.from({ length: Number(count) }, (_, i) => abiTupleElement(batch, list, i));
   const named = ops.filter((op) => bytesToHex(abiTupleBytes(batch, op, START_BODY_HASH * WORD)) === bodyHash);
   const bodies = named.map((op) => bodyIn(batch, abiTupleRef(batch, op, START_BODY * WORD)));
-  return bodies.find((body) => {
+  return bodies.filter((body) => {
     const hash = proofBodyHash(body);
     return hash.ok && hash.value === bodyHash;
   });

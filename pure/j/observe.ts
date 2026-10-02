@@ -38,7 +38,7 @@ export type JEvent =
   | Tagged<"j_window_over", { peer: Bytes32 }>
   | Tagged<"j_dispute_over", { peer: Bytes32 }>
   | Tagged<"j_collateral", { peer: Bytes32; token: TokenId; collateral: bigint; ondelta: bigint }>
-  | Tagged<"j_finalize_unread", { peer: Bytes32 }>;
+  | Tagged<"j_finalize_unread", { peer: Bytes32; tx: Bytes32 }>;
 
 /** A secret the chain showed: no peer, every hosted Entity hears it. */
 export type Revealed = Tagged<"j_secret", { secret: Bytes32 }>;
@@ -155,7 +155,7 @@ const disputeStarted = (events: readonly ChainEvent[], e: Started, peer: Bytes32
 /** The dispute is over; and a finalize whose arguments the Host could not read says so (R-WATCH-CALLDATA). */
 const finalizedTold = (e: Finalized, peer: Bytes32): readonly JEvent[] => {
   const over: JEvent = { _tag: "j_dispute_over", peer };
-  return e.shown._tag === "unread" ? [over, { _tag: "j_finalize_unread", peer }] : [over];
+  return e.shown._tag === "unread" ? [over, { _tag: "j_finalize_unread", peer, tx: e.tx }] : [over];
 };
 
 /** What one event is to one hosted Entity that is a party to it, or nothing. */

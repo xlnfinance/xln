@@ -107,23 +107,35 @@ export const calldataWanted = (p: Prepared): readonly Bytes32[] =>
   [...new Set(p.events.flatMap((e) => (e._tag === "dispute_finalized" || e._tag === "dispute_started" ? [e.tx] : [])))];
 
 /**
- * The prepared batch with the arguments of its finalizes read from the inputs of their transactions, by transaction
- * hash: the finalize is `read` when an op of the input carries the evidence hash the log did, `unread` when none does
- * or the Host has no input for it.
+ * The prepared batch with the arguments of its finalizes read from the bytes that carried them, by transaction hash:
+ * the input of the transaction and, where the Host asked the node for a call trace, the input of each call it made to
+ * the Depository. A finalize is `read` when a `processBatch` call among those bytes, wherever a wrapper put it, has an
+ * op that carries the evidence hash the log did, and `unread` when none does or the Host has no bytes for it.
  */
-export const withCalldata = (p: Prepared, inputs: ReadonlyMap<Bytes32, Uint8Array>): Prepared => ({
+export const withCalldata = (p: Prepared, inputs: ReadonlyMap<Bytes32, readonly Uint8Array[]>): Prepared => ({
   ...p,
   events: p.events.map((e): ChainEvent => {
     if (e._tag === "dispute_started") {
-      const read = inputs.get(e.tx);
-      return { ...e, body: read === undefined ? undefined : startedBody(read, e.bodyHash) };
+      const body = (inputs.get(e.tx) ?? []).flatMap((input) => startedBody(input, e.bodyHash) ?? []).at(0);
+      return { ...e, body };
     }
     if (e._tag !== "dispute_finalized") return e;
-    const input = inputs.get(e.tx);
-    const secrets = input === undefined ? undefined : finalizedSecrets(input, e.evidence);
-    return { ...e, shown: secrets === undefined ? { _tag: "unread" } : { _tag: "read", secrets } };
+    const found = (inputs.get(e.tx) ?? []).flatMap((input) => finalizedSecrets(input, e.evidence) ?? []);
+    const read = (inputs.get(e.tx) ?? []).some((input) => finalizedSecrets(input, e.evidence) !== undefined);
+    return { ...e, shown: read ? { _tag: "read", secrets: [...new Set(found)] } : { _tag: "unread" } };
   }),
 });
+
+/**
+ * The transactions whose calldata the Host could not read what the log is about from: a finalize no bytes it holds
+ * carry, and a start whose body none does. The Host asks the node for a call trace of these, once.
+ */
+export const unreadTxs = (p: Prepared): readonly Bytes32[] => {
+  const unread = (e: ChainEvent): boolean =>
+    (e._tag === "dispute_finalized" && e.shown._tag === "unread")
+    || (e._tag === "dispute_started" && e.body === undefined);
+  return [...new Set(p.events.filter(unread).flatMap((e) => ("tx" in e ? [e.tx] : [])))];
+};
 
 /** The Accounts the chain must be asked about, at the end of which block, before `advance` can run. */
 export const readings = (p: Prepared, hosted: readonly Bytes32[]): readonly Reading[] => readingsOf(p.events, hosted);

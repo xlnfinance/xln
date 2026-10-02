@@ -9,7 +9,7 @@ import type { AccountAt } from "../../../j/observe.ts";
 import type { Block } from "../../../j/watch.ts";
 import { A } from "../../../kernel/encoding/abi.ts";
 import { hexToBytes } from "../../../kernel/encoding/bytes.ts";
-import { all, err, flatMap, map, mapErr, ok, type Result } from "../../../kernel/core/result.ts";
+import { all, err, flatMap, map, mapErr, ok, traverse, type Result } from "../../../kernel/core/result.ts";
 import type { PortFault } from "../submit/chain.ts";
 import type { WatchPort } from "../watch/loop.ts";
 import { bad, hexQuantity, oneWord, quantity, withArguments, wordsOf, type ReplyFault } from "./calls.ts";
@@ -49,6 +49,36 @@ const inputOf = (raw: unknown): Result<Uint8Array, ReplyFault> =>
     return bytes?.ok === true ? ok(bytes.value) : err(bad("a transaction without input"));
   });
 
+/** The most calls, and the deepest nesting, of a trace the port reads: a bigger one is a fault, never a part. */
+const MOST_CALLS = 4096;
+const MOST_DEPTH = 64;
+
+/** A call of a `callTracer` trace is `{ to, input, calls? }`: it and everything below it, in the order walked. */
+const nodesOf = (raw: unknown, depth: number): Result<readonly Fields[], ReplyFault> =>
+  (depth > MOST_DEPTH
+    ? err(bad("a call trace too deep to read"))
+    : flatMap(fieldsOf(raw), (node) => {
+      const { calls } = node;
+      if (calls === undefined) return ok([node]);
+      return Array.isArray(calls)
+        ? map(traverse(calls, (call) => nodesOf(call, depth + 1)), (below) => [node, ...below.flat()])
+        : err(bad("the calls of a call are not a list"));
+    }));
+
+/** The input of each call of the trace whose target is the Depository. A trace too big to read is a fault. */
+const callsOf = (depository: Address) => (raw: unknown): Result<readonly Uint8Array[], ReplyFault> =>
+  flatMap(nodesOf(raw, 0), (nodes) =>
+    (nodes.length > MOST_CALLS
+      ? err(bad("a call trace too big to read"))
+      : traverse(nodes.filter((n) => isText(n["to"]) && n["to"].toLowerCase() === depository), (n) => {
+        const bytes = isText(n["input"]) ? hexToBytes(n["input"].toLowerCase()) : undefined;
+        return bytes?.ok === true ? ok(bytes.value) : err(bad("a call of the trace without input"));
+      })));
+
+/** What a node says of a method it does not run: the one answer that is no fault of the call (the port says none). */
+const NO_METHOD =
+  /\bmethod\b.*\b(not found|does not exist|not available|not supported)\b|does not exist\/is not available/i;
+
 /** `_accounts(bytes)` and `ondeltaEpoch(bytes32,bytes32)`: the two reads the watcher's `reading` is made of. */
 const accountCalls = (left: Bytes32, right: Bytes32): Result<Readonly<{ row: string; epoch: string }>, ReplyFault> =>
   flatMap(mapErr(accountKey(left, right), () => bad("not an account key")), (key) =>
@@ -79,6 +109,11 @@ export const watchPort = (rpc: Rpc, depository: Address): WatchPort => {
           : err(bad("a log that is not the one asked for")))));
     },
     input: (tx) => reads.read("watch tx", "eth_getTransactionByHash", [tx], inputOf),
+    trace: async (tx) => {
+      const traced = await reads.read("watch trace", "debug_traceTransaction", [tx, { tracer: "callTracer" }],
+        callsOf(depository));
+      return traced.ok || !NO_METHOD.test(traced.error.reason) ? traced : ok(undefined);
+    },
     accountAt: async (block, left, right): Promise<Result<AccountAt, PortFault>> => {
       const calls = accountCalls(left, right);
       if (!calls.ok) return err(portFault("account at", calls.error.why));

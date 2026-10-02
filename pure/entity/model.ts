@@ -150,9 +150,10 @@ export type PeerMessage = Tagged<"peer_message", { from: EntityId; msg: Msg<Acco
  * settlement or withdrawal that can no longer land (its batch reverted, its signatures ran out), named by the serial
  * its action carried: a report of an operation that is not the one out (a repeat, or an older one) changes nothing;
  * `j_collateral` is what the chain holds for one token of the Account now (R-J-COLLATERAL): a state, not a change, so
- * a repeat is a no-op; `j_finalize_unread` is a dispute finalize whose arguments the Host could not read from its
- * transaction (some other call than `processBatch` carried it), so a secret it showed may have reached the chain
- * unseen by this node (R-WATCH-CALLDATA): told to the owner as a notice and changing no fact.
+ * a repeat is a no-op; `j_finalize_unread` is a dispute finalize, named by its transaction, whose arguments the Host
+ * could not read from the input of the transaction, nor from a call trace of it, so a secret it showed may have reached
+ * the chain unseen by this node (R-WATCH-CALLDATA): told to the owner as a notice naming the Account and the
+ * transaction, and changing no fact. Unread is a notice and not a safe state: the node may have lost a lock's payment.
  */
 export type JEvent =
   | Tagged<"j_epoch", { peer: EntityId; epoch: bigint; stored: bigint; finalBodyHash?: string }>
@@ -170,7 +171,7 @@ export type JEvent =
   | Tagged<"j_counter_lapsed", { peer: EntityId; nonce: bigint }>
   | Tagged<"j_collateral", { peer: EntityId; token: TokenId; collateral: bigint; ondelta: bigint }>
   | Tagged<"j_op_lapsed", { peer: EntityId; serial: bigint }>
-  | Tagged<"j_finalize_unread", { peer: EntityId }>;
+  | Tagged<"j_finalize_unread", { peer: EntityId; tx: string }>;
 
 /** What a peer asks the node to co-sign: a withdrawal of collateral as a shortcut (C2R) or as a settlement. */
 export type CosignOp =
@@ -313,7 +314,7 @@ export type Notice =
   | Tagged<"command_refused", { command: Command; fault: EntityFault }>
   | Tagged<"unknown_peer", { from: EntityId }>
   | Tagged<"holding_dropped", { peer: EntityId; token: TokenId }>
-  | Tagged<"finalize_unread", { peer: EntityId }>
+  | Tagged<"finalize_unread", { peer: EntityId; tx: string }>
   | Tagged<
     "offdelta_rebased",
     {

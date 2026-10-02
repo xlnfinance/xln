@@ -100,6 +100,41 @@ describe("host/shell/evm/watch the J loop's reads of the chain", () => {
       .toEqual(err({ _tag: "port", call: "watch tx", reason: "connection refused" }));
   });
 
+  test("R-WATCH-CALLDATA a call trace is the inputs of the calls made to the Depository, nested or not", async () => {
+    const log = logPath();
+    const call = (to: string, input: string, calls?: readonly unknown[]) => ({ type: "CALL", to, input, calls });
+    const other = "0x00000000000000000000000000000000000000aa";
+    const tree = call(other, "0x1111", [
+      call(other, "0x2222", [call(ADDRESS, "0xCAFE01")]),
+      call(ADDRESS.toUpperCase().replace("0X", "0x"), "0xCAFE02", []),
+    ]);
+    const traced = await portOf({ debug_traceTransaction: () => ok(tree) }, log).trace(txOf(3n, 1n));
+    expect(traced).toEqual(ok([Uint8Array.of(0xca, 0xfe, 0x01), Uint8Array.of(0xca, 0xfe, 0x02)]));
+    expect(askedOf(log)).toEqual([`debug_traceTransaction ["${txOf(3n, 1n)}",{"tracer":"callTracer"}]`]);
+  });
+
+  test("R-WATCH-CALLDATA a node with no call trace says so; any other fault of the node is a fault", async () => {
+    const refuses = (reason: string) => portOf({ debug_traceTransaction: () => err({ _tag: "rpc", reason }) });
+    const none = "the method debug_traceTransaction does not exist/is not available";
+    expect(await refuses(none).trace(txOf(3n, 1n))).toEqual(ok(undefined));
+    expect(await refuses("Method not found").trace(txOf(3n, 1n))).toEqual(ok(undefined));
+    expect(await refuses("transaction not found").trace(txOf(3n, 1n)))
+      .toEqual(err({ _tag: "port", call: "watch trace", reason: "transaction not found" }));
+    expect(await portOf({ debug_traceTransaction: () => down }).trace(txOf(3n, 1n)))
+      .toEqual(err({ _tag: "port", call: "watch trace", reason: "connection refused" }));
+  });
+
+  test("R-WATCH-CALLDATA a call trace that is not a tree of calls, or too big to read, is a fault", async () => {
+    const asked = (reply: unknown) => portOf({ debug_traceTransaction: () => ok(reply) }).trace(txOf(3n, 1n));
+    const missing = { to: ADDRESS };
+    const deeper = (below: unknown): unknown => ({ to: "0x00", input: "0x", calls: [below] });
+    const deep = Array.from({ length: 70 }).reduce<unknown>(deeper, {});
+    const wide = { to: "0x00", input: "0x", calls: Array.from({ length: 4097 }, () => ({ to: "0x00", input: "0x" })) };
+    const replies = [null, "0x", { to: ADDRESS, input: "0x12", calls: "none" }, missing, deep, wide];
+    const answers = await Promise.all(replies.map(asked));
+    answers.forEach((got) => expect(got).toMatchObject({ ok: false, error: { call: "watch trace" } }));
+  });
+
   test("R-WATCH-TELL an Account is read at the end of a block named by its hash: row nonce and epoch", async () => {
     const log = logPath();
     const node: Node = {

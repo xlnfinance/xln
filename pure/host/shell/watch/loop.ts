@@ -12,7 +12,7 @@ import { hexToBytes } from "../../../kernel/encoding/bytes.ts";
 import { readingKey } from "../../../j/observe.ts";
 import { bytes32, type Address, type Bytes32, type RawLog } from "../../../j/log.ts";
 import {
-  advance, calldataWanted, finalizedAt, prepare, readings, watching, withCalldata, type Block, type Watch,
+  advance, calldataWanted, finalizedAt, prepare, readings, unreadTxs, watching, withCalldata, type Block, type Watch,
   type WatchFault, type Window,
 } from "../../../j/watch.ts";
 import { err, flatMap, map, ok, traverse, type Result } from "../../../kernel/core/result.ts";
@@ -28,6 +28,11 @@ export type WatchPort = Readonly<{
   accountAt: (block: Bytes32, left: Bytes32, right: Bytes32) => Promise<Result<AccountAt, PortFault>>;
   /** The input of the transaction with this hash, where a finalize's arguments are (R-WATCH-CALLDATA). */
   input: (tx: Bytes32) => Promise<Result<Uint8Array, PortFault>>;
+  /**
+   * The input of every call the transaction made to the Depository, from the node's call trace, when a wrapper hid the
+   * call from the input. Nothing (`undefined`) when the node has no call trace: that is an answer, not a fault.
+   */
+  trace: (tx: Bytes32) => Promise<Result<readonly Uint8Array[] | undefined, PortFault>>;
 }>;
 
 /** What the node watches: the Depository, how deep a block must be buried, and the Entity it hosts. */
@@ -56,17 +61,38 @@ const blocksAfter = async (port: WatchPort, from: bigint, to: bigint): Promise<R
     (block) => block,
   );
 
-const inputAt = async (port: WatchPort, tx: Bytes32): Promise<Result<readonly [Bytes32, Uint8Array], PortFault>> =>
-  map(await port.input(tx), (input) => [tx, input] as const);
+/** What the node gave for each transaction asked, and the faults it met: a tx is in one of the two, or in neither. */
+type Gathered = Readonly<{
+  found: ReadonlyMap<Bytes32, readonly Uint8Array[]>; failed: ReadonlyMap<Bytes32, PortFault>;
+}>;
 
-/** The inputs of the transactions that carried a finalize, by hash: each asked once, a miss is the node's to retry. */
-const inputsOf = async (
-  port: WatchPort, txs: readonly Bytes32[],
-): Promise<Result<ReadonlyMap<Bytes32, Uint8Array>, PortFault>> =>
-  map(
-    traverse(await Promise.all(txs.map((tx) => inputAt(port, tx))), (r) => r),
-    (found) => new Map(found),
-  );
+const NOTHING: Gathered = { found: new Map(), failed: new Map() };
+
+const gather = async (
+  txs: readonly Bytes32[], ask: (tx: Bytes32) => Promise<Result<readonly Uint8Array[] | undefined, PortFault>>,
+): Promise<Gathered> => {
+  const answers = await Promise.all(txs.map(async (tx) => [tx, await ask(tx)] as const));
+  return {
+    found: new Map(answers.flatMap(([tx, a]) => (a.ok && a.value !== undefined ? [[tx, a.value] as const] : []))),
+    failed: new Map(answers.flatMap(([tx, a]) => (a.ok ? [] : [[tx, a.error] as const]))),
+  };
+};
+
+/** The bytes of each transaction by hash: its input and the inputs of its calls to the Depository, in that order. */
+const joined = (a: Gathered, b: Gathered): Gathered => ({
+  found: new Map([...a.found, ...b.found].map(([tx]) =>
+    [tx, [...(a.found.get(tx) ?? []), ...(b.found.get(tx) ?? [])]])),
+  failed: new Map([...a.failed, ...b.failed]),
+});
+
+/** The earliest block that holds a log of a transaction the Host could not read, and why: what lies before is told. */
+type Stall = Readonly<{ block: bigint; fault: PortFault }>;
+
+const firstStall = (logs: readonly RawLog[], failed: ReadonlyMap<Bytes32, PortFault>): Stall | undefined =>
+  logs.flatMap((log): readonly Stall[] => {
+    const fault = failed.get(log.tx);
+    return fault === undefined ? [] : [{ block: log.block, fault }];
+  }).toSorted((x, y) => (x.block < y.block ? -1 : 1)).at(0);
 
 /** One delivery: the J events for the node's Entity, in the chain's order, and then the height they end at. */
 export type Delivery = Readonly<{ watch: Watch; events: readonly EntityInput[]; height: JHeight }>;
@@ -126,9 +152,23 @@ export const poll = async (
   if (!logs.ok) return logs;
   const prepared = prepare(watch, { head: head.value, blocks: blocks.value, logs: logs.value });
   if (!prepared.ok) return prepared;
-  const inputs = await inputsOf(port, calldataWanted(prepared.value));
-  if (!inputs.ok) return inputs;
-  const read = withCalldata(prepared.value, inputs.value);
+  // The bytes a finalize or a start left: the input of its transaction, and when a wrapper hid the call there, the
+  // call trace. A tx the node cannot give stalls the delivery at its block, not the poll: what lies before is told.
+  const inputs = await gather(calldataWanted(prepared.value), async (tx) => map(await port.input(tx), (i) => [i]));
+  const unread = unreadTxs(withCalldata(prepared.value, inputs.found)).filter((tx) => !inputs.failed.has(tx));
+  const traces = unread.length === 0 ? NOTHING : await gather(unread, port.trace);
+  const gathered = joined(inputs, traces);
+  const stall = firstStall(logs.value, gathered.failed);
+  const upTo = stall === undefined ? to : stall.block - 1n;
+  if (stall !== undefined && upTo <= watch.applied.number) return err(stall.fault);
+  const cut = stall === undefined
+    ? prepared
+    : prepare(watch, {
+      head: head.value, blocks: blocks.value.filter((b) => b.number <= upTo),
+      logs: logs.value.filter((log) => log.block <= upTo),
+    });
+  if (!cut.ok) return cut;
+  const read = withCalldata(cut.value, gathered.found);
   const asked = await Promise.all(readings(read, [hosted]).map(async (r) =>
     map(await port.accountAt(r.blockHash, r.left, r.right), (at) => [readingKey(r), at] as const)));
   const accounts = traverse(asked, (answer) => answer);

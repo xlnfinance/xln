@@ -7,14 +7,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { err, ok, unwrapOr } from "../../../kernel/core/result.ts";
 import { freshChain } from "../../../entity/chain.ts";
-import type { ChainFacts, EntityId, Starting } from "../../../entity/model.ts";
+import type { ChainFacts, EntityId, EntityInput, Starting } from "../../../entity/model.ts";
 import { entityId } from "../../../entity/model.ts";
 import type { Bytes32, RawLog } from "../../../j/log.ts";
 import { proofBodyHash } from "../../../chain/proof/proof.ts";
 import { watching, type Block } from "../../../j/watch.ts";
 import {
   argumentsOf, blockOf, CLAUSED, DEPOSITORY, entityOf, finalizedOf, finalizeInput, finalizeOp, hexOf, logOf, must,
-  startInput, startOp, txOf,
+  multicalled, relayed, startInput, startOp, txOf,
 } from "../../../j/fixtures.ts";
 import { callsOf } from "../fixtures.ts";
 import type { PortFault } from "../submit/chain.ts";
@@ -37,6 +37,7 @@ const logPath = (): string => join(mkdtempSync(LOOP_DIR), "calls.log");
 const portOf = (
   chain: Chain, log: string, broken: bigint | "logs" | "account" | "input" = -1n,
   inputs: ReadonlyMap<Bytes32, Uint8Array> = new Map(),
+  traces: ReadonlyMap<Bytes32, readonly Uint8Array[] | "down"> = new Map(),
 ): WatchPort => {
   appendFileSync(log, "");
   return {
@@ -59,6 +60,12 @@ const portOf = (
       appendFileSync(log, `input ${tx.slice(-4)}\n`);
       const found = inputs.get(tx);
       return Promise.resolve(broken === "input" || found === undefined ? err(DOWN) : ok(found));
+    },
+    // A node with no call trace says so (`undefined`); one that is asked and fails is the port's fault.
+    trace: (tx) => {
+      appendFileSync(log, `trace ${tx.slice(-4)}\n`);
+      const found = traces.get(tx);
+      return Promise.resolve(found === "down" ? err(DOWN) : ok(found));
     },
   };
 };
@@ -122,10 +129,90 @@ describe("host/shell/watch the J loop's poll", () => {
     expect(callsOf(at).filter((c) => c.startsWith("input"))).toEqual([`input ${txOf(2n, 0n).slice(-4)}`]);
   });
 
-  test("R-WATCH-CALLDATA an input the node cannot give is the port's fault: nothing is delivered", async () => {
-    const chain = straight(6n, [advanced(2n, 0n, 1n), finalizedOf(finalizeOp(), 2n, 1n)]);
-    expect(await poll(portOf(chain, logPath(), "input"), start(2n), LEFT)).toEqual(err(DOWN));
-    expect(await poll(portOf(chain, logPath()), start(2n), LEFT)).toEqual(err(DOWN));
+  const SECRET_BYTES = Uint8Array.from({ length: 32 }, (_, i) => (i === 31 ? 8 : 0));
+
+  /** A finalize at block 2 that shows a secret, in the transaction `tx`, after an epoch advance of the same block. */
+  const finalizing = (tx = txOf(2n, 1n)) => {
+    const op = finalizeOp({ otherArguments: argumentsOf([hexOf(8n)]) });
+    return { op, tx, logs: [advanced(2n, 0n, 1n), finalizedOf(op, 2n, 1n, tx)] as const };
+  };
+  const EPOCH: EntityInput = { _tag: "j_epoch", peer: peer(RIGHT), epoch: 1n, stored: 5n, finalBodyHash: hexOf(5n) };
+  const OVER: EntityInput = { _tag: "j_dispute_over", peer: peer(RIGHT) };
+  const TOLD: readonly EntityInput[] = [{ _tag: "j_secret", secret: SECRET_BYTES }, EPOCH, OVER];
+
+  test("R-WATCH-CALLDATA a finalize relayed through a contract is read from the call the input carries", async () => {
+    const at = logPath();
+    const { op, tx, logs } = finalizing();
+    const input = relayed(finalizeInput(RIGHT, [op]));
+    const got = await poll(portOf(straight(6n, logs), at, -1n, new Map([[tx, input]])), start(2n), LEFT);
+    expect(got.ok ? got.value?.events : got).toEqual(TOLD);
+    expect(callsOf(at).some((c) => c.startsWith("trace"))).toBe(false);
+  });
+
+  test("R-WATCH-CALLDATA a finalize in a multicall among other calls is read, whichever entry carries it", async () => {
+    const { op, tx, logs } = finalizing();
+    const other = finalizeInput(RIGHT, [finalizeOp({ finalNonce: 99n })]);
+    const input = multicalled([other, finalizeInput(RIGHT, [op])]);
+    const got = await poll(portOf(straight(6n, logs), logPath(), -1n, new Map([[tx, input]])), start(2n), LEFT);
+    expect(got.ok ? got.value?.events : got).toEqual(TOLD);
+  });
+
+  test("R-WATCH-CALLDATA an embedded call with another evidence hash is ignored, and the node says so", async () => {
+    const at = logPath();
+    const { tx, logs } = finalizing();
+    const liar = finalizeOp({ finalNonce: 99n, otherArguments: argumentsOf([hexOf(9n)]) });
+    const got = await poll(portOf(straight(6n, logs), at, -1n, new Map([[tx, relayed(finalizeInput(RIGHT, [liar]))]])),
+      start(2n), LEFT);
+    const tags = got.ok ? got.value?.events.map((e) => e._tag) : got;
+    expect(tags).toEqual(["j_epoch", "j_dispute_over", "j_finalize_unread"]);
+    expect(got.ok ? got.value?.events.at(-1) : got).toEqual({ _tag: "j_finalize_unread", peer: peer(RIGHT), tx });
+    expect(callsOf(at).filter((c) => c.startsWith("trace"))).toEqual([`trace ${tx.slice(-4)}`]);
+  });
+
+  test("R-WATCH-CALLDATA a call the input hides is read from the node's call trace, asked for once", async () => {
+    const at = logPath();
+    const { op, tx, logs } = finalizing();
+    const hidden = Uint8Array.of(0xca, 0xfe, 0xba, 0xbe, 1, 2, 3, 4);
+    const traces = new Map([[tx, [finalizeInput(RIGHT, [op])]]]);
+    const got = await poll(portOf(straight(6n, logs), at, -1n, new Map([[tx, hidden]]), traces), start(2n), LEFT);
+    expect(got.ok ? got.value?.events : got).toEqual(TOLD);
+    expect(callsOf(at).filter((c) => c.startsWith("trace"))).toEqual([`trace ${tx.slice(-4)}`]);
+  });
+
+  test("R-WATCH-CALLDATA a hidden call on a node with no call trace is told unread, with its tx", async () => {
+    const { tx, logs } = finalizing();
+    const hidden = Uint8Array.of(0xca, 0xfe, 0xba, 0xbe, 1, 2, 3, 4);
+    const got = await poll(portOf(straight(6n, logs), logPath(), -1n, new Map([[tx, hidden]])), start(2n), LEFT);
+    const unread: EntityInput = { _tag: "j_finalize_unread", peer: peer(RIGHT), tx };
+    expect(got.ok ? got.value?.events : got).toEqual([EPOCH, OVER, unread]);
+  });
+
+  test("R-WATCH-CALLDATA a trace that fails stalls the delivery at its block; what lies before is told", async () => {
+    const shown = logOf("SecretRevealed", { hashlock: hexOf(7n), revealer: RIGHT, secret: hexOf(8n) }, 1n, 0n);
+    const { tx, logs } = finalizing();
+    const hidden = Uint8Array.of(0xca, 0xfe, 0xba, 0xbe, 1, 2, 3, 4);
+    const traces = new Map<Bytes32, "down">([[tx, "down"]]);
+    const port = portOf(straight(6n, [shown, ...logs]), logPath(), -1n, new Map([[tx, hidden]]), traces);
+    const got = await poll(port, start(2n), LEFT);
+    expect(got.ok ? got.value?.events : got).toEqual([{ _tag: "j_secret", secret: SECRET_BYTES }]);
+    expect(got.ok ? got.value?.height : got).toBe(1n as never);
+  });
+
+  test("R-WATCH-CALLDATA an input the node cannot give stalls the delivery at its block, no later", async () => {
+    const shown = logOf("SecretRevealed", { hashlock: hexOf(7n), revealer: RIGHT, secret: hexOf(8n) }, 1n, 0n);
+    const { logs } = finalizing();
+    const early = await poll(portOf(straight(6n, [shown, ...logs]), logPath()), start(2n), LEFT);
+    expect(early.ok ? early.value?.events : early).toEqual([{ _tag: "j_secret", secret: SECRET_BYTES }]);
+    expect(early.ok ? early.value?.height : early).toBe(1n as never);
+    const first = await poll(portOf(straight(6n, logs.slice(0, 1) as never), logPath(), "input"), start(2n), LEFT);
+    expect(first.ok ? first.value?.events.map((e) => e._tag) : first).toEqual(["j_epoch"]);
+  });
+
+  test("R-WATCH-CALLDATA a tx the node cannot give in the first block read is the port's fault", async () => {
+    const op = finalizeOp();
+    const at1 = [logOf("AccountEpochAdvanced", { left: LEFT, right: RIGHT, ondeltaEpoch: 1n }, 1n, 0n),
+      finalizedOf(op, 1n, 1n)];
+    expect(await poll(portOf(straight(6n, at1), logPath(), "input"), start(2n), LEFT)).toEqual(err(DOWN));
   });
 
   test("R-JLOOP a block not buried yet is not read: nothing is delivered, nothing is asked past the head", async () => {

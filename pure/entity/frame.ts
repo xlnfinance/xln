@@ -468,7 +468,7 @@ const chainFact = (w: Work, terms: ProofTerms, e: JEvent): Work => {
     case "j_op_lapsed":
       return withFacts(w, e.peer, cosignLapsed(facts, e.serial));
     case "j_finalize_unread":
-      return noting(w, { _tag: "finalize_unread", peer: e.peer });
+      return noting(w, { _tag: "finalize_unread", peer: e.peer, tx: e.tx });
   }
 };
 
