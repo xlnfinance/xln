@@ -61,7 +61,7 @@ const peerOf = (event: { peer: Bytes32 }): Result<EntityId, BadPeer> => {
   return peer.ok ? peer : err({ _tag: "bad_peer", text: event.peer });
 };
 
-/** The Entity's input for what the watcher told: a peer's id for an Account's event, the secret's bytes for a reveal. */
+/** The Entity's input for what the watcher told: the peer's id for an Account's event, the bytes of a secret. */
 const inputOf = (event: Addressed["event"]): Result<EntityInput, BadPeer | BadSecret> => {
   if (event._tag !== "j_secret") return map(peerOf(event), (peer) => ({ ...event, peer }) as EntityInput);
   const bytes = hexToBytes(event.secret);

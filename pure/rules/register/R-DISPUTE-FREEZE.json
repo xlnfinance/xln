@@ -1,6 +1,6 @@
 {
  "id": "R-DISPUTE-FREEZE",
- "statement": "While a dispute is open on an Account, whoever started it (the Entity holds a record of the dispute it asked for, `starting`, or of the one the peer started, `against`, until the finalize, a lapse or the epoch move ends it), the node signs nothing new on it. It proposes no frame (its queue waits), and every frame its peer proposes is refused with the fault `frozen`, which can pass: the proposer takes the frame back and tries again once its view of J moves, so the payment commits in the epoch that follows or is refused then by the Account's own door. The one predicate that says so, `quiet` (the node's signature is out on a settlement or a C2R, R-COSIGN-FREEZE, or a dispute is open), feeds both the proposing and the rules the Account judges the peer's frames by. A command that takes on value (`pay`, `lock`, `offer`, `fill`) asked on an Account in dispute is refused back to whoever asked, with a `command_refused` notice and the fault `account_disputed`, so it is never queued to be zeroed by the rebase; a lock the paybook forwards into it fails back along the route as a refused entry does. When the chain moves the epoch on, each token whose committed state carried offdelta is told to the node's owner (`offdelta_rebased`: peer, token, epoch and the offdelta the node counted), on both sides, so a payment a rebase zeroes is never lost without a word; a frame in flight is kept and sealed again, so it is not told. A release (`resolve`, `cancel`, `expire`, `retract`, `lapse`) and `set_credit` wait in the queue for the new epoch. The proof the dispute rests on therefore stays the newest the node holds, and no frame is committed between the chain's finalize and the Entity hearing of it, because the Entity stays quiet until it hears the epoch move. Not here: a frame sealed before the node heard of the dispute and acked after it (the proposer commits it during the dispute; the acker's counter names it when the acker holds it, and with no counter the finalize voids it, and the notice says what the node counted but not what the chain paid: owed, a notice for offdelta beyond the finalized proof, R-DISPUTE-VOIDED-NOTICE), the Host telling the Entity the epoch before it signs anything, and the starter that never finalizes (the peer stays quiet until it does; it holds only a hash of the opening body and cannot finalize in its place).",
+ "statement": "While a dispute is open on an Account, whoever started it (the Entity holds a record of the dispute it asked for, `starting`, or of the one the peer started, `against`, until the finalize, a lapse or the epoch move ends it), the node signs nothing new on it. It proposes no frame (its queue waits), and every frame its peer proposes is refused with the fault `frozen`, which can pass: the proposer takes the frame back and tries again once its view of J moves, so the payment commits in the epoch that follows or is refused then by the Account's own door. The one predicate that says so, `quiet` (the node's signature is out on a settlement or a C2R, R-COSIGN-FREEZE, or a dispute is open), feeds both the proposing and the rules the Account judges the peer's frames by. A command that takes on value (`pay`, `lock`, `offer`, `fill`) asked on an Account in dispute is refused back to whoever asked, with a `command_refused` notice and the fault `account_disputed`, so it is never queued to be zeroed by the rebase; a lock the paybook forwards into it fails back along the route as a refused entry does. When the chain moves the epoch on, by whatever path (a finalize, a withdrawal, a settlement), each token whose committed state carried offdelta is told to the node's owner (`offdelta_rebased`: peer, token, epoch and the offdelta the node counted), on both sides, so a payment a rebase zeroes is never lost without a word, and a token with none is told nothing; a frame in flight is kept and sealed again, so it is not told. A frame of the node's own that was sealed before the dispute is not sent again while the dispute is open, and the ack of it commits nothing: it stays pending and is rebased with the epoch like any pending frame. A finalize settled every clause of its proof, so the holds are dissolved (R-HOLD-DISSOLVE) and a release queued for one is refused with a notice, never applied again in the epoch that follows. A payee behind a dispute cannot resolve in a frame, so the secret reaches the hub that forwarded the lock another way: every hosted Entity hears the chain's `SecretRevealed` as `j_secret` (at the configured depth, R-WATCH-READS-ALL) and the paybook passes the secret up for a lock it forwarded under that hash, on any Account, frozen or not; a resolve in a frame the node refuses as frozen shows its secret the same way, since a secret proves itself by its hash. A release (`resolve`, `cancel`, `expire`, `retract`, `lapse`) and `set_credit` wait in the queue for the new epoch. The proof the dispute rests on therefore stays the newest the node holds, and no frame is committed between the chain's finalize and the Entity hearing of it, because the Entity stays quiet until it hears the epoch move. Not here: a frame the peer sealed before it heard of the dispute and that this node acked before it heard of it (the peer commits it, this node's finalize or counter may not hold it; the notice says what the node counted but not what the chain paid, so the finalize may void it unannounced: owed, a notice for offdelta beyond the finalized proof), the Host telling the Entity the epoch before it signs anything, the exact tokens a finalize pays (zeroing the union only understates, never overstates: owed, the Host reads the Account's holdings after the finalizing block), and the starter that never finalizes (owed, the next PR).",
  "source": "coordinator 10-02 11:55 (decision after the re-audit of PR 159)",
  "layers": {
   "arrival": "owed: spec thread, next Arrival page",
@@ -84,6 +84,61 @@
    "kind": "test",
    "layer": "ts",
    "name": "R-DISPUTE-FREEZE each side tells the offdelta it counted: the peer that committed first tells more"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DISPUTE-FREEZE a secret Bob shows on the chain is passed up: the hub claims Alice's lock"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DISPUTE-FREEZE a resolve the hub refuses as frozen still gives it the secret to pass up"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DISPUTE-FREEZE a secret nobody forwarded a lock under, or a wrong one, changes nothing"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DISPUTE-FREEZE a lock forwarded into an Account in dispute is refused and given up upstream"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DISPUTE-FREEZE a revealed secret reads hashlock and revealer from topics, the secret from data"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DISPUTE-FREEZE a revealed secret is a j_secret for every hosted Entity and asks no reading"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DISPUTE-FREEZE a secret the chain showed reaches the Entity as j_secret, in bytes"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DISPUTE-FREEZE an ack that arrives in the dispute commits nothing: the frame stays pending"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DISPUTE-FREEZE the timer does not send the pending frame again while the dispute is open"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DISPUTE-FREEZE when the dispute lapses the frame is sent again, Bob acks it again and it commits"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DISPUTE-FREEZE the notice follows the amount, not the path: a dispute before the move tells the same"
   }
  ]
 }

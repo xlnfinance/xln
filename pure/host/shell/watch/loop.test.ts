@@ -70,10 +70,11 @@ describe("host/shell/watch the J loop's poll", () => {
     ]);
   });
 
-  test("R-DISPUTE-FREEZE a secret the chain showed reaches the Entity as j_secret with the secret's bytes", async () => {
+  test("R-DISPUTE-FREEZE a secret the chain showed reaches the Entity as j_secret, in bytes", async () => {
     const shown = logOf("SecretRevealed", { hashlock: hexOf(7n), revealer: RIGHT, secret: hexOf(8n) }, 2n, 0n);
     const got = await poll(portOf(straight(6n, [shown]), logPath()), start(2n), LEFT);
-    expect(got.ok ? got.value?.events : got).toEqual([{ _tag: "j_secret", secret: Uint8Array.from({ length: 32 }, (_, i) => (i === 31 ? 8 : 0)) }]);
+    const bytes = Uint8Array.from({ length: 32 }, (_, i) => (i === 31 ? 8 : 0));
+    expect(got.ok ? got.value?.events : got).toEqual([{ _tag: "j_secret", secret: bytes }]);
   });
 
   test("R-JLOOP a block not buried yet is not read: nothing is delivered, nothing is asked past the head", async () => {

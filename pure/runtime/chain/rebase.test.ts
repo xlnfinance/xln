@@ -5,7 +5,7 @@
 import { describe, expect, test } from "bun:test";
 import { tokenOf, viewOf } from "../../account/fixtures.ts";
 import { OPENED_WITH } from "../../entity/fixtures.ts";
-import { type EntityId, type JEvent } from "../../entity/model.ts";
+import { type EntityId, type JAction, type JEvent } from "../../entity/model.ts";
 import {
   type Cluster, credit, deliver, entityOf, feed, GOLD, hostOf, open, pay, restarted, rise, settle, start,
 } from "../fixtures.ts";
@@ -20,6 +20,15 @@ const paid = settle(feed(credited, ALICE, pay(BOB, 40n)));
 const epochOf = (peer: EntityId, epoch: bigint): JEvent => ({ _tag: "j_epoch", peer, epoch, stored: 5n });
 const moved = (c: Cluster, epoch: bigint): Cluster =>
   feed(feed(c, ALICE, epochOf(BOB, epoch)), BOB, epochOf(ALICE, epoch));
+/** Alice asks for the dispute and the chain opens it: both Entities hear it, so an epoch move after it ends one. */
+const disputed = (c: Cluster): Cluster => {
+  const asked = feed(c, ALICE, { _tag: "dispute", peer: BOB });
+  const [first] = asked.chain.filter((a: JAction) => a._tag === "dispute_start").slice(-1);
+  const nonce = first?._tag === "dispute_start" ? first.nonce : expect.unreachable("no start");
+  const opens = (peer: EntityId): JEvent =>
+    ({ _tag: "j_dispute", peer, epoch: 0n, by: "left", nonce, timeout: 500n, ...OPENED_WITH });
+  return feed(feed(asked, ALICE, opens(BOB)), BOB, opens(ALICE));
+};
 const finalized = (c: Cluster): Cluster => feed(
   feed(c, ALICE, { _tag: "j_dispute_over", peer: BOB }),
   BOB, { _tag: "j_dispute_over", peer: ALICE });
@@ -68,6 +77,14 @@ describe("runtime/chain R-LEDGER-REBASE an epoch advance zeroes the offdelta on 
     expect([rebasedTold(again, ALICE), rebasedTold(again, BOB)]).toEqual([[[GOLD, 1n, -40n]], [[GOLD, 1n, -40n]]]);
     const quiet = moved(opened, 1n);
     expect([rebasedTold(quiet, ALICE), rebasedTold(quiet, BOB)]).toEqual([[], []]);
+  });
+
+  test("R-DISPUTE-FREEZE the notice follows the amount, not the path: a dispute before the move tells the same", () => {
+    const viaFinalize = moved(disputed(paid), 1n);
+    expect([rebasedTold(viaFinalize, ALICE), rebasedTold(viaFinalize, BOB)]).toEqual(
+      [[[GOLD, 1n, -40n]], [[GOLD, 1n, -40n]]]);
+    const nothingCounted = moved(disputed(credited), 1n);
+    expect([rebasedTold(nothingCounted, ALICE), rebasedTold(nothingCounted, BOB)]).toEqual([[], []]);
   });
 
   test("R-DISPUTE-FREEZE each side tells the offdelta it counted: the peer that committed first tells more", () => {

@@ -170,7 +170,8 @@ export type CosignAsk = Tagged<"cosign_ask", { from: EntityId; op: CosignOp }>;
 
 /**
  * `j_secret` is a secret the chain showed (a payee's reveal in a batch of its own): the chain names no Account for it,
- * so every Entity hears it, and the paybook of one that forwarded a lock under its hash passes it up (R-DISPUTE-FREEZE).
+ * so every Entity hears it, and the paybook of one that forwarded a lock under its hash passes it up
+ * (R-DISPUTE-FREEZE).
  */
 export type SecretRevealed = Tagged<"j_secret", { secret: Uint8Array }>;
 

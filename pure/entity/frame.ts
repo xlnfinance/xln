@@ -111,15 +111,20 @@ const cosigned = (outcome: Outcome<PeerFault>, own: EntityReplica["pending"], fa
   || (outcome._tag === "committed_own" && own?.frame.epoch === facts.epoch);
 
 /**
- * A frame of the peer that was taken tells the paybook what the peer answered to the locks made to it. A frame that was
- * not taken (an Account in dispute refuses every frame) still shows the secrets of its resolves: a secret proves itself
- * by its hash, and the hub that holds the lock upstream must not lose it to a refusal (R-DISPUTE-FREEZE).
+ * A frame of the peer that was taken tells the paybook what the peer answered to the locks made to it. A frame refused
+ * as frozen (an Account in dispute refuses every frame its peer proposes) still shows the secrets of its resolves: a
+ * secret proves itself by its hash, and the hub that holds the lock upstream must not lose it to the freeze
+ * (R-DISPUTE-FREEZE). A frame refused for any other fault is no news.
  */
 const takenFrom = (w: Work, a: PeerMessage, outcome: Outcome<PeerFault>): Work => {
   if (a.msg._tag !== "frame") return w;
-  const taken = outcome._tag === "accepted" || outcome._tag === "accepted_over_own";
-  const paybook = taken ? learned(w.state.paybook, a.from, a.msg.frame.txs) : revealedBy(w.state.paybook, a.msg.frame.txs);
-  return { ...w, state: { ...w.state, paybook } };
+  const { txs } = a.msg.frame;
+  const book = w.state.paybook;
+  if (outcome._tag === "accepted" || outcome._tag === "accepted_over_own") {
+    return { ...w, state: { ...w.state, paybook: learned(book, a.from, txs) } };
+  }
+  const frozen = outcome._tag === "refused_invalid" && outcome.fault._tag === "frozen";
+  return frozen ? { ...w, state: { ...w.state, paybook: revealedBy(book, txs) } } : w;
 };
 
 /** A secret the chain showed (R-DISPUTE-FREEZE): to the paybook it is the resolve of the payee, on any Account. */
@@ -159,9 +164,18 @@ const sealedNow = (rules: EntityRules, outcome: Outcome<PeerFault>, pending: Ent
   outcome._tag !== "committed_own"
   || (pending !== undefined && pending.frame.epoch === rules.epoch && pending.frame.firstNonce === rules.firstNonce);
 
+/**
+ * R-DISPUTE-FREEZE: the ack of a frame of mine that was sealed before the dispute commits nothing while the dispute is
+ * open: the head stays the one the dispute rests on. The frame stays pending (the peer, which committed it, is told
+ * again at the epoch that follows, and a frame the new epoch does not accept is sealed anew like any other).
+ */
+const ackedInDispute = (w: Work, a: PeerMessage): boolean =>
+  a.msg._tag === "ack" && inDispute(factsOf(w, a.from));
+
 const hearing = (rules: Rulebook, check: Check, view: JView, w: Work, a: PeerMessage): Work => {
   const account = w.state.accounts.get(a.from);
   if (account === undefined) return noting(w, { _tag: "unknown_peer", from: a.from });
+  if (ackedInDispute(w, a)) return w;
   const rule = rules(w, a.from);
   const heard = receive(rule, account, a.msg);
   const head = heard.replica.head;
@@ -220,8 +234,9 @@ const rebasing = (w: Work, peer: EntityId): Work => {
 
 /**
  * R-DISPUTE-FREEZE: the rebase zeroes offdelta, so each token whose committed state carried some is told to the node's
- * owner with the amount the node counted. What the chain paid for the proof it finalized is read there, not here: a
- * frame in flight is kept and sealed again, so it is not lost and not told.
+ * owner with the amount the node counted, whichever path moved the epoch (a finalize, a withdrawal, a settlement), and
+ * none whose offdelta is zero. What the chain paid for the proof it finalized is read there, not here: a frame in
+ * flight is kept and sealed again, so it is not lost and not told.
  */
 const destroyed = (w: Work, peer: EntityId, account: EntityReplica, epoch: bigint): Work =>
   [...account.state.ledgers].reduce((acc, [token, l]) => (l.offdelta === 0n
@@ -328,7 +343,7 @@ const arrive = (rules: Rulebook, check: Check, view: JView, w: Work, a: Arrival)
 
 const hooked = (w: Work, hook: Hook): Work => {
   const account = w.state.accounts.get(hook.peer);
-  return account === undefined ? w : sending(w, hook.peer, resend(account));
+  return account === undefined || inDispute(factsOf(w, hook.peer)) ? w : sending(w, hook.peer, resend(account));
 };
 
 // ---- phase 3: commands
@@ -667,7 +682,8 @@ const dutiful = (judge: Judge, terms: ProofTerms) => (w: Work, peer: EntityId): 
 };
 
 const isArrival = (i: EntityInput): i is Arrival =>
-  i._tag === "peer_message" || i._tag === "cosign_ask" || i._tag === "j_secret" || i._tag === "j_epoch" || i._tag === "j_dispute"
+  i._tag === "peer_message" || i._tag === "cosign_ask" || i._tag === "j_secret" || i._tag === "j_epoch"
+  || i._tag === "j_dispute"
   || i._tag === "j_countered" || i._tag === "j_window_over" || i._tag === "j_dispute_over"
   || i._tag === "j_start_lapsed" || i._tag === "j_counter_lapsed" || i._tag === "j_collateral"
   || i._tag === "j_op_lapsed";

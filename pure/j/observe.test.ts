@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { err, ok } from "../kernel/core/result.ts";
 import { tokenOf } from "../account/fixtures.ts";
-import { decodeLogs, type ChainEvent } from "./log.ts";
+import { bytes32, decodeLogs, type ChainEvent } from "./log.ts";
 import { observe, readingKey, readingsOf, type Accounts, type Addressed, type Reading } from "./observe.ts";
 import { bodyHashOf, DEPOSITORY, entityOf, hashOf, hexOf, logOf, must } from "./fixtures.ts";
 
@@ -119,13 +119,14 @@ describe("j/observe", () => {
     ]));
   });
 
-  test("R-DISPUTE-FREEZE a revealed secret is a j_secret for every hosted Entity, party or not, and asks no reading", () => {
+  test("R-DISPUTE-FREEZE a revealed secret is a j_secret for every hosted Entity and asks no reading", () => {
     const shown = logOf("SecretRevealed", { hashlock: hexOf(7n), revealer: THIRD, secret: hexOf(8n) }, 4n, 0n);
     const events = eventsOf(shown, advance(4n, 1n, 1n));
     expect(readingsOf(events, [])).toEqual([]);
+    const secret = must(bytes32(hexOf(8n)));
     expect(observe(events.slice(0, 1), [LEFT, THIRD], accountsOf())).toEqual(ok([
-      toward(LEFT, { _tag: "j_secret", secret: hexOf(8n) }),
-      toward(THIRD, { _tag: "j_secret", secret: hexOf(8n) }),
+      toward(LEFT, { _tag: "j_secret", secret }),
+      toward(THIRD, { _tag: "j_secret", secret }),
     ]));
     expect(observe(events.slice(0, 1), [], accountsOf())).toEqual(ok([]));
   });

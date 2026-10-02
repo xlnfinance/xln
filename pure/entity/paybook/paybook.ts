@@ -142,7 +142,8 @@ const routedBy = (book: Paybook, peer: EntityId, tx: Extract<AccountTx, { _tag: 
 /**
  * A secret shows itself by its hash: whoever it came from (a resolve in a frame the Entity refused, or a reveal on the
  * chain) and whichever Account it came by, it opens the lock the Entity forwarded under that hashlock, so the secret is
- * passed up to the one that locked to this Entity (R-DISPUTE-FREEZE: a payee behind a dispute cannot resolve in a frame).
+ * passed up to the one that locked to this Entity (R-DISPUTE-FREEZE: a payee behind a dispute cannot resolve in a
+ * frame).
  */
 export const revealed = (book: Paybook, secret: Uint8Array): Paybook => {
   const hashlock = keccakHex(secret);

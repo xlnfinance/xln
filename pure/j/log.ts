@@ -159,7 +159,7 @@ const finalizedRead: Reader = (at, topics, data) =>
     ? some({ _tag: "dispute_finalized", ...disputeIn(at, topics) })
     : none);
 
-/** `SecretRevealed(hashlock, revealer, secret)`: the hashlock and the revealer ride the topics, the secret is the data. */
+/** `SecretRevealed(hashlock, revealer, secret)`: the hashlock and the revealer are topics, the secret is the data. */
 const revealedRead: Reader = (at, topics, data) =>
   (three(topics) && holdsWords(data, (n) => n === 1)
     ? some({ _tag: "secret_revealed", ...at, hashlock: topics[1], revealer: topics[2], secret: idAt(data, 0) })
