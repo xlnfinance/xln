@@ -236,13 +236,14 @@ module htlc {
             log: st.log.append({ kind: 3, by: st.disp.starter, t: st.now, epoch: st.chEpoch + 1, carried: st.disp.carried, shown: false }) }
   }
 
-  // The payee finalizes with the secret in its own arguments: the clause is paid at once, from the end of the window, without waiting for TD
-  // and without a SecretRevealed. The finalize shows the secret to whoever reads its calldata; `wrapped`: it was relayed through a contract, so the
+  // The payee finalizes with the secret in its own arguments: the clause is paid at once, without waiting for TD and without a SecretRevealed.
+  // Fresh arguments are the non-starter's alone (Account.sol: a starter may not supply `otherArguments`), so the hub started; the non-starter may
+  // finalize the opening state at once, before the window ends (no Pull in the body). The finalize shows the secret to whoever reads its calldata; `wrapped`: it was relayed through a contract, so the
   // watcher's read finds no finalize op in the input (`unread`) and learns nothing.
   action landFinalShown: bool = any { landFinalShownVia(false), landFinalShownVia(true) }
 
   action landFinalShownVia(wrapped: bool): bool = all {
-    wrapped implies HIDE, st.disp.on, st.disp.carried, st.now >= st.disp.timeout, st.now <= TD,
+    wrapped implies HIDE, st.disp.on, st.disp.carried, st.disp.starter == Hub, st.now <= TD,
     st' = { ...st, disp: NO_DISP, chEpoch: st.chEpoch + 1, askS: both(NO_ASK),
             paidChain: st.paidChain + 1, paidFrame: 0, finals: st.finals + 1,
             log: st.log.append({ kind: 3, by: Payee, t: st.now, epoch: st.chEpoch + 1, carried: true, shown: not(wrapped) }) }
