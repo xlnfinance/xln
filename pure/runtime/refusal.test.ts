@@ -10,7 +10,7 @@ import { emptyAccount, withLedger } from "../account/state.ts";
 import type { AccountTx } from "../account/tx.ts";
 import { entityFrame } from "../entity/frame.ts";
 import { emptyEntity, type EntityId, type EntityInput, type EntityState } from "../entity/model.ts";
-import { anchor, credit, entityOf, GOLD, judge, open, pay } from "../entity/fixtures.ts";
+import { anchor, credit, entityOf, GOLD, judge, open, pay, TEST_SIG } from "../entity/fixtures.ts";
 import { inputFor, setup, stamp, started, tick } from "./fixtures.ts";
 import { flush, recover, startRuntime } from "./tick.ts";
 import type { Row } from "./model.ts";
@@ -27,7 +27,7 @@ const payFrame = (author: "left" | "right", amount: bigint): Msg<AccountTx> => {
 };
 
 const fromPeer = (from: EntityId, msg: Msg<AccountTx> | undefined): EntityInput =>
-  ({ _tag: "peer_message", from, msg: msg ?? payFrame("left", 0n) });
+  ({ _tag: "peer_message", from, msg: msg ?? payFrame("left", 0n), sig: TEST_SIG });
 
 /** An Entity whose Account with `peer` is open and holds `limit` of credit extended to its Left. */
 const holdingCredit = (self: EntityId, peer: EntityId, side: "left" | "right", limit: bigint): EntityState => {

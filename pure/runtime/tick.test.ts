@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { TEST_SIG } from "../entity/fixtures.ts";
 import { emptyEntity, type EntityInput, type Outbound } from "../entity/model.ts";
 import type { FrameHash } from "../account/frame/frame.ts";
 import type { Input, Row } from "./model.ts";
@@ -69,7 +70,7 @@ describe("runtime/tick durable before send", () => {
 
 describe("runtime/tick bad inputs", () => {
   const staleAck: EntityInput = {
-    _tag: "peer_message", from: CAROL, msg: { _tag: "ack", hash: `0x${"11".repeat(32)}` as FrameHash },
+    _tag: "peer_message", from: CAROL, msg: { _tag: "ack", hash: `0x${"11".repeat(32)}` as FrameHash }, sig: TEST_SIG
   };
 
   test("R-X1 an input for an Entity this Runtime does not host is refused with notice, as a row", () => {

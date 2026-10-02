@@ -6,7 +6,7 @@ import type { AccountTx } from "../account/tx.ts";
 import { emptyLedger, MAX_AMOUNT } from "../account/ledger.ts";
 import { signing, tokenOf, viewOf } from "../account/fixtures.ts";
 import type { AccountState, Ledger, TokenId } from "../account/model.ts";
-import { anchor, credit, entityOf, GOLD, judge, open, pay } from "./fixtures.ts";
+import { anchor, credit, entityOf, GOLD, judge, open, pay, TEST_SIG } from "./fixtures.ts";
 import { entityFrame } from "./frame.ts";
 import { entityRules, type Standing } from "./rules.ts";
 import { emptyEntity, type CosignOp, type EntityInput, type EntityState, type JAction, type Notice } from "./model.ts";
@@ -174,7 +174,7 @@ describe("entity/cosign R-COSIGN-FREEZE the other way: the peer's frames are ref
   const bob = run(emptyEntity(BOB), open(ALICE)).state;
   const sent = run(bob, credit(ALICE, 50n));
   const frame = sent.outputs[0]?.msg ?? expect.unreachable("Bob proposed nothing");
-  const fromBob: EntityInput = { _tag: "peer_message", from: BOB, msg: frame };
+  const fromBob: EntityInput = { _tag: "peer_message", from: BOB, msg: frame, sig: TEST_SIG };
   const hashOf = frame._tag === "frame" ? frameName(frame.frame) : expect.unreachable("no frame");
 
   test("R-COSIGN-FREEZE a peer's frame is refused with the frozen fault, naming the frame and its first tx", () => {
@@ -193,7 +193,7 @@ describe("entity/cosign R-COSIGN-FREEZE the other way: the peer's frames are ref
 
   test("R-COSIGN-FREEZE the refusal can pass: Bob takes the frame back, keeps its tx, drops nothing", () => {
     const refused = run(frozen, fromBob).outputs[0]?.msg ?? expect.unreachable("no refusal");
-    const back = run(sent.state, { _tag: "peer_message", from: ALICE, msg: refused });
+    const back = run(sent.state, { _tag: "peer_message", from: ALICE, msg: refused, sig: TEST_SIG });
     const account = back.state.accounts.get(ALICE);
     expect(account?.pending).toBeUndefined();
     expect(account?.mempool).toHaveLength(1);
@@ -202,11 +202,11 @@ describe("entity/cosign R-COSIGN-FREEZE the other way: the peer's frames are ref
 
   test("R-COSIGN-FREEZE after a lapse Bob's retry at the next attempt commits, the refused frame stays refused", () => {
     const refused = run(frozen, fromBob).outputs[0]?.msg ?? expect.unreachable("no refusal");
-    const rolled = run(sent.state, { _tag: "peer_message", from: ALICE, msg: refused }).state;
+    const rolled = run(sent.state, { _tag: "peer_message", from: ALICE, msg: refused, sig: TEST_SIG }).state;
     const later = entityFrame({ ...judge, view: viewOf(101n) }, anchor, rolled, []);
     const retry = later.outputs[0]?.msg ?? expect.unreachable("Bob did not retry");
     const lapsed = run(run(frozen, fromBob).state, { _tag: "j_op_lapsed", peer: BOB, serial: 1n });
-    const again = run(lapsed.state, { _tag: "peer_message", from: BOB, msg: retry });
+    const again = run(lapsed.state, { _tag: "peer_message", from: BOB, msg: retry, sig: TEST_SIG });
     expect(again.outputs.map((o) => o.msg._tag)).toEqual(["ack"]);
     const repeat = run(lapsed.state, fromBob);
     expect(repeat.outputs.map((o) => o.msg._tag)).toEqual(["refusal"]);
@@ -228,7 +228,7 @@ describe("entity/cosign R-COSIGN-FREEZE a lapse names its operation: only the on
   const second = run(thawed, withdraw(20n));
   const bob = run(emptyEntity(BOB), open(ALICE), credit(ALICE, 50n));
   const frame = bob.outputs[0]?.msg ?? expect.unreachable("Bob proposed nothing");
-  const fromBob: EntityInput = { _tag: "peer_message", from: BOB, msg: frame };
+  const fromBob: EntityInput = { _tag: "peer_message", from: BOB, msg: frame, sig: TEST_SIG };
 
   test("R-COSIGN-FREEZE each operation of an Account has its own serial, counting from one", () => {
     expect(first.chain.map((a) => (a._tag === "settle" ? a.serial : undefined))).toEqual([1n]);

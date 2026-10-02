@@ -10,7 +10,7 @@ import { jHeight } from "../../account/clause/clock.ts";
 import { hopOf, learned } from "./paybook.ts";
 import { keccakHex } from "../../kernel/encoding/bytes.ts";
 import { unwrapOr } from "../../kernel/core/result.ts";
-import { anchor, credit, entityOf, GOLD, judge, open } from "../fixtures.ts";
+import { anchor, credit, entityOf, GOLD, judge, open, TEST_SIG } from "../fixtures.ts";
 import { entityFrame } from "../frame.ts";
 import {
   emptyEntity, type Command, type Entry, type EntityId, type EntityInput, type EntityState, type Notice, type Outbound,
@@ -38,7 +38,7 @@ const deliver = (net: Net, view: bigint, to: EntityId, inputs: readonly EntityIn
     entities: new Map([...net.entities, [to, framed.state]]), notices: [...net.notices, ...framed.notices],
   };
   return framed.outputs.reduce((acc: Net, out: Outbound) =>
-    deliver(acc, view, out.to, [{ _tag: "peer_message", from: out.from, msg: out.msg }]), next);
+    deliver(acc, view, out.to, [{ _tag: "peer_message", from: out.from, msg: out.msg, sig: TEST_SIG }]), next);
 };
 
 const tell = (net: Net, view: bigint, to: EntityId, ...commands: readonly Command[]): Net =>
@@ -322,7 +322,7 @@ describe("entity/paybook what the hub learns from a frame of its next hop (R-HTL
 
   const hears = (wire: Wire, out: Outbound, msg = out.msg): Wire =>
     step({ ...wire, queue: wire.queue.filter((x) => x !== out) }, out.to,
-      [{ _tag: "peer_message", from: out.from, msg }]);
+      [{ _tag: "peer_message", from: out.from, msg, sig: TEST_SIG }]);
 
   const wired = (wire: Wire, from: EntityId, to: EntityId, tag: Outbound["msg"]["_tag"]): Outbound =>
     wire.queue.find((x) => x.from === from && x.to === to && x.msg._tag === tag) ?? expect.unreachable("no message");
@@ -354,7 +354,8 @@ describe("entity/paybook what the hub learns from a frame of its next hop (R-HTL
     const forged = frame.msg._tag === "frame"
       ? { ...frame.msg, frame: { ...frame.msg.frame, txs: [...frame.msg.frame.txs, ...frame.msg.frame.txs] } }
       : expect.unreachable("not a frame");
-    const refused = step(hear(locked, BOB, HUB, "ack"), HUB, [{ _tag: "peer_message", from: BOB, msg: forged }]);
+    const forgedAck: EntityInput = { _tag: "peer_message", from: BOB, msg: forged, sig: TEST_SIG };
+    const refused = step(hear(locked, BOB, HUB, "ack"), HUB, [forgedAck]);
     expect(refused.net.notices.map((n) => n._tag)).toEqual(["message_refused"]);
     expect(stateOf(refused.net, HUB).paybook.get(HASHLOCK)?._tag).toBe("locked");
     expect(ledgerBetween(refused.net, ALICE, HUB).holds.length).toBe(1);

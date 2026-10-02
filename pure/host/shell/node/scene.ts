@@ -3,11 +3,14 @@
 import { expect } from "bun:test";
 import { appendFileSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
+import { verifyHankoSignature } from "../../../chain/hanko/hanko-verify.ts";
 import { type EntityId, emptyEntity } from "../../../entity/model.ts";
+import type { Check } from "../../../entity/signing/attest.ts";
 import type { JAnswer } from "../../../j/batch/answer.ts";
 import { err, ok, unwrapOr, type Result } from "../../../kernel/core/result.ts";
+import { addressOf, signDigest } from "../../../kernel/crypto/signature.ts";
 import { entityOf } from "../../../runtime/fixtures.ts";
-import { setup, stamp } from "../../../runtime/fixtures.ts";
+import { setup as fixtureSetup, stamp } from "../../../runtime/fixtures.ts";
 import { limits } from "../../host.ts";
 import { DEPLOYED, GAS, TREASURY, WORLD } from "../fixtures.ts";
 import { keyOf, MAX_LINE, type Key, type Peer } from "../link/link.ts";
@@ -28,6 +31,22 @@ const keyFrom = (seed: number): Key =>
 
 const KEYS = new Map([[ALICE, keyFrom(1)], [BOB, keyFrom(40)]]);
 const keyOfEntity = (id: EntityId): Key => KEYS.get(id) ?? expect.unreachable("no key");
+
+/**
+ * Entities here are numbered, not lazy ids, so each one's board is taken as registered, and a signature is its peer's
+ * when it speaks for the peer and the one signer it recovers to is the address of the key the peer holds
+ * (R-SIGNED-HEADS-ON-THE-WIRE).
+ */
+const addressOfKey = (key: Key): string =>
+  addressOf(signDigest(Uint8Array.from({ length: 32 }, () => 1), key.secret).publicKey).toLowerCase();
+
+const bySigner: Check = (peer, head, sig) => {
+  const verdict = verifyHankoSignature(sig, head, () => ok(true));
+  return verdict.ok && verdict.value.entityId === peer && verdict.value.signers.length === 1
+    && verdict.value.signers[0] === addressOfKey(keyOfEntity(peer));
+};
+
+const setup = { ...fixtureSetup, anchor: { ...fixtureSetup.anchor, check: bySigner } };
 
 const NO_CHAIN: PortFault = { _tag: "port", call: "send", reason: "no chain in this test" };
 

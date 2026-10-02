@@ -9,7 +9,7 @@
 // the lock must still commit in every order.
 import { describe, expect, test } from "bun:test";
 import { ledgerOf } from "../account/state.ts";
-import { credit, entityOf, GOLD, open, pay } from "../entity/fixtures.ts";
+import { credit, entityOf, GOLD, open, pay, TEST_SIG } from "../entity/fixtures.ts";
 import { holdOf, viewOf } from "../account/fixtures.ts";
 import type { JView } from "../account/clause/clock.ts";
 import {
@@ -175,7 +175,7 @@ const inputOf = (w: World, name: Name, inputs: readonly EntityInput[]): Input =>
   ({ _tag: "entity", at: stamp(BigInt(w.hosts[name].runtime.wal.length) + 1n), to: ID[name], inputs });
 
 const fromPeer = (name: Name, msg: Msg<AccountTx>): EntityInput =>
-  ({ _tag: "peer_message", from: ID[PEER[name]], msg });
+  ({ _tag: "peer_message", from: ID[PEER[name]], msg, sig: TEST_SIG });
 
 const feed = (ops: Ops, w: World, name: Name, where: Where, input: Input): World =>
   through(w, ops.apply(w.hosts[name].runtime, input), (runtime) =>

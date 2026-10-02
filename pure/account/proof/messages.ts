@@ -3,8 +3,9 @@
 // signed here under digests of their own: a frame by its content name, so a receiver can check who proposed a frame it
 // cannot apply, and a refusal, so a proposer can check who refused. Each digest is tagged with its kind and scoped to
 // the deployment and the Account, so none is valid as the other, as a dispute proof, or on another Account. Every field
-// is written as text, so a digest exists whatever a peer put on the wire (R-X1); the Runtime signs and verifies these,
-// and checks the signature before the receiver's refusal memory or the proposer's rollback is consulted.
+// is written as text, so a digest exists whatever a peer put on the wire (R-X1). Nothing signs or verifies these today
+// (R-SIGNED-MESSAGES says what is owed): a frame is authenticated by the signature over its head, which the Entity
+// checks (R-SIGNED-HEADS-ON-THE-WIRE), and a refusal by the link alone (R-LINK-AUTH).
 import { bytesToHex, keccak256, utf8 } from "../../kernel/encoding/bytes.ts";
 import { rlp, type Rlp } from "../../kernel/encoding/rlp.ts";
 import type { FrameHash, Refusal } from "../frame/frame.ts";

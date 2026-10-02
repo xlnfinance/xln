@@ -2,7 +2,7 @@
 // do not care about a crash in between. Only tests import this.
 import { expect } from "bun:test";
 import { heightOf } from "../account/fixtures.ts";
-import { anchor, credit, entityOf, GOLD, judge, open, pay } from "../entity/fixtures.ts";
+import { anchor, credit, entityOf, GOLD, heardSigned, judge, open, pay } from "../entity/fixtures.ts";
 import { emptyEntity, type EntityId, type EntityInput, type JAction, type Outbound } from "../entity/model.ts";
 import { unwrapOr } from "../kernel/core/result.ts";
 import type { Result } from "../kernel/core/result.ts";
@@ -75,7 +75,7 @@ export const deliver = (c: Cluster): Cluster => {
   const [next, ...rest] = c.inflight;
   return next === undefined
     ? c
-    : feed({ ...c, inflight: rest }, next.to, { _tag: "peer_message", from: next.from, msg: next.msg });
+    : feed({ ...c, inflight: rest }, next.to, heardSigned(next));
 };
 
 /** The link delivers until nothing is in flight. */

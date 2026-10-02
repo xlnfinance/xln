@@ -9,7 +9,7 @@ import { credit, open } from "../../../entity/fixtures.ts";
 import type { Outbound } from "../../../entity/model.ts";
 import { err, ok, unwrapOr } from "../../../kernel/core/result.ts";
 import { begin, persisted, receive } from "../../host.ts";
-import { entityOf, meet, stamp, tell, turn, unhalted } from "../../fixtures.ts";
+import { entityOf, meet, onTheLink, stamp, tell, turn, unhalted } from "../../fixtures.ts";
 import {
   accept, answer, dial, finish, hear, keyOf, open as openRecord, seal, type Key, type Link, type Peer,
 } from "./link.ts";
@@ -229,9 +229,9 @@ describe("host/shell/link R-LINK-AUTH a stranger's message does not reach a Host
   const world = (() => {
     const start = tell(tell(meet(ALICE, BOB), ALICE, open(BOB)), BOB, open(ALICE));
     const proposed = tell(start, ALICE, credit(BOB, 100n));
-    const frame = proposed.link.find((m) => m.to === BOB) ?? expect.unreachable("frame");
+    const frame = onTheLink(proposed.link.find((m) => m.to === BOB) ?? expect.unreachable("frame"));
     const bobsTurn = turn(receive(start.hosts.get(BOB) ?? expect.unreachable("bob"), frame).host, 600n);
-    const reack = bobsTurn.sent.find((m) => m.to === ALICE) ?? expect.unreachable("ack");
+    const reack = onTheLink(bobsTurn.sent.find((m) => m.to === ALICE) ?? expect.unreachable("ack"));
     const bob = start.hosts.get(BOB) ?? expect.unreachable("bob");
     return { proposed, frame, reack, bob };
   })();

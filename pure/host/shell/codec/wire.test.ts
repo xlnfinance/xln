@@ -18,6 +18,7 @@ const wire = (message: unknown): string => {
 };
 
 const hash = `0x${"ab".repeat(32)}`;
+const SIG = `0x${"cd".repeat(65)}`;
 const SIGNED_IN = { epoch: 1n, firstNonce: 3n };
 const HOLD: Hold = holdOf("left", 30n, 1n, 115n, 1);
 const OFFER: Offer = {
@@ -59,9 +60,30 @@ describe("host/shell/wire a message comes back as it went", () => {
     expect(sent.length).toBeGreaterThan(3);
     sent.forEach((message) => {
       const text = writeOutbound(message);
-      expect(text.ok && readWire(text.value)).toEqual({ ok: true, value: message });
+      const { attest: _head, ...onTheLink } = message;
+      expect(text.ok && readWire(text.value)).toEqual({ ok: true, value: onTheLink });
     });
     expect(new Set(sent.map((m) => m.msg._tag))).toEqual(new Set(["frame", "ack"]));
+  });
+
+  test("R-SIGNED-HEADS-ON-THE-WIRE a signed message crosses with its signature and the head stays home", () => {
+    const named = sent.filter((m) => m.attest !== undefined);
+    expect(named.length).toBeGreaterThan(1);
+    named.forEach((message) => {
+      const text = writeOutbound({ ...message, sig: SIG });
+      const read = text.ok ? readWire(text.value) : expect.unreachable("encode");
+      expect(read).toEqual({ ok: true, value: { from: message.from, to: message.to, msg: message.msg, sig: SIG } });
+      expect(Object.hasOwn(read.ok ? read.value : {}, "attest")).toBe(false);
+    });
+  });
+
+  test("R-SIGNED-HEADS-ON-THE-WIRE a signature that is no hex, too long, or has a stray key is refused", () => {
+    const body = { from: ALICE, to: BOB, msg: { _tag: "ack", hash } };
+    expect(first(wire({ ...body, sig: SIG }))).toBeUndefined();
+    expect(first(wire({ ...body, sig: "not hex" }))).toMatchObject({ _tag: "bad_shape", at: "$.sig" });
+    expect(first(wire({ ...body, sig: `0x${"ab".repeat(1025)}` }))).toMatchObject({ _tag: "bad_shape", at: "$.sig" });
+    expect(first(wire({ ...body, sig: 7 }))).toMatchObject({ _tag: "bad_shape", at: "$.sig" });
+    expect(first(wire({ ...body, sig: SIG, attest: hash }))).toMatchObject({ _tag: "bad_shape" });
   });
 
   test("every kind of tx, and a refusal, crosses unchanged", () => {

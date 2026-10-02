@@ -60,7 +60,8 @@ export type LiveLock = Readonly<{ token: TokenId; hold: Hold; slot: number }>;
  * R-SIGNED-IS-LIVE: the locks in proofs this side has signed that no committed frame above them has superseded. A
  * refusal or a yield does not end them: the peer holds the signature and may start a dispute with it, so what a lock
  * held upstream (a payer's funds) may be released on is a higher-slot frame without it committing, or the lock's own
- * deadline plus the reserve having passed, never the refusal. The Runtime reads this to hold and release (cut thread).
+ * deadline plus the reserve having passed, never the refusal. Nothing reads this yet: holding and releasing is the
+ * Runtime's duty and no Runtime code does it (R-SIGNED-IS-LIVE).
  */
 export const liveLocks = (r: AccountReplica): readonly LiveLock[] =>
   r.unsuperseded.flatMap(({ slot, txs }) =>

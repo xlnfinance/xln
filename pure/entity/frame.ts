@@ -4,9 +4,12 @@
 import { mapSet } from "../kernel/core/collections.ts";
 import { emptyReplica } from "../account/frame/account.ts";
 import type { JView } from "../account/clause/clock.ts";
-import { propose, receive, resend, submit, type Heard, type Msg, type Outcome } from "../account/frame/frame.ts";
+import {
+  propose, receive, resend, submit, type FrameHash, type Heard, type Msg, type Outcome,
+} from "../account/frame/frame.ts";
 import { revealOnChainDue } from "../account/clause/clock.ts";
 import type { AccountState, Side } from "../account/model.ts";
+import type { Check } from "./signing/attest.ts";
 import { signingOf, type Anchor } from "./signing/signing.ts";
 import { holderOf, ledgerOf, withHeld } from "../account/state.ts";
 import { MAX_AMOUNT } from "../account/ledger.ts";
@@ -23,7 +26,7 @@ import {
   sideOf, type AccountCommand, type Arrival, type ChainCommand, type ChainFacts, type Command, type CosignAsk,
   type EntityFault, type Entry, type EntityId, type EntityInput, type EntityReplica, type EntityState, type Hook,
   type JAction,
-  type JEvent, type Notice, type Outbound, type PaybookCommand, type PeerFault, type PeerMessage,
+  type JEvent, type Notice, type Outbound, type PaybookCommand, type PeerFault, type PeerMessage, type PeerProof,
 } from "./model.ts";
 
 export type Frame = Readonly<{
@@ -43,8 +46,23 @@ const start = (state: EntityState): Work => ({ state, outputs: [], notices: [], 
 
 const noting = (w: Work, notice: Notice): Work => ({ ...w, notices: [...w.notices, notice] });
 
-const sending = (w: Work, to: EntityId, msgs: readonly Msg<AccountTx>[]): Work =>
-  ({ ...w, outputs: [...w.outputs, ...msgs.map((msg): Outbound => ({ from: w.state.id, to, msg }))] });
+/** The head a message commits its sender to, for the Host to sign: a frame's, the pending one's, and an ack's. */
+const attestOf = (account: EntityReplica | undefined, msg: Msg<AccountTx>): FrameHash | undefined => {
+  switch (msg._tag) {
+    case "frame": return account?.pending?.head;
+    case "ack": return msg.hash;
+    case "refusal": return undefined;
+  }
+};
+
+const sending = (w: Work, to: EntityId, msgs: readonly Msg<AccountTx>[]): Work => {
+  const account = w.state.accounts.get(to);
+  const outbound = (msg: Msg<AccountTx>): Outbound => {
+    const attest = attestOf(account, msg);
+    return attest === undefined ? { from: w.state.id, to, msg } : { from: w.state.id, to, msg, attest };
+  };
+  return { ...w, outputs: [...w.outputs, ...msgs.map(outbound)] };
+};
 
 const withReplica = (w: Work, peer: EntityId, r: EntityReplica): Work =>
   ({ ...w, state: { ...w.state, accounts: mapSet(w.state.accounts, peer, r) } });
@@ -97,17 +115,39 @@ const takenFrom = (w: Work, a: PeerMessage, outcome: Outcome<PeerFault>): Work =
     ? { ...w, state: { ...w.state, paybook: learned(w.state.paybook, a.from, a.msg.frame.txs) } }
     : w);
 
-const hearing = (rules: Rulebook, view: JView, w: Work, a: PeerMessage): Work => {
+/** The round took the head the message commits its sender to: a frame of the peer's, or the ack of my own. */
+const committed = (outcome: Outcome<PeerFault>): boolean =>
+  outcome._tag === "accepted" || outcome._tag === "accepted_over_own" || outcome._tag === "committed_own";
+
+/**
+ * R-SIGNED-HEADS-ON-THE-WIRE: a head is committed only with its peer's signature on it, checked against the head this
+ * Entity computed itself, so a signature over another head, another Account or another epoch is no signature here.
+ */
+const unsigned = (check: Check, a: PeerMessage, head: FrameHash): "missing" | "wrong" | undefined => {
+  if (a.sig === undefined) return "missing";
+  return check(a.from, head, a.sig) ? undefined : "wrong";
+};
+
+const withProof = (w: Work, peer: EntityId, proof: PeerProof): Work =>
+  ({ ...w, state: { ...w.state, proofs: mapSet(w.state.proofs, peer, proof) } });
+
+const hearing = (rules: Rulebook, check: Check, view: JView, w: Work, a: PeerMessage): Work => {
   const account = w.state.accounts.get(a.from);
   if (account === undefined) return noting(w, { _tag: "unknown_peer", from: a.from });
   const heard = receive(rules(w, a.from), account, a.msg);
+  const head = heard.replica.head;
+  const why = committed(heard.outcome) ? unsigned(check, a, head) : undefined;
+  if (why !== undefined) return noting(w, { _tag: "message_unsigned", from: a.from, head, why });
   const refused = refusal(heard.outcome);
   const heardBy = sending(withReplica(w, a.from, heard.replica), a.from, heard.sent);
   const waiting = waitingForJ(heardBy, a.from, view, heard);
   const facts = factsOf(waiting, a.from);
   const counted = cosigned(heard.outcome, account.pending, facts) ? withFacts(waiting, a.from, framed(facts)) : waiting;
   const taken = takenFrom(counted, a, heard.outcome);
-  return refused === undefined ? taken : noting(taken, { _tag: "message_refused", from: a.from, outcome: refused });
+  const proved = committed(heard.outcome) && a.sig !== undefined
+    ? withProof(taken, a.from, { head, slot: heard.replica.used, sig: a.sig })
+    : taken;
+  return refused === undefined ? proved : noting(proved, { _tag: "message_refused", from: a.from, outcome: refused });
 };
 
 /**
@@ -179,10 +219,10 @@ const cosigning = (w: Work, a: CosignAsk): Work => {
     : noting(w, { _tag: "cosign_refused", from: a.from, op: a.op, fault: action.error });
 };
 
-const arrive = (rules: Rulebook, view: JView, w: Work, a: Arrival): Work => {
+const arrive = (rules: Rulebook, check: Check, view: JView, w: Work, a: Arrival): Work => {
   switch (a._tag) {
     case "peer_message":
-      return hearing(rules, view, w, a);
+      return hearing(rules, check, view, w, a);
     case "cosign_ask":
       return cosigning(w, a);
     default:
@@ -459,7 +499,7 @@ export const entityFrame = (
     return entityRules(judge, signingOf(anchor, w.state.id, peer, facts),
       { self: sideOf(w.state.id, peer), frozen: facts.frozen });
   };
-  const arrived = arrivalsOf(inputs).reduce((w, a) => arrive(rules, judge.view, w, a), start(state));
+  const arrived = arrivalsOf(inputs).reduce((w, a) => arrive(rules, anchor.check, judge.view, w, a), start(state));
   const afterHooks = hooksOf(inputs).reduce(hooked, arrived);
   const afterCommands = commandsOf(inputs).reduce((w, c) => commanded(rules, w, c), afterHooks);
   const afterPaybook = forwarding(rules, judge)(afterCommands);

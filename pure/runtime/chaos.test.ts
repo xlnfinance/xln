@@ -14,7 +14,7 @@ import { frameName } from "../account/frame/account.ts";
 import type { FrameHash, Msg } from "../account/frame/frame.ts";
 import { ledgerOf } from "../account/state.ts";
 import type { AccountTx } from "../account/tx.ts";
-import { GOLD, entityOf } from "../entity/fixtures.ts";
+import { GOLD, TEST_SIG, entityOf } from "../entity/fixtures.ts";
 import {
   emptyEntity, type Command, type EntityId, type EntityInput, type EntityState, type JAction,
 } from "../entity/model.ts";
@@ -290,7 +290,8 @@ const linkFrame = (c: Chaos, w: World, step: number, name: Name): World => {
   const mine = w.net.filter((f) => f.to === name);
   const taken = mine.slice(q(2, mine.length)).slice(0, 1 + q(6, 3));
   const command = q(7, 100) < 30 ? [commandAt(c, w, step, name)] : [];
-  const arrivals = taken.map((f): EntityInput => ({ _tag: "peer_message", from: ID[PEER[name]], msg: f.msg }));
+  const arrivals = taken.map((f): EntityInput =>
+    ({ _tag: "peer_message", from: ID[PEER[name]], msg: f.msg, sig: TEST_SIG }));
   const input = inputOf(w, name, [...command, ...arrivals]);
   return idle(w.hosts[name]) && taken.length > 0 ? feed(c.ops, w, name, "link", taken.map((f) => f.id), input) : w;
 };
@@ -343,7 +344,7 @@ const finishHost = (ops: Ops, w: World, name: Name): World =>
 const take = (ops: Ops, w: World, name: Name): World => {
   const flight = w.net.find((f) => f.to === name);
   if (flight === undefined) return w;
-  const arrival: EntityInput = { _tag: "peer_message", from: ID[PEER[name]], msg: flight.msg };
+  const arrival: EntityInput = { _tag: "peer_message", from: ID[PEER[name]], msg: flight.msg, sig: TEST_SIG };
   return commitHost(ops, feed(ops, w, name, "link", [flight.id], inputOf(w, name, [arrival])), name);
 };
 
