@@ -139,9 +139,10 @@ export type PeerMessage = Tagged<"peer_message", { from: EntityId; msg: Msg<Acco
  * asked for (the one of that `nonce`) was dropped from its draft because it would revert and so will never open a
  * dispute (R-DISPUTE-LAPSED); `j_counter_lapsed` is the same for the counter this node asked for (the one of that
  * `nonce`), which the chain would revert for good, so the node stops asking for it; `j_op_lapsed` is a co-signed
- * settlement or withdrawal that can no longer land (its batch reverted, its signatures ran out), named by the serial its action carried: a report of an operation that is not the
- * one out (a repeat, or an older one) changes nothing; `j_collateral` is what the chain holds for one token of the
- * Account now (R-J-COLLATERAL): a state, not a change, so a repeat is a no-op.
+ * settlement or withdrawal that can no longer land (its batch reverted, its signatures ran out), named by the serial
+ * its action carried: a report of an operation that is not the one out (a repeat, or an older one) changes nothing;
+ * `j_collateral` is what the chain holds for one token of the Account now (R-J-COLLATERAL): a state, not a change, so
+ * a repeat is a no-op.
  */
 export type JEvent =
   | Tagged<"j_epoch", { peer: EntityId; epoch: bigint; stored: bigint }>

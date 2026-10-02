@@ -68,7 +68,7 @@
   {
    "kind": "test",
    "layer": "ts",
-   "name": "R-DISPUTE-LAPSED a lapse of another nonce changes nothing, and one of a registered counter does not stop its finalize"
+   "name": "R-DISPUTE-LAPSED a lapse of another nonce changes nothing, and a registered counter still finalizes"
   }
  ]
 }
