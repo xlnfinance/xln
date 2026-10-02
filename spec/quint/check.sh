@@ -124,15 +124,15 @@ fi
 if [ "$DISPUTE" = 1 ]; then
   echo "== htlc: typecheck, scenario tests per variant, properties per variant"
   hdeclared=$(grep -cE '^[[:space:]]*run[[:space:]]+[A-Za-z0-9_]*Test\b' htlc_test.qnt || true)
-  for v in today see dissolve both hop0; do $Q typecheck "htlc_$v.qnt"; done
-  for v in today see dissolve both hop0; do
+  for v in today see dissolve both hop0 noargs wrapped; do $Q typecheck "htlc_$v.qnt"; done
+  for v in today see dissolve both hop0 noargs wrapped; do
     out=$($Q test htlc_test.qnt --main "${v}_htlc_test" --backend typescript --max-samples 1 2>&1) || { echo "$out"; exit 1; }
     ran=$(echo "$out" | grep -cE '^[[:space:]]+ok ' || true)
     [ "$ran" = "$hdeclared" ] || { echo "FAIL htlc_test $v: $hdeclared declared, $ran ran"; exit 1; }
   done
   hexpect() {
-    local v=$1 prop=$2 want=$3 got
-    got=$($Q run "htlc_$v.qnt" --backend typescript --init init --step step --invariant "$prop" --max-steps 50 --max-samples 3000 --seed 0x5 --verbosity 1 2>&1 | grep -oE '^\[(ok|violation)' | tr -d '[' || true)
+    local v=$1 prop=$2 want=$3 samples=${4:-3000} got
+    got=$($Q run "htlc_$v.qnt" --backend typescript --init init --step step --invariant "$prop" --max-steps 50 --max-samples "$samples" --seed 0x5 --verbosity 1 2>&1 | grep -oE '^\[(ok|violation)' | tr -d '[' || true)
     if [ "$got" != "$want" ]; then echo "FAIL htlc_$v $prop: expected $want, got ${got:-nothing}"; exit 1; fi
     echo "   $v $prop: $want"
   }
@@ -140,6 +140,8 @@ if [ "$DISPUTE" = 1 ]; then
   hexpect see paid_once violation; hexpect see route_safe violation
   hexpect dissolve paid_once ok; hexpect dissolve route_safe violation
   hexpect both paid_once ok; hexpect both route_safe ok
+  hexpect noargs paid_once ok; hexpect noargs route_safe violation 10000
+  hexpect wrapped paid_once ok; hexpect wrapped route_safe violation 10000
   # hop0: the claim that lands after the upstream deadline is a schedule (claimNeedsRoomTest, run above), too rare for a random search at this size
   echo "== htlc: witnesses"
   for w in $(grep -oE '^  val w_[a-z_]+' htlc.qnt | awk '{print $2}'); do
