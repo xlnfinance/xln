@@ -28,6 +28,11 @@
   {
    "kind": "test",
    "layer": "ts",
+   "name": "R-HOLD-DISSOLVE an offer a fill has accepted is dissolved with the rest: both sides end with none"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
    "name": "R-HOLD-DISSOLVE a dispute that a counter ended settled nothing: the hold stays"
   },
   {

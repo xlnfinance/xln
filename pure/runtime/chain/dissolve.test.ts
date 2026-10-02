@@ -3,7 +3,7 @@
 // registered settled nothing, and the clause stays until the finalize. Alice is the Left of the Account and locks 30
 // for Bob until height 115.
 import { describe, expect, test } from "bun:test";
-import { holdOf, secretOf, viewOf } from "../../account/fixtures.ts";
+import { heightOf, holdOf, secretOf, tokenOf, viewOf } from "../../account/fixtures.ts";
 import { holdId } from "../../account/model.ts";
 import { OPENED_WITH } from "../../entity/fixtures.ts";
 import { type Command, type Entry, type EntityId, type JAction, type JEvent } from "../../entity/model.ts";
@@ -29,6 +29,18 @@ const countered = (c: Cluster): Cluster => feed(
   feed(c, ALICE, { _tag: "j_countered", peer: BOB, nonce: 9n, ...OPENED_BY }),
   BOB, { _tag: "j_countered", peer: ALICE, nonce: 9n, ...OPENED_BY });
 
+const OIL = tokenOf(2n);
+
+/** Alice offers 30 gold for 30 oil; Bob's first fill takes half: the offer is accepted and half of it stays open. */
+const swapping = (() => {
+  const funded = settle(feed(credited, ALICE, { _tag: "set_credit", peer: BOB, token: OIL, limit: 100n }));
+  const offered = settle(feed(funded, ALICE, {
+    _tag: "offer", peer: BOB, id: holdId(5n), give: { token: GOLD, amount: 30n }, want: { token: OIL, amount: 30n },
+    deadline: heightOf(115n),
+  }));
+  return settle(feed(offered, BOB, { _tag: "fill", peer: ALICE, id: holdId(5n), ratio: 5_000 }));
+})();
+
 const replicaOf = (c: Cluster, id: EntityId) =>
   hostOf(c, id).entities.get(id)?.accounts.get(id === ALICE ? BOB : ALICE) ?? expect.unreachable("no Account");
 const ledgerOf = (c: Cluster, id: EntityId) =>
@@ -44,6 +56,14 @@ describe("runtime/chain R-HOLD-DISSOLVE a finalize ends the Account's open claus
     expect(holdsOf(after)).toEqual([0, 0]);
     expect([ledgerOf(after, ALICE).reserved, same(after)]).toEqual([{ left: 0n, right: 0n }, true]);
     expect(noticesOf(after, ALICE).concat(noticesOf(after, BOB))).toEqual([]);
+  });
+
+  test("R-HOLD-DISSOLVE an offer a fill has accepted is dissolved with the rest: both sides end with none", () => {
+    const openOffers = (c: Cluster) => [ALICE, BOB].map((id) => replicaOf(c, id).state.offers.length);
+    expect(openOffers(swapping)).toEqual([1, 1]);
+    const after = over(swapping);
+    expect(openOffers(after)).toEqual([0, 0]);
+    expect([ledgerOf(after, ALICE).reserved, same(after)]).toEqual([{ left: 0n, right: 0n }, true]);
   });
 
   test("R-HOLD-DISSOLVE a dispute that a counter ended settled nothing: the hold stays", () => {

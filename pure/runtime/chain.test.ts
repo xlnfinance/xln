@@ -11,7 +11,7 @@ import {
 } from "../entity/model.ts";
 import { recover } from "./tick.ts";
 import {
-  type Cluster, credit, entityOf, feed, GOLD, hostOf, open, pay, restarted, rise, settle, start,
+  type Cluster, credit, deliver, entityOf, feed, GOLD, hostOf, open, pay, restarted, rise, settle, start,
 } from "./fixtures.ts";
 import { OPENED_WITH } from "../entity/fixtures.ts";
 
@@ -280,6 +280,17 @@ describe("runtime/chain R-COSIGN-FREEZE after the signature nothing is proposed 
     const landed = settle(rise(atEpoch(raced, 1n, 6n), BOB, 111n));
     expect(committed(landed, BOB)).toBe(committed(landed, ALICE));
     expect(committed(landed, BOB)).not.toBe(committed(raced, BOB));
+  });
+
+  test("R-COSIGN-FREEZE a withdrawal asked while a frame awaits its ack signs nothing, so no ack lands in it", () => {
+    const ackOnLink = deliver(feed(creditedOnly, ALICE, pay(BOB, 5n)));
+    expect(ackOnLink.inflight.map((m) => m.msg._tag)).toEqual(["ack"]);
+    const asked = feed(ackOnLink, ALICE, withdraw(30n));
+    expect(asked.chain).toEqual([]);
+    expect(hostOf(asked, ALICE).entities.get(ALICE)?.chain.get(BOB)?.frozen).toBe(false);
+    const acked = settle(asked);
+    expect(committed(acked, ALICE)).toBe(committed(acked, BOB));
+    expect(committed(acked, ALICE)).not.toBe(committed(creditedOnly, ALICE));
   });
 
   test("R-COSIGN-FREEZE a Host that crashes after the signature comes back frozen and asks for it again", () => {
