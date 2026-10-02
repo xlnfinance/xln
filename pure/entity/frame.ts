@@ -3,7 +3,7 @@
 // frame's commands does not matter, and a command always sees what the arrivals of its own frame did (R-E1).
 import { mapDelete, mapSet } from "../kernel/core/collections.ts";
 import { emptyReplica } from "../account/frame/account.ts";
-import type { JView } from "../account/clause/clock.ts";
+import type { JHeight, JView } from "../account/clause/clock.ts";
 import {
   propose, receive, resend, submit, type FrameHash, type Heard, type Msg, type Outcome,
 } from "../account/frame/frame.ts";
@@ -233,34 +233,60 @@ const rebasing = (w: Work, peer: EntityId, finalized: Finalized | undefined): Wo
   });
 };
 
-/** The proof a dispute finalize paid by: its nonce, the epoch it moved to and the nonce of the node's own head. */
-type Finalized = Readonly<{ nonce: bigint; epoch: bigint; committed: bigint | undefined }>;
+/**
+ * The proof a dispute finalize paid by: its nonce, the epoch it moved to, the nonce of the node's own head, and the
+ * nonce its pending frame would have signed (all under the epoch that ended).
+ */
+type Finalized = Readonly<{
+  nonce: bigint; epoch: bigint; committed: bigint | undefined; pending: bigint | undefined;
+}>;
 
 /**
  * The finalize that moved the epoch on, when it was one: a dispute was open on the Account, and a settlement or a C2R
- * is reverted by the chain while one is, so no other path moves the epoch then. `stored` is the nonce the chain keeps
- * after a finalize, the finalized proof's own.
+ * is reverted by the chain while one is, so no other path moves the epoch then. The chain stores the nonce of the proof
+ * it adopted when a counter registered (a signed branch), and the opening proof's plus one for a unilateral timeout
+ * (Depository.sol 965-976), so the proof the finalize paid by is `stored` in the first case and `stored - 1` in the
+ * second. A counter registered against the node's own start (`starting.countered`), or the node's own registered
+ * answer to the peer's start (`against.answer`), is the first case.
  */
-const finalizedBy = (w: Work, facts: ChainFacts, e: Extract<JEvent, { _tag: "j_epoch" }>): Finalized | undefined =>
-  (inDispute(facts)
-    ? { nonce: e.stored, epoch: e.epoch, committed: proofNonce(facts, w.state.accounts.get(e.peer)?.used ?? 0) }
-    : undefined);
+const finalizedBy = (w: Work, facts: ChainFacts, e: Extract<JEvent, { _tag: "j_epoch" }>): Finalized | undefined => {
+  if (!inDispute(facts)) return undefined;
+  const account = w.state.accounts.get(e.peer);
+  const signed = facts.starting?.countered === true || facts.against?.answer?.registered === true;
+  return {
+    nonce: signed ? e.stored : e.stored - 1n, epoch: e.epoch, committed: proofNonce(facts, account?.used ?? 0),
+    pending: account?.pending === undefined
+      ? undefined
+      : account.pending.frame.firstNonce + BigInt(account.pending.frame.slot) - 1n,
+  };
+};
 
 /**
  * R-DISPUTE-FREEZE: a finalize moved the epoch on and the rebase zeroes offdelta. If the committed head is above the
  * proof the finalize paid by (a frame the proof does not hold: one committed after the proof was signed, or sealed
  * before the dispute and acked after it), each token is told to the node's owner with both nonces and the offdelta the
- * node counted. A head at or below the finalized proof lost nothing, and a settlement or a withdrawal moving the epoch
- * tells nothing. The offdelta the proof holds is not here: the node that lost something is not the one that opened with
- * the proof, so it holds none of its body; the chain's DisputeFinalized for the nonce says what was paid.
+ * node counted. A frame of the node's own still pending carries a payment or a lock the peer may have committed before
+ * it heard of the dispute: the finalize does not hold it and the rebase zeroes what it paid, so the node is told which
+ * (`pending_rebased`); a peer that never heard of the frame refuses it as another epoch's and the node seals it again,
+ * and the notice says as much. A frame at or below the finalized nonce is held by the proof the chain paid by: not
+ * told. A head at or below the finalized proof lost nothing, and a settlement or a withdrawal moving the epoch tells
+ * nothing. The offdelta the proof holds is not here: the node that lost something is not the one
+ * that opened with the proof, so it holds none of its body; the DisputeFinalized event carries only the opening nonce
+ * and hashes (Depository.sol 142-148), so the proof's offdelta is owed from the calldata of its start or counter.
  */
 const destroyed = (w: Work, peer: EntityId, account: EntityReplica, finalized: Finalized | undefined): Work => {
-  if (finalized === undefined || finalized.committed === undefined || finalized.committed <= finalized.nonce) return w;
-  const { committed, nonce, epoch } = finalized;
-  return [...account.state.ledgers].reduce((acc, [token, l]) => noting(acc, {
-    _tag: "offdelta_rebased", peer, token, epoch, committedNonce: committed, offdelta: l.offdelta,
-    finalizedNonce: nonce,
-  }), w);
+  if (finalized === undefined) return w;
+  const { committed, nonce, epoch, pending } = finalized;
+  const told = committed === undefined || committed <= nonce
+    ? w
+    : [...account.state.ledgers].reduce((acc, [token, l]) => noting(acc, {
+      _tag: "offdelta_rebased", peer, token, epoch, committedNonce: committed, offdelta: l.offdelta,
+      finalizedNonce: nonce,
+    }), w);
+  const txs = account.pending?.frame.txs.filter((tx) => tx._tag === "pay" || tx._tag === "lock") ?? [];
+  return pending === undefined || pending <= nonce || txs.length === 0
+    ? told
+    : noting(told, { _tag: "pending_rebased", peer, epoch, nonce: pending, finalizedNonce: nonce, txs });
 };
 
 /** The chain's collateral and ondelta for one token, kept; one with no ledger past the cap is told and dropped. */
@@ -609,16 +635,21 @@ const unackedResolves = (account: EntityReplica): readonly Resolve[] =>
 
 type Asked = Readonly<{ hashlocks: readonly string[]; actions: readonly JAction[] }>;
 
-/** A payee with an unacked resolve reveals once its view is within LAG of the deadline, once per hashlock. */
-const asking = (judge: Judge, peer: EntityId, account: EntityReplica) => (acc: Asked, tx: Resolve): Asked => {
-  const hold = ledgerOf(account.state, tx.token).holds.find((h) => h.id === tx.id);
-  if (hold === undefined || acc.hashlocks.includes(hold.hashlock)) return acc;
-  const { token, id, secret } = tx;
-  const reveal: JAction = { _tag: "reveal", peer, token, id, hashlock: hold.hashlock, secret };
-  return revealOnChainDue(judge.clock, hold.deadline, judge.view)
-    ? { hashlocks: [...acc.hashlocks, hold.hashlock], actions: [...acc.actions, reveal] }
-    : acc;
-};
+/**
+ * A payee with an unacked resolve reveals once its view is within LAG of the deadline, once per hashlock. On an Account
+ * that is quiet (a dispute is open, or its signature is out) no frame is sealed, so the resolve cannot be acked there:
+ * it reveals as soon as the resolve is asked, instead of waiting for a deadline the reveal might not reach in time.
+ */
+const asking = (due: (deadline: JHeight) => boolean, peer: EntityId, account: EntityReplica) =>
+  (acc: Asked, tx: Resolve): Asked => {
+    const hold = ledgerOf(account.state, tx.token).holds.find((h) => h.id === tx.id);
+    if (hold === undefined || acc.hashlocks.includes(hold.hashlock)) return acc;
+    const { token, id, secret } = tx;
+    const reveal: JAction = { _tag: "reveal", peer, token, id, hashlock: hold.hashlock, secret };
+    return due(hold.deadline)
+      ? { hashlocks: [...acc.hashlocks, hold.hashlock], actions: [...acc.actions, reveal] }
+      : acc;
+  };
 
 /**
  * The counter to a dispute the peer started against me: the newest proof I hold, if the chain would rank it above the
@@ -742,7 +773,9 @@ const dutiful = (judge: Judge, terms: ProofTerms) => (w: Work, peer: EntityId): 
   const account = w.state.accounts.get(peer);
   if (account === undefined) return w;
   const open = (w.state.revealed.get(peer) ?? []).filter((hashlock) => holderOf(account.state, hashlock) !== undefined);
-  const asks = unackedResolves(account).reduce(asking(judge, peer, account), { hashlocks: open, actions: [] });
+  const due = (deadline: JHeight): boolean =>
+    quiet(factsOf(w, peer)) || revealOnChainDue(judge.clock, deadline, judge.view);
+  const asks = unackedResolves(account).reduce(asking(due, peer, account), { hashlocks: open, actions: [] });
   const revealed = mapSet(w.state.revealed, peer, asks.hashlocks);
   const revealing = { ...w, chain: [...w.chain, ...asks.actions], state: { ...w.state, revealed } };
   const countering = answering(terms)(revealing, peer, account);

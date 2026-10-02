@@ -310,6 +310,10 @@ export type Notice =
     "offdelta_rebased",
     { peer: EntityId; token: TokenId; epoch: bigint; committedNonce: bigint; offdelta: bigint; finalizedNonce: bigint }
   >
+  | Tagged<
+    "pending_rebased",
+    { peer: EntityId; epoch: bigint; nonce: bigint; finalizedNonce: bigint; txs: readonly AccountTx[] }
+  >
   | Tagged<"cosign_refused", { from: EntityId; op: CosignOp; fault: EntityFault }>
   | Tagged<"message_refused", { from: EntityId; outcome: Outcome<PeerFault> }>
   | Tagged<"message_unsigned", { from: EntityId; head: FrameHash; why: "missing" | "wrong" }>

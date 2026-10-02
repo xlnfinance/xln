@@ -3,9 +3,9 @@
 // leaves no collateral and no ondelta. Alice is the Left of the Account and Bob its Right; Bob extends credit to Alice,
 // who pays him, so the Account carries an offdelta the chain never saw.
 import { describe, expect, test } from "bun:test";
-import { tokenOf, viewOf } from "../../account/fixtures.ts";
+import { holdOf, tokenOf, viewOf } from "../../account/fixtures.ts";
 import { OPENED_WITH } from "../../entity/fixtures.ts";
-import { type EntityId, type JAction, type JEvent } from "../../entity/model.ts";
+import { type Command, type EntityId, type JAction, type JEvent } from "../../entity/model.ts";
 import {
   type Cluster, credit, deliver, entityOf, feed, GOLD, hostOf, open, pay, restarted, rise, settle, start,
 } from "../fixtures.ts";
@@ -27,13 +27,25 @@ const disputed = (c: Cluster): Cluster => {
     ({ _tag: "j_dispute", peer, epoch: 0n, by: "left", nonce: startedAt(asked), timeout: 500n, ...OPENED_WITH });
   return feed(feed(asked, ALICE, opens(BOB)), BOB, opens(ALICE));
 };
+/** `starter` asks for the dispute and the chain opens it; both Entities hear it. */
+const disputedBy = (c: Cluster, starter: EntityId): Cluster => {
+  const other = starter === ALICE ? BOB : ALICE;
+  const asked = feed(c, starter, { _tag: "dispute", peer: other });
+  const by = starter === ALICE ? "left" : "right";
+  const opens = (peer: EntityId): JEvent =>
+    ({ _tag: "j_dispute", peer, epoch: 0n, by, nonce: startedAt(asked), timeout: 500n, ...OPENED_WITH });
+  return feed(feed(asked, starter, opens(other)), other, opens(starter));
+};
 /** The nonce of the proof Alice's dispute start names: what the chain would keep when it finalizes with it. */
 const startedAt = (asked: Cluster): bigint => {
   const [first] = asked.chain.filter((a: JAction) => a._tag === "dispute_start").slice(-1);
   return first?._tag === "dispute_start" ? first.nonce : expect.unreachable("no start");
 };
-/** The chain finalizes the dispute with Alice's opening proof and the epoch moves on, both nodes hear it. */
-const finalizedByStart = (c: Cluster): Cluster => moved(c, 1n, startedAt(c));
+/**
+ * The chain finalizes the dispute with the opening proof by timeout and the epoch moves on, both nodes hear it. A
+ * unilateral timeout stores the opening nonce plus one (Depository.sol 965-976).
+ */
+const finalizedByStart = (c: Cluster): Cluster => moved(c, 1n, startedAt(c) + 1n);
 const finalized = (c: Cluster): Cluster => feed(
   feed(c, ALICE, { _tag: "j_dispute_over", peer: BOB }),
   BOB, { _tag: "j_dispute_over", peer: ALICE });
@@ -47,8 +59,10 @@ const proofKept = (c: Cluster, id: EntityId) => hostOf(c, id).entities.get(id)?.
 const noticesOf = (c: Cluster, id: EntityId) => hostOf(c, id).wal.flatMap((row) => row.notices);
 const rebasedTold = (c: Cluster, id: EntityId) =>
   noticesOf(c, id).flatMap((n) => (n._tag === "offdelta_rebased" ? [n] : []));
-const otherNotices = (c: Cluster) =>
-  [ALICE, BOB].flatMap((id) => noticesOf(c, id).filter((n) => n._tag !== "offdelta_rebased"));
+const pendingTold = (c: Cluster, id: EntityId) =>
+  noticesOf(c, id).flatMap((n) => (n._tag === "pending_rebased" ? [n] : []));
+const otherNotices = (c: Cluster) => [ALICE, BOB].flatMap((id) =>
+  noticesOf(c, id).filter((n) => n._tag !== "offdelta_rebased" && n._tag !== "pending_rebased"));
 const same = (c: Cluster): boolean => replicaOf(c, ALICE).head === replicaOf(c, BOB).head;
 const resend = (c: Cluster, id: EntityId): Cluster =>
   feed(c, id, { _tag: "resend_due", peer: id === ALICE ? BOB : ALICE });
@@ -80,6 +94,8 @@ describe("runtime/chain R-LEDGER-REBASE an epoch advance zeroes the offdelta on 
     const after = finalizedByStart(asked);
     const stale = startedAt(asked);
     expect(rebasedTold(after, ALICE)).toEqual([]);
+    expect(pendingTold(after, ALICE).map((n) => [n.peer, n.finalizedNonce, n.txs.map((t) => t._tag)]))
+      .toEqual([[BOB, stale, ["pay"]]]);
     const [told, ...more] = rebasedTold(after, BOB);
     expect(more).toEqual([]);
     expect(told).toMatchObject({
@@ -102,8 +118,40 @@ describe("runtime/chain R-LEDGER-REBASE an epoch advance zeroes the offdelta on 
     expect(replicaOf(acked, ALICE).pending).toBeDefined();
     const after = finalizedByStart(acked);
     expect(rebasedTold(after, ALICE)).toEqual([]);
+    expect(pendingTold(after, ALICE).map((n) => n.txs.map((t) => t._tag))).toEqual([["pay"]]);
     expect(rebasedTold(after, BOB).map((n) => [n.token, n.offdelta, n.finalizedNonce < n.committedNonce]))
       .toEqual([[GOLD, -45n, true]]);
+    expect(pendingTold(after, BOB)).toEqual([]);
+  });
+
+  test("R-DISPUTE-FREEZE a Right-authored frame the Left committed is told (stored is start plus one)", () => {
+    const given = settle(feed(paid, ALICE, credit(BOB, 100n)));
+    const sealed = deliver(feed(given, BOB, pay(ALICE, 5n)));
+    const asked = settle(disputedBy(sealed, BOB));
+    const stale = startedAt(asked);
+    const after = moved(asked, 1n, stale + 1n);
+    expect(rebasedTold(after, ALICE).map((n) => [n.committedNonce, n.finalizedNonce])).toEqual([[stale + 1n, stale]]);
+    expect(pendingTold(after, BOB).map((n) => n.txs.map((t) => t._tag))).toEqual([["pay"]]);
+    expect(rebasedTold(after, BOB)).toEqual([]);
+  });
+
+  test("R-DISPUTE-FREEZE a pending lock is told like a pending payment", () => {
+    const lock: Command = { _tag: "lock", peer: BOB, token: GOLD, hold: holdOf("left", 30n, 1n, 115n, 1) };
+    const asked = disputed({ ...deliver(feed(paid, ALICE, lock)), inflight: [] });
+    const after = finalizedByStart(asked);
+    expect(pendingTold(after, ALICE).map((n) => n.txs.map((t) => t._tag))).toEqual([["lock"]]);
+  });
+
+  test("R-DISPUTE-FREEZE a finalize with a registered counter pays by the stored nonce itself", () => {
+    const asked = disputed(ackLost(paid, ALICE, 5n));
+    const [counter] = asked.chain.filter((a: JAction) => a._tag === "counter").slice(-1);
+    if (counter?._tag !== "counter") return expect.unreachable("hubX asked for no counter");
+    const registered = (peer: EntityId): JEvent =>
+      ({ _tag: "j_countered", peer, nonce: counter.nonce, proposerIsLeft: counter.proposerIsLeft, bodyHash: "0x" });
+    const after = moved(feed(feed(asked, ALICE, registered(BOB)), BOB, registered(ALICE)), 1n, counter.nonce);
+    expect([rebasedTold(after, ALICE), rebasedTold(after, BOB)]).toEqual([[], []]);
+    // The frame alice still holds pending is the one the counter's proof holds: the chain paid it, so it is not told.
+    expect([pendingTold(after, ALICE), pendingTold(after, BOB)]).toEqual([[], []]);
   });
 
   test("R-DISPUTE-FREEZE an epoch a settlement or a withdrawal moves tells nothing, a repeat nothing more", () => {
