@@ -32,8 +32,12 @@ const MOST_ARGUMENT_BYTES = 64 * 1024;
 const MOST_CLAUSES = 32;
 const MOST_TOKENS = 128;
 const MOST_BODY_BYTES = 176 * 1024;
-/** An input past this is not read: the node's tx gas cap leaves room for no more, so it is not a batch that landed. */
-const MOST_INPUT_BYTES = 1024 * 1024;
+/**
+ * The most bytes of an encoded batch, and of the call data of a tower's counter-dispute (Depository.sol 354, 475): more
+ * is one the Depository reverts. What follows the ABI's own components in an input is no concern of the contract's, and
+ * is never a reason not to read the call: a call padded with zeros is read as the contract reads it.
+ */
+const MOST_BATCH_BYTES = 256 * 1024;
 
 /** `processBatch(bytes32,bytes,bytes,uint256)`: the call that carries a dispute op in a batch. */
 const PROCESS_BATCH = keccak256(utf8("processBatch(bytes32,bytes,bytes,uint256)")).subarray(0, 4);
@@ -117,9 +121,10 @@ const bytesOf = (batch: Uint8Array, op: AbiTuple, slot: number): Uint8Array =>
  * `finalizationEvidenceHash`: `abi.encode` of the initial body hash, the final nonce, both sides and three hashes, the
  * last of the signature the contract finalized with (`sig`).
  */
-const finalizeOf = (batch: Uint8Array, op: AbiTuple, sig: Uint8Array): Finalize => {
+const finalizeOf = (batch: Uint8Array, op: AbiTuple, sig: Uint8Array): Finalize | undefined => {
   const starterArguments = bytesOf(batch, op, FINAL_STARTER_ARGUMENTS);
   const otherArguments = bytesOf(batch, op, FINAL_OTHER_ARGUMENTS);
+  if (starterArguments.length > MOST_ARGUMENT_BYTES || otherArguments.length > MOST_ARGUMENT_BYTES) return undefined;
   const evidence = keccakHex(concat([
     word(batch, op, FINAL_INITIAL_BODY), word(batch, op, FINAL_NONCE), word(batch, op, FINAL_PROPOSER),
     word(batch, op, FINAL_STARTED_BY_LEFT), keccak256(starterArguments), keccak256(otherArguments),
@@ -134,29 +139,30 @@ const startsWith = (input: Uint8Array, prefix: Uint8Array): boolean => prefix.ev
 const batchFinalizes = (input: Uint8Array): readonly Finalize[] => {
   const call = input.subarray(PROCESS_BATCH.length);
   const batch = abiBytes(call, abiLengthRef(call, abiRoot(), WORD));
+  if (batch.length > MOST_BATCH_BYTES) return [];
   const list = abiLengthRef(batch, abiTupleRef(batch, abiRoot(), 0), BATCH_FINALIZATIONS * WORD);
   const count = abiLengthWord(batch, list);
   return count <= BigInt(MOST_FINALIZATIONS) && abiFits(batch, list, count, WORD)
     ? Array.from({ length: Number(count) }, (_, i) => {
       const op = abiTupleElement(batch, list, i);
       return finalizeOf(batch, op, bytesOf(batch, op, FINAL_SIG));
-    })
+    }).flatMap((f) => f ?? [])
     : [];
 };
 
 /** The finalize a tower's call carries: the contract blanks `params.sig` before it finalizes. */
 const towerFinalizes = (input: Uint8Array): readonly Finalize[] => {
+  if (input.length > MOST_BATCH_BYTES) return [];
   const call = input.subarray(TOWER_COUNTER.length);
-  return [finalizeOf(call, abiTupleRef(call, abiRoot(), TOWER_PARAMS * WORD), NO_SIGNATURE)];
+  return [finalizeOf(call, abiTupleRef(call, abiRoot(), TOWER_PARAMS * WORD), NO_SIGNATURE)].flatMap((f) => f ?? []);
 };
 
 /**
  * The finalize ops of an input that is a `processBatch` call or a tower's `watchtowerCounterDispute`, none for any
- * other call and none for an input or a list past what the contract accepts (it would revert; a transaction that
- * carried a `DisputeFinalized` some other way is told as unread).
+ * other call and none for a batch, a blob or a list past what the contract accepts (it would revert; a transaction that
+ * carried a `DisputeFinalized` some other way is told as unread). Bytes after the call's own components are ignored.
  */
 export const finalizesIn = (input: Uint8Array): readonly Finalize[] => {
-  if (input.length > MOST_INPUT_BYTES) return [];
   if (startsWith(input, PROCESS_BATCH)) return batchFinalizes(input);
   return startsWith(input, TOWER_COUNTER) ? towerFinalizes(input) : [];
 };
@@ -243,9 +249,10 @@ const bodyIn = (buf: Uint8Array, body: AbiTuple): ProofBody | undefined => {
  * the state, because the hash is what the chain compares.
  */
 export const startedBody = (input: Uint8Array, bodyHash: Bytes32): ProofBody | undefined => {
-  if (input.length > MOST_INPUT_BYTES || !startsWith(input, PROCESS_BATCH)) return undefined;
+  if (!startsWith(input, PROCESS_BATCH)) return undefined;
   const call = input.subarray(PROCESS_BATCH.length);
   const batch = abiBytes(call, abiLengthRef(call, abiRoot(), WORD));
+  if (batch.length > MOST_BATCH_BYTES) return undefined;
   const list = abiLengthRef(batch, abiTupleRef(batch, abiRoot(), 0), BATCH_STARTS * WORD);
   const count = abiLengthWord(batch, list);
   if (count > BigInt(MOST_STARTS) || !abiFits(batch, list, count, WORD)) return undefined;

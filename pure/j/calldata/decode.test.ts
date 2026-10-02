@@ -101,11 +101,32 @@ describe("j/calldata", () => {
     expect(finalizedSecrets(inputOf(ops), evidenceOf(finalizeOp()))).toBeUndefined();
   });
 
-  test("R-WATCH-CALLDATA an input past the most a transaction can carry is not read", () => {
+  test("R-WATCH-CALLDATA a real finalize padded with 1.3 MB of zeros is read", () => {
     const op = finalizeOp({ otherArguments: argumentsOf([SECRET_A]) });
     const input = inputOf([op]);
+    const padded = Uint8Array.from({ length: input.length + 1_300_000 }, (_, i) => input[i] ?? 0);
+    expect(finalizesIn(padded).map((f) => f.evidence)).toEqual([evidenceOf(op)]);
+    expect(finalizedSecrets(padded, evidenceOf(op))).toEqual([SECRET_A]);
     expect(finalizesIn(Uint8Array.from({ length: 1024 * 1024 }, (_, i) => input[i] ?? 0)).length).toBe(1);
-    expect(finalizesIn(Uint8Array.from({ length: 1024 * 1024 + 1 }, (_, i) => input[i] ?? 0))).toEqual([]);
+  });
+
+  test("R-WATCH-CALLDATA an encoded batch, call data or argument blob past what the contract takes is not read", () => {
+    const hex = (bytes: number) => `0x${"00".repeat(bytes)}`;
+    const batchOf = (bytes: number) => inputOf([finalizeOp({ sig: hex(bytes) })]);
+    const towerOf = (bytes: number) => towerInput(LEFT, finalizeOp({ sig: hex(bytes) }));
+    const startOf = (bytes: number) => startInput(RIGHT, [startOp(CLAUSED, { sig: hex(bytes) })]);
+    expect(finalizesIn(batchOf(200 * 1024)).length).toBe(1);
+    expect(finalizesIn(batchOf(256 * 1024))).toEqual([]);
+    expect(finalizesIn(towerOf(200 * 1024)).length).toBe(1);
+    expect(finalizesIn(towerOf(256 * 1024))).toEqual([]);
+    expect(startedBody(startOf(150 * 1024), hashOf(CLAUSED))).toStrictEqual(CLAUSED);
+    expect(startedBody(startOf(256 * 1024), hashOf(CLAUSED))).toBeUndefined();
+    const starter = (bytes: number) => inputOf([finalizeOp({ starterArguments: hex(bytes) })]);
+    const other = (bytes: number) => inputOf([finalizeOp({ otherArguments: hex(bytes) })]);
+    expect(finalizesIn(starter(64 * 1024)).length).toBe(1);
+    expect(finalizesIn(starter(64 * 1024 + 1))).toEqual([]);
+    expect(finalizesIn(other(64 * 1024)).length).toBe(1);
+    expect(finalizesIn(other(64 * 1024 + 1))).toEqual([]);
   });
 
   test("R-WATCH-CALLDATA a tower's counter-dispute call finalizes with an empty signature in its evidence", () => {
@@ -196,11 +217,10 @@ describe("j/calldata", () => {
     expect(startedBody(starts(9), hashOf(other))).toBeUndefined();
   });
 
-  test("R-WATCH-CALLDATA a start input past the most a transaction can carry gives no body", () => {
+  test("R-WATCH-CALLDATA a start input padded with zeros gives its body, whatever the padding", () => {
     const input = startInput(RIGHT, [startOp(CLAUSED)]);
     const padded = (length: number) => Uint8Array.from({ length }, (_, i) => input[i] ?? 0);
-    expect(startedBody(padded(1024 * 1024), hashOf(CLAUSED))).toStrictEqual(CLAUSED);
-    expect(startedBody(padded(1024 * 1024 + 1), hashOf(CLAUSED))).toBeUndefined();
+    expect(startedBody(padded(input.length + 1_300_000), hashOf(CLAUSED))).toStrictEqual(CLAUSED);
   });
 
   test("R-WATCH-CALLDATA a body whose clauses carry more bytes or allowances than accepted is no body", () => {
