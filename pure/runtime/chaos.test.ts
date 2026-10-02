@@ -261,12 +261,20 @@ const risen = (ops: Ops, w: World): World =>
 const landed = (ops: Ops, w: World): World => {
   const epoch = 1n + NAMES.reduce((e, n) => (e > (factsOf(w, n)?.epoch ?? 0n) ? e : (factsOf(w, n)?.epoch ?? 0n)), 0n);
   const event = (n: Name): EntityInput => ({ _tag: "j_epoch", peer: ID[PEER[n]], epoch, stored: epoch * 10n });
-  const folded = (n: Name): EntityInput => {
-    const l = ledgerOf(accountOf(w, n)?.state ?? expect.unreachable("no Account"), GOLD);
+  // The chain holds one value for both Hosts: what the signer folded, read off its own ledger (it was frozen from the
+  // signature on, so its offdelta is the signed fold). The other Host may hold a frame the link has not delivered yet,
+  // so its own ledger says nothing about it. A Host that signed nothing, or has no Account yet, folds nothing.
+  const signer = NAMES.find((n) => outstanding(w.hosts[n]) !== undefined);
+  const signed = signer === undefined ? undefined : accountOf(w, signer);
+  const folded = (acc: World, n: Name): World => {
+    if (signed === undefined) return acc;
+    const l = ledgerOf(signed.state, GOLD);
     const ondelta = l.ondelta + l.offdelta;
-    return { _tag: "j_collateral", peer: ID[PEER[n]], token: GOLD, collateral: l.collateral, ondelta };
+    const fold: EntityInput =
+      { _tag: "j_collateral", peer: ID[PEER[n]], token: GOLD, collateral: l.collateral, ondelta };
+    return told(ops, acc, n, fold);
   };
-  return risen(ops, NAMES.reduce((acc, n) => told(ops, told(ops, acc, n, event(n)), n, folded(n)), w));
+  return risen(ops, NAMES.reduce((acc, n) => folded(told(ops, acc, n, event(n)), n), w));
 };
 
 /** The Host of `signer` asks the other for the same signature, as its transport would. */
