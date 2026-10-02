@@ -399,6 +399,11 @@
    "kind": "test",
    "layer": "ts",
    "name": "R-WATCH-CALLDATA a tx the node fails past REACT blocks after it was final is told unread, with tries to spare"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-WATCH-CALLDATA a tx the provider keeps refusing, long past REACT = 2 * lag, holds the node for three tries"
   }
  ]
 }

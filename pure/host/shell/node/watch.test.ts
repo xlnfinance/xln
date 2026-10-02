@@ -49,7 +49,10 @@ const portOf = (chain: Chain, log: string, found = [advanced(105n, 1n)], kind = 
   },
   logs: (from, to) => Promise.resolve(ok(found.filter((l) => l.block >= from && l.block <= to))),
   accountAt: () => Promise.resolve(ok({ epoch: 1n, nonce: 5n })),
-  input: () => Promise.resolve(err(DOWN)),
+  input: () => {
+    appendFileSync(log, "input\n");
+    return Promise.resolve(err(DOWN));
+  },
   trace: () => Promise.resolve(ok(undefined)),
   traced: () => Promise.resolve(ok(kind.traces)),
 });
@@ -226,12 +229,29 @@ describe("host/shell/node a node with a J loop", () => {
     expect(await until(async () => (await alice.look()).watchFault !== undefined, WAIT)).toBe(true);
     expect(await until(async () => delivered(await alice.look()), WAIT)).toBe(true);
     const look = await alice.stop();
+    expect(callsOf(log).filter((c) => c === "input")).toHaveLength(MOST_TRIES + 1);
     expect(look.watchFault).toBeUndefined();
     expect(look.notices.filter((n) => n._tag === "watch_stalled")).toEqual([
       { _tag: "watch_stalled", tx: finalize.tx, reason: "connection reset" },
     ]);
     expect(callsOf(log).filter((c) => c === "head").length).toBeGreaterThan(MOST_TRIES);
     expect(factsOf(look)).toMatchObject({ epoch: 1n });
+  });
+
+  test("R-WATCH-CALLDATA a tx the provider keeps refusing, long past REACT = 2 * lag, holds the node for three tries", async () => {
+    const dir = fresh();
+    const log = `${dir}/calls.log`;
+    writeFileSync(log, "");
+    const op = finalizeOp();
+    const finalize = logOf("DisputeFinalized", {
+      sender: bytes(2n), counterentity: bytes(1n), nonce: 7n, finalProofbodyHash: hexOf(5n),
+      finalizationEvidenceHash: evidenceOf(op),
+    }, 105n, 1n);
+    const watch = watchOf({ ...STRAIGHT, head: 140n }, log, [advanced(105n, 1n), finalize]);
+    const alice = await nodeOf(await seatOf(ALICE, dir, 0), NO_PEER, { tickMs: QUICK, watch });
+    expect(await until(async () => (await alice.look()).cursor === 138n, WAIT)).toBe(true);
+    await alice.stop();
+    expect(callsOf(log).filter((c) => c === "input")).toHaveLength(3);
   });
 
   test("R-JLOOP a block off the cursor's chain ends the node, and every request gets that answer", async () => {

@@ -179,6 +179,7 @@ describe("host/shell/evm/watch the J loop's reads of the chain", () => {
     const gone = await Promise.all(missing.map((reason) => refuses(reason).trace(txOf(3n, 1n))));
     gone.forEach((got) => expect(got).toEqual(ok(undefined)));
     const clears = ["response size exceeded", "execution timeout", "service is not available", "missing trie node",
+      "unsupported block range", "unsupported media type",
       "required historical state unavailable (reexec=128)", "trace limit reached"];
     const faults = await Promise.all(clears.map((reason) => refuses(reason).trace(txOf(3n, 1n))));
     faults.forEach((got) => expect(got).toMatchObject({ ok: false, error: { _tag: "port", call: "watch trace" } }));
