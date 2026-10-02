@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { evaluate, layerCounts } from "./evaluate.ts";
 import { LAYERS, describeProblem, type Cell, type Name, type Register, type Row } from "./model.ts";
 import { carries, arrivalNames, quintNames, testFileNames } from "./names/names.ts";
@@ -343,6 +343,24 @@ describe("the real tree", () => {
     const run = Bun.spawnSync(["bun", "rules/check.ts", "--layer-root", "arrival=/no/such/dir"], { cwd: `${import.meta.dir}/..` });
     expect(run.exitCode).toBe(1);
     expect(run.stderr.toString()).toContain("no such directory");
+  }, 30_000);
+
+  // The gate starts its two slow parts as children first; a command that ends before they do (a failed argument check, a query mode)
+  // must not leave them running. Each carries the run's mark in its environment, so what is left of this run is found by it.
+  const marked = (mark: string): readonly string[] =>
+    (existsSync("/proc/self") ? readdirSync("/proc") : []).filter((pid) => /^\d+$/.test(pid) && pid !== String(process.pid)).filter((pid) => {
+      const env = Bun.spawnSync(["cat", `/proc/${pid}/environ`], { stdout: "pipe", stderr: "ignore" }).stdout.toString();
+      return env.includes(`XLN_GATE_TEST_MARK=${mark}`);
+    });
+
+  test("a gate that ends before its slow parts do leaves none of them running", async () => {
+    const mark = `${process.pid}-${Date.now()}`;
+    const run = Bun.spawnSync(["bun", "rules/check.ts", "--layer-root", "arrival=/no/such/dir"], {
+      cwd: `${import.meta.dir}/..`, env: { ...process.env, XLN_GATE_TEST_MARK: mark },
+    });
+    expect(run.exitCode).toBe(1);
+    await Bun.sleep(1_000);
+    expect(marked(mark)).toEqual([]);
   }, 30_000);
 
   test("the gate turns red when the names carrying C1 disappear from the contract tests", () => {
