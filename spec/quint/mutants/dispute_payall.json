@@ -132,6 +132,23 @@
       "old": "f: if (LIVE and st.f.get(s).cOn and not(st.f.get(s).cReg))",
       "new": "f: if (false and st.f.get(s).cOn and not(st.f.get(s).cReg))",
       "killedBy": "test:counterLandsAfterTheWindowTest"
+    },
+    {
+      "id": "watch-not-candidate",
+      "why": "LIVE: only the counter the Entity asked for is a finalize candidate; one its watchtower registered is not (coordinator audit of 165)",
+      "file": "dispute.qnt",
+      "old": "if (a.aOn and LIVE) { ...a, cOn: true",
+      "new": "if (a.aOn and false) { ...a, cOn: true",
+      "killedBy": "invariant:no_lock"
+    },
+    {
+      "id": "transient-lapses",
+      "why": "LIVE: a transient revert (a batch-level fault the op did not raise) lapses the counter for good, so the Entity never asks again",
+      "file": "dispute.qnt",
+      "old": "f: if (LIVE) st.f else mapAt(st.f, s, { ...st.f.get(s), cDead: true }),",
+      "new": "f: mapAt(st.f, s, { ...st.f.get(s), cDead: true }),",
+      "killedBy": "invariant:newest_wins",
+      "samples": 15000
     }
   ]
 }

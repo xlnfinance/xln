@@ -92,6 +92,23 @@ module scn {
       .then(check(st.chStored == 3 and st.chEpoch == 2 and st.comm.get(Left) == 4 and st.comm.get(Right) == 4))
   }
 
+  // The non-starter's watchtower registers a counter its Entity never asked for, then the starter goes down. Today the Entity holds something
+  // newer than the opening, so ACCEPT does not apply, and the counter is not the one it asked for: nothing asks for a finalize and the Account stays
+  // locked. With LIVE the registered counter is the Entity's to finalize with (the chain lets either party execute it after the window).
+  run watchtowerCounterTest = {
+    init
+      .then(seal(Left)).then(receive).then(ack)
+      .then(seal(Left)).then(receive)
+      .then(opStart(Left)).then(duty(Left)).then(landStart(Left))
+      .then(crash(Left))
+      .then(watchCounter(Right))
+      .then(check(st.disp.ctr == 3))
+      .then(hear(Right)).then(hear(Right))
+      .then(jump(5)).then(windowOver)
+      .then(hear(Right)).then(duty(Right))
+      .then(check(if (SW_LIVE) st.askF.get(Right).on and st.askF.get(Right).n == 3 else not(st.askF.get(Right).on)))
+  }
+
   // R's counter lands after the window closed (the J transaction took longer than the window: nothing enforces inclusion within LAG, and
   // the model's own clock never lets it happen). The chain skips it for good (DisputeOpSkipped, window closed). Today the skip is read by
   // nobody and the counter stays pending. With LIVE the Host reads the reason (96817e2bd `skippedForGood`) and R is told it lapsed; with

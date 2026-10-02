@@ -160,7 +160,10 @@ module dispute {
       else { ...fc, aOn: true, aNonce: e.n, aOver: false, cOn: false, cNonce: 0, cReg: false, cDead: false }
     } else if (e.kind == 1) {
       val a = if (fc.sOn and fc.sWin) { ...fc, sCtd: e.n } else fc
-      if (a.aOn and a.cOn and a.cNonce == e.n) { ...a, cReg: true } else a
+      // LIVE: a counter registered by anyone is the Entity's to finalize with, the Entity's own ask or its watchtower's (a counter of nonce
+      // `e.n` is the one the chain executes at the end of the window); before, only the counter the Entity asked for was
+      if (a.aOn and LIVE) { ...a, cOn: true, cNonce: e.n, cReg: true, cDead: false }
+      else if (a.aOn and a.cOn and a.cNonce == e.n) { ...a, cReg: true } else a
     } else if (e.kind == 2) {
       { ...fc, sOver: fc.sOn and fc.sWin, aOver: fc.aOn }
     } else {
@@ -449,6 +452,17 @@ module dispute {
     }
   }
 
+  // The non-starter's watchtower registers a counter the Entity did not ask for (the Entity is slow, or restarts): the chain takes the
+  // nonce the node holds if it is newer than the dispute's and than any counter, inside the window.
+  action watchCounter(s: Side): bool = all {
+    st.disp.on, s != st.disp.starter, st.now < st.disp.timeout, st.f.get(s).epoch == st.chEpoch,
+    not(st.f.get(s).cOn), st.hold.get(s) > st.disp.n, st.hold.get(s) > st.disp.ctr,
+    st' = { ...st,
+      disp: { ...st.disp, ctr: st.hold.get(s) },
+      log: st.log.append({ kind: 1, by: s, n: st.hold.get(s), epoch: st.chEpoch, timeout: 0, settled: 0, stored: 0 }),
+      g: { ...st.g, counters: st.g.counters + 1 } }
+  }
+
   // The newest co-signed proof of the epoch, and whether a live party could have put it on the chain: a non-starter that holds it
   // could counter it; the starter holding it can enforce it only if it opened with it.
   pure def newestHeld(s: St): int =
@@ -523,7 +537,7 @@ module dispute {
     { nondet s = SIDES.oneOf()
       any {
       hear(s), crash(s), restart(s), seal(s), duty(s), opStart(s), dropStart(s), dropCounter(s),
-      landStart(s), landCounter(s), landFinal(s), landSigFinal(s)
+      landStart(s), landCounter(s), watchCounter(s), landFinal(s), landSigFinal(s)
     } }
   }
 
