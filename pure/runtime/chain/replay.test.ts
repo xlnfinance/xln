@@ -21,6 +21,7 @@ const atEpoch = (c: Cluster): Cluster => {
 
 const deposit: Command = { _tag: "deposit", peer: BOB, token: GOLD, amount: 10n };
 const deposited = feed(framed(opened), ALICE, deposit);
+const started = feed(framed(opened), ALICE, { _tag: "dispute", peer: BOB });
 const countered = feed(framed(atEpoch(opened)), ALICE, { _tag: "j_dispute", peer: BOB, epoch: 1n, by: "right" });
 
 /** Alice's WAL with the actions of its last row changed as the test says; what the Runtime says of replaying it. */
@@ -38,12 +39,30 @@ describe("runtime/chain replay review A: a replay sees every field of a deposit 
   test("control: the row as it was made replays", () => {
     expect(replayed(deposited, {}).result.ok).toBe(true);
     expect(replayed(countered, {}).result.ok).toBe(true);
+    expect(replayed(started, {}).result.ok).toBe(true);
   });
 
   test.each([
     ["peer", { peer: CAROL }], ["token", { token: tokenOf(2n) }], ["amount", { amount: 11n }],
   ] as const)("R-DURABLE a WAL whose deposit names another %s does not replay", (_field, change) => {
     const { height, result } = replayed(deposited, change);
+    expect(result).toEqual(diverged(height));
+  });
+
+  test("R-DURABLE a WAL whose dispute start names another peer, nonce, epoch, author or sig does not replay", () => {
+    const changes = [
+      { peer: CAROL }, { nonce: 99n }, { epoch: 9n }, { proposerIsLeft: true }, { sig: "0x7e58" },
+    ] as const;
+    changes.forEach((change) => {
+      const { height, result } = replayed(started, change);
+      expect(result).toEqual(diverged(height));
+    });
+  });
+
+  test("R-DURABLE a WAL whose dispute start carries another proof body does not replay", () => {
+    const row = hostOf(started, ALICE).wal.at(-1)?.chain[0];
+    const body = row?._tag === "dispute_start" ? row.body : expect.unreachable("no dispute start");
+    const { height, result } = replayed(started, { body: { ...body, offdeltas: [...body.offdeltas, 1n] } });
     expect(result).toEqual(diverged(height));
   });
 

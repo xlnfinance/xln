@@ -3,13 +3,15 @@
 // entities of a funding, the canonical transformer). The Host's `chain` effect leaves a committed row only
 // (R-DURABLE), so the op made here is made from a row that is already the WAL's.
 //
-// Three actions are the Host's to make from what the Entity says and the chain's addresses. The others hold signed
-// material the Entity does not keep (a counter needs the proof body and its signature, a C2R or a settlement the
-// counterparty's Hanko), so the Host that holds the signatures makes those; here they are named, never guessed.
+// Four actions are the Host's to make from what the Entity says and the chain's addresses; a dispute start is one of
+// them since the Entity keeps its peer's signature over the committed head (R-SIGNED-HEADS-ON-THE-WIRE) and says the
+// proof body, nonce, epoch and author with it. The others hold signed material the Entity does not keep (a counter
+// needs the starter's proof, a C2R or a settlement the counterparty's Hanko); here they are named, never guessed.
 import type { EntityId, JAction } from "../entity/model.ts";
 import type { JOp } from "../j/op/ops.ts";
 import type { Tagged } from "../kernel/core/tagged.ts";
 import { err, ok, type Result } from "../kernel/core/result.ts";
+import { proofBodyHash } from "../chain/proof/proof.ts";
 import { bytesToHex } from "../kernel/encoding/bytes.ts";
 
 /** A token as the Depository knows it from outside: the contract that holds it, and which token of that contract. */
@@ -21,9 +23,12 @@ export type ExternalToken = Readonly<{ contractAddress: string; externalTokenId:
  */
 export type ChainWorld = Readonly<{ transformer: string; tokens: ReadonlyMap<bigint, ExternalToken> }>;
 
+const NO_COMMITMENT = `0x${"00".repeat(32)}`;
+
 export type OpFault =
   | Tagged<"needs_signature", { action: JAction["_tag"] }>
-  | Tagged<"unknown_token", { token: bigint }>;
+  | Tagged<"unknown_token", { token: bigint }>
+  | Tagged<"unhashable_proof">;
 
 /**
  * The op for an Entity's action. The Entity's token is the Depository's internal token id (the Account layer and the
@@ -54,6 +59,20 @@ export const opOf = (self: EntityId, action: JAction, world: ChainWorld): Result
         _tag: "reveal_secret",
         reveal: { transformer: world.transformer, secret: bytesToHex(action.secret) },
       });
+    case "dispute_start": {
+      const hashed = proofBodyHash(action.body);
+      return hashed.ok
+        ? ok({
+          _tag: "dispute_start",
+          start: {
+            counterentity: action.peer, nonce: action.nonce, ondeltaEpoch: action.epoch,
+            proposerIsLeft: action.proposerIsLeft, proofbodyHash: hashed.value, initialProofbody: action.body,
+            watchSeed: action.body.watchSeed, sig: action.sig, starterInitialArguments: "0x",
+            starterCounterArguments: "0x", starterCounterProofCommitment: NO_COMMITMENT,
+          },
+        })
+        : err({ _tag: "unhashable_proof" });
+    }
     case "counter":
     case "c2r":
     case "settle":
