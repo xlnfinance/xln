@@ -10,12 +10,11 @@ import type { JAnswer } from "../../../j/batch/answer.ts";
 import { err, ok, unwrapOr, type Result } from "../../../kernel/core/result.ts";
 import { setup, stamp } from "../../../runtime/fixtures.ts";
 import { limits } from "../../host.ts";
-import { ALICE, DEPLOYED, GAS, TREASURY, WORLD } from "../fixtures.ts";
+import { ALICE, callsOf, DEPLOYED, GAS, journalIn, TREASURY, WORLD } from "../fixtures.ts";
 import { GOLD } from "../../../runtime/fixtures.ts";
 import { keyOf } from "../link/link.ts";
 import type { ChainPort, PortFault } from "../submit/chain.ts";
 import { lazySigner } from "../submit/signer.ts";
-import { scanJournal } from "../submit/journal.ts";
 import { fileDisk } from "../node/file-disk.ts";
 import { scanWal } from "../disk/wal.ts";
 import { command, pump, start, type Boot, type Shell, type Turn } from "./drive.ts";
@@ -34,16 +33,9 @@ const scene = (): Scene => {
   return { wal: `${dir}/wal.log`, journal: `${dir}/journal.log`, log: `${dir}/calls.log` };
 };
 
-const callsOf = (at: Scene): readonly string[] => readFileSync(at.log, "utf8").split("\n").filter((l) => l !== "");
-
 const rowsIn = (at: Scene) => {
   const scanned = scanWal(readFileSync(at.wal));
   return scanned.ok ? scanned.value.rows : expect.unreachable("wal damaged");
-};
-
-const journalIn = (at: Scene): readonly string[] => {
-  const kept = scanJournal(readFileSync(at.journal));
-  return kept.ok ? kept.value.items.map((r) => `${r._tag}@${r.nonce}`) : [`damaged ${kept.error._tag}`];
 };
 
 const DOWN: PortFault = { _tag: "port", call: "send", reason: "connection reset" };
@@ -58,11 +50,12 @@ const portOf = (at: Scene, sends: Result<void, PortFault>): ChainPort => ({
   },
   send: (call) => {
     const how = sends.ok ? "ok" : "lost";
-    appendFileSync(at.log, `send ${call.nonce} wal=${rowsIn(at).length} journal=${journalIn(at).join(",")} ${how}\n`);
+    const held = journalIn(at.journal).join(",");
+    appendFileSync(at.log, `send ${call.nonce} wal=${rowsIn(at).length} journal=${held} ${how}\n`);
     return Promise.resolve(sends);
   },
   answer: (batch) => {
-    const landed = callsOf(at).some((c) => c.startsWith(`send ${batch.nonce} `) && c.endsWith(" ok"));
+    const landed = callsOf(at.log).some((c) => c.startsWith(`send ${batch.nonce} `) && c.endsWith(" ok"));
     const answer: JAnswer = { _tag: "landed", nonce: batch.nonce, batchHash: batch.digest, skipped: [] };
     return Promise.resolve(ok(landed ? answer : undefined));
   },
@@ -93,13 +86,13 @@ describe("host/shell/drive the Host's rows are on the disk before the chain hear
     const turn = await withShell(at, ok(undefined), async (shell) => {
       const started = turnOf(await start(shell, BOOT));
       const asked = turnOf(await command(shell, started.station, ALICE, FUND));
-      expect(journalIn(at)).toEqual(["sealed@5"]);
+      expect(journalIn(at.journal)).toEqual(["sealed@5"]);
       return turnOf(await pump(shell, asked));
     });
     expect(turn.taken.map((t) => t._tag)).toEqual(["queued"]);
     expect(rowsIn(at).map((r) => r.chain.map((a) => a._tag))).toEqual([["fund"]]);
-    expect(callsOf(at)).toEqual(["simulate", "simulate", "send 5 wal=1 journal=sealed@5 ok"]);
-    expect(journalIn(at)).toEqual(["sealed@5", "answered@5"]);
+    expect(callsOf(at.log)).toEqual(["simulate", "simulate", "send 5 wal=1 journal=sealed@5 ok"]);
+    expect(journalIn(at.journal)).toEqual(["sealed@5", "answered@5"]);
     expect(turn.station.submitter.waiting.size).toBe(0);
   });
 
@@ -109,15 +102,15 @@ describe("host/shell/drive the Host's rows are on the disk before the chain hear
       const started = turnOf(await start(shell, BOOT));
       return turnOf(await command(shell, started.station, ALICE, FUND));
     });
-    expect(journalIn(at)).toEqual(["sealed@5"]);
+    expect(journalIn(at.journal)).toEqual(["sealed@5"]);
     const back = await withShell(at, ok(undefined), async (shell) => {
       const restarted = turnOf(await start(shell, BOOT));
       return turnOf(await pump(shell, restarted));
     });
-    expect(callsOf(at).filter((c) => c.startsWith("send"))).toEqual([
+    expect(callsOf(at.log).filter((c) => c.startsWith("send"))).toEqual([
       "send 5 wal=1 journal=sealed@5 lost", "send 5 wal=1 journal=sealed@5 ok",
     ]);
-    expect(journalIn(at)).toEqual(["sealed@5", "answered@5"]);
+    expect(journalIn(at.journal)).toEqual(["sealed@5", "answered@5"]);
     expect(back.taken.map((t) => t._tag)).toEqual(["known"]);
     expect(rowsIn(at)).toHaveLength(1);
   });
@@ -128,9 +121,9 @@ describe("host/shell/drive the Host's rows are on the disk before the chain hear
       const started = turnOf(await start(shell, BOOT));
       return turnOf(await pump(shell, turnOf(await command(shell, started.station, ALICE, FUND))));
     });
-    const before = callsOf(at);
+    const before = callsOf(at.log);
     const back = await withShell(at, ok(undefined), async (shell) => turnOf(await start(shell, BOOT)));
-    expect(callsOf(at)).toEqual(before);
+    expect(callsOf(at.log)).toEqual(before);
     expect(back.taken.map((t) => t._tag)).toEqual(["known"]);
   });
 
@@ -142,8 +135,8 @@ describe("host/shell/drive the Host's rows are on the disk before the chain hear
       return turnOf(await command(shell, started.station, ALICE, unlisted));
     });
     expect(turn.taken).toEqual([{ _tag: "unknown_token", token: 9n }]);
-    expect(callsOf(at)).toEqual([]);
-    expect(journalIn(at)).toEqual([]);
+    expect(callsOf(at.log)).toEqual([]);
+    expect(journalIn(at.journal)).toEqual([]);
   });
 
   test("R-DURABLE a WAL that cannot be written asks nothing of the chain and says so", async () => {
@@ -155,6 +148,6 @@ describe("host/shell/drive the Host's rows are on the disk before the chain hear
       return command(dead, started.station, ALICE, FUND);
     });
     expect(out).toMatchObject({ ok: false, error: { _tag: "disk" } });
-    expect(callsOf(at)).toEqual([]);
+    expect(callsOf(at.log)).toEqual([]);
   });
 });

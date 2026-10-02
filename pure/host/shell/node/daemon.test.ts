@@ -9,7 +9,7 @@ import { credit, GOLD, open, pay } from "../../../runtime/fixtures.ts";
 import type { Disk } from "../disk/disk.ts";
 import { MAX_LINE } from "../link/link.ts";
 import {
-  accountOf, ALICE, agree, BOB, connected, fresh, LOCAL, must, nodeOf, QUICK, SECOND, seatOf, sleep, slowChain, SLOW,
+  accountOf, ALICE, agree, BOB, connected, fresh, LOCAL, must, nodeOf, QUICK, SECOND, seatOf, slowChain, SLOW,
   until, WAIT,
 } from "./scene.ts";
 import { dialTcp } from "./link/socket.ts";
@@ -131,7 +131,7 @@ describe("host/shell/node two Runtimes over loopback sockets", () => {
     rmSync(full);
     const third = await alice.tell(pay(BOB, 3n));
     expect(third.ok ? "ok" : third.error._tag).toBe("disk");
-    await sleep(100);
+    await Bun.sleep(100);
     const look = await alice.look();
     expect(look.fatal?._tag).toBe("disk");
     expect(look.counts.sent).toBe(sent);
@@ -143,7 +143,7 @@ describe("host/shell/node two Runtimes over loopback sockets", () => {
     const [a, b] = [await seatOf(ALICE, fresh(), 0), await seatOf(BOB, fresh(), 0)];
     a.listener.close();
     const bob = await nodeOf(b, a, { tickMs: QUICK });
-    await sleep(150);
+    await Bun.sleep(150);
     expect((await bob.look()).linked).toEqual([]);
     const alice = await nodeOf(await seatOf(ALICE, a.dir, a.listener.port), b, { tickMs: QUICK });
     expect(await until(() => connected(alice, bob), WAIT)).toBe(true);

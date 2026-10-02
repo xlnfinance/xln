@@ -8,6 +8,7 @@ import { blockOf, DEPOSITORY, entityOf as bytes, logOf, must as made } from "../
 import type { Row } from "../../../runtime/model.ts";
 import { open } from "../../../runtime/fixtures.ts";
 import type { Disk } from "../disk/disk.ts";
+import { callsOf } from "../fixtures.ts";
 import type { PortFault } from "../submit/chain.ts";
 import type { Look } from "./daemon.ts";
 import type { WatchConfig, WatchPort } from "../watch/loop.ts";
@@ -20,8 +21,6 @@ const DEPTH = 2n;
 const NO_PEER = undefined;
 
 type Chain = Readonly<{ head: bigint; fork: (block: bigint) => bigint; down?: string }>;
-
-const callsOf = (path: string): readonly string[] => readFileSync(path, "utf8").split("\n").filter((l) => l !== "");
 
 const advanced = (block: bigint, epoch: bigint) =>
   logOf("AccountEpochAdvanced", { left: bytes(1n), right: bytes(2n), ondeltaEpoch: epoch }, block, 0n);

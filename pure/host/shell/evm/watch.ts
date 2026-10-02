@@ -7,13 +7,12 @@ import { accountKey } from "../../../chain/proof/deployment.ts";
 import { address, bytes32, type Address, type Bytes32, type RawLog } from "../../../j/log.ts";
 import type { AccountAt } from "../../../j/observe.ts";
 import type { Block } from "../../../j/watch.ts";
-import { A, encode } from "../../../kernel/encoding/abi.ts";
-import { bytesToHex, concat, keccak256, utf8 } from "../../../kernel/encoding/bytes.ts";
+import { A } from "../../../kernel/encoding/abi.ts";
 import { all, err, flatMap, map, mapErr, ok, type Result } from "../../../kernel/core/result.ts";
 import type { PortFault } from "../submit/chain.ts";
 import type { WatchPort } from "../watch/loop.ts";
-import { hexQuantity, oneWord, quantity, wordsOf, type ReplyFault } from "./calls.ts";
-import { bad, fieldsOf, isText, listOf, portFault, readsOf, type Fields, type Rpc } from "./port.ts";
+import { bad, hexQuantity, oneWord, quantity, withArguments, wordsOf, type ReplyFault } from "./calls.ts";
+import { fieldsOf, isText, listOf, portFault, readsOf, type Fields, type Rpc } from "./port.ts";
 
 const hash32 = (value: unknown): Result<Bytes32, ReplyFault> =>
   (isText(value) ? mapErr(bytes32(value.toLowerCase()), () => bad("not a 32-byte hash")) : err(bad("not a hash")));
@@ -40,19 +39,12 @@ const logFields = (o: Fields) => all({
 const rawLogOf = (raw: unknown): Result<RawLog, ReplyFault> =>
   flatMap(fieldsOf(raw), (o) => map(logFields(o), (log): RawLog => log));
 
-const function4 = (signature: string): Uint8Array => keccak256(utf8(signature)).slice(0, 4);
-
-const callOf = (signature: string, values: Parameters<typeof encode>[0]): Result<string, ReplyFault> => {
-  const encoded = encode(values);
-  return encoded.ok ? ok(bytesToHex(concat([function4(signature), encoded.value]))) : err(bad(encoded.error._tag));
-};
-
 /** `_accounts(bytes)` and `ondeltaEpoch(bytes32,bytes32)`: the two reads the watcher's `reading` is made of. */
 const accountCalls = (left: Bytes32, right: Bytes32): Result<Readonly<{ row: string; epoch: string }>, ReplyFault> =>
   flatMap(mapErr(accountKey(left, right), () => bad("not an account key")), (key) =>
     all({
-      row: callOf("_accounts(bytes)", [A.bytes(key)]),
-      epoch: callOf("ondeltaEpoch(bytes32,bytes32)", [A.b32(left), A.b32(right)]),
+      row: withArguments("_accounts(bytes)", [A.bytes(key)]),
+      epoch: withArguments("ondeltaEpoch(bytes32,bytes32)", [A.b32(left), A.b32(right)]),
     }));
 
 /** The first word of the row `_accounts` returns is its `nonce`. */

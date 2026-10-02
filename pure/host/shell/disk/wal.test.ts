@@ -6,12 +6,13 @@ import { holdOf, secretOf } from "../../../account/fixtures.ts";
 import type { Row } from "../../../runtime/model.ts";
 import { entityOf, GOLD } from "../../../runtime/fixtures.ts";
 import { aliceRun, ALICE, walOf } from "../fixtures.ts";
-import { recordOf, scanWal } from "./wal.ts";
+import { frame } from "./records.ts";
+import { scanWal } from "./wal.ts";
 
 const rows = walOf(aliceRun, ALICE);
 
 const record = (row: Row): Uint8Array => {
-  const made = recordOf(row);
+  const made = frame(row);
   return made.ok ? made.value : expect.unreachable("record");
 };
 
@@ -72,7 +73,7 @@ describe("host/shell/wal the rows of a file, and how it ended", () => {
   });
 
   test("a record whose check holds but whose text is not a row is a fault, not a tear", () => {
-    const stray = recordOf(Object.assign({}, last, { height: "not a bigint" }));
+    const stray = frame(Object.assign({}, last, { height: "not a bigint" }));
     const scanned = stray.ok && scanWal(concat([prior, stray.value]));
     expect(scanned).toMatchObject({ ok: false, error: { _tag: "bad_record" } });
   });
@@ -85,7 +86,7 @@ describe("host/shell/wal the rows of a file, and how it ended", () => {
   });
 
   test("a row that has no exact text is not written", () => {
-    expect(recordOf(Object.assign({}, last, { notices: [new Map()] }))).toMatchObject({ ok: false });
+    expect(frame(Object.assign({}, last, { notices: [new Map()] }))).toMatchObject({ ok: false });
   });
   test("R-LOCK-ROUTE a row that holds a lock with a route and the paybook's commands comes back unchanged", () => {
     const hashlock = `0x${"cd".repeat(32)}`;

@@ -28,6 +28,16 @@ export const big: Reader<bigint> = (at, v) => (typeof v === "bigint" ? ok(v) : b
 export const count: Reader<number> = (at, v) =>
   (typeof v === "number" && Number.isSafeInteger(v) && v >= 0 ? ok(v) : bad(at, "count"));
 
+const HEX32 = /^0x[0-9a-f]{64}$/;
+
+/** A 32-byte word as lowercase hex text (a hash, a digest, a hashlock); `T` is the brand the caller gives it. */
+export const hex32 = <T extends string = string>(want: string): Reader<T> => (at, v) =>
+  (typeof v === "string" && HEX32.test(v) ? ok(v as T) : bad(at, want));
+
+/** The `_tag` of a tagged value, or why the value is not one. */
+export const tagOf: Reader<string> = (at, v) =>
+  (typeof v === "object" && v !== null && "_tag" in v ? text(`${at}._tag`, v._tag) : bad(at, "tagged"));
+
 export const bytesOf = (length: number): Reader<Uint8Array> => (at, v) =>
   (v instanceof Uint8Array && v.length === length ? ok(v) : bad(at, `${length} bytes`));
 

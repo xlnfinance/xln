@@ -4,10 +4,11 @@
 // and the batch Hanko; the two never sign the same bytes, because the handshake digest begins with its own domain
 // string and a batch digest is a keccak256 hash.
 import { readFile, stat } from "node:fs/promises";
-import { err, flatMap, mapErr, ok, type Result } from "../../../kernel/core/result.ts";
+import { err, flatMap, mapErr, type Result } from "../../../kernel/core/result.ts";
 import type { Tagged } from "../../../kernel/core/tagged.ts";
 import { hexToBytes } from "../../../kernel/encoding/bytes.ts";
 import { keyOf, type Key } from "../link/link.ts";
+import { attempt } from "./attempt.ts";
 
 export type KeyFileFault =
   | Tagged<"key_file_unreadable", { path: string; reason: string }>
@@ -17,19 +18,12 @@ export type KeyFileFault =
 /** The permission bits of the group and others: none may be set. */
 const OTHERS = 0o077;
 
-const reasonOf = (cause: unknown): string => (cause instanceof Error ? cause.message : String(cause));
+const unreadable = (path: string) => (reason: string): KeyFileFault => ({ _tag: "key_file_unreadable", path, reason });
 
-const read = (path: string): Promise<Result<string, KeyFileFault>> =>
-  readFile(path, "utf8").then(
-    (text) => ok(text),
-    (cause): Result<string, KeyFileFault> => err({ _tag: "key_file_unreadable", path, reason: reasonOf(cause) }),
-  );
+const read = (path: string): Promise<Result<string, KeyFileFault>> => attempt(readFile(path, "utf8"), unreadable(path));
 
 const modeOf = (path: string): Promise<Result<number, KeyFileFault>> =>
-  stat(path).then(
-    (info) => ok(info.mode),
-    (cause): Result<number, KeyFileFault> => err({ _tag: "key_file_unreadable", path, reason: reasonOf(cause) }),
-  );
+  attempt(stat(path).then((info) => info.mode), unreadable(path));
 
 const keyIn = (path: string, text: string): Result<Key, KeyFileFault> => {
   const raw = hexToBytes(text.trim().startsWith("0x") ? text.trim() : `0x${text.trim()}`);

@@ -10,7 +10,7 @@
 import { all, flatMap, map, ok, traverse, type Result } from "../../../kernel/core/result.ts";
 import type { Tagged } from "../../../kernel/core/tagged.ts";
 import type { RowId } from "../../model.ts";
-import { bad, big, count, field, record, text, type Fields, type ReadFault } from "../codec/read.ts";
+import { bad, big, count, field, hex32, record, tagOf, type Fields, type ReadFault } from "../codec/read.ts";
 import { scanRecords, type RecordFault } from "../disk/records.ts";
 import type { Held } from "../disk/store.ts";
 
@@ -20,10 +20,7 @@ export type Sealed = Tagged<"sealed", { nonce: bigint; gasBudget: bigint; digest
 export type Answered = Tagged<"answered", { nonce: bigint; digest: string; outcome: Answer }>;
 export type JournalRecord = Sealed | Answered;
 
-const DIGEST = /^0x[0-9a-f]{64}$/;
-
-const digest = (at: string, v: unknown): Result<string, ReadFault> =>
-  (typeof v === "string" && DIGEST.test(v) ? ok(v) : bad(at, "digest"));
+const digest = hex32("digest");
 
 const outcome = (at: string, v: unknown): Result<Answer, ReadFault> =>
   (v === "landed" || v === "failed" ? ok(v) : bad(at, "landed|failed"));
@@ -51,12 +48,9 @@ const KEYS: Readonly<Record<string, readonly string[]>> = {
   sealed: ["nonce", "gasBudget", "digest", "rows"], answered: ["nonce", "digest", "outcome"],
 };
 
-const tagOf = (value: unknown): Result<string, ReadFault> =>
-  (typeof value === "object" && value !== null && "_tag" in value ? text("$._tag", value._tag) : bad("$", "tagged"));
-
 /** What a value in the journal file is: a record of one of the two kinds, with exactly its keys. */
 export const journalRecord = (value: unknown): Result<JournalRecord, ReadFault> =>
-  flatMap(tagOf(value), (tag) => {
+  flatMap(tagOf("$", value), (tag) => {
     const keys = Object.hasOwn(KEYS, tag) ? KEYS[tag] : undefined;
     if (keys === undefined) return bad("$._tag", "sealed|answered");
     return flatMap(record("$", value, ["_tag", ...keys]), (o) => (tag === "sealed" ? sealed(o) : answered(o)));
