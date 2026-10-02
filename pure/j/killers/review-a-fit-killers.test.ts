@@ -41,8 +41,10 @@ describe("R-J3 the size limit is inclusive: exactly 256 KiB is one batch, 32 byt
     return r.ok ? r.value : expect.unreachable("encode");
   };
   test("find the clause size whose batch is exactly the limit", () => {
-    const near = MAX_ENCODED_BYTES - size(0);
-    const n = Array.from({ length: 200 }, (_, i) => near + 100 - i).find((m) => size(m) <= MAX_ENCODED_BYTES) ?? 0;
+    // Each size is an ABI encoding of about 256 KiB, so the clause size is corrected by what is missing, four encodings
+    // at most, not found by trying a couple of hundred sizes (which took seconds on a loaded machine).
+    const mend = (m: number): number => m + MAX_ENCODED_BYTES - size(m);
+    const n = Array.from({ length: 4 }).reduce<number>((m) => mend(m), MAX_ENCODED_BYTES - size(0));
     expect(size(n)).toBe(MAX_ENCODED_BYTES);
     expect(queue(empty, clauseBytes(n))._tag).toBe("queued");
     expect(size(n + 32)).toBe(MAX_ENCODED_BYTES + 32);

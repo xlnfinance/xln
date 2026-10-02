@@ -91,15 +91,16 @@ export class Cluster {
 
   /** Every node is linked to each of its peers. */
   private async connected(): Promise<void> {
-    await this.until(() => [...this.slots].every(([id, slot]) => this.look(id).linked.length === slot.member.peers.length), "the links to come up");
+    await this.until(() => [...this.slots].every(([id, slot]) => this.look(id).linked.length === slot.member.peers.length), "the links to come up", () =>
+      ` (linked: ${[...this.slots].map(([id, slot]) => `${slot.member.party.name} ${this.look(id).linked.length} of ${slot.member.peers.length}`).join("; ")}; down: ${[...this.down].map((id) => this.slot(id).member.party.name).join(", ") || "none"})`);
   }
 
-  private async until(done: () => boolean, what: string): Promise<void> {
+  private async until(done: () => boolean, what: string, why: () => string = () => ""): Promise<void> {
     const end = Date.now() + PATIENCE_MS;
     for (;;) {
       await this.refresh();
       if (done()) return;
-      if (Date.now() > end) throw new Error(`waited ${PATIENCE_MS} ms for ${what}`);
+      if (Date.now() > end) throw new Error(`waited ${PATIENCE_MS} ms for ${what}${why()}`);
       await Bun.sleep(POLL_MS);
     }
   }
@@ -194,7 +195,8 @@ export class Cluster {
       steady = apart && now === before ? steady + 1 : 0;
       before = now;
       return steady >= STABLE;
-    }, `the peers of ${this.slot(id).member.party.name} to see its connection close`);
+    }, `the peers of ${this.slot(id).member.party.name} to see its connection close`, () =>
+      ` (still linked to it: ${others.filter((other) => this.look(other).linked.includes(runtime)).map((other) => this.slot(other).member.party.name).join(", ") || "none"}; lines on their way ${this.inFlight()}, last count ${before})`);
     this.gone = { ...this.gone, heard: this.gone.heard + this.inFlight() };
   }
 
