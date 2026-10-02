@@ -1,6 +1,6 @@
 {
  "id": "R-DISPUTE-LAPSED",
- "statement": "A dispute start the node asked for that can never open a dispute is forgotten, so the node may ask again. The Entity keeps its own start as a record (`starting`, R-DISPUTE-FINALIZE) and refuses a second ask while it stands (`dispute_pending`), so a start that never lands would refuse every later ask until the epoch moved. The Host's builder probes each dispute start in its draft alone at the head (R-SIMULATE): one the chain would revert is dropped from the draft and the rows and named, and the Host tells the Entity of its own peer and nonce (`j_start_lapsed`, in the WAL like any J input). The Entity clears the record only when the lapse names the nonce of the start it holds and the chain has not given that start a window; a lapse of another nonce, of a start with a window, or with no record changes nothing. A start the chain skips (stale nonce, a dispute already open, the epoch moved) is not a lapse: the chain's own events end the record (`j_epoch`, `j_dispute_over`), so a skip is never read as one. A start that reverts only together with the ops it is grouped with is kept. A counter the node asked for (R-DISPUTE-WATCH) lapses the same way: the builder probes each counter in the draft alone, drops the one the chain would revert (the window is over, the signature is void), and the Host tells the Entity (`j_counter_lapsed`, the peer and the counter's nonce); the Entity marks the answer lapsed and does not restate it, so a counter that can only fail never holds the draft or costs a simulation at every frame. A lapse of another nonce changes nothing. Owed: a start that is held for another reason (gas cap, size) stays held and the record stands.",
+ "statement": "A dispute start the node asked for that can never open a dispute is forgotten, so the node may ask again. The Entity keeps its own start as a record (`starting`, R-DISPUTE-FINALIZE) and refuses a second ask while it stands (`dispute_pending`), so a start that never lands would refuse every later ask until the epoch moved. The Host's builder probes each dispute start in its draft alone at the head (R-SIMULATE): one the chain would revert is dropped from the draft and the rows and named, and the Host tells the Entity of its own peer and nonce (`j_start_lapsed`, in the WAL like any J input). The Entity clears the record only when the lapse names the nonce of the start it holds and the chain has not given that start a window; a lapse of another nonce, of a start with a window, or with no record changes nothing. A start the batch's answer says the chain skipped for good (the stored nonce already reached it, reason 0, or the epoch moved on, reason 11; Account.sol 73-83) is told as lapsed the same way, so the record is cleared and a new ask is taken. A start skipped because a dispute is already open (reason 1) is not: it may be the node's own start, restated after it landed, and the dispute reaches the Entity as a chain fact (`j_epoch`, `j_dispute_over`). A start that reverts only together with the ops it is grouped with is kept. A counter the node asked for (R-DISPUTE-WATCH) lapses only when the chain will refuse it for good: the builder probes each dispute op in the draft alone before the draft is sealed whole, and names a counter only when every cause the simulation gives is E2, E4 or E9 (not authorized or stale, a bad signature, a hash mismatch) or a skip with reason 3 to 7 (the dispute moved, the window closed, the counter is not newer, it was superseded, one is already registered). The Host then tells the Entity (`j_counter_lapsed`, the peer and the counter's nonce); the Entity marks the answer lapsed and does not restate it. A counter the batch landed and skipped for reasons 3 to 7 is told the same way; one skipped for another reason is not. A counter held for a reason that can heal (an error the Host cannot name, no dispute open yet at a lagging node) is dropped from the draft for now and not named: the Entity restates it at each frame while the window is open, so it is asked again. A finalize the chain would revert (the other party's landed first, the dispute is over) is probed and dropped the same way and not named; the Entity asks again until it hears the dispute over. A lapse of another nonce changes nothing. Owed: a start that is held for another reason (gas cap, size) stays held and the record stands.",
  "source": "Review A on #156 (lapsed start must clear the record); coordinator 10-02 09:10 order; contracts-decisions.md One start per dispute",
  "layers": {
   "arrival": "n/a: the Arrival page models the Account's frames; a dropped start is an Entity and Host rule",
@@ -69,6 +69,61 @@
    "kind": "test",
    "layer": "ts",
    "name": "R-DISPUTE-LAPSED a lapse of another nonce changes nothing, and a registered counter still finalizes"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DISPUTE-LAPSED a counter held for a reason that can heal is not given up: it is asked for again"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DISPUTE-LAPSED a counter whose revert the Host cannot name is not given up either"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DISPUTE-LAPSED a counter the batch skipped for good (window closed) lapses, a skip that can heal does not"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DISPUTE-LAPSED a start the chain skipped for good (stored nonce reached, epoch left) is told as lapsed"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DISPUTE-LAPSED a start skipped because a dispute is open stays: it may be its own, restated"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DISPUTE-LAPSED a counter that landed and was skipped for good lapses, one skipped as unknown does not"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DISPUTE-LAPSED a counter that reverts for good is dropped and named though a lower group still seals"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DISPUTE-LAPSED a counter held for a reason that can heal is dropped, not named, and what is behind it seals"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DISPUTE-LAPSED a counter that simulates cleanly is not probed away: it is sealed with what is behind it"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DISPUTE-LAPSED a finalize the other party's landed first is dropped, not named, and asked for again"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DISPUTE-LAPSED a finalize that simulates cleanly is sealed and sent, not dropped"
   }
  ]
 }

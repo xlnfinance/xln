@@ -252,7 +252,7 @@ type Finalized = Readonly<{
 const finalizedBy = (w: Work, facts: ChainFacts, e: Extract<JEvent, { _tag: "j_epoch" }>): Finalized | undefined => {
   if (!inDispute(facts)) return undefined;
   const account = w.state.accounts.get(e.peer);
-  const signed = facts.starting?.countered === true || facts.against?.answer?.registered === true;
+  const signed = facts.starting?.countered !== undefined || facts.against?.answer?.registered === true;
   return {
     nonce: signed ? e.stored : e.stored - 1n, epoch: e.epoch, committed: proofNonce(facts, account?.used ?? 0),
     pending: account?.pending === undefined

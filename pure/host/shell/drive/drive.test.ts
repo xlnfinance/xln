@@ -71,7 +71,6 @@ const portOf = (
         ? [{ op: 1, counterentity: op.counter.counterentity, reason: skipReason, nonce: op.counter.counterNonce }]
         : [];
     });
-    appendFileSync(at.log, `answer ${landed} ${batch.ops.map((o) => o._tag)} ${skipped.length}\n`);
     const answer: JAnswer = { _tag: "landed", nonce: batch.nonce, batchHash: batch.digest, skipped };
     return Promise.resolve(ok(landed ? answer : undefined));
   },
@@ -217,7 +216,8 @@ describe("host/shell/drive the Host's rows are on the disk before the chain hear
     const out = await withShell(at, ok(undefined), async (shell) => {
       const started = turnOf(await start(shell, { ...BOOT, genesis: paid }));
       const first = turnOf(await command(shell, started.station, ALICE, counterOpened));
-      return { first, second: turnOf(await command(shell, first.station, ALICE, { _tag: "resend_due", peer: BOB })) };
+      const second = turnOf(await command(shell, first.station, ALICE, { _tag: "resend_due", peer: BOB }));
+      return { first, second, third: turnOf(await pump(shell, second)) };
     }, outcome, skipReason);
     return { at, ...out };
   };
@@ -284,6 +284,6 @@ describe("host/shell/drive the Host's rows are on the disk before the chain hear
   test("R-DISPUTE-LAPSED a counter that landed and was skipped for good lapses, one skipped as unknown does not", async () => {
     const ok_: Simulation["outcome"] = { _tag: "ok", applyGas: 100_000n };
     const [window, none] = [await counterTurns(ok_, 4), await counterTurns(ok_, 2)];
-    expect([answerOf(window.second)?.lapsed, answerOf(none.second)?.lapsed]).toEqual([true, false]);
+    expect([answerOf(window.third)?.lapsed, answerOf(none.third)?.lapsed]).toEqual([true, false]);
   });
 });
