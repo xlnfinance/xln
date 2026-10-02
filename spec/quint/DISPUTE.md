@@ -30,12 +30,22 @@ witness that the search reaches.
 - `no_lock` (`no_lock_left`, `no_lock_right`): no Account stays locked if either side is live. Stated for a side alone: once it has heard everything, run its duties and sees the window over, it has a finalize asked or landed, whatever its peer does.
 - `no_silent_zeroing`: a side that rebases with a frame committed beyond the proof that paid was told.
 
-## Four switches
+## Four switches and the payment path
 
 `FREEZE` (decided 10-02): an Entity with a dispute record seals nothing and refuses the peer's frames. `LIVE` (decided): a counter lapses only on a
 permanent revert, so a transient one is retried while the window is open; and the starter finalizes with a registered counter. `ACCEPT` (not decided,
 what this model says is missing): the non-starter that holds nothing newer than the dispute's proof finalizes with it. `NOTICE` (owed,
 R-DISPUTE-VOIDED-NOTICE): a side that rebases with committed frames beyond the settled proof is told.
+
+`PAY` (a number, not a switch) turns on the payment path: a frame carries a payment (`pid`), and what happens to it across an epoch move is modelled.
+A node in a dispute refuses a peer's frame; its Entity keeps no proof from it (the proofs map is written by a committed round only, `frame.ts` 191-192),
+but the peer holds the payer's signature on it (`kept`), so a finalize built outside the Entity can pay by it: the non-starter's finalize with a
+signature and no counter, which stores its own nonce (`Depository.sol` 965-970, `landSigFinal`). The payer meanwhile either keeps the frame pending
+(stage 2) or has it rolled back on a retryable refusal and its payment sent back to the mempool (`rollback`); when it hears the epoch move it seals the
+payment again. `PAY=1` is #162 at 8f82733df. `PAY=2` drops the payment of the frame the node still has pending when the chain paid by it (61e47255).
+`PAY=3` is the decided rule after Review A's second find: the node records every frame it signed in the epoch, pending or rolled back, and drops the
+payment of the one the finalize paid by. The property `pay_once`: no payment is committed after a finalize paid it. A frame the peer committed (stage 1)
+is acked again and rebased by the code (its after-state is zero), so it is not a case here.
 
 ## Result (random search, 2500 traces of 70 steps, seed 0x5; `./check.sh` asserts each cell)
 
@@ -48,8 +58,19 @@ R-DISPUTE-VOIDED-NOTICE): a side that rebases with committed frames beyond the s
 | + ACCEPT | holds | holds | **fails** |
 | + NOTICE | holds | holds | holds |
 
+With the payment path (all four fixes on; `pay_once` is vacuous without it):
+
+| code | pay_once | newest_wins | no_silent_zeroing | no_lock |
+|---|---|---|---|---|
+| PAY=1 (#162 8f82733df: a refused frame is sealed again) | **fails** | holds | holds | holds |
+| PAY=2 (the pending frame the chain paid by is dropped, 61e47255) | **fails** (a rolled-back frame is sealed again) | holds | holds | holds |
+| PAY=3 (every frame signed in the epoch, rolled back too) | holds | holds | holds | holds |
+
+An earlier version of this table had `no_lock_right` failing under PAY: a refused frame was kept as the refuser's own proof, so a late counter could not land.
+The builder checked the code: nothing uses the signature of a refused frame as a counter or start proof, so the model no longer does either.
+
 "Holds" is no violation found over the samples, not a proof. "Fails" is a counterexample, and each has a scenario test that says what the code does
-(`dispute_test.qnt`, 9 tests, run under every variant, 54 runs):
+(`dispute_test.qnt`, 15 tests, run under every variant, 120 runs):
 
 1. `frameAfterTheCounterTest` (today, LIVE only): the counterer keeps sealing after it countered; the frame commits on both sides and the chain pays the counter, one payment older. FREEZE refuses it.
 2. `counterLapsesTest` (today, FREEZE only): a transient revert drops the counter, the Entity is told it lapsed and never asks again (REVIEW-A N1); the starter finalizes after the window with the older proof while the counterer is live. LIVE retries.
@@ -60,13 +81,28 @@ R-DISPUTE-VOIDED-NOTICE): a side that rebases with committed frames beyond the s
 7. `bothStartTest`: both start at once; the chain keeps one and skips the other, told to nobody; the loser's `starting` has no window until the epoch moves (PR 160 refuses a second start and waits on the window of the dispute against the node, so it does not wedge).
 8. `startAfterTheEpochMovedTest`: a co-signed settlement moves the epoch while a start is on its way; the chain skips it; the record is forgotten when the Entity hears the epoch move.
 9. `staleStartCounteredTest`: the baseline, the #159 audit case: the older proof starts, the newer one counters and pays. Holds everywhere.
+10. `signedFrameRefusedTest` (PAY): the double payment of the fourth audit of #162. A frame sealed before the dispute reaches the non-starter after it; the non-starter refuses it but holds the payer's signature, and a finalize with that signature and no counter pays by it. The proposer hears the epoch move with the frame still pending. PAY=1: it seals the frame again, the peer commits it, the payment is paid twice. PAY=2 and 3: dropped. The test asserts each.
+11. `committedFrameAckLostTest` (PAY): the same frame committed by the peer before it heard of the dispute: nothing is sealed again in any variant.
+12. `rolledBackFrameTest` (PAY): Review A's second find on 61e47255. The refusal comes back to the payer as retryable, the frame is rolled back and its payment goes back to the mempool, while the peer still holds the payer's signature on the frame and finalizes by it. PAY=1 and 2: the payment is sealed again and paid twice. PAY=3 (every signed frame of the epoch is recorded and the one the finalize paid by is named): dropped.
+
+13. `epochMoveStoresAndRebasesTest`: a dispute that ends on the timeout stores the settled nonce plus one, moves the epoch, and both Entities rebase on it (their committed nonce is the stored one plus one, S10). Added for two mutants that no property sees.
+14. `counterLandsAfterTheWindowTest` (LIVE, ACCEPT): the counter lands after its window closed (the J transaction took longer than the window). The chain skips it for good. Today nobody reads the skip and the counter stays pending; with LIVE the Host reads the reason (#165 96817e2bd `skippedForGood`) and the Entity is told it lapsed; with ACCEPT the non-starter then finalizes the opening state at once (`accepting` with a lapsed answer). The model's own clock never lets a counter land late (time passes only when every landable ask has landed), so no random run reaches it: this scenario is the only cover, and the same gap as the backlog's "nothing enforces a J tx included within lag".
+15. `watchtowerCounterTest` (LIVE): the non-starter's watchtower registers a counter its Entity never asked for, then the starter goes down. The Entity holds something newer than the opening, so ACCEPT does not apply, and the counter is not the one it asked for: today nothing asks for a finalize and the Account stays locked. With LIVE a counter registered by anyone is the Entity's to finalize with (the chain lets either party execute it after the window). Action `watchCounter`; the coordinator's audit of #165 found it.
+
+The property `no_lock` names the proof the ask carries (`askNamesTheProof`): an ask for a proof the chain would refuse (the opening's when a counter is registered) does not unlock the Account. Before the mutants it accepted any ask, and a starter that finalized with the wrong proof passed.
+
+## Mutants (`mutants/dispute_payall.json`, `mutants/htlc_both.json`; `MUTANTS=1 ./check.sh`)
+
+Each mutant is a deliberately broken copy of `dispute.qnt` or `htlc.qnt`; a property or a scenario test must kill it. Dispute (code with every fix, PAY=3): finalizing early (`newest_wins`), no freeze (`newest_wins`), the starter ignoring the registered counter (`no_lock`), a strict ACCEPT guard (`no_lock`), a notice off by one and no notice (`no_silent_zeroing`), the epoch move storing the settled nonce or keeping the committed one (`epochMoveStoresAndRebasesTest`), a strict drop of a refused or a rolled-back frame (`signedFrameRefusedTest`, `rolledBackFrameTest`), no drop of a rolled-back frame (`pay_once`), a lapsed counter that does not lead to ACCEPT or a skip that is not told (`counterLandsAfterTheWindowTest`), a counter registered by the watchtower that is no finalize candidate (`no_lock`), and a transient fault that lapses the counter for good (`newest_wins`, 15000 traces, and `counterLapsesTest`). HTLC: the chain secret unseen (`route_safe`), an outdated frame not zeroed (`paid_once`), the payer expiring the upstream lock at TD (`payerCannotExpireBeforeTUTest`), HOP = 0 (`claimNeedsRoomTest`).
+
+Survivors found and what became of them. Boundary mutants (`<=` to `<` in a guard) survive a random search, so each is killed by a scenario test. A mutant of the shared `beyond` condition is blind (`zeroed` and `told` both use it), so the notice mutant edits the told side only. Mutants of a chain-timing guard behind the Entity's own ask (the starter finalizing at once, a counter finalized early) are equivalent: the Entity never asks before the chain would take it, so they are combined in `early-finalize`. Equivalent under PAY=3 and therefore not in the list: dropping only the pending frame the chain paid by (the all-frames rule subsumes it; it matters under PAY=2 only), a counter landing after the window with the old rule (`counter-after-window`), a quiet starter that refuses the answerer's frames (`freeze-starter-only`) and a second start overwriting the first (`second-start-overwrites`), none of which a property can tell from the unmutated model. Not here, because they belong to another model: a late reveal that pays (`chain.qnt`, E6/H1) and a hub that commits while quiet or in another epoch (`no_silent_zeroing`).
 
 ## What it assumes and leaves out
 
 - A proof is its nonce. The equal-nonce rule (Left's proof outranks Right's at the same nonce) is `chain.qnt`'s; here every nonce is distinct.
-- No clause, no Pull, no HTLC: the third finalize path (the non-starter finalizes at once with a newer pull-free proof it holds, `Account.sol` 817-857) is not used by the Entity and not modelled. It is one more way a non-starter could close a dispute it cannot counter in time.
+- No clause, no Pull, no HTLC. The third finalize path (the non-starter finalizes at once with a newer pull-free proof it holds, `Account.sol` 817-857) is `landSigFinal`, on only under PAY > 0; the Entity does not ask for it.
 - ACCEPT assumes the non-starter can build the opening body: it holds the same proof, or it sealed the frame the starter acked. A start's calldata carries the body; the log carries its hash only.
-- "Zeroed" is a frame a side committed whose nonce is above the proof that paid. Half-committed frames count (the receiver committed, the ack did not arrive): the receiver's ledger is rebased to zero too. If the proposer re-seals a refused frame in the new epoch the payment may land again; the model does not credit that.
+- "Zeroed" is a frame a side committed whose nonce is above the proof that paid. Half-committed frames count (the receiver committed, the ack did not arrive): the receiver's ledger is rebased to zero too. With PAY > 0 a payment is named (`pid`) and a frame sealed again in the new epoch is counted: see `pay_once`. A payment a frame never carried to a peer that holds nothing is dropped, not sealed again (the model does not follow it).
 - A co-signed settlement freezes both Entities from the moment it lands, a coarse form of R-COSIGN-FREEZE.
 - Fairness is a bounded environment: two crashes, one transient revert, asks landing within LAG, events heard before time passes. A longer outage of the holder is excused by `newest_wins` (`wasDown`), by design.
 - The Host's wedged draft (REVIEW-A N4: a reverting counter delaying a reveal in the same draft) is a Host property, not here.
@@ -91,7 +127,7 @@ Switches, the decided fixes: `SEE` (the secret on the chain is a chain fact at d
 | SEE + DISSOLVE | holds | holds |
 | SEE + DISSOLVE, HOP = 0 (mutant) | holds | fails: the claim lands after the upstream deadline (E3 needs HOP >= REACT) |
 
-Each failing cell has a schedule in `htlc_test.qnt` (8 tests, run on the four variants and the HOP = 0 mutant): `chainRevealUnheardTest` is F1 (hub out one unit), `releaseAfterFinalizeTest` is F2 (Y is paid by the chain and again by the release sealed after the epoch move),
+Each failing cell has a schedule in `htlc_test.qnt` (9 tests, run on the four variants and the HOP = 0 mutant): `chainRevealUnheardTest` is F1 (hub out one unit), `releaseAfterFinalizeTest` is F2 (Y is paid by the chain and again by the release sealed after the epoch move),
 `finalizeAfterTheUpstreamExpiryTest` shows `route_safe` must be checked after the finalize too (the window ends after TU, so the payout comes after the expiry and only SEE has claimed in time).
 `claimNeedsRoomTest` is the HOP = 0 row (the claim lands after TU). The baselines (`releaseByFrameTest`, `refundWhenNotRevealedTest`, `lateRevealTest`, `committedReleaseThenDisputeTest`) are safe everywhere.
 

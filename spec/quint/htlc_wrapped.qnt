@@ -1,0 +1,5 @@
+// htlc.qnt as #167 is built: the watcher reads a finalize's arguments from the input of a direct processBatch call, and the payee can finalize through a
+// contract. Both fixes of #162/#165, ARGS on, HIDE on: the hub loses one unit.
+module htlc_wrapped {
+  import htlc(SEE = true, DISSOLVE = true, ARGS = true, HIDE = true, HOP = 2).* from "./htlc"
+}

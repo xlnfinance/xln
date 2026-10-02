@@ -13,10 +13,14 @@
 //   paid_once   what Y was paid, by a frame or by the chain, is at most one unit
 //   route_safe  once the lock on U is closed (claimed by H or expired to P), H paid out at most what it collected
 //
-// TWO SWITCHES, the decided fixes:
+// FOUR SWITCHES (the first two the decided fixes of #162/#165, the other two #167):
 //   SEE       a secret revealed on the chain is a chain fact, heard at depth (D9) like any J event; the hub's paybook learns it as it learns
 //             a received resolve, and claims upstream
 //   DISSOLVE  a hold carried by the proof a finalize settled is dissolved at the epoch move, at both sides, never re-released
+//   ARGS      a secret shown in a dispute's arguments pays the clause (DeltaTransformer applyPayment) with no SecretRevealed; the hub's watcher
+//             reads it from the start's log data and from the input of the finalize (R-WATCH-CALLDATA), and the hub claims upstream
+//   HIDE      the payee relays its finalize through a contract: the watcher decodes a direct processBatch call only, finds no finalize op,
+//             and tells finalize_unread, no secret. A finalize before TD pays the clause, the hub cannot claim: the hub is out one unit
 // The model is the code of #162 (FREEZE on): an Entity with a dispute record seals nothing and refuses the peer's frames. The code before
 // the freeze is dispute.qnt's `today` row, whose payee loses (no_silent_zeroing); here the hub is the subject.
 //
@@ -29,6 +33,8 @@
 module htlc {
   const SEE: bool
   const DISSOLVE: bool
+  const HIDE: bool              // the payee can finalize through a call the watcher cannot decode (the code of #167 reads a direct processBatch call only)
+  const ARGS: bool              // the hub's watcher reads the secret in a dispute's arguments (the start's, the finalize's), as it reads SecretRevealed (#167)
   const HOP: int                // the hub's upstream deadline is this far after its onward one (E3: HOP >= REACT = 2 * LAG)
 
   pure val W = 4                // the dispute window, ticks
@@ -47,16 +53,16 @@ module htlc {
   type View = { epoch: int, rec: bool, hold: bool }
 
   // A J transaction asked for and not yet landed.
-  type Ask = { on: bool, carried: bool, epoch: int, at: int }
-  pure val NO_ASK: Ask = { on: false, carried: false, epoch: 0, at: 0 }
+  type Ask = { on: bool, carried: bool, shown: bool, epoch: int, at: int }
+  pure val NO_ASK: Ask = { on: false, carried: false, shown: false, epoch: 0, at: 0 }
 
   // The chain's dispute record on D: the starter, the end of the window, whether the proof it opened with carries the hold.
-  type Disp = { on: bool, starter: Side, timeout: int, carried: bool }
-  pure val NO_DISP: Disp = { on: false, starter: Hub, timeout: 0, carried: false }
+  type Disp = { on: bool, starter: Side, timeout: int, carried: bool, shown: bool }
+  pure val NO_DISP: Disp = { on: false, starter: Hub, timeout: 0, carried: false, shown: false }
 
   // The chain's events in order: kind 0 DisputeStarted, 1 SecretRevealed (at `t`), 3 DisputeFinalized and epoch advance (`carried`: the
   // finalized proof carried the hold).
-  type Ev = { kind: int, by: Side, t: int, epoch: int, carried: bool }
+  type Ev = { kind: int, by: Side, t: int, epoch: int, carried: bool, shown: bool }
 
   // A frame in flight: the payee's release of the hold, sealed in `epoch`; stage 0 on its way to H, 1 committed there and the ack on its way.
   type Pend = { on: bool, epoch: int, stage: int }
@@ -135,7 +141,7 @@ module htlc {
       st' = { ...st,
         seen: st.seen.set(s, i + 1),
         v: st.v.set(s, w2),
-        knows: st.knows or (s == Hub and e.kind == 1 and SEE),
+        knows: st.knows or (s == Hub and ((e.kind == 1 and SEE) or (ARGS and e.shown))),
         askS: if (e.kind == 3) st.askS.set(s, NO_ASK) else st.askS }
     }
   }
@@ -175,14 +181,18 @@ module htlc {
   // A dispute on D, started by either side from the proof it holds (carried: it still sees the hold open); the secret on the chain
   // ---------------------------------------------------------------------------------------------------------
 
-  action askStart(s: Side): bool = {
+  // `sh`: the payee starts with the secret in the start's arguments (the contract freezes the time of the start; the hold is paid at the finalize)
+  action askStartWith(s: Side, sh: bool): bool = {
     val w = st.v.get(s)
     all {
+      sh implies (s == Payee),
       not(w.rec), w.hold, w.epoch < MAXE, not(st.askS.get(s).on),
       st' = { ...st, v: st.v.set(s, { ...w, rec: true }),
-              askS: st.askS.set(s, { on: true, carried: w.hold, epoch: w.epoch, at: st.now }) }
+              askS: st.askS.set(s, { on: true, carried: w.hold, shown: sh, epoch: w.epoch, at: st.now }) }
     }
   }
+
+  action askStart(s: Side): bool = any { askStartWith(s, false), askStartWith(s, true) }
 
   action landStart(s: Side): bool = {
     val a = st.askS.get(s)
@@ -192,21 +202,21 @@ module htlc {
         st' = { ...st, askS: st.askS.set(s, NO_ASK) }
       else
         st' = { ...st, askS: st.askS.set(s, NO_ASK),
-                disp: { on: true, starter: s, timeout: st.now + W, carried: a.carried },
-                log: st.log.append({ kind: 0, by: s, t: st.now, epoch: st.chEpoch, carried: a.carried }) }
+                disp: { on: true, starter: s, timeout: st.now + W, carried: a.carried, shown: a.shown and st.now <= TD },
+                log: st.log.append({ kind: 0, by: s, t: st.now, epoch: st.chEpoch, carried: a.carried, shown: a.shown and st.now <= TD }) }
     }
   }
 
   // The payee puts the secret on the chain, whenever it likes while it sees the hold open (it may be late, then the clause is lost).
   action askReveal: bool = all {
     st.v.get(Payee).hold, not(st.askR.on), st.revealedAt == 0,
-    st' = { ...st, askR: { on: true, carried: false, epoch: 0, at: st.now } }
+    st' = { ...st, askR: { on: true, carried: false, shown: false, epoch: 0, at: st.now } }
   }
 
   action landReveal: bool = all {
     st.askR.on,
     st' = { ...st, askR: NO_ASK, revealedAt: st.now,
-            log: st.log.append({ kind: 1, by: Payee, t: st.now, epoch: st.chEpoch, carried: false }),
+            log: st.log.append({ kind: 1, by: Payee, t: st.now, epoch: st.chEpoch, carried: false, shown: false }),
             lateReveal: st.now > TD }
   }
 
@@ -214,12 +224,24 @@ module htlc {
   // finalize outdates is zeroed (the proof that paid does not contain it).
   action landFinal: bool = all {
     finalizable(st),
-    val paid = st.disp.carried and st.revealedAt != 0 and st.revealedAt <= TD
+    val paid = st.disp.carried and ((st.revealedAt != 0 and st.revealedAt <= TD) or st.disp.shown)
     st' = { ...st, disp: NO_DISP, chEpoch: st.chEpoch + 1, askS: both(NO_ASK),
             paidChain: st.paidChain + (if (paid) 1 else 0),
             paidFrame: if (st.disp.carried) 0 else st.paidFrame,
             finals: st.finals + 1,
-            log: st.log.append({ kind: 3, by: st.disp.starter, t: st.now, epoch: st.chEpoch + 1, carried: st.disp.carried }) }
+            log: st.log.append({ kind: 3, by: st.disp.starter, t: st.now, epoch: st.chEpoch + 1, carried: st.disp.carried, shown: false }) }
+  }
+
+  // The payee finalizes with the secret in its own arguments: the clause is paid at once, from the end of the window, without waiting for TD
+  // and without a SecretRevealed. The finalize shows the secret to whoever reads its calldata; `wrapped`: it was relayed through a contract, so the
+  // watcher's read finds no finalize op in the input (`unread`) and learns nothing.
+  action landFinalShown: bool = any { landFinalShownVia(false), landFinalShownVia(true) }
+
+  action landFinalShownVia(wrapped: bool): bool = all {
+    wrapped implies HIDE, st.disp.on, st.disp.carried, st.now >= st.disp.timeout, st.now <= TD,
+    st' = { ...st, disp: NO_DISP, chEpoch: st.chEpoch + 1, askS: both(NO_ASK),
+            paidChain: st.paidChain + 1, paidFrame: 0, finals: st.finals + 1,
+            log: st.log.append({ kind: 3, by: Payee, t: st.now, epoch: st.chEpoch + 1, carried: true, shown: not(wrapped) }) }
   }
 
   // ---------------------------------------------------------------------------------------------------------
@@ -228,7 +250,7 @@ module htlc {
 
   action askClaim: bool = all {
     st.knows, claimLandable(st), not(st.askC.on),
-    st' = { ...st, askC: { on: true, carried: false, epoch: 0, at: st.now } }
+    st' = { ...st, askC: { on: true, carried: false, shown: false, epoch: 0, at: st.now } }
   }
 
   action landClaim: bool = all {
@@ -243,7 +265,7 @@ module htlc {
   }
 
   action step: bool = any {
-    tick, receive, ack, sendRelease, askReveal, landReveal, landFinal, askClaim, landClaim, expireU,
+    tick, receive, ack, sendRelease, askReveal, landReveal, landFinal, landFinalShown, askClaim, landClaim, expireU,
     { nondet s = SIDES.oneOf() any { hear(s), askStart(s), landStart(s) } }
   }
 
@@ -260,6 +282,6 @@ module htlc {
   val w_no_chain_paid: bool = st.paidChain == 0
   val w_no_frame_paid: bool = st.paidFrame == 0
   val w_no_claim: bool = st.u != 1
-  val w_no_expiry: bool = st.u != 2
   val w_no_epoch_move: bool = st.finals == 0
+  // (expiry of the lock on U is a schedule: every scenario test that ends in closeU reaches it; the random search seldom does)
 }
