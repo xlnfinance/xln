@@ -1,7 +1,7 @@
-// R-DISPUTE-FREEZE: while a dispute is open on an Account, whoever started it, the node seals nothing on it: it proposes
-// no frame, refuses the frames its peer proposes (the fault `frozen`, which can pass), and refuses back to whoever asked
-// any command that takes on value, with a notice. A release waits for the epoch that follows. The Entities here sign
-// for real, so the proof a dispute starts with is the one the peer gave.
+// R-DISPUTE-FREEZE: while a dispute is open on an Account, whoever started it, the node seals nothing on it: it
+// proposes no frame, refuses the frames its peer proposes (the fault `frozen`, which can pass), and refuses back to
+// whoever asked any command that takes on value, with a notice. A release waits for the epoch that follows. The
+// Entities here sign for real, so the proof a dispute starts with is the one the peer gave.
 import { describe, expect, test } from "bun:test";
 import { heightOf, holdOf, tokenOf } from "../../account/fixtures.ts";
 import { holdId } from "../../account/model.ts";
@@ -89,7 +89,7 @@ describe("entity/signing R-DISPUTE-FREEZE an Account in dispute proposes nothing
 });
 
 describe("entity/signing R-DISPUTE-FREEZE a command that takes on value is refused back, a release waits", () => {
-  test("R-DISPUTE-FREEZE a payment, a lock, an offer and a fill asked while a dispute is open are refused with a notice", () => {
+  test("R-DISPUTE-FREEZE a payment, lock, offer and fill asked in a dispute are refused with a notice", () => {
     [started.state, bobDisputed].forEach((state, i) => {
       const peer = i === 0 ? BOB.id : ALICE.id;
       const asked = [pay(peer, 5n), { ...lock, peer }, { ...offer, peer }, { ...fill, peer }];
@@ -105,7 +105,7 @@ describe("entity/signing R-DISPUTE-FREEZE a command that takes on value is refus
     expect(done.outputs).toHaveLength(1);
   });
 
-  test("R-DISPUTE-FREEZE a release or a credit limit is not refused for the dispute, and nothing is sealed for it", () => {
+  test("R-DISPUTE-FREEZE a release or a credit limit is not refused for the dispute, and nothing is sealed", () => {
     const releases: readonly Command[] = [
       { _tag: "resolve", peer: BOB.id, token: GOLD, id: holdId(1n), secret: new Uint8Array(32) },
       { _tag: "cancel", peer: BOB.id, token: GOLD, id: holdId(1n) },

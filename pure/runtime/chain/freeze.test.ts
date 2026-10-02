@@ -1,7 +1,7 @@
-// R-DISPUTE-FREEZE: while a dispute is open the Account seals nothing. A payment asked in the window is refused back to
-// whoever asked, with a notice, and never zeroed by the epoch move that follows; a frame the peer sealed before it heard
-// of the dispute is refused as frozen, and its payment commits in the epoch that follows. Alice is the Left of the
-// Account and Bob its Right; Bob extends credit to Alice, who pays him.
+// R-DISPUTE-FREEZE: while a dispute is open the Account seals nothing. A payment asked in the window is refused back
+// to whoever asked, with a notice, and never zeroed by the epoch move that follows; a frame the peer sealed before it
+// heard of the dispute is refused as frozen, and its payment commits in the epoch that follows. Alice is the Left of
+// the Account and Bob its Right; Bob extends credit to Alice, who pays him.
 import { describe, expect, test } from "bun:test";
 import { viewOf } from "../../account/fixtures.ts";
 import { OPENED_WITH } from "../../entity/fixtures.ts";
@@ -53,7 +53,7 @@ describe("runtime/chain R-DISPUTE-FREEZE a payment asked while the dispute is op
     expect(offdeltas(both)).toEqual(offdeltas(frozen));
   });
 
-  test("R-DISPUTE-FREEZE after the finalize the Account is as the chain left it, and the refused payment is not in it", () => {
+  test("R-DISPUTE-FREEZE after the finalize the Account is as the chain left it, without the refused payment", () => {
     const refused = settle(feed(frozen, ALICE, pay(BOB, 5n)));
     const after = settle(finalized(refused));
     expect(offdeltas(after)).toEqual([0n, 0n]);
@@ -63,7 +63,7 @@ describe("runtime/chain R-DISPUTE-FREEZE a payment asked while the dispute is op
     expect(refusals(again, ALICE).filter((tag) => tag === "account_disputed")).toEqual(["account_disputed"]);
   });
 
-  test("R-DISPUTE-FREEZE a frame sealed by a peer that has not heard of the dispute is refused as frozen and commits later", () => {
+  test("R-DISPUTE-FREEZE a frame a peer sealed before it heard of the dispute is refused as frozen", () => {
     const bobStarted = feed(paid, BOB, { _tag: "dispute", peer: ALICE });
     const sealed = settle(feed(bobStarted, ALICE, pay(BOB, 5n)));
     expect(offdeltas(sealed)).toEqual(offdeltas(paid));

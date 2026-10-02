@@ -43,7 +43,7 @@
   {
    "kind": "test",
    "layer": "ts",
-   "name": "R-DISPUTE-FREEZE a payment, a lock, an offer and a fill asked while a dispute is open are refused with a notice"
+   "name": "R-DISPUTE-FREEZE a payment, lock, offer and fill asked in a dispute are refused with a notice"
   },
   {
    "kind": "test",
@@ -53,7 +53,7 @@
   {
    "kind": "test",
    "layer": "ts",
-   "name": "R-DISPUTE-FREEZE a release or a credit limit is not refused for the dispute, and nothing is sealed for it"
+   "name": "R-DISPUTE-FREEZE a release or a credit limit is not refused for the dispute, and nothing is sealed"
   },
   {
    "kind": "test",
@@ -68,12 +68,12 @@
   {
    "kind": "test",
    "layer": "ts",
-   "name": "R-DISPUTE-FREEZE after the finalize the Account is as the chain left it, and the refused payment is not in it"
+   "name": "R-DISPUTE-FREEZE after the finalize the Account is as the chain left it, without the refused payment"
   },
   {
    "kind": "test",
    "layer": "ts",
-   "name": "R-DISPUTE-FREEZE a frame sealed by a peer that has not heard of the dispute is refused as frozen and commits later"
+   "name": "R-DISPUTE-FREEZE a frame a peer sealed before it heard of the dispute is refused as frozen"
   }
  ]
 }
