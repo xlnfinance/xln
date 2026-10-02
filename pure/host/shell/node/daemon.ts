@@ -27,6 +27,7 @@ import {
 import {
   beginAt, poll, windowsOf, type BadPeer, type BadSecret, type Delivery, type JFault, type WatchConfig,
 } from "../watch/loop.ts";
+import type { PortFault } from "../submit/chain.ts";
 import { dialTcp, type Listener, type SocketFault, type Wire } from "./link/socket.ts";
 
 /** What a node is made of: its shell, its Entity, its key, who its peers are, and how often its timer runs. */
@@ -50,6 +51,12 @@ export type Stopped = Tagged<"stopped">;
  */
 export type ClockBelowDepth = Tagged<"clock_below_depth", { lag: bigint; depth: bigint }>;
 export type ClockDepthOff = Tagged<"clock_depth_off", { clock: bigint | undefined; depth: bigint }>;
+
+/**
+ * A node that may hold value is refused on a provider with no call trace (R-WATCH-CALLDATA): a relay contract hides
+ * the call that shows a secret, and a notice does not save the amount a hub would then lose.
+ */
+export type NoCallTrace = Tagged<"no_call_trace">;
 
 /** What ends a node's work: a disk, the chain's submit path, the Runtime, or a watcher invariant broken. */
 export type NodeFault = DriveFault | WatchFault | BadPeer | BadSecret;
@@ -359,13 +366,18 @@ const STOPPED: Result<never, Stopped> = err({ _tag: "stopped" });
  */
 export const startDaemon = async (
   config: Config, listener: Listener,
-): Promise<Result<Daemon, DriveFault | ClockBelowDepth | ClockDepthOff>> => {
+): Promise<Result<Daemon, DriveFault | ClockBelowDepth | ClockDepthOff | NoCallTrace | PortFault>> => {
   const { lag, depth } = config.boot.setup.clock;
   if (config.watch !== undefined && lag <= config.watch.depth) {
     return err({ _tag: "clock_below_depth", lag, depth: config.watch.depth });
   }
   if (config.watch !== undefined && depth !== config.watch.depth) {
     return err({ _tag: "clock_depth_off", clock: depth, depth: config.watch.depth });
+  }
+  if (config.watch?.value === true) {
+    const traced = await config.watch.port.traced();
+    if (!traced.ok) return traced;
+    if (!traced.value) return err({ _tag: "no_call_trace" });
   }
   const started = await start(config.shell, config.boot);
   if (!started.ok) return started;

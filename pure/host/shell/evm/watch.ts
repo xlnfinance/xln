@@ -78,9 +78,17 @@ const callsOf = (depository: Address) => (raw: unknown): Result<readonly Uint8Ar
         return bytes?.ok === true ? ok(bytes.value) : err(bad("a call of the trace without input"));
       })));
 
-/** What a node says of a method it does not run: the one answer that is no fault of the call (the port says none). */
+/**
+ * What a node says of a method it does not run (JSON-RPC code -32601, or text saying it is unsupported): the one
+ * answer that is no fault of the call, so the port says there is no trace.
+ */
 const NO_METHOD =
-  /\bmethod\b.*\b(not found|does not exist|not available|not supported)\b|does not exist\/is not available/i;
+  /-32601|\bunsupported\b|\bmethod\b.*\b(not found|does not exist|not available|not supported)\b|is not available/i;
+
+const NO_TX = `0x${"00".repeat(32)}`;
+
+/** What a node that runs the trace says of a transaction it does not have. */
+const NO_TX_ANSWER = /transaction|not found|unknown/i;
 
 /** `_accounts(bytes)` and `ondeltaEpoch(bytes32,bytes32)`: the two reads the watcher's `reading` is made of. */
 const accountCalls = (left: Bytes32, right: Bytes32): Result<Readonly<{ row: string; epoch: string }>, ReplyFault> =>
@@ -112,10 +120,22 @@ export const watchPort = (rpc: Rpc, depository: Address): WatchPort => {
           : err(bad("a log that is not the one asked for")))));
     },
     input: (tx) => reads.read("watch tx", "eth_getTransactionByHash", [tx], inputOf),
+    // A fault of the node (it is down, it errs) may clear and stalls the delivery; a node with no call trace, or a
+    // trace the transaction itself makes unreadable (too big, too deep, not a tree), never clears: no trace, and the
+    // finalize is told unread, so one counterparty's transaction cannot blind the watcher.
     trace: async (tx) => {
-      const traced = await reads.read("watch trace", "debug_traceTransaction", [tx, { tracer: "callTracer" }],
-        callsOf(depository));
-      return traced.ok || !NO_METHOD.test(traced.error.reason) ? traced : ok(undefined);
+      const asked = await reads.ask("watch trace", "debug_traceTransaction", [tx, { tracer: "callTracer" }]);
+      if (!asked.ok) return NO_METHOD.test(asked.error.reason) ? ok(undefined) : asked;
+      const calls = callsOf(depository)(asked.value);
+      return ok(calls.ok ? calls.value : undefined);
+    },
+    // The probe asks for the trace of a transaction that does not exist: a node that runs the method says it knows no
+    // such transaction, one that does not says the method is missing, and any other answer is the node's fault.
+    traced: async () => {
+      const asked = await reads.ask("watch trace probe", "debug_traceTransaction", [NO_TX, { tracer: "callTracer" }]);
+      if (asked.ok) return ok(true);
+      if (NO_METHOD.test(asked.error.reason)) return ok(false);
+      return NO_TX_ANSWER.test(asked.error.reason) ? ok(true) : asked;
     },
     accountAt: async (block, left, right): Promise<Result<AccountAt, PortFault>> => {
       const calls = accountCalls(left, right);

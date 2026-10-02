@@ -30,8 +30,15 @@ const settled = (block: bigint) => logOf("AccountSettled", {
   settled: [[bytes(1n), bytes(2n), [[1n, 900n, 1000n, 100n, [0n, 100n]]], 0n]],
 }, block, 0n);
 
+/** Whether the node may hold value, and whether its provider has a call trace. */
+type Kind = Readonly<{ value: boolean; traces: boolean }>;
+const QUIET: Kind = { value: false, traces: true };
+const VALUE_BLIND: Kind = { value: true, traces: false };
+const NO_VALUE_BLIND: Kind = { value: false, traces: false };
+const VALUE_TRACED: Kind = { value: true, traces: true };
+
 /** A chain with one epoch advance at block 105; `down` is a file that, while it is not there, fails the head. */
-const portOf = (chain: Chain, log: string, found = [advanced(105n, 1n)]): WatchPort => ({
+const portOf = (chain: Chain, log: string, found = [advanced(105n, 1n)], kind = QUIET): WatchPort => ({
   head: () => {
     appendFileSync(log, "head\n");
     return Promise.resolve(chain.down !== undefined && !existsSync(chain.down) ? err(DOWN) : ok(chain.head));
@@ -44,10 +51,12 @@ const portOf = (chain: Chain, log: string, found = [advanced(105n, 1n)]): WatchP
   accountAt: () => Promise.resolve(ok({ epoch: 1n, nonce: 5n })),
   input: () => Promise.resolve(err(DOWN)),
   trace: () => Promise.resolve(ok(undefined)),
+  traced: () => Promise.resolve(ok(kind.traces)),
 });
 
-const watchOf = (chain: Chain, log: string, found = [advanced(105n, 1n)]): WatchConfig =>
-  ({ port: portOf(chain, log, found), depository: DEPOSITORY, depth: DEPTH, hosted: bytes(1n) });
+const watchOf = (chain: Chain, log: string, found = [advanced(105n, 1n)], kind = QUIET): WatchConfig => ({
+  port: portOf(chain, log, found, kind), depository: DEPOSITORY, depth: DEPTH, hosted: bytes(1n), value: kind.value,
+});
 
 const STRAIGHT: Chain = { head: 112n, fork: () => 0n };
 
@@ -56,6 +65,22 @@ const factsOf = (look: Look) => look.station.host.runtime.entities.get(ALICE)?.c
 const rowsOf = (look: Look): readonly Row[] => look.station.host.runtime.wal;
 
 const delivered = (look: Look): boolean => look.cursor === 110n;
+
+const booted = async (kind: Kind) => {
+  const dir = fresh();
+  const log = `${dir}/calls.log`;
+  writeFileSync(log, "");
+  const seat = await seatOf(ALICE, dir, 0);
+  const watch = watchOf(STRAIGHT, log, [advanced(105n, 1n)], kind);
+  const config = await configOf(seat, NO_PEER, { tickMs: QUICK, watch });
+  const started = await startDaemon(config, seat.listener);
+  if (started.ok) await started.value.stop();
+  else {
+    await config.shell.wal.close();
+    await config.shell.io.journal.close();
+  }
+  return started.ok ? "started" : started.error;
+};
 
 describe("host/shell/node a node with a J loop", () => {
   test("R-HTLC-FORWARD a node whose clock lag is not above its read depth is not started", async () => {
@@ -69,6 +94,15 @@ describe("host/shell/node a node with a J loop", () => {
     await config.shell.io.journal.close();
     expect(refused).toEqual(err({ _tag: "clock_below_depth", lag: DEPTH, depth: DEPTH }));
     expect(readFileSync(`${dir}/wal.log`, "utf8")).toBe("");
+  });
+
+  test("R-WATCH-CALLDATA a provider with no call trace refuses a node with value, and writes nothing", async () => {
+    expect(await booted(VALUE_BLIND)).toEqual({ _tag: "no_call_trace" });
+  });
+
+  test("R-WATCH-CALLDATA a no-value node starts with no call trace, and a node with value with one", async () => {
+    expect(await booted(NO_VALUE_BLIND)).toBe("started");
+    expect(await booted(VALUE_TRACED)).toBe("started");
   });
 
   test("R-HTLC-CLOCK a node whose clock names another depth than it reads at is not started", async () => {

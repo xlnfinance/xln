@@ -12,8 +12,9 @@ export const resultOf = (reply: unknown): Result<unknown, RpcFault> => {
   if (typeof reply !== "object" || reply === null || Array.isArray(reply)) return err(rpcFault("not a JSON-RPC reply"));
   const { result, error } = reply as Readonly<Record<string, unknown>>;
   if (error !== undefined) {
-    const named = (error as Readonly<{ message?: unknown }> | null)?.message;
-    return err(rpcFault(typeof named === "string" ? named : "the node answered with an error"));
+    const { message, code } = (error ?? {}) as Readonly<{ message?: unknown; code?: unknown }>;
+    const named = typeof message === "string" ? message : "the node answered with an error";
+    return err(rpcFault(typeof code === "number" ? `${named} (JSON-RPC code ${code})` : named));
   }
   return result === undefined ? err(rpcFault("a JSON-RPC reply with no result")) : ok(result);
 };

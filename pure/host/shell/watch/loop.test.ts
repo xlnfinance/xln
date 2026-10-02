@@ -5,7 +5,7 @@ import { describe, expect, test } from "bun:test";
 import { appendFileSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { err, ok, unwrapOr } from "../../../kernel/core/result.ts";
+import { err, ok, unwrapOr, type Result } from "../../../kernel/core/result.ts";
 import { freshChain } from "../../../entity/chain.ts";
 import type { ChainFacts, EntityId, EntityInput, Starting } from "../../../entity/model.ts";
 import { entityId } from "../../../entity/model.ts";
@@ -18,6 +18,8 @@ import {
 } from "../../../j/fixtures.ts";
 import { callsOf } from "../fixtures.ts";
 import type { PortFault } from "../submit/chain.ts";
+import { watchPort } from "../evm/watch.ts";
+import type { Rpc, RpcFault } from "../evm/port.ts";
 import { beginAt, poll, windowsOf, type WatchConfig, type WatchPort } from "./loop.ts";
 
 const LEFT = entityOf(0x11n);
@@ -68,6 +70,7 @@ const portOf = (
       const found = traces.get(tx);
       return Promise.resolve(found === "down" ? err(DOWN) : ok(found));
     },
+    traced: () => Promise.resolve(ok(true)),
   };
 };
 
@@ -199,6 +202,31 @@ describe("host/shell/watch the J loop's poll", () => {
     expect(got.ok ? got.value?.height : got).toBe(1n as never);
   });
 
+  test("R-WATCH-CALLDATA an unreadable trace or a node with no trace never blinds the watcher", async () => {
+    const node = (reply: Result<unknown, RpcFault>): Rpc => (method) =>
+      Promise.resolve(method === "debug_traceTransaction" ? reply : err({ _tag: "rpc", reason: `no ${method}` }));
+    const deeper = (below: unknown): unknown => ({ to: "0x00", input: "0x", calls: [below] });
+    const leaf = { to: "0x00", input: "0x" };
+    const calls = (n: number) => ({ ...leaf, calls: Array.from({ length: n }, () => leaf) });
+    const refuse = (reason: string): Result<unknown, RpcFault> => err({ _tag: "rpc", reason });
+    const replies: ReadonlyArray<Result<unknown, RpcFault>> = [
+      ok(calls(4097)), ok(Array.from({ length: 65 }).reduce<unknown>(deeper, {})), ok("0x"),
+      refuse("Unsupported method (JSON-RPC code -32000)"), refuse("nope (JSON-RPC code -32601)"),
+    ];
+    const bytes = Uint8Array.from({ length: 32 }, (_, i) => (i === 31 ? 10 : 0));
+    const secret: EntityInput = { _tag: "j_secret", secret: bytes };
+    await Promise.all(replies.map(async (reply) => {
+      const later = logOf("SecretRevealed", { hashlock: hexOf(9n), revealer: RIGHT, secret: hexOf(10n) }, 3n, 0n);
+      const { tx, logs } = finalizing();
+      const hidden = Uint8Array.of(0xca, 0xfe, 0xba, 0xbe, 1, 2, 3, 4);
+      const base = portOf(straight(6n, [...logs, later]), logPath(), -1n, new Map([[tx, hidden]]));
+      const got = await poll({ ...base, trace: watchPort(node(reply), DEPOSITORY).trace }, start(2n), LEFT);
+      const unread: EntityInput = { _tag: "j_finalize_unread", peer: peer(RIGHT), tx };
+      expect(got.ok ? got.value?.events : got).toEqual([EPOCH, OVER, unread, secret]);
+      expect(got.ok ? got.value?.height : got).toBe(4n as never);
+    }));
+  });
+
   test("R-WATCH-CALLDATA an input the node cannot give stalls the delivery at its block, no later", async () => {
     const shown = logOf("SecretRevealed", { hashlock: hexOf(7n), revealer: RIGHT, secret: hexOf(8n) }, 1n, 0n);
     const { logs } = finalizing();
@@ -299,7 +327,7 @@ describe("host/shell/watch the J loop's poll", () => {
 
   test("R-JLOOP the cursor begins at the chain's own block, or at the port's fault", async () => {
     const config: WatchConfig = {
-      port: portOf(straight(9n), logPath()), depository: DEPOSITORY, depth: 3n, hosted: LEFT,
+      port: portOf(straight(9n), logPath()), depository: DEPOSITORY, depth: 3n, hosted: LEFT, value: false,
     };
     const begun = await beginAt(config, 5n);
     expect(begun.ok ? begun.value : begun).toEqual({ depository: DEPOSITORY, depth: 3n, applied: blockOf(5n) });

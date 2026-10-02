@@ -36,10 +36,19 @@ export type WatchPort = Readonly<{
    * call from the input. Nothing (`undefined`) when the node has no call trace: that is an answer, not a fault.
    */
   trace: (tx: Bytes32) => Promise<Result<readonly Uint8Array[] | undefined, PortFault>>;
+  /** Whether the node answers `debug_traceTransaction` with the callTracer: asked once, as a node with value boots. */
+  traced: () => Promise<Result<boolean, PortFault>>;
 }>;
 
 /** What the node watches: the Depository, how deep a block must be buried, and the Entity it hosts. */
-export type WatchConfig = Readonly<{ port: WatchPort; depository: Address; depth: bigint; hosted: Bytes32 }>;
+export type WatchConfig = Readonly<{
+  port: WatchPort; depository: Address; depth: bigint; hosted: Bytes32;
+  /**
+   * The node may hold value. A wrapper that builds its call at run time leaves no selector in its input, so the secret
+   * of a relayed finalize is learned only from the call trace: a node with value boots only on a provider that has one.
+   */
+  value: boolean;
+}>;
 
 /** A peer id the chain named that is not an Entity id the node can use: a broken reading, not a retry. */
 export type BadPeer = Tagged<"bad_peer", { text: string }>;

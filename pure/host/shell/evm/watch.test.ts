@@ -118,13 +118,25 @@ describe("host/shell/evm/watch the J loop's reads of the chain", () => {
     const none = "the method debug_traceTransaction does not exist/is not available";
     expect(await refuses(none).trace(txOf(3n, 1n))).toEqual(ok(undefined));
     expect(await refuses("Method not found").trace(txOf(3n, 1n))).toEqual(ok(undefined));
+    expect(await refuses("Unsupported method").trace(txOf(3n, 1n))).toEqual(ok(undefined));
+    expect(await refuses("oops (JSON-RPC code -32601)").trace(txOf(3n, 1n))).toEqual(ok(undefined));
     expect(await refuses("transaction not found").trace(txOf(3n, 1n)))
       .toEqual(err({ _tag: "port", call: "watch trace", reason: "transaction not found" }));
     expect(await portOf({ debug_traceTransaction: () => down }).trace(txOf(3n, 1n)))
       .toEqual(err({ _tag: "port", call: "watch trace", reason: "connection refused" }));
   });
 
-  test("R-WATCH-CALLDATA a call trace that is not a tree of calls, or too big to read, is a fault", async () => {
+  test("R-WATCH-CALLDATA the boot probe asks a trace of no transaction: only a missing method is none", async () => {
+    const refuses = (reason: string) => portOf({ debug_traceTransaction: () => err({ _tag: "rpc", reason }) });
+    expect(await portOf({ debug_traceTransaction: () => ok(null) }).traced()).toEqual(ok(true));
+    expect(await refuses("transaction not found").traced()).toEqual(ok(true));
+    expect(await refuses("Method not found (JSON-RPC code -32601)").traced()).toEqual(ok(false));
+    expect(await refuses("Unsupported method").traced()).toEqual(ok(false));
+    expect(await refuses("connection refused").traced())
+      .toEqual(err({ _tag: "port", call: "watch trace probe", reason: "connection refused" }));
+  });
+
+  test("R-WATCH-CALLDATA a trace the transaction makes unreadable is no trace, never a fault that stalls", async () => {
     const asked = (reply: unknown) => portOf({ debug_traceTransaction: () => ok(reply) }).trace(txOf(3n, 1n));
     const missing = { to: ADDRESS };
     const deeper = (below: unknown): unknown => ({ to: "0x00", input: "0x", calls: [below] });
@@ -132,7 +144,7 @@ describe("host/shell/evm/watch the J loop's reads of the chain", () => {
     const wide = { to: "0x00", input: "0x", calls: Array.from({ length: 4097 }, () => ({ to: "0x00", input: "0x" })) };
     const replies = [null, "0x", { to: ADDRESS, input: "0x12", calls: "none" }, missing, deep, wide];
     const answers = await Promise.all(replies.map(asked));
-    answers.forEach((got) => expect(got).toMatchObject({ ok: false, error: { call: "watch trace" } }));
+    answers.forEach((got) => expect(got).toEqual(ok(undefined)));
   });
 
   test("R-WATCH-TELL an Account is read at the end of a block named by its hash: row nonce and epoch", async () => {
