@@ -7,6 +7,7 @@
 // is the whole state, so a crash is a Station thrown away and `start` run again over the same two files.
 import type { EntityId, EntityInput, EntityState, Outbound } from "../../../entity/model.ts";
 import type { Returned, Skipped } from "../../../j/batch/answer.ts";
+import type { JOp } from "../../../j/op/ops.ts";
 import { err, map, ok, type Result } from "../../../kernel/core/result.ts";
 import type { Tagged } from "../../../kernel/core/tagged.ts";
 import { startRuntime } from "../../../runtime/tick.ts";
@@ -36,9 +37,11 @@ export type Turn = Readonly<{
   taken: readonly Taken[];
   returned: readonly Returned[];
   skipped: readonly Skipped[];
+  /** The dispute starts the builder dropped because they would revert; the Entity is told (R-DISPUTE-LAPSED). */
+  lapsed: readonly JOp[];
 }>;
 
-const nothing = (station: Station): Turn => ({ station, sent: [], taken: [], returned: [], skipped: [] });
+const nothing = (station: Station): Turn => ({ station, sent: [], taken: [], returned: [], skipped: [], lapsed: [] });
 
 /** The Entity's own rows are all it asks of the chain for: a row that names an Entity this Station is not is no ask. */
 const takeOne = (turn: Turn, effect: Effect): Turn => {
@@ -77,12 +80,33 @@ const pumped = (turn: Turn, out: Pumped): Turn => ({
   station: { ...turn.station, submitter: out.submitter },
   returned: [...turn.returned, ...out.returned],
   skipped: [...turn.skipped, ...out.skipped],
+  lapsed: [...turn.lapsed, ...out.lapsed],
 });
+
+/**
+ * R-DISPUTE-LAPSED: a start the builder dropped because it would revert opens no dispute, so the Entity that asked
+ * for it is told which one (its peer and the nonce) and forgets it. The op names its peer as the chain does, so the
+ * Entity's own Accounts say which peer that is.
+ */
+const lapsedInputs = (station: Station, ops: readonly JOp[]): readonly EntityInput[] => {
+  const peers = [...(station.host.runtime.entities.get(station.submitter.entity)?.accounts.keys() ?? [])];
+  return ops.flatMap((op): readonly EntityInput[] => (op._tag === "dispute_start"
+    ? peers.filter((peer) => peer.toLowerCase() === op.start.counterentity.toLowerCase())
+      .map((peer) => ({ _tag: "j_start_lapsed", peer, nonce: op.start.nonce }))
+    : []));
+};
+
+const told = (shell: Shell, turn: Turn, ops: readonly JOp[]): Promise<Result<Turn, DriveFault>> => {
+  const inputs = lapsedInputs(turn.station, ops);
+  const host = inputs.reduce((now, input) => submit(now, { to: turn.station.submitter.entity, input }),
+    turn.station.host);
+  return inputs.length === 0 ? Promise.resolve(ok(turn)) : drained(shell, withHost(turn, host));
+};
 
 /** Move the builder as far as the chain lets it: seal what is waiting, send it, read what became of it. */
 export const pump = async (shell: Shell, turn: Turn): Promise<Result<Turn, DriveFault>> => {
   const out = await settle(shell.io, turn.station.submitter, "sure");
-  return out.ok ? ok(pumped(turn, out.value)) : out;
+  return out.ok ? told(shell, pumped(turn, out.value), out.value.lapsed) : out;
 };
 
 const afterAsks = (shell: Shell, turn: Turn): Promise<Result<Turn, DriveFault>> =>
