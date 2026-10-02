@@ -227,12 +227,18 @@ const rebasing = (w: Work, peer: EntityId, finalized: Finalized | undefined): Wo
   const forgot = { ...w, state: { ...w.state, proofs: mapDelete(w.state.proofs, peer) } };
   if (account === undefined) return forgot;
   const told = destroyed(forgot, peer, account, finalized);
+  // The txs the chain paid are in no frame the node seals again: not in the pending frame (it gives back only the rest
+  // if it is rolled back), not in the mempool.
+  const settled = finalized?.paid?.txs ?? [];
+  const inFrame = withoutPaid(account.pending?.frame.txs ?? [], settled);
+  const inQueue = withoutPaid(account.mempool, withoutPaid(settled, inFrame.removed).kept);
   return withReplica(told, peer, {
     ...account,
     state: rebased(account.state),
+    mempool: inQueue.kept,
     pending: account.pending === undefined ? undefined : {
       ...account.pending, after: rebased(account.pending.after),
-      ...(finalized?.paidPending === true ? { paid: true as const } : {}),
+      ...(settled.length === 0 ? {} : { owed: inFrame.kept }),
     },
   });
 };
@@ -244,14 +250,21 @@ const rebasing = (w: Work, peer: EntityId, finalized: Finalized | undefined): Wo
  */
 type Finalized = Readonly<{
   nonce: bigint | undefined; epoch: bigint; committed: bigint | undefined; pending: bigint | undefined;
-  paidPending: boolean;
+  paid: Paid | undefined;
 }>;
+
+/** The frame of its own the node signed that the chain paid by, as the one lookup that names the nonce finds it. */
+type Paid = Readonly<{ nonce: bigint; txs: readonly AccountTx[] }>;
 
 /**
  * A proof the node can name: the nonce it was signed at and the hash of its body. `own` marks the node's own committed
- * state and the state its pending frame would commit.
+ * state, the state its pending frame would commit and the state of each frame it signed and then rolled back, with the
+ * txs of the frame (the peer holds the signature of a rolled-back frame as it does of any other, R-SIGNED-IS-LIVE).
  */
-type Named = Readonly<{ nonce: bigint | undefined; hash: string | undefined; own?: "committed" | "pending" }>;
+type Named = Readonly<{
+  nonce: bigint | undefined; hash: string | undefined; own?: "committed" | "pending" | "signed";
+  txs?: readonly AccountTx[] | undefined;
+}>;
 
 const hashOf = (body: ProofBody): string | undefined => {
   const hash = proofBodyHash(body);
@@ -266,9 +279,10 @@ const stateHash = (terms: ProofTerms, state: AccountState): string | undefined =
 /**
  * Every proof the node can name for its Account with `peer`, in the order a hash found twice is read: the counter the
  * chain registered against its own start (a state it may not hold), the proof the peer's dispute opened with
- * (likewise), its committed state and the state its pending frame would commit. A dispute the node started opened
- * with its committed state and its own counter was built from it: the freeze commits nothing after either
- * (R-DISPUTE-FREEZE).
+ * (likewise), its committed state, the state its pending frame would commit and the state of every frame it signed in
+ * this epoch that no commit has superseded (a frame the peer refused and the node took back is one). A dispute the
+ * node started opened with its committed state and its own counter was built from it: the freeze commits nothing after
+ * either (R-DISPUTE-FREEZE).
  */
 const proofsKnown = (terms: ProofTerms, facts: ChainFacts, account: EntityReplica): readonly Named[] => {
   const { starting, against } = facts;
@@ -280,8 +294,16 @@ const proofsKnown = (terms: ProofTerms, facts: ChainFacts, account: EntityReplic
     {
       nonce: pending === undefined ? undefined : pending.frame.firstNonce + BigInt(pending.frame.slot) - 1n,
       hash: pending === undefined ? undefined : stateHash(terms, pending.after),
-      own: "pending",
+      own: "pending", txs: pending?.frame.txs,
     },
+    ...account.unsuperseded.flatMap((entry): readonly Named[] => {
+      const { sealed } = entry;
+      if (sealed === undefined || sealed.epoch !== facts.epoch || entry.slot === pending?.frame.slot) return [];
+      return [{
+        nonce: sealed.firstNonce + BigInt(entry.slot) - 1n, hash: stateHash(terms, sealed.after), own: "signed",
+        txs: entry.txs,
+      }];
+    }),
   ];
 };
 
@@ -303,17 +325,17 @@ const finalizedBy = (
   const matched = account === undefined || hash === undefined
     ? []
     : proofsKnown(terms, facts, account).filter((proof) => proof.hash?.toLowerCase() === hash);
-  // A pending frame whose state has the committed state's body adds nothing a proof holds (a quote is no clause until
-  // it is filled): the chain paid nothing of it, and it does not name the proof.
-  const ownsCommitted = matched.some((proof) => proof.own === "committed");
-  const ownsPending = matched.some((proof) => proof.own === "pending");
-  const neutral = ownsCommitted && ownsPending;
-  const named = neutral ? matched.filter((proof) => proof.own !== "pending") : matched;
-  const [nonce] = named.flatMap((proof) => (proof.nonce === undefined ? [] : [proof.nonce]))
-    .toSorted((x, y) => (x < y ? 1 : -1));
+  // A frame of the node's own whose state has the committed state's body adds nothing a proof holds (a quote is no
+  // clause until it is filled): the chain paid nothing of it, and it does not name the proof.
+  const neutral = matched.some((proof) => proof.own === "committed")
+    && matched.some((proof) => proof.own === "pending" || proof.own === "signed");
+  const named = neutral ? matched.filter((proof) => proof.own === undefined || proof.own === "committed") : matched;
+  const byNonce = (x: Named, y: Named): number => ((x.nonce ?? -1n) < (y.nonce ?? -1n) ? 1 : -1);
+  const [top] = named.toSorted(byNonce);
+  const [ownTop] = named.filter((proof) => proof.own === "pending" || proof.own === "signed").toSorted(byNonce);
   return {
-    nonce, epoch: e.epoch, committed: proofNonce(facts, account?.used ?? 0),
-    paidPending: !neutral && ownsPending,
+    nonce: top?.nonce, epoch: e.epoch, committed: proofNonce(facts, account?.used ?? 0),
+    paid: ownTop?.nonce === undefined ? undefined : { nonce: ownTop.nonce, txs: ownTop.txs ?? [] },
     pending: account?.pending === undefined
       ? undefined
       : account.pending.frame.firstNonce + BigInt(account.pending.frame.slot) - 1n,
@@ -328,8 +350,9 @@ const finalizedBy = (
  * have committed before it heard of the dispute is not held by the proof either, and the rebase zeroes what it paid, so
  * the node is told which (`pending_rebased`): the frame stays pending and is sent again in the new epoch, where it
  * commits or comes back as `tx_refused`, so the owner waits and does not ask again. A pending frame whose own body the
- * chain paid by is paid: the owner is told so (`paid_on_chain`) and the frame is marked paid, so that it is never
- * sealed again (it stays pending for the lineage the peer may have committed). A committed head at or below the
+ * chain paid by, a frame it signed and took back included (the peer holds its signature as well), is paid: the owner is
+ * told so (`paid_on_chain`) and its txs are in no frame sealed again (the pending frame stays for the lineage the peer
+ * may have committed, giving back only what was not paid). A committed head at or below the
  * finalized nonce is held by the proof the chain paid by: not told. A finalize whose proof the node cannot name is told
  * with the finalized nonce unknown: the node does not guess whether its head was held. A settlement or a withdrawal
  * moving the epoch tells nothing. The offdelta the proof holds is not here: the node that lost something is not the
@@ -343,26 +366,49 @@ const SPENDING = new Set(["pay", "lock", "offer", "fill"]);
 
 const destroyed = (w: Work, peer: EntityId, account: EntityReplica, finalized: Finalized | undefined): Work => {
   if (finalized === undefined) return w;
-  const { committed, nonce, epoch, pending, paidPending } = finalized;
+  const { committed, nonce, epoch, pending, paid } = finalized;
   const told = !lost(committed, nonce) || committed === undefined
     ? w
     : [...account.state.ledgers].reduce((acc, [token, l]) => noting(acc, {
       _tag: "offdelta_rebased", peer, token, epoch, committedNonce: committed, offdelta: l.offdelta,
       finalizedNonce: nonce,
     }), w);
-  const txs = account.pending?.frame.txs.filter((tx) => SPENDING.has(tx._tag)) ?? [];
-  if (pending === undefined || txs.length === 0) return told;
-  if (paidPending) {
-    return noting(told, {
-      _tag: "pending_rebased", peer, epoch, nonce: pending, finalizedNonce: nonce, txs, fate: "paid_on_chain",
-    });
-  }
-  return !lost(pending, nonce)
+  const settled = paid?.txs ?? [];
+  const spent = settled.filter((tx) => SPENDING.has(tx._tag));
+  const paidTold = paid === undefined || spent.length === 0
     ? told
     : noting(told, {
+      _tag: "pending_rebased", peer, epoch, nonce: paid.nonce, finalizedNonce: nonce, txs: spent, fate: "paid_on_chain",
+    });
+  const txs = withoutPaid(account.pending?.frame.txs ?? [], settled).kept.filter((tx) => SPENDING.has(tx._tag));
+  return pending === undefined || !lost(pending, nonce) || txs.length === 0
+    ? paidTold
+    : noting(paidTold, {
       _tag: "pending_rebased", peer, epoch, nonce: pending, finalizedNonce: nonce, txs, fate: "resent_in_new_epoch",
     });
 };
+
+const txKey = (tx: AccountTx): string => JSON.stringify(tx, (_key, v) => (typeof v === "bigint" ? `${v}n` : v));
+
+type Split = Readonly<{
+  kept: readonly AccountTx[]; removed: readonly AccountTx[]; owing: ReadonlyMap<string, number>;
+}>;
+
+const countOf = (txs: readonly AccountTx[]): ReadonlyMap<string, number> =>
+  txs.reduce<ReadonlyMap<string, number>>(
+    (acc, tx) => mapSet(acc, txKey(tx), (acc.get(txKey(tx)) ?? 0) + 1), new Map<string, number>());
+
+/**
+ * `txs` without one occurrence of each tx the chain paid (`paid`): a payment asked twice is paid once by a frame that
+ * held it once. `removed` is what was found in `txs`, so the rest of `paid` is looked for in the next place.
+ */
+const withoutPaid = (txs: readonly AccountTx[], paid: readonly AccountTx[]): Split =>
+  txs.reduce((acc: Split, tx): Split => {
+    const left = acc.owing.get(txKey(tx)) ?? 0;
+    return left === 0
+      ? { ...acc, kept: [...acc.kept, tx] }
+      : { ...acc, removed: [...acc.removed, tx], owing: mapSet(acc.owing, txKey(tx), left - 1) };
+  }, { kept: [], removed: [], owing: countOf(paid) });
 
 /** The chain's collateral and ondelta for one token, kept; one with no ledger past the cap is told and dropped. */
 const holding = (w: Work, e: Extract<JEvent, { _tag: "j_collateral" }>): Work => {
