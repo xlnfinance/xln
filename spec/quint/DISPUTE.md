@@ -71,3 +71,29 @@ R-DISPUTE-VOIDED-NOTICE): a side that rebases with committed frames beyond the s
 - Fairness is a bounded environment: two crashes, one transient revert, asks landing within LAG, events heard before time passes. A longer outage of the holder is excused by `newest_wins` (`wasDown`), by design.
 - The Host's wedged draft (REVIEW-A N4: a reverting counter delaying a reveal in the same draft) is a Host property, not here.
 - Debt, payout arithmetic, board rotation, windows of different lengths: `chain.qnt` and `entity.qnt`.
+
+## HTLC holds across a dispute (`htlc.qnt`)
+
+`dispute.qnt` has no money and no holds. `htlc.qnt` is the companion that has them, for the two money bugs the coordinator's audit of the freeze PR (#162) found
+(`review/pr-162/REVIEW-A.md` F1 and F2): a route of two Accounts, the payer P with the hub H (U), and H with the payee Y (D); one payment of one unit; P's lock on U
+expires at TU = TD + HOP, H's lock on D at TD. A dispute on D (either side starts it from a proof that carries the hold), the payee's release by frame or its reveal of the
+secret on the chain, the finalize (a carried hold is paid to Y iff the secret was registered by TD, else refunded; it waits for TD: E6, H1), the epoch move, the hub's claim on U,
+the payer's expiry of U. The code modelled is #162's (FREEZE on): an Entity with a dispute record seals nothing and refuses frames.
+
+Properties: `paid_once` (what Y was paid, by frame or by the chain, is at most one unit) and `route_safe` (once U is closed, claimed or expired, the hub paid out at most what it collected).
+Switches, the decided fixes: `SEE` (the secret on the chain is a chain fact at depth that the paybook uses like a received resolve, and the hub claims upstream) and `DISSOLVE` (holds carried by the finalized proof are dissolved at the epoch move, at both sides, never re-released).
+
+| code | paid_once | route_safe |
+|---|---|---|
+| today (#162) | fails | fails |
+| SEE only | **fails** (F2) | **fails** (F2) |
+| DISSOLVE only | holds | **fails** (F1) |
+| SEE + DISSOLVE | holds | holds |
+| SEE + DISSOLVE, HOP = 0 (mutant) | holds | fails: the claim lands after the upstream deadline (E3 needs HOP >= REACT) |
+
+Each failing cell has a schedule in `htlc_test.qnt` (8 tests, run on the four variants and the HOP = 0 mutant): `chainRevealUnheardTest` is F1 (hub out one unit), `releaseAfterFinalizeTest` is F2 (Y is paid by the chain and again by the release sealed after the epoch move),
+`finalizeAfterTheUpstreamExpiryTest` shows `route_safe` must be checked after the finalize too (the window ends after TU, so the payout comes after the expiry and only SEE has claimed in time).
+`claimNeedsRoomTest` is the HOP = 0 row (the claim lands after TU). The baselines (`releaseByFrameTest`, `refundWhenNotRevealedTest`, `lateRevealTest`, `committedReleaseThenDisputeTest`) are safe everywhere.
+
+Assumes: one hold, one unit, one dispute; no crash, counter or stale proof (those are `dispute.qnt`); the starter's proof carries the hold iff it still saw it open; a committed frame the finalize outdates is zeroed (so a payee that did not reveal is robbed by a release committed during a start it has not heard, which is `dispute.qnt`'s `no_silent_zeroing`, the hub's side stays safe); a finalize or reveal ask lands within LAG; the hub's claim on U lands within LAG; the payer lets U expire as soon as TU passes. Not modelled: the symmetric double collection on U (a release queued on U and re-committed after a finalize charges the payer twice; the same DISSOLVE rule closes it), a co-signed settlement carrying holds through an epoch move (the chain does not settle those, so holds stay), several tokens.
+

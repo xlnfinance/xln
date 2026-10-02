@@ -131,6 +131,12 @@ Four switches say which code is modelled: `FREEZE` (decided), `LIVE` (decided: a
 holds nothing newer finalizes with the opening proof; not decided), `NOTICE` (R-DISPUTE-VOIDED-NOTICE, owed). Properties: `newest_wins`, `no_lock` (either side alone), `no_silent_zeroing`.
 Result and the nine scenario tests: [DISPUTE.md](DISPUTE.md). Today's code fails all three; the two decided fixes hold `newest_wins` and leave `no_lock` and `no_silent_zeroing` open.
 
+### HTLC holds across a dispute (`htlc.qnt`)
+
+A route of two Accounts (payer, hub, payee), one hold, a dispute on the downstream one: the payee's release by frame or its secret on the chain, the finalize that pays or refunds a carried hold, the epoch move, the upstream lock's expiry.
+Properties `paid_once` and `route_safe` (the hub never pays out more than it collects). Switches `SEE` (a chain reveal is a chain fact the paybook uses) and `DISSOLVE` (holds in a finalized proof are dissolved at the epoch move):
+today fails both properties, SEE alone fails (a hold paid twice), DISSOLVE alone fails (a reveal the hub never hears), both hold; a mutant with HOP = 0 fails. [DISPUTE.md](DISPUTE.md) has the table and the eight schedules.
+
 ## What the spec asks of the contracts
 
 | id | request | why | evidence |
