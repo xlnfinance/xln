@@ -178,7 +178,7 @@ describe("entity/signing R-DISPUTE-WATCH what the counter is made of, and what s
     expect(countersOf(run(dropped.state, openedBy(start)).chain)).toEqual([]);
   });
 
-  test("R-DISPUTE-LAPSED a lapse of another nonce changes nothing, and one of a registered counter does not stop its finalize", () => {
+  test("R-DISPUTE-LAPSED a lapse of another nonce changes nothing, and a registered counter still finalizes", () => {
     const heard = run(ackLost.bob, openedBy(start));
     const [counter] = countersOf(heard.chain);
     if (counter?._tag !== "counter") return expect.unreachable("no counter");
