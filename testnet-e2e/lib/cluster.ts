@@ -18,7 +18,7 @@ import { address, bytes32 } from "../../pure/j/log.ts";
 import { hexToBytes } from "../../pure/kernel/encoding/bytes.ts";
 import type { Row, Setup } from "../../pure/runtime/model.ts";
 import { must, type Chain, type Party } from "./chain.ts";
-import { rigOf } from "./seat.ts";
+import { rigOf, type Rig } from "./seat.ts";
 
 const LOCAL = "127.0.0.1";
 const TICK_MS = 50;
@@ -36,7 +36,7 @@ const eid = (p: Party): EntityId => must(entityId(p.id), `entity id of ${p.name}
 /** A party and the parties it has an Account with: who it dials and answers. */
 export type Member = Readonly<{ party: Party; peers: readonly Party[] }>;
 
-type Slot = { readonly member: Member; readonly entity: EntityId; readonly dir: string; readonly from: bigint; port: number; daemon: Daemon };
+type Slot = { readonly member: Member; readonly entity: EntityId; readonly dir: string; readonly from: bigint; port: number; daemon: Daemon; rig: Rig };
 
 export type Quiet = Readonly<{ pending?: boolean }>;
 
@@ -58,10 +58,10 @@ export class Cluster {
     const from = BigInt(await chain.provider.getBlockNumber());
     const listeners = await Promise.all(members.map(async () => must(await listenTcp(LOCAL, 0, MAX_LINE), "listen")));
     const slots = new Map(members.map((member, i): [EntityId, Slot] => [eid(member.party), {
-      member, entity: eid(member.party), dir: join(root, member.party.name), from, port: listeners[i]!.port, daemon: undefined as unknown as Daemon,
+      member, entity: eid(member.party), dir: join(root, member.party.name), from, port: listeners[i]!.port, daemon: undefined as unknown as Daemon, rig: undefined as unknown as Rig,
     }]));
     const cluster = new Cluster(chain, setup, slots);
-    await Promise.all(members.map(async (member, i) => { slots.get(eid(member.party))!.daemon = await cluster.launch(slots.get(eid(member.party))!, listeners[i]!); }));
+    await Promise.all(members.map(async (member, i) => { await cluster.launch(slots.get(eid(member.party))!, listeners[i]!); }));
     await cluster.connected();
     return cluster;
   }
@@ -78,13 +78,15 @@ export class Cluster {
     return { runtime: key.runtime, entities: [slot.entity], endpoint: `${LOCAL}:${slot.port}` };
   }
 
-  private async launch(slot: Slot, listener: Listener): Promise<Daemon> {
+  /** The node of `slot` started over its files; its rig and daemon are the slot's from now on. */
+  private async launch(slot: Slot, listener: Listener): Promise<void> {
     const { party, peers } = slot.member;
     const rig = await rigOf(this.chain, party, slot.entity, this.setup, slot.dir, slot.from);
     const depository = must(address(this.chain.manifest.contracts.depository.address.toLowerCase()), "depository address");
     const watch = { port: watchPort(httpRpc(this.chain.rpc), depository), depository, depth: DEPTH, hosted: must(bytes32(slot.entity), "entity id") };
     const config: Config = { shell: rig.shell, boot: rig.boot, key: rig.key, table: peers.map((p) => this.peerOf(p)), tickMs: TICK_MS, nonce, lost: (m) => this.loss(m), watch };
-    return must(await startDaemon(config, listener), `${party.name}'s node`);
+    slot.rig = rig;
+    slot.daemon = must(await startDaemon(config, listener), `${party.name}'s node`);
   }
 
   private async refresh(): Promise<void> {
@@ -159,21 +161,30 @@ export class Cluster {
     try { return await work(); } finally { this.loss = KEEP; }
   }
 
-  /** A crash of one node: it stops, and comes back from its files alone on the same port; its peers dial or answer again. */
+  /**
+   * A crash of one node, a power cut and not a stop: nothing more reaches its files, its files are not closed by it, and
+   * its Host and queue are gone. It comes back from the files alone on the same port; its peers dial or answer again.
+   * The lines in flight must be none when it goes down, so whatever is in flight afterwards is owed to the crash.
+   */
   async restart(id: EntityId): Promise<void> {
+    if (this.inFlight() !== 0) throw new Error(`a node crashed with ${this.inFlight()} lines on their way: nothing could say which the crash lost`);
     const slot = this.slot(id);
     this.down.add(id);
+    slot.rig.cut();
     const last = await slot.daemon.stop();
+    await slot.rig.reclaim();
     await this.lost(id, last);
-    slot.daemon = await this.launch(slot, must(await listenTcp(LOCAL, slot.port, MAX_LINE), "listen again"));
+    await this.launch(slot, must(await listenTcp(LOCAL, slot.port, MAX_LINE), "listen again"));
     this.down.delete(id);
     await this.connected();
   }
 
   /**
    * What the crash of `id` takes with it: the counts of the node that ended stay in the totals, and so do the lines
-   * its peers wrote to it before they saw the connection close, which no one will ever hear. They are written off once
-   * every peer has seen the close and the rest of the lines have been heard.
+   * its peers wrote to it before they saw the connection close, which no one will ever hear (the link carries no
+   * receipt; a resend timer answers for such a line). They are written off once every peer has seen the close and the
+   * count of lines on their way has stood still, and only what was on the way then: a line lost between live nodes
+   * before the crash is refused by the check in `restart`.
    */
   private async lost(id: EntityId, last: Look): Promise<void> {
     this.gone = { sent: this.gone.sent + last.counts.sent, heard: this.gone.heard + last.counts.heard };
