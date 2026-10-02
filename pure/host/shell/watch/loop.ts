@@ -126,7 +126,7 @@ export const poll = async (
   if (!logs.ok) return logs;
   const prepared = prepare(watch, { head: head.value, blocks: blocks.value, logs: logs.value });
   if (!prepared.ok) return prepared;
-  const inputs = await inputsOf(port, calldataWanted(prepared.value));
+  const inputs = await inputsOf(port, calldataWanted(prepared.value, [hosted]));
   if (!inputs.ok) return inputs;
   const read = withCalldata(prepared.value, inputs.value);
   const asked = await Promise.all(readings(read, [hosted]).map(async (r) =>

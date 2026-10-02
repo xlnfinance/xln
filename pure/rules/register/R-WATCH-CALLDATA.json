@@ -1,7 +1,7 @@
 {
  "id": "R-WATCH-CALLDATA",
- "statement": "A secret shown in dispute arguments is learned by every hosted Entity, as one shown by SecretRevealed is. The chain pays a payment clause when its secret is in the arguments of a dispute op before the clause's deadline (DeltaTransformer applyPayment, 294-299) and logs no SecretRevealed for it, so a hub that forwarded the lock would fail it back upstream while the payee was paid downstream. Two places carry such arguments. DisputeStarted logs the starter's two argument blobs (initial and counter) in its own data, so the watcher reads their secrets from the log. DisputeFinalized logs only finalizationEvidenceHash, a hash of the initial body hash, the final nonce, both sides, and the hashes of the starter's blob, the other side's blob and the signature; the blobs are in the input of the transaction. The Host fetches the input of each transaction that carried a finalize (eth_getTransactionByHash, once per transaction per poll; a node that cannot give it is a port fault, tried again at the next tick, nothing delivered), reads it with the ABI cursors as the contract reads it (processBatch, then the batch's finalize ops), and takes the secrets of the op whose evidence hash is the logged one, from both blobs: the evidence hash authenticates the op, so a secret is never taken from an op the log is not about. A blob is `abi.encode(Arguments{uint16[] fillRatios; bytes32[] secrets})`; a blob that is not that has no secrets (the contract reads it as empty). Each secret is told as `j_secret` to every hosted Entity, ahead of the event that follows it: a start's before its j_dispute, a finalize's before the epoch advance the finalize made (so before the holds that advance dissolves, R-HOLD-DISSOLVE; a finalize with no advance in the batch tells them before itself). The Entity's paybook turns a secret into a pass-up by its hash on any Account (R-DISPUTE-FREEZE), so a secret that opens no lock it forwarded changes nothing. A finalize whose input is not a processBatch call (a contract that wrapped it) or holds no op with the logged hash cannot be read: its parties are told `j_finalize_unread` (notice `finalize_unread`, no fact changes) after `j_dispute_over`, so the owner knows a secret may have been shown unseen; the watcher is not stopped for it, because a counterparty could wrap a finalize on purpose. A secret shown in the starter's counter blob is read though the chain uses that blob only if the counter is the one selected: reading more only hands a hub a real preimage. The start's transaction is read the same way for the body the start revealed (the contract has the starter reveal the exact signed body, `InitialDisputeProof.initialProofbody`): the Host takes the start op whose `proofbodyHash` is the logged one and keeps its body only if it hashes to that hash, so a body is never believed on the word of the bytes; the Entity keeps it on the dispute against it (`against.body`, re-checked against the logged hash) and a non-starter with nothing newer, or whose counter lapsed, finalizes the opening state with it when no state of its own has that body (R-DISPUTE-WATCH). A start whose input is unreadable is told without a body, and nothing waits on it. Not here: the body of a counter's calldata (the finalized offdelta in the notices: owed), a finalize carried by a call that is not processBatch (not read: told as unread), and secrets in a counter dispute (a counter proof carries no arguments).",
- "source": "Review A B4 on #162; coordinator audit of #162 (A: calldata PR); DeltaTransformer.sol 294-299; Depository.sol finalizationEvidenceHash (975-1006); builder 10-02",
+ "statement": "A secret shown in dispute arguments is learned by every hosted Entity, as one shown by SecretRevealed is. The chain pays a payment clause when its secret is in the arguments of a dispute op before the clause's deadline (DeltaTransformer applyPayment, 294-299) and logs no SecretRevealed for it, so a hub that forwarded the lock would fail it back upstream while the payee was paid downstream. Two places carry such arguments. DisputeStarted logs the starter's two argument blobs (initial and counter) in its own data, so the watcher reads their secrets from the log. DisputeFinalized logs only finalizationEvidenceHash, a hash of the initial body hash, the final nonce, both sides, and the hashes of the starter's blob, the other side's blob and the signature; the blobs are in the input of the transaction. The Host fetches the input of each transaction that carried a start or a finalize of an Account a hosted Entity is a party to (a stranger's dispute is not read; eth_getTransactionByHash, once per transaction per poll; a node that cannot give it is a port fault, tried again at the next tick, nothing delivered), reads it with the ABI cursors as the contract reads it (processBatch, then the batch's finalize op; or a tower's watchtowerCounterDispute, whose params the contract finalizes with an empty signature, so its evidence hash is over one), and takes the secrets of the op whose evidence hash is the logged one, from both blobs: the evidence hash authenticates the op, so a secret is never taken from an op the log is not about. A blob is `abi.encode(bytes[])`, one `abi.encode(Arguments{uint16[] fillRatios; bytes32[] secrets})` per clause of the proof body (DeltaTransformer decodeTransformerArgumentListStrict, Account.sol _decodeTransformerArgumentList; the skeleton's S10 asks the deployed DeltaTransformer to decode a blob and the node's decoder reads the same secret); a blob that is not that has no secrets (the contract reads it as empty). Each secret is told as `j_secret` to every hosted Entity, ahead of the event that follows it: a start's before its j_dispute, a finalize's before the epoch advance the finalize made (so before the holds that advance dissolves, R-HOLD-DISSOLVE; a finalize with no advance in the batch tells them before itself). The Entity's paybook turns a secret into a pass-up by its hash on any Account (R-DISPUTE-FREEZE), so a secret that opens no lock it forwarded changes nothing. Every read is bounded by what the contract accepts: one finalization and eight starts in a batch, 64 KiB of arguments, 128 tokens, 32 clauses, 128 allowances a clause, 176 KiB of clause bytes, and an input of at most 1 MiB; an input or a list past them is one the Depository would revert, so it is not read (told as unread, or no body), and offsets that alias one op many times cost one read. A finalize whose input is not a processBatch or tower call (a contract that wrapped it) or holds no op with the logged hash cannot be read: its parties are told `j_finalize_unread` (notice `finalize_unread`, no fact changes) after `j_dispute_over`, so the owner knows a secret may have been shown unseen; the watcher is not stopped for it, because a counterparty could wrap a finalize on purpose. A secret shown in the starter's counter blob is read though the chain uses that blob only if the counter is the one selected: reading more only hands a hub a real preimage. The start's transaction is read the same way for the body the start revealed (the contract has the starter reveal the exact signed body, `InitialDisputeProof.initialProofbody`): the Host takes the start op whose `proofbodyHash` is the logged one and keeps its body only if it hashes to that hash, so a body is never believed on the word of the bytes; the Entity keeps it on the dispute against it (`against.body`, re-checked against the logged hash) and a non-starter with nothing newer, or whose counter lapsed, finalizes the opening state with it when no state of its own has that body (R-DISPUTE-WATCH). A start whose input is unreadable is told without a body, and nothing waits on it. Not here: the body of a counter's calldata (the finalized offdelta in the notices: owed), a finalize carried by a call that is neither processBatch nor a tower's (not read: told as unread), and secrets in a counter dispute (a counter proof carries no arguments).",
+ "source": "Review A B4 on #162; coordinator audit of #162 (A: calldata PR); DeltaTransformer.sol 294-299; Depository.sol finalizationEvidenceHash (975-1006); builder 10-02; coordinator audit of #167 (B1 encoding, B2 bounds, B3 tower)",
  "layers": {
   "arrival": "n/a: the Arrival page has no chain events",
   "quint": "n/a: the Quint models have the chain's cells; which secrets the watcher reads is a Host rule",
@@ -13,7 +13,72 @@
   {
    "kind": "test",
    "layer": "ts",
-   "name": "R-WATCH-CALLDATA the secrets of an Arguments blob are read in order, and none from what is not one"
+   "name": "R-WATCH-CALLDATA a start whose body no state of the node has is accepted at once with the body"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-WATCH-CALLDATA a node whose counter lapsed accepts the opening state with the revealed body"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-WATCH-CALLDATA a node whose counter is still asked does not accept the opening state"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-WATCH-CALLDATA a body that is not the one the logged hash names is not kept or accepted by"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-WATCH-CALLDATA a finalize the Host could not read is told as a notice, and no fact changes"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-WATCH-CALLDATA a transaction is asked for by hash and its input comes back as bytes"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-WATCH-CALLDATA a finalize's arguments are read from its transaction's input, asked for once"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-WATCH-CALLDATA a dispute start's secret and body reach the Entity, the input asked for once"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-WATCH-CALLDATA an input the node cannot give is the port's fault: nothing is delivered"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-WATCH-CALLDATA a blob is the contract's `abi.encode(bytes[])`, as its own test encoder makes it"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-WATCH-CALLDATA every clause's secrets are read in order, each once, and none from what is not a blob"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-WATCH-CALLDATA the bare Arguments tuple, which the chain does not read, shows no secret"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-WATCH-CALLDATA a count or an offset the blob has no room for gives no secret, and builds no list"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-WATCH-CALLDATA a blob past what the contract accepts, or clauses past a body's most, are not read"
   },
   {
    "kind": "test",
@@ -23,7 +88,22 @@
   {
    "kind": "test",
    "layer": "ts",
-   "name": "R-WATCH-CALLDATA a processBatch input gives each finalize op with the evidence hash the chain logs"
+   "name": "R-WATCH-CALLDATA a processBatch input gives its finalize op with the evidence hash the chain logs"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-WATCH-CALLDATA a batch with more finalizations than the Depository accepts is not read"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-WATCH-CALLDATA an input past the most a transaction can carry is not read"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-WATCH-CALLDATA a tower's counter-dispute call finalizes with an empty signature in its evidence"
   },
   {
    "kind": "test",
@@ -39,66 +119,6 @@
    "kind": "test",
    "layer": "ts",
    "name": "R-WATCH-CALLDATA the secrets of a finalize are those of the op whose evidence hash was logged"
-  },
-  {
-   "kind": "test",
-   "layer": "ts",
-   "name": "R-WATCH-CALLDATA a finalize's secrets are told to every hosted Entity before the epoch advance it made"
-  },
-  {
-   "kind": "test",
-   "layer": "ts",
-   "name": "R-WATCH-CALLDATA the starter's arguments at a finalize are shown too, and the op is found among others"
-  },
-  {
-   "kind": "test",
-   "layer": "ts",
-   "name": "R-WATCH-CALLDATA a finalize with no advance before it tells its own secrets, just ahead of itself"
-  },
-  {
-   "kind": "test",
-   "layer": "ts",
-   "name": "R-WATCH-CALLDATA a dispute start's secrets are told ahead of the dispute, with no input needed"
-  },
-  {
-   "kind": "test",
-   "layer": "ts",
-   "name": "R-WATCH-CALLDATA the Host is asked for the input of each transaction that carried a finalize, once"
-  },
-  {
-   "kind": "test",
-   "layer": "ts",
-   "name": "R-WATCH-CALLDATA a finalize whose input cannot be read is told to its parties and shows no secret"
-  },
-  {
-   "kind": "test",
-   "layer": "ts",
-   "name": "R-WATCH-CALLDATA a finalize the Host has not asked about says nothing of its arguments"
-  },
-  {
-   "kind": "test",
-   "layer": "ts",
-   "name": "R-WATCH-CALLDATA a finalize's arguments are read from its transaction's input, asked for once"
-  },
-  {
-   "kind": "test",
-   "layer": "ts",
-   "name": "R-WATCH-CALLDATA an input the node cannot give is the port's fault: nothing is delivered"
-  },
-  {
-   "kind": "test",
-   "layer": "ts",
-   "name": "R-WATCH-CALLDATA a transaction is asked for by hash and its input comes back as bytes"
-  },
-  {
-   "kind": "test",
-   "layer": "ts",
-   "name": "R-WATCH-CALLDATA a finalize the Host could not read is told as a notice, and no fact changes"
-  },
-  {
-   "kind": "test",
-   "layer": "ts",
-   "name": "R-WATCH-CALLDATA a dispute start's secret and body reach the Entity, the input asked for once"
   },
   {
    "kind": "test",
@@ -128,7 +148,47 @@
   {
    "kind": "test",
    "layer": "ts",
+   "name": "R-WATCH-CALLDATA more starts, tokens or clauses than the contract accepts give no body"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-WATCH-CALLDATA a start input past the most a transaction can carry gives no body"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-WATCH-CALLDATA a body whose clauses carry more bytes or allowances than accepted is no body"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
    "name": "R-WATCH-CALLDATA whatever is written over the input, a body is read only if its hash is the one named"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-WATCH-CALLDATA a finalize's secrets are told to every hosted Entity before the epoch advance it made"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-WATCH-CALLDATA the starter's arguments at a finalize are shown too"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-WATCH-CALLDATA a finalize with no advance before it tells its own secrets, just ahead of itself"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-WATCH-CALLDATA a dispute start's secrets are told ahead of the dispute, with no input needed"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-WATCH-CALLDATA the Host is asked once for the input of each transaction of a hosted dispute"
   },
   {
    "kind": "test",
@@ -143,22 +203,12 @@
   {
    "kind": "test",
    "layer": "ts",
-   "name": "R-WATCH-CALLDATA a start whose body no state of the node has is accepted at once with the body"
+   "name": "R-WATCH-CALLDATA a finalize whose input cannot be read is told to its parties and shows no secret"
   },
   {
    "kind": "test",
    "layer": "ts",
-   "name": "R-WATCH-CALLDATA a node whose counter lapsed accepts the opening state with the revealed body"
-  },
-  {
-   "kind": "test",
-   "layer": "ts",
-   "name": "R-WATCH-CALLDATA a node whose counter is still asked does not accept the opening state"
-  },
-  {
-   "kind": "test",
-   "layer": "ts",
-   "name": "R-WATCH-CALLDATA a body that is not the one the logged hash names is not kept or accepted by"
+   "name": "R-WATCH-CALLDATA a finalize the Host has not asked about says nothing of its arguments"
   }
  ]
 }
