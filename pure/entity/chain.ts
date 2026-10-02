@@ -1,6 +1,7 @@
 // What an Entity does with what it knows of the chain for one Account (R-IMPLICIT-NONCE-FROM-CHAIN,
 // R-NO-DEPOSIT-BEFORE-COSIGN, R-WINDOWS-NEVER-SHORTEN). The facts come from the Host's events and from the Entity's own
 // committed frames; a proof's nonce is read off them and never derived from an earlier proof.
+import { mapSet } from "../kernel/core/collections.ts";
 import { err, ok, type Result } from "../kernel/core/result.ts";
 import { MAX_PROOF_TOKENS } from "../account/proof/body.ts";
 import type { TokenId } from "../account/model.ts";
@@ -30,7 +31,7 @@ export const keepHolding = (
 ): ChainFacts | undefined => {
   const unledgered = [...f.held.keys()].filter((t) => !ledgered.has(t)).length;
   return ledgered.has(token) || f.held.has(token) || unledgered < MAX_PROOF_TOKENS
-    ? { ...f, held: new Map([...f.held, [token, held]]) }
+    ? { ...f, held: mapSet(f.held, token, held) }
     : undefined;
 };
 
