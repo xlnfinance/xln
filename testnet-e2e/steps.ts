@@ -386,6 +386,7 @@ const reveal: Step<World> = {
     const amount = 5n * unit(chain);
     const deadline = net.view() + 30n;
     const lag = (await view(chain)).clock.lag;
+    const due = lag + DEPTH + 1n;
     // hubY locks 5 for bob on hubY-bob; bob resolves, and the frame never reaches hubY.
     await net.tell(y, { _tag: "lock", peer: b, token: t, hold: { id: holdId(2n), payer: net.account(y, b).side, amount, hashlock: keccakHex(secret), deadline: must(jHeight(deadline), "deadline") } });
     await net.settle();
@@ -397,12 +398,12 @@ const reveal: Step<World> = {
       await net.tell(b, { _tag: "resolve", peer: y, token: t, id: holdId(2n), secret });
       await net.settle({ pending: true });
       if (net.account(b, y).pending === undefined) throw new Error("bob's resolve frame is not pending: it was acked");
-      await net.reach(deadline - lag - 1n, { pending: true });
+      await net.reach(deadline - due - 1n, { pending: true });
       const early = net.askedBy(b).slice(sinceLock);
       if (early.length !== 0) throw new Error(`bob asked the chain at view ${net.view()} (deadline ${deadline}, LAG ${lag}): ${JSON.stringify(early.map((x) => x._tag))}`);
       if ((await transformer.hashToTimestamp!(hash)) !== 0n) throw new Error("the secret was revealed on chain before bob asked");
       // The row of this frame carries the reveal; bob's node seals, signs and sends it by itself, and settle waits for it to land.
-      await net.reach(deadline - lag, { pending: true });
+      await net.reach(deadline - due, { pending: true });
       return net.askedBy(b).slice(sinceLock);
     });
     const action = asked[0];
@@ -421,7 +422,7 @@ const reveal: Step<World> = {
     return {
       checks: [
         `hubY locks 5 for bob (deadline ${deadline}); bob resolves and the frame is lost on the link, so it stays pending`,
-        `at view ${deadline - lag - 1n} bob asks nothing; at view ${deadline - lag} (deadline minus LAG ${lag}) its WAL row carries one reveal action for the clause (R-HTLC-CLOCK c)`,
+        `at view ${deadline - due - 1n} bob asks nothing; at view ${deadline - due} (deadline minus LAG ${lag} minus the read depth ${DEPTH} minus one) its WAL row carries one reveal action for the clause (R-HTLC-CLOCK c)`,
         `bob's node sealed, signed and sent the reveal itself (journal: sealed then landed, nonce ${sealed.nonce}); the transformer holds the secret's hash from block time ${at}`,
         "after the resend timer hubY acks the resolve: the Account is at one head with no open clause",
       ],

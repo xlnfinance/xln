@@ -84,10 +84,13 @@ describe("account/clause/clock", () => {
     expect(due).toEqual([false, true, false]);
   });
 
-  test("R-HTLC-CLOCK a node that reads at a depth asks for the reveal that many heights earlier", () => {
-    const deep = unwrapOr(clockParams(3n, 3n, 10n, 2n), (fault) => expect.unreachable(fault._tag));
-    const due = [4n, 5n, 6n].map((view) => revealOnChainDue(deep, heightOf(10n), viewOf(view)));
-    expect(due).toEqual([false, true, true]);
+  test("R-HTLC-CLOCK a node that reads at a depth asks for the reveal depth plus one heights earlier", () => {
+    const [head, deep] = [0n, 2n].map((depth) =>
+      unwrapOr(clockParams(3n, 3n, 10n, depth), (fault) => expect.unreachable(fault._tag)));
+    const asked = (p: ClockParams | undefined) => [3n, 4n, 5n, 6n, 7n].map((view) =>
+      revealOnChainDue(p ?? expect.unreachable("params"), heightOf(10n), viewOf(view)));
+    expect(asked(head)).toEqual([false, false, false, true, true]);
+    expect(asked(deep)).toEqual([false, true, true, true, true]);
     expect(clockParams(3n, 3n, 10n, -1n)).toEqual(err({ _tag: "depth_negative", depth: -1n }));
   });
 

@@ -42,14 +42,14 @@ export type Stopped = Tagged<"stopped">;
 
 /**
  * A node that reads the chain at `depth` has a view `depth` blocks behind the chain's head. Its own reveal as a payee
- * is sent at the head and lands one block after it, so the clock asks for it `lag + depth` heights before the deadline
- * (`ClockParams.depth`, R-HTLC-CLOCK) and it lands `lag - 1` blocks before the deadline, whatever the depth. A `lag`
- * of `depth` or less is refused all the same: the hop a lock gives the next one, `reserve + lag`, is what covers
- * hearing another node's reveal at that depth. A clock whose `depth` is not the depth the node reads at would ask for
- * the reveal too late or too early, so it is refused too (`clock_depth_off`).
+ * is sent at the head and lands one block after it, so the clock asks for it `lag + depth + 1` heights before the
+ * deadline (`ClockParams.depth`, R-HTLC-CLOCK) and it lands `lag` blocks before the deadline, whatever the depth. A
+ * `lag` of `depth` or less is refused all the same: the hop a lock gives the next one, `reserve + lag`, is what
+ * covers hearing another node's reveal at that depth. A clock whose `depth` is not the depth the node reads at would
+ * ask for the reveal too late or too early, so it is refused too (`clock_depth_off`).
  */
 export type ClockBelowDepth = Tagged<"clock_below_depth", { lag: bigint; depth: bigint }>;
-export type ClockDepthOff = Tagged<"clock_depth_off", { clock: bigint; depth: bigint }>;
+export type ClockDepthOff = Tagged<"clock_depth_off", { clock: bigint | undefined; depth: bigint }>;
 
 /** What ends a node's work: a disk, the chain's submit path, the Runtime, or a watcher invariant broken. */
 export type NodeFault = DriveFault | WatchFault | BadPeer | BadSecret;
