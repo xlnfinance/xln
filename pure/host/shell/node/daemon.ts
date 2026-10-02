@@ -25,9 +25,10 @@ import {
   accepted, closed, dialed, line, linked, route, startMesh, wanted, type ConnId, type Mesh, type Refused, type Write,
 } from "../mesh/mesh.ts";
 import {
-  beginAt, poll, windowsOf, type BadPeer, type BadSecret, type Delivery, type JFault, type Tries, type WatchConfig,
+  beginAt, poll, windowsOf, type BadPeer, type BadSecret, type Delivery, type JFault, type Tries, type WatchConfig, holdBound,
 } from "../watch/loop.ts";
 import type { PortFault } from "../submit/chain.ts";
+import { hopOf } from "../../../entity/paybook/paybook.ts";
 import { dialTcp, type Listener, type SocketFault, type Wire } from "./link/socket.ts";
 
 /** What a node is made of: its shell, its Entity, its key, who its peers are, and how often its timer runs. */
@@ -51,6 +52,13 @@ export type Stopped = Tagged<"stopped">;
  */
 export type ClockBelowDepth = Tagged<"clock_below_depth", { lag: bigint; depth: bigint }>;
 export type ClockDepthOff = Tagged<"clock_depth_off", { clock: bigint | undefined; depth: bigint }>;
+
+/**
+ * A node whose reads of the chain may fall behind by a block count that is negative is refused: `hop - slack - lag -
+ * depth - 1` (`holdBound`) is the most blocks a transaction the node cannot read may hold delivery back before the hub
+ * can no longer claim upstream with the least hop its deadlines keep, so with less than none no wait is safe at all.
+ */
+export type HoldBelowZero = Tagged<"hold_below_zero", { hop: bigint; slack: bigint; lag: bigint; depth: bigint }>;
 
 /**
  * A node that may hold value is refused on a provider with no call trace (R-WATCH-CALLDATA): a relay contract hides
@@ -113,9 +121,6 @@ type State = Readonly<{
   tries: Tries;
   timer: ReturnType<typeof setTimeout> | undefined;
 }>;
-
-/** REACT = 2 * lag: what a hub's onward deadline is ahead of its inbound one at least (R-HTLC-FORWARD). */
-const REACT_PER_LAG = 2n;
 
 const RECENT = 64;
 
@@ -295,7 +300,8 @@ const listening = async (rig: Rig, state: State): Promise<State> => {
   const chain = state.station.host.runtime.entities.get(rig.self)?.chain ?? new Map();
   const windows = windowsOf(watch.hosted, chain);
   if (!windows.ok) return heldUp(next, windows.error);
-  const patience = { tries: state.tries, react: REACT_PER_LAG * rig.config.boot.setup.clock.lag };
+  const hold = holdBound(rig.config.boot.setup.clock, watch.depth, watch.slack);
+  const patience = { tries: state.tries, hold };
   const got = await poll(watch.port, cursor.value, watch.hosted, windows.value, patience);
   if (!got.ok) return heldUp(next, got.error);
   const quiet = { ...next, watchFault: undefined };
@@ -380,13 +386,17 @@ const STOPPED: Result<never, Stopped> = err({ _tag: "stopped" });
  */
 export const startDaemon = async (
   config: Config, listener: Listener,
-): Promise<Result<Daemon, DriveFault | ClockBelowDepth | ClockDepthOff | NoCallTrace | PortFault>> => {
+): Promise<Result<Daemon, DriveFault | ClockBelowDepth | ClockDepthOff | HoldBelowZero | NoCallTrace | PortFault>> => {
   const { lag, depth } = config.boot.setup.clock;
   if (config.watch !== undefined && lag <= config.watch.depth) {
     return err({ _tag: "clock_below_depth", lag, depth: config.watch.depth });
   }
   if (config.watch !== undefined && depth !== config.watch.depth) {
     return err({ _tag: "clock_depth_off", clock: depth, depth: config.watch.depth });
+  }
+  if (config.watch !== undefined && holdBound(config.boot.setup.clock, config.watch.depth, config.watch.slack) < 0n) {
+    const { depth: read, slack } = config.watch;
+    return err({ _tag: "hold_below_zero", hop: hopOf(config.boot.setup.clock), slack, lag, depth: read });
   }
   if (config.watch?.value === true) {
     const traced = await config.watch.port.traced();

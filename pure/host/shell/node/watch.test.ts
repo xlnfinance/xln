@@ -57,8 +57,9 @@ const portOf = (chain: Chain, log: string, found = [advanced(105n, 1n)], kind = 
   traced: () => Promise.resolve(ok(kind.traces)),
 });
 
-const watchOf = (chain: Chain, log: string, found = [advanced(105n, 1n)], kind = QUIET): WatchConfig => ({
+const watchOf = (chain: Chain, log: string, found = [advanced(105n, 1n)], kind = QUIET, slack = 0n): WatchConfig => ({
   port: portOf(chain, log, found, kind), depository: DEPOSITORY, depth: DEPTH, hosted: bytes(1n), value: kind.value,
+  slack,
 });
 
 const STRAIGHT: Chain = { head: 112n, fork: () => 0n };
@@ -106,6 +107,20 @@ describe("host/shell/node a node with a J loop", () => {
   test("R-WATCH-CALLDATA a no-value node starts with no call trace, and a node with value with one", async () => {
     expect(await booted(NO_VALUE_BLIND)).toBe("started");
     expect(await booted(VALUE_TRACED)).toBe("started");
+  });
+
+  test("R-WATCH-CALLDATA a node whose hop leaves no block to hold delivery is not started, and writes nothing", async () => {
+    const dir = fresh();
+    const log = `${dir}/calls.log`;
+    writeFileSync(log, "");
+    const seat = await seatOf(ALICE, dir, 0);
+    const watch = watchOf(STRAIGHT, log, [advanced(105n, 1n)], QUIET, 1n);
+    const config = await configOf(seat, NO_PEER, { tickMs: QUICK, watch });
+    const refused = await startDaemon(config, seat.listener);
+    await config.shell.wal.close();
+    await config.shell.io.journal.close();
+    expect(refused).toEqual(err({ _tag: "hold_below_zero", hop: 6n, slack: 1n, lag: 3n, depth: DEPTH }));
+    expect(readFileSync(`${dir}/wal.log`, "utf8")).toBe("");
   });
 
   test("R-HTLC-CLOCK a node whose clock names another depth than it reads at is not started", async () => {
@@ -225,7 +240,7 @@ describe("host/shell/node a node with a J loop", () => {
       finalizationEvidenceHash: evidenceOf(op),
     }, 105n, 1n);
     const watch = watchOf(STRAIGHT, log, [advanced(105n, 1n), finalize]);
-    const alice = await nodeOf(await seatOf(ALICE, dir, 0), NO_PEER, { tickMs: QUICK, watch });
+    const alice = await nodeOf(await seatOf(ALICE, dir, 0), NO_PEER, { tickMs: QUICK, watch, reserve: 60n });
     expect(await until(async () => (await alice.look()).watchFault !== undefined, WAIT)).toBe(true);
     expect(await until(async () => delivered(await alice.look()), WAIT)).toBe(true);
     const look = await alice.stop();
@@ -238,7 +253,7 @@ describe("host/shell/node a node with a J loop", () => {
     expect(factsOf(look)).toMatchObject({ epoch: 1n });
   });
 
-  test("R-WATCH-CALLDATA a tx the provider keeps refusing, long past REACT = 2 * lag, holds the node for three tries", async () => {
+  test("R-WATCH-CALLDATA a tx the provider keeps refusing, past the hold the hop leaves, holds the node three tries", async () => {
     const dir = fresh();
     const log = `${dir}/calls.log`;
     writeFileSync(log, "");

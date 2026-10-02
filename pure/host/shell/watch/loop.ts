@@ -19,6 +19,8 @@ import {
 import { err, flatMap, map, ok, traverse, type Result } from "../../../kernel/core/result.ts";
 import type { Tagged } from "../../../kernel/core/tagged.ts";
 import type { PortFault } from "../submit/chain.ts";
+import type { ClockParams } from "../../../account/clause/clock.ts";
+import { hopOf } from "../../../entity/paybook/paybook.ts";
 
 /** What the loop asks of the chain: the head, a block by number, the Depository's logs in a range, an Account's row. */
 export type WatchPort = Readonly<{
@@ -51,6 +53,8 @@ export type WatchConfig = Readonly<{
    * of a relayed finalize is learned only from the call trace: a node with value boots only on a provider that has one.
    */
   value: boolean;
+  /** The deployment's slack in J heights, `ceil(slackSeconds / blockSeconds)`: a reveal counts that long past its deadline. */
+  slack: bigint;
 }>;
 
 /** A peer id the chain named that is not an Entity id the node can use: a broken reading, not a retry. */
@@ -82,19 +86,28 @@ export type JFault = PortFault | WatchFault | BadPeer | BadSecret | Stalled;
 export const MOST_TRIES = 24;
 
 /**
- * How long the J loop waits on a transaction the node fails: the tries it has spent, and `react`, how many blocks past
- * the one its log became final (`depth` above it) a hub may still be told a secret and claim upstream with the hop it
- * has, which is REACT = 2 * lag (R-HTLC-FORWARD: the gap between a hub's inbound and onward deadline). A transaction the
- * node still fails past that is told unread though it has tries left: waiting longer cannot save the lock it names, and
- * it would keep the hub blind to every other Account's events meanwhile (the counter windows among them). `undefined`
- * is no bound but the tries.
+ * The most blocks a transaction the node fails may hold delivery back, from the block its log became final (`depth`
+ * above it): the hop a hub's inbound deadline gives its onward one, less what the hub's own reading and answering cost.
+ * The chain counts a payee's reveal until the onward deadline's second plus the slack (`slack` heights: R-DEADLINE-TIMESTAMP),
+ * the hub reads it `depth` blocks and one more after it, and must answer upstream `lag` blocks before the inbound
+ * deadline, so a reveal that reaches the chain last may be heard `hop - slack - lag - depth - 1` blocks late and no more.
+ * `hop` is the least a hub's deadlines differ by (`hopOf`). A node whose configuration leaves less than none is refused.
  */
-export type Patience = Readonly<{ tries: Tries; react: bigint | undefined }>;
+export const holdBound = (clock: ClockParams, depth: bigint, slack: bigint): bigint =>
+  hopOf(clock) - slack - clock.lag - depth - 1n;
+
+/**
+ * How long the J loop waits on a transaction the node fails: the tries it has spent, and `hold`, the most blocks the
+ * transaction may hold delivery back (`holdBound`). A transaction the node still fails past that, after a few tries, is
+ * told unread though it has more left: it would keep the hub blind to every later event, a secret a payee shows on
+ * chain among them, for longer than the hub can still claim upstream. `undefined` is no bound but the tries.
+ */
+export type Patience = Readonly<{ tries: Tries; hold: bigint | undefined }>;
 
 /** The tries a transaction must have failed before its age cuts the wait: one failure of a node catching up is retried. */
-const FEW_TRIES = 3;
+export const FEW_TRIES = 3;
 
-const NO_PATIENCE: Patience = { tries: new Map(), react: undefined };
+const NO_PATIENCE: Patience = { tries: new Map(), hold: undefined };
 
 /** The most blocks one poll reads: a node that was away reads on over several polls, not in one burst of requests. */
 const CATCH_UP = 64n;
@@ -229,8 +242,8 @@ export const poll = async (
   // Each fault costs its tx one try (this poll got as far as these reads, so the node answered the rest), and a tx that
   // spent them all is left unread (it is no fault now) so the delivery goes on and says so.
   const spent = new Map([...gathered.failed].map(([tx]) => [tx, (patience.tries.get(tx) ?? 0) + 1] as const));
-  const aged = (tx: Bytes32): boolean => patience.react !== undefined
-    && logs.value.some((log) => log.tx === tx && head.value - log.block - watch.depth > (patience.react ?? 0n));
+  const aged = (tx: Bytes32): boolean => patience.hold !== undefined
+    && logs.value.some((log) => log.tx === tx && head.value - log.block - watch.depth > (patience.hold ?? 0n));
   const failed = new Map([...gathered.failed].filter(([tx]) => {
     const tried = spent.get(tx) ?? 0;
     return tried <= MOST_TRIES && !(tried >= FEW_TRIES && aged(tx));
