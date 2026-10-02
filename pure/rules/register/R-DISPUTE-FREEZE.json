@@ -4,7 +4,7 @@
  "source": "coordinator 10-02 11:55 (decision after the re-audit of PR 159)",
  "layers": {
   "arrival": "owed: spec thread, next Arrival page",
-  "quint": "owed: spec thread, new Quint branch",
+  "quint": "hold",
   "contract": "n/a: the freeze is the node's off-chain duty while a dispute is open; the contract only sees what is signed",
   "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
   "ts": "hold"
@@ -299,6 +299,16 @@
    "kind": "test",
    "layer": "ts",
    "name": "R-DISPUTE-FREEZE a Host that restarts between the rollback and the finalize still names the frame"
+  },
+  {
+   "kind": "mutant",
+   "layer": "quint",
+   "name": "freeze-off"
+  },
+  {
+   "kind": "test",
+   "layer": "quint",
+   "name": "frameAfterTheCounterTest"
   }
  ]
 }

@@ -9,9 +9,11 @@
 module hscn {
   const SW_SEE: bool
   const SW_DISSOLVE: bool
+  const SW_ARGS: bool
+  const SW_HIDE: bool
   const SW_HOP: int
 
-  import htlc(SEE = SW_SEE, DISSOLVE = SW_DISSOLVE, HOP = SW_HOP).* from "./htlc"
+  import htlc(SEE = SW_SEE, DISSOLVE = SW_DISSOLVE, ARGS = SW_ARGS, HIDE = SW_HIDE, HOP = SW_HOP).* from "./htlc"
 
   action jump(t: int): bool = st' = { ...st, now: t }
   action check(c: bool): bool = all { assert(c), st' = st }
@@ -46,7 +48,7 @@ module hscn {
   // nothing to release.
   run releaseAfterFinalizeTest = {
     init
-      .then(askStart(Payee)).then(landStart(Payee)).then(hear(Hub)).then(hear(Payee))
+      .then(askStartWith(Payee, false)).then(landStart(Payee)).then(hear(Hub)).then(hear(Payee))
       .then(check(not(st.v.get(Payee).hold == false)))
       .then(askReveal).then(landReveal).then(hear(Hub)).then(hear(Payee))
       .then(if (SW_SEE) askClaim.then(landClaim) else check(true))
@@ -85,7 +87,7 @@ module hscn {
   run committedReleaseThenDisputeTest = {
     init
       .then(sendRelease).then(receive)
-      .then(askStart(Payee)).then(landStart(Payee)).then(hear(Hub)).then(hear(Payee))
+      .then(askStartWith(Payee, false)).then(landStart(Payee)).then(hear(Hub)).then(hear(Payee))
       .then(askClaim).then(landClaim)
       .then(askReveal).then(landReveal).then(hear(Hub)).then(hear(Payee))
       .then(jump(TD)).then(landFinal).then(hear(Hub)).then(hear(Payee))
@@ -119,10 +121,55 @@ module hscn {
       .then(closeU)
       .then(check(st.paidChain == 1 and route_safe == (SW_SEE and SW_HOP >= 1)))
   }
+
+  // #167. The payee starts the dispute with the secret in the start's arguments and never reveals it on the chain: the contract pays the clause
+  // at the finalize all the same. The hub learns it only if its watcher reads the start's arguments (ARGS); else the lock on U expires, the
+  // chain pays Y, and the hub is out one unit.
+  run argsInStartTest = {
+    init
+      .then(askStartWith(Payee, true)).then(landStart(Payee)).then(hear(Hub)).then(hear(Payee))
+      .then(check(st.disp.shown and st.knows == SW_ARGS))
+      .then(if (SW_ARGS) askClaim.then(landClaim) else check(true))
+      .then(jump(TD)).then(landFinal).then(hear(Hub)).then(hear(Payee))
+      .then(closeU)
+      .then(check(st.revealedAt == 0 and st.paidChain == 1 and paid_once and route_safe == SW_ARGS))
+  }
+
+  // #167. The payee finalizes with the secret in its own arguments, from the end of the window and before TD: the clause is paid at once, with
+  // no SecretRevealed on the chain. The hub learns it from the finalize's calldata (ARGS) before the epoch advance dissolves the hold, or never.
+  run argsInFinalizeTest = {
+    init
+      .then(askStartWith(Payee, false)).then(landStart(Payee)).then(hear(Hub)).then(hear(Payee))
+      .then(check(not(st.knows)))
+      .then(jump(st.disp.timeout)).then(landFinalShownVia(false)).then(hear(Hub)).then(hear(Payee))
+      .then(check(st.now < TD and st.paidChain == 1 and st.revealedAt == 0 and st.v.get(Hub).epoch == 2 and st.knows == SW_ARGS))
+      .then(if (SW_ARGS) askClaim.then(landClaim) else check(true))
+      .then(closeU)
+      .then(check(paid_once and route_safe == SW_ARGS))
+  }
+
+  // #167 as built. The payee finalizes with the secret in its fresh arguments but relays the signed batch through a contract: the watcher finds
+  // no finalize op in the input, tells `finalize_unread` and no secret. The chain pays Y before TD, the hub cannot claim, the lock on U expires:
+  // the hub is out one unit under every switch (the notice is all the code does; it is told, it is not made whole).
+  run argsInWrappedFinalizeTest = {
+    init.then(if (not(SW_HIDE)) check(true) else
+      askStartWith(Payee, false).then(landStart(Payee)).then(hear(Hub)).then(hear(Payee))
+        .then(jump(st.disp.timeout)).then(landFinalShownVia(true)).then(hear(Hub)).then(hear(Payee))
+        .then(check(st.paidChain == 1 and st.revealedAt == 0 and not(st.knows)))
+        .then(closeU)
+        .then(check(paid_once and not(route_safe))))
+  }
+
+  // R-CLOCK: the payer cannot expire the lock on U before TU, whatever the hub has done by then. The model's own clock never reaches it (time
+  // passes only when the hub has asked for the claim it owes), so a rule that lets the lock expire at TD survives every random trace; here the
+  // clock is moved to TU and the expiry must be refused.
+  run payerCannotExpireBeforeTUTest = (init.then(jump(TU)).then(expireU)).fail()
 }
 
-module today_htlc_test { import hscn(SW_SEE = false, SW_DISSOLVE = false, SW_HOP = 2).* from "./htlc_test" }
-module see_htlc_test { import hscn(SW_SEE = true, SW_DISSOLVE = false, SW_HOP = 2).* from "./htlc_test" }
-module dissolve_htlc_test { import hscn(SW_SEE = false, SW_DISSOLVE = true, SW_HOP = 2).* from "./htlc_test" }
-module both_htlc_test { import hscn(SW_SEE = true, SW_DISSOLVE = true, SW_HOP = 2).* from "./htlc_test" }
-module hop0_htlc_test { import hscn(SW_SEE = true, SW_DISSOLVE = true, SW_HOP = 0).* from "./htlc_test" }
+module today_htlc_test { import hscn(SW_SEE = false, SW_DISSOLVE = false, SW_ARGS = false, SW_HIDE = false, SW_HOP = 2).* from "./htlc_test" }
+module see_htlc_test { import hscn(SW_SEE = true, SW_DISSOLVE = false, SW_ARGS = false, SW_HIDE = false, SW_HOP = 2).* from "./htlc_test" }
+module dissolve_htlc_test { import hscn(SW_SEE = false, SW_DISSOLVE = true, SW_ARGS = false, SW_HIDE = false, SW_HOP = 2).* from "./htlc_test" }
+module both_htlc_test { import hscn(SW_SEE = true, SW_DISSOLVE = true, SW_ARGS = true, SW_HIDE = false, SW_HOP = 2).* from "./htlc_test" }
+module hop0_htlc_test { import hscn(SW_SEE = true, SW_DISSOLVE = true, SW_ARGS = true, SW_HIDE = false, SW_HOP = 0).* from "./htlc_test" }
+module noargs_htlc_test { import hscn(SW_SEE = true, SW_DISSOLVE = true, SW_ARGS = false, SW_HIDE = false, SW_HOP = 2).* from "./htlc_test" }
+module wrapped_htlc_test { import hscn(SW_SEE = true, SW_DISSOLVE = true, SW_ARGS = true, SW_HIDE = true, SW_HOP = 2).* from "./htlc_test" }

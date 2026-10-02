@@ -1,0 +1,154 @@
+{
+  "files": [
+    "dispute.qnt",
+    "dispute_payall.qnt",
+    "dispute_test.qnt"
+  ],
+  "init": "init",
+  "step": "step",
+  "test": "dispute_test.qnt",
+  "testMain": "payall_test",
+  "steps": 70,
+  "mutants": [
+    {
+      "id": "early-finalize",
+      "why": "the finalize lands, and is asked for, before the window is over: the starter pays with its opening proof and the answerer's newer counter cannot land",
+      "file": "dispute.qnt",
+      "old": "if (s.disp.ctr != 0) and { s.now >= s.disp.timeout, a.n == s.disp.ctr }\n      else and { a.n == s.disp.n, (side == s.disp.starter) implies (s.now >= s.disp.timeout) }",
+      "new": "if (s.disp.ctr != 0) and { a.n == s.disp.ctr }\n      else and { a.n == s.disp.n }",
+      "killedBy": "invariant:newest_wins",
+      "also": [
+        {
+          "file": "dispute.qnt",
+          "old": "if (fc.aOn and fc.aOver and fc.cOn and fc.cReg)",
+          "new": "if (fc.aOn and fc.cOn and fc.cReg)"
+        },
+        {
+          "file": "dispute.qnt",
+          "old": "else if (fc.sOn and fc.sWin and fc.sOver and fc.sCtd == 0)",
+          "new": "else if (fc.sOn and fc.sWin and fc.sCtd == 0)"
+        }
+      ]
+    },
+    {
+      "id": "freeze-off",
+      "why": "R-DISPUTE-FREEZE: a node with a dispute record keeps sealing and accepting frames",
+      "file": "dispute.qnt",
+      "old": "pure def quiet(fc: Facts): bool = FREEZE and (fc.sOn or fc.aOn)",
+      "new": "pure def quiet(fc: Facts): bool = false",
+      "killedBy": "invariant:newest_wins"
+    },
+    {
+      "id": "live-ignores-counter",
+      "why": "LIVE: the starter that heard the registered counter finalizes with its opening proof, which the chain now refuses",
+      "file": "dispute.qnt",
+      "old": "{ on: true, n: fc.sCtd, init: fc.sNonce",
+      "new": "{ on: true, n: fc.sNonce, init: fc.sNonce",
+      "killedBy": "invariant:no_lock"
+    },
+    {
+      "id": "accept-strict",
+      "why": "ACCEPT: the non-starter takes the opening proof only when it holds something older than it, so a peer that holds the same proof never finalizes alone",
+      "file": "dispute.qnt",
+      "old": "(not(fc.cOn) and hold <= fc.aNonce)",
+      "new": "(not(fc.cOn) and hold < fc.aNonce)",
+      "killedBy": "invariant:no_lock"
+    },
+    {
+      "id": "notice-off-by-one",
+      "why": "R-DISPUTE-VOIDED-NOTICE: the committer is told only when its head is two above the finalized nonce (the off by one of #162 ad270e841); `zeroed` keeps the exact definition",
+      "file": "dispute.qnt",
+      "old": "told: if (beyond and NOTICE) mapAt(st.g.told, s, true) else st.g.told }",
+      "new": "told: if (rebase and st.comm.get(s) > e.settled + 1 and NOTICE) mapAt(st.g.told, s, true) else st.g.told }",
+      "killedBy": "invariant:no_silent_zeroing"
+    },
+    {
+      "id": "notice-never",
+      "why": "R-DISPUTE-VOIDED-NOTICE: nobody is told",
+      "file": "dispute.qnt",
+      "old": "told: if (beyond and NOTICE) mapAt(st.g.told, s, true) else st.g.told }",
+      "new": "told: st.g.told }",
+      "killedBy": "invariant:no_silent_zeroing"
+    },
+    {
+      "id": "stored-without-increment",
+      "why": "Depository.sol 965-976: a unilateral timeout stores the opening nonce, not the opening nonce plus one",
+      "file": "dispute.qnt",
+      "old": "val stored = if (st.disp.ctr != 0) st.disp.ctr else st.disp.n + 1",
+      "new": "val stored = if (st.disp.ctr != 0) st.disp.ctr else st.disp.n",
+      "killedBy": "test:epochMoveStoresAndRebasesTest"
+    },
+    {
+      "id": "rebase-keeps-comm",
+      "why": "the Entity keeps its pre-epoch frame nonce after the epoch moved",
+      "file": "dispute.qnt",
+      "old": "comm: if (rebase) mapAt(st.comm, s, e.stored + 1) else st.comm,",
+      "new": "comm: st.comm,",
+      "killedBy": "test:epochMoveStoresAndRebasesTest"
+    },
+    {
+      "id": "drop-pending-strict",
+      "why": "PAY=3: a pending frame whose nonce equals the finalized nonce is not recognised as paid and is sealed again",
+      "file": "dispute.qnt",
+      "old": "and not(DROPPAID and st.pend.n <= e.settled))\n                  mapAt(st.g.owes",
+      "new": "and not(DROPPAID and st.pend.n < e.settled))\n                  mapAt(st.g.owes",
+      "killedBy": "test:signedFrameRefusedTest",
+      "also": [
+        {
+          "file": "dispute.qnt",
+          "old": "and not(DROPPAID and st.pend.n <= e.settled)) mapAt(st.g.owesN",
+          "new": "and not(DROPPAID and st.pend.n < e.settled)) mapAt(st.g.owesN"
+        }
+      ]
+    },
+    {
+      "id": "drop-rolled-strict",
+      "why": "PAY=3: a rolled-back frame whose nonce equals the finalized nonce is not recognised as paid",
+      "file": "dispute.qnt",
+      "old": "st.g.owes.get(s) != 0 and st.g.owesN.get(s) <= e.settled)",
+      "new": "st.g.owes.get(s) != 0 and st.g.owesN.get(s) < e.settled)",
+      "killedBy": "test:rolledBackFrameTest"
+    },
+    {
+      "id": "drop-rolled-never",
+      "why": "PAY=3 without its new rule (PAY=2): a rolled-back frame is never named, its payment is sealed again (Review A on #162 61e47255)",
+      "file": "dispute.qnt",
+      "old": "else if (DROPALL and rebase and",
+      "new": "else if (false and rebase and",
+      "killedBy": "invariant:pay_once"
+    },
+    {
+      "id": "lapse-accept-off",
+      "why": "LIVE + ACCEPT: a counter the chain skipped for good lapses, and the non-starter then finalizes the opening state at once (96817e2bd `accepting` with a lapsed answer)",
+      "file": "dispute.qnt",
+      "old": "(LIVE and fc.cDead and not(fc.cReg))",
+      "new": "(false and fc.cDead and not(fc.cReg))",
+      "killedBy": "test:counterLandsAfterTheWindowTest"
+    },
+    {
+      "id": "skip-not-told",
+      "why": "LIVE: the Host reads no reason from a skipped counter (96817e2bd `skippedForGood`), so the Entity is never told it lapsed",
+      "file": "dispute.qnt",
+      "old": "f: if (LIVE and st.f.get(s).cOn and not(st.f.get(s).cReg))",
+      "new": "f: if (false and st.f.get(s).cOn and not(st.f.get(s).cReg))",
+      "killedBy": "test:counterLandsAfterTheWindowTest"
+    },
+    {
+      "id": "watch-not-candidate",
+      "why": "LIVE: only the counter the Entity asked for is a finalize candidate; one its watchtower registered is not (coordinator audit of 165)",
+      "file": "dispute.qnt",
+      "old": "if (a.aOn and LIVE) { ...a, cOn: true",
+      "new": "if (a.aOn and false) { ...a, cOn: true",
+      "killedBy": "invariant:no_lock"
+    },
+    {
+      "id": "transient-lapses",
+      "why": "LIVE: a transient revert (a batch-level fault the op did not raise) lapses the counter for good, so the Entity never asks again",
+      "file": "dispute.qnt",
+      "old": "f: if (LIVE) st.f else mapAt(st.f, s, { ...st.f.get(s), cDead: true }),",
+      "new": "f: mapAt(st.f, s, { ...st.f.get(s), cDead: true }),",
+      "killedBy": "invariant:newest_wins",
+      "samples": 15000
+    }
+  ]
+}
