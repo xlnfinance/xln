@@ -45,6 +45,10 @@ const KEEP = (): boolean => false;
 export class Cluster {
   private readonly snaps = new Map<EntityId, Look>();
   private loss: (message: Outbound) => boolean = KEEP;
+  /** Lines the nodes that crashed had written or heard, and lines that died with them: kept so the totals still balance. */
+  private gone = { sent: 0, heard: 0 };
+  /** The nodes that are stopped for now: not looked at, and not counted. */
+  private readonly down = new Set<EntityId>();
 
   private constructor(private readonly chain: Chain, private readonly setup: Setup, private readonly slots: ReadonlyMap<EntityId, Slot>) {}
 
@@ -84,7 +88,7 @@ export class Cluster {
   }
 
   private async refresh(): Promise<void> {
-    await Promise.all([...this.slots].map(async ([id, slot]) => { this.snaps.set(id, await slot.daemon.look()); }));
+    await Promise.all([...this.slots].filter(([id]) => !this.down.has(id)).map(async ([id, slot]) => { this.snaps.set(id, await slot.daemon.look()); }));
   }
 
   /** Every node is linked to each of its peers. */
@@ -117,9 +121,7 @@ export class Cluster {
     if (working !== undefined) return `${working.name} has work (chain batch ${working.look.busy}, queue ${working.look.station.host.queue.length})`;
     const behind = looks.find(({ look }) => look.cursor === undefined || look.cursor < finalized || look.watchFault !== undefined);
     if (behind !== undefined) return `${behind.name}'s J loop is at ${behind.look.cursor}, the chain is final to ${finalized} (${behind.look.watchFault ?? "no fault"})`;
-    const sent = looks.reduce((n, { look }) => n + look.counts.sent, 0);
-    const heard = looks.reduce((n, { look }) => n + look.counts.heard, 0);
-    if (sent !== heard) return `${sent - heard} lines are on their way`;
+    if (this.inFlight() !== 0) return `${this.inFlight()} lines are on their way`;
     const waiting = options.pending === true ? undefined : looks.find(({ id }) => [...(this.entity(id).accounts.values())].some((a) => a.pending !== undefined));
     return waiting === undefined ? null : `${waiting.name} has a frame waiting for its peer`;
   }
@@ -160,9 +162,33 @@ export class Cluster {
   /** A crash of one node: it stops, and comes back from its files alone on the same port; its peers dial or answer again. */
   async restart(id: EntityId): Promise<void> {
     const slot = this.slot(id);
-    await slot.daemon.stop();
+    this.down.add(id);
+    const last = await slot.daemon.stop();
+    await this.lost(id, last);
     slot.daemon = await this.launch(slot, must(await listenTcp(LOCAL, slot.port, MAX_LINE), "listen again"));
+    this.down.delete(id);
     await this.connected();
+  }
+
+  /**
+   * What the crash of `id` takes with it: the counts of the node that ended stay in the totals, and so do the lines
+   * its peers wrote to it before they saw the connection close, which no one will ever hear. They are written off once
+   * every peer has seen the close and the rest of the lines have been heard.
+   */
+  private async lost(id: EntityId, last: Look): Promise<void> {
+    this.gone = { sent: this.gone.sent + last.counts.sent, heard: this.gone.heard + last.counts.heard };
+    const runtime = this.peerOf(this.slot(id).member.party).runtime;
+    const others = [...this.slots.keys()].filter((other) => other !== id);
+    let steady = 0;
+    let before = Number.NaN;
+    await this.until(() => {
+      const apart = others.every((other) => !this.look(other).linked.includes(runtime));
+      const now = this.inFlight();
+      steady = apart && now === before ? steady + 1 : 0;
+      before = now;
+      return steady >= STABLE;
+    }, `the peers of ${this.slot(id).member.party.name} to see its connection close`);
+    this.gone = { ...this.gone, heard: this.gone.heard + this.inFlight() };
   }
 
   async stop(): Promise<void> {
@@ -193,8 +219,9 @@ export class Cluster {
   dirOf(id: EntityId): string { return this.slot(id).dir; }
   /** Lines written and not yet heard. */
   inFlight(): number {
-    const looks = [...this.slots.keys()].map((id) => this.look(id));
-    return looks.reduce((n, l) => n + l.counts.sent, 0) - looks.reduce((n, l) => n + l.counts.heard, 0);
+    const looks = [...this.slots.keys()].filter((id) => !this.down.has(id)).map((id) => this.look(id));
+    return this.gone.sent - this.gone.heard
+      + looks.reduce((n, l) => n + l.counts.sent, 0) - looks.reduce((n, l) => n + l.counts.heard, 0);
   }
   /** The J view of the Runtimes: they all hold the same one, since the J loop hands every node each height. */
   view(): JView { return this.look([...this.slots.keys()][0]!).station.host.runtime.view; }
