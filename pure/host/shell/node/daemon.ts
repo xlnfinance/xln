@@ -13,6 +13,7 @@ import { EventEmitter, on } from "node:events";
 import type { JHeight } from "../../../account/clause/clock.ts";
 import type { EntityId, EntityInput, Outbound } from "../../../entity/model.ts";
 import type { WatchFault, Watch } from "../../../j/watch.ts";
+import { mapDelete, mapSet } from "../../../kernel/core/collections.ts";
 import { err, ok, type Result } from "../../../kernel/core/result.ts";
 import type { Tagged } from "../../../kernel/core/tagged.ts";
 import { heard, submit } from "../../host.ts";
@@ -136,11 +137,11 @@ const reading = (rig: Rig, conn: ConnId, wire: Wire, rest: string): Promise<void
 
 const withWire = (rig: Rig, state: State, wire: Wire): State => {
   void reading(rig, state.next, wire, "");
-  return { ...state, wires: new Map([...state.wires, [state.next, wire]]), next: state.next + 1 };
+  return { ...state, wires: mapSet(state.wires, state.next, wire), next: state.next + 1 };
 };
 
 const without = (state: State, conn: ConnId): State => ({
-  ...state, mesh: closed(state.mesh, conn), wires: new Map([...state.wires].filter(([id]) => id !== conn)),
+  ...state, mesh: closed(state.mesh, conn), wires: mapDelete(state.wires, conn),
 });
 
 /** A write that fails is a connection that is going, and its read says so. */
