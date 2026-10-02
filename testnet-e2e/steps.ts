@@ -906,10 +906,11 @@ const disputeStale: Step<World> = {
       const told = rebasedNotices(net, id);
       if (told.length !== 0) throw new Error(`${id} was told ${shown(told)} when the epoch moved: the counter paid by the newest head, expected no offdelta_rebased`);
     });
-    // alice's frame with the payment hubX committed before the dispute was still pending, and the counter's proof holds it: the chain paid it, so no one is told.
+    // alice's frame with the payment hubX committed before the dispute was still pending, and the counter's proof holds it: the chain paid it, so alice is told once that it was paid, never that it is sent again.
     const pendingTold = [a, x].map((id) => pendingNotices(net, id, onChain.epoch + 1n));
-    if (pendingTold.some((told) => told.length !== 0)) {
-      throw new Error(`pending_rebased notices ${shown(pendingTold)} (alice, hubX) when the epoch moved to ${onChain.epoch + 1n}, expected none: the counter's proof holds alice's pending frame`);
+    const [alicesTold, hubXsTold] = pendingTold;
+    if (alicesTold?.length !== 1 || !alicesTold[0]?.includes("paid_on_chain") || hubXsTold?.length !== 0) {
+      throw new Error(`pending_rebased notices ${shown(pendingTold)} (alice, hubX) when the epoch moved to ${onChain.epoch + 1n}, expected one paid_on_chain for alice's payment and none for hubX: the counter's proof holds alice's pending frame`);
     }
     const parties = partiesOf(w);
     const now = await heldBy(chain, Object.values(parties), [[alice, hubX], [parties.hubX, parties.hubY], [parties.hubY, parties.bob]]);
@@ -922,7 +923,7 @@ const disputeStale: Step<World> = {
         `past both ${floor} s windows hubX's node, told the window was over, finalized with its counter's proof naming the dispute it answers: its journal holds one sealed batch of the counter and one of the finalize, each with its landed answer; alice's node, told of the counter, asked to finalize ${alicesFinals} times; the chain logged one start, one counter, one finalize and no skip`,
         `the chain paid by the newer state: alice ${fmt(chain, aliceGot)} and hubX ${fmt(chain, hubGot)} (ondelta ${held.ondelta} + offdelta ${newOffdelta}, collateral ${held.collateral}); the opening proof would have paid alice ${fmt(chain, stale)}`,
         `R-DISPUTE-FREEZE: inside the window each node was asked for a payment on the Account in dispute and refused it back to whoever asked with a notice (account_disputed): no frame, no new pending frame, the heads stayed, the nodes asked the chain for nothing new`,
-        `R-DISPUTE-FREEZE: the counter paid by the newest head (alice's committed ledger ${oldOffdelta} is the opening proof's, hubX's ${newOffdelta} the counter's), so no committed head was above the proof the chain paid by and neither Runtime was told an offdelta_rebased or a pending_rebased (alice's still pending frame is the one the counter's proof holds, which the chain paid)`,
+        `R-DISPUTE-FREEZE: the counter paid by the newest head (alice's committed ledger ${oldOffdelta} is the opening proof's, hubX's ${newOffdelta} the counter's), so no committed head was above the proof the chain paid by and neither Runtime was told an offdelta_rebased; alice's still pending frame is the one the counter's proof holds, which the chain paid: she was told once (pending_rebased, paid_on_chain) and her node does not seal it again`,
         `the link healed: both Runtimes read collateral ${after.collateral}, ondelta ${after.ondelta}, offdelta 0, no clause, no frame pending, one head; money held by the four entities is unchanged at ${fmt(chain, now)}`,
       ],
       gaps: [],

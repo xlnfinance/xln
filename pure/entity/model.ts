@@ -317,7 +317,7 @@ export type Notice =
     "pending_rebased",
     {
       peer: EntityId; epoch: bigint; nonce: bigint; finalizedNonce: bigint | undefined; txs: readonly AccountTx[];
-      fate: "resent_in_new_epoch";
+      fate: "resent_in_new_epoch" | "paid_on_chain";
     }
   >
   | Tagged<"cosign_refused", { from: EntityId; op: CosignOp; fault: EntityFault }>
