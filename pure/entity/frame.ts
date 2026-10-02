@@ -220,11 +220,11 @@ const reconciled = (w: Work, peer: EntityId): Work => {
  * taken back and sealed again under the new epoch if the peer refuses it as another epoch's. The peer's signature over
  * a head of the old epoch names a void epoch, so it is forgotten: a dispute from it would only revert.
  */
-const rebasing = (w: Work, peer: EntityId): Work => {
+const rebasing = (w: Work, peer: EntityId, finalized: Finalized | undefined): Work => {
   const account = w.state.accounts.get(peer);
   const forgot = { ...w, state: { ...w.state, proofs: mapDelete(w.state.proofs, peer) } };
   if (account === undefined) return forgot;
-  const told = destroyed(forgot, peer, account, factsOf(w, peer).epoch);
+  const told = destroyed(forgot, peer, account, finalized);
   return withReplica(told, peer, {
     ...account,
     state: rebased(account.state),
@@ -232,16 +232,35 @@ const rebasing = (w: Work, peer: EntityId): Work => {
   });
 };
 
+/** The proof a dispute finalize paid by: its nonce, the epoch it moved to and the nonce of the node's own head. */
+type Finalized = Readonly<{ nonce: bigint; epoch: bigint; committed: bigint | undefined }>;
+
 /**
- * R-DISPUTE-FREEZE: the rebase zeroes offdelta, so each token whose committed state carried some is told to the node's
- * owner with the amount the node counted, whichever path moved the epoch (a finalize, a withdrawal, a settlement), and
- * none whose offdelta is zero. What the chain paid for the proof it finalized is read there, not here: a frame in
- * flight is kept and sealed again, so it is not lost and not told.
+ * The finalize that moved the epoch on, when it was one: a dispute was open on the Account, and a settlement or a C2R
+ * is reverted by the chain while one is, so no other path moves the epoch then. `stored` is the nonce the chain keeps
+ * after a finalize, the finalized proof's own.
  */
-const destroyed = (w: Work, peer: EntityId, account: EntityReplica, epoch: bigint): Work =>
-  [...account.state.ledgers].reduce((acc, [token, l]) => (l.offdelta === 0n
-    ? acc
-    : noting(acc, { _tag: "offdelta_rebased", peer, token, epoch, offdelta: l.offdelta })), w);
+const finalizedBy = (w: Work, facts: ChainFacts, e: Extract<JEvent, { _tag: "j_epoch" }>): Finalized | undefined =>
+  (inDispute(facts)
+    ? { nonce: e.stored, epoch: e.epoch, committed: proofNonce(facts, w.state.accounts.get(e.peer)?.used ?? 0) }
+    : undefined);
+
+/**
+ * R-DISPUTE-FREEZE: a finalize moved the epoch on and the rebase zeroes offdelta. If the committed head is above the
+ * proof the finalize paid by (a frame the proof does not hold: one committed after the proof was signed, or sealed
+ * before the dispute and acked after it), each token is told to the node's owner with both nonces and the offdelta the
+ * node counted. A head at or below the finalized proof lost nothing, and a settlement or a withdrawal moving the epoch
+ * tells nothing. The offdelta the proof holds is not here: the node that lost something is not the one that opened with
+ * the proof, so it holds none of its body; the chain's DisputeFinalized for the nonce says what was paid.
+ */
+const destroyed = (w: Work, peer: EntityId, account: EntityReplica, finalized: Finalized | undefined): Work => {
+  if (finalized === undefined || finalized.committed === undefined || finalized.committed <= finalized.nonce) return w;
+  const { committed, nonce, epoch } = finalized;
+  return [...account.state.ledgers].reduce((acc, [token, l]) => noting(acc, {
+    _tag: "offdelta_rebased", peer, token, epoch, committedNonce: committed, offdelta: l.offdelta,
+    finalizedNonce: nonce,
+  }), w);
+};
 
 /** The chain's collateral and ondelta for one token, kept; one with no ledger past the cap is told and dropped. */
 const holding = (w: Work, e: Extract<JEvent, { _tag: "j_collateral" }>): Work => {
@@ -280,7 +299,7 @@ const chainFact = (w: Work, e: JEvent): Work => {
   switch (e._tag) {
     case "j_epoch": {
       const moved = epochAdvanced(facts, e.epoch, e.stored);
-      return moved === facts ? w : rebasing(withFacts(w, e.peer, moved), e.peer);
+      return moved === facts ? w : rebasing(withFacts(w, e.peer, moved), e.peer, finalizedBy(w, facts, e));
     }
     case "j_dispute":
       return withFacts(w, e.peer, e.by === sideOf(w.state.id, e.peer)

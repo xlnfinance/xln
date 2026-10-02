@@ -40,6 +40,13 @@ export type Config = Readonly<{
 
 export type Stopped = Tagged<"stopped">;
 
+/**
+ * A node that reads the chain at `depth` acts on a reveal one block after its own view reaches `deadline - lag`: the
+ * payee's reveal lands at `view + depth + 1` at the earliest, so a `lag` of `depth` or less puts it past the deadline,
+ * where the clause is expirable and the hub that forwarded the lock hears the secret too late to pass it up.
+ */
+export type ClockBelowDepth = Tagged<"clock_below_depth", { lag: bigint; depth: bigint }>;
+
 /** What ends a node's work: a disk, the chain's submit path, the Runtime, or a watcher invariant broken. */
 export type NodeFault = DriveFault | WatchFault | BadPeer | BadSecret;
 
@@ -346,7 +353,13 @@ const STOPPED: Result<never, Stopped> = err({ _tag: "stopped" });
  * A node over `listener`, which the caller has made so that its port is known to the peers' tables. It dials the peers
  * it is to dial, answers the ones that dial it, and runs until `stop`.
  */
-export const startDaemon = async (config: Config, listener: Listener): Promise<Result<Daemon, DriveFault>> => {
+export const startDaemon = async (
+  config: Config, listener: Listener,
+): Promise<Result<Daemon, DriveFault | ClockBelowDepth>> => {
+  const { lag } = config.boot.setup.clock;
+  if (config.watch !== undefined && lag <= config.watch.depth) {
+    return err({ _tag: "clock_below_depth", lag, depth: config.watch.depth });
+  }
   const started = await start(config.shell, config.boot);
   if (!started.ok) return started;
   const bus = new EventEmitter();
