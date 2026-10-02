@@ -28,7 +28,7 @@ const PATIENCE_MS = 60_000;
 const DEPTH = 1n;
 
 const nonce = (): Uint8Array => crypto.getRandomValues(new Uint8Array(32));
-const shown = (x: unknown): string => JSON.stringify(x, (_, v) => (typeof v === "bigint" ? v.toString() : v instanceof Uint8Array ? "bytes" : v));
+export const shown = (x: unknown): string => JSON.stringify(x, (_, v) => (typeof v === "bigint" ? v.toString() : v instanceof Uint8Array ? "bytes" : v));
 
 /** A party and the parties it has an Account with: who it dials and answers. */
 export type Member = Readonly<{ party: Party; peers: readonly Party[] }>;

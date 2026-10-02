@@ -22,7 +22,7 @@ jobs:
   lane-label:
     name: Lane label
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
     steps:
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -38,19 +38,34 @@ jobs:
 
       # What this pull request now carries, or no longer holds, can change the answer for every other pull request with a
       # lane label (a closed or relabelled holder frees its lane, a reopened or newly labeled one takes it): their lane check
-      # runs again. A run still going is waited for first, because GitHub does not re-run a run in progress; the re-run raises
-      # no label event, so this does not loop.
+      # runs again. Only the first attempt fans out: a re-run keeps the payload of the event that started the run, action
+      # included, so a re-run of a labeled run would fan out again and re-run the others, which re-run it back; the runs then
+      # pile up and GitHub refuses a re-run while one is going ("This workflow is already running"). A re-run changes no label,
+      # so it has nothing to tell the others.
+      # The check reads the open pull requests when its list step runs, not from its event. A run of the other pull request
+      # whose current attempt started at or after this one (or is still queued) reads them after this event, so it is left
+      # alone. One that started earlier may have read them before this event: it is waited for and then re-run, because
+      # GitHub does not re-run a run in progress.
       - name: Run the lane check again for the other pull requests with a lane
-        if: ${{ !cancelled() && contains(fromJSON('["closed", "reopened", "labeled", "unlabeled", "edited"]'), github.event.action) }}
+        if: ${{ !cancelled() && contains(fromJSON('["closed", "reopened", "labeled", "unlabeled", "edited"]'), github.event.action) && github.run_attempt == '1' }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          since=$(gh run view "$GITHUB_RUN_ID" --json startedAt --jq .startedAt)
           bash .github/scripts/lane-label.sh others "${{ github.event.pull_request.number }}" "$RUNNER_TEMP/open-prs.json" | while read -r number branch; do
             run=$(gh run list --workflow lane-label.yml --branch "$branch" --event pull_request --limit 1 --json databaseId --jq '.[0].databaseId // empty')
             if [ -z "$run" ]; then echo "lane-label: pull request $number has no lane check run yet"; continue; fi
-            for _ in 1 2 3 4 5 6 7 8 9 10 11 12; do
-              [ "$(gh run view "$run" --json status --jq .status)" = completed ] && break
+            state=running
+            for _ in $(seq 1 24); do
+              info=$(gh run view "$run" --json status,startedAt --jq '"\(.status) \(.startedAt)"') || info=""
+              status=${info%% *} started=${info#* }
+              if [ "$status" = completed ]; then state=completed; break; fi
+              if [ -n "$status" ] && { [ "$status" != in_progress ] || [[ ! "$started" < "$since" ]]; }; then state=current; break; fi
               sleep 5
             done
-            gh run rerun "$run" && echo "lane-label: ran the check again for pull request $number" || echo "lane-label: could not run the check again for pull request $number"
+            case "$state" in
+              current) echo "lane-label: the check for pull request $number ($status, started $started) reads the pull requests after this event" ;;
+              completed) gh run rerun "$run" && echo "lane-label: ran the check again for pull request $number" || echo "::warning::lane-label: could not run the check again for pull request $number (run $run)" ;;
+              *) echo "::warning::lane-label: the check for pull request $number (run $run) started before this event and was still running after 2 minutes; re-run it by hand" ;;
+            esac
           done
