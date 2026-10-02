@@ -148,7 +148,8 @@ module hscn {
       .then(check(paid_once and route_safe == SW_ARGS))
   }
 
-  // #167 as built. The payee finalizes with the secret in its fresh arguments but relays the signed batch through a contract: the watcher finds
+  // #167 as built. The payee finalizes with the secret in its fresh arguments but relays the signed batch through a contract, or calls the tower
+  // entry point (watchtowerCounterDispute) directly: the watcher finds
   // no finalize op in the input, tells `finalize_unread` and no secret. The chain pays Y before TD, the hub cannot claim, the lock on U expires:
   // the hub is out one unit under every switch (the notice is all the code does; it is told, it is not made whole).
   run argsInWrappedFinalizeTest = {
