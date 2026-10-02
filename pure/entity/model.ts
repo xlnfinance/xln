@@ -108,8 +108,11 @@ export type Against = Readonly<{
   nonce: bigint; proposerIsLeft: boolean; bodyHash: string; window: bigint; over: boolean; answer: Answer | undefined;
 }>;
 
-/** The counter the node asked for, and whether the chain registered it: only a registered counter is finalized with. */
-export type Answer = Readonly<{ counter: DisputeCounter; registered: boolean }>;
+/**
+ * The counter the node asked for, whether the chain registered it (only a registered counter is finalized with), and
+ * whether the Host dropped it because it would revert, after which it is not asked again.
+ */
+export type Answer = Readonly<{ counter: DisputeCounter; registered: boolean; lapsed: boolean }>;
 
 /**
  * A dispute the node asked the chain to open (R-DISPUTE-START, R-DISPUTE-FINALIZE): what it asked with, the end of the
@@ -134,8 +137,9 @@ export type PeerMessage = Tagged<"peer_message", { from: EntityId; msg: Msg<Acco
  * clock having passed that end for a dispute this node started or answers (R-DISPUTE-FINALIZE); `j_dispute_over` is
  * that dispute finalized, which pays the Account out; `j_start_lapsed` is the Host telling that the start this node
  * asked for (the one of that `nonce`) was dropped from its draft because it would revert and so will never open a
- * dispute (R-DISPUTE-LAPSED); `j_op_lapsed` is a co-signed settlement or withdrawal that can no longer land (its batch
- * reverted, its signatures ran out), named by the serial its action carried: a report of an operation that is not the
+ * dispute (R-DISPUTE-LAPSED); `j_counter_lapsed` is the same for the counter this node asked for (the one of that
+ * `nonce`), which the chain would revert for good, so the node stops asking for it; `j_op_lapsed` is a co-signed
+ * settlement or withdrawal that can no longer land (its batch reverted, its signatures ran out), named by the serial its action carried: a report of an operation that is not the
  * one out (a repeat, or an older one) changes nothing; `j_collateral` is what the chain holds for one token of the
  * Account now (R-J-COLLATERAL): a state, not a change, so a repeat is a no-op.
  */
@@ -152,6 +156,7 @@ export type JEvent =
   | Tagged<"j_window_over", { peer: EntityId }>
   | Tagged<"j_dispute_over", { peer: EntityId }>
   | Tagged<"j_start_lapsed", { peer: EntityId; nonce: bigint }>
+  | Tagged<"j_counter_lapsed", { peer: EntityId; nonce: bigint }>
   | Tagged<"j_collateral", { peer: EntityId; token: TokenId; collateral: bigint; ondelta: bigint }>
   | Tagged<"j_op_lapsed", { peer: EntityId; serial: bigint }>;
 

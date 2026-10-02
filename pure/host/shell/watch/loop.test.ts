@@ -145,4 +145,15 @@ describe("host/shell/watch the J loop's poll", () => {
     expect(told({ ...freshChain, against })).toEqual(ok([{ to: LEFT, peer: RIGHT, timeout: 55n }]));
     expect(told({ ...freshChain, against: { ...against, over: true } })).toEqual(ok([]));
   });
+
+  test("R-DISPUTE-WATCH a start of the node's own that never got a window does not hide the dispute against it", () => {
+    const asked = { peer: peer(RIGHT) } as Starting["start"];
+    const against = { nonce: 3n, proposerIsLeft: true, bodyHash: "0x01", window: 55n, over: false, answer: undefined };
+    const told = (starting: Partial<Starting>) => windowsOf(LEFT, new Map([[peer(RIGHT), {
+      ...freshChain, against, starting: { start: asked, window: undefined, over: false, countered: false, ...starting },
+    }]]));
+    expect(told({})).toEqual(ok([{ to: LEFT, peer: RIGHT, timeout: 55n }]));
+    expect(told({ window: 40n, over: true })).toEqual(ok([{ to: LEFT, peer: RIGHT, timeout: 55n }]));
+    expect(told({ window: 40n })).toEqual(ok([{ to: LEFT, peer: RIGHT, timeout: 40n }]));
+  });
 });
