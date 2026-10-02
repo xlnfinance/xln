@@ -144,6 +144,11 @@
    "kind": "test",
    "layer": "ts",
    "name": "R-DISPUTE-LAPSED the return data of a call that succeeded is no error: the logs name the cause"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DISPUTE-LAPSED a counter is not given up while the chain refuses a batch of no op at its nonce"
   }
  ]
 }
