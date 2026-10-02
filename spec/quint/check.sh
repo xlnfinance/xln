@@ -147,4 +147,11 @@ if [ "$DISPUTE" = 1 ]; then
     if echo "$out" | grep -q "Invariant violated"; then echo "   reached  $w"; else echo "   UNREACHED $w"; exit 1; fi
   done
 fi
+if [ "$DISPUTE" = 1 ] && [ "${MUTANTS:-0}" = "1" ]; then
+  # the dispute and htlc models' mutants (mutants/dispute_payall.json, mutants/htlc_both.json): every property and scenario test must kill its mutant
+  echo "== dispute: mutants"
+  MUTANT_STEPS=70 python3 mutants/run.py dispute_payall
+  echo "== htlc: mutants"
+  MUTANT_STEPS=40 python3 mutants/run.py htlc_both
+fi
 echo "check.sh: all green"

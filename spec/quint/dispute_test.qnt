@@ -79,6 +79,54 @@ module scn {
       .then(check(if (LIVE) st.g.settledLast == 3 and not(st.g.lostNewest) else st.g.settledLast == 2 and st.g.lostNewest))
   }
 
+  // The chain stores the nonce it settled on plus one when a dispute ends on the timeout, moves to the next epoch, and both Entities rebase
+  // on it: their committed nonce is the stored one plus one (S10, `_advanceOndeltaEpoch`). A mutant that stores the settled nonce itself, or an
+  // Entity that keeps its old committed nonce across the move, fails here.
+  run epochMoveStoresAndRebasesTest = {
+    init
+      .then(seal(Left)).then(receive).then(ack)
+      .then(opStart(Left)).then(duty(Left)).then(landStart(Left))
+      .then(jump(5)).then(windowOver)
+      .then(hear(Left)).then(hear(Left)).then(duty(Left)).then(landFinal(Left))
+      .then(hear(Left)).then(hear(Right)).then(hear(Right)).then(hear(Right))
+      .then(check(st.chStored == 3 and st.chEpoch == 2 and st.comm.get(Left) == 4 and st.comm.get(Right) == 4))
+  }
+
+  // The non-starter's watchtower registers a counter its Entity never asked for, then the starter goes down. Today the Entity holds something
+  // newer than the opening, so ACCEPT does not apply, and the counter is not the one it asked for: nothing asks for a finalize and the Account stays
+  // locked. With LIVE the registered counter is the Entity's to finalize with (the chain lets either party execute it after the window).
+  run watchtowerCounterTest = {
+    init
+      .then(seal(Left)).then(receive).then(ack)
+      .then(seal(Left)).then(receive)
+      .then(opStart(Left)).then(duty(Left)).then(landStart(Left))
+      .then(crash(Left))
+      .then(watchCounter(Right))
+      .then(check(st.disp.ctr == 3))
+      .then(hear(Right)).then(hear(Right))
+      .then(jump(5)).then(windowOver)
+      .then(hear(Right)).then(duty(Right))
+      .then(check(if (SW_LIVE) st.askF.get(Right).on and st.askF.get(Right).n == 3 else not(st.askF.get(Right).on)))
+  }
+
+  // R's counter lands after the window closed (the J transaction took longer than the window: nothing enforces inclusion within LAG, and
+  // the model's own clock never lets it happen). The chain skips it for good (DisputeOpSkipped, window closed). Today the skip is read by
+  // nobody and the counter stays pending. With LIVE the Host reads the reason (96817e2bd `skippedForGood`) and R is told it lapsed; with
+  // ACCEPT it then finalizes with the opening state at once, which is what the starter does anyway, so nobody waits on a lost counter.
+  run counterLandsAfterTheWindowTest = {
+    init
+      .then(seal(Left)).then(receive).then(ack)
+      .then(seal(Left)).then(receive)
+      .then(opStart(Left)).then(duty(Left)).then(landStart(Left))
+      .then(hear(Right)).then(duty(Right))
+      .then(check(st.askC.get(Right).on))
+      .then(jump(5)).then(windowOver)
+      .then(landCounter(Right))
+      .then(check(st.disp.ctr == 0 and st.f.get(Right).cDead == SW_LIVE))
+      .then(hear(Right)).then(duty(Right))
+      .then(check(if (SW_LIVE and SW_ACCEPT) st.askF.get(Right).on and st.askF.get(Right).n == 2 else not(st.askF.get(Right).on)))
+  }
+
   // R counters, the counter registers, and R goes down for good. The window ends. Today the starter L heard the counter and asks
   // for nothing: the Account stays locked as long as R is down. With LIVE it finalizes with the counter's proof.
   run starterNeverFinalizesTest = {

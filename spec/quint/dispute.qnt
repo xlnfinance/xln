@@ -160,7 +160,10 @@ module dispute {
       else { ...fc, aOn: true, aNonce: e.n, aOver: false, cOn: false, cNonce: 0, cReg: false, cDead: false }
     } else if (e.kind == 1) {
       val a = if (fc.sOn and fc.sWin) { ...fc, sCtd: e.n } else fc
-      if (a.aOn and a.cOn and a.cNonce == e.n) { ...a, cReg: true } else a
+      // LIVE: a counter registered by anyone is the Entity's to finalize with, the Entity's own ask or its watchtower's (a counter of nonce
+      // `e.n` is the one the chain executes at the end of the window); before, only the counter the Entity asked for was
+      if (a.aOn and LIVE) { ...a, cOn: true, cNonce: e.n, cReg: true, cDead: false }
+      else if (a.aOn and a.cOn and a.cNonce == e.n) { ...a, cReg: true } else a
     } else if (e.kind == 2) {
       { ...fc, sOver: fc.sOn and fc.sWin, aOver: fc.aOn }
     } else {
@@ -179,7 +182,7 @@ module dispute {
     if (fc.aOn and fc.aOver and fc.cOn and fc.cReg) { on: true, n: fc.cNonce, init: fc.aNonce, epoch: fc.epoch, at: now }
     else if (fc.sOn and fc.sWin and fc.sOver and fc.sCtd == 0) { on: true, n: fc.sNonce, init: fc.sNonce, epoch: fc.epoch, at: now }
     else if (LIVE and fc.sOn and fc.sWin and fc.sOver and fc.sCtd != 0) { on: true, n: fc.sCtd, init: fc.sNonce, epoch: fc.epoch, at: now }
-    else if (ACCEPT and fc.aOn and not(fc.cOn) and hold <= fc.aNonce) { on: true, n: fc.aNonce, init: fc.aNonce, epoch: fc.epoch, at: now }
+    else if (ACCEPT and fc.aOn and ((not(fc.cOn) and hold <= fc.aNonce) or (LIVE and fc.cDead and not(fc.cReg)))) { on: true, n: fc.aNonce, init: fc.aNonce, epoch: fc.epoch, at: now }
     else NO_ASK
 
   // The counter the Entity asks for: the one it asked first, restated until registered or lapsed; or, with none yet, the newest
@@ -435,7 +438,11 @@ module dispute {
     all {
       a.on,
       if (not(st.disp.on) or st.now >= st.disp.timeout or a.init != st.disp.n or s == st.disp.starter or a.n <= st.disp.n or a.n <= st.disp.ctr)
-        st' = { ...st, askC: mapAt(st.askC, s, NO_ASK) }
+        // a counter the chain skipped is skipped for good (window over, dispute moved, not newer, superseded or registered): with LIVE
+        // the Host reads the skip's reason (96817e2bd, `skippedForGood`) and the Entity is told it lapsed
+        st' = { ...st, askC: mapAt(st.askC, s, NO_ASK),
+                f: if (LIVE and st.f.get(s).cOn and not(st.f.get(s).cReg)) mapAt(st.f, s, { ...st.f.get(s), cDead: true }) else st.f,
+                fresh: if (LIVE) mapAt(st.fresh, s, true) else st.fresh }
       else
         st' = { ...st,
           askC: mapAt(st.askC, s, NO_ASK),
@@ -443,6 +450,17 @@ module dispute {
           log: st.log.append({ kind: 1, by: s, n: a.n, epoch: st.chEpoch, timeout: 0, settled: 0, stored: 0 }),
           g: { ...st.g, counters: st.g.counters + 1 } }
     }
+  }
+
+  // The non-starter's watchtower registers a counter the Entity did not ask for (the Entity is slow, or restarts): the chain takes the
+  // nonce the node holds if it is newer than the dispute's and than any counter, inside the window.
+  action watchCounter(s: Side): bool = all {
+    st.disp.on, s != st.disp.starter, st.now < st.disp.timeout, st.f.get(s).epoch == st.chEpoch,
+    not(st.f.get(s).cOn), st.hold.get(s) > st.disp.n, st.hold.get(s) > st.disp.ctr,
+    st' = { ...st,
+      disp: { ...st.disp, ctr: st.hold.get(s) },
+      log: st.log.append({ kind: 1, by: s, n: st.hold.get(s), epoch: st.chEpoch, timeout: 0, settled: 0, stored: 0 }),
+      g: { ...st.g, counters: st.g.counters + 1 } }
   }
 
   // The newest co-signed proof of the epoch, and whether a live party could have put it on the chain: a non-starter that holds it
@@ -519,7 +537,7 @@ module dispute {
     { nondet s = SIDES.oneOf()
       any {
       hear(s), crash(s), restart(s), seal(s), duty(s), opStart(s), dropStart(s), dropCounter(s),
-      landStart(s), landCounter(s), landFinal(s), landSigFinal(s)
+      landStart(s), landCounter(s), watchCounter(s), landFinal(s), landSigFinal(s)
     } }
   }
 
@@ -532,11 +550,16 @@ module dispute {
 
   // 2. No Account stays locked forever if either side is live. A side alone (its peer down for good) that has heard everything, run
   // its duties and sees the dispute's window over must have a finalize asked or landed.
+  // The ask names the proof the chain would take (landableFinal without the timing): the counter's if one is registered, else the opening's.
+  // An ask for another proof is refused by the chain, so it does not unlock the Account.
+  pure def askNamesTheProof(s: St, a: Ask): bool =
+    a.on and a.init == s.disp.n and a.n == (if (s.disp.ctr != 0) s.disp.ctr else s.disp.n)
+
   pure def soloOk(s: St, x: Side): bool =
     not(and {
       s.disp.on, s.disp.over, s.up.get(x), s.seen.get(x) == s.log.length(), not(s.fresh.get(x)),
       s.f.get(x).epoch == s.chEpoch, s.f.get(x).sOn or s.f.get(x).aOn,
-      not(s.askF.get(x).on)
+      not(askNamesTheProof(s, s.askF.get(x)))
     })
 
   val no_lock_left: bool = soloOk(st, Left)
