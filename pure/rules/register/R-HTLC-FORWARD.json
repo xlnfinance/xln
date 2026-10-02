@@ -1,6 +1,6 @@
 {
  "id": "R-HTLC-FORWARD",
- "statement": "An Entity that is told how a payment passes through it acts on it by itself, as frames of its Accounts: a hub that holds a lock for a hashlock it has a forward entry for locks the same amount and hashlock on the next hop with a deadline one hop (reserve plus lag) sooner, passes the secret to the lock it came in on when the next hop shows it, and gives that lock up when the next hop gives its own up or its Account refuses the lock; a lock too near its deadline for another hop is given up, not forwarded. A payee with an entry resolves a lock for the token and at least the amount it asked, and gives any other up. An entry belongs to one hashlock and one peer: only that peer's lock is forwarded, and a second entry for a hashlock is refused. Owed: a next hop that never answers (expiry and the on-chain reveal of a hub that learned the secret), entries that outlive a payment, and the fee a hub would take. An entry comes from a command or from the route a lock names (R-LOCK-ROUTE): the first hop of the route is the next hop and the rest goes on the next lock; an entry told to the hub stands over a route; a route through a peer the hub has no Account with, back to the sender, or over the limit is given up or refused.",
+ "statement": "An Entity that is told how a payment passes through it acts on it by itself, as frames of its Accounts: a hub that holds a lock for a hashlock it has a forward entry for locks the same amount and hashlock on the next hop with a deadline one hop (reserve plus lag) sooner, passes the secret to the lock it came in on when the next hop shows it, in a frame it takes, or on the chain, or in a frame it refuses as frozen (R-DISPUTE-FREEZE; a frame refused for any other fault shows nothing), and gives that lock up when the next hop gives its own up or its Account refuses the lock; a lock too near its deadline for another hop is given up, not forwarded. A payee with an entry resolves a lock for the token and at least the amount it asked, and gives any other up. An entry belongs to one hashlock and one peer: only that peer's lock is forwarded, and a second entry for a hashlock is refused. Owed: a next hop that never answers (expiry and the on-chain reveal of a hub that learned the secret), entries that outlive a payment, and the fee a hub would take. An entry comes from a command or from the route a lock names (R-LOCK-ROUTE): the first hop of the route is the next hop and the rest goes on the next lock; an entry told to the hub stands over a route; a route through a peer the hub has no Account with, back to the sender, or over the limit is given up or refused. Time to pass a secret up: a hop is `reserve + lag` heights (the next lock expires that much sooner, never at or before the view), which covers the time the hub takes to hear a payee's reveal at depth and claim upstream. A node that reads the chain at a depth is not started unless its `lag` is above the depth (`clock_below_depth`): that is about the node's own reveal as a payee, asked when its view reaches `deadline - lag`, sent at the head `depth` blocks past its view and landing one block later, so a lag of the depth or less lands it past the deadline. On an Account that is quiet (a dispute is open, or the node's signature is out on a settlement or a C2R: no frame can be sealed there, so the resolve cannot be acked) the payee reveals as soon as its resolve is asked, and no deadline is waited for. On a live Account whose peer withholds its ack the payee reveals at `deadline - lag` and the reveal lands at the deadline when `lag` is `depth + 1`, with no block to spare (owed: reveal at `deadline - (lag + depth + 1)`).",
  "source": "consolidation-plan.md e2e rows 4 and 5 (deadlines chain by HOP plus window; a downstream failure reaches A); R-HTLC-CLOCK; R-ONE-LOCK-PER-HASH; testnet-e2e step S5 (gap htlc-route)",
  "layers": {
   "arrival": "owed: spec thread (the entity page has no paybook)",
@@ -133,12 +133,17 @@
   {
    "kind": "test",
    "layer": "ts",
+   "name": "R-HTLC-FORWARD a resolve in a frame accepted over the hub's own pending frame is learned and passed up"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
    "name": "R-HTLC-FORWARD a resolve in a frame that is refused leaves the entry locked and nothing passed up"
   },
   {
    "kind": "test",
    "layer": "ts",
-   "name": "R-HTLC-FORWARD a resolve in a frame accepted over the hub's own pending frame is learned and passed up"
+   "name": "R-HTLC-FORWARD a node whose clock lag is not above its read depth is not started"
   }
  ]
 }

@@ -3,31 +3,32 @@
 // frame's commands does not matter, and a command always sees what the arrivals of its own frame did (R-E1).
 import { mapDelete, mapSet } from "../kernel/core/collections.ts";
 import { emptyReplica } from "../account/frame/account.ts";
-import type { JView } from "../account/clause/clock.ts";
+import type { JHeight, JView } from "../account/clause/clock.ts";
 import {
   propose, receive, resend, submit, type FrameHash, type Heard, type Msg, type Outcome,
 } from "../account/frame/frame.ts";
 import { revealOnChainDue } from "../account/clause/clock.ts";
 import type { AccountState, Side } from "../account/model.ts";
 import { proofBodyOf, type ProofTerms } from "../account/proof/body.ts";
+import { proofBodyHash, type ProofBody } from "../chain/proof/proof.ts";
 import type { Check } from "./signing/attest.ts";
 import { signingOf, type Anchor } from "./signing/signing.ts";
-import { holderOf, ledgerOf, rebased, withHeld } from "../account/state.ts";
+import { dissolved, holderOf, ledgerOf, rebased, withHeld } from "../account/state.ts";
 import { MAX_AMOUNT } from "../account/ledger.ts";
 import {
   answered, cosignFrozen, cosignLapsed, counterLapsed, countered, depositable, disputeAsked, disputeOpened, disputeOver,
-  epochAdvanced,
-  framed, freshChain, keepHolding, nextSerial, paidOut, proofNonce, startLapsed, windowOpened, windowOver, withWindows,
+  epochAdvanced, framed, freshChain, inDispute, keepHolding, nextSerial, paidOut, proofNonce, quiet, startLapsed,
+  windowOpened, windowOver, withWindows,
 } from "./chain.ts";
 import { entityRules, type EntityRules } from "./rules.ts";
-import { hashlocksOf, intentFor, learned, withEntry, type Intent } from "./paybook/paybook.ts";
+import { hashlocksOf, intentFor, learned, revealed, revealedBy, withEntry, type Intent } from "./paybook/paybook.ts";
 import { askedOf, cosignFault, foldsOf, withdrawalOf } from "./cosign.ts";
 import type { AccountTx, Judge } from "../account/tx.ts";
 import {
   sideOf, type AccountCommand, type Arrival, type ChainCommand, type ChainFacts, type Command, type CosignAsk,
   type DisputeCounter, type DisputeStart, type EntityFault, type Entry, type EntityId, type EntityInput,
   type EntityReplica, type EntityState, type Hook, type JAction, type JEvent, type Notice, type Outbound,
-  type PaybookCommand, type PeerFault, type PeerMessage, type PeerProof,
+  type PaybookCommand, type PeerFault, type PeerMessage, type PeerProof, type SecretRevealed,
 } from "./model.ts";
 
 export type Frame = Readonly<{
@@ -110,11 +111,26 @@ const cosigned = (outcome: Outcome<PeerFault>, own: EntityReplica["pending"], fa
   outcome._tag === "accepted" || outcome._tag === "accepted_over_own"
   || (outcome._tag === "committed_own" && own?.frame.epoch === facts.epoch);
 
-/** A frame of the peer that was taken tells the paybook what the peer answered to the locks made to it. */
-const takenFrom = (w: Work, a: PeerMessage, outcome: Outcome<PeerFault>): Work =>
-  (a.msg._tag === "frame" && (outcome._tag === "accepted" || outcome._tag === "accepted_over_own")
-    ? { ...w, state: { ...w.state, paybook: learned(w.state.paybook, a.from, a.msg.frame.txs) } }
-    : w);
+/**
+ * A frame of the peer that was taken tells the paybook what the peer answered to the locks made to it. A frame refused
+ * as frozen (an Account in dispute refuses every frame its peer proposes) still shows the secrets of its resolves: a
+ * secret proves itself by its hash, and the hub that holds the lock upstream must not lose it to the freeze
+ * (R-DISPUTE-FREEZE). A frame refused for any other fault is no news.
+ */
+const takenFrom = (w: Work, a: PeerMessage, outcome: Outcome<PeerFault>): Work => {
+  if (a.msg._tag !== "frame") return w;
+  const { txs } = a.msg.frame;
+  const book = w.state.paybook;
+  if (outcome._tag === "accepted" || outcome._tag === "accepted_over_own") {
+    return { ...w, state: { ...w.state, paybook: learned(book, a.from, txs) } };
+  }
+  const frozen = outcome._tag === "refused_invalid" && outcome.fault._tag === "frozen";
+  return frozen ? { ...w, state: { ...w.state, paybook: revealedBy(book, txs) } } : w;
+};
+
+/** A secret the chain showed (R-DISPUTE-FREEZE): to the paybook it is the resolve of the payee, on any Account. */
+const secretShown = (w: Work, e: SecretRevealed): Work =>
+  ({ ...w, state: { ...w.state, paybook: revealed(w.state.paybook, e.secret) } });
 
 /** The side whose frame made the head the round took: mine when the peer's ack committed it, the peer's otherwise. */
 const authorOf = (heard: Heard<AccountTx, AccountState, PeerFault>): Side => {
@@ -149,9 +165,18 @@ const sealedNow = (rules: EntityRules, outcome: Outcome<PeerFault>, pending: Ent
   outcome._tag !== "committed_own"
   || (pending !== undefined && pending.frame.epoch === rules.epoch && pending.frame.firstNonce === rules.firstNonce);
 
+/**
+ * R-DISPUTE-FREEZE: the ack of a frame of mine that was sealed before the dispute commits nothing while the dispute is
+ * open: the head stays the one the dispute rests on. The frame stays pending (the peer, which committed it, is told
+ * again at the epoch that follows, and a frame the new epoch does not accept is sealed anew like any other).
+ */
+const ackedInDispute = (w: Work, a: PeerMessage): boolean =>
+  a.msg._tag === "ack" && inDispute(factsOf(w, a.from));
+
 const hearing = (rules: Rulebook, check: Check, view: JView, w: Work, a: PeerMessage): Work => {
   const account = w.state.accounts.get(a.from);
   if (account === undefined) return noting(w, { _tag: "unknown_peer", from: a.from });
+  if (ackedInDispute(w, a)) return w;
   const rule = rules(w, a.from);
   const heard = receive(rule, account, a.msg);
   const head = heard.replica.head;
@@ -196,15 +221,193 @@ const reconciled = (w: Work, peer: EntityId): Work => {
  * taken back and sealed again under the new epoch if the peer refuses it as another epoch's. The peer's signature over
  * a head of the old epoch names a void epoch, so it is forgotten: a dispute from it would only revert.
  */
-const rebasing = (w: Work, peer: EntityId): Work => {
+const rebasing = (w: Work, peer: EntityId, finalized: Finalized | undefined): Work => {
   const account = w.state.accounts.get(peer);
   const forgot = { ...w, state: { ...w.state, proofs: mapDelete(w.state.proofs, peer) } };
-  return account === undefined ? forgot : withReplica(forgot, peer, {
+  if (account === undefined) return forgot;
+  const told = destroyed(forgot, peer, account, finalized);
+  // The txs the chain paid are in no frame the node seals again: not in the pending frame (it gives back only the rest
+  // if it is rolled back), not in the mempool.
+  const settled = finalized?.paid?.txs ?? [];
+  const inFrame = withoutPaid(account.pending?.frame.txs ?? [], settled);
+  const inQueue = withoutPaid(account.mempool, withoutPaid(settled, inFrame.removed).kept);
+  return withReplica(told, peer, {
     ...account,
     state: rebased(account.state),
-    pending: account.pending === undefined ? undefined : { ...account.pending, after: rebased(account.pending.after) },
+    mempool: inQueue.kept,
+    pending: account.pending === undefined ? undefined : {
+      ...account.pending, after: rebased(account.pending.after),
+      ...(settled.length === 0 ? {} : { owed: inFrame.kept }),
+    },
   });
 };
+
+/**
+ * The proof a dispute finalize paid by: its nonce (unknown when no proof the node can name has the hash the chain
+ * logged), the epoch it moved to, the nonce of the node's own head, and the nonce its pending frame would have signed
+ * (all under the epoch that ended).
+ */
+type Finalized = Readonly<{
+  nonce: bigint | undefined; epoch: bigint; committed: bigint | undefined; pending: bigint | undefined;
+  paid: Paid | undefined;
+}>;
+
+/** The frame of its own the node signed that the chain paid by, as the one lookup that names the nonce finds it. */
+type Paid = Readonly<{ nonce: bigint; txs: readonly AccountTx[] }>;
+
+/**
+ * A proof the node can name: the nonce it was signed at and the hash of its body. `own` marks the node's own committed
+ * state, the state its pending frame would commit and the state of each frame it signed and then rolled back, with the
+ * txs of the frame (the peer holds the signature of a rolled-back frame as it does of any other, R-SIGNED-IS-LIVE).
+ */
+type Named = Readonly<{
+  nonce: bigint | undefined; hash: string | undefined; own?: "committed" | "pending" | "signed";
+  txs?: readonly AccountTx[] | undefined;
+}>;
+
+const hashOf = (body: ProofBody): string | undefined => {
+  const hash = proofBodyHash(body);
+  return hash.ok ? hash.value : undefined;
+};
+
+const stateHash = (terms: ProofTerms, state: AccountState): string | undefined => {
+  const body = proofBodyOf(terms, state);
+  return body.ok ? hashOf(body.value) : undefined;
+};
+
+/**
+ * Every proof the node can name for its Account with `peer`, in the order a hash found twice is read: the counter the
+ * chain registered against its own start (a state it may not hold), the proof the peer's dispute opened with
+ * (likewise), its committed state, the state its pending frame would commit and the state of every frame it signed in
+ * this epoch that no commit has superseded (a frame the peer refused and the node took back is one). A dispute the
+ * node started opened with its committed state and its own counter was built from it: the freeze commits nothing after
+ * either (R-DISPUTE-FREEZE).
+ */
+const proofsKnown = (terms: ProofTerms, facts: ChainFacts, account: EntityReplica): readonly Named[] => {
+  const { starting, against } = facts;
+  const pending = account.pending;
+  return [
+    { nonce: starting?.countered?.nonce, hash: starting?.countered?.bodyHash },
+    { nonce: against?.nonce, hash: against?.bodyHash },
+    { nonce: proofNonce(facts, account.used), hash: stateHash(terms, account.state), own: "committed" },
+    {
+      nonce: pending === undefined ? undefined : pending.frame.firstNonce + BigInt(pending.frame.slot) - 1n,
+      hash: pending === undefined ? undefined : stateHash(terms, pending.after),
+      own: "pending", txs: pending?.frame.txs,
+    },
+    ...account.unsuperseded.flatMap((entry): readonly Named[] => {
+      const { sealed } = entry;
+      if (sealed === undefined || sealed.epoch !== facts.epoch || entry.slot === pending?.frame.slot) return [];
+      return [{
+        nonce: sealed.firstNonce + BigInt(entry.slot) - 1n, hash: stateHash(terms, sealed.after), own: "signed",
+        txs: entry.txs,
+      }];
+    }),
+  ];
+};
+
+/**
+ * The finalize that moved the epoch on, when it was one: a dispute was open on the Account, and a settlement or a C2R
+ * is reverted by the chain while one is, so no other path moves the epoch then. The chain logs the hash of the body of
+ * the proof it paid by (`DisputeFinalized.finalProofbodyHash`, Depository.sol 142-148) and the Host carries it on the
+ * epoch event; the nonce is that of the proof the node holds or remembers with the same hash: the opening proof, the
+ * counter the chain registered, or a state of its own (a proof of its own that the peer finalized with). No
+ * proof with that hash is a nonce unknown, told as such, never guessed from the nonce the chain stores: a timeout
+ * stores the opening nonce plus one but a signed finalize stores its own, and the logs of the two do not differ.
+ */
+const finalizedBy = (
+  w: Work, terms: ProofTerms, facts: ChainFacts, e: Extract<JEvent, { _tag: "j_epoch" }>,
+): Finalized | undefined => {
+  if (!inDispute(facts)) return undefined;
+  const account = w.state.accounts.get(e.peer);
+  const hash = e.finalBodyHash?.toLowerCase();
+  const matched = account === undefined || hash === undefined
+    ? []
+    : proofsKnown(terms, facts, account).filter((proof) => proof.hash?.toLowerCase() === hash);
+  // A frame of the node's own whose state has the committed state's body adds nothing a proof holds (a quote is no
+  // clause until it is filled): the chain paid nothing of it, and it does not name the proof.
+  const neutral = matched.some((proof) => proof.own === "committed")
+    && matched.some((proof) => proof.own === "pending" || proof.own === "signed");
+  const named = neutral ? matched.filter((proof) => proof.own === undefined || proof.own === "committed") : matched;
+  const byNonce = (x: Named, y: Named): number => ((x.nonce ?? -1n) < (y.nonce ?? -1n) ? 1 : -1);
+  const [top] = named.toSorted(byNonce);
+  const [ownTop] = named.filter((proof) => proof.own === "pending" || proof.own === "signed").toSorted(byNonce);
+  return {
+    nonce: top?.nonce, epoch: e.epoch, committed: proofNonce(facts, account?.used ?? 0),
+    paid: ownTop?.nonce === undefined ? undefined : { nonce: ownTop.nonce, txs: ownTop.txs ?? [] },
+    pending: account?.pending === undefined
+      ? undefined
+      : account.pending.frame.firstNonce + BigInt(account.pending.frame.slot) - 1n,
+  };
+};
+
+/**
+ * R-DISPUTE-FREEZE: a finalize moved the epoch on and the rebase zeroes offdelta. If the committed head is above the
+ * proof the finalize paid by (a frame the proof does not hold: one committed after the proof was signed, or sealed
+ * before the dispute and acked after it), each token is told to the node's owner with both nonces and the offdelta the
+ * node counted. A frame of the node's own still pending that carries a payment, a lock, an offer or a fill the peer may
+ * have committed before it heard of the dispute is not held by the proof either, and the rebase zeroes what it paid, so
+ * the node is told which (`pending_rebased`): the frame stays pending and is sent again in the new epoch, where it
+ * commits or comes back as `tx_refused`, so the owner waits and does not ask again. A pending frame whose own body the
+ * chain paid by, a frame it signed and took back included (the peer holds its signature as well), is paid: the owner is
+ * told so (`paid_on_chain`) and its txs are in no frame sealed again (the pending frame stays for the lineage the peer
+ * may have committed, giving back only what was not paid). A committed head at or below the
+ * finalized nonce is held by the proof the chain paid by: not told. A finalize whose proof the node cannot name is told
+ * with the finalized nonce unknown: the node does not guess whether its head was held. A settlement or a withdrawal
+ * moving the epoch tells nothing. The offdelta the proof holds is not here: the node that lost something is not the
+ * one that opened with the proof, so it holds none of its body, and the DisputeFinalized event carries only hashes
+ * (Depository.sol 142-148); it is owed from the calldata of the start or the counter.
+ */
+const lost = (head: bigint | undefined, paid: bigint | undefined): boolean =>
+  head !== undefined && (paid === undefined || head > paid);
+
+const SPENDING = new Set(["pay", "lock", "offer", "fill"]);
+
+const destroyed = (w: Work, peer: EntityId, account: EntityReplica, finalized: Finalized | undefined): Work => {
+  if (finalized === undefined) return w;
+  const { committed, nonce, epoch, pending, paid } = finalized;
+  const told = !lost(committed, nonce) || committed === undefined
+    ? w
+    : [...account.state.ledgers].reduce((acc, [token, l]) => noting(acc, {
+      _tag: "offdelta_rebased", peer, token, epoch, committedNonce: committed, offdelta: l.offdelta,
+      finalizedNonce: nonce,
+    }), w);
+  const settled = paid?.txs ?? [];
+  const spent = settled.filter((tx) => SPENDING.has(tx._tag));
+  const paidTold = paid === undefined || spent.length === 0
+    ? told
+    : noting(told, {
+      _tag: "pending_rebased", peer, epoch, nonce: paid.nonce, finalizedNonce: nonce, txs: spent, fate: "paid_on_chain",
+    });
+  const txs = withoutPaid(account.pending?.frame.txs ?? [], settled).kept.filter((tx) => SPENDING.has(tx._tag));
+  return pending === undefined || !lost(pending, nonce) || txs.length === 0
+    ? paidTold
+    : noting(paidTold, {
+      _tag: "pending_rebased", peer, epoch, nonce: pending, finalizedNonce: nonce, txs, fate: "resent_in_new_epoch",
+    });
+};
+
+const txKey = (tx: AccountTx): string => JSON.stringify(tx, (_key, v) => (typeof v === "bigint" ? `${v}n` : v));
+
+type Split = Readonly<{
+  kept: readonly AccountTx[]; removed: readonly AccountTx[]; owing: ReadonlyMap<string, number>;
+}>;
+
+const countOf = (txs: readonly AccountTx[]): ReadonlyMap<string, number> =>
+  txs.reduce<ReadonlyMap<string, number>>(
+    (acc, tx) => mapSet(acc, txKey(tx), (acc.get(txKey(tx)) ?? 0) + 1), new Map<string, number>());
+
+/**
+ * `txs` without one occurrence of each tx the chain paid (`paid`): a payment asked twice is paid once by a frame that
+ * held it once. `removed` is what was found in `txs`, so the rest of `paid` is looked for in the next place.
+ */
+const withoutPaid = (txs: readonly AccountTx[], paid: readonly AccountTx[]): Split =>
+  txs.reduce((acc: Split, tx): Split => {
+    const left = acc.owing.get(txKey(tx)) ?? 0;
+    return left === 0
+      ? { ...acc, kept: [...acc.kept, tx] }
+      : { ...acc, removed: [...acc.removed, tx], owing: mapSet(acc.owing, txKey(tx), left - 1) };
+  }, { kept: [], removed: [], owing: countOf(paid) });
 
 /** The chain's collateral and ondelta for one token, kept; one with no ledger past the cap is told and dropped. */
 const holding = (w: Work, e: Extract<JEvent, { _tag: "j_collateral" }>): Work => {
@@ -216,19 +419,34 @@ const holding = (w: Work, e: Extract<JEvent, { _tag: "j_collateral" }>): Work =>
     : reconciled(withFacts(w, e.peer, kept), e.peer);
 };
 
-/** R-LEDGER-REBASE: a finalized dispute paid the Account out: no collateral and no ondelta are held for any token. */
+/**
+ * R-LEDGER-REBASE: a finalized dispute paid the Account out: no collateral and no ondelta are held for any token.
+ * R-HOLD-DISSOLVE: and it settled every clause of the proof it used, so the Account's holds, quotes and offers are
+ * over, in the committed state and in the state a pending frame would commit. A lock this Entity forwarded to `peer`
+ * is a lock `peer` gave up, as far as the paybook is concerned, so the failure walks back to its source the usual way.
+ */
 const finalized = (w: Work, peer: EntityId): Work => {
-  const ledgered = w.state.accounts.get(peer)?.state.ledgers.keys() ?? [];
-  return reconciled(withFacts(w, peer, paidOut(disputeOver(factsOf(w, peer)), ledgered)), peer);
+  const account = w.state.accounts.get(peer);
+  const ledgered = account?.state.ledgers.keys() ?? [];
+  const given = [...(account?.state.ledgers ?? [])]
+    .flatMap(([token, l]) => l.holds.map((h): AccountTx => ({ _tag: "cancel", token, id: h.id })));
+  const told = { ...w, state: { ...w.state, paybook: learned(w.state.paybook, peer, given) } };
+  const { pending } = account ?? {};
+  const open = account === undefined ? told : withReplica(told, peer, {
+    ...account,
+    state: dissolved(account.state),
+    pending: pending === undefined ? undefined : { ...pending, after: dissolved(pending.after) },
+  });
+  return reconciled(withFacts(open, peer, paidOut(disputeOver(factsOf(w, peer)), ledgered)), peer);
 };
 
 /** What the chain did to the Account with `peer`, as the facts the Entity holds for the pair say. */
-const chainFact = (w: Work, e: JEvent): Work => {
+const chainFact = (w: Work, terms: ProofTerms, e: JEvent): Work => {
   const facts = factsOf(w, e.peer);
   switch (e._tag) {
     case "j_epoch": {
       const moved = epochAdvanced(facts, e.epoch, e.stored);
-      return moved === facts ? w : rebasing(withFacts(w, e.peer, moved), e.peer);
+      return moved === facts ? w : rebasing(withFacts(w, e.peer, moved), e.peer, finalizedBy(w, terms, facts, e));
     }
     case "j_dispute":
       return withFacts(w, e.peer, e.by === sideOf(w.state.id, e.peer)
@@ -256,8 +474,8 @@ const chainFact = (w: Work, e: JEvent): Work => {
  * the epoch on signs under that epoch, not under epoch 0 (R-FRAME-EPOCH: a frame of another epoch is parked, and
  * nothing would ever tell the late Entity). An Account the Entity does not hold is told as well.
  */
-const observed = (w: Work, e: JEvent): Work => {
-  const kept = chainFact(w, e);
+const observed = (w: Work, terms: ProofTerms, e: JEvent): Work => {
+  const kept = chainFact(w, terms, e);
   return w.state.accounts.has(e.peer) ? kept : noting(kept, { _tag: "unknown_peer", from: e.peer });
 };
 
@@ -274,14 +492,16 @@ const cosigning = (w: Work, a: CosignAsk): Work => {
     : noting(w, { _tag: "cosign_refused", from: a.from, op: a.op, fault: action.error });
 };
 
-const arrive = (rules: Rulebook, check: Check, view: JView, w: Work, a: Arrival): Work => {
+const arrive = (rules: Rulebook, terms: ProofTerms, check: Check, view: JView, w: Work, a: Arrival): Work => {
   switch (a._tag) {
     case "peer_message":
       return hearing(rules, check, view, w, a);
     case "cosign_ask":
       return cosigning(w, a);
+    case "j_secret":
+      return secretShown(w, a);
     default:
-      return observed(w, a);
+      return observed(w, terms, a);
   }
 };
 
@@ -289,7 +509,7 @@ const arrive = (rules: Rulebook, check: Check, view: JView, w: Work, a: Arrival)
 
 const hooked = (w: Work, hook: Hook): Work => {
   const account = w.state.accounts.get(hook.peer);
-  return account === undefined ? w : sending(w, hook.peer, resend(account));
+  return account === undefined || inDispute(factsOf(w, hook.peer)) ? w : sending(w, hook.peer, resend(account));
 };
 
 // ---- phase 3: commands
@@ -336,10 +556,21 @@ const txOf = (self: Side, command: AccountCommand): AccountTx => {
   }
 };
 
-/** The Account checks the tx against its planning state at the door (R-ADMIT); a refusal is the command's notice. */
+/** A command that takes on value or exposure; a release (a resolve, a cancel, an expire) is not one. */
+const commits = (command: AccountCommand): boolean =>
+  command._tag === "pay" || command._tag === "lock" || command._tag === "offer" || command._tag === "fill";
+
+/**
+ * The Account checks the tx against its planning state at the door (R-ADMIT); a refusal is the command's notice. While
+ * a dispute is open the Account seals nothing (R-DISPUTE-FREEZE), so a command that takes on value is refused back to
+ * whoever asked, not queued to be voided by the epoch move; a release waits in the queue for the new epoch.
+ */
 const queued = (rules: Rulebook, w: Work, command: AccountCommand): Work => {
   const account = w.state.accounts.get(command.peer);
   if (account === undefined) return refusedCommand(w, command, { _tag: "no_account", peer: command.peer });
+  if (commits(command) && inDispute(factsOf(w, command.peer))) {
+    return refusedCommand(w, command, { _tag: "account_disputed" });
+  }
   const admitted = submit(rules(w, command.peer), account, txOf(sideOf(w.state.id, command.peer), command));
   return admitted.ok
     ? touching(withReplica(w, command.peer, admitted.value), command.peer)
@@ -391,9 +622,7 @@ const funded = (w: Work, command: Extract<ChainCommand, { _tag: "fund" }>): Work
 const disputed = (w: Work, terms: ProofTerms, command: Extract<ChainCommand, { _tag: "dispute" }>): Work => {
   const { peer } = command;
   const facts = factsOf(w, peer);
-  if (facts.starting !== undefined || facts.against !== undefined) {
-    return refusedCommand(w, command, { _tag: "dispute_pending" });
-  }
+  if (inDispute(facts)) return refusedCommand(w, command, { _tag: "dispute_pending" });
   const account = w.state.accounts.get(peer);
   const proof = w.state.proofs.get(peer);
   const nonce = proofNonce(factsOf(w, peer), account?.used ?? 0);
@@ -494,7 +723,7 @@ const paced = (w: Work, view: JView, peer: EntityId, account: EntityReplica): bo
 
 const proposing = (rules: Rulebook, view: JView, w: Work, peer: EntityId): Work => {
   const account = w.state.accounts.get(peer);
-  if (account === undefined || paced(w, view, peer, account) || factsOf(w, peer).frozen) return w;
+  if (account === undefined || paced(w, view, peer, account) || quiet(factsOf(w, peer))) return w;
   const proposed = propose(rules(w, peer), account);
   return sending(withReplica(w, peer, proposed.replica), peer, proposed.sent);
 };
@@ -526,16 +755,21 @@ const unackedResolves = (account: EntityReplica): readonly Resolve[] =>
 
 type Asked = Readonly<{ hashlocks: readonly string[]; actions: readonly JAction[] }>;
 
-/** A payee with an unacked resolve reveals once its view is within LAG of the deadline, once per hashlock. */
-const asking = (judge: Judge, peer: EntityId, account: EntityReplica) => (acc: Asked, tx: Resolve): Asked => {
-  const hold = ledgerOf(account.state, tx.token).holds.find((h) => h.id === tx.id);
-  if (hold === undefined || acc.hashlocks.includes(hold.hashlock)) return acc;
-  const { token, id, secret } = tx;
-  const reveal: JAction = { _tag: "reveal", peer, token, id, hashlock: hold.hashlock, secret };
-  return revealOnChainDue(judge.clock, hold.deadline, judge.view)
-    ? { hashlocks: [...acc.hashlocks, hold.hashlock], actions: [...acc.actions, reveal] }
-    : acc;
-};
+/**
+ * A payee with an unacked resolve reveals once its view is within LAG of the deadline, once per hashlock. On an Account
+ * that is quiet (a dispute is open, or its signature is out) no frame is sealed, so the resolve cannot be acked there:
+ * it reveals as soon as the resolve is asked, instead of waiting for a deadline the reveal might not reach in time.
+ */
+const asking = (due: (deadline: JHeight) => boolean, peer: EntityId, account: EntityReplica) =>
+  (acc: Asked, tx: Resolve): Asked => {
+    const hold = ledgerOf(account.state, tx.token).holds.find((h) => h.id === tx.id);
+    if (hold === undefined || acc.hashlocks.includes(hold.hashlock)) return acc;
+    const { token, id, secret } = tx;
+    const reveal: JAction = { _tag: "reveal", peer, token, id, hashlock: hold.hashlock, secret };
+    return due(hold.deadline)
+      ? { hashlocks: [...acc.hashlocks, hold.hashlock], actions: [...acc.actions, reveal] }
+      : acc;
+  };
 
 /**
  * The counter to a dispute the peer started against me: the newest proof I hold, if the chain would rank it above the
@@ -590,9 +824,9 @@ const answering = (terms: ProofTerms) => (w: Work, peer: EntityId, account: Enti
  */
 const finalFor = (w: Work, peer: EntityId, facts: ChainFacts): readonly JAction[] => {
   const mine = sideOf(w.state.id, peer) === "left";
-  const { start, over, countered } = facts.starting ?? { start: undefined, over: false, countered: false };
+  const { start, over, countered } = facts.starting ?? { start: undefined, over: false, countered: undefined };
   const answer = facts.against?.over ? facts.against.answer : undefined;
-  if (start !== undefined && over && !countered) {
+  if (start !== undefined && over && countered === undefined) {
     return [{
       _tag: "dispute_finalize", peer, nonce: start.nonce, proposerIsLeft: start.proposerIsLeft, body: start.body,
       startedByLeft: mine, initial: undefined,
@@ -611,7 +845,9 @@ const dutiful = (judge: Judge, terms: ProofTerms) => (w: Work, peer: EntityId): 
   const account = w.state.accounts.get(peer);
   if (account === undefined) return w;
   const open = (w.state.revealed.get(peer) ?? []).filter((hashlock) => holderOf(account.state, hashlock) !== undefined);
-  const asks = unackedResolves(account).reduce(asking(judge, peer, account), { hashlocks: open, actions: [] });
+  const due = (deadline: JHeight): boolean =>
+    quiet(factsOf(w, peer)) || revealOnChainDue(judge.clock, deadline, judge.view);
+  const asks = unackedResolves(account).reduce(asking(due, peer, account), { hashlocks: open, actions: [] });
   const revealed = mapSet(w.state.revealed, peer, asks.hashlocks);
   const revealing = { ...w, chain: [...w.chain, ...asks.actions], state: { ...w.state, revealed } };
   const countering = answering(terms)(revealing, peer, account);
@@ -619,7 +855,8 @@ const dutiful = (judge: Judge, terms: ProofTerms) => (w: Work, peer: EntityId): 
 };
 
 const isArrival = (i: EntityInput): i is Arrival =>
-  i._tag === "peer_message" || i._tag === "cosign_ask" || i._tag === "j_epoch" || i._tag === "j_dispute"
+  i._tag === "peer_message" || i._tag === "cosign_ask" || i._tag === "j_secret" || i._tag === "j_epoch"
+  || i._tag === "j_dispute"
   || i._tag === "j_countered" || i._tag === "j_window_over" || i._tag === "j_dispute_over"
   || i._tag === "j_start_lapsed" || i._tag === "j_counter_lapsed" || i._tag === "j_collateral"
   || i._tag === "j_op_lapsed";
@@ -643,9 +880,10 @@ export const entityFrame = (
   const rules: Rulebook = (w, peer) => {
     const facts = factsOf(w, peer);
     return entityRules(judge, signingOf(anchor, w.state.id, peer, facts),
-      { self: sideOf(w.state.id, peer), frozen: facts.frozen });
+      { self: sideOf(w.state.id, peer), frozen: quiet(facts) });
   };
-  const arrived = arrivalsOf(inputs).reduce((w, a) => arrive(rules, anchor.check, judge.view, w, a), start(state));
+  const hear = (w: Work, a: Arrival) => arrive(rules, anchor.terms, anchor.check, judge.view, w, a);
+  const arrived = arrivalsOf(inputs).reduce(hear, start(state));
   const afterHooks = hooksOf(inputs).reduce(hooked, arrived);
   const afterCommands = commandsOf(inputs).reduce((w, c) => commanded(rules, anchor.terms, w, c), afterHooks);
   const afterPaybook = forwarding(rules, judge)(afterCommands);

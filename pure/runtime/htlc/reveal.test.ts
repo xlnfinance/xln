@@ -6,7 +6,8 @@ import { describe, expect, test } from "bun:test";
 import { hashlockOf, holdOf, secretOf, viewOf } from "../../account/fixtures.ts";
 import { holdId } from "../../account/model.ts";
 import { apply, commit, flush, recover } from "../tick.ts";
-import { emptyEntity, type Command, type EntityId, type JAction } from "../../entity/model.ts";
+import { OPENED_WITH } from "../../entity/fixtures.ts";
+import { emptyEntity, type Command, type EntityId, type JAction, type JEvent } from "../../entity/model.ts";
 import {
   type Cluster, credit, entityOf, feed, GOLD, heightAt, hostOf, open, restarted, rise, settle, start, unhalted,
 } from "../fixtures.ts";
@@ -28,6 +29,16 @@ const locked = settle(feed(settle(feed(opened, BOB, credit(ALICE, 100n))), ALICE
 
 /** Bob has resolved and the frame is on the link: Alice has not answered. */
 const unacked = feed(locked, BOB, resolveOf(1n));
+
+/** Alice asks for the dispute and the chain opens it: both Entities hear it, so the Account is frozen. */
+const disputed = (c: Cluster): Cluster => {
+  const asked = feed(c, ALICE, { _tag: "dispute", peer: BOB });
+  const [start] = asked.chain.filter((a: JAction) => a._tag === "dispute_start").slice(-1);
+  const nonce = start?._tag === "dispute_start" ? start.nonce : expect.unreachable("no start");
+  const opens = (peer: EntityId): JEvent =>
+    ({ _tag: "j_dispute", peer, epoch: 0n, by: "left", nonce, timeout: 500n, ...OPENED_WITH });
+  return feed(feed(asked, ALICE, opens(BOB)), BOB, opens(ALICE));
+};
 
 const reveals = (c: Cluster): readonly JAction[] => c.chain;
 
@@ -98,5 +109,29 @@ describe("runtime/reveal the payee asks the chain to reveal its secret when the 
     expect(recover(due.setup, [emptyEntity(BOB)], forged)).toEqual({
       ok: false, error: { _tag: "replay_diverged", height: last.height },
     });
+  });
+
+  test("R-HTLC-CLOCK a payee whose Account is in dispute reveals at once: its resolve cannot be acked there", () => {
+    const frozen = disputed(locked);
+    const resolved = feed(frozen, BOB, resolveOf(1n));
+    const queue = hostOf(resolved, BOB).entities.get(BOB)?.accounts.get(ALICE)?.mempool.map((tx) => tx._tag);
+    expect(queue).toEqual(["resolve"]);
+    expect(reveals(resolved).filter((a) => a._tag === "reveal")).toEqual([
+      { _tag: "reveal", peer: ALICE, token: GOLD, id: SLOT, hashlock: hashlockOf(SECRET), secret: SECRET },
+    ]);
+    expect(reveals(rise(resolved, BOB, 111n)).filter((a) => a._tag === "reveal")).toHaveLength(1);
+  });
+
+  test("R-HTLC-CLOCK a payee whose Account waits for a settlement reveals at once too: nothing is acked", () => {
+    const signed = feed(locked, BOB, { _tag: "withdraw", peer: ALICE, token: GOLD, amount: 30n });
+    expect(hostOf(signed, BOB).entities.get(BOB)?.chain.get(ALICE)?.frozen).toBe(true);
+    const resolved = feed(signed, BOB, resolveOf(1n));
+    expect(reveals(resolved).filter((a) => a._tag === "reveal")).toEqual([
+      { _tag: "reveal", peer: ALICE, token: GOLD, id: SLOT, hashlock: hashlockOf(SECRET), secret: SECRET },
+    ]);
+  });
+
+  test("R-HTLC-CLOCK a payee whose Account is not in dispute still waits for the deadline minus LAG", () => {
+    expect(reveals(unacked).filter((a) => a._tag === "reveal")).toEqual([]);
   });
 });

@@ -11,7 +11,7 @@ import type { ChainFacts, EntityId, Starting } from "../../../entity/model.ts";
 import { entityId } from "../../../entity/model.ts";
 import type { RawLog } from "../../../j/log.ts";
 import { watching, type Block } from "../../../j/watch.ts";
-import { blockOf, DEPOSITORY, entityOf, logOf, must } from "../../../j/fixtures.ts";
+import { blockOf, DEPOSITORY, entityOf, hexOf, logOf, must } from "../../../j/fixtures.ts";
 import { callsOf } from "../fixtures.ts";
 import type { PortFault } from "../submit/chain.ts";
 import { beginAt, poll, windowsOf, type WatchConfig, type WatchPort } from "./loop.ts";
@@ -68,6 +68,13 @@ describe("host/shell/watch the J loop's poll", () => {
     expect(callsOf(at)).toEqual([
       "head", "block 1", "block 2", "block 3", "block 4", "logs 1-4", `account ${blockOf(2n).hash.slice(-4)} 11 52`,
     ]);
+  });
+
+  test("R-DISPUTE-FREEZE a secret the chain showed reaches the Entity as j_secret, in bytes", async () => {
+    const shown = logOf("SecretRevealed", { hashlock: hexOf(7n), revealer: RIGHT, secret: hexOf(8n) }, 2n, 0n);
+    const got = await poll(portOf(straight(6n, [shown]), logPath()), start(2n), LEFT);
+    const bytes = Uint8Array.from({ length: 32 }, (_, i) => (i === 31 ? 8 : 0));
+    expect(got.ok ? got.value?.events : got).toEqual([{ _tag: "j_secret", secret: bytes }]);
   });
 
   test("R-JLOOP a block not buried yet is not read: nothing is delivered, nothing is asked past the head", async () => {
@@ -128,7 +135,7 @@ describe("host/shell/watch the J loop's poll", () => {
   test("R-DISPUTE-FINALIZE the windows an Entity waits on are the node's own the chain gave an end, until told", () => {
     const asked = { peer: peer(RIGHT) } as Starting["start"];
     const facts = (starting: Partial<Starting>): ChainFacts =>
-      ({ ...freshChain, starting: { start: asked, window: 40n, over: false, countered: false, ...starting } });
+      ({ ...freshChain, starting: { start: asked, window: 40n, over: false, countered: undefined, ...starting } });
     const chain = new Map<EntityId, ChainFacts>([
       [peer(RIGHT), facts({})], [peer(entityOf(0x70n)), facts({ window: undefined })],
       [peer(entityOf(0x71n)), freshChain], [peer(entityOf(0x72n)), facts({ over: true })],
@@ -150,7 +157,8 @@ describe("host/shell/watch the J loop's poll", () => {
     const asked = { peer: peer(RIGHT) } as Starting["start"];
     const against = { nonce: 3n, proposerIsLeft: true, bodyHash: "0x01", window: 55n, over: false, answer: undefined };
     const told = (starting: Partial<Starting>) => windowsOf(LEFT, new Map([[peer(RIGHT), {
-      ...freshChain, against, starting: { start: asked, window: undefined, over: false, countered: false, ...starting },
+      ...freshChain, against,
+      starting: { start: asked, window: undefined, over: false, countered: undefined, ...starting },
     }]]));
     expect(told({})).toEqual(ok([{ to: LEFT, peer: RIGHT, timeout: 55n }]));
     expect(told({ window: 40n, over: true })).toEqual(ok([{ to: LEFT, peer: RIGHT, timeout: 55n }]));

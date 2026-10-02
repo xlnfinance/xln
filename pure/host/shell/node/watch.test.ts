@@ -12,7 +12,8 @@ import { callsOf } from "../fixtures.ts";
 import type { PortFault } from "../submit/chain.ts";
 import type { Look } from "./daemon.ts";
 import type { WatchConfig, WatchPort } from "../watch/loop.ts";
-import { ALICE, BOB, fresh, nodeOf, QUICK, seatOf, until, WAIT } from "./scene.ts";
+import { startDaemon } from "./daemon.ts";
+import { ALICE, BOB, configOf, fresh, nodeOf, QUICK, seatOf, until, WAIT } from "./scene.ts";
 
 const DOWN: PortFault = { _tag: "port", call: "watch head", reason: "connection reset" };
 
@@ -55,6 +56,19 @@ const rowsOf = (look: Look): readonly Row[] => look.station.host.runtime.wal;
 const delivered = (look: Look): boolean => look.cursor === 110n;
 
 describe("host/shell/node a node with a J loop", () => {
+  test("R-HTLC-FORWARD a node whose clock lag is not above its read depth is not started", async () => {
+    const dir = fresh();
+    const log = `${dir}/calls.log`;
+    writeFileSync(log, "");
+    const seat = await seatOf(ALICE, dir, 0);
+    const config = await configOf(seat, NO_PEER, { tickMs: QUICK, watch: watchOf(STRAIGHT, log), lag: DEPTH });
+    const refused = await startDaemon(config, seat.listener);
+    await config.shell.wal.close();
+    await config.shell.io.journal.close();
+    expect(refused).toEqual(err({ _tag: "clock_below_depth", lag: DEPTH, depth: DEPTH }));
+    expect(readFileSync(`${dir}/wal.log`, "utf8")).toBe("");
+  });
+
   test("R-JLOOP a node tells its Entity what the chain's final blocks hold; its view moves up to them", async () => {
     const dir = fresh();
     const log = `${dir}/calls.log`;
