@@ -6,15 +6,15 @@
 // contract's ABI says is a fault the caller can read, never a thrown error.
 import type { EntityId } from "../../../entity/model.ts";
 import type { JAnswer, SkipFact } from "../../../j/batch/answer.ts";
-import type { Simulation } from "../../../j/gas/simulate.ts";
+import type { Cause, Simulation } from "../../../j/gas/simulate.ts";
 import type { Treasury } from "../../../j/plan/funded.ts";
 import type { Tagged } from "../../../kernel/core/tagged.ts";
 import { all, err, flatMap, map, mapErr, ok, traverse, type Result } from "../../../kernel/core/result.ts";
 import type { Key } from "../link/link.ts";
 import type { ChainPort, PortFault } from "../submit/chain.ts";
 import {
-  bad, BATCH_FAILED, debtOutstandingCall, DISPUTE_SKIPPED, entityNoncesCall, fourBytes, HANKO_PROCESSED, hexQuantity,
-  oneWord, processBatchData, quantity, reservesCall, topicNumber, wide, wordsOf, type ReplyFault,
+  bad, BATCH_FAILED, debtOutstandingCall, DISPUTE_SKIPPED, entityNoncesCall, errorNamed, fourBytes, HANKO_PROCESSED,
+  hexQuantity, oneWord, processBatchData, quantity, reservesCall, topicNumber, wide, wordsOf, type ReplyFault,
 } from "./calls.ts";
 import { rawTx } from "./tx.ts";
 
@@ -69,8 +69,8 @@ export const listOf = <T>(
   raw: unknown, read: (item: unknown) => Result<T, ReplyFault>,
 ): Result<readonly T[], ReplyFault> => (Array.isArray(raw) ? traverse(raw, read) : err(bad("not a list")));
 
-/** What the simulation said of the one call: its status, the gas it used, the logs it made, and why it failed. */
-type Ran = Readonly<{ status: bigint; gas: bigint; logs: readonly Log[]; why: string }>;
+/** What the simulation said of the one call: its status, gas used, logs, why it failed, and what it returned. */
+type Ran = Readonly<{ status: bigint; gas: bigint; logs: readonly Log[]; why: string; data: string }>;
 
 const failureOf = (o: Fields): string => {
   const message = fieldsOf(o["error"]);
@@ -83,12 +83,35 @@ const ranOf = (raw: unknown): Result<Ran, ReplyFault> => {
   return flatMap(calls, ([call]) => {
     if (call === undefined) return err(bad("no call"));
     return flatMap(quantity(call["status"]), (status) => flatMap(quantity(call["gasUsed"]), (gas) =>
-      map(listOf(call["logs"], logOf), (logs) => ({ status, gas, logs, why: failureOf(call) }))));
+      map(listOf(call["logs"], logOf), (logs) => ({
+        status, gas, logs, why: failureOf(call), data: isText(call["returnData"]) ? call["returnData"] : "0x",
+      }))));
   });
 };
 
 const REFUSED: ReadonlyMap<string, string> =
   new Map([[BATCH_FAILED, "BatchFailed"], [DISPUTE_SKIPPED, "DisputeOpSkipped"]]);
+
+/**
+ * What the chain said of why the batch did not apply, as far as the Host can read it: the error a reverted call
+ * returned (its first four bytes), the error a failed batch reports, and each dispute op the batch skipped. A reply it
+ * cannot read adds no cause, so a cause is never guessed.
+ */
+const causesOf = (ran: Ran, depository: string): readonly Cause[] => {
+  const ours = ran.logs.filter((log) => log.address.toLowerCase() === depository.toLowerCase());
+  const failed = ours.filter((log) => log.topics[0] === BATCH_FAILED).flatMap((log): Cause[] => {
+    const named = fourBytes(log.data);
+    return named.ok ? [{ _tag: "error", name: errorNamed(named.value) }] : [];
+  });
+  const skipped = ours.filter((log) => log.topics[0] === DISPUTE_SKIPPED).flatMap((log): Cause[] => {
+    const fact = skipOf(log);
+    return fact.ok ? [{ _tag: "skipped", op: fact.value.op, reason: fact.value.reason }] : [];
+  });
+  const reverted: Cause[] = ran.status === 1n || !/^0x[0-9a-fA-F]{8}/.test(ran.data)
+    ? []
+    : [{ _tag: "error", name: errorNamed(ran.data.slice(0, 10)) }];
+  return [...reverted, ...failed, ...skipped];
+};
 
 /** A batch that does not fully apply is refused, whatever the transaction's own status says (the harness's rule). */
 const outcomeOf = (ran: Ran, depository: string): Simulation["outcome"] => {
@@ -97,7 +120,7 @@ const outcomeOf = (ran: Ran, depository: string): Simulation["outcome"] => {
     .flatMap((log) => REFUSED.get(log.topics[0] ?? "") ?? []);
   return ran.status === 1n && refusals.length === 0
     ? { _tag: "ok", applyGas: ran.gas }
-    : { _tag: "reverts", reason: refusals.join(", ") || ran.why };
+    : { _tag: "reverts", reason: refusals.join(", ") || ran.why, causes: causesOf(ran, depository) };
 };
 
 /** The words of a `DisputeOpSkipped` data: op, reason and the nonce of the proof. */

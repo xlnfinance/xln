@@ -147,7 +147,10 @@ describe("host/shell/watch the J loop's poll", () => {
   });
 
   test("R-DISPUTE-WATCH the window of a dispute against the node is waited on as well, until told", () => {
-    const against = { nonce: 3n, proposerIsLeft: true, bodyHash: "0x01", window: 55n, over: false, answer: undefined };
+    const against = {
+      nonce: 3n, proposerIsLeft: true, bodyHash: "0x01", window: 55n, over: false, answer: undefined,
+      countered: undefined,
+    };
     const told = (facts: ChainFacts) => windowsOf(LEFT, new Map([[peer(RIGHT), facts]]));
     expect(told({ ...freshChain, against })).toEqual(ok([{ to: LEFT, peer: RIGHT, timeout: 55n }]));
     expect(told({ ...freshChain, against: { ...against, over: true } })).toEqual(ok([]));
@@ -155,7 +158,10 @@ describe("host/shell/watch the J loop's poll", () => {
 
   test("R-DISPUTE-WATCH a start of the node's own that never got a window does not hide the dispute against it", () => {
     const asked = { peer: peer(RIGHT) } as Starting["start"];
-    const against = { nonce: 3n, proposerIsLeft: true, bodyHash: "0x01", window: 55n, over: false, answer: undefined };
+    const against = {
+      nonce: 3n, proposerIsLeft: true, bodyHash: "0x01", window: 55n, over: false, answer: undefined,
+      countered: undefined,
+    };
     const told = (starting: Partial<Starting>) => windowsOf(LEFT, new Map([[peer(RIGHT), {
       ...freshChain, against,
       starting: { start: asked, window: undefined, over: false, countered: undefined, ...starting },

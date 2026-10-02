@@ -17,17 +17,27 @@ import type { JOp } from "../op/ops.ts";
 import { encodedBytes } from "../plan/fit.ts";
 import { budgetFor, calldataGas, fitsCap, maxBudget } from "./gas.ts";
 
+/**
+ * Why a batch did not fully apply, as the chain says it. `error` is the Depository's own error that reverted the call
+ * or failed the batch (`E4`, or its four bytes when the Host does not know the name); `skipped` is a dispute op the
+ * batch skipped (op and reason are the contract's DISPUTE_OP_* and DISPUTE_SKIP_* codes). The Host decides from these
+ * which refusals can heal and which are for good (R-DISPUTE-LAPSED).
+ */
+export type Cause =
+  | Tagged<"error", { name: string }>
+  | Tagged<"skipped", { op: number; reason: number }>;
+
 /** What the Host measured for one batch, named by its digest (which holds the nonce, the ops and the budget). */
 export type Simulation = Readonly<{
   digest: string;
-  outcome: Tagged<"ok", { applyGas: bigint }> | Tagged<"reverts", { reason: string }>;
+  outcome: Tagged<"ok", { applyGas: bigint }> | Tagged<"reverts", { reason: string; causes: readonly Cause[] }>;
 }>;
 
 /** The chain's transaction gas cap, and what the outer Hanko check of this Entity's board costs before the budget. */
 export type Gas = Readonly<{ txGasCap: bigint; prelude: bigint }>;
 
 export type HoldReason =
-  | Tagged<"would_revert", { reason: string }>
+  | Tagged<"would_revert", { reason: string; causes: readonly Cause[] }>
   | Tagged<"cap_below_minimum", { txGasCap: bigint; prelude: bigint }>
   | Tagged<"one_op_over_limit", { limit: "bytes" | "gas" }>
   | Tagged<"unsealable", { fault: SealFault }>;
@@ -60,7 +70,7 @@ const afterMeasure = (
   const answer = answerFor(answers, final.value);
   if (answer === undefined) return { _tag: "simulate", candidate: final.value };
   return match(answer.outcome, {
-    reverts: ({ reason }) => hold({ _tag: "would_revert", reason }),
+    reverts: ({ reason, causes }) => hold({ _tag: "would_revert", reason, causes }),
     ok: () => ({ _tag: "sign", candidate: final.value }),
   });
 };
@@ -84,7 +94,7 @@ export const stepFor = (base: Base, gas: Gas, answers: readonly Simulation[], op
   const answer = answerFor(answers, probe.value);
   if (answer === undefined) return { _tag: "simulate", candidate: probe.value };
   return match(answer.outcome, {
-    reverts: ({ reason }) => hold({ _tag: "would_revert", reason }),
+    reverts: ({ reason, causes }) => hold({ _tag: "would_revert", reason, causes }),
     ok: ({ applyGas }) => afterMeasure(base, gas, carried, answers, ops, applyGas),
   });
 };

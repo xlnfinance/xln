@@ -22,6 +22,16 @@ export const HANKO_PROCESSED = topicOf("HankoBatchProcessed(bytes32,bytes32,uint
 export const BATCH_FAILED = topicOf("BatchFailed(bytes32,uint256,bytes4)");
 export const DISPUTE_SKIPPED = topicOf("DisputeOpSkipped(bytes32,bytes32,uint8,uint8,uint256)");
 
+/**
+ * The Depository's own errors by selector (`E0` to `E12`, Types.sol and Depository.sol), so a revert is named as the
+ * contract names it. One this table does not know is named by its four bytes: it is never taken for a known one.
+ */
+const ERROR_NAMES: ReadonlyMap<string, string> =
+  new Map(Array.from({ length: 13 }, (_, n): [string, string] => [bytesToHex(selector(`E${n}()`)), `E${n}`]));
+
+export const errorNamed = (selected: string): string =>
+  ERROR_NAMES.get(selected.toLowerCase()) ?? selected.toLowerCase();
+
 export const withArguments = (signature: string, values: Parameters<typeof encode>[0]): Result<string, ReplyFault> => {
   const encoded = encode(values);
   return encoded.ok ? ok(bytesToHex(concat([selector(signature), encoded.value]))) : err(bad(encoded.error._tag));

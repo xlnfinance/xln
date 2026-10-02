@@ -23,10 +23,18 @@ export type HeightFault = Tagged<"bad_height", { height: bigint }>;
 export const jHeight = (height: bigint): Result<JHeight, HeightFault> =>
   (height >= 0n && height <= MAX_HEIGHT ? ok(height as JHeight) : err({ _tag: "bad_height", height }));
 
-export type ClockParams = Readonly<{ lag: bigint; reserve: bigint; maxLockHorizon: bigint }>;
+/**
+ * `depth` is how many blocks behind the chain's head the node's view is held (the depth its J loop reads at), or
+ * undefined for a view that is the head, as the Arrival clock page has it: the page's reveal lands at once. A node that
+ * reads at a depth asks for its reveal `depth + 1` heights earlier (see `revealOnChainDue`).
+ */
+export type ClockParams = Readonly<{
+  lag: bigint; reserve: bigint; maxLockHorizon: bigint; depth: bigint | undefined;
+}>;
 
 export type ParamsFault =
   | Tagged<"lag_negative", { lag: bigint }>
+  | Tagged<"depth_negative", { depth: bigint }>
   | Tagged<"reserve_below_lag", { lag: bigint; reserve: bigint }>
   | Tagged<"horizon_not_positive", { maxLockHorizon: bigint }>;
 
@@ -34,11 +42,14 @@ export type ParamsFault =
  * The lag is not negative and the reserve is in J heights and at least `lag`; less lets an expiry land while the payee
  * can still resolve (a negative lag admits a negative reserve: a clause is then live and expirable at its deadline).
  */
-export const clockParams = (lag: bigint, reserve: bigint, maxLockHorizon: bigint): Result<ClockParams, ParamsFault> => {
+export const clockParams = (
+  lag: bigint, reserve: bigint, maxLockHorizon: bigint, depth?: bigint,
+): Result<ClockParams, ParamsFault> => {
   if (lag < 0n) return err({ _tag: "lag_negative", lag });
+  if (depth !== undefined && depth < 0n) return err({ _tag: "depth_negative", depth });
   if (reserve < lag) return err({ _tag: "reserve_below_lag", lag, reserve });
   if (maxLockHorizon < 1n) return err({ _tag: "horizon_not_positive", maxLockHorizon });
-  return ok({ lag, reserve, maxLockHorizon });
+  return ok({ lag, reserve, maxLockHorizon, depth });
 };
 
 /** The host door: the chain height a party acts on is the later of the host's finalized height and the context's. */
@@ -54,5 +65,14 @@ export const expirableAt = (p: ClockParams, deadline: JHeight, view: JView): boo
 /** The latest deadline a party admits for a new clause (N2, R-HORIZON-RESERVE). */
 export const latestDeadline = (p: ClockParams, view: JView): bigint => view + p.maxLockHorizon + p.reserve;
 
-/** A payee whose resolve is still unacked reveals the secret on chain once its view reaches `deadline - lag`. */
-export const revealOnChainDue = (p: ClockParams, deadline: JHeight, view: JView): boolean => view + p.lag >= deadline;
+const ONE_BLOCK = 1n;
+
+/**
+ * A payee whose resolve is still unacked reveals the secret on chain once its view reaches `deadline - lag` (the page).
+ * A node that reads at a `depth` has a view that far behind the head and its reveal, sent at the head, lands one block
+ * after it: it asks for the reveal at `deadline - lag - depth - 1`, so the reveal lands `lag` blocks before the
+ * deadline whatever the depth is (a reveal one block early costs nothing; one that misses costs the whole clause, and
+ * this does not depend on whether the contract's deadline check is strict or inclusive).
+ */
+export const revealOnChainDue = (p: ClockParams, deadline: JHeight, view: JView): boolean =>
+  view + p.lag + (p.depth === undefined ? 0n : p.depth + ONE_BLOCK) >= deadline;

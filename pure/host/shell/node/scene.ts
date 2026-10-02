@@ -48,7 +48,7 @@ const bySigner: Check = (peer, head, sig) => {
 
 /** The lag outlasts the depth the watch tests read at (2), as a node that reads the chain needs (clock_below_depth). */
 const setup = {
-  ...fixtureSetup, clock: { ...fixtureSetup.clock, lag: 3n, reserve: 3n },
+  ...fixtureSetup, clock: { ...fixtureSetup.clock, lag: 3n, reserve: 3n, depth: 2n },
   anchor: { ...fixtureSetup.anchor, check: bySigner },
 };
 
@@ -98,13 +98,15 @@ const keep = (): boolean => false;
 
 export type Options = Readonly<{
   tickMs: number; lost?: Config["lost"]; chain?: ChainPort; wrap?: (wal: Disk) => Disk; watch?: WatchConfig;
-  /** The clock's lag in J heights, where a test wants another than the scene's. */
+  /** The clock's lag and read depth in J heights, where a test wants others than the scene's. */
   lag?: bigint;
+  depth?: bigint;
 }>;
 
 /** What a node for `seat` is started with, its files in the seat's directory. */
 export const configOf = async (seat: Seat, other: Seat | undefined, options: Options): Promise<Config> => {
-  const { tickMs, lost = keep, chain = port, wrap = (disk) => disk, watch, lag = setup.clock.lag } = options;
+  const { tickMs, lost = keep, chain = port, wrap = (disk) => disk, watch } = options;
+  const { lag = setup.clock.lag, depth = setup.clock.depth } = options;
   const wal = wrap(must(await fileDisk(`${seat.dir}/wal.log`)));
   const journal = must(await fileDisk(`${seat.dir}/journal.log`));
   const key = keyOfEntity(seat.entity);
@@ -114,7 +116,7 @@ export const configOf = async (seat: Seat, other: Seat | undefined, options: Opt
       now: () => stamp(BigInt(Date.now())),
     },
     boot: {
-      setup: { ...setup, clock: { ...setup.clock, lag } }, genesis: emptyEntity(seat.entity),
+      setup: { ...setup, clock: { ...setup.clock, lag, depth } }, genesis: emptyEntity(seat.entity),
       where: { entity: seat.entity, deployment: DEPLOYED, world: WORLD },
       limits: unwrapOr(limits(32, 8), () => expect.unreachable("limits")),
     },

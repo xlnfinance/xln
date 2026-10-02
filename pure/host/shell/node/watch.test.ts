@@ -69,6 +69,18 @@ describe("host/shell/node a node with a J loop", () => {
     expect(readFileSync(`${dir}/wal.log`, "utf8")).toBe("");
   });
 
+  test("R-HTLC-CLOCK a node whose clock names another depth than it reads at is not started", async () => {
+    const dir = fresh();
+    const log = `${dir}/calls.log`;
+    writeFileSync(log, "");
+    const seat = await seatOf(ALICE, dir, 0);
+    const config = await configOf(seat, NO_PEER, { tickMs: QUICK, watch: watchOf(STRAIGHT, log), depth: 0n });
+    const refused = await startDaemon(config, seat.listener);
+    await config.shell.wal.close();
+    await config.shell.io.journal.close();
+    expect(refused).toEqual(err({ _tag: "clock_depth_off", clock: 0n, depth: DEPTH }));
+  });
+
   test("R-JLOOP a node tells its Entity what the chain's final blocks hold; its view moves up to them", async () => {
     const dir = fresh();
     const log = `${dir}/calls.log`;

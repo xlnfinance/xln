@@ -26,8 +26,9 @@ import { askedOf, cosignFault, foldsOf, withdrawalOf } from "./cosign.ts";
 import type { AccountTx, Judge } from "../account/tx.ts";
 import {
   sideOf, type AccountCommand, type Arrival, type ChainCommand, type ChainFacts, type Command, type CosignAsk,
-  type DisputeCounter, type DisputeStart, type EntityFault, type Entry, type EntityId, type EntityInput,
-  type EntityReplica, type EntityState, type Hook, type JAction, type JEvent, type Notice, type Outbound,
+  type DisputeCounter, type DisputeStart, type Registered, type EntityFault, type Entry, type EntityId,
+  type EntityInput, type EntityReplica, type EntityState, type Hook, type JAction, type JEvent, type Notice,
+  type Outbound,
   type PaybookCommand, type PeerFault, type PeerMessage, type PeerProof, type SecretRevealed,
 } from "./model.ts";
 
@@ -816,13 +817,40 @@ const answering = (terms: ProofTerms) => (w: Work, peer: EntityId, account: Enti
 };
 
 /**
+ * The body of the counter the chain registered against a dispute I started, when I can rebuild it: one of the states
+ * I hold whose proof body has the hash the chain logged: the committed one, the one a frame of mine in flight would
+ * commit, or one of a frame I signed in this epoch that no commit superseded (the peer may hold it signed though it
+ * refused it, and counter with it). The counterer's newest state is often exactly the frame I proposed and it
+ * committed before my ack reached it. A body I cannot rebuild is not guessed: the chain would revert a finalize that
+ * names another.
+ */
+const rebuilt = (
+  terms: ProofTerms, facts: ChainFacts, account: EntityReplica, counter: Registered,
+): ProofBody | undefined => {
+  const signed = account.unsuperseded.flatMap((entry) =>
+    (entry.sealed?.epoch === facts.epoch ? [entry.sealed.after] : []));
+  const states = [account.state, ...(account.pending === undefined ? [] : [account.pending.after]), ...signed];
+  const bodies = states.flatMap((state) => {
+    const body = proofBodyOf(terms, state);
+    return body.ok ? [body.value] : [];
+  });
+  return bodies.find((body) => {
+    const hash = proofBodyHash(body);
+    return hash.ok && hash.value === counter.bodyHash;
+  });
+};
+
+/**
  * Once the chain's clock is past the window of a dispute, the node that holds its outcome asks to finalize. For a
  * dispute it started that is its opening proof, unless the chain registered a counter (which the chain then finalizes
- * only with its own proof); for one it answered, its registered counter. Like the counter it is asked again at each
- * frame until the chain says the dispute is over: the Host de-duplicates, and the chain skips a finalize of a dispute
- * that is already over.
+ * only with its own proof); then it finalizes with that counter when it can rebuild its body, so a counterer that is
+ * down leaves the Account no more locked than one that is up (the chain lets either party execute the selected counter
+ * after the window). For one it answered, its registered counter. Like the counter it is asked again at each frame
+ * until the chain says the dispute is over: the Host de-duplicates, and the chain skips a finalize of a dispute that
+ * is already over.
  */
-const finalFor = (w: Work, peer: EntityId, facts: ChainFacts): readonly JAction[] => {
+const finalFor = (terms: ProofTerms, w: Work, peer: EntityId, account: EntityReplica): readonly JAction[] => {
+  const facts = factsOf(w, peer);
   const mine = sideOf(w.state.id, peer) === "left";
   const { start, over, countered } = facts.starting ?? { start: undefined, over: false, countered: undefined };
   const answer = facts.against?.over ? facts.against.answer : undefined;
@@ -832,10 +860,52 @@ const finalFor = (w: Work, peer: EntityId, facts: ChainFacts): readonly JAction[
       startedByLeft: mine, initial: undefined,
     }];
   }
-  return answer?.registered === true && facts.against !== undefined
-    ? [{
+  const counteredOver = start !== undefined && over && countered !== undefined;
+  const body = counteredOver ? rebuilt(terms, facts, account, countered) : undefined;
+  const opening = start === undefined ? undefined : proofBodyHash(start.body);
+  if (start !== undefined && countered !== undefined && body !== undefined && opening?.ok === true) {
+    return [{
+      _tag: "dispute_finalize", peer, nonce: countered.nonce, proposerIsLeft: countered.proposerIsLeft, body,
+      startedByLeft: mine, initial: { nonce: start.nonce, bodyHash: opening.value },
+    }];
+  }
+  const { against } = facts;
+  if (answer?.registered === true && against !== undefined) {
+    return [{
       _tag: "dispute_finalize", peer, nonce: answer.counter.nonce, proposerIsLeft: answer.counter.proposerIsLeft,
       body: answer.counter.body, startedByLeft: !mine, initial: answer.counter.initial,
+    }];
+  }
+  const theirs = against?.over === true ? against.countered : undefined;
+  const held = against === undefined || theirs === undefined ? undefined : rebuilt(terms, facts, account, theirs);
+  return against !== undefined && theirs !== undefined && held !== undefined
+    ? [{
+      _tag: "dispute_finalize", peer, nonce: theirs.nonce, proposerIsLeft: theirs.proposerIsLeft, body: held,
+      startedByLeft: !mine, initial: { nonce: against.nonce, bodyHash: against.bodyHash },
+    }]
+    : [];
+};
+
+/**
+ * A dispute the peer started that opened with a state I hold, with no newer proof to answer it with, is one I may
+ * accept at once: the chain lets the non-starter finalize the exact state the starter chose before the window is over,
+ * when it has no pull (Account.sol, `_disputeFinalizeInternal`). So a starter that goes down leaves the Account no
+ * more locked than one that stays up. The body is rebuilt from the states I hold, and only when its hash is the one the
+ * chain logged for the start; a start whose body I cannot rebuild is waited out as before.
+ */
+const accepting = (terms: ProofTerms, w: Work, peer: EntityId, account: EntityReplica): readonly JAction[] => {
+  const facts = factsOf(w, peer);
+  const { against } = facts;
+  const answer = against?.answer;
+  // A counter that lapsed and was then registered, or one a tower registered, stands: the chain refuses a finalize by
+  // the opening state then.
+  const dropped = answer === undefined || (answer.lapsed && !answer.registered);
+  const unanswered = against?.countered === undefined && dropped;
+  const body = against !== undefined && unanswered ? rebuilt(terms, facts, account, against) : undefined;
+  return against !== undefined && body !== undefined
+    ? [{
+      _tag: "dispute_finalize", peer, nonce: against.nonce, proposerIsLeft: against.proposerIsLeft, body,
+      startedByLeft: sideOf(w.state.id, peer) !== "left", initial: undefined,
     }]
     : [];
 };
@@ -851,7 +921,8 @@ const dutiful = (judge: Judge, terms: ProofTerms) => (w: Work, peer: EntityId): 
   const revealed = mapSet(w.state.revealed, peer, asks.hashlocks);
   const revealing = { ...w, chain: [...w.chain, ...asks.actions], state: { ...w.state, revealed } };
   const countering = answering(terms)(revealing, peer, account);
-  return { ...countering, chain: [...countering.chain, ...finalFor(countering, peer, factsOf(countering, peer))] };
+  const finals = [...finalFor(terms, countering, peer, account), ...accepting(terms, countering, peer, account)];
+  return { ...countering, chain: [...countering.chain, ...finals] };
 };
 
 const isArrival = (i: EntityInput): i is Arrival =>

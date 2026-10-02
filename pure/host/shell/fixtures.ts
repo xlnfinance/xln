@@ -2,6 +2,7 @@
 // writes, with bigints, bytes and absent fields, and not on rows made up for it.
 import { expect } from "bun:test";
 import { readFileSync } from "node:fs";
+import type { FrameHash } from "../../account/frame/frame.ts";
 import { holdOf, secretOf, viewOf } from "../../account/fixtures.ts";
 import { holdId } from "../../account/model.ts";
 import { deployment } from "../../chain/proof/deployment.ts";
@@ -64,6 +65,27 @@ export const START: Asked = (() => {
   const row = walOf(aliceDisputed, ALICE).findLast((r) => r.chain.some((a) => a._tag === "dispute_start")) as Row;
   const index = row.chain.findIndex((a) => a._tag === "dispute_start");
   return { action: row.chain[index] as Asked["action"], row: { height: row.height, index } };
+})();
+
+/** A counter to a dispute, as the Runtime asks for it: the opening body again, a nonce above the start's, a sig. */
+export const COUNTER: Asked = (() => {
+  const start = START.action._tag === "dispute_start" ? START.action : expect.unreachable("not a start");
+  const action: Asked["action"] = {
+    _tag: "counter", peer: start.peer, nonce: start.nonce + 1n, head: `0x${"07".repeat(32)}` as FrameHash,
+    proposerIsLeft: start.proposerIsLeft, body: start.body, sig: `0x${"11".repeat(65)}`,
+    initial: { nonce: start.nonce, bodyHash: `0x${"09".repeat(32)}` },
+  };
+  return { action, row: { height: START.row.height + 200n, index: 0 } };
+})();
+
+/** A finalize of the dispute START opened, with the opening proof, as the Runtime asks for it. */
+export const FINALIZE: Asked = (() => {
+  const start = START.action._tag === "dispute_start" ? START.action : expect.unreachable("not a start");
+  const action: Asked["action"] = {
+    _tag: "dispute_finalize", peer: start.peer, nonce: start.nonce, proposerIsLeft: start.proposerIsLeft,
+    body: start.body, startedByLeft: true, initial: undefined,
+  };
+  return { action, row: { height: START.row.height + 300n, index: 0 } };
 })();
 
 /** What a scripted chain port wrote about the calls it got, one line each. */

@@ -16,7 +16,9 @@ import { begin, persisted, reopen, startHost, submit } from "../../host.ts";
 import type { Effect, Host, Limits, Stepped } from "../../model.ts";
 import type { Disk } from "../disk/disk.ts";
 import { keep, openWal, type StoreFault, type Unwritable } from "../disk/store.ts";
-import { resume, settle, type Io, type Pumped, type ShellFault, type Where } from "../submit/chain.ts";
+import {
+  COUNTER_SKIPPED_FOR_GOOD, resume, settle, type Io, type Pumped, type ShellFault, type Where,
+} from "../submit/chain.ts";
 import type { Signer } from "../submit/signer.ts";
 import { take, type Submitter, type Taken } from "../submit/submit.ts";
 
@@ -112,10 +114,24 @@ const told = (shell: Shell, turn: Turn, ops: readonly JOp[]): Promise<Result<Tur
   return inputs.length === 0 ? Promise.resolve(ok(turn)) : drained(shell, withHost(turn, host));
 };
 
+/**
+ * The reasons the contract skips a start for good (Account.sol 73-83): the stored nonce already reached it (0), or the
+ * Account has left the epoch it was signed in (11). A start skipped because a dispute is already open (1) is not here:
+ * it may be the node's own start, restated after it landed, and the dispute reaches the Entity as a chain fact.
+ */
+const START_SKIPPED_FOR_GOOD: ReadonlySet<number> = new Set([0, 11]);
+
+/** The ops a landed batch had skipped for good: the Entity that asked for each is told it lapsed, as if dropped. */
+const skippedForGood = (skipped: readonly Skipped[]): readonly JOp[] =>
+  skipped.flatMap(({ op, reason }) => (
+    (op._tag === "dispute_start" && START_SKIPPED_FOR_GOOD.has(reason))
+    || (op._tag === "dispute_counter" && COUNTER_SKIPPED_FOR_GOOD.has(reason)) ? [op] : []));
+
 /** Move the builder as far as the chain lets it: seal what is waiting, send it, read what became of it. */
 export const pump = async (shell: Shell, turn: Turn): Promise<Result<Turn, DriveFault>> => {
   const out = await settle(shell.io, turn.station.submitter, "sure");
-  return out.ok ? told(shell, pumped(turn, out.value), out.value.lapsed) : out;
+  if (!out.ok) return out;
+  return told(shell, pumped(turn, out.value), [...out.value.lapsed, ...skippedForGood(out.value.skipped)]);
 };
 
 const afterAsks = (shell: Shell, turn: Turn): Promise<Result<Turn, DriveFault>> =>

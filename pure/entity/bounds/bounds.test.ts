@@ -48,7 +48,10 @@ describe("entity/bounds what the chain is asked in one frame comes in one order"
     const replica = { ...emptyReplica("right"), state: withLedger(emptyAccount, GOLD, ledger), mempool: [resolve] };
     const against = { nonce: 2n, proposerIsLeft: true, bodyHash: OPENED_WITH.bodyHash, window: 500n, over: false };
     const facts: ChainFacts =
-      { ...freshChain, epoch: 1n, stored: 2n, frames: 1n, against: { ...against, answer: undefined } };
+      {
+        ...freshChain, epoch: 1n, stored: 2n, frames: 1n,
+        against: { ...against, answer: undefined, countered: undefined },
+      };
     const proof = { head: replica.head, slot: 0, author: "left", sig: "0x51" } as const;
     const state: EntityState = {
       ...emptyEntity(BOB), accounts: new Map([[ALICE, replica]]), chain: new Map([[ALICE, facts]]),

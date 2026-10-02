@@ -49,7 +49,7 @@ export const disputeOpened = (f: ChainFacts, e: Extract<JEvent, { _tag: "j_dispu
       ...f,
       against: {
         nonce: e.nonce, proposerIsLeft: e.proposerIsLeft, bodyHash: e.bodyHash, window: e.timeout, over: false,
-        answer: undefined,
+        answer: undefined, countered: undefined,
       },
     });
 
@@ -60,8 +60,10 @@ export const answered = (f: ChainFacts, answer: Answer): ChainFacts =>
 /**
  * The chain registered a counter (its nonce, author and body hash) for the dispute. For a dispute this node
  * started it is a counter against it: it stops asking to finalize with its opening proof, which the chain now
- * refuses, and keeps the counter's identity, which tells a finalize's proof from the others (R-LEDGER-REBASE). For one
- * against it, a counter that is the one it asked for is registered, and only then does it finalize.
+ * refuses, and keeps the counter's identity, which tells a finalize's proof from the others (R-LEDGER-REBASE) and
+ * lets the node finalize with it itself once the window is over and it can rebuild the body (the chain lets either
+ * party execute it after the window). For one against it, the counter is kept whoever registered it (a watchtower of
+ * the node may have, before the node asked for its own), and one that is the one it asked for is registered.
  */
 export const countered = (f: ChainFacts, e: Extract<JEvent, { _tag: "j_countered" }>): ChainFacts => {
   const asked = f.against?.answer;
@@ -71,13 +73,17 @@ export const countered = (f: ChainFacts, e: Extract<JEvent, { _tag: "j_countered
     ? { ...f.against, answer: { ...asked, registered: true } }
     : f.against;
   const registered: Registered = { nonce: e.nonce, proposerIsLeft: e.proposerIsLeft, bodyHash: e.bodyHash };
-  return { ...f, against, starting: f.starting === undefined ? undefined : { ...f.starting, countered: registered } };
+  return {
+    ...f, against: against === undefined ? undefined : { ...against, countered: registered },
+    starting: f.starting === undefined ? undefined : { ...f.starting, countered: registered },
+  };
 };
 
 /**
- * The Host dropped the counter the node asked for, because it would revert: the chain will not take it (the window is
- * over, or the dispute is not the one it names), so it is not restated. A counter of another nonce is not the one
- * dropped, and a registered counter is finalized with whatever is said of it.
+ * The Host found that the chain will refuse the counter the node asked for, for good (its window is closed, a newer or
+ * the same counter is registered, the dispute moved, its signature or hash is void), so it is not restated. A counter
+ * the chain holds for a reason that can heal never gets here: the Host drops it for now and the Entity asks again. A
+ * counter of another nonce is not the one dropped, and a registered counter is finalized with whatever is said of it.
  */
 export const counterLapsed = (f: ChainFacts, nonce: bigint): ChainFacts => {
   const answer = f.against?.answer;

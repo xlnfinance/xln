@@ -25,7 +25,7 @@ const POLL_MS = 25;
 const STABLE = 3;
 const PATIENCE_MS = 60_000;
 /** Blocks a J event waits under before the nodes act on it: the anvil node has no reorgs, one is enough to show the rule. */
-const DEPTH = 1n;
+export const DEPTH = 1n;
 
 const nonce = (): Uint8Array => crypto.getRandomValues(new Uint8Array(32));
 export const shown = (x: unknown): string => JSON.stringify(x, (_, v) => (typeof v === "bigint" ? v.toString() : v instanceof Uint8Array ? "bytes" : v));

@@ -335,13 +335,13 @@ describe("R-SIMULATE reaches seal: nothing is signed before the Host has simulat
   test("a batch that would revert is held, and the group behind it is tried instead", () => {
     const both = queued(openJBatch(ME, 0n), finalize(LEFT_PEER, 1n), reserveToReserve(1n));
     const gated = drive(both, ctx(), (c) => c.ops.some((op) => op._tag === "dispute_finalize")
-      ? { _tag: "reverts", reason: "0x00000002" } : { _tag: "ok", applyGas: 600_000n });
+      ? { _tag: "reverts", reason: "0x00000002", causes: [] } : { _tag: "ok", applyGas: 600_000n });
     expect(gated._tag === "sealed" && gated.batch.ops.map((op) => op._tag)).toEqual(["reserve_to_reserve"]);
     expect(gated._tag === "sealed" && gated.jbatch.draft.map((op) => op._tag)).toEqual(["dispute_finalize"]);
   });
   test("when every group would revert nothing is signed and the reasons are given", () => {
-    const outcome = drive(j, ctx(), () => ({ _tag: "reverts", reason: "0x00000003" }));
-    expect(outcome).toEqual({ _tag: "held", why: [{ _tag: "would_revert", reason: "0x00000003" }] });
+    const outcome = drive(j, ctx(), () => ({ _tag: "reverts", reason: "0x00000003", causes: [] }));
+    expect(outcome).toEqual({ _tag: "held", why: [{ _tag: "would_revert", reason: "0x00000003", causes: [] }] });
   });
   test("a payment batch too heavy for the cap is signed in the part that fits, the rest waits", () => {
     const many = queued(openJBatch(ME, 0n), ...Array.from({ length: 4 }, (_, i) => reserveToReserve(BigInt(i + 1))));

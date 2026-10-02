@@ -44,7 +44,30 @@ const reveals = (c: Cluster): readonly JAction[] => c.chain;
 
 const revealedBy = (c: Cluster, id: EntityId, peer: EntityId) => hostOf(c, id).entities.get(id)?.revealed.get(peer);
 
+/** The same Hosts, each reading the chain at a depth: its view is that many blocks behind the head. */
+const readingAt = (c: Cluster, depth: bigint): Cluster => ({
+  ...c,
+  hosts: new Map([...c.hosts].map(([id, host]) =>
+    [id, { ...host, setup: { ...host.setup, clock: { ...host.setup.clock, depth } } }])),
+});
+
 describe("runtime/reveal the payee asks the chain to reveal its secret when the deadline is near", () => {
+  test("R-HTLC-CLOCK a payee that reads the chain at a depth asks depth plus one heights earlier, and once", () => {
+    const deep = readingAt(unacked, 2n);
+    expect(reveals(rise(deep, BOB, 110n))).toEqual([]);
+    const due = rise(deep, BOB, 111n);
+    expect(reveals(due)).toEqual([
+      { _tag: "reveal", peer: ALICE, token: GOLD, id: SLOT, hashlock: hashlockOf(SECRET), secret: SECRET },
+    ]);
+    expect(reveals(rise(due, BOB, 112n))).toHaveLength(1);
+  });
+
+  test("R-HTLC-CLOCK a payee that reads at the head still asks a height before the deadline minus LAG", () => {
+    const head = readingAt(unacked, 0n);
+    expect(reveals(rise(head, BOB, 112n))).toEqual([]);
+    expect(reveals(rise(head, BOB, 113n)).map((a) => a._tag)).toEqual(["reveal"]);
+  });
+
   test("R-HTLC-CLOCK a resolve unacked with the deadline more than LAG away asks nothing", () => {
     expect(reveals(rise(unacked, BOB, 113n))).toEqual([]);
   });

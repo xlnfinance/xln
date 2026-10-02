@@ -23,10 +23,10 @@ describe("R-SIMULATE the final simulation is a simulation: a revert at the final
     const final = stepFor(base, GAS, afterProbe, ops);
     if (final._tag !== "simulate") return expect.unreachable(final._tag);
     expect(final.candidate.gasBudget).not.toBe(probe.candidate.gasBudget);
-    const outcome = { _tag: "reverts", reason: "0x00000004" } as const;
+    const outcome = { _tag: "reverts", reason: "0x00000004", causes: [] } as const;
     const finalReverts = { digest: final.candidate.digest, outcome } as const;
     expect(stepFor(base, GAS, [...afterProbe, finalReverts], ops))
-      .toEqual({ _tag: "hold", why: { _tag: "would_revert", reason: "0x00000004" } });
+      .toEqual({ _tag: "hold", why: { _tag: "would_revert", reason: "0x00000004", causes: [] } });
   });
 });
 

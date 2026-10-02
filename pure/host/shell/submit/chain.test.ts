@@ -12,7 +12,7 @@ import type { Simulation } from "../../../j/gas/simulate.ts";
 import { err, ok, unwrapOr, type Result } from "../../../kernel/core/result.ts";
 import { settle, resume, step, type Arrival, type ChainPort, type Io, type PortFault } from "./chain.ts";
 import {
-  aliceRun, ALICE, callsOf, DEPOSIT, GAS, journalIn, START, TREASURY, walOf, DEPLOYED, WORLD,
+  aliceRun, ALICE, callsOf, COUNTER, DEPOSIT, FINALIZE, GAS, journalIn, START, TREASURY, walOf, DEPLOYED, WORLD,
 } from "../fixtures.ts";
 import { keyOf } from "../link/link.ts";
 import { fileDisk } from "../node/file-disk.ts";
@@ -25,7 +25,7 @@ const SIGNER: Signer = lazySigner(ALICE, KEY);
 const WHERE = { entity: ALICE, deployment: DEPLOYED, world: WORLD };
 const WAL = walOf(aliceRun, ALICE);
 
-const REVERTS: Simulation["outcome"] = { _tag: "reverts", reason: "paused" };
+const REVERTS: Simulation["outcome"] = { _tag: "reverts", reason: "paused", causes: [] };
 const ROOM: Simulation["outcome"] = { _tag: "ok", applyGas: 100_000n };
 const PORT_DOWN: PortFault = { _tag: "port", call: "send", reason: "connection reset" };
 
@@ -33,6 +33,8 @@ const PORT_DOWN: PortFault = { _tag: "port", call: "send", reason: "connection r
 type Script = Readonly<{
   nonce: bigint; outcome: Simulation["outcome"]; sends: Result<void, PortFault>;
   answer: (batch: SealedBatch) => JAnswer | undefined;
+  /** What the nth simulation of the scene says (from 0), when it differs from `outcome`. */
+  nth?: (n: number) => Simulation["outcome"];
 }>;
 
 const CALM: Script = { nonce: 4n, outcome: ROOM, sends: ok(undefined), answer: () => undefined };
@@ -49,9 +51,10 @@ const scene = (): Scene => {
 const portOf = (at: Scene, script: Script): ChainPort => ({
   nonce: () => Promise.resolve(ok(script.nonce)),
   treasury: () => Promise.resolve(ok(TREASURY)),
-  simulate: (_call, gasLimit) => {
-    appendFileSync(at.log, `simulate gas=${gasLimit}\n`);
-    return Promise.resolve(ok(script.outcome));
+  simulate: (call, gasLimit) => {
+    const before = callsOf(at.log).filter((c) => c.startsWith("simulate")).length;
+    appendFileSync(at.log, `simulate nonce=${call.nonce} gas=${gasLimit}\n`);
+    return Promise.resolve(ok(script.nth?.(before) ?? script.outcome));
   },
   send: (call, gasLimit) => {
     const head = `send ${call.nonce} ${call.encodedBatch.slice(0, 18)} gas=${gasLimit}`;
@@ -91,6 +94,12 @@ const startAsked = (s: Submitter): Submitter => {
   return out._tag === "queued" ? out.submitter : expect.unreachable(`take ${out._tag}`);
 };
 
+/** The counter as asked, behind the deposit: two groups in the draft, the counter's urgent and the deposit's not. */
+const counterAsked = (s: Submitter): Submitter => {
+  const out = take(s, COUNTER);
+  return out._tag === "queued" ? out.submitter : expect.unreachable(`take ${out._tag}`);
+};
+
 const stepped = async (io: Io, s: Submitter, arrival: Arrival = "sure") => {
   const out = await step(io, s, arrival);
   return out.ok ? out.value : expect.unreachable(`step ${JSON.stringify(out.error)}`);
@@ -103,7 +112,7 @@ describe("host/shell/chain a batch is journaled before it is sent", () => {
     expect(moved.stage).toBe("waiting");
     const carried = requirement(GAS.prelude, MIN_GAS_BUDGET) + 100_000n;
     expect(callsOf(at.log)).toEqual([
-      `simulate gas=${GAS.txGasCap}`, `simulate gas=${GAS.txGasCap}`,
+      `simulate nonce=5 gas=${GAS.txGasCap}`, `simulate nonce=5 gas=${GAS.txGasCap}`,
       expect.stringMatching(new RegExp(`^send 5 0x[0-9a-f]+ gas=${carried} journal=sealed@5$`)),
     ]);
   });
@@ -160,6 +169,104 @@ describe("host/shell/chain a batch is journaled before it is sent", () => {
   test("R-DISPUTE-LAPSED a start that simulates cleanly is sealed and sent, not dropped", async () => {
     const at = scene();
     const moved = await withIo(at, CALM, (io) => stepped(io, startAsked(opened())));
+    expect([moved.stage, moved.lapsed]).toEqual(["waiting", []]);
+    expect(journalIn(at.journal)).toEqual(["sealed@5"]);
+  });
+
+  const revertedWith = (name: string): Simulation["outcome"] =>
+    ({ _tag: "reverts", reason: "execution failed", causes: [{ _tag: "error", name }] });
+  const E4_LOST = revertedWith("E4");
+  const E3_KEPT = revertedWith("E3");
+  const firstOnly = (outcome: Simulation["outcome"]) => (n: number) => (n === 0 ? outcome : ROOM);
+
+  test("R-DISPUTE-LAPSED a counter that reverts for good is dropped and named; a lower group still seals", async () => {
+    const at = scene();
+    const both = counterAsked(asked(opened()));
+    const moved = await withIo(at, { ...CALM, nth: firstOnly(E4_LOST) }, (io) => stepped(io, both));
+    expect(moved.lapsed.map((op) => op._tag)).toEqual(["dispute_counter"]);
+    expect(moved.stage).toBe("closed");
+    expect(moved.submitter.jbatch.draft.map((op) => op._tag)).toEqual(["reserve_to_collateral"]);
+    expect(journalIn(at.journal)).toEqual([]);
+  });
+
+  test("R-DISPUTE-LAPSED a counter is not named when a batch of no op is refused at its nonce likewise", async () => {
+    const at = scene();
+    const both = counterAsked(asked(opened()));
+    const staleNonce = (n: number): Simulation["outcome"] => (n <= 1 ? E4_LOST : ROOM);
+    const moved = await withIo(at, { ...CALM, nth: staleNonce }, (io) => stepped(io, both));
+    expect([moved.lapsed, moved.stage]).toEqual([[], "closed"]);
+    expect(moved.submitter.jbatch.draft.map((op) => op._tag)).toEqual(["reserve_to_collateral"]);
+    // The lone probe, then the bare batch at the same nonce.
+    expect(callsOf(at.log)).toEqual([`simulate nonce=5 gas=${GAS.txGasCap}`, `simulate nonce=5 gas=${GAS.txGasCap}`]);
+  });
+
+  test("R-DISPUTE-LAPSED a counter held for a reason that can heal is dropped, not named; the rest seals", async () => {
+    const at = scene();
+    const both = counterAsked(asked(opened()));
+    const moved = await withIo(at, { ...CALM, nth: firstOnly(E3_KEPT) }, (io) => stepped(io, both));
+    expect([moved.lapsed, moved.stage]).toEqual([[], "closed"]);
+    expect(moved.submitter.jbatch.draft.map((op) => op._tag)).toEqual(["reserve_to_collateral"]);
+    const after = await withIo(at, CALM, (io) => stepped(io, moved.submitter));
+    expect(after.stage).toBe("waiting");
+    expect(journalIn(at.journal)).toEqual(["sealed@5"]);
+  });
+
+  type Causes = Extract<Simulation["outcome"], { _tag: "reverts" }>["causes"];
+  const revertedBy = (...causes: Causes): Simulation["outcome"] =>
+    ({ _tag: "reverts", reason: "execution failed", causes });
+  const error = (name: string) => ({ _tag: "error", name }) as const;
+  const skipped = (op: number, reason: number) => ({ _tag: "skipped", op, reason }) as const;
+  const lapsedBy = async (outcome: Simulation["outcome"]): Promise<number> => {
+    const both = counterAsked(asked(opened()));
+    const moved = await withIo(scene(), { ...CALM, nth: firstOnly(outcome) }, (io) => stepped(io, both));
+    return moved.lapsed.length;
+  };
+
+  test("R-DISPUTE-LAPSED a counter lapses for E2, E4, E9 and skip reasons 3 to 7 of its op, no other", async () => {
+    const lost = [error("E2"), error("E4"), error("E9"), ...[3, 4, 5, 6, 7].map((r) => skipped(1, r))];
+    const kept = [
+      error("E3"), error("E5"), error("E10"), error("E11"), ...[0, 1, 2, 8].map((r) => skipped(1, r)),
+      skipped(2, 3), skipped(0, 7),
+    ];
+    expect(await Promise.all(lost.map((c) => lapsedBy(revertedBy(c))))).toEqual(lost.map(() => 1));
+    expect(await Promise.all(kept.map((c) => lapsedBy(revertedBy(c))))).toEqual(kept.map(() => 0));
+  });
+
+  test("R-DISPUTE-LAPSED a counter lapses only when every cause is for good: one that can heal keeps it", async () => {
+    expect(await lapsedBy(revertedBy(error("E4"), skipped(1, 7)))).toBe(1);
+    expect(await lapsedBy(revertedBy(error("E4"), error("E3")))).toBe(0);
+    expect(await lapsedBy(revertedBy(skipped(1, 3), skipped(1, 1)))).toBe(0);
+    expect(await lapsedBy(revertedBy())).toBe(0);
+  });
+
+  test("R-DISPUTE-LAPSED a counter that simulates cleanly is sealed with what is behind it", async () => {
+    const at = scene();
+    const moved = await withIo(at, CALM, (io) => stepped(io, counterAsked(asked(opened()))));
+    expect([moved.lapsed, moved.stage]).toEqual([[], "waiting"]);
+    expect(journalIn(at.journal)).toEqual(["sealed@5"]);
+  });
+
+  const SKIPPED_FINALIZE: Simulation["outcome"] = {
+    _tag: "reverts", reason: "DisputeOpSkipped", causes: [{ _tag: "skipped", op: 2, reason: 2 }],
+  };
+  const finalizeAsked = (s: Submitter): Submitter => {
+    const out = take(s, FINALIZE);
+    return out._tag === "queued" ? out.submitter : expect.unreachable(`take ${out._tag}`);
+  };
+
+  test("R-DISPUTE-LAPSED a finalize the other party's landed first is dropped, not named, asked again", async () => {
+    const at = scene();
+    const moved = await withIo(at, { ...CALM, outcome: SKIPPED_FINALIZE }, (io) =>
+      stepped(io, finalizeAsked(opened())));
+    expect([moved.lapsed, moved.stage]).toEqual([[], "closed"]);
+    expect(moved.submitter.jbatch.draft).toEqual([]);
+    expect(moved.submitter.waiting.size).toBe(0);
+    expect(journalIn(at.journal)).toEqual([]);
+  });
+
+  test("R-DISPUTE-LAPSED a finalize that simulates cleanly is sealed and sent, not dropped", async () => {
+    const at = scene();
+    const moved = await withIo(at, CALM, (io) => stepped(io, finalizeAsked(opened())));
     expect([moved.stage, moved.lapsed]).toEqual(["waiting", []]);
     expect(journalIn(at.journal)).toEqual(["sealed@5"]);
   });

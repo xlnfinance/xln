@@ -5,9 +5,12 @@
 import { describe, expect, test } from "bun:test";
 import { appendFileSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
+import { encodeBatch } from "../../../chain/batch/batch.ts";
 import { emptyEntity } from "../../../entity/model.ts";
-import type { JAnswer } from "../../../j/batch/answer.ts";
-import type { Simulation } from "../../../j/gas/simulate.ts";
+import type { JAnswer, SkipFact } from "../../../j/batch/answer.ts";
+import { MIN_GAS_BUDGET } from "../../../j/batch/sealed.ts";
+import { assemble } from "../../../j/op/assemble.ts";
+import type { Cause, Simulation } from "../../../j/gas/simulate.ts";
 import { err, ok, unwrapOr, type Result } from "../../../kernel/core/result.ts";
 import { hostOf, setup, stamp } from "../../../runtime/fixtures.ts";
 import { limits } from "../../host.ts";
@@ -44,15 +47,20 @@ const rowsIn = (at: Scene) => {
 
 const DOWN: PortFault = { _tag: "port", call: "send", reason: "connection reset" };
 
+/** The batch of no op the Host simulates before it gives a counter up: what the chain says of it is the batch's own. */
+const BARE = unwrapOr(encodeBatch(assemble(MIN_GAS_BUDGET, [])), () => expect.unreachable("no bare batch"));
+const LANDS: Simulation["outcome"] = { _tag: "ok", applyGas: 100_000n };
+
 /** A chain that lands a batch as soon as it is sent, unless its sends are down. */
 const portOf = (
-  at: Scene, sends: Result<void, PortFault>, outcome: Simulation["outcome"] = { _tag: "ok", applyGas: 100_000n },
+  at: Scene, sends: Result<void, PortFault>, outcome: Simulation["outcome"] = LANDS, skipReason?: number,
+  bare: Simulation["outcome"] = LANDS,
 ): ChainPort => ({
   nonce: () => Promise.resolve(ok(4n)),
   treasury: () => Promise.resolve(ok(TREASURY)),
-  simulate: () => {
+  simulate: (call) => {
     appendFileSync(at.log, "simulate\n");
-    return Promise.resolve(ok(outcome));
+    return Promise.resolve(ok(call.encodedBatch === BARE ? bare : outcome));
   },
   send: (call) => {
     const how = sends.ok ? "ok" : "lost";
@@ -62,21 +70,34 @@ const portOf = (
   },
   answer: (batch) => {
     const landed = callsOf(at.log).some((c) => c.startsWith(`send ${batch.nonce} `) && c.endsWith(" ok"));
-    const answer: JAnswer = { _tag: "landed", nonce: batch.nonce, batchHash: batch.digest, skipped: [] };
+    const skipped = skipReason === undefined ? [] : batch.ops.flatMap((op): SkipFact[] => {
+      if (op._tag === "dispute_start") {
+        return [{ op: 0, counterentity: op.start.counterentity, reason: skipReason, nonce: op.start.nonce }];
+      }
+      return op._tag === "dispute_counter"
+        ? [{ op: 1, counterentity: op.counter.counterentity, reason: skipReason, nonce: op.counter.counterNonce }]
+        : [];
+    });
+    const answer: JAnswer = { _tag: "landed", nonce: batch.nonce, batchHash: batch.digest, skipped };
     return Promise.resolve(ok(landed ? answer : undefined));
   },
 });
 
 /** The shell over the scene's two files for one piece of work, and the files closed after it. */
+/** The simulation the scene's port answers with when a test names none. */
+const DEFAULT_OUTCOME: Simulation["outcome"] | undefined = undefined;
+const NO_SKIP: number | undefined = undefined;
+
 const withShell = async <T>(
   at: Scene, sends: Result<void, PortFault>, work: (shell: Shell) => Promise<T>,
-  outcome?: Simulation["outcome"],
+  outcome?: Simulation["outcome"], skipReason?: number, bare?: Simulation["outcome"],
 ): Promise<T> => {
   appendFileSync(at.log, "");
   const wal = await fileDisk(at.wal);
   const journal = await fileDisk(at.journal);
   if (!wal.ok || !journal.ok) return expect.unreachable("disks");
-  const io = { port: portOf(at, sends, outcome), signer: lazySigner(ALICE, KEY), journal: journal.value, gas: GAS };
+  const port = portOf(at, sends, outcome, skipReason, bare);
+  const io = { port, signer: lazySigner(ALICE, KEY), journal: journal.value, gas: GAS };
   const out = await work({ wal: wal.value, io, now: () => stamp(1_000n) });
   await wal.value.close();
   await journal.value.close();
@@ -186,7 +207,7 @@ describe("host/shell/drive the Host's rows are on the disk before the chain hear
       const started = turnOf(await start(shell, { ...BOOT, genesis: paid }));
       const first = turnOf(await command(shell, started.station, ALICE, dispute));
       return { first, second: turnOf(await command(shell, first.station, ALICE, dispute)) };
-    }, { _tag: "reverts", reason: "bad signature" });
+    }, { _tag: "reverts", reason: "bad signature", causes: [] });
     expect(out.first.lapsed.map((op) => op._tag)).toEqual(["dispute_start"]);
     expect(facts(out.first)?.starting).toBeUndefined();
     expect(out.first.station.submitter.jbatch.draft).toEqual([]);
@@ -196,24 +217,94 @@ describe("host/shell/drive the Host's rows are on the disk before the chain hear
     expect(rowsIn(at).flatMap((r) => r.chain.map((a) => a._tag))).toEqual(["dispute_start", "dispute_start"]);
   });
 
-  test("R-DISPUTE-LAPSED a counter the chain would revert is dropped and not asked for again", async () => {
+  const counterOpened = {
+    _tag: "j_dispute", peer: BOB, epoch: 0n, by: "right", nonce: 1n, timeout: 500n, proposerIsLeft: false,
+    bodyHash: `0x${"01".repeat(32)}`,
+  } as const;
+  const answerOf = (turn: Turn) => turn.station.host.runtime.entities.get(ALICE)?.chain.get(BOB)?.against?.answer;
+  const counterTurns = async (outcome: Simulation["outcome"], skipReason?: number, bare?: Simulation["outcome"]) => {
     const at = scene();
     const paid = hostOf(aliceRun, ALICE).entities.get(ALICE) ?? expect.unreachable("no entity");
-    const opened = {
-      _tag: "j_dispute", peer: BOB, epoch: 0n, by: "right", nonce: 1n, timeout: 500n, proposerIsLeft: false,
-      bodyHash: `0x${"01".repeat(32)}`,
-    } as const;
-    const answer = (turn: Turn) => turn.station.host.runtime.entities.get(ALICE)?.chain.get(BOB)?.against?.answer;
     const out = await withShell(at, ok(undefined), async (shell) => {
       const started = turnOf(await start(shell, { ...BOOT, genesis: paid }));
-      const first = turnOf(await command(shell, started.station, ALICE, opened));
-      return { first, second: turnOf(await command(shell, first.station, ALICE, { _tag: "resend_due", peer: BOB })) };
-    }, { _tag: "reverts", reason: "window over" });
+      const first = turnOf(await command(shell, started.station, ALICE, counterOpened));
+      const second = turnOf(await command(shell, first.station, ALICE, { _tag: "resend_due", peer: BOB }));
+      return { first, second, third: turnOf(await pump(shell, second)) };
+    }, outcome, skipReason, bare);
+    return { at, ...out };
+  };
+  const E4: Cause = { _tag: "error", name: "E4" };
+
+  test("R-DISPUTE-LAPSED a counter the chain would revert is dropped and not asked for again", async () => {
+    const out = await counterTurns({ _tag: "reverts", reason: "window over", causes: [E4] });
     expect(out.first.lapsed.map((op) => op._tag)).toEqual(["dispute_counter"]);
-    expect(answer(out.first)?.lapsed).toBe(true);
+    expect(answerOf(out.first)?.lapsed).toBe(true);
     expect(out.first.station.submitter.jbatch.draft).toEqual([]);
-    expect(callsOf(at.log).filter((c) => c.startsWith("send"))).toEqual([]);
+    expect(callsOf(out.at.log).filter((c) => c.startsWith("send"))).toEqual([]);
     expect(out.second.lapsed).toEqual([]);
-    expect(rowsIn(at).flatMap((r) => r.chain.map((a) => a._tag))).toEqual(["counter"]);
+    expect(rowsIn(out.at).flatMap((r) => r.chain.map((a) => a._tag))).toEqual(["counter"]);
+  });
+
+  test("R-DISPUTE-LAPSED a counter is not given up while the chain refuses a batch of no op at its nonce", async () => {
+    const reverts: Simulation["outcome"] = { _tag: "reverts", reason: "window over", causes: [E4] };
+    const out = await counterTurns(reverts, NO_SKIP, reverts);
+    expect(out.first.lapsed).toEqual([]);
+    expect(answerOf(out.first)?.lapsed).toBe(false);
+    expect(out.first.station.submitter.jbatch.draft).toEqual([]);
+    expect(rowsIn(out.at).flatMap((r) => r.chain.map((a) => a._tag))).toEqual(["counter", "counter"]);
+  });
+
+  test("R-DISPUTE-LAPSED a counter held for a reason that can heal is asked for again", async () => {
+    const transient: Cause[] = [{ _tag: "error", name: "E3" }];
+    const out = await counterTurns({ _tag: "reverts", reason: "execution failed", causes: transient });
+    expect(out.first.lapsed).toEqual([]);
+    expect(answerOf(out.first)?.lapsed).toBe(false);
+    expect(out.first.station.submitter.jbatch.draft).toEqual([]);
+    expect(out.second.lapsed).toEqual([]);
+    expect(answerOf(out.second)?.lapsed).toBe(false);
+    expect(rowsIn(out.at).flatMap((r) => r.chain.map((a) => a._tag))).toEqual(["counter", "counter"]);
+  });
+
+  test("R-DISPUTE-LAPSED a counter whose revert the Host cannot name is not given up either", async () => {
+    const out = await counterTurns({ _tag: "reverts", reason: "execution failed", causes: [] });
+    expect(out.first.lapsed).toEqual([]);
+    expect(answerOf(out.first)?.lapsed).toBe(false);
+  });
+
+  test("R-DISPUTE-LAPSED a counter skipped for good in a landed batch lapses, one that can heal does not", async () => {
+    const skipped = (reason: number): Simulation["outcome"] =>
+      ({ _tag: "reverts", reason: "DisputeOpSkipped", causes: [{ _tag: "skipped", op: 1, reason }] });
+    const closed = await counterTurns(skipped(4));
+    expect(closed.first.lapsed.map((op) => op._tag)).toEqual(["dispute_counter"]);
+    const none = await counterTurns(skipped(2));
+    expect([none.first.lapsed, answerOf(none.first)?.lapsed]).toEqual([[], false]);
+  });
+  /** A start the chain's simulation passed and its batch landed, then skipped for `reason`: what the Entity is told. */
+  const startSkipped = async (reason: number) => {
+    const at = scene();
+    const paid = hostOf(aliceRun, ALICE).entities.get(ALICE) ?? expect.unreachable("no entity");
+    const dispute = { _tag: "dispute", peer: BOB } as const;
+    const out = await withShell(at, ok(undefined), async (shell) => {
+      const started = turnOf(await start(shell, { ...BOOT, genesis: paid }));
+      return turnOf(await pump(shell, turnOf(await command(shell, started.station, ALICE, dispute))));
+    }, DEFAULT_OUTCOME, reason);
+    return { at, out, starting: out.station.host.runtime.entities.get(ALICE)?.chain.get(BOB)?.starting };
+  };
+
+  test("R-DISPUTE-LAPSED a start skipped for good (nonce reached, epoch left) is told as lapsed", async () => {
+    const [reached, left] = [await startSkipped(0), await startSkipped(11)];
+    expect(reached.out.skipped.map(({ op, reason }) => [op._tag, reason])).toEqual([["dispute_start", 0]]);
+    expect([reached.starting, left.starting]).toEqual([undefined, undefined]);
+  });
+
+  test("R-DISPUTE-LAPSED a start skipped because a dispute is open stays: it may be its own, restated", async () => {
+    const open = await startSkipped(1);
+    expect(open.out.skipped.map(({ reason }) => reason)).toEqual([1]);
+    expect(open.starting).toBeDefined();
+  });
+  test("R-DISPUTE-LAPSED a counter that landed and was skipped for good lapses, an unknown skip does not", async () => {
+    const ok_: Simulation["outcome"] = { _tag: "ok", applyGas: 100_000n };
+    const [window, none] = [await counterTurns(ok_, 4), await counterTurns(ok_, 2)];
+    expect([answerOf(window.third)?.lapsed, answerOf(none.third)?.lapsed]).toEqual([true, false]);
   });
 });

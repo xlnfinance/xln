@@ -105,16 +105,53 @@ describe("host/shell/evm a batch is simulated at the head, and one that does not
 
   test("R-SIMULATE a call that reverts is a revert, with the node's own reason", async () => {
     const reverted = call({ status: "0x0", error: { code: -3200, message: "execution failed" } });
-    expect(await outcome([reverted])).toEqual(ok({ _tag: "reverts", reason: "execution failed" }));
+    expect(await outcome([reverted])).toEqual(ok({ _tag: "reverts", reason: "execution failed", causes: [] }));
   });
 
   test("R-SIMULATE BatchFailed and DisputeOpSkipped refuse the batch though the call succeeded", async () => {
     const failed = { address: DEPOSITORY.toLowerCase(), topics: [BATCH_FAILED], data: "0x" };
     const skipped = { address: DEPOSITORY, topics: [DISPUTE_SKIPPED], data: "0x" };
-    expect(await outcome([call({ logs: [failed] })])).toEqual(ok({ _tag: "reverts", reason: "BatchFailed" }));
-    expect(await outcome([call({ logs: [skipped] })])).toEqual(ok({ _tag: "reverts", reason: "DisputeOpSkipped" }));
+    expect(await outcome([call({ logs: [failed] })]))
+      .toEqual(ok({ _tag: "reverts", reason: "BatchFailed", causes: [] }));
+    expect(await outcome([call({ logs: [skipped] })]))
+      .toEqual(ok({ _tag: "reverts", reason: "DisputeOpSkipped", causes: [] }));
     const foreign = { address: "0x1111111111111111111111111111111111111111", topics: [BATCH_FAILED], data: "0x" };
     expect(await outcome([call({ logs: [foreign] })])).toEqual(ok({ _tag: "ok", applyGas: 21_000n }));
+  });
+
+  test("R-DISPUTE-LAPSED a revert is named as the contract names it: by return data or four bytes", async () => {
+    const reverted = (returnData: string) =>
+      call({ status: "0x0", returnData, error: { code: -3200, message: "execution failed" } });
+    const named = (name: string) =>
+      ok({ _tag: "reverts", reason: "execution failed", causes: [{ _tag: "error", name }] } as const);
+    expect(await outcome([reverted("0xde8c50c8")])).toEqual(named("E4"));
+    expect(await outcome([reverted("0xDE8C50C8")])).toEqual(named("E4"));
+    expect(await outcome([reverted("0x0b1f0c2a")])).toEqual(named("0x0b1f0c2a"));
+    expect(await outcome([call({ status: "0x0", error: { message: "execution failed" } })])).toEqual(ok({
+      _tag: "reverts", reason: "execution failed", causes: [],
+    } as const));
+  });
+
+  test("R-DISPUTE-LAPSED a skipped dispute op names its op and reason, a failed batch its error", async () => {
+    const word = (n: bigint) => n.toString(16).padStart(64, "0");
+    const skipped = { address: DEPOSITORY, topics: [DISPUTE_SKIPPED, `0x${word(1n)}`, `0x${word(2n)}`],
+      data: `0x${word(1n)}${word(4n)}${word(9n)}` };
+    const failed = { address: DEPOSITORY, topics: [BATCH_FAILED], data: `0xde8c50c8${"00".repeat(28)}` };
+    expect(await outcome([call({ logs: [skipped] })])).toEqual(ok({
+      _tag: "reverts", reason: "DisputeOpSkipped", causes: [{ _tag: "skipped", op: 1, reason: 4 }],
+    } as const));
+    expect(await outcome([call({ logs: [failed] })])).toEqual(ok({
+      _tag: "reverts", reason: "BatchFailed", causes: [{ _tag: "error", name: "E4" }],
+    } as const));
+  });
+
+  test("R-DISPUTE-LAPSED the return data of a call that succeeded is no error: the logs name the cause", async () => {
+    const word = (n: bigint) => n.toString(16).padStart(64, "0");
+    const skipped = { address: DEPOSITORY, topics: [DISPUTE_SKIPPED, `0x${word(1n)}`, `0x${word(2n)}`],
+      data: `0x${word(1n)}${word(1n)}${word(9n)}` };
+    expect(await outcome([call({ logs: [skipped], returnData: "0xde8c50c8" })])).toEqual(ok({
+      _tag: "reverts", reason: "DisputeOpSkipped", causes: [{ _tag: "skipped", op: 1, reason: 1 }],
+    } as const));
   });
 
   test("R-SIMULATE the call is made from the key's address at the head, with the gas limit it is given", async () => {
