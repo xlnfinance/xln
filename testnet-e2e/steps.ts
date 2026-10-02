@@ -17,7 +17,7 @@ import { accountMessageHash } from "../pure/chain/proof/payload.ts";
 import { keccakHex } from "../pure/kernel/encoding/bytes.ts";
 import { startAnvil, assertLoopback, scrubbedEnv, type Anvil } from "./lib/anvil.ts";
 import {
-  accountKeyOf, accountOnChain, advanceTime, collateralOf, connect, eid, hankoOf, heldBy, leftOf, must, partyOf, reserveOf,
+  accountKeyOf, accountOnChain, advanceTime, collateralOf, connect, eid, heldBy, leftOf, must, partyOf, reserveOf,
   unit, type Chain, type Manifest, type Party,
 } from "./lib/chain.ts";
 import { GAPS, REPO } from "./lib/gaps.ts";
@@ -518,6 +518,7 @@ const dispute: Step<World> = {
     // alice's own node starts the dispute: it holds hubX's signature over the head (R-SIGNED-HEADS-ON-THE-WIRE) and asks the chain
     // for the start itself (R-DISPUTE-START); the harness only reads what the node asked and what the chain did.
     const before = net.askedBy(a).length;
+    const fromBlock = (await chain.provider.getBlockNumber()) + 1;
     await net.tell(a, { _tag: "dispute", peer: x });
     await net.settle();
     const asks = net.askedBy(a).slice(before).flatMap((ask) => (ask._tag === "dispute_start" ? [ask] : []));
@@ -541,6 +542,26 @@ const dispute: Step<World> = {
       || must(proofBodyHash(finalAsk.body), "finalize body hash") !== bodyHash) {
       throw new Error("the finalize alice's node asked for differs from the start (nonce, author, side or body)");
     }
+    // The finalize is alice's node's own, by the three records that cannot be the harness's: the chain's one DisputeFinalized names
+    // alice's Entity and was sent from alice's wallet (nothing was skipped, so the restated asks made one transaction), and alice's
+    // journal holds the sealed batch of the WAL row that asked for it with its landed answer.
+    const finished = await chain.depository.queryFilter(chain.depository.filters.DisputeFinalized(), fromBlock);
+    const skipped = await chain.depository.queryFilter(chain.depository.filters.DisputeOpSkipped(), fromBlock);
+    if (finished.length !== 1 || finished[0] === undefined) throw new Error(`the chain finalized ${finished.length} disputes after the start, expected one`);
+    if (skipped.length !== 0) throw new Error(`the chain skipped ${skipped.length} dispute ops after the start: a restated finalize reached it twice`);
+    const [finish] = finished;
+    const sender = (await finish.getTransaction()).from;
+    if (finish.args.sender !== alice.id || sender.toLowerCase() !== alice.wallet.address.toLowerCase()) {
+      throw new Error(`the finalize names ${finish.args.sender} and was sent from ${sender}, expected alice's Entity ${alice.id} from ${alice.wallet.address}`);
+    }
+    const walRows = net.rowsOf(a);
+    const journal = journalOf(net.dirOf(a), "alice");
+    const finalizing = journal.flatMap((record) => (record._tag === "sealed" && record.rows.some((id) => walRows.find((r) => r.height === id.height)?.chain[id.index]?._tag === "dispute_finalize") ? [record] : []));
+    const [sealedFinal] = finalizing;
+    const answer = journal.find((record) => record._tag === "answered" && record.digest === sealedFinal?.digest);
+    if (finalizing.length !== 1 || sealedFinal === undefined || answer?._tag !== "answered" || answer.outcome !== "landed") {
+      throw new Error(`alice's journal holds ${finalizing.length} sealed batches of a finalize and ${answer === undefined ? "no" : `a ${answer._tag === "answered" ? answer.outcome : "?"}`} answer, expected one sealed batch and its landed answer`);
+    }
     // What both sides believed: delta = ondelta + offdelta; Left takes delta clamped to the collateral, Right the rest. The chain's ondelta and collateral, the Runtimes' offdelta.
     const delta = held.ondelta + ledger.offdelta;
     const leftShare = delta < 0n ? 0n : delta > held.collateral ? held.collateral : delta;
@@ -560,7 +581,7 @@ const dispute: Step<World> = {
     return {
       checks: [
         `the head of the last committed frame (slot ${replica.used}, nonce ${nonce}, epoch ${onChain.epoch}, authored by the ${authorIsLeft ? "left" : "right"} side; body from pure/account/proof/body.ts, offdelta ${ledger.offdelta}, one token, no clause) is the dispute-proof digest the chain computes; alice's own node, holding hubX's signature over it from the frame round, asked for the start (nonce, epoch, author and body as the head names them) and the chain opened the dispute`,
-        `after both ${floor} s windows (anvil clock jump) alice's own node was told by its J loop that the window was over (a final block's own second at or past the chain's end for the dispute) and asked the chain to finalize with the state it started from (${finals()} ask${finals() === 1 ? "" : "s"}, the nonce, author, side and body of the start); the chain paid alice ${fmt(chain, aliceGot)} and hubX ${fmt(chain, hubGot)}, which is what the chain's ondelta ${held.ondelta} plus the Runtimes' offdelta ${ledger.offdelta} says`,
+        `after both ${floor} s windows (anvil clock jump) alice's own node was told by its J loop that the window was over (a final block's own second at or past the chain's end for the dispute) and asked the chain to finalize with the state it started from (${finals()} ask${finals() === 1 ? "" : "s"} restated, the nonce, author, side and body of the start), which became one transaction: alice's journal holds the one sealed batch of that finalize with its landed answer (nonce ${sealedFinal.nonce}), the chain's one DisputeFinalized names alice's Entity and was sent from alice's wallet, and nothing was skipped; the chain paid alice ${fmt(chain, aliceGot)} and hubX ${fmt(chain, hubGot)}, which is what the chain's ondelta ${held.ondelta} plus the Runtimes' offdelta ${ledger.offdelta} says`,
         `collateral 0, epoch ${onChain.epoch} to ${after.epoch}, dispute closed; money held by the four entities is unchanged at ${fmt(chain, now)}`,
       ],
       gaps: [],

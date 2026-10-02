@@ -1,8 +1,6 @@
-// The J side of the run: parties with anvil-dev style keys, batches built and sealed by the rewrite's J builder
-// (pure/j/batch: queue, seal), the Host's part of sealing (simulate at the head, R-SIMULATE) done on the fork, signed
-// with a lazy Hanko and sent to the deployed Depository, and reads of what the chain holds. Everything that is bytes
-// comes from the rewrite (pure/chain: Batch, the payloads, the lazy Hanko, signatures); this file only decides which
-// ops to queue and sends what the builder sealed. Its reads of the chain are the check on what the nodes learn.
+// The J side of the run: parties with anvil-dev style keys, the connection to the deployed Depository, and the reads of
+// what the chain holds, which are the check on what the nodes learn. Nothing here sends a batch: every batch is built,
+// simulated, sealed, signed and sent by a node's own submit path (pure/host/shell/submit), and the steps only read.
 import { ethers } from "ethers";
 import { Depository__factory, ERC20Mock__factory } from "../../contracts/typechain-types/index.ts";
 import type { deployedManifest } from "../../contracts/deploy/manifest.ts";
