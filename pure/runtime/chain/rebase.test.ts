@@ -290,6 +290,14 @@ describe("runtime/chain R-DISPUTE-FREEZE the finalized nonce is that of the proo
     expect(pendingTold(after, ALICE).map((n) => n.finalizedNonce)).toStrictEqual([stale + 1n]);
   });
 
+  test("R-DISPUTE-FREEZE a registered counter that holds the node's own head names exactly that nonce", () => {
+    const counter = (peer: EntityId): JEvent =>
+      ({ _tag: "j_countered", peer, nonce: stale, proposerIsLeft: false, bodyHash: openingHash(asked) });
+    const registered = feed(feed(asked, ALICE, counter(BOB)), BOB, counter(ALICE));
+    const after = moved(registered, 1n, stale, openingHash(asked));
+    expect(pendingTold(after, ALICE).map((n) => n.finalizedNonce)).toStrictEqual([stale]);
+  });
+
   test("R-DISPUTE-FREEZE the hash the chain logged matches whatever case it is written in", () => {
     const upper = (hash: string): string => `0x${hash.slice(2).toUpperCase()}`;
     const named = moved(asked, 1n, stale + 1n, upper(openingHash(asked)));

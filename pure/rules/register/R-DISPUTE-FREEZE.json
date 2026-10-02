@@ -254,6 +254,11 @@
    "kind": "test",
    "layer": "ts",
    "name": "R-DISPUTE-FREEZE the same holds whoever started the dispute: a payment the chain paid is paid once"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DISPUTE-FREEZE a registered counter that holds the node's own head names exactly that nonce"
   }
  ]
 }
