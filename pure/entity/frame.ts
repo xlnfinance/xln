@@ -12,7 +12,7 @@ import type { AccountState, Side } from "../account/model.ts";
 import { proofBodyOf, type ProofTerms } from "../account/proof/body.ts";
 import type { Check } from "./signing/attest.ts";
 import { signingOf, type Anchor } from "./signing/signing.ts";
-import { holderOf, ledgerOf, rebased, withHeld } from "../account/state.ts";
+import { dissolved, holderOf, ledgerOf, rebased, withHeld } from "../account/state.ts";
 import { MAX_AMOUNT } from "../account/ledger.ts";
 import {
   answered, cosignFrozen, cosignLapsed, counterLapsed, countered, depositable, disputeAsked, disputeOpened, disputeOver,
@@ -238,10 +238,25 @@ const holding = (w: Work, e: Extract<JEvent, { _tag: "j_collateral" }>): Work =>
     : reconciled(withFacts(w, e.peer, kept), e.peer);
 };
 
-/** R-LEDGER-REBASE: a finalized dispute paid the Account out: no collateral and no ondelta are held for any token. */
+/**
+ * R-LEDGER-REBASE: a finalized dispute paid the Account out: no collateral and no ondelta are held for any token.
+ * R-HOLD-DISSOLVE: and it settled every clause of the proof it used, so the Account's holds, quotes and offers are
+ * over, in the committed state and in the state a pending frame would commit. A lock this Entity forwarded to `peer`
+ * is a lock `peer` gave up, as far as the paybook is concerned, so the failure walks back to its source the usual way.
+ */
 const finalized = (w: Work, peer: EntityId): Work => {
-  const ledgered = w.state.accounts.get(peer)?.state.ledgers.keys() ?? [];
-  return reconciled(withFacts(w, peer, paidOut(disputeOver(factsOf(w, peer)), ledgered)), peer);
+  const account = w.state.accounts.get(peer);
+  const ledgered = account?.state.ledgers.keys() ?? [];
+  const given = [...(account?.state.ledgers ?? [])]
+    .flatMap(([token, l]) => l.holds.map((h): AccountTx => ({ _tag: "cancel", token, id: h.id })));
+  const told = { ...w, state: { ...w.state, paybook: learned(w.state.paybook, peer, given) } };
+  const { pending } = account ?? {};
+  const open = account === undefined ? told : withReplica(told, peer, {
+    ...account,
+    state: dissolved(account.state),
+    pending: pending === undefined ? undefined : { ...pending, after: dissolved(pending.after) },
+  });
+  return reconciled(withFacts(open, peer, paidOut(disputeOver(factsOf(w, peer)), ledgered)), peer);
 };
 
 /** What the chain did to the Account with `peer`, as the facts the Entity holds for the pair say. */
