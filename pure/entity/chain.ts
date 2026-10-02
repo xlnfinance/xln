@@ -43,13 +43,17 @@ export const disputeOpened = (f: ChainFacts, epoch: bigint): ChainFacts =>
 
 export const disputeOver = (f: ChainFacts): ChainFacts => ({ ...f, disputed: false });
 
+/** The first nonce a proof of an epoch may take: two above the stored nonce, since none is signed at stored + 1. */
+export const firstNonce = (f: ChainFacts): bigint => f.stored + 2n;
+
 /**
- * The nonce of the newest co-signed proof of this epoch, if there is one: the stored nonce the chain reports, plus one
- * for the implicit proof that sits at stored + 1, plus one for each frame. The first signed proof of an epoch is at
- * stored + 2 and no proof is ever signed at stored + 1: a Right-authored proof there only ties the implicit one.
+ * The nonce of the newest co-signed proof of this epoch, if there is one: the proof of the frame at slot `used`, the
+ * Account's newest committed slot, signed at the epoch's first nonce plus the slot, less one. A slot is not a count
+ * of frames: the Left lane starts at the second slot, a retry skips slots, and `used` carries across epochs while
+ * `frames` starts again. An epoch with no co-signed frame has no proof of its own.
  */
-export const proofNonce = (f: ChainFacts): bigint | undefined =>
-  (f.frames === 0n ? undefined : f.stored + 1n + f.frames);
+export const proofNonce = (f: ChainFacts, used: number): bigint | undefined =>
+  (f.frames === 0n ? undefined : firstNonce(f) + BigInt(used) - 1n);
 
 /** Epoch 0 has no implicit proof to fall back to: a deposit waits for the first co-signed frame. */
 export const depositable = (f: ChainFacts): boolean => f.epoch > 0n || f.frames > 0n;

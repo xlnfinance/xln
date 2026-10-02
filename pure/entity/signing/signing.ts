@@ -3,6 +3,7 @@
 import type { Deployment } from "../../chain/proof/deployment.ts";
 import type { SigningContext } from "../../account/proof/signing.ts";
 import type { ProofTerms } from "../../account/proof/body.ts";
+import { firstNonce } from "../chain.ts";
 import type { ChainFacts, EntityId } from "../model.ts";
 
 /** What every Account of a Runtime signs under: the chain and Depository it is on, and the terms of its proofs. */
@@ -21,5 +22,5 @@ export const accountKeyOf = (self: EntityId, peer: EntityId): string =>
  */
 export const signingOf = (anchor: Anchor, self: EntityId, peer: EntityId, facts: ChainFacts): SigningContext => ({
   deployment: anchor.deployment, terms: anchor.terms,
-  accountKey: accountKeyOf(self, peer), ondeltaEpoch: facts.epoch, firstNonce: facts.stored + 2n,
+  accountKey: accountKeyOf(self, peer), ondeltaEpoch: facts.epoch, firstNonce: firstNonce(facts),
 });
