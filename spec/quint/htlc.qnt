@@ -19,8 +19,12 @@
 //   DISSOLVE  a hold carried by the proof a finalize settled is dissolved at the epoch move, at both sides, never re-released
 //   ARGS      a secret shown in a dispute's arguments pays the clause (DeltaTransformer applyPayment) with no SecretRevealed; the hub's watcher
 //             reads it from the start's log data and from the input of the finalize (R-WATCH-CALLDATA), and the hub claims upstream
-//   HIDE      the payee relays its finalize through a contract: the watcher decodes a direct processBatch call only, finds no finalize op,
-//             and tells finalize_unread, no secret. A finalize before TD pays the clause, the hub cannot claim: the hub is out one unit
+//   HIDE      the payee finalizes where the watcher cannot read it: through a contract that relays the signed batch, or by calling
+//             Depository.watchtowerCounterDispute directly (a second selector; at or after T it finalizes with the caller's own otherArguments).
+//             The watcher decodes the processBatch selector only, finds no finalize op, and tells finalize_unread, no secret. A finalize
+//             before TD pays the clause, the hub cannot claim: the hub is out one unit
+//   (ARGS is also only as good as the decode: the chain reads a finalize's argument blob as bytes[], one Arguments per clause; a reader that
+//   takes it for one Arguments learns nothing, and the code is then the `noargs` variant.)
 // The model is the code of #162 (FREEZE on): an Entity with a dispute record seals nothing and refuses the peer's frames. The code before
 // the freeze is dispute.qnt's `today` row, whose payee loses (no_silent_zeroing); here the hub is the subject.
 //
