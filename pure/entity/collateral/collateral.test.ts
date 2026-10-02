@@ -76,9 +76,29 @@ describe("entity/frame what the chain holds for an Account's tokens (R-J-COLLATE
   });
 
   test("R-J-COLLATERAL an Account the Entity does not hold is told and ignored", () => {
+    // ignored as far as Accounts go: none is made and no ledger; what the chain holds is kept in the facts, below
     const framed = runAt(base().alice, [held(entityOf(3))]);
     expect(framed.notices).toEqual([{ _tag: "unknown_peer", from: entityOf(3) }]);
-    expect(framed.state).toEqual(base().alice);
+    expect(framed.state.accounts).toEqual(base().alice.accounts);
+  });
+
+  test("R-J-COLLATERAL what the chain holds for a peer with no Account yet is kept for one opened later", () => {
+    const framed = runAt(base().alice, [held(entityOf(3))]);
+    expect(framed.state.chain.get(entityOf(3))?.held.get(GOLD)).toEqual({ collateral: 100n, ondelta: 100n });
+  });
+
+  test("R-FRAME-EPOCH an Account opened after the chain moved the epoch on signs under it and the two commit", () => {
+    const moved = (peer: EntityId): JEvent => ({ _tag: "j_epoch", peer, epoch: 1n, stored: 10n });
+    const start: Pair = { alice: emptyEntity(ALICE), bob: emptyEntity(BOB) };
+    const alone = say(say(start, "alice", open(BOB)), "alice", moved(BOB));
+    const late = say(say(alone, "bob", moved(ALICE)), "bob", open(ALICE));
+    const sent = say(say(late, "alice", credit(BOB, 100n)), "bob", credit(ALICE, 50n));
+    expect(heads(sent)[0]).toBe(heads(sent)[1]);
+    expect(pending(sent)).toEqual([false, false]);
+    expect([ledgerOfToken(sent, "alice")?.limit, ledgerOfToken(sent, "bob")?.limit]).toEqual([
+      { left: 50n, right: 100n }, { left: 50n, right: 100n },
+    ]);
+    expect([sent.alice, sent.bob].map((e) => e.chain.get(e.id === ALICE ? BOB : ALICE)?.epoch)).toEqual([1n, 1n]);
   });
 
   test("R-J-COLLATERAL what the chain holds is what a payment may spend: Left pays from its deposit", () => {

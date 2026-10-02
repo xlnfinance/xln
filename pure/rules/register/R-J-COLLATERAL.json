@@ -69,6 +69,11 @@
    "kind": "test",
    "layer": "ts",
    "name": "R-J-COLLATERAL the snapshots of one Account stay in the chain's order among its other events"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-J-COLLATERAL what the chain holds for a peer with no Account yet is kept for one opened later"
   }
  ]
 }

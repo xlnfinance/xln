@@ -127,10 +127,12 @@ describe("runtime/chain the node answers a dispute started against it until the 
     expect(counters(back)).toEqual([7n, 7n]);
   });
 
-  test("an event about an Account the Entity does not hold is told and changes nothing", () => {
+  test("an event about an Account the Entity does not hold is told and its epoch is kept for one opened later", () => {
     const stranger = feed(opened, ALICE, epochOf(entityOf(3), 1n, 1n));
     expect(noticesOf(stranger, ALICE).map((n) => n._tag)).toEqual(["unknown_peer"]);
-    expect(hostOf(stranger, ALICE).entities.get(ALICE)?.chain.size).toBe(0);
+    const kept = hostOf(stranger, ALICE).entities.get(ALICE)?.chain;
+    expect([kept?.size, kept?.get(entityOf(3))?.epoch]).toEqual([1, 1n]);
+    expect(hostOf(stranger, ALICE).entities.get(ALICE)?.accounts.has(entityOf(3))).toBe(false);
   });
 });
 
