@@ -7,7 +7,7 @@ import { viewOf } from "../../account/fixtures.ts";
 import { OPENED_WITH } from "../../entity/fixtures.ts";
 import type { EntityId, JAction, JEvent } from "../../entity/model.ts";
 import {
-  type Cluster, credit, entityOf, feed, hostOf, open, pay, rise, settle, start,
+  type Cluster, credit, deliver, entityOf, feed, hostOf, open, pay, rise, settle, start,
 } from "../fixtures.ts";
 
 const ALICE = entityOf(1);
@@ -74,5 +74,39 @@ describe("runtime/chain R-DISPUTE-FREEZE a payment asked while the dispute is op
     const retried = settle(rise(settle(feed(moved, ALICE, { _tag: "resend_due", peer: BOB })), ALICE, 111n));
     expect(offdeltas(retried)).toEqual([-5n, -5n]);
     expect(heads(retried)[0]).toBe(heads(retried)[1]);
+  });
+});
+
+describe("runtime/chain R-DISPUTE-FREEZE a frame sealed before the dispute is not resent or acked into a head", () => {
+  /** Alice's payment is with Bob, who acks it; the ack is on the link when Alice asks for the dispute. */
+  const inFlight = (() => {
+    const ackOnLink = deliver(feed(paid, ALICE, pay(BOB, 5n)));
+    expect(ackOnLink.inflight.map((m) => m.msg._tag)).toEqual(["ack"]);
+    return feed(ackOnLink, ALICE, { _tag: "dispute", peer: BOB });
+  })();
+  const startNonce = (() => {
+    const [first] = inFlight.chain.filter((a: JAction) => a._tag === "dispute_start").slice(-1);
+    return first?._tag === "dispute_start" ? first.nonce : expect.unreachable("no start");
+  })();
+
+  test("R-DISPUTE-FREEZE an ack that arrives in the dispute commits nothing: the frame stays pending", () => {
+    const head = accountOf(inFlight, ALICE).head;
+    const acked = deliver(inFlight);
+    expect(accountOf(acked, ALICE).pending).toBeDefined();
+    expect(accountOf(acked, ALICE).head).toBe(head);
+  });
+
+  test("R-DISPUTE-FREEZE the timer does not send the pending frame again while the dispute is open", () => {
+    const acked = deliver(inFlight);
+    const timed = feed(acked, ALICE, { _tag: "resend_due", peer: BOB });
+    expect(timed.inflight).toEqual([]);
+  });
+
+  test("R-DISPUTE-FREEZE when the dispute lapses the frame is sent again, Bob acks it again and it commits", () => {
+    const lapsed = feed(deliver(inFlight), ALICE, { _tag: "j_start_lapsed", peer: BOB, nonce: startNonce });
+    const done = settle(feed(lapsed, ALICE, { _tag: "resend_due", peer: BOB }));
+    expect(accountOf(done, ALICE).pending).toBeUndefined();
+    expect(heads(done)[0]).toBe(heads(done)[1]);
+    expect(offdeltas(done)).toEqual([-45n, -45n]);
   });
 });

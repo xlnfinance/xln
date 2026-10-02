@@ -11,7 +11,7 @@ import type { ChainFacts, EntityId, Starting } from "../../../entity/model.ts";
 import { entityId } from "../../../entity/model.ts";
 import type { RawLog } from "../../../j/log.ts";
 import { watching, type Block } from "../../../j/watch.ts";
-import { blockOf, DEPOSITORY, entityOf, logOf, must } from "../../../j/fixtures.ts";
+import { blockOf, DEPOSITORY, entityOf, hexOf, logOf, must } from "../../../j/fixtures.ts";
 import { callsOf } from "../fixtures.ts";
 import type { PortFault } from "../submit/chain.ts";
 import { beginAt, poll, windowsOf, type WatchConfig, type WatchPort } from "./loop.ts";
@@ -68,6 +68,13 @@ describe("host/shell/watch the J loop's poll", () => {
     expect(callsOf(at)).toEqual([
       "head", "block 1", "block 2", "block 3", "block 4", "logs 1-4", `account ${blockOf(2n).hash.slice(-4)} 11 52`,
     ]);
+  });
+
+  test("R-DISPUTE-FREEZE a secret the chain showed reaches the Entity as j_secret, in bytes", async () => {
+    const shown = logOf("SecretRevealed", { hashlock: hexOf(7n), revealer: RIGHT, secret: hexOf(8n) }, 2n, 0n);
+    const got = await poll(portOf(straight(6n, [shown]), logPath()), start(2n), LEFT);
+    const bytes = Uint8Array.from({ length: 32 }, (_, i) => (i === 31 ? 8 : 0));
+    expect(got.ok ? got.value?.events : got).toEqual([{ _tag: "j_secret", secret: bytes }]);
   });
 
   test("R-JLOOP a block not buried yet is not read: nothing is delivered, nothing is asked past the head", async () => {

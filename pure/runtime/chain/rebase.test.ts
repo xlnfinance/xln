@@ -5,7 +5,7 @@
 import { describe, expect, test } from "bun:test";
 import { tokenOf, viewOf } from "../../account/fixtures.ts";
 import { OPENED_WITH } from "../../entity/fixtures.ts";
-import { type EntityId, type JEvent } from "../../entity/model.ts";
+import { type EntityId, type JAction, type JEvent } from "../../entity/model.ts";
 import {
   type Cluster, credit, deliver, entityOf, feed, GOLD, hostOf, open, pay, restarted, rise, settle, start,
 } from "../fixtures.ts";
@@ -17,9 +17,23 @@ const opened = settle(feed(feed(start(viewOf(110n), viewOf(110n)), ALICE, open(B
 const credited = settle(feed(opened, BOB, credit(ALICE, 100n)));
 const paid = settle(feed(credited, ALICE, pay(BOB, 40n)));
 
-const epochOf = (peer: EntityId, epoch: bigint): JEvent => ({ _tag: "j_epoch", peer, epoch, stored: 5n });
-const moved = (c: Cluster, epoch: bigint): Cluster =>
-  feed(feed(c, ALICE, epochOf(BOB, epoch)), BOB, epochOf(ALICE, epoch));
+const epochOf = (peer: EntityId, epoch: bigint, stored = 5n): JEvent => ({ _tag: "j_epoch", peer, epoch, stored });
+const moved = (c: Cluster, epoch: bigint, stored = 5n): Cluster =>
+  feed(feed(c, ALICE, epochOf(BOB, epoch, stored)), BOB, epochOf(ALICE, epoch, stored));
+/** Alice asks for the dispute and the chain opens it: both Entities hear it, so an epoch move after it ends one. */
+const disputed = (c: Cluster): Cluster => {
+  const asked = feed(c, ALICE, { _tag: "dispute", peer: BOB });
+  const opens = (peer: EntityId): JEvent =>
+    ({ _tag: "j_dispute", peer, epoch: 0n, by: "left", nonce: startedAt(asked), timeout: 500n, ...OPENED_WITH });
+  return feed(feed(asked, ALICE, opens(BOB)), BOB, opens(ALICE));
+};
+/** The nonce of the proof Alice's dispute start names: what the chain would keep when it finalizes with it. */
+const startedAt = (asked: Cluster): bigint => {
+  const [first] = asked.chain.filter((a: JAction) => a._tag === "dispute_start").slice(-1);
+  return first?._tag === "dispute_start" ? first.nonce : expect.unreachable("no start");
+};
+/** The chain finalizes the dispute with Alice's opening proof and the epoch moves on, both nodes hear it. */
+const finalizedByStart = (c: Cluster): Cluster => moved(c, 1n, startedAt(c));
 const finalized = (c: Cluster): Cluster => feed(
   feed(c, ALICE, { _tag: "j_dispute_over", peer: BOB }),
   BOB, { _tag: "j_dispute_over", peer: ALICE });
@@ -32,7 +46,7 @@ const offdeltas = (c: Cluster) => [ledgerOf(c, ALICE).offdelta, ledgerOf(c, BOB)
 const proofKept = (c: Cluster, id: EntityId) => hostOf(c, id).entities.get(id)?.proofs.has(id === ALICE ? BOB : ALICE);
 const noticesOf = (c: Cluster, id: EntityId) => hostOf(c, id).wal.flatMap((row) => row.notices);
 const rebasedTold = (c: Cluster, id: EntityId) =>
-  noticesOf(c, id).flatMap((n) => (n._tag === "offdelta_rebased" ? [[n.token, n.epoch, n.offdelta]] : []));
+  noticesOf(c, id).flatMap((n) => (n._tag === "offdelta_rebased" ? [n] : []));
 const otherNotices = (c: Cluster) =>
   [ALICE, BOB].flatMap((id) => noticesOf(c, id).filter((n) => n._tag !== "offdelta_rebased"));
 const same = (c: Cluster): boolean => replicaOf(c, ALICE).head === replicaOf(c, BOB).head;
@@ -61,19 +75,42 @@ describe("runtime/chain R-LEDGER-REBASE an epoch advance zeroes the offdelta on 
     expect(otherNotices(after)).toEqual([]);
   });
 
-  test("R-DISPUTE-FREEZE a rebase that zeroes an offdelta tells both sides how much, a repeat nothing more", () => {
-    const after = moved(paid, 1n);
-    expect([rebasedTold(after, ALICE), rebasedTold(after, BOB)]).toEqual([[[GOLD, 1n, -40n]], [[GOLD, 1n, -40n]]]);
-    const again = moved(after, 1n);
-    expect([rebasedTold(again, ALICE), rebasedTold(again, BOB)]).toEqual([[[GOLD, 1n, -40n]], [[GOLD, 1n, -40n]]]);
-    const quiet = moved(opened, 1n);
-    expect([rebasedTold(quiet, ALICE), rebasedTold(quiet, BOB)]).toEqual([[], []]);
+  test("R-DISPUTE-FREEZE a finalize by a proof below the committed head tells that node both nonces", () => {
+    const asked = disputed(ackLost(paid, ALICE, 5n));
+    const after = finalizedByStart(asked);
+    const stale = startedAt(asked);
+    expect(rebasedTold(after, ALICE)).toEqual([]);
+    const [told, ...more] = rebasedTold(after, BOB);
+    expect(more).toEqual([]);
+    expect(told).toMatchObject({
+      peer: ALICE, token: GOLD, epoch: 1n, offdelta: -45n, finalizedNonce: stale,
+    });
+    expect((told?.committedNonce ?? 0n) > stale).toBe(true);
+    expect(offdeltas(after)).toEqual([0n, 0n]);
   });
 
-  test("R-DISPUTE-FREEZE each side tells the offdelta it counted: the peer that committed first tells more", () => {
-    const lost = ackLost(paid, ALICE, 5n);
-    const after = moved(lost, 1n);
-    expect([rebasedTold(after, ALICE), rebasedTold(after, BOB)]).toEqual([[[GOLD, 1n, -40n]], [[GOLD, 1n, -45n]]]);
+  test("R-DISPUTE-FREEZE a finalize by the proof the node holds as its head tells nothing", () => {
+    const after = finalizedByStart(disputed(paid));
+    expect(offdeltas(paid)).toEqual([-40n, -40n]);
+    expect([rebasedTold(after, ALICE), rebasedTold(after, BOB)]).toEqual([[], []]);
+    expect(offdeltas(after)).toEqual([0n, 0n]);
+  });
+
+  test("R-DISPUTE-FREEZE a frame sealed before the start and acked after it is told to the committer", () => {
+    const asked = disputed(deliver(feed(paid, ALICE, pay(BOB, 5n))));
+    const acked = settle(asked);
+    expect(replicaOf(acked, ALICE).pending).toBeDefined();
+    const after = finalizedByStart(acked);
+    expect(rebasedTold(after, ALICE)).toEqual([]);
+    expect(rebasedTold(after, BOB).map((n) => [n.token, n.offdelta, n.finalizedNonce < n.committedNonce]))
+      .toEqual([[GOLD, -45n, true]]);
+  });
+
+  test("R-DISPUTE-FREEZE an epoch a settlement or a withdrawal moves tells nothing, a repeat nothing more", () => {
+    const after = moved(paid, 1n);
+    expect([rebasedTold(after, ALICE), rebasedTold(after, BOB)]).toEqual([[], []]);
+    expect([rebasedTold(moved(paid, 1n, 0n), ALICE), rebasedTold(moved(paid, 1n, 0n), BOB)]).toEqual([[], []]);
+    expect([rebasedTold(moved(after, 1n), ALICE), rebasedTold(moved(opened, 1n), BOB)]).toEqual([[], []]);
   });
 
   test("R-LEDGER-REBASE a repeat or an older report of the epoch changes nothing, a new payment stays", () => {
