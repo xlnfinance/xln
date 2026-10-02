@@ -12,8 +12,9 @@ module scn {
   const SW_LIVE: bool
   const SW_ACCEPT: bool
   const SW_NOTICE: bool
+  const SW_PAY: int
 
-  import dispute(FREEZE = SW_FREEZE, LIVE = SW_LIVE, ACCEPT = SW_ACCEPT, NOTICE = SW_NOTICE).* from "./dispute"
+  import dispute(FREEZE = SW_FREEZE, LIVE = SW_LIVE, ACCEPT = SW_ACCEPT, NOTICE = SW_NOTICE, PAY = SW_PAY).* from "./dispute"
 
   action jump(t: int): bool = st' = { ...st, now: t }
   action check(c: bool): bool = all { assert(c), st' = st }
@@ -183,11 +184,53 @@ module scn {
       .then(hear(Left))
       .then(check(phase(st.f.get(Left)) == 0 and not(st.frz.get(Left)) and st.f.get(Left).epoch == 2))
   }
+  // A payment sealed before the dispute reaches the other side after it. R, in the dispute L started, refuses the frame but holds L's
+  // signature on it (n3), counters with it and the chain finalizes by it: the finalized body already paid the payment. L hears the epoch
+  // move with the frame still pending. PAY=1 (#162 8f82733df): L seals it again in the new epoch, R commits it, and the payment is paid twice.
+  // PAY=2: L drops it, never seals it again.
+  run signedFrameRefusedTest = {
+    init
+      .then(seal(Left)).then(receive).then(ack)
+      .then(seal(Left))
+      .then(opStart(Left)).then(duty(Left)).then(landStart(Left))
+      .then(hear(Right))
+      .then(receive)
+      .then(if (PAY == 0) check(true)
+            else check(st.pend.stage == 2 and st.hold.get(Right) == 3 and st.comm.get(Right) == 2)
+              .then(duty(Right)).then(landCounter(Right))
+              .then(hear(Left)).then(hear(Left)).then(hear(Right)).then(duty(Left)).then(duty(Right))
+              .then(jump(5)).then(windowOver)
+              .then(hear(Left)).then(hear(Right)).then(duty(Left)).then(duty(Right))
+              .then(landFinal(Right))
+              .then(check(st.g.settledLast == 3 and st.g.chain.size() == 1))
+              .then(hear(Left)).then(hear(Right))
+              .then(check(if (PAY == 1) st.g.owes.get(Left) == 2 else st.g.owes.get(Left) == 0))
+              .then(if (PAY == 1) seal(Left).then(receive).then(check(st.g.double))
+                    else check(not(st.pend.on) and not(st.g.double))))
+  }
+
+  // The same frame, committed by R before it heard of the dispute and acked too late: R holds it as a committed frame, L keeps it pending
+  // and the re-ack brings the rebased state: nothing is sealed again, in either variant.
+  run committedFrameAckLostTest = {
+    init
+      .then(seal(Left)).then(receive).then(ack)
+      .then(seal(Left)).then(receive)
+      .then(opStart(Left)).then(duty(Left)).then(landStart(Left))
+      .then(hear(Right)).then(duty(Right)).then(landCounter(Right))
+      .then(hear(Left)).then(hear(Left)).then(hear(Right)).then(duty(Left)).then(duty(Right))
+      .then(jump(5)).then(windowOver)
+      .then(hear(Left)).then(hear(Right)).then(duty(Left)).then(duty(Right))
+      .then(landFinal(Right))
+      .then(hear(Left)).then(hear(Right))
+      .then(check(st.g.owes.get(Left) == 0 and not(st.g.double)))
+  }
 }
 
-module today_test { import scn(SW_FREEZE = false, SW_LIVE = false, SW_ACCEPT = false, SW_NOTICE = false).* from "./dispute_test" }
-module freeze_test { import scn(SW_FREEZE = true, SW_LIVE = false, SW_ACCEPT = false, SW_NOTICE = false).* from "./dispute_test" }
-module live_test { import scn(SW_FREEZE = false, SW_LIVE = true, SW_ACCEPT = false, SW_NOTICE = false).* from "./dispute_test" }
-module decided_test { import scn(SW_FREEZE = true, SW_LIVE = true, SW_ACCEPT = false, SW_NOTICE = false).* from "./dispute_test" }
-module accept_test { import scn(SW_FREEZE = true, SW_LIVE = true, SW_ACCEPT = true, SW_NOTICE = false).* from "./dispute_test" }
-module all_test { import scn(SW_FREEZE = true, SW_LIVE = true, SW_ACCEPT = true, SW_NOTICE = true).* from "./dispute_test" }
+module today_test { import scn(SW_FREEZE = false, SW_LIVE = false, SW_ACCEPT = false, SW_NOTICE = false, SW_PAY = 0).* from "./dispute_test" }
+module freeze_test { import scn(SW_FREEZE = true, SW_LIVE = false, SW_ACCEPT = false, SW_NOTICE = false, SW_PAY = 0).* from "./dispute_test" }
+module live_test { import scn(SW_FREEZE = false, SW_LIVE = true, SW_ACCEPT = false, SW_NOTICE = false, SW_PAY = 0).* from "./dispute_test" }
+module decided_test { import scn(SW_FREEZE = true, SW_LIVE = true, SW_ACCEPT = false, SW_NOTICE = false, SW_PAY = 0).* from "./dispute_test" }
+module accept_test { import scn(SW_FREEZE = true, SW_LIVE = true, SW_ACCEPT = true, SW_NOTICE = false, SW_PAY = 0).* from "./dispute_test" }
+module all_test { import scn(SW_FREEZE = true, SW_LIVE = true, SW_ACCEPT = true, SW_NOTICE = true, SW_PAY = 0).* from "./dispute_test" }
+module pay_test { import scn(SW_FREEZE = true, SW_LIVE = true, SW_ACCEPT = true, SW_NOTICE = true, SW_PAY = 1).* from "./dispute_test" }
+module paydrop_test { import scn(SW_FREEZE = true, SW_LIVE = true, SW_ACCEPT = true, SW_NOTICE = true, SW_PAY = 2).* from "./dispute_test" }

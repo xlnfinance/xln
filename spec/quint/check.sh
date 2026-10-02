@@ -76,15 +76,15 @@ for m in $MODULES; do
   fi
 done
 # dispute: the lifecycle of one Account across both Entities and the chain (dispute.qnt). It is the one module whose properties are
-# EXPECTED to fail: each variant fixes the switches (FREEZE, LIVE, ACCEPT, NOTICE) for a code state, and the table below says which
+# EXPECTED to fail: each variant fixes the switches (FREEZE, LIVE, ACCEPT, NOTICE, PAY) for a code state, and the table below says which
 # property holds there. An expected failure that stops failing means the model or the code moved: read DISPUTE.md and update both.
 if [ "$DISPUTE" = 1 ]; then
   echo "== dispute: typecheck, scenario tests per variant, properties per variant"
   declared=$(grep -cE '^[[:space:]]*run[[:space:]]+[A-Za-z0-9_]*Test\b' dispute_test.qnt || true)
-  for v in today freeze live decided accept all; do
+  for v in today freeze live decided accept all pay paydrop; do
     $Q typecheck "dispute_$v.qnt"
   done
-  for v in today freeze live decided accept all; do
+  for v in today freeze live decided accept all pay paydrop; do
     out=$($Q test dispute_test.qnt --main "${v}_test" --backend typescript --max-samples 1 2>&1) || { echo "$out"; exit 1; }
     ran=$(echo "$out" | grep -cE '^[[:space:]]+ok ' || true)
     [ "$ran" = "$declared" ] || { echo "FAIL dispute_test $v: $declared declared, $ran ran"; exit 1; }
@@ -96,17 +96,24 @@ if [ "$DISPUTE" = 1 ]; then
     if [ "$got" != "$want" ]; then echo "FAIL dispute_$v $prop: expected $want, got ${got:-nothing}"; exit 1; fi
     echo "   $v $prop: $want"
   }
-  for v in today freeze live decided accept all; do expect "$v" sane ok "$SAMPLES"; done
+  for v in today freeze live decided accept all pay paydrop; do expect "$v" sane ok "$SAMPLES"; done
   for p in newest_wins no_lock_left no_lock_right no_silent_zeroing; do expect today "$p" violation 2500; done
   expect freeze newest_wins violation 2500; expect freeze no_lock_left violation 2500; expect freeze no_lock_right violation 2500; expect freeze no_silent_zeroing violation 2500
   expect live newest_wins violation 2500; expect live no_lock_left violation 2500; expect live no_lock_right violation 2500; expect live no_silent_zeroing violation 2500
   expect decided newest_wins ok "$SAMPLES"; expect decided no_lock_left violation 2500; expect decided no_lock_right violation 2500; expect decided no_silent_zeroing violation 2500
   for p in newest_wins no_lock_left no_lock_right; do expect accept "$p" ok "$SAMPLES"; expect all "$p" ok "$SAMPLES"; done
   expect accept no_silent_zeroing violation 2500; expect all no_silent_zeroing ok "$SAMPLES"
+  # PAY: the payment path. A payment is paid twice when the proposer seals again a frame the chain finalized by (pay), not when it drops it
+  # (paydrop). With a held signature on a refused frame a counter can come too late to land and the answerer has no finalize (no_lock_right).
+  expect all pay_once ok "$SAMPLES"; expect pay pay_once violation 2500; expect paydrop pay_once ok "$SAMPLES"
+  for v in pay paydrop; do
+    expect "$v" newest_wins ok "$SAMPLES"; expect "$v" no_silent_zeroing ok "$SAMPLES"; expect "$v" no_lock_left ok "$SAMPLES"; expect "$v" no_lock_right violation 2500
+  done
   echo "== dispute: witnesses (each must be violated, or the path is unreachable)"
   for w in $(grep -oE '^  val w_[a-z_]+' dispute.qnt | awk '{print $2}'); do
     # a counter lapses (is told it lapsed) only in the code of today; every other state of the lifecycle is reached with all fixes in
     v=all; [ "$w" = w_no_counter_lapsed ] && v=today
+    case "$w" in w_pay_*) v=pay ;; esac
     out=$($Q run "dispute_$v.qnt" --backend typescript --init init --step step --invariant "$w" --max-steps 70 --max-samples 3000 --seed 0x7 --verbosity 1 2>&1 || true)
     if echo "$out" | grep -q "Invariant violated"; then echo "   reached  $w"; else echo "   UNREACHED $w"; exit 1; fi
   done

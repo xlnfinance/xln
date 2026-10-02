@@ -35,7 +35,13 @@ module dispute {
   const LIVE: bool
   const ACCEPT: bool
   const NOTICE: bool
+  // The payment path (frames that carry a payment, their fate in an epoch move). 0 not modelled. 1 the code at #162 8f82733df: a node
+  // that holds a peer's signed frame it refused (it was in a dispute) can finalize with it (SIGFIN), the proposer of a refused or
+  // uncommitted frame seals it again in the new epoch (RESEND). 2 as 1, and a frame the chain finalized by is dropped, never sealed
+  // again (DROPPAID: the coordinator's decision after the fourth audit).
+  const PAY: int
 
+  pure val DROPPAID = PAY == 2
   pure val W = 4                // the dispute window: the sum of the two response windows (each at the floor, 2 ticks: chain.qnt MIN_WINDOW), in ticks
   pure val LAG = 1              // a J transaction lands within this many ticks of the ask
   pure val MAXT = 10            // the clock stops here
@@ -75,15 +81,20 @@ module dispute {
 
   // A frame in flight: sealed by `p` at nonce `n` in `p`'s epoch; stage 0 on its way to the other side, 1 committed there and
   // its ack on the way back.
-  type Pend = { on: bool, p: Side, n: int, epoch: int, stage: int }
-  pure val NO_PEND: Pend = { on: false, p: Left, n: 0, epoch: 0, stage: 0 }
+  // Stage 2 (PAY > 0): the other side refused it while in a dispute but holds the signature on it, so a proof of it can reach the chain.
+  // `pid` names the payment the frame carries; a payment sealed again keeps its pid.
+  type Pend = { on: bool, p: Side, n: int, epoch: int, stage: int, pid: int }
+  pure val NO_PEND: Pend = { on: false, p: Left, n: 0, epoch: 0, stage: 0, pid: 0 }
 
   // What the invariants watch. `zeroed[s]`: s rebased with a frame it had committed beyond the proof that paid; `told[s]`: and was told.
   // `wasDown[s]`: s was down at some time since the dispute opened. `lostNewest`: a dispute paid a proof older than the newest
   // co-signed one although a live party could have enforced the newest.
   type Ghost = {
     zeroed: Side -> bool, told: Side -> bool, wasDown: Side -> bool, lostNewest: bool,
-    crashes: int, finals: int, counters: int, starts: int, skipsStart: int, lapsedCounters: int, lapsedStarts: int, settledLast: int, lostBy: int
+    crashes: int, finals: int, counters: int, starts: int, skipsStart: int, lapsedCounters: int, lapsedStarts: int, settledLast: int, lostBy: int,
+    // payments: `nextPid` the last pid given, `owes[s]` the pid s seals again next (0 none), `chain` the pids a finalize paid by its body,
+    // `double` a pid committed after the chain paid it, `sigs` finalizes with a newer signed proof and no counter
+    nextPid: int, owes: Side -> int, chain: Set[int], double: bool, sigs: int
   }
 
   type St = {
@@ -182,7 +193,8 @@ module dispute {
       askS: both(NO_ASK), askC: both(NO_ASK), askF: both(NO_ASK),
       g: {
         zeroed: both(false), told: both(false), wasDown: both(false), lostNewest: false,
-        crashes: 0, finals: 0, counters: 0, starts: 0, skipsStart: 0, lapsedCounters: 0, lapsedStarts: 0, settledLast: 0, lostBy: 0
+        crashes: 0, finals: 0, counters: 0, starts: 0, skipsStart: 0, lapsedCounters: 0, lapsedStarts: 0, settledLast: 0, lostBy: 0,
+        nextPid: 0, owes: both(0), chain: Set(), double: false, sigs: 0
       }
     }
   }
@@ -244,7 +256,14 @@ module dispute {
         askS: if (rebase) mapAt(st.askS, s, NO_ASK) else st.askS,
         askC: if (rebase) mapAt(st.askC, s, NO_ASK) else st.askC,
         askF: if (rebase) mapAt(st.askF, s, NO_ASK) else st.askF,
+        // PAY > 0: the proposer of a frame the peer holds learns the epoch moved. A frame the peer committed is acked again and rebased
+        // (the Entity keeps it pending, its after-state is rebased: nothing is paid twice). A frame the peer only holds the signature of
+        // is sealed again in the new epoch, unless the chain paid by a proof that held it and DROPPAID knows it.
+        pend: if (PAY > 0 and rebase and st.pend.on and st.pend.p == s and st.pend.epoch == st.f.get(s).epoch and st.pend.stage >= 1) NO_PEND else st.pend,
         g: { ...st.g,
+          owes: if (PAY > 0 and rebase and st.pend.on and st.pend.p == s and st.pend.epoch == st.f.get(s).epoch and st.pend.stage == 2
+                    and not(DROPPAID and st.pend.n <= e.settled))
+                  mapAt(st.g.owes, s, st.pend.pid) else st.g.owes,
           zeroed: if (beyond) mapAt(st.g.zeroed, s, true) else st.g.zeroed,
           told: if (beyond and NOTICE) mapAt(st.g.told, s, true) else st.g.told }
       }
@@ -275,20 +294,33 @@ module dispute {
     all {
       st.up.get(p), not(st.pend.on), not(quiet(fc)), not(st.frz.get(p)),
       st.comm.get(p) < fc.base + MAXF,
-      st' = { ...st, pend: { on: true, p: p, n: st.comm.get(p) + 1, epoch: fc.epoch, stage: 0 } }
+      val again = st.g.owes.get(p)
+      val pid = if (again != 0) again else st.g.nextPid + 1
+      st' = { ...st, pend: { on: true, p: p, n: st.comm.get(p) + 1, epoch: fc.epoch, stage: 0, pid: pid },
+              g: { ...st.g, nextPid: if (again != 0) st.g.nextPid else pid, owes: mapAt(st.g.owes, p, 0) } }
     }
   }
 
   action receive: bool = {
     val a = other(st.pend.p)
     val fa = st.f.get(a)
+    val p = st.pend.p
     all {
       st.pend.on, st.pend.stage == 0, st.up.get(a),
-      if (fa.epoch != st.pend.epoch or quiet(fa) or st.frz.get(a) or st.pend.n != st.comm.get(a) + 1)
-        st' = { ...st, pend: NO_PEND }
+      if (fa.epoch != st.pend.epoch)
+        // another epoch's: taken back, and with RESEND the proposer seals its payment again
+        st' = { ...st, pend: NO_PEND,
+                g: { ...st.g, owes: if (PAY > 0) mapAt(st.g.owes, p, st.pend.pid) else st.g.owes } }
+      else if (quiet(fa) or st.frz.get(a) or st.pend.n != st.comm.get(a) + 1)
+        if (PAY > 0 and (quiet(fa) or st.frz.get(a)) and st.pend.n == st.comm.get(a) + 1)
+          // refused, but the signature on it is held
+          st' = { ...st, pend: { ...st.pend, stage: 2 }, hold: mapAt(st.hold, a, st.pend.n), fresh: mapAt(st.fresh, a, true) }
+        else
+          st' = { ...st, pend: NO_PEND }
       else
         st' = { ...st, pend: { ...st.pend, stage: 1 },
-                comm: mapAt(st.comm, a, st.pend.n), hold: mapAt(st.hold, a, st.pend.n), fresh: mapAt(st.fresh, a, true) }
+                comm: mapAt(st.comm, a, st.pend.n), hold: mapAt(st.hold, a, st.pend.n), fresh: mapAt(st.fresh, a, true),
+                g: { ...st.g, double: st.g.double or st.g.chain.contains(st.pend.pid) } }
     }
   }
 
@@ -402,6 +434,11 @@ module dispute {
       x == s.disp.starter implies s.disp.n == n
     })
 
+  // The payment a frame in flight carries is paid by the chain when a finalize settles on a proof that holds the frame: the other side
+  // committed it or holds its signature (stage 1, 2), and the proof's nonce is at least the frame's.
+  pure def paidBy(s: St, settled: int): Set[int] =
+    if (s.pend.on and s.pend.stage >= 1 and s.pend.epoch == s.chEpoch and s.pend.n <= settled) Set(s.pend.pid) else Set()
+
   action landFinal(s: Side): bool = {
     val a = st.askF.get(s)
     all {
@@ -413,10 +450,27 @@ module dispute {
         askS: both(NO_ASK), askC: both(NO_ASK), askF: both(NO_ASK),
         disp: NO_DISP, chEpoch: st.chEpoch + 1, chStored: stored,
         log: st.log.append({ kind: 3, by: s, n: 0, epoch: st.chEpoch + 1, timeout: 0, settled: settled, stored: stored }),
-        g: { ...st.g, finals: st.g.finals + 1, settledLast: settled,
+        g: { ...st.g, finals: st.g.finals + 1, settledLast: settled, chain: st.g.chain.union(paidBy(st, settled)),
              lostNewest: st.g.lostNewest or (settled < newest and enforceable(st, newest)),
              lostBy: if (settled < newest) newest - settled else st.g.lostBy } }
     }
+  }
+
+  // PAY > 0: the non-starter finalizes at once, with no counter, with a proof newer than the opening one that carries the starter's
+  // signature (Depository.sol 965-970: a signature adopts finalNonce, which the chain stores). It holds the signature on a frame it
+  // committed or refused.
+  action landSigFinal(s: Side): bool = all {
+    PAY > 0, st.disp.on, s != st.disp.starter, st.disp.ctr == 0, st.f.get(s).epoch == st.chEpoch, st.hold.get(s) > st.disp.n,
+    not(st.g.wasDown.get(s)),
+    val settled = st.hold.get(s)
+    val newest = newestHeld(st)
+    st' = { ...st,
+      askS: both(NO_ASK), askC: both(NO_ASK), askF: both(NO_ASK),
+      disp: NO_DISP, chEpoch: st.chEpoch + 1, chStored: settled,
+      log: st.log.append({ kind: 3, by: s, n: 0, epoch: st.chEpoch + 1, timeout: 0, settled: settled, stored: settled }),
+      g: { ...st.g, finals: st.g.finals + 1, settledLast: settled, sigs: st.g.sigs + 1, chain: st.g.chain.union(paidBy(st, settled)),
+           lostNewest: st.g.lostNewest or (settled < newest and enforceable(st, newest)),
+           lostBy: if (settled < newest) newest - settled else st.g.lostBy } }
   }
 
   // A co-signed settlement or C2R lands (Account.sol 1385, 1743: it sets the nonce and advances the epoch, and reverts while a dispute is open):
@@ -438,7 +492,7 @@ module dispute {
     { nondet s = SIDES.oneOf()
       any {
       hear(s), crash(s), restart(s), seal(s), duty(s), opStart(s), dropStart(s), dropCounter(s),
-      landStart(s), landCounter(s), landFinal(s)
+      landStart(s), landCounter(s), landFinal(s), landSigFinal(s)
     } }
   }
 
@@ -463,6 +517,9 @@ module dispute {
   val no_lock: bool = no_lock_left and no_lock_right
 
   // 3. No committed payment is zeroed without a notice: a side that rebased with a committed frame beyond the proof that paid was told.
+  // 4. (PAY) Nothing the finalized body already paid is paid again in the new epoch: no payment is committed after a finalize paid it.
+  val pay_once: bool = not(st.g.double)
+
   val no_silent_zeroing: bool = SIDES.forall(x => st.g.zeroed.get(x) implies st.g.told.get(x))
 
   // The model's own consistency.
@@ -475,6 +532,10 @@ module dispute {
   val safe: bool = and { newest_wins, no_lock, no_silent_zeroing, sane }
 
   // Witnesses: each state of the lifecycle is reachable (violated by a trace that reaches it).
+  val w_pay_sigfin: bool = st.g.sigs == 0
+  val w_pay_held: bool = st.pend.stage != 2
+  val w_pay_chain: bool = st.g.chain.size() == 0
+  val w_pay_owes: bool = SIDES.forall(x => st.g.owes.get(x) == 0)
   val w_no_own_start_pending: bool = SIDES.forall(x => phase(st.f.get(x)) != 1)
   val w_no_own_start_registered: bool = SIDES.forall(x => phase(st.f.get(x)) != 2)
   val w_no_peer_start_seen: bool = SIDES.forall(x => phase(st.f.get(x)) != 3)
