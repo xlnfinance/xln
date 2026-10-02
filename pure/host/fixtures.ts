@@ -1,6 +1,7 @@
 // What the Host tests share: Hosts over fresh Runtimes, and a shell that never fails. Only tests import this.
 import { expect } from "bun:test";
 import { entityOf, started, stamp, unhalted } from "../runtime/fixtures.ts";
+import { TEST_SIG } from "../entity/fixtures.ts";
 import type { EntityId, EntityInput, JAction, Outbound } from "../entity/model.ts";
 import type { Input } from "../runtime/model.ts";
 import { unwrapOr } from "../kernel/core/result.ts";
@@ -15,6 +16,9 @@ export const hostFor = (...ids: readonly EntityId[]): Host => startHost(started(
 
 export const sentIn = (effects: readonly Effect[]): readonly Outbound[] =>
   effects.flatMap((effect) => (effect._tag === "send" ? [effect.message] : []));
+
+/** A message as the link carries it once the shell has signed it: one that names a head gets the tests' signature. */
+export const onTheLink = (o: Outbound): Outbound => (o.attest === undefined ? o : { ...o, sig: TEST_SIG });
 
 export const chainIn = (effects: readonly Effect[]): readonly JAction[] =>
   effects.flatMap((effect) => (effect._tag === "chain" ? [effect.action] : []));
@@ -49,7 +53,7 @@ export const tell = (p: Pair, id: EntityId, ...inputs: readonly EntityInput[]): 
 export const settle = (p: Pair): Pair => {
   const [next, ...rest] = p.link;
   if (next === undefined) return p;
-  const received = receive(hostOf(p, next.to), next).host;
+  const received = receive(hostOf(p, next.to), onTheLink(next)).host;
   const done = turn(received, p.clock);
   const link = [...rest, ...done.sent];
   return settle({ hosts: new Map([...p.hosts, [next.to, done.host]]), link, clock: p.clock + 1n });

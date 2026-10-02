@@ -290,7 +290,8 @@ const linkFrame = (c: Chaos, w: World, step: number, name: Name): World => {
   const mine = w.net.filter((f) => f.to === name);
   const taken = mine.slice(q(2, mine.length)).slice(0, 1 + q(6, 3));
   const command = q(7, 100) < 30 ? [commandAt(c, w, step, name)] : [];
-  const arrivals = taken.map((f): EntityInput => ({ _tag: "peer_message", from: ID[PEER[name]], msg: f.msg, sig: TEST_SIG }));
+  const arrivals = taken.map((f): EntityInput =>
+    ({ _tag: "peer_message", from: ID[PEER[name]], msg: f.msg, sig: TEST_SIG }));
   const input = inputOf(w, name, [...command, ...arrivals]);
   return idle(w.hosts[name]) && taken.length > 0 ? feed(c.ops, w, name, "link", taken.map((f) => f.id), input) : w;
 };

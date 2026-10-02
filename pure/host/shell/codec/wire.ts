@@ -151,18 +151,22 @@ const MAX_SIG_CHARS = 2048;
 const sig: Reader<string> = (at, v) =>
   (typeof v === "string" && v.length <= MAX_SIG_CHARS && /^0x[0-9a-f]*$/.test(v) ? ok(v) : bad(at, "a hex signature"));
 
-/** A message carries a signature when its sender signed the head it commits to; no other field of the Outbound crosses. */
+/** A message carries a signature when its sender signed the head it commits to; no other field crosses. */
 const readOutbound: Reader<Outbound> = (at, v) => {
   const signed = typeof v === "object" && v !== null && Object.hasOwn(v, "sig");
   return flatMap(record(at, v, signed ? ["from", "to", "msg", "sig"] : ["from", "to", "msg"]), (o) => {
-    const base = all({ from: field(at, o, "from", entity), to: field(at, o, "to", entity), msg: field(at, o, "msg", readMsg) });
+    const base = all({
+      from: field(at, o, "from", entity), to: field(at, o, "to", entity), msg: field(at, o, "msg", readMsg),
+    });
     return signed ? flatMap(base, (m) => map(field(at, o, "sig", sig), (s): Outbound => ({ ...m, sig: s }))) : base;
   });
 };
 
-/** The text a message goes as: its sender, its recipient, the message and the signature; the head it is signed over stays home. */
-export const writeOutbound = (message: Outbound): Result<string, ValueFault> =>
-  encodeValue({ from: message.from, to: message.to, msg: message.msg, ...(message.sig === undefined ? {} : { sig: message.sig }) });
+/** The text a message goes as: sender, recipient, message and signature; the head it is signed over stays home. */
+export const writeOutbound = (message: Outbound): Result<string, ValueFault> => {
+  const { from, to, msg, sig: signature } = message;
+  return encodeValue({ from, to, msg, ...(signature === undefined ? {} : { sig: signature }) });
+};
 
 /** The message in `text`, or why it is not one: over the bound, not text of ours, or not the shape of a message. */
 export const readWire = (wire: string): Result<Outbound, ReadFault> => {

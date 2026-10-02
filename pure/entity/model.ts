@@ -55,7 +55,10 @@ export type EntityState = Readonly<{
 export type PeerProof = Readonly<{ head: FrameHash; slot: number; sig: string }>;
 
 export const emptyEntity = (id: EntityId): EntityState =>
-  ({ id, accounts: new Map(), proofs: new Map(), waiting: new Map(), revealed: new Map(), chain: new Map(), paybook: new Map() });
+  ({
+    id, accounts: new Map(), proofs: new Map(), waiting: new Map(), revealed: new Map(), chain: new Map(),
+    paybook: new Map(),
+  });
 
 /**
  * What the Entity does about an HTLC that is, or will be, locked to it, by hashlock (one is open per hashlock in an
@@ -92,8 +95,8 @@ export type ChainFacts = Readonly<{
   cosigned: bigint; held: ReadonlyMap<TokenId, Held>;
 }>;
 
-// What a frame takes in. `sig` is the sender's signature over the head the message commits to (R-SIGNED-HEADS-ON-THE-WIRE):
-// a frame's, or the ack's.
+// What a frame takes in. `sig` is the sender's signature over the head the message commits to
+// (R-SIGNED-HEADS-ON-THE-WIRE): a frame's, or the ack's.
 export type PeerMessage = Tagged<"peer_message", { from: EntityId; msg: Msg<AccountTx>; sig?: string }>;
 
 /**
@@ -164,10 +167,12 @@ export type EntityInput = Arrival | Hook | Command;
 
 /**
  * What leaves an Entity: an Account message for a peer. A frame and an ack commit their sender to a head: `attest` is
- * that head, for the Host to sign before the message goes (the Entity holds no key); `sig` is the signature the Host put
- * on it, and the only part of the two that crosses the link.
+ * that head, for the Host to sign before the message goes (the Entity holds no key); `sig` is the signature the Host
+ * put on it, and the only part of the two that crosses the link.
  */
-export type Outbound = Readonly<{ from: EntityId; to: EntityId; msg: Msg<AccountTx>; attest?: FrameHash; sig?: string }>;
+export type Outbound = Readonly<{
+  from: EntityId; to: EntityId; msg: Msg<AccountTx>; attest?: FrameHash; sig?: string;
+}>;
 
 /** What a PeerMessage carries of an Outbound: the sender, the message and the signature the sender put on it. */
 export const heardOf = (o: Outbound): PeerMessage =>

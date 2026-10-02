@@ -18,7 +18,7 @@ import { setup } from "../runtime/fixtures.ts";
 import { messageId } from "../runtime/tick.ts";
 import { begin, persisted, receive, reopen, submit, TICK, type Tick } from "./host.ts";
 import type { Effect, Host } from "./model.ts";
-import { BOUNDS, entityOf, hostFor, inputsOf, sentIn, stamp } from "./fixtures.ts";
+import { BOUNDS, entityOf, hostFor, inputsOf, onTheLink, sentIn, stamp } from "./fixtures.ts";
 
 const NAMES = ["alice", "bob"] as const;
 type Name = (typeof NAMES)[number];
@@ -90,7 +90,7 @@ const crash = (shell: Shell, w: World, name: Name): World => {
 
 const hear = (w: World, name: Name, flight: Flight): World => {
   const node = w.nodes[name];
-  const got = receive(node.host, flight.message);
+  const got = receive(node.host, onTheLink(flight.message));
   return { ...withNode(w, name, { ...node, host: got.host }), refused: w.refused + got.notices.length };
 };
 

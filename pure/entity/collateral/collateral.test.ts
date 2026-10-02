@@ -3,7 +3,7 @@
 import { describe, expect, test } from "bun:test";
 import { tokenOf, viewOf } from "../../account/fixtures.ts";
 import { ledgerOf } from "../../account/state.ts";
-import { anchor, entityOf, GOLD, judge, open } from "../fixtures.ts";
+import { anchor, entityOf, GOLD, judge, open, TEST_SIG } from "../fixtures.ts";
 import { entityFrame } from "../frame.ts";
 import {
   emptyEntity, type Command, type EntityId, type EntityInput, type EntityState, type JEvent, type Notice, type Outbound,
@@ -23,7 +23,7 @@ const runAt = (state: EntityState, inputs: readonly EntityInput[]) =>
   entityFrame({ ...judge, view: viewOf(100n) }, anchor, state, inputs);
 
 const heard = (outs: readonly Outbound[]): readonly EntityInput[] =>
-  outs.map((o): EntityInput => ({ _tag: "peer_message", from: o.from, msg: o.msg }));
+  outs.map((o): EntityInput => ({ _tag: "peer_message", from: o.from, msg: o.msg, sig: TEST_SIG }));
 
 /** What one side sends, delivered to the other, and what that sends back, until nothing is on its way. */
 const drain = (p: Pair, outs: readonly Outbound[], from: Who): Pair => {

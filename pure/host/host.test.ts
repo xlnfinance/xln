@@ -9,7 +9,7 @@ import { setup } from "../runtime/fixtures.ts";
 import { begin, idle, limits, persisted, receive, reopen, submit } from "./host.ts";
 import type { Host, Item } from "./model.ts";
 import {
-  BOUNDS, entityOf, hostFor, hostOf, inputsOf, meet, sentIn, settle, stamp, tell, turn, unhalted,
+  BOUNDS, entityOf, hostFor, hostOf, inputsOf, meet, onTheLink, sentIn, settle, stamp, tell, turn, unhalted,
 } from "./fixtures.ts";
 
 const ALICE = entityOf(1);
@@ -77,7 +77,7 @@ describe("host", () => {
   test("R-DURABLE the outputs of a row leave only once the row is durable, once, and never an earlier row's", () => {
     const { bob, sent } = aliceToBob();
     expect(sent.map((o) => o.msg._tag)).toEqual(["frame"]);
-    const heard = unhalted(begin(receive(bob, sent[0] as Outbound).host, stamp(30n)));
+    const heard = unhalted(begin(receive(bob, onTheLink(sent[0] as Outbound)).host, stamp(30n)));
     expect(sentIn(heard.effects)).toEqual([]);
     const done = unhalted(persisted(heard.host));
     expect(sentIn(done.effects).map((o) => o.msg._tag)).toEqual(["ack"]);

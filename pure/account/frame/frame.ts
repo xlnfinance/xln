@@ -109,9 +109,11 @@ type Declined<F> = Readonly<{ hash: FrameHash; attempt: number; index: number; f
 type Proposed<Tx, S> = Readonly<{ frame: Frame<Tx>; after: S; head: FrameHash }>;
 
 /**
- * A frame this side proposed, whose proof it signed and sent, that no committed frame has superseded yet. The peer
- * holds the signature, so the proof stays enforceable against this side whether or not the peer accepted the frame
- * (R-SIGNED-IS-LIVE): what its txs say is live until a frame at a higher slot commits.
+ * A frame this side proposed, whose proof it signed and sent, that no committed frame has superseded yet. The Account
+ * does not sign: the proposal names its head and the Host's shell signs it as the frame leaves
+ * (R-SIGNED-HEADS-ON-THE-WIRE), so the peer holds the signature, and the proof stays enforceable against this side
+ * whether or not the peer accepted the frame (R-SIGNED-IS-LIVE): what its txs say is live until a frame at a higher
+ * slot commits.
  */
 export type Signed<Tx> = Readonly<{ slot: number; txs: readonly Tx[] }>;
 

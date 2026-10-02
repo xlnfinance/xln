@@ -1,6 +1,7 @@
 // Review A of PR 96: the reveal duty with more than one Account, more than one hold and more than one Entity in a
 // Runtime, and a replay that has to see every field of a chain action. Bob is the payee throughout: Alice and Carol
 // lock for him until height 115 (LAG 1, so a reveal is due at his view 114) and his resolves are never acked.
+import { TEST_SIG } from "../../entity/fixtures.ts";
 import { describe, expect, test } from "bun:test";
 import { hashlockOf, holdOf, secretOf, tokenOf, viewOf } from "../../account/fixtures.ts";
 import { holdId } from "../../account/model.ts";
@@ -71,7 +72,7 @@ describe("runtime/duties review A: a Runtime that hosts two payees asks for both
   const deliverAll = (p: Pair): Pair => {
     const [next, ...rest] = p.inflight;
     if (next === undefined) return p;
-    const heard: EntityInput = { _tag: "peer_message", from: next.from, msg: next.msg };
+    const heard: EntityInput = { _tag: "peer_message", from: next.from, msg: next.msg, sig: TEST_SIG };
     return deliverAll(send({ ...p, inflight: rest }, next.to, heard));
   };
 

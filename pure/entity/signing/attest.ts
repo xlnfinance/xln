@@ -1,5 +1,6 @@
 // Who signed a head (R-SIGNED-HEADS-ON-THE-WIRE). A head is the digest the two signers of a frame sign: the dispute
-// proof of the state after it, at its nonce, naming chain, Depository, Account and epoch (R-FRAME-SIGNATURE-NAMES-ACCOUNT).
+// proof of the state after it, at its nonce, naming chain, Depository, Account and epoch
+// (R-FRAME-SIGNATURE-NAMES-ACCOUNT).
 // What the Entity keeps of its peer is that signature over that head, because it is what a dispute starts with: the
 // chain reads the same digest. A signature is the Hanko of the signer's own Entity; the check recovers its signer and
 // asks that the Entity it speaks for is the peer's.

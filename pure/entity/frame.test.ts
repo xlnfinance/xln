@@ -3,7 +3,7 @@ import { emptyReplica } from "../account/frame/account.ts";
 import { queue, type FrameHash, type Msg } from "../account/frame/frame.ts";
 import { ledgerOf } from "../account/state.ts";
 import type { AccountTx } from "../account/tx.ts";
-import { anchor, credit, entityOf, GOLD, judge, open, pay } from "./fixtures.ts";
+import { anchor, credit, entityOf, GOLD, judge, open, pay, TEST_SIG } from "./fixtures.ts";
 import { entityFrame } from "./frame.ts";
 import { emptyEntity, entityId, sideOf, type EntityInput, type EntityState, type Outbound } from "./model.ts";
 
@@ -27,7 +27,8 @@ const creditFromBob = (limit: bigint) => {
   return { bob: framed.state, sent: framed.outputs };
 };
 
-const peerMessage = (from: typeof ALICE, msg: Msg<AccountTx>): EntityInput => ({ _tag: "peer_message", from, msg });
+const peerMessage = (from: typeof ALICE, msg: Msg<AccountTx>): EntityInput =>
+  ({ _tag: "peer_message", from, msg, sig: TEST_SIG });
 
 const toAlice = (outputs: readonly Outbound[]): EntityInput => {
   const first = outputs[0];

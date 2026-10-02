@@ -123,8 +123,10 @@ const committed = (outcome: Outcome<PeerFault>): boolean =>
  * R-SIGNED-HEADS-ON-THE-WIRE: a head is committed only with its peer's signature on it, checked against the head this
  * Entity computed itself, so a signature over another head, another Account or another epoch is no signature here.
  */
-const unsigned = (check: Check, a: PeerMessage, head: FrameHash): "missing" | "wrong" | undefined =>
-  (a.sig === undefined ? "missing" : check(a.from, head, a.sig) ? undefined : "wrong");
+const unsigned = (check: Check, a: PeerMessage, head: FrameHash): "missing" | "wrong" | undefined => {
+  if (a.sig === undefined) return "missing";
+  return check(a.from, head, a.sig) ? undefined : "wrong";
+};
 
 const withProof = (w: Work, peer: EntityId, proof: PeerProof): Work =>
   ({ ...w, state: { ...w.state, proofs: mapSet(w.state.proofs, peer, proof) } });

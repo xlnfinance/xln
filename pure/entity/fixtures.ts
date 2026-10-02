@@ -14,7 +14,7 @@ export const entityOf = (n: number): EntityId => `0x${n.toString(16).padStart(64
 export const GOLD = tokenOf(1n);
 
 /** The one signature the entity tests' checker takes: these tests are not about keys (the signed-heads tests are). */
-export const TEST_SIG = "test-signature";
+export const TEST_SIG = "0x7e57";
 
 /** Where the entity tests sign: the account tests' deployment and terms (each Account's key and epoch are its own). */
 export const anchor: Anchor = {

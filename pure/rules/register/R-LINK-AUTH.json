@@ -1,6 +1,6 @@
 {
  "id": "R-LINK-AUTH",
- "statement": "The Host trusts a message's `from` only as the link-authenticated peer: the link authenticates its peer, the content authenticates itself.",
+ "statement": "The Host trusts a message's `from` only as the link-authenticated peer: the link authenticates the peer's Runtime for every message. The content authenticates itself only where it carries a signature: a frame or an ack that commits a head carries its sender's signature over that head, which the Entity checks (R-SIGNED-HEADS-ON-THE-WIRE). A refusal, and a message the Account refuses, carry none: what they say rests on the link alone.",
  "source": "spec/QUESTIONS.md Q-T-5; spec/transport/bugs trust-frame-sender and trust-ack-sender; Review A of 118",
  "layers": {
   "arrival": "owed: spec thread, name the link page's sender-authentication bugs trust-frame-sender and trust-ack-sender under this id",

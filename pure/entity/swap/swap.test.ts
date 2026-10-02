@@ -5,7 +5,7 @@ import { describe, expect, test } from "bun:test";
 import { heightOf, tokenOf, viewOf } from "../../account/fixtures.ts";
 import { holdId, type AccountState, type Leg, type Offer, type Side } from "../../account/model.ts";
 import { ledgerOf } from "../../account/state.ts";
-import { anchor, entityOf, GOLD, judge, open } from "../fixtures.ts";
+import { anchor, entityOf, GOLD, judge, open, TEST_SIG } from "../fixtures.ts";
 import { entityFrame } from "../frame.ts";
 import { emptyEntity, type Command, type EntityInput, type EntityState, type Notice, type Outbound } from "../model.ts";
 
@@ -26,7 +26,8 @@ const runAt = (view: bigint, state: EntityState, inputs: readonly EntityInput[])
 const drain = (p: Pair, view: bigint, outs: readonly Outbound[], from: Who): Pair => {
   if (outs.length === 0) return p;
   const to = OTHER[from];
-  const framed = runAt(view, p[to], outs.map((o): EntityInput => ({ _tag: "peer_message", from: o.from, msg: o.msg })));
+  const heard = outs.map((o): EntityInput => ({ _tag: "peer_message", from: o.from, msg: o.msg, sig: TEST_SIG }));
+  const framed = runAt(view, p[to], heard);
   return drain({ ...p, [to]: framed.state }, view, framed.outputs, to);
 };
 

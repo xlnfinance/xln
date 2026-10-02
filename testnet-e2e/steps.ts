@@ -23,6 +23,7 @@ import {
 import { GAPS, REPO } from "./lib/gaps.ts";
 import { Blocked, type Step } from "./lib/runner.ts";
 import { entityId, type EntityId, type JAction } from "../pure/entity/model.ts";
+import { lazyCheck } from "../pure/entity/signing/attest.ts";
 import { opOf } from "../pure/host/ops.ts";
 import type { ClockParams, JView } from "../pure/account/clause/clock.ts";
 import { Cluster, shown } from "./lib/cluster.ts";
@@ -141,7 +142,7 @@ const deposits: Step<World> = {
     const parties = Object.values(partiesOf(w));
     const { alice, hubX } = partiesOf(w);
     const signing = await signingFor(chain, alice, hubX);
-    const setup: Setup = { ...(await view(chain)), anchor: { deployment: signing.deployment, terms: signing.terms } };
+    const setup: Setup = { ...(await view(chain)), anchor: { deployment: signing.deployment, terms: signing.terms, check: lazyCheck } };
     const amount = DEPOSIT * unit(chain);
     const t = token(chain);
     const root = seatsDir();
@@ -231,7 +232,7 @@ const open: Step<World> = {
     const signing = await signingFor(chain, alice, hubX);
     w.signing = signing;
     const members = [{ party: alice, peers: [hubX] }, { party: hubX, peers: [alice, hubY] }, { party: hubY, peers: [hubX, bob] }, { party: bob, peers: [hubY] }];
-    const net = w.net = await Cluster.open(chain, { clock: v.clock, view: v.view, anchor: { deployment: signing.deployment, terms: signing.terms } }, members);
+    const net = w.net = await Cluster.open(chain, { clock: v.clock, view: v.view, anchor: { deployment: signing.deployment, terms: signing.terms, check: lazyCheck } }, members);
     for (const [a, b] of legs) { await net.tell(eid(a), { _tag: "open_account", peer: eid(b) }); await net.tell(eid(b), { _tag: "open_account", peer: eid(a) }); }
     await net.settle();
     // The first frame of each Account: credit from the receiving side (a deposit waits for the first co-signed frame, R-NO-DEPOSIT-BEFORE-COSIGN).
@@ -304,6 +305,10 @@ const pay: Step<World> = {
     await net.settle();
     const [ra, rx] = [net.account(a, x), net.account(x, a)];
     if (ra.head !== rx.head || ra.pending !== undefined || rx.pending !== undefined) throw new Error("the two Runtimes do not hold the same committed head after the payment");
+    // Each Entity holds its peer's signature over that head (R-SIGNED-HEADS-ON-THE-WIRE), the thing a dispute starts with.
+    const [pa, px] = [net.entity(a).proofs.get(x), net.entity(x).proofs.get(a)];
+    if (pa?.head !== ra.head || px?.head !== ra.head || pa.slot !== ra.used || px.slot !== rx.used) throw new Error("an Entity does not hold its peer's signature over the committed head");
+    if (!lazyCheck(x, ra.head, pa.sig) || !lazyCheck(a, ra.head, px.sig)) throw new Error("a signature an Entity holds is not its peer's over the head");
     const moved = allocation(ledgerOf(ra.state, t)) - before;
     const expected = ra.side === "left" ? -30n * unit(chain) : 30n * unit(chain);
     if (moved !== expected) throw new Error(`alice-hubX allocation moved ${moved}, expected ${expected}`);
@@ -312,7 +317,7 @@ const pay: Step<World> = {
     quiet(net, Object.values(partiesOf(w)), "pay");
     return {
       checks: [
-        `alice pay 30 to hubX: one frame, both Runtimes committed head ${ra.head.slice(0, 12)} (the digest of the dispute proof of the state, slot ${ra.used}), allocation moved ${moved} for the ${ra.side} side`,
+        `alice pay 30 to hubX: one frame, both Runtimes committed head ${ra.head.slice(0, 12)} (the digest of the dispute proof of the state, slot ${ra.used}) with the peer's own signature over it kept on each side, allocation moved ${moved} for the ${ra.side} side`,
         `hubY-bob: bob's credit of 50 from the opening frame is in both ledgers (hubY may owe bob ${limit})`,
       ],
       gaps: [],
