@@ -475,3 +475,19 @@ describe("account/swap R-SWAP-CONSENT a quote binds the taker to nothing: its fi
     expect(refusal(open, "left", tx.take(1n, 10_000))?._tag).toBe("not_taker");
   });
 });
+
+// The title is the name a register killer carried before R-SWAP-CONSENT; it stays true as the acceptance half: a quote
+// reserves the maker's give alone, and both legs are reserved once the taker's first fill accepts it.
+describe("account/swap R-SWAP-OFFER either side offers its funds for the other's and both legs are reserved", () => {
+  test("once the taker's first fill accepts the quote, the maker's give and the taker's want are both reserved", () => {
+    SIDES.forEach((maker) => {
+      const taker = other(maker);
+      const ratio = 6553;
+      const accepted = must(must(start, maker, tx.offer(offerOf(maker, 1000n, 333n))), taker, tx.take(1n, ratio));
+      expect(ledgerOf(accepted, GOLD).reserved[maker]).toBe(1000n - fillOf(1000n, ratio));
+      expect(ledgerOf(accepted, OIL).reserved[taker]).toBe(333n - fillOf(333n, ratio));
+      expect([ledgerOf(accepted, GOLD).reserved[taker], ledgerOf(accepted, OIL).reserved[maker]]).toEqual([0n, 0n]);
+      expect([accepted.quotes.length, accepted.offers.length]).toEqual([0, 1]);
+    });
+  });
+});

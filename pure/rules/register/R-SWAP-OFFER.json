@@ -24,6 +24,11 @@
    "kind": "bug",
    "layer": "arrival",
    "name": "swap-quote-reserves-taker"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "account/swap R-SWAP-OFFER either side offers its funds for the other's and both legs are reserved"
   }
  ]
 }
