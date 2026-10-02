@@ -4,22 +4,31 @@ import type { ChainFacts } from "./model.ts";
 
 const STORED = [0n, 1n, 5n, 100n, 2n ** 64n];
 const FRAMES = [1n, 2n, 3n, 10n];
+const SLOTS = [1, 2, 5, 11];
 
 const after = (n: bigint, f: ChainFacts): ChainFacts => (n === 0n ? f : after(n - 1n, framed(f)));
 
 describe("entity/chain the nonce of a proof is read from the chain's stored nonce", () => {
   test("R-IMPLICIT-NONCE-FROM-CHAIN no proof of an epoch is at stored + 1, whatever the stored nonce", () => {
     STORED.forEach((stored) =>
-      FRAMES.forEach((frames) => {
-        const nonce = proofNonce(after(frames, epochAdvanced(freshChain, 1n, stored)));
-        expect(nonce).toBe(stored + 1n + frames);
-        expect(nonce).toBeGreaterThanOrEqual(stored + 2n);
-      }));
+      FRAMES.forEach((frames) =>
+        SLOTS.forEach((slot) => {
+          const nonce = proofNonce(after(frames, epochAdvanced(freshChain, 1n, stored)), slot);
+          expect(nonce).toBe(stored + 1n + BigInt(slot));
+          expect(nonce).toBeGreaterThanOrEqual(stored + 2n);
+        })));
+  });
+
+  test("R-IMPLICIT-NONCE-FROM-CHAIN the newest proof is at its slot, not at the count of frames", () => {
+    const facts = after(1n, epochAdvanced(freshChain, 1n, 5n));
+    expect(proofNonce(facts, 1)).toBe(7n);
+    expect(proofNonce(facts, 2)).toBe(8n);
+    expect(proofNonce(facts, 4)).toBe(10n);
   });
 
   test("R-IMPLICIT-NONCE-FROM-CHAIN an epoch with no co-signed frame has no proof; a new one forgets the old", () => {
-    expect(proofNonce(epochAdvanced(freshChain, 1n, 5n))).toBeUndefined();
-    expect(proofNonce(epochAdvanced(after(4n, freshChain), 1n, 5n))).toBeUndefined();
+    expect(proofNonce(epochAdvanced(freshChain, 1n, 5n), 4)).toBeUndefined();
+    expect(proofNonce(epochAdvanced(after(4n, freshChain), 1n, 5n), 4)).toBeUndefined();
   });
 
   test("an epoch that is not above the known one is a repeat or an older report and changes nothing", () => {

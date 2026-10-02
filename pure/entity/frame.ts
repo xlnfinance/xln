@@ -419,7 +419,7 @@ const asking = (judge: Judge, peer: EntityId, account: EntityReplica) => (acc: A
  * dispute is over: a batch the chain reverted or a Host that crashed cannot leave the dispute unanswered for good.
  */
 const counterFor = (facts: ChainFacts, peer: EntityId, account: EntityReplica): readonly JAction[] => {
-  const nonce = proofNonce(facts);
+  const nonce = proofNonce(facts, account.used);
   return facts.disputed && nonce !== undefined ? [{ _tag: "counter", peer, nonce, head: account.head }] : [];
 };
 

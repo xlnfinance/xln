@@ -58,7 +58,15 @@ describe("runtime/chain the first proof of an epoch is two above the nonce the c
     expect(factsAt(three, ALICE, BOB)).toMatchObject({ epoch: 1n, stored: 5n, frames: 3n });
     const finalized = atEpoch(three, 2n, 6n);
     const next = feed(framed(finalized, 130n), ALICE, disputeBy(BOB, 2n, "right"));
-    expect(counters(next)).toEqual([8n]);
+    expect(counters(next)).toEqual([11n]);
+  });
+
+  test("R-IMPLICIT-NONCE-FROM-CHAIN a dispute is countered at the nonce the newest frame was signed at", () => {
+    const leftFramed = settle(feed(epoch1, ALICE, credit(BOB, 100n)));
+    const first = feed(leftFramed, ALICE, disputeBy(BOB, 1n, "right"));
+    expect(counters(first)).toEqual([8n]);
+    const rightFramed = framed(leftFramed, 110n);
+    expect(counters(feed(rightFramed, ALICE, disputeBy(BOB, 1n, "right")))).toEqual([9n]);
   });
 
   test("R-IMPLICIT-NONCE-FROM-CHAIN a report of an epoch the Entity already knows changes nothing", () => {
