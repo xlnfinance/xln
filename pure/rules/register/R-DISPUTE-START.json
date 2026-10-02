@@ -28,7 +28,7 @@
   {
    "kind": "test",
    "layer": "ts",
-   "name": "with no Account, or no committed frame, there is nothing to start with"
+   "name": "with no Account, or no committed frame, or a frame still pending, there is nothing to start with"
   },
   {
    "kind": "test",

@@ -78,7 +78,7 @@ describe("entity/signing R-DISPUTE-START a dispute starts from the peer's signat
     });
   });
 
-  test("with no Account, or no committed frame, there is nothing to start with", () => {
+  test("with no Account, or no committed frame, or a frame still pending, there is nothing to start with", () => {
     const noAccount = dispute(emptyEntity(ALICE.id), BOB.id);
     expect(noAccount.chain).toEqual([]);
     expect(noAccount.notices.map((n) => n._tag === "command_refused" && n.fault._tag)).toEqual(["no_account"]);
