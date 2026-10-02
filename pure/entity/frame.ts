@@ -16,7 +16,7 @@ import {
   withWindows,
 } from "./chain.ts";
 import { entityRules, type EntityRules } from "./rules.ts";
-import { intents, learned, withEntry, type Intent } from "./paybook/paybook.ts";
+import { hashlocksOf, intentFor, learned, withEntry, type Intent } from "./paybook/paybook.ts";
 import { askedOf, cosignFault, foldsOf, withdrawalOf } from "./cosign.ts";
 import type { AccountTx, Judge } from "../account/tx.ts";
 import {
@@ -333,12 +333,16 @@ const intended = (rules: Rulebook, w: Work, i: Intent): Work => {
 };
 
 /**
- * What the paybook owes now, asked of the Accounts before they propose. Two rounds: a lock the door refuses makes a
- * `fail` entry, which the second round turns into a cancel of the lock it was forwarding.
+ * What the paybook owes now, asked of the Accounts before they propose, one entry at a time against the state the
+ * entry before it left, so that two payments to one next hop in a frame take two slots. Two rounds: a lock the door
+ * refuses makes a `fail` entry, which the second round turns into a cancel of the lock it was forwarding.
  */
 const forwarding = (rules: Rulebook, judge: Judge) => (w: Work): Work => {
-  const round = (acc: Work): Work => intents(acc.state, judge.clock, judge.view).reduce(
-    (inner, i) => intended(rules, inner, i), acc);
+  const step = (inner: Work, hashlock: string): Work => {
+    const i = intentFor(inner.state, judge.clock, judge.view, hashlock);
+    return i === undefined ? inner : intended(rules, inner, i);
+  };
+  const round = (acc: Work): Work => hashlocksOf(acc.state).reduce(step, acc);
   return round(round(w));
 };
 

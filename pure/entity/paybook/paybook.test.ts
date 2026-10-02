@@ -7,13 +7,13 @@ import { holdId, type Hold } from "../../account/model.ts";
 import { MAX_ROUTE_HOPS } from "../../account/tx.ts";
 import { ledgerOf } from "../../account/state.ts";
 import { jHeight } from "../../account/clause/clock.ts";
-import { hopOf } from "./paybook.ts";
+import { hopOf, learned } from "./paybook.ts";
 import { keccakHex } from "../../kernel/encoding/bytes.ts";
 import { unwrapOr } from "../../kernel/core/result.ts";
 import { anchor, credit, entityOf, GOLD, judge, open } from "../fixtures.ts";
 import { entityFrame } from "../frame.ts";
 import {
-  emptyEntity, type Command, type EntityId, type EntityInput, type EntityState, type Notice, type Outbound,
+  emptyEntity, type Command, type Entry, type EntityId, type EntityInput, type EntityState, type Notice, type Outbound,
 } from "../model.ts";
 
 const ALICE = entityOf(1);
@@ -206,6 +206,7 @@ describe("entity/paybook the paybook forwards a payment (R-HTLC-FORWARD)", () =>
     expect(ledgerBetween(done, ALICE, HUB).holds).toEqual([]);
     expect(ledgerBetween(done, ALICE, HUB).offdelta).toBe(0n);
     expect(stateOf(done, HUB).paybook.size).toBe(0);
+    expect(done.notices).toEqual([]);
   });
 
   test("R-HTLC-FORWARD a route back to the peer the lock came from is given up", () => {
@@ -229,5 +230,152 @@ describe("entity/paybook the paybook forwards a payment (R-HTLC-FORWARD)", () =>
     expect(ledgerBetween(refused, ALICE, HUB).holds).toEqual([]);
     const fits = tell(base(), 100n, ALICE, routedLock(base(), 105n, long.slice(1)));
     expect(fits.notices).toEqual([]);
+  });
+});
+
+describe("entity/paybook what the forwarder pins (R-HTLC-FORWARD)", () => {
+  const routed = (): Net => expectAt(forwardAt(base()));
+  const secondForward = (net: Net): Net =>
+    tell(net, 100n, HUB, { _tag: "forward", hashlock: SECOND_HASHLOCK, from: ALICE, to: BOB });
+
+  test("R-HTLC-FORWARD two payments to one next hop in one frame take two slots and both go through", () => {
+    const asked = tell(secondForward(routed()), 100n, BOB,
+      { _tag: "expect", hashlock: SECOND_HASHLOCK, from: HUB, token: GOLD, amount: AMOUNT, secret: SECOND });
+    const done = deliver(asked, 100n, ALICE, [lock(base(), 105n), lock(base(), 105n, 2n, SECOND_HASHLOCK)]);
+    expect([[ALICE, HUB], [HUB, BOB]].map(([a, b]) => ledgerBetween(done, a!, b!).offdelta)).toEqual([-20n, -20n]);
+    expect(LINKS.map(([a, b]) => ledgerBetween(done, a!, b!).holds.length)).toEqual(LINKS.map(() => 0));
+    expect([HUB, BOB].map((id) => stateOf(done, id).paybook.size)).toEqual([0, 0]);
+    expect(done.notices).toEqual([]);
+  });
+
+  test("R-HTLC-FORWARD with lag 1 and reserve 2 a lock due at 110 is forwarded due at 107", () => {
+    expect(hopOf(judge.clock)).toBe(3n);
+    const waiting = tell(forwardAt(base()), 100n, ALICE, lock(base(), 110n));
+    expect(ledgerBetween(waiting, HUB, BOB).holds.map((h) => h.deadline)).toEqual([heightOf(107n)]);
+  });
+
+  test("R-HTLC-FORWARD at view 100 a lock due at 104 is forwarded due at 101 and one due at 103 is given up", () => {
+    const edge = tell(forwardAt(base()), 100n, ALICE, lock(base(), 104n));
+    expect(ledgerBetween(edge, HUB, BOB).holds.map((h) => h.deadline)).toEqual([heightOf(101n)]);
+    expect(edge.notices).toEqual([]);
+    const near = tell(forwardAt(base()), 100n, ALICE, lock(base(), 103n));
+    expect(ledgerBetween(near, HUB, BOB).holds).toEqual([]);
+    expect(ledgerBetween(near, ALICE, HUB).holds).toEqual([]);
+    expect(near.notices).toEqual([]);
+  });
+
+  test("R-HTLC-FORWARD a next hop that already holds a lock gets a slot above it", () => {
+    const first = tell(forwardAt(base()), 100n, ALICE, lock(base(), 105n));
+    const both = tell(secondForward(first), 100n, ALICE, lock(base(), 105n, 7n, SECOND_HASHLOCK));
+    expect(ledgerBetween(both, HUB, BOB).holds.map((h) => h.id)).toEqual([holdId(1n), holdId(2n)]);
+    expect(both.notices).toEqual([]);
+  });
+
+  test("R-HTLC-FORWARD a lock the hub itself made to the peer is not an incoming lock to forward", () => {
+    const entry = tell(base(), 100n, HUB, { _tag: "forward", hashlock: HASHLOCK, from: BOB, to: CAROL });
+    const side = stateOf(entry, HUB).accounts.get(BOB)?.side ?? expect.unreachable("no account");
+    const own: Hold = { ...hold(entry, 1n, HASHLOCK, 105n), payer: side };
+    const done = tell(entry, 100n, HUB, { _tag: "lock", peer: BOB, token: GOLD, hold: own });
+    expect(ledgerBetween(done, HUB, BOB).holds.length).toBe(1);
+    expect(ledgerBetween(done, HUB, CAROL).holds).toEqual([]);
+    expect(stateOf(done, HUB).paybook.get(HASHLOCK)?._tag).toBe("forward");
+    expect(done.notices).toEqual([]);
+  });
+});
+
+describe("entity/paybook what a peer's accepted frame tells the paybook (R-HTLC-FORWARD)", () => {
+  const first = holdId(1n);
+  const locked: Entry = { _tag: "locked", from: ALICE, to: BOB, token: GOLD, id: first };
+  const resolve = { _tag: "resolve", token: GOLD, id: first, secret: SECRET } as const;
+
+  test("R-HTLC-FORWARD a secret shown by the next hop is passed up, by any other peer it is not", () => {
+    const book = new Map<string, Entry>([[HASHLOCK, locked]]);
+    expect(learned(book, BOB, [resolve])).toEqual(new Map([[HASHLOCK, { _tag: "pass", from: ALICE, secret: SECRET }]]));
+    expect(learned(book, CAROL, [resolve])).toEqual(book);
+  });
+
+  test("R-HTLC-FORWARD a secret shown for an entry that has locked nothing yet is not passed up", () => {
+    const waiting = new Map<string, Entry>([[HASHLOCK, { _tag: "forward", from: ALICE, to: BOB, route: [] }]]);
+    expect(learned(waiting, BOB, [resolve])).toEqual(waiting);
+  });
+
+  test("R-HTLC-FORWARD a cancel fails the entry of its own token and slot, not the first entry to that peer", () => {
+    const oilLocked: Entry = { _tag: "locked", from: CAROL, to: BOB, token: OIL, id: first };
+    const book = new Map<string, Entry>([[HASHLOCK, locked], [SECOND_HASHLOCK, oilLocked]]);
+    const cancelled = learned(book, BOB, [{ _tag: "cancel", token: OIL, id: first }]);
+    expect(cancelled.get(HASHLOCK)).toEqual(locked);
+    expect(cancelled.get(SECOND_HASHLOCK)).toEqual({ _tag: "fail", from: CAROL });
+  });
+});
+
+describe("entity/paybook what the hub learns from a frame of its next hop (R-HTLC-FORWARD)", () => {
+  /** Messages kept on the wire instead of delivered at once: a test picks which one is heard next. */
+  type Wire = Readonly<{ net: Net; queue: readonly Outbound[] }>;
+
+  const step = (wire: Wire, to: EntityId, inputs: readonly EntityInput[]): Wire => {
+    const framed = entityFrame({ ...judge, view: viewOf(100n) }, anchor, stateOf(wire.net, to), inputs);
+    const entities = new Map([...wire.net.entities, [to, framed.state]]);
+    return {
+      net: { entities, notices: [...wire.net.notices, ...framed.notices] }, queue: [...wire.queue, ...framed.outputs],
+    };
+  };
+
+  const hears = (wire: Wire, out: Outbound, msg = out.msg): Wire =>
+    step({ ...wire, queue: wire.queue.filter((x) => x !== out) }, out.to,
+      [{ _tag: "peer_message", from: out.from, msg }]);
+
+  const wired = (wire: Wire, from: EntityId, to: EntityId, tag: Outbound["msg"]["_tag"]): Outbound =>
+    wire.queue.find((x) => x.from === from && x.to === to && x.msg._tag === tag) ?? expect.unreachable("no message");
+
+  const hear = (wire: Wire, from: EntityId, to: EntityId, tag: Outbound["msg"]["_tag"]): Wire =>
+    hears(wire, wired(wire, from, to, tag));
+
+  const drained = (wire: Wire): Wire => {
+    const [next] = wire.queue;
+    return next === undefined ? wire : drained(hears(wire, next));
+  };
+
+  const lockBy = (net: Net, payer: EntityId, id: bigint, hashlock: string): Command => {
+    const side = stateOf(net, payer).accounts.get(HUB)?.side ?? expect.unreachable("no account");
+    return { _tag: "lock", peer: HUB, token: GOLD, hold: { ...hold(net, id, hashlock, 105n), payer: side } };
+  };
+
+  const expecting = (net: Net, payee: EntityId, hashlock: string, secret: Uint8Array): Net =>
+    tell(net, 100n, payee, { _tag: "expect", hashlock, from: HUB, token: GOLD, amount: AMOUNT, secret });
+
+  const forwarded = (net: Net, hashlock: string, from: EntityId, to: EntityId): Net =>
+    tell(net, 100n, HUB, { _tag: "forward", hashlock, from, to });
+
+  test("R-HTLC-FORWARD a resolve in a frame that is refused leaves the entry locked and nothing passed up", () => {
+    const entries = expecting(forwarded(base(), HASHLOCK, ALICE, BOB), BOB, HASHLOCK, SECRET);
+    const sent = hear(step({ net: entries, queue: [] }, ALICE, [lock(entries, 105n)]), ALICE, HUB, "frame");
+    const locked = hear(hear(sent, HUB, ALICE, "ack"), HUB, BOB, "frame");
+    const frame = wired(locked, BOB, HUB, "frame");
+    const forged = frame.msg._tag === "frame"
+      ? { ...frame.msg, frame: { ...frame.msg.frame, txs: [...frame.msg.frame.txs, ...frame.msg.frame.txs] } }
+      : expect.unreachable("not a frame");
+    const refused = step(hear(locked, BOB, HUB, "ack"), HUB, [{ _tag: "peer_message", from: BOB, msg: forged }]);
+    expect(refused.net.notices.map((n) => n._tag)).toEqual(["message_refused"]);
+    expect(stateOf(refused.net, HUB).paybook.get(HASHLOCK)?._tag).toBe("locked");
+    expect(ledgerBetween(refused.net, ALICE, HUB).holds.length).toBe(1);
+    expect(stateOf(refused.net, HUB).accounts.get(ALICE)?.pending).toBeUndefined();
+  });
+
+  test("R-HTLC-FORWARD a resolve in a frame accepted over the hub's own pending frame is learned and passed up", () => {
+    // Bob pays Alice through the hub, who is Right of Alice: its frame to Alice gives way when both propose at once.
+    const asked = expecting(expecting(base(), ALICE, HASHLOCK, SECRET), ALICE, SECOND_HASHLOCK, SECOND);
+    const routes = forwarded(forwarded(asked, HASHLOCK, BOB, ALICE), SECOND_HASHLOCK, BOB, ALICE);
+    const bob = step(step({ net: routes, queue: [] }, BOB, [lockBy(routes, BOB, 1n, HASHLOCK)]), BOB,
+      [lockBy(routes, BOB, 2n, SECOND_HASHLOCK)]);
+    const second = hear(hear(hear(bob, BOB, HUB, "frame"), HUB, BOB, "ack"), BOB, HUB, "frame");
+    const resolved = hear(second, HUB, ALICE, "frame");
+    const alice = hear(resolved, ALICE, HUB, "ack");
+    expect(stateOf(alice.net, HUB).accounts.get(ALICE)?.pending?.frame.txs.map((t) => t._tag)).toEqual(["lock"]);
+    const collided = hear(alice, ALICE, HUB, "frame");
+    expect(collided.net.notices).toEqual([]);
+    const done = drained(collided).net;
+    expect(LINKS.map(([a, b]) => ledgerBetween(done, a!, b!).holds.length)).toEqual(LINKS.map(() => 0));
+    expect([[BOB, HUB], [HUB, ALICE]].map(([a, b]) => ledgerBetween(done, a!, b!).offdelta)).toEqual([20n, 20n]);
+    expect([HUB, ALICE].map((id) => stateOf(done, id).paybook.size)).toEqual([0, 0]);
   });
 });

@@ -112,12 +112,16 @@ const intentOf = (state: EntityState, clock: ClockParams, view: JView, [hashlock
   }
 };
 
-/** What the paybook asks of the Accounts now, in hashlock order. */
-export const intents = (state: EntityState, clock: ClockParams, view: JView): readonly Intent[] =>
-  [...state.paybook].toSorted(([a], [b]) => (a < b ? -1 : 1)).flatMap((row) => {
-    const intent = intentOf(state, clock, view, row);
-    return intent === undefined ? [] : [intent];
-  });
+/** The hashlocks the paybook has an entry for, in order. */
+export const hashlocksOf = (state: EntityState): readonly string[] => [...state.paybook.keys()].toSorted();
+
+/** What the paybook asks of the Accounts now for one hashlock, judged on the state as it stands. */
+export const intentFor = (
+  state: EntityState, clock: ClockParams, view: JView, hashlock: string,
+): Intent | undefined => {
+  const entry = state.paybook.get(hashlock);
+  return entry === undefined ? undefined : intentOf(state, clock, view, [hashlock, entry]);
+};
 
 /** An entry in place of the one for `hashlock`, or none. */
 export const withEntry = (book: Paybook, hashlock: string, entry: Entry | undefined): Paybook => {

@@ -89,6 +89,56 @@
    "kind": "test",
    "layer": "ts",
    "name": "R-HTLC-FORWARD a route longer than the limit makes the lock refused at the door"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-HTLC-FORWARD two payments to one next hop in one frame take two slots and both go through"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-HTLC-FORWARD with lag 1 and reserve 2 a lock due at 110 is forwarded due at 107"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-HTLC-FORWARD at view 100 a lock due at 104 is forwarded due at 101 and one due at 103 is given up"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-HTLC-FORWARD a next hop that already holds a lock gets a slot above it"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-HTLC-FORWARD a lock the hub itself made to the peer is not an incoming lock to forward"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-HTLC-FORWARD a secret shown by the next hop is passed up, by any other peer it is not"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-HTLC-FORWARD a secret shown for an entry that has locked nothing yet is not passed up"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-HTLC-FORWARD a cancel fails the entry of its own token and slot, not the first entry to that peer"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-HTLC-FORWARD a resolve in a frame that is refused leaves the entry locked and nothing passed up"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-HTLC-FORWARD a resolve in a frame accepted over the hub's own pending frame is learned and passed up"
   }
  ]
 }
