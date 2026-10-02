@@ -6,7 +6,7 @@ import { err, ok, type Result } from "../kernel/core/result.ts";
 import { MAX_PROOF_TOKENS } from "../account/proof/body.ts";
 import type { TokenId } from "../account/model.ts";
 import type { Held } from "../account/state.ts";
-import type { Answer, ChainFacts, DisputeStart, EntityFault, JEvent, Windows } from "./model.ts";
+import type { Answer, ChainFacts, DisputeStart, EntityFault, JEvent, Registered, Windows } from "./model.ts";
 
 export const freshChain: ChainFacts =
   {
@@ -58,9 +58,11 @@ export const answered = (f: ChainFacts, answer: Answer): ChainFacts =>
   (f.against === undefined || f.against.answer !== undefined ? f : { ...f, against: { ...f.against, answer } });
 
 /**
- * The chain registered a counter (its nonce and author) for the dispute. For a dispute this node
+ * The chain registered a counter (its nonce, author and body hash) for the dispute. For a dispute this node
  * started it is a counter against it: it stops asking to finalize with its opening proof, which the chain now
- * refuses. For one against it, a counter that is the one it asked for is registered, and only then does it finalize.
+ * refuses, and keeps the counter's identity, to finalize with it itself once the window is over and it can rebuild the
+ * body (the chain lets either party execute it after the window). For one against it, a counter that is the one it
+ * asked for is registered, and only then does it finalize.
  */
 export const countered = (f: ChainFacts, e: Extract<JEvent, { _tag: "j_countered" }>): ChainFacts => {
   const asked = f.against?.answer;
@@ -69,7 +71,8 @@ export const countered = (f: ChainFacts, e: Extract<JEvent, { _tag: "j_countered
   const against = f.against !== undefined && asked !== undefined && mine
     ? { ...f.against, answer: { ...asked, registered: true } }
     : f.against;
-  return { ...f, against, starting: f.starting === undefined ? undefined : { ...f.starting, countered: true } };
+  const registered: Registered = { nonce: e.nonce, proposerIsLeft: e.proposerIsLeft, bodyHash: e.bodyHash };
+  return { ...f, against, starting: f.starting === undefined ? undefined : { ...f.starting, countered: registered } };
 };
 
 /**
@@ -102,7 +105,7 @@ export const disputeOver = (f: ChainFacts): ChainFacts => ({ ...f, against: unde
  * moves on, and no second start replaces it: the chain holds the dispute it opened first, with that start's nonce.
  */
 export const disputeAsked = (f: ChainFacts, start: DisputeStart): ChainFacts =>
-  ({ ...f, starting: { start, window: undefined, over: false, countered: false } });
+  ({ ...f, starting: { start, window: undefined, over: false, countered: undefined } });
 
 /**
  * The chain says the dispute opened with `nonce` has a window ending at `timeout`. A dispute of another epoch or

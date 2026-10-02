@@ -120,8 +120,12 @@ export type Answer = Readonly<{ counter: DisputeCounter; registered: boolean; la
  * the chain's clock has passed that end (`over`). Once over, the node asks to finalize it with what it started with,
  * and keeps asking until the chain says the dispute is over.
  */
-export type Starting =
-  Readonly<{ start: DisputeStart; window: bigint | undefined; over: boolean; countered: boolean }>;
+export type Starting = Readonly<{
+  start: DisputeStart; window: bigint | undefined; over: boolean; countered: Registered | undefined;
+}>;
+
+/** The counter the chain registered against a dispute: its nonce, its author, and the hash of its body. */
+export type Registered = Readonly<{ nonce: bigint; proposerIsLeft: boolean; bodyHash: string }>;
 
 // What a frame takes in. `sig` is the sender's signature over the head the message commits to
 // (R-SIGNED-HEADS-ON-THE-WIRE): a frame's, or the ack's.

@@ -152,6 +152,44 @@ describe("entity/signing R-DISPUTE-WATCH a dispute from the newest proof held is
   });
 });
 
+describe("entity/signing R-DISPUTE-WATCH the starter finalizes with the counter when the counterer does not", () => {
+  const start = startOf(ackLost.alice);
+  const counter = countersOf(run(ackLost.bob, openedBy(start)).chain)[0];
+  if (counter?._tag !== "counter") throw new Error("no counter");
+  const opened = (() => {
+    const asked = run(ackLost.alice, { _tag: "dispute", peer: BOB.id });
+    return run(asked.state, { ...openedBy(start), peer: BOB.id, by: "left" } as JEvent);
+  })();
+  const registered = (bodyHash: string): JEvent => ({
+    _tag: "j_countered", peer: BOB.id, nonce: counter.nonce, proposerIsLeft: counter.proposerIsLeft, bodyHash,
+  });
+  const counterHash = must(proofBodyHash(counter.body));
+
+  test("R-DISPUTE-WATCH once the window is over the starter finalizes with the registered counter it can rebuild", () => {
+    const countered = run(opened.state, registered(counterHash));
+    expect(finalsOf(countered.chain)).toEqual([]);
+    const over = run(countered.state, { _tag: "j_window_over", peer: BOB.id });
+    const [final, ...more] = finalsOf(over.chain);
+    if (final?._tag !== "dispute_finalize" || more.length > 0) return expect.unreachable("not one finalize");
+    expect([final.nonce, final.proposerIsLeft, final.startedByLeft]).toEqual([counter.nonce, true, true]);
+    expect(final.body).toEqual(counter.body);
+    expect(final.initial).toEqual({ nonce: start.nonce, bodyHash: must(proofBodyHash(start.body)) });
+  });
+
+  test("R-DISPUTE-WATCH the starter asks again at each frame, and stops once the dispute is over", () => {
+    const over = run(run(opened.state, registered(counterHash)).state, { _tag: "j_window_over", peer: BOB.id });
+    expect(finalsOf(run(over.state, { _tag: "resend_due", peer: BOB.id }).chain)).toHaveLength(1);
+    const done = run(over.state, { _tag: "j_dispute_over", peer: BOB.id });
+    expect(finalsOf(run(done.state, { _tag: "resend_due", peer: BOB.id }).chain)).toEqual([]);
+  });
+
+  test("R-DISPUTE-WATCH a registered counter whose body the starter cannot rebuild is not finalized with a guess", () => {
+    const countered = run(opened.state, registered(OPENED_WITH.bodyHash));
+    const over = run(countered.state, { _tag: "j_window_over", peer: BOB.id });
+    expect(finalsOf(over.chain)).toEqual([]);
+  });
+});
+
 describe("entity/signing R-DISPUTE-WATCH what the counter is made of, and what stops it", () => {
   const start = startOf(ackLost.alice);
 

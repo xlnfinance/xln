@@ -836,19 +836,22 @@ const disputeStale: Step<World> = {
     const counters = net.askedBy(x).slice(mark.hubX).flatMap((ask) => (ask._tag === "counter" ? [ask] : []));
     const counter = counters[0];
     if (counter === undefined || counters.some((c) => c.nonce !== counter.nonce)) throw new Error(`hubX's node asked for counters of nonces ${shown(counters.map((c) => c.nonce))}, expected one nonce`);
-    const alicesFinals = net.askedBy(a).slice(mark.alice).filter((ask) => ask._tag === "dispute_finalize").length;
-    if (alicesFinals !== 0) throw new Error(`alice's node asked ${alicesFinals} times to finalize with her opening proof after hubX's counter registered`);
+    // Once the window is over either party may finalize with the counter's proof, so both nodes ask to; each ask is the counter's, never the opening proof's.
+    const alicesFinals = net.askedBy(a).slice(mark.alice).flatMap((ask) => (ask._tag === "dispute_finalize" ? [ask] : []));
+    if (alicesFinals.some((ask) => ask.nonce !== counter.nonce || ask.proposerIsLeft !== counter.proposerIsLeft)) throw new Error("alice's node asked to finalize with her opening proof after hubX's counter registered");
     // The three steps are the nodes' own, by what the chain and the journals hold that cannot be the harness's: who sent each, and that nothing was skipped.
     const [started, registered, finished, skipped] = await Promise.all([chain.depository.filters.DisputeStarted(), chain.depository.filters.CounterDisputeRegistered(), chain.depository.filters.DisputeFinalized(), chain.depository.filters.DisputeOpSkipped()]
       .map((filter) => chain.depository.queryFilter(filter, fromBlock)));
-    if (started?.length !== 1 || registered?.length !== 1 || finished?.length !== 1 || skipped?.length !== 0) {
-      throw new Error(`the chain logged ${started?.length} starts, ${registered?.length} counters, ${finished?.length} finalizes and ${skipped?.length} skips since the stale dispute began, expected 1, 1, 1 and none`);
+    // The loser of the finalize race may be skipped by the chain (op 2, the dispute is over); nothing else is skipped.
+    const lostRace = (skipped ?? []).filter((log) => BigInt(log.args[2]) === 2n);
+    if (started?.length !== 1 || registered?.length !== 1 || finished?.length !== 1 || (skipped?.length ?? 0) !== lostRace.length || lostRace.length > 1) {
+      throw new Error(`the chain logged ${started?.length} starts, ${registered?.length} counters, ${finished?.length} finalizes and ${skipped?.length} skips (${lostRace.length} of a finalize) since the stale dispute began, expected 1, 1, 1 and at most one skipped finalize`);
     }
     const steps = [started[0]!, registered[0]!, finished[0]!];
-    const authors = [alice, hubX, hubX];
+    const authors = [[alice], [hubX], [alice, hubX]];
     for (const [i, log] of steps.entries()) {
       const sender = (await log.getTransaction()).from.toLowerCase();
-      if (log.args.sender !== authors[i]!.id || sender !== authors[i]!.wallet.address.toLowerCase()) throw new Error(`step ${i + 1} of the dispute names ${log.args.sender} and was sent from ${sender}, expected ${authors[i]!.name}'s Entity and wallet`);
+      if (!authors[i]!.some((p) => log.args.sender === p.id && sender === p.wallet.address.toLowerCase())) throw new Error(`step ${i + 1} of the dispute names ${log.args.sender} and was sent from ${sender}, expected ${authors[i]!.map((p) => p.name).join(" or ")}'s Entity and wallet`);
     }
     const startNonce = BigInt(started[0]!.args.nonce);
     if (BigInt(registered[0]!.args.nonce) !== counter.nonce || startNonce >= counter.nonce) throw new Error(`the counter's nonce ${registered[0]!.args.nonce} is not above the dispute's ${startNonce}`);
@@ -856,11 +859,11 @@ const disputeStale: Step<World> = {
     if (finalAsk === undefined || finalAsk.nonce !== counter.nonce || finalAsk.proposerIsLeft !== counter.proposerIsLeft || finalAsk.initial?.nonce !== startNonce || finalAsk.startedByLeft !== (a === eid(leftOf(alice, hubX)))) {
       throw new Error("the finalize hubX's node asked for is not its counter's proof (nonce, author), naming the dispute it answers and who started it");
     }
-    for (const tag of ["counter", "dispute_finalize"] as const) {
-      const batches = batchesOf(net, x, "hubX", tag);
-      const landed = batches.every(({ answer }) => answer?._tag === "answered" && answer.outcome === "landed");
-      if (batches.length !== 1 || !landed) throw new Error(`hubX's journal holds ${batches.length} sealed batches carrying a ${tag}${landed ? "" : ", not all landed"}, expected one landed batch`);
-    }
+    const counterBatches = batchesOf(net, x, "hubX", "counter");
+    if (counterBatches.length !== 1 || !counterBatches.every(({ answer }) => answer?._tag === "answered" && answer.outcome === "landed")) throw new Error(`hubX's journal holds ${counterBatches.length} sealed batches carrying a counter, expected one landed batch`);
+    const finalBatches = [[a, "alice"], [x, "hubX"]].flatMap(([id, name]) => batchesOf(net, id as EntityId, name as string, "dispute_finalize"));
+    const landedFinals = finalBatches.filter(({ answer }) => answer?._tag === "answered" && answer.outcome === "landed");
+    if (landedFinals.length !== finalBatches.length || finalBatches.length !== 1 + lostRace.length) throw new Error(`the two journals hold ${finalBatches.length} sealed batches carrying a finalize, ${landedFinals.length} landed; the chain finalized once and skipped ${lostRace.length}`);
     // The counter's head is the dispute-proof digest the chain computes for hubX's newer proof: the nonce is the epoch's first plus the slot, less one.
     const bodyHash = must(proofBodyHash(counter.body), "counter body hash");
     const expectedNonce = onChain.nonce + 2n + BigInt(newSlot) - 1n;
@@ -903,7 +906,7 @@ const disputeStale: Step<World> = {
       checks: [
         `alice funded alice-hubX with ${fmt(chain, funded)} in epoch ${onChain.epoch}; alice paid hubX ${fmt(chain, STALE_PAY * unit(chain))}, hubX committed the frame (slot ${newSlot}) and its ack to alice was lost: hubX holds alice's signature over a head alice never committed`,
         `alice's own node started the dispute from her older head (nonce ${startNonce}); hubX's node, told of it at depth 1, asked for a counter with the newer proof (nonce ${counter.nonce}, restated ${counters.length} time${counters.length === 1 ? "" : "s"}): one CounterDisputeRegistered naming hubX's Entity, sent from hubX's wallet, inside the window; the counter's head is the dispute-proof digest the chain computes for that nonce and epoch`,
-        `past both ${floor} s windows hubX's node, told the window was over, finalized with its counter's proof naming the dispute it answers: its journal holds one sealed batch of the counter and one of the finalize, each with its landed answer; alice's node, told of the counter, asked to finalize ${alicesFinals} times; the chain logged one start, one counter, one finalize and no skip`,
+        `past both ${floor} s windows hubX's node, told the window was over, finalized with its counter's proof naming the dispute it answers: its journal holds one sealed batch of the counter and one of the finalize, each with its landed answer; alice's node, told of the counter, the finalize that landed was sent by ${(await finished[0]!.getTransaction()).from.toLowerCase() === hubX.wallet.address.toLowerCase() ? "hubX" : "alice"} (both may finalize, alice's node asked ${alicesFinals.length} times, each with the counter's proof); the chain logged one start, one counter, one finalize and ${lostRace.length} skipped finalize`,
         `the chain paid by the newer state: alice ${fmt(chain, aliceGot)} and hubX ${fmt(chain, hubGot)} (ondelta ${held.ondelta} + offdelta ${newOffdelta}, collateral ${held.collateral}); the opening proof would have paid alice ${fmt(chain, stale)}`,
         `R-DISPUTE-FREEZE: inside the window each node was asked for a payment on the Account in dispute and refused it back to whoever asked with a notice (account_disputed): no frame, no new pending frame, the heads stayed, the nodes asked the chain for nothing new`,
         `R-DISPUTE-FREEZE: when the epoch moved to ${onChain.epoch + 1n} alice's Runtime was told the offdelta she counted (${oldOffdelta}, the opening proof's ledger) and hubX's the one it counted (${newOffdelta}, the counter's), one notice each`,

@@ -12,7 +12,7 @@ import type { Simulation } from "../../../j/gas/simulate.ts";
 import { err, ok, unwrapOr, type Result } from "../../../kernel/core/result.ts";
 import { settle, resume, step, type Arrival, type ChainPort, type Io, type PortFault } from "./chain.ts";
 import {
-  aliceRun, ALICE, callsOf, DEPOSIT, GAS, journalIn, START, TREASURY, walOf, DEPLOYED, WORLD,
+  aliceRun, ALICE, callsOf, COUNTER, DEPOSIT, FINALIZE, GAS, journalIn, START, TREASURY, walOf, DEPLOYED, WORLD,
 } from "../fixtures.ts";
 import { keyOf } from "../link/link.ts";
 import { fileDisk } from "../node/file-disk.ts";
@@ -25,7 +25,7 @@ const SIGNER: Signer = lazySigner(ALICE, KEY);
 const WHERE = { entity: ALICE, deployment: DEPLOYED, world: WORLD };
 const WAL = walOf(aliceRun, ALICE);
 
-const REVERTS: Simulation["outcome"] = { _tag: "reverts", reason: "paused" };
+const REVERTS: Simulation["outcome"] = { _tag: "reverts", reason: "paused", causes: [] };
 const ROOM: Simulation["outcome"] = { _tag: "ok", applyGas: 100_000n };
 const PORT_DOWN: PortFault = { _tag: "port", call: "send", reason: "connection reset" };
 
@@ -33,6 +33,8 @@ const PORT_DOWN: PortFault = { _tag: "port", call: "send", reason: "connection r
 type Script = Readonly<{
   nonce: bigint; outcome: Simulation["outcome"]; sends: Result<void, PortFault>;
   answer: (batch: SealedBatch) => JAnswer | undefined;
+  /** What the nth simulation of the scene says (from 0), when it differs from `outcome`. */
+  nth?: (n: number) => Simulation["outcome"];
 }>;
 
 const CALM: Script = { nonce: 4n, outcome: ROOM, sends: ok(undefined), answer: () => undefined };
@@ -50,8 +52,9 @@ const portOf = (at: Scene, script: Script): ChainPort => ({
   nonce: () => Promise.resolve(ok(script.nonce)),
   treasury: () => Promise.resolve(ok(TREASURY)),
   simulate: (_call, gasLimit) => {
+    const before = callsOf(at.log).filter((c) => c.startsWith("simulate")).length;
     appendFileSync(at.log, `simulate gas=${gasLimit}\n`);
-    return Promise.resolve(ok(script.outcome));
+    return Promise.resolve(ok(script.nth?.(before) ?? script.outcome));
   },
   send: (call, gasLimit) => {
     const head = `send ${call.nonce} ${call.encodedBatch.slice(0, 18)} gas=${gasLimit}`;
@@ -88,6 +91,12 @@ const asked = (s: Submitter): Submitter => {
 /** The start as asked; a row of its own, since the deposit's row of another Runtime's WAL has the same height. */
 const startAsked = (s: Submitter): Submitter => {
   const out = take(s, { ...START, row: { ...START.row, height: START.row.height + 100n } });
+  return out._tag === "queued" ? out.submitter : expect.unreachable(`take ${out._tag}`);
+};
+
+/** The counter as asked, behind the deposit: two groups in the draft, the counter's urgent and the deposit's not. */
+const counterAsked = (s: Submitter): Submitter => {
+  const out = take(s, COUNTER);
   return out._tag === "queued" ? out.submitter : expect.unreachable(`take ${out._tag}`);
 };
 
@@ -160,6 +169,62 @@ describe("host/shell/chain a batch is journaled before it is sent", () => {
   test("R-DISPUTE-LAPSED a start that simulates cleanly is sealed and sent, not dropped", async () => {
     const at = scene();
     const moved = await withIo(at, CALM, (io) => stepped(io, startAsked(opened())));
+    expect([moved.stage, moved.lapsed]).toEqual(["waiting", []]);
+    expect(journalIn(at.journal)).toEqual(["sealed@5"]);
+  });
+
+  const E4_LOST: Simulation["outcome"] = { _tag: "reverts", reason: "execution failed", causes: [{ _tag: "error", name: "E4" }] };
+  const E3_KEPT: Simulation["outcome"] = { _tag: "reverts", reason: "execution failed", causes: [{ _tag: "error", name: "E3" }] };
+  const firstOnly = (outcome: Simulation["outcome"]) => (n: number) => (n === 0 ? outcome : ROOM);
+
+  test("R-DISPUTE-LAPSED a counter that reverts for good is dropped and named though a lower group still seals", async () => {
+    const at = scene();
+    const both = counterAsked(asked(opened()));
+    const moved = await withIo(at, { ...CALM, nth: firstOnly(E4_LOST) }, (io) => stepped(io, both));
+    expect(moved.lapsed.map((op) => op._tag)).toEqual(["dispute_counter"]);
+    expect(moved.stage).toBe("closed");
+    expect(moved.submitter.jbatch.draft.map((op) => op._tag)).toEqual(["reserve_to_collateral"]);
+    expect(journalIn(at.journal)).toEqual([]);
+  });
+
+  test("R-DISPUTE-LAPSED a counter held for a reason that can heal is dropped, not named, and what is behind it seals", async () => {
+    const at = scene();
+    const both = counterAsked(asked(opened()));
+    const moved = await withIo(at, { ...CALM, nth: firstOnly(E3_KEPT) }, (io) => stepped(io, both));
+    expect([moved.lapsed, moved.stage]).toEqual([[], "closed"]);
+    expect(moved.submitter.jbatch.draft.map((op) => op._tag)).toEqual(["reserve_to_collateral"]);
+    const after = await withIo(at, CALM, (io) => stepped(io, moved.submitter));
+    expect(after.stage).toBe("waiting");
+    expect(journalIn(at.journal)).toEqual(["sealed@5"]);
+  });
+
+  test("R-DISPUTE-LAPSED a counter that simulates cleanly is not probed away: it is sealed with what is behind it", async () => {
+    const at = scene();
+    const moved = await withIo(at, CALM, (io) => stepped(io, counterAsked(asked(opened()))));
+    expect([moved.lapsed, moved.stage]).toEqual([[], "waiting"]);
+    expect(journalIn(at.journal)).toEqual(["sealed@5"]);
+  });
+
+  const SKIPPED_FINALIZE: Simulation["outcome"] = {
+    _tag: "reverts", reason: "DisputeOpSkipped", causes: [{ _tag: "skipped", op: 2, reason: 2 }],
+  };
+  const finalizeAsked = (s: Submitter): Submitter => {
+    const out = take(s, FINALIZE);
+    return out._tag === "queued" ? out.submitter : expect.unreachable(`take ${out._tag}`);
+  };
+
+  test("R-DISPUTE-LAPSED a finalize the other party's landed first is dropped, not named, and asked for again", async () => {
+    const at = scene();
+    const moved = await withIo(at, { ...CALM, outcome: SKIPPED_FINALIZE }, (io) => stepped(io, finalizeAsked(opened())));
+    expect([moved.lapsed, moved.stage]).toEqual([[], "closed"]);
+    expect(moved.submitter.jbatch.draft).toEqual([]);
+    expect(moved.submitter.waiting.size).toBe(0);
+    expect(journalIn(at.journal)).toEqual([]);
+  });
+
+  test("R-DISPUTE-LAPSED a finalize that simulates cleanly is sealed and sent, not dropped", async () => {
+    const at = scene();
+    const moved = await withIo(at, CALM, (io) => stepped(io, finalizeAsked(opened())));
     expect([moved.stage, moved.lapsed]).toEqual(["waiting", []]);
     expect(journalIn(at.journal)).toEqual(["sealed@5"]);
   });

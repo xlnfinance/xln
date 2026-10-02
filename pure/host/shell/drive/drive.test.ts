@@ -7,7 +7,7 @@ import { appendFileSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { emptyEntity } from "../../../entity/model.ts";
 import type { JAnswer } from "../../../j/batch/answer.ts";
-import type { Simulation } from "../../../j/gas/simulate.ts";
+import type { Cause, Simulation } from "../../../j/gas/simulate.ts";
 import { err, ok, unwrapOr, type Result } from "../../../kernel/core/result.ts";
 import { hostOf, setup, stamp } from "../../../runtime/fixtures.ts";
 import { limits } from "../../host.ts";
@@ -186,7 +186,7 @@ describe("host/shell/drive the Host's rows are on the disk before the chain hear
       const started = turnOf(await start(shell, { ...BOOT, genesis: paid }));
       const first = turnOf(await command(shell, started.station, ALICE, dispute));
       return { first, second: turnOf(await command(shell, first.station, ALICE, dispute)) };
-    }, { _tag: "reverts", reason: "bad signature" });
+    }, { _tag: "reverts", reason: "bad signature", causes: [] });
     expect(out.first.lapsed.map((op) => op._tag)).toEqual(["dispute_start"]);
     expect(facts(out.first)?.starting).toBeUndefined();
     expect(out.first.station.submitter.jbatch.draft).toEqual([]);
@@ -196,24 +196,56 @@ describe("host/shell/drive the Host's rows are on the disk before the chain hear
     expect(rowsIn(at).flatMap((r) => r.chain.map((a) => a._tag))).toEqual(["dispute_start", "dispute_start"]);
   });
 
-  test("R-DISPUTE-LAPSED a counter the chain would revert is dropped and not asked for again", async () => {
+  const counterOpened = {
+    _tag: "j_dispute", peer: BOB, epoch: 0n, by: "right", nonce: 1n, timeout: 500n, proposerIsLeft: false,
+    bodyHash: `0x${"01".repeat(32)}`,
+  } as const;
+  const answerOf = (turn: Turn) => turn.station.host.runtime.entities.get(ALICE)?.chain.get(BOB)?.against?.answer;
+  const counterTurns = async (outcome: Simulation["outcome"]) => {
     const at = scene();
     const paid = hostOf(aliceRun, ALICE).entities.get(ALICE) ?? expect.unreachable("no entity");
-    const opened = {
-      _tag: "j_dispute", peer: BOB, epoch: 0n, by: "right", nonce: 1n, timeout: 500n, proposerIsLeft: false,
-      bodyHash: `0x${"01".repeat(32)}`,
-    } as const;
-    const answer = (turn: Turn) => turn.station.host.runtime.entities.get(ALICE)?.chain.get(BOB)?.against?.answer;
     const out = await withShell(at, ok(undefined), async (shell) => {
       const started = turnOf(await start(shell, { ...BOOT, genesis: paid }));
-      const first = turnOf(await command(shell, started.station, ALICE, opened));
+      const first = turnOf(await command(shell, started.station, ALICE, counterOpened));
       return { first, second: turnOf(await command(shell, first.station, ALICE, { _tag: "resend_due", peer: BOB })) };
-    }, { _tag: "reverts", reason: "window over" });
+    }, outcome);
+    return { at, ...out };
+  };
+  const E4: Cause = { _tag: "error", name: "E4" };
+
+  test("R-DISPUTE-LAPSED a counter the chain would revert is dropped and not asked for again", async () => {
+    const out = await counterTurns({ _tag: "reverts", reason: "window over", causes: [E4] });
     expect(out.first.lapsed.map((op) => op._tag)).toEqual(["dispute_counter"]);
-    expect(answer(out.first)?.lapsed).toBe(true);
+    expect(answerOf(out.first)?.lapsed).toBe(true);
     expect(out.first.station.submitter.jbatch.draft).toEqual([]);
-    expect(callsOf(at.log).filter((c) => c.startsWith("send"))).toEqual([]);
+    expect(callsOf(out.at.log).filter((c) => c.startsWith("send"))).toEqual([]);
     expect(out.second.lapsed).toEqual([]);
-    expect(rowsIn(at).flatMap((r) => r.chain.map((a) => a._tag))).toEqual(["counter"]);
+    expect(rowsIn(out.at).flatMap((r) => r.chain.map((a) => a._tag))).toEqual(["counter"]);
+  });
+
+  test("R-DISPUTE-LAPSED a counter held for a reason that can heal is not given up: it is asked for again", async () => {
+    const transient: Cause[] = [{ _tag: "error", name: "E3" }];
+    const out = await counterTurns({ _tag: "reverts", reason: "execution failed", causes: transient });
+    expect(out.first.lapsed).toEqual([]);
+    expect(answerOf(out.first)?.lapsed).toBe(false);
+    expect(out.first.station.submitter.jbatch.draft).toEqual([]);
+    expect(out.second.lapsed).toEqual([]);
+    expect(answerOf(out.second)?.lapsed).toBe(false);
+    expect(rowsIn(out.at).flatMap((r) => r.chain.map((a) => a._tag))).toEqual(["counter", "counter"]);
+  });
+
+  test("R-DISPUTE-LAPSED a counter whose revert the Host cannot name is not given up either", async () => {
+    const out = await counterTurns({ _tag: "reverts", reason: "execution failed", causes: [] });
+    expect(out.first.lapsed).toEqual([]);
+    expect(answerOf(out.first)?.lapsed).toBe(false);
+  });
+
+  test("R-DISPUTE-LAPSED a counter the batch skipped for good (window closed) lapses, a skip that can heal does not", async () => {
+    const skipped = (reason: number): Simulation["outcome"] =>
+      ({ _tag: "reverts", reason: "DisputeOpSkipped", causes: [{ _tag: "skipped", op: 1, reason }] });
+    const closed = await counterTurns(skipped(4));
+    expect(closed.first.lapsed.map((op) => op._tag)).toEqual(["dispute_counter"]);
+    const none = await counterTurns(skipped(2));
+    expect([none.first.lapsed, answerOf(none.first)?.lapsed]).toEqual([[], false]);
   });
 });

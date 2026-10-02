@@ -6,7 +6,7 @@
 // returns; `settle` repeats it until the batch is on its way, the chain has nothing more to say, or something is held.
 import type { SignFault, Signer } from "./signer.ts";
 import { requirement } from "../../../j/gas/gas.ts";
-import type { Gas, Simulation } from "../../../j/gas/simulate.ts";
+import type { Cause, Gas, HoldReason, Simulation } from "../../../j/gas/simulate.ts";
 import { seal, type JBatch, type SealOutcome } from "../../../j/batch/jbatch.ts";
 import type { JAnswer, Returned, Skipped } from "../../../j/batch/answer.ts";
 import { processBatchCall, type ProcessBatchCall, type SealedBatch } from "../../../j/batch/sealed.ts";
@@ -104,35 +104,68 @@ const sealOutcome = async (
     : outcome;
 };
 
+/** The contract's DISPUTE_OP_COUNTER, and the DISPUTE_SKIP_* reasons that are for good (Account.sol 69-83). */
+const COUNTER_OP = 1;
+const SKIPPED_FOR_GOOD: ReadonlySet<number> = new Set([3, 4, 5, 6, 7]);
+/** The errors a counter is reverted with for good: Unauthorized or stale (E2), a bad signature (E4), a hash mismatch (E9). */
+const REVERTED_FOR_GOOD: ReadonlySet<string> = new Set(["E2", "E4", "E9"]);
+
+const forGood = (cause: Cause): boolean =>
+  (cause._tag === "error" ? REVERTED_FOR_GOOD.has(cause.name) : cause.op === COUNTER_OP && SKIPPED_FOR_GOOD.has(cause.reason));
+
 /**
- * R-DISPUTE-LAPSED: the starts and counters in the draft that would revert on their own. One alone is sealed and
- * simulated at the head: one the chain would revert for ever (its signature is no longer the Account's, the window is
- * over) is dropped from the draft, and named, so the Entity that asked for it is told (a start may be asked again, a
- * counter is not restated). One that is held for any other reason (a limit, the cap), or only with the ops it is
- * grouped with, or one a signed batch also carries, stays: a draft is never held by an op that can only fail.
+ * Whether a counter the chain would revert will be reverted for ever: every cause it was refused for is one that
+ * nothing the chain does later undoes (a bad signature, the window over, a newer counter already registered). One with
+ * no cause the Host can name, or with any other (an error it does not know, no dispute open yet at a lagging node),
+ * may heal, so it is not given up.
  */
-const lapsedDisputes = async (io: Io, s: Submitter): Promise<Result<Pumped, ShellFault>> => {
-  const starts = s.jbatch.draft.filter((op) => op._tag === "dispute_start" || op._tag === "dispute_counter");
-  const probes = await Promise.all(starts.map((op) => sealOutcome(io, s, { ...s.jbatch, draft: [op] }, [])));
+const counterIsLost = (why: readonly HoldReason[]): boolean => {
+  const causes = why.flatMap((reason) => (reason._tag === "would_revert" ? reason.causes : []));
+  return causes.length > 0 && causes.every(forGood);
+};
+
+/**
+ * R-DISPUTE-LAPSED: the starts, counters and finalizes in the draft that would revert on their own. One alone is
+ * sealed and simulated at the head, before the draft is sealed whole, so one that can only fail never delays what
+ * shares its group (a reveal) or waits behind it. A start the chain would revert is dropped from the draft, and named,
+ * so the Entity that asked for it is told (it may ask again). A counter is named only when the chain would revert it
+ * for good (`counterIsLost`): the Entity then stops restating it. A counter or a finalize held for a reason that can
+ * heal (or that the Host cannot name) is dropped from the draft for now and not named: the Entity restates both at each
+ * frame, the counter while the window is open and the finalize until the dispute is over, so it asks again; and the
+ * finalize the other party's landed first is dropped for good this way, since the dispute it names is over. One held
+ * for any other reason (a limit, the cap), or only with the ops it is grouped with, or one a signed batch also carries,
+ * stays: a draft is never held by an op that can only fail. Returns nothing when nothing was dropped.
+ */
+const lapsedDisputes = async (io: Io, s: Submitter): Promise<Result<Pumped | undefined, ShellFault>> => {
+  const disputes = s.jbatch.draft.filter((op) =>
+    op._tag === "dispute_start" || op._tag === "dispute_counter" || op._tag === "dispute_finalize");
+  const probes = await Promise.all(disputes.map((op) => sealOutcome(io, s, { ...s.jbatch, draft: [op] }, [])));
   const failed = probes.find((probe) => !probe.ok);
   if (failed !== undefined && !failed.ok) return failed;
-  const lapsed = starts.filter((_, i) => {
+  const refused = disputes.filter((_, i) => {
     const probe = probes[i];
     return probe !== undefined && probe.ok && probe.value._tag === "held"
       && probe.value.why.some((why) => why._tag === "would_revert");
   });
-  const left = lapsed.reduce<Submitter>((now, op) => dropped(now, op), s);
-  const gone = lapsed.filter((op) => !left.jbatch.draft.includes(op));
-  return ok({ submitter: left, stage: gone.length > 0 ? "closed" : "held", returned: [], skipped: [], lapsed: gone });
+  const left = refused.reduce<Submitter>((now, op) => dropped(now, op), s);
+  const gone = refused.filter((op) => !left.jbatch.draft.includes(op));
+  const named = gone.filter((op) => {
+    const probe = probes[disputes.indexOf(op)];
+    return op._tag === "dispute_start" || (probe?.ok === true && probe.value._tag === "held" && counterIsLost(probe.value.why));
+  });
+  return ok(gone.length === 0 ? undefined : { submitter: left, stage: "closed", returned: [], skipped: [], lapsed: named });
 };
 
 const sealing = async (io: Io, s: Submitter): Promise<Result<Pumped, ShellFault>> => {
+  const lapsed = await lapsedDisputes(io, s);
+  if (!lapsed.ok) return lapsed;
+  if (lapsed.value !== undefined) return ok(lapsed.value);
   const out = await sealOutcome(io, s, s.jbatch, []);
   if (!out.ok) return out;
   switch (out.value._tag) {
     case "nothing_to_send": return quiet(s, "idle");
     case "in_flight": return quiet(s, "waiting");
-    case "held": return lapsedDisputes(io, s);
+    case "held": return quiet(s, "held");
     case "sealed": {
       const done = sealedBy(s, out.value.jbatch, out.value.batch);
       if (!done.ok) return done;
