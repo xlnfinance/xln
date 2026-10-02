@@ -230,7 +230,10 @@ const rebasing = (w: Work, peer: EntityId, finalized: Finalized | undefined): Wo
   return withReplica(told, peer, {
     ...account,
     state: rebased(account.state),
-    pending: account.pending === undefined ? undefined : { ...account.pending, after: rebased(account.pending.after) },
+    pending: account.pending === undefined ? undefined : {
+      ...account.pending, after: rebased(account.pending.after),
+      ...(finalized?.paidPending === true ? { paid: true as const } : {}),
+    },
   });
 };
 
@@ -241,10 +244,14 @@ const rebasing = (w: Work, peer: EntityId, finalized: Finalized | undefined): Wo
  */
 type Finalized = Readonly<{
   nonce: bigint | undefined; epoch: bigint; committed: bigint | undefined; pending: bigint | undefined;
+  paidPending: boolean;
 }>;
 
-/** A proof the node can name: the nonce it was signed at and the hash of its body. */
-type Named = Readonly<{ nonce: bigint | undefined; hash: string | undefined }>;
+/**
+ * A proof the node can name: the nonce it was signed at and the hash of its body. `own` marks the node's own committed
+ * state and the state its pending frame would commit.
+ */
+type Named = Readonly<{ nonce: bigint | undefined; hash: string | undefined; own?: "committed" | "pending" }>;
 
 const hashOf = (body: ProofBody): string | undefined => {
   const hash = proofBodyHash(body);
@@ -269,10 +276,11 @@ const proofsKnown = (terms: ProofTerms, facts: ChainFacts, account: EntityReplic
   return [
     { nonce: starting?.countered?.nonce, hash: starting?.countered?.bodyHash },
     { nonce: against?.nonce, hash: against?.bodyHash },
-    { nonce: proofNonce(facts, account.used), hash: stateHash(terms, account.state) },
+    { nonce: proofNonce(facts, account.used), hash: stateHash(terms, account.state), own: "committed" },
     {
       nonce: pending === undefined ? undefined : pending.frame.firstNonce + BigInt(pending.frame.slot) - 1n,
       hash: pending === undefined ? undefined : stateHash(terms, pending.after),
+      own: "pending",
     },
   ];
 };
@@ -292,11 +300,20 @@ const finalizedBy = (
   if (!inDispute(facts)) return undefined;
   const account = w.state.accounts.get(e.peer);
   const hash = e.finalBodyHash?.toLowerCase();
-  const paid = account === undefined || hash === undefined
-    ? undefined
-    : proofsKnown(terms, facts, account).find((proof) => proof.hash?.toLowerCase() === hash);
+  const matched = account === undefined || hash === undefined
+    ? []
+    : proofsKnown(terms, facts, account).filter((proof) => proof.hash?.toLowerCase() === hash);
+  // A pending frame whose state has the committed state's body adds nothing a proof holds (a quote is no clause until
+  // it is filled): the chain paid nothing of it, and it does not name the proof.
+  const ownsCommitted = matched.some((proof) => proof.own === "committed");
+  const ownsPending = matched.some((proof) => proof.own === "pending");
+  const neutral = ownsCommitted && ownsPending;
+  const named = neutral ? matched.filter((proof) => proof.own !== "pending") : matched;
+  const [nonce] = named.flatMap((proof) => (proof.nonce === undefined ? [] : [proof.nonce]))
+    .toSorted((x, y) => (x < y ? 1 : -1));
   return {
-    nonce: paid?.nonce, epoch: e.epoch, committed: proofNonce(facts, account?.used ?? 0),
+    nonce, epoch: e.epoch, committed: proofNonce(facts, account?.used ?? 0),
+    paidPending: !neutral && ownsPending,
     pending: account?.pending === undefined
       ? undefined
       : account.pending.frame.firstNonce + BigInt(account.pending.frame.slot) - 1n,
@@ -310,11 +327,13 @@ const finalizedBy = (
  * node counted. A frame of the node's own still pending that carries a payment, a lock, an offer or a fill the peer may
  * have committed before it heard of the dispute is not held by the proof either, and the rebase zeroes what it paid, so
  * the node is told which (`pending_rebased`): the frame stays pending and is sent again in the new epoch, where it
- * commits or comes back as `tx_refused`, so the owner waits and does not ask again. A frame at or below the finalized
- * nonce is held by the proof the chain paid by: not told. A finalize whose proof the node cannot name is told with the
- * finalized nonce unknown: the node does not guess whether its head was held. A settlement or a withdrawal moving the
- * epoch tells nothing. The offdelta the proof holds is not here: the node that lost something is not the one that
- * opened with the proof, so it holds none of its body, and the DisputeFinalized event carries only hashes
+ * commits or comes back as `tx_refused`, so the owner waits and does not ask again. A pending frame whose own body the
+ * chain paid by is paid: the owner is told so (`paid_on_chain`) and the frame is marked paid, so that it is never
+ * sealed again (it stays pending for the lineage the peer may have committed). A committed head at or below the
+ * finalized nonce is held by the proof the chain paid by: not told. A finalize whose proof the node cannot name is told
+ * with the finalized nonce unknown: the node does not guess whether its head was held. A settlement or a withdrawal
+ * moving the epoch tells nothing. The offdelta the proof holds is not here: the node that lost something is not the
+ * one that opened with the proof, so it holds none of its body, and the DisputeFinalized event carries only hashes
  * (Depository.sol 142-148); it is owed from the calldata of the start or the counter.
  */
 const lost = (head: bigint | undefined, paid: bigint | undefined): boolean =>
@@ -324,7 +343,7 @@ const SPENDING = new Set(["pay", "lock", "offer", "fill"]);
 
 const destroyed = (w: Work, peer: EntityId, account: EntityReplica, finalized: Finalized | undefined): Work => {
   if (finalized === undefined) return w;
-  const { committed, nonce, epoch, pending } = finalized;
+  const { committed, nonce, epoch, pending, paidPending } = finalized;
   const told = !lost(committed, nonce) || committed === undefined
     ? w
     : [...account.state.ledgers].reduce((acc, [token, l]) => noting(acc, {
@@ -332,7 +351,13 @@ const destroyed = (w: Work, peer: EntityId, account: EntityReplica, finalized: F
       finalizedNonce: nonce,
     }), w);
   const txs = account.pending?.frame.txs.filter((tx) => SPENDING.has(tx._tag)) ?? [];
-  return pending === undefined || !lost(pending, nonce) || txs.length === 0
+  if (pending === undefined || txs.length === 0) return told;
+  if (paidPending) {
+    return noting(told, {
+      _tag: "pending_rebased", peer, epoch, nonce: pending, finalizedNonce: nonce, txs, fate: "paid_on_chain",
+    });
+  }
+  return !lost(pending, nonce)
     ? told
     : noting(told, {
       _tag: "pending_rebased", peer, epoch, nonce: pending, finalizedNonce: nonce, txs, fate: "resent_in_new_epoch",

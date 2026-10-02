@@ -795,3 +795,29 @@ describe("account/frame what Review B of PR 85 found in round 2", () => {
     expect(accepted.replica.head).toBe(rightDone.replica.head);
   });
 });
+
+describe("account/frame R-DISPUTE-FREEZE a frame the chain paid by is not sent back with its txs", () => {
+  const paidOf = (r: AccountReplica): AccountReplica =>
+    ({ ...r, pending: { ...(r.pending ?? expect.unreachable("no pending frame")), paid: true } });
+  const sentLeft = proposing(credited.left, pay(10n));
+  const sentRight = proposing(credited.right, credit(500n));
+  const refusal = (r: AccountReplica): Msg<AccountTx> => ({
+    _tag: "refusal", hash: frameName(r.pending?.frame ?? expect.unreachable("no pending frame")), index: 0,
+    fault: STALE_ATTEMPT, mark: 0, floor: 0,
+  });
+
+  test("R-DISPUTE-FREEZE a refusal rolls a frame back with its txs, none of them when the chain paid by it", () => {
+    const back = receive(rules, sentLeft.replica, refusal(sentLeft.replica));
+    expect([back.replica.pending, back.replica.mempool]).toStrictEqual([undefined, [pay(10n)]]);
+    const paid = paidOf(sentLeft.replica);
+    const gone = receive(rules, paid, refusal(paid));
+    expect([gone.outcome._tag, gone.replica.pending, gone.replica.mempool])
+      .toStrictEqual(["rolled_back", undefined, []]);
+  });
+
+  test("R-DISPUTE-FREEZE the peer's frame committed over a paid pending frame takes none of its txs back", () => {
+    const over = receive(rules, paidOf(sentRight.replica), only(sentLeft.sent));
+    expect([over.outcome._tag, over.replica.pending, over.replica.mempool])
+      .toStrictEqual(["accepted_over_own", undefined, []]);
+  });
+});

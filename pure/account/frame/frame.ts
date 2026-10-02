@@ -106,7 +106,11 @@ export type Refused<Tx, F> = Readonly<{ tx: Tx; fault: F | PeerRefused | SignedC
  */
 type Declined<F> = Readonly<{ hash: FrameHash; attempt: number; index: number; fault: F }>;
 
-type Proposed<Tx, S> = Readonly<{ frame: Frame<Tx>; after: S; head: FrameHash }>;
+/**
+ * `paid` is set by the Entity when the chain has paid by the proof this frame would commit (R-DISPUTE-FREEZE): the
+ * frame stays pending, so the lineage the peer may have committed stays whole, but a rollback keeps none of its txs.
+ */
+type Proposed<Tx, S> = Readonly<{ frame: Frame<Tx>; after: S; head: FrameHash; paid?: true }>;
 
 /**
  * A frame this side proposed, whose proof it signed and sent, that no committed frame has superseded yet. The Account
@@ -257,9 +261,13 @@ const heard = <Tx, S, F>(
   r: Replica<Tx, S, F>, sent: readonly Msg<Tx>[], outcome: Outcome<F>,
 ): Heard<Tx, S, F> => ({ replica: r, sent, outcome });
 
+/** The txs of the pending frame that a rollback sends back: none when the chain has paid by the frame (`paid`). */
+const owed = <Tx, S, F>(r: Replica<Tx, S, F>): readonly Tx[] =>
+  r.pending?.paid === true ? [] : r.pending?.frame.txs ?? [];
+
 /** Rolls the pending frame back: its txs go ahead of the mempool, to be checked again at the next propose. */
 const withoutPending = <Tx, S, F>(r: Replica<Tx, S, F>): Replica<Tx, S, F> =>
-  ({ ...r, mempool: [...(r.pending?.frame.txs ?? []), ...r.mempool], pending: undefined });
+  ({ ...r, mempool: [...owed(r), ...r.mempool], pending: undefined });
 
 /**
  * Left's slots are an even number above the committed slot and Right's an odd one: both replicas hold the same
@@ -412,6 +420,9 @@ const onRefusal = <Tx, S, F>(
     return heard(r, NO_MESSAGES, { _tag: "refusal_ignored" });
   }
   const peerSigned = Math.max(r.peerSigned, floor);
+  if (pending.paid === true) {
+    return heard({ ...r, pending: undefined, attempt, peerSigned }, NO_MESSAGES, { _tag: "rolled_back" });
+  }
   // R-FRAME-EPOCH: the peer's view of the chain differs from the one the frame was sealed under, and mine still is that
   // one: the frame waits as it is, and the Host's resend sends the same bytes (the same slot, so no new proof is signed
   // for every try). If my own view has moved since, the frame is stale: it goes back and is sealed anew.

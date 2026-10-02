@@ -179,8 +179,9 @@ describe("runtime/chain R-LEDGER-REBASE an epoch advance zeroes the offdelta on 
       feed(feed(asked, ALICE, registered(BOB)), BOB, registered(ALICE)), 1n, counter.nonce, hashed(counter.body),
     );
     expect([rebasedTold(after, ALICE), rebasedTold(after, BOB)]).toEqual([[], []]);
-    // The frame alice still holds pending is the one the counter's proof holds: the chain paid it, so it is not told.
-    expect([pendingTold(after, ALICE), pendingTold(after, BOB)]).toEqual([[], []]);
+    // The frame alice still holds pending is the one the counter's proof holds: the chain paid it, and she is told so.
+    expect(pendingTold(after, ALICE)).toMatchObject([{ fate: "paid_on_chain", finalizedNonce: counter.nonce }]);
+    expect(pendingTold(after, BOB)).toStrictEqual([]);
   });
 
   test("R-DISPUTE-FREEZE an epoch a settlement or a withdrawal moves tells nothing, a repeat nothing more", () => {
@@ -256,12 +257,13 @@ describe("runtime/chain R-DISPUTE-FREEZE the finalized nonce is that of the proo
   const stale = startedAt(asked);
   const unknown = `0x${"ab".repeat(32)}`;
 
-  test("R-DISPUTE-FREEZE a finalize with a proof the starter signed pays by that proof: nothing is voided", () => {
+  test("R-DISPUTE-FREEZE a finalize with a proof the starter signed pays by that proof: told as paid", () => {
     // The peer finalizes at once with the newer proof Alice signed: the chain stores its nonce, no counter is logged.
     const signed = pendingHash(asked, ALICE);
     const after = moved(asked, 1n, stale + 1n, signed);
     expect([rebasedTold(after, ALICE), rebasedTold(after, BOB)]).toEqual([[], []]);
-    expect([pendingTold(after, ALICE), pendingTold(after, BOB)]).toEqual([[], []]);
+    expect(pendingTold(after, ALICE)).toMatchObject([{ peer: BOB, fate: "paid_on_chain", txs: [{ _tag: "pay" }] }]);
+    expect(pendingTold(after, BOB)).toStrictEqual([]);
   });
 
   test("R-DISPUTE-FREEZE a finalize with the opening proof pays by the opening nonce, not the stored one", () => {
@@ -276,18 +278,46 @@ describe("runtime/chain R-DISPUTE-FREEZE the finalized nonce is that of the proo
     const registered = feed(feed(asked, ALICE, counter(BOB)), BOB, counter(ALICE));
     const after = moved(registered, 1n, stale + 5n, unknown);
     expect([rebasedTold(after, ALICE), pendingTold(after, ALICE)]).toEqual([[], []]);
-    expect(pendingTold(moved(asked, 1n, stale + 5n, unknown), ALICE).map((n) => n.finalizedNonce)).toEqual([undefined]);
+    const unnamed = pendingTold(moved(asked, 1n, stale + 5n, unknown), ALICE);
+    expect(unnamed.map((n) => n.finalizedNonce)).toStrictEqual([undefined]);
+  });
+
+  test("R-DISPUTE-FREEZE a finalize with the registered counter names exactly the counter's nonce", () => {
+    const counter = (peer: EntityId): JEvent =>
+      ({ _tag: "j_countered", peer, nonce: stale + 1n, proposerIsLeft: false, bodyHash: unknown });
+    const registered = feed(feed(asked, ALICE, counter(BOB)), BOB, counter(ALICE));
+    const after = moved(registered, 1n, stale + 1n, unknown);
+    expect(pendingTold(after, ALICE).map((n) => n.finalizedNonce)).toStrictEqual([stale + 1n]);
+  });
+
+  test("R-DISPUTE-FREEZE a registered counter that holds the node's own head names exactly that nonce", () => {
+    const counter = (peer: EntityId): JEvent =>
+      ({ _tag: "j_countered", peer, nonce: stale, proposerIsLeft: false, bodyHash: openingHash(asked) });
+    const registered = feed(feed(asked, ALICE, counter(BOB)), BOB, counter(ALICE));
+    const after = moved(registered, 1n, stale, openingHash(asked));
+    expect(pendingTold(after, ALICE).map((n) => n.finalizedNonce)).toStrictEqual([stale]);
+  });
+
+  test("R-DISPUTE-FREEZE the hash the chain logged matches whatever case it is written in", () => {
+    const upper = (hash: string): string => `0x${hash.slice(2).toUpperCase()}`;
+    const named = moved(asked, 1n, stale + 1n, upper(openingHash(asked)));
+    expect(pendingTold(named, ALICE).map((n) => n.finalizedNonce)).toStrictEqual([stale]);
+    const counter = (peer: EntityId): JEvent =>
+      ({ _tag: "j_countered", peer, nonce: stale + 1n, proposerIsLeft: false, bodyHash: upper(unknown) });
+    const registered = feed(feed(asked, ALICE, counter(BOB)), BOB, counter(ALICE));
+    const after = moved(registered, 1n, stale + 1n, unknown);
+    expect(pendingTold(after, ALICE).map((n) => n.finalizedNonce)).toStrictEqual([stale + 1n]);
   });
 
   test("R-DISPUTE-FREEZE a finalize with a proof the node cannot name is told with the nonce unknown", () => {
     const after = moved(asked, 1n, stale + 1n, unknown);
-    expect(pendingTold(after, ALICE).map((n) => n.finalizedNonce)).toEqual([undefined]);
-    expect(rebasedTold(after, BOB).map((n) => n.finalizedNonce)).toEqual([undefined]);
+    expect(pendingTold(after, ALICE).map((n) => n.finalizedNonce)).toStrictEqual([undefined]);
+    expect(rebasedTold(after, BOB).map((n) => n.finalizedNonce)).toStrictEqual([undefined]);
   });
 
   test("R-DISPUTE-FREEZE a finalize that logged no body hash is told with the nonce unknown too", () => {
     const after = moved(asked, 1n, stale + 1n);
-    expect(pendingTold(after, ALICE).map((n) => n.finalizedNonce)).toEqual([undefined]);
+    expect(pendingTold(after, ALICE).map((n) => n.finalizedNonce)).toStrictEqual([undefined]);
   });
 
   test("R-DISPUTE-FREEZE the notice of a pending frame names its epoch, its nonce and that it is sent again", () => {
@@ -296,6 +326,56 @@ describe("runtime/chain R-DISPUTE-FREEZE the finalized nonce is that of the proo
       peer: BOB, epoch: 1n, finalizedNonce: stale, fate: "resent_in_new_epoch",
     }]);
     expect((pendingTold(after, ALICE)[0]?.nonce ?? 0n) > stale).toBe(true);
+  });
+
+  test("R-DISPUTE-FREEZE a pending frame the chain paid by is dropped, never sealed again: no double payment", () => {
+    // Alice pays 5; Bob never commits the frame but holds her signature, and finalizes with it at once.
+    const lost = disputed(frameLost(paid, ALICE, 5n));
+    const after = retried(moved(lost, 1n, startedAt(lost) + 1n, pendingHash(lost, ALICE)), ALICE);
+    expect(offdeltas(after)).toStrictEqual([0n, 0n]);
+    expect([replicaOf(after, ALICE).pending, replicaOf(after, ALICE).mempool]).toStrictEqual([undefined, []]);
+    expect(same(after)).toBe(true);
+    expect(pendingTold(after, ALICE)).toMatchObject([{ fate: "paid_on_chain", txs: [{ _tag: "pay" }] }]);
+    expect(noticesOf(after, ALICE).map((n) => n._tag)).toStrictEqual(["pending_rebased"]);
+    const next = settle(feed(after, ALICE, pay(BOB, 7n)));
+    expect([offdeltas(next), same(next)]).toStrictEqual([[-7n, -7n], true]);
+  });
+
+  test("R-DISPUTE-FREEZE the same holds whoever started the dispute: a payment the chain paid is paid once", () => {
+    [ALICE, BOB].forEach((starter) => {
+      const lost = disputedBy(frameLost(paid, ALICE, 5n), starter);
+      const after = retried(moved(lost, 1n, startedAt(lost) + 1n, pendingHash(lost, ALICE)), ALICE);
+      expect([starter, offdeltas(after), same(after)]).toStrictEqual([starter, [0n, 0n], true]);
+      expect([starter, replicaOf(after, ALICE).mempool]).toStrictEqual([starter, []]);
+      expect(pendingTold(after, ALICE).map((n) => n.fate)).toStrictEqual(["paid_on_chain"]);
+    });
+  });
+
+  test("R-DISPUTE-FREEZE a frame the chain paid by and the peer committed commits on the re-ack, paid once", () => {
+    const lost = disputed(ackLost(paid, ALICE, 5n));
+    const after = settle(resend(moved(lost, 1n, startedAt(lost) + 1n, pendingHash(lost, ALICE)), ALICE));
+    expect(replicaOf(after, ALICE).pending).toBeUndefined();
+    expect([offdeltas(after), same(after)]).toStrictEqual([[0n, 0n], true]);
+    expect(pendingTold(after, ALICE)).toMatchObject([{ fate: "paid_on_chain" }]);
+  });
+
+  test("R-DISPUTE-FREEZE a body several proofs share is named by the highest nonce among them", () => {
+    // Alice raises Bob's credit (not in a proof body) and Bob commits it; the chain finalizes with the opening proof.
+    const lost = disputed({ ...deliver(feed(paid, ALICE, credit(BOB, 50n))), inflight: [] });
+    const after = finalizedByStart(lost);
+    expect(rebasedTold(after, BOB)).toStrictEqual([]);
+    expect(pendingTold(after, ALICE)).toStrictEqual([]);
+  });
+
+  test("R-DISPUTE-FREEZE a finalize on an Account with no co-signed frame tells nothing and moves the epoch", () => {
+    const opens = (peer: EntityId): JEvent => ({
+      _tag: "j_dispute", peer, epoch: 0n, by: "right", nonce: 1n, timeout: 500n, proposerIsLeft: false,
+      bodyHash: `0x${"cd".repeat(32)}`,
+    });
+    const against = feed(feed(opened, ALICE, opens(BOB)), BOB, opens(ALICE));
+    const after = moved(against, 1n, 2n, `0x${"ef".repeat(32)}`);
+    expect([rebasedTold(after, ALICE), pendingTold(after, ALICE)]).toStrictEqual([[], []]);
+    expect(same(after)).toBe(true);
   });
 });
 
@@ -323,6 +403,9 @@ describe("runtime/chain R-DISPUTE-FREEZE only a frame that spends is told as voi
     const { want: give, give: want, deadline } = swap;
     const offer: Command = { _tag: "offer", peer: ALICE, id: holdId(5n), give, want, deadline };
     expect(told(swapping, BOB, offer)).toEqual([["offer"]]);
+    // A quote is no clause until it is filled: the proof the chain paid by does not hold it, so it is sent again.
+    const after = finalizedByStart(disputed(lostFrom(swapping, BOB, offer)));
+    expect(pendingTold(after, BOB).map((n) => n.fate)).toStrictEqual(["resent_in_new_epoch"]);
   });
 
   test("R-DISPUTE-FREEZE a pending fill is told like a payment", () => {
