@@ -100,11 +100,11 @@ describe("j/observe", () => {
 
   test("R-WATCH-TELL a finalize is a j_dispute_over for each hosted party; a counter only for its registrar", () => {
     expect(observe(eventsOf(finalized(4n, 0n)), [LEFT, RIGHT], accountsOf())).toEqual(ok([
-      toward(LEFT, { _tag: "j_dispute_over", peer: RIGHT }),
-      toward(RIGHT, { _tag: "j_dispute_over", peer: LEFT }),
+      toward(LEFT, { _tag: "j_dispute_over", peer: RIGHT, finalized: true }),
+      toward(RIGHT, { _tag: "j_dispute_over", peer: LEFT, finalized: true }),
     ]));
     expect(observe(eventsOf(countered(4n, 0n)), [LEFT, RIGHT], accountsOf())).toEqual(ok([
-      toward(LEFT, { _tag: "j_dispute_over", peer: RIGHT }),
+      toward(LEFT, { _tag: "j_dispute_over", peer: RIGHT, finalized: false }),
     ]));
   });
 

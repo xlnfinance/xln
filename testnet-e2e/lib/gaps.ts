@@ -33,8 +33,8 @@ const mentions = (dir: string, pattern: RegExp): boolean =>
 export const GAPS = {
   ledgerRebase: {
     id: "ledger-rebase", kind: "missing", layer: "Entity",
-    piece: "After a finalized dispute the Entity learns the new epoch (j_epoch) and that the dispute is over, but nothing rebases the Account: its ledger still says offdelta and collateral as they were, its frame counter is not reset to the new epoch's base, and the settlement fold into ondelta is not there.",
-    supplier: "the cut thread: settlement fold and epoch rebase, after multi-hop",
+    piece: "Landed (R-LEDGER-REBASE, pure/entity/frame.ts `rebasing`): after an epoch move the Entity restarts the Account's offdelta from zero, forgets the peer's signature over a head of the voided epoch, and a finalized dispute zeroes collateral and ondelta. No step stands in for it any more; the entry stays so the tripwire tests have a piece that has landed.",
+    supplier: "the builder thread: S10 rebase, after the dispute through the node",
     landed: () => mentions("entity", /rebased|rebaseLedger/) || mentions("account", /rebased|rebaseLedger/),
   },
   disputeWithClause: {

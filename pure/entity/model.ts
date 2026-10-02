@@ -127,7 +127,7 @@ export type JEvent =
   | Tagged<"j_epoch", { peer: EntityId; epoch: bigint; stored: bigint }>
   | Tagged<"j_dispute", { peer: EntityId; epoch: bigint; by: Side; nonce: bigint; timeout: bigint }>
   | Tagged<"j_window_over", { peer: EntityId }>
-  | Tagged<"j_dispute_over", { peer: EntityId }>
+  | Tagged<"j_dispute_over", { peer: EntityId; finalized: boolean }>
   | Tagged<"j_collateral", { peer: EntityId; token: TokenId; collateral: bigint; ondelta: bigint }>
   | Tagged<"j_op_lapsed", { peer: EntityId; serial: bigint }>;
 
