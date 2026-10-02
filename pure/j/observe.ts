@@ -38,7 +38,8 @@ export type JEvent =
   | Tagged<"j_window_over", { peer: Bytes32 }>
   | Tagged<"j_dispute_over", { peer: Bytes32 }>
   | Tagged<"j_collateral", { peer: Bytes32; token: TokenId; collateral: bigint; ondelta: bigint }>
-  | Tagged<"j_finalize_unread", { peer: Bytes32; tx: Bytes32 }>;
+  | Tagged<"j_finalize_unread", { peer: Bytes32; tx: Bytes32 }>
+  | Tagged<"j_start_unread", { peer: Bytes32; tx: Bytes32 }>;
 
 /** A secret the chain showed: no peer, every hosted Entity hears it. */
 export type Revealed = Tagged<"j_secret", { secret: Bytes32 }>;
@@ -144,13 +145,21 @@ const epochMoved = (events: readonly ChainEvent[], e: Moved, peer: Bytes32, at: 
     : err({ _tag: "reading_off", reading, logged: e.epoch, read });
 };
 
-const disputeStarted = (events: readonly ChainEvent[], e: Started, peer: Bytes32, at: AccountAt | undefined): Told =>
-  (at === undefined
-    ? err({ _tag: "no_reading", reading: readingOf(e) })
-    : ok([{
-      _tag: "j_dispute", peer, epoch: epochAt(events, e, at), by: startedBy(e), nonce: e.nonce, timeout: e.timeout,
-      proposerIsLeft: e.proposerIsLeft, bodyHash: e.bodyHash, ...(e.body === undefined ? {} : { body: e.body }),
-    }]));
+/**
+ * A dispute against the hosted Entity whose opening state the Host could not read (neither the input of the
+ * transaction nor a call trace of it) is told as unread after it: without the body the Entity cannot answer it by
+ * finalizing, so the owner is told (R-WATCH-CALLDATA). A start of the Entity's own needs no body.
+ */
+const disputeStarted = (
+  events: readonly ChainEvent[], e: Started, self: Bytes32, peer: Bytes32, at: AccountAt | undefined,
+): Told => {
+  if (at === undefined) return err({ _tag: "no_reading", reading: readingOf(e) });
+  const started: JEvent = {
+    _tag: "j_dispute", peer, epoch: epochAt(events, e, at), by: startedBy(e), nonce: e.nonce, timeout: e.timeout,
+    proposerIsLeft: e.proposerIsLeft, bodyHash: e.bodyHash, ...(e.body === undefined ? {} : { body: e.body }),
+  };
+  return ok(e.unread && e.sender !== self ? [started, { _tag: "j_start_unread", peer, tx: e.tx }] : [started]);
+};
 
 /** The dispute is over; and a finalize whose arguments the Host could not read says so (R-WATCH-CALLDATA). */
 const finalizedTold = (e: Finalized, peer: Bytes32): readonly JEvent[] => {
@@ -165,7 +174,7 @@ const eventFor = (
   const peer = peerOf(self, partiesOf(e));
   switch (e._tag) {
     case "epoch_advanced": return epochMoved(events, e, peer, at);
-    case "dispute_started": return disputeStarted(events, e, peer, at);
+    case "dispute_started": return disputeStarted(events, e, self, peer, at);
     case "dispute_countered":
       return ok([
         { _tag: "j_countered", peer, nonce: e.nonce, proposerIsLeft: e.proposerIsLeft, bodyHash: e.bodyHash },

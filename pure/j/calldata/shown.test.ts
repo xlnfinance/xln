@@ -92,8 +92,8 @@ describe("j/shown", () => {
   });
 
   const HASH = must(proofBodyHash(CLAUSED));
-  const opened = (inputs: ReadonlyMap<Bytes32, readonly Carried[]>) =>
-    must(observe(withCalldata(preparedOf(started(2n, 0n, [], HASH)), inputs).events, [LEFT], accounts));
+  const opened = (inputs: ReadonlyMap<Bytes32, readonly Carried[]>, hosted = LEFT) =>
+    must(observe(withCalldata(preparedOf(started(2n, 0n, [], HASH)), inputs).events, [hosted], accounts));
   const START_TX = txOf(2n, 0n);
 
   test("R-WATCH-CALLDATA the body a start carried is told with the dispute, read from its transaction's input", () => {
@@ -102,14 +102,20 @@ describe("j/shown", () => {
     expect(told[0]?.event).toMatchObject({ _tag: "j_dispute", bodyHash: HASH, body: CLAUSED });
   });
 
-  test("R-WATCH-CALLDATA a start whose input has no op with the logged hash is told with no body", () => {
+  test("R-WATCH-CALLDATA a start whose input has no op with the logged hash is told with no body, and unread", () => {
     const lying = startInput(RIGHT, [startOp(CLAUSED, { proofbodyHash: hexOf(77n) })]);
     const wrapped = patched(startInput(RIGHT, [startOp(CLAUSED)]), 0, Uint8Array.of(0xca, 0xfe, 0xba, 0xbe));
     [new Map(), new Map([[START_TX, [direct(lying)]]]), new Map([[START_TX, [direct(wrapped)]]])].forEach((inputs) => {
       const told = opened(inputs);
-      expect(told.map((a) => a.event._tag)).toEqual(["j_dispute"]);
+      expect(told.map((a) => a.event._tag)).toEqual(["j_dispute", "j_start_unread"]);
       expect(told[0]?.event).not.toHaveProperty("body");
+      expect(told[1]).toEqual(toward(LEFT, { _tag: "j_start_unread", peer: RIGHT, tx: START_TX }));
     });
+  });
+
+  test("R-WATCH-CALLDATA a start of the hosted Entity's own that cannot be read is no notice: it needs no body", () => {
+    const told = opened(new Map(), RIGHT);
+    expect(told.map((a) => a.event._tag)).toEqual(["j_dispute"]);
   });
 
   test("R-WATCH-CALLDATA a finalize whose input cannot be read is told to its parties and shows no secret", () => {

@@ -163,14 +163,21 @@ type Call = Readonly<{ kind: "batch" | "tower"; args: Uint8Array; route: Route }
 const MOST_OPS = 64;
 const SELECTOR_BYTES = 4;
 
-const startsWith = (input: Uint8Array, prefix: Uint8Array): boolean => prefix.every((b, i) => input[i] === b);
+const KINDS = [{ kind: "batch", selector: PROCESS_BATCH }, { kind: "tower", selector: TOWER_COUNTER }] as const;
 
-const callAt = (input: Uint8Array, at: number, route: Route): readonly Call[] => {
-  const from = input.subarray(at);
-  const args = from.subarray(SELECTOR_BYTES);
-  if (startsWith(from, PROCESS_BATCH)) return [{ kind: "batch", args, route }];
-  return startsWith(from, TOWER_COUNTER) ? [{ kind: "tower", args, route }] : [];
-};
+const callAt = (input: Uint8Array, at: number, route: Route): readonly Call[] =>
+  KINDS.filter(({ selector }) => selector.every((b, i) => input[at + i] === b))
+    .map(({ kind }) => ({ kind, args: input.subarray(at + SELECTOR_BYTES), route }));
+
+/**
+ * The offsets of an input that can begin a call, by their first byte alone: the scan of a megabyte slices and
+ * allocates nothing for the offsets that cannot, and `callAt` compares the four bytes of the others.
+ */
+const candidates = (input: Uint8Array): readonly number[] =>
+  Array.from(
+    input.subarray(0, Math.max(0, input.length - SELECTOR_BYTES + 1)),
+    (b, at) => (KINDS.some(({ selector }) => selector[0] === b) ? at : -1),
+  ).filter((at) => at >= 0);
 
 /**
  * Every call in an input, as its arguments after the selector. A transaction to the Depository is the one call its
@@ -178,11 +185,20 @@ const callAt = (input: Uint8Array, at: number, route: Route): readonly Call[] =>
  * transaction to another contract is scanned at every offset for the calls a wrapper carries in its own arguments (an
  * ABI wrapper places one on a word, a packed one does not), within the scan's budget: a longer input has none.
  */
-const callsIn = ({ data, route }: Carried): readonly Call[] => {
+const scan = ({ data, route }: Carried): readonly Call[] => {
   if (route === "direct") return callAt(data, 0, route);
-  return data.length > MOST_SCAN_BYTES
-    ? []
-    : Array.from({ length: Math.max(0, data.length - SELECTOR_BYTES + 1) }, (_, at) => callAt(data, at, route)).flat();
+  return data.length > MOST_SCAN_BYTES ? [] : candidates(data).flatMap((at) => callAt(data, at, route));
+};
+
+/** What the scan of an input found, kept for the input's life: a poll reads each transaction's bytes once, however many logs name it. */
+const scanned = new WeakMap<Carried, readonly Call[]>();
+
+const callsIn = (carried: Carried): readonly Call[] => {
+  const known = scanned.get(carried);
+  if (known !== undefined) return known;
+  const calls = scan(carried);
+  scanned.set(carried, calls);
+  return calls;
 };
 
 /** A finalize or a start op in an input, and where it lies: one op is read once however many offsets reach it. */

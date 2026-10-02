@@ -121,12 +121,11 @@ export const withCalldata = (p: Prepared, inputs: ReadonlyMap<Bytes32, readonly 
   events: p.events.map((e): ChainEvent => {
     if (e._tag === "dispute_started") {
       const body = (inputs.get(e.tx) ?? []).flatMap((input) => startedBody(input, e.bodyHash) ?? []).at(0);
-      return { ...e, body };
+      return { ...e, body, unread: body === undefined };
     }
     if (e._tag !== "dispute_finalized") return e;
-    const found = (inputs.get(e.tx) ?? []).flatMap((input) => finalizedSecrets(input, e.evidence) ?? []);
-    const read = (inputs.get(e.tx) ?? []).some((input) => finalizedSecrets(input, e.evidence) !== undefined);
-    return { ...e, shown: read ? { _tag: "read", secrets: [...new Set(found)] } : { _tag: "unread" } };
+    const read = (inputs.get(e.tx) ?? []).map((input) => finalizedSecrets(input, e.evidence)).filter((r) => r !== undefined);
+    return { ...e, shown: read.length > 0 ? { _tag: "read", secrets: [...new Set(read.flat())] } : { _tag: "unread" } };
   }),
 });
 

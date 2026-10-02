@@ -25,7 +25,7 @@ import {
   accepted, closed, dialed, line, linked, route, startMesh, wanted, type ConnId, type Mesh, type Refused, type Write,
 } from "../mesh/mesh.ts";
 import {
-  beginAt, poll, windowsOf, type BadPeer, type BadSecret, type Delivery, type JFault, type WatchConfig,
+  beginAt, poll, windowsOf, type BadPeer, type BadSecret, type Delivery, type JFault, type Tries, type WatchConfig,
 } from "../watch/loop.ts";
 import type { PortFault } from "../submit/chain.ts";
 import { dialTcp, type Listener, type SocketFault, type Wire } from "./link/socket.ts";
@@ -109,8 +109,13 @@ type State = Readonly<{
   fatal: NodeFault | undefined;
   cursor: Watch | undefined;
   watchFault: string | undefined;
+  /** The tries the J loop has spent on transactions the node could not give (it gives up on one past MOST_TRIES). */
+  tries: Tries;
   timer: ReturnType<typeof setTimeout> | undefined;
 }>;
+
+/** REACT = 2 * lag: what a hub's onward deadline is ahead of its inbound one at least (R-HTLC-FORWARD). */
+const REACT_PER_LAG = 2n;
 
 const RECENT = 64;
 
@@ -259,8 +264,16 @@ const cursorOf = (watch: WatchConfig, state: State): Promise<Result<Watch, JFaul
     : Promise.resolve(ok(state.cursor)));
 
 /** A fault of the node's reads of the chain is tried again at the next tick; one of the watcher's checks is final. */
-const heldUp = (state: State, fault: JFault): State =>
-  (fault._tag === "port" ? { ...state, watchFault: `${fault.call}: ${fault.reason}` } : { ...state, fatal: fault });
+const heldUp = (state: State, fault: JFault): State => {
+  if (fault._tag === "stalled") {
+    const watchFault = `${fault.fault.call}: ${fault.fault.reason}`;
+    const begun: readonly HostNotice[] = state.watchFault === watchFault
+      ? []
+      : [{ _tag: "watch_stalled", tx: fault.tx, reason: fault.fault.reason }];
+    return { ...state, watchFault, tries: fault.tries, notices: recent([...state.notices, ...begun]) };
+  }
+  return fault._tag === "port" ? { ...state, watchFault: `${fault.call}: ${fault.reason}` } : { ...state, fatal: fault };
+};
 
 /** The events are in the WAL before the height is; the cursor moves only after the height's row (R-HEIGHT-ORDER). */
 const delivered = async (rig: Rig, state: State, delivery: Delivery): Promise<State> => {
@@ -270,7 +283,7 @@ const delivered = async (rig: Rig, state: State, delivery: Delivery): Promise<St
   if (first.fatal !== undefined) return first;
   const height = { ...first.station, host: heard(first.station.host, delivery.height) };
   const second = await concluded(rig, first, await drain(shell, height));
-  return second.fatal === undefined ? { ...second, cursor: delivery.watch } : second;
+  return second.fatal === undefined ? { ...second, cursor: delivery.watch, tries: delivery.tries } : second;
 };
 
 const listening = async (rig: Rig, state: State): Promise<State> => {
@@ -282,7 +295,8 @@ const listening = async (rig: Rig, state: State): Promise<State> => {
   const chain = state.station.host.runtime.entities.get(rig.self)?.chain ?? new Map();
   const windows = windowsOf(watch.hosted, chain);
   if (!windows.ok) return heldUp(next, windows.error);
-  const got = await poll(watch.port, cursor.value, watch.hosted, windows.value);
+  const patience = { tries: state.tries, react: REACT_PER_LAG * rig.config.boot.setup.clock.lag };
+  const got = await poll(watch.port, cursor.value, watch.hosted, windows.value, patience);
   if (!got.ok) return heldUp(next, got.error);
   const quiet = { ...next, watchFault: undefined };
   return got.value === undefined ? quiet : delivered(rig, quiet, got.value);
@@ -387,7 +401,7 @@ export const startDaemon = async (
   const first: State = {
     station: started.value.station, mesh: startMesh(config.key, config.table), wires: new Map(), next: 1,
     dialing: new Set(), stalled: new Map(), counts: { sent: 0, heard: 0, dropped: 0 }, notices: [], refused: [],
-    fatal: undefined, cursor: undefined, watchFault: undefined, timer: undefined,
+    fatal: undefined, cursor: undefined, watchFault: undefined, tries: new Map(), timer: undefined,
   };
   const finished = leaving(rig, first, started.value.sent)
     .then((state) => run(rig, mails, state)).then((state) => ended(rig, state));

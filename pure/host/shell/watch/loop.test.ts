@@ -23,7 +23,7 @@ import { callsOf } from "../fixtures.ts";
 import type { PortFault } from "../submit/chain.ts";
 import { watchPort } from "../evm/watch.ts";
 import type { Rpc, RpcFault } from "../evm/port.ts";
-import { beginAt, poll, windowsOf, type WatchConfig, type WatchPort } from "./loop.ts";
+import { beginAt, MOST_TRIES, poll, windowsOf, type Tries, type WatchConfig, type WatchPort } from "./loop.ts";
 
 const LEFT = entityOf(0x11n);
 const RIGHT = entityOf(0x52n);
@@ -92,6 +92,19 @@ const start = (depth: bigint, from: Block = blockOf(0n)) => must(watching(DEPLOY
 const peer = (id: typeof RIGHT): EntityId => unwrapOr(entityId(id), () => expect.unreachable("peer"));
 
 describe("host/shell/watch the J loop's poll", () => {
+  /** The result of the `polls`th poll in a row, each from the cursor the last delivered and with the tries it spent. */
+  const triedOn = async (port: WatchPort, polls: number) => {
+    let watch = start(2n);
+    let tries: Tries = new Map();
+    let last: Awaited<ReturnType<typeof poll>> = ok(undefined);
+    for (let i = 0; i < polls; i += 1) {
+      last = await poll(port, watch, LEFT, [], { tries, react: undefined });
+      if (last.ok && last.value !== undefined) ({ watch, tries } = last.value);
+      else if (!last.ok && last.error._tag === "stalled") tries = last.error.tries;
+    }
+    return last;
+  };
+
   test("R-JLOOP a poll reads the final blocks, their logs and readings, and delivers events and height", async () => {
     const at = logPath();
     const got = await poll(portOf(straight(6n, [advanced(2n, 0n, 1n)]), at), start(2n), LEFT);
@@ -219,7 +232,6 @@ describe("host/shell/watch the J loop's poll", () => {
     const replies: ReadonlyArray<Result<unknown, RpcFault>> = [
       ok("0x"), ok({ to: DEPOSITORY, input: "0x12", calls: "none" }),
       refuse("Unsupported method (JSON-RPC code -32000)"), refuse("nope (JSON-RPC code -32601)"),
-      refuse("response size exceeded the limit"),
     ];
     const bytes = Uint8Array.from({ length: 32 }, (_, i) => (i === 31 ? 10 : 0));
     const secret: EntityInput = { _tag: "j_secret", secret: bytes };
@@ -263,12 +275,13 @@ describe("host/shell/watch the J loop's poll", () => {
     expect(first.ok ? first.value?.events.map((e) => e._tag) : first).toEqual(["j_epoch"]);
   });
 
-  test("R-WATCH-CALLDATA a transaction of an old block the node does not know is told unread, no stall", async () => {
+  test("R-WATCH-CALLDATA a tx of an old block the node does not know costs tries as any fault, then it is told unread", async () => {
     const at = logPath();
     const { tx, logs } = finalizing();
-    const got = await poll(portOf(straight(400n, logs), at, "unknown"), start(2n), LEFT);
-    const unread: EntityInput = { _tag: "j_finalize_unread", peer: peer(RIGHT), tx };
-    expect(got.ok ? got.value?.events : got).toEqual([EPOCH, OVER, unread]);
+    const port = portOf(straight(400n, logs), at, "unknown");
+    const first = await poll(port, start(2n), LEFT);
+    expect(first.ok ? first.value?.events : first).toEqual([]);
+    expect(await triedOn(port, MOST_TRIES + 1)).toMatchObject({ ok: true, value: { events: [EPOCH, OVER, { _tag: "j_finalize_unread", tx }] } });
     expect(callsOf(at).some((c) => c.startsWith("trace"))).toBe(false);
   });
 
@@ -312,7 +325,57 @@ describe("host/shell/watch the J loop's poll", () => {
     const op = finalizeOp();
     const at1 = [logOf("AccountEpochAdvanced", { left: LEFT, right: RIGHT, ondeltaEpoch: 1n }, 1n, 0n),
       finalizedOf(op, 1n, 1n)];
-    expect(await poll(portOf(straight(6n, at1), logPath(), "input"), start(2n), LEFT)).toEqual(err(DOWN));
+    const stalled = { _tag: "stalled", tx: txOf(1n, 1n), fault: DOWN, tries: new Map([[txOf(1n, 1n), 1]]) } as const;
+    expect(await poll(portOf(straight(6n, at1), logPath(), "input"), start(2n), LEFT)).toEqual(err(stalled));
+  });
+
+  test("R-WATCH-CALLDATA a tx the node keeps failing is tried MOST_TRIES polls, then told unread, and the rest follows", async () => {
+    const later = logOf("SecretRevealed", { hashlock: hexOf(7n), revealer: RIGHT, secret: hexOf(8n) }, 4n, 0n);
+    const { tx, logs } = finalizing();
+    const port = portOf(straight(8n, [...logs, later]), logPath(), "input");
+    const tried = await triedOn(port, MOST_TRIES);
+    expect(tried).toEqual(err({ _tag: "stalled", tx, fault: DOWN, tries: new Map([[tx, MOST_TRIES]]) } as const));
+    const spent = await triedOn(port, MOST_TRIES + 1);
+    const unread: EntityInput = { _tag: "j_finalize_unread", peer: peer(RIGHT), tx };
+    expect(spent.ok ? spent.value?.events : spent).toEqual([EPOCH, OVER, unread, { _tag: "j_secret", secret: SECRET_BYTES }]);
+    expect(spent.ok ? spent.value?.tries : spent).toEqual(new Map([[tx, MOST_TRIES + 1]]));
+  });
+
+  test("R-WATCH-CALLDATA the tries of a tx the node gives again are forgotten, and the tries of a fault of the head are none", async () => {
+    const { tx, logs } = finalizing();
+    const inputs = new Map([[tx, finalizeInput(RIGHT, [finalizing().op])]]);
+    const before = new Map([[tx, MOST_TRIES]]);
+    const got = await poll(portOf(straight(6n, logs), logPath(), -1n, inputs), start(2n), LEFT, [], { tries: before, react: undefined });
+    expect(got.ok ? got.value?.tries : got).toEqual(new Map());
+    expect(got.ok ? got.value?.events : got).toEqual(TOLD);
+    const down = { ...portOf(straight(6n, logs), logPath()), head: () => Promise.resolve(err(DOWN)) };
+    expect(await poll(down, start(2n), LEFT, [], { tries: before, react: undefined })).toEqual(err(DOWN));
+  });
+
+  test("R-WATCH-CALLDATA a tx the node fails past REACT blocks after it was final is told unread, with tries to spare", async () => {
+    const { tx, logs } = finalizing();
+    const port = portOf(straight(30n, logs), logPath(), "input");
+    const patient = { tries: new Map([[tx, 2]]), react: 100n };
+    const held = await poll(port, start(2n, blockOf(1n)), LEFT, [], patient);
+    expect(held).toEqual(err({ _tag: "stalled", tx, fault: DOWN, tries: new Map([[tx, 3]]) } as const));
+    const once = await poll(port, start(2n, blockOf(1n)), LEFT, [], { tries: new Map(), react: 10n });
+    expect(once).toMatchObject({ ok: false, error: { _tag: "stalled" } });
+    const aged = await poll(port, start(2n, blockOf(1n)), LEFT, [], { ...patient, react: 10n });
+    const unread: EntityInput = { _tag: "j_finalize_unread", peer: peer(RIGHT), tx };
+    expect(aged.ok ? aged.value?.events : aged).toEqual([EPOCH, OVER, unread]);
+    const edge = await poll(port, start(2n, blockOf(1n)), LEFT, [], { ...patient, react: 26n });
+    expect(edge).toMatchObject({ ok: false, error: { _tag: "stalled" } });
+  });
+
+  test("R-WATCH-CALLDATA a trace the node keeps failing for one tx costs it tries as well, then it is told unread", async () => {
+    const { tx, logs } = finalizing();
+    const hidden = new Map([[tx, Uint8Array.of(0xca, 0xfe, 0xba, 0xbe, 1, 2, 3, 4)]]);
+    const port = portOf(straight(6n, logs), logPath(), -1n, hidden, new Map([[tx, "down"]]));
+    const tried = await triedOn(port, MOST_TRIES);
+    expect(tried).toEqual(err({ _tag: "stalled", tx, fault: DOWN, tries: new Map([[tx, MOST_TRIES]]) } as const));
+    const unread: EntityInput = { _tag: "j_finalize_unread", peer: peer(RIGHT), tx };
+    const spent = await triedOn(port, MOST_TRIES + 1);
+    expect(spent.ok ? spent.value?.events : spent).toEqual([EPOCH, OVER, unread]);
   });
 
   test("R-JLOOP a block not buried yet is not read: nothing is delivered, nothing is asked past the head", async () => {

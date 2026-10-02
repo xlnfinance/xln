@@ -153,7 +153,7 @@ describe("j/log", () => {
     expect(decodeLogs(DEPLOYED, [started, countered, finalized])).toEqual(ok([
       {
         _tag: "dispute_started", ...fact, proposerIsLeft: true, bodyHash: bodyHashOf(1n), timeout: 5n, index: 0n,
-        secrets: [], tx: txOf(3n, 0n), body: undefined,
+        secrets: [], tx: txOf(3n, 0n), body: undefined, unread: false,
       },
       { _tag: "dispute_countered", ...fact, proposerIsLeft: false, bodyHash: bodyHashOf(4n), index: 1n },
       {

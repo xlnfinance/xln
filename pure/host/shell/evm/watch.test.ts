@@ -134,23 +134,55 @@ describe("host/shell/evm/watch the J loop's reads of the chain", () => {
       .toEqual(err({ _tag: "port", call: "watch trace", reason: "connection refused" }));
   });
 
-  test("R-WATCH-CALLDATA the boot probe traces a call at the head: only a missing method is none", async () => {
-    const refuses = (reason: string) => portOf({ debug_traceCall: () => err({ _tag: "rpc", reason }) });
-    expect(await portOf({ debug_traceCall: () => ok({ type: "CALL" }) }).traced()).toEqual(ok(true));
+  test("R-WATCH-CALLDATA the boot probe traces a transaction of a recent block: only a missing method is none", async () => {
+    const chain = {
+      eth_blockNumber: () => ok("0x5"),
+      eth_getBlockByNumber: ([n]: readonly unknown[]) => ok({ transactions: n === "0x4" ? [txOf(4n, 1n)] : [] }),
+    };
+    const log = logPath();
+    expect(await portOf({ ...chain, debug_traceTransaction: () => ok({ type: "CALL" }) }, log).traced()).toEqual(ok(true));
+    expect(askedOf(log).filter((l) => l.startsWith("debug_traceTransaction")))
+      .toEqual([`debug_traceTransaction ["${txOf(4n, 1n)}",{"tracer":"callTracer"}]`]);
+    const refuses = (reason: string) => portOf({ ...chain, debug_traceTransaction: () => err({ _tag: "rpc", reason }) });
     expect(await refuses("Method not found (JSON-RPC code -32601)").traced()).toEqual(ok(false));
     expect(await refuses("Unsupported method").traced()).toEqual(ok(false));
     expect(await refuses("connection refused").traced())
       .toEqual(err({ _tag: "port", call: "watch trace probe", reason: "connection refused" }));
   });
 
-  test("R-WATCH-CALLDATA a trace that is not a tree of calls is no trace; the provider's refusals too", async () => {
+  test("R-WATCH-CALLDATA the boot probe: a node that traces calls but not transactions is none", async () => {
+    const node = {
+      eth_blockNumber: () => ok("0x2"), eth_getBlockByNumber: () => ok({ transactions: [txOf(2n, 0n)] }),
+      debug_traceCall: () => ok({ type: "CALL" }),
+      debug_traceTransaction: () => err({ _tag: "rpc", reason: "Method not found (JSON-RPC code -32601)" } as const),
+    };
+    expect(await portOf(node).traced()).toEqual(ok(false));
+  });
+
+  test("R-WATCH-CALLDATA the boot probe with no transaction in the recent blocks traces a call at the head", async () => {
+    const empty = { eth_blockNumber: () => ok("0x30"), eth_getBlockByNumber: () => ok({ transactions: [] }) };
+    const log = logPath();
+    expect(await portOf({ ...empty, debug_traceCall: () => ok({ type: "CALL" }) }, log).traced()).toEqual(ok(true));
+    expect(askedOf(log).filter((l) => l.startsWith("eth_getBlockByNumber"))).toHaveLength(16);
+    const none = portOf({ ...empty, debug_traceCall: () => err({ _tag: "rpc", reason: "Method not found" }) });
+    expect(await none.traced()).toEqual(ok(false));
+  });
+
+  test("R-WATCH-CALLDATA a trace that is not a tree of calls is no trace; only a missing method is, of what a node says", async () => {
     const asked = (reply: unknown) => portOf({ debug_traceTransaction: () => ok(reply) }).trace(txOf(3n, 1n));
     const refuses = (reason: string) => portOf({ debug_traceTransaction: () => err({ _tag: "rpc", reason }) });
     const replies = [null, "0x", { to: ADDRESS, input: "0x12", calls: "none" }, { to: ADDRESS }];
     const answers = await Promise.all(replies.map(asked));
     answers.forEach((got) => expect(got).toEqual(ok(undefined)));
-    expect(await refuses("response size exceeded").trace(txOf(3n, 1n))).toEqual(ok(undefined));
-    expect(await refuses("execution timeout").trace(txOf(3n, 1n))).toMatchObject({ ok: false });
+    const method = "the method debug_traceTransaction does not exist/is not available";
+    const missing = [method, "Method not found", "Unsupported method", "method not supported", "(JSON-RPC code -32601)"];
+    const gone = await Promise.all(missing.map((reason) => refuses(reason).trace(txOf(3n, 1n))));
+    gone.forEach((got) => expect(got).toEqual(ok(undefined)));
+    const clears = ["response size exceeded", "execution timeout", "service is not available", "missing trie node",
+      "unsupported block range", "unsupported media type",
+      "required historical state unavailable (reexec=128)", "trace limit reached"];
+    const faults = await Promise.all(clears.map((reason) => refuses(reason).trace(txOf(3n, 1n))));
+    faults.forEach((got) => expect(got).toMatchObject({ ok: false, error: { _tag: "port", call: "watch trace" } }));
   });
 
   test("R-WATCH-CALLDATA a trace is read at any depth or size the EVM allows, the finalize last", async () => {

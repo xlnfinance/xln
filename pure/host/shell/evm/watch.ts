@@ -98,13 +98,14 @@ const callsOf = (depository: Address) => (raw: unknown): Result<readonly Carried
   });
 
 /**
- * What a node says of a trace it does not give: the method is missing (JSON-RPC code -32601, or text saying it is
- * unsupported or not available) or the provider refuses or cuts the trace (too big for its limits). Neither is a fault
- * of the call that a retry would clear, so the port says there is no trace.
+ * What a node says when it has no such method: JSON-RPC code -32601, or the texts of the clients that give none
+ * (`Method not found`, geth's `the method debug_traceTransaction does not exist/is not available`, `Unsupported
+ * method`, `method not supported`). Nothing else is taken for it: an error that merely says something is not available,
+ * too big or timed out may clear, and is the node's fault for the retry budget to bound (a trace the node never gives
+ * costs its tries, then the finalize is told unread).
  */
 const NO_METHOD = new RegExp(
-  "-32601|\\bunsupported\\b|\\bmethod\\b.*\\b(not found|does not exist|not available|not supported)\\b|is not available"
-  + "|\\b(response|result|trace)\\b.*\\b(too (big|large)|exceed|limit)|\\btracing\\b.*\\b(disabled|not enabled)",
+  "-32601|\\bmethod not found\\b|\\bthe method \\S+ does not exist\\b|\\bunsupported method\\b|\\bmethod not supported\\b",
   "i",
 );
 
@@ -119,6 +120,27 @@ const accountCalls = (left: Bytes32, right: Bytes32): Result<Readonly<{ row: str
 /** The first word of the row `_accounts` returns is its `nonce`. */
 const nonceOf = (raw: unknown): Result<bigint, ReplyFault> =>
   flatMap(wordsOf(raw), ([nonce]) => (nonce === undefined ? err(bad("an empty Account row")) : ok(nonce)));
+
+const TRACER = { tracer: "callTracer" };
+
+/** The blocks at the head that the probe looks through for a transaction to trace. */
+const PROBE_BLOCKS = 16n;
+
+/** The first transaction of the newest of `left` blocks, from block `at` down, that holds one, if any does. */
+const txFrom = async (
+  reads: ReturnType<typeof readsOf>, at: bigint, left: bigint,
+): Promise<Result<Bytes32 | undefined, PortFault>> => {
+  if (left === 0n || at < 0n) return ok(undefined);
+  const block = await reads.read("watch trace probe", "eth_getBlockByNumber", [hexQuantity(at), false], (raw) =>
+    flatMap(fieldsOf(raw), (o) => (Array.isArray(o["transactions"]) ? listOf(o["transactions"], hash32) : ok([]))));
+  if (!block.ok) return block;
+  return block.value[0] === undefined ? txFrom(reads, at - 1n, left - 1n) : ok(block.value[0]);
+};
+
+const recentTx = async (reads: ReturnType<typeof readsOf>): Promise<Result<Bytes32 | undefined, PortFault>> => {
+  const head = await reads.read("watch trace probe", "eth_blockNumber", [], quantity);
+  return head.ok ? txFrom(reads, head.value, PROBE_BLOCKS) : head;
+};
 
 export const watchPort = (rpc: Rpc, deployed: Deployed): WatchPort => {
   const { depository, transformer } = deployed;
@@ -141,22 +163,26 @@ export const watchPort = (rpc: Rpc, deployed: Deployed): WatchPort => {
           : err(bad("a log that is not the one asked for")))));
     },
     input: (tx) => reads.read("watch tx", "eth_getTransactionByHash", [tx], inputOf(depository)),
-    // A fault of the node (it is down, it errs) may clear and stalls the delivery; a node with no call trace, or a
-    // trace the transaction itself makes unreadable (too big, too deep, not a tree), never clears: no trace, and the
-    // finalize is told unread, so one counterparty's transaction cannot blind the watcher.
+    // A fault of the node (it is down, it errs, it is too busy or the trace too big for it) may clear and stalls the
+    // delivery, which the Host's retry budget bounds; a node with no such method, or a trace the transaction itself
+    // makes unreadable (too deep, not a tree), never clears: no trace, and the finalize is told unread, so one
+    // counterparty's transaction cannot blind the watcher.
     trace: async (tx) => {
-      const asked = await reads.ask("watch trace", "debug_traceTransaction", [tx, { tracer: "callTracer" }]);
+      const asked = await reads.ask("watch trace", "debug_traceTransaction", [tx, TRACER]);
       if (!asked.ok) return NO_METHOD.test(asked.error.reason) ? ok(undefined) : asked;
       const calls = callsOf(depository)(asked.value);
       return ok(calls.ok ? calls.value : undefined);
     },
-    // The probe traces a call of the Depository at the head (`debug_traceCall`, of the same namespace and tracer as the
-    // trace of a transaction, and needing no transaction: on a fork a transaction of the fork's past is the upstream's
-    // to trace). A node that runs it answers with the frame, one that does not says the method is missing, and any
-    // other answer is the node's fault.
+    // The probe traces a transaction a recent block holds, with the tracer the trace of a finalize is read with: a node
+    // that runs it answers with the frame, one that does not says the method is missing (any other answer is the node's
+    // fault). On a fork the transaction must be one mined after the fork point, which the head's own blocks hold; when
+    // no recent block holds one, a call at the head (`debug_traceCall`, the same namespace and tracer) is traced instead.
     traced: async () => {
-      const call = { to: depository, data: "0x" };
-      const asked = await reads.ask("watch trace probe", "debug_traceCall", [call, "latest", { tracer: "callTracer" }]);
+      const found = await recentTx(reads);
+      if (!found.ok) return found;
+      const asked = found.value === undefined
+        ? await reads.ask("watch trace probe", "debug_traceCall", [{ to: depository, data: "0x" }, "latest", TRACER])
+        : await reads.ask("watch trace probe", "debug_traceTransaction", [found.value, TRACER]);
       if (asked.ok) return ok(true);
       return NO_METHOD.test(asked.error.reason) ? ok(false) : asked;
     },

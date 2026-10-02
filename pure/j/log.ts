@@ -57,7 +57,9 @@ export type ChainEvent =
   | Tagged<"account_settled", Place & { left: Bytes32; right: Bytes32; holdings: readonly Holding[] }>
   | Tagged<
     "dispute_started",
-    Dispute & Proof & { timeout: bigint; secrets: readonly Bytes32[]; tx: Bytes32; body: ProofBody | undefined }
+    Dispute & Proof & {
+      timeout: bigint; secrets: readonly Bytes32[]; tx: Bytes32; body: ProofBody | undefined; unread: boolean;
+    }
   >
   | Tagged<"dispute_countered", Dispute & Proof>
   | Tagged<"dispute_finalized", Dispute & { bodyHash: Bytes32; evidence: Bytes32; tx: Bytes32; shown: Shown }>
@@ -163,7 +165,7 @@ const startedRead: Reader = (at, topics, data, tx) =>
   (four(topics) && holdsWords(data, (n) => n >= STARTED_WORDS)
     ? some({
       _tag: "dispute_started", ...disputeIn(at, topics), ...proofIn(data), timeout: wordAt(data, TIMEOUT_AT),
-      secrets: startedSecrets(data), tx, body: undefined,
+      secrets: startedSecrets(data), tx, body: undefined, unread: false,
     })
     : none);
 
