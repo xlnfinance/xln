@@ -224,6 +224,16 @@
    "kind": "test",
    "layer": "ts",
    "name": "R-WATCH-CALLDATA a start body is found in a wrapped call too, and only by the hash the chain logged"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-WATCH-CALLDATA the earliest stalled tx sets the cut; a tx with no input has no trace"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-WATCH-CALLDATA a start whose body the input hides is read from the call trace"
   }
  ]
 }

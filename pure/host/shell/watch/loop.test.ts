@@ -208,6 +208,34 @@ describe("host/shell/watch the J loop's poll", () => {
     expect(first.ok ? first.value?.events.map((e) => e._tag) : first).toEqual(["j_epoch"]);
   });
 
+  test("R-WATCH-CALLDATA the earliest stalled tx sets the cut; a tx with no input has no trace", async () => {
+    const at = logPath();
+    const shown = logOf("SecretRevealed", { hashlock: hexOf(7n), revealer: RIGHT, secret: hexOf(8n) }, 1n, 0n);
+    const second = finalizing(txOf(2n, 1n));
+    const third = finalizedOf(second.op, 3n, 1n, txOf(3n, 1n));
+    const logs = [shown, advanced(2n, 0n, 1n), second.logs[1], advanced(3n, 0n, 2n), third];
+    const got = await poll(portOf(straight(7n, logs), at), start(2n), LEFT);
+    expect(got.ok ? got.value?.events : got).toEqual([{ _tag: "j_secret", secret: SECRET_BYTES }]);
+    expect(got.ok ? got.value?.height : got).toBe(1n as never);
+    expect(callsOf(at).some((c) => c.startsWith("trace"))).toBe(false);
+  });
+
+  test("R-WATCH-CALLDATA a start whose body the input hides is read from the call trace", async () => {
+    const at = logPath();
+    const opened = logOf("DisputeStarted", {
+      sender: RIGHT, counterentity: LEFT, nonce: 7n, proposerIsLeft: true, proofbodyHash: must(proofBodyHash(CLAUSED)),
+      watchSeed: hexOf(2n), starterInitialArguments: "0x", starterCounterArguments: "0x",
+      starterCounterProofCommitment: hexOf(3n), disputeTimeout: 5n, disputeStartTimestamp: 6n,
+      leftResponseSeconds: 60n, rightResponseSeconds: 60n,
+    }, 2n, 0n);
+    const tx = txOf(2n, 0n);
+    const hidden = Uint8Array.of(0xca, 0xfe, 0xba, 0xbe, 1, 2, 3, 4);
+    const traces = new Map([[tx, [startInput(RIGHT, [startOp(CLAUSED)])]]]);
+    const got = await poll(portOf(straight(6n, [opened]), at, -1n, new Map([[tx, hidden]]), traces), start(2n), LEFT);
+    expect(got.ok ? got.value?.events[0] : got).toMatchObject({ _tag: "j_dispute", body: CLAUSED });
+    expect(callsOf(at).filter((c) => c.startsWith("trace"))).toEqual([`trace ${tx.slice(-4)}`]);
+  });
+
   test("R-WATCH-CALLDATA a tx the node cannot give in the first block read is the port's fault", async () => {
     const op = finalizeOp();
     const at1 = [logOf("AccountEpochAdvanced", { left: LEFT, right: RIGHT, ondeltaEpoch: 1n }, 1n, 0n),

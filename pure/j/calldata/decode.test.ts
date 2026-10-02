@@ -109,6 +109,8 @@ describe("j/calldata", () => {
     expect(startedBody(wrapped, hashOf(CLAUSED))).toStrictEqual(CLAUSED);
     expect(startedBody(wrapped, entityOf(99n))).toBeUndefined();
     expect(startedBody(relayed(startInput(RIGHT, [startOp(other)])), hashOf(CLAUSED))).toBeUndefined();
+    const later = multicalled([startInput(RIGHT, [startOp(other)]), startInput(RIGHT, [startOp(CLAUSED)])]);
+    expect(startedBody(later, hashOf(CLAUSED))).toStrictEqual(CLAUSED);
   });
 
   test("R-WATCH-CALLDATA the body a start carried is read back whole: signs, wide numbers, clauses, allowances", () => {
