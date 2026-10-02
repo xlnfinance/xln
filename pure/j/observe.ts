@@ -23,9 +23,16 @@ import type { Bytes32, ChainEvent } from "./log.ts";
  */
 export type JEvent =
   | Tagged<"j_epoch", { peer: Bytes32; epoch: bigint; stored: bigint }>
-  | Tagged<"j_dispute", { peer: Bytes32; epoch: bigint; by: Side; nonce: bigint; timeout: bigint }>
+  | Tagged<
+    "j_dispute",
+    {
+      peer: Bytes32; epoch: bigint; by: Side; nonce: bigint; timeout: bigint; proposerIsLeft: boolean;
+      bodyHash: Bytes32;
+    }
+  >
+  | Tagged<"j_countered", { peer: Bytes32; nonce: bigint; proposerIsLeft: boolean; bodyHash: Bytes32 }>
   | Tagged<"j_window_over", { peer: Bytes32 }>
-  | Tagged<"j_dispute_over", { peer: Bytes32; finalized: boolean }>
+  | Tagged<"j_dispute_over", { peer: Bytes32 }>
   | Tagged<"j_collateral", { peer: Bytes32; token: TokenId; collateral: bigint; ondelta: bigint }>;
 
 /** A J event for one hosted Entity. */
@@ -111,6 +118,7 @@ const disputeStarted = (events: readonly ChainEvent[], e: Started, peer: Bytes32
     ? err({ _tag: "no_reading", reading: readingOf(e) })
     : ok([{
       _tag: "j_dispute", peer, epoch: epochAt(events, e, at), by: startedBy(e), nonce: e.nonce, timeout: e.timeout,
+      proposerIsLeft: e.proposerIsLeft, bodyHash: e.bodyHash,
     }]));
 
 /** What one event is to one hosted Entity that is a party to it, or nothing. */
@@ -121,8 +129,11 @@ const eventFor = (
   switch (e._tag) {
     case "epoch_advanced": return epochMoved(events, e, peer, at);
     case "dispute_started": return disputeStarted(events, e, peer, at);
-    case "dispute_countered": return ok(e.sender === self ? [{ _tag: "j_dispute_over", peer, finalized: false }] : []);
-    case "dispute_finalized": return ok([{ _tag: "j_dispute_over", peer, finalized: true }]);
+    case "dispute_countered":
+      return ok([
+        { _tag: "j_countered", peer, nonce: e.nonce, proposerIsLeft: e.proposerIsLeft, bodyHash: e.bodyHash },
+      ]);
+    case "dispute_finalized": return ok([{ _tag: "j_dispute_over", peer }]);
     case "account_settled": return ok(e.holdings.map((h): JEvent => ({ _tag: "j_collateral", peer, ...h })));
   }
 };

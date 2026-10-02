@@ -15,9 +15,8 @@ import { signingOf, type Anchor } from "./signing/signing.ts";
 import { holderOf, ledgerOf, rebased, withHeld } from "../account/state.ts";
 import { MAX_AMOUNT } from "../account/ledger.ts";
 import {
-  cosignFrozen, cosignLapsed, depositable, disputeAsked, disputeOpened, disputeOver, epochAdvanced, framed, freshChain,
-  keepHolding, nextSerial, paidOut, proofNonce, startLapsed, windowOpened, windowOver,
-  withWindows,
+  answered, cosignFrozen, cosignLapsed, countered, depositable, disputeAsked, disputeOpened, disputeOver, epochAdvanced,
+  framed, freshChain, keepHolding, nextSerial, paidOut, proofNonce, startLapsed, windowOpened, windowOver, withWindows,
 } from "./chain.ts";
 import { entityRules, type EntityRules } from "./rules.ts";
 import { hashlocksOf, intentFor, learned, withEntry, type Intent } from "./paybook/paybook.ts";
@@ -25,9 +24,9 @@ import { askedOf, cosignFault, foldsOf, withdrawalOf } from "./cosign.ts";
 import type { AccountTx, Judge } from "../account/tx.ts";
 import {
   sideOf, type AccountCommand, type Arrival, type ChainCommand, type ChainFacts, type Command, type CosignAsk,
-  type DisputeStart, type EntityFault, type Entry, type EntityId, type EntityInput, type EntityReplica,
-  type EntityState, type Hook, type JAction,
-  type JEvent, type Notice, type Outbound, type PaybookCommand, type PeerFault, type PeerMessage, type PeerProof,
+  type DisputeCounter, type DisputeStart, type EntityFault, type Entry, type EntityId, type EntityInput,
+  type EntityReplica, type EntityState, type Hook, type JAction, type JEvent, type Notice, type Outbound,
+  type PaybookCommand, type PeerFault, type PeerMessage, type PeerProof,
 } from "./model.ts";
 
 export type Frame = Readonly<{
@@ -233,11 +232,13 @@ const chainFact = (w: Work, e: JEvent): Work => {
     case "j_dispute":
       return withFacts(w, e.peer, e.by === sideOf(w.state.id, e.peer)
         ? windowOpened(facts, e.epoch, e.nonce, e.timeout)
-        : disputeOpened(facts, e.epoch));
+        : disputeOpened(facts, e));
+    case "j_countered":
+      return withFacts(w, e.peer, countered(facts, e));
     case "j_window_over":
       return withFacts(w, e.peer, windowOver(facts));
     case "j_dispute_over":
-      return e.finalized ? finalized(w, e.peer) : withFacts(w, e.peer, disputeOver(facts));
+      return finalized(w, e.peer);
     case "j_start_lapsed":
       return withFacts(w, e.peer, startLapsed(facts, e.nonce));
     case "j_collateral":
@@ -531,46 +532,88 @@ const asking = (judge: Judge, peer: EntityId, account: EntityReplica) => (acc: A
 };
 
 /**
- * While a dispute the peer started is open against me, and I hold a co-signed proof of the epoch, I counter with it.
- * The Host de-duplicates what is asked again, so each frame of the Entity restates it until the chain says the
- * dispute is over: a batch the chain reverted or a Host that crashed cannot leave the dispute unanswered for good.
+ * The counter to a dispute the peer started against me: the newest proof I hold, if the chain would rank it above the
+ * one the dispute opened with (a higher nonce, or the same nonce authored by Left over Right's). My head must be the
+ * one the peer signed, and its body is what my committed state signs as (the same rule as a start).
  */
-const counterFor = (facts: ChainFacts, peer: EntityId, account: EntityReplica): readonly JAction[] => {
+const counterOf = (w: Work, terms: ProofTerms, peer: EntityId, account: EntityReplica): DisputeCounter | undefined => {
+  const facts = factsOf(w, peer);
+  const proof = w.state.proofs.get(peer);
   const nonce = proofNonce(facts, account.used);
-  return facts.disputed && nonce !== undefined ? [{ _tag: "counter", peer, nonce, head: account.head }] : [];
+  const against = facts.against;
+  if (against === undefined || proof === undefined || nonce === undefined || proof.head !== account.head) {
+    return undefined;
+  }
+  const left = proof.author === "left";
+  const newer = nonce > against.nonce || (nonce === against.nonce && left && !against.proposerIsLeft);
+  const body = proofBodyOf(terms, account.state);
+  return newer && body.ok
+    ? {
+      peer, nonce, head: account.head, proposerIsLeft: left, body: body.value, sig: proof.sig,
+      initial: { nonce: against.nonce, bodyHash: against.bodyHash },
+    }
+    : undefined;
 };
 
 /**
- * Once the chain's clock is past the window of a dispute this node started, it asks to finalize with what it started
- * with. Like the counter it is asked again at each frame until the chain says the dispute is over: the Host
- * de-duplicates, and the chain skips a finalize of a dispute that is already over.
+ * While a dispute the peer started is open against me, I counter it once with the newest proof I hold, and remember
+ * what I asked. The Host de-duplicates what is asked again, so each frame restates the counter until the chain says it
+ * registered: a batch the chain reverted or a Host that crashed cannot leave the dispute unanswered for good. A dispute
+ * that opened with the newest proof I hold has nothing newer to be answered with.
+ */
+const answering = (terms: ProofTerms) => (w: Work, peer: EntityId, account: EntityReplica): Work => {
+  const against = factsOf(w, peer).against;
+  if (against === undefined) return w;
+  if (against.answer !== undefined) {
+    return against.answer.registered ? w : asked(w, { _tag: "counter", ...against.answer.counter });
+  }
+  const counter = counterOf(w, terms, peer, account);
+  if (counter === undefined) return w;
+  const answer = answered(factsOf(w, peer), { counter, registered: false });
+  return asked(withFacts(w, peer, answer), { _tag: "counter", ...counter });
+};
+
+/**
+ * Once the chain's clock is past the window of a dispute, the node that holds its outcome asks to finalize. For a
+ * dispute it started that is its opening proof, unless the chain registered a counter (which the chain then finalizes
+ * only with its own proof); for one it answered, its registered counter. Like the counter it is asked again at each
+ * frame until the chain says the dispute is over: the Host de-duplicates, and the chain skips a finalize of a dispute
+ * that is already over.
  */
 const finalFor = (w: Work, peer: EntityId, facts: ChainFacts): readonly JAction[] => {
-  const { start, over } = facts.starting ?? { start: undefined, over: false };
-  return start !== undefined && over
-    ? [{
+  const mine = sideOf(w.state.id, peer) === "left";
+  const { start, over, countered } = facts.starting ?? { start: undefined, over: false, countered: false };
+  const answer = facts.against?.over ? facts.against.answer : undefined;
+  if (start !== undefined && over && !countered) {
+    return [{
       _tag: "dispute_finalize", peer, nonce: start.nonce, proposerIsLeft: start.proposerIsLeft, body: start.body,
-      startedByLeft: sideOf(w.state.id, peer) === "left",
+      startedByLeft: mine, initial: undefined,
+    }];
+  }
+  return answer?.registered === true && facts.against !== undefined
+    ? [{
+      _tag: "dispute_finalize", peer, nonce: answer.counter.nonce, proposerIsLeft: answer.counter.proposerIsLeft,
+      body: answer.counter.body, startedByLeft: !mine, initial: answer.counter.initial,
     }]
     : [];
 };
 
 /** What the Entity owes the chain on `peer`'s Account; a hashlock whose hold is gone is forgotten. */
-const dutiful = (judge: Judge) => (w: Work, peer: EntityId): Work => {
+const dutiful = (judge: Judge, terms: ProofTerms) => (w: Work, peer: EntityId): Work => {
   const account = w.state.accounts.get(peer);
   if (account === undefined) return w;
   const open = (w.state.revealed.get(peer) ?? []).filter((hashlock) => holderOf(account.state, hashlock) !== undefined);
-  const asked = unackedResolves(account).reduce(asking(judge, peer, account), { hashlocks: open, actions: [] });
-  const revealed = mapSet(w.state.revealed, peer, asked.hashlocks);
-  const counters = counterFor(factsOf(w, peer), peer, account);
-  const finals = finalFor(w, peer, factsOf(w, peer));
-  return { ...w, chain: [...w.chain, ...asked.actions, ...counters, ...finals], state: { ...w.state, revealed } };
+  const asks = unackedResolves(account).reduce(asking(judge, peer, account), { hashlocks: open, actions: [] });
+  const revealed = mapSet(w.state.revealed, peer, asks.hashlocks);
+  const revealing = { ...w, chain: [...w.chain, ...asks.actions], state: { ...w.state, revealed } };
+  const countering = answering(terms)(revealing, peer, account);
+  return { ...countering, chain: [...countering.chain, ...finalFor(countering, peer, factsOf(countering, peer))] };
 };
 
 const isArrival = (i: EntityInput): i is Arrival =>
   i._tag === "peer_message" || i._tag === "cosign_ask" || i._tag === "j_epoch" || i._tag === "j_dispute"
-  || i._tag === "j_window_over" || i._tag === "j_dispute_over" || i._tag === "j_start_lapsed"
-  || i._tag === "j_collateral" || i._tag === "j_op_lapsed";
+  || i._tag === "j_countered" || i._tag === "j_window_over" || i._tag === "j_dispute_over"
+  || i._tag === "j_start_lapsed" || i._tag === "j_collateral" || i._tag === "j_op_lapsed";
 
 const arrivalsOf = (inputs: readonly EntityInput[]): readonly Arrival[] => inputs.filter(isArrival);
 
@@ -600,7 +643,7 @@ export const entityFrame = (
   const propose = (w: Work, peer: EntityId): Work => proposing(rules, judge.view, w, peer);
   const proposed = proposalOrder(afterPaybook).reduce(propose, afterPaybook);
   const peers = [...proposed.state.accounts.keys()].toSorted();
-  const owing = peers.reduce(dutiful(judge), peers.reduce(told, stillWaiting(proposed, judge.view)));
+  const owing = peers.reduce(dutiful(judge, anchor.terms), peers.reduce(told, stillWaiting(proposed, judge.view)));
   const done = peers.reduce(reconciled, owing);
   return { state: done.state, outputs: done.outputs, notices: done.notices, chain: done.chain };
 };

@@ -6,11 +6,11 @@ import { err, ok, type Result } from "../kernel/core/result.ts";
 import { MAX_PROOF_TOKENS } from "../account/proof/body.ts";
 import type { TokenId } from "../account/model.ts";
 import type { Held } from "../account/state.ts";
-import type { ChainFacts, DisputeStart, EntityFault, Windows } from "./model.ts";
+import type { Answer, ChainFacts, DisputeStart, EntityFault, JEvent, Windows } from "./model.ts";
 
 export const freshChain: ChainFacts =
   {
-    epoch: 0n, stored: 0n, frames: 0n, windows: undefined, disputed: false, frozen: false, cosigned: 0n,
+    epoch: 0n, stored: 0n, frames: 0n, windows: undefined, against: undefined, frozen: false, cosigned: 0n,
     held: new Map(), starting: undefined,
   };
 
@@ -18,7 +18,7 @@ export const freshChain: ChainFacts =
  * The chain moved the epoch on: no proof of the new epoch is signed yet. An older or repeated report changes nothing.
  */
 export const epochAdvanced = (f: ChainFacts, epoch: bigint, stored: bigint): ChainFacts =>
-  (epoch <= f.epoch ? f : { ...f, epoch, stored, frames: 0n, disputed: false, frozen: false, starting: undefined });
+  (epoch <= f.epoch ? f : { ...f, epoch, stored, frames: 0n, against: undefined, frozen: false, starting: undefined });
 
 /**
  * What the chain holds for a token, kept as it stands. A token the Account has a ledger for is always kept: the proof
@@ -38,9 +38,39 @@ export const keepHolding = (
 /** One more frame is co-signed in this epoch. */
 export const framed = (f: ChainFacts): ChainFacts => ({ ...f, frames: f.frames + 1n });
 
-/** A dispute opened in another epoch than the one the Entity knows is not about its proofs. */
-export const disputeOpened = (f: ChainFacts, epoch: bigint): ChainFacts =>
-  (epoch === f.epoch ? { ...f, disputed: true } : f);
+/**
+ * The peer opened a dispute in the epoch the Entity is in. One in another epoch is not about its proofs, and a repeated
+ * report keeps the dispute it first named (with the answer already given to it).
+ */
+export const disputeOpened = (f: ChainFacts, e: Extract<JEvent, { _tag: "j_dispute" }>): ChainFacts =>
+  (e.epoch !== f.epoch || f.against !== undefined
+    ? f
+    : {
+      ...f,
+      against: {
+        nonce: e.nonce, proposerIsLeft: e.proposerIsLeft, bodyHash: e.bodyHash, window: e.timeout, over: false,
+        answer: undefined,
+      },
+    });
+
+/** The node asked the chain to counter the dispute against it with `answer`: it is asked again until it registers. */
+export const answered = (f: ChainFacts, answer: Answer): ChainFacts =>
+  (f.against === undefined || f.against.answer !== undefined ? f : { ...f, against: { ...f.against, answer } });
+
+/**
+ * The chain registered a counter (its nonce and author) for the dispute. For a dispute this node
+ * started it is a counter against it: it stops asking to finalize with its opening proof, which the chain now
+ * refuses. For one against it, a counter that is the one it asked for is registered, and only then does it finalize.
+ */
+export const countered = (f: ChainFacts, e: Extract<JEvent, { _tag: "j_countered" }>): ChainFacts => {
+  const asked = f.against?.answer;
+  const ours = asked?.counter;
+  const mine = ours !== undefined && ours.nonce === e.nonce && ours.proposerIsLeft === e.proposerIsLeft;
+  const against = f.against !== undefined && asked !== undefined && mine
+    ? { ...f.against, answer: { ...asked, registered: true } }
+    : f.against;
+  return { ...f, against, starting: f.starting === undefined ? undefined : { ...f.starting, countered: true } };
+};
 
 /**
  * The chain finalized the dispute: it paid the Account out of its collateral, so it holds none and no ondelta for any
@@ -53,14 +83,14 @@ export const paidOut = (f: ChainFacts, ledgered: Iterable<TokenId>): ChainFacts 
 };
 
 /** The dispute is over, whoever started it: nothing is left to counter or to finalize. */
-export const disputeOver = (f: ChainFacts): ChainFacts => ({ ...f, disputed: false, starting: undefined });
+export const disputeOver = (f: ChainFacts): ChainFacts => ({ ...f, against: undefined, starting: undefined });
 
 /**
  * The node asked the chain to open a dispute with `start`. The record is kept until the dispute is over or the epoch
  * moves on, and no second start replaces it: the chain holds the dispute it opened first, with that start's nonce.
  */
 export const disputeAsked = (f: ChainFacts, start: DisputeStart): ChainFacts =>
-  ({ ...f, starting: { start, window: undefined, over: false } });
+  ({ ...f, starting: { start, window: undefined, over: false, countered: false } });
 
 /**
  * The chain says the dispute opened with `nonce` has a window ending at `timeout`. A dispute of another epoch or
@@ -82,9 +112,15 @@ export const startLapsed = (f: ChainFacts, nonce: bigint): ChainFacts =>
     ? f
     : { ...f, starting: undefined });
 
-/** The chain's clock passed the end of the window: only a dispute the chain gave a window is over its window. */
-export const windowOver = (f: ChainFacts): ChainFacts =>
-  (f.starting === undefined || f.starting.window === undefined ? f : { ...f, starting: { ...f.starting, over: true } });
+/**
+ * The chain's clock passed the end of the window: a dispute the chain gave a window is over its window, whether the
+ * node started it or answers it.
+ */
+export const windowOver = (f: ChainFacts): ChainFacts => ({
+  ...f,
+  starting: f.starting === undefined || f.starting.window === undefined ? f.starting : { ...f.starting, over: true },
+  against: f.against === undefined ? undefined : { ...f.against, over: true },
+});
 
 /** The first nonce a proof of an epoch may take: two above the stored nonce, since none is signed at stored + 1. */
 export const firstNonce = (f: ChainFacts): bigint => f.stored + 2n;

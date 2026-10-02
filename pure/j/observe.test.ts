@@ -3,7 +3,10 @@ import { err, ok } from "../kernel/core/result.ts";
 import { tokenOf } from "../account/fixtures.ts";
 import { decodeLogs, type ChainEvent } from "./log.ts";
 import { observe, readingKey, readingsOf, type Accounts, type Addressed, type Reading } from "./observe.ts";
-import { DEPOSITORY, entityOf, hashOf, hexOf, logOf, must } from "./fixtures.ts";
+import { bodyHashOf, DEPOSITORY, entityOf, hashOf, hexOf, logOf, must } from "./fixtures.ts";
+
+/** The proof the started dispute of `started` opened with: its author and body hash. */
+const OPENED = { proposerIsLeft: true, bodyHash: bodyHashOf(1n) } as const;
 
 const LEFT = entityOf(0x11n);
 const RIGHT = entityOf(0x52n);
@@ -70,11 +73,11 @@ describe("j/observe", () => {
   test("R-WATCH-TELL a dispute start is a j_dispute naming the side that started it, in the chain's epoch", () => {
     const accounts = accountsOf(readAt(3n, 4n, 7n));
     expect(observe(eventsOf(started(3n, 0n)), [LEFT, RIGHT], accounts)).toEqual(ok([
-      toward(LEFT, { _tag: "j_dispute", peer: RIGHT, epoch: 4n, by: "right", nonce: 7n, timeout: 5n }),
-      toward(RIGHT, { _tag: "j_dispute", peer: LEFT, epoch: 4n, by: "right", nonce: 7n, timeout: 5n }),
+      toward(LEFT, { _tag: "j_dispute", peer: RIGHT, epoch: 4n, by: "right", nonce: 7n, timeout: 5n, ...OPENED }),
+      toward(RIGHT, { _tag: "j_dispute", peer: LEFT, epoch: 4n, by: "right", nonce: 7n, timeout: 5n, ...OPENED }),
     ]));
     expect(observe(eventsOf(started(3n, 0n, LEFT, RIGHT)), [LEFT], accounts)).toEqual(ok([
-      toward(LEFT, { _tag: "j_dispute", peer: RIGHT, epoch: 4n, by: "left", nonce: 7n, timeout: 5n }),
+      toward(LEFT, { _tag: "j_dispute", peer: RIGHT, epoch: 4n, by: "left", nonce: 7n, timeout: 5n, ...OPENED }),
     ]));
   });
 
@@ -83,9 +86,9 @@ describe("j/observe", () => {
     const accounts = accountsOf(readAt(3n, 2n, 8n));
     const heard = observe(events, [LEFT], accounts);
     expect(heard).toEqual(ok([
-      toward(LEFT, { _tag: "j_dispute", peer: RIGHT, epoch: 1n, by: "right", nonce: 7n, timeout: 5n }),
+      toward(LEFT, { _tag: "j_dispute", peer: RIGHT, epoch: 1n, by: "right", nonce: 7n, timeout: 5n, ...OPENED }),
       toward(LEFT, { _tag: "j_epoch", peer: RIGHT, epoch: 2n, stored: 8n }),
-      toward(LEFT, { _tag: "j_dispute", peer: RIGHT, epoch: 2n, by: "right", nonce: 7n, timeout: 5n }),
+      toward(LEFT, { _tag: "j_dispute", peer: RIGHT, epoch: 2n, by: "right", nonce: 7n, timeout: 5n, ...OPENED }),
     ]));
   });
 
@@ -93,18 +96,26 @@ describe("j/observe", () => {
     const events = eventsOf(started(3n, 0n), advance(3n, 1n, 5n, LEFT, THIRD));
     const accounts = accountsOf(readAt(3n, 4n, 7n), readAt(3n, 5n, 1n, LEFT, THIRD));
     expect(observe(events, [LEFT], accounts)).toEqual(ok([
-      toward(LEFT, { _tag: "j_dispute", peer: RIGHT, epoch: 4n, by: "right", nonce: 7n, timeout: 5n }),
+      toward(LEFT, { _tag: "j_dispute", peer: RIGHT, epoch: 4n, by: "right", nonce: 7n, timeout: 5n, ...OPENED }),
       toward(LEFT, { _tag: "j_epoch", peer: THIRD, epoch: 5n, stored: 1n }),
     ]));
   });
 
+  // The title is a register killer from before R-DISPUTE-WATCH: only the registrar was told then; the peer is now too.
   test("R-WATCH-TELL a finalize is a j_dispute_over for each hosted party; a counter only for its registrar", () => {
     expect(observe(eventsOf(finalized(4n, 0n)), [LEFT, RIGHT], accountsOf())).toEqual(ok([
-      toward(LEFT, { _tag: "j_dispute_over", peer: RIGHT, finalized: true }),
-      toward(RIGHT, { _tag: "j_dispute_over", peer: LEFT, finalized: true }),
+      toward(LEFT, { _tag: "j_dispute_over", peer: RIGHT }),
+      toward(RIGHT, { _tag: "j_dispute_over", peer: LEFT }),
     ]));
+    expect(observe(eventsOf(countered(4n, 0n)), [LEFT], accountsOf())).toEqual(ok([
+      toward(LEFT, { _tag: "j_countered", peer: RIGHT, nonce: 9n, proposerIsLeft: false, bodyHash: bodyHashOf(4n) }),
+    ]));
+  });
+
+  test("R-DISPUTE-WATCH a counter is a j_countered for each hosted party and not the end of the dispute", () => {
     expect(observe(eventsOf(countered(4n, 0n)), [LEFT, RIGHT], accountsOf())).toEqual(ok([
-      toward(LEFT, { _tag: "j_dispute_over", peer: RIGHT, finalized: false }),
+      toward(LEFT, { _tag: "j_countered", peer: RIGHT, nonce: 9n, proposerIsLeft: false, bodyHash: bodyHashOf(4n) }),
+      toward(RIGHT, { _tag: "j_countered", peer: LEFT, nonce: 9n, proposerIsLeft: false, bodyHash: bodyHashOf(4n) }),
     ]));
   });
 

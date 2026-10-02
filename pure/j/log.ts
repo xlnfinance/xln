@@ -36,14 +36,17 @@ export type RawLog = Readonly<Place & { address: Address; topics: readonly Bytes
 /** The two entities of a dispute event and the nonce it names: `sender` is the entity whose batch carried the op. */
 type Dispute = Readonly<Place & { sender: Bytes32; counter: Bytes32; nonce: bigint }>;
 
+/** The proof a dispute start or a counter named: who authored it and the hash of its body (the first two words). */
+type Proof = Readonly<{ proposerIsLeft: boolean; bodyHash: Bytes32 }>;
+
 /** What the chain holds for one token of an Account after an operation: its collateral and its ondelta. */
 export type Holding = Readonly<{ token: TokenId; collateral: bigint; ondelta: bigint }>;
 
 export type ChainEvent =
   | Tagged<"epoch_advanced", Place & { left: Bytes32; right: Bytes32; epoch: bigint }>
   | Tagged<"account_settled", Place & { left: Bytes32; right: Bytes32; holdings: readonly Holding[] }>
-  | Tagged<"dispute_started", Dispute & { timeout: bigint }>
-  | Tagged<"dispute_countered", Dispute>
+  | Tagged<"dispute_started", Dispute & Proof & { timeout: bigint }>
+  | Tagged<"dispute_countered", Dispute & Proof>
   | Tagged<"dispute_finalized", Dispute>;
 
 export type LogFault =
@@ -137,14 +140,16 @@ const STARTED_WORDS = 12;
 const TIMEOUT_AT = 6;
 const TWO_WORDS = 2;
 
+const proofIn = (data: string): Proof => ({ proposerIsLeft: wordAt(data, 0) !== 0n, bodyHash: idAt(data, 1) });
+
 const startedRead: Reader = (at, topics, data) =>
   (four(topics) && holdsWords(data, (n) => n >= STARTED_WORDS)
-    ? some({ _tag: "dispute_started", ...disputeIn(at, topics), timeout: wordAt(data, TIMEOUT_AT) })
+    ? some({ _tag: "dispute_started", ...disputeIn(at, topics), ...proofIn(data), timeout: wordAt(data, TIMEOUT_AT) })
     : none);
 
 const counteredRead: Reader = (at, topics, data) =>
   (four(topics) && holdsWords(data, (n) => n === TWO_WORDS)
-    ? some({ _tag: "dispute_countered", ...disputeIn(at, topics) })
+    ? some({ _tag: "dispute_countered", ...disputeIn(at, topics), ...proofIn(data) })
     : none);
 
 const finalizedRead: Reader = (at, topics, data) =>

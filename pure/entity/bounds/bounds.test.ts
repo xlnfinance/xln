@@ -9,7 +9,7 @@ import { emptyLedger, MAX_AMOUNT } from "../../account/ledger.ts";
 import { holdId } from "../../account/model.ts";
 import { emptyAccount, withLedger } from "../../account/state.ts";
 import { withWindows, freshChain } from "../chain.ts";
-import { anchor, entityOf, GOLD, judge } from "../fixtures.ts";
+import { anchor, entityOf, GOLD, judge, OPENED_WITH } from "../fixtures.ts";
 import { entityFrame } from "../frame.ts";
 import { emptyEntity, type ChainFacts, type EntityInput, type EntityState } from "../model.ts";
 
@@ -46,9 +46,13 @@ describe("entity/bounds what the chain is asked in one frame comes in one order"
     const ledger = { ...emptyLedger, holds: [hold] };
     const resolve = { _tag: "resolve", token: GOLD, id: holdId(1n), secret: secretOf(1) } as const;
     const replica = { ...emptyReplica("right"), state: withLedger(emptyAccount, GOLD, ledger), mempool: [resolve] };
-    const facts: ChainFacts = { ...freshChain, epoch: 1n, stored: 2n, frames: 1n, disputed: true };
+    const against = { nonce: 2n, proposerIsLeft: true, bodyHash: OPENED_WITH.bodyHash, window: 500n, over: false };
+    const facts: ChainFacts =
+      { ...freshChain, epoch: 1n, stored: 2n, frames: 1n, against: { ...against, answer: undefined } };
+    const proof = { head: replica.head, slot: 0, author: "left", sig: "0x51" } as const;
     const state: EntityState = {
       ...emptyEntity(BOB), accounts: new Map([[ALICE, replica]]), chain: new Map([[ALICE, facts]]),
+      proofs: new Map([[ALICE, proof]]),
     };
     expect(run(state, 114n).chain.map((a) => a._tag)).toEqual(["reveal", "counter"]);
   });

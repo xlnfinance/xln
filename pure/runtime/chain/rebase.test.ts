@@ -4,6 +4,7 @@
 // who pays him, so the Account carries an offdelta the chain never saw.
 import { describe, expect, test } from "bun:test";
 import { tokenOf, viewOf } from "../../account/fixtures.ts";
+import { OPENED_WITH } from "../../entity/fixtures.ts";
 import { type EntityId, type JEvent } from "../../entity/model.ts";
 import {
   type Cluster, credit, deliver, entityOf, feed, GOLD, hostOf, open, pay, restarted, rise, settle, start,
@@ -20,8 +21,8 @@ const epochOf = (peer: EntityId, epoch: bigint): JEvent => ({ _tag: "j_epoch", p
 const moved = (c: Cluster, epoch: bigint): Cluster =>
   feed(feed(c, ALICE, epochOf(BOB, epoch)), BOB, epochOf(ALICE, epoch));
 const finalized = (c: Cluster): Cluster => feed(
-  feed(c, ALICE, { _tag: "j_dispute_over", peer: BOB, finalized: true }),
-  BOB, { _tag: "j_dispute_over", peer: ALICE, finalized: true });
+  feed(c, ALICE, { _tag: "j_dispute_over", peer: BOB }),
+  BOB, { _tag: "j_dispute_over", peer: ALICE });
 
 const replicaOf = (c: Cluster, id: EntityId) =>
   hostOf(c, id).entities.get(id)?.accounts.get(id === ALICE ? BOB : ALICE) ?? expect.unreachable("no Account");
@@ -88,6 +89,15 @@ describe("runtime/chain R-LEDGER-REBASE an epoch advance zeroes the offdelta on 
     expect([proofKept(next, ALICE), proofKept(next, BOB)]).toEqual([true, true]);
   });
 
+  // Review A probe 159g: a settlement moves the epoch and leaves the stored nonce as it was, so the re-ack of the old
+  // epoch's frame must be told apart by its epoch and not by a nonce the move did not change.
+  test("R-LEDGER-REBASE the re-ack of an old epoch's frame leaves neither side a proof of that epoch", () => {
+    const unchanged = (peer: EntityId): JEvent => ({ _tag: "j_epoch", peer, epoch: 1n, stored: 0n });
+    const lost = ackLost(paid, ALICE, 5n);
+    const after = settle(resend(feed(feed(lost, ALICE, unchanged(BOB)), BOB, unchanged(ALICE)), ALICE));
+    expect([proofKept(after, ALICE), proofKept(after, BOB)]).toEqual([false, false]);
+  });
+
   test("R-LEDGER-REBASE a frame the peer never heard is refused as another epoch's and sealed again", () => {
     const lost = frameLost(paid, ALICE, 5n);
     const after = retried(moved(lost, 1n), ALICE);
@@ -125,9 +135,11 @@ describe("runtime/chain R-LEDGER-REBASE a finalized dispute leaves nothing held"
     });
   });
 
+  // The title is a register killer from before R-DISPUTE-WATCH, when a counter ended the dispute for its registrar.
   test("R-LEDGER-REBASE a dispute that is over by a counter keeps what the chain holds", () => {
-    const countered = feed(feed(withChain, ALICE, { _tag: "j_dispute_over", peer: BOB, finalized: false }),
-      BOB, { _tag: "j_dispute_over", peer: ALICE, finalized: false });
+    const registered = (peer: EntityId): JEvent =>
+      ({ _tag: "j_countered", peer, nonce: 9n, proposerIsLeft: true, bodyHash: OPENED_WITH.bodyHash });
+    const countered = feed(feed(withChain, ALICE, registered(BOB)), BOB, registered(ALICE));
     expect([ledgerOf(countered, ALICE).collateral, ledgerOf(countered, ALICE).ondelta]).toEqual([100n, 100n]);
   });
 

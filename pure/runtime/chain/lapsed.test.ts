@@ -3,6 +3,7 @@
 import { describe, expect, test } from "bun:test";
 import { viewOf } from "../../account/fixtures.ts";
 import type { ChainFacts, JAction, JEvent } from "../../entity/model.ts";
+import { OPENED_WITH } from "../../entity/fixtures.ts";
 import { type Cluster, credit, entityOf, feed, hostOf, open, restarted, settle, start } from "../fixtures.ts";
 
 const ALICE = entityOf(1);
@@ -20,7 +21,8 @@ const NONCE = (() => {
 })();
 
 const lapsed = (nonce: bigint): JEvent => ({ _tag: "j_start_lapsed", peer: BOB, nonce });
-const gave: JEvent = { _tag: "j_dispute", peer: BOB, epoch: 0n, by: "left", nonce: NONCE, timeout: 500n };
+const gave: JEvent =
+  { _tag: "j_dispute", peer: BOB, epoch: 0n, by: "left", nonce: NONCE, timeout: 500n, ...OPENED_WITH };
 const refusals = (c: Cluster): readonly (string | false)[] =>
   hostOf(c, ALICE).wal.at(-1)?.notices.map((n) => n._tag === "command_refused" && n.fault._tag) ?? [];
 

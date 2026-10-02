@@ -99,6 +99,10 @@ const bodyId = (body: ProofBody): string => {
   return hashed.ok ? hashed.value : "unhashable";
 };
 
+/** The dispute a counter, or a finalize of a counter, answers: its nonce and the hash of the body it opened with. */
+const initialId = (initial: Readonly<{ nonce: bigint; bodyHash: string }> | undefined): string =>
+  (initial === undefined ? "own" : `${initial.nonce} ${initial.bodyHash}`);
+
 const chainId = (action: JAction): string =>
   match(action, {
     fund: (f) => `fund ${f.token} ${f.amount}`,
@@ -107,8 +111,10 @@ const chainId = (action: JAction): string =>
     dispute_start: (d) =>
       `dispute_start ${d.peer} ${d.nonce} ${d.epoch} ${d.proposerIsLeft} ${bodyId(d.body)} ${d.sig}`,
     dispute_finalize: (d) =>
-      `dispute_finalize ${d.peer} ${d.nonce} ${d.proposerIsLeft} ${d.startedByLeft} ${bodyId(d.body)}`,
-    counter: (c) => `counter ${c.peer} ${c.nonce} ${c.head}`,
+      `dispute_finalize ${d.peer} ${d.nonce} ${d.proposerIsLeft} ${d.startedByLeft} ${bodyId(d.body)}`
+      + ` ${initialId(d.initial)}`,
+    counter: (c) =>
+      `counter ${c.peer} ${c.nonce} ${c.head} ${c.proposerIsLeft} ${bodyId(c.body)} ${c.sig} ${initialId(c.initial)}`,
     c2r: (c) => `c2r ${c.peer} ${c.serial} ${c.token} ${c.amount}`,
     settle: (s) => `settle ${s.peer} ${s.serial} ${s.token} ${s.amount} ${s.folds.map(foldId).join(",")}`,
   });

@@ -54,14 +54,13 @@ describe("host/shell/submit a chain effect is taken once, whoever asks again", (
     expect(two.jbatch.draft).toHaveLength(2);
   });
 
-  test("a counter, a C2R and a settlement hold signed material the Host lacks: they are named, not guessed", () => {
+  test("a C2R and a settlement hold signed material the Host lacks: they are named, not guessed", () => {
     const actions: readonly JAction[] = [
-      { _tag: "counter", peer: BOB, nonce: 5n, head: `0x${"ab".repeat(32)}` as never },
       { _tag: "c2r", peer: BOB, serial: 1n, token: 1n as never, amount: 3n },
       { _tag: "settle", peer: BOB, serial: 1n, token: 1n as never, amount: 3n, folds: [] },
     ];
     const tags = actions.map((action) => take(fresh(), { action, row: ROW })._tag);
-    expect(tags).toEqual(["needs_signature", "needs_signature", "needs_signature"]);
+    expect(tags).toEqual(["needs_signature", "needs_signature"]);
   });
 });
 

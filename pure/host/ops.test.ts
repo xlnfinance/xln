@@ -5,6 +5,7 @@ import { describe, expect, test } from "bun:test";
 import { holdOf, secretOf, tokenOf, viewOf } from "../account/fixtures.ts";
 import { holdId } from "../account/model.ts";
 import { encodeBatch } from "../chain/batch/batch.ts";
+import { proofBodyHash, type ProofBody } from "../chain/proof/proof.ts";
 import type { Command, JAction } from "../entity/model.ts";
 import { assemble } from "../j/op/assemble.ts";
 import { openJBatch, queue } from "../j/batch/jbatch.ts";
@@ -98,9 +99,44 @@ describe("host/ops an Entity's action is the Depository's op", () => {
     expect(encodeBatch(assemble(500_000n, ops)).ok).toBe(true);
   });
 
-  test("a counter, a C2R and a settlement hold signed material the Entity does not keep: named, not made", () => {
+  test("R-DISPUTE-WATCH a counter names the dispute it answers, with the newer proof and signature", () => {
+    const body: ProofBody = {
+      watchSeed: `0x${"00".repeat(32)}`, leftResponseSeconds: 60n, rightResponseSeconds: 60n, offdeltas: [5n],
+      tokenIds: [GOLD], transformers: [],
+    };
+    const hashed = proofBodyHash(body);
+    const initial = { nonce: 3n, bodyHash: `0x${"0d".repeat(32)}` };
+    const counter: JAction = {
+      _tag: "counter", peer: BOB, nonce: 4n, head: `0x${"00".repeat(32)}` as never, proposerIsLeft: true, body,
+      sig: "0x51", initial,
+    };
+    expect(opOf(ALICE, counter, WORLD)).toEqual({
+      ok: true,
+      value: {
+        _tag: "dispute_counter",
+        counter: {
+          counterentity: BOB, initialNonce: 3n, initialProofbodyHash: initial.bodyHash, counterNonce: 4n,
+          proposerIsLeft: true, counterProofbody: body, sig: "0x51",
+        },
+      },
+    });
+    const own =
+      { _tag: "dispute_finalize", peer: BOB, nonce: 3n, proposerIsLeft: true, body, startedByLeft: true } as const;
+    const names = (a: JAction) => {
+      const made = opOf(ALICE, a, WORLD);
+      return made.ok && made.value._tag === "dispute_finalize" ? made.value.finalization : expect.unreachable("no op");
+    };
+    const hash = hashed.ok ? hashed.value : expect.unreachable("no hash");
+    expect(names({ ...own, initial: undefined })).toMatchObject({
+      initialNonce: 3n, finalNonce: 3n, initialProofbodyHash: hash, startedByLeft: true,
+    });
+    expect(names({ ...own, nonce: 4n, startedByLeft: false, initial })).toMatchObject({
+      initialNonce: 3n, finalNonce: 4n, initialProofbodyHash: initial.bodyHash, startedByLeft: false,
+    });
+  });
+
+  test("a C2R and a settlement hold signed material the Entity does not keep: named, not made", () => {
     const needing: readonly JAction[] = [
-      { _tag: "counter", peer: BOB, nonce: 3n, head: `0x${"00".repeat(32)}` as never },
       { _tag: "c2r", peer: BOB, serial: 1n, token: GOLD, amount: 1n },
       { _tag: "settle", peer: BOB, serial: 1n, token: GOLD, amount: 1n, folds: [] },
     ];

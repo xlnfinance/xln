@@ -10,6 +10,7 @@ import type { Row } from "../runtime/model.ts";
 import { type Cluster, credit, feed, GOLD, hostOf, open, pay, rise, settle, start } from "../runtime/fixtures.ts";
 import { begin, heard, limits, persisted, reopen, startHost, submit } from "./host.ts";
 import { entityOf, stamp, unhalted } from "./fixtures.ts";
+import { OPENED_WITH } from "../entity/fixtures.ts";
 import { unwrapOr } from "../kernel/core/result.ts";
 import type { Effect, RowId } from "./model.ts";
 
@@ -20,7 +21,8 @@ const WIDE = unwrapOr(limits(10, 10), () => expect.unreachable("limits"));
 const opened = settle(feed(feed(start(viewOf(110n), viewOf(110n)), ALICE, open(BOB)), BOB, open(ALICE)));
 const framed = (c: Cluster, limit: bigint): Cluster => settle(feed(c, BOB, credit(ALICE, limit)));
 const epochOf = (peer: EntityId, epoch: bigint, stored: bigint): JEvent => ({ _tag: "j_epoch", peer, epoch, stored });
-const dispute: JEvent = { _tag: "j_dispute", peer: BOB, epoch: 1n, by: "right", nonce: 3n, timeout: 5n };
+const dispute: JEvent =
+  { _tag: "j_dispute", peer: BOB, epoch: 1n, by: "right", nonce: 3n, timeout: 5n, ...OPENED_WITH };
 const deposit = (amount: bigint): Command => ({ _tag: "deposit", peer: BOB, token: GOLD, amount });
 const withdraw = (amount: bigint): Command => ({ _tag: "withdraw", peer: BOB, token: GOLD, amount });
 const lockIn = (id: bigint, deadline: bigint): Command =>

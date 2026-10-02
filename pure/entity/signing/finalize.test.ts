@@ -3,7 +3,7 @@
 import { describe, expect, test } from "bun:test";
 import { proofBodyHash } from "../../chain/proof/proof.ts";
 import { opOf } from "../../host/ops.ts";
-import { credit, open } from "../fixtures.ts";
+import { credit, open, OPENED_WITH } from "../fixtures.ts";
 import { emptyEntity, type JAction } from "../model.ts";
 import { ALICE, BOB, must, run, signed } from "./keys.ts";
 
@@ -18,7 +18,7 @@ const committed = (() => {
   return { alice: run(proposed.state, signed(BOB, ack)).state, bob: heard.state };
 })();
 
-const window = { _tag: "j_dispute", epoch: 0n, timeout: 500n } as const;
+const window = { _tag: "j_dispute", epoch: 0n, timeout: 500n, ...OPENED_WITH } as const;
 const nonceOf = (action: JAction | undefined): bigint =>
   (action?._tag === "dispute_start" ? action.nonce : expect.unreachable("no dispute start"));
 const over = { _tag: "j_window_over" } as const;

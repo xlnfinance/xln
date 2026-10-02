@@ -158,6 +158,9 @@ export const must = <T, E>(made: Result<T, E>): T =>
 
 export const entityOf = (n: bigint): Bytes32 => must(bytes32(hexOf(n)));
 
+/** The hash of a proof body, by number: the one a dispute log names as `proofbodyHash`. */
+export const bodyHashOf = (n: bigint): Bytes32 => must(bytes32(hexOf(n)));
+
 export const DEPOSITORY: Address = must(address(hexOf(0xde0n, 20)));
 
 /** A block hash that names its height and the fork it is on, so two forks never share one. */
