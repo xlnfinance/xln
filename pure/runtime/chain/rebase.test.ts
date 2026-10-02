@@ -31,6 +31,10 @@ const ledgerOf = (c: Cluster, id: EntityId) =>
 const offdeltas = (c: Cluster) => [ledgerOf(c, ALICE).offdelta, ledgerOf(c, BOB).offdelta];
 const proofKept = (c: Cluster, id: EntityId) => hostOf(c, id).entities.get(id)?.proofs.has(id === ALICE ? BOB : ALICE);
 const noticesOf = (c: Cluster, id: EntityId) => hostOf(c, id).wal.flatMap((row) => row.notices);
+const rebasedTold = (c: Cluster, id: EntityId) =>
+  noticesOf(c, id).flatMap((n) => (n._tag === "offdelta_rebased" ? [[n.token, n.epoch, n.offdelta]] : []));
+const otherNotices = (c: Cluster) =>
+  [ALICE, BOB].flatMap((id) => noticesOf(c, id).filter((n) => n._tag !== "offdelta_rebased"));
 const same = (c: Cluster): boolean => replicaOf(c, ALICE).head === replicaOf(c, BOB).head;
 const resend = (c: Cluster, id: EntityId): Cluster =>
   feed(c, id, { _tag: "resend_due", peer: id === ALICE ? BOB : ALICE });
@@ -54,7 +58,22 @@ describe("runtime/chain R-LEDGER-REBASE an epoch advance zeroes the offdelta on 
     expect(offdeltas(after)).toEqual([0n, 0n]);
     expect(ledgerOf(after, ALICE).limit).toEqual(ledgerOf(paid, ALICE).limit);
     expect([proofKept(after, ALICE), proofKept(after, BOB)]).toEqual([false, false]);
-    expect(noticesOf(after, ALICE).concat(noticesOf(after, BOB))).toEqual([]);
+    expect(otherNotices(after)).toEqual([]);
+  });
+
+  test("R-DISPUTE-FREEZE a rebase that zeroes an offdelta tells both sides how much, a repeat nothing more", () => {
+    const after = moved(paid, 1n);
+    expect([rebasedTold(after, ALICE), rebasedTold(after, BOB)]).toEqual([[[GOLD, 1n, -40n]], [[GOLD, 1n, -40n]]]);
+    const again = moved(after, 1n);
+    expect([rebasedTold(again, ALICE), rebasedTold(again, BOB)]).toEqual([[[GOLD, 1n, -40n]], [[GOLD, 1n, -40n]]]);
+    const quiet = moved(opened, 1n);
+    expect([rebasedTold(quiet, ALICE), rebasedTold(quiet, BOB)]).toEqual([[], []]);
+  });
+
+  test("R-DISPUTE-FREEZE each side tells the offdelta it counted: the peer that committed first tells more", () => {
+    const lost = ackLost(paid, ALICE, 5n);
+    const after = moved(lost, 1n);
+    expect([rebasedTold(after, ALICE), rebasedTold(after, BOB)]).toEqual([[[GOLD, 1n, -40n]], [[GOLD, 1n, -45n]]]);
   });
 
   test("R-LEDGER-REBASE a repeat or an older report of the epoch changes nothing, a new payment stays", () => {
@@ -82,7 +101,7 @@ describe("runtime/chain R-LEDGER-REBASE an epoch advance zeroes the offdelta on 
     expect(replicaOf(after, ALICE).pending).toBeUndefined();
     expect(same(after)).toBe(true);
     expect(offdeltas(after)).toEqual([0n, 0n]);
-    expect(noticesOf(after, ALICE).concat(noticesOf(after, BOB))).toEqual([]);
+    expect(otherNotices(after)).toEqual([]);
     expect([proofKept(after, ALICE), proofKept(after, BOB)]).toEqual([false, false]);
     const next = settle(feed(after, ALICE, pay(BOB, 7n)));
     expect([offdeltas(next), same(next)]).toEqual([[-7n, -7n], true]);
@@ -105,7 +124,7 @@ describe("runtime/chain R-LEDGER-REBASE an epoch advance zeroes the offdelta on 
     expect(same(after)).toBe(true);
     expect(offdeltas(after)).toEqual([-5n, -5n]);
     expect(replicaOf(after, ALICE).height).toBe(replicaOf(paid, ALICE).height + 1);
-    expect(noticesOf(after, ALICE).concat(noticesOf(after, BOB))).toEqual([]);
+    expect(otherNotices(after)).toEqual([]);
   });
 
   test("R-LEDGER-REBASE a payment that fitted only before the move is refused back to the one who asked", () => {
@@ -114,7 +133,7 @@ describe("runtime/chain R-LEDGER-REBASE an epoch advance zeroes the offdelta on 
     expect(replicaOf(after, BOB).pending).toBeUndefined();
     expect(same(after)).toBe(true);
     expect(offdeltas(after)).toEqual([0n, 0n]);
-    expect(noticesOf(after, BOB).map((n) => n._tag)).toEqual(["tx_refused"]);
+    expect(noticesOf(after, BOB).map((n) => n._tag).filter((t) => t !== "offdelta_rebased")).toEqual(["tx_refused"]);
   });
 });
 

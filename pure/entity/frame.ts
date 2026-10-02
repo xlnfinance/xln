@@ -199,12 +199,24 @@ const reconciled = (w: Work, peer: EntityId): Work => {
 const rebasing = (w: Work, peer: EntityId): Work => {
   const account = w.state.accounts.get(peer);
   const forgot = { ...w, state: { ...w.state, proofs: mapDelete(w.state.proofs, peer) } };
-  return account === undefined ? forgot : withReplica(forgot, peer, {
+  if (account === undefined) return forgot;
+  const told = destroyed(forgot, peer, account, factsOf(w, peer).epoch);
+  return withReplica(told, peer, {
     ...account,
     state: rebased(account.state),
     pending: account.pending === undefined ? undefined : { ...account.pending, after: rebased(account.pending.after) },
   });
 };
+
+/**
+ * R-DISPUTE-FREEZE: the rebase zeroes offdelta, so each token whose committed state carried some is told to the node's
+ * owner with the amount the node counted. What the chain paid for the proof it finalized is read there, not here: a
+ * frame in flight is kept and sealed again, so it is not lost and not told.
+ */
+const destroyed = (w: Work, peer: EntityId, account: EntityReplica, epoch: bigint): Work =>
+  [...account.state.ledgers].reduce((acc, [token, l]) => (l.offdelta === 0n
+    ? acc
+    : noting(acc, { _tag: "offdelta_rebased", peer, token, epoch, offdelta: l.offdelta })), w);
 
 /** The chain's collateral and ondelta for one token, kept; one with no ledger past the cap is told and dropped. */
 const holding = (w: Work, e: Extract<JEvent, { _tag: "j_collateral" }>): Work => {
