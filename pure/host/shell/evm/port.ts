@@ -13,7 +13,7 @@ import { all, err, flatMap, map, mapErr, ok, traverse, type Result } from "../..
 import type { Key } from "../link/link.ts";
 import type { ChainPort, PortFault } from "../submit/chain.ts";
 import {
-  BATCH_FAILED, debtOutstandingCall, DISPUTE_SKIPPED, entityNoncesCall, fourBytes, HANKO_PROCESSED, hexQuantity,
+  bad, BATCH_FAILED, debtOutstandingCall, DISPUTE_SKIPPED, entityNoncesCall, fourBytes, HANKO_PROCESSED, hexQuantity,
   oneWord, processBatchData, quantity, reservesCall, topicNumber, wide, wordsOf, type ReplyFault,
 } from "./calls.ts";
 import { rawTx } from "./tx.ts";
@@ -37,8 +37,6 @@ export type PortConfig = Readonly<{
   /** A batch is answered only by a log this many blocks below the head (D9, R-WATCH-DEPTH); 0 on a local node. */
   depth: bigint;
 }>;
-
-export const bad = (why: string): ReplyFault => ({ _tag: "bad_reply", why });
 
 export const portFault = (call: string, reason: string): PortFault => ({ _tag: "port", call, reason });
 
