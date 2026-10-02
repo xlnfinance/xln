@@ -798,7 +798,7 @@ describe("account/frame what Review B of PR 85 found in round 2", () => {
 
 describe("account/frame R-DISPUTE-FREEZE a frame the chain paid by is not sent back with its txs", () => {
   const paidOf = (r: AccountReplica): AccountReplica =>
-    ({ ...r, pending: { ...(r.pending ?? expect.unreachable("no pending frame")), paid: true } });
+    ({ ...r, pending: { ...(r.pending ?? expect.unreachable("no pending frame")), owed: [] } });
   const sentLeft = proposing(credited.left, pay(10n));
   const sentRight = proposing(credited.right, credit(500n));
   const refusal = (r: AccountReplica): Msg<AccountTx> => ({
@@ -813,6 +813,13 @@ describe("account/frame R-DISPUTE-FREEZE a frame the chain paid by is not sent b
     const gone = receive(rules, paid, refusal(paid));
     expect([gone.outcome._tag, gone.replica.pending, gone.replica.mempool])
       .toStrictEqual(["rolled_back", undefined, []]);
+  });
+
+  test("R-DISPUTE-FREEZE a rollback of a part-paid frame gives back only the txs the chain did not pay", () => {
+    const pending = sentLeft.replica.pending ?? expect.unreachable("no pending");
+    const part = { ...sentLeft.replica, pending: { ...pending, owed: [pay(3n)] } };
+    const back = receive(rules, part, refusal(part));
+    expect([back.replica.pending, back.replica.mempool]).toStrictEqual([undefined, [pay(3n)]]);
   });
 
   test("R-DISPUTE-FREEZE the peer's frame committed over a paid pending frame takes none of its txs back", () => {

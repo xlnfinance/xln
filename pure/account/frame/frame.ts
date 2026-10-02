@@ -107,10 +107,11 @@ export type Refused<Tx, F> = Readonly<{ tx: Tx; fault: F | PeerRefused | SignedC
 type Declined<F> = Readonly<{ hash: FrameHash; attempt: number; index: number; fault: F }>;
 
 /**
- * `paid` is set by the Entity when the chain has paid by the proof this frame would commit (R-DISPUTE-FREEZE): the
- * frame stays pending, so the lineage the peer may have committed stays whole, but a rollback keeps none of its txs.
+ * `owed` is set by the Entity when the chain has paid some of this frame's txs (R-DISPUTE-FREEZE): the frame stays
+ * pending, so the lineage the peer may have committed stays whole, but a rollback gives back only these txs (those the
+ * chain did not pay), and every tx of the frame is paid when it is empty.
  */
-type Proposed<Tx, S> = Readonly<{ frame: Frame<Tx>; after: S; head: FrameHash; paid?: true }>;
+type Proposed<Tx, S> = Readonly<{ frame: Frame<Tx>; after: S; head: FrameHash; owed?: readonly Tx[] }>;
 
 /**
  * A frame this side proposed, whose proof it signed and sent, that no committed frame has superseded yet. The Account
@@ -119,7 +120,11 @@ type Proposed<Tx, S> = Readonly<{ frame: Frame<Tx>; after: S; head: FrameHash; p
  * whether or not the peer accepted the frame (R-SIGNED-IS-LIVE): what its txs say is live until a frame at a higher
  * slot commits.
  */
-export type Signed<Tx> = Readonly<{ slot: number; txs: readonly Tx[] }>;
+export type Signed<Tx, S> = Readonly<{
+  slot: number; txs: readonly Tx[];
+  /** The state the frame would commit and the epoch and first nonce it was sealed under: what names its proof. */
+  sealed?: Readonly<{ after: S; epoch: bigint; firstNonce: bigint }>;
+}>;
 
 /** The most signed-but-unsuperseded frames one side keeps: past it, it proposes nothing more until one commits. */
 export const MAX_UNSUPERSEDED = 64;
@@ -145,7 +150,7 @@ export type Replica<Tx, S, F> = Readonly<{
   signed: number;
   peerSigned: number;
   /** Every frame I signed and sent at a slot above `used`, in slot order: proofs the peer may still hold live. */
-  unsuperseded: readonly Signed<Tx>[];
+  unsuperseded: readonly Signed<Tx, S>[];
   last: FrameHash | undefined;
   state: S;
   mempool: readonly Tx[];
@@ -245,7 +250,10 @@ export const propose = <Tx, S, F>(rules: Rules<Tx, S, F>, r: Replica<Tx, S, F>):
   const unsealed = sealed?.ok === false ? split.valid.map((tx): Refused<Tx, F> => ({ tx, fault: sealed.error })) : [];
   const pending = sealed?.ok === true ? { frame, after: split.state, head: sealed.value } : undefined;
   const signed = pending === undefined ? r.signed : frame.slot;
-  const live = pending === undefined ? r.unsuperseded : [...r.unsuperseded, { slot: frame.slot, txs: frame.txs }];
+  const live = pending === undefined ? r.unsuperseded : [...r.unsuperseded, {
+      slot: frame.slot, txs: frame.txs,
+      sealed: { after: split.state, epoch: frame.epoch, firstNonce: frame.firstNonce },
+    }];
   const proposed = {
     ...r, signed, unsuperseded: live, mempool: [], refused: [...r.refused, ...split.refused, ...unsealed],
     pending,
@@ -261,9 +269,8 @@ const heard = <Tx, S, F>(
   r: Replica<Tx, S, F>, sent: readonly Msg<Tx>[], outcome: Outcome<F>,
 ): Heard<Tx, S, F> => ({ replica: r, sent, outcome });
 
-/** The txs of the pending frame that a rollback sends back: none when the chain has paid by the frame (`paid`). */
-const owed = <Tx, S, F>(r: Replica<Tx, S, F>): readonly Tx[] =>
-  r.pending?.paid === true ? [] : r.pending?.frame.txs ?? [];
+/** The txs of the pending frame that a rollback sends back: those the chain has not paid (`owed`). */
+const owed = <Tx, S, F>(r: Replica<Tx, S, F>): readonly Tx[] => r.pending?.owed ?? r.pending?.frame.txs ?? [];
 
 /** Rolls the pending frame back: its txs go ahead of the mempool, to be checked again at the next propose. */
 const withoutPending = <Tx, S, F>(r: Replica<Tx, S, F>): Replica<Tx, S, F> =>
@@ -420,8 +427,9 @@ const onRefusal = <Tx, S, F>(
     return heard(r, NO_MESSAGES, { _tag: "refusal_ignored" });
   }
   const peerSigned = Math.max(r.peerSigned, floor);
-  if (pending.paid === true) {
-    return heard({ ...r, pending: undefined, attempt, peerSigned }, NO_MESSAGES, { _tag: "rolled_back" });
+  if (pending.owed !== undefined) {
+    const back = { ...r, mempool: [...pending.owed, ...r.mempool], pending: undefined, attempt, peerSigned };
+    return heard(back, NO_MESSAGES, { _tag: "rolled_back" });
   }
   // R-FRAME-EPOCH: the peer's view of the chain differs from the one the frame was sealed under, and mine still is that
   // one: the frame waits as it is, and the Host's resend sends the same bytes (the same slot, so no new proof is signed
