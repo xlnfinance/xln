@@ -72,6 +72,16 @@ export const windowOpened = (f: ChainFacts, epoch: bigint, nonce: bigint, timeou
     ? f
     : { ...f, starting: { ...f.starting, window: timeout } });
 
+/**
+ * The Host dropped the start the node asked for, because it would revert: no dispute is coming from it, so the record
+ * goes and the node may ask again. A start of another nonce, or one that already has its window, is not the one
+ * dropped (a repeat or an older report changes nothing).
+ */
+export const startLapsed = (f: ChainFacts, nonce: bigint): ChainFacts =>
+  (f.starting === undefined || f.starting.window !== undefined || f.starting.start.nonce !== nonce
+    ? f
+    : { ...f, starting: undefined });
+
 /** The chain's clock passed the end of the window: only a dispute the chain gave a window is over its window. */
 export const windowOver = (f: ChainFacts): ChainFacts =>
   (f.starting === undefined || f.starting.window === undefined ? f : { ...f, starting: { ...f.starting, over: true } });

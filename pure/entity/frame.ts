@@ -16,7 +16,7 @@ import { holderOf, ledgerOf, rebased, withHeld } from "../account/state.ts";
 import { MAX_AMOUNT } from "../account/ledger.ts";
 import {
   cosignFrozen, cosignLapsed, depositable, disputeAsked, disputeOpened, disputeOver, epochAdvanced, framed, freshChain,
-  keepHolding, nextSerial, paidOut, proofNonce, windowOpened, windowOver,
+  keepHolding, nextSerial, paidOut, proofNonce, startLapsed, windowOpened, windowOver,
   withWindows,
 } from "./chain.ts";
 import { entityRules, type EntityRules } from "./rules.ts";
@@ -227,6 +227,8 @@ const chainFact = (w: Work, e: JEvent): Work => {
       return withFacts(w, e.peer, windowOver(facts));
     case "j_dispute_over":
       return e.finalized ? finalized(w, e.peer) : withFacts(w, e.peer, disputeOver(facts));
+    case "j_start_lapsed":
+      return withFacts(w, e.peer, startLapsed(facts, e.nonce));
     case "j_collateral":
       return holding(w, e);
     case "j_op_lapsed":
@@ -556,8 +558,8 @@ const dutiful = (judge: Judge) => (w: Work, peer: EntityId): Work => {
 
 const isArrival = (i: EntityInput): i is Arrival =>
   i._tag === "peer_message" || i._tag === "cosign_ask" || i._tag === "j_epoch" || i._tag === "j_dispute"
-  || i._tag === "j_window_over" || i._tag === "j_dispute_over" || i._tag === "j_collateral"
-  || i._tag === "j_op_lapsed";
+  || i._tag === "j_window_over" || i._tag === "j_dispute_over" || i._tag === "j_start_lapsed"
+  || i._tag === "j_collateral" || i._tag === "j_op_lapsed";
 
 const arrivalsOf = (inputs: readonly EntityInput[]): readonly Arrival[] => inputs.filter(isArrival);
 

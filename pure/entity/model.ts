@@ -117,7 +117,8 @@ export type PeerMessage = Tagged<"peer_message", { from: EntityId; msg: Msg<Acco
  * or a finished dispute landed), with the nonce it stores now; `j_dispute` is a dispute started in `epoch` by `by`,
  * whose start carried `nonce` and whose window ends at the chain's second `timeout`; `j_window_over` is the chain's
  * clock having passed that end for a dispute this node started (R-DISPUTE-FINALIZE); `j_dispute_over` is that
- * dispute countered or finalized;
+ * dispute countered or finalized; `j_start_lapsed` is the Host telling that the start this node asked for (the one of
+ * that `nonce`) was dropped from its draft because it would revert and so will never open a dispute (R-DISPUTE-LAPSED);
  * `j_op_lapsed` is a co-signed settlement or withdrawal that can no longer land (its batch reverted, its signatures
  * ran out), named by the serial its action carried: a report of an operation that is not the one out (a repeat, or an
  * older one) changes nothing; `j_collateral` is what the chain holds for one token of the Account now
@@ -128,6 +129,7 @@ export type JEvent =
   | Tagged<"j_dispute", { peer: EntityId; epoch: bigint; by: Side; nonce: bigint; timeout: bigint }>
   | Tagged<"j_window_over", { peer: EntityId }>
   | Tagged<"j_dispute_over", { peer: EntityId; finalized: boolean }>
+  | Tagged<"j_start_lapsed", { peer: EntityId; nonce: bigint }>
   | Tagged<"j_collateral", { peer: EntityId; token: TokenId; collateral: bigint; ondelta: bigint }>
   | Tagged<"j_op_lapsed", { peer: EntityId; serial: bigint }>;
 

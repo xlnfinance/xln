@@ -1,0 +1,59 @@
+{
+ "id": "R-DISPUTE-LAPSED",
+ "statement": "A dispute start the node asked for that can never open a dispute is forgotten, so the node may ask again. The Entity keeps its own start as a record (`starting`, R-DISPUTE-FINALIZE) and refuses a second ask while it stands (`dispute_pending`), so a start that never lands would refuse every later ask until the epoch moved. The Host's builder probes each dispute start in its draft alone at the head (R-SIMULATE): one the chain would revert is dropped from the draft and the rows and named, and the Host tells the Entity of its own peer and nonce (`j_start_lapsed`, in the WAL like any J input). The Entity clears the record only when the lapse names the nonce of the start it holds and the chain has not given that start a window; a lapse of another nonce, of a start with a window, or with no record changes nothing. A start the chain skips (stale nonce, a dispute already open, the epoch moved) is not a lapse: the chain's own events end the record (`j_epoch`, `j_dispute_over`), so a skip is never read as one. A start that reverts only together with the ops it is grouped with is kept. Owed: a start that is held for another reason (gas cap, size) stays held and the record stands.",
+ "source": "Review A on #156 (lapsed start must clear the record); coordinator 10-02 09:10 order; contracts-decisions.md One start per dispute",
+ "layers": {
+  "arrival": "n/a: the Arrival page models the Account's frames; a dropped start is an Entity and Host rule",
+  "quint": "n/a: the Quint model has the chain's dispute cells; what the node keeps of its own ask is not one of them",
+  "contract": "n/a: the chain reverts or skips a start by its own rules (J2, S1); this row is what the node does when the chain would revert it",
+  "rig": "n/a: an off-chain Entity and Host rule",
+  "ts": "hold"
+ },
+ "killers": [
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DISPUTE-LAPSED the lapse of the start the node asked for clears its record, and a new ask is taken"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DISPUTE-LAPSED while the record stands a second ask is still refused"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DISPUTE-LAPSED a lapse of another nonce, or of a start that has its window, changes nothing"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DISPUTE-LAPSED a Host that restarts after the lapse still has no record of the start"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DISPUTE-LAPSED a start that would revert is dropped from the draft and named, nothing is sent"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DISPUTE-LAPSED a start that simulates cleanly is sealed and sent, not dropped"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DISPUTE-LAPSED a start the chain would revert is dropped and the Entity may ask again"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DISPUTE-LAPSED a start a signed batch also carries is not dropped: that batch may still land"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DISPUTE-LAPSED a start held for want of gas room, not for a revert, stays in the draft"
+  }
+ ]
+}

@@ -7,13 +7,14 @@ import { appendFileSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { emptyEntity } from "../../../entity/model.ts";
 import type { JAnswer } from "../../../j/batch/answer.ts";
+import type { Simulation } from "../../../j/gas/simulate.ts";
 import { err, ok, unwrapOr, type Result } from "../../../kernel/core/result.ts";
-import { setup, stamp } from "../../../runtime/fixtures.ts";
+import { hostOf, setup, stamp } from "../../../runtime/fixtures.ts";
 import { limits } from "../../host.ts";
 import { verifyHankoSignature } from "../../../chain/hanko/hanko-verify.ts";
 import { credit, open } from "../../../entity/fixtures.ts";
 import { addressOf, signDigest } from "../../../kernel/crypto/signature.ts";
-import { ALICE, BOB, callsOf, DEPLOYED, GAS, journalIn, TREASURY, WORLD } from "../fixtures.ts";
+import { ALICE, aliceRun, BOB, callsOf, DEPLOYED, GAS, journalIn, TREASURY, WORLD } from "../fixtures.ts";
 import { GOLD } from "../../../runtime/fixtures.ts";
 import { keyOf } from "../link/link.ts";
 import type { ChainPort, PortFault } from "../submit/chain.ts";
@@ -44,12 +45,14 @@ const rowsIn = (at: Scene) => {
 const DOWN: PortFault = { _tag: "port", call: "send", reason: "connection reset" };
 
 /** A chain that lands a batch as soon as it is sent, unless its sends are down. */
-const portOf = (at: Scene, sends: Result<void, PortFault>): ChainPort => ({
+const portOf = (
+  at: Scene, sends: Result<void, PortFault>, outcome: Simulation["outcome"] = { _tag: "ok", applyGas: 100_000n },
+): ChainPort => ({
   nonce: () => Promise.resolve(ok(4n)),
   treasury: () => Promise.resolve(ok(TREASURY)),
   simulate: () => {
     appendFileSync(at.log, "simulate\n");
-    return Promise.resolve(ok({ _tag: "ok", applyGas: 100_000n }));
+    return Promise.resolve(ok(outcome));
   },
   send: (call) => {
     const how = sends.ok ? "ok" : "lost";
@@ -67,12 +70,13 @@ const portOf = (at: Scene, sends: Result<void, PortFault>): ChainPort => ({
 /** The shell over the scene's two files for one piece of work, and the files closed after it. */
 const withShell = async <T>(
   at: Scene, sends: Result<void, PortFault>, work: (shell: Shell) => Promise<T>,
+  outcome?: Simulation["outcome"],
 ): Promise<T> => {
   appendFileSync(at.log, "");
   const wal = await fileDisk(at.wal);
   const journal = await fileDisk(at.journal);
   if (!wal.ok || !journal.ok) return expect.unreachable("disks");
-  const io = { port: portOf(at, sends), signer: lazySigner(ALICE, KEY), journal: journal.value, gas: GAS };
+  const io = { port: portOf(at, sends, outcome), signer: lazySigner(ALICE, KEY), journal: journal.value, gas: GAS };
   const out = await work({ wal: wal.value, io, now: () => stamp(1_000n) });
   await wal.value.close();
   await journal.value.close();
@@ -171,5 +175,24 @@ describe("host/shell/drive the Host's rows are on the disk before the chain hear
       expect(verdict.ok && verdict.value.signers).toEqual([signer]);
       expect(verdict.ok && verdict.value.entityId).toBe(ALICE);
     });
+  });
+
+  test("R-DISPUTE-LAPSED a start the chain would revert is dropped and the Entity may ask again", async () => {
+    const at = scene();
+    const paid = hostOf(aliceRun, ALICE).entities.get(ALICE) ?? expect.unreachable("no entity");
+    const dispute = { _tag: "dispute", peer: BOB } as const;
+    const facts = (turn: Turn) => turn.station.host.runtime.entities.get(ALICE)?.chain.get(BOB);
+    const out = await withShell(at, ok(undefined), async (shell) => {
+      const started = turnOf(await start(shell, { ...BOOT, genesis: paid }));
+      const first = turnOf(await command(shell, started.station, ALICE, dispute));
+      return { first, second: turnOf(await command(shell, first.station, ALICE, dispute)) };
+    }, { _tag: "reverts", reason: "bad signature" });
+    expect(out.first.lapsed.map((op) => op._tag)).toEqual(["dispute_start"]);
+    expect(facts(out.first)?.starting).toBeUndefined();
+    expect(out.first.station.submitter.jbatch.draft).toEqual([]);
+    expect(callsOf(at.log).filter((c) => c.startsWith("send"))).toEqual([]);
+    expect(out.second.lapsed.map((op) => op._tag)).toEqual(["dispute_start"]);
+    expect(rowsIn(at).map((r) => r.notices.map((n) => n._tag))).toEqual([[], [], [], []]);
+    expect(rowsIn(at).flatMap((r) => r.chain.map((a) => a._tag))).toEqual(["dispute_start", "dispute_start"]);
   });
 });

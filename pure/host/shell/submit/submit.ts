@@ -11,7 +11,7 @@ import type { JAction } from "../../../entity/model.ts";
 import type { EntityId } from "../../../entity/model.ts";
 import type { Deployment } from "../../../chain/proof/deployment.ts";
 import { observe, type JAnswer, type Observed, type Returned, type Skipped } from "../../../j/batch/answer.ts";
-import { openJBatch, queue, type JBatch, type QueueFault } from "../../../j/batch/jbatch.ts";
+import { drop, openJBatch, queue, type JBatch, type QueueFault } from "../../../j/batch/jbatch.ts";
 import { sealBatch, type SealedBatch, type SealFault } from "../../../j/batch/sealed.ts";
 import type { JOp } from "../../../j/op/ops.ts";
 import { mapDelete, mapSet, mapSetAll } from "../../../kernel/core/collections.ts";
@@ -82,6 +82,14 @@ export const take = (s: Submitter, asked: Asked): Taken => {
     case "skipped": return { _tag: "skipped" };
     case "refused": return { _tag: "refused", fault: out.fault };
   }
+};
+
+/** A request in the draft that will not be sent: the draft and the rows forget it. One signed into a batch stays. */
+export const dropped = (s: Submitter, op: JOp): Submitter => {
+  const out = drop(s.jbatch, op);
+  if (out._tag !== "dropped") return s;
+  const gone = s.jbatch.draft.filter((d) => !out.jbatch.draft.includes(d));
+  return { ...s, jbatch: out.jbatch, waiting: new Map([...s.waiting].filter(([d]) => !gone.includes(d))) };
 };
 
 export type UnmappedOp = Tagged<"unmapped_op", { kind: JOp["_tag"] }>;
