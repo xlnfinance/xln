@@ -43,12 +43,6 @@ export const GAPS = {
     supplier: "the cut thread: settlement fold and epoch rebase, after multi-hop",
     landed: () => mentions("entity", /rebased|rebaseLedger/) || mentions("account", /rebased|rebaseLedger/),
   },
-  htlcRoute: {
-    id: "htlc-route", kind: "scaffold", layer: "Entity",
-    piece: "HTLC forwarding: on an incoming lock, open the next hop with a shorter deadline; on a resolve, pass the secret upstream; hold duty while a signed proof carries the lock (R-SIGNED-IS-LIVE). The harness decides each hop's lock and deadline and gives each resolve to the payee, hop by hop.",
-    supplier: "the cut thread's multi-hop slice (the coordinator gave it that owner); hold duty is the A4b Runtime slice after #97",
-    landed: () => has("runtime/htlc/route.ts") || has("entity/route.ts"),
-  },
   entitySwapCommands: {
     id: "entity-swap-commands", kind: "missing", layer: "Entity",
     piece: "Swap inside an Account through a Runtime: AccountTx has offer, fill, retract and lapse (#111, pure/account/swap), but the Entity takes no command that queues them, so no swap offer, partial fill or cancel can go through a Runtime and nothing on the Account's frames is signed for one. The proof body carries the swap clause already; the chain side is plan/swap-onchain.md.",

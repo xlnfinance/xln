@@ -28,11 +28,15 @@ const legItem = (l: Leg): Rlp => [text(l.token), text(l.amount)];
 
 const offerItem = (o: Offer): Rlp => [text(o.id), text(o.maker), legItem(o.give), legItem(o.want), text(o.deadline)];
 
+/** A lock's route is in its frame's name when it has one, so both sides sign the same route or none. */
+const routeItem = (route: readonly string[] | undefined): readonly Rlp[] =>
+  (route === undefined ? [] : [route.map(text)]);
+
 const txItem = (tx: AccountTx): Rlp =>
   match(tx, {
     pay: (t) => [text(t._tag), text(t.token), text(t.amount)],
     set_credit: (t) => [text(t._tag), text(t.token), text(t.limit)],
-    lock: (t) => [text(t._tag), text(t.token), holdItem(t.hold)],
+    lock: (t) => [text(t._tag), text(t.token), holdItem(t.hold), ...routeItem(t.route)],
     resolve: (t) => [text(t._tag), text(t.token), text(t.id), t.secret],
     cancel: (t) => [text(t._tag), text(t.token), text(t.id)],
     expire: (t) => [text(t._tag), text(t.token), text(t.id)],

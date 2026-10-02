@@ -44,6 +44,11 @@
    "kind": "test",
    "layer": "ts",
    "name": "R-J-COLLATERAL-NO-LEDGER the tokens kept for an Account are bounded; the one past the bound is told"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-J-COLLATERAL-NO-LEDGER dust in 128 tokens does not crowd out a token the Account has a ledger for"
   }
  ]
 }

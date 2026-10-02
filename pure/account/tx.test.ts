@@ -8,7 +8,7 @@ import {
   type TokenId,
 } from "./model.ts";
 import { emptyAccount, ledgerOf, openHolds, withLedger } from "./state.ts";
-import { applyTx, type AccountTx, type Judge } from "./tx.ts";
+import { applyTx, MAX_ROUTE_HOPS, type AccountTx, type Judge } from "./tx.ts";
 
 const refused = (fault: AccountFault): Result<never, AccountFault> => err(fault);
 
@@ -40,6 +40,16 @@ const holds = (token: TokenId, n: number, from: number): readonly AccountTx[] =>
   Array.from({ length: n }, (_, i) => lockOn(token, holdOf("left", 1n, BigInt(from + i), DEADLINE, from + i)));
 
 describe("account/tx", () => {
+  test("R-LOCK-ROUTE a lock's route is at most MAX_ROUTE_HOPS ids and changes nothing else about the lock", () => {
+    const hold = holdOf("left", 5n, 1n, DEADLINE, 1);
+    const routed = (hops: number): AccountTx =>
+      ({ _tag: "lock", token: GOLD, hold, route: Array.from({ length: hops }, () => "x") });
+    expect(applyTx(bothTokens, judge, "left", routed(MAX_ROUTE_HOPS + 1))).toEqual(
+      refused({ _tag: "route_too_long", hops: MAX_ROUTE_HOPS + 1, max: MAX_ROUTE_HOPS }));
+    expect(applyTx(bothTokens, judge, "left", routed(MAX_ROUTE_HOPS))).toEqual(
+      applyTx(bothTokens, judge, "left", lockOn(GOLD, hold)));
+  });
+
   test("a token with no entry is the empty ledger, and a refused tx leaves the state as it was", () => {
     expect(ledgerOf(emptyAccount, GOLD).holds).toEqual([]);
     expect(applyTx(emptyAccount, judge, "left", { _tag: "pay", token: GOLD, amount: 1n })).toEqual(

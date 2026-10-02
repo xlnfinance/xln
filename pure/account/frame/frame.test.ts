@@ -62,6 +62,17 @@ describe("account/frame the round", () => {
     expect(propose(rules, queue(sent.replica, pay(2n))).sent).toEqual([]);
   });
 
+  test("R-LOCK-ROUTE a lock's route is in the frame's name: a different route, or none, is a different frame", () => {
+    const lock = (route?: readonly string[]): AccountTx => ({
+      _tag: "lock", token: GOLD, hold: holdOf("left", 5n, 1n, 105n, 1), ...(route === undefined ? {} : { route }),
+    });
+    const named = (route?: readonly string[]) => frameName({ ...FIRST, txs: [lock(route)] });
+    expect(named(["0x01"])).toBe(named(["0x01"]));
+    expect(named(["0x01"])).not.toBe(named(["0x02"]));
+    expect(named(["0x01"])).not.toBe(named(["0x01", "0x02"]));
+    expect(named(["0x01"])).not.toBe(named());
+  });
+
   test("a frame is named by its parent and its txs: equal frames agree and any difference changes the name", () => {
     const f = { ...FIRST, txs: [pay(1n)] };
     expect(frameName({ ...f })).toBe(frameName(f));

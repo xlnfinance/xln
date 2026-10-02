@@ -20,14 +20,19 @@ export const epochAdvanced = (f: ChainFacts, epoch: bigint, stored: bigint): Cha
   (epoch <= f.epoch ? f : { ...f, epoch, stored, frames: 0n, disputed: false, frozen: false });
 
 /**
- * What the chain holds for a token, kept as it stands. The Entity keeps no more tokens than a proof body can carry,
- * so a peer that puts dust in many tokens fills a row each and no more: the token past the cap is `undefined`, to be
- * told.
+ * What the chain holds for a token, kept as it stands. A token the Account has a ledger for is always kept: the proof
+ * already bounds those. The Entity keeps no more than a proof body can carry of the others, so a peer that puts dust in
+ * many tokens fills a row each and no more, and cannot crowd out a token with a ledger: the token past the cap is
+ * `undefined`, to be told.
  */
-export const keepHolding = (f: ChainFacts, token: TokenId, held: Held): ChainFacts | undefined =>
-  (f.held.has(token) || f.held.size < MAX_PROOF_TOKENS
+export const keepHolding = (
+  f: ChainFacts, token: TokenId, held: Held, ledgered: ReadonlySet<TokenId>,
+): ChainFacts | undefined => {
+  const unledgered = [...f.held.keys()].filter((t) => !ledgered.has(t)).length;
+  return ledgered.has(token) || f.held.has(token) || unledgered < MAX_PROOF_TOKENS
     ? { ...f, held: new Map([...f.held, [token, held]]) }
-    : undefined);
+    : undefined;
+};
 
 /** One more frame is co-signed in this epoch. */
 export const framed = (f: ChainFacts): ChainFacts => ({ ...f, frames: f.frames + 1n });

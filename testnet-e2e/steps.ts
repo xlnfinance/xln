@@ -329,30 +329,25 @@ const htlc: Step<World> = {
     const hashlock = keccakHex(secret);
     const amount = 10n * unit(chain);
     const at = net.view();
-    const deadlines = [at + 30n, at + 20n, at + 10n];
+    const deadline = at + 30n;
     const offBefore = hops.map(([a, b]) => ledgerOf(net.account(eid(a), eid(b)).state, t).offdelta);
-    // Forward: each payer locks on its hop with a shorter deadline than the hop before (a hand-written forwarder, gap `htlc-route`).
-    for (const [i, [payer, payee]] of hops.entries()) {
-      const hold = { id: holdId(1n), payer: net.account(eid(payer), eid(payee)).side, amount, hashlock, deadline: must(jHeight(deadlines[i]!), "deadline") };
-      await net.tell(eid(payer), { _tag: "lock", peer: eid(payee), token: t, hold });
-      await net.settle();
-    }
-    const open = hops.map(([a, b]) => ledgerOf(net.account(eid(a), eid(b)).state, t).holds.length);
-    if (open.some((n) => n !== 1)) throw new Error(`expected one open clause on each hop, found ${open.join(",")}`);
-    // Backward: the payee of each hop shows the secret, starting with bob.
-    for (const [payer, payee] of [...hops].reverse()) {
-      await net.tell(eid(payee), { _tag: "resolve", peer: eid(payer), token: t, id: holdId(1n), secret });
-      await net.settle();
-    }
+    // Bob asks for the payment (an invoice: the hashlock, his secret, what he wants and from whom), and alice's one lock,
+    // which names the route after its first hop, is all that is sent: each hub's Entity forwards by itself.
+    await net.tell(eid(bob), { _tag: "expect", hashlock, from: eid(hubY), token: t, amount, secret });
+    const hold = { id: holdId(1n), payer: net.account(eid(alice), eid(hubX)).side, amount, hashlock, deadline: must(jHeight(deadline), "deadline") };
+    await net.tell(eid(alice), { _tag: "lock", peer: eid(hubX), token: t, hold, route: [eid(hubY), eid(bob)] });
+    await net.settle();
     const checks = hops.map(([payer, payee], i) => {
       const [rp, rq] = [net.account(eid(payer), eid(payee)), net.account(eid(payee), eid(payer))];
       const l = ledgerOf(rp.state, t);
       const expected = offBefore[i]! + (rp.side === "left" ? -amount : amount);
       if (rp.head !== rq.head || l.holds.length !== 0 || l.offdelta !== expected) throw new Error(`${payer.name}-${payee.name}: holds ${l.holds.length}, offdelta ${l.offdelta}, expected ${expected}`);
-      return `${payer.name} to ${payee.name}: lock deadline view+${deadlines[i]! - at}, resolved by ${payee.name}, both Runtimes at head ${rp.head.slice(0, 12)}, payer's allocation fell by ${fmt(chain, amount)}`;
+      return `${payer.name} to ${payee.name}: locked by the Entity of ${payer.name}, resolved by ${payee.name}, both Runtimes at head ${rp.head.slice(0, 12)}, offdelta moved ${fmt(chain, amount)} toward the payee`;
     });
+    const left = [hubX, hubY, bob].map((p) => net.entity(eid(p)).paybook.size);
+    if (left.some((n) => n !== 0)) throw new Error(`paybook entries left after the payment: ${left.join(",")}`);
     quiet(net, [alice, hubX, hubY, bob], "htlc");
-    return { checks: [`hashlock ${hashlock.slice(0, 12)} on three hops through the Entities' lock and resolve commands, J view ${at}, deadlines step down toward bob`, ...checks, "hubs end flat: each received 10 on one Account and paid 10 on the next (no fee modelled)"], gaps: ["htlcRoute"] };
+    return { checks: [`hashlock ${hashlock.slice(0, 12)}: alice's one lock at J view ${at} (deadline view+${deadline - at}) named the route hubY, bob and became a lock on each hop made by the hubs' own Entities (their deadlines one hop apart are checked by the paybook tests, not here: the holds are gone when this step looks), and bob's resolve came back hop by hop`, ...checks, "hubs end flat: each received 10 on one Account and paid 10 on the next (no fee modelled)"], gaps: [] };
   },
 };
 

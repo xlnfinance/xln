@@ -3,7 +3,7 @@
 import { describe, expect, test } from "bun:test";
 import { holdOf, secretOf } from "../../../account/fixtures.ts";
 import type { Hold, Offer } from "../../../account/model.ts";
-import type { AccountTx } from "../../../account/tx.ts";
+import { MAX_ROUTE_HOPS, type AccountTx } from "../../../account/tx.ts";
 import type { Outbound } from "../../../entity/model.ts";
 import { GOLD } from "../../../runtime/fixtures.ts";
 import { aliceRun, ALICE, BOB, bobRun, walOf } from "../fixtures.ts";
@@ -29,6 +29,7 @@ const ALL_TXS: readonly AccountTx[] = [
   { _tag: "pay", token: GOLD, amount: 5n },
   { _tag: "set_credit", token: GOLD, limit: 2n ** 200n },
   { _tag: "lock", token: GOLD, hold: HOLD },
+  { _tag: "lock", token: GOLD, hold: HOLD, route: [ALICE, BOB] },
   { _tag: "resolve", token: GOLD, id: HOLD.id, secret: secretOf(1) },
   { _tag: "cancel", token: GOLD, id: HOLD.id },
   { _tag: "expire", token: GOLD, id: HOLD.id },
@@ -97,6 +98,16 @@ describe("host/shell/wire what a stranger can write is refused at the first wron
     expect(badTx({ _tag: "nope" })).toMatchObject({ at: "$.msg.frame.txs[0]" });
     expect(first(wire({ ...base, to: "bob" }))).toEqual({ _tag: "bad_shape", at: "$.to", want: "entity id" });
     expect(first(wire({ ...base, extra: 1 }))).toMatchObject({ _tag: "bad_shape", at: "$" });
+  });
+
+  test("R-LOCK-ROUTE a lock's route is a list of entity ids at most MAX_ROUTE_HOPS long, and nothing else", () => {
+    const lock = (route: unknown) => badTx({ _tag: "lock", token: GOLD, hold: HOLD, route });
+    expect(lock(Array.from({ length: MAX_ROUTE_HOPS }, () => ALICE))).toBeUndefined();
+    expect(lock(Array.from({ length: MAX_ROUTE_HOPS + 1 }, () => ALICE)))
+      .toMatchObject({ _tag: "bad_shape", at: "$.msg.frame.txs[0].route" });
+    expect(lock([ALICE, "bob"])).toEqual({ _tag: "bad_shape", at: "$.msg.frame.txs[0].route[1]", want: "entity id" });
+    expect(lock("alice")).toMatchObject({ _tag: "bad_shape", at: "$.msg.frame.txs[0].route" });
+    expect(badTx({ _tag: "lock", token: GOLD, hold: HOLD, route: [], extra: 1 })).toMatchObject({ _tag: "bad_shape" });
   });
 
   test("the epoch and first nonce of a frame are unsigned bigints, both present, and cross unchanged", () => {

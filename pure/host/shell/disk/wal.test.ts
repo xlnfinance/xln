@@ -2,7 +2,9 @@
 import { describe, expect, test } from "bun:test";
 import { ok } from "../../../kernel/core/result.ts";
 import { concat } from "../../../kernel/encoding/bytes.ts";
+import { holdOf, secretOf } from "../../../account/fixtures.ts";
 import type { Row } from "../../../runtime/model.ts";
+import { entityOf, GOLD } from "../../../runtime/fixtures.ts";
 import { aliceRun, ALICE, walOf } from "../fixtures.ts";
 import { recordOf, scanWal } from "./wal.ts";
 
@@ -84,5 +86,15 @@ describe("host/shell/wal the rows of a file, and how it ended", () => {
 
   test("a row that has no exact text is not written", () => {
     expect(recordOf(Object.assign({}, last, { notices: [new Map()] }))).toMatchObject({ ok: false });
+  });
+  test("R-LOCK-ROUTE a row that holds a lock with a route and the paybook's commands comes back unchanged", () => {
+    const hashlock = `0x${"cd".repeat(32)}`;
+    const inputs = [
+      { _tag: "lock", peer: ALICE, token: GOLD, hold: holdOf("left", 30n, 1n, 115n, 1), route: [ALICE, entityOf(3)] },
+      { _tag: "forward", hashlock, from: ALICE, to: entityOf(3) },
+      { _tag: "expect", hashlock, from: ALICE, token: GOLD, amount: 7n, secret: secretOf(1) },
+    ];
+    const routed = Object.assign({}, last, { input: { _tag: "entity", at: 5n, to: ALICE, inputs } });
+    expect(scanWal(file(routed as Row))).toMatchObject({ ok: true, value: { rows: [routed], tail: "clean" } });
   });
 });

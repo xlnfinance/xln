@@ -46,10 +46,28 @@ export type EntityState = Readonly<{
   waiting: ReadonlyMap<EntityId, JView>;
   revealed: ReadonlyMap<EntityId, readonly string[]>;
   chain: ReadonlyMap<EntityId, ChainFacts>;
+  paybook: Paybook;
 }>;
 
 export const emptyEntity = (id: EntityId): EntityState =>
-  ({ id, accounts: new Map(), waiting: new Map(), revealed: new Map(), chain: new Map() });
+  ({ id, accounts: new Map(), waiting: new Map(), revealed: new Map(), chain: new Map(), paybook: new Map() });
+
+/**
+ * What the Entity does about an HTLC that is, or will be, locked to it, by hashlock (one is open per hashlock in an
+ * Account, R-ONE-LOCK-PER-HASH). `forward` waits for a lock from `from` and then locks on `to` with a shorter
+ * deadline and `route`, the hops after `to` (a lock that came with a route makes the entry itself); `locked` is that
+ * lock, queued, waiting for `to` to resolve or cancel; `pass` and `fail` are what `to` answered, to be passed on to
+ * `from`; `receive` is a payment this Entity is the payee of, resolved on the lock of `from` when it is for the token
+ * and amount that was asked.
+ */
+export type Entry =
+  | Tagged<"forward", { from: EntityId; to: EntityId; route: readonly EntityId[] }>
+  | Tagged<"locked", { from: EntityId; to: EntityId; token: TokenId; id: HoldId }>
+  | Tagged<"pass", { from: EntityId; secret: Uint8Array }>
+  | Tagged<"fail", { from: EntityId }>
+  | Tagged<"receive", { from: EntityId; token: TokenId; amount: bigint; secret: Uint8Array }>;
+
+export type Paybook = ReadonlyMap<string, Entry>;
 
 /** Response windows in seconds, one per side, as the signed proofs of an Account carry them. */
 export type Windows = Readonly<{ left: bigint; right: bigint }>;
@@ -108,7 +126,7 @@ export type Hook = Tagged<"resend_due", { peer: EntityId }>;
 export type AccountCommand =
   | Tagged<"set_credit", { peer: EntityId; token: TokenId; limit: bigint }>
   | Tagged<"pay", { peer: EntityId; token: TokenId; amount: bigint }>
-  | Tagged<"lock", { peer: EntityId; token: TokenId; hold: Hold }>
+  | Tagged<"lock", { peer: EntityId; token: TokenId; hold: Hold; route?: readonly EntityId[] }>
   | Tagged<"resolve", { peer: EntityId; token: TokenId; id: HoldId; secret: Uint8Array }>
   | Tagged<"cancel", { peer: EntityId; token: TokenId; id: HoldId }>
   | Tagged<"expire", { peer: EntityId; token: TokenId; id: HoldId }>
@@ -129,7 +147,12 @@ export type ChainCommand =
   | Tagged<"set_windows", { peer: EntityId; windows: Windows }>
   | Tagged<"withdraw", { peer: EntityId; token: TokenId; amount: bigint }>;
 
-export type Command = Tagged<"open_account", { peer: EntityId }> | AccountCommand | ChainCommand;
+/** What an Entity is told about a payment that passes through it, before the lock for it arrives. */
+export type PaybookCommand =
+  | Tagged<"forward", { hashlock: string; from: EntityId; to: EntityId }>
+  | Tagged<"expect", { hashlock: string; from: EntityId; token: TokenId; amount: bigint; secret: Uint8Array }>;
+
+export type Command = Tagged<"open_account", { peer: EntityId }> | AccountCommand | ChainCommand | PaybookCommand;
 
 export type EntityInput = Arrival | Hook | Command;
 
@@ -163,7 +186,8 @@ export type EntityFault =
   | Tagged<"windows_shorten", { current: Windows }>
   | Tagged<"already_cosigned">
   | Tagged<"frame_in_flight">
-  | Tagged<"unfolded_c2r", { folds: readonly Fold[] }>;
+  | Tagged<"unfolded_c2r", { folds: readonly Fold[] }>
+  | Tagged<"entry_exists", { hashlock: string }>;
 
 /** What the owner of an input is told when it did not take effect. */
 export type Notice =

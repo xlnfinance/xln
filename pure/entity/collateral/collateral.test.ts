@@ -170,4 +170,13 @@ describe("entity/frame the token list is changed by a signed frame only (R-J-COL
     expect(over.state.chain.get(BOB)?.held.size).toBe(128);
     expect(runAt(flooded.alice, [held(BOB, tokenOf(10n), 9n, 9n)]).notices).toEqual([]);
   });
+
+  test("R-J-COLLATERAL-NO-LEDGER dust in 128 tokens does not crowd out a token the Account has a ledger for", () => {
+    const flooded = dust(base(), 128n);
+    expect(runAt(flooded.alice, [held(BOB, GOLD, 40n, 40n)]).notices).toEqual([]);
+    const after = say(flooded, "alice", held(BOB, GOLD, 40n, 40n));
+    expect(ledgerOfToken(after, "alice", GOLD)).toMatchObject({ collateral: 40n, ondelta: 40n });
+    const both = dust(say(base(), "alice", held(BOB, GOLD, 40n, 40n)), 128n);
+    expect(both.alice.chain.get(BOB)?.held.size).toBe(129);
+  });
 });

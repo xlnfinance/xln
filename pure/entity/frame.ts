@@ -16,12 +16,14 @@ import {
   withWindows,
 } from "./chain.ts";
 import { entityRules, type EntityRules } from "./rules.ts";
+import { hashlocksOf, intentFor, learned, withEntry, type Intent } from "./paybook/paybook.ts";
 import { askedOf, cosignFault, foldsOf, withdrawalOf } from "./cosign.ts";
 import type { AccountTx, Judge } from "../account/tx.ts";
 import {
   sideOf, type AccountCommand, type Arrival, type ChainCommand, type ChainFacts, type Command, type CosignAsk,
-  type EntityFault, type EntityId, type EntityInput, type EntityReplica, type EntityState, type Hook, type JAction,
-  type JEvent, type Notice, type Outbound, type PeerFault, type PeerMessage,
+  type EntityFault, type Entry, type EntityId, type EntityInput, type EntityReplica, type EntityState, type Hook,
+  type JAction,
+  type JEvent, type Notice, type Outbound, type PaybookCommand, type PeerFault, type PeerMessage,
 } from "./model.ts";
 
 export type Frame = Readonly<{
@@ -89,6 +91,12 @@ const cosigned = (outcome: Outcome<PeerFault>, own: EntityReplica["pending"], fa
   outcome._tag === "accepted" || outcome._tag === "accepted_over_own"
   || (outcome._tag === "committed_own" && own?.frame.epoch === facts.epoch);
 
+/** A frame of the peer that was taken tells the paybook what the peer answered to the locks made to it. */
+const takenFrom = (w: Work, a: PeerMessage, outcome: Outcome<PeerFault>): Work =>
+  (a.msg._tag === "frame" && (outcome._tag === "accepted" || outcome._tag === "accepted_over_own")
+    ? { ...w, state: { ...w.state, paybook: learned(w.state.paybook, a.from, a.msg.frame.txs) } }
+    : w);
+
 const hearing = (rules: Rulebook, view: JView, w: Work, a: PeerMessage): Work => {
   const account = w.state.accounts.get(a.from);
   if (account === undefined) return noting(w, { _tag: "unknown_peer", from: a.from });
@@ -98,7 +106,8 @@ const hearing = (rules: Rulebook, view: JView, w: Work, a: PeerMessage): Work =>
   const waiting = waitingForJ(heardBy, a.from, view, heard);
   const facts = factsOf(waiting, a.from);
   const counted = cosigned(heard.outcome, account.pending, facts) ? withFacts(waiting, a.from, framed(facts)) : waiting;
-  return refused === undefined ? counted : noting(counted, { _tag: "message_refused", from: a.from, outcome: refused });
+  const taken = takenFrom(counted, a, heard.outcome);
+  return refused === undefined ? taken : noting(taken, { _tag: "message_refused", from: a.from, outcome: refused });
 };
 
 /**
@@ -120,9 +129,11 @@ const reconciled = (w: Work, peer: EntityId): Work => {
   });
 };
 
-/** The chain's collateral and ondelta for one token, kept; a token past the cap is told and dropped. */
+/** The chain's collateral and ondelta for one token, kept; one with no ledger past the cap is told and dropped. */
 const holding = (w: Work, e: Extract<JEvent, { _tag: "j_collateral" }>): Work => {
-  const kept = keepHolding(factsOf(w, e.peer), e.token, { collateral: e.collateral, ondelta: e.ondelta });
+  const ledgered = new Set(w.state.accounts.get(e.peer)?.state.ledgers.keys());
+  const amounts = { collateral: e.collateral, ondelta: e.ondelta };
+  const kept = keepHolding(factsOf(w, e.peer), e.token, amounts, ledgered);
   return kept === undefined
     ? noting(w, { _tag: "holding_dropped", peer: e.peer, token: e.token })
     : reconciled(withFacts(w, e.peer, kept), e.peer);
@@ -199,7 +210,9 @@ const txOf = (self: Side, command: AccountCommand): AccountTx => {
     case "set_credit":
       return { _tag: "set_credit", token: command.token, limit: command.limit };
     case "lock":
-      return { _tag: "lock", token: command.token, hold: command.hold };
+      return command.route === undefined || command.route.length === 0
+        ? { _tag: "lock", token: command.token, hold: command.hold }
+        : { _tag: "lock", token: command.token, hold: command.hold, route: command.route };
     case "resolve":
       return { _tag: "resolve", token: command.token, id: command.id, secret: command.secret };
     case "cancel":
@@ -281,6 +294,17 @@ const chained = (w: Work, command: Exclude<ChainCommand, { _tag: "fund" }>): Wor
   }
 };
 
+/** The paybook takes an entry for a hashlock it has none for: a second one is the caller's mistake, told. */
+const prepared = (w: Work, command: PaybookCommand): Work => {
+  if (w.state.paybook.has(command.hashlock)) {
+    return refusedCommand(w, command, { _tag: "entry_exists", hashlock: command.hashlock });
+  }
+  const entry: Entry = command._tag === "forward"
+    ? { _tag: "forward", from: command.from, to: command.to, route: [] }
+    : { _tag: "receive", from: command.from, token: command.token, amount: command.amount, secret: command.secret };
+  return { ...w, state: { ...w.state, paybook: withEntry(w.state.paybook, command.hashlock, entry) } };
+};
+
 const commanded = (rules: Rulebook, w: Work, command: Command): Work => {
   switch (command._tag) {
     case "open_account":
@@ -291,9 +315,35 @@ const commanded = (rules: Rulebook, w: Work, command: Command): Work => {
     case "set_windows":
     case "withdraw":
       return chained(w, command);
+    case "forward":
+    case "expect":
+      return prepared(w, command);
     default:
       return queued(rules, w, command);
   }
+};
+
+// ---- phase 3b: the paybook
+
+/** One step of the paybook through the Account's door: the entry that stands is the one the door's answer picks. */
+const intended = (rules: Rulebook, w: Work, i: Intent): Work => {
+  const done = queued(rules, w, i.command);
+  const entry = done.notices.length > w.notices.length ? i.refused : i.admitted;
+  return { ...done, state: { ...done.state, paybook: withEntry(done.state.paybook, i.hashlock, entry) } };
+};
+
+/**
+ * What the paybook owes now, asked of the Accounts before they propose, one entry at a time against the state the
+ * entry before it left, so that two payments to one next hop in a frame take two slots. Two rounds: a lock the door
+ * refuses makes a `fail` entry, which the second round turns into a cancel of the lock it was forwarding.
+ */
+const forwarding = (rules: Rulebook, judge: Judge) => (w: Work): Work => {
+  const step = (inner: Work, hashlock: string): Work => {
+    const i = intentFor(inner.state, judge.clock, judge.view, hashlock);
+    return i === undefined ? inner : intended(rules, inner, i);
+  };
+  const round = (acc: Work): Work => hashlocksOf(acc.state).reduce(step, acc);
+  return round(round(w));
 };
 
 // ---- phase 4: proposals
@@ -404,8 +454,9 @@ export const entityFrame = (
   const arrived = arrivalsOf(inputs).reduce((w, a) => arrive(rules, judge.view, w, a), start(state));
   const afterHooks = hooksOf(inputs).reduce(hooked, arrived);
   const afterCommands = commandsOf(inputs).reduce((w, c) => commanded(rules, w, c), afterHooks);
+  const afterPaybook = forwarding(rules, judge)(afterCommands);
   const propose = (w: Work, peer: EntityId): Work => proposing(rules, judge.view, w, peer);
-  const proposed = proposalOrder(afterCommands).reduce(propose, afterCommands);
+  const proposed = proposalOrder(afterPaybook).reduce(propose, afterPaybook);
   const peers = [...proposed.state.accounts.keys()].toSorted();
   const owing = peers.reduce(dutiful(judge), peers.reduce(told, stillWaiting(proposed, judge.view)));
   const done = peers.reduce(reconciled, owing);
