@@ -123,6 +123,14 @@ durable before send, command acknowledged only when durable, a closed list of lo
 
 Properties: `no_equivocation`, `exactly_once_j`, `acked_durable`, `canonical_frames`. 8 mutants.
 
+## The dispute lifecycle of one Account (`dispute.qnt`)
+
+Both Entities, the chain and the frames in flight, as one model (what `chain.qnt`, `entity.qnt` and `account.qnt` show only apart). A proof is its nonce, a frame is a payment. Phases of an Entity: none,
+own start pending, own start registered, peer start seen, counter pending, counter registered, counter lapsed, window over; the chain's side is skip versus revert, the epoch move and the finalize.
+Four switches say which code is modelled: `FREEZE` (decided), `LIVE` (decided: a counter lapses only on a permanent revert, the starter finalizes with a registered counter), `ACCEPT` (the non-starter that
+holds nothing newer finalizes with the opening proof; not decided), `NOTICE` (R-DISPUTE-VOIDED-NOTICE, owed). Properties: `newest_wins`, `no_lock` (either side alone), `no_silent_zeroing`.
+Result and the nine scenario tests: [DISPUTE.md](DISPUTE.md). Today's code fails all three; the two decided fixes hold `newest_wins` and leave `no_lock` and `no_silent_zeroing` open.
+
 ## What the spec asks of the contracts
 
 | id | request | why | evidence |

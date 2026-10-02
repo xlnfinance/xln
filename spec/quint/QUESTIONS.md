@@ -774,3 +774,10 @@ debt queues and the ghost only, the epoch update, the offdelta fold and the co-s
 that it lands the fold and the forgiveness together; `settle.qnt` has no debt queue. (c) A part-paid head is forgiven for what is left (the claim is the queue entry, with its remaining amount); the J page says the same, I
 have not read the contract for it. (d) A third-party claim is only ever paid out or left: the model has no second Account of the entity, so what the third party does with it, and whether forgiving it there is possible,
 are outside. (e) The model draws a debt on each side from `init` (one claim on the non-debtor side), which `payout`'s shortfall does not create: after a dispute payout only the debtor's queue grows.
+
+**D-dispute. Modelling choices of `dispute.qnt` (2026-10-02, coordinator relay 13:51Z). Three for the coordinator.**
+(1) A proof is its nonce; the equal-nonce rule is `chain.qnt`'s. (2) "Zeroed" is a frame a side committed whose nonce is above the proof that paid; a half-committed frame counts. (3) ACCEPT assumes the non-starter
+holding nothing newer can build the opening body (it holds the same proof, or sealed the frame the starter acked); the log carries only the hash, the start's calldata the body. **Decision needed:** does the Entity
+finalize at once, as a non-starter, with the opening state when it has nothing to counter (`Account.sol` 861-875)? Without it the Account stays locked while the starter is down (`nothingNewerTest`). A second
+one, R-DISPUTE-VOIDED-NOTICE: a frame sealed before the start and acked after, committed on both sides, is zeroed with no notice when the older proof is finalized (`sealedBeforeTheStartTest`); only a notice to both
+sides tells it. Not modelled: the third finalize path (a non-starter with a newer pull-free proof, 817-857), Host drafts (REVIEW-A N4), several tokens.
