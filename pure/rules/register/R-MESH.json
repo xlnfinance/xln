@@ -1,6 +1,6 @@
 {
  "id": "R-MESH",
- "statement": "A Runtime holds one connection state per socket and nothing else of it: the Runtime with the smaller id dials, a line is a handshake step or a sealed record, a message goes to its peer's newest connection that is up, and a message with no connection is dropped and counted, never sent on another peer's.",
+ "statement": "A Runtime holds one connection state per socket and nothing else of it: the Runtime with the smaller id dials, once per peer (a peer whose handshake is under way is not dialed again), a line is a handshake step or a sealed record, a message goes to its peer's newest connection that is up, and a message with no connection is dropped and counted, never sent on another peer's.",
  "source": "plan/backlog/e2e.md S3 (the Host's peers over sockets); Q-T-4, Q-T-5",
  "layers": {
   "arrival": "n/a: the Arrival specs run one Runtime's Host core, not the sockets under it",
@@ -19,6 +19,11 @@
    "kind": "test",
    "layer": "ts",
    "name": "R-MESH a handshake in lines leaves both ends up, and a closed connection is wanted again"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-MESH a peer whose handshake is under way is not dialed again, and is once its connection closes"
   },
   {
    "kind": "test",

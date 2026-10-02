@@ -665,12 +665,12 @@ const nodes: Step<World> = {
     if (rb.pending !== undefined || rb.head !== ry.head || ledgerOf(rb.state, t).limit[rb.side === "left" ? "right" : "left"] !== 60n * unit(chain)) throw new Error("bob's frame did not settle on one head after hubY's restart");
     if (fingerprint(y) !== prints) throw new Error("hubY's Accounts changed when the copy of the frame arrived: a frame it already holds must change nothing");
     // The copy of bob's frame is a row of its own on hubY's disk, and the ack it answers with names the head hubY committed before the crash.
+    // Bob's timer sends the frame again at every second tick until his pending clears, so more than one copy can be on its way before the first ack gets back: each copy is a row, and each is answered the same.
     const after = net.rowsOf(y).slice(rows);
     const answers = after.flatMap((r) => r.outputs.filter((o) => o.to === b && o.msg._tag === "ack"));
-    const [heard] = after;
-    const copy = heard?.input._tag === "entity" ? heard.input.inputs.some((i) => i._tag === "peer_message" && i.from === b && i.msg._tag === "frame" && i.msg.frame.parent === pending.frame.parent && i.msg.frame.slot === pending.frame.slot) : false;
-    if (after.length !== 1 || !copy) throw new Error(`hubY's rows after the restart are not just bob's frame heard again: ${after.map((r) => r.input._tag).join(", ") || "none"}`);
-    if (answers.length !== 1 || answers[0]!.msg._tag !== "ack" || answers[0]!.msg.hash !== headBefore) throw new Error("hubY did not answer the copy of bob's frame with the ack of the head it committed before the crash");
+    const isCopy = (r: (typeof after)[number]): boolean => r.input._tag === "entity" && r.input.inputs.length === 1 && r.input.inputs.every((i) => i._tag === "peer_message" && i.from === b && i.msg._tag === "frame" && i.msg.frame.parent === pending.frame.parent && i.msg.frame.slot === pending.frame.slot);
+    if (after.length === 0 || !after.every(isCopy)) throw new Error(`hubY's rows after the restart are not just bob's frame heard again: ${after.map((r) => (r.input._tag === "entity" ? `entity[${r.input.inputs.map((i) => i._tag).join(" ")}]` : r.input._tag)).join(", ") || "none"}`);
+    if (answers.length !== after.length || answers.some((a) => a.msg._tag !== "ack" || a.msg.hash !== headBefore)) throw new Error("hubY did not answer each copy of bob's frame with the ack of the head it committed before the crash");
     if (pending.head !== headBefore || rb.head !== headBefore) throw new Error("bob's pending frame did not clear on the ack of the head it was waiting for");
     const noticesNow = everyone.flatMap((p, i) => net.noticesOf(eid(p)).slice(noticed[i]!).map((n) => `${p.name}: ${n}`));
     if (noticesNow.length > 0) throw new Error(`a copy of a frame a peer already holds is answered, not refused: ${noticesNow.join(", ")}`);
@@ -678,7 +678,7 @@ const nodes: Step<World> = {
     return {
       checks: [
         `hubY lost power (no stop, no clean close of its files) and restarted from its ${rows} durable rows alone with bob's frame committed and its ack lost: its Accounts (heads, slots, ledgers) are equal to what they were, and its ${net.askedBy(y).length} chain actions are asked again`,
-        `bob's resend timer sent the same pending frame again (parent and slot equal); it is the one new row on hubY's disk, answered by one ack of head ${headBefore.slice(0, 12)}, the head bob was waiting for; no notice: one head on both sides (${rb.head.slice(0, 12)}), nothing pending, and the copy changed no Account`,
+        `bob's resend timer sent the same pending frame again (parent and slot equal); hubY heard it ${after.length} time${after.length === 1 ? "" : "s"} (each a row of its own on its disk, the timer repeating until bob's pending clears), each answered by an ack of head ${headBefore.slice(0, 12)}, the head bob was waiting for; no notice: one head on both sides (${rb.head.slice(0, 12)}), nothing pending, and the copy changed no Account`,
       ],
       gaps: [],
     };

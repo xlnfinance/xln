@@ -35,9 +35,22 @@ const withConn = (mesh: Mesh, conn: ConnId, state: Conn): Mesh =>
 /** The pair is dialed by the Runtime with the smaller id: the one connection both sides agree to make. */
 export const dials = (mesh: Mesh, peer: Peer): boolean => mesh.self.runtime < peer.runtime;
 
-/** The peers this Runtime dials, which are the ones that are not up. */
+/** The Runtimes that have a connection to this one in any state past the first line: under way or up. */
+const meeting = (mesh: Mesh): readonly RuntimeId[] =>
+  [...mesh.conns.values()].flatMap((state) => {
+    switch (state._tag) {
+      case "fresh": return [];
+      case "up": return [state.session.peer.runtime];
+      default: return [state.peer.runtime];
+    }
+  });
+
+/**
+ * The peers this Runtime dials: the ones with no connection, up or still in its handshake. A second dial while the
+ * first one is answering would end with two connections up to one peer.
+ */
 export const wanted = (mesh: Mesh): readonly Peer[] =>
-  mesh.table.filter((peer) => dials(mesh, peer) && !linked(mesh).includes(peer.runtime));
+  mesh.table.filter((peer) => dials(mesh, peer) && !meeting(mesh).includes(peer.runtime));
 
 /** A connection this Runtime opened to `peer`: the hello to write on it. */
 export const dialed = (

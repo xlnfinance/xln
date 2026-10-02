@@ -59,6 +59,15 @@ describe("host/shell/mesh a pair of Runtimes connects once, from the lower id", 
   });
 });
 
+describe("host/shell/mesh a handshake under way is a connection", () => {
+  test("R-MESH a peer whose handshake is under way is not dialed again, and is once its connection closes", () => {
+    const hello = dialed(startMesh(LOW, TABLE), TABLE[1] as Peer, 1, nonce(1));
+    expect(linked(hello.mesh)).toEqual([]);
+    expect(wanted(hello.mesh)).toEqual([]);
+    expect(wanted(closed(hello.mesh, 1)).map((p) => p.runtime)).toEqual([HIGH.runtime]);
+  });
+});
+
 describe("host/shell/mesh a message goes to the connection of the peer that speaks for its Entity", () => {
   test("R-MESH a message is sealed on the peer's connection, and arrives at the peer's Host from the peer", () => {
     const { alice, bob } = connected();
