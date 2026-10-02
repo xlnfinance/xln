@@ -284,6 +284,18 @@ describe("runtime/chain R-DISPUTE-FREEZE a frame the peer refused and holds sign
     expect(same(after)).toBe(true);
   });
 
+  test("R-DISPUTE-FREEZE a Host that restarts between the rollback and the finalize still names the frame", () => {
+    const { c, hashA } = rolledBack();
+    const back = settle(restarted(c, ALICE));
+    expect(replicaOf(back, ALICE).unsuperseded).toStrictEqual(replicaOf(c, ALICE).unsuperseded);
+    const asked = disputed(back);
+    const after = retried(frozenBob(moved(asked, 1n, startedAt(asked) + 1n, hashA), THAWED), ALICE);
+    expect(offdeltas(after)).toStrictEqual([0n, 0n]);
+    expect([replicaOf(after, ALICE).pending, replicaOf(after, ALICE).mempool]).toStrictEqual([undefined, []]);
+    expect(pendingTold(after, ALICE).map((n) => n.fate)).toStrictEqual(["paid_on_chain"]);
+    expect(same(after)).toBe(true);
+  });
+
   test("R-DISPUTE-FREEZE a later frame that shares the paid payment is sealed again with only the rest", () => {
     const { c, hashA } = rolledBack();
     const later = { ...rise(feed(c, ALICE, pay(BOB, 3n)), ALICE, 111n), inflight: [] };
@@ -402,6 +414,14 @@ describe("runtime/chain R-DISPUTE-FREEZE the finalized nonce is that of the proo
       peer: BOB, epoch: 1n, finalizedNonce: stale, fate: "resent_in_new_epoch",
     }]);
     expect((pendingTold(after, ALICE)[0]?.nonce ?? 0n) > stale).toBe(true);
+  });
+
+  test("R-DISPUTE-FREEZE a pending payment the chain did not pay by is sent again and commits in the new epoch", () => {
+    const lost = disputed(frameLost(paid, ALICE, 5n));
+    const after = settle(rise(retried(finalizedByStart(lost), ALICE), ALICE, 112n));
+    expect([offdeltas(after), same(after)]).toStrictEqual([[-5n, -5n], true]);
+    expect(replicaOf(after, ALICE).pending).toBeUndefined();
+    expect(pendingTold(after, ALICE).map((n) => n.fate)).toStrictEqual(["resent_in_new_epoch"]);
   });
 
   test("R-DISPUTE-FREEZE a pending frame the chain paid by is dropped, never sealed again: no double payment", () => {
