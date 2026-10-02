@@ -45,21 +45,21 @@ const offer: Command = {
 const fill: Command = { _tag: "fill", peer: BOB.id, id: holdId(7n), ratio: 1 };
 
 describe("entity/signing R-DISPUTE-FREEZE an Account in dispute proposes nothing, on either side", () => {
-  test("a tx queued while a dispute against the node is open waits: no frame goes to the peer", () => {
+  test("R-DISPUTE-FREEZE a tx queued while a dispute against the node is open waits: no frame goes to the peer", () => {
     expect(run(committed.bob, credit(ALICE.id, 80n)).outputs).toHaveLength(1);
     const waiting = run(bobDisputed, credit(ALICE.id, 80n));
     expect(waiting.outputs).toEqual([]);
     expect(waiting.notices).toEqual([]);
   });
 
-  test("the same holds for the starter of the dispute, as soon as it asks for the start", () => {
+  test("R-DISPUTE-FREEZE the same holds for the starter of the dispute, as soon as it asks for the start", () => {
     expect(run(committed.alice, credit(BOB.id, 20n)).outputs).toHaveLength(1);
     const waiting = run(started.state, credit(BOB.id, 20n));
     expect(waiting.outputs).toEqual([]);
     expect(waiting.notices).toEqual([]);
   });
 
-  test("a frame the peer proposes meanwhile is refused with the frozen fault, which can pass", () => {
+  test("R-DISPUTE-FREEZE a frame the peer proposes meanwhile is refused with the frozen fault, which can pass", () => {
     const proposed = run(committed.alice, credit(BOB.id, 20n)).outputs[0] ?? expect.unreachable("no frame");
     const heard = run(bobDisputed, signed(ALICE, proposed));
     const answer = heard.outputs[0]?.msg ?? expect.unreachable("no answer");
@@ -69,12 +69,12 @@ describe("entity/signing R-DISPUTE-FREEZE an Account in dispute proposes nothing
     expect(calm.outputs[0]?.msg._tag).toBe("ack");
   });
 
-  test("only the Account in dispute stops: the others still propose", () => {
+  test("R-DISPUTE-FREEZE only the Account in dispute stops: the others still propose", () => {
     const carol = run(bobDisputed, open(CAROL), credit(CAROL, 5n));
     expect(carol.outputs.map((o) => o.to)).toEqual([CAROL]);
   });
 
-  test("the epoch moving on, or the dispute being over, ends it and the queue goes out", () => {
+  test("R-DISPUTE-FREEZE the epoch moving on, or the dispute being over, ends it and the queue goes out", () => {
     const queued = run(bobDisputed, credit(ALICE.id, 80n)).state;
     const moved = run(queued, { _tag: "j_epoch", peer: ALICE.id, epoch: 1n, stored: 9n });
     expect(moved.outputs).toHaveLength(1);
@@ -82,14 +82,14 @@ describe("entity/signing R-DISPUTE-FREEZE an Account in dispute proposes nothing
     expect(over.outputs).toHaveLength(1);
   });
 
-  test("a dispute the Host dropped, because its start would revert, ends it too", () => {
+  test("R-DISPUTE-FREEZE a dispute the Host dropped, because its start would revert, ends it too", () => {
     const lapsed = run(started.state, { _tag: "j_start_lapsed", peer: BOB.id, nonce: start.nonce });
     expect(run(lapsed.state, credit(BOB.id, 20n)).outputs).toHaveLength(1);
   });
 });
 
 describe("entity/signing R-DISPUTE-FREEZE a command that takes on value is refused back, a release waits", () => {
-  test("a payment, a lock, an offer and a fill asked while a dispute is open are refused with a notice", () => {
+  test("R-DISPUTE-FREEZE a payment, a lock, an offer and a fill asked while a dispute is open are refused with a notice", () => {
     [started.state, bobDisputed].forEach((state, i) => {
       const peer = i === 0 ? BOB.id : ALICE.id;
       const asked = [pay(peer, 5n), { ...lock, peer }, { ...offer, peer }, { ...fill, peer }];
@@ -99,13 +99,13 @@ describe("entity/signing R-DISPUTE-FREEZE a command that takes on value is refus
     });
   });
 
-  test("the same payment on an Account with no dispute is taken", () => {
+  test("R-DISPUTE-FREEZE the same payment on an Account with no dispute is taken", () => {
     const done = run(committed.alice, pay(BOB.id, 5n));
     expect(refusals(done.notices)).toEqual([]);
     expect(done.outputs).toHaveLength(1);
   });
 
-  test("a release or a credit limit is not refused for the dispute, and nothing is sealed for it", () => {
+  test("R-DISPUTE-FREEZE a release or a credit limit is not refused for the dispute, and nothing is sealed for it", () => {
     const releases: readonly Command[] = [
       { _tag: "resolve", peer: BOB.id, token: GOLD, id: holdId(1n), secret: new Uint8Array(32) },
       { _tag: "cancel", peer: BOB.id, token: GOLD, id: holdId(1n) },
@@ -118,7 +118,7 @@ describe("entity/signing R-DISPUTE-FREEZE a command that takes on value is refus
     expect(done.outputs).toEqual([]);
   });
 
-  test("once the dispute is over the payment is taken again", () => {
+  test("R-DISPUTE-FREEZE once the dispute is over the payment is taken again", () => {
     const over = run(started.state, { _tag: "j_dispute_over", peer: BOB.id }).state;
     const done = run(over, pay(BOB.id, 5n));
     expect(refusals(done.notices)).toEqual([]);

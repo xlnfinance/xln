@@ -525,27 +525,28 @@ const dispute: Step<World> = {
     // for the start itself (R-DISPUTE-START); the harness only reads what the node asked and what the chain did.
     const before = net.askedBy(a).length;
     const fromBlock = (await chain.provider.getBlockNumber()) + 1;
-    await net.tell(a, { _tag: "dispute", peer: x });
-    await net.settle();
-    const asks = net.askedBy(a).slice(before).flatMap((ask) => (ask._tag === "dispute_start" ? [ask] : []));
-    const ask = asks[0];
-    if (asks.length !== 1 || ask === undefined) throw new Error(`alice's node asked for ${asks.length} dispute starts, expected one`);
-    if (ask.nonce !== nonce || ask.epoch !== onChain.epoch || ask.proposerIsLeft !== authorIsLeft || must(proofBodyHash(ask.body), "ask body hash") !== bodyHash) {
-      throw new Error("the dispute start alice's node asked for differs from the proof the head names (nonce, epoch, author or body)");
-    }
-    if (net.account(a, x).used !== replica.used) throw new Error("the dispute start moved alice's Account");
-    if (!(await accountOnChain(chain, alice, hubX)).disputeOpen) throw new Error("no dispute is open after the start");
-    // The chain's clock runs past both windows (anvil: a clock jump, then blocks to make that second final at depth 1); alice's own
-    // node is told by its J loop that the window it waits on is over, and its Entity asks the chain to finalize with what it started from.
-    // A payment is pending when the chain finalizes (R-LEDGER-REBASE): alice pays hubX 5 while the window runs and the link loses alice's
-    // frame on its way, so hubX never commits it (a payment hubX had committed is a newer signed proof: that one is the counter's case, and
-    // hubX would answer the dispute with it). Alice holds the frame pending across the epoch move; it is outside what the chain pays.
+    // A payment is pending when the chain finalizes (R-LEDGER-REBASE): alice pays hubX 5 and the link loses alice's frame on its way, so hubX
+    // never commits it (a payment hubX had committed is a newer signed proof: that one is the counter's case, and hubX would answer the
+    // dispute with it); only then does she start the dispute. A payment asked once the dispute is open is refused back (R-DISPUTE-FREEZE).
+    // Alice holds the frame pending across the epoch move; it is outside what the chain pays.
     const finals = (): number => net.askedBy(a).slice(before).filter((ask) => ask._tag === "dispute_finalize").length;
     await net.losing((m) => m.from === a && m.to === x, async () => {
       await net.tell(a, { _tag: "pay", peer: x, token: t, amount: PENDING_PAY * unit(chain) });
       await net.settle({ pending: true });
       if (net.account(a, x).pending === undefined) throw new Error("alice's payment is not pending: the link did not lose it");
       if (net.account(x, a).used !== replica.used) throw new Error("hubX committed alice's payment: it holds a newer proof than the one the dispute started from");
+      await net.tell(a, { _tag: "dispute", peer: x });
+      await net.settle({ pending: true });
+      const asks = net.askedBy(a).slice(before).flatMap((ask) => (ask._tag === "dispute_start" ? [ask] : []));
+      const ask = asks[0];
+      if (asks.length !== 1 || ask === undefined) throw new Error(`alice's node asked for ${asks.length} dispute starts, expected one`);
+      if (ask.nonce !== nonce || ask.epoch !== onChain.epoch || ask.proposerIsLeft !== authorIsLeft || must(proofBodyHash(ask.body), "ask body hash") !== bodyHash) {
+        throw new Error("the dispute start alice's node asked for differs from the proof the head names (nonce, epoch, author or body)");
+      }
+      if (net.account(a, x).head !== replica.head) throw new Error("the dispute start moved alice's Account");
+      if (!(await accountOnChain(chain, alice, hubX)).disputeOpen) throw new Error("no dispute is open after the start");
+      // The chain's clock runs past both windows (anvil: a clock jump, then blocks to make that second final at depth 1); alice's own
+      // node is told by its J loop that the window it waits on is over, and its Entity asks the chain to finalize with what it started from.
       await advanceTime(chain, Number(2n * floor + 10n));
       for (let tries = 0; tries < 6 && (await accountOnChain(chain, alice, hubX)).disputeOpen; tries += 1) {
         await net.reach(BigInt(await chain.provider.getBlockNumber()), { pending: true });
@@ -793,6 +794,21 @@ const disputeStale: Step<World> = {
       await net.reach(BigInt(await chain.provider.getBlockNumber()), { pending: true });
       const registered = await chain.depository.queryFilter(chain.depository.filters.CounterDisputeRegistered(), fromBlock);
       if (registered.length !== 1) throw new Error(`the chain registered ${registered.length} counters inside the window, expected one`);
+      // R-DISPUTE-FREEZE: inside the window both nodes are asked for a payment on the Account in dispute. Each refuses it back to whoever asked,
+      // with a notice, and seals nothing: no frame, no pending frame, the heads the dispute rests on stay the newest.
+      const frozen = { alice: net.account(a, x), hubX: net.account(x, a) };
+      const [frozenNotices, frozenAsks] = [[a, x].map((id) => net.noticesOf(id).length), [a, x].map((id) => net.askedBy(id).length)];
+      await net.tell(a, { _tag: "pay", peer: x, token: t, amount: unit(chain) });
+      await net.tell(x, { _tag: "pay", peer: a, token: t, amount: unit(chain) });
+      await net.settle({ pending: true });
+      const refusals = [a, x].map((id, i) => net.noticesOf(id).slice(frozenNotices[i]!).filter((n) => n.startsWith("command_refused") && n.includes("account_disputed")).length);
+      const [afterA, afterX] = [net.account(a, x), net.account(x, a)];
+      if (refusals.some((n) => n !== 1)) throw new Error(`payments asked inside the dispute window were refused back ${shown(refusals)} times (alice, hubX), expected once each`);
+      if (afterA.head !== frozen.alice.head || afterX.head !== frozen.hubX.head || afterA.pending?.head !== frozen.alice.pending?.head || afterX.pending !== undefined || ledgerOf(afterX.state, t).offdelta !== newOffdelta) {
+        throw new Error("a node sealed something on the Account while the dispute was open");
+      }
+      const grew = [a, x].map((id, i) => net.askedBy(id).slice(frozenAsks[i]!).filter((ask) => ask._tag !== "counter").length);
+      if (grew.some((n) => n !== 0)) throw new Error(`the nodes asked the chain for ${shown(grew)} new things inside the window, expected none`);
       // Past both windows hubX's node is told the window is over and finalizes with its counter; alice's node, told of the counter, does not.
       await advanceTime(chain, Number(2n * floor + 10n));
       for (let tries = 0; tries < 6 && (await accountOnChain(chain, alice, hubX)).disputeOpen; tries += 1) {
@@ -861,13 +877,14 @@ const disputeStale: Step<World> = {
     const parties = partiesOf(w);
     const now = await heldBy(chain, Object.values(parties), [[alice, hubX], [parties.hubX, parties.hubY], [parties.hubY, parties.bob]]);
     if (now !== w.held) throw new Error(`money is not conserved: ${w.held} before the dispute, ${now} after`);
-    quiet(net, Object.values(parties), "dispute-stale", (n) => n.startsWith("command_refused") && n.includes('"_tag":"dispute"') && n.includes("no_proof"));
+    quiet(net, Object.values(parties), "dispute-stale", (n) => n.startsWith("command_refused") && (n.includes("account_disputed") || (n.includes('"_tag":"dispute"') && n.includes("no_proof"))));
     return {
       checks: [
         `alice funded alice-hubX with ${fmt(chain, funded)} in epoch ${onChain.epoch}; alice paid hubX ${fmt(chain, STALE_PAY * unit(chain))}, hubX committed the frame (slot ${newSlot}) and its ack to alice was lost: hubX holds alice's signature over a head alice never committed`,
         `alice's own node started the dispute from her older head (nonce ${startNonce}); hubX's node, told of it at depth 1, asked for a counter with the newer proof (nonce ${counter.nonce}, restated ${counters.length} time${counters.length === 1 ? "" : "s"}): one CounterDisputeRegistered naming hubX's Entity, sent from hubX's wallet, inside the window; the counter's head is the dispute-proof digest the chain computes for that nonce and epoch`,
         `past both ${floor} s windows hubX's node, told the window was over, finalized with its counter's proof naming the dispute it answers: its journal holds one sealed batch of the counter and one of the finalize, each with its landed answer; alice's node, told of the counter, asked to finalize ${alicesFinals} times; the chain logged one start, one counter, one finalize and no skip`,
         `the chain paid by the newer state: alice ${fmt(chain, aliceGot)} and hubX ${fmt(chain, hubGot)} (ondelta ${held.ondelta} + offdelta ${newOffdelta}, collateral ${held.collateral}); the opening proof would have paid alice ${fmt(chain, stale)}`,
+        `R-DISPUTE-FREEZE: inside the window each node was asked for a payment on the Account in dispute and refused it back to whoever asked with a notice (account_disputed): no frame, no new pending frame, the heads stayed, the nodes asked the chain for nothing new`,
         `the link healed: both Runtimes read collateral ${after.collateral}, ondelta ${after.ondelta}, offdelta 0, no clause, no frame pending, one head; money held by the four entities is unchanged at ${fmt(chain, now)}`,
       ],
       gaps: [],

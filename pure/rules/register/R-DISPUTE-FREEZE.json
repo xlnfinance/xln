@@ -1,0 +1,79 @@
+{
+ "id": "R-DISPUTE-FREEZE",
+ "statement": "While a dispute is open on an Account, whoever started it (the Entity holds a record of the dispute it asked for, `starting`, or of the one the peer started, `against`, until the finalize, a lapse or the epoch move ends it), the node signs nothing new on it. It proposes no frame (its queue waits), and every frame its peer proposes is refused with the fault `frozen`, which can pass: the proposer takes the frame back and tries again once its view of J moves, so the payment commits in the epoch that follows or is refused then by the Account's own door. The one predicate that says so, `quiet` (the node's signature is out on a settlement or a C2R, R-COSIGN-FREEZE, or a dispute is open), feeds both the proposing and the rules the Account judges the peer's frames by. A command that takes on value (`pay`, `lock`, `offer`, `fill`) asked on an Account in dispute is refused back to whoever asked, with a `command_refused` notice and the fault `account_disputed`, so it is never queued to be zeroed by the rebase; a lock the paybook forwards into it fails back along the route as a refused entry does. A release (`resolve`, `cancel`, `expire`, `retract`, `lapse`) and `set_credit` wait in the queue for the new epoch. The proof the dispute rests on therefore stays the newest the node holds, and no frame is committed between the chain's finalize and the Entity hearing of it, because the Entity stays quiet until it hears the epoch move. Not here: a frame sealed before the node heard of the dispute and acked after it (the proposer commits it during the dispute; the acker's counter names it when the acker holds it, and with no counter the finalize voids it with no notice: owed, a notice for offdelta beyond the finalized proof), the Host telling the Entity the epoch before it signs anything, and the starter that never finalizes (the peer stays quiet until it does; it holds only a hash of the opening body and cannot finalize in its place).",
+ "source": "coordinator 10-02 11:55 (decision after the re-audit of PR 159)",
+ "layers": {
+  "arrival": "owed: spec thread, next Arrival page",
+  "quint": "owed: spec thread, new Quint branch",
+  "contract": "n/a: the freeze is the node's off-chain duty while a dispute is open; the contract only sees what is signed",
+  "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
+  "ts": "hold"
+ },
+ "killers": [
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DISPUTE-FREEZE a tx queued while a dispute against the node is open waits: no frame goes to the peer"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DISPUTE-FREEZE the same holds for the starter of the dispute, as soon as it asks for the start"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DISPUTE-FREEZE a frame the peer proposes meanwhile is refused with the frozen fault, which can pass"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DISPUTE-FREEZE only the Account in dispute stops: the others still propose"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DISPUTE-FREEZE the epoch moving on, or the dispute being over, ends it and the queue goes out"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DISPUTE-FREEZE a dispute the Host dropped, because its start would revert, ends it too"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DISPUTE-FREEZE a payment, a lock, an offer and a fill asked while a dispute is open are refused with a notice"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DISPUTE-FREEZE the same payment on an Account with no dispute is taken"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DISPUTE-FREEZE a release or a credit limit is not refused for the dispute, and nothing is sealed for it"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DISPUTE-FREEZE once the dispute is over the payment is taken again"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DISPUTE-FREEZE both sides' payments are refused with a notice and no frame goes out"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DISPUTE-FREEZE after the finalize the Account is as the chain left it, and the refused payment is not in it"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DISPUTE-FREEZE a frame sealed by a peer that has not heard of the dispute is refused as frozen and commits later"
+  }
+ ]
+}
