@@ -6,7 +6,9 @@ import { tokenOf } from "../account/fixtures.ts";
 import {
   bytes32, address, decodeLog, decodeLogs, IGNORED, READ_SIGNATURES, topicOf, type ChainEvent, type RawLog,
 } from "./log.ts";
-import { DEPOSITORY, DEPOSITORY_ABI, entityOf, hashOf, hexOf, lifecyclePhases, logOf, must } from "./fixtures.ts";
+import {
+  bodyHashOf, DEPOSITORY, DEPOSITORY_ABI, entityOf, hashOf, hexOf, lifecyclePhases, logOf, must,
+} from "./fixtures.ts";
 
 const LEFT = entityOf(0x11n);
 const RIGHT = entityOf(0x52n);
@@ -131,8 +133,8 @@ describe("j/log", () => {
     }, 3n, 2n);
     const fact = { sender: RIGHT, counter: LEFT, nonce: 7n, block: 3n, blockHash: hashOf(3n) };
     expect(decodeLogs(DEPOSITORY, [started, countered, finalized])).toEqual(ok([
-      { _tag: "dispute_started", ...fact, timeout: 5n, index: 0n },
-      { _tag: "dispute_countered", ...fact, index: 1n },
+      { _tag: "dispute_started", ...fact, proposerIsLeft: true, bodyHash: bodyHashOf(1n), timeout: 5n, index: 0n },
+      { _tag: "dispute_countered", ...fact, proposerIsLeft: false, bodyHash: bodyHashOf(4n), index: 1n },
       { _tag: "dispute_finalized", ...fact, index: 2n },
     ] satisfies readonly ChainEvent[]));
   });

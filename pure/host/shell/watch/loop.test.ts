@@ -128,7 +128,7 @@ describe("host/shell/watch the J loop's poll", () => {
   test("R-DISPUTE-FINALIZE the windows an Entity waits on are the node's own the chain gave an end, until told", () => {
     const asked = { peer: peer(RIGHT) } as Starting["start"];
     const facts = (starting: Partial<Starting>): ChainFacts =>
-      ({ ...freshChain, starting: { start: asked, window: 40n, over: false, ...starting } });
+      ({ ...freshChain, starting: { start: asked, window: 40n, over: false, countered: false, ...starting } });
     const chain = new Map<EntityId, ChainFacts>([
       [peer(RIGHT), facts({})], [peer(entityOf(0x70n)), facts({ window: undefined })],
       [peer(entityOf(0x71n)), freshChain], [peer(entityOf(0x72n)), facts({ over: true })],
@@ -137,5 +137,23 @@ describe("host/shell/watch the J loop's poll", () => {
     expect(windowsOf(LEFT, new Map())).toEqual(ok([]));
     const bad = "0xnot-an-id" as EntityId;
     expect(windowsOf(LEFT, new Map([[bad, facts({})]]))).toEqual(err({ _tag: "bad_peer", text: bad }));
+  });
+
+  test("R-DISPUTE-WATCH the window of a dispute against the node is waited on as well, until told", () => {
+    const against = { nonce: 3n, proposerIsLeft: true, bodyHash: "0x01", window: 55n, over: false, answer: undefined };
+    const told = (facts: ChainFacts) => windowsOf(LEFT, new Map([[peer(RIGHT), facts]]));
+    expect(told({ ...freshChain, against })).toEqual(ok([{ to: LEFT, peer: RIGHT, timeout: 55n }]));
+    expect(told({ ...freshChain, against: { ...against, over: true } })).toEqual(ok([]));
+  });
+
+  test("R-DISPUTE-WATCH a start of the node's own that never got a window does not hide the dispute against it", () => {
+    const asked = { peer: peer(RIGHT) } as Starting["start"];
+    const against = { nonce: 3n, proposerIsLeft: true, bodyHash: "0x01", window: 55n, over: false, answer: undefined };
+    const told = (starting: Partial<Starting>) => windowsOf(LEFT, new Map([[peer(RIGHT), {
+      ...freshChain, against, starting: { start: asked, window: undefined, over: false, countered: false, ...starting },
+    }]]));
+    expect(told({})).toEqual(ok([{ to: LEFT, peer: RIGHT, timeout: 55n }]));
+    expect(told({ window: 40n, over: true })).toEqual(ok([{ to: LEFT, peer: RIGHT, timeout: 55n }]));
+    expect(told({ window: 40n })).toEqual(ok([{ to: LEFT, peer: RIGHT, timeout: 40n }]));
   });
 });

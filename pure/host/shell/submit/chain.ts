@@ -105,13 +105,14 @@ const sealOutcome = async (
 };
 
 /**
- * R-DISPUTE-LAPSED: the starts in the draft that would revert on their own. A start alone is sealed and simulated at
- * the head: one the chain would revert for ever (its signature is no longer the Account's) is dropped from the draft,
- * and named, so the Entity that asked for it is told and may ask again. One that is held for any other reason (a
- * limit, the cap), or only with the ops it is grouped with, or one a signed batch also carries, stays.
+ * R-DISPUTE-LAPSED: the starts and counters in the draft that would revert on their own. One alone is sealed and
+ * simulated at the head: one the chain would revert for ever (its signature is no longer the Account's, the window is
+ * over) is dropped from the draft, and named, so the Entity that asked for it is told (a start may be asked again, a
+ * counter is not restated). One that is held for any other reason (a limit, the cap), or only with the ops it is
+ * grouped with, or one a signed batch also carries, stays: a draft is never held by an op that can only fail.
  */
-const lapsedStarts = async (io: Io, s: Submitter): Promise<Result<Pumped, ShellFault>> => {
-  const starts = s.jbatch.draft.filter((op) => op._tag === "dispute_start");
+const lapsedDisputes = async (io: Io, s: Submitter): Promise<Result<Pumped, ShellFault>> => {
+  const starts = s.jbatch.draft.filter((op) => op._tag === "dispute_start" || op._tag === "dispute_counter");
   const probes = await Promise.all(starts.map((op) => sealOutcome(io, s, { ...s.jbatch, draft: [op] }, [])));
   const failed = probes.find((probe) => !probe.ok);
   if (failed !== undefined && !failed.ok) return failed;
@@ -131,7 +132,7 @@ const sealing = async (io: Io, s: Submitter): Promise<Result<Pumped, ShellFault>
   switch (out.value._tag) {
     case "nothing_to_send": return quiet(s, "idle");
     case "in_flight": return quiet(s, "waiting");
-    case "held": return lapsedStarts(io, s);
+    case "held": return lapsedDisputes(io, s);
     case "sealed": {
       const done = sealedBy(s, out.value.jbatch, out.value.batch);
       if (!done.ok) return done;

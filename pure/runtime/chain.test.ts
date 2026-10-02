@@ -13,14 +13,15 @@ import { recover } from "./tick.ts";
 import {
   type Cluster, credit, entityOf, feed, GOLD, hostOf, open, pay, restarted, rise, settle, start,
 } from "./fixtures.ts";
+import { OPENED_WITH } from "../entity/fixtures.ts";
 
 const ALICE = entityOf(1);
 const BOB = entityOf(2);
 
 const epochOf = (peer: EntityId, epoch: bigint, stored: bigint): JEvent => ({ _tag: "j_epoch", peer, epoch, stored });
 const disputeBy = (peer: EntityId, epoch: bigint, by: "left" | "right"): JEvent =>
-  ({ _tag: "j_dispute", peer, epoch, by, nonce: 3n, timeout: 5n });
-const over = (peer: EntityId): JEvent => ({ _tag: "j_dispute_over", peer, finalized: false });
+  ({ _tag: "j_dispute", peer, epoch, by, nonce: 3n, timeout: 5n, ...OPENED_WITH });
+const over = (peer: EntityId): JEvent => ({ _tag: "j_dispute_over", peer });
 
 const opened = settle(feed(feed(start(viewOf(110n), viewOf(110n)), ALICE, open(BOB)), BOB, open(ALICE)));
 
@@ -49,8 +50,8 @@ describe("runtime/chain the first proof of an epoch is two above the nonce the c
   test("R-IMPLICIT-NONCE-FROM-CHAIN a dispute the peer starts is countered at stored + 2, then + 3", () => {
     const first = feed(framed(epoch1, 100n), ALICE, disputeBy(BOB, 1n, "right"));
     expect(counters(first)).toEqual([7n]);
-    const second = framed(first, 150n);
-    expect(counters(second)).toEqual([7n, 8n]);
+    const second = feed(framed(framed(epoch1, 100n), 150n), ALICE, disputeBy(BOB, 1n, "right"));
+    expect(counters(second)).toEqual([8n]);
   });
 
   test("R-IMPLICIT-NONCE-FROM-CHAIN the nonce is read from the chain again after an epoch ends, not derived", () => {
@@ -114,7 +115,7 @@ describe("runtime/chain the node answers a dispute started against it until the 
 
   test("R-DISPUTE-WATCH the dispute of an epoch that is over is not the next epoch's, even once it has a proof", () => {
     const next = framed(atEpoch(disputed, 2n, 8n), 130n);
-    expect(factsAt(next, ALICE, BOB)).toMatchObject({ epoch: 2n, frames: 1n, disputed: false });
+    expect(factsAt(next, ALICE, BOB)).toMatchObject({ epoch: 2n, frames: 1n, against: undefined });
     expect(counters(rise(next, ALICE, 111n))).toEqual([7n]);
   });
 

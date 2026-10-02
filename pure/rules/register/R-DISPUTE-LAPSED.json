@@ -1,6 +1,6 @@
 {
  "id": "R-DISPUTE-LAPSED",
- "statement": "A dispute start the node asked for that can never open a dispute is forgotten, so the node may ask again. The Entity keeps its own start as a record (`starting`, R-DISPUTE-FINALIZE) and refuses a second ask while it stands (`dispute_pending`), so a start that never lands would refuse every later ask until the epoch moved. The Host's builder probes each dispute start in its draft alone at the head (R-SIMULATE): one the chain would revert is dropped from the draft and the rows and named, and the Host tells the Entity of its own peer and nonce (`j_start_lapsed`, in the WAL like any J input). The Entity clears the record only when the lapse names the nonce of the start it holds and the chain has not given that start a window; a lapse of another nonce, of a start with a window, or with no record changes nothing. A start the chain skips (stale nonce, a dispute already open, the epoch moved) is not a lapse: the chain's own events end the record (`j_epoch`, `j_dispute_over`), so a skip is never read as one. A start that reverts only together with the ops it is grouped with is kept. Owed: a start that is held for another reason (gas cap, size) stays held and the record stands.",
+ "statement": "A dispute start the node asked for that can never open a dispute is forgotten, so the node may ask again. The Entity keeps its own start as a record (`starting`, R-DISPUTE-FINALIZE) and refuses a second ask while it stands (`dispute_pending`), so a start that never lands would refuse every later ask until the epoch moved. The Host's builder probes each dispute start in its draft alone at the head (R-SIMULATE): one the chain would revert is dropped from the draft and the rows and named, and the Host tells the Entity of its own peer and nonce (`j_start_lapsed`, in the WAL like any J input). The Entity clears the record only when the lapse names the nonce of the start it holds and the chain has not given that start a window; a lapse of another nonce, of a start with a window, or with no record changes nothing. A start the chain skips (stale nonce, a dispute already open, the epoch moved) is not a lapse: the chain's own events end the record (`j_epoch`, `j_dispute_over`), so a skip is never read as one. A start that reverts only together with the ops it is grouped with is kept. A counter the node asked for (R-DISPUTE-WATCH) lapses the same way: the builder probes each counter in the draft alone, drops the one the chain would revert (the window is over, the signature is void), and the Host tells the Entity (`j_counter_lapsed`, the peer and the counter's nonce); the Entity marks the answer lapsed and does not restate it, so a counter that can only fail never holds the draft or costs a simulation at every frame. A lapse of another nonce changes nothing. Owed: a start that is held for another reason (gas cap, size) stays held and the record stands.",
  "source": "Review A on #156 (lapsed start must clear the record); coordinator 10-02 09:10 order; contracts-decisions.md One start per dispute",
  "layers": {
   "arrival": "n/a: the Arrival page models the Account's frames; a dropped start is an Entity and Host rule",
@@ -54,6 +54,21 @@
    "kind": "test",
    "layer": "ts",
    "name": "R-DISPUTE-LAPSED a start held for want of gas room, not for a revert, stays in the draft"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DISPUTE-LAPSED a counter the chain would revert is dropped and not asked for again"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DISPUTE-LAPSED a counter the Host dropped, because the chain would revert it, is not asked for again"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DISPUTE-LAPSED a lapse of another nonce changes nothing, and a registered counter still finalizes"
   }
  ]
 }

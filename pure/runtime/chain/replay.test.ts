@@ -6,6 +6,7 @@ import type { FrameHash } from "../../account/frame/frame.ts";
 import { emptyEntity, type Command, type JAction, type PeerMessage } from "../../entity/model.ts";
 import type { Row } from "../model.ts";
 import { recover } from "../tick.ts";
+import { OPENED_WITH } from "../../entity/fixtures.ts";
 import { type Cluster, credit, entityOf, feed, GOLD, hostOf, open, settle, start } from "../fixtures.ts";
 
 const ALICE = entityOf(1);
@@ -28,12 +29,13 @@ const startNonce = (c: Cluster): bigint => {
 };
 const finalizing = feed(
   feed(started, ALICE, {
-    _tag: "j_dispute", peer: BOB, epoch: 0n, by: "left", nonce: startNonce(started), timeout: 500n,
+    _tag: "j_dispute", peer: BOB, epoch: 0n, by: "left", nonce: startNonce(started), timeout: 500n, ...OPENED_WITH,
   }),
   ALICE, { _tag: "j_window_over", peer: BOB },
 );
 const countered = feed(
-  framed(atEpoch(opened)), ALICE, { _tag: "j_dispute", peer: BOB, epoch: 1n, by: "right", nonce: 3n, timeout: 5n },
+  framed(atEpoch(opened)), ALICE,
+  { _tag: "j_dispute", peer: BOB, epoch: 1n, by: "right", nonce: 3n, timeout: 5n, ...OPENED_WITH },
 );
 
 /** Alice's WAL with the actions of its last row changed as the test says; what the Runtime says of replaying it. */
@@ -85,6 +87,7 @@ describe("runtime/chain replay review A: a replay sees every field of a deposit 
     const changes = [
       { peer: CAROL }, { nonce: 99n }, { proposerIsLeft: !ask.proposerIsLeft }, { startedByLeft: !ask.startedByLeft },
       { body: { ...ask.body, offdeltas: [...ask.body.offdeltas, 1n] } },
+      { initial: { nonce: 1n, bodyHash: "0x01" } },
     ] as const;
     changes.forEach((change) => {
       const { height, result } = replayed(finalizing, change);
@@ -97,6 +100,22 @@ describe("runtime/chain replay review A: a replay sees every field of a deposit 
   ] as const)("R-DURABLE a WAL whose counter names another %s does not replay", (_field, change) => {
     const { height, result } = replayed(countered, change);
     expect(result).toEqual(diverged(height));
+  });
+});
+
+describe("runtime/chain replay R-DISPUTE-WATCH: a replay sees the whole of a counter", () => {
+  test("R-DURABLE a WAL whose counter names another author, body, signature or dispute does not replay", () => {
+    const row = hostOf(countered, ALICE).wal.at(-1)?.chain.find((a) => a._tag === "counter");
+    const ask = row?._tag === "counter" ? row : expect.unreachable("no counter");
+    const changes = [
+      { proposerIsLeft: !ask.proposerIsLeft }, { body: { ...ask.body, offdeltas: [...ask.body.offdeltas, 1n] } },
+      { sig: "0x7e58" }, { initial: { ...ask.initial, nonce: ask.initial.nonce + 1n } },
+      { initial: { ...ask.initial, bodyHash: "0x01" } },
+    ] as const;
+    changes.forEach((change) => {
+      const { height, result } = replayed(countered, change);
+      expect(result).toEqual(diverged(height));
+    });
   });
 });
 

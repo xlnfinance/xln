@@ -6,7 +6,7 @@ import type { AccountTx } from "../account/tx.ts";
 import { emptyLedger, MAX_AMOUNT } from "../account/ledger.ts";
 import { signing, tokenOf, viewOf } from "../account/fixtures.ts";
 import type { AccountState, Ledger, TokenId } from "../account/model.ts";
-import { anchor, credit, entityOf, GOLD, judge, open, pay, TEST_SIG } from "./fixtures.ts";
+import { anchor, credit, entityOf, GOLD, judge, open, OPENED_WITH, pay, TEST_SIG } from "./fixtures.ts";
 import { entityFrame } from "./frame.ts";
 import { entityRules, type Standing } from "./rules.ts";
 import { emptyEntity, type CosignOp, type EntityInput, type EntityState, type JAction, type Notice } from "./model.ts";
@@ -261,7 +261,7 @@ describe("entity/cosign review A: the edges of the signature, and what a dispute
   const signed = (amount: bigint): JAction =>
     ({ _tag: "settle", peer: BOB, serial: 1n, token: GOLD, amount, folds: [OWED] });
   const disputed = (by: "left" | "right"): EntityInput =>
-    ({ _tag: "j_dispute", peer: BOB, epoch: 0n, by, nonce: 3n, timeout: 5n });
+    ({ _tag: "j_dispute", peer: BOB, epoch: 0n, by, nonce: 3n, timeout: 5n, ...OPENED_WITH });
   const factsOf = (s: EntityState) => s.chain.get(BOB);
 
   test("R-COSIGN-FREEZE a tx queued in the same frame does not stop the signature, which holds it back", () => {
@@ -283,7 +283,7 @@ describe("entity/cosign review A: the edges of the signature, and what a dispute
     const out = run(owing, withdraw(30n)).state;
     expect(factsOf(run(out, disputed("right")).state)?.frozen).toBe(true);
     expect(factsOf(run(out, disputed("left")).state)?.frozen).toBe(true);
-    const over = run(run(out, disputed("right")).state, { _tag: "j_dispute_over", peer: BOB, finalized: false }).state;
+    const over = run(run(out, disputed("right")).state, { _tag: "j_dispute_over", peer: BOB }).state;
     expect(factsOf(over)?.frozen).toBe(true);
   });
 });

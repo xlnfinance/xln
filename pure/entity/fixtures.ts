@@ -16,6 +16,9 @@ export const GOLD = tokenOf(1n);
 /** The one signature the entity tests' checker takes: these tests are not about keys (the signed-heads tests are). */
 export const TEST_SIG = "0x7e57";
 
+/** The proof a dispute the chain opened named: who authored it and the hash of its body. */
+export const OPENED_WITH = { proposerIsLeft: true, bodyHash: `0x${"01".repeat(32)}` } as const;
+
 /** Where the entity tests sign: the account tests' deployment and terms (each Account's key and epoch are its own). */
 export const anchor: Anchor = {
   deployment: signing.deployment, terms: signing.terms, check: (_peer, _head, sig) => sig === TEST_SIG,

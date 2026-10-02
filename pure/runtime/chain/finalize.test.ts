@@ -6,6 +6,7 @@
 import { describe, expect, test } from "bun:test";
 import { viewOf } from "../../account/fixtures.ts";
 import type { ChainFacts, JAction, JEvent } from "../../entity/model.ts";
+import { OPENED_WITH } from "../../entity/fixtures.ts";
 import { type Cluster, credit, entityOf, feed, hostOf, open, restarted, rise, settle, start } from "../fixtures.ts";
 
 const ALICE = entityOf(1);
@@ -16,9 +17,9 @@ const framed = (c: Cluster): Cluster => settle(feed(c, BOB, credit(ALICE, 100n))
 const asked = feed(framed(opened), ALICE, { _tag: "dispute", peer: BOB });
 
 const gave = (epoch: bigint, by: "left" | "right", timeout: bigint, nonce = NONCE): JEvent =>
-  ({ _tag: "j_dispute", peer: BOB, epoch, by, nonce, timeout });
+  ({ _tag: "j_dispute", peer: BOB, epoch, by, nonce, timeout, ...OPENED_WITH });
 const windowOver: JEvent = { _tag: "j_window_over", peer: BOB };
-const over: JEvent = { _tag: "j_dispute_over", peer: BOB, finalized: true };
+const over: JEvent = { _tag: "j_dispute_over", peer: BOB };
 
 const factsOf = (c: Cluster): ChainFacts | undefined => hostOf(c, ALICE).entities.get(ALICE)?.chain.get(BOB);
 const finalizes = (c: Cluster): readonly JAction[] => c.chain.filter((a: JAction) => a._tag === "dispute_finalize");
@@ -48,7 +49,7 @@ describe("runtime/chain R-DISPUTE-FINALIZE the node that started a dispute final
     expect(factsOf(again)?.starting?.window).toBe(500n);
     const theirs = feed(asked, ALICE, gave(0n, "right", 700n));
     expect(factsOf(theirs)?.starting?.window).toBeUndefined();
-    expect(factsOf(theirs)?.disputed).toBe(true);
+    expect(factsOf(theirs)?.against?.window).toBe(700n);
     expect(factsOf(feed(asked, ALICE, gave(1n, "left", 700n)))?.starting?.window).toBeUndefined();
     expect(factsOf(feed(framed(opened), ALICE, gave(0n, "left", 700n)))?.starting).toBeUndefined();
   });
@@ -86,7 +87,7 @@ describe("runtime/chain R-DISPUTE-FINALIZE the node that started a dispute final
     if (start?._tag !== "dispute_start" || first?._tag !== "dispute_finalize") return expect.unreachable("no ask");
     expect(first).toEqual({
       _tag: "dispute_finalize", peer: BOB, nonce: start.nonce, proposerIsLeft: start.proposerIsLeft, body: start.body,
-      startedByLeft: true,
+      startedByLeft: true, initial: undefined,
     });
     expect(finalizes(ended)).toHaveLength(1);
   });
@@ -116,7 +117,8 @@ describe("runtime/chain R-DISPUTE-FINALIZE the node that started a dispute final
 
   test("R-DISPUTE-FINALIZE the one who is the Account's Right says so in the ask", () => {
     const bob = feed(framed(opened), BOB, { _tag: "dispute", peer: ALICE });
-    const heard: JEvent = { _tag: "j_dispute", peer: ALICE, epoch: 0n, by: "right", nonce: NONCE, timeout: 500n };
+    const heard: JEvent =
+      { _tag: "j_dispute", peer: ALICE, epoch: 0n, by: "right", nonce: NONCE, timeout: 500n, ...OPENED_WITH };
     const gaveBob = feed(feed(bob, BOB, heard), BOB, { _tag: "j_window_over", peer: ALICE });
     const ask = finalizes(gaveBob)[0];
     expect(ask?._tag === "dispute_finalize" ? ask.startedByLeft : undefined).toBe(false);

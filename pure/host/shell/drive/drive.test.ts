@@ -195,4 +195,25 @@ describe("host/shell/drive the Host's rows are on the disk before the chain hear
     expect(rowsIn(at).map((r) => r.notices.map((n) => n._tag))).toEqual([[], [], [], []]);
     expect(rowsIn(at).flatMap((r) => r.chain.map((a) => a._tag))).toEqual(["dispute_start", "dispute_start"]);
   });
+
+  test("R-DISPUTE-LAPSED a counter the chain would revert is dropped and not asked for again", async () => {
+    const at = scene();
+    const paid = hostOf(aliceRun, ALICE).entities.get(ALICE) ?? expect.unreachable("no entity");
+    const opened = {
+      _tag: "j_dispute", peer: BOB, epoch: 0n, by: "right", nonce: 1n, timeout: 500n, proposerIsLeft: false,
+      bodyHash: `0x${"01".repeat(32)}`,
+    } as const;
+    const answer = (turn: Turn) => turn.station.host.runtime.entities.get(ALICE)?.chain.get(BOB)?.against?.answer;
+    const out = await withShell(at, ok(undefined), async (shell) => {
+      const started = turnOf(await start(shell, { ...BOOT, genesis: paid }));
+      const first = turnOf(await command(shell, started.station, ALICE, opened));
+      return { first, second: turnOf(await command(shell, first.station, ALICE, { _tag: "resend_due", peer: BOB })) };
+    }, { _tag: "reverts", reason: "window over" });
+    expect(out.first.lapsed.map((op) => op._tag)).toEqual(["dispute_counter"]);
+    expect(answer(out.first)?.lapsed).toBe(true);
+    expect(out.first.station.submitter.jbatch.draft).toEqual([]);
+    expect(callsOf(at.log).filter((c) => c.startsWith("send"))).toEqual([]);
+    expect(out.second.lapsed).toEqual([]);
+    expect(rowsIn(at).flatMap((r) => r.chain.map((a) => a._tag))).toEqual(["counter"]);
+  });
 });

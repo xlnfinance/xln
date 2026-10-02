@@ -57,16 +57,24 @@ const inputOf = (event: { peer: Bytes32 }): Result<EntityId, BadPeer> => {
   return peer.ok ? peer : err({ _tag: "bad_peer", text: event.peer });
 };
 
+/** The end of the window the Entity waits on, of a dispute it started or one it answers, while the window is open. */
+const waitedOn = (facts: ChainFacts): bigint | undefined => {
+  const { starting, against } = facts;
+  if (starting?.window !== undefined && !starting.over) return starting.window;
+  return against === undefined || against.over ? undefined : against.window;
+};
+
 const windowOf = (self: Bytes32, peer: EntityId, facts: ChainFacts): Result<readonly Window[], BadPeer> => {
-  const timeout = facts.starting?.over ? undefined : facts.starting?.window;
+  const timeout = waitedOn(facts);
   if (timeout === undefined) return ok([]);
   const named = bytes32(peer);
   return named.ok ? ok([{ to: self, peer: named.value, timeout }]) : err({ _tag: "bad_peer", text: peer });
 };
 
 /**
- * The dispute windows an Entity waits on: each dispute it started that the chain gave an end to, until it is told the
- * window is over. They are read off the Entity's own chain facts (which the WAL rebuilds), so a restart forgets none.
+ * The dispute windows an Entity waits on: each dispute it started or answers that the chain gave an end to, until it is
+ * told the window is over. They are read off the Entity's own chain facts (which the WAL rebuilds), so a restart
+ * forgets none.
  */
 export const windowsOf = (
   self: Bytes32, chain: ReadonlyMap<EntityId, ChainFacts>,

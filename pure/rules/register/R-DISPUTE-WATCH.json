@@ -1,6 +1,6 @@
 {
  "id": "R-DISPUTE-WATCH",
- "statement": "The node watches the disputes its peer starts against it and, while the dispute is open, asks for a counter naming the nonce and the head of the newest committed frame of the epoch, restating the ask at every frame of the Entity until the chain says the dispute is over, so that one counter lands inside the floor window (60 + 60 s on testnet). With no co-signed proof of the epoch there is nothing to counter with: the implicit proof is the best state there is. A dispute the node started itself, or one of another epoch, is not countered. Status: the ask is a chain action with the nonce and the head only. The peer's signature over that head, which is what makes it a proof, is kept by the Entity (`proofs`, R-SIGNED-HEADS-ON-THE-WIRE) but the action does not carry it and the Host maps no chain op for it, so no counter reaches the chain yet; the e2e dispute steps are the harness's own until that is wired.",
+ "statement": "The node answers a dispute its peer started against it in the epoch it is in. The Entity keeps the dispute (`against`: the nonce and author the dispute opened with, the hash of its body, the end of its window and whether the chain's clock has passed it; the first one told for the epoch is kept, one of another epoch is not this record's). While it is open the node asks for ONE counter with the newest proof it holds, when the chain would rank that proof above the one the dispute opened with (a higher nonce, or the same nonce authored by Left against Right's): the head must be the one the peer signed, the nonce is the epoch's first plus the slot, less one, the body is the one its committed state signs as, and the signature is the peer's own over that head, kept in `proofs` (R-SIGNED-HEADS-ON-THE-WIRE). The counter names the dispute it answers (its nonce and body hash) and is restated at every frame until the chain registers it (`j_countered`, which both parties hear), so that it lands inside the floor window (60 + 60 s on testnet); a Host that restarts is asked again. A dispute that opened with the newest proof the node holds, one the node started, and one of another epoch are not countered; with no co-signed proof of the epoch there is nothing to counter with. Once the window is over and the chain registered the node's counter, the node asks to finalize (`dispute_finalize`) with the counter's nonce, author, body and the side that started the dispute, naming the dispute it answers, and keeps asking until `j_dispute_over`: after a registered counter the chain finalizes only the counter's proof, and by either party. The Host reads the window of an answered dispute as it reads that of a started one. The starter that hears the counter stops asking to finalize with its opening proof, which the chain would revert. A node with a dispute open against it asks for none of its own (`dispute_pending`): the chain would skip the start (DISPUTE_ACTIVE) with no event, and the Host waits on the window of the dispute against the node whenever its own start has none (`windowsOf`). A counter the Host drops because the chain would revert it lapses like a start (R-DISPUTE-LAPSED) and is not restated. Not here: a frame committed after the node's counter (the counter keeps the proof it first named), a counter whose proof holds an open clause (S9 exercises the clause side), a counterer that is down for the whole window (the dispute settles on the opening proof; the contract has a watchtower entry, not modelled), and both sides disputing at once.",
  "source": "contracts-decisions.md Runtime rules from Review A of PR 76, item 2 (coordinator 09-30 23:53)",
  "layers": {
   "arrival": "owed: spec thread, next Arrival page",
@@ -29,6 +29,76 @@
    "kind": "test",
    "layer": "ts",
    "name": "R-DISPUTE-WATCH a Host that restarts keeps the dispute and is asked to counter again"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "the counter names the dispute, the newer nonce and body, and Alice's signature over the newer head"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "it is restated at every frame until the chain registers it, and then no more"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "it finalizes with its counter once the chain registered it and the window is over, and not before"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "a counter of another nonce or author is not the node's: it still waits"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "a dispute of another epoch is not answered, and an epoch that moves on forgets the answer"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "both sides hold the same newest head: no counter"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "a dispute that opened with a proof above the one held is not answered"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "the starter that is countered does not finalize with its opening proof"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DISPUTE-WATCH a counter names the dispute it answers, with the newer proof and signature"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DISPUTE-WATCH the window of a dispute against the node is waited on as well, until told"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DISPUTE-WATCH a counter is a j_countered for each hosted party and not the end of the dispute"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "a proof signed over an older head than the Account's is not offered: its signature would not verify"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "a node with a dispute open against it does not start one of its own: the chain would skip it"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DISPUTE-WATCH a start of the node's own that never got a window does not hide the dispute against it"
   }
  ]
 }

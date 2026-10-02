@@ -95,9 +95,24 @@ export type Windows = Readonly<{ left: bigint; right: bigint }>;
  * there until a signed frame gives the Account a ledger for it. `starting` is a dispute the node itself asked for.
  */
 export type ChainFacts = Readonly<{
-  epoch: bigint; stored: bigint; frames: bigint; windows: Windows | undefined; disputed: boolean; frozen: boolean;
-  cosigned: bigint; held: ReadonlyMap<TokenId, Held>; starting: Starting | undefined;
+  epoch: bigint; stored: bigint; frames: bigint; windows: Windows | undefined; against: Against | undefined;
+  frozen: boolean; cosigned: bigint; held: ReadonlyMap<TokenId, Held>; starting: Starting | undefined;
 }>;
+
+/**
+ * A dispute the peer started against this node in the epoch it is in (R-DISPUTE-WATCH): the proof it opened with
+ * (`nonce`, `proposerIsLeft`, `bodyHash`), the end of its window and whether the chain's clock has passed it, and the
+ * node's own answer: the counter it asked the chain for with the newest proof it holds.
+ */
+export type Against = Readonly<{
+  nonce: bigint; proposerIsLeft: boolean; bodyHash: string; window: bigint; over: boolean; answer: Answer | undefined;
+}>;
+
+/**
+ * The counter the node asked for, whether the chain registered it (only a registered counter is finalized with), and
+ * whether the Host dropped it because it would revert, after which it is not asked again.
+ */
+export type Answer = Readonly<{ counter: DisputeCounter; registered: boolean; lapsed: boolean }>;
 
 /**
  * A dispute the node asked the chain to open (R-DISPUTE-START, R-DISPUTE-FINALIZE): what it asked with, the end of the
@@ -105,7 +120,8 @@ export type ChainFacts = Readonly<{
  * the chain's clock has passed that end (`over`). Once over, the node asks to finalize it with what it started with,
  * and keeps asking until the chain says the dispute is over.
  */
-export type Starting = Readonly<{ start: DisputeStart; window: bigint | undefined; over: boolean }>;
+export type Starting =
+  Readonly<{ start: DisputeStart; window: bigint | undefined; over: boolean; countered: boolean }>;
 
 // What a frame takes in. `sig` is the sender's signature over the head the message commits to
 // (R-SIGNED-HEADS-ON-THE-WIRE): a frame's, or the ack's.
@@ -115,21 +131,33 @@ export type PeerMessage = Tagged<"peer_message", { from: EntityId; msg: Msg<Acco
  * What the Host saw on the J chain about the Account with `peer`. A repeat or an older report changes nothing, so the
  * Host may deliver an event again: `j_epoch` is the chain moving the Account's epoch on (a settlement, a withdrawal
  * or a finished dispute landed), with the nonce it stores now; `j_dispute` is a dispute started in `epoch` by `by`,
- * whose start carried `nonce` and whose window ends at the chain's second `timeout`; `j_window_over` is the chain's
- * clock having passed that end for a dispute this node started (R-DISPUTE-FINALIZE); `j_dispute_over` is that
- * dispute countered or finalized; `j_start_lapsed` is the Host telling that the start this node asked for (the one of
- * that `nonce`) was dropped from its draft because it would revert and so will never open a dispute (R-DISPUTE-LAPSED);
- * `j_op_lapsed` is a co-signed settlement or withdrawal that can no longer land (its batch reverted, its signatures
- * ran out), named by the serial its action carried: a report of an operation that is not the one out (a repeat, or an
- * older one) changes nothing; `j_collateral` is what the chain holds for one token of the Account now
- * (R-J-COLLATERAL): a state, not a change, so a repeat is a no-op.
+ * whose start carried `nonce` and whose window ends at the chain's second `timeout` (`proposerIsLeft` and `bodyHash`
+ * name the proof it opened with); `j_countered` is a counter the chain registered for the dispute, with the proof it
+ * named (a registered counter is not the end of the dispute: the finalize is); `j_window_over` is the chain's
+ * clock having passed that end for a dispute this node started or answers (R-DISPUTE-FINALIZE); `j_dispute_over` is
+ * that dispute finalized, which pays the Account out; `j_start_lapsed` is the Host telling that the start this node
+ * asked for (the one of that `nonce`) was dropped from its draft because it would revert and so will never open a
+ * dispute (R-DISPUTE-LAPSED); `j_counter_lapsed` is the same for the counter this node asked for (the one of that
+ * `nonce`), which the chain would revert for good, so the node stops asking for it; `j_op_lapsed` is a co-signed
+ * settlement or withdrawal that can no longer land (its batch reverted, its signatures ran out), named by the serial
+ * its action carried: a report of an operation that is not the one out (a repeat, or an older one) changes nothing;
+ * `j_collateral` is what the chain holds for one token of the Account now (R-J-COLLATERAL): a state, not a change, so
+ * a repeat is a no-op.
  */
 export type JEvent =
   | Tagged<"j_epoch", { peer: EntityId; epoch: bigint; stored: bigint }>
-  | Tagged<"j_dispute", { peer: EntityId; epoch: bigint; by: Side; nonce: bigint; timeout: bigint }>
+  | Tagged<
+    "j_dispute",
+    {
+      peer: EntityId; epoch: bigint; by: Side; nonce: bigint; timeout: bigint; proposerIsLeft: boolean;
+      bodyHash: string;
+    }
+  >
+  | Tagged<"j_countered", { peer: EntityId; nonce: bigint; proposerIsLeft: boolean; bodyHash: string }>
   | Tagged<"j_window_over", { peer: EntityId }>
-  | Tagged<"j_dispute_over", { peer: EntityId; finalized: boolean }>
+  | Tagged<"j_dispute_over", { peer: EntityId }>
   | Tagged<"j_start_lapsed", { peer: EntityId; nonce: bigint }>
+  | Tagged<"j_counter_lapsed", { peer: EntityId; nonce: bigint }>
   | Tagged<"j_collateral", { peer: EntityId; token: TokenId; collateral: bigint; ondelta: bigint }>
   | Tagged<"j_op_lapsed", { peer: EntityId; serial: bigint }>;
 
@@ -208,7 +236,7 @@ export type JAction =
   | Tagged<"deposit", { peer: EntityId; token: TokenId; amount: bigint }>
   | Tagged<"dispute_start", DisputeStart>
   | Tagged<"dispute_finalize", DisputeFinalize>
-  | Tagged<"counter", { peer: EntityId; nonce: bigint; head: FrameHash }>
+  | Tagged<"counter", DisputeCounter>
   | Tagged<"c2r", { peer: EntityId; serial: bigint; token: TokenId; amount: bigint }>
   | Tagged<"settle", { peer: EntityId; serial: bigint; token: TokenId; amount: bigint; folds: readonly Fold[] }>;
 
@@ -221,12 +249,25 @@ export type DisputeStart = Readonly<{
 }>;
 
 /**
- * A dispute the node finalizes after its window, with the state it started from: no counter has changed it, so the
- * chain settles on the opening proof (a counter by the peer is the Host's to answer, R-DISPUTE-WATCH).
- * `startedByLeft` is whether the node is the Account's Left side, the one that started it.
+ * A counter to the peer's dispute with the newest proof the node holds: the dispute it answers (`initial`: its nonce
+ * and the hash of the body it opened with), the proof (`nonce`, author, body, the peer's signature over it) and the
+ * head of the frame that proof was signed over.
+ */
+export type DisputeCounter = Readonly<{
+  peer: EntityId; nonce: bigint; head: FrameHash; proposerIsLeft: boolean; body: ProofBody; sig: string;
+  initial: Readonly<{ nonce: bigint; bodyHash: string }>;
+}>;
+
+/**
+ * A dispute the node finalizes after its window. One it started and nobody countered is finalized with the state it
+ * started from: the chain settles on the opening proof. One it answered is finalized with its registered counter's
+ * proof (`nonce`, `proposerIsLeft`, `body` are the counter's), naming the dispute it answers in `initial`
+ * (R-DISPUTE-WATCH).
+ * `startedByLeft` is whether the side that started the dispute is the Account's Left.
  */
 export type DisputeFinalize = Readonly<{
   peer: EntityId; nonce: bigint; proposerIsLeft: boolean; body: ProofBody; startedByLeft: boolean;
+  initial: Readonly<{ nonce: bigint; bodyHash: string }> | undefined;
 }>;
 
 /** The offdelta of a token that a settlement folds into its ondelta, so that the epoch advance cannot erase it. */

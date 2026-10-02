@@ -7,11 +7,16 @@ import {
   advance, finalizedAt, prepare, readings, watching, type Batch, type Block, type Step, type Watch, type WatchFault,
   type Window,
 } from "./watch.ts";
-import { blockOf, blocksBetween, DEPOSITORY, entityOf, hashOf, hexOf, logOf, must } from "./fixtures.ts";
+import {
+  blockOf, blocksBetween, bodyHashOf, DEPOSITORY, entityOf, hashOf, hexOf, logOf, must,
+} from "./fixtures.ts";
 
 const LEFT = entityOf(0x11n);
 const RIGHT = entityOf(0x52n);
 const BYSTANDER = entityOf(0x99n);
+/** The proof the started dispute of `started` opened with: its author and body hash. */
+const OPENED = { proposerIsLeft: true, bodyHash: bodyHashOf(1n) } as const;
+
 const GENESIS = blockOf(0n);
 
 const start = (depth: bigint, from: Block = GENESIS): Watch => must(watching(DEPOSITORY, depth, from));
@@ -66,10 +71,10 @@ describe("j/watch", () => {
     expect(step.events).toEqual([
       toward(LEFT, { _tag: "j_epoch", peer: RIGHT, epoch: 1n, stored: 5n }),
       toward(RIGHT, { _tag: "j_epoch", peer: LEFT, epoch: 1n, stored: 5n }),
-      toward(LEFT, { _tag: "j_dispute", peer: RIGHT, epoch: 1n, by: "right", nonce: 7n, timeout: 500n }),
-      toward(RIGHT, { _tag: "j_dispute", peer: LEFT, epoch: 1n, by: "right", nonce: 7n, timeout: 500n }),
-      toward(LEFT, { _tag: "j_dispute_over", peer: RIGHT, finalized: true }),
-      toward(RIGHT, { _tag: "j_dispute_over", peer: LEFT, finalized: true }),
+      toward(LEFT, { _tag: "j_dispute", peer: RIGHT, epoch: 1n, by: "right", nonce: 7n, timeout: 500n, ...OPENED }),
+      toward(RIGHT, { _tag: "j_dispute", peer: LEFT, epoch: 1n, by: "right", nonce: 7n, timeout: 500n, ...OPENED }),
+      toward(LEFT, { _tag: "j_dispute_over", peer: RIGHT }),
+      toward(RIGHT, { _tag: "j_dispute_over", peer: LEFT }),
       toward(LEFT, { _tag: "j_epoch", peer: RIGHT, epoch: 2n, stored: 8n }),
       toward(RIGHT, { _tag: "j_epoch", peer: LEFT, epoch: 2n, stored: 8n }),
     ]);
@@ -237,8 +242,9 @@ describe("j/watch", () => {
     switch (plan[b]?.[i]) {
       case "advance": return bothHear((peer) => ({ _tag: "j_epoch", peer, epoch: epoch + 1n, stored: nonce }));
       case "dispute":
-        return bothHear((peer) => ({ _tag: "j_dispute", peer, epoch, by: "right", nonce: 7n, timeout: 500n }));
-      default: return bothHear((peer) => ({ _tag: "j_dispute_over", peer, finalized: true }));
+        return bothHear((peer) =>
+          ({ _tag: "j_dispute", peer, epoch, by: "right", nonce: 7n, timeout: 500n, ...OPENED }));
+      default: return bothHear((peer) => ({ _tag: "j_dispute_over", peer }));
     }
   };
 

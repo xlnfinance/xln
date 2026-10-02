@@ -3,10 +3,11 @@
 // entities of a funding, the canonical transformer). The Host's `chain` effect leaves a committed row only
 // (R-DURABLE), so the op made here is made from a row that is already the WAL's.
 //
-// Four actions are the Host's to make from what the Entity says and the chain's addresses; a dispute start is one of
-// them since the Entity keeps its peer's signature over the committed head (R-SIGNED-HEADS-ON-THE-WIRE) and says the
-// proof body, nonce, epoch and author with it. The others hold signed material the Entity does not keep (a counter
-// needs the starter's proof, a C2R or a settlement the counterparty's Hanko); here they are named, never guessed.
+// Most actions are the Host's to make from what the Entity says and the chain's addresses; a dispute start and a
+// counter are two of them since the Entity keeps its peer's signature over the committed head
+// (R-SIGNED-HEADS-ON-THE-WIRE) and says the proof body, nonce, epoch and author with it. The others hold signed
+// material the Entity does not keep (a C2R or a settlement needs the counterparty's Hanko); here they are named, never
+// guessed.
 import type { EntityId, JAction } from "../entity/model.ts";
 import type { JOp } from "../j/op/ops.ts";
 import type { Tagged } from "../kernel/core/tagged.ts";
@@ -45,20 +46,41 @@ const startOp = (action: Extract<JAction, { _tag: "dispute_start" }>): Result<JO
     : err({ _tag: "unhashable_proof" });
 };
 
-/** The finalize of a dispute no counter changed: the chain settles on the opening proof, its final body too. */
-const finalizeOp = (action: Extract<JAction, { _tag: "dispute_finalize" }>): Result<JOp, OpFault> => {
+/**
+ * The counter to the peer's dispute: it names the dispute (its nonce and the hash of the body it opened with) and the
+ * newer proof, with the peer's signature over it.
+ */
+const counterOp = (action: Extract<JAction, { _tag: "counter" }>): Result<JOp, OpFault> => {
   const hashed = proofBodyHash(action.body);
   return hashed.ok
     ? ok({
-      _tag: "dispute_finalize",
-      finalization: {
-        counterentity: action.peer, initialNonce: action.nonce, finalNonce: action.nonce,
-        proposerIsLeft: action.proposerIsLeft, initialProofbodyHash: hashed.value, finalProofbody: action.body,
-        starterArguments: "0x", otherArguments: "0x", sig: "0x", startedByLeft: action.startedByLeft,
-        cooperative: false,
+      _tag: "dispute_counter",
+      counter: {
+        counterentity: action.peer, initialNonce: action.initial.nonce, initialProofbodyHash: action.initial.bodyHash,
+        counterNonce: action.nonce, proposerIsLeft: action.proposerIsLeft, counterProofbody: action.body,
+        sig: action.sig,
       },
     })
     : err({ _tag: "unhashable_proof" });
+};
+
+/**
+ * The finalize of a dispute: with the opening proof when no counter changed it (the chain settles on it, its final
+ * body too), or with the counter this node registered, naming the dispute it answers.
+ */
+const finalizeOp = (action: Extract<JAction, { _tag: "dispute_finalize" }>): Result<JOp, OpFault> => {
+  const hashed = proofBodyHash(action.body);
+  if (!hashed.ok) return err({ _tag: "unhashable_proof" });
+  const initial = action.initial ?? { nonce: action.nonce, bodyHash: hashed.value };
+  return ok({
+    _tag: "dispute_finalize",
+    finalization: {
+      counterentity: action.peer, initialNonce: initial.nonce, finalNonce: action.nonce,
+      proposerIsLeft: action.proposerIsLeft, initialProofbodyHash: initial.bodyHash, finalProofbody: action.body,
+      starterArguments: "0x", otherArguments: "0x", sig: "0x", startedByLeft: action.startedByLeft,
+      cooperative: false,
+    },
+  });
 };
 
 /**
@@ -95,6 +117,7 @@ export const opOf = (self: EntityId, action: JAction, world: ChainWorld): Result
     case "dispute_finalize":
       return finalizeOp(action);
     case "counter":
+      return counterOp(action);
     case "c2r":
     case "settle":
       return err({ _tag: "needs_signature", action: action._tag });
