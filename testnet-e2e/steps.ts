@@ -16,12 +16,12 @@ import { accountMessageHash } from "../pure/chain/proof/payload.ts";
 import { keccakHex } from "../pure/kernel/encoding/bytes.ts";
 import { startAnvil, assertLoopback, scrubbedEnv, type Anvil } from "./lib/anvil.ts";
 import {
-  accountKeyOf, accountOnChain, advanceTime, collateralOf, connect, hankoOf, heldBy, leftOf, must, partyOf, reserveOf, sendOps,
+  accountKeyOf, accountOnChain, advanceTime, collateralOf, connect, eid, hankoOf, heldBy, leftOf, must, partyOf, reserveOf, sendOps,
   unit, type Chain, type Manifest, type Party,
 } from "./lib/chain.ts";
 import { GAPS, REPO } from "./lib/gaps.ts";
 import { Blocked, type Step } from "./lib/runner.ts";
-import { entityId, type EntityId } from "../pure/entity/model.ts";
+import type { EntityId } from "../pure/entity/model.ts";
 import type { ClockParams, JView } from "../pure/account/clause/clock.ts";
 import { Cluster } from "./lib/cluster.ts";
 import { Seat } from "./lib/seat.ts";
@@ -59,7 +59,6 @@ export const newWorld = (options: Options): World =>
 const chainOf = (w: World): Chain => w.chain ?? (() => { throw new Error("no chain: the fork step did not finish"); })();
 const partiesOf = (w: World) => w.parties ?? (() => { throw new Error("no parties"); })();
 const netOf = (w: World): Cluster => w.net ?? (() => { throw new Error("no Runtimes: the open step did not finish"); })();
-const eid = (p: Party): EntityId => must(entityId(p.id), `entity id of ${p.name}`);
 const fmt = (chain: Chain, n: bigint): string => `${ethers.formatUnits(n, chain.manifest.token.decimals)} ${chain.manifest.token.symbol}`;
 const token = (chain: Chain): TokenId => must(tokenId(chain.tokenId), "token id");
 const DEPOSIT = 500n;

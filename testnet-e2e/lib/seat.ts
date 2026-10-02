@@ -6,19 +6,16 @@ import { emptyEntity, type Command, type EntityId } from "../../pure/entity/mode
 import { limits } from "../../pure/host/host.ts";
 import { command, pump, start, type Boot, type Shell, type Station, type Turn } from "../../pure/host/shell/drive/drive.ts";
 import { chainPort } from "../../pure/host/shell/evm/port.ts";
-import { keyOf, type Key } from "../../pure/host/shell/link/link.ts";
+import type { Key } from "../../pure/host/shell/link/link.ts";
 import { fileDisk } from "../../pure/host/shell/node/file-disk.ts";
 import { httpRpc } from "../../pure/host/shell/node/rpc.ts";
 import { lazySigner } from "../../pure/host/shell/submit/signer.ts";
-import { hexToBytes } from "../../pure/kernel/encoding/bytes.ts";
 import type { Setup } from "../../pure/runtime/model.ts";
 import { timestamp } from "../../pure/runtime/model.ts";
-import { GAS, must, worldOf, type Chain, type Party } from "./chain.ts";
+import { GAS, keyOfParty, must, worldOf, type Chain, type Party } from "./chain.ts";
 
 const SETTLE_POLLS = 40;
 const POLL_MS = 100;
-
-const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
 /** What a party's node is made of on this chain: the shell over real files, the Entity's boot and the signing key. */
 export type Rig = Readonly<{ shell: Shell; boot: Boot; key: Key }>;
@@ -30,7 +27,7 @@ export const rigOf = async (
   mkdirSync(dir, { recursive: true });
   const wal = must(await fileDisk(`${dir}/wal.log`), `${party.name}'s WAL`);
   const journal = must(await fileDisk(`${dir}/journal.log`), `${party.name}'s journal`);
-  const key = must(keyOf(must(hexToBytes(party.key), "key bytes")), `${party.name}'s key`);
+  const key = keyOfParty(party);
   const port = chainPort(httpRpc(chain.rpc), {
     depository: chain.manifest.contracts.depository.address, entity, chainId: chain.chainId, key,
     tokens: [chain.tokenId], from, depth: 0n,
@@ -67,7 +64,7 @@ export class Seat {
     this.station = pumped.station;
     if (pumped.station.submitter.jbatch.phase._tag !== "inflight") return pumped;
     if (polls === 0) throw new Error(`${this.party.name}: the batch was sent and the chain said nothing about it in ${SETTLE_POLLS * POLL_MS} ms`);
-    await sleep(POLL_MS);
+    await Bun.sleep(POLL_MS);
     return this.settled(pumped, polls - 1);
   }
 
