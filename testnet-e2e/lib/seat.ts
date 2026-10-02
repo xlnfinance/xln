@@ -2,6 +2,8 @@
 // its key, and a chain port to the node over JSON-RPC. The harness only tells the seat what the party commands and
 // reads what the chain holds afterwards: the Host, the disk, the signing and the sending are the rewrite's.
 import { mkdirSync } from "node:fs";
+import { err, ok, type Result } from "../../pure/kernel/core/result.ts";
+import type { Disk, DiskFault } from "../../pure/host/shell/disk/disk.ts";
 import { emptyEntity, type Command, type EntityId } from "../../pure/entity/model.ts";
 import { limits } from "../../pure/host/host.ts";
 import { command, pump, start, type Boot, type Shell, type Station, type Turn } from "../../pure/host/shell/drive/drive.ts";
@@ -17,27 +19,50 @@ import { GAS, keyOfParty, must, worldOf, type Chain, type Party } from "./chain.
 const SETTLE_POLLS = 40;
 const POLL_MS = 100;
 
-/** What a party's node is made of on this chain: the shell over real files, the Entity's boot and the signing key. */
-export type Rig = Readonly<{ shell: Shell; boot: Boot; key: Key }>;
+/**
+ * What a party's node is made of on this chain: the shell over real files, the Entity's boot and the signing key.
+ * `cut` is the power cut: nothing more reaches the files and a close does nothing, as for a process that is gone;
+ * `reclaim` is the operating system taking the file handles back.
+ */
+export type Rig = Readonly<{ shell: Shell; boot: Boot; key: Key; cut: () => void; reclaim: () => Promise<void> }>;
+
+const CUT: DiskFault = { _tag: "disk", op: "write", reason: "the power was cut" };
+
+const dying = (disk: Disk): Readonly<{ disk: Disk; cut: () => void; reclaim: () => Promise<unknown> }> => {
+  let off = false;
+  return {
+    disk: {
+      read: disk.read,
+      run: (ops) => (off ? Promise.resolve(err(CUT)) : disk.run(ops)),
+      close: (): Promise<Result<void, DiskFault>> => (off ? Promise.resolve(ok(undefined)) : disk.close()),
+    },
+    cut: () => { off = true; },
+    reclaim: () => disk.close(),
+  };
+};
 
 /** A rig over `dir`: the WAL and the journal are `wal.log` and `journal.log` there, read back if they are not empty; a batch's answer is looked for in the chain's logs from block `from`. */
 export const rigOf = async (
   chain: Chain, party: Party, entity: EntityId, setup: Setup, dir: string, from: bigint,
 ): Promise<Rig> => {
   mkdirSync(dir, { recursive: true });
-  const wal = must(await fileDisk(`${dir}/wal.log`), `${party.name}'s WAL`);
-  const journal = must(await fileDisk(`${dir}/journal.log`), `${party.name}'s journal`);
+  const wal = dying(must(await fileDisk(`${dir}/wal.log`), `${party.name}'s WAL`));
+  const journal = dying(must(await fileDisk(`${dir}/journal.log`), `${party.name}'s journal`));
   const key = keyOfParty(party);
   const port = chainPort(httpRpc(chain.rpc), {
     depository: chain.manifest.contracts.depository.address, entity, chainId: chain.chainId, key,
     tokens: [chain.tokenId], from, depth: 0n,
   });
   const shell: Shell = {
-    wal, io: { port, signer: lazySigner(entity, key), journal, gas: GAS },
+    wal: wal.disk, io: { port, signer: lazySigner(entity, key), journal: journal.disk, gas: GAS },
     now: () => must(timestamp(BigInt(Date.now())), "stamp"),
   };
   const boot: Boot = { setup, genesis: emptyEntity(entity), limits: must(limits(32, 8), "limits"), where: { entity, deployment: chain.dep, world: worldOf(chain) } };
-  return { shell, boot, key };
+  return {
+    shell, boot, key,
+    cut: () => { wal.cut(); journal.cut(); },
+    reclaim: async () => { await Promise.all([wal.reclaim(), journal.reclaim()]); },
+  };
 };
 
 export class Seat {
