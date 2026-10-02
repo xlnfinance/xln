@@ -42,6 +42,7 @@ const portOf = (chain: Chain, log: string, found = [advanced(105n, 1n)]): WatchP
   },
   logs: (from, to) => Promise.resolve(ok(found.filter((l) => l.block >= from && l.block <= to))),
   accountAt: () => Promise.resolve(ok({ epoch: 1n, nonce: 5n })),
+  input: () => Promise.resolve(err(DOWN)),
 });
 
 const watchOf = (chain: Chain, log: string, found = [advanced(105n, 1n)]): WatchConfig =>

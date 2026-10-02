@@ -108,6 +108,8 @@ export type ChainFacts = Readonly<{
 export type Against = Readonly<{
   nonce: bigint; proposerIsLeft: boolean; bodyHash: string; window: bigint; over: boolean; answer: Answer | undefined;
   countered: Registered | undefined;
+  /** The exact body the start revealed in its calldata, when the Host read it and it hashes to `bodyHash`. */
+  body?: ProofBody;
 }>;
 
 /**
@@ -148,7 +150,9 @@ export type PeerMessage = Tagged<"peer_message", { from: EntityId; msg: Msg<Acco
  * settlement or withdrawal that can no longer land (its batch reverted, its signatures ran out), named by the serial
  * its action carried: a report of an operation that is not the one out (a repeat, or an older one) changes nothing;
  * `j_collateral` is what the chain holds for one token of the Account now (R-J-COLLATERAL): a state, not a change, so
- * a repeat is a no-op.
+ * a repeat is a no-op; `j_finalize_unread` is a dispute finalize whose arguments the Host could not read from its
+ * transaction (some other call than `processBatch` carried it), so a secret it showed may have reached the chain
+ * unseen by this node (R-WATCH-CALLDATA): told to the owner as a notice and changing no fact.
  */
 export type JEvent =
   | Tagged<"j_epoch", { peer: EntityId; epoch: bigint; stored: bigint; finalBodyHash?: string }>
@@ -156,7 +160,7 @@ export type JEvent =
     "j_dispute",
     {
       peer: EntityId; epoch: bigint; by: Side; nonce: bigint; timeout: bigint; proposerIsLeft: boolean;
-      bodyHash: string;
+      bodyHash: string; body?: ProofBody;
     }
   >
   | Tagged<"j_countered", { peer: EntityId; nonce: bigint; proposerIsLeft: boolean; bodyHash: string }>
@@ -165,7 +169,8 @@ export type JEvent =
   | Tagged<"j_start_lapsed", { peer: EntityId; nonce: bigint }>
   | Tagged<"j_counter_lapsed", { peer: EntityId; nonce: bigint }>
   | Tagged<"j_collateral", { peer: EntityId; token: TokenId; collateral: bigint; ondelta: bigint }>
-  | Tagged<"j_op_lapsed", { peer: EntityId; serial: bigint }>;
+  | Tagged<"j_op_lapsed", { peer: EntityId; serial: bigint }>
+  | Tagged<"j_finalize_unread", { peer: EntityId }>;
 
 /** What a peer asks the node to co-sign: a withdrawal of collateral as a shortcut (C2R) or as a settlement. */
 export type CosignOp =
@@ -308,6 +313,7 @@ export type Notice =
   | Tagged<"command_refused", { command: Command; fault: EntityFault }>
   | Tagged<"unknown_peer", { from: EntityId }>
   | Tagged<"holding_dropped", { peer: EntityId; token: TokenId }>
+  | Tagged<"finalize_unread", { peer: EntityId }>
   | Tagged<
     "offdelta_rebased",
     {

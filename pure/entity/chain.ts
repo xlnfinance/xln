@@ -3,6 +3,7 @@
 // committed frames; a proof's nonce is read off them and never derived from an earlier proof.
 import { mapSet } from "../kernel/core/collections.ts";
 import { err, ok, type Result } from "../kernel/core/result.ts";
+import { proofBodyHash, type ProofBody } from "../chain/proof/proof.ts";
 import { MAX_PROOF_TOKENS } from "../account/proof/body.ts";
 import type { TokenId } from "../account/model.ts";
 import type { Held } from "../account/state.ts";
@@ -38,6 +39,14 @@ export const keepHolding = (
 /** One more frame is co-signed in this epoch. */
 export const framed = (f: ChainFacts): ChainFacts => ({ ...f, frames: f.frames + 1n });
 
+/** The body the start revealed, kept only if it is the one the chain logged the hash of: nothing else is believed. */
+const shown = (e: Extract<JEvent, { _tag: "j_dispute" }>): Readonly<{ body?: ProofBody }> => {
+  const hash = e.body === undefined ? undefined : proofBodyHash(e.body);
+  return e.body !== undefined && hash?.ok === true && hash.value.toLowerCase() === e.bodyHash.toLowerCase()
+    ? { body: e.body }
+    : {};
+};
+
 /**
  * The peer opened a dispute in the epoch the Entity is in. One in another epoch is not about its proofs, and a repeated
  * report keeps the dispute it first named (with the answer already given to it).
@@ -49,7 +58,7 @@ export const disputeOpened = (f: ChainFacts, e: Extract<JEvent, { _tag: "j_dispu
       ...f,
       against: {
         nonce: e.nonce, proposerIsLeft: e.proposerIsLeft, bodyHash: e.bodyHash, window: e.timeout, over: false,
-        answer: undefined, countered: undefined,
+        answer: undefined, countered: undefined, ...shown(e),
       },
     });
 

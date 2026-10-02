@@ -12,7 +12,9 @@ import { err, map, ok, traverse, type Result } from "../kernel/core/result.ts";
 import { none, some, type Option } from "../kernel/core/option.ts";
 import type { Brand, Tagged } from "../kernel/core/tagged.ts";
 import type { TokenId } from "../account/model.ts";
+import type { ProofBody } from "../chain/proof/proof.ts";
 import { keccakHex, utf8 } from "../kernel/encoding/bytes.ts";
+import { startedSecrets } from "./calldata/decode.ts";
 
 /** `0x` and 64 lowercase hex digits: an entity id, a topic or a block hash. Their text order is their numeric order. */
 export type Bytes32 = Brand<string, "Bytes32">;
@@ -32,7 +34,7 @@ export const address = (text: string): Result<Address, BadHex> =>
 export type Place = Readonly<{ block: bigint; blockHash: Bytes32; index: bigint }>;
 
 /** A log as the node returns it, with its numbers parsed and its hex lowercased by the shell that fetched it. */
-export type RawLog = Readonly<Place & { address: Address; topics: readonly Bytes32[]; data: string }>;
+export type RawLog = Readonly<Place & { address: Address; topics: readonly Bytes32[]; data: string; tx: Bytes32 }>;
 
 /** The two entities of a dispute event and the nonce it names: `sender` is the entity whose batch carried the op. */
 type Dispute = Readonly<Place & { sender: Bytes32; counter: Bytes32; nonce: bigint }>;
@@ -43,12 +45,22 @@ type Proof = Readonly<{ proposerIsLeft: boolean; bodyHash: Bytes32 }>;
 /** What the chain holds for one token of an Account after an operation: its collateral and its ondelta. */
 export type Holding = Readonly<{ token: TokenId; collateral: bigint; ondelta: bigint }>;
 
+/**
+ * What a finalize showed in its arguments, which no log carries: `unasked` until the Host has fetched the input of the
+ * transaction (`withCalldata`), then the secrets of the op whose evidence hash is the logged one, or `unread` when no
+ * op of the input has it (the transaction was some other call, such as a contract that wrapped `processBatch`).
+ */
+export type Shown = Tagged<"unasked"> | Tagged<"read", { secrets: readonly Bytes32[] }> | Tagged<"unread">;
+
 export type ChainEvent =
   | Tagged<"epoch_advanced", Place & { left: Bytes32; right: Bytes32; epoch: bigint }>
   | Tagged<"account_settled", Place & { left: Bytes32; right: Bytes32; holdings: readonly Holding[] }>
-  | Tagged<"dispute_started", Dispute & Proof & { timeout: bigint }>
+  | Tagged<
+    "dispute_started",
+    Dispute & Proof & { timeout: bigint; secrets: readonly Bytes32[]; tx: Bytes32; body: ProofBody | undefined }
+  >
   | Tagged<"dispute_countered", Dispute & Proof>
-  | Tagged<"dispute_finalized", Dispute & { bodyHash: Bytes32 }>
+  | Tagged<"dispute_finalized", Dispute & { bodyHash: Bytes32; evidence: Bytes32; tx: Bytes32; shown: Shown }>
   | Tagged<"secret_revealed", Place & { hashlock: Bytes32; revealer: Bytes32; secret: Bytes32 }>;
 
 export type LogFault =
@@ -74,7 +86,7 @@ const holdsWords = (data: string, fits: (words: number) => boolean): boolean => 
   return words._tag === "some" && fits(words.value);
 };
 
-type Reader = (at: Place, topics: Topics, data: string) => Option<ChainEvent>;
+type Reader = (at: Place, topics: Topics, data: string, tx: Bytes32) => Option<ChainEvent>;
 
 const epochRead: Reader = (at, topics, data) =>
   (three(topics) && holdsWords(data, (n) => n === 1)
@@ -144,9 +156,12 @@ const TWO_WORDS = 2;
 
 const proofIn = (data: string): Proof => ({ proposerIsLeft: wordAt(data, 0) !== 0n, bodyHash: idAt(data, 1) });
 
-const startedRead: Reader = (at, topics, data) =>
+const startedRead: Reader = (at, topics, data, tx) =>
   (four(topics) && holdsWords(data, (n) => n >= STARTED_WORDS)
-    ? some({ _tag: "dispute_started", ...disputeIn(at, topics), ...proofIn(data), timeout: wordAt(data, TIMEOUT_AT) })
+    ? some({
+      _tag: "dispute_started", ...disputeIn(at, topics), ...proofIn(data), timeout: wordAt(data, TIMEOUT_AT),
+      secrets: startedSecrets(data), tx, body: undefined,
+    })
     : none);
 
 const counteredRead: Reader = (at, topics, data) =>
@@ -154,9 +169,12 @@ const counteredRead: Reader = (at, topics, data) =>
     ? some({ _tag: "dispute_countered", ...disputeIn(at, topics), ...proofIn(data) })
     : none);
 
-const finalizedRead: Reader = (at, topics, data) =>
+const finalizedRead: Reader = (at, topics, data, tx) =>
   (four(topics) && holdsWords(data, (n) => n === TWO_WORDS)
-    ? some({ _tag: "dispute_finalized", ...disputeIn(at, topics), bodyHash: idAt(data, 0) })
+    ? some({
+      _tag: "dispute_finalized", ...disputeIn(at, topics), bodyHash: idAt(data, 0), evidence: idAt(data, 1), tx,
+      shown: { _tag: "unasked" },
+    })
     : none);
 
 /** `SecretRevealed(hashlock, revealer, secret)`: the hashlock and the revealer are topics, the secret is the data. */
@@ -235,7 +253,7 @@ export const decodeLog = (depository: Address, log: RawLog): Result<Option<Chain
   if (log.address !== depository) return err({ _tag: "foreign_log", ...at, address: log.address });
   if (!lowercaseBytes32(log.topics)) return err({ _tag: "bad_log", ...at, event: topic });
   if (read !== undefined) {
-    const event = read(at, log.topics, log.data);
+    const event = read(at, log.topics, log.data, log.tx);
     return event._tag === "some" ? ok(event) : err({ _tag: "bad_log", ...at, event: topic });
   }
   return SKIPPED.has(topic) ? ok(none) : err({ _tag: "unknown_event", ...at, topic });

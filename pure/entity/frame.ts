@@ -467,6 +467,8 @@ const chainFact = (w: Work, terms: ProofTerms, e: JEvent): Work => {
       return holding(w, e);
     case "j_op_lapsed":
       return withFacts(w, e.peer, cosignLapsed(facts, e.serial));
+    case "j_finalize_unread":
+      return noting(w, { _tag: "finalize_unread", peer: e.peer });
   }
 };
 
@@ -901,7 +903,8 @@ const accepting = (terms: ProofTerms, w: Work, peer: EntityId, account: EntityRe
   // the opening state then.
   const dropped = answer === undefined || (answer.lapsed && !answer.registered);
   const unanswered = against?.countered === undefined && dropped;
-  const body = against !== undefined && unanswered ? rebuilt(terms, facts, account, against) : undefined;
+  const held = against !== undefined && unanswered ? rebuilt(terms, facts, account, against) : undefined;
+  const body = held ?? (unanswered ? against?.body : undefined);
   return against !== undefined && body !== undefined
     ? [{
       _tag: "dispute_finalize", peer, nonce: against.nonce, proposerIsLeft: against.proposerIsLeft, body,
@@ -930,7 +933,7 @@ const isArrival = (i: EntityInput): i is Arrival =>
   || i._tag === "j_dispute"
   || i._tag === "j_countered" || i._tag === "j_window_over" || i._tag === "j_dispute_over"
   || i._tag === "j_start_lapsed" || i._tag === "j_counter_lapsed" || i._tag === "j_collateral"
-  || i._tag === "j_op_lapsed";
+  || i._tag === "j_op_lapsed" || i._tag === "j_finalize_unread";
 
 const arrivalsOf = (inputs: readonly EntityInput[]): readonly Arrival[] => inputs.filter(isArrival);
 

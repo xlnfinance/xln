@@ -82,6 +82,14 @@ describe("entity/signing R-DISPUTE-FREEZE an Account in dispute proposes nothing
     expect(over.outputs).toHaveLength(1);
   });
 
+  test("R-WATCH-CALLDATA a finalize the Host could not read is told as a notice, and no fact changes", () => {
+    const unread = run(bobDisputed, { _tag: "j_finalize_unread", peer: ALICE.id });
+    expect(unread.notices).toStrictEqual([{ _tag: "finalize_unread", peer: ALICE.id }]);
+    expect(unread.state.chain).toEqual(bobDisputed.chain);
+    expect(unread.outputs).toEqual([]);
+    expect(unread.chain).toEqual(run(bobDisputed).chain);
+  });
+
   test("R-DISPUTE-FREEZE a dispute the Host dropped, because its start would revert, ends it too", () => {
     const lapsed = run(started.state, { _tag: "j_start_lapsed", peer: BOB.id, nonce: start.nonce });
     expect(run(lapsed.state, credit(BOB.id, 20n)).outputs).toHaveLength(1);

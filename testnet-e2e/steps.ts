@@ -15,6 +15,7 @@ import type { SigningContext } from "../pure/account/proof/signing.ts";
 import { proofBodyHash } from "../pure/chain/proof/proof.ts";
 import { accountMessageHash } from "../pure/chain/proof/payload.ts";
 import { keccakHex } from "../pure/kernel/encoding/bytes.ts";
+import { secretsIn } from "../pure/j/calldata/decode.ts";
 import { startAnvil, assertLoopback, scrubbedEnv, type Anvil } from "./lib/anvil.ts";
 import {
   accountKeyOf, accountOnChain, advanceTime, collateralOf, connect, eid, heldBy, leftOf, must, partyOf, reserveOf,
@@ -690,6 +691,24 @@ const rebase: Step<World> = {
       [alice.name, hubX.name].forEach((who) => { if (!names.includes(`${who} ${tag}`)) throw new Error(`${who} was told no ${tag} (${names.join(", ")})`); });
     });
     if (!names.some((n) => n.endsWith("j_dispute"))) throw new Error(`nobody was told of the dispute (${names.join(", ")})`);
+    // R-WATCH-CALLDATA: each node's loop fetched the finalize's transaction from the node and found the op whose evidence hash the chain logged.
+    if (names.some((n) => n.endsWith("j_finalize_unread"))) throw new Error(`a node could not read the finalize's arguments from its transaction (${names.join(", ")})`);
+    // R-WATCH-CALLDATA, the encoding: the deployed DeltaTransformer reads a dispute's argument blob as `abi.encode(bytes[])`, one `Arguments` per clause, and the node reads the same secrets from the same bytes.
+    const secret = ethers.hexlify(ethers.randomBytes(32));
+    const coder = ethers.AbiCoder.defaultAbiCoder();
+    const element = coder.encode(["tuple(uint16[] fillRatios, bytes32[] secrets)"], [[[5000n], [secret]]]);
+    const blob = coder.encode(["bytes[]"], [[element]]);
+    const decoder = new ethers.Contract(chain.manifest.contracts.deltaTransformer.address, [
+      "function decodeTransformerArgumentListStrict(bytes) pure returns (bytes[])",
+      "function decodeArgumentsStrict(bytes) pure returns (tuple(uint16[] fillRatios, bytes32[] secrets))",
+    ], chain.provider);
+    const listed: readonly string[] = await decoder.decodeTransformerArgumentListStrict!(blob);
+    const decoded = await decoder.decodeArgumentsStrict!(listed[0]);
+    const chainSees = [...decoded.secrets];
+    const nodeSees = secretsIn(ethers.getBytes(blob));
+    if (listed.length !== 1 || shown(chainSees) !== shown([secret]) || shown(nodeSees) !== shown([secret])) {
+      throw new Error(`the deployed DeltaTransformer reads ${listed.length} clause(s) with secrets ${shown(chainSees)} from a blob the node's decoder reads as ${shown(nodeSees)}, expected [${secret}]`);
+    }
     // R-LEDGER-REBASE: each Runtime's ledger is the chain's now: no collateral, no ondelta, offdelta counted from zero, and no open clause.
     const pay = PENDING_PAY * unit(chain);
     const ledgers = [a, x].map((id) => ({ id, replica: net.account(id, id === a ? x : a) }));
@@ -756,6 +775,8 @@ const rebase: Step<World> = {
     return {
       checks: [
         `each node's own J loop (pure/host/shell/watch, the watcher core pure/j/watch.ts: blocks and logs by number, readings by block hash) read the Depository's logs at depth 1 up to height ${net.view()} and told its Entity ${names.length} J events, in the WAL before the height: ${names.join(", ")}`,
+        `R-WATCH-CALLDATA: the deployed DeltaTransformer (decodeTransformerArgumentListStrict, then decodeArgumentsStrict on each element) reads a dispute's argument blob as abi.encode(bytes[]) with one Arguments per clause, and pure/j/calldata/decode.ts reads the same secret from the same bytes (${secret.slice(0, 10)}...)`,
+        `R-WATCH-CALLDATA: each node's loop fetched the finalize's transaction (eth_getTransactionByHash) and found in its processBatch input the op whose evidence hash the Depository logged, so no node was told the finalize was unread; the arguments carried no secret (the Host's own finalize sends none)`,
         `both Runtimes hold chain facts epoch ${onChain.epoch}, stored nonce ${onChain.nonce}, no dispute open, the frames of the new epoch counted, for alice-hubX: the same as the chain`,
         `R-LEDGER-REBASE: both ledgers read collateral ${held.collateral}, ondelta ${held.ondelta} (the chain's), offdelta restarted from zero (it was ${before} before the move), no open clause, no frame pending, one head, and the peer's signature kept is over a head of the new epoch only`,
         `the payment of ${PENDING_PAY} alice had pending when the chain finalized (hubX never committed it: the link lost it) ${resealed ? "was refused by hubX as another epoch's and sealed anew: it committed in epoch 1 on both sides" : "was refused back to alice with a notice (both ledgers at offdelta zero)"}`,
@@ -826,7 +847,11 @@ const disputeStale: Step<World> = {
       if (!(await accountOnChain(chain, alice, hubX)).disputeOpen) throw new Error("no dispute is open after alice's start");
       // The nodes act on the chain's start at the confirmation depth: hubX's node is told, asks for the counter, and its batch lands inside the window.
       await net.reach(BigInt(await chain.provider.getBlockNumber()), { pending: true });
-      if (net.entity(x).chain.get(a)?.against === undefined) throw new Error("hubX's node was never told of the dispute against it");
+      const against = net.entity(x).chain.get(a)?.against;
+      if (against === undefined) throw new Error("hubX's node was never told of the dispute against it");
+      if (against.body === undefined || must(proofBodyHash(against.body), "revealed body hash") !== against.bodyHash) {
+        throw new Error("hubX's node was not told the body alice's start revealed: its J loop read none from the start's transaction input, or one that does not make the logged hash");
+      }
       if (!net.askedBy(x).slice(mark.hubX).some((ask) => ask._tag === "counter")) throw new Error("hubX's node did not ask the chain for a counter");
       await net.reach(BigInt(await chain.provider.getBlockNumber()), { pending: true });
       const registered = await chain.depository.queryFilter(chain.depository.filters.CounterDisputeRegistered(), fromBlock);
@@ -934,6 +959,7 @@ const disputeStale: Step<World> = {
       checks: [
         `alice funded alice-hubX with ${fmt(chain, funded)} in epoch ${onChain.epoch}; alice paid hubX ${fmt(chain, STALE_PAY * unit(chain))}, hubX committed the frame (slot ${newSlot}) and its ack to alice was lost: hubX holds alice's signature over a head alice never committed`,
         `alice's own node started the dispute from her older head (nonce ${startNonce}); hubX's node, told of it at depth 1, asked for a counter with the newer proof (nonce ${counter.nonce}, restated ${counters.length} time${counters.length === 1 ? "" : "s"}): one CounterDisputeRegistered naming hubX's Entity, sent from hubX's wallet, inside the window; the counter's head is the dispute-proof digest the chain computes for that nonce and epoch`,
+        "R-WATCH-CALLDATA: hubX's node read the proof body alice's start revealed from the input of the start's transaction (its J loop asked the node for it by transaction hash and found the start op by its logged body hash): the body its Entity holds hashes to the one the chain logged",
         `past both ${floor} s windows hubX's node, told the window was over, finalized with its counter's proof naming the dispute it answers: its journal holds one sealed batch of the counter and one of the finalize, each with its landed answer; alice's node, told of the counter, the finalize that landed was sent by ${(await finished[0]!.getTransaction()).from.toLowerCase() === hubX.wallet.address.toLowerCase() ? "hubX" : "alice"} (both may finalize, alice's node asked ${alicesFinals.length} times, each with the counter's proof); the chain logged one start, one counter, one finalize and ${lostRace.length} skipped finalize`,
         `the chain paid by the newer state: alice ${fmt(chain, aliceGot)} and hubX ${fmt(chain, hubGot)} (ondelta ${held.ondelta} + offdelta ${newOffdelta}, collateral ${held.collateral}); the opening proof would have paid alice ${fmt(chain, stale)}`,
         `R-DISPUTE-FREEZE: inside the window each node was asked for a payment on the Account in dispute and refused it back to whoever asked with a notice (account_disputed): no frame, no new pending frame, the heads stayed, the nodes asked the chain for nothing new`,
