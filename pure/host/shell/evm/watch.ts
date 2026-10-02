@@ -41,9 +41,12 @@ const logFields = (o: Fields) => all({
 const rawLogOf = (raw: unknown): Result<RawLog, ReplyFault> =>
   flatMap(fieldsOf(raw), (o) => map(logFields(o), (log): RawLog => log));
 
-/** The `input` of a transaction: the calldata of the call, as bytes. One the node does not know is a fault. */
-const inputOf = (raw: unknown): Result<Uint8Array, ReplyFault> =>
-  flatMap(fieldsOf(raw), (o) => {
+/**
+ * The `input` of a transaction: the calldata of the call, as bytes. A transaction the node does not know (it answers
+ * null: pruned, or not yet indexed by this backend) is `undefined`, an answer the loop decides on by its age.
+ */
+const inputOf = (raw: unknown): Result<Uint8Array | undefined, ReplyFault> =>
+  raw === null ? ok(undefined) : flatMap(fieldsOf(raw), (o) => {
     const input = o["input"];
     const bytes = isText(input) ? hexToBytes(input.toLowerCase()) : undefined;
     return bytes?.ok === true ? ok(bytes.value) : err(bad("a transaction without input"));

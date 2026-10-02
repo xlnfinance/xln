@@ -215,9 +215,23 @@ export const lifecyclePhases: Readonly<Record<string, Phase>> = Object.fromEntri
 
 // ---- the arguments and calldata of a dispute finalize
 
-/** `abi.encode(Arguments)`, the blob a transformer decodes: one fill ratio and these secrets. */
-export const argumentsOf = (secrets: readonly string[]): string =>
-  AbiCoder.defaultAbiCoder().encode(["tuple(uint16[],bytes32[])"], [[[5000n], secrets]]);
+/**
+ * One clause's `Arguments` as the contract's own dispute tests encode it (`encodeDeltaTransformerArguments` of
+ * Depository-part-1): one fill ratio and these secrets, `abi.encode` of the tuple.
+ */
+export const argumentTupleOf = (secrets: readonly string[]): string =>
+  AbiCoder.defaultAbiCoder().encode(["tuple(uint16[] fillRatios, bytes32[] secrets)"], [[[5000n], secrets]]);
+
+/**
+ * The blob a dispute carries, as the contract's own tests encode it (Depository-part-1, `starterInitialArguments`) and
+ * as the Depository reads it (Account.sol `_decodeTransformerArgumentList`): `abi.encode(bytes[])`, one `Arguments` per
+ * clause.
+ */
+export const argumentListOf = (...clauses: readonly (readonly string[])[]): string =>
+  AbiCoder.defaultAbiCoder().encode(["bytes[]"], [clauses.map(argumentTupleOf)]);
+
+/** The blob of a dispute over one clause, showing these secrets. */
+export const argumentsOf = (secrets: readonly string[]): string => argumentListOf(secrets);
 
 const BODY: ProofBody = {
   watchSeed: hexOf(0n), leftResponseSeconds: 60n, rightResponseSeconds: 60n, offdeltas: [10n], tokenIds: [1n],
@@ -272,6 +286,20 @@ export const startOp = (body: ProofBody, over: Partial<InitialDisputeProof> = {}
 export const startInput = (sender: Bytes32, ops: readonly InitialDisputeProof[]): Uint8Array => {
   const batch = must(encodeBatch({ ...emptyBatch(1_000_000n), disputeStarts: ops }));
   return must(hexToBytes(DEPOSITORY_ABI.encodeFunctionData("processBatch", [sender, batch, "0x1234", 3n])));
+};
+
+/** A signed 512-bit offdelta as the contract's `Int512 {int256 high; uint256 low}`. */
+const int512Of = (value: bigint): { high: bigint; low: bigint } => ({
+  high: value >> 256n, low: value & ((1n << 256n) - 1n),
+});
+
+/** The input of a tower's `watchtowerCounterDispute` call, which carries the op as its `params`. */
+export const towerInput = (entity: Bytes32, op: FinalDisputeProof): Uint8Array => {
+  const body = op.finalProofbody;
+  const params = { ...op, finalProofbody: { ...body, offdeltas: body.offdeltas.map(int512Of) } };
+  return must(hexToBytes(DEPOSITORY_ABI.encodeFunctionData("watchtowerCounterDispute", [
+    entity, params, 300n, 1n, "0x1234",
+  ])));
 };
 
 /** What `DisputeFinalized` logs as `finalizationEvidenceHash` for the op. */

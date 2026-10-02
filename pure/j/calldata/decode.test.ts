@@ -5,8 +5,8 @@ import { bytesToHex, hexToBytes } from "../../kernel/encoding/bytes.ts";
 import { finalizedSecrets, finalizesIn, secretsIn, startedBody, startedSecrets } from "./decode.ts";
 import { proofBodyHash } from "../../chain/proof/proof.ts";
 import {
-  argumentsOf, CLAUSED, entityOf, evidenceOf, finalizeInput, finalizeOp, hexOf, logOf, multicalled, must, patched,
-  relayed, startInput, startOp,
+  argumentListOf, argumentsOf, argumentTupleOf, CLAUSED, entityOf, evidenceOf, finalizeInput, finalizeOp, hexOf, logOf,
+  multicalled, must, patched, relayed, startInput, startOp, towerInput,
 } from "../fixtures.ts";
 
 const LEFT = entityOf(0x11n);
@@ -23,16 +23,60 @@ const bytesOf = (hex: string): Uint8Array => must(hexToBytes(hex));
 
 const inputOf = (ops: readonly FinalDisputeProof[]): Uint8Array => finalizeInput(RIGHT, ops);
 
+/**
+ * What the contract's own test encoder makes of one clause showing the secret 0xa1 (the dispute tests of the contracts,
+ * Depository-part-1, `starterInitialArguments`): `abi.encode(['bytes[]'], [[abi.encode(tuple(uint16[] fillRatios,
+ * bytes32[] secrets))]])`, with a fill ratio of 5000. The Depository reads exactly this layout
+ * (`decodeTransformerArgumentListStrict`).
+ */
+const CONTRACT_BLOB = "0x"
+  + "0000000000000000000000000000000000000000000000000000000000000020"
+  + "0000000000000000000000000000000000000000000000000000000000000001"
+  + "0000000000000000000000000000000000000000000000000000000000000020"
+  + "00000000000000000000000000000000000000000000000000000000000000e0"
+  + "0000000000000000000000000000000000000000000000000000000000000020"
+  + "0000000000000000000000000000000000000000000000000000000000000040"
+  + "0000000000000000000000000000000000000000000000000000000000000080"
+  + "0000000000000000000000000000000000000000000000000000000000000001"
+  + "0000000000000000000000000000000000000000000000000000000000001388"
+  + "0000000000000000000000000000000000000000000000000000000000000001"
+  + "00000000000000000000000000000000000000000000000000000000000000a1";
+
 describe("j/calldata", () => {
-  test("R-WATCH-CALLDATA the secrets of an Arguments blob are read in order, and none from what is not one", () => {
-    expect(secretsIn(bytesOf(argumentsOf([SECRET_A, SECRET_B])))).toEqual([SECRET_A, SECRET_B]);
+  test("R-WATCH-CALLDATA a blob is the contract's `abi.encode(bytes[])`, as its own test encoder makes it", () => {
+    expect(argumentsOf([SECRET_A])).toBe(CONTRACT_BLOB);
+    expect(secretsIn(bytesOf(CONTRACT_BLOB))).toEqual([SECRET_A]);
+  });
+
+  test("R-WATCH-CALLDATA every clause's secrets are read in order, each once, and none from what is not a blob", () => {
+    expect(secretsIn(bytesOf(argumentListOf([SECRET_A, SECRET_B], [], [SECRET_B, SECRET_C])))).toEqual(
+      [SECRET_A, SECRET_B, SECRET_C],
+    );
     expect(secretsIn(bytesOf(argumentsOf([])))).toEqual([]);
+    expect(secretsIn(bytesOf(argumentListOf()))).toEqual([]);
     expect(secretsIn(new Uint8Array())).toEqual([]);
     expect(secretsIn(bytesOf(argumentsOf([SECRET_A])).subarray(0, 100))).toEqual([]);
-    const huge = bytesOf(`0x${"ff".repeat(96)}`);
-    expect(secretsIn(huge)).toEqual([]);
-    const lying = patched(bytesOf(argumentsOf([SECRET_A])), 160, bytesOf(hexOf(1n << 40n)));
-    expect(secretsIn(lying)).toEqual([]);
+    expect(secretsIn(bytesOf(`0x${"ff".repeat(96)}`))).toEqual([]);
+  });
+
+  test("R-WATCH-CALLDATA the bare Arguments tuple, which the chain does not read, shows no secret", () => {
+    expect(secretsIn(bytesOf(argumentTupleOf([SECRET_A])))).toEqual([]);
+  });
+
+  test("R-WATCH-CALLDATA a count or an offset the blob has no room for gives no secret, and builds no list", () => {
+    const blob = bytesOf(argumentsOf([SECRET_A]));
+    expect(secretsIn(patched(blob, 32, bytesOf(hexOf(1n << 40n))))).toEqual([]);
+    expect(secretsIn(patched(blob, 0, bytesOf(hexOf(1n << 40n))))).toEqual([]);
+    const element = 32 + 32 + 32;
+    expect(secretsIn(patched(blob, element + 32 + 32 + 32, bytesOf(hexOf(1n << 40n))))).toEqual([]);
+  });
+
+  test("R-WATCH-CALLDATA a blob past what the contract accepts, or clauses past a body's most, are not read", () => {
+    const blob = bytesOf(argumentsOf([SECRET_A]));
+    expect(secretsIn(Uint8Array.from({ length: 64 * 1024 }, (_, i) => blob[i] ?? 0))).toEqual([SECRET_A]);
+    expect(secretsIn(Uint8Array.from({ length: 64 * 1024 + 1 }, (_, i) => blob[i] ?? 0))).toEqual([]);
+    const clauses = Array.from({ length: 33 }, (_, i) => [entityOf(BigInt(i + 1))]);
+    expect(secretsIn(bytesOf(argumentListOf(...clauses)))).toEqual(clauses.slice(0, 32).flat());
   });
 
   test("R-WATCH-CALLDATA a dispute start shows the secrets of both its blobs, each once", () => {
@@ -46,13 +90,35 @@ describe("j/calldata", () => {
     expect(startedSecrets("0x")).toEqual([]);
   });
 
-  test("R-WATCH-CALLDATA a processBatch input gives each finalize op with the evidence hash the chain logs", () => {
-    const first = finalizeOp({ otherArguments: argumentsOf([SECRET_A]) });
-    const second = finalizeOp({ finalNonce: 9n, starterArguments: argumentsOf([SECRET_B]) });
-    const found = finalizesIn(inputOf([first, second]));
-    expect(found.map((f) => f.evidence)).toEqual([evidenceOf(first), evidenceOf(second)]);
-    expect(found.map((f) => secretsIn(f.otherArguments))).toEqual([[SECRET_A], []]);
-    expect(found.map((f) => secretsIn(f.starterArguments))).toEqual([[], [SECRET_B]]);
+  test("R-WATCH-CALLDATA a processBatch input gives its finalize op with the evidence hash the chain logs", () => {
+    const op = finalizeOp({ otherArguments: argumentsOf([SECRET_A]), starterArguments: argumentsOf([SECRET_B]) });
+    const found = finalizesIn(inputOf([op]));
+    expect(found.map((f) => f.evidence)).toEqual([evidenceOf(op)]);
+    expect(found.map((f) => secretsIn(f.otherArguments))).toEqual([[SECRET_A]]);
+    expect(found.map((f) => secretsIn(f.starterArguments))).toEqual([[SECRET_B]]);
+  });
+
+  test("R-WATCH-CALLDATA a batch with more finalizations than the Depository accepts is not read", () => {
+    const ops = [finalizeOp(), finalizeOp({ finalNonce: 9n })];
+    expect(finalizesIn(inputOf(ops))).toEqual([]);
+    expect(finalizedSecrets(inputOf(ops), evidenceOf(finalizeOp()))).toBeUndefined();
+  });
+
+  test("R-WATCH-CALLDATA an input past the most a transaction can carry is not read", () => {
+    const op = finalizeOp({ otherArguments: argumentsOf([SECRET_A]) });
+    const input = inputOf([op]);
+    expect(finalizesIn(Uint8Array.from({ length: 1024 * 1024 }, (_, i) => input[i] ?? 0)).length).toBe(1);
+    expect(finalizesIn(Uint8Array.from({ length: 1024 * 1024 + 1 }, (_, i) => input[i] ?? 0))).toEqual([]);
+  });
+
+  test("R-WATCH-CALLDATA a tower's counter-dispute call finalizes with an empty signature in its evidence", () => {
+    const op = finalizeOp({ otherArguments: argumentsOf([SECRET_A]), sig: "0x" });
+    const signed = finalizeOp({ otherArguments: argumentsOf([SECRET_A]), sig: `0x${"cd".repeat(65)}` });
+    const input = towerInput(LEFT, signed);
+    const found = finalizesIn(input);
+    expect(found.map((f) => f.evidence)).toEqual([evidenceOf(op)]);
+    expect(finalizedSecrets(input, evidenceOf(op))).toEqual([SECRET_A]);
+    expect(finalizedSecrets(input, evidenceOf(signed))).toBeUndefined();
   });
 
   test("R-WATCH-CALLDATA an input that is not a processBatch call, or is cut short, has no finalize ops", () => {
@@ -71,13 +137,14 @@ describe("j/calldata", () => {
 
   test("R-WATCH-CALLDATA the secrets of a finalize are those of the op whose evidence hash was logged", () => {
     const mine = finalizeOp({ otherArguments: argumentsOf([SECRET_A]), starterArguments: argumentsOf([SECRET_B]) });
-    const theirs = finalizeOp({ finalNonce: 9n, otherArguments: argumentsOf([SECRET_C]) });
-    const input = inputOf([theirs, mine]);
+    const input = inputOf([mine]);
     expect(finalizedSecrets(input, evidenceOf(mine))).toEqual([SECRET_B, SECRET_A]);
     expect(finalizedSecrets(input, evidenceOf(finalizeOp({ finalNonce: 99n })))).toBeUndefined();
     expect(finalizedSecrets(inputOf([]), evidenceOf(mine))).toBeUndefined();
   });
 
+  const clause = CLAUSED.transformers[0] ?? expect.unreachable("no clause");
+  const allowance = clause.allowances[0] ?? expect.unreachable("no allowance");
   const hashOf = (body: typeof CLAUSED) => must(bytes32Of(must(proofBodyHash(body))));
   const bytes32Of = (hash: string) => ({ ok: true, value: hash as ReturnType<typeof entityOf> }) as const;
   const other = { ...CLAUSED, offdeltas: [5n], transformers: [] };
@@ -102,6 +169,23 @@ describe("j/calldata", () => {
     const noise = new Uint8Array([...selector, ...Array.from({ length: NOISE }, () => 0xff), ...selector]);
     expect(finalizesIn(noise)).toEqual([]);
     expect(finalizesIn(new Uint8Array([...selector]))).toEqual([]);
+  });
+
+  test("R-WATCH-CALLDATA a tower's call is found inside a wrapper too, and read with the empty signature", () => {
+    const signed = finalizeOp({ otherArguments: argumentsOf([SECRET_A]), sig: `0x${"cd".repeat(65)}` });
+    const wanted = evidenceOf({ ...signed, sig: "0x" });
+    const wrapped = relayed(towerInput(LEFT, signed));
+    expect(finalizedSecrets(wrapped, wanted)).toEqual([SECRET_A]);
+    const together = multicalled([inputOf([finalizeOp()]), towerInput(LEFT, signed)]);
+    expect(finalizedSecrets(together, wanted)).toEqual([SECRET_A]);
+  });
+
+  test("R-WATCH-CALLDATA an input with more distinct ops than are read is not read, never half read", () => {
+    const many = (n: number) =>
+      multicalled(Array.from({ length: n }, (_, i) => inputOf([finalizeOp({ finalNonce: BigInt(i + 20) })])));
+    expect(finalizesIn(many(64))).toHaveLength(64);
+    expect(finalizesIn(many(65))).toEqual([]);
+    expect(finalizedSecrets(many(65), evidenceOf(finalizeOp({ finalNonce: 20n })))).toBeUndefined();
   });
 
   test("R-WATCH-CALLDATA a start body is found in a wrapped call too, and only by the hash the chain logged", () => {
@@ -146,6 +230,41 @@ describe("j/calldata", () => {
     const countAt = 4 + Number(wordAt(call, 32)) + 32 + head + Number(wordAt(batch, head + 5 * 32));
     expect(wordAt(input, countAt)).toBe(1n);
     expect(startedBody(patched(input, countAt, bytesOf(hexOf(1n << 40n))), hashOf(CLAUSED))).toBeUndefined();
+  });
+
+  test("R-WATCH-CALLDATA more starts, tokens or clauses than the contract accepts give no body", () => {
+    const hashedAs = (body: typeof CLAUSED) => startedBody(startInput(RIGHT, [startOp(body)]), hashOf(body));
+    const tokens = (n: number) => Array.from({ length: n }, (_, i) => BigInt(i + 1));
+    const manyTokens = (n: number) => ({ ...other, tokenIds: tokens(n), offdeltas: tokens(n).map(() => 0n) });
+    expect(hashedAs(manyTokens(128))).toStrictEqual(manyTokens(128));
+    expect(hashedAs(manyTokens(129))).toBeUndefined();
+    const clauses = (n: number) => ({ ...other, transformers: Array.from({ length: n }, () => clause) });
+    expect(hashedAs(clauses(32))).toStrictEqual(clauses(32));
+    expect(hashedAs(clauses(33))).toBeUndefined();
+    const starts = (n: number) =>
+      startInput(RIGHT, Array.from({ length: n }, (_, i) => startOp(other, { nonce: BigInt(i + 1) })));
+    expect(startedBody(starts(8), hashOf(other))).toStrictEqual(other);
+    expect(startedBody(starts(9), hashOf(other))).toBeUndefined();
+  });
+
+  test("R-WATCH-CALLDATA a start input past the most a transaction can carry gives no body", () => {
+    const input = startInput(RIGHT, [startOp(CLAUSED)]);
+    const padded = (length: number) => Uint8Array.from({ length }, (_, i) => input[i] ?? 0);
+    expect(startedBody(padded(1024 * 1024), hashOf(CLAUSED))).toStrictEqual(CLAUSED);
+    expect(startedBody(padded(1024 * 1024 + 1), hashOf(CLAUSED))).toBeUndefined();
+  });
+
+  test("R-WATCH-CALLDATA a body whose clauses carry more bytes or allowances than accepted is no body", () => {
+    const heavy = (bytes: number) =>
+      ({ ...other, transformers: [{ ...clause, encodedBatch: `0x${"ab".repeat(bytes)}` }] });
+    const read = (body: typeof CLAUSED) => startedBody(startInput(RIGHT, [startOp(body)]), hashOf(body));
+    expect(read(heavy(100_000))).toStrictEqual(heavy(100_000));
+    expect(read(heavy(176 * 1024 + 1))).toBeUndefined();
+    const allowed = (n: number) => ({
+      ...other, transformers: [{ ...clause, allowances: Array.from({ length: n }, () => allowance) }],
+    });
+    expect(read(allowed(128))).toStrictEqual(allowed(128));
+    expect(read(allowed(129))).toBeUndefined();
   });
 
   test("R-WATCH-CALLDATA whatever is written over the input, a body is read only if its hash is the one named", () => {

@@ -17,7 +17,7 @@ import { jHeight, type HeightFault, type JHeight } from "../account/clause/clock
 import { finalizedSecrets, startedBody } from "./calldata/decode.ts";
 import { decodeLogs, type Address, type Bytes32, type ChainEvent, type LogFault, type RawLog } from "./log.ts";
 import {
-  observe, readingsOf, type Accounts, type Addressed, type JEvent, type ObserveFault, type Reading,
+  hostsAny, observe, readingsOf, type Accounts, type Addressed, type JEvent, type ObserveFault, type Reading,
 } from "./observe.ts";
 
 /** A block as the node tells it: `timestamp` is the chain's own second for it, the clock a dispute's window runs on. */
@@ -101,10 +101,12 @@ export const prepare = (w: Watch, batch: Batch): Result<Prepared, WatchFault> =>
 
 /**
  * The transactions whose input the Host must read: the ones that carried a dispute start (its body) or a dispute
- * finalize (its arguments), R-WATCH-CALLDATA.
+ * finalize (its arguments) of an Account a hosted Entity is a party to, R-WATCH-CALLDATA. A stranger's dispute is not
+ * read: the node asks the chain for nothing a stranger can make it ask for.
  */
-export const calldataWanted = (p: Prepared): readonly Bytes32[] =>
-  [...new Set(p.events.flatMap((e) => (e._tag === "dispute_finalized" || e._tag === "dispute_started" ? [e.tx] : [])))];
+export const calldataWanted = (p: Prepared, hosted: readonly Bytes32[]): readonly Bytes32[] =>
+  [...new Set(p.events.flatMap((e) =>
+    ((e._tag === "dispute_finalized" || e._tag === "dispute_started") && hostsAny(hosted, e) ? [e.tx] : [])))];
 
 /**
  * The prepared batch with the arguments of its finalizes read from the bytes that carried them, by transaction hash:
@@ -127,13 +129,14 @@ export const withCalldata = (p: Prepared, inputs: ReadonlyMap<Bytes32, readonly 
 });
 
 /**
- * The transactions whose calldata the Host could not read what the log is about from: a finalize no bytes it holds
- * carry, and a start whose body none does. The Host asks the node for a call trace of these, once.
+ * The transactions of a hosted Account's disputes whose calldata the Host could not read what the log is about from: a
+ * finalize no bytes it holds carry, and a start whose body none does. The Host asks the node for a call trace of
+ * these, once.
  */
-export const unreadTxs = (p: Prepared): readonly Bytes32[] => {
+export const unreadTxs = (p: Prepared, hosted: readonly Bytes32[]): readonly Bytes32[] => {
   const unread = (e: ChainEvent): boolean =>
-    (e._tag === "dispute_finalized" && e.shown._tag === "unread")
-    || (e._tag === "dispute_started" && e.body === undefined);
+    ((e._tag === "dispute_finalized" && e.shown._tag === "unread")
+      || (e._tag === "dispute_started" && e.body === undefined)) && hostsAny(hosted, e);
   return [...new Set(p.events.filter(unread).flatMap((e) => ("tx" in e ? [e.tx] : [])))];
 };
 

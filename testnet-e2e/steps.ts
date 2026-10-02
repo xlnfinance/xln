@@ -15,7 +15,7 @@ import type { SigningContext } from "../pure/account/proof/signing.ts";
 import { proofBodyHash } from "../pure/chain/proof/proof.ts";
 import { accountMessageHash } from "../pure/chain/proof/payload.ts";
 import { keccakHex } from "../pure/kernel/encoding/bytes.ts";
-import { finalizedSecrets } from "../pure/j/calldata/decode.ts";
+import { finalizedSecrets, secretsIn } from "../pure/j/calldata/decode.ts";
 import { address, bytes32 } from "../pure/j/log.ts";
 import { watchPort } from "../pure/host/shell/evm/watch.ts";
 import { httpRpc } from "../pure/host/shell/node/rpc.ts";
@@ -696,6 +696,22 @@ const rebase: Step<World> = {
     if (!names.some((n) => n.endsWith("j_dispute"))) throw new Error(`nobody was told of the dispute (${names.join(", ")})`);
     // R-WATCH-CALLDATA: each node's loop fetched the finalize's transaction from the node and found the op whose evidence hash the chain logged.
     if (names.some((n) => n.endsWith("j_finalize_unread"))) throw new Error(`a node could not read the finalize's arguments from its transaction (${names.join(", ")})`);
+    // R-WATCH-CALLDATA, the encoding: the deployed DeltaTransformer reads a dispute's argument blob as `abi.encode(bytes[])`, one `Arguments` per clause, and the node reads the same secrets from the same bytes.
+    const secret = ethers.hexlify(ethers.randomBytes(32));
+    const coder = ethers.AbiCoder.defaultAbiCoder();
+    const element = coder.encode(["tuple(uint16[] fillRatios, bytes32[] secrets)"], [[[5000n], [secret]]]);
+    const blob = coder.encode(["bytes[]"], [[element]]);
+    const decoder = new ethers.Contract(chain.manifest.contracts.deltaTransformer.address, [
+      "function decodeTransformerArgumentListStrict(bytes) pure returns (bytes[])",
+      "function decodeArgumentsStrict(bytes) pure returns (tuple(uint16[] fillRatios, bytes32[] secrets))",
+    ], chain.provider);
+    const listed: readonly string[] = await decoder.decodeTransformerArgumentListStrict!(blob);
+    const decoded = await decoder.decodeArgumentsStrict!(listed[0]);
+    const chainSees = [...decoded.secrets];
+    const nodeSees = secretsIn(ethers.getBytes(blob));
+    if (listed.length !== 1 || shown(chainSees) !== shown([secret]) || shown(nodeSees) !== shown([secret])) {
+      throw new Error(`the deployed DeltaTransformer reads ${listed.length} clause(s) with secrets ${shown(chainSees)} from a blob the node's decoder reads as ${shown(nodeSees)}, expected [${secret}]`);
+    }
     // A wrapper may hide the call from the input, so the port also reads the node's call trace: the real node's trace of the finalize names its call to the Depository.
     const recent = (await chain.provider.getBlockNumber()) - 5_000;
     const finalized = await chain.depository.queryFilter(chain.depository.filters.DisputeFinalized(), recent);
@@ -772,6 +788,7 @@ const rebase: Step<World> = {
     return {
       checks: [
         `each node's own J loop (pure/host/shell/watch, the watcher core pure/j/watch.ts: blocks and logs by number, readings by block hash) read the Depository's logs at depth 1 up to height ${net.view()} and told its Entity ${names.length} J events, in the WAL before the height: ${names.join(", ")}`,
+        `R-WATCH-CALLDATA: the deployed DeltaTransformer (decodeTransformerArgumentListStrict, then decodeArgumentsStrict on each element) reads a dispute's argument blob as abi.encode(bytes[]) with one Arguments per clause, and pure/j/calldata/decode.ts reads the same secret from the same bytes (${secret.slice(0, 10)}...)`,
         `R-WATCH-CALLDATA: each node's loop fetched the finalize's transaction (eth_getTransactionByHash) and found in its processBatch input the op whose evidence hash the Depository logged, so no node was told the finalize was unread; the node's call trace (debug_traceTransaction, callTracer) of the same transaction, read by the port the nodes use, lists ${traced.value.length} call to the Depository, and the op is in it by the same hash; the arguments carried no secret (the Host's own finalize sends none)`,
         `both Runtimes hold chain facts epoch ${onChain.epoch}, stored nonce ${onChain.nonce}, no dispute open, the frames of the new epoch counted, for alice-hubX: the same as the chain`,
         `R-LEDGER-REBASE: both ledgers read collateral ${held.collateral}, ondelta ${held.ondelta} (the chain's), offdelta restarted from zero (it was ${before} before the move), no open clause, no frame pending, one head, and the peer's signature kept is over a head of the new epoch only`,

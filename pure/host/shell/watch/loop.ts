@@ -26,8 +26,11 @@ export type WatchPort = Readonly<{
   logs: (from: bigint, to: bigint) => Promise<Result<readonly RawLog[], PortFault>>;
   /** The Account's `ondeltaEpoch` and stored nonce at the end of the block with this hash. */
   accountAt: (block: Bytes32, left: Bytes32, right: Bytes32) => Promise<Result<AccountAt, PortFault>>;
-  /** The input of the transaction with this hash, where a finalize's arguments are (R-WATCH-CALLDATA). */
-  input: (tx: Bytes32) => Promise<Result<Uint8Array, PortFault>>;
+  /**
+   * The input of the transaction with this hash, where a finalize's arguments are (R-WATCH-CALLDATA). Nothing
+   * (`undefined`) when the node does not know the transaction.
+   */
+  input: (tx: Bytes32) => Promise<Result<Uint8Array | undefined, PortFault>>;
   /**
    * The input of every call the transaction made to the Depository, from the node's call trace, when a wrapper hid the
    * call from the input. Nothing (`undefined`) when the node has no call trace: that is an answer, not a fault.
@@ -61,12 +64,32 @@ const blocksAfter = async (port: WatchPort, from: bigint, to: bigint): Promise<R
     (block) => block,
   );
 
-/** What the node gave for each transaction asked, and the faults it met: a tx is in one of the two, or in neither. */
+/**
+ * What the node gave for each transaction asked, and the faults it met: a tx is in one of the two, or in neither (the
+ * node gave no answer: it does not know the transaction, or has no call trace).
+ */
 type Gathered = Readonly<{
   found: ReadonlyMap<Bytes32, readonly Uint8Array[]>; failed: ReadonlyMap<Bytes32, PortFault>;
 }>;
 
 const NOTHING: Gathered = { found: new Map(), failed: new Map() };
+
+/**
+ * A block this far behind the head is one a node that still does not know a transaction of has dropped it (it was
+ * pruned): waiting would never read it, so it is told unread and the delivery goes on. A younger one may be a backend
+ * that has not indexed it yet, so it stalls like any fault.
+ */
+const PRUNED_AFTER = 256n;
+
+const unknown = (tx: Bytes32): PortFault =>
+  ({ _tag: "port", call: "watch tx", reason: `the node does not know ${tx}` });
+
+/** The transactions the node did not know and that are too young to be given up on, as the faults they are. */
+const youngMissing = (
+  asked: readonly Bytes32[], got: Gathered, logs: readonly RawLog[], head: bigint,
+): ReadonlyMap<Bytes32, PortFault> =>
+  new Map(asked.filter((tx) => !got.found.has(tx) && !got.failed.has(tx)).filter((tx) =>
+    logs.some((log) => log.tx === tx && head - log.block < PRUNED_AFTER)).map((tx) => [tx, unknown(tx)]));
 
 const gather = async (
   txs: readonly Bytes32[], ask: (tx: Bytes32) => Promise<Result<readonly Uint8Array[] | undefined, PortFault>>,
@@ -154,8 +177,12 @@ export const poll = async (
   if (!prepared.ok) return prepared;
   // The bytes a finalize or a start left: the input of its transaction, and when a wrapper hid the call there, the
   // call trace. A tx the node cannot give stalls the delivery at its block, not the poll: what lies before is told.
-  const inputs = await gather(calldataWanted(prepared.value), async (tx) => map(await port.input(tx), (i) => [i]));
-  const unread = unreadTxs(withCalldata(prepared.value, inputs.found)).filter((tx) => !inputs.failed.has(tx));
+  const wanted = calldataWanted(prepared.value, [hosted]);
+  const asked = await gather(wanted, async (tx) =>
+    map(await port.input(tx), (i) => (i === undefined ? undefined : [i])));
+  const inputs = joined(asked, { found: new Map(), failed: youngMissing(wanted, asked, logs.value, head.value) });
+  const known = new Set(wanted.filter((tx) => !asked.found.has(tx)));
+  const unread = unreadTxs(withCalldata(prepared.value, inputs.found), [hosted]).filter((tx) => !known.has(tx));
   const traces = unread.length === 0 ? NOTHING : await gather(unread, port.trace);
   const gathered = joined(inputs, traces);
   const stall = firstStall(logs.value, gathered.failed);
@@ -169,9 +196,9 @@ export const poll = async (
     });
   if (!cut.ok) return cut;
   const read = withCalldata(cut.value, gathered.found);
-  const asked = await Promise.all(readings(read, [hosted]).map(async (r) =>
+  const states = await Promise.all(readings(read, [hosted]).map(async (r) =>
     map(await port.accountAt(r.blockHash, r.left, r.right), (at) => [readingKey(r), at] as const)));
-  const accounts = traverse(asked, (answer) => answer);
+  const accounts = traverse(states, (answer) => answer);
   if (!accounts.ok) return accounts;
   const step = advance(watch, read, [hosted], new Map(accounts.value), windows);
   return flatMap(step, (done) => map(

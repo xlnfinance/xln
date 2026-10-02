@@ -35,7 +35,7 @@ const logPath = (): string => join(mkdtempSync(LOOP_DIR), "calls.log");
 
 /** A port over `chain` that writes each call it gets to `log`; `broken` is the block, or the read, that fails. */
 const portOf = (
-  chain: Chain, log: string, broken: bigint | "logs" | "account" | "input" = -1n,
+  chain: Chain, log: string, broken: bigint | "logs" | "account" | "input" | "unknown" = -1n,
   inputs: ReadonlyMap<Bytes32, Uint8Array> = new Map(),
   traces: ReadonlyMap<Bytes32, readonly Uint8Array[] | "down"> = new Map(),
 ): WatchPort => {
@@ -59,6 +59,7 @@ const portOf = (
     input: (tx) => {
       appendFileSync(log, `input ${tx.slice(-4)}\n`);
       const found = inputs.get(tx);
+      if (broken === "unknown") return Promise.resolve(ok(undefined));
       return Promise.resolve(broken === "input" || found === undefined ? err(DOWN) : ok(found));
     },
     // A node with no call trace says so (`undefined`); one that is asked and fails is the port's fault.
@@ -206,6 +207,23 @@ describe("host/shell/watch the J loop's poll", () => {
     expect(early.ok ? early.value?.height : early).toBe(1n as never);
     const first = await poll(portOf(straight(6n, logs.slice(0, 1) as never), logPath(), "input"), start(2n), LEFT);
     expect(first.ok ? first.value?.events.map((e) => e._tag) : first).toEqual(["j_epoch"]);
+  });
+
+  test("R-WATCH-CALLDATA a transaction of an old block the node does not know is told unread, no stall", async () => {
+    const at = logPath();
+    const { tx, logs } = finalizing();
+    const got = await poll(portOf(straight(400n, logs), at, "unknown"), start(2n), LEFT);
+    const unread: EntityInput = { _tag: "j_finalize_unread", peer: peer(RIGHT), tx };
+    expect(got.ok ? got.value?.events : got).toEqual([EPOCH, OVER, unread]);
+    expect(callsOf(at).some((c) => c.startsWith("trace"))).toBe(false);
+  });
+
+  test("R-WATCH-CALLDATA a transaction of a young block the node does not know stalls like a fault", async () => {
+    const shown = logOf("SecretRevealed", { hashlock: hexOf(7n), revealer: RIGHT, secret: hexOf(8n) }, 1n, 0n);
+    const { logs } = finalizing();
+    const got = await poll(portOf(straight(6n, [shown, ...logs]), logPath(), "unknown"), start(2n), LEFT);
+    expect(got.ok ? got.value?.events : got).toEqual([{ _tag: "j_secret", secret: SECRET_BYTES }]);
+    expect(got.ok ? got.value?.height : got).toBe(1n as never);
   });
 
   test("R-WATCH-CALLDATA the earliest stalled tx sets the cut; a tx with no input has no trace", async () => {

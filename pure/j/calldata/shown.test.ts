@@ -50,9 +50,9 @@ describe("j/shown", () => {
     ]));
   });
 
-  test("R-WATCH-CALLDATA the starter's arguments at a finalize are shown too, and the op is found among others", () => {
+  test("R-WATCH-CALLDATA the starter's arguments at a finalize are shown too", () => {
     const mine = finalizeOp({ starterArguments: argumentsOf([OTHER_SECRET]) });
-    const input = finalizeInput(RIGHT, [finalizeOp({ finalNonce: 99n, otherArguments: argumentsOf([SECRET]) }), mine]);
+    const input = finalizeInput(RIGHT, [mine]);
     const read = withCalldata(preparedOf(advance(2n, 0n, 1n), finalizedOf(mine, 2n, 1n, TX)), new Map([[TX, [input]]]));
     const told = must(observe(read.events, [LEFT], accounts));
     const shown = told.filter((a) => a.event._tag === "j_secret");
@@ -75,14 +75,15 @@ describe("j/shown", () => {
     expect(told[0]).toEqual(toward(LEFT, { _tag: "j_secret", secret: SECRET }));
   });
 
-  test("R-WATCH-CALLDATA the Host is asked for the input of each transaction that carried a finalize, once", () => {
+  test("R-WATCH-CALLDATA the Host is asked once for the input of each transaction of a hosted dispute", () => {
     const op = finalizeOp();
     const other = txOf(2n, 7n);
     const prepared = preparedOf(
       advance(2n, 0n, 1n), started(2n, 1n, []), finalizedOf(op, 2n, 2n, TX), finalizedOf(op, 2n, 3n, TX),
       finalizedOf(op, 2n, 4n, other),
     );
-    expect(calldataWanted(prepared)).toEqual([txOf(2n, 1n), TX, other]);
+    expect(calldataWanted(prepared, [LEFT])).toEqual([txOf(2n, 1n), TX, other]);
+    expect(calldataWanted(prepared, [THIRD])).toEqual([]);
   });
 
   const HASH = must(proofBodyHash(CLAUSED));

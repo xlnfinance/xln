@@ -93,7 +93,7 @@ describe("host/shell/evm/watch the J loop's reads of the chain", () => {
       .toEqual(ok(Uint8Array.of(0xde, 0xad, 0xbe, 0xef)));
     expect(askedOf(log)).toEqual([`eth_getTransactionByHash ["${txOf(3n, 1n)}"]`]);
     const asked = (reply: unknown) => portOf({ eth_getTransactionByHash: () => ok(reply) }).input(txOf(3n, 1n));
-    expect(await asked(null)).toMatchObject({ ok: false, error: { call: "watch tx" } });
+    expect(await asked(null)).toEqual({ ok: true, value: undefined });
     expect(await asked({ ...found, input: 12 })).toMatchObject({ ok: false });
     expect(await asked({ ...found, input: "0xabc" })).toMatchObject({ ok: false });
     expect(await portOf({ eth_getTransactionByHash: () => down }).input(txOf(3n, 1n)))

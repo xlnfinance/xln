@@ -93,7 +93,7 @@ const advancedAfter = (events: readonly ChainEvent[], e: Bound): number =>
 
 const needsReading = (e: ChainEvent): boolean => e._tag === "epoch_advanced" || e._tag === "dispute_started";
 
-const hostsAny = (hosted: readonly Bytes32[], e: Bound): boolean => partiesOf(e).some((p) => hosted.includes(p));
+export const hostsAny = (hosted: readonly Bytes32[], e: Bound): boolean => partiesOf(e).some((p) => hosted.includes(p));
 
 const isBound = (e: ChainEvent): e is Bound => e._tag !== "secret_revealed";
 
