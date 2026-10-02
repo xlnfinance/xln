@@ -609,7 +609,7 @@ const rebase: Step<World> = {
 
 // ---- S10 ---------------------------------------------------------------------------------------------------------
 const nodes: Step<World> = {
-  id: "nodes", title: "A node crashes and comes back from its WAL; the others carry on", needs: ["htlc"],
+  id: "nodes", title: "A node crashes with a frame committed and unacked, and comes back from its WAL; the others carry on", needs: ["htlc"],
   run: async (w) => {
     const chain = chainOf(w);
     const net = netOf(w);
@@ -619,31 +619,41 @@ const nodes: Step<World> = {
     const everyone = [alice, hubX, hubY, bob];
     const fingerprint = (id: EntityId): string => JSON.stringify([...net.entity(id).accounts].map(([peer, r]) => [peer, r.head, r.height, r.used, [...r.state.ledgers].map(([k, l]) => [k.toString(), l])]), (_, v) => (typeof v === "bigint" ? `${v}n` : v));
     const asked = (id: EntityId): string => JSON.stringify(net.askedBy(id), (_, v) => (typeof v === "bigint" ? `${v}n` : v));
-    const [prints, actions, rows] = [fingerprint(y), asked(y), net.rowsOf(y).length];
-    if (rows === 0) throw new Error("hubY has no committed rows to replay");
     quiet(net, everyone, "nodes, before the crash");
     const noticed = everyone.map((p) => net.noticesOf(eid(p)).length);
+    // bob extends hubY 60 of credit and hubY commits the frame, but its ack never reaches bob: bob's frame stays pending, hubY's row is on its disk.
+    await net.losing((m) => m.from === y && m.to === b, async () => {
+      await net.tell(b, { _tag: "set_credit", peer: y, token: t, limit: 60n * unit(chain) });
+      await net.settle({ pending: true });
+    });
+    const pending = net.account(b, y).pending;
+    if (pending === undefined) throw new Error("bob's frame is not pending: hubY's ack was not lost");
+    if (ledgerOf(net.account(y, b).state, t).limit[net.account(y, b).side] !== 60n * unit(chain)) throw new Error("hubY did not commit bob's frame before the crash");
+    const [prints, actions, rows, headBefore] = [fingerprint(y), asked(y), net.rowsOf(y).length, net.account(y, b).head];
     // hubY dies: its Host and queue are gone, only the rows its disk holds are left.
     await net.restart(y);
-    const resent = net.inFlight();
-    await net.settle();
     if (fingerprint(y) !== prints) throw new Error("hubY's Accounts after the replay differ from what they were before the crash");
     if (asked(y) !== actions) throw new Error("hubY was not asked again for every chain action of its committed rows");
-    // The peers drop what they already hold, and the work goes on.
-    await net.tell(b, { _tag: "set_credit", peer: y, token: t, limit: 60n * unit(chain) });
+    // bob's resend timer sends the same frame again: hubY already holds it and answers it, and both end at one head.
     await net.settle();
     const [rb, ry] = [net.account(b, y), net.account(y, b)];
-    if (rb.head !== ry.head || ledgerOf(ry.state, t).limit[ry.side] !== 60n * unit(chain)) throw new Error("bob's new credit did not reach hubY after its restart");
-    // A copy of a frame a peer already holds is refused in place with a notice that names it (refused_not_next), and nothing else is.
-    const copies = everyone.flatMap((p, i) => net.noticesOf(eid(p)).slice(noticed[i]!).map((n) => `${p.name}: ${n}`));
-    const other = copies.filter((n) => !n.includes("refused_not_next"));
-    if (other.length > 0 || copies.length === 0) throw new Error(`after the restart the peers noticed ${copies.length === 0 ? "nothing, but each copy is refused with a notice" : other.join(", ")}`);
+    if (rb.pending !== undefined || rb.head !== ry.head || ledgerOf(rb.state, t).limit[rb.side === "left" ? "right" : "left"] !== 60n * unit(chain)) throw new Error("bob's frame did not settle on one head after hubY's restart");
+    if (fingerprint(y) !== prints) throw new Error("hubY's Accounts changed when the copy of the frame arrived: a frame it already holds must change nothing");
+    // The copy of bob's frame is a row of its own on hubY's disk, and the ack it answers with names the head hubY committed before the crash.
+    const after = net.rowsOf(y).slice(rows);
+    const answers = after.flatMap((r) => r.outputs.filter((o) => o.to === b && o.msg._tag === "ack"));
+    const [heard] = after;
+    const copy = heard?.input._tag === "entity" ? heard.input.inputs.some((i) => i._tag === "peer_message" && i.from === b && i.msg._tag === "frame" && i.msg.frame.parent === pending.frame.parent && i.msg.frame.slot === pending.frame.slot) : false;
+    if (after.length !== 1 || !copy) throw new Error(`hubY's rows after the restart are not just bob's frame heard again: ${after.map((r) => r.input._tag).join(", ") || "none"}`);
+    if (answers.length !== 1 || answers[0]!.msg._tag !== "ack" || answers[0]!.msg.hash !== headBefore) throw new Error("hubY did not answer the copy of bob's frame with the ack of the head it committed before the crash");
+    if (pending.head !== headBefore || rb.head !== headBefore) throw new Error("bob's pending frame did not clear on the ack of the head it was waiting for");
+    const noticesNow = everyone.flatMap((p, i) => net.noticesOf(eid(p)).slice(noticed[i]!).map((n) => `${p.name}: ${n}`));
+    if (noticesNow.length > 0) throw new Error(`a copy of a frame a peer already holds is answered, not refused: ${noticesNow.join(", ")}`);
     if (net.inFlight() > 0) throw new Error("messages are still on the link");
     return {
       checks: [
-        `hubY restarted from its ${rows} durable rows alone: its Accounts (heads, slots, ledgers) are equal to what they were, and its ${net.askedBy(y).length} chain actions are asked again`,
-        `the ${resent} committed outputs it re-sent were dropped by the peers as copies they already hold (${copies.length} refused_not_next notices, no other), and the link went quiet`,
-        `bob then extended hubY 60 of credit over the link: one frame, both at head ${rb.head.slice(0, 12)}`,
+        `hubY lost power (no stop, no clean close of its files) and restarted from its ${rows} durable rows alone with bob's frame committed and its ack lost: its Accounts (heads, slots, ledgers) are equal to what they were, and its ${net.askedBy(y).length} chain actions are asked again`,
+        `bob's resend timer sent the same pending frame again (parent and slot equal); it is the one new row on hubY's disk, answered by one ack of head ${headBefore.slice(0, 12)}, the head bob was waiting for; no notice: one head on both sides (${rb.head.slice(0, 12)}), nothing pending, and the copy changed no Account`,
       ],
       gaps: [],
     };
