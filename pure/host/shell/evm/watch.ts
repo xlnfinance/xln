@@ -5,6 +5,7 @@
 // words of the ABI, is a fault the caller reads, never a thrown error.
 import { accountKey } from "../../../chain/proof/deployment.ts";
 import { address, bytes32, type Address, type Bytes32, type RawLog } from "../../../j/log.ts";
+import type { Carried } from "../../../j/calldata/decode.ts";
 import type { AccountAt } from "../../../j/observe.ts";
 import type { Block } from "../../../j/watch.ts";
 import { A } from "../../../kernel/encoding/abi.ts";
@@ -42,48 +43,70 @@ const rawLogOf = (raw: unknown): Result<RawLog, ReplyFault> =>
   flatMap(fieldsOf(raw), (o) => map(logFields(o), (log): RawLog => log));
 
 /**
- * The `input` of a transaction: the calldata of the call, as bytes. A transaction the node does not know (it answers
- * null: pruned, or not yet indexed by this backend) is `undefined`, an answer the loop decides on by its age.
+ * The `input` of a transaction as bytes, with how its call reached the Depository (a transaction to it is `direct`,
+ * any other, a creation too, is a `wrapper`'s). A transaction the node does not know (it answers null:
+ * pruned, or not yet indexed by this backend) is `undefined`, an answer the loop decides on by its age.
  */
-const inputOf = (raw: unknown): Result<Uint8Array | undefined, ReplyFault> =>
+const inputOf = (depository: Address) => (raw: unknown): Result<Carried | undefined, ReplyFault> =>
   raw === null ? ok(undefined) : flatMap(fieldsOf(raw), (o) => {
     const input = o["input"];
     const bytes = isText(input) ? hexToBytes(input.toLowerCase()) : undefined;
-    return bytes?.ok === true ? ok(bytes.value) : err(bad("a transaction without input"));
+    const to = o["to"];
+    const route = isText(to) && to.toLowerCase() === depository ? "direct" : "wrapper";
+    return bytes?.ok === true ? ok({ data: bytes.value, route }) : err(bad("a transaction without input"));
   });
 
-/** The most calls, and the deepest nesting, of a trace the port reads: a bigger one is a fault, never a part. */
-const MOST_CALLS = 4096;
-const MOST_DEPTH = 64;
+/**
+ * The calls of a trace come from the EVM, not from a number chosen here: a transaction holds as many frames as its gas
+ * pays for, so none is capped, and a call stack is at most 1024 deep, so a trace deeper than that is no trace of the
+ * EVM's. It is walked a level at a time, never recursively.
+ */
+const MOST_DEPTH = 1025;
 
-/** A call of a `callTracer` trace is `{ to, input, calls? }`: it and everything below it, in the order walked. */
-const nodesOf = (raw: unknown, depth: number): Result<readonly Fields[], ReplyFault> =>
-  (depth > MOST_DEPTH
-    ? err(bad("a call trace too deep to read"))
-    : flatMap(fieldsOf(raw), (node) => {
-      const { calls } = node;
-      if (calls === undefined) return ok([node]);
-      return Array.isArray(calls)
-        ? map(traverse(calls, (call) => nodesOf(call, depth + 1)), (below) => [node, ...below.flat()])
-        : err(bad("the calls of a call are not a list"));
-    }));
+type Level = Readonly<{ next: readonly unknown[]; seen: readonly (readonly Fields[])[] }>;
 
-/** The input of each call of the trace whose target is the Depository. A trace too big to read is a fault. */
-const callsOf = (depository: Address) => (raw: unknown): Result<readonly Uint8Array[], ReplyFault> =>
-  flatMap(nodesOf(raw, 0), (nodes) =>
-    (nodes.length > MOST_CALLS
-      ? err(bad("a call trace too big to read"))
-      : traverse(nodes.filter((n) => isText(n["to"]) && n["to"].toLowerCase() === depository), (n) => {
-        const bytes = isText(n["input"]) ? hexToBytes(n["input"].toLowerCase()) : undefined;
-        return bytes?.ok === true ? ok(bytes.value) : err(bad("a call of the trace without input"));
-      })));
+/** The calls under each of these frames, all of them, or why the frames are not a tree of calls. */
+const below = (frames: readonly Fields[]): Result<readonly unknown[], ReplyFault> =>
+  map(traverse(frames, (frame) => {
+    const { calls } = frame;
+    if (calls === undefined) return ok([]);
+    return Array.isArray(calls) ? ok(calls as readonly unknown[]) : err(bad("the calls of a call are not a list"));
+  }), (lists) => lists.flat());
+
+const deeper = (walk: Result<Level, ReplyFault>): Result<Level, ReplyFault> =>
+  flatMap(walk, ({ next, seen }) => flatMap(traverse(next, fieldsOf), (frames) =>
+    map(below(frames), (calls): Level => ({ next: calls, seen: [...seen, frames] }))));
+
+/** Every frame of a `callTracer` trace, whatever its size, and none for a tree deeper than the EVM goes. */
+const framesOf = (raw: unknown): Result<readonly Fields[], ReplyFault> => {
+  const start: Result<Level, ReplyFault> = ok({ next: [raw], seen: [] });
+  const walked = Array.from({ length: MOST_DEPTH }).reduce<Result<Level, ReplyFault>>(deeper, start);
+  return flatMap(walked, ({ next, seen }) =>
+    (next.length > 0 ? err(bad("a call trace deeper than the EVM goes")) : ok(seen.flat())));
+};
+
+/** The input of each call of the trace whose target is the Depository, each one `direct`. */
+const callsOf = (depository: Address) => (raw: unknown): Result<readonly Carried[], ReplyFault> =>
+  flatMap(framesOf(raw), (frames) => {
+    const ours = frames.filter((n) => isText(n["to"]) && n["to"].toLowerCase() === depository);
+    return traverse(ours, (n): Result<Carried, ReplyFault> => {
+      const bytes = isText(n["input"]) ? hexToBytes(n["input"].toLowerCase()) : undefined;
+      return bytes?.ok === true
+        ? ok({ data: bytes.value, route: "direct" })
+        : err(bad("a call of the trace without input"));
+    });
+  });
 
 /**
- * What a node says of a method it does not run (JSON-RPC code -32601, or text saying it is unsupported): the one
- * answer that is no fault of the call, so the port says there is no trace.
+ * What a node says of a trace it does not give: the method is missing (JSON-RPC code -32601, or text saying it is
+ * unsupported or not available) or the provider refuses or cuts the trace (too big for its limits). Neither is a fault
+ * of the call that a retry would clear, so the port says there is no trace.
  */
-const NO_METHOD =
-  /-32601|\bunsupported\b|\bmethod\b.*\b(not found|does not exist|not available|not supported)\b|is not available/i;
+const NO_METHOD = new RegExp(
+  "-32601|\\bunsupported\\b|\\bmethod\\b.*\\b(not found|does not exist|not available|not supported)\\b|is not available"
+  + "|\\b(response|result|trace)\\b.*\\b(too (big|large)|exceed|limit)|\\btracing\\b.*\\b(disabled|not enabled)",
+  "i",
+);
 
 const NO_TX = `0x${"00".repeat(32)}`;
 
@@ -119,7 +142,7 @@ export const watchPort = (rpc: Rpc, depository: Address): WatchPort => {
           ? ok(found)
           : err(bad("a log that is not the one asked for")))));
     },
-    input: (tx) => reads.read("watch tx", "eth_getTransactionByHash", [tx], inputOf),
+    input: (tx) => reads.read("watch tx", "eth_getTransactionByHash", [tx], inputOf(depository)),
     // A fault of the node (it is down, it errs) may clear and stalls the delivery; a node with no call trace, or a
     // trace the transaction itself makes unreadable (too big, too deep, not a tree), never clears: no trace, and the
     // finalize is told unread, so one counterparty's transaction cannot blind the watcher.

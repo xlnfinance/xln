@@ -90,10 +90,15 @@ describe("host/shell/evm/watch the J loop's reads of the chain", () => {
     const log = logPath();
     const found = { hash: txOf(3n, 1n), input: "0xDEADbeef", to: ADDRESS };
     expect(await portOf({ eth_getTransactionByHash: () => ok(found) }, log).input(txOf(3n, 1n)))
-      .toEqual(ok(Uint8Array.of(0xde, 0xad, 0xbe, 0xef)));
+      .toEqual(ok({ data: Uint8Array.of(0xde, 0xad, 0xbe, 0xef), route: "direct" }));
     expect(askedOf(log)).toEqual([`eth_getTransactionByHash ["${txOf(3n, 1n)}"]`]);
     const asked = (reply: unknown) => portOf({ eth_getTransactionByHash: () => ok(reply) }).input(txOf(3n, 1n));
     expect(await asked(null)).toEqual({ ok: true, value: undefined });
+    const elsewhere = await asked({ ...found, to: "0x00000000000000000000000000000000000000aa" });
+    expect(elsewhere).toEqual(ok({ data: Uint8Array.of(0xde, 0xad, 0xbe, 0xef), route: "wrapper" }));
+    expect(await asked({ ...found, to: null })).toMatchObject({ ok: true, value: { route: "wrapper" } });
+    expect(await asked({ ...found, to: ADDRESS.toUpperCase().replace("0X", "0x") }))
+      .toMatchObject({ ok: true, value: { route: "direct" } });
     expect(await asked({ ...found, input: 12 })).toMatchObject({ ok: false });
     expect(await asked({ ...found, input: "0xabc" })).toMatchObject({ ok: false });
     expect(await portOf({ eth_getTransactionByHash: () => down }).input(txOf(3n, 1n)))
@@ -109,7 +114,10 @@ describe("host/shell/evm/watch the J loop's reads of the chain", () => {
       call(ADDRESS.toUpperCase().replace("0X", "0x"), "0xCAFE02", []),
     ]);
     const traced = await portOf({ debug_traceTransaction: () => ok(tree) }, log).trace(txOf(3n, 1n));
-    expect(traced).toEqual(ok([Uint8Array.of(0xca, 0xfe, 0x01), Uint8Array.of(0xca, 0xfe, 0x02)]));
+    expect(traced).toEqual(ok([
+      { data: Uint8Array.of(0xca, 0xfe, 0x02), route: "direct" },
+      { data: Uint8Array.of(0xca, 0xfe, 0x01), route: "direct" },
+    ]));
     expect(askedOf(log)).toEqual([`debug_traceTransaction ["${txOf(3n, 1n)}",{"tracer":"callTracer"}]`]);
   });
 
@@ -136,15 +144,28 @@ describe("host/shell/evm/watch the J loop's reads of the chain", () => {
       .toEqual(err({ _tag: "port", call: "watch trace probe", reason: "connection refused" }));
   });
 
-  test("R-WATCH-CALLDATA a trace the transaction makes unreadable is no trace, never a fault that stalls", async () => {
+  test("R-WATCH-CALLDATA a trace that is not a tree of calls is no trace; the provider's refusals too", async () => {
     const asked = (reply: unknown) => portOf({ debug_traceTransaction: () => ok(reply) }).trace(txOf(3n, 1n));
-    const missing = { to: ADDRESS };
-    const deeper = (below: unknown): unknown => ({ to: "0x00", input: "0x", calls: [below] });
-    const deep = Array.from({ length: 70 }).reduce<unknown>(deeper, {});
-    const wide = { to: "0x00", input: "0x", calls: Array.from({ length: 4097 }, () => ({ to: "0x00", input: "0x" })) };
-    const replies = [null, "0x", { to: ADDRESS, input: "0x12", calls: "none" }, missing, deep, wide];
+    const refuses = (reason: string) => portOf({ debug_traceTransaction: () => err({ _tag: "rpc", reason }) });
+    const replies = [null, "0x", { to: ADDRESS, input: "0x12", calls: "none" }, { to: ADDRESS }];
     const answers = await Promise.all(replies.map(asked));
     answers.forEach((got) => expect(got).toEqual(ok(undefined)));
+    expect(await refuses("response size exceeded").trace(txOf(3n, 1n))).toEqual(ok(undefined));
+    expect(await refuses("execution timeout").trace(txOf(3n, 1n))).toMatchObject({ ok: false });
+  });
+
+  test("R-WATCH-CALLDATA a trace is read at any depth or size the EVM allows, the finalize last", async () => {
+    const asked = (reply: unknown) => portOf({ debug_traceTransaction: () => ok(reply) }).trace(txOf(3n, 1n));
+    const finalize = { to: ADDRESS, input: "0xCAFE01" };
+    const around = (below: unknown): unknown => ({ to: "0x00", input: "0x", calls: [below] });
+    const deep = (levels: number) => Array.from({ length: levels }).reduce<unknown>(around, finalize);
+    const wide = (calls: number) => ({
+      to: "0x00", input: "0x", calls: [...Array.from({ length: calls }, () => ({ to: "0x00", input: "0x" })), finalize],
+    });
+    const read = ok([{ data: Uint8Array.of(0xca, 0xfe, 0x01), route: "direct" as const }]);
+    const answers = await Promise.all([deep(65), deep(1000), deep(1024), wide(5000), wide(100_000)].map(asked));
+    answers.forEach((got) => expect(got).toEqual(read));
+    expect(await asked(deep(1025))).toEqual(ok(undefined));
   });
 
   test("R-WATCH-TELL an Account is read at the end of a block named by its hash: row nonce and epoch", async () => {

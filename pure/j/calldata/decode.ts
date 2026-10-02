@@ -14,9 +14,10 @@
 //
 // The Depository authorizes a batch by its Hanko, not by who sends it (Depository.sol 340-348), so the call is not
 // always the top of the transaction: a relay contract, a multicall or an `execute(target, data)` carries it inside its
-// own arguments. Every place in an input that begins with the `processBatch` or the tower's selector is read as a
-// call, whatever wraps it; what a call must prove is the same wherever it was found (an evidence hash or a body hash
-// the log names), so a stray match changes nothing.
+// own arguments. A transaction to the Depository is that one call, read exactly by its ABI layout (bytes after the
+// call's own components are ignored, so nothing appended can hide it). A transaction to another contract is scanned at
+// every offset for a `processBatch` or tower selector, within a budget; what a call must prove is the same wherever it
+// was found (an evidence hash or a body hash the log names), so a stray match changes nothing.
 //
 // A transaction is read once and in bounded work, whatever its bytes say: ABI offsets may alias one op or one list many
 // times, so every count is held to what the contract itself accepts (DepositoryBounds, Account.sol limits), and an
@@ -38,8 +39,14 @@ const MOST_ARGUMENT_BYTES = 64 * 1024;
 const MOST_CLAUSES = 32;
 const MOST_TOKENS = 128;
 const MOST_BODY_BYTES = 176 * 1024;
-/** An input past this is not read: the node's tx gas cap leaves room for no more, so it is not a batch that landed. */
-const MOST_INPUT_BYTES = 1024 * 1024;
+/**
+ * The most bytes of an encoded batch, and of the call data of a tower's counter-dispute (Depository.sol 354, 475): more
+ * is one the Depository reverts. What follows the ABI's own components in an input is no concern of the contract's, and
+ * is never a reason not to read the call: a call padded with zeros is read as the contract reads it.
+ */
+const MOST_BATCH_BYTES = 256 * 1024;
+/** The scan of a wrapper's input is bounded (its step budget, one step an offset): a longer input is not scanned. */
+const MOST_SCAN_BYTES = 1024 * 1024;
 
 /** `processBatch(bytes32,bytes,bytes,uint256)`: the call that carries a dispute op in a batch. */
 const PROCESS_BATCH = keccak256(utf8("processBatch(bytes32,bytes,bytes,uint256)")).subarray(0, 4);
@@ -123,9 +130,10 @@ const bytesOf = (batch: Uint8Array, op: AbiTuple, slot: number): Uint8Array =>
  * `finalizationEvidenceHash`: `abi.encode` of the initial body hash, the final nonce, both sides and three hashes, the
  * last of the signature the contract finalized with (`sig`).
  */
-const finalizeOf = (batch: Uint8Array, op: AbiTuple, sig: Uint8Array): Finalize => {
+const finalizeOf = (batch: Uint8Array, op: AbiTuple, sig: Uint8Array): Finalize | undefined => {
   const starterArguments = bytesOf(batch, op, FINAL_STARTER_ARGUMENTS);
   const otherArguments = bytesOf(batch, op, FINAL_OTHER_ARGUMENTS);
+  if (starterArguments.length > MOST_ARGUMENT_BYTES || otherArguments.length > MOST_ARGUMENT_BYTES) return undefined;
   const evidence = keccakHex(concat([
     word(batch, op, FINAL_INITIAL_BODY), word(batch, op, FINAL_NONCE), word(batch, op, FINAL_PROPOSER),
     word(batch, op, FINAL_STARTED_BY_LEFT), keccak256(starterArguments), keccak256(otherArguments),
@@ -134,35 +142,47 @@ const finalizeOf = (batch: Uint8Array, op: AbiTuple, sig: Uint8Array): Finalize 
   return { evidence: evidence as Bytes32, starterArguments, otherArguments };
 };
 
+/**
+ * How a call reached the Depository: the transaction was to it (`direct`: its input is the call, read exactly as the
+ * contract reads it, whatever follows), or a contract carried the call in its own input (`wrapper`: found by a scan).
+ */
+export type Route = "direct" | "wrapper";
+
+/** The input of a transaction, or of one call of its trace, and how the call it holds reached the Depository. */
+export type Carried = Readonly<{ data: Uint8Array; route: Route }>;
+
 /** The calls of the Depository the watcher reads: a batch (`processBatch`) and a tower's counter-dispute. */
-type Call = Readonly<{ kind: "batch" | "tower"; args: Uint8Array }>;
+type Call = Readonly<{ kind: "batch" | "tower"; args: Uint8Array; route: Route }>;
 
 /**
- * The most distinct ops of one input that are read: no honest wrapper carries more, and each op is bounded work. An
- * input with more is not read (told as unread, loudly), so a flood of look-alike calls can neither make the node decode
- * without end nor hide the op the log names behind them silently.
+ * The most distinct ops of a wrapper's input that are read: no honest wrapper carries more, and each op is bounded
+ * work. An input with more is not read (told as unread, loudly), so a flood of look-alike calls can neither make the
+ * node decode without end nor hide the op the log names behind them silently. A direct call has no scan, so no flood.
  */
 const MOST_OPS = 64;
 const SELECTOR_BYTES = 4;
 
 const startsWith = (input: Uint8Array, prefix: Uint8Array): boolean => prefix.every((b, i) => input[i] === b);
 
-const callAt = (input: Uint8Array, at: number): readonly Call[] => {
+const callAt = (input: Uint8Array, at: number, route: Route): readonly Call[] => {
   const from = input.subarray(at);
   const args = from.subarray(SELECTOR_BYTES);
-  if (startsWith(from, PROCESS_BATCH)) return [{ kind: "batch", args }];
-  return startsWith(from, TOWER_COUNTER) ? [{ kind: "tower", args }] : [];
+  if (startsWith(from, PROCESS_BATCH)) return [{ kind: "batch", args, route }];
+  return startsWith(from, TOWER_COUNTER) ? [{ kind: "tower", args, route }] : [];
 };
 
 /**
- * Every call in an input, as its arguments after the selector: the input itself when it is one, and each one a wrapper
- * carries in its own arguments, at any offset (an ABI wrapper places it on a word, a packed one does not). An input
- * past the most a transaction can carry has none.
+ * Every call in an input, as its arguments after the selector. A transaction to the Depository is the one call its
+ * input is, read from its first byte: look-alike calls behind it are arguments of that call, never other calls. A
+ * transaction to another contract is scanned at every offset for the calls a wrapper carries in its own arguments (an
+ * ABI wrapper places one on a word, a packed one does not), within the scan's budget: a longer input has none.
  */
-const callsIn = (input: Uint8Array): readonly Call[] =>
-  (input.length > MOST_INPUT_BYTES
+const callsIn = ({ data, route }: Carried): readonly Call[] => {
+  if (route === "direct") return callAt(data, 0, route);
+  return data.length > MOST_SCAN_BYTES
     ? []
-    : Array.from({ length: Math.max(0, input.length - SELECTOR_BYTES + 1) }, (_, at) => callAt(input, at)).flat());
+    : Array.from({ length: Math.max(0, data.length - SELECTOR_BYTES + 1) }, (_, at) => callAt(data, at, route)).flat();
+};
 
 /** A finalize or a start op in an input, and where it lies: one op is read once however many offsets reach it. */
 type Placed<T> = Readonly<{ place: string; read: () => T }>;
@@ -177,8 +197,9 @@ const distinct = <T>(ops: readonly Placed<T>[]): readonly Placed<T>[] => {
 };
 
 /** The one finalize a batch of `processBatch` may carry, none when its list is longer than the contract accepts. */
-const batchFinalizes = (args: Uint8Array): readonly Placed<Finalize>[] => {
+const batchFinalizes = (args: Uint8Array): readonly Placed<Finalize | undefined>[] => {
   const batch = abiBytes(args, abiLengthRef(args, abiRoot(), WORD));
+  if (batch.length > MOST_BATCH_BYTES) return [];
   const list = abiLengthRef(batch, abiTupleRef(batch, abiRoot(), 0), BATCH_FINALIZATIONS * WORD);
   const count = abiLengthWord(batch, list);
   return count <= BigInt(MOST_FINALIZATIONS) && abiFits(batch, list, count, WORD)
@@ -190,7 +211,8 @@ const batchFinalizes = (args: Uint8Array): readonly Placed<Finalize>[] => {
 };
 
 /** The finalize a tower's call carries: the contract blanks `params.sig` before it finalizes. */
-const towerFinalizes = (args: Uint8Array): readonly Placed<Finalize>[] => {
+const towerFinalizes = (args: Uint8Array, route: Route): readonly Placed<Finalize | undefined>[] => {
+  if (route === "direct" && args.length + SELECTOR_BYTES > MOST_BATCH_BYTES) return [];
   const params = abiTupleRef(args, abiRoot(), TOWER_PARAMS * WORD);
   return [placed("tower", args, params, () => finalizeOf(args, params, NO_SIGNATURE))];
 };
@@ -200,16 +222,17 @@ const towerFinalizes = (args: Uint8Array): readonly Placed<Finalize>[] => {
  * the contract accepts (it would revert) and none for an input with more distinct ops than `MOST_OPS`: a transaction
  * that carried a `DisputeFinalized` some other way is told as unread.
  */
-export const finalizesIn = (input: Uint8Array): readonly Finalize[] =>
-  distinct(callsIn(input).flatMap((call) =>
-    (call.kind === "batch" ? batchFinalizes(call.args) : towerFinalizes(call.args)))).map((op) => op.read());
+export const finalizesIn = (carried: Carried): readonly Finalize[] =>
+  distinct(callsIn(carried).flatMap((call) =>
+    (call.kind === "batch" ? batchFinalizes(call.args) : towerFinalizes(call.args, call.route))))
+    .flatMap((op) => op.read() ?? []);
 
 /**
  * The secrets a finalize showed, from the input of the transaction that carried it: the ops whose evidence hash is
  * the logged one, and none (`undefined`) when no op of the input is. Ops with one hash carry the same blobs.
  */
-export const finalizedSecrets = (input: Uint8Array, evidence: Bytes32): readonly Bytes32[] | undefined => {
-  const mine = finalizesIn(input).filter((f) => f.evidence === evidence);
+export const finalizedSecrets = (carried: Carried, evidence: Bytes32): readonly Bytes32[] | undefined => {
+  const mine = finalizesIn(carried).filter((f) => f.evidence === evidence);
   return mine.length === 0
     ? undefined
     : unique(mine.flatMap((f) => [...secretsIn(f.starterArguments), ...secretsIn(f.otherArguments)]));
@@ -285,8 +308,8 @@ const bodyIn = (buf: Uint8Array, body: AbiTuple): ProofBody | undefined => {
  * no op of it names the hash with a body that makes it. The Entity may finalize with such a body without having held
  * the state, because the hash is what the chain compares.
  */
-export const startedBody = (input: Uint8Array, bodyHash: Bytes32): ProofBody | undefined => {
-  const starts = distinct(callsIn(input).flatMap((call) =>
+export const startedBody = (carried: Carried, bodyHash: Bytes32): ProofBody | undefined => {
+  const starts = distinct(callsIn(carried).flatMap((call) =>
     (call.kind === "batch" ? startsOf(call.args, bodyHash) : [])));
   return starts.flatMap((start) => start.read() ?? []).find((body) => {
     const hash = proofBodyHash(body);
@@ -297,6 +320,7 @@ export const startedBody = (input: Uint8Array, bodyHash: Bytes32): ProofBody | u
 /** The start ops of a batch that name `bodyHash`, each to be read as a body when asked. */
 const startsOf = (args: Uint8Array, bodyHash: Bytes32): readonly Placed<ProofBody | undefined>[] => {
   const batch = abiBytes(args, abiLengthRef(args, abiRoot(), WORD));
+  if (batch.length > MOST_BATCH_BYTES) return [];
   const list = abiLengthRef(batch, abiTupleRef(batch, abiRoot(), 0), BATCH_STARTS * WORD);
   const count = abiLengthWord(batch, list);
   if (count > BigInt(MOST_STARTS) || !abiFits(batch, list, count, WORD)) return [];

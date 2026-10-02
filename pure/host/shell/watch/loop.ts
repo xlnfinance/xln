@@ -7,6 +7,7 @@
 import type { JHeight } from "../../../account/clause/clock.ts";
 import type { ChainFacts, EntityId, EntityInput } from "../../../entity/model.ts";
 import { entityId } from "../../../entity/model.ts";
+import type { Carried } from "../../../j/calldata/decode.ts";
 import type { AccountAt, Addressed } from "../../../j/observe.ts";
 import { hexToBytes } from "../../../kernel/encoding/bytes.ts";
 import { readingKey } from "../../../j/observe.ts";
@@ -27,15 +28,17 @@ export type WatchPort = Readonly<{
   /** The Account's `ondeltaEpoch` and stored nonce at the end of the block with this hash. */
   accountAt: (block: Bytes32, left: Bytes32, right: Bytes32) => Promise<Result<AccountAt, PortFault>>;
   /**
-   * The input of the transaction with this hash, where a finalize's arguments are (R-WATCH-CALLDATA). Nothing
-   * (`undefined`) when the node does not know the transaction.
+   * The input of the transaction with this hash, where a finalize's arguments are (R-WATCH-CALLDATA), and whether the
+   * transaction was to the Depository (`direct`) or to another contract (`wrapper`). Nothing (`undefined`) when the
+   * node does not know the transaction.
    */
-  input: (tx: Bytes32) => Promise<Result<Uint8Array | undefined, PortFault>>;
+  input: (tx: Bytes32) => Promise<Result<Carried | undefined, PortFault>>;
   /**
-   * The input of every call the transaction made to the Depository, from the node's call trace, when a wrapper hid the
-   * call from the input. Nothing (`undefined`) when the node has no call trace: that is an answer, not a fault.
+   * The input of every call the transaction made to the Depository (each `direct`), from the node's call trace, when a
+   * wrapper hid the call from the input. Nothing (`undefined`) when the node has no call trace, or none it can give for
+   * this transaction (the provider refuses or truncates it): that is an answer, not a fault.
    */
-  trace: (tx: Bytes32) => Promise<Result<readonly Uint8Array[] | undefined, PortFault>>;
+  trace: (tx: Bytes32) => Promise<Result<readonly Carried[] | undefined, PortFault>>;
   /** Whether the node answers `debug_traceTransaction` with the callTracer: asked once, as a node with value boots. */
   traced: () => Promise<Result<boolean, PortFault>>;
 }>;
@@ -78,7 +81,7 @@ const blocksAfter = async (port: WatchPort, from: bigint, to: bigint): Promise<R
  * node gave no answer: it does not know the transaction, or has no call trace).
  */
 type Gathered = Readonly<{
-  found: ReadonlyMap<Bytes32, readonly Uint8Array[]>; failed: ReadonlyMap<Bytes32, PortFault>;
+  found: ReadonlyMap<Bytes32, readonly Carried[]>; failed: ReadonlyMap<Bytes32, PortFault>;
 }>;
 
 const NOTHING: Gathered = { found: new Map(), failed: new Map() };
@@ -101,7 +104,7 @@ const youngMissing = (
     logs.some((log) => log.tx === tx && head - log.block < PRUNED_AFTER)).map((tx) => [tx, unknown(tx)]));
 
 const gather = async (
-  txs: readonly Bytes32[], ask: (tx: Bytes32) => Promise<Result<readonly Uint8Array[] | undefined, PortFault>>,
+  txs: readonly Bytes32[], ask: (tx: Bytes32) => Promise<Result<readonly Carried[] | undefined, PortFault>>,
 ): Promise<Gathered> => {
   const answers = await Promise.all(txs.map(async (tx) => [tx, await ask(tx)] as const));
   return {

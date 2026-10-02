@@ -11,9 +11,12 @@ import type { ChainFacts, EntityId, EntityInput, Starting } from "../../../entit
 import { entityId } from "../../../entity/model.ts";
 import type { Bytes32, RawLog } from "../../../j/log.ts";
 import { proofBodyHash } from "../../../chain/proof/proof.ts";
+import type { Carried } from "../../../j/calldata/decode.ts";
 import { watching, type Block } from "../../../j/watch.ts";
+import { bytesToHex } from "../../../kernel/encoding/bytes.ts";
 import {
-  argumentsOf, blockOf, CLAUSED, DEPOSITORY, entityOf, finalizedOf, finalizeInput, finalizeOp, hexOf, logOf, must,
+  argumentsOf, blockOf, CLAUSED, DEPOSITORY, DEPOSITORY_ABI, entityOf, finalizedOf, finalizeInput, finalizeOp, hexOf,
+  logOf, must,
   multicalled, relayed, startInput, startOp, txOf,
 } from "../../../j/fixtures.ts";
 import { callsOf } from "../fixtures.ts";
@@ -34,6 +37,13 @@ const straight = (head: bigint, logs: readonly RawLog[] = []): Chain =>
 const LOOP_DIR = join(tmpdir(), "loop-");
 
 const logPath = (): string => join(mkdtempSync(LOOP_DIR), "calls.log");
+
+/** A transaction whose input is a call of the Depository is one to it; any other input is a wrapper's. */
+const carried = (data: Uint8Array): Carried => {
+  const calls = ["processBatch", "watchtowerCounterDispute"];
+  const selectors = calls.map((name) => DEPOSITORY_ABI.getFunction(name)?.selector);
+  return { data, route: selectors.includes(bytesToHex(data.subarray(0, 4))) ? "direct" : "wrapper" };
+};
 
 /** A port over `chain` that writes each call it gets to `log`; `broken` is the block, or the read, that fails. */
 const portOf = (
@@ -62,13 +72,13 @@ const portOf = (
       appendFileSync(log, `input ${tx.slice(-4)}\n`);
       const found = inputs.get(tx);
       if (broken === "unknown") return Promise.resolve(ok(undefined));
-      return Promise.resolve(broken === "input" || found === undefined ? err(DOWN) : ok(found));
+      return Promise.resolve(broken === "input" || found === undefined ? err(DOWN) : ok(carried(found)));
     },
     // A node with no call trace says so (`undefined`); one that is asked and fails is the port's fault.
     trace: (tx) => {
       appendFileSync(log, `trace ${tx.slice(-4)}\n`);
       const found = traces.get(tx);
-      return Promise.resolve(found === "down" ? err(DOWN) : ok(found));
+      return Promise.resolve(found === "down" ? err(DOWN) : ok(found?.map((data) => ({ data, route: "direct" }))));
     },
     traced: () => Promise.resolve(ok(true)),
   };
@@ -202,16 +212,14 @@ describe("host/shell/watch the J loop's poll", () => {
     expect(got.ok ? got.value?.height : got).toBe(1n as never);
   });
 
-  test("R-WATCH-CALLDATA an unreadable trace or a node with no trace never blinds the watcher", async () => {
+  test("R-WATCH-CALLDATA a trace the provider cannot give, or no trace at all, never blinds the watcher", async () => {
     const node = (reply: Result<unknown, RpcFault>): Rpc => (method) =>
       Promise.resolve(method === "debug_traceTransaction" ? reply : err({ _tag: "rpc", reason: `no ${method}` }));
-    const deeper = (below: unknown): unknown => ({ to: "0x00", input: "0x", calls: [below] });
-    const leaf = { to: "0x00", input: "0x" };
-    const calls = (n: number) => ({ ...leaf, calls: Array.from({ length: n }, () => leaf) });
     const refuse = (reason: string): Result<unknown, RpcFault> => err({ _tag: "rpc", reason });
     const replies: ReadonlyArray<Result<unknown, RpcFault>> = [
-      ok(calls(4097)), ok(Array.from({ length: 65 }).reduce<unknown>(deeper, {})), ok("0x"),
+      ok("0x"), ok({ to: DEPOSITORY, input: "0x12", calls: "none" }),
       refuse("Unsupported method (JSON-RPC code -32000)"), refuse("nope (JSON-RPC code -32601)"),
+      refuse("response size exceeded the limit"),
     ];
     const bytes = Uint8Array.from({ length: 32 }, (_, i) => (i === 31 ? 10 : 0));
     const secret: EntityInput = { _tag: "j_secret", secret: bytes };
@@ -224,6 +232,24 @@ describe("host/shell/watch the J loop's poll", () => {
       const unread: EntityInput = { _tag: "j_finalize_unread", peer: peer(RIGHT), tx };
       expect(got.ok ? got.value?.events : got).toEqual([EPOCH, OVER, unread, secret]);
       expect(got.ok ? got.value?.height : got).toBe(4n as never);
+    }));
+  });
+
+  test("R-WATCH-CALLDATA a finalize in a trace of any size the EVM allows is read, its secrets told", async () => {
+    const { op, tx, logs } = finalizing();
+    const finalize = { to: DEPOSITORY, input: bytesToHex(finalizeInput(RIGHT, [op])) };
+    const around = (below: unknown): unknown => ({ to: "0x00", input: "0x", calls: [below] });
+    const deep = (levels: number) => Array.from({ length: levels }).reduce<unknown>(around, finalize);
+    const wide = (calls: number) => ({
+      to: "0x00", input: "0x", calls: [...Array.from({ length: calls }, () => ({ to: "0x00", input: "0x" })), finalize],
+    });
+    const hidden = Uint8Array.of(0xca, 0xfe, 0xba, 0xbe, 1, 2, 3, 4);
+    await Promise.all([deep(65), deep(1000), wide(5000)].map(async (tree) => {
+      const node: Rpc = (method) =>
+        Promise.resolve(method === "debug_traceTransaction" ? ok(tree) : err({ _tag: "rpc", reason: "no" }));
+      const base = portOf(straight(6n, logs), logPath(), -1n, new Map([[tx, hidden]]));
+      const got = await poll({ ...base, trace: watchPort(node, DEPOSITORY).trace }, start(2n), LEFT);
+      expect(got.ok ? got.value?.events : got).toEqual(TOLD);
     }));
   });
 
