@@ -13,7 +13,7 @@
 import { err, map, ok, type Result } from "../kernel/core/result.ts";
 import type { Tagged } from "../kernel/core/tagged.ts";
 import type { JHeight } from "../account/clause/clock.ts";
-import type { EntityId, EntityState, Outbound } from "../entity/model.ts";
+import { heardOf, type EntityId, type EntityState, type Outbound } from "../entity/model.ts";
 import type { Halt, Row, Runtime, Setup, Timestamp } from "../runtime/model.ts";
 import { apply, commit, flush, recover } from "../runtime/tick.ts";
 import type { Effect, Host, HostNotice, Item, Limits, Stepped } from "./model.ts";
@@ -51,11 +51,11 @@ export const submit = (host: Host, item: Item): Host => ({ ...host, queue: [...h
  * link-authenticated peer (Q-T-5, R-LINK-AUTH): the transport shell delivers that, this function only trusts it.
  */
 export const receive = (host: Host, message: Outbound): Received => {
-  const { from, to, msg } = message;
+  const { from, to } = message;
   switch (true) {
     case !hosts(host, to): return { host, notices: [{ _tag: "misrouted", to, from }] };
     case queuedFrom(host, from) >= host.limits.perPeer: return { host, notices: [{ _tag: "queue_full", from }] };
-    default: return { host: submit(host, { to, input: { _tag: "peer_message", from, msg } }), notices: [] };
+    default: return { host: submit(host, { to, input: heardOf(message) }), notices: [] };
   }
 };
 

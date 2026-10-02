@@ -43,14 +43,19 @@ export type EntityReplica = Replica<AccountTx, AccountState, PeerFault>;
 export type EntityState = Readonly<{
   id: EntityId;
   accounts: ReadonlyMap<EntityId, EntityReplica>;
+  /** The newest head each peer signed that the Account committed, with its signature: what a dispute starts with. */
+  proofs: ReadonlyMap<EntityId, PeerProof>;
   waiting: ReadonlyMap<EntityId, JView>;
   revealed: ReadonlyMap<EntityId, readonly string[]>;
   chain: ReadonlyMap<EntityId, ChainFacts>;
   paybook: Paybook;
 }>;
 
+/** A peer's signature over the head the Account committed at `slot`: the proof of that state, enforceable on chain. */
+export type PeerProof = Readonly<{ head: FrameHash; slot: number; sig: string }>;
+
 export const emptyEntity = (id: EntityId): EntityState =>
-  ({ id, accounts: new Map(), waiting: new Map(), revealed: new Map(), chain: new Map(), paybook: new Map() });
+  ({ id, accounts: new Map(), proofs: new Map(), waiting: new Map(), revealed: new Map(), chain: new Map(), paybook: new Map() });
 
 /**
  * What the Entity does about an HTLC that is, or will be, locked to it, by hashlock (one is open per hashlock in an
@@ -87,8 +92,9 @@ export type ChainFacts = Readonly<{
   cosigned: bigint; held: ReadonlyMap<TokenId, Held>;
 }>;
 
-// What a frame takes in.
-export type PeerMessage = Tagged<"peer_message", { from: EntityId; msg: Msg<AccountTx> }>;
+// What a frame takes in. `sig` is the sender's signature over the head the message commits to (R-SIGNED-HEADS-ON-THE-WIRE):
+// a frame's, or the ack's.
+export type PeerMessage = Tagged<"peer_message", { from: EntityId; msg: Msg<AccountTx>; sig?: string }>;
 
 /**
  * What the Host saw on the J chain about the Account with `peer`. A repeat or an older report changes nothing, so the
@@ -156,8 +162,16 @@ export type Command = Tagged<"open_account", { peer: EntityId }> | AccountComman
 
 export type EntityInput = Arrival | Hook | Command;
 
-/** What leaves an Entity: an Account message for a peer. */
-export type Outbound = Readonly<{ from: EntityId; to: EntityId; msg: Msg<AccountTx> }>;
+/**
+ * What leaves an Entity: an Account message for a peer. A frame and an ack commit their sender to a head: `attest` is
+ * that head, for the Host to sign before the message goes (the Entity holds no key); `sig` is the signature the Host put
+ * on it, and the only part of the two that crosses the link.
+ */
+export type Outbound = Readonly<{ from: EntityId; to: EntityId; msg: Msg<AccountTx>; attest?: FrameHash; sig?: string }>;
+
+/** What a PeerMessage carries of an Outbound: the sender, the message and the signature the sender put on it. */
+export const heardOf = (o: Outbound): PeerMessage =>
+  ({ _tag: "peer_message", from: o.from, msg: o.msg, ...(o.sig === undefined ? {} : { sig: o.sig }) });
 
 /**
  * What an Entity asks of the J chain: data the Host turns into a batch (the bytes are the chain layer's). A `reveal` is
@@ -196,4 +210,5 @@ export type Notice =
   | Tagged<"holding_dropped", { peer: EntityId; token: TokenId }>
   | Tagged<"cosign_refused", { from: EntityId; op: CosignOp; fault: EntityFault }>
   | Tagged<"message_refused", { from: EntityId; outcome: Outcome<PeerFault> }>
+  | Tagged<"message_unsigned", { from: EntityId; head: FrameHash; why: "missing" | "wrong" }>
   | Tagged<"tx_refused", { peer: EntityId; refused: Refused<AccountTx, PeerFault> }>;

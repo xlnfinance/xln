@@ -7,7 +7,7 @@
 // is the whole state, so a crash is a Station thrown away and `start` run again over the same two files.
 import type { EntityId, EntityInput, EntityState, Outbound } from "../../../entity/model.ts";
 import type { Returned, Skipped } from "../../../j/batch/answer.ts";
-import { err, ok, type Result } from "../../../kernel/core/result.ts";
+import { err, map, ok, type Result } from "../../../kernel/core/result.ts";
 import type { Tagged } from "../../../kernel/core/tagged.ts";
 import { startRuntime } from "../../../runtime/tick.ts";
 import type { Halt, Row, Setup, Timestamp } from "../../../runtime/model.ts";
@@ -16,6 +16,7 @@ import type { Effect, Host, Limits, Stepped } from "../../model.ts";
 import type { Disk } from "../disk/disk.ts";
 import { keep, openWal, type StoreFault, type Unwritable } from "../disk/store.ts";
 import { resume, settle, type Io, type Pumped, type ShellFault, type Where } from "../submit/chain.ts";
+import type { Signer } from "../submit/signer.ts";
 import { take, type Submitter, type Taken } from "../submit/submit.ts";
 
 /** What the shell is made of: where the rows are kept, how the chain is reached, and the time. */
@@ -60,6 +61,23 @@ const takeOne = (turn: Turn, effect: Effect): Turn => {
   }
 };
 
+/**
+ * R-SIGNED-HEADS-ON-THE-WIRE: a message that commits its sender to a head leaves signed over it, by the one thing the
+ * shell holds that signs; the Host's core only names the head (`attest`). A message with none leaves as it is.
+ */
+const signed = (signer: Signer, effects: readonly Effect[]): Result<readonly Effect[], ShellFault> => {
+  const one = (effect: Effect): Result<Effect, ShellFault> => {
+    if (effect._tag !== "send" || effect.message.attest === undefined) return ok(effect);
+    const hanko = signer.hanko(effect.message.attest);
+    return hanko.ok ? ok({ _tag: "send", message: { ...effect.message, sig: hanko.value } }) : hanko;
+  };
+  return effects.reduce<Result<readonly Effect[], ShellFault>>(
+    (before, effect) => (before.ok ? map(one(effect), (done) => [...before.value, done]) : before), ok([]));
+};
+
+const taking = (shell: Shell, turn: Turn, effects: readonly Effect[]): Result<Turn, ShellFault> =>
+  map(signed(shell.io.signer, effects), (all) => all.reduce(takeOne, turn));
+
 const queuedIn = (turn: Turn): boolean => turn.taken.some((taken) => taken._tag === "queued");
 
 const pumped = (turn: Turn, out: Pumped): Turn => ({
@@ -86,7 +104,8 @@ const durable = async (shell: Shell, turn: Turn, row: Row): Promise<Result<Turn,
   if (!kept.ok) return kept;
   const committed = persisted(turn.station.host);
   if (!committed.ok) return committed;
-  return afterAsks(shell, committed.value.effects.reduce(takeOne, withHost(turn, committed.value.host)));
+  const taken = taking(shell, withHost(turn, committed.value.host), committed.value.effects);
+  return taken.ok ? afterAsks(shell, taken.value) : taken;
 };
 
 /** One frame: staged, made durable, committed, and what it leaves handed on. Nothing leaves before the sync. */
@@ -131,5 +150,6 @@ export const start = async (shell: Shell, boot: Boot): Promise<Result<Turn, Driv
   const resumed = await resume(shell.io, boot.where, rows.value);
   if (!resumed.ok) return resumed;
   const base = pumped(nothing({ host: reopened.value.host, submitter: resumed.value.submitter }), resumed.value);
-  return afterAsks(shell, reopened.value.effects.reduce(takeOne, base));
+  const taken = taking(shell, base, reopened.value.effects);
+  return taken.ok ? afterAsks(shell, taken.value) : taken;
 };

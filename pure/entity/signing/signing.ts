@@ -4,9 +4,13 @@ import type { Deployment } from "../../chain/proof/deployment.ts";
 import type { SigningContext } from "../../account/proof/signing.ts";
 import type { ProofTerms } from "../../account/proof/body.ts";
 import type { ChainFacts, EntityId } from "../model.ts";
+import type { Check } from "./attest.ts";
 
-/** What every Account of a Runtime signs under: the chain and Depository it is on, and the terms of its proofs. */
-export type Anchor = Readonly<{ deployment: Deployment; terms: ProofTerms }>;
+/**
+ * What every Account of a Runtime signs under: the chain and Depository it is on, the terms of its proofs, and how a
+ * peer's signature over a head is checked.
+ */
+export type Anchor = Readonly<{ deployment: Deployment; terms: ProofTerms; check: Check }>;
 
 /**
  * The key both sides name an Account by: the two entity ids, the smaller first, as the Depository reads them. An id is
