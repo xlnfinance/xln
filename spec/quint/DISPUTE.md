@@ -37,13 +37,15 @@ permanent revert, so a transient one is retried while the window is open; and th
 what this model says is missing): the non-starter that holds nothing newer than the dispute's proof finalizes with it. `NOTICE` (owed,
 R-DISPUTE-VOIDED-NOTICE): a side that rebases with committed frames beyond the settled proof is told.
 
-`PAY` (a number, not a switch) turns on the payment path: a frame carries a payment (`pid`), and what happens to it across an epoch move is
-modelled. `PAY=1` is #162 at 8f82733df: a node that is in a dispute refuses a peer's frame but keeps the signature on it (stage 2 of a frame in
-flight), so the chain can finalize by a proof that holds it (a counter, or a non-starter's finalize that carries a signature and stores its own nonce,
-`Depository.sol` 965-970, `landSigFinal`); the proposer that hears the epoch move seals the frame again in the new epoch. `PAY=2` adds DROPPAID
-(coordinator decision after the fourth audit of #162): a pending frame the chain finalized by counts as paid, the node drops it and never seals it again.
-The property `pay_once`: no payment is committed after a finalize paid it. A frame the peer committed (stage 1) is acked again and rebased by the
-code (its after-state is zero), so it is not a case here.
+`PAY` (a number, not a switch) turns on the payment path: a frame carries a payment (`pid`), and what happens to it across an epoch move is modelled.
+A node in a dispute refuses a peer's frame; its Entity keeps no proof from it (the proofs map is written by a committed round only, `frame.ts` 191-192),
+but the peer holds the payer's signature on it (`kept`), so a finalize built outside the Entity can pay by it: the non-starter's finalize with a
+signature and no counter, which stores its own nonce (`Depository.sol` 965-970, `landSigFinal`). The payer meanwhile either keeps the frame pending
+(stage 2) or has it rolled back on a retryable refusal and its payment sent back to the mempool (`rollback`); when it hears the epoch move it seals the
+payment again. `PAY=1` is #162 at 8f82733df. `PAY=2` drops the payment of the frame the node still has pending when the chain paid by it (61e47255).
+`PAY=3` is the decided rule after Review A's second find: the node records every frame it signed in the epoch, pending or rolled back, and drops the
+payment of the one the finalize paid by. The property `pay_once`: no payment is committed after a finalize paid it. A frame the peer committed (stage 1)
+is acked again and rebased by the code (its after-state is zero), so it is not a case here.
 
 ## Result (random search, 2500 traces of 70 steps, seed 0x5; `./check.sh` asserts each cell)
 
@@ -60,16 +62,15 @@ With the payment path (all four fixes on; `pay_once` is vacuous without it):
 
 | code | pay_once | newest_wins | no_silent_zeroing | no_lock |
 |---|---|---|---|---|
-| PAY=1 (#162 8f82733df: a refused frame is sealed again) | **fails** | holds | holds | left holds, right **fails** |
-| PAY=2 (a frame the chain finalized by is dropped) | holds | holds | holds | left holds, right **fails** |
+| PAY=1 (#162 8f82733df: a refused frame is sealed again) | **fails** | holds | holds | holds |
+| PAY=2 (the pending frame the chain paid by is dropped, 61e47255) | **fails** (a rolled-back frame is sealed again) | holds | holds | holds |
+| PAY=3 (every frame signed in the epoch, rolled back too) | holds | holds | holds | holds |
 
-`no_lock_right` under PAY: a signed frame the answerer refused reaches it near the end of the window, it counters, the chain skips the late counter
-silently, and the answerer has no finalize to ask (`finalFor` asks only with a registered counter; ACCEPT only when no counter was asked). It rests on
-the assumption that a node uses the signature of a frame it refused as a proof; {unverified} that the Host does. If it does not, the stage 2 path is
-only the unilateral finalize by a third party.
+An earlier version of this table had `no_lock_right` failing under PAY: a refused frame was kept as the refuser's own proof, so a late counter could not land.
+The builder checked the code: nothing uses the signature of a refused frame as a counter or start proof, so the model no longer does either.
 
 "Holds" is no violation found over the samples, not a proof. "Fails" is a counterexample, and each has a scenario test that says what the code does
-(`dispute_test.qnt`, 11 tests, run under every variant, 88 runs):
+(`dispute_test.qnt`, 12 tests, run under every variant, 96 runs):
 
 1. `frameAfterTheCounterTest` (today, LIVE only): the counterer keeps sealing after it countered; the frame commits on both sides and the chain pays the counter, one payment older. FREEZE refuses it.
 2. `counterLapsesTest` (today, FREEZE only): a transient revert drops the counter, the Entity is told it lapsed and never asks again (REVIEW-A N1); the starter finalizes after the window with the older proof while the counterer is live. LIVE retries.
@@ -80,8 +81,9 @@ only the unilateral finalize by a third party.
 7. `bothStartTest`: both start at once; the chain keeps one and skips the other, told to nobody; the loser's `starting` has no window until the epoch moves (PR 160 refuses a second start and waits on the window of the dispute against the node, so it does not wedge).
 8. `startAfterTheEpochMovedTest`: a co-signed settlement moves the epoch while a start is on its way; the chain skips it; the record is forgotten when the Entity hears the epoch move.
 9. `staleStartCounteredTest`: the baseline, the #159 audit case: the older proof starts, the newer one counters and pays. Holds everywhere.
-10. `signedFrameRefusedTest` (PAY): the double payment of the fourth audit of #162. A frame sealed before the dispute reaches the non-starter after it; the non-starter refuses it, holds the signature, counters with it, the chain finalizes by it. The proposer hears the epoch move with the frame pending. PAY=1: it seals the frame again, the peer commits it, the payment is paid twice. PAY=2: dropped. The test asserts both.
-11. `committedFrameAckLostTest` (PAY): the same frame committed by the peer before it heard of the dispute: nothing is sealed again in either variant.
+10. `signedFrameRefusedTest` (PAY): the double payment of the fourth audit of #162. A frame sealed before the dispute reaches the non-starter after it; the non-starter refuses it but holds the payer's signature, and a finalize with that signature and no counter pays by it. The proposer hears the epoch move with the frame still pending. PAY=1: it seals the frame again, the peer commits it, the payment is paid twice. PAY=2 and 3: dropped. The test asserts each.
+11. `committedFrameAckLostTest` (PAY): the same frame committed by the peer before it heard of the dispute: nothing is sealed again in any variant.
+12. `rolledBackFrameTest` (PAY): Review A's second find on 61e47255. The refusal comes back to the payer as retryable, the frame is rolled back and its payment goes back to the mempool, while the peer still holds the payer's signature on the frame and finalizes by it. PAY=1 and 2: the payment is sealed again and paid twice. PAY=3 (every signed frame of the epoch is recorded and the one the finalize paid by is named): dropped.
 
 ## What it assumes and leaves out
 

@@ -184,9 +184,10 @@ module scn {
       .then(hear(Left))
       .then(check(phase(st.f.get(Left)) == 0 and not(st.frz.get(Left)) and st.f.get(Left).epoch == 2))
   }
-  // A payment sealed before the dispute reaches the other side after it. R, in the dispute L started, refuses the frame but holds L's
-  // signature on it (n3), counters with it and the chain finalizes by it: the finalized body already paid the payment. L hears the epoch
-  // move with the frame still pending. PAY=1 (#162 8f82733df): L seals it again in the new epoch, R commits it, and the payment is paid twice.
+  // A payment sealed before the dispute reaches the other side after it. R, in the dispute L started, refuses the frame: its Entity keeps no proof
+  // from it (the proofs map is written by a committed round only), but R holds L's signature on it, and a finalize built outside the Entity
+  // (the non-starter's finalize with a signature, no counter) pays by it: the finalized body already paid the payment. L hears the epoch move with
+  // the frame still pending. PAY=1 (#162 8f82733df): L seals it again in the new epoch, R commits it, and the payment is paid twice.
   // PAY=2: L drops it, never seals it again.
   run signedFrameRefusedTest = {
     init
@@ -196,16 +197,36 @@ module scn {
       .then(hear(Right))
       .then(receive)
       .then(if (PAY == 0) check(true)
-            else check(st.pend.stage == 2 and st.hold.get(Right) == 3 and st.comm.get(Right) == 2)
-              .then(duty(Right)).then(landCounter(Right))
-              .then(hear(Left)).then(hear(Left)).then(hear(Right)).then(duty(Left)).then(duty(Right))
-              .then(jump(5)).then(windowOver)
-              .then(hear(Left)).then(hear(Right)).then(duty(Left)).then(duty(Right))
-              .then(landFinal(Right))
-              .then(check(st.g.settledLast == 3 and st.g.chain.size() == 1))
-              .then(hear(Left)).then(hear(Right))
+            else check(st.pend.stage == 2 and st.hold.get(Right) == 2 and st.g.kept.get(Right) == 3 and st.comm.get(Right) == 2)
+              .then(duty(Right))
+              .then(check(not(st.f.get(Right).cOn)))
+              .then(landSigFinal(Right))
+              .then(check(st.g.settledLast == 3 and st.g.chain.size() == 1 and st.g.sigs == 1))
+              .then(hear(Left)).then(hear(Left)).then(hear(Right))
               .then(check(if (PAY == 1) st.g.owes.get(Left) == 2 else st.g.owes.get(Left) == 0))
               .then(if (PAY == 1) seal(Left).then(receive).then(check(st.g.double))
+                    else check(not(st.pend.on) and not(st.g.double))))
+  }
+
+  // The same frame, but the refusal comes back to L as retryable before L hears of the dispute: L rolls the frame back and its payment goes back
+  // to the mempool, while R still holds L's signature on the frame. R's finalize pays by it. PAY=1 and 2 (a node drops only the frame it still
+  // has pending): L seals the payment again in the new epoch, R commits it, paid twice (Review A on #162 61e47255). PAY=3 (a node drops the
+  // payment of every frame it signed in the epoch, a rolled-back one too): dropped.
+  run rolledBackFrameTest = {
+    init
+      .then(seal(Left)).then(receive).then(ack)
+      .then(seal(Left))
+      .then(opStart(Left)).then(duty(Left)).then(landStart(Left))
+      .then(hear(Right))
+      .then(receive)
+      .then(if (PAY == 0) check(true)
+            else rollback
+              .then(check(not(st.pend.on) and st.g.owes.get(Left) == 2 and st.g.kept.get(Right) == 3))
+              .then(duty(Right)).then(landSigFinal(Right))
+              .then(check(st.g.chain.size() == 1))
+              .then(hear(Left)).then(hear(Left)).then(hear(Right))
+              .then(check(if (PAY <= 2) st.g.owes.get(Left) == 2 else st.g.owes.get(Left) == 0))
+              .then(if (PAY <= 2) seal(Left).then(receive).then(check(st.g.double))
                     else check(not(st.pend.on) and not(st.g.double))))
   }
 
@@ -233,4 +254,5 @@ module decided_test { import scn(SW_FREEZE = true, SW_LIVE = true, SW_ACCEPT = f
 module accept_test { import scn(SW_FREEZE = true, SW_LIVE = true, SW_ACCEPT = true, SW_NOTICE = false, SW_PAY = 0).* from "./dispute_test" }
 module all_test { import scn(SW_FREEZE = true, SW_LIVE = true, SW_ACCEPT = true, SW_NOTICE = true, SW_PAY = 0).* from "./dispute_test" }
 module pay_test { import scn(SW_FREEZE = true, SW_LIVE = true, SW_ACCEPT = true, SW_NOTICE = true, SW_PAY = 1).* from "./dispute_test" }
+module payall_test { import scn(SW_FREEZE = true, SW_LIVE = true, SW_ACCEPT = true, SW_NOTICE = true, SW_PAY = 3).* from "./dispute_test" }
 module paydrop_test { import scn(SW_FREEZE = true, SW_LIVE = true, SW_ACCEPT = true, SW_NOTICE = true, SW_PAY = 2).* from "./dispute_test" }
