@@ -46,6 +46,8 @@ export type World = {
   net: Cluster | null;
   signing: SigningContext | null;
   held: bigint | null;
+  /** What alice's node did with a dispute ask while its Account was in the new epoch with no proof of it: the dispute step takes it, the rebase step reads it. */
+  voidedAsk: Readonly<{ notices: readonly string[]; asks: number }> | null;
 };
 
 /** The clock rule's parameters and the J view the Runtimes start at. */
@@ -56,7 +58,7 @@ const loadManifest = (): Manifest =>
   deployedManifest(JSON.parse(readFileSync(join(REPO, "contracts/deploy/sepolia.manifest.json"), "utf8")));
 
 export const newWorld = (options: Options): World =>
-  ({ options, anvil: null, manifest: loadManifest(), chain: null, facts: { mode: "", chainId: "", block: "" }, parties: null, net: null, signing: null, held: null });
+  ({ options, anvil: null, manifest: loadManifest(), chain: null, facts: { mode: "", chainId: "", block: "" }, parties: null, net: null, signing: null, held: null, voidedAsk: null });
 
 const chainOf = (w: World): Chain => w.chain ?? (() => { throw new Error("no chain: the fork step did not finish"); })();
 const partiesOf = (w: World) => w.parties ?? (() => { throw new Error("no parties"); })();
@@ -535,19 +537,30 @@ const dispute: Step<World> = {
     if (!(await accountOnChain(chain, alice, hubX)).disputeOpen) throw new Error("no dispute is open after the start");
     // The chain's clock runs past both windows (anvil: a clock jump, then blocks to make that second final at depth 1); alice's own
     // node is told by its J loop that the window it waits on is over, and its Entity asks the chain to finalize with what it started from.
-    // A payment is pending when the chain finalizes (R-LEDGER-REBASE): alice pays hubX 5 while the window runs, hubX commits the frame and its
-    // acks to alice are lost for as long as the dispute lasts, so alice holds the frame pending across the epoch move. The proof the dispute
-    // started from is the one before it, so this payment is outside what the chain pays.
+    // A payment is pending when the chain finalizes (R-LEDGER-REBASE): alice pays hubX 5 while the window runs and the link loses alice's
+    // frame on its way, so hubX never commits it (a payment hubX had committed is a newer signed proof: that one is the counter's case, and
+    // hubX would answer the dispute with it). Alice holds the frame pending across the epoch move; it is outside what the chain pays.
     const finals = (): number => net.askedBy(a).slice(before).filter((ask) => ask._tag === "dispute_finalize").length;
-    await net.losing((m) => m.from === x && m.to === a, async () => {
+    await net.losing((m) => m.from === a && m.to === x, async () => {
       await net.tell(a, { _tag: "pay", peer: x, token: t, amount: PENDING_PAY * unit(chain) });
       await net.settle({ pending: true });
-      if (net.account(a, x).pending === undefined) throw new Error("alice's payment is not pending: hubX's ack was not lost");
-      if (net.account(x, a).used === replica.used) throw new Error("hubX did not commit alice's payment before the finalize");
+      if (net.account(a, x).pending === undefined) throw new Error("alice's payment is not pending: the link did not lose it");
+      if (net.account(x, a).used !== replica.used) throw new Error("hubX committed alice's payment: it holds a newer proof than the one the dispute started from");
       await advanceTime(chain, Number(2n * floor + 10n));
       for (let tries = 0; tries < 6 && (await accountOnChain(chain, alice, hubX)).disputeOpen; tries += 1) {
         await net.reach(BigInt(await chain.provider.getBlockNumber()), { pending: true });
       }
+      // The link stays down until both nodes' J loops have told their Entities the epoch moved: a frame committed in the gap between the chain's
+      // move and the Entity hearing of it is voided by the finalize with no one told, and that gap is not this step's subject.
+      await chain.provider.send("evm_mine", []);
+      await net.reach(BigInt(await chain.provider.getBlockNumber()), { pending: true });
+      const heard = [a, x].map((id) => net.entity(id).chain.get(id === a ? x : a)?.epoch);
+      if (heard.some((epoch) => epoch !== onChain.epoch + 1n)) throw new Error(`the nodes' Entities hold epochs ${shown(heard)} after the finalize, expected ${onChain.epoch + 1n}`);
+      // A dispute ask now has no proof of the new epoch to start from (the peer's signature over a head of the old one is forgotten): the node
+      // refuses it, and asks the chain nothing. The rebase step reads this.
+      const [noticed, asked] = [net.noticesOf(a).length, net.askedBy(a).length];
+      await net.tell(a, { _tag: "dispute", peer: x });
+      w.voidedAsk = { notices: net.noticesOf(a).slice(noticed), asks: net.askedBy(a).length - asked };
     });
     if (finals() === 0) throw new Error("alice's node never asked the chain to finalize");
     const finalAsk = net.askedBy(a).slice(before).flatMap((ask) => (ask._tag === "dispute_finalize" ? [ask] : []))[0];
@@ -607,7 +620,7 @@ const disputeClause: Step<World> = {
   run: async () => { throw new Blocked(["disputeWithClause"], `the proof body can carry a clause per open hold, but no Runtime duty starts the dispute or holds a lock that a signed proof carries (R-SIGNED-IS-LIVE): ${GAPS.disputeWithClause.supplier}`); },
 };
 
-// ---- S9 ----------------------------------------------------------------------------------------------------------
+// ---- S10 ---------------------------------------------------------------------------------------------------------
 const rebase: Step<World> = {
   id: "rebase", title: "The Runtimes learn from the chain's logs that the dispute ran and ended, restart the Account from what the chain holds, and carry on", needs: ["dispute"],
   run: async (w) => {
@@ -627,7 +640,7 @@ const rebase: Step<World> = {
       if (f === undefined) throw new Error(`${id} holds no chain facts for alice-hubX`);
       return f;
     });
-    const wrong = facts.filter((f) => f.epoch !== onChain.epoch || f.stored !== onChain.nonce || f.disputed || f.frames !== 0n);
+    const wrong = facts.filter((f) => f.epoch !== onChain.epoch || f.stored !== onChain.nonce || f.disputed || f.frames > 1n);
     if (wrong.length > 0) throw new Error(`chain facts after the dispute: ${shown(facts)}; the chain: epoch ${onChain.epoch}, stored nonce ${onChain.nonce}`);
     // What each node's own J loop told its Entity, from the WAL rows the events are in.
     const told = (id: EntityId): readonly string[] => net.rowsOf(id).flatMap((r) => (r.input._tag === "entity" ? r.input.inputs.flatMap((i) => (i._tag.startsWith("j_") ? [i._tag] : [])) : []));
@@ -645,22 +658,28 @@ const rebase: Step<World> = {
       if (l.collateral !== held.collateral || l.ondelta !== held.ondelta) throw new Error(`${id}'s ledger holds collateral ${l.collateral} and ondelta ${l.ondelta}, the chain ${held.collateral} and ${held.ondelta}`);
       if (l.holds.length !== 0 || replica.state.offers.length !== 0) throw new Error(`${id}'s Account has open clauses after the finalize: S10 starts with none (the open-clause dispute is S9)`);
       if (replica.pending !== undefined) throw new Error(`${id}'s Account still has a frame pending after the nodes went quiet`);
-      if (net.entity(id).proofs.has(id === a ? x : a)) throw new Error(`${id} still holds the peer's signature over a head of the voided epoch`);
+
     });
     if (ledgers[0]!.replica.head !== ledgers[1]!.replica.head) throw new Error("the two Runtimes hold different heads on alice-hubX after the move");
-    // The payment that was pending at the finalize ended in one of two ways, and the two Runtimes agree which: committed in epoch 0 before
-    // the move (then voided with it: the offdelta restarted at zero) or sealed anew and committed in epoch 1 (then it is the offdelta).
+    // The payment alice had pending was never committed by hubX, so it cannot be voided: it ends sealed anew and committed in epoch 1 on both
+    // sides, or refused back to alice with a notice (then both ledgers are at zero). The two Runtimes agree which.
     const offdeltas = ledgers.map(({ replica }) => ledgerOf(replica.state, t).offdelta);
-    const voided = offdeltas.every((o) => o === 0n);
     const resealed = offdeltas.every((o) => o === (ledgers[0]!.replica.side === "left" ? -pay : pay));
-    if (!voided && !resealed) throw new Error(`after the move the two ledgers say offdelta ${shown(offdeltas)}: neither zero (the pending payment voided) nor ${pay} (it committed in epoch 1)`);
-    // A dispute needs a signature of the new epoch: the node refuses to start from the voided one, and asks the chain nothing.
-    const asks = net.askedBy(a).length;
-    const refused = net.noticesOf(a).length;
-    await net.tell(a, { _tag: "dispute", peer: x });
-    const said = net.noticesOf(a).slice(refused).filter((n) => n.startsWith("command_refused"));
-    if (said.length !== 1 || !said[0]!.includes("no_proof")) throw new Error(`alice's dispute ask after the move was ${said.length === 0 ? "not refused" : `refused as ${said[0]}`}, expected no_proof`);
-    if (net.askedBy(a).length !== asks) throw new Error("alice's node asked the chain for a dispute start from a proof of the voided epoch");
+    const refusedBack = offdeltas.every((o) => o === 0n) && net.noticesOf(a).some((n) => n.startsWith("tx_refused"));
+    if (!resealed && !refusedBack) throw new Error(`after the move the two ledgers say offdelta ${shown(offdeltas)}: neither ${pay} (the pending payment committed in epoch 1) nor zero with a refusal told to alice (it was refused back)`);
+    // The frames counted in the new epoch are the one that carried the payment sealed anew, or none.
+    if (facts.some((f) => f.frames !== (resealed ? 1n : 0n))) throw new Error(`chain facts count frames ${shown(facts.map((f) => f.frames))} in epoch ${onChain.epoch}, expected ${resealed ? 1n : 0n} each`);
+    // A dispute needs a signature of the new epoch: while alice had none (the dispute step asked then, with the link still down) the node refused
+    // and asked the chain nothing. The signatures kept now are over heads of the new epoch only: none if nothing committed in it, else the
+    // peer's signature over the head of the payment sealed anew.
+    const probe = w.voidedAsk ?? (() => { throw new Error("the dispute step recorded no dispute ask"); })();
+    const said = probe.notices.filter((n) => n.startsWith("command_refused"));
+    if (said.length !== 1 || !said[0]!.includes("no_proof") || probe.asks !== 0) throw new Error(`alice's dispute ask after the move was ${said.length === 0 ? "not refused" : `refused as ${said[0]}`} and the node asked the chain ${probe.asks} times, expected no_proof and nothing asked`);
+    [a, x].forEach((id) => {
+      const kept = net.entity(id).proofs.get(id === a ? x : a);
+      const head = net.account(id, id === a ? x : a).head;
+      if (resealed ? kept?.head !== head : kept !== undefined) throw new Error(`${id} holds a proof ${kept === undefined ? "of no head" : `of head ${kept.head}`}, the Account's head is ${head}: ${resealed ? "the peer's signature over the new head is expected" : "none is expected"}`);
+    });
     // And the Account carries on in epoch 1: a payment commits on both sides under one head, on the ledger the chain holds.
     const next = 10n * unit(chain);
     await net.tell(a, { _tag: "pay", peer: x, token: t, amount: next });
@@ -673,14 +692,26 @@ const rebase: Step<World> = {
       throw new Error(`after a payment of ${next} in epoch ${onChain.epoch}: heads ${alicePays.head} and ${hubSees.head}, offdeltas ${offdelta(alicePays)} and ${offdelta(hubSees)}, expected ${expected}`);
     }
     const parties = partiesOf(w);
-    const now = await heldBy(chain, Object.values(parties), [[alice, hubX], [parties.hubX, parties.hubY], [parties.hubY, parties.bob]]);
+    const legs = [[alice, hubX], [parties.hubX, parties.hubY], [parties.hubY, parties.bob]] as const;
+    // The chain's total cannot see what the Runtimes' ledgers lost (nothing was sent to the chain since the finalize), so each ledger of each
+    // Account, on both sides, is read against what the chain holds for it, and the two sides' ledgers against each other.
+    for (const [p, q] of legs) {
+      const onChainNow = await collateralOf(chain, p, q);
+      const [lp, lq] = [ledgerOf(net.account(eid(p), eid(q)).state, t), ledgerOf(net.account(eid(q), eid(p)).state, t)];
+      if (lp.collateral !== onChainNow.collateral || lp.ondelta !== onChainNow.ondelta || lq.collateral !== onChainNow.collateral || lq.ondelta !== onChainNow.ondelta) {
+        throw new Error(`${p.name}-${q.name}: the ledgers hold collateral ${lp.collateral} and ${lq.collateral}, ondelta ${lp.ondelta} and ${lq.ondelta}; the chain ${onChainNow.collateral} and ${onChainNow.ondelta}`);
+      }
+      if (lp.offdelta !== lq.offdelta || shown([lp.holds, lp.limit]) !== shown([lq.holds, lq.limit])) throw new Error(`${p.name}-${q.name}: the two Runtimes' ledgers differ (offdelta ${lp.offdelta} and ${lq.offdelta})`);
+    }
+    const now = await heldBy(chain, Object.values(parties), legs.map(([p, q]) => [p, q] as [Party, Party]));
     if (now !== w.held) throw new Error(`money is not conserved: ${w.held} before the dispute, ${now} after the move and one more payment`);
     return {
       checks: [
         `each node's own J loop (pure/host/shell/watch, the watcher core pure/j/watch.ts: blocks and logs by number, readings by block hash) read the Depository's logs at depth 1 up to height ${net.view()} and told its Entity ${names.length} J events, in the WAL before the height: ${names.join(", ")}`,
-        `both Runtimes hold chain facts epoch ${onChain.epoch}, stored nonce ${onChain.nonce}, no dispute open, frames 0 for alice-hubX: the same as the chain`,
-        `R-LEDGER-REBASE: both ledgers read collateral ${held.collateral}, ondelta ${held.ondelta} (the chain's), offdelta restarted from zero (it was ${before} before the move), no open clause, no frame pending, one head, and the peer's signature over a head of the voided epoch is forgotten`,
-        `the payment of ${PENDING_PAY} alice had pending when the chain finalized ${voided ? "committed in epoch 0 on hubX before it heard of the move and was voided with the dispute (both ledgers at offdelta zero)" : "was refused by hubX as another epoch's and sealed anew: it committed in epoch 1 on both sides"}`,
+        `both Runtimes hold chain facts epoch ${onChain.epoch}, stored nonce ${onChain.nonce}, no dispute open, the frames of the new epoch counted, for alice-hubX: the same as the chain`,
+        `R-LEDGER-REBASE: both ledgers read collateral ${held.collateral}, ondelta ${held.ondelta} (the chain's), offdelta restarted from zero (it was ${before} before the move), no open clause, no frame pending, one head, and the peer's signature kept is over a head of the new epoch only`,
+        `the payment of ${PENDING_PAY} alice had pending when the chain finalized (hubX never committed it: the link lost it) ${resealed ? "was refused by hubX as another epoch's and sealed anew: it committed in epoch 1 on both sides" : "was refused back to alice with a notice (both ledgers at offdelta zero)"}`,
+        "each of the three Accounts' ledgers, on both sides, holds the chain's collateral and ondelta, and the two sides agree on offdelta, holds and limits (the chain's total alone cannot see a ledger loss)",
         `alice's dispute ask after the move is refused (no_proof) and the node asks the chain nothing; a payment of 10 then commits in epoch ${onChain.epoch} on both sides under one head, offdelta ${expected} on each; money held by the four entities is unchanged at ${fmt(chain, now)}`,
       ],
       gaps: [],
@@ -688,7 +719,7 @@ const rebase: Step<World> = {
   },
 };
 
-// ---- S10 ---------------------------------------------------------------------------------------------------------
+// ---- S11 ---------------------------------------------------------------------------------------------------------
 const nodes: Step<World> = {
   id: "nodes", title: "A node crashes with a frame committed and unacked, and comes back from its WAL; the others carry on", needs: ["htlc"],
   run: async (w) => {

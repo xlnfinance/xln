@@ -252,7 +252,7 @@ describe("entity/cosign R-COSIGN-FREEZE a lapse names its operation: only the on
     expect(factsOf(landed)?.frozen).toBe(false);
     expect(factsOf(landed)?.cosigned).toBe(2n);
     const third = run(landed, withdraw(10n));
-    expect(third.chain.map((a) => (a._tag === "settle" || a._tag === "c2r" ? a.serial : undefined))).toEqual([3n]);
+    expect(third.chain.map((a) => (a._tag === "c2r" ? a.serial : undefined))).toEqual([3n]);
     expect(factsOf(run(third.state, lapse(2n)).state)?.frozen).toBe(true);
   });
 });

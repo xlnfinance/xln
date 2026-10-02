@@ -139,10 +139,21 @@ const unsigned = (check: Check, a: PeerMessage, head: FrameHash): "missing" | "w
 const withProof = (w: Work, peer: EntityId, proof: PeerProof): Work =>
   ({ ...w, state: { ...w.state, proofs: mapSet(w.state.proofs, peer, proof) } });
 
+/**
+ * R-LEDGER-REBASE: the peer's signature over a head is a proof only if the frame that made the head was sealed in the
+ * epoch this node signs in now. The ack of a pending frame of mine that commits after the epoch moved is the peer's
+ * signature over a head of the voided epoch: the head stays (the lineage goes on), the proof is not kept, since a
+ * dispute from it would only revert. A frame of the peer's is judged only in my own epoch, so it is always current.
+ */
+const sealedNow = (rules: EntityRules, outcome: Outcome<PeerFault>, pending: EntityReplica["pending"]): boolean =>
+  outcome._tag !== "committed_own"
+  || (pending !== undefined && pending.frame.epoch === rules.epoch && pending.frame.firstNonce === rules.firstNonce);
+
 const hearing = (rules: Rulebook, check: Check, view: JView, w: Work, a: PeerMessage): Work => {
   const account = w.state.accounts.get(a.from);
   if (account === undefined) return noting(w, { _tag: "unknown_peer", from: a.from });
-  const heard = receive(rules(w, a.from), account, a.msg);
+  const rule = rules(w, a.from);
+  const heard = receive(rule, account, a.msg);
   const head = heard.replica.head;
   const why = committed(heard.outcome) ? unsigned(check, a, head) : undefined;
   if (why !== undefined) return noting(w, { _tag: "message_unsigned", from: a.from, head, why });
@@ -152,7 +163,7 @@ const hearing = (rules: Rulebook, check: Check, view: JView, w: Work, a: PeerMes
   const facts = factsOf(waiting, a.from);
   const counted = cosigned(heard.outcome, account.pending, facts) ? withFacts(waiting, a.from, framed(facts)) : waiting;
   const taken = takenFrom(counted, a, heard.outcome);
-  const proved = committed(heard.outcome) && a.sig !== undefined
+  const proved = committed(heard.outcome) && a.sig !== undefined && sealedNow(rule, heard.outcome, account.pending)
     ? withProof(taken, a.from, { head, slot: heard.replica.used, author: authorOf(heard), sig: a.sig })
     : taken;
   return refused === undefined ? proved : noting(proved, { _tag: "message_refused", from: a.from, outcome: refused });

@@ -82,8 +82,10 @@ describe("runtime/chain R-LEDGER-REBASE an epoch advance zeroes the offdelta on 
     expect(same(after)).toBe(true);
     expect(offdeltas(after)).toEqual([0n, 0n]);
     expect(noticesOf(after, ALICE).concat(noticesOf(after, BOB))).toEqual([]);
+    expect([proofKept(after, ALICE), proofKept(after, BOB)]).toEqual([false, false]);
     const next = settle(feed(after, ALICE, pay(BOB, 7n)));
     expect([offdeltas(next), same(next)]).toEqual([[-7n, -7n], true]);
+    expect([proofKept(next, ALICE), proofKept(next, BOB)]).toEqual([true, true]);
   });
 
   test("R-LEDGER-REBASE a frame the peer never heard is refused as another epoch's and sealed again", () => {
