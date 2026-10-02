@@ -11,7 +11,6 @@ import {
 } from "../../../account/model.ts";
 import { entityId, type EntityId, type Outbound } from "../../../entity/model.ts";
 import { all, err, flatMap, mapErr, ok, traverse, type Result } from "../../../kernel/core/result.ts";
-import type { Tagged } from "../../../kernel/core/tagged.ts";
 import { bad, big, bytesOf, count, field, record, text, type Fields, type Reader, type ReadFault } from "./read.ts";
 import { decodeValue, encodeValue, type ValueFault } from "./value.ts";
 

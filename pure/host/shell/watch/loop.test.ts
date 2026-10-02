@@ -10,7 +10,7 @@ import type { EntityId } from "../../../entity/model.ts";
 import { entityId } from "../../../entity/model.ts";
 import type { RawLog } from "../../../j/log.ts";
 import { watching, type Block } from "../../../j/watch.ts";
-import { blockOf, blocksBetween, DEPOSITORY, entityOf, logOf, must } from "../../../j/fixtures.ts";
+import { blockOf, DEPOSITORY, entityOf, logOf, must } from "../../../j/fixtures.ts";
 import type { PortFault } from "../submit/chain.ts";
 import { beginAt, poll, type WatchConfig, type WatchPort } from "./loop.ts";
 

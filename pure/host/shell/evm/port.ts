@@ -6,7 +6,6 @@
 // contract's ABI says is a fault the caller can read, never a thrown error.
 import type { EntityId } from "../../../entity/model.ts";
 import type { JAnswer, SkipFact } from "../../../j/batch/answer.ts";
-import type { ProcessBatchCall, SealedBatch } from "../../../j/batch/sealed.ts";
 import type { Simulation } from "../../../j/gas/simulate.ts";
 import type { Treasury } from "../../../j/plan/funded.ts";
 import type { Tagged } from "../../../kernel/core/tagged.ts";

@@ -17,12 +17,11 @@ import { keccakHex } from "../pure/kernel/encoding/bytes.ts";
 import { startAnvil, assertLoopback, scrubbedEnv, type Anvil } from "./lib/anvil.ts";
 import {
   accountKeyOf, accountOnChain, advanceTime, collateralOf, connect, hankoOf, heldBy, leftOf, must, partyOf, reserveOf, sendOps,
-  unit, worldOf, type Chain, type Manifest, type Party,
+  unit, type Chain, type Manifest, type Party,
 } from "./lib/chain.ts";
 import { GAPS, REPO } from "./lib/gaps.ts";
 import { Blocked, type Step } from "./lib/runner.ts";
-import { entityId, type EntityId, type JAction } from "../pure/entity/model.ts";
-import { opOf } from "../pure/host/ops.ts";
+import { entityId, type EntityId } from "../pure/entity/model.ts";
 import type { ClockParams, JView } from "../pure/account/clause/clock.ts";
 import { Cluster } from "./lib/cluster.ts";
 import { Seat } from "./lib/seat.ts";
