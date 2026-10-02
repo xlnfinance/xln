@@ -23,10 +23,15 @@ export type HeightFault = Tagged<"bad_height", { height: bigint }>;
 export const jHeight = (height: bigint): Result<JHeight, HeightFault> =>
   (height >= 0n && height <= MAX_HEIGHT ? ok(height as JHeight) : err({ _tag: "bad_height", height }));
 
-export type ClockParams = Readonly<{ lag: bigint; reserve: bigint; maxLockHorizon: bigint }>;
+/**
+ * `depth` is how many blocks behind the chain's head the node's view is held (the depth its J loop reads at): a reveal
+ * asked at a view lands at least `depth + 1` blocks past it, so the reveal is asked `depth` heights earlier.
+ */
+export type ClockParams = Readonly<{ lag: bigint; reserve: bigint; maxLockHorizon: bigint; depth: bigint }>;
 
 export type ParamsFault =
   | Tagged<"lag_negative", { lag: bigint }>
+  | Tagged<"depth_negative", { depth: bigint }>
   | Tagged<"reserve_below_lag", { lag: bigint; reserve: bigint }>
   | Tagged<"horizon_not_positive", { maxLockHorizon: bigint }>;
 
@@ -34,11 +39,14 @@ export type ParamsFault =
  * The lag is not negative and the reserve is in J heights and at least `lag`; less lets an expiry land while the payee
  * can still resolve (a negative lag admits a negative reserve: a clause is then live and expirable at its deadline).
  */
-export const clockParams = (lag: bigint, reserve: bigint, maxLockHorizon: bigint): Result<ClockParams, ParamsFault> => {
+export const clockParams = (
+  lag: bigint, reserve: bigint, maxLockHorizon: bigint, depth = 0n,
+): Result<ClockParams, ParamsFault> => {
   if (lag < 0n) return err({ _tag: "lag_negative", lag });
+  if (depth < 0n) return err({ _tag: "depth_negative", depth });
   if (reserve < lag) return err({ _tag: "reserve_below_lag", lag, reserve });
   if (maxLockHorizon < 1n) return err({ _tag: "horizon_not_positive", maxLockHorizon });
-  return ok({ lag, reserve, maxLockHorizon });
+  return ok({ lag, reserve, maxLockHorizon, depth });
 };
 
 /** The host door: the chain height a party acts on is the later of the host's finalized height and the context's. */
@@ -54,5 +62,10 @@ export const expirableAt = (p: ClockParams, deadline: JHeight, view: JView): boo
 /** The latest deadline a party admits for a new clause (N2, R-HORIZON-RESERVE). */
 export const latestDeadline = (p: ClockParams, view: JView): bigint => view + p.maxLockHorizon + p.reserve;
 
-/** A payee whose resolve is still unacked reveals the secret on chain once its view reaches `deadline - lag`. */
-export const revealOnChainDue = (p: ClockParams, deadline: JHeight, view: JView): boolean => view + p.lag >= deadline;
+/**
+ * A payee whose resolve is still unacked reveals the secret on chain once its view reaches `deadline - lag - depth`:
+ * the reveal is sent at the head, `depth` blocks past the view, and lands a block later, so it lands `lag - 1` blocks
+ * before the deadline whatever the depth is.
+ */
+export const revealOnChainDue = (p: ClockParams, deadline: JHeight, view: JView): boolean =>
+  view + p.lag + p.depth >= deadline;

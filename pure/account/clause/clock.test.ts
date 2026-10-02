@@ -84,6 +84,13 @@ describe("account/clause/clock", () => {
     expect(due).toEqual([false, true, false]);
   });
 
+  test("R-HTLC-CLOCK a node that reads at a depth asks for the reveal that many heights earlier", () => {
+    const deep = unwrapOr(clockParams(3n, 3n, 10n, 2n), (fault) => expect.unreachable(fault._tag));
+    const due = [4n, 5n, 6n].map((view) => revealOnChainDue(deep, heightOf(10n), viewOf(view)));
+    expect(due).toEqual([false, true, true]);
+    expect(clockParams(3n, 3n, 10n, -1n)).toEqual(err({ _tag: "depth_negative", depth: -1n }));
+  });
+
   test("R-HORIZON-RESERVE the latest admitted deadline is the view plus the horizon plus the reserve", () => {
     expect(latestDeadline(params(1n, 3n, 10n), viewOf(100n))).toBe(113n);
   });

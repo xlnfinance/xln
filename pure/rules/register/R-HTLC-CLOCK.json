@@ -1,6 +1,6 @@
 {
  "id": "R-HTLC-CLOCK",
- "statement": "Every HTLC time judgment is made in J height: a lock is live through its deadline height; an expiry needs own view > deadline + reserve (reserve >= LAG >= 0); a payee with an unacked resolve reveals on chain at deadline - LAG, and at once on any Account that is quiet: a dispute is open, or the node's signature is out on a settlement or a C2R and nothing is proposed or acked until the chain moves the epoch (R-DISPUTE-FREEZE, R-COSIGN-FREEZE), so no frame can be sealed to ack the resolve. Part (c) is the payee's Runtime duty plus a J-layer fact: clause.ts has no input that says the payee knows the secret or has revealed, so the ts cell holds (a) and (b) and (c) is owed to the Runtime cut.",
+ "statement": "Every HTLC time judgment is made in J height: a lock is live through its deadline height; an expiry needs own view > deadline + reserve (reserve >= LAG >= 0); a payee with an unacked resolve reveals on chain at deadline - LAG - DEPTH (DEPTH is how many blocks behind the head the node reads, `ClockParams.depth`, 0 in the models: the reveal is sent at the head and lands a block after it, so it lands LAG - 1 blocks before the deadline at any depth), and at once on any Account that is quiet: a dispute is open, or the node's signature is out on a settlement or a C2R and nothing is proposed or acked until the chain moves the epoch (R-DISPUTE-FREEZE, R-COSIGN-FREEZE), so no frame can be sealed to ack the resolve. Part (c) is the payee's Runtime duty plus a J-layer fact: clause.ts has no input that says the payee knows the secret or has revealed, so the ts cell holds (a) and (b) and (c) is owed to the Runtime cut.",
  "source": "contracts-decisions.md, Account-layer decisions 09-30 D-AC-2, D-AC-3",
  "layers": {
   "arrival": "hold",
@@ -185,6 +185,21 @@
    "kind": "test",
    "layer": "ts",
    "name": "R-HTLC-CLOCK a payee whose Account waits for a settlement reveals at once too: nothing is acked"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-HTLC-CLOCK a node that reads at a depth asks for the reveal that many heights earlier"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-HTLC-CLOCK a payee that reads the chain at a depth asks that many heights earlier, and once"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-HTLC-CLOCK a node whose clock names another depth than it reads at is not started"
   }
  ]
 }

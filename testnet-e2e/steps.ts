@@ -25,7 +25,7 @@ import { Blocked, type Step } from "./lib/runner.ts";
 import type { EntityId, JAction } from "../pure/entity/model.ts";
 import { lazyCheck } from "../pure/entity/signing/attest.ts";
 import type { ClockParams, JView } from "../pure/account/clause/clock.ts";
-import { Cluster, shown } from "./lib/cluster.ts";
+import { Cluster, DEPTH, shown } from "./lib/cluster.ts";
 import { Seat } from "./lib/seat.ts";
 import { openWal } from "../pure/host/shell/disk/store.ts";
 import { fileDisk } from "../pure/host/shell/node/file-disk.ts";
@@ -201,7 +201,7 @@ const signingFor = async (chain: Chain, a: Party, b: Party): Promise<SigningCont
 
 const view = async (chain: Chain): Promise<View> => {
   const height = must(jHeight(BigInt(await chain.provider.getBlockNumber())), "height");
-  return { clock: must(clockParams(2n, 4n, 100n), "clock params"), view: ownView(height, height) };
+  return { clock: must(clockParams(2n, 4n, 100n, DEPTH), "clock params"), view: ownView(height, height) };
 };
 
 /** What a node's journal file holds, read back by the shell's own reader. */

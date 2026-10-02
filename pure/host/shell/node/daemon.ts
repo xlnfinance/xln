@@ -42,13 +42,14 @@ export type Stopped = Tagged<"stopped">;
 
 /**
  * A node that reads the chain at `depth` has a view `depth` blocks behind the chain's head. Its own reveal as a payee
- * (asked when its view reaches `deadline - lag`) is sent at the head and lands one block after it, so with a `lag` of
- * `depth` or less a reveal asked on time lands past the deadline, where the clause is expirable. A `lag` of `depth + 1`
- * lands it on the deadline, which is still live, with no block to spare; each further block of `lag` is one more. It
- * says nothing of the time another node's reveal takes to be heard: the hop a lock
- * gives the next one, `reserve + lag`, covers that.
+ * is sent at the head and lands one block after it, so the clock asks for it `lag + depth` heights before the deadline
+ * (`ClockParams.depth`, R-HTLC-CLOCK) and it lands `lag - 1` blocks before the deadline, whatever the depth. A `lag`
+ * of `depth` or less is refused all the same: the hop a lock gives the next one, `reserve + lag`, is what covers
+ * hearing another node's reveal at that depth. A clock whose `depth` is not the depth the node reads at would ask for
+ * the reveal too late or too early, so it is refused too (`clock_depth_off`).
  */
 export type ClockBelowDepth = Tagged<"clock_below_depth", { lag: bigint; depth: bigint }>;
+export type ClockDepthOff = Tagged<"clock_depth_off", { clock: bigint; depth: bigint }>;
 
 /** What ends a node's work: a disk, the chain's submit path, the Runtime, or a watcher invariant broken. */
 export type NodeFault = DriveFault | WatchFault | BadPeer | BadSecret;
@@ -358,10 +359,13 @@ const STOPPED: Result<never, Stopped> = err({ _tag: "stopped" });
  */
 export const startDaemon = async (
   config: Config, listener: Listener,
-): Promise<Result<Daemon, DriveFault | ClockBelowDepth>> => {
-  const { lag } = config.boot.setup.clock;
+): Promise<Result<Daemon, DriveFault | ClockBelowDepth | ClockDepthOff>> => {
+  const { lag, depth } = config.boot.setup.clock;
   if (config.watch !== undefined && lag <= config.watch.depth) {
     return err({ _tag: "clock_below_depth", lag, depth: config.watch.depth });
+  }
+  if (config.watch !== undefined && depth !== config.watch.depth) {
+    return err({ _tag: "clock_depth_off", clock: depth, depth: config.watch.depth });
   }
   const started = await start(config.shell, config.boot);
   if (!started.ok) return started;
