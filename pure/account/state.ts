@@ -36,6 +36,18 @@ export const withHeld = (s: AccountState, held: ReadonlyMap<TokenId, Held>): Acc
 export const rebased = (s: AccountState): AccountState =>
   ({ ...s, ledgers: new Map([...s.ledgers].map(([token, l]) => [token, { ...l, offdelta: 0n }])) });
 
+/**
+ * R-HOLD-DISSOLVE: what a finalize leaves of the Account's open clauses: none. The chain settled every clause of the
+ * proof it used (a payment paid when its hash was revealed in time, unpaid otherwise), so no hold, no quote and no
+ * offer stands, and nothing is reserved for a swap. What a hold would have paid is in the cash the chain paid out.
+ */
+export const dissolved = (s: AccountState): AccountState => ({
+  ...s,
+  ledgers: new Map([...s.ledgers].map(([token, l]) => [token, { ...l, holds: [], reserved: { left: 0n, right: 0n } }])),
+  quotes: [],
+  offers: [],
+});
+
 /** Every open hold of the Account, whatever its token, in token order of first use. */
 export const openHolds = (s: AccountState): readonly Hold[] => [...s.ledgers.values()].flatMap((l) => l.holds);
 

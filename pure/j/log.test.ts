@@ -30,13 +30,13 @@ describe("j/log", () => {
   });
 
   test("R-WATCH-CLOSED every log of the real lifecycle decodes: the four events are read, the rest are ignored", () => {
-    // AccountSettled is the fifth event read and has its own test below (R-J-COLLATERAL).
+    // AccountSettled and SecretRevealed are read too and have tests of their own below.
     const read = new Set(["AccountEpochAdvanced", "DisputeStarted", "CounterDisputeRegistered", "DisputeFinalized"]);
     const phases = Object.values(lifecyclePhases);
     const logged = (e: (typeof phases)[number]["events"][number], p: number) =>
       ({ e, log: logOf(e.name, e.args, BigInt(p + 1), BigInt(e.logIndex)) });
     const seen = phases.flatMap((phase, p) => phase.events.map((e) => logged(e, p)))
-      .filter(({ e }) => e.name !== "AccountSettled");
+      .filter(({ e }) => e.name !== "AccountSettled" && e.name !== "SecretRevealed");
     expect(seen.length).toBeGreaterThan(10);
     seen.forEach(({ e, log }) => {
       const decoded = decodeLog(DEPOSITORY, log);
@@ -118,6 +118,24 @@ describe("j/log", () => {
     }));
   });
 
+  test("R-DISPUTE-FREEZE a revealed secret reads hashlock and revealer from topics, the secret from data", () => {
+    const log = logOf("SecretRevealed", { hashlock: hexOf(7n), revealer: LEFT, secret: hexOf(8n) }, 5n, 1n);
+    expect(decodeLog(DEPOSITORY, log)).toEqual(ok({
+      _tag: "some",
+      value: {
+        _tag: "secret_revealed", block: 5n, blockHash: hashOf(5n), index: 1n, hashlock: must(bytes32(hexOf(7n))),
+        revealer: LEFT, secret: must(bytes32(hexOf(8n))),
+      },
+    }));
+    const at = { block: 5n, blockHash: hashOf(5n), index: 1n };
+    const fault = err({ _tag: "bad_log" as const, ...at, event: log.topics[0] ?? "" });
+    const bad = [
+      { ...log, topics: log.topics.slice(0, 2) }, { ...log, data: `${log.data}${"00".repeat(32)}` },
+      { ...log, data: "0x" },
+    ];
+    bad.forEach((broken) => expect(decodeLog(DEPOSITORY, broken)).toEqual(fault));
+  });
+
   test("a dispute start, a counter and a finalize read sender, counterentity and nonce from the topics", () => {
     const started = logOf("DisputeStarted", {
       ...disputeArgs, proposerIsLeft: true, proofbodyHash: hexOf(1n), watchSeed: hexOf(2n),
@@ -135,7 +153,7 @@ describe("j/log", () => {
     expect(decodeLogs(DEPOSITORY, [started, countered, finalized])).toEqual(ok([
       { _tag: "dispute_started", ...fact, proposerIsLeft: true, bodyHash: bodyHashOf(1n), timeout: 5n, index: 0n },
       { _tag: "dispute_countered", ...fact, proposerIsLeft: false, bodyHash: bodyHashOf(4n), index: 1n },
-      { _tag: "dispute_finalized", ...fact, index: 2n },
+      { _tag: "dispute_finalized", ...fact, bodyHash: bodyHashOf(5n), index: 2n },
     ] satisfies readonly ChainEvent[]));
   });
 

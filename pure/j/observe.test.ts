@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { err, ok } from "../kernel/core/result.ts";
 import { tokenOf } from "../account/fixtures.ts";
-import { decodeLogs, type ChainEvent } from "./log.ts";
+import { bytes32, decodeLogs, type ChainEvent } from "./log.ts";
 import { observe, readingKey, readingsOf, type Accounts, type Addressed, type Reading } from "./observe.ts";
 import { bodyHashOf, DEPOSITORY, entityOf, hashOf, hexOf, logOf, must } from "./fixtures.ts";
 
@@ -58,6 +58,32 @@ describe("j/observe", () => {
       toward(LEFT, { _tag: "j_epoch", peer: RIGHT, epoch: 1n, stored: 5n }),
       toward(RIGHT, { _tag: "j_epoch", peer: LEFT, epoch: 1n, stored: 5n }),
     ]));
+  });
+
+  test("R-WATCH-TELL the advance a finalize made carries the hash of the proof body the chain logged for it", () => {
+    const events = eventsOf(advance(2n, 3n, 1n), started(2n, 4n, LEFT, RIGHT), finalized(2n, 5n));
+    const accounts = accountsOf(readAt(2n, 1n, 5n));
+    const [heard] = must(observe(events, [LEFT], accounts)).filter((a) => a.event._tag === "j_epoch");
+    expect(heard).toEqual(
+      toward(LEFT, { _tag: "j_epoch", peer: RIGHT, epoch: 1n, stored: 5n, finalBodyHash: bodyHashOf(5n) }),
+    );
+  });
+
+  test("R-WATCH-TELL an advance with no finalize after it in its block, or one of another Account, has no hash", () => {
+    const epochs = (...logs: Parameters<typeof decodeLogs>[1]) =>
+      must(observe(eventsOf(...logs), [LEFT], accountsOf(readAt(2n, 1n, 5n))))
+        .filter((a) => a.event._tag === "j_epoch");
+    const plain = [toward(LEFT, { _tag: "j_epoch", peer: RIGHT, epoch: 1n, stored: 5n })];
+    expect(epochs(advance(2n, 3n, 1n), finalized(3n, 0n))).toEqual(plain);
+    expect(epochs(finalized(2n, 0n), advance(2n, 1n, 1n))).toEqual(plain);
+    expect(epochs(advance(2n, 3n, 1n), finalized(2n, 5n, LEFT, THIRD))).toEqual(plain);
+  });
+
+  test("R-WATCH-TELL of two advances before a finalize in one block only the later one is the finalize's", () => {
+    const events = eventsOf(advance(2n, 0n, 1n), advance(2n, 1n, 2n), finalized(2n, 2n));
+    const heard = must(observe(events, [LEFT], accountsOf(readAt(2n, 2n, 5n))));
+    expect(heard.map((a) => (a.event._tag === "j_epoch" ? a.event.finalBodyHash : "other")))
+      .toEqual([undefined, bodyHashOf(5n), "other"]);
   });
 
   test("R-WATCH-TELL an Entity that is not hosted, or is not a party, hears nothing", () => {
@@ -117,6 +143,18 @@ describe("j/observe", () => {
       toward(LEFT, { _tag: "j_countered", peer: RIGHT, nonce: 9n, proposerIsLeft: false, bodyHash: bodyHashOf(4n) }),
       toward(RIGHT, { _tag: "j_countered", peer: LEFT, nonce: 9n, proposerIsLeft: false, bodyHash: bodyHashOf(4n) }),
     ]));
+  });
+
+  test("R-DISPUTE-FREEZE a revealed secret is a j_secret for every hosted Entity and asks no reading", () => {
+    const shown = logOf("SecretRevealed", { hashlock: hexOf(7n), revealer: THIRD, secret: hexOf(8n) }, 4n, 0n);
+    const events = eventsOf(shown, advance(4n, 1n, 1n));
+    expect(readingsOf(events, [])).toEqual([]);
+    const secret = must(bytes32(hexOf(8n)));
+    expect(observe(events.slice(0, 1), [LEFT, THIRD], accountsOf())).toEqual(ok([
+      toward(LEFT, { _tag: "j_secret", secret }),
+      toward(THIRD, { _tag: "j_secret", secret }),
+    ]));
+    expect(observe(events.slice(0, 1), [], accountsOf())).toEqual(ok([]));
   });
 
   test("R-WATCH-TELL a reading that is missing is a fault, and so is one that contradicts the log's epoch", () => {

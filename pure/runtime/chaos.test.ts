@@ -257,17 +257,23 @@ const risen = (ops: Ops, w: World): World =>
     return commitHost(ops, fed, n);
   }, w);
 
+/** The Host whose signed operation the chain answers: the newest serial, when both signed and neither landed. */
+const signerOf = (w: World): Name | undefined => {
+  const serialOf = (n: Name): bigint => outstanding(w.hosts[n])?.serial ?? -1n;
+  const [first, ...rest] = NAMES.filter((n) => outstanding(w.hosts[n]) !== undefined);
+  return first === undefined ? undefined : rest.reduce((best, n) => (serialOf(n) > serialOf(best) ? n : best), first);
+};
+
 /** The chain moves the epoch on for both Hosts, which have to be between frames: whatever was signed has landed. */
 const landed = (ops: Ops, w: World): World => {
   const epoch = 1n + NAMES.reduce((e, n) => (e > (factsOf(w, n)?.epoch ?? 0n) ? e : (factsOf(w, n)?.epoch ?? 0n)), 0n);
   const event = (n: Name): EntityInput => ({ _tag: "j_epoch", peer: ID[PEER[n]], epoch, stored: epoch * 10n });
   // The chain holds one value for both Hosts: what the signer folded, read off its own ledger (it was frozen from the
   // signature on, so its offdelta is the signed fold). The other Host may hold a frame the link has not delivered yet,
-  // so its own ledger says nothing about it. A Host that signed nothing, or has no Account yet, folds nothing.
-  const signer = NAMES.find((n) => outstanding(w.hosts[n]) !== undefined);
-  const signed = signer === undefined ? undefined : accountOf(w, signer);
+  // so its own ledger says nothing about it. A landing is asked for only when something was signed.
+  const signer = signerOf(w) ?? expect.unreachable("a landing with nothing signed");
+  const signed = accountOf(w, signer) ?? expect.unreachable("a signer with no Account");
   const folded = (acc: World, n: Name): World => {
-    if (signed === undefined) return acc;
     const l = ledgerOf(signed.state, GOLD);
     const ondelta = l.ondelta + l.offdelta;
     const fold: EntityInput =
@@ -286,7 +292,7 @@ const asked = (ops: Ops, w: World, signer: Name, op: Signed): World => {
 
 /** The chain tells a Host something: the operation lands on both, lapses for its signer, or is asked of the other. */
 const chainStep = (c: Chaos, w: World, step: number): World => {
-  const signer = NAMES.find((n) => outstanding(w.hosts[n]) !== undefined);
+  const signer = signerOf(w);
   const op = signer === undefined ? undefined : outstanding(w.hosts[signer]);
   if (signer === undefined || op === undefined) return w;
   const lapse: EntityInput = { _tag: "j_op_lapsed", peer: ID[PEER[signer]], serial: op.serial };

@@ -11,6 +11,10 @@
 // after an epoch moves (a finalized dispute stores a nonce no log names) and its epoch (`DisputeStarted` does not carry
 // one). The epoch at an event is the end-of-block epoch less the epoch advances of that Account later in the block, so
 // two events of one block still see their own epoch; the nonce is the end-of-block one.
+//
+// `SecretRevealed` is the one event that is about no Account: a payee showed a secret in a batch of its own. Every
+// hosted Entity hears it as `j_secret`, and an Entity that forwarded a lock under its hash passes the secret up
+// (R-DISPUTE-FREEZE: the payee behind a dispute cannot resolve in a frame, so the chain is where the hub learns it).
 import { err, map, ok, traverse, type Result } from "../kernel/core/result.ts";
 import type { Of, Tagged } from "../kernel/core/tagged.ts";
 import type { Side, TokenId } from "../account/model.ts";
@@ -22,7 +26,7 @@ import type { Bytes32, ChainEvent } from "./log.ts";
  * by the watcher from a block's time (j/watch.ts).
  */
 export type JEvent =
-  | Tagged<"j_epoch", { peer: Bytes32; epoch: bigint; stored: bigint }>
+  | Tagged<"j_epoch", { peer: Bytes32; epoch: bigint; stored: bigint; finalBodyHash?: Bytes32 }>
   | Tagged<
     "j_dispute",
     {
@@ -35,8 +39,11 @@ export type JEvent =
   | Tagged<"j_dispute_over", { peer: Bytes32 }>
   | Tagged<"j_collateral", { peer: Bytes32; token: TokenId; collateral: bigint; ondelta: bigint }>;
 
+/** A secret the chain showed: no peer, every hosted Entity hears it. */
+export type Revealed = Tagged<"j_secret", { secret: Bytes32 }>;
+
 /** A J event for one hosted Entity. */
-export type Addressed = Readonly<{ to: Bytes32; event: JEvent }>;
+export type Addressed = Readonly<{ to: Bytes32; event: JEvent | Revealed }>;
 
 /** What the chain stores for an Account after a block: its `ondeltaEpoch` and its `nonce`. */
 export type AccountAt = Readonly<{ epoch: bigint; nonce: bigint }>;
@@ -60,14 +67,17 @@ export type ObserveFault =
 
 type Parties = readonly [Bytes32, Bytes32];
 
+/** The events that are about one Account: every one but a revealed secret. */
+type Bound = Exclude<ChainEvent, { _tag: "secret_revealed" }>;
+
 /** The Account of an event as (left, right): the smaller entity id is Left, as the contract's account key has it. */
-const partiesOf = (e: ChainEvent): Parties => {
+const partiesOf = (e: Bound): Parties => {
   const named = e._tag === "epoch_advanced" || e._tag === "account_settled";
   const [a, b] = named ? [e.left, e.right] : [e.sender, e.counter];
   return a < b ? [a, b] : [b, a];
 };
 
-const readingOf = (e: ChainEvent): Reading => {
+const readingOf = (e: Bound): Reading => {
   const [left, right] = partiesOf(e);
   return { block: e.block, blockHash: e.blockHash, left, right };
 };
@@ -76,24 +86,26 @@ const sameAccount = (a: Reading, b: Reading): boolean =>
   a.block === b.block && a.blockHash === b.blockHash && a.left === b.left && a.right === b.right;
 
 /** An epoch advance of the same Account, in the same block, logged after `e`. */
-const advancedAfter = (events: readonly ChainEvent[], e: ChainEvent): number =>
+const advancedAfter = (events: readonly ChainEvent[], e: Bound): number =>
   events.filter((o) => o._tag === "epoch_advanced" && sameAccount(readingOf(o), readingOf(e)) && o.index > e.index)
     .length;
 
 const needsReading = (e: ChainEvent): boolean => e._tag === "epoch_advanced" || e._tag === "dispute_started";
 
-const hostsAny = (hosted: readonly Bytes32[], e: ChainEvent): boolean => partiesOf(e).some((p) => hosted.includes(p));
+const hostsAny = (hosted: readonly Bytes32[], e: Bound): boolean => partiesOf(e).some((p) => hosted.includes(p));
+
+const isBound = (e: ChainEvent): e is Bound => e._tag !== "secret_revealed";
 
 /** The distinct readings the events of a delivery need for the hosted Entities, in event order. */
 export const readingsOf = (events: readonly ChainEvent[], hosted: readonly Bytes32[]): readonly Reading[] => {
-  const needed = events.filter((e) => needsReading(e) && hostsAny(hosted, e)).map(readingOf);
+  const needed = events.filter(isBound).filter((e) => needsReading(e) && hostsAny(hosted, e)).map(readingOf);
   return needed.filter((r, i) => needed.findIndex((o) => sameAccount(o, r)) === i);
 };
 
 const peerOf = (self: Bytes32, [left, right]: Parties): Bytes32 => (self === left ? right : left);
 
 /** The epoch the chain was at when `e` was logged: the end-of-block reading, less the advances logged after it. */
-const epochAt = (events: readonly ChainEvent[], e: ChainEvent, at: AccountAt): bigint =>
+const epochAt = (events: readonly ChainEvent[], e: Bound, at: AccountAt): bigint =>
   at.epoch - BigInt(advancedAfter(events, e));
 
 type Moved = Of<ChainEvent, "epoch_advanced">;
@@ -104,12 +116,27 @@ const startedBy = (e: Started): Side => (e.sender < e.counter ? "left" : "right"
 /** The chain's epoch moved: the Account's epoch and what it stores now. The reading must agree with the log. */
 type Told = Result<readonly JEvent[], ObserveFault>;
 
+/**
+ * The hash of the proof body a dispute finalize paid by, when this epoch advance is the one the finalize made: the
+ * finalize of the same Account logged next in the block, with no other advance of the Account between (the contract
+ * advances the epoch, then logs the finalize). A settlement or a C2R has none.
+ */
+const finalBodyOf = (events: readonly ChainEvent[], e: Moved): Bytes32 | undefined => {
+  const same = (o: Bound) => sameAccount(readingOf(o), readingOf(e)) && o.index > e.index;
+  const marks = ["dispute_finalized", "epoch_advanced"];
+  const later = events.filter(isBound).filter((o) => same(o) && marks.includes(o._tag));
+  const next = later.toSorted((a, b) => (a.index < b.index ? -1 : 1))[0];
+  return next?._tag === "dispute_finalized" ? next.bodyHash : undefined;
+};
+
 const epochMoved = (events: readonly ChainEvent[], e: Moved, peer: Bytes32, at: AccountAt | undefined): Told => {
   const reading = readingOf(e);
   if (at === undefined) return err({ _tag: "no_reading", reading });
   const read = epochAt(events, e, at);
+  const finalBodyHash = finalBodyOf(events, e);
+  const final = finalBodyHash === undefined ? {} : { finalBodyHash };
   return read === e.epoch
-    ? ok([{ _tag: "j_epoch", peer, epoch: e.epoch, stored: at.nonce }])
+    ? ok([{ _tag: "j_epoch", peer, epoch: e.epoch, stored: at.nonce, ...final }])
     : err({ _tag: "reading_off", reading, logged: e.epoch, read });
 };
 
@@ -123,7 +150,7 @@ const disputeStarted = (events: readonly ChainEvent[], e: Started, peer: Bytes32
 
 /** What one event is to one hosted Entity that is a party to it, or nothing. */
 const eventFor = (
-  events: readonly ChainEvent[], e: ChainEvent, self: Bytes32, at: AccountAt | undefined,
+  events: readonly ChainEvent[], e: Bound, self: Bytes32, at: AccountAt | undefined,
 ): Told => {
   const peer = peerOf(self, partiesOf(e));
   switch (e._tag) {
@@ -140,17 +167,21 @@ const eventFor = (
 
 type Hearer = Readonly<{ e: ChainEvent; to: Bytes32 }>;
 
+const hearersOf = (e: ChainEvent, hosted: readonly Bytes32[]): readonly Hearer[] =>
+  (isBound(e) ? partiesOf(e).filter((p) => hosted.includes(p)) : hosted).map((to) => ({ e, to }));
+
 /**
  * The J events of a delivery for the hosted Entities, in the chain's order: block, then log index, then Left before
- * Right when one log is about two hosted Entities. An Entity a log is not about hears nothing of it.
+ * Right when one log is about two hosted Entities. An Entity a log is not about hears nothing of it; a revealed secret
+ * is about none, and every hosted Entity hears it.
  */
 export const observe = (
   events: readonly ChainEvent[], hosted: readonly Bytes32[], accounts: Accounts,
 ): Result<readonly Addressed[], ObserveFault> => {
-  const hearers = events.flatMap((e): readonly Hearer[] =>
-    partiesOf(e).filter((p) => hosted.includes(p)).map((to) => ({ e, to })));
-  const told = ({ e, to }: Hearer) =>
-    map(eventFor(events, e, to, accounts.get(readingKey(readingOf(e)))),
-      (found) => found.map((event): Addressed => ({ to, event })));
-  return map(traverse(hearers, told), (all) => all.flat());
+  const told = ({ e, to }: Hearer): Result<readonly Addressed[], ObserveFault> =>
+    (isBound(e)
+      ? map(eventFor(events, e, to, accounts.get(readingKey(readingOf(e)))),
+        (found) => found.map((event): Addressed => ({ to, event })))
+      : ok([{ to, event: { _tag: "j_secret", secret: e.secret } }]));
+  return map(traverse(events.flatMap((e) => hearersOf(e, hosted)), told), (all) => all.flat());
 };

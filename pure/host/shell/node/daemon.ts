@@ -24,7 +24,9 @@ import { MAX_LINE, type Key, type Peer, type RuntimeId } from "../link/link.ts";
 import {
   accepted, closed, dialed, line, linked, route, startMesh, wanted, type ConnId, type Mesh, type Refused, type Write,
 } from "../mesh/mesh.ts";
-import { beginAt, poll, windowsOf, type BadPeer, type Delivery, type JFault, type WatchConfig } from "../watch/loop.ts";
+import {
+  beginAt, poll, windowsOf, type BadPeer, type BadSecret, type Delivery, type JFault, type WatchConfig,
+} from "../watch/loop.ts";
 import { dialTcp, type Listener, type SocketFault, type Wire } from "./link/socket.ts";
 
 /** What a node is made of: its shell, its Entity, its key, who its peers are, and how often its timer runs. */
@@ -38,8 +40,18 @@ export type Config = Readonly<{
 
 export type Stopped = Tagged<"stopped">;
 
+/**
+ * A node that reads the chain at `depth` has a view `depth` blocks behind the chain's head. Its own reveal as a payee
+ * (asked when its view reaches `deadline - lag`) is sent at the head and lands one block after it, so with a `lag` of
+ * `depth` or less a reveal asked on time lands past the deadline, where the clause is expirable. A `lag` of `depth + 1`
+ * lands it on the deadline, which is still live, with no block to spare; each further block of `lag` is one more. It
+ * says nothing of the time another node's reveal takes to be heard: the hop a lock
+ * gives the next one, `reserve + lag`, covers that.
+ */
+export type ClockBelowDepth = Tagged<"clock_below_depth", { lag: bigint; depth: bigint }>;
+
 /** What ends a node's work: a disk, the chain's submit path, the Runtime, or a watcher invariant broken. */
-export type NodeFault = DriveFault | WatchFault | BadPeer;
+export type NodeFault = DriveFault | WatchFault | BadPeer | BadSecret;
 
 export type Fault = NodeFault | Stopped;
 
@@ -344,7 +356,13 @@ const STOPPED: Result<never, Stopped> = err({ _tag: "stopped" });
  * A node over `listener`, which the caller has made so that its port is known to the peers' tables. It dials the peers
  * it is to dial, answers the ones that dial it, and runs until `stop`.
  */
-export const startDaemon = async (config: Config, listener: Listener): Promise<Result<Daemon, DriveFault>> => {
+export const startDaemon = async (
+  config: Config, listener: Listener,
+): Promise<Result<Daemon, DriveFault | ClockBelowDepth>> => {
+  const { lag } = config.boot.setup.clock;
+  if (config.watch !== undefined && lag <= config.watch.depth) {
+    return err({ _tag: "clock_below_depth", lag, depth: config.watch.depth });
+  }
   const started = await start(config.shell, config.boot);
   if (!started.ok) return started;
   const bus = new EventEmitter();

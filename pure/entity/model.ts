@@ -120,8 +120,12 @@ export type Answer = Readonly<{ counter: DisputeCounter; registered: boolean; la
  * the chain's clock has passed that end (`over`). Once over, the node asks to finalize it with what it started with,
  * and keeps asking until the chain says the dispute is over.
  */
-export type Starting =
-  Readonly<{ start: DisputeStart; window: bigint | undefined; over: boolean; countered: boolean }>;
+export type Starting = Readonly<{
+  start: DisputeStart; window: bigint | undefined; over: boolean; countered: Registered | undefined;
+}>;
+
+/** The counter the chain registered against a dispute: its nonce, its author, and the hash of its body. */
+export type Registered = Readonly<{ nonce: bigint; proposerIsLeft: boolean; bodyHash: string }>;
 
 // What a frame takes in. `sig` is the sender's signature over the head the message commits to
 // (R-SIGNED-HEADS-ON-THE-WIRE): a frame's, or the ack's.
@@ -145,7 +149,7 @@ export type PeerMessage = Tagged<"peer_message", { from: EntityId; msg: Msg<Acco
  * a repeat is a no-op.
  */
 export type JEvent =
-  | Tagged<"j_epoch", { peer: EntityId; epoch: bigint; stored: bigint }>
+  | Tagged<"j_epoch", { peer: EntityId; epoch: bigint; stored: bigint; finalBodyHash?: string }>
   | Tagged<
     "j_dispute",
     {
@@ -168,7 +172,14 @@ export type CosignOp =
 
 export type CosignAsk = Tagged<"cosign_ask", { from: EntityId; op: CosignOp }>;
 
-export type Arrival = PeerMessage | JEvent | CosignAsk;
+/**
+ * `j_secret` is a secret the chain showed (a payee's reveal in a batch of its own): the chain names no Account for it,
+ * so every Entity hears it, and the paybook of one that forwarded a lock under its hash passes it up
+ * (R-DISPUTE-FREEZE).
+ */
+export type SecretRevealed = Tagged<"j_secret", { secret: Uint8Array }>;
+
+export type Arrival = PeerMessage | JEvent | SecretRevealed | CosignAsk;
 
 /** The Host's timer for `peer`'s Account ran out: its pending frame is sent again, so a lost frame cannot wedge it. */
 export type Hook = Tagged<"resend_due", { peer: EntityId }>;
@@ -287,13 +298,28 @@ export type EntityFault =
   | Tagged<"unfolded_c2r", { folds: readonly Fold[] }>
   | Tagged<"entry_exists", { hashlock: string }>
   | Tagged<"no_proof", { why: "none" | "unsignable" }>
-  | Tagged<"dispute_pending">;
+  | Tagged<"dispute_pending">
+  | Tagged<"account_disputed">;
 
 /** What the owner of an input is told when it did not take effect. */
 export type Notice =
   | Tagged<"command_refused", { command: Command; fault: EntityFault }>
   | Tagged<"unknown_peer", { from: EntityId }>
   | Tagged<"holding_dropped", { peer: EntityId; token: TokenId }>
+  | Tagged<
+    "offdelta_rebased",
+    {
+      peer: EntityId; token: TokenId; epoch: bigint; committedNonce: bigint; offdelta: bigint;
+      finalizedNonce: bigint | undefined;
+    }
+  >
+  | Tagged<
+    "pending_rebased",
+    {
+      peer: EntityId; epoch: bigint; nonce: bigint; finalizedNonce: bigint | undefined; txs: readonly AccountTx[];
+      fate: "resent_in_new_epoch" | "paid_on_chain";
+    }
+  >
   | Tagged<"cosign_refused", { from: EntityId; op: CosignOp; fault: EntityFault }>
   | Tagged<"message_refused", { from: EntityId; outcome: Outcome<PeerFault> }>
   | Tagged<"message_unsigned", { from: EntityId; head: FrameHash; why: "missing" | "wrong" }>

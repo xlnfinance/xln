@@ -46,7 +46,11 @@ const bySigner: Check = (peer, head, sig) => {
     && verdict.value.signers[0] === addressOfKey(keyOfEntity(peer));
 };
 
-const setup = { ...fixtureSetup, anchor: { ...fixtureSetup.anchor, check: bySigner } };
+/** The lag outlasts the depth the watch tests read at (2), as a node that reads the chain needs (clock_below_depth). */
+const setup = {
+  ...fixtureSetup, clock: { ...fixtureSetup.clock, lag: 3n, reserve: 3n },
+  anchor: { ...fixtureSetup.anchor, check: bySigner },
+};
 
 const NO_CHAIN: PortFault = { _tag: "port", call: "send", reason: "no chain in this test" };
 
@@ -94,27 +98,33 @@ const keep = (): boolean => false;
 
 export type Options = Readonly<{
   tickMs: number; lost?: Config["lost"]; chain?: ChainPort; wrap?: (wal: Disk) => Disk; watch?: WatchConfig;
+  /** The clock's lag in J heights, where a test wants another than the scene's. */
+  lag?: bigint;
 }>;
 
-/** A node for `seat` that dials and answers `other` (if any), its files in the seat's directory. */
-export const nodeOf = async (seat: Seat, other: Seat | undefined, options: Options): Promise<Daemon> => {
-  const { tickMs, lost = keep, chain = port, wrap = (disk) => disk, watch } = options;
+/** What a node for `seat` is started with, its files in the seat's directory. */
+export const configOf = async (seat: Seat, other: Seat | undefined, options: Options): Promise<Config> => {
+  const { tickMs, lost = keep, chain = port, wrap = (disk) => disk, watch, lag = setup.clock.lag } = options;
   const wal = wrap(must(await fileDisk(`${seat.dir}/wal.log`)));
   const journal = must(await fileDisk(`${seat.dir}/journal.log`));
   const key = keyOfEntity(seat.entity);
-  const config: Config = {
+  return {
     shell: {
       wal, io: { port: chain, signer: lazySigner(seat.entity, key), journal, gas: GAS },
       now: () => stamp(BigInt(Date.now())),
     },
     boot: {
-      setup, genesis: emptyEntity(seat.entity), where: { entity: seat.entity, deployment: DEPLOYED, world: WORLD },
+      setup: { ...setup, clock: { ...setup.clock, lag } }, genesis: emptyEntity(seat.entity),
+      where: { entity: seat.entity, deployment: DEPLOYED, world: WORLD },
       limits: unwrapOr(limits(32, 8), () => expect.unreachable("limits")),
     },
     key, table: other === undefined ? [] : [peerOf(other)], tickMs, nonce, lost, watch,
   };
-  return must(await startDaemon(config, seat.listener));
 };
+
+/** A node for `seat` that dials and answers `other` (if any), its files in the seat's directory. */
+export const nodeOf = async (seat: Seat, other: Seat | undefined, options: Options): Promise<Daemon> =>
+  must(await startDaemon(await configOf(seat, other, options), seat.listener));
 
 export const fresh = (): string => mkdtempSync(`${tmpdir()}/daemon-`);
 

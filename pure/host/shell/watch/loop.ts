@@ -7,7 +7,8 @@
 import type { JHeight } from "../../../account/clause/clock.ts";
 import type { ChainFacts, EntityId, EntityInput } from "../../../entity/model.ts";
 import { entityId } from "../../../entity/model.ts";
-import type { AccountAt } from "../../../j/observe.ts";
+import type { AccountAt, Addressed } from "../../../j/observe.ts";
+import { hexToBytes } from "../../../kernel/encoding/bytes.ts";
 import { readingKey } from "../../../j/observe.ts";
 import { bytes32, type Address, type Bytes32, type RawLog } from "../../../j/log.ts";
 import {
@@ -32,7 +33,10 @@ export type WatchConfig = Readonly<{ port: WatchPort; depository: Address; depth
 /** A peer id the chain named that is not an Entity id the node can use: a broken reading, not a retry. */
 export type BadPeer = Tagged<"bad_peer", { text: string }>;
 
-export type JFault = PortFault | WatchFault | BadPeer;
+/** A secret the chain showed that is not 32 bytes of hex: the log was read as bytes32, so this is a broken reading. */
+export type BadSecret = Tagged<"bad_secret", { text: string }>;
+
+export type JFault = PortFault | WatchFault | BadPeer | BadSecret;
 
 /** The most blocks one poll reads: a node that was away reads on over several polls, not in one burst of requests. */
 const CATCH_UP = 64n;
@@ -52,9 +56,16 @@ const blocksAfter = async (port: WatchPort, from: bigint, to: bigint): Promise<R
 /** One delivery: the J events for the node's Entity, in the chain's order, and then the height they end at. */
 export type Delivery = Readonly<{ watch: Watch; events: readonly EntityInput[]; height: JHeight }>;
 
-const inputOf = (event: { peer: Bytes32 }): Result<EntityId, BadPeer> => {
+const peerOf = (event: { peer: Bytes32 }): Result<EntityId, BadPeer> => {
   const peer = entityId(event.peer);
   return peer.ok ? peer : err({ _tag: "bad_peer", text: event.peer });
+};
+
+/** The Entity's input for what the watcher told: the peer's id for an Account's event, the bytes of a secret. */
+const inputOf = (event: Addressed["event"]): Result<EntityInput, BadPeer | BadSecret> => {
+  if (event._tag !== "j_secret") return map(peerOf(event), (peer) => ({ ...event, peer }) as EntityInput);
+  const bytes = hexToBytes(event.secret);
+  return bytes.ok ? ok({ _tag: "j_secret", secret: bytes.value }) : err({ _tag: "bad_secret", text: event.secret });
 };
 
 /** The end of the window the Entity waits on, of a dispute it started or one it answers, while the window is open. */
@@ -106,7 +117,7 @@ export const poll = async (
   if (!accounts.ok) return accounts;
   const step = advance(watch, prepared.value, [hosted], new Map(accounts.value), windows);
   return flatMap(step, (done) => map(
-    traverse(done.events, ({ event }) => map(inputOf(event), (peer) => ({ ...event, peer }) as EntityInput)),
+    traverse(done.events, ({ event }) => inputOf(event)),
     (events): Delivery => ({ watch: done.watch, events, height: done.height }),
   ));
 };
