@@ -1,6 +1,6 @@
 {
  "id": "R-DISPUTE-START",
- "statement": "The `dispute` command starts a dispute with the peer from the newest head the peer signed that the Account committed: the Entity asks the chain (`dispute_start`) for everything the chain's dispute start holds, and the Host turns the ask into the op with no signature of its own to add. The ask carries the peer, the nonce the head was signed at (first nonce plus slot minus one), the epoch, who authored the head (`proposerIsLeft`), the proof body of the committed state (not of a frame still pending) and the peer's signature over the head. The digest the chain computes from those fields is the head, so the signature the Entity holds is the one the chain verifies. With no Account, no committed frame, or a state that cannot be signed as a proof, nothing is asked and the owner is told (`no_proof`, `no_account`). The WAL row names every field: a replay with another peer, nonce, epoch, author, signature or body diverges. Not here: the finalize after the windows and the counter by the non-starter (R-DISPUTE-WATCH status), the dispute window as a chain fact at depth (D9), and a reaction to the chain refusing a start.",
+ "statement": "The `dispute` command starts a dispute with the peer from the newest head the peer signed that the Account committed: the Entity asks the chain (`dispute_start`) for everything the chain's dispute start holds, and the Host turns the ask into the op with no signature of its own to add. The ask carries the peer, the nonce the head was signed at (first nonce plus slot minus one), the epoch, who authored the head (`proposerIsLeft`), the proof body of the committed state (not of a frame still pending) and the peer's signature over the head. The digest the chain computes from those fields is the head, so the signature the Entity holds is the one the chain verifies. With no Account, no committed frame, or a state that cannot be signed as a proof, nothing is asked and the owner is told (`no_proof`, `no_account`). The WAL row names every field: a replay with another peer, nonce, epoch, author, signature or body diverges. Not here: the finalize after the window (R-DISPUTE-FINALIZE), the counter by the non-starter (R-DISPUTE-WATCH status), and a reaction to the chain refusing a start.",
  "source": "coordinator 10-02 (S8 forced dispute through the node, step 2 of plan/s8-dispute-design.md)",
  "layers": {
   "arrival": "n/a: the Arrival page models the Account's frames; a dispute start is an Entity and Host rule",
@@ -49,6 +49,11 @@
    "kind": "test",
    "layer": "ts",
    "name": "R-DURABLE a WAL whose dispute start names another peer, nonce, epoch, author or sig does not replay"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "a state the chain would refuse as a proof starts nothing, and the owner is told it cannot be signed"
   }
  ]
 }

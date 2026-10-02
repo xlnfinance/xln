@@ -106,6 +106,8 @@ const chainId = (action: JAction): string =>
     deposit: (d) => `deposit ${d.peer} ${d.token} ${d.amount}`,
     dispute_start: (d) =>
       `dispute_start ${d.peer} ${d.nonce} ${d.epoch} ${d.proposerIsLeft} ${bodyId(d.body)} ${d.sig}`,
+    dispute_finalize: (d) =>
+      `dispute_finalize ${d.peer} ${d.nonce} ${d.proposerIsLeft} ${d.startedByLeft} ${bodyId(d.body)}`,
     counter: (c) => `counter ${c.peer} ${c.nonce} ${c.head}`,
     c2r: (c) => `c2r ${c.peer} ${c.serial} ${c.token} ${c.amount}`,
     settle: (s) => `settle ${s.peer} ${s.serial} ${s.token} ${s.amount} ${s.folds.map(foldId).join(",")}`,

@@ -20,8 +20,8 @@ const hash32 = (value: unknown): Result<Bytes32, ReplyFault> =>
 const blockOf = (asked: bigint) => (raw: unknown): Result<Block, ReplyFault> =>
   flatMap(fieldsOf(raw), (o) => flatMap(quantity(o["number"]), (number) =>
     (number !== asked ? err(bad(`block ${number}, not ${asked}`)) : map(
-      all({ hash: hash32(o["hash"]), parent: hash32(o["parentHash"]) }),
-      ({ hash, parent }): Block => ({ number, hash, parent }),
+      all({ hash: hash32(o["hash"]), parent: hash32(o["parentHash"]), timestamp: quantity(o["timestamp"]) }),
+      ({ hash, parent, timestamp }): Block => ({ number, hash, parent, timestamp }),
     ))));
 
 const textsOf = (raw: unknown): Result<readonly Bytes32[], ReplyFault> =>

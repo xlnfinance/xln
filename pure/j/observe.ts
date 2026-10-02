@@ -18,11 +18,13 @@ import type { Bytes32, ChainEvent } from "./log.ts";
 
 /**
  * The J events of the Entity cut's `JEvent`, less `j_op_lapsed`: whether a co-signed op can still land is the Entity's
- * to say from its own record of what it signed, and no log names an op.
+ * to say from its own record of what it signed, and no log names an op. `j_window_over` is no log's either: it is made
+ * by the watcher from a block's time (j/watch.ts).
  */
 export type JEvent =
   | Tagged<"j_epoch", { peer: Bytes32; epoch: bigint; stored: bigint }>
-  | Tagged<"j_dispute", { peer: Bytes32; epoch: bigint; by: Side }>
+  | Tagged<"j_dispute", { peer: Bytes32; epoch: bigint; by: Side; nonce: bigint; timeout: bigint }>
+  | Tagged<"j_window_over", { peer: Bytes32 }>
   | Tagged<"j_dispute_over", { peer: Bytes32 }>
   | Tagged<"j_collateral", { peer: Bytes32; token: TokenId; collateral: bigint; ondelta: bigint }>;
 
@@ -107,7 +109,9 @@ const epochMoved = (events: readonly ChainEvent[], e: Moved, peer: Bytes32, at: 
 const disputeStarted = (events: readonly ChainEvent[], e: Started, peer: Bytes32, at: AccountAt | undefined): Told =>
   (at === undefined
     ? err({ _tag: "no_reading", reading: readingOf(e) })
-    : ok([{ _tag: "j_dispute", peer, epoch: epochAt(events, e, at), by: startedBy(e) }]));
+    : ok([{
+      _tag: "j_dispute", peer, epoch: epochAt(events, e, at), by: startedBy(e), nonce: e.nonce, timeout: e.timeout,
+    }]));
 
 /** What one event is to one hosted Entity that is a party to it, or nothing. */
 const eventFor = (

@@ -5,6 +5,7 @@ import type { RawLog } from "./log.ts";
 import { readingKey, type Accounts, type Addressed, type Reading } from "./observe.ts";
 import {
   advance, finalizedAt, prepare, readings, watching, type Batch, type Block, type Step, type Watch, type WatchFault,
+  type Window,
 } from "./watch.ts";
 import { blockOf, blocksBetween, DEPOSITORY, entityOf, hashOf, hexOf, logOf, must } from "./fixtures.ts";
 
@@ -22,7 +23,7 @@ const started = (block: bigint, index: bigint, fork = 0n) =>
   logOf("DisputeStarted", {
     sender: RIGHT, counterentity: LEFT, nonce: 7n, proposerIsLeft: true, proofbodyHash: hexOf(1n), watchSeed: hexOf(2n),
     starterInitialArguments: "0x", starterCounterArguments: "0x", starterCounterProofCommitment: hexOf(3n),
-    disputeTimeout: 5n, disputeStartTimestamp: 6n, leftResponseSeconds: 60n, rightResponseSeconds: 60n,
+    disputeTimeout: 500n, disputeStartTimestamp: 6n, leftResponseSeconds: 60n, rightResponseSeconds: 60n,
   }, block, index, fork);
 
 const finalized = (block: bigint, index: bigint, fork = 0n) =>
@@ -37,10 +38,11 @@ const answered = (stored: (block: bigint) => { epoch: bigint; nonce: bigint }) =
 /** Prepare, ask the chain, and deliver one batch, as the Host does. */
 const deliver = (
   w: Watch, batch: Batch, hosted: readonly typeof LEFT[], stored: (block: bigint) => { epoch: bigint; nonce: bigint },
+  windows: readonly Window[] = [],
 ): Result<Step, WatchFault> => {
   const prepared = prepare(w, batch);
   const asked = prepared.ok ? readings(prepared.value, hosted) : [];
-  return prepared.ok ? advance(w, prepared.value, hosted, answered(stored)(asked)) : prepared;
+  return prepared.ok ? advance(w, prepared.value, hosted, answered(stored)(asked), windows) : prepared;
 };
 
 const toward = (to: typeof LEFT, event: Addressed["event"]): Addressed => ({ to, event });
@@ -64,8 +66,8 @@ describe("j/watch", () => {
     expect(step.events).toEqual([
       toward(LEFT, { _tag: "j_epoch", peer: RIGHT, epoch: 1n, stored: 5n }),
       toward(RIGHT, { _tag: "j_epoch", peer: LEFT, epoch: 1n, stored: 5n }),
-      toward(LEFT, { _tag: "j_dispute", peer: RIGHT, epoch: 1n, by: "right" }),
-      toward(RIGHT, { _tag: "j_dispute", peer: LEFT, epoch: 1n, by: "right" }),
+      toward(LEFT, { _tag: "j_dispute", peer: RIGHT, epoch: 1n, by: "right", nonce: 7n, timeout: 500n }),
+      toward(RIGHT, { _tag: "j_dispute", peer: LEFT, epoch: 1n, by: "right", nonce: 7n, timeout: 500n }),
       toward(LEFT, { _tag: "j_dispute_over", peer: RIGHT }),
       toward(RIGHT, { _tag: "j_dispute_over", peer: LEFT }),
       toward(LEFT, { _tag: "j_epoch", peer: RIGHT, epoch: 2n, stored: 8n }),
@@ -73,6 +75,36 @@ describe("j/watch", () => {
     ]);
     expect(step.watch.applied).toEqual(blockOf(4n));
     expect(step.height).toBe(4n as typeof step.height);
+  });
+
+  test("R-DISPUTE-FINALIZE a window the last block has passed is told after the logs, and not before", () => {
+    const window = (to: typeof LEFT, peer: typeof LEFT, timeout: bigint): Window => ({ to, peer, timeout });
+    const told = (windows: readonly Window[], hosted = [LEFT]) =>
+      must(deliver(start(2n), lifecycle, hosted, lifecycleChain, windows)).events
+        .filter((e) => e.event._tag === "j_window_over");
+    const over = (to: typeof LEFT, peer: typeof LEFT): Addressed => toward(to, { _tag: "j_window_over", peer });
+    expect(blockOf(4n).timestamp).toBe(40n);
+    expect(told([window(LEFT, RIGHT, 40n)])).toEqual([over(LEFT, RIGHT)]);
+    expect(told([window(LEFT, RIGHT, 41n)])).toEqual([]);
+    expect(told([window(LEFT, RIGHT, 5n), window(LEFT, BYSTANDER, 40n), window(LEFT, RIGHT, 90n)]))
+      .toEqual([over(LEFT, RIGHT), over(LEFT, BYSTANDER)]);
+    expect(told([window(RIGHT, LEFT, 40n)])).toEqual([]);
+    const step = must(deliver(start(2n), lifecycle, [LEFT], lifecycleChain, [window(LEFT, RIGHT, 40n)]));
+    expect(step.events.at(-1)).toEqual(over(LEFT, RIGHT));
+  });
+
+  test("R-DISPUTE-FINALIZE a window the delivery itself opened for the node's own start is told after it", () => {
+    const by = (sender: typeof LEFT, counterentity: typeof LEFT, timeout: bigint) => logOf("DisputeStarted", {
+      sender, counterentity, nonce: 7n, proposerIsLeft: true, proofbodyHash: hexOf(1n), watchSeed: hexOf(2n),
+      starterInitialArguments: "0x", starterCounterArguments: "0x", starterCounterProofCommitment: hexOf(3n),
+      disputeTimeout: timeout, disputeStartTimestamp: 6n, leftResponseSeconds: 60n, rightResponseSeconds: 60n,
+    }, 3n, 0n, 0n);
+    const told = (log: RawLog) =>
+      must(deliver(start(2n), { head: 6n, blocks: blocksBetween(0n, 4n), logs: [log] }, [LEFT], lifecycleChain)).events
+        .map((e) => e.event._tag);
+    expect(told(by(LEFT, RIGHT, 40n))).toEqual(["j_dispute", "j_window_over"]);
+    expect(told(by(LEFT, RIGHT, 41n))).toEqual(["j_dispute"]);
+    expect(told(by(RIGHT, LEFT, 40n))).toEqual(["j_dispute"]);
   });
 
   test("R-WATCH-ORDER an Entity that is not hosted is told nothing, and the delivery still moves the cursor", () => {
@@ -204,7 +236,8 @@ describe("j/watch", () => {
     const [nonce, epoch] = [BigInt(b + 1) * 3n, epochBefore(plan, b, i)];
     switch (plan[b]?.[i]) {
       case "advance": return bothHear((peer) => ({ _tag: "j_epoch", peer, epoch: epoch + 1n, stored: nonce }));
-      case "dispute": return bothHear((peer) => ({ _tag: "j_dispute", peer, epoch, by: "right" }));
+      case "dispute":
+        return bothHear((peer) => ({ _tag: "j_dispute", peer, epoch, by: "right", nonce: 7n, timeout: 500n }));
       default: return bothHear((peer) => ({ _tag: "j_dispute_over", peer }));
     }
   };

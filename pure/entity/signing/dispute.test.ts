@@ -9,6 +9,8 @@ import { proofBodyHash } from "../../chain/proof/proof.ts";
 import { opOf } from "../../host/ops.ts";
 import { proofNonce } from "../chain.ts";
 import { credit, open } from "../fixtures.ts";
+import { entityFrame } from "../frame.ts";
+import { judge } from "../fixtures.ts";
 import { emptyEntity, sideOf, type EntityState, type JAction } from "../model.ts";
 import { accountKeyOf } from "./signing.ts";
 import { ALICE, BOB, hanko, must, real, run, signed } from "./keys.ts";
@@ -87,6 +89,25 @@ describe("entity/signing R-DISPUTE-START a dispute starts from the peer's signat
       const faults = refused.notices.map((n) => n._tag === "command_refused" && n.fault);
       expect(faults).toEqual([{ _tag: "no_proof", why: "none" }]);
     });
+  });
+
+  test("a state the chain would refuse as a proof starts nothing, and the owner is told it cannot be signed", () => {
+    const year = 365n * 24n * 3600n;
+    const longer = { ...real, terms: { ...real.terms, leftResponseSeconds: year + 1n } };
+    const refused = entityFrame(judge, longer, committed.alice, [{ _tag: "dispute", peer: BOB.id }]);
+    expect(refused.chain).toEqual([]);
+    const faults = refused.notices.map((n) => n._tag === "command_refused" && n.fault);
+    expect(faults).toEqual([{ _tag: "no_proof", why: "unsignable" }]);
+    expect(refused.state.chain.get(BOB.id)?.starting).toBeUndefined();
+  });
+
+  test("a second dispute ask while the first stands is refused: the chain holds the first start's nonce", () => {
+    const first = dispute(committed.alice, BOB.id).state;
+    const later = run(first, credit(BOB.id, 90n)).state;
+    const second = dispute(later, BOB.id);
+    expect(second.chain).toEqual([]);
+    expect(second.notices.map((n) => n._tag === "command_refused" && n.fault._tag)).toEqual(["dispute_pending"]);
+    expect(second.state.chain.get(BOB.id)?.starting).toEqual(first.chain.get(BOB.id)?.starting);
   });
 
   test("a frame pending on top of the committed head leaves the dispute on the committed one", () => {

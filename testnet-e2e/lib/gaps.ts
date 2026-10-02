@@ -31,12 +31,6 @@ const mentions = (dir: string, pattern: RegExp): boolean =>
   sourcesUnder(join(PURE, dir)).some((file) => pattern.test(readFileSync(file, "utf8")));
 
 export const GAPS = {
-  harnessSend: {
-    id: "harness-send", kind: "scaffold", layer: "Host",
-    piece: "Chain ops sent by the harness (`sendOps` in lib/chain.ts: queue in the J builder, simulate at the head, sign, send, read the events) instead of by a node's own submit path. A step that still calls it does what the Host's shell does for a deposit (S3) by hand: the reveal of a secret and the dispute start and finalize are ops the Runtime asks for or will ask for (reveal is a chain action of the Entity's WAL row; the dispute duty is the A4b slice), and their path through the node is that step's own work.",
-    supplier: "the e2e builder: the step that sends the op through the node's submit path removes its call to sendOps",
-    landed: () => !readFileSync(join(REPO, "testnet-e2e", "lib", "chain.ts"), "utf8").includes("export const sendOps"),
-  },
   ledgerRebase: {
     id: "ledger-rebase", kind: "missing", layer: "Entity",
     piece: "After a finalized dispute the Entity learns the new epoch (j_epoch) and that the dispute is over, but nothing rebases the Account: its ledger still says offdelta and collateral as they were, its frame counter is not reset to the new epoch's base, and the settlement fold into ondelta is not there.",

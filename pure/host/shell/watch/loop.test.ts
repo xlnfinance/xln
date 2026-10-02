@@ -6,14 +6,15 @@ import { appendFileSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { err, ok, unwrapOr } from "../../../kernel/core/result.ts";
-import type { EntityId } from "../../../entity/model.ts";
+import { freshChain } from "../../../entity/chain.ts";
+import type { ChainFacts, EntityId, Starting } from "../../../entity/model.ts";
 import { entityId } from "../../../entity/model.ts";
 import type { RawLog } from "../../../j/log.ts";
 import { watching, type Block } from "../../../j/watch.ts";
 import { blockOf, DEPOSITORY, entityOf, logOf, must } from "../../../j/fixtures.ts";
 import { callsOf } from "../fixtures.ts";
 import type { PortFault } from "../submit/chain.ts";
-import { beginAt, poll, type WatchConfig, type WatchPort } from "./loop.ts";
+import { beginAt, poll, windowsOf, type WatchConfig, type WatchPort } from "./loop.ts";
 
 const LEFT = entityOf(0x11n);
 const RIGHT = entityOf(0x52n);
@@ -113,5 +114,28 @@ describe("host/shell/watch the J loop's poll", () => {
     expect(begun.ok ? begun.value : begun).toEqual({ depository: DEPOSITORY, depth: 3n, applied: blockOf(5n) });
     const down = await beginAt({ ...config, port: portOf(straight(9n), logPath(), 5n) }, 5n);
     expect(down).toEqual(err(DOWN));
+  });
+
+  test("R-DISPUTE-FINALIZE a window the last block has passed is told to the Entity after the events", async () => {
+    const window = { to: LEFT, peer: RIGHT, timeout: 40n };
+    const chain = straight(6n, [advanced(2n, 0n, 1n)]);
+    const got = await poll(portOf(chain, logPath()), start(2n), LEFT, [window]);
+    expect(got.ok ? got.value?.events.map((e) => e._tag) : got).toEqual(["j_epoch", "j_window_over"]);
+    const early = await poll(portOf(chain, logPath()), start(2n), LEFT, [{ ...window, timeout: 41n }]);
+    expect(early.ok ? early.value?.events.map((e) => e._tag) : early).toEqual(["j_epoch"]);
+  });
+
+  test("R-DISPUTE-FINALIZE the windows an Entity waits on are the node's own the chain gave an end, until told", () => {
+    const asked = { peer: peer(RIGHT) } as Starting["start"];
+    const facts = (starting: Partial<Starting>): ChainFacts =>
+      ({ ...freshChain, starting: { start: asked, window: 40n, over: false, ...starting } });
+    const chain = new Map<EntityId, ChainFacts>([
+      [peer(RIGHT), facts({})], [peer(entityOf(0x70n)), facts({ window: undefined })],
+      [peer(entityOf(0x71n)), freshChain], [peer(entityOf(0x72n)), facts({ over: true })],
+    ]);
+    expect(windowsOf(LEFT, chain)).toEqual(ok([{ to: LEFT, peer: RIGHT, timeout: 40n }]));
+    expect(windowsOf(LEFT, new Map())).toEqual(ok([]));
+    const bad = "0xnot-an-id" as EntityId;
+    expect(windowsOf(LEFT, new Map([[bad, facts({})]]))).toEqual(err({ _tag: "bad_peer", text: bad }));
   });
 });

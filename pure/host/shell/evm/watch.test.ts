@@ -48,13 +48,14 @@ describe("host/shell/evm/watch the J loop's reads of the chain", () => {
 
   test("R-JLOOP a block is asked for by number, refused when it is another's or its hashes are no hashes", async () => {
     const log = logPath();
-    const fine = { number: "0x5", hash: hashOf(5n), parentHash: hashOf(4n) };
+    const fine = { number: "0x5", hash: hashOf(5n), parentHash: hashOf(4n), timestamp: "0x32" };
     expect(await portOf({ eth_getBlockByNumber: () => ok(fine) }, log).block(5n)).toEqual(ok(blockOf(5n)));
     expect(askedOf(log)).toEqual([`eth_getBlockByNumber ["0x5",false]`]);
     const asked = (reply: unknown) => portOf({ eth_getBlockByNumber: () => ok(reply) }).block(5n);
     expect(await asked({ ...fine, number: "0x6" })).toMatchObject({ ok: false, error: { call: "watch block" } });
     expect(await asked({ ...fine, hash: "0x12" })).toMatchObject({ ok: false });
     expect(await asked({ ...fine, parentHash: 7 })).toMatchObject({ ok: false });
+    expect(await asked({ ...fine, timestamp: undefined })).toMatchObject({ ok: false });
     expect(await asked(null)).toMatchObject({ ok: false });
     expect(await portOf({ eth_getBlockByNumber: () => down }).block(5n))
       .toEqual(err({ _tag: "port", call: "watch block", reason: "connection refused" }));

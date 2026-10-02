@@ -5,13 +5,13 @@
 // moved by the caller only after the delivery is in the WAL (R-HEIGHT-ORDER); a restart begins again at the Runtime's
 // own view, which the WAL holds, and replays what it must (every J event is idempotent).
 import type { JHeight } from "../../../account/clause/clock.ts";
-import type { EntityId, EntityInput } from "../../../entity/model.ts";
+import type { ChainFacts, EntityId, EntityInput } from "../../../entity/model.ts";
 import { entityId } from "../../../entity/model.ts";
 import type { AccountAt } from "../../../j/observe.ts";
 import { readingKey } from "../../../j/observe.ts";
-import type { Address, Bytes32, RawLog } from "../../../j/log.ts";
+import { bytes32, type Address, type Bytes32, type RawLog } from "../../../j/log.ts";
 import {
-  advance, finalizedAt, prepare, readings, watching, type Block, type Watch, type WatchFault,
+  advance, finalizedAt, prepare, readings, watching, type Block, type Watch, type WatchFault, type Window,
 } from "../../../j/watch.ts";
 import { err, flatMap, map, ok, traverse, type Result } from "../../../kernel/core/result.ts";
 import type { Tagged } from "../../../kernel/core/tagged.ts";
@@ -57,13 +57,30 @@ const inputOf = (event: { peer: Bytes32 }): Result<EntityId, BadPeer> => {
   return peer.ok ? peer : err({ _tag: "bad_peer", text: event.peer });
 };
 
+const windowOf = (self: Bytes32, peer: EntityId, facts: ChainFacts): Result<readonly Window[], BadPeer> => {
+  const timeout = facts.starting?.over ? undefined : facts.starting?.window;
+  if (timeout === undefined) return ok([]);
+  const named = bytes32(peer);
+  return named.ok ? ok([{ to: self, peer: named.value, timeout }]) : err({ _tag: "bad_peer", text: peer });
+};
+
 /**
- * The next delivery, or nothing when no block past the cursor is final yet. `hosted` is the Entity the node hosts.
+ * The dispute windows an Entity waits on: each dispute it started that the chain gave an end to, until it is told the
+ * window is over. They are read off the Entity's own chain facts (which the WAL rebuilds), so a restart forgets none.
+ */
+export const windowsOf = (
+  self: Bytes32, chain: ReadonlyMap<EntityId, ChainFacts>,
+): Result<readonly Window[], BadPeer> =>
+  map(traverse([...chain], ([peer, facts]) => windowOf(self, peer, facts)), (found) => found.flat());
+
+/**
+ * The next delivery, or nothing when no block past the cursor is final yet. `hosted` is the Entity the node hosts, and
+ * `windows` the dispute windows it waits on: each is told to it, once a delivery's last block is past its end.
  * A fault of the port is the node's to retry; a fault of the core is a local invariant broken (a reorg deeper than the
  * depth) and ends the node.
  */
 export const poll = async (
-  port: WatchPort, watch: Watch, hosted: Bytes32,
+  port: WatchPort, watch: Watch, hosted: Bytes32, windows: readonly Window[] = [],
 ): Promise<Result<Delivery | undefined, JFault>> => {
   const head = await port.head();
   if (!head.ok) return head;
@@ -79,7 +96,7 @@ export const poll = async (
     map(await port.accountAt(r.blockHash, r.left, r.right), (at) => [readingKey(r), at] as const)));
   const accounts = traverse(asked, (answer) => answer);
   if (!accounts.ok) return accounts;
-  const step = advance(watch, prepared.value, [hosted], new Map(accounts.value));
+  const step = advance(watch, prepared.value, [hosted], new Map(accounts.value), windows);
   return flatMap(step, (done) => map(
     traverse(done.events, ({ event }) => map(inputOf(event), (peer) => ({ ...event, peer }) as EntityInput)),
     (events): Delivery => ({ watch: done.watch, events, height: done.height }),

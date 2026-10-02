@@ -131,7 +131,7 @@ describe("j/log", () => {
     }, 3n, 2n);
     const fact = { sender: RIGHT, counter: LEFT, nonce: 7n, block: 3n, blockHash: hashOf(3n) };
     expect(decodeLogs(DEPOSITORY, [started, countered, finalized])).toEqual(ok([
-      { _tag: "dispute_started", ...fact, index: 0n },
+      { _tag: "dispute_started", ...fact, timeout: 5n, index: 0n },
       { _tag: "dispute_countered", ...fact, index: 1n },
       { _tag: "dispute_finalized", ...fact, index: 2n },
     ] satisfies readonly ChainEvent[]));

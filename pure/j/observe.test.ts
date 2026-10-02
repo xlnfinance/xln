@@ -70,11 +70,11 @@ describe("j/observe", () => {
   test("R-WATCH-TELL a dispute start is a j_dispute naming the side that started it, in the chain's epoch", () => {
     const accounts = accountsOf(readAt(3n, 4n, 7n));
     expect(observe(eventsOf(started(3n, 0n)), [LEFT, RIGHT], accounts)).toEqual(ok([
-      toward(LEFT, { _tag: "j_dispute", peer: RIGHT, epoch: 4n, by: "right" }),
-      toward(RIGHT, { _tag: "j_dispute", peer: LEFT, epoch: 4n, by: "right" }),
+      toward(LEFT, { _tag: "j_dispute", peer: RIGHT, epoch: 4n, by: "right", nonce: 7n, timeout: 5n }),
+      toward(RIGHT, { _tag: "j_dispute", peer: LEFT, epoch: 4n, by: "right", nonce: 7n, timeout: 5n }),
     ]));
     expect(observe(eventsOf(started(3n, 0n, LEFT, RIGHT)), [LEFT], accounts)).toEqual(ok([
-      toward(LEFT, { _tag: "j_dispute", peer: RIGHT, epoch: 4n, by: "left" }),
+      toward(LEFT, { _tag: "j_dispute", peer: RIGHT, epoch: 4n, by: "left", nonce: 7n, timeout: 5n }),
     ]));
   });
 
@@ -83,9 +83,9 @@ describe("j/observe", () => {
     const accounts = accountsOf(readAt(3n, 2n, 8n));
     const heard = observe(events, [LEFT], accounts);
     expect(heard).toEqual(ok([
-      toward(LEFT, { _tag: "j_dispute", peer: RIGHT, epoch: 1n, by: "right" }),
+      toward(LEFT, { _tag: "j_dispute", peer: RIGHT, epoch: 1n, by: "right", nonce: 7n, timeout: 5n }),
       toward(LEFT, { _tag: "j_epoch", peer: RIGHT, epoch: 2n, stored: 8n }),
-      toward(LEFT, { _tag: "j_dispute", peer: RIGHT, epoch: 2n, by: "right" }),
+      toward(LEFT, { _tag: "j_dispute", peer: RIGHT, epoch: 2n, by: "right", nonce: 7n, timeout: 5n }),
     ]));
   });
 
@@ -93,7 +93,7 @@ describe("j/observe", () => {
     const events = eventsOf(started(3n, 0n), advance(3n, 1n, 5n, LEFT, THIRD));
     const accounts = accountsOf(readAt(3n, 4n, 7n), readAt(3n, 5n, 1n, LEFT, THIRD));
     expect(observe(events, [LEFT], accounts)).toEqual(ok([
-      toward(LEFT, { _tag: "j_dispute", peer: RIGHT, epoch: 4n, by: "right" }),
+      toward(LEFT, { _tag: "j_dispute", peer: RIGHT, epoch: 4n, by: "right", nonce: 7n, timeout: 5n }),
       toward(LEFT, { _tag: "j_epoch", peer: THIRD, epoch: 5n, stored: 1n }),
     ]));
   });
