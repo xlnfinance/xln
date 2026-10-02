@@ -9,6 +9,7 @@ import {
 } from "../account/frame/frame.ts";
 import { revealOnChainDue } from "../account/clause/clock.ts";
 import type { AccountState, Side } from "../account/model.ts";
+import { proofBodyOf, type ProofTerms } from "../account/proof/body.ts";
 import type { Check } from "./signing/attest.ts";
 import { signingOf, type Anchor } from "./signing/signing.ts";
 import { holderOf, ledgerOf, withHeld } from "../account/state.ts";
@@ -115,6 +116,13 @@ const takenFrom = (w: Work, a: PeerMessage, outcome: Outcome<PeerFault>): Work =
     ? { ...w, state: { ...w.state, paybook: learned(w.state.paybook, a.from, a.msg.frame.txs) } }
     : w);
 
+/** The side whose frame made the head the round took: mine when the peer's ack committed it, the peer's otherwise. */
+const authorOf = (heard: Heard<AccountTx, AccountState, PeerFault>): Side => {
+  const mine = heard.replica.side;
+  if (heard.outcome._tag === "committed_own") return mine;
+  return mine === "left" ? "right" : "left";
+};
+
 /** The round took the head the message commits its sender to: a frame of the peer's, or the ack of my own. */
 const committed = (outcome: Outcome<PeerFault>): boolean =>
   outcome._tag === "accepted" || outcome._tag === "accepted_over_own" || outcome._tag === "committed_own";
@@ -145,7 +153,7 @@ const hearing = (rules: Rulebook, check: Check, view: JView, w: Work, a: PeerMes
   const counted = cosigned(heard.outcome, account.pending, facts) ? withFacts(waiting, a.from, framed(facts)) : waiting;
   const taken = takenFrom(counted, a, heard.outcome);
   const proved = committed(heard.outcome) && a.sig !== undefined
-    ? withProof(taken, a.from, { head, slot: heard.replica.used, sig: a.sig })
+    ? withProof(taken, a.from, { head, slot: heard.replica.used, author: authorOf(heard), sig: a.sig })
     : taken;
   return refused === undefined ? proved : noting(proved, { _tag: "message_refused", from: a.from, outcome: refused });
 };
@@ -328,8 +336,30 @@ const funded = (w: Work, command: Extract<ChainCommand, { _tag: "fund" }>): Work
     : refusedCommand(w, command, { _tag: "bad_fund", amount });
 };
 
+/**
+ * A dispute from the newest head the peer signed that the Account committed: everything the chain's dispute start
+ * holds, from the Account's state and the proof the Entity keeps (R-SIGNED-HEADS-ON-THE-WIRE). Without such a proof,
+ * or when the state cannot be signed as a proof, there is nothing to start with.
+ */
+const disputed = (w: Work, terms: ProofTerms, command: Extract<ChainCommand, { _tag: "dispute" }>): Work => {
+  const { peer } = command;
+  const account = w.state.accounts.get(peer);
+  const proof = w.state.proofs.get(peer);
+  const nonce = proofNonce(factsOf(w, peer), account?.used ?? 0);
+  if (account === undefined || proof === undefined || proof.head !== account.head || nonce === undefined) {
+    return refusedCommand(w, command, { _tag: "no_proof", why: "none" });
+  }
+  const body = proofBodyOf(terms, account.state);
+  return body.ok
+    ? asked(w, {
+      _tag: "dispute_start", peer, nonce, epoch: factsOf(w, peer).epoch, proposerIsLeft: proof.author === "left",
+      body: body.value, sig: proof.sig,
+    })
+    : refusedCommand(w, command, { _tag: "no_proof", why: "unsignable" });
+};
+
 /** A command about the chain needs an Account with the peer, as an Account command does. */
-const chained = (w: Work, command: Exclude<ChainCommand, { _tag: "fund" }>): Work => {
+const chained = (w: Work, terms: ProofTerms, command: Exclude<ChainCommand, { _tag: "fund" }>): Work => {
   const { peer } = command;
   if (!w.state.accounts.has(peer)) return refusedCommand(w, command, { _tag: "no_account", peer });
   switch (command._tag) {
@@ -339,6 +369,8 @@ const chained = (w: Work, command: Exclude<ChainCommand, { _tag: "fund" }>): Wor
       return windowed(w, command);
     case "withdraw":
       return withdrawn(w, command);
+    case "dispute":
+      return disputed(w, terms, command);
   }
 };
 
@@ -353,7 +385,7 @@ const prepared = (w: Work, command: PaybookCommand): Work => {
   return { ...w, state: { ...w.state, paybook: withEntry(w.state.paybook, command.hashlock, entry) } };
 };
 
-const commanded = (rules: Rulebook, w: Work, command: Command): Work => {
+const commanded = (rules: Rulebook, terms: ProofTerms, w: Work, command: Command): Work => {
   switch (command._tag) {
     case "open_account":
       return opened(w, command);
@@ -362,7 +394,8 @@ const commanded = (rules: Rulebook, w: Work, command: Command): Work => {
     case "deposit":
     case "set_windows":
     case "withdraw":
-      return chained(w, command);
+    case "dispute":
+      return chained(w, terms, command);
     case "forward":
     case "expect":
       return prepared(w, command);
@@ -501,7 +534,7 @@ export const entityFrame = (
   };
   const arrived = arrivalsOf(inputs).reduce((w, a) => arrive(rules, anchor.check, judge.view, w, a), start(state));
   const afterHooks = hooksOf(inputs).reduce(hooked, arrived);
-  const afterCommands = commandsOf(inputs).reduce((w, c) => commanded(rules, w, c), afterHooks);
+  const afterCommands = commandsOf(inputs).reduce((w, c) => commanded(rules, anchor.terms, w, c), afterHooks);
   const afterPaybook = forwarding(rules, judge)(afterCommands);
   const propose = (w: Work, peer: EntityId): Work => proposing(rules, judge.view, w, peer);
   const proposed = proposalOrder(afterPaybook).reduce(propose, afterPaybook);

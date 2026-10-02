@@ -12,6 +12,7 @@ import { entityFrame } from "../entity/frame.ts";
 import type { EntityId, EntityInput, EntityState, Fold, JAction, Outbound } from "../entity/model.ts";
 import type { Frame } from "../entity/frame.ts";
 import { ownView } from "../account/clause/clock.ts";
+import { proofBodyHash, type ProofBody } from "../chain/proof/proof.ts";
 import type { EntityBatch, Halt, NewHeight, Input, Row, Runtime, Setup, Timestamp } from "./model.ts";
 
 export const startRuntime = (setup: Setup, entities: readonly EntityState[]): Runtime => ({
@@ -92,11 +93,19 @@ const outputIds = (row: Row): readonly string[] => row.outputs.map((o) => `${o.f
 
 const foldId = (f: Fold): string => `${f.token}:${f.offdelta}`;
 
+/** A proof body by its hash: every field of it is in the identity of the dispute that carries it. */
+const bodyId = (body: ProofBody): string => {
+  const hashed = proofBodyHash(body);
+  return hashed.ok ? hashed.value : "unhashable";
+};
+
 const chainId = (action: JAction): string =>
   match(action, {
     fund: (f) => `fund ${f.token} ${f.amount}`,
     reveal: (r) => `reveal ${r.peer} ${r.token} ${r.id} ${r.hashlock}`,
     deposit: (d) => `deposit ${d.peer} ${d.token} ${d.amount}`,
+    dispute_start: (d) =>
+      `dispute_start ${d.peer} ${d.nonce} ${d.epoch} ${d.proposerIsLeft} ${bodyId(d.body)} ${d.sig}`,
     counter: (c) => `counter ${c.peer} ${c.nonce} ${c.head}`,
     c2r: (c) => `c2r ${c.peer} ${c.serial} ${c.token} ${c.amount}`,
     settle: (s) => `settle ${s.peer} ${s.serial} ${s.token} ${s.amount} ${s.folds.map(foldId).join(",")}`,

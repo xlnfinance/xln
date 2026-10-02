@@ -53,6 +53,7 @@ export type Taken =
   | Tagged<"skipped">
   | Tagged<"needs_signature", { fault: Extract<OpFault, { _tag: "needs_signature" }> }>
   | Tagged<"unknown_token", { token: bigint }>
+  | Tagged<"unhashable_proof">
   | Tagged<"refused", { fault: QueueFault }>;
 
 /** A chain effect: the action and the row it was made from. */
@@ -66,9 +67,11 @@ export const take = (s: Submitter, asked: Asked): Taken => {
   if (known(s, asked.row)) return { _tag: "known" };
   const op = opOf(s.entity, asked.action, s.world);
   if (!op.ok) {
-    return op.error._tag === "needs_signature"
-      ? { _tag: "needs_signature", fault: op.error }
-      : { _tag: "unknown_token", token: op.error.token };
+    switch (op.error._tag) {
+      case "needs_signature": return { _tag: "needs_signature", fault: op.error };
+      case "unknown_token": return { _tag: "unknown_token", token: op.error.token };
+      case "unhashable_proof": return { _tag: "unhashable_proof" };
+    }
   }
   const out = queue(s.jbatch, op.value);
   switch (out._tag) {

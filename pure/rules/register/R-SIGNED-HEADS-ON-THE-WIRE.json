@@ -64,6 +64,11 @@
    "kind": "test",
    "layer": "ts",
    "name": "R-DURABLE a WAL whose peer message lost its signature, or has another, does not replay"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-SIGNED-HEADS-ON-THE-WIRE a frame a restart flushes leaves signed, same signature"
   }
  ]
 }

@@ -13,6 +13,7 @@ import type { Brand, Tagged } from "../kernel/core/tagged.ts";
 import type { FrameHash, Msg, Outcome, Refused, Replica } from "../account/frame/frame.ts";
 import type { JHeight, JView } from "../account/clause/clock.ts";
 import type { AccountFault, AccountState, Hold, HoldId, Leg, Side, TokenId } from "../account/model.ts";
+import type { ProofBody } from "../chain/proof/proof.ts";
 import type { Held } from "../account/state.ts";
 import type { AccountTx } from "../account/tx.ts";
 
@@ -51,8 +52,11 @@ export type EntityState = Readonly<{
   paybook: Paybook;
 }>;
 
-/** A peer's signature over the head the Account committed at `slot`: the proof of that state, enforceable on chain. */
-export type PeerProof = Readonly<{ head: FrameHash; slot: number; sig: string }>;
+/**
+ * A peer's signature over the head the Account committed at `slot`: the proof of that state, enforceable on chain.
+ * `author` is the side whose frame made the head, which the digest names (`proposerIsLeft` on the chain).
+ */
+export type PeerProof = Readonly<{ head: FrameHash; slot: number; author: Side; sig: string }>;
 
 export const emptyEntity = (id: EntityId): EntityState =>
   ({
@@ -154,7 +158,8 @@ export type ChainCommand =
   | Tagged<"fund", { token: TokenId; amount: bigint }>
   | Tagged<"deposit", { peer: EntityId; token: TokenId; amount: bigint }>
   | Tagged<"set_windows", { peer: EntityId; windows: Windows }>
-  | Tagged<"withdraw", { peer: EntityId; token: TokenId; amount: bigint }>;
+  | Tagged<"withdraw", { peer: EntityId; token: TokenId; amount: bigint }>
+  | Tagged<"dispute", { peer: EntityId }>;
 
 /** What an Entity is told about a payment that passes through it, before the lock for it arrives. */
 export type PaybookCommand =
@@ -187,9 +192,18 @@ export type JAction =
   | Tagged<"fund", { token: TokenId; amount: bigint }>
   | Tagged<"reveal", { peer: EntityId; token: TokenId; id: HoldId; hashlock: string; secret: Uint8Array }>
   | Tagged<"deposit", { peer: EntityId; token: TokenId; amount: bigint }>
+  | Tagged<"dispute_start", DisputeStart>
   | Tagged<"counter", { peer: EntityId; nonce: bigint; head: FrameHash }>
   | Tagged<"c2r", { peer: EntityId; serial: bigint; token: TokenId; amount: bigint }>
   | Tagged<"settle", { peer: EntityId; serial: bigint; token: TokenId; amount: bigint; folds: readonly Fold[] }>;
+
+/**
+ * A dispute the node starts with the peer's signature over the newest committed head: the proof body of that state,
+ * the nonce and epoch the head was signed at, and who authored it. The chain's dispute start is made from exactly this.
+ */
+export type DisputeStart = Readonly<{
+  peer: EntityId; nonce: bigint; epoch: bigint; proposerIsLeft: boolean; body: ProofBody; sig: string;
+}>;
 
 /** The offdelta of a token that a settlement folds into its ondelta, so that the epoch advance cannot erase it. */
 export type Fold = Readonly<{ token: TokenId; offdelta: bigint }>;
@@ -206,7 +220,8 @@ export type EntityFault =
   | Tagged<"already_cosigned">
   | Tagged<"frame_in_flight">
   | Tagged<"unfolded_c2r", { folds: readonly Fold[] }>
-  | Tagged<"entry_exists", { hashlock: string }>;
+  | Tagged<"entry_exists", { hashlock: string }>
+  | Tagged<"no_proof", { why: "none" | "unsignable" }>;
 
 /** What the owner of an input is told when it did not take effect. */
 export type Notice =

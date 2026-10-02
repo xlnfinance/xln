@@ -512,25 +512,28 @@ const dispute: Step<World> = {
     if (authorIsLeft === undefined) throw new Error(`the head ${replica.head} is the dispute-proof digest of neither author: the frame was not signed as the chain reads it`);
     const digest = digestFor(authorIsLeft);
     const left = leftOf(alice, hubX);
-    const signer = authorIsLeft ? left : left === alice ? hubX : alice;
-    const starter = signer.id === alice.id ? hubX : alice;
-    const sig = hankoOf(signer, digest);
+    const starter = alice;
     const aliceBefore = await reserveOf(chain, alice);
     const hubBefore = await reserveOf(chain, hubX);
     const held = await collateralOf(chain, alice, hubX);
-    const start = await sendOps(chain, starter, [{
-      _tag: "dispute_start",
-      start: {
-        counterentity: signer.id, nonce, ondeltaEpoch: onChain.epoch, proposerIsLeft: authorIsLeft, proofbodyHash: bodyHash, initialProofbody: body,
-        watchSeed: body.watchSeed, sig, starterInitialArguments: "0x", starterCounterArguments: "0x", starterCounterProofCommitment: ethers.ZeroHash,
-      },
-    }], `${starter.name} starts a dispute with ${signer.name}'s proof`);
+    // alice's own node starts the dispute: it holds hubX's signature over the head (R-SIGNED-HEADS-ON-THE-WIRE) and asks the chain
+    // for the start itself (R-DISPUTE-START); the harness only reads what the node asked and what the chain did.
+    const before = net.askedBy(a).length;
+    await net.tell(a, { _tag: "dispute", peer: x });
+    await net.settle();
+    const asks = net.askedBy(a).slice(before).flatMap((ask) => (ask._tag === "dispute_start" ? [ask] : []));
+    const ask = asks[0];
+    if (asks.length !== 1 || ask === undefined) throw new Error(`alice's node asked for ${asks.length} dispute starts, expected one`);
+    if (ask.nonce !== nonce || ask.epoch !== onChain.epoch || ask.proposerIsLeft !== authorIsLeft || must(proofBodyHash(ask.body), "ask body hash") !== bodyHash) {
+      throw new Error("the dispute start alice's node asked for differs from the proof the head names (nonce, epoch, author or body)");
+    }
+    if (net.account(a, x).used !== replica.used) throw new Error("the dispute start moved alice's Account");
     if (!(await accountOnChain(chain, alice, hubX)).disputeOpen) throw new Error("no dispute is open after the start");
     await advanceTime(chain, Number(2n * floor + 10n));
     const end = await sendOps(chain, starter, [{
       _tag: "dispute_finalize",
       finalization: {
-        counterentity: signer.id, initialNonce: nonce, finalNonce: nonce, proposerIsLeft: authorIsLeft, initialProofbodyHash: bodyHash, finalProofbody: body,
+        counterentity: hubX.id, initialNonce: nonce, finalNonce: nonce, proposerIsLeft: authorIsLeft, initialProofbodyHash: bodyHash, finalProofbody: body,
         starterArguments: "0x", otherArguments: "0x", sig: "0x", startedByLeft: starter.id === left.id, cooperative: false,
       },
     }], `${starter.name} finalizes after both windows`);
@@ -552,7 +555,7 @@ const dispute: Step<World> = {
     if (now !== w.held) throw new Error(`money is not conserved: ${w.held} before the dispute, ${now} after`);
     return {
       checks: [
-        `${signer.name} signed the head of the last committed frame (slot ${replica.used}, nonce ${nonce}, epoch ${onChain.epoch}; body from pure/account/proof/body.ts, offdelta ${ledger.offdelta}, one token, no clause); its digest equals the dispute-proof digest the chain computes; ${starter.name} started with it (gas ${start.gasUsed})`,
+        `the head of the last committed frame (slot ${replica.used}, nonce ${nonce}, epoch ${onChain.epoch}, authored by the ${authorIsLeft ? "left" : "right"} side; body from pure/account/proof/body.ts, offdelta ${ledger.offdelta}, one token, no clause) is the dispute-proof digest the chain computes; alice's own node, holding hubX's signature over it from the frame round, asked for the start (nonce, epoch, author and body as the head names them) and the chain opened the dispute`,
         `after both ${floor} s windows (anvil clock jump) ${starter.name} finalized (gas ${end.gasUsed}); the chain paid alice ${fmt(chain, aliceGot)} and hubX ${fmt(chain, hubGot)}, which is what the chain's ondelta ${held.ondelta} plus the Runtimes' offdelta ${ledger.offdelta} says`,
         `collateral 0, epoch ${onChain.epoch} to ${after.epoch}, dispute closed; money held by the four entities is unchanged at ${fmt(chain, now)}`,
       ],

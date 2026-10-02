@@ -10,7 +10,10 @@ import type { JAnswer } from "../../../j/batch/answer.ts";
 import { err, ok, unwrapOr, type Result } from "../../../kernel/core/result.ts";
 import { setup, stamp } from "../../../runtime/fixtures.ts";
 import { limits } from "../../host.ts";
-import { ALICE, callsOf, DEPLOYED, GAS, journalIn, TREASURY, WORLD } from "../fixtures.ts";
+import { verifyHankoSignature } from "../../../chain/hanko/hanko-verify.ts";
+import { credit, open } from "../../../entity/fixtures.ts";
+import { addressOf, signDigest } from "../../../kernel/crypto/signature.ts";
+import { ALICE, BOB, callsOf, DEPLOYED, GAS, journalIn, TREASURY, WORLD } from "../fixtures.ts";
 import { GOLD } from "../../../runtime/fixtures.ts";
 import { keyOf } from "../link/link.ts";
 import type { ChainPort, PortFault } from "../submit/chain.ts";
@@ -149,5 +152,24 @@ describe("host/shell/drive the Host's rows are on the disk before the chain hear
     });
     expect(out).toMatchObject({ ok: false, error: { _tag: "disk" } });
     expect(callsOf(at.log)).toEqual([]);
+  });
+
+  test("R-SIGNED-HEADS-ON-THE-WIRE a frame a restart flushes leaves signed, same signature", async () => {
+    const at = scene();
+    const first = await withShell(at, ok(undefined), async (shell) => {
+      const started = turnOf(await start(shell, BOOT));
+      const opened = turnOf(await command(shell, started.station, ALICE, open(BOB)));
+      return turnOf(await command(shell, opened.station, ALICE, credit(BOB, 50n)));
+    });
+    const back = await withShell(at, ok(undefined), async (shell) => turnOf(await start(shell, BOOT)));
+    const signer = addressOf(signDigest(Uint8Array.from({ length: 32 }, () => 1), KEY.secret).publicKey).toLowerCase();
+    const named = (turn: Turn) => turn.sent.filter((m) => m.attest !== undefined);
+    expect(named(first)).toHaveLength(1);
+    expect(named(back).map((m) => m.sig)).toEqual(named(first).map((m) => m.sig));
+    [...named(first), ...named(back)].forEach((m) => {
+      const verdict = verifyHankoSignature(m.sig ?? "", m.attest ?? "", () => ok(true));
+      expect(verdict.ok && verdict.value.signers).toEqual([signer]);
+      expect(verdict.ok && verdict.value.entityId).toBe(ALICE);
+    });
   });
 });
