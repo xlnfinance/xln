@@ -49,7 +49,7 @@ export const disputeOpened = (f: ChainFacts, e: Extract<JEvent, { _tag: "j_dispu
       ...f,
       against: {
         nonce: e.nonce, proposerIsLeft: e.proposerIsLeft, bodyHash: e.bodyHash, window: e.timeout, over: false,
-        answer: undefined,
+        answer: undefined, countered: undefined,
       },
     });
 
@@ -62,8 +62,8 @@ export const answered = (f: ChainFacts, answer: Answer): ChainFacts =>
  * started it is a counter against it: it stops asking to finalize with its opening proof, which the chain now
  * refuses, and keeps the counter's identity, which tells a finalize's proof from the others (R-LEDGER-REBASE) and
  * lets the node finalize with it itself once the window is over and it can rebuild the body (the chain lets either
- * party execute it after the window). For one against it, a counter that is the one it asked for is registered, and
- * only then does it finalize.
+ * party execute it after the window). For one against it, the counter is kept whoever registered it (a watchtower of
+ * the node may have, before the node asked for its own), and one that is the one it asked for is registered.
  */
 export const countered = (f: ChainFacts, e: Extract<JEvent, { _tag: "j_countered" }>): ChainFacts => {
   const asked = f.against?.answer;
@@ -73,7 +73,10 @@ export const countered = (f: ChainFacts, e: Extract<JEvent, { _tag: "j_countered
     ? { ...f.against, answer: { ...asked, registered: true } }
     : f.against;
   const registered: Registered = { nonce: e.nonce, proposerIsLeft: e.proposerIsLeft, bodyHash: e.bodyHash };
-  return { ...f, against, starting: f.starting === undefined ? undefined : { ...f.starting, countered: registered } };
+  return {
+    ...f, against: against === undefined ? undefined : { ...against, countered: registered },
+    starting: f.starting === undefined ? undefined : { ...f.starting, countered: registered },
+  };
 };
 
 /**

@@ -145,6 +145,15 @@ describe("host/shell/evm a batch is simulated at the head, and one that does not
     } as const));
   });
 
+  test("R-DISPUTE-LAPSED the return data of a call that succeeded is no error: the logs name the cause", async () => {
+    const word = (n: bigint) => n.toString(16).padStart(64, "0");
+    const skipped = { address: DEPOSITORY, topics: [DISPUTE_SKIPPED, `0x${word(1n)}`, `0x${word(2n)}`],
+      data: `0x${word(1n)}${word(1n)}${word(9n)}` };
+    expect(await outcome([call({ logs: [skipped], returnData: "0xde8c50c8" })])).toEqual(ok({
+      _tag: "reverts", reason: "DisputeOpSkipped", causes: [{ _tag: "skipped", op: 1, reason: 1 }],
+    } as const));
+  });
+
   test("R-SIMULATE the call is made from the key's address at the head, with the gas limit it is given", async () => {
     const log = logOf();
     await portOf({ eth_simulateV1: () => simulated([call({})]) }, log).simulate(CALL, 1_000_000n);

@@ -8,6 +8,7 @@ import { emptyEntity, type Command, type EntityId } from "../../pure/entity/mode
 import { limits } from "../../pure/host/host.ts";
 import { command, pump, start, type Boot, type Shell, type Station, type Turn } from "../../pure/host/shell/drive/drive.ts";
 import { chainPort } from "../../pure/host/shell/evm/port.ts";
+import { MIN_GAS_BUDGET, processBatchCall, sealBatch } from "../../pure/j/batch/sealed.ts";
 import type { Key } from "../../pure/host/shell/link/link.ts";
 import { fileDisk } from "../../pure/host/shell/node/file-disk.ts";
 import { httpRpc } from "../../pure/host/shell/node/rpc.ts";
@@ -91,6 +92,14 @@ export class Seat {
     if (polls === 0) throw new Error(`${this.party.name}: the batch was sent and the chain said nothing about it in ${SETTLE_POLLS * POLL_MS} ms`);
     await Bun.sleep(POLL_MS);
     return this.settled(pumped, polls - 1);
+  }
+
+  /** Whether the chain accepts a batch of no op at the node's next nonce: what the Host asks before it gives up a counter. */
+  async bareBatchLands(chain: Chain): Promise<boolean> {
+    const { signedMax } = this.station.submitter.jbatch;
+    const bare = must(sealBatch({ deployment: chain.dep, entity: this.entity, nonce: signedMax + 1n, gasBudget: MIN_GAS_BUDGET }, []), "bare batch");
+    const call = processBatchCall(bare, must(this.shell.io.signer.hanko(bare.digest), "bare batch hanko"));
+    return must(await this.shell.io.port.simulate(call, GAS.txGasCap), `${this.party.name}'s bare batch`)._tag === "ok";
   }
 
   async close(): Promise<void> {

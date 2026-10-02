@@ -51,9 +51,9 @@ const scene = (): Scene => {
 const portOf = (at: Scene, script: Script): ChainPort => ({
   nonce: () => Promise.resolve(ok(script.nonce)),
   treasury: () => Promise.resolve(ok(TREASURY)),
-  simulate: (_call, gasLimit) => {
+  simulate: (call, gasLimit) => {
     const before = callsOf(at.log).filter((c) => c.startsWith("simulate")).length;
-    appendFileSync(at.log, `simulate gas=${gasLimit}\n`);
+    appendFileSync(at.log, `simulate nonce=${call.nonce} gas=${gasLimit}\n`);
     return Promise.resolve(ok(script.nth?.(before) ?? script.outcome));
   },
   send: (call, gasLimit) => {
@@ -112,7 +112,7 @@ describe("host/shell/chain a batch is journaled before it is sent", () => {
     expect(moved.stage).toBe("waiting");
     const carried = requirement(GAS.prelude, MIN_GAS_BUDGET) + 100_000n;
     expect(callsOf(at.log)).toEqual([
-      `simulate gas=${GAS.txGasCap}`, `simulate gas=${GAS.txGasCap}`,
+      `simulate nonce=5 gas=${GAS.txGasCap}`, `simulate nonce=5 gas=${GAS.txGasCap}`,
       expect.stringMatching(new RegExp(`^send 5 0x[0-9a-f]+ gas=${carried} journal=sealed@5$`)),
     ]);
   });
@@ -189,6 +189,17 @@ describe("host/shell/chain a batch is journaled before it is sent", () => {
     expect(journalIn(at.journal)).toEqual([]);
   });
 
+  test("R-DISPUTE-LAPSED a counter is not named when a batch of no op is refused at its nonce likewise", async () => {
+    const at = scene();
+    const both = counterAsked(asked(opened()));
+    const staleNonce = (n: number): Simulation["outcome"] => (n <= 1 ? E4_LOST : ROOM);
+    const moved = await withIo(at, { ...CALM, nth: staleNonce }, (io) => stepped(io, both));
+    expect([moved.lapsed, moved.stage]).toEqual([[], "closed"]);
+    expect(moved.submitter.jbatch.draft.map((op) => op._tag)).toEqual(["reserve_to_collateral"]);
+    // The lone probe, then the bare batch at the same nonce.
+    expect(callsOf(at.log)).toEqual([`simulate nonce=5 gas=${GAS.txGasCap}`, `simulate nonce=5 gas=${GAS.txGasCap}`]);
+  });
+
   test("R-DISPUTE-LAPSED a counter held for a reason that can heal is dropped, not named; the rest seals", async () => {
     const at = scene();
     const both = counterAsked(asked(opened()));
@@ -198,6 +209,34 @@ describe("host/shell/chain a batch is journaled before it is sent", () => {
     const after = await withIo(at, CALM, (io) => stepped(io, moved.submitter));
     expect(after.stage).toBe("waiting");
     expect(journalIn(at.journal)).toEqual(["sealed@5"]);
+  });
+
+  type Causes = Extract<Simulation["outcome"], { _tag: "reverts" }>["causes"];
+  const revertedBy = (...causes: Causes): Simulation["outcome"] =>
+    ({ _tag: "reverts", reason: "execution failed", causes });
+  const error = (name: string) => ({ _tag: "error", name }) as const;
+  const skipped = (op: number, reason: number) => ({ _tag: "skipped", op, reason }) as const;
+  const lapsedBy = async (outcome: Simulation["outcome"]): Promise<number> => {
+    const both = counterAsked(asked(opened()));
+    const moved = await withIo(scene(), { ...CALM, nth: firstOnly(outcome) }, (io) => stepped(io, both));
+    return moved.lapsed.length;
+  };
+
+  test("R-DISPUTE-LAPSED a counter lapses for E2, E4, E9 and skip reasons 3 to 7 of its op, no other", async () => {
+    const lost = [error("E2"), error("E4"), error("E9"), ...[3, 4, 5, 6, 7].map((r) => skipped(1, r))];
+    const kept = [
+      error("E3"), error("E5"), error("E10"), error("E11"), ...[0, 1, 2, 8].map((r) => skipped(1, r)),
+      skipped(2, 3), skipped(0, 7),
+    ];
+    expect(await Promise.all(lost.map((c) => lapsedBy(revertedBy(c))))).toEqual(lost.map(() => 1));
+    expect(await Promise.all(kept.map((c) => lapsedBy(revertedBy(c))))).toEqual(kept.map(() => 0));
+  });
+
+  test("R-DISPUTE-LAPSED a counter lapses only when every cause is for good: one that can heal keeps it", async () => {
+    expect(await lapsedBy(revertedBy(error("E4"), skipped(1, 7)))).toBe(1);
+    expect(await lapsedBy(revertedBy(error("E4"), error("E3")))).toBe(0);
+    expect(await lapsedBy(revertedBy(skipped(1, 3), skipped(1, 1)))).toBe(0);
+    expect(await lapsedBy(revertedBy())).toBe(0);
   });
 
   test("R-DISPUTE-LAPSED a counter that simulates cleanly is sealed with what is behind it", async () => {

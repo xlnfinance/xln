@@ -156,6 +156,7 @@ const deposits: Step<World> = {
       const dir = join(root, p.name);
       const seat = await Seat.open(chain, p, eid(p), setup, dir);
       const turn = await seat.tell({ _tag: "fund", token: t, amount });
+      if (!(await seat.bareBatchLands(chain))) throw new Error(`${p.name}: the chain refuses a batch of no op at the next nonce`);
       await seat.close();
       const gained = (await reserveOf(chain, p)) - before;
       if (gained !== amount) throw new Error(`${p.name}: reserve rose by ${gained}, not ${amount}`);
@@ -175,6 +176,7 @@ const deposits: Step<World> = {
       checks: [
         ...checks,
         "each fund went from a Runtime command to a durable WAL row, to a batch the Host sealed (simulated at the head through eth_simulateV1), signed with the party's key and sent over JSON-RPC, and was read back as landed",
+        "a batch of no op, signed at the node's next nonce, simulates ok on the real chain for each party: the control the Host asks before it gives up a counter (a stale nonce or a Hanko the chain refuses fails it too)",
       ],
       gaps: [],
     };

@@ -4,7 +4,7 @@
 import { describe, expect, test } from "bun:test";
 import { proofBodyHash } from "../../chain/proof/proof.ts";
 import { credit, open, OPENED_WITH, pay } from "../fixtures.ts";
-import { emptyEntity, type EntityState, type JAction, type JEvent } from "../model.ts";
+import { type Answer, emptyEntity, type EntityState, type JAction, type JEvent } from "../model.ts";
 import { ALICE, BOB, must, run, signed } from "./keys.ts";
 
 const alice0 = run(emptyEntity(ALICE.id), open(BOB.id)).state;
@@ -95,11 +95,11 @@ describe("entity/signing R-DISPUTE-WATCH a dispute from an older proof is answer
     if (counter?._tag !== "counter") return expect.unreachable("no counter");
     const other = run(heard.state, {
       _tag: "j_countered", peer: ALICE.id, nonce: counter.nonce + 1n, proposerIsLeft: counter.proposerIsLeft,
-      bodyHash: must(proofBodyHash(counter.body)),
+      bodyHash: OPENED_WITH.bodyHash,
     });
     const rival = run(other.state, {
       _tag: "j_countered", peer: ALICE.id, nonce: counter.nonce, proposerIsLeft: !counter.proposerIsLeft,
-      bodyHash: must(proofBodyHash(counter.body)),
+      bodyHash: OPENED_WITH.bodyHash,
     });
     const over = run(rival.state, { _tag: "j_window_over", peer: ALICE.id });
     expect(finalsOf(over.chain)).toEqual([]);
@@ -176,6 +176,78 @@ describe("entity/signing R-DISPUTE-WATCH a non-starter with nothing newer finali
     const older = run(ackLost.bob, openedBy(startOf(ackLost.alice)));
     expect(finalsOf(older.chain)).toEqual([]);
     expect(countersOf(older.chain)).toHaveLength(1);
+  });
+});
+
+describe("entity/signing R-DISPUTE-WATCH a counter lapsed and then registered is not answered by accepting", () => {
+  const start = startOf(committed.alice);
+  const heard = run(committed.bob, openedBy(start));
+  const [counter] = countersOf(run(ackLost.bob, openedBy(startOf(ackLost.alice))).chain);
+  if (counter?._tag !== "counter") expect.unreachable("no counter");
+  const { nonce, head, proposerIsLeft, body, sig, initial } = counter;
+  /** Bob asked for a counter, the Host dropped it, and then the chain registered it all the same. */
+  const answered = (fate: Pick<Answer, "registered" | "lapsed">): EntityState => {
+    const facts = heard.state.chain.get(ALICE.id) ?? expect.unreachable("no facts");
+    const against = facts.against ?? expect.unreachable("no dispute");
+    const answer = { counter: { peer: ALICE.id, nonce, head, proposerIsLeft, body, sig, initial }, ...fate };
+    const chain = new Map([...heard.state.chain, [ALICE.id, { ...facts, against: { ...against, answer } }]]);
+    return { ...heard.state, chain };
+  };
+  const resent = (state: EntityState) => finalsOf(run(state, { _tag: "resend_due", peer: ALICE.id }).chain);
+  const DROPPED = { registered: false, lapsed: true };
+  const LATE = { registered: true, lapsed: true };
+  const ASKED = { registered: false, lapsed: false };
+  const REGISTERED = { registered: true, lapsed: false };
+
+  test("a counter that lapsed and was not registered leaves the opening state to accept", () => {
+    expect(resent(answered(DROPPED))).toHaveLength(1);
+  });
+
+  test("a counter that lapsed and was then registered is not accepted against, and nor is one still asked", () => {
+    expect(resent(answered(LATE))).toEqual([]);
+    expect(resent(answered(REGISTERED))).toEqual([]);
+    expect(resent(answered(ASKED))).toEqual([]);
+  });
+});
+
+describe("entity/signing R-DISPUTE-WATCH a counter registered by whoever is a finalize candidate", () => {
+  const start = startOf(ackLost.alice);
+  const [counter] = countersOf(run(ackLost.bob, openedBy(start)).chain);
+  if (counter?._tag !== "counter") expect.unreachable("no counter");
+  const registered: JEvent = {
+    _tag: "j_countered", peer: ALICE.id, nonce: counter.nonce, proposerIsLeft: counter.proposerIsLeft,
+    bodyHash: must(proofBodyHash(counter.body)),
+  };
+  const lapsed: JEvent = { _tag: "j_counter_lapsed", peer: ALICE.id, nonce: counter.nonce };
+  const over: JEvent = { _tag: "j_window_over", peer: ALICE.id };
+  const wanted = [{
+    _tag: "dispute_finalize" as const, peer: ALICE.id, nonce: counter.nonce, proposerIsLeft: counter.proposerIsLeft,
+    body: counter.body, startedByLeft: true, initial: counter.initial,
+  }];
+
+  test("R-DISPUTE-WATCH a counter a tower registered is finalized when the node's own is skipped", () => {
+    const together = run(ackLost.bob, openedBy(start), registered);
+    const skipped = run(run(together.state, lapsed).state, over);
+    expect(finalsOf(skipped.chain)).toEqual(wanted);
+    expect(finalsOf(run(together.state, over).chain)).toEqual(wanted);
+  });
+
+  test("R-DISPUTE-WATCH a counter registered before the node asked for its own is still not accepted against", () => {
+    const together = run(ackLost.bob, openedBy(start), registered);
+    expect(finalsOf(together.chain)).toEqual([]);
+  });
+
+  test("R-DISPUTE-WATCH a node with nothing newer does not accept the opening state past a registered counter", () => {
+    const opening = startOf(committed.alice);
+    const accepted = run(committed.bob, openedBy(opening));
+    expect(finalsOf(accepted.chain)).toHaveLength(1);
+    const countered = run(committed.bob, openedBy(opening), { ...registered, bodyHash: OPENED_WITH.bodyHash });
+    expect(finalsOf(countered.chain)).toEqual([]);
+  });
+
+  test("R-DISPUTE-WATCH a registered counter whose body the node cannot rebuild is waited out, never guessed", () => {
+    const strange = run(ackLost.bob, openedBy(start), { ...registered, bodyHash: OPENED_WITH.bodyHash });
+    expect(finalsOf(run(strange.state, over).chain)).toEqual([]);
   });
 });
 
