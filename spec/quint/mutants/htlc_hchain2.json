@@ -1,0 +1,22 @@
+{
+  "files": [
+    "htlc.qnt",
+    "htlc_hchain2.qnt",
+    "htlc_gate_test.qnt"
+  ],
+  "init": "init",
+  "step": "step",
+  "test": "htlc_gate_test.qnt",
+  "testMain": "hchain2_htlc_gate_test",
+  "steps": 70,
+  "mutants": [
+    {
+      "id": "chain-claim-window-short",
+      "why": "a chain claim is refused after the height deadline like a frame: the slack that cancels is lost",
+      "file": "htlc.qnt",
+      "old": "s.now <= (if (CHAIN) TUX else TU)",
+      "new": "s.now <= TU",
+      "killedBy": "test:lateRevealRaceTest"
+    }
+  ]
+}

@@ -1,0 +1,22 @@
+{
+  "files": [
+    "htlc.qnt",
+    "htlc_xwatch.qnt",
+    "htlc_test.qnt"
+  ],
+  "init": "init",
+  "step": "step",
+  "test": "htlc_test.qnt",
+  "testMain": "xwatch_htlc_test",
+  "steps": 70,
+  "mutants": [
+    {
+      "id": "transformer-event-unseen",
+      "why": "TSEE off in code: the hub's watcher reads Depository logs only, so a direct revealSecret is never heard (the reveal registry channel)",
+      "file": "htlc.qnt",
+      "old": "(e.kind == 2 and TSEE)",
+      "new": "(e.kind == 2 and false)",
+      "killedBy": "test:transformerRevealTest"
+    }
+  ]
+}
