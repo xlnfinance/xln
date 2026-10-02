@@ -1,6 +1,6 @@
 {
  "id": "R-HTLC-CLOCK",
- "statement": "Every HTLC time judgment is made in J height: a lock is live through its deadline height; an expiry needs own view > deadline + reserve (reserve >= LAG >= 0); a payee with an unacked resolve reveals on chain at deadline - LAG, and at once on an Account in dispute, where no frame can be sealed to ack the resolve (R-DISPUTE-FREEZE). Part (c) is the payee's Runtime duty plus a J-layer fact: clause.ts has no input that says the payee knows the secret or has revealed, so the ts cell holds (a) and (b) and (c) is owed to the Runtime cut.",
+ "statement": "Every HTLC time judgment is made in J height: a lock is live through its deadline height; an expiry needs own view > deadline + reserve (reserve >= LAG >= 0); a payee with an unacked resolve reveals on chain at deadline - LAG, and at once on any Account that is quiet: a dispute is open, or the node's signature is out on a settlement or a C2R and nothing is proposed or acked until the chain moves the epoch (R-DISPUTE-FREEZE, R-COSIGN-FREEZE), so no frame can be sealed to ack the resolve. Part (c) is the payee's Runtime duty plus a J-layer fact: clause.ts has no input that says the payee knows the secret or has revealed, so the ts cell holds (a) and (b) and (c) is owed to the Runtime cut.",
  "source": "contracts-decisions.md, Account-layer decisions 09-30 D-AC-2, D-AC-3",
  "layers": {
   "arrival": "hold",
@@ -180,6 +180,11 @@
    "kind": "test",
    "layer": "ts",
    "name": "R-HTLC-CLOCK a payee whose Account is in dispute reveals at once: its resolve cannot be acked there"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-HTLC-CLOCK a payee whose Account waits for a settlement reveals at once too: nothing is acked"
   }
  ]
 }

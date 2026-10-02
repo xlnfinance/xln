@@ -60,9 +60,10 @@ export const answered = (f: ChainFacts, answer: Answer): ChainFacts =>
 /**
  * The chain registered a counter (its nonce, author and body hash) for the dispute. For a dispute this node
  * started it is a counter against it: it stops asking to finalize with its opening proof, which the chain now
- * refuses, and keeps the counter's identity, to finalize with it itself once the window is over and it can rebuild the
- * body (the chain lets either party execute it after the window). For one against it, a counter that is the one it
- * asked for is registered, and only then does it finalize.
+ * refuses, and keeps the counter's identity, which tells a finalize's proof from the others (R-LEDGER-REBASE) and
+ * lets the node finalize with it itself once the window is over and it can rebuild the body (the chain lets either
+ * party execute it after the window). For one against it, a counter that is the one it asked for is registered, and
+ * only then does it finalize.
  */
 export const countered = (f: ChainFacts, e: Extract<JEvent, { _tag: "j_countered" }>): ChainFacts => {
   const asked = f.against?.answer;

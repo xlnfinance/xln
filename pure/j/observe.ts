@@ -26,7 +26,7 @@ import type { Bytes32, ChainEvent } from "./log.ts";
  * by the watcher from a block's time (j/watch.ts).
  */
 export type JEvent =
-  | Tagged<"j_epoch", { peer: Bytes32; epoch: bigint; stored: bigint }>
+  | Tagged<"j_epoch", { peer: Bytes32; epoch: bigint; stored: bigint; finalBodyHash?: Bytes32 }>
   | Tagged<
     "j_dispute",
     {
@@ -116,12 +116,27 @@ const startedBy = (e: Started): Side => (e.sender < e.counter ? "left" : "right"
 /** The chain's epoch moved: the Account's epoch and what it stores now. The reading must agree with the log. */
 type Told = Result<readonly JEvent[], ObserveFault>;
 
+/**
+ * The hash of the proof body a dispute finalize paid by, when this epoch advance is the one the finalize made: the
+ * finalize of the same Account logged next in the block, with no other advance of the Account between (the contract
+ * advances the epoch, then logs the finalize). A settlement or a C2R has none.
+ */
+const finalBodyOf = (events: readonly ChainEvent[], e: Moved): Bytes32 | undefined => {
+  const same = (o: Bound) => sameAccount(readingOf(o), readingOf(e)) && o.index > e.index;
+  const marks = ["dispute_finalized", "epoch_advanced"];
+  const later = events.filter(isBound).filter((o) => same(o) && marks.includes(o._tag));
+  const next = later.toSorted((a, b) => (a.index < b.index ? -1 : 1))[0];
+  return next?._tag === "dispute_finalized" ? next.bodyHash : undefined;
+};
+
 const epochMoved = (events: readonly ChainEvent[], e: Moved, peer: Bytes32, at: AccountAt | undefined): Told => {
   const reading = readingOf(e);
   if (at === undefined) return err({ _tag: "no_reading", reading });
   const read = epochAt(events, e, at);
+  const finalBodyHash = finalBodyOf(events, e);
+  const final = finalBodyHash === undefined ? {} : { finalBodyHash };
   return read === e.epoch
-    ? ok([{ _tag: "j_epoch", peer, epoch: e.epoch, stored: at.nonce }])
+    ? ok([{ _tag: "j_epoch", peer, epoch: e.epoch, stored: at.nonce, ...final }])
     : err({ _tag: "reading_off", reading, logged: e.epoch, read });
 };
 

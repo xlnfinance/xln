@@ -43,8 +43,9 @@ export type Stopped = Tagged<"stopped">;
 /**
  * A node that reads the chain at `depth` has a view `depth` blocks behind the chain's head. Its own reveal as a payee
  * (asked when its view reaches `deadline - lag`) is sent at the head and lands one block after it, so with a `lag` of
- * `depth` or less a reveal asked on time lands past the deadline, where the clause is expirable. A `lag` above `depth`
- * gives that reveal its margin. It says nothing of the time another node's reveal takes to be heard: the hop a lock
+ * `depth` or less a reveal asked on time lands past the deadline, where the clause is expirable. A `lag` of `depth + 1`
+ * lands it on the deadline, which is still live, with no block to spare; each further block of `lag` is one more. It
+ * says nothing of the time another node's reveal takes to be heard: the hop a lock
  * gives the next one, `reserve + lag`, covers that.
  */
 export type ClockBelowDepth = Tagged<"clock_below_depth", { lag: bigint; depth: bigint }>;

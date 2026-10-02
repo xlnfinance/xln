@@ -122,6 +122,15 @@ describe("runtime/reveal the payee asks the chain to reveal its secret when the 
     expect(reveals(rise(resolved, BOB, 111n)).filter((a) => a._tag === "reveal")).toHaveLength(1);
   });
 
+  test("R-HTLC-CLOCK a payee whose Account waits for a settlement reveals at once too: nothing is acked", () => {
+    const signed = feed(locked, BOB, { _tag: "withdraw", peer: ALICE, token: GOLD, amount: 30n });
+    expect(hostOf(signed, BOB).entities.get(BOB)?.chain.get(ALICE)?.frozen).toBe(true);
+    const resolved = feed(signed, BOB, resolveOf(1n));
+    expect(reveals(resolved).filter((a) => a._tag === "reveal")).toEqual([
+      { _tag: "reveal", peer: ALICE, token: GOLD, id: SLOT, hashlock: hashlockOf(SECRET), secret: SECRET },
+    ]);
+  });
+
   test("R-HTLC-CLOCK a payee whose Account is not in dispute still waits for the deadline minus LAG", () => {
     expect(reveals(unacked).filter((a) => a._tag === "reveal")).toEqual([]);
   });

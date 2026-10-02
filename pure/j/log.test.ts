@@ -153,7 +153,7 @@ describe("j/log", () => {
     expect(decodeLogs(DEPOSITORY, [started, countered, finalized])).toEqual(ok([
       { _tag: "dispute_started", ...fact, proposerIsLeft: true, bodyHash: bodyHashOf(1n), timeout: 5n, index: 0n },
       { _tag: "dispute_countered", ...fact, proposerIsLeft: false, bodyHash: bodyHashOf(4n), index: 1n },
-      { _tag: "dispute_finalized", ...fact, index: 2n },
+      { _tag: "dispute_finalized", ...fact, bodyHash: bodyHashOf(5n), index: 2n },
     ] satisfies readonly ChainEvent[]));
   });
 
