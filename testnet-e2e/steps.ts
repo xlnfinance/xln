@@ -342,12 +342,12 @@ const htlc: Step<World> = {
       const l = ledgerOf(rp.state, t);
       const expected = offBefore[i]! + (rp.side === "left" ? -amount : amount);
       if (rp.head !== rq.head || l.holds.length !== 0 || l.offdelta !== expected) throw new Error(`${payer.name}-${payee.name}: holds ${l.holds.length}, offdelta ${l.offdelta}, expected ${expected}`);
-      return `${payer.name} to ${payee.name}: locked by the Entity of ${payer.name}, resolved by ${payee.name}, both Runtimes at head ${rp.head.slice(0, 12)}, payer's allocation fell by ${fmt(chain, amount)}`;
+      return `${payer.name} to ${payee.name}: locked by the Entity of ${payer.name}, resolved by ${payee.name}, both Runtimes at head ${rp.head.slice(0, 12)}, offdelta moved ${fmt(chain, amount)} toward the payee`;
     });
     const left = [hubX, hubY, bob].map((p) => net.entity(eid(p)).paybook.size);
     if (left.some((n) => n !== 0)) throw new Error(`paybook entries left after the payment: ${left.join(",")}`);
     quiet(net, [alice, hubX, hubY, bob], "htlc");
-    return { checks: [`hashlock ${hashlock.slice(0, 12)}: alice's one lock at J view ${at} (deadline view+${deadline - at}) named the route hubY, bob and became a lock on each hop made by the hubs' own Entities, each one hop sooner, and bob's resolve came back hop by hop`, ...checks, "hubs end flat: each received 10 on one Account and paid 10 on the next (no fee modelled)"], gaps: [] };
+    return { checks: [`hashlock ${hashlock.slice(0, 12)}: alice's one lock at J view ${at} (deadline view+${deadline - at}) named the route hubY, bob and became a lock on each hop made by the hubs' own Entities (their deadlines one hop apart are checked by the paybook tests, not here: the holds are gone when this step looks), and bob's resolve came back hop by hop`, ...checks, "hubs end flat: each received 10 on one Account and paid 10 on the next (no fee modelled)"], gaps: [] };
   },
 };
 
