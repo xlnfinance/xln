@@ -173,16 +173,33 @@ const rebuilt = (s: Submitter, wal: ReadonlyMap<bigint, Row>, r: Sealed) =>
       : err<OpenFault>({ _tag: "journal_digest", nonce: r.nonce, recorded: r.digest, rebuilt: batch.value.digest });
   });
 
+/**
+ * A batch is rebuilt from the WAL as new ops, so the draft of the replay may still hold the ops of an earlier batch
+ * that failed: the same rows under other objects. A deposit has no request key to tell them apart by, so the rows do:
+ * what the rebuilt batch carries leaves the draft, or the next seal would make the same deposit a second time.
+ */
+type Kept = Readonly<{ waiting: Submitter["waiting"]; draft: readonly JOp[] }>;
+
+const withoutRows = (s: Submitter, rows: readonly RowId[]): Kept => {
+  const carried = new Set(rows.map(keyOf));
+  const dropped = [...s.waiting].filter(([, row]) => carried.has(keyOf(row))).map(([op]) => op);
+  return {
+    waiting: new Map([...s.waiting].filter(([op]) => !dropped.includes(op))),
+    draft: s.jbatch.draft.filter((op) => !dropped.includes(op)),
+  };
+};
+
 const resent = (replay: Replay, r: Sealed): Result<Replay, OpenFault> =>
   map(rebuilt(replay.s, replay.wal, r), (batch) => {
     const { s } = replay;
     const earlier = s.jbatch.phase._tag === "inflight" ? [s.jbatch.phase.sent] : [];
+    const { waiting, draft } = withoutRows(s, r.rows);
     const jbatch: JBatch = {
-      ...s.jbatch, phase: { _tag: "inflight", sent: batch }, signedMax: batch.nonce,
+      ...s.jbatch, draft, phase: { _tag: "inflight", sent: batch }, signedMax: batch.nonce,
       abandoned: [...s.jbatch.abandoned, ...earlier],
     };
     const signed = new Map([...s.signed, [batch.digest, { rows: r.rows, state: "sent" as const }]]);
-    return { ...replay, s: { ...s, jbatch, signed } };
+    return { ...replay, s: { ...s, jbatch, waiting, signed } };
   });
 
 const closed = (replay: Replay, r: Answered): Replay => {

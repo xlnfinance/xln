@@ -177,10 +177,8 @@ const holding = (w: Work, e: Extract<JEvent, { _tag: "j_collateral" }>): Work =>
     : reconciled(withFacts(w, e.peer, kept), e.peer);
 };
 
-/** What the chain did to the Account with `peer`; for an Account the Entity does not hold it is told and ignored. */
-const observed = (w: Work, e: JEvent): Work => {
-  const account = w.state.accounts.get(e.peer);
-  if (account === undefined) return noting(w, { _tag: "unknown_peer", from: e.peer });
+/** What the chain did to the Account with `peer`, as the facts the Entity holds for the pair say. */
+const chainFact = (w: Work, e: JEvent): Work => {
   const facts = factsOf(w, e.peer);
   switch (e._tag) {
     case "j_epoch":
@@ -194,6 +192,16 @@ const observed = (w: Work, e: JEvent): Work => {
     case "j_op_lapsed":
       return withFacts(w, e.peer, cosignLapsed(facts, e.serial));
   }
+};
+
+/**
+ * The facts are the chain's, whether or not the Entity holds the Account yet: an Account opened after the chain moved
+ * the epoch on signs under that epoch, not under epoch 0 (R-FRAME-EPOCH: a frame of another epoch is parked, and
+ * nothing would ever tell the late Entity). An Account the Entity does not hold is told as well.
+ */
+const observed = (w: Work, e: JEvent): Work => {
+  const kept = chainFact(w, e);
+  return w.state.accounts.has(e.peer) ? kept : noting(kept, { _tag: "unknown_peer", from: e.peer });
 };
 
 /** The node co-signs a peer's ask while no signature of its own waits, and a C2R only with no offdelta to fold. */
@@ -449,7 +457,7 @@ const asking = (judge: Judge, peer: EntityId, account: EntityReplica) => (acc: A
  * dispute is over: a batch the chain reverted or a Host that crashed cannot leave the dispute unanswered for good.
  */
 const counterFor = (facts: ChainFacts, peer: EntityId, account: EntityReplica): readonly JAction[] => {
-  const nonce = proofNonce(facts);
+  const nonce = proofNonce(facts, account.used);
   return facts.disputed && nonce !== undefined ? [{ _tag: "counter", peer, nonce, head: account.head }] : [];
 };
 
