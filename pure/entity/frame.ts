@@ -232,34 +232,60 @@ const rebasing = (w: Work, peer: EntityId, finalized: Finalized | undefined): Wo
   });
 };
 
-/** The proof a dispute finalize paid by: its nonce, the epoch it moved to and the nonce of the node's own head. */
-type Finalized = Readonly<{ nonce: bigint; epoch: bigint; committed: bigint | undefined }>;
+/**
+ * The proof a dispute finalize paid by: its nonce, the epoch it moved to, the nonce of the node's own head, and the
+ * nonce its pending frame would have signed (all under the epoch that ended).
+ */
+type Finalized = Readonly<{
+  nonce: bigint; epoch: bigint; committed: bigint | undefined; pending: bigint | undefined;
+}>;
 
 /**
  * The finalize that moved the epoch on, when it was one: a dispute was open on the Account, and a settlement or a C2R
- * is reverted by the chain while one is, so no other path moves the epoch then. `stored` is the nonce the chain keeps
- * after a finalize, the finalized proof's own.
+ * is reverted by the chain while one is, so no other path moves the epoch then. The chain stores the nonce of the proof
+ * it adopted when a counter registered (a signed branch), and the opening proof's plus one for a unilateral timeout
+ * (Depository.sol 965-976), so the proof the finalize paid by is `stored` in the first case and `stored - 1` in the
+ * second. A counter registered against the node's own start (`starting.countered`), or the node's own registered
+ * answer to the peer's start (`against.answer`), is the first case.
  */
-const finalizedBy = (w: Work, facts: ChainFacts, e: Extract<JEvent, { _tag: "j_epoch" }>): Finalized | undefined =>
-  (inDispute(facts)
-    ? { nonce: e.stored, epoch: e.epoch, committed: proofNonce(facts, w.state.accounts.get(e.peer)?.used ?? 0) }
-    : undefined);
+const finalizedBy = (w: Work, facts: ChainFacts, e: Extract<JEvent, { _tag: "j_epoch" }>): Finalized | undefined => {
+  if (!inDispute(facts)) return undefined;
+  const account = w.state.accounts.get(e.peer);
+  const signed = facts.starting?.countered === true || facts.against?.answer?.registered === true;
+  return {
+    nonce: signed ? e.stored : e.stored - 1n, epoch: e.epoch, committed: proofNonce(facts, account?.used ?? 0),
+    pending: account?.pending === undefined
+      ? undefined
+      : account.pending.frame.firstNonce + BigInt(account.pending.frame.slot) - 1n,
+  };
+};
 
 /**
  * R-DISPUTE-FREEZE: a finalize moved the epoch on and the rebase zeroes offdelta. If the committed head is above the
  * proof the finalize paid by (a frame the proof does not hold: one committed after the proof was signed, or sealed
  * before the dispute and acked after it), each token is told to the node's owner with both nonces and the offdelta the
- * node counted. A head at or below the finalized proof lost nothing, and a settlement or a withdrawal moving the epoch
- * tells nothing. The offdelta the proof holds is not here: the node that lost something is not the one that opened with
- * the proof, so it holds none of its body; the chain's DisputeFinalized for the nonce says what was paid.
+ * node counted. A frame of the node's own still pending carries a payment or a lock the peer may have committed before
+ * it heard of the dispute: the finalize does not hold it and the rebase zeroes what it paid, so the node is told which
+ * (`pending_rebased`); a peer that never heard of the frame refuses it as another epoch's and the node seals it again,
+ * and the notice says as much. A frame at or below the finalized nonce is held by the proof the chain paid by: not
+ * told. A head at or below the finalized proof lost nothing, and a settlement or a withdrawal moving the epoch tells
+ * nothing. The offdelta the proof holds is not here: the node that lost something is not the one
+ * that opened with the proof, so it holds none of its body; the chain's DisputeFinalized for the nonce says what was
+ * paid.
  */
 const destroyed = (w: Work, peer: EntityId, account: EntityReplica, finalized: Finalized | undefined): Work => {
-  if (finalized === undefined || finalized.committed === undefined || finalized.committed <= finalized.nonce) return w;
-  const { committed, nonce, epoch } = finalized;
-  return [...account.state.ledgers].reduce((acc, [token, l]) => noting(acc, {
-    _tag: "offdelta_rebased", peer, token, epoch, committedNonce: committed, offdelta: l.offdelta,
-    finalizedNonce: nonce,
-  }), w);
+  if (finalized === undefined) return w;
+  const { committed, nonce, epoch, pending } = finalized;
+  const told = committed === undefined || committed <= nonce
+    ? w
+    : [...account.state.ledgers].reduce((acc, [token, l]) => noting(acc, {
+      _tag: "offdelta_rebased", peer, token, epoch, committedNonce: committed, offdelta: l.offdelta,
+      finalizedNonce: nonce,
+    }), w);
+  const txs = account.pending?.frame.txs.filter((tx) => tx._tag === "pay" || tx._tag === "lock") ?? [];
+  return pending === undefined || pending <= nonce || txs.length === 0
+    ? told
+    : noting(told, { _tag: "pending_rebased", peer, epoch, nonce: pending, finalizedNonce: nonce, txs });
 };
 
 /** The chain's collateral and ondelta for one token, kept; one with no ledger past the cap is told and dropped. */
