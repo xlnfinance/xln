@@ -43,23 +43,11 @@ export const GAPS = {
     supplier: "the cut thread: settlement fold and epoch rebase, after multi-hop",
     landed: () => mentions("entity", /rebased|rebaseLedger/) || mentions("account", /rebased|rebaseLedger/),
   },
-  entitySwapCommands: {
-    id: "entity-swap-commands", kind: "missing", layer: "Entity",
-    piece: "Swap inside an Account through a Runtime: AccountTx has offer, fill, retract and lapse (#111, pure/account/swap), but the Entity takes no command that queues them, so no swap offer, partial fill or cancel can go through a Runtime and nothing on the Account's frames is signed for one. The proof body carries the swap clause already; the chain side is plan/swap-onchain.md.",
-    supplier: "kernel thread (swap on the Account, #111) then the cut thread (Entity commands offer, fill, retract)",
-    landed: () => mentions("entity", /Tagged<"(offer|fill|retract)"/),
-  },
   disputeWithClause: {
     id: "dispute-with-clause", kind: "missing", layer: "Runtime",
     piece: "Forced dispute with an open clause in the signed proof (HTLC pending when the counterparty goes quiet): the proof body carries one transformer clause per open hold (pure/account/proof/body.ts), but no Runtime duty starts the dispute or holds a lock a signed proof carries (R-SIGNED-IS-LIVE).",
     supplier: "the A4b Runtime duties slice after #97 (pure/runtime/dispute.ts)",
     landed: () => has("runtime/dispute.ts"),
-  },
-  hubMatching: {
-    id: "hub-matching", kind: "missing", layer: "Hub",
-    piece: "Hub matching engine wired to Account state: pure/market has the book and the settlement model, but nothing turns a matched pair into swap txs in two Accounts.",
-    supplier: "hub matching thread (#92, #101 merged; wiring waits for the swap clause shape)",
-    landed: () => mentions("market", /swap_fill|swapFill/),
   },
 } as const satisfies Record<string, Gap>;
 

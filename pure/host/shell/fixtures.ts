@@ -1,6 +1,7 @@
 // Real WALs for the shell's tests: the rows of Runtimes that ran, so a codec or a disk is judged on what the Runtime
 // writes, with bigints, bytes and absent fields, and not on rows made up for it.
 import { expect } from "bun:test";
+import { readFileSync } from "node:fs";
 import { holdOf, secretOf, viewOf } from "../../account/fixtures.ts";
 import { holdId } from "../../account/model.ts";
 import { deployment } from "../../chain/proof/deployment.ts";
@@ -11,6 +12,7 @@ import {
 } from "../../runtime/fixtures.ts";
 import type { Row } from "../../runtime/model.ts";
 import type { ChainWorld } from "../ops.ts";
+import { scanJournal } from "./submit/journal.ts";
 import type { Asked } from "./submit/submit.ts";
 
 export const ALICE = entityOf(1);
@@ -53,3 +55,13 @@ export const DEPOSIT: Asked = (() => {
   const index = row.chain.findIndex((a) => a._tag === "deposit");
   return { action: row.chain[index] as Asked["action"], row: { height: row.height, index } };
 })();
+
+/** What a scripted chain port wrote about the calls it got, one line each. */
+export const callsOf = (path: string): readonly string[] =>
+  readFileSync(path, "utf8").split("\n").filter((l) => l !== "");
+
+/** The records a journal file holds, as `kind@nonce`. */
+export const journalIn = (path: string): readonly string[] => {
+  const kept = scanJournal(readFileSync(path));
+  return kept.ok ? kept.value.items.map((r) => `${r._tag}@${r.nonce}`) : [`damaged ${kept.error._tag}`];
+};

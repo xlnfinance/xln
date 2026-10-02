@@ -14,6 +14,7 @@ import { observe, type JAnswer, type Observed, type Returned, type Skipped } fro
 import { openJBatch, queue, type JBatch, type QueueFault } from "../../../j/batch/jbatch.ts";
 import { sealBatch, type SealedBatch, type SealFault } from "../../../j/batch/sealed.ts";
 import type { JOp } from "../../../j/op/ops.ts";
+import { mapDelete, mapSet, mapSetAll } from "../../../kernel/core/collections.ts";
 import { err, flatMap, foldResult, map, ok, traverse, type Result } from "../../../kernel/core/result.ts";
 import type { Tagged } from "../../../kernel/core/tagged.ts";
 import type { Row } from "../../../runtime/model.ts";
@@ -72,7 +73,7 @@ export const take = (s: Submitter, asked: Asked): Taken => {
   const out = queue(s.jbatch, op.value);
   switch (out._tag) {
     case "queued": {
-      const waiting = new Map([...s.waiting, [op.value, asked.row]]);
+      const waiting = mapSet(s.waiting, op.value, asked.row);
       return { _tag: "queued", submitter: { ...s, jbatch: out.jbatch, waiting } };
     }
     case "skipped": return { _tag: "skipped" };
@@ -91,7 +92,7 @@ export const sealedBy = (
     return row === undefined ? err<UnmappedOp>({ _tag: "unmapped_op", kind: op._tag }) : ok(row);
   }), (rows) => ({
     submitter: { ...s, jbatch, waiting: new Map([...s.waiting].filter(([op]) => !batch.ops.includes(op))),
-      signed: new Map([...s.signed, [batch.digest, { rows, state: "sent" }]]) },
+      signed: mapSet(s.signed, batch.digest, { rows, state: "sent" }) },
     record: { _tag: "sealed", nonce: batch.nonce, gasBudget: batch.gasBudget, digest: batch.digest, rows },
   }));
 
@@ -104,15 +105,15 @@ const sentWith = (s: Submitter, nonce: bigint): SealedBatch | undefined =>
 
 /** The ops of a failed batch that went back to the draft keep the rows they came from. */
 const requeued = (s: Submitter, batch: SealedBatch, rows: readonly RowId[], draft: readonly JOp[]) =>
-  new Map([...s.waiting, ...batch.ops.flatMap((op, i): [JOp, RowId][] => {
+  mapSetAll(s.waiting, batch.ops.flatMap((op, i): [JOp, RowId][] => {
     const row = rows[i];
     return row !== undefined && draft.includes(op) ? [[op, row]] : [];
-  })]);
+  }));
 
 const landedBy = (s: Submitter, a: Extract<JAnswer, { _tag: "landed" }>, seen: Observed): Closed => {
   const batch = s.signed.get(a.batchHash);
   if (batch === undefined) return { submitter: { ...s, jbatch: seen.jbatch }, record: undefined, ...rest(seen) };
-  const signed = new Map([...s.signed, [a.batchHash, { ...batch, state: "landed" as const }]]);
+  const signed = mapSet(s.signed, a.batchHash, { ...batch, state: "landed" as const });
   const record: Answered = { _tag: "answered", nonce: a.nonce, digest: a.batchHash, outcome: "landed" };
   return { submitter: { ...s, jbatch: seen.jbatch, signed }, record, ...rest(seen) };
 };
@@ -123,7 +124,7 @@ const failedBy = (s: Submitter, a: Extract<JAnswer, { _tag: "failed" }>, seen: O
   if (batch === undefined || rows === undefined) {
     return { submitter: { ...s, jbatch: seen.jbatch }, record: undefined, ...rest(seen) };
   }
-  const signed = new Map([...s.signed].filter(([digest]) => digest !== batch.digest));
+  const signed = mapDelete(s.signed, batch.digest);
   const waiting = requeued(s, batch, rows, seen.jbatch.draft);
   const record: Answered = { _tag: "answered", nonce: a.nonce, digest: batch.digest, outcome: "failed" };
   return { submitter: { ...s, jbatch: seen.jbatch, signed, waiting }, record, ...rest(seen) };
@@ -173,16 +174,33 @@ const rebuilt = (s: Submitter, wal: ReadonlyMap<bigint, Row>, r: Sealed) =>
       : err<OpenFault>({ _tag: "journal_digest", nonce: r.nonce, recorded: r.digest, rebuilt: batch.value.digest });
   });
 
+/**
+ * A batch is rebuilt from the WAL as new ops, so the draft of the replay may still hold the ops of an earlier batch
+ * that failed: the same rows under other objects. A deposit has no request key to tell them apart by, so the rows do:
+ * what the rebuilt batch carries leaves the draft, or the next seal would make the same deposit a second time.
+ */
+type Kept = Readonly<{ waiting: Submitter["waiting"]; draft: readonly JOp[] }>;
+
+const withoutRows = (s: Submitter, rows: readonly RowId[]): Kept => {
+  const carried = new Set(rows.map(keyOf));
+  const dropped = [...s.waiting].filter(([, row]) => carried.has(keyOf(row))).map(([op]) => op);
+  return {
+    waiting: new Map([...s.waiting].filter(([op]) => !dropped.includes(op))),
+    draft: s.jbatch.draft.filter((op) => !dropped.includes(op)),
+  };
+};
+
 const resent = (replay: Replay, r: Sealed): Result<Replay, OpenFault> =>
   map(rebuilt(replay.s, replay.wal, r), (batch) => {
     const { s } = replay;
     const earlier = s.jbatch.phase._tag === "inflight" ? [s.jbatch.phase.sent] : [];
+    const { waiting, draft } = withoutRows(s, r.rows);
     const jbatch: JBatch = {
-      ...s.jbatch, phase: { _tag: "inflight", sent: batch }, signedMax: batch.nonce,
+      ...s.jbatch, draft, phase: { _tag: "inflight", sent: batch }, signedMax: batch.nonce,
       abandoned: [...s.jbatch.abandoned, ...earlier],
     };
-    const signed = new Map([...s.signed, [batch.digest, { rows: r.rows, state: "sent" as const }]]);
-    return { ...replay, s: { ...s, jbatch, signed } };
+    const signed = mapSet(s.signed, batch.digest, { rows: r.rows, state: "sent" as const });
+    return { ...replay, s: { ...s, jbatch, waiting, signed } };
   });
 
 const closed = (replay: Replay, r: Answered): Replay => {

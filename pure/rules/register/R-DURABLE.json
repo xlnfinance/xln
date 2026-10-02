@@ -339,6 +339,16 @@
    "kind": "test",
    "layer": "ts",
    "name": "R-DURABLE a node whose WAL fails sends nothing more and answers every request with the fault"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DURABLE a restart while a failed deposit's second batch is on its way leaves nothing in the draft"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DURABLE a restart after a failed deposit's second batch landed makes no second deposit"
   }
  ]
 }

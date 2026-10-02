@@ -53,12 +53,10 @@ export const slowChain = (log: string): ChainPort => ({
   },
 });
 
-export const sleep = (ms: number): Promise<void> => new Promise((resolve) => { setTimeout(resolve, ms); });
-
 export const until = async (check: () => Promise<boolean>, polls: number): Promise<boolean> => {
   if (await check()) return true;
   if (polls === 0) return false;
-  return sleep(20).then(() => until(check, polls - 1));
+  return Bun.sleep(20).then(() => until(check, polls - 1));
 };
 
 export const must = <T, E>(r: Result<T, E>): T => (r.ok ? r.value : expect.unreachable(JSON.stringify(r.error)));

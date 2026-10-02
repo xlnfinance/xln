@@ -12,7 +12,7 @@ import { type Disk, type DiskOp, failStop, sequence } from "./disk.ts";
 import { fileDisk } from "../node/file-disk.ts";
 import { aliceRun, ALICE, bobRun, BOB, walOf } from "../fixtures.ts";
 import { appendOps, keep, openWal } from "./store.ts";
-import { recordOf } from "./wal.ts";
+import { frame } from "./records.ts";
 
 const rows = walOf(aliceRun, ALICE);
 const last = rows[rows.length - 1] as Row;
@@ -46,7 +46,7 @@ const readBack = async (path: string) => {
 describe("host/shell/store a row is kept as one record then a sync, and reported only when both are done", () => {
   test("R-DURABLE the operations that make a row durable are its record, then a sync, in that order", () => {
     const ops = appendOps(last);
-    const record = recordOf(last);
+    const record = frame(last);
     const bytes = record.ok ? record.value : expect.unreachable("record");
     expect(ops).toEqual({ ok: true, value: [{ _tag: "write", bytes }, { _tag: "sync" }] });
   });
@@ -101,7 +101,7 @@ describe("host/shell/store what a file gives back after a crash", () => {
     const path = scratch();
     await written(path, rows.slice(0, -1));
     const priorBytes = readFileSync(path);
-    const record = recordOf(last);
+    const record = frame(last);
     const finalBytes = record.ok ? record.value : expect.unreachable("record");
     const cuts = [1, 3, 4, 5, 17, Math.floor(finalBytes.length / 2), finalBytes.length - 9, finalBytes.length - 1];
     await cuts.reduce<Promise<unknown>>((before, cut) => before.then(async () => {
@@ -127,7 +127,7 @@ describe("host/shell/store what a file gives back after a crash", () => {
     const three = rows.slice(-3);
     await written(path, three);
     const sizes = three.map((row) => {
-      const made = recordOf(row);
+      const made = frame(row);
       return made.ok ? made.value.length : expect.unreachable("record");
     });
     const start = sizes[0] ?? 0;

@@ -39,14 +39,6 @@ export type Turn = Readonly<{
 
 const nothing = (station: Station): Turn => ({ station, sent: [], taken: [], returned: [], skipped: [] });
 
-const joined = (a: Turn, b: Turn): Turn => ({
-  station: b.station,
-  sent: [...a.sent, ...b.sent],
-  taken: [...a.taken, ...b.taken],
-  returned: [...a.returned, ...b.returned],
-  skipped: [...a.skipped, ...b.skipped],
-});
-
 /** The Entity's own rows are all it asks of the chain for: a row that names an Entity this Station is not is no ask. */
 const takeOne = (turn: Turn, effect: Effect): Turn => {
   switch (effect._tag) {

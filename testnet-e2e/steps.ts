@@ -7,7 +7,8 @@ import { ethers } from "ethers";
 import { CONTRACT_NAMES, deployedManifest } from "../contracts/deploy/manifest.ts";
 import { clockParams, jHeight, ownView } from "../pure/account/clause/clock.ts";
 import { allocation, deposit } from "../pure/account/ledger.ts";
-import { holdId, tokenId, type Side, type TokenId } from "../pure/account/model.ts";
+import { holdId, tokenId, type AccountState, type Side, type TokenId } from "../pure/account/model.ts";
+import { FULL_FILL, fillOf } from "../pure/account/swap/swap.ts";
 import { ledgerOf } from "../pure/account/state.ts";
 import { proofBodyOf } from "../pure/account/proof/body.ts";
 import type { SigningContext } from "../pure/account/proof/signing.ts";
@@ -16,15 +17,14 @@ import { accountMessageHash } from "../pure/chain/proof/payload.ts";
 import { keccakHex } from "../pure/kernel/encoding/bytes.ts";
 import { startAnvil, assertLoopback, scrubbedEnv, type Anvil } from "./lib/anvil.ts";
 import {
-  accountKeyOf, accountOnChain, advanceTime, collateralOf, connect, hankoOf, heldBy, leftOf, must, partyOf, reserveOf, sendOps,
-  unit, worldOf, type Chain, type Manifest, type Party,
+  accountKeyOf, accountOnChain, advanceTime, collateralOf, connect, eid, hankoOf, heldBy, leftOf, must, partyOf, reserveOf, sendOps,
+  unit, type Chain, type Manifest, type Party,
 } from "./lib/chain.ts";
 import { GAPS, REPO } from "./lib/gaps.ts";
 import { Blocked, type Step } from "./lib/runner.ts";
-import { entityId, type EntityId, type JAction } from "../pure/entity/model.ts";
-import { opOf } from "../pure/host/ops.ts";
+import type { EntityId } from "../pure/entity/model.ts";
 import type { ClockParams, JView } from "../pure/account/clause/clock.ts";
-import { Cluster } from "./lib/cluster.ts";
+import { Cluster, shown } from "./lib/cluster.ts";
 import { Seat } from "./lib/seat.ts";
 import { openWal } from "../pure/host/shell/disk/store.ts";
 import { fileDisk } from "../pure/host/shell/node/file-disk.ts";
@@ -60,7 +60,6 @@ export const newWorld = (options: Options): World =>
 const chainOf = (w: World): Chain => w.chain ?? (() => { throw new Error("no chain: the fork step did not finish"); })();
 const partiesOf = (w: World) => w.parties ?? (() => { throw new Error("no parties"); })();
 const netOf = (w: World): Cluster => w.net ?? (() => { throw new Error("no Runtimes: the open step did not finish"); })();
-const eid = (p: Party): EntityId => must(entityId(p.id), `entity id of ${p.name}`);
 const fmt = (chain: Chain, n: bigint): string => `${ethers.formatUnits(n, chain.manifest.token.decimals)} ${chain.manifest.token.symbol}`;
 const token = (chain: Chain): TokenId => must(tokenId(chain.tokenId), "token id");
 const DEPOSIT = 500n;
@@ -203,6 +202,9 @@ const view = async (chain: Chain): Promise<View> => {
 /** What a node's journal file holds, read back by the shell's own reader. */
 const journalOf = (dir: string, name: string): readonly JournalRecord[] =>
   must(scanJournal(readFileSync(join(dir, "journal.log"))), `${name}'s journal`).items;
+
+/** The swap quotes and offers an Account holds, to be the same in both Runtimes. */
+const swapsOf = (s: AccountState) => [s.quotes, s.offers];
 
 const quiet = (net: Cluster, parties: readonly Party[], what: string): void => {
   const noticed = parties.flatMap((p) => net.noticesOf(eid(p)).map((n) => `${p.name}: ${n}`));
@@ -409,8 +411,70 @@ const reveal: Step<World> = {
 };
 
 const swap: Step<World> = {
-  id: "swap", title: "Two-party swap inside an Account: offer, partial fill, cancel", needs: ["open"],
-  run: async () => { throw new Blocked(["entitySwapCommands", "hubMatching"], `AccountTx has offer, fill, retract and lapse (pure/account/swap, #111), but the Entity has no command that queues them and no hub turns a matched pair into them, so a Runtime cannot make a swap frame: ${GAPS.entitySwapCommands.supplier}`); },
+  id: "swap", title: "Two-party swap inside an Account: quote, partial fill, withdrawal", needs: ["htlc"],
+  run: async (w) => {
+    const chain = chainOf(w);
+    const net = netOf(w);
+    const { hubX, hubY } = partiesOf(w);
+    const [maker, taker] = [eid(hubX), eid(hubY)];
+    const give = token(chain);
+    const want = must(tokenId(chain.tokenId + 1n), "second token");
+    const [giveAmount, wantAmount] = [10n * unit(chain), 20n * unit(chain)];
+    // The Account has the faucet token and, for this step, a second token of credit alone: each side extends credit in it, so either may pay it.
+    await net.tell(maker, { _tag: "set_credit", peer: taker, token: want, limit: 100n * unit(chain) });
+    await net.settle();
+    await net.tell(taker, { _tag: "set_credit", peer: maker, token: want, limit: 100n * unit(chain) });
+    await net.settle();
+    const [rm, rt] = [() => net.account(maker, taker), () => net.account(taker, maker)];
+    const agree = (what: string): void => {
+      if (rm().head !== rt().head || rm().pending !== undefined || rt().pending !== undefined) throw new Error(`${what}: the two Runtimes do not hold one committed head`);
+      if (shown(swapsOf(rm().state)) !== shown(swapsOf(rt().state))) throw new Error(`${what}: the two Runtimes hold other quotes or offers: ${shown(swapsOf(rm().state))} against ${shown(swapsOf(rt().state))}`);
+    };
+    const offdeltas = () => [ledgerOf(rm().state, give).offdelta, ledgerOf(rm().state, want).offdelta];
+    const [offGive, offWant] = offdeltas();
+    const makerSide = rm().side;
+    const deadline = must(jHeight(net.view() + 30n), "deadline");
+    // The maker's quote: one command, one frame. It reserves only the maker's give and binds the taker to nothing (R-SWAP-CONSENT).
+    await net.tell(maker, { _tag: "offer", peer: taker, id: holdId(10n), give: { token: give, amount: giveAmount }, want: { token: want, amount: wantAmount }, deadline });
+    await net.settle();
+    agree("quote");
+    const quoted = rm().state;
+    if (quoted.quotes.length !== 1 || quoted.offers.length !== 0) throw new Error(`after the quote: ${quoted.quotes.length} quotes and ${quoted.offers.length} offers, expected one quote`);
+    if (ledgerOf(quoted, give).reserved[makerSide] !== giveAmount) throw new Error(`the quote reserves ${ledgerOf(quoted, give).reserved[makerSide]} of the maker's give, expected ${giveAmount}`);
+    const takerReserved = [give, want].map((t) => ledgerOf(quoted, t).reserved[rt().side]);
+    if (takerReserved.some((n) => n !== 0n) || shown(offdeltas()) !== shown([offGive, offWant])) throw new Error(`the quote cost the taker room (reserved ${takerReserved.join(",")}) or moved an offdelta: it must bind the taker to nothing`);
+    // The taker's first fill is its acceptance: it takes about half, at the chain's own arithmetic, and the rest is an offer.
+    const ratio = Math.floor(FULL_FILL / 2);
+    await net.tell(taker, { _tag: "fill", peer: maker, id: holdId(10n), ratio });
+    await net.settle();
+    agree("fill");
+    const [paidGive, paidWant] = [fillOf(giveAmount, ratio), fillOf(wantAmount, ratio)];
+    const [afterGive, afterWant] = offdeltas();
+    const [dGive, dWant] = [afterGive! - offGive!, afterWant! - offWant!];
+    const [expectGive, expectWant] = makerSide === "left" ? [-paidGive, paidWant] : [paidGive, -paidWant];
+    if (dGive !== expectGive || dWant !== expectWant) throw new Error(`the fill moved the offdeltas by ${dGive} and ${dWant}, expected ${expectGive} and ${expectWant}`);
+    const filled = rm().state;
+    const left = filled.offers[0];
+    if (filled.quotes.length !== 0 || filled.offers.length !== 1 || left === undefined) throw new Error(`after the fill: ${filled.quotes.length} quotes and ${filled.offers.length} offers, expected the remainder as one offer`);
+    if (left.give.amount !== giveAmount - paidGive || left.want.amount !== wantAmount - paidWant) throw new Error(`the remainder is ${left.give.amount} for ${left.want.amount}, expected ${giveAmount - paidGive} for ${wantAmount - paidWant}`);
+    // The maker withdraws what is left: what was filled stays, both reservations go.
+    await net.tell(maker, { _tag: "retract", peer: taker, id: holdId(10n) });
+    await net.settle();
+    agree("retract");
+    const done = rm().state;
+    const reserved = [give, want].flatMap((t) => [ledgerOf(done, t).reserved.left, ledgerOf(done, t).reserved.right]);
+    if (done.quotes.length !== 0 || done.offers.length !== 0 || reserved.some((n) => n !== 0n)) throw new Error(`after the retract: ${done.quotes.length} quotes, ${done.offers.length} offers, reserved ${reserved.join(",")}; expected none`);
+    if (shown(offdeltas()) !== shown([afterGive, afterWant])) throw new Error("the retract moved an offdelta: what was filled must stay");
+    quiet(net, Object.values(partiesOf(w)), "swap");
+    return {
+      checks: [
+        `hubX quotes ${fmt(chain, giveAmount)} for ${wantAmount / unit(chain)} of a second token on hubX-hubY: one frame, both Runtimes at head ${rm().head.slice(0, 12)}, the quote reserves only hubX's give: nothing is reserved against hubY and no offdelta moved`,
+        `hubY's first fill at ratio ${ratio}/${FULL_FILL} is the acceptance: offdelta moved ${dGive} of the first token and ${dWant} of the second (the chain's floor(amount * ratio / 65535) on each leg), and the remainder ${left.give.amount} for ${left.want.amount} is an offer in both Runtimes`,
+        "hubX's retract removes the remainder and both reservations; what was filled stays, and neither Runtime noticed anything",
+      ],
+      gaps: [],
+    };
+  },
 };
 
 // ---- S8 ----------------------------------------------------------------------------------------------------------

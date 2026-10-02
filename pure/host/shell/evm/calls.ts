@@ -11,7 +11,7 @@ import { topicOf } from "../../../j/log.ts";
 /** What the node said, or what the caller built, is not what the contract's ABI says it should be. */
 export type ReplyFault = Tagged<"bad_reply", { why: string }>;
 
-const bad = (why: string): ReplyFault => ({ _tag: "bad_reply", why });
+export const bad = (why: string): ReplyFault => ({ _tag: "bad_reply", why });
 
 const HEX_WORD = 64;
 
@@ -22,7 +22,7 @@ export const HANKO_PROCESSED = topicOf("HankoBatchProcessed(bytes32,bytes32,uint
 export const BATCH_FAILED = topicOf("BatchFailed(bytes32,uint256,bytes4)");
 export const DISPUTE_SKIPPED = topicOf("DisputeOpSkipped(bytes32,bytes32,uint8,uint8,uint256)");
 
-const withArguments = (signature: string, values: Parameters<typeof encode>[0]): Result<string, ReplyFault> => {
+export const withArguments = (signature: string, values: Parameters<typeof encode>[0]): Result<string, ReplyFault> => {
   const encoded = encode(values);
   return encoded.ok ? ok(bytesToHex(concat([selector(signature), encoded.value]))) : err(bad(encoded.error._tag));
 };

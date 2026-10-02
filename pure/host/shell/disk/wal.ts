@@ -4,13 +4,9 @@
 import type { Row } from "../../../runtime/model.ts";
 import { err, map, ok, type Result } from "../../../kernel/core/result.ts";
 import type { Tagged } from "../../../kernel/core/tagged.ts";
-import { frame, scanRecords, type RecordFault, type Scanned as Records } from "./records.ts";
-import type { ValueFault } from "../codec/value.ts";
+import { scanRecords, type RecordFault, type Scanned as Records } from "./records.ts";
 
 export type WalFault = RecordFault<Tagged<"not_a_row">>;
-
-/** The bytes to append for one row. */
-export const recordOf = (row: Row): Result<Uint8Array, ValueFault> => frame(row);
 
 const isRow = (v: unknown): v is Row => {
   const row = v as Partial<Record<keyof Row, unknown>> | null;

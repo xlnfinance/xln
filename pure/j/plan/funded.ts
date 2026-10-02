@@ -7,6 +7,7 @@
 // never leans on the contract's implicit flash credit for a debt-free initiator: it signs what the reserve holds.
 import type { Settlement } from "../../chain/batch/batch.ts";
 import type { SettlementDiff } from "../../chain/money.ts";
+import { mapSet } from "../../kernel/core/collections.ts";
 import { match } from "../../kernel/core/tagged.ts";
 import type { JOp, OpKind } from "../op/ops.ts";
 
@@ -62,7 +63,7 @@ type Nets = ReadonlyMap<bigint, bigint>;
 /** The nets after one movement, or nothing when an outflow is more than the net holds. */
 const afterMovement = (nets: Nets, m: Movement): Nets | undefined => {
   const net = nets.get(m.tokenId) ?? 0n;
-  return m.delta < 0n && net < -m.delta ? undefined : new Map([...nets, [m.tokenId, net + m.delta]]);
+  return m.delta < 0n && net < -m.delta ? undefined : mapSet(nets, m.tokenId, net + m.delta);
 };
 
 const startingNets = (t: Treasury): Nets => new Map([...t].map(([tokenId, h]) => [tokenId, netOf(h)] as const));

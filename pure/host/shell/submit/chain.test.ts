@@ -11,8 +11,7 @@ import { requirement } from "../../../j/gas/gas.ts";
 import type { Simulation } from "../../../j/gas/simulate.ts";
 import { err, ok, unwrapOr, type Result } from "../../../kernel/core/result.ts";
 import { settle, resume, step, type Arrival, type ChainPort, type Io, type PortFault } from "./chain.ts";
-import { aliceRun, ALICE, DEPOSIT, GAS, TREASURY, walOf, DEPLOYED, WORLD } from "../fixtures.ts";
-import { scanJournal } from "./journal.ts";
+import { aliceRun, ALICE, callsOf, DEPOSIT, GAS, journalIn, TREASURY, walOf, DEPLOYED, WORLD } from "../fixtures.ts";
 import { keyOf } from "../link/link.ts";
 import { fileDisk } from "../node/file-disk.ts";
 import { lazySigner, type Signer } from "./signer.ts";
@@ -45,11 +44,6 @@ const scene = (): Scene => {
   return { journal: `${dir}/journal.log`, log: `${dir}/calls.log` };
 };
 
-const heldIn = (at: Scene): readonly string[] => {
-  const kept = scanJournal(readFileSync(at.journal));
-  return kept.ok ? kept.value.items.map((r) => `${r._tag}@${r.nonce}`) : [`damaged ${kept.error._tag}`];
-};
-
 const portOf = (at: Scene, script: Script): ChainPort => ({
   nonce: () => Promise.resolve(ok(script.nonce)),
   treasury: () => Promise.resolve(ok(TREASURY)),
@@ -59,13 +53,11 @@ const portOf = (at: Scene, script: Script): ChainPort => ({
   },
   send: (call, gasLimit) => {
     const head = `send ${call.nonce} ${call.encodedBatch.slice(0, 18)} gas=${gasLimit}`;
-    appendFileSync(at.log, `${head} journal=${heldIn(at).join(",")}\n`);
+    appendFileSync(at.log, `${head} journal=${journalIn(at.journal).join(",")}\n`);
     return Promise.resolve(script.sends);
   },
   answer: (batch) => Promise.resolve(ok(script.answer(batch))),
 });
-
-const callsOf = (at: Scene): readonly string[] => readFileSync(at.log, "utf8").split("\n").filter((l) => l !== "");
 
 const ioOf = async (at: Scene, script: Script, signer: Signer = SIGNER): Promise<Io> => {
   appendFileSync(at.log, "");
@@ -102,7 +94,7 @@ describe("host/shell/chain a batch is journaled before it is sent", () => {
     const moved = await withIo(at, CALM, (io) => stepped(io, asked(opened())));
     expect(moved.stage).toBe("waiting");
     const carried = requirement(GAS.prelude, MIN_GAS_BUDGET) + 100_000n;
-    expect(callsOf(at)).toEqual([
+    expect(callsOf(at.log)).toEqual([
       `simulate gas=${GAS.txGasCap}`, `simulate gas=${GAS.txGasCap}`,
       expect.stringMatching(new RegExp(`^send 5 0x[0-9a-f]+ gas=${carried} journal=sealed@5$`)),
     ]);
@@ -112,15 +104,15 @@ describe("host/shell/chain a batch is journaled before it is sent", () => {
     const at = scene();
     const tight = { ...GAS, txGasCap: requirement(GAS.prelude, MIN_GAS_BUDGET) + 50_000n };
     await withIo(at, CALM, (io) => stepped({ ...io, gas: tight }, asked(opened())));
-    expect(callsOf(at).at(-1)).toMatch(new RegExp(` gas=${tight.txGasCap} journal=`));
+    expect(callsOf(at.log).at(-1)).toMatch(new RegExp(` gas=${tight.txGasCap} journal=`));
   });
 
   test("R-SIMULATE a batch that would revert is held: nothing is journaled, nothing is sent", async () => {
     const at = scene();
     const moved = await withIo(at, { ...CALM, outcome: REVERTS }, (io) => stepped(io, asked(opened())));
     expect(moved.stage).toBe("held");
-    expect(heldIn(at)).toEqual([]);
-    expect(callsOf(at).filter((c) => c.startsWith("send"))).toEqual([]);
+    expect(journalIn(at.journal)).toEqual([]);
+    expect(callsOf(at.log).filter((c) => c.startsWith("send"))).toEqual([]);
   });
 
   test("a Signer that cannot sign stops the step before anything is simulated, journaled or sent", async () => {
@@ -128,8 +120,8 @@ describe("host/shell/chain a batch is journaled before it is sent", () => {
     const broken: Signer = { hanko: (digest) => err({ _tag: "cannot_sign", digest, reason: "key" }) };
     const out = await withIo(at, CALM, (io) => step(io, asked(opened()), "sure"), broken);
     expect(out).toMatchObject({ ok: false, error: { _tag: "cannot_sign" } });
-    expect(callsOf(at)).toEqual([]);
-    expect(heldIn(at)).toEqual([]);
+    expect(callsOf(at.log)).toEqual([]);
+    expect(journalIn(at.journal)).toEqual([]);
   });
 
   test("R-DURABLE a journal that cannot be written sends nothing", async () => {
@@ -140,7 +132,7 @@ describe("host/shell/chain a batch is journaled before it is sent", () => {
     });
     const out = await withIo(at, CALM, (io) => step(dead(io), asked(opened()), "sure"));
     expect(out).toMatchObject({ ok: false, error: { _tag: "disk", op: "sync" } });
-    expect(callsOf(at).filter((c) => c.startsWith("send"))).toEqual([]);
+    expect(callsOf(at.log).filter((c) => c.startsWith("send"))).toEqual([]);
   });
 });
 
@@ -151,10 +143,10 @@ describe("host/shell/chain what the chain says closes the batch, and a lost send
     expect(first.stage).toBe("unsent");
     const again = await withIo(at, CALM, (io) => stepped(io, first.submitter, "unsure"));
     expect(again.stage).toBe("waiting");
-    const sends = callsOf(at).filter((c) => c.startsWith("send")).map((c) => c.split(" journal=")[0]);
+    const sends = callsOf(at.log).filter((c) => c.startsWith("send")).map((c) => c.split(" journal=")[0]);
     expect(sends).toHaveLength(2);
     expect(sends[1]).toBe(sends[0]);
-    expect(heldIn(at)).toEqual(["sealed@5"]);
+    expect(journalIn(at.journal)).toEqual(["sealed@5"]);
   });
 
   test("a landed answer is journaled and frees the builder; a sure step does not send again", async () => {
@@ -164,8 +156,8 @@ describe("host/shell/chain what the chain says closes the batch, and a lost send
     expect(waiting.stage).toBe("waiting");
     const closed = await withIo(at, { ...CALM, answer: landed }, (io) => stepped(io, sent.submitter));
     expect(closed.stage).toBe("closed");
-    expect(heldIn(at)).toEqual(["sealed@5", "answered@5"]);
-    expect(callsOf(at).filter((c) => c.startsWith("send"))).toHaveLength(1);
+    expect(journalIn(at.journal)).toEqual(["sealed@5", "answered@5"]);
+    expect(callsOf(at.log).filter((c) => c.startsWith("send"))).toHaveLength(1);
   });
 
   test("R-DURABLE a landed deposit is known: the Runtime asking again queues nothing, nothing is sent", async () => {
@@ -175,7 +167,7 @@ describe("host/shell/chain what the chain says closes the batch, and a lost send
     expect(take(closed.submitter, DEPOSIT)._tag).toBe("known");
     const after = await withIo(at, CALM, (io) => settle(io, closed.submitter, "sure"));
     expect(after).toMatchObject({ ok: true, value: { stage: "idle" } });
-    expect(callsOf(at).filter((c) => c.startsWith("send"))).toHaveLength(1);
+    expect(callsOf(at.log).filter((c) => c.startsWith("send"))).toHaveLength(1);
   });
 
   test("F1 a failed batch spent its nonce: the deposit is signed again at the next, a different batch", async () => {
@@ -184,8 +176,8 @@ describe("host/shell/chain what the chain says closes the batch, and a lost send
     const sent = await withIo(at, CALM, (io) => stepped(io, asked(opened())));
     const settled = await withIo(at, { ...CALM, answer: failed }, (io) => settle(io, sent.submitter, "sure"));
     expect(settled).toMatchObject({ ok: true, value: { stage: "waiting" } });
-    expect(heldIn(at)).toEqual(["sealed@5", "answered@5", "sealed@6"]);
-    const sends = callsOf(at).filter((c) => c.startsWith("send")).map((c) => c.slice(0, 7));
+    expect(journalIn(at.journal)).toEqual(["sealed@5", "answered@5", "sealed@6"]);
+    const sends = callsOf(at.log).filter((c) => c.startsWith("send")).map((c) => c.slice(0, 7));
     expect(sends).toEqual(["send 5 ", "send 6 "]);
   });
 });
@@ -201,23 +193,23 @@ describe("host/shell/chain a restart finds the batch in the journal and asks the
   test("R-DURABLE a crash after the send: the chain has not seen it, so the same batch goes out again", async () => {
     const { at, back } = await afterCrash(CALM, CALM);
     expect(back).toMatchObject({ ok: true, value: { stage: "waiting" } });
-    const sends = callsOf(at).filter((c) => c.startsWith("send")).map((c) => c.split(" journal=")[0]);
+    const sends = callsOf(at.log).filter((c) => c.startsWith("send")).map((c) => c.split(" journal=")[0]);
     expect(sends).toHaveLength(2);
     expect(sends[1]).toBe(sends[0]);
-    expect(heldIn(at)).toEqual(["sealed@5"]);
+    expect(journalIn(at.journal)).toEqual(["sealed@5"]);
   });
 
   test("R-DURABLE a crash between the journal and the send is the same: the journaled batch goes out", async () => {
     const { at, back } = await afterCrash(CALM, { ...CALM, sends: err(PORT_DOWN) });
     expect(back).toMatchObject({ ok: true, value: { stage: "waiting" } });
-    expect(callsOf(at).filter((c) => c.startsWith("send"))).toHaveLength(2);
+    expect(callsOf(at.log).filter((c) => c.startsWith("send"))).toHaveLength(2);
   });
 
   test("F1 a batch that landed while the Host was down is closed by the chain's answer, not sent again", async () => {
     const { at, back } = await afterCrash({ ...CALM, nonce: 5n, answer: landed }, CALM);
     expect(back).toMatchObject({ ok: true, value: { stage: "idle" } });
-    expect(callsOf(at).filter((c) => c.startsWith("send"))).toHaveLength(1);
-    expect(heldIn(at)).toEqual(["sealed@5", "answered@5"]);
+    expect(callsOf(at.log).filter((c) => c.startsWith("send"))).toHaveLength(1);
+    expect(journalIn(at.journal)).toEqual(["sealed@5", "answered@5"]);
   });
 
   test("R-DURABLE the Runtime's re-ask after that restart is the deposit already made: no second batch", async () => {
@@ -226,7 +218,7 @@ describe("host/shell/chain a restart finds the batch in the journal and asks the
     expect(take(submitter, DEPOSIT)._tag).toBe("known");
     const after = await withIo(at, CALM, (io) => settle(io, submitter, "sure"));
     expect(after).toMatchObject({ ok: true, value: { stage: "idle" } });
-    expect(callsOf(at).filter((c) => c.startsWith("send"))).toHaveLength(1);
+    expect(callsOf(at.log).filter((c) => c.startsWith("send"))).toHaveLength(1);
   });
 
   test("a damaged journal stops the start: nothing is read from it and nothing is sent", async () => {
@@ -238,6 +230,6 @@ describe("host/shell/chain a restart finds the batch in the journal and asks the
     writeFileSync(other.journal, Uint8Array.from([...damaged, ...raw]));
     const back = await withIo(other, CALM, (io) => resume(io, WHERE, WAL));
     expect(back).toMatchObject({ ok: false, error: { _tag: "corrupt" } });
-    expect(callsOf(other).filter((c) => c.startsWith("send"))).toEqual([]);
+    expect(callsOf(other.log).filter((c) => c.startsWith("send"))).toEqual([]);
   });
 });

@@ -132,6 +132,35 @@ describe("host/shell/submit a restart rebuilds what was in flight from the journ
     expect(signedOne(back).record).toMatchObject({ nonce: 6n, rows: [ROW] });
   });
 
+  describe("a deposit whose first batch failed and was sent again", () => {
+    const live = answeredBy(first.submitter, { _tag: "failed", nonce: 5n, reason: "BatchFailed" }).submitter;
+    const second = signedOne(live);
+    const secondLanded: JournalRecord =
+      { _tag: "answered", nonce: 6n, digest: second.batch.digest, outcome: "landed" };
+    const history = [sealedRecord, failed, second.record];
+
+    test("the session holds one deposit for the row, in the batch on its way, none in the draft", () => {
+      expect(second.submitter.jbatch.draft).toHaveLength(0);
+      expect(second.submitter.waiting.size).toBe(0);
+    });
+
+    test("R-DURABLE a restart while a failed deposit's second batch is on its way leaves nothing in the draft", () => {
+      const back = reopened(history);
+      expect(back.jbatch.phase).toEqual({ _tag: "inflight", sent: second.batch });
+      expect(back.jbatch.draft).toHaveLength(0);
+      expect(back.waiting.size).toBe(0);
+      expect(take(back, { action: deposit, row: ROW })).toEqual({ _tag: "known" });
+    });
+
+    test("R-DURABLE a restart after a failed deposit's second batch landed makes no second deposit", () => {
+      const back = reopened([...history, secondLanded]);
+      expect(back.jbatch.phase._tag).toBe("idle");
+      expect(back.jbatch.draft).toHaveLength(0);
+      expect(back.waiting.size).toBe(0);
+      expect(take(back, { action: deposit, row: ROW })).toEqual({ _tag: "known" });
+    });
+  });
+
   test("an action nobody journaled is new: the Runtime's ask after the restart queues it", () => {
     const back = reopened([sealedRecord, landed]);
     expect(take(back, { action: deposit, row: OTHER })._tag).toBe("queued");
