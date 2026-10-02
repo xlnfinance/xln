@@ -774,3 +774,22 @@ debt queues and the ghost only, the epoch update, the offdelta fold and the co-s
 that it lands the fold and the forgiveness together; `settle.qnt` has no debt queue. (c) A part-paid head is forgiven for what is left (the claim is the queue entry, with its remaining amount); the J page says the same, I
 have not read the contract for it. (d) A third-party claim is only ever paid out or left: the model has no second Account of the entity, so what the third party does with it, and whether forgiving it there is possible,
 are outside. (e) The model draws a debt on each side from `init` (one claim on the non-debtor side), which `payout`'s shortfall does not create: after a dispute payout only the debtor's queue grows.
+
+**D-dispute. Modelling choices of `dispute.qnt` (2026-10-02, coordinator relay 13:51Z). Three for the coordinator.**
+(1) A proof is its nonce; the equal-nonce rule is `chain.qnt`'s. (2) "Zeroed" is a frame a side committed whose nonce is above the proof that paid; a half-committed frame counts. (3) ACCEPT assumes the non-starter
+holding nothing newer can build the opening body (it holds the same proof, or sealed the frame the starter acked); the log carries only the hash, the start's calldata the body. **Decision needed:** does the Entity
+finalize at once, as a non-starter, with the opening state when it has nothing to counter (`Account.sol` 861-875)? Without it the Account stays locked while the starter is down (`nothingNewerTest`). A second
+one, R-DISPUTE-VOIDED-NOTICE: a frame sealed before the start and acked after, committed on both sides, is zeroed with no notice when the older proof is finalized (`sealedBeforeTheStartTest`); only a notice to both
+sides tells it. Not modelled: the third finalize path (a non-starter with a newer pull-free proof, 817-857), Host drafts (REVIEW-A N4), several tokens.
+
+**D-dispute answers (coordinator, 2026-10-02 14:35Z).** (1) ACCEPT: yes. A non-starter that holds nothing newer than the opening proof finalizes at once with the opening state (`Account.sol` 861-875). It builds the opening
+body from its own stored proof when the hash matches, otherwise from the dispute start's calldata; if it can do neither it waits for the window. Goes into the builder's liveness PR. **Model note:** the fallback "waits for the window" is not
+today's behaviour made safe: today the non-starter asks for nothing at all, so with neither source it is still locked while the starter is down. The calldata path must always work (the log carries the body's hash only), or `no_lock` stays
+open in that corner. (2) NOTICE: the freeze PR (#162, head 81ce1144) emits `offdelta_rebased` in `destroyed` (`pure/entity/frame.ts` 214-219) on every `j_epoch`, to each side, per token whose committed offdelta is not zero, carrying that offdelta.
+It is **not** `NOTICE` of this model. Four differences: (a) it fires on every epoch move, a co-signed settlement and a C2R included, where nothing is destroyed (the fold lands in ondelta): a false notice; (b) its condition is "committed
+offdelta is nonzero", not "a committed frame is beyond the proof the chain finalized": two payments that cancel leave offdelta 0 and a zeroed frame goes untold, and a nonzero offdelta equal to what the proof paid is told though nothing was lost;
+(c) it says what the node counted, not what the chain paid, so the owner cannot tell a loss from a payout (#162's own register text says so, "owed: a notice for offdelta beyond the finalized proof"); (d) it does not see the sealed-before-the-start
+frame as a case: the frame is in the committed offdelta, so it is told only when the sum is nonzero. What `NOTICE` needs: on a dispute finalize only (the Entity knows it signed the settlement or C2R), compare the node's committed head
+(its nonce, offdelta) with the finalized proof (`j_epoch` carries `stored`; the finalized proof's nonce is `stored` or `stored - 1`), and tell iff the committed nonce is above the settled one, with both numbers. Then `no_silent_zeroing`
+holds in the model.
+
