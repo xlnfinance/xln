@@ -6,7 +6,7 @@ import { appendFileSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { err, ok, type Result } from "../../../kernel/core/result.ts";
-import { DEPOSITORY, DEPOSITORY_ABI, entityOf, hashOf, hexOf, txOf } from "../../../j/fixtures.ts";
+import { DEPLOYED, DEPOSITORY, DEPOSITORY_ABI, entityOf, hashOf, hexOf, txOf } from "../../../j/fixtures.ts";
 import { blockOf } from "../../../j/fixtures.ts";
 import type { Rpc, RpcFault } from "./port.ts";
 import { watchPort } from "./watch.ts";
@@ -30,7 +30,7 @@ const rpcOf = (node: Node, log: string): Rpc => (method, params) => {
   return Promise.resolve(answer === undefined ? err({ _tag: "rpc", reason: `no ${method}` }) : answer(params));
 };
 
-const portOf = (node: Node, log: string = logPath()) => watchPort(rpcOf(node, log), ADDRESS);
+const portOf = (node: Node, log: string = logPath()) => watchPort(rpcOf(node, log), DEPLOYED);
 
 const askedOf = (log: string): readonly string[] => readFileSync(log, "utf8").split("\n").filter((l) => l !== "");
 

@@ -5,7 +5,7 @@ import { err } from "../kernel/core/result.ts";
 import { address, decodeLog, decodeLogs, type Bytes32, type RawLog } from "./log.ts";
 import { observe, readingKey, readingsOf, type Reading } from "./observe.ts";
 import { advance, prepare, watching, type Batch } from "./watch.ts";
-import { blockOf, blocksBetween, DEPOSITORY, entityOf, hashOf, hexOf, logOf, must } from "./fixtures.ts";
+import { blockOf, blocksBetween, DEPLOYED, DEPOSITORY, entityOf, hashOf, hexOf, logOf, must } from "./fixtures.ts";
 
 // ids with hex letters in them: upper case is a different string only then
 const LEFT = entityOf(0xabn);
@@ -30,7 +30,7 @@ const finalized = (block: bigint, index: bigint) => logOf("DisputeFinalized", {
   sender: RIGHT, counterentity: LEFT, nonce: 7n, finalProofbodyHash: hexOf(5n), finalizationEvidenceHash: hexOf(6n),
 }, block, index);
 
-const refused = (log: RawLog): boolean => !decodeLog(DEPOSITORY, log).ok;
+const refused = (log: RawLog): boolean => !decodeLog(DEPLOYED, log).ok;
 
 const reading = (block: bigint, fork = 0n): Reading =>
   ({ block, blockHash: hashOf(block, fork), left: LEFT, right: RIGHT });
@@ -77,24 +77,24 @@ describe("j/strict what a reading is, and how it is held to the log", () => {
     [readingKey(reading(block, fork)), { epoch, nonce }] as const;
 
   test("R-WATCH-TELL a reading names its block by number and hash, so the chain is asked for that block", () => {
-    const events = must(decodeLogs(DEPOSITORY, [adv(2n, 0n, 1n)]));
+    const events = must(decodeLogs(DEPLOYED, [adv(2n, 0n, 1n)]));
     expect(readingsOf(events, [LEFT])).toEqual([reading(2n)]);
   });
 
   test("R-WATCH-TELL a row filed under another fork's block is no reading", () => {
     expect(readingKey(reading(2n))).not.toBe(readingKey(reading(2n, 1n)));
-    const events = must(decodeLogs(DEPOSITORY, [adv(2n, 0n, 1n)]));
+    const events = must(decodeLogs(DEPLOYED, [adv(2n, 0n, 1n)]));
     expect(observe(events, [LEFT], new Map([row(2n, 1n, 5n, 1n)])).ok).toBe(false);
     expect(observe(events, [LEFT], new Map([row(2n, 1n, 5n)])).ok).toBe(true);
   });
 
   test("R-WATCH-TELL a finalize or a counter alone asks the chain for nothing", () => {
-    const events = must(decodeLogs(DEPOSITORY, [finalized(2n, 0n), countered(2n, 1n)]));
+    const events = must(decodeLogs(DEPLOYED, [finalized(2n, 0n), countered(2n, 1n)]));
     expect(readingsOf(events, [LEFT, RIGHT])).toEqual([]);
   });
 
   test("R-WATCH-TELL a reading behind the log is a fault as much as one ahead", () => {
-    const events = must(decodeLogs(DEPOSITORY, [adv(4n, 0n, 3n)]));
+    const events = must(decodeLogs(DEPLOYED, [adv(4n, 0n, 3n)]));
     const behind = err({ _tag: "reading_off" as const, reading: reading(4n), logged: 3n, read: 2n });
     const ahead = err({ _tag: "reading_off" as const, reading: reading(4n), logged: 3n, read: 4n });
     expect(observe(events, [LEFT], new Map([row(4n, 2n, 5n)]))).toEqual(behind);
@@ -103,7 +103,7 @@ describe("j/strict what a reading is, and how it is held to the log", () => {
 });
 
 describe("j/strict the cursor and the head", () => {
-  const w = must(watching(DEPOSITORY, 2n, blockOf(9n)));
+  const w = must(watching(DEPLOYED, 2n, blockOf(9n)));
 
   test("R-WATCH-DEPTH a head behind the cursor with no new blocks is an empty batch, not a fault", () => {
     const prepared = must(prepare(w, { head: 5n, blocks: [], logs: [] }));
@@ -116,7 +116,7 @@ describe("j/strict the cursor and the head", () => {
   });
 
   test("R-WATCH-ORDER a log that names a block of the batch by its hash but claims another number is refused", () => {
-    const base = must(watching(DEPOSITORY, 0n, blockOf(0n)));
+    const base = must(watching(DEPLOYED, 0n, blockOf(0n)));
     const liar: RawLog = { ...adv(2n, 0n, 1n), block: 3n };
     const batch: Batch = { head: 9n, blocks: blocksBetween(0n, 3n), logs: [liar] };
     expect(prepare(base, batch)).toEqual(err({ _tag: "log_without_block", block: 3n, index: 0n }));

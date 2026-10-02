@@ -61,7 +61,10 @@ export type ChainEvent =
   >
   | Tagged<"dispute_countered", Dispute & Proof>
   | Tagged<"dispute_finalized", Dispute & { bodyHash: Bytes32; evidence: Bytes32; tx: Bytes32; shown: Shown }>
-  | Tagged<"secret_revealed", Place & { hashlock: Bytes32; revealer: Bytes32; secret: Bytes32 }>;
+  | Tagged<"secret_revealed", Place & { hashlock: Bytes32; revealer: Bytes32 | undefined; secret: Bytes32 }>;
+
+/** The two contracts whose logs the watcher reads: the Depository, and the DeltaTransformer that holds the secrets. */
+export type Deployed = Readonly<{ depository: Address; transformer: Address }>;
 
 export type LogFault =
   | Tagged<"foreign_log", Place & { address: Address }>
@@ -183,6 +186,17 @@ const revealedRead: Reader = (at, topics, data) =>
     ? some({ _tag: "secret_revealed", ...at, hashlock: topics[1], revealer: topics[2], secret: idAt(data, 0) })
     : none);
 
+/**
+ * The transformer's own `SecretRevealed(hashlock, secret)`, whose hashlock is a topic and whose secret is the data. Its
+ * `revealSecret` is public and unauthenticated (DeltaTransformer.sol 422-437): anyone may call it, and the chain then
+ * pays a clause from `hashToTimestamp` with no Depository log at all. A reveal made through the Depository emits this
+ * too, next to the Depository's own.
+ */
+const transformerRevealedRead: Reader = (at, topics, data) =>
+  (topics.length === 2 && holdsWords(data, (n) => n === 1)
+    ? some({ _tag: "secret_revealed", ...at, hashlock: topics[1] as Bytes32, revealer: undefined, secret: idAt(data, 0) })
+    : none);
+
 type Entry = Readonly<{ signature: string; read: Reader }>;
 
 const READ: readonly Entry[] = [
@@ -236,6 +250,7 @@ export const topicOf = (signature: string): string => keccakHex(utf8(signature))
 
 const READERS: ReadonlyMap<string, Reader> = new Map(READ.map((entry) => [topicOf(entry.signature), entry.read]));
 const SKIPPED: ReadonlySet<string> = new Set(IGNORED.map(topicOf));
+const TRANSFORMER_REVEALED = topicOf("SecretRevealed(bytes32,bytes32)");
 
 const placeOf = (log: RawLog): Place => ({ block: log.block, blockHash: log.blockHash, index: log.index });
 
@@ -246,11 +261,12 @@ const lowercaseBytes32 = (topics: readonly string[]): boolean => topics.every((t
  * address, one on neither list and one that is not the shape its signature says are faults: the node is asked for the
  * Depository's logs and the Depository's ABI is closed.
  */
-export const decodeLog = (depository: Address, log: RawLog): Result<Option<ChainEvent>, LogFault> => {
+export const decodeLog = (deployed: Deployed, log: RawLog): Result<Option<ChainEvent>, LogFault> => {
   const at = placeOf(log);
   const topic = log.topics[0] ?? "";
+  if (log.address === deployed.transformer) return transformerLog(at, topic, log);
   const read = READERS.get(topic);
-  if (log.address !== depository) return err({ _tag: "foreign_log", ...at, address: log.address });
+  if (log.address !== deployed.depository) return err({ _tag: "foreign_log", ...at, address: log.address });
   if (!lowercaseBytes32(log.topics)) return err({ _tag: "bad_log", ...at, event: topic });
   if (read !== undefined) {
     const event = read(at, log.topics, log.data, log.tx);
@@ -259,9 +275,17 @@ export const decodeLog = (depository: Address, log: RawLog): Result<Option<Chain
   return SKIPPED.has(topic) ? ok(none) : err({ _tag: "unknown_event", ...at, topic });
 };
 
+/** A log of the transformer: its one event is read, any other is a fault (the transformer's ABI is closed too). */
+const transformerLog = (at: Place, topic: string, log: RawLog): Result<Option<ChainEvent>, LogFault> => {
+  if (!lowercaseBytes32(log.topics)) return err({ _tag: "bad_log", ...at, event: topic });
+  if (topic !== TRANSFORMER_REVEALED) return err({ _tag: "unknown_event", ...at, topic });
+  const event = transformerRevealedRead(at, log.topics, log.data, log.tx);
+  return event._tag === "some" ? ok(event) : err({ _tag: "bad_log", ...at, event: topic });
+};
+
 /** The events of a block range, in the order the logs came, for the logs that are events an Account reads. */
-export const decodeLogs = (depository: Address, logs: readonly RawLog[]): Result<readonly ChainEvent[], LogFault> =>
+export const decodeLogs = (deployed: Deployed, logs: readonly RawLog[]): Result<readonly ChainEvent[], LogFault> =>
   map(
-    traverse(logs, (log) => decodeLog(depository, log)),
+    traverse(logs, (log) => decodeLog(deployed, log)),
     (found) => found.flatMap((event) => (event._tag === "some" ? [event.value] : [])),
   );

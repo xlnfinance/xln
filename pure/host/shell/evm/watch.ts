@@ -4,7 +4,7 @@
 // checked: a block that is not the one asked for, a log of another contract or outside the range, a reply that is not
 // words of the ABI, is a fault the caller reads, never a thrown error.
 import { accountKey } from "../../../chain/proof/deployment.ts";
-import { address, bytes32, type Address, type Bytes32, type RawLog } from "../../../j/log.ts";
+import { address, bytes32, type Address, type Bytes32, type Deployed, type RawLog } from "../../../j/log.ts";
 import type { Carried } from "../../../j/calldata/decode.ts";
 import type { AccountAt } from "../../../j/observe.ts";
 import type { Block } from "../../../j/watch.ts";
@@ -120,7 +120,8 @@ const accountCalls = (left: Bytes32, right: Bytes32): Result<Readonly<{ row: str
 const nonceOf = (raw: unknown): Result<bigint, ReplyFault> =>
   flatMap(wordsOf(raw), ([nonce]) => (nonce === undefined ? err(bad("an empty Account row")) : ok(nonce)));
 
-export const watchPort = (rpc: Rpc, depository: Address): WatchPort => {
+export const watchPort = (rpc: Rpc, deployed: Deployed): WatchPort => {
+  const { depository, transformer } = deployed;
   const reads = readsOf(rpc, { depository });
   const at = (block: Bytes32) => (data: string) =>
     reads.read(
@@ -131,9 +132,11 @@ export const watchPort = (rpc: Rpc, depository: Address): WatchPort => {
     head: () => reads.read("watch head", "eth_blockNumber", [], quantity),
     block: (number) => reads.read("watch block", "eth_getBlockByNumber", [hexQuantity(number), false], blockOf(number)),
     logs: (from, to) => {
-      const filter = { address: depository, fromBlock: hexQuantity(from), toBlock: hexQuantity(to) };
+      const filter = { address: [depository, transformer], fromBlock: hexQuantity(from), toBlock: hexQuantity(to) };
+      const asked = (log: RawLog): boolean =>
+        (log.address === depository || log.address === transformer) && log.block >= from && log.block <= to;
       return reads.read("watch logs", "eth_getLogs", [filter], (raw) => flatMap(listOf(raw, rawLogOf), (found) =>
-        (found.every((log) => log.address === depository && log.block >= from && log.block <= to)
+        (found.every(asked)
           ? ok(found)
           : err(bad("a log that is not the one asked for")))));
     },

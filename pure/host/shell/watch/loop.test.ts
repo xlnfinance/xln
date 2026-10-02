@@ -15,7 +15,7 @@ import type { Carried } from "../../../j/calldata/decode.ts";
 import { watching, type Block } from "../../../j/watch.ts";
 import { bytesToHex } from "../../../kernel/encoding/bytes.ts";
 import {
-  argumentsOf, blockOf, CLAUSED, DEPOSITORY, DEPOSITORY_ABI, entityOf, finalizedOf, finalizeInput, finalizeOp, hexOf,
+  argumentsOf, blockOf, CLAUSED, DEPLOYED, DEPOSITORY, DEPOSITORY_ABI, entityOf, finalizedOf, finalizeInput, finalizeOp, hexOf,
   logOf, must,
   multicalled, relayed, startInput, startOp, txOf,
 } from "../../../j/fixtures.ts";
@@ -87,7 +87,7 @@ const portOf = (
 const advanced = (block: bigint, index: bigint, epoch: bigint) =>
   logOf("AccountEpochAdvanced", { left: LEFT, right: RIGHT, ondeltaEpoch: epoch }, block, index);
 
-const start = (depth: bigint, from: Block = blockOf(0n)) => must(watching(DEPOSITORY, depth, from));
+const start = (depth: bigint, from: Block = blockOf(0n)) => must(watching(DEPLOYED, depth, from));
 
 const peer = (id: typeof RIGHT): EntityId => unwrapOr(entityId(id), () => expect.unreachable("peer"));
 
@@ -228,7 +228,7 @@ describe("host/shell/watch the J loop's poll", () => {
       const { tx, logs } = finalizing();
       const hidden = Uint8Array.of(0xca, 0xfe, 0xba, 0xbe, 1, 2, 3, 4);
       const base = portOf(straight(6n, [...logs, later]), logPath(), -1n, new Map([[tx, hidden]]));
-      const got = await poll({ ...base, trace: watchPort(node(reply), DEPOSITORY).trace }, start(2n), LEFT);
+      const got = await poll({ ...base, trace: watchPort(node(reply), DEPLOYED).trace }, start(2n), LEFT);
       const unread: EntityInput = { _tag: "j_finalize_unread", peer: peer(RIGHT), tx };
       expect(got.ok ? got.value?.events : got).toEqual([EPOCH, OVER, unread, secret]);
       expect(got.ok ? got.value?.height : got).toBe(4n as never);
@@ -248,7 +248,7 @@ describe("host/shell/watch the J loop's poll", () => {
       const node: Rpc = (method) =>
         Promise.resolve(method === "debug_traceTransaction" ? ok(tree) : err({ _tag: "rpc", reason: "no" }));
       const base = portOf(straight(6n, logs), logPath(), -1n, new Map([[tx, hidden]]));
-      const got = await poll({ ...base, trace: watchPort(node, DEPOSITORY).trace }, start(2n), LEFT);
+      const got = await poll({ ...base, trace: watchPort(node, DEPLOYED).trace }, start(2n), LEFT);
       expect(got.ok ? got.value?.events : got).toEqual(TOLD);
     }));
   });
@@ -353,10 +353,10 @@ describe("host/shell/watch the J loop's poll", () => {
 
   test("R-JLOOP the cursor begins at the chain's own block, or at the port's fault", async () => {
     const config: WatchConfig = {
-      port: portOf(straight(9n), logPath()), depository: DEPOSITORY, depth: 3n, hosted: LEFT, value: false,
+      port: portOf(straight(9n), logPath()), deployed: DEPLOYED, depth: 3n, hosted: LEFT, value: false,
     };
     const begun = await beginAt(config, 5n);
-    expect(begun.ok ? begun.value : begun).toEqual({ depository: DEPOSITORY, depth: 3n, applied: blockOf(5n) });
+    expect(begun.ok ? begun.value : begun).toEqual({ deployed: DEPLOYED, depth: 3n, applied: blockOf(5n) });
     const down = await beginAt({ ...config, port: portOf(straight(9n), logPath(), 5n) }, 5n);
     expect(down).toEqual(err(DOWN));
   });

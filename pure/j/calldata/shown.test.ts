@@ -6,7 +6,7 @@ import type { Carried } from "./decode.ts";
 import { observe, type Accounts, type Addressed } from "../observe.ts";
 import { calldataWanted, withCalldata, type Prepared } from "../watch.ts";
 import {
-  argumentsOf, blockOf, bodyHashOf, CLAUSED, DEPOSITORY, direct, entityOf, finalizedOf, finalizeInput, finalizeOp,
+  argumentsOf, blockOf, bodyHashOf, CLAUSED, DEPLOYED, DEPOSITORY, direct, entityOf, finalizedOf, finalizeInput, finalizeOp,
   hexOf,
   logOf, must, patched, startInput, startOp, txOf,
 } from "../fixtures.ts";
@@ -31,7 +31,7 @@ const started = (block: bigint, index: bigint, initial: readonly string[], proof
   }, block, index);
 
 const preparedOf = (...logs: Parameters<typeof decodeLogs>[1]): Prepared =>
-  ({ last: blockOf(2n), events: must(decodeLogs(DEPOSITORY, logs)) });
+  ({ last: blockOf(2n), events: must(decodeLogs(DEPLOYED, logs)) });
 
 const accounts: Accounts = new Map([[`2:${blockOf(2n).hash}:${LEFT}:${RIGHT}`, { epoch: 1n, nonce: 5n }]]);
 

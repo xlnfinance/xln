@@ -15,7 +15,7 @@ import type { SettlementDiff } from "../chain/money.ts";
 import { seal, type JBatch, type SealContext, type SealOutcome } from "./batch/jbatch.ts";
 import type { SealedBatch } from "./batch/sealed.ts";
 import type { Gas, Simulation } from "./gas/simulate.ts";
-import { address, bytes32, type Address, type Bytes32, type RawLog } from "./log.ts";
+import { address, bytes32, type Address, type Bytes32, type Deployed, type RawLog } from "./log.ts";
 import type { JOp } from "./op/ops.ts";
 import type { Treasury } from "./plan/funded.ts";
 import type { Block } from "./watch.ts";
@@ -166,6 +166,11 @@ export const entityOf = (n: bigint): Bytes32 => must(bytes32(hexOf(n)));
 export const bodyHashOf = (n: bigint): Bytes32 => must(bytes32(hexOf(n)));
 
 export const DEPOSITORY: Address = must(address(hexOf(0xde0n, 20)));
+
+/** The DeltaTransformer the fixtures read logs of, next to the Depository. */
+export const TRANSFORMER: Address = must(address(hexOf(0xde1n, 20)));
+
+export const DEPLOYED: Deployed = { depository: DEPOSITORY, transformer: TRANSFORMER };
 
 /** A block hash that names its height and the fork it is on, so two forks never share one. */
 export const hashOf = (number: bigint, fork = 0n): Bytes32 => must(bytes32(hexOf(number + (fork << 128n))));
