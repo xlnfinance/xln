@@ -329,6 +329,22 @@ describe("runtime/chain R-DISPUTE-FREEZE a frame the peer refused and holds sign
     expect([offdeltas(after), same(after)]).toStrictEqual([[-5n, -5n], true]);
   });
 
+  test("R-DISPUTE-WATCH a starter finalizes with a counter made of a frame it signed and took back", () => {
+    const { c, hashA } = rolledBack();
+    const [entry] = replicaOf(c, ALICE).unsuperseded;
+    const nonceA = entry?.sealed === undefined
+      ? expect.unreachable("no signed frame")
+      : entry.sealed.firstNonce + BigInt(entry.slot) - 1n;
+    const asked = disputed(c);
+    const countered = feed(asked, ALICE, {
+      _tag: "j_countered", peer: BOB, nonce: nonceA, proposerIsLeft: true, bodyHash: hashA,
+    });
+    const over = feed(countered, ALICE, { _tag: "j_window_over", peer: BOB });
+    // Bob accepts the opening state at once (nonce below), so only a finalize by the frame's nonce is Alice's.
+    const finals = over.chain.flatMap((a: JAction) => (a._tag === "dispute_finalize" && a.nonce === nonceA ? [a] : []));
+    expect(finals.map((a) => [a.proposerIsLeft, a.startedByLeft, hashed(a.body)])).toStrictEqual([[true, true, hashA]]);
+  });
+
   test("R-DISPUTE-FREEZE a rolled-back frame the chain did not pay by stays in the queue and is sealed once", () => {
     const { c } = rolledBack();
     const asked = disputed(c);

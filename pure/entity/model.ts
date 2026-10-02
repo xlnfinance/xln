@@ -101,11 +101,13 @@ export type ChainFacts = Readonly<{
 
 /**
  * A dispute the peer started against this node in the epoch it is in (R-DISPUTE-WATCH): the proof it opened with
- * (`nonce`, `proposerIsLeft`, `bodyHash`), the end of its window and whether the chain's clock has passed it, and the
- * node's own answer: the counter it asked the chain for with the newest proof it holds.
+ * (`nonce`, `proposerIsLeft`, `bodyHash`), the end of its window and whether the chain's clock has passed it, the
+ * node's own answer (the counter it asked the chain for with the newest proof it holds) and the counter the chain
+ * registered, whoever registered it (a watchtower of the node's, or the node's own answer).
  */
 export type Against = Readonly<{
   nonce: bigint; proposerIsLeft: boolean; bodyHash: string; window: bigint; over: boolean; answer: Answer | undefined;
+  countered: Registered | undefined;
 }>;
 
 /**

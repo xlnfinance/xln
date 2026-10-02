@@ -9,7 +9,9 @@ import { requirement } from "../../../j/gas/gas.ts";
 import type { Cause, Gas, HoldReason, Simulation } from "../../../j/gas/simulate.ts";
 import { seal, type JBatch, type SealOutcome } from "../../../j/batch/jbatch.ts";
 import type { JAnswer, Returned, Skipped } from "../../../j/batch/answer.ts";
-import { processBatchCall, type ProcessBatchCall, type SealedBatch } from "../../../j/batch/sealed.ts";
+import {
+  MIN_GAS_BUDGET, processBatchCall, sealBatch, type ProcessBatchCall, type SealedBatch,
+} from "../../../j/batch/sealed.ts";
 import type { Treasury } from "../../../j/plan/funded.ts";
 import { ok, type Result } from "../../../kernel/core/result.ts";
 import type { Tagged } from "../../../kernel/core/tagged.ts";
@@ -104,10 +106,31 @@ const sealOutcome = async (
     : outcome;
 };
 
+/**
+ * Whether a batch of no op at all is accepted at the nonce the next batch would carry. The Depository checks the
+ * batch's own Hanko (E4) and its nonce (E2) before any op (Depository.sol 368-369), and a batch with a dispute op
+ * reverts whole, so those two reach the Host as the same four bytes an op's own E2 or E4 does; a refusal of this bare
+ * batch is the batch's, and the simulation of a lone op then says nothing of the op.
+ */
+const bareBatchLands = async (io: Io, s: Submitter): Promise<Result<boolean, ShellFault>> => {
+  const { deployment } = s;
+  const { entity, signedMax } = s.jbatch;
+  const bare = sealBatch({ deployment, entity, nonce: signedMax + 1n, gasBudget: MIN_GAS_BUDGET }, []);
+  if (!bare.ok) return ok(false);
+  const call = callOf(io, bare.value);
+  if (!call.ok) return call;
+  const outcome = await io.port.simulate(call.value, io.gas.txGasCap);
+  return outcome.ok ? ok(outcome.value._tag === "ok") : outcome;
+};
+
 /** The contract's DISPUTE_OP_COUNTER, and the skip reasons that are for good for a counter (Account.sol 69-83). */
 const COUNTER_OP = 1;
 export const COUNTER_SKIPPED_FOR_GOOD: ReadonlySet<number> = new Set([3, 4, 5, 6, 7]);
-/** The errors a counter is reverted with for good: unauthorized or stale (E2), bad signature (E4), bad hash (E9). */
+/**
+ * The errors a counter is reverted with for good when the op raised them: unauthorized or stale (E2), bad signature
+ * (E4), bad hash (E9). E2 and E4 are the batch's too (`bareBatchLands`): only with a bare batch that lands are they the
+ * op's.
+ */
 const REVERTED_FOR_GOOD: ReadonlySet<string> = new Set(["E2", "E4", "E9"]);
 
 const forGood = (cause: Cause): boolean =>
@@ -131,7 +154,9 @@ const counterIsLost = (why: readonly HoldReason[]): boolean => {
  * sealed and simulated at the head, before the draft is sealed whole, so one that can only fail never delays what
  * shares its group (a reveal) or waits behind it. A start the chain would revert is dropped from the draft, and named,
  * so the Entity that asked for it is told (it may ask again). A counter is named only when the chain would revert it
- * for good (`counterIsLost`): the Entity then stops restating it. A counter or a finalize held for a reason that can
+ * for good (`counterIsLost`) and a batch of no op lands at the same nonce (`bareBatchLands`), so a stale batch nonce or
+ * a Hanko the chain refuses never ends a counter: the Entity then stops restating it only for the op's own refusal.
+ * A counter or a finalize held for a reason that can
  * heal (or that the Host cannot name) is dropped from the draft for now and not named: the Entity restates both at each
  * frame, the counter while the window is open and the finalize until the dispute is over, so it asks again; and the
  * finalize the other party's landed first is dropped for good this way, since the dispute it names is over. One held
@@ -151,11 +176,15 @@ const lapsedDisputes = async (io: Io, s: Submitter): Promise<Result<Pumped | und
   });
   const left = refused.reduce<Submitter>((now, op) => dropped(now, op), s);
   const gone = refused.filter((op) => !left.jbatch.draft.includes(op));
-  const named = gone.filter((op) => {
+  const lostFor = (op: (typeof disputes)[number]): boolean => {
     const probe = probes[disputes.indexOf(op)];
     const held = probe?.ok === true && probe.value._tag === "held" ? probe.value : undefined;
-    return op._tag === "dispute_start" || (held !== undefined && counterIsLost(held.why));
-  });
+    return held !== undefined && counterIsLost(held.why);
+  };
+  const lost = gone.filter((op) => op._tag === "dispute_counter" && lostFor(op));
+  const bare = lost.length === 0 ? ok(false) : await bareBatchLands(io, s);
+  if (!bare.ok) return bare;
+  const named = gone.filter((op) => op._tag === "dispute_start" || (bare.value && lost.includes(op)));
   const pumped: Pumped = { submitter: left, stage: "closed", returned: [], skipped: [], lapsed: named };
   return ok(gone.length === 0 ? undefined : pumped);
 };
