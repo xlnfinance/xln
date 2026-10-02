@@ -4,7 +4,9 @@
 import { describe, expect, test } from "bun:test";
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { err, ok } from "../../../kernel/core/result.ts";
-import { blockOf, DEPOSITORY, entityOf as bytes, evidenceOf, finalizeOp, hexOf, logOf, must as made } from "../../../j/fixtures.ts";
+import {
+  blockOf, DEPOSITORY, entityOf as bytes, evidenceOf, finalizeOp, hexOf, logOf, must as made,
+} from "../../../j/fixtures.ts";
 import type { Row } from "../../../runtime/model.ts";
 import { open } from "../../../runtime/fixtures.ts";
 import type { Disk } from "../disk/disk.ts";
@@ -118,7 +120,7 @@ describe("host/shell/node a node with a J loop", () => {
       sender: bytes(2n), counterentity: bytes(1n), nonce: 7n, finalProofbodyHash: hexOf(5n),
       finalizationEvidenceHash: evidenceOf(op),
     }, 105n, 1n);
-    // hop 63 (reserve 60, lag 3), slack 50: hold = 63 - 50 - 3 - 2 - 1 = 7, and the finalize of block 105 is 8 old at head 115
+    // hop 63 (reserve 60, lag 3), slack 50: hold = 63 - 50 - 3 - 2 - 1 = 7; the finalize of block 105 is 8 old at 115
     const watch = watchOf({ ...STRAIGHT, head: 115n }, log, [advanced(105n, 1n), finalize], QUIET, 50n);
     const alice = await nodeOf(await seatOf(ALICE, dir, 0), NO_PEER, { tickMs: QUICK, watch, reserve: 60n });
     expect(await until(async () => (await alice.look()).cursor === 113n, WAIT)).toBe(true);
@@ -126,7 +128,7 @@ describe("host/shell/node a node with a J loop", () => {
     expect(callsOf(log).filter((c) => c === "input")).toHaveLength(3);
   });
 
-  test("R-WATCH-CALLDATA a node whose hop leaves no block to hold delivery is not started, and writes nothing", async () => {
+  test("R-WATCH-CALLDATA a node whose hop leaves no block to hold delivery for is not started", async () => {
     const dir = fresh();
     const log = `${dir}/calls.log`;
     writeFileSync(log, "");
@@ -247,7 +249,7 @@ describe("host/shell/node a node with a J loop", () => {
     expect((await alice.stop()).watchFault).toBeUndefined();
   });
 
-  test("R-WATCH-CALLDATA a tx the provider refuses for good holds the node MOST_TRIES ticks, then it goes on", async () => {
+  test("R-WATCH-CALLDATA a tx the provider always refuses holds the node MOST_TRIES ticks, then goes on", async () => {
     const dir = fresh();
     const log = `${dir}/calls.log`;
     writeFileSync(log, "");
@@ -270,7 +272,7 @@ describe("host/shell/node a node with a J loop", () => {
     expect(factsOf(look)).toMatchObject({ epoch: 1n });
   });
 
-  test("R-WATCH-CALLDATA a tx the provider keeps refusing, past the hold the hop leaves, holds the node three tries", async () => {
+  test("R-WATCH-CALLDATA a tx the provider refuses past the hold the hop leaves holds three tries", async () => {
     const dir = fresh();
     const log = `${dir}/calls.log`;
     writeFileSync(log, "");

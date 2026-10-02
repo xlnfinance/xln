@@ -14,7 +14,7 @@
 import { err, flatMap, foldResult, map, ok, type Result } from "../kernel/core/result.ts";
 import type { Tagged } from "../kernel/core/tagged.ts";
 import { jHeight, type HeightFault, type JHeight } from "../account/clause/clock.ts";
-import { finalizedSecrets, startedBody, type Carried } from "./calldata/decode.ts";
+import { finalizedSecrets, startedBody, type Read } from "./calldata/decode.ts";
 import { decodeLogs, type Address, type Bytes32, type ChainEvent, type LogFault, type RawLog } from "./log.ts";
 import {
   hostsAny, observe, readingsOf, type Accounts, type Addressed, type JEvent, type ObserveFault, type Reading,
@@ -114,7 +114,7 @@ export const calldataWanted = (p: Prepared, hosted: readonly Bytes32[]): readonl
  * the Depository. A finalize is `read` when a `processBatch` call among those bytes, wherever a wrapper put it, has an
  * op that carries the evidence hash the log did, and `unread` when none does or the Host has no bytes for it.
  */
-export const withCalldata = (p: Prepared, inputs: ReadonlyMap<Bytes32, readonly Carried[]>): Prepared => ({
+export const withCalldata = (p: Prepared, inputs: ReadonlyMap<Bytes32, readonly Read[]>): Prepared => ({
   ...p,
   events: p.events.map((e): ChainEvent => {
     if (e._tag === "dispute_started") {
@@ -122,7 +122,8 @@ export const withCalldata = (p: Prepared, inputs: ReadonlyMap<Bytes32, readonly 
       return { ...e, body, unread: body === undefined };
     }
     if (e._tag !== "dispute_finalized") return e;
-    const read = (inputs.get(e.tx) ?? []).map((input) => finalizedSecrets(input, e.evidence)).filter((r) => r !== undefined);
+    const read = (inputs.get(e.tx) ?? []).map((input) => finalizedSecrets(input, e.evidence))
+      .filter((r) => r !== undefined);
     return { ...e, shown: read.length > 0 ? { _tag: "read", secrets: [...new Set(read.flat())] } : { _tag: "unread" } };
   }),
 });

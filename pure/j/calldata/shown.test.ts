@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { ok } from "../../kernel/core/result.ts";
 import type { Bytes32 } from "../log.ts";
 import { decodeLogs } from "../log.ts";
-import type { Carried } from "./decode.ts";
+import type { Read } from "./decode.ts";
 import { observe, type Accounts, type Addressed } from "../observe.ts";
 import { calldataWanted, withCalldata, type Prepared } from "../watch.ts";
 import {
@@ -92,7 +92,7 @@ describe("j/shown", () => {
   });
 
   const HASH = must(proofBodyHash(CLAUSED));
-  const opened = (inputs: ReadonlyMap<Bytes32, readonly Carried[]>, hosted = LEFT) =>
+  const opened = (inputs: ReadonlyMap<Bytes32, readonly Read[]>, hosted = LEFT) =>
     must(observe(withCalldata(preparedOf(started(2n, 0n, [], HASH)), inputs).events, [hosted], accounts));
   const START_TX = txOf(2n, 0n);
 

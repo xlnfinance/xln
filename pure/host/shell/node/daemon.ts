@@ -25,7 +25,8 @@ import {
   accepted, closed, dialed, line, linked, route, startMesh, wanted, type ConnId, type Mesh, type Refused, type Write,
 } from "../mesh/mesh.ts";
 import {
-  beginAt, poll, windowsOf, type BadPeer, type BadSecret, type Delivery, type JFault, type Tries, type WatchConfig, holdBound,
+  beginAt, holdBound, poll, windowsOf, type BadPeer, type BadSecret, type Delivery, type JFault, type Reads, type Tries,
+  type WatchConfig,
 } from "../watch/loop.ts";
 import type { PortFault } from "../submit/chain.ts";
 import { hopOf } from "../../../entity/paybook/paybook.ts";
@@ -119,6 +120,8 @@ type State = Readonly<{
   watchFault: string | undefined;
   /** The tries the J loop has spent on transactions the node could not give (it gives up on one past MOST_TRIES). */
   tries: Tries;
+  /** What the J loop holds of the transactions it has not delivered yet: the scans are made once, not per poll. */
+  reads: Reads;
   timer: ReturnType<typeof setTimeout> | undefined;
 }>;
 
@@ -275,9 +278,12 @@ const heldUp = (state: State, fault: JFault): State => {
     const begun: readonly HostNotice[] = state.watchFault === watchFault
       ? []
       : [{ _tag: "watch_stalled", tx: fault.tx, reason: fault.fault.reason }];
-    return { ...state, watchFault, tries: fault.tries, notices: recent([...state.notices, ...begun]) };
+    const notices = recent([...state.notices, ...begun]);
+    return { ...state, watchFault, tries: fault.tries, reads: fault.reads, notices };
   }
-  return fault._tag === "port" ? { ...state, watchFault: `${fault.call}: ${fault.reason}` } : { ...state, fatal: fault };
+  return fault._tag === "port"
+    ? { ...state, watchFault: `${fault.call}: ${fault.reason}` }
+    : { ...state, fatal: fault };
 };
 
 /** The events are in the WAL before the height is; the cursor moves only after the height's row (R-HEIGHT-ORDER). */
@@ -288,7 +294,8 @@ const delivered = async (rig: Rig, state: State, delivery: Delivery): Promise<St
   if (first.fatal !== undefined) return first;
   const height = { ...first.station, host: heard(first.station.host, delivery.height) };
   const second = await concluded(rig, first, await drain(shell, height));
-  return second.fatal === undefined ? { ...second, cursor: delivery.watch, tries: delivery.tries } : second;
+  const { tries, reads } = delivery;
+  return second.fatal === undefined ? { ...second, cursor: delivery.watch, tries, reads } : second;
 };
 
 const listening = async (rig: Rig, state: State): Promise<State> => {
@@ -301,7 +308,7 @@ const listening = async (rig: Rig, state: State): Promise<State> => {
   const windows = windowsOf(watch.hosted, chain);
   if (!windows.ok) return heldUp(next, windows.error);
   const hold = holdBound(rig.config.boot.setup.clock, watch.depth, watch.slack);
-  const patience = { tries: state.tries, hold };
+  const patience = { tries: state.tries, hold, reads: state.reads };
   const got = await poll(watch.port, cursor.value, watch.hosted, windows.value, patience);
   if (!got.ok) return heldUp(next, got.error);
   const quiet = { ...next, watchFault: undefined };
@@ -411,7 +418,7 @@ export const startDaemon = async (
   const first: State = {
     station: started.value.station, mesh: startMesh(config.key, config.table), wires: new Map(), next: 1,
     dialing: new Set(), stalled: new Map(), counts: { sent: 0, heard: 0, dropped: 0 }, notices: [], refused: [],
-    fatal: undefined, cursor: undefined, watchFault: undefined, tries: new Map(), timer: undefined,
+    fatal: undefined, cursor: undefined, watchFault: undefined, tries: new Map(), reads: new Map(), timer: undefined,
   };
   const finished = leaving(rig, first, started.value.sent)
     .then((state) => run(rig, mails, state)).then((state) => ended(rig, state));

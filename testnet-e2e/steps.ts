@@ -15,7 +15,7 @@ import type { SigningContext } from "../pure/account/proof/signing.ts";
 import { proofBodyHash } from "../pure/chain/proof/proof.ts";
 import { accountMessageHash } from "../pure/chain/proof/payload.ts";
 import { keccakHex } from "../pure/kernel/encoding/bytes.ts";
-import { finalizedSecrets, secretsIn } from "../pure/j/calldata/decode.ts";
+import { finalizedSecrets, readOf, secretsIn } from "../pure/j/calldata/decode.ts";
 import { address, bytes32 } from "../pure/j/log.ts";
 import { watchPort } from "../pure/host/shell/evm/watch.ts";
 import { httpRpc } from "../pure/host/shell/node/rpc.ts";
@@ -721,7 +721,7 @@ const rebase: Step<World> = {
     const evidence = must(bytes32(String(finalize.args.finalizationEvidenceHash)), "evidence hash");
     const traced = await watchPort(httpRpc(chain.rpc), depositoryAddress).trace(must(bytes32(finalize.transactionHash), "finalize transaction"));
     if (!traced.ok || traced.value === undefined) throw new Error(`the node gave no call trace of the finalize: ${traced.ok ? "no call trace on this node" : traced.error.reason}`);
-    if (!traced.value.some((input) => finalizedSecrets(input, evidence) !== undefined)) throw new Error(`no call of the finalize's trace carries the op whose evidence hash the chain logged (${traced.value.length} calls to the Depository)`);
+    if (!traced.value.some((input) => finalizedSecrets(readOf(input), evidence) !== undefined)) throw new Error(`no call of the finalize's trace carries the op whose evidence hash the chain logged (${traced.value.length} calls to the Depository)`);
     // R-LEDGER-REBASE: each Runtime's ledger is the chain's now: no collateral, no ondelta, offdelta counted from zero, and no open clause.
     const pay = PENDING_PAY * unit(chain);
     const ledgers = [a, x].map((id) => ({ id, replica: net.account(id, id === a ? x : a) }));
