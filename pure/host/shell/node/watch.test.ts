@@ -109,6 +109,23 @@ describe("host/shell/node a node with a J loop", () => {
     expect(await booted(VALUE_TRACED)).toBe("started");
   });
 
+  test("R-WATCH-CALLDATA the hold is the hop less the slack, the lag and the depth the node reads at", async () => {
+    const dir = fresh();
+    const log = `${dir}/calls.log`;
+    writeFileSync(log, "");
+    const op = finalizeOp();
+    const finalize = logOf("DisputeFinalized", {
+      sender: bytes(2n), counterentity: bytes(1n), nonce: 7n, finalProofbodyHash: hexOf(5n),
+      finalizationEvidenceHash: evidenceOf(op),
+    }, 105n, 1n);
+    // hop 63 (reserve 60, lag 3), slack 50: hold = 63 - 50 - 3 - 2 - 1 = 7, and the finalize of block 105 is 8 old at head 115
+    const watch = watchOf({ ...STRAIGHT, head: 115n }, log, [advanced(105n, 1n), finalize], QUIET, 50n);
+    const alice = await nodeOf(await seatOf(ALICE, dir, 0), NO_PEER, { tickMs: QUICK, watch, reserve: 60n });
+    expect(await until(async () => (await alice.look()).cursor === 113n, WAIT)).toBe(true);
+    await alice.stop();
+    expect(callsOf(log).filter((c) => c === "input")).toHaveLength(3);
+  });
+
   test("R-WATCH-CALLDATA a node whose hop leaves no block to hold delivery is not started, and writes nothing", async () => {
     const dir = fresh();
     const log = `${dir}/calls.log`;

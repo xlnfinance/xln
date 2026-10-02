@@ -414,6 +414,11 @@
    "kind": "test",
    "layer": "ts",
    "name": "R-WATCH-CALLDATA a tx the provider keeps refusing, past the hold the hop leaves, holds the node three tries"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-WATCH-CALLDATA the hold is the hop less the slack, the lag and the depth the node reads at"
   }
  ]
 }
