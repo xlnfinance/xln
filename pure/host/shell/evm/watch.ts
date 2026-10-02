@@ -8,6 +8,7 @@ import { address, bytes32, type Address, type Bytes32, type RawLog } from "../..
 import type { AccountAt } from "../../../j/observe.ts";
 import type { Block } from "../../../j/watch.ts";
 import { A } from "../../../kernel/encoding/abi.ts";
+import { hexToBytes } from "../../../kernel/encoding/bytes.ts";
 import { all, err, flatMap, map, mapErr, ok, type Result } from "../../../kernel/core/result.ts";
 import type { PortFault } from "../submit/chain.ts";
 import type { WatchPort } from "../watch/loop.ts";
@@ -29,6 +30,7 @@ const textsOf = (raw: unknown): Result<readonly Bytes32[], ReplyFault> =>
 
 const logFields = (o: Fields) => all({
   block: quantity(o["blockNumber"]), blockHash: hash32(o["blockHash"]), index: quantity(o["logIndex"]),
+  tx: hash32(o["transactionHash"]),
   topics: textsOf(o["topics"]),
   address: isText(o["address"])
     ? mapErr(address(o["address"].toLowerCase()), () => bad("not an address"))
@@ -38,6 +40,14 @@ const logFields = (o: Fields) => all({
 
 const rawLogOf = (raw: unknown): Result<RawLog, ReplyFault> =>
   flatMap(fieldsOf(raw), (o) => map(logFields(o), (log): RawLog => log));
+
+/** The `input` of a transaction: the calldata of the call, as bytes. One the node does not know is a fault. */
+const inputOf = (raw: unknown): Result<Uint8Array, ReplyFault> =>
+  flatMap(fieldsOf(raw), (o) => {
+    const input = o["input"];
+    const bytes = isText(input) ? hexToBytes(input.toLowerCase()) : undefined;
+    return bytes?.ok === true ? ok(bytes.value) : err(bad("a transaction without input"));
+  });
 
 /** `_accounts(bytes)` and `ondeltaEpoch(bytes32,bytes32)`: the two reads the watcher's `reading` is made of. */
 const accountCalls = (left: Bytes32, right: Bytes32): Result<Readonly<{ row: string; epoch: string }>, ReplyFault> =>
@@ -68,6 +78,7 @@ export const watchPort = (rpc: Rpc, depository: Address): WatchPort => {
           ? ok(found)
           : err(bad("a log that is not the one asked for")))));
     },
+    input: (tx) => reads.read("watch tx", "eth_getTransactionByHash", [tx], inputOf),
     accountAt: async (block, left, right): Promise<Result<AccountAt, PortFault>> => {
       const calls = accountCalls(left, right);
       if (!calls.ok) return err(portFault("account at", calls.error.why));

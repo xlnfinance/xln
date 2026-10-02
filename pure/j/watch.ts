@@ -14,6 +14,7 @@
 import { err, flatMap, foldResult, map, ok, type Result } from "../kernel/core/result.ts";
 import type { Tagged } from "../kernel/core/tagged.ts";
 import { jHeight, type HeightFault, type JHeight } from "../account/clause/clock.ts";
+import { finalizedSecrets } from "./calldata/decode.ts";
 import { decodeLogs, type Address, type Bytes32, type ChainEvent, type LogFault, type RawLog } from "./log.ts";
 import {
   observe, readingsOf, type Accounts, type Addressed, type JEvent, type ObserveFault, type Reading,
@@ -97,6 +98,25 @@ export const prepare = (w: Watch, batch: Batch): Result<Prepared, WatchFault> =>
     flatMap(buried(w, batch, tip), (last) =>
       flatMap(belonging(batch.blocks, batch.logs), () =>
         map(decodeLogs(w.depository, batch.logs), (events) => ({ last, events })))));
+
+/** The transactions whose input the Host must read: the ones that carried a dispute finalize (R-WATCH-CALLDATA). */
+export const calldataWanted = (p: Prepared): readonly Bytes32[] =>
+  [...new Set(p.events.flatMap((e) => (e._tag === "dispute_finalized" ? [e.tx] : [])))];
+
+/**
+ * The prepared batch with the arguments of its finalizes read from the inputs of their transactions, by transaction
+ * hash: the finalize is `read` when an op of the input carries the evidence hash the log did, `unread` when none does
+ * or the Host has no input for it.
+ */
+export const withCalldata = (p: Prepared, inputs: ReadonlyMap<Bytes32, Uint8Array>): Prepared => ({
+  ...p,
+  events: p.events.map((e): ChainEvent => {
+    if (e._tag !== "dispute_finalized") return e;
+    const input = inputs.get(e.tx);
+    const secrets = input === undefined ? undefined : finalizedSecrets(input, e.evidence);
+    return { ...e, shown: secrets === undefined ? { _tag: "unread" } : { _tag: "read", secrets } };
+  }),
+});
 
 /** The Accounts the chain must be asked about, at the end of which block, before `advance` can run. */
 export const readings = (p: Prepared, hosted: readonly Bytes32[]): readonly Reading[] => readingsOf(p.events, hosted);

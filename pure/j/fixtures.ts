@@ -2,11 +2,14 @@
 // Depository's ABI and lifecycle vectors turned into raw logs, and a chain of blocks with hashes. Only tests import
 // this.
 import { readFileSync } from "node:fs";
-import { Interface } from "ethers";
+import { AbiCoder, Interface } from "ethers";
 import { expect } from "bun:test";
 import { Depository__factory } from "../../contracts/typechain-types/factories/Depository.sol/Depository__factory.ts";
 import { unwrapOr, type Result } from "../kernel/core/result.ts";
+import { emptyBatch, encodeBatch, type FinalDisputeProof } from "../chain/batch/batch.ts";
+import { finalizationEvidenceHash } from "../chain/proof/dispute.ts";
 import type { ProofBody } from "../chain/proof/proof.ts";
+import { hexToBytes } from "../kernel/encoding/bytes.ts";
 import type { SettlementDiff } from "../chain/money.ts";
 import { seal, type JBatch, type SealContext, type SealOutcome } from "./batch/jbatch.ts";
 import type { SealedBatch } from "./batch/sealed.ts";
@@ -166,6 +169,10 @@ export const DEPOSITORY: Address = must(address(hexOf(0xde0n, 20)));
 /** A block hash that names its height and the fork it is on, so two forks never share one. */
 export const hashOf = (number: bigint, fork = 0n): Bytes32 => must(bytes32(hexOf(number + (fork << 128n))));
 
+/** The hash of the transaction that carried the log at `block` and `index`, unless a test names another. */
+export const txOf = (block: bigint, index: bigint): Bytes32 =>
+  must(bytes32(hexOf((0x7an << 200n) + (block << 64n) + index)));
+
 /** A block's second is ten times its number: a later block is a later second, on every fork. */
 export const blockOf = (number: bigint, fork = 0n): Block =>
   ({
@@ -179,11 +186,13 @@ export const blocksBetween = (from: bigint, to: bigint, fork = 0n): readonly Blo
 type Values = Readonly<Record<string, unknown>>;
 
 /** A log the Depository would emit: `event` with its arguments by name, at `block` and `index`, on `fork`. */
-export const logOf = (event: string, args: Values, block: bigint, index: bigint, fork = 0n): RawLog => {
+export const logOf = (
+  event: string, args: Values, block: bigint, index: bigint, fork = 0n, tx: Bytes32 = txOf(block, index),
+): RawLog => {
   const fragment = DEPOSITORY_ABI.getEvent(event) ?? expect.unreachable(`the Depository has no event ${event}`);
   const { data, topics } = DEPOSITORY_ABI.encodeEventLog(fragment, fragment.inputs.map((input) => args[input.name]));
   return {
-    address: DEPOSITORY, block, index, blockHash: hashOf(block, fork), data: data.toLowerCase(),
+    address: DEPOSITORY, block, index, blockHash: hashOf(block, fork), data: data.toLowerCase(), tx,
     topics: topics.map((topic) => must(bytes32(topic.toLowerCase()))),
   };
 };
@@ -203,3 +212,46 @@ export const lifecyclePhases: Readonly<Record<string, Phase>> = Object.fromEntri
   Object.entries<unknown>(JSON.parse(readFileSync(LIFECYCLE, "utf8")))
     .filter((entry): entry is [string, Phase] => hasEvents(entry[1])),
 );
+
+// ---- the arguments and calldata of a dispute finalize
+
+/** `abi.encode(Arguments)`, the blob a transformer decodes: one fill ratio and these secrets. */
+export const argumentsOf = (secrets: readonly string[]): string =>
+  AbiCoder.defaultAbiCoder().encode(["tuple(uint16[],bytes32[])"], [[[5000n], secrets]]);
+
+const BODY: ProofBody = {
+  watchSeed: hexOf(0n), leftResponseSeconds: 60n, rightResponseSeconds: 60n, offdeltas: [10n], tokenIds: [1n],
+  transformers: [],
+};
+
+/** A finalize op of a batch, with the fields a test does not care about filled in. */
+export const finalizeOp = (over: Partial<FinalDisputeProof> = {}): FinalDisputeProof => ({
+  counterentity: entityOf(0x11n), initialNonce: 7n, finalNonce: 8n, proposerIsLeft: true,
+  initialProofbodyHash: hexOf(1n), finalProofbody: BODY, starterArguments: "0x", otherArguments: "0x",
+  sig: `0x${"ab".repeat(65)}`, startedByLeft: false, cooperative: false, ...over,
+});
+
+/** The input of a `processBatch` call, made by `sender`, that carries these finalize ops. */
+export const finalizeInput = (sender: Bytes32, ops: readonly FinalDisputeProof[]): Uint8Array => {
+  const batch = must(encodeBatch({ ...emptyBatch(1_000_000n), disputeFinalizations: ops }));
+  return must(hexToBytes(DEPOSITORY_ABI.encodeFunctionData("processBatch", [sender, batch, "0x1234", 3n])));
+};
+
+/** What `DisputeFinalized` logs as `finalizationEvidenceHash` for the op. */
+export const evidenceOf = (op: FinalDisputeProof): Bytes32 =>
+  must(bytes32(must(finalizationEvidenceHash({
+    initialProofBodyHash: op.initialProofbodyHash, finalNonce: op.finalNonce, proposerIsLeft: op.proposerIsLeft,
+    startedByLeft: op.startedByLeft, starterArguments: op.starterArguments, otherArguments: op.otherArguments,
+    sig: op.sig,
+  }))));
+
+/** The `DisputeFinalized` log of `op` (sender Right, counterentity Left, opened at nonce 7), carried by `tx`. */
+export const finalizedOf = (op: FinalDisputeProof, block: bigint, index: bigint, tx = txOf(block, index)): RawLog =>
+  logOf("DisputeFinalized", {
+    sender: entityOf(0x52n), counterentity: entityOf(0x11n), nonce: 7n, finalProofbodyHash: hexOf(5n),
+    finalizationEvidenceHash: evidenceOf(op),
+  }, block, index, 0n, tx);
+
+/** The bytes with `patch` written over them at `at`, as a new array. */
+export const patched = (bytes: Uint8Array, at: number, patch: Uint8Array): Uint8Array =>
+  Uint8Array.from(bytes, (b, i) => patch[i - at] ?? b);

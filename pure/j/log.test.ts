@@ -7,7 +7,7 @@ import {
   bytes32, address, decodeLog, decodeLogs, IGNORED, READ_SIGNATURES, topicOf, type ChainEvent, type RawLog,
 } from "./log.ts";
 import {
-  bodyHashOf, DEPOSITORY, DEPOSITORY_ABI, entityOf, hashOf, hexOf, lifecyclePhases, logOf, must,
+  bodyHashOf, DEPOSITORY, DEPOSITORY_ABI, entityOf, hashOf, hexOf, lifecyclePhases, logOf, must, txOf,
 } from "./fixtures.ts";
 
 const LEFT = entityOf(0x11n);
@@ -151,9 +151,15 @@ describe("j/log", () => {
     }, 3n, 2n);
     const fact = { sender: RIGHT, counter: LEFT, nonce: 7n, block: 3n, blockHash: hashOf(3n) };
     expect(decodeLogs(DEPOSITORY, [started, countered, finalized])).toEqual(ok([
-      { _tag: "dispute_started", ...fact, proposerIsLeft: true, bodyHash: bodyHashOf(1n), timeout: 5n, index: 0n },
+      {
+        _tag: "dispute_started", ...fact, proposerIsLeft: true, bodyHash: bodyHashOf(1n), timeout: 5n, index: 0n,
+        secrets: [],
+      },
       { _tag: "dispute_countered", ...fact, proposerIsLeft: false, bodyHash: bodyHashOf(4n), index: 1n },
-      { _tag: "dispute_finalized", ...fact, bodyHash: bodyHashOf(5n), index: 2n },
+      {
+        _tag: "dispute_finalized", ...fact, bodyHash: bodyHashOf(5n), index: 2n, evidence: bodyHashOf(6n),
+        tx: txOf(3n, 2n), shown: { _tag: "unasked" },
+      },
     ] satisfies readonly ChainEvent[]));
   });
 

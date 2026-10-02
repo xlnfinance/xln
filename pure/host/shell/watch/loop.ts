@@ -12,7 +12,8 @@ import { hexToBytes } from "../../../kernel/encoding/bytes.ts";
 import { readingKey } from "../../../j/observe.ts";
 import { bytes32, type Address, type Bytes32, type RawLog } from "../../../j/log.ts";
 import {
-  advance, finalizedAt, prepare, readings, watching, type Block, type Watch, type WatchFault, type Window,
+  advance, calldataWanted, finalizedAt, prepare, readings, watching, withCalldata, type Block, type Watch,
+  type WatchFault, type Window,
 } from "../../../j/watch.ts";
 import { err, flatMap, map, ok, traverse, type Result } from "../../../kernel/core/result.ts";
 import type { Tagged } from "../../../kernel/core/tagged.ts";
@@ -25,6 +26,8 @@ export type WatchPort = Readonly<{
   logs: (from: bigint, to: bigint) => Promise<Result<readonly RawLog[], PortFault>>;
   /** The Account's `ondeltaEpoch` and stored nonce at the end of the block with this hash. */
   accountAt: (block: Bytes32, left: Bytes32, right: Bytes32) => Promise<Result<AccountAt, PortFault>>;
+  /** The input of the transaction with this hash, where a finalize's arguments are (R-WATCH-CALLDATA). */
+  input: (tx: Bytes32) => Promise<Result<Uint8Array, PortFault>>;
 }>;
 
 /** What the node watches: the Depository, how deep a block must be buried, and the Entity it hosts. */
@@ -51,6 +54,18 @@ const blocksAfter = async (port: WatchPort, from: bigint, to: bigint): Promise<R
   traverse(
     await Promise.all(Array.from({ length: Number(to - from) }, (_, i) => port.block(from + 1n + BigInt(i)))),
     (block) => block,
+  );
+
+const inputAt = async (port: WatchPort, tx: Bytes32): Promise<Result<readonly [Bytes32, Uint8Array], PortFault>> =>
+  map(await port.input(tx), (input) => [tx, input] as const);
+
+/** The inputs of the transactions that carried a finalize, by hash: each asked once, a miss is the node's to retry. */
+const inputsOf = async (
+  port: WatchPort, txs: readonly Bytes32[],
+): Promise<Result<ReadonlyMap<Bytes32, Uint8Array>, PortFault>> =>
+  map(
+    traverse(await Promise.all(txs.map((tx) => inputAt(port, tx))), (r) => r),
+    (found) => new Map(found),
   );
 
 /** One delivery: the J events for the node's Entity, in the chain's order, and then the height they end at. */
@@ -111,11 +126,14 @@ export const poll = async (
   if (!logs.ok) return logs;
   const prepared = prepare(watch, { head: head.value, blocks: blocks.value, logs: logs.value });
   if (!prepared.ok) return prepared;
-  const asked = await Promise.all(readings(prepared.value, [hosted]).map(async (r) =>
+  const inputs = await inputsOf(port, calldataWanted(prepared.value));
+  if (!inputs.ok) return inputs;
+  const read = withCalldata(prepared.value, inputs.value);
+  const asked = await Promise.all(readings(read, [hosted]).map(async (r) =>
     map(await port.accountAt(r.blockHash, r.left, r.right), (at) => [readingKey(r), at] as const)));
   const accounts = traverse(asked, (answer) => answer);
   if (!accounts.ok) return accounts;
-  const step = advance(watch, prepared.value, [hosted], new Map(accounts.value), windows);
+  const step = advance(watch, read, [hosted], new Map(accounts.value), windows);
   return flatMap(step, (done) => map(
     traverse(done.events, ({ event }) => inputOf(event)),
     (events): Delivery => ({ watch: done.watch, events, height: done.height }),

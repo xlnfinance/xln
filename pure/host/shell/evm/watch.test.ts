@@ -6,7 +6,7 @@ import { appendFileSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { err, ok, type Result } from "../../../kernel/core/result.ts";
-import { DEPOSITORY, DEPOSITORY_ABI, entityOf, hashOf, hexOf } from "../../../j/fixtures.ts";
+import { DEPOSITORY, DEPOSITORY_ABI, entityOf, hashOf, hexOf, txOf } from "../../../j/fixtures.ts";
 import { blockOf } from "../../../j/fixtures.ts";
 import type { Rpc, RpcFault } from "./port.ts";
 import { watchPort } from "./watch.ts";
@@ -36,7 +36,8 @@ const askedOf = (log: string): readonly string[] => readFileSync(log, "utf8").sp
 
 const rawLog = (block: bigint, index: bigint, extra: Record<string, unknown> = {}): Record<string, unknown> => ({
   address: ADDRESS.toUpperCase().replace("0X", "0x"), topics: [hexOf(7n), hexOf(8n)], data: "0xABCD",
-  blockNumber: `0x${block.toString(16)}`, blockHash: hashOf(block), logIndex: `0x${index.toString(16)}`, ...extra,
+  blockNumber: `0x${block.toString(16)}`, blockHash: hashOf(block), logIndex: `0x${index.toString(16)}`,
+  transactionHash: txOf(block, index).toUpperCase().replace("0X", "0x"), ...extra,
 });
 
 describe("host/shell/evm/watch the J loop's reads of the chain", () => {
@@ -64,8 +65,8 @@ describe("host/shell/evm/watch the J loop's reads of the chain", () => {
   test("R-JLOOP the Depository's logs in a range come back whole, lowercase, and only those asked for", async () => {
     const log = logPath();
     const got = await portOf({ eth_getLogs: () => ok([rawLog(3n, 0n), rawLog(4n, 2n)]) }, log).logs(3n, 4n);
-    expect(got.ok ? got.value.map((l) => [l.block, l.index, l.blockHash, l.address, l.data]) : got).toEqual([
-      [3n, 0n, hashOf(3n), ADDRESS, "0xabcd"], [4n, 2n, hashOf(4n), ADDRESS, "0xabcd"],
+    expect(got.ok ? got.value.map((l) => [l.block, l.index, l.blockHash, l.address, l.data, l.tx]) : got).toEqual([
+      [3n, 0n, hashOf(3n), ADDRESS, "0xabcd", txOf(3n, 0n)], [4n, 2n, hashOf(4n), ADDRESS, "0xabcd", txOf(4n, 2n)],
     ]);
     expect(got.ok ? got.value[0]?.topics : got).toEqual([hexOf(7n), hexOf(8n)] as never);
     expect(askedOf(log)).toEqual([`eth_getLogs [{"address":"${ADDRESS}","fromBlock":"0x3","toBlock":"0x4"}]`]);
@@ -78,9 +79,25 @@ describe("host/shell/evm/watch the J loop's reads of the chain", () => {
     expect(await asked(rawLog(3n, 0n, { data: 12 }))).toMatchObject({ ok: false });
     expect(await asked(rawLog(3n, 0n, { blockHash: "0x1" }))).toMatchObject({ ok: false });
     expect(await asked(rawLog(3n, 0n, { logIndex: "1" }))).toMatchObject({ ok: false });
+    expect(await asked(rawLog(3n, 0n, { transactionHash: "0x1" }))).toMatchObject({ ok: false });
+    expect(await asked(rawLog(3n, 0n, { transactionHash: undefined }))).toMatchObject({ ok: false });
     expect(await portOf({ eth_getLogs: () => ok("nothing") }).logs(3n, 4n)).toMatchObject({ ok: false });
     expect(await portOf({ eth_getLogs: () => down }).logs(3n, 4n))
       .toMatchObject({ ok: false, error: { call: "watch logs" } });
+  });
+
+  test("R-WATCH-CALLDATA a transaction is asked for by hash and its input comes back as bytes", async () => {
+    const log = logPath();
+    const found = { hash: txOf(3n, 1n), input: "0xDEADbeef", to: ADDRESS };
+    expect(await portOf({ eth_getTransactionByHash: () => ok(found) }, log).input(txOf(3n, 1n)))
+      .toEqual(ok(Uint8Array.of(0xde, 0xad, 0xbe, 0xef)));
+    expect(askedOf(log)).toEqual([`eth_getTransactionByHash ["${txOf(3n, 1n)}"]`]);
+    const asked = (reply: unknown) => portOf({ eth_getTransactionByHash: () => ok(reply) }).input(txOf(3n, 1n));
+    expect(await asked(null)).toMatchObject({ ok: false, error: { call: "watch tx" } });
+    expect(await asked({ ...found, input: 12 })).toMatchObject({ ok: false });
+    expect(await asked({ ...found, input: "0xabc" })).toMatchObject({ ok: false });
+    expect(await portOf({ eth_getTransactionByHash: () => down }).input(txOf(3n, 1n)))
+      .toEqual(err({ _tag: "port", call: "watch tx", reason: "connection refused" }));
   });
 
   test("R-WATCH-TELL an Account is read at the end of a block named by its hash: row nonce and epoch", async () => {

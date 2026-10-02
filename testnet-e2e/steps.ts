@@ -688,6 +688,8 @@ const rebase: Step<World> = {
       [alice.name, hubX.name].forEach((who) => { if (!names.includes(`${who} ${tag}`)) throw new Error(`${who} was told no ${tag} (${names.join(", ")})`); });
     });
     if (!names.some((n) => n.endsWith("j_dispute"))) throw new Error(`nobody was told of the dispute (${names.join(", ")})`);
+    // R-WATCH-CALLDATA: each node's loop fetched the finalize's transaction from the node and found the op whose evidence hash the chain logged.
+    if (names.some((n) => n.endsWith("j_finalize_unread"))) throw new Error(`a node could not read the finalize's arguments from its transaction (${names.join(", ")})`);
     // R-LEDGER-REBASE: each Runtime's ledger is the chain's now: no collateral, no ondelta, offdelta counted from zero, and no open clause.
     const pay = PENDING_PAY * unit(chain);
     const ledgers = [a, x].map((id) => ({ id, replica: net.account(id, id === a ? x : a) }));
@@ -754,6 +756,7 @@ const rebase: Step<World> = {
     return {
       checks: [
         `each node's own J loop (pure/host/shell/watch, the watcher core pure/j/watch.ts: blocks and logs by number, readings by block hash) read the Depository's logs at depth 1 up to height ${net.view()} and told its Entity ${names.length} J events, in the WAL before the height: ${names.join(", ")}`,
+        `R-WATCH-CALLDATA: each node's loop fetched the finalize's transaction (eth_getTransactionByHash) and found in its processBatch input the op whose evidence hash the Depository logged, so no node was told the finalize was unread; the arguments carried no secret (the Host's own finalize sends none)`,
         `both Runtimes hold chain facts epoch ${onChain.epoch}, stored nonce ${onChain.nonce}, no dispute open, the frames of the new epoch counted, for alice-hubX: the same as the chain`,
         `R-LEDGER-REBASE: both ledgers read collateral ${held.collateral}, ondelta ${held.ondelta} (the chain's), offdelta restarted from zero (it was ${before} before the move), no open clause, no frame pending, one head, and the peer's signature kept is over a head of the new epoch only`,
         `the payment of ${PENDING_PAY} alice had pending when the chain finalized (hubX never committed it: the link lost it) ${resealed ? "was refused by hubX as another epoch's and sealed anew: it committed in epoch 1 on both sides" : "was refused back to alice with a notice (both ledgers at offdelta zero)"}`,
