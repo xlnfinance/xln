@@ -758,10 +758,10 @@ const STALE_COLLATERAL = 40n;
 const STALE_PAY = 7n;
 
 /** The sealed batches of `id`'s journal that carry a chain action of `tag`, each with the answer the chain gave. */
-const batchesOf = (net: Cluster, id: EntityId, name: string, tag: JAction["_tag"]): readonly Readonly<{ sealed: JournalRecord; answer: JournalRecord | undefined }>[] => {
+const batchesOf = (net: Cluster, id: EntityId, name: string, tag: JAction["_tag"], since = 0): readonly Readonly<{ sealed: JournalRecord; answer: JournalRecord | undefined }>[] => {
   const rows = net.rowsOf(id);
   const journal = journalOf(net.dirOf(id), name);
-  return journal.flatMap((record) => (record._tag === "sealed" && record.rows.some((row) => rows.find((r) => r.height === row.height)?.chain[row.index]?._tag === tag)
+  return journal.flatMap((record) => (record._tag === "sealed" && record.rows.some((row) => rows.findIndex((r) => r.height === row.height) >= since && rows.find((r) => r.height === row.height)?.chain[row.index]?._tag === tag)
     ? [{ sealed: record, answer: journal.find((r) => r._tag === "answered" && r.digest === record.digest) }]
     : []));
 };
@@ -791,6 +791,7 @@ const disputeStale: Step<World> = {
     const onChain = await accountOnChain(chain, alice, hubX);
     const reserves = { alice: await reserveOf(chain, alice), hubX: await reserveOf(chain, hubX) };
     const mark = { alice: net.askedBy(a).length, hubX: net.askedBy(x).length };
+    const rowsFrom = { alice: net.rowsOf(a).length, hubX: net.rowsOf(x).length };
     const fromBlock = (await chain.provider.getBlockNumber()) + 1;
     let newOffdelta = 0n;
     let newSlot = 0;
@@ -867,7 +868,7 @@ const disputeStale: Step<World> = {
     }
     const counterBatches = batchesOf(net, x, "hubX", "counter");
     if (counterBatches.length !== 1 || !counterBatches.every(({ answer }) => answer?._tag === "answered" && answer.outcome === "landed")) throw new Error(`hubX's journal holds ${counterBatches.length} sealed batches carrying a counter, expected one landed batch`);
-    const finalBatches = [[a, "alice"], [x, "hubX"]].flatMap(([id, name]) => batchesOf(net, id as EntityId, name as string, "dispute_finalize"));
+    const finalBatches = [[a, "alice", rowsFrom.alice], [x, "hubX", rowsFrom.hubX]].flatMap(([id, name, since]) => batchesOf(net, id as EntityId, name as string, "dispute_finalize", since as number));
     const landedFinals = finalBatches.filter(({ answer }) => answer?._tag === "answered" && answer.outcome === "landed");
     if (landedFinals.length !== finalBatches.length || finalBatches.length !== 1 + lostRace.length) throw new Error(`the two journals hold ${finalBatches.length} sealed batches carrying a finalize, ${landedFinals.length} landed; the chain finalized once and skipped ${lostRace.length}`);
     // The counter's head is the dispute-proof digest the chain computes for hubX's newer proof: the nonce is the epoch's first plus the slot, less one.

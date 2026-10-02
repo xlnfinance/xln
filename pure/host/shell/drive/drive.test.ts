@@ -6,7 +6,7 @@ import { describe, expect, test } from "bun:test";
 import { appendFileSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { emptyEntity } from "../../../entity/model.ts";
-import type { JAnswer } from "../../../j/batch/answer.ts";
+import type { JAnswer, SkipFact } from "../../../j/batch/answer.ts";
 import type { Cause, Simulation } from "../../../j/gas/simulate.ts";
 import { err, ok, unwrapOr, type Result } from "../../../kernel/core/result.ts";
 import { hostOf, setup, stamp } from "../../../runtime/fixtures.ts";
@@ -47,6 +47,7 @@ const DOWN: PortFault = { _tag: "port", call: "send", reason: "connection reset"
 /** A chain that lands a batch as soon as it is sent, unless its sends are down. */
 const portOf = (
   at: Scene, sends: Result<void, PortFault>, outcome: Simulation["outcome"] = { _tag: "ok", applyGas: 100_000n },
+  skipReason?: number,
 ): ChainPort => ({
   nonce: () => Promise.resolve(ok(4n)),
   treasury: () => Promise.resolve(ok(TREASURY)),
@@ -62,7 +63,16 @@ const portOf = (
   },
   answer: (batch) => {
     const landed = callsOf(at.log).some((c) => c.startsWith(`send ${batch.nonce} `) && c.endsWith(" ok"));
-    const answer: JAnswer = { _tag: "landed", nonce: batch.nonce, batchHash: batch.digest, skipped: [] };
+    const skipped = skipReason === undefined ? [] : batch.ops.flatMap((op): SkipFact[] => {
+      if (op._tag === "dispute_start") {
+        return [{ op: 0, counterentity: op.start.counterentity, reason: skipReason, nonce: op.start.nonce }];
+      }
+      return op._tag === "dispute_counter"
+        ? [{ op: 1, counterentity: op.counter.counterentity, reason: skipReason, nonce: op.counter.counterNonce }]
+        : [];
+    });
+    appendFileSync(at.log, `answer ${landed} ${batch.ops.map((o) => o._tag)} ${skipped.length}\n`);
+    const answer: JAnswer = { _tag: "landed", nonce: batch.nonce, batchHash: batch.digest, skipped };
     return Promise.resolve(ok(landed ? answer : undefined));
   },
 });
@@ -70,13 +80,13 @@ const portOf = (
 /** The shell over the scene's two files for one piece of work, and the files closed after it. */
 const withShell = async <T>(
   at: Scene, sends: Result<void, PortFault>, work: (shell: Shell) => Promise<T>,
-  outcome?: Simulation["outcome"],
+  outcome?: Simulation["outcome"], skipReason?: number,
 ): Promise<T> => {
   appendFileSync(at.log, "");
   const wal = await fileDisk(at.wal);
   const journal = await fileDisk(at.journal);
   if (!wal.ok || !journal.ok) return expect.unreachable("disks");
-  const io = { port: portOf(at, sends, outcome), signer: lazySigner(ALICE, KEY), journal: journal.value, gas: GAS };
+  const io = { port: portOf(at, sends, outcome, skipReason), signer: lazySigner(ALICE, KEY), journal: journal.value, gas: GAS };
   const out = await work({ wal: wal.value, io, now: () => stamp(1_000n) });
   await wal.value.close();
   await journal.value.close();
@@ -201,14 +211,14 @@ describe("host/shell/drive the Host's rows are on the disk before the chain hear
     bodyHash: `0x${"01".repeat(32)}`,
   } as const;
   const answerOf = (turn: Turn) => turn.station.host.runtime.entities.get(ALICE)?.chain.get(BOB)?.against?.answer;
-  const counterTurns = async (outcome: Simulation["outcome"]) => {
+  const counterTurns = async (outcome: Simulation["outcome"], skipReason?: number) => {
     const at = scene();
     const paid = hostOf(aliceRun, ALICE).entities.get(ALICE) ?? expect.unreachable("no entity");
     const out = await withShell(at, ok(undefined), async (shell) => {
       const started = turnOf(await start(shell, { ...BOOT, genesis: paid }));
       const first = turnOf(await command(shell, started.station, ALICE, counterOpened));
       return { first, second: turnOf(await command(shell, first.station, ALICE, { _tag: "resend_due", peer: BOB })) };
-    }, outcome);
+    }, outcome, skipReason);
     return { at, ...out };
   };
   const E4: Cause = { _tag: "error", name: "E4" };
@@ -247,5 +257,33 @@ describe("host/shell/drive the Host's rows are on the disk before the chain hear
     expect(closed.first.lapsed.map((op) => op._tag)).toEqual(["dispute_counter"]);
     const none = await counterTurns(skipped(2));
     expect([none.first.lapsed, answerOf(none.first)?.lapsed]).toEqual([[], false]);
+  });
+  /** A start the chain's simulation passed and its batch landed, then skipped for `reason`: what the Entity is told. */
+  const startSkipped = async (reason: number) => {
+    const at = scene();
+    const paid = hostOf(aliceRun, ALICE).entities.get(ALICE) ?? expect.unreachable("no entity");
+    const dispute = { _tag: "dispute", peer: BOB } as const;
+    const out = await withShell(at, ok(undefined), async (shell) => {
+      const started = turnOf(await start(shell, { ...BOOT, genesis: paid }));
+      return turnOf(await pump(shell, turnOf(await command(shell, started.station, ALICE, dispute))));
+    }, undefined, reason);
+    return { at, out, starting: out.station.host.runtime.entities.get(ALICE)?.chain.get(BOB)?.starting };
+  };
+
+  test("R-DISPUTE-LAPSED a start the chain skipped for good (stored nonce reached, epoch left) is told as lapsed", async () => {
+    const [reached, left] = [await startSkipped(0), await startSkipped(11)];
+    expect(reached.out.skipped.map(({ op, reason }) => [op._tag, reason])).toEqual([["dispute_start", 0]]);
+    expect([reached.starting, left.starting]).toEqual([undefined, undefined]);
+  });
+
+  test("R-DISPUTE-LAPSED a start skipped because a dispute is open stays: it may be its own, restated", async () => {
+    const open = await startSkipped(1);
+    expect(open.out.skipped.map(({ reason }) => reason)).toEqual([1]);
+    expect(open.starting).toBeDefined();
+  });
+  test("R-DISPUTE-LAPSED a counter that landed and was skipped for good lapses, one skipped as unknown does not", async () => {
+    const ok_: Simulation["outcome"] = { _tag: "ok", applyGas: 100_000n };
+    const [window, none] = [await counterTurns(ok_, 4), await counterTurns(ok_, 2)];
+    expect([answerOf(window.second)?.lapsed, answerOf(none.second)?.lapsed]).toEqual([true, false]);
   });
 });

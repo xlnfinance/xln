@@ -104,14 +104,14 @@ const sealOutcome = async (
     : outcome;
 };
 
-/** The contract's DISPUTE_OP_COUNTER, and the DISPUTE_SKIP_* reasons that are for good (Account.sol 69-83). */
+/** The contract's DISPUTE_OP_COUNTER, and the DISPUTE_SKIP_* reasons for a counter that are for good (Account.sol 69-83). */
 const COUNTER_OP = 1;
-const SKIPPED_FOR_GOOD: ReadonlySet<number> = new Set([3, 4, 5, 6, 7]);
+export const COUNTER_SKIPPED_FOR_GOOD: ReadonlySet<number> = new Set([3, 4, 5, 6, 7]);
 /** The errors a counter is reverted with for good: Unauthorized or stale (E2), a bad signature (E4), a hash mismatch (E9). */
 const REVERTED_FOR_GOOD: ReadonlySet<string> = new Set(["E2", "E4", "E9"]);
 
 const forGood = (cause: Cause): boolean =>
-  (cause._tag === "error" ? REVERTED_FOR_GOOD.has(cause.name) : cause.op === COUNTER_OP && SKIPPED_FOR_GOOD.has(cause.reason));
+  (cause._tag === "error" ? REVERTED_FOR_GOOD.has(cause.name) : cause.op === COUNTER_OP && COUNTER_SKIPPED_FOR_GOOD.has(cause.reason));
 
 /**
  * Whether a counter the chain would revert will be reverted for ever: every cause it was refused for is one that
