@@ -152,6 +152,33 @@ describe("entity/signing R-DISPUTE-WATCH a dispute from the newest proof held is
   });
 });
 
+describe("entity/signing R-DISPUTE-WATCH a non-starter with nothing newer finalizes the opening state at once", () => {
+  const start = startOf(committed.alice);
+  const heard = run(committed.bob, openedBy(start));
+
+  test("R-DISPUTE-WATCH it asks to finalize the state the starter chose, before the window is over, and no counter", () => {
+    expect(countersOf(heard.chain)).toEqual([]);
+    const [final, ...more] = finalsOf(heard.chain);
+    if (final?._tag !== "dispute_finalize" || more.length > 0) return expect.unreachable("not one finalize");
+    expect([final.nonce, final.proposerIsLeft, final.startedByLeft]).toEqual([start.nonce, start.proposerIsLeft, true]);
+    expect([final.body, final.initial]).toEqual([start.body, undefined]);
+  });
+
+  test("R-DISPUTE-WATCH it is restated at every frame until the chain says the dispute is over, and then no more", () => {
+    expect(finalsOf(run(heard.state, openedBy(start)).chain)).toEqual(finalsOf(heard.chain));
+    const over = run(heard.state, { _tag: "j_dispute_over", peer: ALICE.id });
+    expect(finalsOf(over.chain)).toEqual([]);
+  });
+
+  test("R-DISPUTE-WATCH it does not finalize a start whose body it cannot rebuild, nor one it holds a newer proof for", () => {
+    const strange = run(committed.bob, { ...openedBy(start), bodyHash: OPENED_WITH.bodyHash } as JEvent);
+    expect(finalsOf(strange.chain)).toEqual([]);
+    const older = run(ackLost.bob, openedBy(startOf(ackLost.alice)));
+    expect(finalsOf(older.chain)).toEqual([]);
+    expect(countersOf(older.chain)).toHaveLength(1);
+  });
+});
+
 describe("entity/signing R-DISPUTE-WATCH the starter finalizes with the counter when the counterer does not", () => {
   const start = startOf(ackLost.alice);
   const counter = countersOf(run(ackLost.bob, openedBy(start)).chain)[0];

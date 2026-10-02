@@ -657,6 +657,25 @@ const finalFor = (terms: ProofTerms, w: Work, peer: EntityId, account: EntityRep
     : [];
 };
 
+/**
+ * A dispute the peer started that opened with a state I hold, with no newer proof to answer it with, is one I may accept
+ * at once: the chain lets the non-starter finalize the exact state the starter chose before the window is over, when it
+ * has no pull (Account.sol, `_disputeFinalizeInternal`). So a starter that goes down leaves the Account no more locked
+ * than one that stays up. The body is rebuilt from the states I hold, and only when its hash is the one the chain
+ * logged for the start; a start whose body I cannot rebuild is waited out as before.
+ */
+const accepting = (terms: ProofTerms, w: Work, peer: EntityId, account: EntityReplica): readonly JAction[] => {
+  const { against } = factsOf(w, peer);
+  const unanswered = against !== undefined && (against.answer === undefined || against.answer.lapsed);
+  const body = against !== undefined && unanswered ? rebuilt(terms, account, against) : undefined;
+  return against !== undefined && body !== undefined
+    ? [{
+      _tag: "dispute_finalize", peer, nonce: against.nonce, proposerIsLeft: against.proposerIsLeft, body,
+      startedByLeft: sideOf(w.state.id, peer) !== "left", initial: undefined,
+    }]
+    : [];
+};
+
 /** What the Entity owes the chain on `peer`'s Account; a hashlock whose hold is gone is forgotten. */
 const dutiful = (judge: Judge, terms: ProofTerms) => (w: Work, peer: EntityId): Work => {
   const account = w.state.accounts.get(peer);
@@ -666,7 +685,8 @@ const dutiful = (judge: Judge, terms: ProofTerms) => (w: Work, peer: EntityId): 
   const revealed = mapSet(w.state.revealed, peer, asks.hashlocks);
   const revealing = { ...w, chain: [...w.chain, ...asks.actions], state: { ...w.state, revealed } };
   const countering = answering(terms)(revealing, peer, account);
-  return { ...countering, chain: [...countering.chain, ...finalFor(terms, countering, peer, account)] };
+  const finals = [...finalFor(terms, countering, peer, account), ...accepting(terms, countering, peer, account)];
+  return { ...countering, chain: [...countering.chain, ...finals] };
 };
 
 const isArrival = (i: EntityInput): i is Arrival =>

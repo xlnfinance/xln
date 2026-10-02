@@ -531,12 +531,13 @@ const dispute: Step<World> = {
     // alice's own node starts the dispute: it holds hubX's signature over the head (R-SIGNED-HEADS-ON-THE-WIRE) and asks the chain
     // for the start itself (R-DISPUTE-START); the harness only reads what the node asked and what the chain did.
     const before = net.askedBy(a).length;
+    const beforeX = net.askedBy(x).length;
     const fromBlock = (await chain.provider.getBlockNumber()) + 1;
     // A payment is pending when the chain finalizes (R-LEDGER-REBASE): alice pays hubX 5 and the link loses alice's frame on its way, so hubX
     // never commits it (a payment hubX had committed is a newer signed proof: that one is the counter's case, and hubX would answer the
     // dispute with it); only then does she start the dispute. A payment asked once the dispute is open is refused back (R-DISPUTE-FREEZE).
     // Alice holds the frame pending across the epoch move; it is outside what the chain pays.
-    const finals = (): number => net.askedBy(a).slice(before).filter((ask) => ask._tag === "dispute_finalize").length;
+    const finalsOf = (id: EntityId, mark: number): number => net.askedBy(id).slice(mark).filter((ask) => ask._tag === "dispute_finalize").length;
     await net.losing((m) => m.from === a && m.to === x, async () => {
       await net.tell(a, { _tag: "pay", peer: x, token: t, amount: PENDING_PAY * unit(chain) });
       await net.settle({ pending: true });
@@ -552,9 +553,10 @@ const dispute: Step<World> = {
       }
       if (net.account(a, x).head !== replica.head) throw new Error("the dispute start moved alice's Account");
       if (!(await accountOnChain(chain, alice, hubX)).disputeOpen) throw new Error("no dispute is open after the start");
-      // The chain's clock runs past both windows (anvil: a clock jump, then blocks to make that second final at depth 1); alice's own
-      // node is told by its J loop that the window it waits on is over, and its Entity asks the chain to finalize with what it started from.
-      await advanceTime(chain, Number(2n * floor + 10n));
+      // hubX's node holds no proof newer than the one the dispute opened with, so once its J loop hears the start (at depth 1) there is nothing to
+      // counter and its Entity accepts the state the starter chose, as the chain lets the non-starter do before the window is over (no pull): the
+      // finalize lands inside the window, and alice's node, told the dispute is over, never asks to finalize (R-DISPUTE-WATCH).
+      await net.reach(BigInt(await chain.provider.getBlockNumber()), { pending: true });
       for (let tries = 0; tries < 6 && (await accountOnChain(chain, alice, hubX)).disputeOpen; tries += 1) {
         await net.reach(BigInt(await chain.provider.getBlockNumber()), { pending: true });
       }
@@ -570,31 +572,36 @@ const dispute: Step<World> = {
       await net.tell(a, { _tag: "dispute", peer: x });
       w.voidedAsk = { notices: net.noticesOf(a).slice(noticed), asks: net.askedBy(a).length - asked };
     });
-    if (finals() === 0) throw new Error("alice's node never asked the chain to finalize");
-    const finalAsk = net.askedBy(a).slice(before).flatMap((ask) => (ask._tag === "dispute_finalize" ? [ask] : []))[0];
+    if (finalsOf(x, beforeX) === 0) throw new Error("hubX's node never asked the chain to finalize");
+    if (finalsOf(a, before) !== 0) throw new Error(`alice's node asked ${finalsOf(a, before)} times to finalize a dispute hubX had closed`);
+    const finalAsk = net.askedBy(x).slice(beforeX).flatMap((ask) => (ask._tag === "dispute_finalize" ? [ask] : []))[0];
     if (finalAsk === undefined || finalAsk.nonce !== nonce || finalAsk.proposerIsLeft !== authorIsLeft || finalAsk.startedByLeft !== (a === eid(left))
-      || must(proofBodyHash(finalAsk.body), "finalize body hash") !== bodyHash) {
-      throw new Error("the finalize alice's node asked for differs from the start (nonce, author, side or body)");
+      || finalAsk.initial !== undefined || must(proofBodyHash(finalAsk.body), "finalize body hash") !== bodyHash) {
+      throw new Error("the finalize hubX's node asked for differs from the start (nonce, author, side or body)");
     }
-    // The finalize is alice's node's own, by the three records that cannot be the harness's: the chain's one DisputeFinalized names
-    // alice's Entity and was sent from alice's wallet (nothing was skipped, so the restated asks made one transaction), and alice's
-    // journal holds the sealed batch of the WAL row that asked for it with its landed answer.
+    // The finalize is hubX's node's own, by the records that cannot be the harness's: the chain's one DisputeFinalized names hubX's Entity,
+    // was sent from hubX's wallet and landed before the window ended (nothing was skipped, so the restated asks made one transaction), and
+    // hubX's journal holds the sealed batch of the WAL row that asked for it with its landed answer.
     const finished = await chain.depository.queryFilter(chain.depository.filters.DisputeFinalized(), fromBlock);
     const skipped = await chain.depository.queryFilter(chain.depository.filters.DisputeOpSkipped(), fromBlock);
     if (finished.length !== 1 || finished[0] === undefined) throw new Error(`the chain finalized ${finished.length} disputes after the start, expected one`);
     if (skipped.length !== 0) throw new Error(`the chain skipped ${skipped.length} dispute ops after the start: a restated finalize reached it twice`);
     const [finish] = finished;
     const sender = (await finish.getTransaction()).from;
-    if (finish.args.sender !== alice.id || sender.toLowerCase() !== alice.wallet.address.toLowerCase()) {
-      throw new Error(`the finalize names ${finish.args.sender} and was sent from ${sender}, expected alice's Entity ${alice.id} from ${alice.wallet.address}`);
+    if (finish.args.sender !== hubX.id || sender.toLowerCase() !== hubX.wallet.address.toLowerCase()) {
+      throw new Error(`the finalize names ${finish.args.sender} and was sent from ${sender}, expected hubX's Entity ${hubX.id} from ${hubX.wallet.address}`);
     }
-    const walRows = net.rowsOf(a);
-    const journal = journalOf(net.dirOf(a), "alice");
+    const opened = await chain.depository.queryFilter(chain.depository.filters.DisputeStarted(), fromBlock);
+    const endsAt = BigInt(opened[0]?.args.disputeTimeout ?? 0);
+    const finishedAt = BigInt((await finish.getBlock()).timestamp);
+    if (endsAt === 0n || finishedAt >= endsAt) throw new Error(`the finalize landed at second ${finishedAt}, not before the window's end ${endsAt}`);
+    const walRows = net.rowsOf(x);
+    const journal = journalOf(net.dirOf(x), "hubX");
     const finalizing = journal.flatMap((record) => (record._tag === "sealed" && record.rows.some((id) => walRows.find((r) => r.height === id.height)?.chain[id.index]?._tag === "dispute_finalize") ? [record] : []));
     const [sealedFinal] = finalizing;
     const answer = journal.find((record) => record._tag === "answered" && record.digest === sealedFinal?.digest);
     if (finalizing.length !== 1 || sealedFinal === undefined || answer?._tag !== "answered" || answer.outcome !== "landed") {
-      throw new Error(`alice's journal holds ${finalizing.length} sealed batches of a finalize and ${answer === undefined ? "no" : `a ${answer._tag === "answered" ? answer.outcome : "?"}`} answer, expected one sealed batch and its landed answer`);
+      throw new Error(`hubX's journal holds ${finalizing.length} sealed batches of a finalize and ${answer === undefined ? "no" : `a ${answer._tag === "answered" ? answer.outcome : "?"}`} answer, expected one sealed batch and its landed answer`);
     }
     // What both sides believed: delta = ondelta + offdelta; Left takes delta clamped to the collateral, Right the rest. The chain's ondelta and collateral, the Runtimes' offdelta.
     w.disputed = ledger.offdelta;
@@ -616,7 +623,7 @@ const dispute: Step<World> = {
     return {
       checks: [
         `the head of the last committed frame (slot ${replica.used}, nonce ${nonce}, epoch ${onChain.epoch}, authored by the ${authorIsLeft ? "left" : "right"} side; body from pure/account/proof/body.ts, offdelta ${ledger.offdelta}, one token, no clause) is the dispute-proof digest the chain computes; alice's own node, holding hubX's signature over it from the frame round, asked for the start (nonce, epoch, author and body as the head names them) and the chain opened the dispute`,
-        `after both ${floor} s windows (anvil clock jump) alice's own node was told by its J loop that the window was over (a final block's own second at or past the chain's end for the dispute) and asked the chain to finalize with the state it started from (${finals()} ask${finals() === 1 ? "" : "s"} restated, the nonce, author, side and body of the start), which became one transaction: alice's journal holds the one sealed batch of that finalize with its landed answer (nonce ${sealedFinal.nonce}), the chain's one DisputeFinalized names alice's Entity and was sent from alice's wallet, and nothing was skipped; the chain paid alice ${fmt(chain, aliceGot)} and hubX ${fmt(chain, hubGot)}, which is what the chain's ondelta ${held.ondelta} plus the Runtimes' offdelta ${ledger.offdelta} says`,
+        `hubX's node, which holds no proof newer than the one the dispute opened with, heard the start at depth 1 and asked the chain to finalize with the state the starter chose (${finalsOf(x, beforeX)} ask${finalsOf(x, beforeX) === 1 ? "" : "s"} restated, the nonce, author, side and body of the start), which became one transaction landed before the window's end (second ${finishedAt} of ${endsAt}): hubX's journal holds the one sealed batch of that finalize with its landed answer (nonce ${sealedFinal.nonce}), the chain's one DisputeFinalized names hubX's Entity and was sent from hubX's wallet, alice's node asked for none, and nothing was skipped; the chain paid alice ${fmt(chain, aliceGot)} and hubX ${fmt(chain, hubGot)}, which is what the chain's ondelta ${held.ondelta} plus the Runtimes' offdelta ${ledger.offdelta} says`,
         `collateral 0, epoch ${onChain.epoch} to ${after.epoch}, dispute closed; money held by the four entities is unchanged at ${fmt(chain, now)}`,
       ],
       gaps: [],
