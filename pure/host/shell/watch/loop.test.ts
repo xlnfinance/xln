@@ -2,7 +2,7 @@
 // order, how much, and what a fault of the port or of the core does. The chain's events are the real Depository's ABI
 // turned into logs (j/fixtures.ts).
 import { describe, expect, test } from "bun:test";
-import { appendFileSync, mkdtempSync, readFileSync } from "node:fs";
+import { appendFileSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { err, ok, unwrapOr } from "../../../kernel/core/result.ts";
@@ -11,6 +11,7 @@ import { entityId } from "../../../entity/model.ts";
 import type { RawLog } from "../../../j/log.ts";
 import { watching, type Block } from "../../../j/watch.ts";
 import { blockOf, DEPOSITORY, entityOf, logOf, must } from "../../../j/fixtures.ts";
+import { callsOf } from "../fixtures.ts";
 import type { PortFault } from "../submit/chain.ts";
 import { beginAt, poll, type WatchConfig, type WatchPort } from "./loop.ts";
 
@@ -26,8 +27,6 @@ const straight = (head: bigint, logs: readonly RawLog[] = []): Chain =>
 const LOOP_DIR = join(tmpdir(), "loop-");
 
 const logPath = (): string => join(mkdtempSync(LOOP_DIR), "calls.log");
-
-const callsOf = (path: string): readonly string[] => readFileSync(path, "utf8").split("\n").filter((l) => l !== "");
 
 /** A port over `chain` that writes each call it gets to `log`; `broken` is the block, or the read, that fails. */
 const portOf = (chain: Chain, log: string, broken: bigint | "logs" | "account" = -1n): WatchPort => {
