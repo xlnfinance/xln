@@ -41,9 +41,11 @@ export type Config = Readonly<{
 export type Stopped = Tagged<"stopped">;
 
 /**
- * A node that reads the chain at `depth` acts on a reveal one block after its own view reaches `deadline - lag`: the
- * payee's reveal lands at `view + depth + 1` at the earliest, so a `lag` of `depth` or less puts it past the deadline,
- * where the clause is expirable and the hub that forwarded the lock hears the secret too late to pass it up.
+ * A node that reads the chain at `depth` has a view `depth` blocks behind the chain's head. Its own reveal as a payee
+ * (asked when its view reaches `deadline - lag`) is sent at the head and lands one block after it, so with a `lag` of
+ * `depth` or less a reveal asked on time lands past the deadline, where the clause is expirable. A `lag` above `depth`
+ * gives that reveal its margin. It says nothing of the time another node's reveal takes to be heard: the hop a lock
+ * gives the next one, `reserve + lag`, covers that.
  */
 export type ClockBelowDepth = Tagged<"clock_below_depth", { lag: bigint; depth: bigint }>;
 

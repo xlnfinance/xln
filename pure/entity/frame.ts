@@ -3,7 +3,7 @@
 // frame's commands does not matter, and a command always sees what the arrivals of its own frame did (R-E1).
 import { mapDelete, mapSet } from "../kernel/core/collections.ts";
 import { emptyReplica } from "../account/frame/account.ts";
-import type { JView } from "../account/clause/clock.ts";
+import type { JHeight, JView } from "../account/clause/clock.ts";
 import {
   propose, receive, resend, submit, type FrameHash, type Heard, type Msg, type Outcome,
 } from "../account/frame/frame.ts";
@@ -270,8 +270,8 @@ const finalizedBy = (w: Work, facts: ChainFacts, e: Extract<JEvent, { _tag: "j_e
  * and the notice says as much. A frame at or below the finalized nonce is held by the proof the chain paid by: not
  * told. A head at or below the finalized proof lost nothing, and a settlement or a withdrawal moving the epoch tells
  * nothing. The offdelta the proof holds is not here: the node that lost something is not the one
- * that opened with the proof, so it holds none of its body; the chain's DisputeFinalized for the nonce says what was
- * paid.
+ * that opened with the proof, so it holds none of its body; the DisputeFinalized event carries only the opening nonce
+ * and hashes (Depository.sol 142-148), so the proof's offdelta is owed from the calldata of its start or counter.
  */
 const destroyed = (w: Work, peer: EntityId, account: EntityReplica, finalized: Finalized | undefined): Work => {
   if (finalized === undefined) return w;
@@ -634,16 +634,21 @@ const unackedResolves = (account: EntityReplica): readonly Resolve[] =>
 
 type Asked = Readonly<{ hashlocks: readonly string[]; actions: readonly JAction[] }>;
 
-/** A payee with an unacked resolve reveals once its view is within LAG of the deadline, once per hashlock. */
-const asking = (judge: Judge, peer: EntityId, account: EntityReplica) => (acc: Asked, tx: Resolve): Asked => {
-  const hold = ledgerOf(account.state, tx.token).holds.find((h) => h.id === tx.id);
-  if (hold === undefined || acc.hashlocks.includes(hold.hashlock)) return acc;
-  const { token, id, secret } = tx;
-  const reveal: JAction = { _tag: "reveal", peer, token, id, hashlock: hold.hashlock, secret };
-  return revealOnChainDue(judge.clock, hold.deadline, judge.view)
-    ? { hashlocks: [...acc.hashlocks, hold.hashlock], actions: [...acc.actions, reveal] }
-    : acc;
-};
+/**
+ * A payee with an unacked resolve reveals once its view is within LAG of the deadline, once per hashlock. On an Account
+ * that is quiet (a dispute is open, or its signature is out) no frame is sealed, so the resolve cannot be acked there:
+ * it reveals as soon as the resolve is asked, instead of waiting for a deadline the reveal might not reach in time.
+ */
+const asking = (due: (deadline: JHeight) => boolean, peer: EntityId, account: EntityReplica) =>
+  (acc: Asked, tx: Resolve): Asked => {
+    const hold = ledgerOf(account.state, tx.token).holds.find((h) => h.id === tx.id);
+    if (hold === undefined || acc.hashlocks.includes(hold.hashlock)) return acc;
+    const { token, id, secret } = tx;
+    const reveal: JAction = { _tag: "reveal", peer, token, id, hashlock: hold.hashlock, secret };
+    return due(hold.deadline)
+      ? { hashlocks: [...acc.hashlocks, hold.hashlock], actions: [...acc.actions, reveal] }
+      : acc;
+  };
 
 /**
  * The counter to a dispute the peer started against me: the newest proof I hold, if the chain would rank it above the
@@ -719,7 +724,9 @@ const dutiful = (judge: Judge, terms: ProofTerms) => (w: Work, peer: EntityId): 
   const account = w.state.accounts.get(peer);
   if (account === undefined) return w;
   const open = (w.state.revealed.get(peer) ?? []).filter((hashlock) => holderOf(account.state, hashlock) !== undefined);
-  const asks = unackedResolves(account).reduce(asking(judge, peer, account), { hashlocks: open, actions: [] });
+  const due = (deadline: JHeight): boolean =>
+    quiet(factsOf(w, peer)) || revealOnChainDue(judge.clock, deadline, judge.view);
+  const asks = unackedResolves(account).reduce(asking(due, peer, account), { hashlocks: open, actions: [] });
   const revealed = mapSet(w.state.revealed, peer, asks.hashlocks);
   const revealing = { ...w, chain: [...w.chain, ...asks.actions], state: { ...w.state, revealed } };
   const countering = answering(terms)(revealing, peer, account);
