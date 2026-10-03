@@ -59,11 +59,16 @@ export type ChainEvent =
     "dispute_started",
     Dispute & Proof & {
       timeout: bigint; secrets: readonly Bytes32[]; tx: Bytes32; body: ProofBody | undefined; unread: boolean;
+      /** Read once from the event's block; retained with a pending body across WAL recovery. */
+      epoch?: bigint;
     }
   >
   | Tagged<"dispute_countered", Dispute & Proof>
   | Tagged<"dispute_finalized", Dispute & { bodyHash: Bytes32; evidence: Bytes32; tx: Bytes32; shown: Shown }>
   | Tagged<"secret_revealed", Place & { hashlock: Bytes32; revealer: Bytes32 | undefined; secret: Bytes32 }>;
+
+/** Only these payloads may remain unresolved after the Runtime commits the delivery's height. */
+export type ReadWait = Extract<ChainEvent, { _tag: "dispute_started" | "dispute_finalized" }>;
 
 /** The two contracts whose logs the watcher reads: the Depository, and the DeltaTransformer that holds the secrets. */
 export type Deployed = Readonly<{ depository: Address; transformer: Address }>;

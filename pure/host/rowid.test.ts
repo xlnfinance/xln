@@ -58,8 +58,8 @@ const hostBefore = (c: Case, before: readonly Row[], row: Row) => {
   const back = flush(unhalted(recover(hostOf(c.run, c.owner).setup, [emptyEntity(c.owner)], before))).runtime;
   const host = startHost(back, WIDE);
   const { input } = row;
-  return input._tag === "j_height"
-    ? heard(host, input.height)
+  if (input._tag === "j_observation") return expect.unreachable("this fixture has no watcher delivery");
+  return input._tag === "j_height" ? heard(host, input.height)
     : input.inputs.reduce((h, i) => submit(h, { to: input.to, input: i }), host);
 };
 

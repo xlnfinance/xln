@@ -10,7 +10,8 @@ import type { Returned, Skipped } from "../../../j/batch/answer.ts";
 import type { JOp } from "../../../j/op/ops.ts";
 import { err, map, ok, type Result } from "../../../kernel/core/result.ts";
 import type { Tagged } from "../../../kernel/core/tagged.ts";
-import { startRuntime } from "../../../runtime/tick.ts";
+import type { JHeight } from "../../../account/clause/clock.ts";
+import { apply, startRuntime } from "../../../runtime/tick.ts";
 import type { Halt, Row, Setup, Timestamp } from "../../../runtime/model.ts";
 import { begin, persisted, reopen, startHost, submit } from "../../host.ts";
 import type { Effect, Host, Limits, Stepped } from "../../model.ts";
@@ -30,7 +31,11 @@ export type Boot = Readonly<{ setup: Setup; genesis: EntityState; limits: Limits
 
 export type Station = Readonly<{ host: Host; submitter: Submitter }>;
 
-export type DriveFault = StoreFault | Unwritable | ShellFault | Halt | Tagged<"stuck", { height: bigint }>;
+/** Pre-observation WALs cannot identify which finalizes were held versus already applied. Do not guess on upgrade. */
+export type ReadWaitUpgrade = Tagged<"read_wait_upgrade", { peers: readonly EntityId[] }>;
+
+export type DriveFault = StoreFault | Unwritable | ShellFault | Halt | ReadWaitUpgrade
+  | Tagged<"stuck", { height: bigint }>;
 
 /** What a move of the shell made: the messages that leave, what the builder did with each ask, and what came back. */
 export type Turn = Readonly<{
@@ -180,6 +185,27 @@ export const command = (
 export const drain = (shell: Shell, station: Station): Promise<Result<Turn, DriveFault>> =>
   drained(shell, nothing(station));
 
+/**
+ * A complete J delivery is one durable Runtime input. Drain earlier commands first, retain the Host's frame bound,
+ * and publish no delivery effect until both its read-wait facts and height have reached the same WAL record.
+ */
+export const observe = async (
+  shell: Shell, station: Station, to: EntityId, inputs: readonly EntityInput[], height: JHeight,
+): Promise<Result<Turn, DriveFault>> => {
+  const earlier = await drain(shell, station);
+  if (!earlier.ok) return earlier;
+  const { host } = earlier.value.station;
+  if (inputs.length === 0 && height <= host.runtime.view) return earlier;
+  const size = host.limits.perFrame;
+  const batches = Array.from({ length: Math.ceil(inputs.length / size) },
+    (_, i) => inputs.slice(i * size, (i + 1) * size));
+  const staged = apply(host.runtime, { _tag: "j_observation", at: shell.now(), to, batches, height });
+  if (!staged.ok) return staged;
+  const row = staged.value.staged;
+  return row === undefined ? err({ _tag: "nothing_staged" })
+    : durable(shell, withHost(earlier.value, { ...host, runtime: staged.value }), row);
+};
+
 /** The Station over the WAL and the journal as they are: new on empty files, and after a crash what they hold. */
 export const start = async (shell: Shell, boot: Boot): Promise<Result<Turn, DriveFault>> => {
   const rows = await openWal(shell.wal);
@@ -188,6 +214,10 @@ export const start = async (shell: Shell, boot: Boot): Promise<Result<Turn, Driv
     ? ok<Stepped>({ host: startHost(startRuntime(boot.setup, [boot.genesis]), boot.limits), effects: [] })
     : reopen(boot.setup, [boot.genesis], rows.value, boot.limits);
   if (!reopened.ok) return reopened;
+  const peers = [...reopened.value.host.runtime.entities.values()].flatMap((entity) =>
+    [...entity.chain].flatMap(([peer, facts]) =>
+      (facts.behind !== undefined && !facts.lost && facts.readWaits === undefined ? [peer] : [])));
+  if (peers.length > 0) return err({ _tag: "read_wait_upgrade", peers });
   const resumed = await resume(shell.io, boot.where, rows.value);
   if (!resumed.ok) return resumed;
   const base = pumped(nothing({ host: reopened.value.host, submitter: resumed.value.submitter }), resumed.value);

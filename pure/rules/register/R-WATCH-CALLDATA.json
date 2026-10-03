@@ -429,6 +429,16 @@
    "kind": "test",
    "layer": "ts",
    "name": "R-WATCH-CALLDATA a trace asked and answered is not asked again while another tx waits"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-WATCH-CALLDATA a start of the hosted Entity asks for no foreign body"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-WATCH-CALLDATA a stranger finalize asks for neither calldata nor Account state"
   }
  ]
 }

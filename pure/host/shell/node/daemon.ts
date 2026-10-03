@@ -15,10 +15,10 @@ import type { WatchFault, Watch } from "../../../j/watch.ts";
 import { mapDelete, mapSet } from "../../../kernel/core/collections.ts";
 import { err, ok, type Result } from "../../../kernel/core/result.ts";
 import type { Tagged } from "../../../kernel/core/tagged.ts";
-import { heard, submit } from "../../host.ts";
+import { submit } from "../../host.ts";
 import type { HostNotice } from "../../model.ts";
 import {
-  command, drain, pump, start, type Boot, type DriveFault, type Shell, type Station, type Turn,
+  command, drain, observe, pump, start, type Boot, type DriveFault, type Shell, type Station, type Turn,
 } from "../drive/drive.ts";
 import { MAX_LINE, type Key, type Peer, type RuntimeId } from "../link/link.ts";
 import {
@@ -273,7 +273,9 @@ const standing = (rig: Rig, state: State): Standing => {
   const { runtime } = state.station.host;
   const entity = runtime.entities.get(rig.self);
   const waits = entity === undefined ? NO_WAITS : waitsOf(entity, rig.config.boot.setup.clock);
-  return { ...waits, view: runtime.view };
+  const pending = new Map([...chainOf(rig, state)].flatMap(([peer, facts]) =>
+    (facts.readWaits === undefined ? [] : [[peer, facts.readWaits] as const])));
+  return { ...waits, view: runtime.view, pending };
 };
 
 /** A fault of the node's reads of the chain is tried again at the next tick; one of the watcher's checks is final. */
@@ -305,15 +307,11 @@ const blinding = (rig: Rig, state: State, delivery: Delivery): readonly EntityIn
 const untracedNotices = (state: State, why: string | undefined): readonly HostNotice[] =>
   (why === undefined || state.untraced ? [] : [{ _tag: "no_call_trace", why }]);
 
-/** The events are in the WAL before the height is; the cursor moves only after the height's row (R-HEIGHT-ORDER). */
+/** Event effects, read waits and height commit together; only then does the cursor move (R-HEIGHT-ORDER). */
 const delivered = async (rig: Rig, state: State, delivery: Delivery): Promise<State> => {
-  const { shell } = rig.config;
   const inputs = [...blinding(rig, state, delivery), ...delivery.events];
-  const queued = inputs.reduce((host, input) => submit(host, { to: rig.self, input }), state.station.host);
-  const first = await concluded(rig, state, await drain(shell, { ...state.station, host: queued }));
-  if (first.fatal !== undefined) return first;
-  const height = { ...first.station, host: heard(first.station.host, delivery.height) };
-  const second = await concluded(rig, first, await drain(shell, height));
+  const second = await concluded(rig, state,
+    await observe(rig.config.shell, state.station, rig.self, inputs, delivery.height));
   const { carry, stalls } = delivery;
   const said = rig.config.watch?.value === true && delivery.untraceable
     ? untracedNotices(state, "a transaction's call trace: no such method") : [];

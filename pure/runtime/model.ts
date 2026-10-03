@@ -22,14 +22,20 @@ export const timestamp = (ms: bigint): Result<Timestamp, BadTimestamp> =>
 
 /**
  * What the Host hands the Runtime, with the time the Host saw it: the inputs of one Entity frame, or a new height of
- * the J chain. The Runtime's view of J only rises (R-DRIFT bounds how far it lags the chain, which is the Host's to
+ * the J chain, or a watcher delivery whose events and height commit together. The view only rises (R-DRIFT bounds
+ * how far it lags the chain, which is the Host's to
  * watch); a rise is a frame of every Entity, so an Account that waited for it proposes.
  */
 export type EntityBatch = Tagged<"entity", { at: Timestamp; to: EntityId; inputs: readonly EntityInput[] }>;
 
 export type NewHeight = Tagged<"j_height", { at: Timestamp; height: JHeight }>;
 
-export type Input = EntityBatch | NewHeight;
+/** A watcher delivery: bounded Entity frames at the old view, then its height, durable as one record. */
+export type Observation = Tagged<"j_observation", {
+  at: Timestamp; to: EntityId; batches: readonly (readonly EntityInput[])[]; height: JHeight;
+}>;
+
+export type Input = EntityBatch | NewHeight | Observation;
 
 export type RuntimeNotice = Notice | Tagged<"unknown_entity", { entity: EntityId }>;
 

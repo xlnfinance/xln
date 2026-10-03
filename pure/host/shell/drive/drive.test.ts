@@ -24,7 +24,8 @@ import type { ChainPort, PortFault } from "../submit/chain.ts";
 import { lazySigner } from "../submit/signer.ts";
 import { fileDisk } from "../node/file-disk.ts";
 import { scanWal } from "../disk/wal.ts";
-import { command, pump, start, type Boot, type Shell, type Turn } from "./drive.ts";
+import { heightOf } from "../../../account/fixtures.ts";
+import { command, observe, pump, start, type Boot, type Shell, type Turn } from "./drive.ts";
 
 const KEY = unwrapOr(keyOf(Uint8Array.from({ length: 32 }, (_, i) => i + 1)), () => expect.unreachable("key"));
 const BOOT: Boot = {
@@ -179,6 +180,20 @@ describe("host/shell/drive the Host's rows are on the disk before the chain hear
     expect(callsOf(at.log)).toEqual([]);
   });
 
+  test("R-HEIGHT-ORDER legacy read waits without identities require migration before outputs leave", async () => {
+    const at = scene();
+    await withShell(at, ok(undefined), async (shell) => {
+      const started = turnOf(await start(shell, BOOT));
+      const opened = turnOf(await command(shell, started.station, ALICE, open(BOB)));
+      return command(shell, opened.station, ALICE, { _tag: "j_behind", peer: BOB, from: 105n });
+    });
+    const before = readFileSync(at.wal);
+    const back = await withShell(at, ok(undefined), (shell) => start(shell, BOOT));
+    expect(back).toEqual(err({ _tag: "read_wait_upgrade", peers: [BOB] }));
+    expect(readFileSync(at.wal)).toEqual(before);
+    expect(callsOf(at.log)).toEqual([]);
+  });
+
   test("R-SIGNED-HEADS-ON-THE-WIRE a frame a restart flushes leaves signed, same signature", async () => {
     const at = scene();
     const first = await withShell(at, ok(undefined), async (shell) => {
@@ -243,6 +258,28 @@ describe("host/shell/drive the Host's rows are on the disk before the chain hear
     expect(callsOf(out.at.log).filter((c) => c.startsWith("send"))).toEqual([]);
     expect(out.second.lapsed).toEqual([]);
     expect(rowsIn(out.at).flatMap((r) => r.chain.map((a) => a._tag))).toEqual(["counter"]);
+  });
+
+  test("R-HEIGHT-ORDER a dropped observation counter feeds back only after the delivery is durable", async () => {
+    const at = scene();
+    const paid = hostOf(aliceRun, ALICE).entities.get(ALICE) ?? expect.unreachable("no entity");
+    const boot = { ...BOOT, genesis: paid, limits: unwrapOr(limits(8, 1), () => expect.unreachable("limits")) };
+    const outcome: Simulation["outcome"] = { _tag: "reverts", reason: "window over", causes: [E4] };
+    const first = await withShell(at, ok(undefined), async (shell) => {
+      const started = turnOf(await start(shell, boot));
+      return turnOf(await observe(shell, started.station, ALICE, [counterOpened], heightOf(501n)));
+    }, outcome);
+    expect(first.lapsed.map((op) => op._tag)).toEqual(["dispute_counter"]);
+    expect(answerOf(first)?.lapsed).toBe(true);
+    expect(first.station.host.runtime.view).toBe(501n as never);
+    const rows = rowsIn(at);
+    expect(rows.map((r) => r.input._tag)).toEqual(["j_observation", "entity"]);
+    expect(rows[0]?.chain.map((a) => a._tag)).toEqual(["counter", "counter"]);
+    expect(first.taken.map((t) => t._tag)).toEqual(["queued", "skipped"]);
+    const back = await withShell(at, ok(undefined), async (shell) => turnOf(await start(shell, boot)), outcome);
+    expect(answerOf(back)?.lapsed).toBe(true);
+    expect(back.station.host.runtime.entities).toEqual(first.station.host.runtime.entities);
+    expect(callsOf(at.log).filter((c) => c.startsWith("send"))).toEqual([]);
   });
 
   test("R-DISPUTE-LAPSED a counter is not given up while the chain refuses a batch of no op at its nonce", async () => {

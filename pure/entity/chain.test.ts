@@ -134,6 +134,21 @@ describe("entity/chain the record that the Host holds an Account's events back (
     expect(disputeOpened(read, dispute(other)).against?.body).toEqual(CLAUSED);
   });
 
+  test("R-WATCH-STALL a repeated start fills no body for another epoch, nonce or logged hash", () => {
+    const bare = disputeOpened(freshChain, dispute());
+    const other = { ...CLAUSED, leftResponseSeconds: CLAUSED.leftResponseSeconds + 1n };
+    const repeats = [
+      { ...dispute(CLAUSED), epoch: 1n },
+      { ...dispute(CLAUSED), nonce: 8n },
+      dispute(other, must(proofBodyHash(other))),
+    ];
+    repeats.forEach((repeated) => {
+      expect(disputeOpened(bare, repeated)).toBe(bare);
+      expect(disputeOpened(bare, repeated).against?.body).toBeUndefined();
+    });
+    expect(disputeOpened(bare, dispute(CLAUSED)).against?.body).toEqual(CLAUSED);
+  });
+
   describe("a finalize held back for its secrets is told late (R-WATCH-STALL)", () => {
     const ALICE = entityOf(1);
     const BOB = entityOf(2);

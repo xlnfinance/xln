@@ -222,3 +222,42 @@ describe("runtime/tick review A: stamps, and what a replay compares", () => {
     expect(frame(1n)).not.toBe(frame(2n));
   });
 });
+
+
+describe("runtime/tick watcher observations", () => {
+  test("R-HEIGHT-ORDER delivery batches keep output order and old-view judgments in one durable row", () => {
+    const before = tick(started(BOB), inputFor(BOB, 1n, open(ALICE), open(CAROL))).runtime;
+    const batches: readonly (readonly EntityInput[])[] = [[credit(ALICE, 100n)], [credit(CAROL, 200n)]];
+    const at = stamp(2n);
+    const height = 101n as JHeight;
+    const separate = batches.reduce((rt, inputs) => tick(rt, { _tag: "entity", at, to: BOB, inputs }).runtime, before);
+    const expected = tick(separate, { _tag: "j_height", at, height }).runtime;
+    const staged = unhalted(apply(before, { _tag: "j_observation", at, to: BOB, batches, height }));
+    expect(staged.entities).toEqual(expected.entities);
+    expect(staged.view).toBe(expected.view);
+    expect(staged.staged?.outputs).toEqual(expected.wal.slice(before.wal.length).flatMap((r) => r.outputs));
+    expect(flush(staged).leaving).toEqual([]);
+    const lost = unhalted(recover(setup, genesis, staged.wal));
+    expect(lost.entities).toEqual(before.entities);
+    expect(lost.view).toBe(before.view);
+    const committed = unhalted(commit(staged));
+    const recovered = unhalted(recover(setup, genesis, committed.wal));
+    expect(recovered.entities).toEqual(expected.entities);
+    expect(BigInt(recovered.view)).toBe(BigInt(height));
+    expect(committed.wal.length).toBe(before.wal.length + 1);
+    expect(flush(recovered).leaving).toEqual(expected.wal.flatMap((r) => r.outputs));
+  });
+
+  test("R-HEIGHT-ORDER same-height recovery applies its payload without an extra height frame", () => {
+    const before = tick(started(BOB), inputFor(BOB, 1n, open(ALICE))).runtime;
+    const inputs: readonly EntityInput[] = [credit(ALICE, 100n)];
+    const expected = tick(before, inputFor(BOB, 2n, ...inputs)).runtime;
+    const actual = tick(before, {
+      _tag: "j_observation", at: stamp(2n), to: BOB, batches: [inputs], height: BigInt(before.view) as JHeight,
+    }).runtime;
+    expect(actual.entities).toEqual(expected.entities);
+    expect(actual.wal.at(-1)?.outputs).toEqual(expected.wal.at(-1)?.outputs);
+    expect(actual.wal.at(-1)?.chain).toEqual(expected.wal.at(-1)?.chain);
+    expect(actual.wal.at(-1)?.notices).toEqual(expected.wal.at(-1)?.notices);
+  });
+});

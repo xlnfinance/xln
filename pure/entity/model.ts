@@ -16,6 +16,7 @@ import type { AccountFault, AccountState, Hold, HoldId, Leg, Side, TokenId } fro
 import type { ProofBody } from "../chain/proof/proof.ts";
 import type { Held } from "../account/state.ts";
 import type { AccountTx } from "../account/tx.ts";
+import type { ReadWait } from "../j/log.ts";
 
 /** A 32-byte id, `0x` and 64 lowercase hex digits: the text order of two ids is their numeric order, as the chain's. */
 export type EntityId = Brand<string, "EntityId">;
@@ -115,6 +116,8 @@ export type ChainFacts = Readonly<{
    * out of it.
    */
   lost: boolean;
+  /** Exact unresolved payloads, delivered through Runtime WAL inputs; absent only in older WALs. */
+  readWaits?: readonly ReadWait[];
 }>;
 
 /**
@@ -203,6 +206,7 @@ export type JEvent =
   | Tagged<"j_start_unread", { peer: EntityId; tx: string }>
   | Tagged<"j_behind", { peer: EntityId; from: bigint }>
   | Tagged<"j_behind_over", { peer: EntityId }>
+  | Tagged<"j_read_waits", { peer: EntityId; pending: readonly ReadWait[] }>
   | Tagged<"j_account_lost", { peer: EntityId; from: bigint }>;
 
 /** What a peer asks the node to co-sign: a withdrawal of collateral as a shortcut (C2R) or as a settlement. */

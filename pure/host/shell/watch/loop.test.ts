@@ -514,6 +514,28 @@ describe("host/shell/watch the J loop's poll", () => {
     expect(got).toEqual(err(DOWN));
   });
 
+  test("R-WATCH-WINDOW pruning when the hosted Entity is Right names the left peer only", async () => {
+    const at = logPath();
+    const other = logOf("AccountEpochAdvanced", { left: RIGHT, right: OTHER, ondeltaEpoch: 1n }, 3n, 0n);
+    const logs = [advanced(2n, 0n, 1n), other, shownAt(4n)];
+    const polled = await poll(portOf(straight(8n, logs), at, "pruned"), start(2n), RIGHT);
+    expect(polled.ok).toBe(true);
+    const got = must(polled);
+    expect(got?.events).toEqual([
+      { _tag: "j_account_lost", peer: peer(LEFT), from: 2n },
+      { _tag: "j_epoch", peer: peer(OTHER), epoch: 1n, stored: 5n },
+      { _tag: "j_secret", secret: Uint8Array.from({ length: 32 }, (_, i) => (i === 31 ? 8 : 0)), at: 4n },
+    ]);
+  });
+
+  test("R-WATCH-WINDOW several pruned readings keep the earliest lost block of the Account", async () => {
+    const logs = [advanced(2n, 0n, 1n), advanced(3n, 0n, 2n), advanced(4n, 0n, 3n)];
+    const polled = await poll(portOf(straight(8n, logs), logPath(), "pruned"), start(2n), LEFT);
+    expect(polled.ok).toBe(true);
+    const got = must(polled);
+    expect(got?.events).toEqual([{ _tag: "j_account_lost", peer: peer(RIGHT), from: 2n }]);
+  });
+
   test("R-WATCH-STALL an epoch told ahead of another advance in its block is read less it", async () => {
     const op = finalizeOp({ otherArguments: argumentsOf([hexOf(8n)]) });
     const tx = txOf(2n, 2n);
@@ -604,6 +626,43 @@ describe("host/shell/watch the J loop's poll", () => {
     expect(callsOf(at).filter((c) => c.startsWith("account"))).toHaveLength(1);
   });
 
+  test("R-WATCH-WINDOW a pending start keeps its event epoch through recovery after a same-block advance", async () => {
+    const at = logPath();
+    const logs = [opening(WINDOW), advanced(2n, 1n, 1n)];
+    const stand: Standing = { ...NO_STANDING, pending: new Map(), lastHeard: new Map([[RIGHT, 50n]]) };
+    const waiting = await stepped(portOf(straight(6n, logs), at, "input"), FRESH, stand);
+    const marker = waiting.told.find((e) => e._tag === "j_read_waits");
+    if (marker?._tag !== "j_read_waits") return expect.unreachable("no pending start recorded");
+    expect(marker.pending[0]).toMatchObject({ _tag: "dispute_started", epoch: 0n });
+    const recovered: Standing = {
+      ...stand, view: 4n, behind: new Set([RIGHT]), pending: new Map([[RIGHT, marker.pending]]),
+    };
+    const retry = logPath();
+    const inputs = new Map([[txOf(2n, 0n), startInput(RIGHT, [startOp(CLAUSED)])]]);
+    const port = portOf(straight(7n, logs), retry, "pruned", inputs);
+    const replayed = must(await poll(port, start(2n, blockOf(1n)), LEFT, [], NO_CARRY, recovered));
+    expect(callsOf(retry).filter((call) => call.startsWith("account"))).toEqual([]);
+    expect(replayed?.events.find((e) => e._tag === "j_dispute")).toMatchObject({ epoch: 0n, body: CLAUSED });
+    expect(replayed?.events.some((e) => e._tag === "j_epoch" || e._tag === "j_account_lost")).toBe(false);
+    expect(replayed?.events).toContainEqual({ _tag: "j_read_waits", peer: peer(RIGHT), pending: [] });
+  });
+
+  test("R-WATCH-CALLDATA a start of the hosted Entity asks for no foreign body", async () => {
+    const at = logPath();
+    const got = must(await poll(portOf(straight(6n, [opening(WINDOW)]), at, "input"), start(2n), RIGHT));
+    expect(callsOf(at).some((call) => call.startsWith("input") || call.startsWith("trace"))).toBe(false);
+    expect(got?.events.some((e) => e._tag === "j_dispute")).toBe(true);
+    expect(got?.events.some((e) => e._tag === "j_behind" || e._tag === "j_start_unread")).toBe(false);
+  });
+
+  test("R-WATCH-CALLDATA a stranger finalize asks for neither calldata nor Account state", async () => {
+    const at = logPath();
+    const { logs } = finalizing();
+    const got = must(await poll(portOf(straight(6n, logs), at, "input"), start(2n), OTHER));
+    expect(callsOf(at).some((call) => /^(input|trace|account) /.test(call))).toBe(false);
+    expect(got?.events).toEqual([]);
+  });
+
   /** One tx: a finalize of a stranger's Account first, then the finalize of the Entity's Account with RIGHT. */
   const relayedFinalizes = () => {
     const op = finalizeOp({ otherArguments: argumentsOf([hexOf(8n)]) });
@@ -684,6 +743,43 @@ describe("host/shell/watch the J loop's poll", () => {
     return { logs, fine, stuck };
   };
 
+  test("R-WATCH-STALL a later finalize cannot dissolve the same Account before an earlier secret arrives", async () => {
+    const { logs, fine, stuck } = behindAStall();
+    const stand: Standing = { ...NO_STANDING, lastHeard: new Map([[RIGHT, 50n]]) };
+    const readable = new Map([[fine.tx, finalizeInput(RIGHT, [fine.op])]]);
+    const first = await stepped(portOf(straight(8n, logs), logPath(), -1n, readable), FRESH, stand);
+    expect(first.told.filter((e) => e._tag === "j_dispute_over")).toEqual([]);
+    expect(first.carry.held).toHaveLength(2);
+    const all = new Map([...readable, [stuck.tx, finalizeInput(RIGHT, [stuck.op])]]);
+    const done = await stepped(portOf(straight(9n, logs), logPath(), -1n, all), first, stand);
+    const released = done.told.slice(first.told.length);
+    expect(released[0]).toMatchObject({ _tag: "j_secret", at: 2n });
+    expect(released.filter((e) => e._tag === "j_dispute_over")).toEqual([OVER_LATE, OVER_LATE]);
+    expect(released.at(-1)).toEqual(BEHIND_OVER);
+    expect(done.carry.held).toEqual([]);
+  });
+
+  test("R-WATCH-STALL two pending finalizes survive restart with the later payload already read", async () => {
+    const { logs, fine, stuck } = behindAStall();
+    const stand: Standing = { ...NO_STANDING, pending: new Map(), lastHeard: new Map([[RIGHT, 50n]]) };
+    const readable = new Map([[fine.tx, finalizeInput(RIGHT, [fine.op])]]);
+    const first = await stepped(portOf(straight(8n, logs), logPath(), -1n, readable), FRESH, stand);
+    const marker = first.told.find((e) => e._tag === "j_read_waits");
+    if (marker?._tag !== "j_read_waits") return expect.unreachable("no pending finalizes recorded");
+    expect(marker.pending).toHaveLength(2);
+    const recovered: Standing = {
+      ...stand, view: 6n, behind: new Set([RIGHT]), pending: new Map([[RIGHT, marker.pending]]),
+    };
+    const at = logPath();
+    const onlyEarlier = new Map([[stuck.tx, finalizeInput(RIGHT, [stuck.op])]]);
+    const done = must(await poll(portOf(straight(9n, logs), at, -1n, onlyEarlier), start(2n),
+      LEFT, [], NO_CARRY, recovered));
+    expect(done?.events.filter((e) => e._tag === "j_dispute_over")).toEqual([OVER_LATE, OVER_LATE]);
+    expect(done?.events.filter((e) => e._tag === "j_epoch")).toEqual([]);
+    expect(countOf(at, `input ${fine.tx.slice(-4)}`)).toBe(0);
+    expect(done?.carry.held).toEqual([]);
+  });
+
   test("R-WATCH-CALLDATA a tx read ahead of a stalled one is read once, and not kept once told", async () => {
     const at = logPath();
     const { logs, fine, stuck } = behindAStall();
@@ -693,6 +789,9 @@ describe("host/shell/watch the J loop's poll", () => {
     expect(countOf(at, `input ${fine.tx.slice(-4)}`)).toBe(1);
     expect(countOf(at, `input ${stuck.tx.slice(-4)}`)).toBe(2);
     expect([...polled.carry.reads.keys()]).toEqual([]);
+    expect(polled.carry.held.find((e) => "tx" in e && e.tx === fine.tx)).toMatchObject({ shown: { _tag: "read" } });
+    const released = await along((head) => portOf(straight(head, logs), at, -1n, inputs), [10n], polled);
+    expect([...released.carry.reads.keys()]).toEqual([]);
   });
 
   test("R-WATCH-CALLDATA a trace asked and answered is not asked again while another tx waits", async () => {
@@ -703,7 +802,7 @@ describe("host/shell/watch the J loop's poll", () => {
     const polled = await along((head) => portOf(straight(head, logs), at, -1n, hidden), upTo(8n, 11n), FRESH, stand);
     expect(polled.carry.failing.has(stuck.tx)).toBe(true);
     expect(countOf(at, `trace ${fine.tx.slice(-4)}`)).toBe(1);
-    expect(polled.carry.reads.has(fine.tx)).toBe(false);
+    expect(polled.carry.reads.has(fine.tx)).toBe(true);
   });
 
   test("R-WATCH-CALLDATA what the Host keeps of a tx ends with its delivery: nothing is kept past it", async () => {

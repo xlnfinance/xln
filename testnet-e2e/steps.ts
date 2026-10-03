@@ -756,7 +756,11 @@ const rebase: Step<World> = {
       throw new Error(`pending_rebased notices ${shown(pendingTold)} (alice, hubX) when the epoch moved to ${onChain.epoch}, expected one naming alice's payment, a known finalized nonce and the resend, and none for hubX`);
     }
     // What each node's own J loop told its Entity, from the WAL rows the events are in.
-    const told = (id: EntityId): readonly string[] => net.rowsOf(id).flatMap((r) => (r.input._tag === "entity" ? r.input.inputs.flatMap((i) => (i._tag.startsWith("j_") ? [i._tag] : [])) : []));
+    const told = (id: EntityId): readonly string[] => net.rowsOf(id).flatMap((r) => {
+      const inputs = r.input._tag === "j_observation" ? r.input.batches.flat()
+        : r.input._tag === "entity" ? r.input.inputs : [];
+      return inputs.flatMap((i) => (i._tag.startsWith("j_") ? [i._tag] : []));
+    });
     const names = [alice, hubX].flatMap((p) => told(eid(p)).map((tag) => `${p.name} ${tag}`));
     ["j_epoch", "j_dispute_over"].forEach((tag) => {
       [alice.name, hubX.name].forEach((who) => { if (!names.includes(`${who} ${tag}`)) throw new Error(`${who} was told no ${tag} (${names.join(", ")})`); });

@@ -24,7 +24,13 @@ export const chainIn = (effects: readonly Effect[]): readonly JAction[] =>
   effects.flatMap((effect) => (effect._tag === "chain" ? [effect.action] : []));
 
 /** The Entity inputs a Runtime input carries: none for a J height. */
-export const inputsOf = (input: Input): readonly EntityInput[] => (input._tag === "entity" ? input.inputs : []);
+export const inputsOf = (input: Input): readonly EntityInput[] => {
+  switch (input._tag) {
+    case "entity": return input.inputs;
+    case "j_observation": return input.batches.flat();
+    case "j_height": return [];
+  }
+};
 
 export type Turn = Readonly<{ host: Host; sent: readonly Outbound[] }>;
 
