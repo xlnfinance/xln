@@ -1,10 +1,10 @@
 {
  "id": "R-HEIGHT-ORDER",
- "statement": "A J height is handed to the Host only after the J events of its delivery are in the WAL, and the watcher's cursor moves only once a committed j_height row holds the height, since the Host's waiting height is lost in a crash.",
- "source": "watch.ts header and R-WATCH-ORDER (the view never runs ahead of an event it has not been told); R-HTLC-CLOCK; Review A of 118",
+ "statement": "A watcher delivery applies ordered bounded Entity frames at the old view before advancing height, then commits their effects, pending payload identities and view as one j_observation WAL record. Outputs leave only after that record is durable; the cursor moves only after commit. No crash may keep effects or cleared read waits without their covering view. Separate legacy height inputs require their events durable first.",
+ "source": "watch.ts header and R-WATCH-ORDER (the view never runs ahead of an event it has not been told); R-HTLC-CLOCK; Review A of 118; slice-1 crash-boundary reproduction and atomic delivery design 2026-10-03",
  "layers": {
   "arrival": "n/a: the Arrival specs take J events and heights as given, in order",
-  "quint": "owed: spec thread (spec/quint/runtime.qnt part 3 `exactly_once_j`, QUESTIONS R2, is the spec side; no name carries this id yet)",
+  "quint": "hold",
   "contract": "n/a: no contract code takes part; it is the Host's order of two inputs",
   "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
   "ts": "hold"
@@ -14,6 +14,31 @@
    "kind": "test",
    "layer": "ts",
    "name": "R-HEIGHT-ORDER the events are in the WAL before the height, and the cursor is the height's"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-HEIGHT-ORDER a crash after persisting a read wait cannot leave its effects ahead of its view"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-HEIGHT-ORDER delivery batches keep output order and old-view judgments in one durable row"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-HEIGHT-ORDER same-height recovery applies its payload without an extra height frame"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-HEIGHT-ORDER a dropped observation counter feeds back only after the delivery is durable"
+  },
+  {
+   "kind": "test",
+   "layer": "quint",
+   "name": "R_HEIGHT_ORDER_splitCommitCounterexampleTest"
   }
  ]
 }

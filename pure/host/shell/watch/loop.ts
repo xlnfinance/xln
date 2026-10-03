@@ -2,8 +2,8 @@
 // at depth, as the J events of the Entity this node hosts and the height they end at. It reads blocks and logs through
 // a port and hands them to the watcher core (j/watch.ts), which checks them: a block that does not follow the cursor, a
 // log that does not belong to its block, a reading that contradicts a log. The cursor lives in the node's memory and is
-// moved by the caller only after the delivery is in the WAL (R-HEIGHT-ORDER); a restart begins again at the Runtime's
-// own view, which the WAL holds, and replays what it must (every J event is idempotent).
+// moved by the caller only after effects, pending payloads and height share a durable observation (R-HEIGHT-ORDER).
+// A restart uses the WAL's view to exclude applied ordinary facts, and resumes only recorded unresolved payloads.
 //
 // A dispute finalize whose bytes the node cannot read (R-WATCH-STALL) holds back the events of its own Account from its
 // first event on, and nothing else: the other Accounts and every revealed secret go on at once. A dispute start holds

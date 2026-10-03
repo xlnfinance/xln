@@ -1,5 +1,5 @@
 // A node with a J loop over a chain that is scripted (R-JLOOP, R-HEIGHT-ORDER): the events reach the Entity before
-// the height does, the cursor moves only with the height's row, a restart begins at the view its WAL holds, a node
+// the height does within one atomic observation, a restart begins at the view its WAL holds, a node
 // whose reads fail goes on at the next tick, and a reorg deeper than the depth ends it.
 import { describe, expect, test } from "bun:test";
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
@@ -11,6 +11,7 @@ import type { Row } from "../../../runtime/model.ts";
 import { entityOf as entityNumbered, forwarded } from "../../../entity/fixtures.ts";
 import { open } from "../../../runtime/fixtures.ts";
 import type { Disk } from "../disk/disk.ts";
+import { scanWal } from "../disk/wal.ts";
 import { callsOf } from "../fixtures.ts";
 import type { PortFault } from "../submit/chain.ts";
 import type { Look } from "./daemon.ts";
@@ -110,6 +111,14 @@ const entriesOf = (look: Look): readonly string[] =>
 const blindOf = (look: Look): boolean => look.station.host.runtime.entities.get(ALICE)?.blind === true;
 
 const rowsOf = (look: Look): readonly Row[] => look.station.host.runtime.wal;
+
+const inputsOf = (row: Row) => {
+  switch (row.input._tag) {
+    case "entity": return row.input.inputs;
+    case "j_observation": return row.input.batches.flat();
+    case "j_height": return [];
+  }
+};
 
 /** How many notices of the Host the node told, and how many of the Entity the WAL holds, of one kind. */
 const told = (look: Look, tag: string): number => look.notices.filter((n) => n._tag === tag).length;
@@ -240,11 +249,11 @@ describe("host/shell/node a node with a J loop", () => {
     expect(await until(async () => delivered(await alice.look()), WAIT)).toBe(true);
     const rows = rowsOf(await alice.stop());
     const eventRow = rows.findIndex(
-      (r) => r.input._tag === "entity" && r.input.inputs.some((i) => i._tag === "j_epoch"),
+      (r) => inputsOf(r).some((i) => i._tag === "j_epoch"),
     );
-    const heightRow = rows.findIndex((r) => r.input._tag === "j_height");
+    const heightRow = rows.findIndex((r) => r.input._tag === "j_observation");
     expect(eventRow).toBeGreaterThanOrEqual(0);
-    expect(heightRow).toBeGreaterThan(eventRow);
+    expect(heightRow).toBe(eventRow);
   });
 
   test("R-J-COLLATERAL what the chain holds reaches the Entity, and a restart from the WAL has it", async () => {
@@ -354,7 +363,7 @@ describe("host/shell/node a node with a J loop", () => {
     const waiting = await alice.look();
     expect(factsOf(waiting)).toMatchObject({ epoch: 1n, behind: 105n });
     expect(entriesOf(waiting)).toEqual(["locked"]);
-    const wal = (look: Look) => rowsOf(look).flatMap((r) => (r.input._tag === "entity" ? r.input.inputs : []));
+    const wal = (look: Look) => rowsOf(look).flatMap(inputsOf);
     expect(wal(waiting).some((i) => i._tag === "j_dispute_over")).toBe(false);
     expect(await until(async () => caughtUp(factsOf(await alice.look())), WAIT)).toBe(true);
     const look = await alice.stop();
@@ -449,11 +458,64 @@ describe("host/shell/node a node with a J loop", () => {
     expect(factsOf(after)).toMatchObject({ epoch: 1n, lost: false, readWaits: [] });
     expect(callsOf(log).filter((call) => call === "account")).toEqual([]);
     expect(entityTold(after, "account_lost")).toBe(0);
-    const inputs = rowsOf(after).flatMap((row) => row.input._tag === "entity" ? row.input.inputs : []);
+    const inputs = rowsOf(after).flatMap(inputsOf);
     expect(inputs.filter((input) => input._tag === "j_epoch")).toHaveLength(1);
     expect(inputs.filter((input) => input._tag === "j_dispute_over")).toEqual([
       { _tag: "j_dispute_over", peer: BOB, late: true },
     ]);
+  });
+
+  test("R-HEIGHT-ORDER a crash after persisting a read wait cannot leave its effects ahead of its view", async () => {
+    const dir = fresh();
+    const log = `${dir}/calls.log`;
+    writeFileSync(log, "");
+    const up = `${dir}/up`;
+    const crashOn = (state: "pending" | "cleared") => (disk: Disk): Disk => ({
+      ...disk,
+      run: async (ops) => {
+        const row = ops.flatMap((op) => op._tag === "write" ? made(scanWal(op.bytes)).rows : [])[0];
+        const inputs = row === undefined ? [] : inputsOf(row);
+        const marker = inputs.some((input) => input._tag === "j_read_waits"
+          && (input.pending.length === 0) === (state === "cleared"));
+        const written = await disk.run(ops);
+        return written.ok && marker ? err({ _tag: "disk", op: "sync", reason: "crash after sync" }) : written;
+      },
+    });
+    const watch = watchOf({ ...STRAIGHT, down: up }, log, [advanced(105n, 1n), finalized]);
+    const alice = await nodeOf(await seatOf(ALICE, dir, 0), NO_PEER, {
+      tickMs: QUICK, watch, wrap: crashOn("pending"),
+    });
+    await alice.tell(open(BOB));
+    writeFileSync(up, "up");
+    expect(await until(async () => (await alice.look()).fatal !== undefined, WAIT)).toBe(true);
+    await alice.stop();
+    const resumed = `${dir}/resumed`;
+    const given = { ...QUIET, input: "given" as const, pruned: true };
+    const again = await nodeOf(await seatOf(ALICE, dir, 0), NO_PEER, {
+      tickMs: QUICK, wrap: crashOn("cleared"),
+      watch: watchOf({ ...STRAIGHT, down: resumed }, log, [advanced(105n, 1n), finalized], given),
+    });
+    expect((await again.look()).station.host.runtime.view).toBe(110n as never);
+    const newer = {
+      _tag: "j_dispute", peer: BOB, epoch: 1n, by: "right", nonce: 11n, timeout: 500n,
+      proposerIsLeft: false, bodyHash: hexOf(91n),
+    } as const;
+    expect((await again.tell(newer)).ok).toBe(true);
+    writeFileSync(resumed, "up");
+    expect(await until(async () => (await again.look()).fatal !== undefined, WAIT)).toBe(true);
+    await again.stop();
+    const last = await nodeOf(await seatOf(ALICE, dir, 0), NO_PEER, {
+      tickMs: QUICK, watch: watchOf(STRAIGHT, log, [advanced(105n, 1n), finalized], given),
+    });
+    expect(await until(async () => delivered(await last.look()), WAIT)).toBe(true);
+    const after = await last.stop();
+    expect(factsOf(after)?.against?.nonce).toBe(11n);
+    expect(factsOf(after)?.readWaits).toEqual([]);
+    const inputs = rowsOf(after).flatMap(inputsOf);
+    expect(inputs.filter((input) => input._tag === "j_dispute_over")).toEqual([
+      { _tag: "j_dispute_over", peer: BOB, late: true },
+    ]);
+    expect(inputs.filter((input) => input._tag === "j_epoch")).toHaveLength(1);
   });
 
   test("R-WATCH-CALLDATA no call trace at run time blinds a node with value and does not end it", async () => {
@@ -520,7 +582,7 @@ describe("host/shell/node a node with a J loop", () => {
   });
 
   test.each([
-    ["the events' row", 2], ["the height's row", 3],
+    ["the atomic delivery row", 2],
   ])("R-HEIGHT-ORDER a delivery whose WAL write fails ends it: no height after lost events (%s)", async (_, at) => {
     const dir = fresh();
     const log = `${dir}/calls.log`;

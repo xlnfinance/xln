@@ -10,7 +10,8 @@ import type { Returned, Skipped } from "../../../j/batch/answer.ts";
 import type { JOp } from "../../../j/op/ops.ts";
 import { err, map, ok, type Result } from "../../../kernel/core/result.ts";
 import type { Tagged } from "../../../kernel/core/tagged.ts";
-import { startRuntime } from "../../../runtime/tick.ts";
+import type { JHeight } from "../../../account/clause/clock.ts";
+import { apply, startRuntime } from "../../../runtime/tick.ts";
 import type { Halt, Row, Setup, Timestamp } from "../../../runtime/model.ts";
 import { begin, persisted, reopen, startHost, submit } from "../../host.ts";
 import type { Effect, Host, Limits, Stepped } from "../../model.ts";
@@ -179,6 +180,27 @@ export const command = (
 /** The Host as it is, run until it has nothing queued: what the link or the J loop put in its queue is taken. */
 export const drain = (shell: Shell, station: Station): Promise<Result<Turn, DriveFault>> =>
   drained(shell, nothing(station));
+
+/**
+ * A complete J delivery is one durable Runtime input. Drain earlier commands first, retain the Host's frame bound,
+ * and publish no delivery effect until both its read-wait facts and height have reached the same WAL record.
+ */
+export const observe = async (
+  shell: Shell, station: Station, to: EntityId, inputs: readonly EntityInput[], height: JHeight,
+): Promise<Result<Turn, DriveFault>> => {
+  const earlier = await drain(shell, station);
+  if (!earlier.ok) return earlier;
+  const { host } = earlier.value.station;
+  if (inputs.length === 0 && height <= host.runtime.view) return earlier;
+  const size = host.limits.perFrame;
+  const batches = Array.from({ length: Math.ceil(inputs.length / size) },
+    (_, i) => inputs.slice(i * size, (i + 1) * size));
+  const staged = apply(host.runtime, { _tag: "j_observation", at: shell.now(), to, batches, height });
+  if (!staged.ok) return staged;
+  const row = staged.value.staged;
+  return row === undefined ? err({ _tag: "nothing_staged" })
+    : durable(shell, withHost(earlier.value, { ...host, runtime: staged.value }), row);
+};
 
 /** The Station over the WAL and the journal as they are: new on empty files, and after a crash what they hold. */
 export const start = async (shell: Shell, boot: Boot): Promise<Result<Turn, DriveFault>> => {

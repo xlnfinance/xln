@@ -12,7 +12,7 @@ const isRow = (v: unknown): v is Row => {
   const row = v as Partial<Record<keyof Row, unknown>> | null;
   const input = row?.input as { _tag?: unknown } | undefined;
   return typeof row === "object" && row !== null && typeof row.height === "bigint" && typeof row.stamp === "bigint"
-    && (input?._tag === "entity" || input?._tag === "j_height")
+    && (input?._tag === "entity" || input?._tag === "j_height" || input?._tag === "j_observation")
     && Array.isArray(row.outputs) && Array.isArray(row.chain) && Array.isArray(row.notices);
 };
 

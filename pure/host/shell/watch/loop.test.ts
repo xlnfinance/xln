@@ -759,6 +759,27 @@ describe("host/shell/watch the J loop's poll", () => {
     expect(done.carry.held).toEqual([]);
   });
 
+  test("R-WATCH-STALL two pending finalizes survive restart with the later payload already read", async () => {
+    const { logs, fine, stuck } = behindAStall();
+    const stand: Standing = { ...NO_STANDING, pending: new Map(), lastHeard: new Map([[RIGHT, 50n]]) };
+    const readable = new Map([[fine.tx, finalizeInput(RIGHT, [fine.op])]]);
+    const first = await stepped(portOf(straight(8n, logs), logPath(), -1n, readable), FRESH, stand);
+    const marker = first.told.find((e) => e._tag === "j_read_waits");
+    if (marker?._tag !== "j_read_waits") return expect.unreachable("no pending finalizes recorded");
+    expect(marker.pending).toHaveLength(2);
+    const recovered: Standing = {
+      ...stand, view: 6n, behind: new Set([RIGHT]), pending: new Map([[RIGHT, marker.pending]]),
+    };
+    const at = logPath();
+    const onlyEarlier = new Map([[stuck.tx, finalizeInput(RIGHT, [stuck.op])]]);
+    const done = must(await poll(portOf(straight(9n, logs), at, -1n, onlyEarlier), start(2n),
+      LEFT, [], NO_CARRY, recovered));
+    expect(done?.events.filter((e) => e._tag === "j_dispute_over")).toEqual([OVER_LATE, OVER_LATE]);
+    expect(done?.events.filter((e) => e._tag === "j_epoch")).toEqual([]);
+    expect(countOf(at, `input ${fine.tx.slice(-4)}`)).toBe(0);
+    expect(done?.carry.held).toEqual([]);
+  });
+
   test("R-WATCH-CALLDATA a tx read ahead of a stalled one is read once, and not kept once told", async () => {
     const at = logPath();
     const { logs, fine, stuck } = behindAStall();

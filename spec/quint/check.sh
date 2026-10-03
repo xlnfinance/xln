@@ -31,6 +31,11 @@ run_tests() {
   fi
 }
 
+echo "== watch delivery: atomic recovery and same-Account finalize order"
+$Q typecheck watch_delivery.qnt
+run_tests watch_delivery.qnt
+$Q run watch_delivery.qnt --backend typescript --invariant safe --max-steps 30 --max-samples "$SAMPLES" --seed 0x1 --verbosity 1
+
 echo "== params: the numbers the layers share"
 run_tests params_test.qnt
 

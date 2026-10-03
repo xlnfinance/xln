@@ -130,18 +130,28 @@ read their Account state again, replay their collateral, or repeat their epoch a
 pending payloads, reads their calldata, and releases finalizes as late. Existing carried read results are preserved.
 The cursor still starts at `min(view, min(behind) - 1)`; old logs do not become new Entity facts.
 
-The pending list is committed after its payload effects and before `j_behind_over`, then the delivery height is
-committed. A crash before that list update can repeat late protection while the Account remains behind; it cannot
-forget the secret before applying it or permit new spending before clearing its pending evidence. An old WAL that
-has `behind` but no `readWaits` retains the conservative archive-read path until a successful delivery records the
-identities; a pruned legacy read still faults its Account rather than guessing.
+A watcher delivery is one Runtime `j_observation` input and one WAL record: bounded Entity frames at the old
+view, including the payload effects, pending list and `j_behind_over`, followed by the height frame only if the view
+rises. A torn or absent record applies none of these; a durable record applies all. There is no persisted prefix
+where effects or cleared markers run ahead of their view. Commands already queued are drained before the delivery.
+
+Outputs and chain actions retain frame order and leave only after that record is durable. The submitter then pumps
+them and commits any lapse feedback before the observation move returns. This intentionally removes chain-feedback
+interleaving between the delivery's subframes: a rejected counter is marked lapsed in the next frame, after height,
+with its existing nonce guard; it cannot cause the opening proof to be accepted before that rejection is known.
+Repeated counter/finalize asks still use the builder's normal deduplication. The read-depth/response-window budget
+must cover poll, WAL sync and submission latency; this change creates no new timing allowance.
+
+An old WAL with `behind` but no `readWaits` retains conservative archive reads until a successful delivery records
+the identities; a pruned legacy read still faults its Account rather than guessing. Existing `entity` and `j_height`
+rows retain their replay semantics. New observations require the new reader; downgrades fail loudly on the WAL tag.
 
 Ownership and durability: `readWaits` belongs to Entity ChainFacts and is reconstructed from the same ordered Runtime
 WAL inputs as those facts. It is not a second journal, checkpoint, or signed Account proof field. Its exact log
 identities and event-time epoch cannot be derived from the latest Account facts or from pruned historical state.
-The node-level restart regression requires zero old Account reads, no duplicate epoch, one late finalize, and no lost
-Account. A separate pending-start regression preserves its original epoch across a same-block advance. Once new
-`j_read_waits` rows exist, recovery requires a version that understands them; do not downgrade the WAL reader.
+The node-level restart regressions require zero old Account reads, no duplicate epoch, one late finalize, no lost
+Account, and preservation of a newer dispute across crashes after recording and clearing a read wait. A separate pending-start regression preserves its original epoch across a same-block advance. Once new
+`j_observation` rows exist, recovery requires a version that understands them; do not downgrade the WAL reader.
 
 A value node boots blind again and re-probes tracing. Retry counters remain volatile and restart at zero, extending
 rather than shortening the retry floor.
