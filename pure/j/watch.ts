@@ -17,7 +17,8 @@ import { jHeight, type HeightFault, type JHeight } from "../account/clause/clock
 import { finalizedSecrets, startedBody, type Read } from "./calldata/decode.ts";
 import { decodeLogs, type Address, type Bytes32, type ChainEvent, type LogFault, type RawLog } from "./log.ts";
 import {
-  hostsAny, observe, readingsOf, type Accounts, type Addressed, type JEvent, type ObserveFault, type Reading,
+  accountOf, beginsAt, hostsAny, observe, readingsOf, type Accounts, type Addressed, type JEvent, type ObserveFault,
+  type Reading,
 } from "./observe.ts";
 
 /** A block as the node tells it: `timestamp` is the chain's own second for it, the clock a dispute's window runs on. */
@@ -138,6 +139,33 @@ export const unreadTxs = (p: Prepared, hosted: readonly Bytes32[]): readonly Byt
     ((e._tag === "dispute_finalized" && e.shown._tag === "unread")
       || (e._tag === "dispute_started" && e.body === undefined)) && hostsAny(hosted, e);
   return [...new Set(p.events.filter(unread).flatMap((e) => ("tx" in e ? [e.tx] : [])))];
+};
+
+/** The events of a batch that are told now, and the ones held back, both in the chain's order. */
+export type Split = Readonly<{ ready: readonly ChainEvent[]; held: readonly ChainEvent[] }>;
+
+type Position = Readonly<{ block: bigint; index: bigint }>;
+
+const earlier = (a: Position, b: Position): boolean => a.block < b.block || (a.block === b.block && a.index < b.index);
+
+/**
+ * R-WATCH-STALL: what a transaction the Host cannot read yet holds back: the events of its own Accounts, from its first
+ * event of them on (the chain's order within an Account is kept: a later event of it never reaches the Entity ahead of
+ * an earlier one), and nothing of any other Account, nor a revealed secret, which is about none. The epoch advance a
+ * finalize made counts as the finalize's own (`beginsAt`), so the secrets it showed come before the dissolve of the
+ * holds that advance causes.
+ */
+export const splitStalled = (events: readonly ChainEvent[], stalled: ReadonlySet<Bytes32>): Split => {
+  const begun = events.flatMap((e): readonly (readonly [string, Position])[] => {
+    const account = accountOf(e);
+    const reads = e._tag === "dispute_started" || e._tag === "dispute_finalized";
+    return account !== undefined && reads && stalled.has(e.tx) ? [[account, beginsAt(events, e)]] : [];
+  });
+  const held = (e: ChainEvent): boolean => {
+    const account = accountOf(e);
+    return begun.some(([key, at]) => key === account && !earlier(e, at));
+  };
+  return { ready: events.filter((e) => !held(e)), held: events.filter(held) };
 };
 
 /** The Accounts the chain must be asked about, at the end of which block, before `advance` can run. */

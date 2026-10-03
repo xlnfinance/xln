@@ -1,6 +1,10 @@
 import { describe, expect, test } from "bun:test";
-import { depositable, epochAdvanced, framed, freshChain, proofNonce, withWindows } from "./chain.ts";
-import type { ChainFacts } from "./model.ts";
+import {
+  behindFrom, behindOver, depositable, epochAdvanced, framed, freshChain, proofNonce, withWindows,
+} from "./chain.ts";
+import { entityFrame } from "./frame.ts";
+import { anchor, entityOf, judge, open } from "./fixtures.ts";
+import { emptyEntity, type ChainFacts, type EntityInput } from "./model.ts";
 
 const STORED = [0n, 1n, 5n, 100n, 2n ** 64n];
 const FRAMES = [1n, 2n, 3n, 10n];
@@ -48,5 +52,32 @@ describe("entity/chain the nonce of a proof is read from the chain's stored nonc
     expect(withWindows(signed, { left: 61n, right: 120n }).ok).toBe(true);
     expect(withWindows(signed, { left: 60n, right: 119n }).ok).toBe(false);
     expect(withWindows(signed, { left: 59n, right: 500n }).ok).toBe(false);
+  });
+});
+
+describe("entity/chain the record that the Host holds an Account's events back (R-WATCH-STALL)", () => {
+  test("R-WATCH-STALL the earliest block an Account was held from stands until it is over", () => {
+    expect(freshChain.behind).toBeUndefined();
+    const held = behindFrom(freshChain, 9n);
+    expect(held.behind).toBe(9n);
+    expect(behindFrom(held, 12n)).toBe(held);
+    expect(behindFrom(held, 7n).behind).toBe(7n);
+    expect(behindOver(held).behind).toBeUndefined();
+  });
+
+  test("R-WATCH-STALL the Entity keeps the record per Account, through other news, until told over", () => {
+    const ALICE = entityOf(1);
+    const BOB = entityOf(2);
+    const CAROL = entityOf(3);
+    const run = (state: ReturnType<typeof emptyEntity>, ...inputs: readonly EntityInput[]) =>
+      entityFrame(judge, anchor, state, inputs).state;
+    const open2 = run(emptyEntity(ALICE), open(BOB), open(CAROL));
+    const held = run(open2, { _tag: "j_behind", peer: BOB, from: 9n }, { _tag: "j_behind", peer: BOB, from: 12n });
+    expect(held.chain.get(BOB)?.behind).toBe(9n);
+    expect(held.chain.get(CAROL)?.behind).toBeUndefined();
+    const moved = run(held, { _tag: "j_epoch", peer: BOB, epoch: 1n, stored: 4n });
+    expect(moved.chain.get(BOB)).toMatchObject({ epoch: 1n, behind: 9n });
+    expect(run(moved, { _tag: "j_behind_over", peer: BOB }).chain.get(BOB)?.behind).toBeUndefined();
+    expect(run(moved, { _tag: "j_behind_over", peer: CAROL }).chain.get(BOB)?.behind).toBe(9n);
   });
 });

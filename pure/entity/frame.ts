@@ -16,9 +16,9 @@ import { signingOf, type Anchor } from "./signing/signing.ts";
 import { dissolved, holderOf, ledgerOf, rebased, withHeld } from "../account/state.ts";
 import { MAX_AMOUNT } from "../account/ledger.ts";
 import {
-  answered, cosignFrozen, cosignLapsed, counterLapsed, countered, depositable, disputeAsked, disputeOpened, disputeOver,
-  epochAdvanced, framed, freshChain, inDispute, keepHolding, nextSerial, paidOut, proofNonce, quiet, startLapsed,
-  windowOpened, windowOver, withWindows,
+  answered, behindFrom, behindOver, cosignFrozen, cosignLapsed, counterLapsed, countered, depositable, disputeAsked,
+  disputeOpened, disputeOver, epochAdvanced, framed, freshChain, inDispute, keepHolding, nextSerial, paidOut,
+  proofNonce, quiet, startLapsed, windowOpened, windowOver, withWindows,
 } from "./chain.ts";
 import { entityRules, type EntityRules } from "./rules.ts";
 import { hashlocksOf, intentFor, learned, revealed, revealedBy, withEntry, type Intent } from "./paybook/paybook.ts";
@@ -471,6 +471,10 @@ const chainFact = (w: Work, terms: ProofTerms, e: JEvent): Work => {
       return noting(w, { _tag: "finalize_unread", peer: e.peer, tx: e.tx });
     case "j_start_unread":
       return noting(w, { _tag: "start_unread", peer: e.peer, tx: e.tx });
+    case "j_behind":
+      return withFacts(w, e.peer, behindFrom(facts, e.from));
+    case "j_behind_over":
+      return withFacts(w, e.peer, behindOver(facts));
   }
 };
 
@@ -935,7 +939,8 @@ const isArrival = (i: EntityInput): i is Arrival =>
   || i._tag === "j_dispute"
   || i._tag === "j_countered" || i._tag === "j_window_over" || i._tag === "j_dispute_over"
   || i._tag === "j_start_lapsed" || i._tag === "j_counter_lapsed" || i._tag === "j_collateral"
-  || i._tag === "j_op_lapsed" || i._tag === "j_finalize_unread" || i._tag === "j_start_unread";
+  || i._tag === "j_op_lapsed" || i._tag === "j_finalize_unread" || i._tag === "j_start_unread"
+  || i._tag === "j_behind" || i._tag === "j_behind_over";
 
 const arrivalsOf = (inputs: readonly EntityInput[]): readonly Arrival[] => inputs.filter(isArrival);
 

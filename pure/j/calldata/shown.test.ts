@@ -102,7 +102,7 @@ describe("j/shown", () => {
     expect(told[0]?.event).toMatchObject({ _tag: "j_dispute", bodyHash: HASH, body: CLAUSED });
   });
 
-  test("R-WATCH-CALLDATA a start whose input has no op with the logged hash is told with no body, and unread", () => {
+  test("R-WATCH-CALLDATA a start whose input has no op with the logged hash is told with no body", () => {
     const lying = startInput(RIGHT, [startOp(CLAUSED, { proofbodyHash: hexOf(77n) })]);
     const wrapped = patched(startInput(RIGHT, [startOp(CLAUSED)]), 0, Uint8Array.of(0xca, 0xfe, 0xba, 0xbe));
     [new Map(), new Map([[START_TX, [direct(lying)]]]), new Map([[START_TX, [direct(wrapped)]]])].forEach((inputs) => {

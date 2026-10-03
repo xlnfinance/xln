@@ -18,6 +18,8 @@ const ADDRESS = DEPOSITORY;
 
 const word = (n: bigint): string => n.toString(16).padStart(64, "0");
 const words = (...ns: readonly bigint[]): string => `0x${ns.map(word).join("")}`;
+const FRAME = { type: "CALL", from: "0x00000000000000000000000000000000000000bb", to: ADDRESS, input: "0x" };
+const NO_METHOD = { _tag: "no_method" } as const;
 const down: Result<never, RpcFault> = err({ _tag: "rpc", reason: "connection refused" });
 
 type Node = Readonly<Record<string, (params: readonly unknown[]) => Result<unknown, RpcFault>>>;
@@ -114,20 +116,23 @@ describe("host/shell/evm/watch the J loop's reads of the chain", () => {
       call(ADDRESS.toUpperCase().replace("0X", "0x"), "0xCAFE02", []),
     ]);
     const traced = await portOf({ debug_traceTransaction: () => ok(tree) }, log).trace(txOf(3n, 1n));
-    expect(traced).toEqual(ok([
-      { data: Uint8Array.of(0xca, 0xfe, 0x02), route: "direct" },
-      { data: Uint8Array.of(0xca, 0xfe, 0x01), route: "direct" },
-    ]));
+    expect(traced).toEqual(ok({
+      _tag: "calls",
+      calls: [
+        { data: Uint8Array.of(0xca, 0xfe, 0x02), route: "direct" },
+        { data: Uint8Array.of(0xca, 0xfe, 0x01), route: "direct" },
+      ],
+    }));
     expect(askedOf(log)).toEqual([`debug_traceTransaction ["${txOf(3n, 1n)}",{"tracer":"callTracer"}]`]);
   });
 
   test("R-WATCH-CALLDATA a node with no call trace says so; any other fault of the node is a fault", async () => {
     const refuses = (reason: string) => portOf({ debug_traceTransaction: () => err({ _tag: "rpc", reason }) });
     const none = "the method debug_traceTransaction does not exist/is not available";
-    expect(await refuses(none).trace(txOf(3n, 1n))).toEqual(ok(undefined));
-    expect(await refuses("Method not found").trace(txOf(3n, 1n))).toEqual(ok(undefined));
-    expect(await refuses("Unsupported method").trace(txOf(3n, 1n))).toEqual(ok(undefined));
-    expect(await refuses("oops (JSON-RPC code -32601)").trace(txOf(3n, 1n))).toEqual(ok(undefined));
+    expect(await refuses(none).trace(txOf(3n, 1n))).toEqual(ok(NO_METHOD));
+    expect(await refuses("Method not found").trace(txOf(3n, 1n))).toEqual(ok(NO_METHOD));
+    expect(await refuses("Unsupported method").trace(txOf(3n, 1n))).toEqual(ok(NO_METHOD));
+    expect(await refuses("oops (JSON-RPC code -32601)").trace(txOf(3n, 1n))).toEqual(ok(NO_METHOD));
     expect(await refuses("transaction not found").trace(txOf(3n, 1n)))
       .toEqual(err({ _tag: "port", call: "watch trace", reason: "transaction not found" }));
     expect(await portOf({ debug_traceTransaction: () => down }).trace(txOf(3n, 1n)))
@@ -140,34 +145,36 @@ describe("host/shell/evm/watch the J loop's reads of the chain", () => {
       eth_getBlockByNumber: ([n]: readonly unknown[]) => ok({ transactions: n === "0x4" ? [txOf(4n, 1n)] : [] }),
     };
     const log = logPath();
-    const traces = portOf({ ...chain, debug_traceTransaction: () => ok({ type: "CALL" }) }, log);
-    expect(await traces.traced()).toEqual(ok(true));
+    const traces = portOf({ ...chain, debug_traceTransaction: () => ok(FRAME) }, log);
+    expect(await traces.traced()).toEqual(ok("traces"));
     expect(askedOf(log).filter((l) => l.startsWith("debug_traceTransaction")))
       .toEqual([`debug_traceTransaction ["${txOf(4n, 1n)}",{"tracer":"callTracer"}]`]);
     const refuses = (reason: string) =>
       portOf({ ...chain, debug_traceTransaction: () => err({ _tag: "rpc", reason }) });
-    expect(await refuses("Method not found (JSON-RPC code -32601)").traced()).toEqual(ok(false));
-    expect(await refuses("Unsupported method").traced()).toEqual(ok(false));
+    expect(await refuses("Method not found (JSON-RPC code -32601)").traced()).toEqual(ok("none"));
+    expect(await refuses("Unsupported method").traced()).toEqual(ok("none"));
     expect(await refuses("connection refused").traced())
       .toEqual(err({ _tag: "port", call: "watch trace probe", reason: "connection refused" }));
   });
 
-  test("R-WATCH-CALLDATA the boot probe: a node that traces calls but not transactions is none", async () => {
-    const node = {
+  test("R-WATCH-CALLDATA the boot probe: an answer that is no call frame is none, not a trace", async () => {
+    const chain = {
       eth_blockNumber: () => ok("0x2"), eth_getBlockByNumber: () => ok({ transactions: [txOf(2n, 0n)] }),
-      debug_traceCall: () => ok({ type: "CALL" }),
-      debug_traceTransaction: () => err({ _tag: "rpc", reason: "Method not found (JSON-RPC code -32601)" } as const),
     };
-    expect(await portOf(node).traced()).toEqual(ok(false));
+    const answers = [null, "0x", {}, { type: "CALL" }, { from: ADDRESS }, { structLogs: [] }, [FRAME]];
+    const probed = await Promise.all(
+      answers.map((a) => portOf({ ...chain, debug_traceTransaction: () => ok(a) }).traced()),
+    );
+    probed.forEach((got) => expect(got).toEqual(ok("none")));
   });
 
-  test("R-WATCH-CALLDATA the boot probe with no tx in the recent blocks traces a call at the head", async () => {
+  test("R-WATCH-CALLDATA the boot probe with no tx in the recent blocks knows nothing and asks no call", async () => {
     const empty = { eth_blockNumber: () => ok("0x30"), eth_getBlockByNumber: () => ok({ transactions: [] }) };
     const log = logPath();
-    expect(await portOf({ ...empty, debug_traceCall: () => ok({ type: "CALL" }) }, log).traced()).toEqual(ok(true));
+    const node = { ...empty, debug_traceCall: () => ok(FRAME), debug_traceTransaction: () => ok(FRAME) };
+    expect(await portOf(node, log).traced()).toEqual(ok("no_transaction"));
     expect(askedOf(log).filter((l) => l.startsWith("eth_getBlockByNumber"))).toHaveLength(16);
-    const none = portOf({ ...empty, debug_traceCall: () => err({ _tag: "rpc", reason: "Method not found" }) });
-    expect(await none.traced()).toEqual(ok(false));
+    expect(askedOf(log).filter((l) => l.startsWith("debug_"))).toEqual([]);
   });
 
   test("R-WATCH-CALLDATA a trace that is no tree of calls is no trace; only a missing method says none", async () => {
@@ -175,13 +182,13 @@ describe("host/shell/evm/watch the J loop's reads of the chain", () => {
     const refuses = (reason: string) => portOf({ debug_traceTransaction: () => err({ _tag: "rpc", reason }) });
     const replies = [null, "0x", { to: ADDRESS, input: "0x12", calls: "none" }, { to: ADDRESS }];
     const answers = await Promise.all(replies.map(asked));
-    answers.forEach((got) => expect(got).toEqual(ok(undefined)));
+    answers.forEach((got) => expect(got).toEqual(ok({ _tag: "unreadable" })));
     const method = "the method debug_traceTransaction does not exist/is not available";
     const missing = [
       method, "Method not found", "Unsupported method", "method not supported", "(JSON-RPC code -32601)",
     ];
     const gone = await Promise.all(missing.map((reason) => refuses(reason).trace(txOf(3n, 1n))));
-    gone.forEach((got) => expect(got).toEqual(ok(undefined)));
+    gone.forEach((got) => expect(got).toEqual(ok(NO_METHOD)));
     const clears = ["response size exceeded", "execution timeout", "request timed out", "the call timed out",
       "context deadline exceeded", "service is not available", "missing trie node",
       "unsupported block range", "unsupported media type",
@@ -198,10 +205,12 @@ describe("host/shell/evm/watch the J loop's reads of the chain", () => {
     const wide = (calls: number) => ({
       to: "0x00", input: "0x", calls: [...Array.from({ length: calls }, () => ({ to: "0x00", input: "0x" })), finalize],
     });
-    const read = ok([{ data: Uint8Array.of(0xca, 0xfe, 0x01), route: "direct" as const }]);
+    const read = ok({
+      _tag: "calls" as const, calls: [{ data: Uint8Array.of(0xca, 0xfe, 0x01), route: "direct" as const }],
+    });
     const answers = await Promise.all([deep(65), deep(1000), deep(1024), wide(5000), wide(100_000)].map(asked));
     answers.forEach((got) => expect(got).toEqual(read));
-    expect(await asked(deep(1025))).toEqual(ok(undefined));
+    expect(await asked(deep(1025))).toEqual(ok({ _tag: "unreadable" }));
   });
 
   test("R-WATCH-TELL an Account is read at the end of a block named by its hash: row nonce and epoch", async () => {

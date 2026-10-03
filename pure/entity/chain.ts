@@ -12,8 +12,14 @@ import type { Answer, ChainFacts, DisputeStart, EntityFault, JEvent, Registered,
 export const freshChain: ChainFacts =
   {
     epoch: 0n, stored: 0n, frames: 0n, windows: undefined, against: undefined, frozen: false, cosigned: 0n,
-    held: new Map(), starting: undefined,
+    held: new Map(), starting: undefined, behind: undefined,
   };
+
+/** The Host holds back this Account's events from block `from`: the earliest it ever said stands until it is over. */
+export const behindFrom = (f: ChainFacts, from: bigint): ChainFacts =>
+  (f.behind !== undefined && f.behind <= from ? f : { ...f, behind: from });
+
+export const behindOver = (f: ChainFacts): ChainFacts => ({ ...f, behind: undefined });
 
 /**
  * The chain moved the epoch on: no proof of the new epoch is signed yet. An older or repeated report changes nothing.

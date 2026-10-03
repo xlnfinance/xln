@@ -203,13 +203,21 @@ const scan = ({ data, route }: Carried): readonly Call[] => {
 };
 
 /**
- * The bytes of a transaction and the calls the scan found in them. The scan is the costly part, so the Host makes a
- * `Read` once per transaction and keeps it for as long as the transaction is in its range, however many polls and logs
- * name it (R-WATCH-CALLDATA).
+ * The bytes of a transaction, the calls the scan found in them and the finalizes those calls carry. The scan and the
+ * decode are the costly part, so the Host makes a `Read` once per transaction and keeps it for as long as the
+ * transaction is in its range, however many polls and logs name it (R-WATCH-CALLDATA).
  */
-export type Read = Readonly<{ carried: Carried; calls: readonly Call[] }>;
+export type Read = Readonly<{ carried: Carried; calls: readonly Call[]; finalizes: readonly Finalize[] }>;
 
-export const readOf = (carried: Carried): Read => ({ carried, calls: scan(carried) });
+const finalizesOf = (calls: readonly Call[]): readonly Finalize[] =>
+  distinct(calls.flatMap((call) =>
+    (call.kind === "batch" ? batchFinalizes(call.args) : towerFinalizes(call.args, call.route))))
+    .flatMap((op) => op.read() ?? []);
+
+export const readOf = (carried: Carried): Read => {
+  const calls = scan(carried);
+  return { carried, calls, finalizes: finalizesOf(calls) };
+};
 
 /** A finalize or a start op in an input, and where it lies: one op is read once however many offsets reach it. */
 type Placed<T> = Readonly<{ place: string; read: () => T }>;
@@ -249,10 +257,7 @@ const towerFinalizes = (args: Uint8Array, route: Route): readonly Placed<Finaliz
  * the contract accepts (it would revert) and none for an input with more distinct ops than `MOST_OPS`: a transaction
  * that carried a `DisputeFinalized` some other way is told as unread.
  */
-export const finalizesIn = ({ calls }: Read): readonly Finalize[] =>
-  distinct(calls.flatMap((call) =>
-    (call.kind === "batch" ? batchFinalizes(call.args) : towerFinalizes(call.args, call.route))))
-    .flatMap((op) => op.read() ?? []);
+export const finalizesIn = ({ finalizes }: Read): readonly Finalize[] => finalizes;
 
 /**
  * The secrets a finalize showed, from the input of the transaction that carried it: the ops whose evidence hash is

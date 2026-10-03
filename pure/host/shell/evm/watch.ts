@@ -12,7 +12,7 @@ import { A } from "../../../kernel/encoding/abi.ts";
 import { hexToBytes } from "../../../kernel/encoding/bytes.ts";
 import { all, err, flatMap, map, mapErr, ok, traverse, type Result } from "../../../kernel/core/result.ts";
 import type { PortFault } from "../submit/chain.ts";
-import type { WatchPort } from "../watch/loop.ts";
+import type { Probe, Traced, WatchPort } from "../watch/loop.ts";
 import { bad, hexQuantity, oneWord, quantity, withArguments, wordsOf, type ReplyFault } from "./calls.ts";
 import { fieldsOf, isText, listOf, portFault, readsOf, type Fields, type Rpc } from "./port.ts";
 
@@ -148,33 +148,39 @@ const recentTx = async (reads: Reads): Promise<Result<Bytes32 | undefined, PortF
 };
 
 /**
- * The calls of a transaction to the Depository, from the node's call trace. A fault of the node (it is down, it errs,
- * it is too busy or the trace too big for it) may clear and stalls the delivery, which the Host's retry budget bounds;
- * a node with no such method, or a trace the transaction itself makes unreadable (too deep, not a tree), never clears:
- * no trace, and the finalize is told unread, so one counterparty's transaction cannot blind the watcher.
+ * What the node's call trace says of a transaction. A fault of the node (it is down, it errs, it is too busy or the
+ * trace too big for it) may clear and holds back the transaction's Account, which the Host's patience bounds; a trace
+ * the transaction itself makes unreadable (too deep, not a tree) never clears: no trace, and a finalize is told unread,
+ * so one counterparty's transaction cannot blind the watcher; and a node with no such method says so, which a node
+ * that may hold value does not go on without.
  */
 const traceOf = (reads: Reads, depository: Address) =>
-  async (tx: Bytes32): Promise<Result<readonly Carried[] | undefined, PortFault>> => {
+  async (tx: Bytes32): Promise<Result<Traced, PortFault>> => {
     const asked = await reads.ask("watch trace", "debug_traceTransaction", [tx, TRACER]);
-    if (!asked.ok) return NO_METHOD.test(asked.error.reason) ? ok(undefined) : asked;
+    if (!asked.ok) return NO_METHOD.test(asked.error.reason) ? ok({ _tag: "no_method" }) : asked;
     const calls = callsOf(depository)(asked.value);
-    return ok(calls.ok ? calls.value : undefined);
+    return ok(calls.ok ? { _tag: "calls", calls: calls.value } : { _tag: "unreadable" });
   };
+
+/** The top frame of a `callTracer` trace: a node that traces with another tracer, or not at all, answers otherwise. */
+const isFrame = (raw: unknown): boolean => {
+  const fields = fieldsOf(raw);
+  return fields.ok && isText(fields.value["type"]) && isText(fields.value["from"]);
+};
 
 /**
  * The probe traces a transaction a recent block holds, with the tracer the trace of a finalize is read with: a node
- * that runs it answers with the frame, one that does not says the method is missing (any other answer is the node's
- * fault). On a fork the transaction must be one mined after the fork point, which the head's own blocks hold; when no
- * recent block holds one, a call at the head (`debug_traceCall`, the same namespace and tracer) is traced.
+ * that runs it answers with the tree of calls, one that does not says the method is missing or answers with something
+ * else (any other error is the node's fault). On a fork the transaction must be one mined after the fork point, which
+ * the head's own blocks hold. With no transaction in them nothing is known yet: there is no call that stands for one.
  */
-const probeOf = (reads: Reads, depository: Address) => async (): Promise<Result<boolean, PortFault>> => {
+const probeOf = (reads: Reads) => async (): Promise<Result<Probe, PortFault>> => {
   const found = await recentTx(reads);
   if (!found.ok) return found;
-  const asked = found.value === undefined
-    ? await reads.ask("watch trace probe", "debug_traceCall", [{ to: depository, data: "0x" }, "latest", TRACER])
-    : await reads.ask("watch trace probe", "debug_traceTransaction", [found.value, TRACER]);
-  if (asked.ok) return ok(true);
-  return NO_METHOD.test(asked.error.reason) ? ok(false) : asked;
+  if (found.value === undefined) return ok("no_transaction");
+  const asked = await reads.ask("watch trace probe", "debug_traceTransaction", [found.value, TRACER]);
+  if (asked.ok) return ok(isFrame(asked.value) ? "traces" : "none");
+  return NO_METHOD.test(asked.error.reason) ? ok("none") : asked;
 };
 
 export const watchPort = (rpc: Rpc, depository: Address): WatchPort => {
@@ -196,7 +202,7 @@ export const watchPort = (rpc: Rpc, depository: Address): WatchPort => {
     },
     input: (tx) => reads.read("watch tx", "eth_getTransactionByHash", [tx], inputOf(depository)),
     trace: traceOf(reads, depository),
-    traced: probeOf(reads, depository),
+    traced: probeOf(reads),
     accountAt: async (block, left, right): Promise<Result<AccountAt, PortFault>> => {
       const calls = accountCalls(left, right);
       if (!calls.ok) return err(portFault("account at", calls.error.why));

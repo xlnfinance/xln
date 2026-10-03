@@ -10,7 +10,7 @@
 // of the chain ends the daemon's work and is what every later request answers: it never goes on after a row it could
 // not keep.
 import { EventEmitter, on } from "node:events";
-import type { EntityId, EntityInput, Outbound } from "../../../entity/model.ts";
+import type { ChainFacts, EntityId, EntityInput, Outbound } from "../../../entity/model.ts";
 import type { WatchFault, Watch } from "../../../j/watch.ts";
 import { mapDelete, mapSet } from "../../../kernel/core/collections.ts";
 import { err, ok, type Result } from "../../../kernel/core/result.ts";
@@ -25,11 +25,11 @@ import {
   accepted, closed, dialed, line, linked, route, startMesh, wanted, type ConnId, type Mesh, type Refused, type Write,
 } from "../mesh/mesh.ts";
 import {
-  beginAt, holdBound, poll, windowsOf, type BadPeer, type BadSecret, type Delivery, type JFault, type Reads, type Tries,
-  type WatchConfig,
+  beginAt, NO_CARRY, poll, resumeAt, windowsOf, type BadPeer, type BadSecret, type Carry, type Delivery, type JFault,
+  type Standing, type Stall, type WatchConfig,
 } from "../watch/loop.ts";
 import type { PortFault } from "../submit/chain.ts";
-import { hopOf } from "../../../entity/paybook/paybook.ts";
+import { lastHeard } from "../../../entity/paybook/paybook.ts";
 import { dialTcp, type Listener, type SocketFault, type Wire } from "./link/socket.ts";
 
 /** What a node is made of: its shell, its Entity, its key, who its peers are, and how often its timer runs. */
@@ -55,20 +55,20 @@ export type ClockBelowDepth = Tagged<"clock_below_depth", { lag: bigint; depth: 
 export type ClockDepthOff = Tagged<"clock_depth_off", { clock: bigint | undefined; depth: bigint }>;
 
 /**
- * A node whose reads of the chain may fall behind by a block count that is negative is refused: `hop - slack - lag -
- * depth - 1` (`holdBound`) is the most blocks a transaction the node cannot read may hold delivery back before the hub
- * can no longer claim upstream with the least hop its deadlines keep, so with less than none no wait is safe at all.
- */
-export type HoldBelowZero = Tagged<"hold_below_zero", { hop: bigint; slack: bigint; lag: bigint; depth: bigint }>;
-
-/**
  * A node that may hold value is refused on a provider with no call trace (R-WATCH-CALLDATA): a relay contract hides
- * the call that shows a secret, and a notice does not save the amount a hub would then lose.
+ * the call that shows a secret, and a notice does not save the amount a hub would then lose. The same node ends if
+ * the provider says at run time that it has none: no value moves on a reading that cannot see a relayed finalize.
  */
 export type NoCallTrace = Tagged<"no_call_trace">;
 
-/** What ends a node's work: a disk, the chain's submit path, the Runtime, or a watcher invariant broken. */
-export type NodeFault = DriveFault | WatchFault | BadPeer | BadSecret;
+/**
+ * A node that may hold value cannot tell at boot whether its provider traces when the chain's recent blocks hold no
+ * transaction to trace: it does not start until one does, as it does not start on a provider that does not trace.
+ */
+export type NoProbeTx = Tagged<"no_probe_tx">;
+
+/** What ends a node's work: a disk, the chain's submit path, the Runtime, a watcher invariant broken, or no trace. */
+export type NodeFault = DriveFault | WatchFault | BadPeer | BadSecret | NoCallTrace;
 
 export type Fault = NodeFault | Stopped;
 
@@ -118,10 +118,8 @@ type State = Readonly<{
   fatal: NodeFault | undefined;
   cursor: Watch | undefined;
   watchFault: string | undefined;
-  /** The tries the J loop has spent on transactions the node could not give (it gives up on one past MOST_TRIES). */
-  tries: Tries;
-  /** What the J loop holds of the transactions it has not delivered yet: the scans are made once, not per poll. */
-  reads: Reads;
+  /** What the J loop carries between polls: the transactions it cannot read, their reads, the events held back. */
+  carry: Carry;
   timer: ReturnType<typeof setTimeout> | undefined;
 }>;
 
@@ -265,26 +263,43 @@ const ran = async (rig: Rig, state: State, run: Run, reply: Reply<Result<Turn, F
 
 // ---- the J loop
 
-/** The cursor: the chain's own block at the Runtime's view, which the WAL holds, unless the node has one. */
-const cursorOf = (watch: WatchConfig, state: State): Promise<Result<Watch, JFault>> =>
+const chainOf = (rig: Rig, state: State): ReadonlyMap<EntityId, ChainFacts> =>
+  state.station.host.runtime.entities.get(rig.self)?.chain ?? new Map();
+
+/**
+ * The cursor: the chain's own block at the Runtime's view, which the WAL holds, unless the node has one. A restart
+ * that finds the Entity was told events of an Account were held back begins before the first of them (`resumeAt`).
+ */
+const cursorOf = (rig: Rig, watch: WatchConfig, state: State): Promise<Result<Watch, JFault>> =>
   (state.cursor === undefined
-    ? beginAt(watch, state.station.host.runtime.view)
+    ? beginAt(watch, resumeAt(state.station.host.runtime.view, chainOf(rig, state)))
     : Promise.resolve(ok(state.cursor)));
 
-/** A fault of the node's reads of the chain is tried again at the next tick; one of the watcher's checks is final. */
-const heldUp = (state: State, fault: JFault): State => {
-  if (fault._tag === "stalled") {
-    const watchFault = `${fault.fault.call}: ${fault.fault.reason}`;
-    const begun: readonly HostNotice[] = state.watchFault === watchFault
-      ? []
-      : [{ _tag: "watch_stalled", tx: fault.tx, reason: fault.fault.reason }];
-    const notices = recent([...state.notices, ...begun]);
-    return { ...state, watchFault, tries: fault.tries, reads: fault.reads, notices };
-  }
-  return fault._tag === "port"
-    ? { ...state, watchFault: `${fault.call}: ${fault.reason}` }
-    : { ...state, fatal: fault };
+/** What the loop needs of the Entity: where waiting for a secret stops paying, who is held back, and the view. */
+const standing = (rig: Rig, state: State): Standing => {
+  const { runtime } = state.station.host;
+  const entity = runtime.entities.get(rig.self);
+  return {
+    lastHeard: entity === undefined ? new Map() : lastHeard(entity, rig.config.boot.setup.clock),
+    behind: new Set([...chainOf(rig, state)].flatMap(([peer, facts]) => (facts.behind === undefined ? [] : [peer]))),
+    view: runtime.view,
+  };
 };
+
+/** A fault of the node's reads of the chain is tried again at the next tick; one of the watcher's checks is final. */
+const heldUp = (state: State, fault: JFault): State =>
+  (fault._tag === "port" ? { ...state, watchFault: `${fault.call}: ${fault.reason}` } : { ...state, fatal: fault });
+
+/**
+ * A transaction the node cannot read is told once (`watch_stalled`), and again only when the class of its fault (the
+ * call that failed) is another: a stall of many polls with a changing reason is one notice, not one per poll.
+ */
+const stallNotices = (was: Carry, stalls: readonly Stall[]): readonly HostNotice[] =>
+  stalls.filter((s) => was.failing.get(s.tx)?.fault.call !== s.fault.call)
+    .map((s): HostNotice => ({ _tag: "watch_stalled", tx: s.tx, reason: s.fault.reason }));
+
+const watchFaultOf = (stalls: readonly Stall[]): string | undefined =>
+  stalls.map((s) => `${s.fault.call}: ${s.fault.reason}`).at(0);
 
 /** The events are in the WAL before the height is; the cursor moves only after the height's row (R-HEIGHT-ORDER). */
 const delivered = async (rig: Rig, state: State, delivery: Delivery): Promise<State> => {
@@ -294,22 +309,26 @@ const delivered = async (rig: Rig, state: State, delivery: Delivery): Promise<St
   if (first.fatal !== undefined) return first;
   const height = { ...first.station, host: heard(first.station.host, delivery.height) };
   const second = await concluded(rig, first, await drain(shell, height));
-  const { tries, reads } = delivery;
-  return second.fatal === undefined ? { ...second, cursor: delivery.watch, tries, reads } : second;
+  const { carry, stalls } = delivery;
+  const told = recent([...second.notices, ...stallNotices(state.carry, stalls)]);
+  const traceless = rig.config.watch?.value === true && delivery.untraceable;
+  return second.fatal === undefined
+    ? {
+      ...second, cursor: delivery.watch, carry, notices: told, watchFault: watchFaultOf(stalls),
+      fatal: traceless ? { _tag: "no_call_trace" } : undefined,
+    }
+    : second;
 };
 
 const listening = async (rig: Rig, state: State): Promise<State> => {
   const { watch } = rig.config;
   if (watch === undefined) return state;
-  const cursor = await cursorOf(watch, state);
+  const cursor = await cursorOf(rig, watch, state);
   if (!cursor.ok) return heldUp(state, cursor.error);
   const next = { ...state, cursor: cursor.value };
-  const chain = state.station.host.runtime.entities.get(rig.self)?.chain ?? new Map();
-  const windows = windowsOf(watch.hosted, chain);
+  const windows = windowsOf(watch.hosted, chainOf(rig, state));
   if (!windows.ok) return heldUp(next, windows.error);
-  const hold = holdBound(rig.config.boot.setup.clock, watch.depth, watch.slack);
-  const patience = { tries: state.tries, hold, reads: state.reads };
-  const got = await poll(watch.port, cursor.value, watch.hosted, windows.value, patience);
+  const got = await poll(watch.port, cursor.value, watch.hosted, windows.value, state.carry, standing(rig, state));
   if (!got.ok) return heldUp(next, got.error);
   const quiet = { ...next, watchFault: undefined };
   return got.value === undefined ? quiet : delivered(rig, quiet, got.value);
@@ -393,7 +412,7 @@ const STOPPED: Result<never, Stopped> = err({ _tag: "stopped" });
  */
 export const startDaemon = async (
   config: Config, listener: Listener,
-): Promise<Result<Daemon, DriveFault | ClockBelowDepth | ClockDepthOff | HoldBelowZero | NoCallTrace | PortFault>> => {
+): Promise<Result<Daemon, DriveFault | ClockBelowDepth | ClockDepthOff | NoCallTrace | NoProbeTx | PortFault>> => {
   const { lag, depth } = config.boot.setup.clock;
   if (config.watch !== undefined && lag <= config.watch.depth) {
     return err({ _tag: "clock_below_depth", lag, depth: config.watch.depth });
@@ -401,14 +420,11 @@ export const startDaemon = async (
   if (config.watch !== undefined && depth !== config.watch.depth) {
     return err({ _tag: "clock_depth_off", clock: depth, depth: config.watch.depth });
   }
-  if (config.watch !== undefined && holdBound(config.boot.setup.clock, config.watch.depth, config.watch.slack) < 0n) {
-    const { depth: read, slack } = config.watch;
-    return err({ _tag: "hold_below_zero", hop: hopOf(config.boot.setup.clock), slack, lag, depth: read });
-  }
   if (config.watch?.value === true) {
-    const traced = await config.watch.port.traced();
-    if (!traced.ok) return traced;
-    if (!traced.value) return err({ _tag: "no_call_trace" });
+    const probed = await config.watch.port.traced();
+    if (!probed.ok) return probed;
+    if (probed.value === "none") return err({ _tag: "no_call_trace" });
+    if (probed.value === "no_transaction") return err({ _tag: "no_probe_tx" });
   }
   const started = await start(config.shell, config.boot);
   if (!started.ok) return started;
@@ -418,7 +434,7 @@ export const startDaemon = async (
   const first: State = {
     station: started.value.station, mesh: startMesh(config.key, config.table), wires: new Map(), next: 1,
     dialing: new Set(), stalled: new Map(), counts: { sent: 0, heard: 0, dropped: 0 }, notices: [], refused: [],
-    fatal: undefined, cursor: undefined, watchFault: undefined, tries: new Map(), reads: new Map(), timer: undefined,
+    fatal: undefined, cursor: undefined, watchFault: undefined, carry: NO_CARRY, timer: undefined,
   };
   const finished = leaving(rig, first, started.value.sent)
     .then((state) => run(rig, mails, state)).then((state) => ended(rig, state));

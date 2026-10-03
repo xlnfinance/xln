@@ -5,7 +5,7 @@ import { describe, expect, test } from "bun:test";
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { err, ok } from "../../../kernel/core/result.ts";
 import {
-  blockOf, DEPOSITORY, entityOf as bytes, evidenceOf, finalizeOp, hexOf, logOf, must as made,
+  blockOf, DEPOSITORY, entityOf as bytes, evidenceOf, finalizeInput, finalizeOp, hexOf, logOf, must as made,
 } from "../../../j/fixtures.ts";
 import type { Row } from "../../../runtime/model.ts";
 import { open } from "../../../runtime/fixtures.ts";
@@ -13,7 +13,7 @@ import type { Disk } from "../disk/disk.ts";
 import { callsOf } from "../fixtures.ts";
 import type { PortFault } from "../submit/chain.ts";
 import type { Look } from "./daemon.ts";
-import { MOST_TRIES, type WatchConfig, type WatchPort } from "../watch/loop.ts";
+import type { Probe, Traced, WatchConfig, WatchPort } from "../watch/loop.ts";
 import { startDaemon } from "./daemon.ts";
 import { ALICE, BOB, configOf, fresh, nodeOf, QUICK, seatOf, until, WAIT } from "./scene.ts";
 
@@ -23,7 +23,8 @@ const START = 100n;
 const DEPTH = 2n;
 const NO_PEER = undefined;
 
-type Chain = Readonly<{ head: bigint; fork: (block: bigint) => bigint; down?: string }>;
+/** `rises` is a head that is one block higher at each poll of it: the chain goes on while the node waits. */
+type Chain = Readonly<{ head: bigint; fork: (block: bigint) => bigint; down?: string; rises?: boolean }>;
 
 const advanced = (block: bigint, epoch: bigint) =>
   logOf("AccountEpochAdvanced", { left: bytes(1n), right: bytes(2n), ondeltaEpoch: epoch }, block, 0n);
@@ -32,18 +33,37 @@ const settled = (block: bigint) => logOf("AccountSettled", {
   settled: [[bytes(1n), bytes(2n), [[1n, 900n, 1000n, 100n, [0n, 100n]]], 0n]],
 }, block, 0n);
 
-/** Whether the node may hold value, and whether its provider has a call trace. */
-type Kind = Readonly<{ value: boolean; traces: boolean }>;
-const QUIET: Kind = { value: false, traces: true };
-const VALUE_BLIND: Kind = { value: true, traces: false };
-const NO_VALUE_BLIND: Kind = { value: false, traces: false };
-const VALUE_TRACED: Kind = { value: true, traces: true };
+/** Whether the node may hold value, what its provider says of a call trace, and what it gives of a transaction. */
+type Kind = Readonly<{
+  value: boolean; probe: Probe; trace: Traced; input: "down" | "given" | "hidden";
+}>;
+const UNREADABLE: Traced = { _tag: "unreadable" };
+const QUIET: Kind = { value: false, probe: "traces", trace: UNREADABLE, input: "down" };
+const VALUE_BLIND: Kind = { ...QUIET, value: true, probe: "none" };
+const NO_VALUE_BLIND: Kind = { ...QUIET, probe: "none" };
+const VALUE_TRACED: Kind = { ...QUIET, value: true };
+const VALUE_NO_TX: Kind = { ...QUIET, value: true, probe: "no_transaction" };
+const FINALIZE = finalizeOp();
+const HIDDEN = Uint8Array.of(0xca, 0xfe, 0xba, 0xbe, 1, 2, 3, 4);
+
+/** The finalize the tests' chain holds, at block 105: its Account is the node's with BOB. */
+const finalized = logOf("DisputeFinalized", {
+  sender: bytes(2n), counterentity: bytes(1n), nonce: 7n, finalProofbodyHash: hexOf(5n),
+  finalizationEvidenceHash: evidenceOf(FINALIZE),
+}, 105n, 1n);
+
+const inputOf = (kind: Kind) => {
+  if (kind.input === "down") return err(DOWN);
+  const data = kind.input === "given" ? finalizeInput(bytes(2n), [FINALIZE]) : HIDDEN;
+  return ok({ data, route: kind.input === "given" ? "direct" as const : "wrapper" as const });
+};
 
 /** A chain with one epoch advance at block 105; `down` is a file that, while it is not there, fails the head. */
 const portOf = (chain: Chain, log: string, found = [advanced(105n, 1n)], kind = QUIET): WatchPort => ({
   head: () => {
     appendFileSync(log, "head\n");
-    return Promise.resolve(chain.down !== undefined && !existsSync(chain.down) ? err(DOWN) : ok(chain.head));
+    const rose = chain.rises === true ? BigInt(callsOf(log).filter((c) => c === "head").length) - 1n : 0n;
+    return Promise.resolve(chain.down !== undefined && !existsSync(chain.down) ? err(DOWN) : ok(chain.head + rose));
   },
   block: (number) => {
     appendFileSync(log, `block ${number}\n`);
@@ -53,15 +73,14 @@ const portOf = (chain: Chain, log: string, found = [advanced(105n, 1n)], kind = 
   accountAt: () => Promise.resolve(ok({ epoch: 1n, nonce: 5n })),
   input: () => {
     appendFileSync(log, "input\n");
-    return Promise.resolve(err(DOWN));
+    return Promise.resolve(inputOf(kind));
   },
-  trace: () => Promise.resolve(ok(undefined)),
-  traced: () => Promise.resolve(ok(kind.traces)),
+  trace: () => Promise.resolve(ok(kind.trace)),
+  traced: () => Promise.resolve(ok(kind.probe)),
 });
 
-const watchOf = (chain: Chain, log: string, found = [advanced(105n, 1n)], kind = QUIET, slack = 0n): WatchConfig => ({
+const watchOf = (chain: Chain, log: string, found = [advanced(105n, 1n)], kind = QUIET): WatchConfig => ({
   port: portOf(chain, log, found, kind), depository: DEPOSITORY, depth: DEPTH, hosted: bytes(1n), value: kind.value,
-  slack,
 });
 
 const STRAIGHT: Chain = { head: 112n, fork: () => 0n };
@@ -106,40 +125,14 @@ describe("host/shell/node a node with a J loop", () => {
     expect(await booted(VALUE_BLIND)).toEqual({ _tag: "no_call_trace" });
   });
 
+  test("R-WATCH-CALLDATA a node with value waits for a transaction to tell if the provider traces", async () => {
+    expect(await booted(VALUE_NO_TX)).toEqual({ _tag: "no_probe_tx" });
+    expect(await booted({ ...VALUE_NO_TX, value: false })).toBe("started");
+  });
+
   test("R-WATCH-CALLDATA a no-value node starts with no call trace, and a node with value with one", async () => {
     expect(await booted(NO_VALUE_BLIND)).toBe("started");
     expect(await booted(VALUE_TRACED)).toBe("started");
-  });
-
-  test("R-WATCH-CALLDATA the hold is the hop less the slack, the lag and the depth the node reads at", async () => {
-    const dir = fresh();
-    const log = `${dir}/calls.log`;
-    writeFileSync(log, "");
-    const op = finalizeOp();
-    const finalize = logOf("DisputeFinalized", {
-      sender: bytes(2n), counterentity: bytes(1n), nonce: 7n, finalProofbodyHash: hexOf(5n),
-      finalizationEvidenceHash: evidenceOf(op),
-    }, 105n, 1n);
-    // hop 63 (reserve 60, lag 3), slack 50: hold = 63 - 50 - 3 - 2 - 1 = 7; the finalize of block 105 is 8 old at 115
-    const watch = watchOf({ ...STRAIGHT, head: 115n }, log, [advanced(105n, 1n), finalize], QUIET, 50n);
-    const alice = await nodeOf(await seatOf(ALICE, dir, 0), NO_PEER, { tickMs: QUICK, watch, reserve: 60n });
-    expect(await until(async () => (await alice.look()).cursor === 113n, WAIT)).toBe(true);
-    await alice.stop();
-    expect(callsOf(log).filter((c) => c === "input")).toHaveLength(3);
-  });
-
-  test("R-WATCH-CALLDATA a node whose hop leaves no block to hold delivery for is not started", async () => {
-    const dir = fresh();
-    const log = `${dir}/calls.log`;
-    writeFileSync(log, "");
-    const seat = await seatOf(ALICE, dir, 0);
-    const watch = watchOf(STRAIGHT, log, [advanced(105n, 1n)], QUIET, 1n);
-    const config = await configOf(seat, NO_PEER, { tickMs: QUICK, watch });
-    const refused = await startDaemon(config, seat.listener);
-    await config.shell.wal.close();
-    await config.shell.io.journal.close();
-    expect(refused).toEqual(err({ _tag: "hold_below_zero", hop: 6n, slack: 1n, lag: 3n, depth: DEPTH }));
-    expect(readFileSync(`${dir}/wal.log`, "utf8")).toBe("");
   });
 
   test("R-HTLC-CLOCK a node whose clock names another depth than it reads at is not started", async () => {
@@ -249,43 +242,70 @@ describe("host/shell/node a node with a J loop", () => {
     expect((await alice.stop()).watchFault).toBeUndefined();
   });
 
-  test("R-WATCH-CALLDATA a tx the provider always refuses holds the node MOST_TRIES ticks, then goes on", async () => {
+  /** A node of ALICE with BOB on `chain`, over a finalize whose transaction the provider answers as `kind` says. */
+  const stalling = async (dir: string, log: string, chain: Chain, kind: Kind) => {
+    writeFileSync(log, "");
+    const watch = watchOf(chain, log, [advanced(105n, 1n), finalized], kind);
+    const alice = await nodeOf(await seatOf(ALICE, dir, 0), NO_PEER, { tickMs: QUICK, watch });
+    await alice.tell(open(BOB));
+    return alice;
+  };
+
+  test("R-WATCH-STALL a tx the provider refuses holds its Account only; the Entity is told it is behind", async () => {
     const dir = fresh();
     const log = `${dir}/calls.log`;
-    writeFileSync(log, "");
-    const op = finalizeOp();
-    const finalize = logOf("DisputeFinalized", {
-      sender: bytes(2n), counterentity: bytes(1n), nonce: 7n, finalProofbodyHash: hexOf(5n),
-      finalizationEvidenceHash: evidenceOf(op),
-    }, 105n, 1n);
-    const watch = watchOf(STRAIGHT, log, [advanced(105n, 1n), finalize]);
-    const alice = await nodeOf(await seatOf(ALICE, dir, 0), NO_PEER, { tickMs: QUICK, watch, reserve: 60n });
-    expect(await until(async () => (await alice.look()).watchFault !== undefined, WAIT)).toBe(true);
+    const alice = await stalling(dir, log, STRAIGHT, QUIET);
     expect(await until(async () => delivered(await alice.look()), WAIT)).toBe(true);
     const look = await alice.stop();
-    expect(callsOf(log).filter((c) => c === "input")).toHaveLength(MOST_TRIES + 1);
-    expect(look.watchFault).toBeUndefined();
+    expect(factsOf(look)).toMatchObject({ epoch: 0n, behind: 105n });
+    expect(look.station.host.runtime.view).toBe(110n as never);
+    expect(look.watchFault).toBe("watch head: connection reset");
     expect(look.notices.filter((n) => n._tag === "watch_stalled")).toEqual([
-      { _tag: "watch_stalled", tx: finalize.tx, reason: "connection reset" },
+      { _tag: "watch_stalled", tx: finalized.tx, reason: "connection reset" },
     ]);
-    expect(callsOf(log).filter((c) => c === "head").length).toBeGreaterThan(MOST_TRIES);
-    expect(factsOf(look)).toMatchObject({ epoch: 1n });
+    expect(callsOf(log).filter((c) => c === "input")).toHaveLength(1);
   });
 
-  test("R-WATCH-CALLDATA a tx the provider refuses past the hold the hop leaves holds three tries", async () => {
+  test("R-WATCH-STALL a tx the provider keeps refusing is waited on FEW_TRIES blocks, then told unread", async () => {
     const dir = fresh();
     const log = `${dir}/calls.log`;
-    writeFileSync(log, "");
-    const op = finalizeOp();
-    const finalize = logOf("DisputeFinalized", {
-      sender: bytes(2n), counterentity: bytes(1n), nonce: 7n, finalProofbodyHash: hexOf(5n),
-      finalizationEvidenceHash: evidenceOf(op),
-    }, 105n, 1n);
-    const watch = watchOf({ ...STRAIGHT, head: 140n }, log, [advanced(105n, 1n), finalize]);
-    const alice = await nodeOf(await seatOf(ALICE, dir, 0), NO_PEER, { tickMs: QUICK, watch });
-    expect(await until(async () => (await alice.look()).cursor === 138n, WAIT)).toBe(true);
-    await alice.stop();
+    const alice = await stalling(dir, log, { ...STRAIGHT, rises: true }, QUIET);
+    expect(await until(async () => factsOf(await alice.look())?.epoch === 1n, WAIT)).toBe(true);
+    const look = await alice.stop();
     expect(callsOf(log).filter((c) => c === "input")).toHaveLength(3);
+    expect(look.watchFault).toBeUndefined();
+    expect(look.notices.filter((n) => n._tag === "watch_stalled")).toHaveLength(1);
+    expect(factsOf(look)?.behind).toBeUndefined();
+  });
+
+  test("R-WATCH-STALL a restart begins before the block its Account was held back from", async () => {
+    const dir = fresh();
+    const first = `${dir}/first.log`;
+    const alice = await stalling(dir, first, STRAIGHT, QUIET);
+    expect(await until(async () => delivered(await alice.look()), WAIT)).toBe(true);
+    await alice.stop();
+    const second = `${dir}/second.log`;
+    writeFileSync(second, "");
+    const given = watchOf(STRAIGHT, second, [advanced(105n, 1n), finalized], { ...QUIET, input: "given" });
+    const again = await nodeOf(await seatOf(ALICE, dir, 0), NO_PEER, { tickMs: QUICK, watch: given });
+    expect(await until(async () => factsOf(await again.look())?.epoch === 1n, WAIT)).toBe(true);
+    const look = await again.stop();
+    expect(callsOf(second).find((c) => c.startsWith("block"))).toBe("block 104");
+    expect(factsOf(look)?.behind).toBeUndefined();
+    expect(look.station.host.runtime.view).toBe(110n as never);
+  });
+
+  test("R-WATCH-CALLDATA a provider that says at run time it has no call trace ends a node with value", async () => {
+    const dir = fresh();
+    const hidden: Kind = { ...VALUE_TRACED, input: "hidden", trace: { _tag: "no_method" } };
+    const alice = await stalling(dir, `${dir}/calls.log`, STRAIGHT, hidden);
+    expect(await until(async () => (await alice.look()).fatal !== undefined, WAIT)).toBe(true);
+    const look = await alice.stop();
+    expect(look.fatal).toEqual({ _tag: "no_call_trace" });
+    expect(factsOf(look)).toMatchObject({ epoch: 1n });
+    const quiet = await stalling(fresh(), `${dir}/quiet.log`, STRAIGHT, { ...hidden, value: false });
+    expect(await until(async () => factsOf(await quiet.look())?.epoch === 1n, WAIT)).toBe(true);
+    expect((await quiet.stop()).fatal).toBeUndefined();
   });
 
   test("R-JLOOP a block off the cursor's chain ends the node, and every request gets that answer", async () => {

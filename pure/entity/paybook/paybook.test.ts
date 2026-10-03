@@ -7,7 +7,7 @@ import { holdId, type Hold } from "../../account/model.ts";
 import { MAX_ROUTE_HOPS } from "../../account/tx.ts";
 import { ledgerOf } from "../../account/state.ts";
 import { jHeight } from "../../account/clause/clock.ts";
-import { hopOf, learned } from "./paybook.ts";
+import { hopOf, lastHeard, learned } from "./paybook.ts";
 import { keccakHex } from "../../kernel/encoding/bytes.ts";
 import { unwrapOr } from "../../kernel/core/result.ts";
 import { anchor, credit, entityOf, GOLD, judge, open, OPENED_WITH, TEST_SIG } from "../fixtures.ts";
@@ -103,6 +103,22 @@ describe("entity/paybook the paybook forwards a payment (R-HTLC-FORWARD)", () =>
     expect(next).toMatchObject({ amount: AMOUNT, hashlock: HASHLOCK, deadline: heightOf(105n - hopOf(judge.clock)) });
     expect(ledgerBetween(waiting, ALICE, HUB).holds[0]?.deadline).toEqual(heightOf(105n));
     expect(stateOf(waiting, HUB).paybook.get(HASHLOCK)?._tag).toBe("locked");
+  });
+
+  test("R-WATCH-STALL a hub waits on the peer it forwarded to until the inbound deadline less the lag", () => {
+    const { lag } = judge.clock;
+    const waiting = tell(forwardAt(base()), 100n, ALICE, lock(base(), 105n));
+    expect(lastHeard(stateOf(waiting, HUB), judge.clock)).toEqual(new Map([[BOB, 105n - lag]]));
+    expect(lastHeard(stateOf(forwardAt(base()), HUB), judge.clock)).toEqual(new Map());
+    expect(lastHeard(stateOf(base(), HUB), judge.clock)).toEqual(new Map());
+    const second = (net: Net): Net =>
+      tell(net, 100n, HUB, { _tag: "forward", hashlock: SECOND_HASHLOCK, from: ALICE, to: BOB });
+    const sooner = tell(forwardAt(base()), 100n, ALICE, lock(base(), 105n));
+    const both = tell(second(sooner), 100n, ALICE, lock(base(), 130n, 7n, SECOND_HASHLOCK));
+    expect(lastHeard(stateOf(both, HUB), judge.clock)).toEqual(new Map([[BOB, 105n - lag]]));
+    const later = tell(forwardAt(base()), 100n, ALICE, lock(base(), 130n));
+    const either = tell(second(later), 100n, ALICE, lock(base(), 105n, 7n, SECOND_HASHLOCK));
+    expect(lastHeard(stateOf(either, HUB), judge.clock)).toEqual(new Map([[BOB, 105n - lag]]));
   });
 
   test("R-HTLC-FORWARD a payee asked for more than the lock holds gives it up and the hub gives up Alice's", () => {
