@@ -99,6 +99,21 @@
    "kind": "test",
    "layer": "ts",
    "name": "R-WATCH-STALL a finalize begins at the advance it made; an earlier advance is not its own"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-WATCH-STALL what the loop waits on the Entity for: the last heard of each peer, and who is behind"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-WATCH-STALL a stall is told once, and again only when the call that fails is another"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-WATCH-STALL a trace asked at a head and refused is not asked again at that head"
   }
  ]
 }

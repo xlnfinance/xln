@@ -35,6 +35,14 @@ export const lastHeard = (state: EntityState, clock: ClockParams): ReadonlyMap<E
     return least !== undefined && least <= at ? last : mapSet(last, entry.to, at);
   }, new Map());
 
+/** What the J loop waits on the Entity for: where hearing a secret stops paying (`lastHeard`) and who is behind. */
+export type Waits = Readonly<{ lastHeard: ReadonlyMap<EntityId, bigint>; behind: ReadonlySet<EntityId> }>;
+
+export const waitsOf = (state: EntityState, clock: ClockParams): Waits => ({
+  lastHeard: lastHeard(state, clock),
+  behind: new Set([...state.chain].flatMap(([peer, facts]) => (facts.behind === undefined ? [] : [peer]))),
+});
+
 /** One step the paybook asks of an Account's door, and the entry that stands after it is admitted or refused. */
 export type Intent = Readonly<{
   hashlock: string; command: AccountCommand; admitted: Entry | undefined; refused: Entry | undefined;

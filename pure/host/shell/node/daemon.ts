@@ -29,7 +29,7 @@ import {
   type Standing, type Stall, type WatchConfig,
 } from "../watch/loop.ts";
 import type { PortFault } from "../submit/chain.ts";
-import { lastHeard } from "../../../entity/paybook/paybook.ts";
+import { waitsOf } from "../../../entity/paybook/paybook.ts";
 import { dialTcp, type Listener, type SocketFault, type Wire } from "./link/socket.ts";
 
 /** What a node is made of: its shell, its Entity, its key, who its peers are, and how often its timer runs. */
@@ -275,15 +275,14 @@ const cursorOf = (rig: Rig, watch: WatchConfig, state: State): Promise<Result<Wa
     ? beginAt(watch, resumeAt(state.station.host.runtime.view, chainOf(rig, state)))
     : Promise.resolve(ok(state.cursor)));
 
+const NO_WAITS = { lastHeard: new Map<EntityId, bigint>(), behind: new Set<EntityId>() };
+
 /** What the loop needs of the Entity: where waiting for a secret stops paying, who is held back, and the view. */
 const standing = (rig: Rig, state: State): Standing => {
   const { runtime } = state.station.host;
   const entity = runtime.entities.get(rig.self);
-  return {
-    lastHeard: entity === undefined ? new Map() : lastHeard(entity, rig.config.boot.setup.clock),
-    behind: new Set([...chainOf(rig, state)].flatMap(([peer, facts]) => (facts.behind === undefined ? [] : [peer]))),
-    view: runtime.view,
-  };
+  const waits = entity === undefined ? NO_WAITS : waitsOf(entity, rig.config.boot.setup.clock);
+  return { ...waits, view: runtime.view };
 };
 
 /** A fault of the node's reads of the chain is tried again at the next tick; one of the watcher's checks is final. */
@@ -294,7 +293,7 @@ const heldUp = (state: State, fault: JFault): State =>
  * A transaction the node cannot read is told once (`watch_stalled`), and again only when the class of its fault (the
  * call that failed) is another: a stall of many polls with a changing reason is one notice, not one per poll.
  */
-const stallNotices = (was: Carry, stalls: readonly Stall[]): readonly HostNotice[] =>
+export const stallNotices = (was: Carry, stalls: readonly Stall[]): readonly HostNotice[] =>
   stalls.filter((s) => was.failing.get(s.tx)?.fault.call !== s.fault.call)
     .map((s): HostNotice => ({ _tag: "watch_stalled", tx: s.tx, reason: s.fault.reason }));
 

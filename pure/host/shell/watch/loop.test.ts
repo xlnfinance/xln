@@ -276,14 +276,19 @@ describe("host/shell/watch the J loop's poll", () => {
   test("R-WATCH-STALL the held events follow the tx once it is given: secrets first", async () => {
     const { op, tx, logs } = finalizing();
     const inputs = new Map([[tx, finalizeInput(RIGHT, [op])]]);
-    const chain = [...logs, otherAdvanced(3n, 1n, 1n)];
+    const settled = logOf("AccountSettled", {
+      settled: [[LEFT, RIGHT, [[1n, 900n, 1000n, 100n, [0n, 100n]]], 0n]],
+    }, 3n, 0n);
+    const chain = [...logs, settled, otherAdvanced(3n, 1n, 1n)];
     const flaky = (head: bigint) => portOf(straight(head, chain), logPath(), head < 8n ? "input" : -1n, inputs);
     const other: EntityInput = { _tag: "j_epoch", peer: peer(OTHER), epoch: 1n, stored: 5n };
     const held = await along(flaky, upTo(6n, 7n));
     expect(held.told).toEqual([BEHIND, other]);
-    expect(held.carry.held).toHaveLength(2);
+    expect(held.carry.held).toHaveLength(3);
     const given = await along(flaky, [8n], held);
-    expect(given.told.slice(2)).toEqual([...TOLD, BEHIND_OVER]);
+    const tags = ["j_secret", "j_epoch", "j_dispute_over", "j_collateral", "j_behind_over"];
+    expect(tagsOf(given.told.slice(2))).toEqual(tags);
+    expect(given.told.slice(2, 5)).toEqual([...TOLD]);
     expect(given.carry).toEqual(NO_CARRY);
   });
 
@@ -401,6 +406,18 @@ describe("host/shell/watch the J loop's poll", () => {
     const next = await stepped(portOf(straight(1_001n, logs), at, "input"), catching, NO_STANDING);
     expect(countOf(at, `input ${tx.slice(-4)}`)).toBe(2);
     expect(next.carry.failing.get(tx)).toMatchObject({ tries: 2, head: 1_001n });
+  });
+
+  test("R-WATCH-STALL a trace asked at a head and refused is not asked again at that head", async () => {
+    const at = logPath();
+    const { tx, logs } = finalizing();
+    const down = new Map<Bytes32, "down">([[tx, "down"]]);
+    const port = portOf(straight(1_000n, logs), at, -1n, new Map([[tx, HIDDEN]]), down);
+    const first = await stepped(port, FRESH, NO_STANDING);
+    const caught = await stepped(port, await stepped(port, first, NO_STANDING), NO_STANDING);
+    expect(countOf(at, `trace ${tx.slice(-4)}`)).toBe(1);
+    expect(countOf(at, `input ${tx.slice(-4)}`)).toBe(1);
+    expect(caught.carry.failing.get(tx)).toMatchObject({ tries: 1, head: 1_000n });
   });
 
   test("R-WATCH-STALL with no lock on it a tx the node fails gets FEW_TRIES blocks, then is unread", async () => {

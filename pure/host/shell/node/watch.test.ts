@@ -13,8 +13,8 @@ import type { Disk } from "../disk/disk.ts";
 import { callsOf } from "../fixtures.ts";
 import type { PortFault } from "../submit/chain.ts";
 import type { Look } from "./daemon.ts";
-import type { Probe, Traced, WatchConfig, WatchPort } from "../watch/loop.ts";
-import { startDaemon } from "./daemon.ts";
+import { NO_CARRY, type Carry, type Probe, type Traced, type WatchConfig, type WatchPort } from "../watch/loop.ts";
+import { startDaemon, stallNotices } from "./daemon.ts";
 import { ALICE, BOB, configOf, fresh, nodeOf, QUICK, seatOf, until, WAIT } from "./scene.ts";
 
 const DOWN: PortFault = { _tag: "port", call: "watch head", reason: "connection reset" };
@@ -276,6 +276,19 @@ describe("host/shell/node a node with a J loop", () => {
     expect(look.watchFault).toBeUndefined();
     expect(look.notices.filter((n) => n._tag === "watch_stalled")).toHaveLength(1);
     expect(factsOf(look)?.behind).toBeUndefined();
+  });
+
+  test("R-WATCH-STALL a stall is told once, and again only when the call that fails is another", () => {
+    const fault = (call: string, reason: string): PortFault => ({ _tag: "port", call, reason });
+    const tx = finalized.tx;
+    const stall = (call: string, reason: string) => ({ tx, peer: bytes(2n), fault: fault(call, reason), tries: 1 });
+    const was = (call: string): Carry =>
+      ({ ...NO_CARRY, failing: new Map([[tx, { tries: 1, head: 7n, fault: fault(call, "first") }]]) });
+    expect(stallNotices(NO_CARRY, [stall("watch tx", "503")])).toEqual([{ _tag: "watch_stalled", tx, reason: "503" }]);
+    expect(stallNotices(was("watch tx"), [stall("watch tx", "timeout")])).toEqual([]);
+    expect(stallNotices(was("watch tx"), [stall("watch trace", "timeout")])).toEqual([
+      { _tag: "watch_stalled", tx, reason: "timeout" },
+    ]);
   });
 
   test("R-WATCH-STALL a restart begins before the block its Account was held back from", async () => {
