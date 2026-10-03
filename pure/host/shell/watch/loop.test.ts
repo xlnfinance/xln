@@ -665,6 +665,8 @@ describe("host/shell/watch the J loop's poll", () => {
     expect(resumeAt(20n, chain)).toBe(4n);
     expect(resumeAt(3n, chain)).toBe(3n);
     expect(resumeAt(20n, new Map())).toBe(20n);
+    const lost: ChainFacts = { ...freshChain, behind: 2n, lost: true };
+    expect(resumeAt(20n, new Map([...chain, [peer(OTHER), lost]]))).toBe(4n);
   });
 
   /** A finalize at block 2 whose tx the node never gives, and one at block 3 whose tx it gives (tx index 5 there). */

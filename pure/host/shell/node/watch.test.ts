@@ -184,9 +184,11 @@ describe("host/shell/node a node with a J loop", () => {
     expect(await until(async () => callsOf(log).some((c) => c.startsWith("probe")), WAIT)).toBe(true);
     expect(await until(async () => delivered(await alice.look()), WAIT)).toBe(true);
     const asked = callsOf(log).filter((c) => c.startsWith("probe")).length;
+    await new Promise((done) => setTimeout(done, QUICK * 10));
     const look = await alice.stop();
     expect(blindOf(look)).toBe(false);
     expect(asked).toBe(1);
+    expect(callsOf(log).filter((c) => c.startsWith("probe"))).toHaveLength(1);
     const rows = rowsOf(look).flatMap((r) => (r.input._tag === "entity" ? r.input.inputs.map((i) => i._tag) : []));
     expect(rows.filter((t) => t === "j_blind")).toHaveLength(1);
     expect(rows.filter((t) => t === "j_blind_over")).toHaveLength(1);

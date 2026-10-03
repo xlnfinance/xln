@@ -1020,7 +1020,10 @@ const nodes: Step<World> = {
     if (fingerprint(y) !== prints) throw new Error("hubY's Accounts changed when the copy of the frame arrived: a frame it already holds must change nothing");
     // The copy of bob's frame is a row of its own on hubY's disk, and the ack it answers with names the head hubY committed before the crash.
     // Bob's timer sends the frame again at every second tick until his pending clears, so more than one copy can be on its way before the first ack gets back: each copy is a row, and each is answered the same.
-    const after = net.rowsOf(y).slice(rows);
+    // A node with value boots blind and the probe ends it (R-WATCH-CALLDATA): those two inputs are rows of the restart itself, not copies.
+    const sight = (r: ReturnType<typeof net.rowsOf>[number]): boolean =>
+      r.input._tag === "entity" && r.input.inputs.every((i) => i._tag === "j_blind" || i._tag === "j_blind_over");
+    const after = net.rowsOf(y).slice(rows).filter((r) => !sight(r));
     const answers = after.flatMap((r) => r.outputs.filter((o) => o.to === b && o.msg._tag === "ack"));
     const isCopy = (r: (typeof after)[number]): boolean => r.input._tag === "entity" && r.input.inputs.length === 1 && r.input.inputs.every((i) => i._tag === "peer_message" && i.from === b && i.msg._tag === "frame" && i.msg.frame.parent === pending.frame.parent && i.msg.frame.slot === pending.frame.slot);
     if (after.length === 0 || !after.every(isCopy)) throw new Error(`hubY's rows after the restart are not just bob's frame heard again: ${after.map((r) => (r.input._tag === "entity" ? `entity[${r.input.inputs.map((i) => i._tag).join(" ")}]` : r.input._tag)).join(", ") || "none"}`);
