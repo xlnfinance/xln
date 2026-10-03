@@ -136,7 +136,7 @@ fi
 if [ "$DISPUTE" = 1 ]; then
   echo "== htlc: typecheck, scenario tests per variant, properties per variant"
   hdeclared=$(grep -cE '^[[:space:]]*run[[:space:]]+[A-Za-z0-9_]*Test\b' htlc_test.qnt || true)
-  for v in today see dissolve both hop0 noargs wrapped xrev xwatch xback hgate1 hgate2 hgate3 hpoll2 hpoll3 hchain0 hchain1 hchain2 hback hall hstall hstall5 hgive hgives hgivec hgivecs; do $Q typecheck "htlc_$v.qnt"; done
+  for v in today see dissolve both hop0 noargs wrapped xrev xwatch xback hgate1 hgate2 hgate3 hpoll2 hpoll3 hchain0 hchain1 hchain2 hback hall hstall hstall5 hgive hgives hgivec hgivecs hord hordlate hlate; do $Q typecheck "htlc_$v.qnt"; done
   for v in today see dissolve both hop0 noargs wrapped xrev xwatch xback; do
     out=$($Q test htlc_test.qnt --main "${v}_htlc_test" --backend typescript --max-samples 1 2>&1) || { echo "$out"; exit 1; }
     ran=$(echo "$out" | grep -cE '^[[:space:]]+ok ' || true)
@@ -160,7 +160,7 @@ if [ "$DISPUTE" = 1 ]; then
   hexpect xwatch route_safe ok; hexpect xback route_safe ok
   echo "== htlc: the clock (slack, depth, reserve): scenario tests per variant, route_safe per variant"
   gdeclared=$(grep -cE '^[[:space:]]*run[[:space:]]+[A-Za-z0-9_]*Test\b' htlc_gate_test.qnt || true)
-  for v in hgate1 hgate2 hgate3 hpoll2 hpoll3 hchain0 hchain1 hchain2 hback hall hstall hstall5 hgive hgives hgivec hgivecs; do
+  for v in hgate1 hgate2 hgate3 hpoll2 hpoll3 hchain0 hchain1 hchain2 hback hall hstall hstall5 hgive hgives hgivec hgivecs hord hordlate hlate; do
     out=$($Q test htlc_gate_test.qnt --main "${v}_htlc_gate_test" --backend typescript --max-samples 1 2>&1) || { echo "$out"; exit 1; }
     ran=$(echo "$out" | grep -cE '^[[:space:]]+ok ' || true)
     [ "$ran" = "$gdeclared" ] || { echo "FAIL htlc_gate_test $v: $gdeclared declared, $ran ran"; exit 1; }
@@ -169,7 +169,8 @@ if [ "$DISPUTE" = 1 ]; then
   # hpoll2, hall, hstall and hchain0 is a schedule (the reveal on the last tick the contract counts, the expiry on the first tick it may): lateRevealRaceTest
   # above runs it and asserts the formula both ways, and a random search of this size does not find it (10000 traces missed all five). The safe
   # variants are searched for a loss the formula does not name.
-  hexpect hgate3 route_safe ok; hexpect hpoll3 route_safe ok; hexpect hchain1 route_safe ok; hexpect hchain2 route_safe ok; hexpect hback route_safe ok; hexpect hstall5 route_safe ok; hexpect hgive route_safe ok; hexpect hgives route_safe ok; hexpect hgivecs route_safe ok
+  hexpect hgate3 route_safe ok; hexpect hpoll3 route_safe ok; hexpect hchain1 route_safe ok; hexpect hchain2 route_safe ok; hexpect hback route_safe ok; hexpect hstall5 route_safe ok; hexpect hgive route_safe ok; hexpect hgives route_safe ok; hexpect hgivecs route_safe ok; hexpect hord route_safe ok
+  # hordlate, hlate (PR 171 DESIGN-watch-wait): the read wait RD ticks after the finalize is heard; ordered (finalize held until read) the hop must also cover RD (hord safe, hordlate lost); told before read (LATE) loses at every hop (hlate). Both losses are schedules, run by pendingReadTest.
   # hop0: the claim that lands after the upstream deadline is a schedule (claimNeedsRoomTest, run above), too rare for a random search at this size
   echo "== htlc: witnesses"
   for w in $(grep -oE '^  val w_[a-z_]+' htlc.qnt | awk '{print $2}'); do

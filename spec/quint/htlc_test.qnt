@@ -17,7 +17,7 @@ module hscn {
   const SW_BACK: bool
 
   import htlc(SEE = SW_SEE, DISSOLVE = SW_DISSOLVE, ARGS = SW_ARGS, HIDE = SW_HIDE, HOP = SW_HOP, XREV = SW_XREV, TSEE = SW_TSEE, BACK = SW_BACK,
-              SLK = 0, PD = 0, RSV = 0, CHAIN = false).* from "./htlc"
+              SLK = 0, PD = 0, RSV = 0, CHAIN = false, RD = 0, LATE = false).* from "./htlc"
 
   action jump(t: int): bool = st' = { ...st, now: t }
   action check(c: bool): bool = all { assert(c), st' = st }
