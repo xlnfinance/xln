@@ -518,7 +518,9 @@ describe("host/shell/watch the J loop's poll", () => {
     const at = logPath();
     const other = logOf("AccountEpochAdvanced", { left: RIGHT, right: OTHER, ondeltaEpoch: 1n }, 3n, 0n);
     const logs = [advanced(2n, 0n, 1n), other, shownAt(4n)];
-    const got = must(await poll(portOf(straight(8n, logs), at, "pruned"), start(2n), RIGHT));
+    const polled = await poll(portOf(straight(8n, logs), at, "pruned"), start(2n), RIGHT);
+    expect(polled.ok).toBe(true);
+    const got = must(polled);
     expect(got?.events).toEqual([
       { _tag: "j_account_lost", peer: peer(LEFT), from: 2n },
       { _tag: "j_epoch", peer: peer(OTHER), epoch: 1n, stored: 5n },
@@ -528,7 +530,9 @@ describe("host/shell/watch the J loop's poll", () => {
 
   test("R-WATCH-WINDOW several pruned readings keep the earliest lost block of the Account", async () => {
     const logs = [advanced(2n, 0n, 1n), advanced(3n, 0n, 2n), advanced(4n, 0n, 3n)];
-    const got = must(await poll(portOf(straight(8n, logs), logPath(), "pruned"), start(2n), LEFT));
+    const polled = await poll(portOf(straight(8n, logs), logPath(), "pruned"), start(2n), LEFT);
+    expect(polled.ok).toBe(true);
+    const got = must(polled);
     expect(got?.events).toEqual([{ _tag: "j_account_lost", peer: peer(RIGHT), from: 2n }]);
   });
 
