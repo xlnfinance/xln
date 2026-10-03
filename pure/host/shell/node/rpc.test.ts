@@ -9,7 +9,7 @@ describe("host/shell/node a JSON-RPC reply is read for its result or its error",
   test("R-DURABLE a reply with a result is the result, and one with an error is the node's own message", () => {
     expect(resultOf({ jsonrpc: "2.0", id: 1, result: "0x5" })).toEqual({ ok: true, value: "0x5" });
     expect(resultOf({ jsonrpc: "2.0", id: 1, error: { code: -32000, message: "nonce too low" } }))
-      .toEqual({ ok: false, error: { _tag: "rpc", reason: "nonce too low" } });
+      .toEqual({ ok: false, error: { _tag: "rpc", reason: "nonce too low (JSON-RPC code -32000)" } });
     expect(resultOf({ jsonrpc: "2.0", id: 1, error: null }).ok).toBe(false);
   });
 

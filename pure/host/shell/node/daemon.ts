@@ -10,7 +10,7 @@
 // of the chain ends the daemon's work and is what every later request answers: it never goes on after a row it could
 // not keep.
 import { EventEmitter, on } from "node:events";
-import type { EntityId, EntityInput, Outbound } from "../../../entity/model.ts";
+import type { ChainFacts, EntityId, EntityInput, Outbound } from "../../../entity/model.ts";
 import type { WatchFault, Watch } from "../../../j/watch.ts";
 import { mapDelete, mapSet } from "../../../kernel/core/collections.ts";
 import { err, ok, type Result } from "../../../kernel/core/result.ts";
@@ -25,8 +25,11 @@ import {
   accepted, closed, dialed, line, linked, route, startMesh, wanted, type ConnId, type Mesh, type Refused, type Write,
 } from "../mesh/mesh.ts";
 import {
-  beginAt, poll, windowsOf, type BadPeer, type BadSecret, type Delivery, type JFault, type WatchConfig,
+  beginAt, NO_CARRY, poll, resumeAt, windowsOf, type BadPeer, type BadSecret, type Carry, type Delivery, type JFault,
+  type Standing, type Stall, type WatchConfig,
 } from "../watch/loop.ts";
+import type { PortFault } from "../submit/chain.ts";
+import { waitsOf } from "../../../entity/paybook/paybook.ts";
 import { dialTcp, type Listener, type SocketFault, type Wire } from "./link/socket.ts";
 
 /** What a node is made of: its shell, its Entity, its key, who its peers are, and how often its timer runs. */
@@ -101,7 +104,13 @@ type State = Readonly<{
   refused: readonly string[];
   fatal: NodeFault | undefined;
   cursor: Watch | undefined;
+  /** The head block the probe last asked a transaction of, while the node's Entity is blind. */
+  probed: bigint | undefined;
+  /** Whether the notice that the provider does not trace was told since the node last was shown a trace. */
+  untraced: boolean;
   watchFault: string | undefined;
+  /** What the J loop carries between polls: the transactions it cannot read, their reads, the events held back. */
+  carry: Carry;
   timer: ReturnType<typeof setTimeout> | undefined;
 }>;
 
@@ -245,40 +254,118 @@ const ran = async (rig: Rig, state: State, run: Run, reply: Reply<Result<Turn, F
 
 // ---- the J loop
 
-/** The cursor: the chain's own block at the Runtime's view, which the WAL holds, unless the node has one. */
-const cursorOf = (watch: WatchConfig, state: State): Promise<Result<Watch, JFault>> =>
+const chainOf = (rig: Rig, state: State): ReadonlyMap<EntityId, ChainFacts> =>
+  state.station.host.runtime.entities.get(rig.self)?.chain ?? new Map();
+
+/**
+ * The cursor: the chain's own block at the Runtime's view, which the WAL holds, unless the node has one. A restart
+ * that finds the Entity was told events of an Account were held back begins before the first of them (`resumeAt`).
+ */
+const cursorOf = (rig: Rig, watch: WatchConfig, state: State): Promise<Result<Watch, JFault>> =>
   (state.cursor === undefined
-    ? beginAt(watch, state.station.host.runtime.view)
+    ? beginAt(watch, resumeAt(state.station.host.runtime.view, chainOf(rig, state)))
     : Promise.resolve(ok(state.cursor)));
+
+const NO_WAITS = { lastHeard: new Map<EntityId, bigint>(), behind: new Set<EntityId>(), lost: new Set<EntityId>() };
+
+/** What the loop needs of the Entity: where waiting for a secret stops paying, who is held back, and the view. */
+const standing = (rig: Rig, state: State): Standing => {
+  const { runtime } = state.station.host;
+  const entity = runtime.entities.get(rig.self);
+  const waits = entity === undefined ? NO_WAITS : waitsOf(entity, rig.config.boot.setup.clock);
+  return { ...waits, view: runtime.view };
+};
 
 /** A fault of the node's reads of the chain is tried again at the next tick; one of the watcher's checks is final. */
 const heldUp = (state: State, fault: JFault): State =>
   (fault._tag === "port" ? { ...state, watchFault: `${fault.call}: ${fault.reason}` } : { ...state, fatal: fault });
 
+/**
+ * A transaction the node cannot read is told once (`watch_stalled`), and again only when the class of its fault (the
+ * call that failed) is another: a stall of many polls with a changing reason is one notice, not one per poll.
+ */
+export const stallNotices = (was: Carry, stalls: readonly Stall[]): readonly HostNotice[] =>
+  stalls.filter((s) => was.failing.get(s.tx)?.fault.call !== s.fault.call)
+    .map((s): HostNotice => ({ _tag: "watch_stalled", tx: s.tx, reason: s.fault.reason }));
+
+const watchFaultOf = (stalls: readonly Stall[]): string | undefined =>
+  stalls.map((s) => `${s.fault.call}: ${s.fault.reason}`).at(0);
+
+/**
+ * A node that may hold value and finds its provider answers no call trace at run time is told to its Entity
+ * (`j_blind`), which forwards no lock from then on; the node keeps watching and defending every Account, which an
+ * exit would stop. It is told once: the Entity knows (`blind`). The probe then asks for a trace at each new head.
+ */
+const blinding = (rig: Rig, state: State, delivery: Delivery): readonly EntityInput[] => {
+  const known = state.station.host.runtime.entities.get(rig.self)?.blind === true;
+  return rig.config.watch?.value === true && delivery.untraceable && !known ? [{ _tag: "j_blind", boot: false }] : [];
+};
+
+/** The provider does not trace: told once for each time the node goes blind, naming what said so. */
+const untracedNotices = (state: State, why: string | undefined): readonly HostNotice[] =>
+  (why === undefined || state.untraced ? [] : [{ _tag: "no_call_trace", why }]);
+
 /** The events are in the WAL before the height is; the cursor moves only after the height's row (R-HEIGHT-ORDER). */
 const delivered = async (rig: Rig, state: State, delivery: Delivery): Promise<State> => {
   const { shell } = rig.config;
-  const queued = delivery.events.reduce((host, input) => submit(host, { to: rig.self, input }), state.station.host);
+  const inputs = [...blinding(rig, state, delivery), ...delivery.events];
+  const queued = inputs.reduce((host, input) => submit(host, { to: rig.self, input }), state.station.host);
   const first = await concluded(rig, state, await drain(shell, { ...state.station, host: queued }));
   if (first.fatal !== undefined) return first;
   const height = { ...first.station, host: heard(first.station.host, delivery.height) };
   const second = await concluded(rig, first, await drain(shell, height));
-  return second.fatal === undefined ? { ...second, cursor: delivery.watch } : second;
+  const { carry, stalls } = delivery;
+  const said = rig.config.watch?.value === true && delivery.untraceable
+    ? untracedNotices(state, "a transaction's call trace: no such method") : [];
+  const told = recent([...second.notices, ...stallNotices(state.carry, stalls), ...said]);
+  return second.fatal === undefined
+    ? {
+      ...second, cursor: delivery.watch, carry, notices: told, watchFault: watchFaultOf(stalls), fatal: undefined,
+      untraced: second.untraced || said.length > 0,
+    }
+    : second;
 };
 
 const listening = async (rig: Rig, state: State): Promise<State> => {
   const { watch } = rig.config;
   if (watch === undefined) return state;
-  const cursor = await cursorOf(watch, state);
+  const cursor = await cursorOf(rig, watch, state);
   if (!cursor.ok) return heldUp(state, cursor.error);
   const next = { ...state, cursor: cursor.value };
-  const chain = state.station.host.runtime.entities.get(rig.self)?.chain ?? new Map();
-  const windows = windowsOf(watch.hosted, chain);
+  const windows = windowsOf(watch.hosted, chainOf(rig, state));
   if (!windows.ok) return heldUp(next, windows.error);
-  const got = await poll(watch.port, cursor.value, watch.hosted, windows.value);
+  const got = await poll(watch.port, cursor.value, watch.hosted, windows.value, state.carry, standing(rig, state));
   if (!got.ok) return heldUp(next, got.error);
   const quiet = { ...next, watchFault: undefined };
   return got.value === undefined ? quiet : delivered(rig, quiet, got.value);
+};
+
+/** The Entity is told the provider was shown tracing calls: it forwards again (R-WATCH-CALLDATA). */
+const sighted = async (rig: Rig, state: State): Promise<State> => {
+  const input: EntityInput = { _tag: "j_blind_over" };
+  const host = submit(state.station.host, { to: rig.self, input });
+  return concluded(rig, { ...state, untraced: false }, await drain(rig.config.shell, { ...state.station, host }));
+};
+
+/**
+ * While the Entity of a node that may hold value is blind, the probe asks the first transaction of each new head
+ * block for a `callTracer` tree (no chosen window of blocks: a block with none waits for the next); the first tree
+ * ends the blindness. A provider that answers no method, or something else, is asked again at the next head; a fault
+ * of the node's reads is tried again at the next tick.
+ */
+const probing = async (rig: Rig, state: State): Promise<State> => {
+  const { watch } = rig.config;
+  const blind = state.station.host.runtime.entities.get(rig.self)?.blind === true;
+  if (watch?.value !== true || !blind || state.fatal !== undefined) return state;
+  const head = await watch.port.head();
+  if (!head.ok) return heldUp(state, head.error);
+  if (state.probed === head.value) return state;
+  const probe = await watch.port.traced(head.value);
+  if (!probe.ok) return heldUp(state, probe.error);
+  const said = probe.value === "none" ? untracedNotices(state, "the probe: no call tree") : [];
+  const untraced = state.untraced || said.length > 0;
+  const asked = { ...state, probed: head.value, notices: recent([...state.notices, ...said]), untraced };
+  return probe.value === "traces" ? sighted(rig, asked) : asked;
 };
 
 const tick = async (rig: Rig, state: State): Promise<State> => {
@@ -287,7 +374,7 @@ const tick = async (rig: Rig, state: State): Promise<State> => {
   const resent = resending({ ...state, stalled: now }, rig.self, due);
   const drained = await drain(rig.config.shell, resent.station);
   const made = drained.ok && busy(drained.value.station) ? await pump(rig.config.shell, drained.value) : drained;
-  const next = await listening(rig, await concluded(rig, resent, made));
+  const next = await probing(rig, await listening(rig, await concluded(rig, resent, made)));
   const timer = setTimeout(() => { post(rig, { _tag: "tick" }); }, rig.config.tickMs);
   return { ...redialed(rig, next), timer };
 };
@@ -354,6 +441,18 @@ const accepting = (rig: Rig): void => {
 const STOPPED: Result<never, Stopped> = err({ _tag: "stopped" });
 
 /**
+ * A node that may hold value boots blind: its Entity forwards no lock until the probe is shown a trace in this run
+ * (R-WATCH-CALLDATA). The node still watches and defends every Account from its first block.
+ */
+const blindStart = (config: Config, station: Station): Station => {
+  const self = config.boot.genesis.id;
+  const blind = station.host.runtime.entities.get(self)?.blind === true;
+  return config.watch?.value === true && !blind
+    ? { ...station, host: submit(station.host, { to: self, input: { _tag: "j_blind", boot: true } }) }
+    : station;
+};
+
+/**
  * A node over `listener`, which the caller has made so that its port is known to the peers' tables. It dials the peers
  * it is to dial, answers the ones that dial it, and runs until `stop`.
  */
@@ -373,9 +472,11 @@ export const startDaemon = async (
   const mails = on(bus, "mail", { close: ["stop"] })[Symbol.asyncIterator]();
   const rig: Rig = { config, bus, self: config.boot.genesis.id, listener };
   const first: State = {
-    station: started.value.station, mesh: startMesh(config.key, config.table), wires: new Map(), next: 1,
-    dialing: new Set(), stalled: new Map(), counts: { sent: 0, heard: 0, dropped: 0 }, notices: [], refused: [],
-    fatal: undefined, cursor: undefined, watchFault: undefined, timer: undefined,
+    station: blindStart(config, started.value.station), mesh: startMesh(config.key, config.table), wires: new Map(),
+    next: 1, dialing: new Set(), stalled: new Map(), counts: { sent: 0, heard: 0, dropped: 0 }, notices: [],
+    refused: [],
+    fatal: undefined, cursor: undefined, probed: undefined, untraced: false, watchFault: undefined, carry: NO_CARRY,
+    timer: undefined,
   };
   const finished = leaving(rig, first, started.value.sent)
     .then((state) => run(rig, mails, state)).then((state) => ended(rig, state));
