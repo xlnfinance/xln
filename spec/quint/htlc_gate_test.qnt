@@ -123,3 +123,17 @@ module hback_htlc_gate_test { import hgate(SW_HOP = 2, SW_XREV = true, SW_TSEE =
 module hall_htlc_gate_test { import hgate(SW_HOP = 3, SW_XREV = false, SW_TSEE = false, SW_BACK = false, SW_SLK = 2, SW_PD = 1, SW_RSV = 0, SW_CHAIN = false).* from "./htlc_gate_test" }
 module hstall_htlc_gate_test { import hgate(SW_HOP = 2, SW_XREV = false, SW_TSEE = false, SW_BACK = false, SW_SLK = 0, SW_PD = 4, SW_RSV = 0, SW_CHAIN = false).* from "./htlc_gate_test" }
 module hstall5_htlc_gate_test { import hgate(SW_HOP = 5, SW_XREV = false, SW_TSEE = false, SW_BACK = false, SW_SLK = 0, SW_PD = 4, SW_RSV = 0, SW_CHAIN = false).* from "./htlc_gate_test" }
+
+// The give-up height of PR 171 at c701bcf21 (loop.ts `givenUp`, paybook `lastHeard`): a stalled transaction of an Account is waited on until the view a delivery
+// reaches is past g = TU - lag, and the events held behind it are told then. The gates of the hub's frames count views (head - depth), so depth cancels from
+// the claim of a frame: the hub hears at view g, its PD in view terms is g - (the tick the reveal landed) = HOP - lag - SLK for the reveal on the last counted
+// tick (lag = LAG = 1 here). A chain claim is counted in heads, so depth stays in it: PD = HOP - lag - SLK + depth.
+//   hgive    height-gated claim, SLK 0: heard at g exactly (to = last)           HOP 2, PD 1: safe (equality)
+//   hgives   the same with slack SLK 1, the reveal one tick later                HOP 3, PD 1: safe (equality)
+//   hgivec   chain claim (S9b), depth 1, SLK 0: PD = 2, the claim lands at TU+1  HOP 2, RSV 1: lost, SLK < depth
+//   hgivecs  the same with SLK 1 = depth                                          HOP 2, PD 1: safe
+// The delivery at the give-up poll of the code is at to = last + 1 (`to > last`), one tick later than hgive: that is hpoll2 (HOP 2, PD 2), lost.
+module hgive_htlc_gate_test { import hgate(SW_HOP = 2, SW_XREV = false, SW_TSEE = false, SW_BACK = false, SW_SLK = 0, SW_PD = 1, SW_RSV = 0, SW_CHAIN = false).* from "./htlc_gate_test" }
+module hgives_htlc_gate_test { import hgate(SW_HOP = 3, SW_XREV = false, SW_TSEE = false, SW_BACK = false, SW_SLK = 1, SW_PD = 1, SW_RSV = 0, SW_CHAIN = false).* from "./htlc_gate_test" }
+module hgivec_htlc_gate_test { import hgate(SW_HOP = 2, SW_XREV = false, SW_TSEE = false, SW_BACK = false, SW_SLK = 0, SW_PD = 2, SW_RSV = 1, SW_CHAIN = true).* from "./htlc_gate_test" }
+module hgivecs_htlc_gate_test { import hgate(SW_HOP = 2, SW_XREV = false, SW_TSEE = false, SW_BACK = false, SW_SLK = 1, SW_PD = 1, SW_RSV = 1, SW_CHAIN = true).* from "./htlc_gate_test" }
