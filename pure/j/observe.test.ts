@@ -138,6 +138,20 @@ describe("j/observe", () => {
     ]));
   });
 
+  test("R-WATCH-STALL a finalize held back is told late, after its advance, with its secrets just ahead of it", () => {
+    const logs = eventsOf(advance(4n, 0n, 1n), finalized(4n, 1n));
+    const moved = logs[0] ?? expect.unreachable("no advance");
+    const final = logs[1] ?? expect.unreachable("no finalize");
+    const read = { ...final, shown: { _tag: "read", secrets: [must(bytes32(hexOf(8n)))] } } as ChainEvent;
+    const accounts = accountsOf(readAt(4n, 1n, 5n));
+    const context = [moved, read];
+    const order = (told: readonly ChainEvent[], late: ReadonlySet<ChainEvent>) =>
+      must(observe(told, [LEFT], accounts, { context, late })).map((a) => a.event)
+        .map((event) => (event._tag === "j_dispute_over" ? `${event._tag}:${event.late === true}` : event._tag));
+    expect(order(context, new Set())).toEqual(["j_secret", "j_epoch", "j_dispute_over:false"]);
+    expect(order([read], new Set([read]))).toEqual(["j_secret", "j_dispute_over:true"]);
+  });
+
   test("R-DISPUTE-WATCH a counter is a j_countered for each hosted party and not the end of the dispute", () => {
     expect(observe(eventsOf(countered(4n, 0n)), [LEFT, RIGHT], accountsOf())).toEqual(ok([
       toward(LEFT, { _tag: "j_countered", peer: RIGHT, nonce: 9n, proposerIsLeft: false, bodyHash: bodyHashOf(4n) }),

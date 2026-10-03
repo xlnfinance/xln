@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { err, unwrapOr, type Result } from "../kernel/core/result.ts";
 import { draw } from "../account/fixtures.ts";
 import { decodeLogs, type Bytes32, type ChainEvent, type RawLog } from "./log.ts";
-import { beginsAt, readingKey, type Accounts, type Addressed, type Reading } from "./observe.ts";
+import { readingKey, type Accounts, type Addressed, type Reading } from "./observe.ts";
 import {
   advance, finalizedAt, prepare, readings, splitStalled, watching, type Batch, type Block, type Step, type Watch,
   type WatchFault, type Window,
@@ -305,39 +305,33 @@ describe("j/watch what a transaction the Host cannot read holds back (R-WATCH-ST
     logOf("SecretRevealed", { hashlock: hexOf(n), revealer: RIGHT, secret: hexOf(n + 1n) }, block, 0n);
   const other = (block: bigint, index: bigint, epoch: bigint) =>
     logOf("AccountEpochAdvanced", { left: LEFT, right: BYSTANDER, ondeltaEpoch: epoch }, block, index);
+  const waiting = (...txs: readonly Bytes32[]) => (e: ChainEvent): boolean => "tx" in e && txs.includes(e.tx);
   const places = (events: readonly ChainEvent[]) => events.map((e) => `${e._tag}@${e.block}.${e.index}`);
   const logs = [
     secret(1n, 7n), advanced(2n, 0n, 1n), advanced(3n, 0n, 2n), finalized(3n, 1n), advanced(4n, 0n, 3n),
     other(4n, 1n, 1n), secret(4n, 9n),
   ];
 
-  test("R-WATCH-STALL a finalize the Host cannot read holds its Account from the advance it made, no other", () => {
+  test("R-WATCH-STALL a finalize the Host cannot read is held alone: the advance it made and the rest are told", () => {
     const events = eventsOf(logs);
-    const split = splitStalled(events, new Set([txOf(3n, 1n)]));
+    const split = splitStalled(events, waiting(txOf(3n, 1n)));
+    expect(places(split.held)).toEqual(["dispute_finalized@3.1"]);
     expect(places(split.ready)).toEqual([
-      "secret_revealed@1.0", "epoch_advanced@2.0", "epoch_advanced@4.1", "secret_revealed@4.0",
+      "secret_revealed@1.0", "epoch_advanced@2.0", "epoch_advanced@3.0", "epoch_advanced@4.0", "epoch_advanced@4.1",
+      "secret_revealed@4.0",
     ]);
-    expect(places(split.held)).toEqual(["epoch_advanced@3.0", "dispute_finalized@3.1", "epoch_advanced@4.0"]);
   });
 
-  test("R-WATCH-STALL a start the Host cannot read holds its Account from the start; earlier events go on", () => {
+  test("R-WATCH-STALL a start the Host cannot read holds nothing: its Account's events go on", () => {
     const events = eventsOf([advanced(2n, 0n, 1n), started(3n, 0n), advanced(4n, 0n, 2n), other(4n, 1n, 1n)]);
-    const split = splitStalled(events, new Set([txOf(3n, 0n)]));
-    expect(places(split.ready)).toEqual(["epoch_advanced@2.0", "epoch_advanced@4.1"]);
-    expect(places(split.held)).toEqual(["dispute_started@3.0", "epoch_advanced@4.0"]);
+    const split = splitStalled(events, waiting(txOf(3n, 0n)));
+    expect(places(split.ready)).toEqual(places(events));
+    expect(split.held).toEqual([]);
   });
 
   test("R-WATCH-STALL with nothing stalled everything is told; a tx no event names holds nothing", () => {
     const events = eventsOf(logs);
-    expect(splitStalled(events, new Set())).toEqual({ ready: events, held: [] });
-    expect(splitStalled(events, new Set([txOf(9n, 9n) as Bytes32])).held).toEqual([]);
-  });
-
-  test("R-WATCH-STALL a finalize begins at the advance it made; an earlier advance is not its own", () => {
-    const events = eventsOf(logs);
-    const final = events.find((e) => e._tag === "dispute_finalized") ?? expect.unreachable("no finalize");
-    expect(beginsAt(events, final)).toMatchObject({ block: 3n, index: 0n });
-    const alone = eventsOf([finalized(3n, 1n)]);
-    expect(beginsAt(alone, alone[0] ?? expect.unreachable("none"))).toMatchObject({ block: 3n, index: 1n });
+    expect(splitStalled(events, waiting())).toEqual({ ready: events, held: [] });
+    expect(splitStalled(events, waiting(txOf(9n, 9n))).held).toEqual([]);
   });
 });

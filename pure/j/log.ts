@@ -196,7 +196,9 @@ const revealedRead: Reader = (at, topics, data) =>
  */
 const transformerRevealedRead: Reader = (at, topics, data) =>
   (topics.length === 2 && holdsWords(data, (n) => n === 1)
-    ? some({ _tag: "secret_revealed", ...at, hashlock: topics[1] as Bytes32, revealer: undefined, secret: idAt(data, 0) })
+    ? some({
+      _tag: "secret_revealed", ...at, hashlock: topics[1] as Bytes32, revealer: undefined, secret: idAt(data, 0),
+    })
     : none);
 
 type Entry = Readonly<{ signature: string; read: Reader }>;

@@ -1,0 +1,30 @@
+{
+  "files": [
+    "htlc.qnt",
+    "htlc_hall.qnt",
+    "htlc_gate_test.qnt"
+  ],
+  "init": "init",
+  "step": "step",
+  "test": "htlc_gate_test.qnt",
+  "testMain": "hall_htlc_gate_test",
+  "steps": 70,
+  "mutants": [
+    {
+      "id": "slack-ignored",
+      "why": "the model counts a reveal only to the height deadline: the contract's slack (a reveal past it still pays) is forgotten",
+      "file": "htlc.qnt",
+      "old": "pure val TDX = TD + SLK",
+      "new": "pure val TDX = TD",
+      "killedBy": "test:lateRevealRaceTest"
+    },
+    {
+      "id": "poll-ignored",
+      "why": "the hub hears an event the tick it lands: depth and poll are forgotten",
+      "file": "htlc.qnt",
+      "old": "st.log.nth(i).t + PD <= st.now,",
+      "new": "true,",
+      "killedBy": "test:hearingWaitsForDepthTest"
+    }
+  ]
+}

@@ -1,11 +1,17 @@
 // What the entity and runtime tests share: entities by number, a token, a judge, and the commands the tests send.
 // Only tests import this.
 import { expect } from "bun:test";
-import { clockParams } from "../account/clause/clock.ts";
+import { clockParams, jHeight } from "../account/clause/clock.ts";
 import { signing, tokenOf, viewOf } from "../account/fixtures.ts";
+import { holdId } from "../account/model.ts";
 import type { Judge } from "../account/tx.ts";
 import { unwrapOr } from "../kernel/core/result.ts";
-import { heardOf, type Command, type EntityId, type Outbound, type PeerMessage } from "./model.ts";
+import { keccakHex } from "../kernel/encoding/bytes.ts";
+import { entityFrame } from "./frame.ts";
+import {
+  emptyEntity, heardOf, sideOf, type Command, type EntityId, type EntityInput, type EntityState, type Outbound,
+  type PeerMessage,
+} from "./model.ts";
 import type { Anchor } from "./signing/signing.ts";
 
 /** Entity number `n`: ids are ordered like their numbers, so the smaller number is the Left of an Account. */
@@ -35,3 +41,40 @@ export const judge: Judge = {
 export const open = (peer: EntityId): Command => ({ _tag: "open_account", peer });
 export const credit = (peer: EntityId, limit: bigint): Command => ({ _tag: "set_credit", peer, token: GOLD, limit });
 export const pay = (peer: EntityId, amount: bigint): Command => ({ _tag: "pay", peer, token: GOLD, amount });
+
+/** What the Entities hold, by id; `to` is told `inputs` and every message that leaves any of them is told on. */
+type Net = ReadonlyMap<EntityId, EntityState>;
+
+const told = (view: bigint) => (net: Net, to: EntityId, inputs: readonly EntityInput[]): Net => {
+  const at = { ...judge, view: viewOf(view) };
+  const framed = entityFrame(at, anchor, net.get(to) ?? expect.unreachable("no entity"), inputs);
+  const next = new Map([...net, [to, framed.state]]);
+  return framed.outputs.reduce((acc: Net, out) => told(view)(acc, out.to, [heardSigned(out)]), next);
+};
+
+/** The secret whose hash the lock of `forwarded` is under. */
+const FORWARDED_SECRET = Uint8Array.from({ length: 32 }, (_, i) => i + 1);
+
+/**
+ * `hub` after `payer` locked 10 to it under `FORWARDED_SECRET` due at `deadline`, and it forwarded the lock to `next`,
+ * which has not answered: an inbound hold on one Account, an outbound one on the other, and a `locked` paybook entry.
+ * All at the J view `view`, which the lock's deadline must be near.
+ */
+export const forwarded = (
+  hub: EntityId, payer: EntityId, next: EntityId, view: bigint, deadline: bigint,
+): EntityState => {
+  const tell = told(view);
+  const ids = [hub, payer, next];
+  const links = [[hub, payer], [payer, hub], [hub, next], [next, hub]] as const;
+  const bare: Net = new Map(ids.map((id) => [id, emptyEntity(id)]));
+  const opened = links.reduce((net, [self, peer]) => tell(net, self, [open(peer)]), bare);
+  const credited = links.reduce((net, [self, peer]) => tell(net, self, [credit(peer, 1000n)]), opened);
+  const hashlock = keccakHex(FORWARDED_SECRET);
+  const routed = tell(credited, hub, [{ _tag: "forward", hashlock, from: payer, to: next }]);
+  const hold = {
+    id: holdId(1n), payer: sideOf(payer, hub), amount: 10n, hashlock,
+    deadline: unwrapOr(jHeight(deadline), () => expect.unreachable("deadline")),
+  };
+  const locked = tell(routed, payer, [{ _tag: "lock", peer: hub, token: GOLD, hold }]);
+  return locked.get(hub) ?? expect.unreachable("no hub");
+};

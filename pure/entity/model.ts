@@ -29,7 +29,7 @@ export const entityId = (text: string): Result<EntityId, BadEntityId> =>
 export const sideOf = (self: EntityId, peer: EntityId): Side => (self < peer ? "left" : "right");
 
 /** What a frame of an Account can be refused for: the Account's own faults, and that the node's signature is out. */
-export type PeerFault = AccountFault | Tagged<"frozen"> | Tagged<"revealed_on_chain">;
+export type PeerFault = AccountFault | Tagged<"frozen"> | Tagged<"reveal_unknown"> | Tagged<"revealed_on_chain">;
 
 /** One side of an Account as the Entity holds it. */
 export type EntityReplica = Replica<AccountTx, AccountState, PeerFault>;
@@ -52,6 +52,11 @@ export type EntityState = Readonly<{
   paybook: Paybook;
   /** The lowest J height at which the chain showed the secret of a hashlock (`j_secret`): the key is the hashlock. */
   shown: ReadonlyMap<string, bigint>;
+  /**
+   * The Host's provider can give no call trace (`j_blind`), so a secret shown inside a call it cannot read may reach
+   * the chain unseen: this Entity forwards no lock while it holds, and still watches and defends every Account.
+   */
+  blind: boolean;
 }>;
 
 /**
@@ -63,7 +68,7 @@ export type PeerProof = Readonly<{ head: FrameHash; slot: number; author: Side; 
 export const emptyEntity = (id: EntityId): EntityState =>
   ({
     id, accounts: new Map(), proofs: new Map(), waiting: new Map(), revealed: new Map(), chain: new Map(),
-    paybook: new Map(), shown: new Map(),
+    paybook: new Map(), shown: new Map(), blind: false,
   });
 
 /**
@@ -104,6 +109,12 @@ export type ChainFacts = Readonly<{
    * (R-WATCH-STALL), while it does: a restart reads again from just before it, so no held event is lost.
    */
   behind: bigint | undefined;
+  /**
+   * Whether the Host can no longer read this Account's past (`j_account_lost`): the node's state of a block its events
+   * need is pruned. Its events from `behind` on were never told, it is quiet for good, and `j_behind_over` is no way
+   * out of it.
+   */
+  lost: boolean;
 }>;
 
 /**
@@ -150,7 +161,9 @@ export type PeerMessage = Tagged<"peer_message", { from: EntityId; msg: Msg<Acco
  * name the proof it opened with); `j_countered` is a counter the chain registered for the dispute, with the proof it
  * named (a registered counter is not the end of the dispute: the finalize is); `j_window_over` is the chain's
  * clock having passed that end for a dispute this node started or answers (R-DISPUTE-FINALIZE); `j_dispute_over` is
- * that dispute finalized, which pays the Account out; `j_start_lapsed` is the Host telling that the start this node
+ * that dispute finalized, which pays the Account out (a `late` one was held back for its arguments, and the Entity has
+ * heard what came after it: it dissolves the Account's holds and leaves the facts alone, `j_epoch` having moved
+ * them); `j_start_lapsed` is the Host telling that the start this node
  * asked for (the one of that `nonce`) was dropped from its draft because it would revert and so will never open a
  * dispute (R-DISPUTE-LAPSED); `j_counter_lapsed` is the same for the counter this node asked for (the one of that
  * `nonce`), which the chain would revert for good, so the node stops asking for it; `j_op_lapsed` is a co-signed
@@ -166,6 +179,9 @@ export type PeerMessage = Tagged<"peer_message", { from: EntityId; msg: Msg<Acco
  * `j_behind` says the Host holds back the events of this Account from block `from` on, behind a transaction of the
  * Account it cannot read yet (the earliest `from` stands); `j_behind_over` says it has delivered them. They change no
  * behavior of the Entity: they are the record a restart reads the cursor back from (R-WATCH-STALL).
+ * `j_account_lost` says the node no longer serves the state of a block this Account's events need, so the Host cannot
+ * read them from `from` on: a loud notice, the Account is behind for good (`lost`: quiet, no forward to its peer, no
+ * expiry of a hash forwarded to it), and nothing else of the Entity changes; no other Account is held for it.
  */
 export type JEvent =
   | Tagged<"j_epoch", { peer: EntityId; epoch: bigint; stored: bigint; finalBodyHash?: string }>
@@ -178,7 +194,7 @@ export type JEvent =
   >
   | Tagged<"j_countered", { peer: EntityId; nonce: bigint; proposerIsLeft: boolean; bodyHash: string }>
   | Tagged<"j_window_over", { peer: EntityId }>
-  | Tagged<"j_dispute_over", { peer: EntityId }>
+  | Tagged<"j_dispute_over", { peer: EntityId; late?: boolean }>
   | Tagged<"j_start_lapsed", { peer: EntityId; nonce: bigint }>
   | Tagged<"j_counter_lapsed", { peer: EntityId; nonce: bigint }>
   | Tagged<"j_collateral", { peer: EntityId; token: TokenId; collateral: bigint; ondelta: bigint }>
@@ -186,7 +202,8 @@ export type JEvent =
   | Tagged<"j_finalize_unread", { peer: EntityId; tx: string }>
   | Tagged<"j_start_unread", { peer: EntityId; tx: string }>
   | Tagged<"j_behind", { peer: EntityId; from: bigint }>
-  | Tagged<"j_behind_over", { peer: EntityId }>;
+  | Tagged<"j_behind_over", { peer: EntityId }>
+  | Tagged<"j_account_lost", { peer: EntityId; from: bigint }>;
 
 /** What a peer asks the node to co-sign: a withdrawal of collateral as a shortcut (C2R) or as a settlement. */
 export type CosignOp =
@@ -202,7 +219,16 @@ export type CosignAsk = Tagged<"cosign_ask", { from: EntityId; op: CosignOp }>;
  */
 export type SecretRevealed = Tagged<"j_secret", { secret: Uint8Array; at: bigint }>;
 
-export type Arrival = PeerMessage | JEvent | SecretRevealed | CosignAsk;
+/**
+ * `j_blind` is the Host telling that a call that hides a secret cannot be read (R-WATCH-CALLDATA): the Entity forwards
+ * no lock and co-signs no expiry until `j_blind_over`, which the Host sends when the provider has been shown to trace
+ * calls. A node that may hold value boots blind (`boot`: nothing is wrong yet, so no notice); a provider that says at
+ * run time that it has no call trace blinds it again, and the Entity tells its owner once (`chain_blind`). Nothing
+ * else changes: it keeps watching and defending every Account.
+ */
+export type ChainBlind = Tagged<"j_blind", { boot: boolean }> | Tagged<"j_blind_over">;
+
+export type Arrival = PeerMessage | JEvent | SecretRevealed | CosignAsk | ChainBlind;
 
 /** The Host's timer for `peer`'s Account ran out: its pending frame is sent again, so a lost frame cannot wedge it. */
 export type Hook = Tagged<"resend_due", { peer: EntityId }>;
@@ -331,6 +357,8 @@ export type Notice =
   | Tagged<"holding_dropped", { peer: EntityId; token: TokenId }>
   | Tagged<"finalize_unread", { peer: EntityId; tx: string }>
   | Tagged<"start_unread", { peer: EntityId; tx: string }>
+  | Tagged<"chain_blind">
+  | Tagged<"account_lost", { peer: EntityId; from: bigint }>
   | Tagged<
     "offdelta_rebased",
     {

@@ -1,0 +1,44 @@
+{
+ "id": "R-REVEAL-BACKSTOP",
+ "statement": "A hold whose secret the chain showed at a height at or before the hold's deadline is never expired by an Entity's co-signature: the refusal (`revealed_on_chain`) is for good, no wait lifts it, and the payee's way is a dispute. The Entity keeps the lowest height each hashlock was shown at, in whatever order it hears the events; a secret shown after the deadline pays nothing and the expiry stands. This is beside `reveal_unknown` (a hash the Entity forwarded and cannot rule on yet), which is retryable.",
+ "source": "coordinator relay 10-03 01:55 (never co-sign expiry of a hash whose hashToTimestamp at depth <= deadline); DeltaTransformer.sol revealSecret",
+ "layers": {
+  "arrival": "n/a: the Arrival specs take J events as given",
+  "quint": "n/a: the Quint model has no expiry of a clause the chain paid; an owed row of the dispute model",
+  "contract": "n/a: the contract is pinned; the node reads what DeltaTransformer.revealSecret already logs",
+  "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
+  "ts": "hold"
+ },
+ "killers": [
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-REVEAL-BACKSTOP an Entity co-signs no expiry of a hold whose secret the chain showed by its deadline"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-REVEAL-BACKSTOP an expiry is refused for a hold whose secret was shown at or before its deadline"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-REVEAL-BACKSTOP a secret shown after the deadline pays nothing: the expiry stands"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-REVEAL-BACKSTOP the expiry of a hold nobody showed the secret of, or of another hashlock's, stands"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-REVEAL-BACKSTOP the refusal is for good: no wait lifts it, so the payee's way is a dispute"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-REVEAL-BACKSTOP the Entity keeps the lowest height a secret was shown at, in any hearing order"
+  }
+ ]
+}

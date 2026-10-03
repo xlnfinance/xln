@@ -1,0 +1,31 @@
+{
+  "files": [
+    "dispute.qnt",
+    "dispute_stall3.qnt",
+    "dispute_stall_test.qnt"
+  ],
+  "init": "init",
+  "step": "step",
+  "test": "dispute_stall_test.qnt",
+  "testMain": "stall3_test",
+  "steps": 70,
+  "mutants": [
+    {
+      "id": "hear-ignores-stall",
+      "why": "the Entity hears an event before its hold has passed: the delay the Host's stall causes is not modelled",
+      "file": "dispute.qnt",
+      "old": "i < st.log.length() and st.log.nth(i).t + STALL <= st.now",
+      "new": "i < st.log.length()",
+      "killedBy": "test:stalledHearingWaitsTest"
+    },
+    {
+      "id": "counter-lands-at-the-end",
+      "why": "a counter that reaches the chain at the window's last second counts: the window is one tick longer than the contract's",
+      "file": "dispute.qnt",
+      "old": "if (not(st.disp.on) or st.now >= st.disp.timeout or a.init != st.disp.n",
+      "new": "if (not(st.disp.on) or st.now > st.disp.timeout or a.init != st.disp.n",
+      "killedBy": "test:stalledStartTest"
+    }
+  ],
+  "testSamples": 1
+}

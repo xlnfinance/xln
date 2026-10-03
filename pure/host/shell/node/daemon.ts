@@ -54,21 +54,8 @@ export type Stopped = Tagged<"stopped">;
 export type ClockBelowDepth = Tagged<"clock_below_depth", { lag: bigint; depth: bigint }>;
 export type ClockDepthOff = Tagged<"clock_depth_off", { clock: bigint | undefined; depth: bigint }>;
 
-/**
- * A node that may hold value is refused on a provider with no call trace (R-WATCH-CALLDATA): a relay contract hides
- * the call that shows a secret, and a notice does not save the amount a hub would then lose. The same node ends if
- * the provider says at run time that it has none: no value moves on a reading that cannot see a relayed finalize.
- */
-export type NoCallTrace = Tagged<"no_call_trace">;
-
-/**
- * A node that may hold value cannot tell at boot whether its provider traces when the chain's recent blocks hold no
- * transaction to trace: it does not start until one does, as it does not start on a provider that does not trace.
- */
-export type NoProbeTx = Tagged<"no_probe_tx">;
-
-/** What ends a node's work: a disk, the chain's submit path, the Runtime, a watcher invariant broken, or no trace. */
-export type NodeFault = DriveFault | WatchFault | BadPeer | BadSecret | NoCallTrace;
+/** What ends a node's work: a disk, the chain's submit path, the Runtime, or a watcher invariant broken. */
+export type NodeFault = DriveFault | WatchFault | BadPeer | BadSecret;
 
 export type Fault = NodeFault | Stopped;
 
@@ -117,6 +104,10 @@ type State = Readonly<{
   refused: readonly string[];
   fatal: NodeFault | undefined;
   cursor: Watch | undefined;
+  /** The head block the probe last asked a transaction of, while the node's Entity is blind. */
+  probed: bigint | undefined;
+  /** Whether the notice that the provider does not trace was told since the node last was shown a trace. */
+  untraced: boolean;
   watchFault: string | undefined;
   /** What the J loop carries between polls: the transactions it cannot read, their reads, the events held back. */
   carry: Carry;
@@ -275,7 +266,7 @@ const cursorOf = (rig: Rig, watch: WatchConfig, state: State): Promise<Result<Wa
     ? beginAt(watch, resumeAt(state.station.host.runtime.view, chainOf(rig, state)))
     : Promise.resolve(ok(state.cursor)));
 
-const NO_WAITS = { lastHeard: new Map<EntityId, bigint>(), behind: new Set<EntityId>() };
+const NO_WAITS = { lastHeard: new Map<EntityId, bigint>(), behind: new Set<EntityId>(), lost: new Set<EntityId>() };
 
 /** What the loop needs of the Entity: where waiting for a secret stops paying, who is held back, and the view. */
 const standing = (rig: Rig, state: State): Standing => {
@@ -300,21 +291,37 @@ export const stallNotices = (was: Carry, stalls: readonly Stall[]): readonly Hos
 const watchFaultOf = (stalls: readonly Stall[]): string | undefined =>
   stalls.map((s) => `${s.fault.call}: ${s.fault.reason}`).at(0);
 
+/**
+ * A node that may hold value and finds its provider answers no call trace at run time is told to its Entity
+ * (`j_blind`), which forwards no lock from then on; the node keeps watching and defending every Account, which an
+ * exit would stop. It is told once: the Entity knows (`blind`). The probe then asks for a trace at each new head.
+ */
+const blinding = (rig: Rig, state: State, delivery: Delivery): readonly EntityInput[] => {
+  const known = state.station.host.runtime.entities.get(rig.self)?.blind === true;
+  return rig.config.watch?.value === true && delivery.untraceable && !known ? [{ _tag: "j_blind", boot: false }] : [];
+};
+
+/** The provider does not trace: told once for each time the node goes blind, naming what said so. */
+const untracedNotices = (state: State, why: string | undefined): readonly HostNotice[] =>
+  (why === undefined || state.untraced ? [] : [{ _tag: "no_call_trace", why }]);
+
 /** The events are in the WAL before the height is; the cursor moves only after the height's row (R-HEIGHT-ORDER). */
 const delivered = async (rig: Rig, state: State, delivery: Delivery): Promise<State> => {
   const { shell } = rig.config;
-  const queued = delivery.events.reduce((host, input) => submit(host, { to: rig.self, input }), state.station.host);
+  const inputs = [...blinding(rig, state, delivery), ...delivery.events];
+  const queued = inputs.reduce((host, input) => submit(host, { to: rig.self, input }), state.station.host);
   const first = await concluded(rig, state, await drain(shell, { ...state.station, host: queued }));
   if (first.fatal !== undefined) return first;
   const height = { ...first.station, host: heard(first.station.host, delivery.height) };
   const second = await concluded(rig, first, await drain(shell, height));
   const { carry, stalls } = delivery;
-  const told = recent([...second.notices, ...stallNotices(state.carry, stalls)]);
-  const traceless = rig.config.watch?.value === true && delivery.untraceable;
+  const said = rig.config.watch?.value === true && delivery.untraceable
+    ? untracedNotices(state, "a transaction's call trace: no such method") : [];
+  const told = recent([...second.notices, ...stallNotices(state.carry, stalls), ...said]);
   return second.fatal === undefined
     ? {
-      ...second, cursor: delivery.watch, carry, notices: told, watchFault: watchFaultOf(stalls),
-      fatal: traceless ? { _tag: "no_call_trace" } : undefined,
+      ...second, cursor: delivery.watch, carry, notices: told, watchFault: watchFaultOf(stalls), fatal: undefined,
+      untraced: second.untraced || said.length > 0,
     }
     : second;
 };
@@ -333,13 +340,41 @@ const listening = async (rig: Rig, state: State): Promise<State> => {
   return got.value === undefined ? quiet : delivered(rig, quiet, got.value);
 };
 
+/** The Entity is told the provider was shown tracing calls: it forwards again (R-WATCH-CALLDATA). */
+const sighted = async (rig: Rig, state: State): Promise<State> => {
+  const input: EntityInput = { _tag: "j_blind_over" };
+  const host = submit(state.station.host, { to: rig.self, input });
+  return concluded(rig, { ...state, untraced: false }, await drain(rig.config.shell, { ...state.station, host }));
+};
+
+/**
+ * While the Entity of a node that may hold value is blind, the probe asks the first transaction of each new head
+ * block for a `callTracer` tree (no chosen window of blocks: a block with none waits for the next); the first tree
+ * ends the blindness. A provider that answers no method, or something else, is asked again at the next head; a fault
+ * of the node's reads is tried again at the next tick.
+ */
+const probing = async (rig: Rig, state: State): Promise<State> => {
+  const { watch } = rig.config;
+  const blind = state.station.host.runtime.entities.get(rig.self)?.blind === true;
+  if (watch?.value !== true || !blind || state.fatal !== undefined) return state;
+  const head = await watch.port.head();
+  if (!head.ok) return heldUp(state, head.error);
+  if (state.probed === head.value) return state;
+  const probe = await watch.port.traced(head.value);
+  if (!probe.ok) return heldUp(state, probe.error);
+  const said = probe.value === "none" ? untracedNotices(state, "the probe: no call tree") : [];
+  const untraced = state.untraced || said.length > 0;
+  const asked = { ...state, probed: head.value, notices: recent([...state.notices, ...said]), untraced };
+  return probe.value === "traces" ? sighted(rig, asked) : asked;
+};
+
 const tick = async (rig: Rig, state: State): Promise<State> => {
   const now = waitingOn(state.station, rig.self);
   const due = [...now].filter(([peer, mark]) => state.stalled.get(peer) === mark).map(([peer]) => peer);
   const resent = resending({ ...state, stalled: now }, rig.self, due);
   const drained = await drain(rig.config.shell, resent.station);
   const made = drained.ok && busy(drained.value.station) ? await pump(rig.config.shell, drained.value) : drained;
-  const next = await listening(rig, await concluded(rig, resent, made));
+  const next = await probing(rig, await listening(rig, await concluded(rig, resent, made)));
   const timer = setTimeout(() => { post(rig, { _tag: "tick" }); }, rig.config.tickMs);
   return { ...redialed(rig, next), timer };
 };
@@ -406,12 +441,24 @@ const accepting = (rig: Rig): void => {
 const STOPPED: Result<never, Stopped> = err({ _tag: "stopped" });
 
 /**
+ * A node that may hold value boots blind: its Entity forwards no lock until the probe is shown a trace in this run
+ * (R-WATCH-CALLDATA). The node still watches and defends every Account from its first block.
+ */
+const blindStart = (config: Config, station: Station): Station => {
+  const self = config.boot.genesis.id;
+  const blind = station.host.runtime.entities.get(self)?.blind === true;
+  return config.watch?.value === true && !blind
+    ? { ...station, host: submit(station.host, { to: self, input: { _tag: "j_blind", boot: true } }) }
+    : station;
+};
+
+/**
  * A node over `listener`, which the caller has made so that its port is known to the peers' tables. It dials the peers
  * it is to dial, answers the ones that dial it, and runs until `stop`.
  */
 export const startDaemon = async (
   config: Config, listener: Listener,
-): Promise<Result<Daemon, DriveFault | ClockBelowDepth | ClockDepthOff | NoCallTrace | NoProbeTx | PortFault>> => {
+): Promise<Result<Daemon, DriveFault | ClockBelowDepth | ClockDepthOff>> => {
   const { lag, depth } = config.boot.setup.clock;
   if (config.watch !== undefined && lag <= config.watch.depth) {
     return err({ _tag: "clock_below_depth", lag, depth: config.watch.depth });
@@ -419,21 +466,17 @@ export const startDaemon = async (
   if (config.watch !== undefined && depth !== config.watch.depth) {
     return err({ _tag: "clock_depth_off", clock: depth, depth: config.watch.depth });
   }
-  if (config.watch?.value === true) {
-    const probed = await config.watch.port.traced();
-    if (!probed.ok) return probed;
-    if (probed.value === "none") return err({ _tag: "no_call_trace" });
-    if (probed.value === "no_transaction") return err({ _tag: "no_probe_tx" });
-  }
   const started = await start(config.shell, config.boot);
   if (!started.ok) return started;
   const bus = new EventEmitter();
   const mails = on(bus, "mail", { close: ["stop"] })[Symbol.asyncIterator]();
   const rig: Rig = { config, bus, self: config.boot.genesis.id, listener };
   const first: State = {
-    station: started.value.station, mesh: startMesh(config.key, config.table), wires: new Map(), next: 1,
-    dialing: new Set(), stalled: new Map(), counts: { sent: 0, heard: 0, dropped: 0 }, notices: [], refused: [],
-    fatal: undefined, cursor: undefined, watchFault: undefined, carry: NO_CARRY, timer: undefined,
+    station: blindStart(config, started.value.station), mesh: startMesh(config.key, config.table), wires: new Map(),
+    next: 1, dialing: new Set(), stalled: new Map(), counts: { sent: 0, heard: 0, dropped: 0 }, notices: [],
+    refused: [],
+    fatal: undefined, cursor: undefined, probed: undefined, untraced: false, watchFault: undefined, carry: NO_CARRY,
+    timer: undefined,
   };
   const finished = leaving(rig, first, started.value.sent)
     .then((state) => run(rig, mails, state)).then((state) => ended(rig, state));

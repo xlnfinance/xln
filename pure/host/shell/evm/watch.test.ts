@@ -6,7 +6,9 @@ import { appendFileSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { err, ok, type Result } from "../../../kernel/core/result.ts";
-import { DEPLOYED, DEPOSITORY, DEPOSITORY_ABI, entityOf, hashOf, hexOf, TRANSFORMER, txOf } from "../../../j/fixtures.ts";
+import {
+  DEPLOYED, DEPOSITORY, DEPOSITORY_ABI, entityOf, hashOf, hexOf, TRANSFORMER, txOf,
+} from "../../../j/fixtures.ts";
 import { blockOf } from "../../../j/fixtures.ts";
 import type { Rpc, RpcFault } from "./port.ts";
 import { watchPort } from "./watch.ts";
@@ -33,6 +35,17 @@ const rpcOf = (node: Node, log: string): Rpc => (method, params) => {
 };
 
 const portOf = (node: Node, log: string = logPath()) => watchPort(rpcOf(node, log), DEPLOYED);
+
+const TX = `0x${"ab".repeat(32)}`;
+
+const refusal = (reason: string): Result<never, RpcFault> => err({ _tag: "rpc", reason });
+
+/** The probe of block 0x20, whose transactions are `txs`, with the node's answer to the trace; traceCall is a lure. */
+const probed = (trace: Result<unknown, RpcFault>, log: string = logPath(), txs: readonly string[] = [TX]) =>
+  portOf({
+    eth_getBlockByNumber: () => ok({ transactions: txs }), debug_traceTransaction: () => trace,
+    debug_traceCall: () => ok({ type: "CALL", from: "0x00" }),
+  }, log).traced(0x20n);
 
 const askedOf = (log: string): readonly string[] => readFileSync(log, "utf8").split("\n").filter((l) => l !== "");
 
@@ -142,42 +155,42 @@ describe("host/shell/evm/watch the J loop's reads of the chain", () => {
       .toEqual(err({ _tag: "port", call: "watch trace", reason: "connection refused" }));
   });
 
-  test("R-WATCH-CALLDATA the boot probe traces a recent block's tx: only a missing method is none", async () => {
-    const chain = {
-      eth_blockNumber: () => ok("0x5"),
-      eth_getBlockByNumber: ([n]: readonly unknown[]) => ok({ transactions: n === "0x4" ? [txOf(4n, 1n)] : [] }),
-    };
+  test("R-WATCH-CALLDATA the probe traces the first tx of the block asked: only a call tree is a trace", async () => {
     const log = logPath();
-    const traces = portOf({ ...chain, debug_traceTransaction: () => ok(FRAME) }, log);
-    expect(await traces.traced()).toEqual(ok("traces"));
-    expect(askedOf(log).filter((l) => l.startsWith("debug_traceTransaction")))
-      .toEqual([`debug_traceTransaction ["${txOf(4n, 1n)}",{"tracer":"callTracer"}]`]);
-    const refuses = (reason: string) =>
-      portOf({ ...chain, debug_traceTransaction: () => err({ _tag: "rpc", reason }) });
-    expect(await refuses("Method not found (JSON-RPC code -32601)").traced()).toEqual(ok("none"));
-    expect(await refuses("Unsupported method").traced()).toEqual(ok("none"));
-    expect(await refuses("connection refused").traced())
-      .toEqual(err({ _tag: "port", call: "watch trace probe", reason: "connection refused" }));
+    expect(await probed(ok({ ...FRAME, from: "0x01", to: "0x02" }), log)).toEqual(ok("traces"));
+    expect(askedOf(log)).toEqual([
+      `eth_getBlockByNumber ["0x20",false]`, `debug_traceTransaction ["${TX}",{"tracer":"callTracer"}]`,
+    ]);
+    expect(await probed(ok(FRAME))).toEqual(ok("traces"));
+    const STRUCT = { gas: 1, failed: false, returnValue: "", structLogs: [] };
+    const nots = [null, "0x", {}, STRUCT, { from: "0x01" }, { type: "x", from: "y" }, { type: "CALL", from: "0x01" },
+      { type: "CALL", from: "y", to: "0x02" }, { type: "CALL", from: "0x01", to: "z" }, [FRAME]];
+    const answers = await Promise.all(nots.map((a) => probed(ok(a))));
+    answers.forEach((got) => expect(got).toEqual(ok("none")));
+    expect(await probed(ok({ type: "CREATE", from: "0x01" }))).toEqual(ok("traces"));
   });
 
-  test("R-WATCH-CALLDATA the boot probe: an answer that is no call frame is none, not a trace", async () => {
-    const chain = {
-      eth_blockNumber: () => ok("0x2"), eth_getBlockByNumber: () => ok({ transactions: [txOf(2n, 0n)] }),
-    };
-    const answers = [null, "0x", {}, { type: "CALL" }, { from: ADDRESS }, { structLogs: [] }, [FRAME]];
-    const probed = await Promise.all(
-      answers.map((a) => portOf({ ...chain, debug_traceTransaction: () => ok(a) }).traced()),
-    );
-    probed.forEach((got) => expect(got).toEqual(ok("none")));
+  test("R-WATCH-CALLDATA the probe: a missing method is none whatever the client, another error a fault", async () => {
+    const missing = [
+      "the method debug_traceTransaction does not exist/is not available (JSON-RPC code -32601)",
+      "the method debug_traceTransaction does not exist/is not available",
+      "Method not found (JSON-RPC code -32601)", "Unsupported method",
+      "The method 'debug_traceTransaction' is found but the namespace 'debug' is disabled for http://127.0.0.1:8545/. "
+      + "Consider adding the namespace 'debug' to JsonRpc.AdditionalRpcUrls (JSON-RPC code -32600)",
+      "The method 'debug_traceTransaction' is found in namespace 'debug' for http://x/' but is disabled for "
+      + "http://x/. (JSON-RPC code -32600)",
+    ];
+    const none = await Promise.all(missing.map((reason) => probed(refusal(reason))));
+    none.forEach((got) => expect(got).toEqual(ok("none")));
+    const faults = ["Invalid request (JSON-RPC code -32600)", "connection refused", "execution timeout"];
+    const failed = await Promise.all(faults.map((reason) => probed(refusal(reason))));
+    failed.forEach((got) => expect(got).toMatchObject({ ok: false, error: { call: "watch trace probe" } }));
   });
 
-  test("R-WATCH-CALLDATA the boot probe with no tx in the recent blocks knows nothing and asks no call", async () => {
-    const empty = { eth_blockNumber: () => ok("0x30"), eth_getBlockByNumber: () => ok({ transactions: [] }) };
+  test("R-WATCH-CALLDATA the probe of a block with no tx knows nothing and falls back to no traceCall", async () => {
     const log = logPath();
-    const node = { ...empty, debug_traceCall: () => ok(FRAME), debug_traceTransaction: () => ok(FRAME) };
-    expect(await portOf(node, log).traced()).toEqual(ok("no_transaction"));
-    expect(askedOf(log).filter((l) => l.startsWith("eth_getBlockByNumber"))).toHaveLength(16);
-    expect(askedOf(log).filter((l) => l.startsWith("debug_"))).toEqual([]);
+    expect(await probed(ok(FRAME), log, [])).toEqual(ok("no_transaction"));
+    expect(askedOf(log)).toEqual([`eth_getBlockByNumber ["0x20",false]`]);
   });
 
   test("R-WATCH-CALLDATA a trace that is no tree of calls is no trace; only a missing method says none", async () => {
@@ -189,12 +202,14 @@ describe("host/shell/evm/watch the J loop's reads of the chain", () => {
     const method = "the method debug_traceTransaction does not exist/is not available";
     const missing = [
       method, "Method not found", "Unsupported method", "method not supported", "(JSON-RPC code -32601)",
+      "The method 'debug_traceTransaction' is found but the namespace 'debug' is disabled for http://127.0.0.1:8545/.",
+      "The method 'debug_traceTransaction' is found in namespace 'debug' for http://x/' but is disabled for http://x/.",
     ];
     const gone = await Promise.all(missing.map((reason) => refuses(reason).trace(txOf(3n, 1n))));
     gone.forEach((got) => expect(got).toEqual(ok(NO_METHOD)));
     const clears = ["response size exceeded", "execution timeout", "request timed out", "the call timed out",
       "context deadline exceeded", "service is not available", "missing trie node",
-      "unsupported block range", "unsupported media type",
+      "unsupported block range", "unsupported media type", "Invalid request (JSON-RPC code -32600)",
       "required historical state unavailable (reexec=128)", "trace limit reached"];
     const faults = await Promise.all(clears.map((reason) => refuses(reason).trace(txOf(3n, 1n))));
     faults.forEach((got) => expect(got).toMatchObject({ ok: false, error: { _tag: "port", call: "watch trace" } }));
@@ -236,6 +251,42 @@ describe("host/shell/evm/watch the J loop's reads of the chain", () => {
     ]);
     expect(calls.map(([call]) => call.to)).toEqual([ADDRESS, ADDRESS]);
     expect(calls.map(([, at]) => at)).toEqual([block, block]);
+  });
+
+  test("R-WATCH-WINDOW a state the node no longer serves is pruned; any other error is a fault", async () => {
+    const node = (reason: string, which: "epoch" | "row"): Node => ({
+      eth_call: (params) => {
+        const selector = DEPOSITORY_ABI.getFunction("ondeltaEpoch")?.selector ?? "?";
+        const isEpoch = (params[0] as { data: string }).data.startsWith(selector);
+        return isEpoch === (which === "epoch") ? refusal(reason) : ok(isEpoch ? words(3n) : words(9n));
+      },
+    });
+    const read = (reason: string, which: "epoch" | "row") =>
+      portOf(node(reason, which)).accountAt(hashOf(6n), LEFT, RIGHT);
+    const pruned = [
+      "missing trie node 1f2e (path ) state 0x1f2e is not available (JSON-RPC code -32000)",
+      `historical state ${hashOf(6n).slice(2)} is not available (JSON-RPC code -32000)`,
+      "missing trie node 1f2e (path 0a) <nil> (JSON-RPC code -32000)",
+      "old data not available due to pruning (JSON-RPC code -32000)",
+      `No state available for block 100000 (${hashOf(6n)}) (JSON-RPC code -32002)`,
+      "state at block #100000 is pruned (JSON-RPC code -32000)",
+    ];
+    const gone = await Promise.all(pruned.flatMap((reason) => [read(reason, "row"), read(reason, "epoch")]));
+    gone.forEach((got) => expect(got).toEqual(ok("pruned")));
+    const faults = [
+      "header for hash not found", "header not found", "hash is not currently canonical", "block not found: 0x186a0",
+      `hash ${hashOf(6n)} is not currently canonical`, "block 100000 is not executed (last executed: 99000)",
+      `${hashOf(6n)} block is not canonical`, `block not found: hash ${hashOf(6n)}`, "Invalid input", "Internal error",
+      "not supported", "state histories haven't been fully indexed yet", "state histories are not available",
+      `state ${hashOf(6n)} is not available`, "connection refused", "execution timeout",
+    ].map((reason) => `${reason} (JSON-RPC code -32000)`);
+    const failed = await Promise.all(faults.flatMap((reason) => [read(reason, "row"), read(reason, "epoch")]));
+    failed.forEach((got) => expect(got).toMatchObject({ ok: false, error: { _tag: "port", call: "account at" } }));
+  });
+
+  test("R-WATCH-WINDOW a node that answers null for a state it lacks is a fault, never a zero Account", async () => {
+    const got = await portOf({ eth_call: () => ok(null) }).accountAt(hashOf(6n), LEFT, RIGHT);
+    expect(got).toMatchObject({ ok: false, error: { _tag: "port", call: "account at" } });
   });
 
   test("R-WATCH-TELL an empty row, an epoch that is not one word, or a node that fails is a named fault", async () => {

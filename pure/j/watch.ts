@@ -19,7 +19,7 @@ import {
   decodeLogs, type Address, type Bytes32, type ChainEvent, type Deployed, type LogFault, type RawLog,
 } from "./log.ts";
 import {
-  accountOf, beginsAt, hostsAny, observe, readingsOf, type Accounts, type Addressed, type JEvent, type ObserveFault,
+  hostsAny, observe, readingsOf, type Accounts, type Addressed, type Beyond, type JEvent, type ObserveFault,
   type Reading,
 } from "./observe.ts";
 
@@ -103,13 +103,18 @@ export const prepare = (w: Watch, batch: Batch): Result<Prepared, WatchFault> =>
         map(decodeLogs(w.deployed, batch.logs), (events) => ({ last, events })))));
 
 /**
- * The transactions whose input the Host must read: the ones that carried a dispute start (its body) or a dispute
- * finalize (its arguments) of an Account a hosted Entity is a party to, R-WATCH-CALLDATA. A stranger's dispute is not
- * read: the node asks the chain for nothing a stranger can make it ask for.
+ * Whether an event needs the bytes of its transaction: a dispute finalize of an Account a hosted Entity is a party to
+ * (its arguments), or a dispute start against one (its body: a start of the Entity's own needs none, it made the
+ * body), R-WATCH-CALLDATA. A stranger's dispute is not read: the node asks the chain for nothing a stranger can make
+ * it ask for.
  */
+export const needsBytes = (e: ChainEvent, hosted: readonly Bytes32[]): boolean =>
+  (e._tag === "dispute_finalized" && hostsAny(hosted, e))
+  || (e._tag === "dispute_started" && hostsAny(hosted, e) && !hosted.includes(e.sender));
+
+/** The transactions whose input the Host must read. */
 export const calldataWanted = (p: Prepared, hosted: readonly Bytes32[]): readonly Bytes32[] =>
-  [...new Set(p.events.flatMap((e) =>
-    ((e._tag === "dispute_finalized" || e._tag === "dispute_started") && hostsAny(hosted, e) ? [e.tx] : [])))];
+  [...new Set(p.events.flatMap((e) => (needsBytes(e, hosted) && "tx" in e ? [e.tx] : [])))];
 
 /**
  * The prepared batch with the arguments of its finalizes read from the bytes that carried them, by transaction hash:
@@ -139,34 +144,26 @@ export const withCalldata = (p: Prepared, inputs: ReadonlyMap<Bytes32, readonly 
 export const unreadTxs = (p: Prepared, hosted: readonly Bytes32[]): readonly Bytes32[] => {
   const unread = (e: ChainEvent): boolean =>
     ((e._tag === "dispute_finalized" && e.shown._tag === "unread")
-      || (e._tag === "dispute_started" && e.body === undefined)) && hostsAny(hosted, e);
+      || (e._tag === "dispute_started" && e.body === undefined)) && needsBytes(e, hosted);
   return [...new Set(p.events.filter(unread).flatMap((e) => ("tx" in e ? [e.tx] : [])))];
 };
 
 /** The events of a batch that are told now, and the ones held back, both in the chain's order. */
 export type Split = Readonly<{ ready: readonly ChainEvent[]; held: readonly ChainEvent[] }>;
 
-type Position = Readonly<{ block: bigint; index: bigint }>;
-
-const earlier = (a: Position, b: Position): boolean => a.block < b.block || (a.block === b.block && a.index < b.index);
-
 /**
- * R-WATCH-STALL: what a transaction the Host cannot read yet holds back: the events of its own Accounts, from its first
- * event of them on (the chain's order within an Account is kept: a later event of it never reaches the Entity ahead of
- * an earlier one), and nothing of any other Account, nor a revealed secret, which is about none. The epoch advance a
- * finalize made counts as the finalize's own (`beginsAt`), so the secrets it showed come before the dissolve of the
- * holds that advance causes.
+ * R-WATCH-STALL: what a dispute finalize the Host cannot read yet holds back: the finalize itself, which tells the
+ * secrets it showed and then that the dispute is over, and nothing else. The epoch advance it made is told at once, in
+ * its place among the Account's events (a rebase of the Account; a dispute started in the epoch after must find the
+ * Entity in that epoch, or it is dropped), and so is every other event of every Account and every revealed secret.
+ * What the finalize's arrival does to the Entity is the dissolve of the Account's holds and the failure of the locks it
+ * forwarded to that peer (`finalized`), which a secret in the finalize's arguments must precede (R-HOLD-DISSOLVE): that
+ * alone waits, told `late` when it comes, so it leaves what happened in the epoch after it alone. `awaited` says which
+ * events wait for bytes. A dispute start never holds anything back: its secrets and its window are in its log, only its
+ * body comes from the bytes, and the Entity must hear a dispute against it in time.
  */
-export const splitStalled = (events: readonly ChainEvent[], stalled: ReadonlySet<Bytes32>): Split => {
-  const begun = events.flatMap((e): readonly (readonly [string, Position])[] => {
-    const account = accountOf(e);
-    const reads = e._tag === "dispute_started" || e._tag === "dispute_finalized";
-    return account !== undefined && reads && stalled.has(e.tx) ? [[account, beginsAt(events, e)]] : [];
-  });
-  const held = (e: ChainEvent): boolean => {
-    const account = accountOf(e);
-    return begun.some(([key, at]) => key === account && !earlier(e, at));
-  };
+export const splitStalled = (events: readonly ChainEvent[], awaited: (e: ChainEvent) => boolean): Split => {
+  const held = (e: ChainEvent): boolean => e._tag === "dispute_finalized" && awaited(e);
   return { ready: events.filter((e) => !held(e)), held: events.filter(held) };
 };
 
@@ -201,12 +198,14 @@ export type Step = Readonly<{ watch: Watch; height: JHeight; events: readonly Ad
 /**
  * Deliver a prepared batch: the J events of its logs for the hosted Entities, in the chain's order, then the windows
  * the batch's last block has passed, and the height they end at. The new cursor is the batch's last block; an empty
- * batch is the cursor itself and announces its height again.
+ * batch is the cursor itself and announces its height again. `beyond` is what the delivery knows past its own
+ * events (j/observe.ts).
  */
 export const advance = (
   w: Watch, p: Prepared, hosted: readonly Bytes32[], accounts: Accounts, windows: readonly Window[] = [],
+  beyond: Partial<Beyond> = {},
 ): Result<Step, WatchFault> =>
-  flatMap(observe(p.events, hosted, accounts), (events) =>
+  flatMap(observe(p.events, hosted, accounts, beyond), (events) =>
     map(jHeight(p.last.number), (height) => ({
       watch: { ...w, applied: p.last }, height,
       events: [...events, ...passed(p.last.timestamp, hosted, windows, events)],

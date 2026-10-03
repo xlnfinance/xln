@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import type { FinalDisputeProof } from "../../chain/batch/batch.ts";
 import { wordAt } from "../../kernel/encoding/abi-read.ts";
 import { bytesToHex, hexToBytes } from "../../kernel/encoding/bytes.ts";
-import { finalizedSecrets, finalizesIn, secretsIn, startedBody, startedSecrets } from "./decode.ts";
+import { finalizedSecrets, finalizesIn, readOf, secretsIn, startedBody, startedSecrets } from "./decode.ts";
 import { proofBodyHash } from "../../chain/proof/proof.ts";
 import {
   argumentListOf, argumentsOf, argumentTupleOf, CLAUSED, direct, entityOf, evidenceOf, finalizeInput, finalizeOp, hexOf,
@@ -256,6 +256,23 @@ describe("j/calldata", () => {
     expect(read.calls).toEqual([]);
     expect(finalizesIn(read)).toEqual([]);
     expect(finalizedSecrets(read, evidenceOf(real))).toBeUndefined();
+  });
+
+  test("R-WATCH-CALLDATA a megabyte of the selector at every offset, or of its first byte, is read once", () => {
+    const selector = bytesOf(DEPOSITORY_ABI.getFunction("processBatch")?.selector ?? "0x");
+    const floods = [
+      Uint8Array.from({ length: 1024 * 1024 }, (_, i) => selector[i % 4] ?? 0),
+      Uint8Array.from({ length: 1024 * 1024 }, () => selector[0] ?? 0),
+    ];
+    floods.forEach((data) => {
+      const begun = performance.now();
+      const read = readOf({ data, route: "wrapper" });
+      expect(finalizedSecrets(read, entityOf(1n))).toBeUndefined();
+      expect(performance.now() - begun).toBeLessThan(2000);
+      const again = performance.now();
+      expect(finalizedSecrets(read, entityOf(1n))).toBeUndefined();
+      expect(performance.now() - again).toBeLessThan(200);
+    });
   });
 
   test("R-WATCH-CALLDATA a tower call a wrapper carries is read though its input runs on past 256 KiB", () => {

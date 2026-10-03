@@ -36,7 +36,7 @@ export type JEvent =
   >
   | Tagged<"j_countered", { peer: Bytes32; nonce: bigint; proposerIsLeft: boolean; bodyHash: Bytes32 }>
   | Tagged<"j_window_over", { peer: Bytes32 }>
-  | Tagged<"j_dispute_over", { peer: Bytes32 }>
+  | Tagged<"j_dispute_over", { peer: Bytes32; late?: boolean }>
   | Tagged<"j_collateral", { peer: Bytes32; token: TokenId; collateral: bigint; ondelta: bigint }>
   | Tagged<"j_finalize_unread", { peer: Bytes32; tx: Bytes32 }>
   | Tagged<"j_start_unread", { peer: Bytes32; tx: Bytes32 }>;
@@ -98,9 +98,6 @@ export const hostsAny = (hosted: readonly Bytes32[], e: Bound): boolean => parti
 
 const isBound = (e: ChainEvent): e is Bound => e._tag !== "secret_revealed";
 
-/** The Account an event is about, as one key, or nothing for a revealed secret, which is about none. */
-export const accountOf = (e: ChainEvent): string | undefined => (isBound(e) ? partiesOf(e).join(":") : undefined);
-
 /** The party of an event's Account that is not `self`, or nothing when `self` is no party or the event has none. */
 export const peerOfEvent = (self: Bytes32, e: ChainEvent): Bytes32 | undefined => {
   if (!isBound(e)) return undefined;
@@ -142,17 +139,6 @@ const finalOf = (events: readonly ChainEvent[], e: Moved): Finalized | undefined
   return next?._tag === "dispute_finalized" ? next : undefined;
 };
 
-/**
- * Where an event begins for the purposes of holding it back: a finalize begins at the epoch advance it made, whose
- * dissolve of the Account's holds must never reach the Entity before the secrets the finalize showed (R-HOLD-DISSOLVE).
- */
-export const beginsAt = (events: readonly ChainEvent[], e: ChainEvent): Readonly<{ block: bigint; index: bigint }> => {
-  const made = e._tag === "dispute_finalized"
-    ? events.filter((o): o is Moved => o._tag === "epoch_advanced" && finalOf(events, o) === e)
-    : [];
-  return made.reduce((first, o) => (o.index < first.index ? o : first), e);
-};
-
 const finalBodyOf = (events: readonly ChainEvent[], e: Moved): Bytes32 | undefined => finalOf(events, e)?.bodyHash;
 
 const epochMoved = (events: readonly ChainEvent[], e: Moved, peer: Bytes32, at: AccountAt | undefined): Told => {
@@ -182,15 +168,18 @@ const disputeStarted = (
   return ok(e.unread && e.sender !== self ? [started, { _tag: "j_start_unread", peer, tx: e.tx }] : [started]);
 };
 
-/** The dispute is over; and a finalize whose arguments the Host could not read says so (R-WATCH-CALLDATA). */
-const finalizedTold = (e: Finalized, peer: Bytes32): readonly JEvent[] => {
-  const over: JEvent = { _tag: "j_dispute_over", peer };
+/**
+ * The dispute is over; and a finalize whose arguments the Host could not read says so (R-WATCH-CALLDATA). A `late`
+ * one was held back for its arguments, so the Entity has heard what came after it already (R-WATCH-STALL).
+ */
+const finalizedTold = (e: Finalized, peer: Bytes32, late: ReadonlySet<ChainEvent>): readonly JEvent[] => {
+  const over: JEvent = late.has(e) ? { _tag: "j_dispute_over", peer, late: true } : { _tag: "j_dispute_over", peer };
   return e.shown._tag === "unread" ? [over, { _tag: "j_finalize_unread", peer, tx: e.tx }] : [over];
 };
 
 /** What one event is to one hosted Entity that is a party to it, or nothing. */
 const eventFor = (
-  events: readonly ChainEvent[], e: Bound, self: Bytes32, at: AccountAt | undefined,
+  { context: events, late }: Beyond, e: Bound, self: Bytes32, at: AccountAt | undefined,
 ): Told => {
   const peer = peerOf(self, partiesOf(e));
   switch (e._tag) {
@@ -200,7 +189,7 @@ const eventFor = (
       return ok([
         { _tag: "j_countered", peer, nonce: e.nonce, proposerIsLeft: e.proposerIsLeft, bodyHash: e.bodyHash },
       ]);
-    case "dispute_finalized": return ok(finalizedTold(e, peer));
+    case "dispute_finalized": return ok(finalizedTold(e, peer, late));
     case "account_settled": return ok(e.holdings.map((h): JEvent => ({ _tag: "j_collateral", peer, ...h })));
   }
 };
@@ -214,18 +203,27 @@ const shownBy = (f: Finalized | undefined): readonly Bytes32[] => (f?.shown._tag
 
 /**
  * The secrets an event shows in dispute arguments, which no `SecretRevealed` carries (R-WATCH-CALLDATA): a start's two
- * blobs, and a finalize's. A finalize's are told ahead of the epoch advance the finalize made, so they come before the
- * dissolve of the holds that advance causes (R-HOLD-DISSOLVE); a finalize no advance goes with tells its own.
+ * blobs, and a finalize's. A finalize's are told ahead of the epoch advance the finalize made when that advance is in
+ * the delivery, and ahead of the finalize itself when it is not (a finalize held back for its arguments comes after
+ * its advance): either way before its `j_dispute_over`, the dissolve of the holds, so a lock this Entity forwarded is
+ * claimed upstream before it is failed (R-HOLD-DISSOLVE).
  */
-const secretsAt = (events: readonly ChainEvent[], e: ChainEvent): readonly Bytes32[] => {
+const secretsAt = (told: readonly ChainEvent[], { context }: Beyond, e: ChainEvent): readonly Bytes32[] => {
+  const made = (o: ChainEvent) => o._tag === "epoch_advanced" && finalOf(context, o) === e;
   switch (e._tag) {
     case "dispute_started": return e.secrets;
-    case "epoch_advanced": return shownBy(finalOf(events, e));
-    case "dispute_finalized":
-      return events.some((o) => o._tag === "epoch_advanced" && finalOf(events, o) === e) ? [] : shownBy(e);
+    case "epoch_advanced": return shownBy(finalOf(context, e));
+    case "dispute_finalized": return told.some(made) ? [] : shownBy(e);
     default: return [];
   }
 };
+
+/**
+ * What a delivery knows beyond its own events: `context`, every event of the blocks it reads, the ones held back
+ * included (a reading is of the end of a block, so an epoch is told less the advances logged after it, held or not),
+ * and the `late` events, the finalizes held back for their arguments and told after the events that came behind them.
+ */
+export type Beyond = Readonly<{ context: readonly ChainEvent[]; late: ReadonlySet<ChainEvent> }>;
 
 /**
  * The J events of a delivery for the hosted Entities, in the chain's order: block, then log index, then Left before
@@ -233,17 +231,18 @@ const secretsAt = (events: readonly ChainEvent[], e: ChainEvent): readonly Bytes
  * is about none, and every hosted Entity hears it, as it hears the secrets dispute arguments show.
  */
 export const observe = (
-  events: readonly ChainEvent[], hosted: readonly Bytes32[], accounts: Accounts,
+  events: readonly ChainEvent[], hosted: readonly Bytes32[], accounts: Accounts, beyond: Partial<Beyond> = {},
 ): Result<readonly Addressed[], ObserveFault> => {
+  const known: Beyond = { context: events, late: new Set(), ...beyond };
   const told = ({ e, to }: Hearer): Result<readonly Addressed[], ObserveFault> =>
     (isBound(e)
-      ? map(eventFor(events, e, to, accounts.get(readingKey(readingOf(e)))),
+      ? map(eventFor(known, e, to, accounts.get(readingKey(readingOf(e)))),
         (found) => found.map((event): Addressed => ({ to, event })))
       : ok([{ to, event: { _tag: "j_secret", secret: e.secret, at: e.block } }]));
   const hear = (secret: Bytes32, at: bigint): readonly Addressed[] =>
     hosted.map((to): Addressed => ({ to, event: { _tag: "j_secret", secret, at } }));
   const shown = (e: ChainEvent): readonly Addressed[] =>
-    secretsAt(events, e).flatMap((secret) => hear(secret, e.block));
+    secretsAt(events, known, e).flatMap((secret) => hear(secret, e.block));
   return map(
     traverse(events, (e) => map(traverse(hearersOf(e, hosted), told), (all) => [...shown(e), ...all.flat()])),
     (all) => all.flat(),

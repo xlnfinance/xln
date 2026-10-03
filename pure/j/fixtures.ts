@@ -4,7 +4,9 @@
 import { readFileSync } from "node:fs";
 import { AbiCoder, Interface } from "ethers";
 import { expect } from "bun:test";
-import { DeltaTransformer__factory } from "../../contracts/typechain-types/factories/DeltaTransformer.sol/DeltaTransformer__factory.ts";
+import {
+  DeltaTransformer__factory,
+} from "../../contracts/typechain-types/factories/DeltaTransformer.sol/DeltaTransformer__factory.ts";
 import { Depository__factory } from "../../contracts/typechain-types/factories/Depository.sol/Depository__factory.ts";
 import { unwrapOr, type Result } from "../kernel/core/result.ts";
 import { emptyBatch, encodeBatch, type FinalDisputeProof, type InitialDisputeProof } from "../chain/batch/batch.ts";
@@ -155,7 +157,7 @@ export const bigStart = (peer: string, nonce: bigint, kib: number): JOp => {
 
 export const DEPOSITORY_ABI = new Interface(Depository__factory.abi);
 
-export const TRANSFORMER_ABI = new Interface(DeltaTransformer__factory.abi);
+const TRANSFORMER_ABI = new Interface(DeltaTransformer__factory.abi);
 
 /** A `SecretRevealed` log the DeltaTransformer emits, as its own ABI encodes it (a reveal made by anyone, any way). */
 export const transformerLogOf = (

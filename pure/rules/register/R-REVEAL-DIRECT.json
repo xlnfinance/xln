@@ -1,0 +1,39 @@
+{
+ "id": "R-REVEAL-DIRECT",
+ "statement": "A secret the DeltaTransformer logs (`SecretRevealed(hashlock indexed, secret)`, emitted by `revealSecret`, which anyone may call, with no Depository log and no dispute) is a chain fact exactly as the Depository's is: the watcher decodes the transformer's log (an address of the deployment's `Deployed` event), tells every hosted Entity `j_secret` with the block it was shown in, and an Entity that forwarded a lock under that hashlock claims upstream at depth. The log of any other address stays foreign, and a log of the transformer that is not its reveal or not shaped as one is a fault.",
+ "source": "coordinator relay 10-03 01:55 (reveal PR: watch DeltaTransformer SecretRevealed at depth); builder; consolidation-plan.md D9",
+ "layers": {
+  "arrival": "n/a: the Arrival specs take J events as given",
+  "quint": "n/a: the Quint model takes a revealed secret as a J event, whichever contract logged it",
+  "contract": "n/a: the contract is pinned; the node reads what DeltaTransformer.revealSecret already logs",
+  "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
+  "ts": "hold"
+ },
+ "killers": [
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-REVEAL-DIRECT a secret shown with no dispute at all is passed up: the hub claims the lock"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-REVEAL-DIRECT a secret shown to the transformer alone reaches the Entity with its block"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-REVEAL-DIRECT the transformer's own reveal, by anyone, is a shown secret with no revealer"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-REVEAL-DIRECT a log of the transformer that is not its reveal, or not shaped as one, is a fault"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-REVEAL-DIRECT a log from an address that is neither the Depository nor the transformer is foreign"
+  }
+ ]
+}

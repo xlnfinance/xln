@@ -7,7 +7,8 @@ import {
   bytes32, address, decodeLog, decodeLogs, IGNORED, READ_SIGNATURES, topicOf, type ChainEvent, type RawLog,
 } from "./log.ts";
 import {
-  bodyHashOf, DEPLOYED, DEPOSITORY, DEPOSITORY_ABI, entityOf, hashOf, hexOf, lifecyclePhases, logOf, must, transformerLogOf, txOf,
+  bodyHashOf, DEPLOYED, DEPOSITORY, DEPOSITORY_ABI, entityOf, hashOf, hexOf, lifecyclePhases, logOf, must,
+  transformerLogOf, txOf,
 } from "./fixtures.ts";
 
 const LEFT = entityOf(0x11n);
@@ -154,7 +155,8 @@ describe("j/log", () => {
     const topic = log.topics[0] ?? "";
     expect(decodeLog(DEPLOYED, { ...log, topics: [must(bytes32(hexOf(9n))), ...log.topics.slice(1)] }))
       .toEqual(err({ _tag: "unknown_event", ...at, topic: hexOf(9n) }));
-    [{ ...log, topics: log.topics.slice(0, 1) }, { ...log, data: "0x" }, { ...log, data: `${log.data}${"00".repeat(32)}` }]
+    const padded = `${log.data}${"00".repeat(32)}`;
+    [{ ...log, topics: log.topics.slice(0, 1) }, { ...log, data: "0x" }, { ...log, data: padded }]
       .forEach((broken) => expect(decodeLog(DEPLOYED, broken)).toEqual(err({ _tag: "bad_log", ...at, event: topic })));
   });
 
