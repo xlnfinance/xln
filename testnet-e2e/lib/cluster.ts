@@ -79,7 +79,9 @@ export class Cluster {
     const { party, peers } = slot.member;
     const rig = await rigOf(this.chain, party, slot.entity, this.setup, slot.dir, slot.from);
     const depository = must(address(this.chain.manifest.contracts.depository.address.toLowerCase()), "depository address");
-    const watch = { port: watchPort(httpRpc(this.chain.rpc), depository), depository, depth: DEPTH, hosted: must(bytes32(slot.entity), "entity id") };
+    const transformer = must(address(this.chain.manifest.contracts.deltaTransformer.address.toLowerCase()), "transformer address");
+    const deployed = { depository, transformer };
+    const watch = { port: watchPort(httpRpc(this.chain.rpc), deployed), deployed, depth: DEPTH, hosted: must(bytes32(slot.entity), "entity id"), value: true };
     const config: Config = { shell: rig.shell, boot: rig.boot, key: rig.key, table: peers.map((p) => this.peerOf(p)), tickMs: TICK_MS, nonce, lost: (m) => this.loss(m), watch };
     slot.rig = rig;
     slot.daemon = must(await startDaemon(config, listener), `${party.name}'s node`);

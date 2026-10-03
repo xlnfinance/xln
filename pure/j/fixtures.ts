@@ -4,17 +4,21 @@
 import { readFileSync } from "node:fs";
 import { AbiCoder, Interface } from "ethers";
 import { expect } from "bun:test";
+import {
+  DeltaTransformer__factory,
+} from "../../contracts/typechain-types/factories/DeltaTransformer.sol/DeltaTransformer__factory.ts";
 import { Depository__factory } from "../../contracts/typechain-types/factories/Depository.sol/Depository__factory.ts";
 import { unwrapOr, type Result } from "../kernel/core/result.ts";
 import { emptyBatch, encodeBatch, type FinalDisputeProof, type InitialDisputeProof } from "../chain/batch/batch.ts";
+import { readOf, type Read } from "./calldata/decode.ts";
 import { finalizationEvidenceHash } from "../chain/proof/dispute.ts";
 import { proofBodyHash, type ProofBody } from "../chain/proof/proof.ts";
-import { hexToBytes } from "../kernel/encoding/bytes.ts";
+import { bytesToHex, hexToBytes } from "../kernel/encoding/bytes.ts";
 import type { SettlementDiff } from "../chain/money.ts";
 import { seal, type JBatch, type SealContext, type SealOutcome } from "./batch/jbatch.ts";
 import type { SealedBatch } from "./batch/sealed.ts";
 import type { Gas, Simulation } from "./gas/simulate.ts";
-import { address, bytes32, type Address, type Bytes32, type RawLog } from "./log.ts";
+import { address, bytes32, type Address, type Bytes32, type Deployed, type RawLog } from "./log.ts";
 import type { JOp } from "./op/ops.ts";
 import type { Treasury } from "./plan/funded.ts";
 import type { Block } from "./watch.ts";
@@ -153,6 +157,20 @@ export const bigStart = (peer: string, nonce: bigint, kib: number): JOp => {
 
 export const DEPOSITORY_ABI = new Interface(Depository__factory.abi);
 
+const TRANSFORMER_ABI = new Interface(DeltaTransformer__factory.abi);
+
+/** A `SecretRevealed` log the DeltaTransformer emits, as its own ABI encodes it (a reveal made by anyone, any way). */
+export const transformerLogOf = (
+  hashlock: string, secret: string, block: bigint, index: bigint, fork = 0n, tx: Bytes32 = txOf(block, index),
+): RawLog => {
+  const fragment = TRANSFORMER_ABI.getEvent("SecretRevealed") ?? expect.unreachable("no SecretRevealed on it");
+  const { data, topics } = TRANSFORMER_ABI.encodeEventLog(fragment, [hashlock, secret]);
+  return {
+    address: TRANSFORMER, block, index, blockHash: hashOf(block, fork), data: data.toLowerCase(), tx,
+    topics: topics.map((topic) => must(bytes32(topic.toLowerCase()))),
+  };
+};
+
 /** Lowercase hex of a number, padded to `bytes` bytes. */
 export const hexOf = (n: bigint, bytes = 32): string => `0x${n.toString(16).padStart(bytes * 2, "0")}`;
 
@@ -165,6 +183,11 @@ export const entityOf = (n: bigint): Bytes32 => must(bytes32(hexOf(n)));
 export const bodyHashOf = (n: bigint): Bytes32 => must(bytes32(hexOf(n)));
 
 export const DEPOSITORY: Address = must(address(hexOf(0xde0n, 20)));
+
+/** The DeltaTransformer the fixtures read logs of, next to the Depository. */
+export const TRANSFORMER: Address = must(address(hexOf(0xde1n, 20)));
+
+export const DEPLOYED: Deployed = { depository: DEPOSITORY, transformer: TRANSFORMER };
 
 /** A block hash that names its height and the fork it is on, so two forks never share one. */
 export const hashOf = (number: bigint, fork = 0n): Bytes32 => must(bytes32(hexOf(number + (fork << 128n))));
@@ -251,6 +274,22 @@ export const finalizeInput = (sender: Bytes32, ops: readonly FinalDisputeProof[]
   const batch = must(encodeBatch({ ...emptyBatch(1_000_000n), disputeFinalizations: ops }));
   return must(hexToBytes(DEPOSITORY_ABI.encodeFunctionData("processBatch", [sender, batch, "0x1234", 3n])));
 };
+
+/** An input as the transaction's own, to the Depository: its call is read exactly. */
+export const direct = (data: Uint8Array): Read => readOf({ data, route: "direct" });
+
+/** An input of a transaction to another contract: a call in it is found by a scan. */
+export const inWrapper = (data: Uint8Array): Read => readOf({ data, route: "wrapper" });
+
+const RELAY_ABI = new Interface(["function execute(address target, bytes data)", "function multicall(bytes[] calls)"]);
+
+/** The input of a relay contract's `execute(target, data)` that passes `call` on to the Depository: a wrapped call. */
+export const relayed = (call: Uint8Array): Uint8Array =>
+  must(hexToBytes(RELAY_ABI.encodeFunctionData("execute", [DEPOSITORY, bytesToHex(call)])));
+
+/** The input of a `multicall(bytes[])` whose entries are these calls, the Depository's among them. */
+export const multicalled = (calls: readonly Uint8Array[]): Uint8Array =>
+  must(hexToBytes(RELAY_ABI.encodeFunctionData("multicall", [calls.map((call) => bytesToHex(call))])));
 
 /** A body with a negative offdelta, two tokens and a clause with allowances: every shape the decoder must read. */
 export const CLAUSED: ProofBody = {

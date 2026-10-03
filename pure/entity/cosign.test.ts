@@ -15,7 +15,9 @@ const ALICE = entityOf(1);
 const BOB = entityOf(2);
 const CAROL = entityOf(3);
 const SILVER = tokenOf(2n);
-const UNFROZEN_LEFT: Standing = { self: "left", frozen: false };
+const UNFROZEN_LEFT: Standing = {
+  self: "left", frozen: false, unruled: new Set(), blind: false, shown: new Map(),
+};
 
 const run = (state: EntityState, ...inputs: readonly EntityInput[]) => entityFrame(judge, anchor, state, inputs);
 

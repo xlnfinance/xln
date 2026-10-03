@@ -12,11 +12,47 @@ import type { AccountTx } from "../../account/tx.ts";
 import type { Of } from "../../kernel/core/tagged.ts";
 import { traverse } from "../../kernel/core/result.ts";
 import {
-  entityId, sideOf, type AccountCommand, type Entry, type EntityId, type EntityState, type Paybook,
+  entityId, sideOf, type AccountCommand, type ChainFacts, type Entry, type EntityId, type EntityState, type Paybook,
 } from "../model.ts";
 
 /** A hop's deadline is earlier than the hop before it by what its payee needs to learn the secret and pass it on. */
 export const hopOf = (clock: ClockParams): bigint => clock.reserve + clock.lag;
+
+/**
+ * R-WATCH-STALL: for each peer the Entity forwarded a lock to, the last view at which hearing a secret that a dispute
+ * transaction of that Account showed still lets the Entity claim upstream. Its inbound hold must be live for the
+ * view of its upstream peer, which is at most `lag` ahead of its own, so a secret heard by view `deadline - lag` is
+ * resolved up in time and a later one is not. The latest over the Entity's outstanding forwards to the peer: a secret
+ * in a dispute transaction may pay any clause of the Account, so it is useful while it is useful for any lock of it
+ * (the least gave up a long lock's secret for a short one's deadline); a peer none is outstanding to is not in the map.
+ * (The onward deadline, which the chain counts a reveal until, is a hop earlier than the inbound one, so this is the
+ * later bound and the safer: a secret never costs by waiting for it.)
+ */
+export const lastHeard = (state: EntityState, clock: ClockParams): ReadonlyMap<EntityId, bigint> =>
+  [...state.paybook].reduce<ReadonlyMap<EntityId, bigint>>((last, [hashlock, entry]) => {
+    const inbound = entry._tag === "locked" ? clauseIn(state, entry.from, hashlock) : undefined;
+    if (entry._tag !== "locked" || inbound === undefined) return last;
+    const at = inbound.hold.deadline - clock.lag;
+    const latest = last.get(entry.to);
+    return latest !== undefined && latest >= at ? last : mapSet(last, entry.to, at);
+  }, new Map());
+
+/**
+ * What the J loop waits on the Entity for: where hearing a secret stops paying (`lastHeard`), who is behind (events
+ * the Host holds), and whose past the Host can no longer read (`lost`, never read nor told again).
+ */
+export type Waits = Readonly<{
+  lastHeard: ReadonlyMap<EntityId, bigint>; behind: ReadonlySet<EntityId>; lost: ReadonlySet<EntityId>;
+}>;
+
+export const waitsOf = (state: EntityState, clock: ClockParams): Waits => ({
+  lastHeard: lastHeard(state, clock),
+  behind: heldPeers(state, (facts) => facts.behind !== undefined && !facts.lost),
+  lost: heldPeers(state, (facts) => facts.lost),
+});
+
+const heldPeers = (state: EntityState, is: (facts: ChainFacts) => boolean): ReadonlySet<EntityId> =>
+  new Set([...state.chain].flatMap(([peer, facts]) => (is(facts) ? [peer] : [])));
 
 /** One step the paybook asks of an Account's door, and the entry that stands after it is admitted or refused. */
 export type Intent = Readonly<{
@@ -63,6 +99,18 @@ const nextDeadline = (clock: ClockParams, view: JView, hold: Hold): JHeight | un
   return sooner.ok && sooner.value > view ? sooner.value : undefined;
 };
 
+/** Whether the Host still owes the Entity events of its Account with `peer` (R-WATCH-STALL). */
+const behind = (state: EntityState, peer: EntityId): boolean => state.chain.get(peer)?.behind !== undefined;
+
+/**
+ * The hashlocks whose secret the Entity cannot rule out having reached the chain unseen: the lock it forwarded sits on
+ * an Account the Host owes events of, so a secret in a finalize it has not read may already have paid the next hop. An
+ * expiry of the inbound hold of such a hash is never co-signed: it would give back to the payer what the chain paid on.
+ */
+export const unruled = (state: EntityState): ReadonlySet<string> =>
+  new Set([...state.paybook].flatMap(([hashlock, entry]) =>
+    (entry._tag === "locked" && behind(state, entry.to) ? [hashlock] : [])));
+
 /** A forward whose lock is in: the same amount and hashlock on the next hop, one hop sooner, or the lock given up. */
 type Forward = Of<Entry, "forward">;
 type Receive = Of<Entry, "receive">;
@@ -73,7 +121,9 @@ const forwardOf = (
   const c = incoming(state, e.from, hashlock);
   if (c === undefined) return undefined;
   const deadline = nextDeadline(clock, view, c.hold);
-  if (deadline === undefined || !state.accounts.has(e.to) || e.to === e.from) return cancelUp(e.from, hashlock, c);
+  if (state.blind || behind(state, e.to) || deadline === undefined || !state.accounts.has(e.to) || e.to === e.from) {
+    return cancelUp(e.from, hashlock, c);
+  }
   const id = freeSlot(state, e.to);
   const hold: Hold = { id, payer: sideOf(state.id, e.to), amount: c.hold.amount, hashlock, deadline };
   return {

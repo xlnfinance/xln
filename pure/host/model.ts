@@ -21,10 +21,18 @@ export type Item = Readonly<{ to: EntityId; input: EntityInput }>;
 /** `perPeer` bounds the queued messages of one sender, `perFrame` the inputs one frame takes. Both mean loss. */
 export type Limits = Readonly<{ perPeer: number; perFrame: number }>;
 
-/** A message the Host turned away before it reached a frame. */
+/**
+ * A message the Host turned away before it reached a frame, and a transaction the J loop cannot read: `watch_stalled`
+ * names the transaction the node's provider fails, whose finalize the J loop holds back (every other event is told),
+ * once when the stall begins; past its retries the loop tells it unread (R-WATCH-CALLDATA). `no_call_trace` says the
+ * provider of a node that may hold value does not trace calls (a probe or a transaction's trace answered no method),
+ * so its Entity forwards no lock: once for each time the node goes blind.
+ */
 export type HostNotice =
   | Tagged<"misrouted", { to: EntityId; from: EntityId }>
-  | Tagged<"queue_full", { from: EntityId }>;
+  | Tagged<"queue_full", { from: EntityId }>
+  | Tagged<"watch_stalled", { tx: string; reason: string }>
+  | Tagged<"no_call_trace", { why: string }>;
 
 /** Which chain action of which committed row an effect came from: the WAL height and the place in the row's `chain`. */
 export type RowId = Readonly<{ height: bigint; index: number }>;

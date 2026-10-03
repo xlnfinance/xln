@@ -4,7 +4,7 @@ import { expect } from "bun:test";
 import { appendFileSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { verifyHankoSignature } from "../../../chain/hanko/hanko-verify.ts";
-import { type EntityId, emptyEntity } from "../../../entity/model.ts";
+import { type EntityId, type EntityState, emptyEntity } from "../../../entity/model.ts";
 import type { Check } from "../../../entity/signing/attest.ts";
 import type { JAnswer } from "../../../j/batch/answer.ts";
 import { err, ok, unwrapOr, type Result } from "../../../kernel/core/result.ts";
@@ -98,15 +98,18 @@ const keep = (): boolean => false;
 
 export type Options = Readonly<{
   tickMs: number; lost?: Config["lost"]; chain?: ChainPort; wrap?: (wal: Disk) => Disk; watch?: WatchConfig;
-  /** The clock's lag and read depth in J heights, where a test wants others than the scene's. */
+  /** The Entity the node starts from, where a test wants one that holds more than the empty Entity. */
+  genesis?: EntityState;
+  /** The clock's lag, reserve and read depth in J heights, where a test wants others than the scene's. */
   lag?: bigint;
+  reserve?: bigint;
   depth?: bigint;
 }>;
 
 /** What a node for `seat` is started with, its files in the seat's directory. */
 export const configOf = async (seat: Seat, other: Seat | undefined, options: Options): Promise<Config> => {
-  const { tickMs, lost = keep, chain = port, wrap = (disk) => disk, watch } = options;
-  const { lag = setup.clock.lag, depth = setup.clock.depth } = options;
+  const { tickMs, lost = keep, chain = port, wrap = (disk) => disk, watch, genesis } = options;
+  const { lag = setup.clock.lag, reserve = setup.clock.reserve, depth = setup.clock.depth } = options;
   const wal = wrap(must(await fileDisk(`${seat.dir}/wal.log`)));
   const journal = must(await fileDisk(`${seat.dir}/journal.log`));
   const key = keyOfEntity(seat.entity);
@@ -116,7 +119,7 @@ export const configOf = async (seat: Seat, other: Seat | undefined, options: Opt
       now: () => stamp(BigInt(Date.now())),
     },
     boot: {
-      setup: { ...setup, clock: { ...setup.clock, lag, depth } }, genesis: emptyEntity(seat.entity),
+      setup: { ...setup, clock: { ...setup.clock, lag, reserve, depth } }, genesis: genesis ?? emptyEntity(seat.entity),
       where: { entity: seat.entity, deployment: DEPLOYED, world: WORLD },
       limits: unwrapOr(limits(32, 8), () => expect.unreachable("limits")),
     },

@@ -1,14 +1,14 @@
 import { describe, expect, test } from "bun:test";
 import { err, unwrapOr, type Result } from "../kernel/core/result.ts";
 import { draw } from "../account/fixtures.ts";
-import type { RawLog } from "./log.ts";
+import { decodeLogs, type Bytes32, type ChainEvent, type RawLog } from "./log.ts";
 import { readingKey, type Accounts, type Addressed, type Reading } from "./observe.ts";
 import {
-  advance, finalizedAt, prepare, readings, watching, type Batch, type Block, type Step, type Watch, type WatchFault,
-  type Window,
+  advance, finalizedAt, prepare, readings, splitStalled, watching, type Batch, type Block, type Step, type Watch,
+  type WatchFault, type Window,
 } from "./watch.ts";
 import {
-  blockOf, blocksBetween, bodyHashOf, DEPOSITORY, entityOf, hashOf, hexOf, logOf, must,
+  blockOf, blocksBetween, bodyHashOf, DEPLOYED, DEPOSITORY, entityOf, hashOf, hexOf, logOf, must, txOf,
 } from "./fixtures.ts";
 
 const LEFT = entityOf(0x11n);
@@ -19,7 +19,7 @@ const OPENED = { proposerIsLeft: true, bodyHash: bodyHashOf(1n) } as const;
 
 const GENESIS = blockOf(0n);
 
-const start = (depth: bigint, from: Block = GENESIS): Watch => must(watching(DEPOSITORY, depth, from));
+const start = (depth: bigint, from: Block = GENESIS): Watch => must(watching(DEPLOYED, depth, from));
 
 const advanced = (block: bigint, index: bigint, epoch: bigint, fork = 0n) =>
   logOf("AccountEpochAdvanced", { left: LEFT, right: RIGHT, ondeltaEpoch: epoch }, block, index, fork);
@@ -144,8 +144,8 @@ describe("j/watch", () => {
   });
 
   test("R-WATCH-DEPTH a depth below zero is refused when the watch starts", () => {
-    expect(watching(DEPOSITORY, -1n, GENESIS)).toEqual(err({ _tag: "bad_depth", depth: -1n }));
-    expect(watching(DEPOSITORY, 0n, GENESIS).ok).toBe(true);
+    expect(watching(DEPLOYED, -1n, GENESIS)).toEqual(err({ _tag: "bad_depth", depth: -1n }));
+    expect(watching(DEPLOYED, 0n, GENESIS).ok).toBe(true);
   });
 
   test("R-WATCH-DEPTH a first block whose parent is not the cursor's block is a reorg deeper than the depth", () => {
@@ -296,5 +296,42 @@ describe("j/watch", () => {
     expect(first.ok).toBe(true);
     expect(deliver(start(2n), batch, [LEFT, RIGHT], chainOf(plan))).toEqual(first);
     expect(unwrapOr(first, () => expect.unreachable("delivered")).events).toEqual(oracle(plan));
+  });
+});
+
+describe("j/watch what a transaction the Host cannot read holds back (R-WATCH-STALL)", () => {
+  const eventsOf = (logs: readonly RawLog[]): readonly ChainEvent[] => must(decodeLogs(DEPLOYED, logs));
+  const secret = (block: bigint, n: bigint) =>
+    logOf("SecretRevealed", { hashlock: hexOf(n), revealer: RIGHT, secret: hexOf(n + 1n) }, block, 0n);
+  const other = (block: bigint, index: bigint, epoch: bigint) =>
+    logOf("AccountEpochAdvanced", { left: LEFT, right: BYSTANDER, ondeltaEpoch: epoch }, block, index);
+  const waiting = (...txs: readonly Bytes32[]) => (e: ChainEvent): boolean => "tx" in e && txs.includes(e.tx);
+  const places = (events: readonly ChainEvent[]) => events.map((e) => `${e._tag}@${e.block}.${e.index}`);
+  const logs = [
+    secret(1n, 7n), advanced(2n, 0n, 1n), advanced(3n, 0n, 2n), finalized(3n, 1n), advanced(4n, 0n, 3n),
+    other(4n, 1n, 1n), secret(4n, 9n),
+  ];
+
+  test("R-WATCH-STALL a finalize the Host cannot read is held alone: the advance it made and the rest are told", () => {
+    const events = eventsOf(logs);
+    const split = splitStalled(events, waiting(txOf(3n, 1n)));
+    expect(places(split.held)).toEqual(["dispute_finalized@3.1"]);
+    expect(places(split.ready)).toEqual([
+      "secret_revealed@1.0", "epoch_advanced@2.0", "epoch_advanced@3.0", "epoch_advanced@4.0", "epoch_advanced@4.1",
+      "secret_revealed@4.0",
+    ]);
+  });
+
+  test("R-WATCH-STALL a start the Host cannot read holds nothing: its Account's events go on", () => {
+    const events = eventsOf([advanced(2n, 0n, 1n), started(3n, 0n), advanced(4n, 0n, 2n), other(4n, 1n, 1n)]);
+    const split = splitStalled(events, waiting(txOf(3n, 0n)));
+    expect(places(split.ready)).toEqual(places(events));
+    expect(split.held).toEqual([]);
+  });
+
+  test("R-WATCH-STALL with nothing stalled everything is told; a tx no event names holds nothing", () => {
+    const events = eventsOf(logs);
+    expect(splitStalled(events, waiting())).toEqual({ ready: events, held: [] });
+    expect(splitStalled(events, waiting(txOf(9n, 9n))).held).toEqual([]);
   });
 });

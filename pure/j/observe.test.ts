@@ -3,7 +3,7 @@ import { err, ok } from "../kernel/core/result.ts";
 import { tokenOf } from "../account/fixtures.ts";
 import { bytes32, decodeLogs, type ChainEvent } from "./log.ts";
 import { observe, readingKey, readingsOf, type Accounts, type Addressed, type Reading } from "./observe.ts";
-import { bodyHashOf, DEPOSITORY, entityOf, hashOf, hexOf, logOf, must } from "./fixtures.ts";
+import { bodyHashOf, DEPLOYED, DEPOSITORY, entityOf, hashOf, hexOf, logOf, must } from "./fixtures.ts";
 
 /** The proof the started dispute of `started` opened with: its author and body hash. */
 const OPENED = { proposerIsLeft: true, bodyHash: bodyHashOf(1n) } as const;
@@ -39,7 +39,7 @@ const settled = (block: bigint, index: bigint, rows: readonly (readonly [bigint,
   }, block, index);
 
 const eventsOf = (...logs: Parameters<typeof decodeLogs>[1]): readonly ChainEvent[] =>
-  must(decodeLogs(DEPOSITORY, logs));
+  must(decodeLogs(DEPLOYED, logs));
 
 type Row = readonly [string, { epoch: bigint; nonce: bigint }];
 
@@ -138,6 +138,20 @@ describe("j/observe", () => {
     ]));
   });
 
+  test("R-WATCH-STALL a finalize held back is told late, after its advance, with its secrets just ahead of it", () => {
+    const logs = eventsOf(advance(4n, 0n, 1n), finalized(4n, 1n));
+    const moved = logs[0] ?? expect.unreachable("no advance");
+    const final = logs[1] ?? expect.unreachable("no finalize");
+    const read = { ...final, shown: { _tag: "read", secrets: [must(bytes32(hexOf(8n)))] } } as ChainEvent;
+    const accounts = accountsOf(readAt(4n, 1n, 5n));
+    const context = [moved, read];
+    const order = (told: readonly ChainEvent[], late: ReadonlySet<ChainEvent>) =>
+      must(observe(told, [LEFT], accounts, { context, late })).map((a) => a.event)
+        .map((event) => (event._tag === "j_dispute_over" ? `${event._tag}:${event.late === true}` : event._tag));
+    expect(order(context, new Set())).toEqual(["j_secret", "j_epoch", "j_dispute_over:false"]);
+    expect(order([read], new Set([read]))).toEqual(["j_secret", "j_dispute_over:true"]);
+  });
+
   test("R-DISPUTE-WATCH a counter is a j_countered for each hosted party and not the end of the dispute", () => {
     expect(observe(eventsOf(countered(4n, 0n)), [LEFT, RIGHT], accountsOf())).toEqual(ok([
       toward(LEFT, { _tag: "j_countered", peer: RIGHT, nonce: 9n, proposerIsLeft: false, bodyHash: bodyHashOf(4n) }),
@@ -151,8 +165,8 @@ describe("j/observe", () => {
     expect(readingsOf(events, [])).toEqual([]);
     const secret = must(bytes32(hexOf(8n)));
     expect(observe(events.slice(0, 1), [LEFT, THIRD], accountsOf())).toEqual(ok([
-      toward(LEFT, { _tag: "j_secret", secret }),
-      toward(THIRD, { _tag: "j_secret", secret }),
+      toward(LEFT, { _tag: "j_secret", secret, at: 4n }),
+      toward(THIRD, { _tag: "j_secret", secret, at: 4n }),
     ]));
     expect(observe(events.slice(0, 1), [], accountsOf())).toEqual(ok([]));
   });

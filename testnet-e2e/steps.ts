@@ -15,7 +15,10 @@ import type { SigningContext } from "../pure/account/proof/signing.ts";
 import { proofBodyHash } from "../pure/chain/proof/proof.ts";
 import { accountMessageHash } from "../pure/chain/proof/payload.ts";
 import { keccakHex } from "../pure/kernel/encoding/bytes.ts";
-import { secretsIn } from "../pure/j/calldata/decode.ts";
+import { finalizedSecrets, readOf, secretsIn } from "../pure/j/calldata/decode.ts";
+import { address, bytes32 } from "../pure/j/log.ts";
+import { watchPort } from "../pure/host/shell/evm/watch.ts";
+import { httpRpc } from "../pure/host/shell/node/rpc.ts";
 import { startAnvil, assertLoopback, scrubbedEnv, type Anvil } from "./lib/anvil.ts";
 import {
   accountKeyOf, accountOnChain, advanceTime, collateralOf, connect, eid, heldBy, leftOf, must, partyOf, reserveOf,
@@ -23,7 +26,7 @@ import {
 } from "./lib/chain.ts";
 import { GAPS, REPO } from "./lib/gaps.ts";
 import { Blocked, type Step } from "./lib/runner.ts";
-import type { EntityId, JAction } from "../pure/entity/model.ts";
+import type { EntityId, JAction, Outbound } from "../pure/entity/model.ts";
 import { lazyCheck } from "../pure/entity/signing/attest.ts";
 import type { ClockParams, JView } from "../pure/account/clause/clock.ts";
 import { Cluster, DEPTH, shown } from "./lib/cluster.ts";
@@ -434,6 +437,74 @@ const reveal: Step<World> = {
   },
 };
 
+// ---- S6b ---------------------------------------------------------------------------------------------------------
+const revealDirect: Step<World> = {
+  id: "reveal-direct", title: "The payee shows the secret on the transformer itself: the hub claims upstream from that log", needs: ["reveal"],
+  run: async (w) => {
+    const chain = chainOf(w);
+    const net = netOf(w);
+    const { alice, hubX, hubY, bob } = partiesOf(w);
+    const t = token(chain);
+    const [x, y, b] = [eid(hubX), eid(hubY), eid(bob)];
+    const hops = [[alice, hubX], [hubX, hubY], [hubY, bob]] as const;
+    const secret = ethers.getBytes(ethers.keccak256(ethers.toUtf8Bytes("xln-testnet-e2e-skeleton/secret-3")));
+    const hash = keccakHex(secret);
+    const amount = 4n * unit(chain);
+    const deadline = net.view() + 60n;
+    const offBefore = hops.map(([a, p]) => ledgerOf(net.account(eid(a), eid(p)).state, t).offdelta);
+    const askedBefore = [x, y, b].map((id) => net.askedBy(id).length);
+    const transformer = new ethers.Contract(chain.manifest.contracts.deltaTransformer.address, ["function revealSecret(bytes32 secret)", "function hashToTimestamp(bytes32) view returns (uint256)"], bob.wallet);
+    const holdsOf = (a: Party, p: Party) => ledgerOf(net.account(eid(a), eid(p)).state, t).holds.length;
+    // Bob's resolve frames are lost on the link (bob's other messages, acks included, go through), so bob's resolve stays pending.
+    const resolving = (message: Outbound): boolean =>
+      message.from === b && message.msg._tag === "frame" && message.msg.frame.txs.some((tx) => tx._tag === "resolve");
+    const shownAt = await net.losing(resolving, async () => {
+      await net.tell(b, { _tag: "expect", hashlock: hash, from: y, token: t, amount, secret });
+      const hold = { id: holdId(2n), payer: net.account(eid(alice), x).side, amount, hashlock: hash, deadline: must(jHeight(deadline), "deadline") };
+      await net.tell(eid(alice), { _tag: "lock", peer: x, token: t, hold, route: [y, b] });
+      await net.settle({ pending: true });
+      if (net.account(b, y).pending === undefined) throw new Error("bob's resolve frame is not pending: it was acked");
+      const open = hops.map(([a, p]) => holdsOf(a, p));
+      if (open.join() !== "1,1,1") throw new Error(`open clauses per hop before the reveal: ${open.join()}, expected 1,1,1`);
+      // Bob does not use his node: his wallet calls DeltaTransformer.revealSecret, which logs SecretRevealed and nothing of the Depository's.
+      const receipt = await (await transformer.revealSecret!(secret)).wait();
+      if ((await transformer.hashToTimestamp!(hash)) === 0n) throw new Error("the transformer holds no reveal time after bob's call");
+      const block = BigInt(receipt.blockNumber);
+      await net.reach(block, { pending: true });
+      return block;
+    });
+    const stuck = holdsOf(hubY, bob);
+    const claimed = [holdsOf(alice, hubX), holdsOf(hubX, hubY)];
+    if (claimed.join() !== "0,0") throw new Error(`the hubs did not claim upstream from the transformer log: open clauses alice-hubX, hubX-hubY ${claimed.join()}`);
+    if (stuck !== 1 || net.account(b, y).pending === undefined) throw new Error(`hubY-bob should still wait on bob's lost resolve: open ${stuck}`);
+    const heard = net.entity(y).shown.get(hash);
+    if (heard !== shownAt) throw new Error(`hubY's Entity keeps the secret shown at ${heard}, the transformer logged it at block ${shownAt}`);
+    const disputes = [x, y, b].flatMap((id, i) => net.askedBy(id).slice(askedBefore[i]!));
+    if (disputes.length !== 0) throw new Error(`a node asked the chain for ${shown(disputes.map((a) => a._tag))}: the claim needs no chain action of the hubs`);
+    // The link works again: bob's resend reaches hubY, which acks, and the last hop resolves off chain too.
+    await net.settle();
+    const checks = hops.map(([payer, payee], i) => {
+      const [rp, rq] = [net.account(eid(payer), eid(payee)), net.account(eid(payee), eid(payer))];
+      const l = ledgerOf(rp.state, t);
+      const expected = offBefore[i]! + (rp.side === "left" ? -amount : amount);
+      if (rp.head !== rq.head || rp.pending !== undefined || l.holds.length !== 0 || l.offdelta !== expected) throw new Error(`${payer.name}-${payee.name}: holds ${l.holds.length}, offdelta ${l.offdelta}, expected ${expected}`);
+      return `${payer.name} to ${payee.name}: resolved, both Runtimes at head ${rp.head.slice(0, 12)}, offdelta moved ${fmt(chain, amount)} toward the payee`;
+    });
+    const left = [hubX, hubY, bob].map((p) => net.entity(eid(p)).paybook.size);
+    if (left.some((n) => n !== 0)) throw new Error(`paybook entries left after the payment: ${left.join(",")}`);
+    quiet(net, [alice, hubX, hubY, bob], "reveal-direct");
+    return {
+      checks: [
+        `hashlock ${hash.slice(0, 12)}: alice's lock across hubX and hubY to bob (deadline ${deadline}); bob's resolve frames are lost, so hubY-bob stays pending`,
+        `bob's wallet calls DeltaTransformer.revealSecret itself (block ${shownAt}): only the transformer's SecretRevealed is logged, no Depository log and no dispute`,
+        `at depth hubY's Entity keeps the secret shown at ${shownAt} and claims upstream: alice-hubX and hubX-hubY hold no clause while hubY-bob still waits`,
+        ...checks,
+      ],
+      gaps: [],
+    };
+  },
+};
+
 const swap: Step<World> = {
   id: "swap", title: "Two-party swap inside an Account: quote, partial fill, withdrawal", needs: ["htlc"],
   run: async (w) => {
@@ -709,6 +780,18 @@ const rebase: Step<World> = {
     if (listed.length !== 1 || shown(chainSees) !== shown([secret]) || shown(nodeSees) !== shown([secret])) {
       throw new Error(`the deployed DeltaTransformer reads ${listed.length} clause(s) with secrets ${shown(chainSees)} from a blob the node's decoder reads as ${shown(nodeSees)}, expected [${secret}]`);
     }
+    // A wrapper may hide the call from the input, so the port also reads the node's call trace: the real node's trace of the finalize names its call to the Depository.
+    const recent = (await chain.provider.getBlockNumber()) - 5_000;
+    const finalized = await chain.depository.queryFilter(chain.depository.filters.DisputeFinalized(), recent);
+    const [finalize] = finalized;
+    if (finalized.length !== 1 || finalize === undefined) throw new Error(`the chain logged ${finalized.length} dispute finalizes, expected the one of the dispute step`);
+    const depositoryAddress = must(address(chain.manifest.contracts.depository.address.toLowerCase()), "depository address");
+    const evidence = must(bytes32(String(finalize.args.finalizationEvidenceHash)), "evidence hash");
+    const transformer = must(address(chain.manifest.contracts.deltaTransformer.address.toLowerCase()), "transformer address");
+    const traced = await watchPort(httpRpc(chain.rpc), { depository: depositoryAddress, transformer }).trace(must(bytes32(finalize.transactionHash), "finalize transaction"));
+    if (!traced.ok || traced.value._tag !== "calls") throw new Error(`the node gave no call trace of the finalize: ${traced.ok ? traced.value._tag : traced.error.reason}`);
+    const calls = traced.value.calls;
+    if (!calls.some((input) => finalizedSecrets(readOf(input), evidence) !== undefined)) throw new Error(`no call of the finalize's trace carries the op whose evidence hash the chain logged (${calls.length} calls to the Depository)`);
     // R-LEDGER-REBASE: each Runtime's ledger is the chain's now: no collateral, no ondelta, offdelta counted from zero, and no open clause.
     const pay = PENDING_PAY * unit(chain);
     const ledgers = [a, x].map((id) => ({ id, replica: net.account(id, id === a ? x : a) }));
@@ -776,7 +859,7 @@ const rebase: Step<World> = {
       checks: [
         `each node's own J loop (pure/host/shell/watch, the watcher core pure/j/watch.ts: blocks and logs by number, readings by block hash) read the Depository's logs at depth 1 up to height ${net.view()} and told its Entity ${names.length} J events, in the WAL before the height: ${names.join(", ")}`,
         `R-WATCH-CALLDATA: the deployed DeltaTransformer (decodeTransformerArgumentListStrict, then decodeArgumentsStrict on each element) reads a dispute's argument blob as abi.encode(bytes[]) with one Arguments per clause, and pure/j/calldata/decode.ts reads the same secret from the same bytes (${secret.slice(0, 10)}...)`,
-        `R-WATCH-CALLDATA: each node's loop fetched the finalize's transaction (eth_getTransactionByHash) and found in its processBatch input the op whose evidence hash the Depository logged, so no node was told the finalize was unread; the arguments carried no secret (the Host's own finalize sends none)`,
+        `R-WATCH-CALLDATA: each node's loop fetched the finalize's transaction (eth_getTransactionByHash) and found in its processBatch input the op whose evidence hash the Depository logged, so no node was told the finalize was unread; the node's call trace (debug_traceTransaction, callTracer) of the same transaction, read by the port the nodes use, lists ${calls.length} call to the Depository, and the op is in it by the same hash; the arguments carried no secret (the Host's own finalize sends none)`,
         `both Runtimes hold chain facts epoch ${onChain.epoch}, stored nonce ${onChain.nonce}, no dispute open, the frames of the new epoch counted, for alice-hubX: the same as the chain`,
         `R-LEDGER-REBASE: both ledgers read collateral ${held.collateral}, ondelta ${held.ondelta} (the chain's), offdelta restarted from zero (it was ${before} before the move), no open clause, no frame pending, one head, and the peer's signature kept is over a head of the new epoch only`,
         `the payment of ${PENDING_PAY} alice had pending when the chain finalized (hubX never committed it: the link lost it) ${resealed ? "was refused by hubX as another epoch's and sealed anew: it committed in epoch 1 on both sides" : "was refused back to alice with a notice (both ledgers at offdelta zero)"}`,
@@ -1006,7 +1089,10 @@ const nodes: Step<World> = {
     if (fingerprint(y) !== prints) throw new Error("hubY's Accounts changed when the copy of the frame arrived: a frame it already holds must change nothing");
     // The copy of bob's frame is a row of its own on hubY's disk, and the ack it answers with names the head hubY committed before the crash.
     // Bob's timer sends the frame again at every second tick until his pending clears, so more than one copy can be on its way before the first ack gets back: each copy is a row, and each is answered the same.
-    const after = net.rowsOf(y).slice(rows);
+    // A node with value boots blind and the probe ends it (R-WATCH-CALLDATA): those two inputs are rows of the restart itself, not copies.
+    const sight = (r: ReturnType<typeof net.rowsOf>[number]): boolean =>
+      r.input._tag === "entity" && r.input.inputs.every((i) => i._tag === "j_blind" || i._tag === "j_blind_over");
+    const after = net.rowsOf(y).slice(rows).filter((r) => !sight(r));
     const answers = after.flatMap((r) => r.outputs.filter((o) => o.to === b && o.msg._tag === "ack"));
     const isCopy = (r: (typeof after)[number]): boolean => r.input._tag === "entity" && r.input.inputs.length === 1 && r.input.inputs.every((i) => i._tag === "peer_message" && i.from === b && i.msg._tag === "frame" && i.msg.frame.parent === pending.frame.parent && i.msg.frame.slot === pending.frame.slot);
     if (after.length === 0 || !after.every(isCopy)) throw new Error(`hubY's rows after the restart are not just bob's frame heard again: ${after.map((r) => (r.input._tag === "entity" ? `entity[${r.input.inputs.map((i) => i._tag).join(" ")}]` : r.input._tag)).join(", ") || "none"}`);
@@ -1025,4 +1111,4 @@ const nodes: Step<World> = {
   },
 };
 
-export const STEPS: readonly Step<World>[] = [fork, world, deposits, open, pay, htlc, reveal, swap, dispute, disputeClause, rebase, nodes, disputeStale];
+export const STEPS: readonly Step<World>[] = [fork, world, deposits, open, pay, htlc, reveal, revealDirect, swap, dispute, disputeClause, rebase, nodes, disputeStale];
