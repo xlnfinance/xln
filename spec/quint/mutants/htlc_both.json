@@ -14,8 +14,8 @@
       "id": "chain-secret-unseen",
       "why": "SEE off: the hub's paybook does not learn a secret the chain shows (F1 of the freeze audit)",
       "file": "htlc.qnt",
-      "old": "knows: st.knows or (s == Hub and ((e.kind == 1 and SEE) or (ARGS and e.shown))),",
-      "new": "knows: st.knows or (s == Hub and ((e.kind == 1 and false) or (ARGS and e.shown))),",
+      "old": "knows: st.knows or (s == Hub and ((e.kind == 1 and SEE) or (e.kind == 2 and TSEE) or (ARGS and e.shown))),",
+      "new": "knows: st.knows or (s == Hub and ((e.kind == 1 and false) or (e.kind == 2 and TSEE) or (ARGS and e.shown))),",
       "killedBy": "invariant:route_safe"
     },
     {
@@ -30,8 +30,8 @@
       "id": "upstream-expires-early",
       "why": "R-CLOCK: the payer lets the upstream lock expire at the downstream deadline, before the hub can claim",
       "file": "htlc.qnt",
-      "old": "st.u == 0, st.now > TU,",
-      "new": "st.u == 0, st.now > TD,",
+      "old": "st.u == 0, st.now > TU + RSV,",
+      "new": "st.u == 0, st.now > TD + RSV,",
       "killedBy": "test:payerCannotExpireBeforeTUTest"
     },
     {
@@ -46,16 +46,16 @@
       "id": "args-start-unseen",
       "why": "#167: the watcher reads the secret in a finalize's arguments but not in a start's",
       "file": "htlc.qnt",
-      "old": "knows: st.knows or (s == Hub and ((e.kind == 1 and SEE) or (ARGS and e.shown))),",
-      "new": "knows: st.knows or (s == Hub and ((e.kind == 1 and SEE) or (ARGS and e.shown and e.kind == 3))),",
+      "old": "knows: st.knows or (s == Hub and ((e.kind == 1 and SEE) or (e.kind == 2 and TSEE) or (ARGS and e.shown))),",
+      "new": "knows: st.knows or (s == Hub and ((e.kind == 1 and SEE) or (e.kind == 2 and TSEE) or (ARGS and e.shown and e.kind == 3))),",
       "killedBy": "test:argsInStartTest"
     },
     {
       "id": "args-finalize-unseen",
       "why": "#167: the watcher reads the secret in a start's arguments but not in a finalize's",
       "file": "htlc.qnt",
-      "old": "knows: st.knows or (s == Hub and ((e.kind == 1 and SEE) or (ARGS and e.shown))),",
-      "new": "knows: st.knows or (s == Hub and ((e.kind == 1 and SEE) or (ARGS and e.shown and e.kind == 0))),",
+      "old": "knows: st.knows or (s == Hub and ((e.kind == 1 and SEE) or (e.kind == 2 and TSEE) or (ARGS and e.shown))),",
+      "new": "knows: st.knows or (s == Hub and ((e.kind == 1 and SEE) or (e.kind == 2 and TSEE) or (ARGS and e.shown and e.kind == 0))),",
       "killedBy": "test:argsInFinalizeTest"
     }
   ]

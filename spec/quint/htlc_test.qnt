@@ -12,8 +12,12 @@ module hscn {
   const SW_ARGS: bool
   const SW_HIDE: bool
   const SW_HOP: int
+  const SW_XREV: bool
+  const SW_TSEE: bool
+  const SW_BACK: bool
 
-  import htlc(SEE = SW_SEE, DISSOLVE = SW_DISSOLVE, ARGS = SW_ARGS, HIDE = SW_HIDE, HOP = SW_HOP).* from "./htlc"
+  import htlc(SEE = SW_SEE, DISSOLVE = SW_DISSOLVE, ARGS = SW_ARGS, HIDE = SW_HIDE, HOP = SW_HOP, XREV = SW_XREV, TSEE = SW_TSEE, BACK = SW_BACK,
+              SLK = 0, PD = 0, RSV = 0, CHAIN = false).* from "./htlc"
 
   action jump(t: int): bool = st' = { ...st, now: t }
   action check(c: bool): bool = all { assert(c), st' = st }
@@ -77,7 +81,7 @@ module hscn {
       .then(askStart(Hub)).then(landStart(Hub)).then(hear(Hub)).then(hear(Payee))
       .then(askReveal).then(jump(TD + 1)).then(landReveal).then(landFinal).then(hear(Hub)).then(hear(Hub)).then(hear(Payee)).then(hear(Payee))
       .then(check(st.lateReveal and st.paidChain == 0))
-      .then(closeU)
+      .then(if (SW_BACK) claimByRegistry else closeU)    // BACK: the registry shows a reveal by TU, so the hub claims on U instead of expiring it
       .then(check(paid_once and route_safe))
   }
 
@@ -161,16 +165,48 @@ module hscn {
         .then(check(paid_once and not(route_safe))))
   }
 
+  // The reveal registry as its own channel (DeltaTransformer.revealSecret is public). The hub starts a dispute on D; the payee, quiet, reveals the
+  // secret by calling the transformer itself: the registry is set, the chain will pay the clause at the finalize, but the only event is the
+  // transformer's SecretRevealed, not the Depository's. A watcher that reads Depository logs only (TSEE off) never hears it. The lock on U then
+  // expires, unless the backstop refuses the expiry for a hash the registry shows revealed by its second and the hub claims by the registry.
+  run transformerRevealTest = {
+    init.then(if (not(SW_XREV)) check(true) else
+      askStart(Hub).then(landStart(Hub)).then(hear(Hub)).then(hear(Payee))
+        .then(askReveal).then(landRevealDirect).then(hear(Hub)).then(hear(Payee))
+        .then(check(st.revealedAt != 0 and st.knows == SW_TSEE))
+        .then(if (SW_TSEE) askClaim.then(landClaim) else check(true))
+        .then(jump(TD)).then(landFinal).then(hear(Hub)).then(hear(Payee))
+        .then(check(st.paidChain == 1))
+        .then(if (SW_BACK and not(st.knows)) claimByRegistry else check(true))
+        .then(closeU)
+        .then(check(paid_once and route_safe == (SW_TSEE or SW_BACK) and st.collected == (if (SW_TSEE or SW_BACK) 1 else 0)
+                    and st.viaReg == (SW_BACK and not(SW_TSEE)))))
+  }
+
+  // The backstop alone: the hub does not know the secret (the transformer's event is not read), the lock's deadline has passed, and the registry
+  // shows a reveal by it: the hub must not co-sign the expiry, whatever the clock says.
+  run backstopRefusesExpiryTest = {
+    init.then(if (not(SW_XREV) or not(SW_BACK) or SW_TSEE) check(true) else
+      askStart(Hub).then(landStart(Hub)).then(hear(Hub)).then(hear(Payee))
+        .then(askReveal).then(landRevealDirect).then(hear(Hub)).then(hear(Payee))
+        .then(check(not(st.knows)))
+        .then(jump(TU + 1))
+        .then(expireU).fail())
+  }
+
   // R-CLOCK: the payer cannot expire the lock on U before TU, whatever the hub has done by then. The model's own clock never reaches it (time
   // passes only when the hub has asked for the claim it owes), so a rule that lets the lock expire at TD survives every random trace; here the
   // clock is moved to TU and the expiry must be refused.
   run payerCannotExpireBeforeTUTest = (init.then(jump(TU)).then(expireU)).fail()
 }
 
-module today_htlc_test { import hscn(SW_SEE = false, SW_DISSOLVE = false, SW_ARGS = false, SW_HIDE = false, SW_HOP = 2).* from "./htlc_test" }
-module see_htlc_test { import hscn(SW_SEE = true, SW_DISSOLVE = false, SW_ARGS = false, SW_HIDE = false, SW_HOP = 2).* from "./htlc_test" }
-module dissolve_htlc_test { import hscn(SW_SEE = false, SW_DISSOLVE = true, SW_ARGS = false, SW_HIDE = false, SW_HOP = 2).* from "./htlc_test" }
-module both_htlc_test { import hscn(SW_SEE = true, SW_DISSOLVE = true, SW_ARGS = true, SW_HIDE = false, SW_HOP = 2).* from "./htlc_test" }
-module hop0_htlc_test { import hscn(SW_SEE = true, SW_DISSOLVE = true, SW_ARGS = true, SW_HIDE = false, SW_HOP = 0).* from "./htlc_test" }
-module noargs_htlc_test { import hscn(SW_SEE = true, SW_DISSOLVE = true, SW_ARGS = false, SW_HIDE = false, SW_HOP = 2).* from "./htlc_test" }
-module wrapped_htlc_test { import hscn(SW_SEE = true, SW_DISSOLVE = true, SW_ARGS = true, SW_HIDE = true, SW_HOP = 2).* from "./htlc_test" }
+module today_htlc_test { import hscn(SW_SEE = false, SW_DISSOLVE = false, SW_ARGS = false, SW_HIDE = false, SW_HOP = 2, SW_XREV = false, SW_TSEE = false, SW_BACK = false).* from "./htlc_test" }
+module see_htlc_test { import hscn(SW_SEE = true, SW_DISSOLVE = false, SW_ARGS = false, SW_HIDE = false, SW_HOP = 2, SW_XREV = false, SW_TSEE = false, SW_BACK = false).* from "./htlc_test" }
+module dissolve_htlc_test { import hscn(SW_SEE = false, SW_DISSOLVE = true, SW_ARGS = false, SW_HIDE = false, SW_HOP = 2, SW_XREV = false, SW_TSEE = false, SW_BACK = false).* from "./htlc_test" }
+module both_htlc_test { import hscn(SW_SEE = true, SW_DISSOLVE = true, SW_ARGS = true, SW_HIDE = false, SW_HOP = 2, SW_XREV = false, SW_TSEE = false, SW_BACK = false).* from "./htlc_test" }
+module hop0_htlc_test { import hscn(SW_SEE = true, SW_DISSOLVE = true, SW_ARGS = true, SW_HIDE = false, SW_HOP = 0, SW_XREV = false, SW_TSEE = false, SW_BACK = false).* from "./htlc_test" }
+module noargs_htlc_test { import hscn(SW_SEE = true, SW_DISSOLVE = true, SW_ARGS = false, SW_HIDE = false, SW_HOP = 2, SW_XREV = false, SW_TSEE = false, SW_BACK = false).* from "./htlc_test" }
+module wrapped_htlc_test { import hscn(SW_SEE = true, SW_DISSOLVE = true, SW_ARGS = true, SW_HIDE = true, SW_HOP = 2, SW_XREV = false, SW_TSEE = false, SW_BACK = false).* from "./htlc_test" }
+module xrev_htlc_test { import hscn(SW_SEE = true, SW_DISSOLVE = true, SW_ARGS = true, SW_HIDE = false, SW_HOP = 2, SW_XREV = true, SW_TSEE = false, SW_BACK = false).* from "./htlc_test" }
+module xwatch_htlc_test { import hscn(SW_SEE = true, SW_DISSOLVE = true, SW_ARGS = true, SW_HIDE = false, SW_HOP = 2, SW_XREV = true, SW_TSEE = true, SW_BACK = false).* from "./htlc_test" }
+module xback_htlc_test { import hscn(SW_SEE = true, SW_DISSOLVE = true, SW_ARGS = true, SW_HIDE = false, SW_HOP = 2, SW_XREV = true, SW_TSEE = false, SW_BACK = true).* from "./htlc_test" }

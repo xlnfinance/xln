@@ -1,0 +1,22 @@
+{
+  "files": [
+    "htlc.qnt",
+    "htlc_hback.qnt",
+    "htlc_gate_test.qnt"
+  ],
+  "init": "init",
+  "step": "step",
+  "test": "htlc_gate_test.qnt",
+  "testMain": "hback_htlc_gate_test",
+  "steps": 70,
+  "mutants": [
+    {
+      "id": "backstop-reads-at-head",
+      "why": "the backstop looks at the registry at the head, not at depth: it co-signs an expiry before its read covers the lock's second",
+      "file": "htlc.qnt",
+      "old": "BACK implies (st.now >= TUX + PD and not(regShows(st))),",
+      "new": "BACK implies not(regShows(st)),",
+      "killedBy": "test:backstopWaitsForDepthTest"
+    }
+  ]
+}

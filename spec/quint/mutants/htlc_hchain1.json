@@ -1,0 +1,22 @@
+{
+  "files": [
+    "htlc.qnt",
+    "htlc_hchain1.qnt",
+    "htlc_gate_test.qnt"
+  ],
+  "init": "init",
+  "step": "step",
+  "test": "htlc_gate_test.qnt",
+  "testMain": "hchain1_htlc_gate_test",
+  "steps": 70,
+  "mutants": [
+    {
+      "id": "chain-hub-expires-while-claiming",
+      "why": "the hub co-signs the upstream expiry although it knows the secret and the lock's second has not passed",
+      "file": "htlc.qnt",
+      "old": "CHAIN implies not(st.knows and st.now <= TUX),",
+      "new": "true,",
+      "killedBy": "test:chainHubRefusesExpiryWhileClaimingTest"
+    }
+  ]
+}
