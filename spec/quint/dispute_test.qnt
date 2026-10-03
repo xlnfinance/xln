@@ -14,7 +14,7 @@ module scn {
   const SW_NOTICE: bool
   const SW_PAY: int
 
-  import dispute(FREEZE = SW_FREEZE, LIVE = SW_LIVE, ACCEPT = SW_ACCEPT, NOTICE = SW_NOTICE, PAY = SW_PAY).* from "./dispute"
+  import dispute(FREEZE = SW_FREEZE, LIVE = SW_LIVE, ACCEPT = SW_ACCEPT, NOTICE = SW_NOTICE, PAY = SW_PAY, STALL = 0).* from "./dispute"
 
   action jump(t: int): bool = st' = { ...st, now: t }
   action check(c: bool): bool = all { assert(c), st' = st }

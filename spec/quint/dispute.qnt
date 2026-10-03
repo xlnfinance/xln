@@ -35,6 +35,10 @@ module dispute {
   const LIVE: bool
   const ACCEPT: bool
   const NOTICE: bool
+  // R-WATCH-STALL (#171): the Host holds back the events of an Account behind a transaction its provider fails to give, so an Entity hears an event STALL
+  // ticks after the chain logged it. 0: it hears at once (every PR before #171, and the model's assumption so far). The hold is bounded by the Host,
+  // not by the window: dispute_test.qnt `stalledStartTest` plays the schedule.
+  const STALL: int
   // The payment path (frames that carry a payment, their fate in an epoch move). 0 not modelled. 1 the code at #162 8f82733df: a node
   // that holds a peer's signed frame it refused (it was in a dispute) can finalize with it (SIGFIN), the proposer of a refused or
   // uncommitted frame seals it again in the new epoch (RESEND). 2 as 1, and a frame the chain finalized by is dropped, never sealed
@@ -80,7 +84,7 @@ module dispute {
 
   // The chain's events, in the chain's order. kind 0 DisputeStarted, 1 CounterDisputeRegistered, 2 window over (from the block
   // clock), 3 DisputeFinalized with the epoch advance (`settled` the proof that paid, `stored` what the chain stores now).
-  type Ev = { kind: int, by: Side, n: int, epoch: int, timeout: int, settled: int, stored: int }
+  type Ev = { kind: int, by: Side, n: int, epoch: int, timeout: int, settled: int, stored: int, t: int }
 
   // A frame in flight: sealed by `p` at nonce `n` in `p`'s epoch; stage 0 on its way to the other side, 1 committed there and
   // its ack on the way back.
@@ -224,7 +228,7 @@ module dispute {
 
   pure def owed(s: St): bool = or {
     s.disp.on and s.now >= s.disp.timeout and not(s.disp.over),
-    SIDES.exists(x => s.up.get(x) and (s.seen.get(x) < s.log.length() or s.fresh.get(x))),
+    SIDES.exists(x => s.up.get(x) and ((s.seen.get(x) < s.log.length() and s.log.nth(s.seen.get(x)).t + STALL <= s.now) or s.fresh.get(x))),
     SIDES.exists(x => s.askS.get(x).on and s.askS.get(x).at + LAG <= s.now),
     SIDES.exists(x => s.askC.get(x).on and s.askC.get(x).at + LAG <= s.now),
     SIDES.exists(x => landableFinal(s, x) and s.askF.get(x).at + LAG <= s.now)
@@ -240,7 +244,7 @@ module dispute {
   action windowOver: bool = all {
     st.disp.on, st.now >= st.disp.timeout, not(st.disp.over),
     st' = { ...st, disp: { ...st.disp, over: true },
-            log: st.log.append({ kind: 2, by: Left, n: 0, epoch: st.chEpoch, timeout: 0, settled: 0, stored: 0 }) }
+            log: st.log.append({ kind: 2, by: Left, n: 0, epoch: st.chEpoch, timeout: 0, settled: 0, stored: 0, t: st.now }) }
   }
 
   // ---------------------------------------------------------------------------------------------------------
@@ -250,7 +254,7 @@ module dispute {
   action hear(s: Side): bool = {
     val i = st.seen.get(s)
     all {
-      st.up.get(s), i < st.log.length(),
+      st.up.get(s), i < st.log.length() and st.log.nth(i).t + STALL <= st.now,
       val e = st.log.nth(i)
       val rebase = e.kind == 3 and e.epoch > st.f.get(s).epoch
       val beyond = rebase and st.comm.get(s) > e.settled
@@ -428,7 +432,7 @@ module dispute {
           askS: mapAt(st.askS, s, NO_ASK),
           disp: { on: true, starter: s, n: a.n, timeout: st.now + W, ctr: 0, over: false },
           chStored: a.n,
-          log: st.log.append({ kind: 0, by: s, n: a.n, epoch: st.chEpoch, timeout: st.now + W, settled: 0, stored: 0 }),
+          log: st.log.append({ kind: 0, by: s, n: a.n, epoch: st.chEpoch, timeout: st.now + W, settled: 0, stored: 0, t: st.now }),
           g: { ...st.g, starts: st.g.starts + 1, wasDown: Map(Left -> not(st.up.get(Left)), Right -> not(st.up.get(Right))) } }
     }
   }
@@ -447,7 +451,7 @@ module dispute {
         st' = { ...st,
           askC: mapAt(st.askC, s, NO_ASK),
           disp: { ...st.disp, ctr: a.n },
-          log: st.log.append({ kind: 1, by: s, n: a.n, epoch: st.chEpoch, timeout: 0, settled: 0, stored: 0 }),
+          log: st.log.append({ kind: 1, by: s, n: a.n, epoch: st.chEpoch, timeout: 0, settled: 0, stored: 0, t: st.now }),
           g: { ...st.g, counters: st.g.counters + 1 } }
     }
   }
@@ -459,7 +463,7 @@ module dispute {
     not(st.f.get(s).cOn), st.hold.get(s) > st.disp.n, st.hold.get(s) > st.disp.ctr,
     st' = { ...st,
       disp: { ...st.disp, ctr: st.hold.get(s) },
-      log: st.log.append({ kind: 1, by: s, n: st.hold.get(s), epoch: st.chEpoch, timeout: 0, settled: 0, stored: 0 }),
+      log: st.log.append({ kind: 1, by: s, n: st.hold.get(s), epoch: st.chEpoch, timeout: 0, settled: 0, stored: 0, t: st.now }),
       g: { ...st.g, counters: st.g.counters + 1 } }
   }
 
@@ -493,7 +497,7 @@ module dispute {
       st' = { ...st,
         askS: both(NO_ASK), askC: both(NO_ASK), askF: both(NO_ASK),
         disp: NO_DISP, chEpoch: st.chEpoch + 1, chStored: stored,
-        log: st.log.append({ kind: 3, by: s, n: 0, epoch: st.chEpoch + 1, timeout: 0, settled: settled, stored: stored }),
+        log: st.log.append({ kind: 3, by: s, n: 0, epoch: st.chEpoch + 1, timeout: 0, settled: settled, stored: stored, t: st.now }),
         g: { ...st.g, finals: st.g.finals + 1, settledLast: settled, chain: st.g.chain.union(paidBy(st, settled)),
              lostNewest: st.g.lostNewest or (settled < newest and enforceable(st, newest)),
              lostBy: if (settled < newest) newest - settled else st.g.lostBy } }
@@ -511,7 +515,7 @@ module dispute {
     st' = { ...st,
       askS: both(NO_ASK), askC: both(NO_ASK), askF: both(NO_ASK),
       disp: NO_DISP, chEpoch: st.chEpoch + 1, chStored: settled,
-      log: st.log.append({ kind: 3, by: s, n: 0, epoch: st.chEpoch + 1, timeout: 0, settled: settled, stored: settled }),
+      log: st.log.append({ kind: 3, by: s, n: 0, epoch: st.chEpoch + 1, timeout: 0, settled: settled, stored: settled, t: st.now }),
       g: { ...st.g, finals: st.g.finals + 1, settledLast: settled, sigs: st.g.sigs + 1, chain: st.g.chain.union(paidBy(st, settled)),
            lostNewest: st.g.lostNewest or (settled < newest and enforceable(st, newest)),
            lostBy: if (settled < newest) newest - settled else st.g.lostBy } }
@@ -524,7 +528,7 @@ module dispute {
     not(st.disp.on), not(st.pend.on), st.chEpoch < MAXE, st.comm.get(Left) == st.comm.get(Right),
     val stored = imax(st.chStored, newestHeld(st)) + 1
     st' = { ...st, chEpoch: st.chEpoch + 1, chStored: stored, frz: both(true),
-            log: st.log.append({ kind: 3, by: Left, n: 0, epoch: st.chEpoch + 1, timeout: 0, settled: stored, stored: stored }) }
+            log: st.log.append({ kind: 3, by: Left, n: 0, epoch: st.chEpoch + 1, timeout: 0, settled: stored, stored: stored, t: st.now }) }
   }
 
   action step: bool = any {
