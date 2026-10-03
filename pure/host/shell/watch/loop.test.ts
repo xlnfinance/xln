@@ -278,13 +278,13 @@ describe("host/shell/watch the J loop's poll", () => {
     const inputs = new Map([[tx, finalizeInput(RIGHT, [op])]]);
     const settled = logOf("AccountSettled", {
       settled: [[LEFT, RIGHT, [[1n, 900n, 1000n, 100n, [0n, 100n]]], 0n]],
-    }, 3n, 0n);
-    const chain = [...logs, settled, otherAdvanced(3n, 1n, 1n)];
+    }, 6n, 0n);
+    const chain = [...logs, otherAdvanced(3n, 1n, 1n), settled];
     const flaky = (head: bigint) => portOf(straight(head, chain), logPath(), head < 8n ? "input" : -1n, inputs);
     const other: EntityInput = { _tag: "j_epoch", peer: peer(OTHER), epoch: 1n, stored: 5n };
     const held = await along(flaky, upTo(6n, 7n));
     expect(held.told).toEqual([BEHIND, other]);
-    expect(held.carry.held).toHaveLength(3);
+    expect(held.carry.held).toHaveLength(2);
     const given = await along(flaky, [8n], held);
     const tags = ["j_secret", "j_epoch", "j_dispute_over", "j_collateral", "j_behind_over"];
     expect(tagsOf(given.told.slice(2))).toEqual(tags);
