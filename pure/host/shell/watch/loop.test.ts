@@ -15,9 +15,8 @@ import type { Carried } from "../../../j/calldata/decode.ts";
 import { watching, type Block, type Watch } from "../../../j/watch.ts";
 import { bytesToHex } from "../../../kernel/encoding/bytes.ts";
 import {
-  argumentsOf, blockOf, CLAUSED, DEPOSITORY, DEPOSITORY_ABI, entityOf, evidenceOf, finalizedOf, finalizeInput,
-  finalizeOp, hexOf,
-  logOf, must,
+  argumentsOf, blockOf, CLAUSED, DEPLOYED, DEPOSITORY, DEPOSITORY_ABI, entityOf, evidenceOf, finalizedOf,
+  finalizeInput, finalizeOp, hexOf, logOf, must, transformerLogOf,
   multicalled, relayed, startInput, startOp, txOf,
 } from "../../../j/fixtures.ts";
 import { callsOf } from "../fixtures.ts";
@@ -105,7 +104,7 @@ const atEpoch = (port: WatchPort, epoch: bigint): WatchPort =>
 const advanced = (block: bigint, index: bigint, epoch: bigint) =>
   logOf("AccountEpochAdvanced", { left: LEFT, right: RIGHT, ondeltaEpoch: epoch }, block, index);
 
-const start = (depth: bigint, from: Block = blockOf(0n)) => must(watching(DEPOSITORY, depth, from));
+const start = (depth: bigint, from: Block = blockOf(0n)) => must(watching(DEPLOYED, depth, from));
 
 const peer = (id: typeof RIGHT): EntityId => unwrapOr(entityId(id), () => expect.unreachable("peer"));
 
@@ -166,7 +165,14 @@ describe("host/shell/watch the J loop's poll", () => {
     const shown = logOf("SecretRevealed", { hashlock: hexOf(7n), revealer: RIGHT, secret: hexOf(8n) }, 2n, 0n);
     const got = await poll(portOf(straight(6n, [shown]), logPath()), start(2n), LEFT);
     const bytes = Uint8Array.from({ length: 32 }, (_, i) => (i === 31 ? 8 : 0));
-    expect(got.ok ? got.value?.events : got).toEqual([{ _tag: "j_secret", secret: bytes }]);
+    expect(got.ok ? got.value?.events : got).toEqual([{ _tag: "j_secret", secret: bytes, at: 2n }]);
+  });
+
+  test("R-REVEAL-DIRECT a secret shown to the transformer alone reaches the Entity with its block", async () => {
+    const shown = transformerLogOf(hexOf(7n), hexOf(8n), 3n, 0n);
+    const got = await poll(portOf(straight(6n, [shown]), logPath()), start(2n), LEFT);
+    const bytes = Uint8Array.from({ length: 32 }, (_, i) => (i === 31 ? 8 : 0));
+    expect(got.ok ? got.value?.events : got).toEqual([{ _tag: "j_secret", secret: bytes, at: 3n }]);
   });
 
   test("R-WATCH-CALLDATA a finalize's arguments are read from its transaction's input, asked for once", async () => {
@@ -178,7 +184,7 @@ describe("host/shell/watch the J loop's poll", () => {
     const got = await poll(portOf(straight(6n, [advanced(2n, 0n, 1n), finalize]), at, -1n, inputs), start(2n), LEFT);
     const secret = Uint8Array.from({ length: 32 }, (_, i) => (i === 31 ? 8 : 0));
     expect(got.ok ? got.value?.events : got).toEqual([
-      { _tag: "j_secret", secret },
+      { _tag: "j_secret", secret, at: 2n },
       { _tag: "j_epoch", peer: peer(RIGHT), epoch: 1n, stored: 5n, finalBodyHash: hexOf(5n) },
       { _tag: "j_dispute_over", peer: peer(RIGHT) },
     ]);
@@ -197,13 +203,14 @@ describe("host/shell/watch the J loop's poll", () => {
     const got = await poll(portOf(straight(6n, [opened]), at, -1n, inputs), start(2n), LEFT);
     const secret = Uint8Array.from({ length: 32 }, (_, i) => (i === 31 ? 8 : 0));
     expect(got.ok ? got.value?.events.map((e) => e._tag) : got).toEqual(["j_secret", "j_dispute"]);
-    expect(got.ok ? got.value?.events[0] : got).toEqual({ _tag: "j_secret", secret });
+    expect(got.ok ? got.value?.events[0] : got).toEqual({ _tag: "j_secret", secret, at: 2n });
     expect(got.ok ? got.value?.events[1] : got).toMatchObject({ _tag: "j_dispute", body: CLAUSED });
     expect(callsOf(at).filter((c) => c.startsWith("input"))).toEqual([`input ${txOf(2n, 0n).slice(-4)}`]);
   });
 
   const SECRET_BYTES = Uint8Array.from({ length: 32 }, (_, i) => (i === 31 ? 8 : 0));
-  const SECRET_TOLD: EntityInput = { _tag: "j_secret", secret: SECRET_BYTES };
+  const toldAt = (at: bigint): EntityInput => ({ _tag: "j_secret", secret: SECRET_BYTES, at });
+  const SECRET_TOLD = toldAt(2n);
 
   /** A finalize at block 2 that shows a secret, in the transaction `tx`, after an epoch advance of the same block. */
   const finalizing = (tx = txOf(2n, 1n)) => {
@@ -275,7 +282,7 @@ describe("host/shell/watch the J loop's poll", () => {
     const bytes = Uint8Array.from({ length: 32 }, (_, i) => (i === 31 ? 10 : 0));
     const other: EntityInput = { _tag: "j_epoch", peer: peer(OTHER), epoch: 1n, stored: 5n };
     const again: EntityInput = { _tag: "j_epoch", peer: peer(RIGHT), epoch: 1n, stored: 5n };
-    expect(got.told).toEqual([BEHIND, SECRET_TOLD, EPOCH, other, again, { _tag: "j_secret", secret: bytes }]);
+    expect(got.told).toEqual([BEHIND, toldAt(1n), EPOCH, other, again, { _tag: "j_secret", secret: bytes, at: 4n }]);
     expect(got.last?.height).toBe(6n as never);
     expect(got.carry.held.map((e) => e._tag)).toEqual(["dispute_finalized"]);
     expect([...got.carry.failing.keys()]).toEqual([tx]);
@@ -309,13 +316,13 @@ describe("host/shell/watch the J loop's poll", () => {
       refuse("Unsupported method (JSON-RPC code -32000)"), refuse("nope (JSON-RPC code -32601)"),
     ];
     const bytes = Uint8Array.from({ length: 32 }, (_, i) => (i === 31 ? 10 : 0));
-    const secret: EntityInput = { _tag: "j_secret", secret: bytes };
+    const secret: EntityInput = { _tag: "j_secret", secret: bytes, at: 3n };
     await Promise.all(replies.map(async (reply) => {
       const later = logOf("SecretRevealed", { hashlock: hexOf(9n), revealer: RIGHT, secret: hexOf(10n) }, 3n, 0n);
       const { tx, logs } = finalizing();
       const hidden = Uint8Array.of(0xca, 0xfe, 0xba, 0xbe, 1, 2, 3, 4);
       const base = portOf(straight(6n, [...logs, later]), logPath(), -1n, new Map([[tx, hidden]]));
-      const got = await poll({ ...base, trace: watchPort(node(reply), DEPOSITORY).trace }, start(2n), LEFT);
+      const got = await poll({ ...base, trace: watchPort(node(reply), DEPLOYED).trace }, start(2n), LEFT);
       const unread: EntityInput = { _tag: "j_finalize_unread", peer: peer(RIGHT), tx };
       expect(got.ok ? got.value?.events : got).toEqual([EPOCH, OVER, unread, secret]);
       expect(got.ok ? got.value?.height : got).toBe(4n as never);
@@ -335,7 +342,7 @@ describe("host/shell/watch the J loop's poll", () => {
       const node: Rpc = (method) =>
         Promise.resolve(method === "debug_traceTransaction" ? ok(tree) : err({ _tag: "rpc", reason: "no" }));
       const base = portOf(straight(6n, logs), logPath(), -1n, new Map([[tx, hidden]]));
-      const got = await poll({ ...base, trace: watchPort(node, DEPOSITORY).trace }, start(2n), LEFT);
+      const got = await poll({ ...base, trace: watchPort(node, DEPLOYED).trace }, start(2n), LEFT);
       expect(got.ok ? got.value?.events : got).toEqual(TOLD);
     }));
   });
@@ -343,7 +350,7 @@ describe("host/shell/watch the J loop's poll", () => {
   test("R-WATCH-STALL an input the node cannot give holds the finalize alone: its advance is told", async () => {
     const { logs } = finalizing();
     const early = await stepped(portOf(straight(6n, [shownAt(1n), ...logs]), logPath()), FRESH, NO_STANDING);
-    expect(early.told).toEqual([BEHIND, SECRET_TOLD, EPOCH]);
+    expect(early.told).toEqual([BEHIND, toldAt(1n), EPOCH]);
     const first = await stepped(portOf(straight(6n, logs.slice(0, 1)), logPath(), "input"), FRESH, NO_STANDING);
     expect(tagsOf(first.told)).toEqual(["j_epoch"]);
   });
@@ -361,7 +368,7 @@ describe("host/shell/watch the J loop's poll", () => {
   test("R-WATCH-CALLDATA a transaction of a young block the node does not know holds like a fault", async () => {
     const { logs } = finalizing();
     const got = await stepped(portOf(straight(6n, [shownAt(1n), ...logs]), logPath(), "unknown"), FRESH, NO_STANDING);
-    expect(got.told).toEqual([BEHIND, SECRET_TOLD, EPOCH]);
+    expect(got.told).toEqual([BEHIND, toldAt(1n), EPOCH]);
     expect(got.last?.height).toBe(4n as never);
   });
 
@@ -371,7 +378,7 @@ describe("host/shell/watch the J loop's poll", () => {
     const third = finalizedOf(second.op, 3n, 1n, txOf(3n, 1n));
     const logs = [shownAt(1n), advanced(2n, 0n, 1n), second.logs[1], advanced(3n, 0n, 1n), third];
     const got = await stepped(portOf(straight(7n, logs), at), FRESH, NO_STANDING);
-    expect(got.told).toEqual([BEHIND, SECRET_TOLD, EPOCH, EPOCH]);
+    expect(got.told).toEqual([BEHIND, toldAt(1n), EPOCH, EPOCH]);
     expect(got.carry.held).toHaveLength(2);
     expect(callsOf(at).some((c) => c.startsWith("trace"))).toBe(false);
   });
@@ -757,10 +764,10 @@ describe("host/shell/watch the J loop's poll", () => {
 
   test("R-JLOOP the cursor begins at the chain's own block, or at the port's fault", async () => {
     const config: WatchConfig = {
-      port: portOf(straight(9n), logPath()), depository: DEPOSITORY, depth: 3n, hosted: LEFT, value: false,
+      port: portOf(straight(9n), logPath()), deployed: DEPLOYED, depth: 3n, hosted: LEFT, value: false,
     };
     const begun = await beginAt(config, 5n);
-    expect(begun.ok ? begun.value : begun).toEqual({ depository: DEPOSITORY, depth: 3n, applied: blockOf(5n) });
+    expect(begun.ok ? begun.value : begun).toEqual({ deployed: DEPLOYED, depth: 3n, applied: blockOf(5n) });
     const down = await beginAt({ ...config, port: portOf(straight(9n), logPath(), 5n) }, 5n);
     expect(down).toEqual(err(DOWN));
   });

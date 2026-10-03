@@ -15,7 +15,9 @@ import { err, flatMap, foldResult, map, ok, type Result } from "../kernel/core/r
 import type { Tagged } from "../kernel/core/tagged.ts";
 import { jHeight, type HeightFault, type JHeight } from "../account/clause/clock.ts";
 import { finalizedSecrets, startedBody, type Read } from "./calldata/decode.ts";
-import { decodeLogs, type Address, type Bytes32, type ChainEvent, type LogFault, type RawLog } from "./log.ts";
+import {
+  decodeLogs, type Address, type Bytes32, type ChainEvent, type Deployed, type LogFault, type RawLog,
+} from "./log.ts";
 import {
   hostsAny, observe, readingsOf, type Accounts, type Addressed, type Beyond, type JEvent, type ObserveFault,
   type Reading,
@@ -25,7 +27,7 @@ import {
 export type Block = Readonly<{ number: bigint; hash: Bytes32; parent: Bytes32; timestamp: bigint }>;
 
 /** What the Host knows: where it has delivered up to, how deep a block must be buried, and the contract it watches. */
-export type Watch = Readonly<{ depository: Address; depth: bigint; applied: Block }>;
+export type Watch = Readonly<{ deployed: Deployed; depth: bigint; applied: Block }>;
 
 export type WatchFault =
   | Tagged<"bad_depth", { depth: bigint }>
@@ -40,8 +42,8 @@ export type WatchFault =
   | HeightFault;
 
 /** Start at a block already final: the deployment block's parent, or the cursor the Host last stored. */
-export const watching = (depository: Address, depth: bigint, from: Block): Result<Watch, WatchFault> =>
-  (depth < 0n ? err({ _tag: "bad_depth", depth }) : ok({ depository, depth, applied: from }));
+export const watching = (deployed: Deployed, depth: bigint, from: Block): Result<Watch, WatchFault> =>
+  (depth < 0n ? err({ _tag: "bad_depth", depth }) : ok({ deployed, depth, applied: from }));
 
 /** The highest block whose events may be delivered when the chain's head is `head`. */
 export const finalizedAt = (depth: bigint, head: bigint): bigint => (head > depth ? head - depth : 0n);
@@ -98,7 +100,7 @@ export const prepare = (w: Watch, batch: Batch): Result<Prepared, WatchFault> =>
   flatMap(linked(w, batch.blocks), (tip) =>
     flatMap(buried(w, batch, tip), (last) =>
       flatMap(belonging(batch.blocks, batch.logs), () =>
-        map(decodeLogs(w.depository, batch.logs), (events) => ({ last, events })))));
+        map(decodeLogs(w.deployed, batch.logs), (events) => ({ last, events })))));
 
 /**
  * Whether an event needs the bytes of its transaction: a dispute finalize of an Account a hosted Entity is a party to

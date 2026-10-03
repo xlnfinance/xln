@@ -7,7 +7,8 @@ import {
   bytes32, address, decodeLog, decodeLogs, IGNORED, READ_SIGNATURES, topicOf, type ChainEvent, type RawLog,
 } from "./log.ts";
 import {
-  bodyHashOf, DEPOSITORY, DEPOSITORY_ABI, entityOf, hashOf, hexOf, lifecyclePhases, logOf, must, txOf,
+  bodyHashOf, DEPLOYED, DEPOSITORY, DEPOSITORY_ABI, entityOf, hashOf, hexOf, lifecyclePhases, logOf, must,
+  transformerLogOf, txOf,
 } from "./fixtures.ts";
 
 const LEFT = entityOf(0x11n);
@@ -39,7 +40,7 @@ describe("j/log", () => {
       .filter(({ e }) => e.name !== "AccountSettled" && e.name !== "SecretRevealed");
     expect(seen.length).toBeGreaterThan(10);
     seen.forEach(({ e, log }) => {
-      const decoded = decodeLog(DEPOSITORY, log);
+      const decoded = decodeLog(DEPLOYED, log);
       expect(decoded.ok).toBe(true);
       expect(decoded.ok && decoded.value._tag === "some").toBe(read.has(e.name));
     });
@@ -49,7 +50,7 @@ describe("j/log", () => {
   test("R-J-COLLATERAL the real deposit and settlement read the collateral and ondelta the contract stored", () => {
     const settled = Object.values(lifecyclePhases)
       .flatMap((phase) => phase.events.filter((e) => e.name === "AccountSettled"));
-    const read = settled.map((e, i) => must(decodeLog(DEPOSITORY, logOf(e.name, e.args, BigInt(i + 1), 0n))));
+    const read = settled.map((e, i) => must(decodeLog(DEPLOYED, logOf(e.name, e.args, BigInt(i + 1), 0n))));
     const holdings = read.map((found) => (found._tag === "some" && found.value._tag === "account_settled"
       ? found.value.holdings.map(({ token, collateral, ondelta }) => [token, collateral, ondelta]) : []));
     expect(holdings).toEqual([[[1n, 100n, 100n]], [[1n, 90n, 90n]]]);
@@ -63,7 +64,7 @@ describe("j/log", () => {
     }, 6n, 1n);
 
   const heldBy = (log: RawLog) => {
-    const found = must(decodeLog(DEPOSITORY, log));
+    const found = must(decodeLog(DEPLOYED, log));
     return found._tag === "some" && found.value._tag === "account_settled" ? found.value : undefined;
   };
 
@@ -104,13 +105,13 @@ describe("j/log", () => {
       settledLog([{ token: 1n, collateral: 1n, high: 0n, low: 1n }], RIGHT, LEFT),
       settledLog([{ token: 1n, collateral: 1n, high: 0n, low: 1n }], LEFT, LEFT),
     ];
-    faulty.forEach((log) => expect(decodeLog(DEPOSITORY, log)).toEqual(fault));
+    faulty.forEach((log) => expect(decodeLog(DEPLOYED, log)).toEqual(fault));
   });
 
 
   test("an epoch advance reads its two entities from the topics and its epoch from the data", () => {
     const log = logOf("AccountEpochAdvanced", { left: LEFT, right: RIGHT, ondeltaEpoch: 9n }, 4n, 2n);
-    expect(decodeLog(DEPOSITORY, log)).toEqual(ok({
+    expect(decodeLog(DEPLOYED, log)).toEqual(ok({
       _tag: "some",
       value: {
         _tag: "epoch_advanced", block: 4n, blockHash: hashOf(4n), index: 2n, left: LEFT, right: RIGHT, epoch: 9n,
@@ -120,7 +121,7 @@ describe("j/log", () => {
 
   test("R-DISPUTE-FREEZE a revealed secret reads hashlock and revealer from topics, the secret from data", () => {
     const log = logOf("SecretRevealed", { hashlock: hexOf(7n), revealer: LEFT, secret: hexOf(8n) }, 5n, 1n);
-    expect(decodeLog(DEPOSITORY, log)).toEqual(ok({
+    expect(decodeLog(DEPLOYED, log)).toEqual(ok({
       _tag: "some",
       value: {
         _tag: "secret_revealed", block: 5n, blockHash: hashOf(5n), index: 1n, hashlock: must(bytes32(hexOf(7n))),
@@ -133,7 +134,37 @@ describe("j/log", () => {
       { ...log, topics: log.topics.slice(0, 2) }, { ...log, data: `${log.data}${"00".repeat(32)}` },
       { ...log, data: "0x" },
     ];
-    bad.forEach((broken) => expect(decodeLog(DEPOSITORY, broken)).toEqual(fault));
+    bad.forEach((broken) => expect(decodeLog(DEPLOYED, broken)).toEqual(fault));
+  });
+
+  test("R-REVEAL-DIRECT the transformer's own reveal, by anyone, is a shown secret with no revealer", () => {
+    const log = transformerLogOf(hexOf(7n), hexOf(8n), 5n, 1n);
+    expect(String(log.topics[0])).toBe(topicOf("SecretRevealed(bytes32,bytes32)"));
+    expect(decodeLog(DEPLOYED, log)).toEqual(ok({
+      _tag: "some",
+      value: {
+        _tag: "secret_revealed", block: 5n, blockHash: hashOf(5n), index: 1n, hashlock: must(bytes32(hexOf(7n))),
+        revealer: undefined, secret: must(bytes32(hexOf(8n))),
+      },
+    }));
+  });
+
+  test("R-REVEAL-DIRECT a log of the transformer that is not its reveal, or not shaped as one, is a fault", () => {
+    const log = transformerLogOf(hexOf(7n), hexOf(8n), 5n, 1n);
+    const at = { block: 5n, blockHash: hashOf(5n), index: 1n };
+    const topic = log.topics[0] ?? "";
+    expect(decodeLog(DEPLOYED, { ...log, topics: [must(bytes32(hexOf(9n))), ...log.topics.slice(1)] }))
+      .toEqual(err({ _tag: "unknown_event", ...at, topic: hexOf(9n) }));
+    const padded = `${log.data}${"00".repeat(32)}`;
+    [{ ...log, topics: log.topics.slice(0, 1) }, { ...log, data: "0x" }, { ...log, data: padded }]
+      .forEach((broken) => expect(decodeLog(DEPLOYED, broken)).toEqual(err({ _tag: "bad_log", ...at, event: topic })));
+  });
+
+  test("R-REVEAL-DIRECT a log from an address that is neither the Depository nor the transformer is foreign", () => {
+    const log = transformerLogOf(hexOf(7n), hexOf(8n), 5n, 1n);
+    const other = must(address(hexOf(0xdeadn, 20)));
+    expect(decodeLog(DEPLOYED, { ...log, address: other }))
+      .toEqual(err({ _tag: "foreign_log", block: 5n, blockHash: hashOf(5n), index: 1n, address: other }));
   });
 
   test("a dispute start, a counter and a finalize read sender, counterentity and nonce from the topics", () => {
@@ -150,7 +181,7 @@ describe("j/log", () => {
       ...disputeArgs, finalProofbodyHash: hexOf(5n), finalizationEvidenceHash: hexOf(6n),
     }, 3n, 2n);
     const fact = { sender: RIGHT, counter: LEFT, nonce: 7n, block: 3n, blockHash: hashOf(3n) };
-    expect(decodeLogs(DEPOSITORY, [started, countered, finalized])).toEqual(ok([
+    expect(decodeLogs(DEPLOYED, [started, countered, finalized])).toEqual(ok([
       {
         _tag: "dispute_started", ...fact, proposerIsLeft: true, bodyHash: bodyHashOf(1n), timeout: 5n, index: 0n,
         secrets: [], tx: txOf(3n, 0n), body: undefined, unread: false,
@@ -167,9 +198,9 @@ describe("j/log", () => {
     const reserve = logOf("ReserveUpdated", { entity: LEFT, tokenId: 1n, newBalance: 2n }, 1n, 0n);
     const log: RawLog = { ...reserve, topics: [LEFT] };
     const at = { block: 1n, blockHash: hashOf(1n), index: 0n };
-    expect(decodeLog(DEPOSITORY, log)).toEqual(err({ _tag: "unknown_event", ...at, topic: LEFT }));
+    expect(decodeLog(DEPLOYED, log)).toEqual(err({ _tag: "unknown_event", ...at, topic: LEFT }));
     const bare = { ...log, topics: [] };
-    expect(decodeLog(DEPOSITORY, bare)).toEqual(err({ _tag: "unknown_event", ...at, topic: "" }));
+    expect(decodeLog(DEPLOYED, bare)).toEqual(err({ _tag: "unknown_event", ...at, topic: "" }));
   });
 
   test("R-WATCH-CLOSED a log of another address is a fault: the node is asked for the Depository's logs", () => {
@@ -177,12 +208,12 @@ describe("j/log", () => {
     const log = logOf("AccountEpochAdvanced", { left: LEFT, right: RIGHT, ondeltaEpoch: 1n }, 2n, 0n);
     const at = { block: 2n, blockHash: hashOf(2n), index: 0n };
     const refused = err({ _tag: "foreign_log" as const, ...at, address: stranger });
-    expect(decodeLog(DEPOSITORY, { ...log, address: stranger })).toEqual(refused);
+    expect(decodeLog(DEPLOYED, { ...log, address: stranger })).toEqual(refused);
   });
 
   test("a log that is not the shape its signature says is a fault: topics, data, and whole words", () => {
     const good = logOf("AccountEpochAdvanced", { left: LEFT, right: RIGHT, ondeltaEpoch: 1n }, 2n, 0n);
-    const bad = (log: RawLog) => decodeLog(DEPOSITORY, log);
+    const bad = (log: RawLog) => decodeLog(DEPLOYED, log);
     const at = { block: 2n, blockHash: hashOf(2n), index: 0n };
     const fault = err({ _tag: "bad_log" as const, ...at, event: topicOf(READ_SIGNATURES[0] ?? "") });
     expect(bad({ ...good, topics: good.topics.slice(0, 2) })).toEqual(fault);
@@ -201,13 +232,13 @@ describe("j/log", () => {
   test("a fault in one log of a block range is the fault of the range, and no event of it is delivered", () => {
     const fine = logOf("AccountEpochAdvanced", { left: LEFT, right: RIGHT, ondeltaEpoch: 1n }, 2n, 0n);
     const bad: RawLog = { ...fine, index: 1n, topics: [LEFT] };
-    expect(decodeLogs(DEPOSITORY, [fine, bad]).ok).toBe(false);
-    expect(decodeLogs(DEPOSITORY, [fine]).ok).toBe(true);
+    expect(decodeLogs(DEPLOYED, [fine, bad]).ok).toBe(false);
+    expect(decodeLogs(DEPLOYED, [fine]).ok).toBe(true);
   });
 
   test("an ignored event is none, not a fault", () => {
     const reserve = logOf("ReserveUpdated", { entity: LEFT, tokenId: 1n, newBalance: 2n }, 1n, 0n);
-    expect(decodeLog(DEPOSITORY, reserve)).toEqual(ok(none));
+    expect(decodeLog(DEPLOYED, reserve)).toEqual(ok(none));
   });
 
   test("hex is lowercase 0x text of the exact width", () => {

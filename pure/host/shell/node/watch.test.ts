@@ -5,7 +5,7 @@ import { describe, expect, test } from "bun:test";
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { err, ok } from "../../../kernel/core/result.ts";
 import {
-  blockOf, DEPOSITORY, entityOf as bytes, evidenceOf, finalizeInput, finalizeOp, hexOf, logOf, must as made,
+  blockOf, DEPLOYED, entityOf as bytes, evidenceOf, finalizeInput, finalizeOp, hexOf, logOf, must as made,
 } from "../../../j/fixtures.ts";
 import type { Row } from "../../../runtime/model.ts";
 import { entityOf as entityNumbered, forwarded } from "../../../entity/fixtures.ts";
@@ -94,7 +94,7 @@ const portOf = (chain: Chain, log: string, found = [advanced(105n, 1n)], kind = 
 });
 
 const watchOf = (chain: Chain, log: string, found = [advanced(105n, 1n)], kind = QUIET): WatchConfig => ({
-  port: portOf(chain, log, found, kind), depository: DEPOSITORY, depth: DEPTH, hosted: bytes(1n), value: kind.value,
+  port: portOf(chain, log, found, kind), deployed: DEPLOYED, depth: DEPTH, hosted: bytes(1n), value: kind.value,
 });
 
 const STRAIGHT: Chain = { head: 112n, fork: () => 0n };

@@ -6,9 +6,8 @@ import type { Read } from "./decode.ts";
 import { observe, type Accounts, type Addressed } from "../observe.ts";
 import { calldataWanted, withCalldata, type Prepared } from "../watch.ts";
 import {
-  argumentsOf, blockOf, bodyHashOf, CLAUSED, DEPOSITORY, direct, entityOf, finalizedOf, finalizeInput, finalizeOp,
-  hexOf,
-  logOf, must, patched, startInput, startOp, txOf,
+  argumentsOf, blockOf, bodyHashOf, CLAUSED, DEPLOYED, DEPOSITORY, direct, entityOf, finalizedOf, finalizeInput,
+  finalizeOp, hexOf, logOf, must, patched, startInput, startOp, txOf,
 } from "../fixtures.ts";
 import { proofBodyHash } from "../../chain/proof/proof.ts";
 
@@ -31,7 +30,7 @@ const started = (block: bigint, index: bigint, initial: readonly string[], proof
   }, block, index);
 
 const preparedOf = (...logs: Parameters<typeof decodeLogs>[1]): Prepared =>
-  ({ last: blockOf(2n), events: must(decodeLogs(DEPOSITORY, logs)) });
+  ({ last: blockOf(2n), events: must(decodeLogs(DEPLOYED, logs)) });
 
 const accounts: Accounts = new Map([[`2:${blockOf(2n).hash}:${LEFT}:${RIGHT}`, { epoch: 1n, nonce: 5n }]]);
 
@@ -45,8 +44,8 @@ describe("j/shown", () => {
     const inputs = new Map([[TX, [direct(finalizeInput(RIGHT, [op]))]]]);
     const read = withCalldata(preparedOf(advance(2n, 0n, 1n), finalizedOf(op, 2n, 1n, TX)), inputs);
     expect(observe(read.events, [LEFT, THIRD], accounts)).toEqual(ok([
-      toward(LEFT, { _tag: "j_secret", secret: SECRET }),
-      toward(THIRD, { _tag: "j_secret", secret: SECRET }),
+      toward(LEFT, { _tag: "j_secret", secret: SECRET, at: 2n }),
+      toward(THIRD, { _tag: "j_secret", secret: SECRET, at: 2n }),
       toward(LEFT, { _tag: "j_epoch", peer: RIGHT, epoch: 1n, stored: 5n, finalBodyHash: bodyHashOf(5n) }),
       toward(LEFT, { _tag: "j_dispute_over", peer: RIGHT }),
     ]));
@@ -59,7 +58,7 @@ describe("j/shown", () => {
     const read = withCalldata(prepared, new Map([[TX, [direct(input)]]]));
     const told = must(observe(read.events, [LEFT], accounts));
     const shown = told.filter((a) => a.event._tag === "j_secret");
-    expect(shown).toEqual([toward(LEFT, { _tag: "j_secret", secret: OTHER_SECRET })]);
+    expect(shown).toEqual([toward(LEFT, { _tag: "j_secret", secret: OTHER_SECRET, at: 2n })]);
   });
 
   test("R-WATCH-CALLDATA a finalize with no advance before it tells its own secrets, just ahead of itself", () => {
@@ -67,7 +66,7 @@ describe("j/shown", () => {
     const inputs = new Map([[TX, [direct(finalizeInput(RIGHT, [op]))]]]);
     const read = withCalldata(preparedOf(finalizedOf(op, 2n, 1n, TX)), inputs);
     expect(observe(read.events, [LEFT], accounts)).toEqual(ok([
-      toward(LEFT, { _tag: "j_secret", secret: SECRET }),
+      toward(LEFT, { _tag: "j_secret", secret: SECRET, at: 2n }),
       toward(LEFT, { _tag: "j_dispute_over", peer: RIGHT }),
     ]));
   });
@@ -76,7 +75,7 @@ describe("j/shown", () => {
     const prepared = preparedOf(started(2n, 0n, [SECRET]));
     const told = must(observe(prepared.events, [LEFT], accounts));
     expect(told.map((a) => a.event._tag)).toEqual(["j_secret", "j_dispute"]);
-    expect(told[0]).toEqual(toward(LEFT, { _tag: "j_secret", secret: SECRET }));
+    expect(told[0]).toEqual(toward(LEFT, { _tag: "j_secret", secret: SECRET, at: 2n }));
   });
 
   test("R-WATCH-CALLDATA the Host is asked once for the input of each transaction of a hosted dispute", () => {

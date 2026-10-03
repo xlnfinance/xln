@@ -6,7 +6,9 @@ import { appendFileSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { err, ok, type Result } from "../../../kernel/core/result.ts";
-import { DEPOSITORY, DEPOSITORY_ABI, entityOf, hashOf, hexOf, txOf } from "../../../j/fixtures.ts";
+import {
+  DEPLOYED, DEPOSITORY, DEPOSITORY_ABI, entityOf, hashOf, hexOf, TRANSFORMER, txOf,
+} from "../../../j/fixtures.ts";
 import { blockOf } from "../../../j/fixtures.ts";
 import type { Rpc, RpcFault } from "./port.ts";
 import { watchPort } from "./watch.ts";
@@ -32,7 +34,7 @@ const rpcOf = (node: Node, log: string): Rpc => (method, params) => {
   return Promise.resolve(answer === undefined ? err({ _tag: "rpc", reason: `no ${method}` }) : answer(params));
 };
 
-const portOf = (node: Node, log: string = logPath()) => watchPort(rpcOf(node, log), ADDRESS);
+const portOf = (node: Node, log: string = logPath()) => watchPort(rpcOf(node, log), DEPLOYED);
 
 const TX = `0x${"ab".repeat(32)}`;
 
@@ -82,7 +84,10 @@ describe("host/shell/evm/watch the J loop's reads of the chain", () => {
       [3n, 0n, hashOf(3n), ADDRESS, "0xabcd", txOf(3n, 0n)], [4n, 2n, hashOf(4n), ADDRESS, "0xabcd", txOf(4n, 2n)],
     ]);
     expect(got.ok ? got.value[0]?.topics : got).toEqual([hexOf(7n), hexOf(8n)] as never);
-    expect(askedOf(log)).toEqual([`eth_getLogs [{"address":"${ADDRESS}","fromBlock":"0x3","toBlock":"0x4"}]`]);
+    const both = `["${ADDRESS}","${TRANSFORMER}"]`;
+    expect(askedOf(log)).toEqual([`eth_getLogs [{"address":${both},"fromBlock":"0x3","toBlock":"0x4"}]`]);
+    const theirs = await portOf({ eth_getLogs: () => ok([rawLog(3n, 0n, { address: TRANSFORMER })]) }).logs(3n, 4n);
+    expect(theirs.ok ? theirs.value.map((l) => l.address) : theirs).toEqual([TRANSFORMER]);
     const asked = (...logs: readonly unknown[]) => portOf({ eth_getLogs: () => ok(logs) }).logs(3n, 4n);
     expect(await asked(rawLog(3n, 0n, { address: `0x${"11".repeat(20)}` }))).toMatchObject({ ok: false });
     expect(await asked(rawLog(2n, 0n))).toMatchObject({ ok: false });
@@ -97,6 +102,38 @@ describe("host/shell/evm/watch the J loop's reads of the chain", () => {
     expect(await portOf({ eth_getLogs: () => ok("nothing") }).logs(3n, 4n)).toMatchObject({ ok: false });
     expect(await portOf({ eth_getLogs: () => down }).logs(3n, 4n))
       .toMatchObject({ ok: false, error: { call: "watch logs" } });
+  });
+
+  /** A node that answers no range of more than `most` blocks, as a hosted provider refuses a reply of too many logs. */
+  const capped = (most: bigint): Node => ({
+    eth_getLogs: ([filter]) => {
+      const { fromBlock, toBlock } = filter as { fromBlock: string; toBlock: string };
+      const [from, to] = [BigInt(fromBlock), BigInt(toBlock)];
+      return to - from + 1n > most ? refusal("query returned more than 10000 results")
+        : ok(Array.from({ length: Number(to - from) + 1 }, (_, i) => rawLog(from + BigInt(i), 0n)));
+    },
+  });
+
+  test("R-WATCH-STALL a range the node will not answer is asked as halves down to one block, in order", async () => {
+    const log = logPath();
+    const got = await portOf(capped(2n), log).logs(10n, 17n);
+    expect(got.ok ? got.value.map((l) => l.block) : got).toEqual([10n, 11n, 12n, 13n, 14n, 15n, 16n, 17n]);
+    const asked = askedOf(log).map((l) => /"fromBlock":"(0x[0-9a-f]+)","toBlock":"(0x[0-9a-f]+)"/.exec(l)?.slice(1, 3));
+    expect(asked.map((r) => r?.map((x) => Number(x)))).toEqual([
+      [10, 17], [10, 13], [10, 11], [12, 13], [14, 17], [14, 15], [16, 17],
+    ]);
+    const single = await portOf(capped(1n)).logs(10n, 13n);
+    expect(single.ok ? single.value.map((l) => l.block) : single).toEqual([10n, 11n, 12n, 13n]);
+  });
+
+  test("R-WATCH-STALL a block the node will not answer alone is the poll's fault, one call per halving", async () => {
+    const log = logPath();
+    const got = await portOf(capped(0n), log).logs(0n, 63n);
+    expect(got).toMatchObject({ ok: false, error: { call: "watch logs" } });
+    expect(askedOf(log)).toHaveLength(7);
+    const down7 = logPath();
+    expect(await portOf({ eth_getLogs: () => down }, down7).logs(5n, 5n)).toMatchObject({ ok: false });
+    expect(askedOf(down7)).toHaveLength(1);
   });
 
   test("R-WATCH-CALLDATA a transaction is asked for by hash and its input comes back as bytes", async () => {

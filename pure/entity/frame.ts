@@ -2,6 +2,7 @@
 // Account, and the Accounts then propose. The phases are the only order there is: where an arrival sits among the
 // frame's commands does not matter, and a command always sees what the arrivals of its own frame did (R-E1).
 import { mapDelete, mapSet } from "../kernel/core/collections.ts";
+import { keccakHex } from "../kernel/encoding/bytes.ts";
 import { emptyReplica } from "../account/frame/account.ts";
 import type { JHeight, JView } from "../account/clause/clock.ts";
 import {
@@ -132,9 +133,32 @@ const takenFrom = (w: Work, a: PeerMessage, outcome: Outcome<PeerFault>): Work =
   return frozen ? { ...w, state: { ...w.state, paybook: revealedBy(book, txs) } } : w;
 };
 
-/** A secret the chain showed (R-DISPUTE-FREEZE): to the paybook it is the resolve of the payee, on any Account. */
-const secretShown = (w: Work, e: SecretRevealed): Work =>
-  ({ ...w, state: { ...w.state, paybook: revealed(w.state.paybook, e.secret) } });
+/** The hashlocks an Entity can lose on: a hold of any Account (committed, proposed or queued), a paybook entry. */
+const named = (state: EntityState): ReadonlySet<string> => {
+  const held = (s: AccountState): readonly string[] =>
+    [...s.ledgers.values()].flatMap((l) => l.holds.map((h) => h.hashlock));
+  const queued = (r: EntityReplica): readonly string[] =>
+    r.mempool.flatMap((tx) => (tx._tag === "lock" ? [tx.hold.hashlock] : []));
+  const proposed = (r: EntityReplica): readonly string[] => (r.pending === undefined ? [] : held(r.pending.after));
+  const replicas = [...state.accounts.values()];
+  const holds = replicas.flatMap((r) => [...held(r.state), ...proposed(r), ...queued(r)]);
+  return new Set([...state.paybook.keys(), ...holds]);
+};
+
+/**
+ * A secret the chain showed (R-DISPUTE-FREEZE): to the paybook it is the resolve of the payee, on any Account. The
+ * lowest height it was shown at is kept only for a hashlock a hold or paybook entry of this Entity names, so that the
+ * Entity never co-signs the expiry of a hold the chain paid (R-REVEAL-BACKSTOP). `revealSecret` is open to anyone with
+ * any 32 bytes, so the map is bounded by the Entity's own holds and not by what strangers show: a reveal of a hashlock
+ * nothing names writes nothing and copies nothing. Owed: a hold made after its secret was shown.
+ */
+const secretShown = (w: Work, e: SecretRevealed): Work => {
+  const hashlock = keccakHex(e.secret);
+  const first = w.state.shown.get(hashlock);
+  const lower = first === undefined || e.at < first;
+  const shown = lower && named(w.state).has(hashlock) ? mapSet(w.state.shown, hashlock, e.at) : w.state.shown;
+  return { ...w, state: { ...w.state, shown, paybook: revealed(w.state.paybook, e.secret) } };
+};
 
 /** The side whose frame made the head the round took: mine when the peer's ack committed it, the peer's otherwise. */
 const authorOf = (heard: Heard<AccountTx, AccountState, PeerFault>): Side => {
@@ -1000,7 +1024,8 @@ export const entityFrame = (
   const rules: Rulebook = (w, peer) => {
     const facts = factsOf(w, peer);
     return entityRules(judge, signingOf(anchor, w.state.id, peer, facts),
-      { self: sideOf(w.state.id, peer), frozen: quiet(facts), unruled: unruled(w.state), blind: w.state.blind });
+      { self: sideOf(w.state.id, peer), frozen: quiet(facts), unruled: unruled(w.state), blind: w.state.blind,
+        shown: w.state.shown });
   };
   const hear = (w: Work, a: Arrival) => arrive(rules, anchor.terms, anchor.check, judge.view, w, a);
   const arrived = arrivalsOf(inputs).reduce(hear, start(state));

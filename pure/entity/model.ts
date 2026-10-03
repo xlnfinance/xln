@@ -29,7 +29,7 @@ export const entityId = (text: string): Result<EntityId, BadEntityId> =>
 export const sideOf = (self: EntityId, peer: EntityId): Side => (self < peer ? "left" : "right");
 
 /** What a frame of an Account can be refused for: the Account's own faults, and that the node's signature is out. */
-export type PeerFault = AccountFault | Tagged<"frozen"> | Tagged<"reveal_unknown">;
+export type PeerFault = AccountFault | Tagged<"frozen"> | Tagged<"reveal_unknown"> | Tagged<"revealed_on_chain">;
 
 /** One side of an Account as the Entity holds it. */
 export type EntityReplica = Replica<AccountTx, AccountState, PeerFault>;
@@ -50,6 +50,8 @@ export type EntityState = Readonly<{
   revealed: ReadonlyMap<EntityId, readonly string[]>;
   chain: ReadonlyMap<EntityId, ChainFacts>;
   paybook: Paybook;
+  /** The lowest J height at which the chain showed the secret of a hashlock (`j_secret`): the key is the hashlock. */
+  shown: ReadonlyMap<string, bigint>;
   /**
    * The Host's provider can give no call trace (`j_blind`), so a secret shown inside a call it cannot read may reach
    * the chain unseen: this Entity forwards no lock while it holds, and still watches and defends every Account.
@@ -66,7 +68,7 @@ export type PeerProof = Readonly<{ head: FrameHash; slot: number; author: Side; 
 export const emptyEntity = (id: EntityId): EntityState =>
   ({
     id, accounts: new Map(), proofs: new Map(), waiting: new Map(), revealed: new Map(), chain: new Map(),
-    paybook: new Map(), blind: false,
+    paybook: new Map(), shown: new Map(), blind: false,
   });
 
 /**
@@ -215,7 +217,7 @@ export type CosignAsk = Tagged<"cosign_ask", { from: EntityId; op: CosignOp }>;
  * so every Entity hears it, and the paybook of one that forwarded a lock under its hash passes it up
  * (R-DISPUTE-FREEZE).
  */
-export type SecretRevealed = Tagged<"j_secret", { secret: Uint8Array }>;
+export type SecretRevealed = Tagged<"j_secret", { secret: Uint8Array; at: bigint }>;
 
 /**
  * `j_blind` is the Host telling that a call that hides a secret cannot be read (R-WATCH-CALLDATA): the Entity forwards

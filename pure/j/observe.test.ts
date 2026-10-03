@@ -3,7 +3,7 @@ import { err, ok } from "../kernel/core/result.ts";
 import { tokenOf } from "../account/fixtures.ts";
 import { bytes32, decodeLogs, type ChainEvent } from "./log.ts";
 import { observe, readingKey, readingsOf, type Accounts, type Addressed, type Reading } from "./observe.ts";
-import { bodyHashOf, DEPOSITORY, entityOf, hashOf, hexOf, logOf, must } from "./fixtures.ts";
+import { bodyHashOf, DEPLOYED, DEPOSITORY, entityOf, hashOf, hexOf, logOf, must } from "./fixtures.ts";
 
 /** The proof the started dispute of `started` opened with: its author and body hash. */
 const OPENED = { proposerIsLeft: true, bodyHash: bodyHashOf(1n) } as const;
@@ -39,7 +39,7 @@ const settled = (block: bigint, index: bigint, rows: readonly (readonly [bigint,
   }, block, index);
 
 const eventsOf = (...logs: Parameters<typeof decodeLogs>[1]): readonly ChainEvent[] =>
-  must(decodeLogs(DEPOSITORY, logs));
+  must(decodeLogs(DEPLOYED, logs));
 
 type Row = readonly [string, { epoch: bigint; nonce: bigint }];
 
@@ -165,8 +165,8 @@ describe("j/observe", () => {
     expect(readingsOf(events, [])).toEqual([]);
     const secret = must(bytes32(hexOf(8n)));
     expect(observe(events.slice(0, 1), [LEFT, THIRD], accountsOf())).toEqual(ok([
-      toward(LEFT, { _tag: "j_secret", secret }),
-      toward(THIRD, { _tag: "j_secret", secret }),
+      toward(LEFT, { _tag: "j_secret", secret, at: 4n }),
+      toward(THIRD, { _tag: "j_secret", secret, at: 4n }),
     ]));
     expect(observe(events.slice(0, 1), [], accountsOf())).toEqual(ok([]));
   });

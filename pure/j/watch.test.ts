@@ -8,7 +8,7 @@ import {
   type WatchFault, type Window,
 } from "./watch.ts";
 import {
-  blockOf, blocksBetween, bodyHashOf, DEPOSITORY, entityOf, hashOf, hexOf, logOf, must, txOf,
+  blockOf, blocksBetween, bodyHashOf, DEPLOYED, DEPOSITORY, entityOf, hashOf, hexOf, logOf, must, txOf,
 } from "./fixtures.ts";
 
 const LEFT = entityOf(0x11n);
@@ -19,7 +19,7 @@ const OPENED = { proposerIsLeft: true, bodyHash: bodyHashOf(1n) } as const;
 
 const GENESIS = blockOf(0n);
 
-const start = (depth: bigint, from: Block = GENESIS): Watch => must(watching(DEPOSITORY, depth, from));
+const start = (depth: bigint, from: Block = GENESIS): Watch => must(watching(DEPLOYED, depth, from));
 
 const advanced = (block: bigint, index: bigint, epoch: bigint, fork = 0n) =>
   logOf("AccountEpochAdvanced", { left: LEFT, right: RIGHT, ondeltaEpoch: epoch }, block, index, fork);
@@ -144,8 +144,8 @@ describe("j/watch", () => {
   });
 
   test("R-WATCH-DEPTH a depth below zero is refused when the watch starts", () => {
-    expect(watching(DEPOSITORY, -1n, GENESIS)).toEqual(err({ _tag: "bad_depth", depth: -1n }));
-    expect(watching(DEPOSITORY, 0n, GENESIS).ok).toBe(true);
+    expect(watching(DEPLOYED, -1n, GENESIS)).toEqual(err({ _tag: "bad_depth", depth: -1n }));
+    expect(watching(DEPLOYED, 0n, GENESIS).ok).toBe(true);
   });
 
   test("R-WATCH-DEPTH a first block whose parent is not the cursor's block is a reorg deeper than the depth", () => {
@@ -300,7 +300,7 @@ describe("j/watch", () => {
 });
 
 describe("j/watch what a transaction the Host cannot read holds back (R-WATCH-STALL)", () => {
-  const eventsOf = (logs: readonly RawLog[]): readonly ChainEvent[] => must(decodeLogs(DEPOSITORY, logs));
+  const eventsOf = (logs: readonly RawLog[]): readonly ChainEvent[] => must(decodeLogs(DEPLOYED, logs));
   const secret = (block: bigint, n: bigint) =>
     logOf("SecretRevealed", { hashlock: hexOf(n), revealer: RIGHT, secret: hexOf(n + 1n) }, block, 0n);
   const other = (block: bigint, index: bigint, epoch: bigint) =>

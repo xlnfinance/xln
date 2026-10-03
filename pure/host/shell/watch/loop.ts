@@ -17,7 +17,7 @@ import { entityId } from "../../../entity/model.ts";
 import { readOf, type Carried, type Read } from "../../../j/calldata/decode.ts";
 import { peerOfEvent, readingKey, type AccountAt, type Accounts, type Addressed } from "../../../j/observe.ts";
 import { hexToBytes } from "../../../kernel/encoding/bytes.ts";
-import { bytes32, type Address, type Bytes32, type ChainEvent, type RawLog } from "../../../j/log.ts";
+import { bytes32, type Bytes32, type ChainEvent, type Deployed, type RawLog } from "../../../j/log.ts";
 import {
   advance, calldataWanted, finalizedAt, needsBytes, prepare, readings, splitStalled, unreadTxs, watching, withCalldata,
   type Block, type Prepared, type Watch, type WatchFault, type Window,
@@ -68,7 +68,7 @@ export type WatchPort = Readonly<{
 
 /** What the node watches: the Depository, how deep a block must be buried, and the Entity it hosts. */
 export type WatchConfig = Readonly<{
-  port: WatchPort; depository: Address; depth: bigint; hosted: Bytes32;
+  port: WatchPort; deployed: Deployed; depth: bigint; hosted: Bytes32;
   /**
    * The node may hold value. A wrapper that builds its call at run time leaves no selector in its input, so the secret
    * of a relayed finalize is learned only from the call trace: a node with value boots only on a provider that has one,
@@ -146,7 +146,7 @@ export type Delivery = Readonly<{
 /** The cursor at the chain's own block `number`, final by the node's own choice (its view). */
 export const beginAt = async (config: WatchConfig, number: bigint): Promise<Result<Watch, JFault>> => {
   const block = await config.port.block(number);
-  return block.ok ? watching(config.depository, config.depth, block.value) : block;
+  return block.ok ? watching(config.deployed, config.depth, block.value) : block;
 };
 
 const blocksAfter = async (port: WatchPort, from: bigint, to: bigint): Promise<Result<readonly Block[], PortFault>> =>
@@ -207,7 +207,9 @@ const peerOf = (event: { peer: Bytes32 }): Result<EntityId, BadPeer> => {
 const inputOf = (event: Addressed["event"]): Result<EntityInput, BadPeer | BadSecret> => {
   if (event._tag !== "j_secret") return map(peerOf(event), (peer) => ({ ...event, peer }) as EntityInput);
   const bytes = hexToBytes(event.secret);
-  return bytes.ok ? ok({ _tag: "j_secret", secret: bytes.value }) : err({ _tag: "bad_secret", text: event.secret });
+  return bytes.ok
+    ? ok({ _tag: "j_secret", secret: bytes.value, at: event.at })
+    : err({ _tag: "bad_secret", text: event.secret });
 };
 
 /** The end of the window the Entity waits on, of a dispute it started or one it answers, while the window is open. */
