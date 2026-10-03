@@ -31,7 +31,11 @@ export type Boot = Readonly<{ setup: Setup; genesis: EntityState; limits: Limits
 
 export type Station = Readonly<{ host: Host; submitter: Submitter }>;
 
-export type DriveFault = StoreFault | Unwritable | ShellFault | Halt | Tagged<"stuck", { height: bigint }>;
+/** Pre-observation WALs cannot identify which finalizes were held versus already applied. Do not guess on upgrade. */
+export type ReadWaitUpgrade = Tagged<"read_wait_upgrade", { peers: readonly EntityId[] }>;
+
+export type DriveFault = StoreFault | Unwritable | ShellFault | Halt | ReadWaitUpgrade
+  | Tagged<"stuck", { height: bigint }>;
 
 /** What a move of the shell made: the messages that leave, what the builder did with each ask, and what came back. */
 export type Turn = Readonly<{
@@ -210,6 +214,10 @@ export const start = async (shell: Shell, boot: Boot): Promise<Result<Turn, Driv
     ? ok<Stepped>({ host: startHost(startRuntime(boot.setup, [boot.genesis]), boot.limits), effects: [] })
     : reopen(boot.setup, [boot.genesis], rows.value, boot.limits);
   if (!reopened.ok) return reopened;
+  const peers = [...reopened.value.host.runtime.entities.values()].flatMap((entity) =>
+    [...entity.chain].flatMap(([peer, facts]) =>
+      (facts.behind !== undefined && !facts.lost && facts.readWaits === undefined ? [peer] : [])));
+  if (peers.length > 0) return err({ _tag: "read_wait_upgrade", peers });
   const resumed = await resume(shell.io, boot.where, rows.value);
   if (!resumed.ok) return resumed;
   const base = pumped(nothing({ host: reopened.value.host, submitter: resumed.value.submitter }), resumed.value);

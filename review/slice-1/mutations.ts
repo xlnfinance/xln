@@ -22,6 +22,7 @@ const cases = [
   ["pending start epoch", "j/observe.ts", "epoch: epochAt(context, e, at)", "epoch: at.epoch", "host/shell/watch/loop.test.ts", "pending start keeps its event epoch"],
   ["named-set invalidation", "entity/frame.ts", 'a._tag === "j_secret" || stable ? next : { ...next, names: undefined }', "next", "entity/paybook/paybook.test.ts", "peer lock between two reveals"],
   ["atomic delivery", "runtime/tick.ts", "return { ...done.runtime, stamp, staged: row };", "return { ...done.runtime, view: rt.view, stamp, staged: row };", "host/shell/node/watch.test.ts", "crash after persisting"],
+  ["legacy wait rejection", "host/shell/drive/drive.ts", 'if (peers.length > 0) return err({ _tag: "read_wait_upgrade", peers });', 'if (false) return err({ _tag: "read_wait_upgrade", peers });', "host/shell/drive/drive.test.ts", "legacy read waits without"],
 ] as const;
 const results = [];
 for (const [name, path, before, after, test, pattern] of cases) {

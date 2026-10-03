@@ -142,9 +142,13 @@ with its existing nonce guard; it cannot cause the opening proof to be accepted 
 Repeated counter/finalize asks still use the builder's normal deduplication. The read-depth/response-window budget
 must cover poll, WAL sync and submission latency; this change creates no new timing allowance.
 
-An old WAL with `behind` but no `readWaits` retains conservative archive reads until a successful delivery records
-the identities; a pruned legacy read still faults its Account rather than guessing. Existing `entity` and `j_height`
-rows retain their replay semantics. New observations require the new reader; downgrades fail loudly on the WAL tag.
+Upgrade boundary: a pre-observation WAL with `behind`, not `lost`, and no `readWaits` cannot identify which
+finalizes remain owed. Replaying archive logs can clear a newer dispute; marking every old finalize late can still
+dissolve newer holds. The shell therefore refuses that WAL with `read_wait_upgrade` naming its peers, before
+resuming the submitter or publishing outputs. It leaves the files intact for explicit offline migration from an
+authoritative record of pending payloads. No generic migration guesses those identities. Legacy WALs without an
+unidentified read wait, including already-lost Accounts, retain their original replay semantics. New observations
+require the new reader; downgrades fail loudly on the WAL tag.
 
 Ownership and durability: `readWaits` belongs to Entity ChainFacts and is reconstructed from the same ordered Runtime
 WAL inputs as those facts. It is not a second journal, checkpoint, or signed Account proof field. Its exact log

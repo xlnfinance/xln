@@ -180,6 +180,20 @@ describe("host/shell/drive the Host's rows are on the disk before the chain hear
     expect(callsOf(at.log)).toEqual([]);
   });
 
+  test("R-HEIGHT-ORDER legacy read waits without identities require migration before outputs leave", async () => {
+    const at = scene();
+    await withShell(at, ok(undefined), async (shell) => {
+      const started = turnOf(await start(shell, BOOT));
+      const opened = turnOf(await command(shell, started.station, ALICE, open(BOB)));
+      return command(shell, opened.station, ALICE, { _tag: "j_behind", peer: BOB, from: 105n });
+    });
+    const before = readFileSync(at.wal);
+    const back = await withShell(at, ok(undefined), (shell) => start(shell, BOOT));
+    expect(back).toEqual(err({ _tag: "read_wait_upgrade", peers: [BOB] }));
+    expect(readFileSync(at.wal)).toEqual(before);
+    expect(callsOf(at.log)).toEqual([]);
+  });
+
   test("R-SIGNED-HEADS-ON-THE-WIRE a frame a restart flushes leaves signed, same signature", async () => {
     const at = scene();
     const first = await withShell(at, ok(undefined), async (shell) => {

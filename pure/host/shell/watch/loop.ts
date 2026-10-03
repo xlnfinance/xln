@@ -419,7 +419,7 @@ const isWait = (e: ChainEvent): e is ReadWait => e._tag === "dispute_started" ||
 
 const waitKey = (e: ReadWait): string => `${eventKey(e)}:${e._tag === "dispute_started" ? e.epoch : e.shown._tag}`;
 
-/** Persisted after payload effects, before releasing behind: a crash repeats protection instead of losing evidence. */
+/** Applied after payload effects and before releasing behind, in the same atomic delivery as its height. */
 const waitInputs = (
   hosted: Bytes32, stand: Standing, events: readonly ChainEvent[], context: readonly ChainEvent[], accounts: Accounts,
 ): Result<readonly EntityInput[], BadPeer> => {

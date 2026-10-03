@@ -201,7 +201,7 @@ describe("host/shell/node a node with a J loop", () => {
     expect(blindOf(look)).toBe(false);
     expect(asked).toBe(1);
     expect(callsOf(log).filter((c) => c.startsWith("probe"))).toHaveLength(1);
-    const rows = rowsOf(look).flatMap((r) => (r.input._tag === "entity" ? r.input.inputs.map((i) => i._tag) : []));
+    const rows = rowsOf(look).flatMap(inputsOf).map((i) => i._tag);
     expect(rows.filter((t) => t === "j_blind")).toHaveLength(1);
     expect(rows.filter((t) => t === "j_blind_over")).toHaveLength(1);
   });
@@ -599,6 +599,6 @@ describe("host/shell/node a node with a J loop", () => {
     const look = await alice.stop();
     expect(look.fatal?._tag).toBe("disk");
     expect(look.cursor).toBe(START);
-    expect(rowsOf(look).some((r) => r.input._tag === "j_height")).toBe(false);
+    expect(rowsOf(look).some((r) => r.input._tag === "j_height" || r.input._tag === "j_observation")).toBe(false);
   });
 });
