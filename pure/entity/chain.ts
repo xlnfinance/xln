@@ -12,14 +12,18 @@ import type { Answer, ChainFacts, DisputeStart, EntityFault, JEvent, Registered,
 export const freshChain: ChainFacts =
   {
     epoch: 0n, stored: 0n, frames: 0n, windows: undefined, against: undefined, frozen: false, cosigned: 0n,
-    held: new Map(), starting: undefined, behind: undefined,
+    held: new Map(), starting: undefined, behind: undefined, lost: false,
   };
 
 /** The Host holds back this Account's events from block `from`: the earliest it ever said stands until it is over. */
 export const behindFrom = (f: ChainFacts, from: bigint): ChainFacts =>
   (f.behind !== undefined && f.behind <= from ? f : { ...f, behind: from });
 
-export const behindOver = (f: ChainFacts): ChainFacts => ({ ...f, behind: undefined });
+/** The Host has delivered what it held: an Account it can no longer read stays behind (R-WATCH-STALL). */
+export const behindOver = (f: ChainFacts): ChainFacts => (f.lost ? f : { ...f, behind: undefined });
+
+/** The Host cannot read the Account's past from block `from` on: behind for good, from the earliest block it said. */
+export const accountLost = (f: ChainFacts, from: bigint): ChainFacts => ({ ...behindFrom(f, from), lost: true });
 
 /**
  * The chain moved the epoch on: no proof of the new epoch is signed yet. An older or repeated report changes nothing.

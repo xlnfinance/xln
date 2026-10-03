@@ -99,18 +99,34 @@ const callsOf = (depository: Address) => (raw: unknown): Result<readonly Carried
 
 /**
  * What a node says when it has no such method: JSON-RPC code -32601, or the texts of the clients that give none
- * (`Method not found`, geth's `the method debug_traceTransaction does not exist/is not available`, `Unsupported
- * method`, `method not supported`). Nothing else is taken for it: an error that merely says something is not available,
- * too big or timed out may clear, and is the node's fault for the retry budget to bound (a trace the node never gives
- * costs its tries, then the finalize is told unread).
+ * (`Method not found`, `the method debug_traceTransaction does not exist/is not available` of geth, Erigon and
+ * Nethermind, `Unsupported method`, `method not supported`), and Nethermind's answer when the namespace is off, code
+ * -32600 with `The method 'debug_traceTransaction' is found but the namespace 'debug' is disabled for <url>` or `... is
+ * found in namespace 'debug' for <url>' but is disabled for <endpoint>` (JsonRpcService.cs): a method the endpoint will
+ * not run is a missing method. A bare -32600 is not (an invalid request may clear). Nothing else is taken for it: an
+ * error that merely says something is not available, too big or timed out may clear, and is the node's fault for the
+ * retry budget to bound (a trace the node never gives costs its tries, then the finalize is told unread).
  */
 const NO_METHOD = new RegExp(
   [
     "-32601", "\\bmethod not found\\b", "\\bthe method \\S+ does not exist\\b", "\\bunsupported method\\b",
-    "\\bmethod not supported\\b",
+    "\\bmethod not supported\\b", "\\bthe method '[^']*' is found\\b[\\s\\S]*\\bis disabled for\\b",
   ].join("|"),
   "i",
 );
+
+/**
+ * What a node says of the state of a block it no longer serves, as each client words it: geth's `historical state ...
+ * is not available` and the older `missing trie node` (Nethermind says the second too), Erigon's `old data not
+ * available due to pruning`, Nethermind's `No state available for block`, Reth's `state at block #N is pruned`. A
+ * block the node does not know (`header not found`, `block not found`, `is not currently canonical`) is another
+ * thing, a block off the chain, and is a fault of the read, as is any other error, and a reply that is no value.
+ */
+const PRUNED = new RegExp([
+  "\\bmissing trie node\\b", "\\bhistorical state \\S+ is not available\\b",
+  "\\bold data not available due to pruning\\b", "\\bNo state available for block\\b",
+  "\\bstate at block #\\d+ is pruned\\b",
+].join("|"), "i");
 
 /** `_accounts(bytes)` and `ondeltaEpoch(bytes32,bytes32)`: the two reads the watcher's `reading` is made of. */
 const accountCalls = (left: Bytes32, right: Bytes32): Result<Readonly<{ row: string; epoch: string }>, ReplyFault> =>
@@ -128,23 +144,14 @@ const TRACER = { tracer: "callTracer" };
 
 type Reads = ReturnType<typeof readsOf>;
 
-/** The blocks at the head that the probe looks through for a transaction to trace. */
-const PROBE_BLOCKS = 16n;
+const CALLS = ["CALL", "STATICCALL", "DELEGATECALL", "CALLCODE"];
+const KINDS = [...CALLS, "CREATE", "CREATE2", "SELFDESTRUCT"];
 
-/** The first transaction of the newest of `left` blocks, from block `at` down, that holds one, if any does. */
-const txFrom = async (
-  reads: Reads, at: bigint, left: bigint,
-): Promise<Result<Bytes32 | undefined, PortFault>> => {
-  if (left === 0n || at < 0n) return ok(undefined);
+/** The first transaction of block `at`, if it holds one. */
+const txFrom = async (reads: Reads, at: bigint): Promise<Result<Bytes32 | undefined, PortFault>> => {
   const block = await reads.read("watch trace probe", "eth_getBlockByNumber", [hexQuantity(at), false], (raw) =>
     flatMap(fieldsOf(raw), (o) => (Array.isArray(o["transactions"]) ? listOf(o["transactions"], hash32) : ok([]))));
-  if (!block.ok) return block;
-  return block.value[0] === undefined ? txFrom(reads, at - 1n, left - 1n) : ok(block.value[0]);
-};
-
-const recentTx = async (reads: Reads): Promise<Result<Bytes32 | undefined, PortFault>> => {
-  const head = await reads.read("watch trace probe", "eth_blockNumber", [], quantity);
-  return head.ok ? txFrom(reads, head.value, PROBE_BLOCKS) : head;
+  return map(block, (hashes) => hashes[0]);
 };
 
 /**
@@ -162,20 +169,30 @@ const traceOf = (reads: Reads, depository: Address) =>
     return ok(calls.ok ? { _tag: "calls", calls: calls.value } : { _tag: "unreadable" });
   };
 
-/** The top frame of a `callTracer` trace: a node that traces with another tracer, or not at all, answers otherwise. */
+
+const isHex = (value: unknown): boolean => isText(value) && /^0x([0-9a-fA-F]{2})+$/.test(value);
+
+/**
+ * The top frame of a `callTracer` trace: a call kind, the caller's address and, for the kinds that call, the callee's.
+ * A node that traces with another tracer, or not at all, answers otherwise, and a frame made up of any two texts is
+ * none.
+ */
 const isFrame = (raw: unknown): boolean => {
   const fields = fieldsOf(raw);
-  return fields.ok && isText(fields.value["type"]) && isText(fields.value["from"]);
+  if (!fields.ok) return false;
+  const { type, from, to } = fields.value;
+  const kind = isText(type) ? type.toUpperCase() : "";
+  return KINDS.includes(kind) && isHex(from) && (!CALLS.includes(kind) || isHex(to));
 };
 
 /**
- * The probe traces a transaction a recent block holds, with the tracer the trace of a finalize is read with: a node
+ * The probe traces the first transaction of block `at` with the tracer the trace of a finalize is read with: a node
  * that runs it answers with the tree of calls, one that does not says the method is missing or answers with something
- * else (any other error is the node's fault). On a fork the transaction must be one mined after the fork point, which
- * the head's own blocks hold. With no transaction in them nothing is known yet: there is no call that stands for one.
+ * else (any other error is the node's fault). A block with no transaction tells nothing, and no `debug_traceCall`
+ * stands in for it: the caller asks again at the next block.
  */
-const probeOf = (reads: Reads) => async (): Promise<Result<Probe, PortFault>> => {
-  const found = await recentTx(reads);
+const probeOf = (reads: Reads) => async (at: bigint): Promise<Result<Probe, PortFault>> => {
+  const found = await txFrom(reads, at);
   if (!found.ok) return found;
   if (found.value === undefined) return ok("no_transaction");
   const asked = await reads.ask("watch trace probe", "debug_traceTransaction", [found.value, TRACER]);
@@ -203,10 +220,12 @@ export const watchPort = (rpc: Rpc, depository: Address): WatchPort => {
     input: (tx) => reads.read("watch tx", "eth_getTransactionByHash", [tx], inputOf(depository)),
     trace: traceOf(reads, depository),
     traced: probeOf(reads),
-    accountAt: async (block, left, right): Promise<Result<AccountAt, PortFault>> => {
+    accountAt: async (block, left, right): Promise<Result<AccountAt | "pruned", PortFault>> => {
       const calls = accountCalls(left, right);
       if (!calls.ok) return err(portFault("account at", calls.error.why));
       const [row, epoch] = await Promise.all([at(block)(calls.value.row), at(block)(calls.value.epoch)]);
+      const gone = [row, epoch].some((r) => !r.ok && PRUNED.test(r.error.reason));
+      if (gone) return ok("pruned");
       if (!row.ok) return row;
       if (!epoch.ok) return epoch;
       const read = all({ nonce: nonceOf(row.value), epoch: oneWord(epoch.value) });

@@ -117,11 +117,11 @@ describe("entity/paybook the paybook forwards a payment (R-HTLC-FORWARD)", () =>
     const sooner = tell(forwardAt(base()), 100n, ALICE, lock(base(), 105n));
     const both = tell(second(sooner), 100n, ALICE, lock(base(), 110n, 7n, SECOND_HASHLOCK));
     expect(stateOf(both, HUB).paybook.get(SECOND_HASHLOCK)?._tag).toBe("locked");
-    expect(lastHeard(stateOf(both, HUB), judge.clock)).toEqual(new Map([[BOB, 105n - lag]]));
+    expect(lastHeard(stateOf(both, HUB), judge.clock)).toEqual(new Map([[BOB, 110n - lag]]));
     const later = tell(forwardAt(base()), 100n, ALICE, lock(base(), 110n));
     const either = tell(second(later), 100n, ALICE, lock(base(), 105n, 7n, SECOND_HASHLOCK));
     expect(stateOf(either, HUB).paybook.get(SECOND_HASHLOCK)?._tag).toBe("locked");
-    expect(lastHeard(stateOf(either, HUB), judge.clock)).toEqual(new Map([[BOB, 105n - lag]]));
+    expect(lastHeard(stateOf(either, HUB), judge.clock)).toEqual(new Map([[BOB, 110n - lag]]));
   });
 
   test("R-WATCH-STALL what the loop waits on the Entity for: the last heard of each peer, and who is behind", () => {
@@ -129,7 +129,7 @@ describe("entity/paybook the paybook forwards a payment (R-HTLC-FORWARD)", () =>
     const behind = { ...(waiting.chain.get(ALICE) ?? freshChain), behind: 9n };
     const held = { ...waiting, chain: new Map([[ALICE, behind]]) };
     expect(waitsOf(held, judge.clock)).toEqual({
-      lastHeard: new Map([[BOB, 105n - judge.clock.lag]]), behind: new Set([ALICE]),
+      lastHeard: new Map([[BOB, 105n - judge.clock.lag]]), behind: new Set([ALICE]), lost: new Set(),
     });
     expect(waitsOf(waiting, judge.clock).behind).toEqual(new Set());
   });
@@ -466,7 +466,7 @@ describe("entity/paybook the hub learns a secret the Account in dispute cannot c
     expect(stateOf(refused, HUB).paybook.size).toBe(0);
   });
 
-  const blind = (net: Net): Net => deliver(net, 100n, HUB, [{ _tag: "j_blind" }]);
+  const blind = (net: Net): Net => deliver(net, 100n, HUB, [{ _tag: "j_blind", boot: false }]);
 
   test("R-WATCH-CALLDATA a blind Entity forwards no lock: the lock that came to it is given up upstream", () => {
     const refused = tell(blind(forwardAt(base())), 100n, ALICE, lock(base(), 105n));
@@ -512,10 +512,64 @@ describe("entity/paybook the hub learns a secret the Account in dispute cannot c
     expect(ledgerBetween(unrelated, ALICE, HUB).holds).toEqual([]);
   });
 
+  const lostOn = (net: Net, peer: EntityId): Net =>
+    deliver(net, 100n, HUB, [{ _tag: "j_account_lost", peer, from: 2n }]);
+
+  test("R-WATCH-WINDOW a hub forwards no lock to a peer it cannot read, and expires none forwarded to it", () => {
+    const refused = tell(lostOn(forwardAt(base()), BOB), 100n, ALICE, lock(base(), 105n));
+    expect(ledgerBetween(refused, HUB, BOB).holds).toEqual([]);
+    const held = expiring(lostOn(locked(), BOB));
+    expect(ledgerBetween(held, ALICE, HUB).holds).toHaveLength(1);
+    const freed = expiring(deliver(lostOn(locked(), BOB), 100n, HUB, [{ _tag: "j_behind_over", peer: BOB }]));
+    expect(ledgerBetween(freed, ALICE, HUB).holds).toHaveLength(1);
+    const waits = waitsOf(stateOf(lostOn(locked(), BOB), HUB), judge.clock);
+    expect(waits.lost).toEqual(new Set([BOB]));
+    expect(waits.behind).toEqual(new Set());
+  });
+
   test("R-WATCH-CALLDATA a blind Entity co-signs no expiry of any hold", () => {
     const held = expiring(blind(locked()));
     expect(ledgerBetween(held, ALICE, HUB).holds).toHaveLength(1);
     const lifted = expiring(deliver(blind(locked()), 100n, HUB, [{ _tag: "j_blind_over" }]));
     expect(ledgerBetween(lifted, ALICE, HUB).holds).toEqual([]);
+  });
+});
+
+describe("entity/paybook a finalize held back for its secrets ends the Account late (R-WATCH-STALL)", () => {
+  const FINAL = `0x${"05".repeat(32)}`;
+  const hear = (net: Net, ...inputs: readonly EntityInput[]): Net => deliver(net, 100n, HUB, inputs);
+  const moved: EntityInput = { _tag: "j_epoch", peer: BOB, epoch: 1n, stored: 5n, finalBodyHash: FINAL };
+  const late: EntityInput = { _tag: "j_dispute_over", peer: BOB, late: true };
+
+  /** Two locks of Alice's, one hash each, forwarded to Bob: the shorter at 105, the longer at 110. */
+  const twoLocks = (): Net => {
+    const entries = tell(base(), 100n, HUB,
+      { _tag: "forward", hashlock: HASHLOCK, from: ALICE, to: BOB },
+      { _tag: "forward", hashlock: SECOND_HASHLOCK, from: ALICE, to: BOB });
+    return tell(entries, 100n, ALICE, lock(base(), 105n), lock(base(), 110n, 7n, SECOND_HASHLOCK));
+  };
+  const upstream = (net: Net) => [ledgerBetween(net, ALICE, HUB).offdelta, ledgerBetween(net, ALICE, HUB).holds.length];
+
+  test("R-WATCH-STALL the epoch told ahead of the finalize dissolves nothing: both locks stay locked", () => {
+    const heard = hear(twoLocks(), moved);
+    expect(stateOf(heard, HUB).chain.get(BOB)).toMatchObject({ epoch: 1n });
+    const entries = [HASHLOCK, SECOND_HASHLOCK].map((h) => stateOf(heard, HUB).paybook.get(h)?._tag);
+    expect(entries).toEqual(["locked", "locked"]);
+    expect(upstream(heard)).toEqual([0n, 2]);
+  });
+
+  test("R-WATCH-STALL of two locks on one Account the secret of the longer is claimed, the end fails the other", () => {
+    const heard = hear(twoLocks(), moved, { _tag: "j_secret", secret: SECOND });
+    expect(upstream(heard)).toEqual([-AMOUNT, 1]);
+    const over = hear(heard, late);
+    expect(upstream(over)).toEqual([-AMOUNT, 0]);
+    expect(ledgerBetween(over, HUB, BOB).holds).toEqual([]);
+    expect(stateOf(over, HUB).paybook.size).toBe(0);
+  });
+
+  test("R-WATCH-STALL the late end of the dispute with no secret fails every lock forwarded to the peer", () => {
+    const over = hear(twoLocks(), moved, late);
+    expect(upstream(over)).toEqual([0n, 0]);
+    expect(stateOf(over, HUB).paybook.size).toBe(0);
   });
 });

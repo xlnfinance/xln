@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { err, unwrapOr, type Result } from "../kernel/core/result.ts";
 import { draw } from "../account/fixtures.ts";
 import { decodeLogs, type Bytes32, type ChainEvent, type RawLog } from "./log.ts";
-import { beginsAt, readingKey, type Accounts, type Addressed, type Reading } from "./observe.ts";
+import { readingKey, type Accounts, type Addressed, type Reading } from "./observe.ts";
 import {
   advance, finalizedAt, prepare, readings, splitStalled, watching, type Batch, type Block, type Step, type Watch,
   type WatchFault, type Window,
@@ -312,13 +312,14 @@ describe("j/watch what a transaction the Host cannot read holds back (R-WATCH-ST
     other(4n, 1n, 1n), secret(4n, 9n),
   ];
 
-  test("R-WATCH-STALL a finalize the Host cannot read holds its Account from the advance it made, no other", () => {
+  test("R-WATCH-STALL a finalize the Host cannot read is held alone: the advance it made and the rest are told", () => {
     const events = eventsOf(logs);
     const split = splitStalled(events, waiting(txOf(3n, 1n)));
+    expect(places(split.held)).toEqual(["dispute_finalized@3.1"]);
     expect(places(split.ready)).toEqual([
-      "secret_revealed@1.0", "epoch_advanced@2.0", "epoch_advanced@4.1", "secret_revealed@4.0",
+      "secret_revealed@1.0", "epoch_advanced@2.0", "epoch_advanced@3.0", "epoch_advanced@4.0", "epoch_advanced@4.1",
+      "secret_revealed@4.0",
     ]);
-    expect(places(split.held)).toEqual(["epoch_advanced@3.0", "dispute_finalized@3.1", "epoch_advanced@4.0"]);
   });
 
   test("R-WATCH-STALL a start the Host cannot read holds nothing: its Account's events go on", () => {
@@ -332,13 +333,5 @@ describe("j/watch what a transaction the Host cannot read holds back (R-WATCH-ST
     const events = eventsOf(logs);
     expect(splitStalled(events, waiting())).toEqual({ ready: events, held: [] });
     expect(splitStalled(events, waiting(txOf(9n, 9n))).held).toEqual([]);
-  });
-
-  test("R-WATCH-STALL a finalize begins at the advance it made; an earlier advance is not its own", () => {
-    const events = eventsOf(logs);
-    const final = events.find((e) => e._tag === "dispute_finalized") ?? expect.unreachable("no finalize");
-    expect(beginsAt(events, final)).toMatchObject({ block: 3n, index: 0n });
-    const alone = eventsOf([finalized(3n, 1n)]);
-    expect(beginsAt(alone, alone[0] ?? expect.unreachable("none"))).toMatchObject({ block: 3n, index: 1n });
   });
 });

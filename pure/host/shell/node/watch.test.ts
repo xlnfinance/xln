@@ -39,6 +39,10 @@ const settled = (block: bigint) => logOf("AccountSettled", {
 /** Whether the node may hold value, what its provider says of a call trace, and what it gives of a transaction. */
 type Kind = Readonly<{
   value: boolean; probe: Probe; trace: Traced; input: "down" | "given" | "hidden";
+  /** A file that, once there, makes the provider answer the probe `none`: the trace method goes away at run time. */
+  off?: string;
+  /** The provider no longer serves the state of the blocks the node's readings of an Account need. */
+  pruned?: boolean;
 }>;
 const UNREADABLE: Traced = { _tag: "unreadable" };
 const QUIET: Kind = { value: false, probe: "traces", trace: UNREADABLE, input: "down" };
@@ -73,13 +77,20 @@ const portOf = (chain: Chain, log: string, found = [advanced(105n, 1n)], kind = 
     return Promise.resolve(ok(blockOf(number, chain.fork(number))));
   },
   logs: (from, to) => Promise.resolve(ok(found.filter((l) => l.block >= from && l.block <= to))),
-  accountAt: () => Promise.resolve(ok({ epoch: 1n, nonce: 5n })),
+  accountAt: () => Promise.resolve(ok(kind.pruned === true ? "pruned" as const : { epoch: 1n, nonce: 5n })),
   input: () => {
     appendFileSync(log, "input\n");
     return Promise.resolve(inputOf(kind));
   },
-  trace: () => Promise.resolve(ok(kind.trace)),
-  traced: () => Promise.resolve(ok(kind.probe)),
+  trace: () => {
+    if (kind.off !== undefined && kind.trace._tag === "no_method") writeFileSync(kind.off, "off");
+    return Promise.resolve(ok(kind.trace));
+  },
+  traced: (at) => {
+    appendFileSync(log, `probe ${at}\n`);
+    const off = kind.off !== undefined && existsSync(kind.off);
+    return Promise.resolve(ok(off ? "none" : kind.probe));
+  },
 });
 
 const watchOf = (chain: Chain, log: string, found = [advanced(105n, 1n)], kind = QUIET): WatchConfig => ({
@@ -90,9 +101,17 @@ const STRAIGHT: Chain = { head: 112n, fork: () => 0n };
 
 const factsOf = (look: Look) => look.station.host.runtime.entities.get(ALICE)?.chain.get(BOB);
 
+const entriesOf = (look: Look): readonly string[] =>
+  [...(look.station.host.runtime.entities.get(ALICE)?.paybook.values() ?? [])].map((entry) => entry._tag);
+
 const blindOf = (look: Look): boolean => look.station.host.runtime.entities.get(ALICE)?.blind === true;
 
 const rowsOf = (look: Look): readonly Row[] => look.station.host.runtime.wal;
+
+/** How many notices of the Host the node told, and how many of the Entity the WAL holds, of one kind. */
+const told = (look: Look, tag: string): number => look.notices.filter((n) => n._tag === tag).length;
+const entityTold = (look: Look, tag: string): number =>
+  rowsOf(look).flatMap((r) => r.notices).filter((n) => n._tag === tag).length;
 
 const delivered = (look: Look): boolean => look.cursor === 110n;
 
@@ -126,18 +145,51 @@ describe("host/shell/node a node with a J loop", () => {
     expect(readFileSync(`${dir}/wal.log`, "utf8")).toBe("");
   });
 
-  test("R-WATCH-CALLDATA a provider with no call trace refuses a node with value, and writes nothing", async () => {
-    expect(await booted(VALUE_BLIND)).toEqual({ _tag: "no_call_trace" });
+  test("R-WATCH-CALLDATA a node with value boots blind on any provider, watches, and probes at each head", async () => {
+    const [dir, none, quiet] = [fresh(), fresh(), fresh()];
+    const probes = (log: string) => callsOf(log).filter((c) => c.startsWith("probe"));
+    const blinded = async (where: string, kind: Kind) => {
+      const log = `${where}/calls.log`;
+      writeFileSync(log, "");
+      const watch = watchOf({ ...STRAIGHT, rises: true }, log, [advanced(105n, 1n)], kind);
+      const alice = await nodeOf(await seatOf(ALICE, where, 0), NO_PEER, { tickMs: QUICK, watch });
+      expect(await until(async () => probes(log).length >= 3, WAIT)).toBe(true);
+      return { look: await alice.stop(), log };
+    };
+    const refused = await blinded(dir, VALUE_BLIND);
+    expect(refused.look.fatal).toBeUndefined();
+    expect(blindOf(refused.look)).toBe(true);
+    expect(factsOf(refused.look)).toMatchObject({ epoch: 1n });
+    expect(new Set(probes(refused.log)).size).toBeGreaterThanOrEqual(3);
+    expect(told(refused.look, "no_call_trace")).toBe(1);
+    expect(entityTold(refused.look, "chain_blind")).toBe(0);
+    const empty = await blinded(none, VALUE_NO_TX);
+    expect(blindOf(empty.look)).toBe(true);
+    expect(empty.look.fatal).toBeUndefined();
+    const log = `${quiet}/calls.log`;
+    writeFileSync(log, "");
+    const watch = watchOf(STRAIGHT, log, [advanced(105n, 1n)], { ...VALUE_BLIND, value: false });
+    const free = await nodeOf(await seatOf(ALICE, quiet, 0), NO_PEER, { tickMs: QUICK, watch });
+    expect(await until(async () => delivered(await free.look()), WAIT)).toBe(true);
+    expect(blindOf(await free.stop())).toBe(false);
+    expect(callsOf(log).filter((c) => c.startsWith("probe"))).toEqual([]);
   });
 
-  test("R-WATCH-CALLDATA a node with value waits for a transaction to tell if the provider traces", async () => {
-    expect(await booted(VALUE_NO_TX)).toEqual({ _tag: "no_probe_tx" });
-    expect(await booted({ ...VALUE_NO_TX, value: false })).toBe("started");
-  });
-
-  test("R-WATCH-CALLDATA a no-value node starts with no call trace, and a node with value with one", async () => {
-    expect(await booted(NO_VALUE_BLIND)).toBe("started");
-    expect(await booted(VALUE_TRACED)).toBe("started");
+  test("R-WATCH-CALLDATA the first call tree the probe is shown ends the blindness, and it asks no more", async () => {
+    const dir = fresh();
+    const log = `${dir}/calls.log`;
+    writeFileSync(log, "");
+    const watch = watchOf({ ...STRAIGHT, rises: true }, log, [advanced(105n, 1n)], VALUE_TRACED);
+    const alice = await nodeOf(await seatOf(ALICE, dir, 0), NO_PEER, { tickMs: QUICK, watch });
+    expect(await until(async () => callsOf(log).some((c) => c.startsWith("probe")), WAIT)).toBe(true);
+    expect(await until(async () => delivered(await alice.look()), WAIT)).toBe(true);
+    const asked = callsOf(log).filter((c) => c.startsWith("probe")).length;
+    const look = await alice.stop();
+    expect(blindOf(look)).toBe(false);
+    expect(asked).toBe(1);
+    const rows = rowsOf(look).flatMap((r) => (r.input._tag === "entity" ? r.input.inputs.map((i) => i._tag) : []));
+    expect(rows.filter((t) => t === "j_blind")).toHaveLength(1);
+    expect(rows.filter((t) => t === "j_blind_over")).toHaveLength(1);
   });
 
   test("R-HTLC-CLOCK a node whose clock names another depth than it reads at is not started", async () => {
@@ -256,13 +308,15 @@ describe("host/shell/node a node with a J loop", () => {
     return alice;
   };
 
-  test("R-WATCH-STALL a tx the provider refuses holds its Account only; the Entity is told it is behind", async () => {
+  const caughtUp = (facts: ReturnType<typeof factsOf>): boolean => facts?.epoch === 1n && facts.behind === undefined;
+
+  test("R-WATCH-STALL a tx the provider refuses holds its finalize only; the Entity is told it is behind", async () => {
     const dir = fresh();
     const log = `${dir}/calls.log`;
     const alice = await stalling(dir, log, STRAIGHT, QUIET);
     expect(await until(async () => delivered(await alice.look()), WAIT)).toBe(true);
     const look = await alice.stop();
-    expect(factsOf(look)).toMatchObject({ epoch: 0n, behind: 105n });
+    expect(factsOf(look)).toMatchObject({ epoch: 1n, behind: 105n });
     expect(look.station.host.runtime.view).toBe(110n as never);
     expect(look.watchFault).toBe("watch head: connection reset");
     expect(look.notices.filter((n) => n._tag === "watch_stalled")).toEqual([
@@ -275,7 +329,7 @@ describe("host/shell/node a node with a J loop", () => {
     const dir = fresh();
     const log = `${dir}/calls.log`;
     const alice = await stalling(dir, log, { ...STRAIGHT, rises: true }, QUIET);
-    expect(await until(async () => factsOf(await alice.look())?.epoch === 1n, WAIT)).toBe(true);
+    expect(await until(async () => caughtUp(factsOf(await alice.look())), WAIT)).toBe(true);
     const look = await alice.stop();
     expect(callsOf(log).filter((c) => c === "input")).toHaveLength(3);
     expect(look.watchFault).toBeUndefined();
@@ -292,11 +346,40 @@ describe("host/shell/node a node with a J loop", () => {
     const alice = await nodeOf(await seatOf(ALICE, dir, 0), NO_PEER, { tickMs: QUICK, watch, genesis });
     const tries = () => callsOf(log).filter((c) => c === "input").length;
     expect(await until(async () => tries() >= FEW_TRIES + 2, WAIT)).toBe(true);
-    expect(factsOf(await alice.look())).toMatchObject({ epoch: 0n, behind: 105n });
-    expect(await until(async () => factsOf(await alice.look())?.epoch === 1n, WAIT)).toBe(true);
+    const waiting = await alice.look();
+    expect(factsOf(waiting)).toMatchObject({ epoch: 1n, behind: 105n });
+    expect(entriesOf(waiting)).toEqual(["locked"]);
+    const wal = (look: Look) => rowsOf(look).flatMap((r) => (r.input._tag === "entity" ? r.input.inputs : []));
+    expect(wal(waiting).some((i) => i._tag === "j_dispute_over")).toBe(false);
+    expect(await until(async () => caughtUp(factsOf(await alice.look())), WAIT)).toBe(true);
     const look = await alice.stop();
     expect(tries()).toBeGreaterThanOrEqual(8);
     expect(factsOf(look)?.behind).toBeUndefined();
+    expect(wal(look).filter((i) => i._tag === "j_finalize_unread")).toHaveLength(1);
+  });
+
+  test("R-WATCH-WINDOW a provider with no more state of an Account loses it loudly; the node goes on", async () => {
+    const dir = fresh();
+    const log = `${dir}/calls.log`;
+    writeFileSync(log, "");
+    const watch = watchOf(STRAIGHT, log, [advanced(105n, 1n)], { ...QUIET, pruned: true });
+    const alice = await nodeOf(await seatOf(ALICE, dir, 0), NO_PEER, { tickMs: QUICK, watch });
+    await alice.tell(open(BOB));
+    expect(await until(async () => delivered(await alice.look()), WAIT)).toBe(true);
+    const look = await alice.stop();
+    expect(look.fatal).toBeUndefined();
+    expect(factsOf(look)).toMatchObject({ epoch: 0n, behind: 105n, lost: true });
+    const told = rowsOf(look).flatMap((r) => r.notices).map((n) => JSON.stringify(n, (_, v: unknown) =>
+      (typeof v === "bigint" ? String(v) : v)));
+    expect(told.filter((n) => n.includes("account_lost"))).toHaveLength(1);
+    const second = `${dir}/second.log`;
+    writeFileSync(second, "");
+    const again = await nodeOf(await seatOf(ALICE, dir, 0), NO_PEER, {
+      tickMs: QUICK, watch: watchOf(STRAIGHT, second, [advanced(105n, 1n)], QUIET),
+    });
+    expect(await until(async () => delivered(await again.look()), WAIT)).toBe(true);
+    const restarted = await again.stop();
+    expect(factsOf(restarted)).toMatchObject({ epoch: 0n, behind: 105n, lost: true });
   });
 
   test("R-WATCH-STALL an Account stays behind after a restart until a delivery reaches the WAL's view", async () => {
@@ -347,14 +430,21 @@ describe("host/shell/node a node with a J loop", () => {
 
   test("R-WATCH-CALLDATA no call trace at run time blinds a node with value and does not end it", async () => {
     const dir = fresh();
-    const hidden: Kind = { ...VALUE_TRACED, input: "hidden", trace: { _tag: "no_method" } };
-    const alice = await stalling(dir, `${dir}/calls.log`, STRAIGHT, hidden);
+    const hidden: Kind = { ...VALUE_TRACED, input: "hidden", trace: { _tag: "no_method" }, off: `${dir}/off` };
+    const log = `${dir}/calls.log`;
+    const alice = await stalling(dir, log, { ...STRAIGHT, rises: true }, hidden);
+    expect(await until(async () => existsSync(`${dir}/off`), WAIT)).toBe(true);
     expect(await until(async () => blindOf(await alice.look()), WAIT)).toBe(true);
     expect(await until(async () => delivered(await alice.look()), WAIT)).toBe(true);
+    const later = callsOf(log).filter((c) => c.startsWith("probe")).length;
+    expect(await until(async () => callsOf(log).filter((c) => c.startsWith("probe")).length > later, WAIT)).toBe(true);
     const look = await alice.stop();
+    expect(blindOf(look)).toBe(true);
     expect(look.fatal).toBeUndefined();
     expect(factsOf(look)).toMatchObject({ epoch: 1n });
     expect(look.notices.filter((n) => n._tag === "watch_stalled")).toEqual([]);
+    expect(told(look, "no_call_trace")).toBe(1);
+    expect(entityTold(look, "chain_blind")).toBe(0);
     const quiet = await stalling(fresh(), `${dir}/quiet.log`, STRAIGHT, { ...hidden, value: false });
     expect(await until(async () => factsOf(await quiet.look())?.epoch === 1n, WAIT)).toBe(true);
     expect(blindOf(await quiet.stop())).toBe(false);
@@ -362,7 +452,7 @@ describe("host/shell/node a node with a J loop", () => {
 
   test("R-WATCH-CALLDATA a blind node that boots on a provider that traces is told its Entity sees again", async () => {
     const dir = fresh();
-    const hidden: Kind = { ...VALUE_TRACED, input: "hidden", trace: { _tag: "no_method" } };
+    const hidden: Kind = { ...VALUE_BLIND, input: "hidden", trace: { _tag: "no_method" } };
     const alice = await stalling(dir, `${dir}/first.log`, STRAIGHT, hidden);
     expect(await until(async () => blindOf(await alice.look()), WAIT)).toBe(true);
     await alice.stop();

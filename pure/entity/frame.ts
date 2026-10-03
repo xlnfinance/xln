@@ -16,8 +16,9 @@ import { signingOf, type Anchor } from "./signing/signing.ts";
 import { dissolved, holderOf, ledgerOf, rebased, withHeld } from "../account/state.ts";
 import { MAX_AMOUNT } from "../account/ledger.ts";
 import {
-  answered, behindFrom, behindOver, cosignFrozen, cosignLapsed, counterLapsed, countered, depositable, disputeAsked,
-  disputeOpened, disputeOver, epochAdvanced, framed, freshChain, inDispute, keepHolding, nextSerial, paidOut,
+  accountLost, answered, behindFrom, behindOver, cosignFrozen, cosignLapsed, counterLapsed, countered, depositable,
+  disputeAsked, disputeOpened, disputeOver, epochAdvanced, framed, freshChain, inDispute, keepHolding, nextSerial,
+  paidOut,
   proofNonce, quiet, startLapsed, windowOpened, windowOver, withWindows,
 } from "./chain.ts";
 import { entityRules, type EntityRules } from "./rules.ts";
@@ -423,33 +424,53 @@ const holding = (w: Work, e: Extract<JEvent, { _tag: "j_collateral" }>): Work =>
 };
 
 /**
- * R-LEDGER-REBASE: a finalized dispute paid the Account out: no collateral and no ondelta are held for any token.
- * R-HOLD-DISSOLVE: and it settled every clause of the proof it used, so the Account's holds, quotes and offers are
- * over, in the committed state and in the state a pending frame would commit. A lock this Entity forwarded to `peer`
- * is a lock `peer` gave up, as far as the paybook is concerned, so the failure walks back to its source the usual way.
+ * R-HOLD-DISSOLVE: a finalized dispute settled every clause of the proof it used, so the Account's holds, quotes and
+ * offers are over, in the committed state and in the state a pending frame would commit. A lock this Entity forwarded
+ * to `peer` is a lock `peer` gave up, as far as the paybook is concerned, so the failure walks back to its source the
+ * usual way.
  */
-const finalized = (w: Work, peer: EntityId): Work => {
+const dissolving = (w: Work, peer: EntityId): Work => {
   const account = w.state.accounts.get(peer);
-  const ledgered = account?.state.ledgers.keys() ?? [];
   const given = [...(account?.state.ledgers ?? [])]
     .flatMap(([token, l]) => l.holds.map((h): AccountTx => ({ _tag: "cancel", token, id: h.id })));
   const told = { ...w, state: { ...w.state, paybook: learned(w.state.paybook, peer, given) } };
   const { pending } = account ?? {};
-  const open = account === undefined ? told : withReplica(told, peer, {
+  return account === undefined ? told : withReplica(told, peer, {
     ...account,
     state: dissolved(account.state),
     pending: pending === undefined ? undefined : { ...pending, after: dissolved(pending.after) },
   });
-  return reconciled(withFacts(open, peer, paidOut(disputeOver(factsOf(w, peer)), ledgered)), peer);
 };
+
+/** The tokens the Account with `peer` has a ledger for. */
+const ledgersOf = (w: Work, peer: EntityId) => w.state.accounts.get(peer)?.state.ledgers.keys() ?? [];
+
+/**
+ * R-LEDGER-REBASE: a finalized dispute paid the Account out: no collateral and no ondelta are held for any token, and
+ * no dispute is left to counter or to finalize.
+ */
+const paid = (w: Work, peer: EntityId): Work =>
+  withFacts(w, peer, paidOut(disputeOver(factsOf(w, peer)), ledgersOf(w, peer)));
+
+
+
+/** The chain finalized the dispute: the Account is paid out and its holds are dissolved. */
+const finalized = (w: Work, peer: EntityId): Work => reconciled(paid(dissolving(w, peer), peer), peer);
+
+/**
+ * The finalize that was held back for its arguments comes at last (R-WATCH-STALL): the Entity heard the epoch move on
+ * and what came after it, so it dissolves the holds and leaves the facts, which are the new epoch's, alone.
+ */
+const finalizedLate = (w: Work, peer: EntityId): Work => reconciled(dissolving(w, peer), peer);
 
 /** What the chain did to the Account with `peer`, as the facts the Entity holds for the pair say. */
 const chainFact = (w: Work, terms: ProofTerms, e: JEvent): Work => {
   const facts = factsOf(w, e.peer);
   switch (e._tag) {
     case "j_epoch": {
-      const moved = epochAdvanced(facts, e.epoch, e.stored);
-      return moved === facts ? w : rebasing(withFacts(w, e.peer, moved), e.peer, finalizedBy(w, terms, facts, e));
+      const advanced = epochAdvanced(facts, e.epoch, e.stored);
+      const moved = e.finalBodyHash === undefined ? advanced : paidOut(advanced, ledgersOf(w, e.peer));
+      return advanced === facts ? w : rebasing(withFacts(w, e.peer, moved), e.peer, finalizedBy(w, terms, facts, e));
     }
     case "j_dispute":
       return withFacts(w, e.peer, e.by === sideOf(w.state.id, e.peer)
@@ -460,7 +481,7 @@ const chainFact = (w: Work, terms: ProofTerms, e: JEvent): Work => {
     case "j_window_over":
       return withFacts(w, e.peer, windowOver(facts));
     case "j_dispute_over":
-      return finalized(w, e.peer);
+      return e.late === true ? finalizedLate(w, e.peer) : finalized(w, e.peer);
     case "j_start_lapsed":
       return withFacts(w, e.peer, startLapsed(facts, e.nonce));
     case "j_counter_lapsed":
@@ -477,6 +498,10 @@ const chainFact = (w: Work, terms: ProofTerms, e: JEvent): Work => {
       return withFacts(w, e.peer, behindFrom(facts, e.from));
     case "j_behind_over":
       return withFacts(w, e.peer, behindOver(facts));
+    case "j_account_lost":
+      return noting(
+        withFacts(w, e.peer, accountLost(facts, e.from)), { _tag: "account_lost", peer: e.peer, from: e.from },
+      );
   }
 };
 
@@ -503,6 +528,13 @@ const cosigning = (w: Work, a: CosignAsk): Work => {
     : noting(w, { _tag: "cosign_refused", from: a.from, op: a.op, fault: action.error });
 };
 
+/** Blind from now on; the owner is told unless it is the boot state of a node that has not asked its provider yet. */
+const blinded = (w: Work, a: Extract<Arrival, { _tag: "j_blind" }>): Work => {
+  if (w.state.blind) return w;
+  const next = { ...w, state: { ...w.state, blind: true } };
+  return a.boot ? next : noting(next, { _tag: "chain_blind" });
+};
+
 const arrive = (rules: Rulebook, terms: ProofTerms, check: Check, view: JView, w: Work, a: Arrival): Work => {
   switch (a._tag) {
     case "peer_message":
@@ -512,7 +544,7 @@ const arrive = (rules: Rulebook, terms: ProofTerms, check: Check, view: JView, w
     case "j_secret":
       return secretShown(w, a);
     case "j_blind":
-      return w.state.blind ? w : noting({ ...w, state: { ...w.state, blind: true } }, { _tag: "chain_blind" });
+      return blinded(w, a);
     case "j_blind_over":
       return { ...w, state: { ...w.state, blind: false } };
     default:
@@ -946,7 +978,8 @@ const isArrival = (i: EntityInput): i is Arrival =>
   || i._tag === "j_countered" || i._tag === "j_window_over" || i._tag === "j_dispute_over"
   || i._tag === "j_start_lapsed" || i._tag === "j_counter_lapsed" || i._tag === "j_collateral"
   || i._tag === "j_op_lapsed" || i._tag === "j_finalize_unread" || i._tag === "j_start_unread"
-  || i._tag === "j_behind" || i._tag === "j_behind_over" || i._tag === "j_blind" || i._tag === "j_blind_over";
+  || i._tag === "j_behind" || i._tag === "j_behind_over" || i._tag === "j_account_lost" || i._tag === "j_blind"
+  || i._tag === "j_blind_over";
 
 const arrivalsOf = (inputs: readonly EntityInput[]): readonly Arrival[] => inputs.filter(isArrival);
 

@@ -60,7 +60,7 @@ const tracedOf = (found: readonly Uint8Array[] | "down" | "no_method" | undefine
 
 /** A port over `chain` that writes each call it gets to `log`; `broken` is the block, or the read, that fails. */
 const portOf = (
-  chain: Chain, log: string, broken: bigint | "logs" | "account" | "input" | "unknown" = -1n,
+  chain: Chain, log: string, broken: bigint | "logs" | "account" | "input" | "unknown" | "pruned" = -1n,
   inputs: ReadonlyMap<Bytes32, Uint8Array> = new Map(),
   traces: ReadonlyMap<Bytes32, readonly Uint8Array[] | "down" | "no_method"> = new Map(),
 ): WatchPort => {
@@ -79,6 +79,7 @@ const portOf = (
     },
     accountAt: (block, left, right) => {
       appendFileSync(log, `account ${block.slice(-4)} ${left.slice(-2)} ${right.slice(-2)}\n`);
+      if (broken === "pruned" && right === RIGHT) return Promise.resolve(ok("pruned"));
       return Promise.resolve(broken === "account" ? err(DOWN) : ok({ epoch: 1n, nonce: 5n }));
     },
     input: (tx) => {
@@ -96,6 +97,10 @@ const portOf = (
     traced: () => Promise.resolve(ok("traces")),
   };
 };
+
+/** The same chain, whose Accounts all stand at `epoch` after the last block the Host asks about. */
+const atEpoch = (port: WatchPort, epoch: bigint): WatchPort =>
+  ({ ...port, accountAt: () => Promise.resolve(ok({ epoch, nonce: 5n })) });
 
 const advanced = (block: bigint, index: bigint, epoch: bigint) =>
   logOf("AccountEpochAdvanced", { left: LEFT, right: RIGHT, ondeltaEpoch: epoch }, block, index);
@@ -207,6 +212,7 @@ describe("host/shell/watch the J loop's poll", () => {
   };
   const EPOCH: EntityInput = { _tag: "j_epoch", peer: peer(RIGHT), epoch: 1n, stored: 5n, finalBodyHash: hexOf(5n) };
   const OVER: EntityInput = { _tag: "j_dispute_over", peer: peer(RIGHT) };
+  const OVER_LATE: EntityInput = { ...OVER, late: true };
   const TOLD: readonly EntityInput[] = [SECRET_TOLD, EPOCH, OVER];
 
   test("R-WATCH-CALLDATA a finalize relayed through a contract is read from the call the input carries", async () => {
@@ -260,21 +266,22 @@ describe("host/shell/watch the J loop's poll", () => {
     expect(plain.ok ? plain.value?.untraceable : plain).toBe(false);
   });
 
-  test("R-WATCH-STALL a stalled tx holds back its own Account only: secrets and other Accounts go on", async () => {
+  test("R-WATCH-STALL a stalled finalize is held alone: the advance, secrets and other Accounts go on", async () => {
     const { tx, logs } = finalizing();
-    const chain = [shownAt(1n), ...logs, otherAdvanced(3n, 1n, 1n), advanced(3n, 2n, 2n), shownAt(4n, 9n, 10n)];
+    const chain = [shownAt(1n), ...logs, otherAdvanced(3n, 1n, 1n), advanced(3n, 2n, 1n), shownAt(4n, 9n, 10n)];
     const traces = new Map<Bytes32, "down">([[tx, "down"]]);
     const port = portOf(straight(8n, chain), logPath(), -1n, new Map([[tx, HIDDEN]]), traces);
     const got = await stepped(port, FRESH, NO_STANDING);
     const bytes = Uint8Array.from({ length: 32 }, (_, i) => (i === 31 ? 10 : 0));
     const other: EntityInput = { _tag: "j_epoch", peer: peer(OTHER), epoch: 1n, stored: 5n };
-    expect(got.told).toEqual([BEHIND, SECRET_TOLD, other, { _tag: "j_secret", secret: bytes }]);
+    const again: EntityInput = { _tag: "j_epoch", peer: peer(RIGHT), epoch: 1n, stored: 5n };
+    expect(got.told).toEqual([BEHIND, SECRET_TOLD, EPOCH, other, again, { _tag: "j_secret", secret: bytes }]);
     expect(got.last?.height).toBe(6n as never);
-    expect(got.carry.held.map((e) => e._tag)).toEqual(["epoch_advanced", "dispute_finalized", "epoch_advanced"]);
+    expect(got.carry.held.map((e) => e._tag)).toEqual(["dispute_finalized"]);
     expect([...got.carry.failing.keys()]).toEqual([tx]);
   });
 
-  test("R-WATCH-STALL the held events follow the tx once it is given: secrets first", async () => {
+  test("R-WATCH-STALL the held finalize follows the tx once it is given: secrets, then the end, late", async () => {
     const { op, tx, logs } = finalizing();
     const inputs = new Map([[tx, finalizeInput(RIGHT, [op])]]);
     const settled = logOf("AccountSettled", {
@@ -284,12 +291,12 @@ describe("host/shell/watch the J loop's poll", () => {
     const flaky = (head: bigint) => portOf(straight(head, chain), logPath(), head < 8n ? "input" : -1n, inputs);
     const other: EntityInput = { _tag: "j_epoch", peer: peer(OTHER), epoch: 1n, stored: 5n };
     const held = await along(flaky, upTo(6n, 7n));
-    expect(held.told).toEqual([BEHIND, other]);
-    expect(held.carry.held).toHaveLength(2);
+    expect(held.told).toEqual([BEHIND, EPOCH, other]);
+    expect(held.carry.held).toHaveLength(1);
     const given = await along(flaky, [8n], held);
-    const tags = ["j_secret", "j_epoch", "j_dispute_over", "j_collateral", "j_behind_over"];
-    expect(tagsOf(given.told.slice(2))).toEqual(tags);
-    expect(given.told.slice(2, 5)).toEqual([...TOLD]);
+    const tags = ["j_secret", "j_dispute_over", "j_collateral", "j_behind_over"];
+    expect(tagsOf(given.told.slice(3))).toEqual(tags);
+    expect(given.told.slice(3, 5)).toEqual([SECRET_TOLD, { ...OVER, late: true }]);
     expect(given.carry).toEqual(NO_CARRY);
   });
 
@@ -333,10 +340,10 @@ describe("host/shell/watch the J loop's poll", () => {
     }));
   });
 
-  test("R-WATCH-STALL an input the node cannot give holds its Account from the finalize's advance on", async () => {
+  test("R-WATCH-STALL an input the node cannot give holds the finalize alone: its advance is told", async () => {
     const { logs } = finalizing();
     const early = await stepped(portOf(straight(6n, [shownAt(1n), ...logs]), logPath()), FRESH, NO_STANDING);
-    expect(early.told).toEqual([BEHIND, SECRET_TOLD]);
+    expect(early.told).toEqual([BEHIND, SECRET_TOLD, EPOCH]);
     const first = await stepped(portOf(straight(6n, logs.slice(0, 1)), logPath(), "input"), FRESH, NO_STANDING);
     expect(tagsOf(first.told)).toEqual(["j_epoch"]);
   });
@@ -347,25 +354,25 @@ describe("host/shell/watch the J loop's poll", () => {
     const unread: EntityInput = { _tag: "j_finalize_unread", peer: peer(RIGHT), tx };
     const heads = upTo(400n, 400n + BigInt(FEW_TRIES) - 1n);
     const polled = await along((head) => portOf(straight(head, logs), at, "unknown"), heads);
-    expect(polled.told).toEqual([BEHIND, EPOCH, OVER, unread, BEHIND_OVER]);
+    expect(polled.told).toEqual([BEHIND, EPOCH, OVER_LATE, unread, BEHIND_OVER]);
     expect(callsOf(at).some((c) => c.startsWith("trace"))).toBe(false);
   });
 
   test("R-WATCH-CALLDATA a transaction of a young block the node does not know holds like a fault", async () => {
     const { logs } = finalizing();
     const got = await stepped(portOf(straight(6n, [shownAt(1n), ...logs]), logPath(), "unknown"), FRESH, NO_STANDING);
-    expect(got.told).toEqual([BEHIND, SECRET_TOLD]);
+    expect(got.told).toEqual([BEHIND, SECRET_TOLD, EPOCH]);
     expect(got.last?.height).toBe(4n as never);
   });
 
-  test("R-WATCH-CALLDATA two stalled txs of one Account hold from the earlier; none has a trace", async () => {
+  test("R-WATCH-CALLDATA two stalled finalizes of one Account are both held; none has a trace", async () => {
     const at = logPath();
     const second = finalizing(txOf(2n, 1n));
     const third = finalizedOf(second.op, 3n, 1n, txOf(3n, 1n));
-    const logs = [shownAt(1n), advanced(2n, 0n, 1n), second.logs[1], advanced(3n, 0n, 2n), third];
+    const logs = [shownAt(1n), advanced(2n, 0n, 1n), second.logs[1], advanced(3n, 0n, 1n), third];
     const got = await stepped(portOf(straight(7n, logs), at), FRESH, NO_STANDING);
-    expect(got.told).toEqual([BEHIND, SECRET_TOLD]);
-    expect(got.carry.held).toHaveLength(4);
+    expect(got.told).toEqual([BEHIND, SECRET_TOLD, EPOCH, EPOCH]);
+    expect(got.carry.held).toHaveLength(2);
     expect(callsOf(at).some((c) => c.startsWith("trace"))).toBe(false);
   });
 
@@ -387,8 +394,7 @@ describe("host/shell/watch the J loop's poll", () => {
 
   test("R-WATCH-CALLDATA an input the node cannot give is the port's fault: nothing is delivered", async () => {
     const op = finalizeOp();
-    const at1 = [logOf("AccountEpochAdvanced", { left: LEFT, right: RIGHT, ondeltaEpoch: 1n }, 1n, 0n),
-      finalizedOf(op, 1n, 1n)];
+    const at1 = [finalizedOf(op, 1n, 1n)];
     const tx = txOf(1n, 1n);
     const got = await poll(portOf(straight(6n, at1), logPath(), "input"), start(2n), LEFT);
     const told: EntityInput = { _tag: "j_behind", peer: peer(RIGHT), from: 1n };
@@ -425,11 +431,11 @@ describe("host/shell/watch the J loop's poll", () => {
     const { tx, logs } = finalizing();
     const at = (head: bigint) => portOf(straight(head, logs), logPath(), "input");
     const tries = await along(at, upTo(6n, 6n + BigInt(FEW_TRIES) - 2n));
-    expect(tries.told).toEqual([BEHIND]);
+    expect(tries.told).toEqual([BEHIND, EPOCH]);
     expect(tries.carry.failing.get(tx)?.tries).toBe(FEW_TRIES - 1);
     const spent = await along(at, [6n + BigInt(FEW_TRIES) - 1n], tries);
     const unread: EntityInput = { _tag: "j_finalize_unread", peer: peer(RIGHT), tx };
-    expect(spent.told.slice(1)).toEqual([EPOCH, OVER, unread, BEHIND_OVER]);
+    expect(spent.told.slice(2)).toEqual([OVER_LATE, unread, BEHIND_OVER]);
     expect(spent.carry.failing.size).toBe(0);
   });
 
@@ -438,14 +444,78 @@ describe("host/shell/watch the J loop's poll", () => {
     const at = (head: bigint) => portOf(straight(head, logs), logPath(), "input");
     const stand: Standing = { ...NO_STANDING, lastHeard: new Map([[RIGHT, 20n]]) };
     const waiting = await along(at, upTo(6n, 21n), FRESH, stand);
-    expect(waiting.told).toEqual([BEHIND]);
+    expect(waiting.told).toEqual([BEHIND, EPOCH]);
     expect(waiting.carry.failing.get(tx)?.tries).toBe(16);
     const spent = await along(at, [22n], waiting, stand);
     const unread: EntityInput = { _tag: "j_finalize_unread", peer: peer(RIGHT), tx };
-    expect(spent.told.slice(1)).toEqual([EPOCH, OVER, unread, BEHIND_OVER]);
+    expect(spent.told.slice(2)).toEqual([OVER_LATE, unread, BEHIND_OVER]);
     const other: Standing = { ...NO_STANDING, lastHeard: new Map([[OTHER, 100n]]) };
     const unrelated = await along(at, upTo(6n, 8n), FRESH, other);
-    expect(unrelated.told.slice(1)).toEqual([EPOCH, OVER, unread, BEHIND_OVER]);
+    expect(unrelated.told.slice(2)).toEqual([OVER_LATE, unread, BEHIND_OVER]);
+  });
+
+  test("R-WATCH-STALL one fault does not give up a lock the secret may pay: FEW_TRIES blocks at least", async () => {
+    const { tx, op, logs } = finalizing();
+    const down = (head: bigint) => portOf(straight(head, logs), logPath(), "input");
+    const inputs = new Map([[tx, finalizeInput(RIGHT, [op])]]);
+    const up = (head: bigint) => portOf(straight(head, logs), logPath(), -1n, inputs);
+    const stand: Standing = { ...NO_STANDING, lastHeard: new Map([[RIGHT, 3n]]) };
+    const waiting = await along(down, [6n], FRESH, stand);
+    expect(waiting.told).toEqual([BEHIND, EPOCH]);
+    const read = await along(up, [7n], waiting, stand);
+    expect(read.told.slice(2)).toEqual([SECRET_TOLD, OVER_LATE, BEHIND_OVER]);
+    const spent = await along(down, upTo(6n, 8n), FRESH, stand);
+    const unread: EntityInput = { _tag: "j_finalize_unread", peer: peer(RIGHT), tx };
+    expect(spent.told.slice(2)).toEqual([OVER_LATE, unread, BEHIND_OVER]);
+  });
+
+  test("R-WATCH-WINDOW the reading of a start waiting for its body is taken once, and carried", async () => {
+    const at = logPath();
+    const tx = txOf(2n, 0n);
+    const inputs = new Map([[tx, startInput(RIGHT, [startOp(CLAUSED)])]]);
+    const stand: Standing = { ...NO_STANDING, lastHeard: new Map([[RIGHT, 50n]]) };
+    const down = (head: bigint) => portOf(straight(head, [opening(WINDOW)]), at, "input");
+    const waiting = await along(down, upTo(6n, 8n), FRESH, stand);
+    expect(countOf(at, `account ${blockOf(2n).hash.slice(-4)} 11 52`)).toBe(1);
+    expect(waiting.carry.readings.size).toBe(1);
+    const up = (head: bigint) => portOf(straight(head, [opening(WINDOW)]), at, -1n, inputs);
+    const read = await along(up, [9n], waiting, stand);
+    expect(read.told.at(-2)).toMatchObject({ _tag: "j_dispute", body: CLAUSED });
+    expect(countOf(at, `account ${blockOf(2n).hash.slice(-4)} 11 52`)).toBe(1);
+    expect(read.carry.readings.size).toBe(0);
+  });
+
+  test("R-WATCH-WINDOW a reading the node no longer serves loses its own Account, and no other", async () => {
+    const at = logPath();
+    const logs = [advanced(2n, 0n, 1n), otherAdvanced(3n, 0n, 1n), shownAt(4n)];
+    const lost: EntityInput = { _tag: "j_account_lost", peer: peer(RIGHT), from: 2n };
+    const first = await stepped(portOf(straight(8n, logs), at, "pruned"), FRESH, NO_STANDING);
+    expect(tagsOf(first.told)).toEqual(["j_account_lost", "j_epoch", "j_secret"]);
+    expect(first.told[0]).toEqual(lost);
+    expect(first.told[1]).toMatchObject({ _tag: "j_epoch", peer: peer(OTHER) });
+    const later = [...logs, advanced(7n, 0n, 1n), otherAdvanced(7n, 1n, 1n)];
+    const stand: Standing = { ...NO_STANDING, lost: new Set([RIGHT]) };
+    const next = await stepped(portOf(straight(10n, later), at, "pruned"), first, stand);
+    expect(tagsOf(next.told.slice(3))).toEqual(["j_epoch"]);
+    expect(next.told[3]).toMatchObject({ peer: peer(OTHER), epoch: 1n, stored: 5n });
+    expect(callsOf(at).filter((c) => c.endsWith("11 52"))).toHaveLength(1);
+  });
+
+  test("R-WATCH-WINDOW a fault of the reads that is no pruned state is the poll's: nothing told", async () => {
+    const chain = straight(6n, [advanced(2n, 0n, 1n)]);
+    const got = await poll(portOf(chain, logPath(), "account"), start(2n), LEFT);
+    expect(got).toEqual(err(DOWN));
+  });
+
+  test("R-WATCH-STALL an epoch told ahead of another advance in its block is read less it", async () => {
+    const op = finalizeOp({ otherArguments: argumentsOf([hexOf(8n)]) });
+    const tx = txOf(2n, 2n);
+    const logs = [advanced(2n, 0n, 1n), advanced(2n, 1n, 2n), finalizedOf(op, 2n, 2n, tx)];
+    const EPOCH2: EntityInput = { ...EPOCH, epoch: 2n };
+    const port = atEpoch(portOf(straight(6n, logs), logPath(), "input"), 2n);
+    const got = await stepped(port, FRESH, NO_STANDING);
+    expect(got.told).toEqual([BEHIND, { _tag: "j_epoch", peer: peer(RIGHT), epoch: 1n, stored: 5n }, EPOCH2]);
+    expect(got.carry.held.map((e) => e._tag)).toEqual(["dispute_finalized"]);
   });
 
   /** A dispute start of the peer against the Entity at block 2, whose window ends at the chain's second `timeout`. */
@@ -496,6 +566,37 @@ describe("host/shell/watch the J loop's poll", () => {
     expect(spent.carry.reading).toEqual([]);
   });
 
+  test("R-WATCH-STALL a start still reading and a finalize held are told again in the chain's order", async () => {
+    const stuck = txOf(2n, 0n);
+    const second = finalizing(txOf(3n, 1n));
+    const logs = [opening(WINDOW, stuck), advanced(3n, 0n, 1n), finalizedOf(second.op, 3n, 1n, second.tx)];
+    const inputs = new Map([
+      [stuck, startInput(RIGHT, [startOp(CLAUSED)])], [second.tx, finalizeInput(RIGHT, [second.op])],
+    ]);
+    const stand: Standing = { ...NO_STANDING, lastHeard: new Map([[RIGHT, 50n]]) };
+    const down = (head: bigint) => portOf(straight(head, logs), logPath(), "input");
+    const waiting = await along(down, upTo(7n, 8n), FRESH, stand);
+    expect(tagsOf(waiting.told)).toEqual(["j_behind", "j_secret", "j_dispute", "j_epoch"]);
+    const up = (head: bigint) => portOf(straight(head, logs), logPath(), -1n, inputs);
+    const read = await along(up, [9n], waiting, stand);
+    const tags = ["j_secret", "j_dispute", "j_secret", "j_dispute_over", "j_behind_over"];
+    expect(tagsOf(read.told.slice(4))).toEqual(tags);
+    expect(read.told[5]).toMatchObject({ _tag: "j_dispute", body: CLAUSED });
+    expect(read.told[7]).toEqual(OVER_LATE);
+  });
+
+  test("R-WATCH-WINDOW a finalize held for longer than the node keeps state asks it of no old block", async () => {
+    const at = logPath();
+    const { tx, op, logs } = finalizing();
+    const inputs = new Map([[tx, finalizeInput(RIGHT, [op])]]);
+    const stand: Standing = { ...NO_STANDING, lastHeard: new Map([[RIGHT, 500n]]) };
+    const waiting = await along((head) => portOf(straight(head, logs), at, "input"), upTo(6n, 300n), FRESH, stand);
+    expect(waiting.told).toEqual([BEHIND, EPOCH]);
+    const read = await along((head) => portOf(straight(head, logs), at, -1n, inputs), [301n], waiting, stand);
+    expect(read.told.slice(2)).toEqual([SECRET_TOLD, OVER_LATE, BEHIND_OVER]);
+    expect(callsOf(at).filter((c) => c.startsWith("account"))).toHaveLength(1);
+  });
+
   /** One tx: a finalize of a stranger's Account first, then the finalize of the Entity's Account with RIGHT. */
   const relayedFinalizes = () => {
     const op = finalizeOp({ otherArguments: argumentsOf([hexOf(8n)]) });
@@ -512,7 +613,7 @@ describe("host/shell/watch the J loop's poll", () => {
     const at = (head: bigint) => portOf(straight(head, logs), logPath(), "input");
     const forwarded: Standing = { ...NO_STANDING, lastHeard: new Map([[RIGHT, 100n]]) };
     const waiting = await along(at, upTo(6n, 20n), FRESH, forwarded);
-    expect(waiting.told).toEqual([{ ...BEHIND, from: 2n }]);
+    expect(waiting.told).toEqual([BEHIND, EPOCH]);
     expect(waiting.carry.failing.get(tx)?.tries).toBe(15);
     const alone = await along(at, upTo(6n, 8n));
     expect(tagsOf(alone.told)).toEqual(["j_behind", "j_epoch", "j_dispute_over", "j_finalize_unread", "j_behind_over"]);
@@ -535,13 +636,13 @@ describe("host/shell/watch the J loop's poll", () => {
     const at = (head: bigint) => portOf(straight(head, logs), logPath(), "input");
     const stand: Standing = { ...NO_STANDING, lastHeard: new Map([[RIGHT, 100n], [OTHER, 10n]]) };
     const waiting = await along(at, upTo(6n, 11n), FRESH, stand);
-    expect(tagsOf(waiting.told)).toEqual(["j_behind", "j_behind"]);
+    expect(tagsOf(waiting.told)).toEqual(["j_behind", "j_behind", "j_epoch", "j_epoch"]);
     const spent = await along(at, [12n], waiting, stand);
     const unread: EntityInput = { _tag: "j_finalize_unread", peer: peer(OTHER), tx };
-    expect(tagsOf(spent.told.slice(2))).toEqual(["j_epoch", "j_dispute_over", "j_finalize_unread", "j_behind_over"]);
-    expect(spent.told.slice(2)[2]).toEqual(unread);
+    expect(tagsOf(spent.told.slice(4))).toEqual(["j_dispute_over", "j_finalize_unread", "j_behind_over"]);
+    expect(spent.told.slice(4)[1]).toEqual(unread);
     expect(spent.told.at(-1)).toEqual({ _tag: "j_behind_over", peer: peer(OTHER) });
-    expect(spent.carry.held.map((e) => e._tag)).toEqual(["epoch_advanced", "dispute_finalized"]);
+    expect(spent.carry.held.map((e) => e._tag)).toEqual(["dispute_finalized"]);
     expect(spent.carry.failing.has(tx)).toBe(true);
   });
 
@@ -551,9 +652,9 @@ describe("host/shell/watch the J loop's poll", () => {
     const knows: Standing = { ...NO_STANDING, behind: new Set([RIGHT]), view: 100n };
     const restarted = await along(at, upTo(6n, 8n), FRESH, knows);
     const unread: EntityInput = { _tag: "j_finalize_unread", peer: peer(RIGHT), tx };
-    expect(restarted.told).toEqual([EPOCH, OVER, unread]);
+    expect(restarted.told).toEqual([EPOCH, OVER_LATE, unread]);
     const caught = await along(at, upTo(6n, 8n), FRESH, { ...knows, view: 0n });
-    expect(caught.told).toEqual([EPOCH, OVER, unread, BEHIND_OVER]);
+    expect(caught.told).toEqual([EPOCH, OVER_LATE, unread, BEHIND_OVER]);
   });
 
   test("R-WATCH-STALL a restart begins before the earliest block the Entity was told is held back", () => {
@@ -570,11 +671,11 @@ describe("host/shell/watch the J loop's poll", () => {
   const behindAStall = () => {
     const stuck = finalizing(txOf(2n, 1n));
     const fine = finalizing(txOf(3n, 5n));
-    const logs = [...stuck.logs, advanced(3n, 0n, 2n), finalizedOf(fine.op, 3n, 5n, fine.tx)];
+    const logs = [...stuck.logs, advanced(3n, 0n, 1n), finalizedOf(fine.op, 3n, 5n, fine.tx)];
     return { logs, fine, stuck };
   };
 
-  test("R-WATCH-CALLDATA a tx read behind a stalled one is read once, not once a head", async () => {
+  test("R-WATCH-CALLDATA a tx read ahead of a stalled one is read once, and not kept once told", async () => {
     const at = logPath();
     const { logs, fine, stuck } = behindAStall();
     const inputs = new Map([[fine.tx, finalizeInput(RIGHT, [fine.op])]]);
@@ -582,10 +683,10 @@ describe("host/shell/watch the J loop's poll", () => {
     expect(polled.carry.failing.get(stuck.tx)?.tries).toBe(2);
     expect(countOf(at, `input ${fine.tx.slice(-4)}`)).toBe(1);
     expect(countOf(at, `input ${stuck.tx.slice(-4)}`)).toBe(2);
-    expect([...polled.carry.reads.keys()]).toEqual([fine.tx]);
+    expect([...polled.carry.reads.keys()]).toEqual([]);
   });
 
-  test("R-WATCH-CALLDATA a trace asked and answered is not asked again while the tx waits behind a stall", async () => {
+  test("R-WATCH-CALLDATA a trace asked and answered is not asked again while another tx waits", async () => {
     const at = logPath();
     const { logs, fine, stuck } = behindAStall();
     const hidden = new Map([[fine.tx, HIDDEN]]);
@@ -593,7 +694,7 @@ describe("host/shell/watch the J loop's poll", () => {
     const polled = await along((head) => portOf(straight(head, logs), at, -1n, hidden), upTo(8n, 11n), FRESH, stand);
     expect(polled.carry.failing.has(stuck.tx)).toBe(true);
     expect(countOf(at, `trace ${fine.tx.slice(-4)}`)).toBe(1);
-    expect(polled.carry.reads.get(fine.tx)?.traced).toBe(true);
+    expect(polled.carry.reads.has(fine.tx)).toBe(false);
   });
 
   test("R-WATCH-CALLDATA what the Host keeps of a tx ends with its delivery: nothing is kept past it", async () => {
@@ -613,7 +714,7 @@ describe("host/shell/watch the J loop's poll", () => {
     expect(tried.carry.failing.get(tx)).toMatchObject({ tries: 2, fault: DOWN });
     const spent = await along(at, [8n], tried);
     const unread: EntityInput = { _tag: "j_finalize_unread", peer: peer(RIGHT), tx };
-    expect(spent.told.slice(1)).toEqual([EPOCH, OVER, unread, BEHIND_OVER]);
+    expect(spent.told.slice(2)).toEqual([OVER_LATE, unread, BEHIND_OVER]);
   });
 
   test("R-JLOOP a block not buried yet is not read: nothing is delivered, nothing is asked past the head", async () => {

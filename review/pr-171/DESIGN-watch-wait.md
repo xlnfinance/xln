@@ -25,24 +25,38 @@ held events travel with them in the carry (`Carry.readings`, by `readingKey`). A
 old block, so a hold longer than the node's recent-state window (128 blocks on a node that is not an archive node) costs
 nothing (P12: lastHeard 200, a SecretRevealed of another Account at block 300 was never told).
 
-A reading the node answers "no longer served" (a pruned state: `missing trie node`, `historical state ... is not
-available`, `header not found`) is not a fault of the poll: it faults **its own Account only**. The Account's events
-from that one on are not told (the cursor moves past them), the Entity is told `j_account_lost {peer, from}`: it files a
-loud notice (`account_lost`), sets `behind` (so the Account stays quiet for good) and nothing else. Every other
+A reading the node answers "no longer served" (a pruned state: geth's `historical state ... is not available` and `missing trie node`, Erigon's `old data not available due to
+pruning`, Nethermind's `No state available for block`, Reth's `state at block #N is pruned`; a block the node does not know, a
+null answer, and every other error are faults) is not a fault of the poll: it faults **its own Account only**. The Account's events
+from that one on are not told, now or at any later poll (the Host drops the events of an Account the Entity's chain
+facts call `lost`; the cursor moves past them), the Entity is told `j_account_lost {peer, from}`: it files a
+loud notice (`account_lost`), sets `behind = from` and `lost` (so the Account stays quiet for good, and `j_behind_over`
+is no way out of it) and nothing else. Every other
 Account and every `SecretRevealed` is told as usual. Any other failure of the read (a 503, a timeout) is a fault of the
-port: the poll is tried again at the next tick, nothing was told, the cursor did not move. A lost Account is re-lost on
-a restart (the restart reads again from `behind - 1` and the old block is still pruned), and the notice is told again.
+port: the poll is tried again at the next tick, nothing was told, the cursor did not move. A lost Account stays lost
+across a restart (the WAL holds `lost`; the restart drops its events without reading them), and its notice is told once.
 Owed: resync of a lost Account (operator re-reads on an archive node); backlog.
 
-## 2. S: the finalize's hold, per Account, per lock
+## 2. S: the finalize alone is held (G1)
 
-A finalize whose calldata the node will not give holds its Account's events from its first event on (`beginsAt`: the
-epoch advance it made), because `j_dispute_over` makes `finalized` (entity/frame.ts) turn the Account's `locked`
-paybook entries into `fail` and cancel the inbound locks upstream, and `revealed` acts only on `locked` entries: a secret told after the dissolve is lost.
+A finalize whose calldata the node will not give is held **alone**: its secrets, then its `j_dispute_over`. The epoch advance
+it made (`j_epoch`, with `finalBodyHash`) is told at once, in its place, and so is every later event of the Account.
+`j_dispute_over` is what makes `finalized` (entity/frame.ts) turn the Account's `locked` paybook entries into `fail` and cancel
+the inbound locks upstream, and `revealed` acts only on `locked` entries: a secret told after the dissolve is lost. The rebase
+(`j_epoch`) dissolves no hold, so it need not wait; and it must not: a start in the epoch after the finalize is dropped by
+`disputeOpened` unless the Entity heard the advance first (chain.ts: a `j_dispute` of another epoch than the facts'), after
+which the Entity signs in the new epoch with a dispute standing it never heard of and misses the counter window.
 
-**Rule 2 (the dissolve race): an entry whose secret read is pending stays `locked` through the finalize.** It does so
-by construction: the Entity is not told the finalize, nor the advance, nor any later event of the Account, until the
-read lands or the Account's give-up passes. A lock this Entity forwarded to the Account's peer dissolves only then.
+The two halves of `finalized` are therefore separable. `j_epoch` with a `finalBodyHash` pays the Account out (the held
+collateral rows are zero: R-LEDGER-REBASE). A held finalize arrives `late` (the Host marks what a poll releases from its
+carry): the Entity dissolves the Account's holds and fails the forwarded locks (`finalizedLate`) and leaves the facts alone,
+which by then are the new epoch's (a dispute that started in it, a later collateral snapshot). A finalize told in order
+(`finalized`) does both, as before. The finalize's secrets are told ahead of the advance it made when that advance is in the
+delivery, and ahead of the finalize itself when it is not: either way before the dissolve.
+
+**Rule 2 (the dissolve race): an entry whose secret read is pending stays `locked` through the finalize.** By construction:
+the Entity is not told `j_dispute_over` until the read lands or the Account's give-up passes. A lock this Entity forwarded to
+the Account's peer dissolves only then.
 
 **Give-up of an Account's pending finalize read = tries and height:** `tries >= FEW_TRIES` (one try per head block, at
 least FEW_TRIES blocks even past the height: P11, one fault at head 6 must not give up a lock whose secret is still
@@ -67,17 +81,19 @@ stranger's is not read at all (`needsBytes`).
 A start is told at once as its log has it (window, nonce, proof hash, secrets, no body), so the Entity hears a dispute
 against it, and every event that opens or closes its response window, in time (B9; the model: the counter registers only
 if hearing delay plus lag is under the window). Its body is told when the bytes come: the start is told again with the
-body (the Entity takes the body of the dispute it holds only if it hashes to the logged hash). It is told
+body. G2: `disputeOpened` returns early on a repeat once `against` is set, so the repeat is a path of its own that fills a
+missing body, and only when the body hashes to the hash already logged (`bodied`, entity/chain.ts; any other repeat is
+ignored). Unchanged by this round: it already did, and its tests are in entity/chain.test.ts. It is told
 `j_start_unread` once a delivery's last block is past the window's end (the chain's own second). A start of the
 Entity's own is not read. A counter is never held.
 
 ## 4. While an Account is behind
 
-`behind` is set while the Host owes the Entity events of the Account (held finalize events, a start's body pending, a
-lost Account). The Account is **quiet**: no new frame signed, its peer's frames refused as frozen, no lock forwarded
+`behind` is set while the Host owes the Entity events of the Account (a held finalize, a start's body pending, a lost
+Account). The Account is **quiet**: no new frame signed, its peer's frames refused as frozen, no lock forwarded
 to that peer (the inbound lock is given up), and the inbound hold of a hash forwarded to it is not expired
 (`reveal_unknown`). Holding a finalize therefore costs nothing on its Account: it takes nothing new meanwhile, and a
-start in the epoch after has no proof of the Entity's to be countered by.
+start in the epoch after has no proof of the Entity's to be countered by (and the Entity heard the advance, so it hears the start).
 
 ## 5. The probe and the blind Entity (N2, M1)
 
@@ -85,21 +101,27 @@ A node that may hold value watches and defends always; what the probe decides is
 
 - Boot always proceeds. The Entity starts blind (`j_blind`: no forward, no expiry co-signed, nothing else) unless a
   trace was proven in this run.
-- The probe asks the newest block's first transaction for a `callTracer` tree at each new head block, until one traces
-  (no chosen window of blocks: PROBE_BLOCKS is gone); on the first tree the Entity is told `j_blind_over`. A node that
-  answers "no method" keeps asking at each block (one cheap call).
+- The probe asks the first transaction of the newest block for a `callTracer` tree at each new head block, until one
+  traces (no chosen window of blocks: PROBE_BLOCKS is gone; a block with none waits for the next head); on the first
+  tree the Entity is told `j_blind_over` and the probe stops. A node that answers "no method" keeps being asked at each
+  block (one cheap call); no `debug_traceCall` stands in.
 - A run-time "no method" for a transaction on a value node tells `j_blind` again and the probe restarts. The node is
   never ended: it keeps polling, draining, countering and finalizing.
-- `isFrame` is strict (L2): `type` is a call kind, `from` an address, `to` an address when the kind has one, `input`
-  hex, `calls` a list.
-- A missing method is `-32601` or the texts of the clients that give none, Nethermind's included (L3).
+- `isFrame` is strict (L2): `type` is a call kind (CALL, STATICCALL, DELEGATECALL, CALLCODE, CREATE, CREATE2,
+  SELFDESTRUCT), `from` hex, `to` hex when the kind calls.
+- A missing method is `-32601` or the texts of the clients that give none: geth, Erigon and Nethermind's `the method
+  debug_traceTransaction does not exist/is not available`, and Nethermind's code -32600 answers when the namespace is
+  off (`... is found but the namespace 'debug' is disabled for <url>`, `... is found in namespace 'debug' for <url>' but
+  is disabled for <endpoint>`): a method the endpoint will not run is a missing method (coordinator ruling 01:32); a bare
+  -32600 is not (L3).
 
 ## 6. A restart (L4)
 
-The WAL holds: the Entity's chain facts (`behind`, `blind`), the view. The Host holds nothing else durable. A restart
+The WAL holds: the Entity's chain facts (`behind`, `lost`, `blind`), the view. The Host holds nothing else durable. A restart
 begins reading at `min(view, min(behind) - 1)`: held finalizes and pending starts are read again, tries start at
 zero (so the FEW_TRIES floor is counted again: only longer, never shorter), readings are taken again (§1: a pruned one
-loses its Account, loudly), and every J event is idempotent. `blind` is in the WAL; the probe runs again.
+loses its Account, loudly), and every J event is idempotent. A value node boots blind again (`j_blind`; the notice is told if the WAL had it over), and
+the probe runs again at each head.
 
 ## 7. The state machine, in one table
 
@@ -111,20 +133,25 @@ log seen ──► R read (first sight; pruned ⇒ account lost)
    ├─ start ──► told now (no body) ── bytes read ⇒ told again with body
    │                                └ window passed ⇒ j_start_unread
    ├─ counter/window/collateral/other advance ──► told now
-   └─ finalize ──► bytes read ⇒ secrets, then advance, then dispute_over, in order
-                └ pending ⇒ Account held from its advance, behind, quiet
-                      └ tries >= FEW_TRIES and to >= latest(peer) ⇒ j_finalize_unread, then in order
+   └─ finalize ──► the advance it made is told now (j_epoch, rebase, pays the Account out)
+                 ├ bytes read ⇒ secrets, then dispute_over, in order
+                 └ pending ⇒ the finalize alone held, Account behind, quiet
+                       └ tries >= FEW_TRIES and to >= latest(peer) ⇒ j_finalize_unread, then dispute_over (late)
 SecretRevealed ──► told now, always (about no Account)
 ```
 
 ## 8. Tests (each through the real poll, the daemon or the real port)
 
-P9/P10 B9, B10 (start never held; stranger first and two Accounts); P11 two forwards, short and long: the long
-lock's secret is heard (read lands at head 7 after one fault; the Entity is fed the events and claims upstream);
-dissolve race (the Entity is never told the finalize while the read is pending: entry stays `locked`); P12 a hold
-past the recent-state window: the release asks for no old block, a SecretRevealed of another Account at block 300 is
-told; a pruned reading loses only its Account; P13 a run-time "no method" on a value node leaves the node polling,
-draining and countering, value forwards off; M1 boot on a quiet chain, probe at each block, `j_blind_over`;
-L2/L3 `isFrame` and the Nethermind text; L4 a restart re-derives the held read from the cursor; the node-level waits
-test (forward outstanding: waits past FEW_TRIES; none: gives up at FEW_TRIES; the view guard); mutants rerun, survivors
-listed.
+P9/P10 B9, B10 (start never held; stranger first and two Accounts); P11 two forwards, short and long: the long lock's
+secret is heard (read lands at head 7 after one fault; the Entity is fed the events and claims upstream); the dissolve race
+(the Entity is never told the finalize's end while the read is pending: the entry stays `locked`, and the epoch is told at
+once); G1: a late end of a dispute leaves a dispute of the epoch after and a later collateral alone, and the advance
+before the start is what makes the Entity hear the start (entity/chain.test.ts); two locks on one Account (the longer
+lock's secret is claimed, the end fails the other: entity/paybook/paybook.test.ts); hearing out of order (a start still
+reading and a finalize held, told again in the chain's order: host/shell/watch/loop.test.ts); P12 a hold past the
+recent-state window: the release asks for no old block; pruned readings: the six wordings that lose their Account, the
+fifteen that are faults, a null answer a fault (host/shell/evm/watch.test.ts); P13 a run-time "no method" on a value node
+leaves the node polling, draining and countering, value forwards off; M1 boot on a quiet chain, probe at each block,
+`j_blind_over`; L2/L3 `isFrame` and the Nethermind text; L4 a restart re-derives the held read from the cursor (a lost
+Account is not read again); the node-level waits test (forward outstanding: waits past FEW_TRIES; none: gives up at
+FEW_TRIES; the view guard); mutants rerun, survivors listed.
