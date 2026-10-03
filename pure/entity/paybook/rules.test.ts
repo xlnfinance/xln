@@ -5,9 +5,7 @@ import { emptyLedger } from "../../account/ledger.ts";
 import { holdId, type AccountState, type Side } from "../../account/model.ts";
 import type { AccountTx } from "../../account/tx.ts";
 import { keccakHex } from "../../kernel/encoding/bytes.ts";
-import { entityFrame } from "../frame.ts";
-import { anchor, entityOf, GOLD, judge } from "../fixtures.ts";
-import { emptyEntity } from "../model.ts";
+import { GOLD, judge } from "../fixtures.ts";
 import { entityRules } from "../rules.ts";
 
 const DEADLINE = 105n;
@@ -52,14 +50,5 @@ describe("entity/rules R-REVEAL-BACKSTOP the chain's paid clause is not expired"
       self: "left", frozen: false, unruled: new Set(), blind: false, shown: new Map(),
     });
     expect(rules.retryable("revealed_on_chain")).toBe(false);
-  });
-
-  test("R-REVEAL-BACKSTOP the Entity keeps the lowest height a secret was shown at, in any hearing order", () => {
-    const heard = (...heights: readonly bigint[]) =>
-      entityFrame(judge, anchor, emptyEntity(entityOf(1)), heights.map((at) => ({
-        _tag: "j_secret" as const, secret: secretOf(1), at,
-      }))).state.shown;
-    expect(heard(9n, 5n, 7n)).toEqual(new Map([[HASHLOCK, 5n]]));
-    expect(heard(5n, 9n)).toEqual(new Map([[HASHLOCK, 5n]]));
   });
 });

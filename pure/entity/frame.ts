@@ -133,15 +133,30 @@ const takenFrom = (w: Work, a: PeerMessage, outcome: Outcome<PeerFault>): Work =
   return frozen ? { ...w, state: { ...w.state, paybook: revealedBy(book, txs) } } : w;
 };
 
+/** The hashlocks an Entity can lose on: a hold of any Account (committed, proposed or queued), a paybook entry. */
+const named = (state: EntityState): ReadonlySet<string> => {
+  const held = (s: AccountState): readonly string[] =>
+    [...s.ledgers.values()].flatMap((l) => l.holds.map((h) => h.hashlock));
+  const queued = (r: EntityReplica): readonly string[] =>
+    r.mempool.flatMap((tx) => (tx._tag === "lock" ? [tx.hold.hashlock] : []));
+  const proposed = (r: EntityReplica): readonly string[] => (r.pending === undefined ? [] : held(r.pending.after));
+  const replicas = [...state.accounts.values()];
+  const holds = replicas.flatMap((r) => [...held(r.state), ...proposed(r), ...queued(r)]);
+  return new Set([...state.paybook.keys(), ...holds]);
+};
+
 /**
- * A secret the chain showed (R-DISPUTE-FREEZE): to the paybook it is the resolve of the payee, on any Account; and the
- * lowest height it was shown at is kept, for the Entity never to co-sign the expiry of a hold the chain paid
- * (R-REVEAL-BACKSTOP).
+ * A secret the chain showed (R-DISPUTE-FREEZE): to the paybook it is the resolve of the payee, on any Account. The
+ * lowest height it was shown at is kept only for a hashlock a hold or paybook entry of this Entity names, so that the
+ * Entity never co-signs the expiry of a hold the chain paid (R-REVEAL-BACKSTOP). `revealSecret` is open to anyone with
+ * any 32 bytes, so the map is bounded by the Entity's own holds and not by what strangers show: a reveal of a hashlock
+ * nothing names writes nothing and copies nothing. Owed: a hold made after its secret was shown.
  */
 const secretShown = (w: Work, e: SecretRevealed): Work => {
   const hashlock = keccakHex(e.secret);
   const first = w.state.shown.get(hashlock);
-  const shown = first !== undefined && first <= e.at ? w.state.shown : mapSet(w.state.shown, hashlock, e.at);
+  const lower = first === undefined || e.at < first;
+  const shown = lower && named(w.state).has(hashlock) ? mapSet(w.state.shown, hashlock, e.at) : w.state.shown;
   return { ...w, state: { ...w.state, shown, paybook: revealed(w.state.paybook, e.secret) } };
 };
 

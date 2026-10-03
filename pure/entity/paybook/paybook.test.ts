@@ -2,7 +2,7 @@
 // hop sooner, passes the secret back, and gives the lock up when the next hop does. Three whole Entities (Alice, a
 // hub, Bob) talking until nothing is left to send; what an Account's rules say about a lock is account/clause's.
 import { describe, expect, test } from "bun:test";
-import { heightOf, tokenOf, viewOf } from "../../account/fixtures.ts";
+import { heightOf, secretOf, tokenOf, viewOf } from "../../account/fixtures.ts";
 import { holdId, type Hold } from "../../account/model.ts";
 import { MAX_ROUTE_HOPS } from "../../account/tx.ts";
 import { ledgerOf } from "../../account/state.ts";
@@ -542,6 +542,50 @@ describe("entity/paybook the hub learns a secret the Account in dispute cannot c
     expect(ledgerBetween(shown, ALICE, HUB).holds).toHaveLength(1);
     const other = expiring(showing(plain(), SECOND));
     expect(ledgerBetween(other, ALICE, HUB).holds).toEqual([]);
+  });
+
+  const showingAt = (net: Net, secret: Uint8Array, at: bigint): Net =>
+    deliver(net, 100n, HUB, [{ _tag: "j_secret", secret, at }]);
+
+  test("R-REVEAL-BACKSTOP the Entity keeps the lowest height a secret was shown at, in any hearing order", () => {
+    const heard = (...heights: readonly bigint[]) =>
+      stateOf(heights.reduce((net, at) => showingAt(net, SECRET, at), forwarded()), HUB).shown;
+    expect(heard(9n, 5n, 7n)).toEqual(new Map([[HASHLOCK, 5n]]));
+    expect(heard(5n, 9n)).toEqual(new Map([[HASHLOCK, 5n]]));
+  });
+
+  test("R-REVEAL-BACKSTOP a secret no hold or entry of the Entity names is not kept, however many show", () => {
+    const flood = Array.from({ length: 300 }, (_, i) => secretOf(i + 10));
+    const flooded = flood.reduce((net, secret) => showingAt(net, secret, 100n), forwarded());
+    expect(stateOf(flooded, HUB).shown.size).toBe(0);
+    const held = showingAt(tell(base(), 100n, ALICE, lock(base(), 105n)), SECRET, 100n);
+    expect(stateOf(held, HUB).shown).toEqual(new Map([[HASHLOCK, 100n]]));
+    const entry = showingAt(forwardAt(base()), SECRET, 100n);
+    expect(stateOf(entry, HUB).shown).toEqual(new Map([[HASHLOCK, 100n]]));
+  });
+
+  test("R-REVEAL-BACKSTOP a secret heard again once its hold exists is kept, whatever was heard before it", () => {
+    const early = showingAt(base(), SECRET, 99n);
+    const later = showingAt(tell(early, 100n, ALICE, lock(base(), 105n)), SECRET, 101n);
+    expect(stateOf(later, HUB).shown).toEqual(new Map([[HASHLOCK, 101n]]));
+    const both = showingAt(showingAt(tell(base(), 100n, ALICE, lock(base(), 105n)), SECRET, 101n), SECRET, 100n);
+    expect(stateOf(both, HUB).shown).toEqual(new Map([[HASHLOCK, 100n]]));
+  });
+
+  test("R-REVEAL-BACKSTOP a hold in a proposed frame or a queued lock is named too", () => {
+    const hub = stateOf(base(), HUB);
+    const alice = hub.accounts.get(ALICE) ?? expect.unreachable("no account");
+    const locked = stateOf(tell(base(), 100n, ALICE, lock(base(), 105n)), HUB).accounts.get(ALICE)?.state;
+    const after = locked ?? expect.unreachable("no account");
+    const hold = ledgerOf(after, GOLD).holds[0] ?? expect.unreachable("no hold");
+    const heard = (replica: typeof alice) =>
+      entityFrame(judge, anchor, { ...hub, accounts: new Map([...hub.accounts, [ALICE, replica]]) },
+        [{ _tag: "j_secret", secret: SECRET, at: 100n }]).state.shown;
+    const frame = { author: alice.side, parent: alice.head, attempt: 0, slot: 1, epoch: 0n, firstNonce: 1n, txs: [] };
+    expect(heard(alice)).toEqual(new Map());
+    expect(heard({ ...alice, pending: { frame, after, head: alice.head } }))
+      .toEqual(new Map([[HASHLOCK, 100n]]));
+    expect(heard({ ...alice, mempool: [{ _tag: "lock", token: GOLD, hold }] })).toEqual(new Map([[HASHLOCK, 100n]]));
   });
 
   test("R-WATCH-CALLDATA a blind Entity co-signs no expiry of any hold", () => {

@@ -1,6 +1,6 @@
 {
  "id": "R-REVEAL-BACKSTOP",
- "statement": "A hold whose secret the chain showed at a height at or before the hold's deadline is never expired by an Entity's co-signature: the refusal (`revealed_on_chain`) is for good, no wait lifts it, and the payee's way is a dispute. The Entity keeps the lowest height each hashlock was shown at, in whatever order it hears the events; a secret shown after the deadline pays nothing and the expiry stands. This is beside `reveal_unknown` (a hash the Entity forwarded and cannot rule on yet), which is retryable.",
+ "statement": "A hold whose secret the chain showed at a height at or before the hold's deadline is never expired by an Entity's co-signature: the refusal (`revealed_on_chain`) is for good, no wait lifts it, and the payee's way is a dispute. The Entity keeps the lowest height each hashlock was shown at, in whatever order it hears the events, only for a hashlock a hold (committed, proposed or queued) or a paybook entry of its own names, so that strangers who call `revealSecret` with any bytes grow nothing and cost one set of names per reveal (owed, and it blocks the Sepolia value run, not the merge to development: a lock whose hashlock the chain showed before the lock existed is neither refused nor claimed, today as for a reveal through the Depository; closed when the Host reads hashToTimestamp(hashlock) on the transformer at the view block for every lock the Entity would forward or accept and refuses it when it is not zero, which keeps no map); a secret shown after the deadline pays nothing and the expiry stands. This is beside `reveal_unknown` (a hash the Entity forwarded and cannot rule on yet), which is retryable.",
  "source": "coordinator relay 10-03 01:55 (never co-sign expiry of a hash whose hashToTimestamp at depth <= deadline); DeltaTransformer.sol revealSecret",
  "layers": {
   "arrival": "n/a: the Arrival specs take J events as given",
@@ -14,6 +14,26 @@
    "kind": "test",
    "layer": "ts",
    "name": "R-REVEAL-BACKSTOP an Entity co-signs no expiry of a hold whose secret the chain showed by its deadline"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-REVEAL-BACKSTOP the Entity keeps the lowest height a secret was shown at, in any hearing order"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-REVEAL-BACKSTOP a secret no hold or entry of the Entity names is not kept, however many show"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-REVEAL-BACKSTOP a secret heard again once its hold exists is kept, whatever was heard before it"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-REVEAL-BACKSTOP a hold in a proposed frame or a queued lock is named too"
   },
   {
    "kind": "test",
@@ -34,11 +54,6 @@
    "kind": "test",
    "layer": "ts",
    "name": "R-REVEAL-BACKSTOP the refusal is for good: no wait lifts it, so the payee's way is a dispute"
-  },
-  {
-   "kind": "test",
-   "layer": "ts",
-   "name": "R-REVEAL-BACKSTOP the Entity keeps the lowest height a secret was shown at, in any hearing order"
   }
  ]
 }

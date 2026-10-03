@@ -200,6 +200,37 @@ const probeOf = (reads: Reads) => async (at: bigint): Promise<Result<Probe, Port
   return NO_METHOD.test(asked.error.reason) ? ok("none") : asked;
 };
 
+const askLogs = (
+  reads: Reads, deployed: Deployed, from: bigint, to: bigint,
+): Promise<Result<readonly RawLog[], PortFault>> => {
+  const { depository, transformer } = deployed;
+  const filter = { address: [depository, transformer], fromBlock: hexQuantity(from), toBlock: hexQuantity(to) };
+  const asked = (log: RawLog): boolean =>
+    (log.address === depository || log.address === transformer) && log.block >= from && log.block <= to;
+  return reads.read("watch logs", "eth_getLogs", [filter], (raw) => flatMap(listOf(raw, rawLogOf), (found) =>
+    (found.every(asked)
+      ? ok(found)
+      : err(bad("a log that is not the one asked for")))));
+};
+
+/**
+ * The logs of a range. A range the node will not answer (more logs than it returns, a span it refuses) is asked again
+ * as its two halves, down to one block: anyone can put thousands of reveals in a few blocks, and a range asked whole
+ * at every tick would wedge the watcher for good. A block that fails even alone is the poll's fault, so a dead node
+ * costs one call per halving and not one per block.
+ */
+const logsOf = async (
+  reads: Reads, deployed: Deployed, from: bigint, to: bigint,
+): Promise<Result<readonly RawLog[], PortFault>> => {
+  const whole = await askLogs(reads, deployed, from, to);
+  if (whole.ok || from >= to) return whole;
+  const middle = from + (to - from) / 2n;
+  const head = await logsOf(reads, deployed, from, middle);
+  if (!head.ok) return head;
+  const tail = await logsOf(reads, deployed, middle + 1n, to);
+  return tail.ok ? ok([...head.value, ...tail.value]) : tail;
+};
+
 export const watchPort = (rpc: Rpc, deployed: Deployed): WatchPort => {
   const { depository, transformer } = deployed;
   const reads = readsOf(rpc, { depository });
@@ -211,15 +242,7 @@ export const watchPort = (rpc: Rpc, deployed: Deployed): WatchPort => {
   return {
     head: () => reads.read("watch head", "eth_blockNumber", [], quantity),
     block: (number) => reads.read("watch block", "eth_getBlockByNumber", [hexQuantity(number), false], blockOf(number)),
-    logs: (from, to) => {
-      const filter = { address: [depository, transformer], fromBlock: hexQuantity(from), toBlock: hexQuantity(to) };
-      const asked = (log: RawLog): boolean =>
-        (log.address === depository || log.address === transformer) && log.block >= from && log.block <= to;
-      return reads.read("watch logs", "eth_getLogs", [filter], (raw) => flatMap(listOf(raw, rawLogOf), (found) =>
-        (found.every(asked)
-          ? ok(found)
-          : err(bad("a log that is not the one asked for")))));
-    },
+    logs: (from, to) => logsOf(reads, deployed, from, to),
     input: (tx) => reads.read("watch tx", "eth_getTransactionByHash", [tx], inputOf(depository)),
     trace: traceOf(reads, depository),
     traced: probeOf(reads),

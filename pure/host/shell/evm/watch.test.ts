@@ -104,6 +104,38 @@ describe("host/shell/evm/watch the J loop's reads of the chain", () => {
       .toMatchObject({ ok: false, error: { call: "watch logs" } });
   });
 
+  /** A node that answers no range of more than `most` blocks, as a hosted provider refuses a reply of too many logs. */
+  const capped = (most: bigint): Node => ({
+    eth_getLogs: ([filter]) => {
+      const { fromBlock, toBlock } = filter as { fromBlock: string; toBlock: string };
+      const [from, to] = [BigInt(fromBlock), BigInt(toBlock)];
+      return to - from + 1n > most ? refusal("query returned more than 10000 results")
+        : ok(Array.from({ length: Number(to - from) + 1 }, (_, i) => rawLog(from + BigInt(i), 0n)));
+    },
+  });
+
+  test("R-WATCH-STALL a range the node will not answer is asked as halves down to one block, in order", async () => {
+    const log = logPath();
+    const got = await portOf(capped(2n), log).logs(10n, 17n);
+    expect(got.ok ? got.value.map((l) => l.block) : got).toEqual([10n, 11n, 12n, 13n, 14n, 15n, 16n, 17n]);
+    const asked = askedOf(log).map((l) => /"fromBlock":"(0x[0-9a-f]+)","toBlock":"(0x[0-9a-f]+)"/.exec(l)?.slice(1, 3));
+    expect(asked.map((r) => r?.map((x) => Number(x)))).toEqual([
+      [10, 17], [10, 13], [10, 11], [12, 13], [14, 17], [14, 15], [16, 17],
+    ]);
+    const single = await portOf(capped(1n)).logs(10n, 13n);
+    expect(single.ok ? single.value.map((l) => l.block) : single).toEqual([10n, 11n, 12n, 13n]);
+  });
+
+  test("R-WATCH-STALL a block the node will not answer alone is the poll's fault, one call per halving", async () => {
+    const log = logPath();
+    const got = await portOf(capped(0n), log).logs(0n, 63n);
+    expect(got).toMatchObject({ ok: false, error: { call: "watch logs" } });
+    expect(askedOf(log)).toHaveLength(7);
+    const down7 = logPath();
+    expect(await portOf({ eth_getLogs: () => down }, down7).logs(5n, 5n)).toMatchObject({ ok: false });
+    expect(askedOf(down7)).toHaveLength(1);
+  });
+
   test("R-WATCH-CALLDATA a transaction is asked for by hash and its input comes back as bytes", async () => {
     const log = logPath();
     const found = { hash: txOf(3n, 1n), input: "0xDEADbeef", to: ADDRESS };
