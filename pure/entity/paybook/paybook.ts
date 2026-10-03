@@ -98,7 +98,9 @@ const forwardOf = (
   const c = incoming(state, e.from, hashlock);
   if (c === undefined) return undefined;
   const deadline = nextDeadline(clock, view, c.hold);
-  if (deadline === undefined || !state.accounts.has(e.to) || e.to === e.from) return cancelUp(e.from, hashlock, c);
+  if (state.blind || deadline === undefined || !state.accounts.has(e.to) || e.to === e.from) {
+    return cancelUp(e.from, hashlock, c);
+  }
   const id = freeSlot(state, e.to);
   const hold: Hold = { id, payer: sideOf(state.id, e.to), amount: c.hold.amount, hashlock, deadline };
   return {

@@ -509,6 +509,10 @@ const arrive = (rules: Rulebook, terms: ProofTerms, check: Check, view: JView, w
       return cosigning(w, a);
     case "j_secret":
       return secretShown(w, a);
+    case "j_blind":
+      return w.state.blind ? w : noting({ ...w, state: { ...w.state, blind: true } }, { _tag: "chain_blind" });
+    case "j_blind_over":
+      return { ...w, state: { ...w.state, blind: false } };
     default:
       return observed(w, terms, a);
   }
@@ -940,7 +944,7 @@ const isArrival = (i: EntityInput): i is Arrival =>
   || i._tag === "j_countered" || i._tag === "j_window_over" || i._tag === "j_dispute_over"
   || i._tag === "j_start_lapsed" || i._tag === "j_counter_lapsed" || i._tag === "j_collateral"
   || i._tag === "j_op_lapsed" || i._tag === "j_finalize_unread" || i._tag === "j_start_unread"
-  || i._tag === "j_behind" || i._tag === "j_behind_over";
+  || i._tag === "j_behind" || i._tag === "j_behind_over" || i._tag === "j_blind" || i._tag === "j_blind_over";
 
 const arrivalsOf = (inputs: readonly EntityInput[]): readonly Arrival[] => inputs.filter(isArrival);
 

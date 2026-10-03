@@ -87,6 +87,8 @@ const STRAIGHT: Chain = { head: 112n, fork: () => 0n };
 
 const factsOf = (look: Look) => look.station.host.runtime.entities.get(ALICE)?.chain.get(BOB);
 
+const blindOf = (look: Look): boolean => look.station.host.runtime.entities.get(ALICE)?.blind === true;
+
 const rowsOf = (look: Look): readonly Row[] => look.station.host.runtime.wal;
 
 const delivered = (look: Look): boolean => look.cursor === 110n;
@@ -308,17 +310,34 @@ describe("host/shell/node a node with a J loop", () => {
     expect(look.station.host.runtime.view).toBe(110n as never);
   });
 
-  test("R-WATCH-CALLDATA a provider that says at run time it has no call trace ends a node with value", async () => {
+  test("R-WATCH-CALLDATA no call trace at run time blinds a node with value and does not end it", async () => {
     const dir = fresh();
     const hidden: Kind = { ...VALUE_TRACED, input: "hidden", trace: { _tag: "no_method" } };
     const alice = await stalling(dir, `${dir}/calls.log`, STRAIGHT, hidden);
-    expect(await until(async () => (await alice.look()).fatal !== undefined, WAIT)).toBe(true);
+    expect(await until(async () => blindOf(await alice.look()), WAIT)).toBe(true);
+    expect(await until(async () => delivered(await alice.look()), WAIT)).toBe(true);
     const look = await alice.stop();
-    expect(look.fatal).toEqual({ _tag: "no_call_trace" });
+    expect(look.fatal).toBeUndefined();
     expect(factsOf(look)).toMatchObject({ epoch: 1n });
+    expect(look.notices.filter((n) => n._tag === "watch_stalled")).toEqual([]);
     const quiet = await stalling(fresh(), `${dir}/quiet.log`, STRAIGHT, { ...hidden, value: false });
     expect(await until(async () => factsOf(await quiet.look())?.epoch === 1n, WAIT)).toBe(true);
-    expect((await quiet.stop()).fatal).toBeUndefined();
+    expect(blindOf(await quiet.stop())).toBe(false);
+  });
+
+  test("R-WATCH-CALLDATA a blind node that boots on a provider that traces is told its Entity sees again", async () => {
+    const dir = fresh();
+    const hidden: Kind = { ...VALUE_TRACED, input: "hidden", trace: { _tag: "no_method" } };
+    const alice = await stalling(dir, `${dir}/first.log`, STRAIGHT, hidden);
+    expect(await until(async () => blindOf(await alice.look()), WAIT)).toBe(true);
+    await alice.stop();
+    const second = `${dir}/second.log`;
+    writeFileSync(second, "");
+    const again = await nodeOf(await seatOf(ALICE, dir, 0), NO_PEER, {
+      tickMs: QUICK, watch: watchOf(STRAIGHT, second, [advanced(105n, 1n), finalized], VALUE_TRACED),
+    });
+    expect(await until(async () => !blindOf(await again.look()), WAIT)).toBe(true);
+    expect((await again.stop()).fatal).toBeUndefined();
   });
 
   test("R-JLOOP a block off the cursor's chain ends the node, and every request gets that answer", async () => {

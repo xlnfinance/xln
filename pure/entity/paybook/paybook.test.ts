@@ -465,4 +465,28 @@ describe("entity/paybook the hub learns a secret the Account in dispute cannot c
     expect(ledgerBetween(refused, HUB, BOB).holds).toEqual([]);
     expect(stateOf(refused, HUB).paybook.size).toBe(0);
   });
+
+  const blind = (net: Net): Net => deliver(net, 100n, HUB, [{ _tag: "j_blind" }]);
+
+  test("R-WATCH-CALLDATA a blind Entity forwards no lock: the lock that came to it is given up upstream", () => {
+    const refused = tell(blind(forwardAt(base())), 100n, ALICE, lock(base(), 105n));
+    expect(ledgerBetween(refused, ALICE, HUB).holds).toEqual([]);
+    expect(ledgerBetween(refused, HUB, BOB).holds).toEqual([]);
+    expect(stateOf(refused, HUB).paybook.size).toBe(0);
+  });
+
+  test("R-WATCH-CALLDATA blind is told to the owner once, and a lock forwarded before it stands", () => {
+    const waiting = tell(forwardAt(base()), 100n, ALICE, lock(base(), 105n));
+    const told = blind(blind(waiting));
+    expect(told.notices.filter((n) => n._tag === "chain_blind")).toHaveLength(1);
+    expect(stateOf(told, HUB).blind).toBe(true);
+    expect(ledgerBetween(told, HUB, BOB).holds).toHaveLength(1);
+  });
+
+  test("R-WATCH-CALLDATA an Entity told its provider traces again forwards as before", () => {
+    const over = deliver(blind(forwardAt(base())), 100n, HUB, [{ _tag: "j_blind_over" }]);
+    expect(stateOf(over, HUB).blind).toBe(false);
+    const waiting = tell(over, 100n, ALICE, lock(base(), 105n));
+    expect(ledgerBetween(waiting, HUB, BOB).holds).toHaveLength(1);
+  });
 });

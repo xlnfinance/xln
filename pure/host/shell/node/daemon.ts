@@ -300,22 +300,29 @@ export const stallNotices = (was: Carry, stalls: readonly Stall[]): readonly Hos
 const watchFaultOf = (stalls: readonly Stall[]): string | undefined =>
   stalls.map((s) => `${s.fault.call}: ${s.fault.reason}`).at(0);
 
+/**
+ * A node that may hold value and finds its provider answers no call trace at run time is told to its Entity
+ * (`j_blind`), which forwards no lock from then on; the node keeps watching and defending every Account, which an
+ * exit would stop. It is told once: the Entity knows (`blind`).
+ */
+const blinding = (rig: Rig, state: State, delivery: Delivery): readonly EntityInput[] => {
+  const known = state.station.host.runtime.entities.get(rig.self)?.blind === true;
+  return rig.config.watch?.value === true && delivery.untraceable && !known ? [{ _tag: "j_blind" }] : [];
+};
+
 /** The events are in the WAL before the height is; the cursor moves only after the height's row (R-HEIGHT-ORDER). */
 const delivered = async (rig: Rig, state: State, delivery: Delivery): Promise<State> => {
   const { shell } = rig.config;
-  const queued = delivery.events.reduce((host, input) => submit(host, { to: rig.self, input }), state.station.host);
+  const inputs = [...blinding(rig, state, delivery), ...delivery.events];
+  const queued = inputs.reduce((host, input) => submit(host, { to: rig.self, input }), state.station.host);
   const first = await concluded(rig, state, await drain(shell, { ...state.station, host: queued }));
   if (first.fatal !== undefined) return first;
   const height = { ...first.station, host: heard(first.station.host, delivery.height) };
   const second = await concluded(rig, first, await drain(shell, height));
   const { carry, stalls } = delivery;
   const told = recent([...second.notices, ...stallNotices(state.carry, stalls)]);
-  const traceless = rig.config.watch?.value === true && delivery.untraceable;
   return second.fatal === undefined
-    ? {
-      ...second, cursor: delivery.watch, carry, notices: told, watchFault: watchFaultOf(stalls),
-      fatal: traceless ? { _tag: "no_call_trace" } : undefined,
-    }
+    ? { ...second, cursor: delivery.watch, carry, notices: told, watchFault: watchFaultOf(stalls), fatal: undefined }
     : second;
 };
 
@@ -405,6 +412,15 @@ const accepting = (rig: Rig): void => {
 
 const STOPPED: Result<never, Stopped> = err({ _tag: "stopped" });
 
+/** A node told its provider cannot trace (`blind`) that boots on one that does tells its Entity that is over. */
+const unblinded = (config: Config, station: Station): Station => {
+  const self = config.boot.genesis.id;
+  const blind = station.host.runtime.entities.get(self)?.blind === true;
+  return config.watch?.value === true && blind
+    ? { ...station, host: submit(station.host, { to: self, input: { _tag: "j_blind_over" } }) }
+    : station;
+};
+
 /**
  * A node over `listener`, which the caller has made so that its port is known to the peers' tables. It dials the peers
  * it is to dial, answers the ones that dial it, and runs until `stop`.
@@ -431,8 +447,9 @@ export const startDaemon = async (
   const mails = on(bus, "mail", { close: ["stop"] })[Symbol.asyncIterator]();
   const rig: Rig = { config, bus, self: config.boot.genesis.id, listener };
   const first: State = {
-    station: started.value.station, mesh: startMesh(config.key, config.table), wires: new Map(), next: 1,
-    dialing: new Set(), stalled: new Map(), counts: { sent: 0, heard: 0, dropped: 0 }, notices: [], refused: [],
+    station: unblinded(config, started.value.station), mesh: startMesh(config.key, config.table), wires: new Map(),
+    next: 1, dialing: new Set(), stalled: new Map(), counts: { sent: 0, heard: 0, dropped: 0 }, notices: [],
+    refused: [],
     fatal: undefined, cursor: undefined, watchFault: undefined, carry: NO_CARRY, timer: undefined,
   };
   const finished = leaving(rig, first, started.value.sent)

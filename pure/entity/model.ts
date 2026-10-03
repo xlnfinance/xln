@@ -50,6 +50,11 @@ export type EntityState = Readonly<{
   revealed: ReadonlyMap<EntityId, readonly string[]>;
   chain: ReadonlyMap<EntityId, ChainFacts>;
   paybook: Paybook;
+  /**
+   * The Host's provider can give no call trace (`j_blind`), so a secret shown inside a call it cannot read may reach
+   * the chain unseen: this Entity forwards no lock while it holds, and still watches and defends every Account.
+   */
+  blind: boolean;
 }>;
 
 /**
@@ -61,7 +66,7 @@ export type PeerProof = Readonly<{ head: FrameHash; slot: number; author: Side; 
 export const emptyEntity = (id: EntityId): EntityState =>
   ({
     id, accounts: new Map(), proofs: new Map(), waiting: new Map(), revealed: new Map(), chain: new Map(),
-    paybook: new Map(),
+    paybook: new Map(), blind: false,
   });
 
 /**
@@ -200,7 +205,15 @@ export type CosignAsk = Tagged<"cosign_ask", { from: EntityId; op: CosignOp }>;
  */
 export type SecretRevealed = Tagged<"j_secret", { secret: Uint8Array }>;
 
-export type Arrival = PeerMessage | JEvent | SecretRevealed | CosignAsk;
+/**
+ * `j_blind` is the Host telling that the provider it reads the chain by answers no call trace at run time, so a call
+ * that hides a secret cannot be read (R-WATCH-CALLDATA): the Entity tells its owner once and forwards no lock until
+ * `j_blind_over`, which the Host sends when it boots on a provider that traces. Nothing else changes: it keeps
+ * watching and defending every Account.
+ */
+export type ChainBlind = Tagged<"j_blind"> | Tagged<"j_blind_over">;
+
+export type Arrival = PeerMessage | JEvent | SecretRevealed | CosignAsk | ChainBlind;
 
 /** The Host's timer for `peer`'s Account ran out: its pending frame is sent again, so a lost frame cannot wedge it. */
 export type Hook = Tagged<"resend_due", { peer: EntityId }>;
@@ -329,6 +342,7 @@ export type Notice =
   | Tagged<"holding_dropped", { peer: EntityId; token: TokenId }>
   | Tagged<"finalize_unread", { peer: EntityId; tx: string }>
   | Tagged<"start_unread", { peer: EntityId; tx: string }>
+  | Tagged<"chain_blind">
   | Tagged<
     "offdelta_rebased",
     {
