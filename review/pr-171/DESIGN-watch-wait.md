@@ -72,6 +72,10 @@ heights, never timestamps, so the contract's timestamp slack does not enter here
 claim only (S9b: the hub's claim is given up at `deadline + slack - lag - depth`, which needs `slack >= depth`; a
 row of the freeze-followups reserve bounds).
 
+A later finalize of the same Account cannot dissolve its locks while an earlier finalize still awaits its secret.
+Its readable payload stays carried until the earlier one is read or reaches its give-up bound. Other Accounts remain
+independent. This ordering closes the same-Account two-finalize counterexample, including across restart.
+
 The decision is per event, never from the tx's first event: a tx may carry the ops of several Accounts of the Entity
 and a stranger's. Each hosted finalize event waits or is given up for its own Account at its own `latest(peer)`; a
 stranger's is not read at all (`needsBytes`).
@@ -117,11 +121,30 @@ A node that may hold value watches and defends always; what the probe decides is
 
 ## 6. A restart (L4)
 
-The WAL holds: the Entity's chain facts (`behind`, `lost`, `blind`), the view. The Host holds nothing else durable. A restart
-begins reading at `min(view, min(behind) - 1)`: held finalizes and pending starts are read again, tries start at
-zero (so the FEW_TRIES floor is counted again: only longer, never shorter), readings are taken again (§1: a pruned one
-loses its Account, loudly), and every J event is idempotent. A value node boots blind again (`j_blind`; the notice is told if the WAL had it over), and
-the probe runs again at each head.
+The WAL holds the Entity's chain facts (`behind`, `lost`, `blind`), the view, and the exact unresolved payloads
+(`readWaits`, written by `j_read_waits`). Each pending finalize retains its log identity and evidence hash; a pending
+start also retains the epoch read at the original event, accounting for later advances in that same block.
+
+Once the WAL holds the delivery height, ordinary events at or below that view are already applied. Recovery must not
+read their Account state again, replay their collateral, or repeat their epoch advances. It restores only recorded
+pending payloads, reads their calldata, and releases finalizes as late. Existing carried read results are preserved.
+The cursor still starts at `min(view, min(behind) - 1)`; old logs do not become new Entity facts.
+
+The pending list is committed after its payload effects and before `j_behind_over`, then the delivery height is
+committed. A crash before that list update can repeat late protection while the Account remains behind; it cannot
+forget the secret before applying it or permit new spending before clearing its pending evidence. An old WAL that
+has `behind` but no `readWaits` retains the conservative archive-read path until a successful delivery records the
+identities; a pruned legacy read still faults its Account rather than guessing.
+
+Ownership and durability: `readWaits` belongs to Entity ChainFacts and is reconstructed from the same ordered Runtime
+WAL inputs as those facts. It is not a second journal, checkpoint, or signed Account proof field. Its exact log
+identities and event-time epoch cannot be derived from the latest Account facts or from pruned historical state.
+The node-level restart regression requires zero old Account reads, no duplicate epoch, one late finalize, and no lost
+Account. A separate pending-start regression preserves its original epoch across a same-block advance. Once new
+`j_read_waits` rows exist, recovery requires a version that understands them; do not downgrade the WAL reader.
+
+A value node boots blind again and re-probes tracing. Retry counters remain volatile and restart at zero, extending
+rather than shortening the retry floor.
 
 ## 7. The state machine, in one table
 

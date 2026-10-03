@@ -136,6 +136,23 @@ describe("host/shell/evm/watch the J loop's reads of the chain", () => {
     expect(askedOf(down7)).toHaveLength(1);
   });
 
+  test("R-WATCH-STALL a failed tail discards a successful head half of the log range", async () => {
+    const log = logPath();
+    const node: Node = {
+      eth_getLogs: ([filter]) => {
+        const { fromBlock, toBlock } = filter as { fromBlock: string; toBlock: string };
+        const [from, to] = [BigInt(fromBlock), BigInt(toBlock)];
+        if (from === 10n && to === 11n) return ok([rawLog(10n, 0n), rawLog(11n, 0n)]);
+        return refusal("tail unavailable");
+      },
+    };
+    const got = await portOf(node, log).logs(10n, 13n);
+    expect(got).toMatchObject({ ok: false, error: { call: "watch logs", reason: "tail unavailable" } });
+    const ranges = askedOf(log).map((line) =>
+      /"fromBlock":"(0x[0-9a-f]+)","toBlock":"(0x[0-9a-f]+)"/.exec(line)?.slice(1, 3));
+    expect(ranges).toEqual([["0xa", "0xd"], ["0xa", "0xb"], ["0xc", "0xd"], ["0xc", "0xc"]]);
+  });
+
   test("R-WATCH-CALLDATA a transaction is asked for by hash and its input comes back as bytes", async () => {
     const log = logPath();
     const found = { hash: txOf(3n, 1n), input: "0xDEADbeef", to: ADDRESS };

@@ -47,9 +47,11 @@ type Rulebook = (w: Work, peer: EntityId) => EntityRules;
 type Work = Readonly<{
   state: EntityState; outputs: readonly Outbound[]; notices: readonly Notice[]; chain: readonly JAction[];
   touched: readonly EntityId[];
+  names: ReadonlySet<string> | undefined;
 }>;
 
-const start = (state: EntityState): Work => ({ state, outputs: [], notices: [], chain: [], touched: [] });
+const start = (state: EntityState): Work =>
+  ({ state, outputs: [], notices: [], chain: [], touched: [], names: undefined });
 
 const noting = (w: Work, notice: Notice): Work => ({ ...w, notices: [...w.notices, notice] });
 
@@ -156,8 +158,9 @@ const secretShown = (w: Work, e: SecretRevealed): Work => {
   const hashlock = keccakHex(e.secret);
   const first = w.state.shown.get(hashlock);
   const lower = first === undefined || e.at < first;
-  const shown = lower && named(w.state).has(hashlock) ? mapSet(w.state.shown, hashlock, e.at) : w.state.shown;
-  return { ...w, state: { ...w.state, shown, paybook: revealed(w.state.paybook, e.secret) } };
+  const names = w.names ?? named(w.state);
+  const shown = lower && names.has(hashlock) ? mapSet(w.state.shown, hashlock, e.at) : w.state.shown;
+  return { ...w, names, state: { ...w.state, shown, paybook: revealed(w.state.paybook, e.secret) } };
 };
 
 /** The side whose frame made the head the round took: mine when the peer's ack committed it, the peer's otherwise. */
@@ -522,6 +525,8 @@ const chainFact = (w: Work, terms: ProofTerms, e: JEvent): Work => {
       return withFacts(w, e.peer, behindFrom(facts, e.from));
     case "j_behind_over":
       return withFacts(w, e.peer, behindOver(facts));
+    case "j_read_waits":
+      return withFacts(w, e.peer, { ...facts, readWaits: e.pending });
     case "j_account_lost":
       return noting(
         withFacts(w, e.peer, accountLost(facts, e.from)), { _tag: "account_lost", peer: e.peer, from: e.from },
@@ -1002,7 +1007,8 @@ const isArrival = (i: EntityInput): i is Arrival =>
   || i._tag === "j_countered" || i._tag === "j_window_over" || i._tag === "j_dispute_over"
   || i._tag === "j_start_lapsed" || i._tag === "j_counter_lapsed" || i._tag === "j_collateral"
   || i._tag === "j_op_lapsed" || i._tag === "j_finalize_unread" || i._tag === "j_start_unread"
-  || i._tag === "j_behind" || i._tag === "j_behind_over" || i._tag === "j_account_lost" || i._tag === "j_blind"
+  || i._tag === "j_behind" || i._tag === "j_behind_over" || i._tag === "j_read_waits"
+  || i._tag === "j_account_lost" || i._tag === "j_blind"
   || i._tag === "j_blind_over";
 
 const arrivalsOf = (inputs: readonly EntityInput[]): readonly Arrival[] => inputs.filter(isArrival);
@@ -1027,7 +1033,11 @@ export const entityFrame = (
       { self: sideOf(w.state.id, peer), frozen: quiet(facts), unruled: unruled(w.state), blind: w.state.blind,
         shown: w.state.shown });
   };
-  const hear = (w: Work, a: Arrival) => arrive(rules, anchor.terms, anchor.check, judge.view, w, a);
+  const hear = (w: Work, a: Arrival): Work => {
+    const next = arrive(rules, anchor.terms, anchor.check, judge.view, w, a);
+    const stable = next.state.accounts === w.state.accounts && next.state.paybook === w.state.paybook;
+    return a._tag === "j_secret" || stable ? next : { ...next, names: undefined };
+  };
   const arrived = arrivalsOf(inputs).reduce(hear, start(state));
   const afterHooks = hooksOf(inputs).reduce(hooked, arrived);
   const afterCommands = commandsOf(inputs).reduce((w, c) => commanded(rules, anchor.terms, w, c), afterHooks);

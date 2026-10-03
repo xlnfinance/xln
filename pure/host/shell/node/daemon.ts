@@ -273,7 +273,9 @@ const standing = (rig: Rig, state: State): Standing => {
   const { runtime } = state.station.host;
   const entity = runtime.entities.get(rig.self);
   const waits = entity === undefined ? NO_WAITS : waitsOf(entity, rig.config.boot.setup.clock);
-  return { ...waits, view: runtime.view };
+  const pending = new Map([...chainOf(rig, state)].flatMap(([peer, facts]) =>
+    (facts.readWaits === undefined ? [] : [[peer, facts.readWaits] as const])));
+  return { ...waits, view: runtime.view, pending };
 };
 
 /** A fault of the node's reads of the chain is tried again at the next tick; one of the watcher's checks is final. */

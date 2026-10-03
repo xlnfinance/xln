@@ -77,7 +77,10 @@ const portOf = (chain: Chain, log: string, found = [advanced(105n, 1n)], kind = 
     return Promise.resolve(ok(blockOf(number, chain.fork(number))));
   },
   logs: (from, to) => Promise.resolve(ok(found.filter((l) => l.block >= from && l.block <= to))),
-  accountAt: () => Promise.resolve(ok(kind.pruned === true ? "pruned" as const : { epoch: 1n, nonce: 5n })),
+  accountAt: () => {
+    appendFileSync(log, "account\n");
+    return Promise.resolve(ok(kind.pruned === true ? "pruned" as const : { epoch: 1n, nonce: 5n }));
+  },
   input: () => {
     appendFileSync(log, "input\n");
     return Promise.resolve(inputOf(kind));
@@ -428,6 +431,29 @@ describe("host/shell/node a node with a J loop", () => {
     expect(callsOf(second).find((c) => c.startsWith("block"))).toBe("block 104");
     expect(factsOf(look)?.behind).toBeUndefined();
     expect(look.station.host.runtime.view).toBe(110n as never);
+  });
+
+  test("R-WATCH-WINDOW a restart recovers a pending finalize without rereading WAL-covered pruned state", async () => {
+    const dir = fresh();
+    const first = await stalling(dir, `${dir}/first.log`, STRAIGHT, QUIET);
+    expect(await until(async () => delivered(await first.look()), WAIT)).toBe(true);
+    const before = await first.stop();
+    expect(factsOf(before)?.readWaits).toHaveLength(1);
+    const log = `${dir}/recovered.log`;
+    writeFileSync(log, "");
+    const watch = watchOf(STRAIGHT, log, [advanced(105n, 1n), finalized], { ...QUIET, input: "given", pruned: true });
+    const again = await nodeOf(await seatOf(ALICE, dir, 0), NO_PEER, { tickMs: QUICK, watch });
+    expect(await until(async () => caughtUp(factsOf(await again.look())), WAIT)).toBe(true);
+    const after = await again.stop();
+    expect(after.fatal).toBeUndefined();
+    expect(factsOf(after)).toMatchObject({ epoch: 1n, lost: false, readWaits: [] });
+    expect(callsOf(log).filter((call) => call === "account")).toEqual([]);
+    expect(entityTold(after, "account_lost")).toBe(0);
+    const inputs = rowsOf(after).flatMap((row) => row.input._tag === "entity" ? row.input.inputs : []);
+    expect(inputs.filter((input) => input._tag === "j_epoch")).toHaveLength(1);
+    expect(inputs.filter((input) => input._tag === "j_dispute_over")).toEqual([
+      { _tag: "j_dispute_over", peer: BOB, late: true },
+    ]);
   });
 
   test("R-WATCH-CALLDATA no call trace at run time blinds a node with value and does not end it", async () => {

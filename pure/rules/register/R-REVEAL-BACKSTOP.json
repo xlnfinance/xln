@@ -54,6 +54,16 @@
    "kind": "test",
    "layer": "ts",
    "name": "R-REVEAL-BACKSTOP the refusal is for good: no wait lifts it, so the payee's way is a dispute"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-REVEAL-BACKSTOP a frame of foreign secrets builds its unchanged named set once"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-REVEAL-BACKSTOP a peer lock between two reveals invalidates the frame's named set"
   }
  ]
 }

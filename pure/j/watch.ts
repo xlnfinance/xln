@@ -109,8 +109,8 @@ export const prepare = (w: Watch, batch: Batch): Result<Prepared, WatchFault> =>
  * it ask for.
  */
 export const needsBytes = (e: ChainEvent, hosted: readonly Bytes32[]): boolean =>
-  (e._tag === "dispute_finalized" && hostsAny(hosted, e))
-  || (e._tag === "dispute_started" && hostsAny(hosted, e) && !hosted.includes(e.sender));
+  (e._tag === "dispute_finalized" && e.shown._tag !== "read" && hostsAny(hosted, e))
+  || (e._tag === "dispute_started" && e.body === undefined && hostsAny(hosted, e) && !hosted.includes(e.sender));
 
 /** The transactions whose input the Host must read. */
 export const calldataWanted = (p: Prepared, hosted: readonly Bytes32[]): readonly Bytes32[] =>
@@ -125,11 +125,11 @@ export const calldataWanted = (p: Prepared, hosted: readonly Bytes32[]): readonl
 export const withCalldata = (p: Prepared, inputs: ReadonlyMap<Bytes32, readonly Read[]>): Prepared => ({
   ...p,
   events: p.events.map((e): ChainEvent => {
-    if (e._tag === "dispute_started") {
+    if (e._tag === "dispute_started" && e.body === undefined) {
       const body = (inputs.get(e.tx) ?? []).flatMap((input) => startedBody(input, e.bodyHash) ?? []).at(0);
       return { ...e, body, unread: body === undefined };
     }
-    if (e._tag !== "dispute_finalized") return e;
+    if (e._tag !== "dispute_finalized" || e.shown._tag === "read") return e;
     const read = (inputs.get(e.tx) ?? []).map((input) => finalizedSecrets(input, e.evidence))
       .filter((r) => r !== undefined);
     return { ...e, shown: read.length > 0 ? { _tag: "read", secrets: [...new Set(read.flat())] } : { _tag: "unread" } };

@@ -92,7 +92,8 @@ const advancedAfter = (events: readonly ChainEvent[], e: Bound): number =>
   events.filter((o) => o._tag === "epoch_advanced" && sameAccount(readingOf(o), readingOf(e)) && o.index > e.index)
     .length;
 
-const needsReading = (e: ChainEvent): boolean => e._tag === "epoch_advanced" || e._tag === "dispute_started";
+const needsReading = (e: ChainEvent): boolean =>
+  e._tag === "epoch_advanced" || (e._tag === "dispute_started" && e.epoch === undefined);
 
 export const hostsAny = (hosted: readonly Bytes32[], e: Bound): boolean => partiesOf(e).some((p) => hosted.includes(p));
 
@@ -116,6 +117,13 @@ const peerOf = (self: Bytes32, [left, right]: Parties): Bytes32 => (self === lef
 /** The epoch the chain was at when `e` was logged: the end-of-block reading, less the advances logged after it. */
 const epochAt = (events: readonly ChainEvent[], e: Bound, at: AccountAt): bigint =>
   at.epoch - BigInt(advancedAfter(events, e));
+
+/** A pending start retains its event-time epoch, not a later block-end or current Account epoch. */
+export const rememberEpoch = (e: ChainEvent, context: readonly ChainEvent[], accounts: Accounts): ChainEvent => {
+  if (e._tag !== "dispute_started" || e.epoch !== undefined) return e;
+  const at = accounts.get(readingKey(readingOf(e)));
+  return at === undefined ? e : { ...e, epoch: epochAt(context, e, at) };
+};
 
 type Moved = Of<ChainEvent, "epoch_advanced">;
 type Started = Of<ChainEvent, "dispute_started">;
@@ -160,9 +168,10 @@ const epochMoved = (events: readonly ChainEvent[], e: Moved, peer: Bytes32, at: 
 const disputeStarted = (
   events: readonly ChainEvent[], e: Started, self: Bytes32, peer: Bytes32, at: AccountAt | undefined,
 ): Told => {
-  if (at === undefined) return err({ _tag: "no_reading", reading: readingOf(e) });
+  const epoch = e.epoch ?? (at === undefined ? undefined : epochAt(events, e, at));
+  if (epoch === undefined) return err({ _tag: "no_reading", reading: readingOf(e) });
   const started: JEvent = {
-    _tag: "j_dispute", peer, epoch: epochAt(events, e, at), by: startedBy(e), nonce: e.nonce, timeout: e.timeout,
+    _tag: "j_dispute", peer, epoch, by: startedBy(e), nonce: e.nonce, timeout: e.timeout,
     proposerIsLeft: e.proposerIsLeft, bodyHash: e.bodyHash, ...(e.body === undefined ? {} : { body: e.body }),
   };
   return ok(e.unread && e.sender !== self ? [started, { _tag: "j_start_unread", peer, tx: e.tx }] : [started]);

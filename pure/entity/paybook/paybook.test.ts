@@ -1,7 +1,7 @@
 // R-HTLC-FORWARD: a hub that holds a lock for a hashlock it has an entry for locks the same amount on the next hop one
 // hop sooner, passes the secret back, and gives the lock up when the next hop does. Three whole Entities (Alice, a
 // hub, Bob) talking until nothing is left to send; what an Account's rules say about a lock is account/clause's.
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
 import { heightOf, secretOf, tokenOf, viewOf } from "../../account/fixtures.ts";
 import { holdId, type Hold } from "../../account/model.ts";
 import { MAX_ROUTE_HOPS } from "../../account/tx.ts";
@@ -572,6 +572,30 @@ describe("entity/paybook the hub learns a secret the Account in dispute cannot c
     expect(stateOf(both, HUB).shown).toEqual(new Map([[HASHLOCK, 100n]]));
   });
 
+  test("R-REVEAL-BACKSTOP a frame of foreign secrets builds its unchanged named set once", () => {
+    const hub = stateOf(forwarded(), HUB);
+    const values = spyOn(hub.accounts, "values");
+    const inputs: EntityInput[] = Array.from({ length: 300 }, (_, i) =>
+      ({ _tag: "j_secret", secret: secretOf(i + 10), at: 100n }));
+    const frame = entityFrame(judge, anchor, hub, inputs);
+    const calls = values.mock.calls.length;
+    values.mockRestore();
+    expect(frame.state.shown.size).toBe(0);
+    expect(calls).toBe(1);
+  });
+
+  test("R-REVEAL-BACKSTOP a peer lock between two reveals invalidates the frame's named set", () => {
+    const net = base();
+    const sent = entityFrame(judge, anchor, stateOf(net, ALICE), [lock(net, 105n)]).outputs[0];
+    if (sent === undefined) return expect.unreachable("no lock frame");
+    const inputs: EntityInput[] = [
+      { _tag: "j_secret", secret: SECRET, at: 99n },
+      { _tag: "peer_message", from: sent.from, msg: sent.msg, sig: TEST_SIG },
+      { _tag: "j_secret", secret: SECRET, at: 101n },
+    ];
+    expect(entityFrame(judge, anchor, stateOf(net, HUB), inputs).state.shown).toEqual(new Map([[HASHLOCK, 101n]]));
+  });
+
   test("R-REVEAL-BACKSTOP a hold in a proposed frame or a queued lock is named too", () => {
     const hub = stateOf(base(), HUB);
     const alice = hub.accounts.get(ALICE) ?? expect.unreachable("no account");
@@ -632,5 +656,17 @@ describe("entity/paybook a finalize held back for its secrets ends the Account l
     const over = hear(twoLocks(), moved, late);
     expect(upstream(over)).toEqual([0n, 0]);
     expect(stateOf(over, HUB).paybook.size).toBe(0);
+  });
+
+  test("R-WATCH-STALL two finalizes wait for the earlier secret before canceling unpaid upstream locks", () => {
+    const behind: EntityInput = { _tag: "j_behind", peer: BOB, from: 90n };
+    const second: EntityInput = { _tag: "j_epoch", peer: BOB, epoch: 2n, stored: 7n, finalBodyHash: FINAL };
+    const waiting = hear(twoLocks(), behind, moved, second);
+    expect(upstream(waiting)).toEqual([0n, 2]);
+    const done = hear(waiting, { _tag: "j_secret", secret: SECOND, at: 100n }, late, late,
+      { _tag: "j_behind_over", peer: BOB });
+    expect(upstream(done)).toEqual([-AMOUNT, 0]);
+    expect(stateOf(done, HUB).paybook.size).toBe(0);
+    expect(stateOf(done, HUB).chain.get(BOB)?.epoch).toBe(2n);
   });
 });
