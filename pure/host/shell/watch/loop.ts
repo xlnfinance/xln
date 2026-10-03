@@ -170,7 +170,7 @@ const peerOf = (event: { peer: Bytes32 }): Result<EntityId, BadPeer> => {
 const inputOf = (event: Addressed["event"]): Result<EntityInput, BadPeer | BadSecret> => {
   if (event._tag !== "j_secret") return map(peerOf(event), (peer) => ({ ...event, peer }) as EntityInput);
   const bytes = hexToBytes(event.secret);
-  return bytes.ok ? ok({ _tag: "j_secret", secret: bytes.value }) : err({ _tag: "bad_secret", text: event.secret });
+  return bytes.ok ? ok({ _tag: "j_secret", secret: bytes.value, at: event.at }) : err({ _tag: "bad_secret", text: event.secret });
 };
 
 /** The end of the window the Entity waits on, of a dispute it started or one it answers, while the window is open. */

@@ -2,6 +2,7 @@
 // Account, and the Accounts then propose. The phases are the only order there is: where an arrival sits among the
 // frame's commands does not matter, and a command always sees what the arrivals of its own frame did (R-E1).
 import { mapDelete, mapSet } from "../kernel/core/collections.ts";
+import { keccakHex } from "../kernel/encoding/bytes.ts";
 import { emptyReplica } from "../account/frame/account.ts";
 import type { JHeight, JView } from "../account/clause/clock.ts";
 import {
@@ -129,9 +130,17 @@ const takenFrom = (w: Work, a: PeerMessage, outcome: Outcome<PeerFault>): Work =
   return frozen ? { ...w, state: { ...w.state, paybook: revealedBy(book, txs) } } : w;
 };
 
-/** A secret the chain showed (R-DISPUTE-FREEZE): to the paybook it is the resolve of the payee, on any Account. */
-const secretShown = (w: Work, e: SecretRevealed): Work =>
-  ({ ...w, state: { ...w.state, paybook: revealed(w.state.paybook, e.secret) } });
+/**
+ * A secret the chain showed (R-DISPUTE-FREEZE): to the paybook it is the resolve of the payee, on any Account; and the
+ * lowest height it was shown at is kept, for the Entity never to co-sign the expiry of a hold the chain paid
+ * (R-REVEAL-BACKSTOP).
+ */
+const secretShown = (w: Work, e: SecretRevealed): Work => {
+  const hashlock = keccakHex(e.secret);
+  const first = w.state.shown.get(hashlock);
+  const shown = first !== undefined && first <= e.at ? w.state.shown : mapSet(w.state.shown, hashlock, e.at);
+  return { ...w, state: { ...w.state, shown, paybook: revealed(w.state.paybook, e.secret) } };
+};
 
 /** The side whose frame made the head the round took: mine when the peer's ack committed it, the peer's otherwise. */
 const authorOf = (heard: Heard<AccountTx, AccountState, PeerFault>): Side => {
@@ -956,7 +965,7 @@ export const entityFrame = (
   const rules: Rulebook = (w, peer) => {
     const facts = factsOf(w, peer);
     return entityRules(judge, signingOf(anchor, w.state.id, peer, facts),
-      { self: sideOf(w.state.id, peer), frozen: quiet(facts) });
+      { self: sideOf(w.state.id, peer), frozen: quiet(facts), shown: w.state.shown });
   };
   const hear = (w: Work, a: Arrival) => arrive(rules, anchor.terms, anchor.check, judge.view, w, a);
   const arrived = arrivalsOf(inputs).reduce(hear, start(state));

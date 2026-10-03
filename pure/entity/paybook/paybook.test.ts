@@ -397,7 +397,7 @@ describe("entity/paybook the hub learns a secret the Account in dispute cannot c
   };
 
   /** The chain showed a secret and the hub heard it. */
-  const showing = (net: Net, secret: Uint8Array): Net => deliver(net, 100n, HUB, [{ _tag: "j_secret", secret }]);
+  const showing = (net: Net, secret: Uint8Array): Net => deliver(net, 100n, HUB, [{ _tag: "j_secret", secret, at: 100n }]);
 
   /** Alice's lock reaches Bob through the hub before Bob has said what he will answer. */
   const forwarded = (): Net => tell(forwardAt(base()), 100n, ALICE, lock(base(), 105n));

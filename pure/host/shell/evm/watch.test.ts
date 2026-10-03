@@ -6,7 +6,7 @@ import { appendFileSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { err, ok, type Result } from "../../../kernel/core/result.ts";
-import { DEPLOYED, DEPOSITORY, DEPOSITORY_ABI, entityOf, hashOf, hexOf, txOf } from "../../../j/fixtures.ts";
+import { DEPLOYED, DEPOSITORY, DEPOSITORY_ABI, entityOf, hashOf, hexOf, TRANSFORMER, txOf } from "../../../j/fixtures.ts";
 import { blockOf } from "../../../j/fixtures.ts";
 import type { Rpc, RpcFault } from "./port.ts";
 import { watchPort } from "./watch.ts";
@@ -69,7 +69,10 @@ describe("host/shell/evm/watch the J loop's reads of the chain", () => {
       [3n, 0n, hashOf(3n), ADDRESS, "0xabcd", txOf(3n, 0n)], [4n, 2n, hashOf(4n), ADDRESS, "0xabcd", txOf(4n, 2n)],
     ]);
     expect(got.ok ? got.value[0]?.topics : got).toEqual([hexOf(7n), hexOf(8n)] as never);
-    expect(askedOf(log)).toEqual([`eth_getLogs [{"address":"${ADDRESS}","fromBlock":"0x3","toBlock":"0x4"}]`]);
+    const both = `["${ADDRESS}","${TRANSFORMER}"]`;
+    expect(askedOf(log)).toEqual([`eth_getLogs [{"address":${both},"fromBlock":"0x3","toBlock":"0x4"}]`]);
+    const theirs = await portOf({ eth_getLogs: () => ok([rawLog(3n, 0n, { address: TRANSFORMER })]) }).logs(3n, 4n);
+    expect(theirs.ok ? theirs.value.map((l) => l.address) : theirs).toEqual([TRANSFORMER]);
     const asked = (...logs: readonly unknown[]) => portOf({ eth_getLogs: () => ok(logs) }).logs(3n, 4n);
     expect(await asked(rawLog(3n, 0n, { address: `0x${"11".repeat(20)}` }))).toMatchObject({ ok: false });
     expect(await asked(rawLog(2n, 0n))).toMatchObject({ ok: false });

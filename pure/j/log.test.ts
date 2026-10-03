@@ -7,7 +7,7 @@ import {
   bytes32, address, decodeLog, decodeLogs, IGNORED, READ_SIGNATURES, topicOf, type ChainEvent, type RawLog,
 } from "./log.ts";
 import {
-  bodyHashOf, DEPLOYED, DEPOSITORY, DEPOSITORY_ABI, entityOf, hashOf, hexOf, lifecyclePhases, logOf, must, txOf,
+  bodyHashOf, DEPLOYED, DEPOSITORY, DEPOSITORY_ABI, entityOf, hashOf, hexOf, lifecyclePhases, logOf, must, transformerLogOf, txOf,
 } from "./fixtures.ts";
 
 const LEFT = entityOf(0x11n);
@@ -134,6 +134,35 @@ describe("j/log", () => {
       { ...log, data: "0x" },
     ];
     bad.forEach((broken) => expect(decodeLog(DEPLOYED, broken)).toEqual(fault));
+  });
+
+  test("R-REVEAL-DIRECT the transformer's own reveal, by anyone, is a shown secret with no revealer", () => {
+    const log = transformerLogOf(hexOf(7n), hexOf(8n), 5n, 1n);
+    expect(log.topics[0]).toBe(topicOf("SecretRevealed(bytes32,bytes32)"));
+    expect(decodeLog(DEPLOYED, log)).toEqual(ok({
+      _tag: "some",
+      value: {
+        _tag: "secret_revealed", block: 5n, blockHash: hashOf(5n), index: 1n, hashlock: must(bytes32(hexOf(7n))),
+        revealer: undefined, secret: must(bytes32(hexOf(8n))),
+      },
+    }));
+  });
+
+  test("R-REVEAL-DIRECT a log of the transformer that is not its reveal, or not shaped as one, is a fault", () => {
+    const log = transformerLogOf(hexOf(7n), hexOf(8n), 5n, 1n);
+    const at = { block: 5n, blockHash: hashOf(5n), index: 1n };
+    const topic = log.topics[0] ?? "";
+    expect(decodeLog(DEPLOYED, { ...log, topics: [must(bytes32(hexOf(9n))), ...log.topics.slice(1)] }))
+      .toEqual(err({ _tag: "unknown_event", ...at, topic: hexOf(9n) }));
+    [{ ...log, topics: log.topics.slice(0, 1) }, { ...log, data: "0x" }, { ...log, data: `${log.data}${"00".repeat(32)}` }]
+      .forEach((broken) => expect(decodeLog(DEPLOYED, broken)).toEqual(err({ _tag: "bad_log", ...at, event: topic })));
+  });
+
+  test("R-REVEAL-DIRECT a log from an address that is neither the Depository nor the transformer is foreign", () => {
+    const log = transformerLogOf(hexOf(7n), hexOf(8n), 5n, 1n);
+    const other = must(address(hexOf(0xdeadn, 20)));
+    expect(decodeLog(DEPLOYED, { ...log, address: other }))
+      .toEqual(err({ _tag: "foreign_log", block: 5n, blockHash: hashOf(5n), index: 1n, address: other }));
   });
 
   test("a dispute start, a counter and a finalize read sender, counterentity and nonce from the topics", () => {

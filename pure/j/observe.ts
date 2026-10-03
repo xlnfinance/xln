@@ -42,7 +42,7 @@ export type JEvent =
   | Tagged<"j_start_unread", { peer: Bytes32; tx: Bytes32 }>;
 
 /** A secret the chain showed: no peer, every hosted Entity hears it. */
-export type Revealed = Tagged<"j_secret", { secret: Bytes32 }>;
+export type Revealed = Tagged<"j_secret", { secret: Bytes32; at: bigint }>;
 
 /** A J event for one hosted Entity. */
 export type Addressed = Readonly<{ to: Bytes32; event: JEvent | Revealed }>;
@@ -218,10 +218,11 @@ export const observe = (
     (isBound(e)
       ? map(eventFor(events, e, to, accounts.get(readingKey(readingOf(e)))),
         (found) => found.map((event): Addressed => ({ to, event })))
-      : ok([{ to, event: { _tag: "j_secret", secret: e.secret } }]));
-  const hear = (secret: Bytes32): readonly Addressed[] =>
-    hosted.map((to): Addressed => ({ to, event: { _tag: "j_secret", secret } }));
-  const shown = (e: ChainEvent): readonly Addressed[] => secretsAt(events, e).flatMap(hear);
+      : ok([{ to, event: { _tag: "j_secret", secret: e.secret, at: e.block } }]));
+  const hear = (secret: Bytes32, at: bigint): readonly Addressed[] =>
+    hosted.map((to): Addressed => ({ to, event: { _tag: "j_secret", secret, at } }));
+  const shown = (e: ChainEvent): readonly Addressed[] =>
+    secretsAt(events, e).flatMap((secret) => hear(secret, e.block));
   return map(
     traverse(events, (e) => map(traverse(hearersOf(e, hosted), told), (all) => [...shown(e), ...all.flat()])),
     (all) => all.flat(),

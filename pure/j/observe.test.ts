@@ -151,8 +151,8 @@ describe("j/observe", () => {
     expect(readingsOf(events, [])).toEqual([]);
     const secret = must(bytes32(hexOf(8n)));
     expect(observe(events.slice(0, 1), [LEFT, THIRD], accountsOf())).toEqual(ok([
-      toward(LEFT, { _tag: "j_secret", secret }),
-      toward(THIRD, { _tag: "j_secret", secret }),
+      toward(LEFT, { _tag: "j_secret", secret, at: 4n }),
+      toward(THIRD, { _tag: "j_secret", secret, at: 4n }),
     ]));
     expect(observe(events.slice(0, 1), [], accountsOf())).toEqual(ok([]));
   });

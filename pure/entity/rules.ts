@@ -9,6 +9,7 @@ import type { Rules } from "../account/frame/frame.ts";
 import type { AccountState, Side } from "../account/model.ts";
 import type { SigningContext } from "../account/proof/signing.ts";
 import type { AccountTx, Judge } from "../account/tx.ts";
+import { ledgerOf } from "../account/state.ts";
 import type { PeerFault } from "./model.ts";
 
 export type EntityRules = Rules<AccountTx, AccountState, PeerFault>;
@@ -16,15 +17,38 @@ export type EntityRules = Rules<AccountTx, AccountState, PeerFault>;
 /** The tag a refusal carries when the receiver's signature is out. */
 const FROZEN = "frozen";
 
-/** `self` is the side of the replica that judges; `frozen` is whether its node signs nothing new on this Account. */
-export type Standing = Readonly<{ self: Side; frozen: boolean }>;
+/** The refusal for an expiry of a hold the chain paid: no wait helps, the payee's way is a dispute (R-REVEAL-BACKSTOP). */
+const REVEALED = "revealed_on_chain";
 
-export const entityRules = (judge: Judge, signing: SigningContext, { self, frozen }: Standing): EntityRules => {
+/**
+ * `self` is the side of the replica that judges; `frozen` is whether its node signs nothing new on this Account;
+ * `shown` is the lowest J height the chain showed a hashlock's secret at.
+ */
+export type Standing = Readonly<{ self: Side; frozen: boolean; shown: ReadonlyMap<string, bigint> }>;
+
+/**
+ * R-REVEAL-BACKSTOP: the chain counts a secret shown at a height up to the deadline (its slack covers the drift), so an
+ * expiry of that hold, by either side, would pay the payer what the chain paid the payee. Events come before the
+ * height that passes the deadline plus the reserve (R-HEIGHT-ORDER), so the Entity knows by the time an expiry is due.
+ */
+const paidByChain = (state: AccountState, shown: Standing["shown"], tx: AccountTx): boolean => {
+  if (tx._tag !== "expire") return false;
+  const hold = ledgerOf(state, tx.token).holds.find((h) => h.id === tx.id);
+  const at = hold === undefined ? undefined : shown.get(hold.hashlock);
+  return hold !== undefined && at !== undefined && at <= hold.deadline;
+};
+
+export const entityRules = (judge: Judge, signing: SigningContext, { self, frozen, shown }: Standing): EntityRules => {
   const base = accountRules(judge, signing);
+  const refusal = (state: AccountState, author: Side, tx: AccountTx): PeerFault | undefined =>
+    (frozen && author !== self ? { _tag: FROZEN } : paidByChain(state, shown, tx) ? { _tag: REVEALED } : undefined);
   return {
     epoch: base.epoch,
     firstNonce: base.firstNonce,
-    apply: (state, author, tx) => (frozen && author !== self ? err({ _tag: FROZEN }) : base.apply(state, author, tx)),
+    apply: (state, author, tx) => {
+      const refused = refusal(state, author, tx);
+      return refused === undefined ? base.apply(state, author, tx) : err(refused);
+    },
     name: base.name,
     seal: base.seal,
     tag: (fault) => fault._tag,

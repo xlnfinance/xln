@@ -29,7 +29,7 @@ export const entityId = (text: string): Result<EntityId, BadEntityId> =>
 export const sideOf = (self: EntityId, peer: EntityId): Side => (self < peer ? "left" : "right");
 
 /** What a frame of an Account can be refused for: the Account's own faults, and that the node's signature is out. */
-export type PeerFault = AccountFault | Tagged<"frozen">;
+export type PeerFault = AccountFault | Tagged<"frozen"> | Tagged<"revealed_on_chain">;
 
 /** One side of an Account as the Entity holds it. */
 export type EntityReplica = Replica<AccountTx, AccountState, PeerFault>;
@@ -50,6 +50,8 @@ export type EntityState = Readonly<{
   revealed: ReadonlyMap<EntityId, readonly string[]>;
   chain: ReadonlyMap<EntityId, ChainFacts>;
   paybook: Paybook;
+  /** The lowest J height at which the chain showed the secret of a hashlock (`j_secret`): the key is the hashlock. */
+  shown: ReadonlyMap<string, bigint>;
 }>;
 
 /**
@@ -61,7 +63,7 @@ export type PeerProof = Readonly<{ head: FrameHash; slot: number; author: Side; 
 export const emptyEntity = (id: EntityId): EntityState =>
   ({
     id, accounts: new Map(), proofs: new Map(), waiting: new Map(), revealed: new Map(), chain: new Map(),
-    paybook: new Map(),
+    paybook: new Map(), shown: new Map(),
   });
 
 /**
@@ -188,7 +190,7 @@ export type CosignAsk = Tagged<"cosign_ask", { from: EntityId; op: CosignOp }>;
  * so every Entity hears it, and the paybook of one that forwarded a lock under its hash passes it up
  * (R-DISPUTE-FREEZE).
  */
-export type SecretRevealed = Tagged<"j_secret", { secret: Uint8Array }>;
+export type SecretRevealed = Tagged<"j_secret", { secret: Uint8Array; at: bigint }>;
 
 export type Arrival = PeerMessage | JEvent | SecretRevealed | CosignAsk;
 
