@@ -21,7 +21,9 @@ import {
   proofNonce, quiet, startLapsed, windowOpened, windowOver, withWindows,
 } from "./chain.ts";
 import { entityRules, type EntityRules } from "./rules.ts";
-import { hashlocksOf, intentFor, learned, revealed, revealedBy, withEntry, type Intent } from "./paybook/paybook.ts";
+import {
+  hashlocksOf, intentFor, learned, revealed, revealedBy, unruled, withEntry, type Intent,
+} from "./paybook/paybook.ts";
 import { askedOf, cosignFault, foldsOf, withdrawalOf } from "./cosign.ts";
 import type { AccountTx, Judge } from "../account/tx.ts";
 import {
@@ -965,7 +967,7 @@ export const entityFrame = (
   const rules: Rulebook = (w, peer) => {
     const facts = factsOf(w, peer);
     return entityRules(judge, signingOf(anchor, w.state.id, peer, facts),
-      { self: sideOf(w.state.id, peer), frozen: quiet(facts) });
+      { self: sideOf(w.state.id, peer), frozen: quiet(facts), unruled: unruled(w.state), blind: w.state.blind });
   };
   const hear = (w: Work, a: Arrival) => arrive(rules, anchor.terms, anchor.check, judge.view, w, a);
   const arrived = arrivalsOf(inputs).reduce(hear, start(state));

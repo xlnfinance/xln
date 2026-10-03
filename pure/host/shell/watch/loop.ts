@@ -5,10 +5,12 @@
 // moved by the caller only after the delivery is in the WAL (R-HEIGHT-ORDER); a restart begins again at the Runtime's
 // own view, which the WAL holds, and replays what it must (every J event is idempotent).
 //
-// A transaction of a dispute the node cannot read the bytes of (R-WATCH-STALL) holds back the events of its own Account
-// from its first event on, and nothing else: the other Accounts and every revealed secret go on at once. The held
-// events wait in the Host's `Carry`, the Entity is told which block they begin at (`j_behind`: the record a restart
-// reads the cursor back from), and they are told when the transaction can be read, or when waiting no longer helps.
+// A dispute finalize whose bytes the node cannot read (R-WATCH-STALL) holds back the events of its own Account from its
+// first event on, and nothing else: the other Accounts and every revealed secret go on at once. A dispute start holds
+// nothing back: the Entity is told it, with its window and its secrets (all in the log), at once, and its body when the
+// bytes come (the start waits in the Carry's `reading` until then). The held events wait in the Host's `Carry`, the
+// Entity is told which block the Host owes it from (`j_behind`: the record a restart reads the cursor back from), and
+// they are told when the transaction can be read, or when waiting no longer helps.
 import type { JHeight } from "../../../account/clause/clock.ts";
 import type { ChainFacts, EntityId, EntityInput } from "../../../entity/model.ts";
 import { entityId } from "../../../entity/model.ts";
@@ -17,7 +19,7 @@ import { peerOfEvent, readingKey, type AccountAt, type Addressed } from "../../.
 import { hexToBytes } from "../../../kernel/encoding/bytes.ts";
 import { bytes32, type Address, type Bytes32, type ChainEvent, type RawLog } from "../../../j/log.ts";
 import {
-  advance, calldataWanted, finalizedAt, prepare, readings, splitStalled, unreadTxs, watching, withCalldata,
+  advance, calldataWanted, finalizedAt, needsBytes, prepare, readings, splitStalled, unreadTxs, watching, withCalldata,
   type Block, type Prepared, type Watch, type WatchFault, type Window,
 } from "../../../j/watch.ts";
 import { err, flatMap, map, ok, traverse, type Result } from "../../../kernel/core/result.ts";
@@ -100,9 +102,11 @@ export type Known = Readonly<{ reads: readonly Read[]; traced: boolean }>;
  */
 export type Carry = Readonly<{
   failing: ReadonlyMap<Bytes32, Failing>; reads: ReadonlyMap<Bytes32, Known>; held: readonly ChainEvent[];
+  /** Dispute starts against the Entity, told already without their body, until the bytes come or the window ends. */
+  reading: readonly ChainEvent[];
 }>;
 
-export const NO_CARRY: Carry = { failing: new Map(), reads: new Map(), held: [] };
+export const NO_CARRY: Carry = { failing: new Map(), reads: new Map(), held: [], reading: [] };
 
 /**
  * What the loop needs to know of the Entity to wait for it: for each peer the last view at which hearing a secret of
@@ -282,13 +286,6 @@ const calldataOf = async (
   return { wanted, gathered, traced: new Set(unread.filter((tx) => !traces.failed.has(tx))) };
 };
 
-/** The Account a transaction's events are about, as the peer of the hosted Entity. */
-const peerOfTx = (batch: Prepared, hosted: Bytes32, tx: Bytes32): Bytes32 | undefined =>
-  batch.events.flatMap((e) =>
-    ((e._tag === "dispute_started" || e._tag === "dispute_finalized") && e.tx === tx
-      ? [peerOfEvent(hosted, e) ?? hosted]
-      : [])).at(0);
-
 /**
  * The tries of each transaction the node fails: one more for a transaction asked at this head and failed, and the same
  * for one not asked at this head (it waits for the next block). A transaction that is given is forgotten.
@@ -301,16 +298,18 @@ const failingNow = (calldata: Calldata, carry: Carry, head: bigint): ReadonlyMap
   ]);
 
 /**
- * R-WATCH-STALL: whether waiting on a transaction no longer helps. When the Entity has locks it forwarded to the peer
- * of the transaction's Account that a secret in it would let it claim, waiting helps until the view a delivery reaches
- * is past the last at which the Entity could still act on one (`lastHeard`): a node that fails for any reason, a 503
- * or a timeout among them, is waited for until then. When no lock depends on it, a few blocks are all it gets.
+ * R-WATCH-STALL: whether waiting for the bytes of one event's transaction no longer helps, decided for the event's own
+ * Account. A finalize's secrets let the Entity claim upstream only while it can still act on one: when it has locks it
+ * forwarded to the peer, waiting helps until the view a delivery reaches is past the last at which it could
+ * (`lastHeard`), however the node fails; when no lock depends on it, a few blocks are all it gets. A start's body is
+ * needed to answer the dispute while its window runs, which is the chain's own second: it is given up once the
+ * delivery's last block is past the window's end.
  */
-const givenUp = (
-  stand: Standing, to: bigint, peer: Bytes32 | undefined, failing: Failing,
-): boolean => {
-  const last = peer === undefined ? undefined : stand.lastHeard.get(peer);
-  return last === undefined ? failing.tries >= FEW_TRIES : to > last;
+const givenUp = (stand: Standing, last: Block, hosted: Bytes32, e: ChainEvent, failing: Failing): boolean => {
+  if (e._tag === "dispute_started") return last.timestamp >= e.timeout;
+  const peer = peerOfEvent(hosted, e);
+  const heard = peer === undefined ? undefined : stand.lastHeard.get(peer);
+  return heard === undefined ? failing.tries >= FEW_TRIES : last.number >= heard;
 };
 
 /** The Accounts the events held back are about, each with the first block of its held events. */
@@ -334,6 +333,42 @@ const behindTold = (
 };
 
 /**
+ * What a poll's events come to once the node has answered for the transactions: the ones told now, with the bytes read
+ * (a start still waiting for its bytes is told as the log has it, body-less and not unread), the finalizes held back
+ * with the events of their Accounts behind them, the starts still reading, and the transactions that are still waited
+ * on, each with the peer of the Account it waits for. A start already told while it was waiting is not told again until
+ * it is read or given up.
+ */
+type Plan = Readonly<{
+  ready: Prepared; held: readonly ChainEvent[]; reading: readonly ChainEvent[];
+  stalled: ReadonlyMap<Bytes32, Failing>; peers: ReadonlyMap<Bytes32, Bytes32>;
+}>;
+
+const planned = (
+  batch: Prepared, carry: Carry, failing: ReadonlyMap<Bytes32, Failing>, found: ReadonlyMap<Bytes32, readonly Read[]>,
+  stand: Standing, hosted: Bytes32,
+): Plan => {
+  const awaited = (e: ChainEvent): boolean => {
+    const f = "tx" in e ? failing.get(e.tx) : undefined;
+    return f !== undefined && needsBytes(e, [hosted]) && !givenUp(stand, batch.last, hosted, e, f);
+  };
+  const pending = (e: ChainEvent): boolean => e._tag === "dispute_started" && awaited(e);
+  const waits = new Set(carry.reading.filter(pending));
+  const split = splitStalled(batch.events.filter((e) => !waits.has(e)), awaited);
+  const read = withCalldata({ ...batch, events: split.ready }, found);
+  const waiting = batch.events.filter(awaited);
+  return {
+    ready: { ...read, events: read.events.map((e, i) => (pending(split.ready[i]!) ? split.ready[i]! : e)) },
+    held: split.held, reading: batch.events.filter(pending),
+    stalled: new Map([...failing].filter(([tx]) => waiting.some((e) => "tx" in e && e.tx === tx))),
+    peers: new Map(waiting.flatMap((e) => {
+      const peer = peerOfEvent(hosted, e);
+      return "tx" in e && peer !== undefined ? [[e.tx, peer] as const] : [];
+    })),
+  };
+};
+
+/**
  * The next delivery, or nothing when no block past the cursor is final yet. `hosted` is the Entity the node hosts, and
  * `windows` the dispute windows it waits on: each is told to it, once a delivery's last block is past its end.
  * A fault of the port is the node's to retry; a fault of the core is a local invariant broken (a reorg deeper than the
@@ -348,35 +383,34 @@ export const poll = async (
   if (!ranged.ok) return ranged;
   const range = ranged.value;
   if (range === undefined) return ok(undefined);
-  const batch = { ...range.prepared, events: [...carry.held, ...range.prepared.events] };
+  const batch = { ...range.prepared, events: [...carry.held, ...carry.reading, ...range.prepared.events] };
   const calldata = await calldataOf(port, batch, hosted, carry, range.head);
   const failing = failingNow(calldata, carry, range.head);
-  const stalled = new Map([...failing].filter(([tx, f]) =>
-    !givenUp(stand, range.to, peerOfTx(batch, hosted, tx), f)));
-  const split = splitStalled(batch.events, new Set(stalled.keys()));
-  const found = calldata.gathered.found;
-  const read = withCalldata({ ...batch, events: split.ready }, found);
+  const plan = planned(batch, carry, failing, calldata.gathered.found, stand, hosted);
+  const read = plan.ready;
   const states = await Promise.all(readings(read, [hosted]).map(async (r) =>
     map(await port.accountAt(r.blockHash, r.left, r.right), (at) => [readingKey(r), at] as const)));
   const accounts = traverse(states, (answer) => answer);
   if (!accounts.ok) return accounts;
   const step = advance(watch, read, [hosted], new Map(accounts.value), windows);
   if (!step.ok) return step;
-  const told = behindTold(hosted, new Set([...stand.behind, ...heldFrom(hosted, carry.held).keys()]), split.held,
-    stand, step.value.height);
+  const behind = new Set([...stand.behind, ...heldFrom(hosted, [...carry.held, ...carry.reading]).keys()]);
+  const told = behindTold(hosted, behind, [...plan.held, ...plan.reading], stand, step.value.height);
   if (!told.ok) return told;
   const events = traverse(step.value.events, ({ event }) => inputOf(event));
   if (!events.ok) return events;
-  const heldTxs = new Set(split.held.flatMap((e) => ("tx" in e ? [e.tx] : [])));
+  const { stalled } = plan;
+  const kept = new Set([...plan.held, ...plan.reading].flatMap((e) => ("tx" in e ? [e.tx] : [])));
+  const found = calldata.gathered.found;
   const reads = new Map(calldata.wanted.flatMap((tx) => {
     const got = found.get(tx);
     const traced = carry.reads.get(tx)?.traced === true || calldata.traced.has(tx);
-    return got === undefined || !(heldTxs.has(tx) || stalled.has(tx)) ? [] : [[tx, { reads: got, traced }] as const];
+    return got === undefined || !(kept.has(tx) || stalled.has(tx)) ? [] : [[tx, { reads: got, traced }] as const];
   }));
   return ok({
     watch: step.value.watch, events: [...told.value.begun, ...events.value, ...told.value.over],
-    height: step.value.height, carry: { failing: stalled, reads, held: split.held },
-    stalls: [...stalled].map(([tx, f]): Stall => ({ tx, peer: peerOfTx(batch, hosted, tx) ?? hosted, ...f })),
+    height: step.value.height, carry: { failing: stalled, reads, held: plan.held, reading: plan.reading },
+    stalls: [...stalled].map(([tx, f]): Stall => ({ tx, peer: plan.peers.get(tx) ?? hosted, ...f })),
     untraceable: calldata.gathered.noMethod.size > 0,
   });
 };

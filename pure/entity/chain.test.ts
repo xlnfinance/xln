@@ -1,6 +1,9 @@
 import { describe, expect, test } from "bun:test";
+import { proofBodyHash } from "../chain/proof/proof.ts";
+import { CLAUSED, must } from "../j/fixtures.ts";
 import {
-  behindFrom, behindOver, depositable, epochAdvanced, framed, freshChain, proofNonce, withWindows,
+  behindFrom, behindOver, depositable, disputeOpened, epochAdvanced, framed, freshChain, proofNonce, quiet,
+  withWindows,
 } from "./chain.ts";
 import { entityFrame } from "./frame.ts";
 import { anchor, entityOf, judge, open } from "./fixtures.ts";
@@ -65,7 +68,7 @@ describe("entity/chain the record that the Host holds an Account's events back (
     expect(behindOver(held).behind).toBeUndefined();
   });
 
-  test("R-WATCH-STALL the Entity keeps the record per Account, through other news, until told over", () => {
+  test("R-WATCH-STALL the Entity keeps the record per Account, through other news, until over", () => {
     const ALICE = entityOf(1);
     const BOB = entityOf(2);
     const CAROL = entityOf(3);
@@ -79,5 +82,37 @@ describe("entity/chain the record that the Host holds an Account's events back (
     expect(moved.chain.get(BOB)).toMatchObject({ epoch: 1n, behind: 9n });
     expect(run(moved, { _tag: "j_behind_over", peer: BOB }).chain.get(BOB)?.behind).toBeUndefined();
     expect(run(moved, { _tag: "j_behind_over", peer: CAROL }).chain.get(BOB)?.behind).toBe(9n);
+  });
+
+  test("R-WATCH-STALL an Account the Host still owes events of signs nothing new, until told over", () => {
+    expect(quiet(freshChain)).toBe(false);
+    expect(quiet(behindFrom(freshChain, 5n))).toBe(true);
+    expect(quiet(behindOver(behindFrom(freshChain, 5n)))).toBe(false);
+  });
+
+  const HASH = must(proofBodyHash(CLAUSED));
+  const dispute = (body?: typeof CLAUSED, bodyHash = HASH) => ({
+    _tag: "j_dispute", peer: entityOf(2), epoch: 0n, by: "right", nonce: 7n, timeout: 100n, proposerIsLeft: true,
+    bodyHash,
+    ...(body === undefined ? {} : { body }),
+  }) as const;
+
+  test("R-WATCH-STALL a dispute told without its body takes the body when it is told again with it", () => {
+    const bare = disputeOpened(freshChain, dispute());
+    expect(bare.against).toMatchObject({ nonce: 7n, window: 100n });
+    expect(bare.against?.body).toBeUndefined();
+    const read = disputeOpened(bare, dispute(CLAUSED));
+    expect(read.against?.body).toEqual(CLAUSED);
+    expect(read.against).toMatchObject({ nonce: 7n, window: 100n, over: false });
+  });
+
+  test("R-WATCH-STALL a body the chain did not log the hash of is not taken, with or without one held", () => {
+    const bare = disputeOpened(freshChain, dispute());
+    const other = { ...CLAUSED, leftResponseSeconds: CLAUSED.leftResponseSeconds + 1n };
+    expect(disputeOpened(bare, dispute(other)).against?.body).toBeUndefined();
+    const read = disputeOpened(bare, dispute(CLAUSED));
+    const nonce = { ...dispute(other), nonce: 8n };
+    expect(disputeOpened(read, nonce)).toEqual(read);
+    expect(disputeOpened(read, dispute(other)).against?.body).toEqual(CLAUSED);
   });
 });

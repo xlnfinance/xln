@@ -15,7 +15,8 @@ import type { Carried } from "../../../j/calldata/decode.ts";
 import { watching, type Block, type Watch } from "../../../j/watch.ts";
 import { bytesToHex } from "../../../kernel/encoding/bytes.ts";
 import {
-  argumentsOf, blockOf, CLAUSED, DEPOSITORY, DEPOSITORY_ABI, entityOf, finalizedOf, finalizeInput, finalizeOp, hexOf,
+  argumentsOf, blockOf, CLAUSED, DEPOSITORY, DEPOSITORY_ABI, entityOf, evidenceOf, finalizedOf, finalizeInput,
+  finalizeOp, hexOf,
   logOf, must,
   multicalled, relayed, startInput, startOp, txOf,
 } from "../../../j/fixtures.ts";
@@ -432,19 +433,116 @@ describe("host/shell/watch the J loop's poll", () => {
     expect(spent.carry.failing.size).toBe(0);
   });
 
-  test("R-WATCH-STALL a tx the node fails with a forward on it is waited on until lastHeard passes", async () => {
+  test("R-WATCH-STALL a tx the node fails with a forward on it is waited on until lastHeard", async () => {
     const { tx, logs } = finalizing();
     const at = (head: bigint) => portOf(straight(head, logs), logPath(), "input");
     const stand: Standing = { ...NO_STANDING, lastHeard: new Map([[RIGHT, 20n]]) };
-    const waiting = await along(at, upTo(6n, 22n), FRESH, stand);
+    const waiting = await along(at, upTo(6n, 21n), FRESH, stand);
     expect(waiting.told).toEqual([BEHIND]);
-    expect(waiting.carry.failing.get(tx)?.tries).toBe(17);
-    const spent = await along(at, [23n], waiting, stand);
+    expect(waiting.carry.failing.get(tx)?.tries).toBe(16);
+    const spent = await along(at, [22n], waiting, stand);
     const unread: EntityInput = { _tag: "j_finalize_unread", peer: peer(RIGHT), tx };
     expect(spent.told.slice(1)).toEqual([EPOCH, OVER, unread, BEHIND_OVER]);
     const other: Standing = { ...NO_STANDING, lastHeard: new Map([[OTHER, 100n]]) };
     const unrelated = await along(at, upTo(6n, 8n), FRESH, other);
     expect(unrelated.told.slice(1)).toEqual([EPOCH, OVER, unread, BEHIND_OVER]);
+  });
+
+  /** A dispute start of the peer against the Entity at block 2, whose window ends at the chain's second `timeout`. */
+  const opening = (timeout: bigint, tx = txOf(2n, 0n)) =>
+    logOf("DisputeStarted", {
+      sender: RIGHT, counterentity: LEFT, nonce: 7n, proposerIsLeft: true, proofbodyHash: must(proofBodyHash(CLAUSED)),
+      watchSeed: hexOf(2n), starterInitialArguments: argumentsOf([hexOf(8n)]), starterCounterArguments: "0x",
+      starterCounterProofCommitment: hexOf(3n), disputeTimeout: timeout, disputeStartTimestamp: 6n,
+      leftResponseSeconds: 60n, rightResponseSeconds: 60n,
+    }, 2n, 0n, 0n, tx);
+  const START_UNREAD = (tx: Bytes32): EntityInput => ({ _tag: "j_start_unread", peer: peer(RIGHT), tx });
+  const WINDOW = 100n;
+
+  test("R-WATCH-STALL a start behind a tx the node always fails is told at once, window and secret in it", async () => {
+    const tx = txOf(2n, 0n);
+    const at = (head: bigint) => portOf(straight(head, [opening(WINDOW)]), logPath(), "input");
+    const async: Standing = { ...NO_STANDING, lastHeard: new Map([[RIGHT, 17_000n]]) };
+    const first = await along(at, [6n], FRESH, async);
+    expect(tagsOf(first.told)).toEqual(["j_behind", "j_secret", "j_dispute"]);
+    expect(first.told[2]).toMatchObject({ _tag: "j_dispute", nonce: 7n, timeout: WINDOW });
+    expect(first.told[2]).not.toHaveProperty("body");
+    const later = await along(at, upTo(7n, 11n), first, async);
+    expect(later.told).toEqual(first.told);
+    expect(later.carry.failing.get(tx)?.tries).toBe(6);
+  });
+
+  test("R-WATCH-STALL a start told without its body is told again with it once the bytes come", async () => {
+    const tx = txOf(2n, 0n);
+    const down = (head: bigint) => portOf(straight(head, [opening(WINDOW)]), logPath(), "input");
+    const inputs = new Map([[tx, startInput(RIGHT, [startOp(CLAUSED)])]]);
+    const up = (head: bigint) => portOf(straight(head, [opening(WINDOW)]), logPath(), -1n, inputs);
+    const waiting = await along(down, upTo(6n, 8n));
+    const read = await along(up, [9n], waiting);
+    expect(tagsOf(read.told.slice(3))).toEqual(["j_secret", "j_dispute", "j_behind_over"]);
+    expect(read.told[4]).toMatchObject({ _tag: "j_dispute", body: CLAUSED });
+    expect(read.carry.reading).toEqual([]);
+    expect(read.told.some((e) => e._tag === "j_start_unread")).toBe(false);
+  });
+
+  test("R-WATCH-STALL a start the bytes never come for is told unread once its window has passed", async () => {
+    const tx = txOf(2n, 0n);
+    const at = (head: bigint) => portOf(straight(head, [opening(WINDOW)]), logPath(), "input");
+    const waiting = await along(at, upTo(6n, 11n));
+    expect(tagsOf(waiting.told)).toEqual(["j_behind", "j_secret", "j_dispute"]);
+    const spent = await along(at, [12n], waiting);
+    expect(tagsOf(spent.told.slice(3))).toEqual(["j_secret", "j_dispute", "j_start_unread", "j_behind_over"]);
+    expect(spent.told.at(-2)).toEqual(START_UNREAD(tx));
+    expect(spent.carry.reading).toEqual([]);
+  });
+
+  /** One tx: a finalize of a stranger's Account first, then the finalize of the Entity's Account with RIGHT. */
+  const relayedFinalizes = () => {
+    const op = finalizeOp({ otherArguments: argumentsOf([hexOf(8n)]) });
+    const tx = txOf(2n, 3n);
+    const stranger = logOf("DisputeFinalized", {
+      sender: entityOf(0x61n), counterentity: entityOf(0x62n), nonce: 7n, finalProofbodyHash: hexOf(5n),
+      finalizationEvidenceHash: evidenceOf(op),
+    }, 2n, 0n, 0n, tx);
+    return { tx, logs: [stranger, advanced(2n, 1n, 1n), finalizedOf(op, 2n, 3n, tx)] as const };
+  };
+
+  test("R-WATCH-STALL a stranger's finalize ahead of the Entity's in one tx does not shorten the wait", async () => {
+    const { tx, logs } = relayedFinalizes();
+    const at = (head: bigint) => portOf(straight(head, logs), logPath(), "input");
+    const forwarded: Standing = { ...NO_STANDING, lastHeard: new Map([[RIGHT, 100n]]) };
+    const waiting = await along(at, upTo(6n, 20n), FRESH, forwarded);
+    expect(waiting.told).toEqual([{ ...BEHIND, from: 2n }]);
+    expect(waiting.carry.failing.get(tx)?.tries).toBe(15);
+    const alone = await along(at, upTo(6n, 8n));
+    expect(tagsOf(alone.told)).toEqual(["j_behind", "j_epoch", "j_dispute_over", "j_finalize_unread", "j_behind_over"]);
+  });
+
+  /** One tx finalizing two Accounts of the Entity: with RIGHT (an advance at 2.0), with OTHER (an advance at 2.3). */
+  const twoAccounts = () => {
+    const op = finalizeOp({ otherArguments: argumentsOf([hexOf(8n)]) });
+    const tx = txOf(2n, 4n);
+    const second = logOf("DisputeFinalized", {
+      sender: OTHER, counterentity: LEFT, nonce: 7n, finalProofbodyHash: hexOf(5n),
+      finalizationEvidenceHash: evidenceOf(op),
+    }, 2n, 4n, 0n, tx);
+    const first = [advanced(2n, 0n, 1n), finalizedOf(op, 2n, 1n, tx), otherAdvanced(2n, 3n, 1n)];
+    return { tx, logs: [...first, second] as const };
+  };
+
+  test("R-WATCH-STALL one tx over two Accounts is given up for each at its own lastHeard", async () => {
+    const { tx, logs } = twoAccounts();
+    const at = (head: bigint) => portOf(straight(head, logs), logPath(), "input");
+    const stand: Standing = { ...NO_STANDING, lastHeard: new Map([[RIGHT, 100n], [OTHER, 10n]]) };
+    const waiting = await along(at, upTo(6n, 11n), FRESH, stand);
+    expect(tagsOf(waiting.told)).toEqual(["j_behind", "j_behind"]);
+    const spent = await along(at, [12n], waiting, stand);
+    const unread: EntityInput = { _tag: "j_finalize_unread", peer: peer(OTHER), tx };
+    expect(tagsOf(spent.told.slice(2))).toEqual(["j_epoch", "j_dispute_over", "j_finalize_unread", "j_behind_over"]);
+    expect(spent.told.slice(2)[2]).toEqual(unread);
+    expect(spent.told.at(-1)).toEqual({ _tag: "j_behind_over", peer: peer(OTHER) });
+    expect(spent.carry.held.map((e) => e._tag)).toEqual(["epoch_advanced", "dispute_finalized"]);
+    expect(spent.carry.failing.has(tx)).toBe(true);
   });
 
   test("R-WATCH-STALL the Entity is told an Account is behind once, and over only from the view it is at", async () => {

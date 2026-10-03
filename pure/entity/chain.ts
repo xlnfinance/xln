@@ -54,12 +54,26 @@ const shown = (e: Extract<JEvent, { _tag: "j_dispute" }>): Readonly<{ body?: Pro
 };
 
 /**
+ * A dispute the Entity was told without its body (the Host had not the bytes yet) gets the body when the Host tells it
+ * again with the bytes read: only the dispute of that nonce and body hash, and only a body that hashes to what the
+ * chain logged (so it can only be the one it has, if it has one).
+ */
+const bodied = (f: ChainFacts, e: Extract<JEvent, { _tag: "j_dispute" }>): ChainFacts => {
+  const { against } = f;
+  const same = against !== undefined && e.epoch === f.epoch && against.nonce === e.nonce
+    && against.bodyHash.toLowerCase() === e.bodyHash.toLowerCase();
+  return same && shown(e).body !== undefined
+    ? { ...f, against: { ...against, ...shown(e) } }
+    : f;
+};
+
+/**
  * The peer opened a dispute in the epoch the Entity is in. One in another epoch is not about its proofs, and a repeated
  * report keeps the dispute it first named (with the answer already given to it).
  */
 export const disputeOpened = (f: ChainFacts, e: Extract<JEvent, { _tag: "j_dispute" }>): ChainFacts =>
   (e.epoch !== f.epoch || f.against !== undefined
-    ? f
+    ? bodied(f, e)
     : {
       ...f,
       against: {
@@ -201,10 +215,11 @@ export const inDispute = (f: ChainFacts): boolean => f.starting !== undefined ||
 
 /**
  * The node signs nothing new on the Account (R-DISPUTE-FREEZE, R-COSIGN-FREEZE): its signature is out on a settlement
- * or a C2R, or a dispute is open. The proof a dispute rests on must stay the newest one the node holds, and a frame
- * committed now would be sealed under an epoch the finalize is about to void.
+ * or a C2R, a dispute is open, or the Host still owes it events of the Account (`behind`, R-WATCH-STALL: a finalize
+ * whose secrets it cannot read yet may have dissolved holds). The proof a dispute rests on must stay the newest one the
+ * node holds, and a frame committed now would be sealed under an epoch the finalize is about to void.
  */
-export const quiet = (f: ChainFacts): boolean => f.frozen || inDispute(f);
+export const quiet = (f: ChainFacts): boolean => f.frozen || inDispute(f) || f.behind !== undefined;
 
 /** The serial the next operation of this Account will have. */
 export const nextSerial = (f: ChainFacts): bigint => f.cosigned + 1n;

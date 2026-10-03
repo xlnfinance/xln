@@ -188,11 +188,6 @@
   {
    "kind": "test",
    "layer": "ts",
-   "name": "R-WATCH-CALLDATA the Host is asked once for the input of each transaction of a hosted dispute"
-  },
-  {
-   "kind": "test",
-   "layer": "ts",
    "name": "R-WATCH-CALLDATA the body a start carried is told with the dispute, read from its transaction's input"
   },
   {
@@ -424,6 +419,16 @@
    "kind": "test",
    "layer": "ts",
    "name": "R-WATCH-CALLDATA a blind node that boots on a provider that traces is told its Entity sees again"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-WATCH-CALLDATA a blind Entity co-signs no expiry of any hold"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-WATCH-CALLDATA the Host is asked once for the input of each transaction of a hosted dispute"
   }
  ]
 }

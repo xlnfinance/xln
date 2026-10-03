@@ -29,7 +29,7 @@ export const entityId = (text: string): Result<EntityId, BadEntityId> =>
 export const sideOf = (self: EntityId, peer: EntityId): Side => (self < peer ? "left" : "right");
 
 /** What a frame of an Account can be refused for: the Account's own faults, and that the node's signature is out. */
-export type PeerFault = AccountFault | Tagged<"frozen">;
+export type PeerFault = AccountFault | Tagged<"frozen"> | Tagged<"reveal_unknown">;
 
 /** One side of an Account as the Entity holds it. */
 export type EntityReplica = Replica<AccountTx, AccountState, PeerFault>;

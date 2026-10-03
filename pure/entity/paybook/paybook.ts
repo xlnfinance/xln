@@ -88,6 +88,18 @@ const nextDeadline = (clock: ClockParams, view: JView, hold: Hold): JHeight | un
   return sooner.ok && sooner.value > view ? sooner.value : undefined;
 };
 
+/** Whether the Host still owes the Entity events of its Account with `peer` (R-WATCH-STALL). */
+const behind = (state: EntityState, peer: EntityId): boolean => state.chain.get(peer)?.behind !== undefined;
+
+/**
+ * The hashlocks whose secret the Entity cannot rule out having reached the chain unseen: the lock it forwarded sits on
+ * an Account the Host owes events of, so a secret in a finalize it has not read may already have paid the next hop. An
+ * expiry of the inbound hold of such a hash is never co-signed: it would give back to the payer what the chain paid on.
+ */
+export const unruled = (state: EntityState): ReadonlySet<string> =>
+  new Set([...state.paybook].flatMap(([hashlock, entry]) =>
+    (entry._tag === "locked" && behind(state, entry.to) ? [hashlock] : [])));
+
 /** A forward whose lock is in: the same amount and hashlock on the next hop, one hop sooner, or the lock given up. */
 type Forward = Of<Entry, "forward">;
 type Receive = Of<Entry, "receive">;
@@ -98,7 +110,7 @@ const forwardOf = (
   const c = incoming(state, e.from, hashlock);
   if (c === undefined) return undefined;
   const deadline = nextDeadline(clock, view, c.hold);
-  if (state.blind || deadline === undefined || !state.accounts.has(e.to) || e.to === e.from) {
+  if (state.blind || behind(state, e.to) || deadline === undefined || !state.accounts.has(e.to) || e.to === e.from) {
     return cancelUp(e.from, hashlock, c);
   }
   const id = freeSlot(state, e.to);

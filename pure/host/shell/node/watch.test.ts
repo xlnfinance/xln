@@ -8,12 +8,15 @@ import {
   blockOf, DEPOSITORY, entityOf as bytes, evidenceOf, finalizeInput, finalizeOp, hexOf, logOf, must as made,
 } from "../../../j/fixtures.ts";
 import type { Row } from "../../../runtime/model.ts";
+import { entityOf as entityNumbered, forwarded } from "../../../entity/fixtures.ts";
 import { open } from "../../../runtime/fixtures.ts";
 import type { Disk } from "../disk/disk.ts";
 import { callsOf } from "../fixtures.ts";
 import type { PortFault } from "../submit/chain.ts";
 import type { Look } from "./daemon.ts";
-import { NO_CARRY, type Carry, type Probe, type Traced, type WatchConfig, type WatchPort } from "../watch/loop.ts";
+import {
+  FEW_TRIES, NO_CARRY, type Carry, type Probe, type Traced, type WatchConfig, type WatchPort,
+} from "../watch/loop.ts";
 import { startDaemon, stallNotices } from "./daemon.ts";
 import { ALICE, BOB, configOf, fresh, nodeOf, QUICK, seatOf, until, WAIT } from "./scene.ts";
 
@@ -278,6 +281,38 @@ describe("host/shell/node a node with a J loop", () => {
     expect(look.watchFault).toBeUndefined();
     expect(look.notices.filter((n) => n._tag === "watch_stalled")).toHaveLength(1);
     expect(factsOf(look)?.behind).toBeUndefined();
+  });
+
+  test("R-WATCH-STALL a node with a forward to the peer waits past FEW_TRIES, until its lock's last view", async () => {
+    const dir = fresh();
+    const log = `${dir}/calls.log`;
+    writeFileSync(log, "");
+    const watch = watchOf({ ...STRAIGHT, rises: true }, log, [advanced(105n, 1n), finalized], QUIET);
+    const genesis = forwarded(ALICE, entityNumbered(3), BOB, 111n, 121n);
+    const alice = await nodeOf(await seatOf(ALICE, dir, 0), NO_PEER, { tickMs: QUICK, watch, genesis });
+    const tries = () => callsOf(log).filter((c) => c === "input").length;
+    expect(await until(async () => tries() >= FEW_TRIES + 2, WAIT)).toBe(true);
+    expect(factsOf(await alice.look())).toMatchObject({ epoch: 0n, behind: 105n });
+    expect(await until(async () => factsOf(await alice.look())?.epoch === 1n, WAIT)).toBe(true);
+    const look = await alice.stop();
+    expect(tries()).toBeGreaterThanOrEqual(8);
+    expect(factsOf(look)?.behind).toBeUndefined();
+  });
+
+  test("R-WATCH-STALL an Account stays behind after a restart until a delivery reaches the WAL's view", async () => {
+    const dir = fresh();
+    const alice = await stalling(dir, `${dir}/first.log`, STRAIGHT, QUIET);
+    expect(await until(async () => delivered(await alice.look()), WAIT)).toBe(true);
+    await alice.stop();
+    const second = `${dir}/second.log`;
+    writeFileSync(second, "");
+    const lower: Chain = { head: 108n, fork: () => 0n };
+    const given = watchOf(lower, second, [advanced(105n, 1n), finalized], { ...QUIET, input: "given" });
+    const again = await nodeOf(await seatOf(ALICE, dir, 0), NO_PEER, { tickMs: QUICK, watch: given });
+    expect(await until(async () => (await again.look()).cursor === 106n, WAIT)).toBe(true);
+    const look = await again.stop();
+    expect(factsOf(look)).toMatchObject({ epoch: 1n, behind: 105n });
+    expect(look.station.host.runtime.view).toBe(110n as never);
   });
 
   test("R-WATCH-STALL a stall is told once, and again only when the call that fails is another", () => {

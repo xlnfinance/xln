@@ -489,4 +489,33 @@ describe("entity/paybook the hub learns a secret the Account in dispute cannot c
     const waiting = tell(over, 100n, ALICE, lock(base(), 105n));
     expect(ledgerBetween(waiting, HUB, BOB).holds).toHaveLength(1);
   });
+
+  const behindOn = (net: Net, peer: EntityId): Net => deliver(net, 100n, HUB, [{ _tag: "j_behind", peer, from: 2n }]);
+  const expiring = (net: Net) => tell(net, 200n, ALICE, { _tag: "expire", peer: HUB, token: GOLD, id: holdId(1n) });
+  const locked = (): Net => tell(forwardAt(base()), 100n, ALICE, lock(base(), 105n));
+
+  test("R-WATCH-STALL a hub forwards no lock to a peer whose events the Host still owes it", () => {
+    const refused = tell(behindOn(forwardAt(base()), BOB), 100n, ALICE, lock(base(), 105n));
+    expect(ledgerBetween(refused, ALICE, HUB).holds).toEqual([]);
+    expect(ledgerBetween(refused, HUB, BOB).holds).toEqual([]);
+    const other = tell(behindOn(forwardAt(base()), CAROL), 100n, ALICE, lock(base(), 105n));
+    expect(ledgerBetween(other, HUB, BOB).holds).toHaveLength(1);
+  });
+
+  test("R-WATCH-STALL an expiry of the lock a hub forwarded to a peer it is behind on is not co-signed", () => {
+    expect(ledgerBetween(expiring(locked()), ALICE, HUB).holds).toEqual([]);
+    const held = expiring(behindOn(locked(), BOB));
+    expect(ledgerBetween(held, ALICE, HUB).holds).toHaveLength(1);
+    const lifted = expiring(deliver(behindOn(locked(), BOB), 100n, HUB, [{ _tag: "j_behind_over", peer: BOB }]));
+    expect(ledgerBetween(lifted, ALICE, HUB).holds).toEqual([]);
+    const unrelated = expiring(behindOn(locked(), CAROL));
+    expect(ledgerBetween(unrelated, ALICE, HUB).holds).toEqual([]);
+  });
+
+  test("R-WATCH-CALLDATA a blind Entity co-signs no expiry of any hold", () => {
+    const held = expiring(blind(locked()));
+    expect(ledgerBetween(held, ALICE, HUB).holds).toHaveLength(1);
+    const lifted = expiring(deliver(blind(locked()), 100n, HUB, [{ _tag: "j_blind_over" }]));
+    expect(ledgerBetween(lifted, ALICE, HUB).holds).toEqual([]);
+  });
 });

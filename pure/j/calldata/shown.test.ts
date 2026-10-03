@@ -86,8 +86,9 @@ describe("j/shown", () => {
       advance(2n, 0n, 1n), started(2n, 1n, []), finalizedOf(op, 2n, 2n, TX), finalizedOf(op, 2n, 3n, TX),
       finalizedOf(op, 2n, 4n, other),
     );
+    // A start of the Entity's own needs no bytes: RIGHT started this one, so only LEFT asks for it.
     expect(calldataWanted(prepared, [LEFT])).toEqual([txOf(2n, 1n), TX, other]);
-    expect(calldataWanted(prepared, [RIGHT])).toEqual([txOf(2n, 1n), TX, other]);
+    expect(calldataWanted(prepared, [RIGHT])).toEqual([TX, other]);
     expect(calldataWanted(prepared, [THIRD])).toEqual([]);
   });
 

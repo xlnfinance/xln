@@ -9,6 +9,7 @@ import type { Rules } from "../account/frame/frame.ts";
 import type { AccountState, Side } from "../account/model.ts";
 import type { SigningContext } from "../account/proof/signing.ts";
 import type { AccountTx, Judge } from "../account/tx.ts";
+import { ledgerOf } from "../account/state.ts";
 import type { PeerFault } from "./model.ts";
 
 export type EntityRules = Rules<AccountTx, AccountState, PeerFault>;
@@ -16,18 +17,39 @@ export type EntityRules = Rules<AccountTx, AccountState, PeerFault>;
 /** The tag a refusal carries when the receiver's signature is out. */
 const FROZEN = "frozen";
 
-/** `self` is the side of the replica that judges; `frozen` is whether its node signs nothing new on this Account. */
-export type Standing = Readonly<{ self: Side; frozen: boolean }>;
+/** The tag a refusal carries when an expiry would give back what the chain may have paid on. */
+const UNRULED = "reveal_unknown";
 
-export const entityRules = (judge: Judge, signing: SigningContext, { self, frozen }: Standing): EntityRules => {
+/**
+ * `self` is the side of the replica that judges; `frozen` is whether its node signs nothing new on this Account;
+ * `unruled` is the hashlocks whose reveal on the chain the Entity cannot rule out (R-WATCH-STALL), and `blind` that it
+ * cannot rule out any (R-WATCH-CALLDATA): an expiry of such a hold is refused, to be tried again when it can.
+ */
+export type Standing = Readonly<{ self: Side; frozen: boolean; unruled: ReadonlySet<string>; blind: boolean }>;
+
+/** An expiry of a hold whose secret may be on the chain unseen. */
+const unknown = (state: AccountState, { unruled, blind }: Standing, tx: AccountTx): boolean => {
+  if (tx._tag !== "expire") return false;
+  const hold = ledgerOf(state, tx.token).holds.find((h) => h.id === tx.id);
+  return hold !== undefined && (blind || unruled.has(hold.hashlock));
+};
+
+export const entityRules = (judge: Judge, signing: SigningContext, standing: Standing): EntityRules => {
   const base = accountRules(judge, signing);
+  const refusal = (state: AccountState, author: Side, tx: AccountTx): PeerFault | undefined => {
+    if (standing.frozen && author !== standing.self) return { _tag: FROZEN };
+    return unknown(state, standing, tx) ? { _tag: UNRULED } : undefined;
+  };
   return {
     epoch: base.epoch,
     firstNonce: base.firstNonce,
-    apply: (state, author, tx) => (frozen && author !== self ? err({ _tag: FROZEN }) : base.apply(state, author, tx)),
+    apply: (state, author, tx) => {
+      const refused = refusal(state, author, tx);
+      return refused === undefined ? base.apply(state, author, tx) : err(refused);
+    },
     name: base.name,
     seal: base.seal,
     tag: (fault) => fault._tag,
-    retryable: (tag) => tag === FROZEN || base.retryable(tag),
+    retryable: (tag) => tag === FROZEN || tag === UNRULED || base.retryable(tag),
   };
 };
