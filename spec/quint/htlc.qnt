@@ -13,7 +13,7 @@
 //   paid_once   what Y was paid, by a frame or by the chain, is at most one unit
 //   route_safe  once the lock on U is closed (claimed by H or expired to P), H paid out at most what it collected
 //
-// SEVEN SWITCHES (the first two the decided fixes of #162/#165, ARGS and HIDE are #167, the rest the reveal registry and the clock, #172):
+// SEVEN SWITCHES (the first two the decided fixes of #162/#165, ARGS and HIDE are #167, the rest the reveal registry and the clock, #173):
 //   SEE       a secret revealed on the chain is a chain fact, heard at depth (D9) like any J event; the hub's paybook learns it as it learns
 //             a received resolve, and claims upstream
 //   DISSOLVE  a hold carried by the proof a finalize settled is dissolved at the epoch move, at both sides, never re-released

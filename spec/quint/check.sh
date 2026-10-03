@@ -142,7 +142,7 @@ if [ "$DISPUTE" = 1 ]; then
   hexpect both paid_once ok; hexpect both route_safe ok
   hexpect noargs paid_once ok; hexpect noargs route_safe violation 10000
   hexpect wrapped paid_once ok; hexpect wrapped route_safe violation 10000
-  # the reveal registry (#172): a direct DeltaTransformer.revealSecret emits no Depository event; the hub is safe only if its watcher reads the transformer's
+  # the reveal registry (#173): a direct DeltaTransformer.revealSecret emits no Depository event; the hub is safe only if its watcher reads the transformer's
   # event (xwatch) or the backstop refuses the upstream expiry and claims by the registry (xback)
   hexpect xrev paid_once ok; hexpect xrev route_safe violation 10000
   hexpect xwatch route_safe ok; hexpect xback route_safe ok
