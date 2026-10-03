@@ -57,6 +57,8 @@ module htlc {
   const PD: int                 // ticks between an event landing and the hub (and the payee) hearing it: depth and poll
   const RSV: int                // the reserve: the upstream lock expires at a view strictly past TU + RSV
   const CHAIN: bool             // the hub's claim on U is a chain claim, counted until the lock's second, TU + SLK
+  const RD: int                 // ticks the read of a finalize's calldata takes beyond hearing the finalize (a provider that fails the trace for a while)
+  const LATE: bool              // the Entity is told the finalize before the read of its calldata lands, and the read after (PR 171 before the watch-wait design)
 
   pure val W = 4                // the dispute window, ticks
   pure val LAG = 1              // a J transaction lands within this many ticks of the ask
@@ -128,6 +130,14 @@ module htlc {
   // claim it owes, and a finalize that became possible has landed within LAG.
   // ---------------------------------------------------------------------------------------------------------
 
+  // The tick from which the hub (or the payee) can be told an event. A finalize waits for the read of its calldata when it is told in order (the watch-wait
+  // design: an entry whose read is pending stays locked through the finalize); LATE tells it at once and the read follows.
+  pure def heardFrom(e: Ev): int = e.t + PD + (if (e.kind == 3 and not(LATE)) RD else 0)
+  // The read of a finalize's calldata that the hub was told of and has not yet read (LATE).
+  pure def lateRead(s: St): bool =
+    LATE and ARGS and not(s.knows) and
+    s.log.indices().exists(i => i < s.seen.get(Hub) and s.log.nth(i).kind == 3 and s.log.nth(i).shown and s.log.nth(i).t + PD + RD <= s.now)
+
   pure def finalizable(s: St): bool = s.disp.on and s.now >= finTime(s.disp)
 
   pure def claimLandable(s: St): bool = s.u == 0 and s.now <= (if (CHAIN) TUX else TU)
@@ -137,7 +147,8 @@ module htlc {
   pure def regClaimable(s: St): bool = BACK and s.u == 0 and regShows(s) and s.revealedAt + PD <= s.now
 
   pure def owed(s: St): bool = or {
-    SIDES.exists(x => s.seen.get(x) < s.log.length() and s.log.nth(s.seen.get(x)).t + PD <= s.now),
+    SIDES.exists(x => s.seen.get(x) < s.log.length() and heardFrom(s.log.nth(s.seen.get(x))) <= s.now),
+    lateRead(s),
     regClaimable(s),
     SIDES.exists(x => s.askS.get(x).on and s.askS.get(x).at + LAG <= s.now),
     s.askR.on and s.askR.at + LAG <= s.now,
@@ -160,7 +171,7 @@ module htlc {
     val i = st.seen.get(s)
     all {
       i < st.log.length(),
-      st.log.nth(i).t + PD <= st.now,
+      heardFrom(st.log.nth(i)) <= st.now,
       val e = st.log.nth(i)
       val w = st.v.get(s)
       val w2 =
@@ -171,7 +182,10 @@ module htlc {
       st' = { ...st,
         seen: st.seen.set(s, i + 1),
         v: st.v.set(s, w2),
-        knows: st.knows or (s == Hub and ((e.kind == 1 and SEE) or (e.kind == 2 and TSEE) or (ARGS and e.shown))),
+        knows: st.knows or (s == Hub and ((e.kind == 1 and SEE) or (e.kind == 2 and TSEE) or (ARGS and e.shown and not(LATE)))),
+        // LATE: the finalize reaches the paybook before its secret, so the entry for the carried hold is dissolved and the inbound lock on U is given up
+        // (R-HOLD-DISSOLVE, frame.ts `finalized`); a secret read afterwards finds no locked entry (`revealed` acts only on locked ones)
+        u: if (LATE and s == Hub and e.kind == 3 and e.carried and DISSOLVE and not(st.knows) and st.u == 0) 2 else st.u,
         askS: if (e.kind == 3) st.askS.set(s, NO_ASK) else st.askS }
     }
   }
@@ -180,6 +194,13 @@ module htlc {
   // The release of the hold by frame: the payee seals it when it is not quiet; the hub commits it when it is not quiet, in the same epoch,
   // with the hold in its view and the deadline not passed (R-CLOCK); committing it teaches the hub the secret.
   // ---------------------------------------------------------------------------------------------------------
+
+  // LATE: the read of the finalize's calldata lands after the finalize was told. If the lock on U is still open the hub learns the secret; if the
+  // finalize already dissolved its entry the secret is ignored.
+  action readLate: bool = all {
+    lateRead(st),
+    st' = { ...st, knows: st.u == 0 }
+  }
 
   action sendRelease: bool = {
     val w = st.v.get(Payee)
@@ -311,7 +332,7 @@ module htlc {
 
   action step: bool = any {
     tick, receive, ack, sendRelease, askReveal, landReveal, landRevealDirect, landFinal, landFinalShown, askClaim, landClaim, expireU,
-    claimByRegistry,
+    claimByRegistry, readLate,
     { nondet s = SIDES.oneOf() any { hear(s), askStart(s), landStart(s) } }
   }
 

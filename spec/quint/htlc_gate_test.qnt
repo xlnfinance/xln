@@ -20,9 +20,11 @@ module hgate {
   const SW_PD: int
   const SW_RSV: int
   const SW_CHAIN: bool
+  const SW_RD: int
+  const SW_LATE: bool
 
   import htlc(SEE = true, DISSOLVE = true, ARGS = true, HIDE = false, HOP = SW_HOP, XREV = SW_XREV, TSEE = SW_TSEE, BACK = SW_BACK,
-              SLK = SW_SLK, PD = SW_PD, RSV = SW_RSV, CHAIN = SW_CHAIN).* from "./htlc"
+              SLK = SW_SLK, PD = SW_PD, RSV = SW_RSV, CHAIN = SW_CHAIN, RD = SW_RD, LATE = SW_LATE).* from "./htlc"
 
   pure def later(t: int, n: int): int = if (t > n) t else n
   action goto(t: int): bool = st' = { ...st, now: later(t, st.now) }
@@ -70,6 +72,22 @@ module hgate {
       .then(check(paid_once and route_safe == PRED))
   }
 
+  // The watch-wait design (PR 171, DESIGN-watch-wait.md, section 2): the payee finalizes with the secret in its arguments on the last tick the contract counts;
+  // the node reads the calldata RD ticks after the finalize is heard. In order (not LATE) the finalize waits for the read and the hub learns the secret with
+  // the advance: safe iff HOP >= SLK + PD + RD + LAG (a height-gated claim; a chain claim HOP >= PD + RD + LAG and HOP + RSV >= SLK + PD + RD). LATE (the finalize told first, the read after) dissolves the hub's entry for the
+  // carried hold at the advance and gives the lock on U up, so the secret that follows is ignored: the hub loses at every hop.
+  run pendingReadTest = {
+    init.then(if (SW_BACK) check(true) else
+      askStartWith(Hub, false).then(landStart(Hub)).then(wait(SW_PD)).then(hear(Hub)).then(hear(Payee))
+      .then(goto(TDX)).then(landFinalShownVia(false))
+      .then(if (not(SW_LATE) and TU + SW_RSV + 1 <= st.now + SW_PD + SW_RD) goto(TU + SW_RSV + 1).then(expireU)
+            else wait(SW_PD + (if (SW_LATE) 0 else SW_RD)).then(hear(Hub)).then(hear(Payee))
+              .then(if (SW_LATE) wait(SW_RD).then(if (lateRead(st)) readLate else check(true)) else check(true))
+              .then(if (st.knows and claimLandable(st)) chase(TU + SW_RSV + 1) else check(true)))
+      .then(if (st.u == 0) goto(TUX + SW_PD + SW_RD + SW_RSV + 2).then(expireU) else check(true))
+      .then(check(paid_once and route_safe == (not(SW_LATE) and (if (SW_CHAIN) SW_HOP >= SW_PD + SW_RD + LAG and SW_HOP + SW_RSV >= SW_SLK + SW_PD + SW_RD else SW_HOP >= SW_SLK + SW_PD + SW_RD + LAG)))))
+  }
+
   // One tick past the second the contract counts: the clause on D is lost to the payee, and the hub is not out of pocket in any variant.
   run revealPastTheSecondTest = {
     init
@@ -111,18 +129,18 @@ module hgate {
   }
 }
 
-module hgate1_htlc_gate_test { import hgate(SW_HOP = 1, SW_XREV = false, SW_TSEE = false, SW_BACK = false, SW_SLK = 2, SW_PD = 0, SW_RSV = 0, SW_CHAIN = false).* from "./htlc_gate_test" }
-module hgate2_htlc_gate_test { import hgate(SW_HOP = 2, SW_XREV = false, SW_TSEE = false, SW_BACK = false, SW_SLK = 2, SW_PD = 0, SW_RSV = 0, SW_CHAIN = false).* from "./htlc_gate_test" }
-module hgate3_htlc_gate_test { import hgate(SW_HOP = 3, SW_XREV = false, SW_TSEE = false, SW_BACK = false, SW_SLK = 2, SW_PD = 0, SW_RSV = 0, SW_CHAIN = false).* from "./htlc_gate_test" }
-module hpoll2_htlc_gate_test { import hgate(SW_HOP = 2, SW_XREV = false, SW_TSEE = false, SW_BACK = false, SW_SLK = 0, SW_PD = 2, SW_RSV = 0, SW_CHAIN = false).* from "./htlc_gate_test" }
-module hpoll3_htlc_gate_test { import hgate(SW_HOP = 3, SW_XREV = false, SW_TSEE = false, SW_BACK = false, SW_SLK = 0, SW_PD = 2, SW_RSV = 0, SW_CHAIN = false).* from "./htlc_gate_test" }
-module hchain0_htlc_gate_test { import hgate(SW_HOP = 2, SW_XREV = false, SW_TSEE = false, SW_BACK = false, SW_SLK = 2, SW_PD = 1, SW_RSV = 0, SW_CHAIN = true).* from "./htlc_gate_test" }
-module hchain1_htlc_gate_test { import hgate(SW_HOP = 2, SW_XREV = false, SW_TSEE = false, SW_BACK = false, SW_SLK = 2, SW_PD = 1, SW_RSV = 1, SW_CHAIN = true).* from "./htlc_gate_test" }
-module hchain2_htlc_gate_test { import hgate(SW_HOP = 1, SW_XREV = false, SW_TSEE = false, SW_BACK = false, SW_SLK = 2, SW_PD = 0, SW_RSV = 2, SW_CHAIN = true).* from "./htlc_gate_test" }
-module hback_htlc_gate_test { import hgate(SW_HOP = 2, SW_XREV = true, SW_TSEE = false, SW_BACK = true, SW_SLK = 1, SW_PD = 2, SW_RSV = 0, SW_CHAIN = false).* from "./htlc_gate_test" }
-module hall_htlc_gate_test { import hgate(SW_HOP = 3, SW_XREV = false, SW_TSEE = false, SW_BACK = false, SW_SLK = 2, SW_PD = 1, SW_RSV = 0, SW_CHAIN = false).* from "./htlc_gate_test" }
-module hstall_htlc_gate_test { import hgate(SW_HOP = 2, SW_XREV = false, SW_TSEE = false, SW_BACK = false, SW_SLK = 0, SW_PD = 4, SW_RSV = 0, SW_CHAIN = false).* from "./htlc_gate_test" }
-module hstall5_htlc_gate_test { import hgate(SW_HOP = 5, SW_XREV = false, SW_TSEE = false, SW_BACK = false, SW_SLK = 0, SW_PD = 4, SW_RSV = 0, SW_CHAIN = false).* from "./htlc_gate_test" }
+module hgate1_htlc_gate_test { import hgate(SW_HOP = 1, SW_XREV = false, SW_TSEE = false, SW_BACK = false, SW_SLK = 2, SW_PD = 0, SW_RSV = 0, SW_CHAIN = false, SW_RD = 0, SW_LATE = false).* from "./htlc_gate_test" }
+module hgate2_htlc_gate_test { import hgate(SW_HOP = 2, SW_XREV = false, SW_TSEE = false, SW_BACK = false, SW_SLK = 2, SW_PD = 0, SW_RSV = 0, SW_CHAIN = false, SW_RD = 0, SW_LATE = false).* from "./htlc_gate_test" }
+module hgate3_htlc_gate_test { import hgate(SW_HOP = 3, SW_XREV = false, SW_TSEE = false, SW_BACK = false, SW_SLK = 2, SW_PD = 0, SW_RSV = 0, SW_CHAIN = false, SW_RD = 0, SW_LATE = false).* from "./htlc_gate_test" }
+module hpoll2_htlc_gate_test { import hgate(SW_HOP = 2, SW_XREV = false, SW_TSEE = false, SW_BACK = false, SW_SLK = 0, SW_PD = 2, SW_RSV = 0, SW_CHAIN = false, SW_RD = 0, SW_LATE = false).* from "./htlc_gate_test" }
+module hpoll3_htlc_gate_test { import hgate(SW_HOP = 3, SW_XREV = false, SW_TSEE = false, SW_BACK = false, SW_SLK = 0, SW_PD = 2, SW_RSV = 0, SW_CHAIN = false, SW_RD = 0, SW_LATE = false).* from "./htlc_gate_test" }
+module hchain0_htlc_gate_test { import hgate(SW_HOP = 2, SW_XREV = false, SW_TSEE = false, SW_BACK = false, SW_SLK = 2, SW_PD = 1, SW_RSV = 0, SW_CHAIN = true, SW_RD = 0, SW_LATE = false).* from "./htlc_gate_test" }
+module hchain1_htlc_gate_test { import hgate(SW_HOP = 2, SW_XREV = false, SW_TSEE = false, SW_BACK = false, SW_SLK = 2, SW_PD = 1, SW_RSV = 1, SW_CHAIN = true, SW_RD = 0, SW_LATE = false).* from "./htlc_gate_test" }
+module hchain2_htlc_gate_test { import hgate(SW_HOP = 1, SW_XREV = false, SW_TSEE = false, SW_BACK = false, SW_SLK = 2, SW_PD = 0, SW_RSV = 2, SW_CHAIN = true, SW_RD = 0, SW_LATE = false).* from "./htlc_gate_test" }
+module hback_htlc_gate_test { import hgate(SW_HOP = 2, SW_XREV = true, SW_TSEE = false, SW_BACK = true, SW_SLK = 1, SW_PD = 2, SW_RSV = 0, SW_CHAIN = false, SW_RD = 0, SW_LATE = false).* from "./htlc_gate_test" }
+module hall_htlc_gate_test { import hgate(SW_HOP = 3, SW_XREV = false, SW_TSEE = false, SW_BACK = false, SW_SLK = 2, SW_PD = 1, SW_RSV = 0, SW_CHAIN = false, SW_RD = 0, SW_LATE = false).* from "./htlc_gate_test" }
+module hstall_htlc_gate_test { import hgate(SW_HOP = 2, SW_XREV = false, SW_TSEE = false, SW_BACK = false, SW_SLK = 0, SW_PD = 4, SW_RSV = 0, SW_CHAIN = false, SW_RD = 0, SW_LATE = false).* from "./htlc_gate_test" }
+module hstall5_htlc_gate_test { import hgate(SW_HOP = 5, SW_XREV = false, SW_TSEE = false, SW_BACK = false, SW_SLK = 0, SW_PD = 4, SW_RSV = 0, SW_CHAIN = false, SW_RD = 0, SW_LATE = false).* from "./htlc_gate_test" }
 
 // The give-up height of PR 171 at c701bcf21 (loop.ts `givenUp`, paybook `lastHeard`): a stalled transaction of an Account is waited on until the view a delivery
 // reaches is past g = TU - lag, and the events held behind it are told then. The gates of the hub's frames count views (head - depth), so depth cancels from
@@ -133,7 +151,15 @@ module hstall5_htlc_gate_test { import hgate(SW_HOP = 5, SW_XREV = false, SW_TSE
 //   hgivec   chain claim (S9b), depth 1, SLK 0: PD = 2, the claim lands at TU+1  HOP 2, RSV 1: lost, SLK < depth
 //   hgivecs  the same with SLK 1 = depth                                          HOP 2, PD 1: safe
 // The delivery at the give-up poll of the code is at to = last + 1 (`to > last`), one tick later than hgive: that is hpoll2 (HOP 2, PD 2), lost.
-module hgive_htlc_gate_test { import hgate(SW_HOP = 2, SW_XREV = false, SW_TSEE = false, SW_BACK = false, SW_SLK = 0, SW_PD = 1, SW_RSV = 0, SW_CHAIN = false).* from "./htlc_gate_test" }
-module hgives_htlc_gate_test { import hgate(SW_HOP = 3, SW_XREV = false, SW_TSEE = false, SW_BACK = false, SW_SLK = 1, SW_PD = 1, SW_RSV = 0, SW_CHAIN = false).* from "./htlc_gate_test" }
-module hgivec_htlc_gate_test { import hgate(SW_HOP = 2, SW_XREV = false, SW_TSEE = false, SW_BACK = false, SW_SLK = 0, SW_PD = 2, SW_RSV = 1, SW_CHAIN = true).* from "./htlc_gate_test" }
-module hgivecs_htlc_gate_test { import hgate(SW_HOP = 2, SW_XREV = false, SW_TSEE = false, SW_BACK = false, SW_SLK = 1, SW_PD = 1, SW_RSV = 1, SW_CHAIN = true).* from "./htlc_gate_test" }
+module hgive_htlc_gate_test { import hgate(SW_HOP = 2, SW_XREV = false, SW_TSEE = false, SW_BACK = false, SW_SLK = 0, SW_PD = 1, SW_RSV = 0, SW_CHAIN = false, SW_RD = 0, SW_LATE = false).* from "./htlc_gate_test" }
+module hgives_htlc_gate_test { import hgate(SW_HOP = 3, SW_XREV = false, SW_TSEE = false, SW_BACK = false, SW_SLK = 1, SW_PD = 1, SW_RSV = 0, SW_CHAIN = false, SW_RD = 0, SW_LATE = false).* from "./htlc_gate_test" }
+module hgivec_htlc_gate_test { import hgate(SW_HOP = 2, SW_XREV = false, SW_TSEE = false, SW_BACK = false, SW_SLK = 0, SW_PD = 2, SW_RSV = 1, SW_CHAIN = true, SW_RD = 0, SW_LATE = false).* from "./htlc_gate_test" }
+module hgivecs_htlc_gate_test { import hgate(SW_HOP = 2, SW_XREV = false, SW_TSEE = false, SW_BACK = false, SW_SLK = 1, SW_PD = 1, SW_RSV = 1, SW_CHAIN = true, SW_RD = 0, SW_LATE = false).* from "./htlc_gate_test" }
+
+// The watch-wait design: the finalize waits for the read of its calldata (hord, hordlate) or is told before it (hlate).
+//   hord      in order, RD 1, PD 1, HOP 3: safe (3 >= 0 + 1 + 1 + 1)
+//   hordlate  in order, RD 1, PD 1, HOP 2: the read costs the hub the lock (2 < 3)
+//   hlate     told before the read, HOP 5: lost, whatever the hop
+module hord_htlc_gate_test { import hgate(SW_HOP = 3, SW_XREV = false, SW_TSEE = false, SW_BACK = false, SW_SLK = 0, SW_PD = 1, SW_RSV = 0, SW_CHAIN = false, SW_RD = 1, SW_LATE = false).* from "./htlc_gate_test" }
+module hordlate_htlc_gate_test { import hgate(SW_HOP = 2, SW_XREV = false, SW_TSEE = false, SW_BACK = false, SW_SLK = 0, SW_PD = 1, SW_RSV = 0, SW_CHAIN = false, SW_RD = 1, SW_LATE = false).* from "./htlc_gate_test" }
+module hlate_htlc_gate_test { import hgate(SW_HOP = 5, SW_XREV = false, SW_TSEE = false, SW_BACK = false, SW_SLK = 0, SW_PD = 1, SW_RSV = 0, SW_CHAIN = false, SW_RD = 1, SW_LATE = true).* from "./htlc_gate_test" }
