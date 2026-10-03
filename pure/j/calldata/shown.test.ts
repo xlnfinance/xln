@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { ok } from "../../kernel/core/result.ts";
 import type { Bytes32 } from "../log.ts";
 import { decodeLogs } from "../log.ts";
-import type { Carried } from "./decode.ts";
+import type { Read } from "./decode.ts";
 import { observe, type Accounts, type Addressed } from "../observe.ts";
 import { calldataWanted, withCalldata, type Prepared } from "../watch.ts";
 import {
@@ -92,7 +92,7 @@ describe("j/shown", () => {
   });
 
   const HASH = must(proofBodyHash(CLAUSED));
-  const opened = (inputs: ReadonlyMap<Bytes32, readonly Carried[]>, hosted = LEFT) =>
+  const opened = (inputs: ReadonlyMap<Bytes32, readonly Read[]>, hosted = LEFT) =>
     must(observe(withCalldata(preparedOf(started(2n, 0n, [], HASH)), inputs).events, [hosted], accounts));
   const START_TX = txOf(2n, 0n);
 
@@ -102,7 +102,7 @@ describe("j/shown", () => {
     expect(told[0]?.event).toMatchObject({ _tag: "j_dispute", bodyHash: HASH, body: CLAUSED });
   });
 
-  test("R-WATCH-CALLDATA a start whose input has no op with the logged hash is told with no body, and unread", () => {
+  test("R-WATCH-CALLDATA a start whose input has no op with the logged hash is told with no body", () => {
     const lying = startInput(RIGHT, [startOp(CLAUSED, { proofbodyHash: hexOf(77n) })]);
     const wrapped = patched(startInput(RIGHT, [startOp(CLAUSED)]), 0, Uint8Array.of(0xca, 0xfe, 0xba, 0xbe));
     [new Map(), new Map([[START_TX, [direct(lying)]]]), new Map([[START_TX, [direct(wrapped)]]])].forEach((inputs) => {

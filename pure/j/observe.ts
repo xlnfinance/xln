@@ -98,6 +98,16 @@ export const hostsAny = (hosted: readonly Bytes32[], e: Bound): boolean => parti
 
 const isBound = (e: ChainEvent): e is Bound => e._tag !== "secret_revealed";
 
+/** The Account an event is about, as one key, or nothing for a revealed secret, which is about none. */
+export const accountOf = (e: ChainEvent): string | undefined => (isBound(e) ? partiesOf(e).join(":") : undefined);
+
+/** The party of an event's Account that is not `self`, or nothing when `self` is no party or the event has none. */
+export const peerOfEvent = (self: Bytes32, e: ChainEvent): Bytes32 | undefined => {
+  if (!isBound(e)) return undefined;
+  const parties = partiesOf(e);
+  return parties.includes(self) ? peerOf(self, parties) : undefined;
+};
+
 /** The distinct readings the events of a delivery need for the hosted Entities, in event order. */
 export const readingsOf = (events: readonly ChainEvent[], hosted: readonly Bytes32[]): readonly Reading[] => {
   const needed = events.filter(isBound).filter((e) => needsReading(e) && hostsAny(hosted, e)).map(readingOf);
@@ -130,6 +140,17 @@ const finalOf = (events: readonly ChainEvent[], e: Moved): Finalized | undefined
   const later = events.filter(isBound).filter((o) => same(o) && marks.includes(o._tag));
   const next = later.toSorted((a, b) => (a.index < b.index ? -1 : 1))[0];
   return next?._tag === "dispute_finalized" ? next : undefined;
+};
+
+/**
+ * Where an event begins for the purposes of holding it back: a finalize begins at the epoch advance it made, whose
+ * dissolve of the Account's holds must never reach the Entity before the secrets the finalize showed (R-HOLD-DISSOLVE).
+ */
+export const beginsAt = (events: readonly ChainEvent[], e: ChainEvent): Readonly<{ block: bigint; index: bigint }> => {
+  const made = e._tag === "dispute_finalized"
+    ? events.filter((o): o is Moved => o._tag === "epoch_advanced" && finalOf(events, o) === e)
+    : [];
+  return made.reduce((first, o) => (o.index < first.index ? o : first), e);
 };
 
 const finalBodyOf = (events: readonly ChainEvent[], e: Moved): Bytes32 | undefined => finalOf(events, e)?.bodyHash;

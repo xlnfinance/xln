@@ -99,6 +99,11 @@ export type Windows = Readonly<{ left: bigint; right: bigint }>;
 export type ChainFacts = Readonly<{
   epoch: bigint; stored: bigint; frames: bigint; windows: Windows | undefined; against: Against | undefined;
   frozen: boolean; cosigned: bigint; held: ReadonlyMap<TokenId, Held>; starting: Starting | undefined;
+  /**
+   * The first block whose events of this Account the Host holds back, behind a transaction it cannot read
+   * (R-WATCH-STALL), while it does: a restart reads again from just before it, so no held event is lost.
+   */
+  behind: bigint | undefined;
 }>;
 
 /**
@@ -158,6 +163,9 @@ export type PeerMessage = Tagged<"peer_message", { from: EntityId; msg: Msg<Acco
  * transaction, and changing no fact. Unread is a notice and not a safe state: the node may have lost a lock's payment.
  * `j_start_unread` is a dispute against this Entity whose opening state the Host could not read the same way: the
  * Entity holds no body to finalize it with, so the notice names the Account and the transaction, and no fact changes.
+ * `j_behind` says the Host holds back the events of this Account from block `from` on, behind a transaction of the
+ * Account it cannot read yet (the earliest `from` stands); `j_behind_over` says it has delivered them. They change no
+ * behavior of the Entity: they are the record a restart reads the cursor back from (R-WATCH-STALL).
  */
 export type JEvent =
   | Tagged<"j_epoch", { peer: EntityId; epoch: bigint; stored: bigint; finalBodyHash?: string }>
@@ -176,7 +184,9 @@ export type JEvent =
   | Tagged<"j_collateral", { peer: EntityId; token: TokenId; collateral: bigint; ondelta: bigint }>
   | Tagged<"j_op_lapsed", { peer: EntityId; serial: bigint }>
   | Tagged<"j_finalize_unread", { peer: EntityId; tx: string }>
-  | Tagged<"j_start_unread", { peer: EntityId; tx: string }>;
+  | Tagged<"j_start_unread", { peer: EntityId; tx: string }>
+  | Tagged<"j_behind", { peer: EntityId; from: bigint }>
+  | Tagged<"j_behind_over", { peer: EntityId }>;
 
 /** What a peer asks the node to co-sign: a withdrawal of collateral as a shortcut (C2R) or as a settlement. */
 export type CosignOp =

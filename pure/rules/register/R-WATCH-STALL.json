@@ -1,0 +1,119 @@
+{
+ "id": "R-WATCH-STALL",
+ "statement": "A transaction the Host cannot read holds back the events of its own Account, and nothing else. A dispute start or finalize whose transaction the node will not give (an input or a trace that fails, null for a transaction it does not know) cannot be told to the Entity yet: the secret in its arguments, or the body of its start, is in those bytes (R-WATCH-CALLDATA). What waits is the events of that Account from the transaction's first event on, in the chain's order (a finalize's first event is the epoch advance it made, so its secrets are told before the holds that advance dissolves, R-HOLD-DISSOLVE; within an Account a later event never reaches the Entity ahead of an earlier one, R-HEIGHT-ORDER). Every other Account's events and every SecretRevealed, which is about no Account, are told at once: a stalled transaction a counterparty picked must not blind the node to the rest of the chain, the counter windows of its other Accounts among them. The held events wait in the Host's carry as the chain logged them and are read again, with the bytes, when the transaction is given or the wait ends. THE RECORD. The Entity is told `j_behind {peer, from}` when an Account begins being held (the first block held) and `j_behind_over {peer}` when it is released, the latter only once the delivery's height reaches the Entity's view; the chain facts keep the first block (`behind`). A restart begins reading at `min(view, min(behind) - 1)`, so the held events are read again; every J event is idempotent. Exposure, owed: the Entity's view moves past the held events while the Account is behind and nothing freezes the Account (the exposure of the old whole-poll stall, narrowed to one Account; backlog: freeze while behind). THE WAIT is counted in chain time. A transaction is tried at most once per head block (a tick at a head already asked reads nothing of it, so a node catching up over many polls of one head spends one try, not one per poll), and the first fault a head gives counts whatever it was: a 503, -32005 or a timeout is the same fault as any other, and none ends the wait by its own count while a forward depends on it. The wait ends, per stalled transaction, by one of two bounds. (a) The Entity has outstanding forwards to the transaction's peer: the wait lasts until the view a delivery reaches is past `lastHeard(peer)`, the least over the Entity's locked paybook entries to that peer of (the inbound hold's deadline - lag) (paybook `lastHeard`). The hub must answer upstream `lag` blocks before the inbound deadline, and the upstream's view is at most `lag` ahead of the node's (R-HTLC-CLOCK), so a secret heard at a view up to deadline - lag can still be passed up in time and a later one cannot. (b) No forward depends on it: FEW_TRIES (3) tries, one per head block, then told unread; a pruned or unknown transaction costs a few blocks, not a stall. The bound (a) is later than the onward form, onward deadline - (lag + depth + 1) = inbound deadline - hop - lag - depth - 1 with hop = reserve + lag (paybook `hopOf`), by hop + depth + 1 blocks: it never gives up while the hub could still claim, and what the extra wait costs is that one Account's later events arrive that much later; the coordinator's form (relay 10-02 23:50) gives up that much earlier, and swapping it in is a change of `last` in `lastHeard` alone, if the Account's delay is judged dearer than the claim. No `hold` bound from the hop and the deployment's slack stays: the node setting WatchConfig.slack and the refusal hold_below_zero are gone, since the wait is no longer measured from the age of the transaction but from what the Entity has outstanding.",
+ "source": "coordinator relay 10-02 23:50 (171 redesign); Review A B8 on #171; builder 10-03",
+ "layers": {
+  "arrival": "n/a: the Arrival page has no chain events",
+  "quint": "n/a: the Quint models have the chain's cells; which secrets the watcher reads is a Host rule",
+  "contract": "n/a: the contract's applyPayment decides what the arguments pay; the e2e dispute-clause step reads the watcher against it",
+  "rig": "n/a: an off-chain Host rule",
+  "ts": "hold"
+ },
+ "killers": [
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-WATCH-STALL the earliest block an Account was held from stands until it is over"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-WATCH-STALL the Entity keeps the record per Account, through other news, until told over"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-WATCH-STALL a hub waits on the peer it forwarded to until the inbound deadline less the lag"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-WATCH-STALL a tx the provider refuses holds its Account only; the Entity is told it is behind"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-WATCH-STALL a tx the provider keeps refusing is waited on FEW_TRIES blocks, then told unread"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-WATCH-STALL a restart begins before the block its Account was held back from"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-WATCH-STALL a stalled tx holds back its own Account only: secrets and other Accounts go on"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-WATCH-STALL the held events follow the tx once it is given: secrets first"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-WATCH-STALL an input the node cannot give holds its Account from the finalize's advance on"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-WATCH-STALL a tx the node fails is tried once per head block, not once per poll"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-WATCH-STALL with no lock on it a tx the node fails gets FEW_TRIES blocks, then is unread"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-WATCH-STALL a tx the node fails with a forward on it is waited on until lastHeard passes"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-WATCH-STALL the Entity is told an Account is behind once, and over only from the view it is at"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-WATCH-STALL a restart begins before the earliest block the Entity was told is held back"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-WATCH-STALL a finalize the Host cannot read holds its Account from the advance it made, no other"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-WATCH-STALL a start the Host cannot read holds its Account from the start; earlier events go on"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-WATCH-STALL with nothing stalled everything is told; a tx no event names holds nothing"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-WATCH-STALL a finalize begins at the advance it made; an earlier advance is not its own"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-WATCH-STALL what the loop waits on the Entity for: the last heard of each peer, and who is behind"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-WATCH-STALL a stall is told once, and again only when the call that fails is another"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-WATCH-STALL a trace asked at a head and refused is not asked again at that head"
+  }
+ ]
+}

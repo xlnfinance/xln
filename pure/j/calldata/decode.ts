@@ -37,13 +37,17 @@ const MOST_FINALIZATIONS = 1;
 const MOST_STARTS = 8;
 const MOST_ARGUMENT_BYTES = 64 * 1024;
 const MOST_CLAUSES = 32;
-/** Tokens, hence deltas, hence the allowances of a clause: the contract takes at most as many as deltas. */
+/**
+ * Tokens, hence deltas, hence the allowances of a clause: a finalize takes at most as many as deltas (Account.sol
+ * 1206-1215); a start is not held to that, so this bound is the reader's own.
+ */
 const MOST_TOKENS = 128;
 const MOST_BODY_BYTES = 176 * 1024;
 /**
- * The most bytes of an encoded batch, and of the call data of a tower's counter-dispute (Depository.sol 354, 475): more
- * is one the Depository reverts. What follows the ABI's own components in an input is no concern of the contract's, and
- * is never a reason not to read the call: a call padded with zeros is read as the contract reads it.
+ * The most bytes of an encoded batch, and of the call data of a tower's counter-dispute as a whole (Depository.sol 354,
+ * 475): more is one the Depository reverts. What follows the ABI's own components in a `processBatch` input is no
+ * concern of the contract's, and is never a reason not to read the call: a call padded with zeros is read as the
+ * contract reads it. A tower's call is capped on everything it carries, padding included.
  */
 const MOST_BATCH_BYTES = 256 * 1024;
 /** The scan of a wrapper's input is bounded (its step budget, one step an offset): a longer input is not scanned. */
@@ -155,19 +159,25 @@ export type Carried = Readonly<{ data: Uint8Array; route: Route }>;
 /** The calls of the Depository the watcher reads: a batch (`processBatch`) and a tower's counter-dispute. */
 type Call = Readonly<{ kind: "batch" | "tower"; args: Uint8Array; route: Route }>;
 
+/** Where a call of the Depository begins in an input: its selector, and which of the two it is. */
+type Hit = Readonly<{ kind: Call["kind"]; at: number }>;
+
 /**
- * The most distinct ops of a wrapper's input that are read: no honest wrapper carries more, and each op is bounded
- * work. An input with more is not read (told as unread, loudly), so a flood of look-alike calls can neither make the
- * node decode without end nor hide the op the log names behind them silently. A direct call has no scan, so no flood.
+ * The most distinct ops of a wrapper's input that are read, and the most selectors it may show: no honest wrapper
+ * carries more of either, and each is bounded work. An input with more is not read (told as unread, loudly), so a flood
+ * of look-alike calls can neither make the node decode without end nor hide the op the log names behind them silently.
+ * A direct call has no scan, so no flood.
  */
 const MOST_OPS = 64;
 const SELECTOR_BYTES = 4;
 
 const KINDS = [{ kind: "batch", selector: PROCESS_BATCH }, { kind: "tower", selector: TOWER_COUNTER }] as const;
 
-const callAt = (input: Uint8Array, at: number, route: Route): readonly Call[] =>
-  KINDS.filter(({ selector }) => selector.every((b, i) => input[at + i] === b))
-    .map(({ kind }) => ({ kind, args: input.subarray(at + SELECTOR_BYTES), route }));
+const hitsAt = (input: Uint8Array, at: number): readonly Hit[] =>
+  KINDS.filter(({ selector }) => selector.every((b, i) => input[at + i] === b)).map(({ kind }) => ({ kind, at }));
+
+const callOf = (input: Uint8Array, route: Route) => ({ kind, at }: Hit): Call =>
+  ({ kind, args: input.subarray(at + SELECTOR_BYTES), route });
 
 /**
  * The offsets of an input that can begin a call, by their first byte alone: the scan of a megabyte slices and
@@ -186,19 +196,27 @@ const candidates = (input: Uint8Array): readonly number[] =>
  * ABI wrapper places one on a word, a packed one does not), within the scan's budget: a longer input has none.
  */
 const scan = ({ data, route }: Carried): readonly Call[] => {
-  if (route === "direct") return callAt(data, 0, route);
-  return data.length > MOST_SCAN_BYTES ? [] : candidates(data).flatMap((at) => callAt(data, at, route));
+  if (route === "direct") return hitsAt(data, 0).map(callOf(data, route));
+  if (data.length > MOST_SCAN_BYTES) return [];
+  const hits = candidates(data).flatMap((at) => hitsAt(data, at));
+  return hits.length > MOST_OPS ? [] : hits.map(callOf(data, route));
 };
 
-/** What the scan of an input found, kept for the input's life: a poll reads each transaction's bytes once, however many logs name it. */
-const scanned = new WeakMap<Carried, readonly Call[]>();
+/**
+ * The bytes of a transaction, the calls the scan found in them and the finalizes those calls carry. The scan and the
+ * decode are the costly part, so the Host makes a `Read` once per transaction and keeps it for as long as the
+ * transaction is in its range, however many polls and logs name it (R-WATCH-CALLDATA).
+ */
+export type Read = Readonly<{ carried: Carried; calls: readonly Call[]; finalizes: readonly Finalize[] }>;
 
-const callsIn = (carried: Carried): readonly Call[] => {
-  const known = scanned.get(carried);
-  if (known !== undefined) return known;
+const finalizesOf = (calls: readonly Call[]): readonly Finalize[] =>
+  distinct(calls.flatMap((call) =>
+    (call.kind === "batch" ? batchFinalizes(call.args) : towerFinalizes(call.args, call.route))))
+    .flatMap((op) => op.read() ?? []);
+
+export const readOf = (carried: Carried): Read => {
   const calls = scan(carried);
-  scanned.set(carried, calls);
-  return calls;
+  return { carried, calls, finalizes: finalizesOf(calls) };
 };
 
 /** A finalize or a start op in an input, and where it lies: one op is read once however many offsets reach it. */
@@ -239,17 +257,14 @@ const towerFinalizes = (args: Uint8Array, route: Route): readonly Placed<Finaliz
  * the contract accepts (it would revert) and none for an input with more distinct ops than `MOST_OPS`: a transaction
  * that carried a `DisputeFinalized` some other way is told as unread.
  */
-export const finalizesIn = (carried: Carried): readonly Finalize[] =>
-  distinct(callsIn(carried).flatMap((call) =>
-    (call.kind === "batch" ? batchFinalizes(call.args) : towerFinalizes(call.args, call.route))))
-    .flatMap((op) => op.read() ?? []);
+export const finalizesIn = ({ finalizes }: Read): readonly Finalize[] => finalizes;
 
 /**
  * The secrets a finalize showed, from the input of the transaction that carried it: the ops whose evidence hash is
  * the logged one, and none (`undefined`) when no op of the input is. Ops with one hash carry the same blobs.
  */
-export const finalizedSecrets = (carried: Carried, evidence: Bytes32): readonly Bytes32[] | undefined => {
-  const mine = finalizesIn(carried).filter((f) => f.evidence === evidence);
+export const finalizedSecrets = (read: Read, evidence: Bytes32): readonly Bytes32[] | undefined => {
+  const mine = finalizesIn(read).filter((f) => f.evidence === evidence);
   return mine.length === 0
     ? undefined
     : unique(mine.flatMap((f) => [...secretsIn(f.starterArguments), ...secretsIn(f.otherArguments)]));
@@ -325,8 +340,8 @@ const bodyIn = (buf: Uint8Array, body: AbiTuple): ProofBody | undefined => {
  * no op of it names the hash with a body that makes it. The Entity may finalize with such a body without having held
  * the state, because the hash is what the chain compares.
  */
-export const startedBody = (carried: Carried, bodyHash: Bytes32): ProofBody | undefined => {
-  const starts = distinct(callsIn(carried).flatMap((call) =>
+export const startedBody = ({ calls }: Read, bodyHash: Bytes32): ProofBody | undefined => {
+  const starts = distinct(calls.flatMap((call) =>
     (call.kind === "batch" ? startsOf(call.args, bodyHash) : [])));
   return starts.flatMap((start) => start.read() ?? []).find((body) => {
     const hash = proofBodyHash(body);

@@ -135,26 +135,27 @@ module hscn {
       .then(check(st.revealedAt == 0 and st.paidChain == 1 and paid_once and route_safe == SW_ARGS))
   }
 
-  // #167. The payee finalizes with the secret in its own arguments, from the end of the window and before TD: the clause is paid at once, with
+  // #167. The payee finalizes with the secret in its own arguments, as the non-starter (the hub started), at once and before TD: the clause is paid at once, with
   // no SecretRevealed on the chain. The hub learns it from the finalize's calldata (ARGS) before the epoch advance dissolves the hold, or never.
   run argsInFinalizeTest = {
     init
-      .then(askStartWith(Payee, false)).then(landStart(Payee)).then(hear(Hub)).then(hear(Payee))
+      .then(askStartWith(Hub, false)).then(landStart(Hub)).then(hear(Hub)).then(hear(Payee))
       .then(check(not(st.knows)))
-      .then(jump(st.disp.timeout)).then(landFinalShownVia(false)).then(hear(Hub)).then(hear(Payee))
+      .then(landFinalShownVia(false)).then(hear(Hub)).then(hear(Payee))
       .then(check(st.now < TD and st.paidChain == 1 and st.revealedAt == 0 and st.v.get(Hub).epoch == 2 and st.knows == SW_ARGS))
       .then(if (SW_ARGS) askClaim.then(landClaim) else check(true))
       .then(closeU)
       .then(check(paid_once and route_safe == SW_ARGS))
   }
 
-  // #167 as built. The payee finalizes with the secret in its fresh arguments but relays the signed batch through a contract: the watcher finds
+  // #167 as built. The payee finalizes with the secret in its fresh arguments but relays the signed batch through a contract, or calls the tower
+  // entry point (watchtowerCounterDispute) directly: the watcher finds
   // no finalize op in the input, tells `finalize_unread` and no secret. The chain pays Y before TD, the hub cannot claim, the lock on U expires:
   // the hub is out one unit under every switch (the notice is all the code does; it is told, it is not made whole).
   run argsInWrappedFinalizeTest = {
     init.then(if (not(SW_HIDE)) check(true) else
-      askStartWith(Payee, false).then(landStart(Payee)).then(hear(Hub)).then(hear(Payee))
-        .then(jump(st.disp.timeout)).then(landFinalShownVia(true)).then(hear(Hub)).then(hear(Payee))
+      askStartWith(Hub, false).then(landStart(Hub)).then(hear(Hub)).then(hear(Payee))
+        .then(landFinalShownVia(true)).then(hear(Hub)).then(hear(Payee))
         .then(check(st.paidChain == 1 and st.revealedAt == 0 and not(st.knows)))
         .then(closeU)
         .then(check(paid_once and not(route_safe))))

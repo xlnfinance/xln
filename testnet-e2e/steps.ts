@@ -15,7 +15,7 @@ import type { SigningContext } from "../pure/account/proof/signing.ts";
 import { proofBodyHash } from "../pure/chain/proof/proof.ts";
 import { accountMessageHash } from "../pure/chain/proof/payload.ts";
 import { keccakHex } from "../pure/kernel/encoding/bytes.ts";
-import { finalizedSecrets, secretsIn } from "../pure/j/calldata/decode.ts";
+import { finalizedSecrets, readOf, secretsIn } from "../pure/j/calldata/decode.ts";
 import { address, bytes32 } from "../pure/j/log.ts";
 import { watchPort } from "../pure/host/shell/evm/watch.ts";
 import { httpRpc } from "../pure/host/shell/node/rpc.ts";
@@ -721,8 +721,9 @@ const rebase: Step<World> = {
     const evidence = must(bytes32(String(finalize.args.finalizationEvidenceHash)), "evidence hash");
     const transformer = must(address(chain.manifest.contracts.deltaTransformer.address.toLowerCase()), "transformer address");
     const traced = await watchPort(httpRpc(chain.rpc), { depository: depositoryAddress, transformer }).trace(must(bytes32(finalize.transactionHash), "finalize transaction"));
-    if (!traced.ok || traced.value === undefined) throw new Error(`the node gave no call trace of the finalize: ${traced.ok ? "no call trace on this node" : traced.error.reason}`);
-    if (!traced.value.some((input) => finalizedSecrets(input, evidence) !== undefined)) throw new Error(`no call of the finalize's trace carries the op whose evidence hash the chain logged (${traced.value.length} calls to the Depository)`);
+    if (!traced.ok || traced.value._tag !== "calls") throw new Error(`the node gave no call trace of the finalize: ${traced.ok ? traced.value._tag : traced.error.reason}`);
+    const calls = traced.value.calls;
+    if (!calls.some((input) => finalizedSecrets(readOf(input), evidence) !== undefined)) throw new Error(`no call of the finalize's trace carries the op whose evidence hash the chain logged (${calls.length} calls to the Depository)`);
     // R-LEDGER-REBASE: each Runtime's ledger is the chain's now: no collateral, no ondelta, offdelta counted from zero, and no open clause.
     const pay = PENDING_PAY * unit(chain);
     const ledgers = [a, x].map((id) => ({ id, replica: net.account(id, id === a ? x : a) }));
@@ -790,7 +791,7 @@ const rebase: Step<World> = {
       checks: [
         `each node's own J loop (pure/host/shell/watch, the watcher core pure/j/watch.ts: blocks and logs by number, readings by block hash) read the Depository's logs at depth 1 up to height ${net.view()} and told its Entity ${names.length} J events, in the WAL before the height: ${names.join(", ")}`,
         `R-WATCH-CALLDATA: the deployed DeltaTransformer (decodeTransformerArgumentListStrict, then decodeArgumentsStrict on each element) reads a dispute's argument blob as abi.encode(bytes[]) with one Arguments per clause, and pure/j/calldata/decode.ts reads the same secret from the same bytes (${secret.slice(0, 10)}...)`,
-        `R-WATCH-CALLDATA: each node's loop fetched the finalize's transaction (eth_getTransactionByHash) and found in its processBatch input the op whose evidence hash the Depository logged, so no node was told the finalize was unread; the node's call trace (debug_traceTransaction, callTracer) of the same transaction, read by the port the nodes use, lists ${traced.value.length} call to the Depository, and the op is in it by the same hash; the arguments carried no secret (the Host's own finalize sends none)`,
+        `R-WATCH-CALLDATA: each node's loop fetched the finalize's transaction (eth_getTransactionByHash) and found in its processBatch input the op whose evidence hash the Depository logged, so no node was told the finalize was unread; the node's call trace (debug_traceTransaction, callTracer) of the same transaction, read by the port the nodes use, lists ${calls.length} call to the Depository, and the op is in it by the same hash; the arguments carried no secret (the Host's own finalize sends none)`,
         `both Runtimes hold chain facts epoch ${onChain.epoch}, stored nonce ${onChain.nonce}, no dispute open, the frames of the new epoch counted, for alice-hubX: the same as the chain`,
         `R-LEDGER-REBASE: both ledgers read collateral ${held.collateral}, ondelta ${held.ondelta} (the chain's), offdelta restarted from zero (it was ${before} before the move), no open clause, no frame pending, one head, and the peer's signature kept is over a head of the new epoch only`,
         `the payment of ${PENDING_PAY} alice had pending when the chain finalized (hubX never committed it: the link lost it) ${resealed ? "was refused by hubX as another epoch's and sealed anew: it committed in epoch 1 on both sides" : "was refused back to alice with a notice (both ledgers at offdelta zero)"}`,

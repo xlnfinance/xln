@@ -157,14 +157,23 @@ const selection = selectionOf(args);
 const SLOW_PARTS: readonly Part[] = ["forge", "contracts"];
 const inChildren = selection.only === undefined && !selection.matrixOnly && !args.includes("--serial");
 
-type Child = Readonly<{ part: Part; finished: Promise<readonly [string, string, number]> }>;
+type Child = Readonly<{ part: Part; pid: number; finished: Promise<readonly [string, string, number]> }>;
 
+// A child is its own process group (detached): the part it runs starts processes of its own (a test run per file, the Foundry suite), and
+// ending this command before the part is done must end all of them, not leave minutes of work running with nobody to read it (a query
+// mode such as --who, or a failed argument check, leaves this process while the children run: the processes added up and slowed every test
+// of the checkout, and a test run that waited for them did not end).
 const startChild = (part: Part): Child => {
-  const child = Bun.spawn([process.execPath, `${here}/check.ts`, `--${part}-only`], { cwd: process.cwd(), env: process.env, stdout: "pipe", stderr: "pipe" });
-  return { part, finished: Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited]) };
+  const child = Bun.spawn([process.execPath, `${here}/check.ts`, `--${part}-only`], { cwd: process.cwd(), env: process.env, stdout: "pipe", stderr: "pipe", detached: true });
+  return { part, pid: child.pid, finished: Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited]) };
 };
 
 const children: readonly Child[] = inChildren ? SLOW_PARTS.map(startChild) : [];
+
+// Whatever way this process ends, a child that is still running ends with it, with every process of its group; a group that has ended is no error.
+process.on("exit", () => {
+  children.forEach(({ pid }) => Bun.spawnSync(["kill", "-KILL", "--", `-${pid}`], { stdout: "ignore", stderr: "ignore" }));
+});
 
 const childPasses = async (part: Part): Promise<boolean> => {
   const child = children.find((each) => each.part === part);

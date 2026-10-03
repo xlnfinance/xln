@@ -6,7 +6,7 @@ import { finalizedSecrets, finalizesIn, secretsIn, startedBody, startedSecrets }
 import { proofBodyHash } from "../../chain/proof/proof.ts";
 import {
   argumentListOf, argumentsOf, argumentTupleOf, CLAUSED, direct, entityOf, evidenceOf, finalizeInput, finalizeOp, hexOf,
-  inWrapper, logOf, multicalled, must, patched, relayed, startInput, startOp, towerInput,
+  DEPOSITORY_ABI, inWrapper, logOf, multicalled, must, patched, relayed, startInput, startOp, towerInput,
 } from "../fixtures.ts";
 
 const LEFT = entityOf(0x11n);
@@ -132,6 +132,31 @@ describe("j/calldata", () => {
     expect(finalizesIn(direct(other(64 * 1024 + 1)))).toEqual([]);
   });
 
+  test("R-WATCH-CALLDATA the caps of 256 KiB hold at exactly the cap and not a byte past it", () => {
+    const CAP = 256 * 1024;
+    const hex = (bytes: number) => `0x${"00".repeat(bytes)}`;
+    const batchSize = (input: Uint8Array) => {
+      const batch = DEPOSITORY_ABI.decodeFunctionData("processBatch", bytesToHex(input))[1] as string;
+      return batch.length / 2 - 1;
+    };
+    /** The input whose encoded batch is exactly `size` bytes: the signature fills what the op leaves (whole words). */
+    const sized = (size: number, made: (sig: string) => Uint8Array) => made(hex(size - batchSize(made(hex(0)))));
+    const finalizing = (size: number) => sized(size, (sig) => inputOf([finalizeOp({ sig })]));
+    const starting = (size: number) => sized(size, (sig) => startInput(RIGHT, [startOp(CLAUSED, { sig })]));
+    expect(batchSize(finalizing(CAP))).toBe(CAP);
+    expect(finalizesIn(direct(finalizing(CAP))).length).toBe(1);
+    expect(finalizesIn(direct(finalizing(CAP + 32)))).toEqual([]);
+    expect(batchSize(starting(CAP))).toBe(CAP);
+    expect(startedBody(direct(starting(CAP)), hashOf(CLAUSED))).toStrictEqual(CLAUSED);
+    expect(startedBody(direct(starting(CAP + 32)), hashOf(CLAUSED))).toBeUndefined();
+    const op = finalizeOp({ otherArguments: argumentsOf([SECRET_A]), sig: "0x" });
+    const tower = towerInput(LEFT, op);
+    const padded = (length: number) => Uint8Array.from({ length }, (_, i) => tower[i] ?? 0);
+    expect(finalizesIn(direct(padded(CAP))).length).toBe(1);
+    expect(finalizesIn(direct(padded(CAP + 1)))).toEqual([]);
+    expect(finalizesIn(direct(padded(CAP - 3))).length).toBe(1);
+  });
+
   test("R-WATCH-CALLDATA a tower's counter-dispute call finalizes with an empty signature in its evidence", () => {
     const op = finalizeOp({ otherArguments: argumentsOf([SECRET_A]), sig: "0x" });
     const signed = finalizeOp({ otherArguments: argumentsOf([SECRET_A]), sig: `0x${"cd".repeat(65)}` });
@@ -219,6 +244,18 @@ describe("j/calldata", () => {
       expect(finalizesIn(direct(after(n))).map((f) => f.evidence)).toEqual([evidenceOf(real)]);
     });
     expect(finalizedSecrets(inWrapper(after(1000)), evidenceOf(real))).toBeUndefined();
+  });
+
+  test("R-WATCH-CALLDATA a megabyte of selectors costs one bounded scan and reads as nothing, never half", () => {
+    const real = finalizeOp({ otherArguments: argumentsOf([SECRET_A]) });
+    const selector = inputOf([real]).subarray(0, 4);
+    const flood = Uint8Array.from({ length: 1024 * 1024 }, (_, i) => selector[i % 4] ?? 0);
+    const begun = performance.now();
+    const read = inWrapper(flood);
+    expect(performance.now() - begun).toBeLessThan(1000);
+    expect(read.calls).toEqual([]);
+    expect(finalizesIn(read)).toEqual([]);
+    expect(finalizedSecrets(read, evidenceOf(real))).toBeUndefined();
   });
 
   test("R-WATCH-CALLDATA a tower call a wrapper carries is read though its input runs on past 256 KiB", () => {

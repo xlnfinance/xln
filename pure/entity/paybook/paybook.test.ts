@@ -7,10 +7,11 @@ import { holdId, type Hold } from "../../account/model.ts";
 import { MAX_ROUTE_HOPS } from "../../account/tx.ts";
 import { ledgerOf } from "../../account/state.ts";
 import { jHeight } from "../../account/clause/clock.ts";
-import { hopOf, learned } from "./paybook.ts";
+import { hopOf, lastHeard, learned, waitsOf } from "./paybook.ts";
 import { keccakHex } from "../../kernel/encoding/bytes.ts";
 import { unwrapOr } from "../../kernel/core/result.ts";
 import { anchor, credit, entityOf, GOLD, judge, open, OPENED_WITH, TEST_SIG } from "../fixtures.ts";
+import { freshChain } from "../chain.ts";
 import { entityFrame } from "../frame.ts";
 import {
   emptyEntity, sideOf, type Command, type Entry, type EntityId, type EntityInput, type EntityState, type Notice,
@@ -103,6 +104,34 @@ describe("entity/paybook the paybook forwards a payment (R-HTLC-FORWARD)", () =>
     expect(next).toMatchObject({ amount: AMOUNT, hashlock: HASHLOCK, deadline: heightOf(105n - hopOf(judge.clock)) });
     expect(ledgerBetween(waiting, ALICE, HUB).holds[0]?.deadline).toEqual(heightOf(105n));
     expect(stateOf(waiting, HUB).paybook.get(HASHLOCK)?._tag).toBe("locked");
+  });
+
+  test("R-WATCH-STALL a hub waits on the peer it forwarded to until the inbound deadline less the lag", () => {
+    const { lag } = judge.clock;
+    const waiting = tell(forwardAt(base()), 100n, ALICE, lock(base(), 105n));
+    expect(lastHeard(stateOf(waiting, HUB), judge.clock)).toEqual(new Map([[BOB, 105n - lag]]));
+    expect(lastHeard(stateOf(forwardAt(base()), HUB), judge.clock)).toEqual(new Map());
+    expect(lastHeard(stateOf(base(), HUB), judge.clock)).toEqual(new Map());
+    const second = (net: Net): Net =>
+      tell(net, 100n, HUB, { _tag: "forward", hashlock: SECOND_HASHLOCK, from: ALICE, to: BOB });
+    const sooner = tell(forwardAt(base()), 100n, ALICE, lock(base(), 105n));
+    const both = tell(second(sooner), 100n, ALICE, lock(base(), 110n, 7n, SECOND_HASHLOCK));
+    expect(stateOf(both, HUB).paybook.get(SECOND_HASHLOCK)?._tag).toBe("locked");
+    expect(lastHeard(stateOf(both, HUB), judge.clock)).toEqual(new Map([[BOB, 105n - lag]]));
+    const later = tell(forwardAt(base()), 100n, ALICE, lock(base(), 110n));
+    const either = tell(second(later), 100n, ALICE, lock(base(), 105n, 7n, SECOND_HASHLOCK));
+    expect(stateOf(either, HUB).paybook.get(SECOND_HASHLOCK)?._tag).toBe("locked");
+    expect(lastHeard(stateOf(either, HUB), judge.clock)).toEqual(new Map([[BOB, 105n - lag]]));
+  });
+
+  test("R-WATCH-STALL what the loop waits on the Entity for: the last heard of each peer, and who is behind", () => {
+    const waiting = stateOf(tell(forwardAt(base()), 100n, ALICE, lock(base(), 105n)), HUB);
+    const behind = { ...(waiting.chain.get(ALICE) ?? freshChain), behind: 9n };
+    const held = { ...waiting, chain: new Map([[ALICE, behind]]) };
+    expect(waitsOf(held, judge.clock)).toEqual({
+      lastHeard: new Map([[BOB, 105n - judge.clock.lag]]), behind: new Set([ALICE]),
+    });
+    expect(waitsOf(waiting, judge.clock).behind).toEqual(new Set());
   });
 
   test("R-HTLC-FORWARD a payee asked for more than the lock holds gives it up and the hub gives up Alice's", () => {

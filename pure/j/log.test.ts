@@ -138,7 +138,7 @@ describe("j/log", () => {
 
   test("R-REVEAL-DIRECT the transformer's own reveal, by anyone, is a shown secret with no revealer", () => {
     const log = transformerLogOf(hexOf(7n), hexOf(8n), 5n, 1n);
-    expect(log.topics[0]).toBe(topicOf("SecretRevealed(bytes32,bytes32)"));
+    expect(String(log.topics[0])).toBe(topicOf("SecretRevealed(bytes32,bytes32)"));
     expect(decodeLog(DEPLOYED, log)).toEqual(ok({
       _tag: "some",
       value: {

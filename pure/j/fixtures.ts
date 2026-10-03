@@ -8,7 +8,7 @@ import { DeltaTransformer__factory } from "../../contracts/typechain-types/facto
 import { Depository__factory } from "../../contracts/typechain-types/factories/Depository.sol/Depository__factory.ts";
 import { unwrapOr, type Result } from "../kernel/core/result.ts";
 import { emptyBatch, encodeBatch, type FinalDisputeProof, type InitialDisputeProof } from "../chain/batch/batch.ts";
-import type { Carried } from "./calldata/decode.ts";
+import { readOf, type Read } from "./calldata/decode.ts";
 import { finalizationEvidenceHash } from "../chain/proof/dispute.ts";
 import { proofBodyHash, type ProofBody } from "../chain/proof/proof.ts";
 import { bytesToHex, hexToBytes } from "../kernel/encoding/bytes.ts";
@@ -274,10 +274,10 @@ export const finalizeInput = (sender: Bytes32, ops: readonly FinalDisputeProof[]
 };
 
 /** An input as the transaction's own, to the Depository: its call is read exactly. */
-export const direct = (data: Uint8Array): Carried => ({ data, route: "direct" });
+export const direct = (data: Uint8Array): Read => readOf({ data, route: "direct" });
 
 /** An input of a transaction to another contract: a call in it is found by a scan. */
-export const inWrapper = (data: Uint8Array): Carried => ({ data, route: "wrapper" });
+export const inWrapper = (data: Uint8Array): Read => readOf({ data, route: "wrapper" });
 
 const RELAY_ABI = new Interface(["function execute(address target, bytes data)", "function multicall(bytes[] calls)"]);
 
