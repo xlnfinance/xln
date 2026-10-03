@@ -13,7 +13,7 @@
 //   paid_once   what Y was paid, by a frame or by the chain, is at most one unit
 //   route_safe  once the lock on U is closed (claimed by H or expired to P), H paid out at most what it collected
 //
-// FOUR SWITCHES (the first two the decided fixes of #162/#165, the other two #167):
+// SEVEN SWITCHES (the first two the decided fixes of #162/#165, ARGS and HIDE are #167, the rest the reveal registry and the clock, #173):
 //   SEE       a secret revealed on the chain is a chain fact, heard at depth (D9) like any J event; the hub's paybook learns it as it learns
 //             a received resolve, and claims upstream
 //   DISSOLVE  a hold carried by the proof a finalize settled is dissolved at the epoch move, at both sides, never re-released
@@ -23,6 +23,16 @@
 //             Depository.watchtowerCounterDispute directly (a second selector; at or after T it finalizes with the caller's own otherArguments).
 //             The watcher decodes the processBatch selector only, finds no finalize op, and tells finalize_unread, no secret. A finalize
 //             before TD pays the clause, the hub cannot claim: the hub is out one unit
+//   XREV      the payee reveals the secret by calling DeltaTransformer.revealSecret itself (public, unauthenticated: DeltaTransformer.sol 404-415).
+//             It sets the registry the clause is paid from (applyPayment, hashToTimestamp) and emits the transformer's own SecretRevealed,
+//             not the Depository's: a node that watches Depository logs only (host/shell/evm/watch.ts filters `address === depository`) hears nothing
+//   TSEE      the hub's watcher also reads the transformer's SecretRevealed, at depth like any J event (D9)
+//   BACK      the backstop: the hub co-signs the upstream lock's expiry only after the registry, read at depth, shows no reveal by the lock's
+//             timestamp deadline; when it does, the hub claims on U by the registry (the contract pays the clause from it)
+//   SLK       the contract counts time in seconds, the hub's gates count J heights; the signed second of a deadline is a line through an anchor plus
+//             a slack (R-DEADLINE-TIMESTAMP), so a reveal up to SLK ticks after the height deadline still pays. PD: the hub hears an event this
+//             many ticks after it landed (depth plus poll). RSV: the reserve an expiry waits for after the deadline. CHAIN: the hub's claim on U is
+//             a chain claim, which the contract accepts until the lock's second (TU + SLK), and not a frame the height gate refuses after TU
 //   (ARGS is also only as good as the decode: the chain reads a finalize's argument blob as bytes[], one Arguments per clause; a reader that
 //   takes it for one Arguments learns nothing, and the code is then the `noargs` variant.)
 // The model is the code of #162 (FREEZE on): an Entity with a dispute record seals nothing and refuses the peer's frames. The code before
@@ -40,12 +50,21 @@ module htlc {
   const HIDE: bool              // the payee can finalize through a call the watcher cannot decode (the code of #167 reads a direct processBatch call only)
   const ARGS: bool              // the hub's watcher reads the secret in a dispute's arguments (the start's, the finalize's), as it reads SecretRevealed (#167)
   const HOP: int                // the hub's upstream deadline is this far after its onward one (E3: HOP >= REACT = 2 * LAG)
+  const XREV: bool              // the payee may reveal by calling DeltaTransformer.revealSecret directly (no Depository event)
+  const TSEE: bool              // the hub's watcher reads the transformer's SecretRevealed
+  const BACK: bool              // the hub refuses the upstream expiry for a hash the registry shows revealed by the lock's deadline, and claims by it
+  const SLK: int                // ticks after a height deadline that the contract still counts a reveal (the signed second's slack, in heights)
+  const PD: int                 // ticks between an event landing and the hub (and the payee) hearing it: depth and poll
+  const RSV: int                // the reserve: the upstream lock expires at a view strictly past TU + RSV
+  const CHAIN: bool             // the hub's claim on U is a chain claim, counted until the lock's second, TU + SLK
 
   pure val W = 4                // the dispute window, ticks
   pure val LAG = 1              // a J transaction lands within this many ticks of the ask
   pure val TD = 9               // deadline of the hold on D, the downstream Account
   pure val TU = TD + HOP        // deadline of the lock on U
-  pure val MAXT = TU + 2
+  pure val TDX = TD + SLK       // the second of the downstream deadline, in ticks: the contract counts a reveal or an argument up to here
+  pure val TUX = TU + SLK       // the second of the upstream deadline
+  pure val MAXT = TUX + PD + RSV + 2
   pure val MAXE = 2             // one dispute, one epoch move
 
   type Side = | Hub | Payee
@@ -64,8 +83,8 @@ module htlc {
   type Disp = { on: bool, starter: Side, timeout: int, carried: bool, shown: bool }
   pure val NO_DISP: Disp = { on: false, starter: Hub, timeout: 0, carried: false, shown: false }
 
-  // The chain's events in order: kind 0 DisputeStarted, 1 SecretRevealed (at `t`), 3 DisputeFinalized and epoch advance (`carried`: the
-  // finalized proof carried the hold).
+  // The chain's events in order: kind 0 DisputeStarted, 1 SecretRevealed of the Depository (at `t`), 2 SecretRevealed of the transformer alone
+  // (a direct revealSecret), 3 DisputeFinalized and epoch advance (`carried`: the finalized proof carried the hold).
   type Ev = { kind: int, by: Side, t: int, epoch: int, carried: bool, shown: bool }
 
   // A frame in flight: the payee's release of the hold, sealed in `epoch`; stage 0 on its way to H, 1 committed there and the ack on its way.
@@ -82,13 +101,14 @@ module htlc {
     paidFrame: int, paidChain: int,    // what Y was paid on D: by a committed release frame of the epoch, by the chain at a finalize
     u: int,                            // the lock on U: 0 open, 1 claimed by H, 2 expired to P
     collected: int,
-    finals: int, lateReveal: bool
+    finals: int, lateReveal: bool,
+    viaReg: bool                       // the hub claimed on U by the registry (BACK)
   }
 
   var st: St
 
   pure def both(x) = Map(Hub -> x, Payee -> x)
-  pure def finTime(d: Disp): int = if (d.carried and d.timeout < TD) TD else d.timeout
+  pure def finTime(d: Disp): int = if (d.carried and d.timeout < TDX) TDX else d.timeout
   pure def out(s: St): int = s.paidFrame + s.paidChain
   pure def quiet(w: View): bool = w.rec
 
@@ -99,7 +119,7 @@ module htlc {
       knows: false, pend: NO_PEND,
       askS: both(NO_ASK), askR: NO_ASK, askC: NO_ASK,
       paidFrame: 0, paidChain: 0, u: 0, collected: 0,
-      finals: 0, lateReveal: false
+      finals: 0, lateReveal: false, viaReg: false
     }
   }
 
@@ -110,10 +130,15 @@ module htlc {
 
   pure def finalizable(s: St): bool = s.disp.on and s.now >= finTime(s.disp)
 
-  pure def claimLandable(s: St): bool = s.u == 0 and s.now <= TU
+  pure def claimLandable(s: St): bool = s.u == 0 and s.now <= (if (CHAIN) TUX else TU)
+
+  // The registry shows a reveal the contract counts for the lock on U (by its second), and the hub's read at depth has it.
+  pure def regShows(s: St): bool = s.revealedAt != 0 and s.revealedAt <= TUX
+  pure def regClaimable(s: St): bool = BACK and s.u == 0 and regShows(s) and s.revealedAt + PD <= s.now
 
   pure def owed(s: St): bool = or {
-    SIDES.exists(x => s.seen.get(x) < s.log.length()),
+    SIDES.exists(x => s.seen.get(x) < s.log.length() and s.log.nth(s.seen.get(x)).t + PD <= s.now),
+    regClaimable(s),
     SIDES.exists(x => s.askS.get(x).on and s.askS.get(x).at + LAG <= s.now),
     s.askR.on and s.askR.at + LAG <= s.now,
     s.askC.on and claimLandable(s) and s.askC.at + LAG <= s.now,
@@ -135,6 +160,7 @@ module htlc {
     val i = st.seen.get(s)
     all {
       i < st.log.length(),
+      st.log.nth(i).t + PD <= st.now,
       val e = st.log.nth(i)
       val w = st.v.get(s)
       val w2 =
@@ -145,7 +171,7 @@ module htlc {
       st' = { ...st,
         seen: st.seen.set(s, i + 1),
         v: st.v.set(s, w2),
-        knows: st.knows or (s == Hub and ((e.kind == 1 and SEE) or (ARGS and e.shown))),
+        knows: st.knows or (s == Hub and ((e.kind == 1 and SEE) or (e.kind == 2 and TSEE) or (ARGS and e.shown))),
         askS: if (e.kind == 3) st.askS.set(s, NO_ASK) else st.askS }
     }
   }
@@ -206,8 +232,8 @@ module htlc {
         st' = { ...st, askS: st.askS.set(s, NO_ASK) }
       else
         st' = { ...st, askS: st.askS.set(s, NO_ASK),
-                disp: { on: true, starter: s, timeout: st.now + W, carried: a.carried, shown: a.shown and st.now <= TD },
-                log: st.log.append({ kind: 0, by: s, t: st.now, epoch: st.chEpoch, carried: a.carried, shown: a.shown and st.now <= TD }) }
+                disp: { on: true, starter: s, timeout: st.now + W, carried: a.carried, shown: a.shown and st.now <= TDX },
+                log: st.log.append({ kind: 0, by: s, t: st.now, epoch: st.chEpoch, carried: a.carried, shown: a.shown and st.now <= TDX }) }
     }
   }
 
@@ -217,18 +243,22 @@ module htlc {
     st' = { ...st, askR: { on: true, carried: false, shown: false, epoch: 0, at: st.now } }
   }
 
-  action landReveal: bool = all {
-    st.askR.on,
+  // `direct`: the payee calls the transformer itself; the registry is set all the same, only the Depository's event is missing.
+  action landRevealVia(direct: bool): bool = all {
+    direct implies XREV, st.askR.on,
     st' = { ...st, askR: NO_ASK, revealedAt: st.now,
-            log: st.log.append({ kind: 1, by: Payee, t: st.now, epoch: st.chEpoch, carried: false, shown: false }),
-            lateReveal: st.now > TD }
+            log: st.log.append({ kind: if (direct) 2 else 1, by: Payee, t: st.now, epoch: st.chEpoch, carried: false, shown: false }),
+            lateReveal: st.now > TDX }
   }
+
+  action landReveal: bool = landRevealVia(false)
+  action landRevealDirect: bool = landRevealVia(true)
 
   // The chain finalizes: a carried hold is paid to Y iff the secret was registered by TD, else refunded; the epoch advances; a frame the
   // finalize outdates is zeroed (the proof that paid does not contain it).
   action landFinal: bool = all {
     finalizable(st),
-    val paid = st.disp.carried and ((st.revealedAt != 0 and st.revealedAt <= TD) or st.disp.shown)
+    val paid = st.disp.carried and ((st.revealedAt != 0 and st.revealedAt <= TDX) or st.disp.shown)
     st' = { ...st, disp: NO_DISP, chEpoch: st.chEpoch + 1, askS: both(NO_ASK),
             paidChain: st.paidChain + (if (paid) 1 else 0),
             paidFrame: if (st.disp.carried) 0 else st.paidFrame,
@@ -243,7 +273,7 @@ module htlc {
   action landFinalShown: bool = any { landFinalShownVia(false), landFinalShownVia(true) }
 
   action landFinalShownVia(wrapped: bool): bool = all {
-    wrapped implies HIDE, st.disp.on, st.disp.carried, st.disp.starter == Hub, st.now <= TD,
+    wrapped implies HIDE, st.disp.on, st.disp.carried, st.disp.starter == Hub, st.now <= TDX,
     st' = { ...st, disp: NO_DISP, chEpoch: st.chEpoch + 1, askS: both(NO_ASK),
             paidChain: st.paidChain + 1, paidFrame: 0, finals: st.finals + 1,
             log: st.log.append({ kind: 3, by: Payee, t: st.now, epoch: st.chEpoch + 1, carried: true, shown: not(wrapped) }) }
@@ -264,13 +294,24 @@ module htlc {
     else st' = { ...st, askC: NO_ASK }
   }
 
+  // The upstream lock expires to the payer once the view is strictly past TU + RSV. A hub that can still claim does not co-sign it (CHAIN),
+  // and with BACK it does not co-sign it before its read at depth covers the lock's second, nor while the registry shows a reveal by it.
   action expireU: bool = all {
-    st.u == 0, st.now > TU,
+    st.u == 0, st.now > TU + RSV,
+    CHAIN implies not(st.knows and st.now <= TUX),
+    BACK implies (st.now >= TUX + PD and not(regShows(st))),
     st' = { ...st, u: 2 }
   }
 
+  // BACK: the registry pays the clause on U to the hub (a dispute on U finalizes by it), at once as far as the model goes.
+  action claimByRegistry: bool = all {
+    regClaimable(st),
+    st' = { ...st, u: 1, collected: 1, viaReg: true }
+  }
+
   action step: bool = any {
-    tick, receive, ack, sendRelease, askReveal, landReveal, landFinal, landFinalShown, askClaim, landClaim, expireU,
+    tick, receive, ack, sendRelease, askReveal, landReveal, landRevealDirect, landFinal, landFinalShown, askClaim, landClaim, expireU,
+    claimByRegistry,
     { nondet s = SIDES.oneOf() any { hear(s), askStart(s), landStart(s) } }
   }
 
@@ -288,5 +329,7 @@ module htlc {
   val w_no_frame_paid: bool = st.paidFrame == 0
   val w_no_claim: bool = st.u != 1
   val w_no_epoch_move: bool = st.finals == 0
+  val w_no_direct_reveal: bool = st.log.select(e => e.kind == 2).length() == 0
+  val w_no_registry_claim: bool = not(st.viaReg)
   // (expiry of the lock on U is a schedule: every scenario test that ends in closeU reaches it; the random search seldom does)
 }
