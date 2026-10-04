@@ -465,6 +465,27 @@ describe("runtime/chain R-DISPUTE-FREEZE the finalized nonce is that of the proo
     expect(factsOf(after, ALICE)?.unresolved).toEqual({ epoch: 1n, finalBodyHash: undefined });
   });
 
+  test("R-FINALIZATION-UNKNOWN an ack of the still-pending frame commits nothing until the log names the nonce", () => {
+    const ackOnLink = deliver(feed(paid, ALICE, pay(BOB, 5n)));
+    const opened = disputed(ackOnLink);
+    const body = foreignBody(`0x${"cd".repeat(32)}`);
+    const hash = hashed(body);
+    const frozen = moved(opened, 1n, startedAt(opened) + 1n, hash);
+    const before = replicaOf(frozen, ALICE);
+    expect(frozen.inflight[0]?.msg._tag).toBe("ack");
+    expect(frozen.inflight[0]?.to).toBe(ALICE);
+    const acked = deliver(frozen);
+    const afterAck = replicaOf(acked, ALICE);
+    expect(afterAck.pending).toBeDefined();
+    expect(afterAck.head).toBe(before.head);
+    expect(offdeltas(acked)).toEqual(offdeltas(frozen));
+    const nonce = frameNonce(acked, ALICE);
+    const named = heardLater(heardLater(acked, ALICE, body, nonce), BOB, body, nonce);
+    expect(factsOf(named, ALICE)?.unresolved).toBeUndefined();
+    expect(offdeltas(named)).toEqual(offdeltas(frozen));
+    expect(pendingTold(named, ALICE).map((n) => n.fate)).toStrictEqual(["paid_on_chain"]);
+  });
+
   test("R-FINALIZATION-UNKNOWN an unnamed finalize does not reissue, and the freeze survives a restart", () => {
     const after = moved(asked, 1n, stale + 1n, unknown);
     const paidAgain = feed(after, ALICE, pay(BOB, 1n));
