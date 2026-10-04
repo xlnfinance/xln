@@ -214,9 +214,14 @@ const sealedNow = (rules: EntityRules, outcome: Outcome<PeerFault>, pending: Ent
  * R-DISPUTE-FREEZE: the ack of a frame of mine that was sealed before the dispute commits nothing while the dispute is
  * open: the head stays the one the dispute rests on. The frame stays pending (the peer, which committed it, is told
  * again at the epoch that follows, and a frame the new epoch does not accept is sealed anew like any other).
+ * R-FINALIZATION-UNKNOWN: an unnamed finalize clears the dispute and leaves the account quiet. That same ack still
+ * commits nothing until a later observation names the nonce.
  */
-const ackedInDispute = (w: Work, a: PeerMessage): boolean =>
-  a.msg._tag === "ack" && inDispute(factsOf(w, a.from));
+const ackedInDispute = (w: Work, a: PeerMessage): boolean => {
+  const facts = factsOf(w, a.from);
+  const quiet = inDispute(facts) || facts.unresolved !== undefined;
+  return a.msg._tag === "ack" && quiet;
+};
 
 /** The state a frame would commit if the freeze were not refusing it. Undefined when a tx still does not apply. */
 const openedState = (
