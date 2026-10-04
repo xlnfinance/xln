@@ -61,6 +61,8 @@ module htlc {
   const LK: int                 // the tick the hub's paybook entry for the lock exists from: a reveal it hears before then reaches no entry (frame.ts named, paybook.ts revealed)
   const ADM: int                // the registry read at the lock's admission, -1 none, else how many ticks behind the Entity's view the read block is (PR 176 owed row)
   const HG: bool                // the expiry's wait is the code's height gate (the view past the deadline plus the reserve), not the lock's second
+  const MISSED: int             // slots the chain may miss; subtracted only from the seconds arm of the forward gap
+  const FWD: bool               // the hub forwards by the seconds gate: both holds of D start false until forwardLock
   const LATE: bool              // the Entity is told the finalize before the read of its calldata lands, and the read after (PR 171 before the watch-wait design)
 
   pure val W = 4                // the dispute window, ticks
@@ -108,7 +110,9 @@ module htlc {
     collected: int,
     finals: int, lateReveal: bool,
     viaReg: bool,                      // the hub claimed on U by the registry (BACK)
-    admitted: bool                     // admitLock has run: a dissolved hold is not opened again
+    admitted: bool,                    // admitLock has run: a dissolved hold is not opened again
+    headSecond: int,                   // the second of the block at the view; meaningful only when secondKnown
+    secondKnown: bool                  // absent is not 0: 0 would be a known second
   }
 
   var st: St
@@ -121,12 +125,13 @@ module htlc {
   action init: bool = {
     st' = {
       now: 1, chEpoch: 1, disp: NO_DISP, revealedAt: 0, log: List(),
-      // LK > 0: the hub's entry does not exist yet. admitLock is what sets its hold, and only when the admission read allows it.
-      seen: both(0), v: Map(Hub -> { epoch: 1, rec: false, hold: LK == 0 }, Payee -> { epoch: 1, rec: false, hold: true }),
+      // LK > 0: the hub's entry does not exist yet. FWD: neither side's onward hold exists until forwardLock.
+      seen: both(0), v: Map(Hub -> { epoch: 1, rec: false, hold: LK == 0 and not(FWD) }, Payee -> { epoch: 1, rec: false, hold: not(FWD) }),
       knows: false, pend: NO_PEND,
       askS: both(NO_ASK), askR: NO_ASK, askC: NO_ASK,
       paidFrame: 0, paidChain: 0, u: 0, collected: 0,
-      finals: 0, lateReveal: false, viaReg: false, admitted: false
+      finals: 0, lateReveal: false, viaReg: false, admitted: false,
+      headSecond: 1, secondKnown: true
     }
   }
 
@@ -356,9 +361,31 @@ module htlc {
     }
   }
 
+  // Seconds between the inbound deadline and the outbound one, less missed slots. Slack cancels (TUX - TDX = HOP).
+  pure def forwardGap: int = if (HOP < (TUX - TDX) - MISSED) HOP else (TUX - TDX) - MISSED
+
+  // Blocks the known head second still leaves before a deadline's second, less missed slots. Slot is one tick here.
+  pure def blocksLeftOf(s: St, deadlineSeconds: int): int = (deadlineSeconds - s.headSecond) - MISSED
+
+  // Pace, a known head second, the onward lock still live past the view, and the gap covers the reaction (depth + poll + lag + 1).
+  // PD is depth plus poll. A missing head second forwards nothing. MISSED shortens only forwardGap.
+  // The onward lock is live when both the height left and the blocks the head second still leaves are positive:
+  // that is effectiveDeadline(outbound) > view, and min of those two lengths is the room.
+  pure def mayForward(s: St): bool =
+    FWD and s.secondKnown and (TD > s.now) and (blocksLeftOf(s, TDX) > 0) and (forwardGap >= PD + LAG + 1)
+
+  action forwardLock: bool = {
+    val hub = st.v.get(Hub)
+    val payee = st.v.get(Payee)
+    all {
+      mayForward(st), not(hub.hold), not(payee.hold),
+      st' = { ...st, v: st.v.set(Hub, { ...hub, hold: true }).set(Payee, { ...payee, hold: true }) }
+    }
+  }
+
   action step: bool = any {
     tick, receive, ack, sendRelease, askReveal, landReveal, landRevealDirect, landFinal, landFinalShown, askClaim, landClaim, expireU,
-    claimByRegistry, readLate, admitLock,
+    claimByRegistry, readLate, admitLock, forwardLock,
     { nondet s = SIDES.oneOf() any { hear(s), askStart(s), landStart(s) } }
   }
 

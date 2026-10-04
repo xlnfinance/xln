@@ -141,7 +141,7 @@ fi
 if [ "$DISPUTE" = 1 ]; then
   echo "== htlc: typecheck, scenario tests per variant, properties per variant"
   hdeclared=$(grep -cE '^[[:space:]]*run[[:space:]]+[A-Za-z0-9_]*Test\b' htlc_test.qnt || true)
-  for v in today see dissolve both hop0 noargs wrapped xrev xwatch xback hgate1 hgate2 hgate3 hpoll2 hpoll3 hchain0 hchain1 hchain2 hback hall hstall hstall5 hgive hgives hgivec hgivecs hord hordlate hlate hbackslk hlk hlkadm hlkold hlkback hgres hgres0; do $Q typecheck "htlc_$v.qnt"; done
+  for v in today see dissolve both hop0 noargs wrapped xrev xwatch xback hgate1 hgate2 hgate3 hpoll2 hpoll3 hchain0 hchain1 hchain2 hback hall hstall hstall5 hgive hgives hgivec hgivecs hord hordlate hlate hbackslk hlk hlkadm hlkold hlkback hgres hgres0 hmiss; do $Q typecheck "htlc_$v.qnt"; done
   for v in today see dissolve both hop0 noargs wrapped xrev xwatch xback; do
     out=$($Q test htlc_test.qnt --main "${v}_htlc_test" --backend typescript --max-samples 1 2>&1) || { echo "$out"; exit 1; }
     ran=$(echo "$out" | grep -cE '^[[:space:]]+ok ' || true)
@@ -165,7 +165,7 @@ if [ "$DISPUTE" = 1 ]; then
   hexpect xwatch route_safe ok; hexpect xback route_safe ok
   echo "== htlc: the clock (slack, depth, reserve): scenario tests per variant, route_safe per variant"
   gdeclared=$(grep -cE '^[[:space:]]*run[[:space:]]+[A-Za-z0-9_]*Test\b' htlc_gate_test.qnt || true)
-  for v in hgate1 hgate2 hgate3 hpoll2 hpoll3 hchain0 hchain1 hchain2 hback hall hstall hstall5 hgive hgives hgivec hgivecs hord hordlate hlate hbackslk hlk hlkadm hlkold hlkback hgres hgres0; do
+  for v in hgate1 hgate2 hgate3 hpoll2 hpoll3 hchain0 hchain1 hchain2 hback hall hstall hstall5 hgive hgives hgivec hgivecs hord hordlate hlate hbackslk hlk hlkadm hlkold hlkback hgres hgres0 hmiss; do
     out=$($Q test htlc_gate_test.qnt --main "${v}_htlc_gate_test" --backend typescript --max-samples 1 2>&1) || { echo "$out"; exit 1; }
     ran=$(echo "$out" | grep -cE '^[[:space:]]+ok ' || true)
     [ "$ran" = "$gdeclared" ] || { echo "FAIL htlc_gate_test $v: $gdeclared declared, $ran ran"; exit 1; }
@@ -180,6 +180,7 @@ if [ "$DISPUTE" = 1 ]; then
   got=$($Q run htlc_hlkback_loss.qnt --backend typescript --init initLoss --step stepLoss --invariant route_safe --max-steps 5 --max-samples 1 --seed 0x5 --verbosity 1 2>&1 | grep -oE '^\[(ok|violation)' | tr -d '[' || true)
   if [ "$got" != "violation" ]; then echo "FAIL htlc_hlkback route_safe: expected violation, got ${got:-nothing}"; exit 1; fi
   echo "   hlkback route_safe: violation"
+  # hmiss: the seconds arm of the forward gap is a schedule lateRevealRaceTest plays. A random search is not the witness, so hmiss is not in the hexpect list.
   # hordlate, hlate (PR 171 DESIGN-watch-wait): the read wait RD ticks after the finalize is heard; ordered (finalize held until read) the hop must also cover RD (hord safe, hordlate lost); told before read (LATE) loses at every hop (hlate). Both losses are schedules, run by pendingReadTest.
   # hlk and hlkold (a lock admitted with no registry read, or with a read one block behind the view) and hgres0 (the backstop gated by height, reserve too short for the slack) are
   # schedules that lose the hub; lateLockTest plays them. hlkadm (read at the view) refuses the lock in that same run.
@@ -198,6 +199,6 @@ if [ "$DISPUTE" = 1 ] && [ "${MUTANTS:-0}" = "1" ]; then
   python3 mutants/run.py dispute_stall3
   echo "== htlc: mutants"
   MUTANT_STEPS=40 python3 mutants/run.py htlc_both
-  for m in htlc_xwatch htlc_xback htlc_hback htlc_hbackslk htlc_hlkadm htlc_hall htlc_hchain1 htlc_hchain2; do MUTANT_STEPS=40 python3 mutants/run.py $m; done
+  for m in htlc_xwatch htlc_xback htlc_hback htlc_hbackslk htlc_hlkadm htlc_hmiss htlc_hall htlc_hchain1 htlc_hchain2; do MUTANT_STEPS=40 python3 mutants/run.py $m; done
 fi
 echo "check.sh: all green"
