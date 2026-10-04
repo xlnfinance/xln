@@ -1,0 +1,8 @@
+# Scheme name search for spec/. An edge is a spelling, not a binding.
+# The parser is built by spec/map/build.sh. pure/sgconfig.yml does not load this file.
+ruleDirs: []
+customLanguages:
+  scheme:
+    libraryPath:
+      aarch64-apple-darwin: libtree-sitter-scheme.dylib
+    extensions: [scm]

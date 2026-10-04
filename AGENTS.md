@@ -262,19 +262,25 @@ surface or fuse stages 2 and 3.
 - Never launch Codex Security scans unless the owner explicitly asks for a Codex Security scan by
   name. Requests to audit, review, inspect security, or check Solidity mean ordinary manual review.
 
+## Tools
+
+- `.mcp.json` exposes one server, `arrival`: a Scheme REPL. Put the program in `repl-input-scheme-program`. The upstreams in `spec/manifold.mcp.json` are functions in that program, called as `server/tool` with keyword arguments, and the program composes them. When one of those results is the input of the next, that is one program; the steps are `.grok/skills/arrival/SKILL.md`. A search that ends at the matches stays on the CLI in the next bullet. `rewrite/preview` returns the patched text and writes nothing; `rewrite/apply` writes that text and refuses a path outside the repo. `ast-edit/preview` returns a slot edit on a named declaration and writes nothing; `ast-edit/apply` writes that text. A body is not a slot. `jev/gate` reads the operations and a preview and returns allow, doubt, or refuse. It does not write. Only allow applies.
+- ast-grep from the shell: `ast-grep --lang <language> -p '<pattern>'`. Never `sg`, which is the Linux group tool. Relational rules (`inside`, `has`) need `stopBy: end`. Inside the REPL the same jobs are `ast-grep/find_code`, `ast-grep/find_code_by_rule`, `ast-grep/dump_syntax_tree`, and `ast-grep/test_match_code_rule`. Skills: `.claude/skills/ast-grep`, `.claude/skills/ast-grep-outline`.
+- The spec checker is `spec/mcp/server.mjs`, called from the REPL as `spec/arrival_run`, `spec/arrival_check`, and `spec/arrival_guide`.
+- A Scheme name across `spec/` is `node spec/map/name.mjs <name>`. A `configs/` or `bugs/` file is its own run, loaded after the page, and its top-level `define` replaces the page binding for that run. A comment is not a hit. A Solidity name is an ast-grep identifier query, and that hit is not a binding. A TypeScript binding in `pure/` is the language server. `lsp/references` asks the same question inside a program, writes nothing, and is not an argument to `ast-edit/apply`. Goldfish does not see Scheme or Solidity; do not invent a rank to stand in for it. The outline skill maps a file already open. The document graph stays off.
+- Project sessions have no `gh` CLI: use the GitHub MCP tools. The backlog is GitHub issues on `adimov-eth/og_xln`.
+- Use Bun. Frontend work is the exception only where a tool needs something else.
+
 ## AST-GREP
 
-- For any code search that depends on syntax or code structure, default to ast-grep:
-  `ast-grep --lang <language> -p '<pattern>'`. Use text grep only for plain text.
-- If `ast-grep` is not on PATH, run it as `uvx --from ast-grep-cli ast-grep`.
-- The `ast-grep` MCP server (`.mcp.json`) provides `dump_syntax_tree`, `test_match_code_rule`,
-  `find_code` and `find_code_by_rule`.
+- A search that ends at the matches stays on the CLI: `ast-grep --lang <language> -p '<pattern>'`.
+  Use text grep only for plain text. If `ast-grep` is not on PATH, run it as `uvx --from ast-grep-cli ast-grep`.
+- When one of those matches is the input of the next tool, stop and follow `.grok/skills/arrival/SKILL.md`.
 - Project skills: `.claude/skills/ast-grep` (writing rules) and `.claude/skills/ast-grep-outline`
   (cheap structural map of files before reading source), vendored from
   https://github.com/ast-grep/claude-skill.
 - Full reference for rule syntax: https://ast-grep.github.io/llms-full.txt. Load it when a rule
   does not behave as expected instead of guessing.
-- Relational rules (`inside`, `has`) need `stopBy: end` to search the whole direction.
 
 ## Rule Development Process
 
@@ -282,8 +288,8 @@ surface or fuse stages 2 and 3.
 2. Identify sub rules that can be used to match the code.
 3. Combine the sub rules into a single rule using relational rules or composite rules.
 4. if rule does not match example code, revise the rule by removing some sub rules and debugging unmatching parts.
-5. Use ast-grep mcp tool to dump AST or dump pattern query
-6. Use ast-grep mcp tool to test the rule against the example code snippet.
+5. From the REPL, `ast-grep/dump_syntax_tree` to see the pattern or the code.
+6. `ast-grep/test_match_code_rule` against the example. A fix belongs in the rule; `rewrite/preview` shows the patched text before `rewrite/apply`.
 
 This iterative process allows the AI to "think" more like a human developer, refining its approach
 until the rule is correct. Detailed prompt for this agentic rule development process:
