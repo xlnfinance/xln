@@ -1,266 +1,86 @@
 # AGENTS.md
 
-On the first message, explain in 3–4 lines how to work with you: execute autonomously at
->=95% confidence, ask the owner below 95% or for a real protocol choice, and report terse
-results with metrics.
+The single instruction file for agents and people working in this repository. `CLAUDE.md` points here and holds no rules of its own. The project instructions Arthur set on the project (goal, Done list, process) are the source of this text; where this file and a message from Arthur differ, the message wins and this file is fixed to match.
 
-Mission: fintech-grade deterministic xln. J/E/A correctness before features. Pure
-transitions, one canonical production path, no silent fallback.
+## Goal
 
-## EXECUTION PRIORITY
+A pure-functional XLN that is ready for testnet, with a protocol spec you can check and an elegant implementation that follows it. We take og's ideas, not its code. og is a reference and a source of lessons, never the oracle.
 
-This order overrides attractive side work:
+Done means:
 
-1. Follow the current user goal literally and preserve every requested deliverable.
-2. Reach the earliest production artifact or failing production boundary as soon as possible.
-3. Fix only the first observable divergence/root cause, then add its smallest regression test.
-4. Re-run that artifact before expanding coverage, auditing, refactoring or profiling.
-5. Run final completeness/audit gates only after the production path works.
+1. A compact spec of the Account, Entity, J and Runtime layers: data flow, control flow, state machines and the properties each layer keeps, with no open questions left.
+2. The contracts are reviewed. Every flaw is fixed or accepted in writing, and every encoding the contracts read is pinned by a vector the contract itself produced.
+3. `pure/xln.ts` is cut down to the spec and passes the relief test.
+4. On fresh seeds, the walk checks the spec's properties every frame against the real contracts: a dispute pays out what both sides believed, money is conserved, credit holds, and both sides sign the same proof. Mutants in money, deadline and consensus code are killed, and CI is green.
+5. The contracts are deployed on testnet and nodes run the implementation, with one scripted end-to-end run (`testnet-e2e/`).
 
-- Never invent a catalog, taxonomy, abstraction, audit campaign or intermediate gate that
-  blocks an explicit production artifact, replay or TPS deliverable.
-- Synthetic completeness never blocks the first production replay. It remains a final release
-  gate after the production artifact is exact.
-- At most one implementer owns an area. A reviewer starts only after the implementer produces
-  a stable diff; never assign overlapping implementation work.
-- Every handoff contains only: current SHA, last green command, first red command/error,
-  artifact path, next single command, and remaining final gates.
+Scope: the complete verified spec covers everything. v1 code covers payments, HTLC routing and disputes; v2 covers the order book, lending and boards. Not the goal: equality with og's bytes, fixing og's bugs, or og's frontend.
 
-## ALWAYS
+Current scope of the path to testnet (Arthur's plan "Convergence to development, then main", adopted 2026-10-03): open accounts, payments, multi-hub HTLCs, two-party swaps, disputes and recovery. Deferred: loans, cross-J, watchtower coordination, live Sepolia, structural refactor. Done item 5 above still names a loan; the plan defers it.
 
-- Run `bun run check` before push, merge, release or a completion claim.
-- Never swallow an error. Consensus/storage failures are fail-stop and include useful evidence.
-- Use Bun, except where an existing frontend tool explicitly requires something else.
-- Browser/F12 verification is required only for frontend or browser-runtime changes.
-- Documentation belongs in `/docs`, never `/core` or `/frontend`.
-- Never redeem a usage reset unless the owner explicitly says to use/redeem a usage reset.
-  Complaints about tokens, requests for compensation or refunds are not authorization.
+Order: collect (done), spec, implement, testnet. Code changes wait for the spec, except fixes to real bugs. Every open question gets one owner and a decision; the coordinator owns them.
 
-The normative TypeScript and state-machine safety standard is [`docs/fints.md`](docs/fints.md).
-Do not duplicate or weaken it.
+## Where things are
 
-## CANONICAL RUNTIME → ENTITY → ACCOUNT CASCADE
+| Path | What it is |
+|---|---|
+| `pure/` | The rewrite. New tree: `kernel/` `account/` `chain/` `entity/` `j/` `host/` `runtime/` `market/`. Old single file: `xln.ts` (frozen legacy, deleted once the walk judges the new tree). |
+| `pure/rules/` | The rule register (`register/<id>.json`, one file per rule) and its gate. Read `pure/rules/README.md` before adding or changing a rule. |
+| `pure/style/` | The style gate and its registered exceptions (`pure/style/README.md`). |
+| `pure/diff/` | The og-parity rig and the walk. It judges the legacy file today. |
+| `spec/` | The spec. Arrival is the main spec, vendored with its checker and MCP server; `spec/quint/` is a complete duplicate in Quint. Each records unclear points in its own `QUESTIONS.md`. |
+| `contracts/` | Our fork of the contracts, fixed here. Deployed Sepolia addresses and vectors: `contracts/deploy/`, `contracts/vectors/`. |
+| `testnet-e2e/` | The scripted end-to-end run on an anvil fork of Sepolia. |
+| `review/` | Reviews, one folder per pull request (`review/pr-<n>/`). |
+| `docs/process-lanes.md` | Lanes, required checks, promotion to `main`. The CI thread keeps it in step with the workflows. |
+| `.github/required-checks.json` | The check names each branch requires. |
+| `core/`, `jurisdictions/` | og. Frozen reference at `566c850`; see the last section. |
 
-| Layer | Live replica | Committed state | Input | Transaction | Frame |
-|---|---|---|---|---|---|
-| Runtime | `RuntimeReplica` | `RuntimeState` | `RuntimeInput` | `RuntimeTx` | `RuntimeFrame` |
-| Entity | `EntityReplica` | `EntityState` | `EntityInput` | `EntityTx` | `EntityFrame` |
-| Account | `AccountReplica` | `AccountState` | `AccountInput` | `AccountTx` | `AccountFrame` |
+Decisions of record live in the register, in `plan/` (convergence plan, consolidation plan, contracts decisions, process) in the project's shared files, and in issue #178 (the ledger of the convergence plan; PR #179 carries `plan/convergence-plan.md`). Check the register for an Arthur decision before changing process or CI. The older project files (GOAL, NOW, PICKUP, AUTHORITY, SOURCE, DSL, PROTOCOL-AUDIT) describe an earlier tree: history, not instructions.
 
-- Every layer is a deterministic transition `(replica, input) -> { replica, outputs }`.
-- Only Runtime converts committed outputs into external effects after WAL commit.
-- `EntityInput` contains `EntityTx[]`; `accountInput` carries an exact child `AccountInput`.
-  Entity-owned financial work creates local `AccountTx[]` admission. Both use the same
-  `applyAccountInput`; local admission never enters routing/P2P.
-- `*State` contains only frame-committed deterministic data. Mempools, candidates, ACK/resend,
-  transport, watchdogs, worker positions and retry state belong to the live replica envelope.
-- `*Replica` is live data; `*Machine` is transition logic, never a data interface.
-- Do not add shared base reducers across Runtime, Entity and Account: their trust boundaries differ.
-- If ownership/naming is genuinely ambiguous, derive it from production code and
-  [`docs/core/rjea-architecture.md`](docs/core/rjea-architecture.md); ask only for a real fork.
+## Evidence
 
-## CONSENSUS AND DETERMINISM
+- Claims are shown, never made. Per-function MATCH tests share the author's misreadings, so prefer whole-system checks: the walk, and the real contracts in BrowserVM. Every encoding a reader of chain bytes uses is pinned by a vector the contract produced, not by our own encoder.
+- A scripted path passing is not the properties being checked. A test that accepts a forbidden outcome hides a money bug. A reviewer's clear is not an audit clear.
+- Before saying "green", run these from `pure/` and report counts and the SHA:
+  - `../node_modules/.bin/tsc --noEmit -p .`
+  - `bun test --timeout 600000`
+  - `bun run test:seeds`
+  - `bun style/check.ts`
+- A failing seed is a bug until proven otherwise. Never tune a seed or a generator to get green. "Flake" is not a root cause: a test that fails under load gets an explicit timeout or a fix.
+- Say "merged" or "running" only after checking it (a PR state, a run, a log line).
 
-- RJEA is pure: identical previous state plus identical inputs produces identical state/outputs.
-- No `Date.now`, `Math.random`, timers or unseeded randomness inside RJEA transitions. Use the
-  controlled environment timestamp and deterministic seeded input.
-- Account bilateral semantics follow `.archive/2024_src/app/Channel.ts` and
-  [`docs/consensus-invariants.md`](docs/consensus-invariants.md).
-- Exact duplicate ACK/proposal delivery is idempotent: preserve canonical cached evidence and
-  respond without appending state. A different hash/height/signature is a loud rejection.
-- Left is the lexicographically lower Entity id. Use `deriveDelta(delta, isLeft)`; never invent
-  alternate `leftCreditLimit`/`rightCreditLimit` viewer math.
-- Canonical output order is positional. Accepted inputs retain dense input positions, each owns
-  naturally ordered outputs, and workers flatten those slots. Never sort financial outputs by id,
-  signer, route, hash, shard or completion time.
-- Security-critical code explains signer, authority, nonce, old/new-state sequence and adversarial
-  counterexample in a focused comment/test.
-- Detailed dispute, Hanko and hash-ladder rules live in
-  [`docs/consensus-invariants.md`](docs/consensus-invariants.md),
-  [`docs/counterfactual-transformers.md`](docs/counterfactual-transformers.md), and
-  [`docs/hashladder-registry-spec.md`](docs/hashladder-registry-spec.md). Load them when that path
-  is in scope; do not keep their full text in every task context.
+## The gate
 
-## REJECT POLICY (owner canon 2026-09-05, quorum-confirmed 2026-09-07)
+One gate, run from `pure/` unless noted. Name the command you ran when you report a result.
 
-- A user or peer can never take a Runtime down. A sender-caused failure is a typed reject
-  disposition decided inside the RJEA transition without reading process env; the Runtime
-  loop applies fail-fast (tests/dev) or log-and-drop (production) exactly once, outside the
-  state machine, so replay never depends on `NODE_ENV`/`XLN_REJECT_FAIL_FAST`.
-- Granularity is per transaction on both engines: evict exactly the rejected tx and certify
-  the rest of the same signer's queue. Never drop a signer lane or a whole peer envelope for
-  one bad tx. Transport-level peer misbehaviour closes that session; it never halts the Hub.
-- Details and the log lines to watch: [`docs/reject-policy.md`](docs/reject-policy.md).
+| Command | What it checks |
+|---|---|
+| `../node_modules/.bin/tsc --noEmit -p .` | Types. |
+| `bun rules/check.ts` | Register (names, layers, ratchet against the base), tree style, folder width, contract-test placement, Foundry suite. `--matrix` prints register progress. Needs forge and forge-std (`cd contracts && bun run forge:setup`). |
+| `bun rules/checks/frozen.ts` | `core/` and `jurisdictions/` are byte-identical to og. |
+| `bun style/check.ts` | The legacy file's style ratchet. |
+| `bun test`, `bun run test:seeds` | Tests; the three seeds `SEEDX=0 12345 987654`. |
+| `cd spec && node test.mjs` | The Arrival pages and planted bugs (build first: `spec/package.json` `setup`). |
+| `cd spec/quint && bash check.sh` | The Quint spec. |
+| `bun testnet-e2e/run.ts --out <file>` | The scripted end-to-end run on the fork. |
 
-## ONE CANONICAL PRODUCTION PATH
+CI split (register row `R-GATE-CI-SPLIT`, Arthur's decision). A pull request into `development` runs two fast checks, `One gate (tsc, rules, frozen, style)` and `One gate (bun test)`, plus `Lane label`. The seeds, Quint, Arrival and the fork run on every push to `development` and `main` and on promotion. Do not move seeds onto pull requests or add local whole-suite rules. Locally, while iterating, run tsc, the rules gate, style and the tests of the area you touch; the push run is the judge of the rest. Red `development` is fixed forward and nothing else merges meanwhile. A job that died before any test ran may be re-run once.
 
-- No legacy behavior, compatibility aliases, fallback readers/writers, duplicate financial
-  formulas, `v2`/`v3` branches or parallel implementations.
-- Replace the canonical path atomically and delete the retired one. Obsolete persisted data needs
-  an explicit offline migration or loud rejection.
-- Never add a stub, test-mode fake, conditional skip, temporary workaround or hidden compromise.
-  If the canonical fix is below 90% confidence, stop and present the exact fork.
-- Do not create mocks/stubs unless the owner asks. Debug consensus using complete state evidence.
+The aggregate `One gate` is the check `main` requires. The rulesets are Arthur's to edit; do not route around a denied push or a missing setting.
 
-## STORAGE AND RECOVERY
+## Style
 
-- Runtime memory holds only the latest finalized R/E/A state plus the required in-flight candidate.
-- Historical Runtime inputs and signed Entity/Account frames live in their dedicated stores and are
-  read on demand. Consensus, settlement and automatic UI refresh never scan Account history.
-- Mempools, proposals, candidates, precommits, votes, retry queues and worker positions are not
-  durable state. Recovery replays accepted Runtime WAL inputs and republishes the flat outbox.
-- Keep one path-keyed durable representation. No CAS/DAG copy, sidecar state, derived receipt,
-  sequence/frontier or alternate checkpoint oracle.
-- A new durable field requires a demonstrated owner, root membership, post-crash necessity,
-  non-derivability and one adversarial recovery test.
-- Replay reads only checkpoint plus ordered Runtime WAL inputs and compares per-frame roots and
-  ordered event/effect/outbox digests. Detailed Account dumps are lazy after first mismatch.
-- Storage/recovery details: [`docs/wal.md`](docs/wal.md) and
-  [`docs/runtime/storage.md`](docs/runtime/storage.md).
+Pure functional TypeScript with ADTs and FSMs. Follow `style/arthur-elegant-code-guide.md` in the project's shared files: name the domain model first, then write functions in its terms. The bar is the relief test: code readable without tracing.
 
-## FROZEN CORE
-
-- Never run `bun run frozen-core:approve`; only the owner may approve interactively.
-- `FROZEN_CORE_VIOLATION` is a hard stop: report old/new hashes and wait.
-- Never edit `frozen-core.json` manually or bypass `frozen-core:check`.
-- Solidity changes require synchronized artifacts/typechain and explicit bytecode/hash review.
-
-## CONFIDENCE AND AUTHORITY
-
-- >=95% confidence with a clear existing invariant: execute autonomously.
-- <95% or multiple materially different protocol choices: stop and ask the owner.
-- Consensus/crypto/contract changes require owner confirmation only when they create a new choice;
-  do not re-ask a decision already present in the goal, this file or canonical code.
-- Read-only diagnostics and normal implementation steps inside the requested scope need no approval.
-
-## GIT AND SHARED WORKSPACE
-
-- Work on your own `claude/` branch and open a PR into `development`; never push to `main` or `development` directly. Promotion to `main` is a `promote/` snapshot PR (`docs/process-lanes.md`).
-- Preserve unrelated user changes. Checkpoint commits may use `wip:` when L1/L2 is not green.
-- Before a shared-tree commit, stop concurrent writers, run formatting and `git diff --check`.
-- Never push without the relevant L1/L2 evidence and `bun run check`.
-- Auditors may use a read-only checkout pinned to an immutable SHA.
-
-## ONE MACHINE, ONE HEAVY STAND
-
-- Check `bun run stand:status` before every HLT, benchmark, recorder, replay or heavy E2E.
-- Wired stands acquire `<main>/.xln-stand-lock` automatically. Everything else runs under
-  `bun run stand:run --reason <why> -- <command>`.
-- Capacity stays one unless the owner changes it. Never set `XLN_STAND_LOCK_DISABLED=1` to skip.
-- A performance number is evidence only when the lock was held for the entire run.
-- Kill the exact process group and children after timeout before another measurement.
-
-## VERIFICATION
-
-Use the smallest failing boundary first:
-
-1. L1: smallest unit/vector for the changed function or first divergent frame.
-2. L2: focused production-equivalent integration/scenario.
-3. L3: related broad suite, then `bun run check` once per unchanged candidate.
-
-- Default process wall budget is 30 seconds; the owner permits up to 60 seconds for ordinary
-  verification while reducing the feedback cycle (2026-09-05). Preserve semantic assertions.
-  The owner-approved exception is 180 seconds for the
-  canonical HLT recorder, exact replay and live economic stand under the machine lock.
-- A live process must be polled by its existing handle; do not restart merely because observation
-  timed out. Report progress while it runs.
-- Show command output/counts. A build, codec/catalog equality or smoke is not semantic parity.
-- Browser build command:
-  `bun build core/runtime.ts --target=browser --external http --external https --external zlib --external fs --external path --external stream --external buffer --external url --external net --external tls --external os --external util`.
-
-## PARITY CRITICAL PATH
-
-1. Record one immutable production mixed WAL as early as possible.
-2. Replay the same checkpoint/WAL through TS W1, TS W4, Rust W1 and Rust W4.
-3. Compare every Runtime/Entity/Account root and ordered event/effect/outbox digest per frame.
-4. Fix only the first divergent frame and add its named regression vector.
-5. Repeat until the full WAL is exact.
-6. Prove live Rust J watcher → Entity → batch → receipt.
-7. Run final transaction-kind completeness plus production and `cfg(test)` Rust compilation.
-8. Run `bun run check`, then live TPS gates, then push.
-
-- Transaction-kind completeness is a final audit, not the first implementation activity. Each test
-  case is named for the concrete `AccountTx`/`EntityTx`; do not create meaningless A/B/C groups.
-- Full parity requires production and `cfg(test)` Rust trees, live J coverage, and per-frame roots
-  plus ordered outputs. Replay alone is necessary but not sufficient.
-
-## TPS AND PERFORMANCE
-
-TPS is valid only from the production H1 live path with:
-
-- at least 1,000 active sovereign user Runtimes, packed 200 per OS process;
-- a full 20-second offered window and at least 1,000 offered payments/s;
-- at least 1,000 committed economic operations, zero transport loss and zero pending Account ACKs
-  after the five-second drain;
-- explicit `XLN_HLT_ENGINE=ts|rust`, real WAL/fsync, and the stand lock held for the whole run.
-
-Replay, smoke, microbenchmarks, AccountTx/s and submitted/enqueued counts are never TPS. Startup is a
-separate reusable preparation phase. Before Rust TPS, the exact Rust H1 must pass bootstrap/cutover
-with TS↔Rust roots equal and complete the live J gate.
-
-Performance work begins only after a valid baseline. Build a unique-operation ledger, measure live
-phase wall times, state the Amdahl ceiling, and change only a measured >5% phase. Prefer deleting a
-duplicate encode/hash/materialization/scan or batching an existing transition before adding state.
-Worker trials run sequentially against independent DB copies. See
-[`docs/mainnet-acceptance-gate.md`](docs/mainnet-acceptance-gate.md) and
-[`docs/parallel.md`](docs/parallel.md).
-
-## ENTITY FINANCIAL PIPELINE
-
-One Runtime frame has three dependency-ordered stages:
-
-1. inbound Account inputs;
-2. Entity-owned Paybook/Orderbook work partitioned by canonical shards;
-3. outbound Account proposals after stage 2 completes.
-
-Stage-1 committed Account state is materialized into the exact Entity candidate before stage 2;
-dirty shard roots may remain unsealed until the final stage. Never create a second Account state
-surface or fuse stages 2 and 3.
-
-## TYPESCRIPT AND CODE STYLE
-
-- Validate at source, fail fast, trust at use. Avoid defensive `?.` after validation.
-- Functional/declarative code, immutable updates, small composable functions (<30 lines) and files
-  (<300 lines). Do not add abstractions that are used once or hide protocol ownership.
-- Use `safeStringify` for BigInt, `buffersEqual` for buffers, and
-  `getAvailableJurisdictions()` for contract addresses.
-- `frontend` is UI only; runtime owns logic. `localhost:8080` is the single local entry point.
-- `xln` and markdown filenames are lowercase.
-
-## DEBUGGING AND COMMUNICATION
-
-- Owner preference (updated 2026-09-18): English, MAX ADHD readability. Lead with the result; use short
-  paragraphs, concrete numbers and next actions. Remove filler, repeated context and invented certainty.
-- Proactively recommend the better next step without waiting for an owner question. Prioritize MML:
-  useful unique economic value processed by xln, never double-counted hops, submitted traffic or hype.
-- Use /1000 comparisons only when useful. Label subjective estimates, name the criteria, and separate
-  measured results from hypotheses. Model rankings require task kind, exact identity, sample count and
-  evidence; unknown is not zero. Never present peer praise as verified intelligence or release readiness.
-- Cross-harness collaboration follows [`docs/agent-workflow.md`](docs/agent-workflow.md).
-  This file remains the single project authority; harness personas do not override its invariants.
-- Current autonomous goal and one shared external-model budget are recorded in
-  [`docs/night-work-plan.md`](docs/night-work-plan.md). From 2026-09-06 18:31:42 UTC,
-  the owner authorizes USD 10 per rolling hour across all agents, harnesses and retries.
-  Use the single Quorum reservation owner. Unresolved calls retain their full reserved
-  maximum; old overnight grants and unresolved costs remain in the historical ledger.
-  A new hour, agent or restart never independently renews the same allocation.
-- During authorized sustained work, review the plan and working method every 30 minutes.
-  Repeated failure without new evidence requires a changed hypothesis or approach.
-- For consensus, dump and diff both sides at the first divergent frame. Use
-  `core/qa/runtime-ascii.ts` for scanning and `/tmp/*-frames.json`/`*-final.json` with `jq` for depth.
-- Detailed workflow: [`docs/debug.md`](docs/debug.md) and
-  [`docs/debugging/consensus-debugging-guide.md`](docs/debugging/consensus-debugging-guide.md).
-- Responses use compact ASCII sections, 3–5 bullets maximum per section, metrics first, and end
-  with `NEXT: A) B) C)`.
-- During autonomous long work, report user-visible progress at least every ten minutes. Do not write
-  a separate progress log unless the owner asks.
-- Owner update (2026-09-06): include progress percentages in every progress update, tied to
-  explicit completed/total checks for the current stage; do not imply unmeasured mainnet readiness.
-- If the user asks why/how or requests discussion, give the reasoning; otherwise lead with results.
-- External auditors/models run only when the owner explicitly requests them. One bounded question,
-  immutable SHA, read-only scope, independently verified finding. Never let audit replace execution.
-- Never launch Codex Security scans unless the owner explicitly asks for a Codex Security scan by
-  name. Requests to audit, review, inspect security, or check Solidity mean ordinary manual review.
+- No loops, `let`, mutation, `throw`, classes or `try` outside the exceptions registered in `pure/style/README.md`. A new exception is listed there with the reason no pure expression does the same work at the same cost.
+- Use `Result` with tagged errors, not `throw` and not string errors. Make invalid states unrepresentable; parse into the type instead of asserting it (`as unknown as` is counted).
+- Use `switch`/`case` and the in-house ts-pattern-style `match`, with no library import.
+- One sentence per function, named for what it does; one `const` per statement; named flow steps. No dense one-liners, no comma sequences, no nested ternaries, no positional boolean or bare `true`/`false`/`undefined` arguments (pass a record or a named constant).
+- Lines of at most 120 characters, declarations of at most 50 lines. The new tree starts at a zero baseline on every rule; a hit is allowed only by a row in `pure/style/tree-exceptions.json` with its reason in the README.
+- Comments say why. State a rule in our words and cite the register id or spec property; do not point at og source lines.
+- Restyles are done by the owning thread, not by parallel line-polishing agents. Show a small before and after before a large restyle.
+- og belongs under `rig/og/` only; an identifier that names og's model fails the `og-named` rule.
 
 ## Tools
 
@@ -271,16 +91,31 @@ surface or fuse stages 2 and 3.
 - Project sessions have no `gh` CLI: use the GitHub MCP tools. The backlog is GitHub issues on `adimov-eth/og_xln`.
 - Use Bun. Frontend work is the exception only where a tool needs something else.
 
-## AST-GREP
+## Process
 
-- A search that ends at the matches stays on the CLI: `ast-grep --lang <language> -p '<pattern>'`.
-  Use text grep only for plain text. If `ast-grep` is not on PATH, run it as `uvx --from ast-grep-cli ast-grep`.
-- When one of those matches is the input of the next tool, stop and follow `.grok/skills/arrival/SKILL.md`.
-- Project skills: `.claude/skills/ast-grep` (writing rules) and `.claude/skills/ast-grep-outline`
-  (cheap structural map of files before reading source), vendored from
-  https://github.com/ast-grep/claude-skill.
-- Full reference for rule syntax: https://ast-grep.github.io/llms-full.txt. Load it when a rule
-  does not behave as expected instead of guessing.
+- Pull requests target `development` and open as drafts; small, one slice each. Work on your own `claude/` branch. Never push to `main` or `development` directly. Merge commits only; never force-push or rewrite history on a shared branch.
+- Every pull request into `development` carries exactly one lane label: `core` (Account, Entity, Runtime), `chain` (J, Host, contracts, e2e), `spec`, or `process` (CI, infra, process files; exempt from the one-open-pull-request rule). The first pull request opened holds its lane. Details: `docs/process-lanes.md`.
+- Every pull request names the e2e step it moves (`testnet-e2e`), or says none for CI and process work.
+- One integration owner writes overlapping changes. A separate reviewer looks at each money-code pull request on an exact commit; a later push to money code (`pure/` Account, Entity, Runtime, J, Host) voids that clear. Non-money code merges on green fast checks. A clean merge of `development` into the branch keeps a clear.
+- Merges and closes wait for Arthur's word, except that merging into `development` is delegated to the merge thread (2026-10-01): it merges whatever has its required checks passing, in the order the coordinator sets. The merge thread may push to another branch only to merge `development` into it, with merge commits, and tells the author and reviewers the new head.
+- The convergence plan runs in four slices, each gated green and separately released by Arthur in words: (1) chain observation and recovery, (2) admission and timing safety, preceded by a dispute lifecycle document, (3) finalization and payment reconciliation, (4) complete real scenarios. Do not start, merge or build a slice that has not been released. Progress and the open gates are in issue #178.
+- Promotion to `main` is a `promote/<sha>` snapshot pull request, never a push; see `docs/process-lanes.md`.
+- A protocol rule is decided and written down before its code opens, then modelled, then coded. Do not patch a dispute or HTLC timing rule one audit round at a time.
+- Do not edit another thread's branch. Preserve unfinished local work before closing anything.
+- When a step does not need Arthur's input, keep going. Stop and ask only when you cannot continue without him, or before anything destructive (deleting data, force-pushing, changing anything outside this repository, live chain actions, secrets).
+
+## Communication
+
+- Lead with the result and recommend one path. Ask only when there is a real fork, and do not end with a permission question. No jargon.
+- Cite the source of a claim (a path with line, a command and its output, a run URL). Never invent numbers. Correct your own wrong claims openly.
+- A handoff (a status reply, a note to another thread, memory left for a successor) contains only: the current SHA, the last green command, the first red command and its error, the artifact path, the next single command, and the remaining final gates. Substantive design goes in docs.
+- Put design in files under `plan/`, `spec/` or `docs/`, never in a handoff.
+
+## og (`core/`, `jurisdictions/`)
+
+og is `core/` and `jurisdictions/` at `566c850`. It is frozen reference: never edit it, not even to debug; monkeypatch from the test instead. `bun rules/checks/frozen.ts` fails on any difference. Do not move anything into `core/`.
+
+The former rulebook of this file was og's own (TPS stands, the Rust parity path, frozen-core approval, push-to-`main`, the machine lock) and applies only to work in `core/`, which is closed. For `pure/` those rules do not apply; the project instructions above win. It stays readable in history (`git show 21f163b:AGENTS.md`), and og's invariants and lessons stay readable in `docs/` (`consensus-invariants.md`, `fints.md`, `reject-policy.md`, `wal.md`). Use them as sources of lessons. A rule enters `pure/` only through a decision in the register.
 
 ## Rule Development Process
 
