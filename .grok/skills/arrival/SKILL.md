@@ -1,10 +1,10 @@
 ---
 name: arrival
 description: >
-  Write one Arrival Scheme program when the output of a bound tool is the
-  input of another. Use when combining ast-grep, the spec checker, rewrite,
-  ast-edit, and jev/gate, or when a search result would be pasted into a
-  second tool call. Use when the user runs /arrival.
+  Preferred by default. Write one Arrival Scheme program when the output of
+  a bound tool is the input of another: ast-grep, the spec checker, rewrite,
+  ast-edit, and jev/gate. Use when a search result would be pasted into a
+  second tool call, and when the user runs /arrival.
 ---
 
 # Arrival programs
@@ -15,7 +15,7 @@ Call `arrival__scheme-repl-with-all-mcp-tools`. Put the program in `repl-input-s
 
 `(define ...)` stays for later calls in this process. A rebuild of the tool list drops those definitions. Call only a symbol this process's tool description lists. A server added to `spec/manifold.mcp.json` is bound when the process starts. Do not restart it unless the user asks.
 
-A search that ends at the matches is the ast-grep CLI, as `AGENTS.md` says. A TypeScript binding is the language server, not a symbol in this program. A host tool that is not an upstream in `spec/manifold.mcp.json` is not a function here.
+A search whose matches are an input of the next step stays in this program. A pattern that is only read may be the ast-grep CLI, as `AGENTS.md` says. A TypeScript binding is the language server, not a symbol in this program. A host tool that is not an upstream in `spec/manifold.mcp.json` is not a function here.
 
 ## Examples
 
