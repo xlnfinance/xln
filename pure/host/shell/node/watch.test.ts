@@ -3,6 +3,7 @@
 // whose reads fail goes on at the next tick, and a reorg deeper than the depth ends it.
 import { describe, expect, test } from "bun:test";
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
+import type { ClockParams } from "../../../account/clause/clock.ts";
 import { err, ok } from "../../../kernel/core/result.ts";
 import {
   blockOf, DEPLOYED, entityOf as bytes, evidenceOf, finalizeInput, finalizeOp, hexOf, logOf, must as made,
@@ -18,8 +19,8 @@ import type { Look } from "./daemon.ts";
 import {
   FEW_TRIES, NO_CARRY, type Carry, type Probe, type Traced, type WatchConfig, type WatchPort,
 } from "../watch/loop.ts";
-import { startDaemon, stallNotices } from "./daemon.ts";
-import { ALICE, BOB, configOf, fresh, nodeOf, QUICK, seatOf, until, WAIT } from "./scene.ts";
+import { pollDelayOf, startDaemon, stallNotices } from "./daemon.ts";
+import { ALICE, BOB, configOf, fresh, nodeOf, PACE, QUICK, seatOf, until, WAIT } from "./scene.ts";
 
 const DOWN: PortFault = { _tag: "port", call: "watch head", reason: "connection reset" };
 
@@ -28,7 +29,11 @@ const DEPTH = 2n;
 const NO_PEER = undefined;
 
 /** `rises` is a head that is one block higher at each poll of it: the chain goes on while the node waits. */
-type Chain = Readonly<{ head: bigint; fork: (block: bigint) => bigint; down?: string; rises?: boolean }>;
+type Chain = Readonly<{
+  head: bigint; fork: (block: bigint) => bigint; down?: string; rises?: boolean;
+  /** From the `at`th time the head is asked, it stands `by` blocks higher: the node was away, or the chain ran on. */
+  jump?: Readonly<{ at: number; by: bigint }>;
+}>;
 
 const advanced = (block: bigint, epoch: bigint) =>
   logOf("AccountEpochAdvanced", { left: bytes(1n), right: bytes(2n), ondeltaEpoch: epoch }, block, 0n);
@@ -70,8 +75,11 @@ const inputOf = (kind: Kind) => {
 const portOf = (chain: Chain, log: string, found = [advanced(105n, 1n)], kind = QUIET): WatchPort => ({
   head: () => {
     appendFileSync(log, "head\n");
-    const rose = chain.rises === true ? BigInt(callsOf(log).filter((c) => c === "head").length) - 1n : 0n;
-    return Promise.resolve(chain.down !== undefined && !existsSync(chain.down) ? err(DOWN) : ok(chain.head + rose));
+    const asked = callsOf(log).filter((c) => c === "head").length;
+    const rose = chain.rises === true ? BigInt(asked) - 1n : 0n;
+    const jumped = chain.jump !== undefined && asked >= chain.jump.at ? chain.jump.by : 0n;
+    const down = chain.down !== undefined && !existsSync(chain.down);
+    return Promise.resolve(down ? err(DOWN) : ok(chain.head + rose + jumped));
   },
   block: (number) => {
     appendFileSync(log, `block ${number}\n`);
@@ -216,6 +224,84 @@ describe("host/shell/node a node with a J loop", () => {
     await config.shell.wal.close();
     await config.shell.io.journal.close();
     expect(refused).toEqual(err({ _tag: "clock_depth_off", clock: 0n, depth: DEPTH }));
+  });
+
+  const refusedBy = async (tweak: (clock: ClockParams) => ClockParams, tickMs = QUICK) => {
+    const dir = fresh();
+    const log = `${dir}/calls.log`;
+    writeFileSync(log, "");
+    const seat = await seatOf(ALICE, dir, 0);
+    const config = await configOf(seat, NO_PEER, { tickMs, watch: watchOf(STRAIGHT, log, [], VALUE_TRACED) });
+    const setup = { ...config.boot.setup, clock: tweak(config.boot.setup.clock) };
+    const refused = await startDaemon({ ...config, boot: { ...config.boot, setup } }, seat.listener);
+    await config.shell.wal.close();
+    await config.shell.io.journal.close();
+    return refused;
+  };
+
+  test("R-HOP-SLACK a node that may hold value is not started without the chain's slot and missed slots", async () => {
+    expect(await refusedBy((clock) => ({ ...clock, pace: undefined }))).toEqual(err({ _tag: "no_pace" }));
+    expect((await refusedBy((clock) => clock)).ok).toBe(true);
+  });
+
+  test("R-POLL-DELAY a node whose poll delay is shorter than its own tick implies is not started", async () => {
+    const pace = (pollDelay: bigint) => (clock: ClockParams): ClockParams =>
+      ({ ...clock, pace: { ...PACE, pollDelay } });
+    expect(await refusedBy(pace(1n))).toEqual(err({ _tag: "poll_delay_below_tick", pollDelay: 1n, least: 2n }));
+    expect((await refusedBy(pace(2n))).ok).toBe(true);
+    expect(await refusedBy(pace(2n), 12_001)).toEqual(err({ _tag: "poll_delay_below_tick", pollDelay: 2n, least: 3n }));
+    expect([pollDelayOf(50, 12n), pollDelayOf(12_000, 12n), pollDelayOf(12_001, 12n), pollDelayOf(1, 1n)])
+      .toEqual([2n, 2n, 3n, 2n]);
+  });
+
+  test("R-POLL-DELAY a poll later than the bound is told loud and blinds the Entity until one is on time", async () => {
+    const dir = fresh();
+    const log = `${dir}/calls.log`;
+    writeFileSync(log, "");
+    const watch = watchOf({ ...STRAIGHT, jump: { at: 4, by: 50n } }, log, [advanced(105n, 1n)], VALUE_TRACED);
+    const alice = await nodeOf(await seatOf(ALICE, dir, 0), NO_PEER, { tickMs: QUICK, watch });
+    const tags = (look: Look) => rowsOf(look).flatMap(inputsOf)
+      .map((i) => i._tag).filter((t) => t === "j_blind" || t === "j_blind_over");
+    expect(await until(async () => tags(await alice.look()).length >= 4, WAIT)).toBe(true);
+    const look = await alice.stop();
+    expect(tags(look).slice(0, 4)).toEqual(["j_blind", "j_blind_over", "j_blind", "j_blind_over"]);
+    expect(told(look, "poll_late")).toBe(1);
+    expect(look.notices.find((n) => n._tag === "poll_late")).toMatchObject({ bound: PACE.pollDelay });
+    expect(look.fatal).toBeUndefined();
+    expect(blindOf(look)).toBe(false);
+    const calls = callsOf(log);
+    const after = calls.slice(calls.findLastIndex((c) => c.startsWith("block")))
+      .filter((c) => c === "head" || c.startsWith("probe"));
+    expect(after.slice(0, 3)).toEqual(["head", "head", `probe ${112n + 50n}`]);
+    const rise = rowsOf(look).flatMap((r) => (r.input._tag === "j_observation" ? [r.input.seconds] : []));
+    expect(rise).toEqual([blockOf(110n).timestamp, blockOf(160n).timestamp]);
+  });
+
+  test("R-POLL-DELAY a poll with exactly the bound of final blocks unread is on time, one more is late", async () => {
+    const late = async (pollDelay: bigint): Promise<number> => {
+      const dir = fresh();
+      const log = `${dir}/calls.log`;
+      writeFileSync(log, "");
+      const watch = watchOf(STRAIGHT, log, [advanced(105n, 1n)], VALUE_TRACED);
+      const pace = { ...PACE, pollDelay };
+      const alice = await nodeOf(await seatOf(ALICE, dir, 0), NO_PEER, { tickMs: QUICK, watch, pace });
+      expect(await until(async () => delivered(await alice.look()), WAIT)).toBe(true);
+      return told(await alice.stop(), "poll_late");
+    };
+    expect(await Promise.all([late(10n), late(9n)])).toEqual([0, 1]);
+  });
+
+  test("R-POLL-DELAY a node that holds no value is never told it was late, whatever it finds unread", async () => {
+    const dir = fresh();
+    const log = `${dir}/calls.log`;
+    writeFileSync(log, "");
+    const watch = watchOf({ ...STRAIGHT, jump: { at: 2, by: 50n } }, log, [advanced(105n, 1n)], QUIET);
+    const pace = { ...PACE, pollDelay: 2n };
+    const alice = await nodeOf(await seatOf(ALICE, dir, 0), NO_PEER, { tickMs: QUICK, watch, pace });
+    expect(await until(async () => (await alice.look()).cursor === 160n, WAIT)).toBe(true);
+    const look = await alice.stop();
+    expect(told(look, "poll_late")).toBe(0);
+    expect(blindOf(look)).toBe(false);
   });
 
   test("R-JLOOP a node tells its Entity what the chain's final blocks hold; its view moves up to them", async () => {
@@ -600,5 +686,41 @@ describe("host/shell/node a node with a J loop", () => {
     expect(look.fatal?._tag).toBe("disk");
     expect(look.cursor).toBe(START);
     expect(rowsOf(look).some((r) => r.input._tag === "j_height" || r.input._tag === "j_observation")).toBe(false);
+  });
+
+  test("R-REGISTRY-AT-VIEW a node that may hold value and ignores the registry is not started", async () => {
+    const dir = fresh();
+    const log = `${dir}/calls.log`;
+    writeFileSync(log, "");
+    const seat = await seatOf(ALICE, dir, 0);
+    const config = await configOf(seat, NO_PEER, {
+      tickMs: QUICK, watch: watchOf(STRAIGHT, log, [advanced(105n, 1n)], VALUE_TRACED), registry: false,
+    });
+    const refused = await startDaemon(config, seat.listener);
+    await config.shell.wal.close();
+    await config.shell.io.journal.close();
+    expect(refused).toEqual(err({ _tag: "registry_off" }));
+  });
+
+  test("R-REGISTRY-AT-VIEW a failed read is told once for its hashlock, however often it is asked", async () => {
+    const dir = fresh();
+    const log = `${dir}/calls.log`;
+    writeFileSync(log, "");
+    const read = (hashlock: string) => {
+      appendFileSync(log, `registry ${hashlock}\n`);
+      return Promise.resolve(err(DOWN));
+    };
+    const alice = await nodeOf(await seatOf(ALICE, dir, 0), NO_PEER, {
+      tickMs: QUICK, watch: watchOf(STRAIGHT, log, [], VALUE_TRACED), read,
+    });
+    const forward = { _tag: "forward", hashlock: hexOf(9n), from: ALICE, to: BOB } as const;
+    await alice.tell(forward);
+    await alice.tell(forward);
+    const look = await alice.stop();
+    expect(callsOf(log).filter((c) => c.startsWith("registry")).length).toBeGreaterThanOrEqual(2);
+    expect(told(look, "registry_unread")).toBe(1);
+    expect(look.notices.find((n) => n._tag === "registry_unread")).toEqual({
+      _tag: "registry_unread", hashlock: hexOf(9n), reason: "watch head: connection reset",
+    });
   });
 });

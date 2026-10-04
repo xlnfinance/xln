@@ -19,9 +19,11 @@ export const stamp = (ms: bigint): Timestamp => ms as Timestamp;
 export const inputFor = (to: EntityId, at: bigint, ...inputs: readonly EntityInput[]): Input =>
   ({ _tag: "entity", at: stamp(at), to, inputs });
 
-/** The Host saw the J chain reach `height`. */
-export const heightAt = (at: bigint, height: bigint): Input =>
-  ({ _tag: "j_height", at: stamp(at), height: heightOf(height) });
+/** The Host saw the J chain reach `height`, whose block's header gave `seconds` when the test cares. */
+export const heightAt = (at: bigint, height: bigint, seconds?: bigint): Input =>
+  (seconds === undefined
+    ? { _tag: "j_height", at: stamp(at), height: heightOf(height) }
+    : { _tag: "j_height", at: stamp(at), height: heightOf(height), seconds });
 
 export const started = (...ids: readonly EntityId[]): Runtime => startRuntime(setup, ids.map(emptyEntity));
 

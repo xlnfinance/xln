@@ -14,7 +14,7 @@
 import { err, flatMap, foldResult, map, ok, type Result } from "../kernel/core/result.ts";
 import type { Tagged } from "../kernel/core/tagged.ts";
 import { jHeight, type HeightFault, type JHeight } from "../account/clause/clock.ts";
-import { finalizedSecrets, startedBody, type Read } from "./calldata/decode.ts";
+import { finalizedProof, finalizedSecrets, startedBody, type Read } from "./calldata/decode.ts";
 import {
   decodeLogs, type Address, type Bytes32, type ChainEvent, type Deployed, type LogFault, type RawLog,
 } from "./log.ts";
@@ -130,9 +130,16 @@ export const withCalldata = (p: Prepared, inputs: ReadonlyMap<Bytes32, readonly 
       return { ...e, body, unread: body === undefined };
     }
     if (e._tag !== "dispute_finalized" || e.shown._tag === "read") return e;
-    const read = (inputs.get(e.tx) ?? []).map((input) => finalizedSecrets(input, e.evidence))
-      .filter((r) => r !== undefined);
-    return { ...e, shown: read.length > 0 ? { _tag: "read", secrets: [...new Set(read.flat())] } : { _tag: "unread" } };
+    const carried = inputs.get(e.tx) ?? [];
+    const read = carried.map((input) => finalizedSecrets(input, e.evidence)).filter((r) => r !== undefined);
+    const proof = carried.flatMap((input) => {
+      const found = finalizedProof(input, e.evidence, e.bodyHash);
+      return found === undefined ? [] : [found];
+    }).at(0);
+    const readShown = { _tag: "read" as const, secrets: [...new Set(read.flat())] };
+    const unreadShown = { _tag: "unread" as const };
+    const shown = read.length > 0 ? readShown : unreadShown;
+    return { ...e, shown, ...(proof === undefined ? {} : { proof }) };
   }),
 });
 

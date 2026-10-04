@@ -1,0 +1,114 @@
+{
+ "id": "R-HOP-SLACK",
+ "statement": "A deadline stays in the unit the contract compares: it is a J height in the hold and the second `terms.secondsOf` gives it in the proof body, and it is never replaced by a stored height. A node reads it against the second of the J block at its view, the header of the same block as the height (never the tip's, never a wall clock or an offset), which travels with the height from the J loop to the Entity (`j_height.seconds`, a field of the WAL row, so a replay has it). blocksLeft(d) = floor((secondsOf(d) - headSeconds) / slot) - missed, and a deadline is read as e(d) = view + min(d - view, blocksLeft(d)): it can shorten, never lengthen. A hub forwards a lock held until d_in as one held until d_out only if e(d_out) is above the view and every claim it may have to land fits between the two deadlines, measured between them and not from now (the payee's reveal may land at d_out itself): min(d_in - d_out, floor((secondsOf(d_in) - secondsOf(d_out)) / slot) - missed) is at least reaction + 1 (R-LAG-ONE). Missed slots cancel between two effective deadlines but not in the seconds window itself, so `missed` stays in the gap. Whenever the gap holds at the view, the two effective deadlines are at least reaction + 1 apart, whether one, both or neither is capped by blocksLeft (a property over random heads). A hub that does not know the second of its view forwards nothing. `slot` and `missed` are in the clock (`ClockParams.pace`, from the chain's manifest or config, no literal), and a node that may hold value does not start without them. There is no deadline-in-seconds knob: each deadline comes from its own lock. Owed: the Arrival and Quint models of the gate; the second of the view block at a boot on a quiet chain is learned with the first height past the view (until then nothing is forwarded).",
+ "source": "coordinator ruling 10-03 03:32 and 03:50 (reserve bound, hub slack gate); builder; R-DEADLINE-TIMESTAMP; consolidation-plan.md D9",
+ "layers": {
+  "arrival": "owed: spec thread (the hub's gate over two deadlines read through the chain's seconds)",
+  "quint": "owed: spec thread (the hub's gate over two deadlines read through the chain's seconds)",
+  "contract": "n/a: the contract compares seconds (DeltaTransformer.sol, revealedUntilTimestamp); the node reads them, it does not change the contract",
+  "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
+  "ts": "hold"
+ },
+ "killers": [
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-HOP-SLACK a deadline is read as sooner, never later: a head second ahead of the line shortens it"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-HOP-SLACK a head second ahead of wall time, or behind it, never lengthens any deadline"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-HOP-SLACK a hub forwards only if both deadlines are live and every claim fits between them"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-HOP-SLACK a missed slot shortens the blocks that fit, and a forward that no longer fits is refused"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-HOP-SLACK whenever a forward fits, its two effective deadlines are a reaction and a block apart"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-HOP-SLACK a lock whose claims fit is forwarded one hop sooner, as signed"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-HOP-SLACK a missed slot shrinks the blocks left, and the forward that no longer fits is refused"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-HOP-SLACK a head second ahead of the line never lengthens a deadline: it can only refuse"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-HOP-SLACK a hub that does not know the second of its view forwards nothing"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-HOP-SLACK a clock with no pace forwards as before, whatever second the view stands at"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-HOP-SLACK a lock with no room for another hop is given up whatever the seconds say"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-HOP-SLACK the second of a height's block waits with it, and the highest height's stands for the rest"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-HOP-SLACK a pace is a positive slot, no negative missed or delay, and a reserve over the reaction"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-HOP-SLACK blocks are floored toward minus infinity, and missed slots come off the blocks that fit"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-HOP-SLACK a node that may hold value is not started without the chain's slot and missed slots"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-HOP-SLACK the second of the view's block rises with the height and is the WAL's, so a replay has it"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-HOP-SLACK the blocks the deadlines are apart bind as well as the seconds they are apart"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-HOP-SLACK a Runtime started with the second of its view forwards a lock whose claims fit"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-HOP-SLACK the second of a block the view has passed is not taken back by a height that does not rise"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-HOP-SLACK a Runtime that does not know the second of its view forwards nothing until a height does"
+  }
+ ]
+}

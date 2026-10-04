@@ -30,7 +30,16 @@ export const entityId = (text: string): Result<EntityId, BadEntityId> =>
 export const sideOf = (self: EntityId, peer: EntityId): Side => (self < peer ? "left" : "right");
 
 /** What a frame of an Account can be refused for: the Account's own faults, and that the node's signature is out. */
-export type PeerFault = AccountFault | Tagged<"frozen"> | Tagged<"reveal_unknown"> | Tagged<"revealed_on_chain">;
+export type PeerFault =
+  | AccountFault | Tagged<"frozen"> | Tagged<"reveal_unknown"> | Tagged<"revealed_on_chain">
+  | Tagged<"registry_unknown"> | Tagged<"paid_on_chain">;
+
+/**
+ * What the chain's registry (`DeltaTransformer.hashToTimestamp`) held for a hashlock in the state of J block `at`: the
+ * second a secret was first shown at, or 0 when none had been (R-REGISTRY-AT-VIEW). The Host reads it at the view the
+ * frame decides at and hands it over with the frame, so a replay decides the same.
+ */
+export type Reading = Readonly<{ hashlock: string; at: bigint; seconds: bigint }>;
 
 /** One side of an Account as the Entity holds it. */
 export type EntityReplica = Replica<AccountTx, AccountState, PeerFault>;
@@ -118,7 +127,20 @@ export type ChainFacts = Readonly<{
   lost: boolean;
   /** Exact unresolved payloads, delivered through Runtime WAL inputs; absent only in older WALs. */
   readWaits?: readonly ReadWait[];
+  /**
+   * A finalize whose proof this node cannot name (R-FINALIZATION-UNKNOWN). The account stays quiet until a later
+   * observation carries this `finalBodyHash`. Absent when the nonce was named, or when no such finalize has landed.
+   */
+  unresolved?: Readonly<{ epoch: bigint; finalBodyHash: string | undefined }>;
+  /**
+   * A frame the peer signed that this node refused while it was quiet (R-DISPUTE-FREEZE). The state is not committed.
+   * The hash is what a later finalize can be named by, which is how "the peer holds it signed" stays a proof.
+   */
+  seen?: readonly SeenProof[];
 }>;
+
+/** A proof the peer signed and this node did not commit: its nonce, the hash of the state it would commit, its txs. */
+export type SeenProof = Readonly<{ nonce: bigint; hash: string; txs: readonly AccountTx[] }>;
 
 /**
  * A dispute the peer started against this node in the epoch it is in (R-DISPUTE-WATCH): the proof it opened with
@@ -197,7 +219,7 @@ export type JEvent =
   >
   | Tagged<"j_countered", { peer: EntityId; nonce: bigint; proposerIsLeft: boolean; bodyHash: string }>
   | Tagged<"j_window_over", { peer: EntityId }>
-  | Tagged<"j_dispute_over", { peer: EntityId; late?: boolean }>
+  | Tagged<"j_dispute_over", { peer: EntityId; late?: boolean; nonce?: bigint; body?: ProofBody }>
   | Tagged<"j_start_lapsed", { peer: EntityId; nonce: bigint }>
   | Tagged<"j_counter_lapsed", { peer: EntityId; nonce: bigint }>
   | Tagged<"j_collateral", { peer: EntityId; token: TokenId; collateral: bigint; ondelta: bigint }>
@@ -380,4 +402,5 @@ export type Notice =
   | Tagged<"cosign_refused", { from: EntityId; op: CosignOp; fault: EntityFault }>
   | Tagged<"message_refused", { from: EntityId; outcome: Outcome<PeerFault> }>
   | Tagged<"message_unsigned", { from: EntityId; head: FrameHash; why: "missing" | "wrong" }>
-  | Tagged<"tx_refused", { peer: EntityId; refused: Refused<AccountTx, PeerFault> }>;
+  | Tagged<"tx_refused", { peer: EntityId; refused: Refused<AccountTx, PeerFault> }>
+  | Tagged<"finalization_unknown", { peer: EntityId; epoch: bigint; finalBodyHash: string | undefined }>;

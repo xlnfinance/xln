@@ -58,6 +58,11 @@ module htlc {
   const RSV: int                // the reserve: the upstream lock expires at a view strictly past TU + RSV
   const CHAIN: bool             // the hub's claim on U is a chain claim, counted until the lock's second, TU + SLK
   const RD: int                 // ticks the read of a finalize's calldata takes beyond hearing the finalize (a provider that fails the trace for a while)
+  const LK: int                 // the tick the hub's paybook entry for the lock exists from: a reveal it hears before then reaches no entry (frame.ts named, paybook.ts revealed)
+  const ADM: int                // the registry read at the lock's admission, -1 none, else how many ticks behind the Entity's view the read block is (PR 176 owed row)
+  const HG: bool                // the expiry's wait is the code's height gate (the view past the deadline plus the reserve), not the lock's second
+  const MISSED: int             // slots the chain may miss; subtracted only from the seconds arm of the forward gap
+  const FWD: bool               // the hub forwards by the seconds gate: both holds of D start false until forwardLock
   const LATE: bool              // the Entity is told the finalize before the read of its calldata lands, and the read after (PR 171 before the watch-wait design)
 
   pure val W = 4                // the dispute window, ticks
@@ -104,7 +109,10 @@ module htlc {
     u: int,                            // the lock on U: 0 open, 1 claimed by H, 2 expired to P
     collected: int,
     finals: int, lateReveal: bool,
-    viaReg: bool                       // the hub claimed on U by the registry (BACK)
+    viaReg: bool,                      // the hub claimed on U by the registry (BACK)
+    admitted: bool,                    // admitLock has run: a dissolved hold is not opened again
+    headSecond: int,                   // the second of the block at the view; meaningful only when secondKnown
+    secondKnown: bool                  // absent is not 0: 0 would be a known second
   }
 
   var st: St
@@ -117,11 +125,13 @@ module htlc {
   action init: bool = {
     st' = {
       now: 1, chEpoch: 1, disp: NO_DISP, revealedAt: 0, log: List(),
-      seen: both(0), v: both({ epoch: 1, rec: false, hold: true }),
+      // LK > 0: the hub's entry does not exist yet. FWD: neither side's onward hold exists until forwardLock.
+      seen: both(0), v: Map(Hub -> { epoch: 1, rec: false, hold: LK == 0 and not(FWD) }, Payee -> { epoch: 1, rec: false, hold: not(FWD) }),
       knows: false, pend: NO_PEND,
       askS: both(NO_ASK), askR: NO_ASK, askC: NO_ASK,
       paidFrame: 0, paidChain: 0, u: 0, collected: 0,
-      finals: 0, lateReveal: false, viaReg: false
+      finals: 0, lateReveal: false, viaReg: false, admitted: false,
+      headSecond: 1, secondKnown: true
     }
   }
 
@@ -144,6 +154,11 @@ module htlc {
 
   // The registry shows a reveal the contract counts for the lock on U (by its second), and the hub's read at depth has it.
   pure def regShows(s: St): bool = s.revealedAt != 0 and s.revealedAt <= TUX
+
+  // The admission read, ADM ticks behind the view, shows a reveal the contract counts for TD (by TDX, slack already inside that second).
+  // A reveal is in that read only once depth has passed it: revealedAt + PD + ADM < now. ADM < 0 is no read.
+  pure def admissionShows(s: St): bool =
+    ADM >= 0 and s.revealedAt != 0 and s.revealedAt <= TDX and s.revealedAt + PD + ADM < s.now
   pure def regClaimable(s: St): bool = BACK and s.u == 0 and regShows(s) and s.revealedAt + PD <= s.now
 
   pure def owed(s: St): bool = or {
@@ -182,7 +197,8 @@ module htlc {
       st' = { ...st,
         seen: st.seen.set(s, i + 1),
         v: st.v.set(s, w2),
-        knows: st.knows or (s == Hub and ((e.kind == 1 and SEE) or (e.kind == 2 and TSEE) or (ARGS and e.shown and not(LATE)))),
+        // An event emitted before the entry exists (e.t <= LK) reaches no paybook entry, even if it is heard later. LK = 0 is every event.
+        knows: st.knows or (s == Hub and e.t > LK and ((e.kind == 1 and SEE) or (e.kind == 2 and TSEE) or (ARGS and e.shown and not(LATE)))),
         // LATE: the finalize reaches the paybook before its secret, so the entry for the carried hold is dissolved and the inbound lock on U is given up
         // (R-HOLD-DISSOLVE, frame.ts `finalized`); a secret read afterwards finds no locked entry (`revealed` acts only on locked ones)
         u: if (LATE and s == Hub and e.kind == 3 and e.carried and DISSOLVE and not(st.knows) and st.u == 0) 2 else st.u,
@@ -317,10 +333,15 @@ module htlc {
 
   // The upstream lock expires to the payer once the view is strictly past TU + RSV. A hub that can still claim does not co-sign it (CHAIN),
   // and with BACK it does not co-sign it before its read at depth covers the lock's second, nor while the registry shows a reveal by it.
+  // `regSeen`: the registry's reveal the hub's read at its view block shows now: it landed PD ticks ago or more, and the contract counts it for the lock.
+  pure def regSeen(s: St): bool = regShows(s) and s.revealedAt + PD <= s.now
+  pure def expirable(s: St): bool = all {
+    s.u == 0, s.now > TU + RSV,
+    CHAIN implies not(s.knows and s.now <= TUX),
+    BACK implies ((if (HG) s.now > TU + RSV + PD else s.now >= TUX + PD) and not(regSeen(s)))
+  }
   action expireU: bool = all {
-    st.u == 0, st.now > TU + RSV,
-    CHAIN implies not(st.knows and st.now <= TUX),
-    BACK implies (st.now >= TUX + PD and not(regShows(st))),
+    expirable(st),
     st' = { ...st, u: 2 }
   }
 
@@ -330,9 +351,41 @@ module htlc {
     st' = { ...st, u: 1, collected: 1, viaReg: true }
   }
 
+  // The hub's downstream hold starts false when LK > 0. This is the step that sets it, at or after LK, unless the admission read
+  // already shows a reveal the contract counts. A backstop on the upstream expiry is not this read.
+  action admitLock: bool = {
+    val w = st.v.get(Hub)
+    all {
+      LK > 0, not(st.admitted), not(w.hold), st.now >= LK, not(admissionShows(st)),
+      st' = { ...st, admitted: true, v: st.v.set(Hub, { ...w, hold: true }) }
+    }
+  }
+
+  // Seconds between the inbound deadline and the outbound one, less missed slots. Slack cancels (TUX - TDX = HOP).
+  pure def forwardGap: int = if (HOP < (TUX - TDX) - MISSED) HOP else (TUX - TDX) - MISSED
+
+  // Blocks the known head second still leaves before a deadline's second, less missed slots. Slot is one tick here.
+  pure def blocksLeftOf(s: St, deadlineSeconds: int): int = (deadlineSeconds - s.headSecond) - MISSED
+
+  // Pace, a known head second, the onward lock still live past the view, and the gap covers the reaction (depth + poll + lag + 1).
+  // PD is depth plus poll. A missing head second forwards nothing. MISSED shortens only forwardGap.
+  // The onward lock is live when both the height left and the blocks the head second still leaves are positive:
+  // that is effectiveDeadline(outbound) > view, and min of those two lengths is the room.
+  pure def mayForward(s: St): bool =
+    FWD and s.secondKnown and (TD > s.now) and (blocksLeftOf(s, TDX) > 0) and (forwardGap >= PD + LAG + 1)
+
+  action forwardLock: bool = {
+    val hub = st.v.get(Hub)
+    val payee = st.v.get(Payee)
+    all {
+      mayForward(st), not(hub.hold), not(payee.hold),
+      st' = { ...st, v: st.v.set(Hub, { ...hub, hold: true }).set(Payee, { ...payee, hold: true }) }
+    }
+  }
+
   action step: bool = any {
     tick, receive, ack, sendRelease, askReveal, landReveal, landRevealDirect, landFinal, landFinalShown, askClaim, landClaim, expireU,
-    claimByRegistry, readLate,
+    claimByRegistry, readLate, admitLock, forwardLock,
     { nondet s = SIDES.oneOf() any { hear(s), askStart(s), landStart(s) } }
   }
 

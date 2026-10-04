@@ -335,12 +335,63 @@ jobs:
         if: steps.marker.outputs.cache-hit != 'true'
         run: mkdir -p .spec-passed && echo ok > .spec-passed/arrival
 
+  # The scripted fork (testnet-e2e/run.ts). Same slow lane as the seeds: a pull request into development skips it.
+  gate-fork:
+    name: One gate (fork)
+    if: ${{ github.event_name != 'pull_request' || github.base_ref != 'development' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Setup Node 22
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22.13.0'
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: 1.4.0
+
+      - name: Setup Foundry
+        uses: foundry-rs/foundry-toolchain@908c540300062bd5a7e473851cdb4282204cee09 # v1
+        with:
+          version: v1.7.1
+
+      - name: Cache dependencies
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ~/.bun/install/cache
+          key: ${{ runner.os }}-bun-${{ hashFiles('**/bun.lock', '**/package.json') }}
+          restore-keys: |
+            ${{ runner.os }}-bun-
+
+      - name: Cache solc
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ~/.cache/hardhat-nodejs
+          key: ${{ runner.os }}-solc-${{ hashFiles('contracts/hardhat.config.ts') }}
+
+      - name: Install dependencies
+        run: |
+          bun install --frozen-lockfile
+          cd pure
+          bun install --frozen-lockfile
+
+      - name: Build the contracts the fork compares
+        run: bash contracts/scripts/build.sh
+
+      - name: Scripted fork
+        run: bun testnet-e2e/run.ts
+
   # The single result to require. It fails when any part of the gate failed, was cancelled or was skipped, except on a pull request into
   # development, where the slow parts are skipped by design (their `if`) and only the two fast parts, which never skip, must pass.
   one-gate:
     name: One gate
     if: ${{ always() }}
-    needs: [gate-static, gate-tests, gate-seeds, gate-quint, gate-arrival]
+    needs: [gate-static, gate-tests, gate-seeds, gate-quint, gate-arrival, gate-fork]
     runs-on: ubuntu-latest
     steps:
       - name: Every part passed
@@ -351,13 +402,15 @@ jobs:
           SEEDS: ${{ needs.gate-seeds.result }}
           QUINT: ${{ needs.gate-quint.result }}
           ARRIVAL: ${{ needs.gate-arrival.result }}
+          FORK: ${{ needs.gate-fork.result }}
         run: |
-          echo "fast-lane=$FAST static=$STATIC tests=$TESTS seeds=$SEEDS quint=$QUINT arrival=$ARRIVAL"
+          echo "fast-lane=$FAST static=$STATIC tests=$TESTS seeds=$SEEDS quint=$QUINT arrival=$ARRIVAL fork=$FORK"
           test "$STATIC" = success
           test "$TESTS" = success
           test "$SEEDS" = success || test "$FAST:$SEEDS" = true:skipped
           test "$QUINT" = success || test "$FAST:$QUINT" = true:skipped
           test "$ARRIVAL" = success || test "$FAST:$ARRIVAL" = true:skipped
+          test "$FORK" = success || test "$FAST:$FORK" = true:skipped
 
   # og's inherited Hardhat suite is frozen at 566c850 and known red (122 pass, 79 fail). It is reported, never a gate:
   # no other job needs it, and continue-on-error keeps its red from failing the run that carries our own signals.

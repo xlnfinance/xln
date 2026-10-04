@@ -11,7 +11,7 @@ import type { Block } from "../../../j/watch.ts";
 import { A } from "../../../kernel/encoding/abi.ts";
 import { hexToBytes } from "../../../kernel/encoding/bytes.ts";
 import { all, err, flatMap, map, mapErr, ok, traverse, type Result } from "../../../kernel/core/result.ts";
-import type { PortFault } from "../submit/chain.ts";
+import type { PortFault, RegistryRead } from "../submit/chain.ts";
 import type { Probe, Traced, WatchPort } from "../watch/loop.ts";
 import { bad, hexQuantity, oneWord, quantity, withArguments, wordsOf, type ReplyFault } from "./calls.ts";
 import { fieldsOf, isText, listOf, portFault, readsOf, type Fields, type Rpc } from "./port.ts";
@@ -229,6 +229,25 @@ const logsOf = async (
   if (!head.ok) return head;
   const tail = await logsOf(reads, deployed, middle + 1n, to);
   return tail.ok ? ok([...head.value, ...tail.value]) : tail;
+};
+
+/**
+ * The transformer's registry, `hashToTimestamp(hashlock)`, in the state of block `at`: the second a secret was first
+ * shown at, 0 if none was (R-REGISTRY-AT-VIEW). The block is named by its number, the view the Entity decides at, which
+ * lies `depth` blocks under the head. A node that no longer serves that state says so, and that is an answer about the
+ * past (`pruned`); anything else it says, or a reply that is not one word, is the port's fault.
+ */
+export const registryRead = (rpc: Rpc, deployed: Deployed): RegistryRead => {
+  const { depository, transformer } = deployed;
+  const reads = readsOf(rpc, { depository });
+  return async (hashlock, at) => {
+    const key = bytes32(hashlock);
+    const data = key.ok ? withArguments("hashToTimestamp(bytes32)", [A.b32(key.value)]) : err(bad("not a hashlock"));
+    if (!data.ok) return err(portFault("registry", data.error.why));
+    const call = { to: transformer, data: data.value };
+    const got = await reads.read("registry", "eth_call", [call, hexQuantity(at)], oneWord);
+    return !got.ok && PRUNED.test(got.error.reason) ? ok("pruned") : got;
+  };
 };
 
 export const watchPort = (rpc: Rpc, deployed: Deployed): WatchPort => {

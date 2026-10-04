@@ -609,7 +609,10 @@ describe("entity/paybook the hub learns a secret the Account in dispute cannot c
     expect(heard(alice)).toEqual(new Map());
     expect(heard({ ...alice, pending: { frame, after, head: alice.head } }))
       .toEqual(new Map([[HASHLOCK, 100n]]));
-    expect(heard({ ...alice, mempool: [{ _tag: "lock", token: GOLD, hold }] })).toEqual(new Map([[HASHLOCK, 100n]]));
+    // A queued lock behind a frame still in flight stays queued through the frame, so it is still named at its end.
+    const waiting = { frame, after: alice.state, head: alice.head };
+    const queued = { ...alice, pending: waiting, mempool: [{ _tag: "lock", token: GOLD, hold }] } as const;
+    expect(heard(queued)).toEqual(new Map([[HASHLOCK, 100n]]));
   });
 
   test("R-WATCH-CALLDATA a blind Entity co-signs no expiry of any hold", () => {

@@ -145,6 +145,8 @@ export type Stall = Readonly<{ tx: Bytes32; peer: Bytes32; fault: PortFault; tri
 export type Delivery = Readonly<{
   watch: Watch; events: readonly EntityInput[]; height: JHeight; carry: Carry; stalls: readonly Stall[];
   untraceable: boolean;
+  /** The second of the block at `height`, from its header; and how many final blocks the poll found undelivered. */
+  seconds: bigint; unread: bigint;
 }>;
 
 /** The cursor at the chain's own block `number`, final by the node's own choice (its view). */
@@ -473,6 +475,25 @@ const lostTold = (lost: ReadonlyMap<Bytes32, bigint>): Result<readonly EntityInp
   traverse([...lost], ([peer, from]) =>
     map(peerOf({ peer }), (id): EntityInput => ({ _tag: "j_account_lost", peer: id, from })));
 
+/** The bytes and Account readings a later poll still owes, for the events this delivery did not tell. */
+const carriedOn = (
+  batch: Prepared, hosted: Bytes32, accounts: Accounts, calldata: Calldata, carry: Carry, plan: Plan,
+): Pick<Carry, "reads" | "readings"> => {
+  const kept = new Set([...plan.held, ...plan.reading].flatMap((e) => ("tx" in e ? [e.tx] : [])));
+  const found = calldata.gathered.found;
+  const reads = new Map(calldata.wanted.flatMap((tx) => {
+    const got = found.get(tx);
+    const traced = carry.reads.get(tx)?.traced === true || calldata.traced.has(tx);
+    if (got === undefined || !(kept.has(tx) || plan.stalled.has(tx))) return [];
+    return [[tx, { reads: got, traced }] as const];
+  }));
+  const open = readings({ ...batch, events: [...plan.held, ...plan.reading] }, [hosted]).flatMap((reading) => {
+    const at = accounts.get(readingKey(reading));
+    return at === undefined ? [] : [[readingKey(reading), at] as const];
+  });
+  return { reads, readings: new Map(open) };
+};
+
 /**
  * The next delivery, or nothing when no block past the cursor is final yet. `hosted` is the Entity the node hosts, and
  * `windows` the dispute windows it waits on: each is told to it, once a delivery's last block is past its end.
@@ -509,24 +530,17 @@ export const poll = async (
   if (!gave.ok) return gave;
   const events = traverse(step.value.events, ({ event }) => inputOf(event));
   if (!events.ok) return events;
-  const { stalled } = plan;
-  const kept = new Set([...plan.held, ...plan.reading].flatMap((e) => ("tx" in e ? [e.tx] : [])));
-  const found = calldata.gathered.found;
-  const reads = new Map(calldata.wanted.flatMap((tx) => {
-    const got = found.get(tx);
-    const traced = carry.reads.get(tx)?.traced === true || calldata.traced.has(tx);
-    return got === undefined || !(kept.has(tx) || stalled.has(tx)) ? [] : [[tx, { reads: got, traced }] as const];
-  }));
-  const carried = readings({ ...batch, events: [...plan.held, ...plan.reading] }, [hosted]).flatMap((r) => {
-    const at = accounts.get(readingKey(r));
-    return at === undefined ? [] : [[readingKey(r), at] as const];
-  });
+  const carried = carriedOn(batch, hosted, accounts, calldata, carry, plan);
   return ok({
     watch: step.value.watch,
     events: [...gave.value, ...told.value.begun, ...events.value, ...remembered.value, ...told.value.over],
     height: step.value.height,
-    carry: { failing: stalled, reads, held: plan.held, reading: plan.reading, readings: new Map(carried) },
-    stalls: [...stalled].map(([tx, f]): Stall => ({ tx, peer: plan.peers.get(tx) ?? hosted, ...f })),
+    seconds: step.value.watch.applied.timestamp,
+    unread: finalizedAt(watch.depth, range.head) - watch.applied.number,
+    carry: {
+      failing: plan.stalled, reads: carried.reads, held: plan.held, reading: plan.reading, readings: carried.readings,
+    },
+    stalls: [...plan.stalled].map(([tx, f]): Stall => ({ tx, peer: plan.peers.get(tx) ?? hosted, ...f })),
     untraceable: calldata.gathered.noMethod.size > 0,
   });
 };

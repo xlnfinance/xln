@@ -2,14 +2,26 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { MIN_GAS_BUDGET } from "../batch/sealed.ts";
-import { MARGIN_PERCENT, POST_CALL_RESERVE, budgetFor, fitsCap, maxBudget, requirement } from "./gas.ts";
+import {
+  MARGIN_PERCENT, POST_CALL_RESERVE, TRANSFORMER_DECODE_LIMIT, TRANSFORMER_POST_CALL_RESERVE, budgetFor, fitsCap,
+  maxBudget, requirement,
+} from "./gas.ts";
 
 const depository = readFileSync(new URL("../../../contracts/contracts/Depository.sol", import.meta.url), "utf8");
+const account = readFileSync(new URL("../../../contracts/contracts/Account.sol", import.meta.url), "utf8");
+
+const solConstant = (source: string, name: string): bigint => {
+  const text = new RegExp(`${name}\\s*=\\s*([0-9_]+)`).exec(source)?.[1] ?? "";
+  return BigInt(text.replaceAll("_", ""));
+};
 
 describe("R-SIMULATE gas numbers are the deployed contract's", () => {
   test("the post-call reserve is BATCH_POST_CALL_RESERVE", () => {
-    const text = /BATCH_POST_CALL_RESERVE\s*=\s*([0-9_]+)/.exec(depository)?.[1] ?? "";
-    expect(POST_CALL_RESERVE).toBe(BigInt(text.replaceAll("_", "")));
+    expect(POST_CALL_RESERVE).toBe(solConstant(depository, "BATCH_POST_CALL_RESERVE"));
+  });
+  test("the transformer reserve is what Account keeps for the staticcall and the argument decode", () => {
+    expect(TRANSFORMER_POST_CALL_RESERVE).toBe(solConstant(account, "TRANSFORMER_POST_CALL_GAS_RESERVE"));
+    expect(TRANSFORMER_DECODE_LIMIT).toBe(solConstant(account, "TRANSFORMER_ARGUMENT_DECODE_GAS_LIMIT"));
   });
   test("the requirement is the contract's `budget * 64 / 63 + reserve` on top of the prelude, rounded up", () => {
     expect(requirement(0n, 63n)).toBe(64n + POST_CALL_RESERVE);

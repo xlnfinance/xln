@@ -1,0 +1,24 @@
+{
+ "id": "R-FINALIZATION-UNKNOWN",
+ "statement": "A finalize whose proof the node cannot name is not a loss and not a retry. The finalized nonce stays unknown: no `offdelta_rebased`, no `pending_rebased` with `resent_in_new_epoch`, and no return of those transactions to the mempool. The account keeps the affected intents unresolved and stays quiet after `inDispute` has cleared, so it proposes nothing, refuses a peer frame, and refuses `pay`, `lock`, `offer`, `fill`, `settle`, `c2r`, and `withdraw`. The owner is told `finalization_unknown` once (peer, epoch, the log's `finalBodyHash`), and that notice and the record are the WAL's, so a restart has them. A repeat of the same epoch does not tell it again and does not clear the record. A resend while the record stands sends nothing. A frame the peer signed and this node refused while quiet stays a proof it can name, so a finalize that pays by that frame follows R-DISPUTE-FREEZE. Spending resumes when a later observation carries a body that hashes to that finalBodyHash. The nonce is the one that observation names for the body, not the nonce the finalize log stores. A pending frame at or below that nonce is paid_on_chain and is not sealed again. A pending frame above it is resent_in_new_epoch. A second delivery of the same body does not tell it again and does not move value. A body that does not hash to the logged hash, a repeat of the same epoch, and a finalize that logged no hash leave the record. A named proof still follows R-DISPUTE-FREEZE.",
+ "source": "issue #178 unknown-finalization ruling; spec/dispute-lifecycle.md section 5; coordinator ruling that overrides retry-on-unknown",
+ "layers": {
+  "arrival": "owed: spec thread (the node freeze when a finalize names no proof)",
+  "quint": "n/a: the HTLC model does not finalize a dispute",
+  "contract": "n/a: the contract already logs finalProofbodyHash; this rule is the node's reading of it",
+  "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
+  "ts": "hold"
+ },
+ "killers": [
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-FINALIZATION-UNKNOWN an unnamed finalize does not reissue, and the freeze survives a restart"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-FINALIZATION-UNKNOWN spending resumes when a later observation's body hashes to the logged final body, and a frame that nonce holds is not sealed again"
+  }
+ ]
+}

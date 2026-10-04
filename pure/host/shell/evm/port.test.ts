@@ -182,7 +182,7 @@ describe("host/shell/evm the send is one signed transaction at the sender's next
 
   test("R-DURABLE the raw transaction calls processBatch, signed by the key, at nonce 3 and 2 base + tip", async () => {
     const log = logOf();
-    expect(await portOf(node, log).send(CALL, 5_000_000n)).toEqual(ok(undefined));
+    expect(await portOf(node, log).send(CALL, 5_000_000n)).toEqual(ok(`0x${"00".repeat(32)}`));
     const sent = askedOf(log).find((line) => line.startsWith("eth_sendRawTransaction"))
       ?? expect.unreachable("no send");
     const data = unwrapOr(processBatchData(CALL), () => expect.unreachable("calldata"));
@@ -201,6 +201,8 @@ describe("host/shell/evm the send is one signed transaction at the sender's next
       .toEqual(err({ _tag: "port", call: "send", reason: "nonce too low" }));
     const nofee: Node = { ...node, eth_getBlockByNumber: () => ok({ number: "0x1" }) };
     expect(await portOf(nofee).send(CALL, 1n)).toMatchObject({ ok: false, error: { call: "send fee" } });
+    const nohash: Node = { ...node, eth_sendRawTransaction: () => ok(1) };
+    expect(await portOf(nohash).send(CALL, 1n)).toMatchObject({ ok: false, error: { call: "send" } });
   });
 });
 
@@ -256,6 +258,37 @@ describe("host/shell/evm what became of a batch is read from the Depository's lo
 
   test("a batch the chain has said nothing about has no answer yet", async () => {
     expect(await portOf(nodeOf(120n, [])).answer(BATCH)).toEqual(ok(undefined));
+  });
+
+  test("a mined revert with no log spent no nonce: the answer is the receipt, not a failure", async () => {
+    const hash = `0x${"00".repeat(32)}`;
+    const receiptAt = (block: bigint, status: bigint) =>
+      ({ status: `0x${status.toString(16)}`, blockNumber: `0x${block.toString(16)}` });
+    const node: Node = {
+      eth_getTransactionCount: () => ok("0x3"),
+      eth_getBlockByNumber: () => ok({ baseFeePerGas: "0x64" }),
+      eth_maxPriorityFeePerGas: () => ok("0x5"),
+      eth_sendRawTransaction: () => ok(hash),
+      eth_blockNumber: () => ok("0x78"),
+      eth_getLogs: () => ok([]),
+      eth_getTransactionReceipt: (params) => ok(params[0] === hash ? receiptAt(110n, 0n) : null),
+    };
+    const port = portOf(node);
+    const sent = await port.send(CALL, 5_000_000n);
+    const tx = sent.ok ? sent.value : expect.unreachable("hash");
+    expect(await port.answer(BATCH, tx)).toEqual(ok({ _tag: "reverted", nonce: BATCH.nonce }));
+    const succeeded: Node = {
+      ...node, eth_getTransactionReceipt: () => ok(receiptAt(110n, 1n)),
+    };
+    expect(await portOf(succeeded).answer(BATCH, hash)).toEqual(ok(undefined));
+    const pending: Node = { ...node, eth_getTransactionReceipt: () => ok(null) };
+    expect(await portOf(pending).answer(BATCH, hash)).toEqual(ok(undefined));
+    const deep = { ...CONFIG, depth: 5n };
+    const recent: Node = { ...node, eth_getTransactionReceipt: () => ok(receiptAt(116n, 0n)) };
+    expect(await portOf(recent, logOf(), deep).answer(BATCH, hash)).toEqual(ok(undefined));
+    expect(await portOf(nodeOf(120n, [FAILED])).answer(BATCH, hash)).toEqual(ok({
+      _tag: "failed", nonce: BATCH.nonce, reason: "0xaabbccdd",
+    }));
   });
 
   test("R-SUBMIT-DEPTH a landing block less than the depth below the head does not answer the batch", async () => {

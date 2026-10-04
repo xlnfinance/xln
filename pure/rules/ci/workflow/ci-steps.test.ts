@@ -16,6 +16,7 @@ const GATE = [
   '      - run: SEEDS="${{ matrix.seed }}" bun run test:seeds',
   "      - run: bash check.sh",
   '      - run: SHARD="${{ matrix.shard }}/4" node test.mjs',
+  "      - run: bun testnet-e2e/run.ts",
 ];
 
 // A workflow with a gate job holding `steps`, another job that is not behind `one-gate`, and the `one-gate` job.
@@ -175,5 +176,6 @@ describe("the real workflows", () => {
     expect(commands).toContain("bun rules/check.ts");
     expect(commands).toContain("bash check.sh");
     expect(commands.some((command) => command.endsWith("node test.mjs"))).toBe(true);
+    expect(commands).toContain("bun testnet-e2e/run.ts");
   });
 });

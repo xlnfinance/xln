@@ -18,6 +18,7 @@
 import { err, map, ok, traverse, type Result } from "../kernel/core/result.ts";
 import type { Of, Tagged } from "../kernel/core/tagged.ts";
 import type { Side, TokenId } from "../account/model.ts";
+import type { ProofBody } from "../chain/proof/proof.ts";
 import type { Bytes32, ChainEvent } from "./log.ts";
 
 /**
@@ -36,7 +37,7 @@ export type JEvent =
   >
   | Tagged<"j_countered", { peer: Bytes32; nonce: bigint; proposerIsLeft: boolean; bodyHash: Bytes32 }>
   | Tagged<"j_window_over", { peer: Bytes32 }>
-  | Tagged<"j_dispute_over", { peer: Bytes32; late?: boolean }>
+  | Tagged<"j_dispute_over", { peer: Bytes32; late?: boolean; nonce?: bigint; body?: ProofBody }>
   | Tagged<"j_collateral", { peer: Bytes32; token: TokenId; collateral: bigint; ondelta: bigint }>
   | Tagged<"j_finalize_unread", { peer: Bytes32; tx: Bytes32 }>
   | Tagged<"j_start_unread", { peer: Bytes32; tx: Bytes32 }>;
@@ -182,7 +183,10 @@ const disputeStarted = (
  * one was held back for its arguments, so the Entity has heard what came after it already (R-WATCH-STALL).
  */
 const finalizedTold = (e: Finalized, peer: Bytes32, late: ReadonlySet<ChainEvent>): readonly JEvent[] => {
-  const over: JEvent = late.has(e) ? { _tag: "j_dispute_over", peer, late: true } : { _tag: "j_dispute_over", peer };
+  const carried = e.proof === undefined ? {} : { nonce: e.proof.nonce, body: e.proof.body };
+  const over: JEvent = late.has(e)
+    ? { _tag: "j_dispute_over", peer, late: true, ...carried }
+    : { _tag: "j_dispute_over", peer, ...carried };
   return e.shown._tag === "unread" ? [over, { _tag: "j_finalize_unread", peer, tx: e.tx }] : [over];
 };
 

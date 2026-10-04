@@ -21,6 +21,7 @@ export const foldsOf = (state: AccountState): readonly Fold[] =>
 
 /** At most one operation at a time, and never over a frame still in flight: its ack may move the offdelta. */
 export const cosignFault = (account: EntityReplica, facts: ChainFacts, amount: bigint): EntityFault | undefined => {
+  if (facts.unresolved !== undefined) return { _tag: "account_disputed" };
   if (facts.frozen) return { _tag: "already_cosigned" };
   if (account.pending !== undefined) return { _tag: "frame_in_flight" };
   if (amount >= 1n && amount <= MAX_AMOUNT) return undefined;

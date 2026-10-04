@@ -8,6 +8,8 @@ import { emptyEntity, type Command, type EntityId } from "../../pure/entity/mode
 import { limits } from "../../pure/host/host.ts";
 import { command, pump, start, type Boot, type Shell, type Station, type Turn } from "../../pure/host/shell/drive/drive.ts";
 import { chainPort } from "../../pure/host/shell/evm/port.ts";
+import { registryRead } from "../../pure/host/shell/evm/watch.ts";
+import { address } from "../../pure/j/log.ts";
 import { MIN_GAS_BUDGET, processBatchCall, sealBatch } from "../../pure/j/batch/sealed.ts";
 import type { Key } from "../../pure/host/shell/link/link.ts";
 import { fileDisk } from "../../pure/host/shell/node/file-disk.ts";
@@ -54,9 +56,14 @@ export const rigOf = async (
     depository: chain.manifest.contracts.depository.address, entity, chainId: chain.chainId, key,
     tokens: [chain.tokenId], from, depth: 0n,
   });
+  const deployed = {
+    depository: must(address(chain.manifest.contracts.depository.address.toLowerCase()), "depository address"),
+    transformer: must(address(chain.manifest.contracts.deltaTransformer.address.toLowerCase()), "transformer address"),
+  };
   const shell: Shell = {
     wal: wal.disk, io: { port, signer: lazySigner(entity, key), journal: journal.disk, gas: GAS },
     now: () => must(timestamp(BigInt(Date.now())), "stamp"),
+    registry: registryRead(httpRpc(chain.rpc), deployed),
   };
   const boot: Boot = { setup, genesis: emptyEntity(entity), limits: must(limits(32, 8), "limits"), where: { entity, deployment: chain.dep, world: worldOf(chain) } };
   return {

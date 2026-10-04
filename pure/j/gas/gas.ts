@@ -9,6 +9,18 @@ import { MIN_GAS_BUDGET } from "../batch/sealed.ts";
 /** `Depository.BATCH_POST_CALL_RESERVE`: kept outside the signed budget so the self-call is handed all of it. */
 export const POST_CALL_RESERVE = 30_000n;
 
+/**
+ * `Account.TRANSFORMER_POST_CALL_GAS_RESERVE`. A finalize runs in the outer frame, and the transformer staticcall is
+ * refused unless this much gas is still left when it is reached. The signed budget does not pay it.
+ */
+export const TRANSFORMER_POST_CALL_RESERVE = 2_000_000n;
+
+/**
+ * `Account.TRANSFORMER_ARGUMENT_DECODE_GAS_LIMIT`. A non-empty argument list is decoded with this stipend, and the
+ * caller must still hold the transformer reserve on top of it or the decode is refused.
+ */
+export const TRANSFORMER_DECODE_LIMIT = 500_000n;
+
 /** The margin on the measured self-call gas, in percent. A named choice (decisions-pending), not a contract number. */
 export const MARGIN_PERCENT = 10n;
 

@@ -39,9 +39,19 @@ export const GAPS = {
   },
   disputeWithClause: {
     id: "dispute-with-clause", kind: "missing", layer: "Runtime",
-    piece: "Forced dispute with an open clause in the signed proof (HTLC pending when the counterparty goes quiet): the proof body carries one transformer clause per open hold (pure/account/proof/body.ts), but no Runtime duty starts the dispute or holds a lock a signed proof carries (R-SIGNED-IS-LIVE).",
-    supplier: "the A4b Runtime duties slice after #97 (pure/runtime/dispute.ts)",
-    landed: () => has("runtime/dispute.ts"),
+    piece: "Forced dispute with an open clause in the signed proof. The body carries one transformer clause per open hold (pure/account/proof/body.ts). R-HOLD-DISSOLVE, the register row, is what drops the hold when the chain finalizes. This probe reads that row and the dispute-clause step.",
+    supplier: "R-HOLD-DISSOLVE (pure/rules/register/R-HOLD-DISSOLVE.json) and the dispute-clause step",
+    landed: () => {
+      const row = join(REPO, "pure/rules/register/R-HOLD-DISSOLVE.json");
+      const step = join(REPO, "testnet-e2e/steps.ts");
+      if (!existsSync(row) || !existsSync(step)) return false;
+      const source = readFileSync(step, "utf8");
+      const at = source.indexOf('id: "dispute-clause"');
+      const end = source.indexOf('id: "rebase"', at);
+      if (at < 0 || end < 0) return false;
+      const body = source.slice(at, end);
+      return body.includes("R-HOLD-DISSOLVE") && !body.includes("new Blocked");
+    },
   },
 } as const satisfies Record<string, Gap>;
 

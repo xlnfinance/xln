@@ -5,7 +5,7 @@
 // chain what became of it instead of signing a second batch at the same nonce. A step moves the batch one stage and
 // returns; `settle` repeats it until the batch is on its way, the chain has nothing more to say, or something is held.
 import type { SignFault, Signer } from "./signer.ts";
-import { requirement } from "../../../j/gas/gas.ts";
+import { requirement, TRANSFORMER_DECODE_LIMIT, TRANSFORMER_POST_CALL_RESERVE } from "../../../j/gas/gas.ts";
 import type { Cause, Gas, HoldReason, Simulation } from "../../../j/gas/simulate.ts";
 import { seal, type JBatch, type SealOutcome } from "../../../j/batch/jbatch.ts";
 import type { JAnswer, Returned, Skipped } from "../../../j/batch/answer.ts";
@@ -28,6 +28,13 @@ import {
 /** What the shell asks of the chain: each is one read or one transaction, and none of them signs. */
 export type PortFault = Tagged<"port", { call: string; reason: string }>;
 
+/**
+ * What the chain's registry (`DeltaTransformer.hashToTimestamp`) held for a hashlock in the state of J block `at`: the
+ * second a secret was first shown at, 0 for none, or `pruned` when the node no longer serves that block's state (a
+ * thing about the past, not a fault of the read). Any other failure is the port's fault, tried again.
+ */
+export type RegistryRead = (hashlock: string, at: bigint) => Promise<Result<bigint | "pruned", PortFault>>;
+
 export type ChainPort = Readonly<{
   /** The Entity's stored batch nonce. */
   nonce: () => Promise<Result<bigint, PortFault>>;
@@ -35,9 +42,10 @@ export type ChainPort = Readonly<{
   treasury: () => Promise<Result<Treasury, PortFault>>;
   /** The batch run at the head and undone (R-SIMULATE). */
   simulate: (call: ProcessBatchCall, gasLimit: bigint) => Promise<Result<Simulation["outcome"], PortFault>>;
-  send: (call: ProcessBatchCall, gasLimit: bigint) => Promise<Result<void, PortFault>>;
-  /** What the chain did with the batch, or nothing yet. */
-  answer: (batch: SealedBatch) => Promise<Result<JAnswer | undefined, PortFault>>;
+  /** The transaction hash the node returned for the sent batch. */
+  send: (call: ProcessBatchCall, gasLimit: bigint) => Promise<Result<string, PortFault>>;
+  /** What the chain did with the batch, or nothing yet. `tx` is that hash, when this process sent it. */
+  answer: (batch: SealedBatch, tx?: string) => Promise<Result<JAnswer | undefined, PortFault>>;
 }>;
 
 export type Io = Readonly<{ port: ChainPort; signer: Signer; journal: Disk; gas: Gas }>;
@@ -54,9 +62,15 @@ export type ShellFault =
 /** Carried over what the contract asks for, so an estimate that is a little low does not starve the batch. */
 const SLACK = 100_000n;
 
+/** A claused finalize pays the clause in the outer frame, so the transaction must still hold the transformer's gas. */
+const settlesClause = (batch: SealedBatch): boolean =>
+  batch.ops.some((op) =>
+    op._tag === "dispute_finalize" && op.finalization.finalProofbody.transformers.length > 0);
+
 const gasLimitFor = (io: Io, batch: SealedBatch): bigint => {
   const padded = requirement(io.gas.prelude, batch.gasBudget) + SLACK;
-  return padded < io.gas.txGasCap ? padded : io.gas.txGasCap;
+  const needed = settlesClause(batch) ? padded + TRANSFORMER_POST_CALL_RESERVE + TRANSFORMER_DECODE_LIMIT : padded;
+  return needed < io.gas.txGasCap ? needed : io.gas.txGasCap;
 };
 
 const callOf = (io: Io, batch: SealedBatch): Result<ProcessBatchCall, ShellFault> => {
@@ -87,7 +101,18 @@ const sent = async (io: Io, submitter: Submitter, batch: SealedBatch): Promise<R
   const call = callOf(io, batch);
   if (!call.ok) return call;
   const out = await io.port.send(call.value, gasLimitFor(io, batch));
-  return quiet(submitter, out.ok ? "waiting" : "unsent");
+  return out.ok ? quiet({ ...submitter, tx: out.value }, "waiting") : quiet(submitter, "unsent");
+};
+
+/** The mined transaction reverted whole, so the nonce is unspent. Resend only when the head would now accept it. */
+const resendWhenOpen = async (
+  io: Io, s: Submitter, batch: SealedBatch,
+): Promise<Result<Pumped, ShellFault>> => {
+  const call = callOf(io, batch);
+  if (!call.ok) return call;
+  const outcome = await io.port.simulate(call.value, gasLimitFor(io, batch));
+  if (!outcome.ok) return outcome;
+  return outcome.value._tag === "ok" ? sent(io, s, batch) : quiet(s, "waiting");
 };
 
 /** What sealing the builder's draft comes to once every simulation it asks for is answered (R-SIMULATE). */
@@ -211,9 +236,10 @@ const sealing = async (io: Io, s: Submitter): Promise<Result<Pumped, ShellFault>
 const waited = async (
   io: Io, s: Submitter, batch: SealedBatch, arrival: Arrival,
 ): Promise<Result<Pumped, ShellFault>> => {
-  const answer = await io.port.answer(batch);
+  const answer = await io.port.answer(batch, s.tx);
   if (!answer.ok) return answer;
   if (answer.value === undefined) return arrival === "unsure" ? sent(io, s, batch) : quiet(s, "waiting");
+  if (answer.value._tag === "reverted") return resendWhenOpen(io, s, batch);
   const closed = answeredBy(s, answer.value);
   const kept = closed.record === undefined ? ok(undefined) : await keep(io.journal, closed.record);
   if (!kept.ok) return kept;

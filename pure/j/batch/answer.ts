@@ -5,6 +5,7 @@
 //            copy of one waiting in the draft is dropped. A failed batch (R-J5) applied nothing and spent its nonce, so
 //            its work goes back to the draft at a fresh nonce, except the co-signed ops: those are RETURNED to their
 //            Account, because the counterparty's signature is what failed and a resend would fail the same way.
+//            A whole-transaction revert spent nothing: the sealed batch stays the one to send.
 //   abort    stop waiting for the sent batch. It stays signed and may still land (F1), so it becomes abandoned; only
 //            ops that are safe to send twice go back to the draft, a deposit or a payment stays with it.
 //   landable the signed batch the chain accepts next, if we hold it: a resend of the sent one, or a push of an
@@ -23,7 +24,8 @@ export type SkipFact = Readonly<{ op: number; counterentity: string; reason: num
 export type JAnswer =
   | Tagged<"landed", { nonce: bigint; batchHash: string; skipped: readonly SkipFact[] }>
   | Tagged<"failed", { nonce: bigint; reason: string }>
-  | Tagged<"starved", { nonce: bigint }>;
+  | Tagged<"starved", { nonce: bigint }>
+  | Tagged<"reverted", { nonce: bigint }>;
 
 export type ReturnReason =
   | Tagged<"batch_failed", { reason: string }>
@@ -115,6 +117,7 @@ export const observe = (j: JBatch, answer: JAnswer): Observed => match(answer, {
   landed: (a) => landed(j, a),
   failed: (a) => failed(j, a),
   starved: () => unchanged(j),
+  reverted: () => unchanged(j),
 });
 
 /**

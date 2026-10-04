@@ -1,0 +1,11 @@
+{
+  "typescript": {
+    "command": "/Users/boris/.hermes/node/bin/typescript-language-server",
+    "args": ["--stdio"],
+    "extensionToLanguage": {
+      ".ts": "typescript",
+      ".tsx": "typescriptreact"
+    },
+    "startupTimeout": 30000
+  }
+}

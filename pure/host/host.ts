@@ -12,9 +12,11 @@
 //              sent.
 import { err, map, ok, type Result } from "../kernel/core/result.ts";
 import type { Tagged } from "../kernel/core/tagged.ts";
-import type { JHeight } from "../account/clause/clock.ts";
-import { heardOf, type EntityId, type EntityState, type Outbound } from "../entity/model.ts";
-import type { Halt, Row, Runtime, Setup, Timestamp } from "../runtime/model.ts";
+import { ownView, type JHeight, type JView } from "../account/clause/clock.ts";
+import {
+  heardOf, type EntityId, type EntityInput, type EntityState, type Outbound, type Reading,
+} from "../entity/model.ts";
+import type { Halt, NewHeight, Row, Runtime, Setup, Timestamp } from "../runtime/model.ts";
 import { apply, commit, flush, recover } from "../runtime/tick.ts";
 import type { Effect, Host, HostNotice, Item, Limits, Stepped } from "./model.ts";
 
@@ -34,7 +36,7 @@ export const limits = (perPeer: number, perFrame: number): Result<Limits, BadLim
     : err({ _tag: "bad_limits", perPeer, perFrame }));
 
 export const startHost = (runtime: Runtime, bounds: Limits): Host =>
-  ({ runtime, limits: bounds, queue: [], height: undefined });
+  ({ runtime, limits: bounds, queue: [], height: undefined, seconds: undefined });
 
 const hosts = (host: Host, id: EntityId): boolean => host.runtime.entities.has(id);
 
@@ -68,8 +70,10 @@ export const receive = (host: Host, message: Outbound): Received => {
  * J events of its delivery are in the WAL, because a height goes ahead of the queue, and it moves the watcher's cursor
  * only once a committed `j_height` row holds the height, because a waiting height is lost in a crash.
  */
-export const heard = (host: Host, height: JHeight): Host =>
-  (height > host.runtime.view && (host.height === undefined || height > host.height) ? { ...host, height } : host);
+export const heard = (host: Host, height: JHeight, seconds?: bigint): Host =>
+  (height > host.runtime.view && (host.height === undefined || height > host.height)
+    ? { ...host, height, seconds }
+    : host);
 
 /** No frame is staged: the Host can begin one. */
 export const idle = (host: Host): boolean => host.runtime.staged === undefined;
@@ -79,28 +83,65 @@ const persist = (row: Row | undefined): readonly Effect[] => (row === undefined 
 const settled = (host: Host, runtime: Runtime): Stepped =>
   ({ host: { ...host, runtime }, effects: persist(runtime.staged) });
 
-/** A waiting J height is a frame of every Entity, and the Runtime needs it before any deadline is judged. */
-const beginHeight = (host: Host, height: JHeight, at: Timestamp, ops: Tick): Result<Stepped, Halt> =>
-  map(ops.apply(host.runtime, { _tag: "j_height", at, height }), (runtime) =>
-    settled({ ...host, height: undefined }, runtime));
-
-/** The Entity first in line takes its queued inputs, up to the frame's bound, in arrival order. */
-const beginEntity = (host: Host, first: Item, at: Timestamp, ops: Tick): Result<Stepped, Halt> => {
+/** The inputs of the Entity first in line that one frame takes, up to the frame's bound, in arrival order. */
+const takes = (host: Host, first: Item): Readonly<{ places: readonly number[]; inputs: readonly EntityInput[] }> => {
   const places = host.queue.flatMap((item, i) => (item.to === first.to ? [i] : [])).slice(0, host.limits.perFrame);
-  const inputs = places.map((i) => (host.queue[i] as Item).input);
-  return map(ops.apply(host.runtime, { _tag: "entity", at, to: first.to, inputs }), (runtime) =>
-    settled({ ...host, queue: host.queue.filter((_, i) => !places.includes(i)) }, runtime));
+  return { places, inputs: places.map((i) => (host.queue[i] as Item).input) };
+};
+
+/**
+ * The frame `begin` would make next, and the J view it decides at: the waiting height, whose frame every Entity makes
+ * at that height, or the inputs the Entity first in line takes, at the Runtime's view. The shell reads what the frame
+ * decides on (`wantsOf`) at that view before it begins (R-REGISTRY-AT-VIEW).
+ */
+export type Upcoming = Readonly<{ view: JView; to: EntityId | undefined; inputs: readonly EntityInput[] }>;
+
+export const upcoming = (host: Host): Upcoming | undefined => {
+  const first = host.queue[0];
+  if (!idle(host)) return undefined;
+  if (host.height !== undefined) return { view: ownView(host.height, host.height), to: undefined, inputs: [] };
+  return first === undefined ? undefined : { view: host.runtime.view, to: first.to, inputs: takes(host, first).inputs };
+};
+
+/** What the chain's registry held at the frame's view, for the hashlocks it decides on: none when nothing is read. */
+export type Readings = readonly Reading[] | undefined;
+
+type Registered<T> = T & Readonly<{ registry: readonly Reading[] }>;
+
+const withReadings = <T extends object>(batch: T, registry: Readings): T | Registered<T> =>
+  (registry === undefined ? batch : { ...batch, registry });
+
+/** A known header second rides with the height. An unknown one is omitted, never stored as zero. */
+const secondsIn = (input: NewHeight, seconds: bigint | undefined): NewHeight =>
+  (seconds === undefined ? input : { ...input, seconds });
+
+/** A waiting J height is a frame of every Entity, and the Runtime needs it before any deadline is judged. */
+const beginHeight = (
+  host: Host, height: JHeight, at: Timestamp, ops: Tick, registry: Readings,
+): Result<Stepped, Halt> => {
+  const heightInput: NewHeight = { _tag: "j_height", at, height };
+  const carried = secondsIn(withReadings(heightInput, registry), host.seconds);
+  return map(ops.apply(host.runtime, carried), (runtime) =>
+    settled({ ...host, height: undefined, seconds: undefined }, runtime));
+};
+/** The Entity first in line takes its queued inputs, up to the frame's bound, in arrival order. */
+const beginEntity = (host: Host, first: Item, at: Timestamp, ops: Tick, registry: Readings): Result<Stepped, Halt> => {
+  const { places, inputs } = takes(host, first);
+  return map(ops.apply(host.runtime, withReadings({ _tag: "entity", at, to: first.to, inputs } as const, registry)),
+    (runtime) => settled({ ...host, queue: host.queue.filter((_, i) => !places.includes(i)) }, runtime));
 };
 
 /**
  * One frame: a waiting J height, else the Entity first in line. Between a `begin` and its `persisted` the Host is not
- * idle, and a second `begin` changes nothing.
+ * idle, and a second `begin` changes nothing. `registry` is what the shell read for this frame (`upcoming` says which).
  */
-export const begin = (host: Host, at: Timestamp, ops: Tick = TICK): Result<Stepped, Halt> => {
+export const begin = (
+  host: Host, at: Timestamp, ops: Tick = TICK, registry?: readonly Reading[],
+): Result<Stepped, Halt> => {
   const first = host.queue[0];
   if (!idle(host)) return ok({ host, effects: [] });
-  if (host.height !== undefined) return beginHeight(host, host.height, at, ops);
-  return first === undefined ? ok({ host, effects: [] }) : beginEntity(host, first, at, ops);
+  if (host.height !== undefined) return beginHeight(host, host.height, at, ops, registry);
+  return first === undefined ? ok({ host, effects: [] }) : beginEntity(host, first, at, ops, registry);
 };
 
 /** The chain actions of the committed rows not yet flushed, each with the row it is in and its place there. */
