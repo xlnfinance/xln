@@ -223,7 +223,8 @@ export const inDispute = (f: ChainFacts): boolean => f.starting !== undefined ||
  * whose secrets it cannot read yet may have dissolved holds). The proof a dispute rests on must stay the newest one the
  * node holds, and a frame committed now would be sealed under an epoch the finalize is about to void.
  */
-export const quiet = (f: ChainFacts): boolean => f.frozen || inDispute(f) || f.behind !== undefined;
+export const quiet = (f: ChainFacts): boolean =>
+  f.frozen || inDispute(f) || f.behind !== undefined || f.unresolved !== undefined;
 
 /** The serial the next operation of this Account will have. */
 export const nextSerial = (f: ChainFacts): bigint => f.cosigned + 1n;

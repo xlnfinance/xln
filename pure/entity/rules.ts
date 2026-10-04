@@ -3,7 +3,7 @@
 // is out, or a dispute is open on the Account, every frame its peer proposes is refused with the fault `frozen`, which
 // can pass (the operation lands, is superseded, lapses, or the dispute ends), so the proposer takes the frame back and
 // tries again. The Account's code is unchanged: it is handed these rules.
-import { err } from "../kernel/core/result.ts";
+import { err, type Result } from "../kernel/core/result.ts";
 import { accountRules } from "../account/frame/account.ts";
 import type { Rules } from "../account/frame/frame.ts";
 import type { AccountState, Side } from "../account/model.ts";
@@ -13,7 +13,10 @@ import { ledgerOf } from "../account/state.ts";
 import type { PeerFault } from "./model.ts";
 import { paid, type Registry } from "./paybook/registry.ts";
 
-export type EntityRules = Rules<AccountTx, AccountState, PeerFault>;
+export type EntityRules = Rules<AccountTx, AccountState, PeerFault> & {
+  /** Apply one tx with the freeze lifted, so a refused frame can still be named by the state it would commit. */
+  open: (state: AccountState, author: Side, tx: AccountTx) => Result<AccountState, PeerFault>;
+};
 
 /** The tag a refusal carries when the receiver's signature is out. */
 const FROZEN = "frozen";
@@ -95,5 +98,6 @@ export const entityRules = (judge: Judge, signing: SigningContext, standing: Sta
     seal: base.seal,
     tag: (fault) => fault._tag,
     retryable: (tag) => tag === FROZEN || tag === UNRULED || tag === UNREAD || base.retryable(tag),
+    open: base.apply,
   };
 };

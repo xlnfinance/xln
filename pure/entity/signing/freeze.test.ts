@@ -76,7 +76,9 @@ describe("entity/signing R-DISPUTE-FREEZE an Account in dispute proposes nothing
 
   test("R-DISPUTE-FREEZE the epoch moving on, or the dispute being over, ends it and the queue goes out", () => {
     const queued = run(bobDisputed, credit(ALICE.id, 80n)).state;
-    const moved = run(queued, { _tag: "j_epoch", peer: ALICE.id, epoch: 1n, stored: 9n });
+    const moved = run(queued, {
+      _tag: "j_epoch", peer: ALICE.id, epoch: 1n, stored: 9n, finalBodyHash: opened.bodyHash,
+    });
     expect(moved.outputs).toHaveLength(1);
     const over = run(queued, { _tag: "j_dispute_over", peer: ALICE.id });
     expect(over.outputs).toHaveLength(1);

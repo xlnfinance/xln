@@ -4,6 +4,7 @@
 // the Account and Bob its Right; Bob extends credit to Alice, who pays him.
 import { describe, expect, test } from "bun:test";
 import { viewOf } from "../../account/fixtures.ts";
+import { proofBodyHash } from "../../chain/proof/proof.ts";
 import { OPENED_WITH } from "../../entity/fixtures.ts";
 import type { EntityId, JAction, JEvent } from "../../entity/model.ts";
 import {
@@ -36,10 +37,22 @@ const accountOf = (c: Cluster, id: EntityId) =>
 const offdeltas = (c: Cluster) => [ALICE, BOB].map((id) => [...accountOf(c, id).state.ledgers.values()][0]?.offdelta);
 const heads = (c: Cluster) => [ALICE, BOB].map((id) => accountOf(c, id).head);
 
-const epochOf = (peer: EntityId): JEvent => ({ _tag: "j_epoch", peer, epoch: 1n, stored: 5n });
-const finalized = (c: Cluster): Cluster => feed(
-  feed(feed(feed(c, ALICE, epochOf(BOB)), BOB, epochOf(ALICE)), ALICE, { _tag: "j_dispute_over", peer: BOB }),
-  BOB, { _tag: "j_dispute_over", peer: ALICE });
+/** The hash of the body the latest start opened with: the proof a timeout finalize pays by. */
+const openingHash = (c: Cluster): string => {
+  const [last] = c.chain.filter((a: JAction) => a._tag === "dispute_start").slice(-1);
+  const body = last?._tag === "dispute_start" ? last.body : undefined;
+  const hash = body === undefined ? undefined : proofBodyHash(body);
+  return hash?.ok === true ? hash.value : expect.unreachable("no body hash");
+};
+const epochOf = (peer: EntityId, hash: string): JEvent =>
+  ({ _tag: "j_epoch", peer, epoch: 1n, stored: 5n, finalBodyHash: hash });
+const finalized = (c: Cluster): Cluster => {
+  const hash = openingHash(c);
+  return feed(
+    feed(feed(feed(c, ALICE, epochOf(BOB, hash)), BOB, epochOf(ALICE, hash)),
+      ALICE, { _tag: "j_dispute_over", peer: BOB }),
+    BOB, { _tag: "j_dispute_over", peer: ALICE });
+};
 
 describe("runtime/chain R-DISPUTE-FREEZE a payment asked while the dispute is open is refused back, not zeroed", () => {
   const frozen = heardBy(asked, ALICE, BOB);

@@ -119,8 +119,11 @@ describe("runtime/chain R-HOLD-DISSOLVE a release queued in the dispute is not a
   const resolving: Command = { _tag: "resolve", peer: ALICE, token: GOLD, id: holdId(1n), secret: secretOf(1) };
 
   /** The finalize paid Bob's clause: its hash was shown on the chain before the deadline. Both Entities hear it. */
+  /** The chain logged the opening proof. This node can name that hash, so the release is proposed and refused. */
   const finalized = (c: Cluster): Cluster => [[ALICE, BOB], [BOB, ALICE]].reduce((acc, [id, peer]) =>
-    feed(acc, id!, { _tag: "j_epoch", peer: peer!, epoch: 1n, stored: 9n }, { _tag: "j_dispute_over", peer: peer! }),
+    feed(acc, id!, {
+      _tag: "j_epoch", peer: peer!, epoch: 1n, stored: 9n, finalBodyHash: OPENED_WITH.bodyHash,
+    }, { _tag: "j_dispute_over", peer: peer! }),
   c);
 
   test("R-HOLD-DISSOLVE Bob's queued resolve is dropped with a notice and the epoch's ledgers stay at zero", () => {
