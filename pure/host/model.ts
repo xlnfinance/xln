@@ -26,13 +26,16 @@ export type Limits = Readonly<{ perPeer: number; perFrame: number }>;
  * names the transaction the node's provider fails, whose finalize the J loop holds back (every other event is told),
  * once when the stall begins; past its retries the loop tells it unread (R-WATCH-CALLDATA). `no_call_trace` says the
  * provider of a node that may hold value does not trace calls (a probe or a transaction's trace answered no method),
- * so its Entity forwards no lock: once for each time the node goes blind.
+ * so its Entity forwards no lock: once for each time the node goes blind. `registry_unread` says a reading of the
+ * chain's registry the Entity needed was not had (the node failed it or no longer serves that block), so the decision
+ * it rests on is refused or waits (R-REGISTRY-AT-VIEW): once for each hashlock and reason.
  */
 export type HostNotice =
   | Tagged<"misrouted", { to: EntityId; from: EntityId }>
   | Tagged<"queue_full", { from: EntityId }>
   | Tagged<"watch_stalled", { tx: string; reason: string }>
-  | Tagged<"no_call_trace", { why: string }>;
+  | Tagged<"no_call_trace", { why: string }>
+  | Tagged<"registry_unread", { hashlock: string; reason: string }>;
 
 /** Which chain action of which committed row an effect came from: the WAL height and the place in the row's `chain`. */
 export type RowId = Readonly<{ height: bigint; index: number }>;

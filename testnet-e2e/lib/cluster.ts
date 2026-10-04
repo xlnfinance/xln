@@ -222,7 +222,7 @@ export class Cluster {
   /** The chain actions of the committed rows, in order: what the node's Runtime has asked of the chain. */
   askedBy(id: EntityId): readonly JAction[] { return this.rowsOf(id).flatMap((r) => r.chain); }
   noticesOf(id: EntityId): readonly string[] {
-    return [...this.look(id).notices.map((x) => x._tag), ...this.rowsOf(id).flatMap((r) => r.notices.map((x) => `${x._tag} ${shown(x).slice(0, 260)}`))];
+    return [...this.look(id).notices.map((x) => x._tag), ...this.rowsOf(id).flatMap((r) => r.notices.map((x) => `${x._tag} ${shown(x).slice(0, 700)}`))];
   }
   /** The lines this node cut a connection for, most recent last. */
   refusedBy(id: EntityId): readonly string[] { return this.look(id).refused; }

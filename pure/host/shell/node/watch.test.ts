@@ -601,4 +601,41 @@ describe("host/shell/node a node with a J loop", () => {
     expect(look.cursor).toBe(START);
     expect(rowsOf(look).some((r) => r.input._tag === "j_height" || r.input._tag === "j_observation")).toBe(false);
   });
+
+  test("R-REGISTRY-AT-VIEW a node that may hold value and ignores the registry is not started", async () => {
+    const dir = fresh();
+    const log = `${dir}/calls.log`;
+    writeFileSync(log, "");
+    const seat = await seatOf(ALICE, dir, 0);
+    const config = await configOf(seat, NO_PEER, {
+      tickMs: QUICK, watch: watchOf(STRAIGHT, log, [advanced(105n, 1n)], VALUE_TRACED), registry: false,
+    });
+    const refused = await startDaemon(config, seat.listener);
+    await config.shell.wal.close();
+    await config.shell.io.journal.close();
+    expect(refused).toEqual(err({ _tag: "registry_off" }));
+  });
+
+  test("R-REGISTRY-AT-VIEW a failed read is told once for its hashlock, however often it is asked", async () => {
+    const dir = fresh();
+    const log = `${dir}/calls.log`;
+    writeFileSync(log, "");
+    const reads: string[] = [];
+    const read = (hashlock: string) => {
+      reads.push(hashlock);
+      return Promise.resolve(err(DOWN));
+    };
+    const alice = await nodeOf(await seatOf(ALICE, dir, 0), NO_PEER, {
+      tickMs: QUICK, watch: watchOf(STRAIGHT, log, [], VALUE_TRACED), read,
+    });
+    const forward = { _tag: "forward", hashlock: hexOf(9n), from: bytes(2n), to: bytes(3n) } as const;
+    await alice.tell(forward);
+    await alice.tell(forward);
+    const look = await alice.stop();
+    expect(reads.length).toBeGreaterThanOrEqual(2);
+    expect(told(look, "registry_unread")).toBe(1);
+    expect(look.notices.find((n) => n._tag === "registry_unread")).toEqual({
+      _tag: "registry_unread", hashlock: hexOf(9n), reason: "watch head: connection reset",
+    });
+  });
 });

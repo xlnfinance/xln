@@ -26,6 +26,7 @@ import { entityRules, type EntityRules } from "./rules.ts";
 import {
   hashlocksOf, intentFor, learned, revealed, revealedBy, unruled, withEntry, type Intent,
 } from "./paybook/paybook.ts";
+import { registryOf, txsDecide, type Registry } from "./paybook/registry.ts";
 import { askedOf, cosignFault, foldsOf, withdrawalOf } from "./cosign.ts";
 import type { AccountTx, Judge } from "../account/tx.ts";
 import {
@@ -33,7 +34,7 @@ import {
   type DisputeCounter, type DisputeStart, type Registered, type EntityFault, type Entry, type EntityId,
   type EntityInput, type EntityReplica, type EntityState, type Hook, type JAction, type JEvent, type Notice,
   type Outbound,
-  type PaybookCommand, type PeerFault, type PeerMessage, type PeerProof, type SecretRevealed,
+  type PaybookCommand, type PeerFault, type PeerMessage, type PeerProof, type Reading, type SecretRevealed,
 } from "./model.ts";
 
 export type Frame = Readonly<{
@@ -161,6 +162,19 @@ const secretShown = (w: Work, e: SecretRevealed): Work => {
   const names = w.names ?? named(w.state);
   const shown = lower && names.has(hashlock) ? mapSet(w.state.shown, hashlock, e.at) : w.state.shown;
   return { ...w, names, state: { ...w.state, shown, paybook: revealed(w.state.paybook, e.secret) } };
+};
+
+/**
+ * The lowest height a secret was shown at is kept for a hashlock only while a hold, a queued lock or a paybook entry of
+ * the Entity names it: what nothing names is dropped at the end of the frame, so the map is the Entity's own set at
+ * most and no longer grows with every secret ever shown. A secret shown for a hashlock named later is the registry's to
+ * tell (R-REGISTRY-AT-VIEW), not this map's.
+ */
+const unshown = (w: Work): Work => {
+  if (w.state.shown.size === 0) return w;
+  const names = named(w.state);
+  const kept = [...w.state.shown].filter(([hashlock]) => names.has(hashlock));
+  return kept.length === w.state.shown.size ? w : { ...w, state: { ...w.state, shown: new Map(kept) } };
 };
 
 /** The side whose frame made the head the round took: mine when the peer's ack committed it, the peer's otherwise. */
@@ -774,9 +788,9 @@ const intended = (rules: Rulebook, w: Work, i: Intent): Work => {
  * entry before it left, so that two payments to one next hop in a frame take two slots. Two rounds: a lock the door
  * refuses makes a `fail` entry, which the second round turns into a cancel of the lock it was forwarding.
  */
-const forwarding = (rules: Rulebook, judge: Judge) => (w: Work): Work => {
+const forwarding = (rules: Rulebook, judge: Judge, registry: Registry | undefined) => (w: Work): Work => {
   const step = (inner: Work, hashlock: string): Work => {
-    const i = intentFor(inner.state, judge.clock, judge.view, hashlock);
+    const i = intentFor(inner.state, judge.clock, judge.view, hashlock, registry);
     return i === undefined ? inner : intended(rules, inner, i);
   };
   const round = (acc: Work): Work => hashlocksOf(acc.state).reduce(step, acc);
@@ -797,9 +811,18 @@ const paced = (w: Work, view: JView, peer: EntityId, account: EntityReplica): bo
   return since !== undefined && account.attempt > 0 && view <= since;
 };
 
-const proposing = (rules: Rulebook, view: JView, w: Work, peer: EntityId): Work => {
+/**
+ * R-REGISTRY-AT-VIEW: a lock or an expiry in the queue is judged again when the Account proposes, and a refusal there
+ * would drop it. One with no reading at this view (the read failed) waits for the next frame, which is handed one: the
+ * Account proposes nothing meanwhile, and no queued tx is lost.
+ */
+const unread = (w: Work, peer: EntityId, account: EntityReplica, registry: Registry | undefined): boolean =>
+  registry !== undefined && txsDecide(w.state, peer, account.mempool).some((h) => !registry.seconds.has(h));
+
+const proposing = (rules: Rulebook, view: JView, registry: Registry | undefined) => (w: Work, peer: EntityId): Work => {
   const account = w.state.accounts.get(peer);
   if (account === undefined || paced(w, view, peer, account) || quiet(factsOf(w, peer))) return w;
+  if (unread(w, peer, account, registry)) return w;
   const proposed = propose(rules(w, peer), account);
   return sending(withReplica(w, peer, proposed.replica), peer, proposed.sent);
 };
@@ -1026,12 +1049,14 @@ const commandsOf = (inputs: readonly EntityInput[]): readonly Command[] =>
  */
 export const entityFrame = (
   judge: Judge, anchor: Anchor, state: EntityState, inputs: readonly EntityInput[],
+  readings?: readonly Reading[],
 ): Frame => {
+  const registry = readings === undefined ? undefined : registryOf(readings, judge.view, anchor.terms.secondsOf);
   const rules: Rulebook = (w, peer) => {
     const facts = factsOf(w, peer);
     return entityRules(judge, signingOf(anchor, w.state.id, peer, facts),
       { self: sideOf(w.state.id, peer), frozen: quiet(facts), unruled: unruled(w.state), blind: w.state.blind,
-        shown: w.state.shown });
+        shown: w.state.shown, ...(registry === undefined ? {} : { registry }) });
   };
   const hear = (w: Work, a: Arrival): Work => {
     const next = arrive(rules, anchor.terms, anchor.check, judge.view, w, a);
@@ -1041,11 +1066,11 @@ export const entityFrame = (
   const arrived = arrivalsOf(inputs).reduce(hear, start(state));
   const afterHooks = hooksOf(inputs).reduce(hooked, arrived);
   const afterCommands = commandsOf(inputs).reduce((w, c) => commanded(rules, anchor.terms, w, c), afterHooks);
-  const afterPaybook = forwarding(rules, judge)(afterCommands);
-  const propose = (w: Work, peer: EntityId): Work => proposing(rules, judge.view, w, peer);
+  const afterPaybook = forwarding(rules, judge, registry)(afterCommands);
+  const propose = proposing(rules, judge.view, registry);
   const proposed = proposalOrder(afterPaybook).reduce(propose, afterPaybook);
   const peers = [...proposed.state.accounts.keys()].toSorted();
   const owing = peers.reduce(dutiful(judge, anchor.terms), peers.reduce(told, stillWaiting(proposed, judge.view)));
-  const done = peers.reduce(reconciled, owing);
+  const done = unshown(peers.reduce(reconciled, owing));
   return { state: done.state, outputs: done.outputs, notices: done.notices, chain: done.chain };
 };

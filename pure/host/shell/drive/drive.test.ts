@@ -13,19 +13,22 @@ import { assemble } from "../../../j/op/assemble.ts";
 import type { Cause, Simulation } from "../../../j/gas/simulate.ts";
 import { err, ok, unwrapOr, type Result } from "../../../kernel/core/result.ts";
 import { hostOf, setup, stamp } from "../../../runtime/fixtures.ts";
-import { limits } from "../../host.ts";
+import { heard, limits } from "../../host.ts";
 import { verifyHankoSignature } from "../../../chain/hanko/hanko-verify.ts";
 import { credit, open } from "../../../entity/fixtures.ts";
 import { addressOf, signDigest } from "../../../kernel/crypto/signature.ts";
 import { ALICE, aliceRun, BOB, callsOf, DEPLOYED, GAS, journalIn, TREASURY, WORLD } from "../fixtures.ts";
 import { GOLD } from "../../../runtime/fixtures.ts";
 import { keyOf } from "../link/link.ts";
-import type { ChainPort, PortFault } from "../submit/chain.ts";
+import type { ChainPort, PortFault, RegistryRead } from "../submit/chain.ts";
 import { lazySigner } from "../submit/signer.ts";
 import { fileDisk } from "../node/file-disk.ts";
 import { scanWal } from "../disk/wal.ts";
 import { heightOf } from "../../../account/fixtures.ts";
-import { command, observe, pump, start, type Boot, type Shell, type Turn } from "./drive.ts";
+import { keccakHex } from "../../../kernel/encoding/bytes.ts";
+import { holdId } from "../../../account/model.ts";
+import type { Command } from "../../../entity/model.ts";
+import { command, drain, observe, pump, start, type Boot, type Shell, type Turn } from "./drive.ts";
 
 const KEY = unwrapOr(keyOf(Uint8Array.from({ length: 32 }, (_, i) => i + 1)), () => expect.unreachable("key"));
 const BOOT: Boot = {
@@ -88,6 +91,7 @@ const portOf = (
 /** The simulation the scene's port answers with when a test names none. */
 const DEFAULT_OUTCOME: Simulation["outcome"] | undefined = undefined;
 const NO_SKIP: number | undefined = undefined;
+const NO_PORT: RegistryRead | undefined = undefined;
 
 const withShell = async <T>(
   at: Scene, sends: Result<void, PortFault>, work: (shell: Shell) => Promise<T>,
@@ -343,5 +347,117 @@ describe("host/shell/drive the Host's rows are on the disk before the chain hear
     const ok_: Simulation["outcome"] = { _tag: "ok", applyGas: 100_000n };
     const [window, none] = [await counterTurns(ok_, 4), await counterTurns(ok_, 2)];
     expect([answerOf(window.third)?.lapsed, answerOf(none.third)?.lapsed]).toEqual([true, false]);
+  });
+});
+
+describe("host/shell/drive the registry is read at the frame's view before it is begun (R-REGISTRY-AT-VIEW)", () => {
+  const HASHLOCK = keccakHex(Uint8Array.from({ length: 32 }, (_, i) => i + 1));
+  const DECIDING: Boot = { ...BOOT, setup: { ...setup, registry: true } };
+  const LOCK: Command = {
+    _tag: "lock", peer: BOB, token: GOLD,
+    hold: { id: holdId(1n), payer: "left", amount: 10n, hashlock: HASHLOCK, deadline: heightOf(105n) },
+  };
+  const FORWARD: Command = { _tag: "forward", hashlock: HASHLOCK, from: BOB, to: BOB };
+  const PRUNED_READ: ReturnType<RegistryRead> = Promise.resolve(ok("pruned"));
+  const FAULT: PortFault = { _tag: "port", call: "registry", reason: "execution timeout" };
+
+  /** The node's registry: each read is written to the scene's log, and answered as the scenario says. */
+  const registryOf = (at: Scene, answer: (hashlock: string, at: bigint) => ReturnType<RegistryRead>): RegistryRead =>
+    (hashlock, view) => {
+      appendFileSync(at.log, `registry ${hashlock} ${view}\n`);
+      return answer(hashlock, view);
+    };
+
+  const registryCalls = (at: Scene): readonly string[] => callsOf(at.log).filter((c) => c.startsWith("registry"));
+
+  const withRegistry = async <T>(
+    at: Scene, registry: RegistryRead | undefined, work: (shell: Shell) => Promise<T>,
+  ): Promise<T> => {
+    appendFileSync(at.log, "");
+    const wal = await fileDisk(at.wal);
+    const journal = await fileDisk(at.journal);
+    if (!wal.ok || !journal.ok) return expect.unreachable("disks");
+    const io = { port: portOf(at, ok(undefined)), signer: lazySigner(ALICE, KEY), journal: journal.value, gas: GAS };
+    const base = { wal: wal.value, io, now: () => stamp(1_000n) };
+    const out = await work(registry === undefined ? base : { ...base, registry });
+    await wal.value.close();
+    await journal.value.close();
+    return out;
+  };
+
+  const inputsOf = (at: Scene) => rowsIn(at).map((r) => r.input);
+
+  test("R-REGISTRY-AT-VIEW the frame is handed the reading of what it decides on, at the view", async () => {
+    const at = scene();
+    const turn = await withRegistry(at, registryOf(at, () => Promise.resolve(ok(0n))), async (shell) => {
+      const started = turnOf(await start(shell, DECIDING));
+      const opened = turnOf(await command(shell, started.station, ALICE, open(BOB)));
+      return turnOf(await command(shell, opened.station, ALICE, LOCK));
+    });
+    expect(registryCalls(at)).toEqual([`registry ${HASHLOCK} 100`]);
+    const [first, second] = inputsOf(at);
+    expect(first).toMatchObject({ _tag: "entity", registry: [] });
+    expect(second).toMatchObject({ _tag: "entity", registry: [{ hashlock: HASHLOCK, at: 100n, seconds: 0n }] });
+    expect(turn.unread).toEqual([]);
+  });
+
+  test("R-REGISTRY-AT-VIEW a failed read is no reading: the frame is begun, the decision refused, told", async () => {
+    const at = scene();
+    const turn = await withRegistry(at, registryOf(at, () => Promise.resolve(err(FAULT))), async (shell) => {
+      const started = turnOf(await start(shell, DECIDING));
+      const opened = turnOf(await command(shell, started.station, ALICE, open(BOB)));
+      return turnOf(await command(shell, opened.station, ALICE, LOCK));
+    });
+    expect(turn.unread).toEqual([{ hashlock: HASHLOCK, fault: FAULT }]);
+    const last = rowsIn(at).at(-1);
+    expect(last?.input).toMatchObject({ _tag: "entity", registry: [] });
+    expect(last?.notices.map((n) => n._tag)).toEqual(["command_refused"]);
+    const fault = last?.notices.flatMap((n) => (n._tag === "command_refused" && n.fault._tag === "account_refused"
+      ? [n.fault.fault._tag] : []));
+    expect(fault).toEqual(["registry_unknown"]);
+    expect(rowsIn(at)).toHaveLength(2);
+  });
+
+  test("R-REGISTRY-AT-VIEW a block the node no longer serves is told too, with no fault of the port", async () => {
+    const at = scene();
+    const turn = await withRegistry(at, registryOf(at, () => PRUNED_READ), async (shell) => {
+      const started = turnOf(await start(shell, DECIDING));
+      const opened = turnOf(await command(shell, started.station, ALICE, open(BOB)));
+      return turnOf(await command(shell, opened.station, ALICE, LOCK));
+    });
+    expect(turn.unread).toEqual([{ hashlock: HASHLOCK, fault: undefined }]);
+    expect(inputsOf(at).at(-1)).toMatchObject({ _tag: "entity", registry: [] });
+  });
+
+  test("R-REGISTRY-AT-VIEW a waiting height reads at the height, for what every Entity decides on then", async () => {
+    const at = scene();
+    await withRegistry(at, registryOf(at, () => Promise.resolve(ok(0n))), async (shell) => {
+      const started = turnOf(await start(shell, DECIDING));
+      const opened = turnOf(await command(shell, started.station, ALICE, open(BOB)));
+      const entry = turnOf(await command(shell, opened.station, ALICE, FORWARD));
+      const risen = { ...entry.station, host: heard(entry.station.host, heightOf(101n)) };
+      return turnOf(await drain(shell, risen));
+    });
+    expect(registryCalls(at)).toEqual([`registry ${HASHLOCK} 100`, `registry ${HASHLOCK} 101`]);
+    const readings = [{ hashlock: HASHLOCK, at: 101n, seconds: 0n }];
+    expect(inputsOf(at).at(-1)).toMatchObject({ _tag: "j_height", registry: readings });
+  });
+
+  test("R-REGISTRY-AT-VIEW a Runtime that does not decide on the registry reads nothing", async () => {
+    const at = scene();
+    await withRegistry(at, registryOf(at, () => Promise.resolve(ok(0n))), async (shell) => {
+      const started = turnOf(await start(shell, BOOT));
+      const opened = turnOf(await command(shell, started.station, ALICE, open(BOB)));
+      return turnOf(await command(shell, opened.station, ALICE, LOCK));
+    });
+    expect(registryCalls(at)).toEqual([]);
+    expect(inputsOf(at).every((input) => !("registry" in input))).toBe(true);
+  });
+
+  test("R-REGISTRY-AT-VIEW a Runtime that decides on the registry is not started with no way to read it", async () => {
+    const at = scene();
+    const out = await withRegistry(at, NO_PORT, (shell) => start(shell, DECIDING));
+    expect(out).toEqual({ ok: false, error: { _tag: "no_registry" } });
+    expect(rowsIn(at)).toEqual([]);
   });
 });

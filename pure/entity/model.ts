@@ -30,7 +30,16 @@ export const entityId = (text: string): Result<EntityId, BadEntityId> =>
 export const sideOf = (self: EntityId, peer: EntityId): Side => (self < peer ? "left" : "right");
 
 /** What a frame of an Account can be refused for: the Account's own faults, and that the node's signature is out. */
-export type PeerFault = AccountFault | Tagged<"frozen"> | Tagged<"reveal_unknown"> | Tagged<"revealed_on_chain">;
+export type PeerFault =
+  | AccountFault | Tagged<"frozen"> | Tagged<"reveal_unknown"> | Tagged<"revealed_on_chain">
+  | Tagged<"registry_unknown"> | Tagged<"paid_on_chain">;
+
+/**
+ * What the chain's registry (`DeltaTransformer.hashToTimestamp`) held for a hashlock in the state of J block `at`: the
+ * second a secret was first shown at, or 0 when none had been (R-REGISTRY-AT-VIEW). The Host reads it at the view the
+ * frame decides at and hands it over with the frame, so a replay decides the same.
+ */
+export type Reading = Readonly<{ hashlock: string; at: bigint; seconds: bigint }>;
 
 /** One side of an Account as the Entity holds it. */
 export type EntityReplica = Replica<AccountTx, AccountState, PeerFault>;

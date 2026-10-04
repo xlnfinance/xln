@@ -14,7 +14,7 @@ import { setup as fixtureSetup, stamp } from "../../../runtime/fixtures.ts";
 import { limits } from "../../host.ts";
 import { DEPLOYED, GAS, TREASURY, WORLD } from "../fixtures.ts";
 import { keyOf, MAX_LINE, type Key, type Peer } from "../link/link.ts";
-import type { ChainPort, PortFault } from "../submit/chain.ts";
+import type { ChainPort, PortFault, RegistryRead } from "../submit/chain.ts";
 import { lazySigner } from "../submit/signer.ts";
 import type { WatchConfig } from "../watch/loop.ts";
 import type { Disk } from "../disk/disk.ts";
@@ -96,6 +96,8 @@ const nonce = (): Uint8Array => crypto.getRandomValues(new Uint8Array(32));
 
 const keep = (): boolean => false;
 
+const NO_READ: RegistryRead | undefined = undefined;
+
 export type Options = Readonly<{
   tickMs: number; lost?: Config["lost"]; chain?: ChainPort; wrap?: (wal: Disk) => Disk; watch?: WatchConfig;
   /** The Entity the node starts from, where a test wants one that holds more than the empty Entity. */
@@ -104,22 +106,31 @@ export type Options = Readonly<{
   lag?: bigint;
   reserve?: bigint;
   depth?: bigint;
+  /** Whether the node decides on the registry's reading: it does when it may hold value, as such a node must. */
+  registry?: boolean;
+  /** The registry the node reads, where a test wants one that fails. */
+  read?: RegistryRead;
 }>;
+
+/** A registry that shows no secret at any block. */
+const SILENT: RegistryRead = () => Promise.resolve(ok(0n));
 
 /** What a node for `seat` is started with, its files in the seat's directory. */
 export const configOf = async (seat: Seat, other: Seat | undefined, options: Options): Promise<Config> => {
   const { tickMs, lost = keep, chain = port, wrap = (disk) => disk, watch, genesis } = options;
   const { lag = setup.clock.lag, reserve = setup.clock.reserve, depth = setup.clock.depth } = options;
+  const { registry = watch?.value === true } = options;
   const wal = wrap(must(await fileDisk(`${seat.dir}/wal.log`)));
   const journal = must(await fileDisk(`${seat.dir}/journal.log`));
   const key = keyOfEntity(seat.entity);
   return {
     shell: {
       wal, io: { port: chain, signer: lazySigner(seat.entity, key), journal, gas: GAS },
-      now: () => stamp(BigInt(Date.now())),
+      now: () => stamp(BigInt(Date.now())), registry: registry ? options.read ?? SILENT : NO_READ,
     },
     boot: {
-      setup: { ...setup, clock: { ...setup.clock, lag, reserve, depth } }, genesis: genesis ?? emptyEntity(seat.entity),
+      setup: { ...setup, registry, clock: { ...setup.clock, lag, reserve, depth } },
+      genesis: genesis ?? emptyEntity(seat.entity),
       where: { entity: seat.entity, deployment: DEPLOYED, world: WORLD },
       limits: unwrapOr(limits(32, 8), () => expect.unreachable("limits")),
     },

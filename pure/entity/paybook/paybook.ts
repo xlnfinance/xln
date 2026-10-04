@@ -14,6 +14,7 @@ import { traverse } from "../../kernel/core/result.ts";
 import {
   entityId, sideOf, type AccountCommand, type ChainFacts, type Entry, type EntityId, type EntityState, type Paybook,
 } from "../model.ts";
+import type { Registry } from "./registry.ts";
 
 /** A hop's deadline is earlier than the hop before it by what its payee needs to learn the secret and pass it on. */
 export const hopOf = (clock: ClockParams): bigint => clock.reserve + clock.lag;
@@ -116,7 +117,7 @@ type Forward = Of<Entry, "forward">;
 type Receive = Of<Entry, "receive">;
 
 const forwardOf = (
-  state: EntityState, clock: ClockParams, view: JView, hashlock: string, e: Forward,
+  state: EntityState, clock: ClockParams, view: JView, hashlock: string, e: Forward, registry: Registry | undefined,
 ): Intent | undefined => {
   const c = incoming(state, e.from, hashlock);
   if (c === undefined) return undefined;
@@ -124,6 +125,9 @@ const forwardOf = (
   if (state.blind || behind(state, e.to) || deadline === undefined || !state.accounts.has(e.to) || e.to === e.from) {
     return cancelUp(e.from, hashlock, c);
   }
+  // R-REGISTRY-AT-VIEW: no reading of the registry at this view is no answer yet, and not a refusal of the door: the
+  // lock waits for the next frame, which is handed one. A reading that shows the secret is the door's refusal.
+  if (registry !== undefined && !registry.seconds.has(hashlock)) return undefined;
   const id = freeSlot(state, e.to);
   const hold: Hold = { id, payer: sideOf(state.id, e.to), amount: c.hold.amount, hashlock, deadline };
   return {
@@ -142,11 +146,12 @@ const receiveOf = (state: EntityState, hashlock: string, e: Receive): Intent | u
     : cancelUp(e.from, hashlock, c);
 };
 
-const intentOf = (state: EntityState, clock: ClockParams, view: JView, hashlock: string, e: Entry):
-  Intent | undefined => {
+const intentOf = (
+  state: EntityState, clock: ClockParams, view: JView, hashlock: string, e: Entry, registry: Registry | undefined,
+): Intent | undefined => {
   switch (e._tag) {
     case "forward":
-      return forwardOf(state, clock, view, hashlock, e);
+      return forwardOf(state, clock, view, hashlock, e, registry);
     case "receive":
       return receiveOf(state, hashlock, e);
     case "pass": {
@@ -167,10 +172,10 @@ export const hashlocksOf = (state: EntityState): readonly string[] => [...state.
 
 /** What the paybook asks of the Accounts now for one hashlock, judged on the state as it stands. */
 export const intentFor = (
-  state: EntityState, clock: ClockParams, view: JView, hashlock: string,
+  state: EntityState, clock: ClockParams, view: JView, hashlock: string, registry?: Registry,
 ): Intent | undefined => {
   const entry = state.paybook.get(hashlock);
-  return entry === undefined ? undefined : intentOf(state, clock, view, hashlock, entry);
+  return entry === undefined ? undefined : intentOf(state, clock, view, hashlock, entry, registry);
 };
 
 /** An entry in place of the one for `hashlock`, or none. */

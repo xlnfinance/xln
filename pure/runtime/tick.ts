@@ -9,7 +9,7 @@ import { frameName } from "../account/frame/account.ts";
 import type { Msg } from "../account/frame/frame.ts";
 import type { AccountTx } from "../account/tx.ts";
 import { entityFrame } from "../entity/frame.ts";
-import type { EntityId, EntityInput, EntityState, Fold, JAction, Outbound } from "../entity/model.ts";
+import type { EntityId, EntityInput, EntityState, Fold, JAction, Outbound, Reading } from "../entity/model.ts";
 import type { Frame } from "../entity/frame.ts";
 import { ownView } from "../account/clause/clock.ts";
 import { proofBodyHash, type ProofBody } from "../chain/proof/proof.ts";
@@ -22,8 +22,14 @@ export const startRuntime = (setup: Setup, entities: readonly EntityState[]): Ru
 
 const later = (a: Timestamp, b: Timestamp): Timestamp => (a > b ? a : b);
 
-const frameOf = (rt: Runtime, entity: EntityState, inputs: readonly EntityInput[]): Frame =>
-  entityFrame({ clock: rt.setup.clock, view: rt.view }, rt.setup.anchor, entity, inputs);
+/** The readings a frame is handed: none at all when the Entity does not decide on the registry. */
+const readingsOf = (rt: Runtime, registry: readonly Reading[] | undefined): readonly Reading[] | undefined =>
+  (rt.setup.registry === true ? registry ?? [] : undefined);
+
+const frameOf = (
+  rt: Runtime, entity: EntityState, inputs: readonly EntityInput[], registry: readonly Reading[] | undefined,
+): Frame =>
+  entityFrame({ clock: rt.setup.clock, view: rt.view }, rt.setup.anchor, entity, inputs, readingsOf(rt, registry));
 
 /** The frame an input makes on the Runtime as it stands: the entities' next states and the row that records it. */
 const stageEntity = (rt: Runtime, stamp: Timestamp, input: EntityBatch): Runtime => {
@@ -34,7 +40,7 @@ const stageEntity = (rt: Runtime, stamp: Timestamp, input: EntityBatch): Runtime
     const refused: Row = { height, stamp, input, outputs: [], chain: [], notices: [unknown] };
     return { ...rt, stamp, staged: refused };
   }
-  const frame = frameOf(rt, entity, input.inputs);
+  const frame = frameOf(rt, entity, input.inputs, input.registry);
   const row: Row = { height, stamp, input, outputs: frame.outputs, chain: frame.chain, notices: frame.notices };
   return { ...rt, stamp, entities: mapSet(rt.entities, input.to, frame.state), staged: row };
 };
@@ -45,7 +51,8 @@ const byId = ([a]: readonly [EntityId, unknown], [b]: readonly [EntityId, unknow
 const stageHeight = (rt: Runtime, stamp: Timestamp, input: NewHeight): Runtime => {
   const view = input.height > rt.view ? ownView(input.height, input.height) : rt.view;
   const raised = { ...rt, view };
-  const frames = [...rt.entities].toSorted(byId).map(([id, entity]) => [id, frameOf(raised, entity, [])] as const);
+  const frames = [...rt.entities].toSorted(byId)
+    .map(([id, entity]) => [id, frameOf(raised, entity, [], input.registry)] as const);
   const row: Row = {
     height: BigInt(rt.wal.length) + 1n, stamp, input,
     outputs: frames.flatMap(([, f]) => f.outputs), chain: frames.flatMap(([, f]) => f.chain),
@@ -60,17 +67,26 @@ const collected = (before: Observed, runtime: Runtime): Observed => ({
   runtime, rows: runtime.staged === undefined ? before.rows : [...before.rows, runtime.staged],
 });
 
+/** The readings of a delivery, on the synthetic batch or height, and absent when the delivery did not decide on them. */
+const withRegistry = <T extends object>(batch: T, registry: Observation["registry"]): T & { registry?: readonly Reading[] } =>
+  (registry === undefined ? batch : { ...batch, registry });
+
 /**
  * R-HEIGHT-ORDER: a crash may keep the whole delivery or none of it. Committing its events and read-wait identities
  * before a separate height row allowed an already-applied finalize to replay as fresh after a crash in that gap.
  * Frames retain their old-view judgment and positional output order; none leaves until this one row is durable.
+ * The delivery's registry list is copied onto each synthetic batch and onto the height, so replay decides the same way.
  */
 const stageObservation = (rt: Runtime, stamp: Timestamp, input: Observation): Runtime => {
   const events = input.batches.reduce<Observed>((before, inputs) => collected(before,
-    stageEntity(before.runtime, stamp, { _tag: "entity", at: input.at, to: input.to, inputs })),
+    stageEntity(before.runtime, stamp, withRegistry(
+      { _tag: "entity", at: input.at, to: input.to, inputs }, input.registry,
+    ))),
   { runtime: rt, rows: [] });
   const done = input.height > rt.view
-    ? collected(events, stageHeight(events.runtime, stamp, { _tag: "j_height", at: input.at, height: input.height }))
+    ? collected(events, stageHeight(events.runtime, stamp, withRegistry(
+      { _tag: "j_height", at: input.at, height: input.height }, input.registry,
+    )))
     : events;
   const row: Row = {
     height: BigInt(rt.wal.length) + 1n, stamp, input,

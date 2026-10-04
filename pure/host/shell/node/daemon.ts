@@ -18,7 +18,7 @@ import type { Tagged } from "../../../kernel/core/tagged.ts";
 import { submit } from "../../host.ts";
 import type { HostNotice } from "../../model.ts";
 import {
-  command, drain, observe, pump, start, type Boot, type DriveFault, type Shell, type Station, type Turn,
+  command, drain, observe, pump, start, type Boot, type DriveFault, type Shell, type Station, type Turn, type Unread,
 } from "../drive/drive.ts";
 import { MAX_LINE, type Key, type Peer, type RuntimeId } from "../link/link.ts";
 import {
@@ -53,6 +53,12 @@ export type Stopped = Tagged<"stopped">;
  */
 export type ClockBelowDepth = Tagged<"clock_below_depth", { lag: bigint; depth: bigint }>;
 export type ClockDepthOff = Tagged<"clock_depth_off", { clock: bigint | undefined; depth: bigint }>;
+
+/**
+ * A node that may hold value decides on the registry's reading at its view (R-REGISTRY-AT-VIEW): one whose setup does
+ * not is refused, as one with no way to read the registry is (`no_registry`, the drive's).
+ */
+export type RegistryOff = Tagged<"registry_off">;
 
 /** What ends a node's work: a disk, the chain's submit path, the Runtime, or a watcher invariant broken. */
 export type NodeFault = DriveFault | WatchFault | BadPeer | BadSecret;
@@ -219,9 +225,23 @@ const leaving = async (rig: Rig, state: State, sent: readonly Outbound[]): Promi
   return { ...state, mesh: routed.mesh, counts };
 };
 
+/** A registry read the Entity needed and did not get is told once for each hashlock and reason (`registry_unread`). */
+const unreadNotices = (state: State, unread: readonly Unread[]): readonly HostNotice[] => {
+  const told = (hashlock: string, reason: string): boolean => state.notices.some((old) =>
+    old._tag === "registry_unread" && old.hashlock === hashlock && old.reason === reason);
+  return unread.flatMap((u): readonly HostNotice[] => {
+    const reason = u.fault === undefined
+      ? "the node no longer serves that block" : `${u.fault.call}: ${u.fault.reason}`;
+    return told(u.hashlock, reason) ? [] : [{ _tag: "registry_unread", hashlock: u.hashlock, reason }];
+  });
+};
+
 const concluded = (rig: Rig, state: State, made: Result<Turn, DriveFault>): Promise<State> =>
   (made.ok
-    ? leaving(rig, { ...state, station: made.value.station }, made.value.sent)
+    ? leaving(rig, {
+      ...state, station: made.value.station,
+      notices: recent([...state.notices, ...unreadNotices(state, made.value.unread)]),
+    }, made.value.sent)
     : Promise.resolve({ ...state, fatal: made.error }));
 
 const refusedLine = (state: State, refused: Refused): State => {
@@ -456,8 +476,9 @@ const blindStart = (config: Config, station: Station): Station => {
  */
 export const startDaemon = async (
   config: Config, listener: Listener,
-): Promise<Result<Daemon, DriveFault | ClockBelowDepth | ClockDepthOff>> => {
+): Promise<Result<Daemon, DriveFault | ClockBelowDepth | ClockDepthOff | RegistryOff>> => {
   const { lag, depth } = config.boot.setup.clock;
+  if (config.watch?.value === true && config.boot.setup.registry !== true) return err({ _tag: "registry_off" });
   if (config.watch !== undefined && lag <= config.watch.depth) {
     return err({ _tag: "clock_below_depth", lag, depth: config.watch.depth });
   }

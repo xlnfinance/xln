@@ -6,7 +6,7 @@ import { heightOf, holdOf, secretOf, viewOf } from "../account/fixtures.ts";
 import { holdId } from "../account/model.ts";
 import { emptyEntity, type Command } from "../entity/model.ts";
 import { credit, feed, GOLD, hostOf, open, settle, start } from "../runtime/fixtures.ts";
-import { begin, heard, idle, persisted, reopen, startHost, submit } from "./host.ts";
+import { begin, heard, idle, persisted, reopen, startHost, submit, upcoming } from "./host.ts";
 import { BOUNDS, chainIn, entityOf, inputsOf, stamp, unhalted } from "./fixtures.ts";
 
 const ALICE = entityOf(1);
@@ -64,6 +64,11 @@ describe("host/height a J height is a frame of its own, ahead of the queue; the 
     expect(begun.host.height).toBeUndefined();
     expect(begun.host.queue).toHaveLength(1);
     expect(idle(begun.host)).toBe(false);
+  });
+
+  test("R-REGISTRY-AT-VIEW a waiting height is the frame to come, at that height, for every Entity", () => {
+    expect(upcoming(queued)).toEqual({ view: viewOf(113n), to: undefined, inputs: [] });
+    expect(upcoming(unhalted(begin(queued, stamp(100n))).host)).toBeUndefined();
   });
 
   test("after the height frame is durable the queued input takes the next frame; the height is not taken twice", () => {

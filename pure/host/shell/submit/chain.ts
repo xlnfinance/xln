@@ -28,6 +28,13 @@ import {
 /** What the shell asks of the chain: each is one read or one transaction, and none of them signs. */
 export type PortFault = Tagged<"port", { call: string; reason: string }>;
 
+/**
+ * What the chain's registry (`DeltaTransformer.hashToTimestamp`) held for a hashlock in the state of J block `at`: the
+ * second a secret was first shown at, 0 for none, or `pruned` when the node no longer serves that block's state (a
+ * thing about the past, not a fault of the read). Any other failure is the port's fault, tried again.
+ */
+export type RegistryRead = (hashlock: string, at: bigint) => Promise<Result<bigint | "pruned", PortFault>>;
+
 export type ChainPort = Readonly<{
   /** The Entity's stored batch nonce. */
   nonce: () => Promise<Result<bigint, PortFault>>;

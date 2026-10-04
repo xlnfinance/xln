@@ -217,6 +217,9 @@ const journalOf = (dir: string, name: string): readonly JournalRecord[] =>
 /** The swap quotes and offers an Account holds, to be the same in both Runtimes. */
 const swapsOf = (s: AccountState) => [s.quotes, s.offers];
 
+/** The refusals the registry steps ask for on purpose: a command the Entity refuses because the chain already paid the clause. */
+const paidRefusal = (n: string): boolean => n.startsWith("command_refused") && (n.includes("paid_on_chain") || n.includes("revealed_on_chain"));
+
 /** No notice, no cut connection, no line on its way; `expected` are the notices an earlier step caused on purpose. */
 const quiet = (net: Cluster, parties: readonly Party[], what: string, expected: (notice: string) => boolean = () => false): void => {
   const noticed = parties.flatMap((p) => net.noticesOf(eid(p)).filter((n) => !expected(n)).map((n) => `${p.name}: ${n}`));
@@ -251,7 +254,7 @@ const open: Step<World> = {
     const signing = await signingFor(chain, alice, hubX);
     w.signing = signing;
     const members = [{ party: alice, peers: [hubX] }, { party: hubX, peers: [alice, hubY] }, { party: hubY, peers: [hubX, bob] }, { party: bob, peers: [hubY] }];
-    const net = w.net = await Cluster.open(chain, { clock: v.clock, view: v.view, anchor: { deployment: signing.deployment, terms: signing.terms, check: lazyCheck } }, members);
+    const net = w.net = await Cluster.open(chain, { clock: v.clock, view: v.view, anchor: { deployment: signing.deployment, terms: signing.terms, check: lazyCheck }, registry: true }, members);
     for (const [a, b] of legs) { await net.tell(eid(a), { _tag: "open_account", peer: eid(b) }); await net.tell(eid(b), { _tag: "open_account", peer: eid(a) }); }
     await net.settle();
     // The first frame of each Account: credit from the receiving side (a deposit waits for the first co-signed frame, R-NO-DEPOSIT-BEFORE-COSIGN).
@@ -505,6 +508,100 @@ const revealDirect: Step<World> = {
   },
 };
 
+// ---- S6c ---------------------------------------------------------------------------------------------------------
+const lateLock: Step<World> = {
+  id: "late-lock", title: "A lock of a hashlock whose secret the chain already holds is refused, and nothing is lost", needs: ["reveal-direct"],
+  run: async (w) => {
+    const chain = chainOf(w);
+    const net = netOf(w);
+    const { alice, hubX, hubY, bob } = partiesOf(w);
+    const t = token(chain);
+    const [a, x, y, b] = [eid(alice), eid(hubX), eid(hubY), eid(bob)];
+    const hops = [[alice, hubX], [hubX, hubY], [hubY, bob]] as const;
+    const secret = ethers.getBytes(ethers.keccak256(ethers.toUtf8Bytes("xln-testnet-e2e-skeleton/secret-4")));
+    const hash = keccakHex(secret);
+    const transformer = new ethers.Contract(chain.manifest.contracts.deltaTransformer.address, ["function revealSecret(bytes32 secret)", "function hashToTimestamp(bytes32) view returns (uint256)"], bob.wallet);
+    const receipt = await (await transformer.revealSecret!(secret)).wait();
+    const shownAt = await transformer.hashToTimestamp!(hash);
+    if (shownAt === 0n) throw new Error("the transformer holds no reveal time after bob's call");
+    // The nodes read the registry at their view: the reveal is at depth for them before alice locks.
+    await net.reach(BigInt(receipt.blockNumber));
+    const open = (): readonly bigint[] => hops.map(([p, q]) => BigInt(ledgerOf(net.account(eid(p), eid(q)).state, t).holds.length));
+    const offdeltas = (): readonly bigint[] => hops.map(([p, q]) => ledgerOf(net.account(eid(p), eid(q)).state, t).offdelta);
+    const [before, asksBefore, noticed] = [offdeltas(), [a, x, y, b].map((id) => net.askedBy(id).length), net.noticesOf(a).length];
+    const amount = 3n * unit(chain);
+    const hold = { id: holdId(3n), payer: net.account(a, x).side, amount, hashlock: hash, deadline: must(jHeight(net.view() + 60n), "deadline") };
+    await net.tell(a, { _tag: "lock", peer: x, token: t, hold, route: [y, b] });
+    await net.settle();
+    const told = net.noticesOf(a).slice(noticed).filter(paidRefusal);
+    if (told.length !== 1 || !told[0]!.includes("paid_on_chain")) throw new Error(`alice's lock of a paid hashlock was told ${shown(net.noticesOf(a).slice(noticed))}, expected one refusal paid_on_chain`);
+    if (open().some((n) => n !== 0n)) throw new Error(`open clauses per hop after the refused lock: ${open().join()}`);
+    if (shown(offdeltas()) !== shown(before)) throw new Error(`offdelta per hop moved from ${shown(before)} to ${shown(offdeltas())}`);
+    const asked = [a, x, y, b].flatMap((id, i) => net.askedBy(id).slice(asksBefore[i]!));
+    if (asked.length !== 0) throw new Error(`a node asked the chain for ${shown(asked.map((k) => k._tag))} after a refused lock`);
+    const left = [hubX, hubY, bob].map((p) => net.entity(eid(p)).paybook.size);
+    if (left.some((n) => n !== 0)) throw new Error(`paybook entries left after the refused lock: ${left.join(",")}`);
+    quiet(net, [alice, hubX, hubY, bob], "late-lock", paidRefusal);
+    return {
+      checks: [
+        `hashlock ${hash.slice(0, 12)}: bob's wallet calls DeltaTransformer.revealSecret before any lock of it exists (block ${receipt.blockNumber}, block time ${shownAt})`,
+        `alice's Entity reads hashToTimestamp at its view, finds the secret shown (R-REGISTRY-AT-VIEW) and refuses her own lock of ${fmt(chain, amount)} for good: one notice paid_on_chain, no clause on any hop`,
+        "nothing is lost: offdelta on the three Accounts is where it was, no node asked the chain for anything, no paybook entry is left",
+      ],
+      gaps: [],
+    };
+  },
+};
+
+// ---- S6d ---------------------------------------------------------------------------------------------------------
+const lateExpiry: Step<World> = {
+  id: "late-expiry", title: "A secret shown after the deadline height, inside the seconds the lock signs, is paid: the expiry is refused", needs: ["late-lock"],
+  run: async (w) => {
+    const chain = chainOf(w);
+    const net = netOf(w);
+    const { hubY, bob } = partiesOf(w);
+    const t = token(chain);
+    const [y, b] = [eid(hubY), eid(bob)];
+    const secret = ethers.getBytes(ethers.keccak256(ethers.toUtf8Bytes("xln-testnet-e2e-skeleton/secret-5")));
+    const hash = keccakHex(secret);
+    const amount = 2n * unit(chain);
+    const deadline = net.view() + 12n;
+    const reserve = (await view(chain)).clock.reserve;
+    const transformer = new ethers.Contract(chain.manifest.contracts.deltaTransformer.address, ["function revealSecret(bytes32 secret)", "function hashToTimestamp(bytes32) view returns (uint256)"], bob.wallet);
+    const holds = (): number => ledgerOf(net.account(y, b).state, t).holds.length;
+    const offBefore = ledgerOf(net.account(y, b).state, t).offdelta;
+    await net.tell(y, { _tag: "lock", peer: b, token: t, hold: { id: holdId(3n), payer: net.account(y, b).side, amount, hashlock: hash, deadline: must(jHeight(deadline), "deadline") } });
+    await net.settle();
+    if (holds() !== 1) throw new Error(`hubY-bob holds ${holds()} clauses after the lock`);
+    // The deadline height goes by with no secret shown; only then bob shows it, a block later and before the seconds the lock signs have run out.
+    await net.reach(deadline + 1n);
+    const receipt = await (await transformer.revealSecret!(secret)).wait();
+    const block = BigInt(receipt.blockNumber);
+    if (block <= deadline) throw new Error(`the reveal is in block ${block}, not past the deadline ${deadline}`);
+    const shownAt = await transformer.hashToTimestamp!(hash);
+    await net.reach(deadline + reserve + 2n);
+    const noticed = net.noticesOf(y).length;
+    await net.tell(y, { _tag: "expire", peer: b, token: t, id: holdId(3n) });
+    await net.settle();
+    const told = net.noticesOf(y).slice(noticed).filter(paidRefusal);
+    if (told.length !== 1 || !told[0]!.includes("revealed_on_chain")) throw new Error(`hubY's expiry of a paid clause was told ${shown(net.noticesOf(y).slice(noticed))}, expected one refusal revealed_on_chain`);
+    if (holds() !== 1) throw new Error(`hubY-bob holds ${holds()} clauses after the refused expiry, expected the one the chain paid`);
+    // The clause stays in both ledgers until a dispute settles it from the chain's side: off chain it is past its deadline for the payee too.
+    const [rb, ry] = [net.account(b, y), net.account(y, b)];
+    if (rb.head !== ry.head || ledgerOf(ry.state, t).offdelta !== offBefore) throw new Error(`hubY-bob after the refused expiry: offdelta ${ledgerOf(ry.state, t).offdelta}, expected ${offBefore} unchanged`);
+    quiet(net, Object.values(partiesOf(w)), "late-expiry", paidRefusal);
+    return {
+      checks: [
+        `hubY locks ${fmt(chain, amount)} for bob (deadline ${deadline}); the deadline height passes with no secret shown`,
+        `bob's wallet shows the secret in block ${block} (block time ${shownAt}), past the deadline height and inside the seconds the lock signs: the chain pays the clause`,
+        `at view ${net.view()} hubY's Entity reads hashToTimestamp at its view and refuses its own expiry for good: one notice revealed_on_chain, the clause stays on both sides`,
+        "the Accounts stay at one head with the clause and offdelta unchanged: hubY lost nothing the chain paid, and the clause waits for the dispute that settles it from the chain",
+      ],
+      gaps: [],
+    };
+  },
+};
+
 const swap: Step<World> = {
   id: "swap", title: "Two-party swap inside an Account: quote, partial fill, withdrawal", needs: ["htlc"],
   run: async (w) => {
@@ -560,7 +657,7 @@ const swap: Step<World> = {
     const reserved = [give, want].flatMap((t) => [ledgerOf(done, t).reserved.left, ledgerOf(done, t).reserved.right]);
     if (done.quotes.length !== 0 || done.offers.length !== 0 || reserved.some((n) => n !== 0n)) throw new Error(`after the retract: ${done.quotes.length} quotes, ${done.offers.length} offers, reserved ${reserved.join(",")}; expected none`);
     if (shown(offdeltas()) !== shown([afterGive, afterWant])) throw new Error("the retract moved an offdelta: what was filled must stay");
-    quiet(net, Object.values(partiesOf(w)), "swap");
+    quiet(net, Object.values(partiesOf(w)), "swap", paidRefusal);
     return {
       checks: [
         `hubX quotes ${fmt(chain, giveAmount)} for ${wantAmount / unit(chain)} of a second token on hubX-hubY: one frame, both Runtimes at head ${rm().head.slice(0, 12)}, the quote reserves only hubX's give: nothing is reserved against hubY and no offdelta moved`,
@@ -1041,7 +1138,7 @@ const disputeStale: Step<World> = {
     const parties = partiesOf(w);
     const now = await heldBy(chain, Object.values(parties), [[alice, hubX], [parties.hubX, parties.hubY], [parties.hubY, parties.bob]]);
     if (now !== w.held) throw new Error(`money is not conserved: ${w.held} before the dispute, ${now} after`);
-    quiet(net, Object.values(parties), "dispute-stale", (n) => isRebased(n) || (n.startsWith("command_refused") && (n.includes("account_disputed") || (n.includes('"_tag":"dispute"') && n.includes("no_proof")))));
+    quiet(net, Object.values(parties), "dispute-stale", (n) => isRebased(n) || paidRefusal(n) || (n.startsWith("command_refused") && (n.includes("account_disputed") || (n.includes('"_tag":"dispute"') && n.includes("no_proof")))));
     return {
       checks: [
         `alice funded alice-hubX with ${fmt(chain, funded)} in epoch ${onChain.epoch}; alice paid hubX ${fmt(chain, STALE_PAY * unit(chain))}, hubX committed the frame (slot ${newSlot}) and its ack to alice was lost: hubX holds alice's signature over a head alice never committed`,
@@ -1071,7 +1168,7 @@ const nodes: Step<World> = {
     const fingerprint = (id: EntityId): string => JSON.stringify([...net.entity(id).accounts].map(([peer, r]) => [peer, r.head, r.height, r.used, [...r.state.ledgers].map(([k, l]) => [k.toString(), l])]), (_, v) => (typeof v === "bigint" ? `${v}n` : v));
     const asked = (id: EntityId): string => JSON.stringify(net.askedBy(id), (_, v) => (typeof v === "bigint" ? `${v}n` : v));
     // The rebase step asked alice's node for a dispute from a voided proof on purpose: its refusal is the one notice there is.
-    quiet(net, everyone, "nodes, before the crash", (n) => isRebased(n) || (n.startsWith("command_refused") && n.includes('"_tag":"dispute"') && n.includes("no_proof")));
+    quiet(net, everyone, "nodes, before the crash", (n) => isRebased(n) || paidRefusal(n) || (n.startsWith("command_refused") && n.includes('"_tag":"dispute"') && n.includes("no_proof")));
     const noticed = everyone.map((p) => net.noticesOf(eid(p)).length);
     // bob extends hubY 60 of credit and hubY commits the frame, but its ack never reaches bob: bob's frame stays pending, hubY's row is on its disk.
     await net.losing((m) => m.from === y && m.to === b, async () => {
@@ -1115,4 +1212,4 @@ const nodes: Step<World> = {
   },
 };
 
-export const STEPS: readonly Step<World>[] = [fork, world, deposits, open, pay, htlc, reveal, revealDirect, swap, dispute, disputeClause, rebase, nodes, disputeStale];
+export const STEPS: readonly Step<World>[] = [fork, world, deposits, open, pay, htlc, reveal, revealDirect, lateLock, lateExpiry, swap, dispute, disputeClause, rebase, nodes, disputeStale];

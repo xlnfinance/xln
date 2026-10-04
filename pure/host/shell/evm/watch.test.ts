@@ -11,7 +11,11 @@ import {
 } from "../../../j/fixtures.ts";
 import { blockOf } from "../../../j/fixtures.ts";
 import type { Rpc, RpcFault } from "./port.ts";
-import { watchPort } from "./watch.ts";
+import { registryRead, watchPort } from "./watch.ts";
+import { Interface } from "ethers";
+import {
+  DeltaTransformer__factory,
+} from "../../../../contracts/typechain-types/factories/DeltaTransformer.sol/DeltaTransformer__factory.ts";
 
 const LEFT = entityOf(0x11n);
 const RIGHT = entityOf(0x52n);
@@ -362,5 +366,46 @@ describe("host/shell/evm/watch the J loop's reads of the chain", () => {
     expect(await read(failing("epoch"))).toEqual(fault);
     expect(await portOf({ eth_call: () => ok(words(9n)) }).accountAt(hashOf(6n), LEFT, "0x12" as never))
       .toMatchObject({ ok: false });
+  });
+
+  const REGISTRY_ABI = new Interface(DeltaTransformer__factory.abi);
+  const HASHLOCK = hexOf(0xabcn);
+
+  const registryOf = (node: Node, log: string = logPath()) => registryRead(rpcOf(node, log), DEPLOYED);
+
+  test("R-REGISTRY-AT-VIEW the registry is read by the contract's selector, at the view", async () => {
+    const log = logPath();
+    const got = await registryOf({ eth_call: () => ok(words(1_800_000_123n)) }, log)(HASHLOCK, 0x2an);
+    expect(got).toEqual(ok(1_800_000_123n));
+    const [asked] = askedOf(log);
+    const [method, params] = [asked?.split(" ")[0], JSON.parse(asked?.slice((asked?.indexOf(" ") ?? 0) + 1) ?? "null")];
+    expect(method).toBe("eth_call");
+    const call = REGISTRY_ABI.encodeFunctionData("hashToTimestamp", [HASHLOCK]);
+    expect(params).toEqual([{ to: TRANSFORMER, data: call }, "0x2a"]);
+    expect(call.slice(0, 10)).toBe(REGISTRY_ABI.getFunction("hashToTimestamp")?.selector ?? "?");
+  });
+
+  test("R-REGISTRY-AT-VIEW a hashlock never shown reads 0, and a reply that is not one word is a fault", async () => {
+    expect(await registryOf({ eth_call: () => ok(words(0n)) })(HASHLOCK, 5n)).toEqual(ok(0n));
+    const faults = [ok("0x"), ok(words(1n, 2n)), ok(null), ok("0xzz"), ok(7)];
+    const got = await Promise.all(faults.map((reply) => registryOf({ eth_call: () => reply })(HASHLOCK, 5n)));
+    got.forEach((one) => expect(one).toMatchObject({ ok: false, error: { _tag: "port", call: "registry" } }));
+    const unlocked = await registryOf({ eth_call: () => down })("0x12", 5n);
+    expect(unlocked).toMatchObject({ ok: false, error: { call: "registry" } });
+  });
+
+  test("R-REGISTRY-AT-VIEW a block the node no longer serves is pruned; any other error is a fault", async () => {
+    const pruned = [
+      "missing trie node 1f2e (path ) state 0x1f2e is not available (JSON-RPC code -32000)",
+      "old data not available due to pruning (JSON-RPC code -32000)",
+      "No state available for block 100000 (JSON-RPC code -32002)",
+      "state at block #100000 is pruned (JSON-RPC code -32000)",
+    ];
+    const readWith = (reason: string) => registryOf({ eth_call: () => refusal(reason) })(HASHLOCK, 5n);
+    const gone = await Promise.all(pruned.map(readWith));
+    gone.forEach((got) => expect(got).toEqual(ok("pruned")));
+    const faults = ["header not found", "connection refused", "execution timeout", "block not found: 0x5"];
+    const failed = await Promise.all(faults.map(readWith));
+    failed.forEach((got) => expect(got).toMatchObject({ ok: false, error: { _tag: "port", call: "registry" } }));
   });
 });
