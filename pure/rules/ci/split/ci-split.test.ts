@@ -197,26 +197,39 @@ describe("the aggregate, run", () => {
     return block.split("\n").map((line) => line.slice(10)).join("\n");
   };
   const results = ["success", "failure", "cancelled", "skipped"];
+  const slow = ["SEEDS", "QUINT", "ARRIVAL", "FORK"] as const;
+  // One row per combination. Each axis is appended to every row so far, starting from a single empty row.
+  const product = (axes: readonly (readonly string[])[]): readonly (readonly string[])[] =>
+    axes.reduce<readonly (readonly string[])[]>(
+      (rows, axis) => rows.flatMap((row) => axis.map((value) => [...row, value])),
+      [[]],
+    );
+  const each = <T>(items: readonly T[], go: (item: T) => void): void => {
+    const [head, ...rest] = items;
+    if (head === undefined) return;
+    go(head);
+    each(rest, go);
+  };
 
   test("R-GATE-CI-SPLIT the aggregate step passes exactly when every part passed, or a slow part was skipped on a pull request into development", () => {
     const script = body();
     expect(script).toContain("test");
     const allowed = (fast: string, result: string): boolean => result === "success" || (fast === "true" && result === "skipped");
-    for (const fast of ["true", "false"]) {
-      for (const seeds of results) {
-        for (const quint of results) {
-          for (const arrival of results) {
-            const env = { PATH: process.env.PATH ?? "", FAST: fast, STATIC: "success", TESTS: "success", SEEDS: seeds, QUINT: quint, ARRIVAL: arrival };
-            const status = Bun.spawnSync(["bash", "-e", "-c", script], { env }).exitCode;
-            expect({ fast, seeds, quint, arrival, passed: status === 0 }).toEqual({ fast, seeds, quint, arrival, passed: [seeds, quint, arrival].every((result) => allowed(fast, result)) });
-          }
-        }
-      }
-      for (const result of results.filter((value) => value !== "success")) {
-        const slow = { SEEDS: "success", QUINT: "success", ARRIVAL: "success" };
-        expect(Bun.spawnSync(["bash", "-e", "-c", script], { env: { PATH: process.env.PATH ?? "", FAST: fast, STATIC: result, TESTS: "success", ...slow } }).exitCode, `static ${result} fast=${fast}`).not.toBe(0);
-        expect(Bun.spawnSync(["bash", "-e", "-c", script], { env: { PATH: process.env.PATH ?? "", FAST: fast, STATIC: "success", TESTS: result, ...slow } }).exitCode, `tests ${result} fast=${fast}`).not.toBe(0);
-      }
-    }
-  }, 60_000);
+    const rows = product(slow.map(() => results));
+    const run = (env: Readonly<Record<string, string>>): number =>
+      Bun.spawnSync(["bash", "-e", "-c", script], { env: { PATH: process.env.PATH ?? "", ...env } }).exitCode ?? 1;
+    const quiet = Object.fromEntries(slow.map((name) => [name, "success"]));
+    each(["true", "false"], (fast) => {
+      each(rows, (row) => {
+        const parts = Object.fromEntries(slow.map((name, index) => [name, row[index]!]));
+        const passed = row.every((result) => allowed(fast, result));
+        const got = run({ FAST: fast, STATIC: "success", TESTS: "success", ...parts }) === 0;
+        expect({ fast, ...parts, passed: got }).toEqual({ fast, ...parts, passed });
+      });
+      each(results.filter((value) => value !== "success"), (result) => {
+        expect(run({ FAST: fast, STATIC: result, TESTS: "success", ...quiet }), `static ${result} fast=${fast}`).not.toBe(0);
+        expect(run({ FAST: fast, STATIC: "success", TESTS: result, ...quiet }), `tests ${result} fast=${fast}`).not.toBe(0);
+      });
+    });
+  }, 120_000);
 });
