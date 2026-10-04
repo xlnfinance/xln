@@ -16,7 +16,6 @@ const GATE = [
   '      - run: SEEDS="${{ matrix.seed }}" bun run test:seeds',
   "      - run: bash check.sh",
   '      - run: SHARD="${{ matrix.shard }}/4" node test.mjs',
-  "      - run: bun testnet-e2e/run.ts",
 ];
 
 // A workflow with a gate job holding `steps`, another job that is not behind `one-gate`, and the `one-gate` job.

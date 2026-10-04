@@ -872,56 +872,57 @@ const disputeClause: Step<World> = {
     const finals = (): number => net.askedBy(x).slice(before).filter((ask) => ask._tag === "dispute_finalize").length;
     const landedFinals = async (): Promise<number> => (await chain.depository.queryFilter(chain.depository.filters.DisputeFinalized(), fromBlock)).length;
     // The chain refuses the empty finalize until the clause deadline, and the Host restates it, so the node stays busy.
-    // Catch the cursors up. Do not wait for quiet, and do not keep mining, until the dispute has closed.
+    // Catch the cursors up. Do not wait for quiet. After the deadline, mine one block at a time and let the nodes read it.
     const headNow = async (): Promise<bigint> => BigInt(await chain.provider.getBlockNumber());
     const refresh = async (): Promise<void> => {
       await net.reach((await headNow()) - DEPTH, { pending: true, settle: false });
     };
-    const reachChain = async (): Promise<void> => {
-      await net.reach(await headNow(), { pending: true, settle: false });
+    // One block, then the nodes read it. evm_mine includes whatever they have already sent.
+    const oneBlock = async (): Promise<void> => {
+      await chain.provider.send("evm_mine", []);
+      await refresh();
+    };
+    const again = async (left: number, ready: () => Promise<boolean>, step: () => Promise<void>): Promise<void> => {
+      if (left === 0 || await ready()) return;
+      await step();
+      await again(left - 1, ready, step);
     };
     // Both windows pass, and the deadline of the clause does not. hubX's node asks to finalize. The step fails here
     // when the deadline second is not strictly after both windows, rather than mining until the wait appears.
     const deadlineSecond = terms.secondsOf(deadline);
     const stamp = async (): Promise<bigint> => BigInt((await chain.provider.getBlock("latest"))!.timestamp);
     if ((await stamp()) + 2n * floor + 10n >= deadlineSecond) throw new Error(`the clause's deadline second ${deadlineSecond} is within the dispute windows of the chain's clock ${await stamp()}: the step cannot tell the wait from the end`);
-    // advanceTime mines one block. The nodes read it before the block that makes the new second final. After that,
-    // both hubs restate a finalize the clause still refuses, and each send is its own block. Another mine on top of
-    // those two is a late poll (R-POLL-DELAY), and a late poll blinds the hub for the rest of the run.
-    await advanceTime(chain, Number(2n * floor + 10n));
-    await refresh();
-    await reachChain();
-    for (let tries = 0; finals() === 0 && tries < 40; tries += 1) {
-      await Bun.sleep(50);
+    // Automine gives each hub send its own block. Two of those plus one mine in a tick is past pollDelay, and the
+    // hub stays blind (R-POLL-DELAY). This step mines. A send waits in the mempool for that one block.
+    await chain.provider.send("anvil_setAutomine", [false]);
+    try {
+      await advanceTime(chain, Number(2n * floor + 10n));
       await refresh();
-    }
-    const early = { finals: finals(), landed: await landedFinals(), open: (await accountOnChain(chain, hubX, hubY)).disputeOpen };
-    if (early.finals === 0) throw new Error("hubX's node never asked the chain to finalize after the windows");
-    if (early.landed !== 0 || !early.open) throw new Error(`the finalize landed before the clause's deadline (${early.landed} finalized, dispute open ${early.open}): the chain should have made it wait`);
-    const transformer = new ethers.Contract(chain.manifest.contracts.deltaTransformer.address, ["function hashToTimestamp(bytes32) view returns (uint256)"], chain.provider);
-    if ((await transformer.hashToTimestamp!(hashlock)) !== 0n) throw new Error("the secret was revealed on chain: this step is the unrevealed path");
-    // The deadline second passes. The same finalize lands, and the unrevealed clause is unpaid.
-    await advanceTime(chain, Number(deadlineSecond - (await stamp()) + 5n));
-    await refresh();
-    await reachChain();
-    for (let tries = 0; tries < 12 && (await accountOnChain(chain, hubX, hubY)).disputeOpen; tries += 1) {
-      await Bun.sleep(50);
+      await oneBlock();
+      await again(40, async () => finals() > 0, async () => {
+        await Bun.sleep(50);
+        await refresh();
+      });
+      const asked = finals();
+      const landedEarly = await landedFinals();
+      const stillOpen = (await accountOnChain(chain, hubX, hubY)).disputeOpen;
+      if (asked === 0) throw new Error("hubX's node never asked the chain to finalize after the windows");
+      if (landedEarly !== 0 || !stillOpen) throw new Error(`the finalize landed before the clause's deadline (${landedEarly} finalized, dispute open ${stillOpen}): the chain should have made it wait`);
+      const transformer = new ethers.Contract(chain.manifest.contracts.deltaTransformer.address, ["function hashToTimestamp(bytes32) view returns (uint256)"], chain.provider);
+      if ((await transformer.hashToTimestamp!(hashlock)) !== 0n) throw new Error("the secret was revealed on chain: this step is the unrevealed path");
+      await advanceTime(chain, Number(deadlineSecond - (await stamp()) + 5n));
       await refresh();
-    }
-    if ((await accountOnChain(chain, hubX, hubY)).disputeOpen) {
-      throw new Error(`the dispute stayed open after the clause deadline; hubX asked to finalize ${finals()} times and ${await landedFinals()} landed`);
-    }
-    // The finalize that landed is the head until one more block. Absorb both hubs' sends before that block.
-    const absorb = async (): Promise<void> => {
-      for (let tries = 0; tries < 40; tries += 1) {
-        const head = await headNow();
-        await net.reach(head - DEPTH, { pending: true, settle: false });
-        if ((await headNow()) === head) return;
+      await oneBlock();
+      const open = async (): Promise<boolean> => (await accountOnChain(chain, hubX, hubY)).disputeOpen;
+      await again(12, async () => !(await open()), oneBlock);
+      if (await open()) {
+        throw new Error(`the dispute stayed open after the clause deadline; hubX asked to finalize ${finals()} times and ${await landedFinals()} landed`);
       }
-    };
-    await absorb();
-    await reachChain();
-    await absorb();
+      // The closing block is the head. Depth is one, so the nodes have not read it yet.
+      await oneBlock();
+    } finally {
+      await chain.provider.send("anvil_setAutomine", [true]);
+    }
     const finished = await chain.depository.queryFilter(chain.depository.filters.DisputeFinalized(), fromBlock);
     const skipped = await chain.depository.queryFilter(chain.depository.filters.DisputeOpSkipped(), fromBlock);
     if (finished.length !== 1 || finished[0] === undefined) throw new Error(`the chain finalized ${finished.length} disputes after the start, expected one`);
