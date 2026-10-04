@@ -36,7 +36,7 @@ fails there.
 
 ## Account (`account_core.qnt`, `account.qnt`)
 
-State per replica: `height`, `pnonce` (the proof nonce of the last committed frame, its own counter: N1, A13), the committed `tip` Body, `status` (`Open | Proposed(f) | Received(f)`), a mempool, `attempt` (as a proposer: the refusals handled on this head) and `mark` (as a receiver: the highest attempt it refused on this head). A Body is
+State per replica: `height`, `pnonce` (the proof nonce of the last committed frame, its own counter: N1, A13), the committed `tip` Body, `status` (`Open | Proposed(f) | Received(f)`), a mempool, `attempt` (as a proposer: the refusals handled on this head), `mark` (as a receiver: the highest attempt it refused on this head), `hi` (the highest proof nonce it knows signed, its own and the peer's it has seen) and `sig` (the highest rank it signed), and `sigLocks` and `kept` (the locks in the proofs it signed, and the notices that wait for them: R-SIGNED-IS-LIVE). A Body is
 `{offdelta, limitLeft, limitRight, locks}`; a lock is a slot with payer, amount, hashlock, deadline.
 
 State machine of a replica: `Open` -- propose -> `Proposed(f)` -- ack -> `Open` (committed); `Open` -- peer's proposal -> `Received(f)`
@@ -45,7 +45,7 @@ Left's (A1). A lost proposal or ack is recovered by resend. A refusal is a value
 R-FRAME-REFUSAL (A16, A17): a frame that is next in line and that the receiver cannot apply is answered with a refusal `{frame, index of the first refused tx, fault, mark}`; the proposer rolls its pending, unacked frame back
 (a refusal for any other frame is ignored), sends every tx again at the next attempt when the fault is retryable (`not_expired`, `deadline_too_far`, within a budget of `MAX_ATTEMPT`) and otherwise drops the named tx with notice, then proposes
 the rest. A frame carries its `attempt`; the receiver keeps one mark per head, the highest attempt it refused: a frame at the mark is refused again, one below it gets `stale_attempt` and the mark, one above is judged afresh; the mark is
-forgotten when the head moves, so a frame the receiver refused is never taken while the head lasts (no fork when its view of J moves). A retry is at proof nonce `pnonce + 1 + attempt` (A18, to confirm). The transition table (`applyTx`) has
+forgotten when the head moves, so a frame the receiver refused is never taken while the head lasts (no fork when its view of J moves). A frame is signed at proof nonce `max(pnonce, hi) + 1`: above every proof either side signed in the epoch, a yielded or refused attempt included (R-PROOF-NONCE-ABOVE-SIGNED, A19); a receiver acks a frame only if its rank (`nonce * 2 + leftAuthored`) is above every proof it signed itself, else it answers `nonce_low` with its `hi` and the proposer signs again above it. A refusal or a yield does not release a lock that sits in a signed, unsuperseded proof: its notice waits (`kept`) until a frame above commits or the deadline plus the reserve has passed on the side's own clock (R-SIGNED-IS-LIVE, A20; the Entity layer has no place for it yet). A side that co-signed a settlement or a reserve-to-collateral is frozen: it proposes nothing and answers every peer frame with a retryable `frozen` refusal until the operation lands, is superseded or lapses (R-COSIGN-FREEZE, A21). A collision is won by the higher slot, and at one slot by the Left-authored frame (A19). The transition table (`applyTx`) has
 six transactions: SetCredit, Pay, HtlcLock, HtlcResolve, HtlcCancel, HtlcExpire.
 
 Time (R-CLOCK, A8): a frame's timestamp is informational; every time decision uses the deciding side's own clock. Resolve needs `now <= deadline`,
@@ -55,8 +55,8 @@ A Byzantine peer is part of the model: one side's key is taken at any moment and
 height, expiry stamped from the future, resolve stamped in the past, stale or leaping proof nonce, a wrong ack). The honest side is checked.
 
 Properties: `credit_holds` (RCPAN in the worst case over open clauses, stated on the outcomes by an independent oracle), `agreed` (no two committed bodies at one
-height, except that with a Byzantine peer a Left-authored frame supersedes a Right-authored one at one nonce, as the chain ranks them: A12), `no_equivocation`, `both_signed`, `no_bad_accept` (nothing is held for an ack that a correct receiver refuses),
-`authority` (no spending the other side's funds, no self-granted credit, no early expiry), `nonce_climbs`, `no_tx_lost`, `no_orphan` (a side never holds as committed a frame its author gave up on a refusal). 54 scenario tests, 68 mutants.
+height, except that with a Byzantine peer a later frame of higher rank supersedes the earlier commit, as the chain ranks them: A12), `no_equivocation`, `both_signed`, `no_bad_accept` (nothing is held for an ack that a correct receiver refuses),
+`authority` (no spending the other side's funds, no self-granted credit, no early expiry), `nonce_climbs`, `no_tx_lost`, `no_orphan` (a side never holds as committed a frame its author gave up on a refusal), `signed_above_head` (no signed proof outranks the committed head), `no_release_while_signed_live` (no hold released while a signed proof holds the lock), `refusal_floor_reachable` (a refusal's signed floor is at most one above what the proposer knows), `cosign_fold_holds` (R-COSIGN-FREEZE: a side frozen by a co-signed fold keeps the head's offdelta the fold carries and has nothing in flight). 76 scenario tests, 93 mutants.
 
 ## Chain, one Account (`chain.qnt`)
 
@@ -76,8 +76,8 @@ Properties: `p1_allowed` (what settles is a proof the honest side consented to o
 payee that learned the secret `LAG` before the deadline is paid), `p3_conserved` (money is conserved), `nonce_monotone`,
 `no_double_settle`, `debt_only_when_broke`, `debt_means_broke` (after a payout that leaves debt the debtor has nothing spendable, and holds no reserve at all when its debt queue fitted in one enforcement call), `debt_queue_sums`, `r2c_enforces_first` (a deposit enforces the older debt first, F15), and the checks that state the payout on the outcome instead of through the guard: `pay_exact` (a finalize moves each
 side's worth, reserve less debt owed plus debt owed to it, by exactly its allocation), `deposit_exact`, `windows_never_shortened` (N3: windows may lengthen, never shorten, inside an epoch; over unequal windows),
-`closes_on_time` (both windows run in full), `nonce_rules` (a start needs a nonce above the stored one; a finalize stores the adopted nonce or one more). The `offline` flag is per dispute.
-66 scenario tests, 80 mutants.
+`closes_on_time` (both windows run in full), `nonce_rules` (a start needs a nonce above the stored one; a finalize stores the adopted nonce or one more), `forgive_ok` (R-SETTLE-FORGIVE: a settlement forgives the head claim of each side's debt queue that is owed to the other side of the Account, and nothing else, reverts only when nothing was forgiven and a debt exists or past the id cap or on a repeated id; one token). A queued claim is owed to the other side or to a third party; enforcement pays third parties out of the reserves (`Money.out`, counted by `p3_conserved`). The `offline` flag is per dispute.
+77 scenario tests, 95 mutants.
 
 ## Settlement (`settle.qnt`)
 
@@ -122,6 +122,20 @@ can come between any two steps. Rules (R1 to R5): canonical order (peers, then c
 durable before send, command acknowledged only when durable, a closed list of local halt causes.
 
 Properties: `no_equivocation`, `exactly_once_j`, `acked_durable`, `canonical_frames`. 8 mutants.
+
+## The dispute lifecycle of one Account (`dispute.qnt`)
+
+Both Entities, the chain and the frames in flight, as one model (what `chain.qnt`, `entity.qnt` and `account.qnt` show only apart). A proof is its nonce, a frame is a payment. Phases of an Entity: none,
+own start pending, own start registered, peer start seen, counter pending, counter registered, counter lapsed, window over; the chain's side is skip versus revert, the epoch move and the finalize.
+Four switches say which code is modelled: `FREEZE` (decided), `LIVE` (decided: a counter lapses only on a permanent revert, the starter finalizes with a registered counter), `ACCEPT` (the non-starter that
+holds nothing newer finalizes with the opening proof; not decided), `NOTICE` (R-DISPUTE-VOIDED-NOTICE, owed). Properties: `newest_wins`, `no_lock` (either side alone), `no_silent_zeroing`.
+Result and the nine scenario tests: [DISPUTE.md](DISPUTE.md). Today's code fails all three; the two decided fixes hold `newest_wins` and leave `no_lock` and `no_silent_zeroing` open.
+
+### HTLC holds across a dispute (`htlc.qnt`)
+
+A route of two Accounts (payer, hub, payee), one hold, a dispute on the downstream one: the payee's release by frame or its secret on the chain, the finalize that pays or refunds a carried hold, the epoch move, the upstream lock's expiry.
+Properties `paid_once` and `route_safe` (the hub never pays out more than it collects). Switches `SEE` (a chain reveal is a chain fact the paybook uses) and `DISSOLVE` (holds in a finalized proof are dissolved at the epoch move):
+today fails both properties, SEE alone fails (a hold paid twice), DISSOLVE alone fails (a reveal the hub never hears), both hold; a mutant with HOP = 0 fails. [DISPUTE.md](DISPUTE.md) has the table and the eight schedules.
 
 ## What the spec asks of the contracts
 

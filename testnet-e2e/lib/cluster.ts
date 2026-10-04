@@ -1,0 +1,265 @@
+// The parties as nodes of the rewrite's own Host shell (pure/host/shell/node/daemon.ts): each has its WAL and journal on
+// real files, its key, a chain port to the node over JSON-RPC, a listening port on loopback and a static table of the
+// peers it has an Account with. They talk over real sockets, authenticated by the link (R-LINK-AUTH); the harness only
+// tells a node what its party commands, hands each the J heights, waits until the nodes are quiet, and reads what each
+// holds. The reads are snapshots, refreshed by every call that waits.
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import type { JView } from "../../pure/account/clause/clock.ts";
+import type { EntityId, EntityInput, EntityReplica, EntityState, JAction, Outbound } from "../../pure/entity/model.ts";
+import type { Pace } from "../../pure/account/clause/clock.ts";
+import { watchPort } from "../../pure/host/shell/evm/watch.ts";
+import { pollDelayOf, startDaemon, type Config, type Daemon, type Look } from "../../pure/host/shell/node/daemon.ts";
+import { httpRpc } from "../../pure/host/shell/node/rpc.ts";
+import { listenTcp, type Listener } from "../../pure/host/shell/node/link/socket.ts";
+import { MAX_LINE, type Peer } from "../../pure/host/shell/link/link.ts";
+import type { Turn } from "../../pure/host/shell/drive/drive.ts";
+import { address, bytes32 } from "../../pure/j/log.ts";
+import type { Row, Setup } from "../../pure/runtime/model.ts";
+import { eid, keyOfParty, must, type Chain, type Party } from "./chain.ts";
+import { rigOf, type Rig } from "./seat.ts";
+
+const LOCAL = "127.0.0.1";
+const TICK_MS = 50;
+const POLL_MS = 25;
+const STABLE = 3;
+const PATIENCE_MS = 60_000;
+/** Blocks a J event waits under before the nodes act on it: the anvil node has no reorgs, one is enough to show the rule. */
+export const DEPTH = 1n;
+/** The seconds a block is due on the fork, and the pace a node that may hold value starts with (R-HOP-SLACK): a slot missed between two deadlines, a poll within what the tick implies. */
+export const SLOT = 12n;
+export const PACE: Pace = { slot: SLOT, missed: 1n, pollDelay: pollDelayOf(TICK_MS, SLOT) };
+
+const nonce = (): Uint8Array => crypto.getRandomValues(new Uint8Array(32));
+export const shown = (x: unknown): string => JSON.stringify(x, (_, v) => (typeof v === "bigint" ? v.toString() : v instanceof Uint8Array ? "bytes" : v));
+
+/** A party and the parties it has an Account with: who it dials and answers. */
+export type Member = Readonly<{ party: Party; peers: readonly Party[] }>;
+
+type Slot = { readonly member: Member; readonly entity: EntityId; readonly dir: string; readonly from: bigint; port: number; daemon: Daemon; rig: Rig };
+
+export type Quiet = Readonly<{ pending?: boolean }>;
+
+const KEEP = (): boolean => false;
+
+export class Cluster {
+  private readonly snaps = new Map<EntityId, Look>();
+  private loss: (message: Outbound) => boolean = KEEP;
+  /** Lines the nodes that crashed had written or heard, and lines that died with them: kept so the totals still balance. */
+  private gone = { sent: 0, heard: 0 };
+  /** The nodes that are stopped for now: not looked at, and not counted. */
+  private readonly down = new Set<EntityId>();
+
+  private constructor(private readonly chain: Chain, private readonly setup: Setup, private readonly slots: ReadonlyMap<EntityId, Slot>) {}
+
+  /** The nodes of `members`, started over fresh files under a new directory and connected to the peers each names. */
+  static async open(chain: Chain, setup: Setup, members: readonly Member[]): Promise<Cluster> {
+    const root = mkdtempSync(join(tmpdir(), "xln-e2e-nodes-"));
+    const from = BigInt(await chain.provider.getBlockNumber());
+    const listeners = await Promise.all(members.map(async () => must(await listenTcp(LOCAL, 0, MAX_LINE), "listen")));
+    const slots = new Map(members.map((member, i): [EntityId, Slot] => [eid(member.party), {
+      member, entity: eid(member.party), dir: join(root, member.party.name), from, port: listeners[i]!.port, daemon: undefined as unknown as Daemon, rig: undefined as unknown as Rig,
+    }]));
+    const cluster = new Cluster(chain, setup, slots);
+    await Promise.all(members.map(async (member, i) => { await cluster.launch(slots.get(eid(member.party))!, listeners[i]!); }));
+    await cluster.connected();
+    return cluster;
+  }
+
+  private slot(id: EntityId): Slot {
+    const slot = this.slots.get(id);
+    if (slot === undefined) throw new Error(`no node ${id}`);
+    return slot;
+  }
+
+  private peerOf(party: Party): Peer {
+    const slot = this.slot(eid(party));
+    return { runtime: keyOfParty(party).runtime, entities: [slot.entity], endpoint: `${LOCAL}:${slot.port}` };
+  }
+
+  /** The node of `slot` started over its files; its rig and daemon are the slot's from now on. */
+  private async launch(slot: Slot, listener: Listener): Promise<void> {
+    const { party, peers } = slot.member;
+    const rig = await rigOf(this.chain, party, slot.entity, this.setup, slot.dir, slot.from);
+    const depository = must(address(this.chain.manifest.contracts.depository.address.toLowerCase()), "depository address");
+    const transformer = must(address(this.chain.manifest.contracts.deltaTransformer.address.toLowerCase()), "transformer address");
+    const deployed = { depository, transformer };
+    const watch = { port: watchPort(httpRpc(this.chain.rpc), deployed), deployed, depth: DEPTH, hosted: must(bytes32(slot.entity), "entity id"), value: true };
+    const config: Config = { shell: rig.shell, boot: rig.boot, key: rig.key, table: peers.map((p) => this.peerOf(p)), tickMs: TICK_MS, nonce, lost: (m) => this.loss(m), watch };
+    slot.rig = rig;
+    slot.daemon = must(await startDaemon(config, listener), `${party.name}'s node`);
+  }
+
+  private async refresh(): Promise<void> {
+    await Promise.all([...this.slots].filter(([id]) => !this.down.has(id)).map(async ([id, slot]) => { this.snaps.set(id, await slot.daemon.look()); }));
+  }
+
+  /** Every node is linked to each of its peers. */
+  private async connected(): Promise<void> {
+    await this.until(() => [...this.slots].every(([id, slot]) => this.look(id).linked.length === slot.member.peers.length), "the links to come up", () =>
+      ` (linked: ${[...this.slots].map(([id, slot]) => `${slot.member.party.name} ${this.look(id).linked.length} of ${slot.member.peers.length}`).join("; ")}; down: ${[...this.down].map((id) => this.slot(id).member.party.name).join(", ") || "none"})`);
+  }
+
+  private async until(done: () => boolean, what: string, why: () => string = () => ""): Promise<void> {
+    const end = Date.now() + PATIENCE_MS;
+    for (;;) {
+      await this.refresh();
+      if (done()) return;
+      if (Date.now() > end) throw new Error(`waited ${PATIENCE_MS} ms for ${what}${why()}`);
+      await Bun.sleep(POLL_MS);
+    }
+  }
+
+  private look(id: EntityId): Look {
+    const look = this.snaps.get(id);
+    if (look === undefined) throw new Error(`no look at ${id}`);
+    return look;
+  }
+
+  /** What keeps the nodes from being quiet, or null: a fault, work at hand, a batch on the chain, a line on its way, a frame waiting. */
+  private restless(options: Quiet, finalized: bigint): string | null {
+    const looks = [...this.slots].map(([id, slot]) => ({ name: slot.member.party.name, look: this.look(id), id }));
+    const faulted = looks.find(({ look }) => look.fatal !== undefined);
+    if (faulted !== undefined) throw new Error(`${faulted.name}'s node ended on a fault: ${shown(faulted.look.fatal)}`);
+    const working = looks.find(({ look }) => look.busy || look.station.host.queue.length > 0 || look.station.host.height !== undefined || look.station.host.runtime.staged !== undefined);
+    if (working !== undefined) return `${working.name} has work (chain batch ${working.look.busy}, queue ${working.look.station.host.queue.length})`;
+    const behind = looks.find(({ look }) => look.cursor === undefined || look.cursor < finalized || look.watchFault !== undefined);
+    if (behind !== undefined) return `${behind.name}'s J loop is at ${behind.look.cursor}, the chain is final to ${finalized} (${behind.look.watchFault ?? "no fault"})`;
+    if (this.inFlight() !== 0) return `${this.inFlight()} lines are on their way`;
+    const waiting = options.pending === true ? undefined : looks.find(({ id }) => [...(this.entity(id).accounts.values())].some((a) => a.pending !== undefined));
+    return waiting === undefined ? null : `${waiting.name} has a frame waiting for its peer`;
+  }
+
+  /** Until no node has anything to do, no line is on its way and (unless `pending`) no frame waits, for three looks in a row. */
+  async settle(options: Quiet = {}): Promise<void> {
+    const end = Date.now() + PATIENCE_MS;
+    for (let stable = 0; stable < STABLE;) {
+      await this.refresh();
+      const finalized = BigInt(await this.chain.provider.getBlockNumber()) - DEPTH;
+      const why = this.restless(options, finalized);
+      if (why !== null && Date.now() > end) throw new Error(`the nodes did not go quiet in ${PATIENCE_MS} ms: ${why}`);
+      stable = why === null ? stable + 1 : 0;
+      if (stable < STABLE) await Bun.sleep(POLL_MS);
+    }
+  }
+
+  /** Hand `id` commands or timers, one after the other, each run until its Host has nothing queued. */
+  async tell(id: EntityId, ...inputs: readonly EntityInput[]): Promise<void> {
+    for (const input of inputs) must<Turn, unknown>(await this.slot(id).daemon.tell(input), `${this.slot(id).member.party.name}'s command`);
+    await this.refresh();
+  }
+
+  /**
+   * The chain mines until the J height `height` is final (a block `depth` above it), and the nodes' J loops catch up. It
+   * mines no more than the poll delay at once and waits for every node to read them: a run that mined a hundred blocks
+   * between two polls would be a node that heard late (R-POLL-DELAY), and the node says so.
+   * `settle: false` returns once those cursors have caught up, while a node is still busy.
+   */
+  async reach(height: bigint, options: Quiet & Readonly<{ settle?: boolean }> = {}): Promise<void> {
+    for (;;) {
+      const head = BigInt(await this.chain.provider.getBlockNumber());
+      const blocks = height + DEPTH - head;
+      if (blocks <= 0n) break;
+      const chunk = blocks < PACE.pollDelay ? blocks : PACE.pollDelay;
+      await this.chain.provider.send("anvil_mine", [`0x${chunk.toString(16)}`]);
+      await this.caughtUp(head + chunk - DEPTH);
+    }
+    if (options.settle === false) {
+      const head = BigInt(await this.chain.provider.getBlockNumber());
+      await this.caughtUp(head - DEPTH);
+      return;
+    }
+    await this.settle(options);
+  }
+
+  /** Every node that is up has read the chain's blocks up to the final block `finalized`. */
+  private async caughtUp(finalized: bigint): Promise<void> {
+    await this.until(() => [...this.slots.keys()].every((id) => this.down.has(id) || (this.look(id).cursor ?? -1n) >= finalized), `the nodes' J loops to read up to ${finalized}`);
+  }
+
+  /** While `work` runs, the messages `lost` says are lost on their way out. */
+  async losing<T>(lost: (message: Outbound) => boolean, work: () => Promise<T>): Promise<T> {
+    this.loss = lost;
+    try { return await work(); } finally { this.loss = KEEP; }
+  }
+
+  /**
+   * A crash of one node, a power cut and not a stop: nothing more reaches its files, its files are not closed by it, and
+   * its Host and queue are gone. It comes back from the files alone on the same port; its peers dial or answer again.
+   * The lines in flight must be none when it goes down, so whatever is in flight afterwards is owed to the crash.
+   */
+  async restart(id: EntityId): Promise<void> {
+    if (this.inFlight() !== 0) throw new Error(`a node crashed with ${this.inFlight()} lines on their way: nothing could say which the crash lost`);
+    const slot = this.slot(id);
+    this.down.add(id);
+    slot.rig.cut();
+    const last = await slot.daemon.stop();
+    await slot.rig.reclaim();
+    await this.lost(id, last);
+    await this.launch(slot, must(await listenTcp(LOCAL, slot.port, MAX_LINE), "listen again"));
+    this.down.delete(id);
+    await this.connected();
+  }
+
+  /**
+   * What the crash of `id` takes with it: the counts of the node that ended stay in the totals, and so do the lines
+   * its peers wrote to it before they saw the connection close, which no one will ever hear (the link carries no
+   * receipt; a resend timer answers for such a line). They are written off once every peer has seen the close and the
+   * count of lines on their way has stood still, and only what was on the way then: a line lost between live nodes
+   * before the crash is refused by the check in `restart`.
+   */
+  private async lost(id: EntityId, last: Look): Promise<void> {
+    this.gone = { sent: this.gone.sent + last.counts.sent, heard: this.gone.heard + last.counts.heard };
+    const runtime = this.peerOf(this.slot(id).member.party).runtime;
+    const others = [...this.slots.keys()].filter((other) => other !== id);
+    let steady = 0;
+    let before = Number.NaN;
+    await this.until(() => {
+      const apart = others.every((other) => !this.look(other).linked.includes(runtime));
+      const now = this.inFlight();
+      steady = apart && now === before ? steady + 1 : 0;
+      before = now;
+      return steady >= STABLE;
+    }, `the peers of ${this.slot(id).member.party.name} to see its connection close`, () =>
+      ` (still linked to it: ${others.filter((other) => this.look(other).linked.includes(runtime)).map((other) => this.slot(other).member.party.name).join(", ") || "none"}; lines on their way ${this.inFlight()}, last count ${before})`);
+    this.gone = { ...this.gone, heard: this.gone.heard + this.inFlight() };
+  }
+
+  async stop(): Promise<void> {
+    await Promise.all([...this.slots.values()].map((slot) => slot.daemon.stop()));
+  }
+
+  entity(id: EntityId): EntityState {
+    const e = this.look(id).station.host.runtime.entities.get(id);
+    if (e === undefined) throw new Error(`no entity ${id}`);
+    return e;
+  }
+
+  account(id: EntityId, peer: EntityId): EntityReplica {
+    const a = this.entity(id).accounts.get(peer);
+    if (a === undefined) throw new Error(`${id} has no Account with ${peer}`);
+    return a;
+  }
+
+  rowsOf(id: EntityId): readonly Row[] { return this.look(id).station.host.runtime.wal; }
+  /** The chain actions of the committed rows, in order: what the node's Runtime has asked of the chain. */
+  askedBy(id: EntityId): readonly JAction[] { return this.rowsOf(id).flatMap((r) => r.chain); }
+  noticesOf(id: EntityId): readonly string[] {
+    return [...this.look(id).notices.map((x) => x._tag), ...this.rowsOf(id).flatMap((r) => r.notices.map((x) => `${x._tag} ${shown(x).slice(0, 700)}`))];
+  }
+  /** The lines this node cut a connection for, most recent last. */
+  refusedBy(id: EntityId): readonly string[] { return this.look(id).refused; }
+  /** Where the node keeps its WAL and its journal. */
+  dirOf(id: EntityId): string { return this.slot(id).dir; }
+  /** Lines written and not yet heard. */
+  inFlight(): number {
+    const looks = [...this.slots.keys()].filter((id) => !this.down.has(id)).map((id) => this.look(id));
+    return this.gone.sent - this.gone.heard
+      + looks.reduce((n, l) => n + l.counts.sent, 0) - looks.reduce((n, l) => n + l.counts.heard, 0);
+  }
+  /** The J view of the Runtimes: they all hold the same one, since the J loop hands every node each height. */
+  view(): JView { return this.look([...this.slots.keys()][0]!).station.host.runtime.view; }
+  /** What each node's counters say, for a report. */
+  counts(): ReadonlyMap<string, Look["counts"]> { return new Map([...this.slots].map(([id, slot]) => [slot.member.party.name, this.look(id).counts])); }
+}

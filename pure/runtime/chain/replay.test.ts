@@ -3,8 +3,10 @@
 import { describe, expect, test } from "bun:test";
 import { tokenOf, viewOf } from "../../account/fixtures.ts";
 import type { FrameHash } from "../../account/frame/frame.ts";
-import { emptyEntity, type Command, type JAction } from "../../entity/model.ts";
+import { emptyEntity, type Command, type JAction, type PeerMessage } from "../../entity/model.ts";
+import type { Row } from "../model.ts";
 import { recover } from "../tick.ts";
+import { OPENED_WITH } from "../../entity/fixtures.ts";
 import { type Cluster, credit, entityOf, feed, GOLD, hostOf, open, settle, start } from "../fixtures.ts";
 
 const ALICE = entityOf(1);
@@ -20,7 +22,21 @@ const atEpoch = (c: Cluster): Cluster => {
 
 const deposit: Command = { _tag: "deposit", peer: BOB, token: GOLD, amount: 10n };
 const deposited = feed(framed(opened), ALICE, deposit);
-const countered = feed(framed(atEpoch(opened)), ALICE, { _tag: "j_dispute", peer: BOB, epoch: 1n, by: "right" });
+const started = feed(framed(opened), ALICE, { _tag: "dispute", peer: BOB });
+const startNonce = (c: Cluster): bigint => {
+  const action = hostOf(c, ALICE).wal.at(-1)?.chain[0];
+  return action?._tag === "dispute_start" ? action.nonce : expect.unreachable("no dispute start");
+};
+const finalizing = feed(
+  feed(started, ALICE, {
+    _tag: "j_dispute", peer: BOB, epoch: 0n, by: "left", nonce: startNonce(started), timeout: 500n, ...OPENED_WITH,
+  }),
+  ALICE, { _tag: "j_window_over", peer: BOB },
+);
+const countered = feed(
+  framed(atEpoch(opened)), ALICE,
+  { _tag: "j_dispute", peer: BOB, epoch: 1n, by: "right", nonce: 3n, timeout: 5n, ...OPENED_WITH },
+);
 
 /** Alice's WAL with the actions of its last row changed as the test says; what the Runtime says of replaying it. */
 const replayed = (c: Cluster, change: Partial<JAction>) => {
@@ -37,6 +53,8 @@ describe("runtime/chain replay review A: a replay sees every field of a deposit 
   test("control: the row as it was made replays", () => {
     expect(replayed(deposited, {}).result.ok).toBe(true);
     expect(replayed(countered, {}).result.ok).toBe(true);
+    expect(replayed(started, {}).result.ok).toBe(true);
+    expect(replayed(finalizing, {}).result.ok).toBe(true);
   });
 
   test.each([
@@ -46,10 +64,90 @@ describe("runtime/chain replay review A: a replay sees every field of a deposit 
     expect(result).toEqual(diverged(height));
   });
 
+  test("R-DURABLE a WAL whose dispute start names another peer, nonce, epoch, author or sig does not replay", () => {
+    const changes = [
+      { peer: CAROL }, { nonce: 99n }, { epoch: 9n }, { proposerIsLeft: true }, { sig: "0x7e58" },
+    ] as const;
+    changes.forEach((change) => {
+      const { height, result } = replayed(started, change);
+      expect(result).toEqual(diverged(height));
+    });
+  });
+
+  test("R-DURABLE a WAL whose dispute start carries another proof body does not replay", () => {
+    const row = hostOf(started, ALICE).wal.at(-1)?.chain[0];
+    const body = row?._tag === "dispute_start" ? row.body : expect.unreachable("no dispute start");
+    const { height, result } = replayed(started, { body: { ...body, offdeltas: [...body.offdeltas, 1n] } });
+    expect(result).toEqual(diverged(height));
+  });
+
+  test("R-DURABLE a WAL whose dispute finalize names another peer, nonce, author, side or body does not replay", () => {
+    const row = hostOf(finalizing, ALICE).wal.at(-1)?.chain[0];
+    const ask = row?._tag === "dispute_finalize" ? row : expect.unreachable("no dispute finalize");
+    const changes = [
+      { peer: CAROL }, { nonce: 99n }, { proposerIsLeft: !ask.proposerIsLeft }, { startedByLeft: !ask.startedByLeft },
+      { body: { ...ask.body, offdeltas: [...ask.body.offdeltas, 1n] } },
+      { initial: { nonce: 1n, bodyHash: "0x01" } },
+    ] as const;
+    changes.forEach((change) => {
+      const { height, result } = replayed(finalizing, change);
+      expect(result).toEqual(diverged(height));
+    });
+  });
+
   test.each([
     ["peer", { peer: CAROL }], ["nonce", { nonce: 99n }], ["head", { head: `0x${"11".repeat(32)}` as FrameHash }],
   ] as const)("R-DURABLE a WAL whose counter names another %s does not replay", (_field, change) => {
     const { height, result } = replayed(countered, change);
     expect(result).toEqual(diverged(height));
+  });
+});
+
+describe("runtime/chain replay R-DISPUTE-WATCH: a replay sees the whole of a counter", () => {
+  test("R-DURABLE a WAL whose counter names another author, body, signature or dispute does not replay", () => {
+    const row = hostOf(countered, ALICE).wal.at(-1)?.chain.find((a) => a._tag === "counter");
+    const ask = row?._tag === "counter" ? row : expect.unreachable("no counter");
+    const changes = [
+      { proposerIsLeft: !ask.proposerIsLeft }, { body: { ...ask.body, offdeltas: [...ask.body.offdeltas, 1n] } },
+      { sig: "0x7e58" }, { initial: { ...ask.initial, nonce: ask.initial.nonce + 1n } },
+      { initial: { ...ask.initial, bodyHash: "0x01" } },
+    ] as const;
+    changes.forEach((change) => {
+      const { height, result } = replayed(countered, change);
+      expect(result).toEqual(diverged(height));
+    });
+  });
+});
+
+describe("runtime/chain replay R-SIGNED-HEADS-ON-THE-WIRE: a peer's signature is in the row that committed it", () => {
+  const alice = hostOf(framed(opened), ALICE);
+  const heardAPeer = (r: Row): boolean =>
+    r.input._tag === "entity" && r.input.inputs.some((i) => i._tag === "peer_message");
+  const row = alice.wal.findLast(heardAPeer) ?? expect.unreachable("no row heard a peer's message");
+
+  const withSig = (i: PeerMessage, sig: string | undefined): PeerMessage =>
+    (sig === undefined ? { _tag: i._tag, from: i.from, msg: i.msg } : { ...i, sig });
+
+  /** The row with the signature on its peer messages changed by `sig`: replaying it is what the Runtime says. */
+  const resigned = (sig: (s: string | undefined) => string | undefined) => {
+    const { input: before } = row;
+    const input = before._tag === "entity"
+      ? { ...before, inputs: before.inputs.map((i) => (i._tag === "peer_message" ? withSig(i, sig(i.sig)) : i)) }
+      : before;
+    const wal = alice.wal.map((r) => (r === row ? { ...row, input } : r));
+    return recover(alice.setup, [emptyEntity(ALICE)], wal);
+  };
+
+  test("R-DURABLE a restart keeps the proofs: the replay holds the peer's signature over the committed head", () => {
+    const back = recover(alice.setup, [emptyEntity(ALICE)], alice.wal);
+    const proofs = alice.entities.get(ALICE)?.proofs;
+    expect(proofs?.size).toBeGreaterThan(0);
+    expect(back.ok && back.value.entities.get(ALICE)?.proofs).toEqual(proofs);
+  });
+
+  test("R-DURABLE a WAL whose peer message lost its signature, or has another, does not replay", () => {
+    expect(resigned((s) => s).ok).toBe(true);
+    expect(resigned(() => undefined)).toEqual(diverged(row.height));
+    expect(resigned(() => "0x7e58")).toEqual(diverged(row.height));
   });
 });

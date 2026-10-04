@@ -7,10 +7,10 @@
 // A bad input from a peer is refused in place with a notice and never halts (R-X1). A Halt is a broken local
 // invariant: the list is closed, and each case names the invariant.
 import type { ClockParams, JHeight, JView } from "../account/clause/clock.ts";
-import type { SigningContext } from "../account/proof/signing.ts";
+import type { Anchor } from "../entity/signing/signing.ts";
 import { err, ok, type Result } from "../kernel/core/result.ts";
 import type { Brand, Tagged } from "../kernel/core/tagged.ts";
-import type { EntityId, EntityInput, EntityState, JAction, Notice, Outbound } from "../entity/model.ts";
+import type { EntityId, EntityInput, EntityState, JAction, Notice, Outbound, Reading } from "../entity/model.ts";
 
 /** The Host's clock in milliseconds, as it stamps an input: it orders frames and decides no deadline (R-CLOCK). */
 export type Timestamp = Brand<bigint, "Timestamp">;
@@ -22,14 +22,39 @@ export const timestamp = (ms: bigint): Result<Timestamp, BadTimestamp> =>
 
 /**
  * What the Host hands the Runtime, with the time the Host saw it: the inputs of one Entity frame, or a new height of
- * the J chain. The Runtime's view of J only rises (R-DRIFT bounds how far it lags the chain, which is the Host's to
+ * the J chain, or a watcher delivery whose events and height commit together. The view only rises (R-DRIFT bounds
+ * how far it lags the chain, which is the Host's to
  * watch); a rise is a frame of every Entity, so an Account that waited for it proposes.
  */
-export type EntityBatch = Tagged<"entity", { at: Timestamp; to: EntityId; inputs: readonly EntityInput[] }>;
+export type EntityBatch = Tagged<"entity", {
+  at: Timestamp; to: EntityId; inputs: readonly EntityInput[];
+  /** What the chain's registry held at the Runtime's view for the hashlocks the frame decides on. */
+  registry?: readonly Reading[];
+}>;
 
-export type NewHeight = Tagged<"j_height", { at: Timestamp; height: JHeight }>;
+/**
+ * `registry` is the readings taken at the new height. `seconds` is the timestamp of the J block at `height`, from the
+ * same header (R-HOP-SLACK). Absent when that second is unknown: a stored zero would be a known second.
+ */
+export type NewHeight = Tagged<"j_height", {
+  at: Timestamp; height: JHeight;
+  registry?: readonly Reading[];
+  seconds?: bigint;
+}>;
 
-export type Input = EntityBatch | NewHeight;
+/**
+ * A watcher delivery: bounded Entity frames at the old view, then its height, durable as one record.
+ * `registry` is what those frames decide on (R-REGISTRY-AT-VIEW). Absent only when the node does not decide on it.
+ * A present list, including an empty one, means the gate is on. `seconds` is the header timestamp of `height`, copied
+ * onto the height frame only, and omitted when that second is unknown.
+ */
+export type Observation = Tagged<"j_observation", {
+  at: Timestamp; to: EntityId; batches: readonly (readonly EntityInput[])[]; height: JHeight;
+  registry?: readonly Reading[];
+  seconds?: bigint;
+}>;
+
+export type Input = EntityBatch | NewHeight | Observation;
 
 export type RuntimeNotice = Notice | Tagged<"unknown_entity", { entity: EntityId }>;
 
@@ -40,12 +65,21 @@ export type Row = Readonly<{
 }>;
 
 /**
- * What a Runtime is started with and keeps: the clock's parameters and its own view of the J chain. `signing` is ONE
- * interim SigningContext for every Account of every Entity this Runtime hosts. R-FRAME-SIGNATURE-NAMES-ACCOUNT needs
- * one per Account and per epoch (chain, depository, both entity ids, epoch, first nonce = stored + 2 from the chain);
- * until the cut supplies them, two Accounts of one Entity sign frames under the same key and epoch.
+ * What a Runtime is started with and keeps: the clock's parameters, its own view of the J chain, and the `anchor` its
+ * Accounts sign under (the deployment and the proof terms). Each Account's own context, with its key, its epoch and its
+ * first nonce, is read off the Entity's chain facts for it (R-FRAME-SIGNATURE-NAMES-ACCOUNT).
  */
-export type Setup = Readonly<{ clock: ClockParams; view: JView; signing: SigningContext }>;
+export type Setup = Readonly<{
+  clock: ClockParams; view: JView; anchor: Anchor;
+  /**
+   * The Entity decides to accept a lock, to forward one and to co-sign an expiry on the registry's reading at its view,
+   * which the Host hands every frame (R-REGISTRY-AT-VIEW). Off, it decides as before. A node that may hold value turns
+   * it on.
+   */
+  registry?: boolean;
+  /** The timestamp of the J block at `view`, when the node already knows it (R-HOP-SLACK). */
+  seconds?: bigint;
+}>;
 
 /**
  * `entities` is the state after the staged row, if there is one. `wal` is what is durable. `sent` is how many rows of
@@ -55,6 +89,8 @@ export type Runtime = Readonly<{
   setup: Setup;
   stamp: Timestamp;
   view: JView;
+  /** The timestamp of the J block at `view`, once a height has brought it (the Setup's, at the start, if any). */
+  seconds: bigint | undefined;
   entities: ReadonlyMap<EntityId, EntityState>;
   wal: readonly Row[];
   staged: Row | undefined;

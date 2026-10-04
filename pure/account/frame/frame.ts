@@ -23,10 +23,14 @@ export type FrameHash = Brand<string, "FrameHash">;
  * a new frame, so the receiver can judge it afresh and still never commit one it refused. `slot` is the nonce slot its
  * proof is signed at (R-PROOF-NONCE-ABOVE-SIGNED): in the author's lane (Left's are an even distance above the
  * committed slot, Right's an odd one) and above every slot its author has signed. It is part of what a refusal names,
- * and no two frames share a nonce.
+ * and no two frames share a nonce. `epoch` and `firstNonce` are the epoch its proof is signed in and the first nonce a
+ * proof of that epoch may take (R-FRAME-EPOCH): both sides seal a frame under the same pair or the frame is not judged.
  */
 export type Frame<Tx> =
-  Readonly<{ author: Side; parent: FrameHash; attempt: number; slot: number; txs: readonly Tx[] }>;
+  Readonly<{
+    author: Side; parent: FrameHash; attempt: number; slot: number; epoch: bigint; firstNonce: bigint;
+    txs: readonly Tx[];
+  }>;
 
 /** A proposer that has had MAX_ATTEMPTS frames refused on one head stops retrying: that peer is not catching up. */
 export const MAX_ATTEMPTS = 8;
@@ -39,6 +43,13 @@ export const STALE_SLOT = "stale_slot";
 
 /** The fault a receiver names when a frame's slot is not one an honest proposer would take (lane, range, reach). */
 export const BAD_SLOT = "bad_slot";
+
+/**
+ * The fault a receiver names when a frame was proposed under another epoch or first nonce than the receiver signs
+ * under (R-FRAME-EPOCH): the two views of the chain differ for now, so nothing of the frame was judged and its txs are
+ * kept; the proposer parks the frame, and sends the same bytes again when the Host asks, not a new proof each time.
+ */
+const WRONG_EPOCH = "wrong_epoch";
 
 /**
  * `refusal` is R-FRAME-REFUSAL: the answer to a frame the receiver cannot apply. It names the frame, the index of the
@@ -62,10 +73,14 @@ export type Msg<Tx> =
  * signers sign (R-FRAME-HASH-SIGNED). The round gives every frame a slot above every slot either side signed before
  * it, in its author's lane (R-PROOF-NONCE-ABOVE-SIGNED, R-RETRY-NEW-NONCE). It fails when no such digest exists, and
  * the round then refuses the frame.
+ * `epoch` and `firstNonce` are the Account's epoch this replica signs in and the first nonce it signs a proof at: its
+ * frames are proposed under them, and a frame under another pair is refused, not judged (R-FRAME-EPOCH).
  * `tag` is what a refusal says of a fault, and `retryable` says whether a fault with that tag can pass with the peer's
  * view of the chain (a tx the peer finds too early or too far ahead), so the tx is tried again, and not for good.
  */
 export type Rules<Tx, S, F> = Readonly<{
+  epoch: bigint;
+  firstNonce: bigint;
   apply: (state: S, author: Side, tx: Tx) => Result<S, F>;
   name: (frame: Frame<Tx>) => FrameHash;
   seal: (frame: Frame<Tx>, after: S) => Result<FrameHash, F>;
@@ -91,14 +106,25 @@ export type Refused<Tx, F> = Readonly<{ tx: Tx; fault: F | PeerRefused | SignedC
  */
 type Declined<F> = Readonly<{ hash: FrameHash; attempt: number; index: number; fault: F }>;
 
-type Proposed<Tx, S> = Readonly<{ frame: Frame<Tx>; after: S; head: FrameHash }>;
+/**
+ * `owed` is set by the Entity when the chain has paid some of this frame's txs (R-DISPUTE-FREEZE): the frame stays
+ * pending, so the lineage the peer may have committed stays whole, but a rollback gives back only these txs (those the
+ * chain did not pay), and every tx of the frame is paid when it is empty.
+ */
+type Proposed<Tx, S> = Readonly<{ frame: Frame<Tx>; after: S; head: FrameHash; owed?: readonly Tx[] }>;
 
 /**
- * A frame this side proposed, whose proof it signed and sent, that no committed frame has superseded yet. The peer
- * holds the signature, so the proof stays enforceable against this side whether or not the peer accepted the frame
- * (R-SIGNED-IS-LIVE): what its txs say is live until a frame at a higher slot commits.
+ * A frame this side proposed, whose proof it signed and sent, that no committed frame has superseded yet. The Account
+ * does not sign: the proposal names its head and the Host's shell signs it as the frame leaves
+ * (R-SIGNED-HEADS-ON-THE-WIRE), so the peer holds the signature, and the proof stays enforceable against this side
+ * whether or not the peer accepted the frame (R-SIGNED-IS-LIVE): what its txs say is live until a frame at a higher
+ * slot commits.
  */
-export type Signed<Tx> = Readonly<{ slot: number; txs: readonly Tx[] }>;
+export type Signed<Tx, S> = Readonly<{
+  slot: number; txs: readonly Tx[];
+  /** The state the frame would commit and the epoch and first nonce it was sealed under: what names its proof. */
+  sealed?: Readonly<{ after: S; epoch: bigint; firstNonce: bigint }>;
+}>;
 
 /** The most signed-but-unsuperseded frames one side keeps: past it, it proposes nothing more until one commits. */
 export const MAX_UNSUPERSEDED = 64;
@@ -124,7 +150,7 @@ export type Replica<Tx, S, F> = Readonly<{
   signed: number;
   peerSigned: number;
   /** Every frame I signed and sent at a slot above `used`, in slot order: proofs the peer may still hold live. */
-  unsuperseded: readonly Signed<Tx>[];
+  unsuperseded: readonly Signed<Tx, S>[];
   last: FrameHash | undefined;
   state: S;
   mempool: readonly Tx[];
@@ -156,6 +182,8 @@ export type Outcome<F> =
   | Tagged<"refused_not_next">
   | Tagged<"refused_attempt">
   | Tagged<"refused_slot">
+  | Tagged<"refused_epoch">
+  | Tagged<"parked">
   | Tagged<"refused_stale">
   | Tagged<"committed_own">
   | Tagged<"ack_ignored">
@@ -215,13 +243,17 @@ export const propose = <Tx, S, F>(rules: Rules<Tx, S, F>, r: Replica<Tx, S, F>):
   }
   const split = splitValid(rules, r.side, r.state, r.mempool);
   const slot = slotAbove(r.side, r.used, floorOf(r));
-  const frame = { author: r.side, parent: r.head, attempt: r.attempt, slot, txs: split.valid };
+  const frame = { author: r.side, parent: r.head, attempt: r.attempt, slot, epoch: rules.epoch,
+    firstNonce: rules.firstNonce, txs: split.valid };
   const sealed = split.valid.length === 0 ? undefined : rules.seal(frame, split.state);
   // A state with no digest cannot be committed by anyone: its txs are refused with the reason, not left to wedge.
   const unsealed = sealed?.ok === false ? split.valid.map((tx): Refused<Tx, F> => ({ tx, fault: sealed.error })) : [];
   const pending = sealed?.ok === true ? { frame, after: split.state, head: sealed.value } : undefined;
   const signed = pending === undefined ? r.signed : frame.slot;
-  const live = pending === undefined ? r.unsuperseded : [...r.unsuperseded, { slot: frame.slot, txs: frame.txs }];
+  const live = pending === undefined ? r.unsuperseded : [...r.unsuperseded, {
+      slot: frame.slot, txs: frame.txs,
+      sealed: { after: split.state, epoch: frame.epoch, firstNonce: frame.firstNonce },
+    }];
   const proposed = {
     ...r, signed, unsuperseded: live, mempool: [], refused: [...r.refused, ...split.refused, ...unsealed],
     pending,
@@ -237,9 +269,12 @@ const heard = <Tx, S, F>(
   r: Replica<Tx, S, F>, sent: readonly Msg<Tx>[], outcome: Outcome<F>,
 ): Heard<Tx, S, F> => ({ replica: r, sent, outcome });
 
+/** The txs of the pending frame that a rollback sends back: those the chain has not paid (`owed`). */
+const owed = <Tx, S, F>(r: Replica<Tx, S, F>): readonly Tx[] => r.pending?.owed ?? r.pending?.frame.txs ?? [];
+
 /** Rolls the pending frame back: its txs go ahead of the mempool, to be checked again at the next propose. */
 const withoutPending = <Tx, S, F>(r: Replica<Tx, S, F>): Replica<Tx, S, F> =>
-  ({ ...r, mempool: [...(r.pending?.frame.txs ?? []), ...r.mempool], pending: undefined });
+  ({ ...r, mempool: [...owed(r), ...r.mempool], pending: undefined });
 
 /**
  * Left's slots are an even number above the committed slot and Right's an odd one: both replicas hold the same
@@ -303,6 +338,19 @@ const decline = <Tx, S, F>(
  */
 const wellNumbered = (attempt: number): boolean => Number.isSafeInteger(attempt) && attempt >= 0;
 
+/** Whether a frame was sealed under the epoch and first nonce this replica signs under (R-FRAME-EPOCH). */
+const sealedHere = <Tx, S, F>(rules: Rules<Tx, S, F>, f: Frame<Tx>): boolean =>
+  f.epoch === rules.epoch && f.firstNonce === rules.firstNonce;
+
+/**
+ * R-FRAME-EPOCH: a frame of another epoch or first nonce is not judged: the proposer keeps its txs and the frame, and
+ * tries again when the two views of the chain agree. The slot is noted by the caller (the peer has signed it); the
+ * refusal names my floor and mark.
+ */
+const refuseEpoch = <Tx, S, F>(r: Replica<Tx, S, F>, name: FrameHash): Heard<Tx, S, F> =>
+  heard(r, [refusal<Tx>({ hash: name, index: 0, fault: WRONG_EPOCH, mark: r.declined?.attempt ?? 0, floor: r.signed })],
+    { _tag: "refused_epoch" });
+
 const onFrame = <Tx, S, F>(rules: Rules<Tx, S, F>, r0: Replica<Tx, S, F>, f: Frame<Tx>): Heard<Tx, S, F> => {
   if (f.author === r0.side) return heard(r0, NO_MESSAGES, { _tag: "refused_own" });
   if (f.txs.length === 0) return heard(r0, NO_MESSAGES, { _tag: "refused_empty" });
@@ -324,6 +372,7 @@ const onFrame = <Tx, S, F>(rules: Rules<Tx, S, F>, r0: Replica<Tx, S, F>, f: Fra
   }
   const r = { ...r0, peerSigned: Math.max(r0.peerSigned, f.slot) };
   const declined = r.declined;
+  if (!sealedHere(rules, f)) return refuseEpoch(r, name);
   if (declined !== undefined && f.attempt <= declined.attempt) {
     // The index and the fault are those of the frame I refused: another frame at that attempt (a proposer that lost its
     // count) gets the stale answer, which carries the mark, not a refusal that names someone else's tx.
@@ -377,10 +426,21 @@ const onRefusal = <Tx, S, F>(
   if (pending === undefined || named === undefined || !counted || !floored || rules.name(pending.frame) !== hash) {
     return heard(r, NO_MESSAGES, { _tag: "refusal_ignored" });
   }
-  const retry = fault === STALE_ATTEMPT || fault === STALE_SLOT || (rules.retryable(fault) && r.attempt < MAX_ATTEMPTS);
+  const peerSigned = Math.max(r.peerSigned, floor);
+  if (pending.owed !== undefined) {
+    const back = { ...r, mempool: [...pending.owed, ...r.mempool], pending: undefined, attempt, peerSigned };
+    return heard(back, NO_MESSAGES, { _tag: "rolled_back" });
+  }
+  // R-FRAME-EPOCH: the peer's view of the chain differs from the one the frame was sealed under, and mine still is that
+  // one: the frame waits as it is, and the Host's resend sends the same bytes (the same slot, so no new proof is signed
+  // for every try). If my own view has moved since, the frame is stale: it goes back and is sealed anew.
+  if (fault === WRONG_EPOCH && sealedHere(rules, pending.frame)) {
+    return heard({ ...r, peerSigned }, NO_MESSAGES, { _tag: "parked" });
+  }
+  const retry = fault === STALE_ATTEMPT || fault === STALE_SLOT || fault === WRONG_EPOCH
+    || (rules.retryable(fault) && r.attempt < MAX_ATTEMPTS);
   const kept = retry ? pending.frame.txs : pending.frame.txs.filter((_, i) => i !== index);
   const refused = retry ? r.refused : [...r.refused, { tx: named, fault: { _tag: "peer_refused", fault } as const }];
-  const peerSigned = Math.max(r.peerSigned, floor);
   const rolled = { ...r, mempool: [...kept, ...r.mempool], pending: undefined, refused, attempt, peerSigned };
   return heard(rolled, NO_MESSAGES, { _tag: "rolled_back" });
 };

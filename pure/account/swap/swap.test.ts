@@ -43,19 +43,21 @@ const offdelta = (s: AccountState, token: TokenId): bigint => ledgerOf(s, token)
 
 const open = must(start, "left", tx.offer(offerOf("left", 1000n, 333n)));
 
-describe("account/swap R-SWAP-OFFER either side offers its funds for the other's and both legs are reserved", () => {
-  test("a Left maker's give is reserved against Left in its token and its want against Right in the other", () => {
-    expect(open.offers).toEqual([offerOf("left", 1000n, 333n)]);
+describe("account/swap R-SWAP-OFFER either side quotes its funds for the other's, reserving only its own give", () => {
+  test("a Left maker's quote reserves its give against Left and nothing else, and is no clause of the body", () => {
+    expect(open.quotes).toEqual([offerOf("left", 1000n, 333n)]);
+    expect(open.offers).toEqual([]);
     expect(ledgerOf(open, GOLD).reserved).toEqual({ left: 1000n, right: 0n });
-    expect(ledgerOf(open, OIL).reserved).toEqual({ left: 0n, right: 333n });
+    expect(ledgerOf(open, OIL).reserved).toEqual({ left: 0n, right: 0n });
     expect([room(ledgerOf(open, GOLD), "left"), room(ledgerOf(open, OIL), "right")])
-      .toEqual([room(ledgerOf(start, GOLD), "left") - 1000n, room(ledgerOf(start, OIL), "right") - 333n]);
+      .toEqual([room(ledgerOf(start, GOLD), "left") - 1000n, room(ledgerOf(start, OIL), "right")]);
+    expect(bodyOf(open).transformers).toEqual([]);
   });
 
-  test("a Right maker is the mirror: its give against Right, its want against Left", () => {
+  test("a Right maker is the mirror: its give against Right, the Left side's room untouched", () => {
     const s = must(start, "right", tx.offer(offerOf("right", 50n, 70n)));
     expect([ledgerOf(s, GOLD).reserved, ledgerOf(s, OIL).reserved])
-      .toEqual([{ left: 0n, right: 50n }, { left: 70n, right: 0n }]);
+      .toEqual([{ left: 0n, right: 50n }, { left: 0n, right: 0n }]);
   });
 
   test("the refusals, each its own fault: funds, tokens, amounts, slot, deadline", () => {
@@ -77,24 +79,28 @@ describe("account/swap R-SWAP-OFFER either side offers its funds for the other's
     expect(refusal(start, "left", tx.offer(offerOf("left", 10n, 5n, 1n, 112n)))).toBeUndefined();
   });
 
-  test("a maker offers only what it has room to give, and a taker only what it could pay", () => {
+  test("a maker quotes only what it has room to give; the want is the taker's to afford, at its first fill", () => {
     const room_ = room(ledgerOf(start, GOLD), "left");
     expect(refusal(start, "left", tx.offer(offerOf("left", room_ + 1n, 1n)))?._tag).toBe("insufficient_capacity");
     expect(refusal(start, "left", tx.offer(offerOf("left", room_, 1n)))).toBeUndefined();
     const takerRoom = room(ledgerOf(start, OIL), "right");
-    expect(refusal(start, "left", tx.offer(offerOf("left", 1n, takerRoom + 1n)))?._tag).toBe("insufficient_capacity");
-    expect(refusal(start, "left", tx.offer(offerOf("left", 1n, takerRoom)))).toBeUndefined();
+    expect(refusal(start, "left", tx.offer(offerOf("left", 1n, takerRoom + 1n)))).toBeUndefined();
   });
 
-  test("an offer counts as one clause against R-HOLD-CAP with the holds, across tokens", () => {
+  test("a quote is no clause: the clause cap counts accepted offers with the holds, across tokens", () => {
     const lock = (n: bigint): AccountTx =>
       ({ _tag: "lock", token: n % 2n === 0n ? GOLD : OIL, hold: holdOf("left", 1n, n, 105n, Number(n)) });
-    const holds = Array.from({ length: 16 }, (_, i) => BigInt(i + 1)).reduce((s, n) => must(s, "left", lock(n)), start);
-    const full = Array.from({ length: 16 }, (_, i) => BigInt(i + 1))
-      .reduce((s, n) => must(s, "left", tx.offer(offerOf("left", 1n, 1n, n))), holds);
-    expect([full.offers.length, unsignable(signing.terms, full)]).toEqual([16, undefined]);
-    expect(refusal(full, "left", tx.offer(offerOf("left", 1n, 1n, 17n)))).toEqual({ _tag: "too_many_holds", max: 32 });
-    expect(refusal(full, "left", lock(17n))).toEqual({ _tag: "too_many_holds", max: 32 });
+    const upTo = (n: number): readonly bigint[] => Array.from({ length: n }, (_, i) => BigInt(i + 1));
+    const holds = upTo(28).reduce((s, n) => must(s, "left", lock(n)), start);
+    const quoted = upTo(4).reduce((s, n) => must(s, "left", tx.offer(offerOf("left", 1000n, 500n, n))), holds);
+    expect([quoted.quotes.length, unsignable(signing.terms, quoted)]).toEqual([4, undefined]);
+    const full = upTo(4).reduce((s, n) => must(s, "right", tx.take(n, 10_000)), quoted);
+    expect([full.quotes.length, full.offers.length, unsignable(signing.terms, full)]).toEqual([0, 4, undefined]);
+    const more = must(full, "right", tx.offer(offerOf("right", 1000n, 500n, 5n, 105n, OIL, GOLD)));
+    expect(refusal(full, "left", lock(29n))).toEqual({ _tag: "too_many_holds", max: 32 });
+    // a first fill that leaves a remainder would be a 33rd clause; the whole fill leaves none
+    expect(refusal(more, "left", tx.take(5n, 10_000))).toEqual({ _tag: "too_many_holds", max: 32 });
+    expect(refusal(more, "left", tx.take(5n, 65_535))).toBeUndefined();
     expect(unsignable(signing.terms, { ...full, offers: [...full.offers, offerOf("left", 1n, 1n, 17n)] }))
       .toEqual({ _tag: "too_many_clauses", clauses: 33 });
   });
@@ -107,7 +113,8 @@ describe("account/swap R-SWAP-OFFER either side offers its funds for the other's
 
   test("a frame's content name changes with every field of an offer, a fill and a withdrawal", () => {
     const frameWith = (t: AccountTx): Frame<AccountTx> =>
-      ({ author: "left", parent: emptyReplica("left").head, attempt: 0, slot: 2, txs: [t] });
+      ({ author: "left", parent: emptyReplica("left").head, attempt: 0, slot: 2,
+        epoch: signing.ondeltaEpoch, firstNonce: signing.firstNonce, txs: [t] });
     const nameOf = (t: AccountTx) => frameName(frameWith(t));
     const base = offerOf("left", 10n, 5n);
     const variants: readonly AccountTx[] = [
@@ -267,13 +274,14 @@ describe("account/swap R-SWAP-CLAUSE-WITH-FILL a state that holds a fill carries
   });
 
   // each side's reservation in a token is what the open offers could still take of it
+  // a quote reserves only its maker's give; an accepted offer reserves the taker's want as well
   const reservedOf = (s: AccountState, token: TokenId, side: Side): bigint =>
-    s.offers.reduce((sum, o) => sum + (o.give.token === token && o.maker === side ? o.give.amount : 0n)
-      + (o.want.token === token && other(o.maker) === side ? o.want.amount : 0n), 0n);
+    [...s.quotes, ...s.offers].reduce((n, o) => n + (o.give.token === token && o.maker === side ? o.give.amount : 0n),
+      0n) + s.offers.reduce((n, o) => n + (o.want.token === token && other(o.maker) === side ? o.want.amount : 0n), 0n);
 
   /** A fill moves each leg's offdelta by what the offer lost of it: the move plus the remainder is the offer. */
   const conserved = (before: AccountState, after: AccountState, id: bigint): readonly bigint[] => {
-    const o = before.offers.find((x) => x.id === id) ?? expect.unreachable("a fill of no offer");
+    const o = [...before.quotes, ...before.offers].find((x) => x.id === id) ?? expect.unreachable("a fill of no offer");
     const left = after.offers.find((x) => x.id === id);
     const sign = o.maker === "left" ? -1n : 1n;
     const gave = sign * (offdelta(after, o.give.token) - offdelta(before, o.give.token));
@@ -291,7 +299,7 @@ describe("account/swap R-SWAP-CLAUSE-WITH-FILL a state that holds a fill carries
     const side: Side = d(1, 2) === 0 ? "left" : "right";
     const offered = offerOf(side, BigInt(1 + d(2, 2000)), BigInt(1 + d(3, 2000)), id, 105n, gt, wt);
     const ratio = 1 + d(5, 65_535);
-    const maker = walk.s.offers.find((x) => x.id === id)?.maker ?? offered.maker;
+    const maker = [...walk.s.quotes, ...walk.s.offers].find((x) => x.id === id)?.maker ?? offered.maker;
     const taker = other(maker);
     const moves: readonly (readonly [AccountTx, Side])[] = [
       [tx.offer(offered), side], [tx.offer(offered), side], [tx.take(id, ratio), taker],
@@ -323,38 +331,40 @@ describe("account/swap R-SWAP-ALLOWANCES the clause carries an allowance for bot
   const amounts = (s: AccountState) => bodyOf(s).transformers.flatMap((t) => swapsOf(t.encodedBatch))
     .map((x) => [x.ownerIsLeft, x.addDeltaIndex, x.addAmount, x.subDeltaIndex, x.subAmount]);
 
+  test("a quote carries no clause and so no allowance: only an accepted offer is in the body", () => {
+    expect(allowancesOf(open)).toEqual([]);
+    expect(amounts(open)).toEqual([]);
+  });
+
   test("a Left maker's give is the Right side's to take from, its want the Left side's to gain", () => {
-    expect(allowancesOf(open)).toEqual([[
-      { deltaIndex: 0n, rightAllowance: 1000n, leftAllowance: 0n },
-      { deltaIndex: 1n, rightAllowance: 0n, leftAllowance: 333n },
-    ]]);
-    expect(amounts(open)).toEqual([[true, 0n, 1000n, 1n, 333n]]);
-  });
-
-  test("a Right maker's is the mirror, and the indices follow the tokens in ascending order", () => {
-    const s = must(start, "right", tx.offer(offerOf("right", 70n, 50n, 1n, 105n, OIL, GOLD)));
-    expect(allowancesOf(s)).toEqual([[
-      { deltaIndex: 1n, rightAllowance: 0n, leftAllowance: 70n },
-      { deltaIndex: 0n, rightAllowance: 50n, leftAllowance: 0n },
-    ]]);
-    expect(amounts(s)).toEqual([[false, 1n, 70n, 0n, 50n]]);
-  });
-
-  test("after a fill both allowances are the remainder: the clause and its allowances shrink together", () => {
     const once = must(open, "right", tx.take(1n, 10_000));
     expect(allowancesOf(once)).toEqual([[
       { deltaIndex: 0n, rightAllowance: 848n, leftAllowance: 0n },
       { deltaIndex: 1n, rightAllowance: 0n, leftAllowance: 283n },
     ]]);
+    expect(amounts(once)).toEqual([[true, 0n, 848n, 1n, 283n]]);
+  });
+
+  test("a Right maker's is the mirror, and the indices follow the tokens in ascending order", () => {
+    const quote = must(start, "right", tx.offer(offerOf("right", 70n, 50n, 1n, 105n, OIL, GOLD)));
+    const s = must(quote, "left", tx.take(1n, 10_000));
+    // floor(70 * 10000 / 65535) = 10 and floor(50 * 10000 / 65535) = 7
+    expect(allowancesOf(s)).toEqual([[
+      { deltaIndex: 1n, rightAllowance: 0n, leftAllowance: 60n },
+      { deltaIndex: 0n, rightAllowance: 43n, leftAllowance: 0n },
+    ]]);
+    expect(amounts(s)).toEqual([[false, 1n, 60n, 0n, 43n]]);
   });
 
   test("swap clauses follow the payment clauses, each group in slot order", () => {
     const lock: AccountTx = { _tag: "lock", token: GOLD, hold: holdOf("left", 5n, 9n, 105n, 9) };
-    const offers = [7n, 3n].reduce((s, id) => must(s, "left", tx.offer(offerOf("left", id * 10n, 5n, id))), start);
+    const quotes = [7n, 3n].reduce((s, id) => must(s, "left", tx.offer(offerOf("left", id * 10n, 500n, id))), start);
+    const offers = [7n, 3n].reduce((s, id) => must(s, "right", tx.take(id, 10_000)), quotes);
     const s = must(offers, "left", lock);
     const kinds = bodyOf(s).transformers.map((t) => swapsOf(t.encodedBatch).length);
     expect(kinds).toEqual([0, 1, 1]);
-    expect(bodyOf(s).transformers.slice(1).map((t) => swapsOf(t.encodedBatch)[0]?.addAmount)).toEqual([30n, 70n]);
+    // floor(30 * 10000 / 65535) = 4 and floor(70 * 10000 / 65535) = 10 are already in the offdeltas
+    expect(bodyOf(s).transformers.slice(1).map((t) => swapsOf(t.encodedBatch)[0]?.addAmount)).toEqual([26n, 60n]);
     expect(bodyOf(must(s, "left", tx.retract(3n))).transformers).toHaveLength(2);
   });
 });
@@ -399,5 +409,85 @@ describe("account/swap R-SWAP-EXPIRE an offer expires off-chain: a frame lapses 
 
   test("a lapse the view finds early says when it is not early: the retryable fault of the clock rules", () => {
     expect(refusal(open, "left", tx.lapse(1n), 107n)).toEqual({ _tag: "not_expired", deadline: 105n, earliest: 108n });
+  });
+});
+
+describe("account/swap R-SWAP-CONSENT a quote binds the taker to nothing: its first fill is its acceptance", () => {
+  test("any number of quotes leaves the taker's room, reservations and signed body exactly as they were", () => {
+    const quoted = [1n, 2n, 3n, 4n].reduce((s, id) =>
+      must(s, "left", tx.offer(offerOf("left", 100n, room(ledgerOf(start, OIL), "right"), id))), start);
+    expect(room(ledgerOf(quoted, OIL), "right")).toBe(room(ledgerOf(start, OIL), "right"));
+    expect(ledgerOf(quoted, OIL).reserved).toEqual({ left: 0n, right: 0n });
+    expect([bodyOf(quoted).transformers, bodyOf(quoted).offdeltas]).toEqual([[], bodyOf(start).offdeltas]);
+  });
+
+  test("the first fill reserves what is left of the taker's want and makes the offer a clause: the acceptance", () => {
+    const once = must(open, "right", tx.take(1n, 10_000));
+    expect([once.quotes, once.offers]).toEqual([[], [offerOf("left", 848n, 283n)]]);
+    expect([ledgerOf(once, GOLD).reserved, ledgerOf(once, OIL).reserved])
+      .toEqual([{ left: 848n, right: 0n }, { left: 0n, right: 283n }]);
+    expect(bodyOf(once).transformers).toHaveLength(1);
+  });
+
+  test("a first fill that takes everything never becomes a clause: no reservation, no clause, no offer", () => {
+    const done = must(open, "right", tx.take(1n, 65_535));
+    expect([done.quotes, done.offers, bodyOf(done).transformers]).toEqual([[], [], []]);
+    expect([ledgerOf(done, GOLD).reserved, ledgerOf(done, OIL).reserved])
+      .toEqual([{ left: 0n, right: 0n }, { left: 0n, right: 0n }]);
+  });
+
+  test("a taker that cannot afford the want is refused at the first fill, and the quote stays what it was", () => {
+    const wide = must(start, "left", tx.offer(offerOf("left", 10n, room(ledgerOf(start, OIL), "right") + 1n)));
+    const refused = [20_000, 40_000, 65_535].map((ratio) => refusal(wide, "right", tx.take(1n, ratio))?._tag);
+    expect(refused).toEqual(["insufficient_capacity", "insufficient_capacity", "insufficient_capacity"]);
+    expect(refusal(wide, "left", tx.retract(1n))).toBeUndefined();
+  });
+
+  test("at most four quotes per maker per Account, each side its own four; an accepted offer frees its place", () => {
+    const four = [1n, 2n, 3n, 4n].reduce((s, id) => must(s, "left", tx.offer(offerOf("left", 10n, 500n, id))), start);
+    expect(refusal(four, "left", tx.offer(offerOf("left", 10n, 500n, 5n))))
+      .toEqual({ _tag: "too_many_quotes", max: 4 });
+    expect(refusal(four, "right", tx.offer(offerOf("right", 10n, 500n, 5n)))).toBeUndefined();
+    const taken = must(four, "right", tx.take(1n, 10_000));
+    expect(refusal(taken, "left", tx.offer(offerOf("left", 10n, 500n, 5n)))).toBeUndefined();
+    const gone = must(four, "left", tx.retract(2n));
+    expect(refusal(gone, "left", tx.offer(offerOf("left", 10n, 500n, 5n)))).toBeUndefined();
+  });
+
+  test("a quote's slot is a slot: no second quote or offer takes it, and the refusals come in one order", () => {
+    const taken = must(open, "right", tx.take(1n, 10_000));
+    expect(refusal(open, "left", tx.offer(offerOf("left", 1n, 1n)))?._tag).toBe("offer_exists");
+    expect(refusal(taken, "left", tx.offer(offerOf("left", 1n, 1n)))?._tag).toBe("offer_exists");
+  });
+
+  test("withdrawing or lapsing a quote gives back only the maker's give; a taker's want was never held", () => {
+    const gone = must(open, "left", tx.retract(1n));
+    const lapsed = must(open, "right", tx.lapse(1n), 108n);
+    expect([gone.quotes, lapsed.quotes]).toEqual([[], []]);
+    expect([gone.offers, lapsed.offers]).toEqual([[], []]);
+    expect([ledgerOf(gone, GOLD).reserved, ledgerOf(gone, OIL).reserved, ledgerOf(lapsed, GOLD).reserved])
+      .toEqual([{ left: 0n, right: 0n }, { left: 0n, right: 0n }, { left: 0n, right: 0n }]);
+    expect(refusal(open, "right", tx.retract(1n))?._tag).toBe("not_maker");
+  });
+
+  test("a quote past its deadline cannot be accepted, and the maker cannot fill its own", () => {
+    expect(refusal(open, "right", tx.take(1n, 10_000), 106n)?._tag).toBe("past_deadline");
+    expect(refusal(open, "left", tx.take(1n, 10_000))?._tag).toBe("not_taker");
+  });
+});
+
+// The title is the name a register killer carried before R-SWAP-CONSENT; it stays true as the acceptance half: a quote
+// reserves the maker's give alone, and both legs are reserved once the taker's first fill accepts it.
+describe("account/swap R-SWAP-OFFER either side offers its funds for the other's and both legs are reserved", () => {
+  test("once the taker's first fill accepts the quote, the maker's give and the taker's want are both reserved", () => {
+    SIDES.forEach((maker) => {
+      const taker = other(maker);
+      const ratio = 6553;
+      const accepted = must(must(start, maker, tx.offer(offerOf(maker, 1000n, 333n))), taker, tx.take(1n, ratio));
+      expect(ledgerOf(accepted, GOLD).reserved[maker]).toBe(1000n - fillOf(1000n, ratio));
+      expect(ledgerOf(accepted, OIL).reserved[taker]).toBe(333n - fillOf(333n, ratio));
+      expect([ledgerOf(accepted, GOLD).reserved[taker], ledgerOf(accepted, OIL).reserved[maker]]).toEqual([0n, 0n]);
+      expect([accepted.quotes.length, accepted.offers.length]).toEqual([0, 1]);
+    });
   });
 });

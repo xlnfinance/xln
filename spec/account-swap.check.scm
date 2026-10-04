@@ -1,0 +1,6 @@
+;; Check the swap page.   node arrival/packages/arrival-cli/dist/cli.js run account-swap.check.scm   (from spec/)
+(require "lib/vocabulary.scm")
+(require "lib/check.scm")
+(require "money/core.scm")
+(require "account/swap.scm")
+(check account-swap)

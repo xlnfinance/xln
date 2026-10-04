@@ -1,0 +1,22 @@
+{
+  "files": [
+    "htlc.qnt",
+    "htlc_hlkadm.qnt",
+    "htlc_gate_test.qnt"
+  ],
+  "init": "init",
+  "step": "step",
+  "test": "htlc_gate_test.qnt",
+  "testMain": "hlkadm_htlc_gate_test",
+  "steps": 70,
+  "mutants": [
+    {
+      "id": "admission-read-lags-the-view",
+      "why": "the registry read at the lock's admission is taken one block behind the Entity's view: a reveal the hub already heard and dropped is not in it, the lock is admitted, and the hub loses it",
+      "file": "htlc.qnt",
+      "old": "s.revealedAt + PD + ADM < s.now",
+      "new": "s.revealedAt + PD + ADM + 1 < s.now",
+      "killedBy": "test:lateLockTest"
+    }
+  ]
+}

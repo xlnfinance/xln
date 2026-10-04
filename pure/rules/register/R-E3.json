@@ -1,10 +1,10 @@
 {
  "id": "R-E3",
- "statement": "A replica drops its own uncommitted proposal when a certified frame commits at that height.",
+ "statement": "A replica drops its own uncommitted proposal when a certified frame commits at that height. The Quint cell holds the Right side's rollback on a collision: its in-flight txs go back to the queue and the peer's frame applies (right-drops-inflight-on-collision); the Left side keeps its own frame (R-A1).",
  "source": "lessons.md section 3",
  "layers": {
   "arrival": "owed: spec thread, next Arrival page (id not in a name yet)",
-  "quint": "owed: spec thread, new Quint branch (id not in a name yet)",
+  "quint": "hold",
   "contract": "n/a: a replica dropping its own proposal is off-chain Entity logic",
   "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
   "ts": "owed: the cut (Entity and Runtime)"

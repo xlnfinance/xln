@@ -1,0 +1,19 @@
+{
+ "id": "R-LAG-ONE",
+ "statement": "The clock has one lag: the J inclusion bound, the blocks between the hub submitting a transaction and its inclusion. There is no separate chain lag, and nothing counts it twice. The reaction a hub needs between the payee's reveal landing and its own claim landing is depth + pollDelay + lag: it hears the reveal at the depth it reads at, within `pollDelay` of that, then needs `lag` blocks to be included. The hub always keeps that room for the claim on chain, even when it expects the upstream peer to co-sign, because the peer may be quiet. A clock whose hop (reserve + lag), less the slots the chain may miss in it, leaves less than reaction + 1 is refused (`reserve_below_react`: reserve at least depth + pollDelay + missed + 1). Owed (backlog): nothing enforces that a transaction the submit path sent is included within `lag`; the submit path has to notice one that is not.",
+ "source": "coordinator ruling 10-03 03:32 and 03:50 (reserve bound, hub slack gate); builder; R-DEADLINE-TIMESTAMP; consolidation-plan.md D9",
+ "layers": {
+  "arrival": "owed: spec thread (the hub's gate over two deadlines read through the chain's seconds)",
+  "quint": "owed: spec thread (the hub's gate over two deadlines read through the chain's seconds)",
+  "contract": "n/a: the contract compares seconds (DeltaTransformer.sol, revealedUntilTimestamp); the node reads them, it does not change the contract",
+  "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
+  "ts": "hold"
+ },
+ "killers": [
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-LAG-ONE the reaction is the depth, the poll delay and the one lag: no second lag is counted"
+  }
+ ]
+}

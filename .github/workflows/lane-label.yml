@@ -1,0 +1,71 @@
+name: lane-label
+
+# The lane rule: every pull request into development carries exactly one of core, chain, spec or process, and a core, chain or
+# spec pull request waits while an earlier one holds its lane (.github/scripts/lane-label.sh, pinned by rules/ci/lanes/).
+# Any labeled, unlabeled, reopened, edited or closed event also runs the check again for the other pull requests with a lane.
+# `Lane label` is the one check to require on development, next to the two fast gate checks.
+on:
+  pull_request:
+    branches: [development]
+    types: [opened, reopened, synchronize, edited, labeled, unlabeled, ready_for_review, converted_to_draft, closed]
+
+concurrency:
+  group: lane-label-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: read
+  actions: write
+
+jobs:
+  lane-label:
+    name: Lane label
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: List the open pull requests into development
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh api --paginate "repos/$GITHUB_REPOSITORY/pulls?state=open&base=development&per_page=100" | jq -s 'add // []' > "$RUNNER_TEMP/open-prs.json"
+
+      - name: One open pull request per lane
+        if: github.event.action != 'closed'
+        run: bash .github/scripts/lane-label.sh check "${{ github.event.pull_request.number }}" "$RUNNER_TEMP/open-prs.json"
+
+      # What this pull request now carries, or no longer holds, can change the answer for every other pull request with a
+      # lane label (a closed or relabelled holder frees its lane, a reopened or newly labeled one takes it): their lane check
+      # runs again. Only the first attempt fans out: a re-run keeps the payload of the event that started the run, action
+      # included, so a re-run of a labeled run would fan out again and re-run the others, which re-run it back; the runs then
+      # pile up and GitHub refuses a re-run while one is going ("This workflow is already running"). A re-run changes no label,
+      # so it has nothing to tell the others.
+      # The check reads the open pull requests when its list step runs, not from its event. A run of the other pull request
+      # whose current attempt started at or after this one (or is still queued) reads them after this event, so it is left
+      # alone. One that started earlier may have read them before this event: it is waited for and then re-run, because
+      # GitHub does not re-run a run in progress.
+      - name: Run the lane check again for the other pull requests with a lane
+        if: ${{ !cancelled() && contains(fromJSON('["closed", "reopened", "labeled", "unlabeled", "edited"]'), github.event.action) && github.run_attempt == '1' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          since=$(gh run view "$GITHUB_RUN_ID" --json startedAt --jq .startedAt)
+          bash .github/scripts/lane-label.sh others "${{ github.event.pull_request.number }}" "$RUNNER_TEMP/open-prs.json" | while read -r number branch; do
+            run=$(gh run list --workflow lane-label.yml --branch "$branch" --event pull_request --limit 1 --json databaseId --jq '.[0].databaseId // empty')
+            if [ -z "$run" ]; then echo "lane-label: pull request $number has no lane check run yet"; continue; fi
+            state=running
+            for _ in $(seq 1 24); do
+              info=$(gh run view "$run" --json status,startedAt --jq '"\(.status) \(.startedAt)"') || info=""
+              status=${info%% *} started=${info#* }
+              if [ "$status" = completed ]; then state=completed; break; fi
+              if [ -n "$status" ] && { [ "$status" != in_progress ] || [[ ! "$started" < "$since" ]]; }; then state=current; break; fi
+              sleep 5
+            done
+            case "$state" in
+              current) echo "lane-label: the check for pull request $number ($status, started $started) reads the pull requests after this event" ;;
+              completed) gh run rerun "$run" && echo "lane-label: ran the check again for pull request $number" || echo "::warning::lane-label: could not run the check again for pull request $number (run $run)" ;;
+              *) echo "::warning::lane-label: the check for pull request $number (run $run) started before this event and was still running after 2 minutes; re-run it by hand" ;;
+            esac
+          done

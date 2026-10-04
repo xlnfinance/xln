@@ -1,0 +1,22 @@
+{
+  "files": [
+    "htlc.qnt",
+    "htlc_hmiss.qnt",
+    "htlc_gate_test.qnt"
+  ],
+  "init": "init",
+  "step": "step",
+  "test": "htlc_gate_test.qnt",
+  "testMain": "hmiss_htlc_gate_test",
+  "steps": 40,
+  "mutants": [
+    {
+      "id": "forward-gap-drops-the-seconds-arm",
+      "why": "the forward gap keeps only the height hop and ignores missed slots, so a lock the reaction cannot cover is forwarded and the scheduled race loses it",
+      "file": "htlc.qnt",
+      "old": "if (HOP < (TUX - TDX) - MISSED) HOP else (TUX - TDX) - MISSED",
+      "new": "HOP",
+      "killedBy": "test:lateRevealRaceTest"
+    }
+  ]
+}

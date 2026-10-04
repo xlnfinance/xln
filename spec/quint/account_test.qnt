@@ -164,6 +164,7 @@ module account_test {
     .then(deliverAck(Left, 1))
     .expect(and {
       rollbacks == 1,
+      refusals == 0, replica.get(Left).mark == NoMark,      // the winner ignores the loser's frame: no refusal is sent and no mark is kept (a refusal would be the nonce door, not the rank rule)
       replica.get(Left).height == 1, replica.get(Right).height == 1,
       replica.get(Left).tip == replica.get(Right).tip,
       replica.get(Right).tip.limitRight == 1,      // Left's frame won
@@ -269,7 +270,12 @@ module account_test {
     .then(enqueueTx(Left, HtlcExpire({ id: 1 })))                 // Left's clock is 4 > 2 + reserve 1
     .then(propose(Left))
     .then(deliverProposal(Right, 3))                              // Right's clock is 3, not past 3: refused
-  val expireNack: Refusal = refusalFor(3, 0, "not_expired", 0)
+  // the refusal in flight for a frame, whatever floor it carries (every refusal carries the refuser's signed floor, so the scripted tests name the refusal by its frame; the
+  // content is checked where it matters)
+  action deliverNack(s: Side, fid: int): bool = { nondet ref = nacks.filter(x => x.fid == fid).oneOf() deliverRefusal(s, ref) }
+  pure def withFloor(x: Refusal, hi: int): Refusal = { ...x, hi: hi }                                    // the refuser's signed floor rides with every refusal
+  val expireNack: Refusal = { ...refusalFor(3, 0, "not_expired", 0), hi: 2 }                            // Right refused Left's frame at nonce 2: its floor is 2
+  pure def nonceLow(fid: int, hi: int): Refusal = { ...refusalFor(fid, 0, "nonce_low", 0), hi: hi }   // the receiver's answer to a proof that would not outrank one it signed (its `hi` rides with it)
 
   run expiryWaitsForTheReceiversOwnClockTest = lateExpiry
     .expect(and {
@@ -301,8 +307,9 @@ module account_test {
     })
 
   // (b) A fault that does not pass drops the named tx WITH NOTICE and the rest of the frame goes out again. Right's view is a tick ahead (R = 1, L = 0): Left's
-  // lock for deadline 1 is not after it (deadline_past, at index 1, behind a credit tx that applies). Left drops the lock (refused, the payer is released),
-  // keeps the credit tx, and the next frame (attempt 1) commits.
+  // lock for deadline 1 is not after it (deadline_past, at index 1, behind a credit tx that applies). Left drops the lock, keeps the credit tx, and the next frame
+  // (attempt 1) commits. The lock was in the proof Left signed for frame 2 and Right holds that proof: the notice (the release of the payer and of the hold
+  // above it) is kept until a frame above it commits, and then given [R-SIGNED-IS-LIVE: `refusedLockStaysLiveUntilSupersededTest` and the two after it].
   run nonRetryableFaultDropsTheNamedTxTest = init
     .then(enqueueTx(Right, SetCredit({ by: Right, limit: 2 })))
     .then(propose(Right)).then(deliverProposal(Left, 1)).then(ackReceived(Left)).then(deliverAck(Right, 1))
@@ -311,18 +318,20 @@ module account_test {
     .then(enqueueTx(Left, HtlcLock({ id: 1, payer: Left, amount: 1, hashlock: hashOf(1), deadline: 1 })))
     .then(propose(Left))
     .then(deliverProposal(Right, 2))
-    .expect(and { nacks == Set(refusalFor(2, 1, "deadline_past", 0)), isOpen(replica.get(Right)), refusals == 1, isProposed(replica.get(Left)) })
-    .then(deliverRefusal(Left, refusalFor(2, 1, "deadline_past", 0)))
+    .expect(and { nacks == Set(withFloor(refusalFor(2, 1, "deadline_past", 0), 1)), isOpen(replica.get(Right)), refusals == 1, isProposed(replica.get(Left)) })
+    .then(deliverNack(Left, 2))
     .expect(and {
-      replica.get(Left).refused == [HtlcLock({ id: 1, payer: Left, amount: 1, hashlock: hashOf(1), deadline: 1 })],
+      replica.get(Left).kept == [HtlcLock({ id: 1, payer: Left, amount: 1, hashlock: hashOf(1), deadline: 1 })], replica.get(Left).refused == [],
       replica.get(Left).mempool == [SetCredit({ by: Left, limit: 1 })], replica.get(Left).attempt == 1, isOpen(replica.get(Left)), no_tx_lost, safe
     })
     .then(propose(Left))
     .then(deliverProposal(Right, 3))
     .then(ackReceived(Right)).then(deliverAck(Left, 3))
+    .then(releaseHold(Left))
     .expect(and {
       replica.get(Left).height == 2, replica.get(Right).height == 2, replica.get(Left).tip == replica.get(Right).tip,
-      replica.get(Left).tip.limitRight == 1, replica.get(Left).refused.length() == 1, replica.get(Left).submitted == 2, replica.get(Left).done == 1, no_tx_lost, safe
+      replica.get(Left).tip.limitRight == 1, replica.get(Left).refused.length() == 1, replica.get(Left).kept == [], replica.get(Left).submitted == 2, replica.get(Left).done == 1,
+      no_tx_lost, safe
     })
 
   // (c) A refusal for a frame already committed is ignored: here from a peer that acked frame 1 and then refused it (a Byzantine receiver; an honest one never
@@ -332,7 +341,7 @@ module account_test {
     .then(propose(Left))
     .then(turnByzantine(Right)).then(byzAck(Right, true))
     .then(deliverAck(Left, 1))
-    .then(byzNack(Right, 1, 0, "not_expired", 0))
+    .then(byzNack(Right, 1, 0, "not_expired", 0, 0))
     .then(deliverRefusal(Left, refusalFor(1, 0, "not_expired", 0)))
     .expect(and {
       replica.get(Left).height == 1, isOpen(replica.get(Left)), replica.get(Left).mempool == [], replica.get(Left).refused == [], replica.get(Left).attempt == 0, no_tx_lost, safe
@@ -350,7 +359,7 @@ module account_test {
     .then(enqueueTx(Left, SetCredit({ by: Left, limit: 1 })))
     .then(enqueueTx(Left, SetCredit({ by: Left, limit: 2 })))
     .then(propose(Left))
-    .then(turnByzantine(Right)).then(byzNack(Right, 1, 1, "bad_state", 3))
+    .then(turnByzantine(Right)).then(byzNack(Right, 1, 1, "bad_state", 3, 0))
     .then(deliverRefusal(Left, refusalFor(1, 1, "bad_state", 3)))
     .then(propose(Left))
     .expect(and {
@@ -364,29 +373,37 @@ module account_test {
     .then(propose(Right)).then(deliverProposal(Left, 1)).then(ackReceived(Left)).then(deliverAck(Right, 1))
 
   // The same refusal while the receiver has its own frame out (a collision): Right keeps its frame in flight, remembers the mark, and answers Left. Left (clock 4,
-  // Right's 3) rolls its expiry back on the refusal; Right's frame, delivered to the now Open Left, commits on both sides; Left's expiry then goes out again.
+  // Right's 3) rolls its expiry back on the refusal. Right's frame, at the nonce Left signed its own proof at (nonce 2, Right-authored, below Left's own proof at 2), is
+  // refused by the now Open Left with `nonce_low`: Left signed a proof for frame 2 that Right holds, and acking a frame that proof outranks would let Right erase it
+  // (R-PROOF-NONCE-ABOVE-SIGNED). The refusal carries Left's `hi`; Right signs again above it, and that frame commits on both sides; Left's expiry then goes out again.
   run rightKeepsItsFrameWhenItRefusesLeftsTest = lockedByRight
     .then(tick(Left)).then(tick(Right)).then(tick(Left)).then(tick(Right)).then(tick(Left)).then(tick(Right)).then(tick(Left))
     .then(enqueueTx(Left, HtlcExpire({ id: 1 })))
     .then(enqueueTx(Right, Pay({ from: Right, amount: 1 })))
     .then(propose(Left)).then(propose(Right))
     .then(deliverProposal(Right, 2))                              // Right has frame 3 out: it refuses Left's expiry (its clock is 3) and keeps its own
-    .expect(and { isProposed(replica.get(Right)), statusFid(replica.get(Right)) == 3, nacks == Set(refusalFor(2, 0, "not_expired", 0)), replica.get(Right).mempool == [], rollbacks == 0 })
+    .expect(and { isProposed(replica.get(Right)), statusFid(replica.get(Right)) == 3, nacks == Set(withFloor(refusalFor(2, 0, "not_expired", 0), 2)), replica.get(Right).mempool == [], rollbacks == 0 })
     .then(deliverProposal(Left, 3))                               // Left keeps its own frame (Left wins a collision)
-    .then(deliverRefusal(Left, refusalFor(2, 0, "not_expired", 0)))
-    .then(deliverProposal(Left, 3))                               // Left is Open now and takes Right's frame
-    .then(ackReceived(Left)).then(deliverAck(Right, 3))
-    .expect(and { replica.get(Left).height == 2, replica.get(Right).height == 2, replica.get(Left).tip == replica.get(Right).tip, replica.get(Left).mempool == [HtlcExpire({ id: 1 })], no_tx_lost, safe })
+    .then(deliverNack(Left, 2))
+    .then(deliverProposal(Left, 3))                               // Left is Open now, but Right's proof (2, Right) is below the one it signed for frame 2 (2, Left): refused
+    .expect(and { replica.get(Left).height == 1, nacks.contains(nonceLow(3, 2)), isOpen(replica.get(Left)), signed_above_head, safe })
+    .then(deliverRefusal(Right, nonceLow(3, 2)))
+    .expect(and { isOpen(replica.get(Right)), replica.get(Right).attempt == 1, replica.get(Right).mempool == [Pay({ from: Right, amount: 1 })], replica.get(Right).hi == 2, no_tx_lost, safe })
+    .then(propose(Right))
+    .expect(and { frames.get(4).nonce == 3, frames.get(4).attempt == 1 })
+    .then(deliverProposal(Left, 4))
+    .then(ackReceived(Left)).then(deliverAck(Right, 4))
+    .expect(and { replica.get(Left).height == 2, replica.get(Right).height == 2, replica.get(Left).tip == replica.get(Right).tip, replica.get(Left).mempool == [HtlcExpire({ id: 1 })], no_tx_lost, signed_above_head, safe })
     .then(tick(Right))
-    .then(propose(Left)).then(deliverProposal(Right, 4)).then(ackReceived(Right)).then(deliverAck(Left, 4))
-    .expect(and { replica.get(Left).height == 3, replica.get(Right).height == 3, not(replica.get(Right).tip.locks.get(1).on), refusals == 1, no_tx_lost, safe })
+    .then(propose(Left)).then(deliverProposal(Right, 5)).then(ackReceived(Right)).then(deliverAck(Left, 5))
+    .expect(and { replica.get(Left).height == 3, replica.get(Right).height == 3, not(replica.get(Right).tip.locks.get(1).on), refusals == 2, no_tx_lost, safe })     // two refusals: Left's expiry by Right, Right's first Pay by Left (nonce_low)
 
   // Left sends the expiry at attempts 0, 1 and 2 and Right (its view still behind) refuses each; the third refusal finds the retry budget spent (MAX_ATTEMPT = 2), so the
   // expiry is dropped with notice. This is the schedule of the fork the attempt number and the mark are there to prevent.
   action budgetSpent = lateExpiry
     .then(deliverRefusal(Left, expireNack))
-    .then(propose(Left)).then(deliverProposal(Right, 4)).then(deliverRefusal(Left, refusalFor(4, 0, "not_expired", 1)))
-    .then(propose(Left)).then(deliverProposal(Right, 5)).then(deliverRefusal(Left, refusalFor(5, 0, "not_expired", 2)))
+    .then(propose(Left)).then(deliverProposal(Right, 4)).then(deliverNack(Left, 4))
+    .then(propose(Left)).then(deliverProposal(Right, 5)).then(deliverNack(Left, 5))
 
   run retryBudgetIsSpentThenTheTxIsDroppedTest = budgetSpent
     .expect(and {
@@ -403,14 +420,14 @@ module account_test {
     .then(deliverProposal(Right, 5))
     .expect(and {
       isOpen(replica.get(Right)), replica.get(Right).height == 2, replica.get(Right).tip.locks.get(1).on, clock.get(Right) == 4,
-      nacks.contains(refusalFor(5, 0, "not_expired", 2)), refusals == 4, no_bad_accept, no_orphan, safe
+      nacks.contains(withFloor(refusalFor(5, 0, "not_expired", 2), 5)), refusals == 4, no_bad_accept, no_orphan, safe
     })
     .then(deliverProposal(Right, 3)).then(deliverProposal(Right, 4))
     .expect(and {
-      isOpen(replica.get(Right)), replica.get(Right).height == 2, nacks.contains(refusalFor(3, 0, "stale_attempt", 2)), nacks.contains(refusalFor(4, 0, "stale_attempt", 2)),
+      isOpen(replica.get(Right)), replica.get(Right).height == 2, nacks.contains(withFloor(refusalFor(3, 0, "stale_attempt", 2), 5)), nacks.contains(withFloor(refusalFor(4, 0, "stale_attempt", 2), 5)),
       replica.get(Left).height == 2, replica.get(Left).tip == replica.get(Right).tip, no_bad_accept, no_orphan, safe
     })
-    .then(deliverRefusal(Left, refusalFor(3, 0, "stale_attempt", 2)))        // the answer reaches Left, which has nothing pending: ignored
+    .then(deliverNack(Left, 3))        // the answer reaches Left, which has nothing pending: ignored
     .expect(and { replica.get(Left).refused == [HtlcExpire({ id: 1 })], replica.get(Left).mempool == [], isOpen(replica.get(Left)), no_tx_lost })
 
   // (e) A frame below the mark is answered, with the mark (stale_attempt): the proposer moves its attempt to max(own, mark) + 1, keeps every tx (no notice) and the
@@ -419,18 +436,18 @@ module account_test {
   action forgetAttempt(s: Side): bool = all {
     replica' = replica.set(s, { ...replica.get(s), attempt: 0 }),
     frames' = frames, nextFid' = nextFid, proposals' = proposals, acks' = acks, nacks' = nacks, signed' = signed, clock' = clock, firstCommit' = firstCommit,
-    diverged' = diverged, equivocated' = equivocated, rollbacks' = rollbacks, refusals' = refusals, badAccept' = badAccept, badCommit' = badCommit, byz' = byz
+    diverged' = diverged, equivocated' = equivocated, rollbacks' = rollbacks, refusals' = refusals, relBad' = relBad, badAccept' = badAccept, badCommit' = badCommit, byz' = byz
   }
 
   run staleAttemptIsAnsweredWithTheMarkTest = lateExpiry
     .then(deliverRefusal(Left, expireNack))
-    .then(propose(Left)).then(deliverProposal(Right, 4)).then(deliverRefusal(Left, refusalFor(4, 0, "not_expired", 1)))
+    .then(propose(Left)).then(deliverProposal(Right, 4)).then(deliverNack(Left, 4))
     .then(forgetAttempt(Left))
     .then(propose(Left))
     .expect(frames.get(5).attempt == 0)
     .then(deliverProposal(Right, 5))
-    .expect(and { nacks.contains(refusalFor(5, 0, "stale_attempt", 1)), replica.get(Right).mark == Declined({ attempt: 1, index: 0, fault: "not_expired" }), isOpen(replica.get(Right)) })
-    .then(deliverRefusal(Left, refusalFor(5, 0, "stale_attempt", 1)))
+    .expect(and { nacks.contains(withFloor(refusalFor(5, 0, "stale_attempt", 1), 4)), replica.get(Right).mark == Declined({ attempt: 1, index: 0, fault: "not_expired" }), isOpen(replica.get(Right)) })
+    .then(deliverNack(Left, 5))
     .expect(and {
       replica.get(Left).attempt == 2, replica.get(Left).mempool == [HtlcExpire({ id: 1 })], replica.get(Left).refused == [], isOpen(replica.get(Left)), no_tx_lost, safe
     })
@@ -447,7 +464,7 @@ module account_test {
     .then(propose(Right))
     .then(deliverProposal(Left, 2))
     .expect(replica.get(Left).mark == Declined({ attempt: 0, index: 0, fault: "not_expired" }))
-    .then(deliverRefusal(Right, refusalFor(2, 0, "not_expired", 0)))
+    .then(deliverNack(Right, 2))
     .then(enqueueTx(Left, SetCredit({ by: Left, limit: 1 })))
     .then(propose(Left)).then(deliverProposal(Right, 3)).then(ackReceived(Right)).then(deliverAck(Left, 3))
     .expect(and {
@@ -592,6 +609,25 @@ module account_test {
     .then(ackReceived(Right))
     .expect(and { replica.get(Left).height == 1, replica.get(Right).height == 1, replica.get(Left).tip != replica.get(Right).tip, not(diverged), superseded, safe })
 
+  // A12 by rank, the second schedule (found by a longer simulation): a peer acks Right's frame (Left commits it; the ack is lost), its key is then taken, and it REFUSES that
+  // frame: Right drops the lock it names and sends the credit tx again, at a higher nonce, and the peer acks that. Left holds the first frame committed and Right the retry: both
+  // Right-authored. The chain ranks the retry (nonce 2) above the first frame (nonce 1), and Right signed it itself, so it is the frame the chain settles, not a fork. The lock
+  // went to the next hop in a proof Right signed at nonce 1 and that sits below the head now: its notice is released only after that commit.
+  run ackedThenRefusedThenRetryAckedIsSupersededByRankTest = init
+    .then(enqueueTx(Right, HtlcLock({ id: 1, payer: Right, amount: 1, hashlock: hashOf(1), deadline: 4 })))
+    .then(enqueueTx(Right, SetCredit({ by: Right, limit: 3 })))
+    .then(propose(Right)).then(deliverProposal(Left, 1)).then(ackReceived(Left))
+    .then(turnByzantine(Left)).then(byzNack(Left, 1, 0, "bad_state", 0, 0))
+    .then(deliverRefusal(Right, refusalFor(1, 0, "bad_state", 0)))
+    .expect(and { replica.get(Right).kept == [HtlcLock({ id: 1, payer: Right, amount: 1, hashlock: hashOf(1), deadline: 4 })], replica.get(Right).refused == [], no_tx_lost })
+    .then(propose(Right)).then(byzAck(Left, true)).then(deliverAck(Right, 2))
+    .expect(and {
+      replica.get(Left).height == 1, replica.get(Right).height == 1, replica.get(Left).tip != replica.get(Right).tip,
+      proofRank(frames.get(2)) > proofRank(frames.get(1)), not(diverged), superseded, signed_above_head, safe
+    })
+    .then(releaseHold(Right))
+    .expect(and { replica.get(Right).kept == [], replica.get(Right).refused.length() == 1, no_tx_lost, safe })
+
   // #57 sequence (coordinator): a payer co-signs a frame stamped far ahead of every clock, and the payee's held reveal follows. The stamp decides
   // nothing (R-CLOCK): the payee's resolve is judged by its own clock (0 <= deadline 2) and is proposed and would be accepted. The frame's stamp is
   // informational, and a J height a proposer claims is untrusted for the same reason (the model has no J height; A8).
@@ -666,4 +702,330 @@ module account_test {
   run wrongParentIsRefusedTest = init
     .then(turnByzantine(Left)).then(byzPropose(Left, 6, 1)).then(deliverProposal(Right, 1))
     .expect(and { refusals == 1, isOpen(replica.get(Right)), replica.get(Right).height == 0, no_bad_accept, safe })
+
+  // ---- R-PROOF-NONCE-ABOVE-SIGNED (coordinator 10-01; Review A of PR 97, finding 0001) ---------------------------------------------------------
+  // Every committed frame's proof nonce is strictly above every proof nonce either side signed in the epoch, the yielded and refused attempts included,
+  // and no frame commits under a proof the peer holds that outranks it by the chain's order (nonce, then Left over Right at one nonce). The two schedules of
+  // the review, and the third that the guard of the receiver is for. `signed_above_head` states the rule on the signed history; the tests also read the nonces.
+
+  // Right's lock names a deadline Right's view admits and Left's, a tick behind, finds too far ahead (deadline_too_far, retryable): frame 1 at nonce 1 is refused.
+  val farLockR = HtlcLock({ id: 1, payer: Right, amount: 1, hashlock: hashOf(1), deadline: 6 })
+  action rightsFarLockRefused = init
+    .then(tick(Right))
+    .then(enqueueTx(Right, farLockR))
+    .then(propose(Right))
+    .then(deliverProposal(Left, 1))
+    .expect(and { nacks == Set(refusalFor(1, 0, "deadline_too_far", 0)), replica.get(Left).hi == 1, replica.get(Left).sig == 0, signed_above_head, safe })
+
+  // (a) Right YIELDS at attempt 1 to Left's first frame. Left refused attempt 0 (so it has seen the proof at nonce 1) and proposes its own first frame above it, at 2; Right's
+  // retry signs above its own attempt 0, at 2 as well; the frames cross, Left keeps its own and Right yields. Right's yielded proof (2, Right) is held by Left, and
+  // it must rank below the committed (2, Left). With the nonce taken from the committed tip plus the attempt (the old rule) Left's first frame is at 1 and the retry at 2:
+  // the yielded proof outranks the frame that committed, and Left, holding it, starts a dispute with it and reverses Left's payment (mutant `nonce-from-the-committed-tip`).
+  run yieldAtTheRetryLeavesNoHigherProofTest = rightsFarLockRefused
+    .then(enqueueTx(Left, SetCredit({ by: Left, limit: 1 })))
+    .then(propose(Left))                                              // frame 2: Left's first frame, above the refused proof it has seen: nonce 2
+    .then(deliverNack(Right, 1))
+    .then(propose(Right))                                             // frame 3: attempt 1, above Right's own attempt 0: nonce 2
+    .expect(and { frames.get(2).nonce == 2, frames.get(3).nonce == 2, frames.get(3).attempt == 1 })
+    .then(deliverProposal(Left, 3))                                   // Left keeps its own frame
+    .then(deliverProposal(Right, 2))                                  // Right yields to it
+    .expect(and {
+      rollbacks == 1, isReceived(replica.get(Right)),
+      replica.get(Right).mempool == [farLockR], replica.get(Right).kept == [], replica.get(Right).refused == [],    // a yield releases nothing: the lock is still Right's to propose
+      no_tx_lost
+    })
+    .then(ackReceived(Right)).then(deliverAck(Left, 2))
+    .expect(and {
+      replica.get(Left).height == 1, replica.get(Right).height == 1, replica.get(Left).tip == replica.get(Right).tip,
+      proofRank(frames.get(3)) < proofRank(frames.get(2)),                   // the yielded proof is below the committed one: the order the chain applies
+      signed_above_head, no_equivocation, no_release_while_signed_live, safe
+    })
+    .then(tick(Left))                                                  // Left's view reaches the deadline's horizon; Right's lock goes out again and commits above both
+    .then(propose(Right)).then(deliverProposal(Left, 4)).then(ackReceived(Left)).then(deliverAck(Right, 4))
+    .expect(and {
+      frames.get(4).nonce == 3, replica.get(Left).height == 2, replica.get(Right).height == 2, replica.get(Left).tip.locks.get(1).on,
+      replica.get(Right).kept == [], replica.get(Right).refused == [], signed_above_head, safe
+    })
+
+  // (b) Right REFUSES Left's first attempt and then commits its own frame. Left's attempt 0 is a proof (2, Left) that Right holds. Right's own frame, proposed after it has
+  // seen and refused that proof, must be above it: at 3. At 2 (the committed tip plus one: mutant `nonce-ignores-seen-proofs`, and the old rule) it would tie the proof Left
+  // signed, and at one nonce the chain ranks the Left-authored proof above the Right-authored one: Right, holding Left's stale proof, starts a dispute with it and erases
+  // the frame that committed (here a payment Right made to Left).
+  val farLockL = HtlcLock({ id: 1, payer: Left, amount: 1, hashlock: hashOf(1), deadline: 6 })
+  run refuseThenCommitAtTheSameNonceLeavesNoHigherProofTest = init
+    .then(enqueueTx(Right, SetCredit({ by: Right, limit: 2 })))
+    .then(propose(Right)).then(deliverProposal(Left, 1)).then(ackReceived(Left)).then(deliverAck(Right, 1))      // height 1 at nonce 1: Left may owe
+    .then(tick(Left))                                                  // Left's view is a tick ahead of Right's: its lock for deadline 6 is too far for Right
+    .then(enqueueTx(Left, farLockL))
+    .then(propose(Left))                                               // frame 2, nonce 2, Left-authored
+    .then(deliverProposal(Right, 2))
+    .expect(and { nacks == Set(withFloor(refusalFor(2, 0, "deadline_too_far", 0), 1)), replica.get(Right).hi == 2 })    // the floor is what Right held before it saw the frame
+    .then(enqueueTx(Right, Pay({ from: Right, amount: 1 })))
+    .then(propose(Right))                                              // frame 3: above the proof Right has seen Left sign
+    .expect(frames.get(3).nonce == 3)
+    .then(deliverNack(Left, 2))
+    .then(deliverProposal(Left, 3)).then(ackReceived(Left)).then(deliverAck(Right, 3))
+    .expect(and {
+      replica.get(Left).height == 2, replica.get(Right).height == 2, replica.get(Left).tip == replica.get(Right).tip, replica.get(Left).tip.offdelta == 1,
+      proofRank(frames.get(3)) > proofRank(frames.get(2)), replica.get(Left).mempool == [farLockL],
+      signed_above_head, no_equivocation, safe
+    })
+
+  // (b') R-A1 by rank (the kernel's round 2): a collision is won by the higher slot, and at one slot by the Left-authored frame. Left proposes frame 2 at nonce 2; Right refuses it
+  // (it holds a proof at 2 now) and proposes its own frame 3 ABOVE it, at 3, before Left has heard the refusal. Frame 3 reaches Left while Left still has frame 2 in flight: the
+  // higher slot wins even against Left, so Left yields (its lock goes back to its mempool, no notice: its proof at 2 stays signed below the one that commits). Left wins a collision
+  // only at one slot (`collisionLeftWinsTest`). Mutants `collision-won-by-the-lower-slot` and `collision-left-always-wins`.
+  run collisionIsWonByTheHigherSlotTest = init
+    .then(enqueueTx(Right, SetCredit({ by: Right, limit: 2 })))
+    .then(propose(Right)).then(deliverProposal(Left, 1)).then(ackReceived(Left)).then(deliverAck(Right, 1))
+    .then(tick(Left))
+    .then(enqueueTx(Left, farLockL))
+    .then(propose(Left))
+    .then(deliverProposal(Right, 2))
+    .then(enqueueTx(Right, Pay({ from: Right, amount: 1 })))
+    .then(propose(Right))
+    .expect(and { frames.get(2).nonce == 2, frames.get(3).nonce == 3, proofRank(frames.get(3)) > proofRank(frames.get(2)), isProposed(replica.get(Left)) })
+    .then(deliverProposal(Left, 3))
+    .expect(and {
+      rollbacks == 1, isReceived(replica.get(Left)), replica.get(Left).mempool == [farLockL], replica.get(Left).kept == [], replica.get(Left).refused == [],
+      sigLockRanks(replica.get(Left)) == [5], isProposed(replica.get(Right)), no_tx_lost, signed_above_head, safe
+    })
+    .then(ackReceived(Left)).then(deliverAck(Right, 3))
+    .then(deliverNack(Left, 2))                                       // the refusal of the yielded frame arrives: nothing is in flight, ignored
+    .expect(and {
+      replica.get(Left).height == 2, replica.get(Right).height == 2, replica.get(Left).tip == replica.get(Right).tip, replica.get(Left).tip.offdelta == 1,
+      replica.get(Left).mempool == [farLockL], replica.get(Left).refused == [], sigLockRanks(replica.get(Left)) == [],
+      no_tx_lost, signed_above_head, no_equivocation, safe
+    })
+
+  // (c) The same collision with both frames in flight (Right proposed before it saw Left's). Right refuses Left's frame and keeps its own at nonce 2; Left, Open again after the
+  // refusal, holds its own proof (2, Left) and is asked to ack Right's (2, Right): it must not, or Right's committed frame is outranked by a proof Right holds
+  // (mutant `acker-ignores-its-own-signed-proofs`). It answers `nonce_low` with its `hi`, and Right signs again above it: `rightKeepsItsFrameWhenItRefusesLeftsTest` is this schedule
+  // with an expiry for Left's frame. Here the proof the acker signed is the one of a refused lock.
+  run ackerRefusesAProofBelowTheOneItSignedTest = init
+    .then(enqueueTx(Right, SetCredit({ by: Right, limit: 2 })))
+    .then(propose(Right)).then(deliverProposal(Left, 1)).then(ackReceived(Left)).then(deliverAck(Right, 1))
+    .then(tick(Left))
+    .then(enqueueTx(Left, farLockL)).then(enqueueTx(Right, Pay({ from: Right, amount: 1 })))
+    .then(propose(Left)).then(propose(Right))                          // frames 2 (Left, nonce 2) and 3 (Right, nonce 2): both at nonce 2
+    .then(deliverProposal(Right, 2))                                   // Right refuses Left's lock and keeps its own frame
+    .then(deliverProposal(Left, 3))                                    // Left, still Proposed, keeps its own
+    .then(deliverNack(Left, 2))
+    .then(deliverProposal(Left, 3))                                    // Left is Open: (2, Right) is below the (2, Left) it signed
+    .expect(and { nacks.contains(nonceLow(3, 2)), replica.get(Left).height == 1, isOpen(replica.get(Left)), signed_above_head, safe })
+    .then(deliverRefusal(Right, nonceLow(3, 2)))
+    .then(propose(Right))
+    .expect(and { frames.get(4).nonce == 3, frames.get(4).attempt == 1 })
+    .then(deliverProposal(Left, 4)).then(ackReceived(Left)).then(deliverAck(Right, 4))
+    .expect(and {
+      replica.get(Left).height == 2, replica.get(Right).height == 2, replica.get(Left).tip == replica.get(Right).tip,
+      replica.get(Right).refused == [], replica.get(Right).mempool == [], proofRank(frames.get(4)) > proofRank(frames.get(2)), signed_above_head, no_tx_lost, safe
+    })
+
+  // A `nonce_low` answer costs the proposer no tx whatever its budget, and teaches it the receiver's floor. A floor more than one above what the proposer knows signed is more than an
+  // honest peer could hold (its own latest proof, which the proposer has not seen, and nothing more): the refusal is refused, the frame stays in flight, and a Byzantine receiver can
+  // neither burn the counter nor make the proposer drop a tx by it (R-PROOF-NONCE-ABOVE-SIGNED, the reachable bound).
+  run nonceLowCostsNoTxTest = init.expect({
+    val a = SetCredit({ by: Left, limit: 1 })
+    val f = { ...NO_FRAME, txs: [a] }
+    val pend = { ...EMPTY_REPLICA, status: Proposed(1), attempt: MAX_ATTEMPT, hi: 2, sig: 5 }
+    val r = onRefusal(pend, nonceLow(1, 3), f)
+    val burn = onRefusal(pend, nonceLow(1, 4), f)
+    val burnAny = onRefusal(pend, withFloor(refusalFor(1, 0, "bad_state", 0), 99), f)
+    and {
+      r.mempool == [a], r.refused == [], r.kept == [], isOpen(r), r.hi == 3,
+      burn == pend, burnAny == pend,                                              // out of reach: ignored, whatever the fault
+      onRefusal(pend, refusalFor(1, 0, "bad_state", 0), f).mempool == []         // any other fault past the budget still drops the tx
+    }
+  })
+
+  // Every refusal carries the refuser's signed floor (the kernel's round 2): a receiver holding `hi` 4 answers with 4 whatever the frame is refused for (a tx that does not apply,
+  // a stale attempt, a proof below its own), and the proposer's retry is signed above it. A refusal with no floor leaves the proposer to sign at a slot the refuser holds a proof at.
+  run everyRefusalCarriesTheFloorTest = init.expect({
+    val rep = { ...EMPTY_REPLICA, hi: 4, sig: 3 }
+    val frame = { ...NO_FRAME, height: 1, nonce: 5, author: Left, txs: [Pay({ from: Left, amount: 1 })] }       // Left pays with no credit: refused
+    val o = judge(rep, 0, Right, 1, frame)
+    val stale = judge({ ...rep, mark: Declined({ attempt: 2, index: 0, fault: "bad_state" }) }, 0, Right, 1, { ...frame, attempt: 1 })
+    val low = judge({ ...rep, sig: 99 }, 0, Right, 1, frame)
+    val pend = { ...EMPTY_REPLICA, status: Proposed(1), attempt: 0, hi: 3 }
+    val back = onRefusal(pend, o.say, frame)
+    and {
+      o.refused, o.say.fault != "", o.say.hi == 4,
+      stale.say.fault == "stale_attempt", stale.say.hi == 4,
+      low.say.fault == "nonce_low", low.say.hi == 4,
+      back.hi == 4, frameToPropose({ ...back, mempool: [] }, 0, Left, 0).nonce == 5     // the retry is above the refuser's floor
+    }
+  })
+
+
+  // The rank, not the nonce alone, is what a receiver compares: at one nonce the Left-authored proof outranks the Right-authored one, so a Left frame may follow a Right proof
+  // the receiver signed at that nonce, and the other way round it may not.
+  run receiverComparesRanksTest = init.expect({
+    val f = { ...NO_FRAME, height: 1, nonce: 2, author: Left, txs: [SetCredit({ by: Left, limit: 1 })], after: { ...GENESIS, limitRight: 1 } }
+    val rightSigned = { ...EMPTY_REPLICA, hi: 2, sig: 4 }                           // the receiver signed (2, Right)
+    val leftSigned = { ...EMPTY_REPLICA, hi: 2, sig: 5 }                            // it signed (2, Left)
+    and {
+      acceptable(rightSigned, 0, f, Right),                                          // (2, Left) is above (2, Right)
+      not(acceptable(leftSigned, 0, f, Right)),                                      // but not above itself
+      not(acceptable(leftSigned, 0, { ...f, author: Right }, Left)),                 // and (2, Right) is never above (2, Left)
+      not(acceptable({ ...EMPTY_REPLICA, hi: 3, sig: 7 }, 0, f, Right))              // a lower nonce is refused whoever authored it
+    }
+  })
+
+  // The window is one above the highest nonce the receiver knows signed: a proof at hi + 2 leaps, at hi + 1 it is next.
+  run windowIsOneAboveWhatTheReceiverKnowsTest = init.expect({
+    val f = { ...NO_FRAME, height: 1, nonce: 3, author: Left, txs: [SetCredit({ by: Left, limit: 1 })], after: { ...GENESIS, limitRight: 1 } }
+    and {
+      inLine({ ...EMPTY_REPLICA, hi: 2 }, f, Right),
+      not(inLine({ ...EMPTY_REPLICA, hi: 1 }, f, Right)),
+      inLine({ ...EMPTY_REPLICA, hi: 3 }, { ...f, nonce: 3 }, Right)
+    }
+  })
+
+  // The proposer's next nonce is one above the highest it knows signed, its own and the peer's it has seen, and never from the tip alone.
+  run proposerSignsAboveEverythingItKnowsTest = init.expect({
+    val r = { ...EMPTY_REPLICA, pnonce: 1, hi: 4, mempool: [SetCredit({ by: Left, limit: 1 })] }
+    and { frameToPropose(r, 0, Left, 0).nonce == 5, frameToPropose({ ...r, hi: 0 }, 0, Left, 0).nonce == 2 }
+  })
+
+  // The receiver learns the nonce of a frame that is next in line, held, refused or ignored in a collision: the peer signed it.
+  run seenProofsRaiseTheKnownNonceTest = init.expect({
+    val f = { ...NO_FRAME, height: 1, nonce: 1, author: Right, txs: [HtlcExpire({ id: 1 })], after: GENESIS }                     // an expiry of no lock: refused
+    val seen = onPropose(EMPTY_REPLICA, 0, Left, 1, f, NO_FRAME)
+    val stale = onPropose({ ...EMPTY_REPLICA, height: 1, lastFid: 7 }, 0, Left, 1, f, NO_FRAME)                                 // not next in line: not learned
+    and { seen.refused, seen.r.hi == 1, stale.r.hi == 0 }
+  })
+
+  // ---- R-SIGNED-IS-LIVE (coordinator 10-01, narrows R-REFUSED-RELEASES-PAYER) ------------------------------------------------------------------------------
+  // Anything a side has signed stays enforceable against it until a higher-nonce frame commits: its peer holds the proof and can start a dispute with it (chain.qnt: a start
+  // needs a proof signed by the other party, and nothing else; compose.qnt `refusedProofWithTheLockIsEnforcedOnTheChainTest` plays that). So a refusal or a yield does not
+  // release the payer's hold, nor the hold above it (the Entity's upstream lock), for a lock that sits in such a proof: the notice waits (`kept`) until the proof is
+  // superseded or the deadline plus the reserve has passed. `no_release_while_signed_live` states it on the signed history at the moment a notice is given.
+
+  val lockD1 = HtlcLock({ id: 1, payer: Left, amount: 1, hashlock: hashOf(1), deadline: 1 })
+  // Left's frame 2 carries a credit tx and a lock whose deadline is not after Right's view (deadline_past, not retryable): refused, the lock dropped. Frame 2 is signed by Left.
+  action lockRefused = init
+    .then(enqueueTx(Right, SetCredit({ by: Right, limit: 2 })))
+    .then(propose(Right)).then(deliverProposal(Left, 1)).then(ackReceived(Left)).then(deliverAck(Right, 1))
+    .then(tick(Right))
+    .then(enqueueTx(Left, SetCredit({ by: Left, limit: 1 })))
+    .then(enqueueTx(Left, lockD1))
+    .then(propose(Left))
+    .then(deliverProposal(Right, 2))
+    .then(deliverNack(Left, 2))
+
+  // The refusal does not release: the notice is kept, the release is not enabled, and the ghost says no lock was released over a live proof.
+  run refusalDoesNotReleaseTheHoldTest = lockRefused
+    .expect(and {
+      replica.get(Left).kept == [lockD1], replica.get(Left).refused == [], isOpen(replica.get(Left)), no_tx_lost,
+      sigLockRanks(replica.get(Left)) == [5], not(relBad), no_release_while_signed_live, safe
+    })
+    .then(releaseHold(Left)).fail()
+
+  pure def sigLockRanks(r: Replica): List[int] = r.sigLocks.foldl([], (acc, e) => acc.append(e.rank))
+
+  // ... and a frame above it commits: the proof is superseded (Left's frame 3 is at nonce 3, above frame 2's proof at 2), the release is enabled, and the notice is given.
+  run supersessionReleasesTheHoldTest = lockRefused
+    .then(propose(Left)).then(deliverProposal(Right, 3)).then(ackReceived(Right)).then(deliverAck(Left, 3))
+    .expect(and { replica.get(Left).height == 2, frames.get(3).nonce == 3, replica.get(Left).kept == [lockD1], sigLockRanks(replica.get(Left)) == [], no_release_while_signed_live })
+    .then(releaseHold(Left))
+    .expect(and { replica.get(Left).kept == [], replica.get(Left).refused == [lockD1], no_tx_lost, not(relBad), safe })
+
+  // Or the deadline and the reserve pass on the releasing side's own clock: the lock (deadline 1) can no longer be paid by a secret revealed in time, so the proof holds
+  // nothing worth keeping a hold for. At its clock 2 (= deadline + reserve) the hold is still kept; at 3 it is released, with no frame above it.
+  run releaseWaitsForTheDeadlineAndTheReserveTest = lockRefused
+    .then(tick(Left)).then(tick(Left))
+    .expect(and { clock.get(Left) == 2, not(releasable(replica.get(Left), clock.get(Left), lockD1)), isOpen(replica.get(Left)) })
+    .then(tick(Right)).then(tick(Left))
+    .expect(and { clock.get(Left) == 3, releasable(replica.get(Left), clock.get(Left), lockD1) })
+    .then(releaseHold(Left))
+    .expect(and { replica.get(Left).refused == [lockD1], replica.get(Left).kept == [], isOpen(replica.get(Left)), replica.get(Left).height == 1, not(relBad), no_tx_lost, safe })
+
+  // Only a lock held by a signed proof waits: every other tx is released at once (nothing signed holds it), and so is a lock that was never signed.
+  run onlyALockInASignedProofWaitsTest = init.expect({
+    val lock = lockD1
+    val r = { ...EMPTY_REPLICA, sigLocks: [{ tx: lock, rank: 5 }] }
+    val pay = Pay({ from: Left, amount: 1 })
+    val a = withNotice(r, [pay, lock])
+    val b = withNotice(EMPTY_REPLICA, [lock])
+    and {
+      a.refused == [pay], a.kept == [lock],
+      b.refused == [lock], b.kept == [],
+      not(releasable(r, 2, lock)), releasable(r, 3, lock), releasable({ ...r, sigLocks: [] }, 0, lock), releasable(r, 0, pay)
+    }
+  })
+
+  // A commit supersedes the proofs below its rank and no others: a lock in a proof at rank 5 survives a commit at rank 4 and goes with one at rank 6; the commit's own proof
+  // is the committed state, not a live proof.
+  run commitSupersedesOnlyLowerRanksTest = init.expect({
+    val r = { ...EMPTY_REPLICA, sigLocks: [{ tx: lockD1, rank: 5 }] }
+    val low = { ...NO_FRAME, height: 1, nonce: 2, author: Right }               // rank 4
+    val same = { ...NO_FRAME, height: 1, nonce: 2, author: Left }               // rank 5: the proof itself committed
+    val high = { ...NO_FRAME, height: 1, nonce: 3, author: Right }              // rank 6
+    and {
+      commit(r, Left, 1, low).sigLocks.length() == 1,
+      commit(r, Left, 1, same).sigLocks.length() == 0,
+      commit(r, Left, 1, high).sigLocks.length() == 0,
+      commit(r, Left, 1, high).sig == 6, commit(r, Left, 1, high).hi == 3
+    }
+  })
+
+  // ---- R-COSIGN-FREEZE: after a side co-signs a settlement (or a reserve-to-collateral) it proposes nothing and refuses every peer frame, until the operation is over -------------
+
+  // Both sides hold credit for each other, at height 2 with offdelta 0. Left co-signs a fold (offdelta 0 at height 2). Right's payment is refused with the retryable `frozen` (the
+  // fold Left signed stands for the head: a frame that moved the offdelta would leave the chain a different balance than the Account), costs Right no tx, and goes through once
+  // Left is released. A Left that took the frame would have a head whose offdelta is not the fold's (`cosign_fold_holds`; mutant `frozen-side-accepts-the-peer-frame`).
+  action bothHoldCredit = init
+    .then(enqueueTx(Right, SetCredit({ by: Right, limit: 2 })))
+    .then(propose(Right)).then(deliverProposal(Left, 1)).then(ackReceived(Left)).then(deliverAck(Right, 1))
+    .then(enqueueTx(Left, SetCredit({ by: Left, limit: 2 })))
+    .then(propose(Left)).then(deliverProposal(Right, 2)).then(ackReceived(Right)).then(deliverAck(Left, 2))
+  run cosignRefusesPeerFramesUntilReleasedTest = bothHoldCredit
+    .then(cosign(Left))
+    .expect(and { replica.get(Left).frozen, replica.get(Left).foldH == 2, replica.get(Left).fold == 0, cosign_fold_holds, safe })
+    .then(enqueueTx(Right, Pay({ from: Right, amount: 1 })))
+    .then(propose(Right)).then(deliverProposal(Left, 3))
+    .expect(and {
+      nacks.exists(x => x.fault == "frozen" and x.fid == 3), isOpen(replica.get(Left)), replica.get(Left).height == 2, replica.get(Left).tip.offdelta == 0,
+      refusals == 1, cosign_fold_holds, no_bad_accept, safe
+    })
+    .then(deliverNack(Right, 3))
+    .expect(and { isOpen(replica.get(Right)), replica.get(Right).mempool == [Pay({ from: Right, amount: 1 })], replica.get(Right).refused == [], replica.get(Right).attempt == 1, no_tx_lost, safe })
+    .then(thaw(Left))
+    .then(propose(Right)).then(deliverProposal(Left, 4)).then(ackReceived(Left)).then(deliverAck(Right, 4))
+    .expect(and {
+      replica.get(Left).height == 3, replica.get(Right).height == 3, replica.get(Left).tip == replica.get(Right).tip, replica.get(Left).tip.offdelta != 0,
+      not(replica.get(Left).frozen), replica.get(Right).refused == [], no_tx_lost, safe
+    })
+
+  // The other way: a frozen side proposes nothing, whatever it has queued.
+  run frozenSideProposesNothingTest = bothHoldCredit
+    .then(cosign(Left))
+    .then(enqueueTx(Left, Pay({ from: Left, amount: 1 })))
+    .then(propose(Left)).fail()
+
+  // One frame in flight per Account: a side with a frame proposed and unanswered proposes nothing more, whatever it has queued. A second proposal at the
+  // same height would sign a second, different proof for the one nonce (P4; mutant `propose-while-in-flight`).
+  run noSecondProposalWhileOneIsInFlightTest = bothHoldCredit
+    .then(enqueueTx(Left, Pay({ from: Left, amount: 1 })))
+    .then(propose(Left))
+    .then(enqueueTx(Left, Pay({ from: Left, amount: 1 })))
+    .then(propose(Left)).fail()
+
+  // A proposer never skips a proof nonce on its own (MAX_NONCE_GAP = 0, N1, A18): the first frame of an Account signs at nonce 1, whatever the schedule draws
+  // (mutants `proposer-may-skip-nonces`, `proposer-may-skip-nonces-seen-by-agreed`).
+  run firstFrameSignsAtNonceOneTest = bothHoldCredit
+    .then(enqueueTx(Left, Pay({ from: Left, amount: 1 })))
+    .then(propose(Left))
+    .expect(frames.get(1).nonce == 1)
+
+  // A fold is co-signed at a head with nothing in flight: not with a frame proposed, not with one held (the frame would commit after the fold was signed).
+  run cosignRefusedWhileAFrameIsInFlightTest = bothHoldCredit
+    .then(enqueueTx(Left, Pay({ from: Left, amount: 1 })))
+    .then(propose(Left))
+    .then(cosign(Left)).fail()
+  run cosignRefusedWhileAFrameIsHeldTest = bothHoldCredit
+    .then(enqueueTx(Right, Pay({ from: Right, amount: 1 })))
+    .then(propose(Right)).then(deliverProposal(Left, 3))
+    .then(cosign(Left)).fail()
 }

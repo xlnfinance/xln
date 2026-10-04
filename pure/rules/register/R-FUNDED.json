@@ -1,10 +1,10 @@
 {
  "id": "R-FUNDED",
- "statement": "The planner signs a reserve payment only if the reserve covers it, always; oldest first, skipping one that does not fit.",
+ "statement": "The planner signs a reserve payment only if the reserve covers it, always; oldest first, skipping one that does not fit. The Quint cell holds the cover half: a payment is not signed when the reserve does not cover it (unfunded-payment-is-signed); the oldest-first order and the skipping of one that does not fit carry no id there.",
  "source": "contracts-decisions.md (memory, #62)",
  "layers": {
   "arrival": "hold",
-  "quint": "owed: spec thread, new Quint branch",
+  "quint": "hold",
   "contract": "n/a: a planner choice made before signing; the chain's debt handling is R2C-DEBT-FIRST",
   "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
   "ts": "hold"

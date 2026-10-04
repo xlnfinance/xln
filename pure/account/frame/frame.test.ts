@@ -37,6 +37,10 @@ const credited = (() => {
   return { left: accepted.replica, right: committed.replica };
 })();
 
+/** The frame every name test starts from: Left's first frame on the genesis head, in the fixture's epoch. */
+const FIRST = { author: "left" as const, parent: GENESIS, attempt: 0, slot: 2,
+  epoch: signing.ondeltaEpoch, firstNonce: signing.firstNonce };
+
 describe("account/frame the round", () => {
   test("a proposed frame commits on the peer, then on the proposer when the ack comes back", () => {
     const sent = proposing(credited.left, pay(30n));
@@ -58,14 +62,25 @@ describe("account/frame the round", () => {
     expect(propose(rules, queue(sent.replica, pay(2n))).sent).toEqual([]);
   });
 
+  test("R-LOCK-ROUTE a lock's route is in the frame's name: a different route, or none, is a different frame", () => {
+    const lock = (route?: readonly string[]): AccountTx => ({
+      _tag: "lock", token: GOLD, hold: holdOf("left", 5n, 1n, 105n, 1), ...(route === undefined ? {} : { route }),
+    });
+    const named = (route?: readonly string[]) => frameName({ ...FIRST, txs: [lock(route)] });
+    expect(named(["0x01"])).toBe(named(["0x01"]));
+    expect(named(["0x01"])).not.toBe(named(["0x02"]));
+    expect(named(["0x01"])).not.toBe(named(["0x01", "0x02"]));
+    expect(named(["0x01"])).not.toBe(named());
+  });
+
   test("a frame is named by its parent and its txs: equal frames agree and any difference changes the name", () => {
-    const f = { author: "left" as const, parent: GENESIS, attempt: 0, slot: 2, txs: [pay(1n)] };
+    const f = { ...FIRST, txs: [pay(1n)] };
     expect(frameName({ ...f })).toBe(frameName(f));
     expect(frameName({ ...f, txs: [pay(2n)] })).not.toBe(frameName(f));
     expect(frameName({ ...f, txs: [pay(1n), pay(1n)] })).not.toBe(frameName(f));
     expect(frameName({ ...f, parent: frameName(f) })).not.toBe(frameName(f));
     expect(frameName({ ...f, author: "right" })).not.toBe(frameName(f));
-    const odd = { author: "left" as const, parent: GENESIS, attempt: 0, slot: 2, txs: [pay(-1n)] };
+    const odd = { ...FIRST, txs: [pay(-1n)] };
     expect(frameName(odd)).toMatch(/^0x[0-9a-f]{64}$/);
     expect(frameName({ ...f, attempt: 1 })).not.toBe(frameName(f));
     expect(frameName({ ...f, slot: 4 })).not.toBe(frameName(f));
@@ -210,7 +225,7 @@ describe("account/frame a frame has an author", () => {
 
 describe("account/frame an empty frame", () => {
   test("R-NOTICE a frame with no txs is refused and moves nothing: the peer cannot spin the height", () => {
-    const emptied = { author: "left" as const, parent: GENESIS, attempt: 0, slot: 2, txs: [] };
+    const emptied = { ...FIRST, txs: [] };
     const empty: Msg<AccountTx> = { _tag: "frame", frame: emptied };
     const heard = receive(rules, emptyReplica("right"), empty);
     expect(heard.outcome).toEqual({ _tag: "refused_empty" });
@@ -235,7 +250,8 @@ describe("account/frame a peer cannot halt a replica", () => {
     const fault = "not_expired";
     if (kind === 1) return { _tag: "refusal", hash: parent, index: pick(i, 6, 3), fault, mark: 0, floor: 0 };
     const slot = target.used + 1 + pick(i, 8, 3);
-    return { _tag: "frame", frame: { author, parent, attempt: pick(i, 7, 3), slot, txs } };
+    const { ondeltaEpoch: epoch, firstNonce } = signing;
+    return { _tag: "frame", frame: { author, parent, attempt: pick(i, 7, 3), slot, epoch, firstNonce, txs } };
   };
 
   test("R-X1 whatever a peer sends is answered with a replica, and a refusal changes nothing", () => {
@@ -350,7 +366,7 @@ describe("account/frame the name of a frame covers every field", () => {
     { _tag: "expire", token: OIL, id: holdId(1n) },
   ];
   const name = (...txs: readonly AccountTx[]) =>
-    frameName({ author: "left", parent: GENESIS, attempt: 0, slot: 2, txs });
+    frameName({ ...FIRST, txs });
 
   test("every single-tx frame has its own name", () => {
     expect(new Set(variants.map((tx) => name(tx))).size).toBe(variants.length);
@@ -406,7 +422,7 @@ describe("account/frame what the second review's mutants found", () => {
       [expire(GOLD, 1n), expire(GOLD, 2n)],
       [expire(GOLD, 1n), expire(GOLD2, 1n)],
     ];
-    const named = (tx: AccountTx) => frameName({ author: "left", parent: GENESIS, attempt: 0, slot: 2, txs: [tx] });
+    const named = (tx: AccountTx) => frameName({ ...FIRST, txs: [tx] });
     pairs.forEach(([a, b]) => expect(named(a)).not.toBe(named(b)));
   });
 });
@@ -777,5 +793,38 @@ describe("account/frame what Review B of PR 85 found in round 2", () => {
     const quiet = [accepted.replica, rightDone.replica].map((x) => [x.pending, x.mempool]);
     expect(quiet).toEqual([[undefined, []], [undefined, []]]);
     expect(accepted.replica.head).toBe(rightDone.replica.head);
+  });
+});
+
+describe("account/frame R-DISPUTE-FREEZE a frame the chain paid by is not sent back with its txs", () => {
+  const paidOf = (r: AccountReplica): AccountReplica =>
+    ({ ...r, pending: { ...(r.pending ?? expect.unreachable("no pending frame")), owed: [] } });
+  const sentLeft = proposing(credited.left, pay(10n));
+  const sentRight = proposing(credited.right, credit(500n));
+  const refusal = (r: AccountReplica): Msg<AccountTx> => ({
+    _tag: "refusal", hash: frameName(r.pending?.frame ?? expect.unreachable("no pending frame")), index: 0,
+    fault: STALE_ATTEMPT, mark: 0, floor: 0,
+  });
+
+  test("R-DISPUTE-FREEZE a refusal rolls a frame back with its txs, none of them when the chain paid by it", () => {
+    const back = receive(rules, sentLeft.replica, refusal(sentLeft.replica));
+    expect([back.replica.pending, back.replica.mempool]).toStrictEqual([undefined, [pay(10n)]]);
+    const paid = paidOf(sentLeft.replica);
+    const gone = receive(rules, paid, refusal(paid));
+    expect([gone.outcome._tag, gone.replica.pending, gone.replica.mempool])
+      .toStrictEqual(["rolled_back", undefined, []]);
+  });
+
+  test("R-DISPUTE-FREEZE a rollback of a part-paid frame gives back only the txs the chain did not pay", () => {
+    const pending = sentLeft.replica.pending ?? expect.unreachable("no pending");
+    const part = { ...sentLeft.replica, pending: { ...pending, owed: [pay(3n)] } };
+    const back = receive(rules, part, refusal(part));
+    expect([back.replica.pending, back.replica.mempool]).toStrictEqual([undefined, [pay(3n)]]);
+  });
+
+  test("R-DISPUTE-FREEZE the peer's frame committed over a paid pending frame takes none of its txs back", () => {
+    const over = receive(rules, paidOf(sentRight.replica), only(sentLeft.sent));
+    expect([over.outcome._tag, over.replica.pending, over.replica.mempool])
+      .toStrictEqual(["accepted_over_own", undefined, []]);
   });
 });

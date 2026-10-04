@@ -1,0 +1,59 @@
+{
+ "id": "R-DISPUTE-START",
+ "statement": "The `dispute` command starts a dispute with the peer from the newest head the peer signed that the Account committed: the Entity asks the chain (`dispute_start`) for everything the chain's dispute start holds, and the Host turns the ask into the op with no signature of its own to add. The ask carries the peer, the nonce the head was signed at (first nonce plus slot minus one), the epoch, who authored the head (`proposerIsLeft`), the proof body of the committed state (not of a frame still pending) and the peer's signature over the head. The digest the chain computes from those fields is the head, so the signature the Entity holds is the one the chain verifies. With no Account, no committed frame, or a state that cannot be signed as a proof, nothing is asked and the owner is told (`no_proof`, `no_account`). The WAL row names every field: a replay with another peer, nonce, epoch, author, signature or body diverges. Not here: the finalize after the window (R-DISPUTE-FINALIZE), the counter by the non-starter (R-DISPUTE-WATCH status), and a reaction to the chain refusing a start.",
+ "source": "coordinator 10-02 (S8 forced dispute through the node, step 2 of plan/s8-dispute-design.md)",
+ "layers": {
+  "arrival": "n/a: the Arrival page models the Account's frames; a dispute start is an Entity and Host rule",
+  "quint": "n/a: the Quint model has the chain's dispute cells (start-requires-both-signatures), not the Entity's command",
+  "contract": "n/a: the chain verifies the start's Hanko over the digest this ask is built to equal; the e2e dispute step starts one through the node",
+  "rig": "n/a: an off-chain Entity and Host rule",
+  "ts": "hold"
+ },
+ "killers": [
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "the start carries the nonce, epoch, author, body and the peer's own signature, from either side"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "the digest the chain computes from the start's fields is the head the peer signed"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "the Host's op is the chain's dispute start with the same fields and its own hash of the body"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "with no Account, or no committed frame, or a frame still pending, there is nothing to start with"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "a frame pending on top of the committed head leaves the dispute on the committed one"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DURABLE a WAL whose dispute start carries another proof body does not replay"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "entity/signing R-DISPUTE-START a dispute starts from the peer's signature over the committed head"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DURABLE a WAL whose dispute start names another peer, nonce, epoch, author or sig does not replay"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "a state the chain would refuse as a proof starts nothing, and the owner is told it cannot be signed"
+  }
+ ]
+}

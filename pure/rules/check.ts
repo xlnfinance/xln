@@ -3,7 +3,7 @@
 //   --who <id>               list the names that carry an id, per layer
 //   --names-json             dump every name the scanners read, as JSON (to write or audit register rows)
 //   --layer-root <l>=<dir>   read layer l from another checkout (project the matrix onto a spec branch)
-//   --base <ref>             the ref the register may only grow from (default origin/main)
+//   --base <ref>             the ref the register may only grow from (default: the target branch of a pull request run, the replaced tip of a push run, else origin/main)
 //   --register-only          run only the register gate
 //   --style-only             run only the style gate of the new tree (kernel/, chain/), see rules/tree/gate.ts
 //   --width-only             run only folder width (rules/checks/folder-width.ts)
@@ -13,6 +13,7 @@
 //   --contracts-only         run only the contracts/ BrowserVM and deploy-gate tests (rules/checks/contracts/contracts-vm.ts): rebuild, typechain-types unchanged, one test file per process
 //   --bun-only               run only the Bun version check (rules/checks/bun/bun-version.ts)
 //   --findings-only          run only the known-findings ratchet (diff/findings/check.ts)
+//   --serial                 with no --X-only flag: run the Foundry suite and the contracts/ tests one after the other, in this process (the default runs each in a child of its own, side by side with the quick parts)
 // Runs the register gate, the style gate of the new tree, folder width (rules/checks/folder-width.ts), contract-test
 // placement (rules/checks/contract-tests.ts), test timeouts (rules/checks/timeouts/heavy-timeouts.ts), the Foundry suite (rules/checks/forge.ts), the contracts/ BrowserVM and deploy-gate tests (rules/checks/contracts/contracts-vm.ts), the Bun version
 // (rules/checks/bun/bun-version.ts) and the known-findings ratchet of the rig (diff/findings/check.ts): one command, one exit code. The Bun
@@ -23,7 +24,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { evaluate } from "./evaluate.ts";
 import { carries } from "./names/names.ts";
 import { LAYERS, type Layer } from "./model.ts";
-import { readBase } from "./base.ts";
+import { commitExists, defaultBase, readBase } from "./base.ts";
 import { readRegisterFolder } from "./layout/store.ts";
 import { ratchet } from "./ratchet.ts";
 import { renderMarkdown, renderText } from "./render.ts";
@@ -79,8 +80,8 @@ const runForgeSuite = (): boolean => {
   return !report.failed;
 };
 
-const runContractsVm = (): boolean => {
-  const report = contractsReport(repoRoot);
+const runContractsVm = async (): Promise<boolean> => {
+  const report = await contractsReport(repoRoot);
   report.lines.forEach((line) => console.log(line));
   return !report.failed;
 };
@@ -88,9 +89,12 @@ const runContractsVm = (): boolean => {
 const flagValues = (flag: string): readonly string[] =>
   args.flatMap((arg, index) => (arg === flag ? [args[index + 1] ?? ""] : []));
 
+// The ref the register and the findings registry may only grow from: --base, else the target of the pull request or the tip a push replaced (see defaultBase).
+const baseRef = (): string => flagValues("--base")[0] ?? defaultBase(process.env, (sha) => commitExists(repoRoot, sha));
+
 // The rig's registry of known findings may only shrink; its own script holds the rules (diff/findings/check.ts) and its output is ours.
 const runFindings = (): boolean => {
-  const child = Bun.spawnSync([process.execPath, `${here}/../diff/findings/check.ts`, "--base", flagValues("--base")[0] ?? "origin/main"], { cwd: `${here}/..` });
+  const child = Bun.spawnSync([process.execPath, `${here}/../diff/findings/check.ts`, "--base", baseRef()], { cwd: `${here}/..` });
   process.stdout.write(child.stdout);
   process.stderr.write(child.stderr);
   return child.exitCode === 0;
@@ -131,7 +135,7 @@ const runRegister = (): boolean => {
     process.exit(0);
   }
 
-  const base = readBase(repoRoot, flagValues("--base")[0] ?? "origin/main");
+  const base = readBase(repoRoot, baseRef());
   if (!base.ok) {
     console.error(`FAIL ${base.error.detail}`);
     process.exit(1);
@@ -146,8 +150,42 @@ const runRegister = (): boolean => {
 
 const selection = selectionOf(args);
 
+// The two slow parts (the Foundry suite and the contracts/ tests, minutes each) of the whole gate run in children of this process, started
+// first and side by side with the quick parts here, so the command takes about as long as the slowest of them and not their sum. Each child
+// is this command with its --X-only flag, so what it checks and how it fails is the part's own; this process prints the children's lines after
+// the quick parts (in the order the parts have always run) and takes their exit codes. --serial runs them in this process as before.
+const SLOW_PARTS: readonly Part[] = ["forge", "contracts"];
+const inChildren = selection.only === undefined && !selection.matrixOnly && !args.includes("--serial");
+
+type Child = Readonly<{ part: Part; pid: number; finished: Promise<readonly [string, string, number]> }>;
+
+// A child is its own process group (detached): the part it runs starts processes of its own (a test run per file, the Foundry suite), and
+// ending this command before the part is done must end all of them, not leave minutes of work running with nobody to read it (a query
+// mode such as --who, or a failed argument check, leaves this process while the children run: the processes added up and slowed every test
+// of the checkout, and a test run that waited for them did not end).
+const startChild = (part: Part): Child => {
+  const child = Bun.spawn([process.execPath, `${here}/check.ts`, `--${part}-only`], { cwd: process.cwd(), env: process.env, stdout: "pipe", stderr: "pipe", detached: true });
+  return { part, pid: child.pid, finished: Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited]) };
+};
+
+const children: readonly Child[] = inChildren ? SLOW_PARTS.map(startChild) : [];
+
+// Whatever way this process ends, a child that is still running ends with it, with every process of its group; a group that has ended is no error.
+process.on("exit", () => {
+  children.forEach(({ pid }) => Bun.spawnSync(["kill", "-KILL", "--", `-${pid}`], { stdout: "ignore", stderr: "ignore" }));
+});
+
+const childPasses = async (part: Part): Promise<boolean> => {
+  const child = children.find((each) => each.part === part);
+  if (child === undefined) return true;
+  const [out, err, exitCode] = await child.finished;
+  process.stdout.write(out);
+  process.stderr.write(err);
+  return exitCode === 0;
+};
+
 // One table for every way in; `isWanted` says which parts the command line runs. A part that does not run counts as passed.
-const PARTS: Readonly<Record<Part, () => boolean>> = {
+const PARTS: Readonly<Record<Part, () => boolean | Promise<boolean>>> = {
   register: runRegister,
   style: runStyle,
   width: runFolderWidth,
@@ -158,19 +196,19 @@ const PARTS: Readonly<Record<Part, () => boolean>> = {
   bun: runBun,
   findings: runFindings,
 };
-const passes = (part: Part): boolean => !isWanted(part, selection) || PARTS[part]();
+const passes = async (part: Part): Promise<boolean> => !isWanted(part, selection) || (await PARTS[part]());
 
 // Object properties evaluate in order: bun first, then the quick parts, the Foundry suite and the contracts/ tests last.
 process.exit(
   gateExit({
-    bun: passes("bun"),
-    register: passes("register"),
-    style: passes("style"),
-    width: passes("width"),
-    tests: passes("tests"),
-    timeouts: passes("timeouts"),
-    findings: passes("findings"),
-    forge: passes("forge"),
-    contracts: passes("contracts"),
+    bun: await passes("bun"),
+    register: await passes("register"),
+    style: await passes("style"),
+    width: await passes("width"),
+    tests: await passes("tests"),
+    timeouts: await passes("timeouts"),
+    findings: await passes("findings"),
+    forge: inChildren ? await childPasses("forge") : await passes("forge"),
+    contracts: inChildren ? await childPasses("contracts") : await passes("contracts"),
   }),
 );

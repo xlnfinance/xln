@@ -1,13 +1,13 @@
 {
  "id": "R-LINK-AUTH",
- "statement": "The Host trusts a message's `from` only as the link-authenticated peer: the link authenticates its peer, the content authenticates itself.",
+ "statement": "The Host trusts a message's `from` only as the link-authenticated peer: the link authenticates the peer's Runtime for every message. The content authenticates itself only where it carries a signature: a frame or an ack that commits a head carries its sender's signature over that head, which the Entity checks (R-SIGNED-HEADS-ON-THE-WIRE). A refusal, and a message the Account refuses, carry none: what they say rests on the link alone.",
  "source": "spec/QUESTIONS.md Q-T-5; spec/transport/bugs trust-frame-sender and trust-ack-sender; Review A of 118",
  "layers": {
   "arrival": "owed: spec thread, name the link page's sender-authentication bugs trust-frame-sender and trust-ack-sender under this id",
   "quint": "owed: spec thread, say whether runtime.qnt models a forged sender or n/a with the reason",
   "contract": "n/a: link authentication is off-chain",
   "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
-  "ts": "owed: transport thread, the shell slice (pure/host/shell/): the link binds each message to the peer Entity's key, and a test shows a forged ack with a real frame hash over a wrong-peer link is refused before the Host; host.ts receive only trusts `from`"
+  "ts": "hold"
  },
  "killers": [
   {
@@ -19,6 +19,121 @@
    "kind": "bug",
    "layer": "arrival",
    "name": "trust-ack-sender"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-LINK-AUTH a handshake leaves both Runtimes up, and records open in both directions"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-LINK-AUTH a hello from a Runtime that is not in the table is refused"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-LINK-AUTH an impostor answering for Bob, with another key than the table names, is refused"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-LINK-AUTH a reply of an earlier connection, replayed to this one, is refused"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-LINK-AUTH a reply Bob made for Mallory's connection is refused by Alice: both ids are bound"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-LINK-AUTH a finish by another key, of another connection, or a reply passed off as one, is refused"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-LINK-AUTH a finish made for a connection to Bob is refused by Carol with the same challenge"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-LINK-AUTH a Runtime dialing itself cannot pass its reply off as the finish"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-LINK-AUTH a record before the handshake is done, and a move out of order, are refused"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-LINK-AUTH a record altered in any way is refused: the MAC covers the count and the message"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-LINK-AUTH a record sealed by another Runtime, or turned back on its sender, is refused"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-LINK-AUTH a record heard twice is dropped the second time, and a later record is still heard"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-LINK-AUTH a sealed text that is no message, or is not the peer's to send, is refused"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-LINK-AUTH a key that is not a private key is not a key"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-LINK-AUTH a real frame's ack, sealed by Mallory's session as Bob's, is refused before Host.receive"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-LINK-AUTH the same ack on a session Bob's Runtime proved is delivered, and Alice's head moves"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-LINK-AUTH a frame heard twice in one session, as one record and as two, changes the Account once"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-LINK-AUTH a private file with the secret as hex gives the key, whatever the prefix or newline"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-LINK-AUTH a file the group or others can read is refused, and its mode is named"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-LINK-AUTH the Hanko verifies for the Entity of the key, and its signer is the key's own address"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-LINK-AUTH a connection that does not open with the handshake is closed, and only that one"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-LINK-AUTH what a node remembers of refused lines is bounded"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-LINK-AUTH a record that is altered, repeated, or sent before the handshake is refused"
   }
  ]
 }

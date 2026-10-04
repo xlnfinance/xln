@@ -103,6 +103,81 @@ function requireListArg(verb: string, list: unknown): void {
   );
 }
 
+// ---- assoc with a string key over a list that was built by consing onto an earlier list --------------------------------------
+// The spec checker keeps every world it has seen as an alist, (cons (cons key idx) seen), and asks `assoc` about each of 126 k
+// transitions: a walk of the whole list each time (and Floyd's cycle check before it) is quadratic, and was close to half of the
+// slowest case. Pairs are immutable (set-car!/set-cdr! are doors), so a version of the list never changes, and each new version is
+// an old one plus one cell: the versions share ONE index, key -> its entries with the position at which each was consed, and a
+// version of length n answers from the entries at positions <= n. Two different extensions of the same list (a branch) would
+// collide on positions, so the second one forks a copy of the index up to its base. A key that is not an AString anywhere in the list
+// makes the list unindexable: the plain walk (structuralEqual) answers, exactly as before.
+type Entry = Readonly<{ at: number; pair: APair<SchemeValue, SchemeValue> }>;
+type KeyIndex = { readonly byKey: Map<string, Entry[]>; tip: number };
+type Version = Readonly<{ index: KeyIndex; length: number }> | "unindexable";
+const versions = new WeakMap<APair<SchemeValue, SchemeValue>, Version>();
+
+const forkIndex = (index: KeyIndex, length: number): KeyIndex => ({
+  byKey: new Map([...index.byKey].flatMap(([key, entries]): [string, Entry[]][] => {
+    const kept = entries.filter((entry) => entry.at <= length);
+    return kept.length === 0 ? [] : [[key, kept]];
+  })),
+  tip: length,
+});
+
+// How many cells the descent may walk before it asks whether the list is circular (a circular list never reaches an end or a known version).
+const CYCLE_CHECK_AFTER = 64;
+
+function versionOf(head: APair<SchemeValue, SchemeValue>): Version {
+  const known = versions.get(head);
+  if (known !== undefined) return known;
+  const fresh: APair<SchemeValue, SchemeValue>[] = [];
+  let at: unknown = head;
+  let base: Version | undefined;
+  let checked = false;
+  while (at instanceof APair) {
+    base = versions.get(at);
+    if (base !== undefined) break;
+    fresh.push(at);
+    if (!checked && fresh.length > CYCLE_CHECK_AFTER) {
+      if (isCircularList(head)) return "unindexable";
+      checked = true;
+    }
+    at = at.cdr;
+  }
+  if (base === "unindexable" || (base === undefined && !(at instanceof ANil))) {
+    fresh.forEach((cell) => versions.set(cell, "unindexable"));
+    return "unindexable";
+  }
+  const index: KeyIndex = base === undefined ? { byKey: new Map(), tip: 0 } : base.index.tip === base.length ? base.index : forkIndex(base.index, base.length);
+  let position = base === undefined ? 0 : base.length;
+  for (let from = fresh.length - 1; from >= 0; from--) {
+    const cell = fresh[from]!;
+    const entry = adoptSpine(cell.car) as SchemeValue;
+    if (entry instanceof APair && !(entry.car instanceof AString)) {
+      fresh.slice(0, from + 1).forEach((newer) => versions.set(newer, "unindexable"));
+      return "unindexable";
+    }
+    position += 1;
+    if (entry instanceof APair) {
+      const key = (entry.car as AString).__string__;
+      const entries = index.byKey.get(key);
+      if (entries === undefined) index.byKey.set(key, [{ at: position, pair: entry }]);
+      else entries.push({ at: position, pair: entry });
+    }
+    index.tip = position;
+    versions.set(cell, { index, length: position });
+  }
+  return versions.get(head) as Version;
+}
+
+// The first entry of the list whose key is the string, as `assoc` finds it; undefined when this list is not indexable (walk it).
+function assocByString(head: APair<SchemeValue, SchemeValue>, wanted: string): SchemeValue | undefined {
+  const version = versionOf(head);
+  if (version === "unindexable") return undefined;
+  const newest = (version.index.byKey.get(wanted) ?? []).findLast((entry) => entry.at <= version.length);
+  return newest === undefined ? schemeFalse : newest.pair;
+}
+
 function isProperList(obj: SchemeValue): boolean {
   // A circular list is NOT a proper list (R7RS). Detect runtime cycles.
   if (obj instanceof APair && isCircularList(obj)) {
@@ -727,8 +802,12 @@ export default EnvCapability.define("scheme/lists", {
       },
       function (this: CallCtx, obj, alist, compare?: SchemeValue) {
         let current: unknown = alist;
-        TypeError.invariant(!(alist instanceof APair && isCircularList(alist)), "assoc: circular list");
         requireListArg("assoc", alist);
+        // A string key over a list built by consing (the spec checker's seen-worlds list, tens of thousands of entries) is looked up
+        // in an index shared along the chain of versions (see versionOf), not by walking the list again for every query.
+        const indexed = compare === undefined && obj instanceof AString && alist instanceof APair ? assocByString(alist, obj.__string__) : undefined;
+        if (indexed !== undefined) return indexed;
+        TypeError.invariant(!(alist instanceof APair && isCircularList(alist)), "assoc: circular list");
         while (current instanceof APair) {
           // ENTRY ADOPTION — see assq.
           const pair = adoptSpine(current.car) as SchemeValue;

@@ -1,6 +1,6 @@
 {
  "id": "R-WATCH-READS-ALL",
- "statement": "The watcher reads every kind of chain event an Entity can wait on, not only the kinds it thinks it waits for: DisputeOpSkipped and BatchFailed (an op that did not land), SecretRevealed (a hub learns a payee's reveal from the chain), the Debt events, and deposits and collateral changes (AccountSettled). Slice 1 reads four kinds and names the rest as ignored.",
+ "statement": "The watcher reads every kind of chain event an Entity can wait on, not only the kinds it thinks it waits for: DisputeOpSkipped and BatchFailed (an op that did not land), the Debt events, and deposits and collateral changes (AccountSettled). SecretRevealed is read (R-DISPUTE-FREEZE: a hub learns a payee's reveal from the chain, and every hosted Entity hears it), and so are the secrets in a dispute start's logged arguments and in the input of a finalize's transaction (R-WATCH-CALLDATA). The watcher reads five kinds of event and AccountSettled, and names the rest as ignored.",
  "source": "spec/quint/QUESTIONS.md R7 (decided: the watcher does not choose which events to read, DisputeOpSkipped included); consolidation-plan.md J2; coordinator 2026-10-01 10:20 (deposit and SecretRevealed events are the watcher's, slice 2)",
  "layers": {
   "arrival": "n/a: spec/runtime/tick.scm has no watcher",

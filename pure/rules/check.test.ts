@@ -1,10 +1,10 @@
 import { describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { evaluate, layerCounts } from "./evaluate.ts";
 import { LAYERS, describeProblem, type Cell, type Name, type Register, type Row } from "./model.ts";
 import { carries, arrivalNames, quintNames, testFileNames } from "./names/names.ts";
 import { parseCell, parseRegister } from "./register.ts";
-import { readBase } from "./base.ts";
+import { commitExists, defaultBase, readBase } from "./base.ts";
 import { readRegisterFolder } from "./layout/store.ts";
 import { renderMarkdown, renderText } from "./render.ts";
 import { ratchet } from "./ratchet.ts";
@@ -345,6 +345,24 @@ describe("the real tree", () => {
     expect(run.stderr.toString()).toContain("no such directory");
   }, 30_000);
 
+  // The gate starts its two slow parts as children first; a command that ends before they do (a failed argument check, a query mode)
+  // must not leave them running. Each carries the run's mark in its environment, so what is left of this run is found by it.
+  const marked = (mark: string): readonly string[] =>
+    (existsSync("/proc/self") ? readdirSync("/proc") : []).filter((pid) => /^\d+$/.test(pid) && pid !== String(process.pid)).filter((pid) => {
+      const env = Bun.spawnSync(["cat", `/proc/${pid}/environ`], { stdout: "pipe", stderr: "ignore" }).stdout.toString();
+      return env.includes(`XLN_GATE_TEST_MARK=${mark}`);
+    });
+
+  test("a gate that ends before its slow parts do leaves none of them running", async () => {
+    const mark = `${process.pid}-${Date.now()}`;
+    const run = Bun.spawnSync(["bun", "rules/check.ts", "--layer-root", "arrival=/no/such/dir"], {
+      cwd: `${import.meta.dir}/..`, env: { ...process.env, XLN_GATE_TEST_MARK: mark },
+    });
+    expect(run.exitCode).toBe(1);
+    await Bun.sleep(1_000);
+    expect(marked(mark)).toEqual([]);
+  }, 30_000);
+
   test("the gate turns red when the names carrying C1 disappear from the contract tests", () => {
     const without = names.filter((each) => !(each.layer === "contract" && carries("C1", each)));
     const { problems } = evaluate(register, without);
@@ -362,8 +380,11 @@ describe("the real tree", () => {
     const gateRows = register.filter((each) => each.id.startsWith("R-GATE-"));
     const killers = gateRows.flatMap((row) => row.killers.map((killer) => ({ row, name: killer.name })));
     expect(killers.length).toBeGreaterThan(20);
+    // A killer is found among the names of its own layer only (killerExists), so the other layers' names cannot change the verdict: leave them out, which is
+    // most of the work of each evaluation.
+    const layerNames = Object.fromEntries(LAYERS.map((layer) => [layer, names.filter((each) => each.layer === layer)]));
     const missing = killers.filter(({ row, name }) => {
-      const without = names.filter((each) => each.text !== name);
+      const without = [...new Set(row.killers.map((killer) => killer.layer))].flatMap((layer) => layerNames[layer] ?? []).filter((each) => each.text !== name);
       return !evaluate([row], without).problems.some((problem) => problem._tag === "KillerNotFound" && problem.id === row.id);
     });
     expect(missing.map(({ name }) => name)).toEqual([]);
@@ -482,5 +503,45 @@ describe("the base register is read from git, and a git failure is red", () => {
     run("commit", "-q", "--allow-empty", "-m", "two");
     const based = readBase(folder, "base");
     expect(based.ok && based.value._tag === "Base" && based.value.register.map((each) => each.id)).toEqual(["H1"]);
+  });
+});
+
+describe("the ref the register may only grow from", () => {
+  const sha = "a".repeat(40);
+  const known = (...shas: string[]) => (candidate: string): boolean => shas.includes(candidate);
+
+  test("R-GATE-RATCHET-BASE a pull request is held to its own target branch, development or main, never to main by default", () => {
+    expect(defaultBase({ GITHUB_EVENT_NAME: "pull_request", GITHUB_BASE_REF: "development" }, known())).toBe("origin/development");
+    expect(defaultBase({ GITHUB_EVENT_NAME: "pull_request", GITHUB_BASE_REF: "main" }, known())).toBe("origin/main");
+    expect(defaultBase({ GITHUB_EVENT_NAME: "pull_request", GITHUB_BASE_REF: "" }, known())).toBe("origin/main");
+  });
+
+  test("R-GATE-RATCHET-BASE a push is held to the tip it replaced, and to origin/main when that tip is missing, zero or not a sha", () => {
+    expect(defaultBase({ GITHUB_EVENT_NAME: "push", GATE_BASE_BEFORE: sha }, known(sha))).toBe(sha);
+    expect(defaultBase({ GITHUB_EVENT_NAME: "push", GATE_BASE_BEFORE: sha }, known())).toBe("origin/main");
+    expect(defaultBase({ GITHUB_EVENT_NAME: "push", GATE_BASE_BEFORE: "0".repeat(40) }, known("0".repeat(40)))).toBe("origin/main");
+    expect(defaultBase({ GITHUB_EVENT_NAME: "push", GATE_BASE_BEFORE: "origin/development" }, known("origin/development"))).toBe("origin/main");
+    expect(defaultBase({ GITHUB_EVENT_NAME: "push" }, known(sha))).toBe("origin/main");
+  });
+
+  test("R-GATE-RATCHET-BASE a local run, the nightly run and a manual run are held to origin/main, whatever else the environment holds", () => {
+    expect(defaultBase({}, known(sha))).toBe("origin/main");
+    expect(defaultBase({ GITHUB_EVENT_NAME: "schedule", GITHUB_BASE_REF: "development", GATE_BASE_BEFORE: sha }, known(sha))).toBe("origin/main");
+    expect(defaultBase({ GITHUB_EVENT_NAME: "workflow_dispatch", GATE_BASE_BEFORE: sha }, known(sha))).toBe("origin/main");
+  });
+
+  test("R-GATE-RATCHET-BASE the gate step that runs rules/check.ts hands it the tip a push replaced, and passes no --base of its own", () => {
+    const workflow = readFileSync(`${import.meta.dir}/../../.github/workflows/build-and-test.yml`, "utf8");
+    expect(workflow).toContain("        env:\n          GATE_BASE_BEFORE: ${{ github.event.before }}\n        run: bun rules/check.ts\n");
+    expect(workflow).not.toMatch(/rules\/check\.ts[^\n]*--base/);
+  });
+
+  test("R-GATE-RATCHET-BASE a commit is found by its sha in a clone, and an unknown one is not", () => {
+    const repo = mkdtempSync(`${tmpdir()}/rules-exists-`);
+    const sh = (...args: string[]): string => Bun.spawnSync(["git", "-c", "user.email=t@t", "-c", "user.name=t", ...args], { cwd: repo, stdout: "pipe" }).stdout.toString().trim();
+    sh("init", "-q", "-b", "main");
+    sh("commit", "-q", "--allow-empty", "-m", "one");
+    expect(commitExists(repo, sh("rev-parse", "HEAD"))).toBe(true);
+    expect(commitExists(repo, sha)).toBe(false);
   });
 });

@@ -122,7 +122,7 @@
     },
     {
       "id": "right-drops-inflight-on-collision",
-      "why": "[R-A1] the Right side loses its frame in flight instead of queueing it again",
+      "why": "R-E3: [R-A1] the Right side loses its frame in flight instead of queueing it again",
       "file": "entity.qnt",
       "old": "mempool: lk.inflight.concat(lk.mempool), inflight: [] }",
       "new": "mempool: lk.mempool, inflight: [] }",

@@ -3,20 +3,55 @@
 // transformers of every token (Account.sol MAX_DISPUTE_TRANSFORMERS), so the count that must stay at or below 32 is
 // the Account's, and one secret opens one clause in the whole Account (R-ONE-LOCK-PER-HASH).
 import { mapSet } from "../kernel/core/collections.ts";
-import { emptyLedger, MAX_HOLDS } from "./ledger.ts";
+import { emptyLedger, MAX_HOLDS, onChain } from "./ledger.ts";
 import type { AccountFault, AccountState, Hold, Ledger, TokenId } from "./model.ts";
 
-export const emptyAccount: AccountState = { ledgers: new Map(), offers: [] };
+export const emptyAccount: AccountState = { ledgers: new Map(), quotes: [], offers: [] };
 
 export const ledgerOf = (s: AccountState, token: TokenId): Ledger => s.ledgers.get(token) ?? emptyLedger;
 
 export const withLedger = (s: AccountState, token: TokenId, l: Ledger): AccountState =>
   ({ ...s, ledgers: mapSet(s.ledgers, token, l) });
 
+/** What the chain holds for one token of an Account: its collateral and its ondelta. */
+export type Held = Readonly<{ collateral: bigint; ondelta: bigint }>;
+
+/**
+ * The Account's token with the collateral and ondelta the chain holds for it (R-J-COLLATERAL). A token the Account has
+ * no ledger for stays without one: the token list is the proof body, so it changes only by a frame both sides signed
+ * (R-J-COLLATERAL-NO-LEDGER).
+ */
+const withChain = (s: AccountState, token: TokenId, held: Held): AccountState =>
+  (s.ledgers.has(token) ? withLedger(s, token, onChain(ledgerOf(s, token), held.collateral, held.ondelta)) : s);
+
+/** Every token the Account has a ledger for takes what the chain holds for it. */
+export const withHeld = (s: AccountState, held: ReadonlyMap<TokenId, Held>): AccountState =>
+  [...held].reduce((acc, [token, one]) => withChain(acc, token, one), s);
+
+/**
+ * The chain moved the Account's epoch on: every proof of the old epoch is void and the new epoch counts offdelta from
+ * zero in every token (R-LEDGER-REBASE). What the chain applied or paid, it holds in ondelta, collateral and reserves;
+ * the rest of the Ledger (limits, holds, reserved) is the Account's own and stays.
+ */
+export const rebased = (s: AccountState): AccountState =>
+  ({ ...s, ledgers: new Map([...s.ledgers].map(([token, l]) => [token, { ...l, offdelta: 0n }])) });
+
+/**
+ * R-HOLD-DISSOLVE: what a finalize leaves of the Account's open clauses: none. The chain settled every clause of the
+ * proof it used (a payment paid when its hash was revealed in time, unpaid otherwise), so no hold, no quote and no
+ * offer stands, and nothing is reserved for a swap. What a hold would have paid is in the cash the chain paid out.
+ */
+export const dissolved = (s: AccountState): AccountState => ({
+  ...s,
+  ledgers: new Map([...s.ledgers].map(([token, l]) => [token, { ...l, holds: [], reserved: { left: 0n, right: 0n } }])),
+  quotes: [],
+  offers: [],
+});
+
 /** Every open hold of the Account, whatever its token, in token order of first use. */
 export const openHolds = (s: AccountState): readonly Hold[] => [...s.ledgers.values()].flatMap((l) => l.holds);
 
-/** Every open clause of the Account: its holds and its swap offers, each one clause of a proof body. */
+/** Every open clause of the Account: its holds and accepted swap offers, each a clause of a proof body. */
 export const clauseCount = (s: AccountState): number => openHolds(s).length + s.offers.length;
 
 /** The Account's clause cap, checked on a state a lock or an offer has just produced: MAX_HOLDS in all, all tokens. */

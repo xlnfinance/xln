@@ -1,0 +1,314 @@
+{
+ "id": "R-DISPUTE-FREEZE",
+ "statement": "While a dispute is open on an Account, whoever started it (the Entity holds a record of the dispute it asked for, `starting`, or of the one the peer started, `against`, until the finalize, a lapse or the epoch move ends it), the node signs nothing new on it. It proposes no frame (its queue waits), and every frame its peer proposes is refused with the fault `frozen`, which can pass: the proposer takes the frame back and tries again once its view of J moves, so the payment commits in the epoch that follows or is refused then by the Account's own door. The one predicate that says so, `quiet` (the node's signature is out on a settlement or a C2R, R-COSIGN-FREEZE, or a dispute is open), feeds both the proposing and the rules the Account judges the peer's frames by. A command that takes on value (`pay`, `lock`, `offer`, `fill`) asked on an Account in dispute is refused back to whoever asked, with a `command_refused` notice and the fault `account_disputed`, so it is never queued to be zeroed by the rebase; a lock the paybook forwards into it fails back along the route as a refused entry does. When a dispute finalize moves the epoch on, the proof it paid by is named by the hash of its body, which the chain logs in `DisputeFinalized` (`finalProofbodyHash`, Depository.sol 142-148) and the watcher carries on the epoch event, and not by the nonce the chain stores: a timeout stores the opening nonce plus one but a finalize with a signed proof stores that proof's own nonce, and the two cannot be told apart from the logs (Depository.sol 962-976). The node takes the nonce of the proof it can name with that hash: the counter the chain registered against its own start, the proof the peer's dispute opened with, its committed state or the state its pending frame would commit (a dispute it started opened with its committed state, and its own counter was built from it; the freeze commits nothing after either). A hash no proof it can name has leaves the finalized nonce unknown, and the notices say so rather than guess. An unknown nonce is not a loss and is not sent again (R-FINALIZATION-UNKNOWN). A node whose committed head is above a proof it can name (a frame the proof does not hold, committed after it was signed or sealed before the dispute and acked after it) is told, per token, to its owner (`offdelta_rebased`: peer, token, epoch, the committed nonce, the offdelta the node counted and the finalized nonce), so the node that counted a payment the rebase zeroes is told of it. A head at or below a known finalized nonce lost nothing and is told nothing, whatever its offdelta; a settlement or a C2R moving the epoch tells nothing (the chain reverts both while a dispute is open, and a settlement folds the offdelta into ondelta). The proposer of such a frame is told too: its ack is ignored during the dispute, so the frame stays pending with a committed nonce below the finalized one, and a node whose pending frame, above a finalized nonce the node can name, carries a payment, a lock, an offer or a fill when a finalize moves the epoch is told which (`pending_rebased`: peer, epoch, the frame's nonce, the finalized nonce, the txs that spend and `fate`). A frame that carries only releases or a resolve, and a pending frame at or below the finalized nonce whose body the chain did not pay by, are told nothing. If the chain paid by the body of the pending frame itself (the peer finalized or counter-registered with a proof the node signed for it, which a frame's signature is, account/proof/signing.ts), the txs of the frame are paid: the owner is told once (`pending_rebased` with `fate` `paid_on_chain`), the frame stays pending only so that the lineage the peer may have committed stays whole (its re-ack commits it on the rebased ledger, offdelta zero), and a rollback of it, by a refusal or by the peer's own frame committing over it, gives none of its txs back, so the payment is never sealed again in the new epoch (no double payment). The same holds for a frame the node signed and then took back: the peer that refused it with a retryable fault (`frozen` is one, and a malicious peer can use any) still holds its signature, so the node keeps, per Account, the state, the epoch, the first nonce and the txs of every frame it signed that no commit has superseded (`unsuperseded`, R-SIGNED-IS-LIVE: it is Account state, so a Host that restarts from its journal rebuilds it and still names the frame), a rolled-back frame included, and the hash the chain logged names such a frame too (the highest nonce among equal bodies, one lookup for the notice and for what is dropped). Every tx of the frame the chain paid by is taken out of the queue and out of any pending frame that carries it (one occurrence for each tx the frame held: a payment asked twice is paid once, and the pending frame is looked in first), so it is never sealed again, and its owner is told once (`pending_rebased`, `paid_on_chain`, the nonce of that frame); a pending frame that shared a paid payment is sealed again with the rest (`resent_in_new_epoch` names only the rest). A rolled-back frame the chain did not pay by keeps its txs live and they are sealed once. A frame sealed in an earlier epoch is not a candidate (the chain refuses a proof of another epoch; defensive, no behaviour test). A pending frame whose state has the committed state's body (a quote not yet filled is no clause) is not held by any proof: it is told as voided like any other. Any other pending frame above the finalized nonce is, if the peer committed it before it heard of the dispute, zeroed by the rebase; if it never heard of it, the peer refuses it as another epoch's: either way the frame is sent again in the new epoch, where it commits or comes back as `tx_refused` (`fate` is `resent_in_new_epoch`), so the owner waits for that and does not ask again. When several proofs the node can name have the body the chain paid by, the highest nonce among them is the finalized nonce. The offdelta the finalized proof holds is not in either notice: the node that lost something did not open with that proof and holds none of its body (owed: read it from the start's or the counter's calldata; the DisputeFinalized event carries only the opening nonce and two hashes, Depository.sol 142-148). A frame of the node's own that was sealed before the dispute is not sent again while the dispute is open, and the ack of it commits nothing: it stays pending and is rebased with the epoch like any pending frame. A finalize settled every clause of its proof, so the holds are dissolved (R-HOLD-DISSOLVE) and a release queued for one is refused with a notice, never applied again in the epoch that follows. A payee behind a dispute cannot resolve in a frame, so the secret reaches the hub that forwarded the lock another way: every hosted Entity hears the chain's `SecretRevealed` as `j_secret` (at the configured depth, R-WATCH-READS-ALL) and the paybook passes the secret up for a lock it forwarded under that hash, on any Account, frozen or not; a resolve in a frame the node refuses as frozen shows its secret the same way, since a secret proves itself by its hash. A release (`resolve`, `cancel`, `expire`, `retract`, `lapse`) and `set_credit` wait in the queue for the new epoch. The proof the dispute rests on therefore stays the newest the node holds, and no frame is committed between the chain's finalize and the Entity hearing of it, because the Entity stays quiet until it hears the epoch move. Not here: a frame the peer sealed before it heard of the dispute and that this node acked before it heard of it (the peer commits it, this node's finalize or counter may not hold it; the notices say what the node counted and which nonce the chain paid by, not what the finalized proof held: owed, the offdelta of the finalized proof from calldata), the Host telling the Entity the epoch before it signs anything, the exact tokens a finalize pays (zeroing the union only understates, never overstates: owed, the Host reads the Account's holdings after the finalizing block), and the starter that never finalizes (owed, the next PR).",
+ "source": "coordinator 10-02 11:55 (decision after the re-audit of PR 159)",
+ "layers": {
+  "arrival": "owed: spec thread, next Arrival page",
+  "quint": "hold",
+  "contract": "n/a: the freeze is the node's off-chain duty while a dispute is open; the contract only sees what is signed",
+  "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
+  "ts": "hold"
+ },
+ "killers": [
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DISPUTE-FREEZE a tx queued while a dispute against the node is open waits: no frame goes to the peer"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DISPUTE-FREEZE the same holds for the starter of the dispute, as soon as it asks for the start"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DISPUTE-FREEZE a frame the peer proposes meanwhile is refused with the frozen fault, which can pass"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DISPUTE-FREEZE only the Account in dispute stops: the others still propose"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DISPUTE-FREEZE the epoch moving on, or the dispute being over, ends it and the queue goes out"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DISPUTE-FREEZE a dispute the Host dropped, because its start would revert, ends it too"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DISPUTE-FREEZE a payment, lock, offer and fill asked in a dispute are refused with a notice"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DISPUTE-FREEZE the same payment on an Account with no dispute is taken"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DISPUTE-FREEZE a release or a credit limit is not refused for the dispute, and nothing is sealed"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DISPUTE-FREEZE once the dispute is over the payment is taken again"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DISPUTE-FREEZE both sides' payments are refused with a notice and no frame goes out"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DISPUTE-FREEZE after the finalize the Account is as the chain left it, without the refused payment"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DISPUTE-FREEZE a frame a peer sealed before it heard of the dispute is refused as frozen"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DISPUTE-FREEZE a finalize by a proof below the committed head tells that node both nonces"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DISPUTE-FREEZE a frame sealed before the start and acked after it is told to the committer"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DISPUTE-FREEZE a finalize by the proof the node holds as its head tells nothing"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DISPUTE-FREEZE an epoch a settlement or a withdrawal moves tells nothing, a repeat nothing more"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DISPUTE-FREEZE a Right-authored frame the Left committed is told (stored is start plus one)"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DISPUTE-FREEZE a pending lock is told like a pending payment"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DISPUTE-FREEZE a finalize with a registered counter pays by the stored nonce itself"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DISPUTE-FREEZE a secret Bob shows on the chain is passed up: the hub claims Alice's lock"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DISPUTE-FREEZE a resolve the hub refuses as frozen still gives it the secret to pass up"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DISPUTE-FREEZE a secret nobody forwarded a lock under, or a wrong one, changes nothing"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DISPUTE-FREEZE a lock forwarded into an Account in dispute is refused and given up upstream"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DISPUTE-FREEZE a revealed secret reads hashlock and revealer from topics, the secret from data"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DISPUTE-FREEZE a revealed secret is a j_secret for every hosted Entity and asks no reading"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DISPUTE-FREEZE a secret the chain showed reaches the Entity as j_secret, in bytes"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DISPUTE-FREEZE an ack that arrives in the dispute commits nothing: the frame stays pending"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DISPUTE-FREEZE the timer does not send the pending frame again while the dispute is open"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DISPUTE-FREEZE when the dispute lapses the frame is sent again, Bob acks it again and it commits"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DISPUTE-FREEZE a finalize with a proof the starter signed pays by that proof: told as paid"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DISPUTE-FREEZE a finalize with the opening proof pays by the opening nonce, not the stored one"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DISPUTE-FREEZE a finalize with the registered counter pays by its nonce, a state held or not"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DISPUTE-FREEZE a finalize with a proof the node cannot name is told with the nonce unknown"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DISPUTE-FREEZE a finalize that logged no body hash is told with the nonce unknown too"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DISPUTE-FREEZE the notice of a pending frame names its epoch, its nonce and that it is sent again"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DISPUTE-FREEZE a pending release of a hold is not a payment: nothing is told"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DISPUTE-FREEZE a pending resolve is not a payment either"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DISPUTE-FREEZE a pending offer is told like a payment"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DISPUTE-FREEZE a pending fill is told like a payment"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DISPUTE-FREEZE a pending frame the chain paid by is dropped, never sealed again: no double payment"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DISPUTE-FREEZE a frame the chain paid by and the peer committed commits on the re-ack, paid once"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DISPUTE-FREEZE a body several proofs share is named by the highest nonce among them"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DISPUTE-FREEZE a finalize on an Account with no co-signed frame tells nothing and moves the epoch"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DISPUTE-FREEZE a refusal rolls a frame back with its txs, none of them when the chain paid by it"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DISPUTE-FREEZE the peer's frame committed over a paid pending frame takes none of its txs back"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DISPUTE-FREEZE a finalize with the registered counter names exactly the counter's nonce"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DISPUTE-FREEZE the hash the chain logged matches whatever case it is written in"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DISPUTE-FREEZE the same holds whoever started the dispute: a payment the chain paid is paid once"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DISPUTE-FREEZE a registered counter that holds the node's own head names exactly that nonce"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DISPUTE-FREEZE a rolled-back frame the chain paid by is not sealed again from the queue"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DISPUTE-FREEZE a later frame that shares the paid payment is sealed again with only the rest"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DISPUTE-FREEZE one of two equal payments is paid by the chain, the other is sealed again"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DISPUTE-FREEZE a payment asked again behind a paid pending frame is not paid by the chain and stays"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DISPUTE-FREEZE a rolled-back frame the chain did not pay by stays in the queue and is sealed once"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DISPUTE-FREEZE a rollback of a part-paid frame gives back only the txs the chain did not pay"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DISPUTE-FREEZE a pending payment the chain did not pay by is sent again and commits in the new epoch"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DISPUTE-FREEZE a Host that restarts between the rollback and the finalize still names the frame"
+  },
+  {
+   "kind": "mutant",
+   "layer": "quint",
+   "name": "freeze-off"
+  },
+  {
+   "kind": "test",
+   "layer": "quint",
+   "name": "frameAfterTheCounterTest"
+  }
+ ]
+}

@@ -149,6 +149,9 @@ ui/tests/test-results/
 # Machine-wide stand semaphore (tools/stand-lock.ts); lives beside the main checkout.
 .xln-stand-lock/
 
+# Scheme parser built by spec/map/build.sh. The grammar pin is in that script.
+spec/map/*.dylib
+
 # design review raw model streams (contain the screenshots as base64)
 design/review/**/*.jsonl
 

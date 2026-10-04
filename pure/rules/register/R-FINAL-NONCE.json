@@ -4,7 +4,7 @@
  "source": "contracts-decisions.md F1",
  "layers": {
   "arrival": "owed: spec thread, next Arrival page",
-  "quint": "owed: spec thread, new Quint branch",
+  "quint": "hold",
   "contract": "hold",
   "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
   "ts": "hold"

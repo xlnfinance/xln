@@ -1,0 +1,30 @@
+{
+  "evalTimeoutMs": 60000,
+  "attestation": "off",
+  "mcpServers": {
+    "ast-grep": {
+      "command": "ast-grep-server",
+      "env": { "AST_GREP_PATH": "ast-grep" }
+    },
+    "spec": {
+      "command": "node",
+      "args": ["spec/mcp/server.mjs"]
+    },
+    "rewrite": {
+      "command": "node",
+      "args": ["spec/mcp/rewrite.mjs"]
+    },
+    "ast-edit": {
+      "command": "node",
+      "args": ["spec/mcp/ast-edit.mjs"]
+    },
+    "jev": {
+      "command": "node",
+      "args": ["spec/mcp/jev-gate.mjs"]
+    },
+    "lsp": {
+      "command": "node",
+      "args": ["spec/mcp/lsp.mjs"]
+    }
+  }
+}

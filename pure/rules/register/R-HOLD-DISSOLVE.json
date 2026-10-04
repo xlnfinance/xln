@@ -1,0 +1,64 @@
+{
+ "id": "R-HOLD-DISSOLVE",
+ "statement": "A finalized dispute settled every clause of the proof it used on the chain: a payment is applied when its hash was revealed in time and is unpaid otherwise (DeltaTransformer applyPayment; before the deadline an unrevealed clause makes the finalize revert, so it waits), an unfilled swap clause is unfilled. So when an Entity hears a j_dispute_over that was finalized, no hold, no quote and no offer of that Account stands, and nothing is reserved for a swap: in the committed state and in the state a pending frame of the node would commit, so the ack of a frame the peer committed brings no hold back. A lock the node forwarded to that peer is a lock the peer gave up, so the paybook entry fails back toward its source by the existing path. A counter the chain registered settled nothing, and the clauses stay until the finalize. A release of such a hold that was queued while the dispute was open (R-DISPUTE-FREEZE queues a resolve, a cancel, an expire) is refused with a notice when it is proposed, so the payee is never paid again in the epoch that follows. A clause the chain paid because its hash was revealed on chain in time is dissolved as well: the hub that forwarded the lock learns the secret from the chain (R-DISPUTE-FREEZE, `j_secret`, heard before the finalize, which the chain logs after) and claims upstream, so a lock it forwarded is failed back by the finalize only if no secret was shown on a chain event or in a frame. A clause the chain pays because the secret was given in the dispute arguments (DeltaTransformer.sol 294-299) logs no SecretRevealed; the watcher reads those secrets from the start's log and the finalize's transaction input and tells each as `j_secret` before the finalize's epoch advance, so the hub claims upstream before the holds dissolve (R-WATCH-CALLDATA); a finalize whose input cannot be read is told as unread and the hub may not have the secret. Owed: S9b, the hub's upstream hold when its downstream lock resolves after the finalize, and the Depository's debts.",
+ "source": "builder 10-02 (S9 dispute with an open HTLC, plan/s9-dispute-clause-design.md); DeltaTransformer.sol 289-308",
+ "layers": {
+  "arrival": "n/a: the Arrival page models frames within an epoch; what the Entity does with its holds when the chain finalizes is an Entity rule",
+  "quint": "n/a: the Quint model has the chain's cells, not the Entity's ledger after a finalize",
+  "contract": "n/a: the contract settles the clauses; this row is what the Entity does with its own holds, and the e2e dispute-clause step reads both against the chain",
+  "rig": "n/a: an off-chain Entity rule",
+  "ts": "hold"
+ },
+ "killers": [
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-HOLD-DISSOLVE no hold, quote or offer and nothing reserved stand; money and limits are as they were"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-HOLD-DISSOLVE dissolving twice changes nothing, and an Account with no clause is as it was"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-HOLD-DISSOLVE a finalized dispute leaves no hold on either side, and the head is the same"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-HOLD-DISSOLVE an offer a fill has accepted is dissolved with the rest: both sides end with none"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-HOLD-DISSOLVE a dispute that a counter ended settled nothing: the hold stays"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-HOLD-DISSOLVE a lock whose ack the link lost is dissolved in the frame in flight too"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-HOLD-DISSOLVE a lock forwarded to the peer is given up: the entry fails back toward its source"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-HOLD-DISSOLVE a Host that restarts after the finalize replays to the same Account"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-HOLD-DISSOLVE the hold's id is free again: a new lock under it is judged as on an empty Account"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-HOLD-DISSOLVE Bob's queued resolve is dropped with a notice and the epoch's ledgers stay at zero"
+  }
+ ]
+}

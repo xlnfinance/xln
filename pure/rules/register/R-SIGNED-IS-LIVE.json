@@ -1,10 +1,10 @@
 {
  "id": "R-SIGNED-IS-LIVE",
- "statement": "Anything a side has signed and sent stays enforceable against it until a frame at a higher slot commits: a refusal or a yield does not void the proof, so it does not release the payer or an upstream hold for a lock the proof carries. The replica keeps the signed, unsuperseded frames (bounded by MAX_UNSUPERSEDED: at the cap it signs nothing more, its txs are refused with notice `signed_cap` naming the slot range of the live proofs and are not kept, and `stalled` shows the stall so the Runtime can act: wait for the peer's commit or dispute) and `liveLocks` says which locks are still live; a lock is released when a higher-slot frame without it commits or after its deadline plus the reserve. R-REFUSED-RELEASES-PAYER is narrowed to that. Holding and releasing is the Runtime's duty.",
+ "statement": "Anything a side has signed and sent stays enforceable against it until a frame at a higher slot commits: a refusal or a yield does not void the proof, so it does not release the payer or an upstream hold for a lock the proof carries. The replica keeps the signed, unsuperseded frames (bounded by MAX_UNSUPERSEDED: at the cap it signs nothing more, its txs are refused with notice `signed_cap` naming the slot range of the live proofs and are not kept, and `stalled` shows the stall so the Runtime can act: wait for the peer's commit or dispute) and `liveLocks` says which locks are still live; a lock is released when a higher-slot frame without it commits or after its deadline plus the reserve. R-REFUSED-RELEASES-PAYER is narrowed to that. Holding and releasing is the Runtime's duty, and no Runtime code does it yet: nothing reads `liveLocks`. What a sent frame is worth to the peer changed with R-SIGNED-HEADS-ON-THE-WIRE: before it, no signature ever left a node, so a frame sent was not a proof the peer held; since it, each frame and ack leaves signed over its head, which is what makes a refused or yielded proof live. The Quint cell holds the hold and its release: a refusal does not release the payer's hold for a lock in a signed proof (refusal-releases-hold); a release waits for supersession or for the deadline plus the reserve (release-before-supersession, release-ignores-the-reserve, commit-keeps-superseded-locks, commit-supersedes-by-nonce-not-rank); the locks are remembered at signing (signing-forgets-the-locks), only a lock in a signed proof waits (non-lock-notice-waits), the notice is given at the release (release-loses-the-notice); and the chain's dispute start needs only the counterparty's signature (start-requires-both-signatures). The cap on unsuperseded proofs (MAX_UNSUPERSEDED, signed_cap, stalled) is not in the Quint model.",
  "source": "coordinator 10-01 05:55 (Review A of PR 97, second finding)",
  "layers": {
   "arrival": "hold",
-  "quint": "owed: spec thread (slots, floors and higher slot wins, from #97)",
+  "quint": "hold",
   "contract": "n/a: an off-chain Account rule; the chain sees only signed proofs",
   "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
   "ts": "hold"
@@ -24,6 +24,51 @@
    "kind": "test",
    "layer": "ts",
    "name": "at the cap a side signs nothing more: its txs are refused with notice, and the stall shows"
+  },
+  {
+   "kind": "mutant",
+   "layer": "quint",
+   "name": "start-requires-both-signatures"
+  },
+  {
+   "kind": "mutant",
+   "layer": "quint",
+   "name": "refusal-releases-hold"
+  },
+  {
+   "kind": "mutant",
+   "layer": "quint",
+   "name": "release-ignores-the-reserve"
+  },
+  {
+   "kind": "mutant",
+   "layer": "quint",
+   "name": "release-before-supersession"
+  },
+  {
+   "kind": "mutant",
+   "layer": "quint",
+   "name": "signing-forgets-the-locks"
+  },
+  {
+   "kind": "mutant",
+   "layer": "quint",
+   "name": "commit-keeps-superseded-locks"
+  },
+  {
+   "kind": "mutant",
+   "layer": "quint",
+   "name": "commit-supersedes-by-nonce-not-rank"
+  },
+  {
+   "kind": "mutant",
+   "layer": "quint",
+   "name": "non-lock-notice-waits"
+  },
+  {
+   "kind": "mutant",
+   "layer": "quint",
+   "name": "release-loses-the-notice"
   }
  ]
 }

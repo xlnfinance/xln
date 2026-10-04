@@ -14,13 +14,20 @@
 import { err, flatMap, foldResult, map, ok, type Result } from "../kernel/core/result.ts";
 import type { Tagged } from "../kernel/core/tagged.ts";
 import { jHeight, type HeightFault, type JHeight } from "../account/clause/clock.ts";
-import { decodeLogs, type Address, type Bytes32, type ChainEvent, type LogFault, type RawLog } from "./log.ts";
-import { observe, readingsOf, type Accounts, type Addressed, type ObserveFault, type Reading } from "./observe.ts";
+import { finalizedProof, finalizedSecrets, startedBody, type Read } from "./calldata/decode.ts";
+import {
+  decodeLogs, type Address, type Bytes32, type ChainEvent, type Deployed, type LogFault, type RawLog,
+} from "./log.ts";
+import {
+  hostsAny, observe, readingsOf, type Accounts, type Addressed, type Beyond, type JEvent, type ObserveFault,
+  type Reading,
+} from "./observe.ts";
 
-export type Block = Readonly<{ number: bigint; hash: Bytes32; parent: Bytes32 }>;
+/** A block as the node tells it: `timestamp` is the chain's own second for it, the clock a dispute's window runs on. */
+export type Block = Readonly<{ number: bigint; hash: Bytes32; parent: Bytes32; timestamp: bigint }>;
 
 /** What the Host knows: where it has delivered up to, how deep a block must be buried, and the contract it watches. */
-export type Watch = Readonly<{ depository: Address; depth: bigint; applied: Block }>;
+export type Watch = Readonly<{ deployed: Deployed; depth: bigint; applied: Block }>;
 
 export type WatchFault =
   | Tagged<"bad_depth", { depth: bigint }>
@@ -35,8 +42,8 @@ export type WatchFault =
   | HeightFault;
 
 /** Start at a block already final: the deployment block's parent, or the cursor the Host last stored. */
-export const watching = (depository: Address, depth: bigint, from: Block): Result<Watch, WatchFault> =>
-  (depth < 0n ? err({ _tag: "bad_depth", depth }) : ok({ depository, depth, applied: from }));
+export const watching = (deployed: Deployed, depth: bigint, from: Block): Result<Watch, WatchFault> =>
+  (depth < 0n ? err({ _tag: "bad_depth", depth }) : ok({ deployed, depth, applied: from }));
 
 /** The highest block whose events may be delivered when the chain's head is `head`. */
 export const finalizedAt = (depth: bigint, head: bigint): bigint => (head > depth ? head - depth : 0n);
@@ -93,21 +100,120 @@ export const prepare = (w: Watch, batch: Batch): Result<Prepared, WatchFault> =>
   flatMap(linked(w, batch.blocks), (tip) =>
     flatMap(buried(w, batch, tip), (last) =>
       flatMap(belonging(batch.blocks, batch.logs), () =>
-        map(decodeLogs(w.depository, batch.logs), (events) => ({ last, events })))));
+        map(decodeLogs(w.deployed, batch.logs), (events) => ({ last, events })))));
+
+/**
+ * Whether an event needs the bytes of its transaction: a dispute finalize of an Account a hosted Entity is a party to
+ * (its arguments), or a dispute start against one (its body: a start of the Entity's own needs none, it made the
+ * body), R-WATCH-CALLDATA. A stranger's dispute is not read: the node asks the chain for nothing a stranger can make
+ * it ask for.
+ */
+export const needsBytes = (e: ChainEvent, hosted: readonly Bytes32[]): boolean =>
+  (e._tag === "dispute_finalized" && e.shown._tag !== "read" && hostsAny(hosted, e))
+  || (e._tag === "dispute_started" && e.body === undefined && hostsAny(hosted, e) && !hosted.includes(e.sender));
+
+/** The transactions whose input the Host must read. */
+export const calldataWanted = (p: Prepared, hosted: readonly Bytes32[]): readonly Bytes32[] =>
+  [...new Set(p.events.flatMap((e) => (needsBytes(e, hosted) && "tx" in e ? [e.tx] : [])))];
+
+/**
+ * The prepared batch with the arguments of its finalizes read from the bytes that carried them, by transaction hash:
+ * the input of the transaction and, where the Host asked the node for a call trace, the input of each call it made to
+ * the Depository. A finalize is `read` when a `processBatch` call among those bytes, wherever a wrapper put it, has an
+ * op that carries the evidence hash the log did, and `unread` when none does or the Host has no bytes for it.
+ */
+export const withCalldata = (p: Prepared, inputs: ReadonlyMap<Bytes32, readonly Read[]>): Prepared => ({
+  ...p,
+  events: p.events.map((e): ChainEvent => {
+    if (e._tag === "dispute_started" && e.body === undefined) {
+      const body = (inputs.get(e.tx) ?? []).flatMap((input) => startedBody(input, e.bodyHash) ?? []).at(0);
+      return { ...e, body, unread: body === undefined };
+    }
+    if (e._tag !== "dispute_finalized" || e.shown._tag === "read") return e;
+    const carried = inputs.get(e.tx) ?? [];
+    const read = carried.map((input) => finalizedSecrets(input, e.evidence)).filter((r) => r !== undefined);
+    const proof = carried.flatMap((input) => {
+      const found = finalizedProof(input, e.evidence, e.bodyHash);
+      return found === undefined ? [] : [found];
+    }).at(0);
+    const readShown = { _tag: "read" as const, secrets: [...new Set(read.flat())] };
+    const unreadShown = { _tag: "unread" as const };
+    const shown = read.length > 0 ? readShown : unreadShown;
+    return { ...e, shown, ...(proof === undefined ? {} : { proof }) };
+  }),
+});
+
+/**
+ * The transactions of a hosted Account's disputes whose calldata the Host could not read what the log is about from: a
+ * finalize no bytes it holds carry, and a start whose body none does. The Host asks the node for a call trace of
+ * these, once.
+ */
+export const unreadTxs = (p: Prepared, hosted: readonly Bytes32[]): readonly Bytes32[] => {
+  const unread = (e: ChainEvent): boolean =>
+    ((e._tag === "dispute_finalized" && e.shown._tag === "unread")
+      || (e._tag === "dispute_started" && e.body === undefined)) && needsBytes(e, hosted);
+  return [...new Set(p.events.filter(unread).flatMap((e) => ("tx" in e ? [e.tx] : [])))];
+};
+
+/** The events of a batch that are told now, and the ones held back, both in the chain's order. */
+export type Split = Readonly<{ ready: readonly ChainEvent[]; held: readonly ChainEvent[] }>;
+
+/**
+ * R-WATCH-STALL: what a dispute finalize the Host cannot read yet holds back: the finalize itself, which tells the
+ * secrets it showed and then that the dispute is over, and nothing else. The epoch advance it made is told at once, in
+ * its place among the Account's events (a rebase of the Account; a dispute started in the epoch after must find the
+ * Entity in that epoch, or it is dropped), and so is every other event of every Account and every revealed secret.
+ * What the finalize's arrival does to the Entity is the dissolve of the Account's holds and the failure of the locks it
+ * forwarded to that peer (`finalized`), which a secret in the finalize's arguments must precede (R-HOLD-DISSOLVE): that
+ * alone waits, told `late` when it comes, so it leaves what happened in the epoch after it alone. `awaited` says which
+ * events wait for bytes. A dispute start never holds anything back: its secrets and its window are in its log, only its
+ * body comes from the bytes, and the Entity must hear a dispute against it in time.
+ */
+export const splitStalled = (events: readonly ChainEvent[], awaited: (e: ChainEvent) => boolean): Split => {
+  const held = (e: ChainEvent): boolean => e._tag === "dispute_finalized" && awaited(e);
+  return { ready: events.filter((e) => !held(e)), held: events.filter(held) };
+};
 
 /** The Accounts the chain must be asked about, at the end of which block, before `advance` can run. */
 export const readings = (p: Prepared, hosted: readonly Bytes32[]): readonly Reading[] => readingsOf(p.events, hosted);
+
+/** A dispute window a hosted Entity waits on: its dispute with `peer` ends at the chain's second `timeout`. */
+export type Window = Readonly<{ to: Bytes32; peer: Bytes32; timeout: bigint }>;
+
+/** The windows of the disputes a delivery's own events say the hosted Entity started: the Host cannot know them yet. */
+const opening = (events: readonly Addressed[]): readonly Window[] =>
+  events.flatMap(({ to, event }): readonly Window[] =>
+    (event._tag === "j_dispute" && event.by === (to < event.peer ? "left" : "right")
+      ? [{ to, peer: event.peer, timeout: event.timeout }]
+      : []));
+
+/**
+ * The windows the chain's clock has passed by the delivery's last block, each told to its Entity once per delivery
+ * (R-DISPUTE-FINALIZE). A block's second is the chain's own, so a window is over for the Entity only when a final
+ * block says so: nothing here reads the Host's clock. The windows are those the Host brings and those the delivery's
+ * own events open, so a dispute whose start and window end are in one delivery is not left for the next block.
+ */
+const passed = (
+  at: bigint, hosted: readonly Bytes32[], windows: readonly Window[], events: readonly Addressed[],
+): readonly Addressed[] =>
+  [...windows, ...opening(events)].filter((x) => hosted.includes(x.to) && at >= x.timeout)
+    .map((x): Addressed => ({ to: x.to, event: { _tag: "j_window_over", peer: x.peer } satisfies JEvent }));
 
 /** The J events of one delivery for the hosted Entities, the height they end at, and the cursor to store. */
 export type Step = Readonly<{ watch: Watch; height: JHeight; events: readonly Addressed[] }>;
 
 /**
- * Deliver a prepared batch: the J events of its logs for the hosted Entities, in the chain's order, and the height
- * they end at. The new cursor is the batch's last block; an empty batch is the cursor itself and announces its height
- * again.
+ * Deliver a prepared batch: the J events of its logs for the hosted Entities, in the chain's order, then the windows
+ * the batch's last block has passed, and the height they end at. The new cursor is the batch's last block; an empty
+ * batch is the cursor itself and announces its height again. `beyond` is what the delivery knows past its own
+ * events (j/observe.ts).
  */
 export const advance = (
-  w: Watch, p: Prepared, hosted: readonly Bytes32[], accounts: Accounts,
+  w: Watch, p: Prepared, hosted: readonly Bytes32[], accounts: Accounts, windows: readonly Window[] = [],
+  beyond: Partial<Beyond> = {},
 ): Result<Step, WatchFault> =>
-  flatMap(observe(p.events, hosted, accounts), (events) =>
-    map(jHeight(p.last.number), (height) => ({ watch: { ...w, applied: p.last }, height, events })));
+  flatMap(observe(p.events, hosted, accounts, beyond), (events) =>
+    map(jHeight(p.last.number), (height) => ({
+      watch: { ...w, applied: p.last }, height,
+      events: [...events, ...passed(p.last.timestamp, hosted, windows, events)],
+    })));

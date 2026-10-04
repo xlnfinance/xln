@@ -1,15 +1,30 @@
 {
  "id": "R-SWAP-OFFER",
- "statement": "Either side offers its own funds for the other's: `offer` names a maker, a give leg and a want leg in two different tokens (same_token), amounts in 1..MAX_AMOUNT, a slot of its own (offer_exists) and a deadline in range (N2). The maker's give is reserved against the maker in its token and the taker's want against the taker in the other, each only if its RCPAN still holds, so a fill can never fail on funds. An offer is one clause against R-HOLD-CAP together with the holds, across tokens.",
+ "statement": "Either side quotes its own funds for the other's: `offer` names a maker, a give leg and a want leg in two different tokens (same_token), amounts in 1..MAX_AMOUNT, a slot of its own among the quotes and offers (offer_exists), a deadline in range (N2) and a quote to spare (R-SWAP-CONSENT). Only the maker's give is reserved, against the maker in its token and only if its RCPAN still holds; the quote reserves nothing of the taker's and is no clause of the signed body. The Arrival cell holds the page's quote (R-SWAP-CONSENT, kernel PR 132): the maker's give is reserved against the maker, always exactly what the quotes and accepted offers could still take (the taker's want only once its first fill accepts), and a quote is kept only if RCPAN holds with it, so in the worst case over the live offers a fill never fails on funds; the fault names (same_token, offer_exists, the deadline range, the amount bounds), the cap of 4 quotes per maker and the R-HOLD-CAP count are on no page (one offer per slot, one token pair).",
  "source": "Arthur 10-01 02:53 (D3: two-party swap inside an Account); plan/swap-onchain.md; coordinator 10-01",
  "layers": {
-  "arrival": "owed: spec thread, swap page",
+  "arrival": "hold",
   "quint": "owed: spec thread",
   "contract": "n/a: an off-chain Account rule; the chain sees only the signed swap clause (R-SWAP-ONCHAIN)",
   "rig": "n/a: an off-chain Account rule; the walk compares the spec with the contracts, and the chain has no part here",
   "ts": "hold"
  },
  "killers": [
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "account/swap R-SWAP-OFFER either side quotes its funds for the other's, reserving only its own give"
+  },
+  {
+   "kind": "bug",
+   "layer": "arrival",
+   "name": "swap-offer-without-rcpan"
+  },
+  {
+   "kind": "bug",
+   "layer": "arrival",
+   "name": "swap-quote-reserves-taker"
+  },
   {
    "kind": "test",
    "layer": "ts",

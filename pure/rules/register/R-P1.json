@@ -1,6 +1,6 @@
 {
  "id": "R-P1",
- "statement": "A hub whose onward HTLC is refused fails the incoming lock back at once (outcome error, forward_failed:<reason>).",
+ "statement": "A hub whose onward HTLC is refused fails the incoming lock back at once (outcome error, forward_failed:<reason>). The Quint cell holds the failback when the deadline arithmetic leaves no room to forward the lock (no-failback-when-tight); only that case carries the id there, and the outcome tag forward_failed:<reason> is not modelled.",
  "source": "lessons.md section 6",
  "layers": {
   "arrival": "owed: spec thread, next Arrival page (id not in a name yet)",

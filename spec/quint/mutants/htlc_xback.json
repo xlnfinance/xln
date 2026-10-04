@@ -1,0 +1,38 @@
+{
+  "files": [
+    "htlc.qnt",
+    "htlc_xback.qnt",
+    "htlc_test.qnt"
+  ],
+  "init": "init",
+  "step": "step",
+  "test": "htlc_test.qnt",
+  "testMain": "xback_htlc_test",
+  "steps": 70,
+  "mutants": [
+    {
+      "id": "backstop-no-registry-check",
+      "why": "the hub co-signs the upstream expiry whatever the registry shows",
+      "file": "htlc.qnt",
+      "old": "BACK implies (st.now >= TUX + PD and not(regShows(st))),",
+      "new": "BACK implies (st.now >= TUX + PD),",
+      "killedBy": "test:backstopRefusesExpiryTest"
+    },
+    {
+      "id": "backstop-never-claims",
+      "why": "the hub refuses the expiry but never claims by the registry: the lock is stuck open and the property reads it as unsafe",
+      "file": "htlc.qnt",
+      "old": "pure def regClaimable(s: St): bool = BACK and",
+      "new": "pure def regClaimable(s: St): bool = false and",
+      "killedBy": "test:transformerRevealTest"
+    },
+    {
+      "id": "backstop-late-reveals-not-shown",
+      "why": "the registry check counts a reveal only up to the downstream deadline, not the lock's own second",
+      "file": "htlc.qnt",
+      "old": "pure def regShows(s: St): bool = s.revealedAt != 0 and s.revealedAt <= TUX",
+      "new": "pure def regShows(s: St): bool = s.revealedAt != 0 and s.revealedAt <= TD",
+      "killedBy": "test:lateRevealTest"
+    }
+  ]
+}

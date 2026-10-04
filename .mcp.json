@@ -1,17 +1,12 @@
 {
   "mcpServers": {
-    "ast-grep": {
-      "type": "stdio",
-      "command": "ast-grep-server",
-      "env": {
-        "AST_GREP_PATH": "ast-grep"
-      }
-    },
     "arrival": {
       "type": "stdio",
       "command": "node",
       "args": [
-        "spec/mcp/server.mjs"
+        "/Users/boris/jin/harness/packages/arrival-manifold/dist/bin.js",
+        "--config",
+        "spec/manifold.mcp.json"
       ]
     }
   }

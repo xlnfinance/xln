@@ -1,6 +1,7 @@
 {
   "no-mutating-call": { "kernel/core/result.ts": 1 },
   "no-throw": { "kernel/core/tagged.ts": 1 },
-  "no-try": { "kernel/crypto/signature.ts": 1 },
-  "no-boolean-param": { "kernel/encoding/abi.ts": 2 }
+  "no-try": { "kernel/crypto/signature.ts": 1, "host/shell/codec/value.ts": 1 },
+  "no-boolean-param": { "kernel/encoding/abi.ts": 2 },
+  "long-line": { "runtime/chain/rebase.test.ts": 1 }
 }

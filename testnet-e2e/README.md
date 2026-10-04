@@ -29,7 +29,7 @@ Exit 0 only when every step is done, 1 while any is scaffolded or blocked, 2 whe
 
 ## Where each piece comes from
 
-Real, from main: Account money and the frame round (`pure/account`), every encoding the contracts read and every signed payload (`pure/chain`: Batch, ProofBody, batch and dispute-proof payloads, the lazy Hanko), signatures (`pure/kernel`). Stand-ins in this folder, each a named gap in `lib/gaps.ts`: the J side's reads of the chain and its simulation on the fork (`lib/chain.ts`), the Host's shell: four Runtimes with an in-memory disk and link (`lib/net.ts`), the J loop (`lib/jloop.ts`), the conversion of a Runtime's chain action to a J op and the hop-by-hop HTLC forwarder (`steps.ts`). The J batch builder, the Host core, the watcher core, the signed frames, the proof body and the Entity's commands are the rewrite's own.
+Real, from main and development (the J builder, the Host core, the watcher core and the Entity commands are on development until its next stage close): Account money and the frame round (`pure/account`), every encoding the contracts read and every signed payload (`pure/chain`: Batch, ProofBody, batch and dispute-proof payloads, the lazy Hanko), signatures (`pure/kernel`). Stand-ins in this folder, each a named gap in `lib/gaps.ts`: the J side's reads of the chain and its simulation on the fork (`lib/chain.ts`), the Host's shell: four Runtimes with an in-memory disk and link (`lib/net.ts`), the J loop (`lib/jloop.ts`), the conversion of a Runtime's chain action to a J op and the hop-by-hop HTLC forwarder (`steps.ts`). The J batch builder, the Host core, the watcher core, the signed frames, the proof body and the Entity's commands are the rewrite's own.
 
 ## Tripwires
 

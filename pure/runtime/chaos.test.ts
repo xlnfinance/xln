@@ -11,13 +11,14 @@
 import { describe, expect, test } from "bun:test";
 import { draw } from "../account/fixtures.ts";
 import { frameName } from "../account/frame/account.ts";
-import type { Msg } from "../account/frame/frame.ts";
+import type { FrameHash, Msg } from "../account/frame/frame.ts";
 import { ledgerOf } from "../account/state.ts";
 import type { AccountTx } from "../account/tx.ts";
-import { GOLD, entityOf } from "../entity/fixtures.ts";
+import { GOLD, TEST_SIG, entityOf } from "../entity/fixtures.ts";
 import {
   emptyEntity, type Command, type EntityId, type EntityInput, type EntityState, type JAction,
 } from "../entity/model.ts";
+import { mapSet } from "../kernel/core/collections.ts";
 import type { Result } from "../kernel/core/result.ts";
 import type { Halt, Input, Row, Runtime } from "./model.ts";
 import { apply, commit, flush, messageId, recover, startRuntime } from "./tick.ts";
@@ -134,14 +135,14 @@ const stampsOf = (w: World): readonly string[] =>
   }));
 
 /** Every frame either WAL says it sent, by content name, with its parent head: both sides' frames are in these WALs. */
-const parents = (w: World): ReadonlyMap<string, string> =>
+const parents = (w: World): ReadonlyMap<string, FrameHash> =>
   new Map(NAMES.flatMap((n) => w.hosts[n].runtime.wal.flatMap((row: Row) => row.outputs.flatMap((o) =>
     (o.msg._tag === "frame" ? [[frameName(o.msg.frame), o.msg.frame.parent] as const] : [])))));
 
 type Replica = NonNullable<ReturnType<typeof accountOf>>;
 
 /** `x` has committed one frame more than `y`: the frame `x` committed last has `y`'s head as its parent. */
-const oneAhead = (up: ReadonlyMap<string, string>, x: Replica, y: Replica): boolean =>
+const oneAhead = (up: ReadonlyMap<string, FrameHash>, x: Replica, y: Replica): boolean =>
   x.last !== undefined && up.get(x.last) === y.head;
 
 /** The committed heads (of the Hosts that are between frames) are one chain: the same head, or one frame apart. */
@@ -256,11 +257,30 @@ const risen = (ops: Ops, w: World): World =>
     return commitHost(ops, fed, n);
   }, w);
 
+/** The Host whose signed operation the chain answers: the newest serial, when both signed and neither landed. */
+const signerOf = (w: World): Name | undefined => {
+  const serialOf = (n: Name): bigint => outstanding(w.hosts[n])?.serial ?? -1n;
+  const [first, ...rest] = NAMES.filter((n) => outstanding(w.hosts[n]) !== undefined);
+  return first === undefined ? undefined : rest.reduce((best, n) => (serialOf(n) > serialOf(best) ? n : best), first);
+};
+
 /** The chain moves the epoch on for both Hosts, which have to be between frames: whatever was signed has landed. */
 const landed = (ops: Ops, w: World): World => {
   const epoch = 1n + NAMES.reduce((e, n) => (e > (factsOf(w, n)?.epoch ?? 0n) ? e : (factsOf(w, n)?.epoch ?? 0n)), 0n);
   const event = (n: Name): EntityInput => ({ _tag: "j_epoch", peer: ID[PEER[n]], epoch, stored: epoch * 10n });
-  return risen(ops, NAMES.reduce((acc, n) => told(ops, acc, n, event(n)), w));
+  // The chain holds one value for both Hosts: what the signer folded, read off its own ledger (it was frozen from the
+  // signature on, so its offdelta is the signed fold). The other Host may hold a frame the link has not delivered yet,
+  // so its own ledger says nothing about it. A landing is asked for only when something was signed.
+  const signer = signerOf(w) ?? expect.unreachable("a landing with nothing signed");
+  const signed = accountOf(w, signer) ?? expect.unreachable("a signer with no Account");
+  const folded = (acc: World, n: Name): World => {
+    const l = ledgerOf(signed.state, GOLD);
+    const ondelta = l.ondelta + l.offdelta;
+    const fold: EntityInput =
+      { _tag: "j_collateral", peer: ID[PEER[n]], token: GOLD, collateral: l.collateral, ondelta };
+    return told(ops, acc, n, fold);
+  };
+  return risen(ops, NAMES.reduce((acc, n) => folded(told(ops, acc, n, event(n)), n), w));
 };
 
 /** The Host of `signer` asks the other for the same signature, as its transport would. */
@@ -272,7 +292,7 @@ const asked = (ops: Ops, w: World, signer: Name, op: Signed): World => {
 
 /** The chain tells a Host something: the operation lands on both, lapses for its signer, or is asked of the other. */
 const chainStep = (c: Chaos, w: World, step: number): World => {
-  const signer = NAMES.find((n) => outstanding(w.hosts[n]) !== undefined);
+  const signer = signerOf(w);
   const op = signer === undefined ? undefined : outstanding(w.hosts[signer]);
   if (signer === undefined || op === undefined) return w;
   const lapse: EntityInput = { _tag: "j_op_lapsed", peer: ID[PEER[signer]], serial: op.serial };
@@ -289,7 +309,8 @@ const linkFrame = (c: Chaos, w: World, step: number, name: Name): World => {
   const mine = w.net.filter((f) => f.to === name);
   const taken = mine.slice(q(2, mine.length)).slice(0, 1 + q(6, 3));
   const command = q(7, 100) < 30 ? [commandAt(c, w, step, name)] : [];
-  const arrivals = taken.map((f): EntityInput => ({ _tag: "peer_message", from: ID[PEER[name]], msg: f.msg }));
+  const arrivals = taken.map((f): EntityInput =>
+    ({ _tag: "peer_message", from: ID[PEER[name]], msg: f.msg, sig: TEST_SIG }));
   const input = inputOf(w, name, [...command, ...arrivals]);
   return idle(w.hosts[name]) && taken.length > 0 ? feed(c.ops, w, name, "link", taken.map((f) => f.id), input) : w;
 };
@@ -342,7 +363,7 @@ const finishHost = (ops: Ops, w: World, name: Name): World =>
 const take = (ops: Ops, w: World, name: Name): World => {
   const flight = w.net.find((f) => f.to === name);
   if (flight === undefined) return w;
-  const arrival: EntityInput = { _tag: "peer_message", from: ID[PEER[name]], msg: flight.msg };
+  const arrival: EntityInput = { _tag: "peer_message", from: ID[PEER[name]], msg: flight.msg, sig: TEST_SIG };
   return commitHost(ops, feed(ops, w, name, "link", [flight.id], inputOf(w, name, [arrival])), name);
 };
 
@@ -390,7 +411,7 @@ const moneyFailures = (w: World): readonly string[] => {
   const l = a === undefined ? undefined : ledgerOf(a.state, GOLD);
   const owed = owedToLeft(w);
   const says = `the payments taken less refused say ${owed}`;
-  return l === undefined || l.offdelta === owed ? [] : [`offdelta ${l.offdelta}, ${says}`];
+  return l === undefined || l.ondelta + l.offdelta === owed ? [] : [`delta ${l.ondelta + l.offdelta}, ${says}`];
 };
 
 /** Every second run of the chain weather starts with an offdelta: the Accounts open, Bob lends, Alice pays him 7. */
@@ -469,6 +490,30 @@ describe("runtime/chaos two Hosts over a link that loses, repeats and reorders, 
     expect(v.settledRuns).toBe(RUNS);
     expect(v.frames).toBeGreaterThan(RUNS * 4);
   }, BUDGET_MS);
+
+  test("R-NET planted fork: two Hosts that committed different frames are red; one frame apart is not", () => {
+    const w = primed({ ops: REAL, weather: WITHDRAWING, seed: SEED, run: 1 });
+    const alice = accountOf(w, "alice") ?? expect.unreachable("no Account");
+    const bob = accountOf(w, "bob") ?? expect.unreachable("no Account");
+    const retold = (n: Name, replica: Replica): World => {
+      const rt = w.hosts[n].runtime;
+      const entity = rt.entities.get(ID[n]) ?? expect.unreachable("no entity");
+      const accounts = mapSet(entity.accounts, ID[PEER[n]], replica);
+      const entities = mapSet(rt.entities, ID[n], { ...entity, accounts });
+      return withHost(w, n, { ...w.hosts[n], runtime: { ...rt, entities } });
+    };
+    const behind = alice.last === undefined ? undefined : parents(w).get(alice.last);
+    expect([alice.head === bob.head, alice.last !== undefined, behind !== undefined]).toEqual([true, true, true]);
+    expect(oneChain(w)).toEqual([]);
+    if (behind === undefined) return expect.unreachable("Alice committed no frame");
+    expect(oneChain(retold("bob", { ...bob, head: behind, last: undefined }))).toEqual([]);
+    // Bob's head is a frame no WAL ever sent: neither side is one frame ahead of the other
+    const unsent = frameName({
+      author: "left", parent: alice.head, attempt: 7, slot: 2, epoch: 0n, firstNonce: 2n, txs: [],
+    });
+    expect(oneChain(retold("bob", { ...bob, head: unsent, last: unsent })))
+      .toEqual(["the two sides committed different frames"]);
+  });
 
   test("R-DURABLE planted bug: a flush that lets a staged frame's outputs leave is a leak", () => {
     const leaking: Ops = { ...REAL, flush: (rt) => {

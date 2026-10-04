@@ -1,9 +1,9 @@
 {
  "id": "R-BOOK-CLAUSE-LOCKSTEP",
- "statement": "Every party that trades gets one execution: its Account moves by what it gave and got, and its swap clause is rebuilt from the lots still open at the offer's own price (or dropped when filled or withdrawn), never subtracted.",
+ "statement": "Every party that trades gets one execution: its Account moves by what it gave and got, and its swap clause is rebuilt from the lots still open at the offer's own price (or dropped when filled or withdrawn), never subtracted. The Arrival cell holds the one-Account half: a fill moves the offdeltas and rebuilds the clause from what remains, or drops it, in the same step, and no order of offers, fills, withdrawals and lapses leaves a clause that could fill what the offdeltas already hold; the hub book's lots and prices are on no spec page.",
  "source": "Hub matching engine thread, coordinator brief 10-01 02:56 (Arthur: the matching engine is a parallel job; the swap clause stays the Account's)",
  "layers": {
-  "arrival": "owed: spec thread (the swap step: R-SWAP-CLAUSE-WITH-FILL)",
+  "arrival": "hold",
   "quint": "owed: spec thread (the swap step: R-SWAP-CLAUSE-WITH-FILL)",
   "contract": "n/a: an off-chain hub engine; the chain sees only the signed swap clause (R-SWAP-ONCHAIN)",
   "rig": "owed: matching engine thread (when the engine is wired into money state)",
@@ -29,6 +29,11 @@
    "kind": "test",
    "layer": "ts",
    "name": "R-BOOK-PRICE-TIME R-BOOK-NEVER-CROSSED R-BOOK-CLAUSE-LOCKSTEP the book matches the oracle"
+  },
+  {
+   "kind": "bug",
+   "layer": "arrival",
+   "name": "swap-fill-leaves-clause"
   }
  ]
 }

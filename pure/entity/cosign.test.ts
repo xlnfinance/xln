@@ -6,7 +6,7 @@ import type { AccountTx } from "../account/tx.ts";
 import { emptyLedger, MAX_AMOUNT } from "../account/ledger.ts";
 import { signing, tokenOf, viewOf } from "../account/fixtures.ts";
 import type { AccountState, Ledger, TokenId } from "../account/model.ts";
-import { credit, entityOf, GOLD, judge, open, pay } from "./fixtures.ts";
+import { anchor, credit, entityOf, GOLD, judge, open, OPENED_WITH, pay, TEST_SIG } from "./fixtures.ts";
 import { entityFrame } from "./frame.ts";
 import { entityRules, type Standing } from "./rules.ts";
 import { emptyEntity, type CosignOp, type EntityInput, type EntityState, type JAction, type Notice } from "./model.ts";
@@ -15,9 +15,11 @@ const ALICE = entityOf(1);
 const BOB = entityOf(2);
 const CAROL = entityOf(3);
 const SILVER = tokenOf(2n);
-const UNFROZEN_LEFT: Standing = { self: "left", frozen: false };
+const UNFROZEN_LEFT: Standing = {
+  self: "left", frozen: false, unruled: new Set(), blind: false, shown: new Map(),
+};
 
-const run = (state: EntityState, ...inputs: readonly EntityInput[]) => entityFrame(judge, signing, state, inputs);
+const run = (state: EntityState, ...inputs: readonly EntityInput[]) => entityFrame(judge, anchor, state, inputs);
 
 const ledger = (offdelta: bigint): Ledger =>
   ({ ...emptyLedger, collateral: 100n, offdelta, limit: { left: 100n, right: 100n } });
@@ -26,7 +28,7 @@ const ledger = (offdelta: bigint): Ledger =>
 const aliceWith = (offdeltas: ReadonlyMap<TokenId, bigint>): EntityState => {
   const base = run(emptyEntity(ALICE), open(BOB), open(CAROL)).state;
   const held = new Map([...offdeltas].map(([token, d]) => [token, ledger(d)]));
-  const ledgers: AccountState = { ledgers: held, offers: [] };
+  const ledgers: AccountState = { ledgers: held, quotes: [], offers: [] };
   const withBob = { ...emptyReplica("left"), state: ledgers };
   return { ...base, accounts: new Map([...base.accounts, [BOB, withBob]]) };
 };
@@ -174,7 +176,7 @@ describe("entity/cosign R-COSIGN-FREEZE the other way: the peer's frames are ref
   const bob = run(emptyEntity(BOB), open(ALICE)).state;
   const sent = run(bob, credit(ALICE, 50n));
   const frame = sent.outputs[0]?.msg ?? expect.unreachable("Bob proposed nothing");
-  const fromBob: EntityInput = { _tag: "peer_message", from: BOB, msg: frame };
+  const fromBob: EntityInput = { _tag: "peer_message", from: BOB, msg: frame, sig: TEST_SIG };
   const hashOf = frame._tag === "frame" ? frameName(frame.frame) : expect.unreachable("no frame");
 
   test("R-COSIGN-FREEZE a peer's frame is refused with the frozen fault, naming the frame and its first tx", () => {
@@ -193,7 +195,7 @@ describe("entity/cosign R-COSIGN-FREEZE the other way: the peer's frames are ref
 
   test("R-COSIGN-FREEZE the refusal can pass: Bob takes the frame back, keeps its tx, drops nothing", () => {
     const refused = run(frozen, fromBob).outputs[0]?.msg ?? expect.unreachable("no refusal");
-    const back = run(sent.state, { _tag: "peer_message", from: ALICE, msg: refused });
+    const back = run(sent.state, { _tag: "peer_message", from: ALICE, msg: refused, sig: TEST_SIG });
     const account = back.state.accounts.get(ALICE);
     expect(account?.pending).toBeUndefined();
     expect(account?.mempool).toHaveLength(1);
@@ -202,11 +204,11 @@ describe("entity/cosign R-COSIGN-FREEZE the other way: the peer's frames are ref
 
   test("R-COSIGN-FREEZE after a lapse Bob's retry at the next attempt commits, the refused frame stays refused", () => {
     const refused = run(frozen, fromBob).outputs[0]?.msg ?? expect.unreachable("no refusal");
-    const rolled = run(sent.state, { _tag: "peer_message", from: ALICE, msg: refused }).state;
-    const later = entityFrame({ ...judge, view: viewOf(101n) }, signing, rolled, []);
+    const rolled = run(sent.state, { _tag: "peer_message", from: ALICE, msg: refused, sig: TEST_SIG }).state;
+    const later = entityFrame({ ...judge, view: viewOf(101n) }, anchor, rolled, []);
     const retry = later.outputs[0]?.msg ?? expect.unreachable("Bob did not retry");
     const lapsed = run(run(frozen, fromBob).state, { _tag: "j_op_lapsed", peer: BOB, serial: 1n });
-    const again = run(lapsed.state, { _tag: "peer_message", from: BOB, msg: retry });
+    const again = run(lapsed.state, { _tag: "peer_message", from: BOB, msg: retry, sig: TEST_SIG });
     expect(again.outputs.map((o) => o.msg._tag)).toEqual(["ack"]);
     const repeat = run(lapsed.state, fromBob);
     expect(repeat.outputs.map((o) => o.msg._tag)).toEqual(["refusal"]);
@@ -228,7 +230,7 @@ describe("entity/cosign R-COSIGN-FREEZE a lapse names its operation: only the on
   const second = run(thawed, withdraw(20n));
   const bob = run(emptyEntity(BOB), open(ALICE), credit(ALICE, 50n));
   const frame = bob.outputs[0]?.msg ?? expect.unreachable("Bob proposed nothing");
-  const fromBob: EntityInput = { _tag: "peer_message", from: BOB, msg: frame };
+  const fromBob: EntityInput = { _tag: "peer_message", from: BOB, msg: frame, sig: TEST_SIG };
 
   test("R-COSIGN-FREEZE each operation of an Account has its own serial, counting from one", () => {
     expect(first.chain.map((a) => (a._tag === "settle" ? a.serial : undefined))).toEqual([1n]);
@@ -252,7 +254,7 @@ describe("entity/cosign R-COSIGN-FREEZE a lapse names its operation: only the on
     expect(factsOf(landed)?.frozen).toBe(false);
     expect(factsOf(landed)?.cosigned).toBe(2n);
     const third = run(landed, withdraw(10n));
-    expect(third.chain.map((a) => (a._tag === "settle" ? a.serial : undefined))).toEqual([3n]);
+    expect(third.chain.map((a) => (a._tag === "c2r" ? a.serial : undefined))).toEqual([3n]);
     expect(factsOf(run(third.state, lapse(2n)).state)?.frozen).toBe(true);
   });
 });
@@ -260,7 +262,8 @@ describe("entity/cosign R-COSIGN-FREEZE a lapse names its operation: only the on
 describe("entity/cosign review A: the edges of the signature, and what a dispute does to the freeze", () => {
   const signed = (amount: bigint): JAction =>
     ({ _tag: "settle", peer: BOB, serial: 1n, token: GOLD, amount, folds: [OWED] });
-  const disputed = (by: "left" | "right"): EntityInput => ({ _tag: "j_dispute", peer: BOB, epoch: 0n, by });
+  const disputed = (by: "left" | "right"): EntityInput =>
+    ({ _tag: "j_dispute", peer: BOB, epoch: 0n, by, nonce: 3n, timeout: 5n, ...OPENED_WITH });
   const factsOf = (s: EntityState) => s.chain.get(BOB);
 
   test("R-COSIGN-FREEZE a tx queued in the same frame does not stop the signature, which holds it back", () => {

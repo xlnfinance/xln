@@ -1,9 +1,9 @@
 {
  "id": "R-SWAP-FILL",
- "statement": "The taker (not the maker) fills a whole ratio 1..65535 of what remains, while the offer is live in the judge's view. Each leg is floor(amount * ratio / 65535) on its own, the arithmetic of DeltaTransformer's applySwap, so a fill the chain would settle at the same ratio moves the same amounts. A fill that takes nothing of a leg is refused (fill_too_small): every fill is a trade. The whole fill (65535) drops the offer.",
+ "statement": "The taker (not the maker) fills a whole ratio 1..65535 of what remains, while the offer is live in the judge's view. Each leg is floor(amount * ratio / 65535) on its own, the arithmetic of DeltaTransformer's applySwap, so a fill the chain would settle at the same ratio moves the same amounts. A fill that takes nothing of a leg is refused (fill_too_small): every fill is a trade. The whole fill (65535) drops the offer. The first fill of a quote is its acceptance (R-SWAP-CONSENT): the taker's want, in whole, is reserved against the taker only if its RCPAN still holds, and a remainder is a clause only if the Account has a clause to spare (too_many_holds). The Arrival cell holds the fill ratio and the arithmetic: a whole ratio of what remains, each leg floor(remainder * ratio / 65535) on its own, the legs filled never exceeding the legs offered, nothing created or lost on the offdeltas, a whole fill dropping the offer, and a first fill of a quote (its acceptance, R-SWAP-CONSENT) needing room for the taker's whole want; that only the taker fills, that a fill taking nothing of a leg is refused (fill_too_small) and that a fill is judged in the judge's view are guards on the page that no property or planted bug pins, and the 33rd clause of a first fill (too_many_holds) is on no page. That a quote can be filled, withdrawn and lapsed at all is carried by the state counts of the page's cases, not by a property.",
  "source": "Arthur 10-01 02:53 (D3: two-party swap inside an Account); plan/swap-onchain.md; coordinator 10-01",
  "layers": {
-  "arrival": "owed: spec thread, swap page",
+  "arrival": "hold",
   "quint": "owed: spec thread",
   "contract": "owed: contracts review (R-SWAP-ONCHAIN: a finalize at the same ratio moves the same amounts as this rule; plan/swap-onchain.md)",
   "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
@@ -14,6 +14,26 @@
    "kind": "test",
    "layer": "ts",
    "name": "account/swap R-SWAP-FILL the taker fills a ratio of what remains, each leg rounded down on its own"
+  },
+  {
+   "kind": "bug",
+   "layer": "arrival",
+   "name": "swap-fill-beyond-remainder"
+  },
+  {
+   "kind": "bug",
+   "layer": "arrival",
+   "name": "swap-fill-leg-rounds-up"
+  },
+  {
+   "kind": "bug",
+   "layer": "arrival",
+   "name": "swap-fill-ratio-unchecked"
+  },
+  {
+   "kind": "bug",
+   "layer": "arrival",
+   "name": "swap-accept-without-room"
   }
  ]
 }

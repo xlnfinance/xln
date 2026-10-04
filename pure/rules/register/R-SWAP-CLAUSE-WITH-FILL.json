@@ -1,9 +1,9 @@
 {
  "id": "R-SWAP-CLAUSE-WITH-FILL",
- "statement": "The contract has no memory of fills, so the step that moves the offdeltas for a fill also shrinks the offer to its remainder (give and want, both reservations, the clause in the signed body), and a whole fill leaves no clause. The signed state never carries a clause that could fill what the offdeltas already hold: a dispute from it with the taker filling in full yields exactly the offer, never more, in any order of offers, fills, withdrawals and lapses.",
+ "statement": "The contract has no memory of fills, so the step that moves the offdeltas for a fill also shrinks the offer to its remainder (give and want, both reservations, the clause in the signed body), and a whole fill leaves no clause. The signed state never carries a clause that could fill what the offdeltas already hold: a dispute from it with the taker filling in full yields exactly the offer, never more, in any order of offers, fills, withdrawals and lapses. The Arrival cell holds the one-Account half: a fill moves the offdeltas and rebuilds the signed clause from what remains (or drops it) in the same step, a quote is no clause, and a dispute from any reachable state pays the moved offdeltas plus the taker's ratio of what the clauses still hold, never more than the offer.",
  "source": "Arthur 10-01 02:53 (D3: two-party swap inside an Account); plan/swap-onchain.md; coordinator 10-01",
  "layers": {
-  "arrival": "owed: spec thread, swap page",
+  "arrival": "hold",
   "quint": "owed: spec thread",
   "contract": "owed: contracts review (R-SWAP-ONCHAIN: a finalize at the same ratio moves the same amounts as this rule; plan/swap-onchain.md)",
   "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
@@ -14,6 +14,21 @@
    "kind": "test",
    "layer": "ts",
    "name": "account/swap R-SWAP-CLAUSE-WITH-FILL a state that holds a fill carries a clause for what is left"
+  },
+  {
+   "kind": "bug",
+   "layer": "arrival",
+   "name": "swap-fill-leaves-clause"
+  },
+  {
+   "kind": "bug",
+   "layer": "arrival",
+   "name": "swap-dispute-drops-filled"
+  },
+  {
+   "kind": "bug",
+   "layer": "arrival",
+   "name": "swap-quote-is-clause"
   }
  ]
 }

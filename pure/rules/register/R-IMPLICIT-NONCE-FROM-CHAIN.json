@@ -1,6 +1,6 @@
 {
  "id": "R-IMPLICIT-NONCE-FROM-CHAIN",
- "statement": "The Runtime reads the account's stored nonce from the chain and never derives it, and refuses to sign any proof at stored + 1 (either author): the first signed proof of a new epoch takes nonce stored + 2 or higher, because a Right-authored proof at stored + 1 only ties the implicit proof and cannot outrank it.",
+ "statement": "The Runtime reads the account's stored nonce from the chain and never derives it, and refuses to sign any proof at stored + 1 (either author): the first signed proof of a new epoch takes nonce stored + 2 or higher, because a Right-authored proof at stored + 1 only ties the implicit proof and cannot outrank it. A counter in a dispute is at the nonce the newest co-signed frame of the epoch was signed at, the epoch's first nonce plus its slot less one, whichever side authored it: a slot is not a count of frames.",
  "source": "contracts-decisions.md R-IMPLICIT-BASELINE (Review B of PR 76, coordinator 09-30)",
  "layers": {
   "arrival": "owed: spec thread, next Arrival page",
@@ -72,6 +72,16 @@
    "layer": "ts",
    "name": "R-IMPLICIT-NONCE-FROM-CHAIN a counter after burned, yielded or refused nonces names the newest co-signed proof",
    "owed": "the cut, after #97 (the counter nonce is firstNonce + used - 1, not stored + 1 + frames)"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-IMPLICIT-NONCE-FROM-CHAIN the newest proof is at its slot, not at the count of frames"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-IMPLICIT-NONCE-FROM-CHAIN a dispute is countered at the nonce the newest frame was signed at"
   }
  ]
 }

@@ -1,0 +1,199 @@
+{
+ "id": "R-REGISTRY-AT-VIEW",
+ "statement": "The Entity decides on the chain's own word, read at its own view. When it accepts a lock (a peer's frame, its own command, or a queued tx judged again when its Account proposes), forwards one, or co-signs an expiry, the Host has read `DeltaTransformer.hashToTimestamp(hashlock)` at the J block of the frame's view, and the Entity compares it with the second the lock's body signs (`terms.secondsOf(deadline)`) exactly as DeltaTransformer.sol 289-299 does: paid iff the value is not 0 and not after that second. Never heights. A paid hashlock refuses a lock for good (`paid_on_chain`: nothing can unpay it) and refuses an expiry for good (`revealed_on_chain`: the payee's way is a dispute), and a forward of it is given up with the inbound lock cancelled. A reading is the frame's own: a reading of another block is no reading (a secret shown between the two would be missed). A hashlock with no reading at the view is not decided: the lock or expiry is refused with `registry_unknown`, which can pass, the proposer takes the frame back, and the Account's other frames go on. A read the node fails, or one the node no longer serves, is no reading and a `registry_unread` notice told once for each hashlock and reason; it is a fault for that decision only, never the Account's other frames and never a halt. The Host reads only what the frame may decide on (`wantsOf`: locks, expiries and forwards in its inputs, queued txs, forwards that wait), at the view the frame begins at (a waiting height frame, at that height, for every hosted Entity); readings travel on the Runtime input, so the WAL row holds them and a replay decides what the first run did. A node that may hold value is refused unless its setup decides on the registry (`registry_off`), and a setup that does without a port to read it is refused (`no_registry`). The watcher's `shown` stays as the fast path, and an entry is dropped once nothing names its hashlock. The comparison is pinned by the real DeltaTransformer in BrowserVM at the exact second, one past, and before the lock existed.",
+ "source": "coordinator ruling 10-03 04:11 (registry read at the view, late lock, slack); DeltaTransformer.sol applyPayment and revealSecret; R-REVEAL-BACKSTOP owed rows (slack, late lock); builder",
+ "layers": {
+  "arrival": "n/a: the Arrival specs take J events as given; the registry's reading is a node duty",
+  "quint": "n/a: the Quint model has no registry; an owed row of the dispute model",
+  "contract": "hold",
+  "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
+  "ts": "hold"
+ },
+ "killers": [
+  {
+   "kind": "test",
+   "layer": "contract",
+   "name": "R-REGISTRY-AT-VIEW a secret shown at the signed second pays, and the Entity layer reads the same"
+  },
+  {
+   "kind": "test",
+   "layer": "contract",
+   "name": "R-REGISTRY-AT-VIEW a secret shown one second past the signed second pays nothing, and the Entity layer reads the same"
+  },
+  {
+   "kind": "test",
+   "layer": "contract",
+   "name": "R-REGISTRY-AT-VIEW a secret shown before the lock existed pays, and an unrevealed hashlock reads as 0 and pays nothing"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-REGISTRY-AT-VIEW a clause is paid iff a secret was shown and not after the second the lock signs"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-REGISTRY-AT-VIEW only a reading taken at the frame's own view is a reading"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-REGISTRY-AT-VIEW a frame is handed readings for what it decides on and no others"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-REGISTRY-AT-VIEW a lock is accepted when the registry shows no secret at the view"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-REGISTRY-AT-VIEW a lock of a hashlock the chain pays is refused for good, at the second and not past"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-REGISTRY-AT-VIEW a lock with no reading at its view is refused, and the refusal can pass"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-REGISTRY-AT-VIEW a peer's lock of a paid hashlock is refused by the receiver for good"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-REGISTRY-AT-VIEW a peer's lock the receiver cannot read yet comes back and the next reading takes it"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-REGISTRY-AT-VIEW an expiry is refused for good when the registry pays the hold"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-REGISTRY-AT-VIEW an expiry with no reading at its view is refused, and the refusal can pass"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-REGISTRY-AT-VIEW a peer's expiry of a hold the chain pays is refused by the receiver, for good"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-REGISTRY-AT-VIEW a forward with no reading waits: no lock to the next hop, none given up"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-REGISTRY-AT-VIEW a forward of a paid hashlock is refused at the door, the inbound lock given up"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-REGISTRY-AT-VIEW a queued lock waits in its Account's queue for a reading and is not dropped"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-REGISTRY-AT-VIEW an Entity that does not decide on the registry decides as before"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-REGISTRY-AT-VIEW what the chain showed is kept only while a hold or an entry of the Entity names it"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-REGISTRY-AT-VIEW a waiting height is the frame to come, at that height, for every Entity"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-REGISTRY-AT-VIEW the frame to come is told to the shell before it begins"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-REGISTRY-AT-VIEW what the shell read goes into the frame's input, and none adds nothing"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-REGISTRY-AT-VIEW the frame is handed the reading of what it decides on, at the view"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-REGISTRY-AT-VIEW a failed read is no reading: the frame is begun, the decision refused, told"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-REGISTRY-AT-VIEW a block the node no longer serves is told too, with no fault of the port"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-REGISTRY-AT-VIEW a waiting height reads at the height, for what every Entity decides on then"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-REGISTRY-AT-VIEW a Runtime that does not decide on the registry reads nothing"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-REGISTRY-AT-VIEW a Runtime that decides on the registry is not started with no way to read it"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-REGISTRY-AT-VIEW the registry is read by the contract's selector, at the view"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-REGISTRY-AT-VIEW a hashlock never shown reads 0, and a reply that is not one word is a fault"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-REGISTRY-AT-VIEW a block the node no longer serves is pruned; any other error is a fault"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-REGISTRY-AT-VIEW a node that may hold value and ignores the registry is not started"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-REGISTRY-AT-VIEW a failed read is told once for its hashlock, however often it is asked"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-REGISTRY-AT-VIEW the readings a batch carries are what its frame decides on, and the row keeps them"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-REGISTRY-AT-VIEW a Runtime that does not decide on the registry ignores the readings of its batch"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-REGISTRY-AT-VIEW a frame replays from its row: the same readings make the same Entity"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-REGISTRY-AT-VIEW a new height carries the readings the frame of every Entity decides on"
+  }
+ ]
+}

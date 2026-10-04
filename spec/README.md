@@ -13,9 +13,10 @@ spec/
   arrival.config.json      arms define/overridable for the CLI (run from spec/)
   lib/vocabulary.scm       `rule` and `property`: how a page names its parts
   lib/check.scm            `check`: breadth-first walk of every reachable world
-  account/frames.scm       Account frames: propose, ack, cross-open tie-break (Left wins); a coarse J clock that moves between a frame's proposal and its receipt, the receiver's refusal with a fault tag and the proposer's retry or drop (R-FRAME-REFUSAL), the attempt number and the receiver's mark, the frame author, a proof nonce per proposal (R-RETRY-NEW-NONCE, R-PROOF-NONCE-ABOVE-SIGNED), a lock held while its proof is signed (R-SIGNED-IS-LIVE) and the freeze after a co-signed settlement (R-COSIGN-FREEZE); the proof is a slot in the frame, the refusal carries a floor (R-PROOF-NONCE-ABOVE-SIGNED)
+  account/frames.scm       Account frames: propose, ack, cross-open tie-break (Left wins); a coarse J clock that moves between a frame's proposal and its receipt, the receiver's refusal with a fault tag and the proposer's retry or drop (R-FRAME-REFUSAL), the attempt number and the receiver's mark, the frame author, a proof nonce per proposal (R-RETRY-NEW-NONCE, R-PROOF-NONCE-ABOVE-SIGNED), a lock held while its proof is signed (R-SIGNED-IS-LIVE) the freeze after a co-signed settlement (R-COSIGN-FREEZE), the epoch and first nonce a frame is signed under (R-FRAME-EPOCH, R-FRAME-EPOCH-WEDGE); the proof is a slot in the frame, the refusal carries a floor (R-PROOF-NONCE-ABOVE-SIGNED)
   account/clock.scm        a frame's timestamp carries no authority (R-CLOCK); every HTLC time judgment is in J height by the party's own view, strict expiry bound with a reserve >= LAG, payee reveals at deadline - LAG (R-HTLC-CLOCK)
   account/bugs/*.scm       deliberately broken variants; the checker must catch each
+  account/swap.scm         a two-party swap inside an Account: a quote that binds only its maker, accepted by the taker's first fill (R-SWAP-CONSENT), partial fill (a ratio of 65535, each leg floors), withdraw, lapse (off-chain expiry), the signed clause that shrinks with every fill (R-SWAP-CLAUSE-WITH-FILL), and a dispute that honours what was filled (R-SWAP-ONCHAIN)
   money/core.scm           the arithmetic both money pages share: payment, worst-case credit bound, deposit (composition)
   money/ledger.scm         the money of one Account: RCPAN credit bound in the worst case, conservation
   money/bugs/*.scm         planted money bugs
@@ -34,6 +35,7 @@ spec/
   j/batch.scm              the J batch: atomic chain, sealing, abort and abandon (a signed batch is final at its nonce), skipped dispute ops, R-J5/R-COSIGN/J6 batch rules, paused-token deposits and funded payments, FIFO debt enforcement, gas by batch kind, settlement debt forgiveness, refusal when full
   j/bugs/*.scm             planted J batch bugs
   account-frames.check.scm entry point: check the Account frames page
+  account-swap.check.scm   entry point: check the swap page
   entity-frame.check.scm   entry point: check the Entity frame page
   runtime.check.scm        entry point: check the Runtime page
   transport.check.scm      entry point: check the transport link page
@@ -57,7 +59,7 @@ cd spec
 npm install            # or: bun install    (MCP server dependencies; `npm ci` in a boot script)
 npm run setup          # pnpm install + build inside arrival/ (dist/ is not committed)
 npm run check          # about 11 minutes (650 s measured, three checks at once on a busy box): {:ok #t :states 4563 :transitions 18600 :goals 44}
-npm test               # 196 cases on this tree, one child process each (pool of TEST_JOBS=4), each verdict printed as its case finishes; exits non-zero if any case fails.
+npm test               # 275 cases on this tree, one child process each (pool of TEST_JOBS=4), each verdict printed as its case finishes; exits non-zero if any case fails.
                        # Wall time was 88.7 minutes on 4 cores before the refusal page (the J batch case with deposit legs alone takes 85); the 32 account cases alone now take about 70 minutes at TEST_JOBS=3 on a busy box (the heaviest, lossy clock, 35 minutes). Every case has a fixed budget (150 minutes) and fails by name if it blows it
 ```
 

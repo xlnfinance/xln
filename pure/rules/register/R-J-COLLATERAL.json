@@ -1,0 +1,79 @@
+{
+ "id": "R-J-COLLATERAL",
+ "statement": "What the chain holds for an Account (its collateral and ondelta, per token, from the Depository's AccountSettled) reaches each hosted party as j_collateral, once per token, in the chain's order and only at the confirmation depth; the Entity sets the ledger's collateral and ondelta to those amounts, on its committed state and on a pending frame's state, and changes no other field; the amounts are a state, so a repeat changes nothing. A log of an AccountSettled that is not one settlement of whole six-word rows is a fault. A token the Account has no ledger for is kept outside the Account until a signed frame gives it one (R-J-COLLATERAL-NO-LEDGER).",
+ "source": "plan/contracts-decisions.md R-J-COLLATERAL; D9; R-J1 (chain facts reach an Account only through J events); spec/QUESTIONS.md Q-D-22 (a deposit moves collateral and a Left deposit moves ondelta)",
+ "layers": {
+  "arrival": "owed: spec thread (the entity page takes j_epoch and j_dispute as J events; j_collateral has no page yet)",
+  "quint": "owed: spec thread (the Quint model keeps collateral and ondelta in the ledger and moves them by deposit and withdrawal actions, not by a chain snapshot)",
+  "contract": "n/a: no contract code takes part; the Depository's AccountSettled is what is read",
+  "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
+  "ts": "hold"
+ },
+ "killers": [
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-J-COLLATERAL the chain's collateral and ondelta are set as they stand; a repeat changes nothing"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-J-COLLATERAL the credit and holds of the ledger stay as they were"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-J-COLLATERAL an Account the Entity does not hold is told and ignored"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-J-COLLATERAL what the chain holds is what a payment may spend: Left pays from its deposit"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-J-COLLATERAL a command in the frame that hears the chain sees what it holds"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-J-COLLATERAL a frame in flight when the chain is heard commits with the chain's amounts"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-J-COLLATERAL what the chain holds reaches the Entity, and a restart from the WAL has it"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-J-COLLATERAL the real deposit and settlement read the collateral and ondelta the contract stored"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-J-COLLATERAL an AccountSettled is its entities and what it holds per token, an Int512 as words"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-J-COLLATERAL an AccountSettled of a shape the Depository does not emit is a fault"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-J-COLLATERAL an AccountSettled is a j_collateral per token for each hosted party, no reading needed"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-J-COLLATERAL the snapshots of one Account stay in the chain's order among its other events"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-J-COLLATERAL what the chain holds for a peer with no Account yet is kept for one opened later"
+  }
+ ]
+}

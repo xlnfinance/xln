@@ -28,11 +28,15 @@ const legItem = (l: Leg): Rlp => [text(l.token), text(l.amount)];
 
 const offerItem = (o: Offer): Rlp => [text(o.id), text(o.maker), legItem(o.give), legItem(o.want), text(o.deadline)];
 
+/** A lock's route is in its frame's name when it has one, so both sides sign the same route or none. */
+const routeItem = (route: readonly string[] | undefined): readonly Rlp[] =>
+  (route === undefined ? [] : [route.map(text)]);
+
 const txItem = (tx: AccountTx): Rlp =>
   match(tx, {
     pay: (t) => [text(t._tag), text(t.token), text(t.amount)],
     set_credit: (t) => [text(t._tag), text(t.token), text(t.limit)],
-    lock: (t) => [text(t._tag), text(t.token), holdItem(t.hold)],
+    lock: (t) => [text(t._tag), text(t.token), holdItem(t.hold), ...routeItem(t.route)],
     resolve: (t) => [text(t._tag), text(t.token), text(t.id), t.secret],
     cancel: (t) => [text(t._tag), text(t.token), text(t.id)],
     expire: (t) => [text(t._tag), text(t.token), text(t.id)],
@@ -45,7 +49,8 @@ const txItem = (tx: AccountTx): Rlp =>
 /** What a frame says, not what it signs: a refusal and a repeat name a frame by it (R-FRAME-REFUSAL, R-REACK). */
 export const frameName = (f: Frame<AccountTx>): FrameHash =>
   bytesToHex(keccak256(rlp([
-    utf8(f.author), utf8(f.parent), text(BigInt(f.attempt)), text(BigInt(f.slot)), f.txs.map(txItem),
+    utf8(f.author), utf8(f.parent), text(BigInt(f.attempt)), text(BigInt(f.slot)), text(f.epoch), text(f.firstNonce),
+    f.txs.map(txItem),
   ]))) as FrameHash;
 
 /** A lock this side signed and the peer may still hold live: the proof it is in is signed and unsuperseded. */
@@ -55,7 +60,8 @@ export type LiveLock = Readonly<{ token: TokenId; hold: Hold; slot: number }>;
  * R-SIGNED-IS-LIVE: the locks in proofs this side has signed that no committed frame above them has superseded. A
  * refusal or a yield does not end them: the peer holds the signature and may start a dispute with it, so what a lock
  * held upstream (a payer's funds) may be released on is a higher-slot frame without it committing, or the lock's own
- * deadline plus the reserve having passed, never the refusal. The Runtime reads this to hold and release (cut thread).
+ * deadline plus the reserve having passed, never the refusal. Nothing reads this yet: holding and releasing is the
+ * Runtime's duty and no Runtime code does it (R-SIGNED-IS-LIVE).
  */
 export const liveLocks = (r: AccountReplica): readonly LiveLock[] =>
   r.unsuperseded.flatMap(({ slot, txs }) =>
@@ -80,6 +86,8 @@ const signable = (signing: SigningContext, after: AccountState): Result<AccountS
  * terms its frames are signed is in `signing`. A frame's head is its signed digest (R-FRAME-HASH-SIGNED).
  */
 export const accountRules = (judge: Judge, signing: SigningContext): AccountRules => ({
+  epoch: signing.ondeltaEpoch,
+  firstNonce: signing.firstNonce,
   apply: (s, author, tx) => flatMap(applyTx(s, judge, author, tx), (after) => signable(signing, after)),
   name: frameName,
   seal: (f, after) =>

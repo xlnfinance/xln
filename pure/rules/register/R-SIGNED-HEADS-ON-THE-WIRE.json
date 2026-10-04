@@ -1,0 +1,74 @@
+{
+ "id": "R-SIGNED-HEADS-ON-THE-WIRE",
+ "statement": "A frame and an ack leave their sender signed over the head they commit it to, and the receiver commits that head only with that signature. The Entity names the head (`attest`: a frame's pending head, an ack's hash; a refusal names none) and holds no key; the Host's shell signs it with the one key it holds (the Hanko of the sender's own Entity), and only the signature crosses the link (`sig` on the message; the head stays home). The head is the digest of the dispute proof of the state after the frame, at its nonce, naming the chain, the Depository, the Account and the epoch, so the wire signature and the dispute proof share one digest (R-FRAME-HASH-SIGNED, R-FRAME-SIGNATURE-NAMES-ACCOUNT). The receiver checks the signature against the head it computed itself, as the peer's Entity (`Anchor.check`, in production a lazy Hanko whose signer is the Entity's own): a missing or wrong signature on a message that would commit is refused whole, with notice `message_unsigned`, the Account unchanged and nothing acked, so the peer's resend is the retry. The Entity keeps the newest peer-signed head (`proofs`: head, slot, signature), which is what a dispute starts with. A message that commits no head needs none. Owed: the counter action does not carry the proof yet (R-DISPUTE-WATCH); frame-name and refusal signatures are not on the wire (R-SIGNED-MESSAGES); the Host does not sign in the WAL: a row's outputs name the head (`attest`) and the shell signs when they leave, again after a restart. The signature the peer sent is in the row that committed it, so a replay rebuilds `proofs`, and a WAL whose peer message lost or changed its signature does not replay.",
+ "source": "coordinator 10-02 (audit of the e2e dispute step: nothing signed left a node, so S8 could not be real); core/ shape at 566c850 (frameHanko, disputeHanko on proposals and acks); #135 (signed bytes name chain, Depository, Account, epoch)",
+ "layers": {
+  "arrival": "n/a: the Arrival page models the Account's frames, which have no signatures; this is an Entity and Host rule",
+  "quint": "n/a: the Quint model has no signatures except as the start-requires-both-signatures cell of R-SIGNED-IS-LIVE",
+  "contract": "n/a: the chain verifies a Hanko over the same digest (R-FRAME-HASH-SIGNED); the wire check is off-chain, and the pay step shows each Entity holds its peer's signature over that head",
+  "rig": "n/a: an off-chain Entity and Host rule",
+  "ts": "hold"
+ },
+ "killers": [
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "a frame leaves naming the head its proposer's proof is signed over, and an ack the head it commits to"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "that head is the digest of the state after the frame, at its slot, in the Account's own context"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "a frame signed by its proposer commits, is acked, and its signature is kept as the proof"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "the ack, signed by the receiver, commits the proposer's frame and its signature is kept as the proof"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "a frame with no signature is refused with a notice: nothing committed, nothing acked, nothing kept"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "a frame signed by someone else, or over another head, is refused as wrong"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "an ack with no signature, or signed over a head that is not the frame's, leaves the frame pending"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-SIGNED-HEADS-ON-THE-WIRE a signed message crosses with its signature and the head stays home"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-SIGNED-HEADS-ON-THE-WIRE a signature that is no hex, too long, or has a stray key is refused"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DURABLE a restart keeps the proofs: the replay holds the peer's signature over the committed head"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DURABLE a WAL whose peer message lost its signature, or has another, does not replay"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-SIGNED-HEADS-ON-THE-WIRE a frame a restart flushes leaves signed, same signature"
+  }
+ ]
+}

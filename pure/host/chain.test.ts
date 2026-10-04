@@ -6,7 +6,7 @@ import { heightOf, holdOf, secretOf, viewOf } from "../account/fixtures.ts";
 import { holdId } from "../account/model.ts";
 import { emptyEntity, type Command } from "../entity/model.ts";
 import { credit, feed, GOLD, hostOf, open, settle, start } from "../runtime/fixtures.ts";
-import { begin, heard, idle, persisted, reopen, startHost, submit } from "./host.ts";
+import { begin, heard, idle, persisted, reopen, startHost, submit, upcoming } from "./host.ts";
 import { BOUNDS, chainIn, entityOf, inputsOf, stamp, unhalted } from "./fixtures.ts";
 
 const ALICE = entityOf(1);
@@ -66,12 +66,27 @@ describe("host/height a J height is a frame of its own, ahead of the queue; the 
     expect(idle(begun.host)).toBe(false);
   });
 
+  test("R-REGISTRY-AT-VIEW a waiting height is the frame to come, at that height, for every Entity", () => {
+    expect(upcoming(queued)).toEqual({ view: viewOf(113n), to: undefined, inputs: [] });
+    expect(upcoming(unhalted(begin(queued, stamp(100n))).host)).toBeUndefined();
+  });
+
   test("after the height frame is durable the queued input takes the next frame; the height is not taken twice", () => {
     const done = unhalted(persisted(unhalted(begin(queued, stamp(100n))).host));
     const next = unhalted(begin(done.host, stamp(101n)));
     const staged = next.host.runtime.staged;
     expect(staged === undefined ? [] : inputsOf(staged.input).map((i) => i._tag)).toEqual(["set_credit"]);
     expect(next.host.queue).toEqual([]);
+  });
+
+  test("R-HOP-SLACK the second of a height's block waits with it, and the highest height's stands for the rest", () => {
+    const host = bob();
+    const waiting = heard(heard(host, heightOf(host.runtime.view + 2n), 500n), heightOf(host.runtime.view + 1n), 400n);
+    expect(waiting).toMatchObject({ height: heightOf(host.runtime.view + 2n), seconds: 500n });
+    expect(heard(waiting, heightOf(host.runtime.view + 3n), 600n)).toMatchObject({ seconds: 600n });
+    const staged = unhalted(begin(waiting, stamp(100n))).host;
+    expect(staged).toMatchObject({ height: undefined, seconds: undefined });
+    expect(unhalted(begin(waiting, stamp(100n))).host.runtime.staged?.input).toMatchObject({ seconds: 500n });
   });
 
   test("a height that does not rise above the Runtime's view is not kept: no frame and no row", () => {

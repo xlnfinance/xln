@@ -21,19 +21,37 @@ export type Item = Readonly<{ to: EntityId; input: EntityInput }>;
 /** `perPeer` bounds the queued messages of one sender, `perFrame` the inputs one frame takes. Both mean loss. */
 export type Limits = Readonly<{ perPeer: number; perFrame: number }>;
 
-/** A message the Host turned away before it reached a frame. */
+/**
+ * A message the Host turned away before it reached a frame, and a transaction the J loop cannot read: `watch_stalled`
+ * names the transaction the node's provider fails, whose finalize the J loop holds back (every other event is told),
+ * once when the stall begins; past its retries the loop tells it unread (R-WATCH-CALLDATA). `no_call_trace` says the
+ * provider of a node that may hold value does not trace calls (a probe or a transaction's trace answered no method),
+ * so its Entity forwards no lock: once for each time the node goes blind. `registry_unread` says a reading of the
+ * chain's registry the Entity needed was not had (the node failed it or no longer serves that block), so the decision
+ * it rests on is refused or waits (R-REGISTRY-AT-VIEW): once for each hashlock and reason. `poll_late` says a poll
+ * found more final blocks unread than the clock's poll delay (R-POLL-DELAY).
+ */
 export type HostNotice =
   | Tagged<"misrouted", { to: EntityId; from: EntityId }>
-  | Tagged<"queue_full", { from: EntityId }>;
+  | Tagged<"queue_full", { from: EntityId }>
+  | Tagged<"watch_stalled", { tx: string; reason: string }>
+  | Tagged<"no_call_trace", { why: string }>
+  | Tagged<"registry_unread", { hashlock: string; reason: string }>
+  | Tagged<"poll_late", { behind: bigint; bound: bigint }>;
+
+/** Which chain action of which committed row an effect came from: the WAL height and the place in the row's `chain`. */
+export type RowId = Readonly<{ height: bigint; index: number }>;
 
 /**
  * What the Host asks of its shell. The shell reports a `persist` durable by calling `persisted`. A `send` puts a
- * message on the link and a `chain` hands an action to the J batch builder; both leave only from a committed row.
+ * message on the link and a `chain` hands an action to the J batch builder; both leave only from a committed row. A
+ * `chain` carries the identity of that row's action, which a crash and a reopen leave unchanged: a shell that is asked
+ * the same action twice knows it is one action and not two (R-DURABLE, a deposit that is not made twice).
  */
 export type Effect =
   | Tagged<"persist", { row: Row }>
   | Tagged<"send", { message: Outbound }>
-  | Tagged<"chain", { action: JAction }>;
+  | Tagged<"chain", { action: JAction; row: RowId }>;
 
 /**
  * `height` is the highest J height the J loop has handed over and no frame has taken yet, above the Runtime's view.
@@ -43,6 +61,8 @@ export type Effect =
  */
 export type Host = Readonly<{
   runtime: Runtime; limits: Limits; queue: readonly Item[]; height: JHeight | undefined;
+  /** The timestamp of the J block at `height`, as its header gave it: it goes into the frame with the height. */
+  seconds: bigint | undefined;
 }>;
 
 /** One step of the Host: where it is now and what its shell must do. */

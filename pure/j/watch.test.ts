@@ -1,19 +1,25 @@
 import { describe, expect, test } from "bun:test";
 import { err, unwrapOr, type Result } from "../kernel/core/result.ts";
 import { draw } from "../account/fixtures.ts";
-import type { RawLog } from "./log.ts";
+import { decodeLogs, type Bytes32, type ChainEvent, type RawLog } from "./log.ts";
 import { readingKey, type Accounts, type Addressed, type Reading } from "./observe.ts";
 import {
-  advance, finalizedAt, prepare, readings, watching, type Batch, type Block, type Step, type Watch, type WatchFault,
+  advance, finalizedAt, prepare, readings, splitStalled, watching, type Batch, type Block, type Step, type Watch,
+  type WatchFault, type Window,
 } from "./watch.ts";
-import { blockOf, blocksBetween, DEPOSITORY, entityOf, hashOf, hexOf, logOf, must } from "./fixtures.ts";
+import {
+  blockOf, blocksBetween, bodyHashOf, DEPLOYED, DEPOSITORY, entityOf, hashOf, hexOf, logOf, must, txOf,
+} from "./fixtures.ts";
 
 const LEFT = entityOf(0x11n);
 const RIGHT = entityOf(0x52n);
 const BYSTANDER = entityOf(0x99n);
+/** The proof the started dispute of `started` opened with: its author and body hash. */
+const OPENED = { proposerIsLeft: true, bodyHash: bodyHashOf(1n) } as const;
+
 const GENESIS = blockOf(0n);
 
-const start = (depth: bigint, from: Block = GENESIS): Watch => must(watching(DEPOSITORY, depth, from));
+const start = (depth: bigint, from: Block = GENESIS): Watch => must(watching(DEPLOYED, depth, from));
 
 const advanced = (block: bigint, index: bigint, epoch: bigint, fork = 0n) =>
   logOf("AccountEpochAdvanced", { left: LEFT, right: RIGHT, ondeltaEpoch: epoch }, block, index, fork);
@@ -22,7 +28,7 @@ const started = (block: bigint, index: bigint, fork = 0n) =>
   logOf("DisputeStarted", {
     sender: RIGHT, counterentity: LEFT, nonce: 7n, proposerIsLeft: true, proofbodyHash: hexOf(1n), watchSeed: hexOf(2n),
     starterInitialArguments: "0x", starterCounterArguments: "0x", starterCounterProofCommitment: hexOf(3n),
-    disputeTimeout: 5n, disputeStartTimestamp: 6n, leftResponseSeconds: 60n, rightResponseSeconds: 60n,
+    disputeTimeout: 500n, disputeStartTimestamp: 6n, leftResponseSeconds: 60n, rightResponseSeconds: 60n,
   }, block, index, fork);
 
 const finalized = (block: bigint, index: bigint, fork = 0n) =>
@@ -37,10 +43,11 @@ const answered = (stored: (block: bigint) => { epoch: bigint; nonce: bigint }) =
 /** Prepare, ask the chain, and deliver one batch, as the Host does. */
 const deliver = (
   w: Watch, batch: Batch, hosted: readonly typeof LEFT[], stored: (block: bigint) => { epoch: bigint; nonce: bigint },
+  windows: readonly Window[] = [],
 ): Result<Step, WatchFault> => {
   const prepared = prepare(w, batch);
   const asked = prepared.ok ? readings(prepared.value, hosted) : [];
-  return prepared.ok ? advance(w, prepared.value, hosted, answered(stored)(asked)) : prepared;
+  return prepared.ok ? advance(w, prepared.value, hosted, answered(stored)(asked), windows) : prepared;
 };
 
 const toward = (to: typeof LEFT, event: Addressed["event"]): Addressed => ({ to, event });
@@ -64,8 +71,8 @@ describe("j/watch", () => {
     expect(step.events).toEqual([
       toward(LEFT, { _tag: "j_epoch", peer: RIGHT, epoch: 1n, stored: 5n }),
       toward(RIGHT, { _tag: "j_epoch", peer: LEFT, epoch: 1n, stored: 5n }),
-      toward(LEFT, { _tag: "j_dispute", peer: RIGHT, epoch: 1n, by: "right" }),
-      toward(RIGHT, { _tag: "j_dispute", peer: LEFT, epoch: 1n, by: "right" }),
+      toward(LEFT, { _tag: "j_dispute", peer: RIGHT, epoch: 1n, by: "right", nonce: 7n, timeout: 500n, ...OPENED }),
+      toward(RIGHT, { _tag: "j_dispute", peer: LEFT, epoch: 1n, by: "right", nonce: 7n, timeout: 500n, ...OPENED }),
       toward(LEFT, { _tag: "j_dispute_over", peer: RIGHT }),
       toward(RIGHT, { _tag: "j_dispute_over", peer: LEFT }),
       toward(LEFT, { _tag: "j_epoch", peer: RIGHT, epoch: 2n, stored: 8n }),
@@ -73,6 +80,36 @@ describe("j/watch", () => {
     ]);
     expect(step.watch.applied).toEqual(blockOf(4n));
     expect(step.height).toBe(4n as typeof step.height);
+  });
+
+  test("R-DISPUTE-FINALIZE a window the last block has passed is told after the logs, and not before", () => {
+    const window = (to: typeof LEFT, peer: typeof LEFT, timeout: bigint): Window => ({ to, peer, timeout });
+    const told = (windows: readonly Window[], hosted = [LEFT]) =>
+      must(deliver(start(2n), lifecycle, hosted, lifecycleChain, windows)).events
+        .filter((e) => e.event._tag === "j_window_over");
+    const over = (to: typeof LEFT, peer: typeof LEFT): Addressed => toward(to, { _tag: "j_window_over", peer });
+    expect(blockOf(4n).timestamp).toBe(40n);
+    expect(told([window(LEFT, RIGHT, 40n)])).toEqual([over(LEFT, RIGHT)]);
+    expect(told([window(LEFT, RIGHT, 41n)])).toEqual([]);
+    expect(told([window(LEFT, RIGHT, 5n), window(LEFT, BYSTANDER, 40n), window(LEFT, RIGHT, 90n)]))
+      .toEqual([over(LEFT, RIGHT), over(LEFT, BYSTANDER)]);
+    expect(told([window(RIGHT, LEFT, 40n)])).toEqual([]);
+    const step = must(deliver(start(2n), lifecycle, [LEFT], lifecycleChain, [window(LEFT, RIGHT, 40n)]));
+    expect(step.events.at(-1)).toEqual(over(LEFT, RIGHT));
+  });
+
+  test("R-DISPUTE-FINALIZE a window the delivery itself opened for the node's own start is told after it", () => {
+    const by = (sender: typeof LEFT, counterentity: typeof LEFT, timeout: bigint) => logOf("DisputeStarted", {
+      sender, counterentity, nonce: 7n, proposerIsLeft: true, proofbodyHash: hexOf(1n), watchSeed: hexOf(2n),
+      starterInitialArguments: "0x", starterCounterArguments: "0x", starterCounterProofCommitment: hexOf(3n),
+      disputeTimeout: timeout, disputeStartTimestamp: 6n, leftResponseSeconds: 60n, rightResponseSeconds: 60n,
+    }, 3n, 0n, 0n);
+    const told = (log: RawLog) =>
+      must(deliver(start(2n), { head: 6n, blocks: blocksBetween(0n, 4n), logs: [log] }, [LEFT], lifecycleChain)).events
+        .map((e) => e.event._tag);
+    expect(told(by(LEFT, RIGHT, 40n))).toEqual(["j_dispute", "j_window_over"]);
+    expect(told(by(LEFT, RIGHT, 41n))).toEqual(["j_dispute"]);
+    expect(told(by(RIGHT, LEFT, 40n))).toEqual(["j_dispute"]);
   });
 
   test("R-WATCH-ORDER an Entity that is not hosted is told nothing, and the delivery still moves the cursor", () => {
@@ -107,8 +144,8 @@ describe("j/watch", () => {
   });
 
   test("R-WATCH-DEPTH a depth below zero is refused when the watch starts", () => {
-    expect(watching(DEPOSITORY, -1n, GENESIS)).toEqual(err({ _tag: "bad_depth", depth: -1n }));
-    expect(watching(DEPOSITORY, 0n, GENESIS).ok).toBe(true);
+    expect(watching(DEPLOYED, -1n, GENESIS)).toEqual(err({ _tag: "bad_depth", depth: -1n }));
+    expect(watching(DEPLOYED, 0n, GENESIS).ok).toBe(true);
   });
 
   test("R-WATCH-DEPTH a first block whose parent is not the cursor's block is a reorg deeper than the depth", () => {
@@ -200,11 +237,19 @@ describe("j/watch", () => {
   const bothHear = (event: (peer: typeof LEFT) => Addressed["event"]): readonly Addressed[] =>
     [toward(LEFT, event(RIGHT)), toward(RIGHT, event(LEFT))];
 
+  /** The finalize that follows an advance in its block, with no other advance between, makes it a finalize's own. */
+  const finalBodyOf = (plan: Plan, b: number, i: number) =>
+    ((plan[b] ?? []).slice(i + 1).find((d) => d !== "dispute") === "finalize" ? { finalBodyHash: bodyHashOf(5n) } : {});
+
   const toldOf = (plan: Plan, b: number, i: number): readonly Addressed[] => {
     const [nonce, epoch] = [BigInt(b + 1) * 3n, epochBefore(plan, b, i)];
     switch (plan[b]?.[i]) {
-      case "advance": return bothHear((peer) => ({ _tag: "j_epoch", peer, epoch: epoch + 1n, stored: nonce }));
-      case "dispute": return bothHear((peer) => ({ _tag: "j_dispute", peer, epoch, by: "right" }));
+      case "advance":
+        return bothHear((peer) =>
+          ({ _tag: "j_epoch", peer, epoch: epoch + 1n, stored: nonce, ...finalBodyOf(plan, b, i) }));
+      case "dispute":
+        return bothHear((peer) =>
+          ({ _tag: "j_dispute", peer, epoch, by: "right", nonce: 7n, timeout: 500n, ...OPENED }));
       default: return bothHear((peer) => ({ _tag: "j_dispute_over", peer }));
     }
   };
@@ -251,5 +296,42 @@ describe("j/watch", () => {
     expect(first.ok).toBe(true);
     expect(deliver(start(2n), batch, [LEFT, RIGHT], chainOf(plan))).toEqual(first);
     expect(unwrapOr(first, () => expect.unreachable("delivered")).events).toEqual(oracle(plan));
+  });
+});
+
+describe("j/watch what a transaction the Host cannot read holds back (R-WATCH-STALL)", () => {
+  const eventsOf = (logs: readonly RawLog[]): readonly ChainEvent[] => must(decodeLogs(DEPLOYED, logs));
+  const secret = (block: bigint, n: bigint) =>
+    logOf("SecretRevealed", { hashlock: hexOf(n), revealer: RIGHT, secret: hexOf(n + 1n) }, block, 0n);
+  const other = (block: bigint, index: bigint, epoch: bigint) =>
+    logOf("AccountEpochAdvanced", { left: LEFT, right: BYSTANDER, ondeltaEpoch: epoch }, block, index);
+  const waiting = (...txs: readonly Bytes32[]) => (e: ChainEvent): boolean => "tx" in e && txs.includes(e.tx);
+  const places = (events: readonly ChainEvent[]) => events.map((e) => `${e._tag}@${e.block}.${e.index}`);
+  const logs = [
+    secret(1n, 7n), advanced(2n, 0n, 1n), advanced(3n, 0n, 2n), finalized(3n, 1n), advanced(4n, 0n, 3n),
+    other(4n, 1n, 1n), secret(4n, 9n),
+  ];
+
+  test("R-WATCH-STALL a finalize the Host cannot read is held alone: the advance it made and the rest are told", () => {
+    const events = eventsOf(logs);
+    const split = splitStalled(events, waiting(txOf(3n, 1n)));
+    expect(places(split.held)).toEqual(["dispute_finalized@3.1"]);
+    expect(places(split.ready)).toEqual([
+      "secret_revealed@1.0", "epoch_advanced@2.0", "epoch_advanced@3.0", "epoch_advanced@4.0", "epoch_advanced@4.1",
+      "secret_revealed@4.0",
+    ]);
+  });
+
+  test("R-WATCH-STALL a start the Host cannot read holds nothing: its Account's events go on", () => {
+    const events = eventsOf([advanced(2n, 0n, 1n), started(3n, 0n), advanced(4n, 0n, 2n), other(4n, 1n, 1n)]);
+    const split = splitStalled(events, waiting(txOf(3n, 0n)));
+    expect(places(split.ready)).toEqual(places(events));
+    expect(split.held).toEqual([]);
+  });
+
+  test("R-WATCH-STALL with nothing stalled everything is told; a tx no event names holds nothing", () => {
+    const events = eventsOf(logs);
+    expect(splitStalled(events, waiting())).toEqual({ ready: events, held: [] });
+    expect(splitStalled(events, waiting(txOf(9n, 9n))).held).toEqual([]);
   });
 });

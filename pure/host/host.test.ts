@@ -3,13 +3,13 @@ import { GENESIS } from "../account/frame/account.ts";
 import type { Frame, FrameHash, Msg } from "../account/frame/frame.ts";
 import type { AccountTx } from "../account/tx.ts";
 import { credit, GOLD, open, pay } from "../entity/fixtures.ts";
-import { emptyEntity, type EntityId, type EntityInput, type Outbound } from "../entity/model.ts";
+import { emptyEntity, type EntityId, type EntityInput, type Outbound, type Reading } from "../entity/model.ts";
 import { err, ok } from "../kernel/core/result.ts";
 import { setup } from "../runtime/fixtures.ts";
-import { begin, idle, limits, persisted, receive, reopen, submit } from "./host.ts";
+import { begin, idle, limits, persisted, receive, reopen, submit, TICK, upcoming } from "./host.ts";
 import type { Host, Item } from "./model.ts";
 import {
-  BOUNDS, entityOf, hostFor, hostOf, inputsOf, meet, sentIn, settle, stamp, tell, turn, unhalted,
+  BOUNDS, entityOf, hostFor, hostOf, inputsOf, meet, onTheLink, sentIn, settle, stamp, tell, turn, unhalted,
 } from "./fixtures.ts";
 
 const ALICE = entityOf(1);
@@ -19,7 +19,7 @@ const CAROL = entityOf(3);
 const peer = (from: EntityId, to: EntityId, msg: Msg<AccountTx>): Outbound => ({ from, to, msg });
 
 const frameOf = (parent: FrameHash, txs: readonly AccountTx[]): Msg<AccountTx> => {
-  const frame: Frame<AccountTx> = { author: "left", parent, attempt: 0, slot: 2, txs };
+  const frame: Frame<AccountTx> = { author: "left", parent, attempt: 0, slot: 2, epoch: 0n, firstNonce: 2n, txs };
   return { _tag: "frame", frame };
 };
 
@@ -77,7 +77,7 @@ describe("host", () => {
   test("R-DURABLE the outputs of a row leave only once the row is durable, once, and never an earlier row's", () => {
     const { bob, sent } = aliceToBob();
     expect(sent.map((o) => o.msg._tag)).toEqual(["frame"]);
-    const heard = unhalted(begin(receive(bob, sent[0] as Outbound).host, stamp(30n)));
+    const heard = unhalted(begin(receive(bob, onTheLink(sent[0] as Outbound)).host, stamp(30n)));
     expect(sentIn(heard.effects)).toEqual([]);
     const done = unhalted(persisted(heard.host));
     expect(sentIn(done.effects).map((o) => o.msg._tag)).toEqual(["ack"]);
@@ -126,5 +126,23 @@ describe("host", () => {
     expect(sentIn(back.effects)).toEqual(alice.runtime.wal.flatMap((row) => row.outputs));
     const held = (host: Host) => host.runtime.entities.get(ALICE)?.accounts.get(BOB);
     expect(held(back.host)).toEqual(held(alice));
+  });
+
+  test("R-REGISTRY-AT-VIEW the frame to come is told to the shell before it begins", () => {
+    const { alice } = aliceToBob();
+    expect(upcoming(alice)).toBeUndefined();
+    const queued = submit(submit(alice, command(ALICE, credit(BOB, 9n))), command(BOB, credit(ALICE, 1n)));
+    expect(upcoming(queued)).toEqual({ view: alice.runtime.view, to: ALICE, inputs: [credit(BOB, 9n)] });
+    expect(upcoming(unhalted(begin(queued, stamp(90n))).host)).toBeUndefined();
+  });
+
+  test("R-REGISTRY-AT-VIEW what the shell read goes into the frame's input, and none adds nothing", () => {
+    const { alice } = aliceToBob();
+    const reading: Reading = { hashlock: "0xaa", at: alice.runtime.view, seconds: 5n };
+    const queued = submit(alice, command(ALICE, credit(BOB, 9n)));
+    const staged = (registry?: readonly Reading[]) =>
+      unhalted(begin(queued, stamp(90n), TICK, registry)).host.runtime.staged;
+    expect(staged([reading])?.input).toMatchObject({ _tag: "entity", registry: [reading] });
+    expect(staged()?.input).not.toHaveProperty("registry");
   });
 });

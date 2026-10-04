@@ -1,20 +1,79 @@
 {
  "id": "R-WATCH-WINDOW",
- "statement": "A reading of an Account at the end of an event's block is taken while that block is inside the recent-state window a normal node keeps; a node that no longer holds the state is a fault that names the block, never a substitute read at a later block. No archive node is required.",
- "source": "coordinator 2026-10-01 10:20 (do not require an archive node; testnet RPCs mostly are not)",
+ "statement": "A reading of an Account at the end of an event's block is taken while that block is inside the recent-state window a normal node keeps; a node that no longer holds the state is a fault that names the block, never a substitute read at a later block. No archive node is required. Each reading an event needs is taken when the event is first seen and travels with it if it is held (a start waiting for its body; a finalize held needs no reading), so a hold longer than the window asks the node about no old block. A node that answers a reading as no longer served (geth: `historical state ... is not available`, `missing trie node`; Erigon: `old data not available due to pruning`; Nethermind: `No state available for block`; Reth: `state at block #N is pruned`) loses only that Account, loudly (`j_account_lost`, notice `account_lost`; R-WATCH-STALL 8); any other failure of the read is the poll's, tried again. A block the node does not know (`header not found`, `block not found`, `is not currently canonical`) is not a pruned state, and a reply that is no value (Besu answers null for a state it lacks) is not a zero Account: both are faults of the read. Slice-1 recovery: j_read_waits records exact pending payload identities and a start's event-time epoch in the Runtime WAL. Once the delivery height is durable, ordinary events at or below that view are not re-read or re-applied; only recorded payloads resume. A legacy WAL with an active read wait but no pending identities is refused as read_wait_upgrade before outputs leave; its unresolved payloads require explicit migration, never guessed archive replay.",
+ "source": "coordinator 2026-10-01 10:20 (do not require an archive node; testnet RPCs mostly are not); builder 10-03 (design review/pr-171/DESIGN-watch-wait.md)",
  "layers": {
   "arrival": "n/a: the Arrival specs take J events as given",
   "quint": "n/a: the Quint model takes J events as given",
   "contract": "n/a: no contract code takes part; the window is a property of the node",
   "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
-  "ts": "owed: transport thread, the Host's J loop (the window is a Host setting; the pure core only names the block by hash)"
+  "ts": "hold"
  },
  "killers": [
   {
    "kind": "test",
    "layer": "ts",
-   "name": "to be named",
-   "owed": "transport thread, the Host's J loop"
+   "name": "R-WATCH-WINDOW an Account the Host can no longer read is behind for good: told over it stays quiet"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-WATCH-WINDOW a hub forwards no lock to a peer it cannot read, and expires none forwarded to it"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-WATCH-WINDOW a state the node no longer serves is pruned; any other error is a fault"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-WATCH-WINDOW a provider with no more state of an Account loses it loudly; the node goes on"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-WATCH-WINDOW a reading the node no longer serves loses its own Account, and no other"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-WATCH-WINDOW a fault of the reads that is no pruned state is the poll's: nothing told"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-WATCH-WINDOW a node that answers null for a state it lacks is a fault, never a zero Account"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-WATCH-WINDOW the reading of a start waiting for its body is taken once, and carried"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-WATCH-WINDOW a finalize held for longer than the node keeps state asks it of no old block"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-WATCH-WINDOW a restart recovers a pending finalize without rereading WAL-covered pruned state"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-WATCH-WINDOW pruning when the hosted Entity is Right names the left peer only"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-WATCH-WINDOW several pruned readings keep the earliest lost block of the Account"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-WATCH-WINDOW a pending start keeps its event epoch through recovery after a same-block advance"
   }
  ]
 }

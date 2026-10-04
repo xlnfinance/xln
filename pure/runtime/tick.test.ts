@@ -1,12 +1,17 @@
 import { describe, expect, test } from "bun:test";
-import { emptyEntity, type EntityInput, type Outbound } from "../entity/model.ts";
+import { TEST_SIG } from "../entity/fixtures.ts";
+import { emptyEntity, type Command, type EntityInput, type Outbound, type Reading } from "../entity/model.ts";
+import { keccakHex } from "../kernel/encoding/bytes.ts";
+import { holdId } from "../account/model.ts";
+import { heightOf } from "../account/fixtures.ts";
 import type { FrameHash } from "../account/frame/frame.ts";
-import type { Input, Row } from "./model.ts";
+import type { Input, Row, Runtime } from "./model.ts";
 import type { JHeight } from "../account/clause/clock.ts";
 import { timestamp } from "./model.ts";
 import { apply, commit, flush, messageId, recover } from "./tick.ts";
 import {
-  credit, entityOf, GOLD, heightAt, inputFor, open, pay, setup, stamp, started, tick, unhalted,
+  credit, entityOf, feed, GOLD, heightAt, hostOf, inputFor, open, pay, rise, setup, settle, stamp, start, started,
+  tick, unhalted, type Cluster,
 } from "./fixtures.ts";
 
 const ALICE = entityOf(1);
@@ -69,7 +74,7 @@ describe("runtime/tick durable before send", () => {
 
 describe("runtime/tick bad inputs", () => {
   const staleAck: EntityInput = {
-    _tag: "peer_message", from: CAROL, msg: { _tag: "ack", hash: `0x${"11".repeat(32)}` as FrameHash },
+    _tag: "peer_message", from: CAROL, msg: { _tag: "ack", hash: `0x${"11".repeat(32)}` as FrameHash }, sig: TEST_SIG
   };
 
   test("R-X1 an input for an Entity this Runtime does not host is refused with notice, as a row", () => {
@@ -107,6 +112,40 @@ describe("runtime/tick the stamp", () => {
     const risen = tick(started(BOB), heightAt(500n, 111n)).runtime;
     const later = tick(risen, inputFor(BOB, 10n, open(ALICE))).runtime;
     expect(later.wal.map((row) => row.stamp)).toEqual([500n, 500n].map(stamp));
+  });
+
+  test("R-HOP-SLACK the second of the view's block rises with the height and is the WAL's, so a replay has it", () => {
+    const at = (rt: Runtime, height: bigint, seconds: bigint): Runtime =>
+      tick(rt, heightAt(5n, height, seconds)).runtime;
+    const risen = at(at(started(BOB), 111n, 5_000n), 112n, 5_012n);
+    expect(risen.seconds).toBe(5_012n);
+    expect(at(risen, 112n, 9_999n).seconds).toBe(5_012n);
+    expect(at(risen, 100n, 1n).seconds).toBe(5_012n);
+    expect(risen.wal.map((row) => (row.input._tag === "j_height" ? row.input.seconds : undefined)))
+      .toEqual([5_000n, 5_012n]);
+    expect(unhalted(recover(setup, genesis, risen.wal)).seconds).toBe(5_012n);
+    expect(tick(started(BOB), heightAt(5n, 111n)).runtime.seconds).toBeUndefined();
+  });
+
+  test("R-HOP-SLACK an observation copies a header second onto the view and omits one it was not given", () => {
+    const before = started(BOB);
+    const risen = tick(before, {
+      _tag: "j_observation", at: stamp(1n), to: BOB, batches: [], height: 111n as JHeight, seconds: 5_000n,
+    }).runtime;
+    expect(risen.seconds).toBe(5_000n);
+    expect(unhalted(recover(setup, genesis, risen.wal)).seconds).toBe(5_000n);
+    const unknown = tick(before, {
+      _tag: "j_observation", at: stamp(1n), to: BOB, batches: [], height: 111n as JHeight,
+    }).runtime;
+    expect(unknown.seconds).toBeUndefined();
+    const kept = tick(risen, {
+      _tag: "j_observation", at: stamp(2n), to: BOB, batches: [[]], height: 111n as JHeight,
+    }).runtime;
+    expect(kept.seconds).toBe(5_000n);
+    const cleared = tick(risen, {
+      _tag: "j_observation", at: stamp(2n), to: BOB, batches: [], height: 112n as JHeight,
+    }).runtime;
+    expect(cleared.seconds).toBeUndefined();
   });
 
   test("R-CLOCK the stamp decides nothing: the same inputs at other stamps make the same Entities", () => {
@@ -213,8 +252,135 @@ describe("runtime/tick review A: stamps, and what a replay compares", () => {
     expect(messageId({ _tag: "ack", hash: h1 })).not.toBe(messageId({ _tag: "ack", hash: h2 }));
     const frame = (amount: bigint) => messageId({
       _tag: "frame",
-      frame: { author: "left", parent: h1, attempt: 0, slot: 2, txs: [{ _tag: "pay", token: GOLD, amount }] },
+      frame: {
+        author: "left", parent: h1, attempt: 0, slot: 2, epoch: 0n, firstNonce: 2n,
+        txs: [{ _tag: "pay", token: GOLD, amount }],
+      },
     });
     expect(frame(1n)).not.toBe(frame(2n));
+  });
+});
+
+describe("runtime/tick watcher observations", () => {
+  test("R-HEIGHT-ORDER delivery batches keep output order and old-view judgments in one durable row", () => {
+    const before = tick(started(BOB), inputFor(BOB, 1n, open(ALICE), open(CAROL))).runtime;
+    const batches: readonly (readonly EntityInput[])[] = [[credit(ALICE, 100n)], [credit(CAROL, 200n)]];
+    const at = stamp(2n);
+    const height = 101n as JHeight;
+    const separate = batches.reduce((rt, inputs) => tick(rt, { _tag: "entity", at, to: BOB, inputs }).runtime, before);
+    const expected = tick(separate, { _tag: "j_height", at, height }).runtime;
+    const staged = unhalted(apply(before, { _tag: "j_observation", at, to: BOB, batches, height }));
+    expect(staged.entities).toEqual(expected.entities);
+    expect(staged.view).toBe(expected.view);
+    expect(staged.staged?.outputs).toEqual(expected.wal.slice(before.wal.length).flatMap((r) => r.outputs));
+    expect(flush(staged).leaving).toEqual([]);
+    const lost = unhalted(recover(setup, genesis, staged.wal));
+    expect(lost.entities).toEqual(before.entities);
+    expect(lost.view).toBe(before.view);
+    const committed = unhalted(commit(staged));
+    const recovered = unhalted(recover(setup, genesis, committed.wal));
+    expect(recovered.entities).toEqual(expected.entities);
+    expect(BigInt(recovered.view)).toBe(BigInt(height));
+    expect(committed.wal.length).toBe(before.wal.length + 1);
+    expect(flush(recovered).leaving).toEqual(expected.wal.flatMap((r) => r.outputs));
+  });
+
+  test("R-HEIGHT-ORDER same-height recovery applies its payload without an extra height frame", () => {
+    const before = tick(started(BOB), inputFor(BOB, 1n, open(ALICE))).runtime;
+    const inputs: readonly EntityInput[] = [credit(ALICE, 100n)];
+    const expected = tick(before, inputFor(BOB, 2n, ...inputs)).runtime;
+    const actual = tick(before, {
+      _tag: "j_observation", at: stamp(2n), to: BOB, batches: [inputs], height: BigInt(before.view) as JHeight,
+    }).runtime;
+    expect(actual.entities).toEqual(expected.entities);
+    expect(actual.wal.at(-1)?.outputs).toEqual(expected.wal.at(-1)?.outputs);
+    expect(actual.wal.at(-1)?.chain).toEqual(expected.wal.at(-1)?.chain);
+    expect(actual.wal.at(-1)?.notices).toEqual(expected.wal.at(-1)?.notices);
+  });
+});
+
+describe("runtime/tick the registry's readings are part of the row (R-REGISTRY-AT-VIEW)", () => {
+  const HASHLOCK = keccakHex(Uint8Array.from({ length: 32 }, (_, i) => i + 1));
+  const deciding = { ...setup, registry: true } as const;
+  const lockCommand: Command = {
+    _tag: "lock", peer: BOB, token: GOLD,
+    hold: { id: holdId(1n), payer: "left", amount: 10n, hashlock: HASHLOCK, deadline: heightOf(105n) },
+  };
+  const reading = (at: bigint, seconds = 0n): readonly Reading[] => [{ hashlock: HASHLOCK, at, seconds }];
+  const registering = (c: Cluster): Cluster =>
+    ({ ...c, hosts: new Map([...c.hosts].map(([id, rt]) => [id, { ...rt, setup: deciding }])) });
+  const rowOf = (rt: ReturnType<typeof started>) => rt.wal.at(-1) ?? expect.unreachable("no row");
+  const mempoolOf = (c: Cluster) =>
+    hostOf(c, ALICE).entities.get(ALICE)?.accounts.get(BOB)?.mempool.map((tx) => tx._tag);
+
+  /** Alice and Bob with an Account open and credit both ways, both deciding on the registry. */
+  const linked = (): Cluster => {
+    const opened = settle(feed(feed(registering(start()), ALICE, open(BOB)), BOB, open(ALICE)));
+    return settle(feed(feed(opened, ALICE, credit(BOB, 1000n)), BOB, credit(ALICE, 1000n)));
+  };
+
+  const alice = () => hostOf(linked(), ALICE);
+  const refusedFor = (rt: ReturnType<typeof started>): readonly string[] =>
+    rowOf(rt).notices.flatMap((n) => (n._tag === "command_refused" && n.fault._tag === "account_refused"
+      ? [n.fault.fault._tag] : []));
+
+  test("R-REGISTRY-AT-VIEW the readings a batch carries are what its frame decides on, and the row keeps them", () => {
+    const asked = { ...inputFor(ALICE, 3n, lockCommand), registry: reading(100n) } as const;
+    const taken = tick(alice(), asked);
+    expect(rowOf(taken.runtime).notices).toEqual([]);
+    expect(rowOf(taken.runtime).input).toEqual(asked);
+    expect(refusedFor(tick(alice(), inputFor(ALICE, 3n, lockCommand)).runtime)).toEqual(["registry_unknown"]);
+    const stale = tick(alice(), { ...inputFor(ALICE, 3n, lockCommand), registry: reading(99n) });
+    expect(refusedFor(stale.runtime)).toEqual(["registry_unknown"]);
+    const paid = tick(alice(), { ...inputFor(ALICE, 3n, lockCommand), registry: reading(100n, 1n) });
+    expect(refusedFor(paid.runtime)).toEqual(["paid_on_chain"]);
+  });
+
+  test("R-REGISTRY-AT-VIEW a Runtime that does not decide on the registry ignores the readings of its batch", () => {
+    const plain = { ...alice(), setup };
+    const taken = tick(plain, { ...inputFor(ALICE, 3n, lockCommand), registry: reading(100n, 1n) });
+    expect(rowOf(taken.runtime).notices).toEqual([]);
+  });
+
+  test("R-REGISTRY-AT-VIEW a frame replays from its row: the same readings make the same Entity", () => {
+    const before = alice();
+    const taken = tick(before, { ...inputFor(ALICE, 3n, lockCommand), registry: reading(100n) });
+    const recovered = unhalted(recover(deciding, [emptyEntity(ALICE)], taken.runtime.wal));
+    expect(recovered.entities).toEqual(taken.runtime.entities);
+  });
+
+  test("R-REGISTRY-AT-VIEW a new height carries the readings the frame of every Entity decides on", () => {
+    const framed = feed(linked(), ALICE, pay(BOB, 1n));
+    const lockAt100 = { ...inputFor(ALICE, framed.clock, lockCommand), registry: reading(100n) };
+    const asked = tick(hostOf(framed, ALICE), lockAt100);
+    expect(asked.leaving).toEqual([]);
+    const queued = { ...framed, hosts: new Map([...framed.hosts, [ALICE, asked.runtime]]), clock: framed.clock + 1n };
+    const answered = settle(queued);
+    expect(mempoolOf(answered)).toEqual(["lock"]);
+    expect(answered.inflight).toEqual([]);
+    const unread = rise(answered, ALICE, 101n);
+    expect(mempoolOf(unread)).toEqual(["lock"]);
+    expect(unread.inflight).toEqual([]);
+    const read = tick(hostOf(answered, ALICE), { ...heightAt(answered.clock, 101n), registry: reading(101n) });
+    expect(read.leaving.length).toBe(1);
+    expect(read.runtime.entities.get(ALICE)?.accounts.get(BOB)?.mempool).toEqual([]);
+    expect(rowOf(read.runtime).notices).toEqual([]);
+  });
+
+  test("R-REGISTRY-AT-VIEW an observation keeps a present list, and an empty one is not the gate off", () => {
+    const before = alice();
+    const height = BigInt(before.view) as JHeight;
+    const accepted = tick(before, {
+      _tag: "j_observation", at: stamp(3n), to: ALICE, batches: [[lockCommand]], height, registry: reading(100n),
+    });
+    expect(rowOf(accepted.runtime).input).toMatchObject({ _tag: "j_observation", registry: reading(100n) });
+    expect(refusedFor(accepted.runtime)).toEqual([]);
+    const empty = tick(before, {
+      _tag: "j_observation", at: stamp(3n), to: ALICE, batches: [[lockCommand]], height, registry: [],
+    });
+    expect(rowOf(empty.runtime).input).toMatchObject({ _tag: "j_observation", registry: [] });
+    expect(refusedFor(empty.runtime)).toEqual(["registry_unknown"]);
+    const recovered = unhalted(recover(deciding, [emptyEntity(ALICE)], accepted.runtime.wal));
+    expect(recovered.entities).toEqual(accepted.runtime.entities);
   });
 });

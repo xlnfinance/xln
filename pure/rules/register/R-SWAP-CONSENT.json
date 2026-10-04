@@ -1,0 +1,34 @@
+{
+ "id": "R-SWAP-CONSENT",
+ "statement": "A quote binds the taker to nothing: it reserves only the maker's give, takes none of the taker's room and is no clause of the signed body, so a maker cannot lock the taker's funds or fill a proof body with clauses the taker never saw. At most 4 quotes per maker are open in an Account (too_many_quotes). The taker's first fill is its acceptance: the quote becomes an offer, a clause of its own, and the taker's want is reserved against the taker only if its RCPAN still holds (insufficient_capacity otherwise, the quote unchanged); a fill that takes everything never becomes a clause. The Arrival cell holds the one-Account half: a quote reserves only the maker's give and is no clause of the signed body, the taker's first fill reserves its whole remaining want only if RCPAN holds, and a fill that takes everything never becomes a clause; the cap of 4 quotes per maker (too_many_quotes) and the 33rd clause of a first fill (too_many_holds) are on no page (the menu has one quote per maker, at most two clauses).",
+ "source": "Arthur 10-01 02:53 (D3: two-party swap inside an Account); coordinator 10-01 10:17 (swap consent); plan/swap-onchain.md",
+ "layers": {
+  "arrival": "hold",
+  "quint": "owed: spec thread",
+  "contract": "n/a: an off-chain Account rule; the chain sees only the signed swap clause of an accepted offer (R-SWAP-ONCHAIN)",
+  "rig": "n/a: an off-chain Account rule; the walk compares the spec with the contracts, and the chain has no part here",
+  "ts": "hold"
+ },
+ "killers": [
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "account/swap R-SWAP-CONSENT a quote binds the taker to nothing: its first fill is its acceptance"
+  },
+  {
+   "kind": "bug",
+   "layer": "arrival",
+   "name": "swap-quote-reserves-taker"
+  },
+  {
+   "kind": "bug",
+   "layer": "arrival",
+   "name": "swap-quote-is-clause"
+  },
+  {
+   "kind": "bug",
+   "layer": "arrival",
+   "name": "swap-accept-without-room"
+  }
+ ]
+}

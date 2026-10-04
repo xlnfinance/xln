@@ -1,0 +1,54 @@
+{
+ "id": "R-J-COLLATERAL-NO-LEDGER",
+ "statement": "What the chain says about a token never changes which tokens an Account has: the token list is the proof body, so it changes only by a frame both sides signed. A snapshot for a token with no ledger waits in the Entity's chain facts (at most as many tokens as a proof body carries, the one past it told and dropped) and is applied when a signed frame gives the Account the ledger, on the committed state and on a pending frame's state.",
+ "source": "Review A of PR 142 (B1: heads split when one side hears a new token first; B2: dust in 128 tokens makes the Account unsignable); account/proof/body.ts byToken and MAX_PROOF_TOKENS; R-REACK",
+ "layers": {
+  "arrival": "owed: spec thread (the entity page has no chain-facts map for tokens without a ledger)",
+  "quint": "owed: spec thread (the Quint ledger has no token set that a chain event could change)",
+  "contract": "n/a: no contract code takes part; the Depository emits AccountSettled for any token with any amount",
+  "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
+  "ts": "hold"
+ },
+ "killers": [
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-J-COLLATERAL-NO-LEDGER a snapshot for a token without a ledger leaves the ledgers as they were"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-J-COLLATERAL-NO-LEDGER a token heard by one side first does not split the heads"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-J-COLLATERAL-NO-LEDGER the same when the side that has not heard proposes first"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-J-COLLATERAL-NO-LEDGER a token heard while a frame is in flight does not enter the frame's state"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-J-COLLATERAL-NO-LEDGER a held token takes its amounts when a signed frame gives it a ledger"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-J-COLLATERAL-NO-LEDGER dust in many tokens does not make the Account unsignable"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-J-COLLATERAL-NO-LEDGER the tokens kept for an Account are bounded; the one past the bound is told"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-J-COLLATERAL-NO-LEDGER dust in 128 tokens does not crowd out a token the Account has a ledger for"
+  }
+ ]
+}

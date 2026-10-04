@@ -24,7 +24,7 @@ const carrying = (gas: Gas, ops: readonly JOp[]): bigint => {
 
 const ok = (digest: string, applyGas = APPLY_GAS): Simulation => ({ digest, outcome: { _tag: "ok", applyGas } });
 const reverts = (digest: string, reason = "0xdeadbeef"): Simulation =>
-  ({ digest, outcome: { _tag: "reverts", reason } });
+  ({ digest, outcome: { _tag: "reverts", reason, causes: [] } });
 
 const asked = (step: Step): SealedBatch =>
   step._tag === "simulate" ? step.candidate : expect.unreachable(`expected a simulation request, got ${step._tag}`);
@@ -82,11 +82,11 @@ describe("R-SIMULATE the final simulation runs at the final budget (a gasleft() 
     const ops = payments(1);
     const probeBudget = maxBudget(GAS.txGasCap, carrying(GAS, ops));
     const step = settled(ops, (b) => b.gasBudget === probeBudget ? ok(b.digest) : reverts(b.digest, "0x00000004"));
-    expect(step).toEqual({ _tag: "hold", why: { _tag: "would_revert", reason: "0x00000004" } });
+    expect(step).toEqual({ _tag: "hold", why: { _tag: "would_revert", reason: "0x00000004", causes: [] } });
   });
   test("a batch that reverts at the probe is held with the chain's reason, and nothing is signed", () => {
     const step = settled(payments(1), (b) => reverts(b.digest, "0x00000009"));
-    expect(step).toEqual({ _tag: "hold", why: { _tag: "would_revert", reason: "0x00000009" } });
+    expect(step).toEqual({ _tag: "hold", why: { _tag: "would_revert", reason: "0x00000009", causes: [] } });
   });
   test("a finalize whose gate is closed reverts in simulation and is never signed (R-SIMULATE, J6)", () => {
     expect(settled([finalize(idOf(2))], (b) => reverts(b.digest, "0x00000002"))._tag).toBe("hold");

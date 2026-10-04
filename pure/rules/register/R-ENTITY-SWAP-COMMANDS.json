@@ -1,0 +1,19 @@
+{
+ "id": "R-ENTITY-SWAP-COMMANDS",
+ "statement": "The Entity takes four commands that each queue one Account tx the way a payment does: `offer` (a quote; its maker is always this node's own side, a command carries no maker), `fill` (a ratio; the taker's first fill accepts the quote, R-SWAP-CONSENT), `retract` and `lapse`. A refusal is the Account's own fault inside `command_refused` (`account_refused`), nothing is queued and the state is unchanged; a command for a peer with no Account is `no_account`. Both Entities reach the same head and the same quotes, offers and offdeltas by the same frames.",
+ "source": "coordinator 10-01 17:05 and 18:57 (D3: two-party swap inside an Account; e2e swap step); plan/entity-swap-commands.md",
+ "layers": {
+  "arrival": "owed: spec thread, swap page (the Entity is the Account's door, no page names these commands)",
+  "quint": "n/a: the Entity's door to the Account's txs; the Quint Account model has the txs themselves (R-SWAP-*)",
+  "contract": "n/a: off-chain Entity logic; the chain sees only the signed swap clause (R-SWAP-ONCHAIN)",
+  "rig": "n/a: an off-chain Entity rule; the walk compares the spec with the contracts, and the chain has no part here",
+  "ts": "hold"
+ },
+ "killers": [
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "entity/swap R-ENTITY-SWAP-COMMANDS the swap txs are queued like a payment and both Entities agree"
+  }
+ ]
+}

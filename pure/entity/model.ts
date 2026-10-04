@@ -11,9 +11,12 @@
 import { err, ok, type Result } from "../kernel/core/result.ts";
 import type { Brand, Tagged } from "../kernel/core/tagged.ts";
 import type { FrameHash, Msg, Outcome, Refused, Replica } from "../account/frame/frame.ts";
-import type { JView } from "../account/clause/clock.ts";
-import type { AccountFault, AccountState, Hold, HoldId, Side, TokenId } from "../account/model.ts";
+import type { JHeight, JView } from "../account/clause/clock.ts";
+import type { AccountFault, AccountState, Hold, HoldId, Leg, Side, TokenId } from "../account/model.ts";
+import type { ProofBody } from "../chain/proof/proof.ts";
+import type { Held } from "../account/state.ts";
 import type { AccountTx } from "../account/tx.ts";
+import type { ReadWait } from "../j/log.ts";
 
 /** A 32-byte id, `0x` and 64 lowercase hex digits: the text order of two ids is their numeric order, as the chain's. */
 export type EntityId = Brand<string, "EntityId">;
@@ -27,7 +30,16 @@ export const entityId = (text: string): Result<EntityId, BadEntityId> =>
 export const sideOf = (self: EntityId, peer: EntityId): Side => (self < peer ? "left" : "right");
 
 /** What a frame of an Account can be refused for: the Account's own faults, and that the node's signature is out. */
-export type PeerFault = AccountFault | Tagged<"frozen">;
+export type PeerFault =
+  | AccountFault | Tagged<"frozen"> | Tagged<"reveal_unknown"> | Tagged<"revealed_on_chain">
+  | Tagged<"registry_unknown"> | Tagged<"paid_on_chain">;
+
+/**
+ * What the chain's registry (`DeltaTransformer.hashToTimestamp`) held for a hashlock in the state of J block `at`: the
+ * second a secret was first shown at, or 0 when none had been (R-REGISTRY-AT-VIEW). The Host reads it at the view the
+ * frame decides at and hands it over with the frame, so a replay decides the same.
+ */
+export type Reading = Readonly<{ hashlock: string; at: bigint; seconds: bigint }>;
 
 /** One side of an Account as the Entity holds it. */
 export type EntityReplica = Replica<AccountTx, AccountState, PeerFault>;
@@ -42,13 +54,49 @@ export type EntityReplica = Replica<AccountTx, AccountState, PeerFault>;
 export type EntityState = Readonly<{
   id: EntityId;
   accounts: ReadonlyMap<EntityId, EntityReplica>;
+  /** The newest head each peer signed that the Account committed, with its signature: what a dispute starts with. */
+  proofs: ReadonlyMap<EntityId, PeerProof>;
   waiting: ReadonlyMap<EntityId, JView>;
   revealed: ReadonlyMap<EntityId, readonly string[]>;
   chain: ReadonlyMap<EntityId, ChainFacts>;
+  paybook: Paybook;
+  /** The lowest J height at which the chain showed the secret of a hashlock (`j_secret`): the key is the hashlock. */
+  shown: ReadonlyMap<string, bigint>;
+  /**
+   * The Host's provider can give no call trace (`j_blind`), so a secret shown inside a call it cannot read may reach
+   * the chain unseen: this Entity forwards no lock while it holds, and still watches and defends every Account.
+   */
+  blind: boolean;
 }>;
 
+/**
+ * A peer's signature over the head the Account committed at `slot`: the proof of that state, enforceable on chain.
+ * `author` is the side whose frame made the head, which the digest names (`proposerIsLeft` on the chain).
+ */
+export type PeerProof = Readonly<{ head: FrameHash; slot: number; author: Side; sig: string }>;
+
 export const emptyEntity = (id: EntityId): EntityState =>
-  ({ id, accounts: new Map(), waiting: new Map(), revealed: new Map(), chain: new Map() });
+  ({
+    id, accounts: new Map(), proofs: new Map(), waiting: new Map(), revealed: new Map(), chain: new Map(),
+    paybook: new Map(), shown: new Map(), blind: false,
+  });
+
+/**
+ * What the Entity does about an HTLC that is, or will be, locked to it, by hashlock (one is open per hashlock in an
+ * Account, R-ONE-LOCK-PER-HASH). `forward` waits for a lock from `from` and then locks on `to` with a shorter
+ * deadline and `route`, the hops after `to` (a lock that came with a route makes the entry itself); `locked` is that
+ * lock, queued, waiting for `to` to resolve or cancel; `pass` and `fail` are what `to` answered, to be passed on to
+ * `from`; `receive` is a payment this Entity is the payee of, resolved on the lock of `from` when it is for the token
+ * and amount that was asked.
+ */
+export type Entry =
+  | Tagged<"forward", { from: EntityId; to: EntityId; route: readonly EntityId[] }>
+  | Tagged<"locked", { from: EntityId; to: EntityId; token: TokenId; id: HoldId }>
+  | Tagged<"pass", { from: EntityId; secret: Uint8Array }>
+  | Tagged<"fail", { from: EntityId }>
+  | Tagged<"receive", { from: EntityId; token: TokenId; amount: bigint; secret: Uint8Array }>;
+
+export type Paybook = ReadonlyMap<string, Entry>;
 
 /** Response windows in seconds, one per side, as the signed proofs of an Account carry them. */
 export type Windows = Readonly<{ left: bigint; right: bigint }>;
@@ -59,29 +107,129 @@ export type Windows = Readonly<{ left: bigint; right: bigint }>;
  * epoch began, the windows its signed proofs carry, whether a dispute the peer started is open against it, and whether
  * the node has co-signed a settlement or a collateral-to-reserve that has not landed yet (`frozen`, R-COSIGN-FREEZE).
  * `cosigned` counts the operations the node has co-signed on this Account, for good: the `cosigned`-th is the serial
- * its action carries, and the only one whose lapse ends a freeze.
+ * its action carries, and the only one whose lapse ends a freeze. `held` is what the chain last said it holds for each
+ * token (R-J-COLLATERAL), at most one row per token and at most as many tokens as a proof body carries: a token waits
+ * there until a signed frame gives the Account a ledger for it. `starting` is a dispute the node itself asked for.
  */
 export type ChainFacts = Readonly<{
-  epoch: bigint; stored: bigint; frames: bigint; windows: Windows | undefined; disputed: boolean; frozen: boolean;
-  cosigned: bigint;
+  epoch: bigint; stored: bigint; frames: bigint; windows: Windows | undefined; against: Against | undefined;
+  frozen: boolean; cosigned: bigint; held: ReadonlyMap<TokenId, Held>; starting: Starting | undefined;
+  /**
+   * The first block whose events of this Account the Host holds back, behind a transaction it cannot read
+   * (R-WATCH-STALL), while it does: a restart reads again from just before it, so no held event is lost.
+   */
+  behind: bigint | undefined;
+  /**
+   * Whether the Host can no longer read this Account's past (`j_account_lost`): the node's state of a block its events
+   * need is pruned. Its events from `behind` on were never told, it is quiet for good, and `j_behind_over` is no way
+   * out of it.
+   */
+  lost: boolean;
+  /** Exact unresolved payloads, delivered through Runtime WAL inputs; absent only in older WALs. */
+  readWaits?: readonly ReadWait[];
+  /**
+   * A finalize whose proof this node cannot name (R-FINALIZATION-UNKNOWN). The account stays quiet until a later
+   * observation carries this `finalBodyHash`. Absent when the nonce was named, or when no such finalize has landed.
+   */
+  unresolved?: Readonly<{ epoch: bigint; finalBodyHash: string | undefined }>;
+  /**
+   * A frame the peer signed that this node refused while it was quiet (R-DISPUTE-FREEZE). The state is not committed.
+   * The hash is what a later finalize can be named by, which is how "the peer holds it signed" stays a proof.
+   */
+  seen?: readonly SeenProof[];
 }>;
 
-// What a frame takes in.
-export type PeerMessage = Tagged<"peer_message", { from: EntityId; msg: Msg<AccountTx> }>;
+/** A proof the peer signed and this node did not commit: its nonce, the hash of the state it would commit, its txs. */
+export type SeenProof = Readonly<{ nonce: bigint; hash: string; txs: readonly AccountTx[] }>;
+
+/**
+ * A dispute the peer started against this node in the epoch it is in (R-DISPUTE-WATCH): the proof it opened with
+ * (`nonce`, `proposerIsLeft`, `bodyHash`), the end of its window and whether the chain's clock has passed it, the
+ * node's own answer (the counter it asked the chain for with the newest proof it holds) and the counter the chain
+ * registered, whoever registered it (a watchtower of the node's, or the node's own answer).
+ */
+export type Against = Readonly<{
+  nonce: bigint; proposerIsLeft: boolean; bodyHash: string; window: bigint; over: boolean; answer: Answer | undefined;
+  countered: Registered | undefined;
+  /** The exact body the start revealed in its calldata, when the Host read it and it hashes to `bodyHash`. */
+  body?: ProofBody;
+}>;
+
+/**
+ * The counter the node asked for, whether the chain registered it (only a registered counter is finalized with), and
+ * whether the Host dropped it because it would revert, after which it is not asked again.
+ */
+export type Answer = Readonly<{ counter: DisputeCounter; registered: boolean; lapsed: boolean }>;
+
+/**
+ * A dispute the node asked the chain to open (R-DISPUTE-START, R-DISPUTE-FINALIZE): what it asked with, the end of the
+ * window the chain gave it once it is open (`window`, in the chain's own seconds, as the chain logged it), and whether
+ * the chain's clock has passed that end (`over`). Once over, the node asks to finalize it with what it started with,
+ * and keeps asking until the chain says the dispute is over.
+ */
+export type Starting = Readonly<{
+  start: DisputeStart; window: bigint | undefined; over: boolean; countered: Registered | undefined;
+}>;
+
+/** The counter the chain registered against a dispute: its nonce, its author, and the hash of its body. */
+export type Registered = Readonly<{ nonce: bigint; proposerIsLeft: boolean; bodyHash: string }>;
+
+// What a frame takes in. `sig` is the sender's signature over the head the message commits to
+// (R-SIGNED-HEADS-ON-THE-WIRE): a frame's, or the ack's.
+export type PeerMessage = Tagged<"peer_message", { from: EntityId; msg: Msg<AccountTx>; sig?: string }>;
 
 /**
  * What the Host saw on the J chain about the Account with `peer`. A repeat or an older report changes nothing, so the
  * Host may deliver an event again: `j_epoch` is the chain moving the Account's epoch on (a settlement, a withdrawal
- * or a finished dispute landed), with the nonce it stores now; `j_dispute` is a dispute started in `epoch` by `by`;
- * `j_dispute_over` is that dispute countered or finalized; `j_op_lapsed` is a co-signed settlement or withdrawal
- * that can no longer land (its batch reverted, its signatures ran out), named by the serial its action carried: a
- * report of an operation that is not the one out (a repeat, or an older one) changes nothing.
+ * or a finished dispute landed), with the nonce it stores now; `j_dispute` is a dispute started in `epoch` by `by`,
+ * whose start carried `nonce` and whose window ends at the chain's second `timeout` (`proposerIsLeft` and `bodyHash`
+ * name the proof it opened with); `j_countered` is a counter the chain registered for the dispute, with the proof it
+ * named (a registered counter is not the end of the dispute: the finalize is); `j_window_over` is the chain's
+ * clock having passed that end for a dispute this node started or answers (R-DISPUTE-FINALIZE); `j_dispute_over` is
+ * that dispute finalized, which pays the Account out (a `late` one was held back for its arguments, and the Entity has
+ * heard what came after it: it dissolves the Account's holds and leaves the facts alone, `j_epoch` having moved
+ * them); `j_start_lapsed` is the Host telling that the start this node
+ * asked for (the one of that `nonce`) was dropped from its draft because it would revert and so will never open a
+ * dispute (R-DISPUTE-LAPSED); `j_counter_lapsed` is the same for the counter this node asked for (the one of that
+ * `nonce`), which the chain would revert for good, so the node stops asking for it; `j_op_lapsed` is a co-signed
+ * settlement or withdrawal that can no longer land (its batch reverted, its signatures ran out), named by the serial
+ * its action carried: a report of an operation that is not the one out (a repeat, or an older one) changes nothing;
+ * `j_collateral` is what the chain holds for one token of the Account now (R-J-COLLATERAL): a state, not a change, so
+ * a repeat is a no-op; `j_finalize_unread` is a dispute finalize, named by its transaction, whose arguments the Host
+ * could not read from the input of the transaction, nor from a call trace of it, so a secret it showed may have reached
+ * the chain unseen by this node (R-WATCH-CALLDATA): told to the owner as a notice naming the Account and the
+ * transaction, and changing no fact. Unread is a notice and not a safe state: the node may have lost a lock's payment.
+ * `j_start_unread` is a dispute against this Entity whose opening state the Host could not read the same way: the
+ * Entity holds no body to finalize it with, so the notice names the Account and the transaction, and no fact changes.
+ * `j_behind` says the Host holds back the events of this Account from block `from` on, behind a transaction of the
+ * Account it cannot read yet (the earliest `from` stands); `j_behind_over` says it has delivered them. They change no
+ * behavior of the Entity: they are the record a restart reads the cursor back from (R-WATCH-STALL).
+ * `j_account_lost` says the node no longer serves the state of a block this Account's events need, so the Host cannot
+ * read them from `from` on: a loud notice, the Account is behind for good (`lost`: quiet, no forward to its peer, no
+ * expiry of a hash forwarded to it), and nothing else of the Entity changes; no other Account is held for it.
  */
 export type JEvent =
-  | Tagged<"j_epoch", { peer: EntityId; epoch: bigint; stored: bigint }>
-  | Tagged<"j_dispute", { peer: EntityId; epoch: bigint; by: Side }>
-  | Tagged<"j_dispute_over", { peer: EntityId }>
-  | Tagged<"j_op_lapsed", { peer: EntityId; serial: bigint }>;
+  | Tagged<"j_epoch", { peer: EntityId; epoch: bigint; stored: bigint; finalBodyHash?: string }>
+  | Tagged<
+    "j_dispute",
+    {
+      peer: EntityId; epoch: bigint; by: Side; nonce: bigint; timeout: bigint; proposerIsLeft: boolean;
+      bodyHash: string; body?: ProofBody;
+    }
+  >
+  | Tagged<"j_countered", { peer: EntityId; nonce: bigint; proposerIsLeft: boolean; bodyHash: string }>
+  | Tagged<"j_window_over", { peer: EntityId }>
+  | Tagged<"j_dispute_over", { peer: EntityId; late?: boolean; nonce?: bigint; body?: ProofBody }>
+  | Tagged<"j_start_lapsed", { peer: EntityId; nonce: bigint }>
+  | Tagged<"j_counter_lapsed", { peer: EntityId; nonce: bigint }>
+  | Tagged<"j_collateral", { peer: EntityId; token: TokenId; collateral: bigint; ondelta: bigint }>
+  | Tagged<"j_op_lapsed", { peer: EntityId; serial: bigint }>
+  | Tagged<"j_finalize_unread", { peer: EntityId; tx: string }>
+  | Tagged<"j_start_unread", { peer: EntityId; tx: string }>
+  | Tagged<"j_behind", { peer: EntityId; from: bigint }>
+  | Tagged<"j_behind_over", { peer: EntityId }>
+  | Tagged<"j_read_waits", { peer: EntityId; pending: readonly ReadWait[] }>
+  | Tagged<"j_account_lost", { peer: EntityId; from: bigint }>;
 
 /** What a peer asks the node to co-sign: a withdrawal of collateral as a shortcut (C2R) or as a settlement. */
 export type CosignOp =
@@ -90,32 +238,78 @@ export type CosignOp =
 
 export type CosignAsk = Tagged<"cosign_ask", { from: EntityId; op: CosignOp }>;
 
-export type Arrival = PeerMessage | JEvent | CosignAsk;
+/**
+ * `j_secret` is a secret the chain showed (a payee's reveal in a batch of its own): the chain names no Account for it,
+ * so every Entity hears it, and the paybook of one that forwarded a lock under its hash passes it up
+ * (R-DISPUTE-FREEZE).
+ */
+export type SecretRevealed = Tagged<"j_secret", { secret: Uint8Array; at: bigint }>;
+
+/**
+ * `j_blind` is the Host telling that a call that hides a secret cannot be read (R-WATCH-CALLDATA): the Entity forwards
+ * no lock and co-signs no expiry until `j_blind_over`, which the Host sends when the provider has been shown to trace
+ * calls. A node that may hold value boots blind (`boot`: nothing is wrong yet, so no notice); a provider that says at
+ * run time that it has no call trace blinds it again, and the Entity tells its owner once (`chain_blind`). Nothing
+ * else changes: it keeps watching and defending every Account.
+ */
+export type ChainBlind = Tagged<"j_blind", { boot: boolean }> | Tagged<"j_blind_over">;
+
+export type Arrival = PeerMessage | JEvent | SecretRevealed | CosignAsk | ChainBlind;
 
 /** The Host's timer for `peer`'s Account ran out: its pending frame is sent again, so a lost frame cannot wedge it. */
 export type Hook = Tagged<"resend_due", { peer: EntityId }>;
 
-/** A command that becomes a tx of the Account's next frame. */
+/**
+ * A command that becomes a tx of the Account's next frame. The swap commands (R-ENTITY-SWAP-COMMANDS) are a quote
+ * (`offer`, its maker always this node), the taker's fill (the first one accepts the quote), the maker's withdrawal
+ * (`retract`) and `lapse`, which anyone may ask once the offer is past due.
+ */
 export type AccountCommand =
   | Tagged<"set_credit", { peer: EntityId; token: TokenId; limit: bigint }>
   | Tagged<"pay", { peer: EntityId; token: TokenId; amount: bigint }>
-  | Tagged<"lock", { peer: EntityId; token: TokenId; hold: Hold }>
+  | Tagged<"lock", { peer: EntityId; token: TokenId; hold: Hold; route?: readonly EntityId[] }>
   | Tagged<"resolve", { peer: EntityId; token: TokenId; id: HoldId; secret: Uint8Array }>
   | Tagged<"cancel", { peer: EntityId; token: TokenId; id: HoldId }>
-  | Tagged<"expire", { peer: EntityId; token: TokenId; id: HoldId }>;
+  | Tagged<"expire", { peer: EntityId; token: TokenId; id: HoldId }>
+  | Tagged<"offer", { peer: EntityId; id: HoldId; give: Leg; want: Leg; deadline: JHeight }>
+  | Tagged<"fill", { peer: EntityId; id: HoldId; ratio: number }>
+  | Tagged<"retract", { peer: EntityId; id: HoldId }>
+  | Tagged<"lapse", { peer: EntityId; id: HoldId }>;
 
-/** A command that is about the chain, not the Account's frames. */
+/**
+ * A command that is about the chain, not the Account's frames. `fund` is the one that names no peer: the node's own
+ * tokens move from the wallet that holds them into its reserve in the Depository, and the reserve is what a `deposit`
+ * then moves to an Account's collateral. The approval that lets the Depository pull the tokens is the wallet's, not
+ * the Entity's.
+ */
 export type ChainCommand =
+  | Tagged<"fund", { token: TokenId; amount: bigint }>
   | Tagged<"deposit", { peer: EntityId; token: TokenId; amount: bigint }>
   | Tagged<"set_windows", { peer: EntityId; windows: Windows }>
-  | Tagged<"withdraw", { peer: EntityId; token: TokenId; amount: bigint }>;
+  | Tagged<"withdraw", { peer: EntityId; token: TokenId; amount: bigint }>
+  | Tagged<"dispute", { peer: EntityId }>;
 
-export type Command = Tagged<"open_account", { peer: EntityId }> | AccountCommand | ChainCommand;
+/** What an Entity is told about a payment that passes through it, before the lock for it arrives. */
+export type PaybookCommand =
+  | Tagged<"forward", { hashlock: string; from: EntityId; to: EntityId }>
+  | Tagged<"expect", { hashlock: string; from: EntityId; token: TokenId; amount: bigint; secret: Uint8Array }>;
+
+export type Command = Tagged<"open_account", { peer: EntityId }> | AccountCommand | ChainCommand | PaybookCommand;
 
 export type EntityInput = Arrival | Hook | Command;
 
-/** What leaves an Entity: an Account message for a peer. */
-export type Outbound = Readonly<{ from: EntityId; to: EntityId; msg: Msg<AccountTx> }>;
+/**
+ * What leaves an Entity: an Account message for a peer. A frame and an ack commit their sender to a head: `attest` is
+ * that head, for the Host to sign before the message goes (the Entity holds no key); `sig` is the signature the Host
+ * put on it, and the only part of the two that crosses the link.
+ */
+export type Outbound = Readonly<{
+  from: EntityId; to: EntityId; msg: Msg<AccountTx>; attest?: FrameHash; sig?: string;
+}>;
+
+/** What a PeerMessage carries of an Outbound: the sender, the message and the signature the sender put on it. */
+export const heardOf = (o: Outbound): PeerMessage =>
+  ({ _tag: "peer_message", from: o.from, msg: o.msg, ...(o.sig === undefined ? {} : { sig: o.sig }) });
 
 /**
  * What an Entity asks of the J chain: data the Host turns into a batch (the bytes are the chain layer's). A `reveal` is
@@ -123,11 +317,44 @@ export type Outbound = Readonly<{ from: EntityId; to: EntityId; msg: Msg<Account
  * (R-HTLC-CLOCK c); `revealed` on the Entity keeps a hashlock asked once for as long as its hold is open.
  */
 export type JAction =
+  | Tagged<"fund", { token: TokenId; amount: bigint }>
   | Tagged<"reveal", { peer: EntityId; token: TokenId; id: HoldId; hashlock: string; secret: Uint8Array }>
   | Tagged<"deposit", { peer: EntityId; token: TokenId; amount: bigint }>
-  | Tagged<"counter", { peer: EntityId; nonce: bigint; head: FrameHash }>
+  | Tagged<"dispute_start", DisputeStart>
+  | Tagged<"dispute_finalize", DisputeFinalize>
+  | Tagged<"counter", DisputeCounter>
   | Tagged<"c2r", { peer: EntityId; serial: bigint; token: TokenId; amount: bigint }>
   | Tagged<"settle", { peer: EntityId; serial: bigint; token: TokenId; amount: bigint; folds: readonly Fold[] }>;
+
+/**
+ * A dispute the node starts with the peer's signature over the newest committed head: the proof body of that state,
+ * the nonce and epoch the head was signed at, and who authored it. The chain's dispute start is made from exactly this.
+ */
+export type DisputeStart = Readonly<{
+  peer: EntityId; nonce: bigint; epoch: bigint; proposerIsLeft: boolean; body: ProofBody; sig: string;
+}>;
+
+/**
+ * A counter to the peer's dispute with the newest proof the node holds: the dispute it answers (`initial`: its nonce
+ * and the hash of the body it opened with), the proof (`nonce`, author, body, the peer's signature over it) and the
+ * head of the frame that proof was signed over.
+ */
+export type DisputeCounter = Readonly<{
+  peer: EntityId; nonce: bigint; head: FrameHash; proposerIsLeft: boolean; body: ProofBody; sig: string;
+  initial: Readonly<{ nonce: bigint; bodyHash: string }>;
+}>;
+
+/**
+ * A dispute the node finalizes after its window. One it started and nobody countered is finalized with the state it
+ * started from: the chain settles on the opening proof. One it answered is finalized with its registered counter's
+ * proof (`nonce`, `proposerIsLeft`, `body` are the counter's), naming the dispute it answers in `initial`
+ * (R-DISPUTE-WATCH).
+ * `startedByLeft` is whether the side that started the dispute is the Account's Left.
+ */
+export type DisputeFinalize = Readonly<{
+  peer: EntityId; nonce: bigint; proposerIsLeft: boolean; body: ProofBody; startedByLeft: boolean;
+  initial: Readonly<{ nonce: bigint; bodyHash: string }> | undefined;
+}>;
 
 /** The offdelta of a token that a settlement folds into its ondelta, so that the epoch advance cannot erase it. */
 export type Fold = Readonly<{ token: TokenId; offdelta: bigint }>;
@@ -137,17 +364,43 @@ export type EntityFault =
   | Tagged<"account_exists", { peer: EntityId }>
   | Tagged<"no_account", { peer: EntityId }>
   | Tagged<"account_refused", { fault: PeerFault }>
+  | Tagged<"bad_fund", { amount: bigint }>
   | Tagged<"deposit_before_cosign">
   | Tagged<"bad_windows", { windows: Windows }>
   | Tagged<"windows_shorten", { current: Windows }>
   | Tagged<"already_cosigned">
   | Tagged<"frame_in_flight">
-  | Tagged<"unfolded_c2r", { folds: readonly Fold[] }>;
+  | Tagged<"unfolded_c2r", { folds: readonly Fold[] }>
+  | Tagged<"entry_exists", { hashlock: string }>
+  | Tagged<"no_proof", { why: "none" | "unsignable" }>
+  | Tagged<"dispute_pending">
+  | Tagged<"account_disputed">;
 
 /** What the owner of an input is told when it did not take effect. */
 export type Notice =
   | Tagged<"command_refused", { command: Command; fault: EntityFault }>
   | Tagged<"unknown_peer", { from: EntityId }>
+  | Tagged<"holding_dropped", { peer: EntityId; token: TokenId }>
+  | Tagged<"finalize_unread", { peer: EntityId; tx: string }>
+  | Tagged<"start_unread", { peer: EntityId; tx: string }>
+  | Tagged<"chain_blind">
+  | Tagged<"account_lost", { peer: EntityId; from: bigint }>
+  | Tagged<
+    "offdelta_rebased",
+    {
+      peer: EntityId; token: TokenId; epoch: bigint; committedNonce: bigint; offdelta: bigint;
+      finalizedNonce: bigint | undefined;
+    }
+  >
+  | Tagged<
+    "pending_rebased",
+    {
+      peer: EntityId; epoch: bigint; nonce: bigint; finalizedNonce: bigint | undefined; txs: readonly AccountTx[];
+      fate: "resent_in_new_epoch" | "paid_on_chain";
+    }
+  >
   | Tagged<"cosign_refused", { from: EntityId; op: CosignOp; fault: EntityFault }>
   | Tagged<"message_refused", { from: EntityId; outcome: Outcome<PeerFault> }>
-  | Tagged<"tx_refused", { peer: EntityId; refused: Refused<AccountTx, PeerFault> }>;
+  | Tagged<"message_unsigned", { from: EntityId; head: FrameHash; why: "missing" | "wrong" }>
+  | Tagged<"tx_refused", { peer: EntityId; refused: Refused<AccountTx, PeerFault> }>
+  | Tagged<"finalization_unknown", { peer: EntityId; epoch: bigint; finalBodyHash: string | undefined }>;

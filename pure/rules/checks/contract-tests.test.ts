@@ -108,10 +108,10 @@ describe("the placement rule itself", () => {
   });
 
   // The folders are only gated if the workflow runs the gate part that lists them: the part uses isGateTest itself, so the workflow holds no glob that could drift from it.
-  test("R-GATE-CONTRACT-TESTS the contracts-fork job runs the --contracts-only part, which lists exactly the isGateTest files, and holds no glob loop of its own", () => {
+  test("R-GATE-CONTRACT-TESTS the gate-static job runs the whole `bun rules/check.ts`, whose contracts part lists exactly the isGateTest files, and holds no glob loop of its own", () => {
     const workflow = withoutComments(readFileSync(`${import.meta.dir}/../../../.github/workflows/build-and-test.yml`, "utf8"));
-    const job = jobBlocks(workflow)["contracts-fork"] ?? "";
-    expect(runCommands(job)).toContain("bun rules/check.ts --contracts-only");
+    const job = jobBlocks(workflow)["gate-static"] ?? "";
+    expect(runCommands(job)).toContain("bun rules/check.ts");
     expect(job).not.toContain("contracts/test/");
     expect(job).not.toMatch(/for \w+ in /);
   });

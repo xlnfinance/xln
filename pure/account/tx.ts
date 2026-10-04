@@ -14,7 +14,7 @@ import { fill, lapse, offer, retract } from "./swap/swap.ts";
 export type AccountTx =
   | Tagged<"pay", { token: TokenId; amount: bigint }>
   | Tagged<"set_credit", { token: TokenId; limit: bigint }>
-  | Tagged<"lock", { token: TokenId; hold: Hold }>
+  | Tagged<"lock", { token: TokenId; hold: Hold; route?: readonly string[] }>
   | Tagged<"resolve", { token: TokenId; id: HoldId; secret: Uint8Array }>
   | Tagged<"cancel", { token: TokenId; id: HoldId }>
   | Tagged<"expire", { token: TokenId; id: HoldId }>
@@ -23,8 +23,17 @@ export type AccountTx =
   | Tagged<"retract", { id: HoldId }>
   | Tagged<"lapse", { id: HoldId }>;
 
-/** What a tx is judged against besides the state: the clock's parameters and the judging party's own view of J. */
-export type Judge = Readonly<{ clock: ClockParams; view: JView }>;
+/**
+ * The most entity ids a lock's route may name: the hops after the lock's payee, in the text the Entity layer writes ids
+ * in. The Account does not read them; they are in the frame's name, so both sides signed them, and not in a proof.
+ */
+export const MAX_ROUTE_HOPS = 16;
+
+/**
+ * What a tx is judged against besides the state: the clock's parameters and the judging party's own view of J, and
+ * the second of the block at that view (the J loop's header, never a wall clock) when the node knows it.
+ */
+export type Judge = Readonly<{ clock: ClockParams; view: JView; seconds?: bigint }>;
 
 type Step = Result<AccountState, AccountFault>;
 
@@ -39,6 +48,11 @@ const accountRefusal = (s: AccountState, next: AccountState, hold: Hold): Accoun
 
 /** The token's lock rules first, then the caps that only the whole Account can see. */
 const locked = (s: AccountState, j: Judge, author: Side, tx: Extract<AccountTx, { _tag: "lock" }>): Step =>
+  (tx.route !== undefined && tx.route.length > MAX_ROUTE_HOPS
+    ? err({ _tag: "route_too_long", hops: tx.route.length, max: MAX_ROUTE_HOPS })
+    : lockedOnLedger(s, j, author, tx));
+
+const lockedOnLedger = (s: AccountState, j: Judge, author: Side, tx: Extract<AccountTx, { _tag: "lock" }>): Step =>
   flatMap(onLedger(s, tx.token, lockClause(ledgerOf(s, tx.token), j.clock, j.view, author, tx.hold)), (next) => {
     const refusal = accountRefusal(s, next, tx.hold);
     return refusal === undefined ? ok(next) : err(refusal);

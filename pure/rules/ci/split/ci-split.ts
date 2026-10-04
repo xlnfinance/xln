@@ -2,8 +2,9 @@
 // development, a pull request into main, the nightly run, a manual run) runs the whole gate. The split is a few lines of YAML that a
 // later edit could change without anyone noticing, so each of them is pinned here (the workflow is given with its comments removed):
 //   CI_SPLIT_PUSH         the `push` trigger lists both main and development, so the full set runs on every push to either
-//   CI_SPLIT_CONCURRENCY  the group names the event and the ref, and only a pull_request run cancels a run in progress, so a full
-//                         run on main or development always finishes (a newer push waits as the one pending run)
+//   CI_SPLIT_CONCURRENCY  the group names the event and the ref, and only a pull_request run cancels a run in progress, and not
+//                         one from a promote/ branch, so a full run on main or development always finishes (a newer push waits as the one
+//                         pending run) and so does the run of a snapshot promoted to main
 //   CI_SPLIT_IF           the only job-level `if`s are the slow-lane condition (not a pull request into development) and the nightly-or-manual one of og's suites
 //   CI_SPLIT_AGGREGATE    `one-gate` fails a skipped fast job, and accepts a skipped slow job only on a pull request into development
 // The names the development ruleset requires are `fastChecks`: every job without an `if`, which the test compares with
@@ -15,7 +16,8 @@ export const SLOW_IF = "github.event_name != 'pull_request' || github.base_ref !
 export const FAST_FLAG = "github.event_name == 'pull_request' && github.base_ref == 'development'";
 // The other `if` a job may carry: og's informational suites run nightly or by hand only (rules/ci/workflow/ci-triggers.ts pins which jobs).
 export const NIGHTLY_IF = "github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'";
-export const CANCEL_ONLY_PRS = "github.event_name == 'pull_request'";
+// A snapshot branch (promote/<sha>, see plan/process.md) is a pull request whose head never moves, and its run is never cancelled either.
+export const CANCEL_ONLY_PRS = "github.event_name == 'pull_request' && !startsWith(github.head_ref, 'promote/')";
 
 // An expression with its `${{ }}` and extra spaces removed.
 export const expression = (value: string): string => value.trim().replace(/^\$\{\{\s*(.*?)\s*\}\}$/, "$1").replace(/\s+/g, " ");

@@ -2,16 +2,23 @@
 // Depository's ABI and lifecycle vectors turned into raw logs, and a chain of blocks with hashes. Only tests import
 // this.
 import { readFileSync } from "node:fs";
-import { Interface } from "ethers";
+import { AbiCoder, Interface } from "ethers";
 import { expect } from "bun:test";
+import {
+  DeltaTransformer__factory,
+} from "../../contracts/typechain-types/factories/DeltaTransformer.sol/DeltaTransformer__factory.ts";
 import { Depository__factory } from "../../contracts/typechain-types/factories/Depository.sol/Depository__factory.ts";
 import { unwrapOr, type Result } from "../kernel/core/result.ts";
-import type { ProofBody } from "../chain/proof/proof.ts";
+import { emptyBatch, encodeBatch, type FinalDisputeProof, type InitialDisputeProof } from "../chain/batch/batch.ts";
+import { readOf, type Read } from "./calldata/decode.ts";
+import { finalizationEvidenceHash } from "../chain/proof/dispute.ts";
+import { proofBodyHash, type ProofBody } from "../chain/proof/proof.ts";
+import { bytesToHex, hexToBytes } from "../kernel/encoding/bytes.ts";
 import type { SettlementDiff } from "../chain/money.ts";
 import { seal, type JBatch, type SealContext, type SealOutcome } from "./batch/jbatch.ts";
 import type { SealedBatch } from "./batch/sealed.ts";
 import type { Gas, Simulation } from "./gas/simulate.ts";
-import { address, bytes32, type Address, type Bytes32, type RawLog } from "./log.ts";
+import { address, bytes32, type Address, type Bytes32, type Deployed, type RawLog } from "./log.ts";
 import type { JOp } from "./op/ops.ts";
 import type { Treasury } from "./plan/funded.ts";
 import type { Block } from "./watch.ts";
@@ -150,6 +157,20 @@ export const bigStart = (peer: string, nonce: bigint, kib: number): JOp => {
 
 export const DEPOSITORY_ABI = new Interface(Depository__factory.abi);
 
+const TRANSFORMER_ABI = new Interface(DeltaTransformer__factory.abi);
+
+/** A `SecretRevealed` log the DeltaTransformer emits, as its own ABI encodes it (a reveal made by anyone, any way). */
+export const transformerLogOf = (
+  hashlock: string, secret: string, block: bigint, index: bigint, fork = 0n, tx: Bytes32 = txOf(block, index),
+): RawLog => {
+  const fragment = TRANSFORMER_ABI.getEvent("SecretRevealed") ?? expect.unreachable("no SecretRevealed on it");
+  const { data, topics } = TRANSFORMER_ABI.encodeEventLog(fragment, [hashlock, secret]);
+  return {
+    address: TRANSFORMER, block, index, blockHash: hashOf(block, fork), data: data.toLowerCase(), tx,
+    topics: topics.map((topic) => must(bytes32(topic.toLowerCase()))),
+  };
+};
+
 /** Lowercase hex of a number, padded to `bytes` bytes. */
 export const hexOf = (n: bigint, bytes = 32): string => `0x${n.toString(16).padStart(bytes * 2, "0")}`;
 
@@ -158,13 +179,28 @@ export const must = <T, E>(made: Result<T, E>): T =>
 
 export const entityOf = (n: bigint): Bytes32 => must(bytes32(hexOf(n)));
 
+/** The hash of a proof body, by number: the one a dispute log names as `proofbodyHash`. */
+export const bodyHashOf = (n: bigint): Bytes32 => must(bytes32(hexOf(n)));
+
 export const DEPOSITORY: Address = must(address(hexOf(0xde0n, 20)));
+
+/** The DeltaTransformer the fixtures read logs of, next to the Depository. */
+export const TRANSFORMER: Address = must(address(hexOf(0xde1n, 20)));
+
+export const DEPLOYED: Deployed = { depository: DEPOSITORY, transformer: TRANSFORMER };
 
 /** A block hash that names its height and the fork it is on, so two forks never share one. */
 export const hashOf = (number: bigint, fork = 0n): Bytes32 => must(bytes32(hexOf(number + (fork << 128n))));
 
+/** The hash of the transaction that carried the log at `block` and `index`, unless a test names another. */
+export const txOf = (block: bigint, index: bigint): Bytes32 =>
+  must(bytes32(hexOf((0x7an << 200n) + (block << 64n) + index)));
+
+/** A block's second is ten times its number: a later block is a later second, on every fork. */
 export const blockOf = (number: bigint, fork = 0n): Block =>
-  ({ number, hash: hashOf(number, fork), parent: hashOf(number > 0n ? number - 1n : 0n, fork) });
+  ({
+    number, hash: hashOf(number, fork), parent: hashOf(number > 0n ? number - 1n : 0n, fork), timestamp: number * 10n,
+  });
 
 /** The blocks `from + 1` to `to`, each on its parent, on one fork; the first's parent is block `from` of that fork. */
 export const blocksBetween = (from: bigint, to: bigint, fork = 0n): readonly Block[] =>
@@ -173,11 +209,13 @@ export const blocksBetween = (from: bigint, to: bigint, fork = 0n): readonly Blo
 type Values = Readonly<Record<string, unknown>>;
 
 /** A log the Depository would emit: `event` with its arguments by name, at `block` and `index`, on `fork`. */
-export const logOf = (event: string, args: Values, block: bigint, index: bigint, fork = 0n): RawLog => {
+export const logOf = (
+  event: string, args: Values, block: bigint, index: bigint, fork = 0n, tx: Bytes32 = txOf(block, index),
+): RawLog => {
   const fragment = DEPOSITORY_ABI.getEvent(event) ?? expect.unreachable(`the Depository has no event ${event}`);
   const { data, topics } = DEPOSITORY_ABI.encodeEventLog(fragment, fragment.inputs.map((input) => args[input.name]));
   return {
-    address: DEPOSITORY, block, index, blockHash: hashOf(block, fork), data: data.toLowerCase(),
+    address: DEPOSITORY, block, index, blockHash: hashOf(block, fork), data: data.toLowerCase(), tx,
     topics: topics.map((topic) => must(bytes32(topic.toLowerCase()))),
   };
 };
@@ -197,3 +235,118 @@ export const lifecyclePhases: Readonly<Record<string, Phase>> = Object.fromEntri
   Object.entries<unknown>(JSON.parse(readFileSync(LIFECYCLE, "utf8")))
     .filter((entry): entry is [string, Phase] => hasEvents(entry[1])),
 );
+
+// ---- the arguments and calldata of a dispute finalize
+
+/**
+ * One clause's `Arguments` as the contract's own dispute tests encode it (`encodeDeltaTransformerArguments` of
+ * Depository-part-1): one fill ratio and these secrets, `abi.encode` of the tuple. This copies that helper's
+ * expression, it does not import it; the skeleton's S10 asks the deployed DeltaTransformer to decode such a blob.
+ */
+export const argumentTupleOf = (secrets: readonly string[]): string =>
+  AbiCoder.defaultAbiCoder().encode(["tuple(uint16[] fillRatios, bytes32[] secrets)"], [[[5000n], secrets]]);
+
+/**
+ * The blob a dispute carries, as the contract's own tests encode it (Depository-part-1, `starterInitialArguments`) and
+ * as the Depository reads it (Account.sol `_decodeTransformerArgumentList`): `abi.encode(bytes[])`, one `Arguments` per
+ * clause.
+ */
+export const argumentListOf = (...clauses: readonly (readonly string[])[]): string =>
+  AbiCoder.defaultAbiCoder().encode(["bytes[]"], [clauses.map(argumentTupleOf)]);
+
+/** The blob of a dispute over one clause, showing these secrets. */
+export const argumentsOf = (secrets: readonly string[]): string => argumentListOf(secrets);
+
+const BODY: ProofBody = {
+  watchSeed: hexOf(0n), leftResponseSeconds: 60n, rightResponseSeconds: 60n, offdeltas: [10n], tokenIds: [1n],
+  transformers: [],
+};
+
+/** A finalize op of a batch, with the fields a test does not care about filled in. */
+export const finalizeOp = (over: Partial<FinalDisputeProof> = {}): FinalDisputeProof => ({
+  counterentity: entityOf(0x11n), initialNonce: 7n, finalNonce: 8n, proposerIsLeft: true,
+  initialProofbodyHash: hexOf(1n), finalProofbody: BODY, starterArguments: "0x", otherArguments: "0x",
+  sig: `0x${"ab".repeat(65)}`, startedByLeft: false, cooperative: false, ...over,
+});
+
+/** The input of a `processBatch` call, made by `sender`, that carries these finalize ops. */
+export const finalizeInput = (sender: Bytes32, ops: readonly FinalDisputeProof[]): Uint8Array => {
+  const batch = must(encodeBatch({ ...emptyBatch(1_000_000n), disputeFinalizations: ops }));
+  return must(hexToBytes(DEPOSITORY_ABI.encodeFunctionData("processBatch", [sender, batch, "0x1234", 3n])));
+};
+
+/** An input as the transaction's own, to the Depository: its call is read exactly. */
+export const direct = (data: Uint8Array): Read => readOf({ data, route: "direct" });
+
+/** An input of a transaction to another contract: a call in it is found by a scan. */
+export const inWrapper = (data: Uint8Array): Read => readOf({ data, route: "wrapper" });
+
+const RELAY_ABI = new Interface(["function execute(address target, bytes data)", "function multicall(bytes[] calls)"]);
+
+/** The input of a relay contract's `execute(target, data)` that passes `call` on to the Depository: a wrapped call. */
+export const relayed = (call: Uint8Array): Uint8Array =>
+  must(hexToBytes(RELAY_ABI.encodeFunctionData("execute", [DEPOSITORY, bytesToHex(call)])));
+
+/** The input of a `multicall(bytes[])` whose entries are these calls, the Depository's among them. */
+export const multicalled = (calls: readonly Uint8Array[]): Uint8Array =>
+  must(hexToBytes(RELAY_ABI.encodeFunctionData("multicall", [calls.map((call) => bytesToHex(call))])));
+
+/** A body with a negative offdelta, two tokens and a clause with allowances: every shape the decoder must read. */
+export const CLAUSED: ProofBody = {
+  watchSeed: hexOf(0xabn), leftResponseSeconds: 60n, rightResponseSeconds: 3600n,
+  offdeltas: [-123_456_789_012_345_678_901_234_567_890n, 0n, 7n << 200n], tokenIds: [1n, 2n, 3n],
+  transformers: [
+    {
+      transformerAddress: "0x00000000000000000000000000000000000000aa", encodedBatch: "0x1234",
+      allowances: [{ deltaIndex: 1n, rightAllowance: 5n, leftAllowance: 6n }],
+    },
+    { transformerAddress: "0x00000000000000000000000000000000000000bb", encodedBatch: "0x", allowances: [] },
+  ],
+};
+
+/** A start op of a batch for a body, with the hash it names, and the fields a test does not care about filled in. */
+export const startOp = (body: ProofBody, over: Partial<InitialDisputeProof> = {}): InitialDisputeProof => ({
+  counterentity: entityOf(0x11n), nonce: 7n, ondeltaEpoch: 0n, proposerIsLeft: true,
+  proofbodyHash: must(proofBodyHash(body)), initialProofbody: body, watchSeed: body.watchSeed,
+  sig: `0x${"ab".repeat(65)}`, starterInitialArguments: "0x", starterCounterArguments: "0x",
+  starterCounterProofCommitment: hexOf(0n), ...over,
+});
+
+/** The input of a `processBatch` call, made by `sender`, that carries these start ops. */
+export const startInput = (sender: Bytes32, ops: readonly InitialDisputeProof[]): Uint8Array => {
+  const batch = must(encodeBatch({ ...emptyBatch(1_000_000n), disputeStarts: ops }));
+  return must(hexToBytes(DEPOSITORY_ABI.encodeFunctionData("processBatch", [sender, batch, "0x1234", 3n])));
+};
+
+/** A signed 512-bit offdelta as the contract's `Int512 {int256 high; uint256 low}`. */
+const int512Of = (value: bigint): { high: bigint; low: bigint } => ({
+  high: value >> 256n, low: value & ((1n << 256n) - 1n),
+});
+
+/** The input of a tower's `watchtowerCounterDispute` call, which carries the op as its `params`. */
+export const towerInput = (entity: Bytes32, op: FinalDisputeProof): Uint8Array => {
+  const body = op.finalProofbody;
+  const params = { ...op, finalProofbody: { ...body, offdeltas: body.offdeltas.map(int512Of) } };
+  return must(hexToBytes(DEPOSITORY_ABI.encodeFunctionData("watchtowerCounterDispute", [
+    entity, params, 300n, 1n, "0x1234",
+  ])));
+};
+
+/** What `DisputeFinalized` logs as `finalizationEvidenceHash` for the op. */
+export const evidenceOf = (op: FinalDisputeProof): Bytes32 =>
+  must(bytes32(must(finalizationEvidenceHash({
+    initialProofBodyHash: op.initialProofbodyHash, finalNonce: op.finalNonce, proposerIsLeft: op.proposerIsLeft,
+    startedByLeft: op.startedByLeft, starterArguments: op.starterArguments, otherArguments: op.otherArguments,
+    sig: op.sig,
+  }))));
+
+/** The `DisputeFinalized` log of `op` (sender Right, counterentity Left, opened at nonce 7), carried by `tx`. */
+export const finalizedOf = (op: FinalDisputeProof, block: bigint, index: bigint, tx = txOf(block, index)): RawLog =>
+  logOf("DisputeFinalized", {
+    sender: entityOf(0x52n), counterentity: entityOf(0x11n), nonce: 7n, finalProofbodyHash: hexOf(5n),
+    finalizationEvidenceHash: evidenceOf(op),
+  }, block, index, 0n, tx);
+
+/** The bytes with `patch` written over them at `at`, as a new array. */
+export const patched = (bytes: Uint8Array, at: number, patch: Uint8Array): Uint8Array =>
+  Uint8Array.from(bytes, (b, i) => patch[i - at] ?? b);

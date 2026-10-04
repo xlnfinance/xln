@@ -1,0 +1,69 @@
+{
+ "id": "R-REVEAL-BACKSTOP",
+ "statement": "What the code does, and no more: an Entity never co-signs the expiry of a hold whose secret the chain showed at a height at or before the hold's deadline height (`revealed_on_chain`, for good, no wait lifts it, the payee's way is a dispute; beside `reveal_unknown`, a hash the Entity forwarded and cannot rule on yet, which is retryable). The Entity keeps the lowest height each hashlock was shown at, in whatever order it hears the events, only for a hashlock a hold (committed, proposed or queued) or a paybook entry of its own names, so strangers who call `revealSecret` with any bytes grow nothing. The comparison here is by height. It is NOT the contract's: DeltaTransformer.sol (289-299) compares a block timestamp with the lock's second plus slack, so a secret shown up to floor(slack / blockSeconds) heights past the deadline height may still pay on chain while this rule lets the expiry stand (the test titled 'pays nothing' pins only that the code does not refuse a height past the deadline; it is not a claim about the chain). The expiry gate view > deadline + reserve covers the slack only by the size of the reserve. The two cases this height rule misses, the slack and a late lock (a hashlock the chain showed before any hold or entry names it), are closed by R-REGISTRY-AT-VIEW, which reads hashToTimestamp at the view and compares seconds as the contract does; this rule stays as the fast path that needs no read.",
+ "source": "coordinator relay 10-03 01:55 (never co-sign expiry of a hash whose hashToTimestamp at depth <= deadline); DeltaTransformer.sol revealSecret; coordinator relay 10-03 04:11 (spec compare of 176: D1 slack, D2 reserve, D3 late lock)",
+ "layers": {
+  "arrival": "n/a: the Arrival specs take J events as given",
+  "quint": "n/a: the Quint model has no expiry of a clause the chain paid; an owed row of the dispute model",
+  "contract": "n/a: the contract is pinned; the node reads what DeltaTransformer.revealSecret already logs",
+  "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
+  "ts": "hold"
+ },
+ "killers": [
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-REVEAL-BACKSTOP an Entity co-signs no expiry of a hold whose secret the chain showed by its deadline"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-REVEAL-BACKSTOP the Entity keeps the lowest height a secret was shown at, in any hearing order"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-REVEAL-BACKSTOP a secret no hold or entry of the Entity names is not kept, however many show"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-REVEAL-BACKSTOP a secret heard again once its hold exists is kept, whatever was heard before it"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-REVEAL-BACKSTOP a hold in a proposed frame or a queued lock is named too"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-REVEAL-BACKSTOP an expiry is refused for a hold whose secret was shown at or before its deadline"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-REVEAL-BACKSTOP a secret shown after the deadline pays nothing: the expiry stands"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-REVEAL-BACKSTOP the expiry of a hold nobody showed the secret of, or of another hashlock's, stands"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-REVEAL-BACKSTOP the refusal is for good: no wait lifts it, so the payee's way is a dispute"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-REVEAL-BACKSTOP a frame of foreign secrets builds its unchanged named set once"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-REVEAL-BACKSTOP a peer lock between two reveals invalidates the frame's named set"
+  }
+ ]
+}

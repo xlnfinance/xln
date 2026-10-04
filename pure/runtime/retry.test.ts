@@ -2,6 +2,7 @@
 // ahead of Bob's, so Bob refuses her lock for a deadline too far out. What the Runtime owes: Alice waits for her view
 // to move before she tries again (retry pacing), a payer is released when the tx is dropped (R-REFUSED-RELEASES-PAYER),
 // and a restart on either side loses nothing of the round: the WAL replays the attempt, the wait and what was declined.
+import { TEST_SIG } from "../entity/fixtures.ts";
 import { describe, expect, test } from "bun:test";
 import { holdOf, viewOf } from "../account/fixtures.ts";
 import { frameName } from "../account/frame/account.ts";
@@ -97,7 +98,7 @@ describe("runtime/refusal a frame whose attempt nobody can count is refused with
     const [theirs] = sent.inflight;
     const msg = theirs?.msg ?? expect.unreachable("no frame");
     const bent = msg._tag === "frame" ? { ...msg, frame: { ...msg.frame, attempt: -1 } } : msg;
-    const heard = feed({ ...sent, inflight: [] }, ALICE, { _tag: "peer_message", from: BOB, msg: bent });
+    const heard = feed({ ...sent, inflight: [] }, ALICE, { _tag: "peer_message", from: BOB, msg: bent, sig: TEST_SIG });
     expect(noticesOf(heard, ALICE).map((n) => n._tag)).toEqual(["message_refused"]);
     expect(accountOf(heard, ALICE, BOB).head).toBe(accountOf(refused, ALICE, BOB).head);
   });
@@ -145,7 +146,7 @@ describe("runtime/refusal a restart loses nothing of the refusal round", () => {
     const asked = feed(credited, ALICE, lock(100n));
     const [lockFrame] = asked.inflight;
     const msg = lockFrame?.msg ?? expect.unreachable("no frame");
-    const answered = feed({ ...asked, inflight: [] }, BOB, { _tag: "peer_message", from: ALICE, msg });
+    const answered = feed({ ...asked, inflight: [] }, BOB, { _tag: "peer_message", from: ALICE, msg, sig: TEST_SIG });
     expect(answered.inflight.map((o) => messageId(o.msg).split(" ")[0])).toEqual(["refusal"]);
     const crashed = { ...restarted(answered, ALICE), inflight: [] };
     expect(accountOf(crashed, ALICE, BOB).pending).toBeDefined();
@@ -163,7 +164,7 @@ describe("runtime/refusal a restart loses nothing of the refusal round", () => {
     const caught = settle(rise(once, BOB, 111n));
     const back = settle(restarted(caught, BOB));
     expect(hostOf(back, BOB).entities).toEqual(hostOf(caught, BOB).entities);
-    const again = feed({ ...back, inflight: [] }, BOB, { _tag: "peer_message", from: ALICE, msg });
+    const again = feed({ ...back, inflight: [] }, BOB, { _tag: "peer_message", from: ALICE, msg, sig: TEST_SIG });
     expect(again.inflight.map((o) => messageId(o.msg).split(" ")[0])).toEqual(["refusal"]);
   });
 });
@@ -189,7 +190,7 @@ describe("runtime/tick review A: a new height is a frame of every Entity", () =>
     const hosted = startRuntime({ ...setup, view: viewOf(110n) }, [emptyEntity(CAROL), emptyEntity(ALICE)]);
     const retryable = (owner: EntityId, hash: FrameHash) => inputFor(owner, 0n, {
       _tag: "peer_message", from: BOB,
-      msg: { _tag: "refusal", hash, index: 0, fault: "deadline_too_far", mark: 0, floor: 0 },
+      msg: { _tag: "refusal", hash, index: 0, fault: "deadline_too_far", mark: 0, floor: 0 }, sig: TEST_SIG
     });
     const waiting = [ALICE, CAROL].reduce((rt, owner) => {
       const opened = tick(rt, inputFor(owner, 1n, open(BOB))).runtime;

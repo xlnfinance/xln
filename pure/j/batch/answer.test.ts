@@ -122,6 +122,13 @@ describe("R-J5: a failed batch applied nothing and spent its nonce", () => {
     expect(seen.jbatch).toEqual(sent.jbatch);
     expect(landable(seen.jbatch)).toEqual({ _tag: "some", value: sent.batch });
   });
+  test("a whole-transaction revert spent no nonce: the same batch is still the one to send", () => {
+    const sent = inflight(queued(openJBatch(ME, 0n), reserveToReserve(1n)));
+    const seen = observe(sent.jbatch, { _tag: "reverted", nonce: sent.batch.nonce });
+    expect(seen.jbatch).toEqual(sent.jbatch);
+    expect(seen.jbatch.chainNonce).toBe(sent.jbatch.chainNonce);
+    expect(landable(seen.jbatch)).toEqual({ _tag: "some", value: sent.batch });
+  });
 });
 
 describe("abort and R-FINAL-NONCE: a batch given up on stays signed and its nonce is never signed again", () => {
