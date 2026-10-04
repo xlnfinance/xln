@@ -256,6 +256,7 @@ export const drain = (shell: Shell, station: Station): Promise<Result<Turn, Driv
  */
 export const observe = async (
   shell: Shell, station: Station, to: EntityId, inputs: readonly EntityInput[], height: JHeight,
+  seconds?: bigint,
 ): Promise<Result<Turn, DriveFault>> => {
   const earlier = await drain(shell, station);
   if (!earlier.ok) return earlier;
@@ -268,6 +269,7 @@ export const observe = async (
   const staged = apply(host.runtime, {
     _tag: "j_observation", at: shell.now(), to, batches, height,
     ...(read.got === undefined ? {} : { registry: read.got }),
+    ...(seconds === undefined ? {} : { seconds }),
   });
   const told = { ...earlier.value, unread: [...earlier.value.unread, ...read.unread] };
   if (!staged.ok) return staged;

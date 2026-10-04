@@ -28,14 +28,16 @@ export type Limits = Readonly<{ perPeer: number; perFrame: number }>;
  * provider of a node that may hold value does not trace calls (a probe or a transaction's trace answered no method),
  * so its Entity forwards no lock: once for each time the node goes blind. `registry_unread` says a reading of the
  * chain's registry the Entity needed was not had (the node failed it or no longer serves that block), so the decision
- * it rests on is refused or waits (R-REGISTRY-AT-VIEW): once for each hashlock and reason.
+ * it rests on is refused or waits (R-REGISTRY-AT-VIEW): once for each hashlock and reason. `poll_late` says a poll
+ * found more final blocks unread than the clock's poll delay (R-POLL-DELAY).
  */
 export type HostNotice =
   | Tagged<"misrouted", { to: EntityId; from: EntityId }>
   | Tagged<"queue_full", { from: EntityId }>
   | Tagged<"watch_stalled", { tx: string; reason: string }>
   | Tagged<"no_call_trace", { why: string }>
-  | Tagged<"registry_unread", { hashlock: string; reason: string }>;
+  | Tagged<"registry_unread", { hashlock: string; reason: string }>
+  | Tagged<"poll_late", { behind: bigint; bound: bigint }>;
 
 /** Which chain action of which committed row an effect came from: the WAL height and the place in the row's `chain`. */
 export type RowId = Readonly<{ height: bigint; index: number }>;
@@ -59,6 +61,8 @@ export type Effect =
  */
 export type Host = Readonly<{
   runtime: Runtime; limits: Limits; queue: readonly Item[]; height: JHeight | undefined;
+  /** The timestamp of the J block at `height`, as its header gave it: it goes into the frame with the height. */
+  seconds: bigint | undefined;
 }>;
 
 /** One step of the Host: where it is now and what its shell must do. */

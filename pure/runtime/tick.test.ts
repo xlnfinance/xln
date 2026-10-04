@@ -5,7 +5,7 @@ import { keccakHex } from "../kernel/encoding/bytes.ts";
 import { holdId } from "../account/model.ts";
 import { heightOf } from "../account/fixtures.ts";
 import type { FrameHash } from "../account/frame/frame.ts";
-import type { Input, Row } from "./model.ts";
+import type { Input, Row, Runtime } from "./model.ts";
 import type { JHeight } from "../account/clause/clock.ts";
 import { timestamp } from "./model.ts";
 import { apply, commit, flush, messageId, recover } from "./tick.ts";
@@ -112,6 +112,40 @@ describe("runtime/tick the stamp", () => {
     const risen = tick(started(BOB), heightAt(500n, 111n)).runtime;
     const later = tick(risen, inputFor(BOB, 10n, open(ALICE))).runtime;
     expect(later.wal.map((row) => row.stamp)).toEqual([500n, 500n].map(stamp));
+  });
+
+  test("R-HOP-SLACK the second of the view's block rises with the height and is the WAL's, so a replay has it", () => {
+    const at = (rt: Runtime, height: bigint, seconds: bigint): Runtime =>
+      tick(rt, heightAt(5n, height, seconds)).runtime;
+    const risen = at(at(started(BOB), 111n, 5_000n), 112n, 5_012n);
+    expect(risen.seconds).toBe(5_012n);
+    expect(at(risen, 112n, 9_999n).seconds).toBe(5_012n);
+    expect(at(risen, 100n, 1n).seconds).toBe(5_012n);
+    expect(risen.wal.map((row) => (row.input._tag === "j_height" ? row.input.seconds : undefined)))
+      .toEqual([5_000n, 5_012n]);
+    expect(unhalted(recover(setup, genesis, risen.wal)).seconds).toBe(5_012n);
+    expect(tick(started(BOB), heightAt(5n, 111n)).runtime.seconds).toBeUndefined();
+  });
+
+  test("R-HOP-SLACK an observation copies a header second onto the view and omits one it was not given", () => {
+    const before = started(BOB);
+    const risen = tick(before, {
+      _tag: "j_observation", at: stamp(1n), to: BOB, batches: [], height: 111n as JHeight, seconds: 5_000n,
+    }).runtime;
+    expect(risen.seconds).toBe(5_000n);
+    expect(unhalted(recover(setup, genesis, risen.wal)).seconds).toBe(5_000n);
+    const unknown = tick(before, {
+      _tag: "j_observation", at: stamp(1n), to: BOB, batches: [], height: 111n as JHeight,
+    }).runtime;
+    expect(unknown.seconds).toBeUndefined();
+    const kept = tick(risen, {
+      _tag: "j_observation", at: stamp(2n), to: BOB, batches: [[]], height: 111n as JHeight,
+    }).runtime;
+    expect(kept.seconds).toBe(5_000n);
+    const cleared = tick(risen, {
+      _tag: "j_observation", at: stamp(2n), to: BOB, batches: [], height: 112n as JHeight,
+    }).runtime;
+    expect(cleared.seconds).toBeUndefined();
   });
 
   test("R-CLOCK the stamp decides nothing: the same inputs at other stamps make the same Entities", () => {

@@ -4,6 +4,7 @@ import { expect } from "bun:test";
 import { appendFileSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { verifyHankoSignature } from "../../../chain/hanko/hanko-verify.ts";
+import type { Pace } from "../../../account/clause/clock.ts";
 import { type EntityId, type EntityState, emptyEntity } from "../../../entity/model.ts";
 import type { Check } from "../../../entity/signing/attest.ts";
 import type { JAnswer } from "../../../j/batch/answer.ts";
@@ -51,6 +52,15 @@ const setup = {
   ...fixtureSetup, clock: { ...fixtureSetup.clock, lag: 3n, reserve: 3n, depth: 2n },
   anchor: { ...fixtureSetup.anchor, check: bySigner },
 };
+
+/**
+ * The pace a node that may hold value starts with: a 12 s slot, a slot missed, and a poll within twelve blocks (the
+ * tests' chains stand ten blocks past the cursor the node starts at, which its first poll reads at once).
+ */
+export const PACE: Pace = { slot: 12n, missed: 1n, pollDelay: 12n };
+
+/** A reserve a value node of the scene's depth (2) can keep that pace with: depth + poll delay + missed + 1. */
+const VALUE_RESERVE = 16n;
 
 const NO_CHAIN: PortFault = { _tag: "port", call: "send", reason: "no chain in this test" };
 
@@ -109,6 +119,8 @@ export type Options = Readonly<{
   registry?: boolean;
   /** The registry the node reads, where a test wants one that fails. */
   read?: RegistryRead;
+  /** The chain's pace, which a node that may hold value starts with and no other needs. */
+  pace?: Pace;
 }>;
 
 /** A registry that shows no secret at any block. */
@@ -117,8 +129,10 @@ const SILENT: RegistryRead = () => Promise.resolve(ok(0n));
 /** What a node for `seat` is started with, its files in the seat's directory. */
 export const configOf = async (seat: Seat, other: Seat | undefined, options: Options): Promise<Config> => {
   const { tickMs, lost = keep, chain = port, wrap = (disk) => disk, watch, genesis } = options;
-  const { lag = setup.clock.lag, reserve = setup.clock.reserve, depth = setup.clock.depth } = options;
-  const { registry = watch?.value === true } = options;
+  const valued = watch?.value === true;
+  const { lag = setup.clock.lag, reserve = valued ? VALUE_RESERVE : setup.clock.reserve } = options;
+  const { depth = setup.clock.depth, registry = valued } = options;
+  const pace = options.pace ?? (valued ? PACE : setup.clock.pace);
   const wal = wrap(must(await fileDisk(`${seat.dir}/wal.log`)));
   const journal = must(await fileDisk(`${seat.dir}/journal.log`));
   const key = keyOfEntity(seat.entity);
@@ -128,7 +142,7 @@ export const configOf = async (seat: Seat, other: Seat | undefined, options: Opt
       now: () => stamp(BigInt(Date.now())), ...(registry ? { registry: options.read ?? SILENT } : {}),
     },
     boot: {
-      setup: { ...setup, registry, clock: { ...setup.clock, lag, reserve, depth } },
+      setup: { ...setup, registry, clock: { ...setup.clock, lag, reserve, depth, pace } },
       genesis: genesis ?? emptyEntity(seat.entity),
       where: { entity: seat.entity, deployment: DEPLOYED, world: WORLD },
       limits: unwrapOr(limits(32, 8), () => expect.unreachable("limits")),

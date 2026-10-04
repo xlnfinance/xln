@@ -79,6 +79,16 @@ describe("host/height a J height is a frame of its own, ahead of the queue; the 
     expect(next.host.queue).toEqual([]);
   });
 
+  test("R-HOP-SLACK the second of a height's block waits with it, and the highest height's stands for the rest", () => {
+    const host = bob();
+    const waiting = heard(heard(host, heightOf(host.runtime.view + 2n), 500n), heightOf(host.runtime.view + 1n), 400n);
+    expect(waiting).toMatchObject({ height: heightOf(host.runtime.view + 2n), seconds: 500n });
+    expect(heard(waiting, heightOf(host.runtime.view + 3n), 600n)).toMatchObject({ seconds: 600n });
+    const staged = unhalted(begin(waiting, stamp(100n))).host;
+    expect(staged).toMatchObject({ height: undefined, seconds: undefined });
+    expect(unhalted(begin(waiting, stamp(100n))).host.runtime.staged?.input).toMatchObject({ seconds: 500n });
+  });
+
   test("a height that does not rise above the Runtime's view is not kept: no frame and no row", () => {
     const host = bob();
     const view = host.runtime.view;

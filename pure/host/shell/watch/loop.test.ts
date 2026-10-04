@@ -161,6 +161,16 @@ describe("host/shell/watch the J loop's poll", () => {
     ]);
   });
 
+  test("R-POLL-DELAY a delivery gives the second of its height's block and the final blocks unread", async () => {
+    const first = await poll(portOf(straight(6n), logPath()), start(2n), LEFT);
+    expect(first.ok ? first.value : first).toMatchObject({ height: 4n, seconds: blockOf(4n).timestamp, unread: 4n });
+    const cursor = first.ok && first.value !== undefined ? first.value.watch : expect.unreachable("no delivery");
+    const next = await poll(portOf(straight(7n), logPath()), cursor, LEFT);
+    expect(next.ok ? next.value : next).toMatchObject({ height: 5n, seconds: blockOf(5n).timestamp, unread: 1n });
+    const far = await poll(portOf(straight(90n), logPath()), cursor, LEFT);
+    expect(far.ok ? far.value : far).toMatchObject({ height: 68n, unread: 84n });
+  });
+
   test("R-DISPUTE-FREEZE a secret the chain showed reaches the Entity as j_secret, in bytes", async () => {
     const shown = logOf("SecretRevealed", { hashlock: hexOf(7n), revealer: RIGHT, secret: hexOf(8n) }, 2n, 0n);
     const got = await poll(portOf(straight(6n, [shown]), logPath()), start(2n), LEFT);

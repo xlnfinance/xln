@@ -1,0 +1,39 @@
+{
+ "id": "R-POLL-DELAY",
+ "statement": "`pollDelay` is a field of the clock (`ClockParams.pace`), in blocks: the bound the node honours between a block being final and its own poll having read it, never an observed average. Where the tick is in milliseconds it is at least ceil(tick / slot) + 1 (`pollDelayOf`), and a node that may hold value does not start with less. The daemon checks every poll against it: more final blocks unread than `pollDelay` at the head it saw is a breach, told loud (`poll_late`, with what was unread and the bound), the Entity is told `j_blind` (no forward, no expiry co-signed) exactly as for a provider with no call trace, and the probe waits one full tick, a poll that found nothing unread, before it may end the blindness. The node keeps watching, draining, countering and finalizing. A node that holds no value is never told. The bound enters the hub's gate through the reaction (R-LAG-ONE): a reserve below depth + pollDelay + missed + 1 is refused by `clockParams`.",
+ "source": "coordinator ruling 10-03 03:32 and 03:50 (reserve bound, hub slack gate); builder; R-DEADLINE-TIMESTAMP; consolidation-plan.md D9",
+ "layers": {
+  "arrival": "owed: spec thread (the hub's gate over two deadlines read through the chain's seconds)",
+  "quint": "owed: spec thread (the hub's gate over two deadlines read through the chain's seconds)",
+  "contract": "n/a: the contract compares seconds (DeltaTransformer.sol, revealedUntilTimestamp); the node reads them, it does not change the contract",
+  "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
+  "ts": "hold"
+ },
+ "killers": [
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-POLL-DELAY a node whose poll delay is shorter than its own tick implies is not started"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-POLL-DELAY a node that holds no value is never told it was late, whatever it finds unread"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-POLL-DELAY a delivery gives the second of its height's block and the final blocks unread"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-POLL-DELAY a poll later than the bound is told loud and blinds the Entity until one is on time"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-POLL-DELAY a poll with exactly the bound of final blocks unread is on time, one more is late"
+  }
+ ]
+}

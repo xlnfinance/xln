@@ -8,8 +8,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { JView } from "../../pure/account/clause/clock.ts";
 import type { EntityId, EntityInput, EntityReplica, EntityState, JAction, Outbound } from "../../pure/entity/model.ts";
+import type { Pace } from "../../pure/account/clause/clock.ts";
 import { watchPort } from "../../pure/host/shell/evm/watch.ts";
-import { startDaemon, type Config, type Daemon, type Look } from "../../pure/host/shell/node/daemon.ts";
+import { pollDelayOf, startDaemon, type Config, type Daemon, type Look } from "../../pure/host/shell/node/daemon.ts";
 import { httpRpc } from "../../pure/host/shell/node/rpc.ts";
 import { listenTcp, type Listener } from "../../pure/host/shell/node/link/socket.ts";
 import { MAX_LINE, type Peer } from "../../pure/host/shell/link/link.ts";
@@ -26,6 +27,9 @@ const STABLE = 3;
 const PATIENCE_MS = 60_000;
 /** Blocks a J event waits under before the nodes act on it: the anvil node has no reorgs, one is enough to show the rule. */
 export const DEPTH = 1n;
+/** The seconds a block is due on the fork, and the pace a node that may hold value starts with (R-HOP-SLACK): a slot missed between two deadlines, a poll within what the tick implies. */
+export const SLOT = 12n;
+export const PACE: Pace = { slot: SLOT, missed: 1n, pollDelay: pollDelayOf(TICK_MS, SLOT) };
 
 const nonce = (): Uint8Array => crypto.getRandomValues(new Uint8Array(32));
 export const shown = (x: unknown): string => JSON.stringify(x, (_, v) => (typeof v === "bigint" ? v.toString() : v instanceof Uint8Array ? "bytes" : v));
@@ -146,12 +150,26 @@ export class Cluster {
     await this.refresh();
   }
 
-  /** The chain mines until the J height `height` is final (a block `depth` above it), and the nodes' J loops catch up. */
+  /**
+   * The chain mines until the J height `height` is final (a block `depth` above it), and the nodes' J loops catch up. It
+   * mines no more than the poll delay at once and waits for every node to read them: a run that mined a hundred blocks
+   * between two polls would be a node that heard late (R-POLL-DELAY), and the node says so.
+   */
   async reach(height: bigint, options: Quiet = {}): Promise<void> {
-    const head = BigInt(await this.chain.provider.getBlockNumber());
-    const blocks = height + DEPTH - head;
-    if (blocks > 0n) await this.chain.provider.send("anvil_mine", [`0x${blocks.toString(16)}`]);
+    for (;;) {
+      const head = BigInt(await this.chain.provider.getBlockNumber());
+      const blocks = height + DEPTH - head;
+      if (blocks <= 0n) break;
+      const chunk = blocks < PACE.pollDelay ? blocks : PACE.pollDelay;
+      await this.chain.provider.send("anvil_mine", [`0x${chunk.toString(16)}`]);
+      await this.caughtUp(head + chunk - DEPTH);
+    }
     await this.settle(options);
+  }
+
+  /** Every node that is up has read the chain's blocks up to the final block `finalized`. */
+  private async caughtUp(finalized: bigint): Promise<void> {
+    await this.until(() => [...this.slots.keys()].every((id) => this.down.has(id) || (this.look(id).cursor ?? -1n) >= finalized), `the nodes' J loops to read up to ${finalized}`);
   }
 
   /** While `work` runs, the messages `lost` says are lost on their way out. */

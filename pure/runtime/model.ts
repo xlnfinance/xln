@@ -32,20 +32,26 @@ export type EntityBatch = Tagged<"entity", {
   registry?: readonly Reading[];
 }>;
 
+/**
+ * `registry` is the readings taken at the new height. `seconds` is the timestamp of the J block at `height`, from the
+ * same header (R-HOP-SLACK). Absent when that second is unknown: a stored zero would be a known second.
+ */
 export type NewHeight = Tagged<"j_height", {
   at: Timestamp; height: JHeight;
-  /** The same readings, taken at the new height, for the frame every Entity makes of it. */
   registry?: readonly Reading[];
+  seconds?: bigint;
 }>;
 
 /**
  * A watcher delivery: bounded Entity frames at the old view, then its height, durable as one record.
  * `registry` is what those frames decide on (R-REGISTRY-AT-VIEW). Absent only when the node does not decide on it.
- * A present list, including an empty one, means the gate is on. The block's second is not this field.
+ * A present list, including an empty one, means the gate is on. `seconds` is the header timestamp of `height`, copied
+ * onto the height frame only, and omitted when that second is unknown.
  */
 export type Observation = Tagged<"j_observation", {
   at: Timestamp; to: EntityId; batches: readonly (readonly EntityInput[])[]; height: JHeight;
   registry?: readonly Reading[];
+  seconds?: bigint;
 }>;
 
 export type Input = EntityBatch | NewHeight | Observation;
@@ -71,6 +77,8 @@ export type Setup = Readonly<{
    * it on.
    */
   registry?: boolean;
+  /** The timestamp of the J block at `view`, when the node already knows it (R-HOP-SLACK). */
+  seconds?: bigint;
 }>;
 
 /**
@@ -81,6 +89,8 @@ export type Runtime = Readonly<{
   setup: Setup;
   stamp: Timestamp;
   view: JView;
+  /** The timestamp of the J block at `view`, once a height has brought it (the Setup's, at the start, if any). */
+  seconds: bigint | undefined;
   entities: ReadonlyMap<EntityId, EntityState>;
   wal: readonly Row[];
   staged: Row | undefined;

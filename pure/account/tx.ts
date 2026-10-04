@@ -29,8 +29,11 @@ export type AccountTx =
  */
 export const MAX_ROUTE_HOPS = 16;
 
-/** What a tx is judged against besides the state: the clock's parameters and the judging party's own view of J. */
-export type Judge = Readonly<{ clock: ClockParams; view: JView }>;
+/**
+ * What a tx is judged against besides the state: the clock's parameters and the judging party's own view of J, and
+ * the second of the block at that view (the J loop's header, never a wall clock) when the node knows it.
+ */
+export type Judge = Readonly<{ clock: ClockParams; view: JView; seconds?: bigint }>;
 
 type Step = Result<AccountState, AccountFault>;
 

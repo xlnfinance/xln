@@ -145,6 +145,8 @@ export type Stall = Readonly<{ tx: Bytes32; peer: Bytes32; fault: PortFault; tri
 export type Delivery = Readonly<{
   watch: Watch; events: readonly EntityInput[]; height: JHeight; carry: Carry; stalls: readonly Stall[];
   untraceable: boolean;
+  /** The second of the block at `height`, from its header; and how many final blocks the poll found undelivered. */
+  seconds: bigint; unread: bigint;
 }>;
 
 /** The cursor at the chain's own block `number`, final by the node's own choice (its view). */
@@ -525,6 +527,8 @@ export const poll = async (
     watch: step.value.watch,
     events: [...gave.value, ...told.value.begun, ...events.value, ...remembered.value, ...told.value.over],
     height: step.value.height,
+    seconds: step.value.watch.applied.timestamp,
+    unread: finalizedAt(watch.depth, range.head) - watch.applied.number,
     carry: { failing: stalled, reads, held: plan.held, reading: plan.reading, readings: new Map(carried) },
     stalls: [...stalled].map(([tx, f]): Stall => ({ tx, peer: plan.peers.get(tx) ?? hosted, ...f })),
     untraceable: calldata.gathered.noMethod.size > 0,

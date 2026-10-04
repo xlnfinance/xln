@@ -4,7 +4,7 @@
 import { mapDelete, mapSet } from "../kernel/core/collections.ts";
 import { keccakHex } from "../kernel/encoding/bytes.ts";
 import { emptyReplica } from "../account/frame/account.ts";
-import type { JHeight, JView } from "../account/clause/clock.ts";
+import type { JHeight, JView, Reading as ClockReading } from "../account/clause/clock.ts";
 import {
   propose, receive, resend, submit, type FrameHash, type Heard, type Msg, type Outcome,
 } from "../account/frame/frame.ts";
@@ -788,9 +788,11 @@ const intended = (rules: Rulebook, w: Work, i: Intent): Work => {
  * entry before it left, so that two payments to one next hop in a frame take two slots. Two rounds: a lock the door
  * refuses makes a `fail` entry, which the second round turns into a cancel of the lock it was forwarding.
  */
-const forwarding = (rules: Rulebook, judge: Judge, registry: Registry | undefined) => (w: Work): Work => {
+const forwarding = (
+  rules: Rulebook, judge: Judge, reading: ClockReading, registry: Registry | undefined,
+) => (w: Work): Work => {
   const step = (inner: Work, hashlock: string): Work => {
-    const i = intentFor(inner.state, judge.clock, judge.view, hashlock, registry);
+    const i = intentFor(inner.state, judge.clock, reading, judge.view, hashlock, registry);
     return i === undefined ? inner : intended(rules, inner, i);
   };
   const round = (acc: Work): Work => hashlocksOf(acc.state).reduce(step, acc);
@@ -1066,7 +1068,8 @@ export const entityFrame = (
   const arrived = arrivalsOf(inputs).reduce(hear, start(state));
   const afterHooks = hooksOf(inputs).reduce(hooked, arrived);
   const afterCommands = commandsOf(inputs).reduce((w, c) => commanded(rules, anchor.terms, w, c), afterHooks);
-  const afterPaybook = forwarding(rules, judge, registry)(afterCommands);
+  const reading: ClockReading = { headSeconds: judge.seconds, secondsOf: anchor.terms.secondsOf };
+  const afterPaybook = forwarding(rules, judge, reading, registry)(afterCommands);
   const propose = proposing(rules, judge.view, registry);
   const proposed = proposalOrder(afterPaybook).reduce(propose, afterPaybook);
   const peers = [...proposed.state.accounts.keys()].toSorted();
