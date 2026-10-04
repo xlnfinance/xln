@@ -77,7 +77,7 @@ export const slowChain = (log: string): ChainPort => ({
   nonce: () => Promise.resolve(ok(4n)),
   treasury: () => Promise.resolve(ok(TREASURY)),
   simulate: () => Promise.resolve(ok({ _tag: "ok", applyGas: 100_000n })),
-  send: () => Promise.resolve(ok(undefined)),
+  send: () => Promise.resolve(ok(`0x${"22".repeat(32)}`)),
   answer: (batch) => {
     appendFileSync(log, "asked\n");
     const asked = readFileSync(log, "utf8").split("\n").length - 1;

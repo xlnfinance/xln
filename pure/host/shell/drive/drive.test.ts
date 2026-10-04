@@ -11,7 +11,7 @@ import type { JAnswer, SkipFact } from "../../../j/batch/answer.ts";
 import { MIN_GAS_BUDGET } from "../../../j/batch/sealed.ts";
 import { assemble } from "../../../j/op/assemble.ts";
 import type { Cause, Simulation } from "../../../j/gas/simulate.ts";
-import { err, ok, unwrapOr, type Result } from "../../../kernel/core/result.ts";
+import { err, map, ok, unwrapOr, type Result } from "../../../kernel/core/result.ts";
 import { hostOf, setup, stamp } from "../../../runtime/fixtures.ts";
 import { heard, limits } from "../../host.ts";
 import { verifyHankoSignature } from "../../../chain/hanko/hanko-verify.ts";
@@ -70,7 +70,7 @@ const portOf = (
     const how = sends.ok ? "ok" : "lost";
     const held = journalIn(at.journal).join(",");
     appendFileSync(at.log, `send ${call.nonce} wal=${rowsIn(at).length} journal=${held} ${how}\n`);
-    return Promise.resolve(sends);
+    return Promise.resolve(map(sends, () => `0x${"11".repeat(32)}`));
   },
   answer: (batch) => {
     const landed = callsOf(at.log).some((c) => c.startsWith(`send ${batch.nonce} `) && c.endsWith(" ok"));

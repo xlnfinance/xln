@@ -35,13 +35,15 @@ export type Submitter = Readonly<{
   waiting: ReadonlyMap<JOp, RowId>;
   /** The batches signed, by digest, with the rows they carry: on their way, or landed. */
   signed: ReadonlyMap<string, Signed>;
+  /** The hash send returned for the batch on its way. A restart has none and sends the sealed batch again. */
+  tx: string | undefined;
 }>;
 
 export type Chain = Readonly<{ entity: EntityId; deployment: Deployment; world: ChainWorld; chainNonce: bigint }>;
 
 const fresh = (c: Chain): Submitter =>
   ({ entity: c.entity, deployment: c.deployment, world: c.world, jbatch: openJBatch(c.entity, c.chainNonce),
-    waiting: new Map(), signed: new Map() });
+    waiting: new Map(), signed: new Map(), tx: undefined });
 
 const known = (s: Submitter, id: RowId): boolean =>
   [...s.signed.values()].some((batch) => batch.rows.some((row) => keyOf(row) === keyOf(id)))
@@ -126,7 +128,7 @@ const landedBy = (s: Submitter, a: Extract<JAnswer, { _tag: "landed" }>, seen: O
   if (batch === undefined) return { submitter: { ...s, jbatch: seen.jbatch }, record: undefined, ...rest(seen) };
   const signed = mapSet(s.signed, a.batchHash, { ...batch, state: "landed" as const });
   const record: Answered = { _tag: "answered", nonce: a.nonce, digest: a.batchHash, outcome: "landed" };
-  return { submitter: { ...s, jbatch: seen.jbatch, signed }, record, ...rest(seen) };
+  return { submitter: { ...s, jbatch: seen.jbatch, signed, tx: undefined }, record, ...rest(seen) };
 };
 
 const failedBy = (s: Submitter, a: Extract<JAnswer, { _tag: "failed" }>, seen: Observed): Closed => {
@@ -138,18 +140,19 @@ const failedBy = (s: Submitter, a: Extract<JAnswer, { _tag: "failed" }>, seen: O
   const signed = mapDelete(s.signed, batch.digest);
   const waiting = requeued(s, batch, rows, seen.jbatch.draft);
   const record: Answered = { _tag: "answered", nonce: a.nonce, digest: batch.digest, outcome: "failed" };
-  return { submitter: { ...s, jbatch: seen.jbatch, signed, waiting }, record, ...rest(seen) };
+  return { submitter: { ...s, jbatch: seen.jbatch, signed, waiting, tx: undefined }, record, ...rest(seen) };
 };
 
 const rest = (seen: Observed) => ({ returned: seen.returned, skipped: seen.skipped });
 
-/** What the chain said about a batch of ours: landed is done, failed forgets its rows, starved waits. */
+/** What the chain said about a batch of ours: landed is done, failed forgets its rows, a revert or a starve waits. */
 export const answeredBy = (s: Submitter, answer: JAnswer): Closed => {
   const seen = observe(s.jbatch, answer);
   switch (answer._tag) {
     case "landed": return landedBy(s, answer, seen);
     case "failed": return failedBy(s, answer, seen);
-    case "starved": return { submitter: { ...s, jbatch: seen.jbatch }, record: undefined, ...rest(seen) };
+    case "starved":
+    case "reverted": return { submitter: { ...s, jbatch: seen.jbatch }, record: undefined, ...rest(seen) };
   }
 };
 

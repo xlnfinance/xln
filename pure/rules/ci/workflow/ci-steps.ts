@@ -16,6 +16,8 @@ export const GATE_COMMANDS: readonly RegExp[] = [
   // The spec suites, run from spec/ (spec/README.md): the Quint check and the Arrival cases (a shard of them in CI).
   /^bash check\.sh$/,
   /^(?:SHARD="[^"]*" )?node test\.mjs$/,
+  // The scripted fork, from the repo root (testnet-e2e/run.ts). `--out` is the local evidence file; CI prints the report.
+  /^bun testnet-e2e\/run\.ts(?: --out \S+)?$/,
 ];
 
 // What a gate job may run besides the gate: it puts tools and dependencies in place and moves around.
@@ -31,6 +33,8 @@ export const SETUP_COMMANDS: readonly RegExp[] = [
   /^pnpm build$/,
   /^mkdir -p \.spec-passed$/,
   /^echo ok > \.spec-passed\/(?:quint|arrival)$/,
+  // The fork compares the deployed code with this checkout's build (contracts/deploy/verify.ts).
+  /^bash contracts\/scripts\/build\.sh$/,
 ];
 
 // The gate commands every workflow with a `one-gate` job must run somewhere in its gate jobs (the plain `bun rules/check.ts` runs every part).
@@ -43,6 +47,7 @@ const REQUIRED: readonly Readonly<{ command: string; pattern: RegExp }>[] = [
   { command: "bun run test:seeds", pattern: GATE_COMMANDS[5]! },
   { command: "bash check.sh", pattern: GATE_COMMANDS[6]! },
   { command: "node test.mjs", pattern: GATE_COMMANDS[7]! },
+  { command: "bun testnet-e2e/run.ts", pattern: GATE_COMMANDS[8]! },
 ];
 
 const JOB_START = /^ {2}([\w-]+):\s*$/;

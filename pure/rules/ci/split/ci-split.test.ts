@@ -206,14 +206,19 @@ describe("the aggregate, run", () => {
       for (const seeds of results) {
         for (const quint of results) {
           for (const arrival of results) {
-            const env = { PATH: process.env.PATH ?? "", FAST: fast, STATIC: "success", TESTS: "success", SEEDS: seeds, QUINT: quint, ARRIVAL: arrival };
-            const status = Bun.spawnSync(["bash", "-e", "-c", script], { env }).exitCode;
-            expect({ fast, seeds, quint, arrival, passed: status === 0 }).toEqual({ fast, seeds, quint, arrival, passed: [seeds, quint, arrival].every((result) => allowed(fast, result)) });
+            for (const fork of results) {
+              const env = { PATH: process.env.PATH ?? "", FAST: fast, STATIC: "success", TESTS: "success", SEEDS: seeds, QUINT: quint, ARRIVAL: arrival, FORK: fork };
+              const status = Bun.spawnSync(["bash", "-e", "-c", script], { env }).exitCode;
+              const parts = [seeds, quint, arrival, fork];
+              const passed = status === 0;
+              const want = parts.every((result) => allowed(fast, result));
+              expect({ fast, seeds, quint, arrival, fork, passed }).toEqual({ fast, seeds, quint, arrival, fork, passed: want });
+            }
           }
         }
       }
       for (const result of results.filter((value) => value !== "success")) {
-        const slow = { SEEDS: "success", QUINT: "success", ARRIVAL: "success" };
+        const slow = { SEEDS: "success", QUINT: "success", ARRIVAL: "success", FORK: "success" };
         expect(Bun.spawnSync(["bash", "-e", "-c", script], { env: { PATH: process.env.PATH ?? "", FAST: fast, STATIC: result, TESTS: "success", ...slow } }).exitCode, `static ${result} fast=${fast}`).not.toBe(0);
         expect(Bun.spawnSync(["bash", "-e", "-c", script], { env: { PATH: process.env.PATH ?? "", FAST: fast, STATIC: "success", TESTS: result, ...slow } }).exitCode, `tests ${result} fast=${fast}`).not.toBe(0);
       }

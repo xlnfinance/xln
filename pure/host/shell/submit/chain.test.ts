@@ -7,9 +7,9 @@ import { appendFileSync, mkdtempSync, readFileSync, writeFileSync } from "node:f
 import { tmpdir } from "node:os";
 import type { JAnswer } from "../../../j/batch/answer.ts";
 import { MIN_GAS_BUDGET, type SealedBatch } from "../../../j/batch/sealed.ts";
-import { requirement } from "../../../j/gas/gas.ts";
+import { requirement, TRANSFORMER_DECODE_LIMIT, TRANSFORMER_POST_CALL_RESERVE } from "../../../j/gas/gas.ts";
 import type { Simulation } from "../../../j/gas/simulate.ts";
-import { err, ok, unwrapOr, type Result } from "../../../kernel/core/result.ts";
+import { err, map, ok, unwrapOr, type Result } from "../../../kernel/core/result.ts";
 import { settle, resume, step, type Arrival, type ChainPort, type Io, type PortFault } from "./chain.ts";
 import {
   aliceRun, ALICE, callsOf, COUNTER, DEPOSIT, FINALIZE, GAS, journalIn, START, TREASURY, walOf, DEPLOYED, WORLD,
@@ -32,7 +32,7 @@ const PORT_DOWN: PortFault = { _tag: "port", call: "send", reason: "connection r
 /** What the scripted chain does: its answers, and whether the send gets through. */
 type Script = Readonly<{
   nonce: bigint; outcome: Simulation["outcome"]; sends: Result<void, PortFault>;
-  answer: (batch: SealedBatch) => JAnswer | undefined;
+  answer: (batch: SealedBatch, tx?: string) => JAnswer | undefined;
   /** What the nth simulation of the scene says (from 0), when it differs from `outcome`. */
   nth?: (n: number) => Simulation["outcome"];
 }>;
@@ -59,9 +59,9 @@ const portOf = (at: Scene, script: Script): ChainPort => ({
   send: (call, gasLimit) => {
     const head = `send ${call.nonce} ${call.encodedBatch.slice(0, 18)} gas=${gasLimit}`;
     appendFileSync(at.log, `${head} journal=${journalIn(at.journal).join(",")}\n`);
-    return Promise.resolve(script.sends);
+    return Promise.resolve(map(script.sends, () => `0x${"33".repeat(32)}`));
   },
-  answer: (batch) => Promise.resolve(ok(script.answer(batch))),
+  answer: (batch, tx) => Promise.resolve(ok(script.answer(batch, tx))),
 });
 
 const ioOf = async (at: Scene, script: Script, signer: Signer = SIGNER): Promise<Io> => {
@@ -115,6 +115,23 @@ describe("host/shell/chain a batch is journaled before it is sent", () => {
       `simulate nonce=5 gas=${GAS.txGasCap}`, `simulate nonce=5 gas=${GAS.txGasCap}`,
       expect.stringMatching(new RegExp(`^send 5 0x[0-9a-f]+ gas=${carried} journal=sealed@5$`)),
     ]);
+  });
+
+  test("a finalize of a proof that carries a clause is sent with the transformer's gas reserve", async () => {
+    const at = scene();
+    const fin = FINALIZE.action._tag === "dispute_finalize" ? FINALIZE.action : expect.unreachable("not a finalize");
+    const clause = {
+      transformerAddress: "0x00000000000000000000000000000000000000aa", encodedBatch: "0x", allowances: [],
+    };
+    const queued = take(opened(), {
+      action: { ...fin, body: { ...fin.body, transformers: [clause] } }, row: FINALIZE.row,
+    });
+    const submitter = queued._tag === "queued" ? queued.submitter : expect.unreachable(`take ${queued._tag}`);
+    const moved = await withIo(at, CALM, (io) => stepped(io, submitter));
+    const carried = requirement(GAS.prelude, MIN_GAS_BUDGET) + 100_000n + TRANSFORMER_POST_CALL_RESERVE
+      + TRANSFORMER_DECODE_LIMIT;
+    expect(moved.stage).toBe("waiting");
+    expect(callsOf(at.log).at(-1)).toMatch(new RegExp(` gas=${carried} journal=`));
   });
 
   test("the gas carried is the contract's requirement with room to spare, never above the chain's cap", async () => {
@@ -324,6 +341,31 @@ describe("host/shell/chain what the chain says closes the batch, and a lost send
     const after = await withIo(at, CALM, (io) => settle(io, closed.submitter, "sure"));
     expect(after).toMatchObject({ ok: true, value: { stage: "idle" } });
     expect(callsOf(at.log).filter((c) => c.startsWith("send"))).toHaveLength(1);
+  });
+
+  test("a mined revert leaves the nonce unspent, and the same batch is sent once the head accepts it", async () => {
+    const at = scene();
+    const sent = await withIo(at, CALM, (io) => stepped(io, asked(opened())));
+    const phase = sent.submitter.jbatch.phase;
+    const batch = phase._tag === "inflight" ? phase.sent : expect.unreachable("not in flight");
+    const tx = sent.submitter.tx;
+    if (tx === undefined) expect.unreachable("the send returned no transaction hash");
+    const reverted = (named: SealedBatch, seen?: string): JAnswer | undefined =>
+      (seen === tx ? { _tag: "reverted", nonce: named.nonce } : undefined);
+    const held = await withIo(at, { ...CALM, outcome: REVERTS, answer: reverted }, (io) =>
+      stepped(io, sent.submitter));
+    expect(held.stage).toBe("waiting");
+    expect(held.submitter.tx).toBe(sent.submitter.tx);
+    expect(held.submitter.jbatch.chainNonce).toBe(sent.submitter.jbatch.chainNonce);
+    expect(held.submitter.jbatch.phase).toEqual({ _tag: "inflight", sent: batch });
+    expect(journalIn(at.journal)).toEqual([`sealed@${batch.nonce}`]);
+    const open = await withIo(at, { ...CALM, answer: reverted }, (io) => stepped(io, held.submitter));
+    expect(open.stage).toBe("waiting");
+    expect(open.submitter.jbatch.chainNonce).toBe(sent.submitter.jbatch.chainNonce);
+    expect(open.submitter.jbatch.phase).toEqual({ _tag: "inflight", sent: batch });
+    const sends = callsOf(at.log).filter((line) => line.startsWith("send")).map((line) => line.split(" journal=")[0]);
+    expect(sends).toHaveLength(2);
+    expect(sends[1]).toBe(sends[0]);
   });
 
   test("F1 a failed batch spent its nonce: the deposit is signed again at the next, a different batch", async () => {

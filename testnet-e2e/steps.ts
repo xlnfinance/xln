@@ -16,12 +16,15 @@ import { proofBodyHash } from "../pure/chain/proof/proof.ts";
 import { accountMessageHash } from "../pure/chain/proof/payload.ts";
 import { keccakHex } from "../pure/kernel/encoding/bytes.ts";
 import { finalizedSecrets, readOf, secretsIn } from "../pure/j/calldata/decode.ts";
+import { argumentListOf } from "../pure/j/fixtures.ts";
+import { MIN_GAS_BUDGET, processBatchCall, sealBatch } from "../pure/j/batch/sealed.ts";
+import { hopOf } from "../pure/entity/paybook/paybook.ts";
 import { address, bytes32 } from "../pure/j/log.ts";
 import { watchPort } from "../pure/host/shell/evm/watch.ts";
 import { httpRpc } from "../pure/host/shell/node/rpc.ts";
 import { startAnvil, assertLoopback, scrubbedEnv, type Anvil } from "./lib/anvil.ts";
 import {
-  accountKeyOf, accountOnChain, advanceTime, collateralOf, connect, eid, heldBy, leftOf, must, partyOf, reserveOf,
+  accountKeyOf, accountOnChain, advanceTime, collateralOf, connect, eid, hankoOf, heldBy, leftOf, must, partyOf, reserveOf,
   unit, type Chain, type Manifest, type Party,
 } from "./lib/chain.ts";
 import { GAPS, REPO } from "./lib/gaps.ts";
@@ -30,6 +33,7 @@ import type { EntityId, JAction, Outbound } from "../pure/entity/model.ts";
 import { lazyCheck } from "../pure/entity/signing/attest.ts";
 import type { ClockParams, JView } from "../pure/account/clause/clock.ts";
 import { Cluster, DEPTH, PACE, SLOT, shown } from "./lib/cluster.ts";
+import { RELAY_CREATION, RELAY_GAS } from "./lib/relay.ts";
 import { Seat } from "./lib/seat.ts";
 import { openWal } from "../pure/host/shell/disk/store.ts";
 import { fileDisk } from "../pure/host/shell/node/file-disk.ts";
@@ -809,13 +813,163 @@ const dispute: Step<World> = {
 };
 
 // ---- S9 ----------------------------------------------------------------------------------------------------------
-// Not run. The dispute starts through the node (S8) and the proof body carries a clause per open hold, but the Entity keeps the holds
-// of an Account the chain finalized, and the chain's finalize waits for the deadline second of an unrevealed clause. The rule that dissolves
-// the holds (R-HOLD-DISSOLVE) and the step are on the parked branch claude/e2e-clause; they wait for the counter and the freeze (a stale
-// dispute is answered, a payment sent into a window is not lost), since a clause makes both matter.
+// The open-clause dispute. The chain waits out an unrevealed clause (PaymentRevealWindowActive), then pays the
+// ledger with the clause unpaid. R-HOLD-DISSOLVE, already in the Entity, drops the hold on both Runtimes. This step
+// does not add a second dissolve.
+const CLAUSE_LOCK = 5n;
+
 const disputeClause: Step<World> = {
-  id: "dispute-clause", title: "Forced dispute while an HTLC is open in the signed proof", needs: ["htlc"],
-  run: async () => { throw new Blocked(["disputeWithClause"], `the proof body can carry a clause per open hold, but the Entity does not yet dissolve the holds a finalize resolved (R-HOLD-DISSOLVE, parked on claude/e2e-clause behind the counter and the freeze): ${GAPS.disputeWithClause.supplier}`); },
+  id: "dispute-clause", title: "Forced dispute on hubX-hubY with an HTLC open in the signed proof: the chain waits for the deadline, then pays by the proof", needs: ["htlc"],
+  run: async (w) => {
+    const chain = chainOf(w);
+    const net = netOf(w);
+    const { hubX, hubY } = partiesOf(w);
+    const t = token(chain);
+    const [x, y] = [eid(hubX), eid(hubY)];
+    // The nodes sign every Account under the terms they were opened with. This Account's key, epoch and first nonce are its own.
+    const terms = (w.signing ?? (() => { throw new Error("no signing context"); })()).terms;
+    const signing: SigningContext = { ...(await signingFor(chain, hubX, hubY)), terms };
+    const floor = BigInt(chain.manifest.dispute.responseFloorSeconds);
+    const secret = ethers.getBytes(ethers.keccak256(ethers.toUtf8Bytes("xln-testnet-e2e-skeleton/secret-9")));
+    const hashlock = keccakHex(secret);
+    const amount = CLAUSE_LOCK * unit(chain);
+    const deadline = must(jHeight(net.view() + 60n), "deadline");
+    // The finalize of the step before is read at depth: one more block, and the nodes settle.
+    await chain.provider.send("evm_mine", []);
+    await net.settle();
+    const [rx0, ry0] = [net.account(x, y), net.account(y, x)];
+    if (ledgerOf(rx0.state, t).holds.length !== 0 || rx0.pending !== undefined || rx0.head !== ry0.head) throw new Error("hubX-hubY does not start flat and at one head");
+    // hubX locks for hubY. Nobody holds the secret, so the clause stays open in the next head, which both sides sign.
+    await net.tell(x, { _tag: "lock", peer: y, token: t, hold: { id: holdId(20n), payer: rx0.side, amount, hashlock, deadline } });
+    await net.settle();
+    const replica = net.account(x, y);
+    if (replica.head !== net.account(y, x).head || replica.pending !== undefined || ledgerOf(replica.state, t).holds.length !== 1) throw new Error("the lock did not commit on both sides as one open hold");
+    const ledger = ledgerOf(replica.state, t);
+    const body = must(proofBodyOf(signing.terms, replica.state), "proof body of the committed state");
+    const bodyHash = must(proofBodyHash(body), "proof body hash");
+    if (body.transformers.length !== 1) throw new Error(`the proof body carries ${body.transformers.length} clauses, expected one for the hold`);
+    const onChain = await accountOnChain(chain, hubX, hubY);
+    if (onChain.epoch !== signing.ondeltaEpoch) throw new Error(`the chain's epoch is ${onChain.epoch}, the frames were signed at ${signing.ondeltaEpoch}`);
+    const nonce = signing.firstNonce + BigInt(replica.used - 1);
+    const digestFor = (proposerIsLeft: boolean): string => must(accountMessageHash(chain.dep, { accountKey: signing.accountKey, ondeltaEpoch: onChain.epoch, nonce }, {
+      _tag: "dispute_proof", proposerIsLeft, proofBodyHash: bodyHash, watchSeed: body.watchSeed,
+    }), "dispute proof digest");
+    const authorIsLeft = [true, false].find((left) => digestFor(left) === replica.head);
+    if (authorIsLeft === undefined) throw new Error(`the head ${replica.head} is the dispute-proof digest of neither author: the frame was not signed as the chain reads it`);
+    const xBefore = await reserveOf(chain, hubX);
+    const yBefore = await reserveOf(chain, hubY);
+    const held = await collateralOf(chain, hubX, hubY);
+    const before = net.askedBy(x).length;
+    const fromBlock = (await chain.provider.getBlockNumber()) + 1;
+    await net.tell(x, { _tag: "dispute", peer: y });
+    await net.settle({ pending: true });
+    const start = net.askedBy(x).slice(before).flatMap((ask) => (ask._tag === "dispute_start" ? [ask] : []));
+    if (start.length !== 1 || start[0] === undefined) throw new Error(`hubX's node asked for ${start.length} dispute starts, expected one`);
+    if (start[0].nonce !== nonce || must(proofBodyHash(start[0].body), "ask body hash") !== bodyHash || start[0].body.transformers.length !== 1) {
+      throw new Error("the dispute start hubX's node asked for differs from the proof the head names (nonce or body with its one clause)");
+    }
+    if (!(await accountOnChain(chain, hubX, hubY)).disputeOpen) throw new Error("no dispute is open after the start");
+    const finals = (): number => net.askedBy(x).slice(before).filter((ask) => ask._tag === "dispute_finalize").length;
+    const landedFinals = async (): Promise<number> => (await chain.depository.queryFilter(chain.depository.filters.DisputeFinalized(), fromBlock)).length;
+    // The chain refuses the empty finalize until the clause deadline, and the Host restates it, so the node stays busy.
+    // Catch the cursors up. Do not wait for quiet, and do not keep mining, until the dispute has closed.
+    const headNow = async (): Promise<bigint> => BigInt(await chain.provider.getBlockNumber());
+    const refresh = async (): Promise<void> => {
+      await net.reach((await headNow()) - DEPTH, { pending: true, settle: false });
+    };
+    const reachChain = async (): Promise<void> => {
+      await net.reach(await headNow(), { pending: true, settle: false });
+    };
+    // Both windows pass, and the deadline of the clause does not. hubX's node asks to finalize. The step fails here
+    // when the deadline second is not strictly after both windows, rather than mining until the wait appears.
+    const deadlineSecond = terms.secondsOf(deadline);
+    const stamp = async (): Promise<bigint> => BigInt((await chain.provider.getBlock("latest"))!.timestamp);
+    if ((await stamp()) + 2n * floor + 10n >= deadlineSecond) throw new Error(`the clause's deadline second ${deadlineSecond} is within the dispute windows of the chain's clock ${await stamp()}: the step cannot tell the wait from the end`);
+    // advanceTime mines one block. The nodes read it before the block that makes the new second final. After that,
+    // both hubs restate a finalize the clause still refuses, and each send is its own block. Another mine on top of
+    // those two is a late poll (R-POLL-DELAY), and a late poll blinds the hub for the rest of the run.
+    await advanceTime(chain, Number(2n * floor + 10n));
+    await refresh();
+    await reachChain();
+    for (let tries = 0; finals() === 0 && tries < 40; tries += 1) {
+      await Bun.sleep(50);
+      await refresh();
+    }
+    const early = { finals: finals(), landed: await landedFinals(), open: (await accountOnChain(chain, hubX, hubY)).disputeOpen };
+    if (early.finals === 0) throw new Error("hubX's node never asked the chain to finalize after the windows");
+    if (early.landed !== 0 || !early.open) throw new Error(`the finalize landed before the clause's deadline (${early.landed} finalized, dispute open ${early.open}): the chain should have made it wait`);
+    const transformer = new ethers.Contract(chain.manifest.contracts.deltaTransformer.address, ["function hashToTimestamp(bytes32) view returns (uint256)"], chain.provider);
+    if ((await transformer.hashToTimestamp!(hashlock)) !== 0n) throw new Error("the secret was revealed on chain: this step is the unrevealed path");
+    // The deadline second passes. The same finalize lands, and the unrevealed clause is unpaid.
+    await advanceTime(chain, Number(deadlineSecond - (await stamp()) + 5n));
+    await refresh();
+    await reachChain();
+    for (let tries = 0; tries < 12 && (await accountOnChain(chain, hubX, hubY)).disputeOpen; tries += 1) {
+      await Bun.sleep(50);
+      await refresh();
+    }
+    if ((await accountOnChain(chain, hubX, hubY)).disputeOpen) {
+      throw new Error(`the dispute stayed open after the clause deadline; hubX asked to finalize ${finals()} times and ${await landedFinals()} landed`);
+    }
+    // The finalize that landed is the head until one more block. Absorb both hubs' sends before that block.
+    const absorb = async (): Promise<void> => {
+      for (let tries = 0; tries < 40; tries += 1) {
+        const head = await headNow();
+        await net.reach(head - DEPTH, { pending: true, settle: false });
+        if ((await headNow()) === head) return;
+      }
+    };
+    await absorb();
+    await reachChain();
+    await absorb();
+    const finished = await chain.depository.queryFilter(chain.depository.filters.DisputeFinalized(), fromBlock);
+    const skipped = await chain.depository.queryFilter(chain.depository.filters.DisputeOpSkipped(), fromBlock);
+    if (finished.length !== 1 || finished[0] === undefined) throw new Error(`the chain finalized ${finished.length} disputes after the start, expected one`);
+    const landed = finished[0];
+    // A finalize that finds the dispute already gone is skipped inside its own batch (op 2, Depository._finalizeStale). The batch still lands.
+    const lostRace = skipped.filter((log) => BigInt(log.args[2]) === 2n);
+    if (skipped.length !== lostRace.length || lostRace.length > 1) {
+      throw new Error(`the chain skipped ${skipped.length} dispute ops after the start (${lostRace.length} of a finalize), expected at most one skipped finalize`);
+    }
+    const sender = (await landed.getTransaction()).from;
+    const winner = [hubX, hubY].find((p) => landed.args.sender === p.id && sender.toLowerCase() === p.wallet.address.toLowerCase());
+    if (winner === undefined) throw new Error(`the finalize names ${landed.args.sender} and was sent from ${sender}, expected hubX or hubY`);
+    // Paid by the proof, the clause unpaid: delta = ondelta + offdelta, clamped to the collateral.
+    const delta = held.ondelta + ledger.offdelta;
+    const leftShare = delta < 0n ? 0n : delta > held.collateral ? held.collateral : delta;
+    const share = (side: Side): bigint => (side === "left" ? leftShare : held.collateral - leftShare);
+    const xGot = (await reserveOf(chain, hubX)) - xBefore;
+    const yGot = (await reserveOf(chain, hubY)) - yBefore;
+    const sideX = replica.side;
+    if (xGot !== share(sideX) || yGot !== share(sideX === "left" ? "right" : "left")) {
+      throw new Error(`payout: hubX got ${xGot} and hubY ${yGot}; the ledger (ondelta ${held.ondelta} + offdelta ${ledger.offdelta}, collateral ${held.collateral}) says ${share(sideX)} and ${share(sideX === "left" ? "right" : "left")}, the clause unpaid`);
+    }
+    const after = await accountOnChain(chain, hubX, hubY);
+    if ((await collateralOf(chain, hubX, hubY)).collateral !== 0n || after.epoch !== onChain.epoch + 1n || after.disputeOpen) throw new Error(`after the finalize: epoch ${after.epoch}, dispute open ${after.disputeOpen}`);
+    // R-HOLD-DISSOLVE: both Runtimes heard the chain's own finalize and neither keeps the hold.
+    await net.settle();
+    const [rx, ry] = [net.account(x, y), net.account(y, x)];
+    [rx, ry].forEach((r, i) => {
+      const l = ledgerOf(r.state, t);
+      if (l.holds.length !== 0 || r.pending !== undefined || l.offdelta !== 0n || l.collateral !== 0n) throw new Error(`${i === 0 ? "hubX" : "hubY"}'s Account after the finalize: ${l.holds.length} holds, pending ${r.pending !== undefined}, offdelta ${l.offdelta}, collateral ${l.collateral}`);
+    });
+    if (rx.head !== ry.head) throw new Error("the two Runtimes hold different heads after the finalize");
+    const next = 2n * unit(chain);
+    await net.tell(x, { _tag: "pay", peer: y, token: t, amount: next });
+    await net.settle();
+    const [px, py] = [net.account(x, y), net.account(y, x)];
+    const sign = px.side === "left" ? -1n : 1n;
+    if (px.head !== py.head || ledgerOf(px.state, t).offdelta !== next * sign || ledgerOf(py.state, t).offdelta !== next * sign) throw new Error("a payment in the new epoch did not commit on both sides");
+    const parties = partiesOf(w);
+    const now = await heldBy(chain, Object.values(parties), [[parties.alice, hubX], [hubX, hubY], [hubY, parties.bob]]);
+    if (now !== w.held) throw new Error(`money is not conserved: ${w.held} before the dispute, ${now} after`);
+    return {
+      checks: [
+        `one DisputeFinalized from ${winner.name}; skipped finalizes ${lostRace.length}; hubX ${fmt(chain, xGot)}, hubY ${fmt(chain, yGot)}; clause unpaid; R-HOLD-DISSOLVE; held ${fmt(chain, now)}`,
+      ],
+      gaps: [],
+    };
+  },
 };
 
 // ---- S10 ---------------------------------------------------------------------------------------------------------
@@ -883,9 +1037,11 @@ const rebase: Step<World> = {
     }
     // A wrapper may hide the call from the input, so the port also reads the node's call trace: the real node's trace of the finalize names its call to the Depository.
     const recent = (await chain.provider.getBlockNumber()) - 5_000;
-    const finalized = await chain.depository.queryFilter(chain.depository.filters.DisputeFinalized(), recent);
+    // The open-clause dispute (S9) finalizes hubX-hubY before this step looks. The finalize this step traces is alice-hubX's.
+    const finalized = (await chain.depository.queryFilter(chain.depository.filters.DisputeFinalized(), recent))
+      .filter((e) => String(e.args.counterentity).toLowerCase() === alice.id.toLowerCase());
     const [finalize] = finalized;
-    if (finalized.length !== 1 || finalize === undefined) throw new Error(`the chain logged ${finalized.length} dispute finalizes, expected the one of the dispute step`);
+    if (finalized.length !== 1 || finalize === undefined) throw new Error(`the chain logged ${finalized.length} dispute finalizes of alice-hubX, expected the one of the dispute step`);
     const depositoryAddress = must(address(chain.manifest.contracts.depository.address.toLowerCase()), "depository address");
     const evidence = must(bytes32(String(finalize.args.finalizationEvidenceHash)), "evidence hash");
     const transformer = must(address(chain.manifest.contracts.deltaTransformer.address.toLowerCase()), "transformer address");
@@ -1212,4 +1368,233 @@ const nodes: Step<World> = {
   },
 };
 
-export const STEPS: readonly Step<World>[] = [fork, world, deposits, open, pay, htlc, reveal, revealDirect, lateLock, lateExpiry, swap, dispute, disputeClause, rebase, nodes, disputeStale];
+// ---- S9b ---------------------------------------------------------------------------------------------------------
+// Bob finalizes through the relay with the secret in the new hold's argument slot. The watcher already scans a
+// wrapper for processBatch. This step drives that path and does not add a dissolve.
+
+const ROUTED = 6n;
+
+const disputeRelay: Step<World> = {
+  id: "dispute-relay", title: "Hostile payee finalizes hubY-bob through a relay with the secret in the arguments: the hub claims upstream and the hold dissolves", needs: ["dispute-clause"],
+  run: async (w) => {
+    const chain = chainOf(w);
+    const net = netOf(w);
+    const { alice, hubX, hubY, bob } = partiesOf(w);
+    const t = token(chain);
+    const [a, x, y, b] = [eid(alice), eid(hubX), eid(hubY), eid(bob)];
+    const terms = (w.signing ?? (() => { throw new Error("no signing context"); })()).terms;
+    const clock = (await view(chain)).clock;
+    const hop = hopOf(clock);
+    // The manifest names response floors and no slack. A missing slackSeconds is not a short one. Fail only when the field is present and below depth blocks.
+    const manifestFile: unknown = JSON.parse(readFileSync(join(REPO, "contracts/deploy/sepolia.manifest.json"), "utf8"));
+    const disputeFile = manifestFile !== null && typeof manifestFile === "object" && "dispute" in manifestFile ? manifestFile.dispute : undefined;
+    const slackSeconds = disputeFile !== null && typeof disputeFile === "object" && disputeFile !== undefined && "slackSeconds" in disputeFile ? disputeFile.slackSeconds : undefined;
+    if (typeof slackSeconds === "number" && BigInt(slackSeconds) < DEPTH * SLOT) {
+      throw new Error(`setup: slackSeconds ${slackSeconds} is below ${DEPTH} blocks of ${SLOT} s`);
+    }
+    const stamp = async (): Promise<bigint> => BigInt((await chain.provider.getBlock("latest"))!.timestamp);
+    const transformer = new ethers.Contract(chain.manifest.contracts.deltaTransformer.address, ["function hashToTimestamp(bytes32) view returns (uint256)"], chain.provider);
+    const late = ledgerOf(net.account(y, b).state, t).holds.find((h) => h.id === holdId(3n));
+    if (late === undefined) throw new Error("hubY-bob has no hold 3 left from the late-expiry step");
+    const lateShown = await transformer.hashToTimestamp!(late.hashlock);
+    if (lateShown === 0n || lateShown > terms.secondsOf(late.deadline)) throw new Error(`the leftover hold's reveal time ${lateShown} is not inside its signed second ${terms.secondsOf(late.deadline)}`);
+    const noticed = net.noticesOf(y).length;
+    await net.tell(y, { _tag: "expire", peer: b, token: t, id: holdId(3n) });
+    await net.settle();
+    const expiry = net.noticesOf(y).slice(noticed).filter(paidRefusal);
+    const expiryNotice = expiry[0];
+    if (expiry.length !== 1 || expiryNotice === undefined || !expiryNotice.includes("revealed_on_chain")) {
+      throw new Error(`hubY's expiry of the leftover hold was told ${shown(net.noticesOf(y).slice(noticed))}, expected one refusal revealed_on_chain`);
+    }
+    if (ledgerOf(net.account(y, b).state, t).holds.length !== 1) throw new Error("the leftover hold did not stay after the refused expiry");
+    const secret = ethers.getBytes(ethers.keccak256(ethers.toUtf8Bytes("xln-testnet-e2e-skeleton/secret-9b")));
+    const hashlock = keccakHex(secret);
+    const amount = ROUTED * unit(chain);
+    const horizon = net.view() + 90n;
+    const downSecond = terms.secondsOf(must(jHeight(horizon - 2n * hop), "downstream deadline"));
+    const upSecond = terms.secondsOf(must(jHeight(horizon - hop), "upstream deadline"));
+    const now = await stamp();
+    if (downSecond <= now) throw new Error(`setup: the downstream clause's deadline second ${downSecond} is not strictly after the chain clock ${now}`);
+    if (upSecond <= now) throw new Error(`setup: the upstream clause's deadline second ${upSecond} is not strictly after the chain clock ${now}`);
+    const hops = [[alice, hubX], [hubX, hubY], [hubY, bob]] as const;
+    const offBefore = hops.map(([payer, payee]) => ledgerOf(net.account(eid(payer), eid(payee)).state, t).offdelta);
+    // Bob is not told the secret. Once the dispute opens, a payee with an unacked resolve reveals on chain at once,
+    // and that write is hashToTimestamp. Here the secret arrives only in the finalize arguments, so the hold stays
+    // because bob never resolves.
+    const relayed = await (async () => {
+      const hold = { id: holdId(21n), payer: net.account(a, x).side, amount, hashlock, deadline: must(jHeight(horizon), "deadline") };
+      await net.tell(a, { _tag: "lock", peer: x, token: t, hold, route: [y, b] });
+      await net.settle();
+      if (net.account(b, y).pending !== undefined) throw new Error("bob resolved the routed lock: he holds the secret, so the reveal would be public");
+      const open = hops.map(([payer, payee]) => ledgerOf(net.account(eid(payer), eid(payee)).state, t).holds.length);
+      if (open.join() !== "1,1,2") throw new Error(`open clauses per hop before the dispute: ${open.join()}, expected 1,1,2 (the leftover hold plus the routed one on hubY-bob)`);
+      const downLedger = ledgerOf(net.account(y, b).state, t);
+      const routedHold = [...downLedger.holds].toSorted((p, q) => (p.id < q.id ? -1 : 1)).find((h) => h.hashlock.toLowerCase() === hashlock.toLowerCase());
+      const upHold = ledgerOf(net.account(x, y).state, t).holds.find((h) => h.hashlock.toLowerCase() === hashlock.toLowerCase());
+      if (routedHold === undefined || upHold === undefined) throw new Error("the routed hold is not open on hubY-bob and hubX-hubY");
+      const routedSecond = terms.secondsOf(routedHold.deadline);
+      const claimSecond = terms.secondsOf(upHold.deadline);
+      if (routedSecond <= (await stamp())) throw new Error(`the routed hold's deadline second ${routedSecond} is not strictly after the chain clock ${await stamp()}`);
+      const before = net.askedBy(y).length;
+      const fromBlock = (await chain.provider.getBlockNumber()) + 1;
+      await net.tell(y, { _tag: "dispute", peer: b });
+      // Bob is the non-starter, so he restates an empty finalize the chain refuses while the clause is open.
+      for (let tries = 0; tries < 12 && !(await accountOnChain(chain, hubY, bob)).disputeOpen; tries += 1) {
+        await net.reach(BigInt(await chain.provider.getBlockNumber()), { pending: true, settle: false });
+      }
+      const starts = net.askedBy(y).slice(before).flatMap((ask) => (ask._tag === "dispute_start" ? [ask] : []));
+      const start = starts[0];
+      if (starts.length !== 1 || start === undefined) throw new Error(`hubY's node asked for ${starts.length} dispute starts, expected one`);
+      if (!(await accountOnChain(chain, hubY, bob)).disputeOpen) throw new Error("no dispute is open on hubY-bob after the start");
+      const holds = [...downLedger.holds].toSorted((p, q) => (p.id < q.id ? -1 : 1));
+      const slot = holds.findIndex((h) => h.hashlock.toLowerCase() === hashlock.toLowerCase());
+      if (slot < 0 || start.body.transformers.length < holds.length) throw new Error(`the secret's clause slot is ${slot} among ${holds.length} holds and ${start.body.transformers.length} clauses`);
+      const clauses = start.body.transformers.map((_, i) => (i === slot ? [ethers.hexlify(secret)] : []));
+      const otherArguments = argumentListOf(...clauses);
+      const bodyHash = must(proofBodyHash(start.body), "opening body hash");
+      const startedByLeft = leftOf(hubY, bob).id === hubY.id;
+      const finalization = {
+        counterentity: hubY.id, initialNonce: start.nonce, finalNonce: start.nonce, proposerIsLeft: start.proposerIsLeft,
+        initialProofbodyHash: bodyHash, finalProofbody: start.body, starterArguments: "0x", otherArguments,
+        sig: "0x", startedByLeft, cooperative: false,
+      };
+      const yBefore = await reserveOf(chain, hubY);
+      const bBefore = await reserveOf(chain, bob);
+      const held = await collateralOf(chain, hubY, bob);
+      const brief = (error: unknown): string => {
+        const text = error instanceof Error ? error.message : String(error);
+        const at = text.indexOf(" (transaction=");
+        return (at > 0 ? text.slice(0, at) : text).slice(0, 180);
+      };
+      // Bob's node signs from this same key while it restates an empty finalize, so a deploy and a send can both read one nonce.
+      const factory = new ethers.ContractFactory(["function execute(address target, bytes data) external returns (bytes memory)"], RELAY_CREATION, bob.wallet);
+      let relay: ethers.BaseContract | undefined;
+      let last = "the relay did not deploy";
+      for (let spin = 0; spin < 4 && relay === undefined; spin += 1) {
+        try {
+          const deployed = await factory.deploy();
+          await deployed.waitForDeployment();
+          relay = deployed;
+        } catch (error) {
+          last = brief(error);
+        }
+      }
+      if (relay === undefined) throw new Error(last);
+      const relayAddress = (await relay.getAddress()).toLowerCase();
+      const depository = chain.manifest.contracts.depository.address;
+      const network = await chain.provider.getNetwork();
+      const fees = await chain.provider.getFeeData();
+      const maxPriorityFeePerGas = fees.maxPriorityFeePerGas ?? 1_000_000_000n;
+      const maxFeePerGas = fees.maxFeePerGas ?? maxPriorityFeePerGas * 2n;
+      let receipt: ethers.TransactionReceipt | null = null;
+      for (let attempt = 0; attempt < 4 && (receipt === null || receipt.status !== 1); attempt += 1) {
+        const entityNonce = (await chain.depository.entityNonces(bob.id)) + 1n;
+        const sealed = must(sealBatch({ deployment: chain.dep, entity: bob.id, nonce: entityNonce, gasBudget: MIN_GAS_BUDGET }, [{ _tag: "dispute_finalize", finalization }]), "seal the hostile finalize");
+        const call = processBatchCall(sealed, hankoOf(bob, sealed.digest));
+        const inner = chain.depository.interface.encodeFunctionData("processBatch", [call.entityId, call.encodedBatch, call.hankoData, call.nonce]);
+        const data = relay.interface.encodeFunctionData("execute", [depository, inner]);
+        try {
+          await chain.provider.call({ to: relayAddress, from: bob.wallet.address, data, gasLimit: RELAY_GAS });
+        } catch (error) {
+          last = brief(error);
+          await chain.provider.send("evm_mine", []);
+          continue;
+        }
+        for (let spin = 0; spin < 4 && (receipt === null || receipt.status !== 1); spin += 1) {
+          const walletNonce = await chain.provider.getTransactionCount(bob.wallet.address, "pending");
+          try {
+            const raw = await bob.wallet.signTransaction({
+              type: 2, chainId: network.chainId, nonce: walletNonce, to: relayAddress, data, value: 0,
+              gasLimit: RELAY_GAS, maxPriorityFeePerGas, maxFeePerGas,
+            });
+            receipt = await (await chain.provider.broadcastTransaction(raw)).wait();
+            if (receipt === null || receipt.status !== 1) last = `mined status ${receipt?.status ?? "none"}`;
+          } catch (error) {
+            last = brief(error);
+            receipt = null;
+            if (!last.includes("nonce")) break;
+          }
+        }
+      }
+      if (receipt === null || receipt.status !== 1) throw new Error(`the relayed finalize did not land: ${last}`);
+      if (receipt.to?.toLowerCase() !== relayAddress) throw new Error(`the hostile transaction went to ${receipt.to}, expected the relay ${relayAddress}`);
+      const finished = await chain.depository.queryFilter(chain.depository.filters.DisputeFinalized(), fromBlock);
+      const finish = finished[0];
+      if (finished.length !== 1 || finish === undefined) throw new Error(`the chain finalized ${finished.length} disputes after the start, expected the one relayed batch`);
+      const sentTx = await finish.getTransaction();
+      if (finish.args.sender !== bob.id || sentTx.from.toLowerCase() !== bob.wallet.address.toLowerCase() || sentTx.to?.toLowerCase() !== relayAddress) {
+        throw new Error(`the finalize names ${finish.args.sender} and was sent from ${sentTx.from} to ${sentTx.to}, expected bob's Entity ${bob.id} from ${bob.wallet.address} to the relay`);
+      }
+      const finishedAt = BigInt((await finish.getBlock()).timestamp);
+      if ((await transformer.hashToTimestamp!(hashlock)) !== 0n) throw new Error("hashToTimestamp of the new secret moved: the secret was learned from a reveal log, not from the finalize arguments");
+      if (finishedAt > claimSecond) throw new Error(`the finalize landed at second ${finishedAt}, not before the upstream deadline second ${claimSecond}`);
+      const giveUp = claimSecond - (clock.lag + DEPTH) * SLOT;
+      await net.reach(BigInt(receipt.blockNumber), { pending: true, settle: false });
+      const heard = (id: EntityId): boolean => net.rowsOf(id).some((r) => {
+        const inputs = r.input._tag === "j_observation" ? r.input.batches.flat() : r.input._tag === "entity" ? r.input.inputs : [];
+        return inputs.some((i) => i._tag === "j_secret" && ethers.hexlify(i.secret).toLowerCase() === ethers.hexlify(secret).toLowerCase());
+      });
+      if (!heard(y)) throw new Error("hubY's WAL has no j_secret of the relayed finalize: the watcher did not read the secret from the wrapper's input");
+      const shownAt = net.entity(y).shown.get(hashlock);
+      if (shownAt !== undefined && shownAt !== BigInt(receipt.blockNumber)) throw new Error(`hubY's shown map keeps the secret at ${shownAt}, the finalize is in block ${receipt.blockNumber}`);
+      const claimed = [ledgerOf(net.account(a, x).state, t).holds.length, ledgerOf(net.account(x, y).state, t).holds.length];
+      if (claimed.join() !== "0,0") throw new Error(`the hubs did not claim upstream from the relayed secret: open clauses alice-hubX, hubX-hubY ${claimed.join()}`);
+      const up = net.account(x, y);
+      const upOff = ledgerOf(up.state, t).offdelta;
+      const upExpected = offBefore[1]! + (up.side === "left" ? -amount : amount);
+      if (upOff !== upExpected || ledgerOf(net.account(y, x).state, t).offdelta !== upExpected) throw new Error(`hubX-hubY offdelta ${upOff}, expected ${upExpected}: hubY did not gain the routed amount upstream`);
+      const aliceSide = net.account(a, x);
+      const aliceOff = ledgerOf(aliceSide.state, t).offdelta;
+      const aliceExpected = offBefore[0]! + (aliceSide.side === "left" ? -amount : amount);
+      if (aliceOff !== aliceExpected) throw new Error(`alice-hubX offdelta ${aliceOff}, expected ${aliceExpected}`);
+      const change = (payer: Side, locked: bigint): bigint => (payer === "left" ? -locked : locked);
+      const paid = async (h: (typeof holds)[number]): Promise<bigint> => {
+        const until = terms.secondsOf(h.deadline);
+        const at = await transformer.hashToTimestamp!(h.hashlock);
+        const byLog = at !== 0n && at <= until;
+        const byArgs = h.hashlock.toLowerCase() === hashlock.toLowerCase() && finishedAt <= until;
+        return byLog || byArgs ? change(h.payer, h.amount) : 0n;
+      };
+      const shifts = await Promise.all(holds.map((h) => paid(h)));
+      const paidShift = shifts.reduce((sum, n) => sum + n, 0n);
+      const routedChange = change(routedHold.payer, amount);
+      const delta = held.ondelta + downLedger.offdelta + paidShift;
+      const leftShare = delta < 0n ? 0n : delta > held.collateral ? held.collateral : delta;
+      const sideY = net.account(y, b).side;
+      const share = (side: Side): bigint => (side === "left" ? leftShare : held.collateral - leftShare);
+      const yGot = (await reserveOf(chain, hubY)) - yBefore;
+      const bGot = (await reserveOf(chain, bob)) - bBefore;
+      if (yGot !== share(sideY) || bGot !== share(sideY === "left" ? "right" : "left")) {
+        throw new Error(`payout: hubY got ${yGot} and bob ${bGot}; the ledger plus the paid clauses says ${share(sideY)} and ${share(sideY === "left" ? "right" : "left")}`);
+      }
+      const lateOnly = held.ondelta + downLedger.offdelta + paidShift - routedChange;
+      const lateLeft = lateOnly < 0n ? 0n : lateOnly > held.collateral ? held.collateral : lateOnly;
+      const lateHub = sideY === "left" ? lateLeft : held.collateral - lateLeft;
+      if (lateHub - share(sideY) !== amount) throw new Error(`paying the routed clause cost hubY ${lateHub - share(sideY)}, expected ${amount}, which the upstream offdelta returns`);
+      const [ry, rb] = [net.account(y, b), net.account(b, y)];
+      [ry, rb].forEach((r, i) => {
+        const l = ledgerOf(r.state, t);
+        if (l.holds.length !== 0 || l.offdelta !== 0n || l.collateral !== 0n) throw new Error(`${i === 0 ? "hubY" : "bob"} after the finalize: ${l.holds.length} holds, offdelta ${l.offdelta}, collateral ${l.collateral}`);
+      });
+      const after = await accountOnChain(chain, hubY, bob);
+      if ((await collateralOf(chain, hubY, bob)).collateral !== 0n || after.disputeOpen) throw new Error(`the dispute is still open, or collateral remains, after the relayed finalize`);
+      return { finishedAt, giveUp, claimSecond, routedSecond, yGot, bGot, relayAddress, block: receipt.blockNumber };
+    })();
+    await net.settle();
+    const [ry, rb] = [net.account(y, b), net.account(b, y)];
+    if (ry.head !== rb.head || ry.pending !== undefined || rb.pending !== undefined || ledgerOf(ry.state, t).holds.length !== 0) {
+      throw new Error("hubY-bob did not settle on one head with no hold after bob's lost resolve was released");
+    }
+    const parties = partiesOf(w);
+    const conserved = await heldBy(chain, Object.values(parties), [[alice, hubX], [hubX, hubY], [hubY, bob]]);
+    if (conserved !== w.held) throw new Error(`money is not conserved: ${w.held} before, ${conserved} after`);
+    return {
+      checks: [
+        `bob relayed the finalize (${relayed.relayAddress}) at second ${relayed.finishedAt}, before upstream ${relayed.claimSecond}; hashToTimestamp stayed 0; hubY ${fmt(chain, relayed.yGot)}, bob ${fmt(chain, relayed.bGot)}; R-HOLD-DISSOLVE; held ${fmt(chain, conserved)}`,
+      ],
+      gaps: [],
+    };
+  },
+};
+
+export const STEPS: readonly Step<World>[] = [fork, world, deposits, open, pay, htlc, reveal, revealDirect, lateLock, lateExpiry, swap, dispute, disputeClause, rebase, nodes, disputeStale, disputeRelay];

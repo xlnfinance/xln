@@ -154,8 +154,9 @@ export class Cluster {
    * The chain mines until the J height `height` is final (a block `depth` above it), and the nodes' J loops catch up. It
    * mines no more than the poll delay at once and waits for every node to read them: a run that mined a hundred blocks
    * between two polls would be a node that heard late (R-POLL-DELAY), and the node says so.
+   * `settle: false` returns once those cursors have caught up, while a node is still busy.
    */
-  async reach(height: bigint, options: Quiet = {}): Promise<void> {
+  async reach(height: bigint, options: Quiet & Readonly<{ settle?: boolean }> = {}): Promise<void> {
     for (;;) {
       const head = BigInt(await this.chain.provider.getBlockNumber());
       const blocks = height + DEPTH - head;
@@ -163,6 +164,11 @@ export class Cluster {
       const chunk = blocks < PACE.pollDelay ? blocks : PACE.pollDelay;
       await this.chain.provider.send("anvil_mine", [`0x${chunk.toString(16)}`]);
       await this.caughtUp(head + chunk - DEPTH);
+    }
+    if (options.settle === false) {
+      const head = BigInt(await this.chain.provider.getBlockNumber());
+      await this.caughtUp(head - DEPTH);
+      return;
     }
     await this.settle(options);
   }

@@ -6,6 +6,7 @@
 // contract's ABI says is a fault the caller can read, never a thrown error.
 import type { EntityId } from "../../../entity/model.ts";
 import type { JAnswer, SkipFact } from "../../../j/batch/answer.ts";
+import type { SealedBatch } from "../../../j/batch/sealed.ts";
 import type { Cause, Simulation } from "../../../j/gas/simulate.ts";
 import type { Treasury } from "../../../j/plan/funded.ts";
 import type { Tagged } from "../../../kernel/core/tagged.ts";
@@ -205,7 +206,9 @@ const sendOf = (reads: Reads, cfg: PortConfig): ChainPort["send"] => async (call
     chainId: cfg.chainId, nonce, tip, maxFee: 2n * base + tip, gas: gasLimit, to: cfg.depository, data: data.value,
   }, cfg.key.secret);
   if (!raw.ok) return err(portFault("send", raw.error._tag));
-  return map(await reads.ask("send", "eth_sendRawTransaction", [raw.value]), () => undefined);
+  const sent = await reads.ask("send", "eth_sendRawTransaction", [raw.value]);
+  if (!sent.ok) return sent;
+  return isText(sent.value) ? ok(sent.value) : err(portFault("send", "the node returned no transaction hash"));
 };
 
 const skipsOf = async (
@@ -218,7 +221,30 @@ const skipsOf = async (
   ));
 };
 
-const answerOf = (reads: Reads, cfg: PortConfig): ChainPort["answer"] => async (batch) => {
+type Mined = Readonly<{ status: bigint; block: bigint }>;
+
+const minedOf = (raw: unknown): Result<Mined | undefined, ReplyFault> =>
+  (raw === null
+    ? ok(undefined)
+    : flatMap(fieldsOf(raw), (fields) => flatMap(quantity(fields["status"]), (status) =>
+      map(quantity(fields["blockNumber"]), (block) => ({ status, block })))));
+
+/**
+ * A mined transaction that reverted as a whole emitted neither event, and the entity nonce was not spent.
+ * The same sealed batch can still land. No receipt, one above the depth, or a successful one, is not this.
+ */
+const wholeRevert = async (
+  reads: Reads, batch: SealedBatch, tx: string | undefined, settled: bigint,
+): Promise<Result<JAnswer | undefined, PortFault>> => {
+  if (tx === undefined) return ok(undefined);
+  const mined = await reads.read("answer receipt", "eth_getTransactionReceipt", [tx], minedOf);
+  if (!mined.ok) return mined;
+  const receipt = mined.value;
+  if (receipt === undefined || receipt.block > settled || receipt.status !== 0n) return ok(undefined);
+  return ok({ _tag: "reverted", nonce: batch.nonce });
+};
+
+const answerOf = (reads: Reads, cfg: PortConfig): ChainPort["answer"] => async (batch, tx) => {
   const head = await reads.read("answer head", "eth_blockNumber", [], quantity);
   if (!head.ok) return head;
   const settled = head.value - cfg.depth;
@@ -234,7 +260,7 @@ const answerOf = (reads: Reads, cfg: PortConfig): ChainPort["answer"] => async (
   const failed = await reads.logs("answer", [BATCH_FAILED, cfg.entity, topicNumber(batch.nonce)], cfg.from, settled);
   if (!failed.ok) return failed;
   const [refusal] = failed.value;
-  if (refusal === undefined) return ok(undefined);
+  if (refusal === undefined) return wholeRevert(reads, batch, tx, settled);
   return map(mapErr(fourBytes(refusal.data), (fault) => portFault("answer", fault.why)), (reason): JAnswer =>
     ({ _tag: "failed", nonce: batch.nonce, reason }));
 };
