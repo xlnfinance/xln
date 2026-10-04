@@ -91,6 +91,19 @@ const otherNotices = (c: Cluster) => [ALICE, BOB].flatMap((id) =>
 const same = (c: Cluster): boolean => replicaOf(c, ALICE).head === replicaOf(c, BOB).head;
 const resend = (c: Cluster, id: EntityId): Cluster =>
   feed(c, id, { _tag: "resend_due", peer: id === ALICE ? BOB : ALICE });
+/** The nonce the pending frame would sign at: the proof nonce a finalize that holds that frame carries. */
+const frameNonce = (c: Cluster, id: EntityId): bigint => {
+  const frame = replicaOf(c, id).pending?.frame ?? expect.unreachable("no pending frame");
+  return frame.firstNonce + BigInt(frame.slot) - 1n;
+};
+/** A body neither side holds. Its hash is what an unknown finalize logs, and a later observation can carry it. */
+const foreignBody = (seed: string): ProofBody => ({
+  watchSeed: seed, leftResponseSeconds: 60n, rightResponseSeconds: 60n, offdeltas: [3n], tokenIds: [1n],
+  transformers: [],
+});
+/** The later observation that names `body` at `nonce`, as the host tells a finalize once the calldata hashes. */
+const heardLater = (c: Cluster, id: EntityId, body: ProofBody, nonce: bigint): Cluster =>
+  feed(c, id, { _tag: "j_dispute_over", peer: id === ALICE ? BOB : ALICE, body, nonce });
 
 /** The frame sent again, refused as another epoch's, and its txs proposed again once the J view has moved. */
 const retried = (c: Cluster, id: EntityId): Cluster => settle(rise(settle(resend(c, id)), id, 111n));
@@ -474,6 +487,46 @@ describe("runtime/chain R-DISPUTE-FREEZE the finalized nonce is that of the proo
     expect(replicaOf(back, ALICE).pending).toBeDefined();
     const again = feed(back, ALICE, epochOf(BOB, 1n, stale + 1n, unknown));
     expect(unknownTold(again, ALICE)).toHaveLength(1);
+  });
+
+  test("R-FINALIZATION-UNKNOWN spending resumes when a later observation's body hashes to the logged final body, and a frame that nonce holds is not sealed again", () => {
+    const lost = disputed(frameLost(paid, ALICE, 5n));
+    const body = foreignBody(`0x${"cd".repeat(32)}`);
+    const hash = hashed(body);
+    const nonce = frameNonce(lost, ALICE);
+    const frozen = moved(lost, 1n, startedAt(lost) + 1n, hash);
+    expect(factsOf(frozen, ALICE)?.unresolved).toEqual({ epoch: 1n, finalBodyHash: hash });
+    const refused = hostOf(feed(frozen, ALICE, pay(BOB, 1n)), ALICE).wal.at(-1)?.notices ?? [];
+    expect(refused).toMatchObject([{ _tag: "command_refused", fault: { _tag: "account_disputed" } }]);
+    const other = heardLater(frozen, ALICE, foreignBody(`0x${"ef".repeat(32)}`), nonce);
+    expect(factsOf(other, ALICE)?.unresolved).toEqual({ epoch: 1n, finalBodyHash: hash });
+    const named = heardLater(heardLater(frozen, ALICE, body, nonce), BOB, body, nonce);
+    expect(factsOf(named, ALICE)?.unresolved).toBeUndefined();
+    expect(factsOf(named, BOB)?.unresolved).toBeUndefined();
+    expect(pendingTold(named, ALICE)).toMatchObject([{
+      fate: "paid_on_chain", finalizedNonce: nonce, txs: [{ _tag: "pay" }],
+    }]);
+    const twice = heardLater(named, ALICE, body, nonce);
+    expect(pendingTold(twice, ALICE)).toHaveLength(1);
+    expect(offdeltas(twice)).toEqual([0n, 0n]);
+    const back = restarted(named, ALICE);
+    expect(factsOf(back, ALICE)?.unresolved).toBeUndefined();
+    const flushed = retried(named, ALICE);
+    expect(offdeltas(flushed)).toEqual([0n, 0n]);
+    expect(replicaOf(flushed, ALICE).mempool).toEqual([]);
+    const next = settle(rise(settle(feed(flushed, ALICE, pay(BOB, 3n))), ALICE, 112n));
+    expect(offdeltas(next)).toEqual([-3n, -3n]);
+  });
+
+  test("R-FINALIZATION-UNKNOWN a pending frame above the named nonce is sent again", () => {
+    const lost = disputed(frameLost(paid, ALICE, 5n));
+    const body = foreignBody(`0x${"ab".repeat(32)}`);
+    const nonce = frameNonce(lost, ALICE) - 1n;
+    const frozen = moved(lost, 1n, startedAt(lost) + 1n, hashed(body));
+    const named = heardLater(heardLater(frozen, ALICE, body, nonce), BOB, body, nonce);
+    expect(pendingTold(named, ALICE).map((n) => n.fate)).toStrictEqual(["resent_in_new_epoch"]);
+    const after = retried(named, ALICE);
+    expect(offdeltas(after)).toEqual([-5n, -5n]);
   });
 
   test("R-DISPUTE-FREEZE the notice of a pending frame names its epoch, its nonce and that it is sent again", () => {

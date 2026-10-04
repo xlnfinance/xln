@@ -71,6 +71,7 @@ const NO_SIGNATURE = new Uint8Array();
 /** The slots of the types in Types.sol, counted in words from the head of the tuple. */
 const BATCH_FINALIZATIONS = 7;
 const FINAL_INITIAL_BODY = 4;
+const FINAL_BODY = 5;
 const FINAL_NONCE = 2;
 const FINAL_PROPOSER = 3;
 const FINAL_STARTER_ARGUMENTS = 6;
@@ -123,8 +124,14 @@ export const startedSecrets = (data: string): readonly Bytes32[] => {
   return unique([...secretsIn(blob(STARTED_INITIAL_ARGUMENTS)), ...secretsIn(blob(STARTED_COUNTER_ARGUMENTS))]);
 };
 
-/** A finalize op of a batch: the hash the chain logged for it, and the two argument blobs it carried. */
-export type Finalize = Readonly<{ evidence: Bytes32; starterArguments: Uint8Array; otherArguments: Uint8Array }>;
+/**
+ * A finalize op of a batch: the hash the chain logged for it, the two argument blobs it carried, the nonce of the
+ * proof it paid by (`finalNonce`, not the opening nonce the log stores), and that proof's body when the bytes held one.
+ */
+export type Finalize = Readonly<{
+  evidence: Bytes32; starterArguments: Uint8Array; otherArguments: Uint8Array;
+  finalNonce: bigint; body: ProofBody | undefined;
+}>;
 
 const word = (batch: Uint8Array, op: AbiTuple, slot: number): Uint8Array => abiTupleBytes(batch, op, slot * WORD);
 
@@ -144,7 +151,9 @@ const finalizeOf = (batch: Uint8Array, op: AbiTuple, sig: Uint8Array): Finalize 
     word(batch, op, FINAL_STARTED_BY_LEFT), keccak256(starterArguments), keccak256(otherArguments),
     keccak256(sig),
   ]));
-  return { evidence: evidence as Bytes32, starterArguments, otherArguments };
+  const body = bodyIn(batch, abiTupleRef(batch, op, FINAL_BODY * WORD));
+  const finalNonce = abiWord(batch, op, FINAL_NONCE * WORD);
+  return { evidence: evidence as Bytes32, starterArguments, otherArguments, finalNonce, body };
 };
 
 /**
@@ -268,6 +277,23 @@ export const finalizedSecrets = (read: Read, evidence: Bytes32): readonly Bytes3
   return mine.length === 0
     ? undefined
     : unique(mine.flatMap((f) => [...secretsIn(f.starterArguments), ...secretsIn(f.otherArguments)]));
+};
+
+/**
+ * The proof a finalize paid by (R-FINALIZATION-UNKNOWN): the op whose evidence hash is the logged one, and whose body
+ * hashes to the logged `finalProofbodyHash`. The nonce is that op's `finalNonce`. Anything else is no proof.
+ */
+export const finalizedProof = (
+  read: Read, evidence: Bytes32, bodyHash: Bytes32,
+): Readonly<{ nonce: bigint; body: ProofBody }> | undefined => {
+  const hashOf = (body: ProofBody | undefined): string | undefined => {
+    const hash = body === undefined ? undefined : proofBodyHash(body);
+    return hash?.ok === true ? hash.value : undefined;
+  };
+  const named = finalizesIn(read).find((op) =>
+    op.evidence === evidence && hashOf(op.body)?.toLowerCase() === bodyHash.toLowerCase());
+  const body = named?.body;
+  return named === undefined || body === undefined ? undefined : { nonce: named.finalNonce, body };
 };
 
 /** `abi.encode`d words are 32 bytes; an `Int512 {int256 high; uint256 low}` is two of them, an `Allowance` three. */

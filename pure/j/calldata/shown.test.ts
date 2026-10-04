@@ -1,13 +1,13 @@
 import { describe, expect, test } from "bun:test";
 import { ok } from "../../kernel/core/result.ts";
-import type { Bytes32 } from "../log.ts";
+import { bytes32, type Bytes32 } from "../log.ts";
 import { decodeLogs } from "../log.ts";
 import type { Read } from "./decode.ts";
 import { observe, type Accounts, type Addressed } from "../observe.ts";
 import { calldataWanted, withCalldata, type Prepared } from "../watch.ts";
 import {
-  argumentsOf, blockOf, bodyHashOf, CLAUSED, DEPLOYED, DEPOSITORY, direct, entityOf, finalizedOf, finalizeInput,
-  finalizeOp, hexOf, logOf, must, patched, startInput, startOp, txOf,
+  argumentsOf, blockOf, bodyHashOf, CLAUSED, DEPLOYED, DEPOSITORY, direct, entityOf, evidenceOf, finalizedOf,
+  finalizeInput, finalizeOp, hexOf, logOf, must, patched, startInput, startOp, txOf,
 } from "../fixtures.ts";
 import { proofBodyHash } from "../../chain/proof/proof.ts";
 
@@ -132,6 +132,23 @@ describe("j/shown", () => {
       const told = must(observe(read.events, [LEFT, THIRD], accounts));
       expect(told.map((a) => a.event._tag)).toEqual(["j_epoch", "j_dispute_over", "j_finalize_unread"]);
       expect(told.at(-1)).toEqual(toward(LEFT, { _tag: "j_finalize_unread", peer: RIGHT, tx: TX }));
+    });
+  });
+
+  test("R-FINALIZATION-UNKNOWN a finalize whose body hashes to the log is told with that body and its nonce", () => {
+    const op = finalizeOp();
+    const hash = must(bytes32(must(proofBodyHash(op.finalProofbody))));
+    const log = logOf("DisputeFinalized", {
+      sender: RIGHT, counterentity: LEFT, nonce: 7n, finalProofbodyHash: hash,
+      finalizationEvidenceHash: evidenceOf(op),
+    }, 2n, 1n, 0n, TX);
+    const read = withCalldata(
+      preparedOf(advance(2n, 0n, 1n), log), new Map([[TX, [direct(finalizeInput(RIGHT, [op]))]]]),
+    );
+    const told = must(observe(read.events, [LEFT], accounts));
+    const over = told.find((row) => row.event._tag === "j_dispute_over");
+    expect(over?.event).toMatchObject({
+      _tag: "j_dispute_over", peer: RIGHT, nonce: op.finalNonce, body: op.finalProofbody,
     });
   });
 

@@ -64,7 +64,11 @@ export type ChainEvent =
     }
   >
   | Tagged<"dispute_countered", Dispute & Proof>
-  | Tagged<"dispute_finalized", Dispute & { bodyHash: Bytes32; evidence: Bytes32; tx: Bytes32; shown: Shown }>
+  | Tagged<"dispute_finalized", Dispute & {
+    bodyHash: Bytes32; evidence: Bytes32; tx: Bytes32; shown: Shown;
+    /** The proof the calldata paid by, present only when its body hashes to `bodyHash`. */
+    proof?: Readonly<{ nonce: bigint; body: ProofBody }>;
+  }>
   | Tagged<"secret_revealed", Place & { hashlock: Bytes32; revealer: Bytes32 | undefined; secret: Bytes32 }>;
 
 /** Only these payloads may remain unresolved after the Runtime commits the delivery's height. */

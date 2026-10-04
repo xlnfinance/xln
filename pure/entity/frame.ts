@@ -542,6 +542,49 @@ const paid = (w: Work, peer: EntityId): Work =>
 /** The chain finalized the dispute: the Account is paid out and its holds are dissolved. */
 const finalized = (w: Work, peer: EntityId): Work => reconciled(paid(dissolving(w, peer), peer), peer);
 
+/** The nonce a pending frame would sign under, the same reading a finalize uses for that frame. */
+const pendingNonceOf = (account: EntityReplica): bigint | undefined => {
+  const frame = account.pending?.frame;
+  return frame === undefined ? undefined : frame.firstNonce + BigInt(frame.slot) - 1n;
+};
+
+/**
+ * R-FINALIZATION-UNKNOWN: a later observation carries a body that hashes to the logged `finalBodyHash`, and names the
+ * nonce of that body. A pending frame at or below that nonce is one the proof holds: `paid_on_chain`, and a rollback
+ * does not return it. A pending frame above it was not in the proof: `resent_in_new_epoch`. The record clears once.
+ * A body that does not hash to the log, or an observation with no nonce, leaves the freeze as it was.
+ */
+const settledLater = (
+  w: Work, peer: EntityId, body: ProofBody | undefined, nonce: bigint | undefined, claimed?: string,
+): Work | undefined => {
+  const facts = factsOf(w, peer);
+  const logged = facts.unresolved?.finalBodyHash;
+  const hash = body === undefined ? undefined : hashOf(body);
+  const names = logged !== undefined && hash !== undefined && hash.toLowerCase() === logged.toLowerCase();
+  const claimedOk = claimed === undefined || claimed.toLowerCase() === logged?.toLowerCase();
+  if (!names || !claimedOk || nonce === undefined || facts.unresolved === undefined) return undefined;
+  const record = facts.unresolved;
+  const { unresolved, ...cleared } = facts;
+  if (unresolved === undefined) return undefined;
+  const account = w.state.accounts.get(peer);
+  if (account?.pending === undefined) return withFacts(w, peer, cleared);
+  const pendingNonce = pendingNonceOf(account);
+  const spending = account.pending.frame.txs.filter((tx) => SPENDING.has(tx._tag));
+  const held = pendingNonce !== undefined && pendingNonce <= nonce;
+  const notice = spending.length === 0 || pendingNonce === undefined
+    ? w
+    : noting(w, {
+      _tag: "pending_rebased", peer, epoch: record.epoch, nonce: pendingNonce, finalizedNonce: nonce, txs: spending,
+      fate: held ? "paid_on_chain" : "resent_in_new_epoch",
+    });
+  if (!held) return withFacts(notice, peer, cleared);
+  const inFrame = withoutPaid(account.pending.frame.txs, spending);
+  const inQueue = withoutPaid(account.mempool, withoutPaid(spending, inFrame.removed).kept);
+  return withReplica(withFacts(notice, peer, cleared), peer, {
+    ...account, mempool: inQueue.kept, pending: { ...account.pending, owed: inFrame.kept },
+  });
+};
+
 /**
  * The finalize that was held back for its arguments comes at last (R-WATCH-STALL): the Entity heard the epoch move on
  * and what came after it, so it dissolves the holds and leaves the facts, which are the new epoch's, alone.
@@ -561,16 +604,20 @@ const chainFact = (w: Work, terms: ProofTerms, e: JEvent): Work => {
         : moved;
       return advanced === facts ? w : rebasing(withFacts(w, e.peer, recorded), e.peer, verdict);
     }
-    case "j_dispute":
-      return withFacts(w, e.peer, e.by === sideOf(w.state.id, e.peer)
+    case "j_dispute": {
+      const named = settledLater(w, e.peer, e.body, e.nonce, e.bodyHash);
+      return named ?? withFacts(w, e.peer, e.by === sideOf(w.state.id, e.peer)
         ? windowOpened(facts, e.epoch, e.nonce, e.timeout)
         : disputeOpened(facts, e));
+    }
     case "j_countered":
       return withFacts(w, e.peer, countered(facts, e));
     case "j_window_over":
       return withFacts(w, e.peer, windowOver(facts));
-    case "j_dispute_over":
-      return e.late === true ? finalizedLate(w, e.peer) : finalized(w, e.peer);
+    case "j_dispute_over": {
+      const named = settledLater(w, e.peer, e.body, e.nonce) ?? w;
+      return e.late === true ? finalizedLate(named, e.peer) : finalized(named, e.peer);
+    }
     case "j_start_lapsed":
       return withFacts(w, e.peer, startLapsed(facts, e.nonce));
     case "j_counter_lapsed":

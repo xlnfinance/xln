@@ -78,8 +78,12 @@ const collected = (before: Observed, runtime: Runtime): Observed => ({
   runtime, rows: runtime.staged === undefined ? before.rows : [...before.rows, runtime.staged],
 });
 
-/** The readings of a delivery, on the synthetic batch or height, and absent when the delivery did not decide on them. */
-const withRegistry = <T extends object>(batch: T, registry: Observation["registry"]): T & { registry?: readonly Reading[] } =>
+/**
+ * The readings of a delivery, on the synthetic batch or height, and absent when the delivery did not decide on them.
+ */
+const withRegistry = <T extends object>(
+  batch: T, registry: Observation["registry"],
+): T & { registry?: readonly Reading[] } =>
   (registry === undefined ? batch : { ...batch, registry });
 
 /**

@@ -195,7 +195,10 @@ const readAt = async (
   return { got: seen, unread: asked.flatMap(unreadOf) };
 };
 
-/** What the next frame decides on, at the view it decides at. A Runtime that does not decide on the registry reads nothing. */
+/**
+ * What the next frame decides on, at the view it decides at. A Runtime that does not decide on the registry reads
+ * nothing.
+ */
 const readings = async (shell: Shell, turn: Turn): Promise<Readonly<{ got: Readings; unread: readonly Unread[] }>> => {
   const { host } = turn.station;
   const next = host.runtime.setup.registry === true ? upcoming(host) : undefined;
@@ -207,13 +210,15 @@ const readings = async (shell: Shell, turn: Turn): Promise<Readonly<{ got: Readi
  * A delivery is judged twice when its height rises: the batches at the view they keep, the height frame at the new
  * height. One list carries both, and each frame keeps the readings whose block is its own view.
  */
+const EVERY_ENTITY = undefined;
+
 const deliveryReadings = async (
   shell: Shell, host: Host, to: EntityId, inputs: readonly EntityInput[], height: JHeight,
 ): Promise<Readonly<{ got: Readings; unread: readonly Unread[] }>> => {
   if (host.runtime.setup.registry !== true) return { got: undefined, unread: [] };
   const atView = await readAt(shell, host, host.runtime.view, to, inputs);
   const atHeight = height > host.runtime.view
-    ? await readAt(shell, host, height, undefined, [])
+    ? await readAt(shell, host, height, EVERY_ENTITY, [])
     : { got: [] as readonly Reading[], unread: [] as readonly Unread[] };
   return { got: [...atView.got, ...atHeight.got], unread: [...atView.unread, ...atHeight.unread] };
 };

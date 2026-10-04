@@ -219,7 +219,7 @@ export type JEvent =
   >
   | Tagged<"j_countered", { peer: EntityId; nonce: bigint; proposerIsLeft: boolean; bodyHash: string }>
   | Tagged<"j_window_over", { peer: EntityId }>
-  | Tagged<"j_dispute_over", { peer: EntityId; late?: boolean }>
+  | Tagged<"j_dispute_over", { peer: EntityId; late?: boolean; nonce?: bigint; body?: ProofBody }>
   | Tagged<"j_start_lapsed", { peer: EntityId; nonce: bigint }>
   | Tagged<"j_counter_lapsed", { peer: EntityId; nonce: bigint }>
   | Tagged<"j_collateral", { peer: EntityId; token: TokenId; collateral: bigint; ondelta: bigint }>
