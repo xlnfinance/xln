@@ -555,7 +555,7 @@ const lateLock: Step<World> = {
 
 // ---- S6d ---------------------------------------------------------------------------------------------------------
 const lateExpiry: Step<World> = {
-  id: "late-expiry", title: "A secret shown after the deadline height, inside the seconds the lock signs, is paid: the expiry is refused", needs: ["late-lock"],
+  id: "late-expiry", title: "A secret shown after the deadline height, inside the seconds the lock signs, is paid: the expiry is refused", needs: ["reveal-direct"],
   run: async (w) => {
     const chain = chainOf(w);
     const net = netOf(w);

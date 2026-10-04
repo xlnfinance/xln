@@ -620,19 +620,18 @@ describe("host/shell/node a node with a J loop", () => {
     const dir = fresh();
     const log = `${dir}/calls.log`;
     writeFileSync(log, "");
-    const reads: string[] = [];
     const read = (hashlock: string) => {
-      reads.push(hashlock);
+      appendFileSync(log, `registry ${hashlock}\n`);
       return Promise.resolve(err(DOWN));
     };
     const alice = await nodeOf(await seatOf(ALICE, dir, 0), NO_PEER, {
       tickMs: QUICK, watch: watchOf(STRAIGHT, log, [], VALUE_TRACED), read,
     });
-    const forward = { _tag: "forward", hashlock: hexOf(9n), from: bytes(2n), to: bytes(3n) } as const;
+    const forward = { _tag: "forward", hashlock: hexOf(9n), from: ALICE, to: BOB } as const;
     await alice.tell(forward);
     await alice.tell(forward);
     const look = await alice.stop();
-    expect(reads.length).toBeGreaterThanOrEqual(2);
+    expect(callsOf(log).filter((c) => c.startsWith("registry")).length).toBeGreaterThanOrEqual(2);
     expect(told(look, "registry_unread")).toBe(1);
     expect(look.notices.find((n) => n._tag === "registry_unread")).toEqual({
       _tag: "registry_unread", hashlock: hexOf(9n), reason: "watch head: connection reset",

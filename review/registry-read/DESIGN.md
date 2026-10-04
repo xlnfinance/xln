@@ -23,40 +23,37 @@ reading before it makes the lock command; the door never sees a lock it would re
 
 ## 2. Where a reading comes from: the frame that decides carries it
 
-The Entity is pure and the read is a chain read, so the Host brings it, as an Entity input ahead of what needs it:
-`j_registry {hashlock, at, seconds}`. It is in the WAL row with the rest of the frame's inputs, so a replay decides the same.
+The Entity is pure and the read is a chain read, so the Host brings it with the frame, on the Runtime input
+(`EntityBatch.registry` and `NewHeight.registry`, `Reading {hashlock, at, seconds}`), never in Entity state. The row holds
+the input, so a replay decides what the first run did.
 
-`entity/registry.ts` (pure): `wantsOf(state, view, inputs)` = the hashlocks the next frame will decide on:
-the lock and expire txs of the peer frames in `inputs` (an expire names a hold; its hashlock is read off the Account), the
-hashlocks of `lock` and `forward` commands, the hashlocks of holds the Entity proposes to expire at `view` (expirable),
-and the forward entries that have an inbound lock and no outbound one yet. A bounded set: at most the holds of the Entity.
+`entity/paybook/registry.ts` (pure): `wantsOf(state, inputs)` = the hashlocks the frame may decide on, sorted and unique: the
+locks and expiries of a peer's frame in the inputs (an expiry names a hold; its hashlock is read off the Account), the hashlocks of
+`lock`, `forward` and `expire` commands, the txs queued in any Account's mempool (judged again when it proposes) and the
+paybook `forward` entries that wait. A set the frame's own work bounds, never the secrets strangers show.
 
-`drive.ts` `frame` (shell): before `begin`, ask `wantsOf` for the frame's inputs (the next `perFrame` queue items, or the
-waiting height, read at that height's block), read each at the block, and `submit` the `j_registry` inputs ahead of the
-queue. A height frame is preceded by an Entity frame holding readings at the *new* height (`at > view`); the height row
-makes them current. A failed read is a fault of that Account only (below); a read the node no longer serves is told.
+`host.upcoming(host)` says which frame comes next and the view it decides at: the waiting height (every hosted Entity,
+at that height) or the inputs of the Entity first in line (at the Runtime's view). `drive.readings` asks `wantsOf` for each
+hosted Entity concerned, reads each hashlock at that view through `Shell.registry` and begins the frame with the readings.
 
-State: `EntityState.registry: Map<hashlock, {at, seconds}>`. A reading is **current** iff `at === view` at the decision.
-At the start of each frame readings with `at < view` are dropped, so the map holds only the readings of one block.
-No height can be skipped: if the view moved between the read and the frame, the reading is stale, treated as missing,
-and read again for the next frame (a retryable refusal or a waiting forward, never a wrong accept).
-
-Why exact view and not "any reading since": a reveal at block b in (reading.at, view] was heard before the lock was named
-and dropped by `shown`'s naming rule (R-REVEAL-BACKSTOP); only a reading at the view itself leaves no such gap.
+A reading is **current** iff `at === view` of the frame (`registryOf`): a reading of another block is no reading, because a
+secret shown between the two blocks would be missed. With `Setup.registry` on and no reading for a hashlock a lock or expiry
+decides on, the Entity refuses it `registry_unknown` (retryable: the proposer takes the frame back and tries the next view);
+`proposing` holds an Account whose queued tx has no reading, and `forwardOf` waits.
 
 ## 3. The gate is opt-in
 
-`Setup.registry` (a node that may hold value, the same nodes the call-trace probe covers): off, every Entity decides as
-before (the whole existing suite is unchanged). On, the gates above apply. The daemon sets it for `watch.value` nodes and
-refuses to start such a node whose port has no `registry` read. The e2e cluster sets it.
+`Setup.registry`: off, every Entity decides as before. On, the gates apply, the Runtime hands every frame a (possibly empty)
+list of readings, and the drive refuses to start without a port (`no_registry`). The daemon refuses a node that may hold
+value when its setup does not decide on the registry (`registry_off`). The e2e cluster sets it.
 
 ## 4. Reads at the view block follow the read-wait rules
 
-- A read the node answers "no longer served" (pruned wording, the same list as the Account reading) is told:
-  the Entity gets no reading, so the decision stays a retryable refusal or a waiting forward, and the Host tells a loud
-  notice once (`registry_unread`). Nothing else is affected: other Accounts, the other frames and the watcher go on.
-- Any other failure (503, timeout) is a fault of the port: the frame is not begun; the next tick tries again (the queue keeps its inputs).
-- A pending read freezes only the decision (the frame waits for its reads; no other Entity work exists in this Host's frame).
+- A failed read, or one the node no longer serves (the pruned wording, the same list as the Account reading), is no reading
+  and a `registry_unread` notice, told once for each hashlock and reason. The decision stays a retryable refusal or a waiting
+  forward. Nothing else is affected: the Account's other frames, the other Accounts and the watcher go on, and the node
+  is never halted by it.
+- A pending read delays only the frame that wants it (the Host reads before it begins).
 
 ## 5. `shown` is bounded
 
@@ -66,8 +63,9 @@ grows with every secret ever shown.
 
 ## 6. Tests
 
-Forge vector: the real DeltaTransformer on the fork: reveal at a block whose timestamp is `r`; evaluate a payment with
-`revealedUntilTimestamp = r` (pays) and `r - 1` (does not): `paid` in TS agrees at both. Entity: lock refused/accepted by
-reading; expire; forward waits then forwards or is dropped; stale reading; replay. Host: `wantsOf` over inputs/commands/
-height; `frame` reads before begin; fault classes. Fork e2e: a lock of a hashlock revealed before the lock existed is
-refused and nothing is lost (D3); a reveal past the deadline height and within the slack seconds refuses the expiry (D1).
+Forge vector (contracts/test/vm/fork-rules/h5-registry-second.test.ts): the real DeltaTransformer in BrowserVM: a secret shown at
+the exact signed second pays, one second past pays nothing, before the lock existed pays; `paid` in TS agrees at each.
+Entity (entity/paybook/registry.test.ts): lock refused or accepted by the reading, expiry, forward waits then goes or is
+given up, a reading of another block, a queued tx, replay. Runtime, Host, drive, evm, daemon tests for the plumbing. Fork
+e2e steps `late-lock` (a lock of a hashlock revealed before it existed is refused, nothing is lost: D3) and `late-expiry` (a
+reveal past the deadline height and inside the signed seconds refuses the expiry: D1; the old height rule would have let it stand).

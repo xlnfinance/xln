@@ -6,7 +6,7 @@ import { credit, GOLD, open, pay } from "../entity/fixtures.ts";
 import { emptyEntity, type EntityId, type EntityInput, type Outbound, type Reading } from "../entity/model.ts";
 import { err, ok } from "../kernel/core/result.ts";
 import { setup } from "../runtime/fixtures.ts";
-import { begin, idle, limits, persisted, receive, reopen, submit, upcoming } from "./host.ts";
+import { begin, idle, limits, persisted, receive, reopen, submit, TICK, upcoming } from "./host.ts";
 import type { Host, Item } from "./model.ts";
 import {
   BOUNDS, entityOf, hostFor, hostOf, inputsOf, meet, onTheLink, sentIn, settle, stamp, tell, turn, unhalted,
@@ -141,7 +141,7 @@ describe("host", () => {
     const reading: Reading = { hashlock: "0xaa", at: alice.runtime.view, seconds: 5n };
     const queued = submit(alice, command(ALICE, credit(BOB, 9n)));
     const staged = (registry?: readonly Reading[]) =>
-      unhalted(begin(queued, stamp(90n), undefined, registry)).host.runtime.staged;
+      unhalted(begin(queued, stamp(90n), TICK, registry)).host.runtime.staged;
     expect(staged([reading])?.input).toMatchObject({ _tag: "entity", registry: [reading] });
     expect(staged()?.input).not.toHaveProperty("registry");
   });

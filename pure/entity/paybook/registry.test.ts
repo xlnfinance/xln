@@ -189,6 +189,27 @@ describe("entity/paybook the registry at the view (R-REGISTRY-AT-VIEW)", () => {
     expect(holdsBetween(onTime, HUB, ALICE)).toEqual([]);
   });
 
+  test("R-REGISTRY-AT-VIEW an expiry queued behind a pending frame, or in a peer's frame, is wanted too", () => {
+    const at = { ...judge, view: viewOf(EXPIRABLE) };
+    const readings = readingsOf(showing(signed(DEADLINE) + 1n), ALICE, EXPIRABLE);
+    const pay: Command = { _tag: "pay", peer: HUB, token: GOLD, amount: 1n };
+    const pending = entityFrame(at, anchor, stateOf(held(), ALICE), [pay], readings);
+    expect(wantsOf(pending.state, [])).toEqual([]);
+    const queued = entityFrame(at, anchor, pending.state, [expire], readings);
+    expect(queued.state.accounts.get(HUB)?.mempool.map((tx) => tx._tag)).toEqual(["expire"]);
+    expect(wantsOf(queued.state, [])).toEqual([HASHLOCK]);
+    const sent = entityFrame(at, anchor, stateOf(held(), ALICE), [expire], readings);
+    expect(sent.outputs.length).toBe(1);
+    expect(wantsOf(stateOf(held(), HUB), sent.outputs.map(heardSigned))).toEqual([HASHLOCK]);
+  });
+
+  test("R-REGISTRY-AT-VIEW an expiry of a hold that is not there is refused by the Account", () => {
+    const none: Command = { _tag: "expire", peer: HUB, token: GOLD, id: holdId(9n) };
+    const done = tell(showing(signed(DEADLINE)), held(), EXPIRABLE, ALICE, none);
+    expect(done.notices.map((n) => n._tag)).toEqual(["command_refused"]);
+    expect(holdsBetween(done, ALICE, HUB).length).toBe(1);
+  });
+
   test("R-REGISTRY-AT-VIEW an expiry with no reading at its view is refused, and the refusal can pass", () => {
     const none = tell(NONE, held(), EXPIRABLE, ALICE, expire);
     expect(faultOf(none)).toEqual(["registry_unknown"]);

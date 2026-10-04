@@ -96,7 +96,6 @@ const nonce = (): Uint8Array => crypto.getRandomValues(new Uint8Array(32));
 
 const keep = (): boolean => false;
 
-const NO_READ: RegistryRead | undefined = undefined;
 
 export type Options = Readonly<{
   tickMs: number; lost?: Config["lost"]; chain?: ChainPort; wrap?: (wal: Disk) => Disk; watch?: WatchConfig;
@@ -126,7 +125,7 @@ export const configOf = async (seat: Seat, other: Seat | undefined, options: Opt
   return {
     shell: {
       wal, io: { port: chain, signer: lazySigner(seat.entity, key), journal, gas: GAS },
-      now: () => stamp(BigInt(Date.now())), registry: registry ? options.read ?? SILENT : NO_READ,
+      now: () => stamp(BigInt(Date.now())), ...(registry ? { registry: options.read ?? SILENT } : {}),
     },
     boot: {
       setup: { ...setup, registry, clock: { ...setup.clock, lag, reserve, depth } },
