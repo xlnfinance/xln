@@ -58,6 +58,9 @@ module htlc {
   const RSV: int                // the reserve: the upstream lock expires at a view strictly past TU + RSV
   const CHAIN: bool             // the hub's claim on U is a chain claim, counted until the lock's second, TU + SLK
   const RD: int                 // ticks the read of a finalize's calldata takes beyond hearing the finalize (a provider that fails the trace for a while)
+  const LK: int                 // the tick the hub's paybook entry for the lock exists from: a reveal it hears before then reaches no entry (frame.ts named, paybook.ts revealed)
+  const ADM: int                // the registry read at the lock's admission, -1 none, else how many ticks behind the Entity's view the read block is (PR 176 owed row)
+  const HG: bool                // the expiry's wait is the code's height gate (the view past the deadline plus the reserve), not the lock's second
   const LATE: bool              // the Entity is told the finalize before the read of its calldata lands, and the read after (PR 171 before the watch-wait design)
 
   pure val W = 4                // the dispute window, ticks
@@ -182,7 +185,7 @@ module htlc {
       st' = { ...st,
         seen: st.seen.set(s, i + 1),
         v: st.v.set(s, w2),
-        knows: st.knows or (s == Hub and ((e.kind == 1 and SEE) or (e.kind == 2 and TSEE) or (ARGS and e.shown and not(LATE)))),
+        knows: st.knows or (s == Hub and st.now >= LK and ((e.kind == 1 and SEE) or (e.kind == 2 and TSEE) or (ARGS and e.shown and not(LATE)))),
         // LATE: the finalize reaches the paybook before its secret, so the entry for the carried hold is dissolved and the inbound lock on U is given up
         // (R-HOLD-DISSOLVE, frame.ts `finalized`); a secret read afterwards finds no locked entry (`revealed` acts only on locked ones)
         u: if (LATE and s == Hub and e.kind == 3 and e.carried and DISSOLVE and not(st.knows) and st.u == 0) 2 else st.u,
@@ -317,10 +320,15 @@ module htlc {
 
   // The upstream lock expires to the payer once the view is strictly past TU + RSV. A hub that can still claim does not co-sign it (CHAIN),
   // and with BACK it does not co-sign it before its read at depth covers the lock's second, nor while the registry shows a reveal by it.
+  // `regSeen`: the registry's reveal the hub's read at its view block shows now: it landed PD ticks ago or more, and the contract counts it for the lock.
+  pure def regSeen(s: St): bool = regShows(s) and s.revealedAt + PD <= s.now
+  pure def expirable(s: St): bool = all {
+    s.u == 0, s.now > TU + RSV,
+    CHAIN implies not(s.knows and s.now <= TUX),
+    BACK implies ((if (HG) s.now > TU + RSV + PD else s.now >= TUX + PD) and not(regSeen(s)))
+  }
   action expireU: bool = all {
-    st.u == 0, st.now > TU + RSV,
-    CHAIN implies not(st.knows and st.now <= TUX),
-    BACK implies (st.now >= TUX + PD and not(regShows(st))),
+    expirable(st),
     st' = { ...st, u: 2 }
   }
 

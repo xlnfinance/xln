@@ -1,0 +1,22 @@
+{
+  "files": [
+    "htlc.qnt",
+    "htlc_hbackslk.qnt",
+    "htlc_gate_test.qnt"
+  ],
+  "init": "init",
+  "step": "step",
+  "test": "htlc_gate_test.qnt",
+  "testMain": "hbackslk_htlc_gate_test",
+  "steps": 70,
+  "mutants": [
+    {
+      "id": "backstop-compares-height",
+      "why": "the registry check compares the height a secret was shown at with the lock's deadline HEIGHT instead of its SECOND (deadline + slack): a reveal in the slack still counts on chain and the hub co-signs the expiry (PR 176 compares at <= deadline)",
+      "file": "htlc.qnt",
+      "old": "pure def regShows(s: St): bool = s.revealedAt != 0 and s.revealedAt <= TUX",
+      "new": "pure def regShows(s: St): bool = s.revealedAt != 0 and s.revealedAt <= TU",
+      "killedBy": "test:lateRevealRaceTest"
+    }
+  ]
+}
