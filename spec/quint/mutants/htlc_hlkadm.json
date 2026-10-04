@@ -13,9 +13,9 @@
     {
       "id": "admission-read-lags-the-view",
       "why": "the registry read at the lock's admission is taken one block behind the Entity's view: a reveal the hub already heard and dropped is not in it, the lock is admitted, and the hub loses it",
-      "file": "htlc_gate_test.qnt",
-      "old": "1 + SW_PD + SW_ADM < SW_LK",
-      "new": "1 + SW_PD + SW_ADM + 1 < SW_LK",
+      "file": "htlc.qnt",
+      "old": "s.revealedAt + PD + ADM < s.now",
+      "new": "s.revealedAt + PD + ADM + 1 < s.now",
       "killedBy": "test:lateLockTest"
     }
   ]

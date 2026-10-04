@@ -68,15 +68,15 @@ module hgate {
   // The hub starts a dispute on D; the payee reveals as late as the chain still counts it (TD + SLK, past the height deadline when SLK > 0); the
   // finalize pays the clause on D. Whether the hub collects on U depends on the room the hop leaves.
   run lateRevealRaceTest = {
-    init
-      .then(askStart(Hub)).then(landStart(Hub)).then(wait(SW_PD)).then(hear(Hub)).then(hear(Payee))
+    init.then(if (SW_LK > 0) check(true) else
+      askStart(Hub).then(landStart(Hub)).then(wait(SW_PD)).then(hear(Hub)).then(hear(Payee))
       .then(askReveal).then(goto(TDX)).then(if (SW_XREV) landRevealDirect else landReveal)
       .then(check(st.revealedAt == TDX and not(st.lateReveal)))
       .then(race)
       .then(goto(finTime(st.disp))).then(landFinal)
       .then(check(st.paidChain == 1))
       .then(closeEnd)
-      .then(check(paid_once and route_safe == PRED))
+      .then(check(paid_once and route_safe == PRED)))
   }
 
   // The watch-wait design (PR 171, DESIGN-watch-wait.md, section 2): the payee finalizes with the secret in its arguments on the last tick the contract counts;
@@ -84,7 +84,7 @@ module hgate {
   // the advance: safe iff HOP >= SLK + PD + RD + LAG (a height-gated claim; a chain claim HOP >= PD + RD + LAG and HOP + RSV >= SLK + PD + RD). LATE (the finalize told first, the read after) dissolves the hub's entry for the
   // carried hold at the advance and gives the lock on U up, so the secret that follows is ignored: the hub loses at every hop.
   run pendingReadTest = {
-    init.then(if (SW_BACK) check(true) else
+    init.then(if (SW_BACK or SW_LK > 0) check(true) else
       askStartWith(Hub, false).then(landStart(Hub)).then(wait(SW_PD)).then(hear(Hub)).then(hear(Payee))
       .then(goto(TDX)).then(landFinalShownVia(false))
       .then(if (not(SW_LATE) and TU + SW_RSV + 1 <= st.now + SW_PD + SW_RD) goto(TU + SW_RSV + 1).then(expireU)
@@ -99,12 +99,18 @@ module hgate {
   // it before then and the entry is not there to pass it up (frame.ts named, paybook.ts revealed). The registry pays the later lock on D at once. Only a read of the
   // registry at the Entity's view when it admits the lock (ADM = 0) refuses the lock; one a tick older (ADM = 1) does not see a reveal the hub already heard and dropped;
   // and the expiry's backstop (BACK) stops the loss without refusing the lock.
+  // ADM = 0 reads the view: the reveal is in it, admitLock leaves the hub's hold false, and nothing is paid.
+  // ADM < 0 admits with no read. ADM = 1 reads one tick behind the view and misses the reveal. Both admit, and the hub
+  // loses unless the backstop saves that one schedule. The random search of hlkback still finds a loss; this run is not that search.
   run lateLockTest = {
     init.then(if (SW_LK == 0) check(true) else
       goto(1).then(askReveal).then(if (SW_XREV) landRevealDirect else landReveal)
         .then(wait(SW_PD)).then(hear(Hub)).then(hear(Payee))
-        .then(if (SW_ADM >= 0 and 1 + SW_PD + SW_ADM < SW_LK) check(true) else
-          check(SW_ADM != 0).then(goto(SW_LK)).then(askStartWith(Hub, false)).then(landStart(Hub))
+        .then(goto(SW_LK)).then(if (not(st.v.get(Hub).hold) and not(admissionShows(st))) admitLock else check(true))
+        .then(if (SW_ADM == 0)
+          check(not(st.v.get(Hub).hold) and st.paidChain == 0 and st.u == 0 and route_safe)
+        else
+          check(st.v.get(Hub).hold).then(askStartWith(Hub, false)).then(landStart(Hub))
             .then(goto(finTime(st.disp))).then(landFinal)
             .then(check(st.paidChain == 1))
             .then(goto(EARLY)).then(if (expirable(st)) expireU else check(true))
@@ -114,19 +120,19 @@ module hgate {
 
   // One tick past the second the contract counts: the clause on D is lost to the payee, and the hub is not out of pocket in any variant.
   run revealPastTheSecondTest = {
-    init
-      .then(askStart(Hub)).then(landStart(Hub)).then(wait(SW_PD)).then(hear(Hub)).then(hear(Payee))
+    init.then(if (SW_LK > 0) check(true) else
+      askStart(Hub).then(landStart(Hub)).then(wait(SW_PD)).then(hear(Hub)).then(hear(Payee))
       .then(askReveal).then(goto(TDX + 1)).then(if (SW_XREV) landRevealDirect else landReveal)
       .then(check(st.lateReveal))
       .then(goto(finTime(st.disp))).then(landFinal)
       .then(check(st.paidChain == 0))
       .then(if (SW_BACK) goto(TUX + SW_PD).then(if (regShows(st)) claimByRegistry else expireU) else goto(TUX + SW_PD + SW_RSV + 2).then(expireU))
-      .then(check(paid_once and route_safe))
+      .then(check(paid_once and route_safe)))
   }
 
   // The hub hears an event PD ticks after it landed, not before: depth and poll are real.
   run hearingWaitsForDepthTest = {
-    init.then(if (SW_PD == 0) check(true) else
+    init.then(if (SW_PD == 0 or SW_LK > 0) check(true) else
       askStart(Hub).then(landStart(Hub)).then(hear(Hub)).fail())
   }
 
@@ -139,6 +145,19 @@ module hgate {
         .then(askReveal).then(goto(TDX)).then(landReveal).then(goto(st.now + SW_PD)).then(hear(Hub)).then(hear(Payee))
         .then(check(st.knows))
         .then(goto(e)).then(expireU).fail())
+  }
+
+  // BACK with no admission read (hlkback): the secret was shown before the entry existed, the registry has no reveal, the
+  // backstop cannot claim, and the upstream lock expires. Every other cell is a different schedule.
+  run backstopAloneLosesTest = {
+    init.then(if (not(SW_BACK) or SW_ADM >= 0 or SW_LK == 0 or SW_HG) check(true) else
+      askStartWith(Payee, true).then(landStart(Payee))
+        .then(goto(2)).then(hear(Hub)).then(hear(Payee))
+        .then(check(not(st.knows)))
+        .then(goto(finTime(st.disp))).then(landFinal)
+        .then(check(st.paidChain == 1 and st.revealedAt == 0))
+        .then(goto(TUX + PD + 1)).then(expireU)
+        .then(check(not(route_safe))))
   }
 
   // The backstop reads the registry at depth: before its read covers the lock's second, the hub does not co-sign the expiry, even if nothing was

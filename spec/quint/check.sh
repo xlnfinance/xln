@@ -174,10 +174,15 @@ if [ "$DISPUTE" = 1 ]; then
   # hpoll2, hall, hstall and hchain0 is a schedule (the reveal on the last tick the contract counts, the expiry on the first tick it may): lateRevealRaceTest
   # above runs it and asserts the formula both ways, and a random search of this size does not find it (10000 traces missed all five). The safe
   # variants are searched for a loss the formula does not name.
-  hexpect hgate3 route_safe ok; hexpect hpoll3 route_safe ok; hexpect hchain1 route_safe ok; hexpect hchain2 route_safe ok; hexpect hback route_safe ok; hexpect hstall5 route_safe ok; hexpect hgive route_safe ok; hexpect hgives route_safe ok; hexpect hgivecs route_safe ok; hexpect hord route_safe ok; hexpect hbackslk route_safe ok; hexpect hlkback route_safe ok; hexpect hgres route_safe ok
+  hexpect hgate3 route_safe ok; hexpect hpoll3 route_safe ok; hexpect hchain1 route_safe ok; hexpect hchain2 route_safe ok; hexpect hback route_safe ok; hexpect hstall5 route_safe ok; hexpect hgive route_safe ok; hexpect hgives route_safe ok; hexpect hgivecs route_safe ok; hexpect hord route_safe ok; hexpect hbackslk route_safe ok; hexpect hgres route_safe ok
+  # hlkback: a random search of `step` does not reliably reach the dropped-argument schedule once the hub's hold starts false.
+  # The trace is initLoss, and expireU is the step that breaks route_safe. backstopAloneLosesTest plays the same trace.
+  got=$($Q run htlc_hlkback_loss.qnt --backend typescript --init initLoss --step stepLoss --invariant route_safe --max-steps 5 --max-samples 1 --seed 0x5 --verbosity 1 2>&1 | grep -oE '^\[(ok|violation)' | tr -d '[' || true)
+  if [ "$got" != "violation" ]; then echo "FAIL htlc_hlkback route_safe: expected violation, got ${got:-nothing}"; exit 1; fi
+  echo "   hlkback route_safe: violation"
   # hordlate, hlate (PR 171 DESIGN-watch-wait): the read wait RD ticks after the finalize is heard; ordered (finalize held until read) the hop must also cover RD (hord safe, hordlate lost); told before read (LATE) loses at every hop (hlate). Both losses are schedules, run by pendingReadTest.
-  # hlk, hlkold (a lock made after its secret was shown, no registry read at admission or one a block behind the view) and hgres0 (the backstop gated by height, reserve too short for the slack) are
-  # schedules that lose the hub; lateLockTest and lateRevealRaceTest play them and assert the formula both ways. hlkadm (read at the view) and hlkback (the expiry backstop) hold.
+  # hlk and hlkold (a lock admitted with no registry read, or with a read one block behind the view) and hgres0 (the backstop gated by height, reserve too short for the slack) are
+  # schedules that lose the hub; lateLockTest plays them. hlkadm (read at the view) refuses the lock in that same run.
   # hop0: the claim that lands after the upstream deadline is a schedule (claimNeedsRoomTest, run above), too rare for a random search at this size
   echo "== htlc: witnesses"
   for w in $(grep -oE '^  val w_[a-z_]+' htlc.qnt | awk '{print $2}'); do

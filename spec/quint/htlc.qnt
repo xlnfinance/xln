@@ -107,7 +107,8 @@ module htlc {
     u: int,                            // the lock on U: 0 open, 1 claimed by H, 2 expired to P
     collected: int,
     finals: int, lateReveal: bool,
-    viaReg: bool                       // the hub claimed on U by the registry (BACK)
+    viaReg: bool,                      // the hub claimed on U by the registry (BACK)
+    admitted: bool                     // admitLock has run: a dissolved hold is not opened again
   }
 
   var st: St
@@ -120,11 +121,12 @@ module htlc {
   action init: bool = {
     st' = {
       now: 1, chEpoch: 1, disp: NO_DISP, revealedAt: 0, log: List(),
-      seen: both(0), v: both({ epoch: 1, rec: false, hold: true }),
+      // LK > 0: the hub's entry does not exist yet. admitLock is what sets its hold, and only when the admission read allows it.
+      seen: both(0), v: Map(Hub -> { epoch: 1, rec: false, hold: LK == 0 }, Payee -> { epoch: 1, rec: false, hold: true }),
       knows: false, pend: NO_PEND,
       askS: both(NO_ASK), askR: NO_ASK, askC: NO_ASK,
       paidFrame: 0, paidChain: 0, u: 0, collected: 0,
-      finals: 0, lateReveal: false, viaReg: false
+      finals: 0, lateReveal: false, viaReg: false, admitted: false
     }
   }
 
@@ -147,6 +149,11 @@ module htlc {
 
   // The registry shows a reveal the contract counts for the lock on U (by its second), and the hub's read at depth has it.
   pure def regShows(s: St): bool = s.revealedAt != 0 and s.revealedAt <= TUX
+
+  // The admission read, ADM ticks behind the view, shows a reveal the contract counts for TD (by TDX, slack already inside that second).
+  // A reveal is in that read only once depth has passed it: revealedAt + PD + ADM < now. ADM < 0 is no read.
+  pure def admissionShows(s: St): bool =
+    ADM >= 0 and s.revealedAt != 0 and s.revealedAt <= TDX and s.revealedAt + PD + ADM < s.now
   pure def regClaimable(s: St): bool = BACK and s.u == 0 and regShows(s) and s.revealedAt + PD <= s.now
 
   pure def owed(s: St): bool = or {
@@ -185,7 +192,8 @@ module htlc {
       st' = { ...st,
         seen: st.seen.set(s, i + 1),
         v: st.v.set(s, w2),
-        knows: st.knows or (s == Hub and st.now >= LK and ((e.kind == 1 and SEE) or (e.kind == 2 and TSEE) or (ARGS and e.shown and not(LATE)))),
+        // An event emitted before the entry exists (e.t <= LK) reaches no paybook entry, even if it is heard later. LK = 0 is every event.
+        knows: st.knows or (s == Hub and e.t > LK and ((e.kind == 1 and SEE) or (e.kind == 2 and TSEE) or (ARGS and e.shown and not(LATE)))),
         // LATE: the finalize reaches the paybook before its secret, so the entry for the carried hold is dissolved and the inbound lock on U is given up
         // (R-HOLD-DISSOLVE, frame.ts `finalized`); a secret read afterwards finds no locked entry (`revealed` acts only on locked ones)
         u: if (LATE and s == Hub and e.kind == 3 and e.carried and DISSOLVE and not(st.knows) and st.u == 0) 2 else st.u,
@@ -338,9 +346,19 @@ module htlc {
     st' = { ...st, u: 1, collected: 1, viaReg: true }
   }
 
+  // The hub's downstream hold starts false when LK > 0. This is the step that sets it, at or after LK, unless the admission read
+  // already shows a reveal the contract counts. A backstop on the upstream expiry is not this read.
+  action admitLock: bool = {
+    val w = st.v.get(Hub)
+    all {
+      LK > 0, not(st.admitted), not(w.hold), st.now >= LK, not(admissionShows(st)),
+      st' = { ...st, admitted: true, v: st.v.set(Hub, { ...w, hold: true }) }
+    }
+  }
+
   action step: bool = any {
     tick, receive, ack, sendRelease, askReveal, landReveal, landRevealDirect, landFinal, landFinalShown, askClaim, landClaim, expireU,
-    claimByRegistry, readLate,
+    claimByRegistry, readLate, admitLock,
     { nondet s = SIDES.oneOf() any { hear(s), askStart(s), landStart(s) } }
   }
 
