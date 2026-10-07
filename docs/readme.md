@@ -15,6 +15,8 @@ and launch status are separate surfaces and should be assessed independently.
 
 - [competitors.md](competitors.md) — architectural claims, limits and falsification
 - [research/provable-account-mechanisms.md](research/provable-account-mechanisms.md) — pinned Lightning, Raiden, Hydra, Interledger and generalized-account mechanisms compared with production xln
+- [research/btp-and-simplicity.md](research/btp-and-simplicity.md) — BTP versus the xln Account layer, and eight ranked simplicity/reliability ideas from Lightning, TigerBeetle, Mojaloop, Vector and Starlight
+- [research/channel-protocol-shapes.md](research/channel-protocol-shapes.md) — twelve channel and provable-account designs side by side with the xln Account, and the two protocol forks they suggest (one Hanko per frame, `account_reestablish`) with adversarial checks
 - [constraints.md](constraints.md)
 - [core/00_QA.md](core/00_QA.md)
 - [core/10_UFT.md](core/10_UFT.md)
