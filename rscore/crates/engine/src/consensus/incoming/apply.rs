@@ -731,11 +731,10 @@ pub fn apply_incoming_frame_with_authority(
         .delta_transformer()
         .map(|transformer| proof_body_hash(&candidate, transformer))
         .transpose()?;
-    let mut effect_preview = account.clone();
-    effect_preview.apply_consensus_effects(&consensus_effects)?;
+    let effect_preview = account.preview_consensus_effects(&consensus_effects)?;
     if let Some(reason) = counterparty_dispute_requirement_error(
         expected_proof_body_hash.as_ref(),
-        effect_preview.counterparty_dispute(),
+        effect_preview.counterparty,
         candidate.state().j_nonce(),
         dispute.as_ref(),
     ) {
@@ -1125,6 +1124,7 @@ fn apply_incoming_ack_with_authority_mode(
     let pending = account.take_pending().ok_or_else(|| {
         StateError::TransitionFailed("ACCOUNT_PENDING_DISAPPEARED_DURING_ACK".to_string())
     })?;
+    account.apply_consensus_effects(&pending.consensus_effects)?;
     let domain = pending.candidate.state().identity().domain().clone();
     let outputs_by_tx = std::sync::Arc::try_unwrap(pending.outputs_by_tx)
         .unwrap_or_else(|shared| shared.as_ref().clone());

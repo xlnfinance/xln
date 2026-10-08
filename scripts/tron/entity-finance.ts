@@ -10,7 +10,7 @@ import type { ConsensusConfig } from '../../core/entity/types';
 import { readStorageFrameRecord } from '../../core/storage/read/read';
 import { safeStringify } from '../../core/protocol/serialization';
 
-const data = resolve(import.meta.dir, '../../db/native-tron-release-20260918');
+const data = resolve(process.env['XLN_TRON_STAND_PATH'] || resolve(import.meta.dir, '../../db/native-tron-release-20260918'));
 assert.equal(process.env.XLN_DB_PATH, `${data}/runtime`);
 assert.equal(process.env.XLN_JURISDICTIONS_PATH, `${data}/jurisdictions.json`);
 assert.notEqual(process.env.XLN_DISABLE_RUNTIME_RESTORE, '1');

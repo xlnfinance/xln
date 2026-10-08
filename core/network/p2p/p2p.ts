@@ -1691,7 +1691,7 @@ export class RuntimeP2P {
     });
   }
 
-  private async getLocalProfilesForEntities(entityIds?: string[]): Promise<Profile[]> {
+  async getLocalProfilesForEntities(entityIds?: string[]): Promise<Profile[]> {
     if (!this.env.state.eReplicas || this.env.state.eReplicas.size === 0) return [];
     const targetSet = entityIds && entityIds.length > 0 ? new Set(entityIds.map(normalizeId)) : null;
     const advertisedSet =
@@ -2107,6 +2107,12 @@ export class RuntimeP2P {
           throw new Error(`P2P_DIRECT_CLIENT_OWNERSHIP_LOST:${normalizedTargetRuntimeId}`);
         }
         await this.acceptInboundEntityInputs('direct', from, envelope, timestamp, sessionAuthenticated === true);
+      },
+      onGossipAnnounce: async (from, payload) => {
+        if (this.directClients.get(normalizedTargetRuntimeId) !== client) {
+          throw new Error(`P2P_DIRECT_CLIENT_OWNERSHIP_LOST:${normalizedTargetRuntimeId}`);
+        }
+        await this.admitGossipAnnouncement(from, payload);
       },
       onError: error => {
         if (

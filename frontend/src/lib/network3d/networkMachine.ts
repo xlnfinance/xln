@@ -8,7 +8,7 @@ import {
   type RuntimeTimelineFrame,
   type RuntimeTimelineIndex,
 } from './timeline/runtimeGraphTimeline';
-import { parseJsonUnknown, rejectExtraKeys, requireUnknownRecord } from '$lib/utils/boundary';
+import { parseJsonUnknown, rejectExtraKeys, requireUnknownRecord } from '#lib/utils/boundary/index.ts';
 
 export type NetworkMachineTimelineMode = 'all-frames' | 'graph-changes';
 

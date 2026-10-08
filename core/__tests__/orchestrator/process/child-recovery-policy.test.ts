@@ -105,6 +105,14 @@ describe('managed child recovery policy', () => {
     expect(decideChildFailure({}, crash(reason)).reasonCode).toBe('H2_UNEXPECTED_EXIT');
   });
 
+  test('ordinary stdout before SIGKILL cannot replace the process exit cause', () => {
+    const reason = selectChildFailureReason([], [
+      '📤 [JAdapter:rpc] submitTx type=batch entity=e1da',
+    ], 'H1_UNEXPECTED_EXIT code=null signal=SIGKILL');
+    expect(reason).toBe('H1_UNEXPECTED_EXIT code=null signal=SIGKILL');
+    expect(decideChildFailure({}, crash(reason)).reasonCode).toBe('H1_UNEXPECTED_EXIT');
+  });
+
   test('classifies a structured truncated RPC response instead of its closing brace', () => {
     const reason = selectChildFailureReason(
       [
@@ -213,4 +221,19 @@ describe('managed child recovery policy', () => {
       rmSync(root, { recursive: true, force: true });
     }
   });
+});
+
+
+test('native J lifecycle progress cannot replace the actual SIGKILL cause or hide a fatal', () => {
+  // Captured from the native rebalance SIGKILL run; only the producer's level changed.
+  const batch = '0xc718bfd43c58eb7d21ecf82598ca9354ed61b2a79a8a7578d1e5dd94b9280e0f';
+  const progress = [
+    `[INFO][runtime.jsubmit] RSCORE_J_BATCH_INTENT:batch=${batch}:nonce=1:generation=1`,
+    `[INFO][runtime.jsubmit] RSCORE_J_RETRY_ADMITTED:batch=${batch}:nonce=1:generation=1:attempt=1`,
+    `[INFO][runtime.jsubmit] RSCORE_J_RETRY_SKIPPED:pending-attempt:batch=${batch}`,
+  ];
+  expect(selectChildFailureReason([], progress, 'H1_UNEXPECTED_EXIT:SIGKILL')).toBe('H1_UNEXPECTED_EXIT:SIGKILL');
+  const fatal = 'RRS_RUNTIME_FATAL:J_SUBMIT_RECEIPT_MISMATCH';
+  expect(selectChildFailureReason([fatal], progress, 'H1_UNEXPECTED_EXIT')).toBe(fatal);
+  expect(selectChildFailureReason([], [...progress, fatal], 'H1_UNEXPECTED_EXIT')).toBe(fatal);
 });

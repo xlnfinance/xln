@@ -801,14 +801,16 @@ const initializeStartedDispute = async (
     return null;
   }
 
-  const initialProofbody = requireFrozenAccountProofBody(
-    env.state,
+  // A valid older signed state can start the dispute. Bind its body to the
+  // certified chain event, then challenge with our newer signed Account state;
+  // requiring equality here lets a stale-state starter halt the responder.
+  const initialProofbody = requireOnchainProofBodyEvidence(
     account,
     data.initialProofbody,
     data.proofbodyHash,
     counterpartyId,
     'jEvent.disputeStarted',
-  );
+  ).proofbody;
 
   const weAreStarter = senderStr === entityIdNorm;
   const disputeTimeout = toUnixS(Number(data.disputeTimeout));

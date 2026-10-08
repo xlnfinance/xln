@@ -14,18 +14,18 @@
   import DockEntityAuditPanel from './panels/DockEntityAuditPanel.svelte';
   import JMachineInspectorPanel from './panels/JMachineInspectorPanel.svelte';
   import RuntimeDiagnosticsPanel from './panels/RuntimeDiagnosticsPanel.svelte';
-  import RuntimeCreation from '$lib/components/Views/RuntimeCreation.svelte';
-  import RemoteRuntimeManager from '$lib/components/Runtime/RemoteRuntimeManager.svelte';
-  import IndexedDbInspector from '$lib/components/Settings/IndexedDbInspector.svelte';
+  import RuntimeCreation from '#lib/components/Views/RuntimeCreation.svelte';
+  import RemoteRuntimeManager from '#lib/components/Runtime/RemoteRuntimeManager.svelte';
+  import IndexedDbInspector from '#lib/components/Settings/IndexedDbInspector.svelte';
   import UserModePanel from './UserModePanel.svelte';
   import EntityPanelWrapper from './panels/wrappers/EntityPanelWrapper.svelte';
   import TimeMachine from './core/TimeMachine.svelte';
   import { panelBridge, type EntityOpenAction } from './utils/panelBridge';
-  import { errorLog } from '$lib/stores/errorLogStore';
-  import { settings } from '$lib/stores/settingsStore';
-  import { refreshRuntimeView } from '$lib/stores/runtimeViewStore';
-  import { runtimeControllerHandle } from '$lib/stores/runtimeControllerStore';
-  import { appStateOperations } from '$lib/stores/appStateStore';
+  import { errorLog } from '#lib/stores/errorLogStore.ts';
+  import { settings } from '#lib/stores/settingsStore.ts';
+  import { refreshRuntimeView } from '#lib/stores/runtimeViewStore.ts';
+  import { runtimeControllerHandle } from '#lib/stores/runtimeControllerStore.ts';
+  import { appStateOperations } from '#lib/stores/appStateStore.ts';
   import 'dockview/dist/styles/dockview.css';
 
   export let embedMode = false;

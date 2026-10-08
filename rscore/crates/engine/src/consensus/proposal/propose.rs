@@ -375,7 +375,12 @@ pub fn propose_account_frame_with_selection(
     if applied.is_empty() {
         return Ok(ProposalOutcome::Idle { dropped });
     }
-    account.apply_consensus_effects(&consensus_effects)?;
+    // TS proposal proof compares against the live predecessor, while its
+    // nonce comes from the isolated candidate. Publishing activation here
+    // would leak an unacknowledged settlement proof and suppress re-signing.
+    let candidate_next_nonce = account
+        .preview_consensus_effects(&consensus_effects)?
+        .next_proof_nonce;
     let account_state_root = candidate.refresh_account_state_root()?;
     // The recovery proof for the state this frame commits to. Not part of the
     // frame — the counterparty checks the state root, not our proof — but the
@@ -385,7 +390,9 @@ pub fn propose_account_frame_with_selection(
     // A jurisdiction without a transformer requires no dispute proof.
     let proposal_dispute = match candidate.delta_transformer().copied() {
         None => None,
-        Some(transformer) => account.refresh_dispute_draft(&candidate, &transformer)?,
+        Some(transformer) => {
+            account.refresh_dispute_draft(&candidate, &transformer, candidate_next_nonce)?
+        }
     };
     let (dispute_signature, dispute_hanko) = match proposal_dispute.as_ref() {
         Some(dispute) if dispute.hanko.is_none() => {
@@ -424,6 +431,7 @@ pub fn propose_account_frame_with_selection(
         hanko: hanko.clone(),
         candidate,
         outputs_by_tx: Arc::clone(&outputs_by_tx),
+        consensus_effects,
     });
     // The worker that created this witness already owns the Account envelope.
     // Retain it here instead of launching another sharded round after Entity

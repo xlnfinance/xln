@@ -273,7 +273,7 @@ describe('mergeEntityInputs', () => {
     ]);
   });
 
-  test('rejects a same-body leader vote whose signed envelope is not an exact duplicate', () => {
+  test('preserves same-body leader envelopes for canonical signature rejection', () => {
     const target = entityId('9');
     const first = { entityId: target, signerId: 'validator-b', leaderTimeoutVote: leaderVote('validator-a', '0xsig-a') };
     const conflicting = {
@@ -282,7 +282,8 @@ describe('mergeEntityInputs', () => {
       leaderTimeoutVote: leaderVote('validator-a', '0xother-signature'),
     };
 
-    expect(() => mergeEntityInputs([first, conflicting])).toThrow('ENTITY_LEADER_VOTE_EQUIVOCATION');
+    expect(mergeEntityInputs([first, conflicting])).toEqual([first, conflicting]);
+    expect(mergeEntityInputs([conflicting, first])).toEqual([conflicting, first]);
   });
 
   test('does not canonicalize a case-duplicate precommit signer out of a malformed envelope', () => {
@@ -292,7 +293,7 @@ describe('mergeEntityInputs', () => {
       [voter, ['0xsig']],
       [voter.toUpperCase(), ['0xsig']],
     ]);
-    expect(() => mergeEntityInputs([
+    const merged = mergeEntityInputs([
       {
         entityId: target,
         signerId: 'validator-a',
@@ -305,7 +306,26 @@ describe('mergeEntityInputs', () => {
         hashPrecommitFrame: { height: 7, frameHash: '0xframe-7' },
         hashPrecommits: malformed,
       },
-    ])).toThrow('ENTITY_INPUT_PRECOMMIT_DUPLICATE_SIGNER');
+    ]);
+    expect(merged).toHaveLength(2);
+    expect(merged[1]!.hashPrecommits).toEqual(malformed);
+  });
+
+  test('keeps conflicting unverified signatures in order while merging exact retries', () => {
+    const target = entityId('b');
+    const input = (signature: string): RoutedEntityInput => ({
+      entityId: target,
+      signerId: 'validator-a',
+      hashPrecommitFrame: { height: 7, frameHash: '0xframe-7' },
+      hashPrecommits: new Map([['validator-b', [signature]]]),
+    });
+    const first = input('0xforged');
+    const second = input('0xgenuine');
+    const honest = { entityId: entityId('c'), signerId: 'validator-c', entityTxs: [] };
+    const merged = mergeEntityInputs([first, structuredClone(first), honest, second, structuredClone(second)]);
+    expect(merged).toEqual([first, honest, second]);
+    expect(first.hashPrecommits).toEqual(new Map([['validator-b', ['0xforged']]]));
+    expect(second.hashPrecommits).toEqual(new Map([['validator-b', ['0xgenuine']]]));
   });
 
   test('keeps frame-bound precommit heights distinct in accepted order', () => {

@@ -2,6 +2,10 @@
 
 #[path = "fresh/htlc.rs"]
 mod htlc;
+#[path = "fresh/origin.rs"]
+mod origin;
+#[path = "fresh/origin_route.rs"]
+mod origin_route;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::OnceLock;
@@ -41,6 +45,8 @@ pub enum FreshEntityContextError {
     HtlcInfrastructureRequired,
     #[error("RRS_FRESH_CONTEXT_HTLC_ORIGIN_REQUIRED")]
     HtlcOriginRequired,
+    #[error("RRS_FRESH_CONTEXT_ORIGIN_REJECTED:{0}")]
+    OriginRejected(&'static str),
     #[error("RRS_FRESH_CONTEXT_HTLC_INFRA_INVALID:{0}")]
     HtlcInfrastructureInvalid(String),
     #[error("RRS_FRESH_CONTEXT_HTLC_ACCOUNT_READ:{0}")]
@@ -52,12 +58,15 @@ pub enum FreshEntityContextError {
 }
 
 pub struct EntityInfraMaterializeRequest<'a> {
+    /// Existing committed owner seed; used only to prepare live observations.
+    pub entity_encryption_seed: Option<&'a str>,
     pub state: &'a RuntimeEntityState,
     pub replica: &'a mut RuntimeEntityReplica,
     /// Exact Account rows remaining after Runtime FIFO and Entity wire fitting.
     pub account_inputs: &'a [&'a AccountInputRow],
     /// Exact effective local operations after Entity-command expansion.
     pub local_financial_txs: &'a [&'a LocalEntityFinancialTx],
+    pub originated_j_heights: &'a BTreeMap<String, u64>,
     pub timestamp: u64,
     pub finalized_j_height: u64,
 }
@@ -81,21 +90,63 @@ impl MaterializedEntityInfraContext {
     pub(crate) fn retain_inbound_htlc_keys(
         &mut self,
         retained: &BTreeSet<(String, String)>,
+        originated: &BTreeSet<String>,
     ) -> Result<(), FreshEntityContextError> {
         self.execution
             .prepared_htlcs
             .retain(|key, _| retained.contains(key));
         self.observed_peer_by_prepared
             .retain(|key, _| retained.contains(key));
-        let retained_peers = self
+        self.execution
+            .originated_htlcs
+            .retain(|hash, _| originated.contains(hash));
+        let mut retained_peers = self
             .observed_peer_by_prepared
             .values()
             .cloned()
             .collect::<BTreeSet<_>>();
 
+        retained_peers.extend(
+            self.execution
+                .originated_htlcs
+                .values()
+                .map(|payment| payment.next_hop_entity_id.clone()),
+        );
+        let retained_profile_ids = self
+            .execution
+            .originated_htlcs
+            .values()
+            .flat_map(|payment| payment.route.iter().cloned())
+            .collect::<BTreeSet<_>>();
         let context = canonical_object_mut(&mut self.canonical, "CONTEXT")?;
+        let CanonicalValue::Array(profiles) = canonical_field_mut(context, "gossipProfiles")?
+        else {
+            return Err(filter_error("PROFILES"));
+        };
+        let mut filtered_profiles = Vec::new();
+        for profile in std::mem::take(profiles) {
+            let row = canonical_object(&profile, "PROFILE")?;
+            let id = canonical_text(canonical_field(row, "entityId")?, "PROFILE_ID")?;
+            if retained_profile_ids.contains(id) {
+                filtered_profiles.push(profile);
+            }
+        }
+        *profiles = filtered_profiles;
+
         let htlc = canonical_field_mut(context, "htlc")?;
         let htlc = canonical_object_mut(htlc, "HTLC")?;
+        let CanonicalValue::Array(origins) = canonical_field_mut(htlc, "originated")? else {
+            return Err(filter_error("ORIGINATED"));
+        };
+        let mut filtered_origins = Vec::new();
+        for payment in std::mem::take(origins) {
+            let row = canonical_object(&payment, "ORIGIN")?;
+            let hash = canonical_text(canonical_field(row, "txHash")?, "ORIGIN_HASH")?;
+            if originated.contains(hash) {
+                filtered_origins.push(payment);
+            }
+        }
+        *origins = filtered_origins;
         let entries = canonical_field_mut(htlc, "entries")?;
         let CanonicalValue::Array(entries) = entries else {
             return Err(filter_error("HTLC_ENTRIES"));
@@ -217,7 +268,12 @@ pub trait EntityInfraMaterializer {
     /// Install the current transient route/session view before preprocessing a
     /// live Entity frame. The resulting booleans enter `peerAssertions`; the
     /// route/session objects themselves never enter consensus or replay.
-    fn set_paybook_reachability(&mut self, routes: EntityRouteTable, sessions: InboundSessionTable);
+    fn set_paybook_reachability(
+        &mut self,
+        routes: EntityRouteTable,
+        sessions: InboundSessionTable,
+        identity: crate::signed_profile::ProfileTransportIdentity,
+    );
 
     fn materialize(
         &mut self,
@@ -234,6 +290,32 @@ pub struct InboundHtlcInfrastructure {
 }
 
 impl InboundHtlcInfrastructure {
+    fn owner_private_key(
+        &self,
+        entity_id: &str,
+        public_key: [u8; 32],
+        seed: Option<&str>,
+    ) -> Result<[u8; 32], FreshEntityContextError> {
+        let private_key = match seed {
+            Some(seed) => crate::entity_encryption::derive_entity_encryption_key(seed, entity_id)
+                .map_err(FreshEntityContextError::HtlcInfrastructureInvalid)?,
+            None if public_key == self.entity_encryption_public_key => {
+                self.entity_encryption_private_key
+            }
+            None => {
+                return Err(FreshEntityContextError::HtlcInfrastructureInvalid(
+                    "OWNER_ENCRYPTION_KEY_MISSING".into(),
+                ));
+            }
+        };
+        if *PublicKey::from(&StaticSecret::from(private_key)).as_bytes() != public_key {
+            return Err(FreshEntityContextError::HtlcInfrastructureInvalid(
+                "OWNER_ENCRYPTION_KEY_MISMATCH".into(),
+            ));
+        }
+        Ok(private_key)
+    }
+
     pub fn validate(self) -> Result<Self, FreshEntityContextError> {
         let derived_public =
             *PublicKey::from(&StaticSecret::from(self.entity_encryption_private_key)).as_bytes();
@@ -256,6 +338,7 @@ impl InboundHtlcInfrastructure {
 pub struct CanonicalEntityInfraMaterializer {
     inbound_htlc: Option<InboundHtlcInfrastructure>,
     paybook_reachability: Option<(EntityRouteTable, InboundSessionTable)>,
+    profile_identity: Option<crate::signed_profile::ProfileTransportIdentity>,
 }
 
 impl CanonicalEntityInfraMaterializer {
@@ -269,6 +352,7 @@ impl CanonicalEntityInfraMaterializer {
         Ok(Self {
             inbound_htlc: Some(infrastructure.validate()?),
             paybook_reachability: None,
+            profile_identity: None,
         })
     }
 }
@@ -278,8 +362,10 @@ impl EntityInfraMaterializer for CanonicalEntityInfraMaterializer {
         &mut self,
         routes: EntityRouteTable,
         sessions: InboundSessionTable,
+        identity: crate::signed_profile::ProfileTransportIdentity,
     ) {
         self.paybook_reachability = Some((routes, sessions));
+        self.profile_identity = Some(identity);
     }
 
     fn materialize(
@@ -289,6 +375,7 @@ impl EntityInfraMaterializer for CanonicalEntityInfraMaterializer {
         materialize_fresh_entity_context(
             self.inbound_htlc.as_ref(),
             self.paybook_reachability.as_ref(),
+            self.profile_identity.as_ref(),
             request,
         )
     }
@@ -306,15 +393,27 @@ fn needs_originated_htlc(request: &EntityInfraMaterializeRequest<'_>) -> bool {
 fn materialize_fresh_entity_context(
     inbound_htlc: Option<&InboundHtlcInfrastructure>,
     paybook_reachability: Option<&(EntityRouteTable, InboundSessionTable)>,
+    profile_identity: Option<&crate::signed_profile::ProfileTransportIdentity>,
     request: EntityInfraMaterializeRequest<'_>,
 ) -> Result<MaterializedEntityInfraContext, FreshEntityContextError> {
     let mut request = request;
     let total_started = Instant::now();
     let account_rows = request.account_inputs.len();
     let local_txs = request.local_financial_txs.len();
-    if needs_originated_htlc(&request) {
-        return Err(FreshEntityContextError::HtlcOriginRequired);
-    }
+    let origins = if needs_originated_htlc(&request) {
+        let (routes, sessions) =
+            paybook_reachability.ok_or(FreshEntityContextError::HtlcOriginRequired)?;
+        let identity = profile_identity.ok_or(FreshEntityContextError::HtlcOriginRequired)?;
+        Some(origin::materialize(
+            &mut request,
+            inbound_htlc,
+            routes,
+            sessions,
+            identity,
+        )?)
+    } else {
+        None
+    };
     // Collect once. The former path first scanned every Account frame merely
     // to answer `needs_htlc_context`, then scanned them all again inside the
     // HTLC materializer. Ordinary payment/swap frames also entered that
@@ -324,7 +423,7 @@ fn materialize_fresh_entity_context(
         return Err(FreshEntityContextError::HtlcInfrastructureRequired);
     }
     let classify_done = total_started.elapsed();
-    let (prepared_entries, peer_assertions, observed_peer_by_prepared) =
+    let (prepared_entries, mut peer_assertions, observed_peer_by_prepared) =
         match (inbound_htlc, inbound_htlc_inputs.is_empty()) {
             (Some(infrastructure), false) => {
                 let reachability = paybook_reachability.ok_or_else(|| {
@@ -341,6 +440,31 @@ fn materialize_fresh_entity_context(
             }
             _ => (Vec::new(), Vec::new(), BTreeMap::new()),
         };
+    if let Some(origins) = &origins {
+        let mut online = origins.assertions.clone();
+        for assertion in peer_assertions {
+            let row = canonical_object(&assertion, "PEER_ASSERTION")?;
+            let entity = canonical_text(canonical_field(row, "entityId")?, "PEER_ENTITY")?;
+            let CanonicalValue::Bool(ready) = canonical_field(row, "online")? else {
+                return Err(filter_error("PEER_ONLINE"));
+            };
+            if online
+                .insert(entity.to_string(), *ready)
+                .is_some_and(|previous| previous != *ready)
+            {
+                return Err(filter_error("PEER_ONLINE_CONFLICT"));
+            }
+        }
+        peer_assertions = online
+            .into_iter()
+            .map(|(entity, ready)| {
+                canonical_object_value(vec![
+                    ("entityId", CanonicalValue::String(entity)),
+                    ("online", CanonicalValue::Bool(ready)),
+                ])
+            })
+            .collect();
+    }
     let inbound_done = total_started.elapsed();
     let entries = prepared_entries
         .iter()
@@ -400,14 +524,37 @@ fn materialize_fresh_entity_context(
         ("proposerSignerId", CanonicalValue::String(signer_id)),
         ("parentFrameHash", CanonicalValue::String(parent_frame_hash)),
         ("height", canonical_number(height)?),
-        ("gossipProfiles", CanonicalValue::Array(Vec::new())),
+        (
+            "gossipProfiles",
+            CanonicalValue::Array(
+                origins
+                    .as_ref()
+                    .map(|value| value.profiles.clone())
+                    .unwrap_or_default(),
+            ),
+        ),
         ("peerAssertions", CanonicalValue::Array(peer_assertions)),
         (
             "htlc",
             canonical_object_value(vec![
                 ("version", canonical_number(1)?),
                 ("entries", CanonicalValue::Array(entries)),
-                ("originated", CanonicalValue::Array(Vec::new())),
+                (
+                    "originated",
+                    CanonicalValue::Array(
+                        origins
+                            .as_ref()
+                            .map(|value| {
+                                value
+                                    .payments
+                                    .values()
+                                    .map(origin::canonical)
+                                    .collect::<Result<Vec<_>, _>>()
+                            })
+                            .transpose()?
+                            .unwrap_or_default(),
+                    ),
+                ),
             ]),
         ),
     ]);
@@ -418,7 +565,7 @@ fn materialize_fresh_entity_context(
         jurisdiction_id: None,
         pair_policies: std::collections::BTreeMap::new(),
         prepared_htlcs,
-        originated_htlcs: std::collections::BTreeMap::new(),
+        originated_htlcs: origins.map(|value| value.payments).unwrap_or_default(),
     };
     let total = total_started.elapsed();
     if profile_entity_context() {
@@ -449,6 +596,67 @@ mod tests {
     use serde_json::json;
     use xln_rscore_engine::{AccountDomain, DepositoryAddress};
     use xln_rscore_entity_kernel::{HtlcPreparedBinding, HtlcPreparedOutcome, PreparedHtlcEntry};
+
+    #[test]
+    fn owned_entity_keys_decrypt_independently_and_rederive_after_restore() {
+        use xln_rscore_entity_kernel::{decrypt_opaque_htlc_layer, encrypt_opaque_htlc_layer};
+        let hub_private = [7; 32];
+        let infrastructure = InboundHtlcInfrastructure {
+            entity_encryption_public_key: *PublicKey::from(&StaticSecret::from(hub_private))
+                .as_bytes(),
+            entity_encryption_private_key: hub_private,
+            routing_fee_ppm: 0,
+            routing_base_fee: BigInt::from(0),
+        };
+        let seed = format!("0x{}", "55".repeat(64));
+        let owners = [
+            format!("0x{}", "11".repeat(32)),
+            format!("0x{}", "22".repeat(32)),
+        ];
+        let keys = owners.each_ref().map(|owner| {
+            crate::entity_encryption::derive_entity_encryption_key(&seed, owner).unwrap()
+        });
+        assert_ne!(keys[0], keys[1]);
+        for index in 0..2 {
+            let public = *PublicKey::from(&StaticSecret::from(keys[index])).as_bytes();
+            let selected = infrastructure
+                .owner_private_key(&owners[index], public, Some(&seed))
+                .unwrap();
+            let envelope =
+                encrypt_opaque_htlc_layer(b"owner-bound payload", &public, &[9; 32], &[8; 32])
+                    .unwrap();
+            assert_eq!(
+                decrypt_opaque_htlc_layer(&envelope, &public, &selected, &[9; 32]).unwrap(),
+                b"owner-bound payload"
+            );
+            let restored = infrastructure.clone().validate().unwrap();
+            assert_eq!(
+                restored
+                    .owner_private_key(&owners[index], public, Some(&seed))
+                    .unwrap(),
+                selected
+            );
+            assert!(
+                restored
+                    .owner_private_key(&owners[1 - index], public, Some(&seed))
+                    .is_err()
+            );
+            assert!(
+                restored
+                    .owner_private_key(&owners[index], public, None)
+                    .is_err()
+            );
+            assert!(
+                decrypt_opaque_htlc_layer(
+                    &envelope,
+                    &infrastructure.entity_encryption_public_key,
+                    &hub_private,
+                    &[9; 32]
+                )
+                .is_err()
+            );
+        }
+    }
 
     #[test]
     fn inbound_htlc_infrastructure_requires_the_checkpoint_keypair() {
@@ -503,8 +711,10 @@ mod tests {
         let mut execution = DeterministicContext::hlt_default();
         execution.prepared_htlcs.insert(key.clone(), entry);
         let canonical = canonical_value_from_tagged_json(&json!({
+            "gossipProfiles": [],
             "peerAssertions": [],
             "htlc": {
+                "originated": [],
                 "entries": [{
                     "binding": { "accountFrameHash": frame, "hashlock": hashlock },
                     "outcome": { "kind": "reject", "reason": "insufficient_capacity" }
@@ -519,7 +729,7 @@ mod tests {
         };
 
         materialized
-            .retain_inbound_htlc_keys(&BTreeSet::new())
+            .retain_inbound_htlc_keys(&BTreeSet::new(), &BTreeSet::new())
             .expect("trim tail");
         assert!(materialized.execution.prepared_htlcs.is_empty());
         let context = canonical_object(&materialized.canonical, "context").expect("context");

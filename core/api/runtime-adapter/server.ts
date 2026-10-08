@@ -64,7 +64,7 @@ import { withRuntimeCommittedRead } from '../../runtime/frame/lifecycle/writer-l
 import {
   ensurePendingNumberedRegistrationsResumed,
   registerNumberedEntities,
-} from '../../runtime/registration/numbered-registration-driver';
+} from '../../runtime/registration/numbered/numbered-registration-driver';
 import { countOp } from '../../support/performance/op-counters';
 
 export type RuntimeAdapterSocket = {

@@ -1,5 +1,5 @@
 import { normalizeWsConnectUrl } from '../runtime/wsUrl';
-import { isUnknownRecord as isRecord, parseJsonUnknown } from '$lib/utils/boundary';
+import { isUnknownRecord as isRecord, parseJsonUnknown } from '#lib/utils/boundary/index.ts';
 import { REMOTE_RUNTIME } from '@xln/core/config/constants';
 
 export const REMOTE_RUNTIME_IMPORT_HASH_PARAM = REMOTE_RUNTIME.IMPORT_HASH_PARAM;

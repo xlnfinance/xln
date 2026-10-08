@@ -1,8 +1,8 @@
 import { derived, get, writable } from 'svelte/store';
 import type { RuntimeReplica } from '@xln/core/api/public/runtime-module';
 import { activeRuntimeId, runtimes } from '../runtimeStore';
-import { createDetachedRuntimeViewEnv, createRuntimeViewEnv, unwrapLiveRuntimeEnv } from '$lib/utils/runtime/liveRuntimeEnv';
-import { registerDebugSurface } from '$lib/utils/runtime/debugSurface';
+import { createDetachedRuntimeViewEnv, createRuntimeViewEnv, unwrapLiveRuntimeEnv } from '#lib/utils/runtime/liveRuntimeEnv.ts';
+import { registerDebugSurface } from '#lib/utils/runtime/debugSurface.ts';
 import { errorLog } from '../errorLogStore';
 import { hasConnectedJurisdictionAdapter } from '../vault/vault-helpers';
 

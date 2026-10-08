@@ -10,7 +10,7 @@ import { setScenarioStorageEnabled } from '../../../scenarios/harness/helpers';
 import type { RuntimeReplica } from '../../../runtime/types';
 import type { JurisdictionConfig } from '../../../entity/types';
 import type { JReplica } from '../../../types/jurisdiction-runtime';
-import { attachLiveJAdapter } from '../../../runtime/j-submit/live-jadapters';
+import { attachLiveJAdapter, detachLiveJAdapter } from '../../../runtime/j-submit/live-jadapters';
 
 const attach = (
   env: RuntimeReplica,
@@ -104,6 +104,7 @@ describe('scenario numbered-registration boundary', () => {
 
       const unfunded = createEmptyEnv('scenario-registration:unfunded');
       await adapter.stopWatchingAndWait();
+      detachLiveJAdapter(ready, jurisdiction.name, adapter);
       attach(unfunded, adapter, jurisdiction);
       adapter.startWatching(unfunded);
       await expect(resolveScenarioNumberedRegistrationContext(unfunded, jurisdiction))

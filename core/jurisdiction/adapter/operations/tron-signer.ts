@@ -1,7 +1,8 @@
+import { readBoundTronBlockHeader } from './tron-authority';
 import { ethers } from 'ethers';
-import type { TronWeb } from 'tronweb';
+import type { TronWeb, Types } from 'tronweb';
 import { safeStringify } from '../../../protocol/serialization';
-import { broadcastTronTransaction } from './tron-broadcast';
+import { broadcastTronTransaction, encodeSignedTronTransaction } from './tron-broadcast';
 
 type TronWebConstructor = typeof import('tronweb')['TronWeb'];
 type TronTransferTransaction = Awaited<
@@ -99,8 +100,9 @@ export class TronSigner extends ethers.AbstractSigner<ethers.JsonRpcProvider> {
     }, this.#TronWeb);
   }
 
-  override async signTransaction(): Promise<string> {
-    throw new Error('TRON_PROTOBUF_TRANSACTION_REQUIRED');
+  override async signTransaction(tx: ethers.TransactionRequest): Promise<string> {
+    const signed = await this.#buildSignedTransaction(tx);
+    return `0x${encodeSignedTronTransaction(this.#tronWeb, signed)}`;
   }
 
   override signMessage(message: string | Uint8Array): Promise<string> {
@@ -193,14 +195,15 @@ export class TronSigner extends ethers.AbstractSigner<ethers.JsonRpcProvider> {
     throw new Error(`TRON_TRANSACTION_RESPONSE_TIMEOUT:${hash}:${DEFAULT_TRON_BROADCAST_VISIBILITY_MS}`);
   }
 
-  override async sendTransaction(tx: ethers.TransactionRequest): Promise<ethers.TransactionResponse> {
+  async #buildSignedTransaction(tx: ethers.TransactionRequest): Promise<Types.SignedTransaction> {
     const call = await this.#resolveCall(tx);
+    const blockHeader = await readBoundTronBlockHeader(this.#tronWeb, this.provider);
     let unsigned: TronTransferTransaction | TronContractTransaction;
     if (call.data === '0x') {
       // Native TRX transfers consume bandwidth, not smart-contract Energy.
       // Estimating Energy here misclassifies a fresh recipient as a missing
       // contract and prevents the transfer that would activate the account.
-      unsigned = await this.#tronWeb.transactionBuilder.sendTrx(call.to, call.callValue, this.#owner);
+      unsigned = await this.#tronWeb.transactionBuilder.sendTrx(call.to, call.callValue, this.#owner, { blockHeader });
     } else {
       const requestedEnergy = BigInt(await tx.gasLimit || await this.estimateGas(tx));
       const energyFee = await this.#readEnergyFee();
@@ -217,7 +220,7 @@ export class TronSigner extends ethers.AbstractSigner<ethers.JsonRpcProvider> {
       unsigned = await this.#tronWeb.transactionBuilder.triggerSmartContract(
           call.to,
           '',
-          { input: call.data.slice(2), callValue: call.callValue, feeLimit },
+          { input: call.data.slice(2), callValue: call.callValue, feeLimit, txLocal: true, blockHeader },
           [],
           this.#owner,
         ).then((triggered) => {
@@ -229,6 +232,11 @@ export class TronSigner extends ethers.AbstractSigner<ethers.JsonRpcProvider> {
     }
     const signed = await this.#tronWeb.trx.sign(unsigned, this.#privateKey);
     if (!signed?.signature?.length) throw new Error('TRON_TRANSACTION_SIGNATURE_MISSING');
+    return signed;
+  }
+
+  override async sendTransaction(tx: ethers.TransactionRequest): Promise<ethers.TransactionResponse> {
+    const signed = await this.#buildSignedTransaction(tx);
     const broadcast = await broadcastTronTransaction(this.#tronWeb, signed);
     if (!broadcast?.result) throw transactionError('TRON_BROADCAST_FAILED', broadcast);
     const hash = `0x${String(signed.txID).replace(/^0x/, '')}`;

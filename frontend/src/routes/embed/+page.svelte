@@ -16,26 +16,26 @@
    */
 
   import { onMount } from 'svelte';
-  import { page } from '$app/stores';
-  import View from '$lib/view/View.svelte';
-  import { settingsOperations } from '$lib/stores/settingsStore';
-  import { networkMachineRuntimeOperations } from '$lib/stores/network/networkMachineRuntimeStore';
-  import { networkMachineDemo } from '$lib/stores/network/networkMachineDemoStore';
-  import { decodeNetworkTrailFromHash } from '$lib/network3d/timeline/networkTimelineSource';
+  import { page } from '$app/state';
+  import View from '#lib/view/View.svelte';
+  import { settingsOperations } from '#lib/stores/settingsStore.ts';
+  import { networkMachineRuntimeOperations } from '#lib/stores/network/networkMachineRuntimeStore.ts';
+  import { networkMachineDemo } from '#lib/stores/network/networkMachineDemoStore.ts';
+  import { decodeNetworkTrailFromHash } from '#lib/network3d/timeline/networkTimelineSource.ts';
 
   let embedMode = true;
-  let scenarioError = '';
+  let scenarioError = $state('');
 
-  $: scenario = $page.url.searchParams.get('scenario')?.trim() ?? '';
-  $: autoplay = $page.url.searchParams.get('autoplay') === '1';
-  $: speed = Number($page.url.searchParams.get('speed') || 1) || 1;
+  let scenario = $derived(page.url.searchParams.get('scenario')?.trim() ?? '');
+  let autoplay = $derived(page.url.searchParams.get('autoplay') === '1');
+  let speed = $derived(Number(page.url.searchParams.get('speed') || 1) || 1);
 
   const trailFromHash = (hash: string): string =>
     new URLSearchParams(hash.replace(/^#/, '')).get('trail')?.trim() ?? '';
 
   onMount(() => {
     settingsOperations.initialize();
-    const encodedTrail = trailFromHash($page.url.hash);
+    const encodedTrail = trailFromHash(page.url.hash);
     if (!scenario && !encodedTrail) return;
 
     // The Time Machine is the narration in a demo, so it must be visible.

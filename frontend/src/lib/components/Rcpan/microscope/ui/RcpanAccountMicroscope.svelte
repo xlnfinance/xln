@@ -1,5 +1,5 @@
 <script lang="ts">
-  import DeltaCapacityBar from '$lib/components/Entity/shared/DeltaCapacityBar.svelte';
+  import DeltaCapacityBar from '#lib/components/Entity/shared/DeltaCapacityBar.svelte';
   import type {
     MicroscopeAccountDisplay,
     MicroscopeExternalFlow,

@@ -808,7 +808,9 @@ fn push_timing(
     Ok(())
 }
 
-fn kernel_output(value: &EntityKernelOutput) -> Result<CanonicalValue, EntityKernelError> {
+pub fn canonical_entity_kernel_output(
+    value: &EntityKernelOutput,
+) -> Result<CanonicalValue, EntityKernelError> {
     Ok(match value {
         EntityKernelOutput::Debug { payload } => {
             object(vec![("kind", text("debug")), ("payload", payload.clone())])
@@ -1035,7 +1037,7 @@ pub fn compute_entity_effects_parity_digest(
         outputs
             .iter()
             .filter(|output| output.is_runtime_event())
-            .map(kernel_output)
+            .map(canonical_entity_kernel_output)
             .collect::<Result<Vec<_>, _>>()?,
     );
     let encoded = encode_canonical_consensus_bytes(&value).map_err(|error| {
@@ -1077,7 +1079,7 @@ fn outbox_value(
         .collect::<Result<Vec<_>, _>>()?;
     let outputs = outputs
         .iter()
-        .map(kernel_output)
+        .map(canonical_entity_kernel_output)
         .collect::<Result<Vec<_>, _>>()?;
     Ok(object(vec![
         ("domain", text("xln.entity-kernel.ordered-outbox.v1")),

@@ -1,5 +1,5 @@
 import type { DeltaParts, DeltaVisualScale } from './delta-types';
-import { amountToUsd, getAssetUsdPrice } from '$lib/utils/assetPricing';
+import { amountToUsd, getAssetUsdPrice } from '#lib/utils/assetPricing.ts';
 
 function fitComponentsToCapacity(
   componentsUsd: readonly number[],

@@ -14,8 +14,8 @@
     deriveJMachineCreatedAt,
     parseJMachineConfigJson,
     type JMachineConfig,
-  } from '$lib/stores/network/jmachineStore';
-  import { POPULAR_NETWORKS, BROWSERVM_CHAIN_START } from '$lib/config/networks';
+  } from '#lib/stores/network/jmachineStore.ts';
+  import { POPULAR_NETWORKS, BROWSERVM_CHAIN_START } from '#lib/config/networks.ts';
 
   type FieldDraft = {
     name: string;

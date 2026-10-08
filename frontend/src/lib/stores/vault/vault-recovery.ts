@@ -23,7 +23,7 @@ import {
   deriveRuntimeSignerPrivateKey,
   normalizeRuntimeId,
 } from '@xln/core/storage/recovery/bundle/seed-identity';
-import { isUnknownRecord as isRecord, parseJsonUnknown } from '$lib/utils/boundary';
+import { isUnknownRecord as isRecord, parseJsonUnknown } from '#lib/utils/boundary/index.ts';
 export { isRecord };
 import { getAddress } from 'ethers';
 import {

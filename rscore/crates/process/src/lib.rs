@@ -15,6 +15,7 @@ pub mod native_runtime;
 #[cfg(feature = "bench")]
 #[path = "runtime_replay/replay_support.rs"]
 pub mod replay_support;
+pub mod runtime_adapter;
 pub mod runtime_http;
 #[cfg(feature = "bench")]
 pub mod runtime_replay;

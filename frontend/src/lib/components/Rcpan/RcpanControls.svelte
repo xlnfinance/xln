@@ -1,8 +1,8 @@
 <script lang="ts">
   import { Gauge, Palette, Pause, Play, RotateCcw, SlidersHorizontal } from 'lucide-svelte';
-  import { settings, settingsOperations } from '$lib/stores/settingsStore';
-  import { getAvailableThemes } from '$lib/utils/themes';
-  import type { ThemeName } from '$lib/types/ui';
+  import { settings, settingsOperations } from '#lib/stores/settingsStore.ts';
+  import { getAvailableThemes } from '#lib/utils/themes.ts';
+  import type { ThemeName } from '#lib/types/ui.ts';
   import type { RcpanTimelineState } from './microscope/model/microscope-timeline';
   import type { RcpanMicroscopeControls, RcpanMicroscopePalette } from './microscope/model/microscope-playground';
   import './rcpan-controls.css';

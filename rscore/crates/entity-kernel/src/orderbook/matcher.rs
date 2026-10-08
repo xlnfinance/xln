@@ -1030,7 +1030,10 @@ fn process_one_offer<'a>(
         return Ok(());
     }
     let pair_already_exists = state.books.contains_key(&materialized.pair_id);
-    if swept.insert(materialized.pair_id.clone()) {
+    // Cross venues follow TS cross admission, which does not apply the same-J
+    // anchor band. Its cancellation is a cross fill/close lifecycle, never a
+    // unilateral SwapResolve on a signed Pull-bearing Account offer.
+    if offer.cross_jurisdiction.is_none() && swept.insert(materialized.pair_id.clone()) {
         sweep_pair(
             state,
             &materialized.pair_id,
@@ -1039,9 +1042,13 @@ fn process_one_offer<'a>(
             effects,
         )?;
     }
-    let anchor = match state.books.get(&materialized.pair_id) {
-        Some(book) => band_anchor(book, &policy, has_explicit_policy),
-        None => has_explicit_policy.then(|| policy.mid_price_ticks.clone()),
+    let anchor = if offer.cross_jurisdiction.is_some() {
+        None
+    } else {
+        match state.books.get(&materialized.pair_id) {
+            Some(book) => band_anchor(book, &policy, has_explicit_policy),
+            None => has_explicit_policy.then(|| policy.mid_price_ticks.clone()),
+        }
     };
     if let Some(anchor) = anchor {
         let (min, max) = band_bounds(&anchor);

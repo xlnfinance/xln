@@ -6,23 +6,23 @@ import type { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js
 import type { EnvSnapshot, RuntimeReplica } from "@xln/core/api/public/runtime-module";
 import { panelBridge } from "../../utils/panelBridge";
 import { PerformanceMonitor, type PerfMetrics } from "../../utils/perfMonitor";
-import { getXLN, entityPositions } from "$lib/stores/xlnStore";
-import { requireTokenDecimals } from "$lib/components/Entity/token-metadata";
+import { getXLN, entityPositions } from "#lib/stores/xlnStore.ts";
+import { requireTokenDecimals } from "#lib/components/Entity/token-metadata.ts";
 import Graph3DViewport from "../../components/Graph3DViewport.svelte";
-import { compareStableText } from "$lib/utils/stableSort";
-  import { activeRuntimeId, runtimeOperations, runtimes, type Runtime } from "$lib/stores/runtimeStore";
-import { runtimeControllerHandle } from "$lib/stores/runtimeControllerStore";
-import { runtimeView } from "$lib/stores/runtimeViewStore";
-import { runtimeGraphLiveFrameCache, watchRuntimeGraphFrameCache } from "$lib/network3d/runtimeGraphFrameCache";
-import { runtimeGraphCanonicity, runtimeGraphControlOperations, runtimeGraphScope } from "$lib/stores/network/runtimeGraphControlStore";
-import { beginGraphGesture, emptyGraphGestureState, endGraphGesture, type GraphGestureOutcome } from "$lib/network3d/graphSelectionGesture";
-import { ImmersiveWalletSurface } from "$lib/network3d/ImmersiveWalletSurface";
-import { registerDebugSurface } from "$lib/utils/runtime/debugSurface";
-import { networkMachineRuntime } from "$lib/stores/network/networkMachineRuntimeStore";
-import { mergeRuntimeGraphProjections, requireActionableGraphNodeRuntimeId, type MergedRuntimeGraph, type RuntimeGraphCanonicity, type RuntimeGraphProjection } from "$lib/network3d/runtimeGraphProjection";
-import { materializeRuntimeGraphReplicas } from "$lib/network3d/runtimeGraphRender";
-import { connectedRuntimeGraphEntityIds, resolveRuntimeGraphLayout, type RuntimeGraphLayoutCache } from "$lib/network3d/runtimeGraphLayout";
-import { readGraphPositionOverrides, writeGraphPositionOverride } from "$lib/network3d/graphPositionOverrides";
+import { compareStableText } from "#lib/utils/stableSort.ts";
+  import { activeRuntimeId, runtimeOperations, runtimes, type Runtime } from "#lib/stores/runtimeStore.ts";
+import { runtimeControllerHandle } from "#lib/stores/runtimeControllerStore.ts";
+import { runtimeView } from "#lib/stores/runtimeViewStore.ts";
+import { runtimeGraphLiveFrameCache, watchRuntimeGraphFrameCache } from "#lib/network3d/runtimeGraphFrameCache.ts";
+import { runtimeGraphCanonicity, runtimeGraphControlOperations, runtimeGraphScope } from "#lib/stores/network/runtimeGraphControlStore.ts";
+import { beginGraphGesture, emptyGraphGestureState, endGraphGesture, type GraphGestureOutcome } from "#lib/network3d/graphSelectionGesture.ts";
+import { ImmersiveWalletSurface } from "#lib/network3d/ImmersiveWalletSurface.ts";
+import { registerDebugSurface } from "#lib/utils/runtime/debugSurface.ts";
+import { networkMachineRuntime } from "#lib/stores/network/networkMachineRuntimeStore.ts";
+import { mergeRuntimeGraphProjections, requireActionableGraphNodeRuntimeId, type MergedRuntimeGraph, type RuntimeGraphCanonicity, type RuntimeGraphProjection } from "#lib/network3d/runtimeGraphProjection.ts";
+import { materializeRuntimeGraphReplicas } from "#lib/network3d/runtimeGraphRender.ts";
+import { connectedRuntimeGraphEntityIds, resolveRuntimeGraphLayout, type RuntimeGraphLayoutCache } from "#lib/network3d/runtimeGraphLayout.ts";
+import { readGraphPositionOverrides, writeGraphPositionOverride } from "#lib/network3d/graphPositionOverrides.ts";
 import {
   buildGraphAvailableRoutes,
   formatGraphDualConnectionAccountInfoFromReplicas,

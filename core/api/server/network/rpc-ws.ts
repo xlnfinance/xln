@@ -33,7 +33,7 @@ type ServerRpcHandlerDeps = {
   revealBrainVaultMnemonic?: RuntimeAdapterServerDeps['revealBrainVaultMnemonic'];
 };
 
-const readFrameReceipts = (env: RuntimeReplica, query?: RuntimeAdapterReadQuery) =>
+export const readFrameReceipts = (env: RuntimeReplica, query?: RuntimeAdapterReadQuery) =>
   readRuntimeFrameReceipts(
     {
       latestHeight: () => getPersistedLatestHeight(env),
@@ -42,7 +42,7 @@ const readFrameReceipts = (env: RuntimeReplica, query?: RuntimeAdapterReadQuery)
     query,
   );
 
-const findPaymentRoutes = async (
+export const findPaymentRoutes = async (
   env: RuntimeReplica,
   query: RuntimeAdapterReadQuery = {},
 ): Promise<RuntimeAdapterPaymentRoutesResponse> => {

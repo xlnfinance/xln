@@ -72,13 +72,13 @@ describe('Vite RPC proxy connection lifecycle', () => {
     '%s tears down both WebSocket proxy directions when the browser closes first',
     (file) => {
       const config = source(file);
-      expect(config).toContain("from './vite-ws-proxy-lifecycle'");
+      expect(config).toContain("from './vite-ws-proxy-lifecycle.ts'");
       expect(config.match(/configure: configureWsProxyLifecycle/g)?.length).toBe(3);
     },
   );
 
   test.each(['end', 'close', 'error'] as const)(
-    'downstream %s detaches and destroys the upgraded upstream socket',
+    'downstream %s preserves half-close replies and cleans up terminated sockets',
     (event) => {
       let proxyReqWs: ((request: EventEmitter, incoming: object, downstream: PassThrough) => void) | undefined;
       const proxy = {
@@ -104,7 +104,13 @@ describe('Vite RPC proxy connection lifecycle', () => {
 
       downstream.emit(event, event === 'error' ? new Error('browser transport closed') : undefined);
 
-      expect(upstream.destroyed).toBe(true);
+      // A readable-half FIN is not a dead browser: its writable half must
+      // still receive the upstream WebSocket close acknowledgement.
+      expect(upstream.destroyed).toBe(event !== 'end');
+      if (event === 'end') {
+        downstream.emit('close');
+        expect(upstream.destroyed).toBe(true);
+      }
       if (event === 'error') expect(observedError?.message).toBe('browser transport closed');
     },
   );

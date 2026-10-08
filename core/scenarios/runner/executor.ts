@@ -20,11 +20,11 @@ import type {
 import { mergeAndSortEvents } from './parser.js';
 import { namedParamsToObject, getPositionalParams } from './types.js';
 import { getSignerAddress, getSignerPrivateKey } from '../../account/crypto.js';
-import { getTrustedRegistrationAdapter } from '../../runtime/registration/numbered-registration.js';
+import { getTrustedRegistrationAdapter } from '../../runtime/registration/numbered/numbered-registration.js';
 import {
   buildNumberedRegistrationRequest,
   runNumberedRegistrationIntent,
-} from '../../runtime/registration/numbered-registration-intent.js';
+} from '../../runtime/registration/numbered/numbered-registration-intent.js';
 import { resolveRuntimeJurisdictionConfig } from '../../jurisdiction/machine/jurisdiction-runtime/index.js';
 import { safeStringify } from '../../protocol/serialization/index.js';
 import { commitRuntimeInput, processJEvents, waitScenario } from '../harness/helpers';

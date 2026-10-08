@@ -339,6 +339,7 @@ export class TsAccountWorkerAuthority {
       this.#workers.set(workerIndex, emptyWorkerTotals());
     }
     this.provider = {
+      close: () => this.close(),
       executeAccountInboundBatch: batch => this.#executeInbound(batch),
       discardEntityFrameAttempt: input => this.#discardFrameAttempt(input),
       executeEntityBooksBatch: input => this.#executeBooks(input),

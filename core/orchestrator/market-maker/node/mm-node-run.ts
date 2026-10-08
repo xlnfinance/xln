@@ -40,7 +40,7 @@ import {
   validateRuntimeInputAdmission,
 } from '../../../runtime';
 import { registerEnvChangeCallback } from '../../../runtime/loop/loop-environment';
-import { ensurePendingNumberedRegistrationsResumed } from '../../../runtime/registration/numbered-registration-driver';
+import { ensurePendingNumberedRegistrationsResumed } from '../../../runtime/registration/numbered/numbered-registration-driver';
 import { setRuntimeDeliveryReady } from '../../../runtime/envelope/p2p-lifecycle';
 import { isLocalOperatorRequest, resolveSocketPeerAddress } from '../../../api/server/health/redaction';
 import { readRuntimeSecurityIncidentTelemetry } from '../../../runtime/observability/security-incidents';

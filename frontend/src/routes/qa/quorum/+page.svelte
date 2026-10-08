@@ -1,7 +1,7 @@
 <script lang="ts">
   import './quorum.css';
-  import { summarizeModels } from '$lib/qa/quorum/derive';
-  import type { QuorumCategory, QuorumInteraction } from '$lib/qa/quorum/types';
+  import { summarizeModels } from '#lib/qa/quorum/derive.ts';
+  import type { QuorumCategory, QuorumInteraction } from '#lib/qa/quorum/types.ts';
 
   export let data: { interactions: QuorumInteraction[] };
 

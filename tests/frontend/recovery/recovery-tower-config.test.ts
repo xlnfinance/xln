@@ -216,7 +216,7 @@ test('vaultStore diagnostics do not use raw console output', () => {
     source.indexOf('const persistVaultStateOrThrow ='),
     source.indexOf('const readPersistedVaultProtection ='),
   );
-  expect(persistence).toContain('localStorage.setItem(VAULT_STORAGE_KEY, serializeVaultState(get(runtimesState)))');
+  expect(persistence).toContain('localStorage.setItem(VAULT_STORAGE_KEY, serializeVaultState(state))');
   expect(persistence).not.toContain('catch');
   expect(source).toContain('createRuntime failed for ${id.slice(0, 12)}');
   expect(source).toContain("errorLog.log('Failed to register key/create entity', 'Runtime Creation'");

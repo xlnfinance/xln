@@ -3,8 +3,8 @@ import {
   buildHubBaselineProgressSignature,
   evaluateHubBaselineDeadlines,
 } from '../../../orchestrator/hub/hub-baseline-progress';
-import type { HubHealthPayload } from '../../../orchestrator/orchestrator-types';
-import { validateHubHealthPayload, validateHubInfoPayload } from '../../../orchestrator/bootstrap/bootstrap-health-validation';
+import type { HubChild, HubHealthPayload } from '../../../orchestrator/orchestrator-types';
+import { requireHubBootstrapOwners, validateHubHealthPayload, validateHubInfoPayload } from '../../../orchestrator/bootstrap/bootstrap-health-validation';
 
 const health = (overrides: Partial<HubHealthPayload> = {}): HubHealthPayload => ({
   height: 1,
@@ -31,6 +31,22 @@ const p2pReady = {
 } as HubHealthPayload['timings'];
 
 describe('hub baseline progress', () => {
+  test('native bootstrap selects hub roles without treating custody owners as hubs', () => {
+    const hub = { entityId: `0x${'11'.repeat(32)}`, signerId: `0x${'22'.repeat(20)}`, jurisdictionName: 'Testnet', isHub: true };
+    const custody = { ...hub, entityId: `0x${'33'.repeat(32)}`, isHub: false };
+    const child = { name: 'H1', engine: 'rust', lastInfo: { hubEntities: [hub, custody] } } as HubChild;
+    expect(requireHubBootstrapOwners(child).map(owner => owner.entityId)).toEqual([hub.entityId]);
+    expect(child.lastInfo?.hubEntities).toHaveLength(2);
+    expect(() => requireHubBootstrapOwners({ ...child, lastInfo: { hubEntities: [custody] } }))
+      .toThrow('RUST_HUB_BOOTSTRAP_INVENTORY_MISSING:H1');
+    const { isHub: _role, ...tsHub } = hub;
+    expect(requireHubBootstrapOwners({ ...child, engine: 'ts', lastInfo: { hubEntities: [tsHub] } })).toHaveLength(1);
+    expect(() => requireHubBootstrapOwners({ ...child, lastInfo: { hubEntities: [tsHub] } }))
+      .toThrow('RUST_HUB_BOOTSTRAP_OWNER_ROLE:H1');
+    expect(() => validateHubInfoPayload({ hubEntities: [{ ...hub, isHub: 'true' }] }))
+      .toThrow('BOOTSTRAP_HEALTH_PAYLOAD_INVALID:path=info.hubEntities[0].isHub:expected=boolean');
+  });
+
   test('native identity alone does not imply financial delivery readiness', () => {
     const identity = { entityId: `0x${'11'.repeat(32)}` };
     expect(validateHubInfoPayload(identity).deliveryReady).toBeUndefined();

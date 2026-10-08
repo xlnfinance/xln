@@ -16,11 +16,11 @@ import type {
   UIShadowMode,
   UITabStyle,
   UITypographyScale,
-} from '$lib/types/ui';
+} from '#lib/types/ui.ts';
 import {
   DEFAULT_XLN_MASCOT_DOCK,
   normalizeXlnMascotDock,
-} from '$lib/components/XlnMascot/mascot-geometry';
+} from '#lib/components/XlnMascot/mascot-geometry.ts';
 
 const VALID_DENSITY: readonly UIDensityMode[] = ['compact', 'comfortable', 'roomy'] as const;
 const VALID_RADIUS: readonly UIRadiusMode[] = ['sharp', 'soft', 'pill'] as const;

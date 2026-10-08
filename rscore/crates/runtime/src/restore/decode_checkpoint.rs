@@ -28,6 +28,9 @@ pub struct ConcreteCheckpointConfiguration {
     /// different key.  Restore proves this label against canonical 0x26 before
     /// either Entity or Account receives the key.
     pub signer_derivation_labels: Vec<String>,
+    /// Verified external custody keys loaded BEFORE checkpoint decode/WAL replay.
+    /// Process-local configuration only; never serialized or Debug-logged.
+    pub custody_import_keys: BTreeMap<String, [u8; 32]>,
     pub worker_count: usize,
     pub limits: RuntimeLimits,
     pub swap_market: Arc<SwapMarketPolicy>,
@@ -374,6 +377,7 @@ fn decode_checkpoint(
         }
     }
     Ok(DecodedRuntimeCheckpoint {
+        entity_import_keys: keyring,
         runtime_seed: configuration.runtime_seed,
         runtime_height: source.height,
         runtime_timestamp: validated_frame.timestamp,

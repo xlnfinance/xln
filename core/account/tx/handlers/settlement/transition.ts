@@ -90,7 +90,7 @@ const assertWorkspaceHash = (value: string, context: string): string => {
   return value.toLowerCase();
 };
 
-const assertSettlementOps = (ops: readonly SettlementOp[]): void => {
+export const assertSettlementOps = (ops: readonly SettlementOp[]): void => {
   if (!Array.isArray(ops) || ops.length === 0) throw new Error('SETTLEMENT_WORKSPACE_OPS_EMPTY');
   for (const [index, op] of ops.entries()) {
     assertSettlementTokenId(op.tokenId, `workspace-op=${index}`);

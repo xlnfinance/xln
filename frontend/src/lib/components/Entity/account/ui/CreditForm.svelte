@@ -4,11 +4,11 @@
   import { xlnFunctions, error } from '../../../../stores/xlnStore';
   import { errorLog } from '../../../../stores/errorLogStore';
   import { runtimeControllerHandle } from '../../../../stores/runtimeControllerStore';
-  import { requireSignerIdForEntity } from '$lib/utils/identity/entityReplica';
+  import { requireSignerIdForEntity } from '#lib/utils/identity/entityReplica.ts';
   import BigIntInput from '../../../Common/BigIntInput.svelte';
   import EntitySelect from '../../workspace/shell/EntitySelect.svelte';
   import { requireTokenDecimals } from '../../token-metadata';
-  import { optionalBoolean, optionalString, readJsonUnknown, rejectExtraKeys, requireUnknownRecord } from '$lib/utils/boundary';
+  import { optionalBoolean, optionalString, readJsonUnknown, rejectExtraKeys, requireUnknownRecord } from '#lib/utils/boundary/index.ts';
 
   export let entityId: string;
   export let actionRuntimeEnv: RuntimeReplica | null = null;

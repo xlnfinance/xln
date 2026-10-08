@@ -2,12 +2,12 @@
   import { onMount, onDestroy } from 'svelte';
   import { writable, get } from 'svelte/store';
   import { formatUnits } from 'ethers';
-  import { requireTokenDecimals } from '$lib/components/Entity/token-metadata';
+  import { requireTokenDecimals } from '#lib/components/Entity/token-metadata.ts';
   import type { RuntimeReplica } from '@xln/core/api/public/runtime-module';
   import type { RuntimeAdapterFrameReceiptResponse } from '@xln/core/api/runtime-adapter/types';
   import type { EnvSnapshot } from '@xln/core/runtime/types';
-  import { toasts } from '$lib/stores/ui/toastStore';
-  import { paymentSpotlight } from '$lib/stores/network/paymentSpotlightStore';
+  import { toasts } from '#lib/stores/ui/toastStore.ts';
+  import { paymentSpotlight } from '#lib/stores/network/paymentSpotlightStore.ts';
   import UserModePanel from './UserModePanel.svelte';
   import CommandPalette from '../components/shared/CommandPalette.svelte';
   import {
@@ -15,24 +15,24 @@
     buildCommandPaletteViewFromRuntimeView,
     emptyCommandPaletteView,
     type CommandPaletteView,
-  } from '$lib/components/shared/command-palette-view';
-  import PaymentSpotlight from '$lib/components/PaymentSpotlight.svelte';
-  import { errorLog } from '$lib/stores/errorLogStore';
+  } from '#lib/components/shared/command-palette-view.ts';
+  import PaymentSpotlight from '#lib/components/PaymentSpotlight.svelte';
+  import { errorLog } from '#lib/stores/errorLogStore.ts';
   import { panelBridge } from './utils/panelBridge';
-  import { getEnv, getXLN, history as runtimeHistory, xlnEnvironment, xlnInstance } from '$lib/stores/xlnStore';
+  import { getEnv, getXLN, history as runtimeHistory, xlnEnvironment, xlnInstance } from '#lib/stores/xlnStore.ts';
   import {
     onRuntimeControllerStatus,
     runtimeAdapter,
     runtimeControllerHandle,
-  } from '$lib/stores/runtimeControllerStore';
-  import { activeRuntimeId } from '$lib/stores/runtimeStore';
+  } from '#lib/stores/runtimeControllerStore.ts';
+  import { activeRuntimeId } from '#lib/stores/runtimeStore.ts';
   import {
     refreshSelectedRuntimeView,
     runtimeView,
     runtimeViewActiveEntityId,
-  } from '$lib/stores/runtimeViewStore';
-  import { createDetachedRuntimeViewEnv, createRuntimeViewEnv, unwrapLiveRuntimeEnv } from '$lib/utils/runtime/liveRuntimeEnv';
-  import { isLocalDebugSurfaceAllowed, registerDebugSurface } from '$lib/utils/runtime/debugSurface';
+  } from '#lib/stores/runtimeViewStore.ts';
+  import { createDetachedRuntimeViewEnv, createRuntimeViewEnv, unwrapLiveRuntimeEnv } from '#lib/utils/runtime/liveRuntimeEnv.ts';
+  import { isLocalDebugSurfaceAllowed, registerDebugSurface } from '#lib/utils/runtime/debugSurface.ts';
   import {
     createPaymentTerminalMonitor,
     PAYMENT_TERMINAL_EVENT_NAMES,
@@ -41,7 +41,7 @@
     type PaymentTerminalEvent,
     type PaymentTerminalReadRequest,
     type PaymentTerminalReceiptPage,
-  } from '$lib/stores/network/paymentTerminalMonitor';
+  } from '#lib/stores/network/paymentTerminalMonitor.ts';
 
   let commandPaletteOpen = false;
   let commandPaletteView: CommandPaletteView = emptyCommandPaletteView();

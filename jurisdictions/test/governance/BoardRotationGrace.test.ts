@@ -1,3 +1,5 @@
+import { hashCooperativeUpdateHankoPayload, type CooperativeUpdateDiff } from '../../../core/hanko/onchain-domain.ts';
+import { PROOF_BODY_ABI } from '../../../core/protocol/dispute/proof-body.ts';
 import { expect } from 'chai';
 import hre from 'hardhat';
 
@@ -28,13 +30,8 @@ const DEFAULT_ARTICLES = {
 };
 
 const BOARD_GRACE_SECONDS = 7 * 24 * 60 * 60;
-const COOPERATIVE_UPDATE = 0;
 const DISPUTE_PROOF = 1;
 const WATCH_SEED = ethers.keccak256(ethers.toUtf8Bytes('board-rotation-watch-seed'));
-const SETTLEMENT_DIFFS_ABI =
-  'tuple(uint256 tokenId,int256 leftDiff,int256 rightDiff,int256 collateralDiff,int256 ondeltaDiff)[]';
-const PROOF_BODY_ABI =
-  'tuple(bytes32 watchSeed,uint32 leftResponseSeconds,uint32 rightResponseSeconds,int256[] offdeltas,uint256[] tokenIds,tuple(address transformerAddress,bytes encodedBatch,tuple(uint256 deltaIndex,uint256 rightAllowance,uint256 leftAllowance)[] allowances)[] transformers)';
 
 const anchoredEntityMemberBoard = (anchor: string, memberEntityId: string): string =>
   encodeBoard(1, [anchor, memberEntityId], [1, 1]);
@@ -77,19 +74,11 @@ const cooperativeUpdateHash = async (
   depository: { getAddress(): Promise<string> },
   accountKey: string,
   nonce: bigint,
-  diffs: unknown[],
-): Promise<string> => ethers.keccak256(ethers.AbiCoder.defaultAbiCoder().encode(
-  ['uint8', 'uint256', 'address', 'bytes', 'uint256', SETTLEMENT_DIFFS_ABI, 'uint256[]'],
-  [
-    COOPERATIVE_UPDATE,
-    (await ethers.provider.getNetwork()).chainId,
-    await depository.getAddress(),
-    accountKey,
-    nonce,
-    diffs,
-    [],
-  ],
-));
+  diffs: CooperativeUpdateDiff[],
+): Promise<string> => hashCooperativeUpdateHankoPayload(
+  { chainId: (await ethers.provider.getNetwork()).chainId, depositoryAddress: await depository.getAddress() },
+  accountKey, nonce, diffs, [],
+);
 
 describe('EntityProvider board rotation grace', function () {
   async function fixture() {

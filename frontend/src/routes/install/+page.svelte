@@ -9,7 +9,7 @@
 		Smartphone,
 		Terminal,
 	} from 'lucide-svelte';
-	import { INSTALL_CHANNELS, LOCAL_RUNTIME_COMMAND } from '$lib/install/platforms';
+	import { INSTALL_CHANNELS, LOCAL_RUNTIME_COMMAND } from '#lib/install/platforms.ts';
 	import './install-page.css';
 
 	let copied = false;

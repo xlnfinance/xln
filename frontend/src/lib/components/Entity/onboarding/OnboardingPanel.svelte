@@ -57,7 +57,7 @@
     type OnboardingRuntimeProjection,
   } from './onboarding-runtime-input';
   import { hubDiscoveryJurisdictionKey } from './hub-discovery-profile';
-  import { readJsonUnknown, rejectExtraKeys, requireFiniteNumber, requireString, requireUnknownRecord } from '$lib/utils/boundary';
+  import { readJsonUnknown, rejectExtraKeys, requireFiniteNumber, requireString, requireUnknownRecord } from '#lib/utils/boundary/index.ts';
   import type {
     AccountRoleEvidence,
     AccountRoleEvidenceSource,

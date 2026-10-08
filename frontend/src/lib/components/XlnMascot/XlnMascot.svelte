@@ -1,7 +1,8 @@
 <script lang="ts">
+
   import { onDestroy, onMount } from 'svelte';
-  import { page } from '$app/stores';
-  import { settings, settingsOperations } from '$lib/stores/settingsStore';
+  import { page } from '$app/state';
+  import { settings, settingsOperations } from '#lib/stores/settingsStore.ts';
   import XlnMascotChat from './XlnMascotChat.svelte';
   import XlnMascotLogo from './XlnMascotLogo.svelte';
   import type { MascotPresence } from './mascot-types';
@@ -16,27 +17,29 @@
     type MascotPoint,
     type MascotViewport,
   } from './mascot-geometry';
-  import type { XlnAssistantMessage } from '$lib/ai/xln-assistant-client';
+  import type { XlnAssistantMessage } from '#lib/ai/xln-assistant-client.ts';
 
-  let mounted = false;
-  let expanded = false;
-  let presence: MascotPresence = 'idle';
-  let viewport: MascotViewport = { width: 1280, height: 720 };
-  let dragPoint: MascotPoint | null = null;
+  let mounted = $state(false);
+  let expanded = $state(false);
+  let presence: MascotPresence = $state('idle');
+  let viewport: MascotViewport = $state({ width: 1280, height: 720 });
+  let dragPoint: MascotPoint | null = $state(null);
   let activePointerId: number | null = null;
   let pointerStart: MascotPoint = { x: 0, y: 0 };
   let mascotStart: MascotPoint = { x: 0, y: 0 };
   let dragged = false;
   let suppressClick = false;
-  let messages: XlnAssistantMessage[] = [];
+  let messages: XlnAssistantMessage[] = $state([]);
   let presenceBeforeDrag: MascotPresence = 'idle';
   const handlePointerCancel = (event: PointerEvent): void => finishPointer(event, true);
 
-  $: dock = normalizeXlnMascotDock($settings.xlnMascotDock);
-  $: anchoredPoint = resolveMascotPoint(dock, viewport);
-  $: mascotPoint = dragPoint ?? anchoredPoint;
-  $: panelRect = resolveMascotPanelRect(dock, mascotPoint, viewport);
-  $: if (!$settings.showXlnMascot) expanded = false;
+  let dock = $derived(normalizeXlnMascotDock($settings.xlnMascotDock));
+  let anchoredPoint = $derived(resolveMascotPoint(dock, viewport));
+  let mascotPoint = $derived(dragPoint ?? anchoredPoint);
+  let panelRect = $derived(resolveMascotPanelRect(dock, mascotPoint, viewport));
+  $effect(() => {
+    if (!$settings.showXlnMascot) expanded = false;
+  });
 
   function readViewport(): MascotViewport {
     const visual = window.visualViewport;
@@ -165,7 +168,7 @@
         style={`left:${panelRect.x}px;top:${panelRect.y}px;width:${panelRect.width}px;height:${panelRect.height}px;`}
       >
         <XlnMascotChat
-          pathname={$page.url.pathname}
+          pathname={page.url.pathname}
           bind:messages
           onClose={close}
           onPresence={handlePresence}

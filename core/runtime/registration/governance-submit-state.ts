@@ -135,15 +135,6 @@ export const getNextGovernanceSubmitTimestamp = (env: RuntimeReplica): number | 
   return Number.isFinite(next) ? next : null;
 };
 
-export const hasReadyCommittedJOutbox = (env: RuntimeReplica, now: number): boolean => {
-  for (const input of env.infrastructure?.pendingCommittedJOutbox ?? []) {
-    for (const jTx of input.jTxs) {
-      if (!isGovernanceJTx(jTx) || governanceAttemptIsDue(jTx, now)) return true;
-    }
-  }
-  return false;
-};
-
 export const makeGovernanceSubmitResultRuntimeTx = (
   jurisdictionName: string,
   jTx: GovernanceJTx,

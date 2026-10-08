@@ -908,3 +908,54 @@ fn object(entries: Vec<(&str, CanonicalValue)>) -> CanonicalValue {
             .collect(),
     )
 }
+
+#[test]
+fn authenticated_remote_raw_command_cannot_acquire_resident_signing_authority() {
+    let mut ingress = DirectRuntimeIngress::bind(DirectRuntimeIngressConfig::production(
+        "127.0.0.1:0".parse().unwrap(),
+        "remote-authority-server",
+        "runtime",
+    ))
+    .expect("real authenticated ingress");
+    ingress.set_delivery_ready(true).unwrap();
+    let local = ingress.runtime_id().to_owned();
+    let seed = "remote-authority-attacker";
+    let peer = derive_local_runtime_id(seed, "runtime").unwrap();
+    let mut session = DirectSession::connect(SessionConfig {
+        url: &format!("ws://{}/ws", ingress.local_address()),
+        target_runtime_id: &local,
+        source_runtime_id: &peer,
+        source_seed: seed,
+        source_signer_id: "runtime",
+        identity: &encryption_identity(seed),
+        io_timeout: Duration::from_secs(3),
+        max_message_bytes: 32 * 1024 * 1024,
+    })
+    .expect("attacker proves only its own Runtime key");
+    let mut envelope = user_to_hub_envelope(&local, &peer);
+    envelope.transaction_count = 1;
+    envelope.value["entityInputs"][0]["entityTxs"] = json!([{
+        "type":"extendCredit", "data":{
+            "counterpartyEntityId":format!("0x{}", "ff".repeat(32)),
+            "tokenId":1,"amount":{"__xlnType":"BigInt","value":"7"}
+        }
+    }]);
+    session
+        .send_envelope(&envelope)
+        .expect("real encrypted peer wire");
+    assert!(
+        ingress
+            .recv_timeout(Duration::from_millis(500))
+            .unwrap()
+            .is_none(),
+        "raw peer financial transaction must never become resident LocalBatch"
+    );
+    assert!(
+        ingress
+            .last_session_error()
+            .is_some_and(|error| error.contains("REMOTE_LOCAL_COMMAND_FORBIDDEN"))
+    );
+    assert_eq!(ingress.metrics().accepted_batches, 0);
+    drop(session);
+    ingress.shutdown().unwrap();
+}

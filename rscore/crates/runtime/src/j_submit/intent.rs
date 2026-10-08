@@ -338,7 +338,7 @@ pub fn prepare_certified_entity_j_intents(
                     state.timestamp,
                 )?;
                 println!(
-                    "RSCORE_J_BATCH_INTENT:batch={}:nonce={}:generation={}",
+                    "[INFO][runtime.jsubmit] RSCORE_J_BATCH_INTENT:batch={}:nonce={}:generation={}",
                     hash, entity_nonce, batch_generation
                 );
                 prepared.retries.push(RetryJSubmitData {

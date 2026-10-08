@@ -1,6 +1,6 @@
 import type { Profile as GossipProfile, RuntimeAdapterEntitySummary } from '@xln/core/api/public/runtime-module';
 
-import { compareStableText } from '$lib/utils/stableSort';
+import { compareStableText } from '#lib/utils/stableSort.ts';
 
 export type GossipDirectoryProfile = {
   entityId: string;

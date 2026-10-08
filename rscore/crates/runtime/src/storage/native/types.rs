@@ -93,6 +93,8 @@ pub struct RuntimeFrameCommit {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DurableRuntimeFrame {
     pub(super) height: u64,
+    /// Derived from the validated WAL frame; never a separate durable field.
+    pub(super) timestamp: u64,
     pub(super) output_count: usize,
     pub(super) output_digest: [u8; 32],
     /// Exact rows that were just included in the synced write batch. They are
@@ -105,6 +107,10 @@ pub struct DurableRuntimeFrame {
 }
 
 impl DurableRuntimeFrame {
+    pub fn timestamp(&self) -> u64 {
+        self.timestamp
+    }
+
     pub fn height(&self) -> u64 {
         self.height
     }

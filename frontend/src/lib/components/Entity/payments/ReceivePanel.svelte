@@ -7,7 +7,7 @@
     buildWalletPayHref,
     buildXlnInvoiceDeepLink,
     buildXlnInvoiceUri,
-  } from '$lib/utils/xlnInvoice';
+  } from '#lib/utils/xlnInvoice.ts';
 
   export let entityId: string;
 

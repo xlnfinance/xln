@@ -1,17 +1,17 @@
 <script lang="ts">
-  import { runtimeControllerHandle } from '$lib/stores/runtimeControllerStore';
-  import { runtimeCommandLatestReceipt } from '$lib/stores/commands/runtimeCommandBus';
+  import { runtimeControllerHandle } from '#lib/stores/runtimeControllerStore.ts';
+  import { runtimeCommandLatestReceipt } from '#lib/stores/commands/runtimeCommandBus.ts';
   import {
     runtimeView,
     runtimeViewAccountsPage,
     runtimeViewBooksPage,
     runtimeViewFrameMatchesAtHeight,
     runtimeViewQueryAtHeight,
-  } from '$lib/stores/runtimeViewStore';
-  import { runtimeQueryClient } from '$lib/stores/runtimeQueryClient';
+  } from '#lib/stores/runtimeViewStore.ts';
+  import { runtimeQueryClient } from '#lib/stores/runtimeQueryClient.ts';
   import type { RuntimeAdapterViewFrame } from '@xln/core/api/public/runtime-module';
   import { REMOTE_RUNTIME } from '@xln/core/config/constants';
-  import type { Tab } from '$lib/types/ui';
+  import type { Tab } from '#lib/types/ui.ts';
   import EntityPanelTabs from './shell/EntityPanelTabs.svelte';
   import { runtimeProjectionMatchesRuntime } from '../core/entity-workspace';
   import {
@@ -30,7 +30,7 @@
   export let selectedJurisdiction: string | null = null;
   export let allowHeaderAddRuntime: boolean = false;
   export let headerRuntimeAddLabel: string = '+ Add Runtime';
-  import type { EntityOpenAction } from '$lib/view/utils/panelBridge';
+  import type { EntityOpenAction } from '#lib/view/utils/panelBridge.ts';
   export let initialAction: EntityOpenAction | undefined = undefined;
   export let runtimeFrameContext: EntityWorkspaceRuntimeFrameContext = emptyEntityWorkspaceRuntimeFrameContext;
   export let embeddedRuntimeContext: EntityWorkspaceEmbeddedRuntimeContext = emptyEntityWorkspaceEmbeddedRuntimeContext;

@@ -141,6 +141,9 @@ impl ResidentRuntimeService {
         ingress: DirectRuntimeIngress,
         materializer: Box<dyn EntityInfraMaterializer>,
     ) -> Result<Self, ResidentRuntimeServiceError> {
+        processor
+            .hydrate_live_token_catalogs()
+            .map_err(ResidentRuntimeServiceError::JWatcher)?;
         let replica = processor.replica()?;
         let durable_runtime_id = replica.durable.runtime_id();
         let finalized_j_height = replica.state.finalized_j_height;
@@ -150,7 +153,7 @@ impl ResidentRuntimeService {
                 ingress: ingress.runtime_id().into(),
             });
         }
-        let j_watchers = live_j_watchers(replica)?;
+        let j_watchers = live_j_watchers(replica, &BTreeSet::new())?;
         processor.attach_inbound_sessions(ingress.sessions());
         // A crash can happen after fsync but before the best-effort socket
         // write. There is intentionally no transport receipt or delivered
@@ -205,6 +208,9 @@ impl ResidentRuntimeService {
         ingress: DirectRuntimeIngress,
         materializer: Box<dyn EntityInfraMaterializer>,
     ) -> Result<Self, ResidentRuntimeServiceError> {
+        processor
+            .hydrate_live_token_catalogs()
+            .map_err(ResidentRuntimeServiceError::JWatcher)?;
         let replica = processor.replica()?;
         let durable_runtime_id = replica.durable.runtime_id();
         let finalized_j_height = replica.state.finalized_j_height;
@@ -214,7 +220,7 @@ impl ResidentRuntimeService {
                 ingress: ingress.runtime_id().into(),
             });
         }
-        let j_watchers = live_j_watchers(replica)?;
+        let j_watchers = live_j_watchers(replica, &BTreeSet::new())?;
         processor.attach_inbound_sessions(ingress.sessions());
         let retried = processor.retry_publication()?;
         let mut deferred_publication = DeferredPublicationTelemetry::default();
@@ -234,6 +240,98 @@ impl ResidentRuntimeService {
             last_live_frame_started_at: None,
             delivery_ready: false,
         })
+    }
+
+    // Insert inside ResidentRuntimeService, adjacent to process_local_entity_inputs.
+    // Caller is the authenticated process adapter after command frontier admission.
+    pub fn process_adapter_entity_inputs(
+        &mut self,
+        entity_inputs: Vec<RuntimeEntityInput>,
+        marker: crate::RuntimeAdapterCommandMarker,
+    ) -> Result<Option<RuntimeProcessReport>, ResidentRuntimeServiceError> {
+        if !self.delivery_ready {
+            return Err(ResidentRuntimeServiceError::JWatcher(
+                "STARTUP_CATCHUP_PENDING".into(),
+            ));
+        }
+        self.wait_for_live_frame_slot()?;
+        let frame_started = Instant::now();
+        self.pending_runtime_txs
+            .push_back(RuntimeTx::RecordRuntimeAdapterCommand(marker));
+        let report = self.process_entity_inputs_at(entity_inputs, None, wall_clock_ms()?)?;
+        self.note_live_frame(frame_started, report.is_some());
+        Ok(report)
+    }
+
+    /// Mirrors TS ensureLocalRuntimeOwner: an existing exact Entity/signer is
+    /// idempotent, otherwise the canonical import must become durable first.
+    /// The caller supplies custody over private IPC, never an unauthenticated RPC.
+    pub fn adopt_custody_owner(
+        &mut self,
+        signer: &str,
+        key: [u8; 32],
+        entity_seed: &str,
+        jurisdiction: Value,
+        profile_name: &str,
+    ) -> Result<Value, ResidentRuntimeServiceError> {
+        let (entity_id, input) =
+            crate::custody_owner_import(signer, key, entity_seed, jurisdiction, profile_name)
+                .map_err(ResidentRuntimeServiceError::JWatcher)?;
+        let owner = crate::RuntimeEntityKey::new(entity_id, signer)
+            .map_err(|error| ResidentRuntimeServiceError::JWatcher(error.to_string()))?;
+        self.processor
+            .install_custody_key(signer, key)
+            .map_err(ResidentRuntimeServiceError::JWatcher)?;
+        self.sync_committed()?;
+        let replica = self.processor.replica()?;
+        let created = !replica.state.e_replicas.contains_key(&owner);
+        if !created && !replica.e_replicas.contains_key(&owner) {
+            return Err(ResidentRuntimeServiceError::JWatcher(
+                "BRAINVAULT_OWNER_LIVE_MISSING".into(),
+            ));
+        }
+        if created {
+            self.process_custody_import(signer, key, input)?;
+            self.sync_committed()?;
+        }
+        let replica = self.processor.replica()?;
+        if !replica.state.e_replicas.contains_key(&owner)
+            || !replica.e_replicas.contains_key(&owner)
+        {
+            return Err(ResidentRuntimeServiceError::JWatcher(
+                "BRAINVAULT_OWNER_COMMIT_MISSING".into(),
+            ));
+        }
+        Ok(
+            serde_json::json!({"entityId": format!("0x{}", hex::encode(entity_id)),
+            "created": created, "height": replica.state.height}),
+        )
+    }
+
+    /// Caller proves the admin capability before scheduling this operation.
+    /// `input` is built from private worker custody and committed J selection.
+    /// Public completion still requires sync_committed + resident owner verification.
+    pub fn process_custody_import(
+        &mut self,
+        signer: &str,
+        key: [u8; 32],
+        input: crate::ImportReplica,
+    ) -> Result<Option<RuntimeProcessReport>, ResidentRuntimeServiceError> {
+        if !self.delivery_ready {
+            return Err(ResidentRuntimeServiceError::JWatcher(
+                "STARTUP_CATCHUP_PENDING".into(),
+            ));
+        }
+        self.processor
+            .install_custody_key(signer, key)
+            .map_err(ResidentRuntimeServiceError::JWatcher)?;
+        self.wait_for_live_frame_slot()?;
+        let frame_started = Instant::now();
+        self.pending_runtime_txs
+            .push_back(RuntimeTx::ImportReplica(input));
+        let report = self.process_entity_inputs_at(vec![], None, wall_clock_ms()?)?;
+        self.note_live_frame(frame_started, report.is_some());
+        Ok(report)
     }
 
     pub fn local_address(&self) -> std::net::SocketAddr {
@@ -278,12 +376,43 @@ impl ResidentRuntimeService {
     }
 
     /// Read one exact committed WAL frame for an operator query, never history scans.
+    pub fn adapter_storage_head(&mut self) -> Result<Value, ResidentRuntimeServiceError> {
+        self.processor.adapter_storage_head().map_err(Into::into)
+    }
+
+    pub fn adapter_restore_sources(
+        &mut self,
+    ) -> Result<crate::restore::NativeConcreteRestoreSources, ResidentRuntimeServiceError> {
+        self.processor.adapter_restore_sources().map_err(Into::into)
+    }
+
     pub fn read_durable_frame(
         &mut self,
         height: u64,
     ) -> Result<crate::storage::native::RecoveredWalFrame, ResidentRuntimeServiceError> {
         self.processor
             .read_durable_frame(height)
+            .map_err(Into::into)
+    }
+
+    pub fn read_account_views(
+        &mut self,
+        entity_key: &crate::RuntimeEntityKey,
+        account_ids: Vec<xln_rscore_batch::AccountId>,
+        project: fn(
+            &xln_rscore_engine::AccountConsensus,
+        )
+            -> Result<xln_rscore_protocol::CanonicalValue, xln_rscore_engine::StateError>,
+    ) -> Result<
+        Vec<(
+            xln_rscore_batch::AccountId,
+            xln_rscore_protocol::CanonicalValue,
+        )>,
+        ResidentRuntimeServiceError,
+    > {
+        self.sync_committed()?;
+        self.processor
+            .read_account_views(entity_key, account_ids, project)
             .map_err(Into::into)
     }
 
@@ -358,6 +487,20 @@ impl ResidentRuntimeService {
     fn poll_and_commit_j_watcher(
         &mut self,
     ) -> Result<Option<RuntimeProcessReport>, ResidentRuntimeServiceError> {
+        // Imported sovereign Entities join the same watcher path on their next live poll.
+        // Existing scans/cursors remain intact; never reset an in-flight authenticated range.
+        let watched = self
+            .j_watchers
+            .iter()
+            .map(|watcher| {
+                (
+                    *watcher.config.entity_id.as_bytes(),
+                    watcher.signer_id.clone(),
+                )
+            })
+            .collect();
+        self.j_watchers
+            .extend(live_j_watchers(self.processor.replica()?, &watched)?);
         let count = self.j_watchers.len();
         let mut selected = None;
         for _ in 0..count {
@@ -657,6 +800,23 @@ impl ResidentRuntimeService {
         &self,
         batch: &InboundEntityInputs,
     ) -> Result<(), ResidentRuntimeServiceError> {
+        let replica = self.processor.replica()?;
+        for input in &batch.entity_inputs {
+            let key = crate::RuntimeEntityKey {
+                entity_id: *input.entity_id(),
+                signer_id: input.signer_id().to_owned(),
+            };
+            // Address errors belong to the peer, before the durable writer
+            // takes ownership. Check committed membership only: a missing live
+            // slot for an existing committed owner remains an invariant fault.
+            if !replica.state.e_replicas.contains_key(&key) {
+                return Err(super::EntityRouteError::InboundEntityOwner {
+                    entity_id: format!("0x{}", hex::encode(input.entity_id())),
+                    signer_id: input.signer_id().to_owned(),
+                }
+                .into());
+            }
+        }
         self.processor
             .entity_routes()
             .validate_inbound_runtime_outputs(&batch.peer_runtime_id, &batch.entity_inputs)?;
@@ -738,9 +898,27 @@ impl ResidentRuntimeService {
         let previous = self.processor.replica()?.state.timestamp;
         let queued_at = queued_at.unwrap_or(now);
         let timestamp = resolve_live_timestamp(previous, queued_at, now)?;
-        let runtime_txs = self.pending_runtime_txs.drain(..).collect();
-        self.materializer
-            .set_paybook_reachability(self.processor.entity_routes(), self.ingress.sessions());
+        let mut runtime_txs = self.pending_runtime_txs.drain(..).collect::<Vec<_>>();
+        if self.j_submit_operator_key.is_some() {
+            let due = crate::j_submit::lifecycle::collect_due_j_submit_retries(
+                self.processor.replica()?,
+                timestamp,
+                &runtime_txs,
+                &entity_inputs,
+            )
+            .map_err(|error| ResidentRuntimeServiceError::JSubmit(error.to_string()))?;
+            runtime_txs.extend(due);
+        }
+        let profile_identity = crate::signed_profile::ProfileTransportIdentity {
+            runtime_id: self.runtime_id().to_string(),
+            runtime_encryption_public_key: self.encryption_public_key(),
+            ws_url: format!("ws://{}/ws", self.local_address()),
+        };
+        self.materializer.set_paybook_reachability(
+            self.processor.entity_routes(),
+            self.ingress.sessions(),
+            profile_identity,
+        );
         let mut report = self.processor.process_live(
             RuntimeLiveInput {
                 runtime_txs,
@@ -773,17 +951,43 @@ impl ResidentRuntimeService {
             match attempt {
                 DurableJAttempt::ScheduleRuntimeTx(tx) => self.pending_runtime_txs.push_back(tx),
                 DurableJAttempt::Batch(attempt) => {
+                    // A recovered outbox can predate signing. The committed result
+                    // journal retires the attempt regardless of its raw bytes.
+                    if crate::j_submit::lifecycle::prepared_attempt_completed(
+                        self.processor.replica()?,
+                        &attempt,
+                    ) {
+                        continue;
+                    }
                     let operator_key = self.j_submit_operator_key.ok_or_else(|| {
                         ResidentRuntimeServiceError::JSubmit("OPERATOR_KEY_MISSING".into())
                     })?;
-                    let result =
-                        submit_committed_attempt(self.processor.replica()?, operator_key, &attempt);
-                    println!(
-                        "RSCORE_J_SUBMIT_RESULT:batch={}:attempt={}:outcome={:?}",
-                        attempt.batch_hash, attempt.attempt_number, result.outcome
+                    let mut minimum_nonce = None;
+                    for tx in &self.pending_runtime_txs {
+                        if let RuntimeTx::RecordJPreparedTransaction(data) = tx
+                            && data.jurisdiction_name == attempt.jurisdiction_name
+                            && data.raw_transaction.starts_with("0x02")
+                        {
+                            let wire = crate::j_submit::prepared_wire::decode_prepared_transaction(
+                                &data.raw_transaction,
+                                false,
+                            )
+                            .map_err(|e| ResidentRuntimeServiceError::JSubmit(e.to_string()))?;
+                            let next = wire.nonce.checked_add(1).ok_or_else(|| {
+                                ResidentRuntimeServiceError::JSubmit(
+                                    "PREPARED_NONCE_OVERFLOW".into(),
+                                )
+                            })?;
+                            minimum_nonce = Some(minimum_nonce.unwrap_or(0).max(next));
+                        }
+                    }
+                    let result = submit_committed_attempt(
+                        self.processor.replica()?,
+                        operator_key,
+                        &attempt,
+                        minimum_nonce,
                     );
-                    self.pending_runtime_txs
-                        .push_back(RuntimeTx::RecordJSubmitResult(result));
+                    self.pending_runtime_txs.push_back(result);
                 }
                 DurableJAttempt::EntityProvider(attempt) => {
                     let operator_key = self.j_submit_operator_key.ok_or_else(|| {
@@ -870,7 +1074,8 @@ fn live_submit_context(
         .and_then(|rpcs| rpcs.iter().find_map(Value::as_str))
         .ok_or(JSubmitError::Transaction("rpc"))?;
     Ok((
-        HttpJsonRpc::new(endpoint).map_err(|error| JSubmitError::Rpc(error.to_string()))?,
+        HttpJsonRpc::for_committed_j(endpoint, row)
+            .map_err(|error| JSubmitError::Rpc(error.to_string()))?,
         JSubmitConfig {
             chain_id,
             depository_address,
@@ -931,6 +1136,7 @@ fn recover_pending_j_actions(
     let mut actions = decode_pending_j_submit_attempts(replica.durable.infrastructure())
         .map_err(|error| ResidentRuntimeServiceError::JSubmit(error.to_string()))?
         .into_iter()
+        .filter(|attempt| !crate::j_submit::lifecycle::prepared_attempt_completed(replica, attempt))
         .map(DurableJAttempt::Batch)
         .collect::<Vec<_>>();
     actions.extend(
@@ -1099,7 +1305,8 @@ fn submit_committed_attempt(
     replica: &crate::RuntimeReplica,
     operator_private_key: [u8; 32],
     attempt: &DurableJSubmitAttempt,
-) -> JSubmitResultData {
+    minimum_nonce: Option<u64>,
+) -> RuntimeTx {
     let base = || JSubmitResultData {
         entity_id: format!("0x{}", hex::encode(attempt.sealed.entity_id)),
         signer_id: format!("0x{}", hex::encode(attempt.sealed.signer_id)),
@@ -1115,7 +1322,8 @@ fn submit_committed_attempt(
         adapter_failure: None,
         transaction_hash: None,
     };
-    let submit = || -> Result<JSubmitOutcome, JSubmitError> {
+    let mut replacement_evidence = None;
+    let mut submit = || -> Result<crate::j_submit::JSubmitPreparation, JSubmitError> {
         let row = replica
             .durable
             .j_replicas()
@@ -1149,8 +1357,8 @@ fn submit_committed_attempt(
             .and_then(Value::as_array)
             .and_then(|rpcs| rpcs.iter().find_map(Value::as_str))
             .ok_or(JSubmitError::Transaction("rpc"))?;
-        let rpc =
-            HttpJsonRpc::new(endpoint).map_err(|error| JSubmitError::Rpc(error.to_string()))?;
+        let rpc = HttpJsonRpc::for_committed_j(endpoint, row)
+            .map_err(|error| JSubmitError::Rpc(error.to_string()))?;
         let submitter = JSubmitter::new(
             &rpc,
             JSubmitConfig {
@@ -1161,27 +1369,81 @@ fn submit_committed_attempt(
                 gas_headroom_bps: 12_000,
             },
         )?;
-        let (entity_state, _) = replica
+        if let Some(raw) = &attempt.raw_transaction {
+            if let Some((next, evidence)) = submitter.prepare_native_replacement(raw)? {
+                replacement_evidence = Some(evidence);
+                return Ok(crate::j_submit::JSubmitPreparation::Prepared(next));
+            }
+            return submitter
+                .broadcast_prepared(raw, &[])
+                .map(crate::j_submit::JSubmitPreparation::Resolved);
+        }
+        let (entity_state, entity_replica) = replica
             .entity_slot(
                 &attempt.sealed.entity_id,
                 &format!("0x{}", hex::encode(attempt.sealed.signer_id)),
             )
             .ok_or(JSubmitError::Transaction("local-entity-slot"))?;
+        if let Some(local) = entity_replica.replica_metadata().get("jSubmitState")
+            && local.get("batchHash").and_then(Value::as_str) == Some(attempt.batch_hash.as_str())
+            && local.get("entityNonce").and_then(Value::as_u64)
+                == Some(attempt.sealed.nonce.low_u64())
+            && local.get("batchGeneration").and_then(Value::as_u64)
+                == Some(attempt.batch_generation)
+            && let Some(hash) = local.get("txHash").and_then(Value::as_str)
+        {
+            let transaction_hash: [u8; 32] = hash
+                .strip_prefix("0x")
+                .and_then(|value| hex::decode(value).ok())
+                .and_then(|bytes| bytes.try_into().ok())
+                .ok_or(JSubmitError::Transaction("known-transaction-hash"))?;
+            // Recovered pending I/O polls the same transaction; no second sender nonce.
+            return Ok(crate::j_submit::JSubmitPreparation::Resolved(
+                submitter.receipt_status(&transaction_hash, &[])?.unwrap_or(
+                    JSubmitOutcome::Broadcast {
+                        transaction_hash,
+                        transaction_nonce: 0,
+                    },
+                ),
+            ));
+        }
         let current_board = entity_state
             .certified_board_authority()
             .current_board_hash(&attempt.sealed.entity_id);
         let authority = |entity_id: &[u8; 32], board_hash: &[u8; 32], _claim_index: usize| {
             entity_id == &attempt.sealed.entity_id && current_board.as_ref() == Some(board_hash)
         };
-        submitter.submit(
+        submitter.prepare_batch(
             &attempt.sealed,
             attempt.fee_overrides.as_ref(),
             Some(&operator_private_key),
             Some(&authority),
             &[],
+            minimum_nonce,
         )
     };
-    match submit() {
+    let outcome = match submit() {
+        Ok(crate::j_submit::JSubmitPreparation::Prepared(raw_transaction)) => {
+            if let Some(evidence) = replacement_evidence {
+                let value = serde_json::json!({"jurisdictionName":attempt.jurisdiction_name,"attemptId":attempt.attempt_id,
+                    "previousTransactionHash":evidence["oldTransactionHash"],"rawTransaction":raw_transaction,"evidence":evidence});
+                return RuntimeTx::ReplaceJPreparedTransaction(
+                    crate::j_submit::decode_replacement(&value)
+                        .expect("validated native replacement callback"),
+                );
+            }
+            return RuntimeTx::RecordJPreparedTransaction(
+                crate::j_submit::JPreparedTransactionData {
+                    jurisdiction_name: attempt.jurisdiction_name.clone(),
+                    attempt_id: attempt.attempt_id.clone(),
+                    raw_transaction,
+                },
+            );
+        }
+        Ok(crate::j_submit::JSubmitPreparation::Resolved(outcome)) => Ok(outcome),
+        Err(error) => Err(error),
+    };
+    let result = match outcome {
         Ok(JSubmitOutcome::MinedAwaitingAuthentication {
             transaction_hash, ..
         }) => {
@@ -1238,7 +1500,8 @@ fn submit_committed_attempt(
             });
             result
         }
-    }
+    };
+    RuntimeTx::RecordJSubmitResult(result)
 }
 
 fn submit_committed_provider_attempt(
@@ -1316,8 +1579,8 @@ fn submit_committed_provider_attempt(
             .and_then(Value::as_array)
             .and_then(|rpcs| rpcs.iter().find_map(Value::as_str))
             .ok_or(JSubmitError::Transaction("rpc"))?;
-        let rpc =
-            HttpJsonRpc::new(endpoint).map_err(|error| JSubmitError::Rpc(error.to_string()))?;
+        let rpc = HttpJsonRpc::for_committed_j(endpoint, row)
+            .map_err(|error| JSubmitError::Rpc(error.to_string()))?;
         let submitter = JSubmitter::new(
             &rpc,
             JSubmitConfig {
@@ -1553,9 +1816,13 @@ fn submit_committed_governance_attempt(
 
 fn live_j_watchers(
     replica: &crate::RuntimeReplica,
+    watched: &BTreeSet<([u8; 32], String)>,
 ) -> Result<VecDeque<LiveJWatcher>, ResidentRuntimeServiceError> {
     let mut candidates = Vec::new();
     for (entity_key, entity_replica) in &replica.e_replicas {
+        if watched.contains(&(entity_key.entity_id, entity_key.signer_id.clone())) {
+            continue;
+        }
         let Some(entity_state) = replica.state.e_replicas.get(entity_key) else {
             return Err(ResidentRuntimeServiceError::JWatcher(
                 "ENTITY_STATE_MISSING".into(),
@@ -1638,29 +1905,12 @@ fn live_j_watchers(
             .and_then(Value::as_array)
             .and_then(|rows| rows.iter().find_map(Value::as_str))
             .ok_or_else(|| ResidentRuntimeServiceError::JWatcher("RPC_MISSING".into()))?;
-        let global_cursor_height = match crate::canonical_value_from_tagged_json(
-            j_replica
-                .get("blockNumber")
-                .ok_or_else(|| ResidentRuntimeServiceError::JWatcher("CURSOR_MISSING".into()))?,
-        )
-        .map_err(|error| ResidentRuntimeServiceError::JWatcher(error.to_string()))?
-        {
-            xln_rscore_protocol::CanonicalValue::BigInt(value) => u64::try_from(value)
-                .map_err(|_| ResidentRuntimeServiceError::JWatcher("CURSOR_INVALID".into()))?,
-            _ => {
-                return Err(ResidentRuntimeServiceError::JWatcher(
-                    "CURSOR_INVALID".into(),
-                ));
-            }
-        };
+        // Entity history owns its authenticated recovery anchor. The shared J
+        // cursor may lag a committed Entity certificate (including at the first
+        // checkpoint); clamping to it asks for a pruned historical hash and can
+        // halt recovery. Other Entities resume their own anchors independently.
         let cursor_height =
-            committed_entity_j_height(entity_replica.replica_metadata(), &entity_state.entity)?
-                .min(global_cursor_height);
-        let cursor_hash = committed_cursor_hash(
-            entity_replica.replica_metadata(),
-            &entity_state.entity,
-            cursor_height,
-        )?;
+            committed_entity_j_height(entity_replica.replica_metadata(), &entity_state.entity)?;
         let confirmation_depth = j_replica
             .get("watcherConfirmationDepth")
             .and_then(Value::as_u64)
@@ -1674,8 +1924,27 @@ fn live_j_watchers(
             &entity_state.entity,
             &format!("0x{}", hex::encode(entity_key.entity_id)),
         )?;
-        let rpc = HttpJsonRpc::new(endpoint)
+        let rpc = HttpJsonRpc::for_committed_j(endpoint, j_replica)
             .map_err(|error| ResidentRuntimeServiceError::JWatcher(error.to_string()))?;
+        let cursor_hash = if unobserved_deployment_boundary(
+            entity_replica.replica_metadata(),
+            &entity_state.entity,
+            j_replica
+                .get("entityProviderDeploymentBlock")
+                .and_then(Value::as_u64),
+            cursor_height,
+        ) {
+            // This is a configured scan start, NOT certified history. Read only this
+            // exact parent header; normal polling rechecks it and authenticates all receipts.
+            crate::j_watcher::read_initial_watcher_anchor(&rpc, cursor_height)
+                .map_err(|e| ResidentRuntimeServiceError::JWatcher(e.to_string()))?
+        } else {
+            committed_cursor_hash(
+                entity_replica.replica_metadata(),
+                &entity_state.entity,
+                cursor_height,
+            )?
+        };
         let erc20_tokens =
             crate::j_watcher::read_erc20_token_registry(&rpc, &depository_address)
                 .map_err(|error| ResidentRuntimeServiceError::JWatcher(error.to_string()))?;
@@ -1996,6 +2265,18 @@ fn canonical_u64(value: Option<&xln_rscore_protocol::CanonicalValue>) -> Option<
     }
 }
 
+fn unobserved_deployment_boundary(
+    metadata: &Value,
+    state: &xln_rscore_entity_kernel::EntityStateSlice,
+    deployment: Option<u64>,
+    height: u64,
+) -> bool {
+    deployment.and_then(|value| value.checked_sub(1)) == Some(height)
+        && state.last_finalized_j_height == height
+        && state.j_history_finality.is_none()
+        && metadata.get("jHistory").is_none_or(Value::is_null)
+}
+
 fn committed_cursor_hash(
     metadata: &Value,
     state: &xln_rscore_entity_kernel::EntityStateSlice,
@@ -2129,7 +2410,7 @@ mod tests {
         use crate::transport::{DirectRuntimeIngressConfig, derive_local_runtime_id};
         use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 
-        let seed = "runtime-output-ingress-rejection";
+        let seed = "0x7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a";
         let label = "runtime";
         let runtime_id = derive_local_runtime_id(seed, label).expect("local Runtime");
         let peer = format!("0x{}", "22".repeat(20));
@@ -2137,7 +2418,16 @@ mod tests {
         let source_signer = format!("0x{}", "44".repeat(20));
         let mut replica = crate::machine::tests::replica(crate::RuntimeLimits::hlt())
             .expect("real resident Account and Entity");
-        replica.durable = RuntimeDurableEnvelope::fixture_for_runtime(&runtime_id, [0; 32]);
+        // This ingress test owns no J domain (its Entity jurisdiction is None).
+        // Build the supported no-J runtime, rather than unrelated RPC-less J replicas.
+        replica.durable = RuntimeDurableEnvelope::decode(
+            &json!({
+                "runtimeId":runtime_id,"runtimeConfig":{"minFrameDelayMs":5},
+                "infrastructure":{},"jReplicas":[]
+            }),
+            [0; 32],
+        )
+        .expect("canonical no-J ingress runtime");
         let target = replica
             .state
             .e_replicas
@@ -2154,13 +2444,21 @@ mod tests {
         ));
         let store = NativeRuntimeStore::open(&directory, NativeStorageConfig::default())
             .expect("real native WAL");
-        let routes = EntityRouteTable::new([EntityRoute {
-            target_entity_id: source.clone(),
-            target_runtime_id: peer.clone(),
-            target_signer_id: source_signer.clone(),
-            websocket_url: None,
-        }])
-        .expect("pinned source");
+        let routes = EntityRouteTable::new([
+            EntityRoute {
+                target_entity_id: source.clone(),
+                target_runtime_id: peer.clone(),
+                target_signer_id: source_signer.clone(),
+                websocket_url: None,
+            },
+            EntityRoute {
+                target_entity_id: format!("0x{}", "ff".repeat(32)),
+                target_runtime_id: peer.clone(),
+                target_signer_id: source_signer.clone(),
+                websocket_url: None,
+            },
+        ])
+        .expect("pinned source and honest Account peer");
         let processor = DurableRuntimeProcessor::new(
             replica,
             store,
@@ -2234,12 +2532,114 @@ mod tests {
             service.process_batch_at(Some(batch(vec![forged])), 100),
             Err(ResidentRuntimeServiceError::InboundRoute(_)),
         ));
+        // A peer can address an unknown Entity or the wrong validator. Neither
+        // row may reach the durable reducer and poison its resident state.
+        for (entity_id, signer_id) in [
+            (format!("0x{}", "ee".repeat(32)), target.signer_id.clone()),
+            (
+                format!("0x{}", hex::encode(target.entity_id)),
+                "unknown-validator".into(),
+            ),
+        ] {
+            let unknown = RuntimeEntityInput::decode(json!({
+                "entityId":entity_id,"signerId":signer_id,
+                "runtimeId":runtime_id,"from":peer,
+                "sourceRuntimeFrame":{"height":1,"timestamp":100},"entityTxs":[]
+            }))
+            .expect("well-formed hostile destination");
+            assert!(
+                matches!(
+                    service.process_batch_at(Some(batch(vec![unknown])), 100),
+                    Err(ResidentRuntimeServiceError::InboundRoute(_))
+                ),
+                "unknown remote destination must be rejected before durable processing"
+            );
+            assert_eq!(
+                service
+                    .processor
+                    .replica()
+                    .expect("not poisoned")
+                    .state
+                    .height,
+                initial_height
+            );
+        }
+        let admitted = service
+            .accept_inbound_event(InboundRuntimeEvent::EntityInputs(batch(vec![valid])))
+            .expect("following authenticated source remains accepted")
+            .expect("semantic validation belongs to the reducer");
+        service
+            .process_batch_at(Some(admitted), 100)
+            .expect("missing cross route must reject without halting live Runtime");
+        let rejected = service
+            .processor
+            .replica()
+            .expect("typed reject preserves Runtime");
+        assert_eq!(
+            rejected.state.e_replicas[&target].accounts_root,
+            initial_root
+        );
+        assert_eq!(rejected.mempool.entity_input_count(), 0);
+        let after_reject_height = rejected.state.height;
+        let honest = RuntimeEntityInput::decode(json!({
+            "entityId": format!("0x{}", hex::encode(target.entity_id)),
+            "signerId": target.signer_id,
+            "entityTxs": [{"type":"extendCredit", "data":{
+                "counterpartyEntityId":format!("0x{}", "ff".repeat(32)),
+                "tokenId":1, "amount":{"__xlnType":"BigInt", "value":"7"}
+            }}]
+        }))
+        .expect("honest financial input");
+        service
+            .process_local_entity_inputs_at(vec![honest], 101)
+            .expect("honest successor commits")
+            .expect("honest successor makes progress");
         assert!(
             service
-                .accept_inbound_event(InboundRuntimeEvent::EntityInputs(batch(vec![valid])))
-                .expect("following valid source remains accepted")
-                .is_some()
+                .processor
+                .replica()
+                .expect("healthy successor")
+                .state
+                .height
+                > after_reject_height
         );
+        let before_tail = service.processor.replica().unwrap().state.height;
+        let mixed = [
+            json!({"type":"requestCrossJurisdictionClear", "data":{"orderId":"missing-planning-route"}}),
+            json!({"type":"extendCredit", "data":{
+                "counterpartyEntityId":format!("0x{}", "ff".repeat(32)),
+                "tokenId":1, "amount":{"__xlnType":"BigInt", "value":"8"}
+            }})
+        ].into_iter().map(|tx| RuntimeEntityInput::decode(json!({
+            "entityId": format!("0x{}", hex::encode(target.entity_id)),
+            "signerId": target.signer_id, "entityTxs":[tx]
+        })).expect("same-signer command")).collect();
+        let tail_report = service
+            .process_local_entity_inputs_at(mixed, 102)
+            .expect("planning reject evicts one command, not the signer lane")
+            .expect("honest tail is certified");
+        assert_eq!(tail_report.entity_txs_selected, 1);
+        // A service turn may admit only one queued Runtime envelope. Process
+        // the remaining real work before asserting the queue is drained.
+        for now in 103..107 {
+            if service
+                .processor
+                .replica()
+                .unwrap()
+                .mempool
+                .entity_input_count()
+                == 0
+            {
+                break;
+            }
+            service
+                .process_batch_at(None, now)
+                .expect("queued honest successor progresses");
+        }
+        let after_tail = service.processor.replica().expect("healthy mixed queue");
+        assert!(after_tail.state.height > before_tail);
+        assert_eq!(after_tail.mempool.entity_input_count(), 0);
+        assert!(after_tail.e_replicas[&target].entity_mempool.is_empty());
         service.shutdown().expect("shutdown real ingress");
         drop(service);
         std::fs::remove_dir_all(directory).expect("remove fixture WAL");
@@ -2321,6 +2721,67 @@ mod tests {
             resolve_live_timestamp(30_201, 200, 200),
             Err(ResidentRuntimeServiceError::ClockAhead { .. })
         ));
+    }
+
+    #[test]
+    fn custody_import_at_deployment_minus_one_is_not_a_missing_certified_cursor() {
+        let mut state =
+            xln_rscore_entity_kernel::EntityStateSlice::empty(format!("0x{}", "11".repeat(32)), 0);
+        state.last_finalized_j_height = 2;
+        assert!(unobserved_deployment_boundary(
+            &json!({}),
+            &state,
+            Some(3),
+            2
+        ));
+        assert!(committed_cursor_hash(&json!({}), &state, 2).is_err());
+        assert!(!unobserved_deployment_boundary(
+            &json!({}),
+            &state,
+            Some(4),
+            2
+        ));
+        assert!(!unobserved_deployment_boundary(&json!({}), &state, None, 2));
+        assert!(!unobserved_deployment_boundary(
+            &json!({"jHistory":{}}),
+            &state,
+            Some(3),
+            2
+        ));
+        state.j_history_finality = Some(
+            crate::canonical_value_from_tagged_json(
+                &json!({"tipBlockHash":format!("0x{}","ab".repeat(32))}),
+            )
+            .unwrap(),
+        );
+        assert!(!unobserved_deployment_boundary(
+            &json!({}),
+            &state,
+            Some(3),
+            2
+        ));
+        assert_eq!(
+            committed_cursor_hash(&json!({}), &state, 2).unwrap(),
+            Some([0xab; 32])
+        );
+    }
+    #[test]
+    fn recovery_uses_entity_anchor_when_shared_j_cursor_lags() {
+        let hash = format!("0x{}", "3b".repeat(32));
+        let metadata = json!({"jHistory": {
+            "scannedThroughHeight": 29, "tipBlockHash": hash,
+            "blockHashes": {"__xlnType":"Map", "value":[[29, hash]]}
+        }});
+        let state =
+            xln_rscore_entity_kernel::EntityStateSlice::empty(format!("0x{}", "11".repeat(32)), 0);
+        let height = committed_entity_j_height(&metadata, &state).unwrap();
+        assert_eq!(height, 29);
+        assert_eq!(
+            committed_cursor_hash(&metadata, &state, height).unwrap(),
+            Some([0x3b; 32])
+        );
+        // A shared cursor of 24 is not permission to invent an old hash.
+        assert!(committed_cursor_hash(&metadata, &state, 24).is_err());
     }
 
     #[test]

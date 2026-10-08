@@ -44,6 +44,7 @@ pub struct NativeRuntimeStore {
 
 struct PreparedRuntimeFrame {
     frame: RuntimeFrameCommit,
+    timestamp: u64,
     digest: [u8; 32],
     materialized_state: bool,
     next_head: StorageHead,
@@ -101,6 +102,20 @@ impl NativeRuntimeStore {
             self.head.latest_materialized_height,
             self.config.checkpoint_period_frames,
         )
+    }
+
+    pub(crate) fn adapter_storage_head(&self) -> serde_json::Value {
+        serde_json::json!({"schemaVersion":self.head.schema_version,
+            "latestHeight":self.head.latest_height,
+            "latestMaterializedHeight":self.head.latest_materialized_height,
+            // Native stores one rooted checkpoint graph, not TS archive snapshot copies.
+            "latestSnapshotHeight":self.head.latest_materialized_height,
+            "snapshotPeriodFrames":self.config.checkpoint_period_frames,
+            "retainSnapshots":1,
+            "epochMaxBytes":self.head.epoch_max_bytes,
+            "accountMerkleRadix":self.head.account_merkle_radix,
+            "epochReplayBytes":self.head.epoch_replay_bytes,
+            "retainedWalBytes":self.head.retained_wal_bytes})
     }
 
     pub fn latest_height(&self) -> u64 {
@@ -201,6 +216,7 @@ impl NativeRuntimeStore {
         next_head.retained_wal_bytes = bytes;
         self.persist_frame(
             PreparedRuntimeFrame {
+                timestamp: envelope.timestamp,
                 frame,
                 digest: envelope.output_digest,
                 materialized_state: true,
@@ -277,6 +293,7 @@ impl NativeRuntimeStore {
             .checked_add(bytes)
             .ok_or(NativeStorageError::ByteCountOverflow)?;
         Ok(PreparedRuntimeFrame {
+            timestamp: envelope.timestamp,
             frame,
             digest: envelope.output_digest,
             materialized_state: envelope.materialized_state,
@@ -448,6 +465,7 @@ impl NativeRuntimeStore {
         let output_count = prepared.frame.outputs.len();
         let durable = DurableRuntimeFrame {
             height,
+            timestamp: prepared.timestamp,
             output_count,
             output_digest: prepared.digest,
             resident_outputs: Some(prepared.frame.outputs),

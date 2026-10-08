@@ -1,3 +1,5 @@
+import { applyNumberedRegistrationReplacement } from '../registration/numbered/numbered-registration-replacement';
+import { applyRecordJPreparedTransaction } from '../j-submit/prepared-transaction';
 import { engineAccountValueHash } from '../../rscore/engine-leaf/leaf-cache';
 import { buildDefaultEntitySwapPairs, getTokenIdsForJurisdiction } from '../../account/utils';
 import { applyRuntimeStorageChanges } from '../observability/env-events';
@@ -55,7 +57,7 @@ import { applyWatcherJurisdictionCursor } from '../../jurisdiction/adapter/watch
 import {
   applyNumberedRegistrationIntent,
   applyNumberedRegistrationResolution,
-} from '../registration/numbered-registration-intent';
+} from '../registration/numbered/numbered-registration-intent';
 import { assertRuntimeTxCapabilitiesAuthorized } from './internal-tx-auth';
 import { getBytes } from 'ethers';
 import {
@@ -90,6 +92,10 @@ export const applyRuntimeTx = async (
   }
   if (runtimeTx.type === 'recordNumberedRegistrationIntent') {
     applyNumberedRegistrationIntent(env, runtimeTx.data);
+    return [];
+  }
+  if (runtimeTx.type === 'replaceNumberedRegistrationIntent') {
+    applyNumberedRegistrationReplacement(env, runtimeTx.data);
     return [];
   }
   if (runtimeTx.type === 'resolveNumberedRegistrationIntent') {
@@ -142,6 +148,7 @@ export const applyRuntimeTx = async (
   if (runtimeTx.type === 'retryJSubmit') {
     return applyRetryJSubmitRuntimeTx(env, runtimeTx);
   }
+  if (runtimeTx.type === 'recordJPreparedTransaction' || runtimeTx.type === 'replaceJPreparedTransaction') return applyRecordJPreparedTransaction(env, runtimeTx);
   if (runtimeTx.type === 'recordJSubmitResult') {
     applyRecordJSubmitResultRuntimeTx(env, runtimeTx);
     return [];

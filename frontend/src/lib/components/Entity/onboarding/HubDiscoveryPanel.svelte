@@ -7,11 +7,11 @@
   import { errorLog } from '../../../stores/errorLogStore';
   import { runtimeControllerHandle } from '../../../stores/runtimeControllerStore';
   import { xlnFunctions } from '../../../stores/xlnStore';
-  import { getOpenAccountRebalancePolicyData } from '$lib/utils/onboarding/onboardingPreferences';
+  import { getOpenAccountRebalancePolicyData } from '#lib/utils/onboarding/onboardingPreferences.ts';
   import {
     normalizeEntityId,
     requireSignerIdForEntity,
-  } from '$lib/utils/identity/entityReplica';
+  } from '#lib/utils/identity/entityReplica.ts';
   import {
     emptyHubDiscoveryProjection,
     buildHubOpenAccountRuntimeInput,
@@ -24,7 +24,7 @@
     type HubDiscoveryHub,
     type HubDiscoveryProjection,
   } from './hub-discovery-profile';
-  import { compareStableText } from '$lib/utils/stableSort';
+  import { compareStableText } from '#lib/utils/stableSort.ts';
   import { RefreshCw, ChevronDown, ChevronUp, Plus, Check, AlertTriangle } from 'lucide-svelte';
 
   export let entityId: string = '';

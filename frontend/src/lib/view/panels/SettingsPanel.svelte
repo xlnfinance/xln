@@ -12,15 +12,15 @@
   import { panelBridge } from '../utils/panelBridge';
   import { setFrontendVerboseLogging } from '../utils/frontendLogger';
   import ConsolePanel from './ConsolePanel.svelte';
-  import IndexedDbInspector from '$lib/components/Settings/IndexedDbInspector.svelte';
-  import RuntimeStorageLimits from '$lib/components/Settings/RuntimeStorageLimits.svelte';
-  import RuntimePerformanceBudgets from '$lib/components/Settings/RuntimePerformanceBudgets.svelte';
-  import StackManager from '$lib/components/Settings/StackManager.svelte';
-  import TabStylePicker from '$lib/components/Settings/TabStylePicker.svelte';
-  import { TAB_STYLE_OPTIONS } from '$lib/utils/ui-style-options';
-  import { settings as appSettings, settingsOperations } from '$lib/stores/settingsStore';
-  import { networkMachineConfig, networkMachineOperations } from '$lib/stores/network/networkMachineStore';
-  import type { NetworkMachineTimelineMode } from '$lib/network3d/networkMachine';
+  import IndexedDbInspector from '#lib/components/Settings/IndexedDbInspector.svelte';
+  import RuntimeStorageLimits from '#lib/components/Settings/RuntimeStorageLimits.svelte';
+  import RuntimePerformanceBudgets from '#lib/components/Settings/RuntimePerformanceBudgets.svelte';
+  import StackManager from '#lib/components/Settings/StackManager.svelte';
+  import TabStylePicker from '#lib/components/Settings/TabStylePicker.svelte';
+  import { TAB_STYLE_OPTIONS } from '#lib/utils/ui-style-options.ts';
+  import { settings as appSettings, settingsOperations } from '#lib/stores/settingsStore.ts';
+  import { networkMachineConfig, networkMachineOperations } from '#lib/stores/network/networkMachineStore.ts';
+  import type { NetworkMachineTimelineMode } from '#lib/network3d/networkMachine.ts';
   import type { EnvSnapshot, RuntimeReplica } from '@xln/core/api/public/runtime-module';
 
   // Props (isolated stores - reserved for future time-travel settings UI)

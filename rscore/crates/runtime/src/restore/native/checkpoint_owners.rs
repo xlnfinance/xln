@@ -17,7 +17,6 @@ pub(super) fn expected_entity_roots(
     let rows = frame
         .get("canonicalEntityHashes")
         .and_then(Value::as_array)
-        .filter(|rows| !rows.is_empty())
         .ok_or_else(|| invalid("CANONICAL_ENTITY_HASHES"))?;
     let mut roots = BTreeMap::new();
     for (index, row) in rows.iter().enumerate() {
@@ -120,11 +119,28 @@ pub(super) fn signer_keyring(
             ));
         }
     }
-    derive_operator_signers(&configuration.runtime_seed, &labels)
+    let mut keys = derive_operator_signers(&configuration.runtime_seed, &labels)?;
+    for (signer, key) in &configuration.custody_import_keys {
+        crate::install_custody_key(&mut keys, signer, *key).map_err(invalid)?;
+    }
+    Ok(keys)
 }
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn empty_checkpoint_owner_set_is_explicit_and_has_no_rows() {
+        let frame = serde_json::json!({"canonicalEntityHashes":[]});
+        let roots = super::expected_entity_roots(frame.as_object().unwrap()).unwrap();
+        assert!(roots.is_empty());
+        assert!(
+            super::partition_state_rows(std::collections::BTreeMap::new(), &roots)
+                .unwrap()
+                .is_empty()
+        );
+        assert!(super::expected_entity_roots(&serde_json::Map::new()).is_err());
+    }
+
     use super::*;
 
     #[test]
@@ -133,6 +149,7 @@ mod tests {
         let configuration = ConcreteCheckpointConfiguration {
             runtime_seed: "0x0123456789abcdef".into(),
             signer_derivation_labels: labels.clone(),
+            custody_import_keys: Default::default(),
             worker_count: 1,
             limits: crate::RuntimeLimits::hlt(),
             swap_market: std::sync::Arc::new(crate::canonical_swap_market_policy()),

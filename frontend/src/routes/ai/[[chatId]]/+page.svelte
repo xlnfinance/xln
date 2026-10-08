@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
-  import { compareStableText } from '$lib/utils/stableSort';
+  import { compareStableText } from '#lib/utils/stableSort.ts';
 
   // ============================================================================
   // CONFIGURATION

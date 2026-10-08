@@ -1,4 +1,4 @@
-import type { EntityReadView } from '$lib/components/Entity/core/entity-panel-types';
+import type { EntityReadView } from '#lib/components/Entity/core/entity-panel-types.ts';
 import type { BookState, Profile, RuntimeInput, XLNModule } from '@xln/core/api/public/runtime-module';
 import {
   getBookSideLevels,

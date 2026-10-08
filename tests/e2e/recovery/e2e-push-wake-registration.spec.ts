@@ -196,6 +196,7 @@ async function ensureAnyHubAccountOpen(page: Page): Promise<{
   counterpartyName: string;
   counterpartyRuntimeId: string;
 }> {
+  const activeTarget = await readActivePushWakeTarget(page);
   const apiBase = await getActiveApiBase(page);
   const response = await page.request.get(`${apiBase}/api/debug/entities`);
   expect(response.ok(), 'debug entities endpoint must be available').toBe(true);
@@ -205,11 +206,12 @@ async function ensureAnyHubAccountOpen(page: Page): Promise<{
       runtimeId?: string;
       isHub?: boolean;
       name?: string;
-      metadata?: { name?: string };
+      metadata?: { name?: string; jurisdiction?: { chainId?: number } };
     }>;
   };
   const hubs = (Array.isArray(body.entities) ? body.entities : [])
-    .filter((entity) => entity.isHub === true && typeof entity.entityId === 'string');
+    .filter((entity) => entity.isHub === true && typeof entity.entityId === 'string')
+    .filter((entity) => entity.metadata?.jurisdiction?.chainId === activeTarget.chainId);
   const preferredHub = hubs.find((entity) => {
     const name = String(entity.name || entity.metadata?.name || '').trim().toUpperCase();
     return name === 'H1';

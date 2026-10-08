@@ -12,28 +12,28 @@
   import { onMount } from 'svelte';
   import type { Writable } from 'svelte/store';
   import { writable, get } from 'svelte/store';
-  import { activeRuntime as activeRuntimeStore, vaultOperations } from '$lib/stores/vault/vaultStore';
-  import { errorLog } from '$lib/stores/errorLogStore';
-  import { settings } from '$lib/stores/settingsStore';
+  import { activeRuntime as activeRuntimeStore, vaultOperations } from '#lib/stores/vault/vaultStore.ts';
+  import { errorLog } from '#lib/stores/errorLogStore.ts';
+  import { settings } from '#lib/stores/settingsStore.ts';
   import {
     entityPositions,
     handleRuntimeProjectionRefreshError,
     refreshCurrentRuntimeProjection,
-  } from '$lib/stores/xlnStore';
-  import { runtimeControllerHandle } from '$lib/stores/runtimeControllerStore';
+  } from '#lib/stores/xlnStore.ts';
+  import { runtimeControllerHandle } from '#lib/stores/runtimeControllerStore.ts';
   import {
     clearLocalLauncherOnboarding,
     localLauncherOnboarding,
     setLocalLauncherOnboarding,
-  } from '$lib/stores/localLauncherStore';
+  } from '#lib/stores/localLauncherStore.ts';
   import {
     runtimeView,
     runtimeViewActiveEntityId,
     setRuntimeViewActiveEntityId,
-  } from '$lib/stores/runtimeViewStore';
-  import { runtimes, activeRuntimeId, runtimeOperations } from '$lib/stores/runtimeStore';
-  import { showVaultPanel, vaultUiOperations } from '$lib/stores/vault/vaultUiStore';
-  import type { Tab } from '$lib/types/ui';
+  } from '#lib/stores/runtimeViewStore.ts';
+  import { runtimes, activeRuntimeId, runtimeOperations } from '#lib/stores/runtimeStore.ts';
+  import { showVaultPanel, vaultUiOperations } from '#lib/stores/vault/vaultUiStore.ts';
+  import type { Tab } from '#lib/types/ui.ts';
   import type { RuntimeReplica } from '@xln/core/api/public/runtime-module';
   import type { EntityReplica } from '@xln/core/entity/types';
   import type { EnvSnapshot } from '@xln/core/runtime/types';
@@ -41,34 +41,34 @@
     readAnyOnboardingComplete,
     readOnboardingComplete,
     writeOnboardingCompleteForEntities,
-  } from '$lib/utils/onboarding/onboardingState';
-  import { createRuntimeViewEnv, unwrapLiveRuntimeEnv } from '$lib/utils/runtime/liveRuntimeEnv';
+  } from '#lib/utils/onboarding/onboardingState.ts';
+  import { createRuntimeViewEnv, unwrapLiveRuntimeEnv } from '#lib/utils/runtime/liveRuntimeEnv.ts';
   import { panelBridge } from './utils/panelBridge';
   import { resolveActiveLocalReplica } from './local-runtime-selection';
 
-  import EntityWorkspace from '$lib/components/Entity/workspace/EntityWorkspace.svelte';
-  import { runtimeProjectionMatchesRuntime } from '$lib/components/Entity/core/entity-workspace';
-  import type { EntityWorkspaceRuntimeFrameContext } from '$lib/components/Entity/core/runtime-frame-context';
-  import type { EntityWorkspaceEmbeddedRuntimeContext } from '$lib/components/Entity/core/embedded-runtime-context';
-  import OnboardingPanel from '$lib/components/Entity/onboarding/OnboardingPanel.svelte';
-  import RuntimeCreation from '$lib/components/Views/RuntimeCreation.svelte';
+  import EntityWorkspace from '#lib/components/Entity/workspace/EntityWorkspace.svelte';
+  import { runtimeProjectionMatchesRuntime } from '#lib/components/Entity/core/entity-workspace.ts';
+  import type { EntityWorkspaceRuntimeFrameContext } from '#lib/components/Entity/core/runtime-frame-context.ts';
+  import type { EntityWorkspaceEmbeddedRuntimeContext } from '#lib/components/Entity/core/embedded-runtime-context.ts';
+  import OnboardingPanel from '#lib/components/Entity/onboarding/OnboardingPanel.svelte';
+  import RuntimeCreation from '#lib/components/Views/RuntimeCreation.svelte';
   import JurisdictionPanel from './panels/JurisdictionPanel.svelte';
-  import FormationPanel from '$lib/components/Entity/onboarding/FormationPanel.svelte';
-  import AddJMachine from '$lib/components/Jurisdiction/AddJMachine.svelte';
+  import FormationPanel from '#lib/components/Entity/onboarding/FormationPanel.svelte';
+  import AddJMachine from '#lib/components/Jurisdiction/AddJMachine.svelte';
   import {
     importJMachineViaRuntime,
     type JMachineCreateDetail,
-  } from '$lib/components/Jurisdiction/import-jmachine-runtime';
+  } from '#lib/components/Jurisdiction/import-jmachine-runtime.ts';
   import TimeMachine from './core/TimeMachine.svelte';
   import {
     type OnboardingHubCandidate,
     type OnboardingRuntimeProjection,
     type OnboardingRuntimeTarget,
-  } from '$lib/components/Entity/onboarding/onboarding-runtime-input';
+  } from '#lib/components/Entity/onboarding/onboarding-runtime-input.ts';
   import {
     type FormationRuntimeProjection,
-  } from '$lib/components/Entity/onboarding/formation-runtime-projection';
-  import { hubDiscoveryJurisdictionKey } from '$lib/components/Entity/onboarding/hub-discovery-profile';
+  } from '#lib/components/Entity/onboarding/formation-runtime-projection.ts';
+  import { hubDiscoveryJurisdictionKey } from '#lib/components/Entity/onboarding/hub-discovery-profile.ts';
 
   type RuntimeFrame = RuntimeReplica | EnvSnapshot;
   type JurisdictionLike = { name: string };
@@ -176,7 +176,7 @@
   let activeInlinePanel = $state<InlinePanel>('none');
   let onboardingComplete = $state(false);
 
-  let selectedInitialAction = $state<import('$lib/view/utils/panelBridge').EntityOpenAction | undefined>(undefined);
+  let selectedInitialAction = $state<import('#lib/view/utils/panelBridge.ts').EntityOpenAction | undefined>(undefined);
   let workspaceActionRevision = $state(0);
 
   onMount(() => panelBridge.on('dock:selectEntity', ({ entityId, signerId, action }) => {

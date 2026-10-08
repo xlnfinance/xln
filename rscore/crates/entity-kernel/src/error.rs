@@ -91,8 +91,21 @@ pub fn reject_fail_fast() -> bool {
 /// what TS rejects at mempool admission before its reducer runs.
 fn user_validation_reject(kind: &str, detail: &str) -> bool {
     match kind {
+        // These amounts come directly from the sender's unsigned proposal,
+        // before any workspace mutation; invalid money cannot halt the hub.
+        "settle_propose" | "settle_update" => {
+            detail.starts_with("SETTLEMENT_WORKSPACE_AMOUNT_INVALID:index=")
+                || detail.starts_with("SETTLEMENT_TOKEN_INVALID:workspace-op=")
+                || detail == "SETTLEMENT_WORKSPACE_OPS_EMPTY"
+        }
         "directPayment" => true,
-        "htlcPayment" => !detail.starts_with("HTLC_PAYMENT_PREPARED_CONTEXT_"),
+        // TS WAL records only accepted origins. The rejected raw command is
+        // still replayed from Runtime input, so absence of its individual
+        // origin rejects that command; a present mismatching origin is fatal.
+        "htlcPayment" => {
+            detail.starts_with("HTLC_PAYMENT_PREPARED_CONTEXT_REQUIRED:")
+                || !detail.starts_with("HTLC_PAYMENT_PREPARED_CONTEXT_")
+        }
         "resolveHtlcLock" => matches!(
             detail,
             "SECRET_BYTES32" | "HTLC_RESOLVE_LOCK_MISSING" | "HTLC_RESOLVE_HASHLOCK_MISMATCH"

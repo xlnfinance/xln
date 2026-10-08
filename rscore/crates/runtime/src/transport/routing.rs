@@ -65,6 +65,21 @@ pub(super) struct PreparedEnvelopeBatch {
     pub bytes: usize,
 }
 
+impl PreparedEnvelopeBatch {
+    /// Atomic cohorts share the publishing Runtime's durable frame, as TS
+    /// dispatch does. Original signed Account proposals and WAL rows stay exact.
+    pub(super) fn bind_publication_frame(&mut self, height: u64, timestamp: u64) {
+        for envelope in &mut self.envelopes {
+            if envelope.value.get("atomicCrossJurisdictionPair").is_some() {
+                envelope.source_height = height;
+                envelope.source_timestamp = timestamp;
+                envelope.value["sourceRuntimeHeight"] = Value::from(height);
+                envelope.value["sourceRuntimeTimestamp"] = Value::from(timestamp);
+            }
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 struct AtomicCrossJurisdictionPair {
     phase: String,
@@ -228,8 +243,96 @@ pub(super) fn prepare_envelopes_from_values(
         )));
     }
 
+    // A destination frame can contain an ordinary ACK beside signed sibling
+    // proposals. Select exact pairs before batching, as TS dispatch does;
+    // unrelated rows must neither hide a pair nor become part of its cohort.
+    let groups = groups
+        .into_iter()
+        .flat_map(|(key, values)| {
+            if key.3.is_some()
+                || values.len() == 1
+                || (values.len() == 2 && infer_atomic_pair(&values).is_some())
+                || !values.iter().any(|(_, value)| has_cross_proposal(value))
+            {
+                return vec![(key, values)];
+            }
+            let mut claimed = BTreeSet::new();
+            let mut units = Vec::new();
+            for index in 0..values.len() {
+                if claimed.contains(&index) {
+                    continue;
+                }
+                claimed.insert(index);
+                let matches = (index + 1..values.len())
+                    .filter(|other| {
+                        !claimed.contains(other)
+                            && infer_atomic_pair(&[values[index].clone(), values[*other].clone()])
+                                .is_some()
+                    })
+                    .collect::<Vec<_>>();
+                let mut unit = vec![values[index].clone()];
+                if let [other] = matches.as_slice() {
+                    claimed.insert(*other);
+                    unit.push(values[*other].clone());
+                }
+                units.push((key.clone(), unit));
+            }
+            units
+        })
+        .collect::<Vec<_>>();
+    // Frame grouping above must not change positional pairing when an older
+    // frame's ACK surrounds a newer frame's leg. Restore row positions within
+    // each destination; destination order itself remains first appearance.
+    let mut target_order = Vec::new();
+    for (key, _) in &groups {
+        if !target_order.contains(&key.0) {
+            target_order.push(key.0.clone());
+        }
+    }
+    let mut groups = groups;
+    groups.sort_by_key(|(key, values)| {
+        (
+            target_order
+                .iter()
+                .position(|target| target == &key.0)
+                .unwrap(),
+            values[0].0,
+        )
+    });
+    // TS gives exact same-frame cohorts priority, then pairs unclaimed legs
+    // across source frames. Only the already durable flat outbox participates;
+    // a lone or ambiguous leg remains an invariant error below.
+    let mut claimed = BTreeSet::new();
+    let mut cross_frame_groups = Vec::new();
+    for index in 0..groups.len() {
+        if !claimed.insert(index) {
+            continue;
+        }
+        let (key, values) = &groups[index];
+        let matches = if key.3.is_none() && values.len() == 1 {
+            (index + 1..groups.len())
+                .filter(|other| {
+                    let (other_key, other_values) = &groups[*other];
+                    !claimed.contains(other)
+                        && other_key.3.is_none()
+                        && key.0 == other_key.0
+                        && other_values.len() == 1
+                        && infer_atomic_pair(&[values[0].clone(), other_values[0].clone()])
+                            .is_some()
+                })
+                .collect::<Vec<_>>()
+        } else {
+            Vec::new()
+        };
+        let mut unit = values.clone();
+        if let [other] = matches.as_slice() {
+            claimed.insert(*other);
+            unit.push(groups[*other].1[0].clone());
+        }
+        cross_frame_groups.push((key.clone(), unit));
+    }
     let mut envelopes = Vec::new();
-    for ((target, height, timestamp, atomic_pair), mut values) in groups {
+    for ((target, height, timestamp, atomic_pair), mut values) in cross_frame_groups {
         let inferred = atomic_pair.is_none();
         let atomic_pair = atomic_pair.or_else(|| infer_atomic_pair(&values));
         // TS dispatch fails producer invariants rather than sending or parking

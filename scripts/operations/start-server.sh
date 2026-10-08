@@ -18,6 +18,10 @@ API_PORT="${XLN_SERVER_PORT:-$(xln_web_port)}"
 RDB_ROOT="${XLN_RDB_ROOT:-$REPO_ROOT/db}"
 export XLN_MESH_API_PORT_BASE=${XLN_MESH_API_PORT_BASE:-18090}
 export XLN_MESH_PUBLIC_PORT_BASE=${XLN_MESH_PUBLIC_PORT_BASE:-8090}
+# Native H1 uses a separate internal P2P listener; 8090 belongs to nginx TLS.
+if [[ "${XLN_HLT_ENGINE:-ts}" == "rust" ]]; then
+  export XLN_RSCORE_DIRECT_PORT=${XLN_RSCORE_DIRECT_PORT:-18094}
+fi
 export XLN_MESH_CUSTODY_PORT=${XLN_MESH_CUSTODY_PORT:-$(xln_custody_port)}
 export XLN_MESH_CUSTODY_DAEMON_PORT=${XLN_MESH_CUSTODY_DAEMON_PORT:-$(xln_custody_daemon_port)}
 
@@ -26,6 +30,9 @@ if [[ "$XLN_START_ASSERT_ONLY_ACTIVE" -eq 1 ]]; then
     "$API_PORT" "$XLN_MESH_CUSTODY_PORT" "$XLN_MESH_CUSTODY_DAEMON_PORT" \
     "$XLN_MESH_API_PORT_BASE" "$((XLN_MESH_API_PORT_BASE + 1))" \
     "$((XLN_MESH_API_PORT_BASE + 2))" "$((XLN_MESH_API_PORT_BASE + 3))"
+  if [[ "${XLN_HLT_ENGINE:-ts}" == "rust" ]]; then
+    xln_assert_ports_available start-server-native "$XLN_RSCORE_DIRECT_PORT"
+  fi
   export XLN_SKIP_STALE_REAP=1
 fi
 

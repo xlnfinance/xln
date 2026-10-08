@@ -1,10 +1,10 @@
 <script lang="ts">
-import type { EntityReadView } from '$lib/components/Entity/core/entity-panel-types';
+import type { EntityReadView } from '#lib/components/Entity/core/entity-panel-types.ts';
 
   import { onDestroy } from 'svelte';
   import type { RuntimeInput, RuntimeReplica } from '@xln/core/api/public/runtime-module';
   import { get } from 'svelte/store';
-  import { xlnFunctions } from '$lib/stores/xlnStore';
+  import { xlnFunctions } from '#lib/stores/xlnStore.ts';
   import type { PaymentPanelView } from '../../../payments/payment-panel-view';
   import type { SwapPanelRuntimeView } from '../../../swap/swap-panel-helpers';
   import { createLoadTestingController } from '../../load-testing-controller';

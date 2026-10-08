@@ -27,8 +27,10 @@ import {
 } from '../worker-runtime';
 import { attachRustH1, fetchNativeJson, parseHltEngineSelection } from '../rust/rust-h1';
 import { decodeCommittedCrossRoutes } from './cross-boundary';
+import { collectHltEnvironmentManifest, type HltEnvironmentManifest } from '../boundary/environment-manifest';
 
 export type CrossHub = Readonly<{
+  environment: HltEnvironmentManifest;
   identity(chainId: number): LoadIdentity;
   routes(entityId: string): Promise<CrossJurisdictionSwapRoute[]>;
   frame(): Promise<LoadFrame>;
@@ -104,6 +106,7 @@ export const connectCrossRuntimes = async (args: WorkerArgs): Promise<{ hub: Cro
       closeHub = async () => runtime.adapter.disconnect();
       const entities = decodeEntitySummaries(await readWithRateLimitRetry<unknown>(runtime, 'entities'));
       const hub: CrossHub = {
+        environment: collectHltEnvironmentManifest({ engine: 'ts', requireAccountWorkers: true }),
         identity: chain => selectLocalHubIdentity(entities, runtime.adapter.runtimeId, chain),
         routes: async entity =>
           decodeCommittedCrossRoutes(await readWithRateLimitRetry<unknown>(runtime, `entity/${entity}`)),
@@ -132,6 +135,10 @@ export const connectCrossRuntimes = async (args: WorkerArgs): Promise<{ hub: Cro
       }),
     );
     const hub: CrossHub = {
+      // The attached process owns its worker count; the driver environment may not contain it.
+      environment: collectHltEnvironmentManifest({
+        engine: 'rust', rustAccountWorkers: native.ready.workers, requireAccountWorkers: true,
+      }),
       identity: chain => {
         const matches = states.filter(state => state.chainId === chain);
         if (matches.length !== 1) throw new Error(`HLT_NATIVE_CROSS_ENTITY_NOT_UNIQUE:${chain}`);

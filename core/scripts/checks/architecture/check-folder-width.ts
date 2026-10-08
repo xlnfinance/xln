@@ -69,6 +69,7 @@ const EXCLUDED_REPOSITORY_PATHS: ReadonlySet<string> = new Set([
   'packages/npm/xlnfinance/app',
   'packages/npm/xlnfinance/dist',
   'reports',
+  'rscore/target',
   'ui',
 ]);
 

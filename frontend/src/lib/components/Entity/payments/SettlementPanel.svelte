@@ -1,13 +1,13 @@
 <script lang="ts">
-import type { AccountReadView, EntityReadView } from '$lib/components/Entity/core/entity-panel-types';
+import type { AccountReadView, EntityReadView } from '#lib/components/Entity/core/entity-panel-types.ts';
 
   import { getXLN, submitEntityInputs, xlnFunctions } from '../../../stores/xlnStore';
-  import { requireSignerIdForEntity } from '$lib/utils/identity/entityReplica';
-  import type { EntityTx, EntityState } from '$lib/types/ui';
+  import { requireSignerIdForEntity } from '#lib/utils/identity/entityReplica.ts';
+  import type { EntityTx, EntityState } from '#lib/types/ui.ts';
   import type { RuntimeReplica, EnvSnapshot, Profile as GossipProfile } from '@xln/core/api/public/runtime-module';
   import { errorLog } from '../../../stores/errorLogStore';
   import { toasts } from '../../../stores/ui/toastStore';
-  import { entityAvatar as resolveEntityAvatar } from '$lib/utils/identity/avatar';
+  import { entityAvatar as resolveEntityAvatar } from '#lib/utils/identity/avatar.ts';
   import EntityInput from '../../shared/EntityInput.svelte';
   import TokenSelect from '../../shared/TokenSelect.svelte';
   import ActivityHistoryPanel from './ActivityHistoryPanel.svelte';
@@ -917,6 +917,7 @@ import type { AccountReadView, EntityReadView } from '$lib/components/Entity/cor
 </script>
 
 <div class="settlement-panel">
+  {#if !historyOnly || hasAnyBatch}
   <div class="batch-card" class:has-pending={hasAnyBatch}>
     <div class="batch-header">
       <div>
@@ -1049,6 +1050,7 @@ import type { AccountReadView, EntityReadView } from '$lib/components/Entity/cor
     {/if}
 
   </div>
+  {/if}
 
   {#if !historyOnly}
     <div class="action-tabs">

@@ -61,7 +61,7 @@ test('runtime controller is the single adapter lifecycle owner', () => {
   expect(xlnStoreSource).not.toContain('appRuntimeAdapterMode.set');
   expect(xlnStoreSource).not.toContain('appRuntimeAdapterEndpoint.set');
   expect(controllerSource).not.toContain('runtimeAdapterAuthLevel');
-  expect(contextSwitcherSource).toContain("import { runtimeControllerHandle } from '$lib/stores/runtimeControllerStore'");
+  expect(contextSwitcherSource).toContain("import { runtimeControllerHandle } from '#lib/stores/runtimeControllerStore.ts'");
   expect(contextSwitcherSource).toContain('$runtimeControllerHandle.runtimeId');
   expect(contextSwitcherSource).toContain('$runtimeControllerHandle.permissions');
   expect(contextSwitcherSource).not.toContain('appRuntimeAdapterMode');
@@ -213,7 +213,7 @@ test('direct remote runtime URL reuses saved capability before showing paste pro
 test('remote projection never materializes fake RuntimeReplica snapshots', () => {
   const storeSource = readFileSync('frontend/src/lib/stores/xlnStore.ts', 'utf8');
   expect(existsSync('frontend/src/lib/utils/runtimeViewEnv.ts')).toBe(false);
-  expect(storeSource).not.toContain("$lib/utils/runtimeViewEnv");
+  expect(storeSource).not.toContain("#lib/utils/runtimeViewEnv");
   expect(storeSource).not.toContain('runtimeViewFrameToEnv');
   expect(storeSource).not.toContain('buildRemoteAdapterEnvSnapshot');
   expect(storeSource).not.toContain('buildRemoteAdapterHistory');
@@ -383,15 +383,15 @@ test('localhost debug env surfaces expose RuntimeView with matching live runtime
   expect(appTypes).not.toContain('__xln_env');
   expect(appTypes).not.toContain('__xln_instance');
   expect(appTypes).not.toContain('__xlnRuntimeAdapter');
-  expect(viewSource).toContain("import { errorLog } from '$lib/stores/errorLogStore';");
+  expect(viewSource).toContain("import { errorLog } from '#lib/stores/errorLogStore.ts';");
   expect(viewSource).toContain("errorLog.log('RuntimeView projection failed', 'Runtime View', error)");
   expect(viewSource).toContain("errorLog.log('Failed to initialize XLN view', 'Runtime View', err)");
-  expect(viewSource).toContain("import { getEnv, getXLN, history as runtimeHistory, xlnEnvironment, xlnInstance } from '$lib/stores/xlnStore'");
+  expect(viewSource).toContain("import { getEnv, getXLN, history as runtimeHistory, xlnEnvironment, xlnInstance } from '#lib/stores/xlnStore.ts'");
   expect(viewSource).toContain('unsubRuntimeEnv = xlnEnvironment.subscribe');
   expect(viewSource).not.toContain('console.error');
   expect(viewSource).not.toContain('console.warn');
   expect(viewSource).not.toContain('console.info');
-  expect(viewSource).not.toContain("import { runtimeViewFrameToEnv } from '$lib/utils/runtimeViewEnv';");
+  expect(viewSource).not.toContain("import { runtimeViewFrameToEnv } from '#lib/utils/runtimeViewEnv';");
   expect(viewSource).not.toContain('runtimeViewFrameToEnv(');
 
   const publishStart = viewSource.indexOf('const publishLocalEnv =');
@@ -428,8 +428,8 @@ test('localhost debug env surfaces expose RuntimeView with matching live runtime
   expect(viewSource).not.toContain("Object.defineProperty(window, 'isolatedEnv'");
   expect(viewSource).toContain('refreshSelectedRuntimeView,');
   expect(viewSource).toContain('runtimeViewActiveEntityId,');
-  expect(viewSource).toContain("from '$lib/stores/runtimeViewStore'");
-  expect(viewSource).toContain("from '$lib/utils/runtime/debugSurface'");
+  expect(viewSource).toContain("from '#lib/stores/runtimeViewStore.ts'");
+  expect(viewSource).toContain("from '#lib/utils/runtime/debugSurface.ts'");
   expect(viewSource).toContain("registerDebugSurface('view', () => get(runtimeView)");
 });
 
@@ -723,7 +723,7 @@ test('remote app can page through full hub account and book projections', () => 
   const runtimeViewSource = readFileSync('frontend/src/lib/stores/runtimeViewStore.ts', 'utf8');
 
   expect(layoutSource).toContain("import {");
-  expect(layoutSource).toContain("import { runtimeControllerHandle } from '$lib/stores/runtimeControllerStore'");
+  expect(layoutSource).toContain("import { runtimeControllerHandle } from '#lib/stores/runtimeControllerStore.ts'");
   expect(layoutSource).toContain('runtimeViewPageInfo,');
   expect(layoutSource).toContain('runtimeViewPageNeedsNavigation,');
   expect(layoutSource).toContain('setRuntimeViewPage,');
@@ -835,7 +835,7 @@ test('local runtime creation marks the target before bootstrap and switches cont
   const createSource = source.slice(createStart, deleteStart);
   const earlyPendingSelect = createSource.indexOf('runtimeOperations.setActiveRuntimeId(runtimeId)');
   const firstRuntimeInput = createSource.indexOf('await enqueueAndAwait(');
-  const persistedState = createSource.indexOf('runtimesState.update(state => ({');
+  const persistedState = createSource.indexOf('persistVaultStateOrThrow({');
   const controllerSelect = createSource.indexOf('await runtimeOperations.selectRuntime(runtimeId)');
   expect(earlyPendingSelect).toBeGreaterThan(0);
   expect(firstRuntimeInput).toBeGreaterThan(earlyPendingSelect);

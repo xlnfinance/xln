@@ -1,20 +1,20 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { Activity, Database, Network, RefreshCw, ShieldCheck, Siren, Zap } from 'lucide-svelte';
-  import BootstrapLive from '$lib/components/Health/BootstrapLive.svelte';
-  import HealthQaLinkPanel from '$lib/components/Health/HealthQaLinkPanel.svelte';
-  import RuntimeAdapterPanel from '$lib/components/Health/RuntimeAdapterPanel.svelte';
-  import EntityIdentity from '$lib/components/shared/EntityIdentity.svelte';
-  import { probeRpcHealth } from '$lib/health/rpcHealth';
-  import { errorLog } from '$lib/stores/errorLogStore';
-  import { runtimeQueryClient } from '$lib/stores/runtimeQueryClient';
-  import { runtimeControllerHandle } from '$lib/stores/runtimeControllerStore';
-  import { ensureProjectionRuntimeConnected } from '$lib/utils/runtime/runtimeConnection';
+  import BootstrapLive from '#lib/components/Health/BootstrapLive.svelte';
+  import HealthQaLinkPanel from '#lib/components/Health/HealthQaLinkPanel.svelte';
+  import RuntimeAdapterPanel from '#lib/components/Health/RuntimeAdapterPanel.svelte';
+  import EntityIdentity from '#lib/components/shared/EntityIdentity.svelte';
+  import { probeRpcHealth } from '#lib/health/rpcHealth.ts';
+  import { errorLog } from '#lib/stores/errorLogStore.ts';
+  import { runtimeQueryClient } from '#lib/stores/runtimeQueryClient.ts';
+  import { runtimeControllerHandle } from '#lib/stores/runtimeControllerStore.ts';
+  import { ensureProjectionRuntimeConnected } from '#lib/utils/runtime/runtimeConnection.ts';
   import {
     isRelayTimelineError,
     isRelayTimelineWarning,
     type RelayTimelineDelivery,
-  } from '$lib/health/relayEventSeverity';
+  } from '#lib/health/relayEventSeverity.ts';
   import type { RuntimeActivityEvent, RuntimeAdapterEntitySummary } from '@xln/core/api/public/runtime-module';
   import { makeQaSeveritySignal, type QaSeverity, type QaSeveritySignal } from '@xln/core/qa/severity';
   import { DISPLAY } from '@xln/core/config/constants';

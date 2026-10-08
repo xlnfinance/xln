@@ -309,6 +309,8 @@ fn fresh_context_matches_genesis_lineage_and_named_signer() -> Result<(), Runtim
     let mut runtime = replica(RuntimeLimits::hlt())?;
     let context = CanonicalEntityInfraMaterializer::new()
         .materialize(EntityInfraMaterializeRequest {
+            entity_encryption_seed: None,
+            originated_j_heights: &BTreeMap::new(),
             state: runtime
                 .state
                 .e_replicas
@@ -1429,6 +1431,8 @@ fn recorded_scheduled_wake_replays_exactly_once() -> Result<(), RuntimeMachineEr
     assert_eq!(live_frame.entity_inputs.len(), 1);
     let replay_context = CanonicalEntityInfraMaterializer::new()
         .materialize(EntityInfraMaterializeRequest {
+            entity_encryption_seed: None,
+            originated_j_heights: &BTreeMap::new(),
             state: replay_runtime
                 .state
                 .e_replicas
@@ -1631,4 +1635,66 @@ fn exact_replay_rejects_recorded_wake_without_crontab_state() -> Result<(), Runt
             .contains("ENTITY_RESIDENT_CRONTAB_MISSING")
     );
     Ok(())
+}
+
+#[test]
+fn account_mempool_overflow_evicts_exact_entity_tx_and_certifies_same_signer_sibling() {
+    use xln_rscore_engine::{ACCOUNT_MEMPOOL_SIZE, AccountConsensus, AccountTx, TokenId};
+    let runtime = replica_with_account_setup(RuntimeLimits::hlt(), Vec::new(), |seed| {
+        let mut account = AccountConsensus::new(seed.replica);
+        let admission = account
+            .admit_txs(
+                (0..ACCOUNT_MEMPOOL_SIZE - 1)
+                    .map(|index| AccountTx::SetCreditLimit {
+                        token_id: TokenId::new(1).unwrap(),
+                        amount: (index + 100).into(),
+                    })
+                    .collect(),
+                "real queued intents",
+            )
+            .unwrap();
+        assert_eq!(admission.admitted, ACCOUNT_MEMPOOL_SIZE - 1);
+        assert_eq!(account.mempool().len(), ACCOUNT_MEMPOOL_SIZE - 1);
+        AccountSeed {
+            account_id: seed.account_id,
+            replica: account.replica().clone(),
+            consensus: Some(account.consensus_snapshot()),
+        }
+    })
+    .unwrap();
+    let tx = |amount: &str| {
+        serde_json::json!({"type":"extendCredit", "data":{
+            "counterpartyEntityId":format!("0x{}", "ff".repeat(32)), "tokenId":1,
+            "amount":{"__xlnType":"BigInt", "value":amount}
+        }})
+    };
+    let inputs = ["7", "8"]
+        .into_iter()
+        .map(|amount| {
+            RuntimeEntityInput::decode(serde_json::json!({
+                "entityId":hex32(owner_bytes()), "signerId":entity_signer_id(),
+                "entityTxs":[tx(amount)]
+            }))
+            .unwrap()
+        })
+        .collect();
+    let result =
+        super::apply::apply_runtime_with_profile_for_test(runtime, frame(101, inputs), true)
+            .expect("capacity is an exact typed reject, never a Runtime fault");
+    assert_eq!(
+        result
+            .applied_input
+            .as_ref()
+            .expect("honest sibling certified")
+            .entity_txs_selected,
+        1
+    );
+    assert_eq!(result.outputs.entities.len(), 1);
+    assert!(
+        result
+            .replica
+            .e_replicas
+            .values()
+            .all(|entity| entity.entity_mempool.is_empty())
+    );
 }

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import DocsView from '$lib/components/Views/DocsView.svelte';
+  import DocsView from '#lib/components/Views/DocsView.svelte';
 </script>
 
 <svelte:head>

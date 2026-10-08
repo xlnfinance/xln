@@ -1,12 +1,12 @@
 import type { RuntimeAdapterGraphFrame } from '@xln/core/api/public/runtime-module';
-import type { Runtime } from '$lib/stores/runtimeStore';
+import type { Runtime } from '#lib/stores/runtimeStore.ts';
 import type { EnvSnapshot, RuntimeReplica } from '@xln/core/api/public/runtime-module';
-import type { NetworkMachineRuntimeState } from '$lib/stores/network/networkMachineRuntimeStore';
+import type { NetworkMachineRuntimeState } from '#lib/stores/network/networkMachineRuntimeStore.ts';
 import {
   projectRuntimeEnv,
   projectRuntimeGraphFrame,
   type RuntimeGraphProjection,
-} from '$lib/network3d/runtimeGraphProjection';
+} from '#lib/network3d/runtimeGraphProjection.ts';
 
 export type RuntimeGraphProjectionInputs = {
   runtimeMap: Map<string, Runtime>;

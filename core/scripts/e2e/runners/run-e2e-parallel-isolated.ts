@@ -103,6 +103,8 @@ export {
 } from '../harness/e2e-run-report';
 import {
   assertE2ECodeFingerprintStable,
+  captureE2ENativeExecutable,
+  assertE2ENativeExecutableStable,
   computeCodeFingerprint,
   computeRepositorySourceDriftProbe,
   createAsyncLimiter,
@@ -900,7 +902,7 @@ const attachPlaywrightMetadata = (
   const sourceFiles = Array.from(new Set(sourceTargets.map(playwrightSourcePath))).sort();
   const tests = listPlaywrightTestMetadata(sourceFiles, {
     ...(args.pwProject ? { project: args.pwProject } : {}),
-    ...(args.pwProject === 'brainvault' ? { profile: 'brainvault' } : {}),
+    ...(args.pwProject === 'brainvault' || args.pwProject === 'webkit-mobile' ? { profile: args.pwProject } : {}),
   });
   const violations = tests.flatMap((test) => {
     const violation = inspectQaTestCategory(test);
@@ -1962,6 +1964,7 @@ const runShard = async (
     throwIfAborted();
 
     const apiStart = Date.now();
+    assertE2ENativeExecutableStable(buildArtifacts.nativeExecutable);
     api = spawn(
       'bun',
       [
@@ -2004,6 +2007,7 @@ const runShard = async (
         stdio: ['ignore', 'pipe', 'pipe'],
         env: sanitizeChildProcessEnv({
           ...process.env,
+          ...(buildArtifacts.nativeExecutable ? { XLN_RSCORE_BINARY: buildArtifacts.nativeExecutable.path } : {}),
           USE_ANVIL: 'true',
           ANVIL_RPC: rpcUrl,
           ANVIL_RPC2: rpc2Url,
@@ -2167,7 +2171,7 @@ const runShard = async (
         PLAYWRIGHT_HTML_OPEN: 'never',
         PW_BASE_URL: webUrl,
         PW_SKIP_WEBSERVER: '1',
-        PW_PROFILE: args.pwProject === 'brainvault' ? 'brainvault' : '',
+        PW_PROFILE: args.pwProject === 'brainvault' || args.pwProject === 'webkit-mobile' ? args.pwProject : '',
         PW_WORKERS: String(args.workersPerShard),
         PW_TEST_TIMEOUT: String(args.testTimeoutMs),
         PW_VIDEO: args.videoMode,
@@ -2499,6 +2503,10 @@ async function main(): Promise<void> {
       process.exit(1);
     }
 
+    buildArtifacts.nativeExecutable = captureE2ENativeExecutable();
+    if (buildArtifacts.nativeExecutable) {
+      console.log(`Native executable: ${buildArtifacts.nativeExecutable.path} sha256=${buildArtifacts.nativeExecutable.sha256}`);
+    }
     const startedAt = Date.now();
     const sourceFiles = args.pwFiles.length > 0 ? args.pwFiles : listPlaywrightSpecFiles(args.includeAllSpecs);
     let expandedTargets = attachPlaywrightMetadata(expandPlaywrightTargets(sourceFiles), sourceFiles, args);
@@ -2673,6 +2681,7 @@ async function main(): Promise<void> {
     } finally {
       for (const lease of workerPortLeases) lease.release();
     }
+    assertE2ENativeExecutableStable(buildArtifacts.nativeExecutable);
     codeDriftGuard.assertStable(true);
     const endCodeFingerprint = computeCodeFingerprint();
     assertE2ECodeFingerprintStable(codeFingerprint.codeHash, endCodeFingerprint.codeHash);
@@ -2688,6 +2697,7 @@ async function main(): Promise<void> {
       startedAt,
       codeFingerprint,
       failureState.primaryFailure,
+      buildArtifacts.nativeExecutable,
     );
     publishQaRunIfConfigured(logsDir);
 

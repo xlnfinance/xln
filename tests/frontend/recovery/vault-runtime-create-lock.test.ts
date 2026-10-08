@@ -72,10 +72,10 @@ describe('vault runtime creation lock', () => {
     expect(importJurisdiction).toBeGreaterThan(startLoop);
   });
 
-  test('runtime suspension closes ingress and drains accepted work before persistence quiesce', () => {
-    const source = read('frontend/src/lib/stores/vault/vaultStore.ts');
-    const functionStart = source.indexOf('async function suspendRuntimeEnvActivity(');
-    const functionEnd = source.indexOf('\nasync function suspendInactiveRuntimeActivity(', functionStart);
+  test('runtime suspension drains accepted work before persistence quiesce and transport shutdown', () => {
+    const source = read('frontend/src/lib/security/runtimeSession.ts');
+    const functionStart = source.indexOf('export async function suspendRuntimeActivity(');
+    const functionEnd = source.length;
     expect(functionStart).toBeGreaterThan(0);
     expect(functionEnd).toBeGreaterThan(functionStart);
     const functionSource = source.slice(functionStart, functionEnd);
@@ -90,8 +90,8 @@ describe('vault runtime creation lock', () => {
     const stopLoop = functionSource.indexOf('await xln.stopRuntimeLoopAndWait(env, 30_000);');
 
     expect(stopWatchers).toBeGreaterThan(0);
-    expect(quiescePersistence).toBeLessThan(stopWatchers);
-    expect(drainWork).toBeGreaterThan(quiescePersistence);
+    expect(drainWork).toBeGreaterThan(stopWatchers);
+    expect(quiescePersistence).toBeGreaterThan(drainWork);
     expect(pausePersistence).toBeGreaterThan(drainWork);
     expect(stopLoop).toBeGreaterThan(quiescePersistence);
     expect(stopP2P).toBeGreaterThan(stopLoop);

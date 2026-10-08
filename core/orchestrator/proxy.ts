@@ -1,3 +1,6 @@
+import { handleNativeRestProxy } from '../api/server/rpc/tron-proxy';
+import { decodeJurisdictionsData } from '../jurisdiction/adapter/kernel/jurisdiction-loader';
+import { readShardJurisdictions, type OrchestratorJurisdictionsConfig } from './j-select/jurisdictions';
 import { classifyRuntimeTransportFailure, type RuntimeFailureSignal } from '../protocol/errors/failure-taxonomy';
 import { requireBoundaryRecord } from '../protocol/boundary-validation';
 import { safeStringify } from '../protocol/serialization';
@@ -498,3 +501,6 @@ export const createOrchestratorProxyHandlers = (deps: OrchestratorProxyDeps) => 
       proxyRpc(deps, request, upstreamRpcUrl, operatorAuthorized),
   };
 };
+
+export const proxyNativeRest = (request: Request, headers: HeadersInit, config: OrchestratorJurisdictionsConfig): Promise<Response> =>
+  handleNativeRestProxy(request, headers, () => decodeJurisdictionsData(JSON.parse(readShardJurisdictions(config))));

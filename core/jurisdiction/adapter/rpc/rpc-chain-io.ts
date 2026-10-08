@@ -1,3 +1,4 @@
+import { JBroadcastReceiptError } from '../kernel/failure';
 import type { Signer } from 'ethers';
 import { ethers } from 'ethers';
 import { normalizeReceiptHash, parseReceiptQuantity } from '../../machine/receipt-codec';
@@ -76,9 +77,13 @@ const createFeeReader = (
 const createReceiptWaiter = (settings: ChainIoSettings): RpcChainIo['waitForReceipt'] =>
   async (txLike, label) => {
     const tx = asRpcTxResponse(txLike);
-    const receipt = await tx.wait(settings.txWaitConfirms, settings.txWaitTimeoutMs);
-    if (!receipt) throw new Error(`${label} transaction not mined (hash=${tx.hash})`);
-    return decodeRpcReceipt(receipt);
+    try {
+      const receipt = await tx.wait(settings.txWaitConfirms, settings.txWaitTimeoutMs);
+      if (!receipt) throw new Error(`${label} transaction was not mined (hash=${tx.hash})`);
+      return decodeRpcReceipt(receipt);
+    } catch (error) {
+      throw new JBroadcastReceiptError(tx.hash, error);
+    }
   };
 
 const createSignerFactory = (

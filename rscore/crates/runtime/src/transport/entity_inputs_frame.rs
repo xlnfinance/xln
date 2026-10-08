@@ -58,6 +58,101 @@ pub(super) fn send_entity_inputs<S: Read + Write>(
     send_value(socket, &sign_frame(&unsigned, frame)?, max_message_bytes)
 }
 
+/// Same canonical gossip envelope/MAC as TS; gossip spends no encryption nonce.
+pub(super) fn send_profiles<S: Read + Write>(
+    socket: &mut WebSocket<S>,
+    profiles: Vec<Value>,
+    frame: &mut SessionFrameContext<'_>,
+    max_message_bytes: usize,
+) -> Result<(), RuntimeTransportError> {
+    frame.counters.auth_timestamp = frame
+        .counters
+        .auth_timestamp
+        .checked_add(1)
+        .ok_or(RuntimeTransportError::Crypto("auth-timestamp"))?;
+    let timestamp = profiles
+        .iter()
+        .filter_map(|p| p["lastUpdated"].as_u64())
+        .max()
+        .ok_or(RuntimeTransportError::Config("profile-timestamp"))?;
+    let unsigned = profile_unsigned(profiles, timestamp, frame, frame.counters.auth_timestamp);
+    send_value(socket, &sign_frame(&unsigned, frame)?, max_message_bytes)
+}
+
+fn profile_unsigned(
+    profiles: Vec<Value>,
+    timestamp: u64,
+    frame: &SessionFrameContext<'_>,
+    auth_timestamp: u64,
+) -> Value {
+    object([
+        ("type", Value::String("gossip_announce".into())),
+        (
+            "id",
+            Value::String(format!("rrs_gossip_{}", auth_timestamp)),
+        ),
+        ("from", Value::String(frame.from.into())),
+        (
+            "fromEncryptionPubKey",
+            Value::String(frame.encryption_public_hex.into()),
+        ),
+        ("to", Value::String(frame.to.into())),
+        ("timestamp", Value::from(timestamp)),
+        (
+            "payload",
+            object([
+                ("profiles", Value::Array(profiles)),
+                ("jurisdictions", Value::Array(Vec::new())),
+            ]),
+        ),
+    ])
+}
+
+/// Bound the exact MessagePack payload plus worst-case array/header overhead.
+/// Never split a signed profile or lower the profile's Account disclosure limit.
+pub(super) fn take_profile_batch(
+    pending: &mut std::collections::VecDeque<Value>,
+    frame: &SessionFrameContext<'_>,
+    max_bytes: usize,
+) -> Result<Vec<Value>, RuntimeTransportError> {
+    let next = frame
+        .counters
+        .auth_timestamp
+        .checked_add(1)
+        .ok_or(RuntimeTransportError::Crypto("auth-timestamp"))?;
+    let unsigned = profile_unsigned(Vec::new(), 9_007_199_254_740_991, frame, next);
+    let mut envelope = sign_frame(&unsigned, frame)?;
+    envelope["v"] = Value::from(1);
+    envelope["auth"]["timestamp"] = Value::from(next);
+    // Empty array is one byte; an array of at most 1000 rows needs at most three.
+    let mut bytes = super::msgpack::encode_framed(&envelope)?.len() + 2;
+    let mut batch = Vec::new();
+    while batch.len() < 1000 {
+        let Some(profile) = pending.front() else {
+            break;
+        };
+        let size = encode_transport(profile)?.len();
+        if bytes
+            .checked_add(size)
+            .is_none_or(|total| total > max_bytes)
+        {
+            break;
+        }
+        bytes += size;
+        batch.push(
+            pending
+                .pop_front()
+                .ok_or(RuntimeTransportError::Config("profile-queue-empty"))?,
+        );
+    }
+    if batch.is_empty() {
+        return Err(RuntimeTransportError::Config(
+            "single-profile-message-budget",
+        ));
+    }
+    Ok(batch)
+}
+
 fn bump_counters(counters: &mut SessionCounters) -> Result<(), RuntimeTransportError> {
     counters.message_counter = counters
         .message_counter

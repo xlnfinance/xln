@@ -9,8 +9,8 @@
 
   import type { Writable } from 'svelte/store';
   import type { EnvSnapshot } from '@xln/core/api/public/runtime-module';
-  import { shortAddress } from '$lib/utils/format';
-  import type { LogLevel, LogCategory, FrameLogEntry } from '$lib/types/ui';
+  import { shortAddress } from '#lib/utils/format.ts';
+  import type { LogLevel, LogCategory, FrameLogEntry } from '#lib/types/ui.ts';
 
   type DeltaLike = { collateral?: unknown };
   type AccountLike = {

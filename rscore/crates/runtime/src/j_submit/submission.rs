@@ -51,6 +51,11 @@ pub enum JSubmitOutcome {
     AwaitingAuthenticatedEvidence,
 }
 
+pub enum JSubmitPreparation {
+    Prepared(String),
+    Resolved(JSubmitOutcome),
+}
+
 pub struct ControlBoardProposal<'a> {
     pub entity_provider: Address,
     pub shareholder_entity_id: &'a Word,
@@ -105,6 +110,39 @@ fn word(value: &Value, field: &'static str) -> Result<Word, JSubmitError> {
     decoded
         .try_into()
         .map_err(|_| JSubmitError::Transaction(field))
+}
+
+pub(super) fn classify_finalization_chain_time(
+    finalization: &super::FinalDisputeProof,
+    account: &[ethabi::Token],
+    chain_timestamp: u64,
+) -> Result<(), JSubmitError> {
+    let Some(not_before) = finalization.submit_not_before_timestamp else {
+        return Ok(());
+    };
+    if not_before == 0 || account.len() != 15 {
+        return Err(JSubmitError::Transaction(
+            "finalization-chain-account-shape",
+        ));
+    }
+    if account[1] == ethabi::Token::FixedBytes(vec![0; 32]) {
+        return Ok(());
+    }
+    if account[0] != ethabi::Token::Uint(finalization.initial_nonce)
+        || account[2] != ethabi::Token::Uint(not_before.into())
+        || account[6] != ethabi::Token::FixedBytes(finalization.initial_proofbody_hash.to_vec())
+        || account[14] != ethabi::Token::Bool(finalization.started_by_left)
+    {
+        return Err(JSubmitError::Transaction(
+            "finalization-chain-identity-mismatch",
+        ));
+    }
+    if chain_timestamp < not_before {
+        return Err(JSubmitError::Rpc(format!(
+            "DISPUTE_FINALIZATION_AWAITING_CHAIN_TIME:head={chain_timestamp}:notBefore={not_before}"
+        )));
+    }
+    Ok(())
 }
 
 pub fn depository_batch_hash(
@@ -257,13 +295,26 @@ impl<'a> JSubmitter<'a> {
             .ok_or(JSubmitError::Transaction("gas-overflow"))
     }
 
-    fn submit_calldata(
+    fn prepare_calldata(
         &self,
         to: Address,
         calldata: Vec<u8>,
         signer_key: &Word,
         fee_overrides: Option<&JBatchFeeOverrides>,
-    ) -> Result<JSubmitOutcome, JSubmitError> {
+        minimum_nonce: Option<u64>,
+    ) -> Result<String, JSubmitError> {
+        if self.rpc.tron_rpc_attested() {
+            if fee_overrides.is_some() {
+                return Err(JSubmitError::Transaction("tron-ethereum-fee-overrides"));
+            }
+            return super::tron::prepare(
+                self.rpc,
+                &to,
+                &calldata,
+                signer_key,
+                self.config.gas_headroom_bps,
+            );
+        }
         let operator =
             address_of_private_key(signer_key).ok_or(JSubmitError::Transaction("operator-key"))?;
         if quantity(
@@ -278,7 +329,9 @@ impl<'a> JSubmitter<'a> {
         let (max_priority_fee_per_gas, max_fee_per_gas) = self.fees(fee_overrides)?;
         let transaction = Eip1559Transaction {
             chain_id: self.config.chain_id,
-            nonce: self.transaction_nonce(&operator)?,
+            nonce: self
+                .transaction_nonce(&operator)?
+                .max(minimum_nonce.unwrap_or(0)),
             max_priority_fee_per_gas,
             max_fee_per_gas,
             gas_limit,
@@ -287,20 +340,119 @@ impl<'a> JSubmitter<'a> {
             data: calldata,
         }
         .sign(signer_key)?;
-        let returned = word(
-            &self.call("eth_sendRawTransaction", json!([hex(&transaction.raw)]))?,
-            "transaction-hash",
-        )?;
-        if returned != transaction.hash {
-            return Err(JSubmitError::Transaction("transaction-hash-mismatch"));
-        }
-        let broadcast = JSubmitOutcome::Broadcast {
-            transaction_hash: transaction.hash,
-            transaction_nonce: transaction.nonce,
+        Ok(hex(&transaction.raw))
+    }
+
+    fn submit_calldata(
+        &self,
+        to: Address,
+        calldata: Vec<u8>,
+        signer_key: &Word,
+        fee_overrides: Option<&JBatchFeeOverrides>,
+        authenticated: &[ProcessedBatchEvidence],
+    ) -> Result<JSubmitOutcome, JSubmitError> {
+        let raw = self.prepare_calldata(to, calldata, signer_key, fee_overrides, None)?;
+        self.broadcast_prepared(&raw, authenticated)
+    }
+
+    pub(crate) fn prepare_native_replacement(
+        &self,
+        raw: &str,
+    ) -> Result<Option<(String, Value)>, JSubmitError> {
+        let Some(evidence) = super::native_expiry::read_expiry_evidence(self.rpc, raw)? else {
+            return Ok(None);
         };
+        let old = super::prepared_wire::decode_prepared_transaction(raw, true)?;
+        if address_of_private_key(&self.config.operator_private_key) != Some(old.signer) {
+            return Err(JSubmitError::Transaction("replacement-payer"));
+        }
+        let replacement = self.prepare_calldata(
+            old.to,
+            old.data,
+            &self.config.operator_private_key,
+            None,
+            None,
+        )?;
+        let hash = format!("0x{}", hex::encode(old.hash));
+        super::native_replacement::validate_native_replacement(raw, &replacement, &hash, &evidence)
+            .map_err(JSubmitError::Rpc)?;
+        Ok(Some((replacement, evidence)))
+    }
+
+    pub fn broadcast_prepared(
+        &self,
+        raw: &str,
+        authenticated: &[ProcessedBatchEvidence],
+    ) -> Result<JSubmitOutcome, JSubmitError> {
+        let native = self.rpc.tron_rpc_attested();
+        let wire = super::prepared_wire::decode_prepared_transaction(raw, native)?;
+        let receipt =
+            self.receipt_status(&wire.hash, authenticated)
+                .map_err(|error| match error {
+                    JSubmitError::Transaction("receipt-reverted") => JSubmitError::Rpc(
+                        "J_PREPARED_RECEIPT_REVERTED_AWAITING_AUTHENTICATED_EVIDENCE".into(),
+                    ),
+                    error => error,
+                })?;
+        if let Some(receipt) = receipt {
+            return Ok(receipt);
+        }
+        if native {
+            let head = self
+                .rpc
+                .tron_call("getnowblock", json!({}))
+                .map_err(rpc_error)?;
+            let now = head
+                .pointer("/block_header/raw_data/timestamp")
+                .and_then(Value::as_u64)
+                .ok_or(JSubmitError::Transaction("tron-head-time"))?;
+            if wire.expires_at.is_some_and(|expiry| expiry <= now) {
+                return Err(JSubmitError::Rpc(
+                    "TRON_PREPARED_TRANSACTION_EXPIRED_UNRESOLVED".into(),
+                ));
+            }
+            let result = self
+                .rpc
+                .tron_call("broadcasthex", json!({"transaction": &raw[2..]}))
+                .map_err(rpc_error)?;
+            let duplicate =
+                result.get("code").and_then(Value::as_str) == Some("DUP_TRANSACTION_ERROR");
+            if result.get("result").and_then(Value::as_bool) != Some(true) && !duplicate {
+                return Err(JSubmitError::Rpc(format!("tron-broadcast:{result}")));
+            }
+            if !duplicate
+                && result
+                    .get("txid")
+                    .and_then(Value::as_str)
+                    .and_then(|v| hex::decode(v).ok())
+                    .as_deref()
+                    != Some(wire.hash.as_slice())
+            {
+                return Err(JSubmitError::Transaction("tron-broadcast-hash"));
+            }
+        } else {
+            match self.call("eth_sendRawTransaction", json!([raw])) {
+                Ok(returned) if word(&returned, "transaction-hash")? == wire.hash => {}
+                Ok(_) => return Err(JSubmitError::Transaction("transaction-hash-mismatch")),
+                Err(JSubmitError::Rpc(message))
+                    if ["already known", "already imported", "known transaction"]
+                        .iter()
+                        .any(|known| message.to_ascii_lowercase().contains(known)) => {}
+                Err(error) => return Err(error),
+            }
+        }
         Ok(self
-            .receipt_status(&transaction.hash, &[])?
-            .unwrap_or(broadcast))
+            .receipt_status(&wire.hash, authenticated)
+            .map_err(|error| match error {
+                JSubmitError::Transaction("receipt-reverted") => JSubmitError::Rpc(
+                    "J_PREPARED_RECEIPT_REVERTED_AWAITING_AUTHENTICATED_EVIDENCE".into(),
+                ),
+                error => error,
+            })?
+            .unwrap_or(JSubmitOutcome::Broadcast {
+                transaction_hash: wire.hash,
+                transaction_nonce: wire.nonce,
+            }))
     }
 
     /// Exact TS `mint` maintenance operation. Depository exposes this only on
@@ -336,6 +488,7 @@ impl<'a> JSubmitter<'a> {
             calldata,
             &self.config.operator_private_key,
             None,
+            &[],
         )
     }
 
@@ -413,7 +566,7 @@ impl<'a> JSubmitter<'a> {
             ),
         ]));
         let _ = shareholder_entity_id;
-        self.submit_calldata(entity_provider, calldata, signer_key, None)
+        self.submit_calldata(entity_provider, calldata, signer_key, None, &[])
     }
 
     pub fn submit_activate_board(
@@ -430,7 +583,7 @@ impl<'a> JSubmitter<'a> {
         let mut calldata = Vec::new();
         calldata.extend_from_slice(&Keccak256::digest(b"activateBoard(bytes32)")[..4]);
         calldata.extend_from_slice(target_entity_id);
-        self.submit_calldata(entity_provider, calldata, signer_key, None)
+        self.submit_calldata(entity_provider, calldata, signer_key, None, &[])
     }
 
     fn entity_provider_board_hashes(
@@ -555,7 +708,13 @@ impl<'a> JSubmitter<'a> {
         let mut calldata = Vec::new();
         calldata.extend_from_slice(&Keccak256::digest(signature)[..4]);
         calldata.extend_from_slice(&ethabi::encode(&tokens));
-        self.submit_calldata(intent.entity_provider_address, calldata, signer_key, None)
+        self.submit_calldata(
+            intent.entity_provider_address,
+            calldata,
+            signer_key,
+            None,
+            &[],
+        )
     }
 
     pub fn submit(
@@ -566,6 +725,91 @@ impl<'a> JSubmitter<'a> {
         board_authority: Option<BoardAuthorityValidator<'_>>,
         authenticated: &[ProcessedBatchEvidence],
     ) -> Result<JSubmitOutcome, JSubmitError> {
+        match self.prepare_batch(
+            sealed,
+            fee_overrides,
+            external_signer_private_key,
+            board_authority,
+            authenticated,
+            None,
+        )? {
+            JSubmitPreparation::Prepared(raw) => self.broadcast_prepared(&raw, authenticated),
+            JSubmitPreparation::Resolved(outcome) => Ok(outcome),
+        }
+    }
+
+    fn validate_finalization_chain_time(&self, sealed: &SealedJBatch) -> Result<(), JSubmitError> {
+        let timed: Vec<_> = sealed
+            .batch
+            .dispute_finalizations
+            .iter()
+            .filter(|item| item.submit_not_before_timestamp.is_some())
+            .collect();
+        if timed.is_empty() {
+            return Ok(());
+        }
+        if timed.len() != 1 || sealed.batch.dispute_finalizations.len() != 1 {
+            return Err(JSubmitError::Transaction(
+                "finalization-chain-gate-cardinality",
+            ));
+        }
+        let finalization = timed[0];
+        let mut parties = [sealed.entity_id, finalization.counterentity];
+        parties.sort();
+        let mut calldata = Keccak256::digest(b"_accounts(bytes)")[..4].to_vec();
+        calldata.extend(ethabi::encode(&[ethabi::Token::Bytes(parties.concat())]));
+        let result = self.call(
+            "eth_call",
+            json!([{"to":hex(&self.config.depository_address),"data":hex(&calldata)},"latest"]),
+        )?;
+        let bytes = result
+            .as_str()
+            .and_then(|value| value.strip_prefix("0x"))
+            .and_then(|value| hex::decode(value).ok())
+            .ok_or(JSubmitError::Transaction(
+                "finalization-chain-account-encoding",
+            ))?;
+        use ethabi::ParamType::{Bool, FixedBytes, Uint};
+        let account = ethabi::decode(
+            &[
+                Uint(256),
+                FixedBytes(32),
+                Uint(256),
+                Uint(256),
+                Uint(32),
+                Uint(32),
+                FixedBytes(32),
+                Bool,
+                Uint(256),
+                FixedBytes(32),
+                Bool,
+                FixedBytes(32),
+                FixedBytes(32),
+                FixedBytes(32),
+                Bool,
+            ],
+            &bytes,
+        )
+        .map_err(|_| JSubmitError::Transaction("finalization-chain-account-encoding"))?;
+        if ethabi::encode(&account) != bytes {
+            return Err(JSubmitError::Transaction(
+                "finalization-chain-account-encoding",
+            ));
+        }
+        let head = self.call("eth_getBlockByNumber", json!(["latest", false]))?;
+        let timestamp = u64_quantity(&head["timestamp"], "finalization-chain-timestamp")?;
+        classify_finalization_chain_time(finalization, &account, timestamp)
+    }
+
+    pub fn prepare_batch(
+        &self,
+        sealed: &SealedJBatch,
+        fee_overrides: Option<&JBatchFeeOverrides>,
+        external_signer_private_key: Option<&Word>,
+        board_authority: Option<BoardAuthorityValidator<'_>>,
+        authenticated: &[ProcessedBatchEvidence],
+        minimum_nonce: Option<u64>,
+    ) -> Result<JSubmitPreparation, JSubmitError> {
         let encoded = encode_j_batch(&sealed.batch)?;
         let batch_hash = depository_batch_hash(
             self.config.chain_id,
@@ -578,7 +822,9 @@ impl<'a> JSubmitter<'a> {
                 && event.batch_hash == batch_hash
                 && event.entity_nonce == sealed.nonce
         }) {
-            return Ok(JSubmitOutcome::Authenticated(evidence.clone()));
+            return Ok(JSubmitPreparation::Resolved(JSubmitOutcome::Authenticated(
+                evidence.clone(),
+            )));
         }
         verify_canonical_hanko(
             &sealed.hanko,
@@ -593,11 +839,16 @@ impl<'a> JSubmitter<'a> {
             .map_err(|error| JSubmitError::Hanko(error.to_string()))?;
         let onchain_nonce = self.entity_nonce(&sealed.entity_id)?;
         if onchain_nonce >= sealed.nonce {
-            return Ok(JSubmitOutcome::AwaitingAuthenticatedEvidence);
+            return Ok(JSubmitPreparation::Resolved(
+                JSubmitOutcome::AwaitingAuthenticatedEvidence,
+            ));
         }
         if onchain_nonce.checked_add(U256::one()) != Some(sealed.nonce) {
             return Err(JSubmitError::Transaction("entity-nonce-gap"));
         }
+        // The exact account/timeout binding must hold before simulation. E2
+        // also denotes invalid authority and cannot stand in for this gate.
+        self.validate_finalization_chain_time(sealed)?;
         let requires_external_signer = !sealed.batch.external_token_to_reserve.is_empty();
         let submitter_key = if requires_external_signer {
             external_signer_private_key.ok_or(JSubmitError::Transaction("external-signer-key"))?
@@ -609,42 +860,15 @@ impl<'a> JSubmitter<'a> {
         if requires_external_signer && operator != sealed.signer_id {
             return Err(JSubmitError::Transaction("external-signer-mismatch"));
         }
-        if quantity(
-            &self.call("eth_getBalance", json!([hex(&operator), "latest"]))?,
-            "operator-balance",
-        )?
-        .is_zero()
-        {
-            return Err(JSubmitError::Transaction("operator-unfunded"));
-        }
         let calldata = process_batch_calldata(&encoded, &chain_hanko, sealed.nonce);
-        let gas_limit = self.gas_limit_to(&operator, &self.config.depository_address, &calldata)?;
-        let (max_priority_fee_per_gas, max_fee_per_gas) = self.fees(fee_overrides)?;
-        let transaction = Eip1559Transaction {
-            chain_id: self.config.chain_id,
-            nonce: self.transaction_nonce(&operator)?,
-            max_priority_fee_per_gas,
-            max_fee_per_gas,
-            gas_limit,
-            to: self.config.depository_address,
-            value: U256::zero(),
-            data: calldata,
-        }
-        .sign(submitter_key)?;
-        let returned = word(
-            &self.call("eth_sendRawTransaction", json!([hex(&transaction.raw)]))?,
-            "transaction-hash",
-        )?;
-        if returned != transaction.hash {
-            return Err(JSubmitError::Transaction("transaction-hash-mismatch"));
-        }
-        let broadcast = JSubmitOutcome::Broadcast {
-            transaction_hash: transaction.hash,
-            transaction_nonce: transaction.nonce,
-        };
-        Ok(self
-            .receipt_status(&transaction.hash, authenticated)?
-            .unwrap_or(broadcast))
+        self.prepare_calldata(
+            self.config.depository_address,
+            calldata,
+            submitter_key,
+            fee_overrides,
+            minimum_nonce,
+        )
+        .map(JSubmitPreparation::Prepared)
     }
 
     pub fn receipt_status(

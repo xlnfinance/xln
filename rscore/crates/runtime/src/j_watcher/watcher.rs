@@ -93,6 +93,17 @@ fn block_parameter(height: u64) -> String {
     format!("0x{height:x}")
 }
 
+pub(crate) fn read_initial_watcher_anchor(
+    rpc: &impl JsonRpc,
+    height: u64,
+) -> Result<Option<[u8; 32]>, JWatcherError> {
+    if height == 0 {
+        return Ok(None);
+    }
+    let block = read_block(rpc, height)?;
+    Ok(Some(fixed_hex::<32>(&block.hash, "initialParentHash")?))
+}
+
 fn read_block(rpc: &impl JsonRpc, height: u64) -> Result<RpcBlock, JWatcherError> {
     let value = rpc.call(
         "eth_getBlockByNumber",
@@ -169,12 +180,17 @@ fn authenticate_blocks(
         if block_height(block)? < from {
             continue;
         }
-        let mut receipts = block
-            .transactions
-            .iter()
-            .map(|hash| read_receipt(rpc, hash))
-            .collect::<Result<Vec<_>, _>>()?;
-        validate_receipts(block, &mut receipts)?;
+        let receipts = if rpc.tron_rpc_attested() {
+            super::tron::read_receipts(rpc, config, block)?
+        } else {
+            let mut receipts = block
+                .transactions
+                .iter()
+                .map(|hash| read_receipt(rpc, hash))
+                .collect::<Result<Vec<_>, _>>()?;
+            validate_receipts(block, &mut receipts)?;
+            receipts
+        };
         if let Some(batch) = build_block_batch(rpc, config, block, &receipts)? {
             batches.push(batch);
         }

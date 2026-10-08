@@ -1,24 +1,15 @@
+import { DepositoryBounds__factory } from '../../typechain-types/factories/DepositoryBounds__factory.js';
+import { encodeCooperativeUpdateDiff } from '../../../core/hanko/onchain-domain.ts';
+import { requireBoundaryRecord, requireBigInt } from '../../../core/protocol/boundary/boundary-primitives.ts';
 import hre from "hardhat";
 
 const { ethers } = await hre.network.getOrCreate("hardhat");
 
 export const DEFAULT_HARDHAT_MNEMONIC = "test test test test test test test test test test test junk";
 
-export const BATCH_ABI = [
-  'tuple(' +
-    'tuple(bytes32 receivingEntity, uint256 tokenId, uint256 amount)[] reserveToReserve,' +
-    'tuple(uint256 tokenId, bytes32 receivingEntity, tuple(bytes32 entity, uint256 amount)[] pairs)[] reserveToCollateral,' +
-    'tuple(bytes32 counterparty, uint256 tokenId, uint256 amount, uint256 nonce, bytes sig)[] collateralToReserve,' +
-    'tuple(bytes32 leftEntity, bytes32 rightEntity, tuple(uint256 tokenId, int256 leftDiff, int256 rightDiff, int256 collateralDiff, int256 ondeltaDiff)[] diffs, uint256[] forgiveDebtsInTokenIds, bytes sig, uint256 nonce)[] settlements,' +
-    'tuple(bytes32 counterentity, uint256 nonce, bool proposerIsLeft, bytes32 proofbodyHash, tuple(bytes32 watchSeed, uint32 leftResponseSeconds, uint32 rightResponseSeconds, int256[] offdeltas, uint256[] tokenIds, tuple(address transformerAddress, bytes encodedBatch, tuple(uint256 deltaIndex, uint256 rightAllowance, uint256 leftAllowance)[] allowances)[] transformers) initialProofbody, bytes32 watchSeed, bytes sig, bytes starterInitialArguments, bytes starterCounterArguments, bytes32 starterCounterProofCommitment)[] disputeStarts,' +
-    'tuple(bytes32 counterentity, uint256 initialNonce, bytes32 initialProofbodyHash, uint256 counterNonce, bool proposerIsLeft, tuple(bytes32 watchSeed, uint32 leftResponseSeconds, uint32 rightResponseSeconds, int256[] offdeltas, uint256[] tokenIds, tuple(address transformerAddress, bytes encodedBatch, tuple(uint256 deltaIndex, uint256 rightAllowance, uint256 leftAllowance)[] allowances)[] transformers) counterProofbody, bytes sig)[] counterDisputes,' +
-    'tuple(bytes32 counterentity, uint256 initialNonce, uint256 finalNonce, bool proposerIsLeft, bytes32 initialProofbodyHash, tuple(bytes32 watchSeed, uint32 leftResponseSeconds, uint32 rightResponseSeconds, int256[] offdeltas, uint256[] tokenIds, tuple(address transformerAddress, bytes encodedBatch, tuple(uint256 deltaIndex, uint256 rightAllowance, uint256 leftAllowance)[] allowances)[] transformers) finalProofbody, bytes starterArguments, bytes otherArguments, bytes sig, bool startedByLeft, bool cooperative)[] disputeFinalizations,' +
-    'tuple(bytes32 entity, address contractAddress, uint256 externalTokenId, uint8 tokenType, uint256 internalTokenId, uint256 amount)[] externalTokenToReserve,' +
-    'tuple(bytes32 receivingEntity, uint256 tokenId, uint256 amount)[] reserveToExternalToken,' +
-    'tuple(address transformer, bytes32 secret)[] revealSecrets,' +
-    'tuple(bytes32 counterpartyEntity, bool targetRole, bytes32 fullHash, bytes32 partialRoot, tuple(uint16 fillRatio, bytes32 fullSecret, bytes32[4] reveals) witness)[] hashLadderRegistrations' +
-  ')'
-];
+const batchMethod = DepositoryBounds__factory.createInterface().getFunction('assertBatch');
+if (!batchMethod) throw new Error('TEST_BATCH_ABI_MISSING');
+export const BATCH_ABI = [batchMethod.inputs[0]!];
 
 /** abi.encode(HankoBytes): placeholders, packedSignatures, claims, memberSignatures. One envelope only. */
 export const HANKO_ABI = [
@@ -120,8 +111,26 @@ export const deployDepositoryStack = async (
   return { account, depositoryBounds, hashLadderRegistry, nftCustody, deltaTransformer, depository };
 };
 
-export const encodeBatch = (batch: unknown): string =>
-  ethers.AbiCoder.defaultAbiCoder().encode(BATCH_ABI, [batch]);
+export const encodeBatch = (value: unknown): string => {
+  const batch = requireBoundaryRecord(value, 'TEST_BATCH_INVALID');
+  if (!Array.isArray(batch.settlements)) throw new Error('TEST_SETTLEMENTS_INVALID');
+  const settlements = batch.settlements.map(value => {
+    const settlement = requireBoundaryRecord(value, 'TEST_SETTLEMENT_INVALID');
+    if (!Array.isArray(settlement.diffs)) throw new Error('TEST_DIFFS_INVALID');
+    const diffs = settlement.diffs.map(value => {
+      const diff = requireBoundaryRecord(value, 'TEST_DIFF_INVALID');
+      return encodeCooperativeUpdateDiff({
+        tokenId: requireBigInt(diff.tokenId, 'TEST_TOKEN_ID'),
+        leftDiff: requireBigInt(diff.leftDiff, 'TEST_LEFT_DIFF'),
+        rightDiff: requireBigInt(diff.rightDiff, 'TEST_RIGHT_DIFF'),
+        collateralDiff: requireBigInt(diff.collateralDiff, 'TEST_COLLATERAL_DIFF'),
+        ondeltaDiff: requireBigInt(diff.ondeltaDiff, 'TEST_ONDELTA_DIFF'),
+      });
+    });
+    return { ...settlement, diffs };
+  });
+  return ethers.AbiCoder.defaultAbiCoder().encode(BATCH_ABI, [{ ...batch, settlements }]);
+};
 
 export const emptyBatch = (overrides: Record<string, unknown> = {}): Record<string, unknown> => ({
   reserveToReserve: [],

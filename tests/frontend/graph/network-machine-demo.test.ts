@@ -51,8 +51,8 @@ describe('network machine demo playback', () => {
   test('the embed route drives playback from the URL and surfaces scenario failures', () => {
     const route = readFileSync('frontend/src/routes/embed/+page.svelte', 'utf8');
 
-    expect(route).toContain("$page.url.searchParams.get('scenario')");
-    expect(route).toContain("$page.url.searchParams.get('autoplay') === '1'");
+    expect(route).toContain("page.url.searchParams.get('scenario')");
+    expect(route).toContain("page.url.searchParams.get('autoplay') === '1'");
     expect(route).toContain('networkMachineRuntimeOperations.loadScenario');
     // A scenario embed narrates through the Time Machine, so it cannot stay hidden.
     expect(route).toContain('settingsOperations.setShowTimeMachine(true)');

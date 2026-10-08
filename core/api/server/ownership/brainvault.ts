@@ -81,7 +81,7 @@ const normalizeStoredOwner = async (value: unknown): Promise<StoredBrainVaultOwn
   return { version: 1, specId: BRAINVAULT_V1_SPEC_ID, mnemonic24, ethereumAddress };
 };
 
-const readOwner = async (path: string): Promise<StoredBrainVaultOwner | null> => {
+export const readOwner = async (path: string): Promise<StoredBrainVaultOwner | null> => {
   try {
     const owner = await normalizeStoredOwner(JSON.parse(readFileSync(path, 'utf8')));
     chmodSync(path, 0o600);
@@ -92,7 +92,7 @@ const readOwner = async (path: string): Promise<StoredBrainVaultOwner | null> =>
   }
 };
 
-const requireOwnerParentDurable = async (
+export const requireOwnerParentDurable = async (
   path: string,
   durability: StorageDurabilityOptions = {},
 ): Promise<void> => {
@@ -151,6 +151,39 @@ const nativeWorkerCap = (requested: number): number => {
   return Math.max(1, Math.min(requested, availableParallelism(), memoryWorkers, 256));
 };
 
+/** Private custody boundary shared by Bun Runtime and the native Runtime worker.
+ * Returns secrets only to the operator process; never serialize as an adapter reply.
+ */
+export const deriveStoredBrainVaultOwner = async (
+  deps: Pick<BrainVaultOwnerControllerDeps, 'path' | 'workerPath' | 'durability'>,
+  input: RuntimeAdapterBrainVaultInput,
+  options: Readonly<{ signal: AbortSignal; onProgress: (progress: BrainVaultNativeProgress) => void }>,
+) => {
+  if (input.specId !== BRAINVAULT_V1_SPEC_ID) {
+    throw new Error(`BRAINVAULT_SPEC_MISMATCH:${input.specId}:${BRAINVAULT_V1_SPEC_ID}`);
+  }
+  const path = String(deps.path || '').trim();
+  if (!path) throw new Error('BRAINVAULT_OWNER_PATH_NOT_CONFIGURED');
+  const workers = nativeWorkerCap(input.workers);
+  const result = await deriveBrainVaultNative(
+    { ...input, workers },
+    { ...options, ...(deps.workerPath ? { workerPath: deps.workerPath } : {}) },
+  );
+  const stored: StoredBrainVaultOwner = {
+    version: 1,
+    specId: BRAINVAULT_V1_SPEC_ID,
+    mnemonic24: result.mnemonic24,
+    ethereumAddress: result.ethereumAddress.toLowerCase(),
+  };
+  const existing = await readOwner(path);
+  if (existing && existing.ethereumAddress !== stored.ethereumAddress) {
+    throw new Error(`BRAINVAULT_OWNER_ALREADY_CONFIGURED:${existing.ethereumAddress}`);
+  }
+  if (existing) await requireOwnerParentDurable(path, deps.durability);
+  else await persistOwner(path, stored, deps.durability);
+  return { stored: existing ?? stored, result };
+};
+
 export const createBrainVaultOwnerController = (
   deps: BrainVaultOwnerControllerDeps,
 ): BrainVaultOwnerController => {
@@ -206,28 +239,8 @@ export const createBrainVaultOwnerController = (
   return {
     async deriveAndInstall(env, input, options) {
       return runOwnerOperation(async () => {
-        if (input.specId !== BRAINVAULT_V1_SPEC_ID) {
-          throw new Error(`BRAINVAULT_SPEC_MISMATCH:${input.specId}:${BRAINVAULT_V1_SPEC_ID}`);
-        }
-        const path = requirePath();
-        const workers = nativeWorkerCap(input.workers);
-        const result = await deriveBrainVaultNative(
-          { ...input, workers },
-          { ...options, ...(deps.workerPath ? { workerPath: deps.workerPath } : {}) },
-        );
-        const stored: StoredBrainVaultOwner = {
-          version: 1,
-          specId: BRAINVAULT_V1_SPEC_ID,
-          mnemonic24: result.mnemonic24,
-          ethereumAddress: result.ethereumAddress.toLowerCase(),
-        };
-        const existing = await readOwner(path);
-        if (existing && existing.ethereumAddress !== stored.ethereumAddress) {
-          throw new Error(`BRAINVAULT_OWNER_ALREADY_CONFIGURED:${existing.ethereumAddress}`);
-        }
-        if (existing) await requireOwnerParentDurable(path, deps.durability);
-        else await persistOwner(path, stored, deps.durability);
-        const installed = await install(env, existing ?? stored);
+        const { stored, result } = await deriveStoredBrainVaultOwner(deps, input, options);
+        const installed = await install(env, stored);
         return {
           specId: result.specId,
           backend: result.backend,

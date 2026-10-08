@@ -37,6 +37,7 @@ import {
 } from '../../../../jurisdiction/machine/board-registry';
 import {
   assertCanonicalSettlementWorkspace,
+  assertSettlementOps,
   createSettlementWorkspaceHash,
   hasPendingSettlementTransition,
 } from '../../../../account/tx/handlers/settlement/transition';
@@ -236,6 +237,8 @@ export async function handleSettlePropose(
   const isLeft = isLeftEntity(entityState.entityId, counterpartyEntityId);
 
   // Validate: compileOps runs on proposer path (guard 1)
+  try { assertSettlementOps(ops); }
+  catch (error) { throw rejectFailure('SETTLEMENT_OPS_INVALID', error instanceof Error ? error.message : String(error)); }
   compileOps(ops, isLeft);
   // The proposer executes by default. That makes the counterparty's approval
   // the only settlement Hanko accepted on-chain; the executor never submits a
@@ -315,6 +318,8 @@ export async function handleSettleUpdate(
   const isLeft = isLeftEntity(entityState.entityId, counterpartyEntityId);
 
   // Validate new ops (guard 1: dual-side validation)
+  try { assertSettlementOps(ops); }
+  catch (error) { throw rejectFailure('SETTLEMENT_OPS_INVALID', error instanceof Error ? error.message : String(error)); }
   compileOps(ops, isLeft);
   const workspace = account.state.settlementWorkspace;
   const previousWorkspaceHash = assertCanonicalSettlementWorkspace(account.state, workspace);

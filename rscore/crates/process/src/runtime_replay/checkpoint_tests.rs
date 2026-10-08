@@ -86,3 +86,15 @@ fn accounts_roots_preserve_every_entity_and_signer_owner() {
         "restart must detect an omitted second owner"
     );
 }
+
+#[test]
+fn actual_tron_jurisdiction_only_checkpoint_reconstructs_empty_owner_root() {
+    let entries =
+        checkpoint_entity_hashes(&serde_json::json!({"canonicalEntityHashes":[]})).unwrap();
+    assert!(entries.is_empty());
+    assert_eq!(
+        compute_canonical_runtime_state_hash(1, 1791406735110, &entries).unwrap(),
+        "0x41ec607e267c0f496f3be298256d77877f3a05b4b6044912b49455328c48a5e9"
+    );
+    assert!(checkpoint_entity_hashes(&serde_json::json!({})).is_err());
+}

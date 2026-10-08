@@ -1,3 +1,4 @@
+import { decodeSignedTronTransaction } from './tron-transaction';
 import type { TronWeb, Types } from 'tronweb';
 
 /** Broadcast the exact signed protobuf payload, including TAPOS and expiration.
@@ -21,3 +22,20 @@ export const encodeSignedTronTransaction = (tronWeb: TronWeb, signed: Types.Sign
 
 export const broadcastTronTransaction = (tronWeb: TronWeb, signed: Types.SignedTransaction) =>
   tronWeb.trx.sendHexTransaction(encodeSignedTronTransaction(tronWeb, signed));
+
+
+export const broadcastSignedTronWire = async (tronWeb: TronWeb, rawTransaction: string): Promise<string> => {
+  const decoded = decodeSignedTronTransaction(rawTransaction);
+  const broadcast = await tronWeb.trx.sendHexTransaction(rawTransaction.slice(2));
+  // An exact-byte replay is idempotent; it never prepares a second transaction.
+  if (!broadcast.result && broadcast.code !== 'DUP_TRANSACTION_ERROR') {
+    if (broadcast.code === 'TRANSACTION_EXPIRATION_ERROR') {
+      throw new Error('transaction was not mined: TRON_PREPARED_EXPIRATION_REQUIRES_RECONCILIATION');
+    }
+    throw new Error(`TRON_PREPARED_BROADCAST_FAILED:${broadcast.code ?? 'unknown'}`);
+  }
+  if (broadcast.result && `0x${broadcast.txid}`.toLowerCase() !== decoded.hash) {
+    throw new Error('TRON_PREPARED_BROADCAST_HASH_MISMATCH');
+  }
+  return decoded.hash;
+};

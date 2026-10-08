@@ -1,3 +1,6 @@
+import { get } from 'svelte/store';
+import { operatorDiagnosticsAllowed } from './operator-diagnostics';
+
 type BrowserErrorKind =
   | 'console_error'
   | 'window_error'
@@ -81,7 +84,7 @@ const currentIdentity = (): Pick<BrowserErrorEvent, 'runtimeId' | 'entityId'> =>
 
 const flush = async (): Promise<void> => {
   flushTimer = null;
-  if (queue.length === 0) return;
+  if (queue.length === 0 || !get(operatorDiagnosticsAllowed)) return;
   const events = queue.splice(0, BATCH_SIZE);
   const state = telemetryState();
   state.queued = queue.length;

@@ -40,6 +40,10 @@ use crate::{
     transport::derive_local_runtime_id,
 };
 
+mod local_profile_publication;
+mod origin_empty_route;
+mod profile_wire;
+mod signed_profile;
 #[path = "test_ws.rs"]
 mod test_ws;
 use test_ws::CanonicalWsServer;
@@ -155,6 +159,15 @@ fn processor_replica_with_peer(
     runtime_seed: &str,
     peer_id: EntityId,
 ) -> RuntimeReplica {
+    processor_replica_with_pinned_peer(entity_seed, runtime_seed, peer_id, false)
+}
+
+fn processor_replica_with_pinned_peer(
+    entity_seed: &str,
+    runtime_seed: &str,
+    peer_id: EntityId,
+    pinned: bool,
+) -> RuntimeReplica {
     let private_key = derive_signer_key(entity_seed, ENTITY_KEY_LABEL).expect("entity key");
     let signer_id =
         hex(&derive_signer_address(entity_seed, ENTITY_KEY_LABEL).expect("entity signer address"));
@@ -208,7 +221,20 @@ fn processor_replica_with_peer(
         Arc::new(SwapMarketPolicy::default()),
         vec![AccountSeed {
             account_id,
-            replica: AccountReplica::new(owner_id, account_state).expect("account replica"),
+            replica: {
+                let mut account =
+                    AccountReplica::new(owner_id, account_state).expect("account replica");
+                if pinned {
+                    account.set_envelope(
+                        xln_rscore_engine::AccountEnvelope::new(
+                            vec![("publicPinned".into(), CanonicalValue::Bool(true))],
+                            vec![],
+                        )
+                        .expect("pinned account"),
+                    );
+                }
+                account
+            },
             consensus: None,
         }],
     )
@@ -261,7 +287,15 @@ fn processor_replica_with_peer(
                 },
             )]),
         },
-        RuntimeDurableEnvelope::fixture_for_runtime(&runtime_id, [0; 32]),
+        // These socket/WAL tests own no J domain; their Entity jurisdiction is None.
+        RuntimeDurableEnvelope::decode(
+            &json!({
+                "runtimeId":runtime_id,"runtimeConfig":{"minFrameDelayMs":5},
+                "infrastructure":{},"jReplicas":[]
+            }),
+            [0; 32],
+        )
+        .expect("canonical no-J socket runtime"),
         owner,
         signer_id,
         accounts,

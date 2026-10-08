@@ -1,5 +1,6 @@
 //! Concrete owner-scoped Runtime checkpoint and decoded-WAL restoration.
 
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use serde_json::Value;
@@ -25,6 +26,7 @@ const MAX_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
 
 pub struct DecodedRuntimeCheckpoint {
     pub runtime_seed: String,
+    pub entity_import_keys: BTreeMap<String, [u8; 32]>,
     pub runtime_height: u64,
     pub runtime_timestamp: u64,
     pub durable_envelope: RuntimeDurableEnvelope,
@@ -224,9 +226,6 @@ pub fn restore_decoded_runtime_checkpoint(
     if checkpoint.runtime_seed.trim().is_empty() {
         return Err(RuntimeMachineError::RuntimeSeedEmpty.into());
     }
-    if checkpoint.entities.is_empty() {
-        return Err(ConcreteRestoreError::OwnerMismatch);
-    }
     let mut states = std::collections::BTreeMap::new();
     let mut replicas = std::collections::BTreeMap::new();
     let mut owners = std::collections::BTreeSet::new();
@@ -261,6 +260,9 @@ pub fn restore_decoded_runtime_checkpoint(
             mempool: crate::RuntimeMempool::empty(),
             limits: checkpoint.limits,
             proposer_runtime_seed: checkpoint.runtime_seed,
+            entity_import_keys: checkpoint.entity_import_keys,
+            entity_import_workers: checkpoint.worker_count,
+            entity_import_protocol: checkpoint.expected_protocol_fingerprint,
         },
     })
 }
@@ -318,6 +320,7 @@ fn restore_entity_checkpoint(
         &entity_consensus.state.sections,
         owned,
         &entity_consensus.state.authority,
+        entity.height,
     )
     .map_err(|error| ConcreteRestoreError::EntityManifest(error.to_string()))?;
     assert_entity_root(
@@ -348,8 +351,18 @@ fn restore_entity_checkpoint(
 /// step checks the existing Account root and Entity frame root or drops the
 /// whole candidate; output publication remains disabled during restore.
 pub fn replay_decoded_runtime_wal(
+    restored: RestoredRuntime,
+    frames: Vec<DecodedRuntimeWalFrame>,
+) -> Result<RestoredRuntime, ConcreteRestoreError> {
+    replay_decoded_runtime_wal_observed(restored, frames, |_, _, _| {})
+}
+
+/// Read-only observers see actual outputs only after the same canonical restore checks.
+/// No event cache, publication or additional durable receipt representation is introduced.
+pub fn replay_decoded_runtime_wal_observed(
     mut restored: RestoredRuntime,
     frames: Vec<DecodedRuntimeWalFrame>,
+    mut observe: impl FnMut(u64, u64, &crate::RuntimeOutputs),
 ) -> Result<RestoredRuntime, ConcreteRestoreError> {
     for frame in frames {
         let expected_height = restored.replica.state.height.checked_add(1).ok_or(
@@ -414,6 +427,7 @@ pub fn replay_decoded_runtime_wal(
             frame.expected_previous_frame_hash,
             frame.expected_frame_hash,
         )?;
+        observe(frame.height, frame.timestamp, &applied.outputs);
         restored.replica = replica;
     }
     Ok(restored)
@@ -422,6 +436,27 @@ pub fn replay_decoded_runtime_wal(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn restore_jurisdiction_only_runtime_keeps_empty_entity_set() {
+        let restored = restore_decoded_runtime_checkpoint(DecodedRuntimeCheckpoint {
+            entity_import_keys: BTreeMap::new(),
+            runtime_seed: "public-jurisdiction-only-fixture".into(),
+            runtime_height: 1,
+            runtime_timestamp: 1,
+            durable_envelope: RuntimeDurableEnvelope::fixture(),
+            expected_protocol_fingerprint: [0; 32],
+            entities: vec![],
+            worker_count: 1,
+            limits: RuntimeLimits::hlt(),
+            swap_market: Arc::new(SwapMarketPolicy::default()),
+        })
+        .unwrap();
+        assert!(restored.replica.state.e_replicas.is_empty());
+        assert!(restored.replica.e_replicas.is_empty());
+        assert_eq!(restored.replica.state.height, 1);
+        assert_eq!(restored.replica.state.finalized_j_height, 0);
+    }
 
     #[test]
     fn noncheckpoint_wal_frame_does_not_invent_an_expected_accounts_root() {

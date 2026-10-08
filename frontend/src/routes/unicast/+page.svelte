@@ -1,5 +1,5 @@
 <script lang="ts">
-  import BroadcastVsUnicast from '$lib/components/Landing/BroadcastVsUnicast.svelte';
+  import BroadcastVsUnicast from '#lib/components/Landing/BroadcastVsUnicast.svelte';
 </script>
 
 <svelte:head>

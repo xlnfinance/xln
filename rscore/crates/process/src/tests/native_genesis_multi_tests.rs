@@ -28,7 +28,8 @@ fn native_two_jurisdiction_owners_match_ts_identity_and_survive_exact_checkpoint
     )
     .unwrap();
     assert_eq!(ready.processor.replica().unwrap().state.e_replicas.len(), 2);
-    validate_native_owner_inventory(&genesis, ready.processor.replica().unwrap(), seed).unwrap();
+    validate_native_owner_inventory(&genesis, ready.processor.replica().unwrap(), seed, None)
+        .unwrap();
     let mut single_owner_config = genesis.clone();
     single_owner_config.entities.pop();
     assert_eq!(
@@ -41,7 +42,8 @@ fn native_two_jurisdiction_owners_match_ts_identity_and_survive_exact_checkpoint
         validate_native_owner_inventory(
             &single_owner_config,
             ready.processor.replica().unwrap(),
-            seed
+            seed,
+            None
         )
         .unwrap_err()
         .starts_with("RRS_NATIVE_GENESIS_OWNER_INVENTORY_MISMATCH")
@@ -57,6 +59,24 @@ fn native_two_jurisdiction_owners_match_ts_identity_and_survive_exact_checkpoint
             .entity_slot(&entity_id, signer)
             .expect("TS-derived native owner");
         assert!(state.entity.profile.is_hub);
+        let owned = xln_rscore_entity_kernel::compute_entity_owned_sections(
+            &state.entity,
+            state.accounts_root,
+            live.accounts.account_count(),
+        )
+        .unwrap();
+        let projected = xln_rscore_entity_kernel::project_entity_consensus_sections(
+            &live.entity_consensus.state.sections,
+            owned,
+            &live.entity_consensus.state.authority,
+            state.entity.height,
+        )
+        .unwrap();
+        assert_eq!(
+            live.entity_consensus.state.sections, projected,
+            "genesis WAL replay must verify the complete owner root before its first Entity frame"
+        );
+
         assert_eq!(
             tagged_json_from_canonical_value(
                 live.entity_consensus
@@ -96,13 +116,15 @@ fn native_two_jurisdiction_owners_match_ts_identity_and_survive_exact_checkpoint
         1,
         EntityRouteTable::new([]).unwrap(),
         None,
+        BTreeMap::new(),
     )
     .unwrap();
     assert_eq!(
         restored.restored_wal_frames, 1,
         "checkpoint1 with untouched sibling, then exact WAL2"
     );
-    validate_native_owner_inventory(&genesis, restored.processor.replica().unwrap(), seed).unwrap();
+    validate_native_owner_inventory(&genesis, restored.processor.replica().unwrap(), seed, None)
+        .unwrap();
     assert_eq!(
         hex(&restored
             .processor

@@ -29,6 +29,7 @@ use crate::{
     RuntimeLiveInput, RuntimeMachineError, RuntimeReplica, apply_runtime, apply_runtime_live,
 };
 
+use super::local_profiles::{CommittedProfiles, LocalProfilePublication};
 use super::projection::{DurableProjection, checkpoint_graph_due, project_durable_frame};
 use super::replay_outbox::{
     RetainedReplayOutbox, recorded_outbox_needs_prior, select_retained_replay_outbox,
@@ -173,6 +174,7 @@ pub struct DurableRuntimeProcessor {
     /// path unless the existing Runtime profiling gate is explicitly enabled.
     profile: bool,
     poisoned: bool,
+    local_profiles: Option<LocalProfilePublication>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -201,10 +203,15 @@ struct CommitOutcome {
 type CheckpointRowsResult = Result<BTreeMap<Vec<u8>, Vec<u8>>, DurableRuntimeProcessorError>;
 
 enum CommitterCommand {
+    AdapterStorageHead(Sender<Result<Value, DurableRuntimeProcessorError>>),
+    AdapterRestoreSources(
+        Sender<Result<crate::restore::NativeConcreteRestoreSources, DurableRuntimeProcessorError>>,
+    ),
     Commit(
         Box<(
             crate::storage::native::EncodedRuntimeFrame,
             Vec<crate::j_submit::DurableJAttempt>,
+            Option<CommittedProfiles>,
         )>,
     ),
     RetryPublication(Sender<Result<Option<RuntimeProcessReport>, DurableRuntimeProcessorError>>),
@@ -276,8 +283,8 @@ impl Committer {
                     let mut outcome = if self.failed {
                         Err(DurableRuntimeProcessorError::Poisoned)
                     } else {
-                        let (encoded, attempts) = *encoded;
-                        self.commit_one(encoded, attempts)
+                        let (encoded, attempts, profiles) = *encoded;
+                        self.commit_one(encoded, attempts, profiles)
                     };
                     if let Ok(outcome) = &mut outcome {
                         outcome.committer_busy_elapsed = profiled_elapsed(busy_started);
@@ -286,7 +293,8 @@ impl Committer {
                     if matches!(
                         outcome,
                         Err(DurableRuntimeProcessorError::Storage(_)
-                            | DurableRuntimeProcessorError::PublicationState)
+                            | DurableRuntimeProcessorError::PublicationState
+                            | DurableRuntimeProcessorError::LocalProfiles(_))
                     ) {
                         self.failed = true;
                     }
@@ -334,6 +342,24 @@ impl Committer {
                     };
                     let _ = reply.send(result);
                 }
+                CommitterCommand::AdapterStorageHead(reply) => {
+                    let result = if self.failed {
+                        Err(DurableRuntimeProcessorError::Poisoned)
+                    } else {
+                        Ok(self.store.adapter_storage_head())
+                    };
+                    let _ = reply.send(result);
+                }
+                CommitterCommand::AdapterRestoreSources(reply) => {
+                    let result = if self.failed {
+                        Err(DurableRuntimeProcessorError::Poisoned)
+                    } else {
+                        crate::restore::load_native_restore_sources(&mut self.store).map_err(
+                            |error| DurableRuntimeProcessorError::Projection(error.to_string()),
+                        )
+                    };
+                    let _ = reply.send(result);
+                }
                 CommitterCommand::ReadDurableFrame(height, reply) => {
                     let result = if self.failed {
                         Err(DurableRuntimeProcessorError::Poisoned)
@@ -350,12 +376,20 @@ impl Committer {
         &mut self,
         encoded: crate::storage::native::EncodedRuntimeFrame,
         post_commit_j_attempts: Vec<crate::j_submit::DurableJAttempt>,
+        profiles: Option<CommittedProfiles>,
     ) -> Result<CommitOutcome, DurableRuntimeProcessorError> {
         let storage_started = Instant::now();
         let (durable, storage_timings) = self.store.append_encoded_frame(encoded, self.profile)?;
         let storage_elapsed = storage_started.elapsed();
         debug_assert!(!self.profile || storage_timings.accounted() <= storage_elapsed);
         let height = durable.height();
+        // Signed projections describe this exact frame. Release only after fsync;
+        // the shared session writer sends profiles before its financial outbox.
+        if let Some((sessions, profiles)) = profiles {
+            sessions
+                .publish_profiles(profiles)
+                .map_err(DurableRuntimeProcessorError::LocalProfiles)?;
+        }
         self.pending_publications.push_back(durable);
         let publication_started = Instant::now();
         let mut publication = RuntimeProcessReport::default();
@@ -537,7 +571,37 @@ impl DurableRuntimeProcessor {
             in_flight: None,
             profile,
             poisoned: false,
+            local_profiles: None,
         })
+    }
+
+    /// Seed transport from the latest committed state before restored outbox replay.
+    /// Only the canonical live process configures this external publication effect.
+    pub fn configure_local_profiles(
+        &mut self,
+        identity: crate::signed_profile::ProfileTransportIdentity,
+        fees: BTreeMap<crate::RuntimeEntityKey, (u32, num_bigint::BigInt)>,
+        sessions: InboundSessionTable,
+    ) -> Result<(), DurableRuntimeProcessorError> {
+        self.ensure_healthy()?;
+        self.drain_in_flight(true)?;
+        let mut publication = LocalProfilePublication {
+            identity,
+            fees,
+            sessions,
+            signed: BTreeMap::new(),
+        };
+        let replica = self
+            .replica
+            .as_mut()
+            .ok_or(DurableRuntimeProcessorError::Poisoned)?;
+        let keys = replica.state.e_replicas.keys().cloned().collect();
+        let (sessions, profiles) = publication
+            .project(replica, keys)
+            .map_err(DurableRuntimeProcessorError::Projection)?;
+        sessions.publish_profiles(profiles)?;
+        self.local_profiles = Some(publication);
+        Ok(())
     }
 
     /// One committer round-trip. Every cold-path accessor funnels here so a
@@ -607,6 +671,7 @@ impl DurableRuntimeProcessor {
             Err(DurableRuntimeProcessorError::Storage(error)) => {
                 self.fail_stop(DurableRuntimeProcessorError::Storage(error))
             }
+            Err(error @ DurableRuntimeProcessorError::LocalProfiles(_)) => self.fail_stop(error),
             Err(error) => Err(error),
         }
     }
@@ -616,6 +681,83 @@ impl DurableRuntimeProcessor {
         self.replica
             .as_ref()
             .ok_or(DurableRuntimeProcessorError::Poisoned)
+    }
+
+    /// Process-local operator custody. Call only after admin authorization; never serialize keys into a public projection.
+    pub fn operator_signer_material(
+        &self,
+        signer: Option<&str>,
+    ) -> Result<(Vec<String>, Option<[u8; 32]>), String> {
+        let replica = self.replica().map_err(|error| error.to_string())?;
+        let ids: Vec<String> = replica
+            .entity_import_keys
+            .keys()
+            .filter(|id| {
+                replica
+                    .e_replicas
+                    .values()
+                    .any(|entity| entity.signer_id.eq_ignore_ascii_case(id))
+            })
+            .cloned()
+            .collect();
+        let key = if let Some(signer) = signer {
+            let normalized = signer.to_ascii_lowercase();
+            if !ids.contains(&normalized) {
+                return Err("STACK_MANAGER_SIGNER_NOT_OWNED".into());
+            }
+            Some(
+                *replica
+                    .entity_import_keys
+                    .get(&normalized)
+                    .ok_or("STACK_MANAGER_SIGNER_NOT_OWNED")?,
+            )
+        } else {
+            None
+        };
+        Ok((ids, key))
+    }
+
+    /// Only the authenticated single writer may install a verified custody key.
+    /// This hydrates a live dependency; it never mutates committed financial state.
+    pub fn install_custody_key(&mut self, signer: &str, key: [u8; 32]) -> Result<(), String> {
+        self.ensure_healthy().map_err(|error| error.to_string())?;
+        let replica = self.replica.as_mut().ok_or("RUNTIME_REPLICA_MISSING")?;
+        crate::install_custody_key(&mut replica.entity_import_keys, signer, key)
+    }
+
+    pub(super) fn hydrate_live_token_catalogs(&mut self) -> Result<(), String> {
+        self.ensure_healthy().map_err(|error| error.to_string())?;
+        let replica = self.replica.as_mut().ok_or("RUNTIME_REPLICA_MISSING")?;
+        crate::j_watcher::hydrate_live_catalogs(replica.durable.j_replicas_mut())
+            .map_err(|error| error.to_string())
+    }
+
+    pub fn read_account_views(
+        &mut self,
+        entity_key: &crate::RuntimeEntityKey,
+        account_ids: Vec<AccountId>,
+        project: fn(
+            &xln_rscore_engine::AccountConsensus,
+        )
+            -> Result<xln_rscore_protocol::CanonicalValue, xln_rscore_engine::StateError>,
+    ) -> Result<Vec<(AccountId, xln_rscore_protocol::CanonicalValue)>, DurableRuntimeProcessorError>
+    {
+        self.ensure_healthy()?;
+        let replica = self
+            .replica
+            .as_mut()
+            .ok_or(DurableRuntimeProcessorError::Poisoned)?;
+        let entity = replica.e_replicas.get_mut(entity_key).ok_or_else(|| {
+            RuntimeMachineError::EntityStateMap(format!(
+                "READ_OWNER_MISSING:{}",
+                entity_key.replica_id()
+            ))
+        })?;
+        entity
+            .accounts
+            .read_account_views(account_ids, project)
+            .map_err(RuntimeMachineError::Account)
+            .map_err(Into::into)
     }
 
     pub fn account_status(
@@ -729,6 +871,11 @@ impl DurableRuntimeProcessor {
         Ok(())
     }
 
+    /// Transport-authenticated signed Profile metadata; never checkpoint or financial state.
+    pub fn authenticated_profiles(&self) -> Vec<serde_json::Value> {
+        self.routes.authenticated_profiles()
+    }
+
     pub(crate) fn entity_routes(&self) -> EntityRouteTable {
         self.routes.clone()
     }
@@ -753,6 +900,20 @@ impl DurableRuntimeProcessor {
 
     /// Exact bytes persisted for one frame, loaded only after a parity failure.
     /// Successful replay and production publication pay no clone or decode cost.
+    pub fn adapter_storage_head(&mut self) -> Result<Value, DurableRuntimeProcessorError> {
+        self.ensure_healthy()?;
+        self.sync_committed()?;
+        self.committer_call(CommitterCommand::AdapterStorageHead)?
+    }
+
+    pub fn adapter_restore_sources(
+        &mut self,
+    ) -> Result<crate::restore::NativeConcreteRestoreSources, DurableRuntimeProcessorError> {
+        self.ensure_healthy()?;
+        self.sync_committed()?;
+        self.committer_call(CommitterCommand::AdapterRestoreSources)?
+    }
+
     pub fn read_durable_frame(
         &mut self,
         height: u64,
@@ -834,6 +995,9 @@ impl DurableRuntimeProcessor {
             Err(DurableRuntimeProcessorError::Storage(error)) => {
                 return self.fail_stop(DurableRuntimeProcessorError::Storage(error));
             }
+            Err(error @ DurableRuntimeProcessorError::LocalProfiles(_)) => {
+                return self.fail_stop(error);
+            }
             Err(error) => return Err(error),
         };
         let replica = self
@@ -841,7 +1005,7 @@ impl DurableRuntimeProcessor {
             .take()
             .ok_or(DurableRuntimeProcessorError::Poisoned)?;
         let apply_started = Instant::now();
-        let applied = match apply(replica) {
+        let mut applied = match apply(replica) {
             Ok(applied) => applied,
             Err(error) => return self.fail_stop(DurableRuntimeProcessorError::Machine(error)),
         };
@@ -887,6 +1051,15 @@ impl DurableRuntimeProcessor {
             }
         } else {
             None
+        };
+        let profiles = match self
+            .local_profiles
+            .as_mut()
+            .map(|publisher| publisher.changed(&mut applied))
+            .transpose()
+        {
+            Ok(profiles) => profiles,
+            Err(error) => return self.fail_stop(DurableRuntimeProcessorError::Projection(error)),
         };
         let projected = match project_durable_frame(
             applied,
@@ -942,6 +1115,7 @@ impl DurableRuntimeProcessor {
             .send(CommitterCommand::Commit(Box::new((
                 projected.encoded,
                 projected.post_commit_j_attempts,
+                profiles,
             ))))
             .is_err()
         {
@@ -1184,6 +1358,8 @@ pub enum DurableRuntimeProcessorError {
     ReportOverflow,
     #[error("RRS_PROCESSOR_ROUTE:{0}")]
     Route(String),
+    #[error("RRS_PROCESSOR_LOCAL_PROFILES:{0}")]
+    LocalProfiles(RuntimeTransportError),
     #[error(transparent)]
     Machine(#[from] RuntimeMachineError),
     #[error("RRS_PROCESSOR_PROJECTION:{0}")]

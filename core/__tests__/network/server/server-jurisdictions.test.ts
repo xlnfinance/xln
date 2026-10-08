@@ -1,3 +1,4 @@
+import { safeStringify } from '../../../protocol/serialization';
 import { afterEach, describe, expect, test } from 'bun:test';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -103,6 +104,7 @@ describe('server jurisdiction writer', () => {
         ['Testnet', {
           name: 'Testnet',
           chainId: 31337,
+          blockTimeMs: 1000,
           entityProviderDeploymentBlock: 2,
           rpcs: ['http://127.0.0.1:8545'],
           contracts: {
@@ -121,6 +123,7 @@ describe('server jurisdiction writer', () => {
         ['Testnet', {
           name: 'Testnet',
           chainId: 31337,
+          blockTimeMs: 1000,
           entityProviderDeploymentBlock: 2,
           rpcs: ['http://127.0.0.1:8545'],
           contracts: {
@@ -145,3 +148,36 @@ describe('server jurisdiction writer', () => {
     expect(parsed.jurisdictions.testnet.entityProviderDeploymentBlock).toBe(2);
   });
 });
+
+ test('runtime export preserves native transport, block time and complete browser configuration', async () => {
+  const contracts = { account: `0x${'11'.repeat(20)}`, depository: `0x${'22'.repeat(20)}`,
+    entityProvider: `0x${'33'.repeat(20)}`, deltaTransformer: `0x${'44'.repeat(20)}` };
+  const config = { name: 'Native TVM', chainId: 2414086651, blockTimeMs: 3000,
+    rpc: 'http://127.0.0.1:18545/jsonrpc', mode: 'tron', tronFullHost: 'http://127.0.0.1:19090',
+    tronSolidityHost: 'http://127.0.0.1:19091', status: 'active', explorer: '', currency: 'TRX',
+    entityProviderDeploymentBlock: 12, contracts };
+  const defaults = { timeout: 10000, retryAttempts: 3, gasLimit: 10000000 };
+  withJurisdictionsPath({ version: '1', lastUpdated: '2026-10-07', defaults, jurisdictions: { native: config } });
+  const env = { activeJurisdiction: 'Native TVM', state: { jReplicas: new Map([['Native TVM', {
+    name: config.name, chainId: config.chainId, blockTimeMs: config.blockTimeMs, contracts,
+    entityProviderDeploymentBlock: 12, rpcs: [config.rpc] }]]) } };
+  const result = JSON.parse(String(await buildRuntimeJurisdictionsJson(env as never)));
+  expect(Object.values(result.jurisdictions)[0]).toMatchObject({ mode: 'tron', blockTimeMs: 3000,
+    tronFullHost: config.tronFullHost, tronSolidityHost: config.tronSolidityHost, currency: 'TRX', explorer: '' });
+  expect(result.defaults).toEqual(defaults);
+  const { publicNativeTransports } = await import('../../../api/server/rpc/tron-proxy');
+  const publicResult = JSON.parse(publicNativeTransports(safeStringify(result)));
+  expect(Object.values(publicResult.jurisdictions)[0]).toMatchObject({
+    tronFullHost: '/api/tron/2414086651',
+    tronSolidityHost: '/api/tron/2414086651', contracts });
+  expect(result.jurisdictions).not.toEqual(publicResult.jurisdictions);
+  const server = Bun.serve({ port: 0, hostname: '127.0.0.1', fetch: () =>
+    new Response(publicNativeTransports(safeStringify(result))) });
+  try {
+    const response = await fetch(`http://127.0.0.1:${server.port}/api/jurisdictions`, {
+      headers: { Host: 'wallet.example', 'X-Forwarded-Proto': 'https', 'X-Forwarded-Host': 'evil.example' },
+    });
+    const exported = await response.json();
+    expect(Object.values(exported.jurisdictions)[0]).toMatchObject({ tronFullHost: '/api/tron/2414086651' });
+  } finally { server.stop(true); }
+ });

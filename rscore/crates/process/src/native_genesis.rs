@@ -7,25 +7,21 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 use std::str::FromStr;
-use std::sync::Arc;
 use std::time::Instant;
 
 use num_bigint::BigInt;
 use serde_json::{Map, Value};
-use sha2::{Digest, Sha256};
-use xln_rscore_batch::{EngineGeneration, ResidentConsensusEngine};
 use xln_rscore_engine::{BoardDelays, SigningIdentity, derive_signer_address, derive_signer_key};
 use xln_rscore_entity_kernel::{
-    ConsensusMode, EntityConsensusConfig, EntityConsensusState, EntityFrameAuthority,
-    EntityLeaderState, EntityProfile, EntitySingleSigner, EntityStateSlice,
-    ResidentEntityConsensusReplica,
+    ConsensusMode, EntityConsensusConfig, EntityFrameAuthority, EntityLeaderState, EntityProfile,
+    EntityStateSlice,
 };
 use xln_rscore_protocol::CanonicalValue;
 use xln_rscore_runtime::processor::{EntityRouteTable, RuntimeDurableEnvelope};
 use xln_rscore_runtime::storage::native::{NativeRuntimeStore, NativeStorageConfig};
 use xln_rscore_runtime::{
     DurableRuntimeProcessor, RuntimeEntityKey, RuntimeLimits, RuntimeReplica, RuntimeSignerLabel,
-    RuntimeState, canonical_swap_market_policy, canonical_value_from_tagged_json,
+    RuntimeState, canonical_value_from_tagged_json,
 };
 
 use crate::PAYMENT_PROFILE_BINDING;
@@ -73,7 +69,7 @@ impl NativeGenesisConfig {
             .expect("validated J inventory")
         {
             let name = row[0].as_str().expect("validated J name");
-            if name != durable.active_jurisdiction() {
+            if Some(name) != durable.active_jurisdiction() {
                 expected.insert(format!("{primary_label}:{name}"));
             }
         }
@@ -296,18 +292,6 @@ fn hex(bytes: &[u8]) -> String {
     })
 }
 
-fn generation(entity_id: &[u8; 32]) -> EngineGeneration {
-    let mut digest = Sha256::new();
-    digest.update(b"xln.rscore.runtime.restore.generation.v1");
-    digest.update(entity_id);
-    digest.update(0_u64.to_be_bytes());
-    digest.update(0_u64.to_be_bytes());
-    let digest = digest.finalize();
-    let mut generation = [0_u8; 8];
-    generation.copy_from_slice(&digest[..8]);
-    EngineGeneration::from_bytes(generation)
-}
-
 fn expected_runtime_id(runtime_seed: &str, runtime_signer_label: &str) -> Result<String, String> {
     derive_signer_address(runtime_seed, runtime_signer_label)
         .map(|address| hex(&address))
@@ -441,7 +425,7 @@ fn create_native_genesis_processor(
     .map_err(|error| format!("RRS_NATIVE_GENESIS_REPLICA:{error}"))?;
     let signer = RuntimeSignerLabel::new(runtime_signer_label)
         .map_err(|error| format!("RRS_NATIVE_GENESIS_RUNTIME_SIGNER:{error}"))?;
-    let processor = match publication {
+    let mut processor = match publication {
         GenesisPublication::WebSocket => {
             DurableRuntimeProcessor::new(replica, store, routes, runtime_seed, signer)
         }
@@ -455,6 +439,16 @@ fn create_native_genesis_processor(
         ),
     }
     .map_err(|error| format!("RRS_NATIVE_GENESIS_PROCESSOR:{error}"))?;
+    // Genesis and checkpoint restore must expose the same existing operator custody.
+    // Only configured local owners enter this live keyring; no key is persisted or projected.
+    for owner in &genesis.entities {
+        let key = derive_signer_key(runtime_seed, &owner.signer_label)
+            .map_err(|error| format!("RRS_NATIVE_GENESIS_ENTITY_KEY:{error}"))?;
+        let signer = hex(&derive_signer_address(runtime_seed, &owner.signer_label)
+            .map_err(|error| format!("RRS_NATIVE_GENESIS_ENTITY_SIGNER:{error}"))?);
+        processor.install_custody_key(&signer, key)?;
+    }
+
     Ok(NativeRuntimeReady {
         processor,
         restore_elapsed: started.elapsed(),
@@ -469,6 +463,7 @@ pub fn validate_native_owner_inventory(
     genesis: &NativeGenesisConfig,
     replica: &RuntimeReplica,
     runtime_seed: &str,
+    custody_owner: Option<&RuntimeEntityKey>,
 ) -> Result<(), String> {
     let mut expected = BTreeMap::new();
     for owner in &genesis.entities {
@@ -484,8 +479,19 @@ pub fn validate_native_owner_inventory(
             return Err("RRS_NATIVE_GENESIS_DUPLICATE_ENTITY".into());
         }
     }
-    if expected.keys().ne(replica.state.e_replicas.keys())
-        || expected.keys().ne(replica.e_replicas.keys())
+    let mut expected_keys = expected
+        .keys()
+        .cloned()
+        .collect::<std::collections::BTreeSet<_>>();
+    if let Some(owner) = custody_owner {
+        // Caller derives this exact lazy Entity/signer from verified private custody.
+        // A persisted file without its import is the supported crash-gap case.
+        if replica.state.e_replicas.contains_key(owner) {
+            expected_keys.insert(owner.clone());
+        }
+    }
+    if expected_keys.iter().ne(replica.state.e_replicas.keys())
+        || expected_keys.iter().ne(replica.e_replicas.keys())
     {
         return Err(format!(
             "RRS_NATIVE_GENESIS_OWNER_INVENTORY_MISMATCH:expected={}:actual={}",
@@ -537,17 +543,6 @@ fn create_genesis_entity(
             .map_err(|error| format!("RRS_NATIVE_GENESIS_ENTITY_ID:{error}"))?;
     let entity_id = *identity.entity_id();
     let entity_id_text = hex(&entity_id);
-    let accounts = ResidentConsensusEngine::restore(
-        generation(&entity_id),
-        workers,
-        0,
-        private_key,
-        signer_id.clone(),
-        Arc::new(canonical_swap_market_policy()),
-        Vec::new(),
-    )
-    .map_err(|error| format!("RRS_NATIVE_GENESIS_ACCOUNTS:{error}"))?;
-    let accounts_root = accounts.accounts_root();
     let authority = EntityFrameAuthority {
         config: EntityConsensusConfig {
             mode: ConsensusMode::ProposerBased,
@@ -564,43 +559,18 @@ fn create_genesis_entity(
     }
     .validate_and_normalize()
     .map_err(|error| format!("RRS_NATIVE_GENESIS_AUTHORITY:{error}"))?;
-    let entity_consensus = ResidentEntityConsensusReplica {
-        state: EntityConsensusState {
-            sections: Vec::new(),
-            authority,
-        },
-        certified_frame_head: None,
-    };
-    let entity_signer = EntitySingleSigner::from_key(
-        private_key,
-        &signer_id,
-        &entity_id_text,
-        1,
-        1,
-        BoardDelays::default(),
-    )
-    .map_err(|error| format!("RRS_NATIVE_GENESIS_ENTITY_SIGNER:{error}"))?;
     let mut entity = EntityStateSlice::empty(entity_id_text, timestamp);
     entity.profile = owner.entity_profile.clone();
     entity.entity_encryption_public_key = owner.entity_encryption_public_key;
-    let entity_key = RuntimeEntityKey::new(entity_id, &signer_id)
-        .map_err(|error| format!("RRS_NATIVE_GENESIS_REPLICA_KEY:{error}"))?;
-    let state = xln_rscore_runtime::RuntimeEntityState {
-        accounts_root,
+    xln_rscore_runtime::create_entity_genesis_slot(
         entity,
-    };
-    let replica = xln_rscore_runtime::RuntimeEntityReplica::new(
-        &state,
-        entity_id,
+        authority,
+        private_key,
         signer_id,
-        accounts,
-        entity_consensus,
-        entity_signer,
+        workers,
         PAYMENT_PROFILE_BINDING.protocol_fingerprint,
         0,
     )
-    .map_err(|error| format!("RRS_NATIVE_GENESIS_ENTITY_REPLICA:{error}"))?;
-    Ok((entity_key, state, replica))
 }
 
 pub fn native_store_is_pristine(path: impl AsRef<Path>) -> Result<bool, String> {
@@ -655,3 +625,7 @@ mod tests {
 #[cfg(test)]
 #[path = "tests/native_genesis_multi_tests.rs"]
 mod multi_tests;
+
+#[cfg(test)]
+#[path = "tests/native_custody_tests.rs"]
+mod custody_tests;

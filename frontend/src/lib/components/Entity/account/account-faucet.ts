@@ -1,4 +1,4 @@
-import { hasOnlyAllowedKeys as hasOnlyKeys, isUnknownRecord as isRecord, parseJsonUnknown } from '$lib/utils/boundary';
+import { hasOnlyAllowedKeys as hasOnlyKeys, isUnknownRecord as isRecord, parseJsonUnknown } from '#lib/utils/boundary/index.ts';
 
 export const RESERVE_FAUCET_TIMEOUT_MS = 15_000;
 export const OFFCHAIN_FAUCET_REQUEST_TIMEOUT_MS = 3_000;

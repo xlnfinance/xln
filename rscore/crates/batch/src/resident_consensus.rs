@@ -320,6 +320,9 @@ pub struct CertifiedSettlementHankoDraft {
     pub dispute_hanko: Vec<u8>,
 }
 
+/// Per-token committed (inbound, outbound) capacities in the resident owner perspective.
+pub type ResidentAccountCapacities = BTreeMap<TokenId, (BigInt, BigInt)>;
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ResidentAccountStatusView {
     pub status: String,
@@ -1375,6 +1378,38 @@ impl ResidentConsensusEngine {
     /// Canonical on-demand operator projection for one Account. The Account
     /// stays resident on its shard worker and only the requested token rows
     /// cross the boundary; no full forest scan or durable read model exists.
+    /// Explicit bounded view of finalized heads; never read an outbound candidate.
+    pub fn read_account_views(
+        &mut self,
+        account_ids: Vec<AccountId>,
+        project: fn(&AccountConsensus) -> Result<CanonicalValue, xln_rscore_engine::StateError>,
+    ) -> Result<Vec<(AccountId, CanonicalValue)>, BatchError> {
+        self.forest.read_head(
+            account_ids.into_iter().map(|id| (id, ())).collect(),
+            move |id, account, ()| {
+                project(account).map_err(|error| crate::consensus::state_error(id, &error))
+            },
+        )
+    }
+
+    /// Preflight HTLC observations read committed heads, before any Entity round exists.
+    pub fn read_head_capacities(
+        &mut self,
+        requests: Vec<(AccountId, Vec<TokenId>)>,
+    ) -> Result<Vec<(AccountId, ResidentAccountCapacities)>, BatchError> {
+        self.forest.read_head(requests, |_, account, tokens| {
+            Ok(tokens
+                .into_iter()
+                .filter_map(|token| {
+                    account.replica().state().delta(token).map(|delta| {
+                        let view = delta.perspective(account.replica().owner_side());
+                        (token, (view.in_capacity, view.out_capacity))
+                    })
+                })
+                .collect())
+        })
+    }
+
     pub fn account_status(
         &mut self,
         account_id: AccountId,
@@ -2389,7 +2424,16 @@ fn apply_outbound_work(
     if !work.admissions.is_empty() {
         account
             .admit_txs(work.admissions, "rscoreConsensus:admit")
-            .map_err(|error| state_error(account_id, &error))?;
+            .map_err(|error| match error {
+                xln_rscore_engine::StateError::MempoolAdmissionRejected { index, maximum } => {
+                    BatchError::AccountMempoolAdmissionRejected {
+                        account_id,
+                        tx_index: index,
+                        maximum,
+                    }
+                }
+                error => state_error(account_id, &error),
+            })?;
         changed = true;
     }
     for update in work.envelope_updates {
@@ -2466,7 +2510,7 @@ fn apply_outbound_work(
         }
     }
     let selection = match work.proposal_selection {
-        None | Some(BatchAccountSelection::WaitForSibling) => None,
+        None | Some(BatchAccountSelection::Defer) => None,
         Some(BatchAccountSelection::WholeMempool) => Some(AccountProposalSelection::WholeMempool),
         Some(BatchAccountSelection::Selected(txs)) => Some(AccountProposalSelection::Selected(txs)),
     };

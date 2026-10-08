@@ -1,9 +1,9 @@
 <script lang="ts">
-import type { EntityReadView } from '$lib/components/Entity/core/entity-panel-types';
+import type { EntityReadView } from '#lib/components/Entity/core/entity-panel-types.ts';
 
-  import type { Tab } from '$lib/types/ui';
+  import type { Tab } from '#lib/types/ui.ts';
   import type { EntityPanelJurisdictionView } from '../core/entity-panel-model';
-  import JurisdictionDropdown from '$lib/components/Jurisdiction/JurisdictionDropdown.svelte';
+  import JurisdictionDropdown from '#lib/components/Jurisdiction/JurisdictionDropdown.svelte';
   import EntityDropdown from './shell/EntityDropdown.svelte';
 
   export let tab: Tab;

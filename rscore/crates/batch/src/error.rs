@@ -5,6 +5,12 @@ use crate::AccountId;
 
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum BatchError {
+    #[error("RSCORE_ACCOUNT_MEMPOOL_ADMISSION_REJECTED:{account_id}:{tx_index}:{maximum}")]
+    AccountMempoolAdmissionRejected {
+        account_id: AccountId,
+        tx_index: usize,
+        maximum: usize,
+    },
     #[error("RSCORE_BATCH_WORKERS_INVALID:{0}")]
     InvalidWorkerCount(usize),
     #[error("RSCORE_BATCH_THREAD_POOL:{0}")]

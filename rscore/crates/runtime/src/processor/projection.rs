@@ -708,7 +708,7 @@ pub(crate) fn project_durable_frame(
     let phase_started = std::time::Instant::now();
     let runtime_input = runtime_input(applied.runtime_txs, applied.entity_inputs)?;
     let projection_input = phase_started.elapsed();
-    let component_digests = component_digests(&result)?;
+    let component_digests = component_digests(&result.replica.durable)?;
     let machine_done = phase_started.elapsed();
     let projection_machine = machine_done.saturating_sub(projection_input);
     let mut replica_metas = Vec::with_capacity(result.replica.state.e_replicas.len());
@@ -1000,6 +1000,27 @@ fn local_continuation_evidence(
 }
 
 #[cfg(test)]
+mod prepared_wal_roundtrip_tests {
+    #[test]
+    fn native_prepared_transaction_wal_uses_one_runtime_envelope() {
+        let data = crate::j_submit::JPreparedTransactionData {
+            jurisdiction_name: "Testnet".into(),
+            attempt_id: "committed-attempt".into(),
+            raw_transaction: "0x02abcd".into(),
+        };
+        let tx = crate::RuntimeTx::RecordJPreparedTransaction(data.clone());
+        let encoded = super::encode_runtime_txs(std::iter::once(&tx)).unwrap();
+        assert_eq!(encoded[0]["type"], "recordJPreparedTransaction");
+        // Native WAL restoration passes this exact data object to decode_prepared.
+        // A second {type,data} envelope made accepted signed batches unrecoverable.
+        assert_eq!(
+            crate::j_submit::decode_prepared(&encoded[0]["data"]).unwrap(),
+            data
+        );
+    }
+}
+
+#[cfg(test)]
 mod local_continuation_tests {
     use serde_json::json;
 
@@ -1076,9 +1097,32 @@ fn encode_runtime_txs<'a>(
                 ]),
             ),
         ])),
+        crate::RuntimeTx::ReplaceJPreparedTransaction(value) => Ok(object([
+            ("type", Value::String("replaceJPreparedTransaction".into())),
+            ("data", value.encode()),
+        ])),
+        crate::RuntimeTx::RecordJPreparedTransaction(value) => {
+            crate::j_submit::encode_j_prepared_transaction(value)
+                .map_err(|error| RuntimeFrameProjectionError::RuntimeTx(error.to_string()))
+        }
+        crate::RuntimeTx::ImportReplica(value) => Ok(value.encode()),
         crate::RuntimeTx::ImportJ(value) => Ok(object([
             ("type", Value::String("importJ".into())),
             ("data", crate::j_import::encode_import_request(value)),
+        ])),
+        crate::RuntimeTx::ReplaceNumberedRegistrationIntent(value) => Ok(object([
+            (
+                "type",
+                Value::String("replaceNumberedRegistrationIntent".into()),
+            ),
+            ("data", value.encode()),
+        ])),
+        crate::RuntimeTx::RecordAuthenticatedJAuthority(value) => Ok(object([
+            (
+                "type",
+                Value::String("recordAuthenticatedJAuthority".into()),
+            ),
+            ("data", value.encode()),
         ])),
         crate::RuntimeTx::CompleteImportJ(value) => Ok(object([
             ("type", Value::String("completeImportJ".into())),
@@ -1164,32 +1208,38 @@ fn encode_runtime_txs<'a>(
 /// durable Runtime-machine component, so no pending queue is projected here.
 fn runtime_machine(result: &RuntimeApplyResult) -> Result<Value, RuntimeFrameProjectionError> {
     let envelope = &result.replica.durable;
-    Ok(object([
+    let mut machine = object([
         (
             "runtimeId",
             Value::String(envelope.runtime_id().to_string()),
-        ),
-        (
-            "activeJurisdiction",
-            Value::String(envelope.active_jurisdiction().to_string()),
         ),
         ("runtimeConfig", envelope.runtime_config().value()),
         (
             "infrastructure",
             super::envelope::project_durable_infrastructure(envelope.infrastructure())?,
         ),
-        ("jReplicas", envelope.j_replicas().clone()),
-    ]))
+        (
+            "jReplicas",
+            super::envelope::project_durable_j_replicas(envelope.j_replicas()),
+        ),
+    ]);
+    if let Some(name) = envelope.active_jurisdiction() {
+        machine
+            .as_object_mut()
+            .expect("Runtime machine object")
+            .insert("activeJurisdiction".into(), Value::String(name.to_owned()));
+    }
+    Ok(machine)
 }
 
 /// Hash the replay-verifiable machine components without first cloning them
 /// into a second serde tree. The complete machine projection is materialized
 /// only at checkpoint cadence; canonical-only frames never build it.
 fn component_digests(
-    result: &RuntimeApplyResult,
+    envelope: &super::envelope::RuntimeDurableEnvelope,
 ) -> Result<Vec<RuntimeComponentDigest>, RuntimeFrameProjectionError> {
-    let envelope = &result.replica.durable;
     let cache = envelope.component_digest_cache();
+    let j_replicas = super::envelope::project_durable_j_replicas(envelope.j_replicas());
     let runtime_id = Value::String(envelope.runtime_id().to_string());
     let infrastructure =
         super::envelope::project_durable_infrastructure(envelope.infrastructure())?;
@@ -1199,9 +1249,14 @@ fn component_digests(
     [
         ("runtimeId", &runtime_id, &cache.runtime_id),
         ("infrastructure", &infrastructure, &cache.infrastructure),
-        ("jReplicas", envelope.j_replicas(), &cache.j_replicas),
+        ("jReplicas", &j_replicas, &cache.j_replicas),
     ]
     .into_iter()
+    // TypeScript's replay post-state view omits an empty infrastructure
+    // component, even though checkpoint machines retain an explicit {}.
+    .filter(|(key, value, _)| {
+        *key != "infrastructure" || value.as_object().is_some_and(|row| !row.is_empty())
+    })
     .map(|(key, value, cell)| {
         // End the immutable RefCell guard before a cache miss writes the
         // computed digest back. Matching directly on `cell.borrow()` extends
@@ -1306,6 +1361,7 @@ fn canonical_state(
                     &live.entity_consensus.state.sections,
                     owned,
                     &live.entity_consensus.state.authority,
+                    state.entity.height,
                 )?;
                 xln_rscore_entity_kernel::compute_entity_consensus_root(&sections)?
             }
@@ -1494,6 +1550,57 @@ fn dedup_first_touch(values: impl Iterator<Item = String>) -> Vec<String> {
 mod settlement_rejection_tests {
     use super::*;
     use crate::machine::tests::settlement_rejection::{input, pending_replica};
+
+    #[test]
+    fn actual_tvm_import_matches_typescript_durable_j_projection() {
+        let fixture: Value = serde_json::from_str(include_str!(
+            "../../../../fixtures/native-tron-import-v1.json"
+        ))
+        .unwrap();
+        let mut envelope =
+            super::super::envelope::RuntimeDurableEnvelope::decode(&fixture["machine"], [0; 32])
+                .unwrap();
+        for tx in fixture["imports"].as_array().unwrap() {
+            let result = crate::j_import::decode_import_result(&tx["data"]).unwrap();
+            crate::j_import::apply_import_result(&mut envelope, &result).unwrap();
+        }
+        assert_eq!(
+            super::super::envelope::project_durable_j_replicas(envelope.j_replicas()),
+            fixture["expectedView"]["jReplicas"]
+        );
+        assert!(
+            super::super::envelope::project_durable_infrastructure(envelope.infrastructure())
+                .unwrap()
+                .as_object()
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn completed_j_import_omits_empty_post_state_infrastructure() {
+        let machine = serde_json::json!({
+            "runtimeId": format!("0x{}", "11".repeat(20)),
+            "runtimeConfig": {"loopIntervalMs": 0, "minFrameDelayMs": 5},
+            "infrastructure": {}, "jReplicas": []
+        });
+        let mut envelope =
+            super::super::envelope::RuntimeDurableEnvelope::decode(&machine, [0; 32]).unwrap();
+        let keys = |envelope: &super::super::envelope::RuntimeDurableEnvelope| {
+            component_digests(envelope)
+                .unwrap()
+                .into_iter()
+                .map(|entry| entry.key)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(keys(&envelope), ["runtimeId", "jReplicas"]);
+        envelope.infrastructure_mut()["maxEntityInputsPerFrame"] = serde_json::json!(10);
+        envelope.invalidate_infrastructure_digest();
+        assert_eq!(
+            keys(&envelope),
+            ["runtimeId", "infrastructure", "jReplicas"]
+        );
+    }
 
     fn separated_round(reject_last: bool) {
         use crate::machine::tests::settlement_rejection::separated_attempts;

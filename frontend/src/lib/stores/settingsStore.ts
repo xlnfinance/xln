@@ -1,5 +1,5 @@
 import { writable, get } from 'svelte/store';
-import type { Settings, ThemeName, BarColorMode, BarLayoutMode, AccountDeltaViewMode, AccountSkin, AccountBarStyle, UIStyleSettings } from '$lib/types/ui';
+import type { Settings, ThemeName, BarColorMode, BarLayoutMode, AccountDeltaViewMode, AccountSkin, AccountBarStyle, UIStyleSettings } from '#lib/types/ui.ts';
 import { applyThemeToDocument } from '../utils/themes';
 import {
   DEFAULT_UI_STYLE,
@@ -8,12 +8,12 @@ import {
   normalizeImportedUiSettings,
   normalizeUiStyle,
 } from '../utils/ui-style';
-import { normalizeWsUrl, sameWsEndpoint } from '$lib/utils/runtime/wsUrl';
+import { normalizeWsUrl, sameWsEndpoint } from '#lib/utils/runtime/wsUrl.ts';
 import { errorLog } from './errorLogStore';
 import {
   DEFAULT_XLN_MASCOT_DOCK,
   normalizeXlnMascotDock,
-} from '$lib/components/XlnMascot/mascot-geometry';
+} from '#lib/components/XlnMascot/mascot-geometry.ts';
 
 const VALID_BAR_COLOR_MODES: readonly BarColorMode[] = ['rgy', 'theme', 'token'] as const;
 const VALID_ACCOUNT_DELTA_VIEW_MODES: readonly AccountDeltaViewMode[] = ['per-token', 'aggregated'] as const;

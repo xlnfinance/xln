@@ -7,7 +7,7 @@ import { resolveJurisdictionsJsonPath } from '../../../jurisdiction/adapter/juri
 import { computeJurisdictionsNetworkVersion } from '../../../jurisdiction/adapter/kernel/jurisdictions-version';
 import { toPublicRpcUrl } from '../../../network/p2p/loopback-url';
 import { createStructuredLogger } from '../../../support/logger';
-import { validateJurisdictionsDataValue } from '../../../jurisdiction/adapter/kernel/jurisdiction-loader';
+import { decodeJurisdictionTransport, validateJurisdictionsDataValue } from '../../../jurisdiction/adapter/kernel/jurisdiction-loader';
 import { safeStringify } from '../../../protocol/serialization';
 import { isRecord } from '../utils';
 
@@ -128,22 +128,6 @@ export const updateJurisdictionsJson = async (
 export const readCanonicalJurisdictionsJson = async (): Promise<string> =>
   await readFile(resolveJurisdictionsJsonPath(), 'utf8');
 
-const readCanonicalJurisdictionsVersion = async (): Promise<string> => {
-  const raw = await readCanonicalJurisdictionsJson();
-  const parsed = validateJurisdictionsDataValue(JSON.parse(raw));
-  const version = String(parsed['version'] || '').trim();
-  if (!version) {
-    throw new Error('MISSING_JURISDICTIONS_VERSION');
-  }
-  return version;
-};
-
-const readCanonicalNetworkVersion = async (): Promise<string> => {
-  const raw = await readCanonicalJurisdictionsJson();
-  const parsed = validateJurisdictionsDataValue(JSON.parse(raw));
-  return computeJurisdictionsNetworkVersion(parsed, await readCanonicalJurisdictionsVersion());
-};
-
 export const buildRuntimeJurisdictionsJson = async (env?: RuntimeReplica | null): Promise<string | null> => {
   if (!env?.state.jReplicas || env.state.jReplicas.size === 0) return null;
   const jurisdictionName = env.activeJurisdiction ?? env.state.jReplicas.keys().next().value;
@@ -152,6 +136,7 @@ export const buildRuntimeJurisdictionsJson = async (env?: RuntimeReplica | null)
     | {
         name?: string;
         chainId?: number;
+        blockTimeMs?: number;
         rpcs?: string[];
         depositoryAddress?: string;
         entityProviderAddress?: string;
@@ -182,8 +167,20 @@ export const buildRuntimeJurisdictionsJson = async (env?: RuntimeReplica | null)
     );
   }
 
-  const version = await readCanonicalJurisdictionsVersion();
-  const networkVersion = await readCanonicalNetworkVersion();
+  const canonical = validateJurisdictionsDataValue(JSON.parse(await readCanonicalJurisdictionsJson()));
+  const version = String(canonical['version']);
+  const networkVersion = computeJurisdictionsNetworkVersion(canonical, version);
+  const entries = canonical['jurisdictions'] as Record<string, Record<string, unknown>>;
+  const matches = Object.values(entries).filter(entry => entry['chainId'] === replica.chainId &&
+    String((entry['contracts'] as Record<string, unknown>)['depository']).toLowerCase() === depository.toLowerCase());
+  if (matches.length > 1) throw new Error('JURISDICTION_TRANSPORT_BINDING_AMBIGUOUS');
+  const configured = matches[0];
+  const blockTimeMs = replica.blockTimeMs ?? configured?.['blockTimeMs'];
+  if (typeof blockTimeMs !== 'number' || !Number.isFinite(blockTimeMs) || blockTimeMs <= 0) {
+    throw new Error('RUNTIME_JURISDICTION_BLOCK_TIME_INVALID');
+  }
+  const transport = configured ? decodeJurisdictionTransport(configured, 'SERVER_JURISDICTION') : {};
+
   const displayName =
     normalizeJurisdictionDisplayName(replica.name || jurisdictionName) ||
     normalizeJurisdictionDisplayName(jurisdictionName) ||
@@ -194,8 +191,13 @@ export const buildRuntimeJurisdictionsJson = async (env?: RuntimeReplica | null)
     deployVersion: networkVersion,
     networkVersion,
     lastUpdated: new Date().toISOString(),
+    defaults: canonical['defaults'],
     jurisdictions: {
       [jurisdictionKey]: {
+        ...transport,
+        blockTimeMs,
+        currency: configured?.['currency'] ?? 'ETH',
+        explorer: configured?.['explorer'] ?? '',
         name: displayName,
         primary: true,
         status: 'active',

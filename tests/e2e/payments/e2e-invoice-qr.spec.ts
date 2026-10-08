@@ -6,16 +6,16 @@ import { getPersistedReceiptCursor, waitForPersistedFrameMessageMatch } from '..
 
 const TEST_TIMEOUT_MS = process.env.E2E_LONG === '1' ? 240_000 : 210_000;
 
-async function faucetOffchain(page: import('@playwright/test').Page, entityId: string, hubId: string): Promise<void> {
-  const result = await page.evaluate(async ({ entityId, hubId }) => {
+async function faucetOffchain(page: import('@playwright/test').Page, entityId: string, hubId: string, runtimeId: string): Promise<void> {
+  const result = await page.evaluate(async ({ entityId, hubId, runtimeId }) => {
     const response = await fetch('/api/faucet/offchain', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ userEntityId: entityId, hubEntityId: hubId, tokenSymbol: 'USDC', amount: '100' }),
+      body: JSON.stringify({ userEntityId: entityId, userRuntimeId: runtimeId, hubEntityId: hubId, tokenSymbol: 'USDC', amount: '100' }),
     });
     const data = await response.json().catch(() => ({}));
     return { ok: response.ok, data };
-  }, { entityId, hubId });
+  }, { entityId, hubId, runtimeId });
 
   expect(result.ok, JSON.stringify(result.data)).toBe(true);
 }
@@ -42,7 +42,7 @@ test.describe('Invoice QR flow', () => {
       await gotoApp(alicePage);
       const alice = await createRuntimeIdentity(alicePage, 'alice', selectDemoMnemonic('alice'));
       await connectRuntimeToHub(alicePage, alice, hubId);
-      await faucetOffchain(alicePage, alice.entityId, hubId);
+      await faucetOffchain(alicePage, alice.entityId, hubId, alice.runtimeId);
 
       await gotoApp(bobPage);
       const bob = await createRuntimeIdentity(bobPage, 'bob', selectDemoMnemonic('bob'));

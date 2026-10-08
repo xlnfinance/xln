@@ -1,3 +1,6 @@
+#[path = "payments/settlement_continuation.rs"]
+mod continuation;
+pub(crate) use continuation::{ContinuationDisposition, continuation_probe, select_continuation};
 use ethabi::ethereum_types::U256;
 use xln_rscore_engine::{AccountTx, settlement_workspace_body_hash, validate_settlement_ops};
 use xln_rscore_protocol::{CanonicalNumber, CanonicalValue};

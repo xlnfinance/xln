@@ -51,10 +51,11 @@ const J_REPLICA_REQUIRED_FIELDS: [&str; 7] = [
     "position",
     "stateRoot",
 ];
-const J_REPLICA_OPTIONAL_FIELDS: [&str; 8] = [
+const J_REPLICA_OPTIONAL_FIELDS: [&str; 9] = [
     "blockTimeMs",
     "blockReady",
     "watcherConfirmationDepth",
+    "watcherReceiptCommitment",
     "rpcs",
     "chainId",
     "entityProviderDeploymentBlock",
@@ -205,7 +206,7 @@ impl RuntimeOperatorConfig {
 pub struct RuntimeDurableEnvelope {
     runtime_id: String,
     prev_frame_hash: [u8; 32],
-    active_jurisdiction: String,
+    active_jurisdiction: Option<String>,
     runtime_config: RuntimeOperatorConfig,
     infrastructure: Value,
     j_replicas: Value,
@@ -235,14 +236,13 @@ impl RuntimeDurableEnvelope {
         let machine_object = object(machine, "machine")?;
         exact_fields(
             machine_object,
+            &["infrastructure", "jReplicas", "runtimeConfig", "runtimeId"],
             &[
                 "activeJurisdiction",
-                "infrastructure",
-                "jReplicas",
-                "runtimeConfig",
-                "runtimeId",
+                "networkInbox",
+                "pendingNetworkOutputs",
+                "pendingOutputs",
             ],
-            &["networkInbox", "pendingNetworkOutputs", "pendingOutputs"],
             "machine",
         )?;
         for field in ["networkInbox", "pendingNetworkOutputs", "pendingOutputs"] {
@@ -259,8 +259,11 @@ impl RuntimeDurableEnvelope {
         if !canonical_hex(&runtime_id, 20) {
             return Err(RuntimeDurableEnvelopeError::RuntimeId(runtime_id));
         }
-        let active_jurisdiction = string(machine_object, "activeJurisdiction")?.to_string();
-        if active_jurisdiction.is_empty() {
+        let active_jurisdiction = machine_object
+            .get("activeJurisdiction")
+            .map(|_| string(machine_object, "activeJurisdiction").map(str::to_owned))
+            .transpose()?;
+        if active_jurisdiction.as_ref().is_some_and(String::is_empty) {
             return Err(RuntimeDurableEnvelopeError::ActiveJurisdiction);
         }
         let runtime_config = decode_runtime_config(required(machine_object, "runtimeConfig")?)?;
@@ -291,8 +294,8 @@ impl RuntimeDurableEnvelope {
         self.prev_frame_hash
     }
 
-    pub fn active_jurisdiction(&self) -> &str {
-        &self.active_jurisdiction
+    pub fn active_jurisdiction(&self) -> Option<&str> {
+        self.active_jurisdiction.as_deref()
     }
 
     pub fn runtime_config(&self) -> &RuntimeOperatorConfig {
@@ -312,7 +315,7 @@ impl RuntimeDurableEnvelope {
     }
 
     pub(crate) fn set_active_jurisdiction(&mut self, value: String) {
-        self.active_jurisdiction = value;
+        self.active_jurisdiction = Some(value);
     }
 
     pub(crate) fn invalidate_j_replicas_digest(&mut self) {
@@ -423,6 +426,18 @@ pub(crate) fn project_durable_infrastructure(
     Ok(Value::Object(projected))
 }
 
+// Token registry is supplied by the J adapter, outside the TS durable J
+// snapshot. Match that boundary instead of adding a second storage authority.
+pub(crate) fn project_durable_j_replicas(value: &Value) -> Value {
+    let mut rows = value.clone();
+    for row in rows.as_array_mut().expect("validated J rows") {
+        let replica = row[1].as_object_mut().expect("validated J replica");
+        replica.remove("tokenRegistry");
+        replica.insert("lastBlockTimestamp".into(), Value::from(0));
+    }
+    rows
+}
+
 fn has_durable_entries(value: &Value) -> bool {
     match value {
         Value::Array(values) => !values.is_empty(),
@@ -451,16 +466,6 @@ impl PartialEq for RuntimeDurableEnvelope {
 }
 
 impl Eq for RuntimeDurableEnvelope {}
-
-#[cfg(test)]
-impl RuntimeDurableEnvelope {
-    #[cfg(test)]
-    pub(crate) fn fixture_for_runtime(runtime_id: &str, prev_frame_hash: [u8; 32]) -> Self {
-        let mut machine = tests::fixture();
-        machine["runtimeId"] = Value::String(runtime_id.to_string());
-        Self::decode(&machine, prev_frame_hash).expect("durable envelope fixture")
-    }
-}
 
 fn decode_runtime_config(
     value: &Value,
@@ -697,6 +702,16 @@ fn validate_j_replicas(value: &Value) -> Result<(), RuntimeDurableEnvelopeError>
             "watcherConfirmationDepth",
         ] {
             optional_safe_u64(replica, field)?;
+        }
+        if let Some(policy) = replica.get("watcherReceiptCommitment")
+            && (policy.as_str() != Some("tron-rpc-attested")
+                || replica
+                    .get("watcherConfirmationDepth")
+                    .and_then(Value::as_u64)
+                    != Some(0)
+                || replica.get("stateRoot") != Some(&Value::Null))
+        {
+            return Err(RuntimeDurableEnvelopeError::JReplicaRow(index));
         }
         optional_boolean(replica, "blockReady")?;
         if let Some(rpcs) = replica.get("rpcs")
@@ -998,6 +1013,25 @@ mod tests {
             },
             "jReplicas":[["Testnet",j("Testnet","1")],["Tron",j("Tron","2")]]
         })
+    }
+
+    #[test]
+    fn jurisdiction_import_checkpoint_preserves_absent_active_jurisdiction() {
+        let mut machine = fixture();
+        machine
+            .as_object_mut()
+            .unwrap()
+            .remove("activeJurisdiction");
+        assert_eq!(
+            RuntimeDurableEnvelope::decode(&machine, [0; 32])
+                .unwrap()
+                .active_jurisdiction(),
+            None
+        );
+        machine["activeJurisdiction"] = Value::Null;
+        assert!(RuntimeDurableEnvelope::decode(&machine, [0; 32]).is_err());
+        machine["activeJurisdiction"] = json!("");
+        assert!(RuntimeDurableEnvelope::decode(&machine, [0; 32]).is_err());
     }
 
     #[test]

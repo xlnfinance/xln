@@ -7,7 +7,7 @@ const source = (path: string): string => readFileSync(path, 'utf8');
 test('wallet origin ships no third-party executable code and enforces hashed scripts', () => {
   const appHtml = source('frontend/src/app.html');
   const routeMode = source('frontend/static/route-mode.js');
-  const config = source('frontend/svelte.config.js');
+  const config = source('frontend/kit-options.ts');
   const css = `${source('frontend/src/lib/styles/apple-glass.css')}\n${source('frontend/src/lib/components/Landing/landing-page.css')}`;
 
   expect(appHtml).not.toMatch(/<script[^>]+src=["']https?:\/\//i);

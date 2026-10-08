@@ -1,4 +1,4 @@
-import type { DeltaCapacityBarPresentation } from '$lib/components/Entity/shared/delta-types';
+import type { DeltaCapacityBarPresentation } from '#lib/components/Entity/shared/delta-types.ts';
 
 export type RcpanScenarioId = 'full-collateral' | 'reserve-backed' | 'debt-recovery';
 export type RcpanScenarioMode = 'auto' | RcpanScenarioId;

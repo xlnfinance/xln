@@ -574,3 +574,92 @@ fn group_d_cross_j_entity_kinds_match_typescript() {
         assert_outbox(&case, &actual);
     }
 }
+
+#[test]
+fn cross_quote_outside_same_j_anchor_uses_cross_admission() {
+    use crate::orderbook::{
+        OrderbookState, SameJOutputDelta, install_orderbook_outputs, prepare_orderbook_outputs,
+        validate_orderbook_outputs,
+    };
+    let fixture: Value = serde_json::from_str(include_str!(
+        "../../../../fixtures/cross-j-entity-kinds/outside-band.json"
+    ))
+    .unwrap();
+    let context = crate::DeterministicContext::hlt_default();
+    let mut state = OrderbookState::empty(20_000);
+    for (index, key) in ["baselineRoute", "route"].iter().enumerate() {
+        let route = canonical(&fixture[*key]);
+        let (account_id, offer) = cross_jurisdiction_working_offer(&route).unwrap();
+        let hub = offer.right_entity.clone();
+        let delta = SameJOutputDelta::Upsert {
+            account_id,
+            offer: Box::new(offer),
+        };
+        let mut prepared =
+            prepare_orderbook_outputs(&mut state, &[delta], &context, &hub, None).unwrap();
+        let results = prepared
+            .take_jobs()
+            .into_iter()
+            .map(|job| job.apply(&context))
+            .collect();
+        let validated = validate_orderbook_outputs(prepared, results).unwrap();
+        let effects = install_orderbook_outputs(&mut state, validated);
+        assert!(
+            effects.account_txs.is_empty(),
+            "cross quote must never emit same-J SwapResolve: {:?}",
+            effects.account_txs
+        );
+        assert!(effects.cross_jurisdiction_fills.is_empty());
+        assert_eq!(state.books.len(), 1);
+        assert_eq!(state.books.values().next().unwrap().orders.len(), index + 1);
+        let mut snapshot = state.snapshot().unwrap();
+        let expected = snapshot.offers.clone();
+        let admissions = crate::EntityCanonicalCollection::from_entries(expected.iter().map(
+            |((account, order), offer)| {
+                (
+                    format!("{account}:{order}"),
+                    CanonicalValue::Object(vec![
+                        ("orderId".into(), string(order)),
+                        ("sourceEntityId".into(), string(account)),
+                        ("bookOwnerEntityId".into(), string(&hub)),
+                        ("status".into(), string("admitted")),
+                        ("route".into(), offer.cross_jurisdiction.clone().unwrap()),
+                    ]),
+                )
+            },
+        ))
+        .unwrap();
+        snapshot.offers.clear();
+        assert!(
+            OrderbookState::restore(snapshot.clone()).is_err(),
+            "remote maker is absent from local Account rows"
+        );
+        crate::snapshot::hydrate_cross_jurisdiction_offers(&mut snapshot, &hub, Some(&admissions))
+            .unwrap();
+        assert_eq!(snapshot.offers, expected);
+        // Bilateral Account snapshots retain their actual creation height and
+        // owner orientation; the matcher projection derives its own fields.
+        for offer in snapshot.offers.values_mut() {
+            offer.created_height = 42;
+            offer.maker_is_left = false;
+            if let Some(CanonicalValue::Object(fields)) = offer.cross_jurisdiction.as_mut() {
+                fields.reverse();
+            }
+        }
+        crate::snapshot::hydrate_cross_jurisdiction_offers(&mut snapshot, &hub, Some(&admissions))
+            .unwrap();
+        for (key, offer) in &mut snapshot.offers {
+            offer.cross_jurisdiction = expected[key].cross_jurisdiction.clone();
+        }
+        assert_eq!(snapshot.offers, expected);
+        assert_eq!(OrderbookState::restore(snapshot.clone()).unwrap(), state);
+        assert!(
+            crate::snapshot::hydrate_cross_jurisdiction_offers(
+                &mut snapshot,
+                "wrong-owner",
+                Some(&admissions)
+            )
+            .is_err()
+        );
+    }
+}

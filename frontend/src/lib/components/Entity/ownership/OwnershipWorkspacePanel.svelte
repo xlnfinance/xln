@@ -1,5 +1,5 @@
 <script lang="ts">
-import type { EntityReadView } from '$lib/components/Entity/core/entity-panel-types';
+import type { EntityReadView } from '#lib/components/Entity/core/entity-panel-types.ts';
 
 import type {
   EnvSnapshot,
@@ -9,8 +9,8 @@ import type {
 } from "@xln/core/api/public/runtime-module";
 import { isNumberedEntity, toEntityId } from "@xln/core/api/public/runtime-module";
 
-import { getXLN, submitEntityInputs } from "$lib/stores/xlnStore";
-import { toasts } from "$lib/stores/ui/toastStore";
+import { getXLN, submitEntityInputs } from "#lib/stores/xlnStore.ts";
+import { toasts } from "#lib/stores/ui/toastStore.ts";
 import { requireRuntimeEnv } from "../core/entity-panel-model";
 import type { ExternalToken } from "../assets/entity-asset-catalog";
 import OwnershipPanel from "./OwnershipPanel.svelte";

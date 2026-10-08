@@ -1,3 +1,6 @@
+import { hashCooperativeUpdateHankoPayload, type CooperativeUpdateDiff } from '../../../core/hanko/onchain-domain.ts';
+import { encodeInt512, decodeUint768, encodeSignedAmount } from '../../../core/protocol/crypto/abi-money.ts';
+import { PROOF_BODY_ABI } from '../../../core/protocol/dispute/proof-body.ts';
 import { expect } from 'chai';
 
 import hre from 'hardhat';
@@ -28,7 +31,6 @@ import {
 
 const abi = ethers.AbiCoder.defaultAbiCoder();
 
-const COOPERATIVE_UPDATE = 0;
 
 const DISPUTE_PROOF = 1;
 
@@ -36,11 +38,7 @@ const COOPERATIVE_DISPUTE_PROOF = 3;
 
 const MAX_FILL_RATIO = 65535n;
 
-const SETTLEMENT_DIFFS_ABI =
-  'tuple(uint256 tokenId,int256 leftDiff,int256 rightDiff,int256 collateralDiff,int256 ondeltaDiff)[]';
 
-const PROOF_BODY_ABI =
-  'tuple(bytes32 watchSeed,uint32 leftResponseSeconds,uint32 rightResponseSeconds,int256[] offdeltas,uint256[] tokenIds,tuple(address transformerAddress,bytes encodedBatch,tuple(uint256 deltaIndex,uint256 rightAllowance,uint256 leftAllowance)[] allowances)[] transformers)';
 
 const TEST_WATCH_SEED = ethers.keccak256(ethers.toUtf8Bytes('xln:test-watch-seed'));
 
@@ -114,15 +112,13 @@ async function cooperativeUpdateHash(
   depository: Depository,
   accountKey: string,
   nonce: bigint,
-  diffs: unknown[],
+  diffs: CooperativeUpdateDiff[],
   forgiveDebtsInTokenIds: bigint[] = [],
 ): Promise<string> {
   const chainId = (await ethers.provider.getNetwork()).chainId;
-  return ethers.keccak256(
-    abi.encode(
-      ['uint8', 'uint256', 'address', 'bytes', 'uint256', SETTLEMENT_DIFFS_ABI, 'uint256[]'],
-      [COOPERATIVE_UPDATE, chainId, await depository.getAddress(), accountKey, nonce, diffs, forgiveDebtsInTokenIds],
-    ),
+  return hashCooperativeUpdateHankoPayload(
+    { chainId, depositoryAddress: await depository.getAddress() },
+    accountKey, nonce, diffs, forgiveDebtsInTokenIds,
   );
 }
 
@@ -197,7 +193,7 @@ function proofBody(offdeltas: bigint[], tokenIds: bigint[], transformers: unknow
     watchSeed: TEST_WATCH_SEED,
     leftResponseSeconds: 50,
     rightResponseSeconds: 50,
-    offdeltas,
+    offdeltas: offdeltas.map(encodeInt512),
     tokenIds,
     transformers,
   };
@@ -708,7 +704,7 @@ describe('Depository', () => {
       pull: [
         {
           deltaIndex: 1,
-          amount: -MAX_FILL_RATIO,
+          amount: encodeSignedAmount(-MAX_FILL_RATIO),
           claimedRatio: 0,
           fullHash: pullProof.fullHash,
           partialRoot: pullProof.partialRoot,
@@ -895,7 +891,7 @@ describe('Depository', () => {
 
     expect(await depository._reserves(left.entityId, tokenId)).to.equal(0n);
     expect(await depository._reserves(right.entityId, tokenId)).to.equal(100n);
-    expect(await depository.debtOutstanding(left.entityId, tokenId)).to.equal(200n);
+    expect(decodeUint768(await depository.debtOutstanding(left.entityId, tokenId))).to.equal(200n);
     expect(await depository.activeDebts(left.entityId)).to.equal(1n);
 
     await depository.mintToReserve(left.entityId, tokenId, 100n);
@@ -915,7 +911,7 @@ describe('Depository', () => {
     expect(await depository._reserves(left.entityId, tokenId)).to.equal(100n);
     expect(await depository._reserves(right.entityId, tokenId)).to.equal(100n);
     expect(await depository._reserves(recipient, tokenId)).to.equal(0n);
-    expect(await depository.debtOutstanding(left.entityId, tokenId)).to.equal(200n);
+    expect(decodeUint768(await depository.debtOutstanding(left.entityId, tokenId))).to.equal(200n);
     expect(await depository._reserves(left.entityId, independentTokenId)).to.equal(7n);
     expect(await depository._reserves(recipient, independentTokenId)).to.equal(0n);
 
@@ -985,12 +981,12 @@ describe('Depository', () => {
     expect((await depository._accounts(acctKey)).nonce).to.equal(finalNonce);
     expect(await depository._reserves(left.entityId, tokenId)).to.equal(100n);
     expect(await depository._reserves(right.entityId, tokenId)).to.equal(100n);
-    expect(await depository.debtOutstanding(left.entityId, tokenId)).to.equal(200n);
+    expect(decodeUint768(await depository.debtOutstanding(left.entityId, tokenId))).to.equal(200n);
 
     await depository.enforceDebts(left.entityId, tokenId, 32);
     expect(await depository._reserves(left.entityId, tokenId)).to.equal(0n);
     expect(await depository._reserves(right.entityId, tokenId)).to.equal(200n);
-    expect(await depository.debtOutstanding(left.entityId, tokenId)).to.equal(100n);
+    expect(decodeUint768(await depository.debtOutstanding(left.entityId, tokenId))).to.equal(100n);
 
     await depository.mintToReserve(left.entityId, tokenId, 150n);
     const spendableTransferBatch = emptyBatch({
@@ -1009,7 +1005,7 @@ describe('Depository', () => {
     expect(await depository._reserves(left.entityId, tokenId)).to.equal(0n);
     expect(await depository._reserves(right.entityId, tokenId)).to.equal(300n);
     expect(await depository._reserves(recipient, tokenId)).to.equal(50n);
-    expect(await depository.debtOutstanding(left.entityId, tokenId)).to.equal(0n);
+    expect(decodeUint768(await depository.debtOutstanding(left.entityId, tokenId))).to.equal(0n);
     expect(await depository.activeDebts(left.entityId)).to.equal(0n);
   });
 
@@ -1319,7 +1315,7 @@ describe('Depository', () => {
       }],
     }));
     await depository.connect(left.signer).processBatch(finalize.encodedBatch, finalize.hankoData, finalize.nonce);
-    expect(await depository.debtOutstanding(left.entityId, tokenId)).to.equal(500n);
+    expect(decodeUint768(await depository.debtOutstanding(left.entityId, tokenId))).to.equal(500n);
     expect(await depository.activeDebts(left.entityId)).to.equal(1n);
 
     // Exactly the shape that succeeds for a debt-free initiator in (a'): the

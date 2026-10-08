@@ -1,3 +1,4 @@
+import { sendRuntimeInput } from '../commands';
 /**
  * On-chain debts recorded by the Depository (`outDebtsByToken` = what this
  * entity owes, `inDebtsByToken` = what others owe it), and the one action the
@@ -6,7 +7,6 @@
  */
 import type { DebtEntry } from '@xln/core/types/finance/debt';
 import type { RuntimeAdapterViewFrame } from '@xln/core/api/public/runtime-module';
-import { requireAdapter } from '../adapter';
 import { getXLN } from '../xln-loader';
 
 export type DebtGroup = {
@@ -60,5 +60,5 @@ export async function enforceDebts(input: { entityId: string; signerId: string; 
 		signerId: input.signerId,
 		timestamp: Date.now(),
 	});
-	await requireAdapter().send(runtimeInput);
+	await sendRuntimeInput(runtimeInput);
 }

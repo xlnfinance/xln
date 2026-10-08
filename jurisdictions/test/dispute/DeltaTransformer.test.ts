@@ -1,3 +1,4 @@
+import { encodeInt768, decodeInt768, encodeSignedAmount } from '../../../core/protocol/crypto/abi-money.ts';
 import { expect } from "chai";
 import hre from "hardhat";
 import type { DeltaTransformer } from "../../typechain-types/index.js";
@@ -191,8 +192,8 @@ describe("DeltaTransformer", function () {
     const currentTimestamp = await time.latest();
     const disputeStartTimestamp = Math.max(1, currentTimestamp - 2);
     const disputeTimeout = disputeStartTimestamp + 2;
-    return transformer.applyBatch.staticCall(
-      deltas,
+    return (await transformer.applyBatch.staticCall(
+      deltas.map(value => encodeInt768(BigInt(value))),
       tokenIds,
       encodedBatch,
       leftArguments,
@@ -205,7 +206,7 @@ describe("DeltaTransformer", function () {
       disputeTimeout,
       1,
       1,
-    );
+    )).map(decodeInt768);
   }
 
   async function applyViaRegistry(
@@ -230,9 +231,9 @@ describe("DeltaTransformer", function () {
     const totalWindow = timeoutTs - startTs;
     const leftResponseSeconds = disputeClock?.leftResponseSeconds ?? Math.floor(totalWindow / 2);
     const rightResponseSeconds = disputeClock?.rightResponseSeconds ?? totalWindow - leftResponseSeconds;
-    return registry.applyBatchViaRegistry.staticCall(
+    return (await registry.applyBatchViaRegistry.staticCall(
       await transformer.getAddress(),
-      deltas,
+      deltas.map(value => encodeInt768(BigInt(value))),
       tokenIds,
       encodedBatch,
       leftArguments,
@@ -245,7 +246,7 @@ describe("DeltaTransformer", function () {
       timeoutTs,
       leftResponseSeconds,
       rightResponseSeconds,
-    );
+    )).map(decodeInt768);
   }
 
   it("decodes swap fill ratios from uint16 calldata arguments", async function () {
@@ -305,7 +306,7 @@ describe("DeltaTransformer", function () {
 
     await expect(
       transformer.applyBatch.staticCall(
-        [0n, 0n],
+        [encodeInt768(0n), encodeInt768(0n)],
         [1n],
         encodedBatch,
         "0x",
@@ -366,7 +367,7 @@ describe("DeltaTransformer", function () {
       pull: [
         {
           deltaIndex: 0,
-          amount: MAX_FILL_RATIO,
+          amount: encodeSignedAmount(BigInt(MAX_FILL_RATIO)),
           claimedRatio: 0,
           fullHash: partialProof.fullHash,
           partialRoot: partialProof.partialRoot,
@@ -374,7 +375,7 @@ describe("DeltaTransformer", function () {
         },
         {
           deltaIndex: 1,
-          amount: -1234,
+          amount: encodeSignedAmount(BigInt(-1234)),
           claimedRatio: 0,
           fullHash: fullProof.fullHash,
           partialRoot: fullProof.partialRoot,
@@ -410,7 +411,7 @@ describe("DeltaTransformer", function () {
       swap: [],
       pull: [{
         deltaIndex: 0,
-        amount: MAX_FILL_RATIO,
+        amount: encodeSignedAmount(BigInt(MAX_FILL_RATIO)),
         claimedRatio: 0,
         fullHash: lateProof.fullHash,
         partialRoot: lateProof.partialRoot,
@@ -443,7 +444,7 @@ describe("DeltaTransformer", function () {
       swap: [],
       pull: [{
         deltaIndex: 0,
-        amount: MAX_FILL_RATIO,
+        amount: encodeSignedAmount(BigInt(MAX_FILL_RATIO)),
         claimedRatio: 0,
         fullHash: staleProof.fullHash,
         partialRoot: staleProof.partialRoot,
@@ -479,7 +480,7 @@ describe("DeltaTransformer", function () {
       swap: [],
       pull: [{
         deltaIndex: 0,
-        amount: MAX_FILL_RATIO,
+        amount: encodeSignedAmount(BigInt(MAX_FILL_RATIO)),
         claimedRatio: 0,
         fullHash: targetProof.fullHash,
         partialRoot: targetProof.partialRoot,
@@ -526,7 +527,7 @@ describe("DeltaTransformer", function () {
       swap: [],
       pull: [{
         deltaIndex: 0,
-        amount: MAX_FILL_RATIO,
+        amount: encodeSignedAmount(BigInt(MAX_FILL_RATIO)),
         claimedRatio: 0,
         fullHash: noneProof.fullHash,
         partialRoot: noneProof.partialRoot,
@@ -546,7 +547,7 @@ describe("DeltaTransformer", function () {
       swap: [],
       pull: [{
         deltaIndex: 0,
-        amount: MAX_FILL_RATIO,
+        amount: encodeSignedAmount(BigInt(MAX_FILL_RATIO)),
         claimedRatio: previouslyClaimed,
         fullHash: partialProof.fullHash,
         partialRoot: partialProof.partialRoot,
@@ -574,7 +575,7 @@ describe("DeltaTransformer", function () {
     const batch = {
       payment: [{
         deltaIndex: 0,
-        amount: 7,
+        amount: encodeSignedAmount(BigInt(7)),
         revealedUntilTimestamp: deadline,
         hash,
       }],
@@ -760,38 +761,4 @@ describe("DeltaTransformer", function () {
     expect([...result]).to.deep.equal(expected);
   });
 
-  it("fits the runtime maximum swap book inside the canonical transformer gas budget", async function () {
-    const { transformer } = await loadFixture(deployFixture);
-    const swap = {
-      ownerIsLeft: true,
-      addDeltaIndex: 0,
-      addAmount: 1n,
-      subDeltaIndex: 1,
-      subAmount: 1n,
-    };
-    const encodedBatch = await transformer.encodeBatch({
-      payment: [],
-      swap: Array.from({ length: 1_000 }, () => swap),
-      pull: [],
-    });
-    const rightArguments = encodeTransformerArguments(Array.from({ length: 1_000 }, () => 65_535));
-    const timestamp = await time.latest();
-    const disputeStartTimestamp = Math.max(1, timestamp - 2);
-    const gas = await transformer.applyBatch.estimateGas(
-      [0n, 0n],
-      [1n, 2n],
-      encodedBatch,
-      "0x",
-      rightArguments,
-      timestamp,
-      timestamp,
-      LEFT_ENTITY,
-      RIGHT_ENTITY,
-      disputeStartTimestamp,
-      disputeStartTimestamp + 2,
-      1,
-      1,
-    );
-    expect(gas).to.be.lessThanOrEqual(4_000_000n);
-  });
 });

@@ -94,8 +94,10 @@ for (const [path, markers] of [
     'const sameJurisdictionRef = (left: unknown, right: unknown): boolean => {',
     'return Boolean(leftRef && rightRef && leftRef === rightRef);',
     'DEBUG_RESERVE_JURISDICTION_REF_INVALID',
-    'resolveJReplicaForJurisdictionIdentity(env, jurisdiction.jurisdictionRef)',
-    'if (!sameJurisdictionRef(peerJurisdiction, jurisdiction)) return null;',
+    'if (!isJurisdictionStackRef(explicitJurisdiction)) {',
+    'resolveJReplicaForJurisdictionIdentity(env, explicitJurisdiction)',
+    'if (getJurisdictionIdentityRef(candidate) === targetRef) return { name, replica };',
+    'sameJurisdictionRef(identity, jurisdiction)',
   ]],
   ['core/orchestrator/mm-node.ts', [
     'const sameJurisdiction = (',

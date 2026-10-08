@@ -157,8 +157,8 @@ describe('production startup wiring', () => {
     const releaseGate = readFileSync(join(repoRoot, 'core/scripts/release/run-release-gate.ts'), 'utf8');
     const coreE2e = readFileSync(join(repoRoot, 'core/scripts/e2e/runners/run-e2e-core.ts'), 'utf8');
     for (const crashTest of [
-      'core/__tests__/jurisdiction/submission/j-submit-crash-recovery.test.ts',
-      'core/__tests__/jurisdiction/submission/j-submit-real-rpc-crash-recovery.test.ts',
+      'core/__tests__/jurisdiction/submission/recovery/j-submit-crash-recovery.test.ts',
+      'core/__tests__/jurisdiction/submission/recovery/j-submit-real-rpc-crash-recovery.test.ts',
     ]) {
       expect(releaseGate).toContain(crashTest);
     }
@@ -314,7 +314,9 @@ describe('production startup wiring', () => {
       'utf8',
     );
     expect(server).toContain("process.env['XLN_LOCAL_SIMULATION'] === 'true'");
-    expect(server).toContain('JADAPTER_MODE_REQUIRED:set_USE_ANVIL_or_XLN_LOCAL_SIMULATION');
+    expect(server).toContain('configuredNativeServerJurisdiction(await loadJurisdictionsAsync()');
+    expect(readFileSync(join(repoRoot, 'core/api/server/native-jurisdiction.ts'), 'utf8'))
+      .toContain('JADAPTER_MODE_REQUIRED:set_USE_ANVIL_or_XLN_LOCAL_SIMULATION');
     expect(server).toContain('JADAPTER_MODE_CONFLICT:USE_ANVIL_and_XLN_LOCAL_SIMULATION');
     expect(packagedDaemon).toContain("XLN_LOCAL_SIMULATION: 'true'");
     expect(formationPanel).toContain(
@@ -391,7 +393,10 @@ describe('production startup wiring', () => {
 
     expect(runtimeCreation).toContain('buildRemoteRuntimeRecoveryPeerSources({ runtimeId: recoveryRuntimeId })');
     expect(runtimeCreation).not.toContain("url.searchParams.set('allowPartial', '1')");
-    expect(xlnStore).toContain("importSource.searchParams.set('access', 'admin')");
+    const recoveryPeers = readFileSync(join(repoRoot, 'frontend/src/lib/utils/onboarding/remoteRuntimeValidation.ts'), 'utf8');
+    expect(recoveryPeers).toContain("const expectedAuthLevel = 'admin';");
+    expect(recoveryPeers).toContain('if (adapter.authLevel !== expectedAuthLevel)');
+    expect(recoveryPeers).toContain('queryClient.readRecoveryBundles(request.lookupKey)');
     expect(xlnStore).not.toContain("importSource.searchParams.set('allowPartial', '1')");
     expect(deploy).toContain('location /api/recovery/');
     expect(deploy).toContain('proxy_pass http://127.0.0.1:9100;');
@@ -1098,7 +1103,9 @@ describe('production startup wiring', () => {
     expect(mmNode).toContain('if (state.phase === previousPhase) return;');
     expect(mmNode).toContain('rebuildCachedHealthResponseJson();');
     expect(mmNode).toContain("state.phase = 'bootstrap-cross';");
-    expect(mmNode).toContain('input.state.bootstrapCrossBatchExpiresAt = Math.min(...routes.map(route => route.expiresAt));');
+    expect(mmNode).toContain('input.state.bootstrapCrossBatchExpiresAt = expiresAt;');
+    expect(mmNode).toContain('const expiresAt = Math.min(...routes.map(route => {');
+    expect(mmNode).toContain('MARKET_MAKER_CROSS_EXPIRY_INVALID:');
     expect(mmNode).not.toContain('bootstrapCrossCursor');
     expect(mmNode).toContain("if (mode === 'steady') state.steadyCrossCursor = selection.nextCursor;");
     expect(mmNode).not.toContain('deferredBootstrapCrossInputs');

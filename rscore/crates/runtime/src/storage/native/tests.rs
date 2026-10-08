@@ -997,6 +997,13 @@ fn recovery_is_latest_path_checkpoint_plus_exact_wal_tail() {
     assert_eq!(
         resend
             .iter()
+            .map(DurableRuntimeFrame::timestamp)
+            .collect::<Vec<_>>(),
+        vec![1, 2]
+    );
+    assert_eq!(
+        resend
+            .iter()
             .map(DurableRuntimeFrame::height)
             .collect::<Vec<_>>(),
         vec![1, 2]

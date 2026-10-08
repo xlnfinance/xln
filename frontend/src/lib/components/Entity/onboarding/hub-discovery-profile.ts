@@ -1,5 +1,5 @@
 import { isAccountsMapLike } from '../core/account-list-view';
-import type { AccountReadView, EntityReadView } from '$lib/components/Entity/core/entity-panel-types';
+import type { AccountReadView, EntityReadView } from '#lib/components/Entity/core/entity-panel-types.ts';
 import type { RuntimeReplica, Profile as GossipProfile, RuntimeInput } from '@xln/core/api/public/runtime-module';
 import { getJurisdictionStackId } from '@xln/core/jurisdiction/machine/jurisdiction-stack';
 import {

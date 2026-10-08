@@ -1,5 +1,8 @@
 /** Same-j production workload and durable economic completion report. */
 
+import { runRustH1SettlementRejectionSmoke } from '../rust/rust-h1-account-settlement-smoke';
+import { runRustH1FourHopSmoke } from '../rust/rust-h1-four-hop-smoke';
+import { runRustH1SwapPartialSmoke } from '../rust/rust-h1-swap-partial-smoke';
 import { collectHltEnvironmentManifest } from '../boundary/environment-manifest';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -210,6 +213,13 @@ const runRustSameProductionSwapLoad = async (args: WorkerArgs): Promise<void> =>
       ...rateEvidence,
     };
     writeFileSync(join(args.workDir, 'hlt-rust-h1-live.json'), `${safeStringify(live, 2)}\n`);
+    if (evidence === 'functional-smoke') {
+      await runRustH1SwapPartialSmoke({ prepared: preparedParallel, rust: requireRustH1(), portBase: args.portBase, workDir: args.workDir });
+      await runRustH1FourHopSmoke({ prepared: preparedParallel, rust: requireRustH1(), portBase: args.portBase, workDir: args.workDir });
+      const rejection = await runRustH1SettlementRejectionSmoke({ apiBaseUrl: `http://127.0.0.1:${args.portBase + 10}`,
+        rust: requireRustH1(), counterpartyLane: preparedParallel.traderRuntimes[0]!, tokenId: 1 });
+      writeFileSync(join(args.workDir, 'native-settlement-rejection.json'), `${safeStringify(rejection, 2)}\n`);
+    }
     console.log(`[load] rust-same verdict ${safeStringify({
       users: live.users,
       submitted: live.submittedSwapOrders,

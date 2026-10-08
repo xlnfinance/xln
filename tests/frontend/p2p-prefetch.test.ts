@@ -125,6 +125,7 @@ test('waitForCounterpartyRuntimeRoutes waits for the direct handshake before adm
           expect(entityIds).toEqual(['0xabc']);
           return true;
         },
+        canDeliver: () => true,
       },
     },
   };
@@ -216,4 +217,29 @@ test('openAccount profile readiness accepts same-jurisdiction target profiles', 
 
   expect(hasUsableOpenAccountCounterpartyProfile(env as never, SOURCE, COUNTERPARTY, { requireHub: true })).toBe(true);
   await expect(waitForOpenAccountCounterpartyProfiles(env as never, [input] as never, 100)).resolves.toBe(true);
+});
+
+test('openAccount waits for delivery readiness after the direct handshake', async () => {
+  let ready = false;
+  const env = envWithSourceJurisdiction({
+    gossip: { getProfiles: () => [{ entityId: COUNTERPARTY, runtimeId: 'peer', metadata: { jurisdiction: TRON_JURISDICTION } }] },
+    infrastructure: { p2p: {
+      ensureProfiles: async () => true,
+      bootstrapDirectEntityRoutes: async () => true,
+      canDeliver: () => ready,
+    } },
+  });
+  const input = { entityId: SOURCE, entityTxs: [{ type: 'openAccount', data: { targetEntityId: COUNTERPARTY } }] };
+  expect(await waitForOpenAccountCounterpartyProfiles(env as never, [input] as never, 100)).toBe(false);
+  ready = true;
+  expect(await waitForOpenAccountCounterpartyProfiles(env as never, [input] as never, 100)).toBe(true);
+});
+
+test('local openAccount needs no gossip or peer transport', async () => {
+  const env = envWithSourceJurisdiction();
+  env.state.eReplicas.set(`${COUNTERPARTY}:${SIGNER}`, {
+    state: { entityId: COUNTERPARTY, config: { jurisdiction: TRON_JURISDICTION } },
+  });
+  const input = { entityId: SOURCE, entityTxs: [{ type: 'openAccount', data: { targetEntityId: COUNTERPARTY } }] };
+  expect(await waitForOpenAccountCounterpartyProfiles(env as never, [input] as never, 100)).toBe(true);
 });

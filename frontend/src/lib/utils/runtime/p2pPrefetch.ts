@@ -163,7 +163,7 @@ export async function waitForOpenAccountCounterpartyProfiles(
     const missing = pairs.filter((pair) =>
       !hasUsableOpenAccountCounterpartyProfile(env, pair.sourceEntityId, pair.counterpartyEntityId),
     );
-    if (missing.length === 0) return true;
+    if (missing.length === 0) break;
     await prewarmCounterpartyProfiles(
       env,
       missing.map((pair) => pair.counterpartyEntityId),
@@ -172,9 +172,13 @@ export async function waitForOpenAccountCounterpartyProfiles(
     await sleep(100);
   }
 
-  return pairs.every((pair) =>
+  if (!pairs.every((pair) =>
     hasUsableOpenAccountCounterpartyProfile(env, pair.sourceEntityId, pair.counterpartyEntityId),
-  );
+  )) return false;
+  const remoteTargets = pairs.map(pair => pair.counterpartyEntityId)
+    .filter(entityId => !getLocalEntityJurisdiction(env, entityId).found);
+  if (remoteTargets.length === 0) return true;
+  return waitForCounterpartyRuntimeRoutes(env, remoteTargets, Math.max(1, deadline - Date.now()));
 }
 
 export async function waitForCounterpartyRuntimeRoutes(
@@ -185,10 +189,12 @@ export async function waitForCounterpartyRuntimeRoutes(
   const targets = Array.from(new Set(entityIds.map(normalizeEntityId).filter(Boolean)));
   if (!env || targets.length === 0) return false;
 
-  const boundedTimeoutMs = Math.max(100, Math.floor(Number(timeoutMs) || DEFAULT_PROFILE_PREFETCH_TIMEOUT_MS));
+  const boundedTimeoutMs = Math.max(1, Math.floor(Number(timeoutMs) || DEFAULT_PROFILE_PREFETCH_TIMEOUT_MS));
   const deadline = Date.now() + boundedTimeoutMs;
 
-  await prewarmCounterpartyProfiles(env, targets, Math.min(boundedTimeoutMs, DEFAULT_PROFILE_PREFETCH_TIMEOUT_MS));
+  if (!targets.every(entityId => hasCounterpartyRuntimeRoute(env, entityId))) {
+    await prewarmCounterpartyProfiles(env, targets, Math.min(boundedTimeoutMs, DEFAULT_PROFILE_PREFETCH_TIMEOUT_MS));
+  }
   while (Date.now() < deadline) {
     const missing = targets.filter((entityId) => !hasCounterpartyRuntimeRoute(env, entityId));
     if (missing.length === 0) break;
@@ -198,5 +204,15 @@ export async function waitForCounterpartyRuntimeRoutes(
   if (!targets.every((entityId) => hasCounterpartyRuntimeRoute(env, entityId))) return false;
   const p2p = env.infrastructure?.p2p;
   if (!p2p?.bootstrapDirectEntityRoutes) return true;
-  return p2p.bootstrapDirectEntityRoutes(targets, Math.max(1, deadline - Date.now()));
+  if (!(await p2p.bootstrapDirectEntityRoutes(targets, Math.max(1, deadline - Date.now())))) return false;
+  if (!p2p.canDeliver) throw new Error('P2P_DELIVERY_READINESS_UNAVAILABLE');
+  const canDeliver = p2p.canDeliver.bind(p2p);
+  // An authenticated socket may precede the peer's delivery-ready message.
+  // Keep admission inside the original deadline instead of creating a retained outbox.
+  const ready = () => targets.every(entityId => {
+    const runtimeId = getProfile(env, entityId)?.runtimeId;
+    return Boolean(runtimeId && canDeliver(runtimeId));
+  });
+  while (!ready() && Date.now() < deadline) await sleep(Math.min(20, deadline - Date.now()));
+  return ready();
 }

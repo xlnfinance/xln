@@ -511,7 +511,7 @@ export const handleReplayOrObsoleteAccountInput = async (
     if (duplicateAck) return duplicateAck;
   }
   if (!ack && replay.frameIsStale) {
-    replayLog.warn('input.stale_frame_ignored', {
+    replayLog.debug('input.stale_frame_ignored', {
       currentHeight: replay.currentHeight,
       inputHeight: replay.inputHeight,
       newFrameHeight: replay.newFrameHeight ?? null,

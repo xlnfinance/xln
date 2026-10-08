@@ -1,3 +1,6 @@
+import { createServer } from 'node:net';
+import { createJReplica, ensureJAdapter, stopManagedScenarioAnvil } from '../../../scenarios/harness/boot';
+import { createJAdapter } from '../../../jurisdiction/adapter';
 import { PersistentAccountStateMap } from '../../../account/state/persistent-state-map';
 import { accountTransitionView, beginAccountTransition, publishAccountTransition, discardAccountTransition } from '../../../account/state/candidate-overlay';
 import { forkAccountReplicaShell } from '../../../account/state/account-replica-shell';
@@ -149,7 +152,7 @@ import { recordValidatorJHistory } from '../../../jurisdiction/machine/local-his
 
 import { buildLocalJPrefixAttestation } from '../../../jurisdiction/machine/history/j-prefix-consensus';
 
-import { createEmptyBatch, encodeJBatch } from '../../../jurisdiction/machine/batch';
+import { createEmptyBatch, encodeJBatch, computeBatchHankoHash } from '../../../jurisdiction/machine/batch';
 
 import {
   getCertifiedBoardNodeStore,
@@ -175,7 +178,6 @@ import {
   validateRuntimeInputAdmission,
 } from '../../../runtime';
 
-import { createJReplica } from '../../../scenarios/harness/boot';
 
 import { applyMergedEntityInputs, RuntimeEntityInputApplyError } from '../../../runtime/mempool/entity-inputs';
 
@@ -237,7 +239,7 @@ import type { AccountFrame, AccountInput, AccountReplica, AccountState, AccountT
 import type { ConsensusConfig, EntityInput, EntityReplica, EntityState, JurisdictionConfig } from '../../../entity/types';
 import type { RuntimeReplica, RuntimeTx } from '../../../runtime/types';
 import type { JAdapter } from '../../../jurisdiction/adapter/types';
-import { attachLiveJAdapter } from '../../../runtime/j-submit/live-jadapters';
+import { attachLiveJAdapter, detachLiveJAdapter } from '../../../runtime/j-submit/live-jadapters';
 import type { JInput } from '../../../jurisdiction/machine/input';
 import type { CrossJurisdictionSwapRoute } from '../../../types/cross-jurisdiction';
 import type { DisputeFinalizationEvidence, JurisdictionEvent } from '../../../types/jurisdiction-events';
@@ -565,6 +567,78 @@ const installAuditJAdapter = (env: RuntimeReplica, adapter: JAdapter): void => {
   attachLiveJAdapter(env, 'Testnet', adapter);
 };
 
+const realAuditSubmit = async (kind: 'success' | 'E3' | 'E5' | 'transient', localLabel = '1') => {
+  const rpcUrl = kind === 'transient' ? await new Promise<string>((resolve, reject) => {
+    const server = createServer();
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', () => {
+      const address = server.address();
+      if (!address || typeof address === 'string') return reject(new Error('AUDIT_RPC_PORT_MISSING'));
+      server.close(error => error ? reject(error) : resolve(`http://127.0.0.1:${address.port}`));
+    });
+  }) : null;
+  const adapter = rpcUrl
+    ? await ensureJAdapter(undefined, 'rpc', { rpcUrl, chainId: 31337 })
+    : await createJAdapter({ mode: 'browservm', chainId: 31337 });
+  const env = createEmptyEnv(`audit-real-submit-${kind}-${localLabel}`);
+  env.state.timestamp = 1000;
+  const key = deriveSignerKeySync(env.runtimeSeed!, localLabel);
+  const wallet = new ethers.Wallet(ethers.hexlify(key));
+  const signerId = wallet.address.toLowerCase();
+  registerSignerKey(env, signerId, key);
+  const entityId = generateLazyEntityId([signerId], 1n, env);
+  env.runtimeId = localLabel === '1' ? signerId : `0x${'33'.repeat(20)}`;
+  installAuditJAdapter(env, adapter);
+  const batch = createEmptyBatch();
+  if (kind === 'E5') batch.disputeFinalizations.push({
+    counterentity: `0x${'bd'.repeat(32)}`, initialNonce: 0, finalNonce: 0,
+    initialProofbodyHash: ethers.ZeroHash, finalProofbody: makeEmptyProofBody(),
+    starterArguments: '0x', otherArguments: '0x', sig: '0x', startedByLeft: true,
+    cooperative: false, proposerIsLeft: true,
+  });
+  else batch.reserveToExternalToken.push({ tokenId: 1, receivingEntity: ethers.zeroPadValue(wallet.address, 32), amount: 1n });
+  if (kind === 'success') await adapter.debugFundReserves(entityId, 1, 2n);
+  const encodedBatch = encodeJBatch(batch);
+  const batchHash = computeBatchHankoHash(31337n, adapter.addresses.depository, encodedBatch, 1n);
+  const inputs: JInput[] = [{ jurisdictionName: 'Testnet', jTxs: [{ type: 'batch', entityId,
+    timestamp: env.state.timestamp, data: { batch, encodedBatch, batchHash, entityNonce: 1,
+      signerId, hankoSignature: wallet.signingKey.sign(batchHash).serialized, batchSize: 1,
+      runtimeSubmitAttempt: { attemptId: '', attemptNumber: 1, attemptedAt: env.state.timestamp } } }] }];
+  sealAuditJSubmitAttempts(env, inputs);
+  const replica = [...env.state.eReplicas.values()].find(row => row.entityId === entityId)!;
+  const before = computeCanonicalEntityConsensusStateHash(replica.state);
+  const queued: RuntimeTx[] = [];
+  const reads = spyOn(adapter, 'getAccountInfo');
+  const submit = spyOn(adapter, 'submitTx');
+  try {
+    if (rpcUrl) await stopManagedScenarioAnvil(3000, rpcUrl);
+    await submitRuntimeJOutbox(env, inputs, {
+      enqueueRuntimeInputs: (_env, entityInputs, runtimeTxs) => {
+        expect(entityInputs ?? []).toHaveLength(0);
+        queued.push(...(runtimeTxs ?? []));
+      },
+    });
+    expect(reads).not.toHaveBeenCalled();
+    expect(submit).toHaveBeenCalledTimes(1);
+    expect(submit.mock.calls[0]?.[1]?.signerId).toBe(signerId);
+    expect(submit.mock.calls[0]?.[1]?.signerPrivateKey).toBeInstanceOf(Uint8Array);
+    expect(computeCanonicalEntityConsensusStateHash(replica.state)).toBe(before);
+    expect(replica.state.jBatchState?.status).toBe('sent');
+    expect(replica.state.jBatchState?.sentBatch?.terminalFailure).toBeUndefined();
+    expect(replica.state.jBatchState?.failedAttempts).toBe(0);
+    return queued;
+  } finally {
+    reads.mockRestore();
+    submit.mockRestore();
+    detachLiveJAdapter(env, 'Testnet');
+    await adapter.close();
+    if (rpcUrl) {
+      (adapter.provider as ethers.JsonRpcProvider).destroy();
+      await stopManagedScenarioAnvil(3000, rpcUrl);
+    }
+  }
+};
+
 const applyDraftAccountTx = async (
   account: AccountReplica,
   ...args: [AccountTx, boolean, number, number]
@@ -833,469 +907,41 @@ describe('audit fail-fast regressions', () => {
   });
 
   test('submitRuntimeJOutbox queues a durable transient result without poisoning Entity consensus', async () => {
-    const entityId = `0x${'ab'.repeat(32)}`;
-    const signerId = `0x${'cd'.repeat(20)}`;
-    const batchHash = `0x${'11'.repeat(32)}`;
-    const env = createEmptyEnv('j-submit-fail-fast');
-    env.runtimeId = signerId;
-    env.state.timestamp = 123;
-    env.scenarioMode = false;
-    const state = makeEntityState(entityId);
-    state.jBatchState = {
-      batch: createEmptyBatch(),
-      jurisdiction: null,
-      lastBroadcast: 0,
-      broadcastCount: 0,
-      failedAttempts: 0,
-      status: 'sent',
-      sentBatch: {
-        batch: {
-          ...createEmptyBatch(),
-          reserveToReserve: [
-            {
-              receivingEntity: `0x${'ef'.repeat(32)}`,
-              tokenId: 1,
-              amount: 10n,
-            },
-          ],
-        },
-        batchHash,
-        encodedBatch: '0x1234',
-        entityNonce: 1,
-        firstSubmittedAt: 123,
-        lastSubmittedAt: 123,
-        submitAttempts: 1,
-      },
-    };
-    env.state.eReplicas.set(`${entityId}:1`, {
-      entityId,
-      signerId,
-      entityEncPubKey: '',
-      mempool: [],
-      isProposer: true,
-      state,
-    } as EntityReplica);
-    installAuditJAdapter(env, {
-      submitTx: async () => ({ success: false, error: 'ECONNREFUSED' }),
-      pollNow: async () => {},
-    } as JAdapter);
-    const queuedInputs: EntityInput[] = [];
-    const queuedRuntimeTxs: RuntimeTx[] = [];
-
-    await submitAuditRuntimeJOutbox(
-      env,
-      [
-        {
-          jurisdictionName: 'Testnet',
-          jTxs: [
-            {
-              type: 'batch',
-              entityId,
-              data: {
-                batch: {
-                  ...createEmptyBatch(),
-                  reserveToReserve: [
-                    {
-                      receivingEntity: `0x${'ef'.repeat(32)}`,
-                      tokenId: 1,
-                      amount: 10n,
-                    },
-                  ],
-                },
-                batchHash,
-                encodedBatch: '0x1234',
-                entityNonce: 1,
-                hankoSignature: '0x1234',
-                batchSize: 1,
-                signerId,
-                runtimeSubmitAttempt: { attemptId: 'transient-attempt-1', attemptNumber: 1, attemptedAt: 123 },
-              },
-              timestamp: env.state.timestamp,
-            } as any,
-          ],
-        },
-      ],
-      {
-        enqueueRuntimeInputs: (_env, inputs, runtimeTxs) => {
-          queuedInputs.push(...(inputs ?? []));
-          queuedRuntimeTxs.push(...(runtimeTxs ?? []));
-        },
-      },
-    );
-
-    expect(queuedInputs).toHaveLength(0);
-    expect(queuedRuntimeTxs).toMatchObject([
-      {
-        type: 'recordJSubmitResult',
-        data: { outcome: 'transientFailure', message: 'ECONNREFUSED' },
-      },
-    ]);
-    expect(state.jBatchState?.status).toBe('sent');
-    expect(state.jBatchState?.failedAttempts).toBe(0);
-    expect(state.jBatchState?.sentBatch).toBeDefined();
-    expect(state.jBatchState?.sentBatch?.lastFailure).toBeUndefined();
-    expect(state.jBatchState?.sentBatch?.terminalFailure).toBeUndefined();
-  });
+    const results = await realAuditSubmit('transient');
+    expect(results).toHaveLength(1);
+    expect(results[0]).toMatchObject({ type: 'recordJSubmitResult', data: { outcome: 'transientFailure' } });
+    expect(results[0]?.type === 'recordJSubmitResult' && results[0].data.message).toMatch(/ECONNREFUSED|Unable to connect|fetch failed|AggregateError/);
+    expect(results[0]).toMatchObject({ data: { adapterFailure: { category: 'transient' } } });
+  }, 60000);
 
   test('submitRuntimeJOutbox never reads contract account state to reconcile a dispute batch', async () => {
-    const entityId = `0x${'ac'.repeat(32)}`;
-    const counterpartyId = `0x${'bd'.repeat(32)}`;
-    const signerId = `0x${'ce'.repeat(20)}`;
-    const batchHash = `0x${'13'.repeat(32)}`;
-    const disputeFinalize = {
-      counterentity: counterpartyId,
-      initialNonce: 3,
-      finalNonce: 3,
-      initialProofbodyHash: `0x${'14'.repeat(32)}`,
-      finalProofbody: makeEmptyProofBody(),
-      starterArguments: '0x',
-      otherArguments: '0x',
-      sig: '0x',
-      startedByLeft: true,
-      cooperative: false,
-    };
-    const batch = { ...createEmptyBatch(), disputeFinalizations: [disputeFinalize] };
-    const env = createEmptyEnv('j-submit-stale-dispute-finalize');
-    env.runtimeId = signerId;
-    env.state.timestamp = 125;
-    const state = makeEntityState(entityId);
-    state.jBatchState = {
-      batch: createEmptyBatch(),
-      jurisdiction: null,
-      lastBroadcast: 0,
-      broadcastCount: 0,
-      failedAttempts: 0,
-      status: 'sent',
-      sentBatch: {
-        batch,
-        batchHash,
-        encodedBatch: '0x1234',
-        entityNonce: 1,
-        firstSubmittedAt: 125,
-        lastSubmittedAt: 125,
-        submitAttempts: 1,
-      },
-    };
-    env.state.eReplicas.set(`${entityId}:1`, {
-      entityId,
-      signerId,
-      entityEncPubKey: '',
-      mempool: [],
-      isProposer: true,
-      state,
-    } as EntityReplica);
-    let submitCalls = 0;
-    let accountReadCalls = 0;
-    installAuditJAdapter(env, {
-      getAccountInfo: async () => {
-        accountReadCalls += 1;
-        throw new Error('contract account state must not be read by runtime');
-      },
-      submitTx: async () => {
-        submitCalls += 1;
-        return { success: true, events: [], txHash: `0x${'18'.repeat(32)}` };
-      },
-      pollNow: async () => {},
-    } as JAdapter);
-    const queuedInputs: EntityInput[] = [];
-
-    await submitAuditRuntimeJOutbox(
-      env,
-      [
-        {
-          jurisdictionName: 'Testnet',
-          jTxs: [
-            {
-              type: 'batch',
-              entityId,
-              data: {
-                batch,
-                batchHash,
-                encodedBatch: '0x1234',
-                entityNonce: 1,
-                hankoSignature: '0x1234',
-                batchSize: 1,
-                signerId,
-                runtimeSubmitAttempt: { attemptId: 'reconcile-before-1', attemptNumber: 1, attemptedAt: 125 },
-              },
-              timestamp: env.state.timestamp,
-            } as any,
-            {
-              type: 'batch',
-              entityId: `0x${'19'.repeat(32)}`,
-              data: {
-                batch: createEmptyBatch(),
-                batchHash: `0x${'19'.repeat(32)}`,
-                entityNonce: 1,
-                signerId,
-                batchSize: 0,
-                runtimeSubmitAttempt: { attemptId: 'reconcile-before-2', attemptNumber: 1, attemptedAt: 125 },
-              },
-              timestamp: env.state.timestamp,
-            } as any,
-          ],
-        },
-      ],
-      {
-        enqueueRuntimeInputs: (_env, inputs) => queuedInputs.push(...(inputs ?? [])),
-      },
-    );
-
-    expect(accountReadCalls).toBe(0);
-    expect(submitCalls).toBe(2);
-    expect(state.jBatchState?.sentBatch).toBeDefined();
-    expect(queuedInputs).toEqual([]);
+    const results = await realAuditSubmit('E5', '1');
+    expect(results).toHaveLength(1);
+    expect(results[0]).toMatchObject({ type: 'recordJSubmitResult', data: { outcome: 'terminalFailure' } });
+    expect(results[0]?.type === 'recordJSubmitResult' && results[0].data.message).toContain('E5');
   });
 
   test('submitRuntimeJOutbox classifies submit results without reading contract finality', async () => {
-    const entityId = `0x${'ca'.repeat(32)}`;
-    const counterpartyId = `0x${'cb'.repeat(32)}`;
-    const signerId = `0x${'cc'.repeat(20)}`;
-    const initialProofbodyHash = `0x${'cd'.repeat(32)}`;
-    const env = createEmptyEnv('j-submit-post-failure-reconcile');
-    env.runtimeId = signerId;
-    env.state.timestamp = 126;
-    let accountReadCalls = 0;
-    let submitCalls = 0;
-    installAuditJAdapter(env, {
-      getAccountInfo: async () => {
-        accountReadCalls += 1;
-        throw new Error('contract account state must not be read by runtime');
-      },
-      submitTx: async () => {
-        submitCalls += 1;
-        return submitCalls === 1
-          ? { success: false, error: 'staticCall revert: E5()' }
-          : { success: true, events: [], txHash: `0x${'ce'.repeat(32)}` };
-      },
-      pollNow: async () => {},
-    } as JAdapter);
-    const queuedInputs: EntityInput[] = [];
-    const queuedRuntimeTxs: RuntimeTx[] = [];
-    const disputeBatch = {
-      ...createEmptyBatch(),
-      disputeFinalizations: [
-        {
-          counterentity: counterpartyId,
-          initialNonce: 7,
-          finalNonce: 7,
-          initialProofbodyHash,
-          finalProofbody: makeEmptyProofBody(),
-          starterArguments: '0x',
-          otherArguments: '0x',
-          sig: '0x',
-          startedByLeft: true,
-          cooperative: false,
-        },
-      ],
-    };
-
-    await submitAuditRuntimeJOutbox(
-      env,
-      [
-        {
-          jurisdictionName: 'Testnet',
-          jTxs: [
-            {
-              type: 'batch',
-              entityId,
-              data: {
-                batch: disputeBatch,
-                batchHash: `0x${'d2'.repeat(32)}`,
-                encodedBatch: '0x1234',
-                entityNonce: 7,
-                hankoSignature: '0x1234',
-                batchSize: 1,
-                signerId,
-                runtimeSubmitAttempt: { attemptId: 'reconcile-after-1', attemptNumber: 1, attemptedAt: 126 },
-              },
-              timestamp: env.state.timestamp,
-            } as any,
-            {
-              type: 'batch',
-              entityId: `0x${'d3'.repeat(32)}`,
-              data: {
-                batch: createEmptyBatch(),
-                batchHash: `0x${'d3'.repeat(32)}`,
-                entityNonce: 1,
-                signerId,
-                batchSize: 0,
-                runtimeSubmitAttempt: { attemptId: 'reconcile-after-2', attemptNumber: 1, attemptedAt: 126 },
-              },
-              timestamp: env.state.timestamp,
-            } as any,
-          ],
-        },
-      ],
-      {
-        enqueueRuntimeInputs: (_env, inputs, runtimeTxs) => {
-          queuedInputs.push(...(inputs ?? []));
-          queuedRuntimeTxs.push(...(runtimeTxs ?? []));
-        },
-      },
-    );
-
-    expect(accountReadCalls).toBe(0);
-    expect(submitCalls).toBe(2);
-    expect(queuedInputs).toEqual([]);
-    expect(queuedRuntimeTxs.map(tx => (tx.type === 'recordJSubmitResult' ? tx.data.outcome : tx.type))).toEqual([
-      'terminalFailure',
-      'submitted',
-    ]);
+    const results = await realAuditSubmit('E5', '1');
+    expect(results).toHaveLength(1);
+    expect(results[0]).toMatchObject({ type: 'recordJSubmitResult', data: { outcome: 'terminalFailure' } });
+    expect(results[0]?.type === 'recordJSubmitResult' && results[0].data.message).toContain('E5');
+    const success = await realAuditSubmit('success');
+    expect(success[0]).toMatchObject({ type: 'recordJSubmitResult', data: { outcome: 'submitted' } });
   });
 
   test('submitRuntimeJOutbox keeps E5 fatal without matching finalized-dispute evidence', async () => {
-    const entityId = `0x${'ae'.repeat(32)}`;
-    const signerId = `0x${'cf'.repeat(20)}`;
-    const env = createEmptyEnv('j-submit-unproven-e5');
-    env.runtimeId = signerId;
-    env.state.timestamp = 126;
-    installAuditJAdapter(env, {
-      submitTx: async () => ({ success: false, error: 'staticCall revert: E5()' }),
-      pollNow: async () => {},
-    } as JAdapter);
-    const queuedRuntimeTxs: RuntimeTx[] = [];
-
-    await submitAuditRuntimeJOutbox(
-      env,
-      [
-        {
-          jurisdictionName: 'Testnet',
-          jTxs: [
-            {
-              type: 'batch',
-              entityId,
-              data: {
-                batch: {
-                  ...createEmptyBatch(),
-                  reserveToReserve: [
-                    {
-                      receivingEntity: `0x${'ef'.repeat(32)}`,
-                      tokenId: 1,
-                      amount: 10n,
-                    },
-                  ],
-                },
-                batchHash: `0x${'18'.repeat(32)}`,
-                encodedBatch: '0x1234',
-                entityNonce: 1,
-                hankoSignature: '0x1234',
-                batchSize: 1,
-                signerId,
-                runtimeSubmitAttempt: { attemptId: 'fatal-e5-1', attemptNumber: 1, attemptedAt: 126 },
-              },
-              timestamp: env.state.timestamp,
-            } as any,
-          ],
-        },
-      ],
-      {
-        enqueueRuntimeInputs: (_env, _inputs, runtimeTxs) => queuedRuntimeTxs.push(...(runtimeTxs ?? [])),
-      },
-    );
-    expect(queuedRuntimeTxs).toMatchObject([
-      {
-        type: 'recordJSubmitResult',
-        data: { outcome: 'terminalFailure', message: 'staticCall revert: E5()' },
-      },
-    ]);
+    const results = await realAuditSubmit('E5', '1');
+    expect(results).toHaveLength(1);
+    expect(results[0]).toMatchObject({ type: 'recordJSubmitResult', data: { outcome: 'terminalFailure' } });
+    expect(results[0]?.type === 'recordJSubmitResult' && results[0].data.message).toContain('E5');
   });
 
   test('submitRuntimeJOutbox queues terminal staticCall result without mutating Entity consensus', async () => {
-    const entityId = `0x${'ad'.repeat(32)}`;
-    const signerId = `0x${'cd'.repeat(20)}`;
-    const batchHash = `0x${'12'.repeat(32)}`;
-    const env = createEmptyEnv('j-submit-staticcall-fail-fast');
-    env.runtimeId = signerId;
-    env.state.timestamp = 124;
-    env.scenarioMode = false;
-    const state = makeEntityState(entityId);
-    state.jBatchState = {
-      batch: createEmptyBatch(),
-      jurisdiction: null,
-      lastBroadcast: 0,
-      broadcastCount: 0,
-      failedAttempts: 0,
-      status: 'sent',
-      sentBatch: {
-        batch: {
-          ...createEmptyBatch(),
-          reserveToReserve: [
-            {
-              receivingEntity: `0x${'ef'.repeat(32)}`,
-              tokenId: 1,
-              amount: 10n,
-            },
-          ],
-        },
-        batchHash,
-        encodedBatch: '0x1234',
-        entityNonce: 1,
-        firstSubmittedAt: 124,
-        lastSubmittedAt: 124,
-        submitAttempts: 1,
-      },
-    };
-    env.state.eReplicas.set(`${entityId}:1`, {
-      entityId,
-      signerId,
-      entityEncPubKey: '',
-      mempool: [],
-      isProposer: true,
-      state,
-    } as EntityReplica);
-    installAuditJAdapter(env, {
-      submitTx: async () => ({ success: false, error: 'staticCall revert: E3()' }),
-      pollNow: async () => {},
-    } as JAdapter);
-    const queuedRuntimeTxs: RuntimeTx[] = [];
-
-    await submitAuditRuntimeJOutbox(
-      env,
-      [
-        {
-          jurisdictionName: 'Testnet',
-          jTxs: [
-            {
-              type: 'batch',
-              entityId,
-              data: {
-                batch: {
-                  ...createEmptyBatch(),
-                  reserveToReserve: [
-                    {
-                      receivingEntity: `0x${'ef'.repeat(32)}`,
-                      tokenId: 1,
-                      amount: 10n,
-                    },
-                  ],
-                },
-                batchHash,
-                encodedBatch: '0x1234',
-                entityNonce: 1,
-                hankoSignature: '0x1234',
-                batchSize: 1,
-                signerId,
-                runtimeSubmitAttempt: { attemptId: 'fatal-e3-1', attemptNumber: 1, attemptedAt: 124 },
-              },
-              timestamp: env.state.timestamp,
-            } as any,
-          ],
-        },
-      ],
-      { enqueueRuntimeInputs: (_env, _inputs, runtimeTxs) => queuedRuntimeTxs.push(...(runtimeTxs ?? [])) },
-    );
-
-    expect(queuedRuntimeTxs).toMatchObject([
-      {
-        type: 'recordJSubmitResult',
-        data: { outcome: 'terminalFailure', message: 'staticCall revert: E3()' },
-      },
-    ]);
-    expect(state.jBatchState?.status).toBe('sent');
-    expect(state.jBatchState?.failedAttempts).toBe(0);
-    expect(state.jBatchState?.sentBatch?.terminalFailure).toBeUndefined();
-    expect(state.jBatchState?.sentBatch?.lastFailure).toBeUndefined();
+    const results = await realAuditSubmit('E3', '1');
+    expect(results).toHaveLength(1);
+    expect(results[0]).toMatchObject({ type: 'recordJSubmitResult', data: { outcome: 'terminalFailure' } });
+    expect(results[0]?.type === 'recordJSubmitResult' && results[0].data.message).toContain('E3');
   });
 
   test('submitRuntimeJOutbox skips sealed batches owned by another runtime signer', async () => {
@@ -1305,14 +951,10 @@ describe('audit fail-fast regressions', () => {
     const env = createEmptyEnv('j-submit-non-local-signer-skip');
     env.runtimeId = localRuntimeId;
     env.state.timestamp = 125;
-    let adapterCalls = 0;
-    installAuditJAdapter(env, {
-      submitTx: async () => {
-        adapterCalls += 1;
-        return { success: true };
-      },
-      pollNow: async () => {},
-    } as JAdapter);
+    const adapter = await createJAdapter({ mode: 'browservm', chainId: 31337 });
+    const submit = spyOn(adapter, 'submitTx');
+    installAuditJAdapter(env, adapter);
+    try {
     const queuedRuntimeTxs: RuntimeTx[] = [];
 
     await submitAuditRuntimeJOutbox(
@@ -1351,83 +993,33 @@ describe('audit fail-fast regressions', () => {
       { enqueueRuntimeInputs: (_env, _inputs, runtimeTxs) => queuedRuntimeTxs.push(...(runtimeTxs ?? [])) },
     );
 
-    expect(adapterCalls).toBe(0);
+    expect(submit).not.toHaveBeenCalled();
     expect(queuedRuntimeTxs).toMatchObject([
       {
         type: 'recordJSubmitResult',
         data: { outcome: 'terminalFailure' },
       },
     ]);
+    } finally {
+      submit.mockRestore();
+      detachLiveJAdapter(env, 'Testnet');
+      await adapter.close();
+    }
   });
 
   test('submitRuntimeJOutbox submits RuntimeReplica-local multi-signer batches even when runtimeId differs', async () => {
-    const entityId = `0x${'af'.repeat(32)}`;
-    const runtimeId = `0x${'33'.repeat(20)}`;
-    const localScenarioSignerId = '97';
-    const env = createEmptyEnv('j-submit-local-multi-signer');
-    env.runtimeId = runtimeId;
-    env.state.timestamp = 126;
-    let adapterCalls = 0;
-    installAuditJAdapter(env, {
-      submitTx: async (_tx: unknown, options: { signerId?: string; signerPrivateKey?: Uint8Array }) => {
-        adapterCalls += 1;
-        expect(options.signerId).toBe(localScenarioSignerId);
-        expect(options.signerPrivateKey).toBeInstanceOf(Uint8Array);
-        return { success: true };
-      },
-      pollNow: async () => {},
-    } as JAdapter);
-
-    await submitAuditRuntimeJOutbox(
-      env,
-      [
-        {
-          jurisdictionName: 'Testnet',
-          jTxs: [
-            {
-              type: 'batch',
-              entityId,
-              data: {
-                batch: {
-                  ...createEmptyBatch(),
-                  reserveToReserve: [
-                    {
-                      receivingEntity: `0x${'ef'.repeat(32)}`,
-                      tokenId: 1,
-                      amount: 10n,
-                    },
-                  ],
-                },
-                batchHash: `0x${'14'.repeat(32)}`,
-                encodedBatch: '0x1234',
-                entityNonce: 1,
-                hankoSignature: '0x1234',
-                batchSize: 1,
-                signerId: localScenarioSignerId,
-                runtimeSubmitAttempt: { attemptId: 'local-multisig-1', attemptNumber: 1, attemptedAt: 126 },
-              },
-              timestamp: env.state.timestamp,
-            } as any,
-          ],
-        },
-      ],
-      { enqueueRuntimeInputs: () => {} },
-    );
-
-    expect(adapterCalls).toBe(1);
+    const results = await realAuditSubmit('success', '97');
+    expect(results).toHaveLength(1);
+    expect(results[0]).toMatchObject({ type: 'recordJSubmitResult', data: { outcome: 'submitted' } });
   });
 
   test('submitRuntimeJOutbox rejects non-empty consensus batch before adapter when hanko is missing', async () => {
     const env = createEmptyEnv('j-submit-unsealed-batch');
     env.state.timestamp = 123;
-    let adapterCalls = 0;
-    installAuditJAdapter(env, {
-      submitTx: async () => {
-        adapterCalls += 1;
-        return { success: true };
-      },
-      pollNow: async () => {},
-    } as JAdapter);
+    const adapter = await createJAdapter({ mode: 'browservm', chainId: 31337 });
+    const submit = spyOn(adapter, 'submitTx');
+    installAuditJAdapter(env, adapter);
+    try {
     const queuedRuntimeTxs: RuntimeTx[] = [];
 
     await submitAuditRuntimeJOutbox(
@@ -1466,13 +1058,18 @@ describe('audit fail-fast regressions', () => {
       },
     );
 
-    expect(adapterCalls).toBe(0);
+    expect(submit).not.toHaveBeenCalled();
     expect(queuedRuntimeTxs).toMatchObject([
       {
         type: 'recordJSubmitResult',
         data: { outcome: 'terminalFailure' },
       },
     ]);
+    } finally {
+      submit.mockRestore();
+      detachLiveJAdapter(env, 'Testnet');
+      await adapter.close();
+    }
   });
 
   test('request_collateral checks prepaid fee against derived outCapacity', () => {

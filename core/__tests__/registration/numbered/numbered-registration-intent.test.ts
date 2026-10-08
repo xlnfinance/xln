@@ -11,12 +11,12 @@ import {
   prepareNumberedRegistrationIntent,
   runNumberedRegistrationIntent,
   submitNumberedRegistrationIntent,
-} from '../../../runtime/registration/numbered-registration-intent';
+} from '../../../runtime/registration/numbered/numbered-registration-intent';
 import {
   assertNumberedRegistrationDriverActive,
   ensurePendingNumberedRegistrationsResumed,
-} from '../../../runtime/registration/numbered-registration-driver';
-import { markLocalNumberedRegistrationTx } from '../../../runtime/registration/numbered-registration-auth';
+} from '../../../runtime/registration/numbered/numbered-registration-driver';
+import { markLocalNumberedRegistrationTx } from '../../../runtime/registration/numbered/numbered-registration-auth';
 import { createJAdapter } from '../../../jurisdiction/adapter';
 import { closeInfraDb, closeRuntimeDb, createEmptyEnv, loadEnvFromDB } from '../../../runtime';
 import { commitRuntimeInput, processJEvents, setScenarioStorageEnabled } from '../../../scenarios/harness/helpers';
@@ -27,12 +27,12 @@ import {
 import type { RuntimeReplica } from '../../../runtime/types';
 import type { JurisdictionConfig } from '../../../entity/types';
 import type { JReplica } from '../../../types/jurisdiction-runtime';
-import { attachLiveJAdapter , getLiveJAdapter } from '../../../runtime/j-submit/live-jadapters';
+import { attachLiveJAdapter, detachLiveJAdapter, getLiveJAdapter } from '../../../runtime/j-submit/live-jadapters';
 import { markLocalRuntimeAdapterCommandTx } from '../../../runtime/command/frontier-auth';
 import { runtimeAdapterCommandLaneId } from '../../../runtime/command/frontier';
 import { dbRootPath } from '../../../runtime/replica/platform';
 import { canonicalEntitySeed } from '../../../runtime/registration/entity-creation';
-import { encodeNumberedRegistrationCalldata } from '../../../runtime/registration/numbered-registration-codec';
+import { encodeNumberedRegistrationCalldata } from '../../../runtime/registration/numbered/numbered-registration-codec';
 
 const attach = (
   env: RuntimeReplica,
@@ -394,6 +394,7 @@ describe('durable numbered registration intent', () => {
       expect(await adapter.entityProvider.nextNumber()).toBe(4n);
 
       await adapter.stopWatchingAndWait();
+      detachLiveJAdapter(env, jurisdiction.name, adapter);
       const restored = createEmptyEnv(seed);
       setScenarioStorageEnabled(restored, false);
       restored.scenarioMode = true;

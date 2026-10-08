@@ -172,8 +172,23 @@ assertOrder(accountConsensus, accountConsensusPath, [
   'const proofResult = timePerfPhase(',
   '() => buildAccountProofBodyFromJurisdictions(context, validatedMachine)',
   'const localProofBodyHash = proofResult.proofBodyHash;',
-  'const frameHankoError = getDisputeHankoRequirementError(',
+  'const frameHankoError = getIncomingFrameDisputeHankoError(',
+  'validatedMachine,',
+  'localProofBodyHash,',
+  'validatedCounterpartyDisputeHanko,',
+  'if (frameHankoError)',
+  'accountInputValidationRejected(frameHankoError, events)',
 ]);
+assertOrder(accountConsensus, accountConsensusPath, [
+  'const getIncomingFrameDisputeHankoError = (',
+  'getDisputeHankoRequirementError(',
+  'localProofBodyHash,',
+  'account.counterpartyDisputeProofBodyHash,',
+  'account.counterpartyDisputeProofNonce,',
+  'Number(account.state.jNonce ?? 0),',
+  'validated,',
+]);
+assertDirectCallCount('core/account/consensus/index.ts', 'getIncomingFrameDisputeHankoError', 1);
 
 assertOrder(accountCommitTransition, accountCommitTransitionPath, [
   'const owner = timePerfPhase(',
@@ -193,16 +208,32 @@ assertDirectCallCount('core/account/consensus/incoming/ack-commit.ts', 'commitAc
 assertOrder(accountConsensus, accountConsensusPath, [
   'async function handleIncomingAccountFrame',
   'if (preflight.rollbackPendingFrame) {',
-  'applySameHeightIncomingFrameRollback(account, preflight.receivedFrame, events);',
+  'applySameHeightIncomingFrameRollback(',
+  'account,',
+  'preflight.receivedFrame,',
+  'preflight.receivedFrame.stateHash,',
+  'events,',
   'await commitIncomingFrameOnRealState(',
 ]);
 assertOrder(accountConsensus, accountConsensusPath, [
   'async function commitIncomingFrameOnRealState',
   'publishAccountOverlay(account, validation.clonedMachine);',
   'ACCOUNT_OVERLAY_PUBLISH_STATE_IDENTITY_MISMATCH',
-  'account.currentFrame = cloneIsolatedAccountFrame(receivedFrame);',
-  'committedFrames.push({ frame: account.currentFrame, committedViaNewFrame: true });',
+  'installCommittedAccountFrameHead(account, receivedFrame);',
+  'committedFrames.push({',
+  'frame: account.currentFrame,',
+  'proposerIsLeft,',
+  'committedViaNewFrame: true,',
 ]);
+assertOrder(
+  readText('core/account/consensus/frame/committed-envelope.ts'),
+  'core/account/consensus/frame/committed-envelope.ts',
+  [
+    'export const installCommittedAccountFrameHead = (',
+    'account.currentFrame = cloneIsolatedAccountFrame(frame);',
+    'account.currentHeight = frame.height;',
+  ],
+);
 assertNotMatches(
   accountConsensus,
   /\bpending-proposal-replica\b|takePendingProposalReplica|stashPendingProposalReplica/,
@@ -248,7 +279,13 @@ assertOrder(entityConsensus, entityConsensusPath, [
   'normalizeProposedFrameCollectedSigs(input.proposedFrame);',
 ]);
 assertIncludes(entityConsensus, 'const supplied = entityInput.entityTxs ?? [];', entityConsensusPath);
-assertIncludes(entityConsensus, "if (admitted.every(tx => tx.type === 'accountInput')) {", entityConsensusPath);
+assertOrder(entityConsensus, entityConsensusPath, [
+  'const deduped = appendEntityMempoolTransactions([], admitted);',
+  "if (deduped.every(tx => tx.type === 'accountInput')) {",
+  'workingReplica.mempool = appendEntityMempoolTransactions(',
+  'workingReplica.mempool,',
+  'deduped,',
+]);
 assertInitializer(
   'core/entity/consensus/input/admission.ts',
   'admitted',
@@ -259,19 +296,31 @@ assertIncludes(entityConsensus, 'if (!verifyHashPrecommitSignatures(', entityCon
 assertIncludes(entityConsensus, 'const hankos: HankoString[] = [];', entityConsensusPath);
 assertIncludes(entityConsensus, 'await buildQuorumHanko(', entityConsensusPath);
 assertIncludes(entityConsensus, 'attachHankoWitnessToOutputs(', entityConsensusPath);
-assertIncludes(
+assertOrder(
   readText('core/entity/consensus/output/publication.ts'),
-  'GENERIC_ENTITY_OUTPUT_UNSUPPORTED',
   'core/entity/consensus/output/publication.ts',
+  [
+    'if (requireRawAccountOutput(sourceEntityId, output, outputIndex))',
+    'if (!emitRuntimeOutputs) return [];',
+    'RUNTIME_OUTPUT_ROUTE_MISSING',
+    'RUNTIME_OUTPUT_ENTITY_TXS_MISSING',
+    "type: 'runtimeOutput'",
+    "protocol: 'cross-j'",
+    'sourceEntityId: source,',
+    'sourceSignerId: sourceSigner,',
+    'targetEntityId,',
+    'entityTxs: cloneIsolatedEntityTxs(output.entityTxs)',
+  ],
 );
 assertIncludes(entityConsensus, 'if (isEmitter) jOutbox.push(...execution.jOutputs);', entityConsensusPath);
 
 assertIncludes(accountFrame, 'canonicalJurisdictionEventsHash(events)', accountFramePath);
 assertOrder(accountFrame, accountFramePath, [
-  "return computeCanonicalMerkleRoot('account.frame', [",
+  "const hash = computeCanonicalMerkleRoot('account.frame', [",
   "['transition', {",
   "['transactions', frame.accountTxs.map(canonicalAccountTxForFrameHash)],",
   "['accountStateRoot', frame.accountStateRoot],",
+  'return hash;',
 ]);
 assertOrder(entityFrame, entityFramePath, [
   'export const assertEntityFrameTotalByteBudget',

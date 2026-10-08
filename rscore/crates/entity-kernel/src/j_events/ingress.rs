@@ -844,10 +844,9 @@ fn dispute_account<'a>(
     Ok(Some((counterparty, we_are_starter, view)))
 }
 
-fn require_frozen_proof_body(
+fn require_event_proof_body(
     event_body: &xln_rscore_engine::ProofBody,
     expected_hash: [u8; 32],
-    view: &xln_rscore_batch::ResidentAccountDisputeView,
     context: &'static str,
 ) -> Result<crate::j_batch::ProofBody, EntityKernelError> {
     let event_body = crate::proof_body_from_j_event(event_body)
@@ -861,12 +860,29 @@ fn require_frozen_proof_body(
             prefixed_hex(&event_hash)
         )));
     }
-    let resident_body = crate::proof_body_from_engine(
+    Ok(event_body)
+}
+
+fn resident_proof_body(
+    view: &xln_rscore_batch::ResidentAccountDisputeView,
+    context: &'static str,
+) -> Result<crate::j_batch::ProofBody, EntityKernelError> {
+    crate::proof_body_from_engine(
         view.proof_body
             .clone()
             .map_err(|error| invalid(format!("{context}:ACCOUNT_PROOFBODY:{error}")))?,
     )
-    .map_err(|error| invalid(format!("{context}:ACCOUNT_PROOFBODY:{error}")))?;
+    .map_err(|error| invalid(format!("{context}:ACCOUNT_PROOFBODY:{error}")))
+}
+
+fn require_frozen_proof_body(
+    event_body: &xln_rscore_engine::ProofBody,
+    expected_hash: [u8; 32],
+    view: &xln_rscore_batch::ResidentAccountDisputeView,
+    context: &'static str,
+) -> Result<crate::j_batch::ProofBody, EntityKernelError> {
+    let event_body = require_event_proof_body(event_body, expected_hash, context)?;
+    let resident_body = resident_proof_body(view, context)?;
     if event_body != resident_body {
         let resident_hash = crate::proof_body_hash(&resident_body)
             .map_err(|error| invalid(format!("{context}:ACCOUNT_PROOFBODY_HASH:{error}")))?;
@@ -1396,7 +1412,6 @@ fn queue_selected_pull_counter_proof(
     initial_hash: [u8; 32],
     initial_nonce: u64,
     active: &CanonicalValue,
-    body: &crate::j_batch::ProofBody,
     outputs: &mut Vec<LocalEntityOutput>,
     frame_events: &mut Vec<EntityFrameEvent>,
 ) -> Result<bool, EntityKernelError> {
@@ -1419,10 +1434,14 @@ fn queue_selected_pull_counter_proof(
     let delta_transformer = view
         .delta_transformer
         .ok_or_else(|| invalid("J_COUNTER_DISPUTE_DELTA_TRANSFORMER_MISSING"))?;
-    if !crate::cross_j::proof_body_has_signed_pulls(body, delta_transformer)? {
+    // The chain may have selected an older body without these Pulls. The
+    // counterparty's newer signature authorizes the current resident body,
+    // never the starter's historical body carried by the J event.
+    let body = resident_proof_body(view, "J_COUNTER_DISPUTE")?;
+    if !crate::cross_j::proof_body_has_signed_pulls(&body, delta_transformer)? {
         return Ok(false);
     }
-    let body_hash = crate::proof_body_hash(body)
+    let body_hash = crate::proof_body_hash(&body)
         .map_err(|error| invalid(format!("J_COUNTER_DISPUTE_PROOFBODY_HASH:{error}")))?;
     if body_hash != counter.proof_body_hash {
         return Err(invalid(format!(
@@ -1506,7 +1525,7 @@ fn queue_selected_pull_counter_proof(
         state,
         counterparty,
         runtime_seed,
-        body,
+        &body,
         delta_transformer,
         view.owner_is_left,
         Some(active),
@@ -1551,10 +1570,11 @@ fn apply_dispute_started(
         return Ok(());
     };
     let initial_hash = hex_word(&event.proofbody_hash, "J_EVENT_DISPUTE_PROOFBODY_HASH")?;
-    let body = require_frozen_proof_body(
+    // An authenticated old proof is a legal dispute start, not corruption of
+    // our newer Account state. Its hash remains bound to the certified event.
+    let body = require_event_proof_body(
         &event.initial_proofbody,
         initial_hash,
-        view,
         "jEvent.disputeStarted",
     )?;
     if body.watch_seed != event.watch_seed
@@ -1614,7 +1634,6 @@ fn apply_dispute_started(
         initial_hash,
         initial_nonce,
         &active,
-        &body,
         outputs,
         frame_events,
     )?;
@@ -3197,7 +3216,12 @@ mod tests {
         event.sender = counterparty.as_hex();
         event.counterentity = owner.as_hex();
         event.initial_proofbody = event_body;
-        event.proofbody_hash = prefixed_hex(&body_hash);
+        event.initial_proofbody.transformers.clear();
+        let initial_body = crate::proof_body_from_j_event(&event.initial_proofbody)
+            .expect("historical body without the later Pull");
+        let initial_hash = crate::proof_body_hash(&initial_body).expect("initial hash");
+        assert_ne!(initial_hash, body_hash);
+        event.proofbody_hash = prefixed_hex(&initial_hash);
         let mut state = EntityStateSlice::empty(owner.as_hex(), 101_000);
         state.known_accounts.insert(counterparty.as_hex());
         let mut outputs = Vec::new();
@@ -3221,12 +3245,13 @@ mod tests {
             .counter_disputes;
         assert_eq!(queued.len(), 1);
         assert_eq!(queued[0].counter_nonce, U256::from(4_u8));
+        assert_eq!(queued[0].initial_proofbody_hash, initial_hash);
         assert_eq!(queued[0].counter_proofbody, body);
         assert_eq!(outputs.len(), 1);
     }
 
     #[test]
-    fn dispute_started_rejects_event_body_not_equal_to_resident_account() {
+    fn dispute_started_rejects_event_body_not_bound_to_certified_hash() {
         let owner = entity(0x11);
         let counterparty = entity(0x22);
         let mut state = EntityStateSlice::empty(owner.as_hex(), 1_000);

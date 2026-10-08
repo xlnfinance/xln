@@ -7,8 +7,8 @@
 
 import { writable, get } from 'svelte/store';
 import { ethers } from 'ethers';
-import { compareStableText } from '$lib/utils/stableSort';
-import { isUnknownRecord as isRecord, parseJsonUnknown, rejectExtraKeys, requireUnknownRecord } from '$lib/utils/boundary';
+import { compareStableText } from '#lib/utils/stableSort.ts';
+import { isUnknownRecord as isRecord, parseJsonUnknown, rejectExtraKeys, requireUnknownRecord } from '#lib/utils/boundary/index.ts';
 import { errorLog } from '../errorLogStore';
 
 export interface JMachineConfig {

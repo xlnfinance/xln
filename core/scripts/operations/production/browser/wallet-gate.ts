@@ -1,3 +1,4 @@
+import { decodeRuntimeManifestEntries } from '../../hlt/boundary/worker-boundary';
 import type { ChildProcess } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -29,6 +30,30 @@ const waitForService = async (child: ChildProcess, url: string): Promise<void> =
   throw new Error(`WALLET_GATE_SERVICE_NOT_READY:${url}:${last}`);
 };
 
+/** The controller publishes this file only after canonical import readiness passes.
+ * General system health can become ready before its scheduled refresh publishes it. */
+export const waitForRuntimeImportManifest = async (path: string, timeoutMs = 20_000): Promise<void> => {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    let content: string;
+    try {
+      content = readFileSync(path, 'utf8');
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+      await new Promise(resolve => setTimeout(resolve, 100));
+      continue;
+    }
+    const value: unknown = JSON.parse(content);
+    if (decodeRuntimeManifestEntries(value).length === 0) throw new Error('WALLET_IMPORT_MANIFEST_EMPTY');
+    const root = requireBoundaryRecord(value, 'WALLET_IMPORT_MANIFEST_INVALID');
+    const manifest = requireBoundaryRecord(root['manifest'], 'WALLET_IMPORT_MANIFEST_BODY_INVALID');
+    if (requireBoundaryInteger(manifest['expiresAt'], 'WALLET_IMPORT_MANIFEST_EXPIRY_INVALID') <= Date.now())
+      throw new Error('WALLET_IMPORT_MANIFEST_EXPIRED');
+    return;
+  }
+  throw new Error(`WALLET_IMPORT_MANIFEST_NOT_READY:${path}`);
+};
+
 const waitForBrowser = (child: ChildProcess): Promise<void> =>
   new Promise((resolve, reject) => {
     child.once('error', reject);
@@ -52,6 +77,10 @@ const assertBrowserReport = (path: string): void => {
 /** Reuse the production stand and its leased ports; all children share its cleanup owner. */
 export const runWalletBrowserGate = async (input: WalletGate): Promise<void> => {
   const tests = input.tests.split(',');
+  const grep = process.env['XLN_LOCAL_PROD_SMOKE_WALLET_GREP'];
+  if (grep !== undefined && !/^[A-Za-z0-9][A-Za-z0-9 ._-]{0,255}$/.test(grep)) {
+    throw new Error('WALLET_TEST_GREP_INVALID');
+  }
   if (tests.some(test => !/^e2e-[a-z0-9-]+\.spec\.ts$/.test(test))) throw new Error('WALLET_TEST_ARGUMENT_INVALID');
   const port = input.rpcPort + 2;
   const origin = `http://127.0.0.1:${port}`;
@@ -92,6 +121,7 @@ export const runWalletBrowserGate = async (input: WalletGate): Promise<void> => 
     env,
   );
   await waitForService(server, `${origin}/api/jurisdictions`);
+  await waitForRuntimeImportManifest(join(input.workDir, 'prod-mesh', 'runtime-import-manifest.json'));
   await waitForBrowser(
     input.start(
       'wallet-browser',
@@ -104,6 +134,7 @@ export const runWalletBrowserGate = async (input: WalletGate): Promise<void> => 
         '--project=chromium',
         '--max-failures=1',
         '--reporter=list,json',
+        ...(grep === undefined ? [] : ['--grep', grep.replaceAll('.', '[.]')]),
         '--output',
         join(input.workDir, 'wallet-artifacts'),
         ...tests.map(test => `ui/tests/${test}`),

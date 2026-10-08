@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import type { EntityOpenAction } from '$lib/view/utils/panelBridge';
+import type { EntityOpenAction } from '#lib/view/utils/panelBridge.ts';
 
 export type ImmersiveWalletSurfaceAction = EntityOpenAction | 'close';
 

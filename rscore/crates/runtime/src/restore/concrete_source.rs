@@ -299,10 +299,18 @@ pub fn verify_checkpoint_source(
     if source.height == 0 || source.leaf_count == 0 {
         return Err(invalid("CHECKPOINT_HEIGHT_OR_LEAVES"));
     }
-    if source.state_rows.is_empty() {
+    let (frame, _) = verified_checkpoint_frame(source)?;
+    // The first committed Runtime frame may import only a jurisdiction. It
+    // has no Entity/Account rows; only an explicitly empty certified owner set
+    // permits that shape. Missing state for any owner remains a hard error.
+    if source.state_rows.is_empty()
+        && !frame
+            .get("canonicalEntityHashes")
+            .and_then(Value::as_array)
+            .is_some_and(Vec::is_empty)
+    {
         return Err(invalid("CHECKPOINT_STATE_ROWS_EMPTY"));
     }
-    verified_checkpoint_frame(source)?;
     rebuild_runtime_machine_graph(
         source.runtime_machine_leaves.clone(),
         &hex(&source.root_hash),
@@ -323,6 +331,10 @@ mod tests {
     }
 
     fn graph_fixture() -> ConcreteCheckpointSource {
+        graph_fixture_with_entities(true)
+    }
+
+    fn graph_fixture_with_entities(include_entity: bool) -> ConcreteCheckpointSource {
         let rows = vec![
             (
                 encoded(CanonicalValue::Array(Vec::new())),
@@ -369,11 +381,15 @@ mod tests {
                 materialized_state: true,
                 canonical_state: Some(crate::storage::native::CanonicalStateCommitment {
                     state_hash: [2; 32],
-                    entity_hashes: vec![crate::storage::native::RuntimeFrameEntityHash {
-                        entity_id: format!("0x{}", "11".repeat(32)),
-                        hash: [3; 32],
-                        cell_count: 1,
-                    }],
+                    entity_hashes: if include_entity {
+                        vec![crate::storage::native::RuntimeFrameEntityHash {
+                            entity_id: format!("0x{}", "11".repeat(32)),
+                            hash: [3; 32],
+                            cell_count: 1,
+                        }]
+                    } else {
+                        vec![]
+                    },
                 }),
                 runtime_input: serde_json::json!({"runtimeTxs": [], "entityInputs": []}),
                 runtime_machine_root: Some(crate::storage::native::RuntimeMachineGraphRoot {
@@ -412,6 +428,27 @@ mod tests {
         let source = graph_fixture();
         let restored = verify_checkpoint_source(&source).expect("verified graph");
         assert_eq!(restored["runtimeId"], Value::String("h1".into()));
+    }
+
+    #[test]
+    fn jurisdiction_only_checkpoint_allows_certified_empty_entity_rows() {
+        let mut source = graph_fixture_with_entities(false);
+        source.state_rows.clear();
+        let frame = decode_storage_payload(&source.frame_bytes).unwrap();
+        assert_eq!(frame["canonicalEntityHashes"], serde_json::json!([]));
+        verify_checkpoint_source(&source).expect("committed empty owner set");
+    }
+
+    #[test]
+    fn checkpoint_with_entity_cannot_drop_all_state_rows() {
+        let mut source = graph_fixture();
+        source.state_rows.clear();
+        assert!(
+            verify_checkpoint_source(&source)
+                .unwrap_err()
+                .to_string()
+                .contains("CHECKPOINT_STATE_ROWS_EMPTY")
+        );
     }
 
     #[test]

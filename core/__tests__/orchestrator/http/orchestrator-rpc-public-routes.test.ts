@@ -1,3 +1,4 @@
+import { safeStringify } from '../../../protocol/serialization';
 import { describe, expect, test } from 'bun:test';
 
 import { toPublicJurisdictionsPayload } from '../../../orchestrator/j-select/jurisdictions';
@@ -218,4 +219,44 @@ describe('orchestrator public RPC routes', () => {
       entityProviderAddress: '0x6',
     });
   });
+});
+
+test('native aggregate metadata publishes the same-origin REST route without exposing direct node hosts', () => {
+  const payload = JSON.parse(toPublicJurisdictionsPayload({
+    shardJurisdictionsPath: '/tmp/native-shard.json', rpc2Url: '',
+    rpcUrls: { 1: 'http://127.0.0.1:18545/jsonrpc' },
+  }, safeStringify({ version: '1', jurisdictions: { native: {
+    name: 'Native TVM', status: 'active', mode: 'tron', chainId: 2414086651,
+    rpc: 'http://127.0.0.1:18545/jsonrpc', tronFullHost: 'http://127.0.0.1:19090',
+    tronSolidityHost: 'http://127.0.0.1:19091', entityProviderDeploymentBlock: 12,
+    contracts: { account: `0x${'11'.repeat(20)}`, depository: `0x${'22'.repeat(20)}`,
+      entityProvider: `0x${'33'.repeat(20)}`, deltaTransformer: `0x${'44'.repeat(20)}` },
+  } } })));
+  expect(payload.jurisdictions.native.tronFullHost).toBe('/api/tron/2414086651');
+  expect(payload.jurisdictions.native.tronSolidityHost).toBe('/api/tron/2414086651');
+});
+
+test('native aggregate proxy uses its selected shard and the shared bounded HTTP handler', async () => {
+  const { mkdtempSync, writeFileSync, rmSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const { proxyNativeRest } = await import('../../../orchestrator/proxy');
+  const dir = mkdtempSync(join(tmpdir(), 'xln-native-proxy-'));
+  const shardJurisdictionsPath = join(dir, 'jurisdictions.json');
+  writeFileSync(shardJurisdictionsPath, safeStringify({ version: '1', lastUpdated: '2026-10-07',
+    defaults: { timeout: 1000, retryAttempts: 1, gasLimit: 100000 }, jurisdictions: { native: {
+      name: 'Native TVM', chainId: 2414086651, blockTimeMs: 3000, rpc: 'http://127.0.0.1:18545/jsonrpc',
+      mode: 'tron', tronFullHost: 'http://127.0.0.1:19090', tronSolidityHost: 'http://127.0.0.1:19091',
+      status: 'active', explorer: '', currency: 'TRX', entityProviderDeploymentBlock: 12,
+      contracts: { entityProvider: `0x${'11'.repeat(20)}`, depository: `0x${'22'.repeat(20)}` },
+    } } }));
+  try {
+    // Resolving a global/EVM config would reject this chain before reaching the
+    // common byte limit. No RPC is sent for an oversized client request.
+    const response = await proxyNativeRest(new Request('http://localhost/api/tron/2414086651/walletsolidity/getnowblock', {
+      method: 'POST', headers: { 'content-length': String(300 * 1024) }, body: '{}',
+    }), {}, { shardJurisdictionsPath, rpc2Url: '' });
+    expect(response.status).toBe(413);
+    expect(await response.json()).toEqual({ error: 'RPC_PROXY_REQUEST_TOO_LARGE' });
+  } finally { rmSync(dir, { recursive: true }); }
 });

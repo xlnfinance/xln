@@ -1,8 +1,8 @@
 <script lang="ts">
-  import { page } from '$app/stores';
-  import { locale, LOCALES, type Locale } from '$lib/i18n';
+  import { page } from '$app/state';
+  import { locale, LOCALES, type Locale } from '#lib/i18n/index.ts';
   import DeltaVisualizer from './Tools/DeltaVisualizer.svelte';
-  import Dropdown from '$lib/components/UI/Dropdown.svelte';
+  import Dropdown from '#lib/components/UI/Dropdown.svelte';
 
   interface Props {
     variant?: 'default' | 'transparent';
@@ -11,7 +11,7 @@
   let { variant = 'default' }: Props = $props();
 
   // Highlight current page
-  let currentPath = $derived(String($page.url.pathname));
+  let currentPath = $derived(String(page.url.pathname));
 
   // Dropdown states
   let langDropdownOpen = $state(false);

@@ -50,6 +50,18 @@ const selectLastNetworkFrame = async (page: import('@playwright/test').Page): Pr
   await expect(page.getByTestId('network-machine-selected-event')).toBeVisible({ timeout: 90_000 });
 };
 
+const waitForNetworkTimeline = async (page: Page): Promise<void> => {
+  // Refresh clears its previous error synchronously; a new typed protocol failure is terminal.
+  const timelineReady = await page.waitForFunction(() => {
+    const alert = document.querySelector<HTMLElement>('.network-error');
+    const error = alert?.checkVisibility() ? alert.textContent?.trim() : '';
+    if (error && /^E_(BAD_PATH|BAD_QUERY|INTERNAL|UNAUTHORIZED):/.test(error)) return error;
+    return /LIVE\/[1-9]\d*/.test(document.querySelector('[data-testid="network-machine-frame-badge"]')?.textContent || '')
+      ? 'ready' : false;
+  }, null, { timeout: 120_000 });
+  expect(await timelineReady.jsonValue()).toBe('ready');
+};
+
 test.describe('dockview', () => {
   test('Dock workspace, NetworkMachine H1-H3 merge, tools, graph gestures and user return path', { tag: '@functional' }, async ({ page }, testInfo) => {
     test.setTimeout(360_000);
@@ -110,6 +122,7 @@ test.describe('dockview', () => {
     await expect(page.locator('.xln-pinned-dock-tab')).toContainText('Main Wallet');
     await expect(page.getByTestId('network-machine-timeline')).toBeVisible();
     await page.getByTestId('network-machine-refresh').click();
+    await waitForNetworkTimeline(page);
     await expect(page.getByTestId('network-machine-frame-badge')).toContainText(/LIVE\/[1-9]\d*/, { timeout: 120_000 });
 
     const graphBox = await page.locator('.graph3d-wrapper').boundingBox();
@@ -160,6 +173,7 @@ test.describe('dockview', () => {
     await scope.selectOption('merged');
     await expect(page.getByTestId('network-machine-timeline')).toBeVisible({ timeout: 30_000 });
     await page.getByTestId('network-machine-refresh').click();
+    await waitForNetworkTimeline(page);
     await expect(page.getByTestId('network-machine-frame-badge')).toContainText(/LIVE\/[1-9]\d*/, { timeout: 120_000 });
     await selectLastNetworkFrame(page);
 

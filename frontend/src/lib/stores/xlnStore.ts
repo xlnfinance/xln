@@ -1,5 +1,5 @@
 import { writable, derived, get } from 'svelte/store';
-import { isUnknownRecord, parseJsonUnknown, readJsonUnknown } from '$lib/utils/boundary';
+import { isUnknownRecord, parseJsonUnknown, readJsonUnknown } from '#lib/utils/boundary/index.ts';
 import { errorLog } from './errorLogStore';
 import { settings } from './settingsStore';
 import { activeEnv, activeRuntimeId, registerRuntimeAdapterSwitcher, runtimes, runtimeOperations } from './runtimeStore';
@@ -53,26 +53,26 @@ import {
   type RuntimeViewSelection,
 } from './runtimeViewStore';
 import { assertNetworkMachineIsLive, networkMachineRuntime } from './network/networkMachineRuntimeStore';
-import { normalizeWsConnectUrl, normalizeWsUrl, sameWsEndpoint } from '$lib/utils/runtime/wsUrl';
-import { createRuntimeViewEnv, unwrapLiveRuntimeEnv } from '$lib/utils/runtime/liveRuntimeEnv';
-import { registerDebugSurface } from '$lib/utils/runtime/debugSurface';
+import { normalizeWsConnectUrl, normalizeWsUrl, sameWsEndpoint } from '#lib/utils/runtime/wsUrl.ts';
+import { createRuntimeViewEnv, unwrapLiveRuntimeEnv } from '#lib/utils/runtime/liveRuntimeEnv.ts';
+import { registerDebugSurface } from '#lib/utils/runtime/debugSurface.ts';
 import {
   decodeProtectedVaultSecrets,
   deleteVaultDeviceKey,
   protectVaultSecrets,
   unprotectVaultSecrets,
   type ProtectedVaultSecrets,
-} from '$lib/security/vaultProtection';
+} from '#lib/security/vaultProtection.ts';
 import {
   readRemoteRuntimeTokenAccess,
   readRemoteRuntimeTokenAudience,
   resolveStoredRemoteRuntimeAuthKey,
   type RemoteRuntimeHubSummary,
-} from '$lib/utils/onboarding/remoteRuntimeImport';
+} from '#lib/utils/onboarding/remoteRuntimeImport.ts';
 import {
   waitForOpenAccountCounterpartyProfiles,
-} from '$lib/utils/runtime/p2pPrefetch';
-import { requireTokenDecimals } from '$lib/components/Entity/token-metadata';
+} from '#lib/utils/runtime/p2pPrefetch.ts';
+import { requireTokenDecimals } from '#lib/components/Entity/token-metadata.ts';
 import { getXLN, xlnInstance } from './bootstrap/xlnRuntimeLoader';
 import { parseProfile } from '@xln/core/entity/profile';
 import type {
@@ -1093,11 +1093,6 @@ export async function initializeXLN(): Promise<RuntimeReplica | null> {
     // Store XLN instance separately for function access
     xlnInstance.set(xln);
     runtimeOperations.hydrateRemoteRuntimeImports();
-    if (typeof window !== 'undefined') {
-      const importSource = new URL('/api/runtime-import', resolveConfiguredApiBase(window.location.origin));
-      importSource.searchParams.set('access', 'admin');
-      void runtimeOperations.hydrateRemoteRuntimeImportSource(importSource.toString(), { optional: true });
-    }
 
     const adapterConfig = await resolveAppRuntimeAdapterConfig();
     if (adapterConfig.mode === 'remote') {

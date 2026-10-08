@@ -1,5 +1,5 @@
 <script lang="ts">
-  import RcpanExperience from '$lib/components/Rcpan/RcpanExperience.svelte';
+  import RcpanExperience from '#lib/components/Rcpan/RcpanExperience.svelte';
 </script>
 
 <svelte:head>

@@ -17,7 +17,20 @@ mod commitment;
 #[path = "checkpoint/entity_checkpoint.rs"]
 mod entity_checkpoint;
 mod entity_context_json;
+#[path = "administration/entity_encryption.rs"]
+mod entity_encryption;
 mod entity_frame;
+#[path = "administration/entity_import.rs"]
+mod entity_import;
+pub use entity_import::ImportReplica;
+#[path = "administration/custody_owner.rs"]
+mod custody_owner;
+pub use custody_owner::{custody_owner_import, install_custody_key};
+#[path = "administration/entity_genesis.rs"]
+mod entity_genesis;
+pub use entity_genesis::create_entity_genesis_slot;
+mod j_authority;
+#[path = "administration/j_import.rs"]
 mod j_import;
 pub mod j_submit;
 mod j_watcher;
@@ -29,6 +42,10 @@ pub mod processor;
 mod recording;
 pub mod restore;
 pub mod rheader;
+#[path = "projection/signed_profile.rs"]
+pub mod signed_profile;
+#[path = "projection/signed_profile_accounts.rs"]
+pub mod signed_profile_accounts;
 pub mod storage;
 #[path = "codec/storage_msgpack.rs"]
 mod storage_msgpack;
@@ -68,8 +85,8 @@ pub use j_import::{
 pub use j_watcher::{
     FinalizedJEventBatch, FinalizedJHeader, FinalizedWatcherCursor, HttpJsonRpc, JClaimIngress,
     JReserveUpdate, JWatcherConfig, JWatcherError, JWatcherPoll, JsonRpc, ObserveJRange,
-    WatchedExternalWallet, WatchedHashLadder, decode_observe_j_range, encode_observe_j_range,
-    observation_from_poll, poll_finalized_j_events,
+    WalletSnapshotError, WatchedExternalWallet, WatchedHashLadder, decode_observe_j_range,
+    encode_observe_j_range, observation_from_poll, poll_finalized_j_events, read_wallet_snapshot,
 };
 pub use leveldb::{
     RawConcreteWalRows, RuntimeLevelDbError, RuntimeWalReader, StoredRscoreCheckpoint,
@@ -101,3 +118,12 @@ pub use storage_msgpack::{StorageMessagePackError, decode_storage_payload};
 pub use tagged_json::{
     TaggedJsonError, canonical_value_from_tagged_json, tagged_json_from_canonical_value,
 };
+
+pub use j_authority::AuthenticatedJAuthority;
+
+#[path = "administration/registration_replacement.rs"]
+mod registration_replacement;
+pub use registration_replacement::NumberedRegistrationReplacement;
+
+#[path = "projection/payment_routes/mod.rs"]
+pub mod payment_routes;

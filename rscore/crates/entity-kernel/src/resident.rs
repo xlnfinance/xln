@@ -318,6 +318,8 @@ fn commit_book_stage(
 
 #[derive(Debug, Error)]
 pub enum ResidentEntityError {
+    #[error("ENTITY_INBOUND_ADMISSION_REJECTED:row={row_index}:{detail}")]
+    InboundAdmissionRejected { row_index: usize, detail: String },
     #[error("ENTITY_OUTER_COMMAND_REJECTED:operation={operation_index}:{kind}:{detail}")]
     LocalCommandRejected {
         operation_index: usize,
@@ -854,7 +856,7 @@ fn suppress_setup_frame_proposals(
             (
                 account,
                 admissions,
-                BatchAccountSelection::WaitForSibling,
+                BatchAccountSelection::Defer,
                 obligation,
             )
         })
@@ -901,6 +903,17 @@ fn select_cross_j_proposal_work(
             let mut mempool =
                 take_local_opening_mempool(&mut local_mempools, account, created_accounts)?;
             mempool.extend(admissions.iter().cloned());
+            // TS fixes the proposal cohort at Entity-frame entry. Account
+            // creation admits its genesis txs now; Runtime's existing Account
+            // work continuation proposes them only after this frame commits.
+            if created_accounts.contains(&account) {
+                return Ok((
+                    account,
+                    admissions,
+                    BatchAccountSelection::Defer,
+                    obligation,
+                ));
+            }
             let selection = match crate::select_cross_j_opening_proposal(
                 local_entity_id,
                 &account_text(account),
@@ -910,9 +923,7 @@ fn select_cross_j_proposal_work(
                 crate::CrossJOpeningProposalSelection::Ordinary => {
                     BatchAccountSelection::WholeMempool
                 }
-                crate::CrossJOpeningProposalSelection::Wait => {
-                    BatchAccountSelection::WaitForSibling
-                }
+                crate::CrossJOpeningProposalSelection::Wait => BatchAccountSelection::Defer,
                 crate::CrossJOpeningProposalSelection::Selected(txs) => {
                     BatchAccountSelection::Selected(txs)
                 }
@@ -1130,6 +1141,17 @@ fn local_financial_view_requests(
     }
     for commit in commits {
         for transition in &commit.transitions {
+            // A committed cancel authorizes the source Hub to remove this
+            // offer. Without its post-commit view, cross-J cancellation sees
+            // no offer and leaves the remainder executable by later makers.
+            if let AccountTx::SwapCancelRequest { offer_id } = &transition.tx {
+                requested
+                    .entry(account_id(&commit.account_id)?)
+                    .or_default()
+                    .swap_offer_ids
+                    .insert(offer_id.clone());
+                continue;
+            }
             if matches!(transition.tx, AccountTx::SettleTransition { .. }) {
                 requested
                     .entry(account_id(&commit.account_id)?)
@@ -1401,6 +1423,11 @@ fn collect_verdict_certification(
     position: usize,
 ) -> Result<(), ResidentEntityError> {
     match verdict {
+        AccountInputVerdict::FrameDuplicate { height, .. } => {
+            events.push(EntityFrameEvent::Status {
+                message: format!("↩️ Re-sent ACK for duplicate committed frame {height}"),
+            });
+        }
         AccountInputVerdict::FrameCollisionIgnored { height, queued } => {
             append_collision_ignored_events(events, *height, *queued);
             collisions.push(CollisionFixup {
@@ -1666,8 +1693,15 @@ fn ordered_commits(
     Ok(commits)
 }
 
+#[derive(Clone, Copy)]
+enum AdmissionOwner {
+    Local(usize),
+    Inbound(usize),
+}
+
 #[derive(Default)]
 struct EntityTransitionAccumulator {
+    admission_owners: BTreeMap<String, Vec<Option<AdmissionOwner>>>,
     account_creates: Vec<xln_rscore_batch::AccountSeed>,
     proposal_work: Vec<AccountProposalWork>,
     proposal_origins: Vec<(String, usize)>,
@@ -1684,7 +1718,30 @@ struct EntityTransitionAccumulator {
 }
 
 impl EntityTransitionAccumulator {
-    fn merge(&mut self, next: crate::kernel::EntityTransitionResult) -> EntityStateSlice {
+    fn merge(
+        &mut self,
+        next: crate::kernel::EntityTransitionResult,
+        operation: Option<usize>,
+    ) -> EntityStateSlice {
+        let mut inbound_owners = BTreeMap::<&str, Vec<usize>>::new();
+        for (account, position) in &next.proposal_tx_origins {
+            inbound_owners.entry(account).or_default().push(*position);
+        }
+        for work in &next.proposal_work {
+            let owners = self
+                .admission_owners
+                .entry(work.account_id.clone())
+                .or_default();
+            for index in 0..work.txs.len() {
+                owners.push(operation.map(AdmissionOwner::Local).or_else(|| {
+                    inbound_owners
+                        .get(work.account_id.as_str())
+                        .and_then(|rows| rows.get(index))
+                        .copied()
+                        .map(AdmissionOwner::Inbound)
+                }));
+            }
+        }
         let crate::kernel::EntityTransitionResult {
             state,
             mut account_creates,
@@ -2198,6 +2255,9 @@ fn apply_scheduled_wake(
         .collect::<BTreeSet<_>>();
     let mut secret_acks_requiring_dispute = Vec::new();
     for (hashlock, counterparty) in due_secret_acks {
+        if !state.known_accounts.contains(&counterparty) {
+            continue;
+        }
         if active_text.contains(&(counterparty.clone(), hashlock.clone())) {
             secret_acks_requiring_dispute.push((hashlock, counterparty));
         } else {
@@ -2842,7 +2902,7 @@ fn apply_resident_entity_round_core_attempt(
     );
     ordered_events.append(&mut scheduled_transition.local_events);
     ordered_hashes.append(&mut scheduled_transition.local_hashes_to_sign);
-    state = accumulated.merge(scheduled_transition);
+    state = accumulated.merge(scheduled_transition, None);
 
     for (operation_index, operation) in operations.into_iter().enumerate() {
         match operation {
@@ -3003,7 +3063,7 @@ fn apply_resident_entity_round_core_attempt(
                     ordered_hashes.append(&mut next.local_hashes_to_sign);
                     entity_apply_micros =
                         entity_apply_micros.saturating_add(phase_started.elapsed().as_micros());
-                    state = accumulated.merge(next);
+                    state = accumulated.merge(next, None);
                 }
                 if base_transition_pending {
                     let phase_started = Instant::now();
@@ -3023,14 +3083,29 @@ fn apply_resident_entity_round_core_attempt(
                     ordered_hashes.append(&mut next.local_hashes_to_sign);
                     entity_apply_micros =
                         entity_apply_micros.saturating_add(phase_started.elapsed().as_micros());
-                    state = accumulated.merge(next);
+                    state = accumulated.merge(next, None);
                 }
                 schedule_committed_account_work(&mut state, &segment.applied)?;
                 ordered_applied.append(&mut segment.applied);
             }
             ResidentEntityOperation::Local(local_txs) => {
+                // Planning validates sender-selected route IDs before the reducer.
+                // Preserve the owning operation so only that command is evicted;
+                // storage and malformed committed-state errors remain fail-stop.
                 let mut views =
-                    local_account_views(accounts, &state, &local_txs, &[], &[], context)?;
+                    local_account_views(accounts, &state, &local_txs, &[], &[], context).map_err(
+                        |error| match error {
+                            ResidentEntityError::Entity(EntityKernelError::RejectedEntityTx {
+                                kind,
+                                detail,
+                            }) => ResidentEntityError::LocalCommandRejected {
+                                operation_index,
+                                kind,
+                                detail,
+                            },
+                            error => error,
+                        },
+                    )?;
                 let visible_mutations = accumulated
                     .account_envelope_mutations
                     .iter()
@@ -3076,7 +3151,7 @@ fn apply_resident_entity_round_core_attempt(
                 ordered_hashes.append(&mut next.local_hashes_to_sign);
                 entity_apply_micros =
                     entity_apply_micros.saturating_add(phase_started.elapsed().as_micros());
-                state = accumulated.merge(next);
+                state = accumulated.merge(next, Some(operation_index));
             }
         }
     }
@@ -3102,7 +3177,8 @@ fn apply_resident_entity_round_core_attempt(
         context,
     )?;
     entity_apply_micros = entity_apply_micros.saturating_add(phase_started.elapsed().as_micros());
-    let state = accumulated.merge(final_transition);
+    let state = accumulated.merge(final_transition, None);
+    let admission_owners = std::mem::take(&mut accumulated.admission_owners);
     let mut kernel = crate::kernel::EntityTransitionResult {
         state,
         account_creates: accumulated.account_creates,
@@ -3260,6 +3336,96 @@ fn apply_resident_entity_round_core_attempt(
             .routed_entity_outputs
             .extend(ingress.routed_entity_outputs);
         kernel.local_events.extend(ingress.frame_events);
+    }
+
+    // A signed continuation becomes executable only after the ordered inputs, including the J receipt,
+    // have committed its workspace. Reuse the ordinary financial reducers;
+    // derived work is not a new Entity command or a second durable queue.
+    let mut continuations = kernel
+        .state
+        .settlement_continuations
+        .as_ref()
+        .map(|rows| rows.text_entries())
+        .transpose()?
+        .unwrap_or_default();
+    continuations.sort_by(|left, right| left.0.cmp(&right.0));
+    if let Some((counterparty, continuation)) = continuations.first() {
+        let probe = crate::local_financial::continuation_probe(
+            counterparty,
+            &request.expected_proposer_signer_id,
+        )?;
+        let views = local_account_views(accounts, &kernel.state, &[probe], &[], &[], context)?;
+        let queued_transition = kernel.proposal_work.iter().any(|work| {
+            work.account_id == *counterparty
+                && work
+                    .txs
+                    .iter()
+                    .any(|tx| matches!(tx, AccountTx::SettleTransition { .. }))
+        });
+        match crate::local_financial::select_continuation(
+            &kernel.state,
+            counterparty,
+            continuation,
+            &views,
+            queued_transition,
+            &request.expected_proposer_signer_id,
+        )? {
+            crate::local_financial::ContinuationDisposition::Wait => {}
+            crate::local_financial::ContinuationDisposition::Discard(reason) => {
+                kernel
+                    .state
+                    .settlement_continuations
+                    .as_mut()
+                    .expect("selected continuation")
+                    .remove(counterparty)?;
+                kernel.local_events.push(EntityFrameEvent::Status {
+                    message: format!("Settlement continuation cleared: {reason}"),
+                });
+            }
+            crate::local_financial::ContinuationDisposition::Execute(txs) => {
+                let mut next = apply_entity_transitions(
+                    kernel.state,
+                    std::mem::take(&mut kernel.paybook_changes),
+                    Vec::new(),
+                    &BTreeSet::new(),
+                    txs,
+                    &views,
+                    request.local_account_genesis_policy.as_ref(),
+                    request.entity_authority.as_ref(),
+                    request.runtime_seed.as_deref(),
+                    context,
+                )?;
+                next.state
+                    .settlement_continuations
+                    .as_mut()
+                    .expect("executed continuation")
+                    .remove(counterparty)?;
+                kernel.state = next.state;
+                kernel.account_creates.append(&mut next.account_creates);
+                merge_proposal_work(&mut kernel.proposal_work, next.proposal_work);
+                kernel.proposal_origins.append(&mut next.proposal_origins);
+                kernel
+                    .proposal_tx_origins
+                    .append(&mut next.proposal_tx_origins);
+                kernel.outputs.append(&mut next.outputs);
+                kernel.local_events.append(&mut next.local_events);
+                kernel
+                    .non_mutating_wake_targets
+                    .append(&mut next.non_mutating_wake_targets);
+                kernel
+                    .routed_entity_outputs
+                    .append(&mut next.routed_entity_outputs);
+                kernel.j_outputs.append(&mut next.j_outputs);
+                kernel
+                    .local_hashes_to_sign
+                    .append(&mut next.local_hashes_to_sign);
+                kernel
+                    .account_envelope_mutations
+                    .append(&mut next.account_envelope_mutations);
+                kernel.paybook_changes = next.paybook_changes;
+                kernel.orderbook_deltas.append(&mut next.orderbook_deltas);
+            }
+        }
     }
 
     let pending_settlement_hankos = materialize_deferred_settlement_approvals(
@@ -3435,18 +3601,59 @@ fn apply_resident_entity_round_core_attempt(
     let prepare_outbound_micros = prepare_outbound_started.elapsed().as_micros();
     let worklist_micros = phase_started.elapsed().as_micros();
     let phase_started = Instant::now();
-    let prepared = accounts.prepare_entity_outbound(EntityOutboundRequest {
-        owner_entity_id,
-        local_certified_board_authority: request.local_certified_board_authority,
-        timestamp: request.outbound_timestamp,
-        j_height: kernel.state.last_finalized_j_height,
-        creates: std::mem::take(&mut kernel.account_creates),
-        envelope_updates,
-        unsigned_settlement_txs,
-        proposal_work,
-        checkpoint_due: request.checkpoint_due,
-        post_accounts: request.post_accounts,
-    })?;
+    let prepared = accounts
+        .prepare_entity_outbound(EntityOutboundRequest {
+            owner_entity_id,
+            local_certified_board_authority: request.local_certified_board_authority,
+            timestamp: request.outbound_timestamp,
+            j_height: kernel.state.last_finalized_j_height,
+            creates: std::mem::take(&mut kernel.account_creates),
+            envelope_updates,
+            unsigned_settlement_txs,
+            proposal_work,
+            checkpoint_due: request.checkpoint_due,
+            post_accounts: request.post_accounts,
+        })
+        .map_err(|error| match error {
+            BatchError::AccountMempoolAdmissionRejected {
+                account_id: account,
+                tx_index,
+                maximum,
+            } => {
+                match admission_owners
+                    .get(&account_text(account))
+                    .and_then(|owners| owners.get(tx_index))
+                    .copied()
+                    .flatten()
+                {
+                    Some(AdmissionOwner::Local(operation_index)) => {
+                        ResidentEntityError::LocalCommandRejected {
+                            operation_index,
+                            kind: "accountInput",
+                            detail: format!(
+                                "ACCOUNT_MEMPOOL_ADMISSION_REJECTED:{account}:{tx_index}:{maximum}"
+                            ),
+                        }
+                    }
+                    Some(AdmissionOwner::Inbound(row_index)) => {
+                        ResidentEntityError::InboundAdmissionRejected {
+                            row_index,
+                            detail: format!(
+                                "ACCOUNT_MEMPOOL_ADMISSION_REJECTED:{account}:{tx_index}:{maximum}"
+                            ),
+                        }
+                    }
+                    None => {
+                        ResidentEntityError::Account(BatchError::AccountMempoolAdmissionRejected {
+                            account_id: account,
+                            tx_index,
+                            maximum,
+                        })
+                    }
+                }
+            }
+            error => ResidentEntityError::Account(error),
+        })?;
     let failed_routes_started = Instant::now();
     let followups = failed_proposal_followups(&mut kernel.state, &prepared, &mut kernel.outputs)?;
     let failed_followups = followups.len();
@@ -3839,7 +4046,7 @@ mod tests {
         )
         .expect("setup barrier selection");
         assert_eq!(held[0].1, vec![admitted]);
-        assert_eq!(held[0].2, BatchAccountSelection::WaitForSibling);
+        assert_eq!(held[0].2, BatchAccountSelection::Defer);
         let setup_result = accounts
             .entity_outbound(setup_barrier_test_outbound(&owner, held))
             .expect("setup-frame outbound");
@@ -4171,7 +4378,7 @@ mod tests {
             orderbook_deltas: Vec::new(),
         };
         let mut accumulated = EntityTransitionAccumulator::default();
-        let state = accumulated.merge(transition);
+        let state = accumulated.merge(transition, None);
 
         assert!(
             state
@@ -4220,6 +4427,44 @@ mod tests {
         )
         .expect("view request");
         assert_eq!(requests.len(), 1);
+    }
+
+    #[test]
+    fn committed_swap_cancel_requests_its_offer_for_cross_j_book_removal() {
+        let peer = format!("0x{}", "22".repeat(32));
+        let commit = OrderedAccountCommit {
+            account_id: peer.clone(),
+            domain: AccountDomain::new(
+                31_337,
+                DepositoryAddress::parse(&format!("0x{}", "33".repeat(20))).unwrap(),
+            )
+            .unwrap(),
+            scope: JurisdictionScope::Same,
+            committed_via_new_frame: true,
+            frame_state_hash: format!("0x{}", "44".repeat(32)),
+            frame_height: 2,
+            frame_timestamp: 2,
+            inbound_position: 0,
+            transitions: vec![CommittedAccountTransition {
+                tx: AccountTx::SwapCancelRequest {
+                    offer_id: "partial-cross-j".into(),
+                },
+                outputs: Vec::new(),
+            }],
+        };
+        let requests = local_financial_view_requests(
+            &EntityStateSlice::empty(format!("0x{}", "11".repeat(32)), 2),
+            &[],
+            &[commit],
+            &DeterministicContext::hlt_default(),
+        )
+        .unwrap();
+        assert_eq!(requests.len(), 1);
+        assert_eq!(requests[0].0, account_id(&peer).unwrap());
+        assert_eq!(
+            requests[0].1.swap_offer_ids,
+            vec!["partial-cross-j".to_string()]
+        );
     }
 
     #[test]

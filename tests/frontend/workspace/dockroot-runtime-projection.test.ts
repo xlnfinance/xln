@@ -4,18 +4,18 @@ import { readFileSync } from 'node:fs';
 test('DockRoot resolves entity panel seeds through RuntimeView projections', () => {
   const source = readFileSync('frontend/src/lib/view/DockRoot.svelte', 'utf8');
 
-  expect(source).toContain("import { refreshRuntimeView } from '$lib/stores/runtimeViewStore'");
+  expect(source).toContain("import { refreshRuntimeView } from '#lib/stores/runtimeViewStore.ts'");
   expect(source).toContain('resolveEntityPanelDataFromProjection');
   expect(source).toContain('refreshRuntimeView({');
   expect(source).toContain('seedFromViewFrame');
   expect(source).toContain("showEntityPanelStatus(div, 'Loading entity projection...')");
-  expect(source).toContain("import { errorLog } from '$lib/stores/errorLogStore'");
+  expect(source).toContain("import { errorLog } from '#lib/stores/errorLogStore.ts'");
   expect(source).toContain("errorLog.log(message, 'DockRoot', details)");
   expect(source).toContain("logDockRootDiagnostic('Failed to resolve entity panel projection'");
   expect(source).not.toContain('console.warn');
   expect(source).not.toContain('console.error');
   expect(source).not.toContain('console.info');
-  expect(source).not.toContain("from '$lib/stores/runtimeQueryClient'");
+  expect(source).not.toContain("from '#lib/stores/runtimeQueryClient.ts'");
   expect(source).not.toContain('runtimeQueryClient.readViewFrame');
   expect(source).not.toContain('resolveEntityPanelData(panelId)');
   expect(source).not.toContain('env?.state.eReplicas');
@@ -59,10 +59,10 @@ test('DockRoot defaults to Graph left plus pinned wallet and tools on the right'
   ]) {
     expect(source).toContain(`id: '${panelId}'`);
   }
-  expect(source).toContain("import IndexedDbInspector from '$lib/components/Settings/IndexedDbInspector.svelte'");
+  expect(source).toContain("import IndexedDbInspector from '#lib/components/Settings/IndexedDbInspector.svelte'");
   expect(source).toContain('export let requestedPanelId: string | null = null');
   expect(source).toContain('appStateOperations.clearDockPanelRequest(panelId)');
-  expect(source).toContain("import RemoteRuntimeManager from '$lib/components/Runtime/RemoteRuntimeManager.svelte'");
+  expect(source).toContain("import RemoteRuntimeManager from '#lib/components/Runtime/RemoteRuntimeManager.svelte'");
   expect(source).toContain("appStateOperations.setMode('user')");
   expect(source).toContain('showDockTimeMachine = !embedMode || $settings.showTimeMachine');
 });
@@ -70,7 +70,7 @@ test('DockRoot defaults to Graph left plus pinned wallet and tools on the right'
 test('DockRoot blocks RuntimeReplica-only panels on remote runtimes instead of mounting blank fake RuntimeReplica views', () => {
   const source = readFileSync('frontend/src/lib/view/DockRoot.svelte', 'utf8');
 
-  expect(source).toContain("import { runtimeControllerHandle } from '$lib/stores/runtimeControllerStore'");
+  expect(source).toContain("import { runtimeControllerHandle } from '#lib/stores/runtimeControllerStore.ts'");
   expect(source).toContain('const ENV_ONLY_PANEL_NAMES = new Set');
   const envOnlyStart = source.indexOf('const ENV_ONLY_PANEL_NAMES = new Set');
   const envOnlyEnd = source.indexOf(']);', envOnlyStart);

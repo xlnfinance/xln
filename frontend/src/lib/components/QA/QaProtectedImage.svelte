@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { fetchQaBlobUrl } from '$lib/qa/apiClient';
+  import { fetchQaBlobUrl } from '#lib/qa/apiClient.ts';
 
   type Props = {
     url?: string;

@@ -805,6 +805,7 @@ export async function gotoApp(
         const viewVisible =
           isVisible('.view-wrapper') ||
           isVisible('nav[aria-label="Account workspace"]') ||
+          isVisible('[data-testid="account-workspace-mobile-toggle"]') ||
           isVisible('[data-testid="app-runtime-ready"]');
         const runtimeCreationVisible =
           isVisible('#runtime-creation') ||

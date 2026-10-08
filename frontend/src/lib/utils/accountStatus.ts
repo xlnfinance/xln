@@ -1,4 +1,4 @@
-import type { AccountReadView } from '$lib/components/Entity/core/entity-panel-types';
+import type { AccountReadView } from '#lib/components/Entity/core/entity-panel-types.ts';
 
 type AccountStatusSource = Pick<AccountReadView, 'status' | 'mempool'> &
   Partial<Pick<AccountReadView, 'pendingFrame' | 'activeDispute'>>;

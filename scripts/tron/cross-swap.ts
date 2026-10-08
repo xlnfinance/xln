@@ -9,7 +9,7 @@ import { safeStringify } from '../../core/protocol/serialization';
 import { hubs, users, hubSeed, userSeed, credit, amount, replica, walletFor, waitFor, connectChains,
   createParties, enableHubs, account, accountSnapshot, allAccounts, dumpFailure, startCrossTransport } from './cross-swap-context';
 
-const data = resolve(import.meta.dir, '../../db/native-tron-release-20260918');
+const data = resolve(process.env['XLN_TRON_STAND_PATH'] || resolve(import.meta.dir, '../../db/native-tron-release-20260918'));
 assert.equal(process.env['XLN_DB_PATH'], `${data}/cross-runtime`);
 assert.equal(process.env['XLN_JURISDICTIONS_PATH'], `${data}/dual-jurisdictions.json`);
 const resume = process.argv.includes('--resume');

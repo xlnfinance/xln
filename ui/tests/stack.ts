@@ -26,9 +26,9 @@ export async function assertSelectedNativeHub(hubId: string): Promise<void> {
   if (!privateRpc) throw new Error('NATIVE_UI_GATE_PRIVATE_STACK_MISSING');
   const url = new URL(privateRpc);
   const portBase = Number(url.port);
-  if (url.hostname !== '127.0.0.1' || !LOCAL_TEST_STACK_BASES.includes(portBase)) throw new Error('NATIVE_UI_GATE_PRIVATE_STACK_INVALID');
-  // Native H1 deliberately has no TS runtime-import entry; attach to its
-  // canonical supervised API and validate the native committed identity.
+  if (url.hostname !== '127.0.0.1' || !LOCAL_TEST_STACK_BASES.some(base => base === portBase)) throw new Error('NATIVE_UI_GATE_PRIVATE_STACK_INVALID');
+  // Attest the engine through its canonical supervised API, independently
+  // of the runtime-import manifest used to connect the wallet.
   const native = await attachRustH1(`http://127.0.0.1:${portBase + 10}`);
   try {
     expect(hubId.toLowerCase(), 'Selected browser Account must belong to native H1').toBe(native.ready.entityId);
@@ -92,7 +92,7 @@ export async function reopenStack(page: Page, wallet: StackWallet): Promise<void
   await page.getByRole('button', { name: 'Continue', exact: true }).click();
   await page.getByLabel('Password', { exact: true }).fill(LOCAL_PASSWORD);
   await page.getByRole('button', { name: 'Unlock', exact: true }).click();
-  await page.getByTestId('nav-home').first().click();
+  await page.getByTestId('nav-home').locator('visible=true').first().click();
   await expect(page.getByTestId('home-total')).toBeVisible({ timeout: BOOT_TIMEOUT });
   const identity = await readWalletIdentity(page);
   expect(identity.runtimeId).toBe(wallet.runtimeId);

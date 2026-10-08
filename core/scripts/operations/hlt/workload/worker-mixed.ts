@@ -483,11 +483,14 @@ export const runMixedProductionLoad = async (args: WorkerArgs): Promise<void> =>
     const submittedPayments = users.length * args.rounds;
     if (rustH1 && rustMetricsBefore) {
       const expectedMatchedTrades = prepared.distribution.matchedTrades;
+      const baselineOpenIds = new Set(rustMetricsBefore.openSwapOfferIds);
+      const plannedRestingIds = new Set(prepared.traderPlans.flatMap(plan => plan.cancelledOfferIds));
       const matchedSettlement = await waitForRustMixedSettlement({
         rust: rustH1,
         lanes: users,
         expectedPayments: submittedPayments,
         expectedMatchedSwaps: expectedMatchedTrades,
+        expectedOpenSwapOfferIds: new Set([...baselineOpenIds, ...plannedRestingIds]),
         requireExpectedMatchedSwaps: true,
         economicStartedAt: startedAt,
         metricsBefore: rustMetricsBefore,
@@ -495,8 +498,6 @@ export const runMixedProductionLoad = async (args: WorkerArgs): Promise<void> =>
       if (matchedSettlement.metrics.openSwapOfferIdsTruncated) {
         throw new Error('HLT_MIXED_OPEN_SWAP_IDS_TRUNCATED');
       }
-      const baselineOpenIds = new Set(rustMetricsBefore.openSwapOfferIds);
-      const plannedRestingIds = new Set(prepared.traderPlans.flatMap(plan => plan.cancelledOfferIds));
       const observedRestingIds = matchedSettlement.metrics.openSwapOfferIds.filter(
         offerId => !baselineOpenIds.has(offerId),
       );
@@ -504,16 +505,28 @@ export const runMixedProductionLoad = async (args: WorkerArgs): Promise<void> =>
         observedRestingIds.length !== plannedRestingIds.size ||
         observedRestingIds.some(offerId => !plannedRestingIds.has(offerId))
       ) throw new Error('HLT_MIXED_RESTING_SWAP_PARTITION');
+      // This counter includes every committed zero-fill SwapResolve, including explicit cancels.
+      const rejectedAtOrderbook =
+        matchedSettlement.metrics.zeroFillSwapCancels - rustMetricsBefore.zeroFillSwapCancels;
+      if (rejectedAtOrderbook !== 0) {
+        throw new Error(`HLT_MIXED_UNEXPECTED_STP_OR_ZERO_FILL:${rejectedAtOrderbook}`);
+      }
       const cancellation = await cancelPreparedRestingTail(prepared);
       const rustSettlement = await waitForRustMixedSettlement({
         rust: rustH1,
         lanes: users,
         expectedPayments: submittedPayments,
         expectedMatchedSwaps: expectedMatchedTrades,
+        expectedOpenSwapOfferIds: baselineOpenIds,
         requireExpectedMatchedSwaps: true,
         economicStartedAt: startedAt,
         metricsBefore: rustMetricsBefore,
       });
+      const committedExplicitCancels =
+        rustSettlement.metrics.zeroFillSwapCancels - matchedSettlement.metrics.zeroFillSwapCancels;
+      if (committedExplicitCancels !== cancellation.cancelledOffers) {
+        throw new Error(`HLT_MIXED_EXPLICIT_CANCEL_COMMIT_COUNT:${committedExplicitCancels}:${cancellation.cancelledOffers}`);
+      }
       if (economicTelemetry) clearInterval(economicTelemetry);
       const finalElapsedMs = rustSettlement.fullySettledElapsedMs;
       const paymentReport = rustTpsAuthority ? decodeLoadPaymentReport({
@@ -611,11 +624,6 @@ export const runMixedProductionLoad = async (args: WorkerArgs): Promise<void> =>
         throw new Error('HLT_MIXED_OPEN_ORDER_ID_PARTITION');
       }
       const matchedEconomicSwaps = rustSettlement.metrics.matchedSwaps - rustMetricsBefore.matchedSwaps;
-      const rejectedAtOrderbook =
-        rustSettlement.metrics.zeroFillSwapCancels - rustMetricsBefore.zeroFillSwapCancels;
-      if (rejectedAtOrderbook !== 0) {
-        throw new Error(`HLT_MIXED_UNEXPECTED_STP_OR_ZERO_FILL:${rejectedAtOrderbook}`);
-      }
       const acceptedTerminal = prepared.distribution.matchedSubmittedOffers +
         cancellation.cancelledOffers + rejectedAtOrderbook + restingOfferIds.length;
       if (swapProposalLedger.accepted !== acceptedTerminal) {

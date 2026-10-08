@@ -1,9 +1,9 @@
 import type { JAdapter, JTokenInfo } from '../../../jurisdiction/adapter/types';
 
 export interface ExternalWalletApiContext {
-  getJAdapter(): JAdapter | null;
+  getJAdapter(entityId?: string): JAdapter | null;
   getRuntimeId(): string;
-  getTokenCatalog(): Promise<JTokenInfo[]>;
+  getTokenCatalog(entityId?: string): Promise<JTokenInfo[]>;
   jsonHeaders: Record<string, string>;
   faucetSeed: string;
   faucetSignerLabel: string;

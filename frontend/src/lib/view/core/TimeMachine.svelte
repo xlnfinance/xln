@@ -6,9 +6,9 @@
   import { DISPLAY, TIME_MACHINE } from '@xln/core/config/constants';
   import FrameSubtitle from '../../components/TimeMachine/FrameSubtitle.svelte';
   import NetworkMachineTimeline from './NetworkMachineTimeline.svelte';
-  import { runtimeGraphScope } from '$lib/stores/network/runtimeGraphControlStore';
-  import { runtimeControllerHandle } from '$lib/stores/runtimeControllerStore';
-  import { activeRuntimeId, runtimeOperations, runtimes } from '$lib/stores/runtimeStore';
+  import { runtimeGraphScope } from '#lib/stores/network/runtimeGraphControlStore.ts';
+  import { runtimeControllerHandle } from '#lib/stores/runtimeControllerStore.ts';
+  import { activeRuntimeId, runtimeOperations, runtimes } from '#lib/stores/runtimeStore.ts';
   import {
     runtimeView,
     runtimeViewActiveEntityId,
@@ -16,19 +16,19 @@
     setRuntimeViewAtHeight,
     setRuntimeViewActiveEntityId,
     type RuntimeViewHistoryScanState,
-  } from '$lib/stores/runtimeViewStore';
-  import { toasts } from '$lib/stores/ui/toastStore';
-  import { appState, appStateOperations } from '$lib/stores/appStateStore';
+  } from '#lib/stores/runtimeViewStore.ts';
+  import { toasts } from '#lib/stores/ui/toastStore.ts';
+  import { appState, appStateOperations } from '#lib/stores/appStateStore.ts';
   import {
     getXLN,
     refreshCurrentRuntimeProjection,
-  } from '$lib/stores/xlnStore';
+  } from '#lib/stores/xlnStore.ts';
   import {
     REMOTE_HISTORY_SCAN_CACHE_LIMIT,
     runtimeHistoryFrames,
     scanRuntimeAdapterHistoryAtHeight,
     type RuntimeHistoryFrame,
-  } from '$lib/stores/runtimeHistoryStore';
+  } from '#lib/stores/runtimeHistoryStore.ts';
   // BrowserVM resolved via JAdapter
 
   // Props: Accept both Writable and Readable stores (for global vs isolated usage)
@@ -445,9 +445,10 @@
 
   function readTimeMachineDeepLink(): { height: number; entityId: string; runtimeId: string } | null {
     const { params } = parseHashParams();
-    const rawHeight = Number(params.get(TIME_MACHINE.HASH_HEIGHT_PARAM) || '');
-    const height = Math.max(1, Math.floor(rawHeight));
-    if (!Number.isFinite(height) || height < 1) return null;
+    const rawHeight = params.get(TIME_MACHINE.HASH_HEIGHT_PARAM);
+    if (rawHeight === null || rawHeight.trim() === '') return null;
+    const height = Number(rawHeight);
+    if (!Number.isSafeInteger(height) || height < 1) return null;
     return {
       height,
       entityId: String(params.get(TIME_MACHINE.HASH_ENTITY_PARAM) || '').trim().toLowerCase(),

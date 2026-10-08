@@ -207,11 +207,12 @@ fn storage_projection_values_reproduce_owned_consensus_digests() {
     };
     let projection = project_entity_storage(&state, &consensus).expect("projection");
     let owned = compute_entity_owned_sections(&state, [0x55; 32], 1).expect("owned sections");
-    let sections = project_entity_consensus_sections(&[], owned, &consensus.state.authority)
-        .expect("complete sections")
-        .into_iter()
-        .map(|section| (section.field, section.digest))
-        .collect::<BTreeMap<_, _>>();
+    let sections =
+        project_entity_consensus_sections(&[], owned, &consensus.state.authority, state.height)
+            .expect("complete sections")
+            .into_iter()
+            .map(|section| (section.field, section.digest))
+            .collect::<BTreeMap<_, _>>();
 
     for (field, value) in [
         ("entityId", &projection.entity_id),
@@ -260,7 +261,7 @@ fn storage_projection_values_reproduce_owned_consensus_digests() {
         .commitment_values()
         .expect("committed authority");
     assert_eq!(projection.config, stored_config);
-    assert_eq!(projection.leader_state, stored_leader);
+    assert_eq!(projection.leader_state.as_ref(), Some(&stored_leader));
     assert_ne!(stored_config, committed_config);
     assert_eq!(stored_leader, committed_leader);
     assert_section(&sections, "config", &committed_config);

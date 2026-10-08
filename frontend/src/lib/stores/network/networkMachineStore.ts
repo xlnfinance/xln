@@ -6,7 +6,7 @@ import {
   parseNetworkMachineConfig,
   type NetworkMachineConfig,
   type NetworkMachineTimelineMode,
-} from '$lib/network3d/networkMachine';
+} from '#lib/network3d/networkMachine.ts';
 
 export const networkMachineConfig = writable<NetworkMachineConfig>(DEFAULT_NETWORK_MACHINE_CONFIG);
 

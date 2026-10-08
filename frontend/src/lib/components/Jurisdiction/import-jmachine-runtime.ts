@@ -3,8 +3,8 @@ import {
   deriveJMachineCreatedAt,
   jmachineOperations,
   type JMachineConfig,
-} from '$lib/stores/network/jmachineStore';
-import { submitRuntimeInput } from '$lib/stores/xlnStore';
+} from '#lib/stores/network/jmachineStore.ts';
+import { submitRuntimeInput } from '#lib/stores/xlnStore.ts';
 
 export type JMachineCreateDetail = {
   name: string;

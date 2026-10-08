@@ -9,7 +9,7 @@ import type {
 } from '@xln/core/api/public/runtime-module';
 import type { RuntimeAdapterSendOptions } from '@xln/core/api/runtime-adapter/types';
 import { RemoteRuntimeAdapter } from '../../../../core/api/runtime-adapter/remote';
-import { sameWsEndpoint } from '$lib/utils/runtime/wsUrl';
+import { sameWsEndpoint } from '#lib/utils/runtime/wsUrl.ts';
 
 export type RuntimeHandle = {
   id: string;

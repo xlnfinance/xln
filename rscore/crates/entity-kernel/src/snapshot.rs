@@ -96,6 +96,80 @@ impl EntityStateSnapshot {
     }
 }
 
+// Remote makers belong to the sibling Account owner. Their matcher index is
+// derived from this Entity's committed admissions, never from remote history.
+pub fn hydrate_cross_jurisdiction_offers(
+    book: &mut OrderbookStateSnapshot,
+    owner: &str,
+    admissions: Option<&EntityCanonicalCollection>,
+) -> Result<(), EntityKernelError> {
+    // Account checkpoints carry the bilateral offer. Live Account output
+    // admission projects cross-J offers through this same working-offer path.
+    for ((account_id, offer_id), offer) in &mut book.offers {
+        if let Some(route) = &offer.cross_jurisdiction {
+            let (source, projected) = crate::cross_j::cross_jurisdiction_working_offer(route)?;
+            if &source != account_id || &projected.offer_id != offer_id {
+                return Err(invalid("CROSS_J_ACCOUNT_OFFER_IDENTITY"));
+            }
+            *offer = projected;
+        }
+    }
+    let Some(admissions) = admissions else {
+        return Ok(());
+    };
+    for (primary_key, admission) in admissions.text_entries()? {
+        let CanonicalValue::Object(fields) = &admission else {
+            return Err(invalid("CROSS_J_ADMISSION_OBJECT"));
+        };
+        let field = |name: &str| {
+            fields
+                .iter()
+                .find_map(|(key, value)| (key == name).then_some(value))
+        };
+        let text = |name: &str| match field(name) {
+            Some(CanonicalValue::String(value)) => Some(value.as_str()),
+            _ => None,
+        };
+        let status = text("status").ok_or_else(|| invalid("CROSS_J_ADMISSION_STATUS"))?;
+        if status == "closed" {
+            continue;
+        }
+        if !matches!(status, "admitted" | "resolving") || text("bookOwnerEntityId") != Some(owner) {
+            return Err(invalid("CROSS_J_ADMISSION_OWNER_OR_STATUS"));
+        }
+        let route = field("route").ok_or_else(|| invalid("CROSS_J_ADMISSION_ROUTE"))?;
+        let (account_id, offer) = crate::cross_j::cross_jurisdiction_working_offer(route)?;
+        if primary_key != format!("{account_id}:{}", offer.offer_id)
+            || text("sourceEntityId") != Some(account_id.as_str())
+            || text("orderId") != Some(offer.offer_id.as_str())
+        {
+            return Err(invalid("CROSS_J_ADMISSION_IDENTITY"));
+        }
+        let key = (account_id, offer.offer_id.clone());
+        if let Some(existing) = book.offers.get(&key) {
+            let existing_route = existing
+                .cross_jurisdiction
+                .as_ref()
+                .ok_or_else(|| invalid("CROSS_J_ADMISSION_OFFER_CONFLICT"))?;
+            let canonical = |value: &CanonicalValue| {
+                xln_rscore_protocol::encode_canonical_consensus_bytes(value)
+                    .map_err(|error| invalid(format!("CROSS_J_ADMISSION_ROUTE_ENCODING:{error}")))
+            };
+            let mut comparable = existing.clone();
+            comparable.cross_jurisdiction = offer.cross_jurisdiction.clone();
+            if comparable != offer || canonical(existing_route)? != canonical(route)? {
+                return Err(invalid("CROSS_J_ADMISSION_OFFER_CONFLICT"));
+            }
+        } else {
+            book.offers.insert(key.clone(), offer);
+        }
+        if status == "resolving" {
+            book.resolving_offers.insert(key);
+        }
+    }
+    Ok(())
+}
+
 fn invalid(detail: impl Into<String>) -> EntityKernelError {
     EntityKernelError::SnapshotInvalid {
         detail: detail.into(),
@@ -429,7 +503,7 @@ fn validate_swap_trading_pairs(pairs: &[crate::EntitySwapPair]) -> Result<(), En
 }
 
 pub fn restore_entity_state(
-    snapshot: EntityStateSnapshot,
+    mut snapshot: EntityStateSnapshot,
     accounts_root: [u8; 32],
     account_count: usize,
 ) -> Result<EntityStateSlice, EntityKernelError> {
@@ -473,6 +547,13 @@ pub fn restore_entity_state(
         (Some(_), Some(metadata)) => validate_metadata(&snapshot.entity_id, metadata)?,
         (None, None) => {}
         _ => return Err(invalid("ENTITY_ORDERBOOK_METADATA_MISMATCH")),
+    }
+    if let Some(book) = snapshot.orderbook.as_mut() {
+        hydrate_cross_jurisdiction_offers(
+            book,
+            &snapshot.entity_id,
+            snapshot.cross_jurisdiction_book_admissions.as_ref(),
+        )?;
     }
     let state = EntityStateSlice {
         entity_id: snapshot.entity_id,

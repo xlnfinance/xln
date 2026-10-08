@@ -1,12 +1,12 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { goto } from '$app/navigation';
-  import { page } from '$app/stores';
-  import { browser } from '$app/environment';
+  import { page } from '$app/state';
+  import { browser } from '$app/env';
   import { marked } from 'marked';
-  import { sanitizeRenderedHtml } from '$lib/security/safe-markdown';
+  import { sanitizeRenderedHtml } from '#lib/security/safe-markdown.ts';
   import { BookOpen, ExternalLink, FileText, Menu, Search, Wrench, X } from 'lucide-svelte';
-  import { readJsonUnknown, requireBoolean, rejectExtraKeys, requireFiniteNumber, requireString, requireUnknownRecord } from '$lib/utils/boundary';
+  import { readJsonUnknown, requireBoolean, rejectExtraKeys, requireFiniteNumber, requireString, requireUnknownRecord } from '#lib/utils/boundary/index.ts';
 
   interface DocEntry {
     id: string;
@@ -122,7 +122,7 @@
   let articleElement = $state<HTMLElement | null>(null);
   let isNavOpen = $state(false);
 
-  const requestedDocId = $derived(normalizeDocId($page.url.searchParams.get('doc') || 'readme'));
+  const requestedDocId = $derived(normalizeDocId(page.url.searchParams.get('doc') || 'readme'));
 
   function normalizeDocId(value: string): string {
     return String(value || '')
@@ -352,8 +352,7 @@
     isNavOpen = false;
     await goto(`/docs?doc=${encodeURIComponent(docId)}`, {
       replaceState,
-      noScroll: true,
-      keepFocus: true,
+      reset: false,
     });
   }
 
@@ -366,8 +365,7 @@
     const href = anchor.getAttribute('href');
     if (!href) return;
     await goto(href, {
-      noScroll: true,
-      keepFocus: true,
+      reset: false,
     });
   }
 
@@ -406,7 +404,7 @@
     if (!browser || !manifest) return;
 
     const initialDocId = getDocById(requestedDocId) ? requestedDocId : 'readme';
-    if (!$page.url.searchParams.get('doc')) {
+    if (!page.url.searchParams.get('doc')) {
       await openDoc(initialDocId, true);
       return;
     }

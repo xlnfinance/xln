@@ -4218,3 +4218,27 @@ fn certified_settlement_hankos_replace_the_pre_admitted_unsigned_tx() {
         "post-certification witness attachment must not move Account leaf",
     );
 }
+
+#[test]
+fn mempool_overflow_names_only_rejected_admission_and_keeps_prior_queue() {
+    let (mut left, right) = parties();
+    let tx = payment(&left.entity_id, &right.entity_id, 1);
+    left.account
+        .admit_txs(vec![tx.clone(); ACCOUNT_MEMPOOL_SIZE - 1], "capacity seed")
+        .expect("9999 genuine intents fit");
+    let error = left
+        .account
+        .admit_txs(vec![tx.clone(), tx.clone()], "capacity boundary")
+        .expect_err("10001st intent must reject");
+    assert!(
+        error
+            .to_string()
+            .starts_with("ACCOUNT_MEMPOOL_ADMISSION_REJECTED:1:"),
+        "{error}"
+    );
+    assert_eq!(left.account.mempool().len(), ACCOUNT_MEMPOOL_SIZE - 1);
+    left.account
+        .admit_txs(vec![tx], "after exact eviction")
+        .expect("the accepted sibling still fits after removing only index 1");
+    assert_eq!(left.account.mempool().len(), ACCOUNT_MEMPOOL_SIZE);
+}

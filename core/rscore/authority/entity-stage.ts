@@ -40,6 +40,8 @@ export type AccountAuthorityEntityOccurrence =
   | Readonly<{ kind: 'local-event'; ordinal: number }>;
 
 export type AccountAuthorityEntityStageProvider = Readonly<{
+  /** Release this live Runtime-owned executor after frame processing has stopped. */
+  close?(): Promise<void>;
   executeAccountInboundBatch(
     input: AccountAuthorityEntityBatchInbound,
   ): Promise<readonly ((request: AccountAuthorityInputRequest) => HandleAccountInputResult)[]>;

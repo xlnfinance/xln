@@ -1,5 +1,5 @@
 import { Capacitor } from '@capacitor/core';
-import { requestNativePaymentWakeNotifications } from '$lib/native/capacitor';
+import { requestNativePaymentWakeNotifications } from '#lib/native/capacitor.ts';
 import type { PushWakeDeviceToken } from './pushWakeTypes';
 import { normalizeDeviceToken, normalizePlatform } from './pushWakeBoundary';
 import { requestWebPushToken } from './pushWakeWeb';

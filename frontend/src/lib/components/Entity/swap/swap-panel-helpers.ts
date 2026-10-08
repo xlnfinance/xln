@@ -1,5 +1,5 @@
-import type { EntityReadView } from '$lib/components/Entity/core/entity-panel-types';
-import { formatEntityId } from '$lib/utils/format';
+import type { EntityReadView } from '#lib/components/Entity/core/entity-panel-types.ts';
+import { formatEntityId } from '#lib/utils/format.ts';
 
 import type {
   BookState,

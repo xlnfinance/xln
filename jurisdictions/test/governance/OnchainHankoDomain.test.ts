@@ -16,6 +16,7 @@ import {
   encodeBoardProposalHankoPayload,
   encodeCancelEntityProviderActionHankoPayload,
   encodeCooperativeUpdateHankoPayload,
+  encodeCooperativeUpdateDiff,
   encodeDepositoryBatchHankoPayload,
   encodeDisputeProofHankoPayload,
   encodeEntityTransferHankoPayload,
@@ -132,7 +133,7 @@ describe('canonical on-chain Hanko domains', function () {
     const { hankoCodec } = await loadFixture(deployFixture);
     const vector = ONCHAIN_HANKO_VECTOR;
     const accountKey = `${vector.leftEntity}${vector.rightEntity.slice(2)}`;
-    const diffs = vector.diffs.map((diff) => ({ ...diff }));
+    const diffs = vector.diffs.map(encodeCooperativeUpdateDiff);
     const forgiveDebts = [...vector.forgiveDebtsInTokenIds];
     const fixedVectors = [
       {
@@ -366,10 +367,10 @@ describe('canonical on-chain Hanko domains', function () {
     const accountVectors = [
       {
         solidityBytes: await hankoCodec.encodeCooperativeUpdateHankoPayloadForDomain(
-          chainId, depositoryAddress, accountKey, 7, diffs, [12],
+          chainId, depositoryAddress, accountKey, 7, diffs.map(encodeCooperativeUpdateDiff), [12],
         ),
         solidityHash: await hankoCodec.computeCooperativeUpdateHankoHashForDomain(
-          chainId, depositoryAddress, accountKey, 7, diffs, [12],
+          chainId, depositoryAddress, accountKey, 7, diffs.map(encodeCooperativeUpdateDiff), [12],
         ),
         tsBytes: encodeCooperativeUpdateHankoPayload(depositoryDomain, accountKey, 7, diffs, [12]),
         tsHash: hashCooperativeUpdateHankoPayload(depositoryDomain, accountKey, 7, diffs, [12]),

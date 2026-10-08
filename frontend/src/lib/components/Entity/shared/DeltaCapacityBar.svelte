@@ -1,6 +1,6 @@
 <script lang="ts">
   import { createEventDispatcher, onDestroy } from 'svelte';
-  import { settings } from '$lib/stores/settingsStore';
+  import { settings } from '#lib/stores/settingsStore.ts';
   import type { DeltaCapacityBarPresentation, DeltaParts, DeltaVisualScale } from './delta-types';
 
   export let derived: DeltaParts;

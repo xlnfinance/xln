@@ -1,4 +1,4 @@
-import { requireTokenDecimals } from '$lib/components/Entity/token-metadata';
+import { requireTokenDecimals } from '#lib/components/Entity/token-metadata.ts';
 
 const USD_MICROS_BY_SYMBOL: Record<string, bigint> = {
   USDC: 1_000_000n,

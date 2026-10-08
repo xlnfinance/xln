@@ -17,6 +17,7 @@ import {
 } from '../registration/entity-provider-action-submit-state';
 import { markLocalEntityProviderActionRuntimeTx } from '../registration/entity-provider-action-submit-auth';
 import {
+  governanceAttemptIsDue,
   isGovernanceJTx,
   materializeInitialGovernanceAttempt,
   requireCanonicalGovernanceAttempt,
@@ -182,7 +183,43 @@ const matchesJSubmitBatchIdentity = (
 
 export const hasPendingCommittedJBatch = (env: RuntimeReplica, identity: JSubmitBatchIdentity): boolean =>
   (env.infrastructure?.pendingCommittedJOutbox ?? []).some((input) => input.jTxs.some((jTx) =>
-    matchesJSubmitBatchIdentity(input.jurisdictionName, jTx, identity)));
+    matchesJSubmitBatchIdentity(input.jurisdictionName, jTx, identity)
+    && !completedJSubmitAttempt(env, jTx)));
+
+export const completedJSubmitAttempt = (env: RuntimeReplica, jTx: JTx): boolean => {
+  // Completion belongs to the attempt journal, including unsigned preflight/event
+  // barriers and stale outbox copies created before the signed wire was attached.
+  if (jTx.type !== 'batch' || !jTx.data.runtimeSubmitAttempt) return false;
+  const local = findJSubmitReplica(env, jTx.entityId, jTx.data.signerId ?? '')?.jSubmitState;
+  const id = jTx.data.runtimeSubmitAttempt.attemptId;
+  return local?.lastResultAttemptId === id || Object.prototype.hasOwnProperty.call(local?.resultFingerprints ?? {}, id);
+};
+
+export const hasReadyCommittedJOutbox = (env: RuntimeReplica, now: number): boolean => {
+  for (const input of env.infrastructure?.pendingCommittedJOutbox ?? []) {
+    for (const tx of input.jTxs) {
+      if (completedJSubmitAttempt(env, tx)) continue;
+      if (tx.type === 'batch' && !tx.data.runtimeSubmitAttempt?.rawTransaction
+        && env.infrastructure?.jPreparationTasks?.has(tx.data.runtimeSubmitAttempt?.attemptId ?? '')) continue;
+      if (!isGovernanceJTx(tx) || governanceAttemptIsDue(tx, now)) return true;
+    }
+  }
+  return false;
+};
+
+const pruneCompletedPreparedAttempts = (env: RuntimeReplica): void => {
+  if (!env.infrastructure?.pendingCommittedJOutbox) return;
+  env.infrastructure.pendingCommittedJOutbox = env.infrastructure.pendingCommittedJOutbox.flatMap(input => {
+    const jTxs = input.jTxs.filter(tx => {
+      if (tx.type !== 'batch' || !completedJSubmitAttempt(env, tx)) return true;
+      const replica = findJSubmitReplica(env, tx.entityId, tx.data.signerId ?? '');
+      return Boolean(replica?.state.jBatchState?.sentBatch
+        && isMatchingJSubmitBatch(replica.state.jBatchState.sentBatch, tx.data.batchHash ?? '', tx.data.entityNonce ?? -1)
+        && replica.state.jBatchState.broadcastCount === tx.data.batchGeneration);
+    });
+    return jTxs.length ? [{ ...input, jTxs }] : [];
+  });
+};
 
 export const getMatchingJSubmitState = (replica: EntityReplica) => {
   const sent = replica.state.jBatchState?.sentBatch;
@@ -196,18 +233,19 @@ export const getMatchingJSubmitState = (replica: EntityReplica) => {
   return local;
 };
 
-export const markLocalJSubmitRuntimeTx = <T extends RetryJSubmitTx | RecordJSubmitResultTx>(tx: T): T => {
+export const markLocalJSubmitRuntimeTx = <T extends RetryJSubmitTx | RecordJSubmitResultTx | Extract<RuntimeTx, { type: 'recordJPreparedTransaction' | 'replaceJPreparedTransaction' }>>(tx: T): T => {
   Object.defineProperty(tx, LOCAL_J_SUBMIT_RUNTIME_TX, { value: true, enumerable: false });
   return tx;
 };
 
 export const assertJSubmitRuntimeTxAuthorized = (runtimeTx: RuntimeTx, replay: boolean): void => {
-  if (runtimeTx.type !== 'retryJSubmit' && runtimeTx.type !== 'recordJSubmitResult') return;
+  if (runtimeTx.type !== 'retryJSubmit' && runtimeTx.type !== 'recordJSubmitResult' && runtimeTx.type !== 'recordJPreparedTransaction' && runtimeTx.type !== 'replaceJPreparedTransaction') return;
   if (replay || (runtimeTx as RuntimeTx & { [LOCAL_J_SUBMIT_RUNTIME_TX]?: boolean })[LOCAL_J_SUBMIT_RUNTIME_TX]) return;
   throw new Error('J_SUBMIT_RUNTIME_TX_EXTERNAL_INGRESS_REJECTED');
 };
 
 export const registerPendingCommittedJOutbox = (env: RuntimeReplica, additions: JInput[]): void => {
+  pruneCompletedPreparedAttempts(env);
   if (additions.length === 0) return;
   if (!env.infrastructure) env.infrastructure = {};
   const existing = env.infrastructure.pendingCommittedJOutbox ?? [];
@@ -230,6 +268,23 @@ export const registerPendingCommittedJOutbox = (env: RuntimeReplica, additions: 
     if (jTxs.length > 0) accepted.push({ jurisdictionName: input.jurisdictionName, jTxs });
   }
   env.infrastructure.pendingCommittedJOutbox = [...existing, ...accepted];
+};
+
+/** Move the completed attempt's sole signed wire into its successor. */
+const takePendingJAttemptRaw = (env: RuntimeReplica, previousAttemptId: string | undefined): string | undefined => {
+  let rawTransaction: string | undefined;
+  if (previousAttemptId && env.infrastructure?.pendingCommittedJOutbox) {
+    env.infrastructure.pendingCommittedJOutbox = env.infrastructure.pendingCommittedJOutbox.flatMap(input => {
+      const jTxs = input.jTxs.filter(pending => {
+        if (pending.type !== 'batch' || !pending.data.runtimeSubmitAttempt
+          || pending.data.runtimeSubmitAttempt.attemptId !== previousAttemptId) return true;
+        rawTransaction = pending.data.runtimeSubmitAttempt.rawTransaction;
+        return false;
+      });
+      return jTxs.length ? [{ ...input, jTxs }] : [];
+    });
+  }
+  return rawTransaction;
 };
 
 export const applyRetryJSubmitRuntimeTx = (env: RuntimeReplica, tx: RetryJSubmitTx): JInput[] => {
@@ -271,9 +326,7 @@ export const applyRetryJSubmitRuntimeTx = (env: RuntimeReplica, tx: RetryJSubmit
     env.state.timestamp < previous.lastSubmittedAt + ENTITY_J_SUBMIT_RETRY_MS
   ) return [];
   const witness = replica.hankoWitness?.get(sent.batchHash);
-  if (!witness || witness.type !== 'jBatch') {
-    throw new Error(`J_SUBMIT_HANKO_WITNESS_MISSING:${tx.data.entityId}:${sent.batchHash}`);
-  }
+  if (!witness || witness.type !== 'jBatch') throw new Error(`J_SUBMIT_HANKO_WITNESS_MISSING:${tx.data.entityId}:${sent.batchHash}`);
   const attemptNumber = (previous?.submitAttempts ?? 0) + 1;
   const attemptId = buildJSubmitAttemptId({
     jurisdictionName: tx.data.jurisdictionName,
@@ -284,6 +337,7 @@ export const applyRetryJSubmitRuntimeTx = (env: RuntimeReplica, tx: RetryJSubmit
     batchHash: sent.batchHash,
     attemptNumber,
   });
+  const rawTransaction = takePendingJAttemptRaw(env, previous?.lastResultAttemptId);
   const attemptedAt = env.state.timestamp;
   const recordedResultFingerprints = replica.jSubmitState?.resultFingerprints;
   const recordedResultFingerprintOrder = replica.jSubmitState?.resultFingerprintOrder;
@@ -325,6 +379,7 @@ export const applyRetryJSubmitRuntimeTx = (env: RuntimeReplica, tx: RetryJSubmit
         attemptNumber,
         attemptedAt,
         batchGeneration: tx.data.batchGeneration,
+        ...(rawTransaction ? { rawTransaction } : {}),
       },
     },
     timestamp: attemptedAt,

@@ -279,12 +279,12 @@ test('activity history panel reads activity through RuntimeQueryClient only', ()
     paymentSmokeSource.indexOf('test.describe'),
   );
   expect(panelSource).toContain('runtimeQueryClient.readActivity');
-  expect(panelSource).toContain("from '$lib/stores/runtimeQueryClient'");
-  expect(addressRouteSource).toContain("$page.url.searchParams.get('runtimeId')");
+  expect(panelSource).toContain("from '#lib/stores/runtimeQueryClient.ts'");
+  expect(addressRouteSource).toContain("page.url.searchParams.get('runtimeId')");
   expect(addressRouteSource).toContain("runtimeOperations.selectRuntime(targetRuntimeId)");
   expect(addressRouteSource).toContain('Runtime ${targetRuntimeId} is not imported');
   expect(paymentSmokeSource).toContain('__xln?.adapter?.query?.activity');
-  expect(paymentSmokeSource).toContain("getByRole('button', { name: 'History', exact: true }).click()");
+  expect(paymentSmokeSource).toContain("openAccountWorkspaceTab(page, 'history')");
   expect(paymentSmokeSource).toContain('history panel adapter must expose off-chain payment history');
   expect(paymentSmokeSource).not.toContain('/api/debug/activity');
   expect(paymentSmokeSource).not.toContain('readPersistedRuntimeActivityPage');
@@ -295,7 +295,7 @@ test('activity history panel reads activity through RuntimeQueryClient only', ()
   expect(source).not.toContain('runtime.js');
   expect(source).not.toContain('/api/debug/activity');
   expect(source).not.toContain('readDebugActivitySource');
-  expect(source).not.toContain("from '$lib/stores/runtimeStore'");
+  expect(source).not.toContain("from '#lib/stores/runtimeStore.ts'");
   expect(activityE2EHelper).not.toContain('isolatedEnv');
   expect(activityE2EHelper).not.toContain('window.XLN');
   expect(activityE2EHelper).not.toContain('view.XLN');
@@ -581,7 +581,7 @@ test('remote runtime refresh reads typed RuntimeView projections without Runtime
   expect(scanSource).toContain('heights: [requestedHeight]');
   expect(scanSource).not.toContain('heights: missingHeights');
   expect(scanSource).not.toContain("adapter.read<RuntimeAdapterHistoryFrameBatch>('history-frame-batch'");
-  expect(source).not.toContain("$lib/utils/runtimeViewEnv");
+  expect(source).not.toContain("#lib/utils/runtimeViewEnv");
   expect(source).not.toContain('runtimeViewFrameToEnv');
   expect(source).not.toContain('buildRemoteAdapterHistory');
   expect(source).not.toContain('buildRemoteAdapterEnvSnapshot');
@@ -592,7 +592,7 @@ test('remote runtime refresh reads typed RuntimeView projections without Runtime
 test('runtime adapter health panel uses shared RuntimeView store instead of owning projection state', () => {
   const source = readFileSync('frontend/src/lib/components/Health/RuntimeAdapterPanel.svelte', 'utf8');
 
-  expect(source).toContain("from '$lib/stores/runtimeViewStore'");
+  expect(source).toContain("from '#lib/stores/runtimeViewStore.ts'");
   expect(source).toContain('runtimeControllerHandle');
   expect(source).toContain('$runtimeControllerHandle.status');
   expect(source).toContain('$runtimeControllerHandle.height');
@@ -656,8 +656,8 @@ test('address explorer routes read runtime projections instead of debug entity A
   expect(directory).not.toContain('fetch(');
   expect(directory).not.toContain('setInterval');
   expect(detail).toContain('ensureProjectionRuntimeConnected');
-  expect(detail).toContain("from '$lib/stores/runtimeViewStore'");
-  expect(detail).toContain("from '$lib/stores/runtimeQueryClient'");
+  expect(detail).toContain("from '#lib/stores/runtimeViewStore.ts'");
+  expect(detail).toContain("from '#lib/stores/runtimeQueryClient.ts'");
   expect(detail).toContain('refreshRuntimeView({');
   expect(detail).toContain('selectEntityRuntimeFromDirectory');
   expect(detail).toContain('runtimeOperations.selectRuntime(targetRuntimeId)');
@@ -679,14 +679,14 @@ test('address explorer routes read runtime projections instead of debug entity A
   expect(runtimeConnection).toContain('readRemoteRuntimeRequestFromUrl');
   expect(runtimeConnection).toContain('persistRemoteRuntimeRequest');
   expect(runtimeConnection).toContain('stripRemoteRuntimeParamsFromHistory');
-  expect(runtimeConnection).toContain("from '$lib/stores/vault/vaultStore'");
+  expect(runtimeConnection).toContain("from '#lib/stores/vault/vaultStore.ts'");
   expect(runtimeConnection).toContain('await vaultOperations.initialize()');
   expect(runtimeConnection).toContain('const runtime = get(activeRuntime)');
   expect(runtimeConnection).toContain('runtimeId: runtime.id');
   expect(runtimeConnection).toContain('seed: runtime.seed');
   expect(runtimeConnection).toContain('await initializeXLN()');
   expect(runtimeConnection).toContain('getRuntimeControllerAdapter');
-  expect(appLayout).toContain("from '$lib/utils/runtime/runtimeConnection'");
+  expect(appLayout).toContain("from '#lib/utils/runtime/runtimeConnection.ts'");
   expect(appLayout).not.toContain('function readRemoteRuntimeRequestFromUrl');
   expect(appLayout).not.toContain('function persistRemoteRuntimeRequest');
   expect(appLayout).not.toContain('function remoteAccessFromAuthKey');
@@ -701,7 +701,7 @@ test('health admin reads active runtime projections instead of debug event/entit
   expect(source).toContain('RuntimeActivityEvent');
   expect(source).toContain('RuntimeAdapterEntitySummary');
   expect(source).toContain("fetch('/api/health')");
-  expect(source).toContain("import { errorLog } from '$lib/stores/errorLogStore';");
+  expect(source).toContain("import { errorLog } from '#lib/stores/errorLogStore.ts';");
   expect(source).toContain("errorLog.log(message, 'Health Admin', details)");
   expect(source).toContain("'RPC health check failed after retries'");
   expect(source).toContain("'Runtime projection health read failed'");

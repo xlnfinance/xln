@@ -297,7 +297,7 @@
     "playwright": "^1.62.1",
     "prettier": "^3.9.6",
     "solc": "0.8.25",
-    "tronweb": "^6.5.0",
+    "tronweb": "6.5.0",
     "typescript": "^5.9.3"
   },
   "dependencies": {
@@ -323,9 +323,12 @@
     "level": "^8.0.1",
     "msgpackr": "^1.12.1",
     "qrcode": "^1.5.4",
-    "secp256k1": "^4.0.5",
+    "secp256k1": "5.0.2",
     "ws": "^8.21.3"
   },
   "type": "module",
-  "private": true
+  "private": true,
+  "patchedDependencies": {
+    "tronweb@6.5.0": "patches/tronweb@6.5.0.patch"
+  }
 }

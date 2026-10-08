@@ -120,7 +120,8 @@ fn inspect_work(
         EntityPendingWork::ProposerMaterialized { native, .. } => {
             inspect_local_tx(native, admission)
         }
-        EntityPendingWork::Projected(projected) => inspect_entity_tx(projected, admission),
+        EntityPendingWork::Projected(projected)
+        | EntityPendingWork::LocalOpenAccount(projected) => inspect_entity_tx(projected, admission),
     }
 }
 
@@ -160,7 +161,8 @@ fn work_author(
         }
         EntityPendingWork::Account { .. }
         | EntityPendingWork::ProposerMaterialized { .. }
-        | EntityPendingWork::Projected(_) => Ok(None),
+        | EntityPendingWork::Projected(_)
+        | EntityPendingWork::LocalOpenAccount(_) => Ok(None),
     }
 }
 

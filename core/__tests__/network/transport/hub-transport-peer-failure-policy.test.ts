@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import type { ServerWebSocket } from 'bun';
 
-import { createEmptyEnv } from '../../../runtime';
+import { createEmptyEnv, startP2P } from '../../../runtime';
 import { deriveSignerAddressSync } from '../../../account/crypto';
 import { deriveEncryptionKeyPair } from '../../../protocol/crypto/p2p-crypto';
 import { decodeRuntimeEntityInputsEnvelope } from '../../../network/p2p/auth/entity-input-envelope';
@@ -22,6 +22,7 @@ const HUB_ID = deriveSignerAddressSync(HUB_SEED, '1').toLowerCase();
 const PEER_ID = deriveSignerAddressSync(PEER_SEED, '1').toLowerCase();
 type NativeSocket = ServerWebSocket<{ type: 'direct-runtime' }>;
 const clients: RuntimeWsClient[] = [];
+const transports: NonNullable<ReturnType<typeof startP2P>>[] = [];
 const stopServers: Array<() => void> = [];
 const REJECT_ENV = 'XLN_REJECT_FAIL_FAST';
 const previousRejectPolicy = process.env[REJECT_ENV];
@@ -30,7 +31,7 @@ afterEach(async () => {
   if (previousRejectPolicy === undefined) delete process.env[REJECT_ENV];
   else process.env[REJECT_ENV] = previousRejectPolicy;
   try {
-    await Promise.all(clients.splice(0).map(client => client.closeAndWait()));
+    await Promise.all([...clients.splice(0), ...transports.splice(0)].map(client => client.closeAndWait()));
   } finally {
     for (const stop of stopServers.splice(0)) stop();
   }
@@ -58,6 +59,9 @@ type ClientInternals = { sendRaw(msg: RuntimeWsMessage): boolean };
 const connectHub = async (options: { rejectInbound?: boolean } = {}) => {
   const env = createEmptyEnv(HUB_SEED, 1);
   transitionRuntimeLifecycle(ensureRuntimeInfrastructure(env), 'running');
+  const p2p = startP2P(env, { relayUrls: [] });
+  if (!p2p) throw new Error('TEST_REAL_P2P_NOT_STARTED');
+  transports.push(p2p);
   const hubErrors: string[] = [];
   const hubWarnings: string[] = [];
   env.error = (_category, message) => { hubErrors.push(message); };

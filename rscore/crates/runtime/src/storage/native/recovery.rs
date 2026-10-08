@@ -58,6 +58,7 @@ impl NativeRuntimeStore {
             .map(|height| {
                 let frame = self.recover_frame(height)?;
                 Ok(DurableRuntimeFrame {
+                    timestamp: validate_runtime_frame(&frame.frame_bytes)?.timestamp,
                     height: frame.height,
                     output_count: frame.outputs.len(),
                     output_digest: output_digest(&frame.outputs)?,

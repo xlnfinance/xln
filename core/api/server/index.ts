@@ -1,3 +1,4 @@
+import { getEntityJAdapter } from '../../runtime/j-submit/api';
 /**
  * XLN Unified Server
  *
@@ -27,7 +28,7 @@ import {
   closeInfraDb,
 } from '../../runtime.ts';
 import { registerEnvChangeCallback } from '../../runtime/loop/loop-environment.ts';
-import { ensurePendingNumberedRegistrationsResumed } from '../../runtime/registration/numbered-registration-driver';
+import { ensurePendingNumberedRegistrationsResumed } from '../../runtime/registration/numbered/numbered-registration-driver';
 import { readFileSync } from 'node:fs';
 import { safeStringify, serializeTaggedJson } from '../../protocol/serialization';
 import type { RuntimeReplica } from '../../runtime/types';
@@ -109,6 +110,7 @@ import { handleOffchainFaucet } from './faucet/offchain';
 import { handleReserveFaucet } from './faucet/reserve';
 import { handleRuntimeHealth, type RuntimeHealthCacheEntry } from './health/api';
 import { handleRuntimeRpcProxy } from './rpc/proxy';
+import { handleNativeRestProxy, publicNativeTransports } from './rpc/tron-proxy';
 import { requiresLocalNodeOperator } from './control/node-http-access';
 import { handleP2PControl } from './control/p2p';
 import { handleGossipProfileCounterparties } from './control/gossip-counterparties';
@@ -116,7 +118,8 @@ import { handleGossipProfilesSendReady } from './control/gossip-send-ready';
 import { handleRuntimeInputControl } from './control/runtime-input';
 import { handleSignerRegistration } from './control/signer';
 import { createStackManagerController } from './control/stack-manager';
-import { getConfiguredOfficialFoundationSignerId } from '../../jurisdiction/adapter/kernel/jurisdiction-loader';
+import { getConfiguredOfficialFoundationSignerId, loadJurisdictionsAsync } from '../../jurisdiction/adapter/kernel/jurisdiction-loader';
+import { configuredNativeServerJurisdiction } from './native-jurisdiction';
 import { fetchRpcCode, probeLocalAnvilContractStack } from './rpc/stack-probe';
 import { handleRuntimeActivityRequest } from './health/activity';
 import {
@@ -248,9 +251,19 @@ const RELAY_MARKET_MAX_SUBSCRIPTIONS_PER_IP = readPositiveIntegerEnv('XLN_RELAY_
 const marketMakerState = createMarketMakerServerState();
 
 const externalWalletApi = createExternalWalletApi({
-  getJAdapter: () => globalJAdapter,
+  getJAdapter: entityId => {
+    if (!entityId) return globalJAdapter;
+    if (!serverEnv) throw new Error('EXTERNAL_WALLET_RUNTIME_UNAVAILABLE');
+    return getEntityJAdapter(serverEnv, entityId);
+  },
   getRuntimeId: () => String(serverEnv?.runtimeId || ''),
-  getTokenCatalog: async () => tokenCatalogController.ensureTokenCatalog(),
+  getTokenCatalog: async entityId => {
+    if (!entityId) return tokenCatalogController.ensureTokenCatalog();
+    if (!serverEnv) throw new Error('EXTERNAL_WALLET_RUNTIME_UNAVAILABLE');
+    const adapter = getEntityJAdapter(serverEnv, entityId);
+    if (!adapter) throw new Error('EXTERNAL_WALLET_ENTITY_J_ADAPTER_MISSING');
+    return adapter.getTokenRegistry();
+  },
   jsonHeaders: JSON_HEADERS,
   faucetSeed: FAUCET_SEED,
   faucetSignerLabel: FAUCET_SIGNER_LABEL,
@@ -653,7 +666,7 @@ const handleGossipProfileApi = (
 const handleJurisdictionsApi = async (env: RuntimeReplica | null, headers: typeof JSON_HEADERS): Promise<Response> => {
   try {
     const payload = (await buildRuntimeJurisdictionsJson(env)) ?? (await readCanonicalJurisdictionsJson());
-    return new Response(payload, {
+    return new Response(publicNativeTransports(payload), {
       headers: {
         ...headers,
         'Content-Type': 'application/json',
@@ -857,6 +870,7 @@ const handleApiAgainstCommittedState = async (
   if (assistantResponse) return assistantResponse;
   const controlResponse = await maybeHandleControlApi(req, pathname, env, headers);
   if (controlResponse) return controlResponse;
+  if (pathname.startsWith('/api/tron/')) return handleNativeRestProxy(req, headers);
   if (pathname === '/rpc' && req.method === 'POST') {
     return handleRuntimeRpcProxy({ req, pathname, env, relayStore, headers, operatorAuthorized });
   }
@@ -1183,6 +1197,7 @@ const registerServerJurisdiction = async (
     position: { x: 0, y: 50, z: 0 },
     entityProviderDeploymentBlock: adapter.entityProviderDeploymentBlock,
     watcherConfirmationDepth: requireWatcherConfirmationDepth(adapter),
+    ...(adapter.mode === 'tron' ? { watcherReceiptCommitment: 'tron-rpc-attested' as const } : {}),
     contracts: adapter.addresses,
     rpcs: registration.rpcs,
     chainId: adapter.chainId,
@@ -1207,6 +1222,7 @@ const initializeBrowserVmJurisdiction = async (env: RuntimeReplica): Promise<JAd
     adapter,
     rpcs: [],
     requireStateRoot: true,
+    blockTimeMs: 300,
   });
   if (!env.activeJurisdiction) env.activeJurisdiction = 'local';
   return adapter;
@@ -1296,10 +1312,17 @@ const assertPredeployedStackCode = async (
 const initializeJurisdictionAdapter = async (env: RuntimeReplica): Promise<void> => {
   const useAnvil = process.env['USE_ANVIL'] === 'true';
   const useLocalSimulation = process.env['XLN_LOCAL_SIMULATION'] === 'true';
-  if (useAnvil === useLocalSimulation) {
-    throw new Error(useAnvil
-      ? 'JADAPTER_MODE_CONFLICT:USE_ANVIL_and_XLN_LOCAL_SIMULATION'
-      : 'JADAPTER_MODE_REQUIRED:set_USE_ANVIL_or_XLN_LOCAL_SIMULATION');
+  if (useAnvil && useLocalSimulation) throw new Error('JADAPTER_MODE_CONFLICT:USE_ANVIL_and_XLN_LOCAL_SIMULATION');
+  if (!useAnvil && !useLocalSimulation) {
+    const configured = configuredNativeServerJurisdiction(await loadJurisdictionsAsync(),
+      String(process.env['XLN_PREDEPLOYED_JURISDICTION_KEY'] || '').trim());
+    globalJAdapter = await withStartupStepTimeout('createJAdapter(tron)', createJAdapter(configured.adapterConfig));
+    await withStartupStepTimeout('tron.getTokenRegistry', globalJAdapter.getTokenRegistry());
+    await registerServerJurisdiction(env, { name: configured.name, adapter: globalJAdapter,
+      rpcs: [configured.rpcUrl], requireStateRoot: false, blockTimeMs: configured.blockTimeMs });
+    if (!env.activeJurisdiction) env.activeJurisdiction = configured.name;
+    serverLog.info('tron.connected', { chainId: globalJAdapter.chainId, name: configured.name });
+    return;
   }
   const anvilRpc = useAnvil ? resolveRequiredAnvilRpc() : '';
 

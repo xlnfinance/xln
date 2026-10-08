@@ -64,7 +64,7 @@ pub use certified_board_registry::{
 pub use concrete::{
     ConcreteRestoreError, DecodedRuntimeCheckpoint, DecodedRuntimeEntityCheckpoint,
     DecodedRuntimeWalFrame, RestoredRuntime, replay_decoded_runtime_wal,
-    restore_decoded_runtime_checkpoint,
+    replay_decoded_runtime_wal_observed, restore_decoded_runtime_checkpoint,
 };
 pub(crate) use concrete_source::VerifiedWalFrame;
 pub use concrete_source::{
@@ -90,3 +90,5 @@ pub use wal_input::{
     ConcreteWalDecodeError, decode_concrete_runtime_wal_frame,
     reconcile_runtime_input_with_resident_queue,
 };
+
+pub(crate) use entity_consensus::decode_entity_authority;

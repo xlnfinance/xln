@@ -132,6 +132,8 @@ export type JTx =
           attemptNumber: number;
           attemptedAt: number;
           batchGeneration: number;
+          /** Exact signed wire accepted before an external broadcast; hash is derived. */
+          rawTransaction?: string;
         };
       };
       timestamp: number;

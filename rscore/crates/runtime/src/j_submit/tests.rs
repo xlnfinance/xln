@@ -139,3 +139,57 @@ fn domain_calldata_and_eip1559_signing_match_ethers() {
         "690a0d2d4d11daba52308a213ca511a0fe368fad3171db1d7688d6a41017f7be"
     );
 }
+
+#[test]
+fn finalization_checks_chain_deadline_and_exact_account_identity() {
+    use ethabi::Token;
+    let finalization = FinalDisputeProof {
+        counterentity: word(2),
+        initial_nonce: 1.into(),
+        final_nonce: 3.into(),
+        proposer_is_left: true,
+        initial_proofbody_hash: word(3),
+        final_proofbody: ProofBody {
+            watch_seed: word(4),
+            left_response_seconds: 10,
+            right_response_seconds: 10,
+            offdeltas: vec![0.into()],
+            token_ids: vec![1.into()],
+            transformers: vec![],
+        },
+        starter_arguments: vec![],
+        other_arguments: vec![],
+        sig: vec![],
+        started_by_left: false,
+        cooperative: false,
+        submit_not_before_timestamp: Some(100),
+    };
+    let mut account = vec![Token::Uint(U256::zero()); 15];
+    account[0] = Token::Uint(1.into());
+    account[1] = Token::FixedBytes(word(4).to_vec());
+    account[2] = Token::Uint(100.into());
+    account[6] = Token::FixedBytes(word(3).to_vec());
+    account[14] = Token::Bool(false);
+    let gate = super::submission::classify_finalization_chain_time;
+    assert!(
+        matches!(gate(&finalization, &account, 99), Err(JSubmitError::Rpc(message)) if message.starts_with("DISPUTE_FINALIZATION_AWAITING_CHAIN_TIME"))
+    );
+    assert_eq!(gate(&finalization, &account, 100), Ok(()));
+    for (index, forged) in [
+        (0, Token::Uint(2.into())),
+        (2, Token::Uint(101.into())),
+        (6, Token::FixedBytes(word(5).to_vec())),
+        (14, Token::Bool(true)),
+    ] {
+        let mut altered = account.clone();
+        altered[index] = forged;
+        assert_eq!(
+            gate(&finalization, &altered, 101),
+            Err(JSubmitError::Transaction(
+                "finalization-chain-identity-mismatch"
+            ))
+        );
+    }
+    account[1] = Token::FixedBytes(word(0).to_vec());
+    assert_eq!(gate(&finalization, &account, 99), Ok(()));
+}

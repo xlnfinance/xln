@@ -1,3 +1,4 @@
+import { MalformedEntityFrameInputError } from '../tx/processing/invariant-errors';
 import { deriveDelta } from '../../account/utils';
 import { getAccountPerspective } from '../../account/state/perspective';
 import { accountInputProposal } from '../../account/consensus/flush';
@@ -432,13 +433,29 @@ export const materializeHtlcPreparedInfraContext = async (
   }
   const entries = timePerfPhase('htlc.materialize.collect', () =>
     canonicalizeInboundEntries(collectInboundEntries(effectiveInput)));
-  const originated = await timePerfPhase('htlc.materialize.originated', () => materializeOriginatedHtlcPayments({
-    state: effectiveInput.state,
-    proposalTxs: effectiveInput.proposalTxs,
-    profiles: effectiveInput.profiles,
-    height: effectiveInput.height,
-    resolveRoute: effectiveInput.resolveRoute,
-  }));
+  let originated: HtlcPreparedInfraContext['originated'];
+  try {
+    originated = await timePerfPhase('htlc.materialize.originated', () =>
+      materializeOriginatedHtlcPayments({
+        state: effectiveInput.state,
+        proposalTxs: effectiveInput.proposalTxs,
+        profiles: effectiveInput.profiles,
+        height: effectiveInput.height,
+        resolveRoute: effectiveInput.resolveRoute,
+      }),
+    );
+  } catch (error) {
+    // Materialization expands signed commands before frame application. Match
+    // application's recursive unwind: evict the atomic admitted command, never
+    // mutate its signed child list or consume a rejected command's nonce.
+    if (error instanceof MalformedEntityFrameInputError && error.frameTx !== undefined) {
+      const owner = input.proposalTxs.find(tx =>
+        getEffectiveHtlcFrameTxs(input.state, [tx]).includes(error.frameTx as EntityTx),
+      );
+      if (owner) error.frameTx = owner;
+    }
+    throw error;
+  }
   return { version: 1, entries, originated };
 };
 

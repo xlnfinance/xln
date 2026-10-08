@@ -9,9 +9,9 @@
     qaScenarioTitle,
     qaScenarioUsesVideoClock,
     type QaScenarioCue,
-  } from '$lib/qa/scenarioPlayer';
-  import { fetchQaBlobUrl } from '$lib/qa/apiClient';
-  import type { QaArtifact, QaShard } from '$lib/qa/types';
+  } from '#lib/qa/scenarioPlayer.ts';
+  import { fetchQaBlobUrl } from '#lib/qa/apiClient.ts';
+  import type { QaArtifact, QaShard } from '#lib/qa/types.ts';
 
   type Props = {
     runId: string;

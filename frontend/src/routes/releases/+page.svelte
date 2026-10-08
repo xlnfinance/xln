@@ -1,5 +1,5 @@
 <script lang="ts">
-  import ReleasesView from '$lib/components/Releases/ReleasesView.svelte';
+  import ReleasesView from '#lib/components/Releases/ReleasesView.svelte';
 </script>
 
 <ReleasesView />

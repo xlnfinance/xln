@@ -1,4 +1,4 @@
-import { parseJsonUnknown } from '$lib/utils/boundary';
+import { parseJsonUnknown } from '#lib/utils/boundary/index.ts';
 
 export type BirdViewBarsMode = 'close' | 'spread';
 export type BirdViewMode = '2d' | '3d';

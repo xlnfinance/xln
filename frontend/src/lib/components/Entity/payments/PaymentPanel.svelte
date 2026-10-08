@@ -16,14 +16,14 @@
     xlnFunctions,
   } from '../../../stores/xlnStore';
   import { errorLog } from '../../../stores/errorLogStore';
-  import { requireSignerIdForEntity } from '$lib/utils/identity/entityReplica';
-  import { toasts } from '$lib/stores/ui/toastStore';
-  import { runtimeCommandLatestReceipt } from '$lib/stores/commands/runtimeCommandBus';
-  import { classifyRuntimeFailure } from '$lib/utils/runtime/runtimeFailure';
+  import { requireSignerIdForEntity } from '#lib/utils/identity/entityReplica.ts';
+  import { toasts } from '#lib/stores/ui/toastStore.ts';
+  import { runtimeCommandLatestReceipt } from '#lib/stores/commands/runtimeCommandBus.ts';
+  import { classifyRuntimeFailure } from '#lib/utils/runtime/runtimeFailure.ts';
   import EntityInput from '../../shared/EntityInput.svelte';
   import TokenSelect from '../../shared/TokenSelect.svelte';
   import EntityIdentity from '../../shared/EntityIdentity.svelte';
-  import { parseXlnInvoice, type ParsedXlnInvoice } from '$lib/utils/xlnInvoice';
+  import { parseXlnInvoice, type ParsedXlnInvoice } from '#lib/utils/xlnInvoice.ts';
   import { parseTokenAmountInput, tokenAmountInputErrorMessage } from '../assets/token-amount-input';
   import { requireTokenDecimals } from '../token-metadata';
   import {

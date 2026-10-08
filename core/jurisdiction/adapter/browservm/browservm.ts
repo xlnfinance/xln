@@ -33,7 +33,7 @@ import {
 import { createBrowserVmStateMethods } from './browservm-state-methods';
 import { createBrowserVmIoMethods } from './browservm-io';
 import { createSignerNonceSequencer } from '../rpc/write/rpc-transaction-sequencer';
-import { prepareDurableEvmTransaction } from '../rpc/write/evm-durable-transaction';
+import { prepareDurableTransaction } from '../rpc/write/prepared/durable-transaction';
 
 export async function createBrowserVMAdapter(
   config: JAdapterConfig,
@@ -109,10 +109,15 @@ export async function createBrowserVMAdapter(
     deltaTransformer,
     addresses,
     get entityProviderDeploymentBlock() { return browserVM.getEntityProviderDeploymentBlock(); },
+    setPendingSignedTransactionSource: nonceSequencer.setPendingSignedTransactionSource,
+    async broadcastPreparedTransaction(rawTransaction) {
+      return (await provider.broadcastTransaction(rawTransaction)).hash;
+    },
     async prepareDurableTransaction(signerPrivateKey, request, accept) {
       const activeSigner = new ethers.Wallet(ethers.hexlify(signerPrivateKey), provider);
-      return prepareDurableEvmTransaction({
+      return prepareDurableTransaction({
         signer: activeSigner,
+        nativeTron: false,
         request,
         accept,
         sequencer: nonceSequencer,

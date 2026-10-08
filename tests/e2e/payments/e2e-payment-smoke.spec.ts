@@ -9,6 +9,7 @@ import { ensureE2EBaseline } from '../../utils/e2e-baseline';
 import { connectRuntimeToHub, waitForReceiveReadyGossipProfiles } from '../../utils/e2e-connect';
 import { APP_BASE_URL, createRuntimeIdentity, gotoApp } from '../../utils/e2e-demo-users';
 import { submitUiPayment } from '../../utils/runtime/e2e-pay-ui';
+import { openAccountWorkspaceTab } from '../../utils/e2e-account-workspace';
 import {
   getPersistedReceiptCursor,
   waitForPersistedFrameEventMatch,
@@ -309,15 +310,20 @@ async function waitForRestoredRuntime(page: Page, runtimeId: string): Promise<vo
   if (await hasExportedRuntimeEnv(page)) {
     await page.waitForFunction(({ targetRuntimeId }) => {
       const view = window as typeof window & {
-        isolatedEnv?: {
-          runtimeId?: string;
-          state?: {
-            eReplicas?: Map<string, unknown>;
-          };
-        };
+        isolatedEnv?: import('../../../core/api/public/runtime-module').RuntimeReplica;
+        __xln?: { runtimeConnectivity?: { connected?: boolean } };
       };
-      return String(view.isolatedEnv?.runtimeId || '').toLowerCase() === String(targetRuntimeId || '').toLowerCase()
-        && Number(view.isolatedEnv?.state?.eReplicas?.size || 0) > 0;
+      const env = view.isolatedEnv;
+      if (!env || env.runtimeId.toLowerCase() !== targetRuntimeId.toLowerCase() || env.state.eReplicas.size === 0) return false;
+      const accounts = [...env.state.eReplicas.values()].flatMap(entity => [...entity.state.accounts.values()]);
+      // Restored money must be usable online with delivery acknowledged before
+      // this recovery test closes its contexts, not merely readable from disk.
+      return view.__xln?.runtimeConnectivity?.connected === true
+        && (env.pendingNetworkOutputs?.length ?? 0) === 0
+        && (env.pendingOutputs?.length ?? 0) === 0
+        && (env.networkInbox?.length ?? 0) === 0
+        && env.runtimeMempool.entityInputs.length === 0
+        && accounts.every(account => !account.pendingFrame && !account.pendingAccountInput && account.mempool.length === 0);
     }, { targetRuntimeId: runtimeId }, { timeout: CONSENSUS_TIMEOUT_MS });
     return;
   }
@@ -402,8 +408,9 @@ async function verifyEntityActivityHistory(page: Page, entityId: string, options
       .toBeGreaterThan(0);
   }
 
-  await page.getByRole('button', { name: 'History', exact: true }).click();
+  await openAccountWorkspaceTab(page, 'history');
   await expect(page.getByTestId('entity-history-panel')).toBeVisible({ timeout: CONSENSUS_TIMEOUT_MS });
+  await expect(page.locator('.settlement-panel .batch-card')).toHaveCount(0);
   await expect
     .poll(() => page.getByTestId('entity-history-event').count(), {
       timeout: CONSENSUS_TIMEOUT_MS,
@@ -490,7 +497,7 @@ async function verifyEntityActivityHistory(page: Page, entityId: string, options
 test.describe('Payment Smoke', () => {
   test.setTimeout(TEST_TIMEOUT_MS);
 
-  test('fresh runtimes can open accounts, faucet, pay, and reload persisted state', { tag: '@functional' }, async ({ browser, page }) => {
+  test('fresh runtimes can open accounts, faucet, pay, and reload persisted state', { tag: '@functional' }, async ({ browser, page, viewport, isMobile, hasTouch, deviceScaleFactor, userAgent }) => {
     let senderContext: BrowserContext | null = null;
     let recipientContext: BrowserContext | null = null;
 
@@ -504,8 +511,9 @@ test.describe('Payment Smoke', () => {
         });
       }
 
-      senderContext = await browser.newContext({ ignoreHTTPSErrors: true });
-      recipientContext = await browser.newContext({ ignoreHTTPSErrors: true });
+      const contextOptions = { ignoreHTTPSErrors: true, viewport, isMobile, hasTouch, deviceScaleFactor, userAgent };
+      senderContext = await browser.newContext(contextOptions);
+      recipientContext = await browser.newContext(contextOptions);
 
       const senderPage = await senderContext.newPage();
       const recipientPage = await recipientContext.newPage();
@@ -516,6 +524,13 @@ test.describe('Payment Smoke', () => {
         gotoApp(senderPage, { appBaseUrl: APP_BASE_URL, initTimeoutMs: CONSENSUS_TIMEOUT_MS, settleMs: 1_000 }),
         gotoApp(recipientPage, { appBaseUrl: APP_BASE_URL, initTimeoutMs: CONSENSUS_TIMEOUT_MS, settleMs: 1_000 }),
       ]);
+
+      for (const walletPage of [senderPage, recipientPage]) {
+        expect(walletPage.viewportSize()).toEqual(viewport);
+        const device = await walletPage.evaluate(() => ({ width: window.innerWidth, touch: matchMedia('(pointer: coarse)').matches }));
+        expect(device.touch).toBe(hasTouch);
+        console.log('[PAY-SMOKE-DEVICE]', { viewport, isMobile, hasTouch, ...device });
+      }
 
       const sender = await createRuntimeIdentity(senderPage, randomLabel('prodpay-a'), randomMnemonic(), {
         requireOnline: false,

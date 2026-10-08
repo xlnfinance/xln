@@ -1,5 +1,5 @@
 import { writable, derived, get } from 'svelte/store';
-import type { TimeState } from '$lib/types/ui';
+import type { TimeState } from '#lib/types/ui.ts';
 import { history } from './xlnStore';
 import { errorLog } from './errorLogStore';
 

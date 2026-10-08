@@ -205,8 +205,12 @@ pub(super) fn materialize_inbound_htlc_context(
         .map(|_| inputs.by_ref().take(chunk_size).collect::<Vec<_>>())
         .filter(|chunk| !chunk.is_empty())
         .collect::<Vec<_>>();
-    let public_key = infrastructure.entity_encryption_public_key;
-    let private_key = infrastructure.entity_encryption_private_key;
+    let public_key = request.state.entity.entity_encryption_public_key;
+    let private_key = infrastructure.owner_private_key(
+        &request.state.entity.entity_id,
+        public_key,
+        request.entity_encryption_seed,
+    )?;
     let decrypted = request
         .replica
         .accounts
@@ -253,23 +257,14 @@ pub(super) fn materialize_inbound_htlc_context(
                     })
                 })
                 .collect::<Result<Vec<_>, _>>()?;
-            Ok((
-                account_id(entity_id)?,
-                xln_rscore_batch::ResidentAccountFinancialViewRequest {
-                    token_ids: tokens,
-                    htlc_lock_ids: Vec::new(),
-                    pull_ids: Vec::new(),
-                    swap_offer_ids: Vec::new(),
-                    dispute: false,
-                },
-            ))
+            Ok((account_id(entity_id)?, tokens))
         })
         .collect::<Result<Vec<_>, FreshEntityContextError>>()?;
     let plan_done = total_started.elapsed();
     let views = request
         .replica
         .accounts
-        .local_financial_views(account_requests)
+        .read_head_capacities(account_requests)
         .map_err(|error| FreshEntityContextError::HtlcAccountRead(error.to_string()))?;
     let view_count = views.len();
     let views = views.into_iter().collect::<BTreeMap<_, _>>();
@@ -296,14 +291,12 @@ pub(super) fn materialize_inbound_htlc_context(
                 PreparedAccountView {
                     online,
                     out_capacity: view
-                        .owner_out_capacity
                         .get(&token)
-                        .cloned()
+                        .map(|(_, out)| out.clone())
                         .unwrap_or_else(|| BigInt::from(0)),
                     in_capacity: view
-                        .owner_in_capacity
                         .get(&token)
-                        .cloned()
+                        .map(|(input, _)| input.clone())
                         .unwrap_or_else(|| BigInt::from(0)),
                 },
             );
@@ -312,8 +305,8 @@ pub(super) fn materialize_inbound_htlc_context(
     let materialized = materialize_decrypted_htlc_entries(
         decrypted,
         &HtlcMaterializeEnvironment {
-            entity_encryption_public_key: infrastructure.entity_encryption_public_key,
-            entity_encryption_private_key: infrastructure.entity_encryption_private_key,
+            entity_encryption_public_key: public_key,
+            entity_encryption_private_key: private_key,
             entity_timestamp: request.timestamp,
             last_finalized_j_height: request.finalized_j_height,
             routing_fee_ppm: infrastructure.routing_fee_ppm,

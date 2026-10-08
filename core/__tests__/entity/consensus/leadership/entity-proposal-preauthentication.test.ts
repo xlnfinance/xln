@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
-import { applyEntityInput } from '../../../../entity/consensus';
+import { applyEntityInput, mergeEntityInputs } from '../../../../entity/consensus';
+import { safeStringify } from '../../../../protocol/serialization';
 import { createEntityProposalFixture } from '../../../helpers/entity-proposal-fixture';
 
 const {
@@ -21,6 +22,35 @@ const fourSignerQuorum = createEntityProposalFixture(
 );
 
 describe('Entity proposal pre-authentication', () => {
+  test('a forged precommit before a genuine quorum vote preserves honest Entity work', async () => {
+    const { frame, proposer, proposerReplica } = await buildHonestProposal();
+    const validator = createValidator('2');
+    const prepared = await applyEntityInput(validator.env, validator.replica, {
+      entityId, signerId: validator.signerId, proposedFrame: frame,
+    });
+    const genuine = prepared.outputs.find(output =>
+      output.signerId === proposer.signerId && output.hashPrecommits);
+    if (!genuine) throw new Error('TEST_GENUINE_PRECOMMIT_MISSING');
+    const forged = structuredClone(genuine);
+    forged.hashPrecommits = new Map([[validator.signerId, [`0x${'55'.repeat(64)}01`]]]);
+    const honest = {
+      entityId, signerId: proposer.signerId,
+      entityTxs: [{ type: 'chat' as const, data: { from: proposer.signerId, message: 'next honest work' } }],
+    };
+    const merged = mergeEntityInputs([forged, genuine, honest]);
+    expect(merged).toHaveLength(3);
+    const rejected = await applyEntityInput(proposer.env, proposerReplica, merged[0]!);
+    expect(rejected.outcome).toEqual({ kind: 'rejected', code: 'PRECOMMIT_SIGNATURE_REJECTED' });
+    expect(rejected.workingReplica).toEqual(proposerReplica);
+    const committed = await applyEntityInput(proposer.env, rejected.workingReplica, merged[1]!);
+    expect(committed.outcome).toEqual({ kind: 'committed' });
+    expect(committed.workingReplica.state.height).toBe(frame.height);
+    const next = await applyEntityInput(proposer.env, committed.workingReplica, merged[2]!);
+    expect(next.outcome.kind).not.toBe('rejected');
+    expect(next.workingReplica.proposal?.height).toBe(frame.height + 1);
+    expect(safeStringify(next.workingReplica.proposal?.txs)).toContain('next honest work');
+  });
+
   test('rejects a proposal with no active proposer signature before replay', async () => {
     const { frame } = await buildHonestProposal();
     frame.collectedSigs = new Map();

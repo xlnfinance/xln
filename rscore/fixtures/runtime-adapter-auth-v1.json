@@ -1,0 +1,56 @@
+{
+  "authSeed": "runtime-adapter-auth-public-fixture-32bytes",
+  "challenge": "0xabababababababababababababababababababababababababababababababab",
+  "expiresAtMs": 1791432119984,
+  "keyId": "auth-key-α",
+  "now": 1791432059984,
+  "runtimeId": "0x1fed68cebbcfe590ce5216320581275e54314b5a",
+  "runtimeSeed": "runtime-adapter-native-auth-public-fixture",
+  "tokenId": "token-id-β",
+  "vectors": [
+    {
+      "identity": {
+        "identityFingerprint": "0x7d44cf4902ecf40492a79fbf14eae318df13d5fa27e59bfc4ada21664ffbed75",
+        "identityPublicKey": "0x039a15847e2f40d4e70f490c87a511903d9c39a66da6e04e1967987e0ce2746cc7",
+        "identitySignature": "0xe3de0160f99138f93b5a7e1a6258dbe24f4c0a5fc2f5f3c8c83c2565ff1425b46b6fde701927ce99739904dced9897f47b6b3f25e9c40727649bdd8d4d92c2521c",
+        "runtimeId": "0x1fed68cebbcfe590ce5216320581275e54314b5a"
+      },
+      "laneId": "0x073942349e20270d6ae151242b07b12e72ac73162e15ff75a8421b14a4cb2549",
+      "ownerCompactSignature": "0x446b9cdd35dc4ba778b4630d1ae9f97dce8189310d8b0dadcbf7e379faa6f963b099fec7b6a34a4da82ba0595c02cce7453de869f9a19453e94a5d365c056504",
+      "ownerDigest": "0xdc71b26611d1fd96f0ac8c1d40e25070d06712fc82bad4b61fb8522aeb5fae3c",
+      "ownerLaneId": "0x1236f53cb0d0e16ee5e60ebab25a26eeb467871f49c2330d200664b7e1e3354e",
+      "ownerSignature": "0x446b9cdd35dc4ba778b4630d1ae9f97dce8189310d8b0dadcbf7e379faa6f9633099fec7b6a34a4da82ba0595c02cce7453de869f9a19453e94a5d365c0565041c",
+      "role": "read",
+      "token": "xlnra1.read.1791432119984.MHgxZmVkNjhjZWJiY2ZlNTkwY2U1MjE2MzIwNTgxMjc1ZTU0MzE0YjVh.YXV0aC1rZXktzrE.dG9rZW4taWQtzrI.9d43da62253cfada3642a7021d16f3ffadd99a68527919aa6197df8ad8ff44e5",
+      "verification": {
+        "audience": "0x1fed68cebbcfe590ce5216320581275e54314b5a",
+        "expiresAtMs": 1791432119984,
+        "keyId": "auth-key-α",
+        "level": "inspect",
+        "tokenId": "token-id-β"
+      }
+    },
+    {
+      "identity": {
+        "identityFingerprint": "0x7d44cf4902ecf40492a79fbf14eae318df13d5fa27e59bfc4ada21664ffbed75",
+        "identityPublicKey": "0x039a15847e2f40d4e70f490c87a511903d9c39a66da6e04e1967987e0ce2746cc7",
+        "identitySignature": "0xe3de0160f99138f93b5a7e1a6258dbe24f4c0a5fc2f5f3c8c83c2565ff1425b46b6fde701927ce99739904dced9897f47b6b3f25e9c40727649bdd8d4d92c2521c",
+        "runtimeId": "0x1fed68cebbcfe590ce5216320581275e54314b5a"
+      },
+      "laneId": "0x073942349e20270d6ae151242b07b12e72ac73162e15ff75a8421b14a4cb2549",
+      "ownerCompactSignature": "0xe374b148f9128f8fe7af5f4d208f249ba2c85c78bfd00a02b9b257016ee1f671a711535e5654c2b5ebcaa7ffdb79d30fc6bd2642cdf28d32c2a6b75293061c48",
+      "ownerDigest": "0x373722262c8ed4878bc69025a597384eb214ab1afcdfd029743397ba697c17c2",
+      "ownerLaneId": "0x1236f53cb0d0e16ee5e60ebab25a26eeb467871f49c2330d200664b7e1e3354e",
+      "ownerSignature": "0xe374b148f9128f8fe7af5f4d208f249ba2c85c78bfd00a02b9b257016ee1f6712711535e5654c2b5ebcaa7ffdb79d30fc6bd2642cdf28d32c2a6b75293061c481c",
+      "role": "full",
+      "token": "xlnra1.full.1791432119984.MHgxZmVkNjhjZWJiY2ZlNTkwY2U1MjE2MzIwNTgxMjc1ZTU0MzE0YjVh.YXV0aC1rZXktzrE.dG9rZW4taWQtzrI.b73f5887bd7f2c4333fa46cd5bf5d172c4fe7a2d8c8686e7e1bbeb82d8e643ef",
+      "verification": {
+        "audience": "0x1fed68cebbcfe590ce5216320581275e54314b5a",
+        "expiresAtMs": 1791432119984,
+        "keyId": "auth-key-α",
+        "level": "admin",
+        "tokenId": "token-id-β"
+      }
+    }
+  ]
+}

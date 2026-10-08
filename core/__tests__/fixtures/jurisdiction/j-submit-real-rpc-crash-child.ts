@@ -1,8 +1,12 @@
+import { DEFAULT_PRIVATE_KEY } from '../../../jurisdiction/adapter/kernel/factory';
+import { ethers } from 'ethers';
+import { createJAdapter, createXlnJsonRpcProvider } from '../../../jurisdiction/adapter';
 import {
   closeInfraDb,
   closeRuntimeDb,
   loadEnvFromDB,
   processRuntime,
+  enqueueRuntimeInput,
 } from '../../../runtime';
 import { deriveSignerAddressSync } from '../../../account/crypto';
 import { getNextJSubmitRetryTimestamp } from '../../../runtime/j-submit/j-submit-scheduler';
@@ -21,7 +25,7 @@ import {
   getLiveJAdapterEntries,
 } from '../../../runtime/j-submit/live-jadapters';
 
-type Phase = 'crash' | 'recover';
+type Phase = 'crash' | 'recover' | 'pending-crash' | 'pending-recover' | 'accepted-crash' | 'prepared-crash' | 'prepared-recover';
 
 type CrashProof = {
   runtimeId: string;
@@ -46,7 +50,7 @@ const [requestedPhase, seed, rpcUrl, proofPath, recoveryPath] = Bun.argv.slice(2
 if (!requestedPhase || !seed || !rpcUrl || !proofPath || !recoveryPath) {
   throw new Error('phase, seed, rpcUrl, proofPath and recoveryPath are required');
 }
-if (requestedPhase !== 'crash' && requestedPhase !== 'recover') {
+if (!['crash', 'recover', 'pending-crash', 'pending-recover', 'accepted-crash', 'prepared-crash', 'prepared-recover'].includes(requestedPhase)) {
   throw new Error(`J_SUBMIT_REAL_RPC_PHASE_INVALID:${requestedPhase}`);
 }
 const phase = requestedPhase as Phase;
@@ -149,6 +153,18 @@ const runCrashPhase = async (): Promise<never> => {
   if (!jReplica) fail(`jurisdiction-replica-missing:${jurisdiction.name}`);
   jReplica.rpcs = [rpcUrl];
 
+  if (phase === 'prepared-crash') {
+    // Separate public Anvil deployer avoids invalidating the first adapter's live NonceManager.
+    const deployer = ethers.HDNodeWallet.fromPhrase('test test test test test test test test test test test junk', undefined, "m/44'/60'/0'/0/1");
+    const sibling = await createJAdapter({ mode: 'rpc', chainId: jadapter.chainId, rpcUrl, privateKey: deployer.privateKey });
+    await sibling.deployStack();
+    enqueueRuntimeInput(env, { runtimeTxs: [{ type: 'importJ', data: { name: 'Nonce sibling', chainId: sibling.chainId,
+      ticker: 'ETH', rpcs: [rpcUrl], blockTimeMs: 1000, contracts: { ...sibling.addresses },
+      entityProviderDeploymentBlock: sibling.entityProviderDeploymentBlock } }], entityInputs: [] });
+    await driveUntil(env, () => Boolean(getLiveJAdapter(env, 'Nonce sibling')), 'same-chain-second-stack-import');
+    await sibling.close();
+  }
+
   const senderSigner = deriveSignerAddressSync(seed, '1').toLowerCase();
   const receiverSigner = deriveSignerAddressSync(seed, '2').toLowerCase();
   const [sender, receiver] = await registerEntities(env, jadapter, [
@@ -184,12 +200,14 @@ const runCrashPhase = async (): Promise<never> => {
     'durable-submit-intent',
   );
 
-  const originalSubmitTx = jadapter.submitTx.bind(jadapter);
-  jadapter.submitTx = async (...args) => {
-    const result = await originalSubmitTx(...args);
-    if (!result.success || !result.txHash || !Number.isSafeInteger(result.blockNumber)) {
-      fail(`rpc-submit-failed:${result.error ?? 'missing receipt identity'}`);
-    }
+  const pendingCrash = phase === 'pending-crash' || phase === 'accepted-crash' || phase === 'prepared-crash';
+  if (pendingCrash) await chainControl('evm_setAutomine', [false]);
+  const broadcast = jadapter.broadcastPreparedTransaction.bind(jadapter);
+  jadapter.broadcastPreparedTransaction = async raw => {
+    const txHash = phase === 'prepared-crash' ? ethers.keccak256(raw) : await broadcast(raw);
+    const receipt = await jadapter.provider.getTransactionReceipt(txHash);
+    const result = { txHash, blockNumber: receipt?.blockNumber ?? 0 };
+    if (!pendingCrash && (!receipt || receipt.status !== 1)) fail('rpc-submit-missing-receipt');
     const replica = findReplica(env, sender.id);
     const sentBatch = replica.state.jBatchState?.sentBatch;
     const local = replica.jSubmitState;
@@ -217,13 +235,15 @@ const runCrashPhase = async (): Promise<never> => {
       lastSubmittedAt: local.lastSubmittedAt,
       runtimeTimestamp: env.state.timestamp,
       txHash: result.txHash,
-      blockNumber: result.blockNumber!,
+      blockNumber: result.blockNumber ?? 0,
       chainNonce: (await jadapter.getEntityNonce(sender.id)).toString(),
       senderReserve: (await jadapter.getReserves(sender.id, 1)).toString(),
       receiverReserve: (await jadapter.getReserves(receiver.id, 1)).toString(),
       hankoBatchLogCount: await countExactHankoBatchLogs(jadapter, sender.id, sentBatch.batchHash),
     };
     await Bun.write(proofPath, JSON.stringify(proof));
+    if (phase === 'accepted-crash' || phase === 'prepared-crash') crashNow();
+    if (pendingCrash) return result.txHash;
     crashNow();
   };
 
@@ -232,6 +252,10 @@ const runCrashPhase = async (): Promise<never> => {
     () => Boolean(env.runtimeMempool?.runtimeTxs.some((tx) => tx.type === 'recordJSubmitResult')),
     'rpc-submit-result-queued',
   );
+  if (pendingCrash) {
+    await driveUntil(env, () => Boolean(findReplica(env, sender.id).jSubmitState?.txHash), 'pending-result-durable');
+    crashNow();
+  }
   return fail('crash-boundary-not-reached');
 };
 
@@ -334,14 +358,102 @@ const runRecoverPhase = async (): Promise<void> => {
   await closeEnv(reopened);
 };
 
-if (phase === 'crash') {
+const chainControl = async (method: string, params: unknown[]): Promise<void> => {
+  const provider = createXlnJsonRpcProvider(rpcUrl);
+  try { await provider.send(method, params); } finally { await provider.destroy(); }
+};
+
+const runPendingRecoverPhase = async (): Promise<void> => {
+  const proof = JSON.parse(await Bun.file(proofPath).text()) as CrashProof;
+  const env = await loadEnvFromDB(runtimeId, seed);
+  if (!env) fail('pending-restore-null');
+  env.scenarioMode = true;
+  const adapter = getLiveJAdapter(env, proof.jurisdictionName);
+  if (!adapter) fail('pending-adapter-missing');
+  await adapter.stopWatchingAndWait?.();
+  adapter.startWatching(env);
+  const local = findReplica(env, proof.senderId).jSubmitState;
+  const restoredBatch = (env.infrastructure?.pendingCommittedJOutbox ?? []).flatMap(input => input.jTxs)
+    .find(tx => tx.type === 'batch' && tx.data.runtimeSubmitAttempt?.attemptId === proof.attemptId);
+  const raw = restoredBatch?.type === 'batch' ? restoredBatch.data.runtimeSubmitAttempt?.rawTransaction : undefined;
+  assertEqual(raw ? ethers.Transaction.from(raw).hash : local?.txHash, proof.txHash, 'restored-pending-hash');
+  if (!local?.lastResultAttemptId) await driveUntil(env, () => Boolean(findReplica(env, proof.senderId).jSubmitState?.lastResultAttemptId), 'restored-accepted-result');
+  assertEqual(await adapter.provider.getTransactionReceipt(proof.txHash), null, 'transaction-still-pending');
+  if (raw) assertEqual(await adapter.broadcastPreparedTransaction(raw), proof.txHash, 'exact-duplicate-broadcast-hash');
+  const priorNonce = await adapter.provider.getTransactionCount(await adapter.signer.getAddress(), 'pending');
+  let submitCalls = 0;
+  const submit = adapter.submitTx.bind(adapter);
+  adapter.submitTx = async (...args) => { submitCalls += 1; return submit(...args); };
+  const due = getNextJSubmitRetryTimestamp(env);
+  if (due === null) fail('pending-retry-missing');
+  env.state.timestamp = due;
+  await driveUntil(env, () => (findReplica(env, proof.senderId).jSubmitState?.submitAttempts ?? 0) >= 2
+    && findReplica(env, proof.senderId).jSubmitState?.lastResultAt === env.state.timestamp, 'pending-receipt-retry');
+  assertEqual(submitCalls, 0, 'no-second-broadcast');
+  assertEqual(findReplica(env, proof.senderId).jSubmitState?.txHash, proof.txHash, 'retry-preserves-hash');
+  assertEqual(await adapter.provider.getTransactionCount(await adapter.signer.getAddress(), 'pending'), priorNonce, 'sender-nonce-unchanged');
+  await chainControl('evm_mine', []);
+  await adapter.pollNow?.();
+  await driveUntil(env, () => findReplica(env, proof.senderId).state.jBatchState?.entityNonce === proof.entityNonce
+    && findReplica(env, proof.senderId).state.jBatchState?.sentBatch === undefined, 'pending-mined-authenticated');
+  const receipt = await adapter.provider.getTransactionReceipt(proof.txHash);
+  assertEqual(receipt?.status, 1, 'original-receipt-success');
+  assertEqual(await adapter.getReserves(proof.senderId, 1), 90n, 'pending-sender-reserve');
+  assertEqual(await adapter.getReserves(proof.receiverId, 1), 10n, 'pending-receiver-reserve');
+  const logs = await countExactHankoBatchLogs(adapter, proof.senderId, proof.batchHash);
+  assertEqual(logs, 1, 'pending-one-economic-operation');
+  const canonicalHash = computeCanonicalEntityHash(findReplica(env, proof.senderId)).hash;
+  const height = env.state.height;
+  await closeEnv(env);
+  const reopened = await loadEnvFromDB(runtimeId, seed);
+  if (!reopened) fail('pending-second-reopen-null');
+  assertEqual(reopened.state.height, height, 'pending-second-reopen-height');
+  assertEqual(computeCanonicalEntityHash(findReplica(reopened, proof.senderId)).hash, canonicalHash, 'pending-second-reopen-root');
+  assertEqual(reopened.infrastructure?.pendingCommittedJOutbox?.length ?? 0, 0, 'pending-second-reopen-outbox');
+  await closeEnv(reopened);
+  const result = { txHash: proof.txHash, submitCalls, logs, priorNonce, status: receipt?.status, canonicalHash, height };
+  await Bun.write(recoveryPath, safeStringify(result));
+  console.info('J_SUBMIT_PENDING_RECOVERY_PROOF', safeStringify(result));
+};
+
+const runPreparedNonceRecovery = async (): Promise<void> => {
+  const proof = JSON.parse(await Bun.file(proofPath).text()) as CrashProof;
+  const env = await loadEnvFromDB(runtimeId, seed);
+  if (!env) fail('nonce-restore-null');
+  const adapter = getLiveJAdapter(env, proof.jurisdictionName);
+  if (!adapter) fail('nonce-adapter-missing');
+  const batch = env.infrastructure?.pendingCommittedJOutbox?.flatMap(input => input.jTxs)
+    .find(tx => tx.type === 'batch' && tx.data.runtimeSubmitAttempt?.attemptId === proof.attemptId);
+  const raw = batch?.type === 'batch' ? batch.data.runtimeSubmitAttempt?.rawTransaction : undefined;
+  if (!raw) fail('nonce-prepared-wire-missing');
+  const transaction = ethers.Transaction.from(raw);
+  assertEqual(await adapter.provider.getTransaction(proof.txHash), null, 'original-not-broadcast');
+  const sibling = getLiveJAdapter(env, 'Nonce sibling');
+  if (!sibling || sibling.addresses.depository === adapter.addresses.depository) fail('distinct-imported-stack-required');
+  assertEqual(sibling.chainId, adapter.chainId, 'same-chain-nonce-domain');
+  const observed: number[] = [];
+  for (let round = 0; round < 2; round += 1) {
+    try {
+      await sibling.prepareDurableTransaction(ethers.getBytes(DEFAULT_PRIVATE_KEY), {
+        to: sibling.addresses.depository,
+        data: sibling.depository.interface.encodeFunctionData('entityNonces', [proof.senderId]), value: 0n,
+      }, async prepared => { observed.push(prepared.transactionNonce); return 'rejected'; });
+      fail('nonce-rejection-did-not-reject');
+    } catch (error) {
+      if (!(error instanceof Error) || !error.message.includes('DURABLE_TRANSACTION_ACCEPTANCE_REJECTED')) throw error;
+    }
+    assertEqual(observed[round], transaction.nonce + 1, 'restored-nonce-reservation-survives-reset');
+  }
+  await Bun.write(recoveryPath, safeStringify({ reservedNonce: transaction.nonce, observed }));
+  await closeEnv(env);
+};
+
+if (phase === 'prepared-recover') {
+  await runPreparedNonceRecovery();
+} else if (phase === 'pending-recover') {
+  await runPendingRecoverPhase();
+} else if (phase === 'crash' || phase === 'pending-crash' || phase === 'accepted-crash' || phase === 'prepared-crash') {
   await runCrashPhase();
 } else {
   await runRecoverPhase();
-  // Resident TS Account workers are process-owned. This CLI exits only after
-  // exact-once proofs, both durable reopens and all DB/RPC closes complete.
-  await new Promise<void>(resolve => {
-    process.stdout.write('J_SUBMIT_REAL_RPC_RECOVERY_COMPLETE\n', () => resolve());
-  });
-  process.exit(0);
 }

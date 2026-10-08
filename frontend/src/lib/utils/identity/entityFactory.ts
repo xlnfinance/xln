@@ -4,7 +4,7 @@
 
 import type { RuntimeReplica, EntityReplica } from '@xln/core/api/public/runtime-module';
 import { unwrapLiveRuntimeEnv } from '../runtime/liveRuntimeEnv';
-import { dispatchRuntimeInputToRuntimeEnv, getXLN } from '$lib/stores/xlnStore';
+import { dispatchRuntimeInputToRuntimeEnv, getXLN } from '#lib/stores/xlnStore.ts';
 
 type JurisdictionConfig = {
   name: string;

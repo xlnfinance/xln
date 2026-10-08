@@ -315,8 +315,8 @@ describe('frontend time-machine current env contract', () => {
   test('remote TimeMachine deeplinks use RuntimeController identity instead of environment inference', () => {
     const source = read('frontend/src/lib/view/core/TimeMachine.svelte');
 
-    expect(source).toContain("import { runtimeControllerHandle } from '$lib/stores/runtimeControllerStore';");
-    expect(source).toContain("from '$lib/stores/runtimeHistoryStore';");
+    expect(source).toContain("import { runtimeControllerHandle } from '#lib/stores/runtimeControllerStore.ts';");
+    expect(source).toContain("from '#lib/stores/runtimeHistoryStore.ts';");
     expect(source).toContain('RuntimeAdapterViewFrame');
     expect(source).toContain('selectedRuntimeHistoryFrame = findRuntimeHistoryFrame($runtimeHistoryFrames');
     expect(source).toContain('remoteTargetOptions = buildRemoteTargetOptions($runtimeView.frame)');
@@ -359,7 +359,7 @@ describe('frontend time-machine current env contract', () => {
     const source = read('frontend/src/lib/view/View.svelte');
 
     expect(source).toContain('setLocalHistoryPreservingCursor');
-    expect(source).toContain("import { getEnv, getXLN, history as runtimeHistory, xlnEnvironment, xlnInstance } from '$lib/stores/xlnStore';");
+    expect(source).toContain("import { getEnv, getXLN, history as runtimeHistory, xlnEnvironment, xlnInstance } from '#lib/stores/xlnStore.ts';");
     expect(source).not.toContain("import { runtimeViewFrameToEnv } from '$lib/utils/runtimeViewEnv';");
     expect(source).toContain('unsubRuntimeEnv = xlnEnvironment.subscribe');
     expect(source).not.toContain('unsubActiveRuntimeView = runtimeView.subscribe');

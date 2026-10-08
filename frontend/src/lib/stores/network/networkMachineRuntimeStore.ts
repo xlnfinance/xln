@@ -1,21 +1,21 @@
 import { get, writable } from 'svelte/store';
 import type { RuntimeActivityEvent, RuntimeAdapterGraphFrame } from '@xln/core/api/public/runtime-module';
-import { compileNetworkMachine, type NetworkMachine, type NetworkMachineStep } from '$lib/network3d/networkMachine';
+import { compileNetworkMachine, type NetworkMachine, type NetworkMachineStep } from '#lib/network3d/networkMachine.ts';
 import {
   disconnectNetworkTimelineReaders,
   networkTimelineSourceFor,
-} from '$lib/network3d/timeline/networkTimelineLoader';
+} from '#lib/network3d/timeline/networkTimelineLoader.ts';
 import {
   recordNetworkTrail,
   scenarioNetworkTimelineSource,
   trailNetworkTimelineSource,
   type NetworkTimelineSource,
   type NetworkTrail,
-} from '$lib/network3d/timeline/networkTimelineSource';
+} from '#lib/network3d/timeline/networkTimelineSource.ts';
 import { getXLN } from '../bootstrap/xlnRuntimeLoader';
 import { networkMachineConfig, networkMachineOperations } from './networkMachineStore';
 import { runtimes } from '../runtimeStore';
-import type { RuntimeTimelineIndex } from '$lib/network3d/timeline/runtimeGraphTimeline';
+import type { RuntimeTimelineIndex } from '#lib/network3d/timeline/runtimeGraphTimeline.ts';
 
 export type NetworkMachineRuntimeState = {
   loading: boolean;

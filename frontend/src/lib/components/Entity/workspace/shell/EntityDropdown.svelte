@@ -1,5 +1,5 @@
 <script lang="ts">
-import type { EntityReadView } from '$lib/components/Entity/core/entity-panel-types';
+import type { EntityReadView } from '#lib/components/Entity/core/entity-panel-types.ts';
 
   /**
    * EntityDropdown - Unified entity/signer selector
@@ -7,11 +7,11 @@ import type { EntityReadView } from '$lib/components/Entity/core/entity-panel-ty
    */
   import { createEventDispatcher } from 'svelte';
   import { xlnFunctions, xlnInstance } from '../../../../stores/xlnStore';
-  import Dropdown from '$lib/components/UI/Dropdown.svelte';
-  import type { Tab } from '$lib/types/ui';
-  import type { FrontendXlnFunctions } from '$lib/stores/xlnStore';
-  import { entityAvatar, preferredAvatar } from '$lib/utils/identity/avatar';
-  import { getJurisdictionBadgeInfo, type JurisdictionBadgeInfo } from '$lib/utils/identity/jurisdictionBadge';
+  import Dropdown from '#lib/components/UI/Dropdown.svelte';
+  import type { Tab } from '#lib/types/ui.ts';
+  import type { FrontendXlnFunctions } from '#lib/stores/xlnStore.ts';
+  import { entityAvatar, preferredAvatar } from '#lib/utils/identity/avatar.ts';
+  import { getJurisdictionBadgeInfo, type JurisdictionBadgeInfo } from '#lib/utils/identity/jurisdictionBadge.ts';
 
   export let tab: Tab;
   export let jurisdictionFilter: string | null = null;

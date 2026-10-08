@@ -1,7 +1,7 @@
 import { writable, get } from 'svelte/store';
-import type { Tab } from '$lib/types/ui';
+import type { Tab } from '#lib/types/ui.ts';
 import { errorLog } from '../errorLogStore';
-import { parseJsonUnknown, rejectExtraKeys, requireUnknownRecord } from '$lib/utils/boundary';
+import { parseJsonUnknown, rejectExtraKeys, requireUnknownRecord } from '#lib/utils/boundary/index.ts';
 
 export const tabs = writable<Tab[]>([]);
 export const activeTabId = writable<string | null>(null);

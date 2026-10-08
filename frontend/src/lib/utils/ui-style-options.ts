@@ -1,4 +1,4 @@
-import type { UITabStyle } from '$lib/types/ui';
+import type { UITabStyle } from '#lib/types/ui.ts';
 
 export interface UITabStyleOption {
   value: UITabStyle;

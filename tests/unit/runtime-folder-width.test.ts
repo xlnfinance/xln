@@ -97,12 +97,16 @@ describe('repository source folder-width invariant', () => {
     addTypeScriptFiles(join(root, 'reports'), 11);
     addTypeScriptFiles(join(root, 'reports-live'), 11);
     addTypeScriptFiles(join(root, 'src', 'build-tools'), 11);
+    addTypeScriptFiles(join(root, 'rscore', 'target', 'debug'), 11);
+    addTypeScriptFiles(join(root, 'src', 'target'), 11);
 
     expect(collectFolderWidths(root)).toEqual([
       { path: '.', files: 0 },
       { path: 'reports-live', files: 11 },
+      { path: 'rscore', files: 0 },
       { path: 'src', files: 0 },
       { path: 'src/build-tools', files: 11 },
+      { path: 'src/target', files: 11 },
     ]);
   });
 

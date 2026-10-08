@@ -74,6 +74,24 @@ pub(crate) fn prepare_entity_checkpoint(
         .filter(|(tag, _)| !OWNED_FIELD_TAGS.contains(tag))
         .map(|(tag, descriptor)| (*tag, descriptor.clone()))
         .collect::<BTreeMap<_, _>>();
+    // Native genesis carries the same empty nonce section as TS. Imported
+    // graphs retain its exact payload; a fresh owner must materialize it once.
+    // A digest alone cannot reconstruct a nonempty map, so reject that case.
+    if !fields.contains_key(&4)
+        && let Some(section) = replica
+            .entity_consensus
+            .state
+            .sections
+            .iter()
+            .find(|section| section.field == "nonces")
+    {
+        let empty = CanonicalValue::Map(Vec::new());
+        if section.digest != xln_rscore_entity_kernel::compute_entity_section_digest(&empty)? {
+            return Err(EntityCheckpointProjectionError::NoncePayloadMissing);
+        }
+        let bytes = encode_canonical_storage(empty)?;
+        fields.insert(4, write_field(&mut mutations, owner, 4, bytes)?);
+    }
     let mut projected_fields = storage
         .scalar_fields()
         .map(|(tag, value)| (tag, value.clone()))
@@ -800,6 +818,8 @@ fn hex(bytes: &[u8]) -> String {
 
 #[derive(Debug, Error)]
 pub(crate) enum EntityCheckpointProjectionError {
+    #[error("RRS_CHECKPOINT_ENTITY_NONCE_PAYLOAD_MISSING")]
+    NoncePayloadMissing,
     #[error("RRS_CHECKPOINT_BASE_INCOMPLETE")]
     CheckpointBaseIncomplete,
     #[error("RRS_CHECKPOINT_PROTOCOL_FINGERPRINT")]
@@ -830,6 +850,8 @@ pub(crate) enum EntityCheckpointProjectionError {
     Radix(String),
     #[error(transparent)]
     Kernel(#[from] xln_rscore_entity_kernel::EntityStorageProjectionError),
+    #[error(transparent)]
+    EntityConsensus(#[from] xln_rscore_entity_kernel::EntityConsensusError),
     #[error(transparent)]
     EntityKernel(#[from] xln_rscore_entity_kernel::EntityKernelError),
     #[error(transparent)]

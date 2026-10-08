@@ -193,6 +193,7 @@ export type HubHealthPayload = {
       entityId: string;
       jurisdictionName?: string;
       primary?: boolean;
+    isHub?: boolean;
       ready: boolean;
       targetMet: boolean;
       tokens: Array<{
@@ -241,6 +242,7 @@ export type HubInfoPayload = {
     depositoryAddress?: string;
     entityProviderAddress?: string;
     primary?: boolean;
+    isHub?: boolean;
   }>;
   runtimeId?: string;
   apiUrl?: string;

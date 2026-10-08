@@ -1,11 +1,11 @@
 <script lang="ts">
   import { onMount, tick } from 'svelte';
-  import { browser } from '$app/environment';
-  import { page } from '$app/stores';
-  import RuntimeStateCard from '$lib/components/shared/RuntimeStateCard.svelte';
-  import { hasPasswordVault } from '$lib/security/passwordVault';
-  import WalletUnlock from '$lib/components/Views/WalletUnlock.svelte';
-  import { appState } from '$lib/stores/appStateStore';
+  import { browser } from '$app/env';
+  import { page } from '$app/state';
+  import RuntimeStateCard from '#lib/components/shared/RuntimeStateCard.svelte';
+  import { hasPasswordVault } from '#lib/security/passwordVault.ts';
+  import WalletUnlock from '#lib/components/Views/WalletUnlock.svelte';
+  import { appState } from '#lib/stores/appStateStore.ts';
   import {
     initializeXLN,
     refreshCurrentRuntimeProjection,
@@ -13,45 +13,45 @@
     error,
     suspendClientActivity,
     xlnFunctions
-  } from '$lib/stores/xlnStore';
-  import { runtimeControllerHandle } from '$lib/stores/runtimeControllerStore';
+  } from '#lib/stores/xlnStore.ts';
+  import { runtimeControllerHandle } from '#lib/stores/runtimeControllerStore.ts';
   import {
     runtimeViewPageInfo,
     runtimeViewPageNeedsNavigation,
     setRuntimeViewActiveEntityId,
     setRuntimeViewPage,
-  } from '$lib/stores/runtimeViewStore';
-  import { setLocalLauncherOnboarding } from '$lib/stores/localLauncherStore';
-  import { errorLog } from '$lib/stores/errorLogStore';
-  import { settingsOperations } from '$lib/stores/settingsStore';
-  import { tabOperations } from '$lib/stores/ui/tabStore';
-  import { timeOperations } from '$lib/stores/timeStore';
-  import { activeRuntime, vaultOperations } from '$lib/stores/vault/vaultStore';
-  import { resolveDeployVersionAction } from '$lib/utils/deployVersionPolicy';
-  import { resetEverything } from '$lib/utils/control/resetEverything';
-  import { parseStorageSchemaMismatch } from '$lib/utils/recovery/storageSchemaRecovery';
+  } from '#lib/stores/runtimeViewStore.ts';
+  import { setLocalLauncherOnboarding } from '#lib/stores/localLauncherStore.ts';
+  import { errorLog } from '#lib/stores/errorLogStore.ts';
+  import { settingsOperations } from '#lib/stores/settingsStore.ts';
+  import { tabOperations } from '#lib/stores/ui/tabStore.ts';
+  import { timeOperations } from '#lib/stores/timeStore.ts';
+  import { activeRuntime, vaultOperations } from '#lib/stores/vault/vaultStore.ts';
+  import { resolveDeployVersionAction } from '#lib/utils/deployVersionPolicy.ts';
+  import { resetEverything } from '#lib/utils/control/resetEverything.ts';
+  import { parseStorageSchemaMismatch } from '#lib/utils/recovery/storageSchemaRecovery.ts';
   import {
     adoptActiveTabLock,
     clearInactiveTabStandby,
     initializeActiveTabLock,
     isInactiveTabStandby,
     waitForActiveTabLockLoss
-  } from '$lib/utils/control/activeTabLock';
+  } from '#lib/utils/control/activeTabLock.ts';
   import {
     describeRemoteRuntimeImportError,
     parseRemoteRuntimeImportPayload,
-  } from '$lib/utils/onboarding/remoteRuntimeImport';
+  } from '#lib/utils/onboarding/remoteRuntimeImport.ts';
   import {
     fetchRemoteRuntimeImportSource,
     importRemoteRuntimeEntries,
     persistActiveRemoteRuntimeImport,
-  } from '$lib/utils/onboarding/remoteRuntimeImportFlow';
+  } from '#lib/utils/onboarding/remoteRuntimeImportFlow.ts';
   import {
     consumeLocalRuntimePairing,
     readLocalRuntimeLaunchRequest,
     readLocalRuntimePairingToken,
     stripLocalRuntimeLaunchParams,
-  } from '$lib/utils/runtime/localRuntimePairing';
+  } from '#lib/utils/runtime/localRuntimePairing.ts';
   import {
     persistRemoteRuntimeRequest,
     readRemoteRuntimeImportPayloadFromHash,
@@ -61,7 +61,7 @@
     remoteRuntimeRequiresConsent,
     stripRemoteRuntimeParamsFromHistory,
     type RemoteRuntimeRequest,
-  } from '$lib/utils/runtime/runtimeConnection';
+  } from '#lib/utils/runtime/runtimeConnection.ts';
 
   let { children } = $props();
 
@@ -87,7 +87,7 @@
   let claimingActiveTabLock = $state(false);
   let runtimeImportLocationInFlight = false;
   let releaseActiveTabLock: (() => void) | null = null;
-  const pageSearch = $derived(browser ? $page.url.search : '');
+  const pageSearch = $derived(browser ? page.url.search : '');
   const storageSchemaMismatch = $derived(parseStorageSchemaMismatch($error));
   const DEPLOY_VERSION_KEY = 'xln-deploy-version';
   type DeployVersionPayload = {

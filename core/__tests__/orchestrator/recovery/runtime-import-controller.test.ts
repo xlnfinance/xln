@@ -1,4 +1,5 @@
 import { expect, test } from 'bun:test';
+import { verifyRuntimeAdapterAuthCredential } from '../../../api/runtime-adapter/security/auth';
 import { createRuntimeImportController } from '../../../orchestrator/replica-import/runtime-import-controller';
 import type { AggregatedHealth, HubChild, MarketMakerChild } from '../../../orchestrator/orchestrator-types';
 
@@ -12,7 +13,7 @@ const hub = (name: string, engine: HubChild['engine'], runtimeId: string): HubCh
   lastHealth: null,
 } as unknown as HubChild);
 
-test('runtime import advertises only children that implement the admin adapter', () => {
+test('runtime import preserves native engine and binds each admin capability to its actual runtime', () => {
   const controller = createRuntimeImportController({
     publicWsBaseUrl: 'ws://127.0.0.1:20011',
     walletUrl: 'http://127.0.0.1:20004',
@@ -36,6 +37,18 @@ test('runtime import advertises only children that implement the admin adapter',
   const manifest = controller.buildRuntimeImportManifest();
 
   expect(manifest?.entries.map(({ label, engine, wsUrl }) => ({ label, engine, wsUrl }))).toEqual([
+    { label: 'H1', engine: 'rust', wsUrl: 'ws://127.0.0.1:20012/rpc' },
     { label: 'H2', engine: 'ts', wsUrl: 'ws://127.0.0.1:20013/rpc' },
   ]);
+  const native = manifest?.entries.find(entry => entry.label === 'H1');
+  expect(native).toBeDefined();
+  expect(verifyRuntimeAdapterAuthCredential('H1-auth', native?.token, {
+    audience: `0x${'11'.repeat(20)}`,
+  })).toMatchObject({ level: 'admin', keyId: 'h1', audience: `0x${'11'.repeat(20)}` });
+  expect(verifyRuntimeAdapterAuthCredential('H1-auth', native?.token, {
+    audience: `0x${'22'.repeat(20)}`,
+  })).toBeNull();
+  expect(verifyRuntimeAdapterAuthCredential('H2-auth', native?.token, {
+    audience: `0x${'11'.repeat(20)}`,
+  })).toBeNull();
 });

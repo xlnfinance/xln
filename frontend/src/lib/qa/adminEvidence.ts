@@ -1,4 +1,4 @@
-import { isUnknownRecord as isRecord } from '$lib/utils/boundary';
+import { isUnknownRecord as isRecord } from '#lib/utils/boundary/index.ts';
 import type { QaArtifact, QaRun, QaShard, QaStoryScreenshot } from './types';
 
 export type QaAdminStoryKey = 'payment' | 'swap' | 'cross-chain-swap' | 'dispute';

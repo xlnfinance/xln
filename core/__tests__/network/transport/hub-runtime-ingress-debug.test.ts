@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 
-import { createEmptyEnv } from '../../../runtime';
+import { createEmptyEnv, startP2P } from '../../../runtime';
 import { deriveSignerAddressSync } from '../../../account/crypto';
 import { deriveEncryptionKeyPair } from '../../../protocol/crypto/p2p-crypto';
 import { decodeRuntimeEntityInputsEnvelope } from '../../../network/p2p/auth/entity-input-envelope';
@@ -20,11 +20,12 @@ const HUB_ID = deriveSignerAddressSync(HUB_SEED, '1').toLowerCase();
 const PEER_ID = deriveSignerAddressSync(PEER_SEED, '1').toLowerCase();
 const UNKNOWN_ENTITY = `0x${'41'.repeat(32)}`;
 const clients: RuntimeWsClient[] = [];
+const transports: NonNullable<ReturnType<typeof startP2P>>[] = [];
 const stopServers: Array<() => void> = [];
 
 afterEach(async () => {
   try {
-    await Promise.all(clients.splice(0).map(client => client.closeAndWait()));
+    await Promise.all([...clients.splice(0), ...transports.splice(0)].map(client => client.closeAndWait()));
   } finally {
     for (const stop of stopServers.splice(0)) stop();
   }
@@ -45,6 +46,9 @@ const envelopeWith = (entityTxs: EntityTx[]) => decodeRuntimeEntityInputsEnvelop
 const connectHub = async () => {
   const env = createEmptyEnv(HUB_SEED, 1);
   transitionRuntimeLifecycle(ensureRuntimeInfrastructure(env), 'running');
+  const p2p = startP2P(env, { relayUrls: [] });
+  if (!p2p) throw new Error('TEST_REAL_P2P_NOT_STARTED');
+  transports.push(p2p);
   const debug: DirectInputDebugState = { lastSeen: null, lastError: null };
   const route = createHubDirectRuntimeRoute(env, HUB_SEED, () => getRuntimeCommandReadiness(env).ready, debug);
   const server = Bun.serve<{ type: 'direct-runtime' }>({

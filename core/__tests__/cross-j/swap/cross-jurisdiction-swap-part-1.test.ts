@@ -575,6 +575,8 @@ describe('cross-jurisdiction hashledger swap', () => {
         fillDenominator: 2n,
         filledSourceAmount: 50n,
         filledTargetAmount: 45n,
+        executionSourceAmount: 50n,
+        executionTargetAmount: 45n,
       };
       next.crossJurisdictionSwaps?.set(baseRoute.orderId, clearingRoute);
       const account = getEntityAccountForWrite(next.accounts, sourceUser);

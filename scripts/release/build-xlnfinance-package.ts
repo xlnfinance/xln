@@ -57,6 +57,12 @@ const assertPortableServerBundle = (): void => {
   const server = readFileSync(join(DIST_DIR, 'server.js'), 'utf8');
   const worker = join(DIST_DIR, 'brainvault-worker-native.js');
   const launcherClient = join(DIST_DIR, 'launcher-client.js');
+  const custodyWorker = join(DIST_DIR, 'brainvault-custody-native.js');
+  const stackWorker = join(DIST_DIR, 'stack-manager-native.js');
+  if (!statSync(stackWorker).isFile()) throw new Error('XLNFINANCE_STACK_MANAGER_WORKER_MISSING');
+  if (readFileSync(stackWorker, 'utf8').includes(ROOT)) throw new Error('XLNFINANCE_STACK_MANAGER_WORKER_BUILD_PATH');
+  if (!statSync(custodyWorker).isFile()) throw new Error('XLNFINANCE_CUSTODY_WORKER_MISSING');
+  if (readFileSync(custodyWorker, 'utf8').includes(ROOT)) throw new Error('XLNFINANCE_CUSTODY_WORKER_BUILD_PATH');
   if (server.includes(ROOT)) throw new Error(`XLNFINANCE_SERVER_BUNDLE_CONTAINS_BUILD_PATH:${ROOT}`);
   if (!server.includes('classic-level')) throw new Error('XLNFINANCE_SERVER_BUNDLE_MISSING_LEVEL_IMPORT');
   if (!server.includes('@node-rs/argon2')) throw new Error('XLNFINANCE_SERVER_BUNDLE_MISSING_ARGON2_IMPORT');
@@ -97,6 +103,26 @@ const buildPackage = (): void => {
     '--external=msgpackr-extract',
     '--external=secp256k1',
     `--outfile=${join(DIST_DIR, 'server.js')}`,
+  ]);
+  run('bun', [
+    'build',
+    'core/api/server/control/stack-manager/native-worker.ts',
+    '--target=bun',
+    '--external=classic-level',
+    '--external=@node-rs/argon2',
+    '--external=msgpackr-extract',
+    '--external=secp256k1',
+    `--outfile=${join(DIST_DIR, 'stack-manager-native.js')}`,
+  ]);
+  run('bun', [
+    'build',
+    'core/api/server/ownership/brainvault-native-worker.ts',
+    '--target=bun',
+    '--external=classic-level',
+    '--external=@node-rs/argon2',
+    '--external=msgpackr-extract',
+    '--external=secp256k1',
+    `--outfile=${join(DIST_DIR, 'brainvault-custody-native.js')}`,
   ]);
   run('bun', [
     'build',

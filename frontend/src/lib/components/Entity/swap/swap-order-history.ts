@@ -1,8 +1,8 @@
-import { amountToUsd } from '$lib/utils/assetPricing';
+import { amountToUsd } from '#lib/utils/assetPricing.ts';
 import { requireTokenDecimals } from './../token-metadata';
 import type { AccountFrame, SwapBookEntry } from '@xln/core/api/public/runtime-module';
 import { toBigIntSafe } from './../swap-formatting';
-import { requireExactKeys as requireExactKeysWithOptional, requireUnknownRecord as requireRecord } from '$lib/utils/boundary';
+import { requireExactKeys as requireExactKeysWithOptional, requireUnknownRecord as requireRecord } from '#lib/utils/boundary/index.ts';
 
 export type ClosedOrderStatus = 'filled' | 'partial' | 'canceled' | 'closed';
 

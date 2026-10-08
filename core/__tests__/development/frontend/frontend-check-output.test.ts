@@ -13,7 +13,7 @@ describe('frontend check output', () => {
     };
     const checkScript = packageJson.scripts['check'];
     const buildCheckScript = packageJson.scripts['check:build'];
-    const svelteConfig = readFileSync(join(repoRoot, 'frontend/svelte.config.js'), 'utf8');
+    const svelteConfig = readFileSync(join(repoRoot, 'frontend/kit-options.ts'), 'utf8');
     const rootPageConfig = readFileSync(join(repoRoot, 'frontend/src/routes/+page.ts'), 'utf8');
     const copyStatic = readFileSync(join(repoRoot, 'frontend/copy-static-files.js'), 'utf8');
 
@@ -33,7 +33,8 @@ describe('frontend check output', () => {
     const copyStatic = readFileSync(join(repoRoot, 'frontend/copy-static-files.js'), 'utf8');
     const workflow = readFileSync(join(repoRoot, '.github/workflows/build-and-test.yml'), 'utf8');
     expect(copyStatic).not.toContain('LLMS_CONTEXT_STATIC_MISSING');
-    expect(copyStatic).toContain('if (!rebuildRequested && llmsContextPresent)');
+    expect(copyStatic).toContain('execFileSync(process.execPath, [generatorPath]');
+    expect(copyStatic).toContain('LLMS_CONTEXT_GENERATION_FAILED');
     expect(copyStatic).toContain('CONTRACT_STATIC_MISSING');
     expect(copyStatic).toContain('CONTRACT_SOURCE_REQUIRED');
     expect(copyStatic).toContain("process.argv.includes('--contracts-only')");

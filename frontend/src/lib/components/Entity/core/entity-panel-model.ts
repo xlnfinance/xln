@@ -7,7 +7,7 @@ import type {
   EntityReplica,
 } from '@xln/core/api/public/runtime-module';
 import type { AccountReadView, EntityReadState, EntityReadView } from './entity-panel-types';
-import { unwrapLiveRuntimeEnv } from '$lib/utils/runtime/liveRuntimeEnv';
+import { unwrapLiveRuntimeEnv } from '#lib/utils/runtime/liveRuntimeEnv.ts';
 
 export function materializeReplicaView<T extends EntityReadView>(candidate: T | null | undefined): T | null {
   if (!candidate) return null;

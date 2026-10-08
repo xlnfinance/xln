@@ -1,8 +1,8 @@
 <script lang="ts">
   import type { ComponentType } from 'svelte';
   import { Check, Copy } from 'lucide-svelte';
-  import type { FrontendXlnFunctions } from '$lib/stores/xlnStore';
-  import type { Tab } from '$lib/types/ui';
+  import type { FrontendXlnFunctions } from '#lib/stores/xlnStore.ts';
+  import type { Tab } from '#lib/types/ui.ts';
   import ContextSwitcher from './shell/ContextSwitcher.svelte';
   import type { ViewTab } from './entity-panel-routing';
 

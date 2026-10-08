@@ -29,6 +29,7 @@ describe('playwright global setup cleanup', () => {
         cwd: join(repoRoot, 'frontend'),
         env: {
           ...process.env,
+          XLN_KEEP_TEST_ARTIFACTS: undefined,
           XLN_TEST_ARTIFACT_CLEANUP_DONE: undefined,
           XLN_TEST_ARTIFACT_RUN_TOKEN: undefined,
           XLN_MIN_DISK_FREE_BYTES: '1',
@@ -60,6 +61,7 @@ describe('playwright global setup cleanup', () => {
         cwd: repoRoot,
         env: {
           ...process.env,
+          XLN_KEEP_TEST_ARTIFACTS: undefined,
           XLN_TEST_ARTIFACT_CLEANUP_DONE: '1',
           XLN_TEST_ARTIFACT_RUN_TOKEN: undefined,
           XLN_FOUNDRY_HOME: join(root, '.foundry'),

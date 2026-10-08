@@ -1,3 +1,4 @@
+import { sendRuntimeInput } from '../commands';
 import { isAddress } from 'ethers';
 import { isTronChainId } from '@xln/core/api/public/runtime-module';
 import { getEmbeddedEnv, requireAdapter } from '../adapter';
@@ -49,6 +50,6 @@ export async function formEntity(draft: FormationDraft): Promise<{ entityId: str
   if ([...env.state.eReplicas.values()].some(replica => replica.entityId.toLowerCase() === entityId.toLowerCase())) throw new Error('This board already exists in your wallet.');
   if (!localSignerId) throw new Error('Include your signing address to create a self-issued entity in this wallet.');
   const { config } = xln.createLazyEntity(draft.name.trim(), members, BigInt(draft.threshold), jurisdiction);
-  await adapter.send({ runtimeTxs: [xln.importEntity({ entityId, signerId: localSignerId, entitySeed: seed, data: { config, isProposer: config.validators[0]?.toLowerCase() === localSignerId, profileName: draft.name.trim() } })], entityInputs: [] });
+  await sendRuntimeInput({ runtimeTxs: [xln.importEntity({ entityId, signerId: localSignerId, entitySeed: seed, data: { config, isProposer: config.validators[0]?.toLowerCase() === localSignerId, profileName: draft.name.trim() } })], entityInputs: [] });
   return { entityId, imported: true };
 }

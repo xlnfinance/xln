@@ -59,10 +59,11 @@ export const selectChildFailureReason = (
     !isNoise(line) && (hasStableCode(line) || hasCriticalMessage(line));
   const lastNonNoise = (lines: readonly string[]): string | undefined =>
     [...lines].reverse().find(line => line.trim().length > 0 && !isNoise(line));
+  // Ordinary stdout describes progress, not why a process exited. Keep its
+  // explicit failure evidence above, but otherwise report the actual exit.
   return [...recentStderr].reverse().find(isMeaningful)
     ?? [...recentStdout].reverse().find(isMeaningful)
     ?? lastNonNoise(recentStderr)
-    ?? lastNonNoise(recentStdout)
     ?? defaultValue;
 };
 

@@ -1,11 +1,9 @@
 import { writable, derived, get } from 'svelte/store';
 import type { RuntimeReplica, RuntimeAdapterConfig } from '@xln/core/api/public/runtime-module';
-import { createRuntimeViewEnv, unwrapLiveRuntimeEnv } from '$lib/utils/runtime/liveRuntimeEnv';
-import { registerDebugSurface } from '$lib/utils/runtime/debugSurface';
+import { createRuntimeViewEnv, unwrapLiveRuntimeEnv } from '#lib/utils/runtime/liveRuntimeEnv.ts';
+import { registerDebugSurface } from '#lib/utils/runtime/debugSurface.ts';
 import {
   normalizeRemoteRuntimeWsUrl,
-  describeRemoteRuntimeImportError,
-  parseRemoteRuntimeImportSourcePayload,
   persistRemoteRuntimeImports,
   readStoredRemoteRuntimeImports,
   removeStoredRemoteRuntimeImport,
@@ -15,8 +13,8 @@ import {
   type RemoteRuntimeImportAccess,
   type RemoteRuntimeImportEntry,
   type StoredRemoteRuntimeImportEntry,
-} from '$lib/utils/onboarding/remoteRuntimeImport';
-import { validateRemoteRuntimeEntry } from '$lib/utils/onboarding/remoteRuntimeValidation';
+} from '#lib/utils/onboarding/remoteRuntimeImport.ts';
+import { validateRemoteRuntimeEntry } from '#lib/utils/onboarding/remoteRuntimeValidation.ts';
 import { getXLN } from './bootstrap/xlnRuntimeLoader';
 import {
   getRuntimeControllerConfig,
@@ -51,12 +49,7 @@ export const runtimes = writable<Map<string, Runtime>>(new Map());
 const normalizeRuntimeId = (id: string | null | undefined): string =>
   String(id || '').trim().toLowerCase();
 
-let remoteImportSourceHydration: Promise<StoredRemoteRuntimeImportEntry[]> | null = null;
 let runtimeAdapterSwitcher: ((config: RuntimeAdapterConfig) => Promise<void>) | null = null;
-
-type RemoteRuntimeImportSourceHydrationOptions = {
-  optional?: boolean;
-};
 
 export const registerRuntimeAdapterSwitcher = (
   switcher: (config: RuntimeAdapterConfig) => Promise<void>,
@@ -237,20 +230,6 @@ const upsertRemoteImportEntry = (
   });
 };
 
-const fetchRemoteRuntimeImportSource = async (
-  source = '/api/runtime-import',
-): Promise<RemoteRuntimeImportEntry[]> => {
-  if (typeof window === 'undefined') return [];
-  const url = new URL(source, window.location.href);
-  if (url.origin !== window.location.origin) {
-    throw new Error(`REMOTE_RUNTIME_IMPORT_SOURCE_ORIGIN_INVALID:${url.origin}`);
-  }
-  const response = await fetch(url, { cache: 'no-store' });
-  if (response.status === 404) return [];
-  if (!response.ok) throw new Error(`REMOTE_RUNTIME_IMPORT_SOURCE_FAILED:${response.status}`);
-  return parseRemoteRuntimeImportSourcePayload(await response.json());
-};
-
 export type RuntimeSelectionLease = Readonly<{
   revision: number;
   token: symbol;
@@ -415,45 +394,6 @@ export const runtimeOperations = {
     const entries = readStoredRemoteRuntimeImports({ dropExpired: true, dropInvalid: true });
     if (entries.length === 0) return;
     runtimes.update((current) => entries.reduce(upsertRemoteImportEntry, current));
-  },
-
-  async hydrateRemoteRuntimeImportSource(
-    source = '/api/runtime-import',
-    options: RemoteRuntimeImportSourceHydrationOptions = {},
-  ): Promise<StoredRemoteRuntimeImportEntry[]> {
-    if (typeof window === 'undefined') return [];
-    const strict = options.optional !== true;
-    if (!remoteImportSourceHydration) {
-      remoteImportSourceHydration = (async () => {
-        const importedAt = Date.now();
-        const entries = await fetchRemoteRuntimeImportSource(source);
-        if (entries.length === 0) return [];
-        const results = await Promise.allSettled(entries.map((entry, index) =>
-          validateRemoteRuntimeEntry(entry, { index, importedAt })
-        ));
-        const validated = results.flatMap((result) => result.status === 'fulfilled' ? [result.value] : []);
-        const failed = results.flatMap((result, index) => {
-          if (result.status === 'fulfilled') return [];
-          const entry = entries[index]!;
-          return [{
-            entry,
-            reason: describeRemoteRuntimeImportError(result.reason, entry),
-          }];
-        });
-        if (failed.length > 0) {
-          const first = failed[0]!;
-          const message = `REMOTE_RUNTIME_IMPORT_SOURCE_VALIDATION_FAILED:${validated.length}/${entries.length}:${first.reason}`;
-          if (strict || validated.length === 0) throw new Error(message);
-        }
-        return runtimeOperations.upsertRemoteRuntimeImports(validated);
-      })().finally(() => {
-        remoteImportSourceHydration = null;
-      });
-    }
-    const hydration = remoteImportSourceHydration;
-    if (!hydration) return [];
-    if (strict) return hydration;
-    return hydration.catch(() => []);
   },
 
   // Disconnect runtime

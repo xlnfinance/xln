@@ -192,6 +192,13 @@ const readAdminControlProbe = async (
         ...(ok ? {} : { reason: 'not-ready' }),
       };
     } catch (error) {
+      // Committed-state contention is explicitly retryable; corrupt history is not.
+      // Keep polling absent history and a pending height/name, but expose hard failures now.
+      if (typeof error === 'object' && error !== null && 'code' in error &&
+          (!('retryable' in error) || error.retryable !== true) &&
+          ['E_INTERNAL', 'E_BAD_PATH', 'E_BAD_QUERY', 'E_UNAUTHORIZED'].includes(String(error.code))) {
+        throw error;
+      }
       return {
         ok: false,
         latestHeight: 0,
@@ -559,6 +566,7 @@ test(
       };
       return {
         authLevel: String((view as any).__xln?.adapter?.status().authLevel || ''),
+        atHeight: (view as any).__xln?.view?.atHeight,
         storedAccess: localStorage.getItem('xln-runtime-adapter-access'),
         registryStoredLocally: Boolean(localStorage.getItem('xln-remote-runtime-imports')),
         registryStoredInSession: Boolean(sessionStorage.getItem('xln-remote-runtime-imports')),
@@ -569,6 +577,7 @@ test(
       };
     });
     expect(accessAfterReload.authLevel).toBe('admin');
+    expect(accessAfterReload.atHeight).toBeNull();
     expect(accessAfterReload.storedAccess).toBe('admin');
     expect(accessAfterReload.registryStoredLocally).toBe(false);
     expect(accessAfterReload.registryStoredInSession).toBe(true);

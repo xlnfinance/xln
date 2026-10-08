@@ -36,6 +36,7 @@ import {
 import type { EntityTxReducerResult } from '../../apply';
 import { createStructuredLogger, shortHash, shortId } from '../../../../support/logger';
 import { getEntityLeaderState } from '../../../consensus/leader';
+import { rejectFailure } from '../../../../protocol/errors/failure-taxonomy';
 import { requireBoundaryUint } from '../../../../protocol/boundary-validation';
 
 const jBatchActionLog = createStructuredLogger('entity.jbatch');
@@ -218,17 +219,18 @@ export async function handleJBroadcast(
     throw new Error(msg);
   }
 
+  // A user retry may race a real receipt. Reject before mutating the draft;
+  // the immutable sent batch and the remaining user queue must survive.
+  if (newState.jBatchState.sentBatch) {
+    const sent = newState.jBatchState.sentBatch;
+    throw rejectFailure('SENT_BATCH_PENDING',
+      `SENT_BATCH_PENDING:nonce=${sent.entityNonce}:attempts=${sent.submitAttempts}`);
+  }
+
   // Porter reveals deferred while finalize occupied the entity batch.
   const flushed = flushDeferredHashLadderReveals(newState);
   if (flushed > 0) {
     addMessage(newState, `🌉 Flushed ${flushed} deferred hash-ladder reveal(s) into jBatch`);
-  }
-
-  if (newState.jBatchState.sentBatch) {
-    const sent = newState.jBatchState.sentBatch;
-    const msg = `❌ Cannot broadcast: sentBatch pending nonce=${sent.entityNonce} attempts=${sent.submitAttempts}`;
-    addMessage(newState, msg);
-    throw new Error(msg);
   }
 
   // ── Validate: jBatch exists and is non-empty ──

@@ -25,7 +25,7 @@ import { withRuntimeCommittedRead } from '../../runtime/frame/lifecycle/writer-l
 import {
   ensurePendingNumberedRegistrationsResumed,
   registerNumberedEntities,
-} from '../../runtime/registration/numbered-registration-driver';
+} from '../../runtime/registration/numbered/numbered-registration-driver';
 
 export type EmbeddedRuntimeAdapterDeps = {
   getEnv: () => RuntimeReplica | null;

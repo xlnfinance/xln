@@ -140,8 +140,18 @@ export const readExternalWalletSnapshotSource = async (
   if (sourceHeight < 0) {
     throw new Error(`EXTERNAL_WALLET_SNAPSHOT_FINALITY_UNAVAILABLE:head=${headBlockNumber}:depth=${finalityDepth}`);
   }
-  const block = await adapter.provider.getBlock(sourceHeight);
-  if (!block?.hash) throw new Error(`EXTERNAL_WALLET_SNAPSHOT_BLOCK_HASH_MISSING:${sourceHeight}`);
+  const block = adapter.mode === 'tron'
+    ? await (() => {
+      if (!(adapter.provider instanceof ethers.JsonRpcProvider)) throw new Error('TRON_SNAPSHOT_JSON_RPC_PROVIDER_REQUIRED');
+      return adapter.provider.send('eth_getBlockByNumber', [ethers.toQuantity(sourceHeight), false]);
+    })()
+    : await adapter.provider.getBlock(sourceHeight);
+  if (typeof block?.hash !== 'string' || !/^0x[0-9a-f]{64}$/i.test(block.hash)) {
+    throw new Error(`EXTERNAL_WALLET_SNAPSHOT_BLOCK_HASH_MISSING:${sourceHeight}`);
+  }
+  if (adapter.mode === 'tron' && BigInt(String(block.number)) !== BigInt(sourceHeight)) {
+    throw new Error('TRON_SNAPSHOT_SOURCE_HEIGHT_MISMATCH');
+  }
   return { headBlockNumber, sourceHeight, sourceHash: block.hash, finalityDepth };
 };
 

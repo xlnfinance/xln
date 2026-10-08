@@ -1,13 +1,13 @@
-import type { AccountReadView } from '$lib/components/Entity/core/entity-panel-types';
+import type { AccountReadView } from '#lib/components/Entity/core/entity-panel-types.ts';
 
 import { ZeroAddress } from 'ethers';
-import type { FrontendXlnFunctions } from '$lib/stores/xlnStore';
-import { amountToUsd, getAssetUsdPrice } from '$lib/utils/assetPricing';
+import type { FrontendXlnFunctions } from '#lib/stores/xlnStore.ts';
+import { amountToUsd, getAssetUsdPrice } from '#lib/utils/assetPricing.ts';
 import type { AssetLedgerRow, AssetLedgerTotals } from './../asset-ledger';
 import { getExternalTokenIdentityKey, type ExternalToken } from './entity-asset-catalog';
 import { requireTokenDecimals } from './../token-metadata';
 import { parseTokenAmountInput as parseStrictTokenAmountInput } from './token-amount-input';
-import { isMapLike } from '$lib/utils/runtime/liveRuntimeEnv';
+import { isMapLike } from '#lib/utils/runtime/liveRuntimeEnv.ts';
 
 export type AssetTokenInfo = {
   symbol?: string;

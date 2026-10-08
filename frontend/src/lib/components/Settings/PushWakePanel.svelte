@@ -1,10 +1,10 @@
 <script lang="ts">
-  import { requestPushWakeDeviceToken } from '$lib/utils/recovery/pushWakeDevice';
-  import { readPushWakeRegistrationRecords, removePushWakeRegistrationRecord, upsertPushWakeRegistrationRecord } from '$lib/utils/recovery/pushWakeRecords';
-  import type { PushWakeRegistrationRecord } from '$lib/utils/recovery/pushWakeTypes';
+  import { requestPushWakeDeviceToken } from '#lib/utils/recovery/pushWakeDevice.ts';
+  import { readPushWakeRegistrationRecords, removePushWakeRegistrationRecord, upsertPushWakeRegistrationRecord } from '#lib/utils/recovery/pushWakeRecords.ts';
+  import type { PushWakeRegistrationRecord } from '#lib/utils/recovery/pushWakeTypes.ts';
   import type { RuntimeReplica } from '@xln/core/api/public/runtime-module';
-  import type { RecoveryTowerConfig, Runtime } from '$lib/stores/vault/vaultStore';
-  import { vaultOperations } from '$lib/stores/vault/vaultStore';
+  import type { RecoveryTowerConfig, Runtime } from '#lib/stores/vault/vaultStore.ts';
+  import { vaultOperations } from '#lib/stores/vault/vaultStore.ts';
   import {
     buildPushWakeRegistrationPayload,
     buildPushWakeRegistrationRequest,
@@ -12,11 +12,11 @@
     buildPushWakeUnregisterRequest,
     buildWatchtowerPushRequestUrl,
     resolvePushWakeTarget,
-  } from '$lib/utils/recovery/pushWakeRegistration';
-  import { normalizeTowerMode } from '$lib/utils/recovery/recoverySettings';
+  } from '#lib/utils/recovery/pushWakeRegistration.ts';
+  import { normalizeTowerMode } from '#lib/utils/recovery/recoverySettings.ts';
   import { Bell, BellOff, Check, LoaderCircle } from 'lucide-svelte';
   import { onMount } from 'svelte';
-  import { parseJsonUnknown, requireUnknownRecord } from '$lib/utils/boundary';
+  import { parseJsonUnknown, requireUnknownRecord } from '#lib/utils/boundary/index.ts';
 
   export let runtime: Runtime | null = null;
   export let env: RuntimeReplica | null = null;

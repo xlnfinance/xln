@@ -69,7 +69,7 @@ export const createTokenCatalogController = (input: {
   const ensureTokenCatalog = async (): Promise<JTokenInfo[]> => {
     const adapter = input.getAdapter();
     if (!adapter) throw new Error('TOKEN_CATALOG_ADAPTER_UNAVAILABLE');
-    const desiredSymbols = desiredTokenSymbols(adapter);
+    const desiredSymbols = DEV_CHAIN_IDS.has(adapter.chainId) ? desiredTokenSymbols(adapter) : [];
     if (tokenCatalogCache && tokenCatalogCache.length > 0) {
       if (adapter.mode !== 'browservm') {
         const firstToken = tokenCatalogCache[0];
@@ -91,7 +91,7 @@ export const createTokenCatalogController = (input: {
       const current = await readTokenRegistry(adapter);
       const canDeployDefaults = adapter.mode !== 'browservm' && DEV_CHAIN_IDS.has(adapter.chainId);
       const needsMoreDefaultTokens =
-        adapter.mode !== 'browservm' &&
+        canDeployDefaults &&
         (current.length < HUB_REQUIRED_TOKEN_COUNT || !hasDesiredTokens(current, desiredSymbols));
 
       if (current.length > 0 && adapter.mode !== 'browservm') {
@@ -103,9 +103,6 @@ export const createTokenCatalogController = (input: {
           }
         }
         if (needsMoreDefaultTokens) {
-          if (!canDeployDefaults) {
-            throw new Error(`TOKEN_CATALOG_INCOMPLETE:chainId=${adapter.chainId}:count=${current.length}`);
-          }
           await withTimeout(
             deployMissingDefaultTokens(adapter),
             TOKEN_CATALOG_TIMEOUT_MS * 2,

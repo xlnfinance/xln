@@ -22,8 +22,8 @@ import {
   buildNumberedRegistrationRequest,
   prepareNumberedRegistrationIntent,
   getNumberedRegistrationRecord,
-} from '../../../runtime/registration/numbered-registration-intent';
-import { markLocalNumberedRegistrationTx } from '../../../runtime/registration/numbered-registration-auth';
+} from '../../../runtime/registration/numbered/numbered-registration-intent';
+import { markLocalNumberedRegistrationTx } from '../../../runtime/registration/numbered/numbered-registration-auth';
 import {
   closeInfraDb,
   closeRuntimeDb,
@@ -185,7 +185,7 @@ test('production RPC registration resumes exact WAL bytes after restart and impo
     let rejectedNonce = -1;
     await expect(adapter.prepareDurableTransaction(
       getSignerPrivateKey(env, env.runtimeId),
-      { to: request.entityProviderAddress, data: registrationData },
+      { to: request.entityProviderAddress, data: registrationData, value: 0n },
       async prepared => {
         rejectedNonce = prepared.transactionNonce;
         return 'rejected';
@@ -353,12 +353,12 @@ test('production RPC registration resumes exact WAL bytes after restart and impo
 
     await expect(adapter.prepareDurableTransaction(
       getSignerPrivateKey(restored, restored.runtimeId!),
-      { to: request.entityProviderAddress, data: registrationData },
+      { to: request.entityProviderAddress, data: registrationData, value: 0n },
       async () => { throw new Error('WAL_ACCEPTANCE_OUTCOME_UNKNOWN'); },
     )).rejects.toThrow('WAL_ACCEPTANCE_OUTCOME_UNKNOWN');
     await expect(adapter.prepareDurableTransaction(
       getSignerPrivateKey(restored, restored.runtimeId!),
-      { to: request.entityProviderAddress, data: registrationData },
+      { to: request.entityProviderAddress, data: registrationData, value: 0n },
       async () => 'accepted',
     )).rejects.toThrow('SIGNER_NONCE_SEQUENCER_POISONED');
     expect(await adapter.provider.getTransactionCount(restored.runtimeId!, 'latest')).toBe(1);

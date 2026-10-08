@@ -104,6 +104,9 @@ const createRuntimeDbCloser = (
       routing.stopP2PAndWait(env, 10_000),
     ]);
     throwSettledErrors(shutdown, 'RUNTIME_DB_CLOSE_QUIESCE_FAILED');
+    await env.accountAuthorityEntityStageProvider?.close?.();
+    delete env.accountAuthorityEntityStageProvider;
+    delete env.accountAuthorityExecutionMode;
     lifecycle.detachRuntimeEnv(env);
   }
   const closed = await Promise.allSettled([

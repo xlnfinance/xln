@@ -18,6 +18,7 @@ pub(super) struct VerifiedProfileRoute {
     pub runtime_id: String,
     pub signer_id: String,
     pub last_updated: u64,
+    pub profile: Value,
 }
 
 #[derive(Debug, Error, PartialEq, Eq)]
@@ -169,6 +170,7 @@ pub(super) fn verify_profile_route(
         runtime_id: authenticated_runtime_id,
         signer_id: render_hex(signer),
         last_updated,
+        profile: Value::Object(profile.clone()),
     })
 }
 
@@ -399,6 +401,15 @@ mod tests {
         let routes = empty_routes
             .with_verified_profile(verified)
             .expect("authenticated profile route");
+        assert_eq!(routes.authenticated_profiles(), vec![profile.clone()]);
+        let duplicate = routes
+            .with_verified_profile(verify_profile_route(&profile, &runtime_id, None).unwrap())
+            .unwrap();
+        assert_eq!(duplicate.authenticated_profiles(), vec![profile.clone()]);
+        let mut forged = profile.clone();
+        forged["name"] = Value::String("forged".into());
+        assert!(verify_profile_route(&forged, &runtime_id, None).is_err());
+        assert_eq!(routes.authenticated_profiles(), vec![profile.clone()]);
         let inbound_output = |source_signer: &str, peer: &str| {
             let target_entity = format!("0x{}", "55".repeat(32));
             crate::RuntimeEntityInput::decode(serde_json::json!({

@@ -1,0 +1,169 @@
+{
+  "provenance": {
+    "sourceSha": "1f2ac885521a49f32ff094b96b8e1e1c1fccdcb8",
+    "recordingRun": "20261008-042116-188",
+    "sourceDatabase": "shard-0/rdb/mesh/h1/rscore-native",
+    "sourceWorkingTree": "dirty; source SHA identifies base commit, not complete run source",
+    "selection": "Exact decoded public Runtime WAL frames 10 and 13; no changed fields",
+    "originalFrameHashes": [
+      "0x132bcd7c85c7439120e204c8246f1b91b661fde03814e810aa842e49d2dcf7f8",
+      "0xa0ef93fcd1facad7a1f5642825bd8e2574124e85696004837a35e4970a7bcf57"
+    ],
+    "candidate": {
+      "candidateId": "4b194c027f250c863963437b7220c5120a50510fc0e05daa7a7568e8b969a2ab",
+      "gitHead": "1f2ac885521a49f32ff094b96b8e1e1c1fccdcb8",
+      "codeHash": "fb0ea7d0afddca096b8731943e30fff37575ca72bb14ef1d4ebd77a65aa03427",
+      "gateConfigHash": "fa92a1f605a98abc56b8ad49735825c3b019b759a3424d5c523134e03a21ec5a"
+    }
+  },
+  "frames": [
+    {
+      "entityContextRefs": {
+        "__xlnType": "Map",
+        "value": [
+          [
+            "0xbf2891acf55a366fb4f28727dfc301b1f5cd70eb0f3b8a029a31b2ac4478e1da:0xa38e9aca7f60f1768ec3d7020879f97408fc6427:6",
+            "0x9d8eafbd7fb9104f6882edaff89b5b8fd82e0fcdf934d685f7262bcbaaf78c9f"
+          ]
+        ]
+      },
+      "frameHash": "0x132bcd7c85c7439120e204c8246f1b91b661fde03814e810aa842e49d2dcf7f8",
+      "height": 10,
+      "materializedState": false,
+      "postStateHash": "0x97c925e6c58924dbfafa962c4dc17418a2c29ab5bf09841b7f6f2b1a2a64ed7f",
+      "prevFrameHash": "0x60307eb1a7113c49b8962035c482d4430c5f8456435a2d9432350aa12af93c5d",
+      "replicaMetaDigest": "0xb0093f32a11d6baaf0dfd14671656aff7bb2eb9c68e00faa2b3fe2e12e239933",
+      "runtimeInput": {
+        "entityInputs": [
+          {
+            "entityId": "0xbf2891acf55a366fb4f28727dfc301b1f5cd70eb0f3b8a029a31b2ac4478e1da",
+            "entityTxs": [
+              {
+                "data": {
+                  "amount": {
+                    "__xlnType": "BigInt",
+                    "value": "2000000000000"
+                  },
+                  "counterpartyEntityId": "0xd17a4b8415a7e91e805da270fcd0a85e03a093845d8661b80656eb9d00f6a3e5",
+                  "tokenId": 1
+                },
+                "type": "extendCredit"
+              },
+              {
+                "data": {
+                  "amount": {
+                    "__xlnType": "BigInt",
+                    "value": "2000000000000"
+                  },
+                  "counterpartyEntityId": "0xd17a4b8415a7e91e805da270fcd0a85e03a093845d8661b80656eb9d00f6a3e5",
+                  "tokenId": 3
+                },
+                "type": "extendCredit"
+              },
+              {
+                "data": {
+                  "amount": {
+                    "__xlnType": "BigInt",
+                    "value": "2000000000000000000000"
+                  },
+                  "counterpartyEntityId": "0xd17a4b8415a7e91e805da270fcd0a85e03a093845d8661b80656eb9d00f6a3e5",
+                  "tokenId": 2
+                },
+                "type": "extendCredit"
+              }
+            ],
+            "signerId": "0xa38e9aca7f60f1768ec3d7020879f97408fc6427"
+          }
+        ],
+        "runtimeTxs": []
+      },
+      "runtimeOutputCount": 1,
+      "runtimeOutputsDigest": "0xfd1740f7e3459ebc98cc19cbd052b9d05cfe908a79a0aab4d0b2ead5794c9b26",
+      "timestamp": 1791433283988,
+      "touchedAccounts": [
+        {
+          "counterpartyId": "0xd17a4b8415a7e91e805da270fcd0a85e03a093845d8661b80656eb9d00f6a3e5",
+          "entityId": "0xbf2891acf55a366fb4f28727dfc301b1f5cd70eb0f3b8a029a31b2ac4478e1da"
+        }
+      ],
+      "touchedBookEntities": [],
+      "touchedEntities": [
+        "0xbf2891acf55a366fb4f28727dfc301b1f5cd70eb0f3b8a029a31b2ac4478e1da"
+      ]
+    },
+    {
+      "entityContextRefs": {
+        "__xlnType": "Map",
+        "value": [
+          [
+            "0xbf2891acf55a366fb4f28727dfc301b1f5cd70eb0f3b8a029a31b2ac4478e1da:0xa38e9aca7f60f1768ec3d7020879f97408fc6427:7",
+            "0x73153f98b16f6719a2cb845f8ebb8fe5edfa4ac7fef91bf9a133c14b0fa9e694"
+          ]
+        ]
+      },
+      "frameHash": "0xa0ef93fcd1facad7a1f5642825bd8e2574124e85696004837a35e4970a7bcf57",
+      "height": 13,
+      "materializedState": false,
+      "postStateHash": "0x7dda97909de036b814f51237eba0efc6a742f224a39b95c6be69563ebca53457",
+      "prevFrameHash": "0x394813bb40efb8baa355d80bcec0cea1926de8b0f20eb22c5b7da2b78685c692",
+      "replicaMetaDigest": "0xaa3f75b1e8216785e3be2256ce3d97c82304f181284f37aa919cb17d7d15c6d6",
+      "runtimeInput": {
+        "entityInputs": [
+          {
+            "entityId": "0xbf2891acf55a366fb4f28727dfc301b1f5cd70eb0f3b8a029a31b2ac4478e1da",
+            "entityTxs": [
+              {
+                "data": {
+                  "amount": {
+                    "__xlnType": "BigInt",
+                    "value": "2000000000000"
+                  },
+                  "counterpartyEntityId": "0x9a2dedea7e937e9e0099c6a7d09cea53d254058278c9a5dc3a2bdbc9221bb667",
+                  "tokenId": 1
+                },
+                "type": "extendCredit"
+              },
+              {
+                "data": {
+                  "amount": {
+                    "__xlnType": "BigInt",
+                    "value": "2000000000000"
+                  },
+                  "counterpartyEntityId": "0x9a2dedea7e937e9e0099c6a7d09cea53d254058278c9a5dc3a2bdbc9221bb667",
+                  "tokenId": 3
+                },
+                "type": "extendCredit"
+              },
+              {
+                "data": {
+                  "amount": {
+                    "__xlnType": "BigInt",
+                    "value": "2000000000000000000000"
+                  },
+                  "counterpartyEntityId": "0x9a2dedea7e937e9e0099c6a7d09cea53d254058278c9a5dc3a2bdbc9221bb667",
+                  "tokenId": 2
+                },
+                "type": "extendCredit"
+              }
+            ],
+            "signerId": "0xa38e9aca7f60f1768ec3d7020879f97408fc6427"
+          }
+        ],
+        "runtimeTxs": []
+      },
+      "runtimeOutputCount": 1,
+      "runtimeOutputsDigest": "0x34f638a9cde4625becb9fe89721a04d10cf90ec87dda0a5843e8614be8995bd4",
+      "timestamp": 1791433284314,
+      "touchedAccounts": [
+        {
+          "counterpartyId": "0x9a2dedea7e937e9e0099c6a7d09cea53d254058278c9a5dc3a2bdbc9221bb667",
+          "entityId": "0xbf2891acf55a366fb4f28727dfc301b1f5cd70eb0f3b8a029a31b2ac4478e1da"
+        }
+      ],
+      "touchedBookEntities": [],
+      "touchedEntities": [
+        "0xbf2891acf55a366fb4f28727dfc301b1f5cd70eb0f3b8a029a31b2ac4478e1da"
+      ]
+    }
+  ]
+}

@@ -11,6 +11,141 @@ const SOURCE: &str = "0x2222222222222222222222222222222222222222";
 const TARGET: &str = "0x1111111111111111111111111111111111111111";
 
 #[test]
+fn adjacent_frame_close_legs_match_ts_atomic_group() {
+    use base64::Engine as _;
+    let capsule: Value = serde_json::from_str(include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../fixtures/native-cross-cancel-ack-v1.json"
+    )))
+    .unwrap();
+    let mut values = capsule["rowsBase64"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|row| {
+            let bytes = base64::engine::general_purpose::STANDARD
+                .decode(row.as_str().unwrap())
+                .unwrap();
+            crate::decode_storage_payload(&bytes).unwrap()
+        })
+        .collect::<Vec<_>>();
+    values[2]["sourceRuntimeFrame"]["height"] = json!(97);
+    let rows = encode_rows(&values);
+    let mut prepared = prepare_envelopes(
+        capsule["sourceRuntimeId"].as_str().unwrap(),
+        &rows,
+        &BTreeMap::new(),
+        10,
+        1_024 * 1_024,
+    )
+    .expect("TS groups adjacent-frame sibling closes as one exact atomic pair");
+    // Publishing frame differs from both leg frames: never infer max(height).
+    prepared.bind_publication_frame(99, 1791403934999);
+    assert_eq!(prepared.envelopes[0].source_height, 96);
+    assert_eq!(prepared.envelopes[1].source_height, 99);
+    assert_eq!(prepared.envelopes[1].source_timestamp, 1791403934999);
+    assert_eq!(prepared.envelopes.len(), 2);
+    let expected = [2_usize, 1].map(|index| {
+        let mut value = values[index].clone();
+        value.as_object_mut().unwrap().remove("sourceRuntimeFrame");
+        value
+    });
+    assert_eq!(prepared.envelopes[1].value["entityInputs"], json!(expected));
+    assert_eq!(rows, encode_rows(&values), "WAL evidence stays byte-exact");
+    for order in [[0, 2, 1], [1, 0, 2], [2, 0, 1], [1, 2, 0], [2, 1, 0]] {
+        let permuted = order.map(|index| values[index].clone());
+        let prepared = prepare_envelopes(
+            capsule["sourceRuntimeId"].as_str().unwrap(),
+            &encode_rows(&permuted),
+            &BTreeMap::new(),
+            10,
+            1_024 * 1_024,
+        )
+        .unwrap();
+        let pair = prepared
+            .envelopes
+            .iter()
+            .find(|envelope| envelope.value.get("atomicCrossJurisdictionPair").is_some())
+            .unwrap();
+        let expected = order
+            .iter()
+            .rev()
+            .filter(|index| **index != 0)
+            .map(|index| {
+                let mut value = values[*index].clone();
+                value.as_object_mut().unwrap().remove("sourceRuntimeFrame");
+                value
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            pair.value["entityInputs"],
+            json!(expected),
+            "row order {order:?}"
+        );
+    }
+    for bad in [values[..2].to_vec(), {
+        let mut ambiguous = values.clone();
+        let mut duplicate = values[2].clone();
+        duplicate["sourceRuntimeFrame"]["height"] = json!(98);
+        ambiguous.push(duplicate);
+        ambiguous
+    }] {
+        assert!(matches!(prepare_envelopes(
+            capsule["sourceRuntimeId"].as_str().unwrap(), &encode_rows(&bad),
+            &BTreeMap::new(), 10, 1_024 * 1_024,
+        ), Err(RuntimeTransportError::Outbox(reason)) if reason.contains("cross-j-incomplete-cohort")));
+    }
+}
+
+#[test]
+fn native_partial_cancel_ack_and_close_pair_match_ts_groups() {
+    use base64::Engine as _;
+    let capsule: Value = serde_json::from_str(include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../fixtures/native-cross-cancel-ack-v1.json"
+    )))
+    .unwrap();
+    let rows = capsule["rowsBase64"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|row| {
+            base64::engine::general_purpose::STANDARD
+                .decode(row.as_str().unwrap())
+                .unwrap()
+        })
+        .collect::<Vec<_>>();
+    let prepared = prepare_envelopes(
+        capsule["sourceRuntimeId"].as_str().unwrap(),
+        &rows,
+        &BTreeMap::new(),
+        10,
+        1_024 * 1_024,
+    )
+    .expect("ACK must not hide the complete close pair");
+    assert_eq!(prepared.row_count, 3);
+    assert_eq!(prepared.envelopes.len(), 2);
+    for (envelope, group) in prepared
+        .envelopes
+        .iter()
+        .zip(capsule["groups"].as_array().unwrap())
+    {
+        let expected = group["indices"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|index| {
+                let mut value =
+                    crate::decode_storage_payload(&rows[index.as_u64().unwrap() as usize]).unwrap();
+                value.as_object_mut().unwrap().remove("sourceRuntimeFrame");
+                value
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(envelope.value["entityInputs"], json!(expected));
+    }
+}
+
+#[test]
 fn native_cross_h85_interleaved_close_wal_matches_ts_atomic_groups() {
     use base64::Engine as _;
     let capsule: Value = serde_json::from_str(include_str!(concat!(
@@ -122,33 +257,75 @@ fn outbound_pair_stays_in_one_envelope() {
 
 #[test]
 fn route_bound_atomic_wal_rows_roundtrip_into_positional_runtime_inputs() {
-    let marker = atomic_pair("ack", "route-7:fill-9");
-    let entity_bytes = [0x33, 0x44];
-    let values = entity_bytes
-        .map(|entity_byte| routed_output(TARGET, entity_byte, 17, 91, Some(marker.clone())));
-    let rows = encode_rows(&values);
-    let prepared = prepare_envelopes(SOURCE, &rows, &BTreeMap::new(), 10, 1_024 * 1_024)
+    use base64::Engine as _;
+    // Use captured cross-J peer outputs. Local chat commands are not legal
+    // transport inputs and cannot stand in for a production atomic pair.
+    let capsule: Value = serde_json::from_str(include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../fixtures/native-cross-cancel-ack-v1.json"
+    )))
+    .unwrap();
+    let source = capsule["sourceRuntimeId"].as_str().unwrap();
+    let rows = capsule["rowsBase64"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|row| {
+            base64::engine::general_purpose::STANDARD
+                .decode(row.as_str().unwrap())
+                .unwrap()
+        })
+        .collect::<Vec<_>>();
+    let prepared = prepare_envelopes(source, &rows, &BTreeMap::new(), 10, 1_024 * 1_024)
         .expect("route-bound atomic WAL rows");
     let envelope = prepared
         .envelopes
-        .into_iter()
-        .next()
+        .iter()
+        .find(|envelope| envelope.value.get("atomicCrossJurisdictionPair").is_some())
         .expect("one atomic envelope");
-
-    let decoded = decode_inbound(envelope.value).expect("production inbound codec roundtrip");
+    let expected = [2, 1].map(|index| crate::decode_storage_payload(&rows[index]).unwrap());
+    let decoded = decode_envelope(
+        &encode_transport(&envelope.value).unwrap(),
+        source,
+        expected[0]["runtimeId"].as_str().unwrap(),
+        "atomic-test".into(),
+        Some(101),
+    )
+    .expect("production inbound codec roundtrip");
 
     assert_eq!(decoded.entity_inputs.len(), 2);
-    for (index, input) in decoded.entity_inputs.iter().enumerate() {
+    for (input, expected) in decoded.entity_inputs.iter().zip(expected) {
         let canonical = input.canonical();
+        assert_eq!(canonical["entityId"], expected["entityId"]);
+        assert_eq!(canonical["entityTxs"], expected["entityTxs"]);
         assert_eq!(
-            canonical["entityId"],
-            format!("0x{}", format!("{:02x}", entity_bytes[index]).repeat(32)),
+            canonical["atomicCrossJurisdictionPair"],
+            envelope.value["atomicCrossJurisdictionPair"]
         );
-        assert_eq!(canonical["atomicCrossJurisdictionPair"], marker);
-        assert_eq!(canonical["from"], SOURCE);
-        assert_eq!(canonical["sourceRuntimeFrame"]["height"], 17);
-        assert_eq!(canonical["sourceRuntimeFrame"]["timestamp"], 91);
+        assert_eq!(canonical["from"], source);
+        assert_eq!(
+            canonical["sourceRuntimeFrame"]["height"],
+            envelope.source_height
+        );
+        assert_eq!(
+            canonical["sourceRuntimeFrame"]["timestamp"],
+            envelope.source_timestamp
+        );
     }
+    assert_eq!(
+        rows,
+        capsule["rowsBase64"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|row| {
+                base64::engine::general_purpose::STANDARD
+                    .decode(row.as_str().unwrap())
+                    .unwrap()
+            })
+            .collect::<Vec<_>>(),
+        "captured WAL stays unchanged"
+    );
 }
 
 #[test]

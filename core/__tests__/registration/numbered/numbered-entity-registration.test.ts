@@ -4,7 +4,7 @@ import { join } from 'node:path';
 
 import { encodeSingleSignerBoard, hashBoard } from '../../../entity/factory';
 import { createJAdapter } from '../../../jurisdiction/adapter';
-import { parseNumberedEntityRegistrationReceipt } from '../../../runtime/registration/numbered-registration';
+import { parseNumberedEntityRegistrationReceipt } from '../../../runtime/registration/numbered/numbered-registration';
 
 describe('numbered Entity registration authority', () => {
   test('receipt parser rejects missing, extra, reordered, and mismatched registrations', async () => {
@@ -45,7 +45,7 @@ describe('numbered Entity registration authority', () => {
 
   test('production exports contain no direct numbered-registration writer', () => {
     const registration = readFileSync(
-      join(process.cwd(), 'core/runtime/registration/numbered-registration.ts'),
+      join(process.cwd(), 'core/runtime/registration/numbered/numbered-registration.ts'),
       'utf8',
     );
     const publicUtilities = readFileSync(

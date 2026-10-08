@@ -18,6 +18,11 @@ use xln_rscore_batch::AccountId;
 use xln_rscore_engine::TokenId;
 use xln_rscore_runtime::RuntimeEntityInput;
 
+#[path = "http/stack_manager.rs"]
+mod stack_manager;
+#[path = "http/wallet_snapshot.rs"]
+mod wallet_snapshot;
+
 const MAX_REQUEST_BYTES: usize = 16 * 1024 * 1024;
 const MAX_COMMAND_ENTITY_INPUTS: usize = 10_000;
 
@@ -27,7 +32,14 @@ pub enum CrossJurisdictionStateResponse {
     State(Value),
 }
 
+type OperatorSignerMaterial = (Vec<String>, Option<[u8; 32]>);
+
 pub enum RuntimeHttpCommand {
+    StackManagerSigner {
+        signer_id: Option<String>,
+        response: SyncSender<Result<OperatorSignerMaterial, String>>,
+    },
+    Adapter(crate::runtime_adapter::transport::socket::AdapterWork),
     LendingState {
         query: crate::lending_http::LendingStateQuery,
         response: SyncSender<Result<Option<Value>, String>>,
@@ -66,6 +78,10 @@ pub enum RuntimeHttpCommand {
         depth: usize,
         response: SyncSender<Result<Value, String>>,
     },
+    WalletSnapshotDomain {
+        entity_id: [u8; 32],
+        response: SyncSender<Result<Value, String>>,
+    },
     Tokens {
         response: SyncSender<Result<Value, String>>,
     },
@@ -95,6 +111,9 @@ pub struct RuntimeHttpState {
     snapshot: Arc<Mutex<Value>>,
     quiescing: Arc<AtomicBool>,
     commands: Option<SyncSender<RuntimeHttpCommand>>,
+    adapter: Option<Arc<crate::runtime_adapter::auth::AdapterAuthConfig>>,
+    custody: Option<Arc<crate::runtime_adapter::custody::custody_socket::CustodyConfig>>,
+    stack_manager: Arc<Mutex<Value>>,
 }
 
 impl RuntimeHttpState {
@@ -104,6 +123,11 @@ impl RuntimeHttpState {
             snapshot: Arc::new(Mutex::new(initial)),
             quiescing: Arc::new(AtomicBool::new(false)),
             commands: None,
+            adapter: None,
+            custody: None,
+            stack_manager: Arc::new(Mutex::new(
+                json!({"phase":"idle","active":false,"updatedAt":"1970-01-01T00:00:00.000Z"}),
+            )),
         })
     }
 
@@ -114,6 +138,19 @@ impl RuntimeHttpState {
         let mut state = Self::new(initial)?;
         state.commands = Some(commands);
         Ok(state)
+    }
+
+    pub fn with_adapter(mut self, config: crate::runtime_adapter::auth::AdapterAuthConfig) -> Self {
+        self.adapter = Some(Arc::new(config));
+        self
+    }
+
+    pub fn with_custody(
+        mut self,
+        config: Option<Arc<crate::runtime_adapter::custody::custody_socket::CustodyConfig>>,
+    ) -> Self {
+        self.custody = config;
+        self
     }
 
     pub fn publish(&self, snapshot: Value) -> Result<(), String> {
@@ -242,6 +279,27 @@ fn serve(stream: &mut TcpStream, state: &RuntimeHttpState) -> Result<(), String>
         return Err("RRS_RUNTIME_HTTP_VERSION".into());
     }
     let path = target.split('?').next().unwrap_or(target);
+    if *method == "GET" && path == "/rpc" {
+        let config = state.adapter.clone().ok_or("RADAPTER_NOT_CONFIGURED")?;
+        let sender = state.commands.clone().ok_or("RADAPTER_WRITER_MISSING")?;
+        let custody = state.custody.clone();
+        let owned = stream.try_clone().map_err(|e| e.to_string())?;
+        let socket = crate::runtime_adapter::transport::upgrade::accept(owned, &bytes)?;
+        thread::Builder::new()
+            .name("native-runtime-adapter".into())
+            .spawn(move || {
+                if let Err(error) = crate::runtime_adapter::transport::socket::serve(
+                    socket, config, sender, custody,
+                ) {
+                    eprintln!("[WARN][runtime.adapter] {error}");
+                }
+            })
+            .map_err(|error| error.to_string())?;
+        return Ok(());
+    }
+    if path == "/api/stack-manager/status" || path == "/api/control/stack-manager/deploy" {
+        return stack_manager::serve(stream, state, method, target, &bytes);
+    }
     match (*method, path) {
         ("GET", "/api/info") | ("GET", "/api/health") | ("GET", "/api/metrics") => {
             let snapshot = state
@@ -567,6 +625,9 @@ fn serve(stream: &mut TcpStream, state: &RuntimeHttpState) -> Result<(), String>
                 .map_err(|_| "RRS_RUNTIME_HTTP_COMMAND_SEND".to_string())?;
             command_response(stream, result)
         }
+        ("POST", "/api/external-wallet/snapshot") => {
+            wallet_snapshot::serve(stream, state, request_body(&bytes)?)
+        }
         ("POST", "/api/faucet/offchain") => {
             let body = request_body(&bytes)?;
             let value: Value = serde_json::from_slice(body)
@@ -837,6 +898,7 @@ fn response(stream: &mut TcpStream, status: u16, body: &Value) -> Result<(), Str
         200 => "OK",
         400 => "Bad Request",
         404 => "Not Found",
+        413 => "Payload Too Large",
         503 => "Service Unavailable",
         _ => "Internal Server Error",
     };

@@ -8,6 +8,8 @@ mod durable;
 mod entity_checkpoint_projection;
 mod envelope;
 mod live;
+#[path = "projection/local_profiles.rs"]
+mod local_profiles;
 mod machine_snapshot;
 mod output;
 mod profile_route;

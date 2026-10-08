@@ -7,8 +7,9 @@
  *
  * Then drives two CLI wallets: onboard → hubs → open → pay → status → daemon.
  */
+import { startNativeJSubmitCrashProof } from './native-j-submit-crash-proof';
 import { spawn, type ChildProcess } from 'node:child_process';
-import { closeSync, existsSync, mkdirSync, openSync, rmSync, writeFileSync } from 'node:fs';
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createConnection } from 'node:net';
@@ -17,6 +18,7 @@ import {
   buildInheritedLocalTestLeaseEnv,
   stripLocalTestLeaseEnv,
 } from '../../core/scripts/e2e/harness/local-test-port-lease.ts';
+import { collectHltRunProvenance } from '../../core/scripts/operations/hlt/boundary/environment-manifest';
 import { stopProcessGroup } from '../../core/scripts/e2e/runners/process-group.ts';
 
 const repoRoot = process.cwd();
@@ -24,7 +26,7 @@ const inheritedProcessEnv = stripLocalTestLeaseEnv(process.env);
 
 type ManagedProcess = { name: string; proc: ChildProcess };
 
-const assert = (condition: unknown, message: string): asserts condition => {
+const assert: (condition: unknown, message: string) => asserts condition = (condition, message) => {
   if (!condition) throw new Error(`CLI_ORCH_SMOKE: ${message}`);
 };
 
@@ -132,12 +134,14 @@ const runCli = async (
   home: string,
   args: string[],
   passphrase = 'smoke-pass',
+  entryPath = 'cli/xln.ts',
 ): Promise<RunResult> => {
-  const proc = spawn('bun', ['cli/xln.ts', ...args], {
+  const proc = spawn('bun', [entryPath, ...args], {
     cwd: repoRoot,
     env: {
       ...inheritedProcessEnv,
       XLN_HOME: home,
+      ...(entryPath !== 'cli/xln.ts' ? { XLN_DB_PATH: join(home, 'db') } : {}),
       XLN_API_BASE: apiBase,
       XLN_PASSPHRASE: passphrase,
     },
@@ -173,8 +177,10 @@ const extractEntityId = (text: string): string => {
 
 const main = async (): Promise<void> => {
   const startedAt = Date.now();
+  const crashProof = process.env['XLN_NATIVE_J_CRASH_PROOF'] === '1';
+  assert(!crashProof || process.env['XLN_HLT_ENGINE'] === 'rust', 'crash proof requires native H1');
   const localTestLease = await acquireLocalTestPortLease({
-    requiredOffsets: [0, 1, 4, 7, 8, 10, 11, 12, 13],
+    requiredOffsets: [0, 1, ...(crashProof ? [2] : []), 4, 7, 8, 10, 11, 12, 13],
   });
   const portBase = localTestLease.basePort;
   const rpcPort = portBase;
@@ -184,11 +190,13 @@ const main = async (): Promise<void> => {
   const custodyDaemonPort = portBase + 8;
   const nodePortBase = portBase + 10;
   const apiBase = `http://127.0.0.1:${apiPort}`;
-  const workDir = join(tmpdir(), `xln-cli-orch-${portBase}`);
+  const evidenceDirectory = process.env['XLN_CLI_SMOKE_DIR'];
+  const workDir = evidenceDirectory || join(tmpdir(), `xln-cli-orch-${portBase}`);
   const children: ManagedProcess[] = [];
+  let faultGate: ReturnType<typeof startNativeJSubmitCrashProof> | null = null;
   const logPath = (name: string): string => join(workDir, `${name}.log`);
 
-  const startManaged = (name: string, command: string, args: string[], env: Record<string, string>): void => {
+  const startManaged = (name: string, command: string, args: string[], env: Record<string, string>): ChildProcess => {
     mkdirSync(workDir, { recursive: true });
     const out = openSync(logPath(name), 'a');
     const proc = spawn(command, args, {
@@ -199,6 +207,7 @@ const main = async (): Promise<void> => {
     });
     closeSync(out);
     children.push({ name, proc });
+    return proc;
   };
 
   const stopManaged = async (): Promise<void> => {
@@ -233,6 +242,7 @@ const main = async (): Promise<void> => {
     await assertPortsFree([
       rpcPort,
       rpc2Port,
+      ...(crashProof ? [portBase + 2] : []),
       apiPort,
       custodyPort,
       custodyDaemonPort,
@@ -241,23 +251,29 @@ const main = async (): Promise<void> => {
       nodePortBase + 2,
       nodePortBase + 3,
     ]);
+    assert(!evidenceDirectory || !existsSync(workDir), `evidence directory already exists: ${workDir}`);
     if (existsSync(workDir)) rmSync(workDir, { recursive: true, force: true });
     mkdirSync(workDir, { recursive: true });
-    const resetMarker = join(workDir, 'runtime', '.mesh-reset-once');
-    mkdirSync(join(workDir, 'runtime'), { recursive: true });
+    const resetMarker = join(workDir, 'core', '.mesh-reset-once');
+    mkdirSync(join(workDir, 'core'), { recursive: true });
     writeFileSync(resetMarker, 'cli-orch-smoke fresh bootstrap\n');
 
     log(`boot portBase=${portBase} workDir=${workDir}`);
 
-    startManaged('anvil', 'scripts/start-anvil.sh', ['--reset'], {
+    if (crashProof) {
+      writeFileSync(join(workDir, 'native-j-crash-provenance.json'), JSON.stringify(collectHltRunProvenance('rust')));
+      faultGate = startNativeJSubmitCrashProof(rpcPort, portBase + 2, workDir);
+    }
+    startManaged('anvil', 'scripts/operations/start-anvil.sh', ['--reset'], {
       XLN_PORT_BASE: String(portBase),
+      ...(crashProof ? { ANVIL_PORT: String(portBase + 2) } : {}),
       ANVIL_STATE: join(workDir, 'anvil-state.json'),
       ANVIL_LOG: join(workDir, 'anvil.log'),
       ANVIL_TMPDIR: join(workDir, 'anvil-tmp'),
     });
     await waitForRpc(rpcPort, '0x7a69', 'Testnet');
 
-    startManaged('anvil2', 'scripts/start-anvil2.sh', ['--reset'], {
+    startManaged('anvil2', 'scripts/operations/start-anvil2.sh', ['--reset'], {
       XLN_PORT_BASE: String(portBase),
       ANVIL2_STATE: join(workDir, 'anvil2-state.json'),
       ANVIL2_LOG: join(workDir, 'anvil2.log'),
@@ -265,7 +281,7 @@ const main = async (): Promise<void> => {
     });
     await waitForRpc(rpc2Port, '0x7a6a', 'Tron');
 
-    startManaged('server', 'scripts/start-server.sh', [], {
+    startManaged('server', 'scripts/operations/start-server.sh', [], {
       ...buildInheritedLocalTestLeaseEnv(localTestLease, repoRoot),
       XLN_SERVER_PORT: String(apiPort),
       XLN_RDB_ROOT: workDir,
@@ -288,11 +304,13 @@ const main = async (): Promise<void> => {
     log(`mesh ready api=${apiBase}`);
 
     const hubsPayload = (await fetchJson(`${apiBase}/api/hubs`)) as {
-      hubs: Array<{ entityId: string; name?: string }>;
+      hubs: Array<{ entityId: string; runtimeId: string; name?: string }>;
     };
     assert(hubsPayload.hubs.length > 0, 'expected hubs from /api/hubs');
-    const hubEntityId = String(hubsPayload.hubs[0]!.entityId).toLowerCase();
-    log(`hub ${hubEntityId} (${hubsPayload.hubs[0]!.name || 'unnamed'})`);
+    const selectedHub = hubsPayload.hubs.find(hub => hub.name === 'H1');
+    assert(selectedHub, 'H1 required for wallet recovery');
+    const hubEntityId = selectedHub.entityId.toLowerCase();
+    log(`hub ${hubEntityId} (${selectedHub.name || 'unnamed'})`);
 
     const walletA = join(workDir, 'wallet-a');
     const walletB = join(workDir, 'wallet-b');
@@ -338,28 +356,55 @@ const main = async (): Promise<void> => {
     requireOk(receiveB, 'receive B');
     const entityB = extractEntityId(receiveB.stdout);
     assert(entityA !== entityB, 'distinct entities required');
+    if (faultGate) await faultGate.prove(nodePortBase, entityA, apiBase);
 
-    log('pay A→B via hub');
-    const pay = await runCli(apiBase, walletA, [
-      'pay',
-      entityB,
-      '1',
-      '--token',
-      '1',
-      '--mode',
-      'instant',
-      '--hub',
-      hubEntityId,
-      '--local',
-    ]);
-    requireOk(pay, 'pay');
+    assert(existsSync(join(walletA, 'db')) && existsSync(join(walletB, 'db')), 'CLI did not use each wallet home DB');
+
+    log('fresh-device wallet recovery with two settled payments');
+    const evidenceDir = join(workDir, 'wallet-recovery');
+    const restoredWallet = join(workDir, 'wallet-restored');
+    mkdirSync(evidenceDir, { recursive: true, mode: 0o700 });
+    const engine = process.env['XLN_HLT_ENGINE'];
+    assert(engine === 'ts' || engine === 'rust', 'explicit engine required');
+    const provenance = collectHltRunProvenance(engine);
+    const hubInfo = await fetchJson(`http://127.0.0.1:${nodePortBase}/api/info`) as {
+      runtimeId: string; entityId: string; workers?: number;
+    };
+    assert(hubInfo.runtimeId === selectedHub.runtimeId && hubInfo.entityId === hubEntityId,
+      'selected H1 differs from direct runtime identity');
+    if (process.env['XLN_HLT_ENGINE'] === 'rust') {
+      assert(provenance.rustBinarySha256, 'native binary digest missing');
+      const ready = readFileSync(logPath('server'), 'utf8').split('\n')
+        .filter(line => line.startsWith('[H1] {'))
+        .map(line => JSON.parse(line.slice(5)) as { status: string; runtimeId: string; workers: number })
+        .find(row => row.status === 'ready');
+      assert(ready?.runtimeId === hubInfo.runtimeId && ready.workers === hubInfo.workers,
+        'native ready identity differs from selected H1');
+    }
+    writeFileSync(join(evidenceDir, 'native-identity.json'), JSON.stringify({ engine, provenance, hubInfo }));
+    const helper = 'cli/scripts/wallet-recovery-proof.ts';
+    const proofArgs = [hubEntityId, entityB, evidenceDir, restoredWallet];
+    const recipientProcess = startManaged('wallet-recipient', 'bun', [helper, 'recipient', ...proofArgs], {
+      XLN_HOME: walletB, XLN_DB_PATH: join(walletB, 'db'), XLN_API_BASE: apiBase, XLN_PASSPHRASE: 'smoke-pass',
+    });
+    const recipientExit = new Promise<number>((resolve, reject) => {
+      recipientProcess.once('error', reject);
+      recipientProcess.once('exit', code => resolve(code ?? 1));
+    });
+    requireOk(await runCli(apiBase, walletA, ['export', ...proofArgs], 'smoke-pass', helper), 'wallet export');
+    const beforeImport = await runCli(apiBase, restoredWallet, ['status', '--local']);
+    assert(beforeImport.code !== 0 && beforeImport.stderr.includes('CLI_WALLET_RECOVERY_REQUIRED'),
+      'copied wallet must reject missing local history before import');
+    requireOk(await runCli(apiBase, restoredWallet, ['restore', ...proofArgs], 'smoke-pass', helper), 'wallet restore/payment');
+    assert(await recipientExit === 0, 'recipient proof process failed');
+    assert(existsSync(join(evidenceDir, 'complete.json')), 'wallet recovery proof missing');
 
     log('daemon status');
     const daemon = spawn('bun', ['cli/xln.ts', 'daemon'], {
       cwd: repoRoot,
       env: {
         ...inheritedProcessEnv,
-        XLN_HOME: walletA,
+        XLN_HOME: restoredWallet,
         XLN_API_BASE: apiBase,
         XLN_PASSPHRASE: 'smoke-pass',
       },
@@ -369,7 +414,7 @@ const main = async (): Promise<void> => {
     const daemonDeadline = Date.now() + 60_000;
     while (Date.now() < daemonDeadline) {
       await sleep(500);
-      const probe = await runCli(apiBase, walletA, ['status']);
+      const probe = await runCli(apiBase, restoredWallet, ['status']);
       if (probe.code === 0 && probe.stdout.includes('Accounts')) {
         daemonOk = true;
         break;
@@ -378,8 +423,8 @@ const main = async (): Promise<void> => {
     daemon.kill('SIGTERM');
     assert(daemonOk, 'daemon status failed');
 
-    requireOk(await runCli(apiBase, walletA, ['settings', '--bars', 'twin']), 'settings');
-    const twin = await runCli(apiBase, walletA, ['status', '--local']);
+    requireOk(await runCli(apiBase, restoredWallet, ['settings', '--bars', 'twin']), 'settings');
+    const twin = await runCli(apiBase, restoredWallet, ['status', '--local']);
     requireOk(twin, 'twin status');
     assert(twin.stdout.includes('out[') && twin.stdout.includes('in['), twin.stdout);
 
@@ -390,8 +435,9 @@ const main = async (): Promise<void> => {
     await stopManaged().catch(error => {
       console.error('[cli-orch] stop failed', error);
     });
+    faultGate?.stop();
     localTestLease.release();
-    if (process.env['XLN_CLI_SMOKE_KEEP'] !== '1' && existsSync(workDir)) {
+    if (!evidenceDirectory && process.env['XLN_CLI_SMOKE_KEEP'] !== '1' && existsSync(workDir)) {
       rmSync(workDir, { recursive: true, force: true });
     }
   }

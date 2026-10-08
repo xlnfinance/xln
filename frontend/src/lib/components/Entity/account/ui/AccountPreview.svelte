@@ -1,20 +1,20 @@
 <script lang="ts">
-import type { AccountReadView } from '$lib/components/Entity/core/entity-panel-types';
+import type { AccountReadView } from '#lib/components/Entity/core/entity-panel-types.ts';
 
   import type { Profile as GossipProfile } from '@xln/core/api/public/runtime-module';
-  import type { DerivedDelta } from '$lib/types/ui';
+  import type { DerivedDelta } from '#lib/types/ui.ts';
   import { createEventDispatcher, onDestroy, onMount } from 'svelte';
   import { xlnFunctions } from '../../../../stores/xlnStore';
-  import { settings } from '$lib/stores/settingsStore';
+  import { settings } from '#lib/stores/settingsStore.ts';
   import { p2pState } from '../../../../stores/xlnStore';
   import EntityIdentity from '../../../shared/EntityIdentity.svelte';
   import DeltaTokenSummary from '../../shared/DeltaTokenSummary.svelte';
   import AccountTokenDetails from '../../shared/AccountTokenDetails.svelte';
   import { buildTokenVisualScale, sumVisualScales } from '../../shared/delta-visual';
   import { buildAccountTokenDetails, isAccountLeftPerspective } from '../../shared/account-token-details';
-  import { amountToUsdMicros } from '$lib/utils/assetPricing';
-  import { formatEntityId } from '$lib/utils/format';
-  import { getAccountUiStatus, getAccountUiStatusDescription } from '$lib/utils/accountStatus';
+  import { amountToUsdMicros } from '#lib/utils/assetPricing.ts';
+  import { formatEntityId } from '#lib/utils/format.ts';
+  import { getAccountUiStatus, getAccountUiStatusDescription } from '#lib/utils/accountStatus.ts';
   import { faucetPendingKey } from '../account-faucet';
   import { formatEntityNetworkLabel, normalizeJurisdictionDisplayName } from '../../swap/swap-panel-helpers';
 

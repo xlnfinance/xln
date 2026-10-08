@@ -5,7 +5,7 @@
 //! acknowledgement is added: every decoded envelope still enters the single
 //! Runtime writer queue and every reply completes only after the socket write.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, VecDeque};
 use std::os::fd::AsRawFd;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -20,7 +20,7 @@ use super::super::RuntimeTransportError;
 use super::super::crypto::static_public_hex;
 use super::super::entity_inputs_frame::{
     ReadinessFrameContext, SessionCounters, SessionFrameContext, decode_delivery_ready,
-    send_delivery_ready, send_entity_inputs,
+    send_delivery_ready, send_entity_inputs, send_profiles, take_profile_batch,
 };
 use super::super::wire::{Socket, tcp_stream, try_read_value};
 use super::frame::FrameState;
@@ -143,6 +143,8 @@ struct LiveSession {
     pending_write: Option<OutboundWork>,
     pending_control: bool,
     announced_ready: Option<bool>,
+    announced_profiles: u64,
+    pending_profiles: VecDeque<serde_json::Value>,
     peer_ready: Arc<AtomicBool>,
     encryption_public_hex: String,
     _peer: PeerGuard,
@@ -250,6 +252,54 @@ impl LiveSession {
                 self.pending_control = true;
                 return Ok(true);
             }
+        }
+        // Hold across dequeue/send: post-fsync publication takes this same lock
+        // before enqueueing financial work, preventing old-profile/new-data races.
+        let cache = shared
+            .profiles
+            .lock()
+            .map_err(|_| RuntimeTransportError::Config("profile-cache-poisoned"))?;
+        if self.pending_profiles.is_empty() && cache.revision != self.announced_profiles {
+            self.pending_profiles.extend(
+                cache
+                    .rows
+                    .values()
+                    .filter(|(revision, _)| *revision > self.announced_profiles)
+                    .map(|(_, value)| value.clone()),
+            );
+            self.announced_profiles = cache.revision;
+        }
+        if !self.pending_profiles.is_empty() {
+            let mut frame = SessionFrameContext {
+                key: self.side.outgoing_key(&self.keys),
+                from: &shared.config.runtime_id,
+                to: &self.accepted.peer_runtime_id,
+                encryption_public_hex: &self.encryption_public_hex,
+                audience: &self.audience,
+                challenge: &self.challenge,
+                counters: &mut self.outbound,
+            };
+            let profiles = take_profile_batch(
+                &mut self.pending_profiles,
+                &frame,
+                shared.config.max_message_bytes,
+            )?;
+            let result = send_profiles(
+                &mut self.socket,
+                profiles,
+                &mut frame,
+                shared.config.max_message_bytes,
+            );
+            if let Err(error) = result {
+                if !is_would_block(&error) {
+                    return Err(error);
+                }
+                self.pending_control = true;
+                return Ok(true);
+            }
+            // Recheck the latest committed revision on the next writer turn,
+            // including updates that arrived while older chunks were pending.
+            return Ok(true);
         }
         // Read controls before taking the existing one-slot work queue. False
         // retains unsent work; an already buffered frame finishes exactly once.
@@ -443,6 +493,8 @@ fn install_session(
             pending_write: None,
             pending_control: false,
             announced_ready: session.announced_ready,
+            announced_profiles: 0,
+            pending_profiles: VecDeque::new(),
             peer_ready,
             encryption_public_hex: static_public_hex(&shared.config.encryption_identity),
             _peer: session.peer_guard,

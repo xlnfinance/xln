@@ -1,5 +1,5 @@
 <script lang="ts">
-import type { EntityReadView } from '$lib/components/Entity/core/entity-panel-types';
+import type { EntityReadView } from '#lib/components/Entity/core/entity-panel-types.ts';
 
   /**
    * AccountDropdown - Account selector for bilateral relationships
@@ -8,9 +8,9 @@ import type { EntityReadView } from '$lib/components/Entity/core/entity-panel-ty
   import { createEventDispatcher } from 'svelte';
   import { xlnFunctions, xlnInstance } from '../../../../stores/xlnStore';
 
-  import Dropdown from '$lib/components/UI/Dropdown.svelte';
-  import { entityAvatar } from '$lib/utils/identity/avatar';
-  import { getAccountUiStatus, getAccountUiStatusLabel, type AccountUiStatus } from '$lib/utils/accountStatus';
+  import Dropdown from '#lib/components/UI/Dropdown.svelte';
+  import { entityAvatar } from '#lib/utils/identity/avatar.ts';
+  import { getAccountUiStatus, getAccountUiStatusLabel, type AccountUiStatus } from '#lib/utils/accountStatus.ts';
 
   export let replica: EntityReadView | null = null;
   export let selectedAccountId: string | null = null;

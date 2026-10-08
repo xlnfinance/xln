@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { afterEach, describe, expect, test } from 'bun:test';
 
 import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../../../account/crypto';
 import { TIMING } from '../../../config/constants';
@@ -30,7 +30,8 @@ import { getWallClockMs } from '../../../support/time';
 import { attachLiveJAdapter } from '../../../runtime/j-submit/live-jadapters';
 import { rebuildScheduledWakeIndex } from '../../../runtime/mempool/scheduled-wake';
 import { waitForPromiseBeforeTimeout } from '../../../runtime/loop/loop-drain';
-import type { JAdapter } from '../../../jurisdiction/adapter/types';
+import { createJAdapter, type JAdapter } from '../../../jurisdiction/adapter';
+import { PersistentEntityCollectionMap } from '../../../entity/state/persistent-collection-map';
 import {
   applyEntityInputFrameCap,
   applyEntityTxFrameCap,
@@ -38,6 +39,7 @@ import {
   isRuntimeFrameReady,
 } from '../../../runtime/loop/loop-work.ts';
 import { makeAccount } from '../../helpers/cross-j';
+import { startRuntimeAdapterRpc } from '../../helpers/runtime-jadapter';
 
 const TEST_JURISDICTION = {
   address: `0x${'22'.repeat(20)}`,
@@ -58,7 +60,21 @@ const testJurisdiction = (name = TEST_JURISDICTION.name): JurisdictionConfig => 
   name,
 });
 
-const addTestJurisdiction = (env: RuntimeReplica, name = TEST_JURISDICTION.name, jadapter?: unknown): void => {
+const adapters: JAdapter[] = [];
+afterEach(async () => {
+  while (adapters.length > 0) await adapters.pop()!.close();
+});
+
+const createWatcherAdapter = async (provided?: JAdapter) => {
+  const adapter = provided ?? await createJAdapter({ mode: 'browservm', chainId: TEST_JURISDICTION.chainId });
+  adapters.push(adapter);
+  let startCount = 0;
+  const startWatching = adapter.startWatching.bind(adapter);
+  adapter.startWatching = env => { startCount += 1; startWatching(env); };
+  return { adapter, startCount: () => startCount };
+};
+
+const addTestJurisdiction = (env: RuntimeReplica, name = TEST_JURISDICTION.name, jadapter?: JAdapter): void => {
   env.activeJurisdiction = env.activeJurisdiction || name;
   env.state.jReplicas.set(name, {
     name,
@@ -70,14 +86,14 @@ const addTestJurisdiction = (env: RuntimeReplica, name = TEST_JURISDICTION.name,
     position: { x: 0, y: 0, z: 0 },
     contracts: {
       account: `0x${'33'.repeat(20)}`,
-      depository: TEST_JURISDICTION.depositoryAddress,
-      entityProvider: TEST_JURISDICTION.entityProviderAddress,
+      depository: jadapter?.addresses.depository ?? TEST_JURISDICTION.depositoryAddress,
+      entityProvider: jadapter?.addresses.entityProvider ?? TEST_JURISDICTION.entityProviderAddress,
       deltaTransformer: `0x${'44'.repeat(20)}`,
     },
     rpcs: ['http://localhost:8545'],
     chainId: TEST_JURISDICTION.chainId,
   });
-  if (jadapter) attachLiveJAdapter(env, name, jadapter as JAdapter);
+  if (jadapter) attachLiveJAdapter(env, name, jadapter);
 };
 
 const makeReplica = (
@@ -110,7 +126,7 @@ const makeReplica = (
       },
       reserves: new Map(),
       accounts: PersistentEntityAccountMap.empty(entityId, computeEntityAccountValueHash),
-      deferredAccountProposals: new Map(),
+      deferredAccountProposals: PersistentEntityCollectionMap.empty(),
       lastFinalizedJHeight: 0,
       profile: {
         name: 'Replica',
@@ -120,7 +136,7 @@ const makeReplica = (
         website: '',
       },
       ...(keys.publicKey ? { entityEncryptionPublicKey: keys.publicKey } : {}),
-      paybook: { entries: new Map(), feesEarned: 0n },
+      paybook: { entries: PersistentEntityCollectionMap.empty('paybookHashlock'), feesEarned: 0n },
       swapTradingPairs: [],
       crontabState: initCrontab(),
     },
@@ -146,23 +162,15 @@ describe('runtime ingress timestamp', () => {
   test('runtime loop does not restart once runtime state is sticky-halted', async () => {
     const env = createIsolatedEnv('sticky-halt');
     env.infrastructure = { halted: true, loopActive: false };
-    let startCalls = 0;
-    addTestJurisdiction(env, 'Testnet', {
-      startWatching() {
-        startCalls += 1;
-      },
-      stopWatching() {},
-      isWatching() {
-        return false;
-      },
-    });
+    const watcher = await createWatcherAdapter();
+    addTestJurisdiction(env, 'Testnet', watcher.adapter);
 
     const stop = startRuntimeLoop(env);
     stop();
     await sleep(20);
 
     expect(env.infrastructure?.loopActive).toBe(false);
-    expect(startCalls).toBe(0);
+    expect(watcher.startCount()).toBe(0);
   });
 
   test('direct process entry rejects a sticky-halted runtime before applying work', async () => {
@@ -359,7 +367,7 @@ describe('runtime ingress timestamp', () => {
     expect(committedInputs).toEqual([{ height: 1, entityInputCount: 12 }]);
     expect(env.runtimeMempool?.entityInputs ?? []).toHaveLength(0);
     expect(env.infrastructure?.maxEntityInputsPerFrame).toBeUndefined();
-  });
+  }, 30_000);
 
   test('runtime tx frame cap never splits one accepted entity input', async () => {
     const env = createIsolatedEnv('runtime-entity-tx-frame-cap');
@@ -963,28 +971,14 @@ describe('runtime ingress timestamp', () => {
     const env = createIsolatedEnv('runtime-watcher-start-seed');
     env.quietRuntimeLogs = true;
 
-    let startCount = 0;
-    let started = false;
-    const fakeJAdapter = {
-      startWatching(_env: unknown) {
-        if (started) return;
-        started = true;
-        startCount += 1;
-      },
-      isWatching() {
-        return started;
-      },
-      setBlockTimestamp(_timestamp: number) {
-        return undefined;
-      },
-    };
+    const watcher = await createWatcherAdapter();
 
-    addTestJurisdiction(env, 'Testnet', fakeJAdapter);
+    addTestJurisdiction(env, 'Testnet', watcher.adapter);
 
     const stop = startRuntimeLoop(env, { tickDelayMs: 1 });
     try {
       await sleep(10);
-      expect(startCount).toBe(1);
+      expect(watcher.startCount()).toBe(1);
     } finally {
       stop();
     }
@@ -1000,28 +994,14 @@ describe('runtime ingress timestamp', () => {
     const replica = makeReplica(entityId, env.state.timestamp, signerId);
     env.state.eReplicas.set(`${entityId}:${signerId}`, replica);
 
-    let startCount = 0;
-    let started = false;
-    const fakeJAdapter = {
-      startWatching(_env: unknown) {
-        if (started) return;
-        started = true;
-        startCount += 1;
-      },
-      isWatching() {
-        return started;
-      },
-      setBlockTimestamp(_timestamp: number) {
-        return undefined;
-      },
-    };
+    const watcher = await createWatcherAdapter();
 
     const stop = startRuntimeLoop(env, { tickDelayMs: 1 });
     try {
       await sleep(10);
-      expect(startCount).toBe(0);
+      expect(watcher.startCount()).toBe(0);
 
-      addTestJurisdiction(env, 'Testnet', fakeJAdapter);
+      addTestJurisdiction(env, 'Testnet', watcher.adapter);
 
       enqueueRuntimeInput(env, {
         runtimeTxs: [],
@@ -1029,75 +1009,42 @@ describe('runtime ingress timestamp', () => {
       });
 
       await sleep(20);
-      expect(startCount).toBe(1);
+      expect(watcher.startCount()).toBe(1);
     } finally {
       stop();
     }
   });
 
-  test('runtime loop starts exactly one watcher per rpc/depository per runtime', async () => {
+  test('runtime loop rejects ambiguous duplicate rpc/depository jurisdiction replicas', async () => {
     const env = createIsolatedEnv('runtime-watcher-dedup-seed');
     env.quietRuntimeLogs = true;
     env.activeJurisdiction = 'J1';
 
-    let startCountA = 0;
-    let startedA = false;
-    const adapterA = {
-      startWatching(_env: unknown) {
-        startedA = true;
-        startCountA += 1;
-      },
-      isWatching() {
-        return startedA;
-      },
-      stopWatching() {
-        startedA = false;
-      },
-      setBlockTimestamp(_timestamp: number) {
-        return undefined;
-      },
-      mode: 'rpc',
-      chainId: 31337,
-      provider: {
-        _getConnection() {
-          return { url: 'http://localhost:8545' };
-        },
-      },
-    };
-    let startCountB = 0;
-    let startedB = false;
-    const adapterB = {
-      startWatching(_env: unknown) {
-        startedB = true;
-        startCountB += 1;
-      },
-      isWatching() {
-        return startedB;
-      },
-      stopWatching() {
-        startedB = false;
-      },
-      setBlockTimestamp(_timestamp: number) {
-        return undefined;
-      },
-      mode: 'rpc',
-      chainId: 31337,
-      provider: {
-        _getConnection() {
-          return { url: 'http://localhost:8545' };
-        },
-      },
-    };
-
-    addTestJurisdiction(env, 'J1', adapterA);
-    addTestJurisdiction(env, 'J2', adapterB);
-
-    const stop = startRuntimeLoop(env, { tickDelayMs: 1 });
+    const rpc = await startRuntimeAdapterRpc();
     try {
-      await sleep(10);
-      expect(startCountA + startCountB).toBe(1);
+      const adapterA = await createJAdapter({ mode: 'rpc', chainId: 31337, rpcUrl: rpc.rpcUrl });
+      const watcherA = await createWatcherAdapter(adapterA);
+      await adapterA.deployStack();
+      addTestJurisdiction(env, 'J1', adapterA);
+      const replica = env.state.jReplicas.get('J1');
+      if (!replica) throw new Error('WATCHER_JURISDICTION_MISSING');
+      replica.rpcs = [rpc.rpcUrl];
+      replica.contracts = adapterA.addresses;
+      replica.entityProviderDeploymentBlock = adapterA.entityProviderDeploymentBlock;
+      const adapterB = await createJAdapter({ mode: 'rpc', chainId: 31337, rpcUrl: rpc.rpcUrl,
+        fromReplica: replica });
+      const watcherB = await createWatcherAdapter(adapterB);
+      addTestJurisdiction(env, 'J2', adapterB);
+      env.state.jReplicas.set('J2', { ...replica, name: 'J2' });
+      expect(() => startRuntimeLoop(env, { tickDelayMs: 1 }))
+        .toThrow(`J_WATCHER_JURISDICTION_AMBIGUOUS:31337:${adapterA.addresses.depository.toLowerCase()}`);
+      expect(watcherA.startCount()).toBe(1);
+      expect(watcherB.startCount()).toBe(0);
+      expect(adapterA.isWatching()).toBe(false);
+      expect(adapterB.isWatching()).toBe(false);
     } finally {
-      stop();
+      while (adapters.length > 0) await adapters.pop()!.close();
+      await rpc.close();
     }
   });
 

@@ -6,7 +6,7 @@
     shortHealthId,
     type QaAdminHealthSnapshot,
     type QaAdminStoryCard,
-  } from '$lib/qa/adminEvidence';
+  } from '#lib/qa/adminEvidence.ts';
 
   type Props = {
     stories: QaAdminStoryCard[];

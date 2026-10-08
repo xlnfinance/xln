@@ -145,6 +145,28 @@ describe('leader timeout vote durability', () => {
     expect(env.state.height).toBe(1);
   });
 
+  test('rejects an invalid vote while retaining the following genuine same-voter message', async () => {
+    const env = createEmptyEnv('leader-timeout-invalid-signature-followed-by-valid');
+    env.scenarioMode = true;
+    env.quietRuntimeLogs = true;
+    const { replica, vote } = installVoteTarget(env);
+    const invalid = { ...vote, signature: `0x${'00'.repeat(65)}` };
+    await applyRuntimeInput(env, {
+      runtimeTxs: [],
+      entityInputs: [
+        ...voteRuntimeInput(replica, invalid).entityInputs,
+        ...voteRuntimeInput(replica, vote).entityInputs,
+      ],
+    });
+    const current = env.state.eReplicas.get(`${replica.entityId}:${replica.signerId}`)!;
+    expect(current.leaderVotes?.get(vote.voterId)?.signature).toBe(vote.signature);
+    expect(current.leaderVotes?.size).toBe(1);
+    expect(env.state.height).toBe(1);
+    await applyRuntimeInput(env, voteRuntimeInput(replica, vote));
+    expect(env.state.eReplicas.get(`${replica.entityId}:${replica.signerId}`)?.leaderVotes?.size).toBe(1);
+    expect(env.state.height).toBe(2);
+  });
+
   test('restores a standalone sub-quorum vote from authoritative LevelDB history', async () => {
     const seed = `leader-timeout-vote-restore-${process.pid}`;
     const env = createEmptyEnv(seed);

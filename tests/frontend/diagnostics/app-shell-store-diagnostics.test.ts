@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 const diagnosticFiles = [
   {
     path: 'frontend/src/routes/app/+layout.svelte',
-    importLine: "import { errorLog } from '$lib/stores/errorLogStore';",
+    importLine: "import { errorLog } from '#lib/stores/errorLogStore.ts';",
     logLine: "errorLog.log(message, 'App Shell', details)",
   },
   {

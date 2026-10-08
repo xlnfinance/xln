@@ -1,11 +1,11 @@
 <script lang="ts">
-import type { EntityReadView } from '$lib/components/Entity/core/entity-panel-types';
+import type { EntityReadView } from '#lib/components/Entity/core/entity-panel-types.ts';
 
   import type { Profile as GossipProfile } from '@xln/core/api/public/runtime-module';
 
   import { createEventDispatcher } from 'svelte';
   import AccountPreview from './AccountPreview.svelte';
-  import { compareStableText } from '$lib/utils/stableSort';
+  import { compareStableText } from '#lib/utils/stableSort.ts';
   import { buildAccountPageView, isAccountsMapLike, resolveAccountListEntityName } from '../../core/account-list-view';
 
   export let replica: EntityReadView | null;

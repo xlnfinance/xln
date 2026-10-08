@@ -1,10 +1,10 @@
 <script lang="ts">
   import { createEventDispatcher } from 'svelte';
   import EntityIdentity from '../../shared/EntityIdentity.svelte';
-  import { xlnFunctions } from '$lib/stores/xlnStore';
-  import { amountToUsd } from '$lib/utils/assetPricing';
-  import { getEntityDisplayName } from '$lib/utils/identity/entityNaming';
-  import { compareStableText } from '$lib/utils/stableSort';
+  import { xlnFunctions } from '#lib/stores/xlnStore.ts';
+  import { amountToUsd } from '#lib/utils/assetPricing.ts';
+  import { getEntityDisplayName } from '#lib/utils/identity/entityNaming.ts';
+  import { compareStableText } from '#lib/utils/stableSort.ts';
   import type { DebtEntry, EntityState } from '@xln/core/api/public/runtime-module';
   import { requireTokenDecimals } from '../token-metadata';
   import type { DebtEnforceRequest } from './debt-enforce-request';

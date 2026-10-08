@@ -207,7 +207,7 @@ fn wait_for_sibling_emits_nothing_and_preserves_mempool() {
     enter_resident(&mut engine, pair.payer_entity);
 
     let mut request = outbound_request(pair.payer_entity, pair.payer_account, Vec::new());
-    request.proposal_work[0].2 = BatchAccountSelection::WaitForSibling;
+    request.proposal_work[0].2 = BatchAccountSelection::Defer;
     request.checkpoint_due = true;
     let result = engine.entity_outbound(request).expect("wait barrier");
 
@@ -327,7 +327,7 @@ fn wait_for_sibling_routes_required_ack_without_proposing() {
         .expect("outbound Account input accepted");
     let root_before_wait = payer.accounts_root();
     let mut request = force_ack_request(pair.payer_entity, pair.payer_account, Vec::new());
-    request.proposal_work[0].2 = BatchAccountSelection::WaitForSibling;
+    request.proposal_work[0].2 = BatchAccountSelection::Defer;
     request.checkpoint_due = true;
     let result = payer
         .entity_outbound(request)

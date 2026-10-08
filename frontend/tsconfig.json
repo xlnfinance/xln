@@ -1,6 +1,12 @@
 {
-	"extends": "./.svelte-kit/tsconfig.json",
+	"extends": "$app/tsconfig",
+	"include": ["src", "test", "tests", "vite.config.ts"],
+	"exclude": ["src/service-worker"],
 	"compilerOptions": {
+		"paths": {
+			"@xln/core/*": ["../core/*"],
+			"@xln/brainvault/*": ["../brainvault/src/*"]
+		},
 		"allowJs": true,
 		"checkJs": true,
 		"esModuleInterop": true,
@@ -10,7 +16,7 @@
 		"sourceMap": true,
 		"moduleResolution": "bundler",
 		"allowImportingTsExtensions": true,
-		"types": ["svelte", "vite/client", "node"], // Project declarations cover browser-only libraries.
+		"types": ["$app/types", "svelte", "vite/client", "node"], // Project declarations cover browser-only libraries.
 
 		// STRICTEST RULES FOR FINANCIAL SYSTEM
 		"strict": true,

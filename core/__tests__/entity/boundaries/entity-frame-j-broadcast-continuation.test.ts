@@ -7,11 +7,11 @@ import {
   shouldAutoBroadcastDraft,
   takeBroadcastBatch,
 } from '../../../entity/tx/handlers/j-batch/j-broadcast';
-import { initJBatch } from '../../../jurisdiction/machine/batch';
-import {
-  entity,
-  secret,
-} from '../../helpers/cross-j';
+import { applyEntityTx } from '../../../entity/tx/apply';
+import { createEmptyEnv } from '../../../runtime';
+import { entity, secret, makeState, makeJurisdiction } from '../../helpers/cross-j';
+import { encodeJBatch, initJBatch } from '../../../jurisdiction/machine/batch';
+import { keccak256 } from 'ethers';
 
 const self = `0x${'11'.repeat(32)}`;
 const signer = `0x${'22'.repeat(20)}`;
@@ -105,4 +105,25 @@ describe('Entity-frame j_broadcast continuation ownership', () => {
     expect(remainder.reserveToReserve).toHaveLength(1);
     expect(shouldAutoBroadcastDraft(remainder)).toBe(true);
   });
+});
+
+
+test('pending j_broadcast rejects only the retry and preserves the next user transaction', async () => {
+  const state = makeState(self, signer, makeJurisdiction('source', 31337, 'a1', 'a2'));
+  state.jBatchState = initJBatch();
+  state.jBatchState.batch.reserveToReserve.push({ receivingEntity: entity('33'), tokenId: 1, amount: 2n });
+  const encodedBatch = encodeJBatch(state.jBatchState.batch);
+  state.jBatchState.sentBatch = {
+    batch: state.jBatchState.batch, encodedBatch, batchHash: keccak256(encodedBatch),
+    entityNonce: 1, firstSubmittedAt: state.timestamp, lastSubmittedAt: 0, submitAttempts: 0,
+  };
+  const pending = state.jBatchState.sentBatch;
+  const env = createEmptyEnv('broadcast-retry');
+  const rejected = await applyEntityTx(env, state, { type: 'j_broadcast', data: {} });
+  expect(rejected.skippedError).toContain('SENT_BATCH_PENDING');
+  expect(rejected.newState).toBe(state);
+  expect(rejected.jOutputs).toHaveLength(0);
+  const next = await applyEntityTx(env, rejected.newState, { type: 'chat', data: { from: signer, message: 'after retry' } });
+  expect(next.skippedError).toBeUndefined();
+  expect(next.newState.jBatchState!.sentBatch).toEqual(pending);
 });

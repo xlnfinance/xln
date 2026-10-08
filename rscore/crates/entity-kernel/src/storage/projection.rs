@@ -29,7 +29,7 @@ pub struct EntityStorageProjection {
     pub entity_encryption_public_key: CanonicalValue,
     pub profile: CanonicalValue,
     pub config: CanonicalValue,
-    pub leader_state: CanonicalValue,
+    pub leader_state: Option<CanonicalValue>,
     pub reserves: CanonicalValue,
     pub external_wallet: Option<CanonicalValue>,
     pub out_debts_by_token: Option<CanonicalValue>,
@@ -72,7 +72,7 @@ impl EntityStorageProjection {
             self.entity_command_nonces.as_ref().map(|value| (5, value)),
             Some((6, &self.proposals)),
             Some((7, &self.config)),
-            Some((9, &self.leader_state)),
+            self.leader_state.as_ref().map(|value| (9, value)),
             Some((10, &self.reserves)),
             self.external_wallet.as_ref().map(|value| (11, value)),
             Some((14, &self.last_finalized_j_height)),
@@ -209,7 +209,13 @@ pub fn project_entity_storage(
         )),
         profile: canonical_profile(&state.profile),
         config,
-        leader_state,
+        leader_state: (state.height > 0
+            || consensus
+                .state
+                .sections
+                .iter()
+                .any(|section| section.field == "leaderState"))
+        .then_some(leader_state),
         reserves: canonical_reserves(state),
         external_wallet: state
             .external_wallet

@@ -177,7 +177,9 @@ const readStateRows = async (
   for (const tag of WAL_OWNED_TAGS) {
     for await (const key of iterateKeys(walDb, { prefix: Buffer.from([tag]) })) await add(walDb, key);
   }
-  if (rows.size === 0) throw new Error('CHECKPOINT_STATE_ROWS_EMPTY');
+  // A Runtime may commit its J import before its first Entity. That exact
+  // checkpoint owns no Entity rows; requiring one would invent an owner.
+  if (rows.size === 0 && expectedOwners.size > 0) throw new Error('CHECKPOINT_STATE_ROWS_EMPTY');
   for (const owner of expectedOwners) {
     if (!owners.has(owner) || !rows.has(`21${owner}`)) {
       throw new Error(`CHECKPOINT_STATE_OWNER_MISSING:0x${owner}`);

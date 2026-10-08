@@ -32,6 +32,7 @@ export async function fillUiPaymentIntent(
   if (invoiceVisible) {
     await invoiceInput.click();
     await invoiceInput.fill(recipientEntityId);
+    await expect(page.locator('.entity-input').filter({ has: invoiceInput }).locator('.dropdown')).toBeHidden();
   } else {
     const recipientHint = String(recipientEntityId || '').trim().slice(0, 10);
     const selectedRecipient = page

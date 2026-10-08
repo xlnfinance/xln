@@ -158,6 +158,7 @@ const findEntityId = (env: RuntimeReplica, preferred?: string | null): string | 
       const [entityId] = String(key).split(':');
       if (String(entityId || '').toLowerCase() === needle) return String(entityId);
     }
+    return null;
   }
   const first = env.state.eReplicas.keys().next();
   if (first.done) return null;
@@ -325,6 +326,7 @@ export const openSession = async (
   let env = await loadEnvFromDB(runtimeId, identity.mnemonic);
   let fresh = false;
   if (!env) {
+    if (identity.entityId !== null) throw new Error(`CLI_WALLET_RECOVERY_REQUIRED:${settings.dbPath}`);
     env = createEmptyEnv(identity.mnemonic);
     fresh = true;
   }
@@ -338,6 +340,11 @@ export const openSession = async (
   // errors instead of runtime-loop process.exit(1).
   let entityId = findEntityId(env, identity.entityId);
   let jurisdictionName = 'primary';
+  if (identity.entityId !== null && !entityId) {
+    await closeRuntimeDb(env);
+    await closeInfraDb(env);
+    throw new Error(`CLI_WALLET_RECOVERY_REQUIRED:entity=${identity.entityId}:path=${settings.dbPath}`);
+  }
   if (fresh || !entityId) {
     const boot = await bootstrapFresh(env, identity, settings);
     entityId = boot.entityId;

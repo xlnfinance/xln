@@ -1,5 +1,5 @@
 <script lang="ts">
-  import Dropdown from '$lib/components/UI/Dropdown.svelte';
+  import Dropdown from '#lib/components/UI/Dropdown.svelte';
 
   export let label: string;
   export let items: Array<{id: string, label: string, count?: number}>;

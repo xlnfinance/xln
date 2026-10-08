@@ -62,8 +62,9 @@ pub use command::{
     normalize_entity_command_nonce_board,
 };
 pub use commitment::{
-    canonical_swap_trading_pairs, collection_commitment, compute_entity_effects_parity_digest,
-    compute_entity_owned_sections, decode_canonical_swap_trading_pairs,
+    canonical_entity_kernel_output, canonical_swap_trading_pairs, collection_commitment,
+    compute_entity_effects_parity_digest, compute_entity_owned_sections,
+    decode_canonical_swap_trading_pairs,
 };
 pub use consensus::{
     CanonicalEntityTx, CertifiedEntityFrameLink, CertifiedEntityProposal,
@@ -150,8 +151,9 @@ pub use prepared_context::{
     DecodedOnionLayer, DecryptedHtlcLayer, DecryptedHtlcMaterializeInput,
     HtlcMaterializeEnvironment, HtlcMaterializeInput, PreparedAccountView, PreparedContextError,
     compute_htlc_envelope_context_hash, decode_onion_layer, decrypt_htlc_materialize_inputs,
-    decrypt_opaque_htlc_layer, materialize_decrypted_htlc_entries,
-    materialize_htlc_prepared_entries, required_htlc_account_tokens,
+    decrypt_opaque_htlc_layer, directional_fee_ppm, encode_onion_layer, encrypt_opaque_htlc_layer,
+    materialize_decrypted_htlc_entries, materialize_htlc_prepared_entries,
+    required_htlc_account_tokens, required_htlc_inbound,
 };
 pub use proposal::{
     EntityProposal, EntityProposalVote, EntityProposals, EntityVoteChoice,
@@ -178,7 +180,10 @@ pub use scheduler_runtime::{
     ScheduledWakeJobKind, SchedulerCommand, SchedulerError, SchedulerExecution,
     collect_due_scheduled_wake_jobs, execute_crontab, scheduled_wake_entity_tx,
 };
-pub use snapshot::{EntityStateSnapshot, capture_entity_state, restore_entity_state};
+pub use snapshot::{
+    EntityStateSnapshot, capture_entity_state, hydrate_cross_jurisdiction_offers,
+    restore_entity_state,
+};
 pub use storage_projection::{
     EntityStorageProjection, EntityStorageProjectionError, project_entity_storage,
 };

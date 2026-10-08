@@ -1,3 +1,4 @@
+import type { TronExpiryEvidence } from './operations/tron-authority';
 /**
  * JAdapter Types
  * @license AGPL-3.0
@@ -161,6 +162,11 @@ export interface JAdapter {
    * Reserve one EOA nonce through signing and the caller's durable acceptance.
    * Release the EOA queue before broadcast, mining, and evidence ingestion.
    */
+  /** Bind the single live Runtime owner; read its committed reservations on every allocation. */
+  setPendingSignedTransactionSource(read: (() => readonly string[]) | null): void;
+  broadcastPreparedTransaction(rawTransaction: string): Promise<string>;
+  /** Native RPC-attested finalized absence; never an Ethereum proof. */
+  getTronExpiryEvidence?(rawTransaction: string): Promise<TronExpiryEvidence | null>;
   prepareDurableTransaction(
     signerPrivateKey: Uint8Array,
     request: Readonly<{ to: string; data: string; value: bigint }>,
@@ -221,6 +227,8 @@ export interface JAdapter {
     signerId?: string;  // Which signer to use for hanko
     signerPrivateKey?: Uint8Array;
     timestamp?: number; // Block timestamp (scenarioMode)
+    /** Sign only, holding the nonce until the Runtime accepts these bytes in its WAL. */
+    prepareOnly?: (prepared: JPreparedTransaction) => Promise<JPreparedTransactionAcceptance>;
   }): Promise<JSubmitResult>;
 
   // === J-Watcher integration ===

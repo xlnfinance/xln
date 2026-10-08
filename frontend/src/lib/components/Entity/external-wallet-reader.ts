@@ -1,8 +1,8 @@
 import { isAddress, ZeroAddress } from 'ethers';
 import type { JAdapter } from '@xln/core/api/public/runtime-module';
 import { safeParse } from '@xln/core/protocol/serialization';
-import { isUnknownRecord } from '$lib/utils/boundary';
-import type { EntityReplica } from '$lib/types/ui';
+import { isUnknownRecord } from '#lib/utils/boundary/index.ts';
+import type { EntityReplica } from '#lib/types/ui.ts';
 import { readJsonResponse } from './account/account-faucet';
 import type { ExternalToken } from './assets/entity-asset-catalog';
 import {

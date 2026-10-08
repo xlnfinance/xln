@@ -4,7 +4,7 @@ import {
   type LastResortEntityContext,
   type LastResortTowerAppointmentUpload,
 } from '@xln/core/watchtower/last-resort-appointment';
-import { isMapLike } from '$lib/utils/runtime/liveRuntimeEnv';
+import { isMapLike } from '#lib/utils/runtime/liveRuntimeEnv.ts';
 import { resolveRpcUrl } from './vault-helpers';
 import {
   findEntityReplicaByEntityAndSigner,

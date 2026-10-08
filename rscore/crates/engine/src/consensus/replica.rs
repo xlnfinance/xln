@@ -244,6 +244,9 @@ pub struct PendingFrame {
     /// none, and the ACK path releases them. Rows are rebuilt by replay on
     /// restore, so the checkpoint stores no duplicate effect payload.
     pub(crate) outputs_by_tx: Arc<Vec<Vec<crate::AccountOutput>>>,
+    /// Candidate proof activation is released only after the peer authenticates
+    /// this frame. Rebuild it from the existing pending transaction on restore.
+    pub(crate) consensus_effects: Vec<crate::tx::apply_types::AccountConsensusEffect>,
     /// The acknowledgement carried by the message that sent this proposal, if
     /// it carried one. Present means the message was a `ack_frame` rather than
     /// a `frame`, which the account leaf commits.
@@ -315,6 +318,12 @@ pub struct AccountConsensus {
     /// current execution turn. This is verification context, not Account
     /// state: every parent call replaces it from the certified registry.
     local_board_authority: Option<crate::CertifiedBoardAuthority>,
+}
+
+pub(crate) struct ConsensusProofPreview<'a> {
+    pub local: Option<&'a DisputeDraft>,
+    pub counterparty: Option<&'a CounterpartyDispute>,
+    pub next_proof_nonce: u64,
 }
 
 impl AccountConsensus {
@@ -584,6 +593,7 @@ impl AccountConsensus {
                 _ => None,
             })
             .collect();
+        assert_mempool_within_limit(self.mempool.len(), self.pending_tx_count(), context)?;
         let mut summary = AccountAdmission::default();
         let mut admitted: Vec<AccountTx> = Vec::with_capacity(txs.len());
         let mut seen_lifecycle = HashSet::new();
@@ -642,6 +652,14 @@ impl AccountConsensus {
                         continue;
                     }
                 }
+            }
+            if self.mempool.len() + self.pending_tx_count() + admitted.len()
+                == crate::input::mempool::ACCOUNT_MEMPOOL_SIZE
+            {
+                return Err(StateError::MempoolAdmissionRejected {
+                    index,
+                    maximum: crate::input::mempool::ACCOUNT_MEMPOOL_SIZE,
+                });
             }
             if let Some(identity) = identity {
                 seen_lifecycle.insert(identity);
@@ -1131,6 +1149,40 @@ impl AccountConsensus {
         &mut self,
         effects: &[crate::tx::apply_types::AccountConsensusEffect],
     ) -> Result<(), StateError> {
+        let preview = self.preview_consensus_effects(effects)?;
+        let local = preview
+            .local
+            .filter(|row| self.dispute.as_ref().map_or(0, |old| old.nonce) < row.nonce)
+            .cloned();
+        let counterparty = preview
+            .counterparty
+            .filter(|row| {
+                self.counterparty_dispute
+                    .as_ref()
+                    .map_or(0, |old| old.nonce)
+                    < row.nonce
+            })
+            .cloned();
+        let next_proof_nonce = preview.next_proof_nonce;
+        if let Some(local) = local {
+            self.dispute = Some(local);
+        }
+        if let Some(counterparty) = counterparty {
+            self.store_counterparty_dispute(counterparty);
+        }
+        self.next_proof_nonce = next_proof_nonce;
+        Ok(())
+    }
+
+    pub(crate) fn preview_consensus_effects<'a>(
+        &'a self,
+        effects: &'a [crate::tx::apply_types::AccountConsensusEffect],
+    ) -> Result<ConsensusProofPreview<'a>, StateError> {
+        let mut preview = ConsensusProofPreview {
+            local: self.dispute.as_ref(),
+            counterparty: self.counterparty_dispute.as_ref(),
+            next_proof_nonce: self.next_proof_nonce,
+        };
         for effect in effects {
             match effect {
                 crate::tx::apply_types::AccountConsensusEffect::ActivatePostSettlementProof {
@@ -1138,8 +1190,7 @@ impl AccountConsensus {
                     counterparty,
                     next_proof_nonce,
                 } => {
-                    if let Some(current) =
-                        self.dispute.as_ref().filter(|row| row.nonce == local.nonce)
+                    if let Some(current) = preview.local.filter(|row| row.nonce == local.nonce)
                         && (current.hash != local.hash
                             || current.proof_body_hash != local.proof_body_hash
                             || current.proposer_is_left != local.proposer_is_left)
@@ -1149,12 +1200,11 @@ impl AccountConsensus {
                             local.nonce
                         )));
                     }
-                    if self.dispute.as_ref().map_or(0, |row| row.nonce) < local.nonce {
-                        self.dispute = Some(local.clone());
+                    if preview.local.map_or(0, |row| row.nonce) < local.nonce {
+                        preview.local = Some(local);
                     }
-                    if let Some(current) = self
-                        .counterparty_dispute
-                        .as_ref()
+                    if let Some(current) = preview
+                        .counterparty
                         .filter(|row| row.nonce == counterparty.nonce)
                         && (current.hash != counterparty.hash
                             || current.proof_body_hash != counterparty.proof_body_hash
@@ -1165,19 +1215,14 @@ impl AccountConsensus {
                             counterparty.nonce
                         )));
                     }
-                    if self
-                        .counterparty_dispute
-                        .as_ref()
-                        .map_or(0, |row| row.nonce)
-                        < counterparty.nonce
-                    {
-                        self.store_counterparty_dispute(counterparty.clone());
+                    if preview.counterparty.map_or(0, |row| row.nonce) < counterparty.nonce {
+                        preview.counterparty = Some(counterparty);
                     }
-                    self.next_proof_nonce = self.next_proof_nonce.max(*next_proof_nonce);
+                    preview.next_proof_nonce = preview.next_proof_nonce.max(*next_proof_nonce);
                 }
             }
         }
-        Ok(())
+        Ok(preview)
     }
 
     /// Stand behind a new recovery proof for the state this frame commits to.
@@ -1191,6 +1236,7 @@ impl AccountConsensus {
         &mut self,
         candidate: &AccountReplica,
         delta_transformer: &[u8; 20],
+        candidate_next_proof_nonce: u64,
     ) -> Result<Option<DisputeDraft>, StateError> {
         let proof_body_hash = crate::dispute::proof_body_hash(candidate, delta_transformer)?;
         let j_nonce = candidate.state().j_nonce();
@@ -1216,7 +1262,9 @@ impl AccountConsensus {
                     && draft.nonce > j_nonce
             }));
         }
-        let nonce = self.next_proof_nonce.max(j_nonce + 1);
+        let nonce = candidate_next_proof_nonce
+            .max(self.next_proof_nonce)
+            .max(j_nonce + 1);
         let identity = candidate.state().identity();
         self.dispute = Some(DisputeDraft {
             hanko: None,
@@ -1557,6 +1605,7 @@ impl AccountConsensus {
             let PendingReplay {
                 candidate,
                 outputs_by_tx,
+                consensus_effects,
             } = replay_pending(&account.replica, &pending, swap_market, settlement)?;
             account.pending = Some(PendingFrame {
                 frame: pending.frame,
@@ -1564,6 +1613,7 @@ impl AccountConsensus {
                 hanko: pending.hanko,
                 candidate,
                 outputs_by_tx: Arc::new(outputs_by_tx),
+                consensus_effects,
                 bundled_ack: pending.bundled_ack,
                 proposal_dispute: pending.proposal_dispute,
             });
@@ -1601,6 +1651,7 @@ fn verify_restored_outbound_ack(
 struct PendingReplay {
     candidate: AccountReplica,
     outputs_by_tx: Vec<Vec<crate::AccountOutput>>,
+    consensus_effects: Vec<crate::tx::apply_types::AccountConsensusEffect>,
 }
 
 fn replay_pending(
@@ -1623,6 +1674,7 @@ fn replay_pending(
         mut candidate,
         applied,
         outputs_by_tx,
+        consensus_effects,
         ..
     } = execute_window(replica, proposer, pending.frame.txs.clone(), &context, true)?;
     if applied.len() != pending.frame.txs.len() {
@@ -1646,6 +1698,7 @@ fn replay_pending(
     Ok(PendingReplay {
         candidate,
         outputs_by_tx,
+        consensus_effects,
     })
 }
 
@@ -2023,4 +2076,83 @@ fn hex_of(bytes: &[u8]) -> String {
     }
     // Every byte written is an ASCII hex digit.
     String::from_utf8(output).unwrap_or_default()
+}
+
+#[cfg(test)]
+mod proof_effect_tests {
+    use super::*;
+    use crate::{
+        AccountDisputeConfig, AccountDomain, AccountIdentity, AccountState, DepositoryAddress,
+        EntityId, WatchSeed,
+    };
+
+    #[test]
+    fn speculative_settlement_effects_do_not_publish_proofs_before_commit() {
+        let left = EntityId::parse(&format!("0x{}", "11".repeat(32))).unwrap();
+        let right = EntityId::parse(&format!("0x{}", "22".repeat(32))).unwrap();
+        let identity = AccountIdentity::new(
+            AccountDomain::new(
+                31337,
+                DepositoryAddress::parse(&format!("0x{}", "33".repeat(20))).unwrap(),
+            )
+            .unwrap(),
+            left.clone(),
+            right,
+            WatchSeed::parse(&format!("0x{}", "44".repeat(32))).unwrap(),
+        )
+        .unwrap();
+        let state = AccountState::new(identity, AccountDisputeConfig::new(10, 10).unwrap(), vec![])
+            .unwrap();
+        let mut account = AccountConsensus::new(AccountReplica::new(left, state).unwrap());
+        let effect = crate::tx::apply_types::AccountConsensusEffect::ActivatePostSettlementProof {
+            local: DisputeDraft {
+                hanko: None,
+                hash: [1; 32],
+                nonce: 6,
+                proof_body_hash: [2; 32],
+                proposer_is_left: true,
+            },
+            counterparty: CounterpartyDispute {
+                hanko: None,
+                hash: [3; 32],
+                nonce: 6,
+                proof_body_hash: [2; 32],
+                proposer_is_left: false,
+            },
+            next_proof_nonce: 7,
+        };
+        let effects = [effect.clone()];
+        let before = account.checkpoint_envelope().unwrap();
+        let preview = account.preview_consensus_effects(&effects).unwrap();
+        assert_eq!(preview.next_proof_nonce, 7);
+        assert_eq!(preview.counterparty.unwrap().nonce, 6);
+        assert!(account.dispute.is_none());
+        assert!(account.counterparty_dispute.is_none());
+        assert_eq!(account.next_proof_nonce, 1);
+        assert_eq!(account.checkpoint_envelope().unwrap(), before);
+        account.apply_consensus_effects(&effects).unwrap();
+        assert_eq!(account.next_proof_nonce, 7);
+        assert_eq!(account.counterparty_dispute().unwrap().nonce, 6);
+        let committed = account.checkpoint_envelope().unwrap();
+        let mut forged = effect;
+        let crate::tx::apply_types::AccountConsensusEffect::ActivatePostSettlementProof {
+            local,
+            counterparty,
+            ..
+        } = &mut forged;
+        local.nonce = 8;
+        counterparty.hash[0] ^= 1;
+        assert!(
+            account
+                .apply_consensus_effects(&[forged])
+                .unwrap_err()
+                .to_string()
+                .contains("COUNTERPARTY_PROOF_EQUIVOCATION")
+        );
+        assert_eq!(
+            account.checkpoint_envelope().unwrap(),
+            committed,
+            "an invalid peer proof cannot partially install the local proof"
+        );
+    }
 }

@@ -135,6 +135,11 @@ fn address(value: &Value, path: &str) -> Result<String, ConcreteWalDecodeError> 
 fn decode_runtime_tx(value: &Value, index: usize) -> Result<RuntimeTx, ConcreteWalDecodeError> {
     let path = format!("runtimeTxs[{index}]");
     let tx = object(value, &path)?;
+    if tx.get("type").and_then(Value::as_str) == Some("importReplica") {
+        return crate::entity_import::decode(value)
+            .map(RuntimeTx::ImportReplica)
+            .map_err(invalid);
+    }
     exact_fields(tx, &["type", "data"], &path)?;
     let kind = tx["type"]
         .as_str()
@@ -210,9 +215,29 @@ fn decode_runtime_tx(value: &Value, index: usize) -> Result<RuntimeTx, ConcreteW
             .map(RuntimeTx::ImportJ)
             .map_err(|error| invalid(error.to_string()));
     }
+    if kind == "replaceNumberedRegistrationIntent" {
+        return crate::registration_replacement::decode(&tx["data"])
+            .map(RuntimeTx::ReplaceNumberedRegistrationIntent)
+            .map_err(invalid);
+    }
+    if kind == "recordAuthenticatedJAuthority" {
+        return crate::j_authority::decode(&tx["data"])
+            .map(RuntimeTx::RecordAuthenticatedJAuthority)
+            .map_err(invalid);
+    }
     if kind == "completeImportJ" {
         return crate::j_import::decode_import_result(&tx["data"])
             .map(RuntimeTx::CompleteImportJ)
+            .map_err(|error| invalid(error.to_string()));
+    }
+    if kind == "replaceJPreparedTransaction" {
+        return crate::j_submit::decode_replacement(&tx["data"])
+            .map(RuntimeTx::ReplaceJPreparedTransaction)
+            .map_err(|error| invalid(error.to_string()));
+    }
+    if kind == "recordJPreparedTransaction" {
+        return crate::j_submit::decode_prepared(&tx["data"])
+            .map(RuntimeTx::RecordJPreparedTransaction)
             .map_err(|error| invalid(error.to_string()));
     }
     if kind == "retryJSubmit" {
@@ -321,9 +346,6 @@ fn expected_entity_roots(
         return Ok(None);
     };
     let rows = array(value, "frame.canonicalEntityHashes")?;
-    if rows.is_empty() {
-        return Err(invalid("ENTITY_HASH_COUNT:0"));
-    }
     let mut seen = std::collections::BTreeSet::new();
     let roots = rows
         .iter()
@@ -535,6 +557,19 @@ mod tests {
     use super::*;
 
     #[test]
+    fn jurisdiction_only_wal_has_explicit_empty_entity_roots() {
+        assert_eq!(
+            expected_entity_roots(&json!({"canonicalEntityHashes": []}))
+                .unwrap()
+                .unwrap()
+                .len(),
+            0
+        );
+        assert!(expected_entity_roots(&json!({})).unwrap().is_none());
+        assert!(expected_entity_roots(&json!({"canonicalEntityHashes": null})).is_err());
+    }
+
+    #[test]
     fn cross_j_wal_preserves_every_entity_root_and_rejects_duplicate_owners() {
         let mut frame = json!({"canonicalEntityHashes": [
             {"entityId": format!("0x{}", "11".repeat(32)), "hash": format!("0x{}", "aa".repeat(32))},
@@ -623,5 +658,14 @@ mod tests {
         assert_eq!(marker.lane_id, format!("0x{}", "ab".repeat(32)));
         assert_eq!(marker.input_hash, format!("0x{}", "cd".repeat(32)));
         assert_eq!(marker.expires_at_ms, None);
+    }
+    #[test]
+    fn actual_native_financial_replacement_runtime_tx_decodes() {
+        let fixture: Value = serde_json::from_str(include_str!(
+            "../../../../../core/__tests__/fixtures/jurisdiction/tron-financial-replacement.json"
+        ))
+        .unwrap();
+        decode_runtime_tx(&fixture["accepted"], 0)
+            .expect("accepted native financial replacement WAL input");
     }
 }

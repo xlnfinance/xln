@@ -11,6 +11,7 @@ import {
   readPersistedStorageHead,
   startP2P,
   startRuntimeLoop,
+  startJurisdictionWatchers,
   stopP2PAndWait,
   stopRuntimeLoopAndWait,
 } from '../../../runtime';
@@ -21,7 +22,7 @@ import {
 } from '../../../orchestrator/process/node-runtime-quiesce';
 import { resolveDbPath } from '../../../storage/runtime-dbs';
 import type { JReplica } from '../../../types/jurisdiction-runtime';
-import { attachLiveJAdapter } from '../../../runtime/j-submit/live-jadapters';
+import { bootScenario } from '../../../scenarios/harness/boot';
 import type { JurisdictionConfig } from '../../../entity/types';
 import { createTestEntityImportRuntimeTx } from '../../../qa/entity-creation-fixture';
 
@@ -44,64 +45,25 @@ describe('node runtime quiesce', () => {
   });
 
   test('fences the runtime loop from resurrecting a stopped J watcher during quiesce', async () => {
-    const env = createEmptyEnv(null);
-    let watching = false;
-    let startCount = 0;
-    let stopCount = 0;
-    const adapter = {
-      mode: 'rpc' as const,
-      chainId: 31_337,
-      addresses: {
-        account: '0x0000000000000000000000000000000000000001',
-        depository: '0x0000000000000000000000000000000000000002',
-        entityProvider: '0x0000000000000000000000000000000000000003',
-        deltaTransformer: '0x0000000000000000000000000000000000000004',
-      },
-      provider: { _getConnection: () => ({ url: 'http://127.0.0.1:8545' }) },
-      startWatching: () => {
-        startCount += 1;
-        watching = true;
-      },
-      stopWatching: () => {
-        stopCount += 1;
-        watching = false;
-      },
-      stopWatchingAndWait: async () => {
-        stopCount += 1;
-        watching = false;
-      },
-      isWatching: () => watching,
-    };
-    env.state.jReplicas.set('quiesce-race', {
-      name: 'quiesce-race',
-      blockNumber: 0n,
-      stateRoot: new Uint8Array(32),
-      mempool: [],
-      blockDelayMs: 0,
-      lastBlockTimestamp: 0,
-      position: { x: 0, y: 0, z: 0 },
-      depositoryAddress: adapter.addresses.depository,
-      entityProviderAddress: adapter.addresses.entityProvider,
-      contracts: adapter.addresses,
-      rpcs: ['http://127.0.0.1:8545'],
-      chainId: adapter.chainId,
-    } as unknown as JReplica);
-    attachLiveJAdapter(env, 'quiesce-race', adapter as never);
-
-    startRuntimeLoop(env, { tickDelayMs: 0 });
-    expect(startCount).toBe(1);
-    expect(watching).toBe(true);
-
-    const result = await quiesceNodeRuntime(env, {
-      workTimeoutMs: 100,
-      loopTimeoutMs: 100,
-      quietMs: 1,
+    const { env, jadapter } = await bootScenario({
+      name: 'quiesce-watcher', seed: 'quiesce-watcher', signerIds: ['1'],
+      storageEnabled: false, mode: 'browservm',
     });
-
-    expect(result).toEqual({ runtimeDrained: true, runtimeIdle: true });
-    expect(startCount).toBe(1);
-    expect(stopCount).toBe(1);
-    expect(watching).toBe(false);
+    try {
+      startRuntimeLoop(env, { tickDelayMs: 0 });
+      expect(jadapter.isWatching()).toBe(true);
+      const result = await quiesceNodeRuntime(env, {
+        workTimeoutMs: 100, loopTimeoutMs: 100, quietMs: 1,
+      });
+      expect(result).toEqual({ runtimeDrained: true, runtimeIdle: true });
+      expect(env.infrastructure.persistenceQuiescing).toBe(true);
+      expect(jadapter.isWatching()).toBe(false);
+      startJurisdictionWatchers(env);
+      expect(jadapter.isWatching()).toBe(false);
+    } finally {
+      await stopRuntimeLoopAndWait(env);
+      await jadapter.close();
+    }
   });
 
   test('drains accepted runtime work even when the runtime loop was already stopped', async () => {

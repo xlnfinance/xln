@@ -1107,6 +1107,11 @@ pub fn validate_settlement_ops(
     ops: &[CanonicalValue],
     proposer_is_left: bool,
 ) -> Result<(), String> {
+    // Entity admission shares the Account upsert requirement: an empty
+    // workspace cannot become a signed proposal.
+    if ops.is_empty() {
+        return Err("SETTLEMENT_WORKSPACE_OPS_EMPTY".into());
+    }
     compile_ops(ops, proposer_is_left).map(|_| ())
 }
 

@@ -6,6 +6,8 @@ import { openAccountWorkspaceTab } from '../../utils/e2e-account-workspace';
 
 import { acceptRemoteRuntimeConsent, resolveRuntimeImportAppUrl } from '../../utils/runtime/e2e-runtime-import';
 
+import { verifyExternalWalletSnapshotEvidence, verifySiblingWalletDomains } from '../../utils/runtime/e2e-external-wallet-evidence';
+
 import { closeRuntimeContext } from '../../utils/runtime/e2e-runtime-shutdown.mts';
 
 import { HUB_MESH_CREDIT_AMOUNT } from '../../../core/orchestrator/mesh/mesh-common';
@@ -452,6 +454,10 @@ test('remote /app opens an existing hub runtime through radapter', { tag: '@func
   const key = (await resolveRuntimeImportCapability(page, h1Endpoint, 'admin')).token;
   const url = remoteRuntimeUrl('/app', wsUrl, key);
 
+  const walletEvidence = page.waitForResponse(response =>
+    new URL(response.url()).pathname === '/api/external-wallet/snapshot' &&
+    response.request().method() === 'POST',
+  );
   await page.goto(url, { waitUntil: 'domcontentloaded' });
   await acceptRemoteRuntimeConsent(page);
 
@@ -519,6 +525,10 @@ test('remote /app opens an existing hub runtime through radapter', { tag: '@func
       debugRootAdapterAuthLevel: rootAdapterStatus?.authLevel ?? null,
     };
   }, h1);
+
+  const walletResponse = await walletEvidence;
+  const walletInput = await verifyExternalWalletSnapshotEvidence(page, walletResponse);
+  await verifySiblingWalletDomains(page, walletResponse.url(), walletInput, h1Endpoint.runtimeId);
 
   expect(snapshot.runtimeId).toBe(h1Endpoint.runtimeId);
   expect(snapshot.height).toBeGreaterThan(0);

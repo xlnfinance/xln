@@ -12,7 +12,7 @@ test('runtime projection cannot cross a runtime switch boundary', () => {
 
 test('entity workspace shell consumes a projected workspace view instead of traversing replicas inline', () => {
   const source = readFileSync('frontend/src/lib/components/Entity/workspace/EntityWorkspace.svelte', 'utf8');
-  expect(source).toContain("from '$lib/stores/runtimeViewStore'");
+  expect(source).toContain("from '#lib/stores/runtimeViewStore.ts'");
   expect(source).toContain('runtimeQueryClient.readViewFrame(runtimeViewQueryAtHeight({');
   expect(source).toContain('workspaceProjectionFrame = frame');
   expect(source).toContain("const entityId = handle.mode === 'remote'");
@@ -148,9 +148,9 @@ test('user mode remote workspace mounts from RuntimeView instead of RuntimeRepli
   expect(userMode).toContain('runtimeView,');
   expect(userMode).toContain('runtimeViewActiveEntityId,');
   expect(userMode).toContain('setRuntimeViewActiveEntityId,');
-  expect(userMode).toContain("from '$lib/stores/runtimeViewStore'");
+  expect(userMode).toContain("from '#lib/stores/runtimeViewStore.ts'");
   expect(userMode).toContain('setRuntimeViewActiveEntityId');
-  expect(userMode).toContain("import { runtimeControllerHandle } from '$lib/stores/runtimeControllerStore'");
+  expect(userMode).toContain("import { runtimeControllerHandle } from '#lib/stores/runtimeControllerStore.ts'");
   expect(userMode).toContain('$runtimeView.frame');
   expect(userMode).toContain('$runtimeView.activeEntityId');
   expect(userMode).toContain('runtimeProjectionMatchesRuntime($runtimeView.runtimeId, $activeRuntimeId)');
@@ -214,7 +214,7 @@ test('user mode remote workspace mounts from RuntimeView instead of RuntimeRepli
   expect(workspace).not.toContain('export let onGoToLive');
   expect(workspace).toContain('entity-workspace-action-unavailable');
 
-  expect(dockWrapper).toContain("import { runtimeControllerHandle } from '$lib/stores/runtimeControllerStore';");
+  expect(dockWrapper).toContain("import { runtimeControllerHandle } from '#lib/stores/runtimeControllerStore.ts';");
   expect(dockWrapper).toContain("const isRemoteRuntime = $derived.by<boolean>(() => $runtimeControllerHandle.mode === 'remote');");
   expect(dockWrapper).toContain('if (isRemoteRuntime) return null;');
   expect(dockWrapper).toContain("if ($runtimeControllerHandle.status === 'connected' && $runtimeControllerHandle.runtimeId)");

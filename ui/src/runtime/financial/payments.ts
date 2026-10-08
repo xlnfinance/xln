@@ -1,3 +1,4 @@
+import { sendRuntimeInput } from '../commands';
 import type { PaymentDeliveryMode } from '@xln/core/api/public/runtime-module';
 import type { RuntimeAdapterPaymentRoutesResponse, RuntimeAdapterSendResult } from '@xln/core/api/runtime-adapter/types';
 import { buildPaymentRuntimeInput } from '@xln/frontend/lib/components/Entity/payments/runtime/payment-command';
@@ -98,5 +99,5 @@ export async function submitPayment(input: {
 	description: string;
 	route: PaymentRouteQuote;
 }): Promise<RuntimeAdapterSendResult> {
-	return requireAdapter().send(buildPaymentRuntimeInput(input));
+	return sendRuntimeInput(buildPaymentRuntimeInput(input));
 }

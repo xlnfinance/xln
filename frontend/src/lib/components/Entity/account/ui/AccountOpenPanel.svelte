@@ -1,8 +1,8 @@
 <script lang="ts">
-import type { EntityReadView } from '$lib/components/Entity/core/entity-panel-types';
+import type { EntityReadView } from '#lib/components/Entity/core/entity-panel-types.ts';
 
   import type { RuntimeReplica, Profile as GossipProfile, RuntimeInput } from '@xln/core/api/public/runtime-module';
-  import type { Tab } from '$lib/types/ui';
+  import type { Tab } from '#lib/types/ui.ts';
   import type { DisputedAccountView } from '../account-dispute-view';
   import EntityInput from '../../../shared/EntityInput.svelte';
   import HubDiscoveryPanel from '../../onboarding/HubDiscoveryPanel.svelte';

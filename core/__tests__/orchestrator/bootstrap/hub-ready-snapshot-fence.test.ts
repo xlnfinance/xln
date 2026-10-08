@@ -91,9 +91,17 @@ test('authority evidence captures materialized H1 before MM bootstrap', () => {
     XLN_RUNTIME_SNAPSHOT_EXPORT_PATH: '/tmp/authority-base.json',
     XLN_MAX_ENTITY_INPUTS_PER_RUNTIME_FRAME: '4',
     XLN_MAX_ENTITY_TXS_PER_RUNTIME_FRAME: '8',
+    XLN_STACK_MANAGER_WORKER_PATH: '/opt/xln/dist/stack-manager-native.js',
+    XLN_BRAINVAULT_CUSTODY_WORKER_PATH: '/opt/xln/dist/brainvault-custody-native.js',
+    XLN_BRAINVAULT_WORKER_PATH: '/opt/xln/dist/brainvault-worker-native.js',
   };
   const h1 = buildHubChildProcessEnv({ ...base, hubName: 'H1', sourceEnv });
   const h2 = buildHubChildProcessEnv({ ...base, hubName: 'H2', sourceEnv });
+  expect(h1['XLN_STACK_MANAGER_WORKER_PATH']).toBe('/opt/xln/dist/stack-manager-native.js');
+  expect(h1['XLN_STACK_MANAGER_BUN_PATH']).toBe(process.execPath);
+  expect(h1['XLN_BRAINVAULT_CUSTODY_WORKER_PATH']).toBe('/opt/xln/dist/brainvault-custody-native.js');
+  expect(h1['XLN_BRAINVAULT_BUN_PATH']).toBe(process.execPath);
+  expect(h1['XLN_BRAINVAULT_WORKER_PATH']).toBe('/opt/xln/dist/brainvault-worker-native.js');
   expect(h1['XLN_STORAGE_MATERIALIZE_PERIOD_FRAMES']).toBe('100');
   expect(h1['XLN_HLT_AUTHORITY_EVIDENCE']).toBe('1');
   expect(h1['XLN_RUNTIME_SNAPSHOT_EXPORT_PATH']).toBe('/tmp/authority-base.json');

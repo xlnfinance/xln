@@ -1,17 +1,17 @@
 <script lang="ts">
   import './qa.css';
   import { onMount } from 'svelte';
-  import QaAdminEvidenceBoard from '$lib/components/QA/QaAdminEvidenceBoard.svelte';
-  import QaProtectedImage from '$lib/components/QA/QaProtectedImage.svelte';
-  import QaPerformanceTrend from '$lib/components/QA/QaPerformanceTrend.svelte';
-  import QaScenarioPlayer from '$lib/components/QA/QaScenarioPlayer.svelte';
-  import QaTestLedgerTable from '$lib/components/QA/QaTestLedgerTable.svelte';
+  import QaAdminEvidenceBoard from '#lib/components/QA/QaAdminEvidenceBoard.svelte';
+  import QaProtectedImage from '#lib/components/QA/QaProtectedImage.svelte';
+  import QaPerformanceTrend from '#lib/components/QA/QaPerformanceTrend.svelte';
+  import QaScenarioPlayer from '#lib/components/QA/QaScenarioPlayer.svelte';
+  import QaTestLedgerTable from '#lib/components/QA/QaTestLedgerTable.svelte';
   import {
     qaScenarioDescription,
     qaScenarioSummary,
     qaScenarioTitle,
-  } from '$lib/qa/scenarioPlayer';
-  import { clearQaToken, consumeQaTokenFromUrl, qaFetch, writeQaToken } from '$lib/qa/apiClient';
+  } from '#lib/qa/scenarioPlayer.ts';
+  import { clearQaToken, consumeQaTokenFromUrl, qaFetch, writeQaToken } from '#lib/qa/apiClient.ts';
   import {
     benchmarkLabel,
     browserHealth,
@@ -41,14 +41,14 @@
     shortHash,
     statusLabel,
     topRegressionMetric,
-  } from '$lib/qa/cockpit-helpers';
+  } from '#lib/qa/cockpit-helpers.ts';
   import {
     buildAdminStoryCards,
     normalizeQaAdminHealth,
     type QaAdminHealthSnapshot,
-  } from '$lib/qa/adminEvidence';
+  } from '#lib/qa/adminEvidence.ts';
   import { QA } from '@xln/core/config/constants';
-  import { readJsonUnknown } from '$lib/utils/boundary';
+  import { readJsonUnknown } from '#lib/utils/boundary/index.ts';
   import {
     decodeQaAuthInfo,
     decodeQaEnvelope,
@@ -66,7 +66,7 @@
     isQaTestLedgerEntry,
     isQaUxReleasePackAudit,
     isRestartStatus,
-  } from '$lib/qa/boundary';
+  } from '#lib/qa/boundary.ts';
   import type {
     QaArtifact,
     QaAuthInfo,
@@ -93,7 +93,7 @@
     RestartStatus,
     RunSortKey,
     ShardSortKey,
-  } from '$lib/qa/types';
+  } from '#lib/qa/types.ts';
 
   const requireDecodedArray = <T>(value: unknown, code: string, guard: (entry: unknown) => entry is T): T[] => {
     if (!Array.isArray(value) || !value.every(guard)) throw new Error(code);

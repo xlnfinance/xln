@@ -82,6 +82,11 @@ test(
     await derive.click();
 
     const receipt = page.getByTestId('brainvault-node-ready');
+    const failure = page.locator('.brainvault-wrapper .matrix-status.error:visible').first();
+    await expect(receipt.or(failure).first()).toBeVisible({ timeout: 120_000 });
+    if (await failure.isVisible()) {
+      throw new Error(`REMOTE_BRAINVAULT_DERIVATION_FAILED:${await failure.innerText()}`);
+    }
     await expect(receipt).toBeVisible({ timeout: 120_000 });
     await expect(receipt).toContainText('Native benchmark');
     await expect(receipt.locator('#node-mnemonic-export')).toHaveCount(0);

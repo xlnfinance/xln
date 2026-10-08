@@ -1,5 +1,5 @@
 import type { JurisdictionConfig } from '@xln/core/api/public/runtime-module';
-import { isUnknownRecord, readJsonUnknown } from '$lib/utils/boundary';
+import { isUnknownRecord, readJsonUnknown } from '#lib/utils/boundary/index.ts';
 import {
   type HealthMachine,
   type HealthPayload,

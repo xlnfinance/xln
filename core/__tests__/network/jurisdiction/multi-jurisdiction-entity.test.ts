@@ -27,7 +27,7 @@ import { generateLazyEntityId, generateNumberedEntityId } from '../../../entity/
 import { getEntityConfigBoardHash } from '../../../hanko/signing';
 import { DEFAULT_ACCOUNT_TOKEN_IDS } from '../../../account/config/defaults';
 import { accountStateDomainFromJurisdiction } from '../../../account/commitment/state-root';
-import type { JAdapter } from '../../../jurisdiction/adapter/types';
+import { createJAdapter, type JAdapter } from '../../../jurisdiction/adapter';
 import { canonicalizeProfile, parseProfile } from '../../../entity/profile';
 import type { ConsensusConfig, JurisdictionConfig } from '../../../entity/types';
 import type { RuntimeReplica } from '../../../runtime/types';
@@ -42,6 +42,7 @@ const addr = (byte: string): string => `0x${byte.repeat(20)}`;
 const entity = (byte: string): string => generateNumberedEntityId(Number.parseInt(byte, 16));
 let envSequence = 0;
 const createdEnvs: RuntimeReplica[] = [];
+const adapters: JAdapter[] = [];
 
 const cleanupEnvStorage = (env: RuntimeReplica): void => {
   const base = resolveDbPath(env, 'core');
@@ -51,6 +52,7 @@ const cleanupEnvStorage = (env: RuntimeReplica): void => {
 };
 
 afterEach(async () => {
+  while (adapters.length > 0) await adapters.pop()!.close();
   while (createdEnvs.length > 0) {
     const env = createdEnvs.pop()!;
     await closeRuntimeDb(env);
@@ -67,22 +69,11 @@ const makeJurisdiction = (name: string, chainId: number, depByte: string, epByte
   entityProviderAddress: addr(epByte),
 });
 
-const installJurisdiction = (env: RuntimeReplica, jurisdiction: JurisdictionConfig, jadapter?: Partial<JAdapter>): void => {
-  const adapter = jadapter
-    ? {
-        setBlockTimestamp: () => {},
-        isWatching: () => false,
-        startWatching: () => {},
-        stopWatching: () => {},
-        stopWatchingAndWait: async () => {},
-        ...jadapter,
-      } as Partial<JAdapter> & { setBlockTimestamp: () => void }
-    : undefined;
+const installJurisdiction = (env: RuntimeReplica, jurisdiction: JurisdictionConfig, adapter?: JAdapter): void => {
   env.state.jReplicas.set(jurisdiction.name, createTestJReplica({
     name: jurisdiction.name,
     rpcs: [jurisdiction.address],
     chainId: jurisdiction.chainId,
-    contracts: { depository: jurisdiction.depositoryAddress, entityProvider: jurisdiction.entityProviderAddress },
     contracts: {
       depository: jurisdiction.depositoryAddress,
       entityProvider: jurisdiction.entityProviderAddress,
@@ -92,7 +83,7 @@ const installJurisdiction = (env: RuntimeReplica, jurisdiction: JurisdictionConf
     ...(jurisdiction.blockTimeMs !== undefined ? { blockTimeMs: jurisdiction.blockTimeMs } : {}),
     watcherConfirmationDepth: 0,
   }));
-  if (adapter) attachLiveJAdapter(env, jurisdiction.name, adapter as JAdapter);
+  if (adapter) attachLiveJAdapter(env, jurisdiction.name, adapter);
 };
 
 const makeConfig = (signerId: string, jurisdiction: JurisdictionConfig): ConsensusConfig => ({
@@ -539,29 +530,30 @@ describe('multi-jurisdiction entity binding', () => {
 
   test('debt enforcement RuntimeInput uses the entity jurisdiction instead of active jurisdiction', async () => {
     const env = makeEnv('multi-jurisdiction-debt');
-    const j1 = makeJurisdiction('J1', 31337, '11', '12');
-    const j2 = makeJurisdiction('J2', 31338, '21', '22');
+    const adapter1 = await createJAdapter({ mode: 'browservm', chainId: 31337 });
+    adapters.push(adapter1);
+    const adapter2 = await createJAdapter({ mode: 'browservm', chainId: 31338 });
+    adapters.push(adapter2);
+    const j1 = { ...makeJurisdiction('J1', 31337, '11', '12'),
+      depositoryAddress: adapter1.addresses.depository,
+      entityProviderAddress: adapter1.addresses.entityProvider };
+    const j2 = { ...makeJurisdiction('J2', 31338, '21', '22'),
+      depositoryAddress: adapter2.addresses.depository,
+      entityProviderAddress: adapter2.addresses.entityProvider };
     let j1Calls = 0;
     let j2Calls = 0;
-
-    installJurisdiction(env, j1, {
-      enforceDebts: async () => {
-        j1Calls += 1;
-      },
-      submitTx: async (jTx) => {
-        if (jTx.type === 'debtEnforcement') j1Calls += 1;
-        return { success: true };
-      },
-    });
-    installJurisdiction(env, j2, {
-      enforceDebts: async () => {
-        j2Calls += 1;
-      },
-      submitTx: async (jTx) => {
-        if (jTx.type === 'debtEnforcement') j2Calls += 1;
-        return { success: true };
-      },
-    });
+    const submit1 = adapter1.submitTx.bind(adapter1);
+    const submit2 = adapter2.submitTx.bind(adapter2);
+    adapter1.submitTx = async (tx, options) => {
+      if (tx.type === 'debtEnforcement') j1Calls += 1;
+      return submit1(tx, options);
+    };
+    adapter2.submitTx = async (tx, options) => {
+      if (tx.type === 'debtEnforcement') j2Calls += 1;
+      return submit2(tx, options);
+    };
+    installJurisdiction(env, j1, adapter1);
+    installJurisdiction(env, j2, adapter2);
     env.activeJurisdiction = 'J1';
 
     const entityId = entity('02');

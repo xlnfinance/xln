@@ -662,7 +662,7 @@ pub(crate) fn cross_jurisdiction_account_view_requests(
                     .cross_jurisdiction_swaps
                     .as_ref()
                     .and_then(|routes| routes.get(order_id))
-                    .ok_or_else(|| invalid(tx.kind, format!("ROUTE_MISSING:{order_id}")))?;
+                    .ok_or_else(|| rejected(tx.kind, format!("ROUTE_MISSING:{order_id}")))?;
                 let local = normalized(&state.entity_id);
                 let source_user = nested_text(route, "source", "entityId")
                     .map(normalized)
@@ -1608,7 +1608,7 @@ fn apply_materialize_clear(
         .as_ref()
         .and_then(|routes| routes.get(&order_id))
         .cloned()
-        .ok_or_else(|| invalid(tx.kind, format!("ROUTE_MISSING:{order_id}")))?;
+        .ok_or_else(|| rejected(tx.kind, format!("ROUTE_MISSING:{order_id}")))?;
     if text(&route, "status") != Some("clear_requested") {
         return Err(invalid(tx.kind, format!("CLEAR_INTENT_MISSING:{order_id}")));
     }
@@ -1728,15 +1728,23 @@ fn semantic_route<'a>(
 ) -> Result<&'a CanonicalValue, EntityKernelError> {
     let order_id = semantic_order_id(tx)
         .filter(|value| !value.is_empty())
-        .ok_or_else(|| runtime_invalid("RUNTIME_OUTPUT_ROUTE_MISSING:missing"))?;
+        .ok_or_else(|| {
+            rejected(
+                EntityTxKind::RuntimeOutput,
+                "RUNTIME_OUTPUT_ROUTE_MISSING:missing",
+            )
+        })?;
     let supplied = tx.frame_data().and_then(|data| field(data, "route"));
     let stored = state
         .cross_jurisdiction_swaps
         .as_ref()
         .and_then(|routes| routes.get(order_id));
-    let route = stored
-        .or(supplied)
-        .ok_or_else(|| runtime_invalid(format!("RUNTIME_OUTPUT_ROUTE_MISSING:{order_id}")))?;
+    let route = stored.or(supplied).ok_or_else(|| {
+        rejected(
+            EntityTxKind::RuntimeOutput,
+            format!("RUNTIME_OUTPUT_ROUTE_MISSING:{order_id}"),
+        )
+    })?;
     if text(route, "orderId") != Some(order_id) {
         return Err(runtime_invalid(format!(
             "RUNTIME_OUTPUT_ROUTE_MISSING:{order_id}"
@@ -1878,6 +1886,32 @@ fn authorize_semantic_role(
                 [source_hub.clone(), target_hub, book_owner],
             )?;
             assert_target(tx.kind, target, &source_hub)
+        }
+        EntityTxKind::CrossJurisdictionForceSiblingDispute => {
+            // The finalized Account observer notifies its same-role sibling,
+            // and must name its own Account counterparty, never another leg.
+            let edges = [
+                (&source_user, &target_user, &source_hub),
+                (&source_hub, &target_hub, &source_user),
+                (&target_user, &source_user, &target_hub),
+                (&target_hub, &source_hub, &target_user),
+            ];
+            let (_, sibling, expected_observed) = edges
+                .into_iter()
+                .find(|(emitter, _, _)| emitter.as_str() == source)
+                .ok_or_else(|| {
+                    runtime_invalid(format!(
+                        "RUNTIME_OUTPUT_SIBLING_DISPUTE_SOURCE_INVALID:{source}"
+                    ))
+                })?;
+            assert_target(tx.kind, target, sibling)?;
+            let observed = required_text(data, "observedCounterpartyEntityId", tx)?;
+            if &observed != expected_observed {
+                return Err(runtime_invalid(format!(
+                    "RUNTIME_OUTPUT_SIBLING_DISPUTE_OBSERVED_MISMATCH:{observed}:{expected_observed}"
+                )));
+            }
+            Ok(())
         }
         EntityTxKind::CrossJurisdictionSalvage => {
             let claimed_source = required_text(data, "sourceEntityId", tx)?;
@@ -2566,17 +2600,24 @@ fn apply_prepare(
     let source_hub =
         normalized(nested_text(&route, "source", "counterpartyEntityId").unwrap_or_default());
     if local == source_user || local == target_user {
-        insert_exact(
+        let inserted = insert_exact(
             &mut state.cross_jurisdiction_authorizations,
             &order_id,
             route.clone(),
             tx.kind,
         )?;
-        if local != source_user {
-            return Ok(CrossJurisdictionApplyResult::default());
-        }
-        return Ok(CrossJurisdictionApplyResult {
-            outputs: vec![routed_for_route(
+        let role = if local == source_user {
+            "source"
+        } else {
+            "target"
+        };
+        let message = if inserted {
+            format!("🌉 Cross-j swap {order_id} authorized by {role} user")
+        } else {
+            format!("🌉 Cross-j swap {order_id} auth retry re-emitted by {role} user")
+        };
+        let outputs = if local == source_user {
+            vec![routed_for_route(
                 &route,
                 &source_hub,
                 vec![route_tx(
@@ -2584,10 +2625,13 @@ fn apply_prepare(
                     &route,
                 )?],
                 tx.kind,
-            )?],
-            events: vec![EntityFrameEvent::Status {
-                message: format!("🌉 Cross-j swap {order_id} authorized by source user"),
-            }],
+            )?]
+        } else {
+            Vec::new()
+        };
+        return Ok(CrossJurisdictionApplyResult {
+            outputs,
+            events: vec![EntityFrameEvent::Status { message }],
             ..CrossJurisdictionApplyResult::default()
         });
     }
@@ -3406,7 +3450,7 @@ fn apply_cross_pull_close(
         .as_ref()
         .and_then(|routes| routes.get(&order_id))
         .cloned()
-        .ok_or_else(|| invalid(tx.kind, format!("ROUTE_MISSING:{order_id}")))?;
+        .ok_or_else(|| rejected(tx.kind, format!("ROUTE_MISSING:{order_id}")))?;
     let local = normalized(&state.entity_id);
     let source_pull =
         field(&route, "sourcePull").ok_or_else(|| invalid(tx.kind, "SOURCE_PULL_MISSING"))?;
@@ -4549,7 +4593,7 @@ fn apply_clear_request(
         .as_ref()
         .and_then(|values| values.get(&order_id))
         .cloned()
-        .ok_or_else(|| invalid(tx.kind, format!("ROUTE_MISSING:{order_id}")))?;
+        .ok_or_else(|| rejected(tx.kind, format!("ROUTE_MISSING:{order_id}")))?;
     let cancel_remainder = matches!(
         field(data, "cancelRemainder"),
         Some(CanonicalValue::Bool(true))
@@ -6434,6 +6478,71 @@ mod tests {
                 .to_string()
                 .contains("RUNTIME_OUTPUT_SOURCE_SIGNER_MISMATCH")
         );
+    }
+
+    #[test]
+    fn sibling_dispute_output_binds_observer_target_and_observed_account() {
+        for (source, target, observed) in [
+            ("source-user", "target-user", "source-hub"),
+            ("source-hub", "target-hub", "source-user"),
+            ("target-user", "source-user", "target-hub"),
+            ("target-hub", "source-hub", "target-user"),
+        ] {
+            let mut state = EntityStateSlice::empty(target, 1);
+            collection(&mut state.cross_jurisdiction_swaps)
+                .insert("order-1".into(), route("resting", true))
+                .expect("route");
+            let nested = |account: &str| {
+                projected(
+                    EntityTxKind::CrossJurisdictionForceSiblingDispute,
+                    obj(vec![
+                        ("routeId", string("order-1")),
+                        ("observedCounterpartyEntityId", string(account)),
+                    ]),
+                )
+                .expect("tx")
+            };
+            let output =
+                |emitter: &str, signer: &str, account: &str| CrossJurisdictionRuntimeOutput {
+                    source_entity_id: emitter.into(),
+                    source_signer_id: signer.into(),
+                    target_entity_id: target.into(),
+                    entity_txs: vec![nested(account)],
+                };
+            let board = authority(
+                "source-hub-signer",
+                1,
+                "0x1111111111111111111111111111111111111111",
+            );
+            authorize_runtime_output(
+                &state,
+                &output(source, &format!("{source}-signer"), observed),
+                &board,
+            )
+            .expect("exact observer sibling edge");
+            let wrong_account = authorize_runtime_output(
+                &state,
+                &output(source, &format!("{source}-signer"), target),
+                &board,
+            )
+            .expect_err("observed account cannot be spoofed");
+            assert!(
+                wrong_account
+                    .to_string()
+                    .contains("SIBLING_DISPUTE_OBSERVED_MISMATCH")
+            );
+            let wrong_role = authorize_runtime_output(
+                &state,
+                &output(observed, &format!("{observed}-signer"), source),
+                &board,
+            )
+            .expect_err("wrong observer role");
+            assert!(wrong_role.to_string().contains("SEMANTIC_TARGET_MISMATCH"));
+            let wrong_signer =
+                authorize_runtime_output(&state, &output(source, "attacker", observed), &board)
+                    .expect_err("wrong observer signer");
+            assert!(wrong_signer.to_string().contains("SOURCE_SIGNER_MISMATCH"));
+        }
     }
 
     #[test]

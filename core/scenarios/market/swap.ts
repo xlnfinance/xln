@@ -889,13 +889,28 @@ export async function swapWithOrderbook(env: RuntimeReplica): Promise<RuntimeRep
     entityTxs: [{ type: 'j_broadcast', data: {} }],
   }]);
 
-  // Wait for DisputeStarted to propagate
-  for (let i = 0; i < 20; i++) {
+  // Local disputeStart latches timeout=0 until DisputeStarted is observed.
+  let timeoutUnix = 0;
+  for (let round = 0; round < 40; round++) {
+    await syncChain(env, 1);
+    await processJEvents(env);
     await process(env);
-    const jRep = env.state.jReplicas.get('Swap Demo');
-    if (jRep && jRep.mempool.length === 0) break;
+    const runtimeTimeout = Number(
+      findReplica(env, hub.id)[1].state.accounts.get(alice.id)?.activeDispute?.disputeTimeout || 0,
+    );
+    const onChainTimeout = Number((await jadapter.getAccountInfo(hub.id, alice.id)).disputeTimeout || 0);
+    timeoutUnix = onChainTimeout > 0 ? onChainTimeout : runtimeTimeout;
+    const observed = findReplica(env, hub.id)[1].state.accounts.get(alice.id)?.activeDispute?.observedOnChain === true;
+    const counterpartyObserved = findReplica(env, alice.id)[1].state.accounts.get(hub.id)?.activeDispute?.observedOnChain === true;
+    if (onChainTimeout > 0 && observed && counterpartyObserved) break;
   }
-  await drainPendingJEvents(env);
+  const bothObserved = [
+    findReplica(env, hub.id)[1].state.accounts.get(alice.id),
+    findReplica(env, alice.id)[1].state.accounts.get(hub.id),
+  ].every(account => account?.activeDispute?.observedOnChain === true);
+  if (!(timeoutUnix > 0) || !bothObserved) {
+    throw new Error('SWAP_DISPUTE_TIMEOUT_MISSING_AFTER_START');
+  }
 
   const [, hubAfterStart] = findReplica(env, hub.id);
   const hubAccountAfterStart = requireAccount(hubAfterStart.state.accounts.get(alice.id), 'hub/alice after dispute start');
@@ -917,23 +932,6 @@ export async function swapWithOrderbook(env: RuntimeReplica): Promise<RuntimeRep
     'Counterparty dispute proofBodyHash matches on-chain start hash'
   );
 
-  // Local disputeStart latches timeout=0 until DisputeStarted is observed.
-  let timeoutUnix = 0;
-  for (let round = 0; round < 40; round++) {
-    await syncChain(env, 1);
-    await processJEvents(env);
-    await process(env);
-    const runtimeTimeout = Number(
-      findReplica(env, hub.id)[1].state.accounts.get(alice.id)?.activeDispute?.disputeTimeout || 0,
-    );
-    const onChainTimeout = Number((await jadapter.getAccountInfo(hub.id, alice.id)).disputeTimeout || 0);
-    timeoutUnix = onChainTimeout > 0 ? onChainTimeout : runtimeTimeout;
-    const observed = findReplica(env, hub.id)[1].state.accounts.get(alice.id)?.activeDispute?.observedOnChain === true;
-    if (timeoutUnix > 0 && observed) break;
-  }
-  if (!(timeoutUnix > 0)) {
-    throw new Error('SWAP_DISPUTE_TIMEOUT_MISSING_AFTER_START');
-  }
   console.log(`⏳ Waiting for dispute timeout (unix ${timeoutUnix})...`);
   const advanced = await advanceScenarioPastDisputeTimeout(
     env,

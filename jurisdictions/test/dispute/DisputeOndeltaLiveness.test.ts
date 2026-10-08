@@ -1,3 +1,5 @@
+import { encodeInt512, decodeInt512, decodeUint512, decodeUint768 } from '../../../core/protocol/crypto/abi-money.ts';
+import { PROOF_BODY_ABI } from '../../../core/protocol/dispute/proof-body.ts';
 import { expect } from 'chai';
 import hre from 'hardhat';
 import type { HardhatEthersSigner } from '@nomicfoundation/hardhat-ethers/signers.js';
@@ -19,11 +21,9 @@ const { ethers, networkHelpers } = await hre.network.getOrCreate('hardhat');
 const { loadFixture, mine, time } = networkHelpers;
 const abi = ethers.AbiCoder.defaultAbiCoder();
 const DISPUTE_PROOF = 1;
-const INT256_MAX = (1n << 255n) - 1n; // token-supply validity bound (Account._tokenSupply)
-const MAX_MONEY = 1n << 200n; // Types.sol: cap on every financial magnitude
+const UINT256_MAX = (1n << 256n) - 1n;
+const MAX_MONEY = 1n << 200n; // Large test magnitude, not a protocol cap.
 const WATCH_SEED = ethers.keccak256(ethers.toUtf8Bytes('xln:ondelta-liveness'));
-const PROOF_BODY_ABI =
-  'tuple(bytes32 watchSeed,uint32 leftResponseSeconds,uint32 rightResponseSeconds,int256[] offdeltas,uint256[] tokenIds,tuple(address transformerAddress,bytes encodedBatch,tuple(uint256 deltaIndex,uint256 rightAllowance,uint256 leftAllowance)[] allowances)[] transformers)';
 
 type Actor = Readonly<{
   signer: HardhatEthersSigner;
@@ -101,21 +101,15 @@ const disputeProofHash = async (
 };
 
 describe('dispute ondelta liveness', function () {
-  it('caps a reserve at exactly MAX_MONEY (2^200) before mutating state', async function () {
+  it('caps a reserve at uint256 max and reverts overflow before mutating state', async function () {
     const { depository, signer0 } = await loadFixture(deployFixture);
     const owner = actor(signer0, 0);
-    const { tokenId } = await registerFixedErc20(depository, MAX_MONEY);
-    const oversized = MAX_MONEY + 1n;
-
-    await expect(depository.mintToReserve(owner.entityId, tokenId, oversized))
-      .to.be.revertedWithCustomError(depository, 'E8');
-    expect(await depository._reserves(owner.entityId, tokenId)).to.equal(0n);
-
-    await depository.mintToReserve(owner.entityId, tokenId, MAX_MONEY);
-    expect(await depository._reserves(owner.entityId, tokenId)).to.equal(MAX_MONEY);
-    await expect(depository.mintToReserve(owner.entityId, tokenId, 1n))
-      .to.be.revertedWithCustomError(depository, 'E8');
-    expect(await depository._reserves(owner.entityId, tokenId)).to.equal(MAX_MONEY);
+    const maximum = (1n << 256n) - 1n;
+    const { tokenId } = await registerFixedErc20(depository, maximum);
+    await depository.mintToReserve(owner.entityId, tokenId, maximum);
+    expect(await depository._reserves(owner.entityId, tokenId)).to.equal(maximum);
+    await expect(depository.mintToReserve(owner.entityId, tokenId, 1n)).to.be.revertedWithPanic(0x11);
+    expect(await depository._reserves(owner.entityId, tokenId)).to.equal(maximum);
   });
 
   it('finalizes exactly when ondelta and offdelta both sit at the MAX_MONEY bound', async function () {
@@ -138,13 +132,13 @@ describe('dispute ondelta liveness', function () {
     }));
     const funded = await depository._collaterals(accountKey, tokenId);
     expect(funded.collateral).to.equal(MAX_MONEY);
-    expect(funded.ondelta).to.equal(MAX_MONEY);
+    expect(decodeInt512(funded.ondelta)).to.equal(MAX_MONEY);
 
     const proofbody = {
       watchSeed: WATCH_SEED,
       leftResponseSeconds: 2,
       rightResponseSeconds: 3,
-      offdeltas: [MAX_MONEY],
+      offdeltas: [MAX_MONEY].map(encodeInt512),
       tokenIds: [tokenId],
       transformers: [],
     };
@@ -185,15 +179,15 @@ describe('dispute ondelta liveness', function () {
 
     const collateral = await depository._collaterals(accountKey, tokenId);
     expect(collateral.collateral).to.equal(0n);
-    expect(collateral.ondelta).to.equal(0n);
+    expect(decodeInt512(collateral.ondelta)).to.equal(0n);
     expect((await depository._accounts(accountKey)).disputeHash).to.equal(ethers.ZeroHash);
     expect(await depository._reserves(left.entityId, tokenId)).to.equal(MAX_MONEY);
     expect(await depository._reserves(right.entityId, tokenId)).to.equal(0n);
-    expect(await depository.debtOutstanding(right.entityId, tokenId)).to.equal(MAX_MONEY);
-    expect(await depository.debtOutstanding(left.entityId, tokenId)).to.equal(0n);
+    expect(decodeUint768(await depository.debtOutstanding(right.entityId, tokenId))).to.equal(MAX_MONEY);
+    expect(decodeUint768(await depository.debtOutstanding(left.entityId, tokenId))).to.equal(0n);
   });
 
-  it('settles an offdelta of exactly -MAX_MONEY and rejects one unit past the bound at dispute start', async function () {
+  it('settles a large signed offdelta and rejects values outside Int512', async function () {
     const { depository, signer0, signer1 } = await loadFixture(deployFixture);
     const [left, right] = orderedActors(actor(signer0, 0), actor(signer1, 1));
     const { tokenId } = await registerFixedErc20(depository, MAX_MONEY);
@@ -216,7 +210,7 @@ describe('dispute ondelta liveness', function () {
         watchSeed: WATCH_SEED,
         leftResponseSeconds: 2,
         rightResponseSeconds: 3,
-        offdeltas: [offdelta],
+        offdeltas: [offdelta].map(encodeInt512),
         tokenIds: [tokenId],
         transformers: [],
       };
@@ -240,13 +234,8 @@ describe('dispute ondelta liveness', function () {
       return { tx, proofbody, proofbodyHash };
     };
 
-    // |offdelta| > MAX_MONEY is rejected E8 by the proof-body validation, before
-    // any account state (or the outer entity nonce) moves.
-    await expect((await startWith(-(MAX_MONEY + 1n), proofNonce)).tx).to.be.revertedWithCustomError(depository, 'E8');
-    await expect((await startWith(MAX_MONEY + 1n, proofNonce)).tx).to.be.revertedWithCustomError(depository, 'E8');
-    expect((await depository._accounts(accountKey)).disputeHash).to.equal(ethers.ZeroHash);
-    expect(await depository.entityNonces(left.entityId)).to.equal(0n);
-
+    // The signed proof domain is Int512; 2^200 is no longer a financial cap.
+    expect(() => encodeInt512(-(1n << 511n) - 1n)).to.throw('ABI_MONEY_WIDTH:Int512');
     const { tx, proofbody, proofbodyHash } = await startWith(-MAX_MONEY, proofNonce);
     await tx;
     expect((await depository._accounts(accountKey)).disputeHash).to.not.equal(ethers.ZeroHash);
@@ -271,10 +260,10 @@ describe('dispute ondelta liveness', function () {
     // delta = -2^200: RIGHT takes the 100 collateral and LEFT owes the full 2^200
     // (a negative delta is what LEFT owes beyond the collateral RIGHT receives).
     expect(await depository._reserves(right.entityId, tokenId)).to.equal(collateralAmount);
-    expect(await depository.debtOutstanding(left.entityId, tokenId)).to.equal(MAX_MONEY);
+    expect(decodeUint768(await depository.debtOutstanding(left.entityId, tokenId))).to.equal(MAX_MONEY);
     const collateral = await depository._collaterals(accountKey, tokenId);
     expect(collateral.collateral).to.equal(0n);
-    expect(collateral.ondelta).to.equal(0n);
+    expect(decodeInt512(collateral.ondelta)).to.equal(0n);
   });
 
   it('finalizes every dispute with exact debt independent of token supply', async function () {
@@ -302,7 +291,7 @@ describe('dispute ondelta liveness', function () {
         watchSeed: WATCH_SEED,
         leftResponseSeconds: 2,
         rightResponseSeconds: 3,
-        offdeltas: [debtorIsLeft ? -requestedDebts[index]! : requestedDebts[index]!],
+        offdeltas: [debtorIsLeft ? -requestedDebts[index]! : requestedDebts[index]!].map(encodeInt512),
         tokenIds: [tokenId],
         transformers: [],
       };
@@ -356,12 +345,12 @@ describe('dispute ondelta liveness', function () {
       await expect(finalization).to.not.revert(ethers);
     }
 
-    expect(await depository.debtOutstanding(debtor.entityId, tokenId)).to.equal(130n);
+    expect(decodeUint768(await depository.debtOutstanding(debtor.entityId, tokenId))).to.equal(130n);
     expect(await depository.activeDebts(debtor.entityId)).to.equal(3n);
     expect(await depository.entityNonces(debtor.entityId)).to.equal(4n);
-    expect((await depository._debts(debtor.entityId, tokenId, 0)).amount).to.equal(60n);
-    expect((await depository._debts(debtor.entityId, tokenId, 1)).amount).to.equal(60n);
-    expect((await depository._debts(debtor.entityId, tokenId, 2)).amount).to.equal(10n);
+    expect(decodeUint512((await depository._debts(debtor.entityId, tokenId, 0)).amount)).to.equal(60n);
+    expect(decodeUint512((await depository._debts(debtor.entityId, tokenId, 1)).amount)).to.equal(60n);
+    expect(decodeUint512((await depository._debts(debtor.entityId, tokenId, 2)).amount)).to.equal(10n);
     for (let index = 0; index < disputes.length; index++) {
       expect((await depository._accounts(disputes[index]!.accountKey)).disputeHash).to.equal(ethers.ZeroHash);
     }
@@ -376,18 +365,17 @@ describe('dispute ondelta liveness', function () {
     expect(await token.balanceOf(reserveHolder.signer.address)).to.equal(10n);
   });
 
-  it('rejects unsupported fixed supplies at token registration', async function () {
+  it('rejects zero supply and accepts a full uint256 fixed supply at token registration', async function () {
     const { depository } = await loadFixture(deployFixture);
     const tokenFactory = await ethers.getContractFactory('ERC20Mock');
     const zeroSupply = await tokenFactory.deploy('Zero', 'ZERO', 0, 0n);
-    const oversizedSupply = await tokenFactory.deploy('Oversized', 'HUGE', 0, INT256_MAX + 1n);
+    const oversizedSupply = await tokenFactory.deploy('Oversized', 'HUGE', 0, UINT256_MAX);
     await Promise.all([zeroSupply.waitForDeployment(), oversizedSupply.waitForDeployment()]);
 
     await expect(listErc20(depository, await zeroSupply.getAddress()))
       .to.be.revertedWithCustomError(depository, 'E11');
-    await expect(listErc20(depository, await oversizedSupply.getAddress()))
-      .to.be.revertedWithCustomError(depository, 'E11');
-    expect(await depository.getTokensLength()).to.equal(1n);
+    await listErc20(depository, await oversizedSupply.getAddress());
+    expect(await depository.getTokensLength()).to.equal(2n);
   });
 
   it('finalizes an adversarial unknown-token proof as exact internal debt', async function () {
@@ -402,7 +390,7 @@ describe('dispute ondelta liveness', function () {
       watchSeed: WATCH_SEED,
       leftResponseSeconds: 2,
       rightResponseSeconds: 3,
-      offdeltas: [debtorIsLeft ? -requested : requested],
+      offdeltas: [debtorIsLeft ? -requested : requested].map(encodeInt512),
       tokenIds: [tokenId],
       transformers: [],
     };
@@ -441,7 +429,7 @@ describe('dispute ondelta liveness', function () {
       }],
     }))).to.not.revert(ethers);
 
-    expect(await depository.debtOutstanding(debtor.entityId, tokenId)).to.equal(requested);
+    expect(decodeUint768(await depository.debtOutstanding(debtor.entityId, tokenId))).to.equal(requested);
     expect((await depository._accounts(accountKey)).disputeHash).to.equal(ethers.ZeroHash);
   });
 
@@ -462,7 +450,7 @@ describe('dispute ondelta liveness', function () {
         watchSeed: WATCH_SEED,
         leftResponseSeconds: 2,
         rightResponseSeconds: 3,
-        offdeltas: [debtorIsLeft ? -60n : 60n],
+        offdeltas: [debtorIsLeft ? -60n : 60n].map(encodeInt512),
         tokenIds: [tokenId],
         transformers: [],
       };
@@ -501,7 +489,7 @@ describe('dispute ondelta liveness', function () {
         }],
       }), 15_000_000n)).to.not.revert(ethers);
 
-      expect(await depository.debtOutstanding(debtor.entityId, tokenId)).to.equal(60n);
+      expect(decodeUint768(await depository.debtOutstanding(debtor.entityId, tokenId))).to.equal(60n);
       expect((await depository._accounts(accountKey)).disputeHash).to.equal(ethers.ZeroHash);
     });
   }

@@ -97,6 +97,57 @@ impl Drop for SessionReplies {
 }
 
 impl InboundSessionTable {
+    /// Public signed rows cross this boundary only after their Runtime WAL fsync.
+    /// The cache is transport RAM; reconnect resends, never a durable authority.
+    pub fn publish_profiles(
+        &self,
+        profiles: Vec<serde_json::Value>,
+    ) -> Result<(), RuntimeTransportError> {
+        if profiles.is_empty() {
+            return Ok(());
+        }
+        let owner = self.owner.get().ok_or(RuntimeTransportError::Config(
+            "direct-ingress-owner-missing",
+        ))?;
+        let shared = owner
+            .shared
+            .upgrade()
+            .ok_or(RuntimeTransportError::Config("direct-ingress-owner-closed"))?;
+        let mut rows = BTreeMap::new();
+        for profile in profiles {
+            let id = profile["entityId"]
+                .as_str()
+                .ok_or(RuntimeTransportError::Config("profile-entity-id"))?
+                .to_owned();
+            if profile["runtimeId"].as_str() != Some(&shared.config.runtime_id)
+                || rows.insert(id, profile).is_some()
+            {
+                return Err(RuntimeTransportError::Config("profile-owner-or-duplicate"));
+            }
+        }
+        let mut cache = shared
+            .profiles
+            .lock()
+            .map_err(|_| RuntimeTransportError::Config("profile-cache-poisoned"))?;
+        let changed = rows
+            .into_iter()
+            .filter(|(id, value)| cache.rows.get(id).is_none_or(|(_, old)| old != value))
+            .collect::<Vec<_>>();
+        if changed.is_empty() {
+            return Ok(());
+        }
+        cache.revision = cache
+            .revision
+            .checked_add(1)
+            .ok_or(RuntimeTransportError::Config("profile-revision-overflow"))?;
+        let revision = cache.revision;
+        for (id, value) in changed {
+            cache.rows.insert(id, (revision, value));
+        }
+        drop(cache);
+        self.wake_all()
+    }
+
     pub(super) fn bind_owner(
         &self,
         shared: &Arc<SharedIngress>,

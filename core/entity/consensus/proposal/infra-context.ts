@@ -4,6 +4,7 @@ import type { EntityRuntimeContext } from '../../runtime-context';
 import type { EntityReplica } from '../../types';
 import type { EntityTx } from '../../../types/entity-tx';
 import { compareStableText } from '../../../protocol/serialization';
+import { rejectFailure } from '../../../protocol/errors/failure-taxonomy';
 import { timePerfPhase } from '../../../support/performance/profile';
 import { getPrevFrameHash } from '../frame/lineage';
 
@@ -159,7 +160,7 @@ const materializeFreshEntityInfraContext = async (
   ): Promise<readonly string[]> => {
     const routes = await graph!.findPaths(entityId, tx.data.targetEntityId, tx.data.amount, tx.data.tokenId);
     const route = routes[0]?.path;
-    if (!route) throw new Error(`HTLC_PAYMENT_ROUTE_NOT_FOUND:${entityId}:${tx.data.targetEntityId}`);
+    if (!route) throw rejectFailure('HTLC_PAYMENT_INVALID', `HTLC_PAYMENT_ROUTE_NOT_FOUND:${entityId}:${tx.data.targetEntityId}`);
     return route;
   };
   const htlc = needsHtlcInfra

@@ -1,5 +1,5 @@
 <script lang="ts">
-import type { EntityReadView } from '$lib/components/Entity/core/entity-panel-types';
+import type { EntityReadView } from '#lib/components/Entity/core/entity-panel-types.ts';
 
   import { Banknote, RefreshCw } from 'lucide-svelte';
   import type { RuntimeInput } from '@xln/core/runtime/types';
@@ -10,12 +10,12 @@ import type { EntityReadView } from '$lib/components/Entity/core/entity-panel-ty
     getRuntimeControllerConfig,
     isRuntimeControllerConfigCurrent,
   } from '../../../stores/runtimeControllerStore';
-  import { runtimeHttpOriginFromWsUrl } from '$lib/utils/runtime/wsUrl';
+  import { runtimeHttpOriginFromWsUrl } from '#lib/utils/runtime/wsUrl.ts';
   import { toasts } from '../../../stores/ui/toastStore';
   import BigIntInput from '../../Common/BigIntInput.svelte';
   import EntitySelect from '../workspace/shell/EntitySelect.svelte';
   import { requireTokenDecimals } from '../token-metadata';
-  import { parseJsonUnknown, requireUnknownRecord } from '$lib/utils/boundary';
+  import { parseJsonUnknown, requireUnknownRecord } from '#lib/utils/boundary/index.ts';
 
   export let entityId: string;
   export let replica: EntityReadView | null = null;

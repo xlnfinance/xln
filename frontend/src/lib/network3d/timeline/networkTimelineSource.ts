@@ -26,7 +26,7 @@ import {
 } from '../../../../../core/scenarios/network-trail';
 import { deserializeTaggedJson, serializeTaggedJson } from '@xln/core/protocol/serialization';
 import { normalizeRuntimeTimelineIndex, type RuntimeTimelineIndex } from './runtimeGraphTimeline';
-import { isUnknownRecord, rejectExtraKeys } from '$lib/utils/boundary';
+import { isUnknownRecord, rejectExtraKeys } from '#lib/utils/boundary/index.ts';
 import { decodeNetworkMachineCue, type NetworkMachineCue } from '../networkMachine';
 
 const INDEX_PAGE_SIZE = 250;

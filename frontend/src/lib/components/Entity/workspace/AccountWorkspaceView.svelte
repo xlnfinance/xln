@@ -1,10 +1,10 @@
 <script lang="ts">
-import type { EntityReadView } from '$lib/components/Entity/core/entity-panel-types';
+import type { EntityReadView } from '#lib/components/Entity/core/entity-panel-types.ts';
 
   import type { RuntimeReplica, EnvSnapshot, Profile as GossipProfile, RuntimeInput } from '@xln/core/api/public/runtime-module';
   import type { ComponentType } from 'svelte';
   import { ArrowDownLeft, ArrowUpRight, Activity, Banknote, Landmark, PlusCircle, Repeat, Settings as SettingsIcon, SlidersHorizontal } from 'lucide-svelte';
-  import type { Tab } from '$lib/types/ui';
+  import type { Tab } from '#lib/types/ui.ts';
   import AccountAppearancePanel from '../account/ui/AccountAppearancePanel.svelte';
   import AccountConfigurePanel from '../account/ui/AccountConfigurePanel.svelte';
   import AccountDropdown from '../account/ui/AccountDropdown.svelte';

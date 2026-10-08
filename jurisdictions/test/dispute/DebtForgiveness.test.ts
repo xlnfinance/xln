@@ -1,3 +1,4 @@
+import { decodeUint512, decodeUint768 } from '../../../core/protocol/crypto/abi-money.ts';
 import { expect } from 'chai';
 import hre from 'hardhat';
 
@@ -61,22 +62,22 @@ describe('Depository current-debt forgiveness', () => {
       .to.deep.equal([true, false]);
     await expect(harness.harnessForgiveCurrent(debtor, creditorB, tokenId)).not.to.emit(harness, 'DebtForgiven');
     expect(await harness._debtIndex(debtor, tokenId)).to.equal(0n);
-    expect((await harness._debts(debtor, tokenId, 0n)).amount).to.equal(5n);
+    expect(decodeUint512((await harness._debts(debtor, tokenId, 0n)).amount)).to.equal(5n);
 
     await expect(harness.harnessForgiveCurrent(debtor, creditorA, tokenId))
       .to.emit(harness, 'DebtForgiven')
-      .withArgs(debtor, creditorA, tokenId, 5n, 0n);
+      .withArgs(debtor, creditorA, tokenId, [0n, 5n], 0n);
     expect(await harness._debtIndex(debtor, tokenId)).to.equal(1n);
-    expect(await harness.debtOutstanding(debtor, tokenId)).to.equal(16n);
+    expect(decodeUint768(await harness.debtOutstanding(debtor, tokenId))).to.equal(16n);
 
     await expect(harness.harnessForgiveCurrent(debtor, creditorA, tokenId)).not.to.emit(harness, 'DebtForgiven');
     expect(await harness._debtIndex(debtor, tokenId)).to.equal(1n);
-    expect((await harness._debts(debtor, tokenId, 2n)).amount).to.equal(9n);
+    expect(decodeUint512((await harness._debts(debtor, tokenId, 2n)).amount)).to.equal(9n);
 
     await harness.harnessForgiveCurrent(debtor, creditorB, tokenId);
     await harness.harnessForgiveCurrent(debtor, creditorA, tokenId);
     expect(await harness._debtIndex(debtor, tokenId)).to.equal(0n);
-    expect(await harness.debtOutstanding(debtor, tokenId)).to.equal(0n);
+    expect(decodeUint768(await harness.debtOutstanding(debtor, tokenId))).to.equal(0n);
     await expect(harness._debts(debtor, tokenId, 0n)).to.revert(ethers);
   });
 
@@ -154,6 +155,6 @@ describe('Depository current-debt forgiveness', () => {
     expect(await harness.entityNonces(left.entityId)).to.equal(0n);
     expect((await harness._accounts(accountKey)).nonce).to.equal(0n);
     expect(await harness._debtIndex(left.entityId, tokenId)).to.equal(0n);
-    expect((await harness._debts(left.entityId, tokenId, 0n)).amount).to.equal(blockedAmount);
+    expect(decodeUint512((await harness._debts(left.entityId, tokenId, 0n)).amount)).to.equal(blockedAmount);
   });
 });

@@ -74,6 +74,9 @@ const independentTestRunEnv = (
   // lock instead of acquiring an independent fixture lease.
   delete env[TEST_ARTIFACT_CLEANUP_DONE_ENV];
   delete env[TEST_ARTIFACT_RUN_TOKEN_ENV];
+  // The outer run preserves its evidence; these independent temporary
+  // workspaces exercise actual cleanup after their own lease is released.
+  delete env[KEEP_TEST_ARTIFACTS_ENV];
   return env;
 };
 

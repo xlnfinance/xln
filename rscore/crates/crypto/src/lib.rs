@@ -15,6 +15,7 @@ pub mod keys;
 
 pub use ecdsa::{
     EcdsaRecoveryProfileSnapshot, address_of_private_key, address_of_public_key,
-    ecdsa_recovery_profile_snapshot, normalize_recovery_byte, recover_signer_address, sign_digest,
+    compressed_public_key, ecdsa_recovery_profile_snapshot, normalize_recovery_byte,
+    recover_signer_address, sign_digest,
 };
 pub use keys::{KeyDerivationError, derive_signer_address, derive_signer_key};

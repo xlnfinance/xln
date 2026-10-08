@@ -82,6 +82,10 @@ pub enum StateError {
     /// `UnsupportedFrameTx`, which names an unmodelled kind, not a field range.
     #[error("ACCOUNT_TX_POLICY_VERSION_OUT_OF_RANGE:{version}:{maximum}")]
     PolicyVersionOutOfRange { version: u64, maximum: u64 },
+    /// Incoming intent capacity failure; the caller evicts exactly this index
+    /// and rebuilds the owning Entity candidate. Existing corrupt queues remain fatal.
+    #[error("ACCOUNT_MEMPOOL_ADMISSION_REJECTED:{index}:{maximum}")]
+    MempoolAdmissionRejected { index: usize, maximum: usize },
     #[error("ACCOUNT_MEMPOOL_LIMIT_EXCEEDED:{context}:{outstanding}:{maximum}")]
     MempoolLimitExceeded {
         context: &'static str,

@@ -1,3 +1,4 @@
+import { buildRustHubPeerRoutes } from '../../../orchestrator/process/spawn/hub';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -10,6 +11,8 @@ import {
   parseRustHubStatus,
 } from '../../../orchestrator/process/hub-engine-plan';
 import { buildRustHubGenesisConfig } from '../../../orchestrator/process/rust-hub-genesis';
+import { readPositiveIntegerEnv } from '../../../config/environment';
+import { buildPublicDirectWsUrl } from '../../../orchestrator/replica-import/runtime-import-manifest';
 import { safeStringify } from '../../../protocol/serialization';
 import { planNativeHubBootstrapPeers } from '../../../orchestrator/process/reset-startup';
 
@@ -60,7 +63,6 @@ test('mesh supervisor dispatches canonical per-hub process kinds', () => {
   expect(supervisor).toContain('engine,');
   expect(hubSpawner).toContain("child.engine === 'rust'");
   expect(hubSpawner).toContain("{ executable: 'bun', processArgs, rustIdentity: null }");
-  expect(hubSpawner).toContain('directWsUrl: `ws://${status.listen}/ws`');
   expect(supervisor).toContain("? 'rscore/target/release/xlnrs'");
   expect(hubSpawner).toContain('stdio: invocation.rustIdentity');
   expect(supervisor).toContain('driveH1Bootstrap(h1, shouldStartMarketMaker)');
@@ -109,9 +111,9 @@ test('Rust H1 process plan has no TS bootstrap/import/handoff path', () => {
     const plan = buildRustHubProcessPlan({
       name: 'H1',
       apiHost: '127.0.0.1',
-      apiPort: 21001,
+      apiPort: 18090,
       directHost: '127.0.0.1',
-      directPort: 22001,
+      directPort: readPositiveIntegerEnv('XLN_RSCORE_DIRECT_PORT', 8090, { XLN_RSCORE_DIRECT_PORT: '18094' }),
       dbPath: join(root, 'h1'),
       runtimeSeedFile: join(root, 'seed'),
       entityKeyFile: join(root, 'entity-key'),
@@ -125,6 +127,9 @@ test('Rust H1 process plan has no TS bootstrap/import/handoff path', () => {
       binary,
     });
     expect(plan.executable).toBe(binary);
+    expect(plan.args[plan.args.indexOf('--api-bind') + 1]).toBe('127.0.0.1:18090');
+    expect(plan.args[plan.args.indexOf('--bind') + 1]).toBe('127.0.0.1:18094');
+    expect(buildPublicDirectWsUrl('wss://xln.finance', 8090)).toBe('wss://xln.finance:8090/ws');
     expect(plan.args).toContain('--jurisdictions');
     expect(plan.args).toContain('--genesis-config');
     expect(plan.args).toContain('--primary-entity-id');
@@ -200,7 +205,11 @@ test('Rust stdout readiness is strict and process-owned', () => {
   expect(() => parseRustHubStatus('{"status":"ready","height":0}')).toThrow('RUST_HUB_READY_IDENTITY_INVALID');
 });
 
-test.each([false, true])('Rust H1 genesis preserves explicit owner selection (primary-only=%s)', primaryJurisdictionOnly => {
+test.each([
+  { primaryJurisdictionOnly: false, nativeTron: false },
+  { primaryJurisdictionOnly: true, nativeTron: false },
+  { primaryJurisdictionOnly: false, nativeTron: true },
+])('Rust H1 genesis preserves owner selection and explicit native receipt policy (%j)', ({ primaryJurisdictionOnly, nativeTron }) => {
   const address = (byte: string): string => `0x${byte.repeat(40)}`;
   const genesis = buildRustHubGenesisConfig({
     name: 'H1',
@@ -237,6 +246,7 @@ test.each([false, true])('Rust H1 genesis preserves explicit owner selection (pr
           ],
         },
         tron: {
+          ...(nativeTron ? { mode: 'tron', tronFullHost: 'http://127.0.0.1:19090', tronSolidityHost: 'http://127.0.0.1:19091' } : {}),
           name: 'Tron',
           primary: false,
           status: 'active',
@@ -277,7 +287,20 @@ test.each([false, true])('Rust H1 genesis preserves explicit owner selection (pr
   expect(genesis).not.toHaveProperty('entityProfile');
   for (const owner of genesis.entities) expect(owner.entityProfile).toMatchObject({ name: 'H1', isHub: true });
   expect(safeStringify(genesis.machine.jReplicas)).toContain('tokenRegistry');
+  expect(safeStringify(genesis.machine.jReplicas).includes('tron-rpc-attested')).toBe(nativeTron);
   expect(genesis.entities[0]!.entityProfile).toMatchObject({ name: 'H1', isHub: true });
   expect(safeStringify(genesis)).not.toContain('checkpoint');
   expect(safeStringify(genesis)).not.toContain('import');
+});
+
+test('native restart retains configured peer dialing routes without transient gossip', () => {
+  const peers = ['H1', 'H2', 'H3'].map((name, index) => ({
+    name, seed: `restart-route-${name}`, signerLabel: `hub-${index + 1}`, publicPort: 8090 + index,
+  }));
+  const routes = buildRustHubPeerRoutes('H1', peers, 'wss://xln.finance');
+  expect(routes).toHaveLength(2);
+  expect(routes.map(route => route.websocketUrl)).toEqual(['wss://xln.finance:8091/ws', 'wss://xln.finance:8092/ws']);
+  expect(new Set(routes.map(route => route.targetRuntimeId)).size).toBe(2);
+  expect(buildRustHubPeerRoutes('H1', peers, 'ws://127.0.0.1').map(route => route.websocketUrl))
+    .toEqual(['ws://127.0.0.1:8091/ws', 'ws://127.0.0.1:8092/ws']);
 });

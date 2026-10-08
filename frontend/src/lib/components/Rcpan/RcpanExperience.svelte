@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { BadgeCheck, Landmark, Pause, Play, ReceiptText, RotateCcw, Scale, ShieldCheck } from 'lucide-svelte';
-  import { settingsOperations } from '$lib/stores/settingsStore';
+  import { settingsOperations } from '#lib/stores/settingsStore.ts';
   import RcpanControls from './RcpanControls.svelte';
   import RcpanDisputeMicroscope from './microscope/ui/RcpanDisputeMicroscope.svelte';
   import RcpanSalesHero from './RcpanSalesHero.svelte';

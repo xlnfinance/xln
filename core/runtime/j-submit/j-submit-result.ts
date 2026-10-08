@@ -216,8 +216,9 @@ const nextJSubmitState = (
     lastResultFingerprint: resultFingerprint,
     ...journal,
   };
+  // A pending broadcast is still the exact signed transaction after restart.
+  if (tx.data.txHash) next.txHash = tx.data.txHash;
   if (tx.data.outcome === 'submitted') {
-    if (tx.data.txHash) next.txHash = tx.data.txHash;
     delete next.lastFailure;
   } else if (tx.data.outcome === 'eventBarrier') {
     delete next.lastFailure;
@@ -246,7 +247,7 @@ export const applyRecordJSubmitResultRuntimeTx = (env: RuntimeReplica, tx: Recor
   const recordedFingerprint = findRecordedResultFingerprint(env, tx.data.attemptId);
   if (recordedFingerprint !== null) {
     if (recordedFingerprint !== resultFingerprint) {
-      throw new Error(`J_SUBMIT_RESULT_DUPLICATE_CONFLICT:${tx.data.attemptId}`);
+      throw new Error(`J_SUBMIT_RESULT_DUPLICATE_CONFLICT:${tx.data.attemptId}:recorded=${recordedFingerprint}:incoming=${resultFingerprint}`);
     }
     return;
   }
@@ -282,6 +283,9 @@ export const applyRecordJSubmitResultRuntimeTx = (env: RuntimeReplica, tx: Recor
   }
   if (!pending) throw new Error(`J_SUBMIT_PENDING_ATTEMPT_MISSING:${tx.data.attemptId}`);
   const next = nextJSubmitState(env, replica, tx, resultFingerprint);
-  removePendingAttempt(env, tx.data.attemptId);
+  if (!pending.jTx.data.runtimeSubmitAttempt?.rawTransaction
+    || tx.data.outcome === 'terminalFailure' || tx.data.outcome === 'reconciled') {
+    removePendingAttempt(env, tx.data.attemptId);
+  }
   replica.jSubmitState = next;
 };

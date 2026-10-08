@@ -392,8 +392,8 @@ describe('entity panel model helpers', () => {
     expect(chrome).toContain('{entityNames}');
     expect(chrome).toContain('{jurisdictions}');
     expect(chrome).not.toContain('activeEnv');
-    expect(contextSwitcher).toContain("import { refreshCurrentRuntimeProjection, xlnFunctions, xlnInstance } from '$lib/stores/xlnStore'");
-    expect(contextSwitcher).toContain("import { runtimeView, setRuntimeViewActiveEntityId } from '$lib/stores/runtimeViewStore'");
+    expect(contextSwitcher).toContain("import { refreshCurrentRuntimeProjection, xlnFunctions, xlnInstance, error as runtimeError } from '#lib/stores/xlnStore.ts'");
+    expect(contextSwitcher).toContain("import { runtimeView, setRuntimeViewActiveEntityId } from '#lib/stores/runtimeViewStore.ts'");
     expect(contextSwitcher).toContain('await refreshCurrentRuntimeProjection()');
     expect(contextSwitcher).toContain('projectionSummariesForRuntime(runtime.id');
     expect(contextSwitcher).not.toContain('runtime.env');

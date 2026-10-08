@@ -118,15 +118,13 @@ const readBoundedText = async (
   }
 };
 
+export const readBoundedProxyRequest = (request: Request): Promise<string> =>
+  readBoundedText(request, MAX_RPC_PROXY_REQUEST_BYTES, 413, 'RPC_PROXY_REQUEST');
+
 export const readRpcProxyRequest = async (
   request: Request,
 ): Promise<{ bodyText: string; forbiddenMethod: string | null }> => {
-  const bodyText = await readBoundedText(
-    request,
-    MAX_RPC_PROXY_REQUEST_BYTES,
-    413,
-    'RPC_PROXY_REQUEST',
-  );
+  const bodyText = await readBoundedProxyRequest(request);
   let parsed: unknown;
   try {
     parsed = JSON.parse(bodyText);

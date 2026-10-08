@@ -1,17 +1,18 @@
 <script lang="ts">
-  import { browser } from '$app/environment';
-  import { page } from '$app/stores';
+
+  import { browser } from '$app/env';
+  import { page } from '$app/state';
   import { onMount } from 'svelte';
   import { get } from 'svelte/store';
   import type { RuntimeAdapterEntitySummary, RuntimeAdapterViewFrame } from '@xln/core/api/public/runtime-module';
-  import ActivityHistoryPanel from '$lib/components/Entity/payments/ActivityHistoryPanel.svelte';
-  import EntityIdentity from '$lib/components/shared/EntityIdentity.svelte';
-  import { errorLog } from '$lib/stores/errorLogStore';
-  import { runtimeAdapterHeight, runtimeControllerHandle } from '$lib/stores/runtimeControllerStore';
-  import { runtimeQueryClient } from '$lib/stores/runtimeQueryClient';
-  import { runtimeOperations, runtimes } from '$lib/stores/runtimeStore';
-  import { refreshRuntimeView } from '$lib/stores/runtimeViewStore';
-  import { ensureProjectionRuntimeConnected } from '$lib/utils/runtime/runtimeConnection';
+  import ActivityHistoryPanel from '#lib/components/Entity/payments/ActivityHistoryPanel.svelte';
+  import EntityIdentity from '#lib/components/shared/EntityIdentity.svelte';
+  import { errorLog } from '#lib/stores/errorLogStore.ts';
+  import { runtimeAdapterHeight, runtimeControllerHandle } from '#lib/stores/runtimeControllerStore.ts';
+  import { runtimeQueryClient } from '#lib/stores/runtimeQueryClient.ts';
+  import { runtimeOperations, runtimes } from '#lib/stores/runtimeStore.ts';
+  import { refreshRuntimeView } from '#lib/stores/runtimeViewStore.ts';
+  import { ensureProjectionRuntimeConnected } from '#lib/utils/runtime/runtimeConnection.ts';
 
   type ExplorerEntity = {
     entityId: string;
@@ -24,18 +25,13 @@
     metadata: Record<string, unknown>;
   };
 
-  let loading = true;
-  let error: string | null = null;
-  let entity: ExplorerEntity | null = null;
-  let lastLoadedRouteKey = '';
-  let mounted = false;
-  let activeTab: 'overview' | 'history' = 'history';
+  let loading = $state(true);
+  let error: string | null = $state(null);
+  let entity: ExplorerEntity | null = $state(null);
+  let lastLoadedRouteKey = $state('');
+  let mounted = $state(false);
+  let activeTab: 'overview' | 'history' = $state('history');
 
-  $: entityId = decodeURIComponent($page.params.entityId || '').trim();
-  $: normalized = entityId.toLowerCase();
-  $: requestedRuntimeId = normalizeRuntimeId($page.url.searchParams.get('runtimeId') || $page.url.searchParams.get('rt'));
-  $: routeKey = `${normalized}:${requestedRuntimeId}`;
-  $: validEntityId = /^0x[0-9a-f]{64}$/.test(normalized);
 
   function normalizeEntityId(value: string | null | undefined): string {
     return String(value || '').trim().toLowerCase();
@@ -222,10 +218,6 @@
     }
   }
 
-  $: if (browser && mounted && entityId && routeKey !== lastLoadedRouteKey) {
-    lastLoadedRouteKey = routeKey;
-    fetchExplorer();
-  }
 
   onMount(() => {
     mounted = true;
@@ -241,6 +233,17 @@
       mounted = false;
       unsubscribeHeight();
     };
+  });
+  let entityId = $derived(decodeURIComponent(page.params.entityId || '').trim());
+  let normalized = $derived(entityId.toLowerCase());
+  let requestedRuntimeId = $derived(normalizeRuntimeId(page.url.searchParams.get('runtimeId') || page.url.searchParams.get('rt')));
+  let routeKey = $derived(`${normalized}:${requestedRuntimeId}`);
+  let validEntityId = $derived(/^0x[0-9a-f]{64}$/.test(normalized));
+  $effect(() => {
+    if (browser && mounted && entityId && routeKey !== lastLoadedRouteKey) {
+      lastLoadedRouteKey = routeKey;
+      fetchExplorer();
+    }
   });
 </script>
 

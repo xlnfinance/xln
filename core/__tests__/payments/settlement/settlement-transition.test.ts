@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { keccak256 } from 'ethers';
 
 import { applyAccountTx, applyAccountTxToMutableReplica } from '../../../account/tx/apply';
 import { createAccountJClaimSession } from '../../../account/j-claims/j-claim-session';
@@ -39,6 +40,7 @@ import {
   processCommittedSettlementTransitionFollowup,
 } from '../../../entity/tx/handlers/payments/settle';
 import { handleJAbortSentBatch } from '../../../entity/tx/handlers/j-batch/j-abort-sent-batch';
+import { applyHankoBatchProcessedEvent } from '../../../entity/tx/j-events-batch';
 import {
   executeCrontab,
   HUB_REBALANCE_INTERVAL_MS,
@@ -46,7 +48,7 @@ import {
 } from '../../../entity/scheduler';
 import { hubRebalanceHandler } from '../../../entity/scheduler/rebalance';
 import { applyFinalizedAccountJEvents } from '../../../account/tx/handlers/j-events/finality';
-import { createEmptyBatch, initJBatch } from '../../../jurisdiction/machine/batch';
+import { createEmptyBatch, encodeJBatch, initJBatch } from '../../../jurisdiction/machine/batch';
 import { buildAccountProofBody } from '../../../protocol/dispute/proof-builder';
 import { compileOps } from '../../../protocol/settlement/operations';
 import {
@@ -937,7 +939,7 @@ describe('atomic settlement Account transition', () => {
     } finally { await authority?.close(); }
   });
 
-  test('continuation executes once only for its exact ready workspace and an empty J draft', () => {
+  test('continuation waits for its matching batch receipt and then selects its exact ready workspace', async () => {
     const jurisdiction = makeJurisdiction('settlement-transition', 31337, 'a1', 'b2');
     const state = makeState(LEFT, addr('31'), jurisdiction, RIGHT);
     const account = writableAccount(state, RIGHT);
@@ -962,7 +964,7 @@ describe('atomic settlement Account transition', () => {
       },
     ]]);
 
-    expect(selectSettlementContinuation(state)).toEqual({
+    const executable = {
       kind: 'execute',
       counterpartyId: RIGHT,
       txs: [
@@ -976,7 +978,33 @@ describe('atomic settlement Account transition', () => {
         },
         { type: 'j_broadcast', data: {} },
       ],
+    };
+    expect(selectSettlementContinuation(state)).toEqual(executable);
+
+    const unrelatedBatch = createEmptyBatch();
+    unrelatedBatch.reserveToReserve.push({ receivingEntity: entity('55'), tokenId: 1, amount: 1n });
+    const encodedBatch = encodeJBatch(unrelatedBatch);
+    const batchHash = keccak256(encodedBatch);
+    state.jBatchState = initJBatch();
+    state.jBatchState.sentBatch = {
+      batch: unrelatedBatch, encodedBatch, batchHash, entityNonce: 2,
+      firstSubmittedAt: 1, lastSubmittedAt: 1, submitAttempts: 1,
+    };
+    state.jBatchState.status = 'sent';
+    expect(selectSettlementContinuation(state)).toEqual({ kind: 'wait', counterpartyId: RIGHT });
+    await applyHankoBatchProcessedEvent({
+      newState: state, blockNumber: 3,
+      event: { type: 'HankoBatchProcessed', data: { entityId: LEFT, batchHash: entity('66'), nonce: 1 } },
     });
+    expect(selectSettlementContinuation(state)).toEqual({ kind: 'wait', counterpartyId: RIGHT });
+    await applyHankoBatchProcessedEvent({
+      newState: state, blockNumber: 4,
+      event: { type: 'HankoBatchProcessed', data: { entityId: LEFT, batchHash, nonce: 2 } },
+    });
+    expect(state.jBatchState.sentBatch).toBeUndefined();
+    expect(state.jBatchState.entityNonce).toBe(2);
+    expect(selectSettlementContinuation(state)).toEqual(executable);
+    expect(state.settlementContinuations.has(RIGHT)).toBe(true);
 
     state.jBatchState = initJBatch();
     state.jBatchState.batch.reserveToReserve.push({

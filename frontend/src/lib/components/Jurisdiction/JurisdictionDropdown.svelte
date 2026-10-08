@@ -4,7 +4,7 @@
    * Uses unified Dropdown base component.
    */
   import { createEventDispatcher } from 'svelte';
-  import Dropdown from '$lib/components/UI/Dropdown.svelte';
+  import Dropdown from '#lib/components/UI/Dropdown.svelte';
 
   type JurisdictionDropdownItem = {
     name?: string;

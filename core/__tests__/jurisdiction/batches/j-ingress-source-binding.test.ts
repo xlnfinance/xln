@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { createJAdapter } from '../../../jurisdiction/adapter';
 import {
   attachLiveJAdapter,
+  detachLiveJAdapter,
   getLiveJAdapter,
 } from '../../../runtime/j-submit/live-jadapters';
 import {
@@ -289,12 +290,16 @@ describe('manual J-event ingress source binding', () => {
         entityProviderAddress: address('ff'),
         contracts: { ...sourceB.contracts, entityProvider: address('ff') },
       });
+      expect(() => attachLiveJAdapter(mismatchedEnv, chainB.name, adapterB)).toThrow('J_ADAPTER_RUNTIME_OWNER_ALREADY_BOUND');
+      detachLiveJAdapter(isolatedB, 'shared-name', adapterB);
       attachLiveJAdapter(mismatchedEnv, chainB.name, adapterB);
       expect(() => bindLocalJEventIngressSource(
         mismatchedEnv,
         mismatchedEnv.state.jReplicas.get(chainB.name),
         'real-stack-mismatch',
       )).toThrow('J_EVENT_LOCAL_SOURCE_ENTITY_PROVIDER_MISMATCH');
+      detachLiveJAdapter(isolatedA, 'shared-name', adapterA);
+      detachLiveJAdapter(mismatchedEnv, chainB.name, adapterB);
       const env = createEmptyEnv('manual-j-ingress-real-two-stack');
       env.state.jReplicas = new Map([[chainA.name, sourceA], [chainB.name, sourceB]]);
       attachLiveJAdapter(env, chainA.name, adapterA);

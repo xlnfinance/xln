@@ -1,5 +1,5 @@
 import { writable } from 'svelte/store';
-import { parseJsonUnknown, requireUnknownRecord } from '$lib/utils/boundary';
+import { parseJsonUnknown, requireUnknownRecord } from '#lib/utils/boundary/index.ts';
 
 const ACTIVE_TAB_WEB_LOCK_NAME = 'xln-active-runtime';
 const ACTIVE_TAB_CHANNEL_NAME = 'xln-active-tab-lock';

@@ -1,5 +1,5 @@
 import { writable } from 'svelte/store';
-import type { RuntimeGraphCanonicity } from '$lib/network3d/runtimeGraphProjection';
+import type { RuntimeGraphCanonicity } from '#lib/network3d/runtimeGraphProjection.ts';
 
 const CANONICITY_KEY = 'xln-graph-canonicity';
 const validCanonicity = new Set<RuntimeGraphCanonicity>(['timestamp', 'height', 'left', 'right', 'hub']);

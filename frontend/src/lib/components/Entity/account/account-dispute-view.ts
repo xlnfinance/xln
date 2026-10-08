@@ -1,7 +1,7 @@
-import type { AccountReadView } from '$lib/components/Entity/core/entity-panel-types';
+import type { AccountReadView } from '#lib/components/Entity/core/entity-panel-types.ts';
 
 import { compareEntityAssetText } from './../assets/entity-asset-catalog';
-import { isMapLike } from '$lib/utils/runtime/liveRuntimeEnv';
+import { isMapLike } from '#lib/utils/runtime/liveRuntimeEnv.ts';
 
 export type DisputedAccountView = {
   counterpartyId: string;

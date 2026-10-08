@@ -1,9 +1,9 @@
 <script lang="ts">
-import type { EntityReadView } from '$lib/components/Entity/core/entity-panel-types';
+import type { EntityReadView } from '#lib/components/Entity/core/entity-panel-types.ts';
 
   import type { RuntimeReplica, Profile as GossipProfile, RuntimeInput } from '@xln/core/api/public/runtime-module';
-  import { runtimeControllerHandle } from '$lib/stores/runtimeControllerStore';
-  import type { Tab } from '$lib/types/ui';
+  import { runtimeControllerHandle } from '#lib/stores/runtimeControllerStore.ts';
+  import type { Tab } from '#lib/types/ui.ts';
   import CollateralForm from './CollateralForm.svelte';
   import ConfigureAccountSelector from './ConfigureAccountSelector.svelte';
   import ConfigureWorkspaceTabs from '../../workspace/shell/ConfigureWorkspaceTabs.svelte';

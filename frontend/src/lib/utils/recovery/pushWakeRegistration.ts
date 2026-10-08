@@ -1,4 +1,4 @@
-import { isUnknownRecord as isRecord } from '$lib/utils/boundary';
+import { isUnknownRecord as isRecord } from '#lib/utils/boundary/index.ts';
 import { buildPushRegistrationMessage, buildPushUnregisterMessage, hashPushToken } from '@xln/core/watchtower/push/registration';
 import type { PushRegistrationRequestV1, PushUnregisterRequestV1 } from '@xln/core/watchtower/push/types';
 import type { PushWakeTarget, PushWakeDeviceToken } from './pushWakeTypes';

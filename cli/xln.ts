@@ -5,10 +5,14 @@
  *   bun cli/xln.ts
  *   bun cli/xln.ts pay <to> <amount>
  */
-import { runCli } from './commands/index.ts';
+import { loadSettings } from './lib/settings.ts';
 
 const main = async (): Promise<void> => {
   try {
+    // Runtime storage captures its root at import; establish wallet ownership first.
+    const settings = await loadSettings();
+    process.env['XLN_DB_PATH'] = settings.dbPath;
+    const { runCli } = await import('./commands/index.ts');
     const code = await runCli(process.argv);
     process.exitCode = code;
   } catch (err) {

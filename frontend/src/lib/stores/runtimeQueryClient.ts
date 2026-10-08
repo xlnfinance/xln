@@ -18,7 +18,7 @@ import {
   runtimeAdapterHeight,
   runtimeControllerHandle,
 } from './runtimeControllerStore';
-import { registerDebugSurface } from '$lib/utils/runtime/debugSurface';
+import { registerDebugSurface } from '#lib/utils/runtime/debugSurface.ts';
 
 type RuntimeQueryCacheEntry<T> = {
   height: number;

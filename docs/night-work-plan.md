@@ -1,5 +1,996 @@
 # Autonomous xln work
 
+Owner-requested checkpoint — source frozen for commit:
+- Genuine native Rust Ethereum31337 / Java TVM2414086651 cross-J PASSED:
+  2/2 routes,4/4 Account exact balances and peer roots, zero pending ACK/queues,
+  SIGKILL restoration exact frame36/root. Artifact native-rust-cross/attempt3/
+  under .logs/mainnet-20261007; code037e3784ac942ca29c6235c5a90950f3139ddac0fa1a47e79dbbf88537a5a27f,
+  binary574cf20533fbebf6a316d1823265676c8e3bb35ff95c09a50fa7cec1edb52b4e.
+- Previous failure came from test orderIds containing colon, forbidden by both
+  Account engines. Driver now uses canonical IDs. Transport correctly failed
+  closed and was not weakened. Separately, early typed rejection of malformed
+  cross-J orderId is still REQUIRED: today invalid offer is dropped after lock
+  admission and Runtime subsequently halts on incomplete cohort. No fix claimed.
+- All agent writers stopped for owner's immediate main checkpoint request.
+  Full current UI/unit release gates remain pending; this is WIP, not mainnet
+  readiness. Unknown output/,tmp/,HANDOFF.md remain outside the commit.
+
+Current first production blocker — native Ethereum/TRON cross-J:
+- main incorporates origin/main 5b52b1772 via merge34ee0b19e; fresh fetch confirms
+  no upstream commits missing. Nothing pushed; saved pre-merge changes preserved.
+- Financial candidate51a585d9d9ab38195cf6cd9ead2ead101c7b829169f55085d13e134c5f9ef930
+  binary574cf20533fbebf6a316d1823265676c8e3bb35ff95c09a50fa7cec1edb52b4e:
+  TS headless19/19, exact immutable172-frame replay TS/Rust W1/W4 all pass,
+  genuine native TVM deposit/receipt/SIGKILL/wallet restoration passes.
+- New permanent native-rust-cross.ts reaches genuine Ethereum31337 and Java
+  TVM2414086651. Four TS-user/native-hub Accounts and credit pass, then first
+  cross-J intent fails RRS_TRANSPORT_OUTBOX:cross-j-incomplete-cohort at height31.
+  Evidence .logs/mainnet-20261007/native-rust-cross/attempt2/ plus
+  native-rust-cross-4.log; new driver candidate hash is in candidate.json.
+- cross_recovery exclusively owns minimal outbound cohort correction and L1.
+  tron_completion exclusively owns driver and repeated live verification,
+  including exact crash roots and explicit pending-ACK evidence. Root owns
+  final full gates. Do not weaken cohort atomicity or count TS replay as live Rust.
+- After that production boundary passes: freeze candidate, full unit with strict
+  semantic completeness, full Svelte/React on both engines, related replay/live J,
+  contracts and bun run check before push. Earlier full unit/UI runs are not a
+  claim that the current full suite is green. Preserve all original WAL evidence.
+
+Latest frozen financial candidate — after sender-origin fixes:
+- check-origin-final-2.log PASSED33000 exit0: whole bun run check,39source
+  gates,40Rust test targets, frontend and strict parity. Runtime414/414.
+- Native reachable malformed route/loop/timestamp/description/maxDebit/no-route
+  now reject exact signed command, preserve nonce/money, then valid payment and
+  exact WAL replay succeed. Eight live regression cases pass. Captured multihop
+  fee quote25,000,075 vsmax25,000,074 rejects (L1); exact max passes that boundary.
+- TS known-target insufficient capacity RED->typed reject,13relatedtests pass,
+  actual badN/futureN+1 rejection then validN payment and exact WAL recovery.
+- Next single command: fresh release xlnrs, then current immutable recording
+  TS W1/W4 and Rust W1/W4, live Ethereum/TRON, full UI/headless/unit gates.
+  Full unit must enable RSCORE_REQUIRE_SEMANTIC_COMPLETENESS=1. Preserve all
+  assertions and data; code/docs frozen during fingerprinted runs. Root owns
+  final commands; agents idle until a concrete failure needs an implementer.
+- Whole unit baseline4981pass0fail with conditionalcatalog gate separately
+  enabled/pass is earlier than this narrow fix; full current rerun remains.
+  No push/mainnet deployment yet. Final evidence belongs in ignored .logs paths
+  so result recording does not mutate the candidate during verification.
+
+Current green baseline and next bounded fix window:
+- Whole check post-root19-5 PASSED (85935 exit0):40 Rust test targets,
+ 39 source gates, frontend checks/build, strict semantic parity. All8 prior
+ Rust failures resolved; optional seed-map absence is canonical, malformed
+ present data still fails. Runtime406+process58+binary4 all pass.
+- Full unit6 PASSED71628:4962 root +19 subprocess =4981 passed,0failed,
+ 1 conditional semantic-catalog skip,228689 assertions. Skipped gate separately
+ executed with RSCORE_REQUIRE_SEMANTIC_COMPLETENESS=1 and passed; future full
+ unit commands must set this flag, not report a skip as success.
+- Full content fingerprint29fe5665b21f191c3afecb0c54c240d2c4ada196f1759d22fcfffe402faf876e
+ covers6381 source files; post-check5-candidate.json records it. Root19's
+ earlier7f88... identifier was an unstaged diff hash, NOT a full fingerprint.
+- Method review: stop serial browser retries for invalid-input classes. One
+ bounded edit window: native_ui_import owns reachable sender-origin rejection
+ vectors + narrow Rust classification; cross_recovery owns TS route-not-found
+ actual RED->typed reject->real payment/replay proof. Infrastructure faults stay
+ fatal. Only cases reaching canonical production decode count as deficiencies.
+- Then freeze candidate and run final current check/unit, full UI/headless,
+ exact4-way replay and live Ethereum/TRON/recovery gates. No push yet.
+
+Current whole-check boundary after root19:
+- Contracts post-merge passed201/201 (contracts-post-merge-final-2.log), Foundry
+  invariants15/15. Browser root19 remains the latest full custody flow evidence.
+- Native bad hashlock no longer halts: typed per-command rejection preserves
+  nonzero signed nonce and balances, next valid payment settles. Related2/2;
+  exact WAL A4+B3 frames. Native-invalid-origin-green-1.log and related log.
+- Merged secret-ACK path lost its unknown-Account guard. Restored canonical TS
+  behavior; updated two stale timeout expectations to TS timestamp+1ms.
+  resident_entity31/31 passed, merged-resident-entity-green.log.
+- Whole check post-root19-4 failed8 Rust tests:7 share
+  ENTITY_ENCRYPTION_SEEDS_MAP,1 stale context-trim fixture. The latter is now
+  fixed1/1 without changing production or assertions. native_ui_import owns
+  optional key-map absence handling (canonical TS field is optional); present
+  malformed data remains fatal. Sources otherwise frozen for next wholecheck.
+- Rust clippy, source policy checks, Svelte build/diagnostics, lint327 exact
+  baseline and contract invariants passed. No whole-check success yet.
+- Cleared only inactive regenerable Cargo dev artifacts after workspace-budget
+  refusal. Release binaries, all databases/WAL and evidence remain preserved.
+
+Current verified production result — root19:
+- Instant-funded native Rust custody browser gate PASSED1/1,0skips,18.5s.
+  Actual2USDC inbound Instant, two SIGKILL/reopens, recovered UI Pay1USDC,
+  exact balances/roots and exactly-once receipt. Handle40197 terminal0.
+  Evidence .logs/mainnet-20261007/react-custody-rust-19/ and adjacent source file.
+  Main34ee0b19e unstaged diff hash7f88a6fdc1f135ed990fff6c200ceafa4f64b5acb4ef2a145d59ce9f4f51ab70;
+  binary327f7ac1d0e5615eddcd380538ea4d04cfaa6019c63991fe66d4bf3bd21e65a4.
+- Readiness race fixed by waiting for the actual canonical validated unexpired
+  manifest before Playwright; only ENOENT retries. L1 passes1/1,4assertions.
+- Native raw route[] origin is now explicitly present in replayed WAL H3:
+  two real payments7each, bilateral14, both databases H2-H4 exact6frames.
+  Regression1/1 passed; native-empty-route-origin-wal.log preserves evidence.
+- Next first confirmed blocker: sender-invalid origin currently escapes fresh
+  native materialization as fatal. native_ui_import owns production fix;
+  cross_recovery owns the coordinated real-WAL regression. Infrastructure
+  corruption must remain fatal; no new durable error field or weakened checks.
+- Full current unit/UI/headless/check/contracts/replay/liveTVM/J remain final
+  gates. No push or mainnet-ready claim until their actual evidence exists.
+
+Latest observed boundary — custody root18:
+- Main34ee0b19e includes requested origin/main integration; no push. Tracked
+  backup stash and pre-integration patch remain preserved.
+- Owner-key fix now accepts canonical64-byte custody seeds. Actual custody
+  import/restart and owner-key regressions pass. Native two-Runtime payment
+  passes with exact checkpointH1->WALH2 replay; originating raw command replay
+  coverage is being strengthened separately, not counted as already proved.
+- Root18 binary327f7ac1d0e5615eddcd380538ea4d04cfaa6019c63991fe66d4bf3bd21e65a4:
+  browser failed before custody at missing runtime-import-manifest.json.
+  System-ready was observed before canonical RUNTIME_IMPORT_READY publication.
+  ts_unit_runtime owns readiness fix; next gate is isolated Instant-funded root19.
+- Cross owns origin_empty_route replay tests; native_ui_import owns mechanical
+  clippy placement fix and fresh release after writers stabilize. Freeze all
+  sources before browser fingerprint capture. Stand capacity remains one.
+- Latest root checks: staged/unstaged diffcheck, frozen-core unchanged, runtime
+  types pass. Full latest suites/check/replay/live J/TVM remain required.
+
+Latest production boundary after integration:
+- Main34ee0b19e includes origin/main5b52b1772 and restored local work. Native
+  production compile, scheduler13/13, secret-ack reserve1/1 and TS types passed.
+- Root16 Instant-funded gate failed before crashes: profiles now accepted, but
+  native Runtime80 emitted htlc_resolve error/decrypt_failed. H2 Runtime73 ACKed
+  the cancellation; no debit. Root16 H1/H2 persisted evidence preserved.
+- Captured realcipher decrypts with adopted-owner key, fails with configured hub
+  key. fresh/htlc.rs used only startup hub key. native_ui_import owns selecting
+  the correct owner key from existing entityEncryptionSeeds + canonical HKDF,
+  verifying against committed publickey; no new durable field or fallback.
+  Next production command: fresh release then same Instant-funded root17.
+- Cross owns separate realtwoRuntime empty-route test. Knownroute fixture is
+  repaired; next red is receiver HTLC_ACCOUNT_READ:ENTITY_ROUND_MISSING. Compare
+  fixture/canonical worker lifetime before changing production. Real custody
+  path already passed that read, so do not conflate the two failures.
+
+GitHub integration — owner requested 2026-10-08:
+- Fetched origin/main5b52b1772 (7new commits); merged into main34ee0b19e.
+  Seven branch conflicts and three stash-restore conflicts resolved; tracked
+  local changes and untracked source preserved. Backup stash retained; no push.
+  Before-integration check failed Rust formatting; formatted before backup.
+  No complete green check is claimed for the merged candidate.
+- Latest actual custody gate root15 progressed past owner profile discovery,
+  then rejected PROFILE_ACCOUNT_MISSING(H2,owner). Native WAL proves openAccount
+  and ACK share timestamp1791453149417; changed profile with same lastUpdated
+  was discarded by canonical TS admission. Transient profile clock now mirrors
+  TS max(previous+1,Runtime timestamp), reuses unchanged signed rows; L1 green.
+  Must build merged source and run root16 Instant-funded on a fresh stand.
+- Native profile publication, post-fsync ordering and restored-owner projection
+  are implemented. Realwire1/1 verifies actual TS MAC/profile signatures, order
+  and reconnect; outgoing RuntimeP2P handler was missing and is now wired to
+  existing admission (5/5,82assertions). All precede the merge; rerun relevant gates.
+- Method review: repeated profile miss triggered boundary tracing, not retries.
+  Keep first real money flow ahead of broad audits; completed agents require
+  followup_task activation, not only messages. Final full suites remain pending.
+
+## Current owner objective — 2026-10-07
+
+This section supersedes historical priorities and spending windows below.
+Owner profile: [owner-profile.md](owner-profile.md). Follow the existing
+[acceptance protocol](improvement-loop.md), not a new agent framework.
+Active goal: a verified mainnet release candidate covering seven required
+financial/recovery journeys on TS and native Rust; SvelteKit 3 primary UI,
+React additional; lending excluded. Prepare deployment and rollback evidence;
+Networks are confirmed: Ethereum and TRON. Deployment addresses and signing
+authority are not yet bound to a reviewed release; they do not block local work.
+
+Current production boundary, 2026-10-08 09:34 UTC:
+- Rust root13 isolated Instant-funded custody case reaches derive/openAccount,
+  then H2 rejects funding: HTLC_PAYMENT_PROFILE_MATCH_COUNT:<owner>:0.
+  .logs/mainnet-20261007/react-custody-rust-13/server.log115; handle89763
+  terminal1,32.4s. Binary9491e0170699f667d638380389db12ef29f116859210ab80923e7f6b81b806bf.
+  Native has inbound gossip but no outgoing signed profile publisher. First fix:
+  native_ui_import owns transport frame/reactor/latest public-profile slot;
+  ts_unit_runtime owns existing CommitterWork transient profile projection and
+  post-fsync/pre-outbox hook. No new durable fields or uncommitted publication.
+- Previous root12 direct custody control passed18.5s; second owner was invalid
+  against one-owner-per-node rule. Cases now run on independent fresh stands.
+  Real cleanup bug fixed: zombie worker reaped before group-absence checks;
+  realchild regression red->2/2green, descendants still checked. Optional literal
+  wallet grep filter selects one case, default gate unchanged.
+- TS origin command rejection fixed and permanent: early materializer now binds
+  child reject to outer atomic signed command, preserving signatures/nonces.
+  BadN + futureN+1 reject; fresh validN pays1000; WAL24-30 replay exact.
+  Permanent focused2/2 and related12/12, runtime types/size/diff green.
+  Evidence ts-origin-mixed-wal-fixed-clock.log and evidence.json.
+- Rust per-tx missing prepared origin classification red->1/1green; conflicting
+  present origin remains fatal. Fresh sender-invalid omission and full native
+  rejection/replay still outstanding. No blanket infrastructure-error catch.
+- Shared native route solver4/4 + empty-route producer1/1; realtwoRuntime test
+  currently red (origin lock commits, recipient has no frames); diagnostic test
+  must gain working live path and actual replay, not count as completed.
+- Full React manifest corrected:40main +2isolatedcustody +2isolatedclock =44
+  tests/33specs per engine. All latest whole-candidate gates still pending.
+  No paid external calls, funded deployment, frozen-core override or all-green claim.
+
+Current verification boundary, 2026-10-08 — native custody origin:
+- Real React custody journey is green on both engines: TS5 and Rust11.
+  Rust11 terminal39338 exit0,1pass0skip18.3s; actual2USDC funding,
+  SIGKILL/reopen, Instant Pay1USDC, second restart, exact balances/roots,
+  retained WAL and one receipt. Artifacts react-custody-rust-11 under
+  .logs/mainnet-20261007; binary SHA256
+  a7c702423338eb6ce5594e019252dc88ef564d5a28f22c47e8c30ed407e2e91c.
+  HEAD1f2ac885521a49f32ff094b96b8e1e1c1fccdcb8 plus dirty candidate;
+  full source evidence is adjacent to the run, not HEAD alone.
+- Missing origin producer and real pinned Account profile projection fixed;
+  shared codec5/5, signed profile2/2 and captured fee vector1/1 green.
+  This closes the prior positive payment blocker, not the final release gates.
+- Next actual boundary: bad supplied hashlock + good HTLC in one TS input
+  currently throws typed reject before good commit in targeted harness.
+  cross_recovery owns checking production reject policy/catch granularity and
+  exact WAL replay; do not assume the earlier static replay inference is proven.
+- native_ui_import owns reuse of existing native route solver for route=[];
+  ts_unit_runtime adds actual inbound Instant funding to the custody test while
+  preserving the original direct funding case and every recovery assertion.
+  One heavy stand remains locked; source freezes before each browser gate.
+- Full latest unit/check, both complete UI suites, exact replay/live TVM/J,
+  headless native coverage and deployment/rollback package remain outstanding.
+  No all-green/mainnet-ready claim. No paid external calls or funded deployment.
+
+Current production blocker, 2026-10-08 08:38 UTC:
+- Rust React9 now reaches real quote and Pay. Original fatal is captured:
+  RUNTIME_ENTITY_CONTEXT_MATERIALIZATION:RRS_FRESH_CONTEXT_HTLC_ORIGIN_REQUIRED,
+  server.log169 in react-custody-rust-9;1failed41.1s, stand free.
+  Source608be2fb942b96fea1dabda677bce573923ed2c8994bb7fbb69f7d275e5ac625,
+  native9afd4a4b prefix; fullhash adjacent source evidence.
+- Native fresh context explicitly rejects originated HTLC Payment. Kernel apply,
+  existing originated context/WAL decoder and inbound decrypt already exist;
+  missing producer is required for normal Instant Pay. Do not replace with direct.
+  native_ui_import owns Runtime origin materialization; cross_recovery owns
+  disjoint encoder complement + canonical fixed-entropy TS vector/tests, with
+  explicit API handoff. No new protocol or durable-state surface.
+- Reconnect route/profile repairs succeeded: actual quote matches1USDC/zero fee.
+  Diagnostic fix preserves original dispatch error instead of generic poisoned
+  followup. Replay entropy must remain prepared once at boundary and persisted
+  in existing WAL context, never generated inside pure transitions/replay.
+- Method reviewed: prove this first production flow before rerunning whole suites.
+  Earlier broad gates found fixture issues but delayed the next useful browser
+  boundary due shared cleanup lease. Unit/check/E2E wrappers serialize; codec
+  and Runtime implementation can run in parallel in disjoint files.
+- Valid-origin draft now compiles; codec5/5, signed profile1/1, exactfeevector1/1
+  green. Selected-prefix per-payment Entity Jheight and origin context trimming
+  wired. Building release then first same valid React Pay, not a release claim.
+  Explicit remaining implementation gaps: typed malformed-origin rejection with
+  exact replay and empty-route auto-resolution. tron_completion owns apply.rs
+  rejection integration (paused until first happy proof); native_ui_import owns
+  fresh origin producer; cross codec and ts shared profile builders are stable.
+- All final whole-candidate gates remain pending. Historical full unit4971green
+  predates later changes; unit5's7 failures are fixed focused8/8. Do not claim
+  current full E2E/mainnet ready. No external paid models or funded deployment.
+
+Current verification boundary, 2026-10-08 08:24 UTC:
+- First full unit wrapper GREEN4971/4971,0fail/skip,228616assertions,311.2s,
+  unit-full-current-candidate-4.log. It precedes the following small changes.
+- Full check found2 regressions: positive atomic codec test used forbidden local
+  chat instead of peer output; replaced with existing captured cross-J WAL,
+  exact positional/body/source assertions retained,10/10 native atomic green.
+  TS merge grew104lines; removed redundant nested condition,59/59+size gate green.
+  Overall check must repeat. React production build and Svelte check/build green.
+- Rust React rerun6 still fails quote after exact funded recovery. Root cause
+  now evidenced: native peer configuration wrote websocketUrl:null for known
+  hubs, so after RAM sessions disappear pending restored outbox cannot dial.
+  Existing canonical URL builder now supplies actual routes;13/13+types green.
+  TS direct handshake also republishes canonical signed profiles on reconnect;
+  real socket reconnect regression31/31green. No fake profile or new relay path.
+- Subsequent full unit4954 reached4947pass/7fail (candidate5,325.2s): new
+  handshake exposed two harnesses missing actual P2P lifecycle. Production
+  starts P2P first. Harnesses now use real startP2P/closeAndWait,8/8+types green.
+  Next full unit required after focused production proof. Check+unit cannot
+  overlap their shared artifact-cleanup lease; serialize their wrapper gates.
+  Root7 browser stopped preboot on genuine native binary freshness; cargo
+  process release clean+rebuild59064 running, no timestamp/bypass workaround.
+- Next exact React Rust recovery/Pay rerun after native freshness rebuild;
+  freeze sources/docs for test. Then full check/unit/current43React per engine,
+  full139Svelte per engine, exact replay/live TVM/J and release package gates.
+  Two React time-travel specs each need separate fresh stands; ordinary31spec
+  batch is41tests. No all-green or mainnet readiness claim yet.
+
+Current verification boundary, 2026-10-08 08:10 UTC:
+- Actual React remote custody TS passed: real2USDC funding, two H1 SIGKILLs,
+  reconnect, UI Pay1USDC and one retained receipt; react-custody-ts-5.
+  React now uses existing canonical command journal/observation helper for
+  remote mutations; TS hub wires existing route/receipt readers.
+- Same Rust flow reaches restored identity/Account/WAL, then quote fails
+  E_INTERNAL:payment route profiles are unavailable. First blocker assigned
+  to native_ui_import; react-custody-rust-5, binary
+  ba41c299d1990c5793299bd4162e4fa8e26e1d53c032d03bf993c028a321628d.
+  Native route/receipt L1 passed24adapter+3HTLC; live flow is NOT green.
+  Receipt reconstruction uses existing verified replay; older-than-retained
+  checkpoint history remains explicit E_NOT_FOUND, not silently empty.
+- Full unit third run4951pass/1fail: transient folder-width during concurrent
+  native edits; width now passes. Earlier12-Entity timeout completed all12
+  in7.72s; explicit30s test budget preserves exact single-frame assertions.
+- Canonical unit wrapper had four obsolete subprocess paths and silently ran
+  only2of6 files. Corrected paths and mandatory existence check; all6 files
+  now19pass/154assertions. Artifact fixture KEEP override isolated to child
+  temp workspaces. Complete wrapper rerun75578 exited0:4952root+19subprocess=4971pass,
+  0fail/skip,228616assertions,311.2s; unit-full-current-candidate-4.log.
+  This precedes the next direct-transport discovery repair, not its approval.
+- No completion claim: fresh full Svelte/React, check, exact four-way replay,
+  genuine TVM/liveJ, package/rollback and valid performance gates remain.
+
+Current verification boundary, 2026-10-08 07:34 UTC:
+- All3 native Svelte full-suite failures now pass exact strict reruns:
+  StackManager real Anvil deployment19.8s (072606-255), operator5imports27.4s
+  (072701-034), transport-stable Account19.7s (072735-225). Source
+  2e35fe93178a67dc3b0b0770fbc797faf97e5fd604a47b9526c44b2ac20f9707,
+  native54082a56951c37c9def6dcbfaf5a3b87a374fc8e960f8077294eec7ca36846f9.
+  Genesis now hydrates existing process-local owner keyring from validated labels;
+  no new durable state. Native executable hash captured and checked by runner.
+- Full unit rerun terminal4951pass/1fail/0skip/0importerror,4952tests/800files,
+  323.67s; unit-full-current-candidate-2.log and unit-current-candidate.json.
+  Remaining failure:12-Entity same-frame test exceeds Bun default5000ms; retain
+  all12/oneframe assertions and diagnose completion before changing its budget.
+  Other69 original failures repaired. Subprocess continuation6files not reached
+  because root-suite exit1; full wrapper must run again after the fix.
+- Source checks soundcheck10/10, types/folder-width/frozen-core green before
+  final test additions; complete bun run check pending on next stable candidate.
+- React coverage review found a real gap: remote custody UI reconnect after
+  owner SIGKILL and spending restored funds. Native H1 is in actual manifests;
+  one generic TS/Rust test drafted with real Gate/Pay controls, no storage wipe,
+  and canonical real signed-account setup. Apply/execute before final fullReact.
+- Native admission and initial J-anchor investigations remain limited by
+  automatic tool safety-review errors; do not claim their independent audit done.
+  Existing mainnet deploy:prod resets testnet, not safe for funded rollout.
+  Read-only release-ops-packet.txt prepares non-reset launch/WAL-preserving rollback;
+  actual package execution and target parameters remain outstanding.
+
+Current verification boundary, 2026-10-08 07:20 UTC:
+- Full TS unit baseline completed:4873pass,70fail,1skip,1import error,
+  4944tests/799files,318.68s; unit-full-after-consensus-fix.log. Most failures
+  were stale test fixtures/source assertions after real canonical changes;
+  never count this run as green. Enable RSCORE_REQUIRE_SEMANTIC_COMPLETENESS=1
+  on next full suite to execute the catalog case.
+- Focused repairs green: frontend689/689, startup85/85, artifact-cleanup21/21,
+  storage truthfulness21/21, real TRON wire4/4, watchtower+registration6/6,
+  actual RPC registration1/1, runtime wallet/debt/ingress/decoder44/44,
+  watcher7/7 plus cross-J scope1/1. Financial/authority assertions retained;
+  obsolete adapters replaced with genuine BrowserVM/Anvil instead of stubs.
+- Native StackManager now has authenticated admin HTTP and private worker
+  reusing canonical deploy/probe implementation. Auth1/1 and compilation green;
+  real browser deployment still next. Worker bundle exists; portable package
+  Hardhat assets remain an explicitly unproven boundary.
+- Native E2E executable path+SHA256 now enter existing manifest/candidateID;
+  before-shard and after-run hash checks plus2/2 tamper regressions added.
+- Native remote-admission agent reproduced2 failures and applied a patch but
+  automatic tool safety review stopped its final verification. Do not claim
+  this investigation completed or retry it through another agent. Separate
+  initial-J-anchor reproduction also remains blocked by automatic review.
+- All final whole-candidate unit/source/E2E/replay/liveJ/TVM/package gates remain
+  after these edits. Frozen-core unchanged; folder-width/runtime-types green.
+  One heavy stand, no external API spend, no funded deployment.
+
+Current verification boundary, 2026-10-08 07:05 UTC:
+- Complete `bun run check` passed (39 source gates plus both frontend gates),
+  check-after-native-custody-timeline-5.log; native1050/1050, explicit semantic
+  completeness enabled. This precedes the next source fixes, not their approval.
+- Full Svelte native139 completed:135passed,3failed,1 external-AI excluded,
+  0flaky,20m33.7s. Artifact e2e-parallel/20261008-063848-133,
+  source511744b36d42a65c6b48cd9826f0e16fcf2af5636c4c4ede0350abb1d5f0f61c.
+  Native executable hash was not captured by this runner; do not claim exact
+  binary binding from a later filesystem hash. Harness provenance fix underway.
+- Three failures: missing native StackManager API, obsolete runtime count4vs5,
+  and stability observer starting before transport becomes connected. Two test
+  corrections preserve assertions; native canonical StackManager bridge in work.
+- TS unverified leader/J-prefix signature merge now preserves separate inputs
+  for canonical verification instead of plain throwing: focused59/59,
+  370assertions, ts-consensus-reject-{fix,related}.log.
+- Fresh Hardhat contracts201/201 in8s, contracts-current-after-full-rust.log.
+  Native remote local-command admission and owner-mismatch reject findings are
+  source-traced, with reproduction/fix assigned; not yet resolved.
+- Initial unobserved J-anchor reorg investigation was blocked by tool automatic
+  security review. No reproduction/fix or bypass; remains an unresolved item.
+- Full TS unit suite currently running under stand handle17776, log
+  unit-full-after-consensus-fix.log. Editing window active; final immutable full
+  TS/Rust Svelte+React, exact replay/liveJ/TVM and production package remain.
+
+Current verification boundary, 2026-10-08 06:36 UTC:
+- Last13 selective browser failures all closed; unresolved ledger0. Full
+  TS/Rust browser reruns remain next, after one complete current bun run check.
+- Full native Rust test execution1050passed/0failed/0ignored across40
+  executables. rscore:check green after mechanical adapter module grouping;
+  TS bridge/parity172passed. Explicit semantic completeness gate separately
+  enabled:3/3pass (default Rust runner skips this catalog case). Enable
+  RSCORE_REQUIRE_SEMANTIC_COMPLETENESS=1 for the next complete check.
+- New IPC decoder uses existing canonical BrainVault schema; actual worker
+  derive/load and malformed input tests3/3,105assertions. Soundcheck10/10,
+  other source gates33/33, contract invariants15/15. Fixed new lint violations,
+  explicit worker entry point in Knip, page diagnostic lifecycle cleanup and
+  actual no-J test fixture. No weakened rules/ignores or financial assertions.
+- Folder-width nowgreen after ordinary Rust custody/transport/views/history/
+  commands modules and placing the TRON parser test with existing adapter tests.
+  Fresh binary6a50e29cce0e32fbebf701a87777a266e039cebb1ee808d3184e2b57d31d3bab.
+  Evidence native-adapter-grouping-{focused,full,width,release}.log,
+  soundcheck-native-final-2.log, remaining-source-gates-current.log,
+  semantic-completeness-current.log. Prior fullcheck attempts stopped at genuine
+  static failures; none are a full current pass. Run complete check now.
+- Method review: unchanged production boundaries first exposed actual recovery
+  and API gaps. Once13/13 were green, full gates exposed fixture/static failures;
+  independent remaining33 checks were batched while one Rust owner fixed the
+  cause. Keep source/docs frozen for final suites and inspect existing handles.
+
+Current browser boundary, 2026-10-08 06:18 UTC:
+- Last selective list13/13 GREEN; canonical selective ledger unresolved0.
+  Funded native custody receives2 USDC, SIGKILL/restores, sends1 USDC back,
+  second SIGKILL/restores with unchanged final Account root/height.
+  native-custody-financial-current-4.log, stack20261008-055352-838,24.079s.
+  Native mirrored dispute/debt exact1/1 GREEN, native-debt-ledger-current.log,
+  stack20261008-055451-354,36.275s. Both source377438aa4ee4c3e87473750b825ef32c83ffc664cd4931b0c19a1cbc546f1ab8.
+- All remaining remote workspace/import and Dock checks GREEN. Last Dock
+  native-dock-current-3.log, stack20261008-061629-306,37.8s strict health;
+  source3cb2087e3c3a039b8dcbcc139eb4663fa4e0dfe997823a7e638acd427ad81bf1,
+  Rust263943b6d3763f9fff9d69099bfae69c749e2ee649e3b0f497db009a16ca3849.
+  Implemented genuine persisted timeline-index (same102frame WAL regression).
+  Dock hard API failures now surface immediately, original assertions retained.
+- Fixed actual custody recovery boundary and live watcher enrollment; certified
+  cursor hashes remain strict. Orchestrator hub bootstrap now uses explicit
+  isHub and retains the complete resident owner inventory. User wallets are
+  not required to publish hub profiles or receive hub bootstrap treatment.
+- Native live unit12/12 GREEN after correcting genuinely no-J ingress fixture.
+  Entire workspace40 test executables compiled; adapter17/17 GREEN aftertimeline.
+  Compilation is not full test execution; fresh bun run check next.
+- Final full Svelte TS/Rust, React TS/Rust, scenarios, contracts, exact replay,
+  liveJ/TVM, package/deployment proof and valid TPS still outstanding. Original
+  full Rust112pass25fail1externalAI exclusion and TS137pass with browser-health
+  errors are stale. Focused greens above must not be called full release proof.
+- Immutable replay16/16 recording hashes verified; final commands in
+  .logs/mainnet-20261007/final-gate-commands.txt and React production-gates.txt.
+  One locked stand; source/docs frozen during fingerprinted full runs. No
+  deployment with funds authorized yet; no paid external calls or usage resets.
+- Reviewer DTO offer-cap concern is not reproduced through admission: both
+  engines cap Account offers50, below TS DTO100. Restore API allows more but
+  no oversized signed production checkpoint reproduced; no speculative change.
+
+Current browser boundary, 2026-10-08 05:08 UTC:
+- Real TVM wallet snapshot GREEN on native Rust and TS, independently compared
+  with SolidityNode at block511/hash
+  0x00000000000001ffdf61e18e1d3437e2dc436210e60568daa3ecce0f9e9c5814.
+  Exact native89999957923607110 SUN (>2^53), token999400, allowanceMaxUint256.
+  `native-tvm-snapshot-3/{candidate,response,verified}.json` and run log bind
+  source529688dd365d68aa542c396404e1a5a7257ecdeac185c8233ebf2ca67e69d1ba,
+  binary4ddb8e415f9f9fce55e3c126b0858d7778bfb9438878aefa797c4b49dd29b21b.
+  Native Solidity reads are bracketed by the same solid header; no fullnode
+  latest fallback. TS raw headers use existing strict native binding rather
+  than incompatible ethers Ethereum block formatting. Related TS24/24 tests,
+  91assertions; native snapshot5/5. New independent TVM proof, not old replay.
+- Native remote admin E2E now reaches history API, real credit command/receipt
+  and actual checkpoint metadata. Mapping now exposes the real native
+  materialized checkpoint; durable HEAD unchanged. Next exact failure:
+  historical checkpoint1 restore SIGNER_DERIVATION_LABEL_DUPLICATE, hidden by
+  an eventual-state probe timeout. Artifact20261008-050341-483 and
+  `native-admin-history-current-3.log`. Fix source config assembly, retain
+  strict decoder; make deterministic internal probe failures immediate.
+- Standalone custody-worker packaging fixed; real bundled worker smoke2/2.
+  Native BrainVault runtime/keyring/import/restart integration remains a
+  prepared, unapplied draft; no remote wallet recovery completion claim.
+- Full final suites/check/exact replay/liveJ/contracts still outstanding.
+
+Current browser boundary, 2026-10-08 04:54 UTC:
+- Corrected external-wallet snapshot domain selection in TS and native Rust:
+  committed Entity selects its own J adapter and token catalog. Real two-sibling
+  browser regression first failed on the wrong source block hash, then passed
+  on both engines: `native-snapshot-domain-green.log` (15.855s) and
+  `ts-snapshot-domain-green.log` (16.464s). Both source fingerprints
+  d6c6f410e1cd9bf970e3ede79920af78e4297e7205c3aa6ecaf65ce5d9e3d9b5;
+  Rust binary ae521533f7cb07317219006be5f08cad23b1f89bfe9112ff61f33558f97b0212.
+  These are two Anvil chains, not TVM proof. Adapter12/12 and related TS
+  wallet22/22 tests82assertions passed (`snapshot-related-ts-current.log`).
+- Actual TVM snapshot reproduced HTTP500: RPC rejects numeric balance block
+  tags (QUANTITY unsupported, latest only). Evidence
+  `native-tvm-snapshot-1/response.json`; no latest fallback is permitted to
+  masquerade as historical evidence. tron_completion owns root-cause analysis.
+- Next real native remote-command/history test fails before writes on
+  unsupported `history-frame-batch`: `native-admin-history-current.log`,
+  stack20261008-045234-389. cross_recovery owns existing checkpoint/WAL reader
+  integration; rust_tron owns coordinated compilation/release, then same E2E.
+- BrainVault native integration remains incomplete. Canonical TS deliberately
+  commits entitySeed in private Runtime WAL; this is existing protocol, not a
+  newly introduced native leak. Preserve semantics and prove public responses
+  exclude secrets. rust_pay owns key preload/import draft; no protocol rewrite.
+- Complete Svelte/React both-engine suites, headless/replay/liveJ/contracts/check
+  still require fresh final-candidate runs. No mainnet-ready claim.
+
+Current browser boundary, 2026-10-08 04:27 UTC:
+- Native /rpc is now real compiled transport/auth/Runtime single-writer reads
+  and commands, not a TS proxy. First browser found MessagePack Binary ignored
+  by Text-only socket. Actual TS-encoded WebSocket reproduced RED then GREEN;
+  fixed existing native decoder. Binary5c404a18575e07ff4fa96cadbf092d1862f96f03d169f7524ce04ef96f62fe63.
+- Browser2 now authenticates and renders real native Entity state, but first
+  test fails accountCount0: default selected empty TRON sibling by BTree order.
+  Exact existing TS selector scores accounts/books/hub/height; cross_recovery
+  ports that rule and preserves explicit entityId. Evidence
+  `native-rpc-first-browser-2.log`, stack20261008-042116-188, browser-runtime JSON.
+- Same first browser test also requires actual accounts and activity history.
+  rust_pay owns new bounded WAL activity projection, cross owns read/default;
+  no fabricated finalized events from merely accepted input. rust_tron owns
+  compiler/release/transport, root owns single heavy E2E stand.
+- Manifest/native public ports applied:13/13 tests,90assertions, runtime TSC,
+  shell checks. API18090/P2P18094/public8090; actual nginx verification pending.
+- Shared BrainVault KDF/custody+private worker applied, actual derive/persist/
+  separate-process reload2/2 tests21assertions passed. Native keyring/install/
+  pre-replay restore and release worker packaging still not integrated.
+- Adapter test boundary9/10: only historical fixture cadence incorrect; native
+  checkpoint1→101, so real historical before/after must use101→102. Do not
+  modify storage or pretend checkpoint100 existed. Latest projection/auth work.
+Method review: real client/wire artifacts revealed gaps isolated codec tests
+missed. Keep the same real browser boundary; compile checks and fixture expansion
+must not delay it. Final suite/check/replay/liveJ gates remain required.
+
+Current browser boundary, 2026-10-08 04:10 UTC:
+- Seven of seven focused native financial regressions now strict GREEN. Latest
+  SIGKILL/restart24.459s and push-wake28.909s share source hash
+  c94d5554ffc6965624d9d45ebbc9e623df84df33803b9f9f0b561db5ffdc979a.
+  Logs `native-rebalance-catalog-final.log`,
+  `native-push-wake-jurisdiction-final.log`; evidence manifest
+  `native-financial-regression-evidence.json` binds all seven runs (earlier five
+  have their own fingerprints; this is not a final full-suite claim).
+- Fixed real post-crash catalog503 by loading full metadata from committed J
+  contracts outside RJEA/replay; no new durable catalog. Native23/23 tests and
+  release passed. Binary f8a3c0561eb0fbf1ad46897564cc40ffaf02dfd0d519807ea191acf5dab688eb.
+- Two stale-input diagnostic logs now DEBUG, matching stale ACK handling:
+  these existing successful ignore branches occur during normal WAL outbox
+  republication. Financial/reject behavior unchanged. Duplicate ACK and real
+  deferred WAL replay tests6/6,63assertions; strict restart E2E then passed.
+- Next first blocker:18 native UI failures requiring actual /rpc. rust_tron
+  coordinates real integration, cross_recovery owns read/history, auth module
+  vectors3/3, command codec/ingress vectors2/2. Ignored drafts are NOT shipped
+  capabilities. Native custody/BrainVault, history, public port wiring remain.
+- Full TS/Rust Svelte and React, final headless/parity/liveJ/contracts/check still
+  must run on final candidate. No mainnet deployment or release claim.
+
+Current browser boundary, 2026-10-08 04:00 UTC:
+- Full native Rust Svelte run:112 passed,25 failed,1 external-AI exclusion,
+  0 flaky,1266.6s. Evidence `svelte-full-rust-final-1.log`,
+  `.logs/e2e-parallel/20261008-031338-005/`; source hash
+  7a883d97d1eedb7c9434a1f3781e9a1511030f612a73f28dfa54f40bb4af8adb.
+- Five of seven isolated financial regressions now pass strict browser health:
+  native sibling faucet, full/partial/disputed cross-J, full bidirectional AHB
+  including fees/self-route/overspend, QR invoice, pay deeplink. Evidence logs:
+  `native-sibling-faucet-fixed-e2e.log`, `native-cross-j-market-fixed-e2e.log`,
+  `native-ahb-full-contexts.log`, `native-invoice-qr-fixed.log`,
+  `native-pay-deeplink-fixed.log`. Full mode E2E_FAST=0/E2E_LONG=1 is mandatory.
+- First remaining failure: rebalance SIGKILL restores health but `/api/tokens`
+  returns503 RRS_RUNTIME_MARKET_TOKEN_REGISTRY. Captured actual response in
+  `native-rebalance-token-diagnostic.log`, stack20261008-035842-963. Durable
+  projection excludes adapter catalog intentionally; restore must rehydrate it
+  from the real J adapter. rust_tron is sole implementation owner. No weakening
+  of post-restart readiness or financial assertions. Push-wake fixture awaits E2E.
+- Remaining native browser failures largely require actual RuntimeAdapter /rpc;
+  prepared ignored drafts are NOT implemented/tested capability. Agent owners
+  prepare non-overlapping auth/read/manifest pieces while root closes financial
+  recovery. No proxy to TS, no fabricated history, no mutable checkpoint oracle.
+- Wallet snapshot ordering and direct-route delivery readiness fixed: exact
+  recovery, remote-to-local and onboarding strict E2Es passed after full TS run4.
+  They still require a final full TS run. React TS/Rust and final check remain.
+- Current release binary SHA256:
+  4cf0f131bdf7977243d356b97b6d6917255408bd75cdac08e06023563a8ee250.
+  HEAD1f2ac885521a49f32ff094b96b8e1e1c1fccdcb8 plus dirty shared tree.
+Method: freeze every tracked/unignored source AND docs during fingerprinted
+stands. Use one exact failed target per retry while ledger is red. Full latest
+candidate remains unverified; prior core gates are evidence, not release success.
+
+Current browser boundary, 2026-10-08 03:10 UTC:
+- Complete Svelte TS run4:137 passed,0 failed,1 excluded external-AI test,
+  0 flaky;1210.0s. Overall exit1 because strict browser health found two issues.
+  Evidence `svelte-full-ts-final-4.log`, `.logs/e2e-parallel/20261008-024458-239/`;
+  source hash a93d25bf64a77547b70deb9541a8bc85a92f03876b0b134d6572e4535f5162e2.
+- Tower recovery UI500 root cause: recovered Entity was published before its
+  live Runtime binding; renderer used the empty bootstrap Runtime. Ordering fix
+  passed real restore/payment/reopen E2E in32.4s. Full run exposed invalid interim
+  persisted vault selection on remote-to-local creation. Latest fix persists one
+  valid protected snapshot before binding, then publishes reactive selection.
+  Decoder unchanged;12/12 related tests and exact remote-to-local strict E2E
+  passed (`wallet-remote-persist-exact.log`,16.649s). Latest recovery rerun pending.
+- Operator diagnostic test now uses existing admin import; exact E2E and full
+  run passed, preserving capability checks. Rebalance SIGKILL regression passed.
+- Remaining strict-browser issue: onboarding admits three hub openAccount
+  commands before transport canDeliver. native_ui_import owns existing
+  p2pPrefetch readiness and final empty-outbox assertion; no warning suppression.
+- Full Rust Svelte, React TS/Rust, frontend recovery/journal and final check remain.
+  Current binaries/core evidence below are not an all-green browser release.
+Method: freeze docs as well as source during fingerprinted stands. A prior
+diagnostic was invalidated by root editing this document. Keep one stand, reuse
+existing handles, and distinguish passing assertions from browser-health gates.
+
+Previous browser boundary, 2026-10-08 02:30 UTC:
+- Complete Svelte TS E2E executed all138 targets:135 passed,2 failed,1 excluded
+  external-AI mascot test,0 flaky; wall1218.8s. Evidence
+  `svelte-full-ts-final-3.log` and `.logs/e2e-parallel/20261008-020843-646/`.
+- First remaining production journey: wiped-wallet tower recovery reaches UI500
+  ENTITY_JURISDICTION_MISSING. Restored env already has2 Entity replicas/2 J;
+  diagnose exact selected Entity/runtime/config before changing recovery or UI.
+  cross_recovery owns focused diagnostic in watchtower recovery spec.
+- Second failure: browser diagnostic test lacked operator capability. Existing
+  admin-import path is now used, preserving registry/privacy assertions; focused
+  browser rerun pending. native_ui_import owns this separate test.
+- Prior SIGKILL guard failure was corrected at child failure classification:
+  ordinary stdout cannot replace exit cause. Critical stdout/stderr preserved,
+  old narrow test exemption removed.13/13 unit and actual rebalance SIGKILL E2E
+  passed, then same scenario passed inside the complete run above.
+- Latest complete core proof before that supervisor-only edit: TS18/18, fullcheck,
+  native livecombined on55d3, TS/Rust W1/W4 exact on immutable TRON WAL. Bound15
+  artifacts in `verified-core-final-evidence.json`; do not claim browser release
+  green. Full Rust Svelte, React TS/Rust and frontend recovery tests still pending.
+Method: final broad browser runs now use max-failures=0 to collect the entire
+remaining failure set while retaining every assertion and nonzero failure exit.
+Freeze all source while a stand runs; prepare diagnosis read-only in parallel.
+
+Method review and verified continuation, 2026-10-08 01:45 UTC:
+The fatal negative-settlement blocker below is fixed in both engines. Preserve
+signed entityCommand atomicity: reject the bad signed command; distinct healthy
+commands survive. Do not remove inner operations from signed payloads or bypass
+nonce continuity. TS reuses the Account validator at source; Rust classifies only
+specific sender-validation errors and checks nonempty ops at the same boundary.
+- Live combined native run GREEN, 24.702s: 2500 swaps, partial/cancel, real four-hop
+  payment and rejected signed settlement with healthy commands and money intact.
+  Evidence `native-four-hop-atomic-reject/`. Related validation changed afterward;
+  final binary is `55d3bbb3919b4ebb4a533d527eaa377a9a329ed370aab95915714c83a003520b`.
+- Related TS tests 57/57,355 assertions; Rust settlement tests 12/12 including six
+  propose/update invalid-ops cases. Empty ops and invalid token65536 reject;
+  token0 remains valid. No broadened catch-all or signature/nonce weakening.
+- Full `bun run check` GREEN after final fixes, exit0,39 source gates,66.4s:
+  `check-after-settlement-reject-2.log`. Snapshot manifest binds4023 files,
+  fingerprint606cce4a111bc00dfb3349998b65c6c6b61db7da5f48e8e98b10523c9d372dcb.
+- Native W1/W4 replay attempt29 GREEN on final binary:172 tail frames,174 roots
+  each, ordered digests and mandatory native restore. Fresh TS scenarios now run;
+  fresh TS W1/W4 and final full browser gates remain. No mainnet-ready claim.
+Method change: all writers acknowledge freeze before a stand; completed agents
+must be reactivated with a task, not merely sent a message. Fix exact production
+boundaries first; distinguish harness preparation failures from engine defects.
+
+Current first blocker, 2026-10-08 01:32 UTC:
+- Native production negative settlement proposal (`r2r`, amount -1) HALTS the
+  Runtime: `RRS_RUNTIME_FATAL:ENTITY_LOCAL_TX_INVALID:settle_propose:SETTLEMENT_WORKSPACE_AMOUNT_INVALID:index=0`.
+  Evidence: `native-four-hop-manifest-ready/server.log:182` and driver log.
+  Rust owner must reproduce and convert only sender-caused validation into the
+  canonical per-transaction reject, retaining healthy transactions. No timeout
+  increase or catch-all handling. TS counterpart regression is being checked.
+- Native real four-hop payment is now exact: sender/H1(Rust)/H2(TS)/H3(TS)/receiver,
+  debits 1000003→1000002→1000001→1000000, fees [1,1,1], bilateral state and
+  cleanup matched. Evidence `native-four-hop-completion/native-four-hop.json`.
+  The complete combined stand remains RED at the negative settlement boundary.
+- Contracts rerun GREEN: 201/201 (`contracts-final-current.log`). Full Svelte TS
+  stopped at 4 passed/1 failed/133 unrun; screenshot helper referenced retired
+  Refresh UI. Simplified exact-ID waiting passes all four viewports, but its
+  rerun was invalidated by concurrent source drift and MUST repeat frozen.
+  Evidence: `svelte-full-ts-final.log`, `svelte-screenshot-discovery-fixed.log`.
+- Keep one source owner per area and explicitly acknowledge all writers frozen
+  before the next stand. Preserve one live process handle and all artifacts.
+
+Latest verified continuation, 2026-10-08 01:14 UTC (supersedes older statuses):
+- Full TypeScript headless catalog is GREEN: 18/18 scenarios, exit 0, 81.8s,
+  four isolated workers. `final-headless-ts-all-fixed.log` and its candidate
+  manifest bind 4022 source files to fingerprint
+  `aadccb536a594f4220716fc9012eee7793d0d502b29fa67a6a5ac9e996836635`.
+- The two previous failures were fixed at their boundaries: swap waits for both
+  authenticated on-chain dispute observations before assertions; J-submit ignores
+  completed/queued attempts, and Runtime nonce allocation uses chain plus current
+  durable reservations rather than abandoned adapter cache entries. AHB passed
+  136 frames; focused 28/28 and real two-stack SIGKILL nonce test passed.
+- Native Rust TVM expiry/replacement passed real expiry plus three SIGKILL
+  boundaries, one economic execution and exact recovered root; evidence in
+  `native-rust-financial/expiry1/manifest.json`. Replay attempt 28 passed W1/W4
+  172 tail frames and mandatory restarts before the latest completed-attempt fix.
+- Native same-J partial fill/cancel passed after 2500 swaps: exact deltas,
+  matching bilateral heights, zero holds and removed order. An strengthened
+  remainder assertion is awaiting its same-boundary rerun.
+- Complete check after expiry was green (`check-after-native-expiry-2.log`),
+  but predates latest J-submit changes. Full current browser suites, updated
+  exact replay, final check and deployment/rollback binding remain unverified.
+Method: freeze shared source during stands, preserve artifacts explicitly with
+XLN_KEEP_TEST_ARTIFACTS=1, and run complete browser suites next. Do not count
+old/erased browser outputs as current evidence or claim mainnet readiness.
+Evidence paths above are relative to `.logs/mainnet-20261007/`.
+
+Latest verified continuation (base `1f2ac885` plus recorded shared diff):
+- Native newer-counterproof dispute passed the full economic gate in 103.546s:
+  old proof 1, counterproof 3, automatic retry, final Account nonce 3 and closed
+  dispute; reserves/debts preserved for all three checked tokens. Evidence:
+  `.logs/mainnet-20261007/native-counterproof-economic-finality/`.
+- Actual native Rust H1 executed a TVM withdrawal: reserve 100→0, external
+  balance 0→100, nonce 0→1, canonical solidified receipt at block 481. SIGKILL
+  recovery replayed nine frames with the exact pre-crash height 10 and root.
+  Evidence: `.logs/mainnet-20261007/native-rust-financial/attempt3/`.
+- Immutable TVM replay attempt 25 passed all 172/172 tail frames on Rust W1
+  and W4 (hub 98, user 74), including both native checkpoint/WAL restarts.
+  Root, ordered event/effect/outbox and post-state comparisons stayed strict.
+  Evidence: `tron-parity/native-replay-25-evidence.json` binds the four logs,
+  base SHA and executed binary. It is not certification of later source edits.
+
+Method review, 2026-10-07 23:58 UTC: first-divergence work closed proof isolation,
+genesis restore sections, stale authenticated J votes, local openAccount
+materialization/creation sequencing, target-user events and settlement continuation.
+Stop expanding scope until named regressions and the same replay pass after
+removing the speculative full-Account clone, then run the complete current check.
+TS settlement suite passed 55/55 (339 assertions). Native Rust financial expiry
+replacement remains absent; implement that next using existing native validation.
+Full browser/headless release suites and live gates on the final candidate remain.
+
+Method review, 2026-10-08 00:28 UTC: complete `bun run check` is now GREEN,
+exit 0, 55.9 seconds (`check-after-native-parity-5.log`). All 40 Rust test
+executables passed (1018 tests), plus TS/Rust parity, 39 source gates, frontend
+checks and 15 contract invariants. Source fingerprint is recorded in
+`check-after-native-parity-5-candidate.json`. The two routing failures were a
+Rust test setup omission of the TS fixture's explicit genesis leaderState;
+the original oracle roots were preserved. Four duplicate imports were removed
+without relaxing ESLint's exact baseline. Debug-cache cleanup preserved release
+binaries, DBs and all evidence.
+Next production boundary: a ready settlement continuation blocked by sentBatch
+must execute in the same Entity frame when its J receipt clears that batch.
+The Rust selector currently runs before that ingress. Reproduce and fix that
+ordering first, then implement Rust financial expiry replacement. Final E2E,
+live-J and complete checks must run again on the final candidate; this passing
+check does not certify later edits or mainnet readiness.
+
+Method review, 2026-10-07 23:30 UTC: candidate proof isolation passes 45/45
+engine tests but is not accepted yet. Replay attempt 12 exceeded its wall budget;
+attempt 13 reused the built binary under 180 seconds and passed the full hub
+replay comparison before failing its subsequent native restart at WAL frame 5
+(expected `4ed93511…`, actual `b2f158a3…`). This is not an earlier main replay
+failure: `runtime_replay.rs` checks all frame/output counts before calling the
+restart verifier. Compare that restored state before retrying.
+Evidence: `tron-parity/hub-rust-w1-13.log` under the same evidence root. Full
+checks wait for this first production boundary; `check:short` is currently 2/2
+and release-integrity is 77/77, neither certifies complete release correctness.
+Read-only audit confirms native financial `replaceJPreparedTransaction` is
+absent from WAL decoding/transition/projection; the captured TS input exists at
+`core/__tests__/fixtures/jurisdiction/tron-financial-replacement.json`. The
+numbered-registration replacement test does not cover this financial operation.
+
+Owner's current extension: finish native TRON integration and missing tests with
+subagents; do not wait for Claude. Claude is subscription-only and its OAuth
+session failed; no API spend or substitute external model is authorized.
+
+Method review, 2026-10-07 23:00 UTC: explicit Rust writer freeze now includes
+cfg(test) and formatting until both live stand guards launch; incidental edits
+previously invalidated two release binaries. Keep one release owner. Full check
+has exposed formatting, generated-target traversal, folder layout, path-only
+ratchet and function-size failures; each was reproduced and fixed without raising
+limits. Same counts plus an inverse-rename hash prove the ratchet path update.
+The next priority remains live counterproof finalization on the combined deadline
+and remote-maker restore fix, then exact replay frame 96. TS scopes are frozen.
+Native full crash/faucet/fresh-wallet/two-payment flow passed default timeouts;
+TRON financial replacement passed both crash boundaries. Mainnet is not certified.
+
+Current continuation, 2026-10-07 22:37 UTC (supersedes older boundary positions below):
+- Actual native H1 accepted-before-result crash boundary passed after the driver
+  waited for completed bootstrap: same DB, new PID, original hash queried before
+  mining, identical signed bytes rebroadcast, one economic event, sender −1,
+  recipient +1 and nonce +1. The following CLI faucet stage timed out, so the
+  complete orchestration smoke is still red. Native UI owner holds this follow-up.
+- TS release cross-J/hash-ladder family is green: 163/163, 804 assertions across
+  31 files (`cross-j-release-family-current.log`). Gate catalog now discovers
+  the exact recursive family without a stale fixed file-count assertion.
+- Real expired TRON financial batch replacement now executes the original intent:
+  reserve 100→0, entity nonce 0→1, old transaction absent. The second-SIGKILL
+  boundary now passes with one execution and retired pending raw; `rust_tron_submit` owns it within the existing
+  explicitly configured RPC-attested policy. Evidence directory:
+  `.logs/mainnet-20261007/tron-financial-expiry/`.
+- Native counterproof's next book-removal error was traced to a pre-chain price
+  rejection/cancellation, not its J event. That actual cancellation defect remains
+  open. A valid resting quote will isolate the requested counterproof boundary;
+  no book authority or preparation barrier was weakened.
+
+Earlier continuation, 2026-10-07 22:30 UTC:
+
+- Actual old-state dispute no longer halts at frozen-body mismatch after the TS/Rust
+  fix. TS cross-J suite passes 118/118 (647 assertions), dispute suite 77/77
+  (222 assertions), and soundcheck 10/10. Required exact execution
+  amounts were restored in three stale test fixtures, without changing production
+  arithmetic. Evidence: `cross-j-all-current.log`, `dispute-related-current.log`,
+  `soundcheck-cross-dispute-current.log`, and `cross-j-focused-manifest.json`.
+  Native live run now reaches a distinct RuntimeOutput authority/decode failure;
+  `cross_recovery` owns that next boundary. It is not a completed dispute gate.
+- Full native TVM browser path through the real orchestrator and three TS hubs
+  passed solidified withdrawal, exact recipient +1,000,000, and zero browser/HTTP
+  errors with unchanged source fingerprint. Evidence directory:
+  `.logs/mainnet-20261007/native-browser-orchestrator-origin-fixed/`.
+  This proves TS hub ingress, not native Rust H1 equivalence.
+- Actual native H1 SIGKILL now passes checkpoint restoration and exposes a nested
+  prepared-transaction WAL envelope. The projection fix and round-trip regression
+  precede another fresh-binary crash run. `rust_tron` coordinates this continuation.
+- Immutable TVM WAL is exact through frames 2–7. Frame 8 differs only in
+  touchedBookEntities; roots and ordered outputs there match. Full replay remains open.
+- Expired native numbered registration passed replacement-WAL, second SIGKILL,
+  restart and one registration (ordinal 5→6). Evidence:
+  `.logs/mainnet-20261007/tron-registration-replacement-final/`.
+  Rust replacement transition now passes 3/3 captured-WAL tests; full live Rust
+  registration and financial replacement crash gates remain open.
+
+Method review, 22:30 UTC: keep fixing the first real restart/dispute/replay boundary;
+focused green tests have repeatedly missed WAL projection and effect authority.
+Freeze each corrected area, reuse the existing binary until a proven Rust fix
+requires relinking, and avoid Cargo incremental cache growth during final checks.
+No complete current release-suite or mainnet-readiness claim is justified yet.
+
+Latest verified boundaries (2026-10-07, base `1f2ac885`, shared working diff):
+- Newest TRON evidence: `.logs/mainnet-20261007/tron-parity/recording-manifest.json`
+  binds 16 artifacts; real TVM WAL has roots for 174/174 frames and exact TS
+  replay covers 172/172 tail frames. Native Rust reaches frame 2 with equal
+  financial root/outputs but divergent storage hash; exact component comparison
+  is in progress. Do not count this as full TS/Rust parity.
+- Real native numbered registration passed locally signed preparation, WAL
+  commit, SIGKILL, recovery, same-byte broadcast and solidified receipt. A retry
+  returned the same receipt and registered exactly one entity (nextNumber 2→3).
+  Evidence: `native-tron-numbered-registration-4.log` in the same evidence root.
+  Long-outage expired transaction replacement and pre-result batch crash remain open.
+- Current registration follow-up also passed real TVM SIGKILL/recovery after
+  canonical receipt re-read was added. Native headers must be read/validated
+  without ethers' EVM-only `stateRoot` formatter. Exactly one registration,
+  ordinal 3→4, duplicate retry stays 4; unit tests 13/13. Source/artifact hashes:
+  `.logs/mainnet-20261007/tron-registration-finality-current/manifest.json`.
+  Actual TVM reorg remains untested; mutated real-fixture tests are not a reorg drill.
+- Native browser withdrawal reached reserve 0, recipient +1,000,000 and nonce 1.
+  A stricter rerun found shutdown preceded solidity finality; checked-in browser
+  proof must wait for solidified observation before stopping the node. Do not
+  claim durable finality from the earlier mined-only browser result.
+  The later fresh-bundle run did verify solidified withdrawal and persistence
+  after restart with zero HTTP/console/page errors; the final driver is capturing
+  bundle/source fingerprints and related operator E2E results.
+- Full contracts passed 201/201 with test-fixture fixes only; real Depository
+  finalization of 1,000 swaps used 9,357,192 gas and conserved collateral/debt.
+  Evidence: `contracts-full-money-final.log`, `contracts-full-swap-conservation.log`.
+  Native check passed 998 Rust + 172 bridge/parity tests in
+  `rscore-tron-integration.log`; subsequent native changes require revalidation.
+  Latest full `bun run check` is not green: previous size/clippy failures were
+  fixed, but the complete stable-candidate run remains outstanding.
+- Native cross-J plus real process restart passed in 40.8 seconds after using
+  the Entity's authenticated J-history anchor instead of clamping it to a
+  lagging global cursor. Worker evidence comes from native readiness (8 workers).
+  Evidence: `.logs/mainnet-20261007/native-cross-recovery-cursor.log` and its
+  `production-cross-swap-recovery-report.json` in the sibling directory.
+- TS conflicting precommit merge regression and active forged/genuine vote
+  tests passed 43/43; evidence `ts-precommit-{red,green,active}.log` in that
+  evidence root. Full current parity/replay gates remain required.
+- Actual TVM historical restore and a separate fresh private fixture passed.
+  All six fresh stages passed: nine-artifact deployment, economic deposit and
+  withdrawal, authority import, EVM/TVM cross-swap, automatic cross-withdrawal,
+  exact restart (hub R99 / user R76). External Alice received 10,000,000 tokens;
+  reserves/collateral returned to zero. TronWeb's generated namespace bug was
+  fixed with a version-pinned Bun patch, and SDK tests passed 22/22. Evidence:
+  `.logs/mainnet-20261007/tron-current/verified-manifest.json`. These earlier
+  stages do not substitute for the current native Rust parity/live J gates.
+- Svelte Rust full run stopped after three passes at the operator screenshot
+  test, which incorrectly required five TS admin imports. Existing native H1
+  has a separate HTTP operator surface. Corrected focused test verifies four
+  exact imports plus native H1 identity/roots/readiness and passed semantically,
+  but concurrent code drift invalidated the runner's final candidate gate.
+  Evidence: `.logs/e2e-parallel/20261007-205435-133/`. Native remote wallet/time
+  machine is not implemented; the screenshot checks H2's supported adapter.
+- Contract underfunded C2R/R2E regression passed after replacing stale monetary
+  hashing with the canonical helper. Related Depository-part-1 now passes 50/50
+  with exact uint256/Int512/Int768/Uint768 assertions. Evidence:
+  `.logs/mainnet-20261007/contracts-money-domain-final.log`. The later complete
+  contract result is recorded above; no global full-green claim.
+
+Current ownership: `rust_tron` owns native watcher/schema/exact replay;
+`rust_tron_submit` owns signed preparation and J crash recovery;
+`cross_recovery` owns the live newer-proof dispute harness;
+`native_ui_import` owns server/native browser integration;
+`tron_completion` independently reviews the stable signed-registration diff.
+`ts_precommit` completed the adjacent-frame transport fix. One stand lock remains mandatory.
+Freeze all writers before the final complete candidate run and `bun run check`.
+
+Method review, 2026-10-07 21:51 UTC: actual native replay, TVM SDK/header handling,
+and browser finality keep revealing narrower failures than broad green suites.
+Continue each same failing artifact before broad reruns. Browser drivers must
+build the current runtime bundle and observe solidity before node shutdown.
+The pending-node-accepted/pre-result crash regression must remain active until
+the TS and Rust prepared-outbox fix passes; do not delete or skip a red test.
+
+Current task heartbeat: `xln`, every 30 minutes, attached to the current chat.
+Older `xln-ceo-10` and `xln-10` remain paused; their prompts/budgets are historical.
+No new external-model spending authorization. No new agent team is implied
+by each wake-up. Inspect current processes and continue existing work first.
+
+Previously observed milestones before this session resumed: native fresh-device wallet
+recovery including two settled payments passed in 17.980 seconds;
+`/tmp/xln-native-wallet-recovery-green/`. That temporary artifact is no longer
+present on 2026-10-07, so fresh release evidence must be regenerated.
+Root dependency `secp256k1` was upgraded
+from 4.0.5 to 5.0.2 after a minimal native Worker crash reproduction; related
+crypto tests passed 6/6 with 1,422 assertions. Bun remains 1.4.0.
+TS headless catalog passed 18/18 before subsequent changes. SvelteKit 3 produced
+its first production build; this does not certify final types or browser E2E.
+
+Next work, in priority order:
+
+1. Finish the live newer-proof counter-dispute on the next shared Rust binary;
+   retain the separately reproduced pre-chain cancellation authority defect.
+2. Continue exact immutable TVM WAL at frame 96: frames 2–95 (94/98 tail
+   frames) now match fully. First remaining red differs in Account/Entity roots
+   and one outbox item; inspect `first-divergence-h96.json` before changing code.
+3. Finish actual expired financial TRON batch replacement and its second crash,
+   Rust replacement parity, and the full native CLI flow after the successful
+   H1 accepted-before-result crash proof. Exact admin E2E waits for source freeze.
+4. Freeze one candidate; run complete applicable headless, Svelte and React
+   E2E on both engines, immutable replay/live J, contract gates and `bun run check`.
+   Keep failed/skipped/stale evidence explicit; then complete operational gates.
+
+Read-only audit snapshot: `/tmp/xln-final-audit-20261001`, base
+`1f2ac885521a49f32ff094b96b8e1e1c1fccdcb8`, manifest SHA256
+`7c586ec3765ccb9e806a059643265989e172e4ea60d1fb8bdb9ec5c1bf27a7d7`.
+Historical contract and Rust report locations were `/tmp/xln-audit-contracts-final.txt`
+and `/tmp/xln-audit-rust-final.txt`; these and the temporary TS precommit
+reproducer are no longer present on 2026-10-07. TS audit stopped before its final
+report. Revalidate findings against the live diff before fixing or reporting
+them as resolved. Preserve new execution artifacts in `.logs/mainnet-20261007/`.
+
+First resumed command: under the stand lock, run the existing native Runtime
+test `rejected_runtime_output_does_not_stop_live_ingress_or_admit_batch_prefix`
+with Cargo (`xln-rscore-runtime`, `--lib`). It now exercises reducer processing
+and following honest work in the current diff. Result: 1 passed, 0 failed,
+0 ignored; test body 0.13 seconds. Log:
+`.logs/mainnet-20261007/native-reject.log`.
+
+Resumed `bun run check` passed after two concrete fixes: package-scoped Cargo
+cleanup removed 8.1 GiB of generated runtime build files; the exhaustive process
+error-code match now includes `AccountMempoolAdmissionRejected`. Process
+`cargo check --all-targets` passed; the Account mempool regression passed 1/1.
+Full check evidence: `.logs/mainnet-20261007/check-process-error-code.log`
+(exit 0, source gates 39/39). Earlier failed logs remain available.
+
+Full Svelte E2E finished in 1,243.5 seconds: 137 tests passed, one external AI
+mascot test skipped; strict browser health reported zero issues. Do not call
+this 138 executed tests or native Rust coverage. Manifest:
+`.logs/e2e-parallel/20261007-182800-960/manifest.json`; code hash
+`a0d87d3d75d416373a250dca2d057cb38e84edec1e3528d70cf20e28478eae61`, base SHA
+`1f2ac885521a49f32ff094b96b8e1e1c1fccdcb8` with uncommitted changes.
+Headless TS full run passed 18/18 in 75.8 seconds:
+`.logs/mainnet-20261007/ts-scenarios-full.log`. Current browser gate:
+React through `local-prod-smoke.ts` / `runWalletBrowserGate`: TS passed 42/42,
+zero skips: 40 ordinary tests plus early-finalization rejection (1) and complete
+pay/swap/cross-J/dispute/recovered-reserve move journey (1). JSON reports live in
+`.logs/mainnet-20261007/react-ts-{current,dispute,journey}/wallet-results.json`.
+Native release build passed in 29.87 seconds; see `native-release-build.log` and
+`native-binary.sha256` in the same evidence directory. React Rust also passed
+42/42, zero skips: reports `react-rust-{current,dispute,journey}/wallet-results.json`.
+Native H1 identity/engine assertions are present in the browser logs. The full
+journey passed in 19.6 seconds. Next run is full Svelte with `XLN_HLT_ENGINE=rust`
+and `--preserve-artifacts`; log `svelte-rust-full.log`. These passing UI gates
+do not close the remaining TS precommit, J-submit restart, live counterproof,
+contract fixture, exact replay and final operational gates listed above.
+
+First current blocker (20:12 UTC): full Svelte Rust stopped at cross-J partial
+fill cancellation: 2 passed, 1 failed, remaining targets not run. Original
+manifest `.logs/e2e-parallel/20261007-194642-439/manifest.json`; unchanged focused
+reproduction also failed (`svelte-rust-partial-repro.log`). The 25 WETH remainder
+stayed executable after cancel and eventually filled completely.
+Confirmed cause: `resident.rs::local_financial_view_requests` omitted the offer
+for committed `SwapCancelRequest`; the handler treated the missing view as a
+no-op. Added exact offer lookup and named regression
+`committed_swap_cancel_requests_its_offer_for_cross_j_book_removal` (red then green).
+After release rebuild, focused E2E progressed to a new failure:
+`RRS_TRANSPORT_OUTBOX:cross-j-incomplete-cohort` at Runtime height 96. Evidence:
+`.logs/e2e-parallel/20261007-201140-436/shard-0/` and
+`.logs/mainnet-20261007/svelte-rust-partial-fixed.log`. No live test remains.
+Resolved at 20:41 UTC: frame 96 contained ACK plus both matching closes. Rust
+only inferred pairs when the entire destination group had exactly two rows.
+Added exact-pair selection beside unrelated ACKs and a real-WAL regression
+`native-cross-cancel-ack-v1.json`, with expected groups produced by TS.
+Transport tests 9/9 passed. Next E2E exposed a stale test snapshot: automatic J
+collateral had updated both replicas, but the assertion retained the earlier
+client snapshot. It now compares current replicas while retaining exact fill
+and hold checks. Focused E2E passed, manifest
+`.logs/e2e-parallel/20261007-204026-907/manifest.json`. Full `bun run check` passed
+again (`check-cross-cancel.log`, source gates 39/39). Next: full Svelte Rust;
+latest run log `svelte-rust-full-after-cancel.log`.
+
+Owner requested independent Claude Opus 5.5 review, subscription only (no API
+spending). Claude auth reports Max but generation failed: expired OAuth could
+not refresh; CLI also warned `claude-opus-5-5` unrecognized. No review produced,
+no fallback model used. Owner was asked to reauthenticate and confirm exact model
+identifier. Immutable patch packet and failure are under
+`.logs/mainnet-20261007/opus-review/`; regenerate the packet after later edits.
+Keep existing Svelte artifacts with `--keep-test-artifacts` on scenario runs.
+
+## Preserved upstream handoff — dated 2026-09-30
+
+The newer explicit 2026-10-07 release scope above takes precedence.
+
 Latest owner-requested implementation handoff: [J/E/A continuation](jea-continuation.md).
 Its evidence is dated; root `todo.md` remains the only live release checklist.
 

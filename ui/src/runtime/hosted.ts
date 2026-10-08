@@ -1,3 +1,4 @@
+import { sendRuntimeInput } from './commands';
 import { getXLN } from './xln-loader';
 import type { RuntimeRecoveryCandidate } from './restore';
 import { connectEmbedded, getEmbeddedEnv, requireAdapter } from './adapter';
@@ -79,7 +80,7 @@ export function accountReady(env: RuntimeReplica, entityId: string, counterparty
 }
 
 export async function sendEntity(entityId: string, signerId: string, entityTxs: EntityTx[]): Promise<void> {
-	await requireAdapter().send({ runtimeTxs: [], entityInputs: [{ entityId, signerId, entityTxs }] });
+	await sendRuntimeInput({ runtimeTxs: [], entityInputs: [{ entityId, signerId, entityTxs }] });
 }
 
 /** "Learn xln": a throwaway phrase on the live network. The user can keep it afterwards. */
@@ -230,7 +231,6 @@ export async function bootHostedVault(seed: string, options: HostedVaultOptions)
 		await connectEmbedded(seed, options.recovery);
 		const env = getEmbeddedEnv();
 		if (!env) throw new Error('EMBEDDED_ENV_MISSING');
-		const adapter = requireAdapter();
 		const signerId = deriveAddress(seed, 0);
 		const entityId = String(xln.generateLazyEntityId([signerId], 1n)).toLowerCase();
 		const j = stack.jurisdiction;
@@ -240,7 +240,7 @@ export async function bootHostedVault(seed: string, options: HostedVaultOptions)
 			step(`Joining ${chain.name}`);
 			const ready = (): boolean => Boolean(env.state.jReplicas?.get?.(chain.name)?.contracts?.depository);
 			if (ready()) continue;
-			await adapter.send({
+			await sendRuntimeInput({
 				runtimeTxs: [
 					{
 						type: 'importJ',
@@ -268,7 +268,7 @@ export async function bootHostedVault(seed: string, options: HostedVaultOptions)
 			const chainEntityId = primary ? entityId : String(xln.generateLazyEntityId([chainSignerId], 1n)).toLowerCase();
 			if (findReplicaState(env, chainEntityId)) continue;
 			step(`Creating your ${chain.name} entity`);
-			await adapter.send({
+			await sendRuntimeInput({
 				runtimeTxs: [
 					xln.importEntity({
 						entityId: chainEntityId,

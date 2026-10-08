@@ -54,10 +54,17 @@ fn authority() -> EntityFrameAuthority {
 }
 
 fn carried_sections() -> Vec<EntityConsensusSection> {
-    vec![EntityConsensusSection {
+    // This TS vector explicitly installs leaderState at H=0. Ordinary imported
+    // genesis omits it, so carry the fixture's actual field presence rather
+    // than asking projection to invent an absent genesis leader.
+    let mut sections = project_entity_consensus_sections(&[], Vec::new(), &authority(), 1)
+        .expect("fixture authority sections");
+    sections.retain(|section| section.field == "leaderState");
+    sections.push(EntityConsensusSection {
         field: "nonces".into(),
         digest: "0x76be8b528d0075f7aae98d6fa57a6d3c83ae480a8469e668d7b0af968995ac71".into(),
-    }]
+    });
+    sections
 }
 
 fn assert_case(name: &str, tx: LocalEntityControlTx) {
@@ -71,8 +78,13 @@ fn assert_case(name: &str, tx: LocalEntityControlTx) {
 
     let accounts_root = digest_bytes(expected["accountsRoot"].as_str().expect("accounts root"));
     let sections = compute_entity_owned_sections(&state, accounts_root, 0).expect("owned sections");
-    let sections = project_entity_consensus_sections(&carried_sections(), sections, &authority())
-        .expect("complete sections");
+    let sections = project_entity_consensus_sections(
+        &carried_sections(),
+        sections,
+        &authority(),
+        state.height,
+    )
+    .expect("complete sections");
     assert_eq!(
         compute_entity_consensus_root(&sections).expect("Entity root"),
         expected["stateRoot"].as_str().expect("state root"),
@@ -221,8 +233,13 @@ fn runtime_output_authorizes_then_reenters_the_same_typescript_matched_reducer()
         }]
     );
     let sections = compute_entity_owned_sections(&state, [0; 32], 0).expect("sections");
-    let sections = project_entity_consensus_sections(&carried_sections(), sections, &authority())
-        .expect("complete sections");
+    let sections = project_entity_consensus_sections(
+        &carried_sections(),
+        sections,
+        &authority(),
+        state.height,
+    )
+    .expect("complete sections");
     assert_eq!(
         compute_entity_consensus_root(&sections).expect("root"),
         expected["stateRoot"].as_str().expect("state root")

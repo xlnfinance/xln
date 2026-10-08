@@ -32,6 +32,20 @@ pub struct WatchedHashLadder {
 }
 
 pub trait JsonRpc {
+    /// Native receipt trust is selected from the committed JReplica policy.
+    fn tron_rpc_attested(&self) -> bool {
+        false
+    }
+    fn tron_call(&self, _method: &str, _params: Value) -> Result<Value, JWatcherError> {
+        Err(JWatcherError::RpcResponse(
+            "TRON_NATIVE_TRANSPORT_REQUIRED".into(),
+        ))
+    }
+    fn tron_solidity_call(&self, _method: &str, _params: Value) -> Result<Value, JWatcherError> {
+        Err(JWatcherError::RpcResponse(
+            "TRON_NATIVE_TRANSPORT_REQUIRED".into(),
+        ))
+    }
     fn call(&self, method: &str, params: Value) -> Result<Value, JWatcherError>;
 }
 

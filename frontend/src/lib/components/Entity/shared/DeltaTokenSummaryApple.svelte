@@ -1,6 +1,6 @@
 <script lang="ts">
   import { createEventDispatcher } from 'svelte';
-  import { settings } from '$lib/stores/settingsStore';
+  import { settings } from '#lib/stores/settingsStore.ts';
   import type { DeltaParts } from './delta-types';
 
   export let symbol: string;

@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onDestroy, onMount } from 'svelte';
-  import { readJsonUnknown, rejectExtraKeys, requireString, requireUnknownRecord } from '$lib/utils/boundary';
+  import { operatorDiagnosticsAllowed } from '#lib/debug/operator-diagnostics.ts';
+  import { readJsonUnknown, rejectExtraKeys, requireString, requireUnknownRecord } from '#lib/utils/boundary/index.ts';
 
   export let ready = false;
   export let reason: string | null = null;
@@ -75,7 +76,8 @@
     }
   };
 
-  $: signature = ready ? '' : `${runtimeId}|${reason || 'unknown'}|${apiBase}`;
+  $: operatorDiagnostics = $operatorDiagnosticsAllowed;
+  $: signature = ready || !operatorDiagnostics ? '' : `${runtimeId}|${reason || 'unknown'}|${apiBase}`;
   $: if (mounted && signature && signature !== loadedSignature) {
     loadedSignature = signature;
     void loadIncident(signature);
@@ -101,6 +103,7 @@
       <strong>Runtime paused · financial actions disabled</strong>
       <span data-testid="runtime-command-gate-reason">{reason || 'readiness unavailable'}</span>
     </div>
+    {#if operatorDiagnostics}
     <div class="command-gate-incident">
       {#if incidentFingerprint}
         <span>{incidentCode || 'Incident'}</span>
@@ -116,6 +119,7 @@
       {/if}
       <a href={`/qa?runtimeId=${encodeURIComponent(runtimeId)}#system-health`}>Open QA</a>
     </div>
+    {/if}
   </aside>
 {/if}
 

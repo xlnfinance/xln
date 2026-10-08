@@ -1,5 +1,5 @@
 <script lang="ts">
-import type { AccountReadView } from '$lib/components/Entity/core/entity-panel-types';
+import type { AccountReadView } from '#lib/components/Entity/core/entity-panel-types.ts';
 
   import { get } from 'svelte/store';
   import type { RuntimeReplica, RuntimeInput } from '@xln/core/api/public/runtime-module';
@@ -10,10 +10,10 @@ import type { AccountReadView } from '$lib/components/Entity/core/entity-panel-t
     getCounterpartyAccount,
     normalizeEntityId,
     requireSignerIdForEntity,
-  } from '$lib/utils/identity/entityReplica';
+  } from '#lib/utils/identity/entityReplica.ts';
   import BigIntInput from '../../../Common/BigIntInput.svelte';
   import EntitySelect from '../../workspace/shell/EntitySelect.svelte';
-  import { amountToUsd } from '$lib/utils/assetPricing';
+  import { amountToUsd } from '#lib/utils/assetPricing.ts';
   import { requireTokenDecimals } from '../../token-metadata';
 
   export let entityId: string;

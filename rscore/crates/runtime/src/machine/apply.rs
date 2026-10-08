@@ -159,7 +159,14 @@ fn prepare_j_prefix_range_from_parts(
                 header.j_height != base_height + u64::try_from(index).unwrap_or(u64::MAX) + 1
             })
     {
-        return Err(j_range_error("HEADER_RANGE"));
+        return Err(j_range_error(format!(
+            "HEADER_RANGE:entity={}:base={base_height}:tip={}:headers={}:first={:?}:last={:?}",
+            state.entity_id,
+            observation.scanned_through_height,
+            observation.headers.len(),
+            observation.headers.first().map(|header| header.j_height),
+            observation.headers.last().map(|header| header.j_height),
+        )));
     }
     let blocks = xln_rscore_entity_kernel::canonical_j_event_blocks(&observation.batches)
         .map_err(|error| j_range_error(error.to_string()))?;
@@ -1077,6 +1084,7 @@ struct PreparedEntityPrefix<'a> {
     txs: Vec<PreparedFrameTx<'a>>,
     rows: Vec<&'a xln_rscore_batch::AccountInputRow>,
     local_financial_txs: Vec<&'a xln_rscore_entity_kernel::LocalEntityFinancialTx>,
+    originated_j_heights: BTreeMap<String, u64>,
     /// Pending work items this prefix consumed. Differs from `txs.len()` when a
     /// stale (Retry/Cancel) EntityCommand is evicted without entering the frame.
     consumed: usize,
@@ -1092,15 +1100,23 @@ fn prepare_entity_prefix<'a>(
     let mut txs = Vec::new();
     let mut rows = Vec::new();
     let mut local_financial_txs = Vec::new();
+    let mut originated_j_heights = BTreeMap::new();
+    let mut origin_j_height = slot.state.entity.last_finalized_j_height;
     let mut tx_bytes = 0_usize;
     let mut consumed = 0_usize;
     for work in work {
+        let local_start = local_financial_txs.len();
         // TS `selectEntityFrameTxByteBudgetWithMeter`: the frame prefix is cut by
         // count before bytes, deterministically, ahead of any apply.
         if txs.len() >= MAX_ENTITY_FRAME_TXS {
             break;
         }
         match work {
+            EntityPendingWork::LocalOpenAccount(_) => {
+                return Err(RuntimeMachineError::EntityTxExecutionUnsupported(
+                    "UNMATERIALIZED_OPEN_ACCOUNT",
+                ));
+            }
             EntityPendingWork::Account { projected, row, .. } => {
                 if !accept_entity_tx_bytes(&mut tx_bytes, projected, max_tx_bytes)? {
                     break;
@@ -1190,12 +1206,36 @@ fn prepare_entity_prefix<'a>(
                 txs.push(PreparedFrameTx::Borrowed(projected));
             }
         }
+        // A payment uses its Entity's local cursor, advanced only by a J
+        // event preceding it in this exact selected prefix. Another J and a
+        // later event must never shorten its reveal window.
+        if let Some(tx) = txs.last().map(PreparedFrameTx::as_ref)
+            && tx.kind == EntityTxKind::JEvent
+        {
+            let data = crate::tagged_json_from_canonical_value(&tx.wire_data).map_err(|error| {
+                RuntimeMachineError::EntityContextMaterialization(error.to_string())
+            })?;
+            origin_j_height = data
+                .get("scannedThroughHeight")
+                .and_then(serde_json::Value::as_u64)
+                .ok_or_else(|| {
+                    RuntimeMachineError::EntityContextMaterialization(
+                        "ENTITY_ORIGIN_J_HEIGHT_INVALID".into(),
+                    )
+                })?;
+        }
+        for tx in &local_financial_txs[local_start..] {
+            if let xln_rscore_entity_kernel::LocalEntityFinancialTx::HtlcPayment(payment) = tx {
+                originated_j_heights.insert(payment.tx_hash.clone(), origin_j_height);
+            }
+        }
         consumed += 1;
     }
     Ok(PreparedEntityPrefix {
         txs,
         rows,
         local_financial_txs,
+        originated_j_heights,
         consumed,
     })
 }
@@ -1224,6 +1264,76 @@ fn accept_entity_tx_bytes(
     }
     *total = next;
     Ok(true)
+}
+
+fn materialize_local_open_accounts(
+    pending: &mut [EntityPendingWork],
+    slot: &EntityApplySlot,
+    runtime_seed: &str,
+    runtime_id: &str,
+) -> Result<(), RuntimeMachineError> {
+    for work in pending {
+        let EntityPendingWork::LocalOpenAccount(tx) = work else {
+            continue;
+        };
+        let jurisdiction = slot
+            .replica
+            .entity_consensus
+            .state
+            .authority
+            .config
+            .jurisdiction
+            .as_ref()
+            .ok_or_else(|| j_range_error("OPEN_ACCOUNT_JURISDICTION"))?;
+        let jurisdiction = crate::tagged_json_from_canonical_value(jurisdiction)
+            .map_err(|error| j_range_error(error.to_string()))?;
+        let domain = serde_json::json!({"chainId":jurisdiction["chainId"],
+            "depositoryAddress":jurisdiction["depositoryAddress"]});
+        let data = crate::tagged_json_from_canonical_value(&tx.wire_data)
+            .map_err(|error| j_range_error(error.to_string()))?;
+        let mut wire = serde_json::json!({"type":"openAccount","data":data});
+        let data = wire["data"]
+            .as_object_mut()
+            .ok_or_else(|| j_range_error("OPEN_ACCOUNT_DATA"))?;
+        if data
+            .get("accountDomain")
+            .is_some_and(|value| value != &domain)
+        {
+            return Err(j_range_error("OPEN_ACCOUNT_DOMAIN_MISMATCH"));
+        }
+        data.insert("accountDomain".into(), domain);
+        if !data.contains_key("watchSeed") {
+            if runtime_seed.is_empty() {
+                return Err(j_range_error("OPEN_ACCOUNT_RUNTIME_SEED"));
+            }
+            let target = data
+                .get("targetEntityId")
+                .and_then(serde_json::Value::as_str)
+                .ok_or_else(|| j_range_error("OPEN_ACCOUNT_TARGET"))?
+                .trim()
+                .to_ascii_lowercase();
+            let preimage = format!(
+                "xln:account-watch-seed:v1|{}|{}|{}|{}",
+                runtime_seed,
+                runtime_id.to_ascii_lowercase(),
+                slot.state.entity.entity_id.to_ascii_lowercase(),
+                target
+            );
+            let hash: [u8; 32] = Keccak256::digest(preimage.as_bytes()).into();
+            data.insert("watchSeed".into(), serde_json::json!(render_word(&hash)));
+        }
+        let projected = crate::entity_frame::project_entity_tx(&wire)?;
+        let native = decode_local_entity_tx(&projected)
+            .map_err(RuntimeMachineError::EntityFinancial)?
+            .ok_or(RuntimeMachineError::EntityTxExecutionUnsupported(
+                "openAccount",
+            ))?;
+        *work = EntityPendingWork::LocalBatch {
+            projected: vec![projected],
+            native: vec![native],
+        };
+    }
+    Ok(())
 }
 
 fn enqueue_proposer_materializations(
@@ -1460,6 +1570,7 @@ fn pending_work_kind(work: &EntityPendingWork) -> &'static str {
     match work {
         EntityPendingWork::Account { .. } => "account",
         EntityPendingWork::LocalBatch { .. } => "local-batch",
+        EntityPendingWork::LocalOpenAccount(_) => "local-open-account",
         EntityPendingWork::Command { .. } => "command",
         EntityPendingWork::ProposerMaterialized { .. } => "proposer-materialized",
         EntityPendingWork::Projected(_) => "projected",
@@ -1644,6 +1755,7 @@ fn fit_live_entity_prefix(
     frame: &RuntimeFrameContext,
     materializer: &mut dyn EntityInfraMaterializer,
     j_prefix_certificate: Option<&CanonicalValue>,
+    entity_encryption_seed: Option<&str>,
 ) -> Result<(usize, MaterializedEntityInfraContext, Vec<u8>), RuntimeMachineError> {
     let fit_started = Instant::now();
     let prepare_started = Instant::now();
@@ -1652,10 +1764,12 @@ fn fit_live_entity_prefix(
     let materialize_started = Instant::now();
     let mut materialized = materializer
         .materialize(EntityInfraMaterializeRequest {
+            entity_encryption_seed,
             state: &slot.state,
             replica: &mut slot.replica,
             account_inputs: &prepared.rows,
             local_financial_txs: &prepared.local_financial_txs,
+            originated_j_heights: &prepared.originated_j_heights,
             timestamp: frame.timestamp,
             finalized_j_height: frame.finalized_j_height,
         })
@@ -1719,8 +1833,18 @@ fn fit_live_entity_prefix(
         for item in work.iter().take(candidate) {
             retained.extend(pending_htlc_key_pairs(item)?);
         }
+        let originated = prepared
+            .local_financial_txs
+            .iter()
+            .filter_map(|tx| match tx {
+                xln_rscore_entity_kernel::LocalEntityFinancialTx::HtlcPayment(payment) => {
+                    Some(payment.tx_hash.clone())
+                }
+                _ => None,
+            })
+            .collect();
         materialized
-            .retain_inbound_htlc_keys(&retained)
+            .retain_inbound_htlc_keys(&retained, &originated)
             .map_err(|error| {
                 RuntimeMachineError::EntityContextMaterialization(error.to_string())
             })?;
@@ -1776,6 +1900,11 @@ fn take_entity_prefix(
             .pop_front()
             .ok_or(RuntimeMachineError::InputCountOverflow)?;
         match work {
+            EntityPendingWork::LocalOpenAccount(_) => {
+                return Err(RuntimeMachineError::EntityTxExecutionUnsupported(
+                    "UNMATERIALIZED_OPEN_ACCOUNT",
+                ));
+            }
             EntityPendingWork::Account { projected, row, .. } => {
                 selected.txs.push(projected);
                 let start = selected.rows.len();
@@ -1979,15 +2108,17 @@ fn admit_deferred_entity_inputs(
     staged: &mut BTreeMap<RuntimeEntityKey, EntityApplySlot>,
     admissions: Vec<PendingEntityInputAdmission>,
     runtime_seed: &str,
+    runtime_id: &str,
     runtime_timestamp: u64,
 ) -> Result<(), RuntimeMachineError> {
     // Admission is positional across all inputs before any deferred owner
     // proposes. Materialize on the first eligible input, not the merged tail:
     // [chat A], [chat B] must sign [A, materialize], then [B] (R4 regression).
-    for admission in admissions {
+    for mut admission in admissions {
         let slot = staged.get_mut(&admission.key).ok_or_else(|| {
             RuntimeMachineError::EntityStateMap("ADMISSION_ENTITY_SLOT_MISSING".into())
         })?;
+        materialize_local_open_accounts(&mut admission.pending, slot, runtime_seed, runtime_id)?;
         let append_to_run = pending_ends_in_individual_run(&admission.pending);
         append_entity_pending_work(&mut slot.replica.entity_mempool, admission.pending)?;
         enqueue_proposer_materializations(slot, runtime_seed, runtime_timestamp, append_to_run)?;
@@ -2445,6 +2576,88 @@ fn attach_j_prefix_attestation(
     group.j_observation = Some(attestation.observation.clone());
     group.j_attestation_wire = Some(attestation.wire.clone());
     Ok(())
+}
+
+// Stale authenticated votes retire only their old round. They never replace
+// the current certified J anchor; any new vote is derived from local history.
+fn refresh_stale_j_prefix(
+    slot: &EntityApplySlot,
+    group: &mut PendingEntityGroup,
+) -> Result<bool, RuntimeMachineError> {
+    let Some(wire) = group.j_attestation_wire.as_ref() else {
+        return Ok(false);
+    };
+    let target = wire["targetEntityHeight"]
+        .as_u64()
+        .filter(|height| *height > 0 && *height <= 9_007_199_254_740_991)
+        .ok_or_else(|| j_range_error("ATTESTATION_TARGET"))?;
+    if target > slot.state.entity.height {
+        return Ok(false);
+    }
+    let parent = wire["parentFrameHash"]
+        .as_str()
+        .ok_or_else(|| j_range_error("ATTESTATION_PARENT"))?;
+    if (target == 1 && parent != "genesis") || (target > 1 && parse_hex32(parent).is_none()) {
+        return Err(j_range_error("ATTESTATION_PARENT"));
+    }
+    let observation = group
+        .j_observation
+        .as_ref()
+        .ok_or_else(|| j_range_error("ATTESTATION_OBSERVATION"))?;
+    let (_, _, expected_jurisdiction) = certified_j_anchor(&slot.state.entity)?
+        .ok_or_else(|| j_range_error("ATTESTATION_CERTIFIED_ANCHOR_MISSING"))?;
+    if observation.jurisdiction_ref != expected_jurisdiction {
+        return Err(j_range_error("ATTESTATION_JURISDICTION"));
+    }
+    let base = wire["baseHeight"]
+        .as_u64()
+        .ok_or_else(|| j_range_error("ATTESTATION_BASE"))?;
+    if observation.scanned_through_height < base
+        || observation.headers.len() as u64 != observation.scanned_through_height - base
+        || observation
+            .headers
+            .first()
+            .is_some_and(|header| header.j_height != base + 1)
+    {
+        return Err(j_range_error("ATTESTATION_HEADERS"));
+    }
+    let blocks = xln_rscore_entity_kernel::canonical_j_event_blocks(&observation.batches)
+        .map_err(|error| j_range_error(error.to_string()))?;
+    let range_hash = xln_rscore_entity_kernel::canonical_j_event_range_hash(&blocks)
+        .map_err(|error| j_range_error(error.to_string()))?;
+    if wire["rangeHash"].as_str() != Some(render_word(&range_hash).as_str()) {
+        return Err(j_range_error("ATTESTATION_RANGE_HASH"));
+    }
+    let mut unsigned = wire
+        .as_object()
+        .cloned()
+        .ok_or_else(|| j_range_error("ATTESTATION_OBJECT"))?;
+    let signature = unsigned
+        .remove("signature")
+        .and_then(|value| value.as_str().map(str::to_owned))
+        .ok_or_else(|| j_range_error("ATTESTATION_SIGNATURE"))?;
+    unsigned.insert(
+        "domain".into(),
+        serde_json::json!("xln:j-prefix-attestation:v1"),
+    );
+    let canonical = crate::canonical_value_from_tagged_json(&serde_json::Value::Object(unsigned))
+        .map_err(|error| j_range_error(error.to_string()))?;
+    let encoded = encode_canonical_consensus_bytes(&canonical)
+        .map_err(|error| j_range_error(error.to_string()))?;
+    let digest: [u8; 32] = Keccak256::digest(encoded).into();
+    let signature: [u8; 65] = hex::decode(signature.strip_prefix("0x").unwrap_or(""))
+        .map_err(|_| j_range_error("ATTESTATION_SIGNATURE"))?
+        .try_into()
+        .map_err(|_| j_range_error("ATTESTATION_SIGNATURE"))?;
+    let signer = xln_rscore_crypto::recover_signer_address(&digest, &signature)
+        .ok_or_else(|| j_range_error("ATTESTATION_SIGNATURE"))?;
+    if Some(signer) != parse_hex20(&group.signer_id) {
+        return Err(j_range_error("ATTESTATION_SIGNATURE"));
+    }
+    group.j_observation =
+        complete_local_j_prefix_observation(&slot.state, &slot.replica, None, false)?;
+    group.j_attestation_wire = None;
+    Ok(true)
 }
 
 fn assert_j_prefix_attestation_certified(
@@ -2962,6 +3175,8 @@ fn apply_runtime_inner(
     }
 
     if segments.is_empty() {
+        crate::j_submit::prune_completed_prepared_attempts(&mut replica)
+            .map_err(|error| RuntimeMachineError::JSubmit(error.to_string()))?;
         replica.state.height = next_height;
         replica.state.timestamp = frame.frame.timestamp;
         replica.state.finalized_j_height = frame.frame.finalized_j_height;
@@ -3056,6 +3271,7 @@ fn apply_runtime_inner(
                     &mut staged,
                     admissions,
                     &replica.proposer_runtime_seed,
+                    replica.durable.runtime_id(),
                     frame.frame.timestamp,
                 )?;
                 true
@@ -3167,7 +3383,9 @@ fn apply_runtime_inner(
                 next_height,
                 &mut frame.frame,
                 replica.durable.j_replicas(),
+                replica.durable.infrastructure(),
                 &replica.proposer_runtime_seed,
+                replica.durable.runtime_id(),
                 prepared_materialization,
                 replica.limits,
                 false,
@@ -3418,6 +3636,8 @@ fn apply_runtime_inner(
             .or_default()
             .push_back(context);
     }
+    crate::j_submit::prune_completed_prepared_attempts(&mut replica)
+        .map_err(|error| RuntimeMachineError::JSubmit(error.to_string()))?;
     replica.state.height = next_height;
     replica.state.timestamp = frame.frame.timestamp;
     replica.state.finalized_j_height = frame.frame.finalized_j_height;
@@ -3449,14 +3669,34 @@ fn apply_runtime_inner(
     })
 }
 
+// Storage book touches track concrete book rows, not orderbook configuration.
+// In particular initOrderbookExt creates metadata but no book row.
+fn book_commitments(
+    state: &xln_rscore_entity_kernel::EntityStateSlice,
+) -> Result<BTreeMap<String, String>, RuntimeMachineError> {
+    state
+        .orderbook
+        .as_ref()
+        .into_iter()
+        .flat_map(|book| book.books.iter())
+        .map(|(pair, book)| {
+            xln_rscore_entity_kernel::compute_book_commitment_hash(book)
+                .map(|hash| (pair.clone(), hash))
+                .map_err(RuntimeMachineError::EntityFinancial)
+        })
+        .collect()
+}
+
 #[allow(clippy::too_many_arguments)]
 fn apply_entity_group(
     mut slot: EntityApplySlot,
-    group: PendingEntityGroup,
+    mut group: PendingEntityGroup,
     runtime_height: u64,
     frame: &mut RuntimeFrameContext,
     j_replicas: &serde_json::Value,
+    infrastructure: &serde_json::Value,
     proposer_runtime_seed: &str,
+    runtime_id: &str,
     prepared_materialization: Option<MaterializationAdmission>,
     limits: super::RuntimeLimits,
     allow_checkpoint: bool,
@@ -3481,6 +3721,29 @@ fn apply_entity_group(
         .ok_or(RuntimeMachineError::EntityHeightOverflow)?;
     // TS appends materializations before signing consecutive fresh individual
     // inputs. A retained or already-signed command remains a nonce boundary.
+    materialize_local_open_accounts(&mut group.pending, &slot, proposer_runtime_seed, runtime_id)?;
+    let stale_prefix = refresh_stale_j_prefix(&slot, &mut group)?;
+    if stale_prefix
+        && group.j_observation.is_none()
+        && group.pending.is_empty()
+        && group.wake.is_none()
+        && slot.replica.entity_mempool.is_empty()
+    {
+        return Ok(AppliedEntityGroup {
+            evicted_context: None,
+            state: slot.state,
+            replica: slot.replica,
+            outputs: None,
+            account_commits: Vec::new(),
+            touched_accounts: Vec::new(),
+            book_touched: false,
+            synthetic_input: None,
+            selected_count: 0,
+            pending_count: 0,
+            post_commit_j_actions: Vec::new(),
+            apply_profile,
+        });
+    }
     let append_to_fresh_individual_run = pending_ends_in_individual_run(&group.pending);
     let retained_entity_work = slot.replica.entity_mempool.len();
     append_entity_pending_work(&mut slot.replica.entity_mempool, group.pending)?;
@@ -3654,6 +3917,7 @@ fn apply_entity_group(
                     frame,
                     materializer,
                     fit_j_prefix_certificate.as_ref(),
+                    entity_encryption_seed(infrastructure, &render_word(&group.entity_id))?,
                 )?;
                 (
                     count,
@@ -3740,12 +4004,17 @@ fn apply_entity_group(
         let needs_local_account_genesis =
             selected.operations.iter().any(|operation| match operation {
                 ResidentEntityOperation::Local(txs) => txs.iter().any(|admitted| {
-                    matches!(
-                        admitted.tx,
-                        xln_rscore_entity_kernel::LocalEntityTx::Financial(
-                            xln_rscore_entity_kernel::LocalEntityFinancialTx::OpenAccount(_)
-                        )
-                    )
+                    match &admitted.tx {
+                        LocalEntityTx::Financial(xln_rscore_entity_kernel::LocalEntityFinancialTx::OpenAccount(_)) => true,
+                        LocalEntityTx::Control(xln_rscore_entity_kernel::LocalEntityControlTx::Propose(proposal)) => {
+                            canonical_field(&proposal.action, "data")
+                                .and_then(|data| canonical_field(data, "txs"))
+                                .is_some_and(|value| matches!(value, CanonicalValue::Array(txs)
+                                    if txs.iter().any(|tx| matches!(canonical_field(tx, "type"),
+                                        Some(CanonicalValue::String(kind)) if kind == "openAccount"))))
+                        }
+                        _ => false,
+                    }
                 }),
                 ResidentEntityOperation::AccountRange { .. } => false,
             });
@@ -3832,14 +4101,7 @@ fn apply_entity_group(
             cross_j_opening_sibling_views: cross_j_opening_sibling_views.clone(),
             operations: std::mem::take(&mut selected.operations),
         };
-        let prior_orderbook_digest = slot
-            .replica
-            .entity_consensus
-            .state
-            .sections
-            .iter()
-            .find(|section| section.field == "orderbookExt")
-            .map(|section| section.digest.clone());
+        let prior_orderbook_digest = book_commitments(&slot.state.entity)?;
         apply_entity_state_policy(
             &mut context.execution,
             &slot.state,
@@ -3952,15 +4214,35 @@ fn apply_entity_group(
                 }
                 continue;
             }
-            Err(xln_rscore_entity_kernel::ResidentEntityError::LocalCommandRejected {
-                operation_index,
-                kind,
-                detail,
-            }) => {
-                let work_index = *selected
-                    .operation_work_indices
-                    .get(operation_index)
-                    .ok_or(RuntimeMachineError::InputCountOverflow)?;
+            Err(
+                error @ (xln_rscore_entity_kernel::ResidentEntityError::LocalCommandRejected {
+                    ..
+                }
+                | xln_rscore_entity_kernel::ResidentEntityError::InboundAdmissionRejected {
+                    ..
+                }),
+            ) => {
+                let (work_index, kind, detail) = match error {
+                    xln_rscore_entity_kernel::ResidentEntityError::LocalCommandRejected {
+                        operation_index,
+                        kind,
+                        detail,
+                    } => (
+                        selected.operation_work_indices.get(operation_index),
+                        kind,
+                        detail,
+                    ),
+                    xln_rscore_entity_kernel::ResidentEntityError::InboundAdmissionRejected {
+                        row_index,
+                        detail,
+                    } => (
+                        selected.row_work_indices.get(row_index),
+                        "accountInput",
+                        detail,
+                    ),
+                    _ => unreachable!("matched typed reject"),
+                };
+                let work_index = *work_index.ok_or(RuntimeMachineError::InputCountOverflow)?;
                 commit_phase_work.evict_selected(work_index)?;
                 eprintln!(
                     "RSCORE_ENTITY_OUTER_COMMAND_EVICTED:entity={}:work={work_index}:{kind}:{detail}",
@@ -4114,6 +4396,16 @@ fn apply_entity_group(
     )?;
     apply_profile.certification = profiled_elapsed(certification_started);
     slot.replica.entity_consensus = certified.consensus;
+    // TS commit finalization always clears the vote round to an explicit
+    // empty Map; absence and empty are distinct parent Runtime commitments.
+    slot.replica
+        .replica_metadata
+        .as_object_mut()
+        .ok_or_else(|| RuntimeMachineError::ReplicaMetadata("OBJECT_REQUIRED".into()))?
+        .insert(
+            "leaderVotes".into(),
+            serde_json::json!({"__xlnType":"Map","value":[]}),
+        );
     prune_finalized_j_history(
         &mut slot.replica.replica_metadata,
         core.state.last_finalized_j_height,
@@ -4215,14 +4507,7 @@ fn apply_entity_group(
     if checkpoint.is_some() {
         slot.replica.last_materialized_height = runtime_height;
     }
-    let post_orderbook_digest = slot
-        .replica
-        .entity_consensus
-        .state
-        .sections
-        .iter()
-        .find(|section| section.field == "orderbookExt")
-        .map(|section| section.digest.clone());
+    let post_orderbook_digest = book_commitments(&core.state)?;
     let touched_accounts = touched_account_ids
         .into_iter()
         .map(|account_id| super::RuntimeTouchedAccount {
@@ -4309,17 +4594,27 @@ fn apply_runtime_txs(
             super::RuntimeTx::RecordRuntimeAdapterCommand(value) => {
                 apply_runtime_adapter_command_marker(replica, value, current_timestamp)?;
             }
+            super::RuntimeTx::ImportReplica(input) => {
+                touched_entities.push(
+                    crate::entity_import::apply(replica, input, current_timestamp)
+                        .map_err(RuntimeMachineError::ReplicaMetadata)?,
+                );
+            }
             super::RuntimeTx::ImportJ(request) => {
                 crate::j_import::apply_import_intent(&mut replica.durable, request)
                     .map_err(|error| RuntimeMachineError::ReplicaMetadata(error.to_string()))?;
             }
+            super::RuntimeTx::ReplaceNumberedRegistrationIntent(value) => {
+                crate::registration_replacement::apply(&mut replica.durable, value)
+                    .map_err(RuntimeMachineError::ReplicaMetadata)?;
+            }
+            super::RuntimeTx::RecordAuthenticatedJAuthority(evidence) => {
+                crate::j_authority::apply(&mut replica.durable, evidence)
+                    .map_err(RuntimeMachineError::ReplicaMetadata)?;
+            }
             super::RuntimeTx::CompleteImportJ(result) => {
-                crate::j_import::apply_import_result(
-                    &mut replica.durable,
-                    result,
-                    current_timestamp,
-                )
-                .map_err(|error| RuntimeMachineError::ReplicaMetadata(error.to_string()))?;
+                crate::j_import::apply_import_result(&mut replica.durable, result)
+                    .map_err(|error| RuntimeMachineError::ReplicaMetadata(error.to_string()))?;
             }
             super::RuntimeTx::ObserveJRange(value) => {
                 let (state, live) = replica
@@ -4379,6 +4674,22 @@ fn apply_runtime_txs(
                     current_timestamp,
                 )
                 .map_err(|error| RuntimeMachineError::JSubmit(error.to_string()))?;
+            }
+            super::RuntimeTx::ReplaceJPreparedTransaction(prepared) => {
+                if let Some(attempt) =
+                    crate::j_submit::apply_j_prepared_replacement(replica, prepared)
+                        .map_err(|error| RuntimeMachineError::JSubmit(error.to_string()))?
+                {
+                    attempts.push(attempt.into());
+                }
+            }
+            super::RuntimeTx::RecordJPreparedTransaction(prepared) => {
+                if let Some(attempt) =
+                    crate::j_submit::apply_j_prepared_transaction(replica, prepared)
+                        .map_err(|error| RuntimeMachineError::JSubmit(error.to_string()))?
+                {
+                    attempts.push(attempt.into());
+                }
             }
             super::RuntimeTx::RecordJSubmitResult(result) => {
                 crate::j_submit::apply_j_submit_result(replica, result, current_timestamp)
@@ -4920,8 +5231,65 @@ fn insert_j_history_row(
     Ok(())
 }
 
+fn entity_encryption_seed<'a>(
+    infrastructure: &'a serde_json::Value,
+    entity_id: &str,
+) -> Result<Option<&'a str>, RuntimeMachineError> {
+    let Some(seeds) = infrastructure.get("entityEncryptionSeeds") else {
+        return Ok(None);
+    };
+    let rows = seeds["value"].as_array().ok_or_else(|| {
+        RuntimeMachineError::EntityContextMaterialization("ENTITY_ENCRYPTION_SEEDS_MAP".into())
+    })?;
+    rows.iter()
+        .find(|row| row[0].as_str() == Some(entity_id))
+        .map(|row| {
+            row[1].as_str().ok_or_else(|| {
+                RuntimeMachineError::EntityContextMaterialization(
+                    "ENTITY_ENCRYPTION_SEED_TYPE".into(),
+                )
+            })
+        })
+        .transpose()
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn entity_encryption_seed_allows_absence_but_rejects_malformed_present_map() {
+        use serde_json::json;
+        assert_eq!(
+            super::entity_encryption_seed(&json!({}), "owner").unwrap(),
+            None
+        );
+        for seeds in [
+            json!(null),
+            json!({"__xlnType": "Map"}),
+            json!({"value": 7}),
+        ] {
+            assert!(
+                super::entity_encryption_seed(&json!({"entityEncryptionSeeds": seeds}), "owner")
+                    .is_err()
+            );
+        }
+        let infrastructure =
+            json!({"entityEncryptionSeeds": {"__xlnType": "Map", "value": [["owner", "seed"]]}});
+        assert_eq!(
+            super::entity_encryption_seed(&infrastructure, "owner").unwrap(),
+            Some("seed")
+        );
+        assert_eq!(
+            super::entity_encryption_seed(&infrastructure, "other").unwrap(),
+            None
+        );
+        assert!(
+            super::entity_encryption_seed(
+                &json!({"entityEncryptionSeeds": {"__xlnType": "Map", "value": [["owner", 1]]}}),
+                "owner"
+            )
+            .is_err()
+        );
+    }
     #[test]
     fn untrusted_hex_rejects_unicode_and_preserves_valid_words() {
         for prefix in ["€", "0€", "+1", "gg"] {
@@ -5639,6 +6007,69 @@ mod tests {
             metadata["jHistory"]["blockHashes"]["value"],
             serde_json::json!([[35, "0x35"], [36, "0x36"], [37, "0x37"]]),
         );
+    }
+
+    #[test]
+    fn actual_stale_j_prefix_authenticates_before_terminal_noop() {
+        let input: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../../fixtures/entity-consensus/stale-native-prefix.json"
+        ))
+        .unwrap();
+        let mut runtime = crate::machine::tests::replica(crate::RuntimeLimits::hlt()).unwrap();
+        let (mut state, replica) = runtime
+            .take_entity_slot(
+                &crate::machine::tests::owner_bytes(),
+                &crate::machine::tests::entity_signer_id(),
+            )
+            .unwrap();
+        let wire = &input["jPrefixAttestations"]["value"][0][1];
+        state.entity.entity_id = input["entityId"].as_str().unwrap().into();
+        state.entity.height = 1;
+        state.entity.last_finalized_j_height = 22;
+        state.entity.j_history_finality = Some(
+            crate::canonical_value_from_tagged_json(
+                &serde_json::json!({"finalizedThroughHeight":22,
+                "tipBlockHash": wire["headers"][19]["jBlockHash"],
+                "jurisdictionRef": wire["jurisdictionRef"]}),
+            )
+            .unwrap(),
+        );
+        let slot = EntityApplySlot { state, replica };
+        for tamper in [false, true] {
+            let mut candidate = input.clone();
+            if tamper {
+                candidate["jPrefixAttestations"]["value"][0][1]["eventHistoryRoot"] =
+                    serde_json::json!(format!("0x{}", "12".repeat(32)));
+            }
+            let decoded = RuntimeEntityInput::decode(candidate).unwrap();
+            let mut groups = Vec::new();
+            super::push_pending_entity_input(
+                &mut groups,
+                &mut BTreeMap::new(),
+                *decoded.entity_id(),
+                decoded.signer_id().into(),
+                Vec::new(),
+                0,
+            )
+            .unwrap();
+            super::attach_j_prefix_attestation(&mut groups[0], decoded.j_prefix_attestation())
+                .unwrap();
+            let result = super::refresh_stale_j_prefix(&slot, &mut groups[0]);
+            if tamper {
+                assert!(
+                    result
+                        .unwrap_err()
+                        .to_string()
+                        .contains("ATTESTATION_SIGNATURE")
+                );
+                assert!(groups[0].j_attestation_wire.is_some());
+            } else {
+                assert!(result.unwrap());
+                assert!(groups[0].j_observation.is_none());
+                assert!(groups[0].j_attestation_wire.is_none());
+            }
+            assert_eq!(slot.state.entity.last_finalized_j_height, 22);
+        }
     }
 
     #[test]

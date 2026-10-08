@@ -103,7 +103,7 @@ describe('BrowserVM J-watcher historical catch-up', () => {
     }
   }, 30_000);
 
-  test('does not fabricate an empty Entity scan when a block event applies to its sibling only', async () => {
+  test('complete domain-bound watcher advances sibling local evidence without a financial Entity frame', async () => {
     const { env, jadapter, jurisdiction } = await bootScenario({
       name: 'j-watcher-browservm-multi-entity-scan',
       seed: 'j-watcher-browservm-multi-entity-scan',
@@ -125,6 +125,8 @@ describe('BrowserVM J-watcher historical catch-up', () => {
       const observerBeforeFund = env.state.eReplicas.get(`${observer.id}:${observer.signer}`);
       if (!observerBeforeFund) throw new Error('BROWSERVM_MULTI_ENTITY_OBSERVER_BEFORE_FUND_MISSING');
       const observerScanBeforeFund = observerBeforeFund.jHistory?.scannedThroughHeight;
+      const observerHeightBeforeFund = observerBeforeFund.state.height;
+      const observerReserveBeforeFund = observerBeforeFund.state.reserves.get(1);
 
       await fundEntities(env, jadapter, [{ id: sender.id, tokenId: 1, amount: 100n }]);
       const targetBlock = Number(await jadapter.getCurrentBlockNumber?.());
@@ -134,11 +136,13 @@ describe('BrowserVM J-watcher historical catch-up', () => {
 
       expect(senderReplica.state.reserves.get(1)).toBe(100n);
       expect(senderReplica.jHistory?.scannedThroughHeight).toBe(targetBlock);
-      // Receipt-driven scans do not carry a jurisdiction selector for unrelated
-      // entities. Advancing the observer here would both manufacture a no-op
-      // Entity frame and risk copying chain A's block hash into chain B state.
-      expect(observerReplica.jHistory?.scannedThroughHeight).toBe(observerScanBeforeFund);
-      expect(observerReplica.jHistory?.scannedThroughHeight).toBeLessThan(targetBlock);
+      // fundEntities drains the COMPLETE watcher, which supplies the exact chain/depository.
+      // Its authenticated empty suffix updates only local evidence for same-J siblings.
+      // Receipt-only cross-J exclusion is tested independently in jadapter-watcher-ingress.
+      expect(observerReplica.jHistory?.scannedThroughHeight).toBe(targetBlock);
+      expect(observerReplica.jHistory?.scannedThroughHeight).toBeGreaterThan(Number(observerScanBeforeFund));
+      expect(observerReplica.state.height).toBe(observerHeightBeforeFund);
+      expect(observerReplica.state.reserves.get(1)).toBe(observerReserveBeforeFund);
     } finally {
       await jadapter.close();
     }

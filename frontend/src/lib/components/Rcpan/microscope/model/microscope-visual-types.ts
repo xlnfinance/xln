@@ -3,7 +3,7 @@ import type {
   DeltaCapacityBarPresentation,
   DeltaParts,
   DeltaVisualScale,
-} from '$lib/components/Entity/shared/delta-types';
+} from '#lib/components/Entity/shared/delta-types.ts';
 
 export type MicroscopeSide = 'left' | 'right';
 export type MicroscopeCourtPlacement = 'top' | 'bottom' | 'right';

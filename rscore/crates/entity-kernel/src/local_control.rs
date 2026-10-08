@@ -1378,7 +1378,11 @@ fn broadcast(
         )
     } else {
         if batch_state.sent_batch.is_some() {
-            return Err(invalid("j_broadcast", "SENT_BATCH_PENDING"));
+            // A sender retry races the real receipt; it is not corrupt batch state.
+            return Err(EntityKernelError::rejected(
+                "j_broadcast",
+                "SENT_BATCH_PENDING",
+            ));
         }
         let from_recovery = batch_state
             .recovery_batches
@@ -2579,6 +2583,69 @@ mod tests {
                         .into(),
                 },
             ]
+        );
+    }
+
+    #[test]
+    fn broadcast_retry_pending_is_rejected_without_blocking_next_draft() {
+        let mut state = EntityStateSlice::empty(format!("0x{}", "11".repeat(32)), 99);
+        state.reserves.insert(1, BigInt::from(10));
+        state.j_batch_state = Some(JBatchState {
+            batch: JBatch {
+                reserve_to_reserve: vec![ReserveToReserve {
+                    receiving_entity: [0x22; 32],
+                    token_id: U256::one(),
+                    amount: U256::from(2),
+                }],
+                ..JBatch::default()
+            },
+            ..JBatchState::default()
+        });
+        let authority = provider_authority();
+        apply_local_entity_control_tx(
+            &mut state,
+            LocalEntityControlTx::JBroadcast {
+                fee_overrides: None,
+            },
+            &mut Vec::new(),
+            &authority,
+            0,
+        )
+        .unwrap();
+        let before = state.clone();
+        let error = apply_local_entity_control_tx(
+            &mut state,
+            LocalEntityControlTx::JBroadcast {
+                fee_overrides: None,
+            },
+            &mut Vec::new(),
+            &authority,
+            0,
+        )
+        .unwrap_err();
+        assert!(matches!(error, EntityKernelError::RejectedEntityTx {
+            kind: "j_broadcast", ref detail,
+        } if detail == "SENT_BATCH_PENDING"));
+        assert_eq!(state, before);
+        apply_local_entity_control_tx(
+            &mut state,
+            LocalEntityControlTx::R2r {
+                receiving_entity: [0x33; 32],
+                token_id: 1,
+                amount: U256::from(3),
+            },
+            &mut Vec::new(),
+            &authority,
+            0,
+        )
+        .unwrap();
+        assert_eq!(
+            state.j_batch_state.as_ref().unwrap().sent_batch,
+            before.j_batch_state.unwrap().sent_batch
+        );
+        assert_eq!(
+            state.j_batch_state.unwrap().batch.reserve_to_reserve[0].amount,
+            U256::from(3)
         );
     }
 

@@ -1,6 +1,7 @@
+import { deriveAccountWatchSeed } from '../../../../protocol/identity/account-watch-seed';
+import { captureCounterproofAccount, runNativeCounterproof } from './native-counterproof';
 import { connectCrossRuntimes } from './cross-hub';
 /** One truthful cross-j economic fill on the production local stack. */
-import { collectHltEnvironmentManifest } from '../boundary/environment-manifest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { withCanonicalCrossJurisdictionRouteHash } from '../../../../extensions/cross-j';
@@ -166,6 +167,8 @@ export const runCrossProductionSwapLoad = async (args: WorkerArgs): Promise<void
         sourceCredit: level.source.amount * creditUnits,
         targetCredit: level.target.amount * creditUnits,
         custodyRuntimeSeed,
+        ...(process.env['XLN_HLT_NATIVE_COUNTERPROOF'] === '1'
+          ? { disputeConfig: { leftResponseSeconds: 10, rightResponseSeconds: 10 } } : {}),
       });
       await hub.send(`prod-cross-credit-${index}-${targetHub.entityId.slice(-8)}`, {
         runtimeTxs: [],
@@ -187,12 +190,70 @@ export const runCrossProductionSwapLoad = async (args: WorkerArgs): Promise<void
         ],
       });
       await waitForCredit(load, cohort.target.entityId, targetHub.entityId, level.target.tokenId, level.target.amount);
+      if (process.env['XLN_HLT_NATIVE_COUNTERPROOF'] === '1') {
+        await hub.send(`counterproof-source-credit-${index}`, { runtimeTxs: [], entityInputs: [{
+          entityId: sourceHub.entityId, signerId: sourceHub.signerId,
+          entityTxs: [{ type: 'extendCredit', data: { counterpartyEntityId: cohort.source.entityId,
+            tokenId: level.source.tokenId, amount: level.source.amount * creditUnits } }],
+        }] });
+        await waitForCredit(load, cohort.source.entityId, sourceHub.entityId, level.source.tokenId, level.source.amount);
+      }
       const sourceAccount = await readLoadAccount(load, cohort.source.entityId, sourceHub.entityId);
       const targetAccount = await readLoadAccount(load, cohort.target.entityId, targetHub.entityId);
       if (!sourceAccount || !targetAccount) throw new Error('PRODUCTION_SWAP_LOAD_CROSS_ACCOUNT_MISSING');
       prepared.push({ level, cohort, sourceAccount, targetAccount });
     }
 
+    const counterproofRequested = process.env['XLN_HLT_NATIVE_COUNTERPROOF'] === '1';
+    if (counterproofRequested && (process.env['XLN_HLT_ENGINE'] !== 'rust' || burstSize !== 1 || rounds !== 1)) {
+      throw new Error('COUNTERPROOF_REQUIRES_NATIVE_SINGLE_CROSS_FILL');
+    }
+    const transformer = sourceJ.contracts.deltaTransformer;
+    if (counterproofRequested && !transformer) throw new Error('COUNTERPROOF_TRANSFORMER_MISSING');
+    const beforeCounterproof = counterproofRequested ? await captureCounterproofAccount(
+      load, prepared[0]!.cohort.source.entityId, sourceHub.entityId, transformer!,
+      deriveAccountWatchSeed({ runtimeSeed: custodyRuntimeSeed, runtimeId: load.adapter.runtimeId,
+        entityId: prepared[0]!.cohort.source.entityId, counterpartyId: sourceHub.entityId }),
+    ) : null;
+    if (beforeCounterproof) {
+      const clocks = beforeCounterproof.account.state.disputeConfig;
+      if (clocks.leftResponseSeconds !== 10 || clocks.rightResponseSeconds !== 10) {
+        throw new Error(`COUNTERPROOF_SIGNED_CLOCK_MISMATCH:${clocks.leftResponseSeconds}:${clocks.rightResponseSeconds}`);
+      }
+      console.log(`[counterproof] signed baseline nonce=${beforeCounterproof.nonce} clocks=${clocks.leftResponseSeconds}/${clocks.rightResponseSeconds} hash=${beforeCounterproof.proof.proofBodyHash}`);
+      const entry = prepared[0]!;
+      const now = Date.now();
+      const resting = withCanonicalCrossJurisdictionRouteHash({
+        orderId: `counterproof-${now}`, makerEntityId: entry.cohort.source.entityId,
+        hubEntityId: sourceHub.entityId, bookOwnerEntityId: sourceHub.entityId, bookHubSignerId: sourceHub.signerId,
+        sourceSignerId: entry.cohort.source.signerId, sourceHubSignerId: sourceHub.signerId,
+        targetSignerId: entry.cohort.target.signerId, targetHubSignerId: targetHub.signerId,
+        source: { ...entry.level.source, entityId: entry.cohort.source.entityId, counterpartyEntityId: sourceHub.entityId },
+        target: { ...entry.level.target, entityId: targetHub.entityId, counterpartyEntityId: entry.cohort.target.entityId,
+          // A resting quote must remain inside the production anchor band.
+          amount: (entry.level.target.amount * 101n + 99n) / 100n },
+        sourceDisputeConfig: { ...entry.sourceAccount.state.disputeConfig },
+        targetDisputeConfig: { ...entry.targetAccount.state.disputeConfig },
+        riskMode: 'fully_collateralized', status: 'intent', createdAt: now, updatedAt: now, expiresAt: now + 600_000,
+      });
+      await sendObserved(load, resting.orderId, { runtimeTxs: [], entityInputs:
+        [entry.cohort.target, entry.cohort.source].map(identity => ({ entityId: identity.entityId,
+          signerId: identity.signerId, entityTxs: [{ type: 'prepareCrossJurisdictionSwap' as const, data: { route: resting } }] })) });
+      const deadline = Date.now() + 15_000;
+      for (;;) {
+        const current = await captureCounterproofAccount(load, entry.cohort.source.entityId, sourceHub.entityId,
+          transformer!, beforeCounterproof.account.state.watchSeed);
+        const committedRoute = (await hub.routes(sourceHub.entityId)).find(route => route.orderId === resting.orderId);
+        if (committedRoute?.status === 'resting' && current.nonce > beforeCounterproof.nonce &&
+            (current.account.state.pulls?.size ?? 0) > 0) break;
+        if (Date.now() >= deadline) throw new Error('COUNTERPROOF_NEW_PULL_TIMEOUT');
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+      await runNativeCounterproof({ hub, runtime: load, identity: entry.cohort.source, hubEntityId: sourceHub.entityId,
+        rpcUrl: sourceJ.rpc, depositoryAddress: sourceJ.contracts.depository, transformer: transformer!,
+        workDir: args.workDir, before: beforeCounterproof });
+      return;
+    }
     await hub.exportReplayBase();
     const hubBefore = await hub.frame();
     const loadBefore = decodeLoadFrame(await readWithRateLimitRetry<unknown>(load, 'frame/latest'));
@@ -399,7 +460,7 @@ export const runCrossProductionSwapLoad = async (args: WorkerArgs): Promise<void
       loadWalBytesAfter: directoryBytes(loadWal),
       hubDurableBefore: hubBefore,
       hubDurableAfter: await hub.frame(),
-      environment: collectHltEnvironmentManifest({ engine: 'ts', requireAccountWorkers: true }),
+      environment: hub.environment,
       loadDurableBefore: loadBefore,
       loadDurableAfter: decodeLoadFrame(await readWithRateLimitRetry<unknown>(load, 'frame/latest')),
     });
@@ -407,6 +468,7 @@ export const runCrossProductionSwapLoad = async (args: WorkerArgs): Promise<void
     publishHltDashboardReport('cross', report);
     publishHltDashboardPerfFromWorkDir(args.workDir);
     console.log(safeStringify(report));
+
   } finally {
     await hub.close();
     load.adapter.disconnect();

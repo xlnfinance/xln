@@ -1,3 +1,4 @@
+import { sendRuntimeInput } from '../commands';
 /**
  * Entity ownership on the EntityProvider: share tokens (control + dividend),
  * treasury release, and a CONTROL takeover of another entity this signer
@@ -12,7 +13,7 @@ import {
 	type ControlTakeoverBoard,
 	type EntityShareTokenProjection,
 } from '@xln/frontend/lib/components/Entity/ownership/ownership-flow';
-import { getEmbeddedEnv, requireAdapter } from '../adapter';
+import { getEmbeddedEnv } from '../adapter';
 import { getXLN, peekXLN } from '../xln-loader';
 import { hostedJAdapter } from './move';
 
@@ -58,7 +59,7 @@ export async function shareTokens(entityId: string, signerId: string, reserves: 
 export async function releaseShares(entityId: string, signerId: string, depositoryAddress: string): Promise<void> {
 	const xln = await getXLN();
 	const input = buildEntityShareReleaseInput({ entityId: xln.toEntityId(entityId), signerId, depositoryAddress });
-	await requireAdapter().send({ runtimeTxs: [], entityInputs: [input] } as RuntimeInput);
+	await sendRuntimeInput({ runtimeTxs: [], entityInputs: [input] } as RuntimeInput);
 }
 
 export type TakeoverTarget = { entityId: string; name: string };
@@ -132,7 +133,7 @@ export async function proposeTakeover(entityId: string, signerId: string, target
 		newBoardHash: boardHash,
 		actionNonce,
 	});
-	await requireAdapter().send({ runtimeTxs: [], entityInputs: [input] } as RuntimeInput);
+	await sendRuntimeInput({ runtimeTxs: [], entityInputs: [input] } as RuntimeInput);
 }
 
 export async function activateTakeover(entityId: string, signerId: string, targetEntityId: string): Promise<void> {
@@ -144,5 +145,5 @@ export async function activateTakeover(entityId: string, signerId: string, targe
 		signerId: normalize(signerId),
 		board: takeoverBoard(replica.state.config.mode, signerId),
 	});
-	await requireAdapter().send({ runtimeTxs: [], entityInputs: [...inputs] } as RuntimeInput);
+	await sendRuntimeInput({ runtimeTxs: [], entityInputs: [...inputs] } as RuntimeInput);
 }

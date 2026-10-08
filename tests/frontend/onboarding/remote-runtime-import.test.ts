@@ -626,7 +626,7 @@ describe('remote runtime import manager utilities', () => {
     expect(removeStoredRemoteRuntimeImport(h2.wsUrl)).toEqual([]);
   });
 
-  test('app boot hydrates remote runtime handles from the import source through validation', () => {
+  test('app boot restores saved imports; explicit import flow validates admin sources', () => {
     const xlnStore = readFileSync('frontend/src/lib/stores/xlnStore.ts', 'utf8');
     const runtimeCreation = readFileSync('frontend/src/lib/components/Views/RuntimeCreation.svelte', 'utf8');
     const runtimeStore = readFileSync('frontend/src/lib/stores/runtimeStore.ts', 'utf8');
@@ -635,15 +635,13 @@ describe('remote runtime import manager utilities', () => {
     const importFlow = readFileSync('frontend/src/lib/utils/onboarding/remoteRuntimeImportFlow.ts', 'utf8');
 
     expect(xlnStore).toContain('runtimeOperations.hydrateRemoteRuntimeImports()');
-    expect(xlnStore).toContain("new URL('/api/runtime-import', resolveConfiguredApiBase(window.location.origin))");
-    expect(xlnStore).toContain("importSource.searchParams.set('access', 'admin')");
-    expect(xlnStore).not.toContain("importSource.searchParams.set('allowPartial', '1')");
-    expect(xlnStore).toContain('runtimeOperations.hydrateRemoteRuntimeImportSource(importSource.toString(), { optional: true })');
+    expect(xlnStore).not.toContain("new URL('/api/runtime-import'");
+    expect(runtimeStore).not.toContain('hydrateRemoteRuntimeImportSource');
     expect(runtimeCreation).not.toContain('live-runtime-section');
     expect(runtimeCreation).not.toContain('hydrateRemoteRuntimeImportSource');
     expect(runtimeCreation).toContain('buildRemoteRuntimeRecoveryPeerSources({ runtimeId: recoveryRuntimeId })');
     expect(runtimeCreation).toContain('recoveryCheckedPeers = discovery.checkedPeers');
-    expect(runtimeCreation).toContain("import { errorLog } from '$lib/stores/errorLogStore';");
+    expect(runtimeCreation).toContain("import { errorLog } from '#lib/stores/errorLogStore.ts';");
     expect(runtimeCreation).toContain("errorLog.log(message, 'Runtime Creation', details)");
     expect(runtimeCreation).toContain("logRuntimeCreationDiagnostic('BrainVault worker failed'");
     expect(runtimeCreation).toContain("logRuntimeCreationDiagnostic('Mnemonic import failed'");
@@ -652,7 +650,7 @@ describe('remote runtime import manager utilities', () => {
     expect(runtimeCreation).not.toContain('console.error');
     expect(runtimeCreation).not.toContain('console.info');
     expect(vaultStore).toContain('runtimeOperations.hydrateRemoteRuntimeImports();');
-    expect(runtimeStore).toContain('validateRemoteRuntimeEntry(entry, { index, importedAt })');
+    expect(runtimeStore).toContain('validateRemoteRuntimeEntry(entry, { importedAt: Date.now() })');
     expect(runtimeStore).toContain('readStoredRemoteRuntimeImports({ dropExpired: true, dropInvalid: true })');
     expect(appLayout).toContain('async function importRemoteRuntimesIntoApp');
     expect(appLayout).toContain('let runtimeImportLocationInFlight = false;');
@@ -673,11 +671,6 @@ describe('remote runtime import manager utilities', () => {
     expect(importFlow).toContain('runtimeOperations.upsertRemoteRuntimeImports(validated)');
     expect(importFlow).toContain('failedCount: failed.length');
     expect(importFlow).toContain('checked: RemoteRuntimeImportSummaryCheckedRow[]');
-    expect(runtimeStore).toContain('optional?: boolean');
-    expect(runtimeStore).toContain('REMOTE_RUNTIME_IMPORT_SOURCE_VALIDATION_FAILED');
-    expect(runtimeStore).toContain('const hydration = remoteImportSourceHydration');
-    expect(runtimeStore).toContain('const strict = options.optional !== true');
-    expect(runtimeStore).toContain('if (strict) return hydration');
     expect(runtimeStore).not.toContain('Failed to hydrate remote runtime imports');
     expect(runtimeStore).not.toContain('Remote runtime import source hydration failed');
     expect(runtimeStore).not.toContain('console.warn');

@@ -1,11 +1,11 @@
-import type { EntityReadView } from '$lib/components/Entity/core/entity-panel-types';
+import type { EntityReadView } from '#lib/components/Entity/core/entity-panel-types.ts';
 import type { AccountFrame, AccountState, AccountTx } from '@xln/core/api/public/runtime-module';
-import type { FrontendXlnFunctions } from '$lib/stores/xlnStore';
+import type { FrontendXlnFunctions } from '#lib/stores/xlnStore.ts';
 
-import { entityAvatar as resolveEntityAvatar } from '$lib/utils/identity/avatar';
-import { formatEntityId } from '$lib/utils/format';
-import { getEntityDisplayName, resolveEntityName } from '$lib/utils/identity/entityNaming';
-import { isMapLike } from '$lib/utils/runtime/liveRuntimeEnv';
+import { entityAvatar as resolveEntityAvatar } from '#lib/utils/identity/avatar.ts';
+import { formatEntityId } from '#lib/utils/format.ts';
+import { getEntityDisplayName, resolveEntityName } from '#lib/utils/identity/entityNaming.ts';
+import { isMapLike } from '#lib/utils/runtime/liveRuntimeEnv.ts';
 import { requireTokenDecimals } from '../token-metadata';
 
 type GossipSource = Parameters<typeof resolveEntityName>[1];

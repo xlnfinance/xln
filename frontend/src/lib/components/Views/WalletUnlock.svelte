@@ -1,6 +1,6 @@
 <script lang="ts">
   import { createEventDispatcher } from 'svelte';
-  import { allRuntimes } from '$lib/stores/vault/vaultStore';
+  import { allRuntimes } from '#lib/stores/vault/vaultStore.ts';
   import RuntimeCreation from './RuntimeCreation.svelte';
   import WalletPasswordForm from './WalletPasswordForm.svelte';
   export let runtimeId: string;

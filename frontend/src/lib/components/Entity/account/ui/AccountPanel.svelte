@@ -1,7 +1,7 @@
 <script lang="ts">
-import type { AccountReadView, EntityReadView } from '$lib/components/Entity/core/entity-panel-types';
+import type { AccountReadView, EntityReadView } from '#lib/components/Entity/core/entity-panel-types.ts';
 
-  import type { AccountTx } from '$lib/types/ui';
+  import type { AccountTx } from '#lib/types/ui.ts';
   import { createEventDispatcher, onMount, onDestroy } from 'svelte';
   import { p2pState, xlnFunctions } from '../../../../stores/xlnStore';
   import { settings } from '../../../../stores/settingsStore';
@@ -9,7 +9,7 @@ import type { AccountReadView, EntityReadView } from '$lib/components/Entity/cor
   import DeltaTokenSummary from '../../shared/DeltaTokenSummary.svelte';
   import AccountTokenDetails from '../../shared/AccountTokenDetails.svelte';
   import { buildAccountTokenDetails, isAccountLeftPerspective } from '../../shared/account-token-details';
-  import { compareStableText } from '$lib/utils/stableSort';
+  import { compareStableText } from '#lib/utils/stableSort.ts';
   import { faucetPendingKey } from '../account-faucet';
 
   export let account: AccountReadView;

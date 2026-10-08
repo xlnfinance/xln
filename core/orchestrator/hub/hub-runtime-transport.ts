@@ -1,3 +1,4 @@
+import { findPaymentRoutes, readFrameReceipts } from '../../api/server/network/rpc-ws';
 import type { DirectWebSocket } from '../../network/p2p/direct-runtime-bun';
 import {
   createDirectRuntimeWsRoute,
@@ -234,6 +235,11 @@ export const createHubDirectRuntimeRoute = (
     runtimeId: String(env.runtimeId || ''),
     runtimeSeed,
     signEnvelope: (to, envelope) => signRuntimeEntityInputsEnvelope(env, to, envelope),
+    getLocalProfiles: async () => {
+      const p2p = env.infrastructure?.p2p;
+      if (!p2p) throw new Error('DIRECT_GOSSIP_P2P_UNAVAILABLE');
+      return p2p.getLocalProfilesForEntities();
+    },
     onGossipAnnounce: async (from, payload) => {
       const p2p = env.infrastructure?.p2p;
       if (!p2p) throw new Error('DIRECT_GOSSIP_P2P_UNAVAILABLE');
@@ -295,6 +301,8 @@ export const createHubRadapterMessageHandler = (
           if (!isBrainVaultReady()) throw new Error('BRAINVAULT_OWNER_STARTUP_PENDING');
           return brainVaultOwner.revealMnemonic();
         },
+        findPaymentRoutes,
+        readFrameReceipts,
         readHead: targetEnv => readPersistedStorageHead(targetEnv),
         readFrame: (targetEnv, height) =>
           readPersistedStorageFrameRecord(targetEnv, height),

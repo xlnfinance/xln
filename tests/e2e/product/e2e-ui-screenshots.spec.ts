@@ -517,12 +517,40 @@ test('ui screenshot smoke captures operator admin surfaces', { tag: '@functional
   expect(importUrl).toContain('/app#runtime-import');
   expect(importUrl).not.toContain('/radapter/manage');
   await page.goto(importUrl, { waitUntil: 'domcontentloaded' });
-  await page.waitForFunction(() => {
-    const raw = sessionStorage.getItem('xln-remote-runtime-import-last-result');
-    if (!raw) return false;
-    const summary = JSON.parse(raw) as { ok?: boolean; count?: number; failedCount?: number };
-    return summary.ok === true && Number(summary.count || 0) >= 5 && Number(summary.failedCount || 0) === 0;
-  }, null, { timeout: 120_000 });
+  await page.waitForFunction(() => sessionStorage.getItem('xln-remote-runtime-import-last-result') !== null,
+    null, { timeout: 30_000 });
+  const importSummary = await page.evaluate(() => JSON.parse(
+    sessionStorage.getItem('xln-remote-runtime-import-last-result')!,
+  ) as { ok: boolean; count: number; failedCount: number; entries: Array<{ label: string }>; failed: unknown[] });
+  const nativeH1 = process.env['XLN_HLT_ENGINE'] === 'rust';
+  const expectedLabels = ['Custody', 'H1', 'H2', 'H3', 'MM'];
+  expect(importSummary, 'Every supported admin adapter must import without failures').toMatchObject({
+    ok: true, count: expectedLabels.length, failedCount: 0, failed: [],
+  });
+  expect(importSummary.entries.map(entry => entry.label).sort()).toEqual(expectedLabels);
+  if (nativeH1) {
+    const healthResponse = await page.request.get(`${API_BASE_URL}/api/health`);
+    expect(healthResponse.ok()).toBe(true);
+    const aggregate = await healthResponse.json();
+    const h1 = aggregate.hubs.find((hub: { name: string }) => hub.name === 'H1');
+    expect(h1).toMatchObject({ name: 'H1', online: true });
+    const infoResponse = await page.request.get(`${h1.apiUrl}/api/info`);
+    const nativeHealthResponse = await page.request.get(`${h1.apiUrl}/api/health`);
+    expect(infoResponse.ok()).toBe(true);
+    expect(nativeHealthResponse.ok()).toBe(true);
+    const info = await infoResponse.json();
+    const health = await nativeHealthResponse.json();
+    expect(info).toMatchObject({ name: 'H1', runtimeId: h1.runtimeId, entityId: h1.entityId, deliveryReady: true });
+    expect(info.height).toBeGreaterThan(0);
+    expect(info.workers).toBeGreaterThan(0);
+    expect(info.runtimeFrameHash).toMatch(/^0x[0-9a-f]{64}$/);
+    expect(info.accountsRoot).toMatch(/^0x[0-9a-f]{64}$/);
+    expect(health).toMatchObject({ ok: true, runtimeId: h1.runtimeId, entityId: h1.entityId,
+      runtime: { halted: false, lifecyclePhase: 'ready' } });
+    await testInfo.attach('native-h1-operator.json', {
+      body: JSON.stringify({ info, health }), contentType: 'application/json',
+    });
+  }
   await expect(page.getByTestId('context-current')).toBeVisible({ timeout: 30_000 });
   await page.getByTestId('context-current').click();
   await expect(page.getByTestId('context-runtime-rail')).toBeVisible({ timeout: 30_000 });
@@ -530,7 +558,7 @@ test('ui screenshot smoke captures operator admin surfaces', { tag: '@functional
   await captureUxPage(page, testInfo, 'desktop-remote-runtime-import.png', {
     title: 'desktop remote runtime import',
     group: 'Remote Runtime Import',
-    description: uxDescription('Wallet app after same-origin remote runtime import adds H1/H2/H3/MM/Custody to the runtime list.'),
+    description: uxDescription('Wallet app after importing every supported remote admin adapter; native H1 uses its verified operator HTTP surface.'),
     platform: 'desktop',
     tags: ['remote-runtime', 'wallet', 'bulk-import'],
   });

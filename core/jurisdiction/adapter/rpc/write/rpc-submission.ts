@@ -1,3 +1,4 @@
+import { prepareDurableTransaction } from './prepared/durable-transaction';
 import type { Signer } from 'ethers';
 import { compactHankoForChain } from '../../../../hanko/short';
 import { ethers } from 'ethers';
@@ -37,6 +38,7 @@ type SubmitOptions = {
   signerId?: string;
   signerPrivateKey?: Uint8Array;
   timestamp?: number;
+  prepareOnly?: Parameters<JAdapter['submitTx']>[1]['prepareOnly'];
 };
 
 type SubmissionContext = {
@@ -382,6 +384,19 @@ const executeBatchSubmission = async (
         preflightFailure.failure?.code === 'NO_ACTIVE_DISPUTE',
       );
     }
+    if (options.prepareOnly) {
+      await prepareDurableTransaction({
+        signer: submitter ?? context.signer,
+        nativeTron: context.config.mode === 'tron',
+        request: { to: await context.stack.getDepositoryAddress(), value: 0n,
+          data: depository.interface.encodeFunctionData('processBatch', [data.encodedBatch, hankoData, entityNonce]) },
+        accept: options.prepareOnly,
+        sequencer: context.sequencer,
+        buildOverrides: async () => ({ gasLimit,
+          ...applyBatchFeeOverrides(await context.chainIo.buildFeeOverrides(), data.feeOverrides) }),
+      });
+      return { success: true };
+    }
     const receipt = await context.sequencer.send(
       submitter ?? context.signer,
       'submitTx:processBatch',
@@ -449,7 +464,9 @@ const submitBatch = async (
       issues: planned.plan.preflightIssues,
     });
   }
-  return context.sequencer.run(() => executeBatchSubmission(context, planned, options));
+  return options.prepareOnly
+    ? executeBatchSubmission(context, planned, options)
+    : context.sequencer.run(() => executeBatchSubmission(context, planned, options));
 };
 
 export const createRpcSubmitTx = (

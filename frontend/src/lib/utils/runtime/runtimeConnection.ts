@@ -1,14 +1,14 @@
 import { replaceState } from '$app/navigation';
 import { get } from 'svelte/store';
-import type { RuntimeHandle } from '$lib/stores/runtimeControllerStore';
+import type { RuntimeHandle } from '#lib/stores/runtimeControllerStore.ts';
 import {
   getRuntimeControllerAdapter,
   isRuntimeControllerConfigCurrent,
   onRuntimeControllerStatus,
   runtimeControllerHandle,
-} from '$lib/stores/runtimeControllerStore';
-import { activeRuntime, vaultOperations } from '$lib/stores/vault/vaultStore';
-import { initializeXLN, suspendClientActivity, switchAppRuntimeAdapter } from '$lib/stores/xlnStore';
+} from '#lib/stores/runtimeControllerStore.ts';
+import { activeRuntime, vaultOperations } from '#lib/stores/vault/vaultStore.ts';
+import { initializeXLN, suspendClientActivity, switchAppRuntimeAdapter } from '#lib/stores/xlnStore.ts';
 import {
   adoptActiveTabLock,
   ownsActiveTabLock,

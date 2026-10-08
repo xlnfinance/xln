@@ -12,7 +12,7 @@
   import type { Profile as GossipProfile } from '@xln/core/api/public/runtime-module';
   import { xlnFunctions } from '../../stores/xlnStore';
   import { entityAvatar } from '../../utils/identity/avatar';
-  import { compareStableText } from '$lib/utils/stableSort';
+  import { compareStableText } from '#lib/utils/stableSort.ts';
 
   export let value: string = '';
   export let placeholder: string = 'Select or enter entity...';
@@ -272,6 +272,8 @@
     if (parsed.resolved && parsed.entityId) {
       value = parsed.entityId;
       unresolvedInput = '';
+      // A resolved destination needs no search menu over the next form field.
+      showDropdown = false;
       dispatch('change', { value: parsed.entityId, shortId: parsed.shortId, resolved: true });
     } else if (parsed.shortId) {
       // Store unresolved for display, don't set value yet

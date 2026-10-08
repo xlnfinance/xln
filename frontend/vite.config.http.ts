@@ -1,10 +1,11 @@
+import { kitOptions } from './kit-options.ts';
 import { sveltekit } from '@sveltejs/kit/vite';
 import { defineConfig } from 'vite';
 import { execSync } from 'node:child_process';
 import http from 'node:http';
 import https from 'node:https';
 import { fileURLToPath } from 'node:url';
-import { configureWsProxyLifecycle } from './vite-ws-proxy-lifecycle';
+import { configureWsProxyLifecycle } from './vite-ws-proxy-lifecycle.ts';
 
 const REPO_ROOT = fileURLToPath(new URL('..', import.meta.url));
 const BUILD_NUMBER = (() => {
@@ -45,7 +46,7 @@ const ENABLE_HMR = (() => {
  */
 
 export default defineConfig({
-  plugins: [sveltekit()],
+  plugins: [sveltekit(kitOptions)],
   cacheDir: VITE_CACHE_DIR,
   server: {
     host: '0.0.0.0',
@@ -121,6 +122,8 @@ export default defineConfig({
   },
   resolve: {
     alias: {
+      '@xln/core': fileURLToPath(new URL('../core', import.meta.url)),
+      '@xln/brainvault': fileURLToPath(new URL('../brainvault/src', import.meta.url)),
       '../jurisdictions/typechain-types/index.ts': TYPECHAIN_INDEX,
       '../../jurisdictions/typechain-types/index.ts': TYPECHAIN_INDEX,
     },

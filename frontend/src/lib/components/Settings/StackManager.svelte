@@ -7,8 +7,8 @@
   import {
     getRuntimeControllerConfig,
     runtimeControllerHandle,
-  } from '$lib/stores/runtimeControllerStore';
-  import { runtimeHttpOriginFromWsUrl } from '$lib/utils/runtime/wsUrl';
+  } from '#lib/stores/runtimeControllerStore.ts';
+  import { runtimeHttpOriginFromWsUrl } from '#lib/utils/runtime/wsUrl.ts';
   import {
     STACK_VERSION,
     defaultStackStablecoinKind,

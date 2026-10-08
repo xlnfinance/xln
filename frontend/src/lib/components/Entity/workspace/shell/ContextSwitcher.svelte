@@ -1,7 +1,7 @@
 <script lang="ts">
   import { createEventDispatcher, onMount } from 'svelte';
-  import Dropdown from '$lib/components/UI/Dropdown.svelte';
-  import { allRuntimes, activeRuntime, vaultOperations } from '$lib/stores/vault/vaultStore';
+  import Dropdown from '#lib/components/UI/Dropdown.svelte';
+  import { allRuntimes, activeRuntime, vaultOperations } from '#lib/stores/vault/vaultStore.ts';
   import {
     activeRuntimeId as activeStoreRuntimeId,
     coordinateRuntimeSelection,
@@ -9,17 +9,17 @@
     runtimes as runtimeEntries,
     type Runtime as StoreRuntime,
     type RuntimeSelectionLease,
-  } from '$lib/stores/runtimeStore';
-  import { runtimeControllerHandle } from '$lib/stores/runtimeControllerStore';
-  import { runtimeView, setRuntimeViewActiveEntityId } from '$lib/stores/runtimeViewStore';
-  import { errorLog } from '$lib/stores/errorLogStore';
-  import { resetEverything } from '$lib/utils/control/resetEverything';
-  import { refreshCurrentRuntimeProjection, xlnFunctions, xlnInstance, error as runtimeError } from '$lib/stores/xlnStore';
+  } from '#lib/stores/runtimeStore.ts';
+  import { runtimeControllerHandle } from '#lib/stores/runtimeControllerStore.ts';
+  import { runtimeView, setRuntimeViewActiveEntityId } from '#lib/stores/runtimeViewStore.ts';
+  import { errorLog } from '#lib/stores/errorLogStore.ts';
+  import { resetEverything } from '#lib/utils/control/resetEverything.ts';
+  import { refreshCurrentRuntimeProjection, xlnFunctions, xlnInstance, error as runtimeError } from '#lib/stores/xlnStore.ts';
   import type { RuntimeAdapterEntitySummary } from '@xln/core/api/public/runtime-module';
-  import type { Tab } from '$lib/types/ui';
-  import { entityAvatar, preferredAvatar } from '$lib/utils/identity/avatar';
-  import { getJurisdictionBadgeInfo, type JurisdictionBadgeInfo } from '$lib/utils/identity/jurisdictionBadge';
-  import { compareStableText } from '$lib/utils/stableSort';
+  import type { Tab } from '#lib/types/ui.ts';
+  import { entityAvatar, preferredAvatar } from '#lib/utils/identity/avatar.ts';
+  import { getJurisdictionBadgeInfo, type JurisdictionBadgeInfo } from '#lib/utils/identity/jurisdictionBadge.ts';
+  import { compareStableText } from '#lib/utils/stableSort.ts';
 
   export let tab: Tab;
   export let allowAddRuntime = false;

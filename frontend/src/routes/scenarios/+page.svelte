@@ -1,5 +1,5 @@
 <script lang="ts">
-  import ScenarioPlayer from '$lib/components/Embed/ScenarioPlayer.svelte';
+  import ScenarioPlayer from '#lib/components/Embed/ScenarioPlayer.svelte';
 </script>
 
 <svelte:head>

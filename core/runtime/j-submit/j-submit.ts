@@ -1,3 +1,8 @@
+import { ethers } from 'ethers';
+import { parseReceiptLogsToJEvents, type JEventCarrier } from '../../jurisdiction/adapter/j-event-log-decoder';
+import { eventCarriers } from '../../jurisdiction/adapter/rpc/rpc-boundary';
+import { beginJPreparation } from './preparation-driver';
+import { decodePreparedJTransaction } from './prepared-transaction';
 import { normalizeSubmitId } from '../command/submit-identity';
 import type { EntityInput } from '../../entity/types';
 import type { RuntimeReplica, RuntimeTx } from '../types';
@@ -7,11 +12,12 @@ import type { JAdapter, JSubmitResult } from '../../jurisdiction/adapter/types';
 import { getLocalSignerPrivateKey } from '../../account/crypto';
 import { isBatchEmpty } from '../../jurisdiction/machine/batch';
 import { indexReserveUpdatedEvents } from '../../jurisdiction/machine/events/event-evidence';
-import { classifyJAdapterFailure } from '../../jurisdiction/adapter/kernel/failure';
+import { classifyJAdapterFailure, makeJAdapterFailureResult } from '../../jurisdiction/adapter/kernel/failure';
 import { ensureLiveJAdapterForReplica } from '../recovery/j-adapter-restore';
 import { getLiveJAdapter } from './live-jadapters';
 import { createStructuredLogger, shortId } from '../../support/logger';
 import {
+  completedJSubmitAttempt,
   findJSubmitReplica,
   isMatchingJSubmitBatch,
   makeJSubmitResultRuntimeTx,
@@ -274,9 +280,10 @@ const queueKnownFailure = (
   jurisdictionName: string,
   jTx: JTx,
   failure: JAdapterFailure,
+  txHash?: string,
 ): boolean => {
   const outcome = failure.category === 'transient' ? 'transientFailure' : 'terminalFailure';
-  const extra = { message: failure.message, adapterFailure: failure };
+  const extra = { message: failure.message, adapterFailure: failure, ...(txHash ? { txHash } : {}) };
   if (jTx.type === 'batch') {
     queueBatchResult(env, deps, jurisdictionName, jTx, outcome, extra);
     return true;
@@ -292,12 +299,24 @@ const queueKnownFailure = (
   return false;
 };
 
+// External preparation can finish between frames. Its first result already owns
+// this attempt; wait for that canonical queued input instead of producing a
+// second observation (for example after-submit versus before-submit barriers).
+const hasQueuedJSubmitResult = (env: RuntimeReplica, jTx: JTx): boolean => {
+  if (jTx.type !== 'batch' || !jTx.data.runtimeSubmitAttempt) return false;
+  const attemptId = jTx.data.runtimeSubmitAttempt.attemptId;
+  return requireRuntimeMempool(env).runtimeTxs.some(tx =>
+    tx.type === 'recordJSubmitResult' && tx.data.attemptId === attemptId);
+};
+
 const collectActiveJTxs = (
   env: RuntimeReplica,
   deps: RuntimeJSubmitDeps,
   jInput: JInput,
 ): JTx[] =>
   jInput.jTxs.filter(jTx =>
+    !completedJSubmitAttempt(env, jTx) &&
+    !hasQueuedJSubmitResult(env, jTx) &&
     !reconcileDurablyAbortedBatch(env, deps, jInput.jurisdictionName, jTx) &&
     !reconcileDurablyStaleEntityProviderAction(env, deps, jInput.jurisdictionName, jTx) &&
     (!isGovernanceJTx(jTx) || governanceAttemptIsDue(jTx, env.state.timestamp)));
@@ -430,11 +449,79 @@ const validateSubmitAttempt = (
   return false;
 };
 
+export const successfulJReceiptResult = (
+  receipt: Parameters<typeof parseReceiptLogsToJEvents>[0],
+  carriers: JEventCarrier[],
+): JSubmitResult => ({
+  success: true,
+  txHash: receipt.hash,
+  blockNumber: receipt.blockNumber,
+  // Receipt evidence serves API observers only; Entity state still advances via authenticated watcher ingress.
+  events: parseReceiptLogsToJEvents(receipt, carriers),
+});
+
+const reconcileKnownBatchTransaction = async (
+  env: RuntimeReplica, adapter: JAdapter, jTx: JTx,
+): Promise<JSubmitResult | null> => {
+  if (jTx.type !== 'batch' || !jTx.data.runtimeSubmitAttempt) return null;
+  const local = findJSubmitReplica(env, jTx.entityId, normalizedEntityId(jTx.data.signerId))?.jSubmitState;
+  if (!local?.txHash || normalizeSubmitId(local.batchHash) !== normalizeSubmitId(jTx.data.batchHash)
+    || local.entityNonce !== Number(jTx.data.entityNonce)
+    || local.batchGeneration !== jTx.data.runtimeSubmitAttempt.batchGeneration) return null;
+  const txHash = local.txHash;
+  const receipt = await adapter.provider.getTransactionReceipt(txHash);
+  if (!receipt) return { success: false, txHash, error: 'J_SUBMIT_TRANSACTION_NOT_MINED', failure: {
+    category: 'transient', code: 'J_SUBMIT_TRANSACTION_NOT_MINED', message: 'J_SUBMIT_TRANSACTION_NOT_MINED',
+  } };
+  if (receipt.hash.toLowerCase() !== txHash.toLowerCase()) throw new Error('J_SUBMIT_RECEIPT_HASH_MISMATCH');
+  if (receipt.status !== 1) return { success: false, txHash, error: 'J_SUBMIT_RECEIPT_REVERTED', failure: {
+    category: 'terminal', code: 'J_SUBMIT_RECEIPT_REVERTED', message: 'J_SUBMIT_RECEIPT_REVERTED',
+  } };
+  // Receipt observation never advances Entity state: authenticated watcher ingress does.
+  return successfulJReceiptResult(receipt, eventCarriers(adapter.depository, adapter.entityProvider));
+};
+
 const submitJTxToAdapter = async (
   env: RuntimeReplica,
   adapter: JAdapter,
   jTx: JTx,
 ): Promise<JSubmitResult> => {
+  if (jTx.type === 'batch' && jTx.data.runtimeSubmitAttempt?.rawTransaction) {
+    const raw = jTx.data.runtimeSubmitAttempt.rawTransaction;
+    const transaction = decodePreparedJTransaction(raw, adapter.mode === 'tron');
+    if (!transaction.hash) throw new Error('J_PREPARED_HASH_MISSING');
+    try {
+      let receipt = await adapter.provider.getTransactionReceipt(transaction.hash);
+      if (!receipt) {
+        const pending = adapter.mode === 'tron' ? null : await adapter.provider.getTransaction(transaction.hash);
+        if (!pending) {
+          const hash = await adapter.broadcastPreparedTransaction(raw);
+          if (hash.toLowerCase() !== transaction.hash.toLowerCase()) throw new Error('J_PREPARED_BROADCAST_HASH_MISMATCH');
+        }
+        receipt = await adapter.provider.waitForTransaction(transaction.hash, 1, 10_000);
+      }
+      if (!receipt) throw new Error('transaction was not mined');
+      if (receipt.hash.toLowerCase() !== transaction.hash.toLowerCase()) throw new Error('J_PREPARED_RECEIPT_HASH_MISMATCH');
+      if (receipt.status !== 1) {
+        const safeHead = await adapter.getCurrentBlockNumber?.();
+        if (safeHead === undefined || safeHead < receipt.blockNumber) {
+          throw new Error('transaction was not mined at a finalized boundary');
+        }
+        const block = adapter.mode === 'tron'
+          ? await (adapter.provider as ethers.JsonRpcProvider).send('eth_getBlockByNumber', [ethers.toQuantity(receipt.blockNumber), false])
+          : await adapter.provider.getBlock(receipt.blockNumber);
+        if (!block || String(block.hash).toLowerCase() !== receipt.blockHash.toLowerCase()) {
+          throw new Error('transaction was not mined on the canonical finalized chain');
+        }
+        return { ...makeJAdapterFailureResult('transaction reverted'), txHash: transaction.hash };
+      }
+      return successfulJReceiptResult(receipt, eventCarriers(adapter.depository, adapter.entityProvider));
+    } catch (error) {
+      return { ...makeJAdapterFailureResult(error), txHash: transaction.hash };
+    }
+  }
+  const known = await reconcileKnownBatchTransaction(env, adapter, jTx);
+  if (known) return known;
   const submitData = jTx.data as { signerId?: unknown } | undefined;
   const signerId = typeof submitData?.signerId === 'string' ? submitData.signerId : undefined;
   const signerPrivateKey = signerId ? getLocalSignerPrivateKey(env, signerId) : null;
@@ -510,7 +597,7 @@ const recordFailedSubmit = async (
   } else {
     jSubmitLog.error('tx.submit_failed', fields);
   }
-  if (queueKnownFailure(env, deps, jurisdictionName, jTx, failure)) return;
+  if (queueKnownFailure(env, deps, jurisdictionName, jTx, failure, result.txHash)) return;
   if (failure.category === 'transient') throw new Error(`J_SUBMIT_TRANSIENT: ${message}`);
   throw new Error(`J_SUBMIT_FATAL: ${message}`);
 };
@@ -529,8 +616,24 @@ const submitOneJTx = async (
   });
   if (!validateSubmitAttempt(env, deps, jurisdictionName, jTx)) return;
 
+  const finish = async (result: JSubmitResult): Promise<void> => {
+    if (result.success) await recordSuccessfulSubmit(env, deps, jurisdictionName, adapter, jTx, result);
+    else await recordFailedSubmit(env, deps, jurisdictionName, adapter, jTx, result);
+  };
   let result: JSubmitResult;
   try {
+  const raw = jTx.type === 'batch' ? jTx.data.runtimeSubmitAttempt?.rawTransaction : undefined;
+  const replacement = raw && adapter.mode === 'tron' && adapter.getTronExpiryEvidence
+    ? await adapter.getTronExpiryEvidence(raw) : null;
+  if (jTx.type === 'batch' && adapter.mode !== 'browservm' && (!raw || replacement)) {
+    const signerId = jTx.data.signerId;
+    const signerPrivateKey = signerId ? getLocalSignerPrivateKey(env, signerId) : null;
+    await beginJPreparation(env, adapter, jurisdictionName, jTx, { env,
+      ...(signerId ? { signerId } : {}), ...(signerPrivateKey ? { signerPrivateKey } : {}),
+      timestamp: jTx.timestamp ?? env.state.timestamp },
+      tx => deps.enqueueRuntimeInputs(env, undefined, [tx], undefined, env.state.timestamp), finish, replacement ?? undefined);
+    return;
+  }
     result = await submitJTxToAdapter(env, adapter, jTx);
   } catch (error) {
     const failure = classifyJAdapterFailure(error);
@@ -547,11 +650,7 @@ const submitOneJTx = async (
     throw error;
   }
 
-  if (result.success) {
-    await recordSuccessfulSubmit(env, deps, jurisdictionName, adapter, jTx, result);
-  } else {
-    await recordFailedSubmit(env, deps, jurisdictionName, adapter, jTx, result);
-  }
+  await finish(result);
 };
 
 const submitJInput = async (

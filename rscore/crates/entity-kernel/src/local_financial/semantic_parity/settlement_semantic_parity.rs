@@ -424,3 +424,112 @@ fn dispute_start_jbatch_section_matches_typescript_int512_offsets() {
         "TypeScript persists Int512 limbs, never a flat integer"
     );
 }
+
+#[test]
+fn actual_native_withdrawal_continuation_waits_for_ack_then_derives_exact_order() {
+    let recorded: Value = serde_json::from_str(include_str!(
+        "../../../../../fixtures/entity-settlement/native-continuation-frame62.json"
+    ))
+    .expect("actual native WAL62 projection");
+    let peer = text(&recorded["continuation"][0]);
+    let continuation = canonical(&recorded["continuation"][1]);
+    let state = EntityStateSlice::empty(text(&recorded["entityId"]), 1791408516239);
+    let mut view = account_view(case(&fixture(), "settle_execute"));
+    view.settlement_workspace = Some(canonical(&recorded["workspace"]));
+    view.settlement_transition_pending = false;
+    let mut views = BTreeMap::from([(peer.clone(), view)]);
+    let choose = |views: &BTreeMap<String, LocalAccountFinancialView>, queued| {
+        select_continuation(
+            &state,
+            &peer,
+            &continuation,
+            views,
+            queued,
+            "local-validator",
+        )
+    };
+    let ContinuationDisposition::Execute(txs) =
+        choose(&views, false).expect("ready signed withdrawal")
+    else {
+        panic!("execute")
+    };
+    assert_eq!(txs.len(), 3);
+    assert!(
+        matches!(&txs[0].tx, crate::LocalEntityTx::Financial(LocalEntityFinancialTx::SettleExecute(tx)) if tx.disable_c2r_shortcut && tx.counterparty_entity_id == peer)
+    );
+    assert!(matches!(
+        &txs[1].tx,
+        crate::LocalEntityTx::Control(crate::LocalEntityControlTx::R2e { .. })
+    ));
+    assert!(matches!(
+        &txs[2].tx,
+        crate::LocalEntityTx::Control(crate::LocalEntityControlTx::JBroadcast { .. })
+    ));
+    views.get_mut(&peer).expect("peer").settlement_workspace = None;
+    assert!(matches!(
+        choose(&views, true).expect("queued transition"),
+        ContinuationDisposition::Wait
+    ));
+    assert!(matches!(
+        choose(&views, false).expect("absent workspace"),
+        ContinuationDisposition::Discard("workspace missing")
+    ));
+    views
+        .get_mut(&peer)
+        .expect("peer")
+        .settlement_transition_pending = true;
+    assert!(matches!(
+        choose(&views, false).expect("unacked transition"),
+        ContinuationDisposition::Wait
+    ));
+}
+
+#[test]
+fn settlement_propose_and_unsigned_update_reject_invalid_sender_ops() {
+    let fixture = fixture();
+    for kind in ["settle_propose", "settle_update"] {
+        for (ops, reason) in [
+            (
+                serde_json::json!([{"type":"r2r","tokenId":1,"amount":{"__xlnType":"BigInt","value":"-1"}}]),
+                "SETTLEMENT_WORKSPACE_AMOUNT_INVALID",
+            ),
+            (
+                serde_json::json!([{"type":"r2r","tokenId":65536,"amount":{"__xlnType":"BigInt","value":"1"}}]),
+                "SETTLEMENT_TOKEN_INVALID",
+            ),
+            (serde_json::json!([]), "SETTLEMENT_WORKSPACE_OPS_EMPTY"),
+        ] {
+            let mut vector = case(&fixture, kind).clone();
+            vector["tx"]["data"]["ops"] = ops;
+            let mut state = state_for(&vector);
+            let before = state.clone();
+            let views = BTreeMap::from([(
+                text(&vector["setup"]["counterpartyEntityId"]),
+                account_view(&vector),
+            )]);
+            let result = apply_local_entity_financial_txs(
+                &mut state,
+                &mut PaybookChanges::default(),
+                vec![transaction(&vector)],
+                &DeterministicContext::hlt_default(),
+                &views,
+                None,
+                Some("entity-settlement-semantic-fixture"),
+            );
+            let error = result
+                .err()
+                .unwrap_or_else(|| {
+                    panic!("{kind}:{reason}: invalid sender ops created Account work")
+                })
+                .into_user_reject();
+            assert!(
+                matches!(&error, EntityKernelError::RejectedEntityTx { detail, .. } if detail.starts_with(reason)),
+                "{kind}:{reason}:{error}"
+            );
+            assert_eq!(
+                state, before,
+                "{kind}:{reason}: no partial financial mutation"
+            );
+        }
+    }
+}

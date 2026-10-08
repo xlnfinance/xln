@@ -10,6 +10,7 @@ pub use htlc::{
     DecodedOnionLayer, DecryptedHtlcLayer, DecryptedHtlcMaterializeInput,
     HtlcMaterializeEnvironment, HtlcMaterializeInput, PreparedAccountView, PreparedContextError,
     compute_htlc_envelope_context_hash, decode_onion_layer, decrypt_htlc_materialize_inputs,
-    decrypt_opaque_htlc_layer, materialize_decrypted_htlc_entries,
-    materialize_htlc_prepared_entries, required_htlc_account_tokens,
+    decrypt_opaque_htlc_layer, directional_fee_ppm, encode_onion_layer, encrypt_opaque_htlc_layer,
+    materialize_decrypted_htlc_entries, materialize_htlc_prepared_entries,
+    required_htlc_account_tokens, required_htlc_inbound,
 };

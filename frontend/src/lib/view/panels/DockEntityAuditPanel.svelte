@@ -1,6 +1,6 @@
 <script lang="ts">
-  import EntityAuditPanel from '$lib/components/Entity/activity/EntityAuditPanel.svelte';
-  import { runtimeView } from '$lib/stores/runtimeViewStore';
+  import EntityAuditPanel from '#lib/components/Entity/activity/EntityAuditPanel.svelte';
+  import { runtimeView } from '#lib/stores/runtimeViewStore.ts';
 
   $: entityId = String($runtimeView.activeEntityId || $runtimeView.frame?.activeEntityId || '').trim().toLowerCase();
 </script>

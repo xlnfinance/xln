@@ -13,7 +13,7 @@
 		"native:sync": "cap sync",
 		"native:doctor": "cap doctor",
 		"preview": "node scripts/prepare-preview-assets.js && vite preview",
-		"prepare": "svelte-kit sync || echo ''",
+		"prepare": "svelte-kit sync",
 		"check": "bun run check:unsafe-types && bun copy-static-files.js && svelte-kit sync && bun ../tools/run-parallel-checks.ts check:svelte check:build",
 		"check:svelte": "svelte-check --tsconfig ./tsconfig.json --threshold error",
 		"check:build": "bun scripts/vite-build-check.ts",
@@ -26,16 +26,15 @@
 		"@capacitor/android": "^8.5.0",
 		"@capacitor/cli": "^8.5.0",
 		"@capacitor/ios": "^8.5.0",
-		"@sveltejs/adapter-auto": "^6.1.1",
-		"@sveltejs/adapter-static": "^3.0.10",
-		"@sveltejs/kit": "^2.70.2",
-		"@sveltejs/vite-plugin-svelte": "^6.2.4",
+		"@sveltejs/adapter-static": "^4.0.0",
+		"@sveltejs/kit": "^3.0.0",
+		"@sveltejs/vite-plugin-svelte": "^7.3.1",
 		"marked": "^16.4.2",
-		"svelte": "^5.56.8",
-		"svelte-check": "^4.7.4",
+		"svelte": "^5.57.1",
+		"svelte-check": "^4.7.6",
 		"svelte-multiselect": "^11.8.0",
-		"typescript": "^5.9.3",
-		"vite": "^7.3.6"
+		"typescript": "^6.0.3",
+		"vite": "^8.3.2"
 	},
 	"dependencies": {
 		"@capacitor/app": "^8.1.1",
@@ -61,7 +60,9 @@
 		"three": "^0.180.0"
 	},
 	"overrides": {
-		"picomatch": "4.0.5",
-		"rollup": "4.62.2"
+		"picomatch": "4.0.5"
+	},
+	"imports": {
+		"#lib/*": "./src/lib/*"
 	}
 }

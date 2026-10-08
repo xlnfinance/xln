@@ -104,6 +104,7 @@ export const buildRustHubGenesisConfig = (input: RustHubGenesisInput): Record<st
         stateRoot: null,
         tokenRegistry,
         watcherConfirmationDepth: 0,
+        ...(value.mode === 'tron' ? { watcherReceiptCommitment: 'tron-rpc-attested' } : {}),
       },
     ] as const;
   });

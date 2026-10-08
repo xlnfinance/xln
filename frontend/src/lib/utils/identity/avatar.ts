@@ -1,4 +1,4 @@
-import type { FrontendXlnFunctions } from '$lib/stores/xlnStore';
+import type { FrontendXlnFunctions } from '#lib/stores/xlnStore.ts';
 
 export function seedAvatar(
   functions: FrontendXlnFunctions | null,

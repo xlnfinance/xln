@@ -17,6 +17,7 @@ const readText = (path: string): string => {
     'core/__tests__/cross-j/swap/cross-jurisdiction-swap-part-3.test.ts',
     'core/__tests__/cross-j/swap/cross-jurisdiction-swap-part-4.test.ts',
     'core/__tests__/cross-j/swap/cross-jurisdiction-swap-part-5.test.ts',
+    'core/__tests__/cross-j/swap/lifecycle/cross-jurisdiction-expiry.test.ts',
     'core/__tests__/testing/audit/audit-failfast-regressions-part-6.test.ts',
   ].map(file => readFileSync(file, 'utf8')).join('\n');
 };
@@ -165,8 +166,18 @@ const requirements: CoverageRequirement[] = [
     file: 'frontend/src/lib/components/Entity/payments/PaymentPanel.svelte',
     patterns: [
       'data-testid="payment-amount-input"',
-      "type: 'htlcPayment'",
+      'await submitRuntimeInput(buildPaymentRuntimeInput({',
       'Pay now',
+    ],
+  },
+  {
+    area: 'pay',
+    file: 'frontend/src/lib/components/Entity/payments/runtime/payment-command.ts',
+    patterns: [
+      'export const buildPaymentRuntimeInput',
+      "type: 'htlcPayment'",
+      "type: 'directPayment'",
+      'maxSenderDebit: input.route.senderAmount',
     ],
   },
   {

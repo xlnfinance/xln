@@ -393,6 +393,23 @@ const assertRuntimeCrossJRecoveryAuthority = (
   currentState: EntityState,
 ): boolean => {
   switch (tx.type) {
+    case 'crossJurisdictionForceSiblingDispute': {
+      const route = requireSemanticRoute(currentState, tx.data.routeId);
+      const edges = [
+        [route.source.entityId, route.target.counterpartyEntityId, route.source.counterpartyEntityId],
+        [route.source.counterpartyEntityId, route.target.entityId, route.source.entityId],
+        [route.target.counterpartyEntityId, route.source.entityId, route.target.entityId],
+        [route.target.entityId, route.source.counterpartyEntityId, route.target.counterpartyEntityId],
+      ] as const;
+      const edge = edges.find(([emitter]) => normalizeEntityRef(emitter) === source);
+      if (!edge) throw new Error(`RUNTIME_OUTPUT_SIBLING_DISPUTE_SOURCE_INVALID:${source}`);
+      assertSemanticTarget(tx.type, target, edge[1]);
+      const observed = normalizeEntityRef(tx.data.observedCounterpartyEntityId);
+      if (observed !== normalizeEntityRef(edge[2])) {
+        throw new Error(`RUNTIME_OUTPUT_SIBLING_DISPUTE_OBSERVED_MISMATCH:${observed}:${edge[2]}`);
+      }
+      return true;
+    }
     case 'crossJurisdictionSalvage': {
       const route = requireSemanticRoute(currentState, tx.data.routeId);
       if (normalizeEntityRef(tx.data.sourceEntityId) !== normalizeEntityRef(route.source.entityId)) {
@@ -519,6 +536,7 @@ const runtimeOutputRouteId = (tx: EntityTx): string | undefined => {
     case 'requestCrossJurisdictionClear':
       return tx.data.orderId;
     case 'crossJurisdictionSalvage':
+    case 'crossJurisdictionForceSiblingDispute':
       return tx.data.routeId;
     case 'resolveHtlcLock':
       return tx.data.crossJurisdictionRouteId;

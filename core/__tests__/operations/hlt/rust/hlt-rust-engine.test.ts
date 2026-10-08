@@ -26,6 +26,7 @@ import {
   rustH1SessionPopulationIntact,
   rustH1SessionPopulationReady,
   rustPaymentSettlementComplete,
+  rustMixedOpenOffersMatch,
 } from '../../../../scripts/operations/hlt/rust/rust-h1-settlement';
 import { hltLanePortsPerSlot } from '../../../../scripts/operations/hlt/lanes/lane-port-capacity';
 import { hltWorkloadFingerprint } from '../../../../scripts/operations/hlt/workload/workload-fingerprint';
@@ -381,4 +382,23 @@ test('native H1 profile client decodes the canonical profile bundle, never the w
   }, entityId)).toMatchObject({ entityId, name: 'H1', runtimeId: profile.runtimeId });
   expect(() => decodeNativeProfileResponse(profile, entityId))
     .toThrow('HLT_RUST_H1_PROFILE_NOT_FOUND');
+});
+
+
+test('Rust mixed cancellation waits for committed IDs and preserves baseline offers', () => {
+  const baseline = new Set(['baseline-maker']);
+  const resting = ['resting-ask', 'resting-bid'];
+  const queued = rustMetrics({
+    acceptedPayments: 50, completedPayments: 50, matchedSwaps: 20,
+    openSwapOfferIds: [...baseline, ...resting], openSwapOffers: 3, openBookOrders: 3,
+  });
+  expect(rustMixedOpenOffersMatch(queued, new Set([...baseline, ...resting]))).toBe(true);
+  expect(rustMixedOpenOffersMatch(queued, baseline)).toBe(false);
+  const committed = { ...queued, openSwapOfferIds: [...baseline], openSwapOffers: 1, openBookOrders: 1 };
+  expect(rustMixedOpenOffersMatch(committed, baseline)).toBe(true);
+  expect(rustMixedOpenOffersMatch({ ...committed, openSwapOfferIds: ['other-offer'] }, baseline)).toBe(false);
+  expect(rustMixedOpenOffersMatch({ ...committed, openSwapOfferIdsTruncated: true }, baseline)).toBe(false);
+  expect(rustMixedOpenOffersMatch({ ...committed, openBookOrders: 2 }, baseline)).toBe(false);
+  expect(rustMixedOpenOffersMatch({ ...queued, openSwapOfferIds: ['baseline-maker', 'resting-ask', 'resting-ask'] },
+    new Set([...baseline, ...resting]))).toBe(false);
 });

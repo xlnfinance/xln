@@ -2,7 +2,7 @@
   Toast.svelte - Beautiful non-blocking toast notifications
 -->
 <script lang="ts">
-  import { toasts, type Toast } from '$lib/stores/ui/toastStore';
+  import { toasts, type Toast } from '#lib/stores/ui/toastStore.ts';
   import { fly, fade } from 'svelte/transition';
   import { flip } from 'svelte/animate';
 

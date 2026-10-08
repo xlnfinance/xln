@@ -351,6 +351,16 @@ export const waitForRustPaymentSettlement = async (options: Readonly<{
   throw new Error(`HLT_RUST_PAYMENT_NOT_DELIVERED:${safeStringify(options.rust.metrics())}`);
 };
 
+/** A queue ACK cannot prove cancellation; require the exact committed offer set. */
+export const rustMixedOpenOffersMatch = (
+  metrics: Pick<RustH1Metrics, 'openSwapOfferIdsTruncated' | 'openSwapOfferIds' | 'openSwapOffers' | 'openBookOrders'>,
+  expected: ReadonlySet<string>,
+): boolean => !metrics.openSwapOfferIdsTruncated &&
+  metrics.openSwapOffers === expected.size && metrics.openBookOrders === expected.size &&
+  metrics.openSwapOfferIds.length === expected.size &&
+  new Set(metrics.openSwapOfferIds).size === expected.size &&
+  metrics.openSwapOfferIds.every(id => expected.has(id));
+
 /**
  * Rust-native mixed drain authority. Swap commands may terminate as matched,
  * rejected/cancelled, or resting; the caller proves that exact partition from
@@ -361,6 +371,7 @@ export const waitForRustMixedSettlement = async (options: Readonly<{
   lanes: readonly LaneRuntime[];
   expectedPayments: number;
   expectedMatchedSwaps: number;
+  expectedOpenSwapOfferIds: ReadonlySet<string>;
   requireExpectedMatchedSwaps?: boolean;
   economicStartedAt: number;
   metricsBefore: RustH1Metrics;
@@ -397,7 +408,7 @@ export const waitForRustMixedSettlement = async (options: Readonly<{
         (!options.requireExpectedMatchedSwaps || matched === options.expectedMatchedSwaps) &&
         matched === trades &&
         metrics.paybookOpen === options.metricsBefore.paybookOpen &&
-        metrics.openBookOrders === metrics.openSwapOffers &&
+        rustMixedOpenOffersMatch(metrics, options.expectedOpenSwapOfferIds) &&
         metrics.resolvingSwapOffers === options.metricsBefore.resolvingSwapOffers &&
         metrics.pendingBatches === 0 &&
         metrics.activeShards === 0 &&
@@ -425,7 +436,7 @@ export const waitForRustMixedSettlement = async (options: Readonly<{
         await sleep(50);
         const stable = options.rust.metrics();
         if (
-          !stable ||
+          !stable || !rustMixedOpenOffersMatch(stable, options.expectedOpenSwapOfferIds) ||
           stable.matchedSwaps !== metrics.matchedSwaps ||
           stable.zeroFillSwapCancels !== metrics.zeroFillSwapCancels ||
           stable.openSwapOffers !== metrics.openSwapOffers ||
@@ -475,6 +486,7 @@ export const waitForRustSameSettlement = async (options: Readonly<{
   const settlement = await waitForRustMixedSettlement({
     ...options,
     expectedPayments: 0,
+    expectedOpenSwapOfferIds: new Set(options.metricsBefore.openSwapOfferIds),
     requireExpectedMatchedSwaps: true,
   });
   const matched = settlement.metrics.matchedSwaps - options.metricsBefore.matchedSwaps;

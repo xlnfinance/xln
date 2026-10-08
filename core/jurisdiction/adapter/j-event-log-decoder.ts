@@ -60,7 +60,7 @@ const hasEventTopic = (
 
 export const parseReceiptLogsToJEvents = (
   receipt: {
-    logs: Array<{
+    logs: ReadonlyArray<{
       address: string;
       topics: readonly string[];
       data: string;

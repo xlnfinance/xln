@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 const diagnosticFiles = [
   {
     path: 'frontend/src/lib/components/Entity/payments/ActivityHistoryPanel.svelte',
-    importLine: "import { errorLog } from '$lib/stores/errorLogStore';",
+    importLine: "import { errorLog } from '#lib/stores/errorLogStore.ts';",
     logLine: "errorLog.log('Activity history projection read failed', 'Activity History'",
   },
   {
@@ -19,7 +19,7 @@ const diagnosticFiles = [
   },
   {
     path: 'frontend/src/lib/components/Entity/workspace/shell/EntitySettingsProjectionPanel.svelte',
-    importLine: "import { errorLog } from '$lib/stores/errorLogStore';",
+    importLine: "import { errorLog } from '#lib/stores/errorLogStore.ts';",
     logLine: "errorLog.log('Entity profile update failed', 'Entity Settings'",
   },
   {

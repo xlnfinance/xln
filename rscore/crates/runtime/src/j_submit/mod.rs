@@ -7,12 +7,23 @@
 //! watcher ingress may retire a sealed batch.
 
 mod calldata;
+#[path = "prepared/financial_replacement.rs"]
+mod financial_replacement;
 mod governance_lifecycle;
 mod intent;
 pub(crate) mod lifecycle;
+#[path = "prepared/native_expiry.rs"]
+mod native_expiry;
+#[path = "prepared/native_replacement.rs"]
+pub(crate) mod native_replacement;
+#[path = "prepared/prepared_lifecycle.rs"]
+mod prepared_lifecycle;
+#[path = "prepared/prepared_wire.rs"]
+pub(crate) mod prepared_wire;
 pub(crate) mod provider_lifecycle;
 mod submission;
 mod transaction;
+mod tron;
 
 #[cfg(test)]
 mod tests;
@@ -23,6 +34,8 @@ pub use calldata::{
     WatchtowerCounterDisputeCall, decode_process_batch_calldata,
     decode_watchtower_counter_dispute_calldata,
 };
+pub(crate) use financial_replacement::decode_replacement;
+pub use financial_replacement::{JPreparedReplacement, apply_j_prepared_replacement};
 pub(crate) use governance_lifecycle::decode_governance_result;
 pub use governance_lifecycle::{
     DurableGovernanceAttempt, GovernanceResultData, GovernanceResultOutcome,
@@ -38,6 +51,11 @@ pub use lifecycle::{
     RetryJSubmitData, apply_j_submit_result, apply_j_submit_retry, build_j_submit_attempt_id,
     decode_pending_j_submit_attempts, encode_j_submit_result, encode_retry_j_submit,
 };
+pub(crate) use prepared_lifecycle::decode_prepared;
+pub use prepared_lifecycle::{
+    JPreparedTransactionData, apply_j_prepared_transaction, encode_j_prepared_transaction,
+    prune_completed_prepared_attempts,
+};
 pub use provider_lifecycle::{
     DurableEntityProviderActionAttempt, EntityProviderActionResultData,
     EntityProviderActionResultOutcome, RetryEntityProviderActionData,
@@ -46,7 +64,9 @@ pub use provider_lifecycle::{
     encode_entity_provider_action_result, encode_retry_entity_provider_action,
 };
 pub(crate) use submission::ControlBoardProposal;
-pub use submission::{JSubmitConfig, JSubmitOutcome, JSubmitter, ProcessedBatchEvidence};
+pub use submission::{
+    JSubmitConfig, JSubmitOutcome, JSubmitPreparation, JSubmitter, ProcessedBatchEvidence,
+};
 pub use transaction::{Eip1559Transaction, SignedEip1559Transaction};
 pub use xln_rscore_entity_kernel::j_batch::*;
 

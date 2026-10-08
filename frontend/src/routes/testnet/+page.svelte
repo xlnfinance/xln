@@ -1,6 +1,6 @@
 <script lang="ts">
-  import { DEMO_ACCOUNTS } from '$lib/config/demo-accounts';
-  import { resetEverything } from '$lib/utils/control/resetEverything';
+  import { DEMO_ACCOUNTS } from '#lib/config/demo-accounts.ts';
+  import { resetEverything } from '#lib/utils/control/resetEverything.ts';
 
   async function resetTestnet(): Promise<void> {
     if (!window.confirm('Delete every local xln wallet, cache, and testnet database on this device?')) return;

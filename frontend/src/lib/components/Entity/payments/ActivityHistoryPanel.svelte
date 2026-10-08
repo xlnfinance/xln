@@ -1,15 +1,15 @@
 <script lang="ts">
-  import { browser } from '$app/environment';
+  import { browser } from '$app/env';
   import { onMount } from 'svelte';
   import type {
     RuntimeAdapterReadQuery,
     RuntimeActivityEvent,
   } from '@xln/core/api/public/runtime-module';
-  import { errorLog } from '$lib/stores/errorLogStore';
-  import { runtimeControllerHandle, runtimeAdapterHeight } from '$lib/stores/runtimeControllerStore';
-  import { runtimeQueryClient } from '$lib/stores/runtimeQueryClient';
-  import { settings } from '$lib/stores/settingsStore';
-  import { xlnFunctions } from '$lib/stores/xlnStore';
+  import { errorLog } from '#lib/stores/errorLogStore.ts';
+  import { runtimeControllerHandle, runtimeAdapterHeight } from '#lib/stores/runtimeControllerStore.ts';
+  import { runtimeQueryClient } from '#lib/stores/runtimeQueryClient.ts';
+  import { settings } from '#lib/stores/settingsStore.ts';
+  import { xlnFunctions } from '#lib/stores/xlnStore.ts';
   import {
     Calendar,
     ChevronLeft,

@@ -7,6 +7,7 @@
  */
 
 // Browser-compatible: Use isBrowser check instead of fs
+import { resolveNativeTransportHost } from './native-host';
 import { isBrowser } from '../../../support/platform-crypto';
 import { resolveJurisdictionsJsonPath } from '../jurisdictions-path';
 import { createStructuredLogger } from '../../../support/logger';
@@ -104,7 +105,7 @@ const requireText = (value: unknown, code: string): string => {
 };
 
 const requireNativeHost = (value: unknown, code: string): string => {
-  const host = requireString(value, code);
+  const host = resolveNativeTransportHost(requireString(value, code), isBrowser ? window.location.origin : undefined);
   if (host !== host.trim() || !URL.canParse(host)) throw new Error(code);
   const url = new URL(host);
   if ((url.protocol !== 'http:' && url.protocol !== 'https:') || url.username || url.password || host.includes('#')) {
@@ -231,7 +232,7 @@ const decodeJurisdiction = (
   };
 };
 
-const decodeJurisdictionsData = (value: unknown): JurisdictionsData => {
+export const decodeJurisdictionsData = (value: unknown): JurisdictionsData => {
   const root = requireBoundaryRecord(value, 'JURISDICTIONS_ROOT_INVALID');
   requireExactBoundaryKeys(
     root,

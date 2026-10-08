@@ -12,16 +12,16 @@
   import { onDestroy } from 'svelte';
   import { panelBridge } from '../utils/panelBridge';
   import ahbScenarioCode from '../../../../../core/scenarios/consensus/ahb.ts?raw';
-  import { shortAddress } from '$lib/utils/format';
-  import { getXLN, submitRuntimeInput } from '$lib/stores/xlnStore';
+  import { shortAddress } from '#lib/utils/format.ts';
+  import { getXLN, submitRuntimeInput } from '#lib/stores/xlnStore.ts';
   import type { EnvSnapshot, RuntimeInput, RuntimeReplica, XLNModule } from '@xln/core/api/public/runtime-module';
   import type { EntityReplica } from '@xln/core/entity/types';
   import type { JurisdictionConfig } from '@xln/core/protocol/config/jurisdiction-config';
   import type { JAdapter } from '@xln/core/jurisdiction/adapter';
   import { defaultAccountDisputeConfigForRoleEvidence } from '@xln/core/account/config/dispute-config';
   import { computeAddress, hexlify } from 'ethers';
-  import { activeRuntimeEntry as activeRuntimeStore } from '$lib/stores/runtimeStore';
-  import { activeRuntime as activeVaultRuntime } from '$lib/stores/vault/vaultStore';
+  import { activeRuntimeEntry as activeRuntimeStore } from '#lib/stores/runtimeStore.ts';
+  import { activeRuntime as activeVaultRuntime } from '#lib/stores/vault/vaultStore.ts';
   import SolvencyPanel from './solvency/SolvencyPanel.svelte';
 
   // Receive isolated env as props (passed from View.svelte) - REQUIRED

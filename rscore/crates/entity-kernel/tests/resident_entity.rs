@@ -4,6 +4,8 @@ mod cross_j_expiry;
 mod scheduled_dispute;
 #[path = "resident/secret_ack.rs"]
 mod secret_ack;
+#[path = "resident/settlement_receipt.rs"]
+mod settlement_receipt;
 mod support;
 
 use std::collections::{BTreeMap, BTreeSet};

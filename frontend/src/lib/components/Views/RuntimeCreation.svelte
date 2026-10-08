@@ -1,15 +1,15 @@
 <script lang="ts">
   import WalletPasswordForm from './WalletPasswordForm.svelte';
-  import { hasPasswordVault, savePasswordVault } from '$lib/security/passwordVault';
+  import { hasPasswordVault, savePasswordVault } from '#lib/security/passwordVault.ts';
   let passwordSetupRuntimeId: string | null = null;
   let pendingPasswordOpen: (() => Promise<boolean>) | null = null;
   import './runtime-creation.css';
   import { createEventDispatcher, onMount, onDestroy } from 'svelte';
-  import { locale, translations$, initI18n, loadTranslations } from '$lib/i18n';
+  import { locale, translations$, initI18n, loadTranslations } from '#lib/i18n/index.ts';
   // Runtime creation is entry only; entity capabilities are resolved in EntityWorkspace.
-  import HierarchicalNav from '$lib/components/Navigation/HierarchicalNav.svelte';
-  import { appStateOperations } from '$lib/stores/appStateStore';
-  import { errorLog } from '$lib/stores/errorLogStore';
+  import HierarchicalNav from '#lib/components/Navigation/HierarchicalNav.svelte';
+  import { appStateOperations } from '#lib/stores/appStateStore.ts';
+  import { errorLog } from '#lib/stores/errorLogStore.ts';
   import {
     discoverRuntimeRecoveryCandidates,
     parseRuntimeRecoveryCandidateFile,
@@ -18,11 +18,11 @@
     DEFAULT_VAULT_UNLOCK_DURATION_MS,
     type RuntimeRecoveryCandidate,
     type RuntimeRecoveryDiscoveryFailure,
-  } from '$lib/stores/vault/vaultStore';
-  import type { VaultUnlockDurationMs } from '$lib/security/vaultProtection';
-  import { deriveRequestSignal, vaultUiOperations } from '$lib/stores/vault/vaultUiStore';
-  import { writeRuntimeRecoveryDiscoveryStatus } from '$lib/utils/recovery/recoveryDiscoveryStatus';
-  import { buildRemoteRuntimeRecoveryPeerSources } from '$lib/utils/onboarding/remoteRuntimeValidation';
+  } from '#lib/stores/vault/vaultStore.ts';
+  import type { VaultUnlockDurationMs } from '#lib/security/vaultProtection.ts';
+  import { deriveRequestSignal, vaultUiOperations } from '#lib/stores/vault/vaultUiStore.ts';
+  import { writeRuntimeRecoveryDiscoveryStatus } from '#lib/utils/recovery/recoveryDiscoveryStatus.ts';
+  import { buildRemoteRuntimeRecoveryPeerSources } from '#lib/utils/onboarding/remoteRuntimeValidation.ts';
   import {
     BRAINVAULT_V1,
     BRAINVAULT_V1_SPEC_ID,
@@ -35,19 +35,19 @@
     getShardCount,
     hexToBytes,
   } from '@xln/brainvault/core';
-  import { DEMO_ACCOUNTS } from '$lib/config/demo-accounts';
+  import { DEMO_ACCOUNTS } from '#lib/config/demo-accounts.ts';
   import {
     getRuntimeControllerAdapter,
     runtimeControllerHandle,
-  } from '$lib/stores/runtimeControllerStore';
+  } from '#lib/stores/runtimeControllerStore.ts';
   import type { RuntimeAdapterBrainVaultResult } from '@xln/core/api/runtime-adapter/types';
-  import { generateLazyEntityIdPreview } from '$lib/utils/identity/lazyEntityId';
+  import { generateLazyEntityIdPreview } from '#lib/utils/identity/lazyEntityId.ts';
   import {
     BRAINVAULT_WORKER_CAP_STORAGE_KEY,
     computeBrainVaultWorkerCap,
     isBrainVaultWasmMemoryError,
     nextBrainVaultWorkerCapAfterFailure,
-  } from '$lib/brainvault/workers';
+  } from '#lib/brainvault/workers.ts';
   import {
     FACTOR_INFO,
     WALLET_MODE_TRADEOFFS,

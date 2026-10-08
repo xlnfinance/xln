@@ -31,10 +31,10 @@ const REQUIRED_CONTRACT_ARTIFACTS = [
 // runtime directory, where child stdio is captured correctly.
 const SUBPROCESS_STDIO_TEST_FILES = [
   'custody/custody-bootstrap.test.ts',
-  'debug-disk.test.ts',
-  'dev-anvil-stack.test.ts',
-  'dev-radapter-keys.test.ts',
-  'playwright-global-setup.test.ts',
+  'testing/tooling/debug-disk.test.ts',
+  'development/dev/dev-anvil-stack.test.ts',
+  'development/dev/dev-radapter-keys.test.ts',
+  'testing/infrastructure/playwright-global-setup.test.ts',
   'print-dev-links.test.ts',
 ];
 
@@ -50,6 +50,13 @@ const looksLikeExplicitTarget = (arg: string): boolean => (
   !arg.startsWith('-') && (existsSync(arg) || arg.includes('*') || /\.(test|spec)\.[cm]?[tj]sx?$/.test(arg))
 );
 const explicitTargets = passthrough.some(looksLikeExplicitTarget);
+if (!explicitTargets) {
+  for (const file of SUBPROCESS_STDIO_TEST_FILES) {
+    if (!existsSync(resolve(ROOT, 'core/__tests__', file))) {
+      throw new Error(`UNIT_SUBPROCESS_TEST_MISSING:${file}`);
+    }
+  }
+}
 const rootTestArgs = [
   'test',
   ...(explicitTargets

@@ -1,5 +1,6 @@
+import { sendRuntimeInput } from './commands';
 import { JsonRpcProvider } from 'ethers';
-import { getEmbeddedEnv, requireAdapter } from './adapter';
+import { getEmbeddedEnv } from './adapter';
 import { waitFor } from './tx';
 import { CONTRACT_FIELDS, networkInput, type NetworkDraft } from './network-input';
 export { CONTRACT_FIELDS, type NetworkDraft } from './network-input';
@@ -21,6 +22,6 @@ export async function connectNetwork(draft: NetworkDraft): Promise<void> {
   } finally {
     provider.destroy();
   }
-  await requireAdapter().send(input);
+  await sendRuntimeInput(input);
   await waitFor(() => env.state.jReplicas.has(name), `Connect ${name}`);
 }

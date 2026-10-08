@@ -102,7 +102,7 @@ const handleStaleIncomingFrame = async (
     securityContext,
   );
   if (duplicateAck) return duplicateAck;
-  preflightLog.warn('frame.stale_ignored', {
+  preflightLog.debug('frame.stale_ignored', {
     receivedHeight: receivedFrame.height,
     currentHeight: account.currentHeight ?? 0,
     receivedHash: receivedFrame.stateHash,

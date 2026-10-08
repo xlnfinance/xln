@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+import { canDeployHubDefaultTokens, requiredHubTokenCount, selectHubTokenCatalog } from './hub/node/token-catalog';
 import type { ChildProcess } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, rmSync } from 'node:fs';
@@ -88,8 +89,8 @@ import {
 } from './orchestrator-config';
 import { evaluateBootstrapProgressDeadline } from './bootstrap/bootstrap-progress-deadline';
 import { fetchLoopback } from './server/loopback-fetch';
-import { validateHubHealthPayload, validateHubInfoPayload } from './bootstrap/bootstrap-health-validation';
-import { getConfiguredOfficialFoundationSignerId } from '../jurisdiction/adapter/kernel/jurisdiction-loader';
+import { requireHubBootstrapOwners, validateHubHealthPayload, validateHubInfoPayload } from './bootstrap/bootstrap-health-validation';
+import { getConfiguredOfficialFoundationSignerId, resolveJurisdictionTransport } from '../jurisdiction/adapter/kernel/jurisdiction-loader';
 import {
   createManagedRuntimeLeaseManager,
   readManagedProcessTable,
@@ -129,7 +130,7 @@ import {
   toPublicJurisdictionsPayload,
   type OrchestratorJurisdictionsConfig,
 } from './j-select/jurisdictions';
-import { createOrchestratorProxyHandlers, resolveRpcProxyIndex } from './proxy';
+import { createOrchestratorProxyHandlers, proxyNativeRest, resolveRpcProxyIndex } from './proxy';
 import { createHubApiRoutes } from './hub/hub-api-routes';
 import { findMissingRpcContractCode, type RpcContractAddresses } from './bootstrap/contract-readiness';
 import { maybeHandleOrchestratorDebugApi } from './debug-api';
@@ -736,20 +737,6 @@ const pollAllHubHealth = async (): Promise<void> => {
   return hubHealthPollInFlight;
 };
 
-const requireHubBootstrapOwners = (child: HubChild) => {
-  const owners = child.lastInfo?.hubEntities;
-  if (!owners?.length) throw new Error(`RUST_HUB_BOOTSTRAP_INVENTORY_MISSING:${child.name}`);
-  return owners.map(owner => {
-    const entityId = String(owner.entityId || '').trim().toLowerCase();
-    const signerId = String(owner.signerId || '').trim().toLowerCase();
-    const jurisdictionName = String(owner.jurisdictionName || '').trim();
-    if (!/^0x[0-9a-f]{64}$/.test(entityId) || !/^0x[0-9a-f]{40}$/.test(signerId) || !jurisdictionName) {
-      throw new Error(`RUST_HUB_BOOTSTRAP_OWNER_AUTHORITY:${child.name}`);
-    }
-    return { entityId, signerId, jurisdictionName };
-  });
-};
-
 const publishNativeHubProfile = async (child: HubChild): Promise<void> => {
   if (child.engine !== 'rust') return;
   await pollHubHealth(child);
@@ -1031,8 +1018,10 @@ const fundH1OwnedBootstrapReserves = async (
     if (entityIds.length === 0) continue;
     const rpcUrl = resolveLocalMarketMakerRpcUrl(jurisdiction.rpc);
     await fundLocalJOperator(rpcUrl, jurisdiction.chainId, signerId);
+    const transport = await resolveJurisdictionTransport(jurisdiction.chainId, jurisdiction.contracts.depository);
+    if (!transport) throw new Error(`H1_BOOTSTRAP_TRANSPORT_MISSING:${jurisdiction.chainId}`);
     const adapter: JAdapter = await createJAdapter({
-      mode: 'rpc',
+      ...transport, mode: transport.mode ?? 'rpc', watchOnly: !canDeployHubDefaultTokens(jurisdiction.chainId),
       chainId: jurisdiction.chainId,
       rpcUrl,
       fromReplica: {
@@ -1058,20 +1047,10 @@ const fundH1OwnedBootstrapReserves = async (
       name: jurisdiction.name,
       chainId: jurisdiction.chainId,
     });
-    const desired = new Set(
-      configured.length >= HUB_REQUIRED_TOKEN_COUNT
-        ? configured
-        : DEFAULT_ACCOUNT_TOKEN_IDS,
-    );
-    const selected = catalog.filter(token => desired.has(Number(token.tokenId)));
-    const bootstrapCatalog = selected.length >= HUB_REQUIRED_TOKEN_COUNT
-      ? selected
-      : catalog.slice(0, HUB_REQUIRED_TOKEN_COUNT);
-    if (bootstrapCatalog.length < HUB_REQUIRED_TOKEN_COUNT) {
-      throw new Error(
-        `H1_BOOTSTRAP_TOKEN_CATALOG_INCOMPLETE:required=${HUB_REQUIRED_TOKEN_COUNT}:actual=${bootstrapCatalog.length}`,
-      );
-    }
+    const bootstrapCatalog = selectHubTokenCatalog(catalog, jurisdiction.chainId,
+      configured.length >= HUB_REQUIRED_TOKEN_COUNT ? configured : DEFAULT_ACCOUNT_TOKEN_IDS);
+    const required = requiredHubTokenCount(jurisdiction.chainId);
+    if (bootstrapCatalog.length < required) throw new Error(`H1_BOOTSTRAP_TOKEN_CATALOG_INCOMPLETE:required=${required}:actual=${bootstrapCatalog.length}`);
     if (jurisdiction.name === primary.name) {
       nativeH1ReserveTargets = bootstrapCatalog.map((token: JTokenInfo) => ({
         tokenId: Number(token.tokenId),
@@ -1095,7 +1074,10 @@ const fundH1OwnedBootstrapReserves = async (
         }
       }
     }
-    if (mints.length > 0) await adapter.debugFundReservesBatch(mints);
+    if (mints.length > 0) {
+      if (!canDeployHubDefaultTokens(jurisdiction.chainId)) throw new Error(`H1_BOOTSTRAP_RESERVES_REQUIRED:${safeStringify(mints)}`);
+      await adapter.debugFundReservesBatch(mints);
+    }
     logNativeH1Bootstrap('bootstrap_funding_mints_ready', {
       elapsedMs: Date.now() - startedAt,
       jurisdiction: jurisdiction.name,
@@ -1997,7 +1979,7 @@ const computeAggregatedHealth = (options: {
   const bootstrapReserves = buildAggregatedBootstrapReserveHealth(
     bootstrapReservesOk,
     bootstrapReserveTargetsMet,
-    HUB_REQUIRED_TOKEN_COUNT,
+    Math.max(0, ...reserveEntities.map(entity => entity.tokens.length)),
     reserveEntities,
   );
 
@@ -2325,7 +2307,7 @@ const waitForShardJurisdictions = async (child: HubChild): Promise<void> => {
   let progress = { signature: '', lastProgressAt: Date.now() };
   let lastStatus: Record<string, unknown> = {};
   while (true) {
-    const hasRpc2 = hasShardRpc2Jurisdiction(jurisdictionsConfig);
+    const hasRpc2 = !args.rpc2Url || hasShardRpc2Jurisdiction(jurisdictionsConfig);
     const primary = resolvePrimaryHubJurisdiction(jurisdictionsConfig);
     let contracts: RpcContractAddresses | null = null;
     if (primary) {
@@ -2752,7 +2734,7 @@ const server = Bun.serve<OrchestratorWebSocket['data']>({
       if (upgraded) return undefined;
       return new Response('WebSocket upgrade failed', { status: 400 });
     }
-
+    if (pathname.startsWith('/api/tron/')) return proxyNativeRest(request, headers, jurisdictionsConfig);
     const rpcProxyIndex = resolveRpcProxyIndex(pathname);
     if (rpcProxyIndex !== null && request.method === 'POST') {
       return await proxyRpc(request, args.rpcUrls[rpcProxyIndex] || '', operatorAuthorized);

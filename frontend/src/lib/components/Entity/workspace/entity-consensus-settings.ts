@@ -1,4 +1,4 @@
-import type { EntityReadView } from '$lib/components/Entity/core/entity-panel-types';
+import type { EntityReadView } from '#lib/components/Entity/core/entity-panel-types.ts';
 import type { Proposal } from '@xln/core/entity/types';
 import {
   projectConsensusPayments,

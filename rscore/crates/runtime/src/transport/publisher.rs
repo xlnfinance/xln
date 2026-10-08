@@ -248,7 +248,7 @@ impl DirectOutboxPublisher {
         durable: &DurableRuntimeFrame,
     ) -> Result<PreparedEnvelopeBatch, RuntimeTransportError> {
         let rows = store.publication_outputs(durable)?;
-        let prepared = match durable.take_resident_output_values() {
+        let mut prepared = match durable.take_resident_output_values() {
             Some(values) => prepare_envelopes_from_values(
                 &self.source_runtime_id,
                 rows.as_ref(),
@@ -265,6 +265,7 @@ impl DirectOutboxPublisher {
                 self.config.max_plaintext_bytes,
             )?,
         };
+        prepared.bind_publication_frame(durable.height(), durable.timestamp());
         Ok(prepared)
     }
 
@@ -286,13 +287,14 @@ impl DirectOutboxPublisher {
         durable: &DurableRuntimeFrame,
     ) -> Result<PreparedEnvelopeBatch, RuntimeTransportError> {
         let rows = store.publication_outputs(durable)?;
-        let prepared = prepare_envelopes(
+        let mut prepared = prepare_envelopes(
             &self.source_runtime_id,
             rows.as_ref(),
             &self.config.local_entity_signers,
             self.config.max_envelope_rows,
             self.config.max_plaintext_bytes,
         )?;
+        prepared.bind_publication_frame(durable.height(), durable.timestamp());
         if prepared.row_count > self.config.max_queue_rows
             || prepared.bytes > self.config.max_queue_bytes
         {

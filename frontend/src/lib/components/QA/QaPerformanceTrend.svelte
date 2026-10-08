@@ -1,6 +1,6 @@
 <script lang="ts">
-  import type { QaHistoryEntry } from '$lib/qa/types';
-  import { buildQaPerformanceTrends, type QaPerformanceTrend } from '$lib/qa/performanceTrend';
+  import type { QaHistoryEntry } from '#lib/qa/types.ts';
+  import { buildQaPerformanceTrends, type QaPerformanceTrend } from '#lib/qa/performanceTrend.ts';
 
   let { history = [] }: { history?: QaHistoryEntry[] } = $props();
   const trends = $derived(buildQaPerformanceTrends(history));

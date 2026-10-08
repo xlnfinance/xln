@@ -10,7 +10,7 @@ const token = process.env['XLN_STAND_LOCK_TOKEN'];
 assert(token && Array.from({ length: standLockCapacity() }, (_, slot) =>
   readStandLockHolder(standLockRoot(), slot)).some(holder => holder?.token === token));
 const root = resolve(import.meta.dir, '../..');
-const data = `${root}/db/native-tron-release-20260918`;
+const data = resolve(process.env['XLN_TRON_STAND_PATH'] || `${root}/db/native-tron-release-20260918`);
 const path = `${data}/ethereum`;
 await mkdir(path, { recursive: true });
 const graphFile = Bun.file(`${path}/graph.json`);
@@ -75,10 +75,13 @@ try {
   const script = process.argv.includes('--automatic-withdraw') ? 'scripts/tron/withdrawal/automatic.ts' :
     process.argv.includes('--withdraw') ? 'scripts/tron/withdrawal/cross.ts' :
     process.argv.includes('--swap') ? 'scripts/tron/cross-swap.ts' : 'scripts/tron/cross-network.ts';
-  const child = Bun.spawn(['bun', script,
+  const callbackAt = process.argv.indexOf('--exec');
+  const command = callbackAt >= 0 ? process.argv.slice(callbackAt + 1) : ['bun', script,
     ...(process.argv.includes('--inspect') ? ['--inspect'] : []),
     ...(process.argv.includes('--restore') ? ['--restore'] : []),
-    ...(process.argv.includes('--resume') ? ['--resume'] : [])], {
+    ...(process.argv.includes('--resume') ? ['--resume'] : [])];
+  assert(command.length > 0, 'Ethereum stand callback required');
+  const child = Bun.spawn(command, {
     cwd: root, stdout: 'inherit', stderr: 'inherit', env: { ...process.env,
       XLN_DB_PATH: `${data}/cross-runtime`, XLN_JURISDICTIONS_PATH: configurationPath },
   });

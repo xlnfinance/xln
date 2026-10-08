@@ -2,8 +2,8 @@
   import { onMount } from 'svelte';
   import { decodeBinaryPayload } from '@xln/core/protocol/serialization/binary-codec';
   import { STORAGE_ACCOUNT_FIELD_BY_TAG } from '@xln/core/storage/schema/account-field-tags';
-  import { compareStableText } from '$lib/utils/stableSort';
-  import { parseJsonUnknown } from '$lib/utils/boundary';
+  import { compareStableText } from '#lib/utils/stableSort.ts';
+  import { parseJsonUnknown } from '#lib/utils/boundary/index.ts';
 
   type DbKindFilter = 'all' | 'core' | 'infra';
 

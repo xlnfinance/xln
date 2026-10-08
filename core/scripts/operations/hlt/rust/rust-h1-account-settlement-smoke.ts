@@ -1,7 +1,8 @@
 /** Black-box Account settlement over the canonical production xlnrs path. */
 
 import { safeStringify } from '../../../../protocol/serialization';
-import type { HltLivePaymentEvidence, RustH1Handle } from './rust-h1';
+import { fetchNativeJson, type HltLivePaymentEvidence, type RustH1Handle } from './rust-h1';
+import { requireBoundaryRecord } from '../../../../protocol/boundary-validation';
 import {
   readLaneAccountDetails,
   startLaneJurisdictionWatcher,
@@ -78,6 +79,61 @@ const waitForAccount = async (
   throw new Error(`${options.code}:${safeStringify(latest)}:${options.rust.errorTail()}`);
 };
 
+export const runRustH1SettlementRejectionSmoke = async (options: Readonly<{
+  apiBaseUrl: string; rust: RustH1Handle; counterpartyLane: LaneRuntime; tokenId: number;
+}>) => {
+  const { entityId, signerId } = options.rust.ready;
+  const counterpartyEntityId = options.counterpartyLane.identity.entityId;
+  const profileUrl = `${options.apiBaseUrl}/api/gossip/profile?entityId=${entityId}`;
+  const accountUrl = `${options.apiBaseUrl}/api/account/status?hubEntityId=${entityId}&counterpartyEntityId=${counterpartyEntityId}&tokenIds=${options.tokenId}`;
+  const readProfile = async () => requireBoundaryRecord(
+    requireBoundaryRecord(await fetchNativeJson(profileUrl), 'SETTLEMENT_REJECT_PROFILE')['profile'],
+    'SETTLEMENT_REJECT_PROFILE_FIELDS',
+  );
+  const before = requireBoundaryRecord(await fetchNativeJson(accountUrl), 'SETTLEMENT_REJECT_ACCOUNT');
+  const profile = await readProfile();
+  if (before['ready'] !== true || before['settlementWorkspaceHash'] !== null || !Array.isArray(before['tokens'])) {
+    throw new Error('HLT_SETTLEMENT_REJECT_BEFORE_NOT_READY');
+  }
+  const runtime = requireBoundaryRecord(before['runtime'], 'SETTLEMENT_REJECT_RUNTIME');
+  const marker = `settlement-reject-healthy-${runtime['height']}`;
+  const height = await options.rust.submitLocalEntityInputs(marker, [
+    { entityId, signerId, entityTxs: [
+      { type: 'profile-update', data: { profile: { entityId, name: marker } } },
+    ] },
+    { entityId, signerId, entityTxs: [
+      { type: 'profile-update', data: { profile: { entityId, name: `${marker}-rollback` } } },
+      { type: 'settle_propose', data: { counterpartyEntityId, ops: [
+        { type: 'r2r', tokenId: options.tokenId, amount: -1n },
+      ] } },
+    ] },
+    { entityId, signerId, entityTxs: [
+      { type: 'profile-update', data: { profile: { entityId, bio: marker } } },
+    ] },
+  ]);
+  const deadline = Date.now() + 5_000;
+  let observed = await readProfile();
+  while (observed['bio'] !== marker && Date.now() < deadline) {
+    await new Promise(resolve => setTimeout(resolve, 20));
+    observed = await readProfile();
+  }
+  if (observed['bio'] !== marker || observed['name'] !== marker) {
+    throw new Error(`HLT_SETTLEMENT_REJECT_HEALTHY_COMMAND:${safeStringify(observed)}`);
+  }
+  const after = requireBoundaryRecord(await fetchNativeJson(accountUrl), 'SETTLEMENT_REJECT_AFTER');
+  for (const field of ['tokens', 'currentHeight', 'jNonce', 'settlementWorkspaceHash', 'pendingFrameHeight']) {
+    if (safeStringify(after[field]) !== safeStringify(before[field])) {
+      throw new Error(`HLT_SETTLEMENT_REJECT_STATE_CHANGED:${field}`);
+    }
+  }
+  if (typeof profile['bio'] !== 'string' || typeof profile['name'] !== 'string') throw new Error('HLT_SETTLEMENT_REJECT_BIO_INVALID');
+  await options.rust.submitLocalEntityInputs(`${marker}-restore-profile`, [{ entityId, signerId,
+    entityTxs: [{ type: 'profile-update', data: { profile: { entityId, name: profile['name'], bio: profile['bio'] } } }],
+  }]);
+  return { evidence: 'functional-smoke' as const, height, healthyCommandCommitted: true,
+    invalidSettlementLeftNoMutation: true, rejectedCommandProfileRolledBack: true, accountMoneyAndNoncePreserved: true, counterpartyEntityId };
+};
+
 export const runRustH1AccountSettlementSmoke = async (options: Readonly<{
   apiBaseUrl: string;
   rust: RustH1Handle;
@@ -111,6 +167,7 @@ export const runRustH1AccountSettlementSmoke = async (options: Readonly<{
   if (!before.ready || before.settlementWorkspaceHash !== null) {
     throw new Error('HLT_RUST_ACCOUNT_SETTLEMENT_BEFORE_NOT_READY');
   }
+  await runRustH1SettlementRejectionSmoke(options);
   stage('before', before);
   await startLaneJurisdictionWatcher(options.counterpartyLane);
   stage('counterparty-watcher-started');

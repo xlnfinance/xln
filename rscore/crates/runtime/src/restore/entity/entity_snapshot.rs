@@ -443,7 +443,7 @@ pub fn entity_snapshot_from_graph(
     graph: &HydratedEntityGraph,
     known_accounts: BTreeSet<String>,
     accounts_root: [u8; 32],
-    orderbook: Option<HydratedOrderbook>,
+    mut orderbook: Option<HydratedOrderbook>,
 ) -> Result<EntityStateSnapshot, EntitySnapshotRestoreError> {
     let core = object(&graph.core, "core")?;
     let entity_id = text(required(core, "entityId", "core")?, "core.entityId")?;
@@ -453,6 +453,18 @@ pub fn entity_snapshot_from_graph(
     }
     let paybook = object(required(core, "paybook", "core")?, "core.paybook")?;
     exact_allowed(paybook, &["entries", "feesEarned"], "core.paybook")?;
+    let admissions = entity_collection(
+        core.get("crossJurisdictionBookAdmissions"),
+        "crossJurisdictionBookAdmissions",
+    )?;
+    if let Some(book) = orderbook.as_mut() {
+        xln_rscore_entity_kernel::hydrate_cross_jurisdiction_offers(
+            &mut book.snapshot,
+            &entity_id,
+            admissions.as_ref(),
+        )
+        .map_err(|error| EntitySnapshotRestoreError::Kernel(error.to_string()))?;
+    }
     let state = EntityStateSlice {
         entity_id,
         height: unsigned(required(core, "height", "core")?, "core.height")?,
@@ -575,10 +587,7 @@ pub fn entity_snapshot_from_graph(
             core.get("crossJurisdictionAuthorizations"),
             "crossJurisdictionAuthorizations",
         )?,
-        cross_jurisdiction_book_admissions: entity_collection(
-            core.get("crossJurisdictionBookAdmissions"),
-            "crossJurisdictionBookAdmissions",
-        )?,
+        cross_jurisdiction_book_admissions: admissions,
         j_history_finality: core
             .get("jHistoryFinality")
             .map(canonical_value_from_tagged_json)

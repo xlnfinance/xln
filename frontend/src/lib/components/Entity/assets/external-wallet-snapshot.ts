@@ -1,5 +1,5 @@
 import type { RuntimeReplica, JAdapter } from '@xln/core/api/public/runtime-module';
-import { hasOnlyAllowedKeys as hasOnlyKeys, isUnknownRecord as isRecord } from '$lib/utils/boundary';
+import { hasOnlyAllowedKeys as hasOnlyKeys, isUnknownRecord as isRecord } from '#lib/utils/boundary/index.ts';
 import type { ExternalWalletSnapshotSource } from './../asset-ledger';
 
 export type { ExternalWalletSnapshotSource } from './../asset-ledger';

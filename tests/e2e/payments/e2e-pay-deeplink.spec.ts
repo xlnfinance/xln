@@ -1,4 +1,4 @@
-import { expect, test, type BrowserContext } from '../../global-setup.mts';
+import { expect, test, type BrowserContext, type Page } from '../../global-setup.mts';
 import { APP_BASE_URL, ensureE2EBaseline, waitForNamedHubs } from '../../utils/e2e-baseline';
 import { connectRuntimeToHub } from '../../utils/e2e-connect';
 import { createRuntimeIdentity, gotoApp, selectDemoMnemonic } from '../../utils/e2e-demo-users';
@@ -6,16 +6,16 @@ import { getPersistedReceiptCursor, waitForPersistedFrameEvent } from '../../uti
 
 const TEST_TIMEOUT_MS = process.env.E2E_LONG === '1' ? 240_000 : 210_000;
 
-async function faucetOffchain(page: Page, entityId: string, hubId: string): Promise<void> {
-  const result = await page.evaluate(async ({ entityId, hubId }) => {
+async function faucetOffchain(page: Page, entityId: string, hubId: string, runtimeId: string): Promise<void> {
+  const result = await page.evaluate(async ({ entityId, hubId, runtimeId }) => {
     const response = await fetch('/api/faucet/offchain', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ userEntityId: entityId, hubEntityId: hubId, tokenSymbol: 'USDC', amount: '100' }),
+      body: JSON.stringify({ userEntityId: entityId, userRuntimeId: runtimeId, hubEntityId: hubId, tokenSymbol: 'USDC', amount: '100' }),
     });
     const data = await response.json().catch(() => ({}));
     return { ok: response.ok, data };
-  }, { entityId, hubId });
+  }, { entityId, hubId, runtimeId });
 
   expect(result.ok, JSON.stringify(result.data)).toBe(true);
 }
@@ -44,7 +44,7 @@ test.describe('Canonical /app#pay deep link', () => {
       await gotoApp(aliceSetupPage);
       const alice = await createRuntimeIdentity(aliceSetupPage, 'alice', selectDemoMnemonic('alice'));
       await connectRuntimeToHub(aliceSetupPage, alice, hubId);
-      await faucetOffchain(aliceSetupPage, alice.entityId, hubId);
+      await faucetOffchain(aliceSetupPage, alice.entityId, hubId, alice.runtimeId);
 
       await gotoApp(bobPage);
       const bob = await createRuntimeIdentity(bobPage, 'bob', selectDemoMnemonic('bob'));

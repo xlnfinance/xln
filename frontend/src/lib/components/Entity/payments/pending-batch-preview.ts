@@ -1,13 +1,13 @@
-import type { EntityReadView } from '$lib/components/Entity/core/entity-panel-types';
+import type { EntityReadView } from '#lib/components/Entity/core/entity-panel-types.ts';
 import type { EntityTx, JBatch } from '@xln/core/api/public/runtime-module';
 import {
   simulateDraftBatchReserveAvailability,
   type DraftBatchReserveIssue,
 } from '@xln/core/jurisdiction/machine/batch';
-import type { FrontendXlnFunctions } from '$lib/stores/xlnStore';
+import type { FrontendXlnFunctions } from '#lib/stores/xlnStore.ts';
 
-import { amountToUsd } from '$lib/utils/assetPricing';
-import { getEntityDisplayName } from '$lib/utils/identity/entityNaming';
+import { amountToUsd } from '#lib/utils/assetPricing.ts';
+import { getEntityDisplayName } from '#lib/utils/identity/entityNaming.ts';
 import { requireTokenDecimals } from './../token-metadata';
 
 type GossipSource = Parameters<typeof getEntityDisplayName>[1]['source'];

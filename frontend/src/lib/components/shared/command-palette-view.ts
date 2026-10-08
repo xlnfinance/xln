@@ -1,4 +1,4 @@
-import { compareStableText } from '$lib/utils/stableSort';
+import { compareStableText } from '#lib/utils/stableSort.ts';
 import type { RuntimeAdapterViewFrame } from '@xln/core/api/public/runtime-module';
 
 export type CommandPaletteEntity = {

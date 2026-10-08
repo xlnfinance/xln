@@ -32,9 +32,13 @@ const validateAttempt = (value: unknown, code: string): void => {
   requireExactBoundaryKeys(
     attempt,
     ['attemptId', 'attemptNumber', 'attemptedAt', 'batchGeneration'],
-    [],
+    ['rawTransaction'],
     `${code}_FIELDS`,
   );
+  if (attempt['rawTransaction'] !== undefined) {
+    const raw = requireString(attempt['rawTransaction'], `${code}_RAW`);
+    if (!/^0x(?:[0-9a-f]{2})+$/.test(raw) || raw.length > 524_290) throw new Error(`${code}_RAW_INVALID`);
+  }
   requireString(attempt['attemptId'], `${code}_ID`);
   requireBoundaryInteger(attempt['attemptNumber'], `${code}_NUMBER`, 1);
   requireBoundaryInteger(attempt['attemptedAt'], `${code}_AT`);

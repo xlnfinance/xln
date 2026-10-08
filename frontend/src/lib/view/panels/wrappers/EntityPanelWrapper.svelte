@@ -12,13 +12,13 @@
    */
 
   import type { Writable } from 'svelte/store';
-  import EntityWorkspace from '$lib/components/Entity/workspace/EntityWorkspace.svelte';
-  import type { EntityWorkspaceRuntimeFrameContext } from '$lib/components/Entity/core/runtime-frame-context';
-  import type { EntityWorkspaceEmbeddedRuntimeContext } from '$lib/components/Entity/core/embedded-runtime-context';
-  import type { Tab } from '$lib/types/ui';
+  import EntityWorkspace from '#lib/components/Entity/workspace/EntityWorkspace.svelte';
+  import type { EntityWorkspaceRuntimeFrameContext } from '#lib/components/Entity/core/runtime-frame-context.ts';
+  import type { EntityWorkspaceEmbeddedRuntimeContext } from '#lib/components/Entity/core/embedded-runtime-context.ts';
+  import type { Tab } from '#lib/types/ui.ts';
   import type { RuntimeReplica, EnvSnapshot } from '@xln/core/api/public/runtime-module';
-  import { runtimeControllerHandle } from '$lib/stores/runtimeControllerStore';
-  import type { EntityOpenAction } from '$lib/view/utils/panelBridge';
+  import { runtimeControllerHandle } from '#lib/stores/runtimeControllerStore.ts';
+  import type { EntityOpenAction } from '#lib/view/utils/panelBridge.ts';
 
   // Props from Dockview panel params (Svelte 5 runes syntax)
   let {

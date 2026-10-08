@@ -1,3 +1,4 @@
+import { sendRuntimeInput } from '../commands';
 import type {
 	AccountReplica,
 	AccountState,
@@ -193,10 +194,9 @@ async function submitCrossIntent(route: CrossJurisdictionSwapRoute, waitForTarge
 }
 
 export async function submitSwapPlan(plan: SwapCommandPlan): Promise<void> {
-	const adapter = requireAdapter();
 	if (plan.mode === 'same') {
 		if (plan.runtimeInput.entityInputs.some(input => (input.entityTxs ?? []).some(tx => tx.type !== 'placeSwapOffer'))) throw new Error('Prepare incoming capacity before placing the order.');
-		await adapter.send(plan.runtimeInput);
+		await sendRuntimeInput(plan.runtimeInput);
 		return;
 	}
 	if (plan.targetSetupInput) throw new Error('Prepare the target account capacity before swapping.');

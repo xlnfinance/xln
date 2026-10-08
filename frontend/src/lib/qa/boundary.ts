@@ -17,7 +17,7 @@ import type {
   QaUxReleasePackAudit,
   RestartStatus,
 } from './types';
-import { isUnknownRecord, optionalBoolean, optionalString, rejectExtraKeys, requireUnknownRecord } from '$lib/utils/boundary';
+import { isUnknownRecord, optionalBoolean, optionalString, rejectExtraKeys, requireUnknownRecord } from '#lib/utils/boundary/index.ts';
 
 const isFiniteNumber = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value);
 const isNullableFiniteNumber = (value: unknown): boolean => value === null || isFiniteNumber(value);

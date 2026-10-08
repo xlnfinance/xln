@@ -32,6 +32,21 @@ export const attachLiveJAdapter = (
   if (current && current !== adapter) {
     throw new Error(`LIVE_JADAPTER_CONFLICT:${jurisdictionName}`);
   }
+  if (current === adapter) return;
+  // EOA nonce ownership spans every contract stack on this chain; the sequencer
+  // filters recovered payer signatures, never jurisdiction names or recipients.
+  adapter.setPendingSignedTransactionSource(() => {
+    const rows = (replica.infrastructure?.pendingCommittedJOutbox ?? [])
+      .filter(input => replica.state.jReplicas.get(input.jurisdictionName)?.chainId === adapter.chainId).flatMap(input => input.jTxs);
+    const raw = rows.flatMap(tx => tx.type === 'batch' && tx.data.runtimeSubmitAttempt?.rawTransaction
+      ? [tx.data.runtimeSubmitAttempt.rawTransaction] : []);
+    for (const intent of replica.infrastructure?.numberedRegistrationIntents?.values() ?? []) {
+      if (intent.status !== 'pending') continue;
+      const jurisdiction = intent.request.entities[0]?.config.jurisdiction;
+      if (jurisdiction?.chainId === adapter.chainId) raw.push(intent.rawTransaction);
+    }
+    return raw;
+  });
   adapters.set(jurisdictionName, adapter);
 };
 
@@ -45,6 +60,7 @@ export const detachLiveJAdapter = (
   if (expectedAdapter && current && current !== expectedAdapter) {
     throw new Error(`LIVE_JADAPTER_DETACH_CONFLICT:${jurisdictionName}`);
   }
+  current?.setPendingSignedTransactionSource(null);
   adapters?.delete(jurisdictionName);
 };
 

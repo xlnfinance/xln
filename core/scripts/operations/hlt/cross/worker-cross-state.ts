@@ -4,7 +4,8 @@ import type { JurisdictionConfig } from '../../../../protocol/config/jurisdictio
 import { DaemonControlClient, setupCustody } from '../../../../orchestrator/daemon-control';
 import { crossLoadSignerLabels, deriveManagedSignerSeed } from '../../../../orchestrator/mesh/mesh-seeds';
 import type { CrossHub } from './cross-hub';
-import { type ConnectedRuntime } from '../worker-runtime';
+import { deriveAccountWatchSeed } from '../../../../protocol/identity/account-watch-seed';
+import { type ConnectedRuntime, waitForCounterpartyCredit } from '../worker-runtime';
 
 const sleep = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -31,6 +32,7 @@ export const setupCrossLoadCohort = async (options: {
   sourceCredit: bigint;
   targetCredit: bigint;
   custodyRuntimeSeed: string;
+  disputeConfig?: { leftResponseSeconds: number; rightResponseSeconds: number };
 }) => {
   const client = new DaemonControlClient({
     baseUrl: httpBaseForRuntimeWsUrl(options.runtime.wsUrl),
@@ -45,7 +47,7 @@ export const setupCrossLoadCohort = async (options: {
     jurisdiction: options.sourceJurisdiction,
     relayUrl: options.relayUrl,
     gossipPollMs: 250,
-    hubEntityIds: [options.sourceHubEntityId],
+    hubEntityIds: options.disputeConfig ? [] : [options.sourceHubEntityId],
     creditTokenIds: [options.sourceTokenId],
     creditAmount: options.sourceCredit,
   });
@@ -56,7 +58,7 @@ export const setupCrossLoadCohort = async (options: {
     jurisdiction: options.targetJurisdiction,
     relayUrl: options.relayUrl,
     gossipPollMs: 250,
-    hubEntityIds: [options.targetHubEntityId],
+    hubEntityIds: options.disputeConfig ? [] : [options.targetHubEntityId],
     creditTokenIds: [options.targetTokenId],
     creditAmount: options.targetCredit,
   });
@@ -65,6 +67,25 @@ export const setupCrossLoadCohort = async (options: {
     advertiseEntityIds: [source.entityId, target.entityId],
     gossipPollMs: 250,
   });
+  if (options.disputeConfig) {
+    await client.waitForDirectEntityRoutes([options.sourceHubEntityId, options.targetHubEntityId]);
+    for (const [identity, hubEntityId, tokenId, amount] of [
+      [source, options.sourceHubEntityId, options.sourceTokenId, options.sourceCredit],
+      [target, options.targetHubEntityId, options.targetTokenId, options.targetCredit],
+    ] as const) {
+      await client.queueRuntimeInput({ runtimeTxs: [], entityInputs: [{
+        entityId: identity.entityId, signerId: identity.signerId, entityTxs: [
+          { type: 'openAccount', data: { targetEntityId: hubEntityId, disputeConfig: options.disputeConfig,
+            watchSeed: deriveAccountWatchSeed({ runtimeSeed: options.custodyRuntimeSeed,
+              runtimeId: options.runtime.adapter.runtimeId, entityId: identity.entityId, counterpartyId: hubEntityId }),
+          } },
+          { type: 'extendCredit', data: { counterpartyEntityId: hubEntityId, tokenId, amount } },
+        ],
+      }] });
+      // The user grants the hub spending capacity; observe that exact committed side.
+      await waitForCounterpartyCredit(options.runtime, identity.entityId, hubEntityId, tokenId, amount);
+    }
+  }
   return { source, target };
 };
 

@@ -1,4 +1,4 @@
-import type { HubHealthPayload, HubInfoPayload } from '../orchestrator-types';
+import type { HubChild, HubHealthPayload, HubInfoPayload } from '../orchestrator-types';
 import { parseRuntimeSecurityIncidentTelemetry } from '../health/runtime-security-telemetry';
 
 const invalid = (path: string, expected: string): never => {
@@ -154,6 +154,25 @@ export const validateHubInfoPayload = (value: unknown): HubInfoPayload => {
     }
     optionalSafeInteger(entity, 'chainId', path);
     optionalField(entity, 'primary', 'boolean', path);
+    optionalField(entity, 'isHub', 'boolean', path);
   }
   return info as HubInfoPayload;
+};
+
+export const requireHubBootstrapOwners = (child: HubChild) => {
+  const inventory = child.lastInfo?.hubEntities;
+  if (child.engine === 'rust' && inventory?.some(owner => typeof owner.isHub !== 'boolean')) {
+    throw new Error(`RUST_HUB_BOOTSTRAP_OWNER_ROLE:${child.name}`);
+  }
+  const owners = child.engine === 'rust' ? inventory?.filter(owner => owner.isHub === true) : inventory;
+  if (!owners?.length) throw new Error(`RUST_HUB_BOOTSTRAP_INVENTORY_MISSING:${child.name}`);
+  return owners.map(owner => {
+    const entityId = String(owner.entityId || '').trim().toLowerCase();
+    const signerId = String(owner.signerId || '').trim().toLowerCase();
+    const jurisdictionName = String(owner.jurisdictionName || '').trim();
+    if (!/^0x[0-9a-f]{64}$/.test(entityId) || !/^0x[0-9a-f]{40}$/.test(signerId) || !jurisdictionName) {
+      throw new Error(`RUST_HUB_BOOTSTRAP_OWNER_AUTHORITY:${child.name}`);
+    }
+    return { entityId, signerId, jurisdictionName };
+  });
 };

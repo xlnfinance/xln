@@ -5,6 +5,8 @@
     "core/api/public/runtime-public.ts",
     "core/api/public/runtime-module.ts",
     "core/api/server/index.ts",
+    "core/api/server/ownership/brainvault-native-worker.ts",
+    "core/api/server/control/stack-manager/native-worker.ts",
     "core/scripts/**/*.ts",
     "core/scenarios/**/*.ts",
     "core/__tests__/**/*.test.ts",

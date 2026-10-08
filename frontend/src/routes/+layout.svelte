@@ -1,17 +1,17 @@
 <script lang="ts">
-	import { browser } from '$app/environment';
+	import { browser } from '$app/env';
 	import { onMount } from 'svelte';
-	import { page } from '$app/stores';
-	import Topbar from '$lib/components/Topbar.svelte';
-	import Toast from '$lib/components/Toast.svelte';
-	import XlnMascot from '$lib/components/XlnMascot/XlnMascot.svelte';
-	import { initializeNativeShell } from '$lib/native/capacitor';
-	import { installRangeSliderProgress } from '$lib/utils/rangeSliderProgress';
-	import { optionalString, readJsonUnknown, rejectExtraKeys, requireUnknownRecord } from '$lib/utils/boundary';
-	import '$lib/styles/apple-glass.css';
-	import '$lib/styles/checkbox-controls.css';
-	import '$lib/styles/form-controls.css';
-	import '$lib/styles/range-sliders.css';
+	import { page } from '$app/state';
+	import Topbar from '#lib/components/Topbar.svelte';
+	import Toast from '#lib/components/Toast.svelte';
+	import XlnMascot from '#lib/components/XlnMascot/XlnMascot.svelte';
+	import { initializeNativeShell } from '#lib/native/capacitor.ts';
+	import { installRangeSliderProgress } from '#lib/utils/rangeSliderProgress.ts';
+	import { optionalString, readJsonUnknown, rejectExtraKeys, requireUnknownRecord } from '#lib/utils/boundary/index.ts';
+	import '#lib/styles/apple-glass.css';
+	import '#lib/styles/checkbox-controls.css';
+	import '#lib/styles/form-controls.css';
+	import '#lib/styles/range-sliders.css';
 	let { children } = $props();
 
 	onMount(() => {
@@ -33,24 +33,24 @@
 	})());
 
 	// Landing page gets transparent topbar
-	let isLandingPage = $derived($page.url.pathname === '/');
+	let isLandingPage = $derived(page.url.pathname === '/');
 
 	type ChromeMode = 'site' | 'app' | 'hidden';
 
 	let chromeMode = $derived.by<ChromeMode>(() => {
-		const pageData = $page.data as Record<string, unknown> | undefined;
+		const pageData = page.data as Record<string, unknown> | undefined;
 		const value = pageData?.['chrome'] ?? 'site';
 		return value === 'app' || value === 'hidden' ? value : 'site';
 	});
 
 	let skipDeployLabel = $derived.by<boolean>(() => {
-		const pageData = $page.data as Record<string, unknown> | undefined;
+		const pageData = page.data as Record<string, unknown> | undefined;
 		return pageData?.['skipDeployLabel'] === true;
 	});
 
 	let showTopbar = $derived(!isEmbed && chromeMode === 'site');
 	let showXlnMascot = $derived(!isEmbed && (
-		$page.url.pathname === '/app' || $page.url.pathname.startsWith('/app/')
+		page.url.pathname === '/app' || page.url.pathname.startsWith('/app/')
 	));
 	let deployLabel = $state('');
 

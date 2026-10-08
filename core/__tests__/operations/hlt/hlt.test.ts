@@ -146,6 +146,7 @@ describe('production swap load evidence', () => {
   test('environment manifest binds the selected engine Account worker count', () => {
     const previousTs = process.env['XLN_TS_ACCOUNT_WORKERS'];
     const previousRust = process.env['XLN_RSCORE_AUTHORITY_WORKERS'];
+    const previousEngine = process.env['XLN_HLT_ENGINE'];
     try {
       process.env['XLN_TS_ACCOUNT_WORKERS'] = '4';
       expect(collectHltEnvironmentManifest({ engine: 'ts', requireAccountWorkers: true }).accountWorkers)
@@ -154,11 +155,24 @@ describe('production swap load evidence', () => {
       expect(() => collectHltEnvironmentManifest({ engine: 'ts', requireAccountWorkers: true }))
         .toThrow('HLT_ENV_MANIFEST_ACCOUNT_WORKERS_UNKNOWN');
       delete process.env['XLN_RSCORE_AUTHORITY_WORKERS'];
-      expect(collectHltEnvironmentManifest({ engine: 'rust', rustAccountWorkers: 6 }).accountWorkers)
+      expect(collectHltEnvironmentManifest({ engine: 'rust', rustAccountWorkers: 6, requireAccountWorkers: true }).accountWorkers)
         .toBe(6);
       expect(() => collectHltEnvironmentManifest({ engine: 'rust', requireAccountWorkers: true }))
         .toThrow('HLT_ENV_MANIFEST_ACCOUNT_WORKERS_UNKNOWN');
+      process.env['XLN_HLT_ENGINE'] = 'rust';
+      process.env['XLN_RSCORE_AUTHORITY_WORKERS'] = '6';
+      // Cross-load reports use the selected live engine, never the TS worker setting.
+      expect(collectHltEnvironmentManifest({ requireAccountWorkers: true }).accountWorkers).toBe(6);
+      // Attached native process evidence wins over a stale driver environment.
+      expect(collectHltEnvironmentManifest({
+        engine: 'rust', rustAccountWorkers: 8, requireAccountWorkers: true,
+      }).accountWorkers).toBe(8);
+      process.env['XLN_HLT_ENGINE'] = 'invalid';
+      expect(() => collectHltEnvironmentManifest({ requireAccountWorkers: true }))
+        .toThrow('HLT_ENV_MANIFEST_ENGINE_INVALID:invalid');
     } finally {
+      if (previousEngine === undefined) delete process.env['XLN_HLT_ENGINE'];
+      else process.env['XLN_HLT_ENGINE'] = previousEngine;
       if (previousTs === undefined) delete process.env['XLN_TS_ACCOUNT_WORKERS'];
       else process.env['XLN_TS_ACCOUNT_WORKERS'] = previousTs;
       if (previousRust === undefined) delete process.env['XLN_RSCORE_AUTHORITY_WORKERS'];

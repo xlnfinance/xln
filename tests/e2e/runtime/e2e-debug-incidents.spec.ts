@@ -1,11 +1,19 @@
 import { allowBrowserIssue, expect, test } from '../../global-setup.mts';
+import { resolveRuntimeImportAppUrl } from '../../utils/runtime/e2e-runtime-import';
 import { API_BASE_URL, APP_BASE_URL } from '../../utils/e2e-baseline';
 
 test('browser console errors enter the shared unread incident service', { tag: '@functional' }, async ({ page }) => {
-  await page.goto(`${APP_BASE_URL}/app`, { waitUntil: 'load' });
-  // SvelteKit hydrates asynchronously after document load; emit only after
-  // the real application and its client error hooks are mounted.
-  await expect(page.getByRole('heading', { name: 'Create xln wallet', exact: true })).toBeVisible();
+  const importUrl = await resolveRuntimeImportAppUrl(page, {
+    appBaseUrl: APP_BASE_URL, apiBaseUrl: API_BASE_URL, access: 'admin',
+  });
+  await page.goto(importUrl, { waitUntil: 'load' });
+  await page.waitForFunction(() => {
+    const view = window as typeof window & {
+      __xln?: { adapter?: { status(): { connected: boolean; authLevel?: string | null } } };
+    };
+    const status = view.__xln?.adapter?.status();
+    return status?.connected === true && status.authLevel === 'admin';
+  }, null, { timeout: 10_000 });
   allowBrowserIssue({
     type: 'console',
     severity: 'error',

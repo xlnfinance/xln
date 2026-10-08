@@ -2,10 +2,10 @@
   import type { RuntimeAdapterTimelineIndexPage, StorageHead } from '@xln/core/api/public/runtime-module';
   import type { RuntimeSecurityIncident } from '@xln/core/protocol/errors/security-incident';
   import { safeStringify } from '@xln/core/protocol/serialization';
-  import { runtimeControllerHandle } from '$lib/stores/runtimeControllerStore';
-  import { getRuntimeControllerAdapter } from '$lib/stores/runtimeControllerStore';
-  import { runtimeQueryClient } from '$lib/stores/runtimeQueryClient';
-  import { activeRuntime } from '$lib/stores/vault/vaultStore';
+  import { runtimeControllerHandle } from '#lib/stores/runtimeControllerStore.ts';
+  import { getRuntimeControllerAdapter } from '#lib/stores/runtimeControllerStore.ts';
+  import { runtimeQueryClient } from '#lib/stores/runtimeQueryClient.ts';
+  import { activeRuntime } from '#lib/stores/vault/vaultStore.ts';
 
   let head: StorageHead | null = null;
   let timeline: RuntimeAdapterTimelineIndexPage | null = null;

@@ -1,4 +1,4 @@
-import type { Provider, Signer } from 'ethers';
+import { Transaction, type Provider, type Signer } from 'ethers';
 import { rpcLog } from '../../rpc-public';
 import { isNonceSyncError, type FeeOverrides, type RpcReceipt } from '../rpc-boundary';
 
@@ -11,6 +11,7 @@ type TransactionSequencerConfig = {
 };
 
 export type RpcTransactionSequencer = {
+  setPendingSignedTransactionSource(read: (() => readonly string[]) | null): void;
   runFor<T>(signer: Signer, work: () => Promise<T>): Promise<T>;
   run<T>(work: () => Promise<T>): Promise<T>;
   resetFor(signer: Signer): Promise<void>;
@@ -27,7 +28,7 @@ export type RpcTransactionSequencer = {
 
 export type SignerNonceSequencer = Pick<
   RpcTransactionSequencer,
-  'runFor' | 'resetFor' | 'allocateFor'
+  'runFor' | 'resetFor' | 'allocateFor' | 'setPendingSignedTransactionSource'
 > & {
   poisonFor(signer: Signer, cause: unknown): Promise<void>;
 };
@@ -95,6 +96,9 @@ export const createSignerNonceSequencer = (
   provider: Provider,
   usesEvmNonce: boolean,
 ): SignerNonceSequencer => {
+  // A standalone adapter has no Runtime owner. Attachment installs exactly one
+  // read capability; no signed bytes or durable nonce floor are copied here.
+  let readPendingSignedTransactions: (() => readonly string[]) | null = null;
   const queues = new Map<string, Promise<unknown>>();
   const nextNonces = new Map<string, number>();
   const poisoned = new Map<string, string>();
@@ -132,13 +136,29 @@ export const createSignerNonceSequencer = (
       await provider.getTransactionCount(address, 'latest'),
       await provider.getTransactionCount(address, 'pending'),
     );
-    const cachedNonce = nextNonces.get(key);
-    const nonce = cachedNonce === undefined || chainNonce > cachedNonce ? chainNonce : cachedNonce;
+    let committedFloor = chainNonce;
+    if (readPendingSignedTransactions) {
+      const chainId = (await provider.getNetwork()).chainId;
+      for (const raw of readPendingSignedTransactions()) {
+        const transaction = Transaction.from(raw);
+        if (!transaction.from || transaction.chainId !== chainId) throw new Error('J_NONCE_RESERVATION_DOMAIN_INVALID');
+        if (transaction.from.toLowerCase() === key) committedFloor = Math.max(committedFloor, transaction.nonce + 1);
+      }
+    }
+    // Runtime-owned prepared reservations are authoritative and can be retired
+    // before broadcast by authenticated finality. A stale allocation cache must
+    // not leave an unfillable nonce gap; runFor holds allocation through WAL acceptance.
+    const nonce = readPendingSignedTransactions
+      ? committedFloor : Math.max(committedFloor, nextNonces.get(key) ?? committedFloor);
     nextNonces.set(key, nonce + 1);
     return nonce;
   };
 
   return {
+    setPendingSignedTransactionSource(read) {
+      if (read && readPendingSignedTransactions && readPendingSignedTransactions !== read) throw new Error('J_ADAPTER_RUNTIME_OWNER_ALREADY_BOUND');
+      readPendingSignedTransactions = read;
+    },
     runFor,
     resetFor,
     allocateFor,

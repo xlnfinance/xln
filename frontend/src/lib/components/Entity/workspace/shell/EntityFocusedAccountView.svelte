@@ -1,7 +1,7 @@
 <script lang="ts">
-import type { AccountReadView, EntityReadView } from '$lib/components/Entity/core/entity-panel-types';
+import type { AccountReadView, EntityReadView } from '#lib/components/Entity/core/entity-panel-types.ts';
 
-  import type { Tab } from '$lib/types/ui';
+  import type { Tab } from '#lib/types/ui.ts';
   import AccountPanel from '../../account/ui/AccountPanel.svelte';
 
   export let selectedAccount: AccountReadView;

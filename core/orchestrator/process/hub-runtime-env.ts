@@ -1,3 +1,4 @@
+import { resolve } from 'node:path';
 import { buildManagedRuntimeChildSecretEnv } from '../../support/process/child-secrets';
 import { buildRuntimeChildGcEnv } from '../../support/process/runtime-gc-env';
 import { resolveRuntimeMinFrameDelayMs } from '../../runtime/config/frame-cadence';
@@ -30,6 +31,7 @@ const HUB_PASSTHROUGH_ENV_KEYS = [
   'XLN_ENTITY_STATE_ROOT_PROFILE',
   'XLN_HLT_ENGINE',
   'XLN_MESH_PRIMARY_JURISDICTION_ONLY',
+  'XLN_BRAINVAULT_WORKER_PATH',
 ] as const;
 
 // Canonical H1 Runtime intake caps. The authority recorder needs a deeper WAL,
@@ -69,6 +71,12 @@ export const buildHubChildProcessEnv = (
     ...buildRuntimeChildGcEnv(source),
     XLN_DB_PATH: options.dbPath,
     XLN_BRAINVAULT_OWNER_PATH: options.brainvaultOwnerPath,
+    XLN_STACK_MANAGER_WORKER_PATH: resolve(source['XLN_STACK_MANAGER_WORKER_PATH'] ??
+      resolve(import.meta.dir, '../../api/server/control/stack-manager/native-worker.ts')),
+    XLN_STACK_MANAGER_BUN_PATH: process.execPath,
+    XLN_BRAINVAULT_CUSTODY_WORKER_PATH: resolve(source['XLN_BRAINVAULT_CUSTODY_WORKER_PATH'] ??
+      resolve(import.meta.dir, '../../api/server/ownership/brainvault-native-worker.ts')),
+    XLN_BRAINVAULT_BUN_PATH: process.execPath,
     XLN_JURISDICTIONS_PATH: options.jurisdictionsPath,
     ...options.rpcEnv,
     USE_ANVIL: 'true',

@@ -49,7 +49,7 @@ fn due_secret_ack_prepares_in_same_frame_and_missing_lock_terminates_w1_w4() {
             if case.queued_starts == 8 {
                 assert_eq!(status, ["active"]);
                 let entry = result.state.paybook.entries.iter().next().unwrap().1;
-                assert_eq!(entry.secret_ack_deadline_at, Some(DUE + 120_000));
+                assert_eq!(entry.secret_ack_deadline_at, Some(DUE + 1));
                 assert_eq!(
                     result
                         .state
@@ -114,7 +114,7 @@ fn due_secret_ack_deduplicates_peer_and_reserves_last_slot_in_deadline_order() {
             {
                 DUE - 10
             } else {
-                DUE + 120_000
+                DUE + 1
             };
             assert_eq!(entry.secret_ack_deadline_at, Some(expected));
         }

@@ -1,8 +1,8 @@
 <script lang="ts">
-import type { EntityReadView } from '$lib/components/Entity/core/entity-panel-types';
+import type { EntityReadView } from '#lib/components/Entity/core/entity-panel-types.ts';
 
   import type { Profile as GossipProfile } from '@xln/core/api/public/runtime-module';
-  import type { Tab } from '$lib/types/ui';
+  import type { Tab } from '#lib/types/ui.ts';
   import AssetFaucetCard from './AssetFaucetCard.svelte';
   import AssetLedgerTable from './AssetLedgerTable.svelte';
   import AssetWalletMeta from './AssetWalletMeta.svelte';

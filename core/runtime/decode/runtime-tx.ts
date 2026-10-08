@@ -267,6 +267,21 @@ const validateRuntimeTxData = (type: string, value: unknown, code: string): void
     const data = requireBoundaryRecord(value, code);
     if (data['status'] !== 'pending') throw new Error(`${code}_STATUS`);
     validateNumberedRecord(data, code);
+  } else if (type === 'replaceNumberedRegistrationIntent' || type === 'replaceJPreparedTransaction') {
+    const data = requireBoundaryRecord(value, code);
+    const identity = type === 'replaceJPreparedTransaction' ? ['jurisdictionName', 'attemptId'] : ['intentId', 'requestHash'];
+    requireExactBoundaryKeys(data, [...identity, 'previousTransactionHash', 'rawTransaction', 'evidence'], [], `${code}_FIELDS`);
+    for (const key of identity) requireString(data[key], `${code}_${key}`);
+    if (type === 'replaceNumberedRegistrationIntent') for (const key of identity) requireBytes32(data[key], `${code}_${key}`);
+    requireBytes32(data['previousTransactionHash'], `${code}_PREVIOUS_HASH`);
+    const raw = requireString(data['rawTransaction'], `${code}_RAW`);
+    if (!/^0x(?:[0-9a-f]{2})+$/.test(raw) || raw.length > 524_290) throw new Error(`${code}_RAW`);
+    const evidence = requireBoundaryRecord(data['evidence'], `${code}_EVIDENCE`);
+    requireExactBoundaryKeys(evidence, ['oldTransactionHash', 'blockNumber', 'blockHash', 'timestamp'], [], `${code}_EVIDENCE_FIELDS`);
+    requireBytes32(evidence['oldTransactionHash'], `${code}_OLD_HASH`);
+    requireBytes32(evidence['blockHash'], `${code}_BLOCK_HASH`);
+    requireBoundaryInteger(evidence['blockNumber'], `${code}_BLOCK_NUMBER`, 1);
+    requireBoundaryInteger(evidence['timestamp'], `${code}_TIMESTAMP`, 1);
   } else if (type === 'resolveNumberedRegistrationIntent') validateNumberedResolution(value, code);
   else if (type === 'recordAuthenticatedJAuthority') validateRegistrationEvidence(value, code);
   else if (type === 'observeJRange') validateJObservationData(value, code);
@@ -286,6 +301,11 @@ const validateRuntimeTxData = (type: string, value: unknown, code: string): void
     }
     requireBoundaryInteger(data['conflictingHeight'], `${code}_HEIGHT`, 1);
   } else if (type === 'retryJSubmit') validateJSubmit(value, code, false);
+  else if (type === 'recordJPreparedTransaction') {
+    const data = requireBoundaryRecord(value, code);
+    requireExactBoundaryKeys(data, ['jurisdictionName', 'attemptId', 'rawTransaction'], [], `${code}_FIELDS`);
+    for (const field of ['jurisdictionName', 'attemptId', 'rawTransaction']) requireString(data[field], `${code}_${field}`);
+  }
   else if (type === 'recordJSubmitResult') validateJSubmit(value, code, true);
   else if (type === 'retryEntityProviderAction') validateEntityProviderSubmit(value, code, false);
   else if (type === 'recordEntityProviderActionSubmitResult') validateEntityProviderSubmit(value, code, true);

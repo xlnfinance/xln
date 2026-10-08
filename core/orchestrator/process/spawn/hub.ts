@@ -1,4 +1,4 @@
-import { readBooleanEnv } from '../../../config/environment';
+import { readBooleanEnv, readPositiveIntegerEnv } from '../../../config/environment';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -66,6 +66,20 @@ type HubInvocation = {
   rustIdentity: RustIdentity | null;
 };
 
+export const buildRustHubPeerRoutes = (
+  ownName: string,
+  peers: readonly Pick<HubChild, 'name' | 'seed' | 'signerLabel' | 'publicPort'>[],
+  publicWsBaseUrl: string,
+) => peers.filter(peer => peer.name !== ownName).map(peer => {
+  const identity = deriveManagedEntityIdentity(peer);
+  return {
+    targetEntityId: identity.entityId,
+    targetRuntimeId: deriveSignerAddressSync(peer.seed, '1').toLowerCase(),
+    targetSignerId: identity.signerId,
+    websocketUrl: buildPublicDirectWsUrl(publicWsBaseUrl, peer.publicPort),
+  };
+});
+
 const buildRustHubInvocation = (child: HubChild, deps: HubSpawnerDeps, rustIdentity: RustIdentity): HubInvocation => {
   const runtimeSeedFile = join(child.dbPath, 'runtime.seed');
   const entityKeyFile = join(child.dbPath, 'entity-encryption.key');
@@ -75,21 +89,7 @@ const buildRustHubInvocation = (child: HubChild, deps: HubSpawnerDeps, rustIdent
   const entityEncryptionPrivateKey = deriveEntityEncryptionPrivateKey(custodySeed, rustIdentity.entityId);
   writeFileSync(runtimeSeedFile, `${child.seed}\n`, { mode: 0o600 });
   writeFileSync(entityKeyFile, `${entityEncryptionPrivateKey}\n`, { mode: 0o600 });
-  const hubRoutes = deps.hubChildren
-    .filter(peer => peer.name !== child.name)
-    .map(peer => {
-      const identity = deriveManagedEntityIdentity({
-        name: peer.name,
-        seed: peer.seed,
-        signerLabel: peer.signerLabel,
-      });
-      return {
-        targetEntityId: identity.entityId,
-        targetRuntimeId: deriveSignerAddressSync(peer.seed, '1').toLowerCase(),
-        targetSignerId: identity.signerId,
-        websocketUrl: null,
-      };
-    });
+  const hubRoutes = buildRustHubPeerRoutes(child.name, deps.hubChildren, deps.args.publicWsBaseUrl);
   const marketMakerRuntimeId = deriveSignerAddressSync(deps.marketMakerChild.seed, '1').toLowerCase();
   const supportRoutes = deps.getMarketMakerIdentities().map(identity => ({
     targetEntityId: identity.entityId,
@@ -130,7 +130,7 @@ const buildRustHubInvocation = (child: HubChild, deps: HubSpawnerDeps, rustIdent
     apiHost: deps.args.host,
     apiPort: child.apiPort,
     directHost: deps.args.host,
-    directPort: child.publicPort,
+    directPort: readPositiveIntegerEnv('XLN_RSCORE_DIRECT_PORT', child.publicPort),
     dbPath: child.dbPath,
     runtimeSeedFile,
     entityKeyFile,
@@ -208,7 +208,7 @@ const projectRustHubStatus = (
       ...(status.runtimeId ? { runtimeId: status.runtimeId } : {}),
       apiUrl: `http://${deps.args.host}:${String(child.apiPort)}`,
       relayUrl: deps.relayUrl,
-      directWsUrl: `ws://${status.listen}/ws`,
+      directWsUrl: buildPublicDirectWsUrl(deps.args.publicWsBaseUrl, child.publicPort),
     };
   }
   child.lastHealth = {

@@ -97,7 +97,7 @@ fn canonical_jurisdiction(
         .map_err(Into::into)
 }
 
-pub(super) fn decode_entity_authority(
+pub(crate) fn decode_entity_authority(
     core: &Map<String, Value>,
 ) -> Result<EntityFrameAuthority, EntityConsensusRestoreError> {
     let config = object(required(core, "config", "core")?, "core.config")?;

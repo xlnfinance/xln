@@ -1,15 +1,15 @@
 <script lang="ts">
   import { onDestroy, onMount } from 'svelte';
   import { goto } from '$app/navigation';
-  import { getXLN } from '$lib/stores/bootstrap/xlnRuntimeLoader';
+  import { getXLN } from '#lib/stores/bootstrap/xlnRuntimeLoader.ts';
   import {
     currentHeight,
     history,
     setXlnEnvironment,
-  } from '$lib/stores/xlnStore';
-  import { timeOperations } from '$lib/stores/timeStore';
-  import { errorLog } from '$lib/stores/errorLogStore';
-  import type { RuntimeReplica, EnvSnapshot, XLNModule, EntityReplica, EntityState } from '@xln/core/api/public/runtime-module';
+  } from '#lib/stores/xlnStore.ts';
+  import { timeOperations } from '#lib/stores/timeStore.ts';
+  import { errorLog } from '#lib/stores/errorLogStore.ts';
+  import type { RuntimeReplica, EnvSnapshot, EntityReplica, EntityState, XLNModule } from '@xln/core/api/public/runtime-module';
 
   type ScenarioOption = {
     id: string;

@@ -26,6 +26,8 @@ struct BoundEntityRoute {
     /// `None` is an operator-installed route and cannot be displaced by
     /// gossip. Dynamic routes use the signed Profile clock.
     last_updated: Option<u64>,
+    /// Original signed Gossip row, retained only after full profile and route verification.
+    authenticated_profile: Option<Value>,
 }
 
 pub(crate) struct BoundEntityOutputs {
@@ -95,6 +97,11 @@ pub enum EntityRouteError {
     LocalCrossJEscapedMachine(usize),
     #[error("RRS_ENTITY_OUTPUT_LOCAL_INPUT:{0}")]
     LocalInput(String),
+    #[error("INBOUND_ENTITY_OWNER_UNKNOWN:{entity_id}:{signer_id}")]
+    InboundEntityOwner {
+        entity_id: String,
+        signer_id: String,
+    },
     #[error("INBOUND_RUNTIME_OUTPUT_ENVELOPE_INVALID:index={0}")]
     InboundRuntimeOutputEnvelope(usize),
     #[error("INBOUND_RUNTIME_OUTPUT_SOURCE_UNVERIFIED:{entity_id}:{signer_id}:{peer_runtime_id}")]
@@ -124,6 +131,7 @@ impl EntityRouteTable {
                         runtime_id: runtime_id.clone(),
                         signer_id: route.target_signer_id,
                         last_updated: None,
+                        authenticated_profile: None,
                     },
                 )
                 .is_some()
@@ -228,57 +236,59 @@ impl EntityRouteTable {
         sessions.has_open(&route.runtime_id)
     }
 
+    pub fn authenticated_profiles(&self) -> Vec<Value> {
+        self.by_entity
+            .values()
+            .filter_map(|route| route.authenticated_profile.clone())
+            .collect()
+    }
+
     pub(super) fn with_verified_profile(
         &self,
         profile: super::profile_route::VerifiedProfileRoute,
     ) -> Result<Self, EntityRouteError> {
         let mut updated = self.clone();
         let routes = Arc::make_mut(&mut updated.by_entity);
-        match routes.get(&profile.entity_id) {
-            Some(existing)
-                if existing.runtime_id == profile.runtime_id
-                    && existing.signer_id == profile.signer_id =>
+        if let Some(existing) = routes.get_mut(&profile.entity_id) {
+            if existing.runtime_id == profile.runtime_id && existing.signer_id == profile.signer_id
             {
-                if existing
-                    .last_updated
-                    .is_some_and(|current| current < profile.last_updated)
-                {
-                    routes.insert(
-                        profile.entity_id,
-                        BoundEntityRoute {
-                            runtime_id: profile.runtime_id,
-                            signer_id: profile.signer_id,
-                            last_updated: Some(profile.last_updated),
-                        },
-                    );
+                // An operator-pinned route remains pinned, but its verified peer profile
+                // supplies display metadata. An older signed row never overwrites newer metadata.
+                let metadata_clock = existing
+                    .authenticated_profile
+                    .as_ref()
+                    .and_then(|value| value.get("lastUpdated"))
+                    .and_then(Value::as_u64);
+                if metadata_clock.is_none_or(|clock| clock < profile.last_updated) {
+                    existing.authenticated_profile = Some(profile.profile);
                 }
-                Ok(updated)
-            }
-            Some(existing) if existing.last_updated.is_none() => {
-                Err(EntityRouteError::RuntimeConflict(profile.entity_id))
-            }
-            Some(existing)
                 if existing
                     .last_updated
-                    .is_some_and(|current| current > profile.last_updated) =>
-            {
-                Ok(updated)
+                    .is_some_and(|clock| clock < profile.last_updated)
+                {
+                    existing.last_updated = Some(profile.last_updated);
+                }
+                return Ok(updated);
             }
-            Some(existing) if existing.last_updated == Some(profile.last_updated) => {
-                Err(EntityRouteError::RuntimeConflict(profile.entity_id))
-            }
-            Some(_) | None => {
-                routes.insert(
-                    profile.entity_id,
-                    BoundEntityRoute {
-                        runtime_id: profile.runtime_id,
-                        signer_id: profile.signer_id,
-                        last_updated: Some(profile.last_updated),
-                    },
-                );
-                Ok(updated)
+            match existing.last_updated {
+                None => return Err(EntityRouteError::RuntimeConflict(profile.entity_id)),
+                Some(clock) if clock > profile.last_updated => return Ok(updated),
+                Some(clock) if clock == profile.last_updated => {
+                    return Err(EntityRouteError::RuntimeConflict(profile.entity_id));
+                }
+                _ => {}
             }
         }
+        routes.insert(
+            profile.entity_id,
+            BoundEntityRoute {
+                runtime_id: profile.runtime_id,
+                signer_id: profile.signer_id,
+                last_updated: Some(profile.last_updated),
+                authenticated_profile: Some(profile.profile),
+            },
+        );
+        Ok(updated)
     }
 
     /// Install a destination this Runtime already bound and fsynced in its own
@@ -314,6 +324,7 @@ impl EntityRouteTable {
                 runtime_id,
                 signer_id,
                 last_updated: Some(RECOVERED_OUTBOX_ROUTE_CLOCK),
+                authenticated_profile: None,
             },
         );
         Ok(())
@@ -802,6 +813,7 @@ mod tests {
                 runtime_id: runtime("77"),
                 signer_id: "0xcc".into(),
                 last_updated: 1,
+                profile: serde_json::json!({"lastUpdated":1}),
             })
             .expect("signed profile");
         assert_eq!(
@@ -831,6 +843,7 @@ mod tests {
                 runtime_id: runtime("44"),
                 signer_id: "dynamic-peer".into(),
                 last_updated: 1,
+                profile: serde_json::json!({"lastUpdated":1}),
             })
             .expect("dynamic route");
         let sessions = InboundSessionTable::default();

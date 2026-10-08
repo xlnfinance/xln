@@ -20,6 +20,7 @@ mod routing_semantic_parity;
 #[path = "semantic_parity/same_j_semantic_parity.rs"]
 mod same_j_semantic_parity;
 mod settlement;
+pub(crate) use settlement::{ContinuationDisposition, continuation_probe, select_continuation};
 #[cfg(test)]
 #[path = "semantic_parity/settlement_semantic_parity.rs"]
 mod settlement_semantic_parity;

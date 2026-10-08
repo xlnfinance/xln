@@ -5,7 +5,7 @@ import {
 } from '../../protocol/boundary-validation';
 import { decodeRuntimeInput } from '../../runtime/decode';
 import { validateStorageSafeValue } from '../../protocol/boundary/boundary-primitives';
-import { MAX_NUMBERED_REGISTRATION_ENTITIES } from '../../runtime/registration/numbered-registration-codec';
+import { MAX_NUMBERED_REGISTRATION_ENTITIES } from '../../runtime/registration/numbered/numbered-registration-codec';
 import { LIMITS } from '../../config/constants';
 import type {
   RuntimeAdapterErrorCode,

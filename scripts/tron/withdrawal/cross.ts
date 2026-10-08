@@ -13,7 +13,7 @@ import { buildExternalToReserveTx, buildReserveToCollateralTx, buildMoveSettleme
 import { hubSeed, userSeed, hubs, users, amount, credit, replica, walletFor, account,
   accountSnapshot, allAccounts, waitFor, dumpFailure, startCrossTransport } from '../cross-swap-context';
 
-const data = resolve(import.meta.dir, '../../../db/native-tron-release-20260918');
+const data = resolve(process.env['XLN_TRON_STAND_PATH'] || resolve(import.meta.dir, '../../../db/native-tron-release-20260918'));
 assert.equal(process.env['XLN_DB_PATH'], `${data}/cross-runtime`);
 assert.equal(process.env['XLN_JURISDICTIONS_PATH'], `${data}/dual-jurisdictions.json`);
 const restore = process.argv.includes('--restore');

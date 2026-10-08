@@ -1809,14 +1809,23 @@ test.describe('Rebalance E2E', () => {
       code: 'H1_UNEXPECTED_EXIT',
       message: 'H1_UNEXPECTED_EXIT code=null signal=SIGKILL',
     });
-    allowDebugIncident({ source: 'orchestrator', code: '__', message: 'submitTx:processBatch' });
-    allowBrowserIssue({ type: 'console', severity: 'error', message: /WS_UNEXPECTED_CLOSE:runtime=.*:url=ws:\/\/localhost:\d+\/ws/ });
-    allowBrowserIssue({ type: 'console', severity: 'error', message: /WebSocket connection to 'ws:\/\/localhost:\d+\/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED/ });
-    allowBrowserIssue({ type: 'console', severity: 'warning', message: /\[WARN\]\[runtime\.wsClient\] initial_connect\.(error|closed).*url=ws:\/\/localhost:\d+\/ws/ });
-    allowBrowserIssue({ type: 'console', severity: 'warning', message: /\[network\] WS_DIRECT_PEER_OFFLINE \{endpoint: ws:\/\/localhost:\d+\/ws,/ });
+    let h1OutageExpected = false;
+    const unexpectedUnavailableResponses: string[] = [];
+    page.on('response', response => {
+      if (response.status() !== 503) return;
+      const url = response.url();
+      if (!h1OutageExpected || new URL(url).pathname !== '/api/tokens') {
+        unexpectedUnavailableResponses.push(url);
+        return;
+      }
+      allowBrowserIssue({ type: 'http', severity: 'error', url, method: 'GET', status: 503, message: 'HTTP 503' });
+    });
     const criticalConsole: string[] = [];
     page.on('console', (msg) => {
       const text = msg.text();
+      if (h1OutageExpected && text === 'Failed to load resource: the server responded with a status of 503 (Service Unavailable)') {
+        allowBrowserIssue({ type: 'console', severity: 'error', message: text });
+      }
       if (/FRAME_CONSENSUS_FAILED|Frame hash verification failed|Runtime loop error|RUNTIME_LOOP_HALTED/.test(text)) {
         criticalConsole.push(text);
       }
@@ -1858,6 +1867,21 @@ test.describe('Rebalance E2E', () => {
     });
     expect(h1RuntimeId).toMatch(/^0x[0-9a-f]{40}$/);
     expect(userRuntimeId).toMatch(/^0x[0-9a-f]{40}$/);
+    const h1WsUrl = await page.evaluate(runtimeId => {
+      const view = window as typeof window & { isolatedEnv: { gossip: {
+        getProfileByRuntimeId(id: string): { wsUrl?: string } | undefined;
+      } } };
+      const profile = view.isolatedEnv.gossip.getProfileByRuntimeId(runtimeId);
+      if (!profile?.wsUrl) throw new Error('REBALANCE_CRASH_HUB_ENDPOINT_MISSING');
+      return profile.wsUrl;
+    }, h1RuntimeId!);
+    const escapedH1WsUrl = h1WsUrl.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    // The deliberately killed peer may advertise localhost or 127.0.0.1.
+    // Exempt only its exact endpoint; unrelated disconnects remain failures.
+    allowBrowserIssue({ type: 'console', severity: 'error', message: new RegExp(`WS_UNEXPECTED_CLOSE:runtime=.*:url=${escapedH1WsUrl}:`) });
+    allowBrowserIssue({ type: 'console', severity: 'error', message: new RegExp(`WebSocket connection to '${escapedH1WsUrl}' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED`) });
+    allowBrowserIssue({ type: 'console', severity: 'warning', message: new RegExp(`\\[WARN\\]\\[runtime\\.wsClient\\] initial_connect\\.(error|closed).*url=${escapedH1WsUrl}:`) });
+    allowBrowserIssue({ type: 'console', severity: 'warning', message: new RegExp(`\\[network\\] WS_DIRECT_PEER_OFFLINE \\{endpoint: ${escapedH1WsUrl},`) });
     // SIGKILL makes this one peer undeliverable. Retention is expected only for
     // that offline target; the queue and bilateral ACK must drain before reload.
     allowBrowserIssue({
@@ -1885,6 +1909,7 @@ test.describe('Rebalance E2E', () => {
           expectedAmount: requestedAmount,
           hubId,
         });
+        h1OutageExpected = true;
         process.kill(oldPid, 'SIGSTOP');
         h1Frozen = true;
         await callTestnetRpc<unknown>(page, 'anvil_mine', ['0x1']);
@@ -1930,6 +1955,9 @@ test.describe('Rebalance E2E', () => {
       restarted: true,
       systemOk: true,
     });
+    h1OutageExpected = false;
+    const recoveredTokens = await page.request.get(`${API_BASE_URL}/api/tokens`);
+    expect(recoveredTokens.ok(), `token catalog must recover with the hub: ${recoveredTokens.status()} ${await recoveredTokens.text()}`).toBe(true);
 
     const finalizedReceipt = await waitForPersistedFrameEventMatch(page, {
       cursor: cycleCursor,
@@ -1990,6 +2018,7 @@ test.describe('Rebalance E2E', () => {
     }
     expect(BigInt(finalState!.collateral) - BigInt(baseline!.collateral)).toBe(crashBoundary.requestedAmount);
     expect((await readActiveChainRebalanceState(page, entityId, hubId)).collateral).toBe(finalState!.collateral);
+    expect(unexpectedUnavailableResponses, '503 is expected only for token discovery during the injected H1 outage').toEqual([]);
     expect(criticalConsole, `critical consensus/runtime errors:\n${criticalConsole.join('\n')}`).toEqual([]);
   });
 

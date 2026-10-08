@@ -1,7 +1,7 @@
-import { closeRuntimeSession, suspendRuntimeActivity } from '$lib/security/runtimeSession';
-import { hasPasswordVault, removePasswordVault } from '$lib/security/passwordVault';
+import { closeRuntimeSession, suspendRuntimeActivity } from '#lib/security/runtimeSession.ts';
+import { hasPasswordVault, removePasswordVault } from '#lib/security/passwordVault.ts';
 import { derived, get, writable } from 'svelte/store';
-import { parseJsonUnknown } from '$lib/utils/boundary';
+import { parseJsonUnknown } from '#lib/utils/boundary/index.ts';
 
 import { Wallet } from 'ethers';
 
@@ -281,9 +281,9 @@ const persistRuntimeMetadataSnapshot = (): void => {
   }
 };
 
-const persistVaultStateOrThrow = (): void => {
+const persistVaultStateOrThrow = (state: RuntimesState = get(runtimesState)): void => {
   if (typeof localStorage === 'undefined') return;
-  localStorage.setItem(VAULT_STORAGE_KEY, serializeVaultState(get(runtimesState)));
+  localStorage.setItem(VAULT_STORAGE_KEY, serializeVaultState(state));
 };
 
 const readPersistedVaultProtection = (runtimeId: string): ProtectedVaultSecrets | undefined => {
@@ -2186,12 +2186,14 @@ export const vaultOperations = {
       }
       await installVaultRuntimeCommandJournalKeys(runtime.id, runtime.seed);
       await protectRuntimeForDevice(runtime, options.unlockDurationMs ?? DEFAULT_VAULT_UNLOCK_DURATION_MS, () => {
-        runtimesState.update(state => ({
+        // Persist a complete valid vault selection without exposing its signer
+        // to the workspace before the corresponding live adapter is bound.
+        const state = get(runtimesState);
+        persistVaultStateOrThrow({
           ...state,
           runtimes: { ...state.runtimes, [id]: runtime },
           activeRuntimeId: id,
-        }));
-        persistVaultStateOrThrow();
+        });
       });
       markPerf('persist_runtime_state');
 
@@ -2206,6 +2208,13 @@ export const vaultOperations = {
       setXlnEnvironment(newEnv);
       registerRuntimeEnvChange(runtimeId, newEnv!, xln);
       markPerf('attach_runtime_to_store');
+
+      // Publishing the new active signer before adapter selection mounts its
+      // workspace against the empty bootstrap Runtime during tower recovery.
+      runtimesState.update(state => ({
+        ...state, runtimes: { ...state.runtimes, [id]: runtime }, activeRuntimeId: id,
+      }));
+      persistVaultStateOrThrow();
 
       // Fresh and recovered runtimes share one lifecycle boundary. Keeping loop
       // and P2P startup here prevents a restored Runtime from becoming a valid

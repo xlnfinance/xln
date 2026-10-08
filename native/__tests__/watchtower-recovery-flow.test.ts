@@ -492,7 +492,6 @@ describe('watchtower recovery full flow', () => {
     const uploads = await buildDelayedLastResortAppointmentsForTower(
       runtime,
       env,
-      xln,
       { url: 'http://tower.test', towerMode: 'delayed_last_resort', enabled: true },
       towerWallet.address.toLowerCase(),
       encryptedBundle,
@@ -607,7 +606,6 @@ describe('watchtower recovery full flow', () => {
     const uploads = await buildDelayedLastResortAppointmentsForTower(
       runtime,
       env,
-      xln,
       { url: 'http://tower.flow', towerMode: 'delayed_last_resort', enabled: true },
       towerWallet.address.toLowerCase(),
       encryptedBundle,

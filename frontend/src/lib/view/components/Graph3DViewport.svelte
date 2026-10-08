@@ -4,7 +4,7 @@
   import EntityMiniPanel from './EntityMiniPanel.svelte';
   import Graph3DFpsOverlay from './Graph3DFpsOverlay.svelte';
   import VRControlsHUD from './VRControlsHUD.svelte';
-  import type { RuntimeGraphCanonicity } from '$lib/network3d/runtimeGraphProjection';
+  import type { RuntimeGraphCanonicity } from '#lib/network3d/runtimeGraphProjection.ts';
 
   export let container: HTMLDivElement;
   export let showMiniPanel = false;

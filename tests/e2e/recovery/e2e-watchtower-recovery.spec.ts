@@ -694,6 +694,7 @@ async function wipeBrowserRuntimeState(page: Page, context: BrowserContext, towe
   }, towerUrls);
   await closeRuntimePage(page);
   const nextPage = await context.newPage();
+  captureRecoveryPageErrors(nextPage);
   await nextPage.addInitScript((urls: string[]) => {
     try {
       window.localStorage.setItem('xln-watchtower-urls', JSON.stringify(urls));
@@ -708,8 +709,16 @@ async function wipeBrowserRuntimeState(page: Page, context: BrowserContext, towe
   return nextPage;
 }
 
+const recoveryPageErrors = new Map<Page, string[]>();
+const captureRecoveryPageErrors = (page: Page): void => {
+  const errors: string[] = [];
+  recoveryPageErrors.set(page, errors);
+  page.on('pageerror', error => errors.push(error.stack || error.message));
+  page.once('close', () => recoveryPageErrors.delete(page));
+};
+
 async function readRecoveryUiDiagnostics(page: Page): Promise<Record<string, unknown>> {
-  return await page.evaluate(() => {
+  const browser = await page.evaluate(() => {
     const selectedTrigger = document.querySelector<HTMLElement>('[data-testid="context-current"]');
     const env = (window as typeof window & {
       isolatedEnv?: {
@@ -730,6 +739,13 @@ async function readRecoveryUiDiagnostics(page: Page): Promise<Record<string, unk
       envRuntimeId: String(env?.runtimeId || ''),
       envHeight: Number(env?.state?.height || 0),
       envReplicaCount: Number(env?.state?.eReplicas?.size || 0),
+      envReplicas: Array.from(env?.state?.eReplicas ?? []).map(([key, value]) => {
+        const replica = value as { entityId?: string; signerId?: string; state?: {
+          entityId?: string; config?: { jurisdiction?: unknown };
+        } };
+        return { key, entityId: replica.entityId, signerId: replica.signerId,
+          stateEntityId: replica.state?.entityId, jurisdiction: replica.state?.config?.jurisdiction };
+      }),
       envJurisdictionCount: Number(env?.state?.jReplicas?.size || 0),
       creationError: String(document.querySelector<HTMLElement>('.matrix-status.error')?.innerText || ''),
       visibleButtons: Array.from(document.querySelectorAll('button'))
@@ -738,6 +754,7 @@ async function readRecoveryUiDiagnostics(page: Page): Promise<Record<string, unk
         .slice(0, 12),
     };
   });
+  return { ...browser, pageErrors: recoveryPageErrors.get(page) ?? [] };
 }
 
 async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, onTimeout: () => Promise<Record<string, unknown>>): Promise<T> {
@@ -763,6 +780,7 @@ test.describe('watchtower runtime recovery', () => {
   test.setTimeout(TEST_TIMEOUT_MS);
 
   test('restores a wiped runtime from standalone tower backup and continues channel payments', { tag: '@resilience' }, async ({ page, context, browser }) => {
+    captureRecoveryPageErrors(page);
     allowBrowserIssue({
       type: 'http',
       severity: 'error',

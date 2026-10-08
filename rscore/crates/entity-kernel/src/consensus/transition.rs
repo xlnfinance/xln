@@ -268,6 +268,7 @@ pub fn project_entity_consensus_sections(
     current: &[EntityConsensusSection],
     owned: Vec<EntityConsensusSection>,
     authority: &EntityFrameAuthority,
+    entity_height: u64,
 ) -> Result<Vec<EntityConsensusSection>, EntityTransitionError> {
     let mut sections = BTreeMap::new();
     for section in current {
@@ -286,6 +287,14 @@ pub fn project_entity_consensus_sections(
     }
     let (config, leader) = authority.commitment_values()?;
     for (field, value) in [("config", config), ("leaderState", leader)] {
+        // TS genesis omits leaderState until an Entity frame establishes it.
+        // A restored explicit genesis leader must nevertheless remain committed.
+        if field == "leaderState"
+            && entity_height == 0
+            && !current.iter().any(|section| section.field == "leaderState")
+        {
+            continue;
+        }
         insert_section(
             &mut sections,
             EntityConsensusSection {
@@ -383,6 +392,7 @@ pub fn certify_entity_transition(
         &consensus.state.sections,
         owned,
         &request.post_authority,
+        request.post_state.height,
     )?;
     let state_root = compute_entity_consensus_root(&sections)?;
     let authority_root = request.post_authority.root()?;
@@ -555,6 +565,7 @@ mod tests {
             ],
             vec![section("accounts", "50")],
             &authority,
+            1,
         )
         .expect("one canonical projection");
         assert_eq!(
@@ -588,6 +599,7 @@ mod tests {
                 &[section("certifiedOutputSequences", "30")],
                 vec![section("accounts", "50")],
                 &authority,
+                1,
             ),
             Err(EntityTransitionError::RetiredSection(field))
                 if field == "certifiedOutputSequences"

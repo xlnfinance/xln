@@ -1,4 +1,4 @@
-import type { AccountState, Delta, DerivedDelta } from '$lib/types/ui';
+import type { AccountState, Delta, DerivedDelta } from '#lib/types/ui.ts';
 import type { AccountCapacitySource } from '@xln/core/account/capacity-plan';
 import { requireTokenDecimals } from '../token-metadata';
 

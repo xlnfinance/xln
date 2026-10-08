@@ -2,9 +2,9 @@
   import { onMount } from 'svelte';
   import { DISPLAY, QA } from '@xln/core/config/constants';
   import type { QaRegressionStatus, QaRunCategory } from '@xln/core/qa/report-types';
-  import { consumeQaTokenFromUrl, qaFetch, readQaToken, writeQaToken } from '$lib/qa/apiClient';
-  import { readJsonUnknown, rejectExtraKeys, requireUnknownRecord } from '$lib/utils/boundary';
-  import { decodeQaAuthInfo, isQaRunLedgerEntry } from '$lib/qa/boundary';
+  import { consumeQaTokenFromUrl, qaFetch, readQaToken, writeQaToken } from '#lib/qa/apiClient.ts';
+  import { readJsonUnknown, rejectExtraKeys, requireUnknownRecord } from '#lib/utils/boundary/index.ts';
+  import { decodeQaAuthInfo, isQaRunLedgerEntry } from '#lib/qa/boundary.ts';
 
   type RunSortKey = 'date-desc' | 'date-asc' | 'stack-fast' | 'stack-slow' | 'browser-fast' | 'browser-slow';
 

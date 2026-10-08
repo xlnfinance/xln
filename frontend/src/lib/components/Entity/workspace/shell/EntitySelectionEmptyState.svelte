@@ -1,6 +1,6 @@
 <script lang="ts">
   import RuntimeStateCard from '../../../shared/RuntimeStateCard.svelte';
-  import type { Tab } from '$lib/types/ui';
+  import type { Tab } from '#lib/types/ui.ts';
   import ContextSwitcher from './ContextSwitcher.svelte';
 
   export let tab: Tab | null = null;

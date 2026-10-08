@@ -1,8 +1,8 @@
 <script lang="ts">
-import type { EntityReadView } from '$lib/components/Entity/core/entity-panel-types';
+import type { EntityReadView } from '#lib/components/Entity/core/entity-panel-types.ts';
 
 import { tick } from 'svelte';
-import type { Tab } from '$lib/types/ui';
+import type { Tab } from '#lib/types/ui.ts';
 import { writable } from 'svelte/store';
 import type { BookState, Profile, RuntimeReplica, SwapBookEntry } from '@xln/core/api/public/runtime-module';
 import {
@@ -17,12 +17,12 @@ import { submitActiveCrossJurisdictionIntent, submitEntityInputs, submitRuntimeI
 import { readRuntimeEntityProjectionFrame, readRuntimeSwapHistory } from '../../../stores/runtimeViewStore';
 import { toasts } from '../../../stores/ui/toastStore';
 import { errorLog } from '../../../stores/errorLogStore';
-import { requireSignerIdForEntity } from '$lib/utils/identity/entityReplica';
-import { isMapLike, unwrapLiveRuntimeEnv } from '$lib/utils/runtime/liveRuntimeEnv';
-import { prewarmCounterpartyProfiles } from '$lib/utils/runtime/p2pPrefetch';
+import { requireSignerIdForEntity } from '#lib/utils/identity/entityReplica.ts';
+import { isMapLike, unwrapLiveRuntimeEnv } from '#lib/utils/runtime/liveRuntimeEnv.ts';
+import { prewarmCounterpartyProfiles } from '#lib/utils/runtime/p2pPrefetch.ts';
 import { requireTokenDecimals } from '../token-metadata';
 import { buildEntityPanelView } from '../core/entity-panel-model';
-import { formatEntityId } from '$lib/utils/format';
+import { formatEntityId } from '#lib/utils/format.ts';
 import {
   buildSwapPanelRuntimeView,
   buildCrossSwapSetupSteps,

@@ -31,5 +31,5 @@ test('Account history fails when its authoritative Runtime WAL is unavailable', 
     env,
     `0x${'22'.repeat(32)}`,
     `0x${'33'.repeat(32)}`,
-  )).rejects.toThrow('STORAGE_DB_UNAVAILABLE:runtime-wal:list-persisted-handles');
+  )).rejects.toThrow('STORAGE_DB_UNAVAILABLE:runtime-wal:read');
 });

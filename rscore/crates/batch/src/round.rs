@@ -21,13 +21,13 @@ use crate::types::{AccountId, AccountSeed};
 
 /// Which Account proposal window the parent Entity selected for one row.
 ///
-/// `WaitForSibling` is the canonical cross-jurisdiction cohort barrier. It is
-/// not a failed proposal or a fallback: the sibling Account must first become
-/// ready, so this Account keeps its mempool in exact order and signs no frame.
+/// `Defer` retains admissions without signing a frame. A newly created Account
+/// waits for the next Entity round; a cross-jurisdiction cohort waits until
+/// its sibling is ready. Both preserve the exact Account mempool order.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum BatchAccountSelection {
     WholeMempool,
-    WaitForSibling,
+    Defer,
     Selected(Vec<AccountTx>),
 }
 

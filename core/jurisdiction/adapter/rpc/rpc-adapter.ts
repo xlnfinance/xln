@@ -1,3 +1,5 @@
+import { createNativeTronClient, readTronExpiryEvidence } from '../operations/tron-authority';
+import { broadcastPreparedRpcTransaction } from './write/prepared/prepared-broadcast';
 import type { Provider, Signer } from 'ethers';
 import { ethers } from 'ethers';
 import type { BrowserVMProvider, JAdapter, JAdapterConfig } from '../types';
@@ -23,7 +25,7 @@ import {
 } from '../rpc-watcher-inputs';
 import { createRpcWriteMethods } from './write/rpc-write-methods';
 import { asRpcTxResponse } from './rpc-boundary';
-import { prepareDurableEvmTransaction } from './write/evm-durable-transaction';
+import { prepareDurableTransaction } from './write/prepared/durable-transaction';
 
 export const isRpcWatcherTransientError = (error: unknown): boolean =>
   error instanceof ReceiptAvailabilityError || isTransientRpcUnavailableError(error);
@@ -101,6 +103,7 @@ export async function createRpcAdapter(
     verifyStackBinding: stack.verifyBinding,
   });
   const reads = createRpcReadMethods({
+    config,
     provider,
     ...(config.rpcUrl ? { rpcUrl: config.rpcUrl } : {}),
     get depository() { return stack.depository; },
@@ -128,13 +131,14 @@ export async function createRpcAdapter(
     get deltaTransformer() { return stack.deltaTransformer; },
     get addresses() { return stack.addresses; },
     get entityProviderDeploymentBlock() { return stack.entityProviderDeploymentBlock; },
+    setPendingSignedTransactionSource: sequencer.setPendingSignedTransactionSource,
+    getTronExpiryEvidence: async raw => readTronExpiryEvidence(await createNativeTronClient(config), provider, raw),
+    broadcastPreparedTransaction: raw => broadcastPreparedRpcTransaction(config, provider, raw),
     async prepareDurableTransaction(signerPrivateKey, request, accept) {
-      if (config.mode === 'tron') {
-        throw new Error('NUMBERED_REGISTRATION_DURABLE_SIGNING_UNSUPPORTED:tron');
-      }
       const activeSigner = await chainIo.signerForPrivateKey(ethers.hexlify(signerPrivateKey));
-      return prepareDurableEvmTransaction({
+      return prepareDurableTransaction({
         signer: activeSigner,
+        nativeTron: config.mode === 'tron',
         request,
         accept,
         sequencer,

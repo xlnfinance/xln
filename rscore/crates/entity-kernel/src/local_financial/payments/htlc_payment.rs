@@ -285,6 +285,48 @@ mod tests {
             hashlock: Some(hashlock.clone()),
             tx_hash,
         };
+        // A successful WAL context excludes a rejected raw payment. Replay
+        // must reject only that payment, then still execute the good sibling.
+        // This is not permission to accept a present but conflicting origin.
+        let mut rejected = tx.clone();
+        rejected.tx_hash = entity("cc");
+        let missing = apply_htlc_payment(
+            &mut state,
+            &mut paybook,
+            rejected,
+            &context,
+            &views,
+            &mut account_txs,
+            &mut outputs,
+            &mut events,
+        )
+        .expect_err("omitted rejected raw origin")
+        .into_user_reject();
+        assert!(
+            matches!(missing, EntityKernelError::RejectedEntityTx { kind: "htlcPayment", detail }
+            if detail.starts_with("HTLC_PAYMENT_PREPARED_CONTEXT_REQUIRED:"))
+        );
+        let mut conflicting = tx.clone();
+        conflicting.amount = BigInt::from(99);
+        let mismatch = apply_htlc_payment(
+            &mut state,
+            &mut paybook,
+            conflicting,
+            &context,
+            &views,
+            &mut account_txs,
+            &mut outputs,
+            &mut events,
+        )
+        .expect_err("conflicting persisted origin")
+        .into_user_reject();
+        assert!(
+            matches!(mismatch, EntityKernelError::InvalidLocalEntityTx { kind: "htlcPayment", detail }
+            if detail.starts_with("HTLC_PAYMENT_PREPARED_CONTEXT_MISMATCH:"))
+        );
+        assert!(account_txs.is_empty());
+        assert!(outputs.is_empty());
+        assert!(events.is_empty());
         apply_htlc_payment(
             &mut state,
             &mut paybook,

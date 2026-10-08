@@ -18,7 +18,7 @@ import { requireRuntimeMempool } from '../mempool/input-queue.ts';
 import { ensureRuntimeConfig } from './loop-environment.ts';
 import { enqueueRuntimeInputs } from './loop-envelope.ts';
 import { ensureRuntimeInfrastructure } from '../envelope/replica-envelope.ts';
-import { hasReadyCommittedJOutbox } from '../registration/governance-submit-state.ts';
+import { hasReadyCommittedJOutbox } from '../j-submit/j-submit-state.ts';
 import type { EntityInput, EntityReplica } from '../../entity/types.ts';
 import type { RoutedEntityInput, RuntimeReplica, RuntimeInput } from '../types.ts';
 import { atomicCrossJInputCohortKey } from '../delivery/topology/entity-routing.ts';

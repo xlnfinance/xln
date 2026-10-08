@@ -4,8 +4,8 @@ import type {
   RuntimeAdapterTimelineIndexPage,
 } from '@xln/core/api/public/runtime-module';
 import { RemoteRuntimeAdapter } from '../../../../../core/api/runtime-adapter/remote';
-import type { Runtime } from '$lib/stores/runtimeStore';
-import { getRuntimeControllerAdapter } from '$lib/stores/runtimeControllerStore';
+import type { Runtime } from '#lib/stores/runtimeStore.ts';
+import { getRuntimeControllerAdapter } from '#lib/stores/runtimeControllerStore.ts';
 import {
   adapterNetworkTimelineSource,
   type NetworkTimelineSource,

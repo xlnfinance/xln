@@ -1,0 +1,39 @@
+diff --git a/lib/commonjs/protocol/core/contract/balance_contract_pb.cjs b/lib/commonjs/protocol/core/contract/balance_contract_pb.cjs
+index c7980a57afc267bfffce5a44eb1b5c7080a3f6ec..fbf80a2381ecfc6cb84c4f002eef0d796c096d94 100644
+--- a/lib/commonjs/protocol/core/contract/balance_contract_pb.cjs
++++ b/lib/commonjs/protocol/core/contract/balance_contract_pb.cjs
+@@ -24,7 +24,7 @@ var global =
+     Function('return this')();
+ 
+ var core_contract_common_pb = require('../../core/contract/common_pb.cjs');
+-goog.object.extend(proto, core_contract_common_pb);
++goog.object.extend(TronWebProto, core_contract_common_pb);
+ goog.exportSymbol('TronWebProto.AccountBalanceRequest', null, global);
+ goog.exportSymbol('TronWebProto.AccountBalanceResponse', null, global);
+ goog.exportSymbol('TronWebProto.AccountIdentifier', null, global);
+diff --git a/lib/esm/protocol/core/contract/balance_contract_pb.cjs b/lib/esm/protocol/core/contract/balance_contract_pb.cjs
+index c7980a57afc267bfffce5a44eb1b5c7080a3f6ec..fbf80a2381ecfc6cb84c4f002eef0d796c096d94 100644
+--- a/lib/esm/protocol/core/contract/balance_contract_pb.cjs
++++ b/lib/esm/protocol/core/contract/balance_contract_pb.cjs
+@@ -24,7 +24,7 @@ var global =
+     Function('return this')();
+ 
+ var core_contract_common_pb = require('../../core/contract/common_pb.cjs');
+-goog.object.extend(proto, core_contract_common_pb);
++goog.object.extend(TronWebProto, core_contract_common_pb);
+ goog.exportSymbol('TronWebProto.AccountBalanceRequest', null, global);
+ goog.exportSymbol('TronWebProto.AccountBalanceResponse', null, global);
+ goog.exportSymbol('TronWebProto.AccountIdentifier', null, global);
+diff --git a/src/protocol/core/contract/balance_contract_pb.cjs b/src/protocol/core/contract/balance_contract_pb.cjs
+index c7980a57afc267bfffce5a44eb1b5c7080a3f6ec..fbf80a2381ecfc6cb84c4f002eef0d796c096d94 100644
+--- a/src/protocol/core/contract/balance_contract_pb.cjs
++++ b/src/protocol/core/contract/balance_contract_pb.cjs
+@@ -24,7 +24,7 @@ var global =
+     Function('return this')();
+ 
+ var core_contract_common_pb = require('../../core/contract/common_pb.cjs');
+-goog.object.extend(proto, core_contract_common_pb);
++goog.object.extend(TronWebProto, core_contract_common_pb);
+ goog.exportSymbol('TronWebProto.AccountBalanceRequest', null, global);
+ goog.exportSymbol('TronWebProto.AccountBalanceResponse', null, global);
+ goog.exportSymbol('TronWebProto.AccountIdentifier', null, global);

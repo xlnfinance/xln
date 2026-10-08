@@ -1,8 +1,8 @@
 <script lang="ts">
   import { createEventDispatcher } from 'svelte';
-  import { allRuntimes, vaultOperations } from '$lib/stores/vault/vaultStore';
-  import { hasPasswordVault, savePasswordVault, unlockPasswordVault } from '$lib/security/passwordVault';
-  import { deleteVaultDeviceKey } from '$lib/security/vaultProtection';
+  import { allRuntimes, vaultOperations } from '#lib/stores/vault/vaultStore.ts';
+  import { hasPasswordVault, savePasswordVault, unlockPasswordVault } from '#lib/security/passwordVault.ts';
+  import { deleteVaultDeviceKey } from '#lib/security/vaultProtection.ts';
   export let runtimeId: string;
   export let seed: string | undefined = undefined;
   const dispatch = createEventDispatcher<{ unlocked: void; recover: void }>();

@@ -196,26 +196,27 @@ export const entityInputMergeKey = (input: EntityConsensusInput): string => {
 const mergePrecommitBundles = (
   existing: Map<string, string[]> | undefined,
   incoming: Map<string, string[]>,
-): Map<string, string[]> => {
-  const normalize = (bundles: Map<string, string[]>, source: string): Map<string, string[]> => {
+): Map<string, string[]> | null => {
+  const normalize = (bundles: Map<string, string[]>): Map<string, string[]> | null => {
     const normalized = new Map<string, string[]>();
     for (const [rawSignerId, signatures] of bundles) {
       const signerId = rawSignerId.trim().toLowerCase();
       if (normalized.has(signerId)) {
-        throw new Error(`ENTITY_INPUT_PRECOMMIT_DUPLICATE_SIGNER:${source}:${rawSignerId}`);
+        return null;
       }
       normalized.set(signerId, [...signatures]);
     }
     return normalized;
   };
-  const merged = existing ? normalize(existing, 'existing') : new Map<string, string[]>();
-  const normalizedIncoming = normalize(incoming, 'incoming');
+  const merged = existing ? normalize(existing) : new Map<string, string[]>();
+  const normalizedIncoming = normalize(incoming);
+  if (!merged || !normalizedIncoming) return null;
   for (const [signerId, signatures] of normalizedIncoming) {
     const previous = merged.get(signerId);
     if (previous) {
       const exactDuplicate = previous.length === signatures.length &&
         previous.every((signature, index) => signature === signatures[index]);
-      if (!exactDuplicate) throw new Error(`ENTITY_INPUT_PRECOMMIT_EQUIVOCATION:${signerId}`);
+      if (!exactDuplicate) return null;
       continue;
     }
     merged.set(signerId, [...signatures]);
@@ -261,6 +262,27 @@ const applyCausalEntityInputOrder = (
   return prioritizeEntityConsensusInputs([...ready, ...sourcePullConsumers], hasVerifiedCommit);
 };
 
+const matchingConsensusEvidence = (
+  existing: EntityConsensusInput,
+  input: EntityConsensusInput,
+): boolean => {
+  if (input.leaderTimeoutVote || existing.leaderTimeoutVote) {
+    if (safeStringify(input.leaderTimeoutVote) !== safeStringify(existing.leaderTimeoutVote)) {
+      return false;
+    }
+  }
+
+  if (input.jPrefixAttestations || existing.jPrefixAttestations) {
+    if (
+      safeStringify(input.jPrefixAttestations) !==
+      safeStringify(existing.jPrefixAttestations)
+    ) {
+      return false;
+    }
+  }
+  return true;
+};
+
 export const mergeEntityInputs = (
   inputs: EntityConsensusInput[],
   hasVerifiedCommit: EntityCommitPriorityPredicate = () => false,
@@ -279,19 +301,12 @@ export const mergeEntityInputs = (
     if (merged.has(key)) {
       const existing = merged.get(key)!;
 
-      if (input.leaderTimeoutVote || existing.leaderTimeoutVote) {
-        if (safeStringify(input.leaderTimeoutVote) !== safeStringify(existing.leaderTimeoutVote)) {
-          throw new Error(`ENTITY_LEADER_VOTE_EQUIVOCATION:${input.leaderTimeoutVote?.voterId ?? 'missing'}`);
-        }
-      }
-
-      if (input.jPrefixAttestations || existing.jPrefixAttestations) {
-        if (
-          safeStringify(input.jPrefixAttestations) !==
-          safeStringify(existing.jPrefixAttestations)
-        ) {
-          throw new Error('ENTITY_INPUT_J_PREFIX_EQUIVOCATION');
-        }
+      if (!matchingConsensusEvidence(existing, input)) {
+        // Unverified signatures remain separate inputs for the canonical verifier.
+        // A malformed envelope cannot erase a genuine vote or halt before typed rejection.
+        outputBoundary += 1;
+        merged.set(`${outputBoundary}:${laneKey}`, { ...input });
+        continue;
       }
 
       const existingFrameHash = existing.proposedFrame?.hash;
@@ -324,18 +339,24 @@ export const mergeEntityInputs = (
         continue;
       }
 
-      if (input.entityTxs) {
-        if (!isExactTransactionReplay(existing, input)) {
-          existing.entityTxs = [...(existing.entityTxs || []), ...input.entityTxs];
-          if (existing.entityTxs) {
-            existing.entityTxs = mergeJEventTxs(existing.entityTxs);
-          }
-        }
+      const precommits = input.hashPrecommits
+        ? mergePrecommitBundles(existing.hashPrecommits, input.hashPrecommits)
+        : undefined;
+      if (precommits === null) {
+        // These signatures are still unverified. Never let a forged first
+        // bundle erase a later genuine vote or halt the Runtime. Preserve both
+        // envelopes for the canonical Entity verifier's typed rejection, and
+        // retain adjacent transactions and their original ordering.
+        outputBoundary += 1;
+        merged.set(`${outputBoundary}:${laneKey}`, { ...input });
+        continue;
       }
 
-      if (input.hashPrecommits) {
-        existing.hashPrecommits = mergePrecommitBundles(existing.hashPrecommits, input.hashPrecommits);
+      if (input.entityTxs && !isExactTransactionReplay(existing, input)) {
+        existing.entityTxs = mergeJEventTxs([...(existing.entityTxs || []), ...input.entityTxs]);
       }
+
+      if (precommits) existing.hashPrecommits = precommits;
 
       if (input.proposedFrame) {
         const existingIsCommit = hasVerifiedCommit(existing);

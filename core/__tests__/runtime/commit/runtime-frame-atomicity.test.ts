@@ -231,6 +231,41 @@ const closeTestEnv = async (env: RuntimeReplica): Promise<void> => {
 };
 
 describe('runtime frame atomicity', () => {
+  test('conflicting remote precommits cannot halt adjacent honest Runtime work', async () => {
+    process.env['XLN_REJECT_FAIL_FAST'] = '0';
+    const env = createEmptyEnv(`precommit conflict ${TEST_RUN_ID}`);
+    env.runtimeConfig = { ...env.runtimeConfig, storage: { ...env.runtimeConfig?.storage, enabled: true } };
+    env.scenarioMode = true;
+    env.quietRuntimeLogs = true;
+    installJurisdiction(env);
+    cleanupNamespaces.push(env.dbNamespace!);
+    const baseline = localImportReplicaTx(env, 'c');
+    enqueueRuntimeInput(env, { runtimeTxs: [baseline], entityInputs: [] });
+    await processRuntime(env);
+    const honest = importReplicaTx('d');
+    const precommit = (byte: string): RoutedEntityInput => ({
+      entityId: baseline.entityId,
+      signerId: baseline.signerId,
+      from: address('91'),
+      hashPrecommitFrame: { height: 1, frameHash: hash('92') },
+      hashPrecommits: new Map([[address('cf'), [`0x${byte.repeat(65)}`]]]),
+    });
+    try {
+      enqueueRuntimeInput(env, {
+        runtimeTxs: [honest],
+        entityInputs: [precommit('93'), precommit('94')],
+      });
+      await processRuntime(env);
+      expect(env.infrastructure?.halted).not.toBe(true);
+      expect(env.state.eReplicas.has(`${honest.entityId}:${honest.signerId}`)).toBe(true);
+      enqueueRuntimeInput(env, { runtimeTxs: [importReplicaTx('e')], entityInputs: [] });
+      await processRuntime(env);
+      expect(env.infrastructure?.halted).not.toBe(true);
+    } finally {
+      await closeTestEnv(env);
+    }
+  });
+
   test('imported Entity collections are storage-ready persistent radix maps', async () => {
     const env = createEmptyEnv(`runtime import persistent collections ${TEST_RUN_ID}`);
     env.scenarioMode = true;

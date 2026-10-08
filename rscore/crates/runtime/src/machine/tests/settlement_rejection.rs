@@ -247,3 +247,43 @@ pub(crate) fn separated_attempts(reject_last: bool) -> (RuntimeReplica, Vec<Runt
         ],
     )
 }
+
+#[test]
+fn negative_settlement_proposal_rejects_without_losing_healthy_inputs() {
+    let owner = hex32(owner_bytes());
+    let before = serde_json::json!({"type":"profile-update","data":{"profile":{"entityId":owner,"name":"healthy-before-reject"}}});
+    let bad = serde_json::json!({"type":"settle_propose","data":{"counterpartyEntityId":format!("0x{}", "ff".repeat(32)),"ops":[{"type":"r2r","tokenId":1,"amount":{"__xlnType":"BigInt","value":"-1"}}]}});
+    let after = serde_json::json!({"type":"profile-update","data":{"profile":{"entityId":owner,"bio":"healthy-after-reject"}}});
+    let run = |inputs| {
+        apply_runtime_live(
+            replica_with_account_setup(RuntimeLimits::hlt(), Vec::new(), |seed| seed).unwrap(),
+            RuntimeLiveInput {
+                runtime_txs: Vec::new(),
+                entity_inputs: inputs,
+                timestamp: 200,
+                finalized_j_height: 0,
+            },
+            &mut CanonicalEntityInfraMaterializer::new(),
+        )
+    };
+    let expected = run(vec![
+        input(serde_json::json!([before])),
+        input(serde_json::json!([after])),
+    ])
+    .unwrap();
+    let poison = serde_json::json!({"type":"profile-update","data":{"profile":{"entityId":owner,"name":"must-rollback"}}});
+    let actual = run(vec![
+        input(serde_json::json!([before])),
+        input(serde_json::json!([poison, bad])),
+        input(serde_json::json!([after])),
+    ])
+    .expect("invalid user amount cannot halt runtime");
+    assert_eq!(
+        actual.replica.state.e_replicas[&entity_key()].entity,
+        expected.replica.state.e_replicas[&entity_key()].entity
+    );
+    assert_eq!(
+        actual.replica.state.e_replicas[&entity_key()].accounts_root,
+        expected.replica.state.e_replicas[&entity_key()].accounts_root
+    );
+}

@@ -9,8 +9,8 @@
     type HltDashboardConfig,
     type HltDashboardMode,
   } from '@xln/core/qa/hlt/hlt-dashboard-preview';
-  import { consumeQaTokenFromUrl, qaFetch } from '$lib/qa/apiClient';
-  import { decodeHltDashboardPayload, formatMs, formatTps, type HltDashboardPayload, type HltRunView } from '$lib/qa/hlt';
+  import { consumeQaTokenFromUrl, qaFetch } from '#lib/qa/apiClient.ts';
+  import { decodeHltDashboardPayload, formatMs, formatTps, type HltDashboardPayload, type HltRunView } from '#lib/qa/hlt.ts';
 
   const IDLE_RUN: HltRunView = {
     active: false,

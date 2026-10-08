@@ -1,4 +1,4 @@
-import { isUnknownRecord as isRecord, parseJsonUnknown } from '$lib/utils/boundary';
+import { isUnknownRecord as isRecord, parseJsonUnknown } from '#lib/utils/boundary/index.ts';
 
 export type VaultUnlockDurationMs = 600_000 | 86_400_000 | null;
 

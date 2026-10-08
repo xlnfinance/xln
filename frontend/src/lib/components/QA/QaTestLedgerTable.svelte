@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { QaTestLedgerEntry } from '$lib/qa/types';
+  import type { QaTestLedgerEntry } from '#lib/qa/types.ts';
   import {
     filterQaTestLedger,
     sortQaTestLedger,
@@ -7,7 +7,7 @@
     type QaTestLedgerFilter,
     type QaTestLedgerSortDirection,
     type QaTestLedgerSortKey,
-  } from '$lib/qa/testLedger';
+  } from '#lib/qa/testLedger.ts';
 
   let { rows = [] }: { rows?: QaTestLedgerEntry[] } = $props();
 

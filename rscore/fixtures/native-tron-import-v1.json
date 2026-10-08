@@ -1,0 +1,244 @@
+{
+  "machine": {
+    "runtimeId": "0xbc5795505911836788913ed909cf20a8558997dc",
+    "runtimeConfig": {
+      "loopIntervalMs": 0,
+      "minFrameDelayMs": 0
+    },
+    "infrastructure": {
+      "accountJClaimNodes": {
+        "__xlnType": "Map",
+        "value": []
+      },
+      "certifiedBoardNodes": {
+        "__xlnType": "Map",
+        "value": []
+      },
+      "pendingJurisdictionImports": {
+        "__xlnType": "Map",
+        "value": [
+          [
+            "0x19372cf43591c1cccd34cd103eaa19cb75c9e935e99dfa5e9a18c9d2327a83b8",
+            {
+              "importId": "0x19372cf43591c1cccd34cd103eaa19cb75c9e935e99dfa5e9a18c9d2327a83b8",
+              "request": {
+                "blockTimeMs": 3000,
+                "chainId": 2414086651,
+                "contracts": {
+                  "account": "0xf472a53f7fb209f3917b0162facda416e741cce2",
+                  "deltaTransformer": "0x4dbe3a239301e96e468a484c9f40fd7e89080e93",
+                  "depository": "0xba17dc4bc9a901576e320cd01eb4a267ccba6009",
+                  "entityProvider": "0x4ee3b4b352750cef922df4bccc89ab3115cd8a01"
+                },
+                "entityProviderDeploymentBlock": 10,
+                "name": "Native TVM",
+                "rpcs": [
+                  "http://127.0.0.1:18545/jsonrpc"
+                ],
+                "ticker": "TRX"
+              },
+              "requestHash": "0x19372cf43591c1cccd34cd103eaa19cb75c9e935e99dfa5e9a18c9d2327a83b8"
+            }
+          ],
+          [
+            "0xfa7900cdf6d162539afd79703d09fc6bfaf82e2798ca2acc80a9f8745c3c407e",
+            {
+              "importId": "0xfa7900cdf6d162539afd79703d09fc6bfaf82e2798ca2acc80a9f8745c3c407e",
+              "request": {
+                "blockTimeMs": 1000,
+                "chainId": 31337,
+                "contracts": {
+                  "account": "0x5fbdb2315678afecb367f032d93f642f64180aa3",
+                  "deltaTransformer": "0xcf7ed3acca5a467e9e704c703e8d87f634fb0fc9",
+                  "depository": "0xa513e6e4b8f2a923d98304ec87f64353c4d5c853",
+                  "entityProvider": "0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0"
+                },
+                "entityProviderDeploymentBlock": 3,
+                "name": "Private Ethereum",
+                "rpcs": [
+                  "http://127.0.0.1:18546/"
+                ],
+                "ticker": "ETH"
+              },
+              "requestHash": "0xfa7900cdf6d162539afd79703d09fc6bfaf82e2798ca2acc80a9f8745c3c407e"
+            }
+          ]
+        ]
+      }
+    },
+    "jReplicas": []
+  },
+  "imports": [
+    {
+      "data": {
+        "blockNumber": "9",
+        "blockTimeMs": 3000,
+        "chainId": 2414086651,
+        "contracts": {
+          "account": "0xf472a53f7fb209f3917b0162facda416e741cce2",
+          "deltaTransformer": "0x4dbe3a239301e96e468a484c9f40fd7e89080e93",
+          "depository": "0xba17dc4bc9a901576e320cd01eb4a267ccba6009",
+          "entityProvider": "0x4ee3b4b352750cef922df4bccc89ab3115cd8a01"
+        },
+        "entityProviderDeploymentBlock": 10,
+        "importId": "0x19372cf43591c1cccd34cd103eaa19cb75c9e935e99dfa5e9a18c9d2327a83b8",
+        "name": "Native TVM",
+        "requestHash": "0x19372cf43591c1cccd34cd103eaa19cb75c9e935e99dfa5e9a18c9d2327a83b8",
+        "rpcs": [
+          "http://127.0.0.1:18545/jsonrpc"
+        ],
+        "stateRoot": null,
+        "ticker": "TRX",
+        "tokenRegistry": [
+          {
+            "address": "0x01f3ccd565b7cc920b464cbc11d5e5ea3192091a",
+            "decimals": 6,
+            "externalTokenId": {
+              "__xlnType": "BigInt",
+              "value": "0"
+            },
+            "name": "XLN Local Test USD",
+            "symbol": "XLNUSD",
+            "tokenId": 1,
+            "tokenType": 0
+          }
+        ],
+        "watcherConfirmationDepth": 0,
+        "watcherReceiptCommitment": "tron-rpc-attested"
+      },
+      "type": "completeImportJ"
+    },
+    {
+      "data": {
+        "blockNumber": "2",
+        "blockTimeMs": 1000,
+        "chainId": 31337,
+        "contracts": {
+          "account": "0x5fbdb2315678afecb367f032d93f642f64180aa3",
+          "deltaTransformer": "0xcf7ed3acca5a467e9e704c703e8d87f634fb0fc9",
+          "depository": "0xa513e6e4b8f2a923d98304ec87f64353c4d5c853",
+          "entityProvider": "0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0"
+        },
+        "entityProviderDeploymentBlock": 3,
+        "importId": "0xfa7900cdf6d162539afd79703d09fc6bfaf82e2798ca2acc80a9f8745c3c407e",
+        "name": "Private Ethereum",
+        "requestHash": "0xfa7900cdf6d162539afd79703d09fc6bfaf82e2798ca2acc80a9f8745c3c407e",
+        "rpcs": [
+          "http://127.0.0.1:18546/"
+        ],
+        "stateRoot": null,
+        "ticker": "ETH",
+        "tokenRegistry": [
+          {
+            "address": "0x8a791620dd6260079bf849dc5567adc3f2fdc318",
+            "decimals": 6,
+            "externalTokenId": {
+              "__xlnType": "BigInt",
+              "value": "0"
+            },
+            "name": "USD Coin",
+            "symbol": "USDC",
+            "tokenId": 1,
+            "tokenType": 0
+          },
+          {
+            "address": "0x0dcd1bf9a1b36ce34237eeafef220932846bcd82",
+            "decimals": 18,
+            "externalTokenId": {
+              "__xlnType": "BigInt",
+              "value": "0"
+            },
+            "name": "Wrapped Ether",
+            "symbol": "WETH",
+            "tokenId": 2,
+            "tokenType": 0
+          },
+          {
+            "address": "0x9a9f2ccfde556a7e9ff0848998aa4a0cfd8863ae",
+            "decimals": 6,
+            "externalTokenId": {
+              "__xlnType": "BigInt",
+              "value": "0"
+            },
+            "name": "Tether USD",
+            "symbol": "USDT",
+            "tokenId": 3,
+            "tokenType": 0
+          }
+        ],
+        "watcherConfirmationDepth": 0
+      },
+      "type": "completeImportJ"
+    }
+  ],
+  "expectedView": {
+    "jReplicas": [
+      [
+        "Native TVM",
+        {
+          "blockDelayMs": 300,
+          "blockNumber": {
+            "__xlnType": "BigInt",
+            "value": "9"
+          },
+          "blockTimeMs": 3000,
+          "chainId": 2414086651,
+          "contracts": {
+            "account": "0xf472a53f7fb209f3917b0162facda416e741cce2",
+            "deltaTransformer": "0x4dbe3a239301e96e468a484c9f40fd7e89080e93",
+            "depository": "0xba17dc4bc9a901576e320cd01eb4a267ccba6009",
+            "entityProvider": "0x4ee3b4b352750cef922df4bccc89ab3115cd8a01"
+          },
+          "entityProviderDeploymentBlock": 10,
+          "lastBlockTimestamp": 0,
+          "mempool": [],
+          "name": "Native TVM",
+          "position": {
+            "x": 0,
+            "y": 50,
+            "z": 0
+          },
+          "rpcs": [
+            "http://127.0.0.1:18545/jsonrpc"
+          ],
+          "stateRoot": null,
+          "watcherConfirmationDepth": 0,
+          "watcherReceiptCommitment": "tron-rpc-attested"
+        }
+      ],
+      [
+        "Private Ethereum",
+        {
+          "blockDelayMs": 300,
+          "blockNumber": {
+            "__xlnType": "BigInt",
+            "value": "2"
+          },
+          "blockTimeMs": 1000,
+          "chainId": 31337,
+          "contracts": {
+            "account": "0x5fbdb2315678afecb367f032d93f642f64180aa3",
+            "deltaTransformer": "0xcf7ed3acca5a467e9e704c703e8d87f634fb0fc9",
+            "depository": "0xa513e6e4b8f2a923d98304ec87f64353c4d5c853",
+            "entityProvider": "0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0"
+          },
+          "entityProviderDeploymentBlock": 3,
+          "lastBlockTimestamp": 0,
+          "mempool": [],
+          "name": "Private Ethereum",
+          "position": {
+            "x": 0,
+            "y": 50,
+            "z": 0
+          },
+          "rpcs": [
+            "http://127.0.0.1:18546/"
+          ],
+          "stateRoot": null,
+          "watcherConfirmationDepth": 0
+        }
+      ]
+    ],
+    "runtimeId": "0xbc5795505911836788913ed909cf20a8558997dc"
+  }
+}

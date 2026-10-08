@@ -8,9 +8,9 @@
     verifyReleaseManifestSnapshotBinding,
     type ReleaseAttestation,
     type ReleaseSnapshotClaim,
-  } from '$lib/releases/release-signature';
-  import { sanitizeRenderedHtml } from '$lib/security/safe-markdown';
-  import { readJsonUnknown, rejectExtraKeys, requireFiniteNumber, requireString, requireUnknownRecord } from '$lib/utils/boundary';
+  } from '#lib/releases/release-signature.ts';
+  import { sanitizeRenderedHtml } from '#lib/security/safe-markdown.ts';
+  import { readJsonUnknown, rejectExtraKeys, requireFiniteNumber, requireString, requireUnknownRecord } from '#lib/utils/boundary/index.ts';
 
   type Metrics = {
     code: number;

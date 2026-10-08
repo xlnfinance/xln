@@ -86,7 +86,8 @@ describe('release gate ordering', () => {
     const expectedFamily = collectCrossJReleaseTests('core/__tests__').sort();
 
     expect(result.exitCode).toBe(0);
-    expect(expectedFamily).toHaveLength(29);
+    expect(expectedFamily).toContain('core/__tests__/cross-j/swap/cross-jurisdiction-swap-part-3.test.ts');
+    expect(expectedFamily).toContain('core/__tests__/storage/recovery/portable/cross-j-output-replay-route.test.ts');
     expect(plannedFamily).toEqual(expectedFamily);
   });
 

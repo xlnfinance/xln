@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+import { canDeployHubDefaultTokens, requiredHubTokenCount, selectHubTokenCatalog } from './hub/node/token-catalog';
 import { importJurisdiction } from './hub/node/import-jurisdiction';
 import { configureCryptoPoolEntry } from '../protocol/crypto/crypto-pool';
 import { ethers, getIndexedAccountPath, HDNodeWallet, Mnemonic } from 'ethers';
@@ -117,7 +118,7 @@ import {
 } from '../runtime.ts';
 import { withRuntimeCommittedRead } from '../runtime/frame/lifecycle/writer-lock';
 import { registerEnvChangeCallback } from '../runtime/loop/loop-environment.ts';
-import { ensurePendingNumberedRegistrationsResumed } from '../runtime/registration/numbered-registration-driver';
+import { ensurePendingNumberedRegistrationsResumed } from '../runtime/registration/numbered/numbered-registration-driver';
 import { setRuntimeDeliveryReady } from '../runtime/envelope/p2p-lifecycle';
 import type { EntityInput } from '../entity/types';
 import type { RuntimeReplica } from '../runtime/types';
@@ -385,9 +386,8 @@ const tokenCatalogForHubJurisdiction = (
   tokenCatalog: JTokenInfo[],
   hub: Pick<HubBootstrapEntry, 'jurisdictionName' | 'chainId'>,
 ): JTokenInfo[] => {
-  const desiredTokenIds = new Set(tokenIdsForHubJurisdiction(hub));
-  const selected = tokenCatalog.filter((token) => desiredTokenIds.has(Number(token.tokenId)));
-  return selected.length >= HUB_REQUIRED_TOKEN_COUNT ? selected : tokenCatalog.slice(0, HUB_REQUIRED_TOKEN_COUNT);
+  if (!hub.chainId) throw new Error('HUB_TOKEN_CATALOG_CHAIN_ID_MISSING');
+  return selectHubTokenCatalog(tokenCatalog, hub.chainId, tokenIdsForHubJurisdiction(hub));
 };
 
 const resolveLocalApiUrl = (value: string): string => {
@@ -787,6 +787,10 @@ const ensureRpcStackReady = async (env: RuntimeReplica, jadapter: JAdapter): Pro
 
 const ensureTokenCatalog = async (jadapter: JAdapter, allowDeploy: boolean, jurisdictionName = ''): Promise<JTokenInfo[]> => {
   const current = await jadapter.getTokenRegistry();
+  if (!canDeployHubDefaultTokens(jadapter.chainId)) {
+    if (current.length >= requiredHubTokenCount(jadapter.chainId)) return current;
+    throw new Error(`TOKEN_CATALOG_EMPTY:chainId=${jadapter.chainId}`);
+  }
   const desiredTokens = defaultTokensForJurisdiction({
     name: jurisdictionName,
     chainId: Number((jadapter as { chainId?: number }).chainId),
@@ -810,7 +814,7 @@ const waitForTokenCatalog = async (jadapter: JAdapter, rounds = 80): Promise<JTo
   for (let i = 0; i < rounds; i += 1) {
     try {
       const tokens = await jadapter.getTokenRegistry();
-      if (tokens.length >= HUB_REQUIRED_TOKEN_COUNT) return tokens;
+      if (tokens.length >= requiredHubTokenCount(jadapter.chainId)) return tokens;
       lastReadError = null;
     } catch (error) {
       lastReadError = error;
@@ -821,7 +825,7 @@ const waitForTokenCatalog = async (jadapter: JAdapter, rounds = 80): Promise<JTo
     const message = lastReadError instanceof Error ? lastReadError.message : String(lastReadError);
     throw new Error(`TOKEN_CATALOG_READ_FAILED:${message}`, { cause: lastReadError });
   }
-  throw new Error(`TOKEN_CATALOG_INCOMPLETE required=${HUB_REQUIRED_TOKEN_COUNT}`);
+  throw new Error(`TOKEN_CATALOG_INCOMPLETE required=${requiredHubTokenCount(jadapter.chainId)}`);
 };
 
 const ensureOrderbook = async (env: RuntimeReplica, entityId: string, signerId: string): Promise<void> => {
@@ -1078,6 +1082,7 @@ const getReserveHealth = (env: RuntimeReplica, entityId: string, tokenCatalog: J
   const replica = getEntityReplicaById(env, entityId);
   const tokens = tokenCatalogForHubJurisdiction(tokenCatalog, {
     jurisdictionName: getEntityJurisdictionName(env, entityId),
+    chainId: requireJAdapterForEntity(env, entityId, 'RESERVE_HEALTH').chainId,
   }).map(token => {
     const tokenId = Number(token.tokenId);
     const decimals = Number(token.decimals);
@@ -1095,8 +1100,8 @@ const getReserveHealth = (env: RuntimeReplica, entityId: string, tokenCatalog: J
     };
   });
   return {
-    ok: tokens.length >= HUB_REQUIRED_TOKEN_COUNT && tokens.every(token => token.operational === true),
-    targetMet: tokens.length >= HUB_REQUIRED_TOKEN_COUNT && tokens.every(token => token.targetMet === true),
+    ok: tokens.length >= requiredHubTokenCount(requireJAdapterForEntity(env, entityId, 'RESERVE_HEALTH').chainId) && tokens.every(token => token.operational === true),
+    targetMet: tokens.length >= requiredHubTokenCount(requireJAdapterForEntity(env, entityId, 'RESERVE_HEALTH').chainId) && tokens.every(token => token.targetMet === true),
     tokens,
   };
 };
@@ -1129,11 +1134,12 @@ const ensureBootstrapReserves = async (
 
   const bootstrapTokens = tokenCatalogForHubJurisdiction(tokenCatalog, {
     jurisdictionName: getEntityJurisdictionName(env, entityId),
+    chainId: jadapter.chainId,
   });
   reportProgress('watcher-refresh:start');
   await refreshReserveStateFromWatcher(env, entityId, tokenCatalog);
   reportProgress('watcher-refresh:done');
-  if (!resolvedArgs.deployTokens) {
+  if (!resolvedArgs.deployTokens || !canDeployHubDefaultTokens(jadapter.chainId)) {
     const reserveHealth = getReserveHealth(env, entityId, tokenCatalog);
     finishTiming('reserve_funding', startedAt);
     return reserveHealth;
@@ -1203,17 +1209,16 @@ const resolveEntityTokenCatalog = async (
 ): Promise<JTokenInfo[]> => {
   const normalizedEntityId = normalizeEntityId(entityId);
   const cached = tokenCatalogsByEntityId.get(normalizedEntityId);
-  if (cached && cached.length >= HUB_REQUIRED_TOKEN_COUNT) return cached;
-
   const jadapter = requireJAdapterForEntity(env, entityId, 'TOKEN_CATALOG');
+  if (cached && cached.length >= requiredHubTokenCount(jadapter.chainId)) return cached;
   const jurisdictionName = getEntityJurisdictionName(env, entityId);
   const catalog = resolvedArgs.deployTokens
     ? await ensureTokenCatalog(jadapter, true, jurisdictionName)
     : await waitForTokenCatalog(jadapter);
-  if (catalog.length < HUB_REQUIRED_TOKEN_COUNT) {
+  if (catalog.length < requiredHubTokenCount(jadapter.chainId)) {
     throw new Error(
       `TOKEN_CATALOG_INCOMPLETE_FOR_ENTITY: entity=${entityId} jurisdiction=${jurisdictionName || 'unknown'} ` +
-        `count=${catalog.length} required=${HUB_REQUIRED_TOKEN_COUNT}`,
+        `count=${catalog.length} required=${requiredHubTokenCount(jadapter.chainId)}`,
     );
   }
   tokenCatalogsByEntityId.set(normalizedEntityId, catalog);
@@ -2332,9 +2337,14 @@ const requireHubTokenCatalog = async (live: HubNodeLiveContext): Promise<JTokenI
 
 const createHubExternalWalletApi = (live: HubNodeLiveContext) =>
   createExternalWalletApi({
-    getJAdapter: () => live.activeJAdapter,
+    getJAdapter: entityId => entityId ? getEntityJAdapter(live.env, entityId) : live.activeJAdapter,
     getRuntimeId: () => String(live.env.runtimeId || ''),
-    getTokenCatalog: () => requireHubTokenCatalog(live),
+    getTokenCatalog: async entityId => {
+      if (!entityId) return requireHubTokenCatalog(live);
+      const adapter = getEntityJAdapter(live.env, entityId);
+      if (!adapter) throw new Error('EXTERNAL_WALLET_ENTITY_J_ADAPTER_MISSING');
+      return adapter.getTokenRegistry();
+    },
     jsonHeaders: JSON_HEADERS,
     faucetSeed: `${resolvedArgs.seed}:faucet`,
     faucetSignerLabel: FAUCET_SIGNER_LABEL,
@@ -2572,7 +2582,7 @@ const createHubMeshBootstrapController = (
       // Every Hub exposes the faucet API and derives its own faucet signer.
       // H1 creates the shared token catalog, while H2/H3 wait for it above;
       // limiting funding to --deploy-tokens left their valid API unfunded.
-      if (!AUTO_PROVISION_EXTERNAL_FAUCET) return;
+      if (!AUTO_PROVISION_EXTERNAL_FAUCET || !canDeployHubDefaultTokens(jurisdiction.chainId)) return;
       faucetProvision ??= externalWalletApi.provisionFaucetWallet().then(() => {
         if (!live.shuttingDown) nodeLog.info('faucet_provision.ready', { name: resolvedArgs.name });
       });

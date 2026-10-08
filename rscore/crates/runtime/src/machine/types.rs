@@ -23,6 +23,9 @@ pub enum RuntimeTx {
     RecordRuntimeAdapterCommand(RuntimeAdapterCommandMarker),
     ImportJ(crate::JurisdictionImportRequest),
     CompleteImportJ(crate::JurisdictionImportResult),
+    ImportReplica(crate::ImportReplica),
+    RecordAuthenticatedJAuthority(crate::AuthenticatedJAuthority),
+    ReplaceNumberedRegistrationIntent(crate::NumberedRegistrationReplacement),
     ObserveJRange(crate::j_watcher::ObserveJRange),
     AdvanceJWatcherCursor {
         depository_address: String,
@@ -32,6 +35,8 @@ pub enum RuntimeTx {
     RewindJHistory(RewindJHistory),
     RetryJSubmit(crate::j_submit::RetryJSubmitData),
     RecordJSubmitResult(crate::j_submit::JSubmitResultData),
+    RecordJPreparedTransaction(crate::j_submit::JPreparedTransactionData),
+    ReplaceJPreparedTransaction(crate::j_submit::JPreparedReplacement),
     RetryEntityProviderAction(crate::j_submit::RetryEntityProviderActionData),
     RecordEntityProviderActionSubmitResult(crate::j_submit::EntityProviderActionResultData),
     RecordGovernanceJSubmitResult(crate::j_submit::GovernanceResultData),
@@ -97,6 +102,7 @@ pub(crate) enum EntityPendingWork {
         /// re-encodes the whole Entity FIFO on every append.
         wire_digest: [u8; 32],
     },
+    LocalOpenAccount(CanonicalEntityTx),
     LocalBatch {
         projected: Vec<CanonicalEntityTx>,
         native: Vec<LocalEntityTx>,
@@ -391,6 +397,15 @@ impl RuntimeEntityInput {
                         projected: projection,
                     });
                 } else {
+                    // Peer Runtime authentication proves the peer's key, never
+                    // authority to have this Entity sign a fresh command nonce.
+                    // Remote commands must carry their own Entity signature;
+                    // only local admission may mint LocalBatch/OpenAccount work.
+                    if is_remote_output {
+                        return Err(RuntimeMachineError::EntityInputTransportInvalid(
+                            "REMOTE_LOCAL_COMMAND_FORBIDDEN".into(),
+                        ));
+                    }
                     let individual = xln_rscore_entity_kernel::is_individual_entity_command_tx_kind(
                         projection.kind,
                     );
@@ -399,6 +414,17 @@ impl RuntimeEntityInput {
                             projected: std::mem::take(&mut local_projected),
                             native: std::mem::take(&mut local_native),
                         });
+                    }
+                    if projection.kind == EntityTxKind::OpenAccount {
+                        if !local_projected.is_empty() {
+                            pending_work.push(EntityPendingWork::LocalBatch {
+                                projected: std::mem::take(&mut local_projected),
+                                native: std::mem::take(&mut local_native),
+                            });
+                        }
+                        pending_work.push(EntityPendingWork::LocalOpenAccount(projection));
+                        local_individual = None;
+                        continue;
                     }
                     let Some(local) = decode_local_entity_tx(&projection)
                         .map_err(RuntimeMachineError::EntityFinancial)?
@@ -1036,6 +1062,11 @@ pub struct RuntimeReplica {
     /// Operator secret used only to derive proposer-owned public commitments.
     /// It is never projected into Runtime/Entity state or persisted beside it.
     pub(crate) proposer_runtime_seed: String,
+    // Operator-owned signing keys for Entity imports after the checkpoint.
+    // These are live secrets, never projected into Runtime state or WAL.
+    pub(crate) entity_import_keys: BTreeMap<String, [u8; 32]>,
+    pub(crate) entity_import_workers: usize,
+    pub(crate) entity_import_protocol: [u8; 32],
 }
 
 impl RuntimeEntityReplica {
@@ -1214,6 +1245,9 @@ impl RuntimeReplica {
             mempool: RuntimeMempool::empty(),
             limits,
             proposer_runtime_seed,
+            entity_import_keys: BTreeMap::new(),
+            entity_import_workers: 1,
+            entity_import_protocol: [0; 32],
         })
     }
 

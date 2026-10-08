@@ -1,13 +1,13 @@
 <script lang="ts">
   import { onDestroy } from 'svelte';
-  import EntityIdentity from '$lib/components/shared/EntityIdentity.svelte';
+  import EntityIdentity from '#lib/components/shared/EntityIdentity.svelte';
   import {
     buildGossipDirectoryViewFromRuntimeEntities,
     emptyGossipDirectoryView,
     type GossipDirectoryProfile,
-  } from '$lib/components/Entity/activity/gossip-directory-view';
-  import { runtimeControllerHandle } from '$lib/stores/runtimeControllerStore';
-  import { createRuntimeQueryStore } from '$lib/stores/runtimeQueryClient';
+  } from '#lib/components/Entity/activity/gossip-directory-view.ts';
+  import { runtimeControllerHandle } from '#lib/stores/runtimeControllerStore.ts';
+  import { createRuntimeQueryStore } from '#lib/stores/runtimeQueryClient.ts';
 
   const frameStore = createRuntimeQueryStore((client) => client.readViewFrame({
     accountsLimit: 1,

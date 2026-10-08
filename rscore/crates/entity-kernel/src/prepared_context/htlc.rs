@@ -1,3 +1,7 @@
+#[path = "origin_codec.rs"]
+mod origin_codec;
+pub use origin_codec::{encode_onion_layer, encrypt_opaque_htlc_layer};
+
 use std::collections::BTreeMap;
 use std::sync::OnceLock;
 
@@ -412,7 +416,7 @@ fn non_negative(value: &BigInt) -> BigInt {
     }
 }
 
-fn directional_fee_ppm(base: u32, account: &PreparedAccountView) -> u32 {
+pub fn directional_fee_ppm(base: u32, account: &PreparedAccountView) -> u32 {
     let base = base.min(MAX_ROUTING_FEE_PPM);
     let out = non_negative(&account.out_capacity);
     let inbound = non_negative(&account.in_capacity);
@@ -430,6 +434,32 @@ fn directional_fee_ppm(base: u32, account: &PreparedAccountView) -> u32 {
         Ok(value) => value.min(MAX_ROUTING_FEE_PPM),
         Err(_) => MAX_ROUTING_FEE_PPM,
     }
+}
+
+fn routing_fee(amount: &BigInt, ppm: u32, base: &BigInt) -> BigInt {
+    non_negative(base) + amount * BigInt::from(ppm) / BigInt::from(PPM_DENOMINATOR)
+}
+
+/// Integer fee inversion shared by native route quotes and forwarding policy.
+pub fn required_htlc_inbound(forward: &BigInt, ppm: u32, base: &BigInt) -> Result<BigInt, String> {
+    if forward <= &BigInt::from(0) || ppm >= 1_000_000 || base < &BigInt::from(0) {
+        return Err("HTLC_QUOTE_FEE_INVALID".into());
+    }
+    let mut low = forward + base;
+    let mut high = low.clone();
+    let forwarded = |amount: &BigInt| amount - routing_fee(amount, ppm, base);
+    while forwarded(&high) < *forward {
+        high *= 2;
+    }
+    while low < high {
+        let mid = (&low + &high) / 2;
+        if forwarded(&mid) >= *forward {
+            high = mid;
+        } else {
+            low = mid + 1;
+        }
+    }
+    Ok(low)
 }
 
 fn reject(binding: HtlcPreparedBinding, reason: &str) -> PreparedHtlcEntry {
@@ -558,8 +588,8 @@ fn materialize_decrypted_one(
                     return Ok(reject(input.binding, "insufficient_capacity"));
                 }
                 let fee_ppm = directional_fee_ppm(env.routing_fee_ppm, account);
-                let required_fee = non_negative(&env.routing_base_fee)
-                    + &input.binding.amount * BigInt::from(fee_ppm) / BigInt::from(PPM_DENOMINATOR);
+                let required_fee =
+                    routing_fee(&input.binding.amount, fee_ppm, &env.routing_base_fee);
                 if &input.binding.amount - &forward_amount < required_fee {
                     return Ok(reject(input.binding, "fee_below_policy"));
                 }

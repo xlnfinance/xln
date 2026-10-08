@@ -1339,7 +1339,9 @@ describe('production startup wiring', () => {
     expect(quotePipeline).toContain('job.targetHubs,');
     expect(quotePipeline).toContain("if (input.mode === 'bootstrap') {");
     expect(quotePipeline).toContain('await submitCrossJurisdictionIntents(input.deps.env, routes);');
-    expect(quotePipeline).toContain('input.state.bootstrapCrossBatchExpiresAt = Math.min(...routes.map(route => route.expiresAt));');
+    expect(quotePipeline).toContain('input.state.bootstrapCrossBatchExpiresAt = expiresAt;');
+    expect(quotePipeline).toContain('const expiresAt = Math.min(...routes.map(route => {');
+    expect(quotePipeline).toContain('MARKET_MAKER_CROSS_EXPIRY_INVALID:');
     expect(meshCommon).toContain(
       'const queuedEntityTxsFor = (env: RuntimeReplica, targetEntityId: string): EntityTx[] => {',
     );
@@ -1493,7 +1495,7 @@ describe('production startup wiring', () => {
     expect(hubNode).toContain(
       "const AUTO_PROVISION_EXTERNAL_FAUCET = process.env['XLN_AUTO_PROVISION_EXTERNAL_FAUCET'] !== '0';",
     );
-    expect(hubNode).toContain('if (!AUTO_PROVISION_EXTERNAL_FAUCET) return;');
+    expect(hubNode).toContain('if (!AUTO_PROVISION_EXTERNAL_FAUCET || !canDeployHubDefaultTokens(jurisdiction.chainId)) return;');
     expect(driveMeshBootstrap).toContain('await input.ensureFaucetReady();');
     expect(hubNode).not.toContain(
       'if (resolvedArgs.deployTokens) {\n    void externalWalletApi.provisionFaucetWallet()',

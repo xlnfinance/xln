@@ -1,4 +1,4 @@
-import { isAddress } from 'ethers';
+import { normalizeExternalRecipient } from './external-recipient';
 
 import { parsePositiveAssetAmount } from './../assets/entity-asset-values';
 import {
@@ -32,6 +32,7 @@ export type MoveValidationContext = {
   selfExternalAddress: string;
   reserveRecipientEntityId: string;
   externalRecipient: string;
+  jurisdictionMode?: string | undefined;
   reserveToken: MoveValidationAsset;
   externalToken: MoveValidationAsset;
   sourceAvailableBalance: bigint | null | undefined;
@@ -73,14 +74,15 @@ export function getMoveValidationErrorForContext(context: MoveValidationContext)
   const selfEntityId = String(context.selfEntityId || '').trim().toLowerCase();
   const selfExternalAddress = String(context.selfExternalAddress || '').trim().toLowerCase();
   const reserveRecipient = String(context.reserveRecipientEntityId || '').trim().toLowerCase();
-  const externalRecipient = String(context.externalRecipient || '').trim().toLowerCase();
+  let externalRecipient = String(context.externalRecipient || '').trim();
 
   if (context.from === 'account' && !sourceAccountId) return 'Select source account';
   if (context.to === 'account' && (!targetEntityId || !targetHubId)) return 'Select recipient and counterparty';
   if (moveNeedsReserveRecipient(context.from, context.to) && !reserveRecipient) return 'Select recipient entity';
   if (moveNeedsExternalRecipient(context.from, context.to) && !externalRecipient) return 'Enter recipient EOA';
-  if (moveNeedsExternalRecipient(context.from, context.to) && !isAddress(externalRecipient)) {
-    return 'Recipient must be a valid EOA address';
+  if (moveNeedsExternalRecipient(context.from, context.to)) {
+    try { externalRecipient = normalizeExternalRecipient(externalRecipient, context.jurisdictionMode); }
+    catch (error) { return validationErrorMessage(error, 'Recipient must be a valid EOA address'); }
   }
   if (
     context.from === 'account' &&

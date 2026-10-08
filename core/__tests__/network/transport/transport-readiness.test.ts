@@ -1,8 +1,13 @@
+import { RuntimeP2P } from '../../../network/p2p/p2p';
+import { createEmptyEnv } from '../../../runtime';
+import { buildCryptographicProfileFixture, certifySingleSignerProfileFixture, deriveSingleSignerFixtureEntityId } from '../../helpers/cryptographic-profile';
+import { verifyProfileSignature } from '../../../entity/profile/profile-signing';
+import { parseProfile } from '../../../entity/profile';
 import { afterEach, describe, expect, test } from 'bun:test';
 import type { ServerWebSocket } from 'bun';
 
 import { deriveSignerAddressSync } from '../../../account/crypto';
-import { deriveEncryptionKeyPair } from '../../../protocol/crypto/p2p-crypto';
+import { deriveEncryptionKeyPair, pubKeyToHex } from '../../../protocol/crypto/p2p-crypto';
 import { decodeRuntimeEntityInputsEnvelope } from '../../../network/p2p/auth/entity-input-envelope';
 import { createDirectRuntimeWsRoute, type DirectWebSocket } from '../../../network/p2p/direct-runtime-bun';
 import { RuntimeWsClient } from '../../../network/p2p/ws-client';
@@ -61,7 +66,7 @@ const recordSocket = (ws: NativeSocket, frames: CapturedFrame[]): DirectWebSocke
   getBufferedAmount: () => ws.getBufferedAmount(),
 });
 
-const createHarness = () => {
+const createHarness = (getLocalProfiles?: () => Promise<readonly unknown[]>) => {
   const received: RuntimeEntityInputsEnvelope[] = [];
   const gossip: Array<{ from: string; payload: unknown }> = [];
   const failures: string[] = [];
@@ -72,6 +77,7 @@ const createHarness = () => {
   const route = createDirectRuntimeWsRoute({
     runtimeId: SERVER_ID,
     runtimeSeed: SERVER_SEED,
+    ...(getLocalProfiles ? { getLocalProfiles } : {}),
     onEntityInputs: (_from, envelope) => { received.push(envelope); },
     onGossipAnnounce: (from, payload) => { gossip.push({ from, payload }); },
     onRecoveryBundleRequest: (from, lookupKey) => ({ from, lookupKey }),
@@ -111,6 +117,7 @@ const createHarness = () => {
     const envelopes: RuntimeEntityInputsEnvelope[] = [];
     const errors: string[] = [];
     const readyChanges: boolean[] = [];
+    const announcements: unknown[] = [];
     const client = new RuntimeWsClient({
       url: `ws://127.0.0.1:${server.port}${route.path}`,
       runtimeId: CLIENT_ID,
@@ -121,21 +128,88 @@ const createHarness = () => {
       onEntityInputs: (_from, envelope) => { envelopes.push(envelope); },
       onError: error => { errors.push(error.message); },
       onDeliveryReadyChange: ready => { readyChanges.push(ready); },
+      onGossipAnnounce: (_from, payload) => { announcements.push(payload); },
     });
     clients.push(client);
     await client.connect();
     await waitFor(() => client.isOpen() && route.hasOpenSession(CLIENT_ID));
-    return { client, envelopes, errors, readyChanges };
+    return { client, envelopes, errors, readyChanges, announcements };
   };
   const replayToClient = (raw: string | Uint8Array): void => {
     const native = sockets.keys().next().value;
     if (!native || sockets.size !== 1) throw new Error('TEST_EXPECTS_ONE_REAL_SOCKET');
     expect(native.send(raw)).not.toBe(0);
   };
-  return { route, connect, received, gossip, failures, changes, clientFrames, serverFrames, replayToClient };
+  return { url: `ws://127.0.0.1:${server.port}${route.path}`, route, connect, received, gossip, failures, changes, clientFrames, serverFrames, replayToClient };
 };
 
 describe('authenticated direct delivery readiness', () => {
+  test('outgoing RuntimeP2P direct client admits newly adopted signed owner into actual gossip state', async () => {
+    let outgoingProfiles: ReturnType<typeof buildCryptographicProfileFixture>[] = [];
+    const h = createHarness(async () => outgoingProfiles);
+    const hub = certifySingleSignerProfileFixture({
+      ...buildCryptographicProfileFixture({
+        entityId: deriveSingleSignerFixtureEntityId(SERVER_SEED), signingSeed: SERVER_SEED,
+        name: 'direct bootstrap hub', isHub: true, runtimeId: SERVER_ID,
+        runtimeEncPubKey: pubKeyToHex(deriveEncryptionKeyPair(SERVER_SEED).publicKey),
+      }), wsUrl: h.url,
+    }, SERVER_SEED);
+    const owner = certifySingleSignerProfileFixture(buildCryptographicProfileFixture({
+      entityId: deriveSingleSignerFixtureEntityId(SERVER_SEED, '2'),
+      signingSeed: SERVER_SEED, signerId: '2', name: 'newly adopted owner',
+      runtimeId: SERVER_ID, runtimeEncPubKey: hub.runtimeEncPubKey,
+    }), SERVER_SEED, '2');
+    outgoingProfiles = [hub, owner];
+    const env = createEmptyEnv(CLIENT_SEED, 1);
+    env.runtimeId = CLIENT_ID;
+    const p2p = new RuntimeP2P({ env, runtimeId: CLIENT_ID, relayUrls: [],
+      onEntityInputs: () => {}, onGossipProfiles: () => {},
+    });
+    try {
+      await p2p.admitSharedProfiles([hub]);
+      expect(env.gossip.getProfile(owner.entityId)).toBeUndefined();
+      h.route.setReady(true);
+      p2p.setReady(true);
+      expect(await p2p.bootstrapDirectEntityRoutes([hub.entityId], 2000)).toBe(true);
+      await waitFor(() => env.gossip.getProfile(owner.entityId) !== undefined);
+      const accepted = env.gossip.getProfile(owner.entityId)!;
+      expect(accepted.name).toBe(owner.name);
+      expect(accepted.runtimeId).toBe(SERVER_ID);
+      expect((await verifyProfileSignature(accepted)).valid).toBe(true);
+      expect(h.serverFrames.some(frame => frame.message.type === 'gossip_announce')).toBe(true);
+      expect(h.received).toEqual([]);
+      expect(h.failures).toEqual([]);
+    } finally {
+      await p2p.closeAndWait();
+    }
+  });
+
+  test('a fresh and reconnected idle peer receives signed local profiles without a financial envelope', async () => {
+    const profile = certifySingleSignerProfileFixture(buildCryptographicProfileFixture({
+      entityId: deriveSingleSignerFixtureEntityId(SERVER_SEED), signingSeed: SERVER_SEED,
+      name: 'idle signed peer', isHub: true, lastUpdated: 1,
+    }), SERVER_SEED);
+    const h = createHarness(async () => [profile]);
+    const first = await h.connect();
+    await waitFor(() => first.announcements.length === 1);
+    const payload = first.announcements[0];
+    if (!payload || typeof payload !== 'object' || !('profiles' in payload) || !Array.isArray(payload.profiles)) {
+      throw new Error('SIGNED_PROFILE_ANNOUNCEMENT_MISSING');
+    }
+    expect((await verifyProfileSignature(parseProfile(payload.profiles[0]))).valid).toBe(true);
+    expect(h.received).toEqual([]);
+    await first.client.closeAndWait();
+    await waitFor(() => !h.route.hasOpenSession(CLIENT_ID));
+    const second = await h.connect();
+    await waitFor(() => second.announcements.length === 1);
+    expect(second.announcements).toEqual(first.announcements);
+    expect(h.received).toEqual([]);
+    const announces = h.serverFrames.filter(frame => frame.message.type === 'gossip_announce');
+    expect(announces).toHaveLength(2);
+    expect(announces[0]?.message.auth?.nonce).not.toBe(announces[1]?.message.auth?.nonce);
+    expect([...first.errors, ...second.errors, ...h.failures]).toEqual([]);
+  });
+
   test('recovery and gossip precede readiness; entity bytes wait in both directions and revoke immediately', async () => {
     const h = createHarness();
     const c = await h.connect();

@@ -1,3 +1,4 @@
+import { nativeRestProxyHost } from '../../api/server/rpc/tron-proxy';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { createJAdapter } from '../../jurisdiction/adapter';
@@ -665,6 +666,11 @@ export const toPublicJurisdictionsPayload = (
     assertPublicActiveRpcDeploymentMetadata(key, jurisdiction);
     const defaultRpcPath = resolvePublicRpcPath(config, key, jurisdiction);
     jurisdiction.rpc = toPublicRpcUrl(String(jurisdiction.rpc || defaultRpcPath), defaultRpcPath);
+    if (jurisdiction['mode'] === 'tron') {
+      const host = nativeRestProxyHost(Number(jurisdiction.chainId));
+      jurisdiction['tronFullHost'] = host;
+      jurisdiction['tronSolidityHost'] = host;
+    }
   }
   return `${JSON.stringify(parsed, null, 2)}\n`;
 };

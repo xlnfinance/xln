@@ -14,7 +14,7 @@
     type EntityMarketCapEntry,
     type EntityMarketCapStatus,
   } from '@xln/core/network/relay/market/cap/market-cap';
-  import { readJsonUnknown } from '$lib/utils/boundary';
+  import { readJsonUnknown } from '#lib/utils/boundary/index.ts';
   import MarketCapBoard from './MarketCapBoard.svelte';
 
   let data: MarketCapPublicResponse | null = null;

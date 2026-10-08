@@ -7,6 +7,10 @@ results with metrics.
 Mission: fintech-grade deterministic xln. J/E/A correctness before features. Pure
 transitions, one canonical production path, no silent fallback.
 
+Owner-directed autonomous task selection follows [docs/owner-profile.md](docs/owner-profile.md)
+and the current section of [docs/night-work-plan.md](docs/night-work-plan.md).
+These preserve owner preferences; newer owner instructions and the technical rules below prevail.
+
 ## EXECUTION PRIORITY
 
 This order overrides attractive side work:

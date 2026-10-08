@@ -46,6 +46,7 @@ pub fn restore_native_runtime_processor(
     workers: usize,
     routes: EntityRouteTable,
     migration_origin: Option<MigrationOrigin>,
+    custody_import_keys: BTreeMap<String, [u8; 32]>,
 ) -> Result<NativeRuntimeReady, String> {
     restore_native_runtime(
         native_database,
@@ -56,6 +57,7 @@ pub fn restore_native_runtime_processor(
         routes,
         migration_origin,
         RestartPublication::WebSocket,
+        custody_import_keys,
     )
 }
 
@@ -79,6 +81,7 @@ pub(crate) fn restore_native_replay_processor(
         routes,
         migration_origin,
         RestartPublication::ValidateOnly,
+        BTreeMap::new(),
     )
 }
 
@@ -92,6 +95,7 @@ fn restore_native_runtime(
     routes: EntityRouteTable,
     migration_origin: Option<MigrationOrigin>,
     publication: RestartPublication,
+    custody_import_keys: BTreeMap<String, [u8; 32]>,
 ) -> Result<NativeRuntimeReady, String> {
     let restore_started = Instant::now();
     if runtime_seed.is_empty() || workers == 0 {
@@ -106,6 +110,7 @@ fn restore_native_runtime(
     let configuration = ConcreteCheckpointConfiguration {
         runtime_seed: runtime_seed.to_owned(),
         signer_derivation_labels: entity_signer_labels.to_vec(),
+        custody_import_keys,
         worker_count: workers,
         limits: RuntimeLimits::hlt(),
         swap_market: Arc::new(canonical_swap_market_policy()),

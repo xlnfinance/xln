@@ -1041,12 +1041,11 @@ pub fn build_local_genesis_seed(params: LocalGenesisSeedParams) -> Result<Accoun
         replica,
         consensus: None,
     };
-    let canonical = validate_genesis_seed(owner_entity_id, &seed)?;
-    Ok(AccountSeed {
-        account_id,
-        replica: canonical.replica().clone(),
-        consensus: None,
-    })
+    // Validate the creation shell, then retain it until worker admission.
+    // AccountConsensus takes ownership of height/proof fields; returning its
+    // stripped replica here would make the next seed validation incomplete.
+    validate_genesis_seed(owner_entity_id, &seed)?;
+    Ok(seed)
 }
 
 fn genesis_envelope_fields(

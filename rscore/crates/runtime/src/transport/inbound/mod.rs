@@ -115,12 +115,19 @@ struct ValidatedIngressConfig {
     encryption_identity: EncryptionIdentity,
 }
 
+#[derive(Default)]
+struct PublishedProfiles {
+    revision: u64,
+    rows: BTreeMap<String, (u64, serde_json::Value)>,
+}
+
 pub(super) struct SharedIngress {
     config: ValidatedIngressConfig,
     sender: SyncSender<InboundRuntimeEvent>,
     stop: AtomicBool,
     socket_serial: AtomicU64,
     local_ready: AtomicBool,
+    profiles: Mutex<PublishedProfiles>,
     active_peers: Mutex<BTreeSet<String>>,
     sockets: Mutex<BTreeMap<u64, TcpStream>>,
     replies: InboundSessionTable,
@@ -171,6 +178,7 @@ impl DirectRuntimeIngress {
             stop: AtomicBool::new(false),
             socket_serial: AtomicU64::new(0),
             local_ready: AtomicBool::new(false),
+            profiles: Mutex::new(PublishedProfiles::default()),
             active_peers: Mutex::new(BTreeSet::new()),
             sockets: Mutex::new(BTreeMap::new()),
             replies: InboundSessionTable::default(),

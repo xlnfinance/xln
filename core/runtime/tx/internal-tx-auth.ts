@@ -3,7 +3,7 @@ import { assertRuntimeAdapterCommandTxAuthorized } from '../command/frontier-aut
 import { assertEntityProviderActionRuntimeTxAuthorized } from '../registration/entity-provider-action-submit-auth';
 import { assertJSubmitRuntimeTxAuthorized } from '../j-submit/j-submit-state';
 import { assertJImportResultRuntimeTxAuthorized } from '../j-submit/jurisdiction-import';
-import { assertNumberedRegistrationTxAuthorized } from '../registration/numbered-registration-auth';
+import { assertNumberedRegistrationTxAuthorized } from '../registration/numbered/numbered-registration-auth';
 import { assertGovernanceResultRuntimeTxAuthorized } from '../registration/governance-submit-state';
 import { assertCheckpointBarrierRuntimeTxAuthorized } from '../checkpoint/barrier';
 import type { RuntimeInput, RuntimeTx } from '../types';

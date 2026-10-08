@@ -1,4 +1,4 @@
-import type { ThemeName } from '$lib/types/ui';
+import type { ThemeName } from '#lib/types/ui.ts';
 
 export interface ThemeColors {
   name: string;

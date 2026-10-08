@@ -1,4 +1,4 @@
-import { runtimeOperations } from '$lib/stores/runtimeStore';
+import { runtimeOperations } from '#lib/stores/runtimeStore.ts';
 import {
   REMOTE_RUNTIME_IMPORT_RESULT_STORAGE_KEY,
   describeRemoteRuntimeImportError,

@@ -1,3 +1,4 @@
+import { kitOptions } from './kit-options.ts';
 import { sveltekit } from '@sveltejs/kit/vite';
 import { defineConfig } from 'vite';
 import type { Plugin, PreviewServer, ViteDevServer } from 'vite';
@@ -7,7 +8,7 @@ import https from 'node:https';
 import { execSync } from 'node:child_process';
 import { resolve } from 'node:path';
 import { URL, fileURLToPath } from 'node:url';
-import { configureWsProxyLifecycle } from './vite-ws-proxy-lifecycle';
+import { configureWsProxyLifecycle } from './vite-ws-proxy-lifecycle.ts';
 
 /**
  * HTTPS CONFIGURATION (DEV-ONLY)
@@ -266,7 +267,7 @@ function manualClientChunk(id: string): string | undefined {
 export default defineConfig({
 	plugins: [
 		runtimeBundlePlugin(),
-		sveltekit(),
+		sveltekit(kitOptions),
 		{
 			name: 'xln-preview-http-proxy',
 				configurePreviewServer(server: PreviewServer) {
@@ -350,6 +351,8 @@ export default defineConfig({
 	},
 	resolve: {
 		alias: {
+      '@xln/core': fileURLToPath(new URL('../core', import.meta.url)),
+      '@xln/brainvault': fileURLToPath(new URL('../brainvault/src', import.meta.url)),
 			// Runtime files are imported from multiple depths during SSR bundling.
 			// Keep TypeChain resolution anchored to the repo root instead of
 			// relying on fragile relative traversal from the importer path.

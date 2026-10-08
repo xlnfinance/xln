@@ -63,6 +63,8 @@ type DirectRuntimeWsOptions = {
    * verify every profile; socket identity is liveness, not Entity authority.
    */
   onGossipAnnounce?: (from: string, payload: unknown) => Promise<void> | void;
+  /** Existing signed local profile producer; never a remote/unsigned directory substitute. */
+  getLocalProfiles?: () => Promise<readonly unknown[]>;
   /** Signs an envelope for a session without keys; keyed sessions send unsigned. */
   signEnvelope?: (to: string, envelope: RuntimeEntityInputsEnvelope) => RuntimeEntityInputsEnvelope;
   /**
@@ -610,12 +612,12 @@ const sendEntityInputsDelivery = (
 };
 
 
-const handleHandshake = (
+const handleHandshake = async (
   context: DirectRuntimeWsContext,
   ws: DirectWebSocket,
   session: DirectWsSession,
   msg: RuntimeWsMessage,
-): boolean => {
+): Promise<boolean> => {
   if (session.handshakeDone) return false;
   if (msg.type !== 'hello' || typeof msg.from !== 'string') {
     send(ws, {
@@ -703,6 +705,18 @@ const handleHandshake = (
     ...(ackSessionPubKey ? { sessionPubKey: ackSessionPubKey } : {}),
   });
   publishReadiness(context, session);
+  // Both directions of a fresh direct session need the same signed directory
+  // snapshot. A restarted peer has no RAM profile cache even when its restored
+  // Account is funded and no new financial envelope happens to be sent to it.
+  const nonce = session.authNonce;
+  const profiles = await context.options.getLocalProfiles?.();
+  if (profiles?.length && session.authNonce === nonce && isSocketOpen(ws) &&
+      context.sessionsByRuntime.get(normalizedFrom) === session) {
+    sendSession(context, session, {
+      type: 'gossip_announce', id: makeMessageId(), from: context.serverRuntimeId,
+      to: normalizedFrom, timestamp: Date.now(), payload: { profiles, jurisdictions: [] },
+    });
+  }
   return true;
 };
 
@@ -979,7 +993,7 @@ const handleDirectMessage = async (
     send(ws, { type: 'error', error: `Invalid wire message: ${(error as Error).message}` });
     return;
   }
-  if (handleHandshake(context, ws, session, msg)) return;
+  if (await handleHandshake(context, ws, session, msg)) return;
   const verifyAt = OP_COUNTERS_ENABLED ? getPerfMs() : 0;
   const peerKey = normalizeEncryptionPubKey(msg.fromEncryptionPubKey);
   const verifiedError = peerKey !== session.peerEncryptionPubKey

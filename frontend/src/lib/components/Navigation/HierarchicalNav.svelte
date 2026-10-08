@@ -1,10 +1,10 @@
 <script lang="ts">
   import Breadcrumb from './Breadcrumb.svelte';
-  import { appState, appStateOperations } from '$lib/stores/appStateStore';
-  import { runtimes, runtimeOperations } from '$lib/stores/runtimeStore';
-  import { activeRuntime, activeSigner } from '$lib/stores/vault/vaultStore';
-  import { errorLog } from '$lib/stores/errorLogStore';
-  import { runtimeView } from '$lib/stores/runtimeViewStore';
+  import { appState, appStateOperations } from '#lib/stores/appStateStore.ts';
+  import { runtimes, runtimeOperations } from '#lib/stores/runtimeStore.ts';
+  import { activeRuntime, activeSigner } from '#lib/stores/vault/vaultStore.ts';
+  import { errorLog } from '#lib/stores/errorLogStore.ts';
+  import { runtimeView } from '#lib/stores/runtimeViewStore.ts';
   import { buildHierarchicalNavigationView } from './runtime-navigation-view';
 
   $: navigationView = buildHierarchicalNavigationView($runtimes, $appState.navigation, $activeRuntime, $runtimeView);

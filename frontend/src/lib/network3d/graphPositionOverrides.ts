@@ -1,5 +1,5 @@
 import type { RuntimeGraphPosition } from './runtimeGraphProjection';
-import { isUnknownRecord, parseJsonUnknown } from '$lib/utils/boundary';
+import { isUnknownRecord, parseJsonUnknown } from '#lib/utils/boundary/index.ts';
 
 export const GRAPH_POSITION_OVERRIDES_KEY = 'xln-graph-position-overrides-v1';
 

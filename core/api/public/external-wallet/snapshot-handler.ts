@@ -66,17 +66,17 @@ const buildAllowances = (
 export const handleWalletSnapshot = async (context: ExternalWalletApiContext, request: Request): Promise<Response> => {
   try {
     const body = await readWalletSnapshotBody(request);
-    const adapter = context.getJAdapter();
-    if (!adapter) {
-      return createJsonResponse(context.jsonHeaders, { error: 'J-adapter not initialized' }, 503);
-    }
     if (!/^0x[0-9a-f]{64}$/.test(body.entityId)) {
       return createJsonResponse(context.jsonHeaders, { error: 'Invalid entityId' }, 400);
     }
     if (!ethers.isAddress(body.owner)) {
       return createJsonResponse(context.jsonHeaders, { error: 'Invalid owner' }, 400);
     }
-    const tokenCatalog = await context.getTokenCatalog();
+    const adapter = context.getJAdapter(body.entityId);
+    if (!adapter) {
+      return createJsonResponse(context.jsonHeaders, { error: 'J-adapter not initialized' }, 503);
+    }
+    const tokenCatalog = await context.getTokenCatalog(body.entityId);
     const tokenAddresses = body.tokenAddresses?.length
       ? body.tokenAddresses
       : normalizeWalletSnapshotTokenAddresses(tokenCatalog.map(token => token.address), 'tokenCatalog');

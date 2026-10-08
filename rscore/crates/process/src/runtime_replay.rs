@@ -465,9 +465,6 @@ fn checkpoint_entity_hashes(frame: &Value) -> Result<Vec<CanonicalRuntimeEntityH
     let rows = field(frame, "canonicalEntityHashes", "checkpointFrame")?
         .as_array()
         .ok_or_else(|| "RUNTIME_REPLAY_CHECKPOINT_ENTITY_HASHES".to_string())?;
-    if rows.is_empty() {
-        return Err("RUNTIME_REPLAY_CHECKPOINT_ENTITY_COUNT:0".into());
-    }
     let mut seen = std::collections::BTreeSet::new();
     rows.iter()
         .enumerate()
@@ -551,6 +548,7 @@ pub fn replay_runtime_wal(
     let configuration = ConcreteCheckpointConfiguration {
         runtime_seed: runtime_seed.to_string(),
         signer_derivation_labels: entity_signer_labels.to_vec(),
+        custody_import_keys: Default::default(),
         worker_count: workers,
         limits: replay_limits,
         swap_market: Arc::new(canonical_swap_market_policy()),
@@ -892,6 +890,34 @@ pub fn replay_runtime_wal(
                                 })?;
                         eprintln!(
                             "RUNTIME_REPLAY_ACTUAL_ENTITY_J_BATCH_JSON:{height}:{owner}:{tagged}"
+                        );
+                    }
+                    if let Some(head) = entity_replica
+                        .entity_consensus
+                        .certified_frame_head
+                        .as_ref()
+                    {
+                        let frame = &head.frame;
+                        let canonical = |value: &xln_rscore_protocol::CanonicalValue| {
+                            xln_rscore_runtime::tagged_json_from_canonical_value(value)
+                                .map_err(|error| format!("RUNTIME_REPLAY_HEAD_DIAGNOSTIC:{error}"))
+                        };
+                        let txs = frame.txs.iter().map(|tx| {
+                            Ok(serde_json::json!({"type":tx.kind.as_str(),"data":canonical(&tx.wire_data)?}))
+                        }).collect::<Result<Vec<_>, String>>()?;
+                        let prefix = frame
+                            .j_prefix_certificate
+                            .as_ref()
+                            .map(canonical)
+                            .transpose()?;
+                        let diagnostic = serde_json::json!({"height":frame.height,
+                            "hash":frame.hash,"parentFrameHash":frame.parent_frame_hash,
+                            "stateRoot":frame.state_root,"authorityRoot":frame.authority_root,
+                            "timestamp":frame.timestamp,"entityContext":canonical(&frame.entity_context)?,
+                            "txs":txs,"jPrefixCertificate":prefix,"leader":format!("{:?}",frame.leader),
+                            "events":format!("{:?}",frame.events)});
+                        eprintln!(
+                            "RUNTIME_REPLAY_ACTUAL_ENTITY_HEAD_JSON:{height}:{owner}:{diagnostic}"
                         );
                     }
                     actual_replica_meta

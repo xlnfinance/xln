@@ -3,8 +3,9 @@ import { ethers } from 'ethers';
 import type { Depository, EntityProvider } from '../../../../jurisdictions/typechain-types/index.ts';
 import { normalizeEntityId } from '../../../entity/id';
 import { computeAccountKey } from '../events/contract-codec';
-import type { JAdapter, JEvent, JTokenInfo, JWalletSnapshot, JWalletSnapshotRequest } from '../types';
+import type { JAdapter, JAdapterConfig, JEvent, JTokenInfo, JWalletSnapshot, JWalletSnapshotRequest } from '../types';
 import { readRpcWalletSnapshot } from './wallet/rpc-wallet-snapshot';
+import { readNativeTronWalletSnapshot } from './wallet/tron-wallet-snapshot';
 import { buildNonFungibleTokenInfo } from '../registry/token-metadata';
 
 type ReadMethods = Omit<
@@ -29,6 +30,7 @@ type ReadMethods = Omit<
 };
 
 type RpcReadDeps = {
+  config: JAdapterConfig;
   provider: Provider;
   rpcUrl?: string;
   depository: Depository;
@@ -161,6 +163,7 @@ export const createRpcReadMethods = (deps: RpcReadDeps): ReadMethods => {
     },
 
     async readWalletSnapshot(request: JWalletSnapshotRequest): Promise<JWalletSnapshot> {
+      if (deps.config.mode === 'tron') return readNativeTronWalletSnapshot(deps.config, provider, request);
       return readRpcWalletSnapshot({ provider, ...(rpcUrl ? { rpcUrl } : {}) }, request);
     },
 

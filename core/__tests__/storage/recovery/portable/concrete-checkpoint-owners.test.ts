@@ -17,6 +17,33 @@ import { createTestEntityImportRuntimeTx } from '../../../../qa/entity-creation-
 import { exportConcreteCheckpointSource } from '../../../../storage/read/concrete-checkpoint-source';
 import { keyLiveEntity } from '../../../../storage/keys';
 import { resolveDbPath } from '../../../../storage/runtime-db-path';
+import { createCheckpointBarrierRuntimeTx } from '../../../../runtime/checkpoint/barrier';
+
+test('checkpoint before the first Entity exports an empty owner forest', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'xln-empty-checkpoint-'));
+  const seed = `empty checkpoint ${directory}`;
+  const env = createEmptyEnv(seed);
+  env.runtimeId = deriveSignerAddressSync(seed, 'runtime').toLowerCase();
+  env.dbNamespace = env.runtimeId;
+  try {
+    enqueueRuntimeInput(env, { runtimeTxs: [createCheckpointBarrierRuntimeTx()], entityInputs: [] });
+    await processRuntime(env);
+    expect(env.state.eReplicas.size).toBe(0);
+    const checkpoint = await exportConcreteCheckpointSource(env, {
+      getStorageDb: getRuntimeStorageDb, getRuntimeWalDb,
+    });
+    expect(checkpoint.height).toBe(1);
+    expect(checkpoint.runtimeMachineLeaves.length).toBeGreaterThan(0);
+    expect(checkpoint.stateRows).toEqual([]);
+  } finally {
+    await closeRuntimeDb(env);
+    await closeInfraDb(env);
+    for (const suffix of ['', '-wal', '-storage-current', '-storage-previous', '-infra', '-events', '-history-views']) {
+      rmSync(`${resolveDbPath(env)}${suffix}`, { recursive: true, force: true });
+    }
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
 
 test('multi-Entity checkpoint exports each Account authority and rejects orphan or missing owners', async () => {
   const dbRoot = mkdtempSync(join(tmpdir(), 'xln-checkpoint-owners-'));

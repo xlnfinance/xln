@@ -3,9 +3,9 @@
     connectRuntimeAdapter,
     disconnectRuntimeAdapter,
     runtimeControllerHandle,
-  } from '$lib/stores/runtimeControllerStore';
-  import { persistRuntimeAdapterSession } from '$lib/utils/runtime/runtimeConnection';
-  import { refreshRuntimeView, runtimeView } from '$lib/stores/runtimeViewStore';
+  } from '#lib/stores/runtimeControllerStore.ts';
+  import { persistRuntimeAdapterSession } from '#lib/utils/runtime/runtimeConnection.ts';
+  import { refreshRuntimeView, runtimeView } from '#lib/stores/runtimeViewStore.ts';
   import { makeQaSeveritySignal, type QaSeveritySignal } from '@xln/core/qa/severity';
 
   let wsUrl = $state('');

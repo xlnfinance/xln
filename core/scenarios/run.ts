@@ -366,6 +366,8 @@ async function runParallelScenarios(mode: string, workersArg?: number, setName?:
   const startedAt = Date.now();
   try {
     await Promise.all(Array.from({ length: workers }, (_, i) => workerLoop(i)));
+    // Exclusive scenarios use worker 0; nested production stands need a free lease.
+    for (const lease of leases.slice(1)) lease.release();
     for (const scenario of exclusiveScenarios) {
       console.log(`▶️  [exclusive] ${scenario}`);
       const lease = leases[0];

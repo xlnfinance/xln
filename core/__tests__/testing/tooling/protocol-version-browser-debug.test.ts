@@ -37,6 +37,10 @@ describe('global network protocol version', () => {
     )).toBe('0x4434ed36645e6be2c9cae9321c1bd2f3032399ab3e40abb613dcddba46a98640');
   });
 
+  test('keeps exact internal relay authentication working when a public ingress is configured', () => {
+    expect(resolveRuntimeWsRelayAudience('http://localhost:19804/relay', 'ws://localhost:19804/relay', 'ws://localhost:19805/relay')).toBe('ws://localhost:19804/relay');
+  });
+
   test('binds reverse-proxy relay challenges to the configured public audience', () => {
     expect(resolveRuntimeWsRelayAudience(
       'ws://runtime-internal:8080/relay',

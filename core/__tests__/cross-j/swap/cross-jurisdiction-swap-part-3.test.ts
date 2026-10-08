@@ -605,12 +605,15 @@ describe('cross-jurisdiction hashledger swap', () => {
       filledTargetAmount: 450n,
       sourceClaimed: 500n,
       targetClaimed: 450n,
+      executionSourceAmount: 500n,
+      executionTargetAmount: 450n,
     };
     state.crossJurisdictionSwaps?.set(route.orderId, route);
 
     const duplicate = await applyEntityTx(env, state, {
       type: 'crossJurisdictionFillNotice',
-      data: { orderId: route.orderId, routeHash: route.routeHash, fillSeq: 1, cumulativeFillRatio: 32_768 },
+      data: { orderId: route.orderId, routeHash: route.routeHash, fillSeq: 1, cumulativeFillRatio: 32_768,
+        cumulativeExecutionSourceAmount: 500n, cumulativeExecutionTargetAmount: 450n },
     });
 
     expect(duplicate.accountTxs ?? []).toHaveLength(0);
@@ -620,7 +623,8 @@ describe('cross-jurisdiction hashledger swap', () => {
     await expect(
       applyEntityTx(env, state, {
         type: 'crossJurisdictionFillNotice',
-        data: { orderId: route.orderId, routeHash: `0x${'ee'.repeat(32)}`, fillSeq: 2, cumulativeFillRatio: 49_152 },
+        data: { orderId: route.orderId, routeHash: `0x${'ee'.repeat(32)}`, fillSeq: 2, cumulativeFillRatio: 49_152,
+          cumulativeExecutionSourceAmount: 750n, cumulativeExecutionTargetAmount: 675n },
       }),
     ).rejects.toThrow(/CROSS_J_FILL_ROUTE_HASH_MISMATCH/);
   });
@@ -709,7 +713,8 @@ describe('cross-jurisdiction hashledger swap', () => {
       entityTxs: [
         {
           type: 'crossJurisdictionFillNotice',
-          data: { orderId: route.orderId, routeHash: route.routeHash, fillSeq: 1, cumulativeFillRatio: 16_384 },
+          data: { orderId: route.orderId, routeHash: route.routeHash, fillSeq: 1, cumulativeFillRatio: 16_384,
+            cumulativeExecutionSourceAmount: sourceTotal / 4n, cumulativeExecutionTargetAmount: targetTotal / 4n },
         },
       ],
     });
@@ -725,6 +730,8 @@ describe('cross-jurisdiction hashledger swap', () => {
     expect(updatedRoute?.status).toBe('partially_filled');
     expect(updatedRoute?.cumulativeFillRatio).toBe(16_384);
     expect(updatedRoute?.fillSeq).toBe(1);
+    expect(updatedRoute?.executionSourceAmount).toBe(sourceTotal / 4n);
+    expect(updatedRoute?.executionTargetAmount).toBe(targetTotal / 4n);
     expect(updatedRoute?.filledSourceAmount).toBe((sourceTotal * 16_384n) / 65_535n);
     expect(updatedRoute?.filledTargetAmount).toBe((targetTotal * 16_384n) / 65_535n);
     expect(updatedRoute?.fillNumerator).toBe(16_384n);
@@ -921,6 +928,7 @@ describe('cross-jurisdiction hashledger swap', () => {
     account.state.disputeConfig = sourceHubIsLeft
       ? { leftResponseSeconds: 3_600, rightResponseSeconds: 86_400 }
       : { leftResponseSeconds: 86_400, rightResponseSeconds: 3_600 };
+    const initialProof = buildAccountProofBody(account, addr('99'));
 
     const route = buildPreparedCrossJurisdictionRouteCanonical({
       orderId: 'cross-counter-source-window',
@@ -960,8 +968,8 @@ describe('cross-jurisdiction hashledger swap', () => {
       createdHeight: 1,
       createdTimestamp: env.state.timestamp,
     });
-    const initialProof = buildAccountProofBody(account, addr('99'));
     const counterProof = buildAccountProofBody(account, addr('99'));
+    expect(counterProof.proofBodyHash).not.toBe(initialProof.proofBodyHash);
     const counterProposerIsLeft = account.state.leftEntity.toLowerCase() === sourceUser.toLowerCase();
     account.counterpartyDisputeProofBodyHash = counterProof.proofBodyHash;
     account.counterpartyDisputeProofNonce = 2;

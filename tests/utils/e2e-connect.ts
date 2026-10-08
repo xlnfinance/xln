@@ -352,28 +352,8 @@ async function ensureHubCardVisible(page: Page, hubId: string): Promise<void> {
   await openWorkspaceTab(page, 'account-workspace-tab-open');
   const panel = page.locator('.hub-panel').first();
   await expect(panel).toBeVisible({ timeout: 20_000 });
-  const refresh = panel.getByRole('button', { name: /^Refresh$/ }).first();
-  const detailsButtons = panel.locator('.expand-toggle');
-
-  for (let attempt = 0; attempt < 5; attempt += 1) {
-    const hubCard = await resolveHubCardLocator(page, hubId, panel);
-    if (await hubCard.isVisible().catch(() => false)) return;
-    const count = await detailsButtons.count();
-    for (let index = 0; index < count; index += 1) {
-      const button = detailsButtons.nth(index);
-      if (await button.isVisible().catch(() => false)) {
-        await button.click({ timeout: 2_000 }).catch(() => {});
-      }
-    }
-    if (await hubCard.isVisible().catch(() => false)) return;
-    await expect(refresh).toBeVisible({ timeout: 10_000 });
-    if (await refresh.isEnabled().catch(() => false)) {
-      await refresh.click({ timeout: 5_000 });
-    }
-    await page.waitForTimeout(1_000);
-  }
-
-  const hubCard = await resolveHubCardLocator(page, hubId, panel);
+  // Discovery updates reactively; wait for the exact identity after gossip arrives.
+  const hubCard = panel.locator(`.hub-card[data-hub-entity-id="${hubId.toLowerCase()}"]`).first();
   await expect(hubCard, `hub ${hubId} must appear in hub discovery`).toBeVisible({ timeout: 20_000 });
 }
 

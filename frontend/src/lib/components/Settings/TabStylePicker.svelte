@@ -1,7 +1,7 @@
 <script lang="ts">
   import { createEventDispatcher } from 'svelte';
-  import type { UITabStyle } from '$lib/types/ui';
-  import type { UITabStyleOption } from '$lib/utils/ui-style-options';
+  import type { UITabStyle } from '#lib/types/ui.ts';
+  import type { UITabStyleOption } from '#lib/utils/ui-style-options.ts';
 
   export let value: UITabStyle;
   export let options: UITabStyleOption[] = [];

@@ -9,7 +9,7 @@ import { safeStringify } from '../../core/protocol/serialization';
 import { loadJurisdictionsAsync } from '../../core/jurisdiction/adapter/kernel/jurisdiction-loader';
 import { getCertifiedBoardStackKey } from '../../core/jurisdiction/machine/board-registry';
 
-const data = resolve(import.meta.dir, '../../db/native-tron-release-20260918');
+const data = resolve(process.env['XLN_TRON_STAND_PATH'] || resolve(import.meta.dir, '../../db/native-tron-release-20260918'));
 assert.equal(process.env.XLN_DB_PATH, `${data}/cross-runtime`);
 assert.equal(process.env.XLN_JURISDICTIONS_PATH, `${data}/dual-jurisdictions.json`);
 assert.notEqual(process.env.XLN_DISABLE_RUNTIME_RESTORE, '1');

@@ -1,3 +1,4 @@
+import type { TronExpiryEvidence } from '../jurisdiction/adapter/operations/tron-authority';
 import type { Level } from 'level';
 import type { RuntimeP2P } from '../network/p2p/p2p';
 import type { AccountReplica, RuntimeOverlayRecord } from '../types/account';
@@ -169,6 +170,14 @@ export type PendingNumberedRegistration = {
   transactionNonce: number;
 };
 
+export type ReplaceNumberedRegistrationData = {
+  intentId: string;
+  requestHash: string;
+  previousTransactionHash: string;
+  rawTransaction: string;
+  evidence: TronExpiryEvidence;
+};
+
 export type CompletedNumberedRegistration = {
   status: 'completed';
   intentId: string;
@@ -249,6 +258,11 @@ export type RuntimeTx =
       data: PendingNumberedRegistration;
     }
   | {
+      /** Native expired-wire replacement after RPC-attested finalized absence. */
+      type: 'replaceNumberedRegistrationIntent';
+      data: ReplaceNumberedRegistrationData;
+    }
+  | {
       /** Atomic terminal transition after exact imports, or fail-closed nonce quarantine. */
       type: 'resolveNumberedRegistrationIntent';
       data: ResolveNumberedRegistrationData;
@@ -317,6 +331,15 @@ export type RuntimeTx =
         batchGeneration: number;
         feeOverrides?: Extract<JTx, { type: 'batch' }>['data']['feeOverrides'];
       };
+    }
+  | {
+      /** Signed batch bytes owned by the existing committed pending J outbox. */
+      type: 'recordJPreparedTransaction';
+      data: { jurisdictionName: string; attemptId: string; rawTransaction: string };
+    }
+  | {
+      type: 'replaceJPreparedTransaction';
+      data: { jurisdictionName: string; attemptId: string; previousTransactionHash: string; rawTransaction: string; evidence: TronExpiryEvidence };
     }
   | {
       /** Validator-local result for a previously durable retryJSubmit attempt. */
@@ -682,6 +705,8 @@ interface RuntimeInfrastructure {
   ) => Promise<void>) | null;
   /** Already committed J side effects awaiting a durable result RuntimeTx. */
   pendingCommittedJOutbox?: JInput[];
+  /** Process-local preparation tasks; recovery derives work from the committed outbox. */
+  jPreparationTasks?: Map<string, Promise<void>>;
   /** Durable import intents awaiting a local, replayable completeImportJ result. */
   pendingJurisdictionImports?: Map<string, PendingJurisdictionImport>;
   /** Caller-idempotent registration batches; completed records are O(actual batches). */

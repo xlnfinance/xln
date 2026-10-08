@@ -1,4 +1,4 @@
-import type { EntityReadView } from '$lib/components/Entity/core/entity-panel-types';
+import type { EntityReadView } from '#lib/components/Entity/core/entity-panel-types.ts';
 import type { Profile, XLNModule } from '@xln/core/api/public/runtime-module';
 import type { AccountRoleEvidence } from '@xln/core/account/config/dispute-config';
 import type { SameJurisdictionSwapCommandPlan } from '@xln/core/runtime/swap-cmd/swap-command-plan';

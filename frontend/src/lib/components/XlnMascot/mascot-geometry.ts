@@ -1,4 +1,4 @@
-import type { XlnMascotDockPlacement, XlnMascotDockSide } from '$lib/types/ui';
+import type { XlnMascotDockPlacement, XlnMascotDockSide } from '#lib/types/ui.ts';
 
 export type MascotPoint = Readonly<{ x: number; y: number }>;
 export type MascotViewport = Readonly<{

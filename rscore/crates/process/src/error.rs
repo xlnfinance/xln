@@ -174,6 +174,9 @@ impl ProcessError {
 fn batch_code(error: &xln_rscore_batch::BatchError) -> &'static str {
     use xln_rscore_batch::BatchError;
     match error {
+        BatchError::AccountMempoolAdmissionRejected { .. } => {
+            "RSCORE_ACCOUNT_MEMPOOL_ADMISSION_REJECTED"
+        }
         BatchError::InvalidWorkerCount(_) => "RSCORE_BATCH_WORKERS_INVALID",
         BatchError::ThreadPoolBuild(_) => "RSCORE_BATCH_THREAD_POOL",
         BatchError::ResidentWorkerStart { .. } => "RSCORE_BATCH_RESIDENT_WORKER_START",

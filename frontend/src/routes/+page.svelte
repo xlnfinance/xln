@@ -1,7 +1,7 @@
 <script lang="ts">
   import LandingPage from '../lib/components/Landing/LandingPage.svelte';
   import { goto } from '$app/navigation';
-  import { browser } from '$app/environment';
+  import { browser } from '$app/env';
 
   function handleUnlock() {
     // Navigate to /app when user clicks "Launch App"

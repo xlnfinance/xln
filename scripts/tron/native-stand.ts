@@ -8,8 +8,16 @@ if (!standToken || !Array.from({ length: standLockCapacity() }, (_, slot) =>
   readStandLockHolder(standLockRoot(), slot)).some(holder => holder?.token === standToken))
   throw new Error('NATIVE_TRON_REQUIRES_STAND_LOCK');
 const root = resolve(import.meta.dir, '../..');
+const arguments_ = process.argv.slice(2);
+const commandIndex = arguments_.indexOf('--');
+const standArguments = commandIndex < 0 ? arguments_ : arguments_.slice(0, commandIndex);
+const childCommand = commandIndex < 0 ? [] : arguments_.slice(commandIndex + 1);
+if (commandIndex >= 0 && childCommand.length === 0) throw new Error('NATIVE_TRON_CHILD_COMMAND_MISSING');
 const cache = join(homedir(), '.cache/xln/tron/4.8.2.1');
-const data = resolve(root, 'db/native-tron-release-20260918');
+const data = resolve(process.env['XLN_TRON_STAND_PATH'] || `${root}/db/native-tron-release-20260918`);
+// Propagate one absolute fixture root through every chain/runtime subprocess.
+// A new proof must never reset or append to the historical financial ledger.
+process.env['XLN_TRON_STAND_PATH'] = data;
 const key = '1'.padStart(64, '0'); // Public disposable private-chain signer.
 const address = TronWeb.address.fromPrivateKey(key);
 const upstream = await Bun.file(`${cache}/config.upstream.conf`).text();
@@ -82,38 +90,38 @@ try {
   if (!report) throw new Error(`NATIVE_TRON_BOOT_FAILED:exit=${exited ? await node.exited : 'running'}:logs=${data}`,{cause:latestError});
   await Bun.write(`${data}/boot.json`,safeStringify(report,2));
   console.log(safeStringify(report));
-  const swap = process.argv.some(arg => ['--cross-swap', '--cross-swap-resume', '--cross-swap-restore'].includes(arg));
-  const automaticWithdraw = process.argv.some(arg => ['--automatic-withdraw', '--automatic-withdraw-restore'].includes(arg));
-  const withdraw = automaticWithdraw || process.argv.some(arg => ['--cross-withdraw', '--cross-withdraw-restore', '--cross-withdraw-inspect', '--cross-withdraw-resume'].includes(arg));
-  if (withdraw || swap || process.argv.includes('--cross-network') || process.argv.includes('--cross-network-restore') || process.argv.includes('--cross-network-resume')) {
+  const swap = standArguments.some(arg => ['--cross-swap', '--cross-swap-resume', '--cross-swap-restore'].includes(arg));
+  const automaticWithdraw = standArguments.some(arg => ['--automatic-withdraw', '--automatic-withdraw-restore'].includes(arg));
+  const withdraw = automaticWithdraw || standArguments.some(arg => ['--cross-withdraw', '--cross-withdraw-restore', '--cross-withdraw-inspect', '--cross-withdraw-resume'].includes(arg));
+  if (withdraw || swap || standArguments.includes('--cross-network') || standArguments.includes('--cross-network-restore') || standArguments.includes('--cross-network-resume')) {
     const child = Bun.spawn(['bun', 'scripts/tron/ethereum-stand.ts',
       ...(withdraw ? ['--withdraw'] : []),
       ...(automaticWithdraw ? ['--automatic-withdraw'] : []),
-      ...(process.argv.includes('--cross-withdraw-inspect') ? ['--inspect'] : []),
+      ...(standArguments.includes('--cross-withdraw-inspect') ? ['--inspect'] : []),
       ...(swap ? ['--swap'] : []),
-      ...(process.argv.includes('--cross-network-restore') || process.argv.includes('--cross-swap-restore') || process.argv.includes('--cross-withdraw-restore') || process.argv.includes('--automatic-withdraw-restore') ? ['--restore'] : []),
-      ...(process.argv.includes('--cross-network-resume') || process.argv.includes('--cross-swap-resume') || process.argv.includes('--cross-withdraw-resume') ? ['--resume'] : [])], {
+      ...(standArguments.includes('--cross-network-restore') || standArguments.includes('--cross-swap-restore') || standArguments.includes('--cross-withdraw-restore') || standArguments.includes('--automatic-withdraw-restore') ? ['--restore'] : []),
+      ...(standArguments.includes('--cross-network-resume') || standArguments.includes('--cross-swap-resume') || standArguments.includes('--cross-withdraw-resume') ? ['--resume'] : [])], {
       cwd: root, stdout: 'inherit', stderr: 'inherit', env: process.env,
     });
     if (await child.exited !== 0) throw new Error('NATIVE_CROSS_NETWORK_FAILED');
   }
-  if (process.argv.includes('--wallet-move') || process.argv.includes('--wallet-restore')) {
+  if (standArguments.includes('--wallet-move') || standArguments.includes('--wallet-restore')) {
     const child = Bun.spawn(['bun', 'scripts/tron/wallet-move.ts',
-      ...(process.argv.includes('--wallet-restore') ? ['--restore'] : [])], {
+      ...(standArguments.includes('--wallet-restore') ? ['--restore'] : [])], {
       cwd: root, stdout: 'inherit', stderr: 'inherit',
       env: { ...process.env, XLN_DB_PATH: `${data}/runtime`, XLN_JURISDICTIONS_PATH: `${data}/jurisdictions.json` },
     });
     if (await child.exited !== 0) throw new Error('NATIVE_WALLET_MOVE_FAILED');
   }
-  if (process.argv.includes('--entity-finance') || process.argv.includes('--entity-restore')) {
+  if (standArguments.includes('--entity-finance') || standArguments.includes('--entity-restore')) {
     const child = Bun.spawn(['bun', 'scripts/tron/entity-finance.ts',
-      ...(process.argv.includes('--entity-restore') ? ['--restore'] : [])], {
+      ...(standArguments.includes('--entity-restore') ? ['--restore'] : [])], {
       cwd: root, stdout: 'inherit', stderr: 'inherit',
       env: { ...process.env, XLN_DB_PATH: `${data}/runtime`, XLN_JURISDICTIONS_PATH: `${data}/jurisdictions.json` },
     });
     if (await child.exited !== 0) throw new Error('NATIVE_ENTITY_FINANCE_FAILED');
   }
-  if (process.argv.includes('--runtime-import') || process.argv.includes('--runtime-restore') || process.argv.includes('--runtime-resume-import')) {
+  if (standArguments.includes('--runtime-import') || standArguments.includes('--runtime-restore') || standArguments.includes('--runtime-resume-import')) {
     const graph = await Bun.file(`${data}/graph.json`).json();
     const configuration = { version: '1', lastUpdated: '2026-09-18',
       defaults: { timeout: 10000, retryAttempts: 3, gasLimit: 10000000 },
@@ -130,14 +138,14 @@ try {
       if (await Bun.file(path).text() !== text) throw new Error('NATIVE_RUNTIME_CONFIGURATION_CHANGED');
     } else await Bun.write(path, text);
     const child = Bun.spawn(['bun', 'scripts/tron/runtime-import.ts',
-      ...(process.argv.includes('--runtime-restore') ? ['--restore'] : []),
-      ...(process.argv.includes('--runtime-resume-import') ? ['--resume-import'] : [])], {
+      ...(standArguments.includes('--runtime-restore') ? ['--restore'] : []),
+      ...(standArguments.includes('--runtime-resume-import') ? ['--resume-import'] : [])], {
       cwd: root, stdout: 'inherit', stderr: 'inherit',
       env: { ...process.env, XLN_DB_PATH: `${data}/runtime`, XLN_JURISDICTIONS_PATH: path },
     });
     if (await child.exited !== 0) throw new Error('NATIVE_RUNTIME_AUTHORITY_FAILED');
   }
-  if (process.argv.includes('--deploy-token') || process.argv.includes('--deploy-graph') || process.argv.includes('--verify-graph') || process.argv.includes('--economic')) {
+  if (standArguments.includes('--deploy-token') || standArguments.includes('--deploy-graph') || standArguments.includes('--verify-graph') || standArguments.includes('--economic')) {
     const { deployTronContract, deployTron } = await import('../../jurisdictions/scripts/deploy-chain-matrix.cjs');
     const tronWeb = new TronWeb({fullHost:'http://127.0.0.1:19090',solidityNode:'http://127.0.0.1:19091',privateKey:key});
     const parameters = await tronWeb.trx.getChainParameters();
@@ -149,12 +157,12 @@ try {
     const token = await deployTronContract(tronWeb,'ERC20Mock',['XLN Local Test USD','XLNUSD',6,'1000000000000'],{},prior?.transactionHash);
     await Bun.write(`${data}/token.json`,JSON.stringify(token,null,2));
     console.log('NATIVE_TOKEN_DEPLOYED',JSON.stringify(token));
-    if (process.argv.includes('--deploy-graph') || process.argv.includes('--verify-graph') || process.argv.includes('--economic')) {
+    if (standArguments.includes('--deploy-graph') || standArguments.includes('--verify-graph') || standArguments.includes('--economic')) {
       process.env.DEPLOYER_PRIVATE_KEY = key;
       const chain = {id:'xln-native-local',name:'XLN Native Private TVM',kind:'tron',chainId:Number(BigInt(report.chainId)),
         currency:'TRX',defaultRpc:'http://127.0.0.1:18545/jsonrpc',defaultFullHost:'http://127.0.0.1:19090',
         defaultSolidityHost:'http://127.0.0.1:19091',usdtAddress:token.base58};
-      const verify = process.argv.includes('--verify-graph') || process.argv.includes('--economic');
+      const verify = standArguments.includes('--verify-graph') || standArguments.includes('--economic');
       if (!verify && await Bun.file(`${data}/graph.json`).exists()) throw new Error('NATIVE_GRAPH_ALREADY_DEPLOYED');
       const graph = verify ? await Bun.file(`${data}/graph.json`).json() : await deployTron(chain,{skipCompile:true,dryRun:false});
       if (graph.chainId !== chain.chainId) throw new Error('NATIVE_GRAPH_CHAIN_MISMATCH');
@@ -170,12 +178,19 @@ try {
         const result = {mode:adapter.mode,chainId:adapter.chainId,registry,solidifiedBlock:await adapter.getCurrentBlockNumber()};
         await Bun.write(`${data}/adapter.json`,safeStringify(result,2));
         console.log('NATIVE_ADAPTER_VERIFIED',safeStringify(result));
-        if (process.argv.includes('--economic')) {
+        if (standArguments.includes('--economic')) {
           const { nativeEconomicRoundtrip } = await import('./economic-roundtrip');
           await nativeEconomicRoundtrip(adapter,key,token.evm,data);
         }
       } finally { await adapter.close(); }
     }
+  }
+  if (childCommand.length > 0) {
+    // Keep this exact real TVM node alive for a browser/operator integration
+    // driver. The enclosing stand owns its process group and shutdown.
+    const child = Bun.spawn(childCommand, { cwd: root, stdout: 'inherit', stderr: 'inherit', env: process.env });
+    const exitCode = await child.exited;
+    if (exitCode !== 0) throw new Error(`NATIVE_TRON_CHILD_FAILED:${exitCode}`);
   }
 } finally {
   if (!exited) node.kill('SIGTERM');

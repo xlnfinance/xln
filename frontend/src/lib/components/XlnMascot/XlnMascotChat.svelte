@@ -7,9 +7,9 @@
     streamXlnAssistantReply,
     type XlnAssistantCatalog,
     type XlnAssistantMessage,
-  } from '$lib/ai/xln-assistant-client';
-  import { buildXlnGuideMessages, suggestedXlnGuideQuestions } from '$lib/ai/xln-guide-context';
-  import { renderSafeMarkdown } from '$lib/security/safe-markdown';
+  } from '#lib/ai/xln-assistant-client.ts';
+  import { buildXlnGuideMessages, suggestedXlnGuideQuestions } from '#lib/ai/xln-guide-context.ts';
+  import { renderSafeMarkdown } from '#lib/security/safe-markdown.ts';
 
   export let pathname = '/app';
   export let messages: XlnAssistantMessage[] = [];

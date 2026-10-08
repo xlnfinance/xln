@@ -154,6 +154,12 @@ pub fn sign_digest(private_key: &[u8; 32], digest: &[u8; 32]) -> Option<[u8; 65]
     Some(signature)
 }
 
+/// SEC1 compressed identity key, derived from the same existing signing context.
+pub fn compressed_public_key(private_key: &[u8; 32]) -> Option<[u8; 33]> {
+    let secret = SecretKey::from_byte_array(*private_key).ok()?;
+    Some(secret.public_key(sign_context()).serialize())
+}
+
 /// The address a private key signs as.
 pub fn address_of_private_key(private_key: &[u8; 32]) -> Option<[u8; 20]> {
     let secret = SecretKey::from_byte_array(*private_key).ok()?;

@@ -92,6 +92,7 @@ async function readHubAccountSummary(page: Page): Promise<{
   ready: boolean;
   committed: number;
   pending: number;
+  pendingNetworkOutputs: number;
   entitiesWithCommitted: number;
   entityCount: number;
   accounts: Array<{ entityId: string; counterpartyId: string; height: number; pending: boolean }>;
@@ -165,6 +166,7 @@ async function readHubAccountSummary(page: Page): Promise<{
       ready: entityIds.size >= 2 && committedEntityIds.size === entityIds.size,
       committed: accounts.filter((account) => account.height > 0).length,
       pending,
+      pendingNetworkOutputs: env?.pendingNetworkOutputs?.length ?? 0,
       entitiesWithCommitted: committedEntityIds.size,
       entityCount: entityIds.size,
       accounts,
@@ -445,7 +447,7 @@ test.describe('E2E User Journey', () => {
         intervals: [500, 1000, 1500],
         message: 'auto-join should commit at least one hub account per runtime entity lane and leave no pending frames',
       })
-      .toMatchObject({ ready: true, pending: 0 });
+      .toMatchObject({ ready: true, pending: 0, pendingNetworkOutputs: 0 });
 
     await expectSwapBuilderLabels(page);
   });

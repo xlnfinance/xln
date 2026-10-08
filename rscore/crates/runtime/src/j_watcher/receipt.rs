@@ -214,6 +214,23 @@ pub(crate) fn validate_receipts(
     block: &RpcBlock,
     receipts: &mut [RpcReceipt],
 ) -> Result<(), JWatcherError> {
+    validate_receipt_set(block, receipts)?;
+    let encoded = receipts
+        .iter()
+        .map(encode_receipt)
+        .collect::<Result<Vec<_>, _>>()?;
+    let computed = ordered_trie_root::<KeccakHasher, _>(&encoded);
+    let expected = fixed_hex::<32>(&block.receipts_root, "receiptsRoot")?;
+    if computed.as_ref() != expected {
+        return Err(JWatcherError::ReceiptRootMismatch);
+    }
+    Ok(())
+}
+
+pub(crate) fn validate_receipt_set(
+    block: &RpcBlock,
+    receipts: &mut [RpcReceipt],
+) -> Result<(), JWatcherError> {
     if receipts.len() != block.transactions.len() {
         return Err(JWatcherError::ReceiptCount {
             expected: block.transactions.len(),
@@ -223,15 +240,6 @@ pub(crate) fn validate_receipts(
     receipts.sort_by(receipt_order);
     for (index, receipt) in receipts.iter().enumerate() {
         validate_receipt(block, receipt, index)?;
-    }
-    let encoded = receipts
-        .iter()
-        .map(encode_receipt)
-        .collect::<Result<Vec<_>, _>>()?;
-    let computed = ordered_trie_root::<KeccakHasher, _>(&encoded);
-    let expected = fixed_hex::<32>(&block.receipts_root, "receiptsRoot")?;
-    if computed.as_ref() != expected {
-        return Err(JWatcherError::ReceiptRootMismatch);
     }
     Ok(())
 }

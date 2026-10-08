@@ -35,13 +35,6 @@ const entityReplicaFor = (env: RuntimeReplica, entityId: string): EntityReplica 
   return null;
 };
 
-const accountMap = (replica: EntityReplica): Map<string, AccountReplica> => {
-  const accounts = replica.state?.accounts;
-  if (!accounts) return new Map();
-  if (accounts instanceof Map) return accounts;
-  return new Map(Object.entries(accounts as Record<string, AccountReplica>));
-};
-
 export const listAccountViews = (
   env: RuntimeReplica,
   entityId: string,
@@ -51,14 +44,8 @@ export const listAccountViews = (
   const replica = entityReplicaFor(env, entityId);
   if (!replica) return [];
   const views: AccountView[] = [];
-  for (const [counterpartyId, account] of accountMap(replica).entries()) {
-    const frameDeltas = account.currentFrame?.deltas;
-    const stateDeltas = account.state?.deltas;
-    const deltas: Delta[] = Array.isArray(frameDeltas)
-      ? frameDeltas
-      : stateDeltas instanceof Map
-        ? [...stateDeltas.values()]
-        : [];
+  for (const [counterpartyId, account] of replica.state.accounts.entries()) {
+    const deltas: Delta[] = [...account.state.deltas.values()];
     const left = isLeftEntity(entityId, counterpartyId);
     const tokens: AccountTokenRow[] = [];
     for (const delta of deltas) {
@@ -129,7 +116,7 @@ export const findAccount = (
   const replica = entityReplicaFor(env, entityId);
   if (!replica) return null;
   const needle = counterpartyId.toLowerCase();
-  for (const [id, account] of accountMap(replica).entries()) {
+  for (const [id, account] of replica.state.accounts.entries()) {
     if (id.toLowerCase() === needle) return account;
   }
   return null;

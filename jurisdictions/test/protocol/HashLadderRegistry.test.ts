@@ -1,3 +1,5 @@
+import { encodeInt512, encodeSignedAmount } from '../../../core/protocol/crypto/abi-money.ts';
+import { PROOF_BODY_ABI } from '../../../core/protocol/dispute/proof-body.ts';
 import { expect } from 'chai';
 import hre from 'hardhat';
 
@@ -24,8 +26,6 @@ const DISPUTE_PROOF = 1;
 const MAX_FILL_RATIO = 65535n;
 const TEST_WATCH_SEED = ethers.keccak256(ethers.toUtf8Bytes('xln:test-watch-seed'));
 
-const PROOF_BODY_ABI =
-  'tuple(bytes32 watchSeed,uint32 leftResponseSeconds,uint32 rightResponseSeconds,int256[] offdeltas,uint256[] tokenIds,tuple(address transformerAddress,bytes encodedBatch,tuple(uint256 deltaIndex,uint256 rightAllowance,uint256 leftAllowance)[] allowances)[] transformers)';
 
 type TestActor = {
   signer: HardhatEthersSigner;
@@ -72,7 +72,7 @@ function proofBody(offdeltas: bigint[], tokenIds: bigint[], transformers: unknow
     watchSeed: TEST_WATCH_SEED,
     leftResponseSeconds: 50,
     rightResponseSeconds: 50,
-    offdeltas,
+    offdeltas: offdeltas.map(encodeInt512),
     tokenIds,
     transformers,
   };
@@ -201,7 +201,7 @@ describe('HashLadderRegistry (cross-j pull settlement authority)', function () {
       pull: [
         {
           deltaIndex: 0,
-          amount: pullAmount,
+          amount: encodeSignedAmount(pullAmount),
           claimedRatio: 0,
           fullHash: pullProof.fullHash,
           partialRoot: pullProof.partialRoot,
@@ -726,7 +726,7 @@ describe('HashLadderRegistry (cross-j pull settlement authority)', function () {
     const dispute = await openPullDispute({
       label: 'same-nonce-left-wins', fillRatio: 0x2222, starter: 'right', proposerIsLeft: false,
     });
-    const leftBody = { ...dispute.proofbody, offdeltas: [1n] };
+    const leftBody = { ...dispute.proofbody, offdeltas: [encodeInt512(1n)] };
     const leftHash = proofBodyHash(leftBody);
     const leftDigest = await disputeProofHashFor(
       dispute.depository, dispute.acctKey, dispute.disputeNonce, leftHash, true,
@@ -768,7 +768,7 @@ describe('HashLadderRegistry (cross-j pull settlement authority)', function () {
     expect(selected.disputeCounterProposerIsLeft).to.equal(true);
 
     await expect(submit()).to.not.emit(dispute.depository, 'CounterDisputeRegistered');
-    const conflictingBody = { ...leftBody, offdeltas: [2n] };
+    const conflictingBody = { ...leftBody, offdeltas: [encodeInt512(2n)] };
     const conflictingHash = proofBodyHash(conflictingBody);
     const conflictingDigest = await disputeProofHashFor(
       dispute.depository, dispute.acctKey, dispute.disputeNonce, conflictingHash, true,
@@ -790,7 +790,7 @@ describe('HashLadderRegistry (cross-j pull settlement authority)', function () {
     const dispute = await openPullDispute({
       label: 'same-nonce-right-loses', fillRatio: 0x1111, starter: 'left', proposerIsLeft: true,
     });
-    const rightBody = { ...dispute.proofbody, offdeltas: [1n] };
+    const rightBody = { ...dispute.proofbody, offdeltas: [encodeInt512(1n)] };
     const rightHash = proofBodyHash(rightBody);
     const rightDigest = await disputeProofHashFor(
       dispute.depository, dispute.acctKey, dispute.disputeNonce, rightHash, false,
@@ -850,8 +850,8 @@ describe('HashLadderRegistry (cross-j pull settlement authority)', function () {
       payment: [],
       swap: [],
       pull: [
-        { deltaIndex: 0, amount: -MAX_FILL_RATIO, claimedRatio: 0, fullHash: proofA.fullHash, partialRoot: proofA.partialRoot, targetRole: false },
-        { deltaIndex: 0, amount: -MAX_FILL_RATIO, claimedRatio: 0, fullHash: proofB.fullHash, partialRoot: proofB.partialRoot, targetRole: false },
+        { deltaIndex: 0, amount: encodeSignedAmount(-MAX_FILL_RATIO), claimedRatio: 0, fullHash: proofA.fullHash, partialRoot: proofA.partialRoot, targetRole: false },
+        { deltaIndex: 0, amount: encodeSignedAmount(-MAX_FILL_RATIO), claimedRatio: 0, fullHash: proofB.fullHash, partialRoot: proofB.partialRoot, targetRole: false },
       ],
     });
     const body = proofBody(

@@ -692,7 +692,7 @@ fn typescript_and_rust_board_handover_match_post_authority_sections() {
     let post = resolve_board_handover_authority(&current, entity_id.as_bytes(), 1, &txs, &[batch])
         .expect("handover authority");
     let projected =
-        project_entity_consensus_sections(&[], Vec::new(), &post).expect("authority sections");
+        project_entity_consensus_sections(&[], Vec::new(), &post, 1).expect("authority sections");
     for field in ["config", "leaderState"] {
         let expected = case["after"]["sections"]
             .as_array()

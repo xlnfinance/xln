@@ -1,5 +1,13 @@
 import type { JAdapterFailure, JAdapterFailureCategory } from '../../../types/jurisdiction-runtime';
 
+/** The locally returned broadcast identity survives receipt transport failure. */
+export class JBroadcastReceiptError extends Error {
+  constructor(readonly transactionHash: string, cause: unknown) {
+    super(cause instanceof Error ? cause.message : String(cause), { cause });
+    if (!/^0x[0-9a-fA-F]{64}$/.test(transactionHash)) throw new Error('J_BROADCAST_HASH_INVALID');
+  }
+}
+
 const TRANSIENT_CODES = new Set([
   'NETWORK_ERROR',
   'SERVER_ERROR',
@@ -86,7 +94,9 @@ export const classifyJAdapterFailure = (
 export const makeJAdapterFailureResult = (
   error: unknown,
   override: { message?: string; category?: JAdapterFailureCategory; code?: string } = {},
-): { success: false; error: string; failure: JAdapterFailure } => {
+): { success: false; error: string; failure: JAdapterFailure; txHash?: string } => {
   const failure = classifyJAdapterFailure(error, override);
-  return { success: false, error: failure.message, failure };
+  return { success: false, error: failure.message, failure,
+    ...(error instanceof JBroadcastReceiptError ? { txHash: error.transactionHash } : {}),
+  };
 };

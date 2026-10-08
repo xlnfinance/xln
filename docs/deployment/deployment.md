@@ -2,6 +2,13 @@
 
 This is the canonical deployment document for xln.
 
+The commands below deploy the public **testnet**. `deploy:prod` resets Anvil
+and runtime data; it is not a mainnet rollout or rollback procedure. Do not use
+it for a funded network. A mainnet release still requires an immutable verified
+candidate, explicit network/contracts/signing authority, preserved WAL and a
+recovery drill against that candidate. Reverting an executable alone does not
+prove that its storage format can read the current WAL.
+
 ## Scope
 
 This doc covers:

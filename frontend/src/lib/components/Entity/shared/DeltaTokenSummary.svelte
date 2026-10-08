@@ -1,6 +1,6 @@
 <script lang="ts">
   import { createEventDispatcher } from 'svelte';
-  import { settings } from '$lib/stores/settingsStore';
+  import { settings } from '#lib/stores/settingsStore.ts';
   import DeltaCapacityBar from './DeltaCapacityBar.svelte';
   import DeltaTokenSummaryApple from './DeltaTokenSummaryApple.svelte';
   import type { DeltaParts, DeltaVisualScale } from './delta-types';

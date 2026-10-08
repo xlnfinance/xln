@@ -1,6 +1,7 @@
+import { sendRuntimeInput } from './commands';
 import type { EntityTx, RuntimeInput } from '@xln/core/api/public/runtime-module';
 import type { RuntimeAdapterSendResult } from '@xln/core/api/runtime-adapter/types';
-import { getEmbeddedEnv, requireAdapter } from './adapter';
+import { getEmbeddedEnv } from './adapter';
 
 export function buildEntityInput(entityId: string, signerId: string, entityTxs: EntityTx[]): RuntimeInput {
 	return {
@@ -14,7 +15,7 @@ export async function sendEntityTxs(
 	signerId: string,
 	entityTxs: EntityTx[],
 ): Promise<RuntimeAdapterSendResult> {
-	return requireAdapter().send(buildEntityInput(entityId, signerId, entityTxs));
+	return sendRuntimeInput(buildEntityInput(entityId, signerId, entityTxs));
 }
 
 export async function waitFor(

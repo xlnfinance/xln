@@ -1,4 +1,4 @@
-import type { EntityReadView } from '$lib/components/Entity/core/entity-panel-types';
+import type { EntityReadView } from '#lib/components/Entity/core/entity-panel-types.ts';
 import type { Delta, PaymentRoute, Profile as GossipProfile, RuntimeAdapterEntitySummary, RuntimeAdapterViewFrame } from '@xln/core/api/public/runtime-module';
 
 import type { LocalAccountLike, LocalReplicaLike } from './../payment-routing';

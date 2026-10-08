@@ -1,4 +1,4 @@
-import type { DerivedAccountData } from '$lib/network3d/derivedAccount';
+import type { DerivedAccountData } from '#lib/network3d/derivedAccount.ts';
 import type { Delta } from '@xln/core/api/public/runtime-module';
 import type { GraphTransactionLike } from './graph3d-types';
 

@@ -896,7 +896,7 @@ server {
   }
 
   location = /ws {
-    proxy_pass http://127.0.0.1:18090;
+    proxy_pass http://127.0.0.1:__H1_DIRECT_UPSTREAM__;
     proxy_http_version 1.1;
     proxy_set_header Upgrade $http_upgrade;
     proxy_set_header Connection "upgrade";
@@ -988,6 +988,16 @@ server {
   location / { return 404; }
 }
 EOF
+
+  local h1_direct_upstream=18090
+  if [[ "${XLN_HLT_ENGINE:-ts}" == "rust" ]]; then
+    h1_direct_upstream=${XLN_RSCORE_DIRECT_PORT:-18094}
+  fi
+  if [[ ! "$h1_direct_upstream" =~ ^[1-9][0-9]*$ ]] || (( h1_direct_upstream > 65535 )); then
+    echo "[deploy] invalid native H1 direct port: $h1_direct_upstream" >&2
+    return 1
+  fi
+  sed -i "s/__H1_DIRECT_UPSTREAM__/${h1_direct_upstream}/" /etc/nginx/conf.d/xln-direct-ports.conf
 
   if command -v ufw >/dev/null 2>&1; then
     ufw allow 8090:8093/tcp >/dev/null 2>&1 || true

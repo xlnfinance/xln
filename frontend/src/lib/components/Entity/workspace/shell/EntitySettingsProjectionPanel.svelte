@@ -11,16 +11,16 @@
 <script lang="ts">
   import { Network, PlusCircle, Save, ShieldCheck, SlidersHorizontal } from 'lucide-svelte';
   import type { RuntimeReplica, HubRebalanceConfig } from '@xln/core/api/public/runtime-module';
-  import { errorLog } from '$lib/stores/errorLogStore';
-  import { runtimeControllerHandle } from '$lib/stores/runtimeControllerStore';
-  import { settings, settingsOperations } from '$lib/stores/settingsStore';
+  import { errorLog } from '#lib/stores/errorLogStore.ts';
+  import { runtimeControllerHandle } from '#lib/stores/runtimeControllerStore.ts';
+  import { settings, settingsOperations } from '#lib/stores/settingsStore.ts';
   import {
     activeRuntime,
     buildRuntimeRecoveryConfigForMode,
     vaultOperations,
     type RecoveryTowerConfig,
     type RecoveryTowerSetupMode,
-  } from '$lib/stores/vault/vaultStore';
+  } from '#lib/stores/vault/vaultStore.ts';
   import {
     getManualRecoveryTowers,
     isOfficialRecoveryTower,
@@ -29,24 +29,24 @@
     normalizeTowerMode,
     resolveOfficialRecoveryTowerUrl,
     type RecoveryServiceMode,
-  } from '$lib/utils/recovery/recoverySettings';
+  } from '#lib/utils/recovery/recoverySettings.ts';
   import {
     buildRecoveryTowerStatuses,
     buildRuntimeRecoveryCoverage,
-  } from '$lib/utils/recovery/recoveryCoverage';
+  } from '#lib/utils/recovery/recoveryCoverage.ts';
   import {
     readRuntimeRecoveryDiscoveryStatus,
     type RuntimeRecoveryDiscoveryStatus,
-  } from '$lib/utils/recovery/recoveryDiscoveryStatus';
-  import { buildRemoteRuntimeRecoveryPeerSources } from '$lib/utils/onboarding/remoteRuntimeValidation';
-  import AddJMachine from '$lib/components/Jurisdiction/AddJMachine.svelte';
-  import type { JMachineCreateDetail } from '$lib/components/Jurisdiction/import-jmachine-runtime';
-  import PushWakePanel from '$lib/components/Settings/PushWakePanel.svelte';
-  import StackManager from '$lib/components/Settings/StackManager.svelte';
+  } from '#lib/utils/recovery/recoveryDiscoveryStatus.ts';
+  import { buildRemoteRuntimeRecoveryPeerSources } from '#lib/utils/onboarding/remoteRuntimeValidation.ts';
+  import AddJMachine from '#lib/components/Jurisdiction/AddJMachine.svelte';
+  import type { JMachineCreateDetail } from '#lib/components/Jurisdiction/import-jmachine-runtime.ts';
+  import PushWakePanel from '#lib/components/Settings/PushWakePanel.svelte';
+  import StackManager from '#lib/components/Settings/StackManager.svelte';
   import EntityConsensusSettingsPanel from './EntityConsensusSettingsPanel.svelte';
   import type { EntityConsensusSettingsView } from '../entity-consensus-settings';
   import type { SettingsSubview } from '../entity-panel-routing';
-  import type { ThemeName } from '$lib/types/ui';
+  import type { ThemeName } from '#lib/types/ui.ts';
 
   type ProfileView = {
     name?: string;

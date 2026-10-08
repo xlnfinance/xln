@@ -21,6 +21,9 @@ test('Svelte account status survives committed runtime refreshes', { tag: '@func
       'data-connection-state',
       'open',
     );
+    // Observe committed refreshes after the independent transport connection has settled.
+    await expect(page.getByTestId('account-status-indicator').first()).toHaveAttribute('data-ui-status', 'ready');
+    await expect(page.getByTestId('account-status-indicator').first()).toHaveAttribute('data-connection-state', 'connected');
     const observation = page.evaluate(async () => {
       const sample = () => ({
         accounts: Array.from(document.querySelectorAll('[data-testid="account-status-indicator"]'), element => ({

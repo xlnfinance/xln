@@ -109,3 +109,23 @@ describe('move validation', () => {
     }))).toBe(null);
   });
 });
+
+describe('native Tron external recipient boundary', () => {
+  const recipient = 'TMVQGm1qAQYVdetCeGRRkTWYYrLXuHK2HC';
+  test('accepts a checksummed base58 recipient only for the actual Tron adapter', () => {
+    expect(getMoveValidationErrorForContext(ctx({ from: 'reserve', to: 'external',
+      externalRecipient: recipient, jurisdictionMode: 'tron' }))).toBeNull();
+    expect(getMoveValidationErrorForContext(ctx({ from: 'reserve', to: 'external',
+      externalRecipient: recipient, jurisdictionMode: 'rpc' }))).toBe('Recipient must be a valid EOA address');
+  });
+  test('rejects a bad checksum without lowercasing the base58 input', () => {
+    expect(getMoveValidationErrorForContext(ctx({ from: 'reserve', to: 'external',
+      externalRecipient: `${recipient.slice(0, -1)}D`, jurisdictionMode: 'tron' })))
+      .toBe('Recipient must be a valid EOA address');
+  });
+  test('compares Tron base58 and hex aliases when rejecting a direct self transfer', () => {
+    expect(getMoveValidationErrorForContext(ctx({ mode: 'broadcast', from: 'external', to: 'external',
+      externalRecipient: recipient, selfExternalAddress: '0x7e5f4552091a69125d5dfcb7b8c2659029395bdf',
+      jurisdictionMode: 'tron' }))).toBe('External → External to self is meaningless');
+  });
+});

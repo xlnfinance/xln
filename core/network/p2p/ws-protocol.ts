@@ -424,9 +424,12 @@ export const resolveRuntimeWsRelayAudience = (
   publicUrl?: string | null,
 ): string | null => {
   const requestAudience = canonicalizeRuntimeWsAudience(requestUrl);
-  if (publicUrl) return canonicalizeRuntimeWsAudience(publicUrl);
   const internalAudience = canonicalizeRuntimeWsAudience(internalUrl);
-  return requestAudience === internalAudience ? internalAudience : null;
+  // The server's own client signs its configured internal endpoint even when
+  // browser traffic arrives through public ingress. Never derive an audience
+  // from an unmatched Host: proxy requests use only the configured public URL.
+  if (requestAudience === internalAudience) return internalAudience;
+  return publicUrl ? canonicalizeRuntimeWsAudience(publicUrl) : null;
 };
 
 export const directRuntimeWsAudience = (runtimeId: string): string =>

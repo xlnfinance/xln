@@ -535,13 +535,17 @@ test.describe('E2E Cross-J Swap Isolated Flow', () => {
       await expect
         .poll(
           async () => {
-            const [sourceHubDeltas, targetHubDeltas] = await Promise.all([
+            const [sourceHubDeltas, targetHubDeltas, sourceNow, targetNow] = await Promise.all([
               readHubCrossDeltas(page, hubId, source.entityId, [WETH]),
               readHubCrossDeltas(page, targetHub.entityId, target.entityId, [USDC]),
+              readCrossState(page, source, hubId),
+              readCrossState(page, target, targetHub.entityId),
             ]);
+            // J collateral updates can commit after the close snapshot. Compare
+            // both current replicas; exact close economics remain checked below.
             return {
-              source: sourceHubDeltas[String(WETH)],
-              target: targetHubDeltas[String(USDC)],
+              source: isDeepStrictEqual(sourceHubDeltas[String(WETH)], sourceNow.deltas[String(WETH)]),
+              target: isDeepStrictEqual(targetHubDeltas[String(USDC)], targetNow.deltas[String(USDC)]),
             };
           },
           {
@@ -551,8 +555,8 @@ test.describe('E2E Cross-J Swap Isolated Flow', () => {
           },
         )
         .toEqual({
-          source: partialSourceAfter.deltas[String(WETH)],
-          target: partialTargetAfter.deltas[String(USDC)],
+          source: true,
+          target: true,
         });
       expectCrossTransfer(
         partialSourceBefore.deltas[String(WETH)],
@@ -1684,3 +1688,4 @@ test.describe('E2E Cross-J Swap Isolated Flow', () => {
     },
   );
 });
+import { isDeepStrictEqual } from 'node:util';

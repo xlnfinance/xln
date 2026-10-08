@@ -7,12 +7,12 @@ import type { SettlementEvidenceRequest } from './control/settlement-evidence';
 import type {
   NumberedRegistrationCommand,
   NumberedRegistrationCommandResult,
-} from '../../runtime/registration/numbered-registration-driver';
+} from '../../runtime/registration/numbered/numbered-registration-driver';
 
 export type {
   NumberedRegistrationCommand,
   NumberedRegistrationCommandResult,
-} from '../../runtime/registration/numbered-registration-driver';
+} from '../../runtime/registration/numbered/numbered-registration-driver';
 
 type RuntimeAdapterMode = 'embedded' | 'remote';
 export type RuntimeAdapterStatus = 'connected' | 'connecting' | 'disconnected' | 'error';

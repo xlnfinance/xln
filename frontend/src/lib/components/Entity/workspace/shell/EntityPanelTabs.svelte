@@ -4,27 +4,28 @@ import { createEventDispatcher } from "svelte";
 import { onDestroy, onMount } from "svelte";
 import type { ComponentType } from "svelte";
 import { MaxUint256, Wallet, hexlify, isAddress, parseEther, ZeroAddress } from "ethers";
+import { normalizeExternalRecipient } from "../../move/external-recipient";
 import type { EntityTx, RuntimeReplica, EnvSnapshot, JAdapter, Profile, RoutedEntityInput, RuntimeAdapterViewFrame, RuntimeInput, XLNModule } from "@xln/core/api/public/runtime-module";
 import type { EntityReadView } from '../../core/entity-panel-types';
 import { buildDebtEnforcementRuntimeInputFromProjection } from "@xln/core/runtime/tx/debt-enforcement-input";
 import { getDraftBatchReserveDelta } from "@xln/core/jurisdiction/machine/batch";
-import type { Tab, EntityReplica } from "$lib/types/ui";
-import { getXLN, resolveConfiguredApiBase } from "../../../../stores/xlnStore";
+import type { Tab, EntityReplica } from "#lib/types/ui.ts";
+import { getXLN, xlnInstance, resolveConfiguredApiBase } from "../../../../stores/xlnStore";
 import { settings } from "../../../../stores/settingsStore";
 import { runtimes } from "../../../../stores/runtimeStore";
-import { activeRuntime } from "$lib/stores/vault/vaultStore";
+import { activeRuntime } from "#lib/stores/vault/vaultStore.ts";
 import { submitEntityInputs, submitRuntimeInput, xlnFunctions } from "../../../../stores/xlnStore";
 import { runtimeControllerHandle } from "../../../../stores/runtimeControllerStore";
 import { toasts } from "../../../../stores/ui/toastStore";
 import { errorLog } from "../../../../stores/errorLogStore";
-import { getOpenAccountRebalancePolicyData } from "$lib/utils/onboarding/onboardingPreferences";
-import { prewarmCounterpartyProfiles } from "$lib/utils/runtime/p2pPrefetch";
-import { requireSignerIdForEntity } from "$lib/utils/identity/entityReplica";
-import { registerDebugSurface } from "$lib/utils/runtime/debugSurface";
-import { getGossipProfiles } from "$lib/utils/identity/entityNaming";
-import { entityAvatar } from "$lib/utils/identity/avatar";
-import { getJurisdictionBadgeInfo } from "$lib/utils/identity/jurisdictionBadge";
-import { resetEverything } from "$lib/utils/control/resetEverything";
+import { getOpenAccountRebalancePolicyData } from "#lib/utils/onboarding/onboardingPreferences.ts";
+import { prewarmCounterpartyProfiles } from "#lib/utils/runtime/p2pPrefetch.ts";
+import { requireSignerIdForEntity } from "#lib/utils/identity/entityReplica.ts";
+import { registerDebugSurface } from "#lib/utils/runtime/debugSurface.ts";
+import { getGossipProfiles } from "#lib/utils/identity/entityNaming.ts";
+import { entityAvatar } from "#lib/utils/identity/avatar.ts";
+import { getJurisdictionBadgeInfo } from "#lib/utils/identity/jurisdictionBadge.ts";
+import { resetEverything } from "#lib/utils/control/resetEverything.ts";
 import { Landmark, PieChart, Settings, Users } from "lucide-svelte";
 import AccountWorkspaceView from "../AccountWorkspaceView.svelte";
 import EntityAssetsTab from "../../assets/EntityAssetsTab.svelte";
@@ -37,7 +38,7 @@ import EntitySelectionEmptyState from "./EntitySelectionEmptyState.svelte";
 import EntitySettingsProjectionPanel from "./EntitySettingsProjectionPanel.svelte";
 import OwnershipWorkspacePanel from "../../ownership/OwnershipWorkspacePanel.svelte";
 import { buildEntityConsensusSettingsView } from "../entity-consensus-settings";
-import { importJMachineViaRuntime, type JMachineCreateDetail } from "$lib/components/Jurisdiction/import-jmachine-runtime";
+import { importJMachineViaRuntime, type JMachineCreateDetail } from "#lib/components/Jurisdiction/import-jmachine-runtime.ts";
 import { OFFCHAIN_FAUCET_REQUEST_TIMEOUT_MS, faucetPendingKey, type FaucetApiResult, type PendingReserveFaucet, readFaucetApiResult, reconcilePendingReserveFaucets } from "../../account/account-faucet";
 import { buildMoveArrowPath, buildMoveRouteSteps, getMoveRouteKey, isImmediateMoveExecutionRoute, isMoveRouteSupported, moveNeedsExternalRecipient, moveNeedsReserveRecipient, routeRequiresExplicitExternalAllowance, MOVE_ENDPOINT_LABEL, MOVE_ENDPOINTS, type MoveEndpoint } from "../../move-routes";
 import { buildMoveAllowanceContextSignature, buildMoveAllowanceStatusLabel, getMoveRequiredAllowanceAmount, isMoveAllowanceSatisfied } from "../../move/move-allowance";
@@ -98,7 +99,7 @@ export let userModeHeader: boolean = false;
 export let selectedJurisdiction: string | null = null;
 export let allowHeaderAddRuntime: boolean = false;
 export let headerRuntimeAddLabel: string = "+ Add Runtime";
-import type { EntityOpenAction } from "$lib/view/utils/panelBridge";
+import type { EntityOpenAction } from "#lib/view/utils/panelBridge.ts";
 export let initialAction: EntityOpenAction | undefined = undefined;
 export let runtimeFrameContext: EntityWorkspaceRuntimeFrameContext = emptyEntityWorkspaceRuntimeFrameContext;
 export let embeddedRuntimeContext: EntityWorkspaceEmbeddedRuntimeContext = emptyEntityWorkspaceEmbeddedRuntimeContext;
@@ -207,6 +208,15 @@ type IconBadgeTabConfig<T extends string> = IconTabConfig<T> & {
   showBadge?: boolean;
   badgeType?: "pending";
 };
+function getMoveJurisdictionMode(): string | undefined {
+  const env = getRuntimeEnv(actionRuntimeEnv);
+  return env && $xlnInstance
+    ? getCurrentEntityJAdapter($xlnInstance, env, "move-recipient").mode
+    : undefined;
+}
+function normalizeMoveExternalRecipient(value: string): string {
+  return normalizeExternalRecipient(value, getMoveJurisdictionMode());
+}
 function getCurrentEntityJAdapter(xln: XLNModule, env: RuntimeReplica, context: string): JAdapter {
   const entityId = String(replica?.state?.entityId || tab.entityId || "").trim();
   const signerId = String(currentSignerId || tab.signerId || "").trim();
@@ -364,6 +374,7 @@ function getMoveValidationError(mode: MoveValidationMode): string | null {
     selfExternalAddress: resolveSelfEoaAddress(),
     reserveRecipientEntityId: moveReserveRecipientEntityId,
     externalRecipient: moveExternalRecipient,
+    jurisdictionMode: getMoveJurisdictionMode(),
     reserveToken: selectedMoveTransferToken,
     externalToken: selectedMoveExternalToken,
     sourceAvailableBalance: moveUiState.sourceAvailableBalance,
@@ -1187,7 +1198,7 @@ async function withdrawReserveToExternal(tokenId: number, amountOverride?: bigin
   try {
     const signerId = resolveEntitySigner(entityId, "reserve-to-external");
     const amount = amountOverride ?? parsePositiveAssetAmount(reserveToExternalAmount, info, onchainReserves.get(tokenId) ?? 0n);
-    const externalAddress = recipientEoaOverride || (await resolveCurrentExternalAddress());
+    const externalAddress = normalizeMoveExternalRecipient(recipientEoaOverride || (await resolveCurrentExternalAddress()));
     await submitEntityInputs([
       {
         entityId,
@@ -1711,8 +1722,7 @@ async function sendExternalAsset(): Promise<void> {
   const authority = captureSignerAuthorityContext("send-external-asset");
   const token = requirePanelExternalToken(sendAssetSymbol);
   const recipient = sendAssetRecipient.trim();
-  if (!isAddress(recipient)) throw new Error("Recipient must be a valid EOA address");
-  const amount = parsePositiveAssetAmount(sendAssetAmount, token, token.balance);
+    const amount = parsePositiveAssetAmount(sendAssetAmount, token, token.balance);
   const xln = await getXLN();
   const jadapter = getCurrentEntityJAdapter(xln, authority.env, "send-external-asset");
   const privKey = await getSignerPrivateKeyForAuthority(authority);
@@ -1855,7 +1865,7 @@ async function queueReserveToExternalDraft(tokenId: number, amount: bigint, reci
   if (!entityId) throw new Error("Active entity missing for reserve withdrawal");
   if (!activeIsLive) throw new Error("Add to batch requires LIVE mode");
   const signerId = resolveEntitySigner(entityId, "move-reserve-to-external-draft");
-  const externalAddress = recipientEoaOverride || (await resolveCurrentExternalAddress());
+  const externalAddress = normalizeMoveExternalRecipient(recipientEoaOverride || (await resolveCurrentExternalAddress()));
   if (!isAddress(externalAddress)) throw new Error("Recipient must be a valid EOA address");
   const receivingEntity = encodeExternalEoaAsEntity(externalAddress);
   await submitEntityInputs([
@@ -1974,8 +1984,7 @@ async function addMoveToExistingBatch(skipValidation = false): Promise<void> {
   }
   if (routeKey === "reserve->external") {
     const amount = parsePositiveAssetAmount(moveAmount, token, maxSourceAmount);
-    const recipient = moveExternalRecipient.trim();
-    if (!isAddress(recipient)) throw new Error("Recipient must be a valid EOA address");
+    const recipient = normalizeMoveExternalRecipient(moveExternalRecipient);
     await queueReserveToExternalDraft(token.tokenId, amount, recipient);
     moveAmount = "";
     toasts.success("Added to existing draft batch");
@@ -1997,8 +2006,7 @@ async function addMoveToExistingBatch(skipValidation = false): Promise<void> {
   }
   if (routeKey === "account->external") {
     const amount = parsePositiveAssetAmount(moveAmount, token, maxSourceAmount);
-    const recipient = moveExternalRecipient.trim();
-    if (!isAddress(recipient)) throw new Error("Recipient must be a valid EOA address");
+    const recipient = normalizeMoveExternalRecipient(moveExternalRecipient);
     await collateralToReserve(token.tokenId, amount, moveSourceAccount, { type: "r2e", recipientEoa: recipient }, false);
     moveAmount = "";
     toasts.info("Queued for counterparty signature, then added to draft batch");
@@ -2064,8 +2072,7 @@ async function executeMovePlan(): Promise<void> {
     const routeKey = getMoveRouteKey(moveFromEndpoint, moveToEndpoint);
     if (routeKey === "external->external") {
       requirePanelExternalToken(moveAssetSymbol);
-      const recipient = moveExternalRecipient.trim();
-      if (!isAddress(recipient)) throw new Error("Recipient must be a valid EOA address");
+      const recipient = normalizeMoveExternalRecipient(moveExternalRecipient);
       setMoveProgress("Signing external transfer");
       sendAssetSymbol = moveAssetSymbol;
       sendAssetAmount = moveAmount;
@@ -2101,7 +2108,7 @@ async function executeMovePlan(): Promise<void> {
         break;
       case "account->external":
         setMoveProgress("Requesting hub proof and settling account back to your reserve");
-        await collateralToReserve(token.tokenId, amount, moveSourceAccount, { type: "r2e", recipientEoa: moveExternalRecipient.trim() });
+        await collateralToReserve(token.tokenId, amount, moveSourceAccount, { type: "r2e", recipientEoa: normalizeMoveExternalRecipient(moveExternalRecipient) });
         break;
       case "account->account":
         setMoveProgress("Requesting hub proof and settling account back to your reserve");

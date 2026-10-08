@@ -4,6 +4,51 @@ Owner authorization: 2026-09-18. Objective: move the current requested release
 toward usable, financially correct XLN, under the long-term MML ambition.
 This is one working procedure, not a new runtime, agent framework or product gate.
 
+## Current acceptance contract — 2026-10-01
+
+Owner scope: Svelte is the primary interface; React is additional. Required
+journeys are pay, swap, move, dispute, cross-jurisdiction execution, crash
+recovery and wallet recovery. Lending is outside this release. Local tests and
+fuzzing are authorized; a deployment destination remains unconfirmed. Earlier
+capped-testnet and landing-page plans do not expand this task's scope.
+
+"Ideal" means the following observable release conditions, not absence of every
+possible bug or a percentage inferred from test counts:
+
+1. Headless scenarios and browser E2E are separate evidence. Each required
+   journey has exact financial assertions, including fees, holds, terminal
+   status and rejected-input effects. TS-only scenarios never count as Rust
+   coverage. Shared codec vectors never count as live journeys.
+2. Both interfaces complete their exposed required actions on desktop and
+   mobile. Cover success, invalid input, cancellation and interrupted execution
+   where applicable. Rendered defects remain failures even when assertions pass.
+   An exposed unsupported financial action must be fixed or explicitly removed
+   from the release surface; no disabled test can stand in for that decision.
+3. Restart, duplicate delivery and fresh-device recovery preserve exact money
+   and signed evidence, with no duplicate execution or silent fresh-wallet
+   fallback. Assert delivery/ACK drainage before reload can hide a stalled queue.
+4. TS and Rust replay the same immutable production checkpoint/WAL with exact
+   per-frame roots and ordered outputs. Live native J submission, mined receipt
+   and finality are separate required evidence. Fuzzing records seed, exercised
+   invariant, runs/calls and minimized failures; it supplements these journeys.
+5. Release evidence names the source commit/content, engine, command, outcome
+   and artifact. Missing, skipped and stale evidence are explicit. Require
+   `bun run check`, applicable contract tests, sustained recovery/load evidence
+   and deployment/rollback checks before real funds. Preserve the independent
+   review and operational requirements of `mainnet.md`.
+
+Execution protocol: take the first missing or failing required boundary; produce
+a failing execution; fix its smallest cause; rerun that boundary; then run its
+related suite. Two implementers own disjoint headless and UI tests; the primary
+agent owns integration, contract checks and acceptance decisions. One heavy
+stand runs at a time, with parallel workers inside that stand. Never spend a
+work block expanding this protocol instead of closing a demonstrated gap.
+
+Freeze the final candidate before broad gates. Keep full-run failures visible:
+a successful focused rerun closes its finding but is not a new full-suite run.
+Expected fault-injection warnings require narrow matching plus an assertion that
+recovery completed; ordinary product errors cannot be allowlisted away.
+
 Owner steering after the first review: prioritize working pay/swap and clients;
 do not spend work blocks refining this document. Borrow the limited analogy of
 prediction-error learning: state an expected outcome, then update the hypothesis
@@ -17,7 +62,8 @@ or that software quality follows a biological law. No additional framework.
 ## Execute
 
 1. State one user-visible outcome, its observable acceptance result, and first
-   failure. Current outcome: native iPhone scan → review → pay → real receipt.
+   failure. Current outcome: the required headless and browser journeys above,
+   with exact money and recovery evidence on TS and Rust.
 2. Choose work in order: active user deliverable; its financial/correctness
    blocker; another independent acceptance gap if externally blocked; proven
    simplification of the same path. Do not drift into unrelated cleanup.
