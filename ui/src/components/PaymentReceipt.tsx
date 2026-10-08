@@ -81,11 +81,13 @@ export function PaymentReceiptSheet() {
 			<div className="state st-settled" style={{ justifyContent: 'center', display: 'flex' }}>
 				Recorded by your runtime
 			</div>
-			<div className="actions" style={{ display: 'flex', gap: 8 }}>
+			<button type="button" className="btn primary" onClick={dismiss} data-testid="receipt-done">
+				Done
+			</button>
+			<div className="rcpt-more">
 				<button
 					type="button"
-					className="btn"
-					style={{ flex: 1 }}
+					className="btn quiet"
 					data-testid="receipt-copy"
 					onClick={() => {
 						const lines = [
@@ -103,8 +105,7 @@ export function PaymentReceiptSheet() {
 				</button>
 				<button
 					type="button"
-					className="btn"
-					style={{ flex: 1 }}
+					className="btn quiet"
 					data-testid="receipt-download"
 					title="The receipt with its frame, proof and every event, as a file for your books"
 					onClick={() => {
@@ -119,11 +120,8 @@ export function PaymentReceiptSheet() {
 				>
 					Download
 				</button>
-				<button type="button" className="btn" style={{ flex: 1 }} onClick={() => window.print()} data-testid="receipt-print" title="Print, or save as PDF from the print dialog">
+				<button type="button" className="btn quiet" onClick={() => window.print()} data-testid="receipt-print" title="Print, or save as PDF from the print dialog">
 					Print / PDF
-				</button>
-				<button type="button" className="btn primary" style={{ flex: 1 }} onClick={dismiss} data-testid="receipt-done">
-					Done
 				</button>
 			</div>
 		</Sheet>

@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { MANAGE, PageHead } from '../components/PageHead';
 import { isAccountTxKindAvailable } from '@xln/core/account/tx/admission-policy';
-import { Icon } from '../components/Icons';
 import { TokenIcon } from '../components/TokenPicker';
 import { LendingClose } from '../components/LendingClose';
 import { useApp } from '../runtime/store';
@@ -27,7 +26,6 @@ const UNAVAILABLE = 'Lending is unavailable in this release';
  * the bilateral account with the hub.
  */
 export function Lending() {
-	const navigate = useNavigate();
 	const entityId = useApp(s => s.activeEntityId);
 	const selectedTokenId = useApp(s => s.selectedTokenId);
 	const toast = useApp(s => s.toast);
@@ -117,14 +115,10 @@ export function Lending() {
 
 	return (
 		<div className="screen fade-in">
-			<div className="screen-header">
-				<span className="screen-title">
-					<button type="button" className="icon-btn" onClick={() => navigate(-1)} aria-label="Back" data-testid="back">
-						<Icon name="chevronLeft" size={18} />
-					</button>
-					Lending
-				</span>
-			</div>
+			<PageHead
+				title="Lending"
+				parent={MANAGE}
+			/>
 			{!offerAvailable || !borrowAvailable || !repayAvailable ? (
 				<p className="note" role="status" data-testid="lending-unavailable">{UNAVAILABLE}. Existing positions remain visible below.</p>
 			) : null}

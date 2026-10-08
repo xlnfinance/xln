@@ -1,4 +1,5 @@
 import { Networks } from '../components/Networks';
+import { PageHead } from '../components/PageHead';
 import { CopyId } from '../components/CopyId';
 import { Appearance } from '../components/settings/Appearance';
 import { BalanceSettings, ScalePreview } from '../components/settings/BalanceSettings';
@@ -33,9 +34,7 @@ export function SettingsScreen() {
   };
   return (
     <div className="screen fade-in">
-      <div className="screen-header">
-        <span className="screen-title">Settings</span>
-      </div>
+      <PageHead title="Settings" eyebrow="Wallet" sub="Identity, appearance, the guided tour, runtime and vault." />
       <div className="two-col">
         <div>
           <Profile />

@@ -53,7 +53,7 @@ export function Profile() {
         </div>
         <div className="field-row">
           <input
-            className="input"
+            className="input boxed"
             value={profileName}
             placeholder={wallet.name}
             onChange={event => setProfileName(event.target.value)}
@@ -70,14 +70,14 @@ export function Profile() {
           </button>
         </div>
         <input
-          className="input"
+          className="input boxed"
           value={profileWebsite}
           placeholder="website · optional"
           onChange={event => setProfileWebsite(event.target.value)}
           data-testid="profile-website"
         />
         <textarea
-          className="input"
+          className="input boxed profile-bio"
           rows={2}
           value={profileBio}
           placeholder="a line about you · optional"

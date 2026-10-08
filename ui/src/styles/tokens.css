@@ -1,5 +1,5 @@
 :root {
-	--font-ui: 'Instrument Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+	--font-ui: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
 	--font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
 	/* Sums and hero figures. A design preset swaps this; body text never changes. */
 	--font-num: var(--font-ui);
@@ -14,83 +14,99 @@
 	--ease: cubic-bezier(0.32, 0.72, 0, 1);
 
 	--rail-w: 72px;
+	--side-w: 232px;
 	--tabbar-h: 82px;
 
 	/* Visceral value: pixels per dollar. Every bar in the app is drawn from this one number. */
 	--ppu: 0.1;
+
+	/* Fill behind white button ink; follows the accent unless a theme needs more contrast. */
+	--accent-fill: var(--accent);
 }
 
+/* Default material: cool neutral surfaces, slate ink, one indigo accent. */
 :root,
 :root[data-theme='dark'] {
 	color-scheme: dark;
-	--bg: #0e1014;
-	--surface: #15181e;
-	--surface-2: #1c2028;
-	--surface-3: #242935;
-	--line: rgba(236, 237, 239, 0.08);
-	--line-2: rgba(236, 237, 239, 0.15);
-	--ink: #ecedef;
-	--ink-2: #8d929b;
-	--ink-3: #5b6069;
+	--bg: #0b0e14;
+	--surface: #12161e;
+	--surface-2: #181d27;
+	--surface-3: #212835;
+	--line: rgba(226, 232, 244, 0.075);
+	--line-2: rgba(226, 232, 244, 0.14);
+	--ink: #e6e9f0;
+	--ink-2: #959eae;
+	--ink-3: #687284;
 	--display: #ffffff;
-	--accent: #6e7cff;
-	--accent-2: #9aa4ff;
-	--accent-dim: rgba(110, 124, 255, 0.16);
-	--credit: #6e7cff;
+	--accent: #7a73ff;
+	--accent-2: #a6a1ff;
+	--accent-dim: rgba(122, 115, 255, 0.16);
+	--credit: #7a73ff;
 	/* Position palette: what is yours is green, darker the deeper it sits with a
 	   counterparty; exposure is violet; obligations amber; room is a ghost. */
-	--onchain: #4ade80;
-	--reserve: #22c55e;
-	--coll: #15a35a;
+	--onchain: #bbf7d0;
+	--reserve: #4ade80;
+	--coll: #16a34a;
 	--coll-dim: rgba(21, 163, 90, 0.18);
 	--risk: #a78bfa;
 	--risk-dim: rgba(167, 139, 250, 0.22);
-	--room: rgba(236, 237, 239, 0.14);
+	--room: rgba(226, 232, 244, 0.14);
 	--slate: #6e788a;
 	--debt: #e8b04b;
+	--debt-dim: rgba(232, 176, 75, 0.14);
 	--hold: #c4b5fd;
 	--hold-dim: rgba(196, 181, 253, 0.28);
 	--dispute: #f26d6d;
 	--dispute-dim: rgba(242, 109, 109, 0.14);
 	--btn-ink: #ffffff;
-	--scrim: rgba(6, 7, 9, 0.66);
+	--scrim: rgba(4, 6, 10, 0.66);
+	--shadow-card: 0 0 0 1px var(--line), 0 1px 2px rgba(0, 0, 0, 0.3);
+	--shadow-lift: 0 0 0 1px var(--line-2), 0 8px 24px rgba(0, 0, 0, 0.35);
 	--shadow-sheet: 0 -18px 60px rgba(0, 0, 0, 0.55);
 	--fade: var(--bg);
 }
 
 :root[data-theme='light'] {
 	color-scheme: light;
-	--bg: #f4f5f8;
+	--bg: #ffffff;
 	--surface: #ffffff;
-	--surface-2: #eef0f4;
-	--surface-3: #e4e7ee;
-	--line: rgba(20, 23, 30, 0.1);
-	--line-2: rgba(20, 23, 30, 0.18);
-	--ink: #14171e;
-	--ink-2: #5f6672;
-	--ink-3: #858c98;
-	--display: #0b0d12;
-	--accent: #5b69f0;
-	--accent-2: #4653d6;
-	--accent-dim: rgba(91, 105, 240, 0.14);
-	--credit: #5b69f0;
-	--onchain: #22c55e;
-	--reserve: #16a34a;
+	--surface-2: #f6f8fa;
+	--surface-3: #ebeef1;
+	--line: #ebeef1;
+	--line-2: #d8dee4;
+	--ink: #1a1f36;
+	--ink-2: #687385;
+	--ink-3: #8792a2;
+	--display: #1a1f36;
+	--accent: #635bff;
+	--accent-2: #5047e5;
+	--accent-dim: rgba(99, 91, 255, 0.1);
+	--credit: #635bff;
+	--onchain: #86efac;
+	--reserve: #22c55e;
 	--coll: #15803d;
-	--coll-dim: rgba(21, 128, 61, 0.16);
+	--coll-dim: rgba(21, 128, 61, 0.12);
 	--risk: #7c3aed;
-	--risk-dim: rgba(124, 58, 237, 0.2);
-	--room: rgba(20, 23, 30, 0.12);
+	--risk-dim: rgba(124, 58, 237, 0.14);
+	--room: rgba(26, 31, 54, 0.1);
 	--slate: #8b94a5;
 	--debt: #c98a16;
+	--debt-dim: rgba(201, 138, 22, 0.12);
 	--hold: #8e5cf5;
 	--hold-dim: rgba(142, 92, 245, 0.26);
-	--dispute: #d9484f;
-	--dispute-dim: rgba(217, 72, 79, 0.12);
+	--dispute: #df1b41;
+	--dispute-dim: rgba(223, 27, 65, 0.08);
 	--btn-ink: #ffffff;
-	--scrim: rgba(20, 23, 30, 0.5);
-	--shadow-sheet: 0 -18px 60px rgba(20, 23, 30, 0.18);
+	--scrim: rgba(26, 31, 54, 0.4);
+	--shadow-card: 0 0 0 1px rgba(26, 31, 54, 0.06), 0 2px 5px rgba(60, 66, 87, 0.08), 0 1px 1px rgba(0, 0, 0, 0.04);
+	--shadow-lift: 0 0 0 1px rgba(26, 31, 54, 0.06), 0 12px 32px rgba(50, 50, 93, 0.12), 0 4px 10px rgba(0, 0, 0, 0.05);
+	--shadow-sheet: 0 -18px 60px rgba(26, 31, 54, 0.18);
 	--fade: var(--bg);
+}
+
+/* Dark indigo text is bright for links and tabs; white ink on a button needs the deeper fill (4.7:1). */
+:root[data-theme='dark'][data-accent='indigo']:not([data-material='terminal']) {
+	--accent-fill: #635bff;
 }
 
 /* ---------- design presets: material ---------- */

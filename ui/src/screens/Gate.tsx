@@ -217,6 +217,7 @@ export function Gate() {
 				: null;
 		return (
 			<div className="gate" data-testid="gate-busy">
+				<div className="gate-sheet">
 				<GateMark />
 				<div className="gate-busy fade-in">
 					<p className="caps">{busyStep}</p>
@@ -246,16 +247,18 @@ export function Gate() {
 						</div>
 					)}
 				</div>
+				</div>
 			</div>
 		);
 	}
 
 	return (
 		<div className="gate">
+			<div className="gate-sheet">
 			<GateMark />
 			<h1 className="gate-title">xln</h1>
 			<p className="gate-sub muted">Payments and swaps, under your control.</p>
-			<p className="gate-stack muted" data-testid="gate-stack" data-state={stack === undefined ? 'probing' : stack ? 'online' : 'offline'}>
+			<p className={`gate-stack state ${stack ? 'st-settled' : stack === undefined ? 'st-pending' : 'st-dispute'}`} data-testid="gate-stack" data-state={stack === undefined ? 'probing' : stack ? 'online' : 'offline'}>
 				{stack === undefined
 					? 'Looking for a network at this address…'
 					: stack
@@ -415,6 +418,7 @@ export function Gate() {
 					</div>
 				</form>
 			)}
+			</div>
 		</div>
 	);
 }

@@ -2,6 +2,7 @@ import { Bar } from '../Bars';
 import { Icon } from '../Icons';
 import { useApp } from '../../runtime/store';
 import { ACCENTS, MATERIALS, NUMBER_FONTS, RISK_COLORS } from '../../runtime/design';
+import { TOUR_CHAPTERS, TOUR_STEPS } from '../../tour/steps';
 
 export function Appearance() {
   const theme = useApp(s => s.theme);
@@ -189,7 +190,7 @@ export function Appearance() {
               ? 'Finished once. Replay any time.'
               : tour.index > 0
                 ? `Paused at step ${tour.index + 1}.`
-                : 'Credit, payment, collateral, swap, dispute: five minutes on a live sandbox.'}
+                : 'Credit, payments, swaps, collateral, exit by dispute, proofs: about five minutes on a live sandbox.'}
           </div>
         </div>
         <span className="segc">
@@ -201,6 +202,25 @@ export function Appearance() {
           <button type="button" onClick={() => setTour({ active: true, index: 0 })} data-testid="tour-replay">
             {tour.completed || tour.index > 0 ? 'Replay' : 'Start'}
           </button>
+        </span>
+      </div>
+      <div className="setting">
+        <div>
+          <div className="t">Start from a chapter</div>
+          <div className="s">You press and type; the guide points at each part of the screen and moves on when it sees the result.</div>
+        </div>
+        <span className="chips tour-chapters">
+          {TOUR_CHAPTERS.map(entry => (
+            <button
+              key={entry.chapter}
+              type="button"
+              className={tour.active && TOUR_STEPS[tour.index]?.chapter === entry.chapter ? 'active' : ''}
+              onClick={() => setTour({ active: true, index: entry.index })}
+              data-testid={`tour-chapter-${entry.chapter.toLowerCase().replace(/\s+/g, '-')}`}
+            >
+              {entry.chapter}
+            </button>
+          ))}
         </span>
       </div>
     </>

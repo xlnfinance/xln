@@ -52,6 +52,17 @@ const DIRECT_PAYMENT_TYPES = new Set(['directPayment', 'direct_payment']);
 // Opening a token lane is plumbing under a credit limit or a payment, not a movement.
 const PLUMBING_TYPES = new Set(['add_delta', 'liveness', 'proposeAccountsNow']);
 
+/** Raw event names ("FoundationBootstrapped", "reserve_updated") read as sentences ("Foundation bootstrapped"). */
+export function humanTitle(raw: string): string {
+	if (/\s/.test(raw)) return raw;
+	const words = raw
+		.replace(/_/g, ' ')
+		.replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+		.trim()
+		.toLowerCase();
+	return words ? words[0]!.toUpperCase() + words.slice(1) : raw;
+}
+
 const isPaymentEvent = (event: RuntimeActivityEvent): boolean =>
 	event.type === 'payment' || event.type === 'htlc' || /htlc/i.test(String(event.rawType || ''));
 
@@ -136,7 +147,7 @@ function singleMovement(event: RuntimeActivityEvent, kind: Exclude<MovementKind,
 		id: event.id,
 		kind,
 		direction,
-		title: String(event.title || event.type || 'Update'),
+		title: humanTitle(String(event.title || event.type || 'Update')),
 		counterpartyId: normalizeId(event.counterpartyId) || null,
 		viaId: null,
 		tokenId: event.tokenId ?? null,

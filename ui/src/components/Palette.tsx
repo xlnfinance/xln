@@ -56,7 +56,7 @@ export function Palette() {
 			{ id: 'desk', title: 'Desk', hint: 'dense console', icon: 'accounts', run: go('/desk') },
 			{ id: 'activity', title: 'Activity', icon: 'activity', run: go('/activity') },
 			{ id: 'manage', title: 'Manage', hint: 'batch, attention, doors', icon: 'accounts', run: go('/manage') },
-			{ id: 'sovereignty', title: 'Sovereignty', hint: 'keys, proofs, exposure', icon: 'shield', run: go('/sovereignty') },
+			{ id: 'sovereignty', title: 'Security and recovery', hint: 'keys, proofs, exposure', icon: 'shield', run: go('/sovereignty') },
 			{ id: 'assets', title: 'Assets', hint: 'on-chain wallet, faucets, debts', icon: 'wallet', run: go('/assets') },
 			{ id: 'lend', title: 'Lending', icon: 'bank', run: go('/lend') },
 			{ id: 'ownership', title: 'Ownership', icon: 'shield', run: go('/ownership') },

@@ -1,6 +1,4 @@
-import { Bar } from './Bars';
 import { formatMoney, getTokenMeta } from '../runtime/format';
-import { usdOf } from '../runtime/financial/prices';
 import { PRICE_SCALE, type BookLevel, type BookView } from '../runtime/financial/orderbook';
 
 export type BookSide = 'bid' | 'ask';
@@ -10,32 +8,35 @@ export function formatPrice(priceTicks: bigint): string {
 	return formatMoney(priceTicks, 4, 4);
 }
 
-function Row({ level, side, base, onPick }: { level: BookLevel; side: BookSide; base: number; onPick?: ((side: BookSide, level: BookLevel) => void) | undefined }) {
+function Row({ level, side, base, deepest, onPick }: { level: BookLevel; side: BookSide; base: number; deepest: bigint; onPick?: ((side: BookSide, level: BookLevel) => void) | undefined }) {
 	const baseMeta = getTokenMeta(base);
 	const Tag = onPick ? 'button' : 'div';
 	return (
 		<Tag
 			{...(onPick ? { type: 'button' as const, onClick: () => onPick(side, level) } : {})}
 			className={`bk-row ${side}${level.own ? ' own' : ''}`}
+			data-testid={`book-row-${side}`}
 			title={`${level.orders} ${level.orders === 1 ? 'order' : 'orders'} · total ${formatMoney(level.total, baseMeta.decimals, 4)} ${baseMeta.symbol}`}
 		>
 			<span className={`bk-price num ${side === 'bid' ? 'st-settled' : 'st-dispute'}`}>{formatPrice(level.priceTicks)}</span>
 			<span className="bk-size num">{formatMoney(level.size, baseMeta.decimals, 4)}</span>
-			<span className="bk-bar">
-				<Bar segments={[{ usd: usdOf(base, level.size), kind: side === 'bid' ? 'coll' : 'debt' }]} height={4} />
+			<span className="bk-bar" aria-hidden>
+				<i className={`bk-depth ${side}`} style={{ width: `${deepest > 0n ? Number((level.size * 1000n) / deepest) / 10 : 0}%` }} />
 			</span>
 		</Tag>
 	);
 }
 
 /**
- * The hub's book: asks above, spread, bids below. Sizes are drawn at the
- * wallet's one scale, so a level reads against the balances on Home.
+ * The hub's book: asks above, spread, bids below. Depth is drawn against the
+ * deepest visible level: a market's levels dwarf a wallet's balances, so the
+ * wallet's one dollar scale would draw every level at full width.
  */
 export function Orderbook({ book, hubLabel, onPick }: { book: BookView; hubLabel: string; onPick?: ((side: BookSide, level: BookLevel) => void) | undefined }) {
 	const baseMeta = getTokenMeta(book.baseTokenId);
 	const quoteMeta = getTokenMeta(book.quoteTokenId);
 	const empty = book.bids.length === 0 && book.asks.length === 0;
+	const deepest = [...book.asks, ...book.bids].reduce((max, level) => (level.size > max ? level.size : max), 0n);
 	const spreadPct =
 		book.spreadTicks !== null && book.asks[0] ? Number((book.spreadTicks * 100_000n) / book.asks[0].priceTicks) / 1000 : null;
 	return (
@@ -61,7 +62,7 @@ export function Orderbook({ book, hubLabel, onPick }: { book: BookView; hubLabel
 				<>
 					<div className="bk-side asks">
 						{[...book.asks].reverse().map(level => (
-							<Row key={`a${level.priceTicks}`} level={level} side="ask" base={book.baseTokenId} onPick={onPick} />
+							<Row key={`a${level.priceTicks}`} level={level} side="ask" base={book.baseTokenId} deepest={deepest} onPick={onPick} />
 						))}
 					</div>
 					<div className="bk-spread num">
@@ -79,7 +80,7 @@ export function Orderbook({ book, hubLabel, onPick }: { book: BookView; hubLabel
 					</div>
 					<div className="bk-side bids">
 						{book.bids.map(level => (
-							<Row key={`b${level.priceTicks}`} level={level} side="bid" base={book.baseTokenId} onPick={onPick} />
+							<Row key={`b${level.priceTicks}`} level={level} side="bid" base={book.baseTokenId} deepest={deepest} onPick={onPick} />
 						))}
 					</div>
 				</>

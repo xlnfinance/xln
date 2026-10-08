@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { DeltaBar, DeltaCaption } from '../Bars';
+import { DeltaBar, DeltaCaption, Legend } from '../Bars';
 import { Icon } from '../Icons';
 import { TokenIcon } from '../TokenPicker';
 import { formatMoney, formatSigned, getTokenMeta } from '../../runtime/format';
@@ -10,7 +10,7 @@ export function TokenSection({ token }: { token: AccountTokenView }) {
 	const money = (value: bigint): string => formatMoney(value, meta.decimals);
 	const [details, setDetails] = useState(false);
 	return (
-		<section className="card" style={{ marginBottom: 14 }}>
+		<section className="card" style={{ marginBottom: 14 }} data-testid={`account-lane-${meta.symbol}`}>
 			<div className="rt" style={{ marginBottom: 14 }}>
 				<TokenIcon tokenId={token.tokenId} />
 				<span className="tx">
@@ -25,6 +25,9 @@ export function TokenSection({ token }: { token: AccountTokenView }) {
 			</div>
 			<DeltaBar derived={d} tokenId={token.tokenId} />
 			<DeltaCaption derived={d} format={money} />
+			<div className="lane-legend">
+				<Legend />
+			</div>
 			<div style={{ marginTop: 14 }}>
 				<div className="kv">
 					<span className="k">Their credit line to you</span>

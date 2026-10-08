@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { HOME, PageHead } from '../components/PageHead';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Bar } from '../components/Bars';
 import { Icon } from '../components/Icons';
@@ -82,7 +83,11 @@ export function Move() {
 	}, [funding, fundingStarted, fundingReady, fundingKey, navigate]);
 
 	const meta = getTokenMeta(tokenId);
-	const external = useMemo(() => externalTokens(wallet.frame, wallet.signerId, depository), [wallet.frame, wallet.signerId, depository]);
+	const pageRows = useApp(s => s.externalRows);
+	const external = useMemo(
+		() => externalTokens(wallet.frame, wallet.signerId, depository, pageRows),
+		[wallet.frame, wallet.signerId, depository, pageRows],
+	);
 	const externalRow = external.find(row => row.tokenId === tokenId) ?? null;
 	const accounts = wallet.accounts.filter(account => !account.disputed);
 	const firstAccount = accounts[0]?.counterpartyId ?? '';
@@ -186,11 +191,32 @@ export function Move() {
 
 	const placeAmount = (place: MoveEndpoint): bigint => availableAt(place, wallet, tokenId, place === 'account' ? sourceAccountId || firstAccount : '', external);
 
+	// Open on a source that holds money: an empty default source is a dead form. A source the user
+	// picked, or one named in the link, is never overridden.
+	const sourceChosen = useRef(isPlace(params.get('from')));
+	const pickFrom = (place: MoveEndpoint): void => {
+		sourceChosen.current = true;
+		setFrom(place);
+	};
+	const funded = (['reserve', 'external', 'account'] as const).find(place => placeAmount(place) > 0n) ?? null;
+	useEffect(() => {
+		if (sourceChosen.current || funding || !funded || funded === from) return;
+		if (placeAmount(from) > 0n) {
+			sourceChosen.current = true;
+			return;
+		}
+		sourceChosen.current = true;
+		setFrom(funded);
+		if (to === funded) setTo(funded === 'account' ? 'reserve' : 'account');
+		// placeAmount reads the same wallet/external inputs that `funded` already depends on.
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [funded, funding, from, to]);
+
 	const Place = ({ place, side }: { place: MoveEndpoint; side: 'from' | 'to' }) => {
 		const active = side === 'from' ? from === place : to === place;
 		const value = placeAmount(place);
 		return (
-			<button type="button" className={`mode-card${active ? ' active' : ''}`} disabled={Boolean(funding && (side === 'to' ? place !== 'account' : place === 'account')) || fundingSubmitted} onClick={() => (side === 'from' ? setFrom(place) : setTo(place))} data-testid={`move-${side}-${place}`}>
+			<button type="button" className={`mode-card${active ? ' active' : ''}`} disabled={Boolean(funding && (side === 'to' ? place !== 'account' : place === 'account')) || fundingSubmitted} onClick={() => (side === 'from' ? pickFrom(place) : setTo(place))} data-testid={`move-${side}-${place}`}>
 				<span className="t">{PLACE_LABEL[place].title}</span>
 				<span className="s">{PLACE_LABEL[place].hint}</span>
 				<span className="v num">
@@ -203,15 +229,11 @@ export function Move() {
 
 	return (
 		<div className="screen fade-in">
-			<div className="screen-header">
-				<span className="screen-title">
-					<button type="button" className="icon-btn" onClick={() => navigate(-1)} aria-label="Back" data-testid="back">
-						<Icon name="chevronLeft" size={18} />
-					</button>
-					Move
-				</span>
-				{funding ? <span>{meta.symbol}</span> : <TokenPicker tokenId={tokenId} onChange={setTokenId} />}
-			</div>
+			<PageHead
+				title="Move"
+				parent={HOME}
+				actions={funding ? <span>{meta.symbol}</span> : <TokenPicker tokenId={tokenId} onChange={setTokenId} />}
+			/>
 
 			<div className="two-col pay">
 				<div className="stack">
@@ -301,7 +323,7 @@ export function Move() {
 					{!supported ? <p style={{ color: 'var(--dispute)', fontSize: 13 }}>This route is not available.</p> : null}
 
 					{direct ? (
-						<button type="button" className="btn" disabled={busy !== null || Boolean(nowIssue)} onClick={() => void sendDirect()}>
+						<button type="button" className="btn" disabled={busy !== null || Boolean(nowIssue)} onClick={() => void sendDirect()} data-testid="move-send-external">
 							<Icon name="pay" size={15} />
 							{busy === 'direct' ? 'Sending…' : 'Send from wallet'}
 						</button>

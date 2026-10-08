@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { MANAGE, PageHead } from '../components/PageHead';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { Bar } from '../components/Bars';
 import { CopyId } from '../components/CopyId';
@@ -117,14 +118,7 @@ export function Assets() {
 
   return (
     <div className="screen fade-in">
-      <div className="screen-header">
-        <span className="screen-title">
-          <button type="button" className="icon-btn" onClick={() => navigate(-1)} aria-label="Back" data-testid="back">
-            <Icon name="chevronLeft" size={18} />
-          </button>
-          {faucetOnly ? 'Add test money' : 'Assets'}
-        </span>
-      </div>
+      <PageHead title={faucetOnly ? 'Add test money' : 'Assets'} parent={MANAGE} />
       <div className={faucetOnly ? 'faucet-page' : 'two-col'}>
         {!faucetOnly && (
           <div>

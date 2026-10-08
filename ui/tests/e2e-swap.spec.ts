@@ -189,12 +189,12 @@ test(
     );
     console.log('SWAP_HISTORY_MS', Date.now() - started, 'fee', String(fee));
     await page.getByTestId('nav-home').first().click();
-    await expect(page.getByTestId('home-balance-asset')).toHaveValue('1');
+    await expect(page.getByTestId('home-balance-asset')).toHaveAttribute('data-value', '1');
     const headlineUnits = async (decimals: number) => parseUnits(
       (await page.getByTestId('home-total').innerText()).replaceAll(',', '').replace('−', '-'), decimals,
     ).toString();
     await expect.poll(() => headlineUnits(6)).toBe(after.usdc);
-    await page.getByTestId('home-balance-asset').selectOption('2');
+    await page.getByTestId('home-asset-2').click();
     await expect.poll(() => headlineUnits(18)).toBe(after.weth);
     await expect(page.getByTestId('home-send-capacity')).toContainText('WETH');
     await mkdir(directory, { recursive: true });

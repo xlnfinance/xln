@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { HOME, PageHead } from '../components/PageHead';
 import { useNavigate } from 'react-router-dom';
 import QRCode from 'qrcode';
 import { buildWalletPayHref, buildXlnInvoiceDeepLink, buildXlnInvoiceUri } from '$lib/utils/xlnInvoice';
@@ -66,14 +67,10 @@ export function Receive() {
 
 	return (
 		<div className="screen fade-in">
-			<div className="screen-header">
-				<span className="screen-title">
-					<button type="button" className="icon-btn" onClick={() => navigate(-1)} aria-label="Back" data-testid="back">
-						<Icon name="chevronLeft" size={18} />
-					</button>
-					Receive
-				</span>
-			</div>
+			<PageHead
+				title="Receive"
+				parent={HOME}
+			/>
 
 			<div className="two-col">
 			<div className="stack" style={{ alignItems: 'center' }}>
@@ -100,7 +97,7 @@ export function Receive() {
 						</div>
 						<Bar segments={[{ usd: usdOf(selectedTokenId, receivable), kind: 'coll' }]} height={4} />
 					</div>
-					{accounts.length > 0 ? <label className="field">Prepare incoming account
+					{accounts.length > 0 ? <label className="field"><span className="field-label">Prepare incoming account</span>
 						<select className="input" value={hub?.counterpartyId ?? ''} onChange={event => setAccountId(event.target.value)} data-testid="receive-account">
 							{accounts.map(account => <option key={account.counterpartyId} value={account.counterpartyId}>{account.label} · {wallet.jurisdiction}</option>)}
 						</select>
@@ -112,7 +109,7 @@ export function Receive() {
 						disabled={hub.disputed} /> : null}
 					<div className="field">
 						<span className="field-label">Note · optional</span>
-						<input className="input" value={description} onChange={event => setDescription(event.target.value)} placeholder="What is this for?" />
+						<input className="input" value={description} onChange={event => setDescription(event.target.value)} placeholder="What is this for?" data-testid="receive-note" />
 					</div>
 				</div>
 
@@ -163,7 +160,7 @@ export function Receive() {
 					</details>
 				</div>
 				<div className="card">
-					<h3 className="caps">Your entity id</h3>
+					<h3 className="caps">Entity ID</h3>
 					<p style={{ marginTop: 8 }}>
 						<CopyId value={entityId} label="Entity id" head={10} tail={6} />
 					</p>

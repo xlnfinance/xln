@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { formatUsd } from '../../runtime/format';
 import { accountSafety, formatDuration } from '../../runtime/financial/sovereignty';
 import { buildDisputeFinalizeTx, buildPrepareDisputeTx, disputeView } from '../../runtime/financial/manage';
 import type { AccountView, WalletView } from '../../runtime/views';
@@ -83,6 +84,31 @@ export function DisputeControls({ account, wallet, onClose }: { account: Account
 								</li>
 								<li>When the window closes you finalize, and the chain pays out exactly what the winning page says.</li>
 							</ol>
+							{(() => {
+								const safety = accountSafety(account);
+								return (
+									<div className="dispute-figures" data-testid="dispute-figures">
+										<div className="kv">
+											<span className="k">Enforceable on-chain</span>
+											<span className="v num st-settled">{formatUsd(safety.securedUsd)}</span>
+										</div>
+										<div className="kv">
+											<span className="k">Uncovered, lost if {account.label} never pays</span>
+											<span className="v num" style={{ color: safety.riskUsd > 0 ? 'var(--risk)' : undefined }}>
+												{formatUsd(safety.riskUsd)}
+											</span>
+										</div>
+										<div className="kv">
+											<span className="k">You owe {account.label}</span>
+											<span className="v num">{formatUsd(safety.owedUsd)}</span>
+										</div>
+										<div className="kv">
+											<span className="k">Their answer window</span>
+											<span className="v num">{formatDuration(safety.theirResponseSeconds)}</span>
+										</div>
+									</div>
+								);
+							})()}
 							{!confirmDispute ? (
 								<button type="button" className="btn danger" disabled={busy} onClick={() => setConfirmDispute(true)} data-testid="dispute-prepare">
 									Dispute this account…

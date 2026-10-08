@@ -72,8 +72,11 @@ export function Shell({ children }: { children: ReactNode }) {
       <Palette />
       <Tour />
       <nav className="rail" aria-label="Primary">
-        <div className="rail-mark" aria-hidden>
-          <Logo size={22} />
+        <div className="rail-brand" aria-hidden>
+          <span className="rail-mark">
+            <Logo size={17} />
+          </span>
+          <span className="rail-brand-name">xln</span>
         </div>
         {NAV.map(item => (
           <NavLink
@@ -84,11 +87,15 @@ export function Shell({ children }: { children: ReactNode }) {
             aria-label={item.label}
             title={item.label}
           >
-            <Icon name={item.icon} size={19} />
+            <Icon name={item.icon} size={18} />
             <span className="rail-label">{item.label}</span>
           </NavLink>
         ))}
         <div className="rail-spacer" />
+        <div className="rail-foot">
+          <span className="net-badge">{wallet.jurisdiction || 'Testnet'}</span>
+          <span>Frame #{wallet.frameHeight.toLocaleString('en-US')}</span>
+        </div>
       </nav>
 
       <main className="main" id="wallet-content" tabIndex={-1}>

@@ -45,6 +45,15 @@ export function movementParty(movement: Movement, names: Map<string, string>): s
   return `${movement.hash && !movement.viaId ? 'Through' : 'To'} ${name}`;
 }
 
+/** "14:05" today, "Oct 1, 14:05" before; the frame stays in the detail view for whoever needs the proof. */
+function movementTime(movement: Movement): string {
+  if (!movement.timestamp) return `frame #${movement.height}`;
+  const at = new Date(movement.timestamp);
+  const time = at.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
+  if (at.toDateString() === new Date().toDateString()) return time;
+  return `${at.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}, ${time}`;
+}
+
 export function ActivityRow({
   movement,
   names,
@@ -63,12 +72,8 @@ export function ActivityRow({
   const party = movementParty(movement, names);
   // A credit limit or collateral figure is a setting, not money that moved: keep it out of the money column.
   const amountInline = movement.kind === 'account' || movement.kind === 'settlement';
-  // People read clocks, not frame numbers; the frame stays in the detail view for whoever needs the proof.
-  const subtitle =
-    [party, amountInline && amount ? amount : ''].filter(Boolean).join(' · ') ||
-    (movement.timestamp
-      ? new Date(movement.timestamp).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false })
-      : `frame #${movement.height}`);
+  const time = movementTime(movement);
+  const detail = [party, amountInline && amount ? amount : ''].filter(Boolean).join(' · ');
   const Tag = onClick ? 'button' : 'span';
   return (
     <div
@@ -83,23 +88,33 @@ export function ActivityRow({
         <span className={`ev-ic ${cls}`}>
           <Icon name={icon} size={15} />
         </span>
-        <span className="tx">
-          <span className="t">
-            {movement.kind === 'payment' && movement.tone === 'failed'
-              ? 'Payment failed'
-              : movement.kind === 'payment' && movement.tone === 'inflight'
-                ? 'Payment pending'
-                : movement.title}
-          </span>
-          <span className="s">{subtitle}</span>
+        <span className="t">
+          {movement.kind === 'payment' && movement.tone === 'failed'
+            ? 'Payment failed'
+            : movement.kind === 'payment' && movement.tone === 'inflight'
+              ? 'Payment pending'
+              : movement.title}
         </span>
-        <span className="r">
-          {amount && !amountInline ? <span className="v num">{amount}</span> : null}
-          <span className="u">
-            <span className={`state ${TONE_CLASS[movement.tone]}`}>{movement.state}</span>
-          </span>
+        <span className="ap">{detail || <span className="ap-time">{time}</span>}</span>
+        <span className="aa num">{amount && !amountInline ? amount : ''}</span>
+        <span className="as">
+          <span className={`state ${TONE_CLASS[movement.tone]}`}>{movement.state}</span>
         </span>
+        <span className="ad num">{time}</span>
       </Tag>
+    </div>
+  );
+}
+
+/** Column captions for a table of ActivityRow; hidden where rows fold to two lines. */
+export function ActivityHead() {
+  return (
+    <div className="dtable-head" aria-hidden>
+      <span className="ht">Description</span>
+      <span className="hp">Counterparty</span>
+      <span className="ha">Amount</span>
+      <span className="hs">Status</span>
+      <span className="hd">Date</span>
     </div>
   );
 }

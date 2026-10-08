@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { Legend } from '../components/Bars';
 import { CopyId } from '../components/CopyId';
+import { HOME, PageHead } from '../components/PageHead';
 import { Icon } from '../components/Icons';
 import { Sheet } from '../components/Sheet';
 import { TokenSection } from '../components/account/TokenSection';
@@ -84,28 +84,32 @@ export function AccountDetail() {
 						? 'Settling'
 						: 'Open';
 
+	const statusTone =
+		dispute && dispute.phase !== 'none' ? 'st-dispute' : account?.settlement === 'awaiting_you' ? 'st-pending' : 'st-settled';
+
 	return (
 		<div className="screen fade-in">
-			<div className="screen-header">
-				<span className="screen-title">
-					<button type="button" className="icon-btn" onClick={() => navigate(-1)} aria-label="Back" data-testid="back">
-						<Icon name="chevronLeft" size={18} />
-					</button>
-					<span>
-						<span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-							{label}
-							{account?.isHub ? <span className="chip hub">hub</span> : null}
-						</span>
-						<span style={{ display: 'block' }}>
-							<CopyId value={counterpartyId.toLowerCase()} label="Entity id" />
-						</span>
-					</span>
-				</span>
-			</div>
+			<PageHead
+				parent={HOME}
+				title={
+					<>
+						<span className="avatar">{label.slice(0, 1).toUpperCase()}</span>
+						{label}
+						{account?.isHub ? <span className="chip hub">hub</span> : null}
+						<span className={`status-pill ${statusTone}`}>{statusLabel}</span>
+					</>
+				}
+				sub={
+					<>
+						<CopyId value={counterpartyId.toLowerCase()} label="Entity ID" />
+						{wallet.jurisdiction ? ` · ${wallet.jurisdiction}` : ''} · {(account?.frameHeight ?? 0).toLocaleString('en-US')} frames signed
+					</>
+				}
+			/>
 
 			<div className="two-col">
 			<div>
-			<div className="actions" style={{ margin: '0 0 18px' }}>
+			<div className="actions pills" style={{ margin: '0 0 18px' }}>
 				<button type="button" className="btn primary" disabled={account?.disputed} onClick={() => navigate(`/pay?to=${counterpartyId.toLowerCase()}`)}>
 					<Icon name="pay" size={18} />
 					Pay
@@ -160,32 +164,32 @@ export function AccountDetail() {
 				</p>
 			) : null}
 			{account ? <SettlementCard account={account} wallet={wallet} /> : null}
-			{account && lanes.active.length > 0 ? (
-				<div style={{ margin: '0 0 12px' }}>
-					<Legend />
-				</div>
-			) : null}
-			{lanes.active.map(token => (
-				<TokenSection key={token.tokenId} token={token} />
-			))}
-			{lanes.empty.length > 0 ? (
-				<button type="button" className="btn quiet" style={{ marginBottom: 14 }} onClick={() => setShowEmpty(value => !value)} data-testid="account-unused-lanes" data-open={showEmpty ? 'yes' : 'no'}>
-					{showEmpty ? 'Hide' : 'Show'} {lanes.empty.length} unused {lanes.empty.length === 1 ? 'token' : 'tokens'} ·{' '}
-					{lanes.empty.map(token => getTokenMeta(token.tokenId).symbol).join(', ')}
+			<div className="tabs account-tabs">
+				<button type="button" className={showFrames ? '' : 'active'} aria-pressed={!showFrames} onClick={() => setShowFrames(false)} data-testid="account-tab-balances">
+					Balances
 				</button>
-			) : null}
-			{showEmpty ? lanes.empty.map(token => <TokenSection key={token.tokenId} token={token} />) : null}
-			<button
-				type="button"
-				className="btn quiet"
-				style={{ marginBottom: 14 }}
-				onClick={() => setShowFrames(value => !value)}
-				data-testid="account-frames-toggle"
-				data-open={showFrames ? 'yes' : 'no'}
-			>
-				{showFrames ? 'Hide' : 'Show'} the signed pages of this account
-			</button>
-			{showFrames ? <FrameHistory entityId={wallet.entityId} counterpartyId={counterpartyId.toLowerCase()} /> : null}
+				<button type="button" className={showFrames ? 'active' : ''} aria-pressed={showFrames} onClick={() => setShowFrames(true)} data-testid="account-tab-frames">
+					Signed frames
+				</button>
+			</div>
+			{showFrames ? (
+				<FrameHistory entityId={wallet.entityId} counterpartyId={counterpartyId.toLowerCase()} />
+			) : (
+				<>
+					{lanes.active.map(token => (
+						<TokenSection key={token.tokenId} token={token} />
+					))}
+					{lanes.empty.length > 0 ? (
+						<div className="account-links">
+							<button type="button" className="btn quiet" onClick={() => setShowEmpty(value => !value)} data-testid="account-unused-lanes" data-open={showEmpty ? 'yes' : 'no'}>
+								{showEmpty ? 'Hide' : 'Show'} {lanes.empty.length} unused {lanes.empty.length === 1 ? 'token' : 'tokens'} ·{' '}
+								{lanes.empty.map(token => getTokenMeta(token.tokenId).symbol).join(', ')}
+							</button>
+						</div>
+					) : null}
+					{showEmpty ? lanes.empty.map(token => <TokenSection key={token.tokenId} token={token} />) : null}
+				</>
+			)}
 			</div>
 			<div className="aside">
 				<div className="card">
@@ -240,7 +244,7 @@ export function AccountDetail() {
 					) : null}
 					<div className="kv">
 						<span className="k">Status</span>
-						<span className={`v ${dispute && dispute.phase !== 'none' ? 'st-dispute' : account?.settlement === 'awaiting_you' ? 'st-pending' : 'st-settled'}`} data-testid="account-status">
+						<span className={`v ${statusTone}`} data-testid="account-status">
 							{statusLabel}
 						</span>
 					</div>

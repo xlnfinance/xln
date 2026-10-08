@@ -8,15 +8,15 @@
 		<link rel="manifest" href="/manifest.webmanifest" />
 		<link rel="icon" href="/favicon-small.svg" type="image/svg+xml" />
 		<link rel="apple-touch-icon" href="/icon.svg" />
-		<meta name="theme-color" content="#0e1014" media="(prefers-color-scheme: dark)" />
-		<meta name="theme-color" content="#f4f5f8" media="(prefers-color-scheme: light)" />
+		<meta name="theme-color" content="#0b0e14" media="(prefers-color-scheme: dark)" />
+		<meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)" />
 		<meta name="apple-mobile-web-app-capable" content="yes" />
 		<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
 		<meta name="apple-mobile-web-app-title" content="xln" />
 		<link rel="preconnect" href="https://fonts.googleapis.com" />
 		<link
 			rel="stylesheet"
-			href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap"
+			href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400;14..32,500;14..32,600;14..32,700&family=JetBrains+Mono:wght@400;500&display=swap"
 		/>
 		<script>
 			(function () {
@@ -29,8 +29,8 @@
 					}
 					var d = JSON.parse(localStorage.getItem('xln-ui-design') || '{}');
 					var root = document.documentElement.dataset;
-					root.material = d.material || 'bank';
-					root.accent = d.accent || 'mono';
+					root.material = d.material || 'obsidian';
+					root.accent = d.accent || 'indigo';
 					root.numbers = d.numbers || 'sans';
 					root.risk = d.risk || 'violet';
 				} catch (_) {}

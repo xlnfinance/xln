@@ -20,23 +20,23 @@ export type DesignPrefs = {
 
 export const DESIGN_KEY = 'xln-ui-design';
 
-export const DEFAULT_DESIGN: DesignPrefs = { material: 'bank', accent: 'mono', accentHex: '#c9a962', numbers: 'sans', risk: 'violet' };
+export const DEFAULT_DESIGN: DesignPrefs = { material: 'obsidian', accent: 'indigo', accentHex: '#c9a962', numbers: 'sans', risk: 'violet' };
 
 export const MATERIALS: Array<{ id: Material; title: string; hint: string }> = [
-	{ id: 'obsidian', title: 'Obsidian', hint: 'Matte black, two surfaces, hairlines. Light theme is paper.' },
+	{ id: 'obsidian', title: 'Studio', hint: 'Cool neutral surfaces, slate ink, hairlines. Dark theme is deep navy.' },
 	{ id: 'bank', title: 'Private bank', hint: 'Warm off-white first, ink on paper. Dark theme is charcoal.' },
 	{ id: 'terminal', title: 'Terminal', hint: 'Graphite, phosphor green, numbers in mono everywhere.' },
 ];
 
 export const ACCENTS: Array<{ id: Accent; title: string; hint: string; swatch: string }> = [
-	{ id: 'indigo', title: 'Indigo', hint: 'Buttons and links in one calm blue.', swatch: '#6e7cff' },
+	{ id: 'indigo', title: 'Indigo', hint: 'Buttons, links and the active tab in one calm indigo.', swatch: '#635bff' },
 	{ id: 'mono', title: 'Monochrome', hint: 'Ink on ink. The only colors left are the money.', swatch: '#ecedef' },
 	{ id: 'brass', title: 'Brass', hint: 'Warm metal. Expensive, close to the edge.', swatch: '#c9a962' },
 	{ id: 'custom', title: 'Custom', hint: 'Any hex you like.', swatch: '' },
 ];
 
 export const NUMBER_FONTS: Array<{ id: NumberFont; title: string; hint: string; family: string; google: string | null }> = [
-	{ id: 'sans', title: 'Sans', hint: 'Instrument Sans. Clean, safe.', family: "'Instrument Sans', -apple-system, BlinkMacSystemFont, sans-serif", google: null },
+	{ id: 'sans', title: 'Sans', hint: 'Inter. Clean, tabular, safe.', family: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif", google: null },
 	{ id: 'serif', title: 'Serif', hint: 'Fraunces for sums. A fortune, not a balance.', family: "'Fraunces', 'Iowan Old Style', Georgia, serif", google: 'Fraunces:opsz,wght@9..144,500;9..144,600' },
 	{ id: 'tight', title: 'Tight', hint: 'Inter Tight. Dense, fast, tabular.', family: "'Inter Tight', 'Inter', -apple-system, sans-serif", google: 'Inter+Tight:wght@500;600;700' },
 ];

@@ -28,7 +28,11 @@ export function Tour() {
   const [rect, setRect] = useState<Rect | null>(null);
   const [cardHeight, setCardHeight] = useState(150);
   const [menuBottom, setMenuBottom] = useState<number | null>(null);
-  const ctx = useMemo(() => ({ wallet, pathname, baseline: baseline.current, dom }), [wallet, pathname]);
+  const clicked = useRef(new Set<string>());
+  const ctx = useMemo(
+    () => ({ wallet, pathname, baseline: baseline.current, clicked: clicked.current, dom }),
+    [wallet, pathname],
+  );
   const index = Math.min(tour.index, TOUR_STEPS.length - 1);
   const step = tour.active ? TOUR_STEPS[index] : undefined;
   const target = step?.target(ctx) ?? '';
@@ -41,6 +45,7 @@ export function Tour() {
     const key = `${wallet.entityId}:${step.id}`;
     if (entered.current !== key) {
       entered.current = key;
+      clicked.current.clear();
       step.enter?.(ctx);
     }
     if (step.done?.(ctx)) setTour({ index: index + 1 });
@@ -49,13 +54,23 @@ export function Tour() {
   useEffect(() => {
     if (!step) return;
     const timer = window.setInterval(() => setTick(value => value + 1), 200);
+    // Escape closes an open sheet first; only with nothing open does it leave the guide.
     const close = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setTour({ active: false });
+      if (event.key === 'Escape' && !document.querySelector('.sheet')) setTour({ active: false });
+    };
+    // A click on any test id is recorded for the open step; the step decides whether it was the one that counts.
+    const press = (event: MouseEvent) => {
+      const id = (event.target as Element | null)?.closest('[data-testid]')?.getAttribute('data-testid');
+      if (!id) return;
+      clicked.current.add(id);
+      setTick(value => value + 1);
     };
     window.addEventListener('keydown', close);
+    document.addEventListener('click', press, true);
     return () => {
       clearInterval(timer);
       window.removeEventListener('keydown', close);
+      document.removeEventListener('click', press, true);
     };
   }, [step, setTour]);
 
@@ -87,20 +102,27 @@ export function Tour() {
   }, [target]);
 
   if (!step) return null;
-  const width = Math.min(320, window.innerWidth - 24);
-  const left = rect
-    ? Math.max(12, Math.min(rect.left, window.innerWidth - width - 12))
-    : window.innerWidth - width - 12;
+  const width = Math.min(340, window.innerWidth - 24);
   const below = rect ? Math.max(rect.top + rect.height, menuBottom ?? 0) + 14 : 24;
   const above = rect ? rect.top - cardHeight - 14 : -1;
   const fitsAbove = above >= 12;
   const fitsBelow = below + cardHeight <= window.innerHeight - 12;
-  const top = fitsAbove && (menuBottom !== null || !fitsBelow) ? above : below;
+  // A tall target leaves no room above or below: sit beside it when the screen is wide enough.
+  const beside = rect && !fitsAbove && !fitsBelow && rect.left + rect.width + 14 + width <= window.innerWidth - 12;
+  const left = !rect
+    ? window.innerWidth - width - 12
+    : beside
+      ? rect.left + rect.width + 14
+      : Math.max(12, Math.min(rect.left, window.innerWidth - width - 12));
+  const preferred = beside ? (rect?.top ?? 24) : fitsAbove && (menuBottom !== null || !fitsBelow) ? above : below;
+  // The card, and its Next button, always stay on screen.
+  const top = Math.max(12, Math.min(preferred, window.innerHeight - cardHeight - 12));
   const menuNeedsSpace = menuBottom !== null && !fitsAbove && !fitsBelow;
   const finish = step.id === 'finish';
+  const total = TOUR_STEPS.length - 1;
   return (
-    <div className="tour" data-testid="tour" data-step={step.id} data-target={target}>
-      {rect && <div className="tour-ring" style={rect} />}
+    <div className="tour" data-testid="tour" data-step={step.id} data-target={target} data-chapter={step.chapter}>
+      {rect && <div className={`tour-ring${step.detail ? ' detail' : ''}`} style={rect} />}
       <div
         ref={card}
         className="tour-card anchored"
@@ -117,7 +139,9 @@ export function Tour() {
         aria-live="polite"
       >
         <div className="tour-head">
-          <span className="tour-kicker">{Math.min(index + 1, 4)} / 4</span>
+          <span className="tour-kicker">
+            {step.chapter} · {Math.min(index + 1, total)} of {total}
+          </span>
           <button
             type="button"
             className="icon-btn"
@@ -133,6 +157,20 @@ export function Tour() {
         <p className="tour-body" data-testid="tour-hint">
           {step.instruction(ctx)}
         </p>
+        <div className="tour-progress" aria-hidden>
+          <span style={{ width: `${Math.round((Math.min(index, total) / total) * 100)}%` }} />
+        </div>
+        {step.detail && (
+          <button
+            type="button"
+            className="btn primary sm"
+            data-testid="tour-next"
+            style={{ pointerEvents: 'auto' }}
+            onClick={() => setTour({ index: index + 1 })}
+          >
+            Next
+          </button>
+        )}
         {finish && (
           <button
             type="button"

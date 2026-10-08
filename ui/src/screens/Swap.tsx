@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { HOME, PageHead } from '../components/PageHead';
+import { Link, useSearchParams } from 'react-router-dom';
 import type { AccountState, RuntimeAdapterEntitySummary } from '@xln/core/api/public/runtime-module';
 import { getJurisdictionStackId } from '@xln/core/api/public/runtime-module';
 import { ReceiveCapacity } from '../components/ReceiveCapacity';
@@ -13,7 +14,7 @@ import { switchActiveEntity } from '../runtime/entities';
 import { peekXLN } from '../runtime/xln-loader';
 import { sendEntityTxs } from '../runtime/tx';
 import { hubTakerFeeBps, jurisdictionRef, liveCrossOrders, openSwapReceiveAccount, planSwap, readAccountState, submitSwapPlan } from '../runtime/financial/swap';
-import { amountInputText, formatMoney, getTokenMeta, parseAmount, plainAmount} from '../runtime/format';
+import { amountInputText, formatMoney, getTokenMeta, parseAmount, plainAmount, formatLimit } from '../runtime/format';
 import { openSwapOffers, useWallet } from '../runtime/views';
 import { counterpartyFeePolicy } from '../runtime/financial/manage';
 
@@ -22,7 +23,6 @@ type Mode = 'same' | 'cross';
 const normalizeId = (value: unknown): string => String(value || '').trim().toLowerCase();
 
 export function Swap() {
-	const navigate = useNavigate();
 	const [params] = useSearchParams();
 	const entityId = useApp(s => s.activeEntityId);
 	const toast = useApp(s => s.toast);
@@ -325,22 +325,20 @@ export function Swap() {
 
 	return (
 		<div className="screen fade-in">
-			<div className="screen-header">
-				<span className="screen-title">
-					<button type="button" className="icon-btn" onClick={() => navigate(-1)} aria-label="Back" data-testid="back">
-						<Icon name="chevronLeft" size={18} />
-					</button>
-					Swap
-				</span>
-				<span className="segc">
-					<button type="button" className={mode === 'same' ? 'active' : ''} onClick={() => setMode('same')}>
-						Same network
-					</button>
-					<button type="button" className={mode === 'cross' ? 'active' : ''} onClick={() => setMode('cross')} disabled={otherEntities.length === 0}>
-						Across networks
-					</button>
-				</span>
-			</div>
+			<PageHead
+				title="Swap"
+				parent={HOME}
+				actions={
+					<span className="segc">
+						<button type="button" className={mode === 'same' ? 'active' : ''} onClick={() => setMode('same')}>
+							Same network
+						</button>
+						<button type="button" className={mode === 'cross' ? 'active' : ''} onClick={() => setMode('cross')} disabled={otherEntities.length === 0}>
+							Across networks
+						</button>
+					</span>
+				}
+			/>
 
 			<div className="two-col pay">
 				<div className="stack">
@@ -348,7 +346,7 @@ export function Swap() {
 						<div className="field-head">
 							<span>You pay</span>
 							<button type="button" className="btn quiet num" style={{ fontSize: 12 }} disabled={giveSpendable <= 0n} onClick={() => setGiveText(amountInputText(giveSpendable, giveMeta.decimals))}>
-								Up to {formatMoney(giveSpendable, giveMeta.decimals)}
+								Up to {formatLimit(giveSpendable, giveMeta.decimals)}
 								{hub ? ` with ${hub.label}` : ''}
 							</button>
 						</div>
@@ -358,7 +356,7 @@ export function Swap() {
 						</div>
 					</div>
 					<div className="flip">
-						<button type="button" onClick={flip} aria-label="Flip">
+						<button type="button" onClick={flip} aria-label="Flip" data-testid="swap-flip">
 							<Icon name="swap" size={16} />
 						</button>
 					</div>
@@ -526,6 +524,17 @@ export function Swap() {
 						{submitting ? 'Placing…' : prepared ? `Swap ${giveMeta.symbol} for ${wantMeta.symbol}` : 'Swap'}
 					</button>
 
+					{hub && giveToken ? (
+						<div className="card">
+							<h3 className="caps">Your account with {hub.label}</h3>
+							<DeltaBar derived={giveToken.derived} tokenId={giveTokenId} />
+							<DeltaCaption derived={giveToken.derived} format={value => formatMoney(value, giveMeta.decimals)} />
+							<p className="note" style={{ marginTop: 12 }}>
+								The order rests on this account: a fill moves the balance you both sign, nothing moves on-chain.
+							</p>
+						</div>
+					) : null}
+
 					{hub && mode === 'same' ? (
 						<div className="mobile-only card">
 							<div className="sect" style={{ marginTop: 0 }}>
@@ -628,7 +637,7 @@ export function Swap() {
 											<span className="r">
 												<span className="state st-inflight">open</span>
 												<div>
-													<button type="button" className="btn quiet" style={{ fontSize: 12 }} disabled={cancelingId === offer.offerId} onClick={() => void cancel(offer.counterpartyId, offer.offerId)}>
+													<button type="button" className="btn quiet" style={{ fontSize: 12 }} disabled={cancelingId === offer.offerId} onClick={() => void cancel(offer.counterpartyId, offer.offerId)} data-testid="swap-offer-cancel">
 														{cancelingId === offer.offerId ? 'Canceling…' : 'Cancel'}
 													</button>
 												</div>
@@ -674,16 +683,6 @@ export function Swap() {
 									<div className="s">One secret releases both legs. If it never appears, both unlock.</div>
 								</div>
 							</div>
-						</div>
-					) : null}
-					{hub && giveToken ? (
-						<div className="card">
-							<h3 className="caps">Your account with {hub.label}</h3>
-							<DeltaBar derived={giveToken.derived} tokenId={giveTokenId} />
-							<DeltaCaption derived={giveToken.derived} format={value => formatMoney(value, giveMeta.decimals)} />
-							<p className="note" style={{ marginTop: 12 }}>
-								The order rests on this account. Filled amounts move Δ, nothing moves on-chain.
-							</p>
 						</div>
 					) : null}
 					{hubs.length === 0 && (

@@ -30,11 +30,18 @@ export function TestMoney({ wallet }: { wallet: WalletView }) {
     }
   };
   return (
-    <section className="test-money" aria-label="Test money faucet">
-      <div className="test-money-intro">
-        <span className="test-money-label">Test money</span>
-        <span className="note">For trying payments · no real value</span>
-      </div>
+    <section className="testmode" aria-label="Test money faucet">
+      <span className="testmode-label">Test money</span>
+      <span className="note">Try payments with funds that have no real value.</span>
+      {hub && (
+        <details className="disclosure">
+          <summary>How it works</summary>
+          <p className="note">
+            Each click adds 100 USDC of test money. Existing credit is used first; if needed, this action increases how
+            much {hub.label} can owe you without collateral.
+          </p>
+        </details>
+      )}
       <button
         type="button"
         className="btn sm"
@@ -48,15 +55,6 @@ export function TestMoney({ wallet }: { wallet: WalletView }) {
       <button type="button" className="more" onClick={() => setTour({ active: true, index: 0 })}>
         Tour
       </button>
-      {hub && (
-        <details className="disclosure">
-          <summary>How test money works</summary>
-          <p className="note">
-            Each click adds 100 USDC of test money. Existing credit is used first; if needed, this action increases how
-            much {hub.label} can owe you without collateral.
-          </p>
-        </details>
-      )}
       {done && (
         <span role="status" data-testid="test-money-status">
           100 USDC received

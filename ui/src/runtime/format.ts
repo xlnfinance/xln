@@ -65,6 +65,12 @@ export function formatMoney(amount: bigint, decimals: number, fraction = 2): str
 	return fraction > 0 && decimals > 0 ? `${sign}${whole.toLocaleString('en-US')}.${digits}` : `${sign}${whole.toLocaleString('en-US')}`;
 }
 
+/** A limit shown to cents never overstates what is available: it rounds toward zero. */
+export function formatLimit(amount: bigint, decimals: number, fraction = 2): string {
+	const unit = 10n ** BigInt(Math.max(0, decimals - fraction));
+	return formatMoney(amount - (amount % unit), decimals, fraction);
+}
+
 /** Signed money: "+230.00" / "−120.00" / "0.00". */
 export function formatSigned(amount: bigint, decimals: number, fraction = 2): string {
 	const body = formatMoney(amount < 0n ? -amount : amount, decimals, fraction);
