@@ -18,7 +18,7 @@ export const oversizedBodyResponse = (req: Request, pathname: string, headers?: 
   const declared = Number(req.headers.get('content-length') ?? '0');
   const limit = pathname === WATCHTOWER_PROXY_PATH ? WATCHTOWER_PROXY_MAX_BODY_BYTES : API_MAX_BODY_BYTES;
   if (!Number.isFinite(declared) || declared <= limit) return null;
-  return new Response(JSON.stringify({ error: 'Request body too large', limit }), { status: 413, headers });
+  return new Response(JSON.stringify({ error: 'Request body too large', limit }), { status: 413, ...(headers ? { headers } : {}) });
 };
 const WATCHTOWER_PROXY_TIMEOUT_MS = 5_000;
 
