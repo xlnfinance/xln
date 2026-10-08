@@ -11,6 +11,11 @@ and launch status are separate surfaces and should be assessed independently.
 4. [core/12_invariant.md](core/12_invariant.md) — the RCPAN invariant
 5. [core/rjea-architecture.md](core/rjea-architecture.md) — canonical Runtime → Entity → Account → Jurisdiction cascade
 
+## Russian publications
+
+- [ru/readme.md](ru/readme.md) - Russian manuals and publication sources
+- [Core technical manual (PDF)](ru/output/pdf/xln-core-technical-manual.pdf) - 28 pages and 40 diagrams
+
 ## Theory
 
 - [competitors.md](competitors.md) — architectural claims, limits and falsification

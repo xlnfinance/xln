@@ -34,17 +34,13 @@ const MULTILINGUAL_FILES = new Set([
 // Bundled browser runtime embeds compressed BIP39 tables whose opaque byte
 // strings decode as Cyrillic under a UTF-8 scan. Source of truth is
 // brainvault/; do not treat the artifact as editable prose.
-const BUNDLED_ARTIFACT_FILES = new Set([
-  'ui/public/runtime.js',
-]);
+const BUNDLED_ARTIFACT_FILES = new Set(['ui/public/runtime.js']);
 
 // External projects retain their own source-language policy. Root XLN gates
 // must not classify their implementation or documentation as XLN source.
 const EXCLUDED_PREFIXES = ['.archive/', 'ai/', 'brainvault/'];
 
-const trackedFiles = execFileSync('git', ['ls-files'], { encoding: 'utf8' })
-  .split(/\r?\n/u)
-  .filter(Boolean);
+const trackedFiles = execFileSync('git', ['ls-files'], { encoding: 'utf8' }).split(/\r?\n/u).filter(Boolean);
 
 const violations: string[] = [];
 for (const file of trackedFiles) {
@@ -53,6 +49,9 @@ for (const file of trackedFiles) {
   // replacement commit is staged. The source-language gate audits files that
   // exist in the candidate tree; a deleted path has no content to classify.
   if (!fs.existsSync(file)) continue;
+  // Owner-authorized Russian publications and their editable sources live here.
+  // Other documentation and implementation retain the English-only policy.
+  if (file.startsWith('docs/ru/')) continue;
   if (EXCLUDED_PREFIXES.some(prefix => file.startsWith(prefix))) continue;
   if (MULTILINGUAL_FILES.has(file)) continue;
   if (BUNDLED_ARTIFACT_FILES.has(file)) continue;
@@ -69,6 +68,4 @@ if (violations.length > 0) {
   process.exit(1);
 }
 
-console.log(
-  `ENGLISH_SOURCE_OK checked=${trackedFiles.length} multilingualAllowlist=${MULTILINGUAL_FILES.size}`,
-);
+console.log(`ENGLISH_SOURCE_OK checked=${trackedFiles.length} multilingualAllowlist=${MULTILINGUAL_FILES.size}`);

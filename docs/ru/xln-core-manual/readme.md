@@ -13,10 +13,10 @@ Russian source-backed manual: 28 pages, 40 vector figures. Code baseline:
 Run from the repository root:
 
 ```sh
-python3 docs/xln-core-manual/build.py
+python3 docs/ru/xln-core-manual/build.py
 ```
 
-The PDF is written to `docs/output/pdf/xln-core-technical-manual.pdf`. Fonts are
+The PDF is written to `docs/ru/output/pdf/xln-core-technical-manual.pdf`. Fonts are
 embedded; diagrams remain vectors. The renderer rejects page or diagram-box
 overflow. `XLN_MANUAL_FONTS` may point to a separate directory with the same five
 font files. The italic face currently uses macOS Georgia Italic.
