@@ -527,6 +527,8 @@ export async function registerEntities(
         signerId: r.signer,
         data: {
           isProposer: true,
+          // The profile name is what every adapter and the replayed graph label the entity by.
+          profileName: sourceEntity.name,
           position: sourceEntity.position,
           config: {
             mode: 'proposer-based' as const,
@@ -587,6 +589,13 @@ export function getScenarioJAdapter(env: RuntimeReplica): JAdapter {
 // ============================================================================
 // JREPLICA + JURISDICTION HELPERS
 // ============================================================================
+
+/**
+ * Display name of the jurisdiction the presentation scenarios settle on: a local EVM test
+ * chain and its Depository contract. It is the J-machine label in replays, so it must not
+ * suggest a public network the demo never touched.
+ */
+export const DEMO_JURISDICTION_NAME = 'Local test chain · Depository';
 
 /**
  * Create jReplica (J-Machine) for a jurisdiction

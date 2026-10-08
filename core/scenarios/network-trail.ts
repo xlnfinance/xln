@@ -1,8 +1,9 @@
-import type { RuntimeAdapterGraphFrame } from '../api/runtime-adapter/resolve';
+import type { RuntimeAdapterGraphEntityCore, RuntimeAdapterGraphFrame } from '../api/runtime-adapter/resolve';
 import { buildRuntimeActivityEvents } from '../api/public/activity-history';
 import { serializeTaggedJson } from '../protocol/serialization';
 import type { EnvSnapshot } from '../runtime/types';
 import type { RuntimeActivityEvent } from '../storage/views/activity-types';
+import type { NarrationBadge, ScenarioNarrationBeat } from './harness/narration';
 
 export type NetworkTrailIndexFrame = {
   runtimeId: string;
@@ -35,13 +36,22 @@ export type NetworkTrailCue = {
   focusEntityIds?: string[];
   /** Bilateral accounts (`left:right`) those inputs touched. */
   focusAccountIds?: string[];
+  /** A ladder the narration walks, e.g. bilateral → on-chain → legal finality. */
+  badges?: NarrationBadge[];
+  /** A presentation starts at this cue: every earlier step is setup it summarises. */
+  condensePrior?: true;
+  /** A presentation ends at this cue; later frames stay in the full timeline only. */
+  endsPresentation?: true;
 };
+
+type SnapshotSwapOffer = { giveTokenId?: unknown; wantTokenId?: unknown };
 
 type SnapshotAccount = {
   state?: {
     leftEntity?: unknown;
     rightEntity?: unknown;
     deltas?: ReadonlyMap<number, unknown>;
+    swapOffers?: { get(offerId: string): SnapshotSwapOffer | undefined };
   };
   status?: unknown;
   mempool?: SnapshotAccountActivity[];
@@ -75,31 +85,59 @@ const integer = (value: unknown): number => {
   return Number.isFinite(parsed) ? parsed : 0;
 };
 
-const graphAccountActivity = (tx: SnapshotAccountActivity): Record<string, unknown> => {
+type SwapOfferLookup = (offerId: string) => SnapshotSwapOffer | undefined;
+
+const tokenIdField = (value: unknown): number | undefined => {
+  const tokenId = Number(value);
+  return Number.isSafeInteger(tokenId) && tokenId > 0 ? tokenId : undefined;
+};
+
+/**
+ * Both legs of a swap, maker's view: an offer states them, a fill states its execution amounts
+ * against the resting offer. A replay labels the trade with these; a partial leg is omitted.
+ */
+const swapLegs = (type: string, data: Record<string, unknown>, offerOf: SwapOfferLookup): Record<string, unknown> => {
+  const offer = type === 'swap_resolve' ? offerOf(String(data['offerId'] ?? '')) : undefined;
+  const legs = type === 'swap_offer'
+    ? [data['giveTokenId'], data['giveAmount'], data['wantTokenId'], data['wantAmount']]
+    : type === 'swap_resolve'
+      ? [offer?.giveTokenId, data['executionGiveAmount'], offer?.wantTokenId, data['executionWantAmount']]
+      : [];
+  const [giveTokenId, giveAmount, wantTokenId, wantAmount] = [tokenIdField(legs[0]), legs[1], tokenIdField(legs[2]), legs[3]];
+  if (giveTokenId === undefined || wantTokenId === undefined) return {};
+  if (typeof giveAmount !== 'bigint' || typeof wantAmount !== 'bigint') return {};
+  return { giveTokenId, giveAmount, wantTokenId, wantAmount };
+};
+
+const graphAccountActivity = (tx: SnapshotAccountActivity, offerOf: SwapOfferLookup): Record<string, unknown> => {
   const data = typeof tx.data === 'object' && tx.data !== null
     ? tx.data as Record<string, unknown>
     : {};
   const tokenId = Number(data['tokenId']);
+  const type = String(tx.type || '');
   return {
-    type: String(tx.type || ''),
+    type,
     ...(Number.isSafeInteger(tokenId) && tokenId >= 0 ? { tokenId } : {}),
     ...(typeof data['amount'] === 'bigint' ? { amount: data['amount'] } : {}),
     ...(typeof data['fromEntityId'] === 'string' ? { fromEntityId: data['fromEntityId'] } : {}),
     ...(typeof data['toEntityId'] === 'string' ? { toEntityId: data['toEntityId'] } : {}),
+    ...swapLegs(type, data, offerOf),
   };
 };
 
-const graphAccountActivities = (txs: readonly SnapshotAccountActivity[]): Record<string, unknown>[] =>
-  txs.slice(-2).map(graphAccountActivity);
+const graphAccountActivities = (
+  txs: readonly SnapshotAccountActivity[],
+  offerOf: SwapOfferLookup,
+): Record<string, unknown>[] => txs.slice(-2).map((tx) => graphAccountActivity(tx, offerOf));
 
-const graphAccountFrame = (frame: SnapshotAccountFrame): Record<string, unknown> => ({
+const graphAccountFrame = (frame: SnapshotAccountFrame, offerOf: SwapOfferLookup): Record<string, unknown> => ({
   height: integer(frame.height),
   timestamp: integer(frame.timestamp),
   jHeight: integer(frame.jHeight),
   ...(typeof frame.prevFrameHash === 'string' ? { prevFrameHash: frame.prevFrameHash } : {}),
   ...(frame.accountStateRoot !== undefined ? { accountStateRoot: frame.accountStateRoot } : {}),
   ...(frame.stateHash !== undefined ? { stateHash: frame.stateHash } : {}),
-  accountTxs: graphAccountActivities(frame.accountTxs ?? []),
+  accountTxs: graphAccountActivities(frame.accountTxs ?? [], offerOf),
   accountTxCount: frame.accountTxs?.length ?? 0,
 });
 
@@ -112,15 +150,17 @@ const graphAccountFromSnapshot = (
   const [leftEntity, rightEntity] = observerEntityId < other
     ? [observerEntityId, other]
     : [other, observerEntityId];
-  const mempool = graphAccountActivities(account.mempool ?? []);
+  const offers = account.state?.swapOffers;
+  const offerOf: SwapOfferLookup = (offerId) => offers?.get(offerId);
+  const mempool = graphAccountActivities(account.mempool ?? [], offerOf);
   return {
     leftEntity: normalizeId(account.state?.leftEntity) || leftEntity,
     rightEntity: normalizeId(account.state?.rightEntity) || rightEntity,
     status: account.status ?? 'open',
     mempool,
     mempoolCount: mempool.length,
-    ...(account.currentFrame ? { currentFrame: graphAccountFrame(account.currentFrame) } : {}),
-    ...(account.pendingFrame ? { pendingFrame: graphAccountFrame(account.pendingFrame) } : {}),
+    ...(account.currentFrame ? { currentFrame: graphAccountFrame(account.currentFrame, offerOf) } : {}),
+    ...(account.pendingFrame ? { pendingFrame: graphAccountFrame(account.pendingFrame, offerOf) } : {}),
     deltas: new Map(account.state?.deltas ?? []),
     currentHeight: integer(account.currentHeight),
     rollbackCount: integer(account.rollbackCount),
@@ -134,6 +174,23 @@ const graphAccountFromSnapshot = (
     } : {}),
   };
 };
+
+type SnapshotDebt = { tokenId: number; creditor: string; remainingAmount: bigint; createdDebtIndex: number };
+
+/** One on-chain debt in a trail frame: what the entity still owes, and its queue position. */
+export type TrailGraphDebt = { tokenId: number; creditor: string; remaining: bigint; queueIndex: number };
+
+/** A trail's entity core: the live graph core plus the debts the entity owes on-chain. */
+export type TrailGraphEntityCore = RuntimeAdapterGraphEntityCore & { debts?: TrailGraphDebt[] };
+
+const graphDebtsFromState = (
+  byToken: ReadonlyMap<number, ReadonlyMap<string, SnapshotDebt>> | undefined,
+): TrailGraphDebt[] =>
+  Array.from(byToken?.values() ?? [])
+    .flatMap((debts) => Array.from(debts.values()))
+    .filter((debt) => debt.remainingAmount > 0n)
+    .map((debt) => ({ tokenId: debt.tokenId, creditor: normalizeId(debt.creditor), remaining: debt.remainingAmount, queueIndex: integer(debt.createdDebtIndex) }))
+    .sort((left, right) => left.tokenId - right.tokenId || left.queueIndex - right.queueIndex);
 
 /** Browser-safe projection shared by CLI recording and in-browser scenarios. */
 export const graphFrameFromSnapshot = (
@@ -155,18 +212,26 @@ export const graphFrameFromSnapshot = (
     // Same summary shape the live adapter publishes: the jurisdiction name is what lets a
     // replay render its J-machine. Addresses stay out — they vary per anvil lease.
     const jurisdictionName = String(state?.config?.jurisdiction?.name || '').trim();
+    // The scenario's authored stage position: a replay places banks where a live run does.
+    const position = replica.position
+      ? { x: replica.position.x, y: replica.position.y, z: replica.position.z }
+      : null;
     return {
       summary: {
         entityId, runtimeId, label, height, isHub: state?.profile?.isHub === true,
         ...(jurisdictionName ? { jurisdiction: { name: jurisdictionName } } : {}),
+        ...(position ? { position } : {}),
       },
-      core: {
+      core: <TrailGraphEntityCore>{
         entityId,
         signerId: String(replica.signerId || ''),
         height: integer(state?.height ?? height),
         timestamp: integer(state?.timestamp ?? timestamp),
         ...(state?.prevFrameHash ? { prevFrameHash: state.prevFrameHash } : {}),
         reserves: state?.reserves instanceof Map ? new Map(state.reserves) : new Map(),
+        // On-chain debts this entity owes, in the Depository's first-come queue order. A
+        // replay shows a shortfall that became debt; tx hashes stay out (they vary per lease).
+        debts: graphDebtsFromState(state?.outDebtsByToken),
         profile: { name: label, isHub: state?.profile?.isHub === true },
       },
       accounts: { items: accounts, nextCursor: null },
@@ -280,9 +345,43 @@ const deterministicActivity = (event: RuntimeActivityEvent): RuntimeActivityEven
   ...('hash' in event ? { hash: '' } : {}),
 });
 
+/**
+ * A beat narrates a frame that is already committed, so it becomes a cue of its own on that
+ * frame: same height, a distinct id that sorts after the frame's announcing cue.
+ */
+const beatCues = (
+  runtimeId: string,
+  beats: readonly ScenarioNarrationBeat[],
+  focusByHeight: ReadonlyMap<number, { entityIds: string[]; accountIds: string[] }>,
+): NetworkTrailCue[] => {
+  const perHeight = new Map<number, number>();
+  return beats.map((beat) => {
+    const focus = focusByHeight.get(beat.height);
+    if (!focus) throw new Error(`NETWORK_TRAIL_BEAT_FRAME_MISSING:h${beat.height}:${beat.title}`);
+    const ordinal = perHeight.get(beat.height) ?? 0;
+    perHeight.set(beat.height, ordinal + 1);
+    const entityIds = beat.focusEntityIds ? [...new Set(beat.focusEntityIds.map(normalizeId))].sort() : focus.entityIds;
+    return {
+      id: `authored:${runtimeId}:h${beat.height}:b${String(ordinal).padStart(2, '0')}`,
+      at: { runtimeId, height: beat.height, timestamp: beat.height },
+      title: beat.title,
+      ...(beat.what ? { subtitle: beat.what, what: beat.what } : {}),
+      ...(beat.why ? { why: beat.why } : {}),
+      ...(beat.tradfiParallel ? { tradfiParallel: beat.tradfiParallel } : {}),
+      ...(beat.keyMetrics ? { keyMetrics: [...beat.keyMetrics] } : {}),
+      ...(beat.badges ? { badges: beat.badges.map((badge) => ({ ...badge })) } : {}),
+      ...(beat.condensePrior ? { condensePrior: true as const } : {}),
+      ...(beat.endsPresentation ? { endsPresentation: true as const } : {}),
+      ...(entityIds.length > 0 ? { focusEntityIds: entityIds } : {}),
+      ...(!beat.focusEntityIds && focus.accountIds.length > 0 ? { focusAccountIds: focus.accountIds } : {}),
+    };
+  });
+};
+
 export const networkTrailFromSnapshots = (
   runtimeId: string,
   snapshots: readonly EnvSnapshot[],
+  beats: readonly ScenarioNarrationBeat[] = [],
 ): NetworkTrailV1 => {
   const expected = normalizeId(runtimeId);
   if (!expected) throw new Error('NETWORK_TIMELINE_RUNTIME_ID_REQUIRED');
@@ -292,14 +391,16 @@ export const networkTrailFromSnapshots = (
   const frames: Record<string, RuntimeAdapterGraphFrame> = {};
   const activity: RuntimeActivityEvent[] = [];
   const cues: NetworkTrailCue[] = [];
+  const focusByHeight = new Map<number, { entityIds: string[]; accountIds: string[] }>();
   const indexFrames = ordered.map((snapshot) => {
     const height = integer(snapshot.state.height);
     frames[String(height)] = deterministicGraphFrame(graphFrameFromSnapshot(expected, snapshot));
     activity.push(...activityEventsFromSnapshot(expected, snapshot).map(deterministicActivity));
+    const focus = snapshotFocus(snapshot);
+    focusByHeight.set(height, focus);
     const subtitle = snapshot.meta?.subtitle;
     if (subtitle) {
       const shortSubtitle = String(subtitle.what || snapshot.narrative || snapshot.description || '').trim();
-      const focus = snapshotFocus(snapshot);
       cues.push({
         id: `authored:${expected}:h${height}`,
         at: { runtimeId: expected, height, timestamp: height },
@@ -323,6 +424,8 @@ export const networkTrailFromSnapshots = (
     };
   });
   activity.sort((left, right) => left.height - right.height || left.id.localeCompare(right.id));
+  cues.push(...beatCues(expected, beats, focusByHeight));
+  cues.sort((left, right) => left.at.height - right.at.height || left.id.localeCompare(right.id));
   return {
     version: 1,
     runtimeId: expected,

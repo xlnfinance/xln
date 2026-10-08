@@ -380,9 +380,10 @@ describe('network caption', () => {
     expect(caption).toEqual({
       title: 'Alice → Hub',
       subtitle: '100 USDC routed',
-      mechanic: 'Bilateral transfer — settled between two parties, nothing on-chain.',
+      mechanic: 'Bilateral transfer: both banks sign the new account state; nothing goes on-chain.',
       extraCount: 0,
       source: 'activity',
+      tradfiParallel: "A correspondent transfer. Irrevocable between the two banks once both sign, and enforceable on-chain up to the account's collateral; above that it is an unsecured claim. Legal finality depends on system designation.",
     });
   });
 
@@ -412,6 +413,10 @@ describe('network caption', () => {
       extraCount: 0,
       source: 'cue',
       accent: '#f00',
+      // What the author left unsaid comes from the step's own event, never replacing the cue,
+      // and no per-frame runtime line is added under it.
+      why: 'Bilateral transfer: both banks sign the new account state; nothing goes on-chain.',
+      tradfiParallel: "A correspondent transfer. Irrevocable between the two banks once both sign, and enforceable on-chain up to the account's collateral; above that it is an unsecured claim. Legal finality depends on system designation.",
     });
   });
 
@@ -429,15 +434,15 @@ describe('network caption', () => {
     const mechanicOf = (type: string, rawType: string) =>
       captionForStep(step(2), [{ ...activityEvent(2, 'b', 'x'), type, rawType } as never]).mechanic;
 
-    expect(mechanicOf('payment', 'directPayment')).toContain('nothing on-chain');
-    expect(mechanicOf('htlc', 'htlc_lock')).toContain('cannot take the money mid-hop');
-    expect(mechanicOf('settlement', 'settle_approve')).toContain('only the difference');
+    expect(mechanicOf('payment', 'directPayment')).toContain('nothing goes on-chain');
+    expect(mechanicOf('htlc', 'htlc_lock')).toContain('every lock expires');
+    expect(mechanicOf('settlement', 'settle_approve')).toContain('only its net amounts');
     expect(mechanicOf('j_batch', 'jInput')).toContain('one on-chain transaction');
     // Raw type is sharper than the coarse category where it matters.
-    expect(mechanicOf('account', 'set_credit_limit')).toContain('without locking collateral');
-    expect(mechanicOf('account', 'reserveToCollateral')).toContain('costs a J-transaction');
+    expect(mechanicOf('account', 'set_credit_limit')).toContain('no collateral behind it');
+    expect(mechanicOf('account', 'reserveToCollateral')).toContain('needs an on-chain transaction');
     expect(mechanicOf('account', 'openAccount')).toContain('no network-wide registration');
-    expect(mechanicOf('j_event', 'disputeStarted')).toContain('last signed frame');
+    expect(mechanicOf('j_event', 'disputeStarted')).toContain('last co-signed state');
     expect(mechanicOf('unknown-type', 'whatever')).toBe('');
   });
 

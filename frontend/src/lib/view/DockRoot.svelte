@@ -29,6 +29,8 @@
   import 'dockview/dist/styles/dockview.css';
 
   export let embedMode = false;
+  /** Presentation stage (embed `present=1`): graph only, nothing restored or persisted. */
+  export let presentMode = false;
   export let runtimeFrameEnv: Writable<RuntimeReplica | null>;
   export let runtimeFrameHistory: Writable<EnvSnapshot[]>;
   export let runtimeFrameTimeIndex: Writable<number>;
@@ -236,6 +238,7 @@
               runtimeFrameHistory,
               runtimeFrameTimeIndex,
               graphInitSignal,
+              presentMode,
             },
           });
         } else if (options.name === 'wallet') {
@@ -463,9 +466,17 @@
       }
     };
 
-    ensureWorkspacePanels();
+    const ensurePresentationPanels = () => {
+      ensurePanel({ id: 'graph3d', component: 'graph3d', title: 'Graph3D' });
+    };
 
-    if (shouldRestoreLayout && savedLayout) {
+    if (presentMode) {
+      // A presentation is a fixed stage: the graph alone. The saved workspace layout is
+      // neither restored nor overwritten, so presenting never disturbs the operator's dock.
+      ensurePresentationPanels();
+      markWorkspaceReady();
+    } else if (shouldRestoreLayout && savedLayout) {
+      ensureWorkspacePanels();
       setTimeout(() => {
         try {
           const config = JSON.parse(savedLayout);
@@ -481,11 +492,12 @@
         }
       }, 100);
     } else {
+      ensureWorkspacePanels();
       markWorkspaceReady();
     }
 
     const graph3dApi = dockview.getPanel('graph3d');
-    if (graph3dApi) {
+    if (graph3dApi && !presentMode) {
       setTimeout(() => {
         if (mobileDockLayout) return;
         const widthPercent = embedMode ? 1.0 : 0.50;
@@ -500,7 +512,7 @@
 
     dockview.onDidLayoutChange(() => {
       if (saveLayoutTimer) clearTimeout(saveLayoutTimer);
-      if (mobileDockLayout) {
+      if (mobileDockLayout || presentMode) {
         saveLayoutTimer = null;
         return;
       }
@@ -593,7 +605,7 @@
   });
 </script>
 
-<div class="view-wrapper" class:embed-mode={embedMode} class:sidebar-open={embedMode && showSidebarInEmbed}>
+<div class="view-wrapper" class:embed-mode={embedMode} class:present-mode={presentMode} class:sidebar-open={embedMode && showSidebarInEmbed}>
   {#if !embedMode}
     <button
       type="button"
@@ -628,7 +640,7 @@
     </div>
   {/if}
 
-  {#if embedMode}
+  {#if embedMode && !presentMode}
     <button
       class="embed-sidebar-toggle"
       class:sidebar-visible={showSidebarInEmbed}
@@ -709,6 +721,39 @@
 
   .time-machine-bar.embed {
     height: 48px;
+  }
+
+  /* Presentation stage: narration column on the left, the graph fills the rest. The column
+     itself is PresentationNarration (fixed), sized by this variable. */
+  .view-wrapper.present-mode {
+    --xln-present-narration-width: clamp(380px, 30vw, 540px);
+    background: #05080f;
+  }
+
+  .view-wrapper.present-mode .view-container,
+  .view-wrapper.present-mode .time-machine-bar {
+    margin-left: var(--xln-present-narration-width);
+    width: calc(100% - var(--xln-present-narration-width));
+  }
+
+  /* backdrop-filter would make the bar the containing block of the fixed narration card.
+     The bar draws nothing in a presentation (the narration card has the controls), so the
+     stage takes its height too. */
+  .view-wrapper.present-mode .time-machine-bar {
+    height: 0;
+    border-top: 0;
+    backdrop-filter: none;
+    background: transparent;
+  }
+
+  .view-wrapper.present-mode .view-container.with-timemachine {
+    height: 100dvh;
+  }
+
+  @media (max-width: 900px) {
+    .view-wrapper.present-mode {
+      --xln-present-narration-width: 0px;
+    }
   }
 
   :global(.dockview-theme-dark .dv-tab) {

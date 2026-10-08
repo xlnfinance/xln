@@ -13,6 +13,7 @@ import * as THREE from 'three';
 import { toDerivedAccountData, type DerivedAccountData } from './derivedAccount';
 import { requireTokenDecimals } from '$lib/components/Entity/token-metadata';
 import type { Delta } from '@xln/core/api/public/runtime-module';
+import { accountAnnotationLines, createAccountAnnotation, type AccountAnnotationContext } from './accountAnnotation';
 
 /** Minimal endpoint shape the bars need. Structurally satisfied by GraphEntityData. */
 export interface BarEndpoint {
@@ -37,9 +38,18 @@ export interface DisputeInfo {
 export interface AccountBarSettings {
   barsMode: 'close' | 'spread';
   portfolioScale: number;
+  /** Thickness multiplier: a projector needs bars that read from the back of the room. */
+  barRadiusScale?: number | undefined;
+  /**
+   * Visual units per token minor unit, by token. A presentation sizes bars to the network on
+   * stage instead of the fixed "1M tokens = 10 units" rule; a token absent here draws nothing.
+   */
+  capacityScale?: ReadonlyMap<number, number> | null | undefined;
   desyncDetected?: boolean | undefined; // Bilateral consensus in progress
   bilateralState?: AccountBarVisual | null | undefined; // Visual state from consensus
   dispute?: DisputeInfo | null | undefined; // Active dispute info
+  /** Presentation: state the bars' numbers in words above the account. */
+  annotation?: AccountAnnotationContext | null | undefined;
 }
 
 export interface AccountSegments {
@@ -51,11 +61,21 @@ export interface AccountSegments {
   inPeerCredit: number;     // their unused credit (pink wireframe)
 }
 
-const BAR_COLORS = {
-  availableCredit: 0xff9c9c,  // light red - unused credit
-  secured: 0x5cb85c,          // green - collateral
-  unsecured: 0xdc3545         // red - used credit
+/**
+ * The wallet's position palette (ui/src/styles/tokens.css): collateral is green, credit in use
+ * is violet exposure, credit room nobody has drawn on is a grey ghost.
+ */
+export const BAR_COLORS = {
+  availableCredit: 0xb8c0ce,  // grey - credit room, granted but unused
+  secured: 0x22c55e,          // green - collateral
+  unsecured: 0xa78bfa         // violet - credit in use (exposure)
 } as const;
+
+/** The delta marker: where the balance between the two parties currently sits. */
+export const DELTA_MARKER_COLOR = 0xffffff;
+
+/** The translucent sleeve around an account under dispute. */
+export const DISPUTE_SLEEVE_COLOR = 0xf26d6d;
 
 /**
  * Create account capacity bars for a bilateral account (multi-token parallel bars)
@@ -98,7 +118,7 @@ export function createAccountBars(
 
   // Auto-scale bar radius for many tokens
   const tokenCount = sortedTokenIds.length;
-  const baseRadius = barHeight * 2.5;  // Original barRadius = 0.2
+  const baseRadius = barHeight * 2.5 * (settings.barRadiusScale ?? 1);  // Original barRadius = 0.2
   const adjustedRadius = tokenCount > 4 ? baseRadius * Math.min(1.0, 4 / tokenCount) : baseRadius;
   const adjustedDiameter = adjustedRadius * 2;
 
@@ -141,12 +161,30 @@ export function createAccountBars(
       tokenId,
       tokenDecimals,
       adjustedRadius,
-      barHeight
     );
 
     // Apply perpendicular offset to position this token's bars
     tokenBarGroup.position.copy(perpendicularOffset);
     group.add(tokenBarGroup);
+  }
+
+  // One dispute indicator per account: the dispute freezes the whole account, every token.
+  if (settings.dispute) {
+    group.add(createDisputeIndicator(fromEntity, toEntity, settings.dispute.startedByLeft, fromIsLeft, adjustedRadius));
+  }
+
+  if (settings.annotation) {
+    const [leftId, rightId] = fromIsLeft ? [fromEntity.id, toEntity.id] : [toEntity.id, fromEntity.id];
+    const lines = accountAnnotationLines(leftId, rightId, deltas, settings.annotation);
+    if (lines.length > 0) {
+      // Below the bars: bank names sit above their spheres, so the space under an account is
+      // free. On a sloped account, lean toward the higher bank, away from the lower bank's name.
+      const slope = toEntity.position.y - fromEntity.position.y;
+      const lean = Math.abs(slope) > 4 ? (slope > 0 ? 0.62 : 0.38) : 0.5;
+      const anchor = fromEntity.position.clone().lerp(toEntity.position, lean);
+      anchor.y -= adjustedRadius * 2.5 + settings.annotation.lineHeight * (lines.length * 0.6 + 0.5);
+      group.add(createAccountAnnotation(lines, anchor, settings.annotation.lineHeight));
+    }
   }
 
   parent.add(group);
@@ -168,13 +206,14 @@ function createTokenBars(
   tokenId: number,
   tokenDecimals: number,
   barRadius: number,
-  barHeight: number
 ): THREE.Group {
   const tokenGroup = new THREE.Group();
 
-  // Scale bars based on token value (1px = $1 invariant)
+  // Scale bars based on token value (1px = $1 invariant), unless the stage supplies its own scale.
   const tokensToVisualUnits = 0.00001; // 1M tokens → 10 visual units
-  const barScale = (tokensToVisualUnits / Math.pow(10, tokenDecimals)) * (settings.portfolioScale / 5000);
+  const barScale = settings.capacityScale
+    ? settings.capacityScale.get(tokenId) ?? 0
+    : (tokensToVisualUnits / Math.pow(10, tokenDecimals)) * (settings.portfolioScale / 5000);
 
   // Compute CREDIT DEBT segment (how much I borrowed from peer's CREDIT line)
   // RED = using peer's credit (actual debt, risky)
@@ -291,22 +330,9 @@ function createTokenBars(
       normalizedDirection,
       fromSegments,
       toSegments,
-      barHeight,
       settings,
       barRadius  // Pass adjusted radius for this token count
     );
-  }
-
-  // Add dispute indicator if active dispute exists
-  if (settings.dispute) {
-    const disputeIndicator = createDisputeIndicator(
-      fromEntity,
-      toEntity,
-      settings.dispute.startedByLeft,
-      fromIsLeft,
-      barRadius
-    );
-    tokenGroup.add(disputeIndicator);
   }
 
   return tokenGroup;
@@ -405,7 +431,6 @@ function renderCloseMode(
   direction: THREE.Vector3,
   fromSegments: AccountSegments,
   toSegments: AccountSegments,
-  barHeight: number,
   settings: AccountBarSettings,
   barRadius: number  // Adjusted radius passed from parent
 ): void {
@@ -450,11 +475,14 @@ function renderCloseMode(
     currentOffset += segment.length;
   });
 
-  // Delta separator at center
-  const separatorPos = startPos.clone().add(direction.clone().multiplyScalar(currentOffset));
-  const separator = createDeltaSeparator(barHeight, direction);
-  separator.position.copy(separatorPos);
-  group.add(separator);
+  // Delta separator where the balance sits. A token lane with no capacity has no bar, and a
+  // marker floating on nothing would read as a second balance.
+  if (totalLength > barRadius) {
+    const separatorPos = startPos.clone().add(direction.clone().multiplyScalar(currentOffset));
+    const separator = createDeltaSeparator(barRadius, direction);
+    separator.position.copy(separatorPos);
+    group.add(separator);
+  }
 
   // TO entity bars (second half)
   toBarSegments.forEach((segment) => {
@@ -483,17 +511,16 @@ function createBarCylinder(
   _barSide: 'left' | 'right',
   _bilateralState: AccountBarVisual | null | undefined
 ): THREE.Mesh {
-  const geometry = new THREE.CylinderGeometry(radius, radius, length, 16);
+  const geometry = new THREE.CylinderGeometry(radius, radius, length, 24);
   const isUnusedCredit = colorType === 'availableCredit';
 
-  // Bar glow disabled - just show base color (no orange/gold/yellow glow nonsense)
+  // Unused credit is room, not value: a translucent solid reads at distance, a wireframe does not.
   const material = new THREE.MeshLambertMaterial({
     color,
     transparent: true,
-    opacity: isUnusedCredit ? 0.2 : 1.0,
-    emissive: new THREE.Color(color).multiplyScalar(0.1), // Subtle emissive, same color
-    emissiveIntensity: isUnusedCredit ? 0.2 : 0.1,
-    wireframe: isUnusedCredit
+    opacity: isUnusedCredit ? 0.45 : 1.0,
+    emissive: new THREE.Color(color).multiplyScalar(isUnusedCredit ? 0.25 : 0.35),
+    depthWrite: !isUnusedCredit,
   });
 
   const mesh = new THREE.Mesh(geometry, material);
@@ -505,19 +532,19 @@ function createBarCylinder(
 }
 
 /**
- * Create yellow disk separator marking delta (zero point)
+ * The delta marker: a thin disk where the balance sits, sized to the bar it cuts.
  */
-function createDeltaSeparator(barHeight: number, direction: THREE.Vector3): THREE.Mesh {
-  const diskRadius = barHeight * 12; // 3x bigger for visibility
-  const diskThickness = barHeight * 0.3; // Very thin for sharp knife appearance
+function createDeltaSeparator(barRadius: number, direction: THREE.Vector3): THREE.Mesh {
+  const diskRadius = barRadius * 1.8;
+  const diskThickness = barRadius * 0.35; // Thin for a sharp knife appearance
 
   const geometry = new THREE.CylinderGeometry(diskRadius, diskRadius, diskThickness, 32);
   const material = new THREE.MeshLambertMaterial({
-    color: 0xffff00, // YELLOW separator for visibility
+    color: DELTA_MARKER_COLOR,
     transparent: true,
     opacity: 0.95,
-    emissive: 0xffff00,
-    emissiveIntensity: 0.5
+    emissive: DELTA_MARKER_COLOR,
+    emissiveIntensity: 0.6
   });
 
   const separator = new THREE.Mesh(geometry, material);
@@ -567,20 +594,21 @@ function createDisputeIndicator(
 
   // Create subtle red outline around the connection (not a fat glow)
   const glowGeometry = new THREE.CylinderGeometry(
-    barRadius * 1.3,  // Subtle outer glow, just slightly larger than bar
-    barRadius * 1.3,
+    barRadius * 1.6,  // Sleeve just outside the bar
+    barRadius * 1.6,
     length * 0.9,     // Most of connection
-    8,
+    24,
     1,
-    true  // Open-ended wireframe look
+    true
   );
 
+  // A translucent sleeve in the wallet's dispute red: the bar stays readable inside it.
   const glowMaterial = new THREE.MeshBasicMaterial({
-    color: 0xff2222,
+    color: DISPUTE_SLEEVE_COLOR,
     transparent: true,
-    opacity: 0.15,
+    opacity: 0.16,
     side: THREE.DoubleSide,
-    wireframe: true  // Wireframe for subtle danger zone look
+    depthWrite: false,
   });
 
   const glowCylinder = new THREE.Mesh(glowGeometry, glowMaterial);
@@ -634,7 +662,7 @@ function createDisputeIndicator(
   const shieldPos = defenderPos.clone().lerp(initiatorPos, 0.2);
   shieldPos.y += barRadius * 4;
 
-  const shieldGeometry = new THREE.SphereGeometry(barRadius * 1.5, 8, 8);
+  const shieldGeometry = new THREE.SphereGeometry(barRadius * 0.9, 16, 16);
   const shieldMaterial = new THREE.MeshBasicMaterial({
     color: 0x4488ff,
     transparent: true,

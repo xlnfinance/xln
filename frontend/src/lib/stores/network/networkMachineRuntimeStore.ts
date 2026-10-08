@@ -1,6 +1,7 @@
 import { get, writable } from 'svelte/store';
 import type { RuntimeActivityEvent, RuntimeAdapterGraphFrame } from '@xln/core/api/public/runtime-module';
-import { compileNetworkMachine, type NetworkMachine, type NetworkMachineStep } from '$lib/network3d/networkMachine';
+import { compileNetworkMachine, presentationNetworkMachine, type NetworkMachine, type NetworkMachineStep } from '$lib/network3d/networkMachine';
+import { networkMachinePresentation } from './networkMachineDemoStore';
 import {
   disconnectNetworkTimelineReaders,
   networkTimelineSourceFor,
@@ -16,6 +17,8 @@ import { getXLN } from '../bootstrap/xlnRuntimeLoader';
 import { networkMachineConfig, networkMachineOperations } from './networkMachineStore';
 import { runtimes } from '../runtimeStore';
 import type { RuntimeTimelineIndex } from '$lib/network3d/timeline/runtimeGraphTimeline';
+import { deriveNetworkStepMotion, type NetworkStepMotion } from '$lib/network3d/timeline/networkStepMotion';
+import { projectRuntimeGraphFrame, type RuntimeGraphProjection } from '$lib/network3d/runtimeGraphProjection';
 
 export type NetworkMachineRuntimeState = {
   loading: boolean;
@@ -28,6 +31,10 @@ export type NetworkMachineRuntimeState = {
   frames: Map<string, RuntimeAdapterGraphFrame>;
   /** Activity events of the selected step, ordered — the caption source. */
   activity: RuntimeActivityEvent[];
+  /** What the selected step moved, against the R-frame before it — the graph's motion source. */
+  motion: NetworkStepMotion | null;
+  /** Graph frame per runtime one R-frame before the selected step: what a change is measured from. */
+  previousFrames: Map<string, RuntimeAdapterGraphFrame>;
 };
 
 const emptyState = (): NetworkMachineRuntimeState => ({
@@ -39,7 +46,42 @@ const emptyState = (): NetworkMachineRuntimeState => ({
   selectedStep: null,
   frames: new Map(),
   activity: [],
+  motion: null,
+  previousFrames: new Map(),
 });
+
+const projectFrames = (frames: ReadonlyMap<string, RuntimeAdapterGraphFrame>): RuntimeGraphProjection[] =>
+  Array.from(frames, ([runtimeId, frame]) => projectRuntimeGraphFrame(frame, { runtimeId, adapterKind: 'browser' }));
+
+/** The R-frame the active runtime committed just before the selected one, if any. */
+const predecessorHeight = (indexes: RuntimeTimelineIndex[], step: NetworkMachineStep): number | null => {
+  const frames = indexes.find((index) => index.runtimeId === step.activeRuntimeId)?.frames ?? [];
+  const position = frames.findIndex((frame) => frame.height === step.event.height);
+  return position > 0 ? frames[position - 1]!.height : null;
+};
+
+/**
+ * Only the active runtime moved at this step, so the previous network state is the current
+ * one with that runtime rewound by one R-frame.
+ */
+const readStepMotion = async (
+  indexes: RuntimeTimelineIndex[],
+  step: NetworkMachineStep,
+  frames: Map<string, RuntimeAdapterGraphFrame>,
+  activity: RuntimeActivityEvent[],
+): Promise<{ motion: NetworkStepMotion; previousFrames: Map<string, RuntimeAdapterGraphFrame> }> => {
+  const key = `${step.activeRuntimeId}:h${step.event.height}`;
+  const previousHeight = predecessorHeight(indexes, step);
+  if (previousHeight === null) {
+    return { motion: deriveNetworkStepMotion({ key, previous: null, current: projectFrames(frames), activity }), previousFrames: new Map() };
+  }
+  const previousFrames = new Map(frames);
+  previousFrames.set(step.activeRuntimeId, await requireSource(step.activeRuntimeId).readGraphFrame(previousHeight));
+  return {
+    motion: deriveNetworkStepMotion({ key, previous: projectFrames(previousFrames), current: projectFrames(frames), activity }),
+    previousFrames,
+  };
+};
 
 const message = (error: unknown): string => error instanceof Error ? error.message : String(error || 'NetworkMachine failed');
 
@@ -53,8 +95,11 @@ export const assertNetworkMachineIsLive = (
   throw new Error(`RUNTIME_COMMAND_REQUIRES_LIVE_VIEW: network-machine=${event.runtimeId}:h${event.height}`);
 };
 
-const compileCurrent = (indexes: RuntimeTimelineIndex[]): NetworkMachine =>
-  compileNetworkMachine(indexes, get(networkMachineConfig));
+/** A presentation plays only the story: from its setup summary to its closing cue. */
+const compileCurrent = (indexes: RuntimeTimelineIndex[]): NetworkMachine => {
+  const machine = compileNetworkMachine(indexes, get(networkMachineConfig));
+  return get(networkMachinePresentation) ? presentationNetworkMachine(machine) : machine;
+};
 
 let refreshRequestId = 0;
 let selectionRequestId = 0;
@@ -159,7 +204,7 @@ export const networkMachineRuntimeOperations = {
       const runtimeId = `scenario:${scenarioKey}`.toLowerCase();
       const recording = await xln.recordScenario(scenarioKey as never, xln.createEmptyEnv());
       if (recording.frames.length === 0) throw new Error(`NETWORK_MACHINE_SCENARIO_EMPTY:${scenarioKey}`);
-      const source = scenarioNetworkTimelineSource(runtimeId, recording.frames);
+      const source = scenarioNetworkTimelineSource(runtimeId, recording.frames, recording.narration);
       installSourceCues(source);
       const indexes = [await source.readIndex()];
       const machine = compileCurrent(indexes);
@@ -192,6 +237,7 @@ export const networkMachineRuntimeOperations = {
         if (id !== step.activeRuntimeId) continue;
         activity.push(...await source.readActivity(selected.height, selected.height));
       }
+      const { motion, previousFrames } = await readStepMotion(current.indexes, step, frames, activity);
       if (requestId !== selectionRequestId) return step;
       networkMachineRuntime.set({
         loading: false,
@@ -202,6 +248,8 @@ export const networkMachineRuntimeOperations = {
         selectedStep: step,
         frames,
         activity,
+        motion,
+        previousFrames,
       });
       return step;
     } catch (error) {
@@ -218,6 +266,8 @@ export const networkMachineRuntimeOperations = {
       selectedStep: null,
       frames: new Map(),
       activity: [],
+      motion: null,
+      previousFrames: new Map(),
       error: null,
     }));
   },

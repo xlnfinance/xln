@@ -71,6 +71,8 @@
   export let layout: string = 'default'; void layout;
   export let networkMode: 'simnet' | 'testnet' | 'mainnet' = 'simnet'; void networkMode;
   export let embedMode = false;
+  /** Presentation mode (embed `present=1`): DockRoot renders a graph-dominant workspace. */
+  export let presentMode = false;
   export let scenarioId = '';
   export let userMode = false;
   export let requestedPanelId: string | null = null;
@@ -443,6 +445,7 @@
     <svelte:component
       this={module.default}
       {embedMode}
+      {presentMode}
       runtimeFrameEnv={localEnvStore}
       runtimeFrameHistory={localHistoryStore}
       runtimeFrameTimeIndex={localTimeIndex}

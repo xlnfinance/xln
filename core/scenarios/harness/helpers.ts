@@ -780,6 +780,20 @@ export async function processJEvents(env: RuntimeReplica): Promise<void> {
 const wholeTokenAmount = (amount: number | bigint, tokenId: number): bigint =>
   BigInt(amount) * 10n ** BigInt(getTokenInfo(tokenId).decimals);
 
+/**
+ * Narration money: `1,000,000 USDC`, `0.5 WETH`. Decimals and symbol come from the canonical
+ * token registry, so a scenario can never print raw minor units or assume 18 decimals.
+ */
+export const formatTokenMoney = (tokenId: number, amount: bigint): string => {
+  const { decimals, symbol } = getTokenInfo(tokenId);
+  const scale = 10n ** BigInt(decimals);
+  const sign = amount < 0n ? '-' : '';
+  const absolute = amount < 0n ? -amount : amount;
+  const whole = (absolute / scale).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  const fraction = (absolute % scale).toString().padStart(decimals, '0').replace(/0+$/, '');
+  return `${sign}${whole}${fraction ? `.${fraction}` : ''} ${symbol}`;
+};
+
 export const usd = (amount: number | bigint) => wholeTokenAmount(amount, 1);
 export const eth = (amount: number | bigint) => wholeTokenAmount(amount, 2);
 export const dai = (amount: number | bigint) => wholeTokenAmount(amount, 3);

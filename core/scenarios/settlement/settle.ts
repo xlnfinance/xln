@@ -14,8 +14,11 @@ import type { RuntimeReplica } from '../../runtime/types';
 import { defaultAccountDisputeConfigForParties } from '../../account/config/dispute-config';
 import type { SettlementDiff, SettlementOp } from '../../types/account';
 import { compileOps } from '../../protocol/settlement/operations';
-import { snap, enableStrictScenario, advanceScenarioTime, ensureSignerKeysFromSeed, getProcess, syncChain, findReplica, setScenarioStorageEnabled, converge, processUntil, processJEvents } from '../harness/helpers';
-import { bindScenarioJReplica, ensureJAdapter, getScenarioJAdapter, isScenarioJAdapterMissingError, createJReplica, createJurisdictionConfig, registerEntities } from '../harness/boot';
+import { snap, enableStrictScenario, advanceScenarioTime, ensureSignerKeysFromSeed, getProcess, syncChain, findReplica, setScenarioStorageEnabled, converge, processUntil, processJEvents, usd, formatTokenMoney } from '../harness/helpers';
+import { tell } from '../harness/narration';
+import { SETTLEMENT_ASSET } from '../harness/story';
+import { deriveDelta } from '../../account/utils';
+import { bindScenarioJReplica, ensureJAdapter, getScenarioJAdapter, isScenarioJAdapterMissingError, createJReplica, createJurisdictionConfig, DEMO_JURISDICTION_NAME, registerEntities } from '../harness/boot';
 import type { JAdapter } from '../../jurisdiction/adapter/types';
 import { formatRuntime } from '../../qa/runtime-ascii';
 import { createGossipLayer } from '../../network/p2p/gossip';
@@ -23,12 +26,18 @@ import { userAutoApprove } from '../../entity/tx/handlers/payments/settle';
 import { createRuntimeConfig } from '../../runtime/loop/loop-environment';
 
 const USDC_TOKEN_ID = 1;
-const DECIMALS = 18n;
-const ONE_TOKEN = 10n ** DECIMALS;
+const usdc = (amount: bigint): string => formatTokenMoney(USDC_TOKEN_ID, amount);
+// Presentation amounts, in whole USDC: same order of magnitude as the other parts.
+const RESERVE = usd(1_000_000);
+const CREDIT = usd(200_000);
+const COLLATERAL = usd(200_000);
+const ALICE_PAYS = usd(60_000);
+const HUB_PAYS = usd(20_000);
+const NET_OWED = ALICE_PAYS - HUB_PAYS;
+const PARTIAL_OFFER = usd(20_000);
+const REJECTED_ASK = usd(1_000);
 
-const usd = (amount: number | bigint) => BigInt(amount) * ONE_TOKEN;
-
-const JURISDICTION = 'Settle Test';
+const JURISDICTION = DEMO_JURISDICTION_NAME;
 const ENTITY_NAME_MAP = new Map<string, string>();
 
 function assert(condition: unknown, message: string, env?: RuntimeReplica): asserts condition {
@@ -127,10 +136,19 @@ export async function runSettleScenario(existingEnv?: RuntimeReplica): Promise<R
 
   const jurisdiction = createJurisdictionConfig(JURISDICTION, jadapter.addresses.depository, jadapter.addresses.entityProvider);
 
+  snap(env, 'Two banks join the Depository', {
+    description: 'Alice and Hub register on the Depository',
+    phase: 'setup',
+    what: 'Alice, a commercial bank, and Hub, a dealer bank, register as entities on the Depository contract. Each entity is controlled by its own signing board.',
+    why: 'Registration gives each bank an identity the Depository can verify. After it, payments between Alice and Hub happen in their bilateral account; only collateral and settlement go on-chain.',
+    tradfiParallel: 'Opening an account in the settlement system before a bank can settle there.',
+    keyMetrics: ['Participants: 2', `Jurisdiction: ${JURISDICTION}`],
+  });
+
   // Register entities: Alice(signer=2) and Hub(signer=3)
   const registered = await registerEntities(env, jadapter, [
-    { name: 'Alice', signer: '2', position: { x: -30, y: -30, z: 0 } },
-    { name: 'Hub',   signer: '3', position: { x: 30, y: -30, z: 0 } },
+    { name: 'Alice', signer: '2', position: { x: -40, y: -30, z: 0 } },
+    { name: 'Hub',   signer: '3', position: { x: 40, y: -30, z: 0 } },
   ], jurisdiction);
 
   const aliceRegistration = registered[0];
@@ -146,22 +164,26 @@ export async function runSettleScenario(existingEnv?: RuntimeReplica): Promise<R
 
   console.log(`✅ Created Alice (${ALICE_ID.slice(-4)}) and Hub (${HUB_ID.slice(-4)})`);
 
-  snap(env, 'Entities Created', {
-    description: 'Alice and Hub entities initialized',
-    phase: 'setup'
+  snap(env, 'Test balances credited on the Depository', {
+    description: 'Alice and Hub receive test balances',
+    phase: 'setup',
+    what: `Alice and Hub each receive ${usdc(RESERVE)} of test balance as reserves on the Depository.`,
+    why: 'Only reserves moved into an account as collateral back bilateral exposure; the rest stays freely usable.',
+    tradfiParallel: SETTLEMENT_ASSET,
+    keyMetrics: [`Alice reserve: ${usdc(RESERVE)}`, `Hub reserve: ${usdc(RESERVE)}`],
   });
 
   // Mint reserves
   await process(env, [{
     entityId: ALICE_ID,
     signerId: ALICE_SIGNER,
-    entityTxs: [{ type: 'mintReserves', data: { tokenId: USDC_TOKEN_ID, amount: usd(1000) } }]
+    entityTxs: [{ type: 'mintReserves', data: { tokenId: USDC_TOKEN_ID, amount: RESERVE } }]
   }]);
 
   await process(env, [{
     entityId: HUB_ID,
     signerId: HUB_SIGNER,
-    entityTxs: [{ type: 'mintReserves', data: { tokenId: USDC_TOKEN_ID, amount: usd(1000) } }]
+    entityTxs: [{ type: 'mintReserves', data: { tokenId: USDC_TOKEN_ID, amount: RESERVE } }]
   }]);
 
   // Process J-events from minting
@@ -169,6 +191,14 @@ export async function runSettleScenario(existingEnv?: RuntimeReplica): Promise<R
     advanceScenarioTime(env);
     await processJEvents(env);
   }
+
+  snap(env, 'Bilateral account opened', {
+    description: 'Alice opens an account with Hub',
+    phase: 'setup',
+    what: 'Alice opens one bilateral account with Hub. Both sides keep an identical copy of its state, and every change is a frame both of them sign.',
+    why: 'No network-wide registration and no shared ledger: the account involves exactly the two parties who carry its risk.',
+    tradfiParallel: 'A bilateral correspondent relationship, but with one co-signed record instead of two reconciled ledgers.',
+  });
 
   // Open account between Alice and Hub
   await process(env, [{
@@ -189,6 +219,15 @@ export async function runSettleScenario(existingEnv?: RuntimeReplica): Promise<R
 
   console.log(`✅ Account opened between Alice and Hub`);
 
+  snap(env, 'Credit lines in both directions', {
+    description: 'Alice and Hub extend credit to each other',
+    phase: 'setup',
+    what: `Alice and Hub each grant the other a ${usdc(CREDIT)} credit line inside the account.`,
+    why: 'Each bank sets the limit on what the other may owe it, and can lower it at any time; nothing is deposited.',
+    tradfiParallel: 'A bilateral credit limit, set by the bank that carries the risk.',
+    keyMetrics: [`Credit Alice → Hub: ${usdc(CREDIT)}`, `Credit Hub → Alice: ${usdc(CREDIT)}`],
+  });
+
   // Fund both directions with real bilateral credit so the manual settlement
   // negotiation below can reserve either side without mutating Account state.
   await process(env, [{
@@ -196,7 +235,7 @@ export async function runSettleScenario(existingEnv?: RuntimeReplica): Promise<R
     signerId: ALICE_SIGNER,
     entityTxs: [{
       type: 'extendCredit',
-      data: { counterpartyEntityId: HUB_ID, tokenId: USDC_TOKEN_ID, amount: usd(100) },
+      data: { counterpartyEntityId: HUB_ID, tokenId: USDC_TOKEN_ID, amount: CREDIT },
     }],
   }]);
   await process(env, [{
@@ -204,15 +243,10 @@ export async function runSettleScenario(existingEnv?: RuntimeReplica): Promise<R
     signerId: HUB_SIGNER,
     entityTxs: [{
       type: 'extendCredit',
-      data: { counterpartyEntityId: ALICE_ID, tokenId: USDC_TOKEN_ID, amount: usd(100) },
+      data: { counterpartyEntityId: ALICE_ID, tokenId: USDC_TOKEN_ID, amount: CREDIT },
     }],
   }]);
   await converge(env, 20);
-
-  snap(env, 'Account Opened', {
-    description: 'Bilateral account between Alice and Hub',
-    phase: 'setup'
-  });
 
   // ══════════════════════════════════════════════════════════════════════════════
   // TEST 1: CONSERVATION LAW VALIDATION
@@ -299,14 +333,23 @@ export async function runSettleScenario(existingEnv?: RuntimeReplica): Promise<R
   // ══════════════════════════════════════════════════════════════════════════════
   console.log('\n📋 TEST 3: Settlement Workspace Propose');
 
-  // Alice proposes settlement: deposit 100 USDC into collateral
-  const depositOps: SettlementOp[] = [{ type: 'r2c', tokenId: USDC_TOKEN_ID, amount: usd(100) }];
+  // Alice proposes settlement: deposit collateral
+  const depositOps: SettlementOp[] = [{ type: 'r2c', tokenId: USDC_TOKEN_ID, amount: COLLATERAL }];
   const readMoveMoney = () => Promise.all([
     jadapter.getReserves(ALICE_ID, USDC_TOKEN_ID),
     jadapter.getReserves(HUB_ID, USDC_TOKEN_ID),
     jadapter.getCollateral(ALICE_ID, HUB_ID, USDC_TOKEN_ID),
   ] as const);
   const moveBefore = await readMoveMoney();
+
+  snap(env, 'Settlement proposed: reserve into collateral', {
+    description: `Alice proposes to move ${usdc(COLLATERAL)} into collateral`,
+    phase: 'propose',
+    what: `Alice proposes a settlement: move ${usdc(COLLATERAL)} of her reserve into the account as collateral. The amount is put on hold at once so it cannot be spent twice.`,
+    why: 'Hub\'s position only improves, so Hub signs automatically. A settlement is a shared proposal both banks must sign before anything reaches the chain.',
+    tradfiParallel: 'Collateral locked per counterparty, earmarked while the instruction is matched.',
+    keyMetrics: [`On hold: ${usdc(COLLATERAL)}`],
+  });
 
   await process(env, [{
     entityId: ALICE_ID,
@@ -345,7 +388,7 @@ export async function runSettleScenario(existingEnv?: RuntimeReplica): Promise<R
   const aliceIsLeft = aliceAccount.state.leftEntity === ALICE_ID;
   const holdField = aliceIsLeft ? 'leftHold' : 'rightHold';
   const actualHold = aliceIsLeft ? (usdcDelta.leftHold || 0n) : (usdcDelta.rightHold || 0n);
-  const expectedHold = usd(100);
+  const expectedHold = COLLATERAL;
   console.log(`   HOLD CHECK: ${holdField}=${actualHold}, expected=${expectedHold}`);
   assert(actualHold === expectedHold, `Settlement hold not set: expected ${expectedHold}, got ${actualHold}`, env);
 
@@ -356,12 +399,6 @@ export async function runSettleScenario(existingEnv?: RuntimeReplica): Promise<R
   const initialAutoApproved = Boolean(aliceAccount.state.settlementWorkspace[hubHankoField]);
   console.log(`   Auto-approved by Hub: ${initialAutoApproved ? 'yes' : 'no'}`);
 
-  snap(env, 'Settlement Proposed', {
-    description: 'Alice proposes $100 deposit to collateral',
-    phase: 'propose',
-    keyMetrics: [`holdAmount=${expectedHold.toString()}`],
-  });
-
   // A signed workspace is durable authorization and cannot be cleared as a
   // test reset. Complete the real auto-approved path on-chain before starting
   // a distinct manual negotiation on the now-settled Account.
@@ -370,6 +407,14 @@ export async function runSettleScenario(existingEnv?: RuntimeReplica): Promise<R
     'Auto-approved workspace should be fully Hanko-authorized before execution',
     env,
   );
+  snap(env, 'Collateral posted on-chain', {
+    description: 'Alice submits the signed settlement',
+    phase: 'execute',
+    what: `Alice submits the signed settlement to the Depository. One transaction debits her reserve by ${usdc(COLLATERAL)} and credits the account\'s collateral by the same amount.`,
+    why: 'The account now holds collateral that covers what Alice may owe Hub. The chain checks the signatures and that the amounts net to zero.',
+    tradfiParallel: 'Delivery of collateral against a signed instruction: final on-chain once the block is final; legal finality depends on system designation.',
+    keyMetrics: [`Submitted, reserve → collateral: ${usdc(COLLATERAL)}`],
+  });
   await process(env, [{
     entityId: ALICE_ID,
     signerId: ALICE_SIGNER,
@@ -385,16 +430,25 @@ export async function runSettleScenario(existingEnv?: RuntimeReplica): Promise<R
   const clearedAccount = findReplica(env, ALICE_ID)[1].state.accounts.get(HUB_ID);
   assert(!clearedAccount?.state.settlementWorkspace, 'Executed auto-approved workspace should finalize and clear', env);
   const moveFunded = await readMoveMoney();
-  assert(moveFunded[0] === moveBefore[0] - usd(100), 'R2C must debit exactly 100 USDC reserve', env);
+  assert(moveFunded[0] === moveBefore[0] - COLLATERAL, 'R2C must debit exactly the collateral amount from reserve', env);
   assert(moveFunded[1] === moveBefore[1], 'R2C must preserve peer reserve', env);
-  assert(moveFunded[2] === moveBefore[2] + usd(100), 'R2C must credit exactly 100 USDC collateral', env);
+  assert(moveFunded[2] === moveBefore[2] + COLLATERAL, 'R2C must credit exactly the collateral amount', env);
+
+  snap(env, 'Collateral returned to reserve', {
+    description: 'Alice withdraws the collateral',
+    phase: 'execute',
+    what: `The inverse settlement moves the ${usdc(COLLATERAL)} of collateral back to Alice\'s reserve through the same signed path.`,
+    why: 'Collateral is not trapped, but it leaves the account only with the counterparty\'s signature. The on-chain balances return exactly to where they started.',
+    tradfiParallel: 'Releasing pledged collateral once the exposure it covered is gone.',
+    keyMetrics: [`Proposed, collateral → reserve: ${usdc(COLLATERAL)}`],
+  });
 
   // Exercise the inverse through the same signed settlement and J watcher path.
   await process(env, [{
     entityId: ALICE_ID, signerId: ALICE_SIGNER,
     entityTxs: [{ type: 'settle_propose', data: {
       counterpartyEntityId: HUB_ID,
-      ops: [{ type: 'c2r', tokenId: USDC_TOKEN_ID, amount: usd(100) }],
+      ops: [{ type: 'c2r', tokenId: USDC_TOKEN_ID, amount: COLLATERAL }],
       memo: 'Move collateral back to reserve',
     } }],
   }]);
@@ -412,23 +466,88 @@ export async function runSettleScenario(existingEnv?: RuntimeReplica): Promise<R
   assert(moveReturned.every((value, index) => value === moveBefore[index]), 'R2C/C2R round trip must conserve exact chain balances', env);
   assert(!findReplica(env, ALICE_ID)[1].state.accounts.get(HUB_ID)?.state.settlementWorkspace,
     'C2R workspace must clear after chain finality', env);
-  console.log('MOVE_ROUND_TRIP_OK amount=100000000 reserve=exact collateral=exact peerReserve=unchanged');
+  console.log(`MOVE_ROUND_TRIP_OK amount=${COLLATERAL} reserve=exact collateral=exact peerReserve=unchanged`);
+  // A presentation starts here: the setup and the collateral round trip are summarised.
+  tell(env, {
+    title: 'Starting point: two banks, one account',
+    what: `On a local test chain, Alice and Hub each hold ${usdc(RESERVE)} of test balance on the Depository and share one bilateral account with a ${usdc(CREDIT)} credit line each way. They have already moved ${usdc(COLLATERAL)} of collateral into the account and back out, each time with both signatures.`,
+    why: 'Collateral moves on-chain only through a settlement both banks sign; payments between them stay in the account.',
+    tradfiParallel: 'A bilateral relationship with credit limits both ways and collateral posted and released by mutual instruction.',
+    keyMetrics: [`Reserves: ${usdc(RESERVE)} each`, `Credit: ${usdc(CREDIT)} each way`, 'Collateral: 0 USDC'],
+    focusEntityIds: [ALICE_ID, HUB_ID],
+    condensePrior: true,
+  });
+
+  // ══════════════════════════════════════════════════════════════════════════════
+  // GROSS FLOWS: payments in both directions inside the account
+  // ══════════════════════════════════════════════════════════════════════════════
+  console.log('\n📋 GROSS FLOWS: payments both ways');
+  const payInside = async (fromId: string, fromSigner: string, toId: string, amount: bigint, memo: string) => {
+    await process(env, [{
+      entityId: fromId,
+      signerId: fromSigner,
+      entityTxs: [{
+        type: 'directPayment',
+        data: { targetEntityId: toId, tokenId: USDC_TOKEN_ID, amount, route: [fromId, toId], deliveryMode: 'direct', description: memo },
+      }],
+    }]);
+    await converge(env, 20);
+  };
+  const aliceView = () => {
+    const delta = findReplica(env, ALICE_ID)[1].state.accounts.get(HUB_ID)?.state.deltas.get(USDC_TOKEN_ID);
+    assert(delta, 'Alice-Hub USDC delta missing', env);
+    return deriveDelta(delta, findReplica(env, ALICE_ID)[1].state.accounts.get(HUB_ID)!.state.leftEntity === ALICE_ID);
+  };
+  snap(env, `Alice pays Hub ${usdc(ALICE_PAYS)}`, {
+    phase: 'pay',
+    what: `Alice pays Hub ${usdc(ALICE_PAYS)} inside their account. Both sign the new account state; nothing goes on-chain. Alice now owes Hub ${usdc(ALICE_PAYS)}, within the credit line Hub gave her.`,
+    why: 'A payment inside an account changes only its net position.',
+    tradfiParallel: 'A bilateral payment on a credit line, confirmed by both banks at once.',
+    keyMetrics: [`Alice owes Hub: ${usdc(ALICE_PAYS)}`],
+  });
+  await payInside(ALICE_ID, ALICE_SIGNER, HUB_ID, ALICE_PAYS, 'Alice pays Hub');
+  snap(env, `Hub pays Alice ${usdc(HUB_PAYS)}`, {
+    phase: 'pay',
+    what: `Hub pays Alice ${usdc(HUB_PAYS)} over the same account, in the other direction. The two payments offset inside it.`,
+    why: 'Flows in both directions accumulate as one net position; only that would ever need settling.',
+    tradfiParallel: 'Bilateral netting by construction.',
+    keyMetrics: [`Hub → Alice: ${usdc(HUB_PAYS)}`],
+  });
+  await payInside(HUB_ID, HUB_SIGNER, ALICE_ID, HUB_PAYS, 'Hub pays Alice');
+  assert(aliceView().inOwnCredit === NET_OWED, `Alice should owe Hub exactly ${NET_OWED}, got ${aliceView().inOwnCredit}`, env);
+  tell(env, {
+    title: `Net position: Alice owes Hub ${usdc(NET_OWED)}`,
+    what: `${usdc(ALICE_PAYS + HUB_PAYS)} of payments in both directions leave one net position: Alice owes Hub ${usdc(NET_OWED)}. Nothing has moved on-chain, and the debt is unsecured: the collateral went back to Alice's reserve.`,
+    why: 'Hub carries this exposure within the credit line it granted. Settling it needs one transfer of the net amount, not one per payment.',
+    tradfiParallel: 'A bilateral net position waiting for settlement.',
+    keyMetrics: [`Gross bilateral flow: ${usdc(ALICE_PAYS + HUB_PAYS)}`, `Net, Alice → Hub: ${usdc(NET_OWED)}`, 'Moved on-chain: 0 USDC'],
+  });
 
   // ══════════════════════════════════════════════════════════════════════════════
   // TEST 4: SETTLEMENT WORKSPACE UPDATE
   // ══════════════════════════════════════════════════════════════════════════════
   console.log('\n📋 TEST 4: Settlement Workspace Update');
 
-  // Start with a real unsigned negotiation: Alice requests a reserve transfer
-  // from Hub, so Hub's safety predicate must require an explicit decision.
+  // Start with a real unsigned negotiation: Alice offers to settle part of her
+  // debt. Hub's claim in the account would shrink (ondelta moves toward zero),
+  // so Hub's safety predicate must require an explicit decision.
   const manualOps: SettlementOp[] = [{
     type: 'rawDiff',
     tokenId: USDC_TOKEN_ID,
-    leftDiff: usd(25),
-    rightDiff: -usd(25),
+    leftDiff: -PARTIAL_OFFER,
+    rightDiff: PARTIAL_OFFER,
     collateralDiff: 0n,
-    ondeltaDiff: 0n,
+    ondeltaDiff: PARTIAL_OFFER,
   }];
+
+  snap(env, 'Negotiation opens: Alice offers to settle part', {
+    description: `Alice offers to settle ${usdc(PARTIAL_OFFER)}`,
+    phase: 'propose',
+    what: `Alice proposes to settle ${usdc(PARTIAL_OFFER)} of her ${usdc(NET_OWED)} debt now: that amount would move from her reserve to Hub's, and her debt in the account would fall by the same. Hub's claim in the account would shrink, so Hub does not sign automatically.`,
+    why: 'A bank signs only what it has decided to accept. An unsigned proposal moves nothing.',
+    tradfiParallel: 'A settlement instruction waiting for the counterparty\'s confirmation.',
+    keyMetrics: [`Proposed: ${usdc(PARTIAL_OFFER)}`, 'Hub signature: none'],
+  });
 
   await process(env, [{
     entityId: ALICE_ID,
@@ -452,16 +571,25 @@ export async function runSettleScenario(existingEnv?: RuntimeReplica): Promise<R
   assert(manualProposalAccount?.state.settlementWorkspace?.revision === 1, 'Manual workspace should start at revision 1', env);
   assert(!manualProposalAccount.state.settlementWorkspace[hubHankoField], 'Manual negotiation workspace should be unsigned before update', env);
 
-  // Hub counters by requesting a transfer from Alice. Alice's reserve falls,
-  // so this also remains unsigned until TEST 5 explicitly approves it.
+  // Hub counters with the whole net position. Alice's reserve falls, so this
+  // also remains unsigned until TEST 5 explicitly approves it.
   const counterOps: SettlementOp[] = [{
     type: 'rawDiff',
     tokenId: USDC_TOKEN_ID,
-    leftDiff: -usd(50),
-    rightDiff: usd(50),
+    leftDiff: -NET_OWED,
+    rightDiff: NET_OWED,
     collateralDiff: 0n,
-    ondeltaDiff: 0n,
+    ondeltaDiff: NET_OWED,
   }];
+
+  snap(env, 'Hub counter-proposes: settle the whole net', {
+    description: `Hub asks to settle the full ${usdc(NET_OWED)}`,
+    phase: 'update',
+    what: `Hub replaces the terms: settle the whole net position. Alice pays ${usdc(NET_OWED)} from her reserve to Hub's, and her ${usdc(NET_OWED)} debt in the account is cleared. This is version 2 of the proposal, and Alice's ${usdc(NET_OWED)} goes on hold.`,
+    why: 'Both banks edit one shared proposal. Only the bank that did not make the last change can approve it, so nobody approves its own terms.',
+    tradfiParallel: 'Matching a settlement instruction between two back offices before it is released.',
+    keyMetrics: [`Proposed: ${usdc(NET_OWED)} (full net)`, 'Proposal version: 2'],
+  });
 
   await process(env, [{
     entityId: HUB_ID,
@@ -489,21 +617,26 @@ export async function runSettleScenario(existingEnv?: RuntimeReplica): Promise<R
   const { diffs: compiledDiffs } = compileOps(aliceAccount2.state.settlementWorkspace.ops, aliceAccount2.state.settlementWorkspace.lastModifiedByLeft);
   const firstCompiledDiff = compiledDiffs[0];
   assert(firstCompiledDiff, 'Compiled settlement diff should exist', env);
-  assert(firstCompiledDiff.leftDiff === -usd(50), 'Compiled diff should reflect update (Alice leftDiff)');
-  assert(firstCompiledDiff.rightDiff === usd(50), 'Compiled diff should reflect update (Hub rightDiff)');
+  assert(firstCompiledDiff.leftDiff === -NET_OWED, 'Compiled diff should reflect update (Alice leftDiff)');
+  assert(firstCompiledDiff.rightDiff === NET_OWED, 'Compiled diff should reflect update (Hub rightDiff)');
+  assert(firstCompiledDiff.ondeltaDiff === NET_OWED, 'Compiled diff should clear the net position (ondelta)');
 
   console.log(`✅ Settlement updated by Hub`);
   console.log(`   New revision: ${aliceAccount2.state.settlementWorkspace.revision}`);
-
-  snap(env, 'Settlement Updated', {
-    description: 'Hub counter-proposes $50 instead of $100',
-    phase: 'update'
-  });
 
   // ══════════════════════════════════════════════════════════════════════════════
   // TEST 5: SETTLEMENT APPROVE
   // ══════════════════════════════════════════════════════════════════════════════
   console.log('\n📋 TEST 5: Settlement Approve');
+
+  snap(env, 'Alice approves', {
+    description: 'Both signatures collected',
+    phase: 'approve',
+    what: 'Alice signs version 2. The proposal now carries both signatures and a pre-signed account state for after the settlement.',
+    why: 'It can now be submitted. If anyone stalls afterwards, the pre-signed post-settlement state still lets each side recover its funds.',
+    tradfiParallel: 'A matched instruction, released for settlement with both counterparties\' authorisation.',
+    keyMetrics: ['Signatures: 2 of 2', 'Ready to submit'],
+  });
 
   // Alice approves (counterparty of Hub's update — only counterparty of lastModifier can approve)
   await process(env, [{
@@ -584,15 +717,20 @@ export async function runSettleScenario(existingEnv?: RuntimeReplica): Promise<R
     `${aliceAccount3.state.settlementWorkspace.postSettlementDisputeProof[aliceHankoField3]?.slice(0, 20)}...`,
   );
 
-  snap(env, 'Settlement Approved', {
-    description: 'Both parties signed - ready to submit',
-    phase: 'approve'
-  });
-
   // ══════════════════════════════════════════════════════════════════════════════
   // TEST 6: SETTLEMENT EXECUTE
   // ══════════════════════════════════════════════════════════════════════════════
   console.log('\n📋 TEST 6: Settlement Execute');
+
+  const reservesBeforeNet = await Promise.all([jadapter.getReserves(ALICE_ID, USDC_TOKEN_ID), jadapter.getReserves(HUB_ID, USDC_TOKEN_ID)] as const);
+  snap(env, 'The net position settles on-chain', {
+    description: `${usdc(NET_OWED)} moves from Alice to Hub on-chain`,
+    phase: 'execute',
+    what: `Alice submits the agreed settlement. One Depository transaction moves ${usdc(NET_OWED)} from Alice\'s reserve to Hub\'s and clears the account\'s net position.`,
+    why: `${usdc(ALICE_PAYS + HUB_PAYS)} of payments in both directions need one on-chain transfer of ${usdc(NET_OWED)}. This is bilateral netting only: there is no netting across other accounts.`,
+    tradfiParallel: `Bilateral net settlement: final on-chain once the block is final; legal finality depends on system designation. ${SETTLEMENT_ASSET}`,
+    keyMetrics: [`Gross bilateral flow: ${usdc(ALICE_PAYS + HUB_PAYS)}`, `Settled on-chain: ${usdc(NET_OWED)}`, 'On-chain transactions: 1'],
+  });
 
   // The executor was pinned when Alice created v1. Hub's v2 edit cannot silently
   // transfer execution authority, so Alice submits with Hub's Hanko.
@@ -622,13 +760,19 @@ export async function runSettleScenario(existingEnv?: RuntimeReplica): Promise<R
 
   const aliceState = findReplica(env, ALICE_ID)[1].state;
   assert(!aliceState.accounts.get(HUB_ID)?.state.settlementWorkspace, 'Workspace should be cleared after execute', env);
+  const reservesAfterNet = await Promise.all([jadapter.getReserves(ALICE_ID, USDC_TOKEN_ID), jadapter.getReserves(HUB_ID, USDC_TOKEN_ID)] as const);
+  assert(reservesAfterNet[0] === reservesBeforeNet[0] - NET_OWED, 'Net settlement must debit Alice exactly the net amount', env);
+  assert(reservesAfterNet[1] === reservesBeforeNet[1] + NET_OWED, 'Net settlement must credit Hub exactly the net amount', env);
+  assert(aliceView().inOwnCredit === 0n && aliceView().outPeerCredit === 0n, 'Net settlement must clear the account position', env);
+  tell(env, {
+    title: 'Settled: the account is back to zero',
+    what: `The block is final. Alice\'s reserve fell by ${usdc(NET_OWED)} to ${usdc(reservesAfterNet[0])}, Hub\'s rose to ${usdc(reservesAfterNet[1])}, and neither bank owes the other anything in the account.`,
+    why: 'The credit lines are still open, so new payments can build a new net position until the next settlement.',
+    tradfiParallel: SETTLEMENT_ASSET,
+    keyMetrics: [`Alice reserve: ${usdc(reservesAfterNet[0])}`, `Hub reserve: ${usdc(reservesAfterNet[1])}`, 'Net position: 0 USDC'],
+  });
 
   console.log(`✅ Settlement executed + on-chain confirmed`);
-
-  snap(env, 'Settlement Executed', {
-    description: 'Settlement added to jBatch for on-chain commit',
-    phase: 'execute'
-  });
 
   // ══════════════════════════════════════════════════════════════════════════════
   // TEST 7: SETTLEMENT REJECT
@@ -640,11 +784,18 @@ export async function runSettleScenario(existingEnv?: RuntimeReplica): Promise<R
   const rejectionOps: SettlementOp[] = [{
     type: 'rawDiff',
     tokenId: USDC_TOKEN_ID,
-    leftDiff: usd(1),
-    rightDiff: -usd(1),
+    leftDiff: REJECTED_ASK,
+    rightDiff: -REJECTED_ASK,
     collateralDiff: 0n,
     ondeltaDiff: 0n,
   }];
+  snap(env, 'A proposal Hub will not accept', {
+    description: `Alice asks Hub for ${usdc(REJECTED_ASK)}`,
+    phase: 'reject',
+    what: `Alice proposes that Hub transfer her ${usdc(REJECTED_ASK)} of reserves for nothing in return. It stays unsigned on Hub\'s side.`,
+    why: 'A proposal is an offer, not an obligation. It cannot reach the chain without the counterparty\'s signature.',
+    tradfiParallel: 'An unconfirmed settlement instruction.',
+  });
   await process(env, [{
     entityId: ALICE_ID,
     signerId: ALICE_SIGNER,
@@ -662,6 +813,15 @@ export async function runSettleScenario(existingEnv?: RuntimeReplica): Promise<R
     advanceScenarioTime(env);
     await process(env);
   }
+
+  snap(env, 'Hub rejects: holds released', {
+    description: 'Hub rejects the proposal',
+    phase: 'reject',
+    what: 'Hub rejects. The proposal is cleared on both sides and any amount held for it is released.',
+    why: 'Rejection is as explicit and signed as approval, so both sides agree that nothing is pending.',
+    tradfiParallel: 'An unmatched instruction cancelled; earmarked funds released.',
+    keyMetrics: ['Pending settlements: 0'],
+  });
 
   // Hub rejects
   await process(env, [{
@@ -685,16 +845,6 @@ export async function runSettleScenario(existingEnv?: RuntimeReplica): Promise<R
   assert(!aliceAccount5?.state.settlementWorkspace, 'Workspace should be cleared after reject', env);
 
   console.log(`✅ Settlement rejected - workspace cleared`);
-
-  snap(env, 'Settlement Rejected', {
-    description: 'Hub rejected - workspace cleared, holds released',
-    phase: 'reject'
-  });
-
-  snap(env, 'Scenario Complete', {
-    description: 'All settlement tests passed',
-    phase: 'complete'
-  });
 
   // ══════════════════════════════════════════════════════════════════════════════
   // CLEANUP

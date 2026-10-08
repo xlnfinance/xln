@@ -218,8 +218,9 @@ export const trailNetworkTimelineSource = (trail: NetworkTrail): NetworkTimeline
 export const scenarioNetworkTimelineSource = (
   runtimeId: string,
   snapshots: readonly EnvSnapshot[],
+  narration: Parameters<typeof networkTrailFromSnapshots>[2] = [],
 ): NetworkTimelineSource => {
-  const source = trailNetworkTimelineSource(networkTrailFromSnapshots(runtimeId, snapshots) as NetworkTrail);
+  const source = trailNetworkTimelineSource(networkTrailFromSnapshots(runtimeId, snapshots, narration) as NetworkTrail);
   return {
     ...source,
     readGraphFrame: async (height: number) => {
@@ -309,6 +310,23 @@ export const encodeNetworkTrailForHash = async (trail: NetworkTrail): Promise<st
 
 export const decodeNetworkTrailFromHash = async (encoded: string): Promise<NetworkTrail> =>
   parseNetworkTrail(await gunzip(fromBase64Url(String(encoded || '').trim())));
+
+const DEMO_TRAIL_NAME = /^[a-z0-9][a-z0-9-]{0,63}$/;
+
+/**
+ * Offline demos ship with the app as `/demo-trails/<name>.json`, recorded by the canonical
+ * trail exporter. The name is a bare slug, so it can never address anything else.
+ */
+export const fetchDemoNetworkTrail = async (
+  name: string,
+  fetcher: (path: string) => Promise<Response> = (path) => fetch(path),
+): Promise<NetworkTrail> => {
+  const trailName = String(name || '').trim();
+  if (!DEMO_TRAIL_NAME.test(trailName)) throw new Error(`NETWORK_DEMO_TRAIL_NAME_INVALID:${trailName}`);
+  const response = await fetcher(`/demo-trails/${trailName}.json`);
+  if (!response.ok) throw new Error(`NETWORK_DEMO_TRAIL_UNAVAILABLE:${trailName}:${response.status}`);
+  return parseNetworkTrail(await response.text());
+};
 
 /** Drain a live source into a replayable trail. This is how a browser demo is captured. */
 export const recordNetworkTrail = async (source: NetworkTimelineSource): Promise<NetworkTrail> => {

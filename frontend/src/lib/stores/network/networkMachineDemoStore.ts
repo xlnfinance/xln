@@ -31,6 +31,19 @@ export const normalizeDemo = (value: Partial<NetworkMachineDemo>): NetworkMachin
 
 const demo = writable<NetworkMachineDemo>(NETWORK_MACHINE_DEMO_IDLE);
 
+/**
+ * Presentation mode (`/embed?...&present=1`): the graph dominates, narration is a large card,
+ * the keyboard drives playback and the renderer trades frame rate for image quality.
+ * Null when not presenting; the title names the demo on the narration card.
+ */
+export type NetworkMachinePresentation = {
+  title: string;
+  /** Set when the trail is a chapter of the presenter's story: its place and what follows. */
+  chapter?: { index: number; count: number; next: { title: string; href: string } | null };
+};
+
+export const networkMachinePresentation = writable<NetworkMachinePresentation | null>(null);
+
 export const networkMachineDemo = {
   subscribe: demo.subscribe,
   set: (value: Partial<NetworkMachineDemo>): void => {

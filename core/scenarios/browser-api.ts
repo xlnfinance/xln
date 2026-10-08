@@ -1,6 +1,7 @@
 import type { EnvSnapshot, RuntimeReplica } from '../runtime/types';
 import { startRuntimeTraceForTesting } from '../runtime/observability/runtime-trace';
 import { getBrowserScenarios } from './runner/catalog';
+import { readScenarioNarration, type ScenarioNarrationBeat } from './harness/narration';
 
 /**
  * Browser scenario registry.
@@ -25,6 +26,8 @@ export type ScenarioRecording = {
   key: ScenarioKey;
   /** Every committed frame of the run, in order. */
   frames: EnvSnapshot[];
+  /** Narration beats about already-committed frames (see harness/narration). */
+  narration: ScenarioNarrationBeat[];
   env: RuntimeReplica;
 };
 
@@ -77,7 +80,7 @@ export const recordScenario = async (
   const trace = startRuntimeTraceForTesting(env);
   try {
     const result = await run(env);
-    return { key, frames: [...trace.snapshots], env: result };
+    return { key, frames: [...trace.snapshots], narration: readScenarioNarration(env), env: result };
   } finally {
     trace.stop();
   }
