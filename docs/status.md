@@ -7,12 +7,24 @@ current network shape.
 For executable work, use the repository root [todo.md](../todo.md). This file
 summarizes why those items matter and how they fit the protocol.
 
-## Current Snapshot
+## Owner alignment — 2026-09-30
+
+The [launch design](launch-design.md#minimum-remaining-work--owner-alignment-2026-09-30)
+records the minimum implementation tasks and accepted exposure-based reaction
+schedule. The documentation review changed no runtime or contract behavior.
+The full repository check stopped at `rscore:fmt` because `cargo` was unavailable;
+the file-size and contract-artifact gates passed first. This is a verification
+blocker, not evidence of a protocol failure or a green release candidate.
+
+The dated evidence below remains historical. Reproduce it on the actual candidate
+before assigning current readiness or declaring an old blocker resolved.
+
+## Historical snapshot — 2026-07-25
 
 **Date:** 2026-07-25
-**State:** current `main` is production-demo/public-testnet grade, not mainnet-ready.
+**State recorded then:** production-demo/public-testnet grade, not mainnet-ready.
 
-What is true now:
+What was reported at that snapshot:
 
 - the bilateral runtime and consensus architecture exist and are actively
   exercised by local, browser, and prod-facing checks;
@@ -103,7 +115,7 @@ When docs disagree, use this order:
   held at `900 + 1000 - 100 - 50 = 1750`.
 - Runtime ↔ Sepolia reserve and J-event parity was proven with
   `core/scripts/operations/settlement/rpc-settlement-parity.ts --mode=attach
-  --jurisdiction=ethereum-sepolia`: reserves moved `1750 → 1627` / `0 → 123`,
+--jurisdiction=ethereum-sepolia`: reserves moved `1750 → 1627` / `0 → 123`,
   and receipt events matched an independent chain refetch. Evidence receipt:
   `0xe3b7370d960c8901f506a5239c4395c72b50e1a1c95574bdef413d20d73d9f6d`
   at block `11344290`.

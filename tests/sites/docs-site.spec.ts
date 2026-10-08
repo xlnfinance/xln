@@ -6,7 +6,7 @@ type FailureEntry = {
 };
 
 function trackSameOriginFailures(page: Page, failures: FailureEntry[]): void {
-  page.on('requestfailed', (request) => {
+  page.on('requestfailed', request => {
     const url = request.url();
     if (!url.startsWith('http')) return;
     failures.push({
@@ -15,7 +15,7 @@ function trackSameOriginFailures(page: Page, failures: FailureEntry[]): void {
     });
   });
 
-  page.on('response', (response) => {
+  page.on('response', response => {
     const url = response.url();
     if (!url.startsWith('http')) return;
     if (response.status() < 400) return;
@@ -27,11 +27,12 @@ function trackSameOriginFailures(page: Page, failures: FailureEntry[]): void {
 }
 
 async function assertNoDocsFailures(failures: FailureEntry[]): Promise<void> {
-  const relevant = failures.filter((entry) =>
-    entry.url.includes('/docs')
-    || entry.url.includes('/docs-catalog/')
-    || entry.url.includes('/img/')
-    || entry.url.includes('/api/jurisdictions'),
+  const relevant = failures.filter(
+    entry =>
+      entry.url.includes('/docs') ||
+      entry.url.includes('/docs-catalog/') ||
+      entry.url.includes('/img/') ||
+      entry.url.includes('/api/jurisdictions'),
   );
   expect(relevant, 'docs route should not produce failed requests').toEqual([]);
 }
@@ -93,12 +94,16 @@ test.describe('Docs site', () => {
 
     await page.goto('/docs?doc=core%2F00_QA', { waitUntil: 'networkidle' });
     await expect(page.getByTestId('docs-nav-toggle')).toBeVisible();
-    await expect(page.locator('.doc-title')).toHaveText('0.0 Questions & Answers');
-    await expect(page.locator('.markdown-body img')).toHaveCount(3);
+    await expect(page.locator('.doc-title')).toHaveText('Questions and answers');
+    await expect(page.locator('.markdown-body')).toContainText('51% of world GDP');
+    await expect(page.locator('.markdown-body')).toContainText('By 2050');
 
     await page.getByTestId('docs-nav-toggle').click();
     await expect(page.locator('.docs-sidebar.open')).toBeVisible();
     await expect(page.getByTestId('doc-link-core-12_invariant')).toBeVisible();
+    await page.getByTestId('doc-link-core-12_invariant').click();
+    await page.waitForURL(/doc=core%2F12_invariant/);
+    await expect(page.locator('.doc-title')).toHaveText('RCPAN invariant');
 
     await page.screenshot({ path: testInfo.outputPath('docs-mobile.png'), fullPage: true });
     await assertNoDocsFailures(failures);

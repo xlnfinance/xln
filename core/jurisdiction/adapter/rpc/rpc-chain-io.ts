@@ -61,7 +61,8 @@ const createFeeReader = (
 ): RpcChainIo['buildFeeOverrides'] => async () => {
   if (config.mode === 'tron') return {};
   const feeData = await provider.getFeeData();
-  if (!feeData.maxFeePerGas || !feeData.maxPriorityFeePerGas) {
+  // EIP-1559 permits a zero priority fee; only absent fields mean unsupported.
+  if (feeData.maxFeePerGas === null || feeData.maxPriorityFeePerGas === null) {
     throw new Error(
       `[JAdapter:rpc] EIP-1559 fee data unavailable for chainId=${config.chainId}. Refusing gasPrice-only mode.`,
     );

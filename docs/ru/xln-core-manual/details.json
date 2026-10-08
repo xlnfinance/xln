@@ -1,0 +1,98 @@
+{
+  "7": {
+    "kind": "mini",
+    "height": 65,
+    "items": [
+      ["Сбой до WAL", "Candidate не публикуется", "R"],
+      ["Сбой после WAL", "Replay + exact outbox", "R"]
+    ],
+    "caption": "Один crash boundary меняет допустимый следующий шаг."
+  },
+  "9": {
+    "kind": "equation",
+    "height": 58,
+    "formula": "weight(signer 1) + weight(signer 2) = 2 >= threshold 2",
+    "caption": "Для board 2-of-3 две разные допустимые подписи достигают threshold."
+  },
+  "11": {
+    "kind": "mini",
+    "height": 72,
+    "items": [
+      ["До Stage 2", "Inbound child state в E candidate", "A"],
+      ["После Stage 2", "Только теперь outbound proposals", "A"]
+    ],
+    "caption": "Books обязаны видеть результат входящих Account переходов."
+  },
+  "13": { "kind": "balance", "height": 57, "caption": "C = 100. Платёж Left → Right на 20: доля Left 40 → 20." },
+  "15": {
+    "kind": "mini",
+    "height": 72,
+    "items": [
+      ["Данные + root", "Связывают exact state", "A"],
+      ["Replay + authority", "Проверяют допустимость перехода", "E"]
+    ],
+    "caption": "Commitment и доказательство законности перехода дополняют друг друга."
+  },
+  "18": {
+    "kind": "mini",
+    "height": 65,
+    "items": [
+      ["Цена 100 · Order 1", "Пришёл раньше: первый match", "E"],
+      ["Цена 100 · Order 2", "Пришёл позже: следующий match", "E"]
+    ],
+    "caption": "Одинаковая цена сохраняет FIFO; скорость worker не задаёт приоритет."
+  },
+  "20": {
+    "kind": "equation",
+    "height": 58,
+    "formula": "funding: amount + outOwnCredit <= outCapacity",
+    "caption": "Неиспользованный кредит исключается из доступного объёма funding."
+  },
+  "21": {
+    "kind": "mini",
+    "height": 76,
+    "items": [
+      ["Observation", "RPC увидел событие", "J"],
+      ["Accepted evidence", "J prefix / claims подтверждены", "E"]
+    ],
+    "caption": "Увиденный event проходит подтверждение перед финансовым применением."
+  },
+  "22": {
+    "kind": "mini",
+    "height": 59,
+    "items": [
+      ["Submitted", "Transaction отправлена", "R"],
+      ["Finalized", "Receipt принят через J input", "J"]
+    ],
+    "caption": "Submission и финальный расчёт - разные состояния операции."
+  },
+  "23": {
+    "kind": "windows",
+    "height": 83,
+    "caption": "Source и Target имеют собственные S и W. Окна не обязаны совпадать."
+  },
+  "25": {
+    "kind": "equation",
+    "height": 68,
+    "formula": "recover(graph[M], acceptedInputs[M+1..H]) = live[H]",
+    "caption": "Сравнение включает roots и ordered outputs, а не только конечный баланс."
+  },
+  "26": {
+    "kind": "mini",
+    "height": 62,
+    "items": [
+      ["Worker completion", "2, 0, 1 - любой порядок", "E"],
+      ["Canonical outputs", "0, 1, 2 - исходные slots", "A"]
+    ],
+    "caption": "Join восстанавливает позиции input, прежде чем публиковать effects."
+  },
+  "27": {
+    "kind": "mini",
+    "height": 77,
+    "items": [
+      ["Signed debt", "Проверяемое требование", "A"],
+      ["Repayment assets", "Экономическое обеспечение", "J"]
+    ],
+    "caption": "Проверяемое обязательство не создаёт отсутствующие активы должника."
+  }
+}

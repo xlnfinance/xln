@@ -33,6 +33,8 @@ This order overrides attractive side work:
 - Use Bun, except where an existing frontend tool explicitly requires something else.
 - Browser/F12 verification is required only for frontend or browser-runtime changes.
 - Documentation belongs in `/docs`, never `/core` or `/frontend`.
+- Russian publications and their editable sources belong in `/docs/ru/`; the English-only
+  source policy still applies elsewhere, apart from its existing explicit allowances.
 - Never redeem a usage reset unless the owner explicitly says to use/redeem a usage reset.
   Complaints about tokens, requests for compensation or refunds are not authorization.
 

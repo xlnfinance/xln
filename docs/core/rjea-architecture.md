@@ -8,6 +8,14 @@ xln is a hierarchy of deterministic financial state machines. Every layer uses
 the same nouns and transition direction, but each layer has a different trust
 and commit boundary.
 
+The financial model is **Jurisdiction → Entity → Account (J/E/A)**: existing
+settlement authorities, people/organizations, and their bilateral relationships.
+Runtime hosts and coordinates E/A replicas; it is the implementation envelope.
+The [MML goal](../intro.md#mission) is provable accounts supporting 51% of world
+GDP by 2050. The implementation advances that goal through usable account proofs,
+chosen credit/collateral backing and enforceable Delta Transformers. Ordinary
+account activity need not be submitted individually to J to be covered.
+
 ## Canonical vocabulary
 
 | Layer | Live replica | Committed state | Input | Transaction | Frame | Output |
@@ -97,11 +105,11 @@ The Account wire entrypoint is one union:
 
 ```typescript
 type AccountInput =
-  | { kind: 'frame'; /* exact proposal */ }
-  | { kind: 'ack'; /* exact acknowledgement */ }
-  | { kind: 'ack_frame'; /* ACK first, then proposal */ }
-  | { kind: 'dispute'; /* exact dispute Hanko */ }
-  | { kind: 'board_hanko_refresh'; /* exact certified refresh */ };
+  | { kind: 'frame' /* exact proposal */ }
+  | { kind: 'ack' /* exact acknowledgement */ }
+  | { kind: 'ack_frame' /* ACK first, then proposal */ }
+  | { kind: 'dispute' /* exact dispute Hanko */ }
+  | { kind: 'board_hanko_refresh' /* exact certified refresh */ };
 ```
 
 Every branch enters `applyAccountInput`. Local `AccountTx[]` admission and

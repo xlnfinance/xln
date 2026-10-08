@@ -1692,6 +1692,12 @@ test.describe('E2E Swap Isolated Flow', () => {
           })
           .toBeGreaterThanOrEqual(round);
 
+        // Closed history is fetched only by an explicit user action; live
+        // refresh must never scan Account frame history for completion feedback.
+        await Promise.all([
+          alicePage.getByTestId('swap-orders-tab-closed').first().click(),
+          bobPage.getByTestId('swap-orders-tab-closed').first().click(),
+        ]);
         await Promise.all([
           closeExpectedSwapCompletionModal(alicePage),
           closeExpectedSwapCompletionModal(bobPage),

@@ -59,15 +59,18 @@ pub struct ScheduledWake {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SchedulerCommand {
+    PrepareSecretAckDisputes {
+        counterparties: Vec<String>,
+    },
+    DeferSecretAck {
+        hashlock: String,
+    },
     ProcessHtlcTimeouts {
         expired_locks: Vec<(String, String)>,
     },
     /// Loans whose committed term passed unpaid, in derived-deadline order.
     SettleOverdueLending {
         loans: Vec<crate::OverdueLendingLoan>,
-    },
-    PrepareDisputes {
-        counterparties: Vec<String>,
     },
     AutoFinalizeDispute {
         counterparty_entity_id: String,
@@ -97,7 +100,8 @@ pub struct CrontabExecutionContext<'a> {
     /// Overdue loans derived from committed lending state by the caller, in
     /// `(due_at, loan id)` order; never from hooks.
     pub overdue_lending_loans: &'a [crate::OverdueLendingLoan],
-    pub dispute_prepare_counterparties: &'a [String],
+    /// Verified active locks, in derived (deadline, hashlock) order.
+    pub secret_acks_requiring_dispute: &'a [(String, String)],
     pub dispute_views: &'a BTreeMap<String, xln_rscore_batch::ResidentAccountDisputeView>,
     pub j_batch_state: Option<&'a JBatchState>,
     pub dispute_auto_finalize: bool,
@@ -361,7 +365,7 @@ pub fn execute_crontab(
         now,
         expired_htlc_locks,
         overdue_lending_loans,
-        dispute_prepare_counterparties,
+        secret_acks_requiring_dispute,
         dispute_views,
         j_batch_state,
         dispute_auto_finalize,
@@ -385,6 +389,28 @@ pub fn execute_crontab(
     let mut dispute_finalize_planned = false;
     let mut dispute_broadcast_planned = false;
     let mut commands = Vec::new();
+    let mut counterparties = Vec::new();
+    let mut planned = BTreeSet::new();
+    let starts = j_batch_state.map_or(0, |value| value.batch.dispute_starts.len());
+    for (hashlock, counterparty) in secret_acks_requiring_dispute {
+        if dispute_views
+            .get(counterparty)
+            .is_some_and(|view| view.active_dispute.is_some())
+        {
+            continue;
+        }
+        if planned.contains(counterparty) {
+            continue;
+        }
+        if starts + counterparties.len() >= crate::j_batch::MAX_DISPUTE_STARTS {
+            commands.push(SchedulerCommand::DeferSecretAck {
+                hashlock: hashlock.clone(),
+            });
+        } else {
+            planned.insert(counterparty.clone());
+            counterparties.push(counterparty.clone());
+        }
+    }
     let mut account_envelope_mutations = Vec::new();
     for hook in &due_hooks {
         match &hook.kind {
@@ -531,10 +557,8 @@ pub fn execute_crontab(
     if !expired_locks.is_empty() {
         commands.push(SchedulerCommand::ProcessHtlcTimeouts { expired_locks });
     }
-    if !dispute_prepare_counterparties.is_empty() {
-        commands.push(SchedulerCommand::PrepareDisputes {
-            counterparties: dispute_prepare_counterparties.to_vec(),
-        });
+    if !counterparties.is_empty() {
+        commands.push(SchedulerCommand::PrepareSecretAckDisputes { counterparties });
     }
     if !overdue_lending_loans.is_empty() {
         commands.push(SchedulerCommand::SettleOverdueLending {
@@ -684,6 +708,77 @@ mod tests {
     }
 
     #[test]
+    fn secret_ack_timeout_does_not_halt_the_runtime() {
+        let crontab = state();
+        let pending = vec![("hashlock".to_string(), "upstream".to_string())];
+        let result = execute_crontab(
+            &crontab,
+            &wake(vec![ScheduledWakeJob {
+                kind: ScheduledWakeJobKind::Hook,
+                id: "htlc-secret-ack:hashlock".into(),
+                due_at: 1_000,
+            }]),
+            CrontabExecutionContext {
+                expected_proposer_signer_id: "HUB",
+                now: 1_000,
+                expired_htlc_locks: &[],
+                overdue_lending_loans: &[],
+                secret_acks_requiring_dispute: &pending,
+                dispute_views: &BTreeMap::new(),
+                j_batch_state: None,
+                dispute_auto_finalize: true,
+            },
+        );
+        assert!(
+            result.is_ok(),
+            "withheld ACK must queue recovery, not halt: {result:?}"
+        );
+        assert_eq!(
+            result.expect("recovery").commands,
+            vec![SchedulerCommand::PrepareSecretAckDisputes {
+                counterparties: vec!["upstream".into()],
+            }]
+        );
+    }
+
+    #[test]
+    fn secret_ack_disputes_preserve_deadline_order_and_defer_overflow() {
+        let pending = (0..9)
+            .map(|index| (format!("lock-{index}"), format!("upstream-{index}")))
+            .collect::<Vec<_>>();
+        let result = execute_crontab(
+            &state(),
+            &wake(vec![ScheduledWakeJob {
+                kind: ScheduledWakeJobKind::Hook,
+                id: "htlc-secret-ack:lock-0".into(),
+                due_at: 1_000,
+            }]),
+            CrontabExecutionContext {
+                expected_proposer_signer_id: "HUB",
+                now: 1_000,
+                expired_htlc_locks: &[],
+                overdue_lending_loans: &[],
+                secret_acks_requiring_dispute: &pending,
+                dispute_views: &BTreeMap::new(),
+                j_batch_state: None,
+                dispute_auto_finalize: true,
+            },
+        )
+        .expect("bounded recovery");
+        assert_eq!(
+            result.commands,
+            vec![
+                SchedulerCommand::DeferSecretAck {
+                    hashlock: "lock-8".into()
+                },
+                SchedulerCommand::PrepareSecretAckDisputes {
+                    counterparties: pending[..8].iter().map(|(_, peer)| peer.clone()).collect(),
+                },
+            ]
+        );
+    }
+
+    #[test]
     fn derived_htlc_timeouts_drain_in_caller_order_not_only_diagnostic_prefix() {
         let state = state();
         let expired = [
@@ -702,7 +797,7 @@ mod tests {
                 now: 1_000,
                 expired_htlc_locks: &expired,
                 overdue_lending_loans: &[],
-                dispute_prepare_counterparties: &[],
+                secret_acks_requiring_dispute: &[],
                 dispute_views: &BTreeMap::new(),
                 j_batch_state: None,
                 dispute_auto_finalize: true,
@@ -745,7 +840,7 @@ mod tests {
                 now: 1_000,
                 expired_htlc_locks: &expired,
                 overdue_lending_loans: &overdue,
-                dispute_prepare_counterparties: &[],
+                secret_acks_requiring_dispute: &[],
                 dispute_views: &BTreeMap::new(),
                 j_batch_state: None,
                 dispute_auto_finalize: true,
@@ -787,7 +882,7 @@ mod tests {
                 now: 10,
                 expired_htlc_locks: &[],
                 overdue_lending_loans: &[],
-                dispute_prepare_counterparties: &[],
+                secret_acks_requiring_dispute: &[],
                 dispute_views: &BTreeMap::new(),
                 j_batch_state: None,
                 dispute_auto_finalize: true,
@@ -820,7 +915,7 @@ mod tests {
                 now: 1_000,
                 expired_htlc_locks: &[],
                 overdue_lending_loans: &[],
-                dispute_prepare_counterparties: &[],
+                secret_acks_requiring_dispute: &[],
                 dispute_views: &BTreeMap::from([("peer".into(), dispute_view(false, 9))]),
                 j_batch_state: None,
                 dispute_auto_finalize: true,
@@ -847,7 +942,7 @@ mod tests {
                 now: 10_000,
                 expired_htlc_locks: &[],
                 overdue_lending_loans: &[],
-                dispute_prepare_counterparties: &[],
+                secret_acks_requiring_dispute: &[],
                 dispute_views: &BTreeMap::from([("peer".into(), dispute_view(true, 9))]),
                 j_batch_state: None,
                 dispute_auto_finalize: true,
@@ -906,7 +1001,7 @@ mod tests {
                 now: NOW,
                 expired_htlc_locks: &[],
                 overdue_lending_loans: &[],
-                dispute_prepare_counterparties: &[],
+                secret_acks_requiring_dispute: &[],
                 dispute_views: &BTreeMap::from([(
                     ACCOUNT.into(),
                     dispute_view(true, 1_788_395_489),
@@ -952,7 +1047,7 @@ mod tests {
                 now: 10_000,
                 expired_htlc_locks: &[],
                 overdue_lending_loans: &[],
-                dispute_prepare_counterparties: &[],
+                secret_acks_requiring_dispute: &[],
                 dispute_views: &BTreeMap::from([(
                     "peer".into(),
                     dispute_view_with_finalize_queued(true),
@@ -1016,7 +1111,7 @@ mod tests {
                 now: 10_000,
                 expired_htlc_locks: &[],
                 overdue_lending_loans: &[],
-                dispute_prepare_counterparties: &[],
+                secret_acks_requiring_dispute: &[],
                 dispute_views: &BTreeMap::from([(
                     account_id.clone(),
                     dispute_view_with_finalize_queued(false),
@@ -1085,7 +1180,7 @@ mod tests {
                 now: 10_000,
                 expired_htlc_locks: &[],
                 overdue_lending_loans: &[],
-                dispute_prepare_counterparties: &[],
+                secret_acks_requiring_dispute: &[],
                 dispute_views: &BTreeMap::from([(account_id.clone(), dispute_view(true, 9))]),
                 j_batch_state: Some(&j_batch_state),
                 dispute_auto_finalize: true,
@@ -1141,7 +1236,7 @@ mod tests {
                 now: 1_500,
                 expired_htlc_locks: &[],
                 overdue_lending_loans: &[],
-                dispute_prepare_counterparties: &[],
+                secret_acks_requiring_dispute: &[],
                 dispute_views: &BTreeMap::new(),
                 j_batch_state: None,
                 dispute_auto_finalize: true,
@@ -1184,7 +1279,7 @@ mod tests {
                 now: 1_000,
                 expired_htlc_locks: &[],
                 overdue_lending_loans: &[],
-                dispute_prepare_counterparties: &[],
+                secret_acks_requiring_dispute: &[],
                 dispute_views: &BTreeMap::new(),
                 j_batch_state: None,
                 dispute_auto_finalize: true,

@@ -9,7 +9,7 @@
   } from '$lib/stores/xlnStore';
   import { timeOperations } from '$lib/stores/timeStore';
   import { errorLog } from '$lib/stores/errorLogStore';
-  import type { RuntimeReplica, EnvSnapshot, EntityReplica, EntityState, XLNModule } from '@xln/core/api/public/runtime-module';
+  import type { RuntimeReplica, EnvSnapshot, XLNModule, EntityReplica, EntityState } from '@xln/core/api/public/runtime-module';
 
   type ScenarioOption = {
     id: string;
@@ -121,28 +121,8 @@
   $: progressText = frames.length > 0 ? `${currentFrame + 1}/${frames.length}` : '0/0';
   $: builderInspectText = formatBuilderText(activeFrame, visual, selectedScenario, currentFrame, frames.length);
 
-  function mapEntries<T = unknown>(value: unknown): Array<[string, T]> {
-    if (value instanceof Map) return Array.from(value.entries()).map(([key, item]) => [String(key), item as T]);
-    if (value && typeof value === 'object' && !Array.isArray(value)) {
-      return Object.entries(value as Record<string, T>);
-    }
-    return [];
-  }
-
-  function mapSize(value: unknown): number {
-    if (value instanceof Map) return value.size;
-    if (value && typeof value === 'object' && !Array.isArray(value)) return Object.keys(value).length;
-    return 0;
-  }
-
   function normalizeId(value: unknown): string {
     return String(value || '').trim().toLowerCase();
-  }
-
-  function asRecord(value: unknown): Record<string, unknown> {
-    return value && typeof value === 'object' && !Array.isArray(value)
-      ? value as Record<string, unknown>
-      : {};
   }
 
   function formatErrorMessage(error: unknown): string {
@@ -174,18 +154,16 @@
 
   function countDebts(state: EntityState): number {
     let count = 0;
-    for (const family of ['outDebtsByToken', 'inDebtsByToken'] as const) {
-      for (const [, byDebtId] of mapEntries(state[family])) {
-        count += mapSize(byDebtId);
-      }
+    for (const family of [state.outDebtsByToken, state.inDebtsByToken]) {
+      if (!family) continue;
+      for (const debts of family.values()) count += debts.size;
     }
     return count;
   }
 
   function readPosition(replica: EntityReplica, index: number, total: number): { x: number; y: number; raw: boolean } {
-    const raw = replica.position;
-    const x = Number(raw?.x);
-    const y = Number(raw?.y);
+    const x = Number(replica.position?.x);
+    const y = Number(replica.position?.y);
     if (Number.isFinite(x) && Number.isFinite(y)) return { x, y, raw: true };
     const angle = total <= 1 ? 0 : (index / total) * Math.PI * 2;
     return { x: Math.cos(angle) * 40, y: Math.sin(angle) * 24, raw: false };
@@ -227,12 +205,12 @@
     const nodeById = new Map<string, FrameNode & { rawX: number; rawY: number }>();
     const replicaEntries = Array.from(frame.state.eReplicas.entries());
 
-    replicaEntries.forEach(([replicaKey, replica], index) => {
+    replicaEntries.forEach(([, replica], index) => {
       const state = replica.state;
-      const entityId = normalizeId(replica['entityId'] || state['entityId'] || replicaKey.split(':')[0]);
+      const entityId = normalizeId(replica.entityId);
       if (!entityId || nodeById.has(entityId)) return;
       const accounts = Array.from(state.accounts.entries());
-      const disputed = accounts.some(([, account]) => Boolean(account?.['activeDispute']));
+      const disputed = accounts.some(([, account]) => Boolean(account.activeDispute));
       const debtCount = countDebts(state);
       const label = profileName(frame, entityId);
       const position = readPosition(replica, index, Math.max(1, replicaEntries.length));
@@ -261,16 +239,16 @@
 
     for (const [, replica] of replicaEntries) {
       const state = replica.state;
-      const sourceId = normalizeId(replica['entityId'] || state['entityId']);
+      const sourceId = normalizeId(replica.entityId);
       if (!sourceId) continue;
       debtCount += countDebts(state);
-      for (const [counterpartyIdRaw, account] of state.accounts) {
+      for (const [counterpartyIdRaw, account] of Array.from(state.accounts.entries())) {
         const counterpartyId = normalizeId(counterpartyIdRaw);
         const from = normalizedNodeById.get(sourceId);
         const to = normalizedNodeById.get(counterpartyId);
         if (!from || !to || from.id === to.id) continue;
         accountCount += 1;
-        const disputed = Boolean(account?.['activeDispute']);
+        const disputed = Boolean(account.activeDispute);
         if (disputed) activeDisputes += 1;
         const key = [from.id, to.id].sort().join('|');
         const existing = edgeMap.get(key);
@@ -323,12 +301,9 @@
   function stopPreviewInfra(env: RuntimeReplica | null, label = 'preview'): string[] {
     const diagnostics: string[] = [];
     if (!env) return diagnostics;
-    for (const [, jReplica] of mapEntries<Record<string, unknown>>(env.state.jReplicas)) {
-      const adapter = asRecord(jReplica['jadapter']);
+    for (const adapter of env.infrastructure?.liveJAdapters?.values() ?? []) {
       try {
-        if (typeof adapter['stopWatching'] === 'function') {
-          (adapter['stopWatching'] as () => void)();
-        }
+        adapter.stopWatching();
       } catch (error) {
         diagnostics.push(`${label}: failed to stop J-watcher: ${formatErrorMessage(error)}`);
       }

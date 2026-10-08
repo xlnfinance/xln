@@ -192,6 +192,9 @@ const deployBootstrapTokens = async (
   addresses: JAdapterAddresses,
   depository: Depository,
 ): Promise<string[]> => {
+  // Local-dev mint/list authority does not exist on programmable production Js.
+  // Deploy their real contract stack without creating development assets.
+  if (!DEV_CHAIN_IDS.has(config.chainId)) return [];
   const tokens = defaultTokensForJurisdiction({ chainId: config.chainId });
   for (const token of tokens) {
     const supply = getDefaultTokenSupply(token.decimals);

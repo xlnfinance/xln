@@ -725,7 +725,8 @@ fn append_scheduled_account_txs(
                 crate::lending::settle_overdue_lending_loans(state, loans, account_txs)?;
             }
             SchedulerCommand::ProcessHtlcTimeouts { .. }
-            | SchedulerCommand::PrepareDisputes { .. }
+            | SchedulerCommand::PrepareSecretAckDisputes { .. }
+            | SchedulerCommand::DeferSecretAck { .. }
             | SchedulerCommand::AutoFinalizeDispute { .. }
             | SchedulerCommand::BroadcastQueuedDisputeFinalization
             | SchedulerCommand::CrossJOrderbookSweep { .. }

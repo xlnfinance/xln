@@ -1,274 +1,72 @@
-# Unavoidable Constraints: Why XLN is Not Optional
+# Design constraints for provable finance
 
-**XLN is not presented here as a preference or brand thesis.**
-This document argues that bilateral provable-credit settlement is the only
-architecture that satisfies the constraints that actually matter for
-internet-scale finance.
+xln's objective is [MML: accounts supporting 51% of world GDP made provable by
+2050](intro.md#mission). J/E/A describes existing finance; RCPAN makes bilateral
+credit and collateral coexist with executable account proofs.
 
-This is a theory/positioning document, not a launch checklist. For current
-execution state, use [status.md](status.md) and [mainnet.md](mainnet.md).
+This document explains design choices. Implementation evidence and launch status
+are recorded separately in [mainnet.md](mainnet.md) and release artifacts.
 
----
+## Local financial activity
 
-## Constraint 1: Scalability Requires Unicast (Mathematical)
+Putting every operation through one mandatory shared execution or data pipeline
+creates a common resource limit. xln keeps ordinary account updates local to the
+parties and their Entity authority; J handles the enforcement and settlement
+operations that need it. Independent relationships can add aggregate capacity.
 
-**Target:** 1 billion users, 1000 transactions/second each = 1 trillion ops/sec
+Locality does not imply unlimited capacity. Each Runtime, Entity, hub and route
+has hardware and liquidity limits. J must also absorb collateral activity and
+credible dispute load. One billion TPS is a target, not a result established by
+the topology or a replay benchmark.
 
-**Broadcast O(n) analysis:**
-- Each validator processes ALL transactions
-- 1 trillion ops × n validators = physically impossible
-- Sharding reduces to O(n/k) but cross-shard kills gains
-- Rollups batch but still broadcast (data availability bottleneck)
+## Credit and collateral
 
-**Proof:** `lim(n→∞) broadcast_capacity = constant` (validator hardware ceiling)
+Receiving requires available account capacity. A fully collateralized relationship
+can receive using backing already available to it. A credit-bearing relationship
+can also receive against a deliberately accepted obligation from its counterparty.
+RCPAN supports both through one signed account model:
 
-**Therefore:** Internet-scale finance MUST be unicast.
+    −leftCreditLimit ≤ Δ ≤ collateral + rightCreditLimit
 
-**Consequence:** Bilateral accounts are not optional. They are the ONLY topology that achieves O(1) per relationship.
+Credit is a policy choice, not a protocol mandate. The parties select risk and
+backing manually or through soft-limit policy. The runtime enforces exact agreed
+bounds before signing; the J enforces the resulting signed claims. See
+[the invariant](core/12_invariant.md) for orientation and grant direction.
 
----
+## Organizational authority
 
-## Constraint 2: Receiving Requires Credit (Empirical)
+People, businesses, banks and other organizations need explicit authority to
+approve changes. Entity machines make that authority and state verifiable.
+Runtime orchestrates their deterministic transitions and publishes external
+effects only after commitment; it does not replace their authority boundaries.
 
-**Lightning Network experiment (2017-2025):**
-- 7 years, millions in funding, best engineers
-- Result: FAILED due to inbound capacity wall
-- Cannot receive without counterparty pre-funding your side
-- JIT channels, LSPs, custodial services = all reintroduce trust
+## Proof, backing and conditions
 
-**Mathematical proof:**
-```
-Δ = your_balance - counterparty_balance
+A usable proof identifies the signed obligation. Collateral provides backing for
+the secured entitlement. Delta Transformers enforce agreed conditions while
+value moves. These protections reduce specific failure exposures; unsecured
+claims still depend on repayment and J enforcement remains subject to its actual
+availability, inclusion and timing rules.
 
-Receive $100:
-- Δ must increase by 100
-- Full-reserve: Δ ≤ your_locked_collateral
-- Therefore: Cannot receive if collateral = 0
-- QED: Receiving impossible without pre-funding OR credit
-```
+## Programmable jurisdiction
 
-**Lightning tried every workaround:**
-- Dual-funded channels (coordination nightmare)
-- Channel factories (complexity explosion)
-- Submarine swaps (expensive on-chain fallback)
-- All FAILED or reintroduced trust
+The current implementation uses EVM-compatible J-machines to verify Entity
+signatures, execute dispute conditions and atomically settle collateral/reserves.
+Ethereum, TRON and XLNC are the initial focus; compatible additional Js use the
+same financial path after their boundary is verified.
 
-**Therefore:** Credit is not optional. It is mathematical necessity for frictionless receiving.
+These are executable interface requirements, not a theorem that another virtual
+machine or institutional settlement system can never implement equivalent rules.
+A future central-bank programmable J can fit the model without changing the
+meaning of Entity or Account.
 
-**Consequence:** FCUAN (banking credit model) was correct. Missing piece was proofs, not credit itself.
+## What must be demonstrated
 
----
+- A user can fund, pay, swap, withdraw and recover using retained evidence.
+- Credit consent, collateral backing and conditional execution remain exact under failure.
+- Each admitted J has proven observation, deployment, dispute and withdrawal behavior.
+- Throughput counts committed economic operations; MML measures provability coverage,
+  with no repeated counting of hops, retries or later settlement.
 
-## Constraint 3: Organizations Require Programmable Entities (Practical)
-
-**Every organization needs:**
-- Multi-party authorization (board votes, quorum)
-- Conditional logic (if revenue > X then distribute dividends)
-- State management (balances, permissions, proposals)
-- Audit trails (who approved what when)
-
-**Cannot avoid:**
-- P2P (individuals) insufficient for companies, funds, institutions
-- Banks, DAOs, treasuries = 90% of financial activity
-- Static addresses (Bitcoin) cannot express governance
-
-**Therefore:** Programmable state machines (entities) are unavoidable.
-
-**Consequence:** E-machines (entities with consensus + accounts + reserves) are architectural necessity, not design preference.
-
----
-
-## Constraint 4: Crises Make Proofs Inevitable (Human Nature)
-
-**Empirical pattern:**
-- 2014: Mt.Gox ($450M) → "not your keys"
-- 2022: FTX ($8B) → "not your keys"
-- Pattern: Every 2-3 years, another billion-dollar collapse
-
-**Learning ratchet:**
-- Users burned ONCE learn PERMANENTLY
-- After FTX, "trust Coinbase" is not acceptable answer
-- Question becomes: "How do I prove reserves?"
-
-**Unprovable custody dies:**
-- Like HTTP after Snowden (everyone migrated to HTTPS)
-- Like unencrypted email (everyone added TLS)
-- Crises make old standard unacceptable
-
-**Therefore:** Cryptographic proofs become MANDATORY after sufficient crises.
-
-**Consequence:** Bilateral consensus (both parties verify state hash) is not optional. It is survival mechanism.
-
----
-
-## Constraint 5: Enforcement Requires Turing-Complete J-Machine (Technical)
-
-**FIFO debt enforcement needs:**
-
-```solidity
-while (debts.length > cursor && reserve > 0) {
-    if (reserve >= debt.amount) {
-        pay(debt.amount);
-        delete debt;
-        cursor++;
-    } else {
-        debt.amount -= reserve;  // MUTABLE UPDATE
-        reserve = 0;
-        break;
-    }
-}
-```
-
-**Requirements:**
-1. Loops (while/for with unknown iteration count)
-2. Mutable storage (debt.amount update mid-execution)
-3. Atomic multi-entity updates (debtor + creditor simultaneously)
-
-**UTXO chains (Bitcoin, Cardano, Ergo) CANNOT:**
-- No mutable storage (must consume entire UTXO, create new one)
-- No loops (Script forbids, prevents halting problem)
-- No multi-entity atomicity (each UTXO independent)
-
-**Account-based VMs CAN:**
-- EVM: ✅ Storage mutation, ✅ Loops, ✅ Atomic cross-account
-- Solana: ✅ Technically capable BUT wrong optimization (parallel execution conflicts with sequential debt processing)
-- Move VM: ✅ Capable but immature ecosystem
-
-**Therefore:** EVM is not "preferred" - it is REQUIRED (or equivalent Turing-complete account-based VM).
-
-**Consequence:** XLN cannot work on Bitcoin/Lightning rails. Must have programmable settlement layer.
-
----
-
-## The Inescapable Conclusion
-
-**Combining all 5 constraints:**
-
-1. Must be bilateral (unicast scalability)
-2. Must have credit (receiving capability)
-3. Must have programmable entities (organizational logic)
-4. Must have cryptographic proofs (post-crisis survival)
-5. Must have EVM settlement (enforcement automation)
-
-**Question:** What architecture satisfies ALL 5?
-
-**Answer:** RCPAN (Reserve-Credit Provable Account Network)
-
-Specifically:
-- **R**eserve: On-chain collateral (constraint 5 - EVM)
-- **C**redit: Bilateral limits (constraint 2 - receiving)
-- **P**rovable: Bilateral consensus (constraint 4 - proofs)
-- **A**ccount: Bilateral relationships (constraint 1 - unicast)
-- **N**etwork: Programmable entities (constraint 3 - organizations)
-
-**Can anything else satisfy all 5?**
-
-I cannot conceive of an alternative. The constraint space has ONE solution.
-
----
-
-## Why Alternatives Fail (Constraint Analysis)
-
-**Bitcoin:**
-- ✅ Broadcast (fails constraint 1 - scalability)
-- ❌ No credit (fails constraint 2 - receiving)
-- ❌ No programmability (fails constraint 3 - entities)
-- ✅ Proofs exist (satisfies constraint 4)
-- ❌ UTXO (fails constraint 5 - enforcement)
-
-**Lightning Network:**
-- ✅ Bilateral (satisfies constraint 1)
-- ❌ No credit (FAILS constraint 2 - FATAL)
-- ❌ Limited programmability (fails constraint 3)
-- ✅ Proofs (satisfies constraint 4)
-- ⚠️ Requires EVM for complex settlement (partial constraint 5)
-
-**Rollups (Arbitrum, etc):**
-- ❌ Broadcast (fails constraint 1 - hits DA ceiling)
-- ❌ No native credit (fails constraint 2)
-- ✅ Programmable (satisfies constraint 3)
-- ⚠️ Proofs via fraud/validity (partial constraint 4)
-- ✅ EVM (satisfies constraint 5)
-
-**Traditional Banking:**
-- ✅ Unicast (satisfies constraint 1)
-- ✅ Credit (satisfies constraint 2)
-- ✅ Organizational logic (satisfies constraint 3)
-- ❌ NO PROOFS (fails constraint 4 - FATAL after crises)
-- ❌ Not programmable settlement (fails constraint 5)
-
-**XLN:**
-- ✅ Bilateral unicast (constraint 1)
-- ✅ Credit via RCPAN (constraint 2)
-- ✅ Programmable entities (constraint 3)
-- ✅ Bilateral consensus proofs (constraint 4)
-- ✅ EVM enforcement (constraint 5)
-
-**Score: 5/5 constraints satisfied**
-
-**Every other system: ≤3/5**
-
----
-
-## This is Not Innovation. This is Recognition.
-
-XLN did not invent:
-- Bilateral accounts (banking, 500+ years)
-- Credit limits (margin trading, 100+ years)
-- Cryptographic proofs (Bitcoin, 2009)
-- Smart contracts (Ethereum, 2015)
-- FIFO debt queues (bankruptcy law, centuries)
-
-**What XLN recognized:**
-
-All five pieces MUST exist together. Removing any one violates a constraint that cannot be avoided.
-
-This is not design. This is discovery.
-
-Like how TCP/IP didn't invent packets or routing, but recognized they must be combined in specific way.
-
----
-
-## Implications
-
-**For competitors:**
-- Cannot build "better XLN" - there is no alternative satisfying all constraints
-- Can only build "worse implementation of same constraints"
-- Like trying to build "better than TCP/IP" - you just rebuild TCP/IP
-
-**For adoption:**
-- Not "will users prefer XLN?"
-- But "when will users discover constraints cannot be avoided?"
-- Crises accelerate discovery (FTX = $8B lesson on constraint 4)
-
-**For roadmap:**
-- Not "capture market share through features"
-- But "be ready when constraints become obvious to market"
-- Timing determined by crisis frequency, not marketing budget
-
----
-
-## Conclusion
-
-The claim is narrow but strong:
-
-- broadcast systems fail the scaling constraint
-- full-reserve bilateral systems fail the receiving/credit constraint
-- proofless credit systems fail the post-crisis trust constraint
-- non-programmable settlement systems fail the enforcement constraint
-
-RCPAN is the architecture that keeps all five pieces together:
-
-- bilateral topology
-- directional credit
-- cryptographic proofs
-- programmable entities
-- programmable enforcement
-
-That is why XLN matters. Not because every implementation detail is finished,
-but because the constraint set points to this shape and not to a simpler rival.
-
----
-
-**Last Updated:** 2026-05-21
-**This document should be FIRST thing anyone reads.**
+See [the architecture comparison](competitors.md) and
+[the launch acceptance journey](wallet-journey-plan.md).

@@ -1,7 +1,9 @@
 import { describe, expect, test } from 'bun:test';
 
 import { executeCrontab, initCrontab } from '../../../entity/scheduler';
-import { collectDerivedDeadlines } from '../../../entity/scheduler/derived-deadlines';
+import { collectDerivedDeadlines, earliestDerivedDeadline } from '../../../entity/scheduler/derived-deadlines';
+import { armPaymentSecretAckTimeout } from '../../../entity/paybook/lifecycle';
+import { HTLC_ENFORCEMENT_RESERVE_MS } from '../../../account/consensus/dispute/deadline-policy';
 import { createEmptyAccountJClaimAccumulator } from '../../../account/j-claims/j-claim-accumulator';
 import { installCommittedAccountFrameHead } from '../../../account/consensus/frame/committed-envelope';
 import {
@@ -148,6 +150,53 @@ const makeReplica = (entityId: string, counterpartyId: string): EntityReplica =>
 };
 
 describe('htlc event contract and dispute tail', () => {
+  test('wakes for a withheld secret ACK before the signed lock loses its enforcement reserve', async () => {
+    const entityId = `0x${'11'.repeat(32)}`;
+    const counterpartyId = `0x${'22'.repeat(32)}`;
+    const secret = `0x${'55'.repeat(32)}`;
+    const hashlock = hashHtlcSecret(secret);
+    const replica = makeReplica(entityId, counterpartyId);
+    const lockDeadline = replica.state.timestamp + HTLC_ENFORCEMENT_RESERVE_MS + 10_000;
+    const account = getEntityAccountForWrite(replica.state.accounts, counterpartyId)!;
+    account.state.locks = account.state.locks.updated(hashlock, {
+      lockId: hashlock,
+      hashlock,
+      tokenId: 1,
+      amount: 10n,
+      timelock: BigInt(lockDeadline),
+      revealBeforeHeight: 100,
+      senderIsLeft: false,
+    });
+    const entry = {
+      hashlock,
+      secret,
+      inboundEntity: counterpartyId,
+      createdTimestamp: replica.state.timestamp,
+    };
+    armPaymentSecretAckTimeout(replica.state, entry);
+    replica.state.paybook.entries.set(hashlock, entry);
+
+    const expectedWake = lockDeadline - HTLC_ENFORCEMENT_RESERVE_MS;
+    expect(earliestDerivedDeadline(replica.state)).toBe(expectedWake);
+    expect(collectDerivedDeadlines(replica.state, expectedWake)).toMatchObject([
+      { type: 'htlc_secret_ack_timeout', triggerAt: expectedWake },
+    ]);
+    replica.state.timestamp = expectedWake;
+    const outputs = await executeCrontab(createEmptyEnv('late-secret-ack'), replica, replica.state.crontabState!, {
+      manualBroadcastInInput: false,
+      accountChanges: new Set(),
+      bookIntentSlot: createBookIntentProgram().openSlot(),
+    });
+    expect(outputs.flatMap(output => output.entityTxs ?? [])).toContainEqual({
+      type: 'prepareDispute',
+      data: { counterpartyEntityId: counterpartyId, description: 'auto-prepare-dispute-after-secret-ack-timeout' },
+    });
+    account.status = 'dispute_preparing';
+    expect(collectDerivedDeadlines(replica.state, expectedWake)).toEqual([]);
+    expect(earliestDerivedDeadline(replica.state)).toBe(170_000);
+  });
+
+
   test('persists a verified out-of-band preimage before the counterparty ACKs', () => {
     const entityId = `0x${'22'.repeat(32)}`;
     const counterpartyId = `0x${'11'.repeat(32)}`;

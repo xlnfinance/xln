@@ -48,5 +48,6 @@ export const isSecretAckPendingPayment = (
 export const isDisputeReadyPayment = (
   entry: PaybookEntry,
   timestamp: number,
-): entry is SecretAckPendingPayment => isSecretAckPendingPayment(entry)
-  && timestamp >= entry.secretAckDeadlineAt;
+  triggerAt: number,
+): entry is SecretAckPendingPayment =>
+  isSecretAckPendingPayment(entry) && triggerAt >= entry.secretAckStartedAt && timestamp >= triggerAt;

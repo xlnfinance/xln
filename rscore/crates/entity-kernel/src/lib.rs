@@ -30,6 +30,7 @@ mod local_financial;
 mod local_tx;
 mod orderbook;
 mod paybook;
+pub use paybook::secret_ack_trigger_at;
 mod prepared_context;
 #[path = "support/proposal.rs"]
 mod proposal;

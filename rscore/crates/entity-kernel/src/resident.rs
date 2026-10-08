@@ -2025,7 +2025,8 @@ fn append_scheduled_dispute_outputs(
             // Resident admission already applied the cross-j collective action
             // in this frame, before dispatching the canonical Book jobs.
             SchedulerCommand::ProcessHtlcTimeouts { .. }
-            | SchedulerCommand::PrepareDisputes { .. }
+            | SchedulerCommand::PrepareSecretAckDisputes { .. }
+            | SchedulerCommand::DeferSecretAck { .. }
             | SchedulerCommand::SettleOverdueLending { .. }
             | SchedulerCommand::CrossJOrderbookSweep { .. }
             | SchedulerCommand::HubRebalance => {}
@@ -2136,7 +2137,12 @@ fn apply_scheduled_wake(
         .filter(|(account, _)| state.known_accounts.contains(account))
         .collect::<Vec<_>>();
 
-    let due_secret_acks = paybook.due_secret_acks(state, now)?;
+    let lock_deadlines = accounts
+        .expired_htlc_locks(now.saturating_add(xln_rscore_engine::HTLC_ENFORCEMENT_RESERVE_MS))?
+        .into_iter()
+        .map(|(account, hashlock, timelock)| ((account_text(account), hashlock), timelock))
+        .collect();
+    let due_secret_acks = paybook.due_secret_acks(state, now, &lock_deadlines)?;
     let dispute_account_ids = state
         .crontab
         .as_ref()
@@ -2190,45 +2196,13 @@ fn apply_scheduled_wake(
         .iter()
         .map(|(account, lock_id)| (account_text(*account), lock_id.clone()))
         .collect::<BTreeSet<_>>();
-    let mut dispute_prepare_counterparties = Vec::new();
-    let mut planned = BTreeSet::new();
-    let queued_starts = state
-        .j_batch_state
-        .as_ref()
-        .map_or(0, |batch| batch.batch.dispute_starts.len());
-    // Membership is unordered; emission retains (deadline, hashlock) order.
-    // The certified wake admits ordinary prepareDispute in this same frame.
+    let mut secret_acks_requiring_dispute = Vec::new();
     for (hashlock, counterparty) in due_secret_acks {
-        if !state.known_accounts.contains(&counterparty) {
-            continue;
-        }
-        if !active_text.contains(&(counterparty.clone(), hashlock.clone())) {
+        if active_text.contains(&(counterparty.clone(), hashlock.clone())) {
+            secret_acks_requiring_dispute.push((hashlock, counterparty));
+        } else {
             terminate_route_in_frame(state, paybook, &hashlock)?;
-            continue;
         }
-        if dispute_views
-            .get(&counterparty)
-            .is_some_and(|view| view.active_dispute.is_some())
-        {
-            continue;
-        }
-        if planned.contains(&counterparty) {
-            continue;
-        }
-        if queued_starts + planned.len() >= crate::j_batch::MAX_DISPUTE_STARTS {
-            let mut entry = paybook
-                .entry(state, &hashlock)?
-                .cloned()
-                .ok_or_else(|| EntityKernelError::htlc("HTLC_SECRET_ACK_ROUTE_MISSING"))?;
-            entry.secret_ack_deadline_at = Some(
-                now.checked_add(crate::paybook::SECRET_ACK_TIMEOUT_MS)
-                    .ok_or_else(|| EntityKernelError::htlc("HTLC_SECRET_ACK_DEADLINE_OVERFLOW"))?,
-            );
-            paybook.put(entry)?;
-            continue;
-        }
-        planned.insert(counterparty.clone());
-        dispute_prepare_counterparties.push(counterparty);
     }
 
     // Overdue loans are derived from committed lending state exactly like
@@ -2279,7 +2253,7 @@ fn apply_scheduled_wake(
             now: state.timestamp,
             expired_htlc_locks: &expired_locks,
             overdue_lending_loans: &overdue_lending_loans,
-            dispute_prepare_counterparties: &dispute_prepare_counterparties,
+            secret_acks_requiring_dispute: &secret_acks_requiring_dispute,
             dispute_views: &dispute_views,
             j_batch_state: state.j_batch_state.as_ref(),
             dispute_auto_finalize: state
@@ -2294,6 +2268,19 @@ fn apply_scheduled_wake(
                 .is_none_or(|value| value != &CanonicalValue::String("ignore".into())),
         },
     )?;
+    for command in &execution.commands {
+        if let SchedulerCommand::DeferSecretAck { hashlock } = command {
+            let mut entry = paybook
+                .entry(state, hashlock)?
+                .cloned()
+                .ok_or_else(|| EntityKernelError::htlc("SECRET_ACK_DEFER_ROUTE_MISSING"))?;
+            entry.secret_ack_deadline_at = Some(
+                now.checked_add(1)
+                    .ok_or_else(|| EntityKernelError::htlc("HTLC_SECRET_ACK_DEADLINE_OVERFLOW"))?,
+            );
+            paybook.put(entry)?;
+        }
+    }
     state.crontab = Some(execution.crontab);
     Ok((execution.commands, execution.account_envelope_mutations))
 }
@@ -2684,7 +2671,7 @@ fn apply_resident_entity_round_core_attempt(
                     )]),
                 )]
             }
-            SchedulerCommand::PrepareDisputes { counterparties } => counterparties
+            SchedulerCommand::PrepareSecretAckDisputes { counterparties } => counterparties
                 .iter()
                 .map(|account| {
                     crate::CanonicalEntityTx::from_frame_projection(

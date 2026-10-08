@@ -259,13 +259,20 @@ test.describe('xln mascot assistant', () => {
     const issues = await loadMascot(page, 'dark');
     await page.getByTestId('xln-mascot-toggle').click();
     await expect(page.getByText('Local AI · public docs')).toBeVisible({ timeout: 10_000 });
+    const chatResponse = page.waitForResponse(response =>
+      new URL(response.url()).pathname === '/api/assistant/chat' && response.request().method() === 'POST');
     await page.getByRole('button', { name: 'What am I looking at?' }).click();
     await expect(page.getByTestId('xln-mascot-root')).toHaveAttribute('data-presence-state', 'thinking');
     await capture(page, testInfo, 'laptop-dark-real-ai-thinking');
+    // First visible tokens precede completion. The client cancels its SSE reader
+    // on [DONE], so assert application completion rather than socket closure.
+    const response = await chatResponse;
+    expect(response.ok()).toBe(true);
     const answer = page.getByTestId('xln-mascot-chat').locator('article.assistant .message-markdown');
     await expect(answer).not.toHaveText('Thinking…', { timeout: 120_000 });
     await expect(answer).not.toBeEmpty();
-    await expect(page.getByTestId('xln-mascot-root')).toHaveAttribute('data-presence-state', 'ready');
+    await expect(page.getByTestId('xln-mascot-root')).toHaveAttribute('data-presence-state', 'ready', { timeout: 30_000 });
+    await expect(page.locator('.assistant-error')).toHaveCount(0);
     await capture(page, testInfo, 'laptop-dark-real-ai-answer');
     expect(issues).toEqual([]);
   });

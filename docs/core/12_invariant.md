@@ -1,90 +1,75 @@
-# 1.2 RCPAN Invariant 
+# RCPAN invariant
 
-[pairing: Pye Corner Audio - The Simplest Equation](https://www.youtube.com/watch?v=Vp0a8tdzJmk) (but yes, technically it's inequality)
+Accounts are bilateral financial relationships between entities. RCPAN combines
+signed obligations with optional credit and escrowed collateral.
 
+## Canonical orientation
 
-The core credit–collateral mechanism can be grasped in three minutes. Accounts are bilateral relationships between entities. 
+Left is the lexicographically lower Entity ID; Right is the other party.
+For each asset:
 
-For centuries, the world has run on FCUAN (full-credit, unprovable account networks—i.e., traditional banking credit rails): bilateral, uncollateralized limits between end-users (“spokes”) and banks/brokers (“hubs”). Any CEX (e.g., Binance, Coinbase) is also FCUAN. 
+    Δ = ondelta + offdelta
+    −leftCreditLimit ≤ Δ ≤ collateral + rightCreditLimit
 
-FCUAN scales phenomenally but offers weak user security. Any spoke can be censored, and assets seized at any moment. Hubs can default, even without malice (Diamond–Dybvig–style hub runs). 
+Δ represents Left's allocation. A payment from Left to Right decreases Δ;
+a payment from Right to Left increases it. It is not “our balance minus their
+balance” and must not change definition when the viewer changes.
 
-Deposit insurance is typically small relative to broad money (≪ M2), which systematically externalizes tail risk and invites moral hazard.
+| Region             | Financial meaning at settlement                              |
+| ------------------ | ------------------------------------------------------------ |
+| Δ < 0              | Right receives the collateral; Left owes Right the shortfall |
+| 0 ≤ Δ ≤ collateral | Left receives Δ; Right receives the remaining collateral     |
+| Δ > collateral     | Left receives the collateral; Right owes Left the shortfall  |
 
-Two entities start a financial relationship (per-asset Δ balances). Their xln wallets compare their hex IDs; the lower becomes L (left), the other R (right). Imagine an x-axis where:
+Credit-field names identify the borrowing side:
 
-. is zero (0)
-Δ delta is the signed balance (saldo) between counterparties
-[ ] are invariant boundaries—how far Δ can move given mutual credit and shared collateral
+- Right grants Left credit by setting **leftCreditLimit**, permitting negative Δ.
+- Left grants Right credit by setting **rightCreditLimit**, permitting Δ above collateral.
 
-Clean slate (all zeros):
+For user-facing balances and capacity, use the canonical
+[deriveDelta](../../core/account/utils.ts). Holds, allowances and already drawn
+credit affect current capacity. A reduced limit does not erase a signed debt;
+the displayed inequality describes agreed admission bounds, not permission to
+rewrite an existing obligation.
 
-(L)eft entity   [.Δ]   (R)ight entity
+## One financial model, different policies
 
-Either party can extend a credit limit to the other:
-- unused, uncollateralized credit line (credit)
-* used credit
+    Credit-only:       −Lₗ ≤ Δ ≤ Lᵣ
+    Collateral-only:     0 ≤ Δ ≤ C
+    Reserve-credit:    −Lₗ ≤ Δ ≤ C + Lᵣ
 
-**Critical: Credit direction determines flow capability**
-- **rightCreditLimit** (R extends to L): Allows L to go NEGATIVE = L can SEND beyond reserves
-- **leftCreditLimit** (L extends to R): Allows R to go NEGATIVE = R can SEND, **L can RECEIVE**
+Zero credit is valid. Credit is chosen by the grantor; underwriting and default
+preferences belong to the parties and operators. To receive without equal
+pre-funding, a user may grant bounded credit to its hub. That deliberately accepts
+an unsecured receivable rather than silently treating it as collateral.
 
-**Inbound capacity solution:** To receive payments routed through a hub, YOU extend credit TO the hub (leftCreditLimit if you are left, rightCreditLimit if you are right). This allows the hub to go into debt to you = you receive value even with zero reserves.
+For example, start with no collateral, Δ = 0 and both limits = 3:
+Left pays Right 2, producing Δ = −2; Right then pays Left 3, producing Δ = 1.
+The second outcome is a claim on Right, not newly created escrow backing.
 
-Example (leftCreditLimit = 3, rightCreditLimit = 3):
+With collateral = 3 and no credit, Δ must stay in [0, 3]. Starting at Δ = 0,
+Right pays Left 2, producing Δ = 2: Left's secured allocation is 2 and Right's is 1.
 
-[---.Δ---]
+## Three protections
 
-Payments pull Δ toward the payer’s side (away from the receiver) while the receiver’s allocation increases.
-L pays 2 to R → Δ = −2:
+1. **Proof:** signed account evidence establishes the obligation for J dispute.
+2. **Collateral:** chosen backing protects the secured entitlement; soft/hard
+   limits manage additional credit exposure through the canonical financial path.
+3. **Delta Transformers:** signed conditional transitions protect value in motion,
+   with J enforcement bounded by the agreed allowances and evidence.
 
-[-Δ**.---]
+The J pays available collateral/reserves according to the signed outcome and
+books remaining debt under its enforcement rules. Unsecured repayment is not
+guaranteed. Bounds constrain direct account exposure; a common hub failure can
+still affect many accounts and routes at once.
 
-R pays back 3 → Δ = +1:
+## Architecture and mission
 
-[---.*∆--]
+Independent account activity does not require global per-payment publication.
+Runtime and Entity still own real commitment, authority and capacity constraints.
+The goal is [MML: provable accounts supporting 51% of world GDP by 2050](../intro.md#mission),
+not a larger count of internal route hops.
 
-This is what 99.99% of the world economy runs on. Today, every bank, broker, CEX, and payment intermediary is pure FCUAN.
-
-A different approach, FRPAP (full-reserve, provable account primitives), often called “payment/state channels,” was popularized by the 2017 Lightning Network paper. FRPAP/Payment channels are full-reserve bilateral accounts with proofs—not a network architecture.
-
-Every full-reserve design (e.g., Raiden on Ethereum, Hydra on Cardano) inherits the inbound-capacity constraint—an architectural limit, not an implementation bug. It’s more precise to treat this as a family of three account primitives—proofs, collateral, and delta transformers—rather than a scalable network.
-
-In diagrams:
-= collateral (fully escrowed). Think of it as a dedicated 2-of-2 escrow with cryptographic guarantees.
-
-We draw collateral to the right of zero. R posts 3 units of collateral:
-
-[.Δ===]
-
-R pays 2 (Δ moves right):
-
-[.==Δ=]
-
-xln is the first RCPAN (Reserve-Credit, Provable Account Network): credit where it scales, collateral where it secures—a principled hybrid of FCUAN and FRPAP.
-
-FCUAN invariant:
-−leftCreditLimit ≤ Δ ≤ rightCreditLimit
-[---.---]
-
-FRPAP invariant:
-0 ≤ Δ ≤ collateral
-[.===]
-
-RCPAN (xln) superset invariant:
-−leftCreditLimit ≤ Δ ≤ collateral + rightCreditLimit
-[---.===---]
-
-xln can mimic both: ignore collateral functionality and it works like banking with enforceable proofs; ignore credit lines and it works like Lightning/full-reserve payment-channel networks. 
-
-Using both is where the real synergy emerges. RCPAN is literally how banks already think about credit, just formalized.
-
-Practical consequences:
-- **No inbound liquidity wall:** Spokes extend credit to hubs, enabling receiving without pre-funding (solves Lightning's fatal flaw)
-- **Bounded hub risk:** Hub can owe you up to creditLimit (your choice), collateral beyond that is escrowed on-chain (hub can't steal)
-- **Losses are link-capped:** Hub bankruptcy costs you creditLimit max, not your entire deposit
-- **Throughput scales with links:** Each bilateral account processes independently, not global broadcasts
-
-Follow for news, analysis, and a verification-first roadmap (proof sketch, benchmarks, economic spec, security playbook). xln is layer-2 done right.
-
-🔗 https://github.com/xlnfinance/xln
+See [the canonical cascade](rjea-architecture.md),
+[consensus invariants](../consensus-invariants.md), and
+[Depository settlement](../../jurisdictions/contracts/Depository.sol).

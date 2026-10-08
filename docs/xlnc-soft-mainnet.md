@@ -1,44 +1,135 @@
-# xlnc: four networks and limited launch
+# xlnc: programmable jurisdiction and multi-J launch
 
 Date: 2026-09-05. Investigated SHA: `b97c454d605e750a08da7ff6baab645330175468`.
 Status: proposal, no change to consensus, network configuration, or capital limits.
-The owner chose Ethereum, TRON, Base, and experimental XLNC; H1–H3 and MM are ours first.
-Initial capital: $1 000 total. Name: **"limited mainnet / soft mainnet."**
+Owner scope clarified 2026-09-30: Ethereum, TRON and XLNC are the initial focus;
+Base, Arbitrum and additional compatible EVM Js share the same financial model.
+H1–H3 and MM are ours first. The earlier $1 000 proposal below is historical;
+the later [launch design](launch-design.md) governs the capital ladder.
+Name: **"limited mainnet / soft mainnet."**
 This is a designation of risk scale, not proof of readiness or security.
 
 ## Decision
+
+A **block producer** is the J node proposing blocks; consensus validators
+check/vote on those blocks according to the chosen consensus. A verifier checks
+the accepted history without participating in block production. These roles
+are separate from Entity hubs, Account parties and their bilateral consensus.
+The one-producer/separate-verifier artifact below is an experimental starting
+point, not a decision about the production validator set or consensus engine.
 
 - XLNC must fulfill the role of J: Entity registration/authority, reserves, collateral, settlement, disputes, and the needed evidence.
 - Payments, routing, credit, and swaps remain in R/E/A. Do not record every payment on the global chain.
 - Full local verification of XLNC is a useful goal. It does not mean full local verification of Ethereum, TRON, and Base.
 - Reuse a mature consensus mechanism and contract execution; do not create new consensus mechanics now.
-- A genuine "XLN-only" is a block-validation rule enforced by all nodes. RPC restriction or the honesty of our validator does not provide this.
+- Start with ordinary EVM execution and a smaller block gas budget. A custom XLN-only admission rule is not part of the selected direction.
+
+## Conventional EVM direction — owner update 2026-09-30
+
+XLNC is pronounced **“excellence”**. Its purpose is a compact programmable J
+for reserves, rights and adjudication, with routine economic activity in accounts.
+The owner selected conventional stateful EVM execution with roughly 10–20 times
+less block gas capacity. Ordinary activity uses accounts; J serves rebalances
+and disputes. Expensive ordinary J execution can reinforce this separation.
+
+The proposed design has five requirements:
+
+1. Pin an EVM revision and reuse a proven consensus core. An EVM interpreter
+   supplies execution, not agreement on ordering or finality.
+2. Set a substantially smaller block gas budget and measure ordinary execution,
+   storage and network cost. Lower gas capacity bounds offered J execution;
+   gas price is a separate steering mechanism. Keep the exact reference network,
+   block interval and selected gas limit in the network manifest.
+3. Run an ordinary stateful full node: store J state, verify blocks and use the
+   selected client's normal synchronization. Measure phone/laptop continuous
+   operation and catch-up of the last couple of days within five minutes.
+   Account frames remain retained by their parties without per-payment J publication.
+4. Reserve affordable gas and inclusion capacity for dispute start, counter,
+   evidence publication and finalization under correlated hub failure. Price
+   discretionary J traffic heavily without pricing users out of secured recovery.
+5. Publish pinned genesis/domain, contract hashes, rule/upgrade policy and an
+   explicit ordinary-client bootstrap path. Publish measured CPU, memory,
+   disk, bandwidth and synchronization results for the intended devices.
+
+No ZK execution, stateless client or execution-witness protocol is required.
+The earlier witness proposal was an auditor suggestion rejected by the owner;
+it is not the XLNC architecture.
+
+The emergency sizing condition is concrete: remedies due within a protection
+window must fit its reserved J execution and byte capacity. Account throughput
+and low average J load do not prove this correlated-exit bound. Measure it at
+the actual reduced block gas limit before admitting obligations.
+
+This specification remains proposed. The first production artifact is the
+producer/verifier round trip below; unrelated core recovery work retains priority.
+
+## Measured prototype — 2026-09-30
+
+The ordinary stateful Besu 25.9.0 prototype now runs through
+`bun run xlnc:prototype <output-directory>` with `XLNC_BESU_BIN` and
+`JAVA_HOME` set. It uses Cancun EVM, a 6M block gas limit and one-second
+QBFT blocks. This is 10× below the existing local 60M _per-block_ ceiling;
+its different block period prevents claiming 10× lower execution per second.
+
+One producer and one full verifier on the same laptop matched the block hash,
+state root and all four contract code hashes. Restart preserved the producer
+root. Non-dev deployment created no development tokens; a zero EIP-1559
+priority fee succeeded. This establishes a working local J prototype, not
+production consensus, phone resources, two-day catch-up or correlated exits.
+The complete first run produced `/tmp/xlnc-stateful-paid-gas-evidence/evidence.json`.
+Later repeats matched contracts and roots but hit the 60-second stand limit
+during node restart; the latest repeat is not green. Owned node process groups
+are now terminated on interruption; both repeats with this cleanup left no
+running node groups.
+
+Exit capacity is an open release blocker. The cold maximum-token zero-delta
+vector used 2,046,965 execution gas. A signed mixed proof with 128 tokens,
+32 payments, 32 swaps and 18 unrevealed pulls finalized but used **17,363,517**
+execution gas plus transaction intrinsic gas. Its regression deliberately fails
+the existing 15M envelope; it also cannot fit 6M. This is one valid expensive
+shape, not a universal upper bound. Current Account bounds must not be claimed
+compatible with the reduced ceiling. Changing admission or J capacity requires
+an owner decision; no contract limits were silently changed.
+
+The `htlc-ack-recovery` real-RPC scenario separately proves that a late
+preimage, withheld upstream ACK and WAL reopen reach an authenticated J dispute.
+It uses three real Entity/Account machines and preserves the transport partition.
+This verifies dispute start and retained evidence, not collateral payout or
+TS/Rust equivalence of this complete recording.
+
+The earlier `0b25d54ca` checkpoint failed the English-source gate. At
+`1d39fe8e6`, `bun run check` passed, frozen core was unchanged, and the canonical
+Chromium catalog recorded 138/138 targets with zero skips through catalog runs
+and focused reruns. The final rebuilt ScenarioPlayer regression also passed.
+See [the implementation handoff](jea-continuation.md) and its committed evidence.
+The earlier manual localhost `/app` `effect_orphan` observation remains a separate,
+untriaged development observation; it was not reported by those isolated builds.
+These results do not close the XLNC exit-capacity or device-resource gates.
 
 ## What already exists
 
-| Boundary     | Observation in code                                                                                                  | Consequence                                                                                   |
-| ----------- | ------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------- |
-| J → Entity  | [Canonical architecture](core/rjea-architecture.md), [J machine](runtime/jurisdiction.md)                        | External RPC does not become the reducer's authority; observations go through canonical validation     |
-| Adapter     | [JAdapter](../core/jurisdiction/adapter/types.ts): `rpc`, `tron`, `anvil`, `browservm`                             | XLNC does not require a new Account/Entity financial path                                      |
-| Finality | [rpc-finality.ts](../core/jurisdiction/adapter/rpc/rpc-finality.ts): Ethereum 12 blocks, other EVM 2 by default | These numbers do not prove consensus finality; Base/XLNC must not be connected with an implicit default   |
-| Dev networks    | [chain-ids.ts](../core/jurisdiction/adapter/chain-ids.ts): 31337/31338 enable dev behavior                      | XLNC gets its own chain ID, genesis hash, and release manifest; it is not a renamed Anvil |
-| Capital     | [Current policy](../ops/capped-testnet-policy.json): `riskCapUsd: null`, enforcement absent                   | $1 000 is currently an owner decision, not a programmatically enforced limit                            |
+| Boundary     | Observation in code                                                                                             | Consequence                                                                                             |
+| ------------ | --------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| J → Entity   | [Canonical architecture](core/rjea-architecture.md), [J machine](runtime/jurisdiction.md)                       | External RPC does not become the reducer's authority; observations go through canonical validation      |
+| Adapter      | [JAdapter](../core/jurisdiction/adapter/types.ts): `rpc`, `tron`, `anvil`, `browservm`                          | XLNC does not require a new Account/Entity financial path                                               |
+| Finality     | [rpc-finality.ts](../core/jurisdiction/adapter/rpc/rpc-finality.ts): Ethereum 12 blocks, other EVM 2 by default | These numbers do not prove consensus finality; Base/XLNC must not be connected with an implicit default |
+| Dev networks | [chain-ids.ts](../core/jurisdiction/adapter/chain-ids.ts): 31337/31338 enable dev behavior                      | XLNC gets its own chain ID, genesis hash, and release manifest; it is not a renamed Anvil               |
+| Capital      | [Current policy](../ops/capped-testnet-policy.json): `riskCapUsd: null`, enforcement absent                     | $1 000 is currently an owner decision, not a programmatically enforced limit                            |
 
 The verified production files contain no runnable XLNC validator/fullnode. The old `Xlnomy` types with EVM-engine names do not prove a network implementation.
 
-## Minimal path: specialization without a new financial engine
+## Minimal path: ordinary EVM with less global execution
 
-| Option                                                            | What we get                                                          | Limitation                                                             |
-| ------------------------------------------------------------------ | --------------------------------------------------------------------- | ----------------------------------------------------------------------- |
-| Off-the-shelf EVM client + our contracts + operator policy              | Fast experimental rig with the existing JAdapter               | The chain is technically general-purpose; it does not satisfy the strict XLN-only goal |
-| Off-the-shelf consensus/execution core + XLN admission verifiable by all | The desired specialized J-network; contract semantics are preserved | Requires a proven validation hook/minimal fork and a protocol choice  |
-| New native J interpreter + new consensus                       | Maximum freedom                                                  | Two new critical components; pushes mainnet and MML further away                |
+Use an existing EVM client and consensus engine, the canonical xln contracts,
+and a smaller block gas limit. This is the selected architectural direction,
+not merely a temporary rig. No XLN-only opcode, transaction allowlist, native
+financial interpreter or special execution-witness protocol is required.
 
-Recommendation: the second option as the target specification; the first only as an explicitly labeled rig, if it speeds up verification.
-The first option must not be quietly shipped under the promise of the second. Implementation of the target network starts after the validation boundary is chosen.
-XLN admission needs to cover the whole execution graph: direct calls, internal calls, contract creation, upgrades, and incoming native transfers.
-A single allowlist of `to`/selector is not enough if the allowed contract can create/call arbitrary code.
-Allowed bytecode hashes, operations, and the upgrade path must be verified by a full node; shipping a new set is an explicit protocol change.
+Set the absolute gas limit and block interval in genesis/network rules. Measure
+execution, state growth and catch-up with the ordinary client. Account activity
+avoids per-payment J execution; pricing discourages discretionary J transfers.
+The exact client and production consensus remain choices to resolve against
+device measurements and independent-operator requirements.
 
 Besu/QBFT is a concrete candidate for the rig: existing PoA and validator-set management. For Byzantine fault tolerance, Besu requires a minimum of four validators. This is not yet the choice of the XLNC engine. [QBFT](https://docs.besu-eth.org/private-networks/how-to/configure/consensus/qbft)
 For a mass desktop bundle, Besu has a significant downside: the private-networks documentation states a minimum JVM of about 4 GB depending on the environment. Measure the real budget before choosing; a small J-load does not prove a small client. [Besu requirements](https://docs.besu-eth.org/private-networks/get-started/system-requirements)
@@ -53,8 +144,8 @@ UI → local xln Runtime → JAdapter → local XLNC verifier → XLNC peers
 
 - The desktop installer offers and enables the verifier by default, with explicit disk/memory disclosure. The user can stop it; the UI shows the loss of local-verification mode.
 - The validator is a separate role with a separate key. A thousand fullnodes do not turn one validator into a thousand independent producers.
-- Full verification starts from the published genesis; it is acceptable to delete old intermediate states after verification. Fullnode and archive are different responsibilities. [Full verification](https://ethereum.org/developers/docs/nodes-and-clients/)
-- A snapshot speeds up loading only with an explicitly specified verification of its root/history. A snapshot from us without independent verification is a trusted bootstrap, not "everything verified from genesis."
+- Use the client's ordinary full-node synchronization and persist its verified state. Reopening after two days means catching up those two days, not replaying genesis. Fullnode and archive are different responsibilities. [Nodes and clients](https://ethereum.org/developers/docs/nodes-and-clients/)
+- Specify the initial synchronization mode and any bootstrap trust separately from later incremental catch-up. A supplied snapshot must have the client's required verification; disclose any additional trusted checkpoint. This does not require a stateless execution design.
 - A browser page does not install a desktop daemon by itself. BrowserVM is not a network XLNC fullnode; a browser-only client needs a separately proven verifier/connection to a local companion. Browser storage has quotas and persistence modes. [Storage Standard](https://storage.spec.whatwg.org/)
 
 Show separately: `local verification`, `verified up to block`, `bootstrap source`, `lag`, `independent operators`.
@@ -62,13 +153,13 @@ If the node has fallen behind, do not silently switch financial authority to a r
 
 ## What localhost protects
 
-| Threat                                                | Effect of local full verification                                                                      |
-| ----------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
-| RPC returns an incorrect balance/log/state                 | The node rejects invalid history given a correct client and a trusted genesis                       |
-| A single validator censors settlement/dispute | Does not solve this: a valid block may simply not contain our transaction                                         |
-| A validator signs two valid histories          | Can be detected upon receiving both; a single local verification cannot pick a common order for everyone |
-| The node is isolated from honest peers                      | Rules are checked, but the currency/availability of the history is not guaranteed                             |
-| Malicious update, compromised host, or key     | Does not solve this; bundled monoculture increases the overall blast radius                                         |
+| Threat                                        | Effect of local full verification                                                                        |
+| --------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| RPC returns an incorrect balance/log/state    | The node rejects invalid history given a correct client and a trusted genesis                            |
+| A single validator censors settlement/dispute | Does not solve this: a valid block may simply not contain our transaction                                |
+| A validator signs two valid histories         | Can be detected upon receiving both; a single local verification cannot pick a common order for everyone |
+| The node is isolated from honest peers        | Rules are checked, but the currency/availability of the history is not guaranteed                        |
+| Malicious update, compromised host, or key    | Does not solve this; bundled monoculture increases the overall blast radius                              |
 
 Design minimum: loopback-only bind; OS IPC with user permissions where supported; otherwise an authenticated loopback endpoint.
 Check Host/Origin and WebSocket Origin, close wildcard CORS, restrict methods and request size/rate; separate out wallet signing and the validator/admin API.
@@ -87,31 +178,35 @@ XLNC stores J-operations and the necessary evidence; private Account frames and 
 Limit validation cost, block bytes/gas, and state growth. Cheap gas requires protection against disk filling; "free for everyone without limits" is incompatible with a node at every user.
 Emergency exit requires an available J and inclusion. Do not promise that a local copy automatically withdraws funds when the single validator has stopped.
 
-## Four networks, one limited exposure
+## Additional EVM jurisdictions and limited exposure
 
-| Network              | Before admitting capital                                                                        |
-| ----------------- | ---------------------------------------------------------------------------------------------- |
-| Ethereum          | Verified bytecode/address/domain, live J, withdrawal/dispute, explicit finality policy          |
-| TRON              | Real TVM/write/receipt/resource paths and solidified head; Anvil is not evidence             |
+| Network           | Before admitting capital                                                                              |
+| ----------------- | ----------------------------------------------------------------------------------------------------- |
+| Ethereum          | Verified bytecode/address/domain, live J, withdrawal/dispute, explicit finality policy                |
+| TRON              | Real TVM/write/receipt/resource paths and solidified head; Anvil is not evidence                      |
 | Base              | Contract artifacts and separate unsafe/safe/finalized observations; two L2 blocks are not L1-finality |
-| XLNC experimental | Genesis/rules/validator manifest, full-node verification, real assets and their issuer/backing   |
+| Arbitrum          | Verified deployment and chosen chain's DA/finality rules; real dispute and withdrawal behavior        |
+| XLNC experimental | Genesis/rules/validator manifest, full-node verification, real assets and their issuer/backing        |
 
-Base ties the finalized L2 head to L1-finality. Financial admission requires consciously choosing a risk level, not a "ready in N seconds" timer. [Base derivation](https://docs.base.org/specifications/base-protocol/consensus/derivation)
-Four networks give six pairs and twelve directions; Ethereum/Base and our H1–H3/MM are not independent sources of risk.
+Base ties the finalized L2 head to L1-finality. Financial admission requires consciously choosing a risk level, not a "ready in N seconds" timer. [Base derivation](https://docs.base.org/base-chain/specs/protocol/consensus/derivation)
+Additional networks add corridor pairs and directions; Ethereum/Base and our H1–H3/MM are not independent sources of risk. Base and Arbitrum require their own verified observation, finality, dispute and withdrawal boundaries rather than a presumed generic EVM default.
 The first exercise is one minimal real round trip on each new boundary with a withdrawal; the full cross-J matrix remains the final gate.
-Include liquidity, gas/resource balances, dispute reserve, and already-spent deployment fees in the total $1 000; the asset limit is separate from the operating-expense limit.
-Do not spread capital evenly across the four networks: measure deploy/gas and the mandatory reserve, give the remainder to working liquidity. If costs don't fit — narrow the simultaneous exposure, do not covertly raise the budget.
+Account for liquidity, gas/resource balances, dispute reserve and deployment fees within the admitted capital stage from [launch-design.md](launch-design.md); the asset limit is separate from the operating-expense limit.
+Allocate capital using measured deployment costs, required reserves and useful liquidity across the admitted Js. Additional jurisdiction support does not automatically raise capital authorization.
 An XLNC token named USDT does not become Tether USDT. An explicit issuer/redemption/collateral is needed; a bridge and a wrapped asset are additional risk, not a free integration.
 Limits must be applied before admitting an obligation, including quotes/lease/credit and crash recovery; a single UI limit is not sufficient. Capital growth only after a measured round trip, reconciliation, and a separate owner decision.
 
 ## Next decisions and evidence
 
-1. Pin down a strict XLN-only block-validation boundary and the existing core; do not pass off RPC policy as a consensus rule.
-2. Approve the experimental single-validator trust model and a user-available exit on stoppage; if exit is not possible, label it as such explicitly.
+1. Select the existing client/consensus, absolute block gas limit and block interval; compare the stated 10–20× reduction against an explicit baseline.
+2. Disclose the experimental single-producer trust model and recovery on stoppage; if independent exit is unavailable, label that limitation explicitly.
 3. First XLNC artifact: genesis → 1 producer + 1 verifier → canonical deployment → reserve → Account collateral → payment → settlement → withdrawal → restart → identical roots/logs.
 4. Before money: producer failure, a corrupted block, incompatible rules, an invalid snapshot, missing data, and an unavailable RPC produce an explainable halt. No automatic genesis reset.
-5. Then four real J-boundaries, a full check, and a limited capital admission; XLNC R&D does not delay resolving the current production recovery divergence.
+5. Then verify each admitted J boundary, run the full check, and admit the authorized capital stage; XLNC R&D does not delay resolving the current production recovery divergence.
 
-Measure MML by unique completed economic value over a trailing 12 months: one payment once, one exchange without summing both legs, without our own circular relays and tests.
-Share of world GDP is a long-term ambition, not a current success metric: payment turnover and GDP value-added differ methodologically.
+[MML](intro.md#mission) is accounts supporting 51% of world GDP made provable
+by 2050, including activity not individually submitted to J. Payment turnover is
+separate from GDP coverage. Measure unique completed operations for adoption
+evidence: one payment once, one exchange without summing both legs, excluding
+circular relays and tests. The method for attributing GDP coverage remains open.
 The nearest useful numbers: successful withdrawals, losses/discrepancies, cost of a completed operation, capital tied up, recovery time, and the share of clients that actually verify locally.

@@ -25,24 +25,23 @@ Fee: … USDT · Ready: after confirmation
 [ Request collateral ]
 ```
 
-Value of the decision: **910/1000** — a subjective usefulness estimate, not a user measurement.
 Reason: a single choice replaces scattered manual navigation in Manage and hidden credit setup.
 Condition for usefulness: the Runtime can actually execute the chosen method before the operation.
 
 ## what has already been found in the code
 
-| Observation                                              | Evidence                                                                                                              | Consequence                                                    |
-| --------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
-| The current wallet is React `/ui`                         | [App.tsx:72](../ui/src/App.tsx#L72), [vite.config.ts:48](../ui/vite.config.ts#L48)                                    | Integrate into React; do not design a new Svelte wrapper       |
-| The wallet is built from the committed view frame          | [views.ts:15](../ui/src/runtime/views.ts#L15), [views.ts:157](../ui/src/runtime/views.ts#L157)                        | Take capacity and states from one confirmed snapshot           |
-| Receive sums the inbound of several Accounts               | [Receive.tsx:53](../ui/src/screens/Receive.tsx#L53)                                                                    | This sum does not prove the capacity of a single route          |
-| Pay selects one route/first hop                            | [Pay.tsx:117](../ui/src/screens/Pay.tsx#L117), [payments.ts:35](../ui/src/runtime/financial/payments.ts#L35)          | Check source outbound and target inbound separately             |
-| Receive offers credit only at zero capacity                 | [Receive.tsx:106](../ui/src/screens/Receive.tsx#L106)                                                                  | A partial shortfall does not yet get a solution                 |
-| Cross-j shows automatic account/credit steps                | [Swap.tsx:159](../ui/src/screens/Swap.tsx#L159), [Swap.tsx:409](../ui/src/screens/Swap.tsx#L409)                      | Replace implicit credit with an explicit shared choice          |
-| Manage passes the exact fee policy                         | [manage.ts:20](../ui/src/runtime/financial/manage.ts#L20), [manage.ts:30](../ui/src/runtime/financial/manage.ts#L30)  | Use the published committed policy and its version              |
-| "Request credit" asks the hub for credit                   | [manage.ts:170](../ui/src/runtime/financial/manage.ts#L170)                                                            | The needed direction for SEND, not for RECEIVE                  |
-| "Extend credit" allows the hub debt toward the user         | [AccountDetail.tsx:469](../ui/src/screens/AccountDetail.tsx#L469)                                                      | This is the needed direction for the credit part                |
-| The global receipt appears after completion                 | [receipts.ts:99](../ui/src/runtime/financial/receipts.ts#L99)                                                          | The receipt cannot be used as prior consent                     |
+| Observation                                         | Evidence                                                                                                             | Consequence                                              |
+| --------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------- |
+| The current wallet is React `/ui`                   | [App.tsx:72](../ui/src/App.tsx#L72), [vite.config.ts:48](../ui/vite.config.ts#L48)                                   | Integrate into React; do not design a new Svelte wrapper |
+| The wallet is built from the committed view frame   | [views.ts:15](../ui/src/runtime/views.ts#L15), [views.ts:157](../ui/src/runtime/views.ts#L157)                       | Take capacity and states from one confirmed snapshot     |
+| Receive sums the inbound of several Accounts        | [Receive.tsx:53](../ui/src/screens/Receive.tsx#L53)                                                                  | This sum does not prove the capacity of a single route   |
+| Pay selects one route/first hop                     | [Pay.tsx:117](../ui/src/screens/Pay.tsx#L117), [payments.ts:35](../ui/src/runtime/financial/payments.ts#L35)         | Check source outbound and target inbound separately      |
+| Receive offers credit only at zero capacity         | [Receive.tsx:106](../ui/src/screens/Receive.tsx#L106)                                                                | A partial shortfall does not yet get a solution          |
+| Cross-j shows automatic account/credit steps        | [Swap.tsx:159](../ui/src/screens/Swap.tsx#L159), [Swap.tsx:409](../ui/src/screens/Swap.tsx#L409)                     | Replace implicit credit with an explicit shared choice   |
+| Manage passes the exact fee policy                  | [manage.ts:20](../ui/src/runtime/financial/manage.ts#L20), [manage.ts:30](../ui/src/runtime/financial/manage.ts#L30) | Use the published committed policy and its version       |
+| "Request credit" asks the hub for credit            | [manage.ts:170](../ui/src/runtime/financial/manage.ts#L170)                                                          | The needed direction for SEND, not for RECEIVE           |
+| "Extend credit" allows the hub debt toward the user | [AccountDetail.tsx:469](../ui/src/screens/AccountDetail.tsx#L469)                                                    | This is the needed direction for the credit part         |
+| The global receipt appears after completion         | [receipts.ts:99](../ui/src/runtime/financial/receipts.ts#L99)                                                        | The receipt cannot be used as prior consent              |
 
 The old [CollateralForm.svelte:36](../frontend/src/lib/components/Entity/account/ui/CollateralForm.svelte#L36) shows minutes and `$1 per $100 per hour`.
 [Payload:219](../frontend/src/lib/components/Entity/account/ui/CollateralForm.svelte#L219) does not contain a term: only `amount`, `feeTokenId`, `feeAmount`, `policyVersion`.
@@ -157,20 +156,20 @@ The basis of the economic model and the value of the +5% margin, griefing protec
 
 ## where to show it
 
-| Flow                                              | Placement and action                                                                                                                              |
-| --------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Receive with a known amount                         | Below the amount, before promising invoice readiness; choose the inbound Account                                                                    |
-| Receive without an amount                           | Show availability; offer to specify an amount or separately prepare a limit                                                                          |
-| Pay                                                  | Own shortfall → pre-filled Move; someone else's inbound cannot be fixed with someone else's signature                                                |
-| Same-j swap                                          | Spectrum only for the want-token; the give-token is funded separately via Move                                                                       |
-| Cross-j swap                                         | Spectrum only for the target RECEIVE on the user's own Entity/hub/J; the source is topped up via Move                                                |
-| Borrow                                               | The grant increases outbound; this is not receiving principal and not a reason for Spectrum                                                          |
-| Lending fund/repay/close payout                      | Spectrum at the real recipient; for the lender — close payout, for the hub — fund/repay                                                              |
-| Move external/reserve→Account                        | Check the allocation; one's own outCollateral does not prove inbound. Do not pay for collateral again if the needed allocation is already being created |
-| Manage                                               | The same primitive for the expected amount; manual advanced controls separately                                                                      |
-| Open account                                         | The same concepts; do not silently change the existing auto-rebalance policy                                                                         |
-| An already completed operation                       | Only the result; a later slider does not change a signed transfer                                                                                    |
-| Token transfer to a regular EVM address/to reserve   | No Account shortfall: this primitive is not needed                                                                                                    |
+| Flow                                               | Placement and action                                                                                                                                    |
+| -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Receive with a known amount                        | Below the amount, before promising invoice readiness; choose the inbound Account                                                                        |
+| Receive without an amount                          | Show availability; offer to specify an amount or separately prepare a limit                                                                             |
+| Pay                                                | Own shortfall → pre-filled Move; someone else's inbound cannot be fixed with someone else's signature                                                   |
+| Same-j swap                                        | Spectrum only for the want-token; the give-token is funded separately via Move                                                                          |
+| Cross-j swap                                       | Spectrum only for the target RECEIVE on the user's own Entity/hub/J; the source is topped up via Move                                                   |
+| Borrow                                             | The grant increases outbound; this is not receiving principal and not a reason for Spectrum                                                             |
+| Lending fund/repay/close payout                    | Spectrum at the real recipient; for the lender — close payout, for the hub — fund/repay                                                                 |
+| Move external/reserve→Account                      | Check the allocation; one's own outCollateral does not prove inbound. Do not pay for collateral again if the needed allocation is already being created |
+| Manage                                             | The same primitive for the expected amount; manual advanced controls separately                                                                         |
+| Open account                                       | The same concepts; do not silently change the existing auto-rebalance policy                                                                            |
+| An already completed operation                     | Only the result; a later slider does not change a signed transfer                                                                                       |
+| Token transfer to a regular EVM address/to reserve | No Account shortfall: this primitive is not needed                                                                                                      |
 
 Reference operations: [swap.ts:121](../ui/src/runtime/financial/swap.ts#L121), [Lending.tsx:69](../ui/src/screens/Lending.tsx#L69),
 [move.ts:209](../ui/src/runtime/financial/move.ts#L209), [Home.tsx:435](../ui/src/screens/Home.tsx#L435).
@@ -184,18 +183,18 @@ Drag changes the preview; sending happens only via an explicit CTA.
 The CTA shows the inbound choice from the table above; the lease is available only via a real quote.
 Below the credit CTA, the permanent limit, the buffer, and who will be able to owe whom are visible.
 
-| State                                   | What the user sees                                                                                    |
-| ------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
-| `D = 0`                                     | "Ready to receive"; the slider is collapsed or inactive; no extra CTA                                    |
-| Account not selected                        | Choice of hub/jurisdiction; overall wallet capacity does not replace it                                   |
-| Calculating                                 | The amount and the chosen share are preserved; sending is blocked until the result                        |
-| Collateral unavailable                      | A specific reason and explicitly selectable alternatives                                                  |
-| Conditions changed                          | A new calculation; an increase in fee/risk requires a new confirmation                                    |
-| Sent                                        | "Terms accepted" → "Waiting for hub" if needed → "J sent" → "Confirming" → "Done"                          |
-| Partial success                             | It is visible which actions are already committed; closing the window does not cancel them                |
-| Timeout/error                               | The Runtime reason, the saved choice, safe continuation based on the actual state                          |
-| Recovery/dispute/offline                    | The reason for the block; no optimistic readiness                                                          |
-| Swap quote went stale while waiting for J   | A new quote before the swap; the previous price is not promised                                            |
+| State                                     | What the user sees                                                                         |
+| ----------------------------------------- | ------------------------------------------------------------------------------------------ |
+| `D = 0`                                   | "Ready to receive"; the slider is collapsed or inactive; no extra CTA                      |
+| Account not selected                      | Choice of hub/jurisdiction; overall wallet capacity does not replace it                    |
+| Calculating                               | The amount and the chosen share are preserved; sending is blocked until the result         |
+| Collateral unavailable                    | A specific reason and explicitly selectable alternatives                                   |
+| Conditions changed                        | A new calculation; an increase in fee/risk requires a new confirmation                     |
+| Sent                                      | "Terms accepted" → "Waiting for hub" if needed → "J sent" → "Confirming" → "Done"          |
+| Partial success                           | It is visible which actions are already committed; closing the window does not cancel them |
+| Timeout/error                             | The Runtime reason, the saved choice, safe continuation based on the actual state          |
+| Recovery/dispute/offline                  | The reason for the block; no optimistic readiness                                          |
+| Swap quote went stale while waiting for J | A new quote before the swap; the previous price is not promised                            |
 
 The transition to "Done" depends on the committed Account/J state, not on HTTP 200, submit, or a toast.
 A change of route, token, policy, holds, or the arrival of a parallel payment requires a recalculation.
@@ -212,8 +211,7 @@ The first path: invoice/quote and a correct retry; a background request requires
 
 ## appearance and accessibility
 
-Local liquid-glass accent: **890/1000**. Glass backing for all monetary figures: **620/1000**.
-This is a subjective estimate. The current default is matte Obsidian; blur is already used in mobile navigation.
+The current default is matte Obsidian; blur is already used in mobile navigation.
 Sources: [design.ts:23](../ui/src/runtime/design.ts#L23), [app.css:122](../ui/src/styles/app.css#L122).
 
 - Track: `--coll`; the credit part of RECEIVE — `--risk`.
@@ -231,11 +229,11 @@ An inline card is preferred; [Sheet.tsx:16](../ui/src/components/Sheet.tsx#L16) 
 
 The interfaces proposed below are a design, not already-existing APIs.
 
-| Owner                 | Accepts                                                          | Returns/does                                                                |
-| ------------------------ | ------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
-| Runtime planner          | Incoming capacity intent, committed evidence, share/buffer/quote    | A validated preview/refusal, canonical commands, and readiness conditions        |
-| React component          | Preview, status, choice/confirmation callbacks                      | Only visualization and user choice; no env/tx/financial formulas                 |
-| Frontend coordinator     | Intent and the confirmed plan                                       | Submission via the adapter, observing committed state, recalculation/statuses    |
+| Owner                | Accepts                                                          | Returns/does                                                                  |
+| -------------------- | ---------------------------------------------------------------- | ----------------------------------------------------------------------------- |
+| Runtime planner      | Incoming capacity intent, committed evidence, share/buffer/quote | A validated preview/refusal, canonical commands, and readiness conditions     |
+| React component      | Preview, status, choice/confirmation callbacks                   | Only visualization and user choice; no env/tx/financial formulas              |
+| Frontend coordinator | Intent and the confirmed plan                                    | Submission via the adapter, observing committed state, recalculation/statuses |
 
 Receive/Swap/Lending pass the inbound intent; the component does not import these screens.
 Pay uses a separate projection of the existing Move, without a credit choice.
@@ -264,17 +262,17 @@ The existing requestCollateral cannot be renamed to lease without implementing t
 
 ## acceptance
 
-| Check                  | Required evidence                                                                                                  |
-| ------------------------ | ---------------------------------------------------------------------------------------------------------------------- |
-| Credit direction         | RECEIVE: the user's own grant to the hub; queued/committed are distinguished; Pay does not request credit              |
-| Shortfall                 | Both the LEFT/RIGHT sides, zero, partial shortfall, multiple Accounts, holds, and existing unsecured credit           |
-| Endpoints and rounding    | 100/75/50/0%, exact buffer on/off, no hidden grant at 100%, fee gross/net/separate token                              |
-| Stale evidence            | A change of policy/route/token/jurisdiction/holds between preview and submit                                          |
-| Unavailable funding       | No policy, insufficient reserve, hub refusal; no hidden fallback to credit                                            |
-| Async/recovery            | Crash after submit/fee/credit/J, repeated click, retry; no double charge                                               |
-| Operations                | RECEIVE/swap/cross-j/lending; Borrow without a fake receive; Pay is preserved via Move and requires a new confirmation |
-| Long-running execution    | Partial fill/expiry/cancel do not leave unexplained risk or an eternal capacity guarantee                             |
-| Browser                   | Mobile/desktop, light/dark, keyboard/screen reader, console, reduced motion, ETA≠finality                              |
+| Check                  | Required evidence                                                                                                      |
+| ---------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| Credit direction       | RECEIVE: the user's own grant to the hub; queued/committed are distinguished; Pay does not request credit              |
+| Shortfall              | Both the LEFT/RIGHT sides, zero, partial shortfall, multiple Accounts, holds, and existing unsecured credit            |
+| Endpoints and rounding | 100/75/50/0%, exact buffer on/off, no hidden grant at 100%, fee gross/net/separate token                               |
+| Stale evidence         | A change of policy/route/token/jurisdiction/holds between preview and submit                                           |
+| Unavailable funding    | No policy, insufficient reserve, hub refusal; no hidden fallback to credit                                             |
+| Async/recovery         | Crash after submit/fee/credit/J, repeated click, retry; no double charge                                               |
+| Operations             | RECEIVE/swap/cross-j/lending; Borrow without a fake receive; Pay is preserved via Move and requires a new confirmation |
+| Long-running execution | Partial fill/expiry/cancel do not leave unexplained risk or an eternal capacity guarantee                              |
+| Browser                | Mobile/desktop, light/dark, keyboard/screen reader, console, reduced motion, ETA≠finality                              |
 
 First the smallest failing boundary, then a production-equivalent scenario, then the overall `bun run check`.
 A real React run R10 (`/tmp/xln-react-capacity-1788573224783`) verified Receive:
@@ -298,17 +296,17 @@ Artifact: `/tmp/xln-react-cross-swap-1788576931486/browser.log`;
 screenshot: `/tmp/xln-cross-receive-spectrum.png`. Startup 18.820 s, browser 8.319 s,
 1 pass, 0 page/MAC/auth errors. This is proof of a specific path, not a release gate.
 
-| Check | Actual result |
-| --- | --- |
-| Default | Slider 0: 100% collateral; Swap is closed |
-| Explicit choice | `Accept it as credit instead` only changes the choice to 0% collateral; assets/credit/routes do not change |
-| Separate consent | `Extend credit limit`: 0 → 11,218.878 USDT, including +10%; there is no deal before the manual Swap |
-| Real quote | Existing MM order: 10,200 USDC@Testnet → 10,198.98 USDT@Tron |
-| Starting funds | Faucet 20,000 USDC; after the routine rebalance, 19,997.90 of own funds; the 2.10 difference is kept separately |
-| Execution | Both committed routes `settled`; source debit 10,200 USDC; gross filledTarget 10,198.98 USDT |
-| Receipt | Net 10,197.860102 USDT + signed rebalance fee 1.119898 USDT = gross 10,198.98 USDT |
-| Proof of fee | Target Account frame 6, `request_collateral`, token/feeToken 3, amount 10,198.98, policyVersion 1; root `0x3b79c0767b250511094ee279ee89aa2e01a3bd05ebf8dcc28f9b99acdd0cba8b` |
-| After execution | Debt/pending/mempool/pulls = 0 on both legs; the permanent credit limit is preserved |
+| Check            | Actual result                                                                                                                                                                |
+| ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Default          | Slider 0: 100% collateral; Swap is closed                                                                                                                                    |
+| Explicit choice  | `Accept it as credit instead` only changes the choice to 0% collateral; assets/credit/routes do not change                                                                   |
+| Separate consent | `Extend credit limit`: 0 → 11,218.878 USDT, including +10%; there is no deal before the manual Swap                                                                          |
+| Real quote       | Existing MM order: 10,200 USDC@Testnet → 10,198.98 USDT@Tron                                                                                                                 |
+| Starting funds   | Faucet 20,000 USDC; after the routine rebalance, 19,997.90 of own funds; the 2.10 difference is kept separately                                                              |
+| Execution        | Both committed routes `settled`; source debit 10,200 USDC; gross filledTarget 10,198.98 USDT                                                                                 |
+| Receipt          | Net 10,197.860102 USDT + signed rebalance fee 1.119898 USDT = gross 10,198.98 USDT                                                                                           |
+| Proof of fee     | Target Account frame 6, `request_collateral`, token/feeToken 3, amount 10,198.98, policyVersion 1; root `0x3b79c0767b250511094ee279ee89aa2e01a3bd05ebf8dcc28f9b99acdd0cba8b` |
+| After execution  | Debt/pending/mempool/pulls = 0 on both legs; the permanent credit limit is preserved                                                                                         |
 
 The fee is taken from the confirmed Account frame history with a single read after execution.
 This is necessary because `requestedRebalanceFeeState` is deleted after J-finality.

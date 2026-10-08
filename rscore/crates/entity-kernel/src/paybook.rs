@@ -17,6 +17,15 @@ const MIN_TIMELOCK_DELTA_MS: u64 = 10_000;
 const MIN_REVEAL_HEIGHT_DELTA_BLOCKS: u64 = 3;
 pub(crate) const SECRET_ACK_TIMEOUT_MS: u64 = 120_000;
 
+/// Same derived wake as TS: a withheld ACK cannot spend the signed lock's reserve.
+pub fn secret_ack_trigger_at(deadline: u64, started_at: u64, timelock: Option<u64>) -> u64 {
+    timelock.map_or(deadline, |expires| {
+        deadline
+            .min(expires.saturating_sub(xln_rscore_engine::HTLC_ENFORCEMENT_RESERVE_MS))
+            .max(started_at)
+    })
+}
+
 /// Paybook paths are the raw 32-byte hashlock. A length-prefixed text key puts
 /// every canonical `0x…` hashlock under the same Patricia prefix and defeats
 /// physical sharding even though the financial identifier itself is uniform.
@@ -100,6 +109,7 @@ impl PaybookChanges {
         &self,
         state: &EntityStateSlice,
         now: u64,
+        lock_deadlines: &BTreeMap<(String, String), u64>,
     ) -> Result<Vec<(String, String)>, EntityKernelError> {
         let mut due = Vec::new();
         let mut consider = |entry: &PaybookEntry| {
@@ -110,12 +120,19 @@ impl PaybookChanges {
             ) else {
                 return;
             };
+            let trigger_at = secret_ack_trigger_at(
+                deadline,
+                started_at,
+                lock_deadlines
+                    .get(&(counterparty.clone(), entry.hashlock.clone()))
+                    .copied(),
+            );
             if entry.secret_ack_pending
                 && entry.secret.is_some()
                 && deadline >= started_at
-                && deadline <= now
+                && trigger_at <= now
             {
-                due.push((deadline, entry.hashlock.clone(), counterparty.clone()));
+                due.push((trigger_at, entry.hashlock.clone(), counterparty.clone()));
             }
         };
         for (key, entry) in state.paybook.entries.iter() {
@@ -832,6 +849,23 @@ mod key_tests {
         PaybookEntry, PaybookState,
     };
 
+    #[test]
+    fn secret_ack_wake_preserves_signed_enforcement_reserve() {
+        assert_eq!(
+            super::secret_ack_trigger_at(170_000, 50_000, Some(90_000)),
+            60_000
+        );
+        assert_eq!(
+            super::secret_ack_trigger_at(170_000, 70_000, Some(90_000)),
+            70_000
+        );
+        assert_eq!(
+            super::secret_ack_trigger_at(170_000, 50_000, Some(300_000)),
+            170_000
+        );
+        assert_eq!(super::secret_ack_trigger_at(170_000, 50_000, None), 170_000);
+    }
+
     fn evidence() -> (String, String) {
         let secret_bytes = [0x61_u8; 32];
         (
@@ -1029,12 +1063,14 @@ mod key_tests {
         let deadline = route.secret_ack_deadline_at.expect("ack deadline");
         assert_eq!(
             changes
-                .due_secret_acks(&state, deadline - 1)
+                .due_secret_acks(&state, deadline - 1, &BTreeMap::new())
                 .expect("not yet due"),
             Vec::new()
         );
         assert_eq!(
-            changes.due_secret_acks(&state, deadline).expect("due"),
+            changes
+                .due_secret_acks(&state, deadline, &BTreeMap::new())
+                .expect("due"),
             vec![(hashlock.clone(), "upstream".to_string())]
         );
     }

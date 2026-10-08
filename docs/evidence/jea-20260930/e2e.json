@@ -1,0 +1,1443 @@
+{
+  "date": "2026-09-30",
+  "baseCommit": "0b25d54cac0c54db51c5f44933b11c749736f354",
+  "verification": "Full canonical Chromium catalog with focused reruns, followed by rebuilt final ScenarioPlayer regression; not one uninterrupted full-suite run",
+  "total": 138,
+  "passed": 138,
+  "skipped": 0,
+  "missing": [],
+  "counts": {
+    "functional": 97,
+    "resilience": 41
+  },
+  "reportsChecked": 153,
+  "realAi": {
+    "enabled": true,
+    "model": "gpt-oss:20b",
+    "run": "20260930-045401-691",
+    "productionProxy": true
+  },
+  "runs": [
+    "20260930-035124-673",
+    "20260930-041148-509",
+    "20260930-041736-325",
+    "20260930-042033-455",
+    "20260930-042929-151",
+    "20260930-043046-157",
+    "20260930-043553-239",
+    "20260930-043643-866",
+    "20260930-043843-447",
+    "20260930-044003-034",
+    "20260930-044148-447",
+    "20260930-044533-047",
+    "20260930-044906-369",
+    "20260930-045011-727",
+    "20260930-045401-691"
+  ],
+  "tests": [
+    {
+      "target": "tests/e2e-cross-j-swap.spec.ts",
+      "title": "completion modal dismissal fails loud when the overlay remains visible",
+      "category": "functional",
+      "run": "20260930-041148-509",
+      "reportPath": ".logs/e2e-parallel/20260930-041148-509/shard-0/artifacts/playwright/playwright-report.json",
+      "playwrightMs": 6870,
+      "status": "passed",
+      "skipped": 0
+    },
+    {
+      "target": "tests/e2e-cross-j-swap.spec.ts",
+      "title": "market maker prepublishes same-chain and ETH/TRON cross-chain books before user swaps",
+      "category": "functional",
+      "run": "20260930-035124-673",
+      "reportPath": ".logs/e2e-parallel/20260930-035124-673/shard-1/artifacts/playwright/playwright-report.json",
+      "playwrightMs": 3307,
+      "status": "passed",
+      "skipped": 0
+    },
+    {
+      "target": "tests/e2e-cross-j-swap.spec.ts",
+      "title": "H2 process replacement restores authoritative health and exact configured public books",
+      "category": "resilience",
+      "run": "20260930-035124-673",
+      "reportPath": ".logs/e2e-parallel/20260930-035124-673/shard-2/artifacts/playwright/playwright-report.json",
+      "playwrightMs": 10994,
+      "status": "passed",
+      "skipped": 0
+    },
+    {
+      "target": "tests/e2e-cross-j-swap.spec.ts",
+      "title": "real MM full fill auto-closes and partial fill closes manually on both legs",
+      "category": "functional",
+      "run": "20260930-035124-673",
+      "reportPath": ".logs/e2e-parallel/20260930-035124-673/shard-3/artifacts/playwright/playwright-report.json",
+      "playwrightMs": 18153,
+      "status": "passed",
+      "skipped": 0
+    },
+    {
+      "target": "tests/e2e-cross-j-swap.spec.ts",
+      "title": "cross USDT/USDT orderbook resolves terminal no-market when the selected route relay has no snapshots",
+      "category": "resilience",
+      "run": "20260930-041148-509",
+      "reportPath": ".logs/e2e-parallel/20260930-041148-509/shard-1/artifacts/playwright/playwright-report.json",
+      "playwrightMs": 15567,
+      "status": "passed",
+      "skipped": 0
+    },
+    {
+      "target": "tests/e2e-cross-j-swap.spec.ts",
+      "title": "Tron sibling inherits rebalance policy and auto-collateralizes USDC after faucet",
+      "category": "functional",
+      "run": "20260930-041148-509",
+      "reportPath": ".logs/e2e-parallel/20260930-041148-509/shard-2/artifacts/playwright/playwright-report.json",
+      "playwrightMs": 14064,
+      "status": "passed",
+      "skipped": 0
+    },
+    {
+      "target": "tests/e2e-cross-j-swap.spec.ts",
+      "title": "cross swap one-click prepares missing target account and inbound credit",
+      "category": "functional",
+      "run": "20260930-041148-509",
+      "reportPath": ".logs/e2e-parallel/20260930-041148-509/shard-3/artifacts/playwright/playwright-report.json",
+      "playwrightMs": 14252,
+      "status": "passed",
+      "skipped": 0
+    },
+    {
+      "target": "tests/e2e-cross-j-swap.spec.ts",
+      "title": "cross WETH/USDC ignores non-takeable orderbook side before filling the takeable side",
+      "category": "resilience",
+      "run": "20260930-041148-509",
+      "reportPath": ".logs/e2e-parallel/20260930-041148-509/shard-4/artifacts/playwright/playwright-report.json",
+      "playwrightMs": 19508,
+      "status": "passed",
+      "skipped": 0
+    },
+    {
+      "target": "tests/e2e-cross-j-swap.spec.ts",
+      "title": "cross WETH/USDT displays prices as stable quote per WETH for Tron source",
+      "category": "functional",
+      "run": "20260930-041148-509",
+      "reportPath": ".logs/e2e-parallel/20260930-041148-509/shard-5/artifacts/playwright/playwright-report.json",
+      "playwrightMs": 16961,
+      "status": "passed",
+      "skipped": 0
+    },
+    {
+      "target": "tests/e2e-cross-j-swap.spec.ts",
+      "title": "two users can place full, partial, and disputed cross-j swaps through the shared swap builder",
+      "category": "resilience",
+      "run": "20260930-041148-509",
+      "reportPath": ".logs/e2e-parallel/20260930-041148-509/shard-6/artifacts/playwright/playwright-report.json",
+      "playwrightMs": 42179,
+      "status": "passed",
+      "skipped": 0
+    },
+    {
+      "target": "tests/e2e-custody.spec.ts",
+      "title": "separate custody daemon credits deposits and withdraws only from credited offchain balance",
+      "category": "functional",
+      "run": "20260930-041148-509",
+      "reportPath": ".logs/e2e-parallel/20260930-041148-509/shard-7/artifacts/playwright/playwright-report.json",
+      "playwrightMs": 35565,
+      "status": "passed",
+      "skipped": 0
+    },
+    {
+      "target": "tests/e2e-dispute.spec.ts",
+      "title": "entity workspace dispute lifecycle returns reserve",
+      "category": "resilience",
+      "run": "20260930-041148-509",
+      "reportPath": ".logs/e2e-parallel/20260930-041148-509/shard-8/artifacts/playwright/playwright-report.json",
+      "playwrightMs": 33415,
+      "status": "passed",
+      "skipped": 0
+    },
+    {
+      "target": "tests/e2e-dispute.spec.ts",
+      "title": "entity settle workspace Sign & Broadcast submits dispute batch",
+      "category": "resilience",
+      "run": "20260930-041148-509",
+      "reportPath": ".logs/e2e-parallel/20260930-041148-509/shard-9/artifacts/playwright/playwright-report.json",
+      "playwrightMs": 11892,
+      "status": "passed",
+      "skipped": 0
+    },
+    {
+      "target": "tests/e2e-payment.spec.ts",
+      "title": "full HTLC bilateral payment through hub",
+      "category": "functional",
+      "run": "20260930-041148-509",
+      "reportPath": ".logs/e2e-parallel/20260930-041148-509/shard-10/artifacts/playwright/playwright-report.json",
+      "playwrightMs": 20711,
+      "status": "passed",
+      "skipped": 0
+    },
+    {
+      "target": "tests/e2e-qa-cockpit.spec.ts",
+      "title": "shows the standalone runs ledger across test surfaces",
+      "category": "functional",
+      "run": "20260930-041148-509",
+      "reportPath": ".logs/e2e-parallel/20260930-041148-509/shard-11/artifacts/playwright/playwright-report.json",
+      "playwrightMs": 5414,
+      "status": "passed",
+      "skipped": 0
+    },
+    {
+      "target": "tests/e2e-qa-cockpit.spec.ts",
+      "title": "shows and sorts the concrete Playwright test ledger",
+      "category": "functional",
+      "run": "20260930-041148-509",
+      "reportPath": ".logs/e2e-parallel/20260930-041148-509/shard-12/artifacts/playwright/playwright-report.json",
+      "playwrightMs": 8330,
+      "status": "passed",
+      "skipped": 0
+    },
+    {
+      "target": "tests/e2e-qa-cockpit.spec.ts",
+      "title": "plays recorded scenario videos with short copy and synced transcript",
+      "category": "functional",
+      "run": "20260930-041148-509",
+      "reportPath": ".logs/e2e-parallel/20260930-041148-509/shard-13/artifacts/playwright/playwright-report.json",
+      "playwrightMs": 17850,
+      "status": "passed",
+      "skipped": 0
+    },
+    {
+      "target": "tests/e2e-qa-cockpit.spec.ts",
+      "title": "keeps QA evidence visible but privileged actions disabled in read mode",
+      "category": "resilience",
+      "run": "20260930-041148-509",
+      "reportPath": ".logs/e2e-parallel/20260930-041148-509/shard-14/artifacts/playwright/playwright-report.json",
+      "playwrightMs": 5937,
+      "status": "passed",
+      "skipped": 0
+    },
+    {
+      "target": "tests/e2e-qa-cockpit.spec.ts",
+      "title": "enables restart run only after admin plan and typed confirmation",
+      "category": "resilience",
+      "run": "20260930-041148-509",
+      "reportPath": ".logs/e2e-parallel/20260930-041148-509/shard-15/artifacts/playwright/playwright-report.json",
+      "playwrightMs": 4574,
+      "status": "passed",
+      "skipped": 0
+    },
+    {
+      "target": "tests/e2e-qa-cockpit.spec.ts",
+      "title": "requires typed confirmation before aborting active restart",
+      "category": "resilience",
+      "run": "20260930-041148-509",
+      "reportPath": ".logs/e2e-parallel/20260930-041148-509/shard-16/artifacts/playwright/playwright-report.json",
+      "playwrightMs": 4285,
+      "status": "passed",
+      "skipped": 0
+    },
+    {
+      "target": "tests/e2e-qa-cockpit.spec.ts",
+      "title": "windows large shard and artifact lists behind show-more controls",
+      "category": "resilience",
+      "run": "20260930-041148-509",
+      "reportPath": ".logs/e2e-parallel/20260930-041148-509/shard-17/artifacts/playwright/playwright-report.json",
+      "playwrightMs": 9621,
+      "status": "passed",
+      "skipped": 0
+    },
+    {
+      "target": "tests/e2e/commands/runtime-command-journal.spec.ts",
+      "title": "remote command journal survives reload with encrypted exact payload and the same intent ID",
+      "category": "resilience",
+      "run": "20260930-041148-509",
+      "reportPath": ".logs/e2e-parallel/20260930-041148-509/shard-18/artifacts/playwright/playwright-report.json",
+      "playwrightMs": 7116,
+      "status": "passed",
+      "skipped": 0
+    },
+    {
+      "target": "tests/e2e/commands/runtime-command-journal.spec.ts",
+      "title": "remote command journal fails loud on payload mutation and oversized persisted metadata",
+      "category": "resilience",
+      "run": "20260930-041148-509",
+      "reportPath": ".logs/e2e-parallel/20260930-041148-509/shard-19/artifacts/playwright/playwright-report.json",
+      "playwrightMs": 5648,
+      "status": "passed",
+      "skipped": 0
+    },
+    {
+      "target": "tests/e2e/commands/runtime-command-journal.spec.ts",
+      "title": "remote command replay lease has exactly one browser-tab owner",
+      "category": "resilience",
+      "run": "20260930-041148-509",
+      "reportPath": ".logs/e2e-parallel/20260930-041148-509/shard-20/artifacts/playwright/playwright-report.json",
+      "playwrightMs": 8041,
+      "status": "passed",
+      "skipped": 0
+    },
+    {
+      "target": "tests/e2e/commands/runtime-command-journal.spec.ts",
+      "title": "cross-tab terminal settlement cannot be resurrected by a stale accepted write",
+      "category": "resilience",
+      "run": "20260930-041148-509",
+      "reportPath": ".logs/e2e-parallel/20260930-041148-509/shard-21/artifacts/playwright/playwright-report.json",
+      "playwrightMs": 9263,
+      "status": "passed",
+      "skipped": 0
+    },
+    {
+      "target": "tests/e2e/market/e2e-market-cap.spec.ts",
+      "title": "market cap ranks verified Entity valuations and supports exact filters",
+      "category": "functional",
+      "run": "20260930-041148-509",
+      "reportPath": ".logs/e2e-parallel/20260930-041148-509/shard-22/artifacts/playwright/playwright-report.json",
+      "playwrightMs": 5328,
+      "status": "passed",
+      "skipped": 0
+    },
+    {
+      "target": "tests/e2e/market/e2e-market-cap.spec.ts",
+      "title": "market cap desktop visual",
+      "category": "functional",
+      "run": "20260930-041148-509",
+      "reportPath": ".logs/e2e-parallel/20260930-041148-509/shard-23/artifacts/playwright/playwright-report.json",
+      "playwrightMs": 4135,
+      "status": "passed",
+      "skipped": 0
+    },
+    {
+      "target": "tests/e2e/market/e2e-market-cap.spec.ts",
+      "title": "market cap iPhone visual",
+      "category": "functional",
+      "run": "20260930-041148-509",
+      "reportPath": ".logs/e2e-parallel/20260930-041148-509/shard-24/artifacts/playwright/playwright-report.json",
+      "playwrightMs": 5618,
+      "status": "passed",
+      "skipped": 0
+    },
+    {
+      "target": "tests/e2e/market/e2e-market-cap.spec.ts",
+      "title": "market cap wide visual",
+      "category": "functional",
+      "run": "20260930-041148-509",
+      "reportPath": ".logs/e2e-parallel/20260930-041148-509/shard-25/artifacts/playwright/playwright-report.json",
+      "playwrightMs": 5818,
+      "status": "passed",
+      "skipped": 0
+    },
+    {
+      "target": "tests/e2e/payments/e2e-ahb-payment.spec.ts",
+      "title": "bidirectional payments through hub",
+      "category": "functional",
+      "run": "20260930-041148-509",
+      "reportPath": ".logs/e2e-parallel/20260930-041148-509/shard-26/artifacts/playwright/playwright-report.json",
+      "playwrightMs": 52270,
+      "status": "passed",
+      "skipped": 0
+    },
+    {
+      "target": "tests/e2e/payments/e2e-invoice-qr.spec.ts",
+      "title": "creates QR in Receive and scans it into Pay",
+      "category": "functional",
+      "run": "20260930-041148-509",
+      "reportPath": ".logs/e2e-parallel/20260930-041148-509/shard-27/artifacts/playwright/playwright-report.json",
+      "playwrightMs": 24416,
+      "status": "passed",
+      "skipped": 0
+    },
+    {
+      "target": "tests/e2e/payments/e2e-move-direct.spec.ts",
+      "title": "move external to external sends directly from signer wallet",
+      "category": "functional",
+      "run": "20260930-041148-509",
+      "reportPath": ".logs/e2e-parallel/20260930-041148-509/shard-28/artifacts/playwright/playwright-report.json",
+      "playwrightMs": 25545,
+      "status": "passed",
+      "skipped": 0
+    },
+    {
+      "target": "tests/e2e/payments/e2e-move.spec.ts",
+      "title": "asset faucet exposes correct modes and funds every supported token",
+      "category": "functional",
+      "run": "20260930-041148-509",
+      "reportPath": ".logs/e2e-parallel/20260930-041148-509/shard-29/artifacts/playwright/playwright-report.json",
+      "playwrightMs": 17624,
+      "status": "passed",
+      "skipped": 0
+    },
+    {
+      "target": "tests/e2e/payments/e2e-move.spec.ts",
+      "title": "move tab covers all routed paths on isolated runtimes",
+      "category": "functional",
+      "run": "20260930-041148-509",
+      "reportPath": ".logs/e2e-parallel/20260930-041148-509/shard-30/artifacts/playwright/playwright-report.json",
+      "playwrightMs": 52585,
+      "status": "passed",
+      "skipped": 0
+    },
+    {
+      "target": "tests/e2e/payments/e2e-multiroute-load.spec.ts",
+      "title": "full mesh routing with diverse payment patterns",
+      "category": "functional",
+      "run": "20260930-041736-325",
+      "reportPath": ".logs/e2e-parallel/20260930-041736-325/shard-0/artifacts/playwright/playwright-report.json",
+      "playwrightMs": 140810,
+      "status": "passed",
+      "skipped": 0
+    },
+    {
+      "target": "tests/e2e/payments/e2e-pay-deeplink.spec.ts",
+      "title": "restores runtime and opens the pay screen from hash params",
+      "category": "functional",
+      "run": "20260930-041148-509",
+      "reportPath": ".logs/e2e-parallel/20260930-041148-509/shard-32/artifacts/playwright/playwright-report.json",
+      "playwrightMs": 29335,
+      "status": "passed",
+      "skipped": 0
+    },
+    {
+      "target": "tests/e2e/payments/e2e-payment-smoke.spec.ts",
+      "title": "fresh runtimes can open accounts, faucet, pay, and reload persisted state",
+      "category": "functional",
+      "run": "20260930-041148-509",
+      "reportPath": ".logs/e2e-parallel/20260930-041148-509/shard-33/artifacts/playwright/playwright-report.json",
+      "playwrightMs": 37112,
+      "status": "passed",
+      "skipped": 0
+    },
+    {
+      "target": "tests/e2e/payments/e2e-rebalance-bar.spec.ts",
+      "title": "faucet -> request_collateral -> secured bar",
+      "category": "functional",
+      "run": "20260930-042033-455",
+      "reportPath": ".logs/e2e-parallel/20260930-042033-455/shard-34/artifacts/playwright/playwright-report.json",
+      "playwrightMs": 18338,
+      "status": "passed",
+      "skipped": 0
+    },
+    {
+      "target": "tests/e2e/payments/e2e-rebalance-bar.spec.ts",
+      "title": "persistence: mined rebalance survives H1 and user restart exactly once",
+      "category": "resilience",
+      "run": "20260930-042033-455",
+      "reportPath": ".logs/e2e-parallel/20260930-042033-455/shard-35/artifacts/playwright/playwright-report.json",
+      "playwrightMs": 24416,
+      "status": "passed",
+      "skipped": 0
+    },
+    {
+      "target": "tests/e2e/payments/e2e-rebalance-bar.spec.ts",
+      "title": "edge: rapid 8 faucets keep the sub-soft tail out of the pending collateral batch",
+      "category": "resilience",
+      "run": "20260930-042033-455",
+      "reportPath": ".logs/e2e-parallel/20260930-042033-455/shard-36/artifacts/playwright/playwright-report.json",
+      "playwrightMs": 14952,
+      "status": "passed",
+      "skipped": 0
+    },
+    {
+      "target": "tests/e2e/payments/e2e-rebalance-bar.spec.ts",
+      "title": "cycle R2C -> C2R -> R2C (100ms action cadence)",
+      "category": "functional",
+      "run": "20260930-042033-455",
+      "reportPath": ".logs/e2e-parallel/20260930-042033-455/shard-37/artifacts/playwright/playwright-report.json",
+      "playwrightMs": 25885,
+      "status": "passed",
+      "skipped": 0
+    },
+    {
+      "target": "tests/e2e/payments/e2e-rebalance-bar.spec.ts",
+      "title": "rt1->h1->h2->rt2: second 550 fails before rebalance, passes after H2 R2C",
+      "category": "resilience",
+      "run": "20260930-042033-455",
+      "reportPath": ".logs/e2e-parallel/20260930-042033-455/shard-38/artifacts/playwright/playwright-report.json",
+      "playwrightMs": 59344,
+      "status": "passed",
+      "skipped": 0
+    },
+    {
+      "target": "tests/e2e/payments/e2e-rebalance-bar.spec.ts",
+      "title": "runtime2: H1=10k, H3=1k; second 550 via H3 fails before rebalance, passes after",
+      "category": "resilience",
+      "run": "20260930-042033-455",
+      "reportPath": ".logs/e2e-parallel/20260930-042033-455/shard-39/artifacts/playwright/playwright-report.json",
+      "playwrightMs": 32744,
+      "status": "passed",
+      "skipped": 0
+    },
+    {
+      "target": "tests/e2e/product/e2e-debt-ledger.spec.ts",
+      "title": "browser dispute with sovereign Hub creates exactly one mirrored debt on both owners",
+      "category": "resilience",
+      "run": "20260930-042033-455",
+      "reportPath": ".logs/e2e-parallel/20260930-042033-455/shard-40/artifacts/playwright/playwright-report.json",
+      "playwrightMs": 26035,
+      "status": "passed",
+      "skipped": 0
+    },
+    {
+      "target": "tests/e2e/product/e2e-entity-formation.spec.ts",
+      "title": "shows one canonical personal or shared Entity workflow at every supported viewport",
+      "category": "functional",
+      "run": "20260930-042033-455",
+      "reportPath": ".logs/e2e-parallel/20260930-042033-455/shard-41/artifacts/playwright/playwright-report.json",
+      "playwrightMs": 12582,
+      "status": "passed",
+      "skipped": 0
+    },
+    {
+      "target": "tests/e2e/product/e2e-entity-ownership.spec.ts",
+      "title": "Entity ownership keeps share issuance optional and separate from hub listing",
+      "category": "functional",
+      "run": "20260930-042033-455",
+      "reportPath": ".logs/e2e-parallel/20260930-042033-455/shard-42/artifacts/playwright/playwright-report.json",
+      "playwrightMs": 12028,
+      "status": "passed",
+      "skipped": 0
+    },
+    {
+      "target": "tests/e2e/product/e2e-faucet-latency.spec.ts",
+      "title": "demo account single-hub UI USDC faucet finalizes as fast as possible",
+      "category": "functional",
+      "run": "20260930-042033-455",
+      "reportPath": ".logs/e2e-parallel/20260930-042033-455/shard-43/artifacts/playwright/playwright-report.json",
+      "playwrightMs": 10995,
+      "status": "passed",
+      "skipped": 0
+    },
+    {
+      "target": "tests/e2e/product/e2e-jurisdiction-settings.spec.ts",
+      "title": "settings can add custom jurisdiction from canonical JSON and import it into active runtime",
+      "category": "functional",
+      "run": "20260930-042033-455",
+      "reportPath": ".logs/e2e-parallel/20260930-042033-455/shard-44/artifacts/playwright/playwright-report.json",
+      "playwrightMs": 13310,
+      "status": "passed",
+      "skipped": 0
+    },
+    {
+      "target": "tests/e2e/product/e2e-lending.spec.ts",
+      "title": "funds hub pool, borrows from it, and repays from the Lending tab",
+      "category": "functional",
+      "run": "20260930-042033-455",
+      "reportPath": ".logs/e2e-parallel/20260930-042033-455/shard-45/artifacts/playwright/playwright-report.json",
+      "playwrightMs": 19913,
+      "status": "passed",
+      "skipped": 0
+    },
+    {
+      "target": "tests/e2e/product/e2e-stack-manager.spec.ts",
+      "title": "Stack Manager deploys and verifies V1 on the isolated Anvil",
+      "category": "functional",
+      "run": "20260930-042033-455",
+      "reportPath": ".logs/e2e-parallel/20260930-042033-455/shard-46/artifacts/playwright/playwright-report.json",
+      "playwrightMs": 12636,
+      "status": "passed",
+      "skipped": 0
+    },
+    {
+      "target": "tests/e2e/product/e2e-theme-settings.spec.ts",
+      "title": "settings theme select updates document theme and persists selected option",
+      "category": "functional",
+      "run": "20260930-042033-455",
+      "reportPath": ".logs/e2e-parallel/20260930-042033-455/shard-47/artifacts/playwright/playwright-report.json",
+      "playwrightMs": 10199,
+      "status": "passed",
+      "skipped": 0
+    },
+    {
+      "target": "tests/e2e/product/e2e-theme-settings.spec.ts",
+      "title": "settings toggles the xln guide without leaving the workspace",
+      "category": "functional",
+      "run": "20260930-042033-455",
+      "reportPath": ".logs/e2e-parallel/20260930-042033-455/shard-48/artifacts/playwright/playwright-report.json",
+      "playwrightMs": 15338,
+      "status": "passed",
+      "skipped": 0
+    },
+    {
+      "target": "tests/e2e/product/e2e-theme-settings.spec.ts",
+      "title": "settings separates Runtime, Entity, Account, and J consensus heights",
+      "category": "functional",
+      "run": "20260930-042033-455",
+      "reportPath": ".logs/e2e-parallel/20260930-042033-455/shard-49/artifacts/playwright/playwright-report.json",
+      "playwrightMs": 13941,
+      "status": "passed",
+      "skipped": 0
+    },
+    {
+      "target": "tests/e2e/product/e2e-ui-screenshots.spec.ts",
+      "title": "ui screenshot smoke captures onboarding and testnet tools across viewports",
+      "category": "functional",
+      "run": "20260930-042033-455",
+      "reportPath": ".logs/e2e-parallel/20260930-042033-455/shard-50/artifacts/playwright/playwright-report.json",
+      "playwrightMs": 37325,
+      "status": "passed",
+      "skipped": 0
+    },
+    {
+      "target": "tests/e2e/product/e2e-ui-screenshots.spec.ts",
+      "title": "ui screenshot smoke captures operator admin surfaces",
+      "category": "functional",
+      "run": "20260930-035124-673",
+      "reportPath": ".logs/e2e-parallel/20260930-035124-673/shard-54/artifacts/playwright/playwright-report.json",
+      "playwrightMs": 7334,
+      "status": "passed",
+      "skipped": 0
+    },
+    {
+      "target": "tests/e2e/product/e2e-ui-screenshots.spec.ts",
+      "title": "ui screenshot smoke captures main tabs across viewports",
+      "category": "functional",
+      "run": "20260930-035124-673",
+      "reportPath": ".logs/e2e-parallel/20260930-035124-673/shard-55/artifacts/playwright/playwright-report.json",
+      "playwrightMs": 50539,
+      "status": "passed",
+      "skipped": 0
+    },
+    {
+      "target": "tests/e2e/product/e2e-user-journey.spec.ts",
+      "title": "profile onboarding auto-joins three hubs without stale pending frames",
+      "category": "functional",
+      "run": "20260930-042033-455",
+      "reportPath": ".logs/e2e-parallel/20260930-042033-455/shard-51/artifacts/playwright/playwright-report.json",
+      "playwrightMs": 13590,
+      "status": "passed",
+      "skipped": 0
+    },
+    {
+      "target": "tests/e2e/product/e2e-user-journey.spec.ts",
+      "title": "demo runtime -> open hub account -> offchain faucet pipeline",
+      "category": "functional",
+      "run": "20260930-042033-455",
+      "reportPath": ".logs/e2e-parallel/20260930-042033-455/shard-52/artifacts/playwright/playwright-report.json",
+      "playwrightMs": 13486,
+      "status": "passed",
+      "skipped": 0
+    },
+    {
+      "target": "tests/e2e/product/load-testing/e2e-load-testing.spec.ts",
+      "title": "Accounts Manage load testing is controlled, observable, best-effort, and responsive",
+      "category": "functional",
+      "run": "20260930-035124-673",
+      "reportPath": ".logs/e2e-parallel/20260930-035124-673/shard-58/artifacts/playwright/playwright-report.json",
+      "playwrightMs": 15999,
+      "status": "passed",
+      "skipped": 0
+    },
+    {
+      "target": "tests/e2e/qa/e2e-local-password.spec.ts",
+      "title": "an existing Svelte wallet enrolls a password and locks without derivation",
+      "category": "functional",
+      "run": "20260930-042033-455",
+      "reportPath": ".logs/e2e-parallel/20260930-042033-455/shard-53/artifacts/playwright/playwright-report.json",
+      "playwrightMs": 15247,
+      "status": "passed",
+      "skipped": 0
+    },
+    {
+      "target": "tests/e2e/qa/e2e-local-password.spec.ts",
+      "title": "a new Svelte wallet sets its password before leaving creation",
+      "category": "functional",
+      "run": "20260930-042033-455",
+      "reportPath": ".logs/e2e-parallel/20260930-042033-455/shard-54/artifacts/playwright/playwright-report.json",
+      "playwrightMs": 11382,
+      "status": "passed",
+      "skipped": 0
+    },
+    {
+      "target": "tests/e2e/qa/e2e-local-password.spec.ts",
+      "title": "Svelte BrainVault uses its original secret for local unlock",
+      "category": "functional",
+      "run": "20260930-042033-455",
+      "reportPath": ".logs/e2e-parallel/20260930-042033-455/shard-55/artifacts/playwright/playwright-report.json",
+      "playwrightMs": 14338,
+      "status": "passed",
+      "skipped": 0
+    },
+    {
+      "target": "tests/e2e/qa/e2e-qa-hlt.spec.ts",
+      "title": "renders the configurable HLT dashboard across viewports",
+      "category": "functional",
+      "run": "20260930-042033-455",
+      "reportPath": ".logs/e2e-parallel/20260930-042033-455/shard-56/artifacts/playwright/playwright-report.json",
+      "playwrightMs": 10537,
+      "status": "passed",
+      "skipped": 0
+    },
+    {
+      "target": "tests/e2e/qa/e2e-qa-quorum.spec.ts",
+      "title": "shows audited model quality and review chains across viewports",
+      "category": "functional",
+      "run": "20260930-042033-455",
+      "reportPath": ".logs/e2e-parallel/20260930-042033-455/shard-57/artifacts/playwright/playwright-report.json",
+      "playwrightMs": 7283,
+      "status": "passed",
+      "skipped": 0
+    },
+    {
+      "target": "tests/e2e/qa/e2e-state-stability.spec.ts",
+      "title": "Svelte account status survives committed runtime refreshes",
+      "category": "functional",
+      "run": "20260930-042033-455",
+      "reportPath": ".logs/e2e-parallel/20260930-042033-455/shard-58/artifacts/playwright/playwright-report.json",
+      "playwrightMs": 15932,
+      "status": "passed",
+      "skipped": 0
+    },
+    {
+      "target": "tests/e2e/recovery/e2e-brainvault-parity.spec.ts",
+      "title": "standalone BrainVault creates and starts the XLN wallet with deterministic seed material",
+      "category": "functional",
+      "run": "20260930-042033-455",
+      "reportPath": ".logs/e2e-parallel/20260930-042033-455/shard-59/artifacts/playwright/playwright-report.json",
+      "playwrightMs": 16452,
+      "status": "passed",
+      "skipped": 0
+    },
+    {
+      "target": "tests/e2e/recovery/e2e-brainvault-parity.spec.ts",
+      "title": "embedded BrainVault add-runtime flow does not fall back to the active wallet",
+      "category": "functional",
+      "run": "20260930-042033-455",
+      "reportPath": ".logs/e2e-parallel/20260930-042033-455/shard-60/artifacts/playwright/playwright-report.json",
+      "playwrightMs": 15248,
+      "status": "passed",
+      "skipped": 0
+    },
+    {
+      "target": "tests/e2e/recovery/e2e-brainvault-remote.spec.ts",
+      "title": "remote BrainVault keeps the mnemonic on the node and opens account setup without browser export",
+      "category": "functional",
+      "run": "20260930-042033-455",
+      "reportPath": ".logs/e2e-parallel/20260930-042033-455/shard-61/artifacts/playwright/playwright-report.json",
+      "playwrightMs": 6799,
+      "status": "passed",
+      "skipped": 0
+    },
+    {
+      "target": "tests/e2e/recovery/e2e-push-wake-registration.spec.ts",
+      "title": "settings registers and revokes signed push wake token through browser UI",
+      "category": "functional",
+      "run": "20260930-042033-455",
+      "reportPath": ".logs/e2e-parallel/20260930-042033-455/shard-62/artifacts/playwright/playwright-report.json",
+      "playwrightMs": 25193,
+      "status": "passed",
+      "skipped": 0
+    },
+    {
+      "target": "tests/e2e/recovery/e2e-storage-schema-recovery.spec.ts",
+      "title": "incompatible wallet storage fails closed and offers authenticated recovery before reset",
+      "category": "resilience",
+      "run": "20260930-042033-455",
+      "reportPath": ".logs/e2e-parallel/20260930-042033-455/shard-63/artifacts/playwright/playwright-report.json",
+      "playwrightMs": 14398,
+      "status": "passed",
+      "skipped": 0
+    },
+    {
+      "target": "tests/e2e/recovery/e2e-storage-writer-lock.spec.ts",
+      "title": "same-namespace restores serialize and a stale writer cannot overwrite the winner",
+      "category": "resilience",
+      "run": "20260930-042033-455",
+      "reportPath": ".logs/e2e-parallel/20260930-042033-455/shard-64/artifacts/playwright/playwright-report.json",
+      "playwrightMs": 4251,
+      "status": "passed",
+      "skipped": 0
+    },
+    {
+      "target": "tests/e2e/recovery/e2e-watchtower-recovery.spec.ts",
+      "title": "restores a wiped runtime from standalone tower backup and continues channel payments",
+      "category": "resilience",
+      "run": "20260930-042033-455",
+      "reportPath": ".logs/e2e-parallel/20260930-042033-455/shard-65/artifacts/playwright/playwright-report.json",
+      "playwrightMs": 50962,
+      "status": "passed",
+      "skipped": 0
+    },
+    {
+      "target": "tests/e2e/runtime/e2e-active-tab-lock.spec.ts",
+      "title": "second /app tab takes ownership and first becomes inactive",
+      "category": "resilience",
+      "run": "20260930-042033-455",
+      "reportPath": ".logs/e2e-parallel/20260930-042033-455/shard-66/artifacts/playwright/playwright-report.json",
+      "playwrightMs": 7706,
+      "status": "passed",
+      "skipped": 0
+    },
+    {
+      "target": "tests/e2e/runtime/e2e-active-tab-lock.spec.ts",
+      "title": "inactive tab stays inert until explicit active-lock claim",
+      "category": "resilience",
+      "run": "20260930-042033-455",
+      "reportPath": ".logs/e2e-parallel/20260930-042033-455/shard-67/artifacts/playwright/playwright-report.json",
+      "playwrightMs": 7594,
+      "status": "passed",
+      "skipped": 0
+    },
+    {
+      "target": "tests/e2e/runtime/e2e-active-tab-lock.spec.ts",
+      "title": "pay deeplink path also participates in ownership handoff",
+      "category": "resilience",
+      "run": "20260930-042033-455",
+      "reportPath": ".logs/e2e-parallel/20260930-042033-455/shard-68/artifacts/playwright/playwright-report.json",
+      "playwrightMs": 6974,
+      "status": "passed",
+      "skipped": 0
+    },
+    {
+      "target": "tests/e2e/runtime/e2e-active-tab-lock.spec.ts",
+      "title": "projection route cannot evict an active embedded Runtime owner",
+      "category": "resilience",
+      "run": "20260930-042033-455",
+      "reportPath": ".logs/e2e-parallel/20260930-042033-455/shard-69/artifacts/playwright/playwright-report.json",
+      "playwrightMs": 12745,
+      "status": "passed",
+      "skipped": 0
+    },
+    {
+      "target": "tests/e2e/runtime/e2e-ahb-isolated.spec.ts",
+      "title": "bidirectional payments survive across two isolated browser contexts",
+      "category": "functional",
+      "run": "20260930-042033-455",
+      "reportPath": ".logs/e2e-parallel/20260930-042033-455/shard-70/artifacts/playwright/playwright-report.json",
+      "playwrightMs": 57817,
+      "status": "passed",
+      "skipped": 0
+    },
+    {
+      "target": "tests/e2e/runtime/e2e-baseline.spec.ts",
+      "title": "cold reset provisions the 3-hub mesh baseline and reserves",
+      "category": "functional",
+      "run": "20260930-042033-455",
+      "reportPath": ".logs/e2e-parallel/20260930-042033-455/shard-71/artifacts/playwright/playwright-report.json",
+      "playwrightMs": 3024,
+      "status": "passed",
+      "skipped": 0
+    },
+    {
+      "target": "tests/e2e/runtime/e2e-debug-incidents.spec.ts",
+      "title": "browser console errors enter the shared unread incident service",
+      "category": "functional",
+      "run": "20260930-042033-455",
+      "reportPath": ".logs/e2e-parallel/20260930-042033-455/shard-72/artifacts/playwright/playwright-report.json",
+      "playwrightMs": 4064,
+      "status": "passed",
+      "skipped": 0
+    },
+    {
+      "target": "tests/e2e/runtime/e2e-radapter-remote-part-1.spec.ts",
+      "title": "remote /app opens an existing hub runtime through radapter",
+      "category": "functional",
+      "run": "20260930-042033-455",
+      "reportPath": ".logs/e2e-parallel/20260930-042033-455/shard-73/artifacts/playwright/playwright-report.json",
+      "playwrightMs": 4988,
+      "status": "passed",
+      "skipped": 0
+    },
+    {
+      "target": "tests/e2e/runtime/e2e-radapter-remote-part-1.spec.ts",
+      "title": "dev DockRoot entity panel resolves seed through remote RuntimeView projection",
+      "category": "functional",
+      "run": "20260930-042033-455",
+      "reportPath": ".logs/e2e-parallel/20260930-042033-455/shard-74/artifacts/playwright/playwright-report.json",
+      "playwrightMs": 4681,
+      "status": "passed",
+      "skipped": 0
+    },
+    {
+      "target": "tests/e2e/runtime/e2e-radapter-remote-part-1.spec.ts",
+      "title": "dev DockRoot Solvency panel reads remote radapter solvency-summary",
+      "category": "functional",
+      "run": "20260930-042033-455",
+      "reportPath": ".logs/e2e-parallel/20260930-042033-455/shard-75/artifacts/playwright/playwright-report.json",
+      "playwrightMs": 7035,
+      "status": "passed",
+      "skipped": 0
+    },
+    {
+      "target": "tests/e2e/runtime/e2e-radapter-remote-part-1.spec.ts",
+      "title": "remote /app pasted capability connects without reloading the page",
+      "category": "functional",
+      "run": "20260930-042033-455",
+      "reportPath": ".logs/e2e-parallel/20260930-042033-455/shard-76/artifacts/playwright/playwright-report.json",
+      "playwrightMs": 5790,
+      "status": "passed",
+      "skipped": 0
+    },
+    {
+      "target": "tests/e2e/runtime/e2e-radapter-remote-part-1.spec.ts",
+      "title": "local runtime creation while remote is active switches controller to embedded",
+      "category": "functional",
+      "run": "20260930-042033-455",
+      "reportPath": ".logs/e2e-parallel/20260930-042033-455/shard-77/artifacts/playwright/playwright-report.json",
+      "playwrightMs": 7102,
+      "status": "passed",
+      "skipped": 0
+    },
+    {
+      "target": "tests/e2e/runtime/e2e-radapter-remote-part-1.spec.ts",
+      "title": "context dropdown groups H1 H2 H3 remote runtimes",
+      "category": "functional",
+      "run": "20260930-042033-455",
+      "reportPath": ".logs/e2e-parallel/20260930-042033-455/shard-78/artifacts/playwright/playwright-report.json",
+      "playwrightMs": 6098,
+      "status": "passed",
+      "skipped": 0
+    },
+    {
+      "target": "tests/e2e/runtime/e2e-radapter-remote-part-1.spec.ts",
+      "title": "admin remote runtime opens swap workspace from RuntimeView projection",
+      "category": "functional",
+      "run": "20260930-042033-455",
+      "reportPath": ".logs/e2e-parallel/20260930-042033-455/shard-79/artifacts/playwright/playwright-report.json",
+      "playwrightMs": 6509,
+      "status": "passed",
+      "skipped": 0
+    },
+    {
+      "target": "tests/e2e/runtime/e2e-radapter-remote-part-1.spec.ts",
+      "title": "admin remote runtime opens normal app workspace",
+      "category": "functional",
+      "run": "20260930-042033-455",
+      "reportPath": ".logs/e2e-parallel/20260930-042033-455/shard-80/artifacts/playwright/playwright-report.json",
+      "playwrightMs": 6572,
+      "status": "passed",
+      "skipped": 0
+    },
+    {
+      "target": "tests/e2e/runtime/e2e-radapter-remote-part-1.spec.ts",
+      "title": "admin remote runtime keeps raw RuntimeInput send private and account projection readable",
+      "category": "resilience",
+      "run": "20260930-042033-455",
+      "reportPath": ".logs/e2e-parallel/20260930-042033-455/shard-81/artifacts/playwright/playwright-report.json",
+      "playwrightMs": 4678,
+      "status": "passed",
+      "skipped": 0
+    },
+    {
+      "target": "tests/e2e/runtime/e2e-radapter-remote-part-1.spec.ts",
+      "title": "address explorer bootstraps remote runtime projection outside app shell",
+      "category": "functional",
+      "run": "20260930-042033-455",
+      "reportPath": ".logs/e2e-parallel/20260930-042033-455/shard-82/artifacts/playwright/playwright-report.json",
+      "playwrightMs": 8780,
+      "status": "passed",
+      "skipped": 0
+    },
+    {
+      "target": "tests/e2e/runtime/e2e-radapter-remote-part-1.spec.ts",
+      "title": "admin remote runtime opens settings projection without retired RuntimeReplica settings",
+      "category": "functional",
+      "run": "20260930-042033-455",
+      "reportPath": ".logs/e2e-parallel/20260930-042033-455/shard-83/artifacts/playwright/playwright-report.json",
+      "playwrightMs": 4490,
+      "status": "passed",
+      "skipped": 0
+    },
+    {
+      "target": "tests/e2e/runtime/e2e-radapter-remote-part-1.spec.ts",
+      "title": "health admin keeps QA evidence link-only and runtime adapter local",
+      "category": "resilience",
+      "run": "20260930-042033-455",
+      "reportPath": ".logs/e2e-parallel/20260930-042033-455/shard-84/artifacts/playwright/playwright-report.json",
+      "playwrightMs": 7181,
+      "status": "passed",
+      "skipped": 0
+    },
+    {
+      "target": "tests/e2e/runtime/e2e-radapter-remote-part-1.spec.ts",
+      "title": "real H2 replacement gates browser money commands until verified restore",
+      "category": "resilience",
+      "run": "20260930-042033-455",
+      "reportPath": ".logs/e2e-parallel/20260930-042033-455/shard-85/artifacts/playwright/playwright-report.json",
+      "playwrightMs": 19026,
+      "status": "passed",
+      "skipped": 0
+    },
+    {
+      "target": "tests/e2e/runtime/e2e-radapter-remote-part-2.spec.ts",
+      "title": "admin remote runtime control advances live state and exposes past frames",
+      "category": "functional",
+      "run": "20260930-042929-151",
+      "reportPath": ".logs/e2e-parallel/20260930-042929-151/shard-0/artifacts/playwright/playwright-report.json",
+      "playwrightMs": 48162,
+      "status": "passed",
+      "skipped": 0
+    },
+    {
+      "target": "tests/e2e/runtime/e2e-radapter-remote-part-2.spec.ts",
+      "title": "runtime dropdown switches app-imported remote runtimes without manager route",
+      "category": "functional",
+      "run": "20260930-035124-673",
+      "reportPath": ".logs/e2e-parallel/20260930-035124-673/shard-93/artifacts/playwright/playwright-report.json",
+      "playwrightMs": 5134,
+      "status": "passed",
+      "skipped": 0
+    },
+    {
+      "target": "tests/e2e/runtime/e2e-radapter-remote-part-2.spec.ts",
+      "title": "bulk remote runtime import link validates mesh, custody, and market maker runtimes in browser",
+      "category": "functional",
+      "run": "20260930-035124-673",
+      "reportPath": ".logs/e2e-parallel/20260930-035124-673/shard-94/artifacts/playwright/playwright-report.json",
+      "playwrightMs": 5760,
+      "status": "passed",
+      "skipped": 0
+    },
+    {
+      "target": "tests/e2e/runtime/e2e-runtime-ingress-debug.spec.ts",
+      "title": "bad entity inputs are discarded while the runtime remains live",
+      "category": "resilience",
+      "run": "20260930-043046-157",
+      "reportPath": ".logs/e2e-parallel/20260930-043046-157/shard-87/artifacts/playwright/playwright-report.json",
+      "playwrightMs": 7755,
+      "status": "passed",
+      "skipped": 0
+    },
+    {
+      "target": "tests/e2e/runtime/e2e-runtime-persistence.spec.ts",
+      "title": "reload restores complex runtime from a retained checkpoint plus WAL tail",
+      "category": "resilience",
+      "run": "20260930-043046-157",
+      "reportPath": ".logs/e2e-parallel/20260930-043046-157/shard-88/artifacts/playwright/playwright-report.json",
+      "playwrightMs": 26792,
+      "status": "passed",
+      "skipped": 0
+    },
+    {
+      "target": "tests/e2e/runtime/e2e-runtime-shutdown.spec.ts",
+      "title": "manual BrowserContext close quiesces every runtime page first",
+      "category": "resilience",
+      "run": "20260930-043046-157",
+      "reportPath": ".logs/e2e-parallel/20260930-043046-157/shard-89/artifacts/playwright/playwright-report.json",
+      "playwrightMs": 4503,
+      "status": "passed",
+      "skipped": 0
+    },
+    {
+      "target": "tests/e2e/runtime/e2e-runtime-shutdown.spec.ts",
+      "title": "manual Page close quiesces its runtime before the page disappears",
+      "category": "resilience",
+      "run": "20260930-043046-157",
+      "reportPath": ".logs/e2e-parallel/20260930-043046-157/shard-90/artifacts/playwright/playwright-report.json",
+      "playwrightMs": 3638,
+      "status": "passed",
+      "skipped": 0
+    },
+    {
+      "target": "tests/e2e/runtime/e2e-scenario-player.spec.ts",
+      "title": "opens hub-collapse player, scrubs time, switches scenarios, and previews in wallet",
+      "category": "functional",
+      "run": "20260930-043046-157",
+      "reportPath": ".logs/e2e-parallel/20260930-043046-157/shard-91/artifacts/playwright/playwright-report.json",
+      "playwrightMs": 8641,
+      "status": "passed",
+      "skipped": 0
+    },
+    {
+      "target": "tests/e2e/swap/e2e-swap-isolated.spec.ts",
+      "title": "swap fixtures use canonical token decimals",
+      "category": "functional",
+      "run": "20260930-043046-157",
+      "reportPath": ".logs/e2e-parallel/20260930-043046-157/shard-92/artifacts/playwright/playwright-report.json",
+      "playwrightMs": 4279,
+      "status": "passed",
+      "skipped": 0
+    },
+    {
+      "target": "tests/e2e/swap/e2e-swap-isolated.spec.ts",
+      "title": "relay orderbook publishes new resting ask and bid to both subscribed users",
+      "category": "functional",
+      "run": "20260930-043046-157",
+      "reportPath": ".logs/e2e-parallel/20260930-043046-157/shard-93/artifacts/playwright/playwright-report.json",
+      "playwrightMs": 21413,
+      "status": "passed",
+      "skipped": 0
+    },
+    {
+      "target": "tests/e2e/swap/e2e-swap-isolated.spec.ts",
+      "title": "self-trade protection cancels a user taker before matching their own resting order",
+      "category": "resilience",
+      "run": "20260930-043046-157",
+      "reportPath": ".logs/e2e-parallel/20260930-043046-157/shard-94/artifacts/playwright/playwright-report.json",
+      "playwrightMs": 13129,
+      "status": "passed",
+      "skipped": 0
+    },
+    {
+      "target": "tests/e2e/swap/e2e-swap-isolated.spec.ts",
+      "title": "two isolated users trade against each other through one hub orderbook without market maker liquidity",
+      "category": "functional",
+      "run": "20260930-043046-157",
+      "reportPath": ".logs/e2e-parallel/20260930-043046-157/shard-95/artifacts/playwright/playwright-report.json",
+      "playwrightMs": 16535,
+      "status": "passed",
+      "skipped": 0
+    },
+    {
+      "target": "tests/e2e/swap/e2e-swap-isolated.spec.ts",
+      "title": "resting maker order can fill partially, stay open, then cancel remainder",
+      "category": "functional",
+      "run": "20260930-043046-157",
+      "reportPath": ".logs/e2e-parallel/20260930-043046-157/shard-96/artifacts/playwright/playwright-report.json",
+      "playwrightMs": 22699,
+      "status": "passed",
+      "skipped": 0
+    },
+    {
+      "target": "tests/e2e/swap/e2e-swap-isolated.spec.ts",
+      "title": "one resting maker order can be matched by two isolated takers until fully closed",
+      "category": "functional",
+      "run": "20260930-043046-157",
+      "reportPath": ".logs/e2e-parallel/20260930-043046-157/shard-97/artifacts/playwright/playwright-report.json",
+      "playwrightMs": 27812,
+      "status": "passed",
+      "skipped": 0
+    },
+    {
+      "target": "tests/e2e/swap/e2e-swap-isolated.spec.ts",
+      "title": "repeated maker and taker cycles accumulate closed swap rows",
+      "category": "functional",
+      "run": "20260930-043553-239",
+      "reportPath": ".logs/e2e-parallel/20260930-043553-239/shard-0/artifacts/playwright/playwright-report.json",
+      "playwrightMs": 17896,
+      "status": "passed",
+      "skipped": 0
+    },
+    {
+      "target": "tests/e2e/swap/e2e-swap-isolated.spec.ts",
+      "title": "swap round-trip both directions clears holds and updates closed history on both peers",
+      "category": "functional",
+      "run": "20260930-043643-866",
+      "reportPath": ".logs/e2e-parallel/20260930-043643-866/shard-99/artifacts/playwright/playwright-report.json",
+      "playwrightMs": 20299,
+      "status": "passed",
+      "skipped": 0
+    },
+    {
+      "target": "tests/e2e/swap/e2e-swap.spec.ts",
+      "title": "swap shows visible depth on all canonical pairs and selected books",
+      "category": "functional",
+      "run": "20260930-035124-673",
+      "reportPath": ".logs/e2e-parallel/20260930-035124-673/shard-108/artifacts/playwright/playwright-report.json",
+      "playwrightMs": 17951,
+      "status": "passed",
+      "skipped": 0
+    },
+    {
+      "target": "tests/e2e/swap/e2e-swap.spec.ts",
+      "title": "swap orderbook shows terminal no-market state when relay stream never returns a snapshot",
+      "category": "resilience",
+      "run": "20260930-035124-673",
+      "reportPath": ".logs/e2e-parallel/20260930-035124-673/shard-109/artifacts/playwright/playwright-report.json",
+      "playwrightMs": 8977,
+      "status": "passed",
+      "skipped": 0
+    },
+    {
+      "target": "tests/e2e/swap/e2e-swap.spec.ts",
+      "title": "swap orderbook shows terminal error state when relay rejects the market subscription",
+      "category": "resilience",
+      "run": "20260930-035124-673",
+      "reportPath": ".logs/e2e-parallel/20260930-035124-673/shard-110/artifacts/playwright/playwright-report.json",
+      "playwrightMs": 8454,
+      "status": "passed",
+      "skipped": 0
+    },
+    {
+      "target": "tests/e2e/swap/e2e-swap.spec.ts",
+      "title": "swap orderbook pair dropdown updates same-chain form tokens",
+      "category": "functional",
+      "run": "20260930-035124-673",
+      "reportPath": ".logs/e2e-parallel/20260930-035124-673/shard-111/artifacts/playwright/playwright-report.json",
+      "playwrightMs": 8785,
+      "status": "passed",
+      "skipped": 0
+    },
+    {
+      "target": "tests/e2e/swap/e2e-swap.spec.ts",
+      "title": "swap place WETH/USDC offer survives reload",
+      "category": "resilience",
+      "run": "20260930-035124-673",
+      "reportPath": ".logs/e2e-parallel/20260930-035124-673/shard-112/artifacts/playwright/playwright-report.json",
+      "playwrightMs": 17439,
+      "status": "passed",
+      "skipped": 0
+    },
+    {
+      "target": "tests/e2e/swap/e2e-swap.spec.ts",
+      "title": "swap place and cancel from UI updates state machine",
+      "category": "functional",
+      "run": "20260930-035124-673",
+      "reportPath": ".logs/e2e-parallel/20260930-035124-673/shard-113/artifacts/playwright/playwright-report.json",
+      "playwrightMs": 17297,
+      "status": "passed",
+      "skipped": 0
+    },
+    {
+      "target": "tests/e2e/swap/e2e-swap.spec.ts",
+      "title": "swap orderbook lowest ask click fills immediately at displayed book price",
+      "category": "functional",
+      "run": "20260930-035124-673",
+      "reportPath": ".logs/e2e-parallel/20260930-035124-673/shard-114/artifacts/playwright/playwright-report.json",
+      "playwrightMs": 20336,
+      "status": "passed",
+      "skipped": 0
+    },
+    {
+      "target": "tests/e2e/swap/e2e-swap.spec.ts",
+      "title": "swap orderbook highest bid click fills immediately at displayed book price",
+      "category": "functional",
+      "run": "20260930-035124-673",
+      "reportPath": ".logs/e2e-parallel/20260930-035124-673/shard-115/artifacts/playwright/playwright-report.json",
+      "playwrightMs": 14195,
+      "status": "passed",
+      "skipped": 0
+    },
+    {
+      "target": "tests/e2e/swap/e2e-swap.spec.ts",
+      "title": "swap orderbook mid price click fills immediately at displayed book price",
+      "category": "functional",
+      "run": "20260930-035124-673",
+      "reportPath": ".logs/e2e-parallel/20260930-035124-673/shard-116/artifacts/playwright/playwright-report.json",
+      "playwrightMs": 14443,
+      "status": "passed",
+      "skipped": 0
+    },
+    {
+      "target": "tests/e2e/swap/e2e-swap.spec.ts",
+      "title": "swap flip keeps the displayed receive amount as the next source amount",
+      "category": "functional",
+      "run": "20260930-035124-673",
+      "reportPath": ".logs/e2e-parallel/20260930-035124-673/shard-117/artifacts/playwright/playwright-report.json",
+      "playwrightMs": 13574,
+      "status": "passed",
+      "skipped": 0
+    },
+    {
+      "target": "tests/e2e/swap/e2e-swap.spec.ts",
+      "title": "swap flip keeps the sell-side displayed receive amount as the next source amount",
+      "category": "functional",
+      "run": "20260930-035124-673",
+      "reportPath": ".logs/e2e-parallel/20260930-035124-673/shard-118/artifacts/playwright/playwright-report.json",
+      "playwrightMs": 13019,
+      "status": "passed",
+      "skipped": 0
+    },
+    {
+      "target": "tests/e2e/swap/e2e-swap.spec.ts",
+      "title": "swap can buy from asks and then sell back into bids on the same book",
+      "category": "functional",
+      "run": "20260930-035124-673",
+      "reportPath": ".logs/e2e-parallel/20260930-035124-673/shard-119/artifacts/playwright/playwright-report.json",
+      "playwrightMs": 16193,
+      "status": "passed",
+      "skipped": 0
+    },
+    {
+      "target": "tests/e2e/swap/e2e-swap.spec.ts",
+      "title": "swap manual price override after book click uses the edited limit price",
+      "category": "functional",
+      "run": "20260930-035124-673",
+      "reportPath": ".logs/e2e-parallel/20260930-035124-673/shard-120/artifacts/playwright/playwright-report.json",
+      "playwrightMs": 15043,
+      "status": "passed",
+      "skipped": 0
+    },
+    {
+      "target": "tests/e2e/swap/e2e-swap.spec.ts",
+      "title": "swap rejects price beyond 30% from current orderbook",
+      "category": "resilience",
+      "run": "20260930-035124-673",
+      "reportPath": ".logs/e2e-parallel/20260930-035124-673/shard-121/artifacts/playwright/playwright-report.json",
+      "playwrightMs": 13978,
+      "status": "passed",
+      "skipped": 0
+    },
+    {
+      "target": "tests/e2e/swap/e2e-swap.spec.ts",
+      "title": "swap rejects sell price beyond 30% from current orderbook",
+      "category": "resilience",
+      "run": "20260930-035124-673",
+      "reportPath": ".logs/e2e-parallel/20260930-035124-673/shard-122/artifacts/playwright/playwright-report.json",
+      "playwrightMs": 13809,
+      "status": "passed",
+      "skipped": 0
+    },
+    {
+      "target": "tests/e2e/swap/e2e-swap.spec.ts",
+      "title": "swap keeps a within-band wide limit as a resting order instead of filling immediately",
+      "category": "functional",
+      "run": "20260930-035124-673",
+      "reportPath": ".logs/e2e-parallel/20260930-035124-673/shard-123/artifacts/playwright/playwright-report.json",
+      "playwrightMs": 14690,
+      "status": "passed",
+      "skipped": 0
+    },
+    {
+      "target": "tests/e2e/swap/e2e-swap.spec.ts",
+      "title": "swap scope and account switching clears stale rows and stale book hint state",
+      "category": "resilience",
+      "run": "20260930-035124-673",
+      "reportPath": ".logs/e2e-parallel/20260930-035124-673/shard-124/artifacts/playwright/playwright-report.json",
+      "playwrightMs": 16177,
+      "status": "passed",
+      "skipped": 0
+    },
+    {
+      "target": "tests/sites/dockview.spec.ts",
+      "title": "Dock workspace, NetworkMachine H1-H3 merge, tools, graph gestures and user return path",
+      "category": "functional",
+      "run": "20260930-043843-447",
+      "reportPath": ".logs/e2e-parallel/20260930-043843-447/shard-0/artifacts/playwright/playwright-report.json",
+      "playwrightMs": 56594,
+      "status": "passed",
+      "skipped": 0
+    },
+    {
+      "target": "tests/sites/docs-site.spec.ts",
+      "title": "main site exposes llms context as static text",
+      "category": "functional",
+      "run": "20260930-043643-866",
+      "reportPath": ".logs/e2e-parallel/20260930-043643-866/shard-101/artifacts/playwright/playwright-report.json",
+      "playwrightMs": 3585,
+      "status": "passed",
+      "skipped": 0
+    },
+    {
+      "target": "tests/sites/docs-site.spec.ts",
+      "title": "main site exposes a working docs surface",
+      "category": "functional",
+      "run": "20260930-043643-866",
+      "reportPath": ".logs/e2e-parallel/20260930-043643-866/shard-102/artifacts/playwright/playwright-report.json",
+      "playwrightMs": 5998,
+      "status": "passed",
+      "skipped": 0
+    },
+    {
+      "target": "tests/sites/docs-site.spec.ts",
+      "title": "mobile docs navigation stays usable",
+      "category": "functional",
+      "run": "20260930-044148-447",
+      "reportPath": ".logs/e2e-parallel/20260930-044148-447/shard-0/artifacts/playwright/playwright-report.json",
+      "playwrightMs": 6016,
+      "status": "passed",
+      "skipped": 0
+    },
+    {
+      "target": "tests/sites/install-site.spec.ts",
+      "title": "shows honest availability and polished layouts on wide, laptop, and iPhone screens",
+      "category": "functional",
+      "run": "20260930-044003-034",
+      "reportPath": ".logs/e2e-parallel/20260930-044003-034/shard-104/artifacts/playwright/playwright-report.json",
+      "playwrightMs": 10463,
+      "status": "passed",
+      "skipped": 0
+    },
+    {
+      "target": "tests/sites/rcpan-site.spec.ts",
+      "title": "wide and laptop show all three deterministic dispute paths",
+      "category": "functional",
+      "run": "20260930-044906-369",
+      "reportPath": ".logs/e2e-parallel/20260930-044906-369/shard-0/artifacts/playwright/playwright-report.json",
+      "playwrightMs": 41381,
+      "status": "passed",
+      "skipped": 0
+    },
+    {
+      "target": "tests/sites/rcpan-site.spec.ts",
+      "title": "iPhone stacks both worlds and keeps all controls usable",
+      "category": "functional",
+      "run": "20260930-045011-727",
+      "reportPath": ".logs/e2e-parallel/20260930-045011-727/shard-106/artifacts/playwright/playwright-report.json",
+      "playwrightMs": 25414,
+      "status": "passed",
+      "skipped": 0
+    },
+    {
+      "target": "tests/sites/rcpan-site.spec.ts",
+      "title": "playground switches 1-4 tokens and all court placements",
+      "category": "functional",
+      "run": "20260930-045011-727",
+      "reportPath": ".logs/e2e-parallel/20260930-045011-727/shard-107/artifacts/playwright/playwright-report.json",
+      "playwrightMs": 6343,
+      "status": "passed",
+      "skipped": 0
+    },
+    {
+      "target": "tests/sites/xln-mascot.spec.ts",
+      "title": "drags, docks, persists, and exposes an honest assistant state",
+      "category": "functional",
+      "run": "20260930-045011-727",
+      "reportPath": ".logs/e2e-parallel/20260930-045011-727/shard-108/artifacts/playwright/playwright-report.json",
+      "playwrightMs": 6019,
+      "status": "passed",
+      "skipped": 0
+    },
+    {
+      "target": "tests/sites/xln-mascot.spec.ts",
+      "title": "supports keyboard docking, hidden persistence, and reduced motion",
+      "category": "functional",
+      "run": "20260930-045011-727",
+      "reportPath": ".logs/e2e-parallel/20260930-045011-727/shard-109/artifacts/playwright/playwright-report.json",
+      "playwrightMs": 5953,
+      "status": "passed",
+      "skipped": 0
+    },
+    {
+      "target": "tests/sites/xln-mascot.spec.ts",
+      "title": "fits the logo and open chat on iPhone in dark and light themes",
+      "category": "functional",
+      "run": "20260930-045011-727",
+      "reportPath": ".logs/e2e-parallel/20260930-045011-727/shard-110/artifacts/playwright/playwright-report.json",
+      "playwrightMs": 13504,
+      "status": "passed",
+      "skipped": 0
+    },
+    {
+      "target": "tests/sites/xln-mascot.spec.ts",
+      "title": "renders model Markdown without executable or malformed links",
+      "category": "resilience",
+      "run": "20260930-045011-727",
+      "reportPath": ".logs/e2e-parallel/20260930-045011-727/shard-111/artifacts/playwright/playwright-report.json",
+      "playwrightMs": 4674,
+      "status": "passed",
+      "skipped": 0
+    },
+    {
+      "target": "tests/sites/xln-mascot.spec.ts",
+      "title": "streams a real docs-grounded answer through the production proxy",
+      "category": "functional",
+      "run": "20260930-045401-691",
+      "reportPath": ".logs/e2e-parallel/20260930-045401-691/shard-0/artifacts/playwright/playwright-report.json",
+      "playwrightMs": 26666,
+      "status": "passed",
+      "skipped": 0
+    }
+  ],
+  "finalUiCleanupRegression": {
+    "run": "20260930-045654-284",
+    "target": "tests/e2e/runtime/e2e-scenario-player.spec.ts",
+    "title": "opens hub-collapse player, scrubs time, switches scenarios, and previews in wallet",
+    "status": "passed",
+    "skipped": 0,
+    "productionBuildInputHash": "0e1a5d733996223662ba0042a6a1b3f0401b57dcf2cf5d3957698e87a5455aae",
+    "changedScope": "ScenarioPlayer reads live J adapters from Runtime infrastructure; only /scenarios imports this component",
+    "playwrightMs": 7660
+  },
+  "commit": "1d39fe8e6caa5a5d6873001c57e687a3c8eb5626",
+  "finalChecks": {
+    "command": "bun run check",
+    "status": "passed",
+    "log": "/tmp/xln-check-complete.log",
+    "frozenCore": "unchanged",
+    "frontendErrors": 0,
+    "frontendWarnings": 0,
+    "relatedUnitTests": 6,
+    "relatedAssertions": 66,
+    "hotShardParity": "passed"
+  },
+  "catalogBuildInputHash": "59c028963ab0c314efd06bfb382476abec634b11b2fb1400ad90f24fa12d911f",
+  "finalBuildInputHash": "0e1a5d733996223662ba0042a6a1b3f0401b57dcf2cf5d3957698e87a5455aae"
+}

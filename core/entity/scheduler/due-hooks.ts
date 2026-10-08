@@ -7,7 +7,7 @@ import type {
 } from './types';
 import { getEntityCertifiedJurisdictionHeight } from '../../jurisdiction/machine/history/height';
 import { createStructuredLogger, shortHash, shortId } from '../../support/logger';
-import { HTLC_SECRET_ACK_TIMEOUT_MS, programPaymentTermination } from '../paybook/lifecycle';
+import { programPaymentTermination } from '../paybook/lifecycle';
 import type { DerivedDeadline, DerivedSecretAckTimeout } from './derived-deadlines';
 import { J_BATCH_CONTRACT_LIMITS } from '../../jurisdiction/machine/batch';
 import { createDueHookPlan, type DueHookPlan } from './due-hook-types';
@@ -29,7 +29,7 @@ const processSecretAckTimeout = (
   if (!bookIntentSlot) throw new Error('SCHEDULED_WAKE_BOOK_INTENT_SLOT_REQUIRED');
   const route = bookIntentSlot.getPaybookEntry(replica.state, hashlock);
   if (!route) return;
-  if (!isDisputeReadyPayment(route, replica.state.timestamp)) {
+  if (!isDisputeReadyPayment(route, replica.state.timestamp, hook.triggerAt)) {
     if (route.secretAckPending) {
       throw new Error(`HTLC_SECRET_ACK_ROUTE_INVALID:${hashlock}`);
     }
@@ -46,11 +46,13 @@ const processSecretAckTimeout = (
   // maxDisputeStarts. Under load many secret-ack deadlines fire in one tick;
   // re-arm the ones that cannot fit and let them fire after the batch flushes.
   const queuedStarts = replica.state.jBatchState?.batch.disputeStarts.length ?? 0;
-  if (queuedStarts + plan.disputePrepareCounterparties.size >= J_BATCH_CONTRACT_LIMITS.maxDisputeStarts
-    && !plan.disputePrepareCounterparties.has(counterpartyEntityId)) {
+  if (
+    queuedStarts + plan.disputePrepareCounterparties.size >= J_BATCH_CONTRACT_LIMITS.maxDisputeStarts &&
+    !plan.disputePrepareCounterparties.has(counterpartyEntityId)
+  ) {
     // The deadline is the entry's own field; pushing it re-arms the derived wake.
     const pending = bookIntentSlot.getPaybookEntryForWrite(replica.state, hashlock);
-    if (pending) pending.secretAckDeadlineAt = replica.state.timestamp + HTLC_SECRET_ACK_TIMEOUT_MS;
+    if (pending) pending.secretAckDeadlineAt = replica.state.timestamp + 1;
     crontabLog.warn('htlc_secret_ack_timeout.deferred', {
       counterparty: shortId(counterpartyEntityId),
       hashlock: shortHash(hashlock),

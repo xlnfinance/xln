@@ -492,14 +492,15 @@ async function main() {
     // Create fresh env — scenario self-boots from here
     const { createEmptyEnv } = await import('../runtime');
     const seed = String(process.env['XLN_RUNTIME_SEED'] || `${scenarioName}-cli-seed-42`);
-    const env = createEmptyEnv(seed);
+    let env = createEmptyEnv(seed);
     const trailDestination = trail;
     const trace = trailDestination || inputTrace
       ? (await import('../runtime/observability/runtime-trace')).startRuntimeTraceForTesting(env)
       : null;
 
     try {
-      await entry.run(env);
+      const completedReplica = await entry.run(env);
+      if (completedReplica) env = completedReplica;
       if (recording) {
         const { buildPersistedRuntimeRecording } = await import('../runtime');
         const { safeStringify } = await import('../protocol/serialization');

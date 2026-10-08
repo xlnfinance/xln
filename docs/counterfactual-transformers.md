@@ -2,6 +2,14 @@
 
 Status: SPEC — approved direction 2026-07-14 (wallet-authored Solidity clauses, no new DSL).
 
+Implementation boundary checked 2026-09-30: arbitrary signed transformer execution
+exists in `jurisdictions/contracts/Account.sol`; wallet authoring, bilateral clause
+approval and counterfactual deployment are proposed here, not a verified production
+flow. Solidity/TypeScript examples below are historical design sketches, not
+compilable artifacts or current ABI definitions. Implement against the canonical
+`Int768[]` transformer interface and Account-owned execution, then prove one real
+compile → sign → restart → CREATE2 deploy → dispute-finalize artifact.
+
 Two entities author an arbitrary Solidity clause inside their bilateral account via the
 wallet. The clause is signed into account state as an `AccountSubcontract` and enforced
 by the existing Depository dispute path. The contract is **counterfactual**: it deploys
@@ -13,8 +21,8 @@ cooperative path never touches the chain.
 ## 1. Trust model
 
 - A clause is just another `IDeltaTransformer`: `applyBatch(deltas, params, leftArgs, rightArgs) view returns (int[])`.
-- Depository already iterates arbitrary `ProofBody.transformers[]` addresses and clamps
-  every delta diff with signed `allowances` (Depository.sol `_applyTransformer` +
+- Account already iterates arbitrary `ProofBody.transformers[]` addresses and clamps
+  every delta diff with signed `allowances` (`Account.sol` `_applyTransformer` +
   allowance loop). **Worst-case loss = the allowances both parties signed.**
 - Execution is STATICCALL (the dispute helper is `view`): storage writes, CREATE,
   SELFDESTRUCT, value transfers are impossible at the EVM level. No new sandbox needed.
@@ -27,13 +35,14 @@ cooperative path never touches the chain.
 ### 2.1 What already exists (no changes)
 
 - `ProofBody.transformers[] = { transformerAddress, encodedBatch, allowances }` (Types.sol)
-- Depository applies each clause via staticcall, enforces per-delta allowance clamps,
+- Account applies each clause via staticcall, enforces per-delta allowance clamps,
   rejects moves on deltas without allowance.
 - `DeltaTransformer.hashToTimestamp` — public secret-reveal registry, reusable by clauses.
 
 ### 2.2 ClauseBase.sol (new, non-consensus — just a base contract)
 
 Rules for clauses:
+
 - **Stateless, constructor-less.** All instance data lives in `params`
   (= `TransformerClause.encodedBatch`). Same code ⇒ same initcode ⇒ same CREATE2
   address ⇒ popular templates deploy once per jurisdiction, ever.
@@ -175,35 +184,35 @@ deploy tx     = { to: deployer, data: salt ++ initcode }   // permissionless, an
 ```
 
 Gas economics:
+
 - propose / approve / resolve / remove: **0 gas** (bilateral frames, off-chain)
-- dispute where the clause code is already on-chain (any pair ever deployed the same
-  template on this jurisdiction): **0 extra gas**
-- dispute with never-deployed custom code: one deploy tx by the finalizer,
-  `32k + 200·codeSize + calldata` ≈ **~250k gas for a 2KB clause** — rare path only
+- dispute where the clause code is already on-chain: no new deployment cost;
+  transformer execution still consumes gas
+- dispute with never-deployed custom code: a deployment transaction plus normal
+  clause execution; measure both on the selected EVM revision and block gas limit
 - stateless+constructor-less rule ⇒ global dedup: same source ⇒ same address for
   every account pair on the jurisdiction
 
 Wallet pre-checks `eth_getCode(clauseAddress)` and shows “already deployed → dispute
 needs no deploy” badge.
 
-### 2.5 The single Depository decision (consensus change)
+### 2.5 Canonical strict clause execution
 
-Today `_applyTransformer` forwards all gas and a clause revert bricks the entire
-`disputeFinalize` — a malicious/buggy clause can freeze the account forever.
+`Account._applyTransformer` treats a signed clause as financial meaning, not
+optional evidence. Missing code, revert/out-of-gas and malformed output reject
+finalization and leave the dispute active. It forwards available gas minus the
+fixed settlement reserve. `TransformerFaultModes.t.sol` covers this strict behavior.
 
-**Recommended (policy K):** per-clause gas cap + skip-on-failure:
+Keep that rule. Skipping a failed option clause can erase a holder's signed
+exercise right even when every allowance is respected. Allowances bound value
+movement; they do not make skipped obligations equivalent or prove liveness.
+The earlier skip-on-failure recommendation was incorrect and is withdrawn.
 
-```solidity
-uint256 constant CLAUSE_GAS_CAP = 1_000_000;
-// staticcall{gas: CLAUSE_GAS_CAP}(...);
-// on revert/OOG: clause contributes zero diff (deltas unchanged), emit ClauseSkipped
-```
-
-Rationale: a skipped clause degrades to the raw offdeltas both parties signed anyway;
-max swing already bounded by allowances; removes the only liveness-DoS vector.
-Alternative (policy S): ship strict for v1, rely on wallet simulation + lints —
-acceptable only if redeploying Depository later is acceptable. Decide before Phase 1
-lands.
+Improve admission and deployability instead: both parties retain the exact
+deployable artifact, verify its address/code hash, and establish execution fits
+the selected J gas budget. A signed broken clause can still block settlement;
+simulation alone is not a proof for arbitrary programs. Any isolation or
+alternative settlement rule would require a separate explicit protocol choice.
 
 ## 3. Runtime layer
 
@@ -239,13 +248,13 @@ pendingSubcontracts?: Map<string, PendingSubcontract>; // proposal + who propose
 
 ### 3.2 AccountTx set (new handlers, existing byLeft pattern)
 
-| tx | proposer | effect |
-|---|---|---|
-| `subcontract_propose` | either | writes pending entry (source travels in payload for verification; only hashes go into pending state). No holds, no financial effect ⇒ safe to auto-ack. |
-| `subcontract_approve` | **non-proposer only** (byLeft role check, lending-style) | moves pending → `subcontracts`, adds holds mirroring allowances |
-| `subcontract_reject` | non-proposer | clears pending |
-| `subcontract_resolve_propose` | either | carries `{id, args, effects: DeltaEffect[]}` — proposer’s claimed outcome (usually from local simulation with real args, e.g. revealed secret + fill) |
-| `subcontract_resolve_approve` | non-proposer | applies `effects` to offdeltas, releases holds, deletes clause, writes history entry. `effects: []` ⇒ pure removal (cancel). |
+| tx                            | proposer                                                 | effect                                                                                                                                                  |
+| ----------------------------- | -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `subcontract_propose`         | either                                                   | writes pending entry (source travels in payload for verification; only hashes go into pending state). No holds, no financial effect ⇒ safe to auto-ack. |
+| `subcontract_approve`         | **non-proposer only** (byLeft role check, lending-style) | moves pending → `subcontracts`, adds holds mirroring allowances                                                                                         |
+| `subcontract_reject`          | non-proposer                                             | clears pending                                                                                                                                          |
+| `subcontract_resolve_propose` | either                                                   | carries `{id, args, effects: DeltaEffect[]}` — proposer’s claimed outcome (usually from local simulation with real args, e.g. revealed secret + fill)   |
+| `subcontract_resolve_approve` | non-proposer                                             | applies `effects` to offdeltas, releases holds, deletes clause, writes history entry. `effects: []` ⇒ pure removal (cancel).                            |
 
 Human-in-the-loop without breaking auto-ack: the **approve is a separate tx from the
 counterparty**, gated by its wallet UI/policy. Frames stay auto-ackable because
@@ -257,7 +266,7 @@ capacity by `leftAllowance`; `rightAllowance` ⇒ hold LEFT’s capacity. Uses t
 `addHold/releaseHold` model.
 
 Resolve verification policy (no EVM in consensus): the reducer applies whatever both
-sides signed. The *wallet* auto-approves a resolve iff local BrowserVM simulation of
+sides signed. The _wallet_ auto-approves a resolve iff local BrowserVM simulation of
 `transform(deltas, params, args)` equals the claimed `effects`; otherwise it asks the
 human. Consensus stays EVM-free; verification is a wallet policy.
 
@@ -333,12 +342,12 @@ Active clause card: params summary, expiry countdown, “outcome if disputed now
 
 ## 5. Phases
 
-**P0 — decide policy K vs S** (only consensus decision).
+**P0 — preserve strict execution and prove deployability/execution budget** on the canonical ABI.
 
 **P1 — contracts:** ClauseBase.sol, CallOption.sol, Escrow.sol; canonical deployer on
 anvil/BrowserVM genesis; full dispute e2e test on an unmodified Depository (install →
-dispute → CREATE2 deploy → finalize → allowance clamps hold). If K: +~15 lines in
-Depository + regenerate typechain + frontend ABI.
+dispute → CREATE2 deploy → finalize → allowance clamps hold). No skip-on-failure
+change is part of this plan.
 
 **P2 — runtime:** types (§3.1), 5 handlers (§3.2), dispute args threading (§3.3),
 jadapter ensureClauseDeployed, storage for pending, scenario test lock-style
@@ -356,7 +365,7 @@ template registry (curated JSON: source + codeHash + audited-by + deployed-on ma
   honest side cannot finalize. Non-negotiable.
 - **Sign conventions** (delta direction, allowance sides, hold sides) — test vectors
   against Depository before anything ships.
-- **Liveness DoS** — solved by policy K; under policy S mitigated only by wallet sims.
+- **Clause liveness** — strict execution preserves signed rights but a broken clause can block settlement. Retained deployable code, bounded admission and adversarial execution vectors are necessary; wallet simulation alone does not establish arbitrary-clause liveness.
 - **Comprehension gap** — the real risk is signing code you don’t understand;
   mitigations: allowances (hard bound), describe(), AI audit, envelope sweep.
 - **Oracle clauses** — read-only staticcalls allowed by construction; require
