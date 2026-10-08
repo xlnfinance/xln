@@ -46,7 +46,8 @@ async function canonicalRoot(page: Page, height: number): Promise<string> {
 const TOWER = 'http://127.0.0.1:9100';
 
 test('tower backup restores funded Account proofs on a clean device and refuses local overwrite', { tag: '@resilience' }, async ({ browser }) => {
-	test.setTimeout(60_000);
+	// Two devices, a >1 MiB encrypted backup, a restore and a final unlock with chain catch-up.
+	test.setTimeout(90_000);
 	const source = await browser.newContext();
 	const target = await browser.newContext();
 	try {

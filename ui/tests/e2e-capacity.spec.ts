@@ -208,7 +208,25 @@ test(
     await expect(page.getByTestId('move-to-account')).toHaveClass(/active/);
     await expect(page.getByTestId('move-from-reserve')).toHaveClass(/active/);
     await expect(page.getByTestId('move-target-hub')).toHaveValue(hubId);
-    await expect(page.getByTestId('move-amount')).toHaveValue('25.000025');
+    // The top-up is exactly what the Runtime's own route quote debits for this payment (amount plus
+    // any routing fee), never a fee the test assumes.
+    const quotedDebit = await page.evaluate(async counterpartyId => {
+      const debug = (window as DebugWindow).__xln;
+      const adapter = debug?.adapter();
+      const entityId = debug?.store.getState().activeEntityId;
+      if (!adapter || !entityId) throw new Error('Wallet diagnostics unavailable');
+      const quote = await adapter.read<{ routes: Array<{ path: string[]; senderAmount: string }> }>('payment-routes', {
+        sourceEntityId: entityId,
+        targetEntityId: counterpartyId,
+        tokenId: 1,
+        amount: '25000000',
+        fundingAccountId: counterpartyId,
+      });
+      const direct = quote.routes.find(route => route.path.length === 2);
+      return direct ? direct.senderAmount : '25000000';
+    }, hubId);
+    const topUp = BigInt(quotedDebit);
+    await expect(page.getByTestId('move-amount')).toHaveValue(formatUnits(topUp, 6).replace(/\.0$/, ''));
     await expect(page.getByTestId('move-now')).toBeEnabled({ timeout: 10_000 });
     await page.getByTestId('move-draft').click();
     await expect(page.getByTestId('pending-batch')).toHaveAttribute('data-mode', 'draft');
@@ -242,9 +260,9 @@ test(
         { timeout: 15_000 },
       )
       .toEqual({
-        reserve: (BigInt(beforeFunding.reserve) - 25_000_025n).toString(),
-        collateral: (BigInt(beforeFunding.collateral) + 25_000_025n).toString(),
-        ownValue: (BigInt(beforeFunding.ownValue) + 25_000_025n).toString(),
+        reserve: (BigInt(beforeFunding.reserve) - topUp).toString(),
+        collateral: (BigInt(beforeFunding.collateral) + topUp).toString(),
+        ownValue: (BigInt(beforeFunding.ownValue) + topUp).toString(),
         pending: false,
         mempool: 0,
         locks: 0,

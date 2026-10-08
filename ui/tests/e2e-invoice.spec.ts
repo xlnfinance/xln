@@ -15,7 +15,7 @@
 import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import type { RuntimeAdapterViewFrame, XLNModule } from '../../core/api/public/runtime-module';
 import type { RuntimeAdapter } from '../../core/api/runtime-adapter/types';
-import { enterStack, LOCAL_PASSWORD, readWalletCheckpoint, type StackWallet } from './stack';
+import { enterStack, LOCAL_PASSWORD, readWalletCheckpoint, type StackWallet, BOOT_TIMEOUT } from './stack';
 import { readCommittedPayment } from './payment-evidence';
 
 const USDC = 1;
@@ -120,6 +120,8 @@ function onLocalWallet(link: string, page: Page, keepPath: boolean): string {
 async function expectPrefilledPay(alice: Party, bob: Party): Promise<void> {
   const page = alice.page;
   await expect(page).toHaveURL(/\/pay$/, { timeout: CONSENSUS_TIMEOUT });
+  // The deep link moves to /pay before the unlock finishes; unlocking includes chain catch-up.
+  await expect(page.getByTestId('pay-to')).toBeVisible({ timeout: BOOT_TIMEOUT });
   await expect(page.getByTestId('pay-to')).toHaveValue(bob.wallet.entityId);
   await expect(page.getByTestId('pay-amount')).toHaveValue(INVOICE_AMOUNT);
   await expect(page.getByTestId('pay-note')).toHaveValue(MEMO);

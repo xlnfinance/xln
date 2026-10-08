@@ -24,12 +24,12 @@ export function Manage() {
 	const owed = debts.owed.reduce((sum, group) => sum + group.outstanding, 0n);
 
 	const doors: Array<{ to: string; icon: IconName; title: string; hint: string; testId: string }> = [
-    { to: '/manage/custom-contracts', icon: 'shield', title: 'Custom Contracts', hint: 'Experimental Solidity rules · experts only', testId: 'manage-custom-contracts' },
 		{ to: '/sovereignty', icon: 'shield', title: 'Security and recovery', hint: 'Keys, proofs, what is at risk', testId: 'manage-sovereignty' },
 		{ to: '/move', icon: 'arrow', title: 'Move', hint: 'Wallet ↔ reserve ↔ accounts', testId: 'manage-move' },
 		{ to: '/assets', icon: 'wallet', title: 'Assets', hint: 'On-chain wallet, faucets, debts', testId: 'manage-assets' },
 		{ to: '/lend', icon: 'bank', title: 'Lending', hint: isAccountTxKindAvailable('lending_fund') && isAccountTxKindAvailable('lending_borrow_request') ? 'Lend to a hub pool or borrow' : 'Unavailable in this release · view existing positions', testId: 'manage-lend' },
 		{ to: '/ownership', icon: 'accounts', title: 'Ownership', hint: 'Board, shares, takeovers', testId: 'manage-ownership' },
+		{ to: '/manage/custom-contracts', icon: 'bolt', title: 'Custom contracts', hint: 'Experimental Solidity rules · experts only', testId: 'manage-custom-contracts' },
 	];
 
 	return (
@@ -59,10 +59,10 @@ export function Manage() {
 					<div className="card" data-testid="manage-position">
 						<h3 className="caps">Where your money stands</h3>
 						<div className="kv"><span className="k">Total</span><span className="v num">{formatUsd(wallet.usd.net)}</span></div>
-						<div className="kv"><span className="k">Yours whatever a hub does</span><span className="v num" style={{ color: 'var(--coll)' }}>{formatUsd(wallet.usd.onchain + wallet.usd.reserve + wallet.usd.secured)}</span></div>
-						<div className="kv"><span className="k">Promised by hubs</span><span className="v num" style={{ color: 'var(--risk)' }}>{formatUsd(wallet.usd.risk)}</span></div>
+						<div className="kv"><span className="k">Enforceable on-chain</span><span className="v num" style={{ color: 'var(--coll)' }}>{formatUsd(wallet.usd.onchain + wallet.usd.reserve + wallet.usd.secured)}</span></div>
+						<div className="kv"><span className="k">At risk · no collateral</span><span className="v num" style={{ color: 'var(--risk)' }}>{formatUsd(wallet.usd.risk)}</span></div>
 						<div className="kv"><span className="k">You owe</span><span className="v num">{formatUsd(wallet.usd.owed)}</span></div>
-						<p className="note">Green is yours whatever a hub does. Violet is a hub&apos;s promise; move it into collateral or dispute if the hub misbehaves.</p>
+						<p className="note">Enforceable is yours whatever a hub does: on-chain, in your reserve or locked as collateral. At risk is a hub&apos;s promise with nothing locked behind it; cover it with collateral or dispute if the hub misbehaves.</p>
 					</div>
 					<div className="card" data-testid="attention">
 						<h3 className="caps">Needs attention</h3>

@@ -36,7 +36,7 @@ export function SettingsScreen() {
     <div className="screen fade-in">
       <PageHead title="Settings" eyebrow="Wallet" sub="Identity, appearance, the guided tour, runtime and vault." />
       <div className="two-col">
-        <div>
+        <div className="flat-col">
           <Profile />
           <Appearance />
           <BalanceSettings />

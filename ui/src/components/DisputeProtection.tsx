@@ -52,7 +52,7 @@ export function DisputeProtection({ towers, seed }: { towers: string[]; seed: st
         onClick={() => void appoint()}
         data-testid="protection-appoint"
       >
-        {busy ? 'Appointing…' : receipts.length ? 'Update account protection' : 'Appoint dispute protection'}
+        {busy ? 'Appointing…' : receipts.length ? 'Update account protection' : towers.length === 0 ? 'Appoint dispute protection · add a tower first' : 'Appoint dispute protection'}
       </button>
       {error || result?.errors.length ? (
         <p className="note st-dispute" role="alert">

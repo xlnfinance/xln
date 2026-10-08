@@ -39,7 +39,7 @@ export function Home() {
       <TestMoney key={wallet.entityId} wallet={wallet} />
       <header className="page-head">
         <div>
-          <span className="crumb">Wallet{wallet.jurisdiction ? ` · ${wallet.jurisdiction}` : ''}</span>
+          <span className="crumb static">Wallet{wallet.jurisdiction ? ` · ${wallet.jurisdiction}` : ''}</span>
           <EntitySwitcher name={wallet.name} status={null} />
         </div>
         <div className="page-actions">

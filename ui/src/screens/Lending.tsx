@@ -128,6 +128,14 @@ export function Lending() {
 						<p className="note">Lending runs through a hub. Open an account with one first.</p>
 					) : (
 						<>
+							<div className="segc" role="tablist">
+								<button type="button" role="tab" aria-selected={side === 'lend'} className={side === 'lend' ? 'active' : ''} onClick={() => { setSide('lend'); setRateText('100'); }} data-testid="lend-side-lend">
+									Lend
+								</button>
+								<button type="button" role="tab" aria-selected={side === 'borrow'} className={side === 'borrow' ? 'active' : ''} onClick={() => { setSide('borrow'); setRateText('250'); }} data-testid="lend-side-borrow">
+									Borrow
+								</button>
+							</div>
 							<div className="field">
 								<span className="field-label">Hub</span>
 								<div className="mode-grid">
@@ -141,7 +149,7 @@ export function Lending() {
 							</div>
 							<div className="field">
 								<span className="field-label">Token</span>
-								<div className="mode-grid">
+								<div className="mode-grid compact">
 									{(hub?.tokens ?? []).map(token => (
 										<button key={token.tokenId} type="button" className={`mode-card${tokenId === token.tokenId ? ' active' : ''}`} onClick={() => setTokenId(token.tokenId)}>
 											<span className="t">{getTokenMeta(token.tokenId).symbol}</span>
@@ -149,14 +157,6 @@ export function Lending() {
 										</button>
 									))}
 								</div>
-							</div>
-							<div className="segc" style={{ marginBottom: 14 }} role="tablist">
-								<button type="button" role="tab" aria-selected={side === 'lend'} className={side === 'lend' ? 'active' : ''} onClick={() => { setSide('lend'); setRateText('100'); }} data-testid="lend-side-lend">
-									Lend
-								</button>
-								<button type="button" role="tab" aria-selected={side === 'borrow'} className={side === 'borrow' ? 'active' : ''} onClick={() => { setSide('borrow'); setRateText('250'); }} data-testid="lend-side-borrow">
-									Borrow
-								</button>
 							</div>
 							<div className="field">
 								<span className="field-label">{side === 'lend' ? 'Amount to lend' : 'Amount to borrow'}</span>
@@ -167,7 +167,7 @@ export function Lending() {
 							</div>
 							<div className="field">
 								<span className="field-label">Term</span>
-								<div className="mode-grid">
+								<div className="mode-grid compact">
 									{LENDING_TERMS.map(entry => (
 										<button key={entry.id} type="button" className={`mode-card${termId === entry.id ? ' active' : ''}`} onClick={() => setTermId(entry.id)}>
 											<span className="t">{entry.label}</span>

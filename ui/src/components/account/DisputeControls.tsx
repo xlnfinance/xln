@@ -93,7 +93,7 @@ export function DisputeControls({ account, wallet, onClose }: { account: Account
 											<span className="v num st-settled">{formatUsd(safety.securedUsd)}</span>
 										</div>
 										<div className="kv">
-											<span className="k">Uncovered, lost if {account.label} never pays</span>
+											<span className="k">At risk · lost if {account.label} never pays</span>
 											<span className="v num" style={{ color: safety.riskUsd > 0 ? 'var(--risk)' : undefined }}>
 												{formatUsd(safety.riskUsd)}
 											</span>

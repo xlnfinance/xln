@@ -80,7 +80,7 @@ export function Sovereignty() {
 								</div>
 							</div>
 							<div>
-								<div className="hero-label">At risk on promises</div>
+								<div className="hero-label">At risk · no collateral</div>
 								<div className="display num" style={{ fontSize: 40, lineHeight: 1.1, color: totals.risk > 0 ? 'var(--risk)' : undefined }}>
 									{formatUsd(totals.risk)}
 								</div>
@@ -108,7 +108,7 @@ export function Sovereignty() {
 								<i className="sw c-coll" /> Collateral behind what you are owed <b className="num">{formatUsd(totals.secured)}</b>
 							</span>
 							<span data-testid="sovereignty-risk">
-								<i className="sw c-risk" /> Promised <b className="num">{formatUsd(totals.risk)}</b>
+								<i className="sw c-risk" /> At risk <b className="num">{formatUsd(totals.risk)}</b>
 							</span>
 						</div>
 						<p className="note" style={{ marginTop: 10 }}>

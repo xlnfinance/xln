@@ -348,10 +348,6 @@ export function Pay() {
 								</span>
 							</div>
 							<div className="kv">
-								<span className="k">Arrives</span>
-								<span className="v st-settled">Instantly</span>
-							</div>
-							<div className="kv">
 								<span className="k">Delivery</span>
 								<span className="v">
 									{DELIVERY_OPTIONS.find(option => option.value === deliveryMode)?.label}
@@ -457,7 +453,8 @@ export function Pay() {
 							<h3 className="caps">Route</h3>
 							<div className="tl">
 								{chosen.path.map((hop, index) => {
-									const fee = chosen.hops[index - 1]?.fee ?? 0n;
+									// pathfinding puts the forwarding fee on the edge leaving the node that charges it.
+									const fee = chosen.hops[index]?.fee ?? 0n;
 									return (
 										<div key={`${hop}-${index}`} className="ev done">
 											<div className="t">

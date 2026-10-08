@@ -96,7 +96,9 @@ export function AccountDetail() {
 						<span className="avatar">{label.slice(0, 1).toUpperCase()}</span>
 						{label}
 						{account?.isHub ? <span className="chip hub">hub</span> : null}
-						<span className={`status-pill ${statusTone}`}>{statusLabel}</span>
+						<span className={`status-pill ${statusTone}`} data-testid="account-status">
+							{statusLabel}
+						</span>
 					</>
 				}
 				sub={
@@ -193,26 +195,14 @@ export function AccountDetail() {
 			</div>
 			<div className="aside">
 				<div className="card">
-					<h3 className="caps">This account</h3>
-					<div className="kv" style={{ marginTop: 8 }}>
-						<span className="k">Counterparty</span>
-						<span className="v">{account?.isHub ? 'Hub' : 'Direct'}</span>
-					</div>
-					<div className="kv">
-						<span className="k">Network</span>
-						<span className="v">{wallet.jurisdiction || '—'}</span>
-					</div>
-					<div className="kv">
-						<span className="k">Frames signed</span>
-						<span className="v num">{(account?.frameHeight ?? 0).toLocaleString('en-US')}</span>
-					</div>
+					<h3 className="caps">What is at stake</h3>
 					{account ? (
 						(() => {
 							const safety = accountSafety(account);
 							return (
 								<>
 									<div className="kv" data-testid="account-exposure">
-										<span className="k">They owe you, uncovered</span>
+										<span className="k">At risk · they owe you</span>
 										<span className="v num" style={{ color: safety.riskUsd > 0 ? 'var(--risk)' : undefined }}>
 											{formatUsd(safety.riskUsd)}
 											{safety.riskUsd > 0 && account.isHub && account.dispute === 'none' ? (
@@ -242,12 +232,6 @@ export function AccountDetail() {
 							);
 						})()
 					) : null}
-					<div className="kv">
-						<span className="k">Status</span>
-						<span className={`v ${statusTone}`} data-testid="account-status">
-							{statusLabel}
-						</span>
-					</div>
 					<p className="note" style={{ marginTop: 12 }}>
 						Every frame here is signed by both of you. The credit line is your cap on what they can owe you; collateral is what is enforceable on-chain.
 					</p>

@@ -47,8 +47,9 @@ function EntityActivity({ entityId }: { entityId: string | null }) {
 	const filters = useMemo(() => ({
 		...(cursors.at(-1) !== null ? { beforeHeight: cursors.at(-1)! } : {}),
 		...(search.trim() ? { q: search.trim() } : {}),
-		...(from ? { fromTimestamp: new Date(from).getTime() } : {}),
-		...(to ? { toTimestamp: new Date(to).getTime() } : {}),
+		// Day filters: from the start of the first day to the end of the last, in local time.
+		...(from ? { fromTimestamp: new Date(`${from}T00:00:00`).getTime() } : {}),
+		...(to ? { toTimestamp: new Date(`${to}T23:59:59.999`).getTime() } : {}),
 		scanLimit: 1000,
 	}), [cursors, search, from, to]);
 	const types = FILTERS.find(entry => entry.id === filter)?.types ?? USER_ACTIVITY_TYPES;
@@ -97,7 +98,7 @@ function EntityActivity({ entityId }: { entityId: string | null }) {
 				actions={
 					filter !== 'swaps' && movements.length > 0 ? (
 						<button type="button" className="btn sm" onClick={() => exportCsv(movements)} data-testid="activity-export" title="Every movement shown here, with frame height and hash, for your books">
-							<Icon name="arrow" size={14} />
+							<Icon name="download" size={14} />
 							Export CSV
 						</button>
 					) : null
@@ -136,11 +137,11 @@ function EntityActivity({ entityId }: { entityId: string | null }) {
 							/>
 							<label className="toolbar-date">
 								<span>From</span>
-								<input className="input boxed" type="datetime-local" value={from} onChange={event => { setFrom(event.target.value); setCursors([null]); }} />
+								<input className="input boxed" type="date" value={from} onChange={event => { setFrom(event.target.value); setCursors([null]); }} />
 							</label>
 							<label className="toolbar-date">
 								<span>Until</span>
-								<input className="input boxed" type="datetime-local" value={to} onChange={event => { setTo(event.target.value); setCursors([null]); }} />
+								<input className="input boxed" type="date" value={to} onChange={event => { setTo(event.target.value); setCursors([null]); }} />
 							</label>
 						</div>
 					)}

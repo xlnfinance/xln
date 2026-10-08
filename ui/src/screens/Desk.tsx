@@ -90,13 +90,13 @@ export function Desk() {
 					</div>
 				</div>
 				<div className="card">
-					<div className="k">Yours on-chain</div>
+					<div className="k">Enforceable</div>
 					<div className="v num" style={{ color: 'var(--reserve)' }}>
 						{formatUsd(wallet.usd.onchain + wallet.usd.reserve + wallet.usd.secured)}
 					</div>
 				</div>
 				<div className="card">
-					<div className="k">Promised</div>
+					<div className="k">At risk</div>
 					<div className="v num" style={{ color: 'var(--risk)' }}>
 						{formatUsd(wallet.usd.risk)}
 					</div>
@@ -119,7 +119,7 @@ export function Desk() {
 									<th>Account · lane</th>
 									<th>Position</th>
 									<th>Secured</th>
-									<th>Promised</th>
+									<th>At risk</th>
 									<th>You owe</th>
 									<th>Send · receive</th>
 									<th style={{ whiteSpace: 'nowrap' }}>Credit out · in</th>

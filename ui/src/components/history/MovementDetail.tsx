@@ -15,7 +15,7 @@ export function MovementDetail({ movement, names }: { movement: Movement; names:
 				<div className="a num" style={{ fontSize: 30, marginTop: 10 }}>
 					{amount ?? movement.title}
 				</div>
-				{amount ? <div className="to">{[movement.title, party].filter(Boolean).join(' ')}</div> : null}
+				{amount ? <div className="to">{[movement.title, party ? party[0]!.toLowerCase() + party.slice(1) : ''].filter(Boolean).join(' ')}</div> : null}
 			</div>
 			<div>
 				{movement.counterpartyId ? (

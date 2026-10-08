@@ -18,7 +18,7 @@ export function Appearance() {
       <div className="sect">
         <h3 className="caps">Appearance</h3>
       </div>
-      <div className="setting first">
+      <div className="setting first desktop-only">
         <div>
           <div className="t">Layout on wide screens</div>
           <div className="s">

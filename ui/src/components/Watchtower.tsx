@@ -262,7 +262,7 @@ export function Watchtower({ accountCount }: { accountCount: number }) {
         data-testid="watchtower-backup-now"
       >
         <Icon name="shield" size={15} />
-        {busy ? 'Working…' : 'Back up now'}
+        {busy ? 'Working…' : config.towers.length === 0 ? 'Back up now · add a tower first' : 'Back up now'}
       </button>
     </div>
   );

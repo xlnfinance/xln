@@ -11,7 +11,7 @@ const assets = async (page: Page) => {
 const entityIdentity = async (page: Page): Promise<string> => {
   await home(page);
   await page.getByTestId('home-receive').click();
-  const identity = page.locator('.card').filter({ has: page.getByRole('heading', { name: 'Your entity id', exact: true }) }).locator('button.hash');
+  const identity = page.locator('.card').filter({ has: page.getByRole('heading', { name: 'Entity ID', exact: true }) }).locator('button.hash');
   await expect(identity).toBeVisible(WAIT);
   const title = await identity.getAttribute('title');
   if (!title || !/^0x[0-9a-f]{64} · tap to copy$/i.test(title)) throw new Error('PUBLIC_WALLET_ENTITY_ID_MISSING');

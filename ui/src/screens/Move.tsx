@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { HOME, PageHead } from '../components/PageHead';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { Bar } from '../components/Bars';
+import { Bar, type BarSegment } from '../components/Bars';
 import { Icon } from '../components/Icons';
 import { PendingBatch } from '../components/PendingBatch';
 import { TokenPicker } from '../components/TokenPicker';
@@ -212,6 +212,19 @@ export function Move() {
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [funded, funding, from, to]);
 
+	// An account holds two different things: collateral (green) and what the hub owes on credit (violet).
+	const placeSegments = (place: MoveEndpoint, value: bigint): BarSegment[] => {
+		if (place !== 'account') return [{ usd: usdOf(tokenId, value), kind: PLACE_LABEL[place].kind }];
+		const lane = wallet.accounts
+			.find(account => account.counterpartyId === (sourceAccountId || firstAccount))
+			?.tokens.find(token => token.tokenId === tokenId);
+		if (!lane) return [];
+		return [
+			{ usd: usdOf(tokenId, lane.derived.outCollateral), kind: 'coll' },
+			{ usd: usdOf(tokenId, lane.derived.outPeerCredit), kind: 'risk' },
+		];
+	};
+
 	const Place = ({ place, side }: { place: MoveEndpoint; side: 'from' | 'to' }) => {
 		const active = side === 'from' ? from === place : to === place;
 		const value = placeAmount(place);
@@ -222,7 +235,7 @@ export function Move() {
 				<span className="v num">
 					{formatMoney(value, meta.decimals)} {meta.symbol}
 				</span>
-				<Bar segments={[{ usd: usdOf(tokenId, value), kind: PLACE_LABEL[place].kind }]} height={4} />
+				<Bar segments={placeSegments(place, value)} height={4} />
 			</button>
 		);
 	};

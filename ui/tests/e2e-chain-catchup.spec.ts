@@ -23,21 +23,29 @@ test('fresh Entity imports during RPC catch-up retain a contiguous chain prefix'
 	const started = performance.now();
 	await enterStack(page);
 	expect(performance.now() - started, 'fresh wallet opens within its chain-scan budget').toBeLessThan(60_000);
-	const histories = await page.evaluate(() => {
-		const debug = (window as Window & { __xln?: { env(): RuntimeReplica | null } }).__xln;
-		const env = debug?.env();
-		if (!env) throw new Error('CATCHUP_RUNTIME_MISSING');
-		return [...env.state.eReplicas.values()].map(replica => {
-			const history = replica.jHistory;
-			if (!history) throw new Error('CATCHUP_HISTORY_MISSING');
-			let contiguous = Number(replica.state.lastFinalizedJHeight);
-			while (history.blockHashes.has(contiguous + 1)) contiguous += 1;
-			return { chainId: replica.state.config.jurisdiction?.chainId, contiguous, scanned: history.scannedThroughHeight };
+	// Only the primary chain (31337) is under test; the second chain's replica builds its history
+	// a few seconds later and must not fail this read before its own scan starts.
+	const readPrimary = () =>
+		page.evaluate(() => {
+			const debug = (window as Window & { __xln?: { env(): RuntimeReplica | null } }).__xln;
+			const env = debug?.env();
+			if (!env) throw new Error('CATCHUP_RUNTIME_MISSING');
+			return [...env.state.eReplicas.values()]
+				.filter(replica => replica.state.config.jurisdiction?.chainId === 31_337)
+				.map(replica => {
+					const history = replica.jHistory;
+					if (!history) return { contiguous: -1, scanned: -1 };
+					let contiguous = Number(replica.state.lastFinalizedJHeight);
+					while (history.blockHashes.has(contiguous + 1)) contiguous += 1;
+					return { contiguous, scanned: history.scannedThroughHeight };
+				});
 		});
-	});
-	const primary = histories.filter(history => history.chainId === 31_337);
-	expect(primary.length).toBeGreaterThan(0);
-	for (const history of primary) {
+	await expect
+		.poll(async () => (await readPrimary()).every(history => history.contiguous >= target), { timeout: 15_000 })
+		.toBe(true);
+	const histories = await readPrimary();
+	expect(histories.length).toBeGreaterThan(0);
+	for (const history of histories) {
 		expect(history.contiguous).toBeGreaterThanOrEqual(target);
 		expect(history.contiguous).toBe(history.scanned);
 	}

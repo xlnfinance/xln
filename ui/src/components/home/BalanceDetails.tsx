@@ -13,7 +13,7 @@ export function BalanceDetails({ wallet }: { wallet: WalletView }) {
       kind: 'coll' as const,
       amount: wallet.usd.secured,
       id: 'home-secured',
-      label: 'Backed by collateral',
+      label: 'Collateral-backed',
       description: 'Owed to you, covered by funds locked on-chain.',
     },
     {
@@ -21,7 +21,7 @@ export function BalanceDetails({ wallet }: { wallet: WalletView }) {
       kind: 'risk' as const,
       amount: wallet.usd.risk,
       id: 'home-risk',
-      label: 'Without collateral',
+      label: 'At risk',
       description: 'Owed to you; repayment depends on the other party.',
     },
     {

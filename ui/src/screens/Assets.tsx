@@ -248,7 +248,7 @@ export function Assets() {
             </div>
             <div className="field">
               <span className="field-label">Token</span>
-              <div className="mode-grid">
+              <div className="mode-grid compact">
                 {knownTokenIds().map(id => (
                   <button
                     key={id}

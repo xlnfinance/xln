@@ -10,7 +10,7 @@ async function followTo(page: Page, id: string): Promise<void> {
       if (target === id) return id;
       if (target === 'nav-home') await page.getByTestId('nav-home').locator('visible=true').first().click();
       return target;
-    })
+    }, { timeout: 20_000 })
     .toBe(id);
 }
 

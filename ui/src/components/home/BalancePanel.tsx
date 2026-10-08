@@ -73,7 +73,7 @@ export function BalancePanel({
           </p>
         )}
         {wallet.frame && places.accounts && (
-          <p className="note" data-testid="home-send-capacity">
+          <p className="note mobile-only" data-testid="home-send-capacity">
             {!commandReady
               ? 'Wallet connection stopped. Reopen the wallet to continue.'
               : `Payment capacity: ${money(token?.sendCapacity ?? 0n)} · includes available credit`}
@@ -111,7 +111,8 @@ export function BalancePanel({
           </button>
           <button type="button" className="btn" onClick={onAddMoney} data-testid="home-add-money">
             <Icon name="plus" size={16} />
-            Add money
+            <span className="desktop-only">Add money</span>
+            <span className="mobile-only">Add</span>
           </button>
           <button type="button" className="btn" onClick={() => navigate('/move')} data-testid="home-move">
             <Icon name="arrow" size={16} />
