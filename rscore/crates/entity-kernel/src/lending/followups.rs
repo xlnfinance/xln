@@ -69,7 +69,7 @@ pub(super) fn require_empty_outputs(
     }
 }
 
-pub(super) fn projected_credit(
+pub(crate) fn projected_credit(
     view: &LocalAccountFinancialView,
     account_id: &str,
     token_id: TokenId,

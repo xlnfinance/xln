@@ -21,7 +21,7 @@ remappings = [
   "forge-std/=lib/forge-std/src/",
 ]
 ignored_warnings_from = ["lib"]
-fs_permissions = [{ access = "read", path = "./forge-out" }]
+fs_permissions = [{ access = "read", path = "./forge-out" }, { access = "read", path = "./test/fixtures/custom-contracts.json" }]
 
 [profile.default.invariant]
 runs = 128

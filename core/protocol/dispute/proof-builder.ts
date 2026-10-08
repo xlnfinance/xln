@@ -226,8 +226,9 @@ const buildProofPulls = (account: AccountReplica, deltaIndex: ReadonlyMap<number
     targetRole: pull.crossJurisdiction?.leg === 'target',
   }));
 
-const buildSubcontractTransformers = (account: AccountReplica): RuntimeTransformerClause[] =>
+const buildSubcontractTransformers = (account: AccountReplica, deltaIndex: ReadonlyMap<number, number>): RuntimeTransformerClause[] =>
   Array.from(account.state.subcontracts ?? [])
+    .filter(([, clause]) => clause.status === 'active')
     .sort(([left], [right]) => compareStableText(left, right))
     .map(([subcontractId, subcontract]) => {
       const transformerAddress = requireContractAddress(`subcontract_${subcontractId}`, subcontract.transformerAddress);
@@ -235,7 +236,9 @@ const buildSubcontractTransformers = (account: AccountReplica): RuntimeTransform
         throw new Error(`SUBCONTRACT_ENCODED_BATCH_INVALID:${subcontractId}`);
       }
       const allowances = subcontract.allowances
-        .map(allowance => ({ ...allowance }))
+        .map(allowance => ({ deltaIndex: requireProofDeltaIndex(deltaIndex, allowance.tokenId,
+          `CUSTOM_CONTRACT_TOKEN_MISSING:${subcontractId}:${allowance.tokenId}`),
+          leftAllowance: allowance.leftAllowance, rightAllowance: allowance.rightAllowance }))
         .sort((left, right) => left.deltaIndex - right.deltaIndex);
       return {
         transformerAddress,
@@ -292,7 +295,7 @@ const buildProofTransformers = (
   deltaTransformerAddress: string,
 ): RuntimeTransformerClause[] => {
   const batches = buildCanonicalProofBatches(account, deltaIndex);
-  if (batches.length === 0) return buildSubcontractTransformers(account);
+  if (batches.length === 0) return buildSubcontractTransformers(account, deltaIndex);
   const transformerAddress = requireContractAddress('delta_transformer', deltaTransformerAddress);
   // DeltaTransformer executes clauses sequentially. The canonical order
   // payment→swap→pull preserves every original obligation and its order. Each
@@ -305,7 +308,7 @@ const buildProofTransformers = (
     batch,
     allowances: buildTransformerAllowances(batch),
   }));
-  return [...batchTransformers, ...buildSubcontractTransformers(account)];
+  return [...batchTransformers, ...buildSubcontractTransformers(account, deltaIndex)];
 };
 
 /**

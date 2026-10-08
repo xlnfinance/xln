@@ -29,6 +29,7 @@ export const ENTITY_TX_PAYMENT_SCHEMAS = {
     optional: {
       description: 'string', minCooldownMs: 'integer', crossJurisdictionRouteId: 'string',
       starterInitialArguments: 'string',
+      customArguments: 'record',
     },
   },
   disputeStart: {
@@ -39,11 +40,12 @@ export const ENTITY_TX_PAYMENT_SCHEMAS = {
     optional: {
       crossJurisdictionRouteId: 'string', starterInitialArguments: 'string',
       starterCounterArguments: 'string', description: 'string',
+      customArguments: 'record',
     },
   },
   disputeFinalize: {
     required: { counterpartyEntityId: 'string' },
-    optional: { useOnchainRegistry: 'boolean', description: 'string' },
+    optional: { useOnchainRegistry: 'boolean', description: 'string', customArguments: 'record' },
   },
   processHtlcTimeouts: { optional: { expiredLocks: 'array' } },
 } as const satisfies Readonly<Record<string, EntityTxDataSchema>>;

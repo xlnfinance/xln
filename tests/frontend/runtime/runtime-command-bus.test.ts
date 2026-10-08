@@ -660,15 +660,16 @@ test('public mutation exports no longer accept caller-owned RuntimeReplica', () 
   expect(submitEntitySource).not.toContain('routeRuntimeInput(');
 });
 
-// Upstream ingress receipts were removed from the whole product in f85f450e5
-// (`recordRuntimeIngressReceipt`, `result.receipt`, `result.statusUrl`). What
-// survives is the server-side credit request itself, gated on the remote
-// controller handle.
-test('server-side credit requests post through the remote runtime controller handle', () => {
+// A wallet asks a hub for credit inside bilateral Account consensus: the
+// operator-only HTTP endpoint was deleted, so the request form must submit the
+// `requestCredit` EntityTx through the same RuntimeInput path as extend.
+test('credit requests submit the requestCredit EntityTx, never an HTTP endpoint', () => {
   const source = readFileSync('frontend/src/lib/components/Entity/account/ui/CreditForm.svelte', 'utf8');
 
   expect(source).toContain('runtimeControllerHandle');
-  expect(source).toContain("fetch(`${apiBase}/api/credit/request`");
+  expect(source).toContain("type: 'requestCredit'");
+  expect(source).toContain('requestId: newCreditRequestId()');
+  expect(source).not.toContain('/api/credit/request');
 });
 
 test('credit and collateral configure forms submit RuntimeInput through shared command path', () => {

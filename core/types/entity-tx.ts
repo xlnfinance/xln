@@ -280,6 +280,7 @@ type EntityTxPayload =
       type: 'prepareDispute';
       data: {
         counterpartyEntityId: string;
+        customArguments?: Record<string, string>;
         description?: string;
         minCooldownMs?: number;
         /** Internal cross-j recovery binding retained until remote book cleanup ACKs. */
@@ -292,6 +293,7 @@ type EntityTxPayload =
       type: 'disputeStart';
       data: {
         counterpartyEntityId: string;
+        customArguments?: Record<string, string>;
         /** Exact committed route authorizing a target user to force its source-side dispute. */
         crossJurisdictionRouteId?: string;
         starterInitialArguments?: string;
@@ -414,6 +416,7 @@ type EntityTxPayload =
       type: 'disputeFinalize';
       data: {
         counterpartyEntityId: string;
+        customArguments?: Record<string, string>;
         useOnchainRegistry?: boolean; // Optional HTLC reveal via on-chain registry
         description?: string;
       };
@@ -560,6 +563,19 @@ type EntityTxPayload =
         amount: bigint;
       };
     }
+  | {
+      // Ask the counterparty (a hub) to extend credit to this entity, inside
+      // bilateral Account consensus (`credit_request`, id `credit-<16 hex>`).
+      type: 'requestCredit';
+      data: {
+        counterpartyEntityId: string;
+        tokenId: number;
+        amount: bigint;
+        requestId: string;
+      };
+    }
+  | { type: 'customContract'; data: { counterpartyEntityId: string;
+      transition: import('./finance/custom-contract').CustomContractTransition } }
   | {
       type: 'lendingOffer';
       data: {

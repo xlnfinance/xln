@@ -157,12 +157,12 @@ export const HASHABLE_ACCOUNT_SUBCONTRACT_FIELDS = [
   'transformerAddress',
   'encodedBatch',
   'allowances',
-  'leftArgumentsHash',
-  'rightArgumentsHash',
+  'initcode', 'source', 'contractName', 'compilerVersion', 'schemas',
+  'status', 'proposerIsLeft', 'createdHeight', 'revision', 'resolution',
 ] as const satisfies readonly (keyof AccountSubcontract)[];
 
 const HASHABLE_ACCOUNT_SUBCONTRACT_ALLOWANCE_FIELDS = [
-  'deltaIndex',
+  'tokenId',
   'rightAllowance',
   'leftAllowance',
 ] as const satisfies readonly (keyof AccountSubcontract['allowances'][number])[];

@@ -6,6 +6,7 @@ import {
 } from '../../protocol/boundary-validation';
 import { validateAccountTxDataFields } from './fields';
 import { assertSettlementTokenId } from '../../protocol/settlement/operations';
+import { validateCustomContractTransition } from './custom-contract';
 
 const validateCloseProof = (value: unknown, code: string): void => {
   const proof = validateAccountTxDataFields(value, {
@@ -177,7 +178,8 @@ export const validateSpecialAccountTxData = (
   value: unknown,
   code: string,
 ): boolean => {
-  if (type === 'htlc_lock') validateHtlcLock(value, code);
+  if (type === 'subcontract_transition') validateCustomContractTransition(value);
+  else if (type === 'htlc_lock') validateHtlcLock(value, code);
   else if (type === 'htlc_resolve') validateHtlcResolve(value, code);
   else if (type === 'cross_pull_close') {
     const data = validateAccountTxDataFields(

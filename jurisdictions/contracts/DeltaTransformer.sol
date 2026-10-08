@@ -38,6 +38,28 @@ Subcontracts - Programmable Delta Transformers
   This is DeFi within bilateral accounts. Genuinely new.
   */
 contract DeltaTransformer {
+  error CustomTransformerDeploymentFailed();
+  error CustomTransformerInitcodeInvalid();
+  event CustomTransformerDeployed(address indexed transformer, bytes32 indexed initcodeHash);
+
+  /// Both Account signers authorize the computed address in ProofBody. Anyone
+  /// may materialize that exact initcode; a different program has another address.
+  /// This is a factory only: Account still executes clauses using STATICCALL.
+  function customTransformerAddress(bytes32 initcodeHash) public view returns (address) {
+    return address(uint160(uint256(keccak256(abi.encodePacked(bytes1(0xff), address(this), bytes32(0), initcodeHash)))));
+  }
+
+  function deployCustomTransformer(bytes calldata initcode) external returns (address transformer) {
+    if (initcode.length == 0 || initcode.length > 12288) revert CustomTransformerInitcodeInvalid();
+    bytes32 initcodeHash = keccak256(initcode);
+    transformer = customTransformerAddress(initcodeHash);
+    if (transformer.code.length != 0) return transformer;
+    bytes memory code = initcode;
+    assembly ("memory-safe") { transformer := create2(0, add(code, 32), mload(code), 0) }
+    if (transformer == address(0) || transformer.code.length == 0) revert CustomTransformerDeploymentFailed();
+    emit CustomTransformerDeployed(transformer, initcodeHash);
+  }
+
   error InvalidDeltaIndex();
   error ContextLengthMismatch();
   error PullRevealWindowActive(uint256 disputeTimeout);

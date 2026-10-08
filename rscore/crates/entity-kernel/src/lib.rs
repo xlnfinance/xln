@@ -14,6 +14,7 @@ mod command;
 #[path = "support/commitment.rs"]
 mod commitment;
 mod consensus;
+mod credit_request;
 mod cross_j;
 #[path = "support/debt.rs"]
 mod debt;
@@ -131,7 +132,7 @@ pub use local_financial::{
     LendingBorrowEntityTx, LendingClosePositionEntityTx, LendingOfferEntityTx,
     LendingRepayEntityTx, LocalAccountFinancialView, LocalEntityFinancialTx,
     PlaceSwapOfferEntityTx, ProposeCancelSwapEntityTx, RequestCollateralEntityTx,
-    decode_local_entity_financial_tx,
+    RequestCreditEntityTx, decode_local_entity_financial_tx,
 };
 pub use local_tx::{
     AdmittedLocalEntityTx, CrossJurisdictionRuntimeOutput, LocalEntityTx, decode_local_entity_tx,

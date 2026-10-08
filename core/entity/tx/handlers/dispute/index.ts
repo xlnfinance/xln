@@ -161,6 +161,7 @@ const buildDisputeStartIntent = (
     tx.data.crossJurisdictionRouteId ?? representativeRouteId;
   return {
     description: tx.data.description ?? 'prepare-dispute',
+    ...(tx.data.customArguments ? { customArguments: tx.data.customArguments } : {}),
     ...(crossJurisdictionRouteId !== undefined ? { crossJurisdictionRouteId } : {}),
     ...(tx.data.starterInitialArguments !== undefined && !recovery
       ? { starterInitialArguments: tx.data.starterInitialArguments }
@@ -191,6 +192,7 @@ export const draftPreparedDisputeStartIfReady = async (
       type: 'disputeStart',
       data: {
         counterpartyEntityId,
+        ...(intent?.customArguments ? { customArguments: intent.customArguments } : {}),
         ...(intent?.description !== undefined ? { description: intent.description } : {}),
         ...(intent?.crossJurisdictionRouteId !== undefined
           ? { crossJurisdictionRouteId: intent.crossJurisdictionRouteId }

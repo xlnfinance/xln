@@ -1,8 +1,8 @@
 /**
  * Account management: the same entity txs the SvelteKit "Configure" panel
  * sends (collateral request, add token, dispute prepare/finalize, settlement
- * signature) plus the hub's HTTP credit request. Pure helpers over the account
- * document the view-frame already carries; nothing here reads the env.
+ * signature, credit request). Pure helpers over the account document the
+ * view-frame already carries; nothing here reads the env.
  */
 import type { EntityTx, JBatch, RuntimeAdapterViewFrame } from '@xln/core/api/public/runtime-module';
 import type { SettlementOp } from '@xln/core/types/account';
@@ -180,16 +180,26 @@ export function describeSettlementOp(op: SettlementOp, money: (tokenId: number, 
 	}
 }
 
+/** 'credit-<16 hex>': the Account replay id of one credit request. */
+export function newCreditRequestId(): string {
+	const bytes = new Uint8Array(8);
+	crypto.getRandomValues(bytes);
+	return `credit-${Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('')}`;
+}
+
+export function buildRequestCreditTx(counterpartyEntityId: string, tokenId: number, amount: bigint): EntityTx {
+	if (amount <= 0n) throw new Error('Enter a positive amount');
+	return { type: 'requestCredit', data: { counterpartyEntityId, tokenId, amount, requestId: newCreditRequestId() } };
+}
+
 /**
- * Ask the hub's HTTP API for a credit line. The frontend uses this because a
- * user cannot set the hub's own credit limit; the hub decides and commits.
+ * Ask the hub for a credit line inside bilateral Account consensus. A user
+ * cannot set the hub's own limit: our signed `credit_request` commits in the
+ * account, then the hub answers with its own credit line (the smaller of the
+ * request and the protocol cap; it never lowers a larger existing line).
  */
-export async function requestCreditFromHub(input: { userEntityId: string; hubEntityId: string; tokenId: number; amount: bigint }): Promise<void> {
-	const { postJson } = await import('../http');
-	await postJson('/api/credit/request', {
-		userEntityId: input.userEntityId,
-		hubEntityId: input.hubEntityId,
-		tokenId: input.tokenId,
-		amount: input.amount.toString(),
-	});
+export async function requestCreditFromHub(input: { entityId: string; signerId: string; hubEntityId: string; tokenId: number; amount: bigint }): Promise<void> {
+	const tx = buildRequestCreditTx(input.hubEntityId, input.tokenId, input.amount);
+	const { sendEntityTxs } = await import('../tx');
+	await sendEntityTxs(input.entityId, input.signerId, [tx]);
 }

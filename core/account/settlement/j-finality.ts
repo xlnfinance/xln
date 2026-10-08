@@ -135,6 +135,9 @@ const reconcileFinalizedDeltas = (
 };
 
 const clearFinalizedCollections = (account: AccountReplica): void => {
+  if (account.state.subcontracts && account.state.subcontracts.size > 0) {
+    account.state.subcontracts = requirePersistentAccountStateMap(account.state.subcontracts, 'subcontracts').emptied();
+  }
   if (account.state.swapOffers.size > 0) {
     account.state.swapOffers = requirePersistentAccountStateMap(
       account.state.swapOffers,

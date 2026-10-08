@@ -20,8 +20,9 @@ export function resolveApiBase(): string {
 		parsed.hash = '';
 		return parsed.origin;
 	}
-	return typeof __XLN_STACK_ORIGIN__ === 'string' && __XLN_STACK_ORIGIN__
-		? new URL(__XLN_STACK_ORIGIN__).origin : window.location.origin;
+	// Embedded wallets use the serving stack's proxy. This also preserves the
+	// browser's same-origin authority for compiler and AI requests.
+	return window.location.origin;
 }
 
 const NO_API = 'The runtime has no HTTP API at this address';
@@ -40,12 +41,12 @@ export async function readJson(response: Response): Promise<Record<string, unkno
 }
 
 /** POST a JSON body and return the parsed reply; throws with the server's error text. */
-export async function postJson(path: string, body: Record<string, unknown>, timeoutMs = 20_000): Promise<Record<string, unknown>> {
+export async function postJson(path: string, body: Record<string, unknown>, timeoutMs = 20_000, apiBase = resolveApiBase()): Promise<Record<string, unknown>> {
 	const controller = new AbortController();
 	const timer = setTimeout(() => controller.abort(), timeoutMs);
 	let response: Response;
 	try {
-		response = await fetch(new URL(path, resolveApiBase()), {
+		response = await fetch(new URL(path, apiBase), {
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify(body),
@@ -64,8 +65,8 @@ export async function postJson(path: string, body: Record<string, unknown>, time
 	return result;
 }
 
-export async function getJson(path: string, params: Record<string, string>): Promise<Record<string, unknown>> {
-	const url = new URL(path, resolveApiBase());
+export async function getJson(path: string, params: Record<string, string>, apiBase = resolveApiBase()): Promise<Record<string, unknown>> {
+	const url = new URL(path, apiBase);
 	for (const [key, value] of Object.entries(params)) url.searchParams.set(key, value);
 	let response: Response;
 	try {

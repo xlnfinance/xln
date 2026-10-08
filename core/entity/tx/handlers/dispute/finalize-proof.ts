@@ -192,6 +192,7 @@ export const buildFinalProofPayload = (
   counterpartyId: string,
   selection: FinalProofSelection,
   env: EntityRuntimeContext,
+  customArguments?: Readonly<Record<string, string>>,
 ): FinalProofPayload => {
   const activeDispute = account.activeDispute!;
   const callerIsStarter = selection.callerSide ===
@@ -204,7 +205,7 @@ export const buildFinalProofPayload = (
         env.state,
         counterpartyId,
         selection.finalProofbodyHash,
-        { secretsSide: selection.callerSide },
+        { secretsSide: selection.callerSide, ...(customArguments ? { customArguments } : {}) },
       );
   reportOptionalArgumentWarnings(env, counterpartyId, builtArguments.warnings);
   const selectedCounterCommitment = selection.shouldUseCounterProof

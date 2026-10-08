@@ -7,7 +7,7 @@ import { defineConfig, devices } from '@playwright/test';
  * the whole stand up, and the tests assert against the Depository on chain.
  */
 const PORT = process.env['UI_E2E_PORT'] || '5183';
-const BASE_URL = process.env['UI_E2E_BASE_URL'] || `http://localhost:${PORT}`;
+const BASE_URL = process.env['UI_E2E_BASE_URL'] || process.env['PW_BASE_URL'] || `http://localhost:${PORT}`;
 
 export default defineConfig({
 	testDir: './tests',
@@ -15,7 +15,7 @@ export default defineConfig({
 	workers: 1,
 	retries: 0,
 	reporter: [['list']],
-	outputDir: './tests/test-results',
+	outputDir: process.env['PW_OUTPUT_DIR'] || './tests/test-results',
 	use: {
 		baseURL: BASE_URL,
 		headless: process.env['HEADED'] !== 'true',
@@ -29,7 +29,7 @@ export default defineConfig({
 	},
 	projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'], channel: 'chromium' } }],
 	// The wallet is tested against the real stack: `bun run dev` serves it on :5183 with /api proxied.
-	webServer: {
+	webServer: process.env['PW_SKIP_WEBSERVER'] === '1' ? undefined : {
 		command: 'cd .. && bun run dev',
 		url: `${BASE_URL.replace(/\/$/, '')}/api/jurisdictions`,
 		reuseExistingServer: true,

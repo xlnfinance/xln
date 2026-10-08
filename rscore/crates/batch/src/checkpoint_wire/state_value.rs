@@ -79,6 +79,7 @@ pub(super) fn encode_lending_kind(value: &LendingIntentKind) -> AbiValue {
         LendingIntentKind::CreditRevoke => 4,
         LendingIntentKind::CloseRequest => 5,
         LendingIntentKind::ClosePayout => 6,
+        LendingIntentKind::CreditRequest => 7,
     })
 }
 

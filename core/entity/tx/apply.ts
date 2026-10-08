@@ -1,4 +1,5 @@
 import type { RuntimeOverlayRecord } from '../../types/account';
+import { handleCustomContractEntityTx } from './handlers/account/custom-contract';
 import type { EntityState, EntityOutput, HashType, EntityCandidateEffect } from '../types';
 import type { EntityRuntimeContext } from '../runtime-context';
 import type { JInput } from '../../jurisdiction/machine/input';
@@ -69,6 +70,7 @@ import {
   handleLendingOfferEntityTx,
   handleLendingRepayEntityTx,
 } from './handlers/payments/lending';
+import { handleRequestCreditEntityTx } from './handlers/account/credit-request';
 import {
   handleMaterializeCrossJurisdictionSwapEntityTx,
   handlePrepareCrossJurisdictionSwapEntityTx,
@@ -496,9 +498,15 @@ const entityTxDispatchers = {
     env,
     options?.mutableFrameState,
   ),
+  customContract: (_env, state, tx) => handleCustomContractEntityTx(state, tx as Extract<EntityTx, { type: 'customContract' }>),
   extendCredit: (_env, state, tx, options) => handleExtendCreditEntityTx(
     state,
     tx as Extract<EntityTx, { type: 'extendCredit' }>,
+    options?.mutableFrameState,
+  ),
+  requestCredit: (_env, state, tx, options) => handleRequestCreditEntityTx(
+    state,
+    tx as Extract<EntityTx, { type: 'requestCredit' }>,
     options?.mutableFrameState,
   ),
   lendingOffer: (_env, state, tx, options) => handleLendingOfferEntityTx(state, tx as Extract<EntityTx, { type: 'lendingOffer' }>, options?.mutableFrameState),

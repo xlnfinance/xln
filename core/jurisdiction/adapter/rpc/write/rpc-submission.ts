@@ -1,5 +1,6 @@
 import type { Signer } from 'ethers';
 import { compactHankoForChain } from '../../../../hanko/short';
+import { materializeCustomContracts } from './rpc-custom-contracts';
 import { ethers } from 'ethers';
 import type { RuntimeReplica } from '../../../../runtime/types';
 import type { JTx } from '../../../../types/jurisdiction-runtime';
@@ -360,6 +361,8 @@ const executeBatchSubmission = async (
     depositoryAddress: await context.stack.getDepositoryAddress(),
   });
   try {
+    await materializeCustomContracts({ env: options.env, entityId: plan.normalizedEntityId,
+      batch: plan.batch, stack: context.stack, signer: submitter ?? context.signer, sequencer: context.sequencer });
     const estimatedGas = await context.chainIo.estimateGas(
       () => depository.processBatch.estimateGas(data.encodedBatch, hankoData, entityNonce),
     );

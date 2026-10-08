@@ -1,0 +1,95 @@
+{
+  "canonicalSource": "TypeScript applyAccountTxToMutableReplica",
+  "cases": [
+    {
+      "name": "wallet-ask-hub-answers",
+      "steps": [
+        {
+          "accountStateRoot": "0xb59ab95a80314709676366eb035a5eba93d4a7bd9133ea3f978de54fb9c9e38c",
+          "byLeft": false,
+          "deltasRoot": "0xa1591b240e4608df3487cdb406970786de8416b207b8e7a2022784ba2ac7b5ca",
+          "events": [
+            "Credit request credit-1111111111111111 committed"
+          ],
+          "frameHash": "0x2da1e37e3a98b4f300d929e9e34b9c18e4a8899c43f75508b673fc16521bb895",
+          "intentEntries": [
+            [
+              "credit:credit-1111111111111111",
+              "credit-request"
+            ]
+          ],
+          "leftCreditLimit": "0",
+          "lendingIntentsRoot": "0x2b969d4e3f4620e17135fb2581e554cbf58d3860bd4c9973cadcbea296b9691c",
+          "rightCreditLimit": "0",
+          "txType": "credit_request"
+        },
+        {
+          "accountStateRoot": "0xaab05d4aa2d8e5a3e55d00c7417efc69e865c92226d150bec02cbe82de98d282",
+          "byLeft": true,
+          "deltasRoot": "0x7a318db0e98b1903ea8540655600df79b85c4886f0957a24274a44cd45f4c7f7",
+          "events": [
+            "💳 Right credit limit = 25000000 for token 1"
+          ],
+          "frameHash": "0x3b0d37cf2b69f00ed9b4ebd745d07e4b5e20c646f89dcce3ebfcfe4e0530a36c",
+          "intentEntries": [
+            [
+              "credit:credit-1111111111111111",
+              "credit-request"
+            ]
+          ],
+          "leftCreditLimit": "0",
+          "lendingIntentsRoot": "0x2b969d4e3f4620e17135fb2581e554cbf58d3860bd4c9973cadcbea296b9691c",
+          "rightCreditLimit": "25000000",
+          "txType": "set_credit_limit"
+        },
+        {
+          "accountStateRoot": "0xf51afe8ef0fe988b28f35ea9a2a7ecd6c74df687c1a2b596618753b1b35915fb",
+          "byLeft": false,
+          "deltasRoot": "0x7a318db0e98b1903ea8540655600df79b85c4886f0957a24274a44cd45f4c7f7",
+          "events": [
+            "Credit request credit-2222222222222222 committed"
+          ],
+          "frameHash": "0x1127c6cafd69a7e26eb47071225acdf5218dac559d1339655098285ba5ce5edd",
+          "intentEntries": [
+            [
+              "credit:credit-1111111111111111",
+              "credit-request"
+            ],
+            [
+              "credit:credit-2222222222222222",
+              "credit-request"
+            ]
+          ],
+          "leftCreditLimit": "0",
+          "lendingIntentsRoot": "0x3769612ef57814c59cfc6a463ca733090473f568b37921a9713ae6a7470358f3",
+          "rightCreditLimit": "25000000",
+          "txType": "credit_request"
+        },
+        {
+          "accountStateRoot": "0x0e74c8a86117409519536aad539e21721cf316fee38a081fd7677b4343944b78",
+          "byLeft": true,
+          "deltasRoot": "0x93aad91850644cad17d357f34f87d09102feb2e7de9cd8028daac93ee1686897",
+          "events": [
+            "💳 Right credit limit = 1000000000 for token 1"
+          ],
+          "frameHash": "0x49dbca4b476fa465dcd51dfb3215a2143c1f7b5f1438116a1264e6cbd7fd0187",
+          "intentEntries": [
+            [
+              "credit:credit-1111111111111111",
+              "credit-request"
+            ],
+            [
+              "credit:credit-2222222222222222",
+              "credit-request"
+            ]
+          ],
+          "leftCreditLimit": "0",
+          "lendingIntentsRoot": "0x3769612ef57814c59cfc6a463ca733090473f568b37921a9713ae6a7470358f3",
+          "rightCreditLimit": "1000000000",
+          "txType": "set_credit_limit"
+        }
+      ]
+    }
+  ],
+  "version": 1
+}

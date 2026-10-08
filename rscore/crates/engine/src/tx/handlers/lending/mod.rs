@@ -1,3 +1,4 @@
+mod credit_request;
 mod payment;
 mod validation;
 
@@ -112,6 +113,19 @@ pub(crate) fn apply(
             position_id,
             hub_entity_id,
             lender_entity_id,
+            *token_id,
+            amount,
+        ),
+        AccountTx::CreditRequest {
+            request_id,
+            requester_entity_id,
+            token_id,
+            amount,
+        } => credit_request::apply(
+            replica,
+            proposer,
+            request_id,
+            requester_entity_id,
             *token_id,
             amount,
         ),

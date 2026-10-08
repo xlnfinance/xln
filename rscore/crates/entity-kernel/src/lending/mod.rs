@@ -11,6 +11,7 @@ use crate::types::TargetedAccountTx;
 use crate::{EntityKernelError, EntityStateSlice, OrderedAccountCommit};
 
 pub use codec::decode_canonical_lending_state;
+pub(crate) use followups::projected_credit;
 pub use state::{
     LendingLoan, LendingLoanStatus, LendingPoolPosition, LendingPoolStatus, LendingState,
     canonical_lending_state,

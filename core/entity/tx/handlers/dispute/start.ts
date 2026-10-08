@@ -224,6 +224,7 @@ export const handleDisputeStart = async (
       proof.proofBodyHash,
       entityTx.data.starterInitialArguments,
       env,
+      entityTx.data.customArguments,
     ),
   );
   const evidence: StartEvidence = { ...proof, ...nonce, ...argumentsPair };

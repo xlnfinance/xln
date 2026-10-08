@@ -1,4 +1,5 @@
 import { ethers } from 'ethers';
+import { compareStableText } from '../serialization';
 import type { AccountReplica } from '../../types/account';
 import { asOfferId, type OfferId } from '../../orderbook/swap-keys';
 import { sortTransformerEntries } from '../transform/transformer-ordering';
@@ -107,7 +108,7 @@ export function buildCurrentDisputeArgumentPlan(account: AccountReplica): Disput
 
 export function buildDisputeArgumentsFromState(
   account: AccountReplica,
-  options: { secretsSide: DisputeArgumentSide | 'none' },
+  options: { secretsSide: DisputeArgumentSide | 'none'; customArguments?: Readonly<Record<string, string>> },
   secrets: readonly string[],
 ): {
   leftArguments: string;
@@ -126,8 +127,8 @@ export function buildDisputeArgumentsFromState(
   // Slice those ratios by the exact signed chunk plan; repeating the complete
   // ratio array would let a later swap consume another order's authorization.
   const argumentsByClause = buildCanonicalProofBatches(account)
-    .filter(batch => batch.payments.length > 0 || batch.swaps.length > 0)
     .map(batch => {
+      if (batch.payments.length === 0 && batch.swaps.length === 0) return { left: '0x', right: '0x' };
       const leftCount = batch.swaps.filter(swap => !swap.ownerIsLeft).length;
       const rightCount = batch.swaps.length - leftCount;
       const leftRatios =
@@ -143,12 +144,22 @@ export function buildDisputeArgumentsFromState(
         right: encodeDeltaTransformerArgs(rightRatios, rightSecrets),
       };
     });
+  const custom = [...(account.state.subcontracts ?? [])].filter(([, clause]) => clause.status === 'active')
+    .sort(([left], [right]) => compareStableText(left, right));
+  for (const [id, clause] of custom) {
+    const supplied = options.customArguments?.[id];
+    if (supplied !== undefined && (!/^0x(?:[0-9a-f]{2})*$/.test(supplied) || supplied.length > 16386)) throw new Error(`CUSTOM_DISPUTE_ARGUMENT_INVALID:${id}`);
+    argumentsByClause.push({
+      left: options.secretsSide === 'left' ? supplied ?? clause.resolution?.leftArguments ?? '0x' : '0x',
+      right: options.secretsSide === 'right' ? supplied ?? clause.resolution?.rightArguments ?? '0x' : '0x',
+    });
+  }
   const left = sanitizeOptionalDisputeArgument(
-    hasArgumentData(leftFillRatios, leftSecrets) ? wrapTransformerArgs(argumentsByClause.map(args => args.left)) : '0x',
+    hasArgumentData(leftFillRatios, leftSecrets) || argumentsByClause.some(args => args.left !== '0x') ? wrapTransformerArgs(argumentsByClause.map(args => args.left)) : '0x',
     'dispute.state.left',
   );
   const right = sanitizeOptionalDisputeArgument(
-    hasArgumentData(rightFillRatios, rightSecrets)
+    hasArgumentData(rightFillRatios, rightSecrets) || argumentsByClause.some(args => args.right !== '0x')
       ? wrapTransformerArgs(argumentsByClause.map(args => args.right))
       : '0x',
     'dispute.state.right',

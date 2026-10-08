@@ -340,6 +340,7 @@ fn lending_entry(value: &AbiValue) -> Result<(String, LendingIntentKind), Proces
         4 => LendingIntentKind::CreditRevoke,
         5 => LendingIntentKind::CloseRequest,
         6 => LendingIntentKind::ClosePayout,
+        7 => LendingIntentKind::CreditRequest,
         value => {
             return Err(ProcessError::Tag {
                 field: "lendingKind",

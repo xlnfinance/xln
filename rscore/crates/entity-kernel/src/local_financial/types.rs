@@ -81,6 +81,14 @@ pub struct ExtendCreditEntityTx {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RequestCreditEntityTx {
+    pub counterparty_entity_id: String,
+    pub token_id: TokenId,
+    pub amount: BigInt,
+    pub request_id: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RequestCollateralEntityTx {
     pub counterparty_entity_id: String,
     pub token_id: TokenId,
@@ -271,6 +279,7 @@ pub enum LocalEntityFinancialTx {
     ProcessHtlcTimeouts(ProcessHtlcTimeoutsEntityTx),
     ProposeCancelSwap(ProposeCancelSwapEntityTx),
     RequestCollateral(RequestCollateralEntityTx),
+    RequestCredit(RequestCreditEntityTx),
     ResolveHtlcLock(ResolveHtlcLockEntityTx),
     QuoteBackedR2c(QuoteBackedR2cEntityTx),
     SetRebalancePolicy(SetRebalancePolicyEntityTx),

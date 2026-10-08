@@ -1,6 +1,25 @@
 import { fetchRpcProxyText } from './proxy-safety';
 
 const ALLOWED_LOCAL_HOSTS = new Set(['127.0.0.1', 'localhost']);
+
+/** Ordinary API bodies stay small; only the watchtower proxy carries an encrypted backup. */
+export const API_MAX_BODY_BYTES = 1024 * 1024;
+/** A tower's default per-key quota (core/watchtower/standalone-server.ts) plus its appointment envelope. */
+export const WATCHTOWER_DEFAULT_MAX_STORED_BYTES = 4 * 1024 * 1024;
+export const WATCHTOWER_PROXY_MAX_BODY_BYTES = WATCHTOWER_DEFAULT_MAX_STORED_BYTES + 64 * 1024;
+export const WATCHTOWER_PROXY_PATH = '/api/watchtower-proxy';
+
+/**
+ * Bun applies one body limit to a whole server, so the server is sized for the
+ * proxy and every other route is held to the ordinary limit here, before any
+ * route reads its body. A declared length over the limit is refused with 413.
+ */
+export const oversizedBodyResponse = (req: Request, pathname: string, headers?: HeadersInit): Response | null => {
+  const declared = Number(req.headers.get('content-length') ?? '0');
+  const limit = pathname === WATCHTOWER_PROXY_PATH ? WATCHTOWER_PROXY_MAX_BODY_BYTES : API_MAX_BODY_BYTES;
+  if (!Number.isFinite(declared) || declared <= limit) return null;
+  return new Response(JSON.stringify({ error: 'Request body too large', limit }), { status: 413, headers });
+};
 const WATCHTOWER_PROXY_TIMEOUT_MS = 5_000;
 
 const allowedLocalPorts = (): ReadonlySet<string> => new Set(

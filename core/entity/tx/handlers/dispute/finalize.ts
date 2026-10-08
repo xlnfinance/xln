@@ -288,6 +288,7 @@ export const handleDisputeFinalize = async (
     counterpartyId,
     selection,
     env,
+    entityTx.data.customArguments,
   );
   const registry = collectRegistryPublication(
     entityTx,

@@ -31,6 +31,10 @@ export type NetworkTrailCue = {
   why?: string;
   tradfiParallel?: string;
   keyMetrics?: string[];
+  /** Entities whose input this frame processed — what the narration is about. */
+  focusEntityIds?: string[];
+  /** Bilateral accounts (`left:right`) those inputs touched. */
+  focusAccountIds?: string[];
 };
 
 type SnapshotAccount = {
@@ -148,8 +152,14 @@ export const graphFrameFromSnapshot = (
     const label = String(profile?.name || state?.profile?.name || entityId);
     const accounts = Array.from(state?.accounts?.entries?.() ?? [])
       .map(([counterpartyId, account]) => graphAccountFromSnapshot(entityId, counterpartyId, account));
+    // Same summary shape the live adapter publishes: the jurisdiction name is what lets a
+    // replay render its J-machine. Addresses stay out — they vary per anvil lease.
+    const jurisdictionName = String(state?.config?.jurisdiction?.name || '').trim();
     return {
-      summary: { entityId, runtimeId, label, height, isHub: state?.profile?.isHub === true },
+      summary: {
+        entityId, runtimeId, label, height, isHub: state?.profile?.isHub === true,
+        ...(jurisdictionName ? { jurisdiction: { name: jurisdictionName } } : {}),
+      },
       core: {
         entityId,
         signerId: String(replica.signerId || ''),
@@ -180,6 +190,53 @@ export const activityEventsFromSnapshot = (
   timestamp: integer(snapshot.state.timestamp),
   ...(snapshot.runtimeInput ? { runtimeInput: snapshot.runtimeInput } : {}),
 }).map((event) => ({ ...event, runtimeId: normalizeId(runtimeId) }));
+
+const ENTITY_ID_PATTERN = /^0x[0-9a-f]{64}$/;
+const FOCUS_COUNTERPARTY_KEYS = [
+  'toEntityId', 'fromEntityId', 'targetEntityId', 'counterpartyId', 'counterpartyEntityId',
+  'receivingEntity', 'receivingEntityId',
+] as const;
+
+const focusEntityId = (value: unknown): string => {
+  const entityId = normalizeId(value);
+  return ENTITY_ID_PATTERN.test(entityId) ? entityId : '';
+};
+
+const focusAccountId = (left: string, right: string): string =>
+  left < right ? `${left}:${right}` : `${right}:${left}`;
+
+/** Parties one entity tx names: an explicit route wins, otherwise its counterparty fields. */
+const focusPairsOfTx = (self: string, data: Record<string, unknown>): Array<[string, string]> => {
+  const route = Array.isArray(data['route']) ? data['route'].map(focusEntityId).filter(Boolean) : [];
+  if (route.length >= 2) return route.slice(1).map((hop, index) => [route[index]!, hop]);
+  return FOCUS_COUNTERPARTY_KEYS
+    .map((key) => focusEntityId(data[key]))
+    .filter((other) => other && other !== self)
+    .map((other) => [self, other]);
+};
+
+/**
+ * Who a frame's inputs touched. Authored narration describes exactly these parties, so the
+ * replay can light them and dim the rest without a second, hand-written focus list.
+ */
+const snapshotFocus = (snapshot: EnvSnapshot): { entityIds: string[]; accountIds: string[] } => {
+  const entityIds = new Set<string>();
+  const accountIds = new Set<string>();
+  for (const input of snapshot.runtimeInput?.entityInputs ?? []) {
+    const self = focusEntityId(input.entityId);
+    if (!self) continue;
+    entityIds.add(self);
+    for (const tx of input.entityTxs ?? []) {
+      const data = typeof tx.data === 'object' && tx.data !== null ? tx.data as Record<string, unknown> : {};
+      for (const [left, right] of focusPairsOfTx(self, data)) {
+        entityIds.add(left);
+        entityIds.add(right);
+        accountIds.add(focusAccountId(left, right));
+      }
+    }
+  }
+  return { entityIds: [...entityIds].sort(), accountIds: [...accountIds].sort() };
+};
 
 const deterministicAccountFrame = (value: unknown): unknown => {
   if (!value || typeof value !== 'object') return value;
@@ -242,6 +299,7 @@ export const networkTrailFromSnapshots = (
     const subtitle = snapshot.meta?.subtitle;
     if (subtitle) {
       const shortSubtitle = String(subtitle.what || snapshot.narrative || snapshot.description || '').trim();
+      const focus = snapshotFocus(snapshot);
       cues.push({
         id: `authored:${expected}:h${height}`,
         at: { runtimeId: expected, height, timestamp: height },
@@ -251,6 +309,8 @@ export const networkTrailFromSnapshots = (
         ...(subtitle.why ? { why: subtitle.why } : {}),
         ...(subtitle.tradfiParallel ? { tradfiParallel: subtitle.tradfiParallel } : {}),
         ...(subtitle.keyMetrics ? { keyMetrics: [...subtitle.keyMetrics] } : {}),
+        ...(focus.entityIds.length > 0 ? { focusEntityIds: focus.entityIds } : {}),
+        ...(focus.accountIds.length > 0 ? { focusAccountIds: focus.accountIds } : {}),
       });
     }
     return {

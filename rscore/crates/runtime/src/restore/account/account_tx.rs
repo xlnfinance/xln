@@ -149,6 +149,16 @@ fn set_credit_limit(fields: &[AbiValue]) -> Result<AccountTx, AccountWireRestore
     })
 }
 
+fn credit_request(fields: &[AbiValue]) -> Result<AccountTx, AccountWireRestoreError> {
+    let fields = exact(fields, 5, "creditRequest")?;
+    Ok(AccountTx::CreditRequest {
+        request_id: text(&fields[1])?.to_owned(),
+        requester_entity_id: text(&fields[2])?.to_owned(),
+        token_id: token(&fields[3])?,
+        amount: bigint(&fields[4], "amount")?,
+    })
+}
+
 fn rebalance_policy(fields: &[AbiValue]) -> Result<AccountTx, AccountWireRestoreError> {
     let fields = exact(fields, 6, "rebalancePolicy")?;
     Ok(AccountTx::RebalancePolicy {
@@ -471,6 +481,7 @@ pub fn transaction(value: &AbiValue) -> Result<AccountTx, AccountWireRestoreErro
         23 => canonical_tx(fields, "settleTransition", |data| {
             AccountTx::SettleTransition { data }
         }),
+        25 => credit_request(fields),
         value => Err(invalid(format!("TX_TAG:{value}"))),
     }
 }

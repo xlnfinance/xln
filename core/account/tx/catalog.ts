@@ -11,6 +11,7 @@ export const ACCOUNT_TX_TYPES = [
   'lending_close_payout',
   'add_delta',
   'set_credit_limit',
+  'credit_request',
   'request_collateral',
   'rebalance_refund',
   'rebalance_policy',
@@ -22,6 +23,7 @@ export const ACCOUNT_TX_TYPES = [
   'swap_cancel_request',
   'swap_resolve',
   'settle_transition',
+  'subcontract_transition',
   'j_event_claim',
 ] as const satisfies readonly AccountTx['type'][];
 

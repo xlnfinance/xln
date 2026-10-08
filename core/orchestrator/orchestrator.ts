@@ -47,7 +47,7 @@ import { assertMinDiskFree, getStorageHealth, getStorageHealthSnapshotSync } fro
 import { maybeHandleQaRequest } from '../qa/api';
 import { serveStaticApp } from '../api/server/static-assets';
 import { enforceFaucetPolicy } from '../api/server/faucet/policy';
-import { handleWatchtowerProxy } from '../api/server/rpc/watchtower-proxy';
+import { handleWatchtowerProxy, oversizedBodyResponse, WATCHTOWER_PROXY_MAX_BODY_BYTES } from '../api/server/rpc/watchtower-proxy';
 import { createAssistantProxyFromEnv, resolveAssistantDirectClientIp, resolveAssistantRateClientId } from '../api/server/assistant/proxy';
 import { createHttpDrainTracker, stopServerGracefully } from './graceful-server';
 import { publicAggregatedHealth, resolveSocketPeerAddress } from '../api/server/health/redaction';
@@ -2715,12 +2715,14 @@ const server = Bun.serve<OrchestratorWebSocket['data']>({
   hostname: args.host,
   port: args.port,
   idleTimeout: 120,
-  maxRequestBodySize: 1024 * 1024,
+  maxRequestBodySize: WATCHTOWER_PROXY_MAX_BODY_BYTES,
   async fetch(request, serverRef) {
     const releaseHttp = httpDrain.begin();
     try {
     const url = new URL(request.url);
     const pathname = url.pathname;
+    const oversized = oversizedBodyResponse(request, pathname);
+    if (oversized) return oversized;
     const operatorAuthorized = isOperatorRequest(
       request,
       resolveSocketPeerAddress(serverRef, request),

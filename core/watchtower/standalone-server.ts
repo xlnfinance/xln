@@ -18,6 +18,7 @@ import {
   resolveAppointmentBodyLimit,
 } from './http';
 import { runWatchtowerSweep } from './action';
+import { WATCHTOWER_DEFAULT_MAX_STORED_BYTES } from '../api/server/rpc/watchtower-proxy';
 import { runDisputeWatchSweep } from './dispute-watch';
 import { createWatchtowerStore, type WatchtowerStore } from './store';
 import { createPushStore, type PushStore } from './push/store';
@@ -517,7 +518,7 @@ if (import.meta.main) {
     : process.env['XLN_WATCHTOWER_DB_PATH'];
   const maxStoredBytesPerLookupKey = quotaArgIdx !== -1 && args[quotaArgIdx + 1]
     ? Number(args[quotaArgIdx + 1])
-    : Number(process.env['XLN_WATCHTOWER_MAX_BYTES'] || 4 * 1024 * 1024);
+    : Number(process.env['XLN_WATCHTOWER_MAX_BYTES'] || WATCHTOWER_DEFAULT_MAX_STORED_BYTES);
   const maxTotalStoredBytes = totalQuotaArgIdx !== -1 && args[totalQuotaArgIdx + 1]
     ? Number(args[totalQuotaArgIdx + 1])
     : Number(process.env['XLN_WATCHTOWER_MAX_TOTAL_BYTES'] || 1024 * 1024 * 1024);

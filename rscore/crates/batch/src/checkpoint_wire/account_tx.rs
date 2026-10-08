@@ -80,6 +80,18 @@ pub fn encode_account_tx(value: &AccountTx) -> Result<AbiValue, AccountWireEncod
         AccountTx::SetCreditLimit { token_id, amount } => {
             vec![integer(4), integer(token_id.get()), encode_bigint(amount)]
         }
+        AccountTx::CreditRequest {
+            request_id,
+            requester_entity_id,
+            token_id,
+            amount,
+        } => vec![
+            integer(25),
+            AbiValue::Text(request_id.clone()),
+            AbiValue::Text(requester_entity_id.clone()),
+            integer(token_id.get()),
+            encode_bigint(amount),
+        ],
         AccountTx::RebalancePolicy {
             token_id,
             policy_version,

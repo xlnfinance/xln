@@ -253,6 +253,20 @@ fn projected_tx_value(
                 ("amount".to_string(), big(amount)),
             ],
         ),
+        AccountTx::CreditRequest {
+            request_id,
+            requester_entity_id,
+            token_id,
+            amount,
+        } => (
+            "credit_request",
+            vec![
+                ("requestId".to_string(), text(request_id)),
+                ("requesterEntityId".to_string(), text(requester_entity_id)),
+                ("tokenId".to_string(), token(*token_id)),
+                ("amount".to_string(), big(amount)),
+            ],
+        ),
         AccountTx::AddDelta { token_id } => {
             ("add_delta", vec![("tokenId".to_string(), token(*token_id))])
         }

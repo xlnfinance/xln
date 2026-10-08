@@ -92,19 +92,7 @@ interface AccountRejectedFrameEvidence {
   frameHanko: HankoString;
 }
 
-export interface AccountSubcontract {
-  transformerAddress: string;
-  encodedBatch: string;
-  allowances: Array<{
-    deltaIndex: number;
-    rightAllowance: bigint;
-    leftAllowance: bigint;
-  }>;
-  // Runtime arguments are late adversarial evidence. Only optional commitments
-  // belong to mutually signed account state; raw secrets stay outside it.
-  leftArgumentsHash?: string;
-  rightArgumentsHash?: string;
-}
+export type AccountSubcontract = import('./finance/custom-contract').AccountCustomContract;
 
 export type AccountLendingIntentKind =
   | 'fund'
@@ -113,7 +101,8 @@ export type AccountLendingIntentKind =
   | 'credit-grant'
   | 'credit-revoke'
   | 'close-request'
-  | 'close-payout';
+  | 'close-payout'
+  | 'credit-request';
 
 /** Immutable jurisdiction-stack identity shared by both Account replicas. */
 export type AccountStateDomain = {
@@ -259,6 +248,7 @@ export interface AccountReplica {
     pendingOrderbookRemovalIds?: string[];
     /** Exact start request retained until every asynchronous cleanup ACK commits. */
     startIntent?: {
+      customArguments?: Record<string, string>;
       crossJurisdictionRouteId?: string;
       starterInitialArguments?: string;
       description?: string;
@@ -667,6 +657,7 @@ export interface DerivedDelta {
 
 // Account transaction types
 export type AccountTx =
+  | { type: 'subcontract_transition'; data: import('./finance/custom-contract').CustomContractTransition }
   | { type: 'direct_payment'; data: { tokenId: number; amount: bigint; route: string[]; description?: string; fromEntityId: string; toEntityId: string; deliveryMode: Extract<PaymentDeliveryMode, 'direct' | 'trusted'>; trustedGatewayEntityId?: string } }
   | {
       type: 'lending_fund';
@@ -733,6 +724,13 @@ export type AccountTx =
     }
   | { type: 'add_delta'; data: { tokenId: number } }
   | { type: 'set_credit_limit'; data: { tokenId: number; amount: bigint } }
+  | {
+      // The proposer (requester) asks its counterparty to extend credit to it.
+      // Committing records only the replay intent `credit:<requestId>`; a hub
+      // counterparty answers with its own `set_credit_limit` after commit.
+      type: 'credit_request';
+      data: { requestId: string; requesterEntityId: string; tokenId: number; amount: bigint };
+    }
   | {
       type: 'request_collateral';
       data: {

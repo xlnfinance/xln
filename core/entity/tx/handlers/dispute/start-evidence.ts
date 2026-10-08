@@ -165,6 +165,7 @@ export const buildStarterArguments = (
   proofBodyHash: string,
   overrideInitial: string | undefined,
   env: EntityRuntimeContext,
+  customArguments?: Readonly<Record<string, string>>,
 ): Pick<
   StartEvidence,
   | 'starterInitialArguments'
@@ -179,7 +180,7 @@ export const buildStarterArguments = (
     env.state,
     counterpartyId,
     proofBodyHash,
-    { secretsSide: starterSide },
+    { secretsSide: starterSide, ...(customArguments ? { customArguments } : {}) },
   );
   const rawInitial =
     overrideInitial && overrideInitial !== '0x'

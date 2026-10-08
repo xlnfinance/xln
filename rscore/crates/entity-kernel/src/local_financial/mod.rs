@@ -3,6 +3,7 @@ mod decode;
 mod direct_payment;
 mod dispute;
 pub(crate) use dispute::draft_prepared_dispute_start_after_removal;
+mod credit_request;
 mod extend_credit;
 #[path = "payments/htlc_payment.rs"]
 mod htlc_payment;
@@ -43,7 +44,7 @@ pub use types::{
     DirectPaymentEntityTx, ExtendCreditEntityTx, HtlcPaymentEntityTx, LendingBorrowEntityTx,
     LendingClosePositionEntityTx, LendingOfferEntityTx, LendingRepayEntityTx,
     LocalEntityFinancialTx, PlaceSwapOfferEntityTx, ProposeCancelSwapEntityTx,
-    RequestCollateralEntityTx,
+    RequestCollateralEntityTx, RequestCreditEntityTx,
 };
 
 pub(crate) struct LocalFinancialResult {
@@ -211,6 +212,13 @@ pub(crate) fn apply_local_entity_financial_txs(
                     &mut wake_targets,
                 );
             }
+            LocalEntityFinancialTx::RequestCredit(tx) => credit_request::apply_request_credit(
+                state,
+                tx,
+                &mut account_txs,
+                &mut events,
+                &mut wake_targets,
+            )?,
             LocalEntityFinancialTx::ResolveHtlcLock(tx) => resolve_htlc::apply(
                 state,
                 paybook,

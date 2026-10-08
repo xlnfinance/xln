@@ -59,7 +59,7 @@ export const buildDisputeArgumentsForCurrentState = (
   jurisdictions: AccountJurisdictionView,
   counterpartyEntityId: string,
   proofbodyHash: string,
-  options: { secretsSide: DisputeArgumentSide | 'none' },
+  options: { secretsSide: DisputeArgumentSide | 'none'; customArguments?: Readonly<Record<string, string>> },
 ): ReturnType<typeof buildDisputeArgumentsFromState> => {
   const currentProof = buildAccountProofBodyFromJurisdictions(jurisdictions, account);
   if (currentProof.proofBodyHash.toLowerCase() !== proofbodyHash.toLowerCase()) {

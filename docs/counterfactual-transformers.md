@@ -1,14 +1,55 @@
 # counterfactual transformers (custom clauses)
 
-Status: SPEC — approved direction 2026-07-14 (wallet-authored Solidity clauses, no new DSL).
+Status: experimental TypeScript implementation, checked 2026-10-08. Full React E2E,
+native-engine parity and crash/retry evidence remain required before release.
 
-Implementation boundary checked 2026-09-30: arbitrary signed transformer execution
-exists in `jurisdictions/contracts/Account.sol`; wallet authoring, bilateral clause
-approval and counterfactual deployment are proposed here, not a verified production
-flow. Solidity/TypeScript examples below are historical design sketches, not
-compilable artifacts or current ABI definitions. Implement against the canonical
-`Int768[]` transformer interface and Account-owned execution, then prove one real
-compile → sign → restart → CREATE2 deploy → dispute-finalize artifact.
+Current path: React **Manage → Custom Contracts** → backend compiler → signed
+`AccountState.subcontracts` → bilateral approval → either mutually confirmed
+resolution or lazy CREATE2 deployment by the post-WAL J submitter → existing
+Depository dispute finalization. `Account.sol` execution and allowance clamps are
+unchanged. The compiler is outside deterministic RJEA transitions.
+
+Canonical implementation:
+- `core/runtime/custom-contracts/`: pinned solc 0.8.25, templates, ABI schemas and preview.
+- `core/account/tx/handlers/custom-contract.ts`: `subcontract_transition` with
+  `propose`, `approve`, `reject`, `resolve`, `confirm`; creation height and revision
+  bind confirmations, and approval reserves the signed allowances as holds.
+- `jurisdictions/contracts/DeltaTransformer.sol`: zero-salt CREATE2 factory.
+- `ui/src/screens/CustomContracts.tsx`: expert warning, Solidity/AI authoring and
+  React forms from compiled schemas. AI emits Solidity, never executable frontend code.
+
+Parameters are signed `encodedBatch`; late arguments are separate left/right ABI
+bytes. Cooperative effects require the other signer's confirmation. Starter arguments
+are sealed on-chain at dispute start; nonstarter arguments accompany finalization.
+A preview executes this clause at a J snapshot; it is not proof that a future ordered
+dispute with changed external conditions will have the same result.
+
+Checks: four compiler/execution tests, five Account lifecycle tests and three real
+Solidity dispute tests pass. Template deployment used 447,714 execution gas and
+finalization 233,737 execution gas, excluding transaction overhead. New
+DeltaTransformer runtime: 7,115 bytes, Keccak
+`0x9853916f7a04316ab9297e859ee5095a64477b490a822e74a11f894ced2512c4`.
+Account runtime bytecode and Depository runtime template are unchanged.
+
+Continuation handoff:
+- SHA: `5b52b1772459d16ac78f9fff4be1b10e974384df`, implementation uncommitted.
+- Last green: `bun test core/__tests__/finance/custom-contract-lifecycle.test.ts`;
+  runtime and React type checks also pass.
+- First red: `bun run check`, contract-artifact drift gate compares intentional,
+  uncommitted synchronized artifacts against HEAD. React E2E is not green: separate
+  browser Account setup failed; the user–hub run was interrupted at the owner's request.
+- Artifacts: `/tmp/xln-custom-final-check.log`, `/tmp/xln-custom-final-unit.log`,
+  `/tmp/xln-custom-final-lifecycle.log`, `/tmp/xln-custom-forge.log`,
+  `/tmp/xln-custom-bytecode-review.jsonl`,
+  `.logs/e2e-parallel/20261008-020907-992/`.
+- Next single command: `bun run stand:status` before resuming the focused React E2E.
+- Remaining final gates: React two-signer resolution/reload plus full lazy-deployment
+  dispute E2E; real AI authoring; native body ownership, transitions, checkpoint,
+  proof/arguments and parity; production retry/recovery; stable-tree commit and full
+  `bun run check`. No release or push claim.
+
+The material below is the historical design sketch. It is not the current ABI,
+transaction catalog or production implementation; use the files and tests above.
 
 Two entities author an arbitrary Solidity clause inside their bilateral account via the
 wallet. The clause is signed into account state as an `AccountSubcontract` and enforced

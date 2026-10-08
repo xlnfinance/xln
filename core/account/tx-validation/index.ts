@@ -25,7 +25,8 @@ type SpecialAccountTxType =
   | 'htlc_lock'
   | 'htlc_resolve'
   | 'j_event_claim'
-  | 'settle_transition';
+  | 'settle_transition'
+  | 'subcontract_transition';
 
 type MissingAccountTxType = Exclude<
   AccountTx['type'],

@@ -9,6 +9,7 @@ import type {
   Result,
   Interface,
   EventFragment,
+  AddressLike,
   ContractRunner,
   ContractMethod,
   Listener,
@@ -140,14 +141,18 @@ export interface DeltaTransformerInterface extends Interface {
     nameOrSignature:
       | "applyBatch"
       | "containsPull"
+      | "customTransformerAddress"
       | "decodeArgumentsStrict"
       | "decodeTransformerArgumentListStrict"
+      | "deployCustomTransformer"
       | "encodeBatch"
       | "hashToTimestamp"
       | "revealSecret"
   ): FunctionFragment;
 
-  getEvent(nameOrSignatureOrTopic: "SecretRevealed"): EventFragment;
+  getEvent(
+    nameOrSignatureOrTopic: "CustomTransformerDeployed" | "SecretRevealed"
+  ): EventFragment;
 
   encodeFunctionData(
     functionFragment: "applyBatch",
@@ -172,11 +177,19 @@ export interface DeltaTransformerInterface extends Interface {
     values: [BytesLike]
   ): string;
   encodeFunctionData(
+    functionFragment: "customTransformerAddress",
+    values: [BytesLike]
+  ): string;
+  encodeFunctionData(
     functionFragment: "decodeArgumentsStrict",
     values: [BytesLike]
   ): string;
   encodeFunctionData(
     functionFragment: "decodeTransformerArgumentListStrict",
+    values: [BytesLike]
+  ): string;
+  encodeFunctionData(
+    functionFragment: "deployCustomTransformer",
     values: [BytesLike]
   ): string;
   encodeFunctionData(
@@ -198,11 +211,19 @@ export interface DeltaTransformerInterface extends Interface {
     data: BytesLike
   ): Result;
   decodeFunctionResult(
+    functionFragment: "customTransformerAddress",
+    data: BytesLike
+  ): Result;
+  decodeFunctionResult(
     functionFragment: "decodeArgumentsStrict",
     data: BytesLike
   ): Result;
   decodeFunctionResult(
     functionFragment: "decodeTransformerArgumentListStrict",
+    data: BytesLike
+  ): Result;
+  decodeFunctionResult(
+    functionFragment: "deployCustomTransformer",
     data: BytesLike
   ): Result;
   decodeFunctionResult(
@@ -217,6 +238,19 @@ export interface DeltaTransformerInterface extends Interface {
     functionFragment: "revealSecret",
     data: BytesLike
   ): Result;
+}
+
+export namespace CustomTransformerDeployedEvent {
+  export type InputTuple = [transformer: AddressLike, initcodeHash: BytesLike];
+  export type OutputTuple = [transformer: string, initcodeHash: string];
+  export interface OutputObject {
+    transformer: string;
+    initcodeHash: string;
+  }
+  export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
+  export type Filter = TypedDeferredTopicFilter<Event>;
+  export type Log = TypedEventLog<Event>;
+  export type LogDescription = TypedLogDescription<Event>;
 }
 
 export namespace SecretRevealedEvent {
@@ -301,6 +335,12 @@ export interface DeltaTransformer extends BaseContract {
     "view"
   >;
 
+  customTransformerAddress: TypedContractMethod<
+    [initcodeHash: BytesLike],
+    [string],
+    "view"
+  >;
+
   decodeArgumentsStrict: TypedContractMethod<
     [encoded: BytesLike],
     [DeltaTransformer.ArgumentsStructOutput],
@@ -311,6 +351,12 @@ export interface DeltaTransformer extends BaseContract {
     [encoded: BytesLike],
     [string[]],
     "view"
+  >;
+
+  deployCustomTransformer: TypedContractMethod<
+    [initcode: BytesLike],
+    [string],
+    "nonpayable"
   >;
 
   encodeBatch: TypedContractMethod<
@@ -352,6 +398,9 @@ export interface DeltaTransformer extends BaseContract {
     nameOrSignature: "containsPull"
   ): TypedContractMethod<[encodedBatch: BytesLike], [boolean], "view">;
   getFunction(
+    nameOrSignature: "customTransformerAddress"
+  ): TypedContractMethod<[initcodeHash: BytesLike], [string], "view">;
+  getFunction(
     nameOrSignature: "decodeArgumentsStrict"
   ): TypedContractMethod<
     [encoded: BytesLike],
@@ -361,6 +410,9 @@ export interface DeltaTransformer extends BaseContract {
   getFunction(
     nameOrSignature: "decodeTransformerArgumentListStrict"
   ): TypedContractMethod<[encoded: BytesLike], [string[]], "view">;
+  getFunction(
+    nameOrSignature: "deployCustomTransformer"
+  ): TypedContractMethod<[initcode: BytesLike], [string], "nonpayable">;
   getFunction(
     nameOrSignature: "encodeBatch"
   ): TypedContractMethod<[b: DeltaTransformer.BatchStruct], [string], "view">;
@@ -372,6 +424,13 @@ export interface DeltaTransformer extends BaseContract {
   ): TypedContractMethod<[secret: BytesLike], [void], "nonpayable">;
 
   getEvent(
+    key: "CustomTransformerDeployed"
+  ): TypedContractEvent<
+    CustomTransformerDeployedEvent.InputTuple,
+    CustomTransformerDeployedEvent.OutputTuple,
+    CustomTransformerDeployedEvent.OutputObject
+  >;
+  getEvent(
     key: "SecretRevealed"
   ): TypedContractEvent<
     SecretRevealedEvent.InputTuple,
@@ -380,6 +439,17 @@ export interface DeltaTransformer extends BaseContract {
   >;
 
   filters: {
+    "CustomTransformerDeployed(address,bytes32)": TypedContractEvent<
+      CustomTransformerDeployedEvent.InputTuple,
+      CustomTransformerDeployedEvent.OutputTuple,
+      CustomTransformerDeployedEvent.OutputObject
+    >;
+    CustomTransformerDeployed: TypedContractEvent<
+      CustomTransformerDeployedEvent.InputTuple,
+      CustomTransformerDeployedEvent.OutputTuple,
+      CustomTransformerDeployedEvent.OutputObject
+    >;
+
     "SecretRevealed(bytes32,bytes32)": TypedContractEvent<
       SecretRevealedEvent.InputTuple,
       SecretRevealedEvent.OutputTuple,

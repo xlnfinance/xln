@@ -68,6 +68,7 @@ import {
 import { createMarketSubscriptionStack } from '../../network/relay/market/subscriptions';
 import { decodeMarketWireRequest, encodeMarketWireMessage, type MarketWireRequest } from '../../network/relay/market/wire';
 import { JSON_HEADERS, getErrorMessage, resolveRequiredAnvilRpc } from './utils';
+import { handleCustomContractsApi } from './custom-contracts';
 import { enforceFaucetPolicy } from './faucet/policy';
 import { ethers } from 'ethers';
 import {
@@ -102,9 +103,8 @@ import {
 } from './network/gossip-profiles';
 import { attachLiveJAdapter } from '../../runtime/j-submit/live-jadapters';
 import { maybeHandleDebugDumpsRequest } from './health/debug-dumps';
-import { handleCreditRequest } from './faucet/credit';
 import { handleLendingStateRequest } from './entities/lending';
-import { handleWatchtowerProxy } from './rpc/watchtower-proxy';
+import { handleWatchtowerProxy, oversizedBodyResponse, WATCHTOWER_PROXY_MAX_BODY_BYTES } from './rpc/watchtower-proxy';
 import { handleOffchainFaucet } from './faucet/offchain';
 import { handleReserveFaucet } from './faucet/reserve';
 import { handleRuntimeHealth, type RuntimeHealthCacheEntry } from './health/api';
@@ -816,17 +816,6 @@ const maybeHandleFinancialApi = (
       getCurrentRuntimeHeight: currentRuntimeHeight,
     });
   }
-  if (pathname === '/api/credit/request' && req.method === 'POST') {
-    return handleCreditRequest({
-      req,
-      env,
-      headers,
-      activeHubEntityIds: relayStore.activeHubEntityIds,
-      enqueueRuntimeInput,
-      validateRuntimeInputAdmission,
-      getCurrentRuntimeHeight: currentRuntimeHeight,
-    });
-  }
   if (pathname === '/api/lending/state' && req.method === 'GET') {
     return handleLendingStateRequest({
       req,
@@ -855,6 +844,8 @@ const handleApiAgainstCommittedState = async (
   }
   const assistantResponse = await assistantProxy.handle(req, pathname, clientId);
   if (assistantResponse) return assistantResponse;
+  const customContractsResponse = await handleCustomContractsApi(req, pathname, env);
+  if (customContractsResponse) return customContractsResponse;
   const controlResponse = await maybeHandleControlApi(req, pathname, env, headers);
   if (controlResponse) return controlResponse;
   if (pathname === '/rpc' && req.method === 'POST') {
@@ -915,6 +906,8 @@ const handleHttpRequest = async (
   server: Server<RelaySocketData>,
 ): Promise<Response | undefined> => {
   const pathname = new URL(req.url).pathname;
+  const oversized = oversizedBodyResponse(req, pathname);
+  if (oversized) return oversized;
   const localPairingResponse = await localPairingController.handle(req, pathname, session.env);
   if (localPairingResponse) return localPairingResponse;
 
@@ -1125,7 +1118,7 @@ const createHttpServer = (options: XlnServerOptions, session: ServerSession) =>
   Bun.serve<RelaySocketData>({
     port: options.port,
     hostname: options.host ?? '127.0.0.1',
-    maxRequestBodySize: 1024 * 1024,
+    maxRequestBodySize: WATCHTOWER_PROXY_MAX_BODY_BYTES,
     fetch: (req, server) => {
       serverIdleWatch.noteActivity();
       return handleHttpRequest(options, session, req, server);

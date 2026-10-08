@@ -331,7 +331,8 @@ pub(crate) fn apply_to_candidate(
         | AccountTx::LendingRepay { .. }
         | AccountTx::LendingCredit { .. }
         | AccountTx::LendingCloseRequest { .. }
-        | AccountTx::LendingClosePayout { .. } => {
+        | AccountTx::LendingClosePayout { .. }
+        | AccountTx::CreditRequest { .. } => {
             crate::tx::handlers::lending::apply(candidate, tx, proposer)
         }
         AccountTx::RequestCollateral {

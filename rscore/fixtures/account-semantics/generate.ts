@@ -3,11 +3,13 @@ import { join } from 'node:path';
 
 import { safeStringify } from '../../../core/protocol/serialization';
 import { executeLendingAccountSemanticVector } from './lending';
+import { executeCreditRequestAccountSemanticVector } from './credit-request';
 import { executeCrossJAccountSemanticVector } from './cross-j';
 import { executeRebalanceSettlementAccountSemanticVector } from './rebalance-settlement';
 
 const fixtures = [
   ['lending-v1.json', await executeLendingAccountSemanticVector()],
+  ['credit-request-v1.json', await executeCreditRequestAccountSemanticVector()],
   ['cross-j-v1.json', await executeCrossJAccountSemanticVector()],
   ['rebalance-settlement-v1.json', await executeRebalanceSettlementAccountSemanticVector()],
 ] as const;

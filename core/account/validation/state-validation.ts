@@ -31,6 +31,7 @@ const LENDING_INTENTS = new Set([
   'credit-revoke',
   'close-request',
   'close-payout',
+  'credit-request',
 ]);
 
 const validateSwapOffers = (value: unknown, context: string): void => {

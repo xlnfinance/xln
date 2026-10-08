@@ -1,4 +1,4 @@
-import { defineConfig, type Plugin } from 'vite';
+import { defineConfig, type Plugin, type ViteDevServer } from 'vite';
 import react from '@vitejs/plugin-react';
 import { createReadStream, existsSync } from 'node:fs';
 import { join } from 'node:path';
@@ -15,9 +15,7 @@ const RUNTIME_BUNDLE_WAIT_MS = 90_000;
  * the first build is still running waits for the file rather than failing.
  */
 function sharedRuntimeBundle(dir: string): Plugin {
-	return {
-		name: 'xln-shared-runtime-bundle',
-		configureServer(server) {
+	const install = (server: Pick<ViteDevServer, 'middlewares'>): void => {
 			server.middlewares.use((req, res, next) => {
 				const pathname = new URL(req.url ?? '/', 'http://localhost').pathname;
 				if (!RUNTIME_BUNDLES.has(pathname)) return next();
@@ -39,7 +37,11 @@ function sharedRuntimeBundle(dir: string): Plugin {
 				};
 				serve();
 			});
-		},
+	};
+	return {
+		name: 'xln-shared-runtime-bundle',
+		configureServer: install,
+		configurePreviewServer: install,
 	};
 }
 
@@ -64,6 +66,7 @@ export default defineConfig(({ mode }) => ({
 	// SvelteKit wallet loads. Without it the shim has no value to carry and the
 	// page boots with dev semantics.
 	define: {
+		__XLN_UI_DIAGNOSTICS__: JSON.stringify(process.env['XLN_UI_DIAGNOSTICS'] === '1'),
 		__XLN_STACK_ORIGIN__: JSON.stringify(stackOrigin),
 		'process.env.NODE_ENV': JSON.stringify(process.env['NODE_ENV'] ?? 'development'),
 	},
@@ -106,6 +109,7 @@ export default defineConfig(({ mode }) => ({
 		},
 	},
 	build: {
+		...(process.env['XLN_UI_BUILD_DIR'] ? { outDir: process.env['XLN_UI_BUILD_DIR'] } : {}),
 		target: 'es2022',
 		...(mode === 'ios' ? { outDir: '../native-dist', emptyOutDir: true } : {}),
 	},

@@ -342,6 +342,7 @@ const validateStorageAccountStateMaps = (state: AccountState, code: string): voi
   }
   if (state.subcontracts !== undefined) {
     for (const subcontract of requireStorageMap(state.subcontracts, `${code}_SUBCONTRACTS`).values()) {
+      validateCommittedCustomContract(subcontract);
       const row = requireBoundaryRecord(subcontract, `${code}_SUBCONTRACT`);
       const address = requireStorageString(row['transformerAddress'], `${code}_TRANSFORMER`);
       if (!/^0x[0-9a-f]{40}$/.test(address)) throw new Error(`${code}_TRANSFORMER`);
@@ -503,3 +504,4 @@ export const assertStorageAccountDocBinding = (
     throw new Error(`STORAGE_ACCOUNT_DOC_OWNER_MISMATCH:scope=${scope}`);
   return doc;
 };
+import { validateCommittedCustomContract } from '../../account/validation/custom-contract';

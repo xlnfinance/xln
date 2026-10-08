@@ -868,6 +868,8 @@ export const accountTxWire = (tx: AccountTx): RscoreWireValue[] => {
       return [3, tx.data.tokenId];
     case 'set_credit_limit':
       return [4, tx.data.tokenId, tx.data.amount.toString()];
+    case 'credit_request':
+      return [25, tx.data.requestId, tx.data.requesterEntityId, tx.data.tokenId, tx.data.amount.toString()];
     case 'rebalance_policy':
       return [
         5,
@@ -952,6 +954,7 @@ export const accountTxWire = (tx: AccountTx): RscoreWireValue[] => {
     case 'cross_pull_lock': return [19, canonicalValueWire(tx.data)];
     case 'cross_pull_close': return [20, canonicalValueWire(tx.data)];
     case 'settle_transition': return [23, canonicalValueWire(tx.data)];
+    case 'subcontract_transition': return [24, canonicalValueWire(tx.data)];
     default: {
       const exhaustive: never = tx;
       throw new Error(`SHADOW_ACCOUNT_TX_UNREACHABLE:${String(exhaustive)}`);

@@ -13,9 +13,9 @@ use super::types::{
     LendingClosePositionEntityTx, LendingOfferEntityTx, LendingRepayEntityTx,
     LocalEntityFinancialTx, OpenAccountEntityTx, PlaceSwapOfferEntityTx, PrepareDisputeEntityTx,
     ProcessHtlcTimeoutsEntityTx, ProposeCancelSwapEntityTx, QuoteBackedR2cEntityTx,
-    RequestCollateralEntityTx, ResolveHtlcLockEntityTx, SetRebalancePolicyEntityTx,
-    SettleApproveEntityTx, SettleExecuteEntityTx, SettleProposeEntityTx, SettleRejectEntityTx,
-    SettleUpdateEntityTx,
+    RequestCollateralEntityTx, RequestCreditEntityTx, ResolveHtlcLockEntityTx,
+    SetRebalancePolicyEntityTx, SettleApproveEntityTx, SettleExecuteEntityTx,
+    SettleProposeEntityTx, SettleRejectEntityTx, SettleUpdateEntityTx,
 };
 
 fn force_sibling_dispute(
@@ -609,6 +609,29 @@ fn extend_credit(tx: &CanonicalEntityTx) -> Result<LocalEntityFinancialTx, Entit
     }))
 }
 
+fn request_credit(tx: &CanonicalEntityTx) -> Result<LocalEntityFinancialTx, EntityKernelError> {
+    const KIND: &str = "requestCredit";
+    let data = object(frame_data(tx, KIND)?, KIND)?;
+    exact_fields(
+        data,
+        &["counterpartyEntityId", "tokenId", "amount", "requestId"],
+        &[],
+        KIND,
+    )?;
+    Ok(LocalEntityFinancialTx::RequestCredit(
+        RequestCreditEntityTx {
+            counterparty_entity_id: entity_id(
+                field(data, "counterpartyEntityId", KIND)?,
+                KIND,
+                "COUNTERPARTY",
+            )?,
+            token_id: token(field(data, "tokenId", KIND)?, KIND)?,
+            amount: bigint(field(data, "amount", KIND)?, KIND, "AMOUNT")?,
+            request_id: string(field(data, "requestId", KIND)?, KIND, "REQUEST_ID")?,
+        },
+    ))
+}
+
 fn request_collateral(tx: &CanonicalEntityTx) -> Result<LocalEntityFinancialTx, EntityKernelError> {
     const KIND: &str = "requestCollateral";
     let data = object(frame_data(tx, KIND)?, KIND)?;
@@ -1072,6 +1095,7 @@ pub fn decode_local_entity_financial_tx(
         EntityTxKind::ProcessHtlcTimeouts => process_htlc_timeouts(tx).map(Some),
         EntityTxKind::ProposeCancelSwap => cancel_swap(tx).map(Some),
         EntityTxKind::RequestCollateral => request_collateral(tx).map(Some),
+        EntityTxKind::RequestCredit => request_credit(tx).map(Some),
         EntityTxKind::ResolveHtlcLock => resolve_htlc_lock(tx).map(Some),
         EntityTxKind::R2c => quote_backed_r2c(tx),
         EntityTxKind::SetRebalancePolicy => set_rebalance_policy(tx).map(Some),

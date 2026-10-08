@@ -37,9 +37,10 @@ type HtlcRangeChange =
  * General holds also reserve R2C deposits and cannot substitute for live locks.
  */
 export const getOffdeltaRepresentationError = (
-  account: Pick<AccountState, 'locks'>,
+  account: Pick<AccountState, 'locks'> & Partial<Pick<AccountState, 'subcontracts'>>,
   delta: Pick<Delta, 'tokenId' | 'offdelta'>,
   change?: HtlcRangeChange,
+  custom?: Readonly<{ excludeId?: string; addedAllowance?: { leftAllowance: bigint; rightAllowance: bigint } }>,
 ): string | undefined => {
   let lower = delta.offdelta;
   let upper = delta.offdelta;
@@ -52,6 +53,18 @@ export const getOffdeltaRepresentationError = (
     if (lock.tokenId === delta.tokenId && lockId !== change?.removedLockId) include(lock);
   }
   if (change?.addedLock) include(change.addedLock);
+  for (const [id, clause] of account.subcontracts ?? []) {
+    if (clause.status !== 'active' || id === custom?.excludeId) continue;
+    for (const allowance of clause.allowances) {
+      if (allowance.tokenId !== delta.tokenId) continue;
+      lower -= allowance.rightAllowance;
+      upper += allowance.leftAllowance;
+    }
+  }
+  if (custom?.addedAllowance) {
+    lower -= custom.addedAllowance.rightAllowance;
+    upper += custom.addedAllowance.leftAllowance;
+  }
   const outside = lower < INT512_MIN ? lower : upper > INT512_MAX ? upper : null;
   return outside === null ? undefined : `Offdelta outside int512: ${outside}`;
 };
