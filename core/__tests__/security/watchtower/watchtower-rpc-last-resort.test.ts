@@ -10,6 +10,7 @@ import { buildSingleSignerHanko } from '../../../hanko/batch';
 import { decodeInt512, encodeInt512 } from '../../../protocol/crypto/abi-money';
 import { safeStringify } from '../../../protocol/serialization';
 import { computeBatchHankoHash, createEmptyBatch, encodeJBatch, type JBatch } from '../../../jurisdiction/machine/batch';
+import { createXlnJsonRpcProvider } from '../../../jurisdiction/adapter';
 import { linkArtifactBytecode } from '../../../jurisdiction/adapter/rpc-utils';
 import { computeAccountKey } from '../../../jurisdiction/adapter/events/contract-codec';
 import {
@@ -121,7 +122,7 @@ const createNonceManager = (provider: JsonRpcProvider) => {
 };
 
 const waitForRpcReady = async (rpcUrl: string): Promise<void> => {
-  const provider = new JsonRpcProvider(rpcUrl);
+  const provider = createXlnJsonRpcProvider(rpcUrl);
   let lastError = 'unknown';
   try {
     const deadline = Date.now() + 12_000;
@@ -267,7 +268,7 @@ describe('watchtower rpc last-resort integration', () => {
 
     const anvilPort = await reserveFreePort();
     const { rpcUrl } = await startAnvil(anvilPort);
-    const provider = new JsonRpcProvider(rpcUrl, 31337);
+    const provider = createXlnJsonRpcProvider(rpcUrl, 31337);
     const nextNonce = createNonceManager(provider);
 
     const left = new Wallet(derivePrivateKey(0), provider);
@@ -566,7 +567,7 @@ describe('watchtower rpc last-resort integration', () => {
 
     const anvilPort = await reserveFreePort();
     const { rpcUrl } = await startAnvil(anvilPort);
-    const provider = new JsonRpcProvider(rpcUrl, 31337);
+    const provider = createXlnJsonRpcProvider(rpcUrl, 31337);
     const nextNonce = createNonceManager(provider);
 
     const left = new Wallet(derivePrivateKey(0), provider);

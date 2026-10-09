@@ -678,7 +678,7 @@ test('HubDiscoveryPanel renders a supplied projection instead of scanning eRepli
   expect(tabs).toContain('{canOpenAccounts}');
   expect(tabs).toContain('submitRuntimeInput={submitPanelRuntimeInput}');
   const directOpenStart = tabs.indexOf('async function openAccountWithFullId');
-  const nextFunctionStart = tabs.indexOf('function confirmDisputeAction', directOpenStart);
+  const nextFunctionStart = tabs.indexOf('\n}\n', directOpenStart) + 2;
   expect(directOpenStart).toBeGreaterThan(0);
   expect(nextFunctionStart).toBeGreaterThan(directOpenStart);
   const directOpenSource = tabs.slice(directOpenStart, nextFunctionStart);

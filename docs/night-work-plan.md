@@ -1,5 +1,29 @@
 # Autonomous xln work
 
+Full unit pass attempt — 2026-10-09, base6797c86dd plus concurrent UI work:
+- Strict semantic completeness enabled. Root suite4965 pass,3 fail,0 skips,
+  228544 assertions,803 files,322.04s. Log .logs/mainnet-20261007/unit-20261009.log.
+  Required six-file subprocess phase separately passed19/19,154 assertions;
+  root failure prevented the wrapper from reaching it. This is NOT full green.
+- Watchtower counter-dispute test repeated RED: stale cached nonce. Its custom
+  JsonRpcProvider differed from production. Use createXlnJsonRpcProvider (cache
+  disabled) in the real RPC fixture; no production financial code changed.
+- UI source boundary referenced a removed following function. Bound the same
+  open-account body by its own top-level closing brace; preserved all assertions.
+  Both focused files now20/20 green: unit-fixes-20261009-green.log.
+- Shutdown test observed another dev server's health before its own launcher
+  failed DEV_ALREADY_RUNNING. Require owned DEV_BOOTING before any health/RPC
+  mutation and fail immediately when the child exits. Now fails safely in53ms
+  without touching the unrelated chain; log anvil-owned-readiness-20261009.log.
+- External blocker: existing dev launcher PID35447 owns17999. Asked owner whether
+  to stop/restart it for shutdown/recovery verification. Do not kill it without
+  the requested decision; do not skip the test or count it green. No repeated
+  run while the same port owner remains. Other isolated gates can still run.
+- Whole check PASSED handle84986 exit0,39 source gates; log
+  .logs/mainnet-20261007/unit-fixes-20261009-check.log.
+- Next: approved isolated shutdown test and complete unit/UI rerun.
+  Unrelated frontend/UI edits remain unstaged here.
+
 Cross-J orderId rejection fixed — 2026-10-09, base74623a0a7:
 - Reproduced TS and Rust accepting colon-containing orderId before Account
   swap_offer later rejects it. Added typed rejection before authorization/lock

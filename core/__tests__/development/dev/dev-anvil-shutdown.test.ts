@@ -25,7 +25,10 @@ async function waitReady(check: () => Promise<boolean>, label: string, timeoutMs
   const deadline = Date.now() + timeoutMs;
   let lastError: unknown;
   while (Date.now() < deadline) {
-    try { if (await check()) return; } catch (error) { lastError = error; }
+    try { if (await check()) return; } catch (error) {
+      if (error instanceof Error && error.message.startsWith('LAUNCHER_EXITED:')) throw error;
+      lastError = error;
+    }
     await Bun.sleep(50);
   }
   throw new Error(`SHUTDOWN_READINESS_TIMEOUT:${label}`, { cause: lastError });
@@ -57,6 +60,9 @@ test('launcher shutdown preserves Anvil code and the exact mined block across re
   try {
     await waitReady(async () => {
       if (launcher.exitCode !== null) throw new Error(`LAUNCHER_EXITED:${launcher.exitCode}:${data}`);
+      // A pre-existing dev server can be healthy while our launcher fails its
+      // singleton lease. Never mutate that unrelated chain as test evidence.
+      if (!(await Bun.file(join(data, 'launcher.log')).text()).includes('DEV_BOOTING ')) return false;
       const response = await fetch('http://127.0.0.1:8082/api/health?full=1', { signal: AbortSignal.timeout(1000) });
       const health: unknown = await response.json();
       return Boolean(health && typeof health === 'object' && 'systemOk' in health && health.systemOk === true);
