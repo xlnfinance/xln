@@ -1,5 +1,26 @@
 # Autonomous xln work
 
+Latest verification — 2026-10-09, HEAD4d8ee444c plus narrow maintenance:
+- Reproduced folder-width failure (scripts/tron11>10); moved the existing native
+  cross-J driver to scripts/tron/recovery/native-rust-cross.ts and updated imports.
+  No financial behavior or assertions changed. Focused folder/build checks pass.
+- Reproduced tracked owner-profile English-source failure after checkpoint commit;
+  translated that canonical document without changing owner decisions or Russian
+  conversation preference. No policy exclusions added.
+- Whole bun run check PASSED handle20155 exit0:39 source gates,40 Rust executables,
+  Svelte0 errors/0 warnings. Log .logs/mainnet-20261007/check-20261009-driver-location-2.log.
+- Genuine live native cross-J repeated PASSED handle99079 exit0: Ethereum31337 and
+  Java TVM2414086651,2 routes,4 Accounts,exact economic deltas and peer roots,
+  zero pending ACK/queues; SIGKILL restored identical frame36.
+  Evidence .logs/mainnet-20261007/native-rust-cross/attempt-20261009-location/;
+  code150baa3c81930346f9b5a146f6137065acb0315d9f184db6738a78d0bb637888,
+  binary780994d4d1a5b2227313c281418fcba85ec8f37dfb128a0eac825a583dbbf030.
+- NEXT: reproduce/fix early typed rejection of colon-containing cross-J orderId
+  in TS and Rust, before any Account lock is admitted. It remains a confirmed
+  user-caused halt; transport must keep rejecting incomplete cohorts.
+- Full fresh unit/UI/replay/release gates still pending. No mainnet readiness
+  or push claimed. Stand free; original WAL and unknown user files preserved.
+
 Owner-requested checkpoint — source frozen for commit:
 - Genuine native Rust Ethereum31337 / Java TVM2414086651 cross-J PASSED:
   2/2 routes,4/4 Account exact balances and peer roots, zero pending ACK/queues,
