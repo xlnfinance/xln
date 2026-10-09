@@ -5,11 +5,11 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="theme-color" content="#050505" />
   <link rel="icon" href="./assets/favicon.svg" type="image/svg+xml" />
-  <meta name="description" content="Recreate the same wallet from a strong secret through deliberately expensive, local, memory-hard work. No required seed copy. No server." />
+  <meta name="description" content="Recreate your wallet on your own computer. Argon2id makes guessing expensive. Not weak passwords strong." />
   <meta property="og:type" content="website" />
   <meta property="og:url" content="https://brainvault.sh/" />
   <meta property="og:title" content="BrainVault — Your wallet, mined from memory." />
-  <meta property="og:description" content="You wait once per recovery. An attacker pays for every guess. No required seed copy. No server to trust." />
+  <meta property="og:description" content="Recreate your wallet on your own computer. Argon2id makes guessing expensive. Not weak passwords strong." />
   <meta property="og:image" content="https://brainvault.sh/assets/og-card.png" />
   <meta property="og:image:width" content="1200" />
   <meta property="og:image:height" content="630" />
@@ -21,89 +21,87 @@
   <script type="application/ld+json">
     {"@context":"https://schema.org","@type":"SoftwareApplication","name":"BrainVault","applicationCategory":"SecurityApplication","operatingSystem":"macOS, Linux, Windows","url":"https://brainvault.sh/","codeRepository":"https://github.com/xlnfinance/xln/tree/main/brainvault","license":"https://github.com/xlnfinance/xln/blob/main/brainvault/LICENSE","description":"Open-source memory-hard deterministic wallet derivation using Argon2id and BLAKE3."}
   </script>
-  <script src="./assets/script.js" defer></script>
+  <script type="module" src="./assets/script.js"></script>
 </head>
 <body>
-  <a class="skip-link" href="#main">Skip to content</a>
+  <a class="skip-link" href="#main" data-i18n="skip">Skip to content</a>
   <header class="topbar">
-    <a class="brand" href="#top" aria-label="BrainVault home">
+    <a class="brand" href="#top" aria-label="BrainVault">
       <svg viewBox="0 0 36 36" aria-hidden="true"><path d="M5 10.5 18 3l13 7.5v15L18 33 5 25.5z"/><path d="m11 14 7-4 7 4v8l-7 4-7-4z"/><circle cx="18" cy="18" r="2.5"/></svg>
       <span>BrainVault</span>
     </a>
-    <div class="variant-switch" role="group" aria-label="Landing variation">
-      <button type="button" data-variant-button="a" aria-pressed="true">A</button>
-      <button type="button" data-variant-button="b" aria-pressed="false">B</button>
-      <button type="button" data-variant-button="c" aria-pressed="false">C</button>
-    </div>
-    <button class="menu-toggle" type="button" aria-expanded="false" aria-controls="nav">Menu</button>
-    <nav id="nav" aria-label="Primary navigation">
-      <a href="#how">How it works</a><a href="#run">Before funding</a>
-      <a class="source-link" href="https://github.com/xlnfinance/xln/tree/main/brainvault">Source ↗</a>
+    <label class="language-switch"><span class="sr-only" data-i18n="language">Language</span><select id="language" aria-label="Language">
+      <option value="en">English</option><option value="ru">Русский</option><option value="zh">中文</option><option value="es">Español</option><option value="fr">Français</option><option value="de">Deutsch</option><option value="pt">Português</option><option value="ja">日本語</option><option value="ko">한국어</option><option value="tr">Türkçe</option>
+    </select></label>
+    <button class="menu-toggle" type="button" aria-expanded="false" aria-controls="nav" data-i18n="menu">Menu</button>
+    <nav id="nav" aria-label="Menu" data-i18n-label="menu">
+      <a href="#how" data-i18n="howNav">How it works</a><a href="#run" data-i18n="fundNav">Before funding</a>
+      <a class="source-link" href="https://github.com/xlnfinance/xln/tree/main/brainvault" data-i18n="source">Source ↗</a>
     </nav>
   </header>
 
   <main id="main">
     <section class="hero wrap" id="top">
       <div class="hero-copy">
-        <h1 data-copy-key="hero">Your wallet.<br />From memory.</h1>
-        <p class="thesis" data-copy-key="thesis">Nothing to carry.</p>
-        <a class="text-link" href="#run">Before funding ↓</a>
-        <p class="fineprint">Strong secret. Exact settings.</p>
+        <h1 data-i18n="hero">Your wallet.<br />From memory.</h1>
+        <p class="thesis" data-i18n="thesis">Recreate your wallet on your own computer.</p>
+        <a class="text-link" href="#run" data-i18n="fundLink">Before funding ↓</a>
+        <p class="fineprint" data-i18n="fine">Strong secret. Exact settings.</p>
       </div>
-      <div class="installer" aria-label="Ways to run BrainVault">
-        <div class="install-tabs" role="tablist" aria-label="Launch method">
+      <div class="installer" aria-label="Download" data-i18n-label="download">
+        <div class="install-tabs" role="tablist" aria-label="Download" data-i18n-label="download">
           <button type="button" role="tab" aria-selected="true" aria-controls="install-bunx" data-install-tab="bunx">bunx</button>
-          <button type="button" role="tab" aria-selected="false" aria-controls="install-npm" data-install-tab="npm">npm</button>
-          <button type="button" role="tab" aria-selected="false" aria-controls="install-tarball" data-install-tab="tarball">Download</button>
+          <button type="button" role="tab" aria-selected="false" aria-controls="install-npm" tabindex="-1" data-install-tab="npm">npm</button>
+          <button type="button" role="tab" aria-selected="false" aria-controls="install-tarball" tabindex="-1" data-install-tab="tarball" data-i18n="download">Download</button>
         </div>
         <div class="install-panel" id="install-bunx" role="tabpanel" data-install-panel="bunx">
-          <div class="install-command"><pre id="command-bunx">bunx brainvault</pre><button type="button" data-copy-target="#command-bunx">Copy</button></div>
-          <small>Requires <a href="https://bun.sh">Bun ↗</a></small>
+          <div class="install-command"><pre id="command-bunx">bunx brainvault</pre><button type="button" data-copy-target="#command-bunx" data-i18n="copy">Copy</button></div>
+          <small><span data-i18n="requires">Requires Bun.</span> <a href="https://bun.sh">bun.sh ↗</a></small>
         </div>
         <div class="install-panel" id="install-npm" role="tabpanel" data-install-panel="npm" hidden>
           <div class="install-command"><pre id="command-npm">npm install -g brainvault &amp;&amp;
-brainvault</pre><button type="button" data-copy-target="#command-npm">Copy</button></div>
-          <small>Requires Bun.</small>
+brainvault</pre><button type="button" data-copy-target="#command-npm" data-i18n="copy">Copy</button></div>
+          <small data-i18n="requires">Requires Bun.</small>
         </div>
         <div class="install-panel" id="install-tarball" role="tabpanel" data-install-panel="tarball" hidden>
-          <div class="install-command"><pre id="command-tarball">npm pack brainvault</pre><button type="button" data-copy-target="#command-tarball">Copy</button></div>
-          <small><a href="#audit">Audit first ↓</a></small>
+          <div class="install-command"><pre id="command-tarball">npm pack brainvault</pre><button type="button" data-copy-target="#command-tarball" data-i18n="copy">Copy</button></div>
+          <small><a href="#audit" data-i18n="auditFirst">Audit first ↓</a></small>
         </div>
       </div>
     </section>
 
     <section class="section wrap" id="how">
 
-      <h2 data-copy-key="how">Hard to guess.<br />Yours to recover.</h2>
-      <p class="section-copy" data-copy-key="explain">Argon2id makes guessing expensive. Not weak passwords strong.</p>
+      <h2 data-i18n="how">Hard to guess.<br />Yours to recover.</h2>
+      <p class="section-copy" data-i18n="explain">Argon2id makes guessing expensive. Not weak passwords strong.</p>
       <ol class="steps">
-        <li><span>01</span><h3>Remember</h3><p>Username. Password. Shard count. Multiplier.</p></li>
-        <li><span>02</span><h3>Derive</h3><p>Wait on each recovery.</p></li>
-        <li><span>03</span><h3>Recover</h3><p>Same inputs. Same wallets.</p></li>
+        <li><span>01</span><h3 data-i18n="remember">Remember</h3><p data-i18n="inputs">Username. Password. Shard count. Multiplier.</p></li>
+        <li><span>02</span><h3 data-i18n="derive">Derive</h3><p data-i18n="wait">Wait on each recovery.</p></li>
+        <li><span>03</span><h3 data-i18n="recover">Recover</h3><p data-i18n="same">Same inputs. Same wallets.</p></li>
       </ol>
-      <details class="quiet-details"><summary>Watch</summary><div class="demo-frame"><video controls muted playsinline preload="none" poster="./assets/brainvault-terminal-demo-poster.png"><source src="./assets/brainvault-terminal-demo.mp4" type="video/mp4" /></video></div></details>
-      <details class="quiet-details"><summary>Under the hood</summary><dl>
-        <div><dt>Input</dt><dd>Unicode NFKD, then exact UTF-8</dd></div>
-        <div><dt>Each shard</dt><dd>Argon2id v0x13 · 256 MiB · t=1 · p=1 · 32 bytes</dd></div>
-        <div><dt>Combination</dt><dd>Strict numeric shard order · domain-separated BLAKE3</dd></div>
-        <div><dt>Output</dt><dd>Separate PRIMARY/SECONDARY wallets. Import with an empty BIP-39 passphrase.</dd></div>
+      <details class="quiet-details"><summary data-i18n="watch">Watch</summary><div class="demo-frame"><video controls muted playsinline preload="none" poster="./assets/brainvault-terminal-demo-poster.png"><source src="./assets/brainvault-terminal-demo.mp4" type="video/mp4" /></video></div></details>
+      <details class="quiet-details"><summary data-i18n="technical">Under the hood</summary><dl>
+        <div><dt data-i18n="input">Input</dt><dd data-i18n="normalization">Unicode NFKD, then exact UTF-8</dd></div>
+        <div><dt data-i18n="shard">Each shard</dt><dd>Argon2id v0x13 · 256 MiB · t=1 · p=1 · 32 bytes</dd></div>
+        <div><dt data-i18n="combination">Combination</dt><dd data-i18n="order">Strict numeric shard order · domain-separated BLAKE3</dd></div>
+        <div><dt data-i18n="output">Output</dt><dd data-i18n="wallets">Separate PRIMARY/SECONDARY wallets. Import with an empty BIP-39 passphrase.</dd></div>
       </dl></details>
     </section>
 
     <section class="section wrap run" id="run">
-      <h2 data-copy-key="safety">Recover first.<br />Fund second.</h2>
-      <ol class="safety"><li><span>01</span><p><strong>Strong, unique password.</strong> Never reused.</p></li><li><span>02</span><p><strong>Recover independently.</strong> Match the full first address.</p></li><li><span>03</span><p><strong>Forgotten means lost.</strong> Back up if needed.</p></li></ol>
-      <p class="plain-note">Trusted computer. No screen recording.</p>
-      <details class="audit-box" id="audit"><summary id="audit-summary">Audit</summary><div class="audit-body">
-        <p>Inspect code and dependencies. Build. Test. For script-free installation, use <code>--ignore-scripts</code>.</p>
-        <a class="text-link" href="https://github.com/xlnfinance/xln/blob/main/brainvault/docs/audit.md">Source-build guide ↗</a>
-        <div class="audit-prompt"><div><h3>Ask your model.</h3><button type="button" data-copy-target="#audit-prompt">Copy prompt</button></div>
-          <pre id="audit-prompt">Read AGENTS.md and docs/spec-v1.md. Audit entropy, determinism, native boundaries, disclosure, wiping, dependencies and binaries. Compare random seeds. No real secrets. Require P0/P1/P2 findings with file:line and failing tests. State unknowns; never a safety score.</pre>
+      <h2 data-i18n="safety">Recover first.<br />Fund second.</h2>
+      <ol class="safety"><li><span>01</span><p data-i18n="strong"><strong>Strong, unique password.</strong> Never reused.</p></li><li><span>02</span><p data-i18n="independent"><strong>Recover independently.</strong> Match the full first address.</p></li><li><span>03</span><p data-i18n="lost"><strong>Forgotten means lost.</strong> Back up if needed.</p></li></ol>
+      <p class="plain-note" data-i18n="trusted">Trusted computer. No screen recording.</p>
+      <details class="audit-box" id="audit"><summary id="audit-summary" data-i18n="audit">Audit</summary><div class="audit-body">
+        <p data-i18n="auditText">Inspect code and dependencies. Build. Test. For script-free installation, use <code>--ignore-scripts</code>.</p>
+        <a class="text-link" href="https://github.com/xlnfinance/xln/blob/main/brainvault/docs/audit.md" data-i18n="guide">Source-build guide (English) ↗</a>
+        <div class="audit-prompt"><div><h3 data-i18n="ask">Ask your model (English prompt).</h3><button type="button" data-copy-target="#audit-prompt" data-i18n="copyPrompt">Copy prompt</button></div>
+          <pre id="audit-prompt" lang="en">Read AGENTS.md and docs/spec-v1.md. Audit entropy, determinism, native boundaries, disclosure, wiping, dependencies and binaries. Compare random seeds. No real secrets. Require P0/P1/P2 findings with file:line and failing tests. State unknowns; never a safety score.</pre>
         </div>
       </div></details>
     </section>
   </main>
 
-  <footer class="wrap"><a class="brand" href="#top">BrainVault</a><p></p><div><a href="https://github.com/xlnfinance/xln/tree/main/brainvault">GitHub</a><a href="https://github.com/xlnfinance/xln/blob/main/brainvault/docs/spec-v1.md">Specification</a><span>© <span id="year">2026</span></span></div></footer>
+  <footer class="wrap"><a class="brand" href="#top">BrainVault</a><div><a href="https://github.com/xlnfinance/xln/tree/main/brainvault">GitHub</a><a href="https://github.com/xlnfinance/xln/blob/main/brainvault/docs/spec-v1.md" data-i18n="spec">Specification (English)</a><span>© <span id="year">2026</span></span></div></footer>
 </body>
 </html>

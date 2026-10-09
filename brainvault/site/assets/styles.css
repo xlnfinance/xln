@@ -185,10 +185,16 @@ footer a:hover { color: var(--text); }
 @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } *, *::before, *::after { transition: none !important; } }
 @media print { .topbar, .actions, button, video { display: none !important; } body { color: #111; background: #fff; } .section, .metrics, footer { border-color: #bbb; } }
 
-.variant-switch { display: flex; gap: 4px; margin-inline: 18px auto; }
-.variant-switch button { width: 44px; min-height: 44px; border: 0; color: var(--muted); background: none; font: 14px var(--mono); cursor: pointer; }
-.variant-switch button[aria-pressed="true"] { color: var(--bg); background: var(--text); }
-[data-copy-key] { white-space: pre-line; }
-body[data-variant="b"] h1, body[data-variant="b"] h2 { font-family: var(--serif); font-weight: 400; letter-spacing: -.04em; }
-body[data-variant="c"] h1 { font-family: var(--mono); font-size: clamp(40px,5vw,70px); letter-spacing: -.065em; }
-@media (max-width: 420px) { .variant-switch { gap: 0; margin-inline: 8px auto; } .variant-switch button { width: 36px; } .brand { gap: 6px; font-size: 14px; } }
+/* The selector replaces editorial preview controls in the public product. */
+.language-switch { margin-inline: 18px auto; }
+.language-switch select { max-width: 140px; min-height: 44px; padding: 8px; color: var(--text); background: var(--bg); border: 1px solid var(--strong); font: inherit; }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+select:focus-visible { outline: 2px solid var(--text); outline-offset: 4px; }
+h1, h2 { white-space: pre-line; overflow-wrap: anywhere; }
+.install-command { display: flex; flex-wrap: wrap; gap: 16px; padding-right: 0; }
+.install-command pre { flex: 1 1 170px; }
+.install-command button { position: static; flex: 0 1 auto; overflow-wrap: anywhere; max-width: 100%; }
+footer { grid-template-columns: auto 1fr; }
+footer div { justify-content: flex-end; flex-wrap: wrap; }
+@media (max-width: 900px) { nav { gap: 12px; } }
+@media (max-width: 680px) { .language-switch { margin-inline: auto 8px; } .language-switch select { max-width: 112px; } .brand { gap: 6px; font-size: 14px; } .topbar { gap: 8px; } footer { grid-template-columns: 1fr; } footer div { justify-content: flex-start; } }

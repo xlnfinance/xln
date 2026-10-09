@@ -1,23 +1,33 @@
-// Three editorial options share installation and safety behavior.
-const variants = {
-  a: { hero: 'Your wallet.\nFrom memory.', thesis: 'Nothing to carry.', how: 'Hard to guess.\nYours to recover.', explain: 'Argon2id makes guessing expensive. Not weak passwords strong.', safety: 'Recover first.\nFund second.' },
-  b: { hero: 'Carry less.\nRemember more.', thesis: 'Your secret becomes your wallet.', how: 'One secret.\nA costly guess.', explain: 'You wait to recover. Attackers work for every guess.', safety: 'Prove recovery.\nThen trust it.' },
-  c: { hero: 'Make every\nguess expensive.', thesis: 'A wallet derived from what you remember.', how: 'Memory,\nput to work.', explain: 'Argon2id adds work. Your password supplies the strength.', safety: 'Test it.\nThen fund it.' },
-};
-const variantButtons = [...document.querySelectorAll('[data-variant-button]')];
-function selectVariant(name) {
-  if (!Object.hasOwn(variants, name)) return;
-  for (const node of document.querySelectorAll('[data-copy-key]')) {
-    node.textContent = variants[name][node.dataset.copyKey];
+import { locales } from './locales.js';
+import { resolveLanguage } from './language.js';
+
+const language = document.querySelector('#language');
+let current = 'en';
+const translate = (key) => locales[current][key] ?? locales.en[key];
+function setLanguage(value) {
+  current = resolveLanguage(value);
+  document.documentElement.lang = current;
+  language.value = current;
+  language.setAttribute('aria-label', translate('language'));
+  document.title = translate('title');
+  const description = `${translate('thesis')} ${translate('explain')}`;
+  document.querySelector('meta[name="description"]').content = description;
+  document.querySelector('meta[property="og:description"]').content = description;
+  document.querySelector('meta[property="og:title"]').content = translate('title');
+  for (const node of document.querySelectorAll('[data-i18n-label]')) {
+    node.setAttribute('aria-label', translate(node.dataset.i18nLabel));
   }
-  for (const button of variantButtons) {
-    button.setAttribute('aria-pressed', String(button.dataset.variantButton === name));
+  for (const node of document.querySelectorAll('[data-i18n]')) {
+    node.textContent = translate(node.dataset.i18n);
   }
-  document.body.dataset.variant = name;
 }
-for (const button of variantButtons) {
-  button.addEventListener('click', () => selectVariant(button.dataset.variantButton));
-}
+let saved;
+try { saved = localStorage.getItem('brainvault-language'); } catch { /* Storage may be disabled; the page remains usable. */ }
+setLanguage(resolveLanguage(saved, navigator.languages));
+language.addEventListener('change', () => {
+  setLanguage(language.value);
+  try { localStorage.setItem('brainvault-language', current); } catch { /* Keep the choice for this page when storage is unavailable. */ }
+});
 
 const menuButton = document.querySelector('.menu-toggle');
 const navigation = document.querySelector('#nav');
@@ -42,6 +52,7 @@ function selectInstallTab(tab) {
   const selected = tab.getAttribute('data-install-tab');
   for (const candidate of installTabs) {
     candidate.setAttribute('aria-selected', String(candidate === tab));
+    candidate.tabIndex = candidate === tab ? 0 : -1;
   }
   for (const panel of document.querySelectorAll('[data-install-panel]')) {
     panel.hidden = panel.getAttribute('data-install-panel') !== selected;
@@ -64,44 +75,22 @@ for (const tab of installTabs) {
   });
 }
 
-for (const button of document.querySelectorAll('[data-copy]')) {
-  button.addEventListener('click', async () => {
-    const value = button.getAttribute('data-copy');
-    if (!value) {
-      return;
-    }
-
-    try {
-      await navigator.clipboard.writeText(value);
-      button.textContent = 'Copied';
-      window.setTimeout(() => {
-        button.textContent = 'Copy';
-      }, 1500);
-    } catch {
-      button.textContent = 'Select';
-    }
-  });
-}
-
 for (const button of document.querySelectorAll('[data-copy-target]')) {
   button.addEventListener('click', async () => {
-    const selector = button.getAttribute('data-copy-target');
-    const target = selector ? document.querySelector(selector) : null;
-    const value = target?.textContent?.trim();
-    if (!value) {
-      return;
-    }
-
-    const label = button.textContent;
+    const target = document.querySelector(button.dataset.copyTarget);
+    if (!target) return;
     try {
-      await navigator.clipboard.writeText(value);
-      button.textContent = 'Copied';
-      window.setTimeout(() => {
-        button.textContent = label;
-      }, 1500);
+      await navigator.clipboard.writeText(target.textContent.trim());
+      button.textContent = translate('copied');
     } catch {
-      button.textContent = 'Select prompt';
+      const range = document.createRange();
+      range.selectNodeContents(target);
+      const selection = window.getSelection();
+      selection.removeAllRanges();
+      selection.addRange(range);
+      button.textContent = translate('select');
     }
+    window.setTimeout(() => { button.textContent = translate(button.dataset.i18n); }, 2000);
   });
 }
 

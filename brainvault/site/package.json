@@ -2,7 +2,7 @@
   "name": "brainvault-site",
   "private": true,
   "scripts": {
-    "check": "bun check.ts",
+    "check": "bun test language.test.ts && bun check.ts",
     "check:live": "bun check.ts --live"
   }
 }

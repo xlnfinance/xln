@@ -36,8 +36,8 @@ async function localGates(): Promise<string> {
   gate(html.includes('<link rel="canonical" href="https://brainvault.sh/" />'), 'canonical URL drifted');
   gate(html.includes('bunx brainvault'), 'primary launch command disappeared');
   gate(!/brainvault@\d/.test(html), 'landing install commands must use latest');
-  gate((html.match(/data-variant-button=/g) ?? []).length === 3, 'exactly three A/B/C options required');
-  gate(['a', 'b', 'c'].every(name => html.includes(`data-variant-button="${name}"`)), 'A/B/C options drifted');
+  gate(html.includes('id="language"'), 'language selector missing');
+  gate(!html.includes('data-variant-button'), 'editorial draft controls must not ship');
   const installer = html.match(/<div class="installer"[\s\S]*?<\/section>/)?.[0];
   gate(installer && !installer.includes('--ignore-scripts'), 'advanced flags belong in the audit guide');
   const bodyWords = html.replace(/<head>[\s\S]*?<\/head>/g, '').replace(/<svg[\s\S]*?<\/svg>/g, '').replace(/<[^>]*>/g, ' ').trim().split(/\s+/).length;
@@ -66,7 +66,7 @@ async function localGates(): Promise<string> {
 
   const assets = Array.from(html.matchAll(/(?:href|src)="\.\/([^"]+)"/g), (match) => match[1]);
   gate(assets.length > 0, 'no local assets were discovered');
-  for (const asset of new Set(assets)) {
+  for (const asset of new Set([...assets, 'assets/language.js', 'assets/locales.js'])) {
     gate(await Bun.file(join(siteDir, asset)).exists(), `missing local asset: ${asset}`);
   }
 
@@ -95,6 +95,8 @@ async function liveGates(localHtml: string): Promise<void> {
   for (const asset of [
     'assets/styles.css',
     'assets/script.js',
+    'assets/language.js',
+    'assets/locales.js',
     'assets/favicon.svg',
     'assets/og-card.png',
     'assets/brainvault-terminal-demo-poster.png',
