@@ -2540,6 +2540,15 @@ fn validate_route_identity(
     route: &CanonicalValue,
 ) -> Result<(), EntityKernelError> {
     let order_id = route_order_id(kind, route)?;
+    // Match Account swap_offer admission before authorizing any lock. Otherwise
+    // a rejected offer leaves a lone lock and transport must halt publication.
+    if order_id.contains(':') {
+        return Err(rejected(
+            kind,
+            format!("CROSS_J_ORDER_ID_INVALID:{order_id}"),
+        ));
+    }
+
     let status = text(route, "status").ok_or_else(|| invalid(kind, "STATUS_MISSING"))?;
     if !matches!(
         status,
@@ -6625,6 +6634,40 @@ mod tests {
             arbitrary
                 .to_string()
                 .contains("RUNTIME_OUTPUT_SELF_FORBIDDEN")
+        );
+    }
+
+    #[test]
+    fn colon_order_id_rejects_before_authorization_and_valid_retry_applies() {
+        let mut state = EntityStateSlice::empty("source-user", 1_000);
+        let before = state.clone();
+        let mut bad = route("intent", false);
+        set(&mut bad, "orderId", string("cross:invalid")).unwrap();
+        let error = apply_prepare(
+            &mut state,
+            &tx(EntityTxKind::PrepareCrossJurisdictionSwap, bad),
+        )
+        .expect_err("colon orderId must reject before any Account lock or authorization");
+        assert!(
+            matches!(error, EntityKernelError::RejectedEntityTx { ref detail, .. }
+            if detail.contains("CROSS_J_ORDER_ID_INVALID"))
+        );
+        assert_eq!(state, before);
+        apply_prepare(
+            &mut state,
+            &tx(
+                EntityTxKind::PrepareCrossJurisdictionSwap,
+                route("intent", false),
+            ),
+        )
+        .expect("next valid intent");
+        assert!(
+            state
+                .cross_jurisdiction_authorizations
+                .as_ref()
+                .unwrap()
+                .get("order-1")
+                .is_some()
         );
     }
 

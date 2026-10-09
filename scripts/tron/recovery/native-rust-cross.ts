@@ -141,6 +141,14 @@ try {
       sourceUserSignerId: source.signerId, targetUserSignerId: target.signerId,
       sourceHubSignerId: sourceHub.signerId, targetHubSignerId: targetHub.signerId,
       sourceTokenId: 1, targetTokenId: 1, sourceAmount: amount, targetAmount: amount, expiresInMs: 600000 });
+    if (index === 0) {
+      // Exercise native sender rejection before the valid routes. The same
+      // Account roots, empty locks and successful swap below must still hold.
+      await send('reject-colon-order-id', [{ entityId: sourceHub.entityId, signerId: sourceHub.signerId,
+        entityTxs: [{ type: 'prepareCrossJurisdictionSwap', data: {
+          route: { ...submission.route, orderId: `${seed}:invalid`, routeHash: undefined },
+        } }] }]);
+    }
     await wallet.submitCrossJurisdictionIntent(submission.route);
   }
   const settled = async () => { const states = await Promise.all(hubs.map(hub => readNativeCrossState(api, hub.entityId)));
@@ -171,6 +179,10 @@ try {
     return snapshots;
   };
   await wait('native published outbox drained', async () => (await get('/api/health')).quiescence.pendingNetworkOutputs === 0);
+  for (const hub of hubs) {
+    const state = await readNativeCrossState(api, hub.entityId);
+    assert(!state.routes.some(route => route.orderId === `${seed}:invalid`), 'rejected intent never persisted as route');
+  }
   const economic = await verify(); const beforeRestart = await get('/api/info');
   const anchorBefore = await inspector.read<{ height: number; postStateHash: string; canonicalStateHash?: string }>('frame/latest');
   assert.match(anchorBefore.postStateHash, /^0x[0-9a-f]{64}$/);

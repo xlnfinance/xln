@@ -301,6 +301,12 @@ export const handlePrepareCrossJurisdictionSwapEntityTx = (
     addMessage(newState, `❌ Cross-j prepare invalid route: ${error instanceof Error ? error.message : String(error)}`);
     return { newState, outputs };
   }
+  // Account swap_offer forbids colons. Reject the signed intent before user
+  // authorization: otherwise lock admission can survive an evicted offer and
+  // leave a financial cohort that transport must refuse to publish.
+  if (route.orderId.includes(':')) {
+    throw new MalformedEntityFrameInputError('prepareCrossJurisdictionSwap', `CROSS_J_ORDER_ID_INVALID:${route.orderId}`);
+  }
   const localEntityId = normalizeEntityRef(newState.entityId);
   const sourceUserId = normalizeEntityRef(route.source.entityId);
   const targetUserId = normalizeEntityRef(route.target.counterpartyEntityId);

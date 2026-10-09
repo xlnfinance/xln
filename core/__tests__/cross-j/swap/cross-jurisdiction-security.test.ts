@@ -61,6 +61,30 @@ const buildRoute = (
 }, { runtimeSeed: seed, now: 1_000 });
 
 describe('cross-jurisdiction security invariants', () => {
+  test('cross-j colon orderId rejects before authorization and a valid retry still applies', async () => {
+    const env = createEmptyEnv('cross-order-id');
+    env.state.timestamp = 2_000;
+    const eth = makeJurisdiction('Ethereum', 1, '11', '12');
+    const tron = makeJurisdiction('Tron', 2, '21', '22');
+    installJurisdictions(env, eth, tron);
+    const prepared = buildRoute('cross:invalid', 'cross-order-id');
+    const route = { ...prepared, status: 'intent' as const, sourcePull: undefined, targetPull: undefined, routeHash: undefined,
+      sourceSignerId: addr('31'), sourceHubSignerId: addr('32'),
+      targetHubSignerId: addr('33'), targetSignerId: addr('34') };
+    const state = makeState(route.target.counterpartyEntityId, addr('34'), tron, route.target.entityId);
+    const before = state.crossJurisdictionAuthorizations?.size ?? 0;
+    const rejected = await applyEntityTx(env, state, { type: 'prepareCrossJurisdictionSwap', data: { route } });
+    expect(rejected.skippedError).toContain('CROSS_J_ORDER_ID_INVALID');
+    expect(rejected.newState).toBe(state);
+    expect(rejected.outputs).toEqual([]);
+    expect(rejected.accountTxs ?? []).toEqual([]);
+    expect(state.crossJurisdictionAuthorizations?.size ?? 0).toBe(before);
+    const valid = await applyEntityTx(env, state, { type: 'prepareCrossJurisdictionSwap',
+      data: { route: { ...route, orderId: 'cross-valid' } } });
+    expect(valid.skippedError).toBeUndefined();
+    expect(valid.newState.crossJurisdictionAuthorizations?.has('cross-valid')).toBe(true);
+  });
+
   test('prepared route accepts bounded Runtime clock skew and rejects larger future time', () => {
     const eth = makeJurisdiction('Ethereum', 1, '11', '12');
     const route = buildRoute('cross-clock-skew', 'cross-clock-skew', eth);

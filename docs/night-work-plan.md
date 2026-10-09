@@ -1,5 +1,27 @@
 # Autonomous xln work
 
+Cross-J orderId rejection fixed — 2026-10-09, base74623a0a7:
+- Reproduced TS and Rust accepting colon-containing orderId before Account
+  swap_offer later rejects it. Added typed rejection before authorization/lock
+  preparation, using the existing Account restriction. Transport remains strict.
+- Tests prove bad intent preserves state and the next valid intent applies:
+  TS related79/79, Rust entity-kernel221/221. Logs order-id-ts-related.log and
+  order-id-rust-green.log under .logs/mainnet-20261007; red logs retained.
+- Live native Ethereum/TRON passed after submitting the bad intent to Rust:
+  explicit CROSS_J_ORDER_ID_INVALID reject,then2 settled routes,4 exact Account
+  balances/peer roots,zero pending queues,and exact SIGKILL frame37 restoration.
+  Evidence native-rust-cross/order-id-20261009/ under the same log directory;
+  code5ae86b028706f703caa826d44812ef57c997477d30b57f2fc40a362e0b33d3c3,
+  binary0bdf1e3a2180c6e9ba8f90c4eac41c6d3394e82a5d4e8cc120d57eb38af54cbd.
+- Original immutable WAL replay passed TS W1/W4 and Rust W1/W4: each98 hub+74
+  user frames with exact roots/ordered outputs. Logs order-id-replay-*.log.
+- Whole bun run check PASSED handle92432 exit0 (39 gates,40 Rust executables),
+  and full contracts201/201 PASSED handle58427. Logs order-id-check.log and
+  order-id-contracts.log under .logs/mainnet-20261007.
+- NEXT: current full unit with strict semantic completeness, then full Svelte/React
+  E2E on both engines under the stand lock. No mainnet readiness or push claimed.
+  Concurrent frontend/UI work is outside this patch and must not be staged here.
+
 Latest verification — 2026-10-09, HEAD4d8ee444c plus narrow maintenance:
 - Reproduced folder-width failure (scripts/tron11>10); moved the existing native
   cross-J driver to scripts/tron/recovery/native-rust-cross.ts and updated imports.
