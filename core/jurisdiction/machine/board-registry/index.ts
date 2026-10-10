@@ -365,10 +365,9 @@ export const applyCertifiedBoardRegistryEvent = (
 
   let record: CertifiedBoardRecord;
   if (event.type === 'FoundationBootstrapped') {
-    const deployment = jurisdiction.entityProviderDeploymentBlock;
-    if (deployment !== undefined && Number(deployment) !== jHeight) {
-      throw new Error(`CERTIFIED_BOARD_BOOTSTRAP_HEIGHT_MISMATCH:expected=${String(deployment)}:actual=${jHeight}`);
-    }
+    // The record comes from the certified event alone. The configured
+    // deployment block is only the scan floor: a lower floor scans a superset,
+    // a higher one never observes this event and fails STACK_NOT_BOOTSTRAPPED.
     record = makeRecord({
       stackKey,
       entityId: FOUNDATION_ENTITY_ID,

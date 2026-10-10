@@ -1259,6 +1259,23 @@ describe('registered Entity certified board authority', () => {
       .toThrow('CERTIFIED_BOARD_NODE_MISSING');
   });
 
+  test('a deployment block below the bootstrap block is only a lower scan floor', () => {
+    // Rust CertifiedBoardState::apply_j_event never reads the configured
+    // deployment block; both engines must certify the observed bootstrap.
+    const env = createEmptyEnv('registry-bootstrap-floor');
+    const state = makeState(entity('77'), addr('77'), jurisdiction);
+    installEvents(env, state, [
+      event('FoundationBootstrapped', blockHash('31'), { height: 5 }),
+      event('EntityRegistered', blockHash('32'), { height: 6 }),
+    ]);
+    expect(lookupCertifiedBoardRecord(
+      getCertifiedBoardNodeStore(env),
+      state.certifiedBoardState!.boardRegistryRoot,
+      getCertifiedBoardStackKey(jurisdiction),
+      registeredEntityId,
+    )?.boardHash).toBe(blockHash('32'));
+  });
+
   test('orders multiple rotations in one block by logIndex and invalidates the old proof', () => {
     const env = createEmptyEnv('registry-rotation');
     const state = makeState(entity('77'), addr('77'), jurisdiction);
