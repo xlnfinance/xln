@@ -7,7 +7,7 @@ import { normalizeSubmitId } from '../command/submit-identity';
 import type { EntityInput } from '../../entity/types';
 import type { RuntimeReplica, RuntimeTx } from '../types';
 import type { JInput } from '../../jurisdiction/machine/input';
-import type { JAdapterFailure, JReplica, JTx } from '../../types/jurisdiction-runtime';
+import type { JAdapterFailure, JAdapterFailureCategory, JReplica, JTx } from '../../types/jurisdiction-runtime';
 import type { JAdapter, JSubmitResult } from '../../jurisdiction/adapter/types';
 import { getLocalSignerPrivateKey } from '../../account/crypto';
 import { isBatchEmpty } from '../../jurisdiction/machine/batch';
@@ -505,8 +505,8 @@ const readPreparedWire = async <T>(read: () => Promise<T>): Promise<T> => {
   }
 };
 
-const preparedWireFailure = (txHash: string, code: string): JSubmitResult =>
-  ({ ...makeJAdapterFailureResult(code, { category: 'terminal', code }), txHash });
+const preparedWireFailure = (txHash: string, code: string, category: JAdapterFailureCategory = 'terminal'): JSubmitResult =>
+  ({ ...makeJAdapterFailureResult(code, { category, code }), txHash });
 
 const REVERT_AWAITING_FINALITY = 'J_PREPARED_RECEIPT_REVERTED_AWAITING_FINALITY';
 
@@ -518,10 +518,7 @@ const classifyPreparedRevert = async (
   txHash: string,
   receipt: { blockNumber: number; blockHash: string },
 ): Promise<JSubmitResult> => {
-  const awaitingFinality = {
-    ...makeJAdapterFailureResult(REVERT_AWAITING_FINALITY, { category: 'transient', code: REVERT_AWAITING_FINALITY }),
-    txHash,
-  };
+  const awaitingFinality = preparedWireFailure(txHash, REVERT_AWAITING_FINALITY, 'transient');
   const depth = adapter.getFinalityDepth?.();
   const safeHead = await readPreparedWire(async () => adapter.getCurrentBlockNumber?.());
   if (safeHead === undefined || depth === undefined || !Number.isSafeInteger(depth) || depth < 0
@@ -541,16 +538,19 @@ const submitPreparedJBatch = async (adapter: JAdapter, raw: string): Promise<JSu
   if (!transaction.hash) throw new Error('J_PREPARED_HASH_MISSING');
   const txHash = transaction.hash;
   try {
+    const notMined = preparedWireFailure(txHash, 'J_SUBMIT_TRANSACTION_NOT_MINED', 'transient');
     let receipt = await readPreparedWire(() => adapter.provider.getTransactionReceipt(txHash));
     if (!receipt) {
       const pending = adapter.mode === 'tron' ? null : await readPreparedWire(() => adapter.provider.getTransaction(txHash));
-      if (!pending) {
-        const hash = await adapter.broadcastPreparedTransaction(raw);
-        if (hash.toLowerCase() !== txHash.toLowerCase()) return preparedWireFailure(txHash, 'J_PREPARED_BROADCAST_HASH_MISMATCH');
-      }
-      receipt = await readPreparedWire(() => adapter.provider.waitForTransaction(txHash, 1, 10_000));
+      if (pending) return notMined;
+      const hash = await adapter.broadcastPreparedTransaction(raw);
+      if (hash.toLowerCase() !== txHash.toLowerCase()) return preparedWireFailure(txHash, 'J_PREPARED_BROADCAST_HASH_MISMATCH');
+      // This runs under the Runtime frame writer: read once, never wait for
+      // mining. The receipt only serves API observers; the watcher and the next
+      // retry of this exact wire observe inclusion.
+      receipt = await readPreparedWire(() => adapter.provider.getTransactionReceipt(txHash));
+      if (!receipt) return notMined;
     }
-    if (!receipt) throw new Error('transaction was not mined');
     if (receipt.hash.toLowerCase() !== txHash.toLowerCase()) return preparedWireFailure(txHash, 'J_PREPARED_RECEIPT_HASH_MISMATCH');
     if (receipt.status !== 1) return await classifyPreparedRevert(adapter, txHash, receipt);
     return successfulJReceiptResult(receipt, eventCarriers(adapter.depository, adapter.entityProvider));
@@ -644,6 +644,8 @@ const recordFailedSubmit = async (
     jSubmitLog.info('tx.competing_finalization_awaiting_finality', fields);
   } else if (failure.code === 'DISPUTE_FINALIZATION_AWAITING_CHAIN_TIME') {
     jSubmitLog.info('tx.dispute_finalization_awaiting_chain_time', fields);
+  } else if (failure.code === 'J_SUBMIT_TRANSACTION_NOT_MINED') {
+    jSubmitLog.info('tx.broadcast_awaiting_inclusion', { ...fields, txHash: result.txHash ?? null });
   } else {
     jSubmitLog.error('tx.submit_failed', fields);
   }

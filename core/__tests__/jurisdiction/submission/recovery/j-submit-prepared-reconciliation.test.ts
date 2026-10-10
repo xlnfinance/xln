@@ -121,4 +121,42 @@ describe('prepared J batch wire reconciliation', () => {
       message: 'transaction reverted',
     });
   });
+
+  test('a broadcast never waits for mining under the Runtime frame writer', async () => {
+    // Waiting up to 10 s for one confirmation stalled every frame (payments,
+    // ACKs) on a 12 s-block chain although the receipt only serves observers.
+    const calls = { broadcast: 0, wait: 0 };
+    const { env, replica, jOutbox, txHash } = await preparedAttempt({
+      getTransactionReceipt: async () => null,
+      getTransaction: async () => null,
+      waitForTransaction: async () => {
+        calls.wait += 1;
+        return null;
+      },
+    }, {
+      broadcastPreparedTransaction: async () => {
+        calls.broadcast += 1;
+        return txHash;
+      },
+    });
+
+    const queued = await submit(env, jOutbox);
+
+    expect(calls).toEqual({ broadcast: 1, wait: 0 });
+    expect(queued).toHaveLength(1);
+    expect(queued[0]).toMatchObject({
+      type: 'recordJSubmitResult',
+      data: {
+        outcome: 'transientFailure',
+        txHash,
+        adapterFailure: { category: 'transient', code: 'J_SUBMIT_TRANSACTION_NOT_MINED' },
+      },
+    });
+    // Exactly one result owns the attempt and the signed wire stays the only
+    // pending copy, so the next retry rebroadcasts these same bytes.
+    await applyRuntimeTx(env, queued[0]!, { isReplay: true });
+    expect(replica.jSubmitState?.txHash).toBe(txHash);
+    expect(env.infrastructure?.pendingCommittedJOutbox).toHaveLength(1);
+    expect(await submit(env, jOutbox)).toEqual([]);
+  });
 });
