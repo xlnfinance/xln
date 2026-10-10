@@ -171,6 +171,32 @@ export const readBoundedEncodedValue = (
   ownerKey: Buffer,
 ): Promise<Buffer | null> => readEncodedValue(db, ownerKey);
 
+/**
+ * Logical bytes plus their decoded value. A single-row value is read and
+ * decoded once; a chunked value decodes once after its digest is verified.
+ */
+export const readBoundedDecodedValue = async (
+  db: Pick<RuntimeDbLike, 'get'>,
+  ownerKey: Buffer,
+): Promise<Readonly<{ encoded: Buffer; decoded: unknown }> | null> => {
+  const raw = await readRawOrNull(db, ownerKey);
+  if (!raw) return null;
+  const decoded = decodeBuffer(raw);
+  const manifest = maybeManifest(decoded);
+  if (!manifest) return { encoded: raw, decoded };
+  const encoded = await readManifestValue(db, ownerKey, manifest);
+  return { encoded, decoded: decodeBuffer(encoded) };
+};
+
+/** Continuation rows the owner row names; zero for a single-row or absent value. */
+export const readBoundedChunkCount = async (
+  db: Pick<RuntimeDbLike, 'get'>,
+  ownerKey: Buffer,
+): Promise<number> => {
+  const raw = await readRawOrNull(db, ownerKey);
+  return raw ? maybeManifest(decodeBuffer(raw))?.chunkCount ?? 0 : 0;
+};
+
 export const readBoundedValidatedValue = async <T>(
   db: RuntimeDbLike,
   ownerKey: Buffer,

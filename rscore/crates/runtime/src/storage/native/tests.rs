@@ -529,6 +529,111 @@ fn stable_runtime_machine_paths_overwrite_and_prune_only_obsolete_rows() {
 }
 
 #[test]
+fn large_runtime_machine_leaves_chunk_and_a_replacement_prunes_every_stale_chunk() {
+    let path = temporary_path("runtime-machine-large-leaf");
+    cleanup(&path);
+    let root = runtime_machine_leaf(json!([]), json!({"kind":"container","container":"object"}));
+    let atom = |name: &str, value: String| {
+        runtime_machine_leaf(
+            json!([{"kind":"property","name":name}]),
+            json!({"kind":"atom","value":value}),
+        )
+    };
+    // A pending J batch's encodedBatch is one atom whose width follows peers.
+    let batch = atom("batch", "b".repeat(30_000));
+    let gone = atom("gone", "g".repeat(12_000));
+    let shrunk = atom("batch", "small".into());
+    let physical = |leaf: &RuntimeMachineLeafRow| {
+        let key = runtime_machine_leaf_key(&leaf.path_bytes).expect("leaf key");
+        super::bounded::physical_rows(&key, &leaf.value_bytes).expect("physical rows")
+    };
+    let config = NativeStorageConfig {
+        checkpoint_period_frames: 1,
+        ..NativeStorageConfig::default()
+    };
+    let materialized = |state_root, runtime_machine_leaves| CheckpointGraph {
+        state_root,
+        full: false,
+        node_changes: Vec::new(),
+        runtime_machine_leaves,
+    };
+    let first = vec![root.clone(), batch.clone(), gone.clone()];
+    let stale = [physical(&batch), physical(&gone)].concat();
+    assert_eq!(stale.len(), 4 + 1 + 2 + 1);
+    {
+        let mut store = NativeRuntimeStore::open(&path, config.clone()).expect("open");
+        store
+            .append_frame(frame(
+                1,
+                vec![],
+                Some(materialized([0x11; 32], first.clone())),
+            ))
+            .expect("checkpoint with chunked machine leaves");
+        for (key, value) in &stale {
+            assert!(value.len() < super::bounded::MAX_PHYSICAL_VALUE_BYTES);
+            assert_eq!(
+                store.database.get(key).map(|bytes| bytes.to_vec()),
+                Some(value.clone())
+            );
+        }
+    }
+    // Reopen so the RAM key mirror is rebuilt from the chunked rows on disk.
+    let mut store = NativeRuntimeStore::open(&path, config.clone()).expect("reopen");
+    let leaf_map = |leaves: Vec<RuntimeMachineLeafRow>| {
+        leaves
+            .into_iter()
+            .map(|leaf| (leaf.path_bytes, leaf.value_bytes))
+            .collect::<BTreeMap<_, _>>()
+    };
+    let recovered = store.recover().expect("recover chunked leaves");
+    assert_eq!(
+        leaf_map(
+            recovered
+                .checkpoint
+                .expect("checkpoint")
+                .runtime_machine_leaves
+        ),
+        leaf_map(first.clone()),
+    );
+    let latest = vec![root, shrunk.clone()];
+    store
+        .append_frame(frame(
+            2,
+            vec![],
+            Some(materialized([0x22; 32], latest.clone())),
+        ))
+        .expect("replacement checkpoint");
+    let shrunk_key = runtime_machine_leaf_key(&shrunk.path_bytes).expect("key");
+    for (key, _) in &stale {
+        if key == &shrunk_key {
+            assert_eq!(
+                store.database.get(key).map(|bytes| bytes.to_vec()),
+                Some(shrunk.value_bytes.clone())
+            );
+        } else {
+            assert!(
+                store.database.get(key).is_none(),
+                "stale physical row {}",
+                hex(key)
+            );
+        }
+    }
+    drop(store);
+    let mut reopened = NativeRuntimeStore::open(&path, config).expect("reopen latest");
+    let checkpoint = reopened
+        .recover()
+        .expect("recover")
+        .checkpoint
+        .expect("checkpoint");
+    assert_eq!(
+        leaf_map(checkpoint.runtime_machine_leaves),
+        leaf_map(latest)
+    );
+    drop(reopened);
+    cleanup(&path);
+}
+
+#[test]
 fn missing_and_orphan_context_paths_are_rejected() {
     let contexts = typescript_entity_context_rows();
     let mut duplicate = contexts.rows().to_vec();
@@ -574,7 +679,7 @@ fn missing_and_orphan_context_paths_are_rejected() {
 }
 
 #[test]
-fn context_rows_require_canonical_framed_msgpack_below_ten_kilobytes() {
+fn context_rows_require_canonical_framed_msgpack_below_the_frame_bound() {
     let replica = format!("0x{}:0x{}", "11".repeat(32), "22".repeat(20));
     assert!(matches!(
         EntityContextPayloadRow::new(
@@ -585,26 +690,94 @@ fn context_rows_require_canonical_framed_msgpack_below_ten_kilobytes() {
         ),
         Err(EntityContextPayloadError::NonCanonical),
     ));
-    // Leaves and digest pages are one physical row each; the manifest is the
-    // one row bounded on disk, so only its logical size may pass 10 KB.
-    assert!(!matches!(
-        EntityContextPayloadRow::new(
-            &replica,
-            EntityContextPayloadKind::Manifest,
-            0,
-            vec![0x03; 10_000],
-        ),
-        Err(EntityContextPayloadError::RowBytes(_)),
-    ));
+    // Every row is bounded on disk, so a leaf's logical size may pass 10 KB
+    // (a peer-sized Profile or onion layer); only a whole-frame row is refused.
+    for kind in [
+        EntityContextPayloadKind::Manifest,
+        EntityContextPayloadKind::HtlcEntry,
+    ] {
+        assert!(!matches!(
+            EntityContextPayloadRow::new(&replica, kind, 0, vec![0x03; 10_000]),
+            Err(EntityContextPayloadError::RowBytes(_)),
+        ));
+    }
     assert!(matches!(
         EntityContextPayloadRow::new(
             replica,
             EntityContextPayloadKind::HtlcEntry,
             0,
-            vec![0x03; 10_000],
+            vec![0x03; MAX_ENTITY_CONTEXT_ROW_BYTES],
         ),
-        Err(EntityContextPayloadError::RowBytes(10_000)),
+        Err(EntityContextPayloadError::RowBytes(
+            MAX_ENTITY_CONTEXT_ROW_BYTES
+        )),
     ));
+}
+
+fn large_context_rows(replica: &str) -> EntityContextPayloadRows {
+    let entity = replica.split(':').next().expect("entity");
+    let signer = replica.split(':').nth(1).expect("signer");
+    let context = json!({
+        "version":1,"proposerReplicaId":replica,"entityId":entity,
+        "proposerSignerId":signer,"parentFrameHash":"genesis","height":2,
+        "gossipProfiles":[{"entityId":format!("0x{}", "aa".repeat(32)),"pad":"p".repeat(20_000)}],
+        "peerAssertions":[],
+        "htlc":{"version":1,"entries":[{"pad":"e".repeat(20_000)}],"originated":[]}
+    });
+    let canonical = crate::canonical_value_from_tagged_json(&context).expect("context");
+    crate::processor::prepare_entity_context_rows(replica, &canonical).expect("large rows")
+}
+
+#[test]
+fn large_context_leaves_use_canonical_chunks_and_recover_exactly() {
+    let path = temporary_path("entity-context-large-leaf");
+    cleanup(&path);
+    let replica = format!("0x{}:0x{}", "11".repeat(32), "22".repeat(20));
+    let contexts = large_context_rows(&replica);
+    let large = contexts
+        .rows()
+        .iter()
+        .filter(|row| row.value().len() >= super::bounded::MAX_PHYSICAL_VALUE_BYTES)
+        .collect::<Vec<_>>();
+    assert_eq!(
+        large.iter().map(|row| row.kind()).collect::<BTreeSet<_>>(),
+        BTreeSet::from([
+            EntityContextPayloadKind::GossipProfile,
+            EntityContextPayloadKind::HtlcEntry,
+        ]),
+    );
+    {
+        let mut store =
+            NativeRuntimeStore::open(&path, NativeStorageConfig::default()).expect("open");
+        store
+            .append_frame(frame_with_contexts(1, contexts.clone()))
+            .expect("durable frame with chunked context leaves");
+        for row in &large {
+            let physical = super::bounded::physical_rows(&row.key(1).expect("key"), row.value())
+                .expect("rows");
+            assert_eq!(physical.len(), 4);
+            for (key, value) in &physical {
+                assert!(value.len() < super::bounded::MAX_PHYSICAL_VALUE_BYTES);
+                assert_eq!(
+                    store.database.get(key).map(|bytes| bytes.to_vec()),
+                    Some(value.clone())
+                );
+            }
+        }
+        assert_eq!(
+            store
+                .read_durable_frame(1)
+                .expect("durable")
+                .entity_contexts,
+            contexts
+        );
+    }
+    let mut reopened =
+        NativeRuntimeStore::open(&path, NativeStorageConfig::default()).expect("reopen");
+    let recovered = reopened.recover().expect("recover");
+    assert_eq!(recovered.wal_frames[0].entity_contexts, contexts);
+    drop(reopened);
+    cleanup(&path);
 }
 
 #[test]

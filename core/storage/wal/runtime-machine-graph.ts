@@ -1,7 +1,11 @@
 /**
  * Runtime checkpoint storage is the exact structural projection of the RAM
- * value, not a machine blob. Containers become typed Patricia paths and only
- * bounded atoms live in leaves; the frame commits one root and leaf count.
+ * value, not a machine blob. Containers become typed Patricia paths and atoms
+ * live in leaves; the frame commits one root and leaf count. A row's physical
+ * value follows the shared bounded layout: its exact canonical bytes under
+ * 10 KB, otherwise a manifest plus continuation rows. One atom (a pending J
+ * batch's encodedBatch or signed rawTransaction) grows with peer-driven batch
+ * width, and the root hashes the logical value, never the physical rows.
  */
 import { computeIntegrityDigest } from '../../support/bytes/integrity-checksum';
 import { createStructuredLogger } from '../../support/logger';
@@ -23,10 +27,13 @@ import {
 } from '../../protocol/state/radix-merkle';
 import { validateStorageSafeValue } from '../../protocol/boundary/boundary-primitives';
 import { decodeBuffer, encodeBuffer } from '../codec/codec';
+import { prepareBoundedStorageValueRows, readBoundedDecodedValue } from '../codec/bounded-value';
 import { iterateKeys } from '../database/level';
+import { LIMITS } from '../../config/constants';
 import {
   KEY_RUNTIME_MACHINE_BRANCH,
   KEY_RUNTIME_MACHINE_LEAF,
+  keyBoundedValueChunkOwnerRange,
   keyRuntimeMachineBranch,
   keyRuntimeMachineLeaf,
   keyRuntimeMachineTreePrefix,
@@ -39,7 +46,8 @@ import type {
 } from '../types';
 import { validateDurableRuntimeMachineSnapshot } from './runtime-machine-schema';
 
-const MAX_RUNTIME_MACHINE_GRAPH_ROW_BYTES = 10_000;
+/** Rows are bounded on disk; one logical row may not exceed a whole frame. */
+const MAX_RUNTIME_MACHINE_GRAPH_ROW_BYTES = LIMITS.MAX_FRAME_SIZE_BYTES;
 const MAX_RUNTIME_MACHINE_GRAPH_DEPTH = 64;
 
 type PropertySegment = Readonly<{ kind: 'property'; name: string }>;
@@ -232,7 +240,7 @@ const buildStorageValueGraph = (value: unknown): StorageValueGraph => {
   return PersistentRadixValueMap.fromMap(entries, STORAGE_VALUE_GRAPH_OPTIONS);
 };
 
-const boundedRow = (key: Buffer, value: unknown): RuntimeMachineGraphRow => {
+const boundedRows = (key: Buffer, value: unknown): RuntimeMachineGraphRow[] => {
   const encoded = encodeBuffer(value, { omitSymbolKeys: true });
   if (encoded.byteLength >= MAX_RUNTIME_MACHINE_GRAPH_ROW_BYTES) {
     throw new Error(
@@ -240,7 +248,7 @@ const boundedRow = (key: Buffer, value: unknown): RuntimeMachineGraphRow => {
       `${key.toString('hex')}`,
     );
   }
-  return { key, value: encoded };
+  return prepareBoundedStorageValueRows(key, encoded);
 };
 
 const assertStorageRuntimeMachineProjection = (
@@ -270,9 +278,9 @@ export const prepareRuntimeMachineGraphRows = (
   if (!machine) return { rows: [] };
   assertStorageRuntimeMachineProjection(machine);
   const graph = buildStorageValueGraph(machine);
-  const rows = [...graph.nodeRecords()].map(record => record.kind === 'branch'
-    ? boundedRow(keyRuntimeMachineBranch(record.path), storageValueGraphBranchValue(record))
-    : boundedRow(keyRuntimeMachineLeaf(record.keyBytes), record.value));
+  const rows = [...graph.nodeRecords()].flatMap(record => record.kind === 'branch'
+    ? boundedRows(keyRuntimeMachineBranch(record.path), storageValueGraphBranchValue(record))
+    : boundedRows(keyRuntimeMachineLeaf(record.keyBytes), record.value));
   if (isRuntimePerfProfileEnabled('XLN_STORAGE_MACHINE_PROFILE')) {
     machineGraphLog.info('machine_graph.profile', {
       leaves: graph.size,
@@ -294,10 +302,35 @@ export const prepareRuntimeMachineGraphRows = (
 };
 
 /**
+ * Every physical row of the latest graph: 0x15/0x16 owner rows, then the 0x11
+ * continuations of chunked owners. A continuation key carries its owner's
+ * length before the owner bytes, so one exact range per distinct owner length
+ * enumerates them without reading or decoding any owner value.
+ */
+export async function* iterateRuntimeMachineGraphPhysicalKeys(
+  db: RuntimeDbLike,
+): AsyncGenerator<Buffer> {
+  const ownerLengths = new Set<number>();
+  for (const tag of [KEY_RUNTIME_MACHINE_BRANCH, KEY_RUNTIME_MACHINE_LEAF] as const) {
+    for await (const key of iterateKeys(db, { prefix: keyRuntimeMachineTreePrefix(tag) })) {
+      ownerLengths.add(key.byteLength);
+      yield key;
+    }
+  }
+  for (const length of [...ownerLengths].sort((left, right) => left - right)) {
+    yield* iterateKeys(
+      db,
+      keyBoundedValueChunkOwnerRange(length, KEY_RUNTIME_MACHINE_BRANCH, KEY_RUNTIME_MACHINE_LEAF),
+    );
+  }
+}
+
+/**
  * Plan one latest-only Runtime-machine graph replacement. The owning Runtime
  * is the WAL database itself; 0x15/0x16 are permanent branch/leaf namespaces.
- * Common paths are overwritten and paths unreachable from the new root are
- * deleted by the same authoritative batch that publishes the checkpoint.
+ * Common paths are overwritten; owner and continuation rows absent from the
+ * new physical row set are deleted by the same authoritative batch that
+ * publishes the checkpoint.
  */
 export const prepareRuntimeMachineGraphWrite = async (
   db: RuntimeDbLike,
@@ -306,10 +339,8 @@ export const prepareRuntimeMachineGraphWrite = async (
   const prepared = prepareRuntimeMachineGraphRows(machine);
   const retained = new Set(prepared.rows.map(row => row.key.toString('hex')));
   const dels: Buffer[] = [];
-  for (const tag of [KEY_RUNTIME_MACHINE_BRANCH, KEY_RUNTIME_MACHINE_LEAF] as const) {
-    for await (const key of iterateKeys(db, { prefix: keyRuntimeMachineTreePrefix(tag) })) {
-      if (!retained.has(key.toString('hex'))) dels.push(Buffer.from(key));
-    }
+  for await (const key of iterateRuntimeMachineGraphPhysicalKeys(db)) {
+    if (!retained.has(key.toString('hex'))) dels.push(Buffer.from(key));
   }
   return { ...prepared, dels };
 };
@@ -367,7 +398,7 @@ const exactBytes = (left: Uint8Array, right: Uint8Array): boolean =>
 
 const decodeStorageValueGraphLeaf = (
   pathBytes: Uint8Array,
-  valueBytes: Uint8Array,
+  decodedValue: unknown,
 ): readonly [StorageValueGraphPath, StorageValueGraphValue] => {
   const path = decodeStorageValueGraphPath(
     decodeBuffer(Buffer.from(pathBytes)),
@@ -376,10 +407,14 @@ const decodeStorageValueGraphLeaf = (
   if (!exactBytes(storageValueGraphPathBytes(path), pathBytes)) {
     throw new Error('STORAGE_RUNTIME_MACHINE_LEAF_PATH_NON_CANONICAL');
   }
-  return [path, decodeStorageValueGraphValue(
-    decodeBuffer(Buffer.from(valueBytes)),
-    'STORAGE_RUNTIME_MACHINE_LEAF_VALUE',
-  )];
+  return [path, decodeStorageValueGraphValue(decodedValue, 'STORAGE_RUNTIME_MACHINE_LEAF_VALUE')];
+};
+
+/** Logical value of one owner row, reassembled from continuations when chunked. */
+const readGraphRowValue = async (db: RuntimeDbLike, key: Buffer): Promise<unknown> => {
+  const row = await readBoundedDecodedValue(db, key);
+  if (!row) throw new Error(`STORAGE_RUNTIME_MACHINE_ROW_MISSING:${key.toString('hex')}`);
+  return row.decoded;
 };
 
 const readGraphRecords = async (
@@ -389,12 +424,12 @@ const readGraphRecords = async (
   const branchPrefix = keyRuntimeMachineTreePrefix(KEY_RUNTIME_MACHINE_BRANCH);
   for await (const key of iterateKeys(db, { prefix: branchPrefix })) {
     const parsed = parseRuntimeMachineBranchKey(key);
-    records.push(decodeStorageValueGraphBranch(decodeBuffer(await db.get(key)), parsed.path));
+    records.push(decodeStorageValueGraphBranch(await readGraphRowValue(db, key), parsed.path));
   }
   const leafPrefix = keyRuntimeMachineTreePrefix(KEY_RUNTIME_MACHINE_LEAF);
   for await (const key of iterateKeys(db, { prefix: leafPrefix })) {
     const parsed = parseRuntimeMachineLeafKey(key);
-    const [path, value] = decodeStorageValueGraphLeaf(parsed.payload, await db.get(key));
+    const [path, value] = decodeStorageValueGraphLeaf(parsed.payload, await readGraphRowValue(db, key));
     records.push({
       kind: 'leaf',
       path: radixMerklePathSlots(parsed.payload, 16),
@@ -510,7 +545,8 @@ export const decodeRuntimeMachineGraphLeaves = (
   rows: readonly Readonly<{ pathBytes: Uint8Array; valueBytes: Uint8Array }>[],
   expected: RuntimeMachineGraphRoot,
 ): Record<string, unknown> => {
-  const entries = rows.map(row => decodeStorageValueGraphLeaf(row.pathBytes, row.valueBytes));
+  const entries = rows.map(row =>
+    decodeStorageValueGraphLeaf(row.pathBytes, decodeBuffer(Buffer.from(row.valueBytes))));
   const graph = PersistentRadixValueMap.fromMap(entries, STORAGE_VALUE_GRAPH_OPTIONS);
   return validateRuntimeMachineGraph(graph, expected);
 };

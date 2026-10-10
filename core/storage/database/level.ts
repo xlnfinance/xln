@@ -83,10 +83,20 @@ export const measurePrefixBytes = async (db: RuntimeDbLike, prefix: Buffer): Pro
   return { count, bytes, maxValueBytes };
 };
 
-export const copyKeyRange = async (
+export const copyKeyRange = (
   sourceDb: RuntimeDbLike,
   targetDb: RuntimeDbLike,
   range: KeyRangeOptions,
+  mapKey: (key: Buffer) => Buffer | null = (key) => key,
+  onBatchCommitted?: () => void | Promise<void>,
+): Promise<{ bytes: number; count: number }> =>
+  copyKeys(sourceDb, targetDb, iterateKeys(sourceDb, range), mapKey, onBatchCommitted);
+
+/** Copy exactly the given source keys in bounded target batches. */
+export const copyKeys = async (
+  sourceDb: RuntimeDbLike,
+  targetDb: RuntimeDbLike,
+  keys: AsyncIterable<Buffer>,
   mapKey: (key: Buffer) => Buffer | null = (key) => key,
   onBatchCommitted?: () => void | Promise<void>,
 ): Promise<{ bytes: number; count: number }> => {
@@ -103,7 +113,7 @@ export const copyKeyRange = async (
     batchCount = 0;
   };
 
-  for await (const key of iterateKeys(sourceDb, range)) {
+  for await (const key of keys) {
     const targetKey = mapKey(key);
     if (!targetKey) continue;
     const value = await sourceDb.get(key);

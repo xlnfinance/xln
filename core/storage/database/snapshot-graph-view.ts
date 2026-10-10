@@ -6,6 +6,7 @@
  */
 import { Buffer } from '../../support/platform-crypto';
 import {
+  KEY_BOUNDED_VALUE_CHUNK,
   KEY_LIVE_ACCOUNT,
   KEY_LIVE_ACCOUNT_BRANCH,
   KEY_LIVE_ACCOUNT_FIELD,
@@ -20,6 +21,7 @@ import {
   KEY_SNAPSHOT_ENTITY,
   encodeHeight,
   keySnapshotGraph,
+  parseBoundedValueChunkKey,
   parseSnapshotGraphKey,
 } from '../keys';
 import type { RuntimeDbLike } from '../types';
@@ -58,6 +60,13 @@ const isEntityGraphKey = (key: Buffer): boolean =>
 
 const isRuntimeMachineGraphKey = (key: Buffer): boolean =>
   key[0] === KEY_RUNTIME_MACHINE_BRANCH || key[0] === KEY_RUNTIME_MACHINE_LEAF;
+
+/** A graph row or one continuation of a chunked graph row, both copied verbatim. */
+export const isRuntimeMachineGraphPhysicalKey = (key: Buffer): boolean =>
+  isRuntimeMachineGraphKey(key) || (
+    key[0] === KEY_BOUNDED_VALUE_CHUNK &&
+    isRuntimeMachineGraphKey(parseBoundedValueChunkKey(key).ownerKey)
+  );
 
 const snapshotKey = (height: number, liveKey: Buffer): Buffer =>
   liveKey[0] === KEY_LIVE_ACCOUNT
@@ -139,7 +148,7 @@ export const createSnapshotRuntimeMachineGraphView = (
   height: number,
 ): RuntimeDbLike => ({
   get: (key: Buffer) => {
-    if (!isRuntimeMachineGraphKey(key)) {
+    if (!isRuntimeMachineGraphPhysicalKey(key)) {
       throw new Error(`STORAGE_SNAPSHOT_RUNTIME_MACHINE_KEY_UNSUPPORTED:${key.toString('hex')}`);
     }
     return db.get(keySnapshotGraph(height, key));

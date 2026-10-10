@@ -17,11 +17,15 @@ mod types;
 
 use thiserror::Error;
 
+#[cfg(test)]
+pub(crate) use bounded::physical_rows;
 pub use entity_context::{
     EntityContextPayloadDigest, EntityContextPayloadError, EntityContextPayloadKind,
     EntityContextPayloadRow, EntityContextPayloadRows,
 };
-pub(crate) use entity_context::{entity_context_height_prefix, parse_entity_context_payload_key};
+pub(crate) use entity_context::{
+    MAX_ENTITY_CONTEXT_ROW_BYTES, entity_context_height_prefix, parse_entity_context_payload_key,
+};
 pub(crate) use frame::decode_and_validate_runtime_frame;
 pub use frame::{
     AccountAuthorityCheckpointRef, CanonicalRuntimeFrameDraft, CanonicalStateCommitment,

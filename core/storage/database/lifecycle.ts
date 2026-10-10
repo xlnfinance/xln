@@ -1,10 +1,11 @@
 import { encodeBuffer, writeBatch } from '../codec/codec';
-import { copyKeyRange, deleteKeyRange, deleteKeys, iterateKeys, readValidatedOrNull } from './level';
+import { copyKeyRange, copyKeys, deleteKeyRange, deleteKeys, iterateKeys, readValidatedOrNull } from './level';
 import {
   BOUNDED_STORAGE_DELETE_BATCH_SIZE,
   deleteBoundedStorageValues,
 } from '../codec/bounded-value';
 import {
+  KEY_ENTITY_CONTEXT_PAYLOAD,
   KEY_FRAME,
   KEY_HEAD,
   KEY_LIVE_ACCOUNT,
@@ -19,8 +20,7 @@ import {
   KEY_LIVE_ENTITY_FIELD,
   KEY_LIVE_ENTITY_LEAF,
   KEY_LIVE_REPLICA_META,
-  KEY_RUNTIME_MACHINE_BRANCH,
-  KEY_RUNTIME_MACHINE_LEAF,
+  KEY_RUNTIME_OUTPUT_ROW,
   KEY_CERTIFIED_BOARD_NODE,
   KEY_ACCOUNT_J_CLAIM_NODE,
   KEY_SNAPSHOT_ACCOUNT,
@@ -39,7 +39,6 @@ import {
   keySnapshotGraph,
   keySnapshotGraphPrefix,
   keySnapshotReplicaMetaPrefix,
-  keyRuntimeOutputRowPrefix,
   parseRuntimeOutputRowKey,
   parseLiveBookKey,
   parseSnapshotAccountKey,
@@ -50,6 +49,7 @@ import { readSnapshotBookGraph } from '../read/book-graph';
 import { readAccountStorageLayout } from '../schema/account-layout';
 import { readEntityStorageLayout } from '../schema/entity/layout';
 import { createSnapshotAccountGraphView, createSnapshotEntityGraphView } from './snapshot-graph-view';
+import { iterateRuntimeMachineGraphPhysicalKeys } from '../wal/runtime-machine-graph';
 import type {
   RuntimeDbLike,
   StorageDoc,
@@ -347,20 +347,18 @@ export const createSnapshot = async (
     written += copied.count;
     bytes += copied.bytes;
   }
-  for (const graphTag of [
-    KEY_RUNTIME_MACHINE_BRANCH,
-    KEY_RUNTIME_MACHINE_LEAF,
-  ] as const) {
-    const copied = await copyKeyRange(
-      targetDb,
-      targetDb,
-      { prefix: Buffer.from([graphTag]) },
-      key => keySnapshotGraph(height, key),
-      async () => onPersistenceBoundary?.('after-snapshot-body-batch'),
-    );
-    written += copied.count;
-    bytes += copied.bytes;
-  }
+  // Branch/leaf rows and the continuations of chunked rows are copied
+  // verbatim under the same live keys, so pruneSnapshot's height prefix owns
+  // every one of them.
+  const runtimeMachine = await copyKeys(
+    targetDb,
+    targetDb,
+    iterateRuntimeMachineGraphPhysicalKeys(targetDb),
+    key => keySnapshotGraph(height, key),
+    async () => onPersistenceBoundary?.('after-snapshot-body-batch'),
+  );
+  written += runtimeMachine.count;
+  bytes += runtimeMachine.bytes;
   const replicaMetas = await copyKeyRange(
     targetDb,
     targetDb,
@@ -424,6 +422,17 @@ export const maybeRotateSnapshots = async (
   return removedBytes;
 };
 
+/**
+ * Height-prefixed WAL rows owned by one Runtime frame. Each owner row may be
+ * a bounded manifest, so deletion goes through the bounded deleter and takes
+ * its continuation rows in the same batch.
+ */
+const WAL_HEIGHT_OWNER_FAMILIES = [
+  { tag: KEY_FRAME, height: (key: Buffer): number => decodeHeight(key) },
+  { tag: KEY_RUNTIME_OUTPUT_ROW, height: (key: Buffer): number => parseRuntimeOutputRowKey(key).height },
+  { tag: KEY_ENTITY_CONTEXT_PAYLOAD, height: (key: Buffer): number => decodeHeight(key) },
+] as const;
+
 export const pruneWalBeforeHeight = async (
   db: RuntimeDbLike,
   heightInclusive: number,
@@ -442,25 +451,18 @@ export const pruneWalBeforeHeight = async (
     removedBytes += (await deleteBoundedStorageValues(db, ownerKeys, onPruneBatch)).removedBytes;
     ownerKeys = [];
   };
-  for await (const key of iterateKeys(db, {
-    gte: Buffer.from([KEY_FRAME]),
-    lt: Buffer.concat([Buffer.from([KEY_FRAME]), encodeHeight(cutoff + 1)]),
-  })) {
-    if (retainedSnapshots.has(decodeHeight(key))) continue;
-    ownerKeys.push(key);
-    if (ownerKeys.length >= BOUNDED_STORAGE_DELETE_BATCH_SIZE) await flush();
+  for (const family of WAL_HEIGHT_OWNER_FAMILIES) {
+    for await (const key of iterateKeys(db, {
+      gte: Buffer.from([family.tag]),
+      lt: Buffer.concat([Buffer.from([family.tag]), encodeHeight(cutoff + 1)]),
+    })) {
+      if (retainedSnapshots.has(family.height(key))) continue;
+      ownerKeys.push(key);
+      if (ownerKeys.length >= BOUNDED_STORAGE_DELETE_BATCH_SIZE) await flush();
+    }
+    await flush();
   }
-  await flush();
-  for await (const key of iterateKeys(db, {
-    gte: keyRuntimeOutputRowPrefix(),
-    lt: Buffer.concat([keyRuntimeOutputRowPrefix(), encodeHeight(cutoff + 1)]),
-  })) {
-    const { height } = parseRuntimeOutputRowKey(key);
-    if (retainedSnapshots.has(height)) continue;
-    ownerKeys.push(key);
-    if (ownerKeys.length >= BOUNDED_STORAGE_DELETE_BATCH_SIZE) await flush();
-  }
-  await flush();
   return removedBytes;
 };
+
 import { Buffer } from '../../support/platform-crypto';

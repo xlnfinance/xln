@@ -5,6 +5,7 @@
  * Human-audit importance: 98/100 — prevents incomplete/corrupt recovery roots.
  */
 import {
+  KEY_BOUNDED_VALUE_CHUNK,
   KEY_LIVE_ACCOUNT_BRANCH,
   KEY_LIVE_ACCOUNT_FIELD,
   KEY_LIVE_ACCOUNT_LEAF,
@@ -13,8 +14,6 @@ import {
   KEY_LIVE_ENTITY_BRANCH,
   KEY_LIVE_ENTITY_FIELD,
   KEY_LIVE_ENTITY_LEAF,
-  KEY_RUNTIME_MACHINE_BRANCH,
-  KEY_RUNTIME_MACHINE_LEAF,
   KEY_CERTIFIED_BOARD_NODE,
   KEY_ACCOUNT_J_CLAIM_NODE,
   keySnapshotAccount,
@@ -35,11 +34,16 @@ import {
   parseLiveEntityLeafKey,
   parseCertifiedBoardPathNodeKey,
   parseAccountJClaimPathNodeKey,
+  parseBoundedValueChunkKey,
   parseSnapshotAccountKey,
   parseSnapshotGraphKey,
   parseSnapshotEntityKey,
 } from '../../keys';
-import { createSnapshotRuntimeMachineGraphView } from '../../database/snapshot-graph-view';
+import {
+  createSnapshotRuntimeMachineGraphView,
+  isRuntimeMachineGraphPhysicalKey,
+} from '../../database/snapshot-graph-view';
+import { readBoundedChunkCount } from '../../codec/bounded-value';
 import { decodeValidatedBuffer } from '../../codec/codec';
 import { iterateKeys } from '../../database/level';
 import { ACCOUNT_TREE_NAMESPACE_TAG } from '../../schema/account-graph-codec';
@@ -183,29 +187,45 @@ const validateAuxiliaryRow = (tag: number | undefined, value: Buffer): void => {
   }
 };
 
+/**
+ * A copied continuation must belong to a chunked Runtime-machine row of the
+ * same snapshot and lie inside the chunk count that row's manifest names;
+ * anything else is orphan bytes the graph traversal would never read.
+ */
+const assertSnapshotMachineChunkOwned = async (
+  machineView: RuntimeDbLike,
+  liveKey: Buffer,
+  chunkCounts: Map<string, number>,
+): Promise<void> => {
+  const { ownerKey, chunkIndex } = parseBoundedValueChunkKey(liveKey);
+  const owner = ownerKey.toString('hex');
+  const chunkCount = chunkCounts.get(owner) ?? await readBoundedChunkCount(machineView, ownerKey);
+  chunkCounts.set(owner, chunkCount);
+  if (chunkIndex >= chunkCount) {
+    throw new Error(`STORAGE_SNAPSHOT_GRAPH_CHUNK_ORPHAN:${liveKey.toString('hex')}`);
+  }
+};
+
 /** Returns the exact graph-row count after validating every row and owner. */
 export const inspectSnapshotGraphRows = async (
   db: RuntimeDbLike,
   height: number,
   runtimeMachineRoot?: RuntimeMachineGraphRoot,
 ): Promise<number> => {
-  if (runtimeMachineRoot) {
-    await readRuntimeMachineGraph(
-      createSnapshotRuntimeMachineGraphView(db, height),
-      runtimeMachineRoot,
-    );
-  }
+  const machineView = createSnapshotRuntimeMachineGraphView(db, height);
+  if (runtimeMachineRoot) await readRuntimeMachineGraph(machineView, runtimeMachineRoot);
   const owners = await collectSnapshotOwners(db, height);
+  const machineChunkCounts = new Map<string, number>();
   let count = 0;
   for await (const key of iterateKeys(db, { prefix: keySnapshotGraphPrefix(height) })) {
     const parsed = parseSnapshotGraphKey(key);
     if (parsed.height !== height) throw new Error('STORAGE_SNAPSHOT_GRAPH_HEIGHT_MISMATCH');
-    if (
-      parsed.liveKey[0] === KEY_RUNTIME_MACHINE_BRANCH ||
-      parsed.liveKey[0] === KEY_RUNTIME_MACHINE_LEAF
-    ) {
+    if (isRuntimeMachineGraphPhysicalKey(parsed.liveKey)) {
       if (!runtimeMachineRoot) {
         throw new Error('STORAGE_SNAPSHOT_RUNTIME_MACHINE_ROOT_MISSING');
+      }
+      if (parsed.liveKey[0] === KEY_BOUNDED_VALUE_CHUNK) {
+        await assertSnapshotMachineChunkOwned(machineView, parsed.liveKey, machineChunkCounts);
       }
       count += 1;
       continue;

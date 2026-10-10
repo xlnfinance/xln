@@ -166,14 +166,21 @@ export const keyFrame = (height: number): Buffer => Buffer.concat([Buffer.from([
  * Content digests verify bytes in the owner manifest; they never address rows.
  * The explicit owner-key length makes prefixes unambiguous for variable keys.
  */
-const keyBoundedValueChunkPrefix = (ownerKey: Buffer): Buffer => {
-  if (ownerKey.byteLength < 1 || ownerKey.byteLength > 0xffff) {
-    throw new Error(`STORAGE_BOUNDED_OWNER_KEY_BYTES_INVALID:${ownerKey.byteLength}`);
+const boundedOwnerLengthBytes = (ownerKeyLength: number): Buffer => {
+  if (!Number.isSafeInteger(ownerKeyLength) || ownerKeyLength < 1 || ownerKeyLength > 0xffff) {
+    throw new Error(`STORAGE_BOUNDED_OWNER_KEY_BYTES_INVALID:${ownerKeyLength}`);
   }
   const length = Buffer.allocUnsafe(2);
-  length.writeUInt16BE(ownerKey.byteLength);
-  return Buffer.concat([Buffer.from([KEY_BOUNDED_VALUE_CHUNK]), length, ownerKey]);
+  length.writeUInt16BE(ownerKeyLength);
+  return length;
 };
+
+const keyBoundedValueChunkPrefix = (ownerKey: Buffer): Buffer =>
+  Buffer.concat([
+    Buffer.from([KEY_BOUNDED_VALUE_CHUNK]),
+    boundedOwnerLengthBytes(ownerKey.byteLength),
+    ownerKey,
+  ]);
 
 export const keyBoundedValueChunk = (ownerKey: Buffer, chunkIndex: number): Buffer => {
   if (!Number.isSafeInteger(chunkIndex) || chunkIndex < 0 || chunkIndex > 0xffff_ffff) {
@@ -184,12 +191,46 @@ export const keyBoundedValueChunk = (ownerKey: Buffer, chunkIndex: number): Buff
   return Buffer.concat([keyBoundedValueChunkPrefix(ownerKey), index]);
 };
 
-export const keySnapshotManifest = (height: number): Buffer => Buffer.concat([Buffer.from([KEY_SNAPSHOT_MANIFEST]), encodeHeight(height)]);
+export const parseBoundedValueChunkKey = (
+  key: Buffer,
+): Readonly<{ ownerKey: Buffer; chunkIndex: number }> => {
+  const ownerKeyLength = key.byteLength >= 3 ? key.readUInt16BE(1) : 0;
+  if (key[0] !== KEY_BOUNDED_VALUE_CHUNK || ownerKeyLength < 1 || key.byteLength !== ownerKeyLength + 7) {
+    throw new Error(`STORAGE_BOUNDED_CHUNK_KEY_INVALID:${key.toString('hex')}`);
+  }
+  return {
+    ownerKey: key.subarray(3, 3 + ownerKeyLength),
+    chunkIndex: key.readUInt32BE(3 + ownerKeyLength),
+  };
+};
 
-export const keyRuntimeOutputRowPrefix = (height?: number): Buffer =>
-  height === undefined
-    ? Buffer.from([KEY_RUNTIME_OUTPUT_ROW])
-    : Buffer.concat([Buffer.from([KEY_RUNTIME_OUTPUT_ROW]), encodeHeight(height)]);
+/**
+ * Exactly the continuation rows of owners with this byte length whose first
+ * byte lies in `[firstOwnerTag, lastOwnerTag]`: the owner length precedes the
+ * owner bytes, so no other owner's continuation sorts inside the range.
+ */
+export const keyBoundedValueChunkOwnerRange = (
+  ownerKeyLength: number,
+  firstOwnerTag: number,
+  lastOwnerTag: number,
+): Readonly<{ gte: Buffer; lt: Buffer }> => {
+  if (
+    !Number.isSafeInteger(firstOwnerTag) || !Number.isSafeInteger(lastOwnerTag) ||
+    firstOwnerTag < 0 || lastOwnerTag < firstOwnerTag || lastOwnerTag >= 0xff
+  ) {
+    throw new Error(`STORAGE_BOUNDED_OWNER_TAG_RANGE_INVALID:${firstOwnerTag}:${lastOwnerTag}`);
+  }
+  const prefix = Buffer.concat([
+    Buffer.from([KEY_BOUNDED_VALUE_CHUNK]),
+    boundedOwnerLengthBytes(ownerKeyLength),
+  ]);
+  return {
+    gte: Buffer.concat([prefix, Buffer.from([firstOwnerTag])]),
+    lt: Buffer.concat([prefix, Buffer.from([lastOwnerTag + 1])]),
+  };
+};
+
+export const keySnapshotManifest = (height: number): Buffer => Buffer.concat([Buffer.from([KEY_SNAPSHOT_MANIFEST]), encodeHeight(height)]);
 
 export const keyRuntimeOutputRow = (height: number, outputIndex: number): Buffer => {
   if (!Number.isSafeInteger(outputIndex) || outputIndex < 0 || outputIndex > 0xffff_ffff) {
@@ -197,7 +238,7 @@ export const keyRuntimeOutputRow = (height: number, outputIndex: number): Buffer
   }
   const index = Buffer.allocUnsafe(4);
   index.writeUInt32BE(outputIndex);
-  return Buffer.concat([keyRuntimeOutputRowPrefix(height), index]);
+  return Buffer.concat([Buffer.from([KEY_RUNTIME_OUTPUT_ROW]), encodeHeight(height), index]);
 };
 
 export const parseRuntimeOutputRowKey = (

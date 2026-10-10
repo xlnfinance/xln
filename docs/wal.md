@@ -42,6 +42,13 @@ parallel financial representation.
 - Every LevelDB value MUST encode to fewer than `10_000` bytes. An oversized
   value fails loudly until that semantic value has an approved bounded-page
   design.
+- The approved design for one whole logical row is the shared bounded-value
+  layout (`core/storage/codec/bounded-value.ts`, Rust
+  `rscore/crates/runtime/src/storage/native/bounded.rs`): below `10_000` bytes the row is its exact
+  canonical bytes; otherwise a manifest plus `0x11` continuation rows keyed by
+  owner key and index. Runtime frames, outbox rows, every Entity-context row and
+  every Runtime-machine graph row use it. Digests and roots always hash the
+  logical value, and deletion removes the continuations with their owner.
 - The storage shape imposes no fixed Account-count limit on an Entity. Account
   admission economics, Hashcash and bonds are separate resource policies; they
   MUST NOT reintroduce a traversal-based or consensus-state capacity ceiling.

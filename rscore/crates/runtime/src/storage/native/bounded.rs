@@ -10,6 +10,9 @@ use super::NativeStorageError;
 pub(super) const MAX_PHYSICAL_VALUE_BYTES: usize = 10_000;
 const CHUNK_PAYLOAD_BYTES: usize = 9_000;
 const KEY_BOUNDED_VALUE_CHUNK: u8 = 0x11;
+/// A manifest is five short scalars (~120 bytes). A larger owner row is the
+/// payload itself, so it is never decoded a second time just to learn that.
+const MAX_MANIFEST_BYTES: usize = 4_096;
 type PhysicalRow = (Vec<u8>, Vec<u8>);
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -20,12 +23,15 @@ struct Manifest {
 }
 
 pub(super) fn uses_generic_bounded_layout(key: &[u8]) -> bool {
-    // 0x14 Entity-context rows: leaves and digest pages stay under one
-    // physical value; the manifest's page lists grow with the frame and chunk.
-    matches!(key.first(), Some(0x14 | 0x18 | 0x19))
+    // 0x14 Entity-context rows: a peer sizes Profile and HTLC-envelope
+    // leaves and the manifest's page lists grow with the frame. 0x16
+    // Runtime-machine leaves: one atom (a pending J batch's encodedBatch or
+    // rawTransaction) grows with peer-driven batch width. 0x18/0x19 Rust
+    // Account rows. Every such row under 10 KB stays its exact bytes.
+    matches!(key.first(), Some(0x14 | 0x16 | 0x18 | 0x19))
 }
 
-pub(super) fn physical_rows(
+pub(crate) fn physical_rows(
     owner_key: &[u8],
     encoded: &[u8],
 ) -> Result<Vec<PhysicalRow>, NativeStorageError> {
@@ -92,14 +98,28 @@ pub(super) fn physical_keys_for_value(
     owner_key: &[u8],
     encoded: &[u8],
 ) -> Result<Vec<Vec<u8>>, NativeStorageError> {
+    physical_keys_for_length(owner_key, encoded.len())
+}
+
+/// Same derivation from the logical byte length alone, for RAM mirrors that
+/// keep only the length of each durable value.
+pub(super) fn physical_keys_for_length(
+    owner_key: &[u8],
+    logical_length: usize,
+) -> Result<Vec<Vec<u8>>, NativeStorageError> {
     let mut keys = Vec::new();
-    if uses_generic_bounded_layout(owner_key) && encoded.len() >= MAX_PHYSICAL_VALUE_BYTES {
-        for index in 0..encoded.len().div_ceil(CHUNK_PAYLOAD_BYTES) {
+    if uses_generic_bounded_layout(owner_key) && logical_length >= MAX_PHYSICAL_VALUE_BYTES {
+        for index in 0..logical_length.div_ceil(CHUNK_PAYLOAD_BYTES) {
             keys.push(chunk_key(owner_key, index)?);
         }
     }
     keys.push(owner_key.to_vec());
     Ok(keys)
+}
+
+/// Logical byte length of one stored owner row without reading its chunks.
+pub(super) fn logical_length(owner_value: &[u8]) -> Result<usize, NativeStorageError> {
+    Ok(decode_manifest(owner_value)?.map_or(owner_value.len(), |manifest| manifest.byte_length))
 }
 
 pub(super) fn collapse(
@@ -140,6 +160,9 @@ pub(super) fn collapse(
 }
 
 fn decode_manifest(encoded: &[u8]) -> Result<Option<Manifest>, NativeStorageError> {
+    if encoded.len() > MAX_MANIFEST_BYTES {
+        return Ok(None);
+    }
     let value = crate::decode_storage_payload(encoded)?;
     let Some(object) = value.as_object() else {
         return Ok(None);
@@ -251,6 +274,37 @@ mod tests {
             encoded.sort();
             resident.sort();
             assert_eq!(resident, encoded);
+        }
+    }
+
+    #[test]
+    fn context_and_machine_rows_under_ten_kilobytes_stay_one_exact_row() {
+        let context_owner = [
+            vec![0x14],
+            7_u64.to_be_bytes().to_vec(),
+            vec![0, 1, b'x', 1, 0, 0, 0, 0],
+        ]
+        .concat();
+        let machine_owner = vec![0x16, 0x03, 0x90];
+        for owner in [context_owner, machine_owner] {
+            for value in [vec![0x5a; 1], vec![0x5a; MAX_PHYSICAL_VALUE_BYTES - 1]] {
+                assert_eq!(
+                    physical_rows(&owner, &value).expect("rows"),
+                    vec![(owner.clone(), value.clone())],
+                );
+                assert_eq!(
+                    physical_keys_for_value(&owner, &value).expect("keys"),
+                    vec![owner.clone()]
+                );
+            }
+            let large = vec![0x5a; MAX_PHYSICAL_VALUE_BYTES];
+            let rows = physical_rows(&owner, &large).expect("rows");
+            assert_eq!(rows.len(), 3);
+            assert_eq!(
+                logical_length(&rows[0].1).expect("manifest length"),
+                large.len()
+            );
+            assert_eq!(logical_length(&large[..9_999]).expect("raw length"), 9_999);
         }
     }
 

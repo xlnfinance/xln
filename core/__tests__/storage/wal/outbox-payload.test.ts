@@ -6,7 +6,6 @@ import {
 } from '../../../storage/wal/outbox-payload';
 import { MAX_PHYSICAL_STORAGE_VALUE_BYTES } from '../../../storage/codec/bounded-value';
 import {
-  MAX_ENTITY_CONTEXT_PAYLOAD_BYTES,
   prepareEntityContextPayloadRows,
   readEntityContextPayloads,
 } from '../../../storage/wal/entity-context-payload';
@@ -199,7 +198,7 @@ describe('path-addressed Entity replay contexts', () => {
     // An empty context is the manifest alone: prepared HTLCs are stored one
     // leaf each, so a frame that prepared none writes no HTLC rows.
     expect(prepared.rows).toHaveLength(1);
-    expect(prepared.rows.every(row => row.value.byteLength < MAX_ENTITY_CONTEXT_PAYLOAD_BYTES)).toBe(true);
+    expect(prepared.rows.every(row => row.value.byteLength < MAX_PHYSICAL_STORAGE_VALUE_BYTES)).toBe(true);
     const restored = await readEntityContextPayloads(
       memoryReader(prepared.rows),
       RUNTIME_HEIGHT,
@@ -240,7 +239,7 @@ describe('path-addressed Entity replay contexts', () => {
     const prepared = prepareEntityContextPayloadRows(RUNTIME_HEIGHT, new Map([[replicaId, context]]));
     // One leaf per entry, two digest pages, one manifest.
     expect(prepared.rows).toHaveLength(entries.length + 3);
-    expect(prepared.rows.every(row => row.value.byteLength < MAX_ENTITY_CONTEXT_PAYLOAD_BYTES)).toBe(true);
+    expect(prepared.rows.every(row => row.value.byteLength < MAX_PHYSICAL_STORAGE_VALUE_BYTES)).toBe(true);
     const restored = await readEntityContextPayloads(
       memoryReader(prepared.rows), RUNTIME_HEIGHT, prepared.refs,
     );
@@ -284,7 +283,7 @@ describe('path-addressed Entity replay contexts', () => {
     expect(manifestRow).toBeDefined();
     // Every physical row, the manifest included, stays under the record cap; the
     // manifest's chunk rows carry the rest of it.
-    expect(prepared.rows.every(row => row.value.byteLength < MAX_ENTITY_CONTEXT_PAYLOAD_BYTES)).toBe(true);
+    expect(prepared.rows.every(row => row.value.byteLength < MAX_PHYSICAL_STORAGE_VALUE_BYTES)).toBe(true);
     expect(prepared.rows.length).toBeGreaterThan(entries.length + Math.ceil(entries.length / 64) + 1);
     const restored = await readEntityContextPayloads(
       memoryReader(prepared.rows), RUNTIME_HEIGHT, prepared.refs,

@@ -6,7 +6,11 @@ use thiserror::Error;
 use xln_rscore_protocol::{PersistentNodeRecord, PersistentRadixMap};
 
 const MAX_DEPTH: usize = 64;
-const MAX_ROW_BYTES: usize = 10_000;
+/// A path is a storage key and stays inside one physical row.
+const MAX_PATH_BYTES: usize = 10_000;
+/// A value is bounded on disk (chunked above 10 KB, like TS); one logical
+/// value may not exceed a whole frame (TS `LIMITS.MAX_FRAME_SIZE_BYTES`).
+const MAX_VALUE_BYTES: usize = 100_000_000;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct RuntimeMachineLeaf {
@@ -32,7 +36,7 @@ pub(crate) fn prepare_runtime_machine_graph(
     for (path, value) in &entries {
         let path_bytes = encode(path)?;
         let value_bytes = encode(value)?;
-        if path_bytes.len() >= MAX_ROW_BYTES || value_bytes.len() >= MAX_ROW_BYTES {
+        if path_bytes.len() >= MAX_PATH_BYTES || value_bytes.len() >= MAX_VALUE_BYTES {
             return Err(RuntimeMachineProjectionError::RowBytes {
                 key: path_bytes.len(),
                 value: value_bytes.len(),
@@ -287,6 +291,32 @@ mod tests {
             "rows":{"__xlnType":"Map","value":[["a",{"__xlnType":"BigInt","value":"1"}]]}
         });
         let graph = prepare_runtime_machine_graph(&machine).expect("graph");
+        let restored = crate::rebuild_runtime_machine_graph(
+            graph
+                .leaves
+                .iter()
+                .map(|leaf| (leaf.path_bytes.clone(), leaf.value_bytes.clone()))
+                .collect(),
+            &format!("0x{}", hex(&graph.root_hash)),
+            usize::try_from(graph.leaf_count).expect("leaf count"),
+        )
+        .expect("verified graph");
+        assert_eq!(restored, machine);
+    }
+
+    #[test]
+    fn a_pending_batch_atom_wider_than_one_physical_row_projects_and_round_trips() {
+        // encodedBatch width follows peer settlements, withdrawals and disputes.
+        let machine = json!({
+            "pendingBatch":{"encodedBatch":format!("0x{}", "ab".repeat(30_000))}
+        });
+        let graph = prepare_runtime_machine_graph(&machine).expect("wide atom graph");
+        assert!(
+            graph
+                .leaves
+                .iter()
+                .any(|leaf| leaf.value_bytes.len() >= 30_000)
+        );
         let restored = crate::rebuild_runtime_machine_graph(
             graph
                 .leaves

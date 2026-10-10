@@ -196,7 +196,8 @@ const readMachineLeaves = async (walDb: RuntimeDbLike, leafCount: number): Promi
   const rows: HexRow[] = [];
   for await (const key of iterateKeys(walDb, { prefix })) {
     if (key.byteLength <= prefix.byteLength) throw new Error('CHECKPOINT_MACHINE_LEAF_KEY_EMPTY');
-    rows.push([hex(key.subarray(prefix.byteLength)), hex(await walDb.get(key))]);
+    // A chunked leaf exports its logical bytes; Rust hashes and decodes those.
+    rows.push([hex(key.subarray(prefix.byteLength)), hex(await requiredBounded(walDb, key))]);
   }
   if (rows.length !== leafCount) {
     throw new Error(`CHECKPOINT_MACHINE_LEAF_COUNT:expected=${leafCount}:actual=${rows.length}`);

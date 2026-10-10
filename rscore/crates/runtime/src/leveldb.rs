@@ -17,9 +17,10 @@ use crate::restore::{
     VerifiedWalFrame, verify_checkpoint_source,
 };
 use crate::storage::native::{
-    CheckpointGraph, EntityContextPayloadRow, EntityContextPayloadRows, NativeStorageError,
-    PathNodeChange, PathNodeKey, RuntimeFrameCommit, RuntimeMachineLeafRow,
-    entity_context_height_prefix, parse_entity_context_payload_key, validate_runtime_frame,
+    CheckpointGraph, EntityContextPayloadRow, EntityContextPayloadRows,
+    MAX_ENTITY_CONTEXT_ROW_BYTES, NativeStorageError, PathNodeChange, PathNodeKey,
+    RuntimeFrameCommit, RuntimeMachineLeafRow, entity_context_height_prefix,
+    parse_entity_context_payload_key, validate_runtime_frame,
 };
 use crate::{StorageMessagePackError, decode_storage_payload};
 
@@ -42,6 +43,7 @@ const ENTITY_CONTEXT_PEER_ASSERTION_DIGESTS: u8 = 8;
 const KEY_RUNTIME_OUTPUT_ROW: u8 = 0x13;
 const KEY_HEAD: &[u8] = &[0x20];
 const CHUNK_BYTES: usize = 9_000;
+#[cfg(test)]
 const MAX_RUNTIME_OUTPUT_PAYLOAD_BYTES: usize = 10_000;
 
 type RawDatabaseRow = (Vec<u8>, Vec<u8>);
@@ -136,9 +138,8 @@ impl RuntimeWalReader {
         replica_id: &str,
         digest: &[u8; 32],
     ) -> Result<Value, RuntimeLevelDbError> {
-        let database = &mut self.database;
         entity_context_with(
-            &mut |key| Ok(database.get(key).map(|value| value.to_vec())),
+            &mut |key| self.bounded_bytes_or_none(key),
             runtime_height,
             replica_id,
             digest,
@@ -153,9 +154,8 @@ impl RuntimeWalReader {
         replica_id: &str,
         digest: &[u8; 32],
     ) -> Result<Value, RuntimeLevelDbError> {
-        let database = &mut self.database;
         entity_context_full_with(
-            &mut |key| Ok(database.get(key).map(|value| value.to_vec())),
+            &mut |key| self.bounded_bytes_or_none(key),
             runtime_height,
             replica_id,
             digest,
@@ -167,14 +167,28 @@ impl RuntimeWalReader {
         expected_root: &str,
         expected_leaf_count: usize,
     ) -> Result<Value, RuntimeLevelDbError> {
-        let prefix = [0x16];
-        let rows = self.prefixed_rows(&prefix)?;
-        let leaves = rows
-            .into_iter()
-            .map(|(key, value)| (key[prefix.len()..].to_vec(), value))
-            .collect();
+        let leaves = self.runtime_machine_leaf_rows()?;
         crate::rebuild_runtime_machine_graph(leaves, expected_root, expected_leaf_count)
             .map_err(Into::into)
+    }
+
+    /// Every 0x16 leaf as `(path, logical value)`. A leaf of 10 KB or more is
+    /// a bounded manifest whose 0x11 continuations sort outside this prefix;
+    /// the graph root hashes the logical value, never the manifest.
+    fn runtime_machine_leaf_rows(&mut self) -> Result<Vec<RawDatabaseRow>, RuntimeLevelDbError> {
+        let prefix = [0x16];
+        self.prefixed_rows(&prefix)?
+            .into_iter()
+            .map(|(key, value)| {
+                if key.len() <= prefix.len() {
+                    return Err(RuntimeLevelDbError::Output(
+                        "CHECKPOINT_MACHINE_LEAF_KEY".into(),
+                    ));
+                }
+                let value = self.bounded_bytes_from_owner(&key, value)?;
+                Ok((key[prefix.len()..].to_vec(), value))
+            })
+            .collect()
     }
 
     /// Read and verify the Runtime-machine graph committed by one WAL frame.
@@ -248,19 +262,7 @@ impl RuntimeWalReader {
             .filter(|value| *value > 0)
             .ok_or_else(|| RuntimeLevelDbError::Output("CHECKPOINT_MACHINE_LEAF_COUNT".into()))?;
 
-        let machine_prefix = [0x16];
-        let runtime_machine_leaves = self
-            .prefixed_rows(&machine_prefix)?
-            .into_iter()
-            .map(|(key, value)| {
-                if key.len() <= machine_prefix.len() {
-                    return Err(RuntimeLevelDbError::Output(
-                        "CHECKPOINT_MACHINE_LEAF_KEY".into(),
-                    ));
-                }
-                Ok((key[machine_prefix.len()..].to_vec(), value))
-            })
-            .collect::<Result<Vec<_>, _>>()?;
+        let runtime_machine_leaves = self.runtime_machine_leaf_rows()?;
 
         // The disposable current DB owns the materialized TS Entity/Account
         // graph. The synced WAL owns the Rust Account checkpoint (0x17-0x19)
@@ -425,10 +427,12 @@ impl RuntimeWalReader {
         entity_context_rows_from_raw(height, &rows)
     }
 
-    /// Raw 0x14 rows of one Runtime height. The manifest row is a bounded
-    /// value once its page lists outgrow one physical row (TS writes it
-    /// through the same layout as the frame record); reassemble it here so
-    /// every consumer sees the logical manifest bytes its digest binds.
+    /// Raw 0x14 rows of one Runtime height. Any row of 10 KB or more is a
+    /// bounded value (TS writes every row through the same layout as the
+    /// frame record): a peer sizes Profile and HTLC-envelope leaves and the
+    /// manifest grows with the frame. Its 0x11 continuations sort outside this
+    /// height prefix; reassemble here so every consumer sees the logical bytes
+    /// its digest binds.
     fn entity_context_rows_reassembled(
         &mut self,
         height: u64,
@@ -437,13 +441,8 @@ impl RuntimeWalReader {
             entity_context_height_prefix(height).map_err(NativeStorageError::EntityContext)?;
         let mut rows = Vec::new();
         for (key, value) in self.prefixed_rows(&prefix)? {
-            let (_, _, kind, _) = parse_entity_context_payload_key(&key)
-                .map_err(NativeStorageError::EntityContext)?;
-            let value = if kind == crate::storage::native::EntityContextPayloadKind::Manifest {
-                self.bounded_bytes_from_owner(&key, value)?
-            } else {
-                value
-            };
+            parse_entity_context_payload_key(&key).map_err(NativeStorageError::EntityContext)?;
+            let value = self.bounded_bytes_from_owner(&key, value)?;
             rows.push((key, value));
         }
         Ok(rows)
@@ -550,6 +549,16 @@ impl RuntimeWalReader {
             return Ok(owner);
         };
         self.read_chunks(key, &manifest)
+    }
+
+    fn bounded_bytes_or_none(
+        &mut self,
+        key: &[u8],
+    ) -> Result<Option<Vec<u8>>, RuntimeLevelDbError> {
+        match self.database.get(key).map(|value| value.to_vec()) {
+            Some(owner) => self.bounded_bytes_from_owner(key, owner).map(Some),
+            None => Ok(None),
+        }
     }
 
     fn required_bounded(&mut self, key: &[u8]) -> Result<Value, RuntimeLevelDbError> {
@@ -825,7 +834,7 @@ fn entity_context_payload_with(
 ) -> Result<Value, RuntimeLevelDbError> {
     let key = entity_context_key(runtime_height, replica_id, path_kind, index)?;
     let bytes = fetch(&key)?.ok_or_else(|| RuntimeLevelDbError::Missing(hex(&key)))?;
-    if path_kind != ENTITY_CONTEXT_MANIFEST && bytes.len() >= MAX_RUNTIME_OUTPUT_PAYLOAD_BYTES {
+    if bytes.len() >= MAX_ENTITY_CONTEXT_ROW_BYTES {
         return Err(RuntimeLevelDbError::Output(format!(
             "CONTEXT_TOO_LARGE:{}",
             bytes.len()
@@ -1160,6 +1169,8 @@ mod tests {
         WrongOutboxDigest,
         /// One outbox row of 10 KB or more: a bounded-value manifest plus 0x11 chunk rows, exactly as TS writes it.
         BoundedOutputRow,
+        /// A ~20 KB gossip Profile leaf: manifest plus 0x11 chunk rows, exactly as TS writes it.
+        ChunkedContextLeaf,
         ForeignContext,
     }
 
@@ -1171,14 +1182,40 @@ mod tests {
         ))
     }
 
-    fn checkpoint_reader(
+    type CheckpointFixture = (
+        RuntimeWalReader,
+        RuntimeWalReader,
+        std::path::PathBuf,
+        std::path::PathBuf,
+    );
+
+    fn machine_leaf(path: &CanonicalValue, value: CanonicalValue) -> (Vec<u8>, Vec<u8>) {
+        (
+            crate::encode_storage_payload(path).expect("machine key"),
+            crate::encode_storage_payload(&value).expect("machine value"),
+        )
+    }
+
+    fn root_machine_leaf() -> (Vec<u8>, Vec<u8>) {
+        machine_leaf(
+            &CanonicalValue::Array(Vec::new()),
+            CanonicalValue::Object(vec![
+                ("kind".into(), CanonicalValue::String("container".into())),
+                ("container".into(), CanonicalValue::String("object".into())),
+            ]),
+        )
+    }
+
+    fn checkpoint_reader(extra_state_key: Option<Vec<u8>>) -> CheckpointFixture {
+        checkpoint_reader_with_machine(extra_state_key, vec![root_machine_leaf()])
+    }
+
+    /// TS physical layout: each 0x16 leaf goes through the bounded writer, so
+    /// a leaf of 10 KB or more is a manifest plus 0x11 continuation rows.
+    fn checkpoint_reader_with_machine(
         extra_state_key: Option<Vec<u8>>,
-    ) -> (
-        RuntimeWalReader,
-        RuntimeWalReader,
-        std::path::PathBuf,
-        std::path::PathBuf,
-    ) {
+        machine_leaves: Vec<(Vec<u8>, Vec<u8>)>,
+    ) -> CheckpointFixture {
         let wal_path = temporary_path("checkpoint-wal-source");
         let state_path = temporary_path("checkpoint-state-source");
         for path in [&wal_path, &state_path] {
@@ -1202,21 +1239,13 @@ mod tests {
             },
         )
         .expect("fixture state db");
-        let leaf_key =
-            crate::encode_storage_payload(&CanonicalValue::Array(Vec::new())).expect("machine key");
-        let leaf_value = crate::encode_storage_payload(&CanonicalValue::Object(vec![
-            ("kind".into(), CanonicalValue::String("container".into())),
-            ("container".into(), CanonicalValue::String("object".into())),
-        ]))
-        .expect("machine value");
-        let decoded = decode_storage_payload(&leaf_value).expect("machine decode");
-        let radix = PersistentRadixMap::empty()
-            .updated(
-                leaf_key.clone(),
-                decoded,
-                Sha256::digest(&leaf_value).into(),
-            )
-            .expect("machine radix");
+        let mut radix = PersistentRadixMap::empty();
+        for (leaf_key, leaf_value) in &machine_leaves {
+            let decoded = decode_storage_payload(leaf_value).expect("machine decode");
+            radix = radix
+                .updated(leaf_key.clone(), decoded, Sha256::digest(leaf_value).into())
+                .expect("machine radix");
+        }
         let owner = [0x11; 32];
         let frame = crate::storage::native::build_runtime_frame_commit(
             crate::storage::native::CanonicalRuntimeFrameDraft {
@@ -1237,7 +1266,7 @@ mod tests {
                 runtime_input: serde_json::json!({"runtimeTxs": [], "entityInputs": []}),
                 runtime_machine_root: Some(crate::storage::native::RuntimeMachineGraphRoot {
                     root_hash: radix.root_hash(),
-                    leaf_count: 1,
+                    leaf_count: machine_leaves.len() as u64,
                 }),
                 account_authority_checkpoints: vec![],
                 touched_entities: vec![],
@@ -1250,10 +1279,15 @@ mod tests {
                 state_root: [2; 32],
                 full: false,
                 node_changes: Vec::new(),
-                runtime_machine_leaves: vec![crate::storage::native::RuntimeMachineLeafRow {
-                    path_bytes: leaf_key.clone(),
-                    value_bytes: leaf_value.clone(),
-                }],
+                runtime_machine_leaves: machine_leaves
+                    .iter()
+                    .map(|(path_bytes, value_bytes)| {
+                        crate::storage::native::RuntimeMachineLeafRow {
+                            path_bytes: path_bytes.clone(),
+                            value_bytes: value_bytes.clone(),
+                        }
+                    })
+                    .collect(),
             }),
         )
         .expect("checkpoint frame")
@@ -1265,9 +1299,14 @@ mod tests {
         wal_database
             .put(KEY_HEAD, &head_bytes(100, 100, 100))
             .expect("HEAD row");
-        wal_database
-            .put(&[vec![0x16], leaf_key].concat(), &leaf_value)
-            .expect("machine leaf");
+        for (leaf_key, leaf_value) in &machine_leaves {
+            let owner = [vec![0x16], leaf_key.clone()].concat();
+            for (key, value) in crate::storage::native::physical_rows(&owner, leaf_value)
+                .expect("TS physical machine rows")
+            {
+                wal_database.put(&key, &value).expect("machine leaf row");
+            }
+        }
         wal_database
             .put(
                 &[vec![0x26], owner.to_vec(), vec![0; 12], vec![0x22; 20]].concat(),
@@ -1321,7 +1360,21 @@ mod tests {
     }
 
     fn replay_context_rows(entity: &str, signer: &str, profile: bool) -> EntityContextPayloadRows {
+        replay_context_rows_with(entity, signer, profile, 0)
+    }
+
+    fn replay_context_rows_with(
+        entity: &str,
+        signer: &str,
+        profile: bool,
+        profile_pad: usize,
+    ) -> EntityContextPayloadRows {
         let replica_id = format!("{entity}:{signer}");
+        let peer = if profile_pad == 0 {
+            serde_json::json!({"name":"peer"})
+        } else {
+            serde_json::json!({"name":"peer","pad":"p".repeat(profile_pad)})
+        };
         let context = serde_json::json!({
             "version": 1,
             "proposerReplicaId": replica_id,
@@ -1329,7 +1382,7 @@ mod tests {
             "proposerSignerId": signer,
             "parentFrameHash": "genesis",
             "height": 1,
-            "gossipProfiles": if profile { vec![serde_json::json!({"name":"peer"})] } else { vec![] },
+            "gossipProfiles": if profile { vec![peer] } else { vec![] },
             "peerAssertions": [],
             "htlc": {"version":1,"entries":[],"originated":[]},
         });
@@ -1351,7 +1404,12 @@ mod tests {
             },
         )
         .expect("fixture db");
-        let contexts = replay_context_rows(ENTITY, SIGNER, true);
+        let profile_pad = if matches!(corruption, WalCorruption::ChunkedContextLeaf) {
+            20_000
+        } else {
+            0
+        };
+        let contexts = replay_context_rows_with(ENTITY, SIGNER, true, profile_pad);
         let mut output_value = serde_json::json!({
             "entityId": format!("0x{}", "33".repeat(32)),
             "runtimeId": format!("0x{}", "44".repeat(20)),
@@ -1394,9 +1452,12 @@ mod tests {
             {
                 continue;
             }
-            database
-                .put(&row.key(7).expect("context key"), row.value())
-                .expect("context row");
+            let owner = row.key(7).expect("context key");
+            for (key, value) in crate::storage::native::physical_rows(&owner, row.value())
+                .expect("TS physical context rows")
+            {
+                database.put(&key, &value).expect("context row");
+            }
         }
         if matches!(corruption, WalCorruption::ForeignContext) {
             let foreign_entity = format!("0x{}", "55".repeat(32));
@@ -1591,6 +1652,75 @@ mod tests {
         assert_eq!(raw.output_rows()[0], source.outputs()[0]);
         drop(reader);
         std::fs::remove_dir_all(path).expect("clean fixture");
+    }
+
+    #[test]
+    fn concrete_wal_source_and_restore_reader_reassemble_a_chunked_context_leaf() {
+        let (mut reader, path) = wal_reader(WalCorruption::ChunkedContextLeaf);
+        let source = reader
+            .concrete_wal_source(7)
+            .expect("chunked context leaf reassembled");
+        let replica_id = format!("{ENTITY}:{SIGNER}:1");
+        let context = &source.entity_contexts()[&replica_id];
+        assert_eq!(
+            context.value["gossipProfiles"][0]["pad"]
+                .as_str()
+                .map(str::len),
+            Some(20_000),
+        );
+        let raw = reader.raw_concrete_wal_rows(7).expect("raw rows");
+        let profile_row = raw
+            .context_rows
+            .iter()
+            .find(|(key, _)| key[key.len() - 5] == ENTITY_CONTEXT_GOSSIP_PROFILE)
+            .expect("profile leaf");
+        assert!(profile_row.1.len() >= MAX_RUNTIME_OUTPUT_PAYLOAD_BYTES);
+        let stored = reader
+            .database
+            .get(&profile_row.0)
+            .expect("owner row")
+            .to_vec();
+        assert!(stored.len() < MAX_RUNTIME_OUTPUT_PAYLOAD_BYTES);
+        // The restore path reads the same rows through live LevelDB gets.
+        let restored = reader
+            .entity_context_full(7, &replica_id, &context.commitment)
+            .expect("restore reader reassembles chunked leaves");
+        assert_eq!(restored, context.value);
+        drop(reader);
+        std::fs::remove_dir_all(path).expect("clean fixture");
+    }
+
+    #[test]
+    fn concrete_checkpoint_source_reassembles_a_chunked_machine_leaf() {
+        let pad = CanonicalValue::Array(vec![CanonicalValue::Object(vec![
+            ("kind".into(), CanonicalValue::String("property".into())),
+            ("name".into(), CanonicalValue::String("pad".into())),
+        ])]);
+        let large = machine_leaf(
+            &pad,
+            CanonicalValue::Object(vec![
+                ("kind".into(), CanonicalValue::String("atom".into())),
+                ("value".into(), CanonicalValue::String("b".repeat(30_000))),
+            ]),
+        );
+        let (mut reader, mut state_reader, wal_path, state_path) =
+            checkpoint_reader_with_machine(None, vec![root_machine_leaf(), large.clone()]);
+        let owner = [vec![0x16], large.0.clone()].concat();
+        let stored = reader.database.get(&owner).expect("owner row").to_vec();
+        assert!(stored.len() < MAX_RUNTIME_OUTPUT_PAYLOAD_BYTES);
+        let source = reader
+            .concrete_checkpoint_source(&mut state_reader, 100)
+            .expect("chunked machine leaf reassembled");
+        assert!(source.runtime_machine_leaves.contains(&large));
+        let machine = reader
+            .runtime_machine_for_frame(100)
+            .expect("machine graph")
+            .expect("current machine");
+        assert_eq!(machine["pad"].as_str().map(str::len), Some(30_000));
+        drop(reader);
+        drop(state_reader);
+        std::fs::remove_dir_all(wal_path).expect("clean WAL fixture");
+        std::fs::remove_dir_all(state_path).expect("clean state fixture");
     }
 
     #[test]

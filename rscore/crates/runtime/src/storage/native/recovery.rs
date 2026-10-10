@@ -198,11 +198,9 @@ impl NativeRuntimeStore {
                     super::EntityContextPayloadError::Key,
                 ));
             }
-            let value = if kind == super::entity_context::EntityContextPayloadKind::Manifest {
-                super::bounded::collapse(&mut self.database, &key, &value)?
-            } else {
-                value.to_vec()
-            };
+            // Any row may be a bounded manifest; the 0x11 continuations sort
+            // outside this height prefix and are read only through it.
+            let value = super::bounded::collapse(&mut self.database, &key, &value)?;
             rows.push(EntityContextPayloadRow::new(
                 replica_id, kind, index, value,
             )?);
@@ -280,7 +278,7 @@ impl NativeRuntimeStore {
                 .to_vec();
             rows.push(RuntimeMachineLeafRow {
                 path_bytes,
-                value_bytes: value.to_vec(),
+                value_bytes: super::bounded::collapse(&mut self.database, &key, &value)?,
             });
             if !iterator.advance() {
                 break;

@@ -8,7 +8,10 @@ use std::time::{Duration, Instant};
 
 use rusty_leveldb::{DB, LdbIterator, Options, WriteBatch};
 
-use super::bounded::{physical_keys_for_value, physical_rows, previous_physical_keys};
+use super::bounded::{
+    logical_length, physical_keys_for_length, physical_keys_for_value, physical_rows,
+    previous_physical_keys,
+};
 use super::codec::{
     decode_head, encode_checkpoint, encode_head, output_digest, validate_storage_row,
 };
@@ -35,11 +38,12 @@ pub struct NativeRuntimeStore {
     /// stop scanning the whole LevelDB graph. Dropped on a full checkpoint
     /// rewrite; a restart rebuilds it from disk.
     checkpoint_path_nodes: Option<BTreeMap<Vec<u8>, Vec<u8>>>,
-    /// RAM mirror of the stable `0x16 || path` Runtime-machine keys. A restart
-    /// performs one bounded scan of that current namespace; later checkpoints
-    /// diff exact prior/current paths without scanning or rewriting obsolete
-    /// generations.
-    runtime_machine_keys: Option<BTreeSet<Vec<u8>>>,
+    /// RAM mirror of the stable `0x16 || path` Runtime-machine keys and each
+    /// row's logical byte length, which alone derives its 0x11 continuation
+    /// keys. A restart performs one bounded scan of that current namespace;
+    /// later checkpoints diff exact prior/current physical keys without
+    /// scanning or rewriting obsolete generations.
+    runtime_machine_keys: Option<BTreeMap<Vec<u8>, usize>>,
 }
 
 struct PreparedRuntimeFrame {
@@ -686,39 +690,44 @@ fn put_checkpoint_rows(
 fn put_runtime_machine_rows(
     batch: &mut WriteBatch,
     graph: &super::types::CheckpointGraph,
-    prior: &BTreeSet<Vec<u8>>,
-) -> Result<BTreeSet<Vec<u8>>, NativeStorageError> {
-    let next = graph
-        .runtime_machine_leaves
-        .iter()
-        .map(|leaf| runtime_machine_leaf_key(&leaf.path_bytes))
-        .collect::<Result<BTreeSet<_>, _>>()?;
-    for key in prior.difference(&next) {
-        batch.delete(key);
-    }
+    prior: &BTreeMap<Vec<u8>, usize>,
+) -> Result<BTreeMap<Vec<u8>, usize>, NativeStorageError> {
+    let mut next = BTreeMap::new();
+    let mut next_physical = BTreeSet::new();
     for leaf in &graph.runtime_machine_leaves {
-        batch.put(
-            &runtime_machine_leaf_key(&leaf.path_bytes)?,
-            &leaf.value_bytes,
-        );
+        let key = runtime_machine_leaf_key(&leaf.path_bytes)?;
+        for (physical_key, physical_value) in physical_rows(&key, &leaf.value_bytes)? {
+            batch.put(&physical_key, &physical_value);
+            next_physical.insert(physical_key);
+        }
+        next.insert(key, leaf.value_bytes.len());
+    }
+    // A removed path, or a retained path whose value shrank below or across
+    // a chunk boundary, leaves exactly these physical rows behind.
+    for (key, length) in prior {
+        for physical_key in physical_keys_for_length(key, *length)? {
+            if !next_physical.contains(&physical_key) {
+                batch.delete(&physical_key);
+            }
+        }
     }
     Ok(next)
 }
 
-fn runtime_machine_keys(database: &mut DB) -> Result<BTreeSet<Vec<u8>>, NativeStorageError> {
+fn runtime_machine_keys(database: &mut DB) -> Result<BTreeMap<Vec<u8>, usize>, NativeStorageError> {
     let mut iterator = database
         .new_iter()
         .map_err(|error| NativeStorageError::Database(error.to_string()))?;
     iterator.seek(&[KEY_RUNTIME_MACHINE_LEAF]);
-    let mut keys = BTreeSet::new();
-    while let Some((key, _)) = iterator.current() {
+    let mut keys = BTreeMap::new();
+    while let Some((key, value)) = iterator.current() {
         if key.first() != Some(&KEY_RUNTIME_MACHINE_LEAF) {
             break;
         }
         if key.len() == 1 {
             return Err(NativeStorageError::RuntimeMachinePath);
         }
-        keys.insert(key.to_vec());
+        keys.insert(key.to_vec(), logical_length(&value)?);
         if !iterator.advance() {
             break;
         }
