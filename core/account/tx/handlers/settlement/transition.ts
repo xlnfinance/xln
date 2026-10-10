@@ -351,7 +351,34 @@ const prepareSettlementHanko = (
   ) {
     throw new Error(`SETTLEMENT_HANKO_PINNED_HASH_MISMATCH:${workspace.settlementHash}:${expectedSettlementHash}`);
   }
+  const postProof = assertPostSettlementProof(
+    draft,
+    transition,
+    context,
+    workspace,
+    { diffs, forgiveTokenIds },
+    settlementNonce,
+  );
+  return {
+    workspace,
+    settlementNonce,
+    diffs,
+    forgiveTokenIds,
+    ...postProof,
+    expectedSettlementHash,
+    proposerIsLeft: transition.postProof.proposerIsLeft,
+  };
+};
 
+/** The post-settlement dispute proof a settlement Hanko pins, rebuilt locally. */
+const assertPostSettlementProof = (
+  draft: AccountReplica,
+  transition: Extract<SettleTransitionTx['data'], { kind: 'hanko' }>,
+  context: AccountConsensusContext,
+  workspace: SettlementWorkspace,
+  { diffs, forgiveTokenIds }: ReturnType<typeof compileOps>,
+  settlementNonce: number,
+) => {
   const postNonce = assertSettlementNonce(
     transition.postProof.nonce,
     'POST_SETTLEMENT_PROOF_NONCE_INVALID',
@@ -387,7 +414,7 @@ const prepareSettlementHanko = (
   const expectedDisputeHash = createDisputeProofHashWithNonce(
     draft.state,
     proofBodyHash,
-    domain,
+    getAccountStateDomain(draft.state),
     postNonce,
     transition.postProof.proposerIsLeft,
   );
@@ -408,18 +435,7 @@ const prepareSettlementHanko = (
   ) {
     throw new Error('POST_SETTLEMENT_PROOF_PIN_MISMATCH');
   }
-  return {
-    workspace,
-    settlementNonce,
-    diffs,
-    forgiveTokenIds,
-    proofBodyHash,
-    postNonce,
-    expectedSettlementHash,
-    expectedDisputeHash,
-    proposerIsLeft: transition.postProof.proposerIsLeft,
-    pinnedPostProof,
-  };
+  return { postNonce, proofBodyHash, expectedDisputeHash, pinnedPostProof };
 };
 
 type PreparedSettlementHanko = ReturnType<typeof prepareSettlementHanko>;
