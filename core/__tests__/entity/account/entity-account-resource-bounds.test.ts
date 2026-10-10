@@ -29,6 +29,7 @@ import { signEntityHashes } from '../../../hanko/signing';
 import type { AccountReplica, AccountTx } from '../../../types/account';
 import type { EntityReplica, EntityState, JurisdictionConfig } from '../../../entity/types';
 import type { JurisdictionEvent } from '../../../types/jurisdiction-events';
+import type { EntityTx } from '../../../types/entity-tx';
 import { validateAccountReplica } from '../../../account/validation/state-validation';
 import { validateEntityState } from '../../../entity/state/state-validation';
 import { attachAccountDraftHankosAsEntity } from '../../../qa/account/draft';
@@ -470,4 +471,49 @@ test('opted-in committed Entity transition emits a size measurement without cons
     if (previousScopes === undefined) delete process.env['XLN_LOG_SCOPES'];
     else process.env['XLN_LOG_SCOPES'] = previousScopes;
   }
+});
+
+test('the proposer evicts every rejected tx before an honest one instead of halting', async () => {
+  // Two peer runtimeOutputs naming an unknown cross-J order, then an honest
+  // chat. The eviction loop re-read the shrinking proposal length as its
+  // bound, stopped after floor(n/2)+1 evictions and threw a plain
+  // ENTITY_PROPOSAL_EVICTION_LOOP_EXHAUSTED with the chat still untried.
+  const env = createEmptyEnv('entity-eviction-loop-bound');
+  env.state.timestamp = 2_000;
+  env.scenarioMode = true;
+  const signerId = deriveSignerAddressSync(env.runtimeSeed!, 'validator').toLowerCase();
+  registerSignerKey(env, signerId, deriveSignerKeySync(env.runtimeSeed!, 'validator'));
+  const state = makeState();
+  state.config = { ...state.config, validators: [signerId], shares: { [signerId]: 1n } };
+  state.entityId = hashBoard(encodeBoard(state.config)).toLowerCase();
+  state.entityEncryptionPublicKey = provisionTestEntityEncryptionKey(env, state.entityId);
+  const unknownOrderNotice = (orderId: string): EntityTx => ({
+    type: 'runtimeOutput',
+    data: {
+      protocol: 'cross-j',
+      sourceEntityId: `0x${'71'.repeat(32)}`,
+      sourceSignerId: `0x${'72'.repeat(20)}`,
+      targetEntityId: state.entityId,
+      entityTxs: [{ type: 'crossJurisdictionFillNotice', data: { orderId, filledRatio: 1 } } as unknown as EntityTx],
+    },
+  });
+  const rejectedA = unknownOrderNotice('unknown-a');
+  const rejectedB = unknownOrderNotice('unknown-b');
+  const replica: EntityReplica = {
+    entityId: state.entityId,
+    signerId,
+    state,
+    mempool: [rejectedA, rejectedB],
+    isProposer: true,
+  };
+  env.state.eReplicas.set(`${state.entityId}:${signerId}`, replica);
+  const result = await applyEntityInput(env, replica, {
+    entityId: state.entityId,
+    signerId,
+    entityTxs: [{ type: 'chat', data: { from: signerId, message: 'honest' } }],
+  });
+  expect(result.outcome.kind).toBe('committed');
+  expect(result.workingReplica.state.height).toBe(1);
+  expect(result.workingReplica.mempool).not.toContain(rejectedA);
+  expect(result.workingReplica.mempool).not.toContain(rejectedB);
 });

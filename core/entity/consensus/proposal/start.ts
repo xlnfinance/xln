@@ -557,15 +557,23 @@ const buildEntityProposalEvictingRejected = async (
   selection: EntityProposalSelection,
   profile: ProposalProfile,
 ): Promise<CertifiedEntityProposal | null> => {
-  for (let round = 0; round <= selection.proposalTxs.length; round += 1) {
+  // Each round evicts one tx and the last one is rethrown, so the initial
+  // length bounds the loop. Re-reading the shrinking length here stopped after
+  // floor(n/2)+1 evictions and halted with honest txs still untried.
+  const maxRounds = selection.proposalTxs.length;
+  for (let round = 0; round <= maxRounds; round += 1) {
     try {
       return await buildEntityProposal(context, selection, profile);
     } catch (error) {
       if (!(error instanceof MalformedEntityFrameInputError) || error.frameTx === undefined) throw error;
       const rejectedTx = error.frameTx as EntityTx;
-      const inProposal = selection.proposalTxs.includes(rejectedTx);
+      const rejectedIndex = selection.proposalTxs.indexOf(rejectedTx);
       const inMempool = context.workingReplica.mempool.includes(rejectedTx);
-      if (!inProposal || !inMempool || selection.proposalTxs.length === 1) throw error;
+      const required = selection.requiredTxPrefixCount;
+      // The Runtime-required atomic cross-J input is rejected by its pair's
+      // atomic path, never dropped from under it here.
+      const isRequired = required !== undefined && rejectedIndex === required - 1;
+      if (rejectedIndex < 0 || !inMempool || isRequired || selection.proposalTxs.length === 1) throw error;
       entityLog.warn('proposal.tx_evicted', {
         entity: shortId(context.workingReplica.entityId),
         txType: error.txType,
@@ -574,6 +582,10 @@ const buildEntityProposalEvictingRejected = async (
       });
       context.workingReplica.mempool = context.workingReplica.mempool.filter(tx => tx !== rejectedTx);
       selection.proposalTxs = selection.proposalTxs.filter(tx => tx !== rejectedTx);
+      if (required !== undefined && rejectedIndex < required - 1) selection.requiredTxPrefixCount = required - 1;
+      // The byte meter indexes prefixes of the list it was built for.
+      const { wirePrefixMeter: _staleMeter, ...remainingSelection } = selection.proposalSelection;
+      selection.proposalSelection = remainingSelection;
     }
   }
   throw new Error('ENTITY_PROPOSAL_EVICTION_LOOP_EXHAUSTED');
