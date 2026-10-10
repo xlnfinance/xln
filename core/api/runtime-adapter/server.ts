@@ -178,7 +178,7 @@ type PendingRuntimeAdapterCommand = {
  * auth message used to replay the owner lane (mnemonic export included) for
  * the capability's lifetime. In memory only: a restart reopens that window.
  */
-const usedOwnerBindings = new WeakMap<RuntimeReplica, Map<string, number>>();
+const usedOwnerBindings = new Map<RuntimeReplica, Map<string, number>>();
 
 const consumeOwnerBinding = (
   env: RuntimeReplica,
