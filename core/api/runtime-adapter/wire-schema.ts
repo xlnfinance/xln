@@ -48,6 +48,7 @@ const QUERY_KEYS = [
   'eventNames',
   'sourceEntityId',
   'targetEntityId',
+  'fundingAccountId',
   'tokenId',
   'amount',
 ] as const;
@@ -79,6 +80,7 @@ const QUERY_STRING_KEYS = [
   'query',
   'sourceEntityId',
   'targetEntityId',
+  'fundingAccountId',
   'amount',
 ] as const;
 

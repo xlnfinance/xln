@@ -9,6 +9,8 @@ import {
   acquireRuntimeFrameWriter,
   withRuntimeCommittedRead,
 } from '../../../runtime/frame/lifecycle/writer-lock';
+import { resolveRuntimeAdapterRead, type RuntimeAdapterResolveContext } from '../../../api/runtime-adapter/resolve';
+import { decodeRuntimeAdapterBrowserMessage as decodeBrowserMessage } from '../../../api/runtime-adapter/codec';
 
 const radapterAuthSeed = process.env['XLN_RADAPTER_AUTH_SEED'] || 'seed';
 process.env['XLN_RADAPTER_AUTH_SEED'] = radapterAuthSeed;
@@ -163,6 +165,38 @@ describe('runtime committed read barrier', () => {
     const releaseWriter = await writer!;
     expect(writerEntered).toBeTrue();
     releaseWriter();
+  });
+
+  test('a payment-route read waiting on gossip never holds the frame writer', async () => {
+    // The route search's gossip/relay refresh (up to about 1 s) ran inside
+    // the committed-read lease, so any inspect token could stall frames.
+    const env = createEmptyEnv('payment routes outside lease');
+    const gossip = Promise.withResolvers<{ routes: [] }>();
+    const read = resolveRuntimeAdapterRead(
+      { env, findPaymentRoutes: () => gossip.promise } as unknown as RuntimeAdapterResolveContext,
+      'payment-routes',
+    );
+    const writer = await Promise.race([
+      acquireRuntimeFrameWriter(env.infrastructure!),
+      new Promise<'blocked'>(resolve => setTimeout(() => resolve('blocked'), 500)),
+    ]);
+    expect(writer).not.toBe('blocked');
+    (writer as () => void)();
+    gossip.resolve({ routes: [] });
+    expect(await read).toEqual({ routes: [] });
+  });
+
+  test('a remote top-up quote may name its funding account', () => {
+    const entity = (byte: string) => `0x${byte.repeat(32)}`;
+    const query = {
+      sourceEntityId: entity('11'),
+      targetEntityId: entity('22'),
+      fundingAccountId: entity('33'),
+      tokenId: 1,
+      amount: '5',
+    };
+    const decoded = decodeBrowserMessage(JSON.stringify({ v: 1, id: 'quote-1', op: 'read', path: 'payment-routes', query }));
+    expect((decoded as { query?: unknown }).query).toEqual(query);
   });
 
   test('scoped committed reads always release their writer fence', async () => {

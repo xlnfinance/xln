@@ -1,3 +1,4 @@
+import { withRuntimeCommittedRead } from '../../../runtime/frame/lifecycle/writer-lock';
 import { readRuntimeFrameReceipts } from '../../runtime-adapter/frame-receipts';
 import {
   ensureGossipProfiles,
@@ -71,20 +72,21 @@ export const findPaymentRoutes = async (
   }
   if (amount <= 0n) throw new RuntimeAdapterError('E_BAD_QUERY', 'payment route amount must be positive');
 
+  // Network refresh runs outside the committed-read lease; only the graph
+  // search reads committed State, so only it holds the frame writer.
   if (env.infrastructure?.p2p?.syncProfiles) await env.infrastructure.p2p.syncProfiles();
   const profilesReady = await ensureGossipProfiles(env, [sourceEntityId, targetEntityId]);
   if (!profilesReady) {
     throw new RuntimeAdapterError('E_INTERNAL', 'payment route profiles are unavailable', true);
   }
-  let routes = await env.gossip
+  const searchRoutes = () => withRuntimeCommittedRead(env, () => env.gossip
     .getNetworkGraph()
-    .findPaths(sourceEntityId, targetEntityId, amount, tokenId, fundingAccountId);
+    .findPaths(sourceEntityId, targetEntityId, amount, tokenId, fundingAccountId));
+  let routes = await searchRoutes();
   if (routes.length === 0 && env.infrastructure?.p2p?.ensureRoutes) {
     // Pull-only gossip: ask the relay for the profile chains that route here.
     await env.infrastructure.p2p.ensureRoutes(sourceEntityId, targetEntityId, amount, tokenId);
-    routes = await env.gossip
-      .getNetworkGraph()
-      .findPaths(sourceEntityId, targetEntityId, amount, tokenId, fundingAccountId);
+    routes = await searchRoutes();
   }
   if (routes.length === 0) {
     throw new RuntimeAdapterError('E_NOT_FOUND', `no payment route from ${sourceEntityId} to ${targetEntityId}`);

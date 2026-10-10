@@ -2159,13 +2159,6 @@ const resolveRuntimeAdapterReadFromCommittedState = async <T = unknown>(
     return await ctx.readFrameReceipts(query) as T;
   }
 
-  if (parts.length === 1 && parts[0] === 'payment-routes') {
-    if (!ctx.findPaymentRoutes) {
-      throw new RuntimeAdapterError('E_BAD_QUERY', 'payment route reads are unavailable for this adapter');
-    }
-    return await ctx.findPaymentRoutes(query) as T;
-  }
-
   if (parts.length === 1 && parts[0] === 'solvency-summary') {
     return projectSolvencySummary(ctx, query) as T;
   }
@@ -2191,6 +2184,16 @@ export const resolveRuntimeAdapterRead = async <T = unknown>(
   path: string,
   query?: RuntimeAdapterReadQuery,
 ): Promise<T> => {
+  const parts = normalizePath(path);
+  if (parts.length === 1 && parts[0] === 'payment-routes') {
+    // Route search refreshes gossip over the network (up to about 1 s) and
+    // takes the committed-read lease itself, only around the graph search.
+    // Holding the lease across that wait let any inspect token stall frames.
+    if (!ctx.findPaymentRoutes) {
+      throw new RuntimeAdapterError('E_BAD_QUERY', 'payment route reads are unavailable for this adapter');
+    }
+    return detachRuntimeAdapterPayload(await ctx.findPaymentRoutes(query)) as T;
+  }
   const release = await acquireRuntimeCommittedRead(ctx.env);
   try {
     const projection = await resolveRuntimeAdapterReadFromCommittedState<T>(ctx, path, query);
