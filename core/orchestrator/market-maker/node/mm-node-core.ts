@@ -167,6 +167,7 @@ export type CrossQuoteJob = {
   targetHubs: HubProfile[];
   sourceTokenIds: number[];
   targetTokenIds: number[];
+  jurisdictionCount: number;
 };
 
 export type SameQuoteJob = {
@@ -1125,16 +1126,27 @@ export const getMarketMakerOfferLevel = (spec: Pick<MarketMakerOfferSpec, 'offer
   return Number.isFinite(level) && level > 0 ? Math.floor(level) : Number.MAX_SAFE_INTEGER;
 };
 
-// Each cross-j offer installs one pull in both sibling Accounts. The MM quotes
-// both jurisdiction directions over the same bilateral Account, so each
-// directed route owns exactly half of the Account-wide pull budget. Giving
-// either direction the full 32 slots lets the reciprocal route propose pull 33
-// and fail the Runtime frame instead of producing symmetric executable depth.
-export const MARKET_MAKER_CROSS_OFFERS_PER_DIRECTED_ROUTE = Math.floor(
-  LIMITS.MAX_ACCOUNT_CROSS_J_SWAP_OFFERS / 2,
-);
+// Each cross-j offer installs one pull in both sibling Accounts. One MM<->Hub
+// Account carries the source pulls of its N-1 outgoing directed routes and the
+// target pulls of its N-1 incoming ones under the Account-wide cross-j pull cap
+// (pull.ts). A fixed half of the cap fit only two jurisdictions: with a third,
+// the 19th pull was rejected and cross bootstrap depth could never complete.
+export const deriveMarketMakerCrossOffersPerDirectedRoute = (jurisdictionCount: number): number => {
+  const offers = Math.floor(LIMITS.MAX_ACCOUNT_CROSS_J_SWAP_OFFERS / (2 * (jurisdictionCount - 1)));
+  if (!Number.isSafeInteger(jurisdictionCount) || jurisdictionCount < 2 || offers < 1) {
+    throw new Error(`MARKET_MAKER_CROSS_JURISDICTION_COUNT_UNSUPPORTED:${String(jurisdictionCount)}`);
+  }
+  return offers;
+};
 
-const selectByteBudgetedCrossSpecs = (specs: readonly MarketMakerOfferSpec[]): MarketMakerOfferSpec[] => {
+/** Cross-j routes run between the shard-zero MM Entities, one per jurisdiction. */
+export const countMarketMakerCrossJurisdictions = (contexts: readonly MarketMakerEntityContext[]): number =>
+  new Set(contexts.filter(context => context.samePairIndex === 0).map(context => context.jurisdictionRef)).size;
+
+const selectByteBudgetedCrossSpecs = (
+  specs: readonly MarketMakerOfferSpec[],
+  offersPerRoute: number,
+): MarketMakerOfferSpec[] => {
   const routes = specs
     .map(spec => spec.crossJurisdiction)
     .filter((route): route is CrossJurisdictionSwapRoute => Boolean(route));
@@ -1163,10 +1175,10 @@ const selectByteBudgetedCrossSpecs = (specs: readonly MarketMakerOfferSpec[]): M
   take(route => route.source.tokenId === maxSource);
   take(route => route.target.tokenId === maxTarget);
   for (const spec of ordered) {
-    if (selected.length >= MARKET_MAKER_CROSS_OFFERS_PER_DIRECTED_ROUTE) break;
+    if (selected.length >= offersPerRoute) break;
     if (!selected.includes(spec)) selected.push(spec);
   }
-  return selected.slice(0, MARKET_MAKER_CROSS_OFFERS_PER_DIRECTED_ROUTE);
+  return selected.slice(0, offersPerRoute);
 };
 
 export const buildMarketMakerOfferSpecs = (
@@ -1489,12 +1501,14 @@ export const buildMarketMakerCrossOfferSpecs = (
   targetHubs: HubProfile[],
   sourceTokenIds: number[],
   targetTokenIds: number[],
+  jurisdictionCount: number,
 ): MarketMakerOfferSpec[] => {
   if (!marketMakerCrossJurisdictionEnabled()) return [];
   if (sourceContext.entityId === targetContext.entityId || sameJurisdiction(sourceContext, targetContext)) return [];
   const sourceJurisdictionRef = sourceContext.jurisdictionRef;
   const targetJurisdictionRef = targetContext.jurisdictionRef;
   if (!sourceJurisdictionRef || !targetJurisdictionRef) return [];
+  const offersPerRoute = deriveMarketMakerCrossOffersPerDirectedRoute(jurisdictionCount);
   const specs: MarketMakerOfferSpec[] = [];
   const crossPairs = buildMarketMakerCrossTokenPairs(sourceTokenIds, targetTokenIds);
   const targetByBaseName = new Map(targetHubs.map(hub => [hubRoleName(hub), hub] as const));
@@ -1624,8 +1638,7 @@ export const buildMarketMakerCrossOfferSpecs = (
         }
       }
     }
-    const hubSpecs = specs.splice(hubSpecStart);
-    specs.push(...selectByteBudgetedCrossSpecs(hubSpecs));
+    specs.push(...selectByteBudgetedCrossSpecs(specs.splice(hubSpecStart), offersPerRoute));
   }
 
   return specs;

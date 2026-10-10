@@ -113,6 +113,7 @@ import {
   buildMarketMakerTokenIdsByContext,
   configureMarketMakerRuntimeLogging,
   countCommittedMarketMakerOffersForHub,
+  countMarketMakerCrossJurisdictions,
   createMarketMakerEntityContext,
   directWsUrl,
   emitMarketMakerBootstrapDebugEvent,
@@ -1210,6 +1211,7 @@ const buildMarketMakerCrossQuoteJobs = async (
 ): Promise<CrossQuoteJob[] | null> => {
   const jobs: CrossQuoteJob[] = [];
   const crossContexts = contexts.filter(context => context.samePairIndex === 0);
+  const jurisdictionCount = countMarketMakerCrossJurisdictions(contexts);
   for (const sourceContext of crossContexts) {
     await yieldMarketMakerApi();
     if (!shouldContinue()) return null;
@@ -1233,6 +1235,7 @@ const buildMarketMakerCrossQuoteJobs = async (
         targetHubs,
         sourceTokenIds,
         targetTokenIds: getMarketMakerTokenIds(tokenIdsByContext, targetContext),
+        jurisdictionCount,
       });
     }
   }
@@ -1866,6 +1869,7 @@ export const submitMarketMakerBootstrapCrossQuotes = async (
       job.targetHubs,
       job.sourceTokenIds,
       job.targetTokenIds,
+      job.jurisdictionCount,
       input.shouldContinue,
     );
     for (const route of routes) {
@@ -1937,6 +1941,7 @@ const maintainSelectedCrossQuotes = async (input: SelectedCrossQuoteInput): Prom
       job.targetHubs,
       job.sourceTokenIds,
       job.targetTokenIds,
+      job.jurisdictionCount,
       Math.max(2, Math.floor(MARKET_MAKER_OFFERS_PER_ACCOUNT_PER_TICK / 2)),
       Math.max(2, Math.floor(MARKET_MAKER_MAX_NEW_OFFERS_PER_TICK / 2)),
       input.connectivityBudget,

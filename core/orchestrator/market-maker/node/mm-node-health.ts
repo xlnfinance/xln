@@ -31,7 +31,6 @@ buildMarketMakerBootstrapEntityStateHashFromCanonicalHashes
 import {
 type HubProfile,
 MARKET_MAKER_CONNECTIVITY_MAX_TXS_PER_TICK,
-MARKET_MAKER_CROSS_OFFERS_PER_DIRECTED_ROUTE,
 MARKET_MAKER_LEVELS_PER_SIDE,
 MARKET_MAKER_MAX_NEW_OFFERS_PER_TICK,
 MARKET_MAKER_OFFERS_PER_ACCOUNT_PER_TICK,
@@ -46,8 +45,10 @@ buildMarketMakerCrossOfferSpecs,
 buildMarketMakerCrossTokenPairs,
 buildMarketMakerOfferSpecs,
 collectOfferIdsForAccount,
+deriveMarketMakerCrossOffersPerDirectedRoute,
 collectPendingCrossRequestOrderIds,
 countCommittedMarketMakerOffersForHub,
+countMarketMakerCrossJurisdictions,
 countCommittedMarketMakerOffersForHubPair,
 countCrossPairCoverageGaps,
 countCrossSpecBootstrapProgress,
@@ -194,6 +195,7 @@ const buildExpectedMarketMakerCrossRouteGroups = (
 ): Map<string, MarketMakerCrossHealthRouteGroup> => {
   const groups = new Map<string, MarketMakerCrossHealthRouteGroup>();
   const crossContexts = contexts.filter(context => context.samePairIndex === 0);
+  const jurisdictionCount = countMarketMakerCrossJurisdictions(contexts);
   for (const sourceContext of crossContexts) {
     const sourceJurisdictionRef = sourceContext.jurisdictionRef;
     const sourceTokenIds = getMarketMakerTokenIds(tokenIdsByContext, sourceContext);
@@ -222,6 +224,7 @@ const buildExpectedMarketMakerCrossRouteGroups = (
         targetHubs,
         sourceTokenIds,
         targetTokenIds,
+        jurisdictionCount,
       )) {
         const route = spec.crossJurisdiction;
         if (!route) continue;
@@ -320,10 +323,12 @@ export const buildMarketMakerCrossPlanSummary = (
     applicable: expectedRoutes > 0,
     expectedJobs,
     expectedRoutes,
-    expectedOffersPerRoute: Math.min(
-      MARKET_MAKER_CROSS_OFFERS_PER_DIRECTED_ROUTE,
-      maxPairsPerRoute * expectedOffersPerPair,
-    ),
+    expectedOffersPerRoute: expectedRoutes > 0
+      ? Math.min(
+          deriveMarketMakerCrossOffersPerDirectedRoute(countMarketMakerCrossJurisdictions(contexts)),
+          maxPairsPerRoute * expectedOffersPerPair,
+        )
+      : 0,
     expectedOffersPerPair,
   };
 };
@@ -540,6 +545,7 @@ type CrossQuoteMaintenanceContext = {
   targetHubs: HubProfile[];
   sourceTokenIds: number[];
   targetTokenIds: number[];
+  jurisdictionCount: number;
   maxOffersPerAccount: number;
   maxNewOffersTotal: number;
   shouldContinue: () => boolean;
@@ -618,6 +624,7 @@ const planBootstrapCrossQuoteRoutes = (
     targetHubs,
     sourceTokenIds,
     targetTokenIds,
+    jurisdictionCount,
     shouldContinue,
     direction,
     startedAt,
@@ -646,6 +653,7 @@ const planBootstrapCrossQuoteRoutes = (
       sortedTargetHubs,
       sourceTokenIds,
       targetTokenIds,
+      jurisdictionCount,
     );
     if (sourceHubSpecs.length === 0) continue;
     // Existing uncommitted work belongs to an earlier Runtime frame. A new
@@ -718,6 +726,7 @@ export const planMarketMakerBootstrapCrossQuoteRoutes = (
   targetHubs: HubProfile[],
   sourceTokenIds: number[],
   targetTokenIds: number[],
+  jurisdictionCount: number,
   shouldContinue: () => boolean,
 ): CrossJurisdictionSwapRoute[] =>
   planBootstrapCrossQuoteRoutes({
@@ -728,6 +737,7 @@ export const planMarketMakerBootstrapCrossQuoteRoutes = (
     targetHubs,
     sourceTokenIds,
     targetTokenIds,
+    jurisdictionCount,
     maxOffersPerAccount: Number.MAX_SAFE_INTEGER,
     maxNewOffersTotal: Number.MAX_SAFE_INTEGER,
     shouldContinue,
@@ -747,6 +757,7 @@ const maintainSteadyCrossQuotes = async (
     targetHubs,
     sourceTokenIds,
     targetTokenIds,
+    jurisdictionCount,
     maxOffersPerAccount,
     maxNewOffersTotal,
     maxSourceHubGroups,
@@ -760,6 +771,7 @@ const maintainSteadyCrossQuotes = async (
     targetHubs,
     sourceTokenIds,
     targetTokenIds,
+    jurisdictionCount,
   );
   if (desiredOffers.length === 0) return false;
   if (process.env['XLN_MM_CROSS_QUOTE_DEBUG'] === '1') {
@@ -831,6 +843,7 @@ export const maintainMarketMakerCrossQuotes = async (
   targetHubs: HubProfile[],
   sourceTokenIds: number[],
   targetTokenIds: number[],
+  jurisdictionCount: number,
   maxOffersPerAccount = Math.max(2, Math.floor(MARKET_MAKER_OFFERS_PER_ACCOUNT_PER_TICK / 2)),
   maxNewOffersTotal = Math.max(2, Math.floor(MARKET_MAKER_MAX_NEW_OFFERS_PER_TICK / 2)),
   connectivityBudget: MarketMakerConnectivityBudget = { remainingTxs: MARKET_MAKER_CONNECTIVITY_MAX_TXS_PER_TICK },
@@ -854,6 +867,7 @@ export const maintainMarketMakerCrossQuotes = async (
     targetHubs: routedTargetHubs,
     sourceTokenIds,
     targetTokenIds,
+    jurisdictionCount,
     maxOffersPerAccount,
     maxNewOffersTotal,
     shouldContinue,

@@ -26,6 +26,7 @@ import {
   type MarketMakerTokenIdsByContext,
 } from '../../../orchestrator/mm-node';
 import { submitMarketMakerBootstrapCrossQuotes } from '../../../orchestrator/market-maker/node/mm-node-run';
+import { buildMarketMakerCrossPlanSummary } from '../../../orchestrator/market-maker/node/mm-node-health';
 import {
   MARKET_MAKER_LEVELS_PER_SIDE,
   listMarketMakerQuotablePairs,
@@ -473,6 +474,7 @@ test('five-token jurisdiction keeps same-chain and cross depth inside one accoun
     [targetHub],
     sourceTokenIds,
     targetTokenIds,
+    2,
   );
   const reverseCrossSpecs = buildMarketMakerCrossOfferSpecs(
     env,
@@ -482,6 +484,7 @@ test('five-token jurisdiction keeps same-chain and cross depth inside one accoun
     [sourceHub],
     targetTokenIds,
     sourceTokenIds,
+    2,
   );
   const sameJurisdictionSpecs = buildMarketMakerOfferSpecs([sourceHub.entityId], sourceTokenIds);
   const specs = [...sameJurisdictionSpecs, ...crossSpecs];
@@ -507,6 +510,83 @@ test('five-token jurisdiction keeps same-chain and cross depth inside one accoun
   }
 });
 
+const addThirdJurisdiction = (
+  topology: ReturnType<typeof buildBootstrapTopology>,
+): { contexts: MarketMakerEntityContext[]; hubs: HubProfile[] } => {
+  const { env, contexts, visibleHubs } = topology;
+  const context: MarketMakerEntityContext = {
+    entityId: entity('50'),
+    signerId: addr('50'),
+    jurisdictionName: 'Third',
+    chainId: 31339,
+    depositoryAddress: addr('33'),
+    jurisdictionRef: stackRef(31339, '33'),
+    roleEvidence: { entityId: entity('50'), isHub: false, source: 'committed-profile' },
+    samePairIndex: 0,
+  };
+  const hubRuntimeId = addr('91');
+  const hub: HubProfile = {
+    name: 'H1 Third',
+    entityId: entity('60'),
+    signerId: addr('60'),
+    runtimeId: hubRuntimeId,
+    jurisdictionName: 'Third',
+    chainId: 31339,
+    depositoryAddress: addr('33'),
+    jurisdictionRef: stackRef(31339, '33'),
+    roleEvidence: { entityId: entity('60'), isHub: true, source: 'verified-gossip-profile' },
+  };
+  const routes = env.infrastructure.verifiedProfileRoutes;
+  if (!routes) throw new Error('TEST_PROFILE_ROUTES_MISSING');
+  routes.set(context.entityId, {
+    runtimeId: env.runtimeId, runtimeSignerId: context.signerId, runtimeEncPubKey: '', lastUpdated: env.state.timestamp,
+  });
+  routes.set(hub.entityId, {
+    runtimeId: hubRuntimeId, runtimeSignerId: hub.signerId, runtimeEncPubKey: '', lastUpdated: env.state.timestamp,
+  });
+  return { contexts: [...contexts, context], hubs: [...visibleHubs, hub] };
+};
+
+test('three-jurisdiction cross depth keeps every MM Account inside the cross-j pull cap', () => {
+  const topology = buildBootstrapTopology();
+  const { contexts, hubs } = addThirdJurisdiction(topology);
+  for (const context of contexts) addReplica(topology.env, context.entityId, context.signerId);
+  const hubFor = (context: MarketMakerEntityContext): HubProfile => {
+    const hub = hubs.find(candidate => candidate.jurisdictionRef === context.jurisdictionRef);
+    if (!hub) throw new Error(`TEST_HUB_MISSING:${context.jurisdictionName}`);
+    return hub;
+  };
+  // Every live cross-j offer holds one pull on its source MM<->Hub Account and
+  // one on its target MM<->Hub Account; both sides share one Account-wide cap.
+  const pullsByAccount = new Map<string, number>();
+  const addPull = (mmEntityId: string, hubEntityId: string): void => {
+    const key = `${mmEntityId}:${hubEntityId}`;
+    pullsByAccount.set(key, (pullsByAccount.get(key) ?? 0) + 1);
+  };
+  for (const source of contexts) {
+    for (const target of contexts) {
+      if (source === target) continue;
+      const specs = buildMarketMakerCrossOfferSpecs(
+        topology.env, source, target, [hubFor(source)], [hubFor(target)], [1, 2, 3], [1, 2, 3], contexts.length,
+      );
+      expect(specs.length).toBeGreaterThan(0);
+      for (const spec of specs) {
+        const route = spec.crossJurisdiction;
+        if (!route) throw new Error(`TEST_CROSS_ROUTE_MISSING:${spec.offerId}`);
+        addPull(route.source.entityId, route.source.counterpartyEntityId);
+        addPull(route.target.counterpartyEntityId, route.target.entityId);
+      }
+    }
+  }
+  expect(pullsByAccount.size).toBe(3);
+  for (const pulls of pullsByAccount.values()) {
+    expect(pulls).toBeLessThanOrEqual(LIMITS.MAX_ACCOUNT_CROSS_J_SWAP_OFFERS);
+  }
+  const plan = buildMarketMakerCrossPlanSummary(contexts, hubs, new Map(contexts.map(context => [context.entityId, [1, 2, 3]])));
+  expect(plan.expectedRoutes).toBe(6);
+  expect(plan.expectedOffersPerRoute).toBe(Math.floor(LIMITS.MAX_ACCOUNT_CROSS_J_SWAP_OFFERS / 4));
+});
+
 test('cross offer construction requires the deterministic Runtime-frame timestamp', () => {
   const { env, contexts, visibleHubs } = buildBootstrapTopology();
   env.state.timestamp = 0;
@@ -519,6 +599,7 @@ test('cross offer construction requires the deterministic Runtime-frame timestam
     [visibleHubs[1]!],
     [1],
     [1],
+    2,
   )).toThrow('MARKET_MAKER_CROSS_TIMESTAMP_INVALID:0');
 });
 
@@ -534,6 +615,7 @@ test('cross stablecoin depth fully covers a 300 USDC wallet order', () => {
     [visibleHubs[1]!],
     [1],
     [1],
+    2,
   );
   const sourceDepth = specs.reduce((sum, spec) => sum + spec.giveAmount, 0n);
 
@@ -564,6 +646,7 @@ test('runtime market maker health stays red when same-chain offers are committed
     [targetHub],
     [1, 2, 3],
     [1, 2, 3],
+    2,
   );
   expect(specs.length).toBeGreaterThan(0);
   const pendingSpec = specs[0]!;
@@ -670,6 +753,7 @@ test('runtime market maker health stays red until every byte-budgeted cross mark
     [targetHub],
     [1, 2, 3],
     [1, 2, 3],
+    2,
   );
   const targetToSourceSpecs = buildMarketMakerCrossOfferSpecs(
     env,
@@ -679,6 +763,7 @@ test('runtime market maker health stays red until every byte-budgeted cross mark
     [sourceHub],
     [1, 2, 3],
     [1, 2, 3],
+    2,
   );
   const commitOneOfferPerPair = (account: AccountReplica, specs: ReturnType<typeof buildMarketMakerCrossOfferSpecs>): number => {
     const coveredPairs = new Set<string>();
@@ -751,6 +836,7 @@ test('market maker cross order identity is stable within one expiry generation',
     [targetHub],
     [1, 2, 3],
     [1, 2, 3],
+    2,
   );
   const first = build();
   const firstExpiry = deriveMarketMakerCrossExpiryAt(env.state.timestamp);
@@ -792,6 +878,7 @@ test('market maker cross order identity is stable within one expiry generation',
     [targetHub],
     [1, 2, 3],
     [1, 2, 3],
+    2,
   );
   expect(revisedTerms).toHaveLength(nextGeneration.length);
   expect(revisedTerms.map(spec => spec.offerId)).not.toEqual(nextGeneration.map(spec => spec.offerId));
@@ -816,6 +903,7 @@ test('market maker advances only the cross quote slot that committed a close', (
     [targetHub],
     [1],
     [1],
+    2,
   );
   const initial = build();
   const closed = initial[0]!;
@@ -855,6 +943,7 @@ test('market maker does not reuse a terminal cross route after bounded close his
     [targetHub],
     [1],
     [1],
+    2,
   );
   const terminal = build()[0]!;
   const sourceReplica = env.state.eReplicas.get(`${sourceContext.entityId}:${sourceContext.signerId}`)!;
@@ -887,6 +976,7 @@ test('market maker finalized cross matching requires the exact immutable route h
     [targetHub],
     [1, 2, 3],
     [1, 2, 3],
+    2,
   )[0]!;
   const route = spec.crossJurisdiction!;
   account.state.swapOffers = PersistentAccountStateMap.fromEntries('swapOffers', [[spec.offerId, {
@@ -1051,6 +1141,7 @@ test('bootstrap cross quotes enqueue exactly once again after the submitted UTC 
     selected: [{ index: 0, job: {
       sourceContext: sourceContext!, targetContext: targetContext!,
       sourceHubs: [sourceHub!], targetHubs: [targetHub!], sourceTokenIds: [1], targetTokenIds: [1],
+      jurisdictionCount: 2,
     } }],
   };
   const midnight = Date.UTC(2026, 9, 1);
