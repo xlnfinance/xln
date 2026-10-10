@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { sendRpcBatch } from '../../../jurisdiction/adapter/rpc-utils';
 import { asRpcTxResponse } from '../../../jurisdiction/adapter/rpc/rpc-boundary';
+import { RpcTransportUnavailableError } from '../../../jurisdiction/adapter/kernel/failure';
 
 describe('RPC batch transport timeouts', () => {
   test('preserves the provider transaction receiver when awaiting a receipt', async () => {
@@ -35,6 +36,29 @@ describe('RPC batch transport timeouts', () => {
     } finally {
       // The provider stays silent through both timeout assertions; teardown owns its pending handler.
       upstream.resolve(new Response(null, { status: 204 }));
+      await server.stop(true);
+    }
+  }, 2_000);
+
+  test('times out a provider that sends headers and then stalls the body', async () => {
+    // The timeout used to end once headers arrived, so a stalled body hung
+    // the watcher poll (and the frame waiting on it) forever.
+    const server = Bun.serve({
+      port: 0,
+      fetch: () => new Response(new ReadableStream({ start: controller => controller.enqueue(new TextEncoder().encode('[')) }), {
+        headers: { 'content-type': 'application/json' },
+      }),
+    });
+    try {
+      const failure = await sendRpcBatch(`http://127.0.0.1:${server.port}`, [{
+        id: 1,
+        jsonrpc: '2.0',
+        method: 'eth_chainId',
+        params: [],
+      }], 25).catch((error: unknown) => error);
+      expect(failure).toBeInstanceOf(RpcTransportUnavailableError);
+      expect((failure as Error).message).toBe('RPC_BATCH_TIMEOUT:25');
+    } finally {
       await server.stop(true);
     }
   }, 2_000);

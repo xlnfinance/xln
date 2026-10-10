@@ -1,4 +1,8 @@
-import { JBroadcastReceiptError } from '../kernel/failure';
+import {
+  JBroadcastReceiptError,
+  RpcTransportUnavailableError,
+  TRANSIENT_RPC_HTTP_STATUSES,
+} from '../kernel/failure';
 import type { Signer } from 'ethers';
 import { ethers } from 'ethers';
 import { normalizeReceiptHash, parseReceiptQuantity } from '../../machine/receipt-codec';
@@ -131,21 +135,66 @@ export const parseBlockTimestamp = (raw: unknown): number => {
   return timestamp;
 };
 
+const TRON_FETCH_TIMEOUT_MS = 10_000;
+
+/**
+ * One bounded TRON HTTP round trip. Timeouts, connection failures and HTTP
+ * 429/5xx are typed transport outages: the watcher retries them, where an
+ * unrecognised message used to exit the process.
+ */
+const fetchTronJson = async (
+  config: JAdapterConfig,
+  url: string,
+  body: string,
+  label: string,
+  detail = '',
+): Promise<unknown> => {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), TRON_FETCH_TIMEOUT_MS);
+  try {
+    let response: Response;
+    try {
+      response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          ...(config.tronApiKey ? { 'TRON-PRO-API-KEY': config.tronApiKey } : {}),
+        },
+        body,
+        signal: controller.signal,
+      });
+    } catch (error) {
+      const timedOut = error instanceof Error && error.name === 'AbortError';
+      throw new RpcTransportUnavailableError(`${label}_${timedOut ? 'TIMEOUT' : 'UNREACHABLE'}${detail}`, { cause: error });
+    }
+    if (!response.ok) {
+      const message = `${label}_HTTP${detail}:${response.status}`;
+      if (TRANSIENT_RPC_HTTP_STATUSES.has(response.status)) throw new RpcTransportUnavailableError(message);
+      throw new Error(message);
+    }
+    try {
+      return await response.json();
+    } catch (error) {
+      const timedOut = error instanceof Error && error.name === 'AbortError';
+      if (timedOut) throw new RpcTransportUnavailableError(`${label}_TIMEOUT${detail}`, { cause: error });
+      throw new Error(`${label}_RESPONSE_INVALID${detail}`, { cause: error });
+    }
+  } finally {
+    clearTimeout(timeout);
+  }
+};
+
 const readTronSolidifiedBlockNumber = async (config: JAdapterConfig, provider: ethers.JsonRpcProvider): Promise<number> => {
   const fullHost = String(config.tronSolidityHost || config.tronFullHost || config.rpcUrl || '')
     .replace(/\/jsonrpc\/?$/i, '')
     .replace(/\/$/, '');
   if (!fullHost) throw new Error('TRON_FULL_HOST_MISSING');
-  const response = await fetch(`${fullHost}/walletsolidity/getnowblock`, {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-      ...(config.tronApiKey ? { 'TRON-PRO-API-KEY': config.tronApiKey } : {}),
-    },
-    body: '{}',
-  });
-  if (!response.ok) throw new Error(`TRON_SOLIDIFIED_HEAD_HTTP:${response.status}`);
-  const rawPayload: unknown = await response.json();
+  const rawPayload = await fetchTronJson(
+    config,
+    `${fullHost}/walletsolidity/getnowblock`,
+    '{}',
+    'TRON_SOLIDIFIED_HEAD',
+  );
   if (!rawPayload || typeof rawPayload !== 'object' || Array.isArray(rawPayload)) {
     throw new Error('TRON_SOLIDIFIED_HEAD_PAYLOAD_INVALID');
   }
@@ -176,53 +225,32 @@ const sendTronRpcCall = async (
 ): Promise<RpcBatchResponse> => {
   const rpcUrl = String(config.rpcUrl || '').trim();
   if (!rpcUrl) throw new Error('TRON_RPC_URL_MISSING');
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 10_000);
-  try {
-    const response = await fetch(rpcUrl, {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        ...(config.tronApiKey ? { 'TRON-PRO-API-KEY': config.tronApiKey } : {}),
-      },
-      body: JSON.stringify(request),
-      signal: controller.signal,
-    });
-    if (!response.ok) throw new Error(`TRON_RPC_HTTP:${request.method}:${response.status}`);
-    const payload: unknown = await response.json();
-    if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
-      throw new Error(`TRON_RPC_RESPONSE_INVALID:${request.method}`);
-    }
-    const record = payload as Record<string, unknown>;
-    const id = record['id'];
-    if (id !== undefined && (!Number.isSafeInteger(id) || Number(id) < 0)) {
-      throw new Error(`TRON_RPC_RESPONSE_INVALID:${request.method}`);
-    }
-    const error = record['error'];
-    if (error !== undefined && (!error || typeof error !== 'object' || Array.isArray(error))) {
-      throw new Error(`TRON_RPC_RESPONSE_INVALID:${request.method}`);
-    }
-    const errorRecord = error && typeof error === 'object' && !Array.isArray(error)
-      ? error as Record<string, unknown>
-      : undefined;
-    const errorMessage = typeof errorRecord?.['message'] === 'string' ? errorRecord['message'] : undefined;
-    const typedPayload: RpcBatchResponse = {
-      ...(id === undefined ? {} : { id: Number(id) }),
-      ...(Object.hasOwn(record, 'result') ? { result: record['result'] } : {}),
-      ...(error === undefined ? {} : errorMessage === undefined ? { error: {} } : { error: { message: errorMessage } }),
-    };
-    if (typedPayload.id !== request.id) {
-      throw new Error(`TRON_RPC_ID_MISMATCH:${request.method}:${request.id}:${String(typedPayload.id)}`);
-    }
-    return typedPayload;
-  } catch (error) {
-    if (error instanceof Error && error.name === 'AbortError') {
-      throw new Error(`TRON_RPC_TIMEOUT:${request.method}`);
-    }
-    throw error;
-  } finally {
-    clearTimeout(timeout);
+  const payload = await fetchTronJson(config, rpcUrl, JSON.stringify(request), 'TRON_RPC', `:${request.method}`);
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    throw new Error(`TRON_RPC_RESPONSE_INVALID:${request.method}`);
   }
+  const record = payload as Record<string, unknown>;
+  const id = record['id'];
+  if (id !== undefined && (!Number.isSafeInteger(id) || Number(id) < 0)) {
+    throw new Error(`TRON_RPC_RESPONSE_INVALID:${request.method}`);
+  }
+  const error = record['error'];
+  if (error !== undefined && (!error || typeof error !== 'object' || Array.isArray(error))) {
+    throw new Error(`TRON_RPC_RESPONSE_INVALID:${request.method}`);
+  }
+  const errorRecord = error && typeof error === 'object' && !Array.isArray(error)
+    ? error as Record<string, unknown>
+    : undefined;
+  const errorMessage = typeof errorRecord?.['message'] === 'string' ? errorRecord['message'] : undefined;
+  const typedPayload: RpcBatchResponse = {
+    ...(id === undefined ? {} : { id: Number(id) }),
+    ...(Object.hasOwn(record, 'result') ? { result: record['result'] } : {}),
+    ...(error === undefined ? {} : errorMessage === undefined ? { error: {} } : { error: { message: errorMessage } }),
+  };
+  if (typedPayload.id !== request.id) {
+    throw new Error(`TRON_RPC_ID_MISMATCH:${request.method}:${request.id}:${String(typedPayload.id)}`);
+  }
+  return typedPayload;
 };
 
 const sendTronRpcCalls = async (

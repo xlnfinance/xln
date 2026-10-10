@@ -8,6 +8,28 @@ export class JBroadcastReceiptError extends Error {
   }
 }
 
+/**
+ * A transport-level outage (timeout, connection failure, HTTP 429/5xx) from a
+ * request this adapter issued itself. Typed so the watcher never has to guess
+ * from message text whether its own TRON/RPC calls failed transiently.
+ */
+export class RpcTransportUnavailableError extends Error {
+  constructor(message: string, options?: { cause?: unknown }) {
+    super(message, options);
+    this.name = 'RpcTransportUnavailableError';
+  }
+}
+
+export const TRANSIENT_RPC_HTTP_STATUSES: ReadonlySet<number> = new Set([429, 500, 502, 503, 504]);
+
+export const isRpcTransportUnavailable = (error: unknown): boolean => {
+  for (let current = error, depth = 0; current !== undefined && depth < 8; depth += 1) {
+    if (current instanceof RpcTransportUnavailableError) return true;
+    current = current instanceof Error ? current.cause : undefined;
+  }
+  return false;
+};
+
 const TRANSIENT_CODES = new Set([
   'NETWORK_ERROR',
   'SERVER_ERROR',

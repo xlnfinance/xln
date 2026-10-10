@@ -1,5 +1,6 @@
 import { ethers } from 'ethers';
 import { firstUsableContractAddress } from '../machine/contract-address';
+import { RpcTransportUnavailableError, TRANSIENT_RPC_HTTP_STATUSES } from './kernel/failure';
 
 export type DebugEventEmitter = {
   sendDebugEvent(payload: Record<string, unknown>): void;
@@ -65,26 +66,40 @@ export const sendRpcBatch = async (
   const timeoutHandle = timeoutMs > 0
     ? setTimeout(() => controller.abort(), timeoutMs)
     : null;
-  let response: Response;
+  const transportFailure = (error: unknown): RpcTransportUnavailableError =>
+    new RpcTransportUnavailableError(
+      (error as Error)?.name === 'AbortError' ? `RPC_BATCH_TIMEOUT:${timeoutMs}` : 'RPC_BATCH_UNREACHABLE',
+      { cause: error },
+    );
+  let json: unknown;
+  // The timeout covers the body too: a server that sends headers and then
+  // stalls the body used to hang the poll forever.
   try {
-    response = await fetch(rpcUrl, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(batch),
-      signal: controller.signal,
-    });
-  } catch (error) {
-    if ((error as Error)?.name === 'AbortError') {
-      throw new Error(`RPC_BATCH_TIMEOUT:${timeoutMs}`);
+    let response: Response;
+    try {
+      response = await fetch(rpcUrl, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(batch),
+        signal: controller.signal,
+      });
+    } catch (error) {
+      throw transportFailure(error);
     }
-    throw error;
+    if (!response.ok) {
+      const message = `RPC_BATCH_HTTP_${response.status}`;
+      if (TRANSIENT_RPC_HTTP_STATUSES.has(response.status)) throw new RpcTransportUnavailableError(message);
+      throw new Error(message);
+    }
+    try {
+      json = await response.json();
+    } catch (error) {
+      if ((error as Error)?.name === 'AbortError') throw transportFailure(error);
+      throw new Error('RPC_BATCH_INVALID_RESPONSE', { cause: error });
+    }
   } finally {
     if (timeoutHandle !== null) clearTimeout(timeoutHandle);
   }
-  if (!response.ok) {
-    throw new Error(`RPC_BATCH_HTTP_${response.status}`);
-  }
-  const json: unknown = await response.json();
   if (!Array.isArray(json)) {
     throw new Error('RPC_BATCH_INVALID_RESPONSE');
   }

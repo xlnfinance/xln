@@ -3,6 +3,10 @@ import { expect, test } from 'bun:test';
 import { isTransientRpcUnavailableError } from '../../../jurisdiction/adapter/rpc-public';
 import { isRpcWatcherTransientError } from '../../../jurisdiction/adapter/rpc/rpc-adapter';
 import { ReceiptAvailabilityError } from '../../../jurisdiction/adapter/receipt-root';
+import { RpcTransportUnavailableError } from '../../../jurisdiction/adapter/kernel/failure';
+import { createRpcChainIo } from '../../../jurisdiction/adapter/rpc/rpc-chain-io';
+import type { JAdapterConfig } from '../../../jurisdiction/adapter/types';
+import { ethers } from 'ethers';
 
 /**
  * A shared public RPC rate-limits by IP. Classifying that throttle as fatal
@@ -48,5 +52,32 @@ test('genuine faults stay fatal so a broken stack still fails loudly', () => {
     'J_RECEIPT_ROOT_MISMATCH',
   ]) {
     expect(isTransientRpcUnavailableError(new Error(message))).toBe(false);
+  }
+});
+
+test('the adapter\'s own TRON transport outages are retryable, never a watcher exit', async () => {
+  // TRON_SOLIDIFIED_HEAD_HTTP:503 and TRON_RPC_TIMEOUT matched no transient
+  // pattern, so one flaky TRON response exited the whole process.
+  let status = 503;
+  const server = Bun.serve({ port: 0, fetch: () => new Response('busy', { status }) });
+  try {
+    const host = `http://127.0.0.1:${server.port}`;
+    const chainIo = createRpcChainIo(
+      { mode: 'tron', rpcUrl: `${host}/jsonrpc`, tronFullHost: host } as JAdapterConfig,
+      new ethers.JsonRpcProvider(`${host}/jsonrpc`),
+      ethers.Wallet.createRandom(),
+    );
+    const outage = await chainIo.readSafeBlockNumber().catch((error: unknown) => error);
+    expect(outage).toBeInstanceOf(RpcTransportUnavailableError);
+    expect(String((outage as Error).message)).toBe('TRON_SOLIDIFIED_HEAD_HTTP:503');
+    expect(isRpcWatcherTransientError(outage)).toBe(true);
+    expect(isRpcWatcherTransientError(new Error('J_WATCHER_POLL_FAILED', { cause: outage }))).toBe(true);
+
+    status = 400;
+    const rejected = await chainIo.readSafeBlockNumber().catch((error: unknown) => error);
+    expect(String((rejected as Error).message)).toBe('TRON_SOLIDIFIED_HEAD_HTTP:400');
+    expect(isRpcWatcherTransientError(rejected)).toBe(false);
+  } finally {
+    await server.stop(true);
   }
 });

@@ -13,6 +13,7 @@ import {
   resolveDisputeFinalizationEvidence,
 } from '../rpc-public';
 import { ReceiptAvailabilityError } from '../receipt-root';
+import { isRpcTransportUnavailable } from '../kernel/failure';
 import { createRpcReadMethods } from './rpc-reads';
 import { createRpcReceiptReaders } from './rpc-receipts';
 import { createRpcSubmitTx } from './write/rpc-submission';
@@ -28,7 +29,9 @@ import { asRpcTxResponse } from './rpc-boundary';
 import { prepareDurableTransaction } from './write/prepared/durable-transaction';
 
 export const isRpcWatcherTransientError = (error: unknown): boolean =>
-  error instanceof ReceiptAvailabilityError || isTransientRpcUnavailableError(error);
+  error instanceof ReceiptAvailabilityError ||
+  isRpcTransportUnavailable(error) ||
+  isTransientRpcUnavailableError(error);
 
 export async function createRpcAdapter(
   config: JAdapterConfig,
