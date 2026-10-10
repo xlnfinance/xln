@@ -6,6 +6,7 @@ import { computeRuntimePostStateComponentDigests, computeStoragePostStateHash } 
 import { buildReplayVerifiableRuntimePostStateView, buildStorageRuntimeMachineSnapshot } from '../../../../storage/wal/snapshot';
 import { prepareRuntimeOutputRows } from '../../../../storage/wal/outbox-payload';
 import type { PersistedFrameJournal } from '../../../../storage/types';
+import type { EntityInfraContext } from '../../../../types/entity/infra-context';
 import { assertRecoveryRuntimeMachineMatches } from '../../../../storage/recovery/machine';
 
 const SEED_SENTINEL = 'recovery-diagnostic-private-seed-sentinel';
@@ -81,6 +82,42 @@ test('empty snapshot infrastructure is named as diagnostic evidence and never be
   expect(diagnostic['componentMismatches']).toEqual(['infrastructure']);
   fixture.frame.postStateHash = fixture.actualHash;
   expect(() => verifyRecoveryJournalFrame(fixture.env, fixture.frame, 2, fixture.result)).not.toThrow();
+});
+
+const PAYLOAD_SENTINEL = 'recovery-diagnostic-payload-sentinel';
+
+const captureMessage = (run: () => void): string => {
+  try { run(); } catch (error) { return String((error as Error).message); }
+  throw new Error('TEST_MISMATCH_REQUIRED');
+};
+
+test('an entity-context mismatch reports digests and the first differing key, never the contexts', async () => {
+  // The message embedded every replayed context (gossip profiles, HTLC pages).
+  const fixture = await prepareFrame();
+  const context = {
+    version: 1, proposerReplicaId: `${PAYLOAD_SENTINEL}:a`, entityId: PAYLOAD_SENTINEL,
+    proposerSignerId: PAYLOAD_SENTINEL, parentFrameHash: CORRUPTED_HASH, height: 2,
+    gossipProfiles: [], peerAssertions: [], htlc: { version: 1, entries: [] },
+  } as unknown as EntityInfraContext;
+  fixture.result.entityContexts = new Map([[`${PAYLOAD_SENTINEL}:a:2`, context]]);
+  const message = captureMessage(() => verifyRecoveryJournalFrame(fixture.env, fixture.frame, 2, fixture.result));
+  expect(message).toStartWith('RECOVERY_JOURNAL_ENTITY_CONTEXTS_MISMATCH:height=2:');
+  expect(message).toContain(`expectedCount=0:actualCount=1:firstDifferentKey=${PAYLOAD_SENTINEL}:a:2`);
+  expect(message.split(PAYLOAD_SENTINEL)).toHaveLength(2);
+});
+
+test('a replica-meta mismatch reports input counts, never applied WAL inputs or the outbox', async () => {
+  const fixture = await prepareFrame();
+  fixture.frame.replicaMetaDigest = CORRUPTED_HASH;
+  fixture.result.appliedRuntimeInput = {
+    runtimeTxs: [], entityInputs: [{ entityId: PAYLOAD_SENTINEL, signerId: PAYLOAD_SENTINEL, entityTxs: [] }],
+  } as unknown as typeof fixture.result.appliedRuntimeInput;
+  fixture.result.entityOutbox = [{ runtimeId: PAYLOAD_SENTINEL, entityId: PAYLOAD_SENTINEL, entityTxs: [] }];
+  const message = captureMessage(() => verifyRecoveryJournalFrame(fixture.env, fixture.frame, 2, fixture.result));
+  expect(message).toStartWith(`RECOVERY_JOURNAL_REPLICA_META_DIGEST_MISMATCH:height=2:expected=${CORRUPTED_HASH}`);
+  expect(message).toContain('"appliedEntityInputCount":1');
+  expect(message).toContain('"entityOutboxCount":1');
+  expect(message).not.toContain(PAYLOAD_SENTINEL);
 });
 
 test('a runtime-machine mismatch names the field without leaking its secret value', () => {

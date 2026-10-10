@@ -2,6 +2,7 @@ import { getCachedSignerPrivateKey } from '../../../account/crypto';
 import { safeStringify } from '../../../protocol/serialization';
 import type { RuntimeInputApplyResult } from '../../../runtime/frame/apply';
 import type { RuntimeReplica , RoutedEntityInput } from '../../../runtime/types';
+import type { EntityInfraContext } from '../../../types/entity/infra-context';
 import { computeStoragePostStateHash } from '../..';
 import { computeRuntimePostStateComponentDigests } from '../../hashes';
 import { computeCanonicalStateHashFromEnv } from '../../canonical-hash';
@@ -101,6 +102,18 @@ export const selectRetainedRecoveryOutbox = (
   return retained;
 };
 
+// Mismatch messages reach logs and incident journals. They carry counts,
+// digests and the first differing position only: a Hub frame holds up to
+// 10_000 outputs, and WAL inputs and contexts must not be copied into logs.
+const firstDifferentIndex = (left: readonly unknown[], right: readonly unknown[]): number | null => {
+  const length = Math.max(left.length, right.length);
+  for (let index = 0; index < length; index += 1) {
+    if (index >= left.length || index >= right.length) return index;
+    if (!canonicalConsensusValuesEqual(left[index], right[index])) return index;
+  }
+  return null;
+};
+
 export const assertRecoveryOutboxMatches = (
   expectedOutputs: readonly RoutedEntityInput[],
   actualOutputs: readonly RoutedEntityInput[],
@@ -121,11 +134,57 @@ export const assertRecoveryOutboxMatches = (
       expectedCommitment,
       persisted,
       actual,
-      expectedOutputs,
-      actualOutputs,
+      firstDifferentIndex: firstDifferentIndex(expectedOutputs, actualOutputs),
     }),
   );
 };
+
+const digestEntityContexts = (contexts: ReadonlyMap<string, EntityInfraContext>): Map<string, string> =>
+  new Map([...contexts].map(([key, context]) => [key, keccakBytesHash(encodeCanonicalConsensusBytes(context))]));
+
+const assertReplayEntityContexts = (
+  frame: PersistedFrameJournal,
+  height: number,
+  result: RuntimeInputApplyResult,
+): void => {
+  // Frames written before contexts were keyed by certified height carry one
+  // bare `replicaId` key per replica; compare them under the current key shape.
+  const expectedContexts = new Map(
+    [...(frame.entityContexts ?? new Map())].map(([key, context]) => [
+      key.split(':').length === 2 ? `${key}:${context.height}` : key,
+      context,
+    ]),
+  );
+  const expectedEntityContexts = timePerfPhase('recovery.verify.entityContexts.expected', () =>
+    keccakBytesHash(encodeCanonicalConsensusBytes(expectedContexts)));
+  const actualEntityContexts = timePerfPhase('recovery.verify.entityContexts.actual', () =>
+    keccakBytesHash(encodeCanonicalConsensusBytes(result.entityContexts)));
+  if (actualEntityContexts === expectedEntityContexts) return;
+  const expectedByKey = digestEntityContexts(expectedContexts);
+  const actualByKey = digestEntityContexts(result.entityContexts);
+  const firstDifferentKey = [...new Set([...expectedByKey.keys(), ...actualByKey.keys()])]
+    .sort().find(key => expectedByKey.get(key) !== actualByKey.get(key)) ?? null;
+  throw new Error(
+    `RECOVERY_JOURNAL_ENTITY_CONTEXTS_MISMATCH:height=${height}:` +
+    `expectedDigest=${expectedEntityContexts}:actualDigest=${actualEntityContexts}:` +
+    `expectedCount=${expectedByKey.size}:actualCount=${actualByKey.size}:` +
+    `firstDifferentKey=${firstDifferentKey ?? 'none'}`,
+  );
+};
+
+const replicaMetaMismatchInputs = (env: RuntimeReplica, frame: PersistedFrameJournal, result: RuntimeInputApplyResult) => ({
+  entityInputs: frame.runtimeInput.entityInputs.map(input => ({
+    entityId: input.entityId,
+    signerId: input.signerId,
+    entityTxCount: input.entityTxs?.length ?? 0,
+    proposalHeight: input.proposedFrame?.height ?? null,
+    hashPrecommits: input.hashPrecommits?.size ?? 0,
+    hasSignerKey: input.signerId ? getCachedSignerPrivateKey(env, input.signerId) !== null : false,
+  })),
+  appliedEntityInputCount: result.appliedRuntimeInput.entityInputs.length,
+  appliedRuntimeTxCount: result.appliedRuntimeInput.runtimeTxs.length,
+  entityOutboxCount: result.entityOutbox.length,
+});
 
 export const verifyRecoveryJournalFrame = (
   env: RuntimeReplica,
@@ -133,24 +192,7 @@ export const verifyRecoveryJournalFrame = (
   height: number,
   result: RuntimeInputApplyResult,
 ): void => {
-  // Frames written before contexts were keyed by certified height carry one
-  // bare `replicaId` key per replica; compare them under the current key shape.
-  const expectedEntityContexts = timePerfPhase('recovery.verify.entityContexts.expected', () =>
-    keccakBytesHash(encodeCanonicalConsensusBytes(new Map(
-      [...(frame.entityContexts ?? new Map())].map(([key, context]) => [
-        key.split(':').length === 2 ? `${key}:${context.height}` : key,
-        context,
-      ]),
-    ))));
-  const actualEntityContexts = timePerfPhase('recovery.verify.entityContexts.actual', () =>
-    keccakBytesHash(encodeCanonicalConsensusBytes(result.entityContexts)));
-  if (actualEntityContexts !== expectedEntityContexts) {
-    throw new Error(
-      `RECOVERY_JOURNAL_ENTITY_CONTEXTS_MISMATCH:height=${height}:` +
-      `expectedDigest=${expectedEntityContexts}:actualDigest=${actualEntityContexts}:` +
-      `actual=${safeStringify(result.entityContexts)}`,
-    );
-  }
+  assertReplayEntityContexts(frame, height, result);
   const expectedRuntimeMachine = frame.runtimeMachine;
   if (expectedRuntimeMachine) {
     timePerfPhase('recovery.verify.runtimeMachine', () =>
@@ -176,27 +218,13 @@ export const verifyRecoveryJournalFrame = (
     })}`);
   }
   if (commitment.digest !== frame.replicaMetaDigest) {
-    const inputs = frame.runtimeInput.entityInputs.map(input => ({
-      entityId: input.entityId,
-      signerId: input.signerId,
-      entityTxs: input.entityTxs?.map(tx => tx.type) ?? [],
-      proposalHeight: input.proposedFrame?.height ?? null,
-      hashPrecommits: input.hashPrecommits?.size ?? 0,
-      hasSignerKey:
-        input.signerId
-          ? getCachedSignerPrivateKey(env, input.signerId) !== null
-          : false,
-    }));
     throw new Error(
       `RECOVERY_JOURNAL_REPLICA_META_DIGEST_MISMATCH:height=${height}:` +
       `expected=${frame.replicaMetaDigest}:actual=${commitment.digest}:` +
       `actualEntries=${safeStringify(summarizeStorageReplicaMetaEntries(commitment.entries))}:` +
       `actualFields=${safeStringify(summarizeStorageReplicaMetaFields(commitment.entries))}:` +
       `actualHeads=${safeStringify(summarizeStorageReplicaMetaHeads(commitment.entries))}:` +
-      `runtimeInput=${safeStringify(inputs)}:` +
-      `appliedInput=${safeStringify(result.appliedRuntimeInput)}:` +
-      `entityOutbox=${safeStringify(result.entityOutbox)}:` +
-      `actualMeta=${safeStringify(inspectStorageReplicaMetaEntries(commitment.entries)).slice(0, 8_000)}`,
+      `runtimeInput=${safeStringify(replicaMetaMismatchInputs(env, frame, result))}`,
     );
   }
   const postState = timePerfPhase('recovery.verify.postState', () => {

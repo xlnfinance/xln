@@ -26,6 +26,23 @@ test('recovery replay requires the exact ordered committed outbox bytes', () => 
     .toThrow('RECOVERY_JOURNAL_OUTBOX_HASH_MISMATCH:height=7');
 });
 
+test('an outbox mismatch reports commitments and the first differing index, never the outputs', () => {
+  // The message embedded both full output lists; a Hub frame holds up to
+  // 10_000 outputs, so one divergence wrote megabytes of WAL payload to logs.
+  const sentinel = 'outbox-diagnostic-payload-sentinel';
+  const expected = [output('1a'), { ...output('1b'), signerId: sentinel }];
+  const commitment = prepareRuntimeOutputRows(7, expected).commitment;
+  let message = '';
+  try {
+    assertRecoveryOutboxMatches(expected, [expected[0]!, output('1c')], commitment, 7);
+  } catch (error) {
+    message = String((error as Error).message);
+  }
+  expect(message).toStartWith('RECOVERY_JOURNAL_OUTBOX_HASH_MISMATCH:height=7:');
+  expect(message).toContain('"firstDifferentIndex":1');
+  expect(message).not.toContain(sentinel);
+});
+
 test('deferred frame N output survives unrelated N+1 and retires independently in N+2', () => {
   const first = output('1a');
   const second = output('1b');
