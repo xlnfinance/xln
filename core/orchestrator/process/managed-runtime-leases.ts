@@ -271,6 +271,10 @@ export const createManagedRuntimeLeaseManager = (config: ManagedRuntimeLeaseMana
     const table = processTable ?? await readManagedProcessTable();
     const candidates = new Set<number>();
     const reusedPids = new Set<number>();
+    // PID plus OS birth time identify the exact process this lease recorded.
+    // Its command line need not contain spec.script: XLN_RSCORE_BINARY may
+    // launch the native H1 from any path.
+    const birthVerifiedPids = new Set<number>();
     const lease = readLease(spec);
     if (lease) {
       if (!isPidAlive(lease.pid, processOps)) {
@@ -288,6 +292,7 @@ export const createManagedRuntimeLeaseManager = (config: ManagedRuntimeLeaseMana
           });
         } else if (lease.ownerId !== config.ownerId && lease.pid !== currentPid) {
           candidates.add(lease.pid);
+          birthVerifiedPids.add(lease.pid);
         }
       }
     }
@@ -303,7 +308,7 @@ export const createManagedRuntimeLeaseManager = (config: ManagedRuntimeLeaseMana
     for (const pid of candidates) {
       if (pid === process.pid || pid === currentPid || !isPidAlive(pid, processOps)) continue;
       const command = commandByPid.get(pid) || '';
-      if (commandMatchesManagedRuntime(command, spec)) {
+      if (birthVerifiedPids.has(pid) || commandMatchesManagedRuntime(command, spec)) {
         verified.push(pid);
       }
     }

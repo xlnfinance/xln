@@ -98,6 +98,44 @@ test('managed lease accepts the canonical native H1 executable identity', () => 
   }
 });
 
+test('a stale native H1 from an overridden binary is reaped through its birth-verified lease', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'xln-managed-rust-override-'));
+  const spec: ManagedRuntimeSpec = {
+    role: 'hub', name: 'H1', script: 'rscore/target/release/xlnrs', apiPort: 21001, dbPath: '/tmp/h1',
+  };
+  const processStartedAt = Date.parse('Wed Jul 22 07:55:36 2026');
+  const signals: Array<[number, NodeJS.Signals | 0]> = [];
+  let alive = true;
+  const ops: ManagedProcessOps = {
+    kill: (pid, signal) => {
+      signals.push([pid, signal]);
+      if (signal === 0 && !alive) {
+        const error = new Error('missing') as NodeJS.ErrnoException;
+        error.code = 'ESRCH';
+        throw error;
+      }
+      if (signal === 'SIGTERM') alive = false;
+      return true;
+    },
+    sleep: async () => {},
+  };
+  try {
+    const manager = createManagedRuntimeLeaseManager({ controlPlaneDir: directory, ownerId: 'owner', processOps: ops });
+    writeFileSync(manager.leasePathFor(spec), safeStringify({
+      ...spec, ownerId: 'previous-owner', orchestratorPid: 1, pid: 4242, cwd: '/tmp',
+      startedAt: 1, processStartedAt, updatedAt: 1,
+    }));
+    await manager.reapStale(spec, 0, [{
+      pid: 4242,
+      processStartedAt,
+      command: '/opt/xln/bin/xlnrs live --name H1 --api-port 21001 --db-path /tmp/h1',
+    }]);
+    expect(signals).toContainEqual([4242, 'SIGTERM']);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test('managed stale process termination verifies the PID after SIGKILL', async () => {
   let alive = true;
   const signals: Array<NodeJS.Signals | 0> = [];
