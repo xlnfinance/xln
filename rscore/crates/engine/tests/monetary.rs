@@ -15,3 +15,6 @@ mod transfer;
 
 #[path = "authority/settlement_freeze.rs"]
 mod settlement_freeze;
+
+#[path = "monetary/dispute_gas_budget.rs"]
+mod dispute_gas_budget;

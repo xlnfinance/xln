@@ -219,7 +219,9 @@ pub(crate) fn execute_window(
                 rejection,
                 events: _,
             } => {
-                let disposition = if is_retryable(&rejection) {
+                let disposition = if is_retryable(&rejection)
+                    || crate::tx::dispute_gas_budget::opening_deferred(&tx, &rejection.message())
+                {
                     Disposition::Deferred
                 } else {
                     Disposition::Removed

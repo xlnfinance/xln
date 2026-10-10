@@ -186,6 +186,7 @@ pub(crate) fn apply_to_candidate(
     {
         return Ok(MutationDecision::rejected(rejection));
     }
+    let previous_dispute_gas = super::dispute_gas_budget::charge(candidate)?;
     let decision = match tx {
         AccountTx::JEventClaim(tx) => {
             crate::tx::handlers::j_events::apply_j_event_claim(candidate, tx, proposer)
@@ -401,7 +402,21 @@ pub(crate) fn apply_to_candidate(
             crate::tx::handlers::htlc::apply_resolve(candidate, proposer, tx, context)
         }
     };
-    sender_delta_rejection(decision)
+    let decision = sender_delta_rejection(decision)?;
+    if matches!(&decision, MutationDecision::Applied { .. }) {
+        let after = super::dispute_gas_budget::charge(candidate)?;
+        if let Some(message) =
+            super::dispute_gas_budget::admission_error(previous_dispute_gas, after, tx)
+        {
+            return Ok(MutationDecision::rejected_with_events(
+                AccountRejection::Validation(crate::ValidationRejection::AccountTx {
+                    message: message.clone(),
+                }),
+                vec![message],
+            ));
+        }
+    }
+    Ok(decision)
 }
 
 /// Parity target: `senderDeltaRejection` (core/account/tx/apply-result.ts).

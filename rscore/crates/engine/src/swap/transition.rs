@@ -90,6 +90,12 @@ pub(crate) fn apply_offer(
             return Ok(rejected(rejection));
         }
         replica.state_mut().put_delta(delta)?;
+        // A same-j proof indexes both tokens before any fill has occurred.
+        let want_token = TokenId::new(tx.want_token_id)?;
+        if replica.state().delta(want_token).is_none() {
+            let receiving = replica.state().delta_or_zero(want_token)?;
+            replica.state_mut().put_delta(receiving)?;
+        }
     }
 
     let identity = replica.state().identity().clone();

@@ -164,6 +164,7 @@ test('UI dispute prevents early finalization, then releases exactly 100 USDC aft
     expect(starts).toHaveLength(1);
     const start = starts[0];
     if (!start) throw new Error('DisputeStarted receipt unavailable');
+    expect((await start.getTransactionReceipt()).gasUsed).toBeLessThanOrEqual(5_000_000n);
     expect(start.args.proofbodyHash).toBe(active.initialProofbodyHash);
     expect(Number(start.args.nonce)).toBe(active.initialNonce);
     expect(Number(start.args.disputeTimeout)).toBe(active.disputeTimeout);
@@ -226,6 +227,7 @@ test('UI dispute prevents early finalization, then releases exactly 100 USDC aft
     if (!finalization) throw new Error('DisputeFinalized receipt unavailable');
     const receipt = await finalization.getTransactionReceipt();
     expect(receipt.status).toBe(1);
+    expect(receipt.gasUsed).toBeLessThanOrEqual(5_000_000n);
     expect(finalization.args.finalProofbodyHash).toBe(active.initialProofbodyHash);
     expect(finalization.args.nonce).toBe(BigInt(active.initialNonce));
     const payout = await contract.queryFilter(contract.filters.ReserveUpdated(wallet.entityId, 1), receipt.blockNumber, receipt.blockNumber);

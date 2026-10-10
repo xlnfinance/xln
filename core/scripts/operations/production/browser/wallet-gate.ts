@@ -54,11 +54,11 @@ export const waitForRuntimeImportManifest = async (path: string, timeoutMs = 20_
   throw new Error(`WALLET_IMPORT_MANIFEST_NOT_READY:${path}`);
 };
 
-const waitForBrowser = (child: ChildProcess): Promise<void> =>
+const waitForGateProcess = (child: ChildProcess, stage: string): Promise<void> =>
   new Promise((resolve, reject) => {
     child.once('error', reject);
     child.once('exit', (code, signal) =>
-      code === 0 ? resolve() : reject(new Error(`WALLET_E2E_FAILED:${code}:${signal}`)),
+      code === 0 ? resolve() : reject(new Error(`WALLET_GATE_PROCESS_FAILED:${stage}:${code}:${signal}`)),
     );
   });
 
@@ -83,7 +83,10 @@ export const runWalletBrowserGate = async (input: WalletGate): Promise<void> => 
   if (grep !== undefined && !/^[A-Za-z0-9][A-Za-z0-9 ._-]{0,255}$/.test(grep)) {
     throw new Error('WALLET_TEST_GREP_INVALID');
   }
-  if (tests.some(test => !/^e2e-[a-z0-9-]+\.spec\.ts$/.test(test))) throw new Error('WALLET_TEST_ARGUMENT_INVALID');
+  if (tests.some(test => !/^(?:[a-z0-9-]+\/)*e2e-[a-z0-9-]+\.spec\.ts$/.test(test))) throw new Error('WALLET_TEST_ARGUMENT_INVALID');
+  if (ui === 'react' && tests.some(test => /(?:^|\/)e2e-svelte-/.test(test))) throw new Error('WALLET_TEST_UI_MISMATCH:svelte');
+  // Financial assertions must exercise this candidate, never yesterday's bundle.
+  await waitForGateProcess(input.start('wallet-runtime-build', process.execPath, ['run', 'build'], {}), 'runtime-build');
   const port = input.rpcPort + 2;
   const origin = `http://127.0.0.1:${port}`;
   const report = join(input.workDir, 'wallet-results.json');
@@ -131,7 +134,7 @@ export const runWalletBrowserGate = async (input: WalletGate): Promise<void> => 
   );
   await waitForService(server, `${origin}/api/jurisdictions`);
   await waitForRuntimeImportManifest(join(input.workDir, 'prod-mesh', 'runtime-import-manifest.json'));
-  await waitForBrowser(
+  await waitForGateProcess(
     input.start(
       'wallet-browser',
       process.execPath,
@@ -150,6 +153,7 @@ export const runWalletBrowserGate = async (input: WalletGate): Promise<void> => 
       ],
       env,
     ),
+    'browser',
   );
   assertBrowserReport(report);
 };

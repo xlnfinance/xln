@@ -1,0 +1,45 @@
+{
+  "baseCommit": "13f0c24afa61444c339740f85b3a8f6586de436e",
+  "sourceChange": "Account settlement gas reserve: min(2000000, 100000 + 200000 * tokenCount); strict transformer failure semantics unchanged. Argument decoder retains bounded execution.",
+  "contracts": [
+    {
+      "contract": "Account",
+      "abiChanged": false,
+      "bytecodeChanged": true,
+      "before": {
+        "bytecode": {
+          "bytes": 22774,
+          "sha256": "c429abdbe32ddea6a9840aa289127a12493b70b48ff00f93c2702435e10ddff0",
+          "unlinkedTemplate": false
+        },
+        "deployedBytecode": {
+          "bytes": 22742,
+          "sha256": "45dccb890c1e21f6bee6adbac91ca06dfa81536d3b7e2dcc0f1bcec73710a3a4",
+          "unlinkedTemplate": false
+        }
+      },
+      "after": {
+        "bytecode": {
+          "bytes": 22823,
+          "sha256": "9a673af782208eab6480a041a42c371e35fce1aa768a0bab339b52cc10d6a588",
+          "unlinkedTemplate": false
+        },
+        "deployedBytecode": {
+          "bytes": 22791,
+          "sha256": "c50c1c93cf77df6f2d794ed5163cd30a66cc6d9762bfc26abd2e6f7c4b535d43",
+          "unlinkedTemplate": false
+        }
+      }
+    }
+  ],
+  "unchangedBytecodeAndAbi": [
+    "DeltaTransformer",
+    "Depository",
+    "DepositoryBounds",
+    "ERC20Mock",
+    "EntityProvider",
+    "HankoVerifier",
+    "HashLadderRegistry",
+    "NftCustody"
+  ]
+}

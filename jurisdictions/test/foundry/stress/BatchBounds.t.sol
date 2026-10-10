@@ -251,13 +251,13 @@ contract BatchBoundsTest is XlnFixture {
   ///         timeout. MAX_DISPUTE_PROOF_TOKENS is 128 per proof and each
   ///         defensive finalization gets its own portable 15M transaction.
   function test_gas_disputeFinalizeWithMaxProofTokens() public {
-    _measureDefensiveFinalize(_proofBody(keccak256("seed"), 128, 0), "", "");
+    _measureDefensiveFinalize(_proofBody(keccak256("seed"), 128, 0), "", "", LIVENESS_BUDGET);
   }
 
   /// Real executable conditions plus cold, nonzero debt writes on all 128 tokens.
   /// Pulls intentionally have no registry reveal: this measures their zero-fill
   /// branch, not a proven upper bound for every custom transformer/reveal branch.
-  function test_gas_mixedDefensiveFinalizeWithMaxAccountDimensions() public {
+  function test_gas_oversizedMixedDimensionsExceedNewAdmissionBudget() public {
     ProofBody memory pb = _proofBody(keccak256("mixed-seed"), 128, 1);
     DeltaTransformer.Batch memory conditions;
     conditions.payment = new DeltaTransformer.Payment[](32);
@@ -301,11 +301,15 @@ contract BatchBoundsTest is XlnFixture {
     pb.transformers[0] = TransformerClause(address(deltaTransformer), abi.encode(conditions), allowances);
     bytes[] memory arguments = new bytes[](1);
     arguments[0] = abi.encode(args);
-    _measureDefensiveFinalize(pb, abi.encode(arguments), abi.encode(arguments));
+    // This oversized shape is still contract-valid, but Account admission now refuses
+    // its 128 tokens / 82 conditions. Keep the expensive exit as characterization;
+    // DisputeGasAdmissionTest checks the newly admitted frontier under hard 5M.
+    uint256 used = _measureDefensiveFinalize(pb, abi.encode(arguments), abi.encode(arguments), BLOCK_BUDGET);
+    assertGt(used, 5_000_000, "oversized shape explains the need for proof admission");
   }
 
-  function _measureDefensiveFinalize(ProofBody memory pb, bytes memory starterArgs, bytes memory otherArgs)
-    internal
+  function _measureDefensiveFinalize(ProofBody memory pb, bytes memory starterArgs, bytes memory otherArgs, uint256 budget)
+    internal returns (uint256)
   {
     bytes32 me = entity[0];
     bytes32 other = entity[1];
@@ -362,7 +366,8 @@ contract BatchBoundsTest is XlnFixture {
     console.log("disputeFinalize calldata bytes:", calldataBytes);
     console.log("fits experimental 6M execution budget:", gasUsed < 6_000_000);
     assertTrue(ok, "max-token finalize must succeed");
-    assertLt(gasUsed, LIVENESS_BUDGET, "max-token finalization exceeds the 15M liveness budget");
+    assertLt(gasUsed, budget, "finalization exceeds the characterization budget");
+    return gasUsed;
   }
 
   /// @notice Encoded-batch size cap. 256 KiB of calldata at the EIP-7623 floor

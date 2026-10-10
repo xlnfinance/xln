@@ -1,0 +1,109 @@
+{
+  "command": "forge test --match-contract \"TransformerFaultModes|DisputeGasAdmissionTest|BatchBoundsTest\" --fuzz-runs 128 -vv",
+  "standLockHeld": true,
+  "passed": 40,
+  "failed": 0,
+  "skipped": 0,
+  "fuzzRuns": 128,
+  "transactionBudget": 5000000,
+  "measurement": "Each signed call is limited to 5M minus intrinsic gas; total charged is max(intrinsic+execution, EIP-7623 floor), with every calldata byte conservatively nonzero. Whole test-function gas includes setup and multiple transactions and is not the dispute cost.",
+  "tests": [
+    {
+      "name": "testFuzz_budget5m_combinedStockFrontier",
+      "transactionGas": {
+        "start": 3269800,
+        "reveal": 229875,
+        "finalize": 3512364
+      }
+    },
+    {
+      "name": "test_budget5m_coldDebts22",
+      "transactionGas": {
+        "start": 543321,
+        "finalize": 3087202
+      }
+    },
+    {
+      "name": "test_budget5m_irrelevantSecrets",
+      "transactionGas": {
+        "start": 2994600,
+        "finalize": 4450683
+      }
+    },
+    {
+      "name": "test_budget5m_maxStarterMmFrontier",
+      "transactionGas": {
+        "start": 3405480,
+        "reveal": 851958,
+        "finalize": 3907784
+      }
+    },
+    {
+      "name": "test_budget5m_maxStarterTenDebts",
+      "transactionGas": {
+        "start": 2807720,
+        "finalize": 3482802
+      }
+    },
+    {
+      "name": "test_budget5m_mixed32",
+      "transactionGas": {
+        "start": 689127,
+        "finalize": 1174043
+      }
+    },
+    {
+      "name": "test_budget5m_mixedWithRevealedPulls",
+      "transactionGas": {
+        "start": 704718,
+        "reveal": 696346,
+        "finalize": 1379061
+      }
+    },
+    {
+      "name": "test_budget5m_mmFrontier",
+      "transactionGas": {
+        "start": 938427,
+        "reveal": 851958,
+        "finalize": 2248664
+      }
+    },
+    {
+      "name": "test_budget5m_partialPulls18",
+      "transactionGas": {
+        "start": 938439,
+        "reveal": 1002252,
+        "finalize": 2248664
+      }
+    },
+    {
+      "name": "test_budget5m_payments32",
+      "transactionGas": {
+        "start": 689127,
+        "finalize": 1206513
+      }
+    },
+    {
+      "name": "test_budget5m_revealedPulls18",
+      "transactionGas": {
+        "start": 613087,
+        "reveal": 851958,
+        "finalize": 1002520
+      }
+    },
+    {
+      "name": "test_budget5m_swaps32",
+      "transactionGas": {
+        "start": 689115,
+        "finalize": 1061609
+      }
+    },
+    {
+      "name": "test_budget5m_wideColdDebts22",
+      "transactionGas": {
+        "start": 543321,
+        "finalize": 3962802
+      }
+    }
+  ]
+}

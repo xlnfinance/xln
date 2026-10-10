@@ -8,9 +8,11 @@ Current owner direction — 2026-10-10:
 - React tutorial isolated production run: 8/8 passed, 0 skipped, 57.6s browser
   phase. Svelte tutorial/cross-delivery and changed recovery/lending/dispute E2Es
   still require fresh verification. Do not call the entire tutorial ideal.
-- XLNC mixed defensive exit is a known blocker: 17,388,717 execution gas versus
-  the selected 6,000,000 block budget. Reproduce and measure the first expensive
-  call before changing code; preserve proof bounds and the 10-fold gas decision.
+- The owner superseded independent proof maxima with a 5M dispute gas admission
+  budget. TS/Rust use canonical clause counts; Account uses a per-token settlement
+  reserve, and RPC uses the shared 5M ceiling. See [gas evidence](xlnc-soft-mainnet.md#proof-admission-budget--owner-decision-2026-10-10).
+  The old 17.39M signed shape remains a legacy characterization, not an admitted
+  state. XLNC's 6M block reference / 10-fold decision is unchanged.
 
 
 Recovery timeout follow-up — 2026-10-09, base96d361e04 plus local edits:

@@ -1,3 +1,4 @@
+import { disputeGasOpeningDeferred } from '../../validation/dispute-gas-budget';
 import { haltRuntimeFailure } from "../../../protocol/errors/failure-taxonomy";
 
 import type { AccountOutput, AccountReplica, AccountTx } from '../../../types/account';
@@ -244,6 +245,7 @@ const proposalFailureDisposition = (
   if (
     rejection.kind === 'settlement_signed_account_frozen' ||
     rejection.kind === 'htlc_lock_capacity' ||
+    disputeGasOpeningDeferred(tx, rejection.message) ||
     isRefreshableStaleSettlementHanko(account, tx, rejection)
   ) {
     return ACCOUNT_TX_FAILURE_DISPOSITIONS.retry;

@@ -25,10 +25,10 @@ import type { JAdapterMode } from './types';
 
 /**
  * A signed transformer is the dispute program, so finalization forwards every
- * available unit except the contract's 2M settlement reserve. Use one portable
- * 15M ceiling across EVM jurisdictions, below Ethereum's EIP-7825 2^24 cap.
+ * available unit except the contract's bounded per-token settlement reserve. Use one portable
+ * 5M ceiling shared with Account proof admission across EVM jurisdictions.
  */
-export const PROCESS_BATCH_TRANSFORMER_GAS_LIMIT = 15_000_000n;
+export const PROCESS_BATCH_TRANSFORMER_GAS_LIMIT = BigInt(BLOCKCHAIN.PROCESS_BATCH_GAS_LIMIT);
 
 export const resolveProcessBatchGasLimit = (
   estimatedGasLimit: bigint,
@@ -43,7 +43,13 @@ export const resolveProcessBatchGasLimit = (
   if (transformerFinalizationCount > 1) {
     throw new Error('J_TRANSFORMER_FINALIZATION_BATCH_LIMIT');
   }
-  if (transformerFinalizationCount === 0) return estimatedGasLimit;
+  if (transformerFinalizationCount === 0) {
+    const hasDispute = batch.disputeStarts.length + batch.counterDisputes.length + batch.disputeFinalizations.length > 0;
+    if (mode !== 'tron' && hasDispute && estimatedGasLimit > PROCESS_BATCH_TRANSFORMER_GAS_LIMIT) {
+      throw new Error('J_DISPUTE_GAS_LIMIT');
+    }
+    return estimatedGasLimit;
+  }
   if (estimatedGasLimit > PROCESS_BATCH_TRANSFORMER_GAS_LIMIT) {
     throw new Error('J_TRANSFORMER_FINALIZATION_GAS_LIMIT');
   }

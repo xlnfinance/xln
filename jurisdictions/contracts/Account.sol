@@ -353,7 +353,10 @@ library Account {
   bytes4 private constant DECODE_TRANSFORMER_ARGUMENT_LIST_SELECTOR =
     bytes4(keccak256("decodeTransformerArgumentListStrict(bytes)"));
   bytes4 private constant CONTAINS_PULL_SELECTOR = bytes4(keccak256("containsPull(bytes)"));
-  uint256 private constant TRANSFORMER_POST_CALL_GAS_RESERVE = 2_000_000;
+  // Keep room for strict return validation and cold full-width settlement rows.
+  // A fixed 2M starved otherwise executable small proofs under a 5M transaction.
+  uint256 private constant TRANSFORMER_POST_CALL_GAS_RESERVE = 100_000;
+  uint256 private constant TRANSFORMER_SETTLEMENT_GAS_PER_TOKEN = 200_000;
   uint256 private constant TRANSFORMER_ARGUMENT_DECODE_GAS_LIMIT = 500_000;
 
   // ========== PURE HELPERS ==========
@@ -864,7 +867,7 @@ library Account {
   /// @dev A transformer is the executable meaning of the signed dispute state,
   /// not optional evidence. Missing code, revert/OOG, or malformed output must
   /// revert the whole finalization and leave the dispute active. We forward all
-  /// remaining gas except the fixed Depository settlement reserve.
+  /// remaining gas except the Depository reserve for these token rows.
   function _applyTransformer(
     Int768[] memory deltas,
     uint[] memory tokenIds,
@@ -902,8 +905,11 @@ library Account {
       rightResponseSeconds
     );
     uint256 remainingGas = gasleft();
-    if (remainingGas <= TRANSFORMER_POST_CALL_GAS_RESERVE) revert IDepositoryDelegateErrorAbi.TransformerGasBudgetUnavailable();
-    uint256 callGas = remainingGas - TRANSFORMER_POST_CALL_GAS_RESERVE;
+    uint256 settlementReserve = TRANSFORMER_POST_CALL_GAS_RESERVE + tokenIds.length * TRANSFORMER_SETTLEMENT_GAS_PER_TOKEN;
+    // Preserve the previous allowance for already-signed large proofs.
+    if (settlementReserve > 2_000_000) settlementReserve = 2_000_000;
+    if (remainingGas <= settlementReserve) revert IDepositoryDelegateErrorAbi.TransformerGasBudgetUnavailable();
+    uint256 callGas = remainingGas - settlementReserve;
 
     bool callOk;
     uint256 returnSize;

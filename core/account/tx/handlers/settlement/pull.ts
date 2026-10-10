@@ -1,3 +1,4 @@
+import { accountDisputeGasCharge, disputeGasAdmissionError } from '../../../validation/dispute-gas-budget';
 import { UINT256_MAX } from '../../../../protocol/boundary/integer-ranges';
 import type { AccountState, AccountTx, PullCommitment } from '../../../../types/account';
 import type { AccountDraftState } from '../../../state/account-state-draft';
@@ -203,7 +204,8 @@ const validatePullHashMaterial = (
   return null;
 };
 
-/** Exact non-mutating admission shared by Entity preflight and Account apply. */
+/** Non-mutating preflight shared by Entity and Account; reserve one new clause
+ * for a pull before queueing. Account apply checks the actual resulting proof. */
 export const getPullLockAdmissionError = (account: AccountState, accountTx: PullLockTx): string | null => {
   const { pullId, tokenId, amount, fullHash, partialRoot, crossJurisdiction } = accountTx.data;
   const routeError = validateCrossJurisdictionPullRoute(account, accountTx);
@@ -223,7 +225,12 @@ export const getPullLockAdmissionError = (account: AccountState, accountTx: Pull
   }
   const delta = account.deltas.get(tokenId) ?? createDefaultDelta(tokenId);
   const loserCapacity = deriveDelta(delta, amount < 0n).outCapacity;
-  return absAmount > loserCapacity ? `Insufficient pull capacity: need ${absAmount}, available ${loserCapacity}` : null;
+  if (absAmount > loserCapacity) return `Insufficient pull capacity: need ${absAmount}, available ${loserCapacity}`;
+  return disputeGasAdmissionError(
+    accountDisputeGasCharge(account),
+    accountDisputeGasCharge(account, account.deltas.has(tokenId) ? 0 : 1, 1),
+    accountTx,
+  ) ?? null;
 };
 
 export async function handlePullLock(

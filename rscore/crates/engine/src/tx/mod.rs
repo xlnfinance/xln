@@ -4,6 +4,7 @@
 pub(crate) mod apply;
 pub(crate) mod apply_result;
 pub(crate) mod apply_types;
+pub(crate) mod dispute_gas_budget;
 pub(crate) mod handlers;
 pub(crate) mod offdelta;
 

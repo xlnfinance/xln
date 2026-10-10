@@ -93,7 +93,9 @@ test('Svelte dispute returns collateral to reserve and permanently removes dispu
     expect(finalChain).toEqual({ ...fundedChain, reserve: before.reserve, collateral: '0', ondelta: '0', nonce: String(started.dispute.initialNonce + 1), disputeHash: ZeroHash, timeout: 0 });
     const finalizations = await contract.queryFilter(contract.filters.DisputeFinalized(finished.entityId, finished.hubId), initialBlock);
     expect(finalizations).toHaveLength(1);
-    expect((await finalizations[0]!.getTransactionReceipt()).status).toBe(1);
+    const finalReceipt = await finalizations[0]!.getTransactionReceipt();
+    expect(finalReceipt.status).toBe(1);
+    expect(finalReceipt.gasUsed).toBeLessThanOrEqual(5_000_000n);
     await expect(page.getByTestId('configure-dispute-closed')).toBeVisible();
     await expect(page.locator('[data-testid="configure-dispute-prepare"], [data-testid="configure-dispute-finalize"]')).toHaveCount(0);
     expect(errors).toEqual([]);

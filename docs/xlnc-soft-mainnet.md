@@ -72,8 +72,66 @@ tolerance. A separate, existing mixed-proof regression remains red:
 `test_gas_mixedDefensiveFinalizeWithMaxAccountDimensions` uses 17,388,717
 execution gas to finalize, before intrinsic gas, exceeding both 6M and its 15M
 assertion. [Failure evidence](evidence/xlnc-20261010/mixed-exit-gas.log).
+Reproduced on checkpoint `a00835725`: 96 `Account.addDebt` calls consume
+8,919,840 execution gas (92,915 each), while settlement delta preparation consumes
+4,936,366. Debt insertion alone exceeds the selected block budget. This measured
+path requires investigation of debt representation and bounded settlement; a
+transformer micro-optimization alone cannot close it. No contract behavior changed.
+[Current decomposition](evidence/xlnc-20261010/mixed-exit-current.json).
+
 The owner-selected 6M limit is unchanged; full financial launch readiness is
 not claimed and no proof bounds or dispute semantics were weakened.
+
+## Proof admission budget — owner decision, 2026-10-10
+
+The owner now explicitly chooses **5,000,000 gas per EVM dispute transaction**
+and admission before signing, superseding the earlier instruction to preserve
+all independent dimension maxima. This is a gas ceiling, not a fixed ETH fee.
+The optional 2M target is not selected: adversarial execution below measures 4.45M.
+
+Both TS and Rust charge the same canonical stock proof:
+`3,000,000 + 200,000*T + 10,000*C + (50,000 + 4,000*T)*K`, where T is token rows,
+C is live HTLCs + same-J swaps + pulls, and K is the existing proof builder's
+actual clause count. The 3M base reserves permitted 64-KiB starter arguments,
+transaction overhead and authentication. A count-only lock estimate failed on
+allowance-induced clause splits and was replaced with this canonical plan.
+The charge is deterministic admission policy with measured conservative headroom;
+it is not an RPC estimate or a mathematical bound for arbitrary programs.
+Custom subcontracts without an established execution bound cannot admit new work.
+No durable gas counter, alternate proof encoding or removed financial obligation.
+Authoritative J claims remain an explicit exception: this admission policy does
+not yet prove a universal 5M exit bound after adversarial onchain account growth.
+That release gate must be tested and closed before claiming mainnet-wide bounded
+exits; rejecting an authenticated chain fact would not solve it.
+
+An over-budget candidate is discarded before signature. Pull registration checks
+capacity before enqueueing. A cross-j opening already owned by a paired cohort
+stays deferred if queue ordering exhausts the budget; no single leg is dropped
+and no over-budget frame is signed. Chain observations and non-growing resolution
+of existing obligations remain admitted. Old oversized proofs are not rewritten;
+the 17.39M legacy fixture still requires more than the new RPC ceiling. Deploy this
+policy with fresh test state, not as a claim that old 17M exits now fit 5M.
+
+Account's transformer reserve is now `min(2M, 100K + 200K*T)` instead of a fixed
+2M for every Account. The fixed reserve starved valid small proofs in the 5M call.
+Reverts, missing code, malformed output and OOG still revert the full finalization.
+The old large-proof forwarding allowance is preserved. Runtime bytecode is
+22,791 bytes; only Account bytecode changes, all nine artifact ABIs are unchanged.
+Generated artifacts and the Account factory were synchronized.
+[Bytecode comparison](evidence/xlnc-20261010/dispute-budget-bytecode.json).
+
+Verification: 40 Foundry tests across admission, legacy characterization and strict
+transformer failures; the admission test includes 128 fuzz cases. Every admitted
+transaction executes under a hard 5M call budget, with conservative nonzero-byte
+intrinsic gas and the EIP-7623 floor counted as a floor, not double-counted.
+Named finalizations: 5 tokens / 32 swaps / 18 pulls with a maximal starter payload,
+3,907,784 gas; 7 token debts / 32 payments / 2,000 irrelevant secrets, 4,450,683 gas;
+10 wide debts with maximal starter payload, 3,482,802 gas. These are local fixture
+measurements, not a universal claim across future EVM revisions or arbitrary EP
+boards. TS/Rust admission and actual React/Svelte receipt assertions complement them.
+[Contract evidence](evidence/xlnc-20261010/dispute-budget-contracts.json),
+[Svelte journey](evidence/xlnc-20261010/dispute-budget-svelte.json),
+[React journey](evidence/xlnc-20261010/dispute-budget-react.json).
 
 Date: 2026-09-05. Investigated SHA: `b97c454d605e750a08da7ff6baab645330175468`.
 Status: proposal, no change to consensus, network configuration, or capital limits.

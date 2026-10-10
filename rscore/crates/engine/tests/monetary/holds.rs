@@ -86,6 +86,15 @@ fn resting_swap(side: Side, amount: &BigInt) -> AccountReplica {
     assert_eq!(result.verdict(), &AccountVerdict::Applied);
     let candidate = result.committed().expect("resting offer");
     assert_eq!(
+        candidate
+            .state()
+            .delta(token(2))
+            .expect("receiving proof row")
+            .offdelta(),
+        &0.into()
+    );
+    assert!(xln_rscore_engine::build_dispute_proof_body(&candidate, &[0; 20]).is_ok());
+    assert_eq!(
         candidate.state().delta(token(1)).expect("delta").hold(side),
         amount
     );

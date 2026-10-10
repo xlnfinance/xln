@@ -16,7 +16,8 @@ import {
 } from '../state/candidate-overlay';
 import type { ApplyAccountTxResult } from './apply-types';
 import { applyAccountTxMutation } from './mutation';
-import { accountTxRejected, senderDeltaRejection, withAccountTxCandidateEffects } from './apply-result';
+import { accountTxRejected, accountTxValidationRejected, senderDeltaRejection, withAccountTxCandidateEffects } from './apply-result';
+import { accountDisputeGasCharge, disputeGasAdmissionError } from '../validation/dispute-gas-budget';
 import { collectSameJurisdictionSwapOutputs } from './same-j-swap-output';
 
 export async function applyAccountTx(
@@ -31,6 +32,7 @@ export async function applyAccountTx(
   counterpartyCertifiedBoardHash?: string,
   htlcEnforcementClock?: HtlcEnforcementClock,
 ): Promise<ApplyAccountTxResult> {
+  const previousDisputeGas = accountDisputeGasCharge(account.state);
   const candidateEffects: AccountOutput[] = [];
   let result: ApplyAccountTxResult;
   try {
@@ -58,6 +60,8 @@ export async function applyAccountTx(
     return accountTxRejected(rejection, [rejection.message]);
   }
   if (result.ok) {
+    const budgetError = disputeGasAdmissionError(previousDisputeGas, accountDisputeGasCharge(account.state), accountTx);
+    if (budgetError) return accountTxValidationRejected(budgetError, [budgetError]);
     candidateEffects.push(...collectSameJurisdictionSwapOutputs(account, accountTx));
   }
   return withAccountTxCandidateEffects(result, candidateEffects);

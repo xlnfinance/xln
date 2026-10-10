@@ -1,0 +1,16 @@
+{
+  "sourceCommit": "a00835725",
+  "command": "forge test --match-test test_gas_mixedDefensiveFinalizeWithMaxAccountDimensions -vvvv",
+  "workingDirectory": "jurisdictions",
+  "standLockHeld": true,
+  "passed": 0,
+  "failed": 1,
+  "finalizeExecutionGas": 17388717,
+  "selectedXlncBlockGas": 6000000,
+  "calldataBytes": 46372,
+  "debtInsertionCalls": 96,
+  "executionGasPerDebtInsertion": 92915,
+  "totalDebtInsertionExecutionGas": 8919840,
+  "settlementDeltaPreparationExecutionGas": 4936366,
+  "scope": "Local Foundry execution gas; excludes transaction intrinsic gas. No Solidity change. Debt insertion alone exceeds the selected block limit. Preserving current money semantics requires a storage/settlement design review, not a test assertion adjustment."
+}

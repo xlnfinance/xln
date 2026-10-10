@@ -1,0 +1,27 @@
+{
+  "ui": "react",
+  "freshRuntimeAndWorkerBuild": true,
+  "standLockHeld": true,
+  "hardReceiptGasAssertion": 5000000,
+  "tests": [
+    {
+      "title": "UI dispute prevents early finalization, then releases exactly 100 USDC after its signed window",
+      "file": "e2e-dispute-finality.spec.ts",
+      "status": "expected",
+      "results": [
+        {
+          "status": "passed",
+          "durationMs": 16920
+        }
+      ]
+    }
+  ],
+  "stats": {
+    "startTime": "2026-10-10T04:22:56.729Z",
+    "duration": 17613.965,
+    "expected": 1,
+    "skipped": 0,
+    "unexpected": 0,
+    "flaky": 0
+  }
+}

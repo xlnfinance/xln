@@ -1,4 +1,5 @@
 const explanations: Array<[string, string]> = [
+  ['ACCOUNT_DISPUTE_GAS_BUDGET_EXCEEDED', 'This account has reached its dispute gas budget. Wait for pending payments to finish or close swap orders before adding more obligations, or use another account. The limit keeps newly signed proofs within the 5 million gas budget.'],
   ['BRAINVAULT_WORKER_LOAD_FAILED', 'The browser could not start key derivation. Check that the wallet server is running, then reload the page and retry.'],
   ['OWNER_RUNTIME_MISMATCH', 'These endpoints belong to different runtimes. Select a destination offered by the same hub operator.'],
   ['ACCOUNT_FROZEN', 'This account is frozen for a dispute. Use another active account or open Manage to follow the dispute.'],

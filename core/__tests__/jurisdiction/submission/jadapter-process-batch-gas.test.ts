@@ -33,6 +33,7 @@ const finalization = (withTransformer = true) => ({
 
 describe('processBatch transformer gas limit', () => {
   test('rejects the estimator cheap-success no-op path for dispute finalization', () => {
+    expect(PROCESS_BATCH_TRANSFORMER_GAS_LIMIT).toBe(5_000_000n);
     const batch = createEmptyBatch();
     batch.disputeFinalizations.push(finalization());
     expect(resolveProcessBatchGasLimit(267_000n, batch, 'rpc'))
@@ -57,6 +58,13 @@ describe('processBatch transformer gas limit', () => {
     const batch = createEmptyBatch();
     batch.disputeFinalizations.push(finalization(false));
     expect(resolveProcessBatchGasLimit(267_000n, batch, 'rpc')).toBe(267_000n);
+  });
+
+  test('a plain dispute cannot bypass the shared budget', () => {
+    const batch = createEmptyBatch();
+    batch.disputeFinalizations.push(finalization(false));
+    expect(resolveProcessBatchGasLimit(5_000_000n, batch, 'rpc')).toBe(5_000_000n);
+    expect(() => resolveProcessBatchGasLimit(5_000_001n, batch, 'rpc')).toThrow('J_DISPUTE_GAS_LIMIT');
   });
 
   test('rejects multiple transformer finalizations that cannot fit the tx gas cap', () => {

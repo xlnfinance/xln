@@ -15,9 +15,12 @@ The owner signs mainnet transactions and approves the exact production build.
 
 1. Preserve the shared working candidate in a WIP checkpoint and execute current
    source checks. Missing full-suite evidence stays explicit.
-2. Reproduce the XLNC mixed-proof exit gas failure and measure its cause; current
-   recorded 17,388,717 execution gas cannot fit the selected 6,000,000 block.
-   Do not lower financial proof bounds or raise network gas to hide the failure.
+2. Verify the owner-selected 5M dispute admission policy on the release candidate.
+   [Measured proof admission](docs/xlnc-soft-mainnet.md#proof-admission-budget--owner-decision-2026-10-10)
+   adds an aggregate gas gate beyond the independent dimension limits. Keep old signed
+   obligations intact and the selected 6M network limit unchanged. Close the
+   authoritative J-claim / onchain-growth exception before claiming a universal
+   bounded-exit guarantee; current admission evidence covers discretionary work.
 3. Finish actual tutorial journeys on both UIs: payments, swaps/cross-swaps,
    lending/withdrawal/borrow/repay, disputes/recovery and companies. Existing React
    tutorial run is 8/8; newly changed Svelte financial regressions remain pending.

@@ -150,7 +150,7 @@ type ProofDeltaIndex = {
 };
 
 const buildProofDeltaIndex = (
-  account: AccountReplica,
+  account: Pick<AccountReplica, 'state'>,
   deltaOverrides?: ReadonlyMap<number, Delta>,
 ): ProofDeltaIndex => {
   const tokenIds: number[] = [];
@@ -175,7 +175,7 @@ const requireProofDeltaIndex = (index: ReadonlyMap<number, number>, tokenId: num
   return deltaIndex;
 };
 
-const buildProofPayments = (account: AccountReplica, deltaIndex: ReadonlyMap<number, number>): RuntimePayment[] =>
+const buildProofPayments = (account: Pick<AccountReplica, 'state'>, deltaIndex: ReadonlyMap<number, number>): RuntimePayment[] =>
   sortTransformerEntries(account.state.locks.entries()).map(([lockId, lock]) => {
     const revealedUntilTimestamp = exclusiveUnixMsBigIntToUnixS(lock.timelock, `HTLC_LOCK_INVALID_TIMELOCK:${lockId}`);
     return {
@@ -190,7 +190,7 @@ const buildProofPayments = (account: AccountReplica, deltaIndex: ReadonlyMap<num
     };
   });
 
-const buildProofSwaps = (account: AccountReplica, deltaIndex: ReadonlyMap<number, number>): RuntimeSwap[] =>
+const buildProofSwaps = (account: Pick<AccountReplica, 'state'>, deltaIndex: ReadonlyMap<number, number>): RuntimeSwap[] =>
   sortTransformerEntries(account.state.swapOffers.entries()).flatMap(([offerId, offer]) => {
     if (offer.crossJurisdiction) return [];
     return [
@@ -212,7 +212,7 @@ const buildProofSwaps = (account: AccountReplica, deltaIndex: ReadonlyMap<number
     ];
   });
 
-const buildProofPulls = (account: AccountReplica, deltaIndex: ReadonlyMap<number, number>): RuntimePull[] =>
+const buildProofPulls = (account: Pick<AccountReplica, 'state'>, deltaIndex: ReadonlyMap<number, number>): RuntimePull[] =>
   sortTransformerEntries((account.state.pulls ?? new Map()).entries()).map(([pullId, pull]) => ({
     deltaIndex: requireProofDeltaIndex(
       deltaIndex,
@@ -226,7 +226,7 @@ const buildProofPulls = (account: AccountReplica, deltaIndex: ReadonlyMap<number
     targetRole: pull.crossJurisdiction?.leg === 'target',
   }));
 
-const buildSubcontractTransformers = (account: AccountReplica): RuntimeTransformerClause[] =>
+const buildSubcontractTransformers = (account: Pick<AccountReplica, 'state'>): RuntimeTransformerClause[] =>
   Array.from(account.state.subcontracts ?? [])
     .sort(([left], [right]) => compareStableText(left, right))
     .map(([subcontractId, subcontract]) => {
@@ -278,7 +278,7 @@ const chunkProofItems = <T>(items: T[], makeBatch: (chunk: T[]) => RuntimeBatch)
 
 /** One ephemeral ordered plan owns both signed clauses and positional arguments. */
 export const buildCanonicalProofBatches = (
-  account: AccountReplica,
+  account: Pick<AccountReplica, 'state'>,
   deltaIndex: ReadonlyMap<number, number> = buildProofDeltaIndex(account).byTokenId,
 ): RuntimeBatch[] => [
   ...chunkProofItems(buildProofPayments(account, deltaIndex), payments => ({ payments, swaps: [], pulls: [] })),

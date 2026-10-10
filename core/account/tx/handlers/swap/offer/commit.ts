@@ -76,6 +76,11 @@ export const commitSwapOffer = (
     if (holdError) return accountTxValidationRejected(holdError, []);
   }
   commitDeltaDraft(account.state, delta);
+  // Both token indexes must exist in the signed same-j dispute proof, even
+  // before the first fill creates a receiving balance.
+  if (!crossJurisdiction && !account.state.deltas.has(wantTokenId)) {
+    commitDeltaDraft(account.state, createDeltaDraft(account.state, wantTokenId));
+  }
   account.state.swapOffers.put(offerId, offer);
   const events = [
     `📊 Swap offer created: ${offerId.slice(0, 8)}... give ` +

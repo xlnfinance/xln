@@ -443,6 +443,15 @@ pub(crate) fn apply_pull_lock(
                 "Insufficient pull capacity: need {absolute}, available {available}"
             ));
         }
+        let projected = crate::tx::dispute_gas_budget::projected_charge(
+            account,
+            usize::from(account.state().delta(token_id).is_none()),
+            1,
+        )
+        .map_err(|error| error.to_string())?;
+        if let Some(error) = crate::tx::dispute_gas_budget::budget_error(projected) {
+            return Err(error);
+        }
         delta
             .add_hold(loser, &absolute)
             .map_err(|error| error.message())?;
@@ -1011,6 +1020,47 @@ mod tests {
         })
         .expect("bound offer state");
         AccountReplica::new(entity(0x11), state).expect("bound offer replica")
+    }
+
+    #[test]
+    fn cross_pull_lock_gas_budget_rejects_without_hold_and_defers_the_paired_opening() {
+        let mut account = replica();
+        for id in 2..=10 {
+            account = SequentialAccountEngine::apply(
+                &account,
+                Side::Left,
+                &AccountTx::AddDelta {
+                    token_id: TokenId::new(id).expect("token"),
+                },
+            )
+            .expect("transition")
+            .committed()
+            .expect("admitted row");
+        }
+        let root = account.state().deltas_root();
+        let tx = lock_tx_with_amount(10.into());
+        let result = SequentialAccountEngine::apply_with_context(
+            &account,
+            Side::Left,
+            &tx,
+            &AccountExecutionContext::new(1_000, 1_000, 10, 7, 10),
+        )
+        .expect("transition");
+        let crate::AccountVerdict::Rejected(reason) = result.verdict() else {
+            panic!("over-budget pull admitted")
+        };
+        assert_eq!(
+            reason.message(),
+            "ACCOUNT_DISPUTE_GAS_BUDGET_EXCEEDED:5100000/5000000"
+        );
+        assert!(crate::tx::dispute_gas_budget::opening_deferred(
+            &tx,
+            &reason.message()
+        ));
+        assert!(result.candidate().is_none());
+        assert!(result.outputs().is_empty());
+        assert_eq!(account.state().deltas_root(), root);
+        assert_eq!(account.state().pull_count(), 0);
     }
 
     #[test]
