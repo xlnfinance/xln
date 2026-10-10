@@ -111,9 +111,11 @@ import type {
   RuntimeAdapterGraphEntityCore,
   RuntimeAdapterGraphFrame,
   RuntimeAdapterFrameSummary,
+} from '../runtime-adapter/resolve';
+import type {
   RuntimeAdapterHistoryFrameBatch,
   RuntimeAdapterViewFrame,
-} from '../runtime-adapter/resolve';
+} from '../runtime-adapter/read/view-frame';
 import type {
 	  RuntimeAdapterActivityPage,
 	  RuntimeAdapterEntitySummary,
