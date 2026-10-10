@@ -10,6 +10,18 @@ import {
   withFaucetWalletLock,
 } from './faucet-wallet';
 import { createJsonResponse, externalWalletLog, readFaucetBody, readGasFaucetBody } from './http';
+import { BoundedLockBusyError } from '../../../support/bounded-lock';
+
+/** Typed answers for the faucet's own retryable conditions; anything else stays a 500. */
+const faucetBusyResponse = (context: ExternalWalletApiContext, error: unknown): Response | null => {
+  if (!(error instanceof BoundedLockBusyError)) return null;
+  return createJsonResponse(context.jsonHeaders, {
+    error: 'Faucet is busy; retry later',
+    code: 'FAUCET_BUSY',
+    reason: error.code,
+    retryable: true,
+  }, error.code === 'LOCK_QUEUE_FULL' ? 429 : 503);
+};
 
 interface Erc20FaucetRequest {
   jurisdiction?: string;
@@ -168,6 +180,8 @@ export const handleErc20Faucet = async (context: ExternalWalletApiContext, reque
       ? handleBrowserVmErc20Faucet(context, adapter, parsed.request)
       : transferErc20AndGas(context, adapter, parsed.tokens, parsed.request));
   } catch (error) {
+    const busy = faucetBusyResponse(context, error);
+    if (busy) return busy;
     const message = error instanceof Error ? error.message : String(error);
     externalWalletLog.error('faucet.erc20.failed', { error: message });
     context.emitDebugEvent({
@@ -209,6 +223,8 @@ export const handleGasFaucet = async (context: ExternalWalletApiContext, request
       });
     });
   } catch (error) {
+    const busy = faucetBusyResponse(context, error);
+    if (busy) return busy;
     const message = error instanceof Error ? error.message : String(error);
     externalWalletLog.error('faucet.gas.failed', { error: message });
     return createJsonResponse(context.jsonHeaders, { error: message }, 500);

@@ -5,22 +5,16 @@ import { DEV_CHAIN_IDS } from '../../../jurisdiction/adapter/chain-ids';
 import type { JAdapter, JTokenInfo } from '../../../jurisdiction/adapter/types';
 import { safeStringify } from '../../../protocol/serialization';
 import { readPositiveIntegerEnv } from '../../../config/environment';
+import { createBoundedLock, type BoundedLock } from '../../../support/bounded-lock';
 import type { ExternalWalletApiContext } from './context';
 import { externalWalletLog } from './http';
 
 type Erc20ContractRunner = NonNullable<Parameters<typeof ERC20Mock__factory.connect>[1]>;
 
-interface FaucetLock {
-  locked: boolean;
-  queue: Array<() => void>;
-  acquire(): Promise<void>;
-  release(): void;
-}
-
 interface FaucetWalletState {
   provider: ethers.Provider;
   wallet: ethers.NonceManager;
-  lock: FaucetLock;
+  lock: BoundedLock;
 }
 
 export interface WaitableTransaction {
@@ -31,25 +25,13 @@ export interface WaitableTransaction {
 const FAUCET_TX_WAIT_TIMEOUT_MS = readPositiveIntegerEnv('XLN_FAUCET_TX_WAIT_TIMEOUT_MS', 20_000);
 const FAUCET_REFILL_THRESHOLD_BPS = Math.min(10_000, readPositiveIntegerEnv('XLN_FAUCET_REFILL_THRESHOLD_BPS', 5_000));
 
-const createFaucetLock = (): FaucetLock => ({
-  locked: false,
-  queue: [],
-  async acquire() {
-    if (!this.locked) {
-      this.locked = true;
-      return;
-    }
-    await new Promise<void>(resolve => this.queue.push(resolve));
-  },
-  release() {
-    if (!this.locked) throw new Error('FAUCET_LOCK_RELEASE_WITHOUT_ACQUIRE');
-    const next = this.queue.shift();
-    if (next) {
-      next();
-      return;
-    }
-    this.locked = false;
-  },
+// One faucet transaction per wallet at a time (nonce order). Each holder may
+// wait up to FAUCET_TX_WAIT_TIMEOUT_MS for receipts, so public callers get a
+// bounded queue and a bounded wait instead of an ever-growing backlog.
+const createFaucetLock = (): BoundedLock => createBoundedLock({
+  name: 'faucet-wallet',
+  maxWaiters: 16,
+  acquireTimeoutMs: 30_000,
 });
 
 export const toErc20ContractRunner = (runner: unknown, label: string): Erc20ContractRunner => {
@@ -111,11 +93,11 @@ export const withFaucetWalletLock = async <Result>(
   action: (wallet: ethers.NonceManager) => Promise<Result>,
 ): Promise<Result> => {
   const state = getFaucetWalletState(context, adapter);
-  await state.lock.acquire();
+  const release = await state.lock.acquire();
   try {
     return await action(state.wallet);
   } finally {
-    state.lock.release();
+    release();
   }
 };
 

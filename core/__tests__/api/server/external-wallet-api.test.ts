@@ -276,6 +276,34 @@ describe('external wallet API faucet transaction gate', () => {
     }
   });
 
+  test('bounds the faucet wallet queue: a caller beyond it gets a typed retryable 429', async () => {
+    // The per-wallet lock queue was unbounded with no acquire deadline.
+    const provider = makeTestProvider();
+    const adapter = makeBrowserVmAdapter(provider);
+    const blockingFund = createBlockingFaucetFund();
+    try {
+      const api = createExternalWalletApi(makeContext(adapter, blockingFund.fundBrowserVmWallet));
+      const holder = api.handleErc20Faucet(makeFaucetRequest());
+      await blockingFund.firstStarted;
+      const queued = Array.from({ length: 16 }, () => api.handleErc20Faucet(makeFaucetRequest()));
+      await new Promise(resolve => setTimeout(resolve, 10));
+      const rejected = await api.handleErc20Faucet(makeFaucetRequest());
+      expect(rejected.status).toBe(429);
+      expect(await rejected.json()).toEqual({
+        error: 'Faucet is busy; retry later',
+        code: 'FAUCET_BUSY',
+        reason: 'LOCK_QUEUE_FULL',
+        retryable: true,
+      });
+      blockingFund.releaseFirst();
+      const settled = await Promise.all([holder, ...queued]);
+      expect(settled.every(response => response.status === 200)).toBe(true);
+      expect(blockingFund.maxActive()).toBe(1);
+    } finally {
+      provider.destroy();
+    }
+  });
+
   test('serializes startup provision and user faucet through the same gate', async () => {
     const provider = makeTestProvider();
     const adapter = makeBrowserVmAdapter(provider);
