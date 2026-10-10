@@ -246,9 +246,7 @@ describe('JAdapter watcher ingress', () => {
     );
 
     expect(source).toContain("createStructuredLogger('jadapter.event-observation')");
-    expect(source).toContain("log.info('event_batch.canonical'");
     expect(source).toContain("log.info('j_event.deliver_settled'");
-    expect(source).toContain("log.info('event_batch.delivered_to_entity'");
     expect(source).not.toContain('console.');
   });
 

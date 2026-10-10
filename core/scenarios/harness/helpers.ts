@@ -235,7 +235,6 @@ function shouldEmitScenarioLog(level: ScenarioLogLevel): boolean {
 
 export function enableStrictScenario(env: RuntimeReplica, label: string): () => void {
   env.strictScenario = true;
-  env.strictScenarioLabel = label;
   if (!env.scenarioLogLevel) {
     env.scenarioLogLevel = env.quietRuntimeLogs ? 'warn' : 'info';
   }
@@ -304,7 +303,6 @@ export function enableStrictScenario(env: RuntimeReplica, label: string): () => 
     strictScenarioDepth = Math.max(0, strictScenarioDepth - 1);
     if (strictScenarioDepth === 0) {
       env.strictScenario = false;
-      delete env.strictScenarioLabel;
       if (strictScenarioOriginalLog) {
         console.log = strictScenarioOriginalLog;
         strictScenarioOriginalLog = null;

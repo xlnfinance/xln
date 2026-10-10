@@ -88,7 +88,6 @@ const buildFromIngress = (
       blockHash,
       adapterLabel: label,
       txCounter,
-      logBatch: false,
       emitSettledDebugEvents: false,
       localSourceReplica: boundSource.replica,
     });

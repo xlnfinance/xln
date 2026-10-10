@@ -141,7 +141,6 @@ export const processEventBatch = (
     blockHash: batch.blockHash,
     adapterLabel,
     txCounter: counter,
-    logBatch: Boolean(env.debugJWatcherBatches),
     emitSettledDebugEvents: true,
     ...(watcherDepositoryAddress ? { watcherDepositoryAddress } : {}),
     ...(watcherChainId === undefined ? {} : { watcherChainId }),

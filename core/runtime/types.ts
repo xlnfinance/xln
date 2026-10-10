@@ -794,10 +794,8 @@ export interface RuntimeReplica {
   // real in-process EVM so they never depend on or flood an external RPC endpoint.
   scenarioJAdapterMode?: import('../jurisdiction/adapter/types').JAdapterMode;
   quietRuntimeLogs?: boolean; // When true, suppress noisy runtime console logs
-  debugJWatcherBatches?: boolean; // Enables verbose J watcher batch routing diagnostics
   scenarioLogLevel?: 'debug' | 'info' | 'warn' | 'error'; // Scenario log verbosity
   strictScenario?: boolean; // When true, runtime asserts invariants per frame
-  strictScenarioLabel?: string; // Optional label for strict scenario errors
 
   // Frame stepping: stop at specific frame for debugging
   stopAtFrame?: number | undefined; // When set, process() stops at this frame and dumps state

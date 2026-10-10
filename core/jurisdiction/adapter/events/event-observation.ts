@@ -39,7 +39,6 @@ export type JEventsRuntimeInputOptions = {
   blockHash: string;
   adapterLabel: string;
   txCounter?: EventBatchCounter;
-  logBatch?: boolean;
   emitSettledDebugEvents?: boolean;
   watcherDepositoryAddress?: string;
   watcherChainId?: number;
@@ -235,13 +234,6 @@ const buildDelivery = (
       blocks: [block],
     },
   };
-  if (options.logBatch) {
-    log.info('event_batch.delivered_to_entity', {
-      adapterLabel: options.adapterLabel,
-      entityId: shortId(delivery.entityId),
-      count: events.length,
-    });
-  }
   return {
     runtimeTx: markLocalJAuthorityRuntimeTx(observeTx),
     evidence: evidenceEntries(delivery.events, options.blockHash),
@@ -254,13 +246,6 @@ export const buildJEventObservationInput = (
   options: JEventsRuntimeInputOptions,
 ): JEventsRuntimeInputBuildResult | null => {
   if (rawEvents.length === 0) return null;
-  if (options.logBatch) {
-    log.info('event_batch.canonical', {
-      adapterLabel: options.adapterLabel,
-      blockNumber: options.blockNumber,
-      count: rawEvents.length,
-    });
-  }
   const runtimeTxs: RuntimeTx[] = [];
   const entityInputs: EntityInput[] = [];
   const evidence = new Map<string, JEventIngress>();
