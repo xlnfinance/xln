@@ -296,6 +296,18 @@ const queueKnownFailure = (
     queueGovernanceResult(env, deps, jurisdictionName, jTx, outcome, extra);
     return true;
   }
+  if (jTx.type === 'mint' || jTx.type === 'debtEnforcement') {
+    // These carry no Entity result to journal: a failed submit is the
+    // operator's to retry. Any RPC error here used to halt the Runtime.
+    jSubmitLog.error('tx.maintenance_failed', {
+      type: jTx.type,
+      entityId: shortId(jTx.entityId),
+      jurisdictionName,
+      category: failure.category,
+      error: failure.message,
+    });
+    return true;
+  }
   return false;
 };
 

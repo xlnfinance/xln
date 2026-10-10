@@ -8,6 +8,9 @@ import {
   requireCanonicalGovernanceAttempt,
 } from '../../../runtime/registration/governance-submit-state';
 import type { JTx } from '../../../types/jurisdiction-runtime';
+import type { JAdapter } from '../../../jurisdiction/adapter/types';
+import { submitRuntimeJOutbox } from '../../../runtime/j-submit/j-submit';
+import { ensureRuntimeInfrastructure } from '../../../runtime/envelope/replica-envelope';
 
 const input = (jTx: JTx) => [{ jurisdictionName: 'Testnet', jTxs: [jTx] }];
 
@@ -81,5 +84,47 @@ describe('J submit maintenance lane', () => {
     });
     applyGovernanceSubmitResultRuntimeTx(env, submitted);
     expect(env.infrastructure?.pendingCommittedJOutbox).toEqual([]);
+  });
+});
+
+describe('J submit maintenance failures', () => {
+  test('a failed or throwing maintenance submit is logged, never a Runtime halt', async () => {
+    // mint and debtEnforcement carry no Entity result to journal. Any RPC
+    // error during, e.g., the UI's "enforce debts" threw post-commit and
+    // halted the Runtime.
+    const env = createEmptyEnv('j-submit-maintenance-failure');
+    env.state.jReplicas = new Map([['Testnet', {
+      name: 'Testnet',
+      chainId: 31337,
+      blockNumber: 0n,
+      stateRoot: null,
+      mempool: [],
+      blockDelayMs: 0,
+      lastBlockTimestamp: 0,
+      position: { x: 0, y: 0, z: 0 },
+    }]]);
+    let submitCalls = 0;
+    ensureRuntimeInfrastructure(env).liveJAdapters = new Map([['Testnet', {
+      pollNow: async () => {},
+      submitTx: async () => {
+        submitCalls += 1;
+        if (submitCalls === 1) return { success: false, error: 'header not found' };
+        throw new Error('ECONNRESET');
+      },
+    } as unknown as JAdapter]]);
+    const debt: JTx = {
+      type: 'debtEnforcement',
+      entityId: `0x${'22'.repeat(32)}`,
+      data: { tokenId: 1, maxIterations: 10n },
+      timestamp: 1,
+    };
+    const queued: unknown[] = [];
+    const deps = { enqueueRuntimeInputs: (_env: unknown, _inputs: unknown, runtimeTxs?: unknown[]) => queued.push(...(runtimeTxs ?? [])) };
+
+    await submitRuntimeJOutbox(env, input(debt), deps as never);
+    await submitRuntimeJOutbox(env, input(debt), deps as never);
+
+    expect(submitCalls).toBe(2);
+    expect(queued).toEqual([]);
   });
 });
