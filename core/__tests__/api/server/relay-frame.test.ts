@@ -20,9 +20,12 @@ test('every relay socket server decodes frames through the one relay frame decod
   // The orchestrator relay (pm2 xln-server) kept its own copy of the text
   // decode path after the API server was fixed.
   const root = join(import.meta.dir, '..', '..', '..');
-  for (const path of ['api/server/index.ts', 'orchestrator/orchestrator.ts']) {
+  for (const path of ['api/server/index.ts', 'orchestrator/server/relay-socket.ts']) {
     const source = readFileSync(join(root, path), 'utf8');
     expect(source, path).toContain('decodeRelaySocketFrame(');
     expect(source, path).not.toContain('decodeMarketWireRequest');
   }
+  const orchestrator = readFileSync(join(root, 'orchestrator/orchestrator.ts'), 'utf8');
+  expect(orchestrator).toContain('websocket: createOrchestratorRelaySocketHandlers({');
+  expect(orchestrator).not.toContain('decodeMarketWireRequest');
 });

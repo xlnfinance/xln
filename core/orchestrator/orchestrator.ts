@@ -18,19 +18,16 @@ import {
   createRelayStore,
   normalizeRuntimeKey,
   pushDebugEvent,
-  removeClient,
   type RelayStore,
 } from '../network/relay/store';
 import { openRelayIncidentJournal } from '../network/relay/incident-journal';
-import { forgetRelaySocketRuntimeId, isRelaySocketAuthenticated, relayRoute, type RelayRouterConfig } from '../network/relay/router';
+import type { RelayRouterConfig } from '../network/relay/router';
 import { closeRelayClientsForReset } from '../network/relay/reset';
-import { canonicalizeRuntimeWsAudience, resolveRuntimeWsMaxMessageBytes, serializeWsMessage, toRuntimeWsBytes } from '../network/p2p/ws-protocol';
+import { canonicalizeRuntimeWsAudience } from '../network/p2p/ws-protocol';
 import { createHelloChallengeRegistry } from '../network/p2p/auth/hello-challenge';
 import { type MarketSnapshotPayload } from '../network/relay/market/snapshot';
 import { createMarketSubscriptionStack } from '../network/relay/market/subscriptions';
 import { createMarketCapController } from '../network/relay/market/cap/market-cap-controller';
-import { encodeMarketWireMessage } from '../network/relay/market/wire';
-import { decodeRelaySocketFrame } from '../api/server/network/relay-frame';
 import {
   fetchMarketPairCatalogFromHub,
   fetchMarketSnapshotsFromHub,
@@ -162,6 +159,7 @@ import {
 import { createNativeH1Bootstrap } from './bootstrap/native-h1-bootstrap';
 import { createReadinessWaits } from './bootstrap/readiness-waits';
 import { createChildFailureRecords } from './process/supervisor/child-failure-records';
+import { createOrchestratorRelaySocketHandlers } from './server/relay-socket';
 
 const args = parseArgs();
 await installGlobalOpCounters('orchestrator');
@@ -615,8 +613,6 @@ const marketCapController = createMarketCapController({
 });
 
 const reportMarketCapFailure = (event: 'warn' | 'error', reason: string, message: string): void => void pushDebugEvent(relayStore, { event, reason, details: { message } });
-
-const cleanupRpcMarketSubscription = (ws: OrchestratorWebSocket): void => marketSubscriptionStack.cleanup(ws);
 
 const pollHubHealth = async (child: HubChild): Promise<void> => {
   const proc = child.proc;
@@ -1913,79 +1909,12 @@ const server = Bun.serve<OrchestratorWebSocket['data']>({
       releaseHttp();
     }
   }),
-  websocket: {
-    maxPayloadLength: resolveRuntimeWsMaxMessageBytes(),
-    open(ws) {
-      const relayWs = ws;
-      if (relayWs.data.type === 'relay') relayHelloChallenges.issue(relayWs, relayWs.data.audience);
-      pushDebugEvent(relayStore, {
-        event: 'ws_open',
-        details: { wsType: relayWs.data.type },
-      });
-    },
-    message(ws, raw) {
-      try {
-        const frame = decodeRelaySocketFrame(raw, isRelaySocketAuthenticated(ws));
-        if (frame.kind === 'market') {
-          const marketMessage = frame.message;
-          Promise.resolve(marketSubscriptionStack.handleMessage(ws, marketMessage)).catch(error => {
-            const reason = serializeError(error);
-            pushDebugEvent(relayStore, {
-              event: 'error',
-              reason: 'MARKET_HANDLER_EXCEPTION',
-              details: { error: reason, msgType: marketMessage.type },
-            });
-            meshLog.error('relay.market_handler_exception', { error: reason, msgType: marketMessage.type });
-            // The peer may be unauthenticated: it gets a fixed code, never internal exception text.
-            try {
-              ws.send(encodeMarketWireMessage({ type: 'error', error: 'Market handler exception' }));
-            } catch (sendError) {
-              meshLog.warn('relay.market_error_send_failed', { error: serializeError(sendError) });
-            }
-          });
-          return;
-        }
-        const peerMessage = frame.message;
-        Promise.resolve(relayRoute(routerConfig, ws, peerMessage, typeof raw === 'string' ? undefined : toRuntimeWsBytes(raw))).catch(error => {
-          const reason = serializeError(error);
-          pushDebugEvent(relayStore, {
-            event: 'error',
-            reason: 'RELAY_HANDLER_EXCEPTION',
-            details: {
-              error: reason,
-              msgType: peerMessage.type,
-              from: peerMessage.from,
-              to: peerMessage.to,
-            },
-          });
-          meshLog.error('relay.handler_exception', { error: reason, msgType: peerMessage.type });
-          try {
-            ws.send(serializeWsMessage({ type: 'error', error: 'Relay handler exception' }));
-          } catch (sendError) {
-            meshLog.warn('relay.error_send_failed', { error: serializeError(sendError) });
-          }
-        });
-      } catch (error) {
-        pushDebugEvent(relayStore, {
-          event: 'error',
-          reason: 'INVALID_RELAY_MESSAGE',
-          details: { error: serializeError(error) },
-        });
-        try {
-          ws.send(serializeWsMessage({ type: 'error', error: 'Invalid relay message' }));
-        } catch (sendError) {
-          meshLog.warn('relay.invalid_message_send_failed', { error: serializeError(sendError) });
-        }
-      }
-    },
-    close(ws) {
-      const relayWs = ws;
-      relayHelloChallenges.forget(relayWs);
-      cleanupRpcMarketSubscription(relayWs);
-      forgetRelaySocketRuntimeId(relayWs);
-      removeClient(relayStore, relayWs);
-    },
-  },
+  websocket: createOrchestratorRelaySocketHandlers({
+    relayStore,
+    relayHelloChallenges,
+    marketSubscriptionStack,
+    routerConfig,
+  }),
 });
 
 const shutdown = async (): Promise<void> => {
