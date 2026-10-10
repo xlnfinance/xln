@@ -61,7 +61,12 @@ test('P2P decoder mints identity and coordinate brands only after exact validati
     sourceRuntimeHeight: 7,
     sourceRuntimeTimestamp: 8_000,
     entityInputs: [
-      { entityId, signerId: 'signer-1', runtimeId, entityTxs: [{ type: 'chat' }] },
+      {
+        entityId,
+        signerId: 'signer-1',
+        runtimeId,
+        entityTxs: [{ type: 'chat', data: { from: 'signer-1', message: 'hi' } }],
+      },
     ],
   });
   expect(decoded.sourceRuntimeId).toBe(runtimeId);
@@ -78,4 +83,41 @@ test('P2P decoder mints identity and coordinate brands only after exact validati
       { entityId: 'not-an-entity-id', signerId: 'signer-1', runtimeId, entityTxs: [{ type: 'chat' }] },
     ],
   })).toThrow('Invalid EntityId');
+});
+
+test('P2P decoder runs the exact AccountInput decoder before Runtime admission', () => {
+  // Without this, a peer ACK lacking `height` reached applyAccountInput and
+  // threw ACCOUNT_INPUT_HEIGHT_NORMALIZATION_INVARIANT, a Runtime halt. At the
+  // envelope it fails only this message and the peer session.
+  const fromEntityId = `0x${'33'.repeat(32)}`;
+  const toEntityId = `0x${'44'.repeat(32)}`;
+  const envelopeWithAck = (ack: Record<string, unknown>) => ({
+    sourceRuntimeId: runtimeId,
+    sourceSignature,
+    sourceRuntimeHeight: 7,
+    sourceRuntimeTimestamp: 8_000,
+    entityInputs: [{
+      entityId: toEntityId,
+      signerId: 'signer-1',
+      runtimeId,
+      entityTxs: [{
+        type: 'accountInput',
+        data: {
+          kind: 'ack',
+          fromEntityId,
+          toEntityId,
+          domain: { chainId: 31337, depositoryAddress: `0x${'55'.repeat(20)}` },
+          disputeConfig: { leftResponseSeconds: 60, rightResponseSeconds: 60 },
+          ack,
+        },
+      }],
+    }],
+  });
+  const frameHash = `0x${'66'.repeat(32)}`;
+  expect(decodeRuntimeEntityInputsEnvelope(envelopeWithAck({ height: 1, frameHash }))
+    .entityInputs[0]?.entityTxs).toHaveLength(1);
+  expect(() => decodeRuntimeEntityInputsEnvelope(envelopeWithAck({ frameHash })))
+    .toThrow('P2P_ENTITY_INPUTS_ENVELOPE_INPUT_0_TX_0_DATA_ACK_FIELDS:missing=height');
+  expect(() => decodeRuntimeEntityInputsEnvelope(envelopeWithAck({ height: 1, frameHash: 7 })))
+    .toThrow('P2P_ENTITY_INPUTS_ENVELOPE_INPUT_0_TX_0_DATA_ACK_FRAME_HASH');
 });
