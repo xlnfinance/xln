@@ -23,6 +23,24 @@ export type ResetHttpDeps = {
   serializeError: (error: unknown) => string;
 };
 
+// An empty body is a valid reset (the confirmation may come in a header). A
+// body that is present but not a JSON object must never run a destructive
+// reset with default options.
+const readResetBody = async (request: Request): Promise<OrchestratorResetBody | null> => {
+  const text = await request.text();
+  if (!text.trim()) return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    throw new OrchestratorResetRejectedError('RESET_BODY_INVALID', 400);
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new OrchestratorResetRejectedError('RESET_BODY_INVALID', 400);
+  }
+  return parsed as OrchestratorResetBody;
+};
+
 export const handleResetHttpRequest = async (
   request: Request,
   pathname: string,
@@ -32,9 +50,7 @@ export const handleResetHttpRequest = async (
 ): Promise<Response | null> => {
   if (pathname !== '/api/reset' || request.method !== 'POST') return null;
   try {
-    const body = await request
-      .json()
-      .catch(() => null) as OrchestratorResetBody | null;
+    const body = await readResetBody(request);
     assertOrchestratorResetAllowed(request, body, {
       resetAllowed: deps.resetAllowed,
       operatorAuthorized,

@@ -5,6 +5,8 @@ import {
   ORCHESTRATOR_RESET_CONFIRMATION,
   OrchestratorResetRejectedError,
 } from '../../../orchestrator/server/reset-guard';
+import { handleResetHttpRequest, type ResetHttpDeps } from '../../../orchestrator/server/reset-http';
+import type { AggregatedHealth } from '../../../orchestrator/orchestrator-types';
 
 const makeRequest = (headers: Record<string, string> = {}): Request =>
   new Request('http://127.0.0.1:8080/api/reset', {
@@ -115,5 +117,45 @@ describe('orchestrator reset guardrails', () => {
       body,
       config,
     )).not.toThrow();
+  });
+});
+
+describe('orchestrator reset HTTP body', () => {
+  const resetCalls: Array<{ enableMarketMaker: boolean; enableCustody: boolean }> = [];
+  const deps: ResetHttpDeps = {
+    resetAllowed: true,
+    bindHost: '127.0.0.1',
+    resetToken: '',
+    mmEnabled: true,
+    custodyEnabled: true,
+    ensureResetWithOptions: async options => {
+      resetCalls.push(options);
+    },
+    pollAllHubHealth: async () => {},
+    pollMarketMakerHealth: async () => {},
+    buildAggregatedHealthResponse: async () => ({ systemOk: true } as unknown as AggregatedHealth),
+    serializeError: error => String(error),
+  };
+  const post = (body: string): Request => new Request('http://127.0.0.1:8080/api/reset', {
+    method: 'POST',
+    headers: { 'x-xln-reset-confirm': ORCHESTRATOR_RESET_CONFIRMATION },
+    body,
+  });
+
+  test('a malformed reset body is rejected with 400 instead of resetting with defaults', async () => {
+    resetCalls.length = 0;
+    for (const body of ['{"enableMarketMaker": false,', '[]', '"reset"']) {
+      const response = await handleResetHttpRequest(post(body), '/api/reset', true, {}, deps);
+      expect(response?.status).toBe(400);
+      expect(await response?.text()).toContain('RESET_BODY_INVALID');
+    }
+    expect(resetCalls).toEqual([]);
+  });
+
+  test('an empty body still resets with the configured options', async () => {
+    resetCalls.length = 0;
+    const response = await handleResetHttpRequest(post(''), '/api/reset', true, {}, deps);
+    expect(response?.status).toBe(200);
+    expect(resetCalls).toEqual([{ enableMarketMaker: true, enableCustody: true }]);
   });
 });
