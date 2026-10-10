@@ -1913,6 +1913,58 @@ const isMarketMakerConnectivityReady = (
     );
   });
 
+// Hubs run a 1 bps taker fee (daemon-control default). Every MM offer signs the
+// Hub's gossip-advertised fee into maxFee, so cap it instead of authorizing any
+// self-declared fee up to 99.99% of wantAmount.
+const MARKET_MAKER_MAX_HUB_SWAP_FEE_BPS = 10;
+
+type MarketMakerHubSwapFee =
+  | Readonly<{ kind: 'accepted'; feeBps: number }>
+  | Readonly<{
+      kind: 'skipped';
+      code: 'MM_HUB_SWAP_FEE_PROFILE_MISSING' | 'MM_HUB_SWAP_FEE_MISSING' | 'MM_HUB_SWAP_FEE_ABOVE_CAP';
+      feeBps: unknown;
+    }>;
+
+const readMarketMakerHubSwapFee = (env: RuntimeReplica, hubEntityId: string): MarketMakerHubSwapFee => {
+  const profile = (env.gossip?.getProfiles?.() || []).find(
+    candidate => String(candidate.entityId || '').toLowerCase() === hubEntityId,
+  );
+  if (!profile || profile.metadata?.isHub !== true) {
+    return { kind: 'skipped', code: 'MM_HUB_SWAP_FEE_PROFILE_MISSING', feeBps: null };
+  }
+  const feeBps = profile.metadata.swapTakerFeeBps;
+  if (feeBps === undefined || !Number.isSafeInteger(feeBps) || feeBps < 0) {
+    return { kind: 'skipped', code: 'MM_HUB_SWAP_FEE_MISSING', feeBps: feeBps ?? null };
+  }
+  if (feeBps > MARKET_MAKER_MAX_HUB_SWAP_FEE_BPS) {
+    return { kind: 'skipped', code: 'MM_HUB_SWAP_FEE_ABOVE_CAP', feeBps };
+  }
+  return { kind: 'accepted', feeBps };
+};
+
+// Planning runs every bootstrap pass; log a skipped Hub once per changed reason.
+const loggedSkippedHubSwapFees = new Map<string, string>();
+
+const resolveMarketMakerHubSwapFeeBps = (env: RuntimeReplica, hubEntityId: string): number | null => {
+  const fee = readMarketMakerHubSwapFee(env, hubEntityId);
+  if (fee.kind === 'accepted') {
+    loggedSkippedHubSwapFees.delete(hubEntityId);
+    return fee.feeBps;
+  }
+  const reason = `${fee.code}:${String(fee.feeBps)}`;
+  if (loggedSkippedHubSwapFees.get(hubEntityId) !== reason) {
+    loggedSkippedHubSwapFees.set(hubEntityId, reason);
+    nodeLog.warn('quotes.hub_skipped', {
+      hubEntityId,
+      code: fee.code,
+      feeBps: String(fee.feeBps),
+      maxFeeBps: MARKET_MAKER_MAX_HUB_SWAP_FEE_BPS,
+    });
+  }
+  return null;
+};
+
 /**
  * Build quote commands without scheduling Runtime work.
  *
@@ -1977,13 +2029,8 @@ export const planMarketMakerQuoteEntityInputs = (
       remainingNewOffers,
     );
     if (allowedNewOffers <= 0) continue;
-    const hubProfile = (env.gossip?.getProfiles?.() || []).find(
-      candidate => String(candidate.entityId || '').toLowerCase() === hubEntityId,
-    );
-    const hubSwapFeeBps = hubProfile?.metadata?.swapTakerFeeBps;
-    if (!hubProfile || hubProfile.metadata?.isHub !== true || !Number.isSafeInteger(hubSwapFeeBps)) {
-      throw new Error(`MM_SWAP_FEE_POLICY_UNAVAILABLE:${hubEntityId}`);
-    }
+    const hubSwapFeeBps = resolveMarketMakerHubSwapFeeBps(env, hubEntityId);
+    if (hubSwapFeeBps === null) continue;
     const missing = specs
       .filter(spec => !existingOfferIds.has(spec.offerId))
       .filter(
@@ -1994,7 +2041,7 @@ export const planMarketMakerQuoteEntityInputs = (
       .slice(0, allowedNewOffers);
     if (missing.length === 0) continue;
     for (const spec of missing) {
-      const swapNetAuthorization = deriveSwapNetAuthorization(spec.wantAmount, Number(hubSwapFeeBps));
+      const swapNetAuthorization = deriveSwapNetAuthorization(spec.wantAmount, hubSwapFeeBps);
       pushMarketMakerEntityTx(entityInputsByEntitySigner, mmEntityId, mmSignerId, {
         type: 'placeSwapOffer' as const,
         data: {
