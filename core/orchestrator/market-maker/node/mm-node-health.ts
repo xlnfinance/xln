@@ -91,8 +91,6 @@ type MarketMakerCrossBootstrapWaveDebug = {
   enqueuedEntityInputs?: number;
   enqueuedEntityTxs?: number;
   durationMs?: number;
-  remainingNewOffers?: number;
-  remainingSourceHubGroups?: number;
 };
 
 const emitMarketMakerCrossBootstrapWaveEvent = (
@@ -547,13 +545,16 @@ type CrossQuoteMaintenanceContext = {
   sourceTokenIds: number[];
   targetTokenIds: number[];
   jurisdictionCount: number;
-  maxOffersPerAccount: number;
-  maxNewOffersTotal: number;
   shouldContinue: () => boolean;
-  maxSourceHubGroups: number;
   direction: string;
   startedAt: number;
 };
+
+/** Steady replenishment is paced; the bootstrap batch plans every route at once. */
+type SteadyCrossQuoteLimits = Readonly<{
+  maxOffersPerAccount: number;
+  maxNewOffersTotal: number;
+}>;
 
 const createPendingCrossRequestLookup = (env: RuntimeReplica): PendingCrossRequestLookup => {
   const cache = new Map<string, Set<string>>();
@@ -739,16 +740,14 @@ export const planMarketMakerBootstrapCrossQuoteRoutes = (
     sourceTokenIds,
     targetTokenIds,
     jurisdictionCount,
-    maxOffersPerAccount: Number.MAX_SAFE_INTEGER,
-    maxNewOffersTotal: Number.MAX_SAFE_INTEGER,
     shouldContinue,
-    maxSourceHubGroups: Number.MAX_SAFE_INTEGER,
     direction: `${sourceContext.jurisdictionName}->${targetContext.jurisdictionName}`,
     startedAt: Date.now(),
   });
 
 const maintainSteadyCrossQuotes = async (
   context: CrossQuoteMaintenanceContext,
+  { maxOffersPerAccount, maxNewOffersTotal }: SteadyCrossQuoteLimits,
 ): Promise<boolean> => {
   const {
     env,
@@ -759,9 +758,6 @@ const maintainSteadyCrossQuotes = async (
     sourceTokenIds,
     targetTokenIds,
     jurisdictionCount,
-    maxOffersPerAccount,
-    maxNewOffersTotal,
-    maxSourceHubGroups,
     shouldContinue,
   } = context;
   const desiredOffers = buildMarketMakerCrossOfferSpecs(
@@ -806,7 +802,6 @@ const maintainSteadyCrossQuotes = async (
   );
   let submittedIntentCount = 0;
   let remainingNewOffers = Math.max(1, Math.floor(maxNewOffersTotal));
-  let remainingSourceHubGroups = Math.max(1, Math.floor(maxSourceHubGroups));
   for (const [sourceHubEntityId, specs] of groupedEntries) {
     await yieldMarketMakerApi();
     if (!shouldContinue()) return false;
@@ -830,8 +825,6 @@ const maintainSteadyCrossQuotes = async (
       submittedIntentCount += 1;
     }
     remainingNewOffers -= selected.length;
-    if (selected.length > 0) remainingSourceHubGroups -= 1;
-    if (remainingSourceHubGroups <= 0) break;
   }
   return submittedIntentCount > 0;
 };
@@ -849,7 +842,6 @@ export const maintainMarketMakerCrossQuotes = async (
   maxNewOffersTotal = Math.max(2, Math.floor(MARKET_MAKER_MAX_NEW_OFFERS_PER_TICK / 2)),
   connectivityBudget: MarketMakerConnectivityBudget = { remainingTxs: MARKET_MAKER_CONNECTIVITY_MAX_TXS_PER_TICK },
   shouldContinue: () => boolean = () => true,
-  maxSourceHubGroups = Number.MAX_SAFE_INTEGER,
 ): Promise<boolean> => {
   const startedAt = Date.now();
   const direction = `${sourceContext.jurisdictionName}->${targetContext.jurisdictionName}`;
@@ -869,10 +861,7 @@ export const maintainMarketMakerCrossQuotes = async (
     sourceTokenIds,
     targetTokenIds,
     jurisdictionCount,
-    maxOffersPerAccount,
-    maxNewOffersTotal,
     shouldContinue,
-    maxSourceHubGroups,
     direction,
     startedAt,
   };
@@ -913,7 +902,7 @@ export const maintainMarketMakerCrossQuotes = async (
   }
   if (!shouldContinue()) return false;
 
-  return maintainSteadyCrossQuotes(maintenanceContext);
+  return maintainSteadyCrossQuotes(maintenanceContext, { maxOffersPerAccount, maxNewOffersTotal });
 };
 
 export const getMarketMakerHealth = (

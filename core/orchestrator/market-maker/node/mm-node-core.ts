@@ -22,8 +22,9 @@ import {
   defaultAccountDisputeConfigForRoleEvidence,
   type AccountRoleEvidence,
 } from '../../../account/config/dispute-config';
-import { LIMITS, SWAP_CONSTANTS } from '../../../config/constants';
+import { LIMITS } from '../../../config/constants';
 import { readCliOption } from '../../../config/cli';
+import { deriveSameOrderbookPriceBandBounds } from '../../../entity/tx/handlers/account/orderbook/helpers';
 import { readBooleanEnv, readPositiveIntegerEnv } from '../../../config/environment';
 import { resolveCrossJurisdictionRuntimeTopology } from '../../../extensions/cross-j/boundary';
 import {
@@ -1046,9 +1047,7 @@ export const fitCrossAmountsToOrderbook = (
 
 const isWithinPairBand = (anchorTicks: bigint, priceTicks: bigint): boolean => {
   if (anchorTicks <= 0n || priceTicks <= 0n) return false;
-  const rejectDelta = (anchorTicks * BigInt(SWAP_CONSTANTS.PRICE_REJECT_BPS)) / BigInt(SWAP_CONSTANTS.BPS_BASE);
-  const minAllowed = anchorTicks - rejectDelta;
-  const maxAllowed = anchorTicks + rejectDelta;
+  const { minAllowed, maxAllowed } = deriveSameOrderbookPriceBandBounds(anchorTicks);
   return priceTicks >= minAllowed && priceTicks <= maxAllowed;
 };
 
@@ -1192,12 +1191,10 @@ export const buildMarketMakerOfferSpecs = (
     const pairContexts = defaultPairs.map(pair => {
       const pairPolicy = getSwapPairPolicyByBaseQuote(pair.baseTokenId, pair.quoteTokenId);
       const levelProfile = getMarketMakerLevelProfile(pair.baseTokenId, pair.quoteTokenId);
-      const skewBps = 0;
-      const midPriceTicks = (pairPolicy.mmMidPriceTicks * BigInt(10_000 + skewBps)) / 10_000n;
       return {
         pair,
         levelProfile,
-        midPriceTicks,
+        midPriceTicks: pairPolicy.mmMidPriceTicks,
         stepTicksBig: BigInt(Math.max(1, pairPolicy.priceStepTicks)),
         stepTicks: Math.max(1, pairPolicy.priceStepTicks),
       };
@@ -1425,7 +1422,6 @@ const buildMarketMakerCrossRouteBase = (
 const latestCommittedCrossOfferGeneration = (
   env: RuntimeReplica,
   sourceEntityId: string,
-  _account: AccountReplica | null | undefined,
   offerSlotPrefix: string,
   offerSlotSuffix: string,
 ): number => {
@@ -1448,7 +1444,6 @@ type CrossOfferSlot = Readonly<{ prefix: string; suffix: string; draftId: string
 const buildCrossOfferSlot = (
   env: RuntimeReplica,
   sourceEntityId: string,
-  account: AccountReplica | null | undefined,
   sourceHubSuffix: string,
   targetHubSuffix: string,
   sourceTokenId: number,
@@ -1457,13 +1452,7 @@ const buildCrossOfferSlot = (
 ): CrossOfferSlot => {
   const prefix = `mmx-${sourceHubSuffix}-${targetHubSuffix}-${sourceTokenId}-${targetTokenId}-`;
   const suffix = `-sell-${levelId}`;
-  const generation = latestCommittedCrossOfferGeneration(
-    env,
-    sourceEntityId,
-    account,
-    prefix,
-    suffix,
-  );
+  const generation = latestCommittedCrossOfferGeneration(env, sourceEntityId, prefix, suffix);
   return { prefix, suffix, draftId: `${prefix}generation-${generation}${suffix}` };
 };
 
@@ -1528,8 +1517,6 @@ export const buildMarketMakerCrossOfferSpecs = (
       generationStartedAt,
       expiresAt,
     );
-    const sourceAccount = getAccountReplica(env, sourceContext.entityId, sourceHub.entityId);
-
     const hubSpecStart = specs.length;
     for (const pair of crossPairs) {
       const market = deriveCanonicalCrossJurisdictionMarketForLegs(
@@ -1588,7 +1575,7 @@ export const buildMarketMakerCrossOfferSpecs = (
           if (quoteAmount < minimumTradeAmount(oriented.quoteTokenId)) continue;
           if (!isWithinPairBand(canonicalMidTicks, amounts.priceTicks)) continue;
           const offerSlot = buildCrossOfferSlot(
-            env, sourceContext.entityId, sourceAccount, sourceHubSuffix, targetHubSuffix,
+            env, sourceContext.entityId, sourceHubSuffix, targetHubSuffix,
             pair.sourceTokenId, pair.targetTokenId, levelId,
           );
           // A terminal cross-j route remains durable evidence, so reusing its

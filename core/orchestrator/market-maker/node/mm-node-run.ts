@@ -1936,7 +1936,6 @@ const maintainSelectedCrossQuotes = async (input: SelectedCrossQuoteInput): Prom
       Math.max(2, Math.floor(MARKET_MAKER_MAX_NEW_OFFERS_PER_TICK / 2)),
       input.connectivityBudget,
       input.shouldContinue,
-      Number.MAX_SAFE_INTEGER,
     );
     if (enqueued) {
       const nextCursor = (index + 1) % input.jobs.length;
