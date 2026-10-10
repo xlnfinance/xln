@@ -11,6 +11,14 @@ import type { RuntimeReplica } from '../../../runtime/types';
 import type { JReplica } from '../../../types/jurisdiction-runtime';
 
 const readText = (path: string): string => {
+  if (path === 'core/orchestrator/hub-node.ts') {
+    return [
+      'hub/node/hub-jurisdiction-binding.ts',
+      'hub-node.ts',
+    ]
+      .map(file => readFileSync(`core/orchestrator/${file}`, 'utf8'))
+      .join('\n');
+  }
   if (path !== 'core/orchestrator/mm-node.ts') return readFileSync(path, 'utf8');
   return [
     'mm-node.ts',

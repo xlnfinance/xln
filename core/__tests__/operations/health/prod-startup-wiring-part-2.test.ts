@@ -34,6 +34,13 @@ const readMarketMakerNodeSource = (): string =>
     'market-maker/node/mm-node-run.ts',
   ].map(readMarketMakerNodeModule).join('\n');
 
+// hub-node.ts goes last so declaration-order slices keep ending inside it.
+const readHubNodeSource = (): string =>
+  [
+    'hub/node/hub-jurisdiction-binding.ts',
+    'hub-node.ts',
+  ].map(file => readFileSync(join(repoRoot, 'core/orchestrator', file), 'utf8')).join('\n');
+
 const readOrchestratorSource = (): string =>
   [
     'orchestrator.ts',
@@ -268,7 +275,7 @@ describe('production startup wiring', () => {
     const runtimeWatchers = readFileSync(join(repoRoot, 'core/runtime/loop/loop-watchers.ts'), 'utf8');
     const nodeQuiesce = readFileSync(join(repoRoot, 'core/orchestrator/process/node-runtime-quiesce.ts'), 'utf8');
     const sources = [
-      readFileSync(join(repoRoot, 'core/orchestrator/hub-node.ts'), 'utf8'),
+      readHubNodeSource(),
       readMarketMakerNodeSource(),
     ];
 
@@ -340,7 +347,7 @@ describe('production startup wiring', () => {
   });
 
   test('production nodes authenticate P2P early and open financial ingress only after J catchup and registrations', () => {
-    const hubSource = readFileSync(join(repoRoot, 'core/orchestrator/hub-node.ts'), 'utf8');
+    const hubSource = readHubNodeSource();
     const hubDeliveryBlocked = hubSource.indexOf('setRuntimeDeliveryReady(env, false);');
     const hubIngressBlocked = hubSource.indexOf('externalIngressReady: false,');
     const hubCatchup = hubSource.indexOf('const watcherDrain = await drainJWatcherBacklog(');
@@ -591,7 +598,7 @@ describe('production startup wiring', () => {
 
   test('node orchestrators validate J adapters without mutating committed replicas', () => {
     const sources = [
-      readFileSync(join(repoRoot, 'core/orchestrator/hub-node.ts'), 'utf8'),
+      readHubNodeSource(),
       readMarketMakerNodeModule('market-maker/node/mm-node-core.ts'),
     ];
     for (const source of sources) {
@@ -1417,7 +1424,7 @@ describe('production startup wiring', () => {
 
   test('hub and market maker require one authenticated direct entity route', () => {
     const apiServer = readFileSync(join(repoRoot, 'core/api/server/index.ts'), 'utf8');
-    const hubNode = readFileSync(join(repoRoot, 'core/orchestrator/hub-node.ts'), 'utf8');
+    const hubNode = readHubNodeSource();
     const hubTransport = readFileSync(join(repoRoot, 'core/orchestrator/hub/hub-runtime-transport.ts'), 'utf8');
     const mmNode = readMarketMakerNodeSource();
     const p2p = readFileSync(join(repoRoot, 'core/network/p2p/p2p.ts'), 'utf8');
@@ -1439,7 +1446,7 @@ describe('production startup wiring', () => {
   });
 
   test('hub support-peer provisioning uses full jurisdiction token sets', () => {
-    const hubNode = readFileSync(join(repoRoot, 'core/orchestrator/hub-node.ts'), 'utf8');
+    const hubNode = readHubNodeSource();
     expect(hubNode).toContain("import { getTokenIdsForJurisdiction } from '../account/utils';");
     expect(hubNode).toContain('const tokenIdsForHubJurisdiction = (');
     expect(hubNode).toContain('const tokenCatalogForHubJurisdiction = (');
@@ -1480,7 +1487,7 @@ describe('production startup wiring', () => {
   });
 
   test('hub orderbook init stops the boot unless orderbookExt committed', () => {
-    const hubNode = readFileSync(join(repoRoot, 'core/orchestrator/hub-node.ts'), 'utf8');
+    const hubNode = readHubNodeSource();
     const start = hubNode.indexOf('const ensureOrderbook = async (');
     const ensureOrderbook = hubNode.slice(start, hubNode.indexOf('\n};\n', start));
     const enqueue = ensureOrderbook.indexOf("type: 'initOrderbookExt'");
@@ -1494,7 +1501,7 @@ describe('production startup wiring', () => {
   });
 
   test('every hub auto-finalizes its disputes unless the E2E dispute stand opts one out', () => {
-    const hubNode = readFileSync(join(repoRoot, 'core/orchestrator/hub-node.ts'), 'utf8');
+    const hubNode = readHubNodeSource();
     const hubSpawn = readFileSync(join(repoRoot, 'core/orchestrator/process/spawn/hub.ts'), 'utf8');
     const isolatedRunner = readFileSync(join(repoRoot, 'core/scripts/e2e/runners/run-e2e-parallel-isolated.ts'), 'utf8');
     expect(hubNode).not.toContain("resolvedArgs.name.toLowerCase() === 'h2'");
@@ -1507,7 +1514,7 @@ describe('production startup wiring', () => {
   });
 
   test('hub mesh bootstrap uses live entity jurisdiction and provisions the external faucet by default', () => {
-    const hubNode = readFileSync(join(repoRoot, 'core/orchestrator/hub-node.ts'), 'utf8');
+    const hubNode = readHubNodeSource();
     const driveStart = hubNode.indexOf('const advanceHubMeshBootstrap = async (');
     const driveEnd = hubNode.indexOf('const run = async (): Promise<void> => {', driveStart);
     expect(driveStart).toBeGreaterThan(0);
@@ -1554,7 +1561,7 @@ describe('production startup wiring', () => {
   });
 
   test('hub mesh bootstrap releases its interval only after declared support peers are provisioned', () => {
-    const hubNode = readFileSync(join(repoRoot, 'core/orchestrator/hub-node.ts'), 'utf8');
+    const hubNode = readHubNodeSource();
     const readinessStart = hubNode.indexOf('const supportPeerProvisioningReady = (');
     const healthStart = hubNode.indexOf('const buildPairHealth = (', readinessStart);
     const controllerStart = hubNode.indexOf('const createHubMeshBootstrapController = (');
@@ -1695,7 +1702,7 @@ describe('production startup wiring', () => {
   });
 
   test('offchain faucet exposes all local hub bootstrap entities', () => {
-    const hubNode = readFileSync(join(repoRoot, 'core/orchestrator/hub-node.ts'), 'utf8');
+    const hubNode = readHubNodeSource();
     expect(hubNode).toContain(
       'context.faucetRelayStore.activeHubEntityIds =\n      context.hubBootstraps.map(entry => entry.entityId);',
     );

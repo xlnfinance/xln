@@ -23,6 +23,13 @@ const readMarketMakerNodeSource = (): string =>
     'market-maker/node/mm-node-run.ts',
   ].map(readMarketMakerNodeModule).join('\n');
 
+// hub-node.ts goes last so declaration-order slices keep ending inside it.
+const readHubNodeSource = (): string =>
+  [
+    'hub/node/hub-jurisdiction-binding.ts',
+    'hub-node.ts',
+  ].map(file => readFileSync(join(repoRoot, 'core/orchestrator', file), 'utf8')).join('\n');
+
 const readRpcAdapterSource = (): string =>
   [
     'rpc-public.ts',
@@ -59,7 +66,7 @@ describe('production startup wiring', () => {
   });
 
   test('managed hub BrainVault prewarms before WAL replay and opens custody only after restore', () => {
-    const hub = readFileSync(join(repoRoot, 'core/orchestrator/hub-node.ts'), 'utf8');
+    const hub = readHubNodeSource();
     const transport = readFileSync(join(repoRoot, 'core/orchestrator/hub/hub-runtime-transport.ts'), 'utf8');
     const orchestrator = readFileSync(join(repoRoot, 'core/orchestrator/orchestrator.ts'), 'utf8');
     // The child environment is built by the helper the orchestrator calls, so
@@ -95,7 +102,7 @@ describe('production startup wiring', () => {
       expect(source).not.toMatch(/listen 809[0-3][^}]+location \/ \{\s+proxy_pass/s);
     }
     for (const source of [
-      readFileSync(join(repoRoot, 'core/orchestrator/hub-node.ts'), 'utf8'),
+      readHubNodeSource(),
       readMarketMakerNodeSource(),
     ]) {
       const upgrade = source.indexOf('const directUpgrade = directRuntimeWs.maybeUpgrade(request, serverRef);');
@@ -264,7 +271,7 @@ describe('production startup wiring', () => {
   });
 
   test('hubs never pause WAL for a final bootstrap snapshot', () => {
-    const hubNode = readFileSync(join(repoRoot, 'core/orchestrator/hub-node.ts'), 'utf8');
+    const hubNode = readHubNodeSource();
     expect(hubNode).not.toContain('HUB_BOOTSTRAP_PAUSE_STORAGE');
     expect(hubNode).not.toContain('readySnapshotInFlight');
     expect(hubNode).not.toContain('persist-ready-snapshot');
@@ -327,7 +334,7 @@ describe('production startup wiring', () => {
 
   test('managed runtime fatal remains isolated after parent incident fsync acknowledgement', () => {
     const orchestrator = readFileSync(join(repoRoot, 'core/orchestrator/orchestrator.ts'), 'utf8');
-    const hubNode = readFileSync(join(repoRoot, 'core/orchestrator/hub-node.ts'), 'utf8');
+    const hubNode = readHubNodeSource();
     const mmNode = readMarketMakerNodeSource();
     const runtimeLoop = readFileSync(join(repoRoot, 'core/runtime/loop/loop-failure.ts'), 'utf8');
 
@@ -388,7 +395,7 @@ describe('production startup wiring', () => {
     );
     const xlnStore = readFileSync(join(repoRoot, 'frontend/src/lib/stores/xlnStore.ts'), 'utf8');
     const deploy = readPlatformDeploy();
-    const hubNode = readFileSync(join(repoRoot, 'core/orchestrator/hub-node.ts'), 'utf8');
+    const hubNode = readHubNodeSource();
     const vaultStore = readFileSync(join(repoRoot, 'frontend/src/lib/stores/vault/vaultStore.ts'), 'utf8');
 
     expect(runtimeCreation).toContain('buildRemoteRuntimeRecoveryPeerSources({ runtimeId: recoveryRuntimeId })');
@@ -407,7 +414,7 @@ describe('production startup wiring', () => {
   });
 
   test('hub drains relocated gossip before starting any network route', () => {
-    const hubNode = readFileSync(join(repoRoot, 'core/orchestrator/hub-node.ts'), 'utf8');
+    const hubNode = readHubNodeSource();
     const relocationStart = hubNode.indexOf('if (restoredRuntimeRouteRelocated(');
     const awaitedClear = hubNode.indexOf(
       "await clearGossip(env, { runtimeId: String(env.runtimeId || '') });",
@@ -772,7 +779,7 @@ describe('production startup wiring', () => {
     expect(orchestrator).toContain('HUB_EXITED_DURING_MM_READY name=${exitedHub.name}');
     expect(orchestrator).toContain('hubsOnline &&');
 
-    const hubNode = readFileSync(join(repoRoot, 'core/orchestrator/hub-node.ts'), 'utf8');
+    const hubNode = readHubNodeSource();
     const hubVisibleProfiles = readFileSync(
       join(repoRoot, 'core/orchestrator/hub/hub-visible-profiles.ts'),
       'utf8',

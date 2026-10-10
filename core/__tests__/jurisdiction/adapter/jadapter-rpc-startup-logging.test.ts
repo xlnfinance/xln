@@ -9,6 +9,13 @@ const readMarketMakerNodeSource = (): string => [
   'market-maker/node/mm-node-run.ts',
 ].map(file => readFileSync(join(process.cwd(), 'core/orchestrator', file), 'utf8')).join('\n');
 
+// hub-node.ts goes last so declaration-order slices keep ending inside it.
+const readHubNodeSource = (): string =>
+  [
+    'hub/node/hub-jurisdiction-binding.ts',
+    'hub-node.ts',
+  ].map(file => readFileSync(join(process.cwd(), 'core/orchestrator', file), 'utf8')).join('\n');
+
 const readRpcAdapterSource = (): string => [
   'rpc-public.ts',
   'rpc/rpc-adapter.ts',
@@ -53,7 +60,7 @@ test('runtime dev startup status logs stay structured', () => {
   const runtimeWatchers = readFileSync(join(process.cwd(), 'core/runtime/loop/loop-watchers.ts'), 'utf8');
   const runtimeFailure = readFileSync(join(process.cwd(), 'core/runtime/loop/loop-failure.ts'), 'utf8');
   const runtimeFrameStart = readFileSync(join(process.cwd(), 'core/runtime/frame/lifecycle/start.ts'), 'utf8');
-  const hubNode = readFileSync(join(process.cwd(), 'core/orchestrator/hub-node.ts'), 'utf8');
+  const hubNode = readHubNodeSource();
   const marketMakerNode = readMarketMakerNodeSource();
   const orchestrator = readFileSync(join(process.cwd(), 'core/orchestrator/orchestrator.ts'), 'utf8');
   const wsClient = readFileSync(join(process.cwd(), 'core/network/p2p/ws-client.ts'), 'utf8');

@@ -2,7 +2,14 @@ import { expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-const source = readFileSync(join(process.cwd(), 'core/orchestrator/hub-node.ts'), 'utf8');
+// hub-node.ts goes last so declaration-order slices keep ending inside it.
+const readHubNodeSource = (): string =>
+  [
+    'hub/node/hub-jurisdiction-binding.ts',
+    'hub-node.ts',
+  ].map(file => readFileSync(join(process.cwd(), 'core/orchestrator', file), 'utf8')).join('\n');
+
+const source = readHubNodeSource();
 
 const sourceBlock = (startMarker: string, endMarker: string): string => {
   const start = source.indexOf(startMarker);

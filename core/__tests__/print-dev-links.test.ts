@@ -6,6 +6,13 @@ import { join, resolve } from 'node:path';
 
 const repoRoot = resolve(import.meta.dir, '../..');
 
+// hub-node.ts goes last so declaration-order slices keep ending inside it.
+const readHubNodeSource = (): string =>
+  [
+    'hub/node/hub-jurisdiction-binding.ts',
+    'hub-node.ts',
+  ].map(file => readFileSync(join(repoRoot, 'core/orchestrator', file), 'utf8')).join('\n');
+
 test('dev link banner prints stable subsystem links and bulk import fragments', () => {
   const dir = mkdtempSync(join(tmpdir(), 'xln-dev-links-'));
   const keysPath = join(dir, 'radapter-keys.json');
@@ -161,7 +168,7 @@ test('bun run dev does not print token-bearing runtime import URLs by default', 
 });
 
 test('dev hub does not disable durable storage during bootstrap', () => {
-  const hubNode = readFileSync(join(repoRoot, 'core/orchestrator/hub-node.ts'), 'utf8');
+  const hubNode = readHubNodeSource();
 
   expect(hubNode).not.toContain("nodeLog.info('dev_bootstrap.storage_disabled'");
   expect(hubNode).not.toContain('DEV_BOOTSTRAP_STORAGE_DISABLED');

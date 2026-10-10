@@ -12,13 +12,20 @@ const readMarketMakerNodeSource = (): string => [
   'market-maker/node/mm-node-run.ts',
 ].map(file => readFileSync(join(repoRoot, 'core/orchestrator', file), 'utf8')).join('\n');
 
+// hub-node.ts goes last so declaration-order slices keep ending inside it.
+const readHubNodeSource = (): string =>
+  [
+    'hub/node/hub-jurisdiction-binding.ts',
+    'hub-node.ts',
+  ].map(file => readFileSync(join(repoRoot, 'core/orchestrator', file), 'utf8')).join('\n');
+
 test('bootstrap uses the canonical WAL-before-dispatch commit path', () => {
   const process = readFileSync(join(repoRoot, 'core/runtime/frame/process.ts'), 'utf8');
   const postCommit = readFileSync(
     join(repoRoot, 'core/runtime/frame/lifecycle/post-commit.ts'),
     'utf8',
   );
-  const hubNode = readFileSync(join(repoRoot, 'core/orchestrator/hub-node.ts'), 'utf8');
+  const hubNode = readHubNodeSource();
   const mmNode = readMarketMakerNodeSource();
   const orchestrator = readFileSync(join(repoRoot, 'core/orchestrator/orchestrator.ts'), 'utf8');
 
@@ -51,7 +58,7 @@ test('bootstrap uses the canonical WAL-before-dispatch commit path', () => {
 test('authority evidence captures materialized H1 before MM bootstrap', () => {
   const orchestrator = readFileSync(join(repoRoot, 'core/orchestrator/orchestrator.ts'), 'utf8');
   const resetStartup = readFileSync(join(repoRoot, 'core/orchestrator/process/reset-startup.ts'), 'utf8');
-  const hubNode = readFileSync(join(repoRoot, 'core/orchestrator/hub-node.ts'), 'utf8');
+  const hubNode = readHubNodeSource();
   const reset = orchestrator.indexOf('const runReset = async');
   const startupCall = orchestrator.indexOf('await completeResetStartup({', reset);
   const authorityBranch = resetStartup.indexOf(
