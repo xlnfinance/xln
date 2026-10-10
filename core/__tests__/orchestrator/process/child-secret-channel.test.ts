@@ -10,6 +10,7 @@ import {
   writeInheritedChildSecrets,
 } from '../../../support/process/child-secrets';
 import { spawnBunChild } from '../../../orchestrator/bootstrap/custody-bootstrap';
+import { buildHubChildProcessEnv } from '../../../orchestrator/process/hub-runtime-env';
 
 const readStream = async (stream: NodeJS.ReadableStream): Promise<string> => {
   let value = '';
@@ -101,6 +102,29 @@ describe('orchestrator child secret channel', () => {
       auth: '',
       radapter: '',
     });
+  });
+
+  test('managed children never inherit the orchestrator operator or reset token', () => {
+    const sourceEnv = {
+      KEEP_FOR_CHILD: 'kept',
+      XLN_ORCHESTRATOR_OPERATOR_TOKEN: 'operator-token-'.repeat(4),
+      XLN_MESH_RESET_TOKEN: 'mesh-reset-token',
+    };
+    expect(buildManagedRuntimeChildSecretEnv(sourceEnv, false)).toEqual({ KEEP_FOR_CHILD: 'kept' });
+    const hubEnv = buildHubChildProcessEnv({
+      hubName: 'H2',
+      dbPath: '/tmp/h2',
+      brainvaultOwnerPath: '/tmp/h2/brainvault-owner.json',
+      jurisdictionsPath: '/tmp/jurisdictions.json',
+      rpcEnv: {},
+      orchestratorPid: 1,
+      orchestratorOwnerId: 'owner',
+      startupTimeoutMs: 1_000,
+      sourceEnv,
+    });
+    expect(hubEnv['KEEP_FOR_CHILD']).toBe('kept');
+    expect(hubEnv['XLN_ORCHESTRATOR_OPERATOR_TOKEN']).toBeUndefined();
+    expect(hubEnv['XLN_MESH_RESET_TOKEN']).toBeUndefined();
   });
 
   test('managed child secret handshake fails with the child spawn error', async () => {

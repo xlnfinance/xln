@@ -26,6 +26,11 @@ const MANAGED_RUNTIME_PARENT_SECRET_ENV = [
   'CUSTODY_SEED',
   'CUSTODY_DAEMON_RUNTIME_SEED',
   'CUSTODY_DAEMON_AUTH_SEED',
+  // Orchestrator operator credentials unlock /api/control, /api/debug,
+  // runtime-import token minting and /api/reset; network-facing children
+  // must never hold them.
+  'XLN_ORCHESTRATOR_OPERATOR_TOKEN',
+  'XLN_MESH_RESET_TOKEN',
 ] as const;
 
 export const buildManagedRuntimeChildSecretEnv = (
