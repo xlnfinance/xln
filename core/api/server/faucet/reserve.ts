@@ -4,6 +4,7 @@ import { safeStringify } from '../../../protocol/serialization';
 import { createStructuredLogger } from '../../../support/logger';
 import { getErrorMessage } from '../utils';
 import { faucetFailureBody } from './failure';
+import { BoundedLockBusyError } from '../../../support/bounded-lock';
 import {
   reserveFaucetLock,
 } from './reserve-waits';
@@ -38,8 +39,23 @@ const unavailable = (
   { status: 503, headers },
 );
 
+const acquireReserveFaucet = async (headers: HeadersInit): Promise<(() => void) | Response> => {
+  try {
+    return await reserveFaucetLock.acquire();
+  } catch (error) {
+    if (!(error instanceof BoundedLockBusyError)) throw error;
+    faucetLog.warn('reserve.busy', { reason: error.code });
+    return new Response(safeStringify(faucetFailureBody({
+      code: 'FAUCET_BUSY',
+      error: 'Reserve faucet is busy; retry later',
+      extra: { reason: error.code },
+    })), { status: error.code === 'LOCK_QUEUE_FULL' ? 429 : 503, headers });
+  }
+};
+
 export const handleReserveFaucet = async (input: ReserveFaucetInput): Promise<Response> => {
-  await reserveFaucetLock.acquire();
+  const release = await acquireReserveFaucet(input.headers);
+  if (release instanceof Response) return release;
   try {
     const adapter = input.getJAdapter();
     if (!adapter) {
@@ -66,6 +82,6 @@ export const handleReserveFaucet = async (input: ReserveFaucetInput): Promise<Re
       error: message,
     })), { status: 500, headers: input.headers });
   } finally {
-    reserveFaucetLock.release();
+    release();
   }
 };

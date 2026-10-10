@@ -4,30 +4,17 @@ import { DEV_CHAIN_IDS } from '../../../jurisdiction/adapter';
 import { createStructuredLogger } from '../../../support/logger';
 import { getEntityReplicaById } from '../entities/lookup';
 import { withRuntimeCommittedRead } from '../../../runtime/frame/lifecycle/writer-lock';
+import { createBoundedLock } from '../../../support/bounded-lock';
 
 const faucetLog = createStructuredLogger('server.faucet');
 
-export const reserveFaucetLock = {
-  locked: false,
-  queue: [] as Array<() => void>,
-
-  async acquire(): Promise<void> {
-    if (!this.locked) {
-      this.locked = true;
-      return;
-    }
-    await new Promise<void>(resolve => this.queue.push(resolve));
-  },
-
-  release(): void {
-    const next = this.queue.shift();
-    if (next) {
-      next();
-      return;
-    }
-    this.locked = false;
-  },
-};
+// One reserve request at a time; each holds the lock through up to ~45 s of
+// chain waits, so the queue and the wait for it are bounded.
+export const reserveFaucetLock = createBoundedLock({
+  name: 'reserve-faucet',
+  maxWaiters: 8,
+  acquireTimeoutMs: 60_000,
+});
 
 const runtimePollMs = (adapter: JAdapter | null): number => {
   if (!adapter) return 100;

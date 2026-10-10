@@ -3,6 +3,7 @@ import { describe, expect, test } from 'bun:test';
 import type { JAdapter } from '../../../jurisdiction/adapter';
 import { handleReserveFaucet, parseReserveFaucetAmount } from '../../../api/server/faucet/reserve';
 import type { RuntimeReplica, RuntimeInput } from '../../../runtime/types';
+import { safeStringify } from '../../../protocol/serialization';
 
 const entity = (byte: string): string => `0x${byte.repeat(32)}`;
 const signer = (byte: string): string => `0x${byte.repeat(20)}`;
@@ -115,6 +116,39 @@ describe('reserve faucet failures', () => {
       expect(enqueued).toHaveLength(0);
     }
     expect(parseReserveFaucetAmount('1.0000001', { tokenId: 1, decimals: 6 })).toBeNull();
+  });
+
+  test('bounds the reserve queue: a caller beyond it gets a typed retryable 429', async () => {
+    // The global lock queue was unbounded while each holder waits up to ~45 s.
+    let unblock!: () => void;
+    const blocked = new Promise<void>(resolve => {
+      unblock = resolve;
+    });
+    const request = (ensureTokenCatalog: () => Promise<[]>) => handleReserveFaucet({
+      req: new Request('http://xln.local/api/faucet/reserve', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: safeStringify({ userEntityId: USER, tokenId: 1, amount: '1' }),
+      }),
+      env: makeEnv(),
+      headers: { 'content-type': 'application/json' },
+      relayStore: { activeHubEntityIds: [HUB] },
+      getJAdapter: () => makeAdapter(),
+      ensureTokenCatalog,
+      validateRuntimeInputAdmission: () => undefined,
+      enqueueRuntimeInput: () => undefined,
+    });
+    const holder = request(async () => {
+      await blocked;
+      return [];
+    });
+    const queued = Array.from({ length: 8 }, () => request(async () => []));
+    const rejected = await request(async () => []);
+    expect(rejected.status).toBe(429);
+    expect(await rejected.json()).toMatchObject({ code: 'FAUCET_BUSY', retryable: true, reason: 'LOCK_QUEUE_FULL' });
+    unblock();
+    const settled = await Promise.all([holder, ...queued]);
+    expect(settled.map(response => response.status)).toEqual(Array.from({ length: 9 }, () => 400));
   });
 
   test('reports typed transient failure when j-adapter is unavailable', async () => {
