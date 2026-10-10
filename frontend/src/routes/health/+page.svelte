@@ -118,7 +118,6 @@
         runtimeId: string;
         lastSeen: number;
         ageMs: number;
-        topics?: string[];
       }>;
     };
     system: {
@@ -1120,7 +1119,6 @@
               <div class="entity-tags">
                 <span class="chip">age:{Math.round(client.ageMs / 1000)}s</span>
                 <span class="chip">last:{new Date(client.lastSeen).toLocaleTimeString()}</span>
-                <span class="chip">topics:{client.topics?.length ?? 0}</span>
               </div>
             </article>
           {/each}

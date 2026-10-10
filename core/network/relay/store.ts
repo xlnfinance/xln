@@ -44,7 +44,6 @@ type RelayClient = {
   ws: RelaySocketLike;
   runtimeId: string;
   lastSeen: number;
-  topics: Set<string>;
   /** Consecutive forwardToRemoteRuntime sends that landed in Bun's backpressure
    *  queue (send() returned -1) while this socket still reported open. A
    *  queued send is not a delivery failure — retrying the same envelope risks
@@ -116,7 +115,6 @@ export type RelayStore = {
   marketCapUpdatedAt: number;
   gossipJurisdictions: Map<string, JurisdictionGossipAnnouncement>;
   officialFoundationSignerId?: string | undefined;
-  runtimeEncryptionKeys: Map<string, string>;
   debugEvents: RelayDebugEvent[];
   debugEventByteLengths: number[];
   debugEventBytes: number;
@@ -194,7 +192,6 @@ export const createRelayStore = (serverId: string, options: RelayStoreOptions = 
     ...(options.officialFoundationSignerId
       ? { officialFoundationSignerId: options.officialFoundationSignerId }
       : {}),
-    runtimeEncryptionKeys: new Map(),
     debugEvents: [],
     debugEventByteLengths: [],
     debugEventBytes: 0,
@@ -654,7 +651,6 @@ export const registerClient = (store: RelayStore, runtimeId: string, ws: RelaySo
     ws,
     runtimeId: key,
     lastSeen: nextWsTimestamp(store),
-    topics: new Set(),
     consecutiveBackpressuredSends: 0,
     backpressureStartedAt: 0,
   });
@@ -665,32 +661,8 @@ export const removeClient = (store: RelayStore, ws: RelaySocketLike): string | n
   for (const [id, client] of store.clients) {
     if (client.ws === ws) {
       store.clients.delete(id);
-      store.runtimeEncryptionKeys.delete(id.toLowerCase());
       return id;
     }
   }
-  return null;
-};
-
-// ---------------------------------------------------------------------------
-// Encryption key cache
-// ---------------------------------------------------------------------------
-
-export const cacheEncryptionKey = (store: RelayStore, runtimeId: string, pubKeyHex: string): void => {
-  const normalized = normalizeRuntimeKey(runtimeId);
-  if (!normalized) return;
-  const normalizedKey = pubKeyHex.startsWith('0x')
-    ? pubKeyHex.toLowerCase()
-    : `0x${pubKeyHex.toLowerCase()}`;
-  if (/^0x[0-9a-f]{64}$/.test(normalizedKey)) {
-    store.runtimeEncryptionKeys.set(normalized, normalizedKey);
-  }
-};
-
-export const resolveEncryptionPublicKeyHex = (store: RelayStore, targetRuntimeId: string): string | null => {
-  const normalizedTarget = normalizeRuntimeKey(targetRuntimeId);
-  if (!normalizedTarget) return null;
-  const directKey = store.runtimeEncryptionKeys.get(normalizedTarget);
-  if (typeof directKey === 'string' && directKey.length > 0) return directKey;
   return null;
 };

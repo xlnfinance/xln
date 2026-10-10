@@ -1,7 +1,7 @@
 import type { MarketSnapshotPayload } from './snapshot';
 import type { RelayTradeObservationStore } from './aggregate';
 import type { MarketSubscriptionLimiter, MarketSubscriptionLimiterSnapshot } from './subscription-limiter';
-import type { isMarketMessageType, MarketWireRequest } from './wire';
+import type { MarketWireRequest } from './wire';
 
 export type MarketSubscription = {
   followsConnectedHubs: boolean;
@@ -39,7 +39,6 @@ export type MarketSubscriptionStack<WS extends MarketSocket> = {
   cleanup: (ws: WS) => void;
   clear: () => void;
   handleMessage: (ws: WS, message: MarketWireRequest) => Promise<void>;
-  isMarketMessageType: typeof isMarketMessageType;
   snapshot: () => MarketSubscriptionLimiterSnapshot;
 };
 

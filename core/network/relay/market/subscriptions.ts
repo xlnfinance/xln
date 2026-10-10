@@ -10,7 +10,6 @@ import type {
   MarketSubscriptionStack,
   MarketSubscriptionStackOptions,
 } from './subscription-types';
-import { isMarketMessageType } from './wire';
 
 export type {
   MarketSubscriptionStack,
@@ -36,7 +35,6 @@ export const createMarketSubscriptionStack = <WS extends MarketSocket>(
     cleanup: ws => cleanupSubscription(context, ws),
     clear: () => clearSubscriptions(context),
     handleMessage: (ws, message) => handleMarketMessage(context, ws, message),
-    isMarketMessageType,
     snapshot: () => context.limiter.snapshot(),
   };
 };

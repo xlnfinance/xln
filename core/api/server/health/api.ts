@@ -61,7 +61,6 @@ const collectRelayHealth = (deps: RuntimeHealthDeps) => {
     runtimeId,
     lastSeen: client.lastSeen,
     ageMs: Math.max(0, Date.now() - client.lastSeen),
-    topics: Array.from(client.topics || []),
   }));
   const profiles = getAllGossipProfiles(deps.relayStore);
   const profileSummaries = profiles

@@ -22,7 +22,6 @@ import {
   DEFAULT_GOSSIP_SYNC_LIMIT,
   registerClient,
   removeClient,
-  cacheEncryptionKey,
 } from './store';
 import { parseProfile, type Profile } from '../../entity/profile';
 import { verifyProfileSignature, type ProfileVerifyResult } from '../../entity/profile/profile-signing';
@@ -317,7 +316,6 @@ const handleHello = (context: RelayRouteContext): boolean => {
     return true;
   }
   rememberSocketRuntimeId(ws, fromKey);
-  if (fromEncryptionPubKey) cacheEncryptionKey(store, fromKey, fromEncryptionPubKey);
   pushDebugEvent(store, {
     event: 'hello',
     runtimeId: from,

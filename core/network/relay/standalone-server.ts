@@ -7,7 +7,6 @@ import { isRelaySocketAuthenticated, forgetRelaySocketRuntimeId, relayRoute, typ
 import {
   canonicalizeRuntimeWsAudience,
   deserializeWsMessage,
-  makeMessageId,
   resolveRuntimeWsMaxMessageBytes,
   serializeWsMessage,
   toRuntimeWsBytes,
@@ -29,7 +28,6 @@ export type StandaloneRelayServer = {
   server: Bun.Server<undefined>;
   store: RelayStore;
   close: () => void;
-  sendToRuntime: (runtimeId: string, message: RuntimeWsMessage) => void;
 };
 
 const relayStandaloneLog = createStructuredLogger('relay.standalone');
@@ -105,14 +103,6 @@ export const startStandaloneRelayServer = (options: StandaloneRelayOptions): Sta
     server,
     store,
     close: () => server.stop(true),
-    sendToRuntime: (runtimeId, message) => {
-      const normalized = normalizeRuntimeId(runtimeId);
-      if (!normalized) return;
-      const client = store.clients.get(normalized);
-      if (!message.id) message.id = makeMessageId();
-      if (!message.timestamp) message.timestamp = Date.now();
-      if (client?.ws) client.ws.send(serializeWsMessage(message));
-    },
   };
 };
 

@@ -58,7 +58,7 @@ export type GossipProfileBatchRequest = {
 
 export const DEFAULT_GOSSIP_BATCH_LIMIT = 1000;
 export const MAX_GOSSIP_IDS_DEPTH = 3;
-export const DEFAULT_GOSSIP_PREFIX_LIMIT = 100;
+const DEFAULT_GOSSIP_PREFIX_LIMIT = 100;
 const MIN_GOSSIP_PREFIX_CHARS = 4;
 export const MAX_GOSSIP_ROUTE_TO_ROUTES = 50;
 export const DEFAULT_GOSSIP_ROUTE_TO_ROUTES = 50;

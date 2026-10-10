@@ -5,9 +5,7 @@ import { Wallet, getBytes } from 'ethers';
 import type { Profile } from '../../../entity/profile';
 import { relayRoute as productionRelayRoute } from '../../../network/relay/router';
 import {
-  cacheEncryptionKey,
   createRelayStore,
-  resolveEncryptionPublicKeyHex,
   storeVerifiedJurisdictionAnnouncement,
 } from '../../../network/relay/store';
 import { deserializeWsMessage, hashHelloMessage, hashRuntimeWsFrame, type RuntimeWsMessage } from '../../../network/p2p/ws-protocol';
@@ -787,7 +785,6 @@ describe('relay-router gossip fanout', () => {
 
     expect(closes).toEqual([{ code: 4003, reason: 'relay-session-auth-invalid' }]);
     expect(store.clients.has(RUNTIME_A.toLowerCase())).toBe(false);
-    expect(store.runtimeEncryptionKeys.has(RUNTIME_A.toLowerCase())).toBe(false);
   });
 
   test('runtime_input is not a relay protocol message', async () => {
@@ -904,15 +901,5 @@ describe('relay-router gossip fanout', () => {
 
     expect([...store.gossipProfiles.keys()]).toEqual([ENTITY_A.toLowerCase()]);
     expect(store.debugEvents.some(event => event.reason === 'GOSSIP_PROFILE_RUNTIME_BINDING')).toBe(true);
-  });
-
-  test('prefers verified relay socket encryption key over gossip profile cache', () => {
-    const store = createRelayStore(SERVER_RUNTIME_ID);
-    const profile = buildProfile(ENTITY_A, RUNTIME_A, KEY_A, { lastUpdated: 123 });
-
-    expect(cacheEncryptionKey(store, RUNTIME_A, KEY_B)).toBeUndefined();
-    store.gossipProfiles.set(ENTITY_A, { profile, timestamp: profile.lastUpdated });
-
-    expect(resolveEncryptionPublicKeyHex(store, RUNTIME_A)).toBe(KEY_B);
   });
 });

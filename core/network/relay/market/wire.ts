@@ -15,7 +15,7 @@ import {
 import type { RelayMarketSnapshotPayload, RelayMarketSource } from './aggregate';
 import { normalizeMarketEntityId, normalizeMarketPairId } from './identifiers';
 
-export type MarketMessageType =
+type MarketMessageType =
   | 'market_subscribe'
   | 'market_unsubscribe'
   | 'market_snapshot_request';
@@ -64,9 +64,6 @@ const MARKET_REQUEST_TYPES = new Set<MarketMessageType>([
 ]);
 const MARKET_RESPONSE_TYPES = new Set(['ack', 'error', 'market_snapshot', 'market_status']);
 const DEFAULT_MAX_MARKET_MESSAGE_BYTES = 1_048_576;
-
-export const isMarketMessageType = (type: unknown): type is MarketMessageType =>
-  typeof type === 'string' && MARKET_REQUEST_TYPES.has(type as MarketMessageType);
 
 const requireString = (value: unknown, code: string): string => {
   if (typeof value !== 'string' || value.length === 0) throw new Error(code);

@@ -8,7 +8,6 @@ import {
   deserializeWsMessage,
   resolveRuntimeWsMaxMessageBytes,
   serializeWsMessage,
-  serializeWsMessageForDebug,
   type RuntimeWsMessage,
 } from '../../../network/p2p/ws-protocol';
 import {
@@ -86,7 +85,7 @@ describe('WebSocket trusted decode boundary', () => {
   test('accepts canonical MessagePack and keeps tagged JSON output-only', () => {
     const message = { type: 'debug_event' as const, payload: { amount: 7n } };
     expect(deserializeWsMessage(serializeWsMessage(message))).toEqual(message);
-    expect(() => deserializeWsMessage(serializeWsMessageForDebug(message)))
+    expect(() => deserializeWsMessage(JSON.stringify({ type: 'debug_event' })))
       .toThrow('WS_WIRE_BINARY_REQUIRED');
   });
 

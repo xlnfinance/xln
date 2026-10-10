@@ -496,7 +496,6 @@ const clearRelayState = (): void => {
   closeRelayClientsForReset(relayStore);
   relayStore.gossipProfiles.clear();
   marketCapController.clear();
-  relayStore.runtimeEncryptionKeys.clear();
   relayStore.activeHubEntityIds = [];
   clearDebugTimeline(relayStore);
   relayStore.wsCounter = 0;

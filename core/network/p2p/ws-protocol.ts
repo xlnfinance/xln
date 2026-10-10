@@ -14,7 +14,6 @@
  * Message IDs and nonces are for correlation/debugging, not cryptographic security.
  */
 
-import { serializeTaggedJson } from '../../protocol/serialization';
 import { keccak256, toUtf8Bytes } from 'ethers';
 import { hkdf } from '@noble/hashes/hkdf.js';
 import { sha256 } from '@noble/hashes/sha2.js';
@@ -112,7 +111,7 @@ export type RuntimeWsMessage = {
   encSeq?: number;
 };
 
-export type RuntimeWsEnvelope = RuntimeWsMessage & {
+type RuntimeWsEnvelope = RuntimeWsMessage & {
   v: XlnProtocolVersion;
 };
 
@@ -369,9 +368,6 @@ export const serializeWsMessage = (msg: RuntimeWsMessage): Uint8Array => {
   }
   return encoded;
 };
-
-export const serializeWsMessageForDebug = (msg: RuntimeWsMessage): string =>
-  serializeTaggedJson(buildRuntimeWsEnvelope(msg));
 
 export const MAX_WS_PREAUTH_MESSAGE_BYTES = LIMITS.MAX_RUNTIME_WS_PREAUTH_MESSAGE_BYTES;
 

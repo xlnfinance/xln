@@ -25,7 +25,7 @@ import {
 } from '../../entity/profile/profile-signing';
 import { hasCurrentBoardProfileRouteAuthority } from './gossip/local-profile-lifecycle';
 import { inspectHankoForHash } from '../../hanko/signing';
-import { deriveEncryptionKeyPair, pubKeyToHex, hexToPubKey, type P2PKeyPair } from '../../protocol/crypto/p2p-crypto';
+import { deriveEncryptionKeyPair, hexToPubKey, type P2PKeyPair } from '../../protocol/crypto/p2p-crypto';
 import { asFailFastPayload, failfastAssert } from './failfast';
 import { normalizeRuntimeId, isRuntimeId } from './auth/runtime-id';
 import { compareStableText, safeStringify } from '../../protocol/serialization';
@@ -38,7 +38,6 @@ import {
   DEFAULT_GOSSIP_ROUTE_TO_ROUTES,
   MAX_GOSSIP_ROUTE_TO_ROUTES,
   MAX_GOSSIP_IDS_DEPTH,
-  DEFAULT_GOSSIP_PREFIX_LIMIT,
   encodeRouteToRequest,
   type GossipRouteToRequest,
   type GossipProfileBatchRequest,
@@ -99,14 +98,14 @@ export const reportDirectClientError = (
   targetRuntimeId: string,
   error: Error,
   closeSession: () => void = () => undefined,
-): 'transport-error' => {
+): void => {
   if (env.infrastructure?.persistenceQuiescing === true) {
     env.warn?.('network', 'WS_DIRECT_QUIESCE_CLOSE', {
       endpoint,
       targetRuntimeId,
       error: error.message,
     });
-    return 'transport-error';
+    return;
   }
   if (error.message.startsWith('WS_UNEXPECTED_CLOSE:')) {
     // A peer process can disappear after authentication. Retire only this
@@ -117,7 +116,7 @@ export const reportDirectClientError = (
       error: error.message,
     });
     closeSession();
-    return 'transport-error';
+    return;
   }
   applyTransportPeerFailurePolicy(
     env,
@@ -125,7 +124,6 @@ export const reportDirectClientError = (
     { endpoint, targetRuntimeId, error: error.message },
     closeSession,
   );
-  return 'transport-error';
 };
 
 export type P2PGossipSet = 'default' | 'hubs';
@@ -472,10 +470,6 @@ export class RuntimeP2P {
       throw new Error('P2P_INIT_ERROR: runtimeSeed is required for encryption keypair');
     }
     this.encryptionKeyPair = deriveEncryptionKeyPair(seed);
-  }
-
-  getEncryptionPublicKeyHex(): string {
-    return pubKeyToHex(this.encryptionKeyPair.publicKey);
   }
 
   matchesIdentity(runtimeId: string, signerId?: string): boolean {
@@ -1414,33 +1408,6 @@ export class RuntimeP2P {
    * the exclusive `after` id. The relay does not learn which entry is wanted.
    * Resolves the page as applied to the local cache (verified profiles only).
    */
-  async fetchProfilesByPrefix(prefix: string, limit: number = DEFAULT_GOSSIP_PREFIX_LIMIT, after?: string): Promise<Profile[]> {
-    if (this.closing || this.closed) return [];
-    const client = this.getActiveClient();
-    if (!client) return [];
-    const normalizedPrefix = prefix.trim().toLowerCase();
-    const before = new Set((this.env.gossip?.getProfiles?.() || []).map(profile => normalizeId(profile.entityId)));
-    client.sendGossipRequest(this.runtimeId, {
-      prefix: normalizedPrefix,
-      limit,
-      ...(after ? { after: normalizeId(after) } : {}),
-    } satisfies GossipProfileBatchRequest);
-    for (const waitMs of GOSSIP_FETCH_RETRY_DELAYS_MS) {
-      if (!(await this.waitForActiveDelay(waitMs))) break;
-      const page = (this.env.gossip?.getProfiles?.() || [])
-        .filter(profile => normalizeId(profile.entityId).startsWith(normalizedPrefix)
-          && (!after || normalizeId(profile.entityId) > normalizeId(after)))
-        .sort((left, right) => compareStableText(normalizeId(left.entityId), normalizeId(right.entityId)))
-        .slice(0, limit);
-      if (page.some(profile => !before.has(normalizeId(profile.entityId)))) return page;
-    }
-    return (this.env.gossip?.getProfiles?.() || [])
-      .filter(profile => normalizeId(profile.entityId).startsWith(normalizedPrefix)
-        && (!after || normalizeId(profile.entityId) > normalizeId(after)))
-      .sort((left, right) => compareStableText(normalizeId(left.entityId), normalizeId(right.entityId)))
-      .slice(0, limit);
-  }
-
   private async fetchProfilesWithRetry(missingEntityIds: string[] = [], depth: number = 1): Promise<boolean> {
     if (this.closing || this.closed) return false;
     if (!this.getActiveClient()) {
@@ -1840,7 +1807,6 @@ export class RuntimeP2P {
   private async applyIncomingProfiles(from: string, profiles: readonly unknown[]) {
     if (this.closing || this.closed) return;
     if (profiles.length === 0) return;
-    let accepted = 0;
     const acceptedProfiles: Profile[] = [];
     for (const profile of profiles) {
       const { profile: sanitized, error: malformedReason } = sanitizeIncomingProfile(profile);
@@ -1856,7 +1822,6 @@ export class RuntimeP2P {
         });
         continue;
       }
-      const existing = this.env.gossip?.getProfile?.(sanitized.entityId);
       const verifiedRoute = this.getVerifiedRuntimeRoute(sanitized.entityId);
       if (verifiedRoute && verifiedRoute.lastUpdated >= sanitized.lastUpdated) {
         if (
@@ -1871,14 +1836,6 @@ export class RuntimeP2P {
             lastUpdated: sanitized.lastUpdated,
           });
         }
-        continue;
-      }
-      if (
-        existing &&
-        existing.lastUpdated >= sanitized.lastUpdated &&
-        verifiedRoute &&
-        verifiedRoute.lastUpdated >= sanitized.lastUpdated
-      ) {
         continue;
       }
 
@@ -1934,7 +1891,6 @@ export class RuntimeP2P {
       if (this.closing || this.closed) return;
       this.rememberVerifiedProfileRoute(sanitized, result.signerId!);
       this.env.gossip?.announce?.(sanitized);
-      accepted++;
       acceptedProfiles.push(sanitized);
     }
     if (this.closing || this.closed) return;

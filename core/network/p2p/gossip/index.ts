@@ -21,8 +21,6 @@ export interface GossipLayer {
   profiles: Map<string, Profile>;
   jurisdictions: Map<string, JurisdictionGossipAnnouncement>;
   announce: (profile: Profile) => void;
-  /** Canonical X25519 binding for a peer: read from its admitted profile. */
-  encryptionKeyForRuntime: (runtimeId: string) => string | null;
   announceJurisdiction: (announcement: JurisdictionGossipAnnouncement, officialFoundationSignerId?: string) => boolean;
   /** O(1) canonical profile lookup; hot routing must never copy+scan the cache. */
   getProfile: (entityId: string) => Profile | undefined;
@@ -32,7 +30,6 @@ export interface GossipLayer {
   getJurisdictions: () => JurisdictionGossipAnnouncement[];
   getHubs: () => Profile[];
   setProfiles?: (incoming: Iterable<Profile>) => void;
-  getProfileBundle?: (entityId: string) => { profile?: Profile; peers: Profile[] };
   getNetworkGraph: () => {
     findPaths: (
       source: string,
@@ -53,22 +50,11 @@ type GossipLayerOptions = {
 export function createGossipLayer(options: GossipLayerOptions = {}): GossipLayer {
   const profiles = new Map<string, Profile>();
   const jurisdictions = new Map<string, JurisdictionGossipAnnouncement>();
-  // runtimeId -> X25519 pub key. One admission path (announce) maintains it;
-  // sends resolve peer keys from profiles, never from a transport socket map.
-  const runtimeKeys = new Map<string, string>();
   const runtimeProfiles = new Map<string, Map<string, Profile>>();
   const normalizeRuntimeIdKey = (value: string): string =>
     String(value || '')
       .trim()
       .toLowerCase();
-  const validX25519Hex = (value: string): boolean => /^0x[0-9a-f]{64}$/.test(value);
-  const indexRuntimeKey = (profile: Profile): void => {
-    const runtimeId = normalizeRuntimeIdKey(profile.runtimeId || '');
-    const key = String((profile as { runtimeEncPubKey?: unknown }).runtimeEncPubKey || '');
-    if (runtimeId && validX25519Hex(key)) runtimeKeys.set(runtimeId, key);
-  };
-  const encryptionKeyForRuntime = (runtimeId: string): string | null =>
-    runtimeKeys.get(normalizeRuntimeIdKey(runtimeId)) ?? null;
 
   const installProfile = (profile: Profile, publish: boolean): void => {
     logDebug('GOSSIP', `📢 gossip.announce INPUT: ${profile.entityId.slice(-4)} accounts=${profile.accounts.length}`);
@@ -101,7 +87,6 @@ export function createGossipLayer(options: GossipLayerOptions = {}): GossipLayer
       byEntity.set(normalized.entityId, normalized);
       runtimeProfiles.set(runtimeId, byEntity);
     }
-    indexRuntimeKey(normalized);
     logDebug(
       'GOSSIP',
       `📡 Gossip SAVED: ${profile.entityId.slice(-4)} ts=${newTimestamp} accounts=${normalized.accounts.length}`,
@@ -150,17 +135,8 @@ export function createGossipLayer(options: GossipLayerOptions = {}): GossipLayer
   };
   const getJurisdictions = (): JurisdictionGossipAnnouncement[] => Array.from(jurisdictions.values());
   const getHubs = (): Profile[] => getProfiles().filter(isHubProfile);
-  const getProfileBundle = (entityId: string): { profile?: Profile; peers: Profile[] } => {
-    const profile = profiles.get(entityId);
-    if (!profile) return { peers: [] };
-    const peers = profile.publicAccounts
-      .map(id => profiles.get(id))
-      .filter((peer): peer is Profile => peer !== undefined);
-    return { profile, peers };
-  };
   const setProfiles = (incoming: Iterable<Profile>): void => {
     profiles.clear();
-    runtimeKeys.clear();
     runtimeProfiles.clear();
     // Snapshot hydration reconstructs the live cache. It must not re-publish
     // every already-durable profile through the external persistence callback.
@@ -187,7 +163,6 @@ export function createGossipLayer(options: GossipLayerOptions = {}): GossipLayer
     profiles,
     jurisdictions,
     announce,
-    encryptionKeyForRuntime,
     announceJurisdiction,
     getProfile,
     getProfileByRuntimeId,
@@ -195,7 +170,6 @@ export function createGossipLayer(options: GossipLayerOptions = {}): GossipLayer
     getJurisdictions,
     getHubs,
     setProfiles,
-    getProfileBundle,
     getNetworkGraph,
   };
 }

@@ -81,7 +81,6 @@ test('snapshot profile hydration rebuilds indexes without re-persisting profiles
   expect(persisted).toBe(0);
   expect(gossip.getProfile(entityId)?.runtimeId).toBe(runtimeId);
   expect(gossip.getProfileByRuntimeId(runtimeId)?.entityId).toBe(entityId);
-  expect(gossip.encryptionKeyForRuntime(runtimeId)).toBe(runtimeEncPubKey);
 });
 
 test('runtime infra gossip restore diagnostics use structured logging', () => {

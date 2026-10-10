@@ -6,8 +6,6 @@ import { safeStringify } from '../../protocol/serialization';
 
 const rejectLog = createStructuredLogger('network.reject');
 
-export type TransportPeerFailureDisposition = 'halted' | 'rejected';
-
 /**
  * Owner canon (AGENTS.md "REJECT POLICY"): a peer can never take a Runtime
  * down. Transport-level peer misbehaviour closes that peer's session and
@@ -22,13 +20,12 @@ export const applyTransportPeerFailurePolicy = (
   code: string,
   failure: Record<string, unknown>,
   closeSession: () => void,
-): TransportPeerFailureDisposition => {
+): void => {
   env.error?.('network', code, failure);
   if (rejectFailFast()) {
     haltRuntimeRequiresOperator(env, new Error(`${code}:${safeStringify(failure)}`));
-    return 'halted';
+    return;
   }
   rejectLog.error('transport_peer_failure.dropped', { code, disposition: 'session-closed', ...failure });
   closeSession();
-  return 'rejected';
 };

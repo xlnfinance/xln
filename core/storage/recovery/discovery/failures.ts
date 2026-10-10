@@ -33,7 +33,6 @@ const TRANSIENT_CODES: ReadonlySet<string> = new Set([
   'HTTP_429',
   'RECOVERY_REQUEST_SEND_FAILED',
   'RECOVERY_REQUEST_SOCKET_CLOSED',
-  'RECOVERY_REQUEST_SOCKET_PAUSED',
 ]);
 
 const TRANSIENT_TEXT = ['timeout', 'offline', 'connect', 'network', 'fetch'] as const;

@@ -87,20 +87,10 @@ const createDetachedGossip = (liveEnv: RuntimeReplica): RuntimeReplica['gossip']
   };
   const jurisdictions = new Map(structuredClone(Array.from(liveEnv.gossip.jurisdictions.entries())));
   const hubProfiles = structuredClone(liveEnv.gossip.getHubs());
-  const encryptionKeyForRuntime = (runtimeId: string): string | null => {
-    const normalizedRuntimeId = runtimeId.trim().toLowerCase();
-    for (const profile of profiles.values()) {
-      if (String(profile.runtimeId || '').trim().toLowerCase() !== normalizedRuntimeId) continue;
-      const key = String(profile.runtimeEncPubKey || '');
-      return /^0x[0-9a-f]{64}$/.test(key) ? key : null;
-    }
-    return null;
-  };
   return {
     profiles,
     jurisdictions,
     announce: detachedMutation,
-    encryptionKeyForRuntime,
     announceJurisdiction: detachedMutation,
     setProfiles: detachedMutation,
     getProfiles,
@@ -108,16 +98,6 @@ const createDetachedGossip = (liveEnv: RuntimeReplica): RuntimeReplica['gossip']
     getProfileByRuntimeId,
     getJurisdictions: () => Array.from(jurisdictions.values()),
     getHubs: () => [...hubProfiles],
-    getProfileBundle: (entityId: string) => {
-      const profile = profiles.get(entityId);
-      if (!profile) return { peers: [] };
-      return {
-        profile,
-        peers: profile.publicAccounts
-          .map(peerId => profiles.get(peerId))
-          .filter((peer): peer is Profile => peer !== undefined),
-      };
-    },
     getNetworkGraph: detachedMutation,
   };
 };

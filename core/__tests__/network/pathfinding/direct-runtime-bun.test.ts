@@ -6,7 +6,7 @@ import {
   isCleanDirectRuntimeSessionClose,
 } from '../../../network/p2p/direct-runtime-bun';
 import { decryptPayload, deriveEncryptionKeyPair, encryptPayload, pubKeyToHex } from '../../../protocol/crypto/p2p-crypto';
-import { hashHelloMessage, hashRuntimeWsFrame, serializeWsMessage, deserializeWsMessage, serializeWsMessageForDebug, type RuntimeWsMessage } from '../../../network/p2p/ws-protocol';
+import { hashHelloMessage, hashRuntimeWsFrame, serializeWsMessage, deserializeWsMessage, type RuntimeWsMessage } from '../../../network/p2p/ws-protocol';
 import { verifyHelloAuth, verifyRuntimeWsFrameAuth } from '../../../network/p2p/auth/hello-auth';
 import { XLN_PROTOCOL_VERSION } from '../../../protocol/version';
 import { encodeBinaryPayload } from '../../../protocol/serialization/binary-codec';
@@ -321,8 +321,7 @@ describe('direct runtime websocket route', () => {
     expect(binary).toBeInstanceOf(Uint8Array);
     expect(binary[0]).toBe(0x03);
     expect(deserializeWsMessage(binary)).toEqual(message);
-    expect(serializeWsMessageForDebug(message)).toContain('debug_event');
-    expect(() => deserializeWsMessage(serializeWsMessageForDebug(message))).toThrow('WS_WIRE_BINARY_REQUIRED');
+    expect(() => deserializeWsMessage(JSON.stringify({ type: 'debug_event' }))).toThrow('WS_WIRE_BINARY_REQUIRED');
   });
 
   test('rejects oversized UTF-8 routing metadata before relay telemetry', () => {

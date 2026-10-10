@@ -151,7 +151,6 @@ export type RuntimeWsClientOptions = {
   onGossipResponse?: (from: string, payload: unknown) => Promise<void> | void;
   onGossipAnnounce?: (from: string, payload: unknown) => Promise<void> | void;
   onRecoveryBundleRequest?: (from: string, lookupKey: string) => Promise<unknown> | unknown;
-  onRecoveryBundleResponse?: (from: string, payload: unknown, message: RuntimeWsMessage) => Promise<void> | void;
   onOpen?: () => void;
   onDeliveryReadyChange?: (ready: boolean) => void;
   onError?: (error: Error) => void;
@@ -918,11 +917,7 @@ export class RuntimeWsClient {
       if (this.settlePendingRecoveryBundleRequest(msg.inReplyTo, msg.payload, msg.error)) {
         return true;
       }
-      if (msg.error) {
-        this.options.onError?.(new Error(msg.error));
-        return true;
-      }
-      await this.options.onRecoveryBundleResponse?.(msg.from, msg.payload, msg);
+      if (msg.error) this.options.onError?.(new Error(msg.error));
       return true;
     }
     return false;
@@ -1034,10 +1029,6 @@ export class RuntimeWsClient {
       timestamp: this.nextMessageTimestamp(),
       payload,
     });
-  }
-
-  sendRecoveryBundleRequest(to: string, lookupKey: string): boolean {
-    return this.sendRecoveryBundleRequestWithId(to, lookupKey, makeMessageId());
   }
 
   private sendRecoveryBundleRequestWithId(to: string, lookupKey: string, id: string): boolean {
@@ -1299,12 +1290,6 @@ export class RuntimeWsClient {
       error instanceof Error ? error : new Error(String(error)),
     ));
     return true;
-  }
-
-  pause() {
-    const socket = this.prepareSocketStop('RECOVERY_REQUEST_SOCKET_PAUSED', false);
-    socket?.close();
-    if (this.ws === socket) this.ws = null;
   }
 
   close() {

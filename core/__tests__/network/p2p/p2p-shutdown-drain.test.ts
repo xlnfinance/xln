@@ -60,18 +60,17 @@ test('direct runtime rejection is a visible transport error, never a retry hint'
   env.error = (_category, message) => { errors.push(message); };
   env.warn = (_category, message) => { warnings.push(message); };
 
-  expect(reportDirectClientError(
+  reportDirectClientError(
     env,
     'ws://peer/ws',
     `0x${'22'.repeat(20)}`,
     new Error('INBOUND_ENTITY_RUNTIME_QUIESCING: entity=0x11 signer=0x22 txTypes=accountInput'),
-  )).toBe('transport-error');
+  );
   expect(info).toEqual([]);
   expect(errors).toEqual(['WS_DIRECT_FATAL']);
   expect(warnings).toEqual([]);
 
-  expect(reportDirectClientError(env, 'ws://peer/ws', `0x${'22'.repeat(20)}`, new Error('socket failed')))
-    .toBe('transport-error');
+  reportDirectClientError(env, 'ws://peer/ws', `0x${'22'.repeat(20)}`, new Error('socket failed'));
   expect(errors).toEqual(['WS_DIRECT_FATAL', 'WS_DIRECT_FATAL']);
   expect(warnings).toEqual([]);
 });
@@ -88,12 +87,12 @@ test('direct peer close during an established quiesce is visible but non-fatal',
     persistenceQuiescing: true,
   };
 
-  expect(reportDirectClientError(
+  reportDirectClientError(
     env,
     'ws://peer/ws',
     `0x${'22'.repeat(20)}`,
     new Error('peer completed coordinated shutdown'),
-  )).toBe('transport-error');
+  );
   expect(errors).toEqual([]);
   expect(warnings).toEqual(['WS_DIRECT_QUIESCE_CLOSE']);
   expect(env.infrastructure.operatorStatus).toBeUndefined();
