@@ -1526,14 +1526,7 @@ const createMarketMakerBootstrapFinalizer = (deps: MarketMakerBootstrapFinalizer
           incomplete: deps
             .buildSameQuoteJobs(visibleHubs)
             .filter(job => !isSameQuoteJobDepthReady(deps.env, job))
-            .map(job => ({
-              mmEntityId: job.context.entityId,
-              jurisdiction: job.context.jurisdictionName,
-              hubEntityId: job.hub.entityId,
-              committedOffers: countCommittedMarketMakerOffersForHub(deps.env, job.context.entityId, job.hub.entityId),
-              expectedOffers: buildMarketMakerOfferSpecs([job.hub.entityId], job.tokenIds).length,
-              blocker: describeMarketMakerSameHubBlocker(deps.env, job.context.entityId, job.hub.entityId),
-            })),
+            .map(job => describeMarketMakerSameQuoteProgress(deps.env, job)),
         })}`,
       );
     }

@@ -1026,7 +1026,11 @@ describe('production startup wiring', () => {
     expect(mmNode).toContain('if (hasMarketMakerRuntimeBacklog(deps.env)) return false;');
     expect(mmNode).toContain('type SameQuoteJob = {');
     expect(mmNode).toContain('const isSameQuoteJobDepthReady = (env: RuntimeReplica, job: SameQuoteJob): boolean => {');
-    expect(mmNode).toContain('buildMarketMakerOfferSpecs([job.hub.entityId], job.tokenIds)');
+    // Every expected-depth count names the job's pair shard; without it the
+    // incomplete diagnostic reported a ladder for all pairs at reduced depth.
+    expect(mmNode).not.toContain('buildMarketMakerOfferSpecs([job.hub.entityId], job.tokenIds)');
+    const finalizerBuild = extractSourceBlock(mmNode, 'const createMarketMakerBootstrapFinalizer =', 'const markReady =');
+    expect(finalizerBuild).toContain('.map(job => describeMarketMakerSameQuoteProgress(deps.env, job)),');
     expect(mmNode).not.toContain('const isSameQuoteJobCovered = (env: RuntimeReplica, job: SameQuoteJob): boolean => {');
     expect(mmNode).not.toContain('const isSameQuoteJobReady = (env: RuntimeReplica, job: SameQuoteJob): boolean => {');
     expect(mmNode).toContain('const buildMarketMakerSameQuoteJobs = (');
