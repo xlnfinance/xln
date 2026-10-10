@@ -969,20 +969,17 @@ export class BrowserVMProvider {
     );
   }
 
+  /**
+   * Broadcast semantics of a real chain: a reverted tx is still mined (its
+   * status-0 receipt is recorded and the nonce consumed), so the hash is
+   * returned and the receipt carries the failure. Throwing here sent BrowserVM
+   * callers down an error branch production never takes.
+   */
   async executeSignedTx(serializedTx: string): Promise<string> {
     const raw = hexToBytes(serializedTx as `0x${string}`);
     const tx = createTxFromRLP(raw, { common: this.common });
-    const result = await this.runTxInBlock(tx);
-
-    if (result.execResult.exceptionError) {
-      const err = result.execResult.exceptionError;
-      const errInfo = typeof err === 'object' && err ? err as { error?: string; message?: string } : null;
-      const errMsg = errInfo?.error || errInfo?.message || JSON.stringify(err);
-      throw new Error(`executeSignedTx failed: ${errMsg}`);
-    }
-
-    const txHash = bytesToHex(tx.hash());
-    return txHash;
+    await this.runTxInBlock(tx);
+    return bytesToHex(tx.hash());
   }
 
   private async ensureEthBalance(address: string, minBalance: bigint): Promise<void> {

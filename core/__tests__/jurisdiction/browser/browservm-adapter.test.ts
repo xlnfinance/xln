@@ -241,6 +241,36 @@ describe('BrowserVM JAdapter boundary', () => {
     }
   }, 30_000);
 
+  test('mines a reverted signed tx like a real chain: hash returned, status-0 receipt, nonce consumed', async () => {
+    const adapter = await createJAdapter({ mode: 'browservm', chainId: 31337 });
+    const browserVM = adapter.getBrowserVM();
+    if (!browserVM?.fundSignerWallet || !browserVM.getTransactionReceipt) {
+      throw new Error('BROWSERVM_SIGNED_TX_API_MISSING');
+    }
+    const wallet = new ethers.Wallet(
+      '0x5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a',
+    );
+    try {
+      await browserVM.fundSignerWallet(wallet.address);
+      const sign = (nonce: number) => wallet.signTransaction({
+        chainId: 31337,
+        nonce,
+        gasLimit: 100_000,
+        gasPrice: 10,
+        to: adapter.addresses.depository,
+        data: '0xdeadbeef',
+      });
+      // Production registration reads a mined revert from its receipt
+      // (status 0 -> mined-failure); BrowserVM threw instead.
+      const hash = await browserVM.executeSignedTx(await sign(0));
+      expect(browserVM.getTransactionReceipt(hash)?.status).toBe(0);
+      await expect(browserVM.executeSignedTx(await sign(0))).rejects.toThrow();
+      expect(browserVM.getTransactionReceipt(await browserVM.executeSignedTx(await sign(1)))?.status).toBe(0);
+    } finally {
+      await adapter.close();
+    }
+  }, 30_000);
+
   test('proves EntityRegistered after an empty-log transaction in the same block', async () => {
     const adapter = await createJAdapter({ mode: 'browservm', chainId: 31337 });
     try {
