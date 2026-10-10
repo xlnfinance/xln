@@ -147,9 +147,10 @@ type GossipProfileResponse = {
   profile?: DecodedProfile | null;
 };
 
-const responseErrorMessage = (value: unknown, defaultMessage: string): string => {
+// An error body may be a proxy's HTML page; the HTTP status must survive it.
+const responseErrorMessage = (raw: string, defaultMessage: string): string => {
   try {
-    const response = requireBoundaryRecord(value, 'CONTROL_RESPONSE_INVALID');
+    const response = requireBoundaryRecord(deserializeTaggedJson(raw), 'CONTROL_RESPONSE_INVALID');
     return typeof response['error'] === 'string' && response['error'].trim()
       ? response['error']
       : defaultMessage;
@@ -341,6 +342,14 @@ export const deriveManagedEntityIdentity = (config: ManagedEntityConfig): Manage
   };
 };
 
+const readControlResponse = async (response: Response): Promise<unknown> => {
+  const raw = await response.text();
+  if (!response.ok) {
+    throw new Error(responseErrorMessage(raw, `${response.status} ${response.statusText}`));
+  }
+  return raw.trim().length > 0 ? deserializeTaggedJson(raw) : {};
+};
+
 export class DaemonControlClient {
   private baseUrl: string;
   private authKey: string | undefined;
@@ -369,12 +378,7 @@ export class DaemonControlClient {
       this.timeoutMs,
       `GET ${path}`,
     );
-    const raw = await response.text();
-    const payload = raw.trim().length > 0 ? deserializeTaggedJson(raw) : {};
-    if (!response.ok) {
-      throw new Error(responseErrorMessage(payload, `${response.status} ${response.statusText}`));
-    }
-    return payload;
+    return await readControlResponse(response);
   }
 
   private async post(path: string, body: unknown): Promise<unknown> {
@@ -388,12 +392,7 @@ export class DaemonControlClient {
       this.timeoutMs,
       `POST ${path}`,
     );
-    const raw = await response.text();
-    const payload = raw.trim().length > 0 ? deserializeTaggedJson(raw) : {};
-    if (!response.ok) {
-      throw new Error(responseErrorMessage(payload, `${response.status} ${response.statusText}`));
-    }
-    return payload;
+    return await readControlResponse(response);
   }
 
   async listEntities(): Promise<ControlEntitySummary[]> {

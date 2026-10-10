@@ -30,6 +30,20 @@ const validEntity = (): Record<string, unknown> => ({
 });
 
 describe('daemon control committed role boundary', () => {
+  test('a non-JSON error body keeps the HTTP status', async () => {
+    globalThis.fetch = async () => new Response('<html>502 Bad Gateway</html>', {
+      status: 502,
+      statusText: 'Bad Gateway',
+      headers: { 'content-type': 'text/html' },
+    });
+    await expect(new DaemonControlClient({ baseUrl: 'http://control.test' }).listEntities())
+      .rejects.toThrow('502 Bad Gateway');
+
+    globalThis.fetch = async () => new Response(safeStringify({ error: 'CONTROL_DENIED' }), { status: 403 });
+    await expect(new DaemonControlClient({ baseUrl: 'http://control.test' }).listEntities())
+      .rejects.toThrow('CONTROL_DENIED');
+  });
+
   test('accepts only the exact P2P control response contract', async () => {
     globalThis.fetch = async () => new Response(safeStringify({
       ok: true,
