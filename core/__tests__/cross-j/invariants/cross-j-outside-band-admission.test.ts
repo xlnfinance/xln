@@ -7,6 +7,8 @@ import { processOrderbookSwaps } from '../../../entity/tx/handlers/account/order
 import { createEmptyEntityCollectionCandidate } from '../../../entity/state/persistent-collection-map';
 import type { CrossJurisdictionSwapRoute } from '../../../types/cross-jurisdiction';
 import { makeJurisdiction, makeState } from '../../helpers/cross-j';
+import { admitOrderbookOfferForMatching } from '../../../entity/consensus/account/orderbook-admission';
+import { createEmptyEnv } from '../../../runtime';
 
 // The exact committed route that caused native H1 to emit forbidden swap_resolve.
 const fixture = safeParse(readFileSync(new URL('../../../../rscore/fixtures/cross-j-entity-kinds/outside-band.json', import.meta.url), 'utf8')) as {
@@ -77,4 +79,33 @@ test('a cross offer with 0 executable lots is cancelled through pull clearing, n
   expect(result.accountTxs).toHaveLength(0);
   expect(result.bookUpdates).toHaveLength(0);
   expect(result.crossJurisdictionFills).toHaveLength(1);
+});
+
+test('a committed cross offer on a dead route is never booked and never halts the book owner', () => {
+  // The counterparty times its Account commit, so the offer can land after
+  // its route expired or its admission closed or started resolving. That was
+  // a plain Error in Entity frame application: a hub halt.
+  const route = fixture.baselineRoute;
+  const env = createEmptyEnv('cross-j-dead-route-admission');
+  const state = makeState(route.source.counterpartyEntityId, route.sourceHubSignerId!, makeJurisdiction('source', 31337, 'a1', 'a2'));
+  state.crossJurisdictionBookAdmissions = createEmptyEntityCollectionCandidate();
+  const offer = markWorkingOrderbookOffer({ offerId: route.orderId, accountId: route.source.entityId,
+    makerIsLeft: true, fromEntity: route.source.entityId, toEntity: state.entityId, createdHeight: 1,
+    giveTokenId: 1, giveTokenDecimals: 6, giveAmount: route.source.amount,
+    wantTokenId: 1, wantTokenDecimals: 6, wantAmount: route.target.amount,
+    maxFee: 0n, minNetReceive: route.target.amount, priceTicks: 10000n, timeInForce: 0,
+    crossJurisdiction: route,
+  });
+  const admitWith = (status: 'admitted' | 'closed' | 'resolving', timestamp: number) => {
+    state.timestamp = timestamp;
+    state.crossJurisdictionBookAdmissions!.set(`${route.source.entityId}:${route.orderId}`, {
+      orderId: route.orderId, routeHash: route.routeHash!, sourceEntityId: route.source.entityId,
+      bookOwnerEntityId: state.entityId, status, route, updatedAt: route.createdAt,
+    });
+    return admitOrderbookOfferForMatching(env, state, offer);
+  };
+  expect(admitWith('admitted', route.createdAt)?.offerId).toBe(route.orderId);
+  expect(admitWith('admitted', route.expiresAt!)).toBeNull();
+  expect(admitWith('closed', route.createdAt)).toBeNull();
+  expect(admitWith('resolving', route.createdAt)).toBeNull();
 });

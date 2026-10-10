@@ -138,7 +138,14 @@ export const admitOrderbookOfferForMatching = (
         });
         return null;
       }
-      throw new Error(admissionFailure.message);
+      // The counterparty times its Account commit: the route can expire, or
+      // its admission close or start resolving, before the offer lands. A dead
+      // route is never booked; its sweep or close releases the source pull.
+      entityLog.warn('crossj.orderbook.admission_rejected', {
+        offer: shortOrder(offer.offerId, 8),
+        reason: admissionFailure.message,
+      });
+      return null;
     }
   } else {
     const outputVerified = offer.accountOutputVerified === true;
