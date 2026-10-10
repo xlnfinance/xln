@@ -12,9 +12,9 @@ const DOUBLE_ASSERTION_DEBT: Readonly<Record<string, number>> = {};
 // Suppressions can hide unrelated errors on the same line. The empty ratchet
 // makes their removal permanent.
 const TS_SUPPRESSION_DEBT: Readonly<Record<string, number>> = {};
-const NON_NULL_ASSERTION_FILES = 174;
-const NON_NULL_ASSERTION_COUNT = 618;
-const NON_NULL_ASSERTION_SHA256 = '836e816ac618d0adee655165bf1366077cc45756239e3df972ff1f9be89d3e1a';
+const NON_NULL_ASSERTION_FILES = 173;
+const NON_NULL_ASSERTION_COUNT = 617;
+const NON_NULL_ASSERTION_SHA256 = '3617f9d759f8203146ca6ba1f1e78df03e7565d1cd6414b44815e637b57e4a95';
 
 type UnsafeTypeCounts = {
   explicitAnyLines: number[];
