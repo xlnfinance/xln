@@ -541,6 +541,26 @@ describe('registered Entity certified board authority', () => {
     expect(() => getBoardHandoverFrameConfig(env, state, [range, tampered]))
       .toThrow('BOARD_HANDOVER_CONFIG');
 
+    // A peer needs no key to reach the board hash: the activation chain only
+    // has to start at the public current board. A proposer the chain could
+    // never activate (not an EOA) must reject, not halt in encodeBoard.
+    const entityProposer = `0x${'c3'.repeat(32)}`;
+    const unencodable = structuredClone(handover);
+    unencodable.data.board.validators = [entityProposer];
+    unencodable.data.board.shares = { [entityProposer]: 1n };
+    try {
+      getBoardHandoverFrameConfig(env, state, [
+        jRangeTx(signerB, [event('BoardActivated', blockHash('77'), { height: 3, previousBoardHash: oldBoard })]),
+        unencodable,
+      ]);
+      throw new Error('TEST_EXPECTED_BOARD_HANDOVER_REJECTION');
+    } catch (error) {
+      expect(error).toBeInstanceOf(FailureDispositionError);
+      expect((error as FailureDispositionError).disposition).toBe('reject');
+      expect((error as FailureDispositionError).code).toBe('BOARD_HANDOVER_CONFIG_INVALID');
+      expect((error as Error).message).toContain('BOARD_PROPOSER_EOA_REQUIRED');
+    }
+
     try {
       getPendingBoardHandoverConfig(state, [handover, structuredClone(handover)]);
       throw new Error('TEST_EXPECTED_BOARD_HANDOVER_REJECTION');

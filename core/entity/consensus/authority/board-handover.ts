@@ -64,6 +64,24 @@ const assertCanonicalConfig = (
   return structuredClone(config);
 };
 
+/**
+ * encodeBoard enforces the on-chain Board shape (EOA proposer, resolvable
+ * member ids, uint16 powers) with plain Errors. This runs during proposal
+ * preauthentication, before any signature is checked, so a peer-supplied
+ * board that the chain could never have activated is a reject, not a halt.
+ */
+const handoverBoardHash = (config: ConsensusConfig, env: EntityRuntimeContext): string => {
+  try {
+    return hashBoard(encodeBoard(config, env)).toLowerCase();
+  } catch (error) {
+    if (error instanceof FailureDispositionError) throw error;
+    return rejectBoardHandover(
+      'BOARD_HANDOVER_CONFIG_INVALID',
+      error instanceof Error ? error.message : String(error),
+    );
+  }
+};
+
 const selfBoardActivations = (
   state: BoardAuthorityState,
   tx: JEventTx,
@@ -75,20 +93,24 @@ const selfBoardActivations = (
   );
 };
 
-const requireSingleHandoverTx = (txs: readonly EntityTx[]): BoardHandoverTx | null => {
-  const handovers = txs.filter((tx): tx is BoardHandoverTx => tx.type === 'boardHandover');
-  if (handovers.length === 0) return null;
-  if (handovers.length !== 1) {
-    return rejectBoardHandover('BOARD_HANDOVER_COUNT_INVALID', String(handovers.length));
+const singleHandoverTx = (txs: readonly EntityTx[]): BoardHandoverTx | null => {
+  const [handover, ...extra] = txs.filter((tx): tx is BoardHandoverTx => tx.type === 'boardHandover');
+  if (!handover) return null;
+  if (extra.length > 0) {
+    return rejectBoardHandover('BOARD_HANDOVER_COUNT_INVALID', String(extra.length + 1));
   }
+  return handover;
+};
+
+const requireSingleHandoverTx = (txs: readonly EntityTx[]): BoardHandoverTx | null => {
+  const handover = singleHandoverTx(txs);
+  if (!handover) return null;
   if (txs.length !== 2 || txs[0]?.type !== 'j_event' || txs[1]?.type !== 'boardHandover') {
     return rejectBoardHandover(
       'BOARD_HANDOVER_FRAME_SHAPE_INVALID',
       txs.map(tx => tx.type).join(','),
     );
   }
-  const handover = handovers[0];
-  if (!handover) return rejectBoardHandover('BOARD_HANDOVER_MISSING');
   return handover;
 };
 
@@ -119,7 +141,7 @@ export const getBoardHandoverFrameConfig = (
     }
     expectedPrevious = activation.data.newBoardHash.toLowerCase();
   }
-  const configHash = hashBoard(encodeBoard(config, env)).toLowerCase();
+  const configHash = handoverBoardHash(config, env);
   if (configHash !== expectedPrevious) {
     return rejectBoardHandover(
       'BOARD_HANDOVER_CONFIG_HASH_MISMATCH',
@@ -158,14 +180,8 @@ export const getPendingBoardHandoverConfig = (
   state: EntityState,
   txs: readonly EntityTx[],
 ): ConsensusConfig | null => {
-  const handovers = txs.filter((tx): tx is BoardHandoverTx => tx.type === 'boardHandover');
-  if (handovers.length === 0) return null;
-  if (handovers.length !== 1) {
-    return rejectBoardHandover('BOARD_HANDOVER_COUNT_INVALID', String(handovers.length));
-  }
-  const handover = handovers[0];
-  if (!handover) return rejectBoardHandover('BOARD_HANDOVER_MISSING');
-  return assertCanonicalConfig(state, handover.data.board);
+  const handover = singleHandoverTx(txs);
+  return handover ? assertCanonicalConfig(state, handover.data.board) : null;
 };
 
 export const withBoardAuthority = (
