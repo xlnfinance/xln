@@ -524,7 +524,7 @@ type PreparedSettlementExecution = ReturnType<typeof prepareSettlementExecution>
  */
 type SettlementHankoAuthority = 'freshMovement' | 'historicalEvidence';
 
-const verifySettlementHanko = async (
+const getSettlementHankoError = async (
   env: EntityRuntimeContext,
   entityState: EntityState,
   hanko: string,
@@ -532,7 +532,7 @@ const verifySettlementHanko = async (
   entityId: string,
   context: string,
   authority: SettlementHankoAuthority,
-): Promise<void> => {
+): Promise<string | null> => {
   const boardHash = resolveObserverCertifiedBoardHash(
     entityState,
     getCertifiedBoardNodeStore(env),
@@ -550,46 +550,57 @@ const verifySettlementHanko = async (
       observerState: entityState,
     },
   );
-  if (!verified.valid || verified.entityId?.toLowerCase() !== entityId.toLowerCase()) {
-    throw new Error(`${context}_HANKO_INVALID`);
-  }
+  return verified.valid && verified.entityId?.toLowerCase() === entityId.toLowerCase()
+    ? null
+    : `${context}_HANKO_INVALID`;
 };
 
-const verifySettlementExecutionHankos = async (
+/**
+ * Every Hanko was verified when the workspace accepted it. A board rotation
+ * since then retires it (the chain would reject the batch). The hub scheduler
+ * re-emits settle_execute every tick for a ready workspace, so a retired Hanko
+ * is a log, never a committed message per tick and never a halt.
+ */
+const areSettlementExecutionHankosCurrent = async (
   env: EntityRuntimeContext,
   entityState: EntityState,
   account: AccountReplica,
   counterpartyEntityId: string,
   counterpartyHanko: string,
   prepared: PreparedSettlementExecution,
-): Promise<void> => {
-  await verifySettlementHanko(
-    env,
-    entityState,
-    counterpartyHanko,
-    prepared.expectedSettlementHash,
-    counterpartyEntityId,
-    'SETTLEMENT_NONEXECUTOR',
-    'freshMovement',
-  );
-  await verifySettlementHanko(
-    env,
-    entityState,
-    prepared.postProof.leftHanko!,
-    prepared.expectedPostProof.disputeHash,
-    account.state.leftEntity,
-    'POST_SETTLEMENT_LEFT',
-    'historicalEvidence',
-  );
-  await verifySettlementHanko(
-    env,
-    entityState,
-    prepared.postProof.rightHanko!,
-    prepared.expectedPostProof.disputeHash,
-    account.state.rightEntity,
-    'POST_SETTLEMENT_RIGHT',
-    'historicalEvidence',
-  );
+): Promise<boolean> => {
+  const error =
+    (await getSettlementHankoError(
+      env,
+      entityState,
+      counterpartyHanko,
+      prepared.expectedSettlementHash,
+      counterpartyEntityId,
+      'SETTLEMENT_NONEXECUTOR',
+      'freshMovement',
+    )) ??
+    (await getSettlementHankoError(
+      env,
+      entityState,
+      prepared.postProof.leftHanko!,
+      prepared.expectedPostProof.disputeHash,
+      account.state.leftEntity,
+      'POST_SETTLEMENT_LEFT',
+      'historicalEvidence',
+    )) ??
+    (await getSettlementHankoError(
+      env,
+      entityState,
+      prepared.postProof.rightHanko!,
+      prepared.expectedPostProof.disputeHash,
+      account.state.rightEntity,
+      'POST_SETTLEMENT_RIGHT',
+      'historicalEvidence',
+    ));
+  if (error) {
+    settleLog.warn('execute.skip_hanko_not_current', { counterparty: shortId(counterpartyEntityId), error });
+  }
+  return !error;
 };
 
 const queueSettlementExecution = (
@@ -680,14 +691,11 @@ export async function handleSettleExecute(
     account,
     workspace,
   );
-  await verifySettlementExecutionHankos(
-    env,
-    entityState,
-    account,
-    counterpartyEntityId,
-    counterpartyHanko,
-    prepared,
-  );
+  if (!(await areSettlementExecutionHankosCurrent(
+    env, entityState, account, counterpartyEntityId, counterpartyHanko, prepared,
+  ))) {
+    return { newState, outputs, accountTxs };
+  }
   if (
     !queueSettlementExecution(
       newState,
