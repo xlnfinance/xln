@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 
 import { verifyRuntimeAdapterAuthCredential } from '../../../api/runtime-adapter/security/auth';
 import { createLocalPairingController, isTrustedLocalPairingOrigin } from '../../../api/server/ownership/local-pairing';
+import { safeStringify } from '../../../protocol/serialization';
 import type { RuntimeReplica } from '../../../runtime/types';
 
 const CONTROL_TOKEN = 'control-token-that-is-longer-than-thirty-two-bytes';
@@ -54,6 +55,39 @@ describe('local runtime pairing', () => {
     const limited = await controller.handle(issueRequest(), '/api/local-pairing/issue', env);
     expect(limited?.status).toBe(429);
     expect(await limited?.json()).toEqual({ ok: false, error: 'LOCAL_PAIRING_LIMIT_REACHED' });
+  });
+
+  test('answers a missing capability seed with a typed 503 and keeps the one-shot token', async () => {
+    // The seed failure used to throw after the token was consumed and was
+    // reported as a client 400 picked from the error text.
+    const controller = createLocalPairingController({ controlToken: CONTROL_TOKEN, instanceId: 'seed', version: 'test' });
+    const issued = await controller.handle(issueRequest(), '/api/local-pairing/issue', env);
+    const { pairingToken } = await issued?.json() as { pairingToken: string };
+    delete process.env['XLN_RADAPTER_AUTH_SEED'];
+    try {
+      const missing = await controller.handle(consumeRequest(pairingToken), '/api/local-pairing/consume', env);
+      expect(missing?.status).toBe(503);
+      expect(await missing?.json()).toEqual({ ok: false, error: 'LOCAL_PAIRING_RUNTIME_AUTH_SEED_MISSING' });
+    } finally {
+      process.env['XLN_RADAPTER_AUTH_SEED'] = AUTH_SEED;
+    }
+    const consumed = await controller.handle(consumeRequest(pairingToken), '/api/local-pairing/consume', env);
+    expect(consumed?.status).toBe(200);
+  });
+
+  test('rejects malformed and oversized bodies with typed client errors', async () => {
+    const controller = createLocalPairingController({ controlToken: CONTROL_TOKEN, instanceId: 'body', version: 'test' });
+    const send = (body: string) => controller.handle(new Request('http://localhost:8080/api/local-pairing/consume', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', origin: 'http://localhost:8080', 'sec-fetch-site': 'same-origin' },
+      body,
+    }), '/api/local-pairing/consume', env);
+    const malformed = await send('{not json');
+    expect(malformed?.status).toBe(400);
+    expect(await malformed?.json()).toEqual({ ok: false, error: 'LOCAL_PAIRING_BODY_INVALID' });
+    const oversized = await send(safeStringify({ pairingToken: 'x'.repeat(5_000) }));
+    expect(oversized?.status).toBe(413);
+    expect(await oversized?.json()).toEqual({ ok: false, error: 'LOCAL_PAIRING_BODY_TOO_LARGE' });
   });
 
   test('exchanges one CLI-issued token for one real runtime capability', async () => {

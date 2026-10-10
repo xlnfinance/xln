@@ -6,7 +6,6 @@ import {
   resolveRuntimeAdapterAuthSeed,
 } from '../../runtime-adapter/security/auth';
 import { safeStringify } from '../../../protocol/serialization';
-import { requireBoundaryRecord } from '../../../protocol/boundary-validation';
 import type { RuntimeReplica } from '../../../runtime/types';
 
 const DEFAULT_PAIRING_TTL_MS = 60_000;
@@ -68,18 +67,27 @@ export const isTrustedLocalPairingOrigin = (request: Request): boolean => {
   return !fetchSite || fetchSite === 'same-origin';
 };
 
-const readJsonBody = async (request: Request): Promise<Record<string, unknown>> => {
+type LocalPairingBodyRejection = 'LOCAL_PAIRING_BODY_TOO_LARGE' | 'LOCAL_PAIRING_BODY_INVALID';
+
+const bodyRejection = (error: LocalPairingBodyRejection): Response =>
+  jsonResponse({ ok: false, error }, error === 'LOCAL_PAIRING_BODY_TOO_LARGE' ? 413 : 400);
+
+const readJsonBody = async (request: Request): Promise<Record<string, unknown> | Response> => {
   const declaredBytes = Number(request.headers.get('content-length') || 0);
   if (Number.isFinite(declaredBytes) && declaredBytes > MAX_BODY_BYTES) {
-    throw new Error('LOCAL_PAIRING_BODY_TOO_LARGE');
+    return bodyRejection('LOCAL_PAIRING_BODY_TOO_LARGE');
   }
   const text = await request.text();
-  if (Buffer.byteLength(text) > MAX_BODY_BYTES) throw new Error('LOCAL_PAIRING_BODY_TOO_LARGE');
-  const value = JSON.parse(text) as unknown;
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    throw new Error('LOCAL_PAIRING_BODY_INVALID');
+  if (Buffer.byteLength(text) > MAX_BODY_BYTES) return bodyRejection('LOCAL_PAIRING_BODY_TOO_LARGE');
+  let value: unknown;
+  try {
+    value = JSON.parse(text);
+  } catch (error) {
+    if (!(error instanceof SyntaxError)) throw error;
+    return bodyRejection('LOCAL_PAIRING_BODY_INVALID');
   }
-  return requireBoundaryRecord(value, 'LOCAL_PAIRING_BODY_INVALID');
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return bodyRejection('LOCAL_PAIRING_BODY_INVALID');
+  return value as Record<string, unknown>;
 };
 
 const runtimeWsUrl = (requestUrl: string): string => {
@@ -91,9 +99,7 @@ const runtimeWsUrl = (requestUrl: string): string => {
   return url.toString();
 };
 
-const runtimeManifest = (env: RuntimeReplica, requestUrl: string, capabilityTtlMs: number, now: number) => {
-  const seed = resolveRuntimeAdapterAuthSeed();
-  if (!seed) throw new Error('LOCAL_PAIRING_RUNTIME_AUTH_SEED_MISSING');
+const runtimeManifest = (seed: string, env: RuntimeReplica, requestUrl: string, capabilityTtlMs: number, now: number) => {
   const expiresAt = now + capabilityTtlMs;
   const audience = resolveRuntimeAdapterAuthAudience(env);
   return {
@@ -160,8 +166,7 @@ export const createLocalPairingController = (options: LocalPairingOptions = {}):
       }
       if (!env) return jsonResponse({ ok: false, error: 'LOCAL_PAIRING_RUNTIME_NOT_READY' }, 503);
       const pairing = issue(Date.now());
-      // Runs before the server's request try/catch: a throw here reached
-      // Bun's default error page instead of a typed answer.
+      // A full pairing table is a client-side condition, not a server fault.
       if (!pairing) return jsonResponse({ ok: false, error: 'LOCAL_PAIRING_LIMIT_REACHED' }, 429);
       return jsonResponse({ ok: true, pairingToken: pairing.token, expiresAt: pairing.expiresAt });
     }
@@ -172,18 +177,18 @@ export const createLocalPairingController = (options: LocalPairingOptions = {}):
     }
     if (!env) return jsonResponse({ ok: false, error: 'LOCAL_PAIRING_RUNTIME_NOT_READY' }, 503);
 
-    try {
-      const body = await readJsonBody(request);
-      const token = normalizedSecret(body['pairingToken']);
-      if (!token || !consume(token, Date.now())) {
-        return jsonResponse({ ok: false, error: 'LOCAL_PAIRING_TOKEN_INVALID_OR_EXPIRED' }, 401);
-      }
-      return jsonResponse({ ok: true, manifest: runtimeManifest(env, request.url, capabilityTtlMs, Date.now()) });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      const status = message === 'LOCAL_PAIRING_BODY_TOO_LARGE' ? 413 : 400;
-      return jsonResponse({ ok: false, error: message }, status);
+    const body = await readJsonBody(request);
+    if (body instanceof Response) return body;
+    // A server without its capability seed cannot answer; check before the
+    // one-shot token is consumed so the operator can fix config and retry it.
+    const seed = resolveRuntimeAdapterAuthSeed();
+    if (!seed) return jsonResponse({ ok: false, error: 'LOCAL_PAIRING_RUNTIME_AUTH_SEED_MISSING' }, 503);
+    const manifest = runtimeManifest(seed, env, request.url, capabilityTtlMs, Date.now());
+    const token = normalizedSecret(body['pairingToken']);
+    if (!token || !consume(token, Date.now())) {
+      return jsonResponse({ ok: false, error: 'LOCAL_PAIRING_TOKEN_INVALID_OR_EXPIRED' }, 401);
     }
+    return jsonResponse({ ok: true, manifest });
   };
 
   return { enabled: true, handle };

@@ -900,9 +900,6 @@ const handleHttpRequest = async (
   server: Server<RelaySocketData>,
 ): Promise<Response | undefined> => {
   const pathname = new URL(req.url).pathname;
-  const localPairingResponse = await localPairingController.handle(req, pathname, session.env);
-  if (localPairingResponse) return localPairingResponse;
-
   if (req.headers.get('upgrade') === 'websocket') {
     const wsType = pathname === '/relay' ? 'relay' : pathname === '/rpc' ? 'rpc' : null;
     const startupResponse = wsType ? runtimeTransportStartupResponse(serverBootPhase) : null;
@@ -923,6 +920,10 @@ const handleHttpRequest = async (
 
   if (pathname.startsWith('/api/') || pathname === '/rpc') {
     try {
+      // Pairing runs inside the API error boundary: a throw outside it reached
+      // Bun's default error page (stack included) instead of a typed answer.
+      const localPairingResponse = await localPairingController.handle(req, pathname, session.env);
+      if (localPairingResponse) return localPairingResponse;
       const directClientIp = resolveAssistantDirectClientIp(server, req);
       const clientId = resolveAssistantRateClientId(req, directClientIp);
       // This listener may sit behind a same-host reverse proxy, so a loopback
