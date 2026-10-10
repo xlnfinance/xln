@@ -111,9 +111,28 @@ const validateRecord = (value: unknown): IncidentJournalRecord | IncidentCursorR
   return { schema: JOURNAL_SCHEMA, debugId, incident: validatePersistedIncident(input['incident']) };
 };
 
+const PERSISTED_TEXT_LIMITS = {
+  fingerprint: 300,
+  source: 80,
+  code: 200,
+  message: 2_000,
+  runtimeId: 200,
+} as const;
+
+/**
+ * Redaction can lengthen text bounded upstream ("seed=[RED" becomes
+ * "seed=[REDACTED]"), and restore rejects an over-limit line, so one crafted
+ * debug event blocked the next start. Bound after the final redaction and
+ * validate with the restore rules before writing.
+ */
 const withoutSample = (incident: RelayDebugIncident): PersistedIncident => {
   const { sample: _sample, ...persisted } = incident;
-  return redactTelemetryValue(persisted) as PersistedIncident;
+  const redacted = redactTelemetryValue(persisted) as Record<string, unknown>;
+  for (const [field, maxLength] of Object.entries(PERSISTED_TEXT_LIMITS)) {
+    const value = redacted[field];
+    if (typeof value === 'string' && value.length > maxLength) redacted[field] = value.slice(0, maxLength);
+  }
+  return validatePersistedIncident(redacted);
 };
 
 const restoredSample = (incident: PersistedIncident): RelayDebugEvent => ({
@@ -247,7 +266,13 @@ export const openRelayIncidentJournal = (path: string): RelayIncidentJournal => 
       return nextDebugId++;
     },
     record(incident: RelayDebugIncident): void {
-      const persisted = withoutSample(incident);
+      let persisted: PersistedIncident;
+      try {
+        persisted = withoutSample(incident);
+      } catch {
+        // Never write a line restore would reject; the incident stays in RAM.
+        return;
+      }
       debugId = Math.max(debugId, persisted.lastEventId);
       latest.set(persisted.fingerprint, persisted);
       appendDurable(

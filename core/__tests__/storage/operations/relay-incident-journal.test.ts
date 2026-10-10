@@ -146,3 +146,32 @@ test('incident journal fails fast on complete corruption and persists no secrets
   writeFileSync(path, '{"schema":"wrong"}\n');
   expect(() => openRelayIncidentJournal(path)).toThrow('DEBUG_INCIDENT_JOURNAL_CORRUPT:line=1');
 });
+
+test('a crafted debug event never writes a journal line that blocks restart', () => {
+  // The incident text is truncated, then redacted again on write; redaction
+  // can lengthen a cut marker ("seed=[RED" -> "seed=[REDACTED]") past the
+  // restore limit, so the next start threw DEBUG_INCIDENT_JOURNAL_CORRUPT.
+  const path = journalPath();
+  const first = storeFromJournal(path);
+  pushDebugEvent(first.store, {
+    event: 'error',
+    status: 'fatal',
+    reason: `${'a'.repeat(1_990)} seed=${'x'.repeat(20)}`,
+    runtimeId: `${'r'.repeat(195)} seed=${'y'.repeat(20)}`,
+  });
+  pushDebugEvent(first.store, {
+    event: 'error',
+    status: 'fatal',
+    reason: 'LONG_SOURCE',
+    details: { source: 's'.repeat(79), message: `${'m'.repeat(1_995)} seed=${'z'.repeat(20)}` },
+  });
+
+  const restored = openRelayIncidentJournal(path);
+  expect(restored.incidents.length).toBeGreaterThan(0);
+  for (const incident of restored.incidents) {
+    expect(incident.message.length).toBeLessThanOrEqual(2_000);
+    expect(incident.source.length).toBeLessThanOrEqual(80);
+    expect(incident.runtimeId?.length ?? 0).toBeLessThanOrEqual(200);
+    expect(readFileSync(path, 'utf8')).not.toContain('x'.repeat(20));
+  }
+});
