@@ -15,6 +15,7 @@ import { prepareStorageBookGraphWrite } from '../commit/book-graph';
 import { hydrateEntityStateFromStorage } from '../read/projections';
 import { computeStorageReplicaMetaDigest } from '../replica/replica-meta-digest';
 import { deleteKeyRange, iterateKeys } from './level';
+import { createPreparedRowsView } from './prepared-rows-view';
 import {
   KEY_HEAD,
   KEY_LIVE_ACCOUNT,
@@ -368,13 +369,13 @@ const publishNewWalBase = async (
     epochReplayBytes: 0,
     retainedWalBytes: entriesBytes(durableRows),
   };
-  const walBatch = await queueWalReplacement(options.walDb, [
-    ...durableRows,
-    { key: KEY_HEAD, value: encodeBuffer(head) },
-  ]);
+  const walRows = [...durableRows, { key: KEY_HEAD, value: encodeBuffer(head) }];
+  // Verify the exact rows the swap publishes before the swap deletes the old
+  // WAL: a failed check must leave the device on its previous base.
+  await verifyStorageSnapshotIntegrity(createPreparedRowsView(walRows), head);
+  const walBatch = await queueWalReplacement(options.walDb, walRows);
   await writeBatch(walBatch, { sync: true });
   await options.onPersistenceBoundary?.('after-restore-authoritative-swap');
-  await verifyStorageSnapshotIntegrity(options.walDb, head);
   const currentHead = options.currentDb.batch();
   currentHead.put(KEY_HEAD, encodeBuffer(head));
   await writeBatch(currentHead);

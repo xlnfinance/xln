@@ -16,7 +16,12 @@ import {
   readPersistedFrameJournal,
   registerSignerKey,
 } from '../../../runtime';
-import { computeCanonicalStateHashFromEnv } from '../../../storage/canonical-hash';
+import { computeCanonicalRuntimeStateHash, computeCanonicalStateHashFromEnv } from '../../../storage/canonical-hash';
+import { replaceRestoredStorageBase } from '../../../storage/database/restore-import';
+import { STORAGE_SCHEMA_VERSION } from '../../../storage/keys';
+import { verifyStorageTailIntegrity } from '../../../storage/read/verify';
+import { buildStorageRuntimeMachineSnapshot } from '../../../storage/wal/snapshot';
+import { MemoryRuntimeDb } from '../../fixtures/storage/memory-runtime-db';
 import { createCheckpointBarrierRuntimeTx } from '../../../runtime/checkpoint/barrier';
 import { readRuntimeActivityViewStatus, resetRuntimeActivityViewAtFloor } from '../../../storage/history/runtime-activity-view';
 import {
@@ -25,7 +30,7 @@ import {
   clearSignerKeys,
 } from '../../../account/crypto';
 import { generateLazyEntityId } from '../../../entity/factory';
-import { readStorageFrameRecord } from '../../../storage';
+import { readStorageFrameRecord, readStorageHead } from '../../../storage';
 import { resolveDbPath } from '../../../storage/runtime-dbs';
 import type { EntityReplica, JurisdictionConfig } from '../../../entity/types';
 import type { RuntimeReplica } from '../../../runtime/types';
@@ -350,6 +355,28 @@ describe('restored checkpoint conflict policy', () => {
     const after = await readStorageFrameRecord(getRuntimeWalDb(current.env), current.env.state.height);
     expect(after?.frameHash).toBe(before?.frameHash);
     await closeRecoveryEnv(current.env);
+  });
+
+  test('a new base that fails verification never replaces the previous WAL', async () => {
+    // The swap deleted every WAL key and wrote the new base before verifying
+    // it, so a failed check left the device with no loadable WAL.
+    const db = new MemoryRuntimeDb();
+    const seed = `restore verify before swap ${process.pid} deterministic seed`;
+    const base = (height: number, canonicalStateHash: string) => ({
+      currentDb: new MemoryRuntimeDb(), walDb: db, height, timestamp: height * 1_000,
+      docs: [], replicaMetas: [], canonicalEntityHashes: [], canonicalStateHash,
+      headConfig: {
+        schemaVersion: STORAGE_SCHEMA_VERSION, snapshotPeriodFrames: 100, retainSnapshots: 1,
+        epochMaxBytes: Number.MAX_SAFE_INTEGER, accountMerkleRadix: 16 as const,
+      },
+      runtimeMachine: buildStorageRuntimeMachineSnapshot(createEmptyEnv(seed)),
+      runtimeOutputs: [], certifiedBoardNodes: [], accountJClaimNodes: [],
+    });
+    await replaceRestoredStorageBase(base(1, computeCanonicalRuntimeStateHash(1, 1_000, [])));
+    await expect(replaceRestoredStorageBase(base(2, `0x${'99'.repeat(32)}`)))
+      .rejects.toThrow('STORAGE_VERIFY_SNAPSHOT_CANONICAL_HASH_MISMATCH');
+    expect(await readStorageHead(db)).toMatchObject({ latestHeight: 1, latestSnapshotHeight: 1 });
+    expect(await verifyStorageTailIntegrity(db)).toMatchObject({ latestHeight: 1 });
   });
 
   test('rejects non-canonical height and timestamp before persistence mutation', async () => {
