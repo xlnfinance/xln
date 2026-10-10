@@ -256,11 +256,6 @@ for (const [path, markers] of [
     'export const classifyRelayDeliveryEvent',
     'deliveryFailure({',
   ]],
-  ['core/network/relay/router.ts', [
-    'const sendRelayDelivery = (',
-    'const disposition = classifyWebSocketSendResult(result);',
-    "disposition === 'dropped'",
-  ]],
   ['core/orchestrator/hub/hub-runtime-transport.ts', [
     'route.sendEntityInputsDelivery(',
     'canDeliverEntityInputs',

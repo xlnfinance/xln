@@ -23,15 +23,11 @@ import {
   registerClient,
   removeClient,
   cacheEncryptionKey,
-  isRelaySocketOpen,
-  classifyRelayDeliveryEvent,
 } from './store';
-import { classifyWebSocketSendResult } from '../websocket-send-result';
 import { parseProfile, type Profile } from '../../entity/profile';
 import { verifyProfileSignature, type ProfileVerifyResult } from '../../entity/profile/profile-signing';
 import { verifyHelloAuth, verifyRuntimeWsFrameAuth } from '../p2p/auth/hello-auth';
 import type { HelloChallengeBinding } from '../p2p/auth/hello-challenge';
-import { isDeliveryDelivered, type DeliveryResult } from '../../protocol/payments/delivery-result';
 import { createStructuredLogger } from '../../support/logger';
 import { safeStringify } from '../../protocol/serialization';
 import { requireBoundaryRecord, requireExactBoundaryKeys } from '../../protocol/boundary-validation';
@@ -56,7 +52,11 @@ type GossipBudgetRelaySocket = object & {
 };
 const GOSSIP_BUDGET_WINDOW_MS = 60_000;
 const GOSSIP_PROFILES_PER_WINDOW = 10_000;
-const LIVE_RECOVERY_MESSAGE_TYPES = new Set([
+// Peer-to-peer frames the relay never forwards: receivers treat relay-session
+// frames as relay-authored, so forwarding them let any client forge a gossip
+// response or recovery error to another Runtime and kill its relay session.
+const PEER_ONLY_MESSAGE_TYPES = new Set([
+  'gossip_response',
   'recovery_bundle_request',
   'recovery_bundle_response',
 ]);
@@ -207,55 +207,6 @@ export type RelayRouterConfig = {
 };
 
 const DEFAULT_HELLO_SKEW_MS = 5 * 60 * 1000;
-
-const relayDeliveryMetadata = (status: string, reason?: string) =>
-  classifyRelayDeliveryEvent({ status, ...(reason ? { reason } : {}) }) ?? undefined;
-
-const requireRelayDeliveryMetadata = (status: string, reason?: string): DeliveryResult => {
-  const delivery = relayDeliveryMetadata(status, reason);
-  if (!delivery) throw new Error(`RELAY_DELIVERY_CLASSIFICATION_MISSING: status=${status}`);
-  return delivery;
-};
-
-type RelayDeliveryAttempt = {
-  delivery: DeliveryResult;
-  /** True when Bun's send() returned -1 (queued into the backpressure buffer,
-   *  not confirmed written). Kept separate from `delivery` so callers don't
-   *  start failover-retrying a queued financial envelope — see the
-   *  consecutiveBackpressuredSends doc on RelayClient for why a socket stuck
-   *  in this state needs a force-close watchdog instead. */
-  backpressured: boolean;
-};
-
-const sendRelayDelivery = (
-  config: RelayRouterConfig,
-  ws: RelaySocketLike,
-  msg: unknown,
-  wireBytes?: Uint8Array,
-): RelayDeliveryAttempt => {
-  if (!isRelaySocketOpen(ws)) {
-    return { delivery: requireRelayDeliveryMetadata('stale-target', 'TARGET_SOCKET_NOT_OPEN'), backpressured: false };
-  }
-  const payload = wireBytes ?? serializeWsMessage(msg as RuntimeWsMessage);
-  countRelaySocket('out', String((msg as { type?: unknown }).type ?? ''), payload.byteLength);
-  let result: RelaySendResult;
-  try {
-    result = config.send(ws, payload);
-  } catch (error) {
-    countOp('socket.relayRouter.out.sendFailed');
-    return {
-      delivery: requireRelayDeliveryMetadata('send-failed', error instanceof Error ? error.message : String(error)),
-      backpressured: false,
-    };
-  }
-  const disposition = classifyWebSocketSendResult(result);
-  if (disposition === 'dropped') {
-    countOp('socket.relayRouter.out.dropped');
-    return { delivery: requireRelayDeliveryMetadata('send-failed', 'RELAY_SEND_DROPPED'), backpressured: false };
-  }
-  countOp(`socket.relayRouter.out.${disposition === 'backpressured' ? 'backpressured' : 'delivered'}`);
-  return { delivery: requireRelayDeliveryMetadata('delivered'), backpressured: disposition === 'backpressured' };
-};
 
 const createRelayRouteContext = (
   config: RelayRouterConfig,
@@ -665,8 +616,10 @@ const handleSimpleRelayMessage = (context: RelayRouteContext): boolean => {
     });
     return true;
   }
-  if (type === 'entity_inputs') {
-    const code = 'RELAY_ENTITY_INPUTS_FORBIDDEN';
+  const code = type === 'entity_inputs'
+    ? 'RELAY_ENTITY_INPUTS_FORBIDDEN'
+    : PEER_ONLY_MESSAGE_TYPES.has(type) ? 'RELAY_PEER_FRAME_NOT_ROUTABLE' : null;
+  if (code) {
     pushDebugEvent(config.store, {
       event: 'error',
       from,
@@ -685,184 +638,6 @@ const handleSimpleRelayMessage = (context: RelayRouteContext): boolean => {
     return true;
   }
   return false;
-};
-
-const isRoutableRelayType = (type: string): boolean =>
-  type === 'gossip_response' ||
-  LIVE_RECOVERY_MESSAGE_TYPES.has(type);
-
-/**
- * Recipient-key encryption proves confidentiality, not sender identity. If a
- * socket could route before signed hello, it could claim a victim runtime in
- * both `from` and the encrypted envelope; Runtime admission intentionally
- * forwards opaque ciphertext; Runtime verifies the signed plaintext envelope.
- */
-const rejectUnauthenticatedRoutableMessage = (context: RelayRouteContext): boolean => {
-  const { config, ws, type, from, to, id, fromKey, rememberedRuntimeId, traceId } = context;
-  if (fromKey && rememberedRuntimeId === fromKey) return false;
-  pushDebugEvent(config.store, {
-    event: 'error',
-    from,
-    to,
-    msgType: type,
-    status: 'rejected',
-    reason: 'ROUTABLE_MESSAGE_UNREGISTERED_RUNTIME',
-    details: { traceId, rememberedRuntimeId },
-  });
-  config.send(ws, serializeWsMessage({
-    type: 'error',
-    error: 'Routable message requires registered relay hello',
-    ...(id ? { inReplyTo: id } : {}),
-    ...(to ? { to } : {}),
-  }));
-  return true;
-};
-
-const routeDeliveryDetails = (context: RelayRouteContext): Record<string, unknown> => ({
-  traceId: context.traceId,
-});
-
-/** A socket that keeps queuing sends into backpressure without draining is
- *  stuck, not just slow — matches STUCK_SEND_THRESHOLD in
- *  core/network/p2p/direct-runtime-bun.ts's noteSendOutcome. Count alone is
- *  wrong at 1000-user mixed load: four 10 MB Hub frames in one burst are
- *  queued, not wedged; closing the Hub socket drops in-flight Account ACKs. */
-const RELAY_STUCK_BACKPRESSURE_THRESHOLD = 4;
-export const RELAY_STUCK_BACKPRESSURE_MS = 10_000;
-
-const forwardToRemoteRuntime = (
-  context: RelayRouteContext,
-  isLocalTarget: boolean,
-): boolean => {
-  const { config, msg, type, from, to, toKey } = context;
-  const target = config.store.clients.get(toKey);
-  if (!target || isLocalTarget) return false;
-  const attempt = sendRelayDelivery(config, target.ws, msg, resolveRelayWireBytes(context));
-  const delivery = attempt.delivery;
-  if (isDeliveryDelivered(delivery)) {
-    if (attempt.backpressured) {
-      const now = Date.now();
-      target.consecutiveBackpressuredSends += 1;
-      if (target.backpressureStartedAt === 0) target.backpressureStartedAt = now;
-      if (
-        target.consecutiveBackpressuredSends >= RELAY_STUCK_BACKPRESSURE_THRESHOLD &&
-        now - target.backpressureStartedAt >= RELAY_STUCK_BACKPRESSURE_MS
-      ) {
-        target.consecutiveBackpressuredSends = 0;
-        target.backpressureStartedAt = 0;
-        pushDebugEvent(config.store, {
-          event: 'ws_stuck_backpressure_closed',
-          runtimeId: toKey,
-          from,
-          to,
-          status: 'send-failed',
-          reason: 'RELAY_STUCK_BACKPRESSURE',
-          details: routeDeliveryDetails(context),
-        });
-        target.ws.close?.(4010, 'stuck-backpressure');
-        removeClient(config.store, target.ws);
-      }
-    } else {
-      target.consecutiveBackpressuredSends = 0;
-      target.backpressureStartedAt = 0;
-    }
-    relayLog('[RELAY] → forwarding to WS client');
-    pushDebugEvent(config.store, {
-      event: 'delivery',
-      from,
-      to,
-      msgType: type,
-      encrypted: msg.encrypted === true,
-      status: 'delivered',
-      delivery,
-      details: routeDeliveryDetails(context),
-    });
-    return true;
-  }
-  removeClient(config.store, target.ws);
-  const sendFailure = delivery.code !== 'TARGET_SOCKET_NOT_OPEN' && delivery.code !== 'DELIVERY_STALE_TARGET';
-  pushDebugEvent(config.store, {
-    event: 'delivery',
-    from,
-    to,
-    msgType: type,
-    encrypted: msg.encrypted === true,
-    status: sendFailure ? 'send-failed' : 'stale-target',
-    reason: delivery.failure?.message ?? delivery.code,
-    delivery,
-    details: routeDeliveryDetails(context),
-  });
-  return false;
-};
-
-const rejectUnavailableRecovery = (context: RelayRouteContext): boolean => {
-  const { config, ws, msg, type, from, to, id } = context;
-  if (!LIVE_RECOVERY_MESSAGE_TYPES.has(type)) return false;
-  const code = 'RECOVERY_TARGET_NOT_CONNECTED';
-  relayLog(`[RELAY] → rejected ${type} (target not connected)`);
-  pushDebugEvent(config.store, {
-    event: 'delivery',
-    from,
-    to,
-    msgType: type,
-    encrypted: msg.encrypted === true,
-    status: 'rejected',
-    reason: code,
-    details: { traceId: context.traceId },
-  });
-  config.send(ws, serializeWsMessage({
-    type: 'error',
-    error: code,
-    ...(id ? { inReplyTo: id } : {}),
-    ...(to ? { to } : {}),
-  }));
-  return true;
-};
-
-const handleRoutableMessage = async (context: RelayRouteContext): Promise<boolean> => {
-  const { config, ws, msg, type, from, to, toKey, traceId } = context;
-  if (!isRoutableRelayType(type)) return false;
-  if (rejectUnauthenticatedRoutableMessage(context)) return true;
-  if (!toKey) {
-    pushDebugEvent(config.store, {
-      event: 'error',
-      from,
-      msgType: type,
-      status: 'rejected',
-      reason: 'Missing target runtimeId',
-      details: { traceId },
-    });
-    config.send(ws, serializeWsMessage({
-      type: 'error',
-      error: 'Missing target runtimeId',
-      ...(context.id ? { inReplyTo: context.id } : {}),
-    }));
-    return true;
-  }
-  relayLog(`[RELAY] ${type} from=${from || 'none'} to=${to || 'none'} encrypted=${msg.encrypted ?? false}`);
-  const localRuntimeKey = normalizeRuntimeKey(config.localRuntimeId);
-  const isLocalTarget = !!localRuntimeKey && toKey === localRuntimeKey;
-  if (forwardToRemoteRuntime(context, isLocalTarget)) return true;
-  if (rejectUnavailableRecovery(context)) return true;
-  const code = 'GOSSIP_TARGET_NOT_CONNECTED';
-  relayLog(`[RELAY] → rejected ${type} (target not connected)`);
-  pushDebugEvent(config.store, {
-    event: 'delivery',
-    from,
-    to,
-    msgType: type,
-    encrypted: msg.encrypted === true,
-    status: 'rejected',
-    reason: code,
-    details: routeDeliveryDetails(context),
-  });
-  config.send(ws, serializeWsMessage({
-    type: 'error',
-    error: code,
-    ...(context.id ? { inReplyTo: context.id } : {}),
-    ...(to ? { to } : {}),
-  }));
-  return true;
 };
 
 const prepareRelaySession = (context: RelayRouteContext): boolean => {
@@ -1005,8 +780,6 @@ export const relayRoute = async (
   if (await handleGossipAnnounce(context)) return;
 
   if (handleSimpleRelayMessage(context)) return;
-
-  if (await handleRoutableMessage(context)) return;
 
   // Unknown message type
   pushDebugEvent(store, {

@@ -211,12 +211,14 @@ describe('runtime websocket recovery requests', () => {
     expect(receivedTypes).toEqual([]);
   });
 
-  test('requestRecoveryBundles resolves a correlated peer response through relay', async () => {
+  test('requestRecoveryBundles through a relay is refused by request id, never forwarded', async () => {
+    // Recovery reads run over a direct session to the peer. The relay used to
+    // forward recovery frames between clients, and receivers trust relay
+    // frames, so any client could forge a recovery error to another Runtime.
     const relay = startRelay();
     const url = `ws://127.0.0.1:${relay.server.port}`;
-    const seenRequests: Array<{ from: string; lookupKey: string }> = [];
+    const seenRequests: string[] = [];
     const requesterErrors: string[] = [];
-    const responderErrors: string[] = [];
     const requester = makeClient({
       url,
       seed: SEED_A,
@@ -229,48 +231,20 @@ describe('runtime websocket recovery requests', () => {
       seed: SEED_B,
       runtimeId: RUNTIME_B,
       signerId: '2',
-      onRecoveryBundleRequest: (from, lookupKey) => {
-        seenRequests.push({ from: from.toLowerCase(), lookupKey });
-        return { ok: true, runtimeId: RUNTIME_B, lookupKey, bundles: [{ lookupKey, height: 7 }] };
+      onRecoveryBundleRequest: (_from, lookupKey) => {
+        seenRequests.push(lookupKey);
+        return { ok: true, runtimeId: RUNTIME_B, lookupKey, bundles: [] };
       },
-      onError: error => responderErrors.push(error.message),
     });
 
     await requester.connect();
     await responder.connect();
     await waitUntil(() => relay.store.clients.has(RUNTIME_A) && relay.store.clients.has(RUNTIME_B), 'relay clients');
 
-    const response = await requester.requestRecoveryBundles(RUNTIME_B, 'lookup/key', 1_000);
-
-    expect(response).toMatchObject({
-      ok: true,
-      runtimeId: RUNTIME_B,
-      lookupKey: 'lookup/key',
-      bundles: [{ lookupKey: 'lookup/key', height: 7 }],
-    });
-    expect(seenRequests).toEqual([{ from: RUNTIME_A, lookupKey: 'lookup/key' }]);
-    expect(requesterErrors).toEqual([]);
-    expect(responderErrors).toEqual([]);
-  });
-
-  test('requestRecoveryBundles rejects relay offline-target errors by request id', async () => {
-    const relay = startRelay();
-    const url = `ws://127.0.0.1:${relay.server.port}`;
-    const requesterErrors: string[] = [];
-    const requester = makeClient({
-      url,
-      seed: SEED_A,
-      runtimeId: RUNTIME_A,
-      signerId: '1',
-      onError: error => requesterErrors.push(error.message),
-    });
-
-    await requester.connect();
-    await waitUntil(() => relay.store.clients.has(RUNTIME_A), 'requester relay client');
-
     await expect(requester.requestRecoveryBundles(RUNTIME_B, 'lookup/key', 1_000)).rejects.toThrow(
-      'RECOVERY_TARGET_NOT_CONNECTED',
+      'RELAY_PEER_FRAME_NOT_ROUTABLE',
     );
+    expect(seenRequests).toEqual([]);
     expect(requesterErrors).toEqual([]);
   });
 

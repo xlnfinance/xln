@@ -217,7 +217,7 @@ export const normalizeRuntimeKey = (runtimeId: unknown): string => normalizeRunt
 
 export const nextWsTimestamp = (store: RelayStore): number => ++store.wsCounter;
 
-export const isRelaySocketOpen = (ws: unknown): boolean => {
+const isRelaySocketOpen = (ws: unknown): boolean => {
   if (!ws || (typeof ws !== 'object' && typeof ws !== 'function')) return false;
   const readyState = Number((ws as { readyState?: unknown }).readyState);
   return !Number.isFinite(readyState) || readyState === 1;

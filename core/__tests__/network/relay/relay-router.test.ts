@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { Wallet, getBytes } from 'ethers';
 import type { Profile } from '../../../entity/profile';
-import { relayRoute as productionRelayRoute, RELAY_STUCK_BACKPRESSURE_MS } from '../../../network/relay/router';
+import { relayRoute as productionRelayRoute } from '../../../network/relay/router';
 import {
   cacheEncryptionKey,
   createRelayStore,
@@ -582,330 +582,10 @@ describe('relay-router gossip fanout', () => {
     expect((sentBySocket.get(fresh)?.at(-1) as { type?: string; error?: string } | undefined)?.type).not.toBe('error');
   });
 
-  test('rejects a routable message when the registered target socket is stale', async () => {
-    const store = createRelayStore(SERVER_RUNTIME_ID);
-    const sentBySocket = new Map<FakeWs, unknown[]>();
-    const config = {
-      store,
-      localRuntimeId: SERVER_RUNTIME_ID,
-      send: (ws: FakeWs, raw: Uint8Array) => {
-        const bucket = sentBySocket.get(ws) ?? [];
-        bucket.push(deserializeWsMessage(raw));
-        sentBySocket.set(ws, bucket);
-      },
-    };
-    const wsA: FakeWs = { label: 'A', readyState: 1 };
-    const staleB: FakeWs = { label: 'stale-B', readyState: 1 };
-
-    await relayRoute(config, wsA, signedHello(RUNTIME_A, SEED_A, KEY_A));
-    await relayRoute(config, staleB, signedHello(RUNTIME_B, SEED_B, KEY_B, '2'));
-    staleB.readyState = 3;
-
-    await relayRoute(config, wsA, {
-      type: 'recovery_bundle_request',
-      id: 'deliver-to-stale',
-      from: RUNTIME_A,
-      fromEncryptionPubKey: KEY_A,
-      to: RUNTIME_B,
-      payload: { lookupKey: 'stale/key' },
-    });
-
-    expect(sentBySocket.get(staleB) ?? []).toEqual([
-      { type: 'hello_ack', to: RUNTIME_B.toLowerCase() },
-    ]);
-    expect(store.clients.has(RUNTIME_B)).toBe(false);
-    expect((sentBySocket.get(wsA)?.at(-1) as { type?: string; error?: string } | undefined)).toMatchObject({
-      type: 'error',
-      error: 'RECOVERY_TARGET_NOT_CONNECTED',
-      inReplyTo: 'deliver-to-stale',
-    });
-    expect(store.debugEvents.some(event => event.status === 'stale-target')).toBe(true);
-    expect(store.debugEvents.some(event =>
-      event.status === 'rejected' &&
-      event.reason === 'RECOVERY_TARGET_NOT_CONNECTED',
-    )).toBe(true);
-  });
-
-  test('accepts Bun backpressure and rejects a zero-byte forward to an active target', async () => {
-    const store = createRelayStore(SERVER_RUNTIME_ID);
-    const sentBySocket = new Map<FakeWs, unknown[]>();
-    const config = {
-      store,
-      localRuntimeId: SERVER_RUNTIME_ID,
-      send: (ws: FakeWs, raw: Uint8Array) => {
-        const message = deserializeWsMessage(raw);
-        const bucket = sentBySocket.get(ws) ?? [];
-        bucket.push(message);
-        sentBySocket.set(ws, bucket);
-        if (ws.label === 'B' && (message as { id?: string }).id === 'deliver-backpressured') {
-          return -1;
-        }
-        if (ws.label === 'B' && (message as { id?: string }).id === 'deliver-invalid') {
-          return Number.NaN;
-        }
-        if (ws.label === 'B' && (message as { id?: string }).id === 'deliver-dropped') {
-          return 0;
-        }
-      },
-    };
-    const wsA: FakeWs = { label: 'A', readyState: 1 };
-    const wsB: FakeWs = { label: 'B', readyState: 1 };
-
-    await relayRoute(config, wsA, signedHello(RUNTIME_A, SEED_A, KEY_A));
-    await relayRoute(config, wsB, signedHello(RUNTIME_B, SEED_B, KEY_B, '2'));
-    await relayRoute(config, wsA, {
-      type: 'recovery_bundle_response',
-      id: 'deliver-backpressured',
-      from: RUNTIME_A,
-      fromEncryptionPubKey: KEY_A,
-      to: RUNTIME_B,
-      payload: { bundles: [] },
-    });
-
-    expect(store.clients.get(RUNTIME_B)?.ws).toBe(wsB);
-    expect(store.debugEvents.find(event =>
-      event.event === 'delivery' &&
-      event.status === 'delivered' &&
-      event.details &&
-      (event.details as { traceId?: string }).traceId === 'deliver-backpressured'
-    )).toBeDefined();
-
-    await expect(relayRoute(config, wsA, {
-      type: 'recovery_bundle_response',
-      id: 'deliver-invalid',
-      from: RUNTIME_A,
-      fromEncryptionPubKey: KEY_A,
-      to: RUNTIME_B,
-      payload: { bundles: [] },
-    })).rejects.toThrow('WEBSOCKET_SEND_RESULT_INVALID');
-    expect(store.clients.get(RUNTIME_B)?.ws).toBe(wsB);
-
-    await relayRoute(config, wsA, {
-      type: 'recovery_bundle_request',
-      id: 'deliver-dropped',
-      from: RUNTIME_A,
-      fromEncryptionPubKey: KEY_A,
-      to: RUNTIME_B,
-      payload: { lookupKey: 'dropped/key' },
-    });
-
-    expect(store.clients.has(RUNTIME_B)).toBe(false);
-    expect(sentBySocket.get(wsA)?.at(-1)).toMatchObject({
-      type: 'error',
-      error: 'RECOVERY_TARGET_NOT_CONNECTED',
-      inReplyTo: 'deliver-dropped',
-      to: RUNTIME_B,
-    });
-    expect(store.debugEvents.find(event =>
-      event.event === 'delivery' &&
-      event.status === 'send-failed' &&
-      event.to === RUNTIME_B
-    )).toMatchObject({
-      reason: 'RELAY_SEND_DROPPED',
-      delivery: {
-        outcome: 'failed',
-        code: 'RELAY_SEND_DROPPED',
-        retryable: true,
-        fatal: false,
-        terminal: false,
-        failure: {
-          category: 'TransientRace',
-          code: 'RELAY_SEND_DROPPED',
-        },
-      },
-      details: {
-        traceId: 'deliver-dropped',
-      },
-    });
-  });
-
-  test('force-closes a target socket after sustained backpressure', async () => {
-    const store = createRelayStore(SERVER_RUNTIME_ID);
-    const closed: Array<[number | undefined, string | undefined]> = [];
-    const config = {
-      store,
-      localRuntimeId: SERVER_RUNTIME_ID,
-      send: () => -1,
-    };
-    const wsA: FakeWs = { label: 'A', readyState: 1 };
-    const wsB: FakeWs = { label: 'B', readyState: 1, close: (code, reason) => closed.push([code, reason]) };
-
-    await relayRoute(config, wsA, signedHello(RUNTIME_A, SEED_A, KEY_A));
-    await relayRoute(config, wsB, signedHello(RUNTIME_B, SEED_B, KEY_B, '2'));
-
-    const sendOne = (id: string) => relayRoute(config, wsA, {
-      type: 'recovery_bundle_response',
-      id,
-      from: RUNTIME_A,
-      fromEncryptionPubKey: KEY_A,
-      to: RUNTIME_B,
-      payload: { bundles: [] },
-    });
-
-    await sendOne('deliver-1');
-    await sendOne('deliver-2');
-    await sendOne('deliver-3');
-    // Four rapid queued 10 MB-class sends are slow, not wedged. Closing the
-    // Hub socket here dropped in-flight Account ACKs at mixed 1000g.
-    expect(closed).toEqual([]);
-    expect(store.clients.get(RUNTIME_B)?.ws).toBe(wsB);
-
-    await sendOne('deliver-4');
-    expect(closed).toEqual([]);
-    expect(store.clients.has(RUNTIME_B)).toBe(true);
-
-    const client = store.clients.get(RUNTIME_B);
-    if (!client) throw new Error('TEST_RELAY_TARGET_MISSING');
-    client.backpressureStartedAt = Date.now() - RELAY_STUCK_BACKPRESSURE_MS - 1;
-    await sendOne('deliver-5');
-    expect(closed).toEqual([[4010, 'stuck-backpressure']]);
-    expect(store.clients.has(RUNTIME_B)).toBe(false);
-    expect(store.debugEvents.find(event => event.event === 'ws_stuck_backpressure_closed')).toMatchObject({
-      runtimeId: RUNTIME_B,
-      reason: 'RELAY_STUCK_BACKPRESSURE',
-    });
-  });
-
-  test('a cleanly accepted forward resets the backpressured streak', async () => {
-    const store = createRelayStore(SERVER_RUNTIME_ID);
-    const closed: Array<[number | undefined, string | undefined]> = [];
-    let mode: 'backpressured' | 'accepted' = 'backpressured';
-    const config = {
-      store,
-      localRuntimeId: SERVER_RUNTIME_ID,
-      send: () => (mode === 'backpressured' ? -1 : undefined),
-    };
-    const wsA: FakeWs = { label: 'A', readyState: 1 };
-    const wsB: FakeWs = { label: 'B', readyState: 1, close: (code, reason) => closed.push([code, reason]) };
-
-    await relayRoute(config, wsA, signedHello(RUNTIME_A, SEED_A, KEY_A));
-    await relayRoute(config, wsB, signedHello(RUNTIME_B, SEED_B, KEY_B, '2'));
-
-    const sendOne = (id: string) => relayRoute(config, wsA, {
-      type: 'recovery_bundle_response',
-      id,
-      from: RUNTIME_A,
-      fromEncryptionPubKey: KEY_A,
-      to: RUNTIME_B,
-      payload: { bundles: [] },
-    });
-
-    await sendOne('deliver-1');
-    await sendOne('deliver-2');
-    await sendOne('deliver-3');
-    mode = 'accepted';
-    await sendOne('deliver-4');
-    mode = 'backpressured';
-    await sendOne('deliver-5');
-    await sendOne('deliver-6');
-    await sendOne('deliver-7');
-    // 3 queued + 1 clean accept + 3 more queued never reaches 4 in a row.
-    expect(closed).toEqual([]);
-    expect(store.clients.get(RUNTIME_B)?.ws).toBe(wsB);
-  });
-
-  test('routes live recovery bundle request and response without queueing', async () => {
-    const store = createRelayStore(SERVER_RUNTIME_ID);
-    const sentBySocket = new Map<FakeWs, unknown[]>();
-    const config = {
-      store,
-      localRuntimeId: SERVER_RUNTIME_ID,
-      send: (ws: FakeWs, raw: Uint8Array) => {
-        const bucket = sentBySocket.get(ws) ?? [];
-        bucket.push(deserializeWsMessage(raw));
-        sentBySocket.set(ws, bucket);
-      },
-    };
-    const requester: FakeWs = { label: 'requester', readyState: 1 };
-    const responder: FakeWs = { label: 'responder', readyState: 1 };
-
-    await relayRoute(config, requester, signedHello(RUNTIME_A, SEED_A, KEY_A));
-    await relayRoute(config, responder, signedHello(RUNTIME_B, SEED_B, KEY_B, '2'));
-    await relayRoute(config, requester, {
-      type: 'recovery_bundle_request',
-      id: 'psr-request-1',
-      from: RUNTIME_A,
-      fromEncryptionPubKey: KEY_A,
-      to: RUNTIME_B,
-      payload: { lookupKey: 'lookup/key' },
-    });
-    await relayRoute(config, responder, {
-      type: 'recovery_bundle_response',
-      id: 'psr-response-1',
-      inReplyTo: 'psr-request-1',
-      from: RUNTIME_B,
-      fromEncryptionPubKey: KEY_B,
-      to: RUNTIME_A,
-      payload: { ok: true, lookupKey: 'lookup/key', bundles: [] },
-    });
-
-    expect(sentBySocket.get(responder)?.at(-1)).toMatchObject({
-      type: 'recovery_bundle_request',
-      id: 'psr-request-1',
-      from: RUNTIME_A,
-      to: RUNTIME_B,
-      payload: { lookupKey: 'lookup/key' },
-    });
-    expect(sentBySocket.get(requester)?.at(-1)).toMatchObject({
-      type: 'recovery_bundle_response',
-      id: 'psr-response-1',
-      inReplyTo: 'psr-request-1',
-      from: RUNTIME_B,
-      to: RUNTIME_A,
-      payload: { ok: true, lookupKey: 'lookup/key', bundles: [] },
-    });
-  });
-
-  test('rejects recovery bundle requests when the target runtime is offline', async () => {
-    const store = createRelayStore(SERVER_RUNTIME_ID);
-    const sentBySocket = new Map<FakeWs, unknown[]>();
-    const config = {
-      store,
-      localRuntimeId: SERVER_RUNTIME_ID,
-      send: (ws: FakeWs, raw: Uint8Array) => {
-        const bucket = sentBySocket.get(ws) ?? [];
-        bucket.push(deserializeWsMessage(raw));
-        sentBySocket.set(ws, bucket);
-      },
-    };
-    const requester: FakeWs = { label: 'requester', readyState: 1 };
-
-    await relayRoute(config, requester, signedHello(RUNTIME_A, SEED_A, KEY_A));
-    await relayRoute(config, requester, {
-      type: 'recovery_bundle_request',
-      id: 'psr-request-offline',
-      from: RUNTIME_A,
-      fromEncryptionPubKey: KEY_A,
-      to: RUNTIME_B,
-      payload: { lookupKey: 'lookup/key' },
-    });
-
-    expect(sentBySocket.get(requester)?.at(-1)).toMatchObject({
-      type: 'error',
-      error: 'RECOVERY_TARGET_NOT_CONNECTED',
-      inReplyTo: 'psr-request-offline',
-      to: RUNTIME_B,
-    });
-    expect(store.debugEvents.some(event =>
-      event.msgType === 'recovery_bundle_request' &&
-      event.status === 'rejected' &&
-      event.reason === 'RECOVERY_TARGET_NOT_CONNECTED',
-    )).toBe(true);
-    expect(store.debugEvents.find(event =>
-      event.msgType === 'recovery_bundle_request' &&
-      event.reason === 'RECOVERY_TARGET_NOT_CONNECTED',
-    )?.delivery).toMatchObject({
-      outcome: 'failed',
-      code: 'RECOVERY_TARGET_NOT_CONNECTED',
-      retryable: true,
-      fatal: false,
-      failure: {
-        category: 'TransientRace',
-      },
-    });
-  });
-
-  test('rejects offline gossip instead of retaining attacker-controlled relay payloads', async () => {
+  test('never forwards gossip responses or recovery frames between clients', async () => {
+    // Receivers treat relay-session frames as relay-authored. Forwarding let any
+    // client forge a gossip response or a recovery error to another Runtime and
+    // kill its relay session; no production sender uses these routes.
     const store = createRelayStore(SERVER_RUNTIME_ID);
     const sentBySocket = new Map<FakeWs, unknown[]>();
     const config = {
@@ -918,29 +598,29 @@ describe('relay-router gossip fanout', () => {
       },
     };
     const sender: FakeWs = { label: 'sender', readyState: 1 };
-
+    const target: FakeWs = { label: 'target', readyState: 1 };
     await relayRoute(config, sender, signedHello(RUNTIME_A, SEED_A, KEY_A));
-    await relayRoute(config, sender, {
-      type: 'gossip_response',
-      id: 'offline-gossip',
-      from: RUNTIME_A,
-      fromEncryptionPubKey: KEY_A,
-      to: RUNTIME_B,
-      payload: { profiles: [], jurisdictions: [] },
-    });
+    await relayRoute(config, target, signedHello(RUNTIME_B, SEED_B, KEY_B, '2'));
 
-    expect(sentBySocket.get(sender)?.at(-1)).toMatchObject({
+    const peerTypes = ['gossip_response', 'recovery_bundle_request', 'recovery_bundle_response'] as const;
+    for (const type of peerTypes) {
+      await relayRoute(config, sender, {
+        type,
+        id: `peer-${type}`,
+        from: RUNTIME_A,
+        fromEncryptionPubKey: KEY_A,
+        to: RUNTIME_B,
+        payload: { forged: true },
+      });
+    }
+
+    expect(sentBySocket.get(target)).toEqual([{ type: 'hello_ack', to: RUNTIME_B.toLowerCase() }]);
+    expect(sentBySocket.get(sender)?.slice(1)).toEqual(peerTypes.map(type => ({
       type: 'error',
-      error: 'GOSSIP_TARGET_NOT_CONNECTED',
-      inReplyTo: 'offline-gossip',
+      error: 'RELAY_PEER_FRAME_NOT_ROUTABLE',
+      inReplyTo: `peer-${type}`,
       to: RUNTIME_B,
-    });
-    expect(store.debugEvents.some(event =>
-      event.msgType === 'gossip_response' &&
-      event.status === 'rejected' &&
-      event.reason === 'GOSSIP_TARGET_NOT_CONNECTED'
-    )).toBe(true);
-    expect('pendingMessages' in store).toBe(false);
+    })));
   });
 
   test('rejects every routable message before authenticated hello', async () => {
