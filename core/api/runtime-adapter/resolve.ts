@@ -2076,8 +2076,10 @@ const resolveScopedRuntimeAdapterRead = async <T>(
       return compactAccountDocForView(account) as T;
     }
 
-    const { state, replica } = await resolveEntityState(ctx, entityId, query);
+    // An unknown sub-path falls through to E_BAD_PATH; resolving the entity
+    // first loaded full historical state from storage before rejecting it.
     if (parts.length === 2) {
+      const { state, replica } = await resolveEntityState(ctx, entityId, query);
       const projected = replica
         ? projectEntityReplicaCoreView(state, replica)
         : projectEntityCoreDoc(state);

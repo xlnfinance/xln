@@ -523,6 +523,25 @@ test('runtime adapter resolver reads live head and entity paths', async () => {
   expect(accounts.nextCursor).toBe(null);
 });
 
+test('runtime adapter rejects an unknown entity sub-path before loading entity state', async () => {
+  // Resolving the entity first ran a full historical storage load (and gave
+  // E_NOT_FOUND for an unknown entity) before the path fell to E_BAD_PATH.
+  const env = makeEnv();
+  let loads = 0;
+  const ctx: RuntimeAdapterResolveContext = {
+    env,
+    loadEntityState: async () => {
+      loads += 1;
+      return null;
+    },
+  };
+  await expect(resolveRuntimeAdapterRead(ctx, `entity/${entityId}/unknown`, { atHeight: 3 }))
+    .rejects.toMatchObject({ code: 'E_BAD_PATH' });
+  await expect(resolveRuntimeAdapterRead(ctx, `entity/0x${'cc'.repeat(32)}/unknown`))
+    .rejects.toMatchObject({ code: 'E_BAD_PATH' });
+  expect(loads).toBe(0);
+});
+
 test('runtime adapter direct read paths return compact read snapshots', async () => {
   const env = makeEnv();
   const replica = Array.from(env.state.eReplicas.values())[0]!;
