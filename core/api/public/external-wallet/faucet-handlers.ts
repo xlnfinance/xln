@@ -10,11 +10,15 @@ import {
   type WaitableTransaction,
   withFaucetWalletLock,
 } from './faucet-wallet';
-import { createJsonResponse, externalWalletLog, readFaucetBody, readGasFaucetBody } from './http';
+import { createJsonResponse, externalWalletLog, readFaucetBody, readGasFaucetBody, RequestBodyError } from './http';
+import { parsePositiveDecimalUnits } from '../../../protocol/boundary/positive-decimal';
 import { BoundedLockBusyError } from '../../../support/bounded-lock';
 
 /** Typed answers for the faucet's own known conditions; anything else stays a 500. */
 const faucetKnownFailureResponse = (context: ExternalWalletApiContext, error: unknown): Response | null => {
+  if (error instanceof RequestBodyError) {
+    return createJsonResponse(context.jsonHeaders, { error: error.message, code: error.code }, error.status);
+  }
   if (error instanceof FaucetTxWaitError) {
     const pending = error.code === 'FAUCET_TX_PENDING';
     return createJsonResponse(context.jsonHeaders, {
@@ -31,6 +35,15 @@ const faucetKnownFailureResponse = (context: ExternalWalletApiContext, error: un
     reason: error.code,
     retryable: true,
   }, error.code === 'LOCK_QUEUE_FULL' ? 429 : 503);
+};
+
+// A malformed amount reached parseUnits/parseEther and surfaced as a 500.
+const requireFaucetAmountUnits = (amount: string, decimals: number): bigint => {
+  const units = parsePositiveDecimalUnits(amount, decimals);
+  if (units === null) {
+    throw new RequestBodyError(400, 'FAUCET_AMOUNT_INVALID', `expected-positive-decimal-within-${decimals}-decimals`);
+  }
+  return units;
 };
 
 interface Erc20FaucetRequest {
@@ -160,7 +173,7 @@ const parseErc20FaucetRequest = async (
     request: {
       ...body,
       requestId: crypto.randomUUID(),
-      amountWei: ethers.parseUnits(body.amount, token.decimals),
+      amountWei: requireFaucetAmountUnits(body.amount, token.decimals),
       token,
     },
   };
@@ -216,7 +229,7 @@ export const handleGasFaucet = async (context: ExternalWalletApiContext, request
       return createJsonResponse(context.jsonHeaders, { error: 'Invalid userAddress' }, 400);
     }
     const requestId = crypto.randomUUID();
-    const topupAmount = ethers.parseEther(amount);
+    const topupAmount = requireFaucetAmountUnits(amount, 18);
     return await withFaucetWalletLock(context, adapter, async () => {
       const wallet = await requireFaucetWalletBalances(context, adapter, [], {
         requiredEth: topupAmount + ethers.parseEther('0.01'),

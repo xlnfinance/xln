@@ -3,7 +3,7 @@ import {
   findReserveUpdatedEvidence,
   type ReserveUpdatedEvidence,
 } from '../../../jurisdiction/machine/events/event-evidence';
-import { parseFaucetAmountUnits } from './policy';
+import { parsePositiveDecimalUnits } from '../../../protocol/boundary/positive-decimal';
 
 export type TokenCatalogEntry = {
   tokenId?: number | string | null;
@@ -20,7 +20,7 @@ export const parseReserveFaucetAmount = (
   if (typeof decimals !== 'number' || !Number.isSafeInteger(decimals) || decimals < 0 || decimals > 255) {
     throw new Error(`FAUCET_TOKEN_DECIMALS_INVALID:${String(tokenMeta.tokenId)}:${String(tokenMeta.decimals)}`);
   }
-  return parseFaucetAmountUnits(amount, decimals);
+  return parsePositiveDecimalUnits(amount, decimals);
 };
 
 export const waitForReserveUpdatedEvidence = async (

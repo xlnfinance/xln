@@ -14,7 +14,7 @@ import {
   shouldRejectOffchainFaucetForSettledCapacity,
 } from './offchain-admission';
 import { faucetFailureBody } from './failure';
-import { parseFaucetAmountUnits } from './policy';
+import { parsePositiveDecimalUnits } from '../../../protocol/boundary/positive-decimal';
 import { getTokenInfo } from '../../../account/utils';
 import { getDefaultRebalanceBaseFeeForToken } from '../../../account/config/defaults';
 
@@ -120,7 +120,7 @@ const parseFaucetRequest = async (
   // Operator and hub callers skip the public policy pre-check; a malformed
   // amount reached parseUnits and surfaced as a 500.
   const rawAmount = body['amount'] ?? '100';
-  const amountWei = parseFaucetAmountUnits(rawAmount, getTokenInfo(tokenId).decimals);
+  const amountWei = parsePositiveDecimalUnits(rawAmount, getTokenInfo(tokenId).decimals);
   if (amountWei === null) {
     return fail(input.headers, 400, {
       error: 'Invalid amount: expected a positive decimal within the token precision',

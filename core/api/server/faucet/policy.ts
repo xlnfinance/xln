@@ -1,7 +1,7 @@
 import { safeStringify } from '../../../protocol/serialization';
+import { parsePositiveDecimal, type PositiveDecimal } from '../../../protocol/boundary/positive-decimal';
 
 type FaucetEnv = Readonly<Record<string, string | undefined>>;
-type Decimal = { coefficient: bigint; scale: number };
 
 const FAUCET_PATHS = new Set([
   '/api/faucet/erc20',
@@ -10,25 +10,7 @@ const FAUCET_PATHS = new Set([
   '/api/faucet/offchain',
 ]);
 
-const parsePositiveDecimal = (value: unknown): Decimal | null => {
-  if (typeof value !== 'string' && typeof value !== 'number') return null;
-  const text = String(value).trim();
-  if (text.length > 80) return null;
-  const match = /^(0|[1-9]\d*)(?:\.(\d+))?$/.exec(text);
-  if (!match) return null;
-  const fraction = match[2] ?? '';
-  const coefficient = BigInt(`${match[1]}${fraction}`);
-  return coefficient > 0n ? { coefficient, scale: fraction.length } : null;
-};
-
-/** Base units of a faucet amount, or null unless it is a positive plain decimal within `decimals`. */
-export const parseFaucetAmountUnits = (value: unknown, decimals: number): bigint | null => {
-  const amount = parsePositiveDecimal(value);
-  if (!amount || amount.scale > decimals) return null;
-  return amount.coefficient * 10n ** BigInt(decimals - amount.scale);
-};
-
-const exceeds = (value: Decimal, maximum: Decimal): boolean => {
+const exceeds = (value: PositiveDecimal, maximum: PositiveDecimal): boolean => {
   const scale = Math.max(value.scale, maximum.scale);
   return value.coefficient * 10n ** BigInt(scale - value.scale)
     > maximum.coefficient * 10n ** BigInt(scale - maximum.scale);

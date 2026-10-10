@@ -157,9 +157,19 @@ export const readExternalWalletSnapshotSource = async (
   return { headBlockNumber, sourceHeight, sourceHash: block.hash, finalityDepth };
 };
 
+// requireExactBoundaryKeys is a pure check of the client's fields, so any
+// throw is the client's 400, never a server fault.
+const requireFaucetFields = (body: Record<string, unknown>, optional: readonly string[], code: string): void => {
+  try {
+    requireExactBoundaryKeys(body, ['userAddress'], optional, code);
+  } catch {
+    throw new RequestBodyError(400, code, 'unexpected-or-missing-field');
+  }
+};
+
 export const readFaucetBody = async (request: Request): Promise<FaucetRequestBody> => {
   const body = await parseCappedJsonRecord(request, MAX_WALLET_SNAPSHOT_BODY_BYTES, 'FAUCET');
-  requireExactBoundaryKeys(body, ['userAddress'], ['tokenSymbol', 'amount', 'jurisdiction'], 'FAUCET_BODY_FIELDS_INVALID');
+  requireFaucetFields(body, ['tokenSymbol', 'amount', 'jurisdiction'], 'FAUCET_BODY_FIELDS_INVALID');
   return {
     ...readFaucetJurisdiction(body),
     userAddress: String(body['userAddress'] || '').trim(),
@@ -172,7 +182,7 @@ export const readFaucetBody = async (request: Request): Promise<FaucetRequestBod
 
 export const readGasFaucetBody = async (request: Request): Promise<GasFaucetRequestBody> => {
   const body = await parseCappedJsonRecord(request, MAX_WALLET_SNAPSHOT_BODY_BYTES, 'GAS_FAUCET');
-  requireExactBoundaryKeys(body, ['userAddress'], ['amount', 'jurisdiction'], 'GAS_FAUCET_BODY_FIELDS_INVALID');
+  requireFaucetFields(body, ['amount', 'jurisdiction'], 'GAS_FAUCET_BODY_FIELDS_INVALID');
   return {
     userAddress: String(body['userAddress'] || '').trim(),
     amount: String(body['amount'] || '0.1').trim(),

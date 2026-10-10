@@ -141,6 +141,30 @@ describe('external wallet API faucet transaction gate', () => {
     }
   });
 
+  test('a malformed faucet amount or field is a typed 400, not a 500', async () => {
+    const provider = makeTestProvider();
+    try {
+      const api = createExternalWalletApi(makeContext(makeBrowserVmAdapter(provider), async () => true));
+      const post = (path: string, body: Record<string, unknown>) => new Request(`http://localhost${path}`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: safeStringify(body),
+      });
+      for (const [response, code] of [
+        // USDC has 6 decimals; parseUnits threw on the seventh.
+        [await api.handleErc20Faucet(post('/api/faucet/erc20', { userAddress: USER_ADDRESS, amount: '1.0000001' })), 'FAUCET_AMOUNT_INVALID'],
+        [await api.handleErc20Faucet(post('/api/faucet/erc20', { userAddress: USER_ADDRESS, amount: '1e3' })), 'FAUCET_AMOUNT_INVALID'],
+        [await api.handleGasFaucet(post('/api/faucet/gas', { userAddress: USER_ADDRESS, amount: '-1' })), 'FAUCET_AMOUNT_INVALID'],
+        [await api.handleErc20Faucet(post('/api/faucet/erc20', { userAddress: USER_ADDRESS, extra: 1 })), 'FAUCET_BODY_FIELDS_INVALID'],
+      ] as const) {
+        expect(response.status).toBe(400);
+        expect(((await response.json()) as { code?: string }).code).toBe(code);
+      }
+    } finally {
+      provider.destroy();
+    }
+  });
+
   test('returns the full asynchronous faucet failure and releases the wallet lock', async () => {
     const provider = makeTestProvider();
     const adapter = makeBrowserVmAdapter(provider);
