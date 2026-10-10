@@ -69,6 +69,7 @@ listMarketMakerQuotablePairs,
 normalizeEntityRef,
 normalizePositiveTokenIds,
 sameJurisdiction,
+selectMarketMakerRoutedHubEntityIds,
 yieldMarketMakerApi,
 } from './mm-node-core';
 
@@ -838,12 +839,19 @@ export const maintainMarketMakerCrossQuotes = async (
 ): Promise<boolean> => {
   const startedAt = Date.now();
   const direction = `${sourceContext.jurisdictionName}->${targetContext.jurisdictionName}`;
+  // A cross route needs both Hub routes open; an offline Hub drops only its own routes.
+  const routedHubEntityIds = new Set(selectMarketMakerRoutedHubEntityIds(
+    env,
+    [...sourceHubs, ...targetHubs].map(profile => profile.entityId),
+  ));
+  const routedSourceHubs = sourceHubs.filter(profile => routedHubEntityIds.has(profile.entityId));
+  const routedTargetHubs = targetHubs.filter(profile => routedHubEntityIds.has(profile.entityId));
   const maintenanceContext: CrossQuoteMaintenanceContext = {
     env,
     sourceContext,
     targetContext,
-    sourceHubs,
-    targetHubs,
+    sourceHubs: routedSourceHubs,
+    targetHubs: routedTargetHubs,
     sourceTokenIds,
     targetTokenIds,
     maxOffersPerAccount,
@@ -854,8 +862,8 @@ export const maintainMarketMakerCrossQuotes = async (
     startedAt,
   };
   if (
-    sourceHubs.length === 0 ||
-    targetHubs.length === 0 ||
+    routedSourceHubs.length === 0 ||
+    routedTargetHubs.length === 0 ||
     sourceTokenIds.length < HUB_REQUIRED_TOKEN_COUNT ||
     targetTokenIds.length < HUB_REQUIRED_TOKEN_COUNT ||
     sourceContext.entityId === targetContext.entityId ||
@@ -865,8 +873,8 @@ export const maintainMarketMakerCrossQuotes = async (
   }
   if (!shouldContinue()) return false;
 
-  const sourceHubEntityIds = sourceHubs.map(profile => profile.entityId);
-  const targetHubEntityIds = targetHubs.map(profile => profile.entityId);
+  const sourceHubEntityIds = routedSourceHubs.map(profile => profile.entityId);
+  const targetHubEntityIds = routedTargetHubs.map(profile => profile.entityId);
   if (await ensureMarketMakerHubConnectivity(
     env,
     sourceContext.entityId,

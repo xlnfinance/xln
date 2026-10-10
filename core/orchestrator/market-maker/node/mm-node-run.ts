@@ -126,6 +126,7 @@ import {
   isSameQuoteJobDepthReady,
   maintainMarketMakerQuotes,
   marketMakerContextKey,
+  marketMakerHubDirectRoutesOpen,
   mergeMarketMakerQuoteEntityInputs,
   nodeLog,
   planMarketMakerQuoteEntityInputs,
@@ -1893,6 +1894,14 @@ export const submitMarketMakerBootstrapCrossQuotes = async (
 
 const maintainSelectedCrossQuotes = async (input: SelectedCrossQuoteInput): Promise<boolean> => {
   if (input.mode === 'bootstrap') {
+    // The bootstrap cross batch is submitted once per expiry generation, so it
+    // waits for every selected Hub route instead of freezing a partial batch.
+    const hubEntityIds = input.selected.flatMap(({ job }) =>
+      [...job.sourceHubs, ...job.targetHubs].map(hub => hub.entityId));
+    if (!marketMakerHubDirectRoutesOpen(input.deps.env, hubEntityIds)) {
+      await yieldMarketMakerApi();
+      return true;
+    }
     // Connectivity must already be committed before quote planning. It is
     // separate setup state, so admit at most one connectivity batch and let
     // the next bootstrap pass re-read canonical Account state.

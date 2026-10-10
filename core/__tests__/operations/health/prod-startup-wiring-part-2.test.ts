@@ -1435,7 +1435,7 @@ describe('production startup wiring', () => {
     expect(mmNode).not.toContain('preferRelayForEntityInput');
     expect(mmNode).not.toContain('allowDirectClients: false');
     expect(hubNode).toContain('if (!directHubPeersReady(input.env, peers)) return false;');
-    expect(mmNode).toContain('if (!marketMakerHubDirectRoutesOpen(env, hubEntityIds))');
+    expect(mmNode).toContain('hubEntityIds.filter(hubEntityId => marketMakerHubDirectRoutesOpen(env, [hubEntityId]))');
   });
 
   test('hub support-peer provisioning uses full jurisdiction token sets', () => {

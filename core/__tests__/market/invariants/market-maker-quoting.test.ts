@@ -3,6 +3,7 @@ import { describe, expect, test } from 'bun:test';
 import { createDefaultDelta } from '../../../account/state/delta';
 import {
   ensureMarketMakerHubConnectivity,
+  maintainMarketMakerQuotes,
   planMarketMakerQuoteEntityInputs,
 } from '../../../orchestrator/market-maker/node/mm-node-core';
 import {
@@ -22,7 +23,7 @@ const MM = entity('11');
 const MM_SIGNER = addr('11');
 const TOKENS = [1, 2, 3];
 
-type HubFixture = Readonly<{ entityId: string; swapTakerFeeBps?: number }>;
+type HubFixture = Readonly<{ entityId: string; swapTakerFeeBps?: number; account?: false }>;
 
 const fundedAccount = (hubEntityId: string): AccountReplica => {
   const account = makeAccount(MM, hubEntityId);
@@ -47,7 +48,8 @@ const buildQuotingEnv = (hubs: readonly HubFixture[]): RuntimeReplica => {
     state: {
       entityId: MM,
       profile: { isHub: false },
-      accounts: new Map(hubs.map(hub => [hub.entityId, fundedAccount(hub.entityId)])),
+      accounts: new Map(hubs.flatMap(hub =>
+        hub.account === false ? [] : [[hub.entityId, fundedAccount(hub.entityId)] as const])),
     },
   } as unknown as EntityReplica);
   env.gossip = {
@@ -80,6 +82,14 @@ const requireAccount = (env: RuntimeReplica, hubEntityId: string): AccountReplic
 const queuedEntityTxTypes = (env: RuntimeReplica): string[] =>
   env.runtimeMempool.entityInputs.flatMap(input => (input.entityTxs ?? []).map(tx => tx.type));
 
+const queuedTxCounterparties = (env: RuntimeReplica): string[] => [...new Set(
+  env.runtimeMempool.entityInputs.flatMap(input => (input.entityTxs ?? []).map(tx => {
+    if (tx.type === 'openAccount') return tx.data.targetEntityId;
+    if (tx.type === 'extendCredit' || tx.type === 'placeSwapOffer') return tx.data.counterpartyEntityId;
+    return tx.type;
+  })),
+)];
+
 const plannedOfferHubs = (env: RuntimeReplica, hubEntityIds: string[]): Map<string, number> => {
   const counts = new Map<string, number>();
   const inputs = planMarketMakerQuoteEntityInputs(
@@ -104,6 +114,7 @@ describe('market maker quote planning', () => {
       { entityId: confiscatory, swapTakerFeeBps: 9_999 },
       { entityId: invalid, swapTakerFeeBps: 10_000 },
     ]);
+    openDirectRoutes(env, [fair, missing, confiscatory, invalid]);
 
     const counts = plannedOfferHubs(env, [fair, missing, confiscatory, invalid]);
 
@@ -114,6 +125,7 @@ describe('market maker quote planning', () => {
   test('accepted Hub fee is signed exactly into every offer authorization', () => {
     const hub = entity('a1');
     const env = buildQuotingEnv([{ entityId: hub, swapTakerFeeBps: 1 }]);
+    openDirectRoutes(env, [hub]);
     const inputs = planMarketMakerQuoteEntityInputs(
       env, MM, MM_SIGNER, [hub], TOKENS, Number.MAX_SAFE_INTEGER, Number.MAX_SAFE_INTEGER, 0,
     );
@@ -159,5 +171,40 @@ describe('market maker quote planning', () => {
 
     expect(await ensureMarketMakerHubConnectivity(env, MM, MM_SIGNER, [hub], TOKENS, { remainingTxs: 100 })).toBe(true);
     expect(queuedEntityTxTypes(env)).toEqual(['extendCredit']);
+  });
+
+  test('a Hub without an open direct route never stalls quote replenishment on the other Hubs', async () => {
+    const online = entity('a1');
+    const offline = entity('b1');
+    const env = buildQuotingEnv([
+      { entityId: online, swapTakerFeeBps: 1 },
+      { entityId: offline, swapTakerFeeBps: 1 },
+    ]);
+    openDirectRoutes(env, [online]);
+
+    expect(plannedOfferHubs(env, [online, offline])).toEqual(new Map([[online, 20]]));
+    const enqueued = await maintainMarketMakerQuotes(
+      env, MM, MM_SIGNER, [online, offline], TOKENS,
+      Number.MAX_SAFE_INTEGER, Number.MAX_SAFE_INTEGER, { remainingTxs: 100 }, () => true, 0,
+    );
+
+    expect(enqueued).toBe(true);
+    expect(queuedTxCounterparties(env)).toEqual([online]);
+    expect(queuedEntityTxTypes(env).every(type => type === 'placeSwapOffer')).toBe(true);
+  });
+
+  test('connectivity opens Accounts with routed Hubs while an offline Hub waits alone', async () => {
+    const online = entity('a1');
+    const offline = entity('b1');
+    const env = buildQuotingEnv([
+      { entityId: online, swapTakerFeeBps: 1, account: false },
+      { entityId: offline, swapTakerFeeBps: 1, account: false },
+    ]);
+    openDirectRoutes(env, [online]);
+
+    expect(await ensureMarketMakerHubConnectivity(env, MM, MM_SIGNER, [online, offline], TOKENS, { remainingTxs: 100 }))
+      .toBe(true);
+    expect(queuedTxCounterparties(env)).toEqual([online]);
+    expect(queuedEntityTxTypes(env)).toEqual(['openAccount', 'extendCredit', 'extendCredit']);
   });
 });

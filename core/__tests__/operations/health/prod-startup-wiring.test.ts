@@ -1044,7 +1044,8 @@ describe('production startup wiring', () => {
     expect(mmNode).toMatch(
       /\.filter\(profile => !hasMarketMakerAccountBacklog\(input\.deps\.env, input\.context\.entityId, profile\.entityId\)\)/,
     );
-    expect(mmNode).toContain('if (!marketMakerHubDirectRoutesOpen(env, hubEntityIds))');
+    expect(mmNode).toContain('const routedHubEntityIds = selectMarketMakerRoutedHubEntityIds(env, hubEntityIds);');
+    expect(mmNode).not.toContain('if (!marketMakerHubDirectRoutesOpen(env, hubEntityIds))');
     expect(mmNode).toContain('const localCreditInputsByEntity = new Map<string, EntityInput>();');
     expect(mmNode).toContain('const pushLocalConnectivityTx = (');
     expect(mmNode).toContain('const maintainSameContextQuotes = async (');
@@ -1197,7 +1198,9 @@ describe('production startup wiring', () => {
     expect(mmNode).not.toContain('bootstrapCrossExpectedRoutes === false');
     expect(mmNode).not.toContain('crossOverride: buildNeutralMarketMakerCrossHealth()');
     expect(mmNode).not.toContain('Math.max(MARKET_MAKER_OFFERS_PER_ACCOUNT_PER_TICK, expectedOffersPerHub)');
-    expect(mmNode).toMatch(/const quoteReadyHubEntityIds = hubEntityIds\.filter\(\(?hubEntityId\)? =>/);
+    expect(mmNode).toMatch(
+      /const quoteReadyHubEntityIds = selectMarketMakerRoutedHubEntityIds\(env, hubEntityIds\)\.filter\(\(?hubEntityId\)? =>/,
+    );
     expect(mmNode.replace(/\s+/g, '')).toContain(
       'constdesiredOffers=buildMarketMakerOfferSpecs(quoteReadyHubEntityIds,tokenIds,samePairIndex,);',
     );

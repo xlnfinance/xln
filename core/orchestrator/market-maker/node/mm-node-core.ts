@@ -821,8 +821,12 @@ export const readVisibleHubProfiles = (env: RuntimeReplica): HubProfile[] => {
     );
 };
 
-const marketMakerHubDirectRoutesOpen = (env: RuntimeReplica, hubEntityIds: string[]): boolean =>
+export const marketMakerHubDirectRoutesOpen = (env: RuntimeReplica, hubEntityIds: readonly string[]): boolean =>
   getP2P(env)?.prepareDirectEntityRoutes(hubEntityIds) ?? false;
+
+/** Hubs with an open direct route; asking also dials the ones still offline. */
+export const selectMarketMakerRoutedHubEntityIds = (env: RuntimeReplica, hubEntityIds: readonly string[]): string[] =>
+  hubEntityIds.filter(hubEntityId => marketMakerHubDirectRoutesOpen(env, [hubEntityId]));
 
 const getMarketMakerLevelProfile = (
   baseTokenId: number,
@@ -1820,14 +1824,12 @@ export const ensureMarketMakerHubConnectivity = async (
   tokenIds: number[],
   budget: MarketMakerConnectivityBudget,
 ): Promise<boolean> => {
-  // Route readiness is checked before a financial command exists. Waiting for
-  // the next producer tick is not a delivery retry: no RuntimeInput was
-  // committed and no AccountInput was emitted. Once committed, an envelope is
-  // attempted exactly once on this already-open authenticated direct route.
-  if (!marketMakerHubDirectRoutesOpen(env, hubEntityIds)) {
-    await yieldMarketMakerApi();
-    return true;
-  }
+  // Route readiness is checked per Hub before a financial command exists.
+  // Waiting for the next producer tick is not a delivery retry: no RuntimeInput
+  // was committed and no AccountInput was emitted. Once committed, an envelope
+  // is attempted exactly once on this already-open authenticated direct route.
+  // An offline Hub waits alone; it never reports work done for the others.
+  const routedHubEntityIds = selectMarketMakerRoutedHubEntityIds(env, hubEntityIds);
   const localCreditInputsByEntity = new Map<string, EntityInput>();
   const marketMakerRole = requireCommittedMarketMakerRole(env, mmEntityId);
   const deriveMarketMakerAccountWatchSeed = (counterpartyId: string): string =>
@@ -1848,7 +1850,7 @@ export const ensureMarketMakerHubConnectivity = async (
     return true;
   };
 
-  collectOpenAccountInputs: for (const hubEntityId of hubEntityIds) {
+  collectOpenAccountInputs: for (const hubEntityId of routedHubEntityIds) {
     const hubRole = requireVerifiedMarketMakerHubRole(env, hubEntityId);
     const mmAccount = getAccountReplica(env, mmEntityId, hubEntityId);
     const hasPendingConsensus = Boolean(mmAccount?.pendingFrame) || Number(mmAccount?.mempool?.length || 0) > 0;
@@ -1890,7 +1892,7 @@ export const ensureMarketMakerHubConnectivity = async (
     }
   }
 
-  collectCreditInputs: for (const hubEntityId of hubEntityIds) {
+  collectCreditInputs: for (const hubEntityId of routedHubEntityIds) {
     const mmAccount = getAccountReplica(env, mmEntityId, hubEntityId);
     const hasPendingConsensus = Boolean(mmAccount?.pendingFrame) || Number(mmAccount?.mempool?.length || 0) > 0;
     if (hasPendingConsensus) continue;
@@ -2014,7 +2016,7 @@ export const planMarketMakerQuoteEntityInputs = (
   samePairIndex?: number,
 ): EntityInput[] => {
   if (hubEntityIds.length === 0 || tokenIds.length < 3) return [];
-  const quoteReadyHubEntityIds = hubEntityIds.filter(hubEntityId =>
+  const quoteReadyHubEntityIds = selectMarketMakerRoutedHubEntityIds(env, hubEntityIds).filter(hubEntityId =>
     isMarketMakerConnectivityReady(env, mmEntityId, [hubEntityId], tokenIds),
   );
   if (quoteReadyHubEntityIds.length === 0) {
