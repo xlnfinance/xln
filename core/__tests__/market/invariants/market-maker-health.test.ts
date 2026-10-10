@@ -28,6 +28,7 @@ import {
 import { submitMarketMakerBootstrapCrossQuotes } from '../../../orchestrator/market-maker/node/mm-node-run';
 import {
   MARKET_MAKER_LEVELS_PER_SIDE,
+  listMarketMakerQuotablePairs,
   resolvedArgs as marketMakerArgs,
 } from '../../../orchestrator/market-maker/node/mm-node-core';
 import { parseConfiguredPeerIdentities } from '../../../orchestrator/mesh/hub-mesh-peers';
@@ -253,10 +254,10 @@ test('five-token market maker depth remains canonical through Account and hub ad
     deltas.set(tokenId, delta);
   }
 
-  const pairCount = buildDefaultEntitySwapPairs(tokenIds).length;
+  const quotablePairs = listMarketMakerQuotablePairs(tokenIds);
   let admittedOffers = 0;
   const rejected: string[] = [];
-  for (let pairIndex = 0; pairIndex < pairCount; pairIndex += 1) {
+  for (const { samePairIndex: pairIndex } of quotablePairs) {
     const base = makeAccount(mmEntityId, hubEntityId);
     base.state.deltas = PersistentAccountStateMap.fromEntries('deltas', deltas);
     const account = beginAccountStateDraft(base).draft;
@@ -315,7 +316,9 @@ test('five-token market maker depth remains canonical through Account and hub ad
     expect(account.state.swapOffers.size).toBeLessThanOrEqual(LIMITS.MAX_ACCOUNT_SAME_J_SWAP_OFFERS);
   }
 
-  expect(admittedOffers).toBe(200);
+  // WETH/TRX, WETH/SUN and TRX/SUN have no price policy and stay unquoted.
+  expect(quotablePairs).toHaveLength(7);
+  expect(admittedOffers).toBe(140);
   expect(rejected).toEqual([]);
 });
 

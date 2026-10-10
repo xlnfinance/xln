@@ -1,9 +1,6 @@
 #!/usr/bin/env bun
 
 import { createHash } from 'node:crypto';
-import {
-buildDefaultEntitySwapPairs
-} from '../../../account/utils';
 import { LIMITS } from '../../../config/constants';
 import { crossJurisdictionBookOwnerRef } from '../../../extensions/cross-j/orderbook';
 import { deriveCanonicalCrossJurisdictionMarket } from '../../../extensions/cross-j/market';
@@ -68,6 +65,7 @@ hasUncommittedMarketMakerCrossOffer,
 hasMarketMakerCrossOffer,
 hasMarketMakerRuntimeBacklog,
 hubRoleName,
+listMarketMakerQuotablePairs,
 normalizeEntityRef,
 normalizePositiveTokenIds,
 sameJurisdiction,
@@ -908,7 +906,7 @@ export const getMarketMakerHealth = (
   crossOverride?: MarketMakerHealth['cross'],
   sameQuoteContexts: readonly MarketMakerEntityContext[] = [],
 ): MarketMakerHealth => {
-  const pairs = buildDefaultEntitySwapPairs(tokenIds);
+  const pairs = listMarketMakerQuotablePairs(tokenIds);
   const quoteContexts = sameQuoteContexts.length > 0
     ? [...sameQuoteContexts]
     : [];
@@ -938,7 +936,7 @@ export const getMarketMakerHealth = (
     0,
   );
   const expectedOffersPerPair = Math.max(
-    ...pairs.map((pair) =>
+    ...pairs.map(({ pair }) =>
       Math.max(...hubEntityIds.map((hubEntityId) => expectedOffersByHubPair.get(`${hubEntityId}:${pair.pairId}`) || 0), 0),
     ),
     0,
@@ -974,8 +972,8 @@ export const getMarketMakerHealth = (
       0,
     );
     const expectedHubOffers = expectedOffersByHub.get(hubEntityId) || 0;
-    const pairHealth = pairs.map((pair, pairIndex) => {
-      const context = contextsForHub.find(candidate => candidate.samePairIndex === pairIndex);
+    const pairHealth = pairs.map(({ pair, samePairIndex }) => {
+      const context = contextsForHub.find(candidate => candidate.samePairIndex === samePairIndex);
       const account = context?.entityId
         ? getAccountReplica(env, context.entityId, hubEntityId)
         : null;

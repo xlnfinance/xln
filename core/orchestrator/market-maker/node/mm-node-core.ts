@@ -11,7 +11,9 @@ import {
   getSwapPairPolicyByBaseQuote,
   getTokenIdsForJurisdiction,
   getTokenInfo,
+  hasSwapPairPolicyForDimensions,
   isLiquidSwapToken,
+  type EntitySwapPairConfig,
 } from '../../../account/utils';
 import { deriveAccountWatchSeed } from '../../../protocol/identity/account-watch-seed';
 import { deriveSwapNetAuthorization } from '../../../account/swap/swap-net-authorization';
@@ -846,6 +848,27 @@ export const normalizePositiveTokenIds = (tokenIds: readonly number[]): number[]
     new Set(tokenIds.filter(tokenId => Number.isFinite(tokenId) && tokenId > 0).map(tokenId => Math.floor(tokenId))),
   ).sort((a, b) => a - b);
 
+// The MM quotes only off an explicit pair price policy. The default policy mid
+// is 1.0000, which would list e.g. WETH/TRX at one TRX per WETH.
+const hasMarketMakerPricePolicy = (baseTokenId: number, quoteTokenId: number): boolean =>
+  hasSwapPairPolicyForDimensions(
+    baseTokenId,
+    quoteTokenId,
+    getTokenInfo(baseTokenId).decimals,
+    getTokenInfo(quoteTokenId).decimals,
+  );
+
+/**
+ * Same-J pairs the MM quotes. `samePairIndex` stays the pair's position in the
+ * identity plan, so an unpriced pair keeps its shard identity but no ladder.
+ */
+export const listMarketMakerQuotablePairs = (
+  tokenIds: readonly number[],
+): Array<{ pair: EntitySwapPairConfig; samePairIndex: number }> =>
+  buildDefaultEntitySwapPairs(tokenIds)
+    .map((pair, samePairIndex) => ({ pair, samePairIndex }))
+    .filter(({ pair }) => hasMarketMakerPricePolicy(pair.baseTokenId, pair.quoteTokenId));
+
 export const buildMarketMakerCrossTokenPairs = (
   sourceTokenIds: number[],
   targetTokenIds: number[] = sourceTokenIds,
@@ -855,6 +878,11 @@ export const buildMarketMakerCrossTokenPairs = (
   const pairs: Array<{ sourceTokenId: number; targetTokenId: number }> = [];
   for (const sourceTokenId of uniqueSourceTokenIds) {
     for (const targetTokenId of uniqueTargetTokenIds) {
+      const oriented = getSwapPairOrientation(sourceTokenId, targetTokenId);
+      // One asset moved across jurisdictions is priced 1:1 by construction.
+      if (sourceTokenId !== targetTokenId && !hasMarketMakerPricePolicy(oriented.baseTokenId, oriented.quoteTokenId)) {
+        continue;
+      }
       pairs.push({ sourceTokenId, targetTokenId });
     }
   }
@@ -1143,8 +1171,9 @@ export const buildMarketMakerOfferSpecs = (
   samePairIndex?: number,
 ): MarketMakerOfferSpec[] => {
   const specs: MarketMakerOfferSpec[] = [];
-  const allPairs = buildDefaultEntitySwapPairs(tokenIds);
-  const defaultPairs = samePairIndex === undefined ? allPairs : allPairs.slice(samePairIndex, samePairIndex + 1);
+  const defaultPairs = listMarketMakerQuotablePairs(tokenIds)
+    .filter(entry => samePairIndex === undefined || entry.samePairIndex === samePairIndex)
+    .map(entry => entry.pair);
   for (const hubEntityId of hubEntityIds) {
     const hubSuffix = hubEntityId.slice(-6).toLowerCase();
     const pairContexts = defaultPairs.map(pair => {
