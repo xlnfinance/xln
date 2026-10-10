@@ -1,0 +1,87 @@
+{
+  "baseTokenDecimals": 6,
+  "bucketWidthTicks": 100,
+  "canonicalSource": "TypeScript core/orderbook/core.ts",
+  "cases": [
+    {
+      "maxOrders": 16,
+      "name": "resume-stp-cancels-resting-taker",
+      "steps": [
+        {
+          "expected": {
+            "bookCommitmentHash": "0xe282fcb25b01823a9fac73b8d5caec64",
+            "eventHash": "9007197614209365",
+            "events": [
+              "ACK"
+            ],
+            "orderIds": [
+              "x:ask"
+            ],
+            "outcome": "applied",
+            "sweptOrderIds": [],
+            "takerOrderId": null
+          },
+          "step": {
+            "kind": "add",
+            "orderId": "x:ask",
+            "ownerId": "owner-x",
+            "priceTicks": "100",
+            "qtyLots": "1",
+            "side": "ask",
+            "suspended": [],
+            "timeInForce": 0
+          }
+        },
+        {
+          "expected": {
+            "bookCommitmentHash": "0x9c1e13b296ffe414ffefdd4214b3eed4",
+            "eventHash": "8505240276890282",
+            "events": [
+              "ACK"
+            ],
+            "orderIds": [
+              "x:ask",
+              "x:bid"
+            ],
+            "outcome": "applied",
+            "sweptOrderIds": [],
+            "takerOrderId": null
+          },
+          "step": {
+            "kind": "add",
+            "orderId": "x:bid",
+            "ownerId": "owner-x",
+            "priceTicks": "100",
+            "qtyLots": "1",
+            "side": "bid",
+            "suspended": [
+              "x:ask"
+            ],
+            "timeInForce": 0
+          }
+        },
+        {
+          "expected": {
+            "bookCommitmentHash": "0x0a4a3bb98413943051c68dd548b0370f",
+            "eventHash": "4405104526774971",
+            "events": [
+              "REJECT:STP cancel taker:x:ask"
+            ],
+            "orderIds": [
+              "x:ask"
+            ],
+            "outcome": "applied",
+            "sweptOrderIds": [],
+            "takerOrderId": "x:bid"
+          },
+          "step": {
+            "kind": "resume",
+            "suspended": []
+          }
+        }
+      ]
+    }
+  ],
+  "quoteTokenDecimals": 18,
+  "version": 1
+}

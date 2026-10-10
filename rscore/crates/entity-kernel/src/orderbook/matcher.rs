@@ -1453,6 +1453,10 @@ fn apply_orderbook_outputs(
 }
 
 #[cfg(test)]
+#[path = "tests/book_parity.rs"]
+mod book_parity;
+
+#[cfg(test)]
 mod tests {
     use super::*;
 

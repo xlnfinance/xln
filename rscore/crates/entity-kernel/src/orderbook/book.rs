@@ -444,7 +444,12 @@ where
         &mut |maker: &BookOrder, _taker: &AddOrder| maker.price_ticks.clone(),
         &mut events,
     )?;
-    if matched.blocking_order_id.is_some() || matched.remaining == BigInt::from(0) {
+    // TS `resumeCrossedBook`: a self-trade-blocked resting taker leaves the
+    // book as a cancel and folds tag 5 into the event hash; a fully filled
+    // taker leaves silently. Removing both silently forked the book root.
+    if matched.blocking_order_id.is_some() {
+        cancel_order(state, &taker.order_id)?;
+    } else if matched.remaining == BigInt::from(0) {
         remove_order(state, &taker.order_id)?;
     } else if matched.remaining < taker.qty_lots {
         page_tree_mut(&mut state.bid_pages, &mut state.ask_pages, taker_order.side).reduce(
