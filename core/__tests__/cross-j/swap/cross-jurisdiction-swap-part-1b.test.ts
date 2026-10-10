@@ -213,7 +213,6 @@ const makeLocalCrossJRoutingDeps = (): RuntimeEntityRoutingDeps => ({
   enqueueRuntimeInputs: () => {
     throw new Error('TEST_UNEXPECTED_RUNTIME_REQUEUE');
   },
-  extractEntityId: replicaKey => replicaKey.split(':')[0] || '',
   hasLocalSignerForEntity: (current, entityId) =>
     Array.from(current.state.eReplicas.values()).some(replica => replica.entityId.toLowerCase() === entityId.toLowerCase()),
   hasLocalSignerForEntitySigner: (current, entityId, signerId) =>

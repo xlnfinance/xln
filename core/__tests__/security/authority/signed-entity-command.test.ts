@@ -319,7 +319,6 @@ describe('signed Entity command admission', () => {
     }, {
       ensureRuntimeInfrastructure: target => target.infrastructure!,
       enqueueRuntimeInputs: (_target, inputs) => enqueued.push(...(inputs ?? [])),
-      extractEntityId: key => String(key).split(':')[0] || '',
       hasLocalSignerForEntity: () => true,
       hasLocalSignerForEntitySigner: () => true,
       resolveSoleLocalSignerForEntity: () => targetSignerId,
@@ -341,7 +340,6 @@ describe('signed Entity command admission', () => {
     }, {
       ensureRuntimeInfrastructure: target => target.infrastructure!,
       enqueueRuntimeInputs: (_target, inputs) => enqueued.push(...(inputs ?? [])),
-      extractEntityId: key => String(key).split(':')[0] || '',
       hasLocalSignerForEntity: () => true,
       hasLocalSignerForEntitySigner: () => true,
       resolveSoleLocalSignerForEntity: () => signerId,

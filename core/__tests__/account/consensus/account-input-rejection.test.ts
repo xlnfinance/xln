@@ -653,7 +653,6 @@ test('authenticated Runtime Account poison is rejected without halting or mutati
   const routingDeps = {
     ensureRuntimeInfrastructure: () => target.env.infrastructure!,
     enqueueRuntimeInputs: () => {},
-    extractEntityId: (replicaKey: string) => replicaKey.split(':')[0] ?? '',
     hasLocalSignerForEntity: () => true,
     hasLocalSignerForEntitySigner: () => true,
     resolveSoleLocalSignerForEntity: () => target.signerId,

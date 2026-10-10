@@ -1,4 +1,3 @@
-import { extractEntityId } from '../../protocol/identity';
 import { createStructuredLogger } from '../../support/logger.ts';
 import { normalizeRuntimeId } from '../../network/p2p/auth/runtime-id.ts';
 import { safeStringify } from '../../protocol/serialization';
@@ -78,7 +77,6 @@ const getRuntimeEntityRoutingDeps = (
   ensureRuntimeInfrastructure,
   enqueueRuntimeInputs: (env, inputs, runtimeTxs, jInputs, ingressTimestamp, options) =>
     enqueueRuntimeInputs(env, inputs, runtimeTxs, jInputs, ingressTimestamp, options),
-  extractEntityId,
   hasLocalSignerForEntity,
   hasLocalSignerForEntitySigner,
   resolveSoleLocalSignerForEntity,

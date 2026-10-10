@@ -28,7 +28,6 @@ import {
   saveEnvToDB,
   verifyRuntimeChain,
 } from '../../../runtime.ts';
-import { replaceRuntimeFrameEvents } from '../../../runtime/observability/env-events';
 import {
   computeStorageFrameHash,
   inspectStorage,
@@ -1780,13 +1779,13 @@ describe('storage frame journal retention', () => {
 
     for (let signerIndex = 2; signerIndex <= 5; signerIndex += 1) {
       const height = env.state.height + 1;
-      replaceRuntimeFrameEvents(env, [{
+      (env.infrastructure ??= {}).frameEvents = [{
         id: height,
         timestamp: env.state.timestamp,
         level: 'info',
         category: 'system',
         message: `storage-crash-history-view-loss-${height}`,
-      }]);
+      }];
       const nextSigner = deriveSignerAddressSync(seed, String(signerIndex));
       registerSignerKey(env, nextSigner, deriveSignerKeySync(seed, String(signerIndex)));
       const nextEntityId = generateLazyEntityId([nextSigner], 1n).toLowerCase();

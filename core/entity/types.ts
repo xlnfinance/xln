@@ -18,7 +18,6 @@ import type { AccountJClaimNodeChanges } from '../types/finance/account-j-claims
 import type { EntityProviderActionState, EntityProviderActionSubmitState } from '../types/entity-provider-actions';
 import type { JBatchState } from '../jurisdiction/machine/batch';
 import type { JInput } from '../jurisdiction/machine/input';
-import type { RuntimeSecurityIncidentIdentity } from '../protocol/errors/security-incident';
 import type { JurisdictionConfig } from '../protocol/config/jurisdiction-config';
 import type { CrontabState } from './scheduler/types';
 import type { EntityInfraContext } from '../types/entity/infra-context';
@@ -455,14 +454,6 @@ export type EntityCandidateEffect =
       kind: 'accountFrameCommitted';
       entityId: string;
       counterpartyId: string;
-    }
-  | {
-      kind: 'securityIncidentRecord';
-      identity: RuntimeSecurityIncidentIdentity;
-    }
-  | {
-      kind: 'securityIncidentResolve';
-      identity: RuntimeSecurityIncidentIdentity;
     };
 
 

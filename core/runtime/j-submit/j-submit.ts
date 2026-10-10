@@ -137,10 +137,6 @@ const validateDurableEntityProviderAction = (jurisdictionName: string, jTx: JTx)
   requireCanonicalEntityProviderActionAttempt(jurisdictionName, jTx);
 };
 
-export const isTransientJSubmitFailure = (error: unknown): boolean => {
-  return classifyJAdapterFailure(error).category === 'transient';
-};
-
 const queueBatchResult = (
   env: RuntimeReplica,
   deps: RuntimeJSubmitDeps,

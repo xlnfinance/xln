@@ -4,7 +4,6 @@ import {
   MAX_RUNTIME_SECURITY_INCIDENTS,
   buildRuntimeSecurityIncidentId,
   recordRuntimeSecurityIncident,
-  resolveRuntimeSecurityIncident,
 } from '../../../runtime/observability/security-incidents';
 import { createEmptyEnv } from '../../../runtime';
 import { buildDurableRuntimeMachineSnapshot, restoreDurableRuntimeSnapshot } from '../../../storage/wal/snapshot';
@@ -23,7 +22,7 @@ const incident = {
 };
 
 describe('runtime security incidents', () => {
-  test('deduplicates, resolves, and reopens one deterministic cross-j incident', () => {
+  test('deduplicates one deterministic cross-j incident', () => {
     const env = createEmptyEnv('security-incident-lifecycle');
     let activeLogCount = 0;
     env.error = () => {
@@ -44,25 +43,6 @@ describe('runtime security incidents', () => {
       occurrences: 2,
     });
     expect(activeLogCount).toBe(1);
-
-    env.state.timestamp = 120;
-    resolveRuntimeSecurityIncident(env, incident);
-    expect(env.infrastructure?.securityIncidents?.get(id)).toMatchObject({
-      status: 'resolved',
-      resolvedAt: 120,
-      occurrences: 2,
-    });
-
-    env.state.timestamp = 130;
-    recordRuntimeSecurityIncident(env, incident);
-    expect(env.infrastructure?.securityIncidents?.get(id)).toMatchObject({
-      status: 'active',
-      firstSeenAt: 100,
-      lastSeenAt: 130,
-      occurrences: 3,
-    });
-    expect(env.infrastructure?.securityIncidents?.get(id)?.resolvedAt).toBeUndefined();
-    expect(activeLogCount).toBe(2);
   });
 
   test('bounds incident memory and aggregates overflow without throwing', () => {

@@ -24,7 +24,6 @@ import type { LogCategory, FrameLogEntry } from '../../types/logging';
 
 import { storageOverlayRecordKey } from '../../protocol/state/overlay';
 import { invalidateEntityAccountCommitment } from '../../entity/consensus/state-root';
-import { recordRuntimeSecurityIncident, resolveRuntimeSecurityIncident } from './security-incidents';
 
 const getLogState = (env: RuntimeReplica) => {
   if (!env.infrastructure) env.infrastructure = {};
@@ -55,15 +54,6 @@ export const truncateRuntimeFrameEvents = (env: RuntimeReplica, length: number):
 /** Clear a frame buffer after durable commit, recovery, or an explicit scenario reset. */
 export const clearRuntimeFrameEvents = (env: RuntimeReplica): void => {
   getFrameEvents(env).length = 0;
-};
-
-/** Install explicit events for a synthetic frame fixture; never restores history. */
-export const replaceRuntimeFrameEvents = (
-  env: RuntimeReplica,
-  events: readonly FrameLogEntry[],
-): void => {
-  const buffer = getFrameEvents(env);
-  buffer.splice(0, buffer.length, ...events.map(entry => ({ ...entry })));
 };
 
 const MAX_CLEAN_LOGS = 2000;
@@ -302,10 +292,6 @@ export const publishEntityCandidateEffects = (
       }]);
     } else if (effect.kind === 'runtimeEvent') {
       env.emit(effect.eventName, effect.data);
-    } else if (effect.kind === 'securityIncidentRecord') {
-      recordRuntimeSecurityIncident(env, effect.identity);
-    } else if (effect.kind === 'securityIncidentResolve') {
-      resolveRuntimeSecurityIncident(env, effect.identity);
     } else if (effect.kind === 'debug') {
       // Informational candidate traces (currently REB_STEP) are local
       // diagnostics, not a second network event stream. Relay only actionable

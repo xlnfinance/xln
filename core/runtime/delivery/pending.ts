@@ -294,7 +294,6 @@ export type RuntimeOutputRoutingDeps = {
     jInputs?: never,
     ingressTimestamp?: number,
   ): void;
-  extractEntityId(replicaKey: string): string;
   hasLocalSignerForEntity(env: RuntimeReplica, entityId: string): boolean;
   hasLocalSignerForEntitySigner(env: RuntimeReplica, entityId: string, signerId: string): boolean;
   resolveSoleLocalSignerForEntity(env: RuntimeReplica, entityId: string): string | null;

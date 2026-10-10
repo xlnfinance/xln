@@ -40,14 +40,13 @@ export type RuntimeEntityRoutingDeps = {
     ingressTimestamp?: number,
     options?: RuntimeInputQueueOptions,
   ): void;
-  extractEntityId(replicaKey: string): string;
   hasLocalSignerForEntity(env: RuntimeReplica, entityId: string): boolean;
   hasLocalSignerForEntitySigner(env: RuntimeReplica, entityId: string, signerId: string): boolean;
   resolveSoleLocalSignerForEntity(env: RuntimeReplica, entityId: string): string | null;
   getP2P: RuntimeOutputRoutingDeps['getP2P'];
 };
 
-export type RuntimeInboundEntityInputResult =
+type RuntimeInboundEntityInputResult =
   | { kind: 'queued' }
   | { kind: 'ignored' };
 
@@ -63,18 +62,6 @@ type RuntimeInboundEntityInputValidation =
 export const normalizeEntityKey = (value: string): string => String(value || '').toLowerCase();
 const RUNTIME_HINT_TTL_MS = 60_000;
 
-type CrossJAdmissionCandidate = {
-  inputIndex: number;
-  routeKeys: string[];
-  pairKey: string;
-  phase: 'proposal' | 'ack';
-  leg: 'source' | 'target';
-  accountInput: AccountInput;
-  frame: AccountFrame;
-  pulls: Array<Extract<AccountTx, { type: 'cross_pull_lock' }>>;
-  alreadyCommitted: boolean;
-};
-
 const admissionKey = (orderId: string, routeHash: string): string =>
   `${String(orderId || '').trim()}\u0000${String(routeHash || '').trim().toLowerCase()}`;
 
@@ -87,14 +74,13 @@ const admissionOriginKey = (input: RoutedEntityInput): string => {
 // This key crosses the runtime boundary inside the atomic envelope. Transport
 // provenance is deliberately checked beside it, not encoded into it: the same
 // cohort is "local" at the sender and "remote:<sender>" at the receiver.
-const admissionPairKey = (_input: RoutedEntityInput, routeKeys: readonly string[]): string =>
+const admissionPairKey = (routeKeys: readonly string[]): string =>
   [...routeKeys].sort().join('\u0001');
 
 const exactAdmissionPairKey = (
-  input: RoutedEntityInput,
   routeKeys: readonly string[],
-  phase: CrossJAdmissionCandidate['phase'],
-): string => `${phase}\u0000${admissionPairKey(input, routeKeys)}`;
+  phase: 'proposal' | 'ack',
+): string => `${phase}\u0000${admissionPairKey(routeKeys)}`;
 
 const sameSourceRuntimeFrame = (
   source: RoutedEntityInput,
@@ -152,35 +138,19 @@ const crossCloseKey = (tx: CrossJCloseTx): string => safeStringify({
 const effectiveAccountInputs = (input: RoutedEntityInput): AccountInput[] =>
   getEffectiveEntityInputTxs(input).flatMap(tx => tx.type === 'accountInput' ? [tx.data] : []);
 
-const sourceAdmissionCandidate = (
-  input: RoutedEntityInput,
-  inputIndex: number,
-  accountInput: AccountInput,
-): CrossJAdmissionCandidate | null => {
+const sourceAdmissionResolved = (accountInput: AccountInput): boolean => {
   const proposal = accountInputProposal(accountInput);
-  if (!proposal) return null;
+  if (!proposal) return false;
   const pulls = crossPulls(proposal.frame.accountTxs, 'source');
-  if (pulls.length === 0) return null;
+  if (pulls.length === 0) return false;
   const bindings = pulls.map(pull => pull.data.crossJurisdiction!);
   const routeKeys = bindings.map(binding => admissionKey(binding.orderId, binding.routeHash));
-  if (new Set(routeKeys).size !== routeKeys.length) return null;
-  const everyPullHasOffer = bindings.every(binding => proposal.frame.accountTxs.some(tx =>
+  if (new Set(routeKeys).size !== routeKeys.length) return false;
+  return bindings.every(binding => proposal.frame.accountTxs.some(tx =>
     tx.type === 'swap_offer' &&
     tx.data.crossJurisdiction?.orderId === binding.orderId &&
     String(tx.data.crossJurisdiction?.routeHash || '').toLowerCase() ===
       String(binding.routeHash || '').toLowerCase()));
-  if (!everyPullHasOffer) return null;
-  return {
-    inputIndex,
-    routeKeys,
-    pairKey: exactAdmissionPairKey(input, routeKeys, 'proposal'),
-    phase: 'proposal',
-    leg: 'source',
-    accountInput,
-    frame: proposal.frame,
-    pulls,
-    alreadyCommitted: false,
-  };
 };
 
 const findInputReplica = (
@@ -214,29 +184,16 @@ const proposalAlreadyCommitted = (
       String(proposal.frame.stateHash || '').toLowerCase();
 };
 
-const targetProposalCandidate = (
-  input: RoutedEntityInput,
-  inputIndex: number,
-  accountInput: AccountInput,
-): CrossJAdmissionCandidate | null => {
+const targetProposalResolved = (accountInput: AccountInput): boolean => {
   const proposal = accountInputProposal(accountInput);
-  if (!proposal) return null;
+  if (!proposal) return false;
   const pulls = crossPulls(proposal.frame.accountTxs, 'target');
-  if (pulls.length === 0) return null;
-  const bindings = pulls.map(pull => pull.data.crossJurisdiction!);
-  const routeKeys = bindings.map(binding => admissionKey(binding.orderId, binding.routeHash));
-  if (new Set(routeKeys).size !== routeKeys.length) return null;
-  return {
-    inputIndex,
-    routeKeys,
-    pairKey: exactAdmissionPairKey(input, routeKeys, 'proposal'),
-    phase: 'proposal',
-    leg: 'target',
-    accountInput,
-    frame: proposal.frame,
-    pulls,
-    alreadyCommitted: false,
-  };
+  if (pulls.length === 0) return false;
+  const routeKeys = pulls.map(pull => admissionKey(
+    pull.data.crossJurisdiction!.orderId,
+    pull.data.crossJurisdiction!.routeHash,
+  ));
+  return new Set(routeKeys).size === routeKeys.length;
 };
 
 const routeForCrossJPull = (
@@ -312,7 +269,7 @@ type CrossJAccountFrameExpectation = {
   stateHash: string;
 };
 
-export type CrossJAccountInputPairSelection = {
+type CrossJAccountInputPairSelection = {
   inputs: RoutedEntityInput[];
   pairs: CrossJAccountInputPair[];
   rejectedLegs: CrossJRejectedAccountInput[];
@@ -343,13 +300,13 @@ type CrossJRejectedAccountInput = {
   detail: string[];
 };
 
-export type PotentialCrossJAccountInputPair = {
+type PotentialCrossJAccountInputPair = {
   pairKey: string;
   sourceInputIndex: number;
   targetInputIndex: number;
 };
 
-export type PotentialCrossJAccountInputPairOptions = {
+type PotentialCrossJAccountInputPairOptions = {
   /**
    * Sender-side Account legs may be certified by sibling Entities in adjacent
    * Runtime frames. They remain private in the durable outbox until the exact
@@ -385,13 +342,13 @@ const proposalCandidateInvalidReasons = (
   routeKeys: readonly string[],
   sourcePullCount: number,
   targetPullCount: number,
-  source: unknown,
-  target: unknown,
+  sourceResolved: boolean,
+  targetResolved: boolean,
 ): string[] => {
   const reasons: string[] = [];
   if (new Set(routeKeys).size !== routeKeys.length) reasons.push('duplicate-route-key');
-  if (sourcePullCount > 0 && source === null) reasons.push('source-sibling-unresolved');
-  if (targetPullCount > 0 && target === null) reasons.push('target-sibling-unresolved');
+  if (sourcePullCount > 0 && !sourceResolved) reasons.push('source-sibling-unresolved');
+  if (targetPullCount > 0 && !targetResolved) reasons.push('target-sibling-unresolved');
   return reasons;
 };
 
@@ -412,8 +369,6 @@ const buildCrossJProposalFrameCandidate = (
     sourceCloses.length === 0 &&
     targetCloses.length === 0
   ) return null;
-  const source = sourceAdmissionCandidate(input, inputIndex, accountInput);
-  const target = targetProposalCandidate(input, inputIndex, accountInput);
   const routeKeys = [
     ...[...sourcePulls, ...targetPulls].map(pull => `open\u0000${admissionKey(
       pull.data.crossJurisdiction!.orderId,
@@ -425,12 +380,12 @@ const buildCrossJProposalFrameCandidate = (
     routeKeys,
     sourcePulls.length,
     targetPulls.length,
-    source,
-    target,
+    sourceAdmissionResolved(accountInput),
+    targetProposalResolved(accountInput),
   );
   return {
     inputIndex,
-    pairKey: exactAdmissionPairKey(input, routeKeys, 'proposal'),
+    pairKey: exactAdmissionPairKey(routeKeys, 'proposal'),
     originKey: admissionOriginKey(input),
     phase: 'proposal',
     accountInput,
@@ -482,7 +437,7 @@ const buildCrossJAckFrameCandidate = (
   ];
   return {
     inputIndex,
-    pairKey: exactAdmissionPairKey(input, routeKeys, 'ack'),
+    pairKey: exactAdmissionPairKey(routeKeys, 'ack'),
     originKey: admissionOriginKey(input),
     phase: 'ack',
     accountInput,
@@ -1304,7 +1259,7 @@ export const collectCrossJurisdictionRemoteEntityHints = (
   env: RuntimeReplica,
   input: RoutedEntityInput,
   fromRuntimeId: string,
-  deps: Pick<RuntimeEntityRoutingDeps, 'extractEntityId' | 'hasLocalSignerForEntity'>,
+  deps: Pick<RuntimeEntityRoutingDeps, 'hasLocalSignerForEntity'>,
 ): string[] => {
   const localRuntimeId = normalizeRuntimeId(String(env.runtimeId || ''));
   const from = normalizeRuntimeId(fromRuntimeId);
@@ -1708,7 +1663,6 @@ export const createRuntimeOutputRoutingDeps = (
   enqueueRuntimeInputs: (env, inputs, _runtimeTxs, _jInputs, ingressTimestamp) => {
     deps.enqueueRuntimeInputs(env, inputs, undefined, undefined, ingressTimestamp, { localContinuation: true });
   },
-  extractEntityId: deps.extractEntityId,
   hasLocalSignerForEntity: deps.hasLocalSignerForEntity,
   hasLocalSignerForEntitySigner: deps.hasLocalSignerForEntitySigner,
   resolveSoleLocalSignerForEntity: deps.resolveSoleLocalSignerForEntity,

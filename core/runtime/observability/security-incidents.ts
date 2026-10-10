@@ -58,7 +58,7 @@ const recordCapacityIncident = (env: RuntimeReplica, incidents: Map<string, Runt
   const now = incidentTimestamp(env);
   const existing = incidents.get(OVERFLOW_INCIDENT_ID);
   const next: RuntimeSecurityIncident = existing
-    ? { ...existing, status: 'active', lastSeenAt: now, occurrences: existing.occurrences + 1 }
+    ? { ...existing, lastSeenAt: now, occurrences: existing.occurrences + 1 }
     : {
         id: OVERFLOW_INCIDENT_ID,
         domain: 'cross-j',
@@ -84,20 +84,17 @@ export const recordRuntimeSecurityIncident = (
   const id = buildRuntimeSecurityIncidentId(identity);
   const now = incidentTimestamp(env);
   const existing = incidents.get(id);
-  let shouldEmit = !existing || existing.status === 'resolved';
+  let shouldEmit = !existing;
   let incident: RuntimeSecurityIncident;
   if (existing) {
     incident = {
       ...existing,
-      status: 'active',
       lastSeenAt: now,
       occurrences: existing.occurrences + 1,
     };
-    delete incident.resolvedAt;
     incidents.set(id, incident);
   } else if (incidents.size >= MAX_RUNTIME_SECURITY_INCIDENTS - 1) {
-    const overflow = incidents.get(OVERFLOW_INCIDENT_ID);
-    shouldEmit = !overflow || overflow.status === 'resolved';
+    shouldEmit = !incidents.has(OVERFLOW_INCIDENT_ID);
     incident = recordCapacityIncident(env, incidents);
   } else {
     incident = {
@@ -119,28 +116,4 @@ export const recordRuntimeSecurityIncident = (
     }, identity.entityId || env.runtimeId);
   }
   return incident;
-};
-
-export const resolveRuntimeSecurityIncident = (
-  env: RuntimeReplica,
-  identity: RuntimeSecurityIncidentIdentity,
-): RuntimeSecurityIncident | null => {
-  const incidents = getIncidentMap(env);
-  const id = buildRuntimeSecurityIncidentId(identity);
-  const existing = incidents.get(id);
-  if (!existing || existing.status === 'resolved') return existing ?? null;
-  const now = incidentTimestamp(env);
-  const resolved: RuntimeSecurityIncident = {
-    ...existing,
-    status: 'resolved',
-    lastSeenAt: now,
-    resolvedAt: now,
-  };
-  incidents.set(id, resolved);
-  env.info?.('system', 'SECURITY_INCIDENT_RESOLVED', {
-    incidentId: resolved.id,
-    code: resolved.code,
-    summary: resolved.summary,
-  }, identity.entityId || env.runtimeId);
-  return resolved;
 };
