@@ -5,13 +5,13 @@ This runbook covers the production orchestrator surface exposed by `core/orchest
 ## Health Endpoints
 
 - `GET /api/health`: JSON readiness. Local loopback callers receive full diagnostics; public callers receive redacted status.
-- `GET /api/metrics`: Prometheus text metrics derived from the same health object.
+- `GET /api/metrics`: Prometheus text metrics derived from the same health object, with the same redaction. Per-child, hub restart, tracked-storage, `xln_disk_free_bytes` and external-client metrics are operator-only: scrape them from loopback on the host or with the daemon bearer.
 
 Quick checks:
 
 ```bash
 curl -fsS https://xln.finance/api/health | jq '{coreOk, systemOk, degraded, disk, storage, hubMesh, marketMaker, custody}'
-curl -fsS https://xln.finance/api/metrics | grep -E 'xln_(core_ok|system_ok|disk_free_bytes|process_rss_bytes|hub_online)'
+curl -fsS https://xln.finance/api/metrics | grep -E 'xln_(core_ok|system_ok|disk_used_pct|process_rss_bytes|hub_online)'
 bun run prod:health
 ```
 

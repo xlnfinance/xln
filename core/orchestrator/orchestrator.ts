@@ -2597,7 +2597,7 @@ const handleHealthRequest = async (
     await getStorageHealth();
     await refreshChildHealthForResponse();
     const health = await buildAggregatedHealthResponse();
-    return new Response(buildPrometheusMetrics(health), {
+    return new Response(buildPrometheusMetrics(health, operatorAuthorized), {
       headers: {
         ...headers,
         'Content-Type': 'text/plain; version=0.0.4; charset=utf-8',
