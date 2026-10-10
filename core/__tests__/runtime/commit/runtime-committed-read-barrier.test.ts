@@ -10,7 +10,7 @@ import {
   withRuntimeCommittedRead,
 } from '../../../runtime/frame/lifecycle/writer-lock';
 import { resolveRuntimeAdapterRead, type RuntimeAdapterResolveContext } from '../../../api/runtime-adapter/resolve';
-import { decodeRuntimeAdapterBrowserMessage as decodeBrowserMessage } from '../../../api/runtime-adapter/codec';
+import { serializeTaggedJson } from '../../../protocol/serialization';
 
 const radapterAuthSeed = process.env['XLN_RADAPTER_AUTH_SEED'] || 'seed';
 process.env['XLN_RADAPTER_AUTH_SEED'] = radapterAuthSeed;
@@ -195,7 +195,9 @@ describe('runtime committed read barrier', () => {
       tokenId: 1,
       amount: '5',
     };
-    const decoded = decodeBrowserMessage(JSON.stringify({ v: 1, id: 'quote-1', op: 'read', path: 'payment-routes', query }));
+    const decoded = decodeRuntimeAdapterBrowserMessage(
+      serializeTaggedJson({ v: 1, id: 'quote-1', op: 'read', path: 'payment-routes', query }),
+    );
     expect((decoded as { query?: unknown }).query).toEqual(query);
   });
 

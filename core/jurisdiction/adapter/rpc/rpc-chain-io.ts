@@ -145,10 +145,9 @@ const TRON_FETCH_TIMEOUT_MS = 10_000;
 const fetchTronJson = async (
   config: JAdapterConfig,
   url: string,
-  body: string,
-  label: string,
-  detail = '',
+  request: Readonly<{ body: string; label: string; detail?: string }>,
 ): Promise<unknown> => {
+  const { body, label, detail = '' } = request;
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), TRON_FETCH_TIMEOUT_MS);
   try {
@@ -189,12 +188,10 @@ const readTronSolidifiedBlockNumber = async (config: JAdapterConfig, provider: e
     .replace(/\/jsonrpc\/?$/i, '')
     .replace(/\/$/, '');
   if (!fullHost) throw new Error('TRON_FULL_HOST_MISSING');
-  const rawPayload = await fetchTronJson(
-    config,
-    `${fullHost}/walletsolidity/getnowblock`,
-    '{}',
-    'TRON_SOLIDIFIED_HEAD',
-  );
+  const rawPayload = await fetchTronJson(config, `${fullHost}/walletsolidity/getnowblock`, {
+    body: '{}',
+    label: 'TRON_SOLIDIFIED_HEAD',
+  });
   if (!rawPayload || typeof rawPayload !== 'object' || Array.isArray(rawPayload)) {
     throw new Error('TRON_SOLIDIFIED_HEAD_PAYLOAD_INVALID');
   }
@@ -225,7 +222,11 @@ const sendTronRpcCall = async (
 ): Promise<RpcBatchResponse> => {
   const rpcUrl = String(config.rpcUrl || '').trim();
   if (!rpcUrl) throw new Error('TRON_RPC_URL_MISSING');
-  const payload = await fetchTronJson(config, rpcUrl, JSON.stringify(request), 'TRON_RPC', `:${request.method}`);
+  const payload = await fetchTronJson(config, rpcUrl, {
+    body: JSON.stringify(request),
+    label: 'TRON_RPC',
+    detail: `:${request.method}`,
+  });
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
     throw new Error(`TRON_RPC_RESPONSE_INVALID:${request.method}`);
   }
