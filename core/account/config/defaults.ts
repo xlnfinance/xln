@@ -15,12 +15,15 @@ type TokenlessHubRawOverrides = {
   rebalanceGasFee?: bigint;
 };
 
-export const assertNoTokenlessHubRawOverrides = (config: TokenlessHubRawOverrides): void => {
-  const forbidden = [
+export const tokenlessHubRawOverrideFields = (config: TokenlessHubRawOverrides): string[] =>
+  [
     config.rebalanceBaseFee !== undefined ? 'rebalanceBaseFee' : '',
     config.c2rWithdrawSoftLimit !== undefined ? 'c2rWithdrawSoftLimit' : '',
     config.rebalanceGasFee !== undefined ? 'rebalanceGasFee' : '',
   ].filter(Boolean);
+
+export const assertNoTokenlessHubRawOverrides = (config: TokenlessHubRawOverrides): void => {
+  const forbidden = tokenlessHubRawOverrideFields(config);
   if (forbidden.length > 0) {
     throw new Error(`HUB_REBALANCE_TOKENLESS_RAW_OVERRIDE_FORBIDDEN:${forbidden.join(',')}`);
   }

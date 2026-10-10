@@ -1,7 +1,7 @@
 use ethabi::{Token, ethereum_types::U256};
 use num_bigint::{BigInt, Sign};
 use sha3::{Digest, Keccak256};
-use xln_rscore_protocol::{CanonicalNumber, CanonicalValue};
+use xln_rscore_protocol::{CanonicalNumber, CanonicalValue, JS_MAX_SAFE_INTEGER};
 
 use crate::j_batch::{
     EntityAmount, ExternalTokenToReserve, JBatch, JBatchFeeOverrides, ReserveToCollateral,
@@ -823,6 +823,35 @@ fn previous_hub_field<'a>(
     field(fields, name)
 }
 
+/// A negative (or out-of-range) hub number is the signer's error, and the TS
+/// Entity document schema refuses one on every read. Typed reject before
+/// mutation; parity: TS buildHubConfig.
+fn hub_config_uint(
+    entries: &[(String, CanonicalValue)],
+    name: &'static str,
+    code: &'static str,
+    default: u64,
+    range: std::ops::RangeInclusive<u64>,
+) -> Result<u64, EntityKernelError> {
+    let Some(value) = field(entries, name) else {
+        return Ok(default);
+    };
+    let CanonicalValue::Number(number) = value else {
+        return Err(invalid("setHubConfig", format!("{name}:SAFE_UINT")));
+    };
+    let parsed = number
+        .as_str()
+        .parse::<i128>()
+        .map_err(|_| invalid("setHubConfig", format!("{name}:SAFE_UINT")))?;
+    match u64::try_from(parsed) {
+        Ok(value) if range.contains(&value) => Ok(value),
+        _ => Err(EntityKernelError::rejected(
+            "setHubConfig",
+            format!("{code}:{parsed}"),
+        )),
+    }
+}
+
 /// A negative fee or collateral threshold has no meaning, and the TS Entity
 /// document schema refuses one on every read, so committing it bricked the
 /// next restart. Typed reject before mutation; parity: TS buildHubConfig.
@@ -881,7 +910,7 @@ fn apply_set_hub_config(
     let liquidity_fee =
         optional_bigint_field(entries, "rebalanceLiquidityFeeBps", BigInt::from(1_u8))?;
     if liquidity_fee < BigInt::from(0_u8) || liquidity_fee > BigInt::from(10_000_u32) {
-        return Err(invalid(
+        return Err(EntityKernelError::rejected(
             "setHubConfig",
             format!("HUB_REBALANCE_LIQUIDITY_FEE_BPS_INVALID:{liquidity_fee}"),
         ));
@@ -903,23 +932,25 @@ fn apply_set_hub_config(
         }
     };
     let requested_version = field(entries, "policyVersion")
-        .map(|_| safe_u64(entries, "policyVersion", "setHubConfig", 0))
+        .map(|_| {
+            hub_config_uint(
+                entries,
+                "policyVersion",
+                "HUB_REBALANCE_POLICY_VERSION_INVALID",
+                0,
+                1..=JS_MAX_SAFE_INTEGER,
+            )
+        })
         .transpose()?;
-    if requested_version == Some(0) {
-        return Err(invalid(
-            "setHubConfig",
-            "HUB_REBALANCE_POLICY_VERSION_INVALID",
-        ));
-    }
     let policy_version = match requested_version {
         Some(requested) if requested < previous_version => {
-            return Err(invalid(
+            return Err(EntityKernelError::rejected(
                 "setHubConfig",
                 format!("HUB_REBALANCE_POLICY_VERSION_STALE:{requested}<{previous_version}"),
             ));
         }
         Some(requested) if requested == previous_version && fee_policy_changed => {
-            return Err(invalid(
+            return Err(EntityKernelError::rejected(
                 "setHubConfig",
                 format!("HUB_REBALANCE_POLICY_EQUIVOCATION:version={requested}"),
             ));
@@ -946,13 +977,26 @@ fn apply_set_hub_config(
     if dispute_mode != "auto" && dispute_mode != "ignore" {
         return Err(invalid("setHubConfig", "disputeAutoFinalizeMode:LITERAL"));
     }
-    let routing_fee = safe_u64(entries, "routingFeePPM", "setHubConfig", 1)?;
-    let swap_fee = safe_u64(entries, "swapTakerFeeBps", "setHubConfig", 0)?.min(10_000);
-    let timeout = safe_u64(
+    let routing_fee = hub_config_uint(
+        entries,
+        "routingFeePPM",
+        "HUB_CONFIG_ROUTING_FEE_PPM_NEGATIVE",
+        1,
+        0..=JS_MAX_SAFE_INTEGER,
+    )?;
+    let swap_fee = hub_config_uint(
+        entries,
+        "swapTakerFeeBps",
+        "HUB_CONFIG_SWAP_TAKER_FEE_BPS_INVALID",
+        0,
+        0..=10_000,
+    )?;
+    let timeout = hub_config_uint(
         entries,
         "rebalanceTimeoutMs",
-        "setHubConfig",
+        "HUB_CONFIG_REBALANCE_TIMEOUT_MS_NEGATIVE",
         10 * 60 * 1_000,
+        0..=JS_MAX_SAFE_INTEGER,
     )?;
     let mut config = Vec::new();
     if let Some(name) = hub_name {
@@ -2503,6 +2547,89 @@ mod tests {
             apply_control(&mut state, &hub_config(field, 0)).expect("zero is a valid hub amount");
             assert!(state.profile.is_hub);
         }
+    }
+
+    /// A signer's out-of-range hub setting was a fatal InvalidLocalEntityTx,
+    /// which halted the Runtime; parity: TS hub-config-admission-bounds.test.ts.
+    #[test]
+    fn set_hub_config_out_of_range_numbers_are_typed_rejects() {
+        let number = |value: i64| {
+            CanonicalValue::Number(CanonicalNumber::try_from_i64(value).expect("number"))
+        };
+        let hub_config = |fields: Vec<(&str, CanonicalValue)>| {
+            CanonicalEntityTx::from_frame_projection(EntityTxKind::SetHubConfig, object(fields))
+                .expect("tx")
+        };
+        let assert_rejected =
+            |state: &mut EntityStateSlice, tx: &CanonicalEntityTx, expected: &str| {
+                let before = state.clone();
+                let error = apply_control(state, tx).expect_err("typed reject");
+                assert!(
+                    matches!(&error, EntityKernelError::RejectedEntityTx {
+                    kind: "setHubConfig", detail,
+                } if detail == expected),
+                    "{error}"
+                );
+                assert_eq!(*state, before);
+            };
+        for (fields, expected) in [
+            (
+                vec![("routingFeePPM", number(-1))],
+                "HUB_CONFIG_ROUTING_FEE_PPM_NEGATIVE:-1",
+            ),
+            (
+                vec![("rebalanceTimeoutMs", number(-1))],
+                "HUB_CONFIG_REBALANCE_TIMEOUT_MS_NEGATIVE:-1",
+            ),
+            (
+                vec![("swapTakerFeeBps", number(10_001))],
+                "HUB_CONFIG_SWAP_TAKER_FEE_BPS_INVALID:10001",
+            ),
+            (
+                vec![("swapTakerFeeBps", number(-1))],
+                "HUB_CONFIG_SWAP_TAKER_FEE_BPS_INVALID:-1",
+            ),
+            (
+                vec![(
+                    "rebalanceLiquidityFeeBps",
+                    CanonicalValue::BigInt(BigInt::from(10_001)),
+                )],
+                "HUB_REBALANCE_LIQUIDITY_FEE_BPS_INVALID:10001",
+            ),
+            (
+                vec![("policyVersion", number(0))],
+                "HUB_REBALANCE_POLICY_VERSION_INVALID:0",
+            ),
+        ] {
+            let mut state = EntityStateSlice::empty(format!("0x{}", "11".repeat(32)), 1);
+            assert_rejected(&mut state, &hub_config(fields), expected);
+        }
+        let mut state = EntityStateSlice::empty(format!("0x{}", "11".repeat(32)), 1);
+        let liquidity = |value: i64| CanonicalValue::BigInt(BigInt::from(value));
+        apply_control(
+            &mut state,
+            &hub_config(vec![
+                ("policyVersion", number(4)),
+                ("rebalanceLiquidityFeeBps", liquidity(5)),
+            ]),
+        )
+        .expect("configure");
+        assert_rejected(
+            &mut state,
+            &hub_config(vec![
+                ("policyVersion", number(3)),
+                ("rebalanceLiquidityFeeBps", liquidity(5)),
+            ]),
+            "HUB_REBALANCE_POLICY_VERSION_STALE:3<4",
+        );
+        assert_rejected(
+            &mut state,
+            &hub_config(vec![
+                ("policyVersion", number(4)),
+                ("rebalanceLiquidityFeeBps", liquidity(6)),
+            ]),
+            "HUB_REBALANCE_POLICY_EQUIVOCATION:version=4",
+        );
     }
 
     #[test]

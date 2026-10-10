@@ -8,8 +8,8 @@ import { prepareEntityTxState } from '../../../../state-clone';
 import { addMessage } from '../../../../frame-events';
 import { checkAutoRebalance } from '../../../../../account/tx/handlers/rebalance/request-collateral';
 import {
-  assertNoTokenlessHubRawOverrides,
   getDefaultRebalanceBaseFeeForToken,
+  tokenlessHubRawOverrideFields,
 } from '../../../../../account/config/defaults';
 import type { AccountTxTarget } from '..';
 import { getEntityAccountForWrite } from '../../../../state/persistent-account-map';
@@ -59,16 +59,16 @@ const resolveHubPolicyVersion = (
     requestedRaw !== undefined &&
     (!Number.isSafeInteger(requestedRaw) || Number(requestedRaw) <= 0)
   ) {
-    throw new Error(`HUB_REBALANCE_POLICY_VERSION_INVALID:${String(requestedRaw)}`);
+    throw rejectFailure('HUB_REBALANCE_POLICY_VERSION_INVALID', `HUB_REBALANCE_POLICY_VERSION_INVALID:${String(requestedRaw)}`);
   }
   const previousVersion = previous?.policyVersion ?? 0;
   if (requestedRaw !== undefined) {
     const requested = Number(requestedRaw);
     if (requested < previousVersion) {
-      throw new Error(`HUB_REBALANCE_POLICY_VERSION_STALE:${requested}<${previousVersion}`);
+      throw rejectFailure('HUB_REBALANCE_POLICY_VERSION_STALE', `HUB_REBALANCE_POLICY_VERSION_STALE:${requested}<${previousVersion}`);
     }
     if (requested === previousVersion && feePolicyChanged) {
-      throw new Error(`HUB_REBALANCE_POLICY_EQUIVOCATION:version=${requested}`);
+      throw rejectFailure('HUB_REBALANCE_POLICY_EQUIVOCATION', `HUB_REBALANCE_POLICY_EQUIVOCATION:version=${requested}`);
     }
     return requested;
   }
@@ -76,24 +76,42 @@ const resolveHubPolicyVersion = (
   return feePolicyChanged ? previousVersion + 1 : previousVersion;
 };
 
-// A negative fee or collateral threshold has no meaning, and the Entity
-// document schema refuses one on every read, so committing it bricked the next
-// restart. The signer's tx is a typed reject before mutation instead.
-// Parity: Rust apply_set_hub_config (entity-kernel local_control.rs).
-const rejectNegativeHubAmount = (value: bigint | undefined, code: string): void => {
-  if (value !== undefined && value < 0n) throw rejectFailure(code, `${code}:${value}`);
+// A negative fee, threshold, routing fee or timeout has no meaning, and the
+// Entity document schema refuses one on every read, so committing it bricked
+// the next restart. Every invalid field of the signer's tx is a typed reject
+// before mutation instead. Parity: Rust apply_set_hub_config
+// (entity-kernel local_control.rs).
+const rejectNegativeHubAmount = (value: bigint | number | undefined, code: string): void => {
+  if (value !== undefined && value < 0) throw rejectFailure(code, `${code}:${value}`);
+};
+
+const resolveSwapTakerFeeBps = (value: number | undefined): number => {
+  if (value === undefined) return 0;
+  if (!Number.isSafeInteger(value) || value < 0 || value > 10_000) {
+    throw rejectFailure('HUB_CONFIG_SWAP_TAKER_FEE_BPS_INVALID', `HUB_CONFIG_SWAP_TAKER_FEE_BPS_INVALID:${value}`);
+  }
+  return value;
 };
 
 export const buildHubConfig = (
   previous: HubRebalanceConfig | undefined,
   data: SetHubConfigTx['data'],
 ): { config: HubRebalanceConfig; feePolicyChanged: boolean } => {
-  assertNoTokenlessHubRawOverrides(data);
+  const tokenlessOverrides = tokenlessHubRawOverrideFields(data);
+  if (tokenlessOverrides.length > 0) {
+    throw rejectFailure(
+      'HUB_REBALANCE_TOKENLESS_RAW_OVERRIDE_FORBIDDEN',
+      `HUB_REBALANCE_TOKENLESS_RAW_OVERRIDE_FORBIDDEN:${tokenlessOverrides.join(',')}`,
+    );
+  }
   rejectNegativeHubAmount(data.baseFee, 'HUB_CONFIG_BASE_FEE_NEGATIVE');
   rejectNegativeHubAmount(data.minCollateralThreshold, 'HUB_CONFIG_MIN_COLLATERAL_THRESHOLD_NEGATIVE');
+  rejectNegativeHubAmount(data.routingFeePPM, 'HUB_CONFIG_ROUTING_FEE_PPM_NEGATIVE');
+  rejectNegativeHubAmount(data.rebalanceTimeoutMs, 'HUB_CONFIG_REBALANCE_TIMEOUT_MS_NEGATIVE');
+  const swapTakerFeeBps = resolveSwapTakerFeeBps(data.swapTakerFeeBps);
   const liquidityFeeBps = data.rebalanceLiquidityFeeBps ?? 1n;
   if (liquidityFeeBps < 0n || liquidityFeeBps > 10_000n) {
-    throw new Error(`HUB_REBALANCE_LIQUIDITY_FEE_BPS_INVALID:${liquidityFeeBps}`);
+    throw rejectFailure('HUB_REBALANCE_LIQUIDITY_FEE_BPS_INVALID', `HUB_REBALANCE_LIQUIDITY_FEE_BPS_INVALID:${liquidityFeeBps}`);
   }
   const feePolicyChanged =
     !previous ||
@@ -109,10 +127,7 @@ export const buildHubConfig = (
       policyVersion: resolveHubPolicyVersion(data.policyVersion, previous, feePolicyChanged),
       routingFeePPM: data.routingFeePPM ?? 1,
       baseFee: data.baseFee ?? 0n,
-      swapTakerFeeBps: Math.max(
-        0,
-        Math.min(10_000, Math.floor(Number(data.swapTakerFeeBps ?? 0) || 0)),
-      ),
+      swapTakerFeeBps,
       disputeAutoFinalizeMode: data.disputeAutoFinalizeMode ?? 'auto',
       minCollateralThreshold: data.minCollateralThreshold ?? 0n,
       rebalanceLiquidityFeeBps: liquidityFeeBps,
@@ -221,7 +236,7 @@ export const handleSetRebalancePolicyEntityTx = (
   }
 
   if (r2cRequestSoftLimit < 0n || hardLimit < r2cRequestSoftLimit || maxAcceptableFee < 0n) {
-    throw new Error(`REBALANCE_POLICY_INVALID: token=${tokenId}`);
+    throw rejectFailure('REBALANCE_POLICY_INVALID', `REBALANCE_POLICY_INVALID: token=${tokenId}`);
   }
   const account = getEntityAccountForWrite(newState.accounts, counterpartyEntityId);
   if (!account) throw new Error(`REBALANCE_POLICY_ACCOUNT_MISSING:${counterpartyEntityId}`);

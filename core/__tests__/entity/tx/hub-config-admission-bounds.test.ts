@@ -68,6 +68,45 @@ describe('hub settings the Entity document cannot read back are rejected at admi
     });
   }
 
+  // A signer's out-of-range hub setting used to be a plain Error inside the
+  // Entity transition, which halted the Runtime that applied it.
+  const signerErrors: Array<[string, EntityTx, string]> = [
+    ['negative routingFeePPM', hubConfig({ routingFeePPM: -1 }), 'HUB_CONFIG_ROUTING_FEE_PPM_NEGATIVE:-1'],
+    ['negative rebalanceTimeoutMs', hubConfig({ rebalanceTimeoutMs: -1 }), 'HUB_CONFIG_REBALANCE_TIMEOUT_MS_NEGATIVE:-1'],
+    ['swapTakerFeeBps above 100%', hubConfig({ swapTakerFeeBps: 10_001 }), 'HUB_CONFIG_SWAP_TAKER_FEE_BPS_INVALID:10001'],
+    ['negative swapTakerFeeBps', hubConfig({ swapTakerFeeBps: -1 }), 'HUB_CONFIG_SWAP_TAKER_FEE_BPS_INVALID:-1'],
+    [
+      'liquidity fee above 100%',
+      hubConfig({ rebalanceLiquidityFeeBps: 10_001n }),
+      'HUB_REBALANCE_LIQUIDITY_FEE_BPS_INVALID:10001',
+    ],
+    ['policyVersion 0', hubConfig({ policyVersion: 0 }), 'HUB_REBALANCE_POLICY_VERSION_INVALID:0'],
+    [
+      'tokenless raw override',
+      hubConfig({ rebalanceBaseFee: 1n }),
+      'HUB_REBALANCE_TOKENLESS_RAW_OVERRIDE_FORBIDDEN:rebalanceBaseFee',
+    ],
+  ];
+  for (const [name, tx, code] of signerErrors) {
+    test(`${name} is a typed reject, not a Runtime halt`, async () => {
+      const state = freshState();
+      const result = await applyEntityTx(createEmptyEnv(`hub-signer-${name}`), state, tx);
+      expect(result.skippedError).toBe(code);
+      expect(result.newState).toBe(state);
+      expect(state.hubRebalanceConfig).toBeUndefined();
+    });
+  }
+
+  test('a stale or equivocating policy version is a typed reject', async () => {
+    const env = createEmptyEnv('hub-policy-version');
+    const configured = await applyEntityTx(env, freshState(), hubConfig({ policyVersion: 4, rebalanceLiquidityFeeBps: 5n }));
+    expect(configured.skippedError).toBeUndefined();
+    const stale = await applyEntityTx(env, configured.newState, hubConfig({ policyVersion: 3, rebalanceLiquidityFeeBps: 5n }));
+    expect(stale.skippedError).toBe('HUB_REBALANCE_POLICY_VERSION_STALE:3<4');
+    const equivocation = await applyEntityTx(env, configured.newState, hubConfig({ policyVersion: 4, rebalanceLiquidityFeeBps: 6n }));
+    expect(equivocation.skippedError).toBe('HUB_REBALANCE_POLICY_EQUIVOCATION:version=4');
+  });
+
   test('the boundary values commit and round-trip through the Entity storage layout', async () => {
     const env = createEmptyEnv('hub-bounds-accept');
     const configured = await applyEntityTx(env, freshState(), hubConfig({ baseFee: 0n, minCollateralThreshold: 0n }));
