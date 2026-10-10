@@ -63,7 +63,7 @@ const getJReplicaStackId = (replica: JReplica | undefined): string => {
   });
 };
 
-export const getJReplicaByName = (env: EntityRuntimeContext, name?: string | null): JReplica | undefined => {
+const getJReplicaByName = (env: EntityRuntimeContext, name?: string | null): JReplica | undefined => {
   const normalized = normalizeJurisdictionName(name);
   if (!normalized) return undefined;
   const exact = env.state.jReplicas?.get(name as string);

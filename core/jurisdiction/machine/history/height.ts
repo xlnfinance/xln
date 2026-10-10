@@ -1,10 +1,4 @@
 import type { EntityState } from '../../../entity/types';
-import type { RuntimeReplica } from '../../../runtime/types';
-import {
-  getJReplicaByJurisdictionRef,
-  getJReplicaByName,
-  isJurisdictionStackRef,
-} from '../jurisdiction-runtime';
 
 /**
  * Jurisdiction height visible to an Entity reducer.
@@ -26,33 +20,4 @@ export function getEntityCertifiedJurisdictionHeight(
     throw new Error(`ENTITY_J_FINALITY_HEIGHT_MISMATCH:state=${height}:certificate=${certifiedHeight}`);
   }
   return height;
-}
-
-const getJReplicaByJurisdictionNameOrRef = (env: RuntimeReplica, jurisdictionName?: string): ReturnType<typeof getJReplicaByName> => {
-  const raw = String(jurisdictionName || '').trim();
-  if (!raw) return undefined;
-  return isJurisdictionStackRef(raw)
-    ? getJReplicaByJurisdictionRef(env, raw)
-    : getJReplicaByName(env, raw);
-};
-
-export function getRuntimeJurisdictionHeight(env: RuntimeReplica, defaultHeight = 0, jurisdictionName?: string): number {
-  const baseline = Number.isFinite(defaultHeight) ? Math.max(0, Math.floor(defaultHeight)) : 0;
-  if (jurisdictionName) {
-    const requested = getJReplicaByJurisdictionNameOrRef(env, jurisdictionName);
-    if (!requested) return baseline;
-    const blockNumber = Number(requested?.blockNumber ?? 0n);
-    return Number.isFinite(blockNumber) ? Math.max(0, Math.floor(blockNumber)) : baseline;
-  }
-
-  const active = env.activeJurisdiction ? env.state.jReplicas?.get(env.activeJurisdiction) : undefined;
-  const candidates = active
-    ? [active, ...Array.from(env.state.jReplicas?.values?.() || [])]
-    : Array.from(env.state.jReplicas?.values?.() || []);
-  let best = baseline;
-  for (const replica of candidates) {
-    const blockNumber = Number(replica?.blockNumber ?? 0n);
-    if (Number.isFinite(blockNumber) && blockNumber > best) best = Math.floor(blockNumber);
-  }
-  return best;
 }

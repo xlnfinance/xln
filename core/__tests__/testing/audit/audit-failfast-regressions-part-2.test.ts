@@ -157,7 +157,6 @@ import {
   getJEventJurisdictionRef,
 } from '../../../jurisdiction/machine/event-observation';
 
-import { getRuntimeJurisdictionHeight } from '../../../jurisdiction/machine/history/height';
 
 import { recordValidatorJHistory } from '../../../jurisdiction/machine/local-history';
 

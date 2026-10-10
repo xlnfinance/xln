@@ -17,7 +17,7 @@ The J-machine converts finalized chain observations into deterministic entity in
 - `canonicalJurisdictionEventKey(event)` - stable event ordering and identity.
 - `encodeJBatch(batch)` / `decodeJBatch(bytes)` - deterministic batch wire format.
 - `computeBatchHankoHash(...)` - commitment signed by the entity board.
-- `getRuntimeJurisdictionHeight(env, ...)` - resolves finalized local J-height.
+- `getEntityCertifiedJurisdictionHeight(state)` - the J-height an Entity reducer may read: its certified prefix, never a watcher tip.
 - `connectJurisdictionAdapter(config)` - opens the selected external chain adapter.
 
 ## Invariant

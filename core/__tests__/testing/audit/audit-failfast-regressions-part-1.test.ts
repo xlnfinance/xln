@@ -141,7 +141,6 @@ import {
   getJEventJurisdictionRef,
 } from '../../../jurisdiction/machine/event-observation';
 
-import { getRuntimeJurisdictionHeight } from '../../../jurisdiction/machine/history/height';
 
 import { recordValidatorJHistory } from '../../../jurisdiction/machine/local-history';
 
@@ -576,20 +575,6 @@ const makeEntityState = (entityId: string): EntityState => createEntityFrameCand
 });
 
 describe('audit fail-fast regressions', () => {
-  test('jurisdiction-specific runtime height ignores higher sibling chain tip', () => {
-    const env = createEmptyEnv('jurisdiction-height-specificity');
-    env.activeJurisdiction = 'Tron';
-    env.state.jReplicas = new Map([
-      ['Testnet', { name: 'Testnet', blockNumber: 3145n }],
-      ['Tron', { name: 'Tron', blockNumber: 5794n }],
-    ] as any);
-
-    expect(getRuntimeJurisdictionHeight(env, 0, 'Testnet')).toBe(3145);
-    expect(getRuntimeJurisdictionHeight(env, 5794, 'Testnet')).toBe(3145);
-    expect(getRuntimeJurisdictionHeight(env, 0, 'Tron')).toBe(5794);
-    expect(getRuntimeJurisdictionHeight(env, 0)).toBe(5794);
-  });
-
   test('cross-j system entity txs reject every raw ingress outside committed runtimeOutput', async () => {
     const env = createEmptyEnv('cross-j-intra-runtime-boundary');
     env.scenarioMode = true;

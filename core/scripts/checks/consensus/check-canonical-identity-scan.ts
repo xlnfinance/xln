@@ -84,12 +84,6 @@ for (const [path, markers] of [
     '? getJReplicaByJurisdictionRef(env, configuredName)',
     ': getJReplicaByName(env, configuredName);',
   ]],
-  ['core/jurisdiction/machine/history/height.ts', [
-    'const getJReplicaByJurisdictionNameOrRef =',
-    'return isJurisdictionStackRef(raw)',
-    '? getJReplicaByJurisdictionRef(env, raw)',
-    ': getJReplicaByName(env, raw);',
-  ]],
   ['core/orchestrator/hub-node.ts', [
     'const sameJurisdictionRef = (left: unknown, right: unknown): boolean => {',
     'return Boolean(leftRef && rightRef && leftRef === rightRef);',
