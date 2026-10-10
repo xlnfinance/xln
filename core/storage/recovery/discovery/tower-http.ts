@@ -61,6 +61,19 @@ export async function fetchTowerServerInfo(towerUrl: string, pageUrl?: string): 
   return payload;
 }
 
+// A rejected fetch (offline, DNS, refused, TLS, CORS) is transport failure,
+// never evidence about a backup. Code it here, where it is known, so the
+// classifier never reads browser- or source-supplied text. Cancellation keeps
+// its own reason.
+const fetchTower = async (url: string, init: RequestInit): Promise<Response> => {
+  try {
+    return await fetch(url, init);
+  } catch (error) {
+    if (init.signal?.aborted) throw error;
+    throw new Error(`RECOVERY_TOWER_UNREACHABLE: ${error instanceof Error ? error.message : String(error)}`);
+  }
+};
+
 /**
  * Ask before restoring. A tower that holds nothing answers this cheaply, so a
  * device with no backup never produces an expected-404 restore error.
@@ -71,7 +84,7 @@ export async function towerHasRecoveryBundle(
   pageUrl?: string,
   signal?: AbortSignal,
 ): Promise<boolean> {
-  const response = await fetch(buildTowerRequestUrl(tower.url, '/api/recovery/discover', pageUrl), {
+  const response = await fetchTower(buildTowerRequestUrl(tower.url, '/api/recovery/discover', pageUrl), {
     signal: signal ?? null,
     method: 'POST',
     headers: { 'content-type': 'application/json' },
@@ -98,7 +111,7 @@ export async function fetchTowerRecoveryBundles(
   pageUrl?: string,
   signal?: AbortSignal,
 ): Promise<TowerRestoreOutcome> {
-  const response = await fetch(buildTowerRequestUrl(tower.url, '/api/tower/restore', pageUrl), {
+  const response = await fetchTower(buildTowerRequestUrl(tower.url, '/api/tower/restore', pageUrl), {
     signal: signal ?? null,
     method: 'POST',
     headers: { 'content-type': 'application/json' },

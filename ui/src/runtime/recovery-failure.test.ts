@@ -10,7 +10,11 @@ function explain(...messages: string[]): string {
 }
 
 test('a tower outage does not blame the BrainVault credentials', () => {
-  for (const failure of ['HTTP_503', 'Failed to fetch', 'network connection lost', 'Load failed']) {
+  // Transport failures arrive coded from the fetch/socket call site.
+  for (const failure of [
+    'HTTP_503', 'RECOVERY_TOWER_UNREACHABLE: Failed to fetch', 'RECOVERY_TOWER_UNREACHABLE: Load failed',
+    'RECOVERY_REQUEST_TIMEOUT: target=0x01',
+  ]) {
     expect(explain(failure)).toStartWith('The recovery service is unavailable.');
     expect(explain(failure)).toContain(failure);
   }
@@ -19,6 +23,12 @@ test('a tower outage does not blame the BrainVault credentials', () => {
 test('only expected-empty answers establish that no copy was found', () => {
   expect(explain('TOWER_BUNDLE_NOT_FOUND')).toBe('No verified backup could be restored.');
   expect(explain('TOWER_BUNDLE_NOT_FOUND', 'HTTP_503')).toStartWith('The recovery service is unavailable.');
+});
+
+test('source-supplied transport words never downgrade contradicting evidence', () => {
+  expect(explain('RECOVERY_BUNDLE_TRUSTED_RUNTIME_ID_MISMATCH:derived=0x01:encrypted=network'))
+    .toStartWith('The backup could not be verified.');
+  expect(explain('Failed to fetch')).toStartWith('The backup could not be verified.');
 });
 
 test('invalid evidence takes precedence over a retryable outage', () => {

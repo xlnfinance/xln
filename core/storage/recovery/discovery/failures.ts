@@ -1,3 +1,4 @@
+import { normalizeRuntimeFailureCode } from '../../../protocol/errors/failure-taxonomy';
 import type {
   RuntimeRecoveryCandidateSource,
   RuntimeRecoveryDiscoveryFailure,
@@ -14,11 +15,6 @@ import type {
  * restore screen shout at people with nothing wrong.
  */
 
-const normalizeRecoveryFailureCode = (message: string): string => {
-  const code = message.trim().split(/[\s:]/)[0] || 'UNKNOWN';
-  return code.replace(/[^A-Z0-9_]/gi, '_').toUpperCase();
-};
-
 const EXPECTED_EMPTY_CODES: ReadonlySet<string> = new Set([
   'TOWER_BUNDLE_NOT_FOUND',
   'PEER_RECOVERY_BUNDLE_EMPTY',
@@ -26,25 +22,27 @@ const EXPECTED_EMPTY_CODES: ReadonlySet<string> = new Set([
   'HTTP_404',
 ]);
 
+// Transport failures are coded where the request is made (tower fetch, peer
+// socket). The rest of a message carries tower- or peer-supplied text, so
+// classification reads the leading code only: a hostile source cannot turn a
+// contradiction into a retry by echoing "network" or "timeout".
 const TRANSIENT_CODES: ReadonlySet<string> = new Set([
   'HTTP_408',
   'HTTP_409',
   'HTTP_425',
   'HTTP_429',
+  'RECOVERY_TOWER_UNREACHABLE',
   'RECOVERY_REQUEST_SEND_FAILED',
   'RECOVERY_REQUEST_SOCKET_CLOSED',
+  'RECOVERY_REQUEST_TIMEOUT',
+  'RUNTIME_WS_RECOVERY_CONNECT_TIMEOUT',
+  'REMOTE_RUNTIME_CONNECT_FAILED',
 ]);
 
-const TRANSIENT_TEXT = ['timeout', 'offline', 'connect', 'network', 'fetch'] as const;
-
-const categorizeRecoveryFailure = (code: string, message: string): RuntimeRecoveryFailureCategory => {
+const categorizeRecoveryFailure = (code: string): RuntimeRecoveryFailureCategory => {
   if (EXPECTED_EMPTY_CODES.has(code)) return 'ExpectedEmpty';
-  const lower = message.toLowerCase();
-  // WebKit reports a rejected fetch as TypeError("Load failed"). This is
-  // transport failure, not evidence contradicting the wallet or its backup.
-  if (lower === 'load failed') return 'TransientRace';
   if (code.startsWith('HTTP_5') || TRANSIENT_CODES.has(code)) return 'TransientRace';
-  return TRANSIENT_TEXT.some(fragment => lower.includes(fragment)) ? 'TransientRace' : 'Contradiction';
+  return 'Contradiction';
 };
 
 export const classifyRuntimeRecoveryDiscoveryFailure = (input: {
@@ -53,11 +51,11 @@ export const classifyRuntimeRecoveryDiscoveryFailure = (input: {
   message: string;
 }): RuntimeRecoveryDiscoveryFailure => {
   const message = String(input.message || 'unknown').trim() || 'unknown';
-  const code = normalizeRecoveryFailureCode(message);
+  const code = normalizeRuntimeFailureCode(message);
   return {
     source: input.source,
     sourceLabel: String(input.sourceLabel || input.source).trim() || input.source,
-    category: categorizeRecoveryFailure(code, message),
+    category: categorizeRecoveryFailure(code),
     code,
     message,
   };
