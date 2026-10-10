@@ -15,8 +15,23 @@ import { processDisputeDeadlineHook } from './dispute-deadline-hook';
 import { processBoardHankoRefreshHook } from './board-hanko-refresh-hook';
 import { isDisputeReadyPayment } from '../paybook/views';
 import { settleOverdueLendingLoan } from '../tx/handlers/account/committed-lending-close';
+import { scheduleHook } from './hook-state';
 
 const crontabLog = createStructuredLogger('entity.crontab');
+
+// disputeStart halts the Runtime when the J batch already carries
+// maxDisputeStarts, and every planned prepare starts in this one input. Many
+// deadlines can fire in one tick; the ones that cannot fit re-arm and fire
+// after the batch flushes.
+const disputeStartsFull = (
+  replica: EntityTransitionContext,
+  plan: DueHookPlan,
+  counterpartyEntityId: string,
+): boolean => {
+  if (plan.disputePrepareCounterparties.has(counterpartyEntityId)) return false;
+  const queuedStarts = replica.state.jBatchState?.batch.disputeStarts.length ?? 0;
+  return queuedStarts + plan.disputePrepareCounterparties.size >= J_BATCH_CONTRACT_LIMITS.maxDisputeStarts;
+};
 
 const processSecretAckTimeout = (
   hook: DerivedSecretAckTimeout,
@@ -42,21 +57,13 @@ const processSecretAckTimeout = (
     return;
   }
   if (account.activeDispute) return;
-  // disputeStart halts the Runtime when the J batch already carries
-  // maxDisputeStarts. Under load many secret-ack deadlines fire in one tick;
-  // re-arm the ones that cannot fit and let them fire after the batch flushes.
-  const queuedStarts = replica.state.jBatchState?.batch.disputeStarts.length ?? 0;
-  if (
-    queuedStarts + plan.disputePrepareCounterparties.size >= J_BATCH_CONTRACT_LIMITS.maxDisputeStarts &&
-    !plan.disputePrepareCounterparties.has(counterpartyEntityId)
-  ) {
+  if (disputeStartsFull(replica, plan, counterpartyEntityId)) {
     // The deadline is the entry's own field; pushing it re-arms the derived wake.
     const pending = bookIntentSlot.getPaybookEntryForWrite(replica.state, hashlock);
     if (pending) pending.secretAckDeadlineAt = replica.state.timestamp + 1;
     crontabLog.warn('htlc_secret_ack_timeout.deferred', {
       counterparty: shortId(counterpartyEntityId),
       hashlock: shortHash(hashlock),
-      queuedStarts,
     });
     return;
   }
@@ -127,6 +134,16 @@ const processDueHook = (
         )
       ));
       if (hasCurrentBoardHankoRefresh || account.activeDispute || account.disputePrepare) return;
+      if (disputeStartsFull(replica, plan, hook.data.accountId)) {
+        // One-shot hooks are removed before they fire; re-arm this one.
+        const crontabState = replica.state.crontabState;
+        if (!crontabState) throw new Error('COUNTERPARTY_BOARD_HANKO_REFRESH_CRONTAB_MISSING');
+        scheduleHook(crontabState, { ...hook, triggerAt: replica.state.timestamp + 1 });
+        crontabLog.warn('counterparty_board_hanko_refresh_deadline.deferred', {
+          counterparty: shortId(hook.data.accountId),
+        });
+        return;
+      }
       plan.disputePrepareCounterparties.set(
         hook.data.accountId,
         'counterparty-board-hanko-refresh-deadline-expired',

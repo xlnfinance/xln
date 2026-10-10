@@ -22,6 +22,7 @@ import {
   counterpartyBoardHankoRefreshDeadlineHookId,
 } from '../../../entity/tx/j-events-board';
 import { safeStringify } from '../../../protocol/serialization';
+import { J_BATCH_CONTRACT_LIMITS } from '../../../jurisdiction/machine/batch';
 import { createEmptyEnv } from '../../../runtime';
 import { decodeBuffer, encodeBuffer } from '../../../storage/codec/codec';
 import {
@@ -510,4 +511,43 @@ test('fresh counterparty board Hanko refresh satisfies every older activation de
   expect(result.outputs).toEqual([]);
   expect(result.approvedEntityTxs).toBeUndefined();
   expect(result.newState.crontabState?.hooks.has(hookId)).toBe(false);
+});
+
+test('board Hanko refresh deadlines beyond the J batch dispute-start cap re-arm, never halt', async () => {
+  // Nine counterparties rotate boards and skip the refresh; their deadlines
+  // fire in one tick. Every planned prepare starts in this one input, and the
+  // ninth start used to halt with J_BATCH_LIMIT_EXCEEDED (again on restart).
+  const signerId = deriveSignerAddressSync('counterparty-boardHankoRefresh-cap', '1').toLowerCase();
+  const sourceEntityId = digest(32_001);
+  const env = createEmptyEnv('counterparty-boardHankoRefresh-cap');
+  const state = makeState(sourceEntityId, signerId, jurisdiction);
+  state.timestamp = 70_000;
+  state.crontabState = initCrontab();
+  const hookIds: string[] = [];
+  for (let index = 0; index < J_BATCH_CONTRACT_LIMITS.maxDisputeStarts + 1; index += 1) {
+    const counterpartyId = digest(32_100 + index);
+    putCommittedAccount(state, counterpartyId, makeCommittedAccount(sourceEntityId, counterpartyId, digest(32_200 + index)));
+    const hookId = counterpartyBoardHankoRefreshDeadlineHookId(counterpartyId, 44, index);
+    hookIds.push(hookId);
+    scheduleHook(state.crontabState, {
+      id: hookId,
+      triggerAt: state.timestamp,
+      type: 'counterparty_board_hanko_refresh_deadline',
+      data: { accountId: counterpartyId, activationJHeight: 44, activationLogIndex: index },
+    });
+  }
+  const jobs = [...hookIds].sort().map(id => ({ kind: 'hook' as const, id, dueAt: state.timestamp }));
+
+  const result = await handleScheduledWakeEntityTx(
+    env,
+    createEntityFrameCandidateState(state),
+    { type: 'scheduledWake', data: { version: 1, proposerSignerId: signerId, dueAt: state.timestamp, jobs } },
+    false,
+  );
+
+  const prepared = (result.approvedEntityTxs ?? []).filter(tx => tx.type === 'prepareDispute');
+  expect(prepared).toHaveLength(J_BATCH_CONTRACT_LIMITS.maxDisputeStarts);
+  const rearmed = hookIds.filter(id => result.newState.crontabState?.hooks.has(id));
+  expect(rearmed).toEqual([jobs.at(-1)!.id]);
+  expect(result.newState.crontabState?.hooks.get(rearmed[0]!)?.triggerAt).toBe(state.timestamp + 1);
 });
