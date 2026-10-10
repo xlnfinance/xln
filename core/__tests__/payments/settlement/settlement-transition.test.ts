@@ -1184,6 +1184,33 @@ describe('atomic settlement Account transition', () => {
     expect(followup.hashesToSign).toEqual([]);
     expect(rightState.deferredAccountProposals?.get(LEFT))
       .toBe(rightAccount.state.settlementWorkspace?.workspaceHash);
+
+    // The peer replaces its workspace before our approval materializes. The
+    // stale deferral yields to the newly committed workspace; it used to throw
+    // SETTLEMENT_APPROVAL_ALREADY_DEFERRED after commit and halt the Runtime.
+    const firstHash = rightAccount.state.settlementWorkspace!.workspaceHash;
+    const replacement = transition({
+      kind: 'upsert',
+      revision: 2,
+      previousWorkspaceHash: firstHash,
+      ops: [{ type: 'r2r', tokenId: 1, amount: 3n }],
+      executorIsLeft: true,
+    });
+    const { result: replaced, account: replacedAccount } =
+      await applyOnEntity(rightState, LEFT, replacement, true);
+    expect(replaced.ok).toBe(true);
+    await processCommittedSettlementTransitionFollowup(
+      replacedAccount,
+      replacement,
+      { ...replacedAccount.currentFrame, height: 2, timestamp: 1_001, accountTxs: [replacement] },
+      true,
+      LEFT,
+      rightState,
+      env,
+    );
+    const secondHash = replacedAccount.state.settlementWorkspace!.workspaceHash;
+    expect(secondHash).not.toBe(firstHash);
+    expect(rightState.deferredAccountProposals?.get(LEFT)).toBe(secondHash);
   });
 
   test('pure debt forgiveness is never classified as safe for automatic approval', async () => {

@@ -300,14 +300,9 @@ pub(crate) fn apply_committed_settlement_followup(
     let deferred = state
         .deferred_account_proposals
         .get_or_insert_with(EntityCanonicalCollection::empty);
-    if let Some(existing) = deferred.get(counterparty)
-        && existing != &CanonicalValue::String(workspace_hash.into())
-    {
-        return Err(invalid(
-            KIND,
-            format!("APPROVAL_ALREADY_DEFERRED:{counterparty}"),
-        ));
-    }
+    // Parity target: processCommittedSettlementTransitionFollowup (settle.ts).
+    // A newer committed workspace replaces a still-deferred approval of the
+    // old one; erroring here failed the frame after the peer's commit.
     deferred.insert(
         counterparty.to_string(),
         CanonicalValue::String(workspace_hash.into()),
@@ -514,11 +509,8 @@ pub(super) fn apply_approve(
     let deferred = state
         .deferred_account_proposals
         .get_or_insert_with(EntityCanonicalCollection::empty);
-    if let Some(existing) = deferred.get(&tx.counterparty_entity_id)
-        && existing != &CanonicalValue::String(canonical_hash.into())
-    {
-        return Err(invalid(KIND, "SETTLEMENT_APPROVAL_ALREADY_DEFERRED"));
-    }
+    // The requested hash equals the current workspace; any other deferred hash
+    // names a replaced workspace. Parity target: settle.ts settle_approve.
     deferred.insert(
         tx.counterparty_entity_id,
         CanonicalValue::String(canonical_hash.into()),
@@ -936,6 +928,51 @@ mod committed_tests {
                 .as_ref()
                 .and_then(|entries| entries.get(&peer)),
             Some(&CanonicalValue::String(workspace_hash))
+        );
+
+        // Parity: settlement-transition.test.ts. The peer replaces the workspace
+        // before our approval materializes; the newer workspace takes the slot
+        // instead of failing APPROVAL_ALREADY_DEFERRED after commit.
+        let replaced_hash = format!("0x{}", "44".repeat(32));
+        let replaced = financial_view(CanonicalValue::Object(vec![
+            ("revision".into(), n(2)),
+            (
+                "workspaceHash".into(),
+                CanonicalValue::String(replaced_hash.clone()),
+            ),
+            ("lastModifiedByLeft".into(), CanonicalValue::Bool(false)),
+            (
+                "ops".into(),
+                CanonicalValue::Array(vec![CanonicalValue::Object(vec![
+                    ("type".into(), CanonicalValue::String("r2r".into())),
+                    ("tokenId".into(), n(1)),
+                    ("amount".into(), CanonicalValue::BigInt(5.into())),
+                ])]),
+            ),
+        ]));
+        let replacement = AccountTx::SettleTransition {
+            data: CanonicalValue::Object(vec![
+                ("kind".into(), CanonicalValue::String("upsert".into())),
+                ("revision".into(), n(2)),
+            ]),
+        };
+        assert!(
+            apply_committed_settlement_followup(
+                &mut state,
+                &peer,
+                &replacement,
+                true,
+                false,
+                Some(&replaced),
+            )
+            .expect("replacement followup")
+        );
+        assert_eq!(
+            state
+                .deferred_account_proposals
+                .as_ref()
+                .and_then(|entries| entries.get(&peer)),
+            Some(&CanonicalValue::String(replaced_hash))
         );
     }
 

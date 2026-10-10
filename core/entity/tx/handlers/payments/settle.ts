@@ -387,10 +387,8 @@ export async function handleSettleApprove(
     newState.deferredAccountProposals,
     value => value,
   );
-  const existing = newState.deferredAccountProposals.get(counterpartyEntityId);
-  if (existing && existing !== canonicalWorkspaceHash) {
-    throw new Error(`SETTLEMENT_APPROVAL_ALREADY_DEFERRED:${existing}:${canonicalWorkspaceHash}`);
-  }
+  // The requested hash equals the current workspace, so any other deferred
+  // hash names a workspace the peer has since replaced: approve the current one.
   newState.deferredAccountProposals.set(counterpartyEntityId, canonicalWorkspaceHash);
   settleLog.debug('approve.deferred_until_account_idle', {
     side: getAccountPerspective(account.state, entityState.entityId).iAmLeft ? 'left' : 'right',
@@ -836,10 +834,11 @@ export async function processCommittedSettlementTransitionFollowup(
     entityState.deferredAccountProposals,
     value => value,
   );
-  const existing = entityState.deferredAccountProposals.get(counterpartyEntityId);
-  if (existing && existing !== workspaceHash) {
-    throw new Error(`SETTLEMENT_APPROVAL_ALREADY_DEFERRED:${existing}:${workspaceHash}`);
-  }
+  // The peer may replace its workspace while our approval still waits for an
+  // idle Account. The older hash names a workspace that no longer exists, so
+  // the newest committed workspace takes its slot; throwing here halted the
+  // Runtime after the peer's frame had committed. Parity: Rust
+  // apply_committed_settlement_followup (entity-kernel local_financial).
   entityState.deferredAccountProposals.set(counterpartyEntityId, workspaceHash);
   return empty();
 }
