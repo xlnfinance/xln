@@ -14,6 +14,7 @@ import {
   getNextEntityProviderActionRetryTimestamp,
 } from '../registration/entity-provider-action-submit-scheduler';
 import { getNextGovernanceSubmitTimestamp } from '../registration/governance-submit-state';
+import { getNextJurisdictionImportRetryAt } from '../j-submit/jurisdiction-import';
 
 export type RuntimeWakeDeps = {
   requireRuntimeMempool(env: RuntimeReplica): RuntimeInput;
@@ -52,6 +53,7 @@ export const getNextWallClockWakeTimestamp = (env: RuntimeReplica): number | nul
     getNextJSubmitRetryTimestamp(env),
     getNextEntityProviderActionRetryTimestamp(env),
     getNextGovernanceSubmitTimestamp(env),
+    getNextJurisdictionImportRetryAt(env),
   ]
     .filter((value): value is number => value !== null);
   return due.length > 0 ? Math.min(...due) : null;

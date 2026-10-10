@@ -89,6 +89,15 @@ export type PendingJurisdictionImport = {
   request: JurisdictionImportRequest;
 };
 
+/** Last failed materialization of a pending import intent; retryAt null = rejected, not retried. */
+export type JurisdictionImportFailure = {
+  category: 'transient' | 'rejected';
+  code: string;
+  message: string;
+  failures: number;
+  retryAt: number | null;
+};
+
 type NumberedRegistrationEntityOwnership =
   | Readonly<{
       /** This Runtime only pays the on-chain registration and imports no replica. */
@@ -702,6 +711,8 @@ interface RuntimeInfrastructure {
   jPreparationTasks?: Map<string, Promise<void>>;
   /** Durable import intents awaiting a local, replayable completeImportJ result. */
   pendingJurisdictionImports?: Map<string, PendingJurisdictionImport>;
+  /** Process-local materialization failures by importId; never durable. */
+  jurisdictionImportFailures?: Map<string, JurisdictionImportFailure>;
   /** Caller-idempotent registration batches; completed records are O(actual batches). */
   numberedRegistrationIntents?: Map<string, NumberedRegistrationRecord>;
   /** Process-local serialized command lane; its lifetime is exactly this RuntimeReplica. */

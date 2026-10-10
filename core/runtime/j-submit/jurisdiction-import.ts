@@ -5,9 +5,18 @@ import { createJAdapterWithRetry } from '../../jurisdiction/adapter/kernel/retry
 import { createStructuredLogger } from '../../support/logger';
 import type { JAdapter, JAdapterConfig } from '../../jurisdiction/adapter/types';
 import { safeStringify } from '../../protocol/serialization';
-import type { RuntimeReplica, JurisdictionImportRequest, JurisdictionImportResult, PendingJurisdictionImport, RuntimeTx } from '../types';
+import type {
+  JurisdictionImportFailure,
+  JurisdictionImportRequest,
+  JurisdictionImportResult,
+  PendingJurisdictionImport,
+  RuntimeReplica,
+  RuntimeTx,
+} from '../types';
 import type { JReplica } from '../../types/jurisdiction-runtime';
 import { requireRuntimeMempool } from '../mempool/input-queue';
+import { ensureRuntimeInfrastructure } from '../envelope/replica-envelope';
+import { jSubmitDueClockMs } from './j-submit-state';
 
 type ImportJRuntimeTx = Extract<RuntimeTx, { type: 'importJ' }>;
 type CompleteImportJRuntimeTx = Extract<RuntimeTx, { type: 'completeImportJ' }>;
@@ -15,6 +24,16 @@ type CompleteImportJRuntimeTx = Extract<RuntimeTx, { type: 'completeImportJ' }>;
 const LOCAL_J_IMPORT_RESULT = Symbol.for('xln.runtime.j-import-result.local');
 const jurisdictionImportLog = createStructuredLogger('runtime.jurisdiction_import');
 const errorMessage = (error: unknown): string => error instanceof Error ? error.message : String(error);
+const IMPORT_RETRY_BASE_MS = 5_000;
+const IMPORT_RETRY_MAX_MS = 300_000;
+
+/** The request or its own endpoint contradicts the import: retrying this intent cannot succeed. */
+class JurisdictionImportRejectedError extends Error {
+  constructor(readonly code: string, detail: string) {
+    super(`${code}:${detail}`);
+    this.name = 'JurisdictionImportRejectedError';
+  }
+}
 
 export const buildJurisdictionImportRequestHash = (
   request: JurisdictionImportRequest,
@@ -279,12 +298,12 @@ const resolveInitialBlockNumber = async (
     if (request.rpcs.length === 0) return 0n;
     const deploymentBlock = request.entityProviderDeploymentBlock;
     if (deploymentBlock === undefined) {
-      throw new Error(`IMPORT_J_ENTITY_PROVIDER_DEPLOYMENT_BLOCK_REQUIRED:${request.name}`);
+      throw new JurisdictionImportRejectedError('IMPORT_J_ENTITY_PROVIDER_DEPLOYMENT_BLOCK_REQUIRED', request.name);
     }
     return BigInt(deploymentBlock - 1);
   }
   if (!adapter.getCurrentBlockNumber) {
-    throw new Error(`IMPORT_J_CURRENT_BLOCK_UNAVAILABLE:${request.name}`);
+    throw new JurisdictionImportRejectedError('IMPORT_J_CURRENT_BLOCK_UNAVAILABLE', request.name);
   }
   const current = await adapter.getCurrentBlockNumber();
   if (!Number.isSafeInteger(current) || current < 0) {
@@ -299,7 +318,7 @@ const assertAdapterAddresses = (
 ): JurisdictionImportResult['contracts'] => {
   const contracts = normalizeJurisdictionImportContracts(adapter.addresses, true)!;
   if (request.contracts && safeStringify(contracts) !== safeStringify(request.contracts)) {
-    throw new Error(`IMPORT_J_ADAPTER_CONTRACTS_MISMATCH:${request.name}`);
+    throw new JurisdictionImportRejectedError('IMPORT_J_ADAPTER_CONTRACTS_MISMATCH', request.name);
   }
   return contracts;
 };
@@ -331,7 +350,7 @@ const buildJurisdictionImportAdapterConfig = (
   if (isBrowserVM) return config;
 
   const rpcUrl = request.rpcs[0];
-  if (!rpcUrl) throw new Error(`IMPORT_J_RPC_MISSING:${request.name}`);
+  if (!rpcUrl) throw new JurisdictionImportRejectedError('IMPORT_J_RPC_MISSING', request.name);
   const contracts = normalizeJurisdictionImportContracts(request.contracts, true)!;
   config.rpcUrl = rpcUrl;
   config.fromReplica = {
@@ -358,7 +377,7 @@ const requireWatcherConfirmationDepth = (
 ): number => {
   const depth = adapter.getFinalityDepth?.();
   if (depth === undefined || !Number.isSafeInteger(depth) || depth < 0) {
-    throw new Error(`IMPORT_J_FINALITY_POLICY_MISSING:${request.name}`);
+    throw new JurisdictionImportRejectedError('IMPORT_J_FINALITY_POLICY_MISSING', request.name);
   }
   return depth;
 };
@@ -373,19 +392,19 @@ const buildPreparedJurisdictionImportResult = async (
   const watcherConfirmationDepth = requireWatcherConfirmationDepth(adapter, request);
   const stateRootBytes = adapter.captureStateRoot ? await adapter.captureStateRoot() : null;
   if (isBrowserVM && !(stateRootBytes instanceof Uint8Array && stateRootBytes.length === 32)) {
-    throw new Error(`IMPORT_J_STATE_ROOT_UNAVAILABLE:${request.name}`);
+    throw new JurisdictionImportRejectedError('IMPORT_J_STATE_ROOT_UNAVAILABLE', request.name);
   }
   if (!isBrowserVM && stateRootBytes !== null) {
-    throw new Error(`IMPORT_J_RPC_STATE_ROOT_UNEXPECTED:${request.name}`);
+    throw new JurisdictionImportRejectedError('IMPORT_J_RPC_STATE_ROOT_UNEXPECTED', request.name);
   }
   const entityProviderDeploymentBlock = adapter.entityProviderDeploymentBlock;
   if (!Number.isSafeInteger(entityProviderDeploymentBlock) || entityProviderDeploymentBlock < 1) {
-    throw new Error(`IMPORT_J_ENTITY_PROVIDER_DEPLOYMENT_BLOCK_INVALID:${request.name}`);
+    throw new JurisdictionImportRejectedError('IMPORT_J_ENTITY_PROVIDER_DEPLOYMENT_BLOCK_INVALID', request.name);
   }
   const browserVMState = isBrowserVM ? await adapter.dumpState() : undefined;
   const tokenRegistry = await adapter.getTokenRegistry();
   if (isBrowserVM && (!browserVMState || typeof browserVMState === 'string')) {
-    throw new Error(`IMPORT_J_BROWSERVM_STATE_UNAVAILABLE:${request.name}`);
+    throw new JurisdictionImportRejectedError('IMPORT_J_BROWSERVM_STATE_UNAVAILABLE', request.name);
   }
   return {
     importId: pending.importId,
@@ -444,12 +463,72 @@ const prepareJurisdictionImportResult = async (
   return result;
 };
 
+const rejectedImportCode = (error: unknown): string | null => {
+  const causes = error instanceof AggregateError ? error.errors : [error];
+  const rejected = causes.find((cause): cause is JurisdictionImportRejectedError =>
+    cause instanceof JurisdictionImportRejectedError);
+  return rejected?.code ?? null;
+};
+
+/**
+ * Materialization is external I/O against an operator- or user-supplied RPC,
+ * run before every frame: a failure must never leave the loop. A typed
+ * contradiction is not retried in this process; anything else backs off.
+ */
+const recordImportFailure = (env: RuntimeReplica, intent: PendingJurisdictionImport, error: unknown, now: number): void => {
+  const failures = ensureRuntimeInfrastructure(env).jurisdictionImportFailures ??= new Map();
+  const count = (failures.get(intent.importId)?.failures ?? 0) + 1;
+  const code = rejectedImportCode(error);
+  const failure: JurisdictionImportFailure = code
+    ? { category: 'rejected', code, message: errorMessage(error), failures: count, retryAt: null }
+    : {
+        category: 'transient',
+        code: 'IMPORT_J_MATERIALIZE_UNAVAILABLE',
+        message: errorMessage(error),
+        failures: count,
+        retryAt: now + Math.min(IMPORT_RETRY_MAX_MS, IMPORT_RETRY_BASE_MS * 2 ** (count - 1)),
+      };
+  failures.set(intent.importId, failure);
+  jurisdictionImportLog.error('jurisdiction.import_failed', {
+    name: intent.request.name,
+    chainId: intent.request.chainId,
+    ...failure,
+  });
+};
+
+const importIsDue = (env: RuntimeReplica, importId: string, now: number): boolean => {
+  const failure = env.infrastructure?.jurisdictionImportFailures?.get(importId);
+  return !failure || (failure.retryAt !== null && failure.retryAt <= now);
+};
+
+export const hasDueJurisdictionImport = (env: RuntimeReplica): boolean => {
+  const now = jSubmitDueClockMs(env);
+  return [...(env.infrastructure?.pendingJurisdictionImports?.keys() ?? [])]
+    .some(importId => importIsDue(env, importId, now));
+};
+
+export const getNextJurisdictionImportRetryAt = (env: RuntimeReplica): number | null => {
+  const retries = [...(env.infrastructure?.pendingJurisdictionImports?.keys() ?? [])]
+    .flatMap(importId => env.infrastructure?.jurisdictionImportFailures?.get(importId)?.retryAt ?? []);
+  return retries.length > 0 ? Math.min(...retries) : null;
+};
+
+const pruneSettledImportFailures = (env: RuntimeReplica): void => {
+  const failures = env.infrastructure?.jurisdictionImportFailures;
+  if (!failures) return;
+  for (const importId of failures.keys()) {
+    if (!env.infrastructure?.pendingJurisdictionImports?.has(importId)) failures.delete(importId);
+  }
+};
+
 export const materializePendingJurisdictionImportResults = async (
   env: RuntimeReplica,
   enqueue: (runtimeTx: CompleteImportJRuntimeTx) => void,
 ): Promise<void> => {
+  pruneSettledImportFailures(env);
   const pending = env.infrastructure?.pendingJurisdictionImports;
   if (!pending || pending.size === 0) return;
+  const now = jSubmitDueClockMs(env);
   const queuedIds = new Set(requireRuntimeMempool(env).runtimeTxs
     .filter((tx): tx is CompleteImportJRuntimeTx => tx.type === 'completeImportJ')
     .map(tx => tx.data.importId));
@@ -457,18 +536,15 @@ export const materializePendingJurisdictionImportResults = async (
     jurisdictionNameKey(left.request.name).localeCompare(jurisdictionNameKey(right.request.name)) ||
     left.importId.localeCompare(right.importId));
   for (const intent of ordered) {
-    if (queuedIds.has(intent.importId)) continue;
+    if (queuedIds.has(intent.importId) || !importIsDue(env, intent.importId, now)) continue;
     let result: JurisdictionImportResult;
     try {
       result = await prepareJurisdictionImportResult(intent);
     } catch (error) {
-      jurisdictionImportLog.error('jurisdiction.import_failed', {
-        name: intent.request.name,
-        chainId: intent.request.chainId,
-        error: errorMessage(error),
-      });
-      throw error;
+      recordImportFailure(env, intent, error, now);
+      continue;
     }
+    env.infrastructure?.jurisdictionImportFailures?.delete(intent.importId);
     enqueue(markLocalJImportResultRuntimeTx({ type: 'completeImportJ', data: result }));
     jurisdictionImportLog.info('jurisdiction.ready', {
       name: result.name,

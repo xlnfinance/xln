@@ -9,7 +9,11 @@ import { dbRootPath } from '../../../runtime/replica/platform';
 import { bootScenario } from '../../../scenarios/harness/boot';
 import { setScenarioStorageEnabled } from '../../../scenarios/harness/helpers';
 import {
+  applyImportJurisdictionIntent,
   buildJurisdictionImportRequestHash,
+  getNextJurisdictionImportRetryAt,
+  hasDueJurisdictionImport,
+  materializePendingJurisdictionImportResults,
 } from '../../../runtime/j-submit/jurisdiction-import';
 import {
   createEmptyEnv,
@@ -351,6 +355,115 @@ describe('runtime import external-side-effect atomicity', () => {
       expect(browserVM.getEntityWallet(entityId).address.toLowerCase()).toBe(signerId);
     } finally {
       await jadapter.close();
+    }
+  }, 30_000);
+});
+
+describe('pending import materialization failures', () => {
+  const importFailures = (env: ReturnType<typeof createEmptyEnv>) =>
+    [...(env.infrastructure?.jurisdictionImportFailures?.values() ?? [])];
+
+  test('an import its own endpoint contradicts is marked rejected and never halts the frame loop', async () => {
+    // Any materialization failure threw out of post-commit, and the durable
+    // intent re-threw before every later frame and after every restart.
+    const env = createEmptyEnv('runtime-import-j-rejected-intent');
+    setScenarioStorageEnabled(env, false);
+    env.quietRuntimeLogs = true;
+    env.scenarioMode = true;
+    env.state.timestamp = 1_000;
+    enqueueRuntimeInput(env, {
+      runtimeTxs: [{
+        type: 'importJ',
+        data: {
+          name: 'Mismatched BrowserVM',
+          chainId: 31337,
+          ticker: 'SIM',
+          rpcs: [],
+          contracts: {
+            depository: `0x${'11'.repeat(20)}`,
+            entityProvider: `0x${'22'.repeat(20)}`,
+            account: `0x${'33'.repeat(20)}`,
+            deltaTransformer: `0x${'44'.repeat(20)}`,
+          },
+        },
+      }],
+      entityInputs: [],
+    });
+
+    await processRuntime(env);
+    await processRuntime(env);
+
+    expect(env.state.height).toBe(1);
+    expect(env.state.jReplicas.size).toBe(0);
+    expect(env.infrastructure?.pendingJurisdictionImports?.size).toBe(1);
+    expect(importFailures(env)).toEqual([expect.objectContaining({
+      category: 'rejected',
+      code: 'IMPORT_J_ADAPTER_CONTRACTS_MISMATCH',
+      failures: 1,
+      retryAt: null,
+    })]);
+    expect(hasDueJurisdictionImport(env)).toBe(false);
+    expect(getNextJurisdictionImportRetryAt(env)).toBeNull();
+  }, 30_000);
+
+  test('a failing import RPC backs off and retries instead of halting the frame loop', async () => {
+    let requests = 0;
+    const server = Bun.serve({
+      port: 0,
+      fetch: async request => {
+        requests += 1;
+        const body = await request.json() as { id: number } | Array<{ id: number }>;
+        const reply = ({ id }: { id: number }) => ({ jsonrpc: '2.0', id, error: { code: -32_603, message: 'header not found' } });
+        return Response.json(Array.isArray(body) ? body.map(reply) : reply(body));
+      },
+    });
+    try {
+      const env = createEmptyEnv('runtime-import-j-transient-intent');
+      env.quietRuntimeLogs = true;
+      env.scenarioMode = true;
+      env.state.timestamp = 1_000;
+      applyImportJurisdictionIntent(env, {
+        type: 'importJ',
+        data: {
+          name: 'Flaky RPC',
+          chainId: 31337,
+          ticker: 'ETH',
+          rpcs: [`http://127.0.0.1:${server.port}`],
+          entityProviderDeploymentBlock: 1,
+          contracts: {
+            depository: `0x${'11'.repeat(20)}`,
+            entityProvider: `0x${'22'.repeat(20)}`,
+            account: `0x${'33'.repeat(20)}`,
+            deltaTransformer: `0x${'44'.repeat(20)}`,
+          },
+        },
+      });
+      const results: unknown[] = [];
+      const materialize = () => materializePendingJurisdictionImportResults(env, tx => results.push(tx));
+
+      await materialize();
+      expect(importFailures(env)).toEqual([expect.objectContaining({
+        category: 'transient',
+        code: 'IMPORT_J_MATERIALIZE_UNAVAILABLE',
+        failures: 1,
+        retryAt: 6_000,
+      })]);
+      expect(getNextJurisdictionImportRetryAt(env)).toBe(6_000);
+      const requestsAfterFirst = requests;
+      expect(requestsAfterFirst).toBeGreaterThan(0);
+
+      await materialize();
+      expect(requests).toBe(requestsAfterFirst);
+      expect(hasDueJurisdictionImport(env)).toBe(false);
+
+      env.state.timestamp = 6_000;
+      expect(hasDueJurisdictionImport(env)).toBe(true);
+      await materialize();
+      expect(requests).toBeGreaterThan(requestsAfterFirst);
+      expect(importFailures(env)).toEqual([expect.objectContaining({ failures: 2, retryAt: 16_000 })]);
+      expect(results).toEqual([]);
+    } finally {
+      await server.stop(true);
     }
   }, 30_000);
 });

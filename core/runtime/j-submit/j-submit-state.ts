@@ -202,10 +202,10 @@ export const hasInFlightJPreparation = (env: RuntimeReplica, tx: JTx): boolean =
   && Boolean(env.infrastructure?.jPreparationTasks?.has(tx.data.runtimeSubmitAttempt?.attemptId ?? ''));
 
 /**
- * Clock for the post-commit due check of a governance retry. Loop readiness and
- * submission must read the same one: an empty frame never advances the
- * committed timestamp, so wall-clock readiness against committed-time submission
- * re-ran empty frames until unrelated input arrived.
+ * Clock for post-commit due checks (governance retries, import backoff). Loop
+ * readiness and the I/O it wakes for must read the same one: an empty frame
+ * never advances the committed timestamp, so wall-clock readiness against
+ * committed-time submission re-ran empty frames until unrelated input arrived.
  */
 export const jSubmitDueClockMs = (env: RuntimeReplica): number =>
   env.scenarioMode ? env.state.timestamp : getWallClockMs();

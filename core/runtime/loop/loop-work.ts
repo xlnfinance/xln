@@ -18,6 +18,7 @@ import { ensureRuntimeConfig } from './loop-environment.ts';
 import { enqueueRuntimeInputs } from './loop-envelope.ts';
 import { ensureRuntimeInfrastructure } from '../envelope/replica-envelope.ts';
 import { hasReadyCommittedJOutbox } from '../j-submit/j-submit-state.ts';
+import { hasDueJurisdictionImport } from '../j-submit/jurisdiction-import.ts';
 import type { EntityInput, EntityReplica } from '../../entity/types.ts';
 import type { RoutedEntityInput, RuntimeReplica, RuntimeInput, RuntimeTx } from '../types.ts';
 import type { JInput } from '../../jurisdiction/machine/input';
@@ -139,7 +140,7 @@ export const resolveRuntimeWorkReason = (
 ): string | null => {
   const mempool = requireRuntimeMempool(env);
   if (hasReadyCommittedJOutbox(env)) return 'committed-j-outbox';
-  if ((env.infrastructure?.pendingJurisdictionImports?.size ?? 0) > 0) return 'jurisdiction-import';
+  if (hasDueJurisdictionImport(env)) return 'jurisdiction-import';
   if (mempool.runtimeTxs.length > 0 || mempool.entityInputs.length > 0) return 'runtime-mempool';
   if ((mempool.jInputs?.length ?? 0) > 0) return 'j-input';
   if (
