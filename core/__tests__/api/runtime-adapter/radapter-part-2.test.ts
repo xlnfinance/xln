@@ -1877,6 +1877,32 @@ test('runtime adapter read rate limit is configurable', async () => {
   }
 });
 
+test('a captured owner auth message cannot be replayed for the owner lane', async () => {
+  // The owner binding signs a client-chosen challenge; one observed auth
+  // message used to reopen the owner lane (mnemonic export) on any socket.
+  const env = makeEnv();
+  const runtimeId = deriveSignerAddressSync(String(env.runtimeSeed), '1').toLowerCase();
+  env.runtimeId = runtimeId;
+  const ownerKey = deriveRuntimeAdapterCapabilityToken('seed', 'full', Date.now() + 60_000, { audience: runtimeId });
+  const ownerAuth = {
+    v: XLN_PROTOCOL_VERSION, id: 'auth-owner-replay', op: 'auth' as const,
+    key: ownerKey,
+    challenge: adapterAuthChallenge,
+    ownerSignature: ownerBindingSignature(runtimeId, adapterAuthChallenge, ownerKey),
+  };
+  const authOn = async () => {
+    const messages: unknown[] = [];
+    await handleRuntimeAdapterMessage({ send: (message: unknown) => messages.push(message) }, ownerAuth, env, {
+      enqueueRuntimeInput: () => {},
+    });
+    return decodeTestRuntimeAdapterMessage<{ ok: boolean; error?: { code: string } }>(messages.pop());
+  };
+  expect((await authOn()).ok).toBe(true);
+  const replayed = await authOn();
+  expect(replayed.ok).toBe(false);
+  expect(replayed.error?.code).toBe('E_UNAUTHORIZED');
+});
+
 test('BrainVault mnemonic export is owner-lane only and redacts the secret', async () => {
   const messages: unknown[] = [];
   const auditEvents: Array<Record<string, unknown>> = [];

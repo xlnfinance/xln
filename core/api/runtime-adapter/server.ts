@@ -53,7 +53,10 @@ import {
   runtimeAdapterOwnerCommandLaneId,
 } from '../../runtime/command/frontier';
 import { markLocalRuntimeAdapterCommandTx } from '../../runtime/command/frontier-auth';
-import { verifyRuntimeAdapterOwnerBinding } from './security/owner-binding';
+import {
+  buildRuntimeAdapterOwnerBindingDigest,
+  verifyRuntimeAdapterOwnerBinding,
+} from './security/owner-binding';
 import { encodeBinaryPayload } from '../../protocol/serialization/binary-codec';
 import { XLN_PROTOCOL_VERSION } from '../../protocol/version';
 import {
@@ -175,6 +178,30 @@ type PendingRuntimeAdapterCommand = {
     status: 'pending';
     commandSequence: number;
   };
+};
+
+/**
+ * Owner-signed auth digests seen per Runtime, kept until their capability
+ * expires. The owner binding signs a client-chosen challenge, so a captured
+ * auth message used to replay the owner lane (mnemonic export included) for
+ * the capability's lifetime. In memory only: a restart reopens that window.
+ */
+const usedOwnerBindings = new WeakMap<RuntimeReplica, Map<string, number>>();
+
+const consumeOwnerBinding = (
+  env: RuntimeReplica,
+  digest: string,
+  expiresAtMs: number | null,
+): boolean => {
+  const now = Date.now();
+  const used = usedOwnerBindings.get(env) ?? new Map<string, number>();
+  usedOwnerBindings.set(env, used);
+  for (const [seen, expiry] of used) {
+    if (expiry <= now) used.delete(seen);
+  }
+  if (used.has(digest)) return false;
+  used.set(digest, expiresAtMs ?? Number.POSITIVE_INFINITY);
+  return true;
 };
 
 const pendingRuntimeAdapterCommands = new Map<RuntimeReplica, Map<string, PendingRuntimeAdapterCommand>>();
@@ -627,6 +654,19 @@ const handleRuntimeAdapterAuth = (
     throw new RuntimeAdapterError(
       'E_UNAUTHORIZED',
       'runtime adapter vault-owner binding is invalid',
+    );
+  }
+  if (
+    ownerSignature &&
+    !consumeOwnerBinding(
+      env,
+      buildRuntimeAdapterOwnerBindingDigest(identity.runtimeId, challenge, String(msg.key || '')),
+      auth.expiresAtMs,
+    )
+  ) {
+    throw new RuntimeAdapterError(
+      'E_UNAUTHORIZED',
+      'runtime adapter vault-owner binding was already used',
     );
   }
   const commandLaneKind = ownerSignature ? 'owner' : 'capability';
