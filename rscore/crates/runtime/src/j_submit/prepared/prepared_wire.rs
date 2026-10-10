@@ -211,6 +211,45 @@ fn tron_address(bytes: &[u8]) -> Result<Address, JSubmitError> {
     }
     bytes[1..].try_into().map_err(|_| bad())
 }
+const TRIGGER_SMART_CONTRACT: &[u8] = b"type.googleapis.com/protocol.TriggerSmartContract";
+
+struct TronFieldSet {
+    raw: &'static [u64],
+    contract: &'static [u64],
+    call: &'static [u64],
+}
+/// Exactly the fields the canonical xln submitter signs.
+const SUBMITTED_FIELDS: TronFieldSet = TronFieldSet {
+    raw: &[1, 4, 8, 11, 14, 18],
+    contract: &[1, 2],
+    call: &[1, 2, 3, 4],
+};
+/// The complete protocol.Transaction.raw, Contract and TriggerSmartContract
+/// schemas: an included call may come from any wallet, multisig or memo.
+const PROTOCOL_FIELDS: TronFieldSet = TronFieldSet {
+    raw: &[1, 3, 4, 8, 9, 10, 11, 12, 14, 18],
+    contract: &[1, 2, 3, 4, 5],
+    call: &[1, 2, 3, 4, 5, 6],
+};
+/// Same bound as the TS decoders: 524_288 hex digits.
+const MAX_TRON_WIRE_BYTES: usize = 262_144;
+
+/// The single TriggerSmartContract carried by one raw_data.
+fn trigger_smart_contract<'a>(
+    raw: &[(u64, ProtoField<'a>)],
+    allowed: &TronFieldSet,
+) -> Result<Vec<(u64, ProtoField<'a>)>, JSubmitError> {
+    let contract = proto(bytes(raw, 11)?, allowed.contract)?;
+    if number(&contract, 1)? != 31 {
+        return Err(bad());
+    }
+    let parameter = proto(bytes(&contract, 2)?, &[1, 2])?;
+    if bytes(&parameter, 1)? != TRIGGER_SMART_CONTRACT {
+        return Err(bad());
+    }
+    proto(bytes(&parameter, 2)?, allowed.call)
+}
+
 fn decode_tron(wire: &[u8]) -> Result<PreparedTransaction, JSubmitError> {
     let tx = proto(wire, &[1, 2])?;
     let raw = bytes(&tx, 1)?;
@@ -218,7 +257,7 @@ fn decode_tron(wire: &[u8]) -> Result<PreparedTransaction, JSubmitError> {
     if !matches!(signature[64], 27 | 28) {
         return Err(bad());
     }
-    let fields = proto(raw, &[1, 4, 8, 11, 14, 18])?;
+    let fields = proto(raw, SUBMITTED_FIELDS.raw)?;
     if bytes(&fields, 1)?.len() != 2 || bytes(&fields, 4)?.len() != 8 {
         return Err(bad());
     }
@@ -228,15 +267,7 @@ fn decode_tron(wire: &[u8]) -> Result<PreparedTransaction, JSubmitError> {
     if timestamp == 0 || expiration != timestamp + 60_000 || fee == 0 || fee > 15_000_000_000 {
         return Err(bad());
     }
-    let contract = proto(bytes(&fields, 11)?, &[1, 2])?;
-    if number(&contract, 1)? != 31 {
-        return Err(bad());
-    }
-    let parameter = proto(bytes(&contract, 2)?, &[1, 2])?;
-    if bytes(&parameter, 1)? != b"type.googleapis.com/protocol.TriggerSmartContract" {
-        return Err(bad());
-    }
-    let call = proto(bytes(&parameter, 2)?, &[1, 2, 3, 4])?;
+    let call = trigger_smart_contract(&fields, &SUBMITTED_FIELDS)?;
     let signer = tron_address(bytes(&call, 1)?)?;
     let hash = Sha256::digest(raw).into();
     if recover(&hash, &signature)? != signer {
@@ -257,6 +288,27 @@ fn decode_tron(wire: &[u8]) -> Result<PreparedTransaction, JSubmitError> {
         chain_id: None,
         expires_at: Some(expiration),
     })
+}
+
+/// The contract calldata of an INCLUDED native transaction, bound by its id.
+///
+/// A TRON txID is sha256(raw_data protobuf), not keccak over an Ethereum
+/// signed envelope. Recomputing it over the native raw_data binds the calldata
+/// to the receipt-attested transaction. Signatures, fee limit and lifetime were
+/// the chain's admission rules; re-judging them by the submitter's own policy
+/// would reject a counterparty's valid transaction. Mirrors the TS
+/// `decodeIncludedTronTransactionCall`.
+pub(crate) fn decode_included_tron_call(tx_id: &Word, raw: &[u8]) -> Result<Vec<u8>, JSubmitError> {
+    if raw.is_empty() || raw.len() > MAX_TRON_WIRE_BYTES {
+        return Err(bad());
+    }
+    if <Word>::from(Sha256::digest(raw)) != *tx_id {
+        return Err(JSubmitError::Transaction("tron-transaction-id"));
+    }
+    let call = trigger_smart_contract(&proto(raw, PROTOCOL_FIELDS.raw)?, &PROTOCOL_FIELDS)?;
+    tron_address(bytes(&call, 1)?)?;
+    tron_address(bytes(&call, 2)?)?;
+    Ok(bytes(&call, 4)?.to_vec())
 }
 
 #[cfg(test)]

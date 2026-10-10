@@ -1,4 +1,8 @@
-import { createNativeTronClient, readTronExpiryEvidence } from '../operations/tron-authority';
+import {
+  createNativeTronClient,
+  createSolidifiedTronTransactionReader,
+  readTronExpiryEvidence,
+} from '../operations/tron-authority';
 import { broadcastPreparedRpcTransaction } from './write/prepared/prepared-broadcast';
 import type { Provider, Signer } from 'ethers';
 import { ethers } from 'ethers';
@@ -68,8 +72,9 @@ export async function createRpcAdapter(
     mintDebugEnabled: process.env['XLN_JADAPTER_MINT_DEBUG'] === '1',
     isQuiet: () => quietLogs,
   });
-  const readTxFinalizationEvidence = createTxFinalizationEvidenceReader(provider);
-  const readTxDisputeProofBody = createTxDisputeProofBodyReader(provider);
+  const readNativeTronTransaction = config.mode === 'tron' ? createSolidifiedTronTransactionReader(config) : undefined;
+  const readTxFinalizationEvidence = createTxFinalizationEvidenceReader(provider, readNativeTronTransaction);
+  const readTxDisputeProofBody = createTxDisputeProofBodyReader(provider, readNativeTronTransaction);
   const watcher = createRpcWatcherController({
     provider,
     mode: config.mode,

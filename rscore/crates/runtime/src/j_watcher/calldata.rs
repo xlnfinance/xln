@@ -264,10 +264,46 @@ pub(super) fn decode_dispute_calls(calldata: &[u8]) -> Result<Vec<DisputeCall>, 
     Ok(calls)
 }
 
+/// Calldata of a receipt-attested native TRON transaction. The RPC names it by
+/// 0x-prefixed txID; the SolidityNode returns raw_data_hex, and sha256(raw_data)
+/// must equal that txID before its TriggerSmartContract data is trusted. The
+/// eth-compatible view cannot serve this: it carries no raw_data, and an
+/// Ethereum envelope hash never equals a TRON txID. Mirrors the TS
+/// `readIncludedTronCalldata`.
+fn native_tron_calldata(
+    rpc: &impl JsonRpc,
+    transaction_hash: &[u8; 32],
+) -> Result<Vec<u8>, JWatcherError> {
+    let tx_id = super::abi::hex(transaction_hash);
+    let value = rpc.tron_solidity_call(
+        "gettransactionbyid",
+        json!({ "value": tx_id.trim_start_matches("0x") }),
+    )?;
+    let tx = value
+        .as_object()
+        .filter(|tx| !tx.is_empty())
+        .ok_or(JWatcherError::TransactionMissing)?;
+    let claimed = field(tx, "txID")?
+        .as_str()
+        .ok_or(JWatcherError::TransactionField("txID"))?;
+    if fixed_hex::<32>(&format!("0x{claimed}"), "txID")? != *transaction_hash {
+        return Err(JWatcherError::TransactionHashMismatch);
+    }
+    let raw = field(tx, "raw_data_hex")?
+        .as_str()
+        .ok_or(JWatcherError::TransactionField("raw_data_hex"))?;
+    let raw = parse_hex(&format!("0x{raw}"), None, "raw_data_hex")?;
+    crate::j_submit::prepared_wire::decode_included_tron_call(transaction_hash, &raw)
+        .map_err(|_| JWatcherError::TransactionHashMismatch)
+}
+
 pub(crate) fn read_authenticated_calldata(
     rpc: &impl JsonRpc,
     transaction_hash: &[u8; 32],
 ) -> Result<Vec<u8>, JWatcherError> {
+    if rpc.tron_rpc_attested() {
+        return native_tron_calldata(rpc, transaction_hash);
+    }
     let value = rpc.call(
         "eth_getTransactionByHash",
         json!([super::abi::hex(transaction_hash)]),

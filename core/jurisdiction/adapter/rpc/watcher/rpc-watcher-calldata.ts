@@ -1,5 +1,40 @@
 import { ethers } from 'ethers';
 import { Depository__factory } from '../../../../../jurisdictions/typechain-types';
+import { decodeIncludedTronTransactionCall } from '../../operations/tron-transaction';
+
+/** Native SolidityNode `walletsolidity/gettransactionbyid` for one bare txID. */
+export type SolidifiedTronTransactionReader = (txId: string) => Promise<unknown>;
+
+/**
+ * Calldata of a receipt-attested TRON transaction. The RPC log names the
+ * transaction by 0x-prefixed txID; the native node returns raw_data_hex, and
+ * sha256(raw_data) must equal that txID before its TriggerSmartContract data
+ * is trusted. The eth-compatible RPC cannot serve this: its transaction has
+ * no raw_data, and an Ethereum envelope hash never equals a TRON txID.
+ */
+export const readIncludedTronCalldata = async (
+  readTransaction: SolidifiedTronTransactionReader,
+  txHash: string,
+): Promise<string> => {
+  if (!/^0x[0-9a-f]{64}$/.test(txHash)) throw new Error(`J_DISPUTE_TX_HASH_INVALID:${txHash}`);
+  const response = await readTransaction(txHash.slice(2));
+  if (!response || typeof response !== 'object' || Array.isArray(response)) {
+    throw new Error(`J_DISPUTE_TX_MISSING:${txHash}`);
+  }
+  const transaction = response as Record<string, unknown>;
+  if (Object.keys(transaction).length === 0) throw new Error(`J_DISPUTE_TX_MISSING:${txHash}`);
+  const claimed = typeof transaction['txID'] === 'string' ? `0x${transaction['txID'].toLowerCase()}` : '';
+  if (claimed !== txHash) {
+    throw new Error(`J_DISPUTE_TX_HASH_CLAIM_MISMATCH:${txHash}:${claimed || 'missing'}`);
+  }
+  const rawData = transaction['raw_data_hex'];
+  try {
+    if (typeof rawData !== 'string') throw new Error('TRON_RAW_DATA_MISSING');
+    return decodeIncludedTronTransactionCall(txHash, `0x${rawData}`).data;
+  } catch (error) {
+    throw new Error(`J_DISPUTE_TX_HASH_INVALID:${txHash}`, { cause: error });
+  }
+};
 
 const depositoryInterface: ethers.Interface = Depository__factory.createInterface();
 const requireFunction = (name: string): ethers.FunctionFragment => {

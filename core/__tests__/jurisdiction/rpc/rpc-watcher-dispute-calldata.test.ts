@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { ethers, type Provider } from 'ethers';
+import { TronWeb } from 'tronweb';
 
 import { Depository__factory } from '../../../../jurisdictions/typechain-types';
 import { createEmptyBatch, encodeJBatch } from '../../../jurisdiction/machine/batch';
@@ -115,5 +116,57 @@ describe('J watcher dispute calldata embedded in a wrapper call', () => {
 
   test('calldata with no embedded dispute call keeps the strict decoder failure', async () => {
     await expect(resolveStart(safeWrapper('0x1234'))).rejects.toThrow('J_DISPUTE_PROOFBODY_CALLDATA_UNKNOWN');
+  });
+});
+
+/** A counterparty's TriggerSmartContract built by TronWeb's own protobuf codec:
+ * memo, multisig Permission_id and a fee limit above xln's submitter cap. */
+const tronTransaction = (data: string) => {
+  const codec = new TronWeb({ fullHost: 'http://127.0.0.1:9' }).utils.transaction;
+  const protobuf = codec.txJsonToPb({
+    visible: false,
+    raw_data: {
+      contract: [{
+        parameter: {
+          value: { data: data.slice(2), owner_address: `41${'7e'.repeat(20)}`, contract_address: `41${'22'.repeat(20)}` },
+          type_url: 'type.googleapis.com/protocol.TriggerSmartContract',
+        },
+        type: 'TriggerSmartContract',
+        Permission_id: 2,
+      }],
+      ref_block_bytes: '002a', ref_block_hash: 'fa2d5ca94f86a8da', data: '6d656d6f',
+      expiration: 1_791_406_464_000, timestamp: 1_791_406_404_000, fee_limit: 20_000_000_000,
+    },
+  } as unknown as Parameters<typeof codec.txJsonToPb>[0]);
+  return { txID: codec.txPbToTxID(protobuf).replace(/^0x/, ''), raw_data_hex: codec.txPbToRawDataHex(protobuf) };
+};
+
+describe('J watcher dispute calldata on a TRON jurisdiction', () => {
+  const ethView = {
+    getTransaction: async () => {
+      throw new Error('TRON_ETH_TRANSACTION_VIEW_READ');
+    },
+  } as unknown as Provider;
+
+  test('binds calldata to sha256(raw_data) == txID and resolves the ProofBody', async () => {
+    const native = tronTransaction(processBatchCall(startArgs.proofbodyHash));
+    const reads: string[] = [];
+    const reader = createTxDisputeProofBodyReader(ethView, async txId => {
+      reads.push(txId);
+      return native;
+    });
+    expect(await reader(`0x${native.txID}`, 'DisputeStarted', startArgs, location)).toEqual(body);
+    expect(reads).toEqual([native.txID]);
+  });
+
+  test('a native transaction whose raw_data does not hash to the txID is refused', async () => {
+    const native = tronTransaction(processBatchCall(startArgs.proofbodyHash));
+    const forged = tronTransaction(processBatchCall(hashProofBodyStruct(otherBody), 3n, otherBody));
+    const reader = createTxDisputeProofBodyReader(ethView, async () => ({ ...native, raw_data_hex: forged.raw_data_hex }));
+    await expect(reader(`0x${native.txID}`, 'DisputeStarted', startArgs, location))
+      .rejects.toThrow('J_DISPUTE_TX_HASH_INVALID');
+    const unknown = createTxDisputeProofBodyReader(ethView, async () => ({}));
+    await expect(unknown(`0x${native.txID}`, 'DisputeStarted', startArgs, location))
+      .rejects.toThrow('J_DISPUTE_TX_MISSING');
   });
 });

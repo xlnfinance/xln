@@ -46,6 +46,12 @@ export const createNativeTronClient = async (config: JAdapterConfig): Promise<Tr
     ...(apiKey ? { headers: { 'TRON-PRO-API-KEY': apiKey } } : {}) });
 };
 
+/** Solidified native transaction (txID, raw_data_hex). The J watcher binds TRON
+ * dispute calldata to sha256(raw_data), never to the eth-compatible view. */
+export const createSolidifiedTronTransactionReader = (config: JAdapterConfig) =>
+  async (txId: string): Promise<unknown> => (await createNativeTronClient(config)).solidityNode
+    .request('walletsolidity/gettransactionbyid', { value: txId }, 'post');
+
 /** Bind the native TAPOS source to the already chain-verified configured JSON RPC. */
 export const readBoundTronBlockHeader = async (client: TronWeb, provider: ethers.JsonRpcProvider) => {
   const header = parseNativeTronHeader(await client.trx.getCurrentBlock());

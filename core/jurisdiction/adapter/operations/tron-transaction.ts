@@ -56,6 +56,30 @@ const address = (value: Uint8Array): string => {
   return ethers.hexlify(value.slice(1)).toLowerCase();
 };
 
+const TRIGGER_SMART_CONTRACT = 'type.googleapis.com/protocol.TriggerSmartContract';
+
+type TronFieldSet = { raw: number[]; contract: number[]; call: number[] };
+/** Exactly the fields the canonical xln submitter signs. */
+const SUBMITTED_FIELDS: TronFieldSet = { raw: [1, 4, 8, 11, 14, 18], contract: [1, 2], call: [1, 2, 3, 4] };
+/** The complete protocol.Transaction.raw, Contract and TriggerSmartContract
+ * schemas: an included call may come from any wallet, multisig or memo. */
+const PROTOCOL_FIELDS: TronFieldSet = {
+  raw: [1, 3, 4, 8, 9, 10, 11, 12, 14, 18],
+  contract: [1, 2, 3, 4, 5],
+  call: [1, 2, 3, 4, 5, 6],
+};
+
+/** The single TriggerSmartContract carried by one raw_data. */
+const triggerSmartContract = (data: Map<number, Field>, allowed: TronFieldSet): Map<number, Field> => {
+  const contract = fields(bytes(data, 11), allowed.contract);
+  if (number(contract, 1) !== 31n) throw new Error('TRON_CONTRACT_TYPE_INVALID');
+  const parameter = fields(bytes(contract, 2), [1, 2]);
+  if (ethers.toUtf8String(bytes(parameter, 1)) !== TRIGGER_SMART_CONTRACT) {
+    throw new Error('TRON_CONTRACT_PARAMETER_INVALID');
+  }
+  return fields(bytes(parameter, 2), allowed.call);
+};
+
 /** Validate the native signed wire, without inventing an embedded EVM chain id.
  * Its domain is the selected, chain-verified native RPC plus signed TAPOS. */
 export const decodeSignedTronTransaction = (rawTransaction: string) => {
@@ -66,7 +90,7 @@ export const decodeSignedTronTransaction = (rawTransaction: string) => {
   const raw = bytes(transaction, 1);
   const signature = bytes(transaction, 2, 65);
   if (signature[64] !== 27 && signature[64] !== 28) throw new Error('TRON_SIGNATURE_RECOVERY_INVALID');
-  const data = fields(raw, [1, 4, 8, 11, 14, 18]);
+  const data = fields(raw, SUBMITTED_FIELDS.raw);
   const refBlockBytes = ethers.hexlify(bytes(data, 1, 2));
   const refBlockHash = ethers.hexlify(bytes(data, 4, 8));
   const expiration = number(data, 8);
@@ -75,13 +99,7 @@ export const decodeSignedTronTransaction = (rawTransaction: string) => {
   if (timestamp <= 0n || expiration !== timestamp + 60_000n || feeLimit <= 0n || feeLimit > 15_000_000_000n) {
     throw new Error('TRON_TRANSACTION_LIFETIME_OR_FEE_INVALID');
   }
-  const contract = fields(bytes(data, 11), [1, 2]);
-  if (number(contract, 1) !== 31n) throw new Error('TRON_CONTRACT_TYPE_INVALID');
-  const parameter = fields(bytes(contract, 2), [1, 2]);
-  if (ethers.toUtf8String(bytes(parameter, 1)) !== 'type.googleapis.com/protocol.TriggerSmartContract') {
-    throw new Error('TRON_CONTRACT_PARAMETER_INVALID');
-  }
-  const call = fields(bytes(parameter, 2), [1, 2, 3, 4]);
+  const call = triggerSmartContract(data, SUBMITTED_FIELDS);
   const from = address(bytes(call, 1, 21));
   const to = address(bytes(call, 2, 21));
   const hash = ethers.sha256(raw);
@@ -90,4 +108,29 @@ export const decodeSignedTronTransaction = (rawTransaction: string) => {
   }
   return { hash, from, to, data: ethers.hexlify(bytes(call, 4)), value: call.has(3) ? number(call, 3) : 0n,
     nonce: 0, refBlockBytes, refBlockHash, expiration, timestamp, feeLimit };
+};
+
+/**
+ * The contract call of an INCLUDED native transaction, bound by its id.
+ *
+ * A TRON txID is sha256(raw_data protobuf), not keccak over an Ethereum signed
+ * envelope. Recomputing it over the native raw_data binds the calldata to the
+ * receipt-attested transaction. Signatures, fee limit and lifetime were the
+ * chain's admission rules; re-judging them by the submitter's own policy
+ * would reject a counterparty's valid transaction.
+ */
+export const decodeIncludedTronTransactionCall = (txId: string, rawData: string) => {
+  if (!/^0x(?:[0-9a-f]{2})+$/i.test(rawData) || rawData.length > 524_290) {
+    throw new Error('TRON_RAW_DATA_INVALID');
+  }
+  const raw = ethers.getBytes(rawData);
+  const hash = ethers.sha256(raw);
+  if (hash !== txId.toLowerCase()) throw new Error(`TRON_TRANSACTION_ID_MISMATCH:${txId}:${hash}`);
+  const call = triggerSmartContract(fields(raw, PROTOCOL_FIELDS.raw), PROTOCOL_FIELDS);
+  return {
+    hash,
+    from: address(bytes(call, 1, 21)),
+    to: address(bytes(call, 2, 21)),
+    data: ethers.hexlify(bytes(call, 4)),
+  };
 };

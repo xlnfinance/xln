@@ -69,6 +69,8 @@ pub use submission::{
     JSubmitConfig, JSubmitOutcome, JSubmitPreparation, JSubmitter, ProcessedBatchEvidence,
 };
 pub use transaction::{Eip1559Transaction, SignedEip1559Transaction};
+#[cfg(test)]
+pub(crate) use tron::sign_call as sign_tron_call;
 pub use xln_rscore_entity_kernel::j_batch::*;
 
 #[derive(Clone, Debug, PartialEq, Eq)]

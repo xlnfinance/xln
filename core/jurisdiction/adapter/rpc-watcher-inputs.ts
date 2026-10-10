@@ -12,7 +12,11 @@ import {
 } from './rpc-public';
 import { hashProofBodyStruct } from '../../protocol/dispute/proof-builder';
 import { watcherErrorDetails } from './rpc/rpc-boundary';
-import { extractEmbeddedDisputeCalls } from './rpc/watcher/rpc-watcher-calldata';
+import {
+  extractEmbeddedDisputeCalls,
+  readIncludedTronCalldata,
+  type SolidifiedTronTransactionReader,
+} from './rpc/watcher/rpc-watcher-calldata';
 
 export type WatchedErc20Token = {
   tokenId: number;
@@ -31,12 +35,11 @@ export type AuthenticatedTxLocation = Readonly<{
   blockNumber: number;
 }>;
 
-const readAuthenticatedTransactionCalldata = async (
+const readSignedEvmCalldata = async (
   provider: Provider,
   txHash: string,
-  location: AuthenticatedTxLocation,
+  normalizedHash: string,
 ): Promise<string> => {
-  const normalizedHash = txHash.toLowerCase();
   const tx = await provider.getTransaction(txHash);
   if (!tx) throw new Error(`J_DISPUTE_TX_MISSING:${normalizedHash}`);
   const claimedHash = String(tx.hash || '').toLowerCase();
@@ -52,15 +55,32 @@ const readAuthenticatedTransactionCalldata = async (
   if (computedHash !== normalizedHash) {
     throw new Error(`J_DISPUTE_TX_HASH_INVALID:${normalizedHash}:${computedHash || 'missing'}`);
   }
+  return typeof tx.data === 'string' ? tx.data : '';
+};
+
+/**
+ * Calldata bound to the receipt-attested transaction hash: an EVM signed
+ * envelope recomputes to its keccak hash, a native TRON raw_data to its
+ * sha256 txID. The committed jurisdiction mode selects the native reader.
+ */
+const readAuthenticatedTransactionCalldata = async (
+  provider: Provider,
+  txHash: string,
+  location: AuthenticatedTxLocation,
+  readNativeTronTransaction?: SolidifiedTronTransactionReader,
+): Promise<string> => {
+  const normalizedHash = txHash.toLowerCase();
+  const data = readNativeTronTransaction
+    ? await readIncludedTronCalldata(readNativeTronTransaction, normalizedHash)
+    : await readSignedEvmCalldata(provider, txHash, normalizedHash);
   if (!ethers.isHexString(location.blockHash, 32) || !Number.isSafeInteger(location.blockNumber)) {
     throw new Error(`J_DISPUTE_TX_LOCATION_INVALID:${normalizedHash}`);
   }
-  // Receipt-trie membership already proves that this exact transaction hash
-  // occupied the authenticated block. Recomputing the signed transaction hash
-  // binds calldata cryptographically; comparing the RPC's mutable location
+  // Receipt membership already proves that this exact transaction hash
+  // occupied the authenticated block. Recomputing the transaction hash binds
+  // calldata cryptographically; comparing the RPC's mutable location
   // metadata is redundant and breaks across honest local reorg/replay where an
   // identical signed tx is re-mined under the same hash in a different block.
-  const data = typeof tx.data === 'string' ? tx.data : '';
   if (!data || data === '0x') throw new Error(`J_DISPUTE_TX_CALLDATA_MISSING:${normalizedHash}`);
   return data;
 };
@@ -179,6 +199,7 @@ export const buildTrackedExternalOwners = (
 
 export const createTxFinalizationEvidenceReader = (
   provider: Provider,
+  readNativeTronTransaction?: SolidifiedTronTransactionReader,
 ): ((txHash: string, location: AuthenticatedTxLocation) => Promise<TxFinalizationEvidence[]>) => {
   const cache = new Map<string, Promise<TxFinalizationEvidence[]>>();
   return async (txHash: string, location: AuthenticatedTxLocation): Promise<TxFinalizationEvidence[]> => {
@@ -190,7 +211,7 @@ export const createTxFinalizationEvidenceReader = (
       throw new Error('J_DISPUTE_FINALIZATION_TX_LOOKUP_UNAVAILABLE');
     }
     const pending = (async (): Promise<TxFinalizationEvidence[]> => {
-      const data = await readAuthenticatedTransactionCalldata(provider, txHash, location);
+      const data = await readAuthenticatedTransactionCalldata(provider, txHash, location, readNativeTronTransaction);
       return decodeDisputeCalls(data, decodeDisputeFinalizationEvidenceCalldata);
     })();
     cache.set(normalizedHash, pending);
@@ -211,6 +232,7 @@ export const createTxFinalizationEvidenceReader = (
 
 export const createTxDisputeProofBodyReader = (
   provider: Provider,
+  readNativeTronTransaction?: SolidifiedTronTransactionReader,
 ): ((
   txHash: string,
   eventName: TxDisputeProofBodyEvidence['eventName'],
@@ -227,7 +249,7 @@ export const createTxDisputeProofBodyReader = (
         throw new Error('J_DISPUTE_PROOFBODY_TX_LOOKUP_UNAVAILABLE');
       }
       pending = (async () => {
-        const data = await readAuthenticatedTransactionCalldata(provider, txHash, location);
+        const data = await readAuthenticatedTransactionCalldata(provider, txHash, location, readNativeTronTransaction);
         return decodeDisputeCalls(data, decodeDisputeProofBodyEvidenceCalldata, isProofBodyHashConsistent);
       })();
       cache.set(normalizedHash, pending);

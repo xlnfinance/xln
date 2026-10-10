@@ -3,7 +3,10 @@ import { createSignerNonceSequencer } from '../../../jurisdiction/adapter/rpc/wr
 import { ethers } from 'ethers';
 import { validatePreparedTransaction } from '../../../jurisdiction/adapter/rpc/write/prepared/durable-transaction';
 import { expect, test } from 'bun:test';
-import { decodeSignedTronTransaction } from '../../../jurisdiction/adapter/operations/tron-transaction';
+import {
+  decodeIncludedTronTransactionCall,
+  decodeSignedTronTransaction,
+} from '../../../jurisdiction/adapter/operations/tron-transaction';
 import fixture from '../../../../rscore/fixtures/tron-signed-call-v1.json';
 
 test('native TRON prepared transaction verifies the TronWeb wire and recovered owner', () => {
@@ -22,6 +25,20 @@ test('native TRON prepared wire rejects altered TAPOS, expiry, calldata and sign
   }
   expect(() => decodeSignedTronTransaction('0x00')).toThrow();
   expect(() => decodeSignedTronTransaction(`0x${fixture.raw}0801`)).toThrow();
+});
+
+test('included TRON call is bound by sha256(raw_data) == txID, without the submitter policy', () => {
+  // Signed wire = protobuf { 1: raw_data, 2: signature }; this fixture's raw_data is 145 bytes.
+  expect(fixture.raw.slice(0, 6)).toBe('0a9101');
+  const rawData = `0x${fixture.raw.slice(6, 6 + 145 * 2)}`;
+  expect(decodeIncludedTronTransactionCall(`0x${fixture.hash}`, rawData)).toEqual({
+    hash: `0x${fixture.hash}`, from: '0x7e5f4552091a69125d5dfcb7b8c2659029395bdf',
+    to: `0x${fixture.to}`, data: `0x${fixture.data}`,
+  });
+  expect(() => decodeIncludedTronTransactionCall(`0x${'00'.repeat(32)}`, rawData)).toThrow('TRON_TRANSACTION_ID_MISMATCH');
+  const lastByte = Number.parseInt(rawData.slice(-2), 16) ^ 1;
+  const changed = `${rawData.slice(0, -2)}${lastByte.toString(16).padStart(2, '0')}`;
+  expect(() => decodeIncludedTronTransactionCall(`0x${fixture.hash}`, changed)).toThrow('TRON_TRANSACTION_ID_MISMATCH');
 });
 
 test('native prepared acceptance rejects a valid signed wire for a different payer, target, value or call', () => {

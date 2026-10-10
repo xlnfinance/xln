@@ -14,12 +14,17 @@ const FULL_METHODS = new Map([
   ['triggersmartcontract', ['POST']], ['broadcasthex', ['POST']],
 ]);
 
+// Solidified reads: the safe head, and an included transaction's raw_data so
+// the J watcher can bind dispute calldata to its sha256 txID.
+const SOLIDITY_METHODS = new Map([
+  ['getnowblock', ['GET', 'POST']], ['gettransactionbyid', ['POST']],
+]);
+
 export function nativeRestUpstream(data: JurisdictionsData, pathname: string, method: string): string {
   const match = /^\/api\/tron\/(\d+)\/(wallet|walletsolidity)\/([a-z]+)$/.exec(pathname);
   if (!match) throw new RpcProxyError(400, 'TRON_PROXY_PATH_DENIED', pathname);
   const [, chain, lane, operation] = match;
-  const allowed = lane === 'walletsolidity' && operation === 'getnowblock'
-    ? ['GET', 'POST'] : lane === 'wallet' && operation ? FULL_METHODS.get(operation) : undefined;
+  const allowed = operation ? (lane === 'walletsolidity' ? SOLIDITY_METHODS : FULL_METHODS).get(operation) : undefined;
   if (!allowed?.includes(method)) throw new RpcProxyError(400, 'TRON_PROXY_METHOD_DENIED', method);
   const configs = Object.values(data.jurisdictions).filter(config => config.chainId === Number(chain) && config.mode === 'tron' && isActiveJurisdictionStatus(config.status));
   const config = configs[0];

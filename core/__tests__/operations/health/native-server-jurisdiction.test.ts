@@ -34,6 +34,13 @@ test('native REST proxy pins safe-head and signed-broadcast paths to configured 
   const { nativeRestUpstream } = await import('../../../api/server/rpc/tron-proxy');
   expect(nativeRestUpstream(data, '/api/tron/2414086651/walletsolidity/getnowblock', 'POST')).toBe('http://127.0.0.1:19091/walletsolidity/getnowblock');
   expect(nativeRestUpstream(data, '/api/tron/2414086651/wallet/broadcasthex', 'POST')).toBe('http://127.0.0.1:19090/wallet/broadcasthex');
+  // The J watcher binds dispute calldata to a TRON txID through the solidified raw_data.
+  expect(nativeRestUpstream(data, '/api/tron/2414086651/walletsolidity/gettransactionbyid', 'POST'))
+    .toBe('http://127.0.0.1:19091/walletsolidity/gettransactionbyid');
+  expect(() => nativeRestUpstream(data, '/api/tron/2414086651/walletsolidity/gettransactionbyid', 'GET'))
+    .toThrow('TRON_PROXY_METHOD_DENIED');
+  expect(() => nativeRestUpstream(data, '/api/tron/2414086651/walletsolidity/broadcasthex', 'POST'))
+    .toThrow('TRON_PROXY_METHOD_DENIED');
   for (const path of ['/api/tron/1/wallet/getnowblock', '/api/tron/2414086651/wallet/gettransactionsign', '/api/tron/2414086651/wallet/../getnowblock']) {
     expect(() => nativeRestUpstream(data, path, 'POST')).toThrow();
   }

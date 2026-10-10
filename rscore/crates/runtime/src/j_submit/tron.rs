@@ -32,7 +32,7 @@ fn call(rpc: &dyn JsonRpc, method: &str, value: Value) -> Result<Value, JSubmitE
         .map_err(|e| JSubmitError::Rpc(e.to_string()))
 }
 
-pub(super) fn sign_call(
+pub(crate) fn sign_call(
     head: &Value,
     to: &Address,
     data: &[u8],

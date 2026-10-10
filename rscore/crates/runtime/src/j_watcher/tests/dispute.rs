@@ -309,3 +309,96 @@ fn wrapper_whose_embedded_batch_commits_another_proof_body_is_rejected() {
         Err(JWatcherError::DisputeEvidence("start")),
     ));
 }
+
+/// raw_data (field 1) of a signed native wire `{1: raw_data, 2: signature}`.
+fn tron_raw_data(signed: &[u8]) -> Vec<u8> {
+    assert_eq!(signed[0], 0x0a, "raw_data field tag");
+    let (mut length, mut shift, mut offset) = (0_usize, 0, 1);
+    loop {
+        let byte = signed[offset];
+        offset += 1;
+        length |= usize::from(byte & 0x7f) << shift;
+        if byte < 0x80 {
+            break;
+        }
+        shift += 7;
+    }
+    signed[offset..offset + length].to_vec()
+}
+
+fn tron_fixture() -> Value {
+    serde_json::from_str(include_str!(
+        "../../../../../fixtures/tron-signed-call-v1.json"
+    ))
+    .expect("TronWeb signed-call fixture")
+}
+
+fn native_tron_start(
+    raw: &[u8],
+    tx_id: [u8; 32],
+) -> Result<xln_rscore_engine::DisputeStartedEvent, JWatcherError> {
+    let id = hex::encode(tx_id);
+    let hash = format!("0x{id}");
+    let rpc = DisputeRpc {
+        native: Some(BTreeMap::from([(
+            id.clone(),
+            json!({ "txID": id, "raw_data_hex": hex::encode(raw) }),
+        )])),
+        ..DisputeRpc::default()
+    };
+    let (block, receipts) = block_with(
+        &hash,
+        vec![
+            dispute_started_log(&hash, 0, PEER, LOCAL, body_hash(5)),
+            hanko_batch_log(&hash, 1, PEER, 3),
+        ],
+    );
+    let event = only_dispute_started(&rpc, &block, &receipts);
+    assert_eq!(*rpc.reads.borrow(), vec![format!("native:{id}")]);
+    event
+}
+
+#[test]
+fn included_tron_call_decoder_reads_the_tronweb_raw_data_vector() {
+    let fixture = tron_fixture();
+    let raw = tron_raw_data(&hex::decode(fixture["raw"].as_str().expect("raw")).expect("wire"));
+    let tx_id: [u8; 32] = hex::decode(fixture["hash"].as_str().expect("hash"))
+        .expect("txID")
+        .try_into()
+        .expect("32-byte txID");
+    assert_eq!(
+        hex::encode(
+            crate::j_submit::prepared_wire::decode_included_tron_call(&tx_id, &raw)
+                .expect("included call")
+        ),
+        fixture["data"].as_str().expect("data"),
+    );
+    assert!(crate::j_submit::prepared_wire::decode_included_tron_call(&[0; 32], &raw).is_err());
+}
+
+#[test]
+fn tron_dispute_calldata_is_bound_by_sha256_of_native_raw_data() {
+    let fixture = tron_fixture();
+    let key: [u8; 32] = hex::decode(fixture["key"].as_str().expect("key"))
+        .expect("key hex")
+        .try_into()
+        .expect("32-byte key");
+    let (signed, tx_id) = crate::j_submit::sign_tron_call(
+        &fixture["head"],
+        &[0x22; 20],
+        &start_call(body_hash(5), 5, 3),
+        10_000_000,
+        &key,
+    )
+    .expect("sign native call");
+    let raw = tron_raw_data(&signed);
+    let event = native_tron_start(&raw, tx_id).expect("native dispute start");
+    assert_eq!(event.initial_proofbody.offdeltas, vec![5.into()]);
+    assert_eq!(event.batch_nonce, Some(3));
+    let mut forged = raw;
+    *forged.last_mut().expect("raw_data byte") ^= 1;
+    assert!(matches!(
+        native_tron_start(&forged, tx_id),
+        Err(JWatcherError::TransactionHashMismatch),
+    ));
+}
