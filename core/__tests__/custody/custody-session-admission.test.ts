@@ -60,6 +60,20 @@ describe('custody session admission', () => {
     store.createSession('replacement-token', 'replacement-user');
     expect(store.getSessionByToken('funded-token')?.userId).toBe('funded-user');
     expect(store.getSessionByToken('empty-token')).toBeNull();
+    // Fund the replacement too: with a 1 ms TTL an empty replacement turned
+    // stale under load before the overflow attempt and was pruned (flake).
+    store.creditDeposit({
+      eventKey: 'deposit-2',
+      userId: 'replacement-user',
+      tokenId: 1,
+      amountMinor: 1n,
+      description: 'funded',
+      fromEntityId: 'source',
+      hashlock: 'hashlock-2',
+      frameHeight: 2,
+      createdAt: Date.now(),
+    });
+    await Bun.sleep(2);
     expect(() => store.createSession('overflow-token', 'overflow-user'))
       .toThrow('CUSTODY_SESSION_CAPACITY_REACHED');
     store.close();
