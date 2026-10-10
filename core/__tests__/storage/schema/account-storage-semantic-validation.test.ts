@@ -518,7 +518,8 @@ describe('persisted AccountReplica semantic boundary', () => {
     cleanDelta.leftHold = -1n;
     expect(() => deriveDelta(cleanDelta, true)).toThrow('leftHold must be non-negative');
     expect(() => validateDelta(cleanDelta, 'replica-meta restore')).toThrow('leftHold must be non-negative');
-    expect(() => admit(clean)).toThrow('STORAGE_ACCOUNT_DOC_INVALID_STATE_DELTA_leftHold');
+    // Storage rejects with the live engine's own Delta validator, not a copy.
+    expect(() => admit(clean)).toThrow('leftHold must be non-negative');
 
     const admitted = admit(await makeFixture());
     expect(deriveDelta(admitted.state.deltas.get(1)!, true).outCapacity).toBe(baseline);

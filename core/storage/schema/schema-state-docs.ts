@@ -5,9 +5,9 @@ import { validateAccountReplica } from '../../account/validation/state-validatio
 import { assertCanonicalSettlementWorkspace } from '../../account/tx/handlers/settlement/transition';
 import { assertSettlementWorkspacePhase } from '../../account/tx/handlers/settlement/workspace-views';
 import { validateEntityState } from '../../entity/state/state-validation';
-import { FINANCIAL, LIMITS, TOKENS } from '../../config/constants';
+import { FINANCIAL, TOKENS } from '../../config/constants';
 import { normalizeAccountWatchSeed } from '../../protocol/identity/account-watch-seed';
-import { INT256_MAX, INT256_MIN, UINT256_MAX } from '../../protocol/boundary/integer-ranges';
+import { UINT256_MAX } from '../../protocol/boundary/integer-ranges';
 import { HASHABLE_DELTA_FIELDS } from '../../types/hash-coverage/account-nested';
 import type { AccountFrame, AccountState } from '../../types/account';
 import type { StorageAccountDoc, StorageEntityCoreDoc } from '../types';
@@ -20,7 +20,6 @@ import {
   requireStorageArray,
   requireStorageBigInt,
   requireStorageBoolean,
-  requireStorageHash,
   requireStorageMap,
   requireStorageString,
 } from './schema-primitives';
@@ -235,32 +234,22 @@ const ACCOUNT_STATE_OPTIONAL = [
   'settlementWorkspace',
   'rebalanceFeePolicies',
 ] as const;
-const validateStorageDelta = (value: unknown, code: string): number => {
+// Storage owns only the encoding of a Delta row: exact hashed fields, bigint
+// money words and the Map key binding. Money ranges are the live engine's,
+// enforced once by validateDelta inside validateAccountReplica below.
+const validateStorageDeltaEncoding = (key: unknown, value: unknown, code: string): void => {
   const delta = requireBoundaryRecord(value, code);
   requireExactBoundaryKeys(delta, HASHABLE_DELTA_FIELDS, [], `${code}_FIELDS`);
-  const tokenId = requireBoundaryInteger(delta['tokenId'], `${code}_TOKEN`);
-  if (tokenId > TOKENS.MAX_TOKEN_ID) throw new Error(`${code}_TOKEN`);
-  for (const field of [
-    'collateral',
-    'leftCreditLimit',
-    'rightCreditLimit',
-    'leftAllowance',
-    'rightAllowance',
-    'leftHold',
-    'rightHold',
-  ]) {
-    requireStorageBigInt(delta[field], `${code}_${field}`, 0n, UINT256_MAX);
+  for (const field of HASHABLE_DELTA_FIELDS) {
+    if (field !== 'tokenId' && typeof delta[field] !== 'bigint') throw new Error(`${code}_${field}`);
   }
-  for (const field of ['ondelta', 'offdelta'])
-    requireStorageBigInt(delta[field], `${code}_${field}`, INT256_MIN, INT256_MAX);
-  return tokenId;
+  if (requireBoundaryInteger(key, `${code}_KEY`) !== delta['tokenId']) throw new Error(`${code}_KEY_MISMATCH`);
 };
 
 const validateStorageAccountStateCore = (state: Record<string, unknown>, code: string): void => {
   normalizeAccountWatchSeed(state['watchSeed'], code);
   for (const [key, value] of requireStorageMap(state['deltas'], `${code}_DELTAS`)) {
-    const tokenId = requireBoundaryInteger(key, `${code}_DELTA_KEY`);
-    if (tokenId !== validateStorageDelta(value, `${code}_DELTA`)) throw new Error(`${code}_DELTA_KEY_MISMATCH`);
+    validateStorageDeltaEncoding(key, value, `${code}_DELTA`);
   }
   requireBoundaryInteger(state['jNonce'], `${code}_J_NONCE`);
   const dispute = requireBoundaryRecord(state['disputeConfig'], `${code}_DISPUTE`);
@@ -275,36 +264,6 @@ const validateStorageAccountStateCore = (state: Record<string, unknown>, code: s
 };
 
 const validateStorageAccountStateMaps = (state: AccountState, code: string): void => {
-  const locks = requireStorageMap(state.locks, `${code}_LOCKS`);
-  if (locks.size > LIMITS.MAX_ACCOUNT_HTLC_LOCKS) throw new Error(`${code}_LOCKS_LIMIT`);
-  for (const [lockId, lock] of locks) {
-    const row = requireBoundaryRecord(lock, `${code}_LOCK`);
-    if (requireStorageString(lockId, `${code}_LOCK_KEY`) !== requireStorageString(row['lockId'], `${code}_LOCK_ID`))
-      throw new Error(`${code}_LOCK_KEY_MISMATCH`);
-    requireStorageString(row['hashlock'], `${code}_LOCK_HASHLOCK`);
-    requireStorageBigInt(
-      row['amount'],
-      `${code}_LOCK_AMOUNT`,
-      FINANCIAL.MIN_PAYMENT_AMOUNT,
-      row['senderIsLeft'] === true ? -INT256_MIN : INT256_MAX,
-    );
-  }
-  if (state.pulls !== undefined) {
-    for (const pull of requireStorageMap(state.pulls, `${code}_PULLS`).values()) {
-      const row = requireBoundaryRecord(pull, `${code}_PULL`);
-      const amount = row['amount'];
-      if (typeof amount !== 'bigint' || amount === 0n || amount < INT256_MIN || amount > INT256_MAX)
-        throw new Error(`${code}_PULL_AMOUNT`);
-      requireStorageHash(row['fullHash'], `${code}_PULL_FULL_HASH`);
-      requireStorageHash(row['partialRoot'], `${code}_PULL_PARTIAL_ROOT`);
-      const binding = requireBoundaryRecord(row['crossJurisdiction'], `${code}_PULL_CROSS_J`);
-      requireStorageString(binding['orderId'], `${code}_PULL_CROSS_J_ORDER`);
-      requireStorageHash(binding['routeHash'], `${code}_PULL_CROSS_J_ROUTE_HASH`);
-      if (binding['leg'] !== 'source' && binding['leg'] !== 'target') {
-        throw new Error(`${code}_PULL_CROSS_J_LEG`);
-      }
-    }
-  }
   for (const offer of requireStorageMap(state.swapOffers, `${code}_OFFERS`).values()) {
     const row = requireBoundaryRecord(offer, `${code}_OFFER`);
     for (const field of ['giveTokenId', 'wantTokenId'])
@@ -379,14 +338,6 @@ const validateStorageAccountReplicaCore = (doc: Record<string, unknown>, code: s
   const header = requireBoundaryRecord(doc['proofHeader'], `${code}_PROOF_HEADER`);
   requireExactBoundaryKeys(header, ['fromEntity', 'toEntity', 'nextProofNonce'], [], `${code}_PROOF_HEADER_FIELDS`);
   requireBoundaryInteger(header['nextProofNonce'], `${code}_PROOF_NONCE`);
-  for (const withdrawal of requireStorageMap(doc['pendingWithdrawals'], `${code}_WITHDRAWALS`).values()) {
-    requireStorageBigInt(
-      requireBoundaryRecord(withdrawal, `${code}_WITHDRAWAL`)['amount'],
-      `${code}_WITHDRAWAL_AMOUNT`,
-      FINANCIAL.MIN_PAYMENT_AMOUNT,
-      UINT256_MAX,
-    );
-  }
   if (doc['publicPinned'] !== undefined) {
     requireStorageBoolean(doc['publicPinned'], `${code}_PUBLIC_PINNED`);
   }

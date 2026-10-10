@@ -8,6 +8,7 @@ import {
   validateString,
 } from '../../protocol/boundary/validation-primitives.ts';
 import { validateAccountStateCollection } from './collection-validation.ts';
+import { UINT256_MAX } from '../../protocol/boundary/integer-ranges.ts';
 
 const HASH_32 = /^0x[0-9a-f]{64}$/;
 
@@ -28,14 +29,24 @@ const requireAmount = (value: unknown, context: string, allowZero = false): bigi
   return value as bigint;
 };
 
-const requireSignedNonZeroAmount = (value: unknown, context: string): bigint => {
+const absAmount = (value: bigint): bigint => (value < 0n ? -value : value);
+
+// HTLC payments and pulls reach DeltaTransformer as SignedAmount
+// { bool negative; uint256 magnitude } and withdrawals as uint256. Live
+// admission bounds them the same way (htlc/lock.ts, settlement/pull.ts).
+const requireAssetAmount = (value: unknown, context: string): bigint => {
+  const amount = requireAmount(value, context);
+  if (amount > UINT256_MAX) corrupt(context, 'exceeds the uint256 asset domain');
+  return amount;
+};
+
+const requireSignedAssetAmount = (value: unknown, context: string): bigint => {
   if (typeof value !== 'bigint' || value === 0n) {
     corrupt(context, 'must be a non-zero bigint');
   }
+  if (absAmount(value as bigint) > UINT256_MAX) corrupt(context, 'exceeds the SignedAmount domain');
   return value as bigint;
 };
-
-const absAmount = (value: bigint): bigint => (value < 0n ? -value : value);
 
 const requireTokenId = (value: unknown, context: string): number => {
   const tokenId = requireBoundaryInteger(value, context, 1);
@@ -55,7 +66,7 @@ const validateHtlcLock = (key: unknown, value: unknown, context: string): void =
   if (key !== lockId) corrupt(context, 'Map key must equal lockId');
   requireHash(lock['hashlock'], `${context}.hashlock`);
   requireAmount(lock['timelock'], `${context}.timelock`);
-  requireAmount(lock['amount'], `${context}.amount`);
+  requireAssetAmount(lock['amount'], `${context}.amount`);
   requireTokenId(lock['tokenId'], `${context}.tokenId`);
   requireBoundaryInteger(lock['revealBeforeHeight'], `${context}.revealBeforeHeight`);
   requireBoundaryInteger(lock['createdHeight'], `${context}.createdHeight`);
@@ -96,7 +107,7 @@ const validatePull = (key: unknown, value: unknown, context: string): void => {
   const pullId = validateString(pull['pullId'], `${context}.pullId`);
   if (key !== pullId || pullId.includes(':')) corrupt(context, 'Map key/pullId is invalid');
   requireTokenId(pull['tokenId'], `${context}.tokenId`);
-  const amount = requireSignedNonZeroAmount(pull['amount'], `${context}.amount`);
+  const amount = requireSignedAssetAmount(pull['amount'], `${context}.amount`);
   requireHash(pull['fullHash'], `${context}.fullHash`);
   requireHash(pull['partialRoot'], `${context}.partialRoot`);
   requireBoundaryInteger(pull['createdHeight'], `${context}.createdHeight`);
@@ -116,7 +127,7 @@ const validateWithdrawal = (key: unknown, value: unknown, context: string): void
   const requestId = validateString(withdrawal['requestId'], `${context}.requestId`);
   if (key !== requestId) corrupt(context, 'Map key must equal requestId');
   requireTokenId(withdrawal['tokenId'], `${context}.tokenId`);
-  requireAmount(withdrawal['amount'], `${context}.amount`);
+  requireAssetAmount(withdrawal['amount'], `${context}.amount`);
   requireBoundaryInteger(withdrawal['requestedAt'], `${context}.requestedAt`);
   if (withdrawal['direction'] !== 'outgoing' && withdrawal['direction'] !== 'incoming') corrupt(context, 'direction is invalid');
   if (!['pending', 'approved', 'rejected', 'timed_out'].includes(String(withdrawal['status']))) corrupt(context, 'status is invalid');
