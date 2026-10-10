@@ -82,16 +82,26 @@ type PersistedAccountFrameRecord = Readonly<{
 
 const normalize = (value: string): string => String(value || '').trim().toLowerCase();
 
-const accountInputMatchesAccount = (
+/**
+ * Which side of the Account sent this input: `owner` when the owner Entity
+ * sent it to the peer, `peer` for the reverse, null for any other pair. The
+ * input must be addressed to the Entity that received its envelope, so a
+ * peer cannot plant an input that claims to come from the owner.
+ */
+const accountInputSide = (
+  envelope: RoutedEntityInput,
   input: AccountInput,
   entityId: string,
   counterpartyId: string,
-): boolean => {
+): 'owner' | 'peer' | null => {
   const from = normalize(input.fromEntityId);
   const to = normalize(input.toEntityId);
+  if (to !== normalize(envelope.entityId)) return null;
   const owner = normalize(entityId);
   const peer = normalize(counterpartyId);
-  return (from === owner && to === peer) || (from === peer && to === owner);
+  if (from === owner && to === peer) return 'owner';
+  if (from === peer && to === owner) return 'peer';
+  return null;
 };
 
 const proposalOf = (input: AccountInput): AccountFrame | null =>
@@ -109,11 +119,13 @@ const ackOf = (input: AccountInput): AccountAckFrame | null =>
 const accountFrameIdentity = (height: number, frameHash: string): string =>
   `${height}:${normalize(frameHash)}`;
 
-const accountInputsOf = (envelopes: readonly RoutedEntityInput[]): AccountInput[] => {
-  const inputs: AccountInput[] = [];
+const accountInputsOf = (
+  envelopes: readonly RoutedEntityInput[],
+): Array<Readonly<{ envelope: RoutedEntityInput; input: AccountInput }>> => {
+  const inputs: Array<Readonly<{ envelope: RoutedEntityInput; input: AccountInput }>> = [];
   for (const envelope of envelopes) {
     for (const tx of envelope.entityTxs ?? []) {
-      if (tx.type === 'accountInput') inputs.push(tx.data);
+      if (tx.type === 'accountInput') inputs.push({ envelope, input: tx.data });
     }
   }
   return inputs;
@@ -139,10 +151,17 @@ const readAccountFrameHistoryRecords = async (
     : Number.MAX_SAFE_INTEGER;
   const boundedLimit = Math.max(1, Math.min(10_000, Math.floor(Number(limit || 50))));
   const proposals = new Map<string, {
+    identity: string;
     frame: AccountFrame;
     source: PersistedAccountFrameRecord['source'];
   }>();
-  const acknowledgements = new Map<string, { runtimeHeight: number; timestamp: number }>();
+  // A frame commits only when the other side acknowledges it: the owner's
+  // proposal needs the peer's ACK, the peer's proposal needs the owner's ACK.
+  // A peer's ACK of its own proposal is no commit evidence.
+  const acknowledgements = {
+    owner: new Map<string, { runtimeHeight: number; timestamp: number }>(),
+    peer: new Map<string, { runtimeHeight: number; timestamp: number }>(),
+  };
 
   // One bounded sequential WAL scan. No per-Account queries and no eager fan-out.
   const walDb = deps.getRuntimeWalDb(env);
@@ -159,28 +178,31 @@ const readAccountFrameHistoryRecords = async (
       ...accountInputsOf(runtimeFrame.runtimeInput.entityInputs as RoutedEntityInput[]),
       ...accountInputsOf(runtimeOutputs),
     ];
-    for (const input of inputs) {
-      if (!accountInputMatchesAccount(input, entityId, counterpartyId)) continue;
+    for (const { envelope, input } of inputs) {
+      const side = accountInputSide(envelope, input, entityId, counterpartyId);
+      if (!side) continue;
       const ack = ackOf(input);
       if (ack && ack.height <= maxAccountHeight) {
         const identity = accountFrameIdentity(ack.height, ack.frameHash);
-        if (!acknowledgements.has(identity)) {
-          acknowledgements.set(identity, { runtimeHeight, timestamp: runtimeFrame.timestamp });
+        if (!acknowledgements[side].has(identity)) {
+          acknowledgements[side].set(identity, { runtimeHeight, timestamp: runtimeFrame.timestamp });
         }
       }
       const frame = proposalOf(input);
       if (!frame || frame.height > maxAccountHeight) continue;
       const identity = accountFrameIdentity(frame.height, frame.stateHash);
-      if (!proposals.has(identity)) {
-        proposals.set(identity, {
+      if (!proposals.has(`${side}:${identity}`)) {
+        proposals.set(`${side}:${identity}`, {
+          identity,
           frame: structuredClone(frame),
-          source: normalize(input.fromEntityId) === normalize(entityId) ? 'ackCommit' : 'counterpartyCommit',
+          source: side === 'owner' ? 'ackCommit' : 'counterpartyCommit',
         });
       }
     }
   }
-  const records = Array.from(proposals.entries()).flatMap(([identity, proposal]) => {
-    const committed = acknowledgements.get(identity);
+  const records = Array.from(proposals.values()).flatMap(({ identity, ...proposal }) => {
+    const committed = (proposal.source === 'ackCommit' ? acknowledgements.peer : acknowledgements.owner)
+      .get(identity);
     return committed ? [{
       kind: 'accountFrame' as const,
       entityId: normalize(entityId),

@@ -297,6 +297,57 @@ describe('storage frame journal retention', () => {
     await closeInfraDb(env);
   });
 
+  test('Account history counts only the other side\'s ACK as commit evidence', async () => {
+    // Any ACK with a matching (height, hash) used to commit a proposal, so a
+    // peer could propose a frame and ACK it itself, or plant an input that
+    // claims to be the owner's ACK, and the wallet showed a frame that never
+    // committed.
+    const env = await createSavedEmptyEnv('account-history-ack-direction');
+    const user = `0x${'11'.repeat(32)}`;
+    const hub = `0x${'22'.repeat(32)}`;
+    const hex = (byte: string, size = 32): string => `0x${byte.repeat(size * 2)}`;
+    const frame = (height: number, stateHash: string): AccountFrame => ({
+      height, timestamp: height, jHeight: 138, accountTxs: [], prevFrameHash: hex('0'),
+      accountStateRoot: hex('a'), stateHash,
+    });
+    const routed = (fromEntityId: string, toEntityId: string, value: Record<string, unknown>, envelopeEntityId = toEntityId) => ({
+      entityId: envelopeEntityId,
+      signerId: hex('e', 20),
+      from: hex('f', 20),
+      entityTxs: [{ type: 'accountInput' as const, data: {
+        fromEntityId, toEntityId,
+        domain: { chainId: 1, depositoryAddress: hex('d', 20) },
+        disputeConfig: { leftResponseSeconds: 60, rightResponseSeconds: 60 },
+        ...value,
+      } as AccountInput }],
+    }) satisfies RoutedEntityInput;
+    const selfAcked = frame(20, hex('4'));
+    const plantedOwnerAck = frame(21, hex('5'));
+    const genuine = frame(22, hex('6'));
+
+    env.state.height = 2;
+    env.state.timestamp = 2_000;
+    await saveEnvToDB(env, {
+      runtimeTxs: [],
+      entityInputs: [
+        routed(hub, user, { kind: 'ack_frame', proposal: { frame: selfAcked } }),
+        routed(hub, user, { kind: 'ack', ack: { height: selfAcked.height, frameHash: selfAcked.stateHash } }),
+        routed(hub, user, { kind: 'ack_frame', proposal: { frame: plantedOwnerAck } }),
+        // Delivered to the user's Entity, but claims to be the user's ACK to the hub.
+        routed(user, hub, { kind: 'ack', ack: { height: plantedOwnerAck.height, frameHash: plantedOwnerAck.stateHash } }, user),
+        routed(hub, user, { kind: 'ack_frame', proposal: { frame: genuine } }),
+      ],
+    }, [routed(user, hub, { kind: 'ack', ack: { height: genuine.height, frameHash: genuine.stateHash } })], new Map());
+
+    const records = await readPersistedAccountFrameHistoryRecords(env, user, hub, 10);
+    expect(records.map(({ accountHeight, source }) => ({ accountHeight, source }))).toEqual([
+      { accountHeight: 22, source: 'counterpartyCommit' },
+    ]);
+
+    await closeRuntimeDb(env);
+    await closeInfraDb(env);
+  });
+
   test('keeps Runtime activity logs outside the authoritative WAL frame', async () => {
     const env = await createSavedEmptyEnv('frame-event-journal');
     env.state.height = 2;
