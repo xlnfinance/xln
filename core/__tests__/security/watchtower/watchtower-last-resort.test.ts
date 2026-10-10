@@ -961,3 +961,128 @@ describe('watchtower delayed last-resort sweep', () => {
     expect(latest?.lastResortPayload.appointmentSequence).toBe(4);
   });
 });
+
+/** One live dispute the tower must answer: every chain read succeeds unless told to hang. */
+const activeDisputeScenario = async (towerWallet: Wallet, lookupKey: string, runtimeId: string) => {
+  const watchedEntityId = `0x${'aa'.repeat(32)}`;
+  const counterentity = `0x${'bb'.repeat(32)}`;
+  const initialProofbodyHash = `0x${'cc'.repeat(32)}`;
+  const watchSeed = `0x${'ee'.repeat(32)}`;
+  const finalProofbody = makeProofBody(watchSeed);
+  const disputeStartTimestamp = 90n;
+  const emptyArguments = keccak256(abiCoder.encode(['bytes', 'bool', 'uint256'], ['0x', true, disputeStartTimestamp]));
+  const encryptedRemedy = await encryptTowerPayloadForWatchSeed(encodeTowerCounterDisputeRemedy({
+    version: 1,
+    type: 'counter_dispute_remedy',
+    rpcUrl: 'http://127.0.0.1:8545',
+    chainId: 31337,
+    depositoryAddress: `0x${'11'.repeat(20)}`,
+    watchedEntityId,
+    towerAddress: towerWallet.address.toLowerCase(),
+    lastResortWindowSeconds: 8,
+    appointmentSequence: 5,
+    ownerAuthorizationHanko: '0xbeef',
+    latestProof: {
+      counterentity, finalNonce: 2, proposerIsLeft: false, finalProofbody,
+      leftArguments: '0x', rightArguments: '0x', sig: '0xcafe',
+    },
+  }), watchSeed);
+  const appointment: TowerAppointmentV1 = {
+    type: 'tower_appointment',
+    version: 1,
+    towerMode: 'delayed_last_resort',
+    lookupKey,
+    slot: 0,
+    bundle: {
+      version: 1, runtimeId, lookupKey, height: 1, createdAt: 1_717_171_722_000,
+      bundleHash: keccak256(toUtf8Bytes('bundle:timeouts')), iv: '0x1234', ciphertext: '0xabcd',
+    },
+    lastResortPayload: {
+      triggerHint: 'chain:31337:acct:timeouts',
+      encryptedRemedy,
+      watch: {
+        rpcUrl: 'http://127.0.0.1:8545',
+        chainId: 31337,
+        depositoryAddress: `0x${'11'.repeat(20)}`,
+        watchedEntityId,
+        counterentity,
+      },
+      actionKind: 'counter_dispute_only',
+      appointmentSequence: 5,
+      proofNonce: 2,
+      proofBodyHash: proofBodyHashOf(finalProofbody),
+      responseMode: 'last_resort',
+      lastResortWindowSeconds: 8,
+    },
+    ownerProof: { runtimeId, signedAt: Date.now(), signature: '0xdead' },
+  };
+  const account = {
+    nonce: 1n,
+    disputeHash: encodeDisputeHash(1, true, true, 100n, 4n, 6n, initialProofbodyHash, disputeStartTimestamp, '0x', '0x'),
+    disputeTimeout: 100n,
+    disputeStartTimestamp,
+    leftResponseSeconds: 4n,
+    rightResponseSeconds: 6n,
+    disputeInitialProofbodyHash: initialProofbodyHash,
+    disputeInitialProposerIsLeft: true,
+    disputeCounterNonce: 0n,
+    disputeCounterProofbodyHash: `0x${'00'.repeat(32)}`,
+    disputeCounterProposerIsLeft: false,
+    starterInitialArgumentsCommitment: emptyArguments,
+    starterCounterArgumentsCommitment: emptyArguments,
+    starterCounterProofCommitment: emptyCounterProofCommitment,
+    disputeStartedByLeft: true,
+  };
+  const disputeLog = disputeStartedInterface.encodeEventLog(disputeStartedInterface.getEvent('DisputeStarted'), [
+    watchedEntityId, counterentity, 1n, true, initialProofbodyHash, watchSeed, '0x', '0x',
+    emptyCounterProofCommitment, 100n, disputeStartTimestamp, 4, 6,
+  ]);
+  return { appointment, account, disputeLog };
+};
+
+test('a chain call that never answers fails its appointment instead of stalling the sweep', async () => {
+  const towerWallet = Wallet.createRandom();
+  const lookupKey = makeLookupKey('tower:last-resort:rpc-timeouts');
+  const tempRoot = join(process.cwd(), '.tmp-tests', `tower-last-resort-timeouts-${Date.now()}`);
+  tempRoots.push(tempRoot);
+  await mkdir(tempRoot, { recursive: true });
+  const store = createWatchtowerStore({ dbPath: join(tempRoot, 'tower.level'), towerPrivateKey: towerWallet.privateKey });
+  const scenario = await activeDisputeScenario(towerWallet, lookupKey, Wallet.createRandom().address.toLowerCase());
+  await store.upsertAppointment(scenario.appointment);
+  const latestBlock = 95;
+  const never = <T>(): Promise<T> => new Promise<T>(() => {});
+
+  const sweepWithHang = (hang: string) => runWatchtowerSweep(store, {
+    towerPrivateKey: towerWallet.privateKey,
+    rpcTimeoutMs: 20,
+    providerFactory: () => ({
+      getBlockNumber: () => hang === 'block-number' ? never() : Promise.resolve(latestBlock),
+      getBlock: (blockTag) => {
+        const isLatest = Number(blockTag) === latestBlock;
+        if ((hang === 'block-timestamp' && isLatest) || (hang === 'block-search' && !isLatest)) return never();
+        return Promise.resolve({ timestamp: 95 });
+      },
+      getLogs: async () => [{ topics: scenario.disputeLog.topics, data: scenario.disputeLog.data }],
+    }),
+    contractFactory: () => ({
+      _accounts: () => hang === 'account' ? never() : Promise.resolve(scenario.account),
+      watchtowerCounterDispute: () => hang === 'send' ? never() : Promise.resolve({ hash: '0xsent' }),
+    }),
+  });
+
+  for (const [hang, label] of [
+    ['account', 'WATCHTOWER_ACCOUNT_READ_TIMEOUT:20'],
+    ['block-number', 'WATCHTOWER_BLOCK_NUMBER_TIMEOUT:20'],
+    ['block-timestamp', 'WATCHTOWER_BLOCK_TIMESTAMP_TIMEOUT:20'],
+    ['block-search', 'WATCHTOWER_BLOCK_SEARCH:'],
+    ['send', 'WATCHTOWER_COUNTER_DISPUTE_SEND_TIMEOUT:20'],
+  ] as const) {
+    expect(await sweepWithHang(hang)).toEqual({ scanned: 1, submitted: 0, skipped: 0, errors: 1 });
+    const [latest] = await store.listActionReceipts(lookupKey);
+    expect(latest?.status).toBe('error');
+    expect(latest?.error).toContain(label);
+  }
+  // The same fixture without a hang reaches the chain write.
+  expect(await sweepWithHang('none')).toEqual({ scanned: 1, submitted: 1, skipped: 0, errors: 0 });
+  await store.close();
+}, 5_000);

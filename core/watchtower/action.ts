@@ -31,19 +31,21 @@ type WatchtowerSweepProvider = {
 
 const WATCHTOWER_RPC_READ_TIMEOUT_MS = 10_000;
 
+/**
+ * The sweep is serial: one RPC that never answers stalled it for every other
+ * appointment, so every chain call of a sweep is bounded.
+ */
 const withWatchtowerRpcTimeout = async <T>(
   promise: Promise<T>,
   label: string,
+  timeoutMs: number,
 ): Promise<T> => {
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     return await Promise.race([
       promise,
       new Promise<never>((_, reject) => {
-        timer = setTimeout(
-          () => reject(new Error(`${label}_TIMEOUT:${WATCHTOWER_RPC_READ_TIMEOUT_MS}`)),
-          WATCHTOWER_RPC_READ_TIMEOUT_MS,
-        );
+        timer = setTimeout(() => reject(new Error(`${label}_TIMEOUT:${timeoutMs}`)), timeoutMs);
       }),
     ]);
   } finally {
@@ -59,6 +61,7 @@ const isRpcLogRangeLimitError = (error: unknown): boolean => {
 const readAdaptiveWatchtowerLogs = async (
   provider: Pick<WatchtowerSweepProvider, 'getLogs'>,
   filter: Record<string, unknown> & { fromBlock: number; toBlock: number },
+  timeoutMs: number,
 ): Promise<WatchtowerLog[]> => {
   if (typeof provider.getLogs !== 'function') {
     throw new Error('WATCHTOWER_PROVIDER_GET_LOGS_UNAVAILABLE');
@@ -67,13 +70,14 @@ const readAdaptiveWatchtowerLogs = async (
     return await withWatchtowerRpcTimeout(
       provider.getLogs(filter),
       `WATCHTOWER_ACTIVE_DISPUTE_LOGS:${filter.fromBlock}:${filter.toBlock}`,
+      timeoutMs,
     );
   } catch (error) {
     if (!isRpcLogRangeLimitError(error) || filter.fromBlock >= filter.toBlock) throw error;
     const middle = filter.fromBlock + Math.floor((filter.toBlock - filter.fromBlock) / 2);
     const [left, right] = await Promise.all([
-      readAdaptiveWatchtowerLogs(provider, { ...filter, toBlock: middle }),
-      readAdaptiveWatchtowerLogs(provider, { ...filter, fromBlock: middle + 1 }),
+      readAdaptiveWatchtowerLogs(provider, { ...filter, toBlock: middle }, timeoutMs),
+      readAdaptiveWatchtowerLogs(provider, { ...filter, fromBlock: middle + 1 }, timeoutMs),
     ]);
     return [...left, ...right];
   }
@@ -325,6 +329,7 @@ type WatchtowerSweepOptions = {
   allowedRpcUrls?: string[];
   now?: () => number;
   txWaitTimeoutMs?: number;
+  rpcTimeoutMs?: number;
   providerFactory?: (rpcUrl: string, chainId: number) => {
     getBlockNumber: () => Promise<number>;
     getBlock?: (blockTag: string | number) => Promise<{ timestamp: number | bigint } | null>;
@@ -424,36 +429,39 @@ type WatchtowerRpcSender = {
 
 const readProviderBlockNumber = async (
   provider: WatchtowerSweepProvider | JsonRpcProvider,
+  timeoutMs: number,
 ): Promise<number> => {
   const sender = provider as WatchtowerRpcSender;
   if (typeof sender.send === 'function') {
-    const hex = await sender.send('eth_blockNumber', []);
+    const hex = await withWatchtowerRpcTimeout(sender.send('eth_blockNumber', []), 'WATCHTOWER_BLOCK_NUMBER', timeoutMs);
     if (typeof hex === 'string' && hex.startsWith('0x')) {
       return uint256ToSafeNumber(BigInt(hex), 'CURRENT_BLOCK');
     }
   }
-  return uint256ToSafeNumber(BigInt(await provider.getBlockNumber()), 'CURRENT_BLOCK');
+  const blockNumber = await withWatchtowerRpcTimeout(provider.getBlockNumber(), 'WATCHTOWER_BLOCK_NUMBER', timeoutMs);
+  return uint256ToSafeNumber(BigInt(blockNumber), 'CURRENT_BLOCK');
 };
 
 const readProviderBlockTimestamp = async (
   provider: WatchtowerSweepProvider | JsonRpcProvider,
   blockNumber: number,
+  timeoutMs: number,
 ): Promise<bigint> => {
   // Prefer raw eth_getBlockByNumber so reused JsonRpcProvider clients cannot
   // serve a cached getBlock('latest') after anvil time jumps / mines.
   const sender = provider as WatchtowerRpcSender;
   if (typeof sender.send === 'function') {
-    const raw = await sender.send('eth_getBlockByNumber', [
+    const raw = await withWatchtowerRpcTimeout(sender.send('eth_getBlockByNumber', [
       `0x${BigInt(blockNumber).toString(16)}`,
       false,
-    ]) as { timestamp?: string } | null;
+    ]), 'WATCHTOWER_BLOCK_TIMESTAMP', timeoutMs) as { timestamp?: string } | null;
     const hex = raw?.timestamp;
     if (typeof hex === 'string' && hex.startsWith('0x')) {
       return BigInt(hex);
     }
   }
   if (typeof provider.getBlock === 'function') {
-    const block = await provider.getBlock(blockNumber);
+    const block = await withWatchtowerRpcTimeout(provider.getBlock(blockNumber), 'WATCHTOWER_BLOCK_TIMESTAMP', timeoutMs);
     const rawTimestamp = block?.timestamp;
     if (typeof rawTimestamp === 'bigint' && rawTimestamp >= 0n) return rawTimestamp;
     if (typeof rawTimestamp === 'number' && Number.isFinite(rawTimestamp) && rawTimestamp >= 0) {
@@ -463,18 +471,21 @@ const readProviderBlockTimestamp = async (
   throw new Error('WATCHTOWER_PROVIDER_BLOCK_TIMESTAMP_INVALID');
 };
 
+/** A broadcast tx that is not mined in time stays 'submitted' without a block. */
 const waitForReceiptWithTimeout = async (
   tx: { wait?: () => Promise<{ blockNumber?: number } | null> },
   timeoutMs: number,
 ): Promise<{ blockNumber?: number } | null> => {
   if (typeof tx.wait !== 'function') return null;
-  if (!(Number.isFinite(timeoutMs) && timeoutMs > 0)) {
-    return await tx.wait();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      tx.wait(),
+      new Promise<null>((resolve) => { timer = setTimeout(() => resolve(null), timeoutMs); }),
+    ]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
   }
-  return await Promise.race([
-    tx.wait(),
-    new Promise<null>((resolve) => setTimeout(() => resolve(null), timeoutMs)),
-  ]);
 };
 
 type ActiveDisputeContext = {
@@ -556,6 +567,7 @@ const findFirstBlockAtOrAfterTimestamp = async (
   provider: Pick<WatchtowerSweepProvider, 'getBlock'>,
   latestBlock: number,
   timestamp: bigint,
+  timeoutMs: number,
 ): Promise<number> => {
   if (typeof provider.getBlock !== 'function') {
     throw new Error('WATCHTOWER_PROVIDER_GET_BLOCK_UNAVAILABLE');
@@ -564,7 +576,11 @@ const findFirstBlockAtOrAfterTimestamp = async (
   let high = latestBlock;
   while (low < high) {
     const middle = low + Math.floor((high - low) / 2);
-    const block = await provider.getBlock(middle);
+    const block = await withWatchtowerRpcTimeout(
+      provider.getBlock(middle),
+      `WATCHTOWER_BLOCK_SEARCH:${middle}`,
+      timeoutMs,
+    );
     if (!block) throw new Error(`WATCHTOWER_BLOCK_NOT_FOUND:${middle}`);
     if (BigInt(block.timestamp) < timestamp) low = middle + 1;
     else high = middle;
@@ -577,6 +593,7 @@ const findActiveDisputeContext = async (
   watch: TowerLastResortWatchV1,
   account: OnchainDisputeAccount,
   currentBlock: bigint,
+  timeoutMs: number,
 ): Promise<ActiveDisputeContext> => {
   if (typeof provider.getLogs !== 'function') {
     throw new Error('WATCHTOWER_PROVIDER_GET_LOGS_UNAVAILABLE');
@@ -597,6 +614,7 @@ const findActiveDisputeContext = async (
     provider,
     latestBlock,
     account.disputeStartTimestamp,
+    timeoutMs,
   );
   const topic0 = DEPOSITORY_INTERFACE.getEvent('DisputeStarted')!.topicHash;
   const watchedTopic = ethers.zeroPadValue(watch.watchedEntityId, 32).toLowerCase();
@@ -619,7 +637,7 @@ const findActiveDisputeContext = async (
         toBlock,
         address: watch.depositoryAddress,
         topics: [topic0, senderTopic, counterentityTopic],
-      });
+      }, timeoutMs);
       for (const entry of logs) {
         const parsed = DEPOSITORY_INTERFACE.parseLog({
           topics: (entry['topics'] || []) as string[],
@@ -794,6 +812,7 @@ type WatchtowerSweepContext = {
   store: WatchtowerStore;
   towerWallet: Wallet;
   txWaitTimeoutMs: number;
+  rpcTimeoutMs: number;
   customProviderFactory: boolean;
   allowedRpcUrls?: string[];
   providerFactory: SweepProviderFactory;
@@ -857,12 +876,13 @@ const processLastResortAppointment = async (
   const provider = context.providerFactory(rpcUrl, watch.chainId);
   const depository = context.contractFactory(watch, context.towerWallet, provider);
   const acctKey = computeAccountKey(watch.watchedEntityId, watch.counterentity);
-  const account = await depository._accounts(acctKey);
-  const currentBlockNumber = await readProviderBlockNumber(provider);
+  const { rpcTimeoutMs } = context;
+  const account = await withWatchtowerRpcTimeout(depository._accounts(acctKey), 'WATCHTOWER_ACCOUNT_READ', rpcTimeoutMs);
+  const currentBlockNumber = await readProviderBlockNumber(provider, rpcTimeoutMs);
   const currentBlock = BigInt(currentBlockNumber);
   // Resolve timestamp by concrete block number. JsonRpcProvider can cache
   // getBlock('latest') across mines/time jumps on a reused provider instance.
-  const currentTimestamp = await readProviderBlockTimestamp(provider, currentBlockNumber);
+  const currentTimestamp = await readProviderBlockTimestamp(provider, currentBlockNumber, rpcTimeoutMs);
   // Matches Depository.watchtowerCounterDispute: lastResortWindowSeconds is seconds
   // on the same clock as absolute unix disputeTimeout.
   const disputeTimeout = BigInt(account.disputeTimeout || 0n);
@@ -880,6 +900,7 @@ const processLastResortAppointment = async (
     watch,
     account,
     currentBlock,
+    rpcTimeoutMs,
   );
   const remedy = await decodeTowerCounterDisputeRemedy(
     appointment.lastResortPayload.encryptedRemedy,
@@ -931,7 +952,7 @@ const processLastResortAppointment = async (
     disputeContext.starterCounterProofCommitment.toLowerCase()
     ? disputeContext.starterCounterArguments
     : '0x';
-  const tx = await depository.watchtowerCounterDispute(
+  const tx = await withWatchtowerRpcTimeout(depository.watchtowerCounterDispute(
     remedy.watchedEntityId,
     {
       counterentity: remedy.latestProof.counterentity,
@@ -949,7 +970,7 @@ const processLastResortAppointment = async (
     remedy.lastResortWindowSeconds,
     remedy.appointmentSequence,
     remedy.ownerAuthorizationHanko,
-  );
+  ), 'WATCHTOWER_COUNTER_DISPUTE_SEND', rpcTimeoutMs);
   const receipt = await waitForReceiptWithTimeout(tx, context.txWaitTimeoutMs);
   await appendAppointmentReceipt(
     context,
@@ -979,7 +1000,8 @@ export const runWatchtowerSweep = async (
   }
   const towerWallet = new Wallet(towerPrivateKey);
   const now = options?.now || (() => Date.now());
-  const txWaitTimeoutMs = Math.max(0, Math.floor(Number(options?.txWaitTimeoutMs ?? 15_000)));
+  const txWaitTimeoutMs = Math.max(1, Math.floor(Number(options?.txWaitTimeoutMs ?? 15_000)));
+  const rpcTimeoutMs = Math.max(1, Math.floor(Number(options?.rpcTimeoutMs ?? WATCHTOWER_RPC_READ_TIMEOUT_MS)));
   const lastResortAppointments = (await store.listLatestLastResortAppointments())
     .filter((appointment) => appointment.towerMode === 'delayed_last_resort')
     .filter((appointment) => !options?.lookupKey || appointment.lookupKey === options.lookupKey);
@@ -1004,6 +1026,7 @@ export const runWatchtowerSweep = async (
     store,
     towerWallet,
     txWaitTimeoutMs,
+    rpcTimeoutMs,
     customProviderFactory: Boolean(customProviderFactory),
     ...(options?.allowedRpcUrls ? { allowedRpcUrls: options.allowedRpcUrls } : {}),
     providerFactory,
