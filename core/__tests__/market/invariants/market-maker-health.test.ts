@@ -537,13 +537,13 @@ const addThirdJurisdiction = (
     jurisdictionRef: stackRef(31339, '33'),
     roleEvidence: { entityId: entity('60'), isHub: true, source: 'verified-gossip-profile' },
   };
-  const routes = env.infrastructure.verifiedProfileRoutes;
-  if (!routes) throw new Error('TEST_PROFILE_ROUTES_MISSING');
+  const routes = env.infrastructure?.verifiedProfileRoutes;
+  if (!routes || !env.runtimeId) throw new Error('TEST_PROFILE_ROUTES_MISSING');
   routes.set(context.entityId, {
     runtimeId: env.runtimeId, runtimeSignerId: context.signerId, runtimeEncPubKey: '', lastUpdated: env.state.timestamp,
   });
   routes.set(hub.entityId, {
-    runtimeId: hubRuntimeId, runtimeSignerId: hub.signerId, runtimeEncPubKey: '', lastUpdated: env.state.timestamp,
+    runtimeId: hubRuntimeId, runtimeSignerId: addr('60'), runtimeEncPubKey: '', lastUpdated: env.state.timestamp,
   });
   return { contexts: [...contexts, context], hubs: [...visibleHubs, hub] };
 };

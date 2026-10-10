@@ -15,6 +15,7 @@ import {
 import { createEmptyEnv } from '../../../runtime';
 import type { EntityReplica } from '../../../entity/types';
 import type { RuntimeP2P } from '../../../network/p2p/p2p';
+import { ensureRuntimeInfrastructure } from '../../../runtime/envelope/replica-envelope';
 import type { RuntimeReplica } from '../../../runtime/types';
 import type { AccountReplica } from '../../../types/account';
 import { addr, entity, makeAccount, putTestAccountDelta } from '../../helpers/cross-j';
@@ -67,7 +68,7 @@ const buildQuotingEnv = (hubs: readonly HubFixture[]): RuntimeReplica => {
 
 /** Direct routes are open for exactly these Hubs; every other Hub is offline. */
 const openDirectRoutes = (env: RuntimeReplica, openHubEntityIds: readonly string[]): void => {
-  env.infrastructure.p2p = {
+  ensureRuntimeInfrastructure(env).p2p = {
     prepareDirectEntityRoutes: (entityIds: readonly string[]) =>
       entityIds.every(entityId => openHubEntityIds.includes(entityId)),
   } as unknown as RuntimeP2P;
