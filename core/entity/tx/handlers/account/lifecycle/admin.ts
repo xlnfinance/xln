@@ -14,6 +14,7 @@ import {
 import type { AccountTxTarget } from '..';
 import { getEntityAccountForWrite } from '../../../../state/persistent-account-map';
 import { applyEntityAccountEnvelopeUpdate } from '../../../../account-envelope-update';
+import { rejectFailure } from '../../../../../protocol/errors/failure-taxonomy';
 
 type EntityTxOf<T extends EntityTx['type']> = Extract<EntityTx, { type: T }>;
 
@@ -75,11 +76,21 @@ const resolveHubPolicyVersion = (
   return feePolicyChanged ? previousVersion + 1 : previousVersion;
 };
 
+// A negative fee or collateral threshold has no meaning, and the Entity
+// document schema refuses one on every read, so committing it bricked the next
+// restart. The signer's tx is a typed reject before mutation instead.
+// Parity: Rust apply_set_hub_config (entity-kernel local_control.rs).
+const rejectNegativeHubAmount = (value: bigint | undefined, code: string): void => {
+  if (value !== undefined && value < 0n) throw rejectFailure(code, `${code}:${value}`);
+};
+
 export const buildHubConfig = (
   previous: HubRebalanceConfig | undefined,
   data: SetHubConfigTx['data'],
 ): { config: HubRebalanceConfig; feePolicyChanged: boolean } => {
   assertNoTokenlessHubRawOverrides(data);
+  rejectNegativeHubAmount(data.baseFee, 'HUB_CONFIG_BASE_FEE_NEGATIVE');
+  rejectNegativeHubAmount(data.minCollateralThreshold, 'HUB_CONFIG_MIN_COLLATERAL_THRESHOLD_NEGATIVE');
   const liquidityFeeBps = data.rebalanceLiquidityFeeBps ?? 1n;
   if (liquidityFeeBps < 0n || liquidityFeeBps > 10_000n) {
     throw new Error(`HUB_REBALANCE_LIQUIDITY_FEE_BPS_INVALID:${liquidityFeeBps}`);

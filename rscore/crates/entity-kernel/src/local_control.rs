@@ -823,12 +823,60 @@ fn previous_hub_field<'a>(
     field(fields, name)
 }
 
+/// A negative fee or collateral threshold has no meaning, and the TS Entity
+/// document schema refuses one on every read, so committing it bricked the
+/// next restart. Typed reject before mutation; parity: TS buildHubConfig.
+fn reject_negative_hub_amounts(
+    entries: &[(String, CanonicalValue)],
+) -> Result<(), EntityKernelError> {
+    for (name, code) in [
+        ("baseFee", "HUB_CONFIG_BASE_FEE_NEGATIVE"),
+        (
+            "minCollateralThreshold",
+            "HUB_CONFIG_MIN_COLLATERAL_THRESHOLD_NEGATIVE",
+        ),
+    ] {
+        let value = optional_bigint_field(entries, name, BigInt::from(0))?;
+        if value.sign() == Sign::Minus {
+            return Err(EntityKernelError::rejected(
+                "setHubConfig",
+                format!("{code}:{value}"),
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Token 0 cannot be a quote reference and a negative minimum trade has no
+/// meaning; the TS Entity document schema and the Rust snapshot reader refuse
+/// both on every read. Typed reject before mutation; parity: TS
+/// rejectInvalidOrderbookProfile (entity/tx/handlers/system/basic.ts).
+fn reject_invalid_hub_profile(profile: &HubProfile) -> Result<(), EntityKernelError> {
+    if profile.reference_token_id == 0 {
+        return Err(EntityKernelError::rejected(
+            "initOrderbookExt",
+            "ORDERBOOK_REFERENCE_TOKEN_INVALID:0",
+        ));
+    }
+    if profile.min_trade_size.sign() == Sign::Minus {
+        return Err(EntityKernelError::rejected(
+            "initOrderbookExt",
+            format!(
+                "ORDERBOOK_MIN_TRADE_SIZE_NEGATIVE:{}",
+                profile.min_trade_size
+            ),
+        ));
+    }
+    Ok(())
+}
+
 fn apply_set_hub_config(
     state: &mut EntityStateSlice,
     data: CanonicalValue,
     events: &mut Vec<EntityFrameEvent>,
 ) -> Result<(), EntityKernelError> {
     let entries = object(&data, "setHubConfig", "data")?;
+    reject_negative_hub_amounts(entries)?;
     let previous = state.hub_rebalance_config.as_ref();
     let liquidity_fee =
         optional_bigint_field(entries, "rebalanceLiquidityFeeBps", BigInt::from(1_u8))?;
@@ -2178,6 +2226,7 @@ pub fn apply_local_entity_control_tx(
             result = apply_activate_board(state, authority, target_entity_id, events)?;
         }
         LocalEntityControlTx::InitOrderbookExt(mut profile) => {
+            reject_invalid_hub_profile(&profile)?;
             if state.orderbook.is_none() {
                 let spread = &profile.spread_distribution;
                 let total = u64::from(spread.maker_bps)
@@ -2323,13 +2372,10 @@ mod tests {
         assert_eq!(state.profile.sectors, ["finance"]);
     }
 
-    #[test]
-    fn init_orderbook_ext_installs_the_canonical_empty_book_once() {
-        let entity = format!("0x{}", "11".repeat(32));
-        let quote_authority = format!("0x{}", "22".repeat(32));
+    fn init_orderbook_tx(reference_token_id: u32, min_trade_size: i64) -> CanonicalEntityTx {
         let number =
             |value| CanonicalValue::Number(xln_rscore_protocol::CanonicalNumber::from_u32(value));
-        let tx = CanonicalEntityTx::from_frame_projection(
+        CanonicalEntityTx::from_frame_projection(
             EntityTxKind::InitOrderbookExt,
             object(vec![
                 ("name", CanonicalValue::String("H1".into())),
@@ -2343,25 +2389,39 @@ mod tests {
                         ("takerReferrerBps", number(0)),
                     ]),
                 ),
-                ("referenceTokenId", number(1)),
+                ("referenceTokenId", number(reference_token_id)),
                 (
                     "usdQuoteAuthorityEntityId",
-                    CanonicalValue::String(quote_authority.clone()),
+                    CanonicalValue::String(format!("0x{}", "22".repeat(32))),
                 ),
-                ("minTradeSize", CanonicalValue::BigInt(BigInt::from(10))),
+                (
+                    "minTradeSize",
+                    CanonicalValue::BigInt(BigInt::from(min_trade_size)),
+                ),
                 (
                     "supportedPairs",
                     CanonicalValue::Array(vec![CanonicalValue::String("1/2".into())]),
                 ),
             ]),
         )
-        .expect("tx");
-        let native = decode_local_entity_control_tx(&tx)
+        .expect("tx")
+    }
+
+    fn apply_control(
+        state: &mut EntityStateSlice,
+        tx: &CanonicalEntityTx,
+    ) -> Result<LocalEntityControlResult, EntityKernelError> {
+        let native = decode_local_entity_control_tx(tx)
             .expect("decode")
             .expect("control");
+        apply_local_entity_control_tx(state, native, &mut Vec::new(), &authority(), 0)
+    }
+
+    #[test]
+    fn init_orderbook_ext_installs_the_canonical_empty_book_once() {
+        let entity = format!("0x{}", "11".repeat(32));
         let mut state = EntityStateSlice::empty(entity.clone(), 1);
-        apply_local_entity_control_tx(&mut state, native, &mut Vec::new(), &authority(), 0)
-            .expect("apply");
+        apply_control(&mut state, &init_orderbook_tx(1, 10)).expect("apply");
         assert_eq!(
             state
                 .orderbook
@@ -2376,8 +2436,73 @@ mod tests {
             .expect("metadata")
             .hub_profile;
         assert_eq!(profile.entity_id, entity);
-        assert_eq!(profile.usd_quote_authority_entity_id, quote_authority);
+        assert_eq!(
+            profile.usd_quote_authority_entity_id,
+            format!("0x{}", "22".repeat(32))
+        );
         assert_eq!(profile.supported_pairs, ["1/2"]);
+    }
+
+    /// The TS Entity document schema refuses these on every restart, so a
+    /// committed one bricked recovery. They are typed rejects before mutation.
+    #[test]
+    fn init_orderbook_ext_rejects_token_zero_and_negative_min_trade_before_mutation() {
+        for (tx, expected) in [
+            (
+                init_orderbook_tx(0, 10),
+                "ORDERBOOK_REFERENCE_TOKEN_INVALID:0",
+            ),
+            (
+                init_orderbook_tx(1, -1),
+                "ORDERBOOK_MIN_TRADE_SIZE_NEGATIVE:-1",
+            ),
+        ] {
+            let mut state = EntityStateSlice::empty(format!("0x{}", "11".repeat(32)), 1);
+            let before = state.clone();
+            let error = apply_control(&mut state, &tx).expect_err("typed reject");
+            assert!(
+                matches!(&error, EntityKernelError::RejectedEntityTx {
+                    kind: "initOrderbookExt", detail,
+                } if detail == expected),
+                "{error}"
+            );
+            assert_eq!(state, before);
+        }
+        let mut state = EntityStateSlice::empty(format!("0x{}", "11".repeat(32)), 1);
+        apply_control(&mut state, &init_orderbook_tx(1, 0)).expect("zero minimum trade");
+        assert!(state.orderbook.is_some());
+    }
+
+    #[test]
+    fn set_hub_config_rejects_negative_fee_and_threshold_before_mutation() {
+        let hub_config = |field: &str, value: i64| {
+            CanonicalEntityTx::from_frame_projection(
+                EntityTxKind::SetHubConfig,
+                object(vec![(field, CanonicalValue::BigInt(BigInt::from(value)))]),
+            )
+            .expect("tx")
+        };
+        for (field, expected) in [
+            ("baseFee", "HUB_CONFIG_BASE_FEE_NEGATIVE:-1"),
+            (
+                "minCollateralThreshold",
+                "HUB_CONFIG_MIN_COLLATERAL_THRESHOLD_NEGATIVE:-1",
+            ),
+        ] {
+            let mut state = EntityStateSlice::empty(format!("0x{}", "11".repeat(32)), 1);
+            let before = state.clone();
+            let error =
+                apply_control(&mut state, &hub_config(field, -1)).expect_err("typed reject");
+            assert!(
+                matches!(&error, EntityKernelError::RejectedEntityTx {
+                    kind: "setHubConfig", detail,
+                } if detail == expected),
+                "{error}"
+            );
+            assert_eq!(state, before);
+            apply_control(&mut state, &hub_config(field, 0)).expect("zero is a valid hub amount");
+            assert!(state.profile.is_hub);
+        }
     }
 
     #[test]

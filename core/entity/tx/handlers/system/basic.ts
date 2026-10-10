@@ -276,11 +276,25 @@ export const handleProfileUpdateEntityTx = (
   return { newState, outputs: [] };
 };
 
+// Token 0 cannot be a quote reference and a negative minimum trade has no
+// meaning; the Entity document schema refuses both on every read, so
+// committing one bricked the next restart. Typed reject before mutation.
+// Parity: Rust reject_invalid_hub_profile (entity-kernel local_control.rs).
+const rejectInvalidOrderbookProfile = ({ referenceTokenId, minTradeSize }: EntityTxOf<'initOrderbookExt'>['data']): void => {
+  if (referenceTokenId < 1) {
+    throw rejectFailure('ORDERBOOK_REFERENCE_TOKEN_INVALID', `ORDERBOOK_REFERENCE_TOKEN_INVALID:${referenceTokenId}`);
+  }
+  if (minTradeSize < 0n) {
+    throw rejectFailure('ORDERBOOK_MIN_TRADE_SIZE_NEGATIVE', `ORDERBOOK_MIN_TRADE_SIZE_NEGATIVE:${minTradeSize}`);
+  }
+};
+
 export const handleInitOrderbookExtEntityTx = (
   entityState: EntityState,
   entityTx: EntityTxOf<'initOrderbookExt'>,
   mutableFrameState = false,
 ): BasicEntityTxResult => {
+  rejectInvalidOrderbookProfile(entityTx.data);
   if (entityState.orderbookExt) {
     return { newState: entityState, outputs: [] };
   }
