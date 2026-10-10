@@ -14,7 +14,13 @@ import { createXlnJsonRpcProvider } from '../jurisdiction/adapter';
 import { assertWatchtowerRpcUrlAllowed } from './action';
 import { buildDisputeWakeNotification, disputeWakeCollapseKey, selectWakeTargets } from './push/dispute-wake';
 import { createStructuredLogger } from '../support/logger';
-import type { DisputeWakeEvent, PushSender, StoredPushRegistration } from './push/types';
+import type {
+  DisputeWakeEvent,
+  DisputeWakeTarget,
+  PendingDisputeWake,
+  PushSender,
+  StoredPushRegistration,
+} from './push/types';
 
 const DISPUTE_STARTED_ABI = [
   'event DisputeStarted(bytes32 indexed sender, bytes32 indexed counterentity, uint256 indexed nonce, bool proposerIsLeft, bytes32 proofbodyHash, bytes32 watchSeed, bytes starterInitialArguments, bytes starterCounterArguments, bytes32 starterCounterProofCommitment, uint256 disputeTimeout, uint256 disputeStartTimestamp, uint32 leftResponseSeconds, uint32 rightResponseSeconds)',
@@ -27,6 +33,9 @@ const DEFAULT_MAX_BACKFILL_BLOCKS = 50_000;
 const DEFAULT_CONFIRMATIONS = 12;
 const DEFAULT_RPC_TIMEOUT_MS = 10_000;
 const DEFAULT_MAX_LOGS_PER_CHUNK = 10_000;
+// About five minutes of 15 s sweeps. A token that keeps failing is dropped
+// with an error log instead of being retried forever.
+const MAX_WAKE_ATTEMPTS = 20;
 const disputeWatchLog = createStructuredLogger('watchtower.dispute_watch');
 
 const uint256ToSafeNumber = (value: unknown, label: string): number => {
@@ -60,6 +69,9 @@ export interface DisputeWatchStore {
   setCursor(chainId: number, depositoryAddress: string, blockNumber: number): Promise<void>;
   wasRecentlyWoken(key: string): Promise<boolean>;
   markWoken(key: string, at: number): Promise<void>;
+  listPendingWakes(chainId: number, depositoryAddress: string): Promise<PendingDisputeWake[]>;
+  savePendingWake(wake: PendingDisputeWake): Promise<void>;
+  deletePendingWake(wake: PendingDisputeWake): Promise<void>;
 }
 
 export type DisputeWatchOptions = {
@@ -73,11 +85,14 @@ export type DisputeWatchOptions = {
   now?: () => number;
 };
 
+/** errors counts failed targets; a failed wake is retried, not a target failure. */
 export type DisputeWatchResult = {
   targetsScanned: number;
   eventsObserved: number;
   notificationsSent: number;
   notificationsSkipped: number;
+  notificationsFailed: number;
+  notificationsDropped: number;
   errors: number;
 };
 
@@ -157,6 +172,80 @@ const connectTargetProvider = async (
   throw new Error(`WATCHTOWER_DISPUTE_RPC_UNAVAILABLE:${target.chainId}:${target.depositoryAddress}`);
 };
 
+type WakeContext = {
+  store: DisputeWatchStore;
+  sender: PushSender;
+  now: () => number;
+  counts: DisputeWatchResult;
+};
+
+/**
+ * A failed wake becomes a pending item with bounded retries. Holding the
+ * cursor instead let one token whose webhook always fails stop every later
+ * dispute of the jurisdiction from being scanned.
+ */
+const sendWake = async (context: WakeContext, target: DisputeWakeTarget, pending: PendingDisputeWake): Promise<void> => {
+  const { store, counts } = context;
+  const result = await context.sender.send(buildDisputeWakeNotification(target));
+  if (result.ok) {
+    await store.markWoken(pending.dedupKey, context.now());
+    if (pending.attempts > 0) await store.deletePendingWake(pending);
+    counts.notificationsSent += 1;
+    return;
+  }
+  counts.notificationsFailed += 1;
+  const attempts = pending.attempts + 1;
+  const fields = { dedupKey: pending.dedupKey, attempts, error: String(result.error || 'unknown') };
+  if (attempts >= MAX_WAKE_ATTEMPTS) {
+    await store.deletePendingWake(pending);
+    counts.notificationsDropped += 1;
+    disputeWatchLog.error('wake.dropped', fields);
+    return;
+  }
+  await store.savePendingWake({ ...pending, attempts });
+  disputeWatchLog.warn('wake.failed', fields);
+};
+
+const retryPendingWakes = async (
+  context: WakeContext,
+  pendingWakes: readonly PendingDisputeWake[],
+  registrations: readonly StoredPushRegistration[],
+): Promise<void> => {
+  for (const pending of pendingWakes) {
+    if (await context.store.wasRecentlyWoken(pending.dedupKey)) {
+      await context.store.deletePendingWake(pending);
+      continue;
+    }
+    const target = selectWakeTargets(pending.event, registrations)
+      .find(candidate => candidate.registration.tokenHash === pending.tokenHash);
+    if (target) {
+      await sendWake(context, target, pending);
+      continue;
+    }
+    await context.store.deletePendingWake(pending);
+    context.counts.notificationsDropped += 1;
+    disputeWatchLog.warn('wake.unregistered', { dedupKey: pending.dedupKey });
+  }
+};
+
+const wakeVictims = async (
+  context: WakeContext,
+  event: DisputeWakeEvent,
+  registrations: readonly StoredPushRegistration[],
+  pendingKeys: ReadonlySet<string>,
+): Promise<void> => {
+  for (const target of selectWakeTargets(event, registrations)) {
+    const dedupKey = `${disputeWakeCollapseKey(event)}:${target.registration.tokenHash}`;
+    // A pending wake is retried by retryPendingWakes, never restarted by a rescan.
+    if (pendingKeys.has(dedupKey) || await context.store.wasRecentlyWoken(dedupKey)) {
+      context.counts.notificationsSkipped += 1;
+      continue;
+    }
+    const pending = { dedupKey, tokenHash: target.registration.tokenHash, event, attempts: 0, firstFailedAt: context.now() };
+    await sendWake(context, target, pending);
+  }
+};
+
 export const runDisputeWatchSweep = async (
   store: DisputeWatchStore,
   sender: PushSender,
@@ -170,15 +259,24 @@ export const runDisputeWatchSweep = async (
   const maxLogsPerChunk = Math.max(1, Math.floor(Number(options?.maxLogsPerChunk ?? DEFAULT_MAX_LOGS_PER_CHUNK)));
 
   const watchTargets = await store.listWatchTargets();
-  let eventsObserved = 0;
-  let notificationsSent = 0;
-  let notificationsSkipped = 0;
-  let errors = 0;
+  const counts: DisputeWatchResult = {
+    targetsScanned: watchTargets.length,
+    eventsObserved: 0,
+    notificationsSent: 0,
+    notificationsSkipped: 0,
+    notificationsFailed: 0,
+    notificationsDropped: 0,
+    errors: 0,
+  };
+  const context: WakeContext = { store, sender, now, counts };
 
   for (const target of watchTargets) {
     try {
       const registrations = await store.listRegistrationsForTarget(target.chainId, target.depositoryAddress);
+      const pendingWakes = await store.listPendingWakes(target.chainId, target.depositoryAddress);
+      await retryPendingWakes(context, pendingWakes, registrations);
       if (registrations.length === 0) continue;
+      const pendingKeys = new Set(pendingWakes.map(pending => pending.dedupKey));
       const provider = await connectTargetProvider(target, options, rpcTimeoutMs);
 
       const head = Math.max(0, Math.floor(Number(await withTimeout(
@@ -199,10 +297,8 @@ export const runDisputeWatchSweep = async (
       const flooredFrom = Math.max(0, requestedFrom, retainedFrom);
       if (flooredFrom > safeHead) continue;
 
-      let cursor = flooredFrom - 1;
       for (let start = flooredFrom; start <= safeHead; start += maxBlockRange) {
         const end = Math.min(safeHead, start + maxBlockRange - 1);
-        let chunkDeliveryFailed = false;
         const logs = await withTimeout(provider.getLogs({
             fromBlock: start,
             toBlock: end,
@@ -215,33 +311,14 @@ export const runDisputeWatchSweep = async (
         for (const log of logs) {
           const event = parseDisputeStarted(log, target.chainId, target.depositoryAddress);
           if (!event) continue;
-          eventsObserved += 1;
-          for (const wake of selectWakeTargets(event, registrations)) {
-            const dedupKey = `${disputeWakeCollapseKey(event)}:${wake.registration.tokenHash}`;
-            if (await store.wasRecentlyWoken(dedupKey)) {
-              notificationsSkipped += 1;
-              continue;
-            }
-            const result = await sender.send(buildDisputeWakeNotification(wake));
-            if (result.ok) {
-              await store.markWoken(dedupKey, now());
-              notificationsSent += 1;
-            } else {
-              errors += 1;
-              chunkDeliveryFailed = true;
-            }
-          }
+          counts.eventsObserved += 1;
+          await wakeVictims(context, event, registrations, pendingKeys);
         }
-        // Successful wakes are deduped durably, so replaying this chunk is
-        // safe. Advancing past a failed wake would lose that dispute forever.
-        if (chunkDeliveryFailed) break;
-        cursor = end;
-      }
-      if (cursor >= flooredFrom) {
-        await store.setCursor(target.chainId, target.depositoryAddress, cursor);
+        // Every wake of this chunk is delivered or durably pending.
+        await store.setCursor(target.chainId, target.depositoryAddress, end);
       }
     } catch (error) {
-      errors += 1;
+      counts.errors += 1;
       disputeWatchLog.error('target.failed', {
         chainId: target.chainId,
         depositoryAddress: target.depositoryAddress,
@@ -250,11 +327,5 @@ export const runDisputeWatchSweep = async (
     }
   }
 
-  return {
-    targetsScanned: watchTargets.length,
-    eventsObserved,
-    notificationsSent,
-    notificationsSkipped,
-    errors,
-  };
+  return counts;
 };

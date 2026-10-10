@@ -60,6 +60,15 @@ export type DisputeWakeEvent = {
   txHash?: string;
 };
 
+/** A wake whose delivery failed; retried by later sweeps up to a bound. */
+export type PendingDisputeWake = {
+  dedupKey: string;
+  tokenHash: string;
+  event: DisputeWakeEvent;
+  attempts: number;
+  firstFailedAt: number;
+};
+
 export type DisputeWakeTarget = {
   registration: StoredPushRegistration;
   event: DisputeWakeEvent;

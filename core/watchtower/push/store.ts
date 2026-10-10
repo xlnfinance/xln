@@ -9,11 +9,16 @@
 import { mkdir } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { Level } from 'level';
-import { serializeTaggedJson } from '../../protocol/serialization';
+import {
+  requireBoundaryInteger,
+  requireBoundaryRecord,
+  requireExactBoundaryKeys,
+} from '../../protocol/boundary-validation';
+import { deserializeTaggedJson, serializeTaggedJson } from '../../protocol/serialization';
 import { createStructuredLogger } from '../../support/logger';
 import { createSerialLock, type SerialLock } from '../sweep-health';
 import { decodeStoredPushRegistration } from './registration';
-import type { StoredPushRegistration } from './types';
+import type { PendingDisputeWake, StoredPushRegistration } from './types';
 
 const DEFAULT_REGISTRATION_TTL_MS = 90 * 24 * 60 * 60 * 1000;
 const DEFAULT_WAKE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
@@ -88,6 +93,42 @@ const cursorKey = (chainId: number, depository: string): string =>
   `cursor:${normTarget(chainId, depository)}`;
 
 const wakeKey = (key: string): string => `wake:${key}`;
+
+const pendingWakePrefix = (chainId: number, depository: string): string =>
+  `pending:${normTarget(chainId, depository)}:`;
+
+const pendingWakeKey = (wake: PendingDisputeWake): string =>
+  `${pendingWakePrefix(wake.event.chainId, wake.event.depositoryAddress)}${wake.dedupKey}`;
+
+const requireText = (value: unknown, code: string): string => {
+  if (typeof value !== 'string' || value.length === 0) throw new Error(code);
+  return value;
+};
+
+const decodePendingWake = (raw: string, key: string): PendingDisputeWake => {
+  const wake = requireBoundaryRecord(deserializeTaggedJson(raw), `PUSH_PENDING_WAKE_INVALID:key=${key}`);
+  requireExactBoundaryKeys(wake, ['dedupKey', 'tokenHash', 'event', 'attempts', 'firstFailedAt'], [],
+    `PUSH_PENDING_WAKE_FIELDS_INVALID:key=${key}`);
+  const event = requireBoundaryRecord(wake['event'], `PUSH_PENDING_WAKE_EVENT_INVALID:key=${key}`);
+  requireExactBoundaryKeys(event, ['chainId', 'depositoryAddress', 'sender', 'counterentity', 'nonce', 'blockNumber'],
+    ['txHash'], `PUSH_PENDING_WAKE_EVENT_FIELDS_INVALID:key=${key}`);
+  const code = `PUSH_PENDING_WAKE_INVALID:key=${key}`;
+  return {
+    dedupKey: requireText(wake['dedupKey'], code),
+    tokenHash: requireText(wake['tokenHash'], code),
+    event: {
+      chainId: requireBoundaryInteger(event['chainId'], code, 1),
+      depositoryAddress: requireText(event['depositoryAddress'], code),
+      sender: requireText(event['sender'], code),
+      counterentity: requireText(event['counterentity'], code),
+      nonce: requireBoundaryInteger(event['nonce'], code),
+      blockNumber: requireBoundaryInteger(event['blockNumber'], code),
+      ...(event['txHash'] === undefined ? {} : { txHash: requireText(event['txHash'], code) }),
+    },
+    attempts: requireBoundaryInteger(wake['attempts'], code, 1),
+    firstFailedAt: requireBoundaryInteger(wake['firstFailedAt'], code),
+  };
+};
 
 const openStore = async (context: PushStoreContext): Promise<void> => {
   await mkdir(dirname(context.dbPath), { recursive: true });
@@ -318,6 +359,20 @@ const markWoken = async (
   await context.db.put(wakeKey(key), String(Math.max(0, Math.floor(timestamp))));
 };
 
+const listPendingWakes = async (
+  context: PushStoreContext,
+  chainId: number,
+  depository: string,
+): Promise<PendingDisputeWake[]> => {
+  await ensureOpen(context);
+  const prefix = pendingWakePrefix(chainId, depository);
+  const wakes: PendingDisputeWake[] = [];
+  for await (const [key, raw] of context.db.iterator({ gte: prefix, lte: `${prefix}\xff` })) {
+    wakes.push(decodePendingWake(String(raw), key));
+  }
+  return wakes;
+};
+
 const getStats = async (context: PushStoreContext): Promise<PushStoreStats> => {
   await ensureOpen(context);
   let registrationCount = 0;
@@ -346,6 +401,9 @@ const pruneExpired = async (
     } else if (key.startsWith('wake:')) {
       const timestamp = Number(raw);
       if (Number.isFinite(timestamp) && timestamp < wakeCutoff) keys.push(key);
+    } else if (key.startsWith('pending:')) {
+      // Retries end the item; this only collects one whose target stopped being swept.
+      if (decodePendingWake(String(raw), key).firstFailedAt < wakeCutoff) keys.push(key);
     }
   }
   if (keys.length > 0) {
@@ -398,6 +456,15 @@ export const createPushStore = (options: PushStoreOptions = {}) => {
       setCursor(context, chainId, depository, blockNumber),
     wasRecentlyWoken: (key: string) => wasRecentlyWoken(context, key),
     markWoken: (key: string, timestamp: number) => markWoken(context, key, timestamp),
+    listPendingWakes: (chainId: number, depository: string) => listPendingWakes(context, chainId, depository),
+    savePendingWake: async (wake: PendingDisputeWake) => {
+      await ensureOpen(context);
+      await context.db.put(pendingWakeKey(wake), serializeTaggedJson(wake));
+    },
+    deletePendingWake: async (wake: PendingDisputeWake) => {
+      await ensureOpen(context);
+      await context.db.del(pendingWakeKey(wake));
+    },
     getStats: () => getStats(context),
     pruneExpired: () => context.writeLock(() => pruneExpired(context)),
     close: () => closeStore(context),

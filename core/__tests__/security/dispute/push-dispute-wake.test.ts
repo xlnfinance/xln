@@ -413,6 +413,9 @@ describe('runDisputeWatchSweep', () => {
       setCursor: async (c, d, b) => { cursors.set(`${c}:${d}`, b); },
       wasRecentlyWoken: async (k) => woken.has(k),
       markWoken: async (k) => { woken.add(k); },
+      listPendingWakes: async () => [],
+      savePendingWake: async () => { throw new Error('UNEXPECTED_PENDING_WAKE'); },
+      deletePendingWake: async () => undefined,
     };
     return { store, woken, cursors };
   };
@@ -473,32 +476,100 @@ describe('runDisputeWatchSweep', () => {
     expect(topicHash).not.toBe(TOPIC0);
   });
 
-  test('does not advance the scan cursor past a failed wake', async () => {
+  const disputeLog = async (victim: number, nonce: number, blockNumber: number) => {
     const { Interface, id } = await import('ethers');
     const iface = new Interface([
       'event DisputeStarted(bytes32 indexed sender, bytes32 indexed counterentity, uint256 indexed nonce, bool proposerIsLeft, bytes32 proofbodyHash, bytes32 watchSeed, bytes starterInitialArguments, bytes starterCounterArguments, bytes32 starterCounterProofCommitment, uint256 disputeTimeout, uint256 disputeStartTimestamp, uint32 leftResponseSeconds, uint32 rightResponseSeconds)',
     ]);
     const encoded = iface.encodeEventLog('DisputeStarted', [
-      entityId(1), entityId(2), 6, false, id('proof-retry'), id('seed-retry'), '0x', '0x',
+      entityId(1), entityId(victim), nonce, false, id(`proof-${nonce}`), id(`seed-${nonce}`), '0x', '0x',
       `0x${'00'.repeat(32)}`, 5_910, 5_000, 600, 310,
     ]);
-    const log = { topics: [...encoded.topics] as string[], data: encoded.data, blockNumber: 151 };
+    return { topics: [...encoded.topics] as string[], data: encoded.data, blockNumber };
+  };
+
+  /** A chain whose head the test moves, serving only the logs inside each queried range. */
+  const movingChain = (logs: Array<{ topics: string[]; data: string; blockNumber: number }>) => {
+    const chain = { head: 200 };
+    const providerFactory = () => ({
+      send: async () => chainIdHex,
+      getBlockNumber: async () => chain.head,
+      getLogs: async (filter: { fromBlock: number; toBlock: number }) =>
+        logs.filter(log => log.blockNumber >= filter.fromBlock && log.blockNumber <= filter.toBlock),
+    });
+    return { chain, providerFactory };
+  };
+
+  test('a failed wake is retried from a pending item and delivered by a later sweep', async () => {
+    const store = createPushStore({ dbPath: join(await mkdtemp(join(tmpdir(), 'xln-push-retry-wake-')), 'push.level') });
+    await store.registerToken(makeRegistration({ entityId: entityId(2), token: 'victim', tokenHash: hashPushToken('victim') }));
     let fail = true;
+    const sent: string[] = [];
     const sender: PushSender = {
       kind: 'retry-once',
-      send: async () => fail ? { ok: false, error: 'offline' } : { ok: true },
+      send: async notification => {
+        if (fail) return { ok: false, error: 'offline' };
+        sent.push(notification.token);
+        return { ok: true };
+      },
     };
-    const { store, cursors } = buildFakeStore();
-    const providerFactory = makeProvider([log]);
+    const { providerFactory } = movingChain([await disputeLog(2, 6, 151)]);
+    const options = { providerFactory, maxBlockRange: 1000, confirmations: 0 };
+    try {
+      const first = await runDisputeWatchSweep(store, sender, options);
+      expect(first).toMatchObject({ errors: 0, notificationsFailed: 1, notificationsSent: 0 });
+      expect(await store.listPendingWakes(CHAIN_ID, DEPOSITORY)).toHaveLength(1);
 
-    const first = await runDisputeWatchSweep(store, sender, { providerFactory: () => providerFactory(), maxBlockRange: 1000, confirmations: 0 });
-    expect(first.errors).toBe(1);
-    expect(cursors.size).toBe(0);
+      fail = false;
+      const second = await runDisputeWatchSweep(store, sender, options);
+      expect(second).toMatchObject({ errors: 0, notificationsSent: 1 });
+      expect(sent).toEqual(['victim']);
+      expect(await store.listPendingWakes(CHAIN_ID, DEPOSITORY)).toHaveLength(0);
+      expect(await store.getCursor(CHAIN_ID, DEPOSITORY)).toBe(200);
+    } finally {
+      await store.close();
+    }
+  });
 
-    fail = false;
-    const second = await runDisputeWatchSweep(store, sender, { providerFactory: () => providerFactory(), maxBlockRange: 1000, confirmations: 0 });
-    expect(second.notificationsSent).toBe(1);
-    expect(cursors.get(`${CHAIN_ID}:${DEPOSITORY}`)).toBe(200);
+  test('a token that always fails neither stops later disputes nor retries forever', async () => {
+    const store = createPushStore({ dbPath: join(await mkdtemp(join(tmpdir(), 'xln-push-wedge-')), 'push.level') });
+    await store.registerToken(makeRegistration({ entityId: entityId(2), token: 'rejected', tokenHash: hashPushToken('rejected') }));
+    await store.registerToken(makeRegistration({ entityId: entityId(3), token: 'later', tokenHash: hashPushToken('later') }));
+    await store.setCursor(CHAIN_ID, DEPOSITORY, 99);
+    const sent: string[] = [];
+    let rejectedAttempts = 0;
+    const sender: PushSender = {
+      kind: 'webhook-4xx',
+      send: async notification => {
+        if (notification.token === 'rejected') {
+          rejectedAttempts += 1;
+          return { ok: false, error: 'PUSH_WEBHOOK_HTTP_400' };
+        }
+        sent.push(notification.token);
+        return { ok: true };
+      },
+    };
+    const { chain, providerFactory } = movingChain([await disputeLog(2, 7, 150), await disputeLog(3, 8, 350)]);
+    const options = { providerFactory, maxBlockRange: 100, confirmations: 0 };
+    try {
+      await runDisputeWatchSweep(store, sender, options);
+      chain.head = 400;
+      const second = await runDisputeWatchSweep(store, sender, options);
+      // The always-failing token used to hold the cursor at its chunk forever.
+      expect(sent).toEqual(['later']);
+      expect(second).toMatchObject({ errors: 0, notificationsSent: 1, notificationsFailed: 1 });
+      expect(await store.getCursor(CHAIN_ID, DEPOSITORY)).toBe(400);
+
+      let dropped = 0;
+      for (let sweep = 0; sweep < 25; sweep += 1) {
+        dropped += (await runDisputeWatchSweep(store, sender, options)).notificationsDropped;
+      }
+      expect(dropped).toBe(1);
+      expect(rejectedAttempts).toBe(20);
+      expect(await store.listPendingWakes(CHAIN_ID, DEPOSITORY)).toHaveLength(0);
+    } finally {
+      await store.close();
+    }
   });
 
   test('fails loud instead of skipping an expired backfill range', async () => {

@@ -148,6 +148,8 @@ const startPushWatchSweep = (
         eventsObserved: result.eventsObserved,
         notificationsSent: result.notificationsSent,
         notificationsSkipped: result.notificationsSkipped,
+        notificationsFailed: result.notificationsFailed,
+        notificationsDropped: result.notificationsDropped,
         errors: result.errors,
       },
     };
