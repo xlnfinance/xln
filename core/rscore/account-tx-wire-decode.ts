@@ -240,7 +240,7 @@ export const decodeRscoreAccountTx = (value: unknown): AccountTx => {
     case 10: return decodeLendingFund(row);
     case 11: return decodeLendingBorrow(row);
     case 12: return decodeLendingRepay(row);
-    case 13: return decodeLendingCredit(row);
+    case 24: return decodeLendingDisburse(row);
     case 14: return decodeLendingCloseRequest(row);
     case 15: return decodeLendingClosePayout(row);
     case 17: return decodeRequestCollateral(row);
@@ -278,14 +278,12 @@ const decodeLendingRepay = (row: readonly unknown[]): AccountTx => {
     hubEntityId: rscoreWireText(f[2], 'tx.hubEntityId'), borrowerEntityId: rscoreWireText(f[3], 'tx.borrowerEntityId'),
     tokenId: rscoreWireUint(f[4], 'tx.tokenId'), amount: rscoreWireBig(f[5], 'tx.amount') } };
 };
-const decodeLendingCredit = (row: readonly unknown[]): AccountTx => {
-  const f = rscoreWireTuple(row, 7, 'tx.lendingCredit');
-  const action = rscoreWireInt(f[1], 'tx.action');
-  if (action !== 0 && action !== 1) return rscoreWireDecodeFail('tx.action:unknown');
-  return { type: 'lending_credit', data: { action: action === 0 ? 'grant' : 'revoke',
-    loanId: rscoreWireText(f[2], 'tx.loanId'), hubEntityId: rscoreWireText(f[3], 'tx.hubEntityId'),
-    borrowerEntityId: rscoreWireText(f[4], 'tx.borrowerEntityId'), tokenId: rscoreWireUint(f[5], 'tx.tokenId'),
-    creditLimit: rscoreWireBig(f[6], 'tx.creditLimit') } };
+const decodeLendingDisburse = (row: readonly unknown[]): AccountTx => {
+  const f = rscoreWireTuple(row, 6, 'tx.lendingDisburse');
+  return { type: 'lending_disburse', data: {
+    loanId: rscoreWireText(f[1], 'tx.loanId'), hubEntityId: rscoreWireText(f[2], 'tx.hubEntityId'),
+    borrowerEntityId: rscoreWireText(f[3], 'tx.borrowerEntityId'), tokenId: rscoreWireUint(f[4], 'tx.tokenId'),
+    amount: rscoreWireBig(f[5], 'tx.amount') } };
 };
 const decodeLendingCloseRequest = (row: readonly unknown[]): AccountTx => {
   const f = rscoreWireTuple(row, 4, 'tx.lendingCloseRequest');

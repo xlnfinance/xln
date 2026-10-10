@@ -4,7 +4,7 @@ import { Icon } from '../Icons';
 import { TokenIcon } from '../TokenPicker';
 import { formatMoney, formatSigned, getTokenMeta } from '../../runtime/format';
 import type { AccountTokenView } from '../../runtime/views';
-export function TokenSection({ token }: { token: AccountTokenView }) {
+export function TokenSection({ token, disputed = false, closed = false }: { token: AccountTokenView; disputed?: boolean; closed?: boolean }) {
 	const meta = getTokenMeta(token.tokenId);
 	const d = token.derived;
 	const money = (value: bigint): string => formatMoney(value, meta.decimals);
@@ -24,7 +24,9 @@ export function TokenSection({ token }: { token: AccountTokenView }) {
 				</span>
 			</div>
 			<DeltaBar derived={d} tokenId={token.tokenId} />
-			<DeltaCaption derived={d} format={money} />
+			{disputed
+				? <p role="status">{closed ? 'Account permanently closed after dispute. The settlement returned funds to your reserve.' : 'Account frozen by dispute. Sending and receiving are unavailable.'}</p>
+				: <DeltaCaption derived={d} format={money} />}
 			<div style={{ marginTop: 14 }}>
 				<div className="kv">
 					<span className="k">Their credit line to you</span>

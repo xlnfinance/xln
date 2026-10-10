@@ -114,7 +114,7 @@ export const ACCOUNT_TX_SEMANTIC_CATALOG = [
   covered('account', 'lending_fund', 'core/account/tx/handlers/balance/lending.ts', ACCOUNT_LENDING_EVIDENCE),
   covered('account', 'lending_borrow_request', 'core/account/tx/handlers/balance/lending.ts', ACCOUNT_LENDING_EVIDENCE),
   covered('account', 'lending_repay', 'core/account/tx/handlers/balance/lending.ts', ACCOUNT_LENDING_EVIDENCE),
-  covered('account', 'lending_credit', 'core/account/tx/handlers/balance/lending.ts', ACCOUNT_LENDING_EVIDENCE),
+  covered('account', 'lending_disburse', 'core/account/tx/handlers/balance/lending.ts', ACCOUNT_LENDING_EVIDENCE),
   covered('account', 'lending_close_request', 'core/account/tx/handlers/balance/lending.ts', ACCOUNT_LENDING_EVIDENCE),
   covered('account', 'lending_close_payout', 'core/account/tx/handlers/balance/lending.ts', ACCOUNT_LENDING_EVIDENCE),
   covered('account', 'add_delta', 'core/account/tx/handlers/balance/add-delta.ts', ACCOUNT_BALANCE_EVIDENCE),

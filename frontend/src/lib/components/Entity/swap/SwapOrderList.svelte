@@ -1,12 +1,15 @@
 <script lang="ts">
-  import type { SwapBookEntry } from '@xln/core/api/public/runtime-module';
+  import type { CrossJurisdictionSwapRoute, SwapBookEntry } from '@xln/core/api/public/runtime-module';
+  import { isCrossJurisdictionTerminalStatus } from '@xln/core/extensions/cross-j';
   import { toBigIntSafe } from '../swap-formatting';
   import type { ClosedOrderStatus, ClosedOrderView, OfferLike, PairOrientation } from './swap-order-history';
 
   export let orderListTab: 'open' | 'closed' = 'open';
-  export let orderRouteFilter: 'all' | 'same' | 'cross' = 'all';
   export let closedOrderStatusFilter: 'all' | ClosedOrderStatus = 'all';
   export let openOrders: SwapBookEntry[] = [];
+  export let crossOrders: CrossJurisdictionSwapRoute[] = [];
+  export let sourceEntityIdValue = '';
+  export let crossNetworkLabel: (stackId: string) => string = stackId => stackId;
   export let closedOrderViews: ClosedOrderView[] = [];
   export let filteredClosedOrderViews: ClosedOrderView[] = [];
   export let totalPriceImprovementSummary = '';
@@ -38,9 +41,37 @@
 </script>
 
 <div class="section section-orders">
+  {#if crossOrders.length > 0}
+    <section aria-label="Recent cross-network orders" data-testid="cross-swap-orders">
+      <h4>Recent cross-network orders</h4>
+      <p>Confirmed route status from this account's latest view. Matched amounts remain pending until settlement; a closed route releases its unfilled remainder.</p>
+      {#each crossOrders as route (route.orderId)}
+        {@const terminal = isCrossJurisdictionTerminalStatus(route.status)}
+        <article class="cross-route-result" data-testid="cross-swap-order" data-order-id={route.orderId} data-status={route.status}>
+          <strong>{crossNetworkLabel(route.source.jurisdiction)} → {crossNetworkLabel(route.target.jurisdiction)}</strong>
+          <p>Order: {formatAmount(route.source.amount, route.source.tokenId)} {tokenSymbol(route.source.tokenId)} → {formatAmount(route.target.amount, route.target.tokenId)} {tokenSymbol(route.target.tokenId)}</p>
+          <p role="status" data-testid="cross-swap-status">
+            {#if route.status === 'settled'}Settled · closed
+            {:else if terminal}{route.status === 'cancelled' ? 'Cancelled' : 'Expired'} · closed
+            {:else}Pending · {route.status.replace(/_/g, ' ')}{/if}
+          </p>
+          {#if route.status === 'settled'}
+            <p data-testid="cross-swap-delivery">Delivered: {formatAmount(route.filledSourceAmount ?? 0n, route.source.tokenId)} {tokenSymbol(route.source.tokenId)} → {formatAmount(route.filledTargetAmount ?? 0n, route.target.tokenId)} {tokenSymbol(route.target.tokenId)}</p>
+          {:else if !terminal}
+            <p>Matched, pending settlement: {formatAmount(route.filledSourceAmount ?? 0n, route.source.tokenId)} {tokenSymbol(route.source.tokenId)} → {formatAmount(route.filledTargetAmount ?? 0n, route.target.tokenId)} {tokenSymbol(route.target.tokenId)}</p>
+          {:else}<p>No funds delivered.</p>{/if}
+          {#if !terminal && route.source.entityId.toLowerCase() === sourceEntityIdValue}
+            <button class="cancel-btn" data-testid="cross-swap-clear" disabled={route.status === 'clearing' || route.status === 'clear_requested'} on:click={() => requestCrossClear(route.orderId, true)}>Clear + Close</button>
+          {/if}
+          {#if route.error}<p role="alert">{route.error}</p>{/if}
+          <details><summary>Order evidence</summary><code>{route.orderId}</code><p>Check the receiving account on {crossNetworkLabel(route.target.jurisdiction)} to verify its balance.</p></details>
+        </article>
+      {/each}
+    </section>
+  {/if}
   <div class="orders-toolbar">
     <div class="orders-header-left">
-      <h4 class="orders-inline-title">Orders</h4>
+      <h4 class="orders-inline-title">Same-network orders</h4>
       <div class="orders-tabs" role="tablist" aria-label="Swap orders">
         <button
           type="button"
@@ -63,14 +94,6 @@
         >Closed ({closedOrderViews.length})</button>
       </div>
     </div>
-    <label class="closed-status-filter" class:is-hidden={orderListTab !== 'open'}>
-      <span>Route</span>
-      <select bind:value={orderRouteFilter} disabled={orderListTab !== 'open'} data-testid="swap-orders-route-filter">
-        <option value="all">All</option>
-        <option value="same">Same</option>
-        <option value="cross">Cross-j</option>
-      </select>
-    </label>
     <label class="closed-status-filter" class:is-hidden={orderListTab !== 'closed'}>
       <span>Status</span>
       <select bind:value={closedOrderStatusFilter} disabled={orderListTab !== 'closed'}>
@@ -116,9 +139,6 @@
                 </td>
                 <td>
                   <span>{tokenSymbol(pairView.baseTokenId)}/{tokenSymbol(pairView.quoteTokenId)}</span>
-                  {#if offer.crossJurisdiction}
-                    <span class="route-badge">Cross-j</span>
-                  {/if}
                 </td>
                 <td>{formatPriceTicks(offerPriceTicks(offer))}</td>
                 <td>
@@ -135,31 +155,11 @@
                   {:else}
                     {formatAmount(toBigIntSafe(offer.giveAmount) ?? 0n, Number(offer.giveTokenId || 0))} {tokenSymbol(Number(offer.giveTokenId || 0))}
                   {/if}
-                  {#if offer.crossJurisdiction}
-                    {@const route = offer.crossJurisdiction}
-                    {@const pendingAmount = toBigIntSafe(route.filledSourceAmount ?? route.sourceClaimed ?? 0n) ?? 0n}
-                    {@const settledAmount = String(route.status || '') === 'settled' ? pendingAmount : 0n}
-                    <div class="cross-fill-meta">
-                      <span>{String(route.status || 'resting').replace(/_/g, ' ')}</span>
-                      <span>pending {formatAmount(pendingAmount, Number(offer.giveTokenId || 0))}</span>
-                      <span>settled {formatAmount(settledAmount, Number(offer.giveTokenId || 0))}</span>
-                    </div>
-                  {/if}
                 </td>
                 <td>{formatPriceImprovement(offerImprovement.amount, offerImprovement.tokenId)}</td>
                 <td>{String(offer.accountId || '').slice(0, 10)}...</td>
                 <td>
-                  {#if offer.crossJurisdiction}
-                    <div class="cross-order-actions">
-                      <button class="cancel-btn" data-testid="cross-swap-clear" on:click={() => requestCrossClear(String(offer.offerId || ''), true)}>
-                        Clear + Close
-                      </button>
-                    </div>
-                  {:else}
-                    <button class="cancel-btn" data-testid="swap-open-order-cancel" on:click={() => cancelSwapOffer(String(offer.offerId || ''), String(offer.accountId || ''))}>
-                      Request Cancel
-                    </button>
-                  {/if}
+                  <button class="cancel-btn" data-testid="swap-open-order-cancel" on:click={() => cancelSwapOffer(String(offer.offerId || ''), String(offer.accountId || ''))}>Request Cancel</button>
                 </td>
               </tr>
             {/each}
@@ -228,3 +228,8 @@
     {/if}
   {/if}
 </div>
+
+<style>
+  .cross-route-result { margin: 12px 0; padding: 12px; border: 1px solid var(--border-color, #627084); border-radius: 8px; overflow-wrap: anywhere; }
+  .cross-route-result p { margin: 6px 0; }
+</style>

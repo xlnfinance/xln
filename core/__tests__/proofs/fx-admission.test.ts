@@ -113,15 +113,14 @@ const LENDING_TXS: Array<[AccountTx['type'], AccountTx]> = [
       amount: 10n,
     },
   }],
-  ['lending_credit', {
-    type: 'lending_credit',
+  ['lending_disburse', {
+    type: 'lending_disburse',
     data: {
-      action: 'grant',
       loanId: 'loan-1',
       hubEntityId: '0xhub',
       borrowerEntityId: '0xsender',
       tokenId: 1,
-      creditLimit: 10n,
+      amount: 10n,
     },
   }],
   ['lending_close_request', {

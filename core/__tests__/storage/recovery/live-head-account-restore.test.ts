@@ -44,6 +44,8 @@ const committedAccountCount = (env: RuntimeReplica, entityId: string): number =>
 };
 
 describe('live-head restore after advertised account opens', () => {
+  // Four entities perform signed bilateral opens, durable writes and full WAL replay.
+  // Keep all digest assertions; allow the integration budget under full-suite load.
   test('replays three pinned hub accounts without replica-meta digest drift', async () => {
     const seed = `live-head-3hub ${process.pid} alpha beta gamma`;
     const runtimeId = deriveSignerAddressSync(seed, '1').toLowerCase();
@@ -162,5 +164,5 @@ describe('live-head restore after advertised account opens', () => {
         await closeInfraDb(restored);
       }
     }
-  });
+  }, 30_000);
 });

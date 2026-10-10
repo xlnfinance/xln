@@ -53,7 +53,7 @@
   let kind: ActivityKind = 'all';
   let mode: ViewMode = 'paged';
   let search = '';
-  let selectedTypes: string[] = [];
+  let selectedTypes: string[] = ['payment', 'swap', 'cross_swap', 'htlc', 'settlement', 'j_batch', 'error'];
   let pageSize = 80;
   let events: ActivityEvent[] = [];
   let loading = false;
@@ -394,7 +394,7 @@
       </button>
     {/each}
     {#if selectedTypes.length > 0 || search || fromLocal || toLocal}
-      <button class="clear" type="button" onclick={clearFilters} data-testid="history-clear-filters">Clear</button>
+      <button class="clear" type="button" onclick={clearFilters} data-testid="history-clear-filters">Show all events</button>
     {/if}
   </div>
 

@@ -3,8 +3,8 @@ mod common;
 use num_bigint::BigInt;
 use serde::Deserialize;
 use xln_rscore_engine::{
-    AccountTx, AccountVerdict, LendingAction, LendingIntentKind, LendingTermId,
-    SequentialAccountEngine, Side, TransitionError,
+    AccountTx, AccountVerdict, LendingIntentKind, LendingTermId, SequentialAccountEngine, Side,
+    TransitionError,
 };
 
 use common::{delta, entity, entity_text, replica, root_hex, token};
@@ -51,8 +51,7 @@ fn intent_kind(value: &str) -> LendingIntentKind {
     match value {
         "fund" => LendingIntentKind::Fund,
         "borrow" => LendingIntentKind::Borrow,
-        "credit-grant" => LendingIntentKind::CreditGrant,
-        "credit-revoke" => LendingIntentKind::CreditRevoke,
+        "disburse" => LendingIntentKind::Disburse,
         "repay" => LendingIntentKind::Repay,
         "close-request" => LendingIntentKind::CloseRequest,
         "close-payout" => LendingIntentKind::ClosePayout,
@@ -254,13 +253,12 @@ fn all_six_lending_variants_apply_with_exact_roles_and_orientation() {
         ),
         (
             Side::Left,
-            AccountTx::LendingCredit {
-                action: LendingAction::Grant,
+            AccountTx::LendingDisburse {
                 loan_id: LOAN.into(),
                 hub_entity_id: entity_text(0x10),
                 borrower_entity_id: entity_text(0x30),
                 token_id: token(1),
-                credit_limit: 22_500.into(),
+                amount: 2_500.into(),
             },
         ),
         (
@@ -279,8 +277,8 @@ fn all_six_lending_variants_apply_with_exact_roles_and_orientation() {
         .committed()
         .expect("candidate");
     let delta = borrower.state().delta(token(1)).expect("delta");
-    assert_eq!(delta.right_credit_limit(), &BigInt::from(22_500));
-    assert_eq!(delta.offdelta(), &BigInt::from(2_525));
+    assert_eq!(delta.right_credit_limit(), &BigInt::from(20_000));
+    assert_eq!(delta.offdelta(), &BigInt::from(25));
     assert_eq!(
         borrower
             .state()
@@ -290,8 +288,8 @@ fn all_six_lending_variants_apply_with_exact_roles_and_orientation() {
     assert_eq!(
         borrower
             .state()
-            .lending_intent("grant:loan-0327fd9035d42518"),
-        Some(LendingIntentKind::CreditGrant)
+            .lending_intent("disburse:loan-0327fd9035d42518"),
+        Some(LendingIntentKind::Disburse)
     );
     assert_eq!(
         borrower
@@ -302,31 +300,26 @@ fn all_six_lending_variants_apply_with_exact_roles_and_orientation() {
 }
 
 #[test]
-fn credit_grant_root_matches_typescript_literal() {
+fn principal_disbursement_preserves_credit_and_cannot_pay_twice() {
     let base = borrower_account();
-    let tx = AccountTx::LendingCredit {
-        action: LendingAction::Grant,
+    let tx = AccountTx::LendingDisburse {
         loan_id: LOAN.into(),
         hub_entity_id: entity_text(0x10),
         borrower_entity_id: entity_text(0x30),
         token_id: token(1),
-        credit_limit: 22_500.into(),
+        amount: 2_500.into(),
     };
     let candidate = SequentialAccountEngine::apply(&base, Side::Left, &tx)
-        .expect("credit")
+        .expect("disbursement")
         .committed()
         .expect("candidate");
+    let delta = candidate.state().delta(token(1)).expect("delta");
+    assert_eq!(delta.offdelta(), &BigInt::from(-2_500));
+    assert_eq!(delta.right_credit_limit(), &BigInt::from(20_000));
+    assert!(SequentialAccountEngine::apply(&candidate, Side::Left, &tx).is_err());
     assert_eq!(
-        root_hex(&candidate),
-        "67104d5645f8cbe8fb1126337873d8c4b6e4ec199e58b941339a0b2df76ed4dc"
-    );
-    assert_eq!(
-        candidate
-            .state()
-            .lending_intents_root()
-            .map(hex::encode)
-            .as_deref(),
-        Some("b1c856124c7dee52e0a5b8c63cdcfd5f3912c50e78c5b48b8cd82550751e8c01")
+        candidate.state().delta(token(1)).expect("delta").offdelta(),
+        &BigInt::from(-2_500)
     );
 }
 
@@ -363,13 +356,12 @@ fn all_lending_variants_match_the_shared_typescript_semantic_vector() {
         ),
         (
             Side::Left,
-            AccountTx::LendingCredit {
-                action: LendingAction::Grant,
+            AccountTx::LendingDisburse {
                 loan_id: LOAN.into(),
                 hub_entity_id: entity_text(0x10),
                 borrower_entity_id: entity_text(0x30),
                 token_id: token(1),
-                credit_limit: 22_500.into(),
+                amount: 2_500.into(),
             },
         ),
         (

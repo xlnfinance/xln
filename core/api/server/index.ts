@@ -101,11 +101,12 @@ import {
   gossipProfileEntityId,
   handleKnownProfileRequest,
 } from './network/gossip-profiles';
-import { attachLiveJAdapter } from '../../runtime/j-submit/live-jadapters';
+import { attachLiveJAdapter, getLiveJAdapter } from '../../runtime/j-submit/live-jadapters';
 import { maybeHandleDebugDumpsRequest } from './health/debug-dumps';
 import { handleCreditRequest } from './faucet/credit';
 import { handleLendingStateRequest } from './entities/lending';
 import { handleWatchtowerProxy } from './rpc/watchtower-proxy';
+import { withApiBodyLimit, WATCHTOWER_PROXY_BODY_MAX_BYTES } from './http-body-limit';
 import { handleOffchainFaucet } from './faucet/offchain';
 import { handleReserveFaucet } from './faucet/reserve';
 import { handleRuntimeHealth, type RuntimeHealthCacheEntry } from './health/api';
@@ -251,13 +252,19 @@ const RELAY_MARKET_MAX_SUBSCRIPTIONS_PER_IP = readPositiveIntegerEnv('XLN_RELAY_
 const marketMakerState = createMarketMakerServerState();
 
 const externalWalletApi = createExternalWalletApi({
-  getJAdapter: entityId => {
+  getJAdapter: (entityId, jurisdiction) => {
+    if (jurisdiction) return serverEnv ? getLiveJAdapter(serverEnv, jurisdiction) ?? null : null;
     if (!entityId) return globalJAdapter;
     if (!serverEnv) throw new Error('EXTERNAL_WALLET_RUNTIME_UNAVAILABLE');
     return getEntityJAdapter(serverEnv, entityId);
   },
   getRuntimeId: () => String(serverEnv?.runtimeId || ''),
-  getTokenCatalog: async entityId => {
+  getTokenCatalog: async (entityId, jurisdiction) => {
+    if (jurisdiction) {
+      const adapter = serverEnv ? getLiveJAdapter(serverEnv, jurisdiction) : null;
+      if (!adapter) throw new Error(`FAUCET_JURISDICTION_UNAVAILABLE:${jurisdiction}`);
+      return adapter.getTokenRegistry();
+    }
     if (!entityId) return tokenCatalogController.ensureTokenCatalog();
     if (!serverEnv) throw new Error('EXTERNAL_WALLET_RUNTIME_UNAVAILABLE');
     const adapter = getEntityJAdapter(serverEnv, entityId);
@@ -272,9 +279,9 @@ const externalWalletApi = createExternalWalletApi({
   emitDebugEvent: entry => {
     pushDebugEvent(relayStore, entry);
   },
-  fundBrowserVmWallet: async (address: string, amount: bigint, tokenSymbol?: string): Promise<boolean> => {
-    if (!globalJAdapter?.fundSignerWallet) return false;
-    await globalJAdapter.fundSignerWallet(address, amount, tokenSymbol);
+  fundBrowserVmWallet: async (address, amount, tokenSymbol, adapter): Promise<boolean> => {
+    if (!adapter.fundSignerWallet) return false;
+    await adapter.fundSignerWallet(address, amount, tokenSymbol);
     return true;
   },
 });
@@ -1139,11 +1146,11 @@ const createHttpServer = (options: XlnServerOptions, session: ServerSession) =>
   Bun.serve<RelaySocketData>({
     port: options.port,
     hostname: options.host ?? '127.0.0.1',
-    maxRequestBodySize: 1024 * 1024,
-    fetch: (req, server) => {
+    maxRequestBodySize: WATCHTOWER_PROXY_BODY_MAX_BYTES,
+    fetch: withApiBodyLimit<Bun.Server<RelaySocketData>>((req, server) => {
       serverIdleWatch.noteActivity();
       return handleHttpRequest(options, session, req, server);
-    },
+    }),
     websocket: {
       maxPayloadLength: resolveRuntimeWsMaxMessageBytes(),
       open(ws: RelaySocket) {

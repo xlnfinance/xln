@@ -625,7 +625,7 @@ fn apply_commit_transitions(
             AccountTx::LendingFund { .. }
             | AccountTx::LendingBorrowRequest { .. }
             | AccountTx::LendingRepay { .. }
-            | AccountTx::LendingCredit { .. }
+            | AccountTx::LendingDisburse { .. }
             | AccountTx::LendingCloseRequest { .. }
             | AccountTx::LendingClosePayout { .. } => {
                 return Err(EntityKernelError::lending(format!(

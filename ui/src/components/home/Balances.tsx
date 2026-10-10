@@ -164,7 +164,7 @@ export function TokenRow({
                       </span>
                     </span>
                   </div>
-                  <AccountBalance token={token} symbol={meta.symbol} money={money} />
+                  <AccountBalance closed={account.dispute === 'closed'} disputed={account.disputed} token={token} symbol={meta.symbol} money={money} />
                 </button>
               );
             })}
@@ -175,7 +175,9 @@ export function TokenRow({
 }
 
 export function AccountRow({ account, first, onClick }: { account: AccountView; first: boolean; onClick: () => void }) {
-  const status = account.disputed
+  const status = account.dispute === 'closed'
+    ? 'Closed after dispute'
+    : account.disputed
     ? 'Dispute in progress'
     : account.settlement !== 'none'
       ? 'Settlement in progress'

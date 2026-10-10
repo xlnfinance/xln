@@ -81,7 +81,6 @@ import {
 } from './vault-helpers';
 
 import {
-  RECOVERY_SNAPSHOT_INTERVAL_FRAMES,
   RECOVERY_TOWER_STATUS_LIMIT,
   RECOVERY_UPLOAD_DEBOUNCE_MS,
   applyRecoveryBundleMetadata,
@@ -267,8 +266,6 @@ const runtimeRecoveryUploadMeta = new Map<
   {
     lastUploadedHeight: number;
     lastBundleHash: string | null;
-    lastSnapshotHeight: number;
-    lastSnapshotHash: string | null;
   }
 >();
 
@@ -499,53 +496,12 @@ async function uploadRuntimeRecoverySnapshot(
     if (shouldSkipRuntimeRecoveryUploadAtHeight(previous, height)) return null;
     const signers = buildRuntimeRecoverySigners(runtime);
     const meta = buildRuntimeRecoveryMeta(runtime);
-    const shouldUploadSnapshot =
-      !previous ||
-      !previous.lastSnapshotHash ||
-      previous.lastSnapshotHeight <= 0 ||
-      height - previous.lastSnapshotHeight >= RECOVERY_SNAPSHOT_INTERVAL_FRAMES ||
-      typeof xln.readPersistedFrameJournals !== 'function';
-
-    let backupSlot = 0;
-    let bundle: RuntimeRecoveryBundleV1;
-    const buildSnapshot = async (): Promise<RuntimeRecoveryBundleV1> => {
-      const frame = await xln.readPersistedFrameJournal(env, height);
-      if (!frame) throw new Error(`RECOVERY_UPLOAD_TIP_JOURNAL_MISSING:${height}`);
-      return xln.buildRuntimeRecoveryBundle(env, { signers, meta, kind: 'snapshot', frames: [frame] });
-    };
-    if (shouldUploadSnapshot) {
-      bundle = await buildSnapshot();
-    } else {
-      const baseSnapshotHeight = previous.lastSnapshotHeight;
-      const baseSnapshotHash = previous.lastSnapshotHash;
-      if (!baseSnapshotHash) throw new Error('RECOVERY_UPLOAD_SNAPSHOT_HASH_MISSING');
-      const fromHeight = baseSnapshotHeight + 1;
-      const frames = await xln.readPersistedFrameJournals(env, {
-        fromHeight,
-        toHeight: height,
-        limit: RECOVERY_SNAPSHOT_INTERVAL_FRAMES,
-      });
-      const expectedFrames = height - baseSnapshotHeight;
-      const contiguous =
-        frames.length === expectedFrames &&
-        frames.every((frame, index) => Math.max(0, Math.floor(Number(frame.height || 0))) === fromHeight + index);
-      if (contiguous) {
-        backupSlot = 1;
-        bundle = xln.buildRuntimeRecoveryBundle(env, {
-          signers,
-          meta,
-          kind: 'journal_tail',
-          baseCheckpoint: {
-            height: baseSnapshotHeight,
-            hash: baseSnapshotHash,
-          },
-          frames,
-        });
-      } else {
-        bundle = await buildSnapshot();
-      }
-    }
-    return { bundle, backupSlot, previous };
+    // Live backup uses the canonical committed tip, as the React wallet does.
+    // Sparse WAL frames are not verified journal tails; signing them directly
+    // rejects at the first frame without a full canonical root.
+    const frame = await xln.readPersistedFrameJournal(env, height);
+    if (!frame) throw new Error(`RECOVERY_UPLOAD_TIP_JOURNAL_MISSING:${height}`);
+    return xln.buildRuntimeRecoveryBundle(env, { signers, meta, kind: 'snapshot', frames: [frame] });
   };
   // The committed barrier already owns the writer. Scheduled uploads acquire
   // a read lease only while capturing one exact snapshot and its WAL evidence.
@@ -553,8 +509,10 @@ async function uploadRuntimeRecoverySnapshot(
     ? await prepare()
     : await withRuntimeCommittedRead(env, prepare);
   if (!prepared) return;
-  const { bundle, backupSlot, previous } = prepared;
+  const bundle = prepared;
+  const backupSlot = 0;
   const encrypted = await xln.encryptRuntimeRecoveryBundle(bundle, runtime.seed);
+  const previous = runtimeRecoveryUploadMeta.get(normalizedRuntimeId);
   if (
     previous &&
     previous.lastBundleHash === encrypted.bundleHash &&
@@ -711,12 +669,6 @@ async function uploadRuntimeRecoverySnapshot(
   runtimeRecoveryUploadMeta.set(normalizedRuntimeId, {
     lastUploadedHeight: encrypted.height,
     lastBundleHash: encrypted.bundleHash,
-    lastSnapshotHeight:
-      (bundle.kind ?? 'snapshot') === 'snapshot' ? encrypted.height : (previous?.lastSnapshotHeight ?? 0),
-    lastSnapshotHash:
-      (bundle.kind ?? 'snapshot') === 'snapshot'
-        ? String(bundle.checkpointHash || '').toLowerCase()
-        : (previous?.lastSnapshotHash ?? null),
   });
   persistRuntimeMetadataSnapshot();
 }
@@ -745,7 +697,9 @@ function scheduleRuntimeRecoveryUpload(runtimeId: string, env: RuntimeReplica, x
   const normalizedRuntimeId = normalizeRuntimeId(runtimeId);
   if (!normalizedRuntimeId) return;
   const existingTimer = runtimeRecoveryUploadTimers.get(normalizedRuntimeId);
-  if (existingTimer) clearTimeout(existingTimer);
+  // Keep the first deadline. J observations can publish faster than this delay;
+  // a trailing debounce would indefinitely leave an active wallet without a backup.
+  if (existingTimer) return;
   runtimeRecoveryUploadTimers.set(
     normalizedRuntimeId,
     setTimeout(() => {
@@ -1664,6 +1618,16 @@ export const vaultOperations = {
     return xln.readPersistedFrameJournal(unwrapLiveRuntimeEnv(env) ?? env, height);
   },
 
+  completeRuntimeOnboarding(runtimeId: string): void {
+    const id = normalizeRuntimeId(runtimeId);
+    runtimesState.update(state => {
+      const runtime = state.runtimes[id];
+      if (!runtime) throw new Error(`Runtime not found: ${id}`);
+      return { ...state, runtimes: { ...state.runtimes, [id]: { ...runtime, requiresOnboarding: false } } };
+    });
+    this.saveToStorage();
+  },
+
   async updateRuntimeRecovery(runtimeId: string | null | undefined, recovery: RuntimeRecoveryConfig): Promise<Runtime> {
     const normalizedRuntimeId = normalizeRuntimeId(runtimeId || get(activeRuntimeId));
     if (!normalizedRuntimeId) throw new Error('No active runtime selected');
@@ -2185,7 +2149,7 @@ export const vaultOperations = {
         }
       }
       await installVaultRuntimeCommandJournalKeys(runtime.id, runtime.seed);
-      await protectRuntimeForDevice(runtime, options.unlockDurationMs ?? DEFAULT_VAULT_UNLOCK_DURATION_MS, () => {
+      await protectRuntimeForDevice(runtime, options.unlockDurationMs === undefined ? DEFAULT_VAULT_UNLOCK_DURATION_MS : options.unlockDurationMs, () => {
         // Persist a complete valid vault selection without exposing its signer
         // to the workspace before the corresponding live adapter is bound.
         const state = get(runtimesState);

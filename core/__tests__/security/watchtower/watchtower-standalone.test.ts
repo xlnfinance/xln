@@ -1,14 +1,17 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
+import { randomBytes } from 'node:crypto';
+import { enforceApiBodyLimit, WATCHTOWER_PROXY_BODY_MAX_BYTES } from '../../../api/server/http-body-limit';
+import { handleWatchtowerProxy } from '../../../api/server/rpc/watchtower-proxy';
 import { Wallet, hexlify, keccak256, toUtf8Bytes } from 'ethers';
 
 import { deriveSignerKeySync } from '../../../account/crypto';
 import { generateLazyEntityId } from '../../../entity/factory';
 import { createEmptyEnv, enqueueRuntimeInput, processRuntime, readPersistedFrameJournal } from '../../../runtime.ts';
 import { buildRuntimeRecoveryBundle } from '../../../storage/recovery/bundle';
-import { buildTowerAppointmentOwnerMessage, encryptRuntimeRecoveryBundle } from '../../../storage/recovery/bundle/crypto';
-import { serializeTaggedJson } from '../../../protocol/serialization';
+import { buildTowerAppointmentOwnerMessage, encryptRuntimeRecoveryBundle, decryptRuntimeRecoveryBundle } from '../../../storage/recovery/bundle/crypto';
+import { serializeTaggedJson, safeStringify } from '../../../protocol/serialization';
 import type { JurisdictionConfig, TowerAppointmentV1 } from '../../../api/public/runtime-module';
 import { decodeStoredLookupDoc } from '../../../watchtower/store/decode';
 import { startStandaloneWatchtowerServer, type StandaloneWatchtowerServer } from '../../../watchtower/standalone-server';
@@ -61,7 +64,7 @@ const installJurisdiction = (env: ReturnType<typeof createEmptyEnv>): Jurisdicti
   return jurisdiction;
 };
 
-const createRuntimeAppointment = async (runtimeSeed = 'watchtower-http-seed') => {
+const createRuntimeAppointment = async (runtimeSeed = 'watchtower-http-seed', label = 'Watchtower HTTP') => {
   const env = createEmptyEnv(runtimeSeed);
   const runtimeId = env.runtimeId!;
   const wallet = new Wallet(hexlify(deriveSignerKeySync(runtimeSeed, '1')));
@@ -91,6 +94,7 @@ const createRuntimeAppointment = async (runtimeSeed = 'watchtower-http-seed') =>
   const frame = env.state.height > 0 ? await readPersistedFrameJournal(env, env.state.height) : null;
   if (env.state.height > 0 && !frame) throw new Error('WATCHTOWER_HTTP_TIP_JOURNAL_MISSING');
   const bundle = buildRuntimeRecoveryBundle(env, {
+    meta: { label },
     frames: frame ? [frame] : [],
     signers: [{
       index: 0,
@@ -639,4 +643,47 @@ describe('standalone watchtower service', () => {
       dbPath: join(tempRoot, 'tower.level'),
     })).toThrow('WATCHTOWER_PRIVATE_KEY_REQUIRED_FOR_PUBLIC_BIND');
   });
+});
+
+
+test('encrypted recovery larger than 1 MiB uploads and decrypts through the production proxy', async () => {
+  const root = join(process.cwd(), '.tmp-tests', `tower-proxy-large-${Date.now()}`);
+  const tower = startStandaloneWatchtowerServer({ host: '127.0.0.1', port: 0, dbPath: root });
+  servers.push(tower);
+  const previousPorts = process.env['XLN_WATCHTOWER_PROXY_PORTS'];
+  process.env['XLN_WATCHTOWER_PROXY_PORTS'] = String(tower.server.port);
+  const proxy = Bun.serve({ hostname: '127.0.0.1', port: 0, maxRequestBodySize: WATCHTOWER_PROXY_BODY_MAX_BYTES,
+    async fetch(request) { return await enforceApiBodyLimit(request) ?? await handleWatchtowerProxy(request); },
+  });
+  const url = (path: string) => {
+    const target = new URL('/api/watchtower-proxy', proxy.url);
+    target.searchParams.set('target', tower.server.url.origin);
+    target.searchParams.set('path', path);
+    return target;
+  };
+  try {
+    // Incompressible metadata exercises actual encrypted bytes, signatures,
+    // transport, disk admission and decryption; no HTTP or storage substitutes.
+    const label = randomBytes(900_000).toString('base64');
+    const { appointment } = await createRuntimeAppointment('large-recovery-proxy-seed', label);
+    const body = safeStringify(appointment);
+    expect(Buffer.byteLength(body)).toBeGreaterThan(1024 * 1024);
+    const health = await (await fetch(url('/api/tower/healthz'))).json() as { maxAppointmentBytes: number };
+    expect(health.maxAppointmentBytes).toBe(4 * 1024 * 1024 + 64 * 1024);
+    const uploaded = await fetch(url('/api/tower/appointment'), { method: 'PUT', headers: { 'content-type': 'application/json' }, body });
+    expect(uploaded.status).toBe(200);
+    expect(await uploaded.json()).toMatchObject({ ok: true });
+    const restored = await fetch(url('/api/tower/restore'), { method: 'POST', headers: { 'content-type': 'application/json' }, body: safeStringify({ lookupKey: appointment.lookupKey }) });
+    expect(restored.status).toBe(200);
+    const result = await restored.json() as { bundles: typeof appointment.bundle[] };
+    const bundle = result.bundles[0];
+    if (!bundle) throw new Error('TEST_RESTORED_BUNDLE_MISSING');
+    const decrypted = await decryptRuntimeRecoveryBundle(bundle, 'large-recovery-proxy-seed');
+    expect(decrypted.meta?.label).toBe(label);
+    expect(decrypted.runtimeHeight).toBe(appointment.bundle.height);
+  } finally {
+    proxy.stop(true);
+    if (previousPorts === undefined) delete process.env['XLN_WATCHTOWER_PROXY_PORTS'];
+    else process.env['XLN_WATCHTOWER_PROXY_PORTS'] = previousPorts;
+  }
 });

@@ -1730,7 +1730,7 @@ export async function submitActiveCrossJurisdictionIntent(
       return;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      if (!options.waitForTargetReady || !message.startsWith('CROSS_J_TARGET_INBOUND_NOT_READY:')) {
+      if (!options.waitForTargetReady || !(message.startsWith('CROSS_J_TARGET_INBOUND_NOT_READY:') || message.startsWith('RECEIVE_CAPACITY_ACCOUNT_MISSING:'))) {
         throw error;
       }
       if (Date.now() >= deadline) {

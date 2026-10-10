@@ -5,9 +5,9 @@ use xln_rscore_abi::AbiValue;
 use xln_rscore_engine::{
     AccountTx, BilateralRebalanceFeePolicy, DeliveryMode, Delta, HtlcDeliveryMode, HtlcHashlock,
     HtlcLock, HtlcLockTx, HtlcResolveOutcome, HtlcResolveTx, JClaimAccumulator, JClaimNode,
-    JClaimProof, JClaimRecord, JClaimSide, JEventClaimTx, JurisdictionEvent, LendingAction,
-    LendingTermId, OpaqueHtlcCiphertext, RebalanceFeePolicySnapshot, RebalanceRefundReason, Side,
-    SwapOffer, TokenId,
+    JClaimProof, JClaimRecord, JClaimSide, JEventClaimTx, JurisdictionEvent, LendingTermId,
+    OpaqueHtlcCiphertext, RebalanceFeePolicySnapshot, RebalanceRefundReason, Side, SwapOffer,
+    TokenId,
 };
 
 use super::account_canonical;
@@ -273,20 +273,14 @@ fn lending_repay(fields: &[AbiValue]) -> Result<AccountTx, AccountWireRestoreErr
     })
 }
 
-fn lending_credit(fields: &[AbiValue]) -> Result<AccountTx, AccountWireRestoreError> {
-    let fields = exact(fields, 7, "lendingCredit")?;
-    let action = match integer(&fields[1])? {
-        0 => LendingAction::Grant,
-        1 => LendingAction::Revoke,
-        value => return Err(invalid(format!("LENDING_ACTION:{value}"))),
-    };
-    Ok(AccountTx::LendingCredit {
-        action,
-        loan_id: text(&fields[2])?.to_owned(),
-        hub_entity_id: text(&fields[3])?.to_owned(),
-        borrower_entity_id: text(&fields[4])?.to_owned(),
-        token_id: token(&fields[5])?,
-        credit_limit: bigint(&fields[6], "creditLimit")?,
+fn lending_disburse(fields: &[AbiValue]) -> Result<AccountTx, AccountWireRestoreError> {
+    let fields = exact(fields, 6, "lendingDisburse")?;
+    Ok(AccountTx::LendingDisburse {
+        loan_id: text(&fields[1])?.into(),
+        hub_entity_id: text(&fields[2])?.into(),
+        borrower_entity_id: text(&fields[3])?.into(),
+        token_id: token(&fields[4])?,
+        amount: bigint(&fields[5], "amount")?,
     })
 }
 
@@ -457,7 +451,7 @@ pub fn transaction(value: &AbiValue) -> Result<AccountTx, AccountWireRestoreErro
         10 => lending_fund(fields),
         11 => lending_borrow_request(fields),
         12 => lending_repay(fields),
-        13 => lending_credit(fields),
+        24 => lending_disburse(fields),
         14 => lending_close_request(fields),
         15 => lending_close_payout(fields),
         17 => request_collateral(fields),

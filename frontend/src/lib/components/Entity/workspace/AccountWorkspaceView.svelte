@@ -177,8 +177,8 @@ import type { EntityReadView } from '#lib/components/Entity/core/entity-panel-ty
   export let handleWorkspaceAccountChange: (event: CustomEvent<{ value?: string }>) => void;
 
   $: profiles = Array.from(profileByEntityId.values());
-  export let confirmAndQueueDisputeFinalize: (counterpartyEntityId: string, reason: string) => void | Promise<void>;
-  export let confirmAndQueueDisputePrepare: (
+  export let queueDisputeFinalize: (counterpartyEntityId: string, reason: string) => void | Promise<void>;
+  export let queueDisputePrepare: (
     counterpartyEntityId: string,
     reason: string,
   ) => void | Promise<void>;
@@ -209,16 +209,8 @@ import type { EntityReadView } from '#lib/components/Entity/core/entity-panel-ty
     { id: 'activity', icon: Activity, label: 'Activity' },
     { id: 'appearance', icon: SlidersHorizontal, label: 'Appearance' },
   ];
-  const accountWorkspacePrimaryTabIds: AccountWorkspaceTab[] = [
-    'open', 'send', 'receive', 'swap', 'move', ...(lendingAvailable ? ['lending' as const] : []),
-  ];
-
-  $: hasWorkspaceAccounts = workspaceAccountIds.length > 0;
-  $: visibleAccountWorkspaceTabs = hasWorkspaceAccounts
-    ? accountWorkspaceTabs
-    : accountWorkspaceTabs.filter((tabConfig) => tabConfig.id === 'open');
-  $: if (!hasWorkspaceAccounts && accountWorkspaceTab !== 'open') {
-    accountWorkspaceTab = 'open';
+  $: if (!accountWorkspaceTabs.some(tab => tab.id === accountWorkspaceTab)) {
+    accountWorkspaceTab = accountIds.length > 0 ? 'configure' : 'open';
   }
 
   function selectAccountWorkspaceTab(next: string): void {
@@ -277,9 +269,8 @@ import type { EntityReadView } from '#lib/components/Entity/core/entity-panel-ty
 />
 
 <AccountWorkspaceRail
-  tabs={visibleAccountWorkspaceTabs}
+  tabs={accountWorkspaceTabs}
   activeTab={accountWorkspaceTab}
-  primaryTabIds={accountWorkspacePrimaryTabIds}
   ariaLabel="Account workspace"
   on:select={(event) => selectAccountWorkspaceTab(event.detail)}
 />
@@ -409,7 +400,7 @@ import type { EntityReadView } from '#lib/components/Entity/core/entity-panel-ty
       {activeIsLive}
       {liveRuntimeEnv}
       {workspaceAccountId}
-      {workspaceAccountIds}
+      workspaceAccountIds={accountIds}
       {entityNames}
       {profileByEntityId}
       bind:configureWorkspaceTab
@@ -417,8 +408,8 @@ import type { EntityReadView } from '#lib/components/Entity/core/entity-panel-ty
       {configureTokenOptions}
       {handleWorkspaceAccountChange}
       selectConfigureTab={(nextTab) => configureWorkspaceTab = nextTab}
-      {confirmAndQueueDisputeFinalize}
-      {confirmAndQueueDisputePrepare}
+      {queueDisputeFinalize}
+      {queueDisputePrepare}
       {addTokenToAccount}
       {paymentView}
       {swapRuntimeView}

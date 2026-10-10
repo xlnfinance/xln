@@ -262,7 +262,7 @@ const disputeProofHash = async (
 };
 
 describe('watchtower rpc last-resort integration', () => {
-  test('standalone tower skips early and submits a real on-chain counter-dispute in the last-resort window', async () => {
+  test('standalone tower automatically skips early, counters in its window and finalizes on chain', async () => {
     const tempRoot = await mkdtemp(join(tmpdir(), 'xln-watchtower-rpc-'));
     tempRoots.push(tempRoot);
 
@@ -447,6 +447,9 @@ describe('watchtower rpc last-resort integration', () => {
       towerPrivateKey: tower.privateKey,
       maxStoredBytesPerLookupKey: 64 * 1024,
       enableOperatorApi: true,
+      enableLastResortAgent: true,
+      sweepIntervalMs: 1_000,
+      allowedRpcUrls: [rpcUrl],
     });
     servers.push(towerServer);
 
@@ -457,37 +460,21 @@ describe('watchtower rpc last-resort integration', () => {
     });
     expect(upload.ok).toBe(true);
 
-    const liveContract = depository.connect(tower);
-    const liveSweepOptions = {
-      lookupKey,
-      towerPrivateKey: tower.privateKey,
-      providerFactory: () => provider,
-      contractFactory: () => ({
-        _accounts: (acctKey: string) => liveContract._accounts(acctKey),
-        watchtowerCounterDispute: (
-          entityId: string,
-          finalization: Parameters<typeof liveContract.watchtowerCounterDispute>[1],
-          lastResortBlocks: number,
-          sequence: number,
-          ownerHanko: string,
-        ) => liveContract.watchtowerCounterDispute(
-          entityId,
-          finalization,
-          BigInt(lastResortBlocks),
-          BigInt(sequence),
-          ownerHanko,
-        ),
-      }),
-    } as const;
-
-    expect(await runWatchtowerSweep(towerServer.store, {
-      ...liveSweepOptions,
-    })).toEqual({
-      scanned: 1,
-      submitted: 0,
-      skipped: 1,
-      errors: 0,
-    });
+    // Only the daemon's production scheduler may submit. The test advances
+    // the isolated chain clock and observes receipts; it never calls sweep.
+    const waitForAction = async (submitted: number): Promise<void> => {
+      const deadline = Date.now() + 15_000;
+      while (Date.now() < deadline) {
+        const receipts = await towerServer.store.listActionReceipts(lookupKey);
+        const errors = receipts.filter(receipt => receipt.status === 'error');
+        expect(errors, safeStringify(errors)).toEqual([]);
+        const count = receipts.filter(receipt => receipt.status === 'submitted').length;
+        if (submitted === 0 ? receipts.some(receipt => receipt.status === 'skipped') : count >= submitted) return;
+        await Bun.sleep(100);
+      }
+      throw new Error(`AUTOMATIC_TOWER_TIMEOUT:${safeStringify(await towerServer.store.listActionReceipts(lookupKey))}`);
+    };
+    await waitForAction(0);
     expect((await depository._accounts(accountKey)).nonce).toBe(disputeNonce);
 
     const disputeTimeout = BigInt((await depository._accounts(accountKey)).disputeTimeout);
@@ -503,15 +490,7 @@ describe('watchtower rpc last-resort integration', () => {
     }
     expect(await readLatestTimestamp() + BigInt(lastResortWindowSeconds) >= disputeTimeout).toBe(true);
 
-    const liveSweepResult = await runWatchtowerSweep(towerServer.store, {
-      ...liveSweepOptions,
-    });
-    expect(liveSweepResult).toEqual({
-      scanned: 1,
-      submitted: 1,
-      skipped: 0,
-      errors: 0,
-    });
+    await waitForAction(1);
 
     // Before T the tower can only lock the newest signed counter-proof. This
     // removes the starter's obsolete-state race without shortening either
@@ -526,7 +505,7 @@ describe('watchtower rpc last-resort integration', () => {
       await provider.send('evm_increaseTime', [Number(disputeTimeout - timestampAfterLock)]);
       await provider.send('evm_mine', []);
     }
-    const sweep = await runWatchtowerSweep(towerServer.store, { ...liveSweepOptions });
+    await waitForAction(2);
     // A failed submission is recorded as an error receipt and nowhere else, so
     // read the reason back before asserting: a bare count tells nobody why the
     // tower did not defend the account.
@@ -534,12 +513,8 @@ describe('watchtower rpc last-resort integration', () => {
     const sweepErrors = sweepReceipts
       .filter(receipt => receipt.status === 'error')
       .map(receipt => receipt.error ?? 'no reason recorded');
-    expect(sweep, `sweep receipts: ${sweepErrors.join(' | ') || 'none'}`).toEqual({
-      scanned: 1,
-      submitted: 1,
-      skipped: 0,
-      errors: 0,
-    });
+    expect(sweepErrors).toEqual([]);
+    expect(sweepReceipts.filter(receipt => receipt.status === 'submitted')).toHaveLength(2);
 
     const finalizedAccount = await depository._accounts(accountKey);
     const collateralAfter = await depository._collaterals(accountKey, tokenId);
@@ -559,7 +534,7 @@ describe('watchtower rpc last-resort integration', () => {
     expect(actionPayload.receipts?.find((receipt) => receipt.status === 'submitted')?.txHash).toMatch(/^0x[0-9a-f]+$/);
 
     await provider.destroy();
-  }, 120_000);
+  }, 60_000);
 
   test('stale tower remedy cannot override a newer user-submitted counter-dispute', async () => {
     const tempRoot = await mkdtemp(join(tmpdir(), 'xln-watchtower-rpc-stale-'));

@@ -24,6 +24,7 @@
     readSavedCollateralPolicy,
     writeHubJoinPreference,
     writeSavedCollateralPolicy,
+    getHubOpeningCredit,
     getOpenAccountRebalancePolicyData,
   } from '../../../utils/onboarding/onboardingPreferences';
   import {
@@ -294,7 +295,12 @@
     const key = `${runtime?.id || 'none'}:${JSON.stringify(runtime?.recovery?.towers || [])}:${runtime?.recovery?.useDefaultTowers === true}`;
     if (!force && recoveryDraftLoadedFor === key) return;
     recoveryMode = inferRecoveryMode();
-    recoveryTowerDraft = normalizeRecoveryDraft(runtime?.recovery?.towers);
+    const officialUrl = resolveOfficialRecoveryTowerUrl();
+    recoveryTowerDraft = normalizeRecoveryDraft(buildRuntimeRecoveryConfigForMode(recoveryMode, {
+      officialTowerUrl: officialUrl,
+      manualTowers: getManualRecoveryTowers(normalizeRecoveryDraft(runtime?.recovery?.towers), officialUrl),
+      previous: runtime?.recovery || null,
+    }).towers);
     recoveryDraftLoadedFor = key;
     recoveryMessage = '';
     recoveryMessageTone = 'neutral';
@@ -683,7 +689,7 @@
     const readyCandidates = selection.hubEntityIds
       .filter((hubId) => !hasProjectedCounterpartyAccount(target.entityId, hubId));
 
-    const creditAmount = 10_000n * 10n ** BigInt(tokenDecimals);
+    const creditAmount = getHubOpeningCredit(tokenDecimals);
     await submitRuntimeInput(buildOnboardingHubOpenRuntimeInput({
       target,
       hubEntityIds: readyCandidates,
@@ -781,6 +787,9 @@
 
       const completedEntityIds = allTargets.map((target) => target.entityId);
       writeOnboardingCompleteForEntities(completedEntityIds.length > 0 ? completedEntityIds : [entityId], true);
+      // This flag travels in the encrypted backup; browser-local completion alone
+      // sends a restored wallet through fresh setup again on a new device.
+      if (!daemonCustody && $activeRuntime) vaultOperations.completeRuntimeOnboarding($activeRuntime.id);
       localStorage.setItem('xln-display-name', cleanDisplayName);
 
       dispatch('complete', {

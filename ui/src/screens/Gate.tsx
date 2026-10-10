@@ -1,4 +1,5 @@
 import { useNavigate } from 'react-router-dom';
+import { explainWalletError } from '@xln/frontend/lib/utils/ui/walletError';
 import { PasswordEntry } from '../components/PasswordEntry';
 import { hasPasswordVault, savePasswordVault } from '../../../frontend/src/lib/security/passwordVault';
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -7,7 +8,7 @@ import { Logo } from '../components/Logo';
 import { GateWelcome } from '../components/GateWelcome';
 import { RestoreChoice } from '../components/RestoreChoice';
 import { discoverTowerRestore } from '../runtime/restore';
-import { defaultTowerUrl, saveRecovery } from '../runtime/recovery';
+import { defaultTowerUrl, normalizeTowerUrl, saveRecovery } from '../runtime/recovery';
 import { useApp } from '../runtime/store';
 import { bootHostedVault, bootLearnVault, detectStack, type Stack } from '../runtime/hosted';
 import {
@@ -51,6 +52,7 @@ export function Gate() {
 	const [phrase, setPhrase] = useState('');
 	const [restore, setRestore] = useState(false);
 	const [towerUrl, setTowerUrl] = useState(defaultTowerUrl);
+	const [backupEnabled, setBackupEnabled] = useState(() => Boolean(defaultTowerUrl()));
 	const [wsUrl, setWsUrl] = useState('wss://xln.finance/rpc');
 	const [authKey, setAuthKey] = useState('');
 	const [remoteEntities, setRemoteEntities] = useState<RuntimeAdapterEntitySummary[] | null>(null);
@@ -86,7 +88,7 @@ export function Gate() {
 		return discoverTowerRestore(seed, towerUrl);
 	};
 	const rememberTower = (vaultId: string): void => {
-		if (restore) saveRecovery(vaultId, { mode: 'tower', towers: [towerUrl.trim()] });
+		if (restore || backupEnabled) saveRecovery(vaultId, { mode: 'tower', towers: [normalizeTowerUrl(towerUrl)] });
 	};
 
 	const NO_STACK = 'No xln network answers at this address. Open the wallet from a running stack (bun run dev, or xln.finance/ui).';
@@ -104,6 +106,7 @@ export function Gate() {
 	const createVault = (): void => {
 		if (!work) return;
 		void run(async () => {
+			if (backupEnabled || restore) normalizeTowerUrl(towerUrl);
 			setBusyStep('Deriving your vault');
 			deriveAbort.current = new AbortController();
 			let result;
@@ -265,7 +268,7 @@ export function Gate() {
 
 			{error ? (
 				<p className="gate-error" role="alert">
-					{error}
+					{explainWalletError(error)}
 				</p>
 			) : null}
 
@@ -327,6 +330,14 @@ export function Gate() {
 							Each shard is one unit of Argon2 memory-hard work. The same name, passphrase, and work reopen this vault on any device.
 						</span>
 					</div>
+					<details className="disclosure">
+						<summary>Backup and dispute protection · {backupEnabled ? 'encrypted backups' : 'local only'}</summary>
+						<label className="field"><span><input type="checkbox" checked={backupEnabled} onChange={event => setBackupEnabled(event.target.checked)} /> Automatically back up this wallet</span></label>
+						{backupEnabled && <label className="field"><span className="field-label">Backup tower</span><input className="input" value={towerUrl} onChange={event => setTowerUrl(event.target.value)} placeholder="https://tower.example.com" /></label>}
+						<p className="note">Backups are encrypted before leaving your device and update while the wallet is open. Your exact name, passphrase and work factor recover the keys; the backup recovers the latest signed wallet state. Older activity remains on the original device.</p>
+						<p className="note">Dispute protection is offered on the home screen after your first account is signed. Check the tower’s response status; storing a backup does not mean it will answer disputes.</p>
+						{!defaultTowerUrl() && <p className="note">This local testnet has no default tower. Add a running local service to enable backups.</p>}
+					</details>
 					<RestoreChoice enabled={restore} address={towerUrl} onToggle={setRestore} onAddress={setTowerUrl} />
 					<div className="gate-form-actions">
 						<button type="button" className="btn quiet" onClick={() => setMode('landing')}>

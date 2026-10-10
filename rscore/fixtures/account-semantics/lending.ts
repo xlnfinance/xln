@@ -119,14 +119,13 @@ const borrowerLifecycle = async (): Promise<readonly LendingStep[]> => {
       },
     }, false),
     await applyStep(account, {
-      type: 'lending_credit',
+      type: 'lending_disburse',
       data: {
-        action: 'grant',
         loanId: LOAN_ID,
         hubEntityId: HUB,
         borrowerEntityId: BORROWER,
         tokenId: 1,
-        creditLimit: 22_500n,
+        amount: 2_500n,
       },
     }, true),
     await applyStep(account, {

@@ -11,8 +11,8 @@
   const dispatch = createEventDispatcher<{ close: void }>();
 </script>
 
-<div class="swap-modal-overlay">
-  <div class="swap-modal">
+<section class="swap-completion-notice" role="status" aria-live="polite" data-testid="swap-completion-notice">
+  <div class="swap-receipt">
     <div class="swap-modal-kicker">Swap Filled</div>
     <h3>{modal.side} {modal.pairLabel}</h3>
     <p class="swap-modal-copy">
@@ -37,4 +37,4 @@
       >Close</button>
     </div>
   </div>
-</div>
+</section>

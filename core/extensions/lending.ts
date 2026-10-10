@@ -1,6 +1,6 @@
 import { ethers } from 'ethers';
 
-import type { AccountReplica, AccountState, AccountTx } from '../types/account';
+import type { AccountState } from '../types/account';
 import type { EntityState } from '../entity/types';
 import type { LendingLoan, LendingPoolPosition, LendingState, LendingTermId } from '../types/finance/lending';
 import { deriveDelta } from '../account/utils';
@@ -61,59 +61,6 @@ export const ensureLendingState = (state: EntityState): LendingState => {
   if (!(state.lending.pools instanceof Map)) state.lending.pools = new Map();
   if (!(state.lending.loans instanceof Map)) state.lending.loans = new Map();
   return state.lending;
-};
-
-const getCreditGrantedByAccountOwner = (
-  account: AccountState,
-  ownerEntityId: string,
-  tokenId: number,
-): bigint => {
-  const delta = account.deltas.get(tokenId);
-  if (!delta) return 0n;
-  const owner = String(ownerEntityId || '').toLowerCase();
-  const left = String(account.leftEntity || '').toLowerCase();
-  const right = String(account.rightEntity || '').toLowerCase();
-  if (owner !== left && owner !== right) {
-    throw new Error(`LENDING_ACCOUNT_OWNER_MISMATCH:${ownerEntityId}`);
-  }
-  // Credit granted by the viewer is the canonical peerCreditLimit. Never
-  // select left/right storage fields here: LEFT writes rightCreditLimit and
-  // RIGHT writes leftCreditLimit, which is easy to invert at call sites.
-  return deriveDelta(delta, owner === left).peerCreditLimit;
-};
-
-const creditTarget = (tx: AccountTx, tokenId: number): bigint | undefined => {
-  if (tx.type === 'set_credit_limit' && tx.data.tokenId === tokenId) return tx.data.amount;
-  if (tx.type === 'lending_credit' && tx.data.tokenId === tokenId) return tx.data.creditLimit;
-  return undefined;
-};
-
-/**
- * The credit the hub will have granted this counterparty once every already
- * decided write lands. Borrow, repay and the overdue settlement all move the
- * grant through this one projection; a second formula would drift it.
- */
-export const projectedHubCreditLimit = (
-  account: AccountReplica,
-  hubEntityId: string,
-  counterpartyId: string,
-  accountTxs: readonly { accountId: string; tx: AccountTx }[],
-  tokenId: number,
-): bigint => {
-  let projected = getCreditGrantedByAccountOwner(account.state, hubEntityId, tokenId);
-  const apply = (txs: readonly AccountTx[]): void => {
-    for (const tx of txs) projected = creditTarget(tx, tokenId) ?? projected;
-  };
-  const lower = (value: unknown): string => String(value || '').toLowerCase();
-  const hubIsLeft = lower(account.state.leftEntity) === hubEntityId;
-  const pendingProposerIsLeft = lower(account.proofHeader.fromEntity)
-    === lower(account.state.leftEntity);
-  if (account.pendingFrame && pendingProposerIsLeft === hubIsLeft) apply(account.pendingFrame.accountTxs);
-  apply(account.mempool);
-  apply(accountTxs
-    .filter(output => lower(output.accountId) === counterpartyId)
-    .map(output => output.tx));
-  return projected;
 };
 
 export const getAccountOutCapacity = (

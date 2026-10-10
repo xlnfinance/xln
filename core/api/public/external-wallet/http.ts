@@ -73,12 +73,14 @@ const parseCappedJsonRecord = async (
 };
 
 export interface FaucetRequestBody {
+  jurisdiction?: string;
   userAddress: string;
   tokenSymbol: string;
   amount: string;
 }
 
 export interface GasFaucetRequestBody {
+  jurisdiction?: string;
   userAddress: string;
   amount: string;
 }
@@ -157,8 +159,9 @@ export const readExternalWalletSnapshotSource = async (
 
 export const readFaucetBody = async (request: Request): Promise<FaucetRequestBody> => {
   const body = await parseCappedJsonRecord(request, MAX_WALLET_SNAPSHOT_BODY_BYTES, 'FAUCET');
-  requireExactBoundaryKeys(body, ['userAddress'], ['tokenSymbol', 'amount'], 'FAUCET_BODY_FIELDS_INVALID');
+  requireExactBoundaryKeys(body, ['userAddress'], ['tokenSymbol', 'amount', 'jurisdiction'], 'FAUCET_BODY_FIELDS_INVALID');
   return {
+    ...readFaucetJurisdiction(body),
     userAddress: String(body['userAddress'] || '').trim(),
     tokenSymbol: String(body['tokenSymbol'] || 'USDC')
       .trim()
@@ -169,11 +172,20 @@ export const readFaucetBody = async (request: Request): Promise<FaucetRequestBod
 
 export const readGasFaucetBody = async (request: Request): Promise<GasFaucetRequestBody> => {
   const body = await parseCappedJsonRecord(request, MAX_WALLET_SNAPSHOT_BODY_BYTES, 'GAS_FAUCET');
-  requireExactBoundaryKeys(body, ['userAddress'], ['amount'], 'GAS_FAUCET_BODY_FIELDS_INVALID');
+  requireExactBoundaryKeys(body, ['userAddress'], ['amount', 'jurisdiction'], 'GAS_FAUCET_BODY_FIELDS_INVALID');
   return {
     userAddress: String(body['userAddress'] || '').trim(),
     amount: String(body['amount'] || '0.1').trim(),
+    ...readFaucetJurisdiction(body),
   };
+};
+
+const readFaucetJurisdiction = (body: Record<string, unknown>): { jurisdiction?: string } => {
+  if (body['jurisdiction'] === undefined) return {};
+  if (typeof body['jurisdiction'] !== 'string' || !body['jurisdiction'].trim()) {
+    throw new RequestBodyError(400, 'FAUCET_JURISDICTION_INVALID', 'expected-network-name');
+  }
+  return { jurisdiction: body['jurisdiction'].trim() };
 };
 
 const requireSnapshotString = (value: unknown, label: string): string => {

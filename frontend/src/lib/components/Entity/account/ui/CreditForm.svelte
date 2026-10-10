@@ -1,5 +1,6 @@
 <script lang="ts">
   import { get } from 'svelte/store';
+  import type { AccountReadView } from '#lib/components/Entity/core/entity-panel-types.ts';
   import type { RuntimeReplica, RuntimeInput } from '@xln/core/api/public/runtime-module';
   import { xlnFunctions, error } from '../../../../stores/xlnStore';
   import { errorLog } from '../../../../stores/errorLogStore';
@@ -18,6 +19,7 @@
   export let accountIds: string[] = [];
   export let entityNames: Map<string, string> = new Map();
   export let mode: 'extend' | 'request' = 'extend';
+  export let accountOverride: AccountReadView | null = null;
   export let submitRuntimeInput: ((input: RuntimeInput) => Promise<unknown> | unknown) | null = null;
 
   $: activeXlnFunctions = $xlnFunctions;
@@ -30,6 +32,13 @@
   let submitting = false;
 
   $: effectiveCounterparty = counterpartyId || selectedCounterparty;
+  $: signedDelta = accountOverride && accountOverride.currentFrame.height > 0
+    ? accountOverride.state.deltas.get(selectedTokenId)
+    : undefined;
+  $: signedCredit = signedDelta && activeXlnFunctions
+    ? activeXlnFunctions.deriveDelta(signedDelta, entityId.toLowerCase() < effectiveCounterparty.toLowerCase())
+    : null;
+  $: currentSignedLimit = signedCredit ? (mode === 'extend' ? signedCredit.ownCreditLimit : signedCredit.peerCreditLimit) : null;
   $: tokenList = activeXlnFunctions
     ? [1, 2, 3].map((id) => ({ id, symbol: activeXlnFunctions.getTokenInfo(id).symbol }))
     : [];
@@ -163,6 +172,13 @@
 
 <div class="action-card">
   <h4>{mode === 'request' ? 'Request Credit' : 'Extend Credit'}</h4>
+  {#if mode === 'extend'}
+    <p class="credit-explanation">Set the new total that this counterparty may owe you, not an amount to add. For example, replacing 100 with 200 sets the limit to 200. This changes your unsecured exposure, not your balance.</p>
+  {/if}
+  <p class="credit-explanation" data-testid="credit-current-signed-limit">
+    Current signed limit{mode === 'extend' ? ' you extend' : ' they extend'}:
+    {currentSignedLimit !== null && activeXlnFunctions ? activeXlnFunctions.formatTokenAmount(selectedTokenId, currentSignedLimit) : 'Not available'}
+  </p>
   <div class="action-form">
     {#if counterpartyId === null}
       <EntitySelect bind:value={selectedCounterparty} options={accountIds} {entityNames} placeholder="Select account" />
@@ -175,7 +191,7 @@
     <BigIntInput
       bind:value={creditAmountBigInt}
       decimals={selectedTokenDecimals}
-      placeholder="Credit amount"
+      placeholder={mode === 'extend' ? 'New total credit limit' : 'Requested credit limit'}
       disabled={submitting}
     />
     <div class="button-row">
@@ -207,6 +223,8 @@
     font-size: 0.8em;
     font-weight: 600;
   }
+
+  .credit-explanation { margin: 8px 0; color: #a1a1aa; font-size: 0.8em; line-height: 1.5; }
 
   .action-form {
     display: flex;

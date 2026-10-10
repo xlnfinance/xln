@@ -1,0 +1,422 @@
+{
+  "config": {
+    "argv": [
+      "/Users/zigota/.bun/bin/bun",
+      "/Users/zigota/xln/ui/node_modules/playwright/cli.js",
+      "test",
+      "--config",
+      "ui/playwright.config.ts",
+      "--project=chromium",
+      "--max-failures=1",
+      "--reporter=list,json",
+      "--output",
+      "/var/folders/zq/fvt20j1s0fx3v9c8l41czctr0000gn/T/xln-local-prod-smoke-20000/wallet-artifacts",
+      "ui/tests/e2e-tour.spec.ts",
+      "ui/tests/e2e-tutorial-features.spec.ts",
+      "ui/tests/e2e-tutorial-company.spec.ts",
+      "ui/tests/e2e-swap-quote.spec.ts",
+      "ui/tests/e2e-tutorial-network-boundaries.spec.ts"
+    ],
+    "configFile": "/Users/zigota/xln/ui/playwright.config.ts",
+    "rootDir": "/Users/zigota/xln/ui/tests",
+    "failOnFlakyTests": false,
+    "forbidOnly": false,
+    "fullyParallel": false,
+    "globalSetup": null,
+    "globalTeardown": null,
+    "globalTimeout": 0,
+    "grep": {},
+    "grepInvert": null,
+    "maxFailures": 1,
+    "metadata": {
+      "actualWorkers": 1
+    },
+    "preserveOutput": "always",
+    "projects": [
+      {
+        "outputDir": "/var/folders/zq/fvt20j1s0fx3v9c8l41czctr0000gn/T/xln-local-prod-smoke-20000/wallet-artifacts",
+        "repeatEach": 1,
+        "retries": 0,
+        "metadata": {
+          "actualWorkers": 1
+        },
+        "id": "chromium",
+        "name": "chromium",
+        "testDir": "/Users/zigota/xln/ui/tests",
+        "testIgnore": [],
+        "testMatch": [
+          "**/*.@(spec|test).?(c|m)[jt]s?(x)"
+        ],
+        "timeout": 240000
+      }
+    ],
+    "quiet": false,
+    "reporter": [
+      [
+        "list"
+      ],
+      [
+        "json"
+      ]
+    ],
+    "reportSlowTests": {
+      "max": 5,
+      "threshold": 300000
+    },
+    "shard": null,
+    "tags": [],
+    "updateSnapshots": "missing",
+    "updateSourceMethod": "patch",
+    "version": "1.62.1",
+    "workers": 1,
+    "webServer": {
+      "command": "cd .. && bun run dev",
+      "url": "http://127.0.0.1:20002/api/jurisdictions",
+      "reuseExistingServer": true,
+      "gracefulShutdown": {
+        "signal": "SIGTERM",
+        "timeout": 60000
+      },
+      "timeout": 240000
+    }
+  },
+  "suites": [
+    {
+      "title": "e2e-swap-quote.spec.ts",
+      "file": "e2e-swap-quote.spec.ts",
+      "column": 0,
+      "line": 0,
+      "specs": [
+        {
+          "title": "cross-network orders require an explicit minimum instead of borrowing a same-network quote",
+          "ok": true,
+          "tags": [
+            "functional"
+          ],
+          "tests": [
+            {
+              "timeout": 60000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 5775,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-10T03:11:45.124Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "df0d2b2f78fd76fa0529-91cec1d60a719c71eae6",
+          "file": "e2e-swap-quote.spec.ts",
+          "line": 4,
+          "column": 0
+        }
+      ]
+    },
+    {
+      "title": "e2e-tour.spec.ts",
+      "file": "e2e-tour.spec.ts",
+      "column": 0,
+      "line": 0,
+      "specs": [
+        {
+          "title": "guide follows real funding, payment, swap and history without acknowledgement clicks",
+          "ok": true,
+          "tags": [
+            "functional"
+          ],
+          "tests": [
+            {
+              "timeout": 60000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 9092,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-10T03:11:53.094Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "3bfe528db576696cfab2-227741931e84abebda29",
+          "file": "e2e-tour.spec.ts",
+          "line": 4,
+          "column": 0
+        },
+        {
+          "title": "starting guidance after receiving money skips the faucet without a second grant",
+          "ok": true,
+          "tags": [
+            "functional"
+          ],
+          "tests": [
+            {
+              "timeout": 45000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 5664,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-10T03:12:02.189Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "3bfe528db576696cfab2-b5e23ae3b1d4b3ea0da6",
+          "file": "e2e-tour.spec.ts",
+          "line": 79,
+          "column": 0
+        },
+        {
+          "title": "starting the guided demo from Settings opens Home and its faucet",
+          "ok": true,
+          "tags": [
+            "functional"
+          ],
+          "tests": [
+            {
+              "timeout": 60000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 4604,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-10T03:12:07.856Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "3bfe528db576696cfab2-1c71d1d6fa18647f81bb",
+          "file": "e2e-tour.spec.ts",
+          "line": 103,
+          "column": 0
+        }
+      ]
+    },
+    {
+      "title": "e2e-tutorial-company.spec.ts",
+      "file": "e2e-tutorial-company.spec.ts",
+      "column": 0,
+      "line": 0,
+      "specs": [
+        {
+          "title": "company lesson registers a real Entity, releases both share classes, then another wallet can open",
+          "ok": true,
+          "tags": [
+            "functional"
+          ],
+          "tests": [
+            {
+              "timeout": 60000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 13842,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-10T03:12:12.465Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "91a113dc7c674fbe1ae0-1eb1a08b164d18a0e037",
+          "file": "e2e-tutorial-company.spec.ts",
+          "line": 4,
+          "column": 0
+        }
+      ]
+    },
+    {
+      "title": "e2e-tutorial-features.spec.ts",
+      "file": "e2e-tutorial-features.spec.ts",
+      "column": 0,
+      "line": 0,
+      "specs": [
+        {
+          "title": "every advanced tutorial chapter opens its real screen and can pause without losing input",
+          "ok": true,
+          "tags": [
+            "functional"
+          ],
+          "tests": [
+            {
+              "timeout": 60000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 6440,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-10T03:12:26.312Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "09ee2af89228eaa44d80-0fd3e5e35834c621d7a8",
+          "file": "e2e-tutorial-features.spec.ts",
+          "line": 13,
+          "column": 0
+        },
+        {
+          "title": "jurisdiction name, chain and color follow the selected entity on every screen",
+          "ok": true,
+          "tags": [
+            "functional"
+          ],
+          "tests": [
+            {
+              "timeout": 60000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 4798,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-10T03:12:32.755Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "09ee2af89228eaa44d80-0300c5be5c5d978930ba",
+          "file": "e2e-tutorial-features.spec.ts",
+          "line": 47,
+          "column": 0
+        }
+      ]
+    },
+    {
+      "title": "e2e-tutorial-network-boundaries.spec.ts",
+      "file": "e2e-tutorial-network-boundaries.spec.ts",
+      "column": 0,
+      "line": 0,
+      "specs": [
+        {
+          "title": "hub opening excludes foreign stacks and rejects their pasted IDs",
+          "ok": true,
+          "tags": [
+            "functional"
+          ],
+          "tests": [
+            {
+              "timeout": 60000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 4521,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-10T03:12:37.557Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "1fe05bba66f70a148be3-750dc0f0297fb509af55",
+          "file": "e2e-tutorial-network-boundaries.spec.ts",
+          "line": 6,
+          "column": 0
+        }
+      ]
+    }
+  ],
+  "errors": [],
+  "stats": {
+    "startTime": "2026-10-10T03:11:44.681Z",
+    "duration": 57598.763,
+    "expected": 8,
+    "skipped": 0,
+    "unexpected": 0,
+    "flaky": 0
+  }
+}

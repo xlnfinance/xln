@@ -1,0 +1,70 @@
+.jurisdiction-surface {
+  --jurisdiction-color: #91a6bd;
+  background-image: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--jurisdiction-color) 9%, transparent),
+    transparent 55%
+  );
+}
+.jurisdiction-surface[data-jurisdiction='ethereum'] {
+  --jurisdiction-color: #969aff;
+}
+.jurisdiction-surface[data-jurisdiction='tron'] {
+  --jurisdiction-color: #ff8787;
+}
+.jurisdiction-surface[data-jurisdiction='xlnc'] {
+  --jurisdiction-color: #57dcb0;
+}
+.jurisdiction-surface[data-jurisdiction='local'],
+.jurisdiction-surface[data-jurisdiction='sepolia'] {
+  --jurisdiction-color: #e5b969;
+}
+.jurisdiction-surface[data-jurisdiction='base'] {
+  --jurisdiction-color: #75aaff;
+}
+.jurisdiction-banner {
+  border-left: 4px solid var(--jurisdiction-color);
+  background: color-mix(in srgb, var(--jurisdiction-color) 10%, transparent);
+  padding: 10px 14px;
+  margin: 12px 20px;
+  border-radius: 8px;
+  font-size: 13px;
+}
+.jurisdiction-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 14px;
+}
+.jurisdiction-heading strong {
+  color: inherit;
+}
+.jurisdiction-heading button {
+  margin-left: auto;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  background: transparent;
+  border: 1px solid currentColor;
+  border-radius: 6px;
+  padding: 5px 10px;
+}
+.jurisdiction-stack {
+  margin-top: 6px;
+  font-size: 12px;
+}
+.jurisdiction-stack summary {
+  cursor: pointer;
+}
+.jurisdiction-stack p {
+  margin: 6px 0;
+}
+.jurisdiction-stack code {
+  overflow-wrap: anywhere;
+  user-select: all;
+}
+@media (max-width: 600px) {
+  .jurisdiction-banner {
+    margin: 8px 12px;
+  }
+}

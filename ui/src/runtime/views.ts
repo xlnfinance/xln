@@ -4,7 +4,7 @@ import { useAdapterRead, type ReadState } from './hooks';
 import { useApp } from './store';
 import { peekXLN } from './xln-loader';
 import { usdOf } from './financial/prices';
-import { accountNetBalance } from './financial/balance';
+import { accountNetBalance } from '@xln/frontend/lib/utils/ui/accountBalance';
 import { disputeView, settlementView, type AccountDoc, type DisputePhase, type SettlementPhase } from './financial/manage';
 
 /**
@@ -235,8 +235,10 @@ export function useWallet(entityId: string | null): WalletView {
 							risk += unsecured;
 							secured += token.signed - unsecured;
 						} else owed += token.signed;
-						sendCapacity += token.derived.outCapacity;
-						receiveCapacity += token.derived.inCapacity;
+						if (!account.disputed) {
+							sendCapacity += token.derived.outCapacity;
+							receiveCapacity += token.derived.inCapacity;
+						}
 					}
 				}
 				const active = onchainAmount > 0n || reserveAmount > 0n || pending > 0n || receivable > 0n || owed < 0n || sendCapacity > 0n || receiveCapacity > 0n;
@@ -281,6 +283,7 @@ export function useWallet(entityId: string | null): WalletView {
 		usd.net = usd.onchain + usd.reserve + usd.receivable - usd.owed;
 		for (const account of accounts) {
 			for (const token of account.tokens) {
+				if (account.disputed) continue;
 				usd.sendCapacity += usdOf(token.tokenId, token.derived.outCapacity);
 				usd.receiveCapacity += usdOf(token.tokenId, token.derived.inCapacity);
 			}
@@ -331,6 +334,7 @@ export function openSwapOffers(frame: RuntimeAdapterViewFrame | null, entityId: 
 		const counterpartyId = left === self ? right : left;
 		const isLeft = left === self;
 		for (const offer of doc.state.swapOffers?.values() ?? []) {
+			if (offer.crossJurisdiction) continue;
 			out.push({
 				counterpartyId,
 				offerId: offer.offerId,

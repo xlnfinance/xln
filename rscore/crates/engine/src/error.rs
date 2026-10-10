@@ -382,7 +382,7 @@ pub enum TransitionError {
     #[error("LENDING_INVALID_INTEREST_BPS: {0}")]
     LendingInterestBpsInvalid(i64),
     #[error("LENDING_CREDIT_LIMIT_NEGATIVE:{0}")]
-    LendingCreditLimitNegative(BigInt),
+    LendingDisburseLimitNegative(BigInt),
     #[error("ACCOUNT_TX_ROUTE_MISMATCH:lending")]
     LendingRouteMismatch,
     #[error("ACCOUNT_EXECUTION_CONTEXT_REQUIRED:{0}")]

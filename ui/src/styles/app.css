@@ -1486,6 +1486,8 @@ textarea.input.boxed {
 	overflow-wrap: anywhere;
 }
 
+.toast button { pointer-events: auto; }
+
 .toast-danger {
 	border-color: color-mix(in srgb, var(--dispute) 40%, transparent);
 	color: var(--dispute);
@@ -2466,4 +2468,32 @@ textarea.input.boxed {
     text-align: left;
     white-space: normal;
   }
+}
+
+/* Guidance uses one compact row of controls; actions stay in the first viewport. */
+.tour-chapters { display: flex; align-items: center; gap: 12px; min-width: 0; flex: 1; }
+.tour-chapters select { width: 100%; max-width: 420px; min-width: 0; padding: 6px; background: var(--surface); color: var(--ink); border: 1px solid var(--line-2); border-radius: 6px; }
+.tour-kicker { flex-shrink: 0; }
+.tour-footer { display: flex; align-items: baseline; justify-content: space-between; gap: 8px 16px; flex-wrap: wrap; }
+.tour-example { margin: 0; font-size: 12px; line-height: 1.5; }
+.tour-example summary { cursor: pointer; }
+.tour-value { margin: 6px 0 0; font-size: 13px; line-height: 1.4; font-weight: 500; color: var(--ink); }
+.tour-example p { margin: 8px 0; max-width: 640px; }
+.tour-inline { position: relative; inset: auto; z-index: auto; margin: 0 20px 8px; pointer-events: auto; }
+.tour-inline .tour-card.anchored { position: relative; width: auto; inset: auto; padding: 10px 14px; box-shadow: none; border-color: var(--jurisdiction-color); }
+.tour-inline .tour-body { margin: 6px 0 8px; }
+.tour-inline .tour-actions { margin-left: auto; }
+.main { flex-direction: column; align-items: center; justify-content: flex-start; }
+.main > .jurisdiction-banner, .main > .tour-inline { width: calc(100% - 40px); max-width: 1032px; }
+.wallet-home { padding-top: 16px; }
+.wallet-home .screen-header { margin-bottom: 8px; }
+.wallet-home .wallet-overview { padding: 8px 0 12px; }
+.wallet-home .test-money { margin: 0 0 16px; }
+.tutorial-target { outline: 2px solid var(--jurisdiction-color, var(--accent)); outline-offset: 4px; }
+@media (max-width: 600px) {
+  .tour-inline { margin: 0 12px 8px; }
+  .tour-chapters { flex-direction: column; align-items: stretch; gap: 2px; }
+  .tour-inline .tour-head { align-items: flex-start; }
+  .main > .jurisdiction-banner, .main > .tour-inline { width: calc(100% - 24px); }
+  .wallet-home .test-money-intro { flex-basis: 100%; }
 }

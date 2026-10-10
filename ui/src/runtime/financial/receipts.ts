@@ -1,11 +1,10 @@
-import { create } from 'zustand';
+import { useReceipts } from './receipt-state';
 import type { RuntimeAdapterFrameReceiptResponse } from '@xln/core/api/runtime-adapter/types';
 import {
 	createPaymentTerminalMonitor,
 	PAYMENT_TERMINAL_EVENT_NAMES,
 	sharedPaymentTerminalCursorStore,
 	sharedPaymentTerminalSeenEventStore,
-	type PaymentTerminalEvent,
 	type PaymentTerminalReadRequest,
 	type PaymentTerminalReceiptPage,
 } from '@xln/frontend/lib/stores/network/paymentTerminalMonitor';
@@ -17,37 +16,6 @@ import { useApp } from '../store';
  * durable. Same monitor, same event names and the same durable cursor as the
  * SvelteKit View: no polling of live state, no optimistic toasts.
  */
-export type PaymentReceipt = {
-	id: string;
-	height: number;
-	name: PaymentTerminalEvent['name'];
-	data: Record<string, unknown>;
-	observedAt: number;
-};
-
-type ReceiptState = {
-	latest: PaymentReceipt | null;
-	show: (event: PaymentTerminalEvent) => void;
-	dismiss: () => void;
-};
-
-let receiptSeq = 0;
-
-export const useReceipts = create<ReceiptState>(set => ({
-	latest: null,
-	show: event =>
-		set({
-			latest: {
-				id: `receipt-${++receiptSeq}`,
-				height: event.height,
-				name: event.name,
-				data: event.data,
-				observedAt: Date.now(),
-			},
-		}),
-	dismiss: () => set({ latest: null }),
-}));
-
 const normalizeId = (value: unknown): string =>
 	String(value || '')
 		.trim()
@@ -82,7 +50,6 @@ export function startPaymentTerminal(): () => void {
 				useApp.getState().toast(reason ? `Payment failed: ${reason}` : 'Payment failed', 'danger');
 				return;
 			}
-			useApp.getState().clearToasts();
 			useReceipts.getState().show(event);
 		},
 		onError: error => {

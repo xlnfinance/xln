@@ -4,7 +4,7 @@ import { normalizeEntityId } from '@xln/core/protocol/identity/entity-id';
 import { getAdapter } from './adapter';
 import { useAdapterRead } from './hooks';
 import { useApp } from './store';
-import { useReceipts } from './financial/receipts';
+import { useReceipts } from './financial/receipt-state';
 import { shortId } from './format';
 
 /** One entity of the connected runtime, as the switcher and the palette present it. */

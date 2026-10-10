@@ -546,7 +546,7 @@ async function createRuntimeViaUi(
   // browser or on a node, a raw seed continues with the seed. "Derive wallet"
   // and the older wallet-opening labels no longer exist in the UI.
   const createButton = page.getByRole('button', {
-    name: /Derive wallet|Derive on node|Continue with seed|Verify recovery/i,
+    name: /Derive wallet|Derive on node|Continue with seed|Verify recovery|Unlock wallet/i,
   }).first();
   await expect(createButton).toBeEnabled({ timeout: 15_000 });
   await createButton.click({ force: true });

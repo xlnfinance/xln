@@ -56,7 +56,7 @@ export function AccountDetail() {
 			await sendEntityTxs(wallet.entityId, wallet.signerId, [
 				{ type: 'extendCredit', data: { counterpartyEntityId: counterpartyId.toLowerCase(), tokenId: selectedTokenId, amount } },
 			]);
-			toast(`Extended ${formatMoney(amount, meta.decimals)} ${meta.symbol} of credit to ${label}`);
+			toast(`Credit limit set to ${formatMoney(amount, meta.decimals)} ${meta.symbol} for ${label}`);
 			setExtending(false);
 			setCreditText('');
 		} catch (error) {
@@ -110,7 +110,7 @@ export function AccountDetail() {
 					<Icon name="pay" size={18} />
 					Pay
 				</button>
-				<button type="button" className="btn" disabled={account?.disputed} onClick={() => setExtending(true)}>
+				<button type="button" className="btn" disabled={account?.disputed} onClick={() => setExtending(true)} data-testid="account-extend-credit">
 					<Icon name="plus" size={18} />
 					Extend credit
 				</button>
@@ -165,8 +165,8 @@ export function AccountDetail() {
 					<Legend />
 				</div>
 			) : null}
-			{lanes.active.map(token => (
-				<TokenSection key={token.tokenId} token={token} />
+			{account && lanes.active.map(token => (
+				<TokenSection key={token.tokenId} token={token} disputed={account.disputed} closed={account.dispute === 'closed'} />
 			))}
 			{lanes.empty.length > 0 ? (
 				<button type="button" className="btn quiet" style={{ marginBottom: 14 }} onClick={() => setShowEmpty(value => !value)} data-testid="account-unused-lanes" data-open={showEmpty ? 'yes' : 'no'}>
@@ -174,7 +174,7 @@ export function AccountDetail() {
 					{lanes.empty.map(token => getTokenMeta(token.tokenId).symbol).join(', ')}
 				</button>
 			) : null}
-			{showEmpty ? lanes.empty.map(token => <TokenSection key={token.tokenId} token={token} />) : null}
+			{account && showEmpty ? lanes.empty.map(token => <TokenSection key={token.tokenId} token={token} disputed={account.disputed} closed={account.dispute === 'closed'} />) : null}
 			<button
 				type="button"
 				className="btn quiet"

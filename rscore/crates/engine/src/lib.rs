@@ -125,7 +125,5 @@ pub use tx::handlers::settlement::{
     can_auto_approve_settlement_ops, prepare_settlement_execution, settlement_workspace_body_hash,
     validate_settlement_ops,
 };
-pub use tx::{
-    ACCOUNT_TX_TYPES, AccountTx, DeliveryMode, LendingAction, LendingTermId, RebalanceRefundReason,
-};
+pub use tx::{ACCOUNT_TX_TYPES, AccountTx, DeliveryMode, LendingTermId, RebalanceRefundReason};
 pub use xln_rscore_protocol::{CanonicalNumber, CanonicalValue};

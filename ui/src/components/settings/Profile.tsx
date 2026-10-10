@@ -53,6 +53,7 @@ export function Profile() {
         </div>
         <div className="field-row">
           <input
+            aria-label="Published name"
             className="input"
             value={profileName}
             placeholder={wallet.name}
@@ -70,6 +71,7 @@ export function Profile() {
           </button>
         </div>
         <input
+          aria-label="Website"
           className="input"
           value={profileWebsite}
           placeholder="website · optional"
@@ -77,6 +79,7 @@ export function Profile() {
           data-testid="profile-website"
         />
         <textarea
+          aria-label="About you"
           className="input"
           rows={2}
           value={profileBio}

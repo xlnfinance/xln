@@ -3,7 +3,6 @@
   import { resetEverything } from '#lib/utils/control/resetEverything.ts';
 
   async function resetTestnet(): Promise<void> {
-    if (!window.confirm('Delete every local xln wallet, cache, and testnet database on this device?')) return;
     await resetEverything({ confirmed: true, reason: 'testnet-tools' });
   }
 

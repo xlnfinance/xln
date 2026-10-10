@@ -16,6 +16,8 @@ import {
 import { getEmbeddedEnv } from '../adapter';
 import { getXLN, peekXLN } from '../xln-loader';
 import { hostedJAdapter } from './move';
+import type { TakeoverStatus } from './ownership-activation';
+export type { TakeoverStatus } from './ownership-activation';
 
 export type { EntityShareTokenProjection };
 
@@ -64,8 +66,6 @@ export async function releaseShares(entityId: string, signerId: string, deposito
 
 export type TakeoverTarget = { entityId: string; name: string };
 
-export type TakeoverStatus = { currentBoardHash: string; proposedBoardHash: string; currentBlock: bigint; activateAtBlock: bigint };
-
 /** Other entities in this runtime whose board lists our signer: the only takeover candidates. */
 export function takeoverTargets(entityId: string, signerId: string, names: Map<string, string>): TakeoverTarget[] {
 	const env = getEmbeddedEnv();
@@ -107,11 +107,14 @@ export async function readTakeoverStatus(entityId: string, signerId: string, tar
 	const { replica } = requireTarget(targetEntityId, signerId);
 	const jadapter = await hostedJAdapter(entityId, signerId);
 	const entity = await jadapter.entityProvider.entities(replica.state.entityId);
+	const latestBlock = await jadapter.provider.getBlock('latest');
+	if (!latestBlock) throw new Error('CONTROL_TAKEOVER_LATEST_BLOCK_MISSING');
 	return {
+		targetEntityId: normalize(replica.state.entityId),
 		currentBoardHash: normalize(entity.currentBoardHash),
 		proposedBoardHash: normalize(entity.proposedBoardHash),
-		currentBlock: BigInt(await jadapter.provider.getBlockNumber()),
-		activateAtBlock: BigInt(entity.activateAt),
+		currentUnix: BigInt(latestBlock.timestamp),
+		activateAt: BigInt(entity.activateAt),
 	};
 }
 

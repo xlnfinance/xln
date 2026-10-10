@@ -23,6 +23,7 @@ export type VaultMeta = {
 
 export type Toast = {
 	id: number;
+	key?: string;
 	text: string;
 	kind: 'info' | 'danger';
 };
@@ -169,7 +170,7 @@ type AppState = {
 	setSelectedTokenId: (tokenId: number) => void;
 
 	toasts: Toast[];
-	toast: (text: string, kind?: Toast['kind']) => void;
+	toast: (text: string, kind?: Toast['kind'], key?: string) => void;
 	dismissToast: (id: number) => void;
 	/** Drop every toast: a route change or a committed receipt supersedes them. */
 	clearToasts: () => void;
@@ -293,10 +294,10 @@ export const useApp = create<AppState>((set, get) => ({
 	setSelectedTokenId: tokenId => set({ selectedTokenId: tokenId }),
 
 	toasts: [],
-	toast: (text, kind = 'info') => {
+	toast: (text, kind = 'info', key) => {
 		const id = ++toastSeq;
-		set({ toasts: [...get().toasts, { id, text, kind }] });
-		setTimeout(() => get().dismissToast(id), kind === 'danger' ? 7000 : 4000);
+		set({ toasts: [...get().toasts.filter(toast => !key || toast.key !== key), { id, text, kind, ...(key ? { key } : {}) }] });
+		if (kind !== 'danger') setTimeout(() => get().dismissToast(id), 4000);
 	},
 	dismissToast: id => set({ toasts: get().toasts.filter(t => t.id !== id) }),
 	clearToasts: () => set({ toasts: [] }),

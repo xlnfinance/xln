@@ -1,3 +1,4 @@
+import { getJurisdictionBadgeInfo } from '@xln/frontend/lib/utils/identity/jurisdictionBadge';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Icon } from './Icons';
@@ -78,7 +79,9 @@ export function EntitySwitcher({ name, status }: { name: string; status: ReactNo
 							type="button"
 							role="option"
 							aria-selected={entity.entityId === activeEntityId}
-							className={`picker-option${entity.entityId === activeEntityId ? ' active' : ''}`}
+							className={`picker-option jurisdiction-surface${entity.entityId === activeEntityId ? ' active' : ''}`}
+							data-jurisdiction={getJurisdictionBadgeInfo(entity.jurisdiction)?.className ?? 'generic'}
+							style={{ borderLeft: '3px solid var(--jurisdiction-color)' }}
 							onClick={() => pick(entity.entityId)}
 							data-testid="entity-switcher-entity"
 							data-entity-id={entity.entityId}

@@ -370,22 +370,20 @@ fn projected_tx_value(
                 ("amount".to_string(), big(amount)),
             ],
         ),
-        AccountTx::LendingCredit {
-            action,
+        AccountTx::LendingDisburse {
             loan_id,
             hub_entity_id,
             borrower_entity_id,
             token_id,
-            credit_limit,
+            amount,
         } => (
-            "lending_credit",
+            "lending_disburse",
             vec![
-                ("action".to_string(), text(action.wire_name())),
                 ("loanId".to_string(), text(loan_id)),
                 ("hubEntityId".to_string(), text(hub_entity_id)),
                 ("borrowerEntityId".to_string(), text(borrower_entity_id)),
                 ("tokenId".to_string(), token(*token_id)),
-                ("creditLimit".to_string(), big(credit_limit)),
+                ("amount".to_string(), big(amount)),
             ],
         ),
         AccountTx::LendingCloseRequest {

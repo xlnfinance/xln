@@ -97,12 +97,8 @@ function token(state: Snapshot, id: number) {
   return found;
 }
 async function creditReceive(page: Page) {
-  const spectrum = page.getByTestId('receive-spectrum');
-  await expect(spectrum).toBeVisible(WAIT); await expect(page.getByTestId('swap-submit')).toBeDisabled();
-  await spectrum.getByRole('button', { name: 'Accept it as credit instead', exact: true }).click();
-  await expect(page.getByTestId('receive-spectrum-confirm')).toHaveText('Extend credit limit');
-  await page.getByTestId('receive-spectrum-confirm').click();
-  await expect(spectrum).toHaveCount(0, WAIT); await expect(page.getByTestId('swap-submit')).toBeEnabled(WAIT);
+  await expect(page.getByText(/Placing this order also prepares incoming capacity/)).toBeVisible(WAIT);
+  await expect(page.getByTestId('swap-submit')).toBeEnabled(WAIT);
 }
 async function moveReserve(page: Page, hub: string, amount: bigint) {
   await home(page); await page.getByTestId('home-move').click();
@@ -134,6 +130,7 @@ test('one wallet funds 100, pays, swaps on both networks, disputes and moves rec
   page.on('request', request => { const path = new URL(request.url()).pathname; if (request.method() === 'POST' && path.startsWith('/api/faucet/')) faucets.push(path); });
   async function phase(name: string, run: () => Promise<void>) { const start = Date.now(); try { await test.step(name, run); } finally { console.log(`JOURNEY_PHASE ${name} ms=${Date.now() - start}`); } }
   try {
+    await page.clock.install();
     const bootStarted = Date.now();
     const wallet = await enterStack(page);
     console.log(`JOURNEY_PHASE boot ms=${Date.now() - bootStarted}`);
@@ -159,6 +156,7 @@ test('one wallet funds 100, pays, swaps on both networks, disputes and moves rec
       const checkpoint = await readWalletCheckpoint(page);
       await page.getByTestId('home-pay').click(); await page.getByTestId('pay-to').fill('H2'); await page.getByTestId('pay-amount').fill('25');
       await expect(page.getByTestId('pay-submit')).toBeEnabled(WAIT); await page.getByTestId('pay-submit').click();
+      await page.getByTestId('receipt-open').click();
       await expect(page.getByTestId('receipt-kicker')).toHaveText('Paid', WAIT);
       const payment = await readCommittedPayment(page, wallet.entityId, checkpoint.frame.height);
       expect(payment.amount).toBe('25000000'); expect(BigInt(payment.senderAmount)).toBe(25_000_000n + BigInt(payment.fee));
@@ -206,8 +204,16 @@ test('one wallet funds 100, pays, swaps on both networks, disputes and moves rec
       const take = await oppositeQuote(label, hub, targetHub, receiveToken.decimals);
       await page.getByTestId('swap-want').locator('..').getByRole('button').click(); await page.getByRole('option', { name: new RegExp(`^${receiveToken.symbol}`) }).click();
       await page.getByTestId('swap-give').fill(formatUnits(take.effectiveGive, 6)); await page.getByTestId('swap-want').fill(formatUnits(take.effectiveWant, receiveToken.decimals));
-      await page.getByRole('button', { name: `Open incoming account with ${label}`, exact: true }).click(); await creditReceive(page);
-      expect(token(await settled(page, targetOwner, targetHub), 3).owned).toBe('0'); await page.getByTestId('swap-submit').click();
+      await creditReceive(page);
+      // The canonical Swap command opens and prepares the previously absent
+      // destination Account; merely viewing the form must not create it.
+      expect(await page.evaluate(async ({ owner, hub }) => {
+        const adapter = (window as DebugWindow).__xln?.adapter();
+        if (!adapter) throw new Error('Journey target preview unavailable');
+        const view = await adapter.read<RuntimeAdapterViewFrame>('view-frame', { entityId: owner, accountsLimit: 100 });
+        return view.activeEntity?.accounts.items.some(account => account.state.leftEntity === hub || account.state.rightEntity === hub);
+      }, { owner: targetOwner, hub: targetHub })).toBe(false);
+      await page.getByTestId('swap-submit').click();
       await expect.poll(async () => (await settled(page, wallet.entityId, hub)).routes.map(route => route.status), WAIT).toEqual(['settled']);
       const source = await settled(page, wallet.entityId, hub); const target = await settled(page, targetOwner, targetHub);
       expect(target.routes).toEqual(source.routes); expect(source.routes[0]).toMatchObject({ filledSource: String(take.effectiveGive), filledTarget: String(take.effectiveWant) });
@@ -229,13 +235,15 @@ test('one wallet funds 100, pays, swaps on both networks, disputes and moves rec
       expect(start.args.rightResponseSeconds).toBe(BigInt(before.disputeConfig.rightResponseSeconds));
       expect(start.args.disputeTimeout).toBe(start.args.disputeStartTimestamp + start.args.leftResponseSeconds + start.args.rightResponseSeconds);
       const deadline = Number(start.args.disputeTimeout) + 1;
-      // Only the isolated chain advances; all transport authentication clocks stay real.
-      // H1 may legally accept the initial proof before T; the starter must wait for T.
+      // Only this leased chain and wallet clock advance to the signed deadline.
       // This journey verifies the exact payout from either real protocol finalizer.
       const beforeDeadlineBlock = await provider.getBlock('latest');
       expect(beforeDeadlineBlock?.timestamp).toBeLessThan(Number(start.args.disputeTimeout));
-      expect(deadline, 'Journey requires ANVIL_GENESIS_TIMESTAMP at least three days in the past').toBeLessThan(Math.floor(Date.now() / 1000));
+      await page.clock.pauseAt(await page.evaluate(() => Date.now() + 1000));
       await provider.send('evm_setNextBlockTimestamp', [deadline]); await provider.send('evm_mine', []);
+      const hostTime = await page.evaluate(() => Math.round(performance.timeOrigin + performance.now()));
+      try { await page.clock.fastForward(deadline * 1000 - hostTime); }
+      finally { await page.clock.resume(); }
       const deadlineBlock = await provider.getBlock('latest');
       expect(deadlineBlock?.timestamp).toBe(deadline);
       await expect.poll(async () => { const value = await snapshot(page, wallet.entityId, hub); return value ? [value.dispute, value.status, token(value, 1).reserve, token(value, 2).reserve] : null; }, WAIT).toEqual([null, 'disputed', String(expectedUsdc), String(expectedWeth)]);

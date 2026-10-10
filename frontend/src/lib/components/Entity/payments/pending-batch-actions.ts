@@ -22,7 +22,6 @@ type PendingBatchActionRunnerOptions = {
   getState: () => PendingBatchRunnerState;
   setSubmitting: (submitting: boolean) => void;
   enqueueAction: (action: PendingBatchAction, context: string) => Promise<void>;
-  confirmClear: () => boolean;
   notifySuccess: (message: string) => void;
   notifyError: (message: string) => void;
   formatError: (error: unknown, defaultMessage: string) => string;
@@ -57,7 +56,7 @@ export function createPendingBatchActionRunner(options: PendingBatchActionRunner
     const state = options.getState();
     if (state.pendingBatchSubmitting) return;
     if (action === 'clear') {
-      if (!state.pendingBatchCount || !options.confirmClear()) return;
+      if (!state.pendingBatchCount) return;
       await runPendingBatchAction(options, action, 'global-clear-batch', 'Batch cleared', 'Batch clear failed');
       return;
     }

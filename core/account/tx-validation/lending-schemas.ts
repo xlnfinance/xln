@@ -23,12 +23,11 @@ export const ACCOUNT_TX_LENDING_SCHEMAS = {
       tokenId: 'integer', amount: 'bigint',
     },
   },
-  lending_credit: {
+  lending_disburse: {
     required: {
-      action: 'string', loanId: 'string', hubEntityId: 'string',
-      borrowerEntityId: 'string', tokenId: 'integer', creditLimit: 'bigint',
+      loanId: 'string', hubEntityId: 'string',
+      borrowerEntityId: 'string', tokenId: 'integer', amount: 'bigint',
     },
-    literals: { action: ['grant', 'revoke'] },
   },
   lending_close_request: {
     required: { positionId: 'string', hubEntityId: 'string', lenderEntityId: 'string' },

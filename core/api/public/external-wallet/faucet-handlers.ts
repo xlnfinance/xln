@@ -12,6 +12,7 @@ import {
 import { createJsonResponse, externalWalletLog, readFaucetBody, readGasFaucetBody } from './http';
 
 interface Erc20FaucetRequest {
+  jurisdiction?: string;
   requestId: string;
   userAddress: string;
   tokenSymbol: string;
@@ -46,7 +47,7 @@ const handleBrowserVmErc20Faucet = (
   request: Erc20FaucetRequest,
 ): Promise<Response> =>
   withFaucetWalletLock(context, adapter, async () => {
-    const funded = await context.fundBrowserVmWallet(request.userAddress, request.amountWei, request.token.symbol);
+    const funded = await context.fundBrowserVmWallet(request.userAddress, request.amountWei, request.token.symbol, adapter);
     if (!funded) {
       return createJsonResponse(context.jsonHeaders, { error: 'BrowserVM faucet unavailable' }, 503);
     }
@@ -124,7 +125,7 @@ const parseErc20FaucetRequest = async (
   if (!ethers.isAddress(body.userAddress)) {
     return createJsonResponse(context.jsonHeaders, { error: 'Invalid userAddress' }, 400);
   }
-  const tokens = await context.getTokenCatalog();
+  const tokens = await context.getTokenCatalog(undefined, body.jurisdiction);
   const token = tokens.find(item => item.symbol.toUpperCase() === body.tokenSymbol);
   if (!token) {
     return createJsonResponse(context.jsonHeaders, { error: `Token ${body.tokenSymbol} not found` }, 404);
@@ -145,12 +146,12 @@ const parseErc20FaucetRequest = async (
 
 export const handleErc20Faucet = async (context: ExternalWalletApiContext, request: Request): Promise<Response> => {
   try {
-    const adapter = context.getJAdapter();
+    const parsed = await parseErc20FaucetRequest(context, request);
+    if (parsed instanceof Response) return parsed;
+    const adapter = context.getJAdapter(undefined, parsed.request.jurisdiction);
     if (!adapter) {
       return createJsonResponse(context.jsonHeaders, { error: 'J-adapter not initialized' }, 503);
     }
-    const parsed = await parseErc20FaucetRequest(context, request);
-    if (parsed instanceof Response) return parsed;
     context.emitDebugEvent({
       event: 'debug_event',
       runtimeId: context.getRuntimeId(),
@@ -163,9 +164,9 @@ export const handleErc20Faucet = async (context: ExternalWalletApiContext, reque
         amount: parsed.request.amount,
       },
     });
-    return adapter.mode === 'browservm'
+    return await (adapter.mode === 'browservm'
       ? handleBrowserVmErc20Faucet(context, adapter, parsed.request)
-      : transferErc20AndGas(context, adapter, parsed.tokens, parsed.request);
+      : transferErc20AndGas(context, adapter, parsed.tokens, parsed.request));
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     externalWalletLog.error('faucet.erc20.failed', { error: message });
@@ -182,11 +183,11 @@ export const handleErc20Faucet = async (context: ExternalWalletApiContext, reque
 
 export const handleGasFaucet = async (context: ExternalWalletApiContext, request: Request): Promise<Response> => {
   try {
-    const adapter = context.getJAdapter();
+    const { userAddress, amount, jurisdiction } = await readGasFaucetBody(request);
+    const adapter = context.getJAdapter(undefined, jurisdiction);
     if (!adapter) {
       return createJsonResponse(context.jsonHeaders, { error: 'J-adapter not initialized' }, 503);
     }
-    const { userAddress, amount } = await readGasFaucetBody(request);
     if (!ethers.isAddress(userAddress)) {
       return createJsonResponse(context.jsonHeaders, { error: 'Invalid userAddress' }, 400);
     }

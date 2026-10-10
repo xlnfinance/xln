@@ -205,6 +205,7 @@
     .map(id => ({
       id,
       displayName: getKnownEntityName(id) || formatShortId(id),
+      jurisdiction: activeProfiles.find(profile => normalizeEntityId(profile.entityId) === normalizeEntityId(id))?.metadata.jurisdiction?.name || '',
       avatar: entityAvatar(activeFunctions, id)
     }));
 
@@ -347,7 +348,7 @@
         {/if}
         <span class="item-meta">
           <span class="item-name-row">
-            <span class="item-name">{selectedOption.displayName}</span>
+            <span class="item-name">{selectedOption.displayName}</span>{#if selectedOption.jurisdiction}<span class="item-id">{selectedOption.jurisdiction}</span>{/if}
             {#if selectedIsPreferred}
               <span class="item-badge">Self</span>
             {/if}
@@ -411,7 +412,7 @@
           {/if}
           <span class="item-meta">
             <span class="item-name-row">
-              <span class="item-name">{pinnedOption.displayName}</span>
+              <span class="item-name">{pinnedOption.displayName}</span>{#if pinnedOption.jurisdiction}<span class="item-id">{pinnedOption.jurisdiction}</span>{/if}
               <span class="item-badge">Self</span>
             </span>
             <span class="item-id">{getCompactEntityId(pinnedOption.id)}</span>
@@ -445,7 +446,7 @@
               <span class="item-avatar placeholder">?</span>
             {/if}
             <span class="dropdown-item-main">
-              <span class="item-name">{opt.displayName}</span>
+              <span class="item-name">{opt.displayName}</span>{#if opt.jurisdiction}<span class="item-id">{opt.jurisdiction}</span>{/if}
               <span class="item-id">{getCompactEntityId(opt.id)}</span>
             </span>
           </button>

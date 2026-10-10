@@ -83,7 +83,7 @@
   <div class="token-table-row asset-ledger-row asset-ledger-total" data-testid="asset-ledger-total">
     <div class="col-token asset-ledger-total-label">
       <div class="asset-name-block">
-        <span class="token-name">Net Worth</span>
+        <span class="token-name">Total balance</span>
         <span class="asset-kind">Total {formatApproxUsd(grandTotal)}</span>
       </div>
     </div>

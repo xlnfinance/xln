@@ -1,4 +1,5 @@
 <script lang="ts">
+import WalletGuide from "#lib/tutorial/WalletGuide.svelte";
 import { replaceState } from "$app/navigation";
 import { createEventDispatcher } from "svelte";
 import { onDestroy, onMount } from "svelte";
@@ -40,7 +41,7 @@ import OwnershipWorkspacePanel from "../../ownership/OwnershipWorkspacePanel.sve
 import { buildEntityConsensusSettingsView } from "../entity-consensus-settings";
 import { importJMachineViaRuntime, type JMachineCreateDetail } from "#lib/components/Jurisdiction/import-jmachine-runtime.ts";
 import { OFFCHAIN_FAUCET_REQUEST_TIMEOUT_MS, faucetPendingKey, type FaucetApiResult, type PendingReserveFaucet, readFaucetApiResult, reconcilePendingReserveFaucets } from "../../account/account-faucet";
-import { buildMoveArrowPath, buildMoveRouteSteps, getMoveRouteKey, isImmediateMoveExecutionRoute, isMoveRouteSupported, moveNeedsExternalRecipient, moveNeedsReserveRecipient, routeRequiresExplicitExternalAllowance, MOVE_ENDPOINT_LABEL, MOVE_ENDPOINTS, type MoveEndpoint } from "../../move-routes";
+import { withdrawableCollateral, buildMoveArrowPath, buildMoveRouteSteps, getMoveRouteKey, isImmediateMoveExecutionRoute, isMoveRouteSupported, moveNeedsExternalRecipient, moveNeedsReserveRecipient, routeRequiresExplicitExternalAllowance, MOVE_ENDPOINT_LABEL, MOVE_ENDPOINTS, type MoveEndpoint } from "../../move-routes";
 import { buildMoveAllowanceContextSignature, buildMoveAllowanceStatusLabel, getMoveRequiredAllowanceAmount, isMoveAllowanceSatisfied } from "../../move/move-allowance";
 import { choosePreferredMoveAssetSymbol, computeMoveSourceAvailableBalanceForEndpoint, getMoveMaxAmountForEndpoint, getPreferredMoveSourceAccountId } from "../../move/move-balance";
 import { getMoveValidationErrorForContext, type MoveValidationMode } from "../../move/move-validation";
@@ -59,7 +60,7 @@ import { emptyEntityWorkspaceEmbeddedRuntimeContext, type EntityWorkspaceEmbedde
 import { buildHubDiscoveryProjection, buildHubDiscoveryRemoteHubsFromRuntimes, buildDirectOpenAccountRuntimeInput, canSubmitHubOpenAccount, emptyHubDiscoveryProjection, getHubOpenAccountPermissionError, type HubDiscoveryProjection } from "../../onboarding/hub-discovery-profile";
 import { buildPaymentPanelView, buildPaymentPanelViewFromRuntimeView, emptyPaymentPanelView, type PaymentPanelView } from "../../payments/payment-panel-view";
 import { buildSwapPanelRuntimeView, type SwapPanelRuntimeView } from "../../swap/swap-panel-helpers";
-import { buildAccountSpendableByToken, buildAccountPortfolioData, buildAssetLedger, createEntityAssetValueFormatters, parsePositiveAssetAmount, parseTokenAmountInput } from "../../assets/entity-asset-values";
+import { buildAccountBalancesByToken, buildAccountPortfolioData, buildAssetLedger, createEntityAssetValueFormatters, parsePositiveAssetAmount, parseTokenAmountInput } from "../../assets/entity-asset-values";
 import {
   choosePreferredAssetSymbol,
   compareTokenSymbols,
@@ -75,7 +76,7 @@ import {
   type ReserveTransferAsset,
 } from "../../assets/entity-asset-catalog";
 import { requireTokenDecimals } from "../../token-metadata";
-import { buildOpenOutgoingDebtTotals, buildPendingBatchPreview, buildPendingBatchState, canBroadcastPendingBatch, formatBatchReserveIssue, getPendingBatchReserveIssue, pendingBatchEntityLabel } from "../../payments/pending-batch-preview";
+import { buildOpenOutgoingDebtTotals, buildPendingBatchPreview, buildPendingBatchState, canBroadcastPendingBatch, formatBatchReserveIssue, getPendingBatchReserveIssue } from "../../payments/pending-batch-preview";
 import { createPendingBatchActionRunner, enqueuePendingBatchAction } from "../../payments/pending-batch-actions";
 import {
   buildAddTokenToAccountTx,
@@ -506,8 +507,6 @@ function handleMoveTargetHubChange(event: CustomEvent<{ value?: string }>) {
   }
   const supported = moveHubEntityOptions.map((id) => String(id).trim().toLowerCase());
   if (!supported.includes(next)) {
-    const confirmed = typeof window === "undefined" ? true : window.confirm("This counterparty is not listed in the recipient profile. Funds may be lost if they do not support this account. Continue?");
-    if (!confirmed) return;
     moveTargetCounterpartyManualOverride = true;
   } else {
     moveTargetCounterpartyManualOverride = false;
@@ -775,8 +774,8 @@ $: workspaceAccountIds = accountIds.filter((id) => {
   if (!account) return false;
   return String(account.status || "") !== "disputed";
 });
-$: if (!workspaceAccountId || !workspaceAccountIds.includes(workspaceAccountId)) {
-  workspaceAccountId = workspaceAccountIds[0] || "";
+$: if (!workspaceAccountId || !accountIds.includes(workspaceAccountId)) {
+  workspaceAccountId = workspaceAccountIds[0] || accountIds[0] || "";
 }
 $: firstFaucetAccountId = workspaceAccountIds[0] || accountIds[0] || "";
 $: if (assetWorkspaceTab === "move" && workspaceAccountIds.length > 0) {
@@ -833,7 +832,7 @@ function handleOpenAccountTargetChange(event: CustomEvent<{ value?: string }>) {
   openAccountEntityId = String(event.detail?.value || "").trim();
 }
 function handleWorkspaceAccountChange(event: CustomEvent<{ value?: string }>) {
-  workspaceAccountId = normalizeWorkspaceAccountId(String(event.detail?.value || ""), workspaceAccountIds);
+  workspaceAccountId = normalizeWorkspaceAccountId(String(event.detail?.value || ""), accountIds);
 }
 $: openAccountEntityOptions = (() => {
   return buildOpenAccountEntityOptions({
@@ -921,7 +920,7 @@ let moveUiState: MoveUiState = {
   sourceAvailableBalance: 0n,
 };
 let lastMoveAmountContextKey = "";
-let accountSpendableByToken = new Map<number, bigint>();
+let accountBalancesByToken = new Map<number, bigint>();
 let pendingAssetBridgeSync: {
   tokenId: number;
   symbol: string;
@@ -1050,7 +1049,7 @@ async function requestExternalGasFaucet(owner: string, amount = "0.1"): Promise<
   const response = await fetch(`${requestApiBase}/api/faucet/gas`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ userAddress: owner, amount }),
+    body: JSON.stringify({ userAddress: owner, amount, jurisdiction: replica?.state.config.jurisdiction?.name }),
   });
   const result = await readFaucetApiResult(response);
   if (!response.ok || !result?.success) {
@@ -1162,7 +1161,7 @@ function getDerivedDeltaForAccount(counterpartyEntityId: string, tokenId: number
 function getAccountSpendableCapacity(counterpartyEntityId: string, tokenId: number): bigint {
   const derived = getDerivedDeltaForAccount(counterpartyEntityId, tokenId);
   if (!derived) return 0n;
-  return derived.outCapacity;
+  return withdrawableCollateral(derived);
 }
 function resolveReserveTokenMeta(tokenId: number, symbolHint?: string): { tokenId: number; symbol: string; decimals: number } {
   return resolveReserveTokenMetaFromCatalog({
@@ -1452,10 +1451,10 @@ $: moveAssetOptions = assetLedgerRows
   .map((row) => ({ symbol: row.symbol }));
 $: selectedMoveExternalToken = findPanelExternalToken(moveAssetSymbol);
 $: selectedMoveTransferToken = findReserveTransferTokenBySymbol(moveAssetSymbol);
-$: accountSpendableByToken = (() => {
+$: accountBalancesByToken = (() => {
   activeEnv;
   envRevision;
-  return buildAccountSpendableByToken({
+  return buildAccountBalancesByToken({
     accounts: replica?.state.accounts,
     localEntityId: String(replica?.state.entityId || tab.entityId || ""),
     deriveDelta: activeXlnFunctions?.deriveDelta,
@@ -1464,7 +1463,7 @@ $: accountSpendableByToken = (() => {
 $: ({ rows: assetLedgerRows, totals: assetLedgerTotals } = buildAssetLedger({
   externalTokens,
   reserves: onchainReserves,
-  accountSpendable: accountSpendableByToken,
+  accountBalances: accountBalancesByToken,
   getExternalValue,
   getAssetValue,
   resolveReserveTokenMeta,
@@ -2269,21 +2268,6 @@ async function openAccountWithFullId(targetEntityId: string) {
     toasts.error(`Open account failed: ${(err as Error).message}`);
   }
 }
-function confirmDisputeAction(kind: "prepare" | "finalize", counterpartyEntityId: string): boolean {
-  const label = pendingBatchEntityLabel(counterpartyEntityId, getPendingBatchLabelOptions());
-  if (kind === "prepare") {
-    return confirm(`Prepare dispute with ${label}?\n\nThis freezes normal account traffic, removes orderbook exposure, and automatically drafts Dispute Start as soon as evidence is stable.`);
-  }
-  return confirm(`Finalize on-chain dispute with ${label}?\n\nThis adds Dispute Finalize to the pending batch. Only do this after the dispute timeout has passed.`);
-}
-async function confirmAndQueueDisputePrepare(counterpartyEntityId: string, description = "dispute-prepare-from-configure") {
-  if (!confirmDisputeAction("prepare", counterpartyEntityId)) return;
-  await queueDisputePrepare(counterpartyEntityId, description);
-}
-async function confirmAndQueueDisputeFinalize(counterpartyEntityId: string, description = "dispute-finalize-from-configure") {
-  if (!confirmDisputeAction("finalize", counterpartyEntityId)) return;
-  await queueDisputeFinalize(counterpartyEntityId, description);
-}
 async function queueDisputePrepare(counterpartyEntityId: string, description = "dispute-prepare-from-configure") {
   const entityId = replica?.state?.entityId || tab.entityId;
   const signerId = resolveEntitySigner(entityId, "dispute-prepare");
@@ -2420,7 +2404,9 @@ async function faucetExternalTokens(tokenSymbol: string = "USDC") {
     const amount = tokenSymbol === "ETH" ? "0.1" : "100";
     const isEth = tokenSymbol === "ETH";
     const endpoint = isEth ? `${requestApiBase}/api/faucet/gas` : `${requestApiBase}/api/faucet/erc20`;
-    const payload = isEth ? { userAddress: signerId, amount } : { userAddress: signerId, tokenSymbol, amount };
+    const jurisdiction = replica?.state.config.jurisdiction?.name;
+    if (!jurisdiction) throw new Error('Select a network before requesting test funds.');
+    const payload = isEth ? { userAddress: signerId, amount, jurisdiction } : { userAddress: signerId, tokenSymbol, amount, jurisdiction };
     // Faucet A: ERC20 to wallet (or native ETH gas faucet)
     const response = await fetch(endpoint, {
       method: "POST",
@@ -2431,10 +2417,8 @@ async function faucetExternalTokens(tokenSymbol: string = "USDC") {
     if (!response.ok || !result?.success) {
       throw new Error(result?.error || `Faucet failed (${response.status})`);
     }
-    toasts.success(`Received ${amount} ${tokenSymbol} in external!`);
-    if (isEth) {
-      void fetchExternalTokens(true);
-    }
+    await fetchExternalTokens(true);
+    toasts.success(`Received ${amount} ${tokenSymbol} in your ${jurisdiction} wallet.`);
   } catch (err) {
     logEntityPanelDiagnostic("External faucet failed", {
       tokenSymbol,
@@ -2494,8 +2478,6 @@ $: {
 }
 async function handleResetEverything(): Promise<void> {
   if (resettingEverything) return;
-  const confirmed = window.confirm("Reset ALL local XLN data? Wallets, runtimes, settings, and IndexedDB databases will be deleted.");
-  if (!confirmed) return;
   resettingEverything = true;
   try {
     await resetEverything({ confirmed: true, reason: "entity-empty-state" });
@@ -2615,6 +2597,9 @@ $: accountsData = buildAccountPortfolioData({
 });
 $: disputedAccounts = buildDisputedAccountViews(replica?.state?.accounts);
 $: netWorth = externalTotal + reservesTotal + accountsData.total;
+$: lendingAccounts = Array.from(replica?.state.accounts ?? [], ([hubEntityId, account]) => ({
+  hubEntityId, intents: Array.from(account.state.lendingIntents ?? []),
+}));
 $: entityActivityRows = buildEntityActivityRows({
   replica,
   tabEntityId: tab.entityId,
@@ -2711,7 +2696,6 @@ const runPendingBatchAction = createPendingBatchActionRunner({
     pendingBatchSubmitting = submitting;
   },
   enqueueAction: enqueueCurrentPendingBatchAction,
-  confirmClear: () => confirm("Clear current draft and any sent batch state?"),
   notifySuccess: toasts.success,
   notifyError: toasts.error,
   formatError: toErrorMessage,
@@ -2761,7 +2745,15 @@ $: if (typeof window !== "undefined") {
     entityNames={panelView.entityNames} jurisdictions={panelView.jurisdictions}
     {handleJurisdictionSelect} {handleEntitySelect}
   />
-  <main class="main-scroll">
+  <main class="main-scroll jurisdiction-surface" data-jurisdiction={entityJurisdictionBadge?.className ?? 'generic'}>
+    {#if replica}
+      <WalletGuide name={currentEntityJurisdictionName || ''}
+        chainId={replica.state.config.jurisdiction?.chainId}
+        depository={replica.state.config.jurisdiction?.depositoryAddress || ''}
+        entityProvider={replica.state.config.jurisdiction?.entityProviderAddress || ''}
+        onNavigate={(route, lessonId) => { window.location.hash = route; applyDeepLinkViewFromUrl(); if (lessonId === 'dispute') configureWorkspaceTab = 'dispute'; if (lessonId === 'limits') configureWorkspaceTab = 'extend-credit'; }}
+        onCreateEntity={handleHeaderAddEntity} />
+    {/if}
     {#if activeIsLive}
       <RuntimeCommandGateBanner
         ready={activeCommandsReady} reason={$runtimeControllerHandle.commandReadyReason} runtimeId={$runtimeControllerHandle.runtimeId}
@@ -2789,7 +2781,8 @@ $: if (typeof window !== "undefined") {
         {tab} {userModeHeader} {avatar}
         {activeXlnFunctions} {entityJurisdictionBadge} {heroDisplayName}
         {allowHeaderAddRuntime} {headerRuntimeAddLabel} {currentEntityValue}
-        {copiedMetaField} {netWorth} {tabs}
+        {copiedMetaField} {netWorth} availableToPay={accountsData.outbound} {tabs}
+        {lendingAccounts} lendingApiBase={resolveApiBase()} isLive={activeIsLive} {getAssetValue}
         {activeTab} {pendingBatchCount} {formatUsdExact}
         {copyMetaValue} {selectTopLevelTab} {handleHeaderAddRuntime}
         {handleHeaderAddJurisdiction} {handleHeaderAddEntity} {handleEntitySelect}
@@ -2872,8 +2865,8 @@ $: if (typeof window !== "undefined") {
             {handleAccountSelect} {handleAccountFaucet} {handleQuickSettleApprove}
             {openAccountHistoryWorkspace} {openAccountMoveWorkspace} {clearPendingBatch}
             {rebroadcastPendingBatch} {broadcastPendingBatch} {handleWorkspaceAccountChange}
-            {confirmAndQueueDisputeFinalize}
-            {confirmAndQueueDisputePrepare} {addTokenToAccount} {handleOpenAccountTargetChange}
+            {queueDisputeFinalize}
+            {queueDisputePrepare} {addTokenToAccount} {handleOpenAccountTargetChange}
             {openAccountWithFullId} {openDisputedAccount}
             {resolveSelfEntityId} {formatAmount} {formatApproxUsd}
             onMoveVisualRoot={moveVisualController.setRoot}

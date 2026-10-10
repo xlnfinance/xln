@@ -2,9 +2,10 @@
 import type { EntityReadView } from '#lib/components/Entity/core/entity-panel-types.ts';
 
 import { tick } from 'svelte';
+import { explainWalletError } from '#lib/utils/ui/walletError.ts';
 import type { Tab } from '#lib/types/ui.ts';
 import { writable } from 'svelte/store';
-import type { BookState, Profile, RuntimeReplica, SwapBookEntry } from '@xln/core/api/public/runtime-module';
+import type { BookState, CrossJurisdictionSwapRoute, Profile, RuntimeReplica, SwapBookEntry } from '@xln/core/api/public/runtime-module';
 import {
   deriveCanonicalCrossJurisdictionBookOwnerForLegs,
   deriveCanonicalCrossJurisdictionMarketForLegs,
@@ -187,11 +188,11 @@ let orderMode: 'buy-base' | 'sell-base' | 'none' = 'none';
 let limitPriceTicks: bigint | null = null;
 let marketPriceTicks: bigint | null = null;
 let orderListTab: 'open' | 'closed' = 'open';
-let orderRouteFilter: 'all' | 'same' | 'cross' = 'all';
 let closedOrderStatusFilter: 'all' | ClosedOrderStatus = 'all';
 let activeOffers: SwapOfferLike[] = [];
 let routeFilteredOpenOffers: SwapOfferLike[] = [];
 let openOrders: SwapOfferLike[] = [];
+let crossOrders: CrossJurisdictionSwapRoute[] = [];
 let offerLifecycles: OfferLifecycle[] = [];
 let closedOfferLifecycles: OfferLifecycle[] = [];
 let closedOrderViews: ClosedOrderView[] = [];
@@ -495,7 +496,7 @@ function accountLabel(accountIdValue: string): string {
   return resolved || formatEntityId(accountIdValue);
 }
 function toErrorMessage(error: unknown, defaultMessage = 'Unknown error'): string {
-  return error instanceof Error && error.message ? error.message : defaultMessage;
+  return explainWalletError(error instanceof Error && error.message ? error.message : defaultMessage);
 }
 function logSwapDiagnostic(message: string, error: unknown, details: Record<string, unknown> = {}): void {
   errorLog.log(message, 'Swap Panel', {
@@ -740,43 +741,17 @@ function orderbookRelayUrlForHub(entityIdValue: string): string {
   const relays = Array.isArray(profile?.relays) ? profile.relays : [];
   return String(relays.find((value) => String(value || '').trim()) || '').trim();
 }
-function hubBaseName(profile: Profile | null): string {
-  return (
-    String(profile?.name || profile?.entityId || '')
-      .trim()
-      .split(/\s+/)[0]
-      ?.toLowerCase() || ''
-  );
-}
-function hubMirrorsEntity(profile: Profile | null, entityIdValue: string): boolean {
-  const normalized = String(entityIdValue || '')
-    .trim()
-    .toLowerCase();
-  if (!profile || !normalized) return false;
-  const mirrors = profile.metadata?.mirrors;
-  if (!Array.isArray(mirrors)) return false;
-  return mirrors.some(
-    (mirror) =>
-      String(mirror?.entityId || '')
-        .trim()
-        .toLowerCase() === normalized,
-  );
-}
 function hubRouteCompatible(sourceHubEntityId: string, targetHubEntityId: string): boolean {
   const sourceHub = getHubProfile(sourceHubEntityId);
   const targetHub = getHubProfile(targetHubEntityId);
   if (!sourceHub || !targetHub) return false;
-  if (hubMirrorsEntity(sourceHub, targetHub.entityId) || hubMirrorsEntity(targetHub, sourceHub.entityId)) return true;
   const sourceRuntime = String(sourceHub.runtimeId || '')
     .trim()
     .toLowerCase();
   const targetRuntime = String(targetHub.runtimeId || '')
     .trim()
     .toLowerCase();
-  if (sourceRuntime && sourceRuntime === targetRuntime) return true;
-  const sourceBase = hubBaseName(sourceHub);
-  const targetBase = hubBaseName(targetHub);
-  return Boolean(sourceBase && sourceBase === targetBase);
+  return Boolean(sourceRuntime && sourceRuntime === targetRuntime);
 }
 function findHubProfileForJurisdiction(jurisdictionName: string): Profile | null {
   const normalized = String(jurisdictionName || '')
@@ -840,6 +815,8 @@ function buildCrossTargetOptions(
       ),
     ).sort(compareStableText);
     for (const targetHubEntityId of targetHubIds) {
+      const account = candidate.state.accounts.get(targetHubEntityId);
+      if (account && (account.status !== 'active' || account.activeDispute)) continue;
       const targetHubProfile = getHubProfile(targetHubEntityId);
       if (targetHubProfile?.metadata?.isHub !== true) continue;
       const hasTargetAccount = accountHubIds.some((id) => id.toLowerCase() === targetHubEntityId.toLowerCase());
@@ -1813,7 +1790,7 @@ function validateCrossSwapForm(
   }
   if (input.wantAmount <= 0n) return 'Amount to receive is too small for selected price.';
   if (input.notionalUsd < MIN_ORDER_NOTIONAL_USD) {
-    return `Minimum order size is ~$${MIN_ORDER_NOTIONAL_USD}.`;
+    return `Order value after rounding is $${input.notionalUsd.toFixed(6)}; minimum is $${MIN_ORDER_NOTIONAL_USD}. Increase the amount slightly.`;
   }
   if (input.giveAmount > input.availableGiveCapacity) {
     return `Insufficient source capacity: ${input.formattedAvailableGive} available.`;
@@ -2334,10 +2311,16 @@ function isDustOpenOfferForPanel(offer: SwapOfferLike): boolean {
   return isDustOpenOffer(offer, MIN_ORDER_NOTIONAL_USD, (tokenIdValue) => activeXlnFunctions?.getTokenInfo?.(tokenIdValue));
 }
 $: routeFilteredOpenOffers = (Array.isArray(activeOffers) ? activeOffers : []).filter((offer: SwapOfferLike) => {
-  if (orderRouteFilter === 'all') return true;
-  const isCross = Boolean(offer.crossJurisdiction);
-  return orderRouteFilter === 'cross' ? isCross : !isCross;
+  // Cross orders are Entity-owned routes; the committed route projection below owns their lifecycle display.
+  return !offer.crossJurisdiction;
 });
+$: crossOrders = [...(currentReplica?.state.crossJurisdictionSwaps?.values() ?? [])].filter(route =>
+  route.source.entityId.toLowerCase() === sourceEntityIdValue || route.target.counterpartyEntityId.toLowerCase() === sourceEntityIdValue,
+);
+function crossNetworkLabel(stackId: string): string {
+  const candidate = swapRuntimeView.localReplicas.find(entry => getReplicaJurisdictionRef(entry).toLowerCase() === stackId.toLowerCase());
+  return candidate ? getReplicaJurisdictionName(candidate) : normalizeJurisdictionDisplayName(stackId);
+}
 $: openOrders = [...(Array.isArray(routeFilteredOpenOffers) ? routeFilteredOpenOffers : [])].sort((a: SwapOfferLike, b: SwapOfferLike) => {
   const aDust = isDustOpenOfferForPanel(a);
   const bDust = isDustOpenOfferForPanel(b);
@@ -2875,9 +2858,11 @@ function useMarketPrice(): void {
   </div>
   <SwapOrderList
     bind:orderListTab
-    bind:orderRouteFilter
     bind:closedOrderStatusFilter
     {openOrders}
+    {crossOrders}
+    {sourceEntityIdValue}
+    {crossNetworkLabel}
     {closedOrderViews}
     {filteredClosedOrderViews}
     {totalPriceImprovementSummary}

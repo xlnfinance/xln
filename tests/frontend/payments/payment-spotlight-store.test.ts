@@ -28,3 +28,19 @@ test('clears a spotlight on owner switch or owner rollback', () => {
   expect(current).toBeNull();
   unsubscribe();
 });
+
+test('incoming payments do not open or replace a receipt without user action', () => {
+  const store = createPaymentSpotlightStore();
+  let receipt: PaymentSpotlight | null = null;
+  const unsubscribe = store.opened.subscribe(value => { receipt = value; });
+  show(store, OWNER_A, 10);
+  expect(receipt).toBeNull();
+  store.open();
+  expect(receipt?.ownerHeight).toBe(10);
+  show(store, OWNER_A, 11);
+  expect(receipt?.ownerHeight).toBe(10);
+  store.retainForOwner(OWNER_B, 11);
+  expect(receipt).toBeNull();
+  store.clear();
+  unsubscribe();
+});

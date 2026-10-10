@@ -1,7 +1,8 @@
+import { getAssetValueUsd } from '@xln/frontend/lib/components/Entity/assets/entity-asset-values';
 import { describe, expect, test } from 'bun:test';
 import { deriveDelta } from '../../../../core/account/utils';
 import type { Delta } from '../../../../core/types/account';
-import { accountNetBalance } from './balance';
+import { accountNetBalance } from '@xln/frontend/lib/utils/ui/accountBalance';
 
 const delta = (collateral: bigint, ondelta: bigint): Delta => ({
 	tokenId: 1,
@@ -47,4 +48,10 @@ describe('wallet ownership from the canonical Account perspective', () => {
 		expect(accountNetBalance(deriveDelta(value, true))).toBe(allocation);
 		expect(accountNetBalance(deriveDelta(value, false))).toBe(collateral - allocation);
 	});
+});
+
+
+test('USD totals retain the sign of term-loan liabilities', () => {
+  expect(getAssetValueUsd(-2_020_000n, { symbol: 'USDC', decimals: 6 })).toBe(-2.02);
+  expect(getAssetValueUsd(102_000_000n, { symbol: 'USDC', decimals: 6 }) + getAssetValueUsd(-2_020_000n, { symbol: 'USDC', decimals: 6 })).toBe(99.98);
 });

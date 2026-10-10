@@ -1,6 +1,5 @@
 import { broadcastHardResetRequest } from './activeTabLock';
 import { shutdownRuntimeResumeListener, vaultOperations } from '../../stores/vault/vaultStore';
-
 let activeResetPromise: Promise<void> | null = null;
 
 const RESET_TAB_SETTLE_MS = 300;

@@ -20,6 +20,16 @@ GDP attribution. The immediate contribution is reliable payments and recovery.
 
 ## Agreed release
 
+- Owner update 2026-10-10: production target is the existing `xln.finance`.
+  Egor signs Ethereum/TRON deployment and initial transactions himself.
+  External auditor sign-off is no longer mandatory; Codex performs engineering
+  review and must not label it independent external assurance. Financial,
+  recovery, native-chain and deployment/rollback gates remain mandatory.
+  Codex prepares releases; Egor approves promotion of the exact reviewed build.
+  Approval binds artifact hashes, production configuration and destination;
+  changing them requires a new review. Preparation is not rollout authorization.
+  BrainVault seed provisioning remains under design; no secret transfer is implied.
+
 - Confirmed 2026-10-07: the first mainnet networks are Ethereum and TRON,
   integrated into "Mass Navigator" (the owner's wording). Do not propose Base
   or ask again which networks to use. This does not block local fixes.

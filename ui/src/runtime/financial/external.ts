@@ -37,7 +37,9 @@ const normalize = (value: unknown): string => String(value || '').trim().toLower
 export async function readExternalWallet(entityId: string, signerId: string): Promise<ExternalWallet> {
 	const jadapter = await hostedJAdapter(entityId, signerId);
 	const registry = await jadapter.getTokenRegistry();
-	const tokens = registry.filter(token => isAddress(token.address));
+	// readWalletSnapshot reads ERC-20 balanceOf/allowance. ERC-1155 company
+	// classes share one provider address and belong to the Ownership view.
+	const tokens = registry.filter(token => token.tokenType === 0 && isAddress(token.address));
 	const depository = normalize(jadapter.addresses.depository);
 	const headBlockNumber = Number(await (jadapter.getCurrentBlockNumber?.() ?? jadapter.provider.getBlockNumber()));
 	const snapshot = await jadapter.readWalletSnapshot({
@@ -75,16 +77,18 @@ const GAS_FAUCET_ETH = '0.1';
  */
 export async function requestFaucet(
 	kind: FaucetKind,
-	input: { entityId: string; signerId: string; runtimeId: string; hubEntityId?: string; tokenId: number; tokenSymbol: string; amount: string },
+	input: { entityId: string; signerId: string; runtimeId: string; jurisdiction: string; hubEntityId?: string; tokenId: number; tokenSymbol: string; amount: string },
 ): Promise<void> {
+	const jurisdiction = input.jurisdiction;
+	if ((kind === 'erc20' || kind === 'gas') && !jurisdiction) throw new Error('Select a network before requesting test funds.');
 	switch (kind) {
 		case 'erc20':
-			await postJson('/api/faucet/erc20', { userAddress: input.signerId, tokenSymbol: input.tokenSymbol, amount: input.amount });
+			await postJson('/api/faucet/erc20', { userAddress: input.signerId, tokenSymbol: input.tokenSymbol, amount: input.amount, jurisdiction });
 			return;
 		case 'gas':
 			// Gas is ETH, not the token amount in the form; the public faucet caps gas at 0.1 ETH (XLN_FAUCET_MAX_GAS_AMOUNT),
 			// the same amount the SvelteKit wallet asks for.
-			await postJson('/api/faucet/gas', { userAddress: input.signerId, amount: GAS_FAUCET_ETH });
+			await postJson('/api/faucet/gas', { userAddress: input.signerId, amount: GAS_FAUCET_ETH, jurisdiction });
 			return;
 		case 'reserve':
 			await postJson('/api/faucet/reserve', { userEntityId: input.entityId, tokenId: input.tokenId, tokenSymbol: input.tokenSymbol, amount: input.amount });

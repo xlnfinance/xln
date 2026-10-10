@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { explainWalletError } from '@xln/frontend/lib/utils/ui/walletError';
 import type { AccountState, RuntimeAdapterEntitySummary } from '@xln/core/api/public/runtime-module';
 import { getJurisdictionStackId } from '@xln/core/api/public/runtime-module';
-import { ReceiveCapacity } from '../components/ReceiveCapacity';
 import { DeltaBar, DeltaCaption } from '../components/Bars';
 import { Orderbook, type BookSide } from '../components/Orderbook';
 import { quoteAtBestLevel, quoteForBase, swapMinimumError, useOrderbook, type BookLevel } from '../runtime/financial/orderbook';
@@ -12,7 +12,7 @@ import { useApp } from '../runtime/store';
 import { switchActiveEntity } from '../runtime/entities';
 import { peekXLN } from '../runtime/xln-loader';
 import { sendEntityTxs } from '../runtime/tx';
-import { hubTakerFeeBps, jurisdictionRef, liveCrossOrders, openSwapReceiveAccount, planSwap, readAccountState, submitSwapPlan } from '../runtime/financial/swap';
+import { compatibleSwapHubs, hubTakerFeeBps, jurisdictionRef, liveCrossOrders, planSwap, readAccountState, submitSwapPlan } from '../runtime/financial/swap';
 import { amountInputText, formatMoney, getTokenMeta, parseAmount, plainAmount} from '../runtime/format';
 import { openSwapOffers, useWallet } from '../runtime/views';
 import { counterpartyFeePolicy } from '../runtime/financial/manage';
@@ -56,15 +56,14 @@ export function Swap() {
 	const targetHubs = useMemo(
 		() =>
 			wallet.summaries.filter(
-				summary => summary.isHub && targetEntity && (summary.jurisdiction?.name || '') === (targetEntity.jurisdiction?.name || '') && normalizeId(summary.entityId) !== normalizeId(targetEntity.entityId),
+				summary => summary.isHub && targetEntity && hub && compatibleSwapHubs(hub.counterpartyId, summary.entityId) && (summary.jurisdiction?.name || '') === (targetEntity.jurisdiction?.name || '') && normalizeId(summary.entityId) !== normalizeId(targetEntity.entityId),
 			),
-		[wallet.summaries, targetEntity],
+		[wallet.summaries, targetEntity, hub],
 	);
 	const [targetHubId, setTargetHubId] = useState('');
 	const targetHub = targetHubs.find(summary => normalizeId(summary.entityId) === targetHubId) ?? targetHubs[0] ?? null;
 	const [targetAccount, setTargetAccount] = useState<AccountState | null | undefined>(undefined);
 	const [targetAccountError, setTargetAccountError] = useState('');
-	const [openingTarget, setOpeningTarget] = useState(false);
 	useEffect(() => { setTargetAccount(undefined); setTargetAccountError(''); }, [mode, targetEntity?.entityId, targetHub?.entityId]);
 
 	useEffect(() => {
@@ -84,7 +83,7 @@ export function Swap() {
 		return () => {
 			cancelled = true;
 		};
-	}, [mode, targetEntity, targetHub, wallet.frameHeight, openingTarget]);
+	}, [mode, targetEntity, targetHub, wallet.frameHeight]);
 
 	const giveMeta = getTokenMeta(giveTokenId);
 	const wantMeta = getTokenMeta(wantTokenId);
@@ -153,9 +152,9 @@ export function Swap() {
 			return null;
 		}
 	}, [giveText, giveMeta.decimals]);
-	// No price typed yet: quote at the best resting level, so the ticket never sits at 0.00 while the book is live.
+	// This book contains same-network offers only; its price cannot quote a cross-network venue.
 	const impliedWantText = useMemo(() => {
-		if (!book || wantText.trim() || !giveText.trim()) return '';
+		if (mode === 'cross' || !book || wantText.trim() || !giveText.trim()) return '';
 		let give: bigint;
 		try {
 			give = parseAmount(giveText, giveMeta.decimals);
@@ -167,7 +166,7 @@ export function Swap() {
 		const quote = getTokenMeta(book.quoteTokenId);
 		const quoteAtLevel = quoteAtBestLevel(book, giveTokenId, wantTokenId, give, base.decimals, quote.decimals);
 		return quoteAtLevel ? plainAmount(quoteAtLevel.want, wantMeta.decimals) : '';
-	}, [book, wantText, giveText, giveTokenId, wantTokenId, giveMeta.decimals, wantMeta.decimals]);
+	}, [mode, book, wantText, giveText, giveTokenId, wantTokenId, giveMeta.decimals, wantMeta.decimals]);
 	const parsedWant = useMemo(() => {
 		try {
 			const value = parseAmount(wantText || impliedWantText || '0', wantMeta.decimals);
@@ -217,15 +216,6 @@ export function Swap() {
 	const receivingFeePolicy = receivingAccount && receivingOwnerId && receivingHubId && xln
 		? counterpartyFeePolicy({ state: receivingAccount }, xln.isLeftEntity(receivingOwnerId, receivingHubId), wantTokenId)
 		: null;
-	const openTarget = async () => {
-		if (!targetEntity?.signerId || !targetHub || openingTarget) return;
-		setOpeningTarget(true);
-		try {
-			await openSwapReceiveAccount({ entityId: targetEntity.entityId, signerId: targetEntity.signerId, hubEntityId: targetHub.entityId }, wantTokenId, wallet.summaries);
-			toast('Account opening requested with zero credit. Prepare incoming capacity after confirmation.');
-		} catch (error) { toast(error instanceof Error ? error.message : String(error), 'danger'); }
-		finally { setOpeningTarget(false); }
-	};
 
 	const flip = (): void => {
 		setGiveTokenId(wantTokenId);
@@ -235,7 +225,7 @@ export function Swap() {
 	};
 
 	const place = async (): Promise<void> => {
-		if (!wallet.frame || !hub || !prepared || !wallet.signerId || !inboundReady) return;
+		if (!wallet.frame || !hub || !prepared || !wallet.signerId) return;
 		if (mode === 'same' && swapMinimumError(book, giveTokenId, prepared)) return;
 		setSubmitting(true);
 		try {
@@ -277,8 +267,8 @@ export function Swap() {
 			await submitSwapPlan(plan);
 			toast(
 				mode === 'cross'
-					? `Cross-network swap submitted: ${formatMoney(prepared.effectiveGive, giveMeta.decimals)} ${giveMeta.symbol} for ${formatMoney(prepared.effectiveWant, wantMeta.decimals)} ${wantMeta.symbol}`
-					: `Order placed: ${formatMoney(prepared.effectiveGive, giveMeta.decimals)} ${giveMeta.symbol} for ${formatMoney(prepared.effectiveWant, wantMeta.decimals)} ${wantMeta.symbol}`,
+					? `Cross-network swap submitted: ${plainAmount(prepared.effectiveGive, giveMeta.decimals)} ${giveMeta.symbol} for ${plainAmount(prepared.effectiveWant, wantMeta.decimals)} ${wantMeta.symbol}`
+					: `Order placed: ${plainAmount(prepared.effectiveGive, giveMeta.decimals)} ${giveMeta.symbol} for ${plainAmount(prepared.effectiveWant, wantMeta.decimals)} ${wantMeta.symbol}`,
 			);
 			setGiveText('');
 			setWantText('');
@@ -326,8 +316,9 @@ export function Swap() {
 
 	const mine = openSwapOffers(wallet.frame, wallet.entityId).filter(offer => offer.mine);
 	const crossOrders = liveCrossOrders(wallet.frame, wallet.entityId);
+	const networkLabel = (stack: string): string => wallet.summaries.find(summary => summary.jurisdiction && getJurisdictionStackId(summary.jurisdiction) === stack)?.jurisdiction?.name || stack;
 	const minimumError = mode === 'same' && prepared ? swapMinimumError(book, giveTokenId, prepared) : null;
-	const disabledReason = minimumError ?? (!hub ? 'No hub account to swap through' : sameToken ? 'Choose two different tokens' : overCapacity ? 'Exceeds what you can send' : !inboundReady ? `One step first: allow ${(mode === 'cross' ? targetHub?.label : hub.label) ?? 'the hub'} to owe you ${wantMeta.symbol} (the panel above, one tap)` : null);
+	const disabledReason = (mode === 'cross' ? targetAccountError || (!targetEntity || !targetHub ? 'Choose an available destination on the same hub runtime' : null) : null) ?? minimumError ?? (!hub ? 'No hub account to swap through' : sameToken ? 'Choose two different tokens' : overCapacity ? 'Exceeds what you can send' : null);
 
 	return (
 		<div className="screen fade-in">
@@ -339,10 +330,10 @@ export function Swap() {
 					Swap
 				</span>
 				<span className="segc">
-					<button type="button" className={mode === 'same' ? 'active' : ''} onClick={() => setMode('same')}>
+					<button type="button" className={mode === 'same' ? 'active' : ''} onClick={() => { if (mode !== 'same') setWantText(''); setMode('same'); }}>
 						Same network
 					</button>
-					<button type="button" className={mode === 'cross' ? 'active' : ''} onClick={() => setMode('cross')} disabled={otherEntities.length === 0}>
+					<button type="button" data-testid="swap-cross-mode" aria-pressed={mode === 'cross'} className={mode === 'cross' ? 'active' : ''} onClick={() => { if (mode !== 'cross') setWantText(''); setMode('cross'); }} disabled={otherEntities.length === 0}>
 						Across networks
 					</button>
 				</span>
@@ -370,7 +361,7 @@ export function Swap() {
 					</div>
 					<div className="field">
 						<div className="field-head">
-							<span>You receive</span>
+							<span>{mode === 'cross' ? 'Minimum to receive' : 'You receive'}</span>
 							<span>{mode === 'cross' && targetEntity ? `into your ${targetEntity.jurisdiction?.name || 'other'} account` : hub ? `from ${hub.label}` : ''}</span>
 						</div>
 						<div className="field-row">
@@ -390,9 +381,11 @@ export function Swap() {
 								{...(mode === 'cross' && targetEntity?.jurisdiction?.name ? { chip: targetEntity.jurisdiction.name } : {})}
 							/>
 						</div>
-						{giveText.trim() && !wantText.trim() ? (
-							<div className="note" style={{ marginTop: 8 }}>
-								{impliedWantText
+						{mode === 'cross' || (giveText.trim() && !wantText.trim()) ? (
+							<div className="note" style={{ marginTop: 8 }} data-testid="swap-quote-note">
+								{mode === 'cross'
+									? 'Enter the minimum amount you want on the destination network. This is a limit order, not a live cross-network quote. It may remain open until matching liquidity is available.'
+									: impliedWantText
 									? `Quoted at the best price in the book right now. Type your own amount to set a limit; the order then rests on your account until ${hub?.label ?? 'the hub'} fills it.`
 									: `Set the amount you want. The order rests on your account at that price until ${hub?.label ?? 'the hub'} fills it.`}
 							</div>
@@ -411,6 +404,7 @@ export function Swap() {
 
 					{mode === 'cross' && (
 						<div className="card tight">
+							<p className="note" data-testid="cross-swap-safety">Stay online for this cross-network swap: this device relays the secrets needed to complete it. Use Clear to settle filled amounts, or Cancel rest to settle fills and release the unfilled part. Check the destination balance and final status; submission alone does not mean delivery.</p>
 							<div className="kv">
 								<span className="k">Your other account</span>
 								<span className="v">
@@ -486,14 +480,8 @@ export function Swap() {
 						</div>
 					)}
 
-					{targetAccountError && mode === 'cross' ? <p className="note" role="alert">{targetAccountError}</p> : null}
-					{mode === 'cross' && targetAccount === null && targetEntity && targetHub ? <button type="button" className="btn" disabled={openingTarget} onClick={() => void openTarget()}>{openingTarget ? 'Opening…' : `Open incoming account with ${targetHub.label}`}</button> : null}
-					{mode === 'same' && hub && receiveRequired > 0n ? <ReceiveCapacity account={hub.doc.state}
-						ownerEntityId={wallet.entityId} signerId={wallet.signerId} counterpartyEntityId={hub.counterpartyId} accountLabel={hub.label}
-						jurisdiction={wallet.jurisdiction} tokenId={wantTokenId} requiredAmount={receiveRequired} disabled={submitting || hub.disputed} /> : null}
-					{mode === 'cross' && targetAccount && targetEntity && targetHub && receiveRequired > 0n ? <ReceiveCapacity account={targetAccount}
-						ownerEntityId={targetEntity.entityId} signerId={targetEntity.signerId ?? ''} counterpartyEntityId={targetHub.entityId} accountLabel={targetHub.label}
-						jurisdiction={targetEntity.jurisdiction?.name ?? ''} tokenId={wantTokenId} requiredAmount={receiveRequired} disabled={submitting} /> : null}
+					{targetAccountError && mode === 'cross' ? <p className="note" role="alert" style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{explainWalletError(targetAccountError)}</p> : null}
+					{!inboundReady && receiveRequired > 0n ? <p className="note">Placing this order also prepares incoming capacity with {receivingHubLabel}. The hub may owe you the received amount until it is collateralized.</p> : null}
 					{mode === 'cross' && targetAccount && inboundReady && targetEntity && targetHub && (
 						<div className="check">
 							<span className="ck">
@@ -561,12 +549,12 @@ export function Swap() {
 											</span>
 											<span className="tx">
 												<span className="t num">
-													{formatMoney(order.sourceAmount, sMeta.decimals, 4)} {sMeta.symbol} on {order.sourceJurisdiction || 'source'} for{' '}
-													{formatMoney(order.targetAmount, tMeta.decimals, 4)} {tMeta.symbol} on {order.targetJurisdiction || 'target'}
+													{plainAmount(order.sourceAmount, sMeta.decimals)} {sMeta.symbol} on {networkLabel(order.sourceJurisdiction) || 'source'} for{' '}
+													{plainAmount(order.targetAmount, tMeta.decimals)} {tMeta.symbol} on {networkLabel(order.targetJurisdiction) || 'target'}
 												</span>
 												<span className="s">
 													{order.filledSourceAmount > 0n
-														? `filled ${formatMoney(order.filledSourceAmount, sMeta.decimals, 4)} ${sMeta.symbol} so far`
+														? `filled ${plainAmount(order.filledSourceAmount, sMeta.decimals)} ${sMeta.symbol} so far`
 														: 'nothing filled yet'}
 												</span>
 											</span>
@@ -625,7 +613,7 @@ export function Swap() {
 											</span>
 											<span className="tx">
 												<span className="t num">
-													{formatMoney(offer.giveAmount, gMeta.decimals, 4)} {gMeta.symbol} for {formatMoney(offer.wantAmount, wMeta.decimals, 4)} {wMeta.symbol}
+													{plainAmount(offer.giveAmount, gMeta.decimals)} {gMeta.symbol} for {plainAmount(offer.wantAmount, wMeta.decimals)} {wMeta.symbol}
 												</span>
 												<span className="s">
 													with {wallet.names.get(offer.counterpartyId) || 'hub'} · height {offer.createdHeight}
@@ -666,18 +654,18 @@ export function Swap() {
 								<div className="ev">
 									<div className="t">1 · {wallet.jurisdiction || 'here'}</div>
 									<div className="s">
-										You lock {prepared ? formatMoney(prepared.effectiveGive, giveMeta.decimals) : '…'} {giveMeta.symbol} with {hub?.label ?? 'the hub'}
+										You lock {prepared ? plainAmount(prepared.effectiveGive, giveMeta.decimals) : '…'} {giveMeta.symbol} with {hub?.label ?? 'the hub'}
 									</div>
 								</div>
 								<div className="ev">
 									<div className="t">2 · {targetEntity?.jurisdiction?.name || 'there'}</div>
 									<div className="s">
-										{targetHub?.label ?? 'The hub'} pays {prepared ? formatMoney(prepared.effectiveWant, wantMeta.decimals) : '…'} {wantMeta.symbol} into your account there
+										{targetHub?.label ?? 'The hub'} pays {prepared ? plainAmount(prepared.effectiveWant, wantMeta.decimals) : '…'} {wantMeta.symbol} into your account there
 									</div>
 								</div>
 								<div className="ev">
 									<div className="t">Clear</div>
-									<div className="s">One secret releases both legs. If it never appears, both unlock.</div>
+									<div className="s">A shared secret links both legs. Stay online and use the order controls to clear fills or cancel the remainder; verify the final balances.</div>
 								</div>
 							</div>
 						</div>

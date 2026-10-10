@@ -1,5 +1,57 @@
 # Autonomous xln work
 
+Current owner direction — 2026-10-10:
+- Checkpoint all current source changes; tutorial subagents are stopped. No push
+  or public deployment is implied. Both wallets, lending and companies are in scope.
+- Follow [the execution loop](improvement-loop.md); the active release queue is
+  [todo.md](../todo.md). Older process handles and pending statuses below are history.
+- React tutorial isolated production run: 8/8 passed, 0 skipped, 57.6s browser
+  phase. Svelte tutorial/cross-delivery and changed recovery/lending/dispute E2Es
+  still require fresh verification. Do not call the entire tutorial ideal.
+- XLNC mixed defensive exit is a known blocker: 17,388,717 execution gas versus
+  the selected 6,000,000 block budget. Reproduce and measure the first expensive
+  call before changing code; preserve proof bounds and the 10-fold gas decision.
+
+
+Recovery timeout follow-up — 2026-10-09, base96d361e04 plus local edits:
+- Original unchanged focused test passed1/1 in3.23s,8 assertions:
+  .logs/mainnet-20261007/live-head-focused-20261009.log. Full-suite failure was
+  Bun's default5s wall budget; no digest mismatch observed. Set this one signed
+  four-entity durable replay integration test to the standard30s budget, keeping
+  every semantic assertion. Related recovery suite50/50,262 assertions,28.13s:
+  .logs/mainnet-20261007/live-head-related-20261009.log.
+- Dev restored successfully after previous run, then gracefully stopped again
+  (PID92696) for the full rerun; owner authorization persists.
+- ACTIVE full unit: exec handle95541, shared stand reason full-unit-recovery-budget,
+  timeout1200s. Log .logs/mainnet-20261007/unit-recovery-budget-20261009.log.
+  Poll existing handle; do not restart. No full-green claim yet. Next run
+  bun run check after this exits, then remaining current replay/live/UI gates.
+  Pending local owned changes: dev launcher lock, dev startup hardening test,
+  live-head-account-restore test timeout, this plan. Other edits belong to peers.
+
+Latest state — 2026-10-09, BrainVault site commit96d361e04:
+- Owner authorized stopping/restarting local dev. Prior PID35447 blocker is
+  resolved; isolated shutdown test passed1/1 (shutdown-approved-20261009.log).
+- A different task restarted dev during the next full unit run. Pending local
+  fix in scripts/dev/run-dev.ts makes dev hold the existing shared stand lock
+  and validates inherited tokens. Startup/shutdown regression28/28 passed in
+  .logs/mainnet-20261007/dev-stand-exclusion.log. Do not stage unrelated UI edits.
+- Full unit with this fix:4971 pass,1 fail,228620 assertions,803 files,348.09s.
+  Shutdown passed. First remaining failure: live-head-account-restore.test.ts,
+  three pinned hub accounts, Bun default5000ms timeout. No semantic mismatch
+  observed. Reproduce focused before changing its wall budget. Log:
+  .logs/mainnet-20261007/unit-exclusive-dev.log. Full green NOT claimed.
+- BrainVault site:10 languages,45 keys each;2 tests/532 assertions and31 site
+  gates passed. Agent browser evidence20 desktop/mobile language combinations.
+  .logs/brainvault-product-20261009/ contains manifest, screenshots, logs and
+  static-site.tar.gz. Local preview127.0.0.1:5197; not published.
+- BrainVault package check87 pass/4 fail: existing source-manifest mismatch,
+  stale documented wallet line count, nested package check, GPU folder width.
+  Do not modify frozen hashes to hide these failures. npm latest2.1.0 vs local2.2.0.
+  Hosting/project and explicit static-site release permission asked, pending.
+- Next: focused live-head restore reproduction, then current full gates;
+  BrainVault publication only after target and release authorization are known.
+
 Full unit pass attempt — 2026-10-09, base6797c86dd plus concurrent UI work:
 - Strict semantic completeness enabled. Root suite4965 pass,3 fail,0 skips,
   228544 assertions,803 files,322.04s. Log .logs/mainnet-20261007/unit-20261009.log.
@@ -241,8 +293,13 @@ Owner profile: [owner-profile.md](owner-profile.md). Follow the existing
 Active goal: a verified mainnet release candidate covering seven required
 financial/recovery journeys on TS and native Rust; SvelteKit 3 primary UI,
 React additional; lending excluded. Prepare deployment and rollback evidence;
-Networks are confirmed: Ethereum and TRON. Deployment addresses and signing
-authority are not yet bound to a reviewed release; they do not block local work.
+Networks are confirmed: Ethereum and TRON. Owner update 2026-10-10: target
+`xln.finance`; Egor signs deployment himself. External auditor sign-off is
+optional; Codex engineering review and existing technical gates remain required.
+Codex prepares the release; Egor approves activation of the exact build and
+configuration. This decision does not approve any current artifact or rollout.
+Contract addresses and service seed provisioning are not yet bound to a reviewed
+release; they do not block local work.
 
 Current production boundary, 2026-10-08 09:34 UTC:
 - Rust root13 isolated Instant-funded custody case reaches derive/openAccount,

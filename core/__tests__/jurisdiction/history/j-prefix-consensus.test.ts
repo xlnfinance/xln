@@ -22,6 +22,7 @@ import {
   assertFrameJPrefix,
   buildJPrefixCertificate,
   buildLocalJPrefixAttestation,
+  getLocalJPrefixAttestableHeight,
   hashJPrefixAttestation,
   mergeJPrefixAttestations,
   restoreJPrefixRound,
@@ -213,6 +214,19 @@ const buildOrdinaryProposal = async (
 };
 
 describe('validator J-prefix consensus', () => {
+  test('numbered bootstrap waits for registration beyond the first RPC history chunk', () => {
+    const state = makeState(['0x' + '11'.repeat(20)]);
+    state.config.jurisdiction!.registrationBlock = 4098;
+    state.config.jurisdiction!.entityProviderDeploymentBlock = 11;
+    delete state.jHistoryFinality;
+    expect(getLocalJPrefixAttestableHeight(state, observedThrough(2058, false))).toBeNull();
+    expect(getLocalJPrefixAttestableHeight(state, observedThrough(4097, false))).toBeNull();
+    expect(getLocalJPrefixAttestableHeight(state, observedThrough(4098, false))).toBe(4098);
+    // Lazy entities still advance the same complete prefix without a registration prerequisite.
+    delete state.config.jurisdiction!.registrationBlock;
+    expect(getLocalJPrefixAttestableHeight(state, observedThrough(2058, false))).toBe(2058);
+  });
+
   test('locally derives a pending-event prefix before finalizing a lazy single-validator collective action', async () => {
     const env = createEmptyEnv('j-prefix-on-demand-lazy-event');
     env.state.timestamp = 2_000;

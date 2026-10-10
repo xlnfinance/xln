@@ -1,5 +1,5 @@
 import { Icon, type IconName } from '../Icons';
-import { formatMoney, getTokenMeta } from '../../runtime/format';
+import { formatAmount, getTokenMeta } from '../../runtime/format';
 import { displayEntityName } from '../../runtime/views';
 import type { Movement } from '../../runtime/financial/movements';
 export const TONE_CLASS: Record<Movement['tone'], string> = {
@@ -30,10 +30,10 @@ export function formatMovementAmount(movement: Movement): string | null {
           ? '+'
           : ''
       : '';
-  const primary = `${sign}${formatMoney(movement.amount, meta.decimals)} ${meta.symbol}`;
+  const primary = `${sign}${formatAmount(movement.amount, meta.decimals, meta.decimals)} ${meta.symbol}`;
   if (movement.kind !== 'swap' || movement.quoteAmount == null || movement.quoteTokenId == null) return primary;
   const quote = getTokenMeta(movement.quoteTokenId);
-  return `${primary} → ${formatMoney(movement.quoteAmount, quote.decimals)} ${quote.symbol}`;
+  return `${primary} → ${formatAmount(movement.quoteAmount, quote.decimals, quote.decimals)} ${quote.symbol}`;
 }
 
 /** "to Meridian Desk via Hub One" / "from Hub One" / "with Hub One". */

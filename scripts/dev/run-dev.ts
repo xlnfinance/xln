@@ -11,6 +11,7 @@ import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { spawn, type ChildProcess } from 'node:child_process';
 
 import { stopProcessGroup } from '../../core/scripts/e2e/runners/process-group';
+import { acquireStandLock, releaseStandLock, readStandLockHolder, standLockRoot, standLockCapacity, STAND_LOCK_TOKEN_ENV, type StandLockGrant } from '../../tools/stand-lock';
 
 export const DEV_SINGLETON_PORT = 17_999;
 export const DEV_LAUNCHER_SHUTDOWN_TIMEOUT_MS = 90_000;
@@ -234,10 +235,23 @@ const runDev = async (): Promise<number> => {
     if (process.argv.length === 2 && isDevSingletonConflict(error)) return reportRunningDev();
     throw error;
   }
+  let stand: StandLockGrant | null = null;
   try {
+    // Dev owns the same chain ports as recovery tests. A separate launch must
+    // not enter an already reserved stand; only its holder may start children.
+    const inherited = process.env[STAND_LOCK_TOKEN_ENV];
+    if (inherited) {
+      const root = standLockRoot();
+      if (!Array.from({ length: standLockCapacity() }, (_, slot) => readStandLockHolder(root, slot))
+        .some(holder => holder?.token === inherited)) throw new Error('DEV_STAND_TOKEN_INVALID');
+    } else {
+      stand = await acquireStandLock({ reason: 'dev', waitMs: 0 });
+      process.env[STAND_LOCK_TOKEN_ENV] = stand.token;
+    }
     return await runDevCommands(commands, environmentForMode(mode, lease));
   } finally {
     lease.release();
+    if (stand) releaseStandLock(stand);
   }
 };
 

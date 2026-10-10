@@ -336,8 +336,7 @@ fn lending_entry(value: &AbiValue) -> Result<(String, LendingIntentKind), Proces
         0 => LendingIntentKind::Fund,
         1 => LendingIntentKind::Borrow,
         2 => LendingIntentKind::Repay,
-        3 => LendingIntentKind::CreditGrant,
-        4 => LendingIntentKind::CreditRevoke,
+        7 => LendingIntentKind::Disburse,
         5 => LendingIntentKind::CloseRequest,
         6 => LendingIntentKind::ClosePayout,
         value => {

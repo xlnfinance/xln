@@ -33,6 +33,7 @@
   } from '../payment-routing';
   import {
     emptyPaymentPanelView,
+    paymentRecipientProfiles,
     type PaymentPanelView,
     type PaymentReplicaView,
   } from './payment-panel-view';
@@ -148,7 +149,10 @@
     });
   }
 
-  $: knownRecipientEntities = paymentView.knownRecipientEntities;
+  $: recipientProfiles = paymentRecipientProfiles(runtimeProfiles, entityId);
+  $: knownRecipientEntities = paymentView.knownRecipientEntities.filter(id =>
+    recipientProfiles.some(profile => normalizeEntityId(profile.entityId) === normalizeEntityId(id)),
+  );
 
   function mergeRuntimeProfiles(profiles: GossipProfile[]): void {
     const byEntityId = new Map(runtimeProfiles.map((profile) => [normalizeEntityId(profile.entityId), profile]));
@@ -278,6 +282,15 @@
       requestAutoFindRoutes();
       return;
     }
+    // Names and partial IDs are picker searches, not malformed invoices.
+    const query = trimmed.toLowerCase();
+    if (recipientProfiles.some(profile => profile.name.toLowerCase().includes(query)
+      || profile.entityId.toLowerCase().includes(query))) {
+      discardImportedInvoiceIntent();
+      invoiceError = '';
+      targetEntityId = '';
+      return;
+    }
     try {
       const parsed = parseXlnInvoice(trimmed);
       applyInvoiceIntent(parsed);
@@ -355,7 +368,8 @@
     for (const [replicaKey, replica] of currentReplicas.entries()) {
       const [replicaEntityId] = replicaKey.split(':');
       if (normalizeEntityId(replicaEntityId) !== selfNorm) continue;
-      for (const account of replica.state.accounts.values()) {
+      for (const [counterpartyId, account] of replica.state.accounts) {
+        if (paymentView.blockedCounterpartyIds.has(normalizeEntityId(counterpartyId))) continue;
         for (const [deltaTokenId, delta] of account.deltas.entries()) {
           if (Number(deltaTokenId) !== tokenIdValue) continue;
           const isLeft = normalizeEntityId(account.leftEntity) === selfNorm;
@@ -371,9 +385,17 @@
     const maxAmount = computeLocalPayMax(tokenId);
     if (maxAmount <= 0n) return;
     amount = formatTokenInputValue(tokenId, maxAmount);
+    resetQuotedRoutes();
   }
 
-  $: payMaxAmount = computeLocalPayMax(tokenId);
+  $: {
+    // Svelte cannot see reactive inputs read inside computeLocalPayMax.
+    currentReplicas;
+    entityId;
+    activeXlnFunctions;
+    paymentView.blockedCounterpartyIds;
+    payMaxAmount = computeLocalPayMax(tokenId);
+  }
 
   function isRouteableIntermediary(entity: string): boolean {
     // Routeability is a transport/security property, not a display-metadata property.
@@ -1012,26 +1034,12 @@
   }
 
   async function payUsingCurrentIntent(): Promise<void> {
-    if (sendingPayment || findingRoutes) return;
+    if (sendingPayment || findingRoutes || !hasSelectedRoute()) return;
     const t0 = performance.now();
-    let result: SendPaymentResult;
-    if (hasSelectedRoute()) {
-      result = await sendPayment();
-    } else {
-      result = await payNowCheapestTracked();
-    }
+    const result = await sendPayment();
     if (result.queued) {
       flashPaymentSubmitted(Math.round(performance.now() - t0));
     }
-  }
-
-  async function payNowCheapestTracked(): Promise<SendPaymentResult> {
-    if (sendingPayment || findingRoutes) return { queued: false };
-    if (isSelfRecipient) return { queued: false };
-    await findRoutes();
-    if (routes.length === 0) return { queued: false };
-    selectedRouteIndex = 0;
-    return await sendPayment();
   }
 
   async function sendPayment(): Promise<SendPaymentResult> {
@@ -1153,6 +1161,8 @@
   $: canPayNow =
     !!targetEntityId &&
     !!amount &&
+    selectedRouteIndex >= 0 &&
+    Boolean(routes[selectedRouteIndex]) &&
     activeIsLive &&
     !findingRoutes &&
     !sendingPayment &&
@@ -1204,7 +1214,7 @@
           value={targetEntityId}
           rawTextOverride={invoiceValue}
           entities={knownRecipientEntities}
-          profiles={runtimeProfiles}
+          profiles={recipientProfiles}
           excludeId={entityId}
           preferredId=""
           testId="payment-invoice"
@@ -1392,6 +1402,9 @@
 
   <!-- ── CTA ── -->
   <div class="pay-cta">
+    {#if !routes.length && targetEntityId && amount && !findingRoutes}
+      <p class="pay-hint" data-testid="payment-quote-required">Find routes to review the fee before paying.</p>
+    {/if}
     <button
       class="btn-pay"
       class:success={paymentSubmitted}

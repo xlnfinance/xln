@@ -1,5 +1,6 @@
 <script lang="ts">
   import WalletPasswordForm from './WalletPasswordForm.svelte';
+  import { explainWalletError } from '#lib/utils/ui/walletError.ts';
   import { hasPasswordVault, savePasswordVault } from '#lib/security/passwordVault.ts';
   let passwordSetupRuntimeId: string | null = null;
   let pendingPasswordOpen: (() => Promise<boolean>) | null = null;
@@ -670,6 +671,7 @@
 
   function workerErrorMessage(err: unknown): string {
     if (err instanceof Error) return err.message;
+    if (err instanceof Event && !('message' in err)) return explainWalletError('BRAINVAULT_WORKER_LOAD_FAILED');
     if (err && typeof err === 'object' && 'message' in err) {
       return String((err as { message?: unknown }).message ?? 'Worker failed');
     }
@@ -1492,7 +1494,9 @@
               : inputMode === 'brainvault'
               ? 'Create xln wallet'
               : 'Create or restore from seed'}</h1>
-            <p>{rehearsalMode !== null
+            <p>{unlockRuntimeId
+              ? 'Enter the original vault name and secret, or recovery phrase, to reopen your saved wallet.'
+              : rehearsalMode !== null
               ? 'Re-enter the same recovery inputs. Only the public wallet fingerprint was kept from the first run.'
               : inputMode === 'brainvault'
               ? 'Your name and private secret recreate the same wallet. No backup phrase is required.'
@@ -1791,7 +1795,9 @@
           disabled={!canDerive}
           on:click={startDerivation}
         >
-          {rehearsalMode !== null
+          {unlockRuntimeId
+            ? 'Unlock wallet'
+            : rehearsalMode !== null
             ? 'Verify recovery'
             : inputMode === 'brainvault'
               ? derivesBrainVaultOnNode ? 'Derive on node' : 'Derive wallet'

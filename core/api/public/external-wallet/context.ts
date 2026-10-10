@@ -1,9 +1,9 @@
 import type { JAdapter, JTokenInfo } from '../../../jurisdiction/adapter/types';
 
 export interface ExternalWalletApiContext {
-  getJAdapter(entityId?: string): JAdapter | null;
+  getJAdapter(entityId?: string, jurisdiction?: string): JAdapter | null;
   getRuntimeId(): string;
-  getTokenCatalog(entityId?: string): Promise<JTokenInfo[]>;
+  getTokenCatalog(entityId?: string, jurisdiction?: string): Promise<JTokenInfo[]>;
   jsonHeaders: Record<string, string>;
   faucetSeed: string;
   faucetSignerLabel: string;
@@ -16,5 +16,5 @@ export interface ExternalWalletApiContext {
     reason: string;
     details: Record<string, unknown>;
   }): void;
-  fundBrowserVmWallet(address: string, amount: bigint, tokenSymbol?: string): Promise<boolean>;
+  fundBrowserVmWallet(address: string, amount: bigint, tokenSymbol: string | undefined, adapter: JAdapter): Promise<boolean>;
 }

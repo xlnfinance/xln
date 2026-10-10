@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 
 import {
   buildPaymentPanelView,
+  paymentRecipientProfiles,
   buildPaymentPanelViewFromRuntimeView,
 } from '../../../frontend/src/lib/components/Entity/payments/payment-panel-view';
 import { hasCertifiedEntityEncryptionKey } from '../../../frontend/src/lib/components/Entity/payment-routing';
@@ -226,4 +227,20 @@ test('payment gossip refresh is owned by runtime store operation', () => {
   expect(source).toContain('xln?.refreshGossip?.(env)');
   expect(source).not.toContain("if (!env) throw new Error('Runtime env is not loaded')");
   expect(source).toContain('export function sendRuntimeDebugEvent');
+});
+
+
+test('payment suggestions exclude another chain or Depository even when the hub names match', () => {
+  const jurisdiction = { name: 'Testnet', chainId: 31337, depositoryAddress: `0x${'ab'.repeat(20)}` };
+  const view = buildPaymentPanelViewFromRuntimeView({ entityId: SOURCE, frame: {
+    entities: [
+      { entityId: SOURCE, label: 'Self', jurisdiction },
+      { entityId: HUB, label: 'H2', jurisdiction: { ...jurisdiction, name: 'Renamed network' } },
+      { entityId: RECIPIENT, label: 'H2', jurisdiction: { ...jurisdiction, chainId: 31338 } },
+      { entityId: `0x${'55'.repeat(32)}`, label: 'H2', jurisdiction: { ...jurisdiction, depositoryAddress: `0x${'cd'.repeat(20)}` } },
+      { entityId: `0x${'66'.repeat(32)}`, label: 'H2', jurisdiction: { name: 'Testnet' } },
+    ],
+  } as never });
+  expect(paymentRecipientProfiles(view.profiles, SOURCE).map(profile => profile.entityId)).toEqual([SOURCE, HUB]);
+  expect(paymentRecipientProfiles(view.profiles, `0x${'77'.repeat(32)}`)).toEqual([]);
 });

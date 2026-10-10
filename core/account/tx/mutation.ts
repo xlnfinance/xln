@@ -188,7 +188,7 @@ export const applyAccountTxMutation = async (
     case 'lending_fund':
     case 'lending_borrow_request':
     case 'lending_repay':
-    case 'lending_credit':
+    case 'lending_disburse':
     case 'lending_close_request':
     case 'lending_close_payout':
       return handleLendingAccountTx(account, tx, byLeft);

@@ -8,6 +8,7 @@ import { collectDerivedDeadlines } from '../../../entity/scheduler/derived-deadl
 import { settleOverdueLendingLoan } from '../../../entity/tx/handlers/account/committed-lending-close';
 import type { AccountFrame, AccountReplica, AccountTx } from '../../../types/account';
 import type { ConsensusConfig, EntityState } from '../../../entity/types';
+import { deriveDelta } from '../../../account/utils';
 import { createDefaultDelta } from '../../../account/state/delta';
 import { PersistentAccountStateMap } from '../../../account/state/persistent-state-map';
 import { PersistentEntityAccountMap } from '../../../entity/state/persistent-account-map';
@@ -161,7 +162,7 @@ const applyOnly = async (
 };
 
 describe('payer-authenticated hub lending', () => {
-  test('projects batched grants and revokes instead of overwriting absolute credit', async () => {
+  test('batched loans transfer each principal and settle each repayment exactly once', async () => {
     const state = makeState();
     state.accounts = state.accounts.updated(LENDER, makeAccount(LENDER));
     state.accounts = state.accounts.updated(BORROWER, makeAccount(BORROWER));
@@ -202,8 +203,8 @@ describe('payer-authenticated hub lending', () => {
       undefined,
       [],
     );
-    expect(grants.map(output => output.tx.type === 'lending_credit' ? output.tx.data.creditLimit : 0n))
-      .toEqual([20_100n, 20_300n]);
+    expect(grants.map(output => output.tx.type === 'lending_disburse' ? output.tx.data.amount : 0n))
+      .toEqual([100n, 200n]);
 
     for (const output of grants) {
       expect((await applyOnly(state, BORROWER, output.tx, true, 2_001)).ok).toBe(true);
@@ -239,11 +240,12 @@ describe('payer-authenticated hub lending', () => {
       undefined,
       [],
     );
-    expect(revokes.map(output => output.tx.type === 'lending_credit' ? output.tx.data.creditLimit : 0n))
-      .toEqual([20_200n, 20_000n]);
+    expect(revokes).toEqual([]);
+    expect(loans.map(loan => loan.status)).toEqual(['repaid', 'repaid']);
+    expect(deriveDelta(state.accounts.get(BORROWER)!.state.deltas.get(1)!, false).ownCreditLimit).toBe(20_000n);
   });
 
-  test('fund, borrow, grant, repay, and revoke finalize only after matching bilateral commits', async () => {
+  test('fund, disburse, repay and withdraw conserve principal and interest', async () => {
     const state = makeState();
     state.accounts = state.accounts.updated(LENDER, makeAccount(LENDER));
     state.accounts = state.accounts.updated(BORROWER, makeAccount(BORROWER));
@@ -277,13 +279,22 @@ describe('payer-authenticated hub lending', () => {
       },
     };
     const [grant] = await commit(state, BORROWER, borrowTx, false, 2_000);
-    expect(grant?.tx.type).toBe('lending_credit');
+    expect(grant?.tx.type).toBe('lending_disburse');
     const loan = Array.from(state.lending!.loans.values())[0]!;
     expect(loan).toMatchObject({ status: 'opening', principalAmount: 2_500n, repaymentAmount: 2_525n });
     expect(pool).toMatchObject({ availableAmount: 7_500n, borrowedAmount: 2_500n });
 
+    const beforeDisbursement = deriveDelta(state.accounts.get(BORROWER)!.state.deltas.get(1)!, false);
     await commit(state, BORROWER, grant!.tx, true, 2_001);
+    const afterDisbursement = deriveDelta(state.accounts.get(BORROWER)!.state.deltas.get(1)!, false);
+    expect(afterDisbursement.ownCreditLimit).toBe(beforeDisbursement.ownCreditLimit);
+    expect(afterDisbursement.outCollateral + afterDisbursement.outPeerCredit - afterDisbursement.inOwnCredit)
+      .toBe(beforeDisbursement.outCollateral + beforeDisbursement.outPeerCredit - beforeDisbursement.inOwnCredit + 2_500n);
     expect(loan.status).toBe('active');
+    const principalDelta = state.accounts.get(BORROWER)!.state.deltas.get(1)!.offdelta;
+    await expect(applyOnly(state, BORROWER, grant!.tx, true, 2_002)).rejects.toThrow('LENDING_INTENT_REPLAY');
+    expect(state.accounts.get(BORROWER)!.state.deltas.get(1)!.offdelta).toBe(principalDelta);
+
 
     const repayTx: AccountTx = {
       type: 'lending_repay',
@@ -295,12 +306,11 @@ describe('payer-authenticated hub lending', () => {
         amount: 2_525n,
       },
     };
-    const [revoke] = await commit(state, BORROWER, repayTx, false, 3_000);
-    expect(revoke?.tx).toMatchObject({ type: 'lending_credit', data: { action: 'revoke', loanId: loan.loanId } });
-    expect(loan.status).toBe('closing');
-    expect(pool).toMatchObject({ availableAmount: 7_500n, borrowedAmount: 2_500n });
-
-    await commit(state, BORROWER, revoke!.tx, true, 3_001);
+    expect(await commit(state, BORROWER, repayTx, false, 3_000)).toEqual([]);
+    const afterRepayment = deriveDelta(state.accounts.get(BORROWER)!.state.deltas.get(1)!, false);
+    expect(afterRepayment.ownCreditLimit).toBe(beforeDisbursement.ownCreditLimit);
+    expect(afterRepayment.outCollateral + afterRepayment.outPeerCredit - afterRepayment.inOwnCredit)
+      .toBe(beforeDisbursement.outCollateral + beforeDisbursement.outPeerCredit - beforeDisbursement.inOwnCredit - 25n);
     expect(loan).toMatchObject({ status: 'repaid', repaidAmount: 2_525n });
     expect(pool).toMatchObject({ availableAmount: 10_025n, borrowedAmount: 0n });
 
@@ -319,7 +329,7 @@ describe('payer-authenticated hub lending', () => {
     expect(pool).toMatchObject({ status: 'closed', availableAmount: 0n, borrowedAmount: 0n });
   });
 
-  test('an overdue loan defaults: pool released, credit called in, debt recorded', async () => {
+  test('an overdue loan preserves the depositor claim without changing bilateral credit', async () => {
     const state = makeState();
     state.accounts = state.accounts.updated(LENDER, makeAccount(LENDER));
     state.accounts = state.accounts.updated(BORROWER, makeAccount(BORROWER));
@@ -365,20 +375,11 @@ describe('payer-authenticated hub lending', () => {
     // The lender's principal is released; the interest is never earned.
     expect(loan).toMatchObject({ status: 'defaulted', repaidAmount: 0n, repaymentAmount: 2_525n });
     expect(pool).toMatchObject({ availableAmount: 10_000n, borrowedAmount: 0n });
-    expect(settlement).toHaveLength(1);
-    expect(settlement[0]!.tx).toMatchObject({
-      type: 'lending_credit',
-      data: { action: 'revoke', loanId: loan.loanId, creditLimit: 20_000n },
-    });
-    // The deadline is drained by the settlement: it never re-arms.
+    expect(settlement).toEqual([]);
     expect(collectDerivedDeadlines(state, state.timestamp)).toEqual([]);
     settleOverdueLendingLoan(state, loan.loanId, settlement);
-    expect(settlement).toHaveLength(1);
-
-    // Committing the revoke lands only the credit-line reduction.
-    await commit(state, BORROWER, settlement[0]!.tx, true, loan.dueAt + 1);
-    expect(loan).toMatchObject({ status: 'defaulted', repaidAmount: 0n });
-    expect(pool).toMatchObject({ availableAmount: 10_000n, borrowedAmount: 0n });
+    expect(settlement).toEqual([]);
+    expect(deriveDelta(state.accounts.get(BORROWER)!.state.deltas.get(1)!, false).ownCreditLimit).toBe(20_000n);
 
     // The lender withdraws the released capital; the borrower keeps the debt.
     const [payout] = await commit(state, LENDER, {

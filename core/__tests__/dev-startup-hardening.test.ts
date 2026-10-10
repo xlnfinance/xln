@@ -3,6 +3,7 @@ import { spawn } from 'node:child_process';
 import { chmodSync, existsSync, mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { acquireStandLock, releaseStandLock, STAND_LOCK_TOKEN_ENV } from '../../tools/stand-lock';
 import { acquireDevSingleton, isDevSingletonConflict, runDevCommands, type DevSingletonLease } from '../../scripts/dev/run-dev';
 import {
   DEV_ROLES,
@@ -647,4 +648,18 @@ test('dev rejects independent storage roots before stopping or resetting anythin
   } finally {
     lease.release();
   }
+});
+
+// The actual CLI must stop before starting chain processes owned by another run.
+test('dev CLI refuses a machine stand reserved by another process', async () => {
+  const grant = process.env[STAND_LOCK_TOKEN_ENV] ? null
+    : await acquireStandLock({ reason: 'dev-startup-exclusion-test', waitMs: 0 });
+  try {
+    const result = await run('bun', ['scripts/dev/run-dev.ts'], {
+      env: { [STAND_LOCK_TOKEN_ENV]: undefined }, timeoutMs: 5000,
+    });
+    expect(result.code).toBe(1);
+    expect(result.stderr).toContain('STAND_LOCK_BUSY');
+    expect(result.stdout).not.toContain('DEV_BOOTING');
+  } finally { if (grant) releaseStandLock(grant); }
 });

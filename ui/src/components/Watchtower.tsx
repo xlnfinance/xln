@@ -1,5 +1,5 @@
 import { PushNotifications } from './PushNotifications';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { DisputeProtection } from './DisputeProtection';
 import { Icon } from './Icons';
 import { getEmbeddedEnv } from '../runtime/adapter';
@@ -31,7 +31,6 @@ export function Watchtower({ accountCount }: { accountCount: number }) {
   const [coverage, setCoverage] = useState<TowerCoverage[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const lastBackedUpHeight = useRef(0);
 
   useEffect(() => setConfig(readRecovery(activeVaultId)), [activeVaultId]);
 
@@ -57,21 +56,12 @@ export function Watchtower({ accountCount }: { accountCount: number }) {
     void refresh(config.towers);
   }, [config.towers, refresh]);
 
-  /** While a tower is chosen, every new committed frame is sent up once it settles. */
+  /** The wallet-level service also runs while this panel is closed or unmounted. */
   useEffect(() => {
-    if (config.mode !== 'tower' || !xln || !env || !seed || height <= lastBackedUpHeight.current) return;
-    const timer = setTimeout(() => {
-      lastBackedUpHeight.current = height;
-      void backupToTowers(xln, env, seed, config.towers)
-        .then(async results => {
-          const failures = results.filter(result => result.error);
-          if (failures.length) setError(failures.map(result => `${result.url}: ${result.error}`).join(' · '));
-          await refresh(config.towers);
-        })
-        .catch(failure => setError(failure instanceof Error ? failure.message : String(failure)));
-    }, 2_000);
-    return () => clearTimeout(timer);
-  }, [config.mode, config.towers, height, xln, env, seed, refresh]);
+    const updated = (): void => { void refresh(config.towers); };
+    window.addEventListener('xln-recovery-updated', updated);
+    return () => window.removeEventListener('xln-recovery-updated', updated);
+  }, [config.towers, refresh]);
 
   const protecting = coverage.filter(row => row.protecting);
   const covered = protecting.length > 0;
@@ -101,7 +91,6 @@ export function Watchtower({ accountCount }: { accountCount: number }) {
       setDraftUrl('');
       toast(`Tower ${health.towerId} added`);
       if (xln && env && seed) {
-        lastBackedUpHeight.current = height;
         const results = await backupToTowers(xln, env, seed, next.towers);
         const failed = results.filter(result => result.error);
         if (failed.length > 0) setError(failed.map(result => `${result.url}: ${result.error}`).join(' · '));
@@ -127,7 +116,6 @@ export function Watchtower({ accountCount }: { accountCount: number }) {
     setBusy(true);
     setError(null);
     try {
-      lastBackedUpHeight.current = height;
       const results = await backupToTowers(xln, env, seed, config.towers);
       const failed = results.filter(result => result.error);
       if (failed.length > 0) setError(failed.map(result => `${result.url}: ${result.error}`).join(' · '));
@@ -248,7 +236,7 @@ export function Watchtower({ accountCount }: { accountCount: number }) {
         </span>
       </div>
       <div className="kv" data-testid="watchtower-coverage-accounts">
-        <span className="k">Accounts inside that copy</span>
+        <span className="k">Accounts in the selected entity</span>
         <span className="v num">{accountCount.toLocaleString('en-US')}</span>
       </div>
       <DisputeProtection towers={config.towers} seed={seed} />

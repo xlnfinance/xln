@@ -77,6 +77,8 @@ const assertBrowserReport = (path: string): void => {
 /** Reuse the production stand and its leased ports; all children share its cleanup owner. */
 export const runWalletBrowserGate = async (input: WalletGate): Promise<void> => {
   const tests = input.tests.split(',');
+  const ui = process.env['XLN_LOCAL_PROD_SMOKE_WALLET_UI'] ?? 'react';
+  if (ui !== 'react' && ui !== 'svelte') throw new Error('WALLET_UI_INVALID');
   const grep = process.env['XLN_LOCAL_PROD_SMOKE_WALLET_GREP'];
   if (grep !== undefined && !/^[A-Za-z0-9][A-Za-z0-9 ._-]{0,255}$/.test(grep)) {
     throw new Error('WALLET_TEST_GREP_INVALID');
@@ -95,6 +97,10 @@ export const runWalletBrowserGate = async (input: WalletGate): Promise<void> => 
   await waitForService(tower, `${towerOrigin}/api/tower/healthz`);
   const env = {
     NODE_ENV: 'development',
+    VITE_DEV_PORT: String(port),
+    VITE_API_PROXY_TARGET: `http://127.0.0.1:${input.apiPort}`,
+    XLN_VITE_FORCE_HTTP: '1',
+    SVELTE_E2E_BASE_URL: `${origin}/app`,
     VITE_XLN_WATCHTOWER_URL: towerOrigin,
     UI_E2E_TOWER_URL: towerOrigin,
     XLN_UI_STACK_ORIGIN: `http://127.0.0.1:${input.apiPort}`,
@@ -109,7 +115,10 @@ export const runWalletBrowserGate = async (input: WalletGate): Promise<void> => 
   const server = input.start(
     'wallet-server',
     process.execPath,
-    [
+    ui === 'svelte' ? [
+      '--cwd', join(input.repoRoot, 'frontend'),
+      './node_modules/vite/bin/vite.js', '--host', '127.0.0.1', '--port', String(port), '--strictPort',
+    ] : [
       join(input.repoRoot, 'ui/node_modules/vite/bin/vite.js'),
       'ui',
       '--host',

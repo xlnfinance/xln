@@ -21,14 +21,14 @@ import { withRuntimeCommittedRead } from '@xln/core/runtime/frame/lifecycle/writ
 import { deriveJurisdictionSignerIndex } from '@xln/core/jurisdiction/machine/config/signer-derivation';
 import { Wallet } from 'ethers';
 import { deriveAddress, derivePrivateKey } from './keys';
-import { requireBackupCapacity } from './backup-size';
+import { requireBackupCapacity, requireBackupTransportCapacity } from './backup-size';
 
 /** `tower`: an encrypted copy leaves this device. `local`: nothing does. */
 export type RecoveryMode = 'tower' | 'local';
 export type RecoveryConfig = { mode: RecoveryMode; towers: string[] };
 
 /** What the tower says about itself before we trust it with anything. */
-export type TowerHealth = { towerId: string; signerAddress: string; maxStoredBytesPerLookupKey: number; lookupKeys: number; sweepEnabled: boolean; pushEnabled: boolean; pushSender: string };
+export type TowerHealth = { towerId: string; signerAddress: string; maxStoredBytesPerLookupKey: number; maxAppointmentBytes: number; lookupKeys: number; sweepEnabled: boolean; pushEnabled: boolean; pushSender: string };
 
 /** What the tower says it actually holds for us, read back from the tower, not from our own hopes. */
 export type TowerCoverage = {
@@ -98,7 +98,7 @@ export function normalizeTowerUrl(value: string): string {
  */
 export function defaultTowerUrl(): string {
   const hostname = window.location.hostname.toLowerCase();
-  return hostname === 'localhost' || hostname === '127.0.0.1' ? '' : 'https://xln.finance';
+  return ['localhost', '127.0.0.1', '[::1]'].includes(hostname) ? '' : 'https://xln.finance';
 }
 
 /**
@@ -133,6 +133,7 @@ export async function towerHealth(towerUrl: string): Promise<TowerHealth> {
   return {
     towerId: String(payload['towerId'] || 'tower'),
     maxStoredBytesPerLookupKey: Number(payload['maxStoredBytesPerLookupKey']),
+    maxAppointmentBytes: Number(payload['maxAppointmentBytes']),
     signerAddress: String(payload['signerAddress'] || ''),
     lookupKeys: Number(asRecord(payload['stats'])['lookupCount'] || 0),
     sweepEnabled: asRecord(payload['sweep'])['enabled'] === true,
@@ -260,7 +261,7 @@ async function buildBackupAppointment(
 export type BackupResult = { url: string; receipt: TowerReceiptV1 | null; error: string | null };
 
 /**
- * Send one committed checkpoint and retained history atomically to each tower. Returns one row per
+ * Send the latest committed recovery snapshot to each tower. Returns one row per
  * tower so the screen can show exactly which of them accepted it; a tower that
  * refuses is reported, never swallowed.
  */
@@ -271,21 +272,18 @@ export async function backupToTowers(
   towers: string[],
 ): Promise<BackupResult[]> {
   if (towers.length === 0) return [];
-  const recording = await withRuntimeCommittedRead(env, () => xln.buildPersistedRuntimeRecording(env, {
-    signers: recoverySigners(env, seed),
-    meta: { label: 'xln wallet', activeSignerIndex: 0, loginType: 'manual', createdAt: Date.now() },
-  }));
+  const encrypted = await encryptTip(xln, env, seed);
+  if (!encrypted) return [];
   const signedAt = Date.now();
-  const encrypted = await Promise.all(recording.bundles.map(bundle => xln.encryptRuntimeRecoveryBundle(bundle, seed)));
-  const appointments = await Promise.all(encrypted.map(bundle =>
-    buildBackupAppointment(xln, recording.runtimeId, seed, bundle, signedAt)));
-  const body = JSON.stringify(appointments.length === 1 ? appointments[0] : appointments);
+  const appointment = await buildBackupAppointment(xln, encrypted.runtimeId, seed, encrypted, signedAt);
+  const body = JSON.stringify(appointment);
   const bundleBytes = new TextEncoder().encode(JSON.stringify(encrypted)).byteLength;
   return Promise.all(
     towers.map(async url => {
       try {
         const health = await towerHealth(url);
         requireBackupCapacity(bundleBytes, health.maxStoredBytesPerLookupKey);
+        requireBackupTransportCapacity(new TextEncoder().encode(body).byteLength, health.maxAppointmentBytes);
         const response = await fetch(towerRequestUrl(url, '/api/tower/appointment'), {
           method: 'PUT',
           headers: { 'content-type': 'application/json' },

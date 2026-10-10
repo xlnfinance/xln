@@ -45,6 +45,7 @@ test('a funded wallet pays H3 twice without leaving held funds', { tag: '@functi
     expect(BigInt(sender)).toBe(25_000_000n + BigInt(fee));
     const before = await readWalletCheckpoint(page);
     await page.getByTestId('pay-submit').click();
+    await page.getByTestId('receipt-open').click();
     await expect(page.getByTestId('receipt-kicker')).toHaveText('Paid', { timeout: 15_000 });
     const payment = await readCommittedPayment(page, wallet.entityId, before.latestHeight + 1);
     expect(payment.amount).toBe(recipient);

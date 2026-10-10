@@ -27,8 +27,7 @@ const LENDING_INTENTS = new Set([
   'fund',
   'borrow',
   'repay',
-  'credit-grant',
-  'credit-revoke',
+  'disburse',
   'close-request',
   'close-payout',
 ]);

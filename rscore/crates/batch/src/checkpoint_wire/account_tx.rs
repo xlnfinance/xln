@@ -2,7 +2,7 @@ use num_bigint::BigInt;
 use xln_rscore_abi::AbiValue;
 use xln_rscore_engine::{
     AccountTx, DeliveryMode, Delta, HtlcDeliveryMode, HtlcResolveOutcome, JClaimNode, JClaimProof,
-    JurisdictionEvent, LendingAction, LendingTermId, Side,
+    JurisdictionEvent, LendingTermId, Side,
 };
 
 use super::{AccountWireEncodeError, encode_canonical_value, integer, tuple};
@@ -230,24 +230,19 @@ pub fn encode_account_tx(value: &AccountTx) -> Result<AbiValue, AccountWireEncod
             integer(token_id.get()),
             encode_bigint(amount),
         ],
-        AccountTx::LendingCredit {
-            action,
+        AccountTx::LendingDisburse {
             loan_id,
             hub_entity_id,
             borrower_entity_id,
             token_id,
-            credit_limit,
+            amount,
         } => vec![
-            integer(13),
-            integer(match action {
-                LendingAction::Grant => 0,
-                LendingAction::Revoke => 1,
-            }),
+            integer(24),
             AbiValue::Text(loan_id.clone()),
             AbiValue::Text(hub_entity_id.clone()),
             AbiValue::Text(borrower_entity_id.clone()),
             integer(token_id.get()),
-            encode_bigint(credit_limit),
+            encode_bigint(amount),
         ],
         AccountTx::LendingCloseRequest {
             position_id,

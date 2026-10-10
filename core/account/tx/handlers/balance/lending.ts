@@ -2,7 +2,6 @@ import type { AccountLendingIntentKind, AccountReplica, AccountTx } from '../../
 import type { AccountDraftReplica } from '../../../state/account-state-draft';
 import { normalizeInterestBps, normalizeLendingTerm } from '../../../../extensions/lending';
 import { handleDirectPayment } from './direct-payment';
-import { handleSetCreditLimit } from './set-credit-limit';
 import type { ApplyAccountTxResult } from '../../apply-types';
 import { accountTxApplied, accountTxValidationRejected } from '../../apply-result';
 import { deriveDelta } from '../../../utils';
@@ -12,7 +11,7 @@ type LendingAccountTx = Extract<AccountTx, {
     | 'lending_fund'
     | 'lending_borrow_request'
     | 'lending_repay'
-    | 'lending_credit'
+    | 'lending_disburse'
     | 'lending_close_request'
     | 'lending_close_payout';
 }>;
@@ -76,7 +75,7 @@ const positiveAmount = (value: bigint, context: string): void => {
 
 const applyPayment = (
   account: AccountDraftReplica,
-  tx: Extract<LendingAccountTx, { type: 'lending_fund' | 'lending_repay' | 'lending_close_payout' }>,
+  tx: Extract<LendingAccountTx, { type: 'lending_fund' | 'lending_repay' | 'lending_close_payout' | 'lending_disburse' }>,
   byLeft: boolean,
 ): LendingResult => {
   const data = tx.data;
@@ -85,6 +84,9 @@ const applyPayment = (
   if (tx.type === 'lending_close_payout') {
     payer = tx.data.hubEntityId;
     recipient = tx.data.lenderEntityId;
+  } else if (tx.type === 'lending_disburse') {
+    payer = tx.data.hubEntityId;
+    recipient = tx.data.borrowerEntityId;
   } else if (tx.type === 'lending_fund') {
     payer = tx.data.lenderEntityId;
     recipient = tx.data.hubEntityId;
@@ -157,22 +159,17 @@ export const handleLendingAccountTx = (
     return result;
   }
 
-  if (tx.type === 'lending_credit') {
+  if (tx.type === 'lending_disburse') {
     requireIntentId(tx.data.loanId, 'loan');
     requireRole(account, byLeft, 'hub', tx.data.hubEntityId);
     requireCounterparty(account, normalized(tx.data.hubEntityId), tx.data.borrowerEntityId);
-    if (tx.data.creditLimit < 0n) throw new Error(`LENDING_CREDIT_LIMIT_NEGATIVE:${tx.data.creditLimit}`);
-    const result = handleSetCreditLimit(account.state, {
-      type: 'set_credit_limit',
-      data: { tokenId: tx.data.tokenId, amount: tx.data.creditLimit },
-    }, byLeft);
-    if (result.ok) {
-      consumeIntent(
-        account,
-        `${tx.data.action === 'grant' ? 'grant' : 'revoke'}:${normalized(tx.data.loanId)}`,
-        tx.data.action === 'grant' ? 'credit-grant' : 'credit-revoke',
-      );
-    }
+    positiveAmount(tx.data.amount, 'LENDING_DISBURSE');
+    const intentKey = `disburse:${normalized(tx.data.loanId)}`;
+    // The certified hub proposer spends its own outgoing capacity exactly once.
+    // Check replay before payment: a duplicate loan must never transfer principal twice.
+    requireUnusedIntent(account, intentKey);
+    const result = applyPayment(account, tx, byLeft);
+    if (result.ok) consumeIntent(account, intentKey, 'disburse');
     return result;
   }
 

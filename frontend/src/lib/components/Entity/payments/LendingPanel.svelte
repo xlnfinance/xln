@@ -1,9 +1,12 @@
 <script lang="ts">
 import type { EntityReadView } from '#lib/components/Entity/core/entity-panel-types.ts';
 
+  import { walletHelp } from '#lib/utils/ui/walletHelp.ts';
   import { Banknote, RefreshCw } from 'lucide-svelte';
+  import { onMount } from 'svelte';
   import type { RuntimeInput } from '@xln/core/runtime/types';
   import type { EntityTx } from '@xln/core/types/entity-tx';
+  import { computeLendingInterest, normalizeInterestBps } from '@xln/core/extensions/lending';
 
   import { resolveConfiguredApiBase, xlnFunctions } from '../../../stores/xlnStore';
   import {
@@ -92,6 +95,22 @@ import type { EntityReadView } from '#lib/components/Entity/core/entity-panel-ty
   let lastAutoRefreshKey = '';
   let refreshVersion = 0;
 
+  onMount(() => {
+    const timer = setInterval(() => {
+      if (isLive && !loading && !submitting) void refreshLendingState();
+    }, 3_000);
+    return () => clearInterval(timer);
+  });
+
+  function closePoolReason(pool: LendingPoolPosition): string | null {
+    if (BigInt(pool.borrowedAmount) > 0n) return 'Wait for outstanding loans to be repaid.';
+    const account = replica?.state.accounts.get(pool.hubEntityId);
+    if (!account || account.status !== 'active' || account.activeDispute) return 'An active account with this hub is required.';
+    const delta = account.state.deltas.get(pool.tokenId);
+    const inbound = delta && activeXlnFunctions ? activeXlnFunctions.deriveDelta(delta, normalizedEntityId < pool.hubEntityId.toLowerCase()).inCapacity : 0n;
+    return inbound < BigInt(pool.availableAmount) ? 'Increase incoming capacity in Manage before receiving this payout.' : null;
+  }
+
   $: activeXlnFunctions = $xlnFunctions;
   $: normalizedEntityId = String(entityId || replica?.state?.entityId || '').trim().toLowerCase();
   $: normalizedAccounts = Array.from(
@@ -115,6 +134,17 @@ import type { EntityReadView } from '#lib/components/Entity/core/entity-panel-ty
   $: totalAvailable = parseAmount(state?.totals?.availableAmount);
   $: totalBorrowed = parseAmount(state?.totals?.borrowedAmount);
   $: canSubmit = isLive && !!selectedHubEntityId && !!normalizedEntityId && !submitting;
+  $: borrowPreview = previewBorrow(borrowAmount, maxBorrowInterestBps);
+
+  function previewBorrow(principal: bigint, maxRate: number) {
+    if (principal <= 0n) return null;
+    try {
+      const bps = normalizeInterestBps(maxRate);
+      return { repayment: principal + computeLendingInterest(principal, bps), error: '' };
+    } catch (error) {
+      return { repayment: null, error: error instanceof Error ? error.message : String(error) };
+    }
+  }
 
   function buildTokenOptions(): Array<{ id: number; symbol: string }> {
     const ids = new Set<number>();
@@ -155,14 +185,14 @@ import type { EntityReadView } from '#lib/components/Entity/core/entity-panel-ty
     }
   }
 
-  function formatAmount(value: string | bigint | null | undefined, tokenId = selectedTokenId): string {
+  function formatAmount(value: string | bigint | null | undefined, tokenId = selectedTokenId, maxFraction = 6): string {
     const amount = parseAmount(value);
     const decimals = tokenDecimals(tokenId);
     const divisor = 10n ** BigInt(decimals);
     const whole = amount / divisor;
     const frac = amount % divisor;
     if (frac === 0n) return whole.toString();
-    const fracText = frac.toString().padStart(decimals, '0').slice(0, 6).replace(/0+$/, '');
+    const fracText = frac.toString().padStart(decimals, '0').slice(0, maxFraction).replace(/0+$/, '');
     return fracText ? `${whole}.${fracText}` : whole.toString();
   }
 
@@ -333,6 +363,7 @@ import type { EntityReadView } from '#lib/components/Entity/core/entity-panel-ty
 </script>
 
 <section class="lending-panel" data-testid="lending-panel">
+  <details><summary>How lending works — with an example</summary><p>{walletHelp['lendingBalance']}</p></details>
   <div class="lending-head">
     <div>
       <div class="eyebrow">Lending</div>
@@ -395,8 +426,9 @@ import type { EntityReadView } from '#lib/components/Entity/core/entity-panel-ty
           </select>
         </label>
         <label>
-          <span>Rate, bps</span>
+          <span>Interest you ask · basis points</span>
           <input type="number" min="0" max="10000" bind:value={lendInterestBps} disabled={submitting} data-testid="lending-offer-rate" />
+          <small>{rateLabel(lendInterestBps)} per term</small>
         </label>
       </div>
       <button class="primary" type="submit" disabled={!canSubmit || lendAmount <= 0n || submitting} data-testid="lending-offer-submit">
@@ -420,11 +452,20 @@ import type { EntityReadView } from '#lib/components/Entity/core/entity-panel-ty
           </select>
         </label>
         <label>
-          <span>Max bps</span>
+          <span>Maximum interest · basis points</span>
           <input type="number" min="0" max="10000" bind:value={maxBorrowInterestBps} disabled={submitting} data-testid="lending-borrow-max-rate" />
+          <small>{rateLabel(maxBorrowInterestBps)} per term</small>
         </label>
       </div>
-      <button class="primary" type="submit" disabled={!canSubmit || borrowAmount <= 0n || submitting} data-testid="lending-borrow-submit">
+      {#if borrowPreview}
+        <p data-testid="lending-borrow-preview">
+          {#if borrowPreview.repayment === null}{borrowPreview.error}{:else}
+            Maximum repayment: {formatAmount(borrowPreview.repayment, selectedTokenId, selectedTokenDecimals)} {selectedTokenSymbol}, due {borrowTermId === '1m' ? '30 days' : terms.find(term => term.id === borrowTermId)!.label} after approval.
+            Estimate at your maximum rate; the matched rate may be lower. Check the confirmed loan for its exact due date.
+          {/if}
+        </p>
+      {/if}
+      <button class="primary" type="submit" disabled={!canSubmit || borrowAmount <= 0n || submitting || Boolean(borrowPreview?.error)} data-testid="lending-borrow-submit">
         Borrow
       </button>
     </form>
@@ -444,6 +485,15 @@ import type { EntityReadView } from '#lib/components/Entity/core/entity-panel-ty
             </div>
             <div class="row-secondary">
               borrowed {formatAmount(pool.borrowedAmount, pool.tokenId)}
+              {#if pool.status === 'open'}
+                <button class="secondary" type="button" disabled={submitting || !canSubmit || Boolean(closePoolReason(pool))}
+                  title={closePoolReason(pool) || 'Return available pool funds to your account after confirmation.'}
+                  on:click={() => submitLendingTx({ type: 'lendingClosePosition', data: { hubEntityId: pool.hubEntityId, positionId: pool.positionId } })}
+                  data-testid="lending-close">
+                  Close and receive {formatAmount(pool.availableAmount, pool.tokenId)} {tokenSymbol(pool.tokenId)}
+                </button>
+                {#if closePoolReason(pool)}<span>{closePoolReason(pool)}</span>{/if}
+              {/if}
             </div>
           </div>
         {/each}

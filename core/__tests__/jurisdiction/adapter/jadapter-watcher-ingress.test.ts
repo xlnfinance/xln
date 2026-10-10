@@ -121,6 +121,31 @@ const makeReplica = (entityId: string, signerId: string, isProposer: boolean): E
   }) as EntityReplica;
 
 describe('JAdapter watcher ingress', () => {
+  test('pre-registration history stays durable without fencing the next bootstrap chunk', () => {
+    const seed = 'numbered-bootstrap-history-chunk';
+    const env = createEmptyEnv(seed);
+    const signerId = deriveSignerAddressSync(seed, '1').toLowerCase();
+    const entityId = `0x${'0'.repeat(63)}a`;
+    const replicaKey = `${entityId}:${signerId}`;
+    const jurisdiction = { ...makeJurisdiction('Bootstrap', 31337, `0x${'71'.repeat(20)}`), registrationBlock: 5 };
+    const jurisdictionRef = `stack:${jurisdiction.chainId}:${jurisdiction.depositoryAddress}`;
+    const blockHash = (height: number): string => `0x${height.toString(16).padStart(64, '0')}`;
+    const replica = makeReplica(entityId, signerId, true);
+    replica.state.config.jurisdiction = jurisdiction;
+    env.state.eReplicas.set(replicaKey, replica);
+    const events = [{ type: 'ReserveUpdated' as const, data: { entity: entityId, tokenId: 1, newBalance: '42' },
+      blockNumber: 2, blockHash: blockHash(2), transactionHash: `0x${'72'.repeat(32)}`, logIndex: 0 }];
+    const observation = { type: 'observeJRange' as const, data: { entityId, signerId, jurisdictionRef,
+      scannedThroughHeight: 2, tipBlockHash: blockHash(2), blocks: [{ jurisdictionRef, jHeight: 2,
+        jBlockHash: blockHash(2), eventsHash: canonicalJurisdictionEventsHash(events), events }] } };
+    const range = enqueueJHistoryRange(env, [{ timestamp: 2, runtimeTxs: [observation], entityInputs: [] }],
+      2, blockHash(2), undefined, [1, 2].map(jHeight => ({ jHeight, jBlockHash: blockHash(jHeight) })));
+    expect(range.scannedReplicaKeys).toEqual([replicaKey]);
+    expect(range.finalityReplicaKeys).toEqual([]);
+    expect(env.runtimeMempool?.runtimeTxs).toContainEqual(observation);
+    expect(env.runtimeMempool?.entityInputs).toEqual([]);
+  });
+
   test('receipt watcher excludes non-ERC20 registry entries sharing one contract', async () => {
     const erc20 = `0x${'41'.repeat(20)}`;
     const entityProvider = `0x${'42'.repeat(20)}`;

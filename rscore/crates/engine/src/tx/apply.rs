@@ -329,7 +329,7 @@ pub(crate) fn apply_to_candidate(
         AccountTx::LendingFund { .. }
         | AccountTx::LendingBorrowRequest { .. }
         | AccountTx::LendingRepay { .. }
-        | AccountTx::LendingCredit { .. }
+        | AccountTx::LendingDisburse { .. }
         | AccountTx::LendingCloseRequest { .. }
         | AccountTx::LendingClosePayout { .. } => {
             crate::tx::handlers::lending::apply(candidate, tx, proposer)

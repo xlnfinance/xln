@@ -104,7 +104,7 @@ function EntityActivity({ entityId }: { entityId: string | null }) {
 					</button>
 				) : null}
 				<span className="faint" style={{ fontSize: 12 }} hidden={filter === 'swaps'}>
-					{movements.length} {movements.length === 1 ? 'movement' : 'movements'}
+					{loading ? 'Loading stored history…' : `${movements.length} ${movements.length === 1 ? 'movement' : 'movements'}`}
 				</span>
 			</div>
 			<div className="two-col activity">

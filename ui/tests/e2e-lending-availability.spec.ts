@@ -151,6 +151,7 @@ test('available lending offers Offer and Borrow and leaves the wallet able to pa
   expect(quote.recipient).toBe(25_000_000n);
   expect(quote.sender).toBe(quote.recipient + quote.fee);
   await page.getByTestId('pay-submit').click();
+  await page.getByTestId('receipt-open').click();
   const receipt = page.getByTestId('payment-receipt');
   await expect(receipt).toBeVisible({ timeout: 15_000 });
   await expect(receipt.getByTestId('receipt-kicker')).toHaveText('Paid');

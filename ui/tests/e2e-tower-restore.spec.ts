@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { readCommittedPayment, readUsdcAccount } from './payment-evidence';
 import { execFileSync } from 'node:child_process';
 import { mkdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -43,7 +44,7 @@ async function canonicalRoot(page: Page, height: number): Promise<string> {
   }, { height, moduleUrl });
 }
 
-test('tower backup restores funded Account proofs on a clean device and refuses local overwrite', { tag: '@resilience' }, async ({ browser }) => {
+test('tower backup restores funded Account proofs, refuses overwrite and continues payments', { tag: '@resilience' }, async ({ browser }) => {
 	test.setTimeout(60_000);
 	const source = await browser.newContext();
 	const target = await browser.newContext();
@@ -102,6 +103,29 @@ test('tower backup restores funded Account proofs on a clean device and refuses 
 		await restoredPage.reload();
 		await reopenStack(restoredPage, wallet);
 		expect((await readWalletCheckpoint(restoredPage, before.frame.height)).accounts).toEqual(before.accounts);
+		const restoredMoney = await readUsdcAccount(restoredPage, wallet.entityId);
+		expect(restoredMoney.owned).toBe('100000000');
+		const fromHeight = (await readWalletCheckpoint(restoredPage)).frame.height;
+		await restoredPage.getByTestId('home-pay').click();
+		await restoredPage.getByTestId('pay-to').fill('H2');
+		await restoredPage.getByTestId('pay-amount').fill('1');
+		await expect(restoredPage.getByTestId('pay-submit')).toBeEnabled();
+		const quotedDebit = await restoredPage.getByTestId('pay-quote').getAttribute('data-sender-amount');
+		if (!quotedDebit) throw new Error('RECOVERY_PAYMENT_QUOTE_MISSING');
+		await restoredPage.getByTestId('pay-submit').click();
+		await restoredPage.getByTestId('receipt-open').click();
+		await expect(restoredPage.getByTestId('payment-receipt')).toBeVisible({ timeout: 15_000 });
+		await expect(restoredPage.getByTestId('receipt-kicker')).toHaveText('Paid');
+		const payment = await readCommittedPayment(restoredPage, wallet.entityId, fromHeight);
+		expect(payment.amount).toBe('1000000');
+		expect(BigInt(payment.senderAmount)).toBe(1_000_000n + BigInt(payment.fee));
+		expect(BigInt(payment.senderAmount)).toBeLessThanOrEqual(BigInt(quotedDebit));
+		await restoredPage.getByTestId('receipt-done').click();
+		await expect.poll(async () => {
+			const money = await readUsdcAccount(restoredPage, wallet.entityId);
+			return { owned: money.owned, pending: money.pending, mempool: money.mempool };
+		}).toEqual({ owned: (100_000_000n - BigInt(payment.senderAmount)).toString(), pending: false, mempool: 0 });
+		await test.info().attach('post-restore-payment', { body: JSON.stringify({ restoredMoney, payment }), contentType: 'application/json' });
 		console.log(`TOWER_RESTORE runtime=${after.runtimeId} height=${after.frame.height} root=${after.frame.postStateHash} accounts=${after.accounts.length}`);
 	} finally {
 		await source.close();

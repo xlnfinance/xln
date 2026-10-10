@@ -1,6 +1,6 @@
 import type { AccountTx } from '../../../../types/account';
 import type { EntityState } from '../../../types';
-import { getAccountOutCapacity, projectedHubCreditLimit } from '../../../../extensions/lending';
+import { getAccountOutCapacity } from '../../../../extensions/lending';
 import type { LendingFollowupContext } from './committed-lending-followup';
 import type { AccountTxTarget } from './orderbook/queue';
 import { createStructuredLogger, shortId } from '../../../../support/logger';
@@ -89,31 +89,14 @@ export function applyLendingClosePayout(
   pool.updatedAt = now;
 }
 
-/**
- * Overdue loan settlement — the banking half of the loan lifecycle.
- *
- * A pool's cash never leaves the hub: `lending_fund` moves it lender -> hub and
- * `lending_borrow_request` only grants the borrower a credit line against it.
- * So when the term passes unpaid the hub settles it the way a bank does with a
- * defaulted customer loan:
- *
- *  - the lender's principal returns to the pool, because the hub still holds
- *    that cash and owes the depositor, not the borrower;
- *  - the drawn exposure stays a hub receivable against the borrower — signed
- *    bilateral debt that a lower credit limit can never erase (deriveDelta
- *    keeps `outPeerCredit`), so the hub absorbs the credit loss;
- *  - the credit line is called in through the same `lending_credit` revoke the
- *    repay path uses, so a defaulted borrower cannot draw again;
- *  - `repaymentAmount - repaidAmount` stays recorded against the borrower on a
- *    terminal `defaulted` loan. Interest is not earned on a default.
- *
- * Every failure here is caused by one loan and is dropped with evidence: a
- * single bad loan never halts the Runtime (docs/reject-policy.md).
+/** The hub retains its obligation to the depositor after borrower default.
+ * Releasing the claim does not create cash: withdrawal still requires actual
+ * bilateral payout capacity. The unpaid loan remains a hub receivable.
  */
 export const settleOverdueLendingLoan = (
   state: EntityState,
   loanId: string,
-  accountTxs: AccountTxTarget[],
+  _accountTxs: AccountTxTarget[],
 ): void => {
   const lending = state.lending;
   const loan = lending?.loans.get(loanId);
@@ -134,29 +117,6 @@ export const settleOverdueLendingLoan = (
   pool.borrowedAmount -= loan.principalAmount;
   pool.availableAmount += loan.principalAmount;
   pool.updatedAt = now;
-  const hubEntityId = String(state.entityId).toLowerCase();
-  const currentLimit = projectedHubCreditLimit(
-    account,
-    hubEntityId,
-    loan.borrowerEntityId,
-    accountTxs,
-    loan.tokenId,
-  );
-  accountTxs.push({
-    accountId: loan.borrowerEntityId,
-    tx: {
-      type: 'lending_credit',
-      data: {
-        action: 'revoke',
-        loanId,
-        hubEntityId,
-        borrowerEntityId: loan.borrowerEntityId,
-        tokenId: loan.tokenId,
-        creditLimit:
-          currentLimit > loan.principalAmount ? currentLimit - loan.principalAmount : 0n,
-      },
-    },
-  });
   lendingLog.warn('lending_overdue.defaulted', {
     loanId,
     borrower: shortId(loan.borrowerEntityId),

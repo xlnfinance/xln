@@ -3,14 +3,42 @@
 **Status:** required for first launch by owner instruction on 2026-09-07
 (Istanbul time); implementation is not yet production-ready.
 
-The owner now requires a hub-enabled Lending extension: users explicitly move
-current balances into N-day term positions, and the hub manually approves
-borrowers after underwriting. This supersedes the former out-of-release scope
-decision. Existing live admission still rejects the six Lending AccountTx kinds;
-changing that gate alone does not implement the owner's requested economics.
-The code review must first resolve term-claim enforcement, principal accounting,
-approval authority and default handling. The design below predates this update;
-it is context, not evidence that those requirements already work.
+## Current implementation and accounting
+
+The owner approved on 2026-09-07 that principal is transferred exactly once and
+that the hub retains its obligation to depositors after borrower default.
+`lending_disburse` now pays hub → borrower through the canonical direct-payment
+handler; it never changes either credit limit. The signed `disburse:<loanId>`
+intent prevents a second transfer. Repayment pays principal plus agreed interest
+once, then its bilateral commit finalizes the hub book without a credit-revoke
+round trip. Defaults preserve the unpaid loan and the depositor's principal claim;
+a withdrawal still requires actual bilateral payout capacity.
+
+The old revolving-credit transaction is removed. Its numeric wire tag 13 is
+rejected; disbursement uses tag 24. Old credit-grant/revoke intent tags 3/4 are
+rejected on restore; disbursement uses tag 7. Existing data containing the old
+lending protocol requires an explicit offline migration. It must not be replayed
+under the new principal-transfer semantics. Disposable local test data is reset.
+
+Both wallets include hub-reported deposits and subtract unpaid term-loan
+repayments in total balance. Example: start with 100, borrow 2 at 1% per term;
+the account contains 102, the loan obligation is 2.02, and net balance is 99.98.
+This projection is an estimate from the hub, not new settlement authority.
+
+Verification commands:
+
+- `bun run test:lending:fast`: deterministic Account/Entity scenarios, shared
+  TS/Rust semantic vectors, wire rejection and signed portfolio valuation.
+- `bun run test:lending:e2e`: real React and Svelte controls on `bun run dev`.
+  React uses separate lender and borrower wallets and spends the proceeds before
+  repayment. Svelte exercises the full fund/disburse/repay/withdraw path.
+  Use a clean disposable stand; pre-existing competitive offers can change the
+  selected lender, and the test must fail rather than claim the wrong payout.
+
+Admission is open. The implementation still automatically matches offers;
+manual underwriting, jurisdiction-enforceable term claims and late repayment
+remain separate release requirements. The design below describes the broader
+product target, not evidence that all release requirements are implemented.
 
 ## Product Shape
 

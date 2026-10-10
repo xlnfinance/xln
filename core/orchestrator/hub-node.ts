@@ -2337,9 +2337,16 @@ const requireHubTokenCatalog = async (live: HubNodeLiveContext): Promise<JTokenI
 
 const createHubExternalWalletApi = (live: HubNodeLiveContext) =>
   createExternalWalletApi({
-    getJAdapter: entityId => entityId ? getEntityJAdapter(live.env, entityId) : live.activeJAdapter,
+    getJAdapter: (entityId, jurisdiction) => jurisdiction
+      ? getLiveJAdapter(live.env, jurisdiction) ?? null
+      : entityId ? getEntityJAdapter(live.env, entityId) : live.activeJAdapter,
     getRuntimeId: () => String(live.env.runtimeId || ''),
-    getTokenCatalog: async entityId => {
+    getTokenCatalog: async (entityId, jurisdiction) => {
+      if (jurisdiction) {
+        const adapter = getLiveJAdapter(live.env, jurisdiction);
+        if (!adapter) throw new Error(`FAUCET_JURISDICTION_UNAVAILABLE:${jurisdiction}`);
+        return adapter.getTokenRegistry();
+      }
       if (!entityId) return requireHubTokenCatalog(live);
       const adapter = getEntityJAdapter(live.env, entityId);
       if (!adapter) throw new Error('EXTERNAL_WALLET_ENTITY_J_ADAPTER_MISSING');
@@ -2583,9 +2590,17 @@ const createHubMeshBootstrapController = (
       // H1 creates the shared token catalog, while H2/H3 wait for it above;
       // limiting funding to --deploy-tokens left their valid API unfunded.
       if (!AUTO_PROVISION_EXTERNAL_FAUCET || !canDeployHubDefaultTokens(jurisdiction.chainId)) return;
-      faucetProvision ??= externalWalletApi.provisionFaucetWallet().then(() => {
+      faucetProvision ??= (async () => {
+        // The same faucet signer needs gas and tokens on every served chain.
+        for (const entry of live.hubBootstraps) {
+          const adapter = getLiveJAdapter(live.env, entry.jurisdictionName);
+          if (!adapter) throw new Error(`FAUCET_JURISDICTION_UNAVAILABLE:${entry.jurisdictionName}`);
+          if (canDeployHubDefaultTokens(adapter.chainId)) {
+            await externalWalletApi.provisionFaucetWallet(entry.jurisdictionName);
+          }
+        }
         if (!live.shuttingDown) nodeLog.info('faucet_provision.ready', { name: resolvedArgs.name });
-      });
+      })();
       await faucetProvision;
     };
     const markProgress = (step: string): void => {

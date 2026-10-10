@@ -1,9 +1,11 @@
+import { getHubOpeningCredit, readSavedCollateralPolicy } from '@xln/frontend/lib/utils/onboarding/onboardingPreferences';
+import { sameJurisdictionIdentity } from '@xln/core/jurisdiction/machine/jurisdiction-runtime';
 import { useState } from 'react';
 import { Sheet } from '../Sheet';
 import { useApp } from '../../runtime/store';
 import { sendEntityTxs } from '../../runtime/tx';
 import { accountDisputeConfig, gossipProfile } from '../../runtime/financial/roles';
-import { getTokenMeta, parseAmount, shortId } from '../../runtime/format';
+import { getTokenMeta, parseAmount, shortId, plainAmount } from '../../runtime/format';
 import type { WalletView } from '../../runtime/views';
 
 export function OpenAccountSheet({ wallet, onClose }: { wallet: WalletView; onClose: () => void }) {
@@ -11,26 +13,35 @@ export function OpenAccountSheet({ wallet, onClose }: { wallet: WalletView; onCl
   const selectedTokenId = useApp(s => s.selectedTokenId);
   const [targetId, setTargetId] = useState('');
   const [creditText, setCreditText] = useState('');
-  const [autoCollateral, setAutoCollateral] = useState(false);
-  const [softText, setSoftText] = useState('');
-  const [hardText, setHardText] = useState('');
-  const [feeText, setFeeText] = useState('');
+  const [policy] = useState(readSavedCollateralPolicy);
+  const [autoCollateral, setAutoCollateral] = useState(policy.mode === 'autopilot');
+  const [softText, setSoftText] = useState(String(policy.softLimitUsd));
+  const [hardText, setHardText] = useState(String(policy.hardLimitUsd));
+  const [feeText, setFeeText] = useState(String(policy.maxFeeUsd));
   const [submitting, setSubmitting] = useState(false);
   const meta = getTokenMeta(selectedTokenId);
   const existing = new Set(wallet.accounts.map(account => account.counterpartyId));
+  const jurisdiction = wallet.frame?.activeEntity?.core.config.jurisdiction;
+  const targetJurisdiction = wallet.summaries.find(summary => summary.entityId.toLowerCase() === targetId)?.jurisdiction;
+  const compatibleTarget = sameJurisdictionIdentity(jurisdiction, targetJurisdiction);
   const candidates = wallet.summaries
+    .filter(summary => sameJurisdictionIdentity(jurisdiction, summary.jurisdiction))
     .map(summary => summary.entityId.toLowerCase())
     .filter(id => id && id !== wallet.entityId && !existing.has(id));
 
   const openAccount = async (): Promise<void> => {
     if (!wallet.entityId || !wallet.signerId || !targetId) return;
+    if (!compatibleTarget) {
+      toast('Choose a counterparty in the same jurisdiction and contract stack.', 'danger');
+      return;
+    }
     setSubmitting(true);
     try {
       const creditAmount = creditText.trim() ? parseAmount(creditText, meta.decimals) : 0n;
       // Same optional policy the SvelteKit hub onboarding attaches: the hub tops up
       // collateral on its own once the soft limit is crossed, up to the hard limit.
       let rebalancePolicy: { r2cRequestSoftLimit: bigint; hardLimit: bigint; maxAcceptableFee: bigint } | null = null;
-      if (autoCollateral) {
+      if (autoCollateral && wallet.hubs.has(targetId)) {
         const r2cRequestSoftLimit = parseAmount(softText || '0', meta.decimals);
         const hardLimit = parseAmount(hardText || '0', meta.decimals);
         const maxAcceptableFee = parseAmount(feeText || '0', meta.decimals);
@@ -90,7 +101,7 @@ export function OpenAccountSheet({ wallet, onClose }: { wallet: WalletView; onCl
             type="button"
             className={`picker-option${targetId === id ? ' active' : ''}`}
             style={{ padding: '10px 10px' }}
-            onClick={() => setTargetId(id)}
+            onClick={() => { setTargetId(id); setCreditText(wallet.hubs.has(id) ? plainAmount(getHubOpeningCredit(meta.decimals), meta.decimals) : '0'); }}
           >
             <span className="t">
               {wallet.names.get(id) || 'Entity'}
@@ -106,10 +117,11 @@ export function OpenAccountSheet({ wallet, onClose }: { wallet: WalletView; onCl
           className="input mono"
           placeholder="or paste an entity id, 0x…"
           value={targetId}
-          onChange={event => setTargetId(event.target.value.trim().toLowerCase())}
+          onChange={event => { const id = event.target.value.trim().toLowerCase(); setTargetId(id); setCreditText(wallet.hubs.has(id) ? plainAmount(getHubOpeningCredit(meta.decimals), meta.decimals) : '0'); }}
           spellCheck={false}
         />
       </div>
+      {targetId && !compatibleTarget ? <p className="note" role="alert">Choose a counterparty in the same jurisdiction and contract stack. Unknown networks cannot be verified.</p> : null}
       <div className="field">
         <span className="field-label">Credit line you extend · optional</span>
         <div className="field-row">
@@ -171,7 +183,7 @@ export function OpenAccountSheet({ wallet, onClose }: { wallet: WalletView; onCl
       <button
         type="button"
         className="btn"
-        disabled={!/^0x[0-9a-f]{64}$/.test(targetId) || submitting}
+        disabled={!/^0x[0-9a-f]{64}$/.test(targetId) || !compatibleTarget || submitting}
         onClick={() => void openAccount()}
       >
         {submitting ? 'Proposing…' : 'Propose account'}

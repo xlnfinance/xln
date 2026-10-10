@@ -94,7 +94,7 @@ export function validateSwapForm(input: SwapFormValidationInput): string {
   }
   if (input.wantAmount <= 0n) return 'Amount to receive is too small for selected price.';
   if (input.notionalUsd < MIN_ORDER_NOTIONAL_USD) {
-    return `Minimum order size is ~$${MIN_ORDER_NOTIONAL_USD}.`;
+    return `Order value after rounding is $${input.notionalUsd.toFixed(6)}; minimum is $${MIN_ORDER_NOTIONAL_USD}. Increase the amount slightly.`;
   }
   if (!input.wantTokenPresentInAccount) {
     return 'Inbound token is not active in this account. Add token capacity first.';

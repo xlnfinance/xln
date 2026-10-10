@@ -131,3 +131,8 @@ export function buildMoveRouteSteps(
       return ['Route not available'];
   }
 }
+
+/** A collateral withdrawal cannot spend an unsecured receivable or encumbered funds. */
+export function withdrawableCollateral(derived: { outCollateral: bigint; outTotalHold: bigint }): bigint {
+  return derived.outCollateral > derived.outTotalHold ? derived.outCollateral - derived.outTotalHold : 0n;
+}

@@ -5,11 +5,14 @@ import type { ReactNode } from 'react';
 import { Icon, type IconName } from './Icons';
 import { Toasts } from './Toasts';
 import { Palette } from './Palette';
+import { JurisdictionBanner } from './JurisdictionBanner';
+import { getJurisdictionBadgeInfo } from '@xln/frontend/lib/utils/identity/jurisdictionBadge';
 import { Tour } from './Tour';
 import { useExternalWalletSync } from '../runtime/financial/external';
 import { useWallet } from '../runtime/views';
 import { Logo } from './Logo';
 import { observeFundingBatches } from '../runtime/financial/funding-submission';
+import { useRecoverySync } from '../runtime/recovery-sync';
 
 /**
  * Destinations only. Pay, Receive and Swap are flows pushed over Home with a
@@ -51,6 +54,7 @@ export function Shell({ children }: { children: ReactNode }) {
   const { pathname } = useLocation();
   const entityId = useApp(s => s.activeEntityId);
   const wallet = useWallet(entityId);
+  useRecoverySync();
   useExternalWalletSync(wallet.entityId, wallet.signerId);
   const batches = wallet.frame?.activeEntity?.core?.jBatchState;
   useEffect(() => {
@@ -65,12 +69,11 @@ export function Shell({ children }: { children: ReactNode }) {
   useEffect(() => clearToasts(), [pathname, clearToasts]);
 
   return (
-    <div className="app">
+    <div className="app jurisdiction-surface" data-jurisdiction={getJurisdictionBadgeInfo(wallet.jurisdiction, wallet.frame?.activeEntity?.core?.config.jurisdiction?.chainId)?.className ?? 'generic'}>
       <a className="skip-link" href="#wallet-content">
         Skip to content
       </a>
       <Palette />
-      <Tour />
       <nav className="rail" aria-label="Primary">
         <div className="rail-mark" aria-hidden>
           <Logo size={22} />
@@ -92,6 +95,8 @@ export function Shell({ children }: { children: ReactNode }) {
       </nav>
 
       <main className="main" id="wallet-content" tabIndex={-1}>
+        <JurisdictionBanner wallet={wallet} />
+        <Tour />
         {children}
       </main>
 

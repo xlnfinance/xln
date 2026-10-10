@@ -9,10 +9,10 @@ export type { ExternalWalletApiContext } from './external-wallet/context';
 // This is the public HTTP composition root. Endpoint validation, faucet
 // serialization, and snapshot projection each live with their own owner.
 export const createExternalWalletApi = (context: ExternalWalletApiContext) => ({
-  provisionFaucetWallet: async (): Promise<void> => {
-    const adapter = context.getJAdapter();
+  provisionFaucetWallet: async (jurisdiction?: string): Promise<void> => {
+    const adapter = context.getJAdapter(undefined, jurisdiction);
     if (!adapter) throw new Error('J-adapter not initialized');
-    await provisionFaucetWalletFunding(context, adapter, await context.getTokenCatalog(), {
+    await provisionFaucetWalletFunding(context, adapter, await context.getTokenCatalog(undefined, jurisdiction), {
       ensureEth: true,
       ensureTokens: adapter.mode !== 'browservm',
     });

@@ -10,7 +10,7 @@ export function Formation() {
   const wallet = useWallet(entityId);
   const networks = [...(getEmbeddedEnv()?.state.jReplicas.keys() ?? [])];
   const [name, setName] = useState('');
-  const [network, setNetwork] = useState('');
+  const [network, setNetwork] = useState(wallet.jurisdiction);
   const [kind, setKind] = useState<'lazy' | 'numbered'>('numbered');
   const [shared, setShared] = useState(false);
   const [members, setMembers] = useState<BoardMember[]>([]);
@@ -50,6 +50,6 @@ export function Formation() {
       </fieldset>
     </form>}
     {error && <p className="note" role="alert">{error}</p>}
-    {result && <div role="status"><p>{result.imported ? 'Entity created. Select it in your entity switcher.' : 'Board registered. Its members can import the configuration.'}</p><CopyId value={result.entityId} label="Created entity id" />{result.transactionHash && <p><CopyId value={result.transactionHash} label="Registration transaction" /></p>}</div>}
+    {result && <div role="status" data-testid="formation-result" data-entity-id={result.entityId}><p>{result.imported ? 'Entity created. Select it in your entity switcher.' : 'Board registered. Its members can import the configuration.'}</p><CopyId value={result.entityId} label="Created entity id" />{result.transactionHash && <p><CopyId value={result.transactionHash} label="Registration transaction" /></p>}</div>}
   </details>;
 }

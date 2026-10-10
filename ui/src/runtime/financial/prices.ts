@@ -1,4 +1,5 @@
-import { amountToUsd, getAssetUsdPrice } from '$lib/utils/assetPricing';
+import { getAssetUsdPrice } from '$lib/utils/assetPricing';
+import { getAssetValueUsd } from '$lib/components/Entity/assets/entity-asset-values';
 import { getTokenMeta } from '../format';
 
 /**
@@ -6,10 +7,9 @@ import { getTokenMeta } from '../format';
  * SvelteKit frontend renders with; one source, two shells.
  */
 export function usdOf(tokenId: number, amount: bigint): number {
-	if (amount <= 0n) return 0;
 	const meta = getTokenMeta(tokenId);
 	if (meta.symbol === '?' || getAssetUsdPrice(meta.symbol) <= 0) return 0;
-	return amountToUsd(amount, meta.decimals, meta.symbol);
+	return getAssetValueUsd(amount, meta);
 }
 
 export function hasUsdPrice(tokenId: number): boolean {

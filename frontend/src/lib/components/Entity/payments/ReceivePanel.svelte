@@ -131,13 +131,13 @@
         <input type="text" bind:value={description} data-testid="receive-invoice-description" aria-label="Invoice description" />
       </div>
       <div class="invoice-actions">
-        <button class="primary-inline" type="button" on:click={() => copyText(invoicePreview, 'invoice')}>
+        <button class="primary-inline" type="button" on:click={() => copyText(walletHref, 'invoice')}>
           {#if copiedInvoice}
             <Check size={14} />
-            <span>Copied Invoice</span>
+            <span>Copied payment link</span>
           {:else}
             <Copy size={14} />
-            <span>Copy Invoice</span>
+            <span>Copy payment link</span>
           {/if}
         </button>
         <button class="secondary-inline" type="button" on:click={downloadQr} disabled={!qrDataUrl}>

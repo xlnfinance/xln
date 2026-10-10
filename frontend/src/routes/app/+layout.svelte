@@ -27,7 +27,7 @@
   import { tabOperations } from '#lib/stores/ui/tabStore.ts';
   import { timeOperations } from '#lib/stores/timeStore.ts';
   import { activeRuntime, vaultOperations } from '#lib/stores/vault/vaultStore.ts';
-  import { resolveDeployVersionAction } from '#lib/utils/deployVersionPolicy.ts';
+  import { isDisposableLocalTestnet, resolveDeployVersionAction } from '#lib/utils/deployVersionPolicy.ts';
   import { resetEverything } from '#lib/utils/control/resetEverything.ts';
   import { parseStorageSchemaMismatch } from '#lib/utils/recovery/storageSchemaRecovery.ts';
   import {
@@ -123,24 +123,12 @@
 
   async function maybeHandleResetHash(): Promise<boolean> {
     if (!isResetHashActive()) return false;
-    const confirmed = window.confirm('reset everything');
-    if (confirmed) {
-      await resetEverything({ confirmed: true, reason: 'hash-reset' });
-      return true;
-    }
-    // Reset is a hard lifecycle boundary. SvelteKit navigation is unsafe while
-    // the root component is still mounting (`#reset` can arrive on first load),
-    // so leave the current document instead of mutating router state in-place.
-    window.location.replace('/app');
+    await resetEverything({ confirmed: true, reason: 'hash-reset' });
     return true;
   }
 
   async function handleResetEverything(): Promise<void> {
     if (resettingEverything) return;
-    const confirmed = window.confirm(
-      'Reset ALL local XLN data? Wallets, runtimes, settings, and IndexedDB databases will be deleted.'
-    );
-    if (!confirmed) return;
     resettingEverything = true;
     try {
       await resetEverything({ confirmed: true, reason: 'loading-screen' });
@@ -416,7 +404,11 @@
       throw new Error('MISSING_DEPLOY_VERSION');
     }
 
-    return { version, ephemeralTestnet: root['ephemeralTestnet'] === true };
+    return {
+      version,
+      ephemeralTestnet: root['ephemeralTestnet'] === true
+        || isDisposableLocalTestnet(import.meta.env.DEV, window.location.hostname),
+    };
   }
 
   async function fetchCurrentDeployVersion(): Promise<DeployVersionPayload> {

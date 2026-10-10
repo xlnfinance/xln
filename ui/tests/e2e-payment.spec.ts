@@ -12,12 +12,12 @@
  * Actions use real UI controls; recovery also reads committed evidence through the wallet adapter.
  */
 import { expect, test, type Page } from '@playwright/test';
-import type { RuntimeAdapterViewFrame, XLNModule } from '../../core/api/public/runtime-module';
+import type { RuntimeAdapterViewFrame } from '../../core/api/public/runtime-module';
 import type { RuntimeAdapter, RuntimeAdapterFrameReceiptResponse } from '../../core/api/runtime-adapter/types';
 import type { RuntimeAdapterFrameSummary } from '../../core/api/runtime-adapter/resolve';
 import { safeStringify } from '../../core/protocol/serialization';
 import { enterStack, readWalletCheckpoint, reopenStack } from './stack';
-import { readCommittedPayment } from './payment-evidence';
+import { readCommittedPayment, readUsdcAccount } from './payment-evidence';
 
 const PAYMENT_AMOUNT = '25';
 const CONSENSUS_TIMEOUT = 15_000;
@@ -26,31 +26,6 @@ const parseMoney = (text: string): number => Number(text.replace(/[^0-9.\-−]/g
 
 async function readUsdcNet(page: Page): Promise<number> {
   return parseMoney(await page.getByTestId('token-net-USDC').innerText());
-}
-
-/** Read the committed primary Account, independently of rounded screen text. */
-async function readUsdcAccount(page: Page, entityId: string) {
-  return page.evaluate(async owner => {
-    const debug = (window as Window & {
-      __xln?: { adapter: () => RuntimeAdapter | null; xln: () => Promise<XLNModule> };
-    }).__xln;
-    const adapter = debug?.adapter();
-    if (!debug || !adapter) throw new Error('Payment diagnostics unavailable');
-    const frame = await adapter.read<RuntimeAdapterViewFrame>('view-frame', { entityId: owner });
-    const account = frame.activeEntity?.accounts.items[0];
-    if (!account || frame.activeEntityId !== owner) throw new Error('Payment Account unavailable');
-    const delta = account.state.deltas.get(1);
-    if (!delta) throw new Error('Payment USDC lane unavailable');
-    const xln = await debug.xln();
-    const derived = xln.deriveDelta(delta, owner === account.state.leftEntity);
-    return {
-      owned: (derived.outCollateral + derived.outPeerCredit - derived.inOwnCredit).toString(),
-      root: account.currentFrame.accountStateRoot,
-      height: account.currentHeight,
-      pending: Boolean(account.pendingFrame),
-      mempool: account.mempoolCount,
-    };
-  }, entityId);
 }
 
 async function readPaymentStarts(page: Page, entityId: string, fromHeight = 1) {
@@ -149,6 +124,8 @@ test.describe('wallet UI payment', () => {
       expect(await readPaymentStarts(page, wallet.entityId)).toHaveLength(0);
       // A rapid second click must not create a second payment.
       await submit.dblclick();
+
+      await page.getByTestId('receipt-open').click();
 
       const receipt = page.getByTestId('payment-receipt');
       await expect(receipt).toBeVisible({ timeout: CONSENSUS_TIMEOUT });
@@ -267,6 +244,7 @@ test('payment receipts and recovery dialogs keep keyboard focus inside and resto
   await page.getByTestId('pay-amount').fill('25');
   await expect(page.getByTestId('pay-submit')).toBeEnabled();
   await page.getByTestId('pay-submit').click();
+  await page.getByTestId('receipt-open').click();
   const payment = page.getByTestId('payment-receipt');
   await expect(payment.getByTestId('receipt-kicker')).toHaveText('Paid', { timeout: 15_000 });
   expect(await payment.evaluate(node => node.contains(document.activeElement))).toBe(true);

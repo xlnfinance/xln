@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { buildXlnInvoiceDeepLink, parseXlnInvoice } from '../../../../frontend/src/lib/utils/xlnInvoice';
+import { buildWalletPayHref, buildXlnInvoiceDeepLink, parseXlnInvoice } from '../../../../frontend/src/lib/utils/xlnInvoice';
 
 const TARGET = `0x${'ab'.repeat(32)}`;
 const PAYLOAD = encodeURIComponent(`${TARGET}?token=1&amount=5&desc=Local+payment`);
@@ -34,4 +34,19 @@ describe('xln invoice URL policy', () => {
       description: 'Local payment',
     });
   });
+});
+
+
+test('payment links preserve the local wallet origin and entry path while public links stay canonical', () => {
+  const intent = { targetEntityId: TARGET, tokenId: 1, amount: '5' };
+  for (const href of ['http://localhost:5183/receive', 'http://127.0.0.1:8081/app#accounts/receive']) {
+    const link = buildWalletPayHref(intent, href);
+    expect(new URL(link).origin).toBe(new URL(href).origin);
+    expect(new URL(link).pathname).toBe(new URL(href).pathname);
+    expect(parseXlnInvoice(link)).toMatchObject({ targetEntityId: TARGET, tokenId: 1, amount: '5' });
+  }
+  for (const href of ['', 'https://xln.finance/ui/receive', 'https://example.test/app', 'http://localhost.evil.test/app']) {
+    expect(new URL(buildWalletPayHref(intent, href)).origin).toBe('https://xln.finance');
+    expect(new URL(buildWalletPayHref(intent, href)).pathname).toBe('/app');
+  }
 });

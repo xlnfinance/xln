@@ -7,7 +7,7 @@
   import { errorLog } from '../../../stores/errorLogStore';
   import { runtimeControllerHandle } from '../../../stores/runtimeControllerStore';
   import { xlnFunctions } from '../../../stores/xlnStore';
-  import { getOpenAccountRebalancePolicyData } from '#lib/utils/onboarding/onboardingPreferences.ts';
+  import { getHubOpeningCredit, getOpenAccountRebalancePolicyData } from '#lib/utils/onboarding/onboardingPreferences.ts';
   import {
     normalizeEntityId,
     requireSignerIdForEntity,
@@ -120,7 +120,7 @@
       if (!signerId) throw new Error('No signer available for hub account setup');
 
       const tokenDecimals = $xlnFunctions.getTokenInfo(1).decimals;
-      const creditAmount = 10_000n * 10n ** BigInt(tokenDecimals);
+      const creditAmount = getHubOpeningCredit(tokenDecimals);
       const rebalancePolicy = getOpenAccountRebalancePolicyData(tokenDecimals);
       const normalizedSourceEntityId = normalizeHubEntityId(entityId);
       const sourceIsHub = hubDiscoveryProjection.committedRoles.get(normalizedSourceEntityId);

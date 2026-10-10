@@ -6,6 +6,12 @@ This file defines the release bar for real user funds. It is narrower than
 `status.md`: status explains what is active now; this file explains what must
 be true before mainnet is acceptable.
 
+Owner decision, 2026-10-10: an external auditor is not a required launch gate.
+Codex performs and documents the engineering review; this is not independent
+external audit evidence. Exact financial assertions, security regression gates,
+recovery, native-chain verification and deployment/rollback evidence remain
+required. The owner signs mainnet deployment transactions himself.
+
 For the current capped public-testnet / pre-mainnet launch loop, use the strict
 acceptance prompt and evidence loop in
 [mainnet-acceptance-gate.md](mainnet-acceptance-gate.md).
@@ -27,7 +33,7 @@ and `bun run security:audit-pack` passed on 2026-07-09, and a
 historical release soak completed 13 full gate/benchmark iterations before
 being stopped manually. That is enough for serious public-testnet hardening. It
 is not enough for real funds because the full uninterrupted current
-mainnet-preflight soak, real mainnet ops, and independent external audit are
+mainnet-preflight soak and real mainnet ops are
 still open. Peer State Refresh is an optional third-line recovery aid, not a
 launch gate.
 
@@ -166,7 +172,7 @@ Required:
 - recovery coverage is visible enough for users to know whether an account is
   locally backed up, tower-backed, and delayed-last-resort protected.
 
-External audit handoff:
+Required engineering security checks:
 
 ```bash
 bun run security:contract-governance
@@ -179,10 +185,11 @@ bun run security:swap-cancel-canonical
 bun run security:audit-pack
 ```
 
-Brief: [docs/security/external-audit-brief.md](security/external-audit-brief.md)
+Optional external review brief: [docs/security/external-audit-brief.md](security/external-audit-brief.md)
 
-The audit pack command must stay green, but green internal gates are not a
-substitute for an independent audit before uncapped real funds.
+The audit pack command must stay green. Per the owner's 2026-10-10 decision,
+external audit sign-off is optional and does not block launch. Internal review
+must not be described as independent external assurance.
 
 ## Things That Are Mainnet-Relevant But Not First-Launch Gates
 

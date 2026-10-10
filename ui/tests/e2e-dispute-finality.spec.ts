@@ -1,37 +1,15 @@
 import { expect, test, type Page } from '@playwright/test';
-import { JsonRpcProvider, ZeroHash } from 'ethers';
+import { ZeroHash } from 'ethers';
 import { Depository__factory } from '../../jurisdictions/typechain-types/factories/Depository.sol/Depository__factory';
-import { computeAccountKey } from '../../core/jurisdiction/adapter/events/contract-codec';
-import { decodeInt512 } from '../../core/protocol/crypto/abi-money';
 import { safeStringify } from '../../core/protocol/serialization';
-import { LOCAL_TEST_STACK_BASES } from '../../core/scripts/e2e/harness/local-test-port-lease';
 import type { RuntimeAdapterViewFrame, RuntimeReplica, XLNModule } from '../../core/api/public/runtime-module';
 import type { RuntimeAdapter } from '../../core/api/runtime-adapter/types';
+import { privateChain, chainMoney, externalUsdc } from './dispute-chain';
 import { enterStack } from './stack';
 
 type DebugWindow = Window & { __xln?: { adapter: () => RuntimeAdapter | null; env: () => RuntimeReplica | null; xln: () => Promise<XLNModule>; store: { getState: () => { activeEntityId: string | null } } } };
 const AMOUNT = 100_000_000n;
 const WAIT = { timeout: 15_000, intervals: [100, 250, 500] };
-type FinalizeWarning = { counterparty: string; nowSec: number; timeoutSec: number; hasPulls: boolean };
-
-function finalizeWarning(text: string): FinalizeWarning | null {
-  const prefix = '[WARN][entity.dispute] finalize.too_early ';
-  if (!text.startsWith(prefix)) return null;
-  const value: unknown = JSON.parse(text.slice(prefix.length));
-  if (typeof value !== 'object' || value === null || !('counterparty' in value) || typeof value.counterparty !== 'string' || !('nowSec' in value) || typeof value.nowSec !== 'number' || !Number.isSafeInteger(value.nowSec) || !('timeoutSec' in value) || typeof value.timeoutSec !== 'number' || !Number.isSafeInteger(value.timeoutSec) || !('hasPulls' in value) || typeof value.hasPulls !== 'boolean') throw new Error('DISPUTE_FINALIZE_WARNING_MALFORMED');
-  return { counterparty: value.counterparty, nowSec: value.nowSec, timeoutSec: value.timeoutSec, hasPulls: value.hasPulls };
-}
-
-function privateChain(baseURL: string | undefined): JsonRpcProvider {
-  const rpc = process.env['XLN_UI_DISPUTE_PRIVATE_RPC'];
-  const origin = process.env['XLN_UI_DISPUTE_PRIVATE_ORIGIN'];
-  if (!rpc || !origin || baseURL !== origin) throw new Error('DISPUTE_ISOLATED_STAND_REQUIRED');
-  const url = new URL(rpc);
-  const base = Number(url.port);
-  if (url.hostname !== '127.0.0.1' || !LOCAL_TEST_STACK_BASES.some(port => port === base) || origin !== `http://127.0.0.1:${base + 2}`) throw new Error('DISPUTE_PRIVATE_CLOCK_ENDPOINT_INVALID');
-  return new JsonRpcProvider(rpc, 31337, { staticNetwork: true, cacheTimeout: -1 });
-}
-
 const readState = (page: Page, hubId: string) => page.evaluate(async counterpartyId => {
   const debug = (window as DebugWindow).__xln;
   if (!debug) throw new Error('Wallet diagnostics unavailable');
@@ -48,7 +26,7 @@ const readState = (page: Page, hubId: string) => page.evaluate(async counterpart
   const xln = await debug.xln();
   const derived = xln.deriveDelta(delta, xln.isLeftEntity(entityId, counterpartyId));
   const batch = active.core.jBatchState;
-  return { entityId, height: frame.height, timestamp: active.core.timestamp, depository: jurisdiction.depositoryAddress, lastFinalizedJHeight: active.core.lastFinalizedJHeight,
+  return { entityId, signerId: active.core.signerId, height: frame.height, timestamp: active.core.timestamp, depository: jurisdiction.depositoryAddress, lastFinalizedJHeight: active.core.lastFinalizedJHeight,
     disputeConfig: account.state.disputeConfig, accountHeight: account.currentHeight, accountRoot: account.currentFrame.accountStateRoot, status: account.status,
     reserve: (active.core.reserves.get(1) ?? 0n).toString(), collateral: delta.collateral.toString(), ondelta: delta.ondelta.toString(), offdelta: delta.offdelta.toString(),
     ownValue: (derived.outCollateral + derived.outPeerCredit - derived.inOwnCredit).toString(), jNonce: account.state.jNonce,
@@ -138,35 +116,23 @@ async function finishSubmission(page: Page, hubId: string): Promise<void> {
   if (state.batch.finalizations > 0 && !state.batch.sent) await broadcast(page, 'Dispute finalize');
 }
 
-type Depository = ReturnType<typeof Depository__factory.connect>;
-async function chainMoney(contract: Depository, owner: string, hub: string) {
-  const key = computeAccountKey(owner, hub);
-  const [reserve, peerReserve, collateral, account] = await Promise.all([contract._reserves(owner, 1), contract._reserves(hub, 1), contract._collaterals(key, 1), contract._accounts(key)]);
-  return { reserve: reserve.toString(), peerReserve: peerReserve.toString(), collateral: collateral.collateral.toString(), ondelta: decodeInt512(collateral.ondelta).toString(), nonce: account.nonce.toString(), disputeHash: account.disputeHash, timeout: Number(account.disputeTimeout) };
-}
-
 // The signed dispute window is waited out by moving a private chain's clock,
 // so this needs a stand nobody else shares: its own anvil on a leased local
-// port with the wallet served two ports above it. No stand in the repository
-// sets these today, so elsewhere the test says what it needs and stops.
+// port with the wallet served two ports above it. The local production smoke
+// wallet gate provides both endpoints and owns the chain for the entire test.
 test.skip(
   !process.env['XLN_UI_DISPUTE_PRIVATE_RPC'] || !process.env['XLN_UI_DISPUTE_PRIVATE_ORIGIN'],
   'needs a private dispute stand: XLN_UI_DISPUTE_PRIVATE_RPC and XLN_UI_DISPUTE_PRIVATE_ORIGIN',
 );
 
-test('UI dispute rejects early finalization, then releases exactly 100 USDC after its signed window', { tag: '@functional' }, async ({ page, baseURL }, testInfo) => {
-  test.setTimeout(50_000);
+test('UI dispute prevents early finalization, then releases exactly 100 USDC after its signed window', { tag: '@functional' }, async ({ page, baseURL }, testInfo) => {
+  test.setTimeout(60_000);
   const provider = privateChain(baseURL);
   const errors: string[] = [];
-  const rejectionWarnings: FinalizeWarning[] = [];
   let diagnosticHub: string | undefined;
   page.on('pageerror', error => errors.push(error.message));
   page.on('console', message => {
     if (message.type() === 'error') console.log(`DISPUTE_BROWSER_ERROR ${message.text()}`);
-    if (message.type() === 'warning') {
-      const warning = finalizeWarning(message.text());
-      if (warning) rejectionWarnings.push(warning);
-    }
   });
   try {
     await page.clock.install();
@@ -183,7 +149,8 @@ test('UI dispute rejects early finalization, then releases exactly 100 USDC afte
     expect(fundedChain.reserve).toBe('0');
     expect(fundedChain.collateral).toBe(AMOUNT.toString());
     expect(fundedChain.ondelta).toBe(funded.ondelta);
-    await page.getByTestId('account-row').first().click();
+    await page.getByTestId('wallet-tutorial').click();
+    await page.getByTestId('tour-chapter').selectOption('dispute');
     await manageDispute(page);
     await page.getByTestId('dispute-prepare').click();
     await page.getByTestId('dispute-prepare-confirm').click();
@@ -214,11 +181,8 @@ test('UI dispute rejects early finalization, then releases exactly 100 USDC afte
     await page.getByTestId('account-row').first().click();
     await expect(page.getByTestId('account-dispute-state')).toContainText('on-chain', WAIT);
     await manageDispute(page);
-    await expect(page.getByTestId('dispute-finalize')).toBeEnabled();
-    const warningCount = rejectionWarnings.length;
-    await page.getByTestId('dispute-finalize').click();
-    await expect.poll(async () => (await readDisputeJournal(page, started.height, hubId)).finalizeInputs.length, WAIT).toBe(1);
-    await expect.poll(() => rejectionWarnings.slice(warningCount).some(warning => warning.counterparty === hubId.slice(-4) && warning.timeoutSec === active.disputeTimeout && warning.nowSec < warning.timeoutSec && !warning.hasPulls), WAIT).toBe(true);
+    await expect(page.getByTestId('dispute-finalize')).toBeDisabled();
+    await expect(page.getByTestId('dispute-finalize')).toHaveText('Waiting for challenge window');
     const rejected = await readState(page, hubId);
     expect(rejected.dispute).toEqual(active);
     expect(rejected.batch).toEqual(started.batch);
@@ -227,10 +191,10 @@ test('UI dispute rejects early finalization, then releases exactly 100 USDC afte
     expect(await chainMoney(contract, wallet.entityId, hubId)).toEqual(startedChain);
     expect(await contract.queryFilter(contract.filters.DisputeFinalized(wallet.entityId, hubId), initialBlock)).toHaveLength(0);
     const rejectedJournal = await readDisputeJournal(page, started.height, hubId);
-    expect(rejectedJournal.finalizeInputs).toHaveLength(1);
-    expect(rejectedJournal.finalizeInputs.map(input => input.description)).toEqual(['dispute-finalize-from-configure']);
-    expect(rejectedJournal.finalizeInputs.every(input => input.timestamp < active.disputeTimeout * 1000)).toBe(true);
-    await testInfo.attach('early-finalize-rejection', { body: safeStringify({ started, rejected, startedChain, acceptedWal: rejectedJournal, warnings: rejectionWarnings.slice(warningCount) }), contentType: 'application/json' });
+    expect(rejectedJournal.finalizeInputs).toHaveLength(0);
+    expect(rejectedJournal.submissions).toHaveLength(0);
+    await testInfo.attach('early-finalize-prevention', { body: safeStringify({ started, rejected, startedChain, acceptedWal: rejectedJournal }), contentType: 'application/json' });
+    await page.getByRole('dialog').getByRole('button', { name: 'Close', exact: true }).click();
     // The real host clock is performance.timeOrigin + performance.now(), not Date.
     // Advancing elapsed time runs the existing deadline hook; its canonical output
     // finalizes the UI-started dispute without another financial input from the test.
@@ -301,8 +265,24 @@ test('UI dispute rejects early finalization, then releases exactly 100 USDC afte
     await expect(page.getByTestId('dispute-closed')).toHaveText('Dispute finalized. This account is permanently closed.');
     await expect(page.locator('[data-testid="dispute-prepare"], [data-testid="dispute-prepare-confirm"], [data-testid="dispute-finalize"]')).toHaveCount(0);
     expect(errors, 'no uncaught browser errors').toEqual([]);
-    await testInfo.attach('dispute-finality', { body: safeStringify({ mode: 'canonical-auto-after-ui-start-and-early-rejection', beforeClock, afterClock, funded, fundedChain, started, startTx: start.transactionHash, deadlineBlock: { number: block.number, hash: block.hash, timestamp: block.timestamp }, finished, finalChain, finalTx: receipt.hash, sourceBatch, accepted }), contentType: 'application/json' });
-    await page.screenshot({ path: testInfo.outputPath('dispute-paid.png'), fullPage: true });
+    await testInfo.attach('dispute-finality', { body: safeStringify({ mode: 'canonical-auto-after-ui-start-and-early-prevention', beforeClock, afterClock, funded, fundedChain, started, startTx: start.transactionHash, deadlineBlock: { number: block.number, hash: block.hash, timestamp: block.timestamp }, finished, finalChain, finalTx: receipt.hash, sourceBatch, accepted }), contentType: 'application/json' });
+    await page.getByRole('dialog').getByRole('button', { name: 'Close', exact: true }).click();
+    await page.getByTestId('nav-home').locator('visible=true').first().click();
+    await expect(page.getByTestId('token-net-USDC')).toHaveText('100.00');
+    await expect(page.getByTestId('account-row').first()).toContainText('Closed after dispute');
+    await expect(page.getByRole('region', { name: 'Test money faucet' })).toContainText('closed after a dispute');
+    const externalBefore = await externalUsdc(contract, funded.signerId, provider);
+    await page.getByTestId('home-move').click();
+    await page.getByTestId('move-from-reserve').click();
+    await page.getByTestId('move-to-external').click();
+    await page.getByTestId('move-external-recipient').fill(funded.signerId);
+    await page.getByTestId('move-amount').fill('100');
+    await page.getByTestId('move-now').click();
+    await expect.poll(() => externalUsdc(contract, funded.signerId, provider), WAIT).toBe(externalBefore + AMOUNT);
+    await expect.poll(() => contract._reserves(wallet.entityId, 1), WAIT).toBe(0n);
+    await expect.poll(async () => (await readState(page, hubId)).reserve, WAIT).toBe('0');
+    await testInfo.attach('withdrawn-dispute-proceeds', { body: safeStringify({ signerId: funded.signerId, before: externalBefore, after: await externalUsdc(contract, funded.signerId, provider) }), contentType: 'application/json' });
+    await page.screenshot({ path: testInfo.outputPath('dispute-paid.png'), fullPage: true, animations: 'disabled' });
   } catch (error) {
     if (diagnosticHub) {
       try {

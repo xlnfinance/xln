@@ -6,6 +6,28 @@ product backlog; long-term work belongs in `docs/roadmap.md`.
 September 30 implementation and verification: [J/E/A continuation](docs/jea-continuation.md).
 The 138-target E2E snapshot and green full check are dated evidence, not mainnet acceptance.
 
+## Current execution order — 2026-10-10
+
+Latest owner decisions override the historical launch snapshots below: Ethereum,
+native TRON and four-node XLNC; 10-fold lower XLNC gas budget; equal React/Svelte
+priority; lending and multisig companies with existing EP shares included.
+The owner signs mainnet transactions and approves the exact production build.
+
+1. Preserve the shared working candidate in a WIP checkpoint and execute current
+   source checks. Missing full-suite evidence stays explicit.
+2. Reproduce the XLNC mixed-proof exit gas failure and measure its cause; current
+   recorded 17,388,717 execution gas cannot fit the selected 6,000,000 block.
+   Do not lower financial proof bounds or raise network gas to hide the failure.
+3. Finish actual tutorial journeys on both UIs: payments, swaps/cross-swaps,
+   lending/withdrawal/borrow/repay, disputes/recovery and companies. Existing React
+   tutorial run is 8/8; newly changed Svelte financial regressions remain pending.
+4. Freeze the candidate and satisfy the existing replay/native-J/recovery/load and
+   release gates. Prepare the xln.finance deployment and rollback package tied to
+   exact hashes; only then request the owner's build approval and signatures.
+
+Working method: [improvement-loop.md](docs/improvement-loop.md). No additional
+agent framework, duplicated checklist or new financial implementation is needed.
+
 ## Adopted launch design — 2026-09-05
 
 Canonical product and evidence contract: [launch-design.md](docs/launch-design.md).

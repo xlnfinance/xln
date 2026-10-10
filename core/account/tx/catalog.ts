@@ -6,7 +6,7 @@ export const ACCOUNT_TX_TYPES = [
   'lending_fund',
   'lending_borrow_request',
   'lending_repay',
-  'lending_credit',
+  'lending_disburse',
   'lending_close_request',
   'lending_close_payout',
   'add_delta',

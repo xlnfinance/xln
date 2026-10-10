@@ -304,6 +304,7 @@ const handleHealth = async (
     towerId: store.towerId,
     signerAddress: store.signerAddress,
     maxStoredBytesPerLookupKey: store.maxStoredBytesPerLookupKey,
+    maxAppointmentBytes: resolveAppointmentBodyLimit(store),
     maxLookupKeys: store.maxLookupKeys,
     maxTotalStoredBytes: store.maxTotalStoredBytes,
     maxBundlesPerLookupKey: store.maxBundlesPerLookupKey,

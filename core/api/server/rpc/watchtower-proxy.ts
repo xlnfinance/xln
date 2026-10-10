@@ -1,7 +1,17 @@
 import { fetchRpcProxyText } from './proxy-safety';
+import { WATCHTOWER_PROXY_BODY_MAX_BYTES } from '../http-body-limit';
+import { safeStringify } from '../../../protocol/serialization';
 
 const ALLOWED_LOCAL_HOSTS = new Set(['127.0.0.1', 'localhost']);
-const WATCHTOWER_PROXY_TIMEOUT_MS = 5_000;
+const WATCHTOWER_PROXY_TIMEOUT_MS = 30_000;
+
+const proxyHealth = (payload: string): string => {
+  const health: unknown = JSON.parse(payload);
+  if (!health || typeof health !== 'object' || !('maxAppointmentBytes' in health)) throw new Error('WATCHTOWER_BODY_LIMIT_INVALID');
+  const maximum = health.maxAppointmentBytes;
+  if (typeof maximum !== 'number' || !Number.isSafeInteger(maximum) || maximum <= 0) throw new Error('WATCHTOWER_BODY_LIMIT_INVALID');
+  return safeStringify({ ...health, maxAppointmentBytes: Math.min(maximum, WATCHTOWER_PROXY_BODY_MAX_BYTES) });
+};
 
 const allowedLocalPorts = (): ReadonlySet<string> => new Set(
   String(process.env['XLN_WATCHTOWER_PROXY_PORTS'] || process.env['XLN_WATCHTOWER_PORT'] || '9100')
@@ -61,7 +71,13 @@ export const handleWatchtowerProxy = async (req: Request): Promise<Response> => 
       },
       ...(body !== undefined ? { body } : {}),
     }, WATCHTOWER_PROXY_TIMEOUT_MS, 'WATCHTOWER_PROXY_TIMEOUT');
-    return new Response(payload, {
+    // Advertise the effective transport ceiling alongside the tower's storage
+    // quota so clients can reject oversized uploads before transferring them.
+    const healthPath = upstreamUrl.pathname === '/healthz' || upstreamUrl.pathname === '/api/tower/healthz';
+    const responseBody = upstream.ok && healthPath
+      ? proxyHealth(payload)
+      : payload;
+    return new Response(responseBody, {
       status: upstream.status,
       headers: {
         'content-type': upstream.headers.get('content-type') || 'application/json',

@@ -193,7 +193,9 @@ test(
     const sourceHubId = new URL(page.url()).pathname.split('/accounts/')[1];
     if (!sourceHubId || !/^0x[0-9a-f]{64}$/.test(sourceHubId)) throw new Error('Primary hub Account unavailable');
     await page.getByTestId('back').click();
-    await page.getByTestId('home-swap').click();
+    await page.getByTestId('wallet-tutorial').click();
+    await page.getByTestId('tour-chapter').selectOption('cross');
+    await expect(page.getByTestId('tour-result')).toContainText('source debit AND destination credit');
     const across = page.getByRole('button', { name: 'Across networks', exact: true });
     await expect(across).toBeEnabled({ timeout: 5_000 });
     await across.click();

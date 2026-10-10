@@ -71,5 +71,5 @@ test('hash reset never enters SvelteKit navigation during root mount', () => {
   expect(appLayoutSource).not.toContain("from '$app/navigation'");
   expect(appLayoutSource).not.toContain("replaceState('/app'");
   expect(appLayoutSource).toContain("await resetEverything({ confirmed: true, reason: 'hash-reset' })");
-  expect(appLayoutSource).toContain("window.location.replace('/app')");
+  expect(appLayoutSource).not.toContain("confirmBrowserReset");
 });

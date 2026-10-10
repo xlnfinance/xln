@@ -5,6 +5,9 @@
   import type { Tab } from '#lib/types/ui.ts';
   import ContextSwitcher from './shell/ContextSwitcher.svelte';
   import type { ViewTab } from './entity-panel-routing';
+  import { walletHelp } from '#lib/utils/ui/walletHelp.ts';
+  import LendingBalance from '../assets/lending/LendingBalance.svelte';
+  import type { LendingBalanceAccount } from '#lib/utils/ui/lendingBalance.ts';
 
   type JurisdictionBadge = {
     className: string;
@@ -31,6 +34,11 @@
   export let currentEntityValue = '';
   export let copiedMetaField = '';
   export let netWorth = 0;
+  export let lendingAccounts: LendingBalanceAccount[] = [];
+  export let lendingApiBase: string;
+  export let isLive: boolean;
+  export let getAssetValue: (token: number, amount: bigint) => number;
+  export let availableToPay = 0;
   export let tabs: TopTab[] = [];
   export let activeTab: ViewTab = 'assets';
   export let pendingBatchCount = 0;
@@ -102,8 +110,10 @@
     </div>
   </div>
   <div class="hero-right">
-    <div class="hero-networth">{formatUsdExact(netWorth)}</div>
-    <div class="hero-label">Net Worth</div>
+    <LendingBalance entityId={tab.entityId} apiBase={lendingApiBase} accounts={lendingAccounts} {isLive} walletBalance={netWorth} {getAssetValue} {formatUsdExact} />
+    <div class="hero-label" title={walletHelp['balance']}>Total balance</div>
+    <div class="hero-label">Available to pay: {formatUsdExact(availableToPay)} · includes credit</div>
+    <details><summary>Balance explained</summary><p>{walletHelp['balance']}</p></details>
   </div>
 </section>
 
@@ -239,12 +249,6 @@
     flex: 0 0 auto;
   }
 
-  .hero-networth {
-    color: var(--theme-text-primary, #f4f4f5);
-    font-size: 28px;
-    line-height: 1;
-    font-weight: 800;
-  }
 
   .hero-label {
     margin-top: 5px;
@@ -342,8 +346,12 @@
   }
 
   @media (max-width: 900px) {
+    .hero {
+      flex-direction: column;
+      align-items: stretch;
+    }
     .hero-right {
-      display: none;
+      text-align: left;
     }
   }
 
@@ -381,9 +389,6 @@
       overflow-wrap: anywhere;
     }
 
-    .hero-networth {
-      font-size: 24px;
-    }
 
     .hero-label {
       margin-top: 2px;
@@ -423,8 +428,5 @@
       padding: 6px 8px;
     }
 
-    .hero-networth {
-      font-size: 20px;
-    }
   }
 </style>

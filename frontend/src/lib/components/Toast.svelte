@@ -3,6 +3,7 @@
 -->
 <script lang="ts">
   import { toasts, type Toast } from '#lib/stores/ui/toastStore.ts';
+  import { explainWalletError } from '#lib/utils/ui/walletError.ts';
   import { fly, fade } from 'svelte/transition';
   import { flip } from 'svelte/animate';
 
@@ -42,7 +43,7 @@
           </svg>
         {/if}
       </span>
-      <span class="message">{toast.message}</span>
+      <span class="message" role={toast.type === 'error' ? 'alert' : 'status'}>{toast.type === 'error' ? explainWalletError(toast.message) : toast.message}</span>
       <button class="close" aria-label="Dismiss notification" on:click={() => toasts.remove(toast.id)}>
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
           <path d="M18 6L6 18M6 6l12 12"/>
@@ -126,6 +127,8 @@
   .message {
     flex: 1;
     line-height: 1.4;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
   }
 
   .close {

@@ -49,8 +49,8 @@ export async function importStackPhraseUi(page: Page, phrase: string): Promise<v
   await page.getByLabel('Confirm password', { exact: true }).fill(LOCAL_PASSWORD);
   await page.getByRole('button', { name: 'Save and open', exact: true }).click();
   // Surface the first recovery invariant immediately instead of timing out on Home.
-  await expect(page.locator('[data-testid="nav-home"]:visible, .gate-error').first()).toBeVisible({ timeout: BOOT_TIMEOUT });
-  const errors = await page.locator('.gate-error').allTextContents();
+  await expect(page.locator('[data-testid="nav-home"]:visible, [role="alert"]').first()).toBeVisible({ timeout: BOOT_TIMEOUT });
+  const errors = await page.getByRole('alert').allTextContents();
   if (errors.length > 0) throw new Error(`WALLET_BOOT_FAILED:${errors.join('\n')}`);
 }
 

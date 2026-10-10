@@ -1,3 +1,4 @@
+import { accountNetBalance } from '#lib/utils/ui/accountBalance.ts';
 import type { AccountReadView } from '#lib/components/Entity/core/entity-panel-types.ts';
 
 import { ZeroAddress } from 'ethers';
@@ -112,7 +113,8 @@ export function getAssetPriceUsd(symbol: string): number {
 
 export function getAssetValueUsd(amount: bigint, info: AssetTokenInfo, symbolOverride?: string): number {
   const symbol = symbolOverride ?? info.symbol ?? 'UNK';
-  return amountToUsd(amount, requireTokenDecimals(info.decimals, symbol), symbol);
+  const magnitude = amountToUsd(amount < 0n ? -amount : amount, requireTokenDecimals(info.decimals, symbol), symbol);
+  return amount < 0n ? -magnitude : magnitude;
 }
 
 export function getExternalTokenValueUsd(token: ExternalTokenValueInput): number {
@@ -180,18 +182,18 @@ export function buildAccountPortfolioData(options: {
       const derived = options.deriveDelta?.(delta, isLeftEntity);
       if (!derived) continue;
 
-      if (derived.outCapacity > 0n) out.outbound += getAssetValueUsd(derived.outCapacity, info, symbol);
-      if (derived.inCapacity > 0n) out.inbound += getAssetValueUsd(derived.inCapacity, info, symbol);
+      if (account.status === 'active' && !account.activeDispute && derived.outCapacity > 0n) out.outbound += getAssetValueUsd(derived.outCapacity, info, symbol);
+      if (account.status === 'active' && !account.activeDispute && derived.inCapacity > 0n) out.inbound += getAssetValueUsd(derived.inCapacity, info, symbol);
+      out.total += getAssetValueUsd(accountNetBalance(derived), info, symbol);
       if (derived.outCollateral > 0n) out.outCollateral += getAssetValueUsd(derived.outCollateral, info, symbol);
       if (derived.outOwnCredit > 0n) out.outOurCredit += getAssetValueUsd(derived.outOwnCredit, info, symbol);
     }
   }
 
-  out.total = out.outbound;
   return out;
 }
 
-export function buildAccountSpendableByToken(options: {
+export function buildAccountBalancesByToken(options: {
   accounts: ReadonlyMap<string, AccountReadView> | undefined;
   localEntityId: string;
   deriveDelta: FrontendXlnFunctions['deriveDelta'] | undefined;
@@ -204,8 +206,8 @@ export function buildAccountSpendableByToken(options: {
     for (const [tokenId, delta] of account.state.deltas.entries()) {
       const numericTokenId = Number(tokenId);
       if (!Number.isFinite(numericTokenId) || numericTokenId <= 0) continue;
-      const spendable = options.deriveDelta(delta, isLeftEntity)?.outCapacity ?? 0n;
-      if (spendable > 0n) totals.set(numericTokenId, (totals.get(numericTokenId) ?? 0n) + spendable);
+      const balance = accountNetBalance(options.deriveDelta(delta, isLeftEntity));
+      totals.set(numericTokenId, (totals.get(numericTokenId) ?? 0n) + balance);
     }
   }
   return totals;
@@ -214,7 +216,7 @@ export function buildAccountSpendableByToken(options: {
 export function buildAssetLedger(options: {
   externalTokens: ExternalToken[];
   reserves: Map<number, bigint>;
-  accountSpendable: Map<number, bigint>;
+  accountBalances: Map<number, bigint>;
   getExternalValue(token: ExternalToken): number;
   getAssetValue(tokenId: number, amount: bigint, symbol?: string): number;
   resolveReserveTokenMeta(tokenId: number): { symbol: string; decimals: number };
@@ -226,7 +228,7 @@ export function buildAssetLedger(options: {
   for (const token of options.externalTokens) {
     const isReserve = typeof token.tokenId === 'number' && token.tokenId > 0;
     const reserveBalance = isReserve ? (options.reserves.get(token.tokenId!) ?? 0n) : 0n;
-    const accountBalance = isReserve ? (options.accountSpendable.get(token.tokenId!) ?? 0n) : 0n;
+    const accountBalance = isReserve ? (options.accountBalances.get(token.tokenId!) ?? 0n) : 0n;
     const externalUsd = options.getExternalValue(token);
     const reserveUsd = isReserve ? valueFor(token.tokenId!, reserveBalance, token.symbol) : 0;
     const accountUsd = isReserve ? valueFor(token.tokenId!, accountBalance, token.symbol) : 0;
@@ -247,11 +249,11 @@ export function buildAssetLedger(options: {
     });
   }
 
-  for (const tokenId of new Set([...options.reserves.keys(), ...options.accountSpendable.keys()])) {
+  for (const tokenId of new Set([...options.reserves.keys(), ...options.accountBalances.keys()])) {
     if (!Number.isFinite(tokenId) || tokenId <= 0 || rows.has(`token:${tokenId}`)) continue;
     const info = options.resolveReserveTokenMeta(tokenId);
     const reserveBalance = options.reserves.get(tokenId) ?? 0n;
-    const accountBalance = options.accountSpendable.get(tokenId) ?? 0n;
+    const accountBalance = options.accountBalances.get(tokenId) ?? 0n;
     const reserveUsd = valueFor(tokenId, reserveBalance, info.symbol);
     const accountUsd = valueFor(tokenId, accountBalance, info.symbol);
     rows.set(`token:${tokenId}`, {

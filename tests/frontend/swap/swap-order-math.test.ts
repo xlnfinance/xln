@@ -55,7 +55,8 @@ describe('swap order math', () => {
     expect(computePriceDeviationBps(13_001n, 10_000n)).toBe(3_001n);
     expect(validateSwapForm(valid)).toBe('');
     expect(validateSwapForm({ ...valid, limitPriceTicks: 13_001n })).toBe('Price must stay within 30% of the current orderbook.');
-    expect(validateSwapForm({ ...valid, notionalUsd: 9 })).toBe('Minimum order size is ~$10.');
+    expect(validateSwapForm({ ...valid, notionalUsd: 9 })).toBe('Order value after rounding is $9.000000; minimum is $10. Increase the amount slightly.');
+    expect(validateSwapForm({ ...valid, notionalUsd: 9.999 })).toContain('after rounding is $9.999000');
     expect(validateSwapForm({ ...valid, wantTokenPresentInAccount: false })).toBe('Inbound token is not active in this account. Add token capacity first.');
     expect(validateSwapForm({ ...valid, giveAmount: 2_000n })).toBe('Insufficient outbound capacity (1000 USDC).');
     expect(validateSwapForm({ ...valid, wantAmount: 2_000n })).toBe('Insufficient inbound capacity (1000 WETH).');

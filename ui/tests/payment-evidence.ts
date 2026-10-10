@@ -1,5 +1,5 @@
 import type { Page } from '@playwright/test';
-import type { RuntimeAdapterViewFrame } from '../../core/api/public/runtime-module';
+import type { RuntimeAdapterViewFrame, XLNModule } from '../../core/api/public/runtime-module';
 import type { RuntimeAdapter, RuntimeAdapterFrameReceiptResponse } from '../../core/api/runtime-adapter/types';
 
 /** The embedded receipt monitor reads these same persisted activity journals. */
@@ -29,4 +29,29 @@ export async function readCommittedPayment(page: Page, entityId: string, fromHei
     }
     return { amount: String(data['amount']), senderAmount: String(data['senderAmount']), fee: String(data['fee']), hashlock: data['hashlock'] };
   }, { owner: entityId, from: fromHeight });
+}
+
+/** Read the committed primary Account, independently of rounded screen text. */
+export async function readUsdcAccount(page: Page, entityId: string) {
+  return page.evaluate(async owner => {
+    const debug = (window as Window & {
+      __xln?: { adapter: () => RuntimeAdapter | null; xln: () => Promise<XLNModule> };
+    }).__xln;
+    const adapter = debug?.adapter();
+    if (!debug || !adapter) throw new Error('Payment diagnostics unavailable');
+    const frame = await adapter.read<RuntimeAdapterViewFrame>('view-frame', { entityId: owner });
+    const account = frame.activeEntity?.accounts.items[0];
+    if (!account || frame.activeEntityId !== owner) throw new Error('Payment Account unavailable');
+    const delta = account.state.deltas.get(1);
+    if (!delta) throw new Error('Payment USDC lane unavailable');
+    const xln = await debug.xln();
+    const derived = xln.deriveDelta(delta, owner === account.state.leftEntity);
+    return {
+      owned: (derived.outCollateral + derived.outPeerCredit - derived.inOwnCredit).toString(),
+      root: account.currentFrame.accountStateRoot,
+      height: account.currentHeight,
+      pending: Boolean(account.pendingFrame),
+      mempool: account.mempoolCount,
+    };
+  }, entityId);
 }

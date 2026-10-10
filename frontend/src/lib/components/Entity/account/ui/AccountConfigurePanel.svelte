@@ -32,14 +32,21 @@ import type { EntityReadView } from '#lib/components/Entity/core/entity-panel-ty
   export let configureTokenOptions: ConfigureTokenOption[] = [];
   export let handleWorkspaceAccountChange: (event: CustomEvent<{ value?: string }>) => void;
   export let selectConfigureTab: (tab: ConfigureWorkspaceTab) => void;
-  export let confirmAndQueueDisputeFinalize: (counterpartyEntityId: string, reason: string) => void | Promise<void>;
-  export let confirmAndQueueDisputePrepare: (counterpartyEntityId: string, reason: string) => void | Promise<void>;
+  export let queueDisputeFinalize: (counterpartyEntityId: string, reason: string) => void | Promise<void>;
+  export let queueDisputePrepare: (counterpartyEntityId: string, reason: string) => void | Promise<void>;
   export let addTokenToAccount: () => void | Promise<void>;
   export let submitRuntimeInput: ((input: RuntimeInput) => Promise<unknown> | unknown) | null = null;
   export let paymentView: PaymentPanelView;
   export let swapRuntimeView: SwapPanelRuntimeView | null = null;
 
   $: configureAccount = replica?.state?.accounts?.get?.(workspaceAccountId);
+  $: dispute = configureAccount?.activeDispute;
+  $: signedDisputeConfig = configureAccount && configureAccount.currentFrame.height > 0 ? configureAccount.state.disputeConfig : null;
+  $: viewerIsLeft = configureAccount?.state.leftEntity === (replica?.state.entityId || tab.entityId);
+  const responseDuration = (seconds: number): string => seconds > 0 && seconds % 3600 === 0
+    ? `${seconds / 3600} hour${seconds === 3600 ? '' : 's'}`
+    : `${seconds} seconds`;
+  $: finalizationReady = Boolean(dispute?.observedOnChain && dispute.disputeTimeout > 0 && Number(replica?.state.timestamp ?? 0) >= dispute.disputeTimeout * 1000 && !dispute.finalizeQueued);
   $: profiles = Array.from(profileByEntityId.values());
   $: remoteAdminReady = $runtimeControllerHandle.mode === 'remote' && $runtimeControllerHandle.authLevel === 'admin';
   $: commandReady = activeIsLive && Boolean(liveRuntimeEnv || remoteAdminReady);
@@ -76,6 +83,7 @@ import type { EntityReadView } from '#lib/components/Entity/core/entity-panel-ty
       accountIds={workspaceAccountIds}
       {entityNames}
       mode="extend"
+      accountOverride={configureAccount ?? null}
       {submitRuntimeInput}
     />
   {:else if configureWorkspaceTab === 'request-credit'}
@@ -88,6 +96,7 @@ import type { EntityReadView } from '#lib/components/Entity/core/entity-panel-ty
       accountIds={workspaceAccountIds}
       {entityNames}
       mode="request"
+      accountOverride={configureAccount ?? null}
       {submitRuntimeInput}
     />
   {:else if configureWorkspaceTab === 'collateral'}
@@ -119,17 +128,20 @@ import type { EntityReadView } from '#lib/components/Entity/core/entity-panel-ty
       <p class="muted">
         One action freezes local account traffic, removes orderbook exposure, and automatically drafts the on-chain dispute when evidence is stable.
       </p>
-      {#if configureAccount?.activeDispute}
+      {#if configureAccount?.status === 'disputed' && !dispute}
+        <p class="muted" data-testid="configure-dispute-closed">Dispute finalized. This account is permanently closed. The settlement returned funds to your reserve.</p>
+      {:else if configureAccount?.activeDispute}
         <p class="danger-note">
-          Active dispute in progress. Finalize only after the timeout passes on-chain.
+          Active dispute in progress. {dispute?.disputeTimeout ? `Challenge window closes ${new Date(dispute.disputeTimeout * 1000).toLocaleString()}.` : 'Waiting for on-chain confirmation.'}
         </p>
+        <p class="muted">While this wallet is unlocked and online, it automatically submits finalization after the challenge window. If it locks, unlock it to resume. The chain releases the winning balance to your reserve; gas is required.</p>
         <button
           class="btn-danger-batch"
           data-testid="configure-dispute-finalize"
-          on:click={() => confirmAndQueueDisputeFinalize(workspaceAccountId, 'dispute-finalize-from-configure')}
-          disabled={!activeIsLive}
+          on:click={() => queueDisputeFinalize(workspaceAccountId, 'dispute-finalize-from-configure')}
+          disabled={!activeIsLive || !finalizationReady}
         >
-          Add Dispute Finalize To Batch
+          {dispute?.finalizeQueued ? 'Finalization queued' : !finalizationReady ? 'Waiting for challenge window' : 'Queue finalization'}
         </button>
       {:else if configureAccount?.status === 'dispute_preparing'}
         <p class="danger-note">
@@ -137,12 +149,24 @@ import type { EntityReadView } from '#lib/components/Entity/core/entity-panel-ty
         </p>
       {:else}
         <p class="danger-note">
-          This removes orders and stops normal account traffic before committing the on-chain dispute hash.
+          This removes orders and stops normal account traffic before committing the on-chain dispute hash. The account will close permanently.
         </p>
+        {#if signedDisputeConfig}
+          <p class="muted" data-testid="configure-dispute-window"
+            data-total-seconds={signedDisputeConfig.leftResponseSeconds + signedDisputeConfig.rightResponseSeconds}>
+            Signed response windows: you have {responseDuration(viewerIsLeft ? signedDisputeConfig.leftResponseSeconds : signedDisputeConfig.rightResponseSeconds)};
+            the counterparty has {responseDuration(viewerIsLeft ? signedDisputeConfig.rightResponseSeconds : signedDisputeConfig.leftResponseSeconds)}.
+            The total challenge period is {responseDuration(signedDisputeConfig.leftResponseSeconds + signedDisputeConfig.rightResponseSeconds)} from the confirmed on-chain start.
+            Batch confirmation and finalization take additional time and gas. Keep this wallet unlocked and online to finalize.
+          </p>
+        {:else}
+          <p class="muted" data-testid="configure-dispute-window">Signed response windows are unavailable. Wait for the signed account state before reviewing the deadline.</p>
+        {/if}
+        <p class="muted">Finalization releases the winning collateral to your reserve. It cannot guarantee repayment of unsecured promises.</p>
         <button
           class="btn-danger-batch"
           data-testid="configure-dispute-prepare"
-          on:click={() => confirmAndQueueDisputePrepare(
+          on:click={() => queueDisputePrepare(
             workspaceAccountId,
             'dispute-prepare-from-configure',
           )}

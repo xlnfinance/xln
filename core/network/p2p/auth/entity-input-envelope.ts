@@ -4,6 +4,7 @@ import {
   validateDeliverableEntityInput,
   type ValidatedDeliverableEntityInput,
 } from '../../../runtime/delivery/topology/routing-validation';
+import { validateEntityTx } from '../../../entity/tx-validation';
 import { decodeRuntimeId } from './runtime-id';
 import type { RuntimeId } from '../../../protocol/identity';
 import {
@@ -101,7 +102,18 @@ export const decodeRuntimeEntityInputsEnvelope = (value: unknown): DecodedRuntim
     envelope['atomicCrossJurisdictionPair'],
     envelope['entityInputs'].length,
   );
-  const entityInputs = envelope['entityInputs'].map(validateDeliverableEntityInput);
+  const entityInputs = envelope['entityInputs'].map((raw, index) => {
+    const input = validateDeliverableEntityInput(raw);
+    // Routing validation checks only each EntityTx type name. Run the exact
+    // decoder here, at the one inbound transport boundary: a peer accountInput
+    // is otherwise first parsed inside the Account transition, where a missing
+    // ACK height or a numeric amount throws past the typed-reject boundary and
+    // halts the Runtime. Rejected here, the same bytes fail only this message.
+    input.entityTxs?.forEach((tx, txIndex) => {
+      validateEntityTx(tx, `P2P_ENTITY_INPUTS_ENVELOPE_INPUT_${index}_TX_${txIndex}`);
+    });
+    return input;
+  });
   return {
     sourceRuntimeId,
     ...(sourceSignature !== undefined ? { sourceSignature } : {}),

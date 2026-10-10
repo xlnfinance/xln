@@ -82,6 +82,7 @@ test('production wallet imports, funds 100, moves reserve, pays 25 and preserves
   const cents = (100_000_000n - senderAmount + 5_000n) / 10_000n;
   const expectedBalance = `${cents / 100n}.${String(cents % 100n).padStart(2, '0')} USDC`;
   await page.getByTestId('pay-submit').click();
+  await page.getByTestId('receipt-open').click();
   await expect(page.getByTestId('receipt-kicker')).toHaveText('Paid', WAIT);
   await expect(page.getByTestId('receipt-amount')).toHaveText('25.00 USDC');
   await expect(page.getByTestId('receipt-title')).toContainText('H2');

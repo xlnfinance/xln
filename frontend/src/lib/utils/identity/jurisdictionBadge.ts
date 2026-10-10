@@ -19,10 +19,13 @@ export function getJurisdictionBadgeInfo(
   const normalized = normalize(name);
   if (!name && !chainId) return null;
 
+  if (chainId === 391337 || normalized === 'xlnc') {
+    return { name: name || 'XLNC', symbol: 'X', className: 'xlnc', title: name || 'XLNC' };
+  }
   if (chainId === 8453 || normalized.includes('base')) {
     return { name: name || 'Base', symbol: 'B', className: 'base', title: name || 'Base' };
   }
-  if (chainId === 1 || normalized === 'ethereum' || normalized.includes('mainnet')) {
+  if (chainId === 1 || normalized.startsWith('ethereum')) {
     return { name: name || 'Ethereum', symbol: 'E', className: 'ethereum', title: name || 'Ethereum' };
   }
   if (chainId === 11155111 || normalized.includes('sepolia')) {

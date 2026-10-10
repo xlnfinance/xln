@@ -45,7 +45,7 @@ export const TX_WIRE_CASES: { name: string; tx: AccountTx }[] = [
   { name: 'lending_fund', tx: { type: 'lending_fund', data: { positionId: 'position-1', hubEntityId: A, lenderEntityId: B, tokenId: 1, amount: 100n, termId: '1d', interestBps: 250 } } },
   { name: 'lending_borrow_request', tx: { type: 'lending_borrow_request', data: { requestId: 'borrow-1', hubEntityId: A, borrowerEntityId: B, tokenId: 1, amount: 50n, termId: '1h', maxInterestBps: 300 } } },
   { name: 'lending_repay', tx: { type: 'lending_repay', data: { loanId: 'loan-1', hubEntityId: A, borrowerEntityId: B, tokenId: 1, amount: 25n } } },
-  { name: 'lending_credit', tx: { type: 'lending_credit', data: { action: 'grant', loanId: 'loan-1', hubEntityId: A, borrowerEntityId: B, tokenId: 1, creditLimit: 500n } } },
+  { name: 'lending_disburse', tx: { type: 'lending_disburse', data: { loanId: 'loan-1', hubEntityId: A, borrowerEntityId: B, tokenId: 1, amount: 500n } } },
   { name: 'lending_close_request', tx: { type: 'lending_close_request', data: { positionId: 'position-1', hubEntityId: A, lenderEntityId: B } } },
   { name: 'lending_close_payout', tx: { type: 'lending_close_payout', data: { positionId: 'position-1', hubEntityId: A, lenderEntityId: B, tokenId: 1, amount: 75n } } },
   { name: 'htlc_lock/full', tx: { type: 'htlc_lock', data: { lockId: 'lock-1', hashlock: HASHLOCK, timelock: 1_700_000_000_000n, revealBeforeHeight: 12, amount: 500n, tokenId: 1, deliveryMode: 'async' } } },
@@ -106,6 +106,10 @@ if (Bun.env['RSCORE_GENERATE_TX_WIRE'] === '1') {
       expect(`${name}:${packWireValue(wire!).toString('hex')}`)
         .toBe(`${name}:${recorded.get(name)}`);
     }
+  });
+
+  test('retired revolving-credit wire cannot be decoded as a principal transfer', () => {
+    expect(() => decodeRscoreAccountTx([13, 0, 'loan-1', A, B, 1, '500'])).toThrow();
   });
 
   test('TypeScript reads back the transaction it wrote', () => {

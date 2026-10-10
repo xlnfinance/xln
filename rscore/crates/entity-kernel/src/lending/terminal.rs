@@ -1,26 +1,18 @@
 use num_bigint::BigInt;
-use xln_rscore_engine::{AccountTx, LendingAction, TokenId};
+use xln_rscore_engine::{AccountTx, TokenId};
 
 use crate::EntityKernelError;
 use crate::local_financial::LocalAccountFinancialView;
 use crate::types::TargetedAccountTx;
 
-use super::followups::{projected_credit, projected_credit_from};
 use super::{LendingLoanStatus, LendingPoolStatus, LendingState};
 
-#[expect(
-    clippy::too_many_arguments,
-    reason = "the pure lending transition keeps financial authority and output sinks explicit"
-)]
 pub(super) fn apply_repay(
     lending: &mut LendingState,
     tx: &AccountTx,
     proposer: &str,
     counterparty: &str,
-    hub: &str,
     now: u64,
-    view: &LocalAccountFinancialView,
-    queued: &mut Vec<TargetedAccountTx>,
 ) -> Result<(), EntityKernelError> {
     let AccountTx::LendingRepay {
         loan_id,
@@ -47,27 +39,19 @@ pub(super) fn apply_repay(
     {
         return Err(EntityKernelError::lending("REPAYMENT_MISMATCH"));
     }
-    loan.status = LendingLoanStatus::Closing;
+    let mut pool = lending
+        .pool(&loan.position_id)
+        .cloned()
+        .filter(|pool| pool.borrowed_amount >= loan.principal_amount)
+        .ok_or_else(|| EntityKernelError::lending("POOL_BORROWED_UNDERFLOW"))?;
+    loan.repaid_amount = loan.repayment_amount.clone();
+    loan.status = LendingLoanStatus::Repaid;
     loan.updated_at = now;
-    lending.put_loan(loan.clone())?;
-    let current = projected_credit(view, counterparty, *token_id, queued);
-    let credit_limit = if current > loan.principal_amount {
-        current - &loan.principal_amount
-    } else {
-        BigInt::from(0)
-    };
-    queued.push((
-        proposer.to_string(),
-        AccountTx::LendingCredit {
-            action: LendingAction::Revoke,
-            loan_id: loan.loan_id,
-            hub_entity_id: hub.to_string(),
-            borrower_entity_id: proposer.to_string(),
-            token_id: *token_id,
-            credit_limit,
-        },
-    ));
-    Ok(())
+    pool.borrowed_amount -= &loan.principal_amount;
+    pool.available_amount += amount;
+    pool.updated_at = now;
+    lending.put_loan(loan)?;
+    lending.put_pool(pool)
 }
 
 #[expect(
@@ -171,32 +155,12 @@ pub(super) fn apply_close_payout(
     lending.put_pool(pool)
 }
 
-/// Overdue loan settlement — the banking half of the loan lifecycle, and the
-/// exact mirror of TS `settleOverdueLendingLoan`.
-///
-/// A pool's cash never leaves the hub: `LendingFund` moves it lender -> hub and
-/// `LendingBorrowRequest` only grants the borrower a credit line against it. So
-/// when the term passes unpaid the hub settles it the way a bank does:
-///
-///  - the lender's principal returns to the pool, because the hub still holds
-///    that cash and owes the depositor, not the borrower;
-///  - the drawn exposure stays a hub receivable against the borrower — signed
-///    bilateral debt a lower credit limit can never erase — so the hub absorbs
-///    the credit loss;
-///  - the credit line is called in through the same `LendingCredit` revoke the
-///    repay path uses, so a defaulted borrower cannot draw again;
-///  - `repayment_amount - repaid_amount` stays recorded against the borrower on
-///    a terminal `Defaulted` loan. Interest is not earned on a default.
-///
-/// A loan that no longer qualifies is skipped, never raised: one loan can never
-/// halt the Runtime (docs/reject-policy.md).
+/// The hub retains the depositor obligation. Releasing a claim creates no cash;
+/// payout still requires bilateral capacity and the unpaid loan stays recorded.
 pub(super) fn settle_overdue(
     lending: &mut LendingState,
     loan_id: &str,
-    committed_credit_limit: BigInt,
-    hub: &str,
     now: u64,
-    queued: &mut Vec<TargetedAccountTx>,
 ) -> Result<(), EntityKernelError> {
     let Some(mut loan) = lending
         .loan(loan_id)
@@ -212,35 +176,11 @@ pub(super) fn settle_overdue(
     else {
         return Ok(());
     };
-    let token = TokenId::new(u32::from(loan.token_id))
-        .map_err(|_| EntityKernelError::lending("TOKEN_ID"))?;
     loan.status = LendingLoanStatus::Defaulted;
     loan.updated_at = now;
     pool.borrowed_amount -= &loan.principal_amount;
     pool.available_amount += &loan.principal_amount;
     pool.updated_at = now;
-    let current = projected_credit_from(
-        committed_credit_limit,
-        &loan.borrower_entity_id,
-        token,
-        queued,
-    );
-    let credit_limit = if current > loan.principal_amount {
-        current - &loan.principal_amount
-    } else {
-        BigInt::from(0)
-    };
-    queued.push((
-        loan.borrower_entity_id.clone(),
-        AccountTx::LendingCredit {
-            action: LendingAction::Revoke,
-            loan_id: loan.loan_id.clone(),
-            hub_entity_id: hub.to_string(),
-            borrower_entity_id: loan.borrower_entity_id.clone(),
-            token_id: token,
-            credit_limit,
-        },
-    ));
     lending.put_loan(loan)?;
     lending.put_pool(pool)
 }

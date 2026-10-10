@@ -127,7 +127,7 @@ export async function deriveBrainvaultMnemonic(
 			for (let i = 0; i < workerCount; i++) {
 				const worker = createBrainvaultWorker();
 				workers.push(worker);
-				worker.onerror = event => fail(new Error(`BRAINVAULT_WORKER_ERROR: ${event.message}`));
+				worker.onerror = event => fail(new Error(event.message ? `BRAINVAULT_WORKER_ERROR: ${event.message}` : 'BRAINVAULT_WORKER_LOAD_FAILED'));
 				worker.onmessage = (event: MessageEvent<WorkerMessage>) => {
 					const message = event.data;
 					if (message.type === 'error') {

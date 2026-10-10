@@ -14,7 +14,7 @@ test('all six lending AccountTx variants match the shared TypeScript semantic ve
   expect(`${safeStringify(actual, 2)}\n`).toBe(expected);
   expect(actual.cases.flatMap(testCase => testCase.steps).map(step => step.txType)).toEqual([
     'lending_borrow_request',
-    'lending_credit',
+    'lending_disburse',
     'lending_repay',
     'lending_fund',
     'lending_close_request',

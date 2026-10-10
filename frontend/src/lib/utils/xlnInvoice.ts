@@ -140,8 +140,14 @@ export function buildXlnInvoiceUri(intent: Partial<XlnInvoiceIntent> & { targetE
   return params.size > 0 ? `${targetEntityId}?${params.toString()}` : targetEntityId;
 }
 
-export function buildWalletPayHref(intent: Partial<XlnInvoiceIntent> & { targetEntityId: string }): string {
-  const url = new URL('/app', CANONICAL_WALLET_ORIGIN);
+export function buildWalletPayHref(
+  intent: Partial<XlnInvoiceIntent> & { targetEntityId: string },
+  currentHref = typeof window === 'undefined' ? '' : window.location.href,
+): string {
+  const current = currentHref ? new URL(currentHref) : null;
+  // Local test recipients belong to this stand, not the public deployment.
+  const local = current && isAllowedWalletOrigin(current) && current.origin !== CANONICAL_WALLET_ORIGIN;
+  const url = local ? new URL(current.pathname, current.origin) : new URL('/app', CANONICAL_WALLET_ORIGIN);
   url.hash = `pay/${encodeURIComponent(buildXlnInvoiceUri(intent))}`;
   return url.toString();
 }

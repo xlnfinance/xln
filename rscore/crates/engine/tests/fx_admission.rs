@@ -188,14 +188,13 @@ fn extended_transactions() -> Vec<(&'static str, AccountTx)> {
             },
         ),
         (
-            "lending_credit",
-            AccountTx::LendingCredit {
-                action: xln_rscore_engine::LendingAction::Grant,
+            "lending_disburse",
+            AccountTx::LendingDisburse {
                 loan_id: "loan-1".to_string(),
                 hub_entity_id: "0xhub".to_string(),
                 borrower_entity_id: "0xborrower".to_string(),
                 token_id: token,
-                credit_limit: BigInt::from(10),
+                amount: BigInt::from(10),
             },
         ),
         (

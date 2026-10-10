@@ -177,11 +177,12 @@ const LENDING_KINDS = [
   'fund',
   'borrow',
   'repay',
-  'credit-grant',
-  'credit-revoke',
+  undefined, // Retired revolving-credit intents must not restore as term loans.
+  undefined,
   'close-request',
   'close-payout',
-] as const satisfies readonly AccountLendingIntentKind[];
+  'disburse',
+] as const satisfies readonly (AccountLendingIntentKind | undefined)[];
 
 const decodeLending = (value: unknown, index: number): readonly [string, AccountLendingIntentKind] => {
   const row = rscoreCheckpointTuple(value, 2, `RESTORE_LENDING_${index}`);

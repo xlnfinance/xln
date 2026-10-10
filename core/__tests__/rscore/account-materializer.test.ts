@@ -323,7 +323,7 @@ const restoreWire = (
     [...state.locks.values()].map(lockWire),
     [...(state.lendingIntents ?? new Map()).entries()].map(([key, kind]) => [
       key,
-      ['fund', 'borrow', 'repay', 'credit-grant', 'credit-revoke', 'close-request', 'close-payout'].indexOf(kind),
+      ['fund', 'borrow', 'repay', undefined, undefined, 'close-request', 'close-payout', 'disburse'].indexOf(kind),
     ]),
     [...state.swapOffers.values()].map(offerWire),
     [...(state.rebalanceFeePolicies ?? new Map()).entries()].map(([tokenId, policy]) => [

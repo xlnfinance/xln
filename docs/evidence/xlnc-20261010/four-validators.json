@@ -1,0 +1,117 @@
+{
+  "blockGasLimit": 6000000,
+  "blockPeriodSeconds": 1,
+  "capitalAuthorized": 0,
+  "chainId": 391337,
+  "clientVersion": "besu/v25.9.0/osx-aarch_64/openjdk-java-21",
+  "contracts": [
+    {
+      "address": "0xc80D398B8F5a65700C349C3Af38246b79aBDE991",
+      "codeHash": "0x75f4ac34c3f941940e35fed799104642691096951b0cfe79d59c6902c8c88965",
+      "name": "account"
+    },
+    {
+      "address": "0xC9a9528141e648D375a4B08252D97888F6489633",
+      "codeHash": "0x7624c43812de232195820642fc7505b8916d98b27f1d57956cf80d931efa3f93",
+      "name": "depository"
+    },
+    {
+      "address": "0x6c9cB0C517B5750112ccAEFAF76D8f0BBd9244Ce",
+      "codeHash": "0x7d31796baad3f25384954f5baaa617acbc99f0bb58bc09f00404e6c06da24ee2",
+      "name": "entityProvider"
+    },
+    {
+      "address": "0x465bD7a6859EDE9BB7278049e67DEFeCC3c5a085",
+      "codeHash": "0xfca59d4b14b46b3a443aef94b0deca08abfd0729bf20c0e4950c16bebe6109cf",
+      "name": "deltaTransformer"
+    }
+  ],
+  "deploymentReceipts": [
+    {
+      "address": "0xc80D398B8F5a65700C349C3Af38246b79aBDE991",
+      "blockNumber": 1,
+      "codeHash": "0x75f4ac34c3f941940e35fed799104642691096951b0cfe79d59c6902c8c88965",
+      "gasUsed": "4971259",
+      "hash": "0xe578a77ef2d0eee5adfa1d3c7ae576375fb5017bd8bd2deb79a326b107ccdc7c"
+    },
+    {
+      "address": "0xbb9E729879693F472087E6769b089EFB1429Ad66",
+      "blockNumber": 2,
+      "codeHash": "0x02413ad800e58e168089146dd8b10a7e36316bfbe35a201f1e6f02c12a2ed717",
+      "gasUsed": "1188251",
+      "hash": "0x1074e5f048f0c79f8e86709082bacc4c7b32ab48fa27458f12d820b01684429c"
+    },
+    {
+      "address": "0x6c9cB0C517B5750112ccAEFAF76D8f0BBd9244Ce",
+      "blockNumber": 3,
+      "codeHash": "0x7d31796baad3f25384954f5baaa617acbc99f0bb58bc09f00404e6c06da24ee2",
+      "gasUsed": "4496988",
+      "hash": "0xf3346e68157b799e5162d7279ee7701b7b2257d228309c247817e683a6dbeac6"
+    },
+    {
+      "address": "0x465bD7a6859EDE9BB7278049e67DEFeCC3c5a085",
+      "blockNumber": 4,
+      "codeHash": "0xfca59d4b14b46b3a443aef94b0deca08abfd0729bf20c0e4950c16bebe6109cf",
+      "gasUsed": "1504268",
+      "hash": "0x04eee66f4d44e1c62d2bebf9f81da864f206c3ad14ac39c46447eb717429ec5a"
+    },
+    {
+      "address": "0x696468FbEDDcc77cE7Af93E4ceECE33d89Fcd269",
+      "blockNumber": 5,
+      "codeHash": "0x8a462bc56dc291d25e118de0d0fbb9120896477bfdeb1b09470d4a8592cb477f",
+      "gasUsed": "1049921",
+      "hash": "0xbd0b83ef77c832423c31d918236010cb7f9de99c045ed8ddcd3209d36cb376cd"
+    },
+    {
+      "address": "0xd7d5A30373c18Dbf4A38FCb0309fFC770840C9dE",
+      "blockNumber": 6,
+      "codeHash": "0x800aeddd846691299f1d621553293a8d4c2bf61d46d66d724bc0487640f32ad2",
+      "gasUsed": "396758",
+      "hash": "0xb8ff96458488158e933c864dec04f9419464ee5e398c1c701c834a706327460a"
+    },
+    {
+      "address": "0x09840B49542F21A72e4172aC1cA769709d90ce6B",
+      "blockNumber": 7,
+      "codeHash": "0xc174ce47f4099732e5470ae893d55719c669de8ad9041896a25b0d0610fe46a8",
+      "gasUsed": "497526",
+      "hash": "0x57ed0ca7573099b9522c2b2c37eeee4d8aac289b8d76d42914b2d17bc9f0eb3c"
+    },
+    {
+      "address": "0xC9a9528141e648D375a4B08252D97888F6489633",
+      "blockNumber": 8,
+      "codeHash": "0x7624c43812de232195820642fc7505b8916d98b27f1d57956cf80d931efa3f93",
+      "gasUsed": "4905451",
+      "hash": "0x6c279605155f57206e3d8d8d8ac98a083cd23a4bc2d4af13ac1242a65f6ecd93"
+    },
+    {
+      "address": null,
+      "blockNumber": 9,
+      "codeHash": null,
+      "gasUsed": "72426",
+      "hash": "0xcddf3bfc3a6d44129cd805e5bbea3dbea9ed60981709a4115a62f2d4b050d9cb"
+    }
+  ],
+  "hash": "0x272a15874e63cdec76ace4f64d203c6c41a6fa5da1684f96529adbc76c8d95eb",
+  "height": 9,
+  "kind": "experimental-stateful-evm",
+  "oneValidatorOutageVerified": true,
+  "outageTransactionHash": "0xb4f60215059c40ffbbb33bcfb556833e4fe331200783dedd079c4a9f21cd68c2",
+  "reduction": 10,
+  "referenceBlockGasLimit": 60000000,
+  "restartVerified": true,
+  "sameOperator": true,
+  "stateRoot": "0xf6154279cdbe7f3460fd8fe168adb102b6cda7f97cd16d6f4e4fb70530612137",
+  "unmeasured": [
+    "phone resources",
+    "two-day catch-up",
+    "correlated exits"
+  ],
+  "validatorCount": 4,
+  "validators": [
+    "0x1853d719e0aac928321a420e96b8bb8296bf5951",
+    "0x69c72959754fe8af96857e9513c14f1e622747c3",
+    "0x8391003c52e34f329db89e2466b82cee529c4da5",
+    "0xfb5825695c48f28fcfc254fd07d2e60179bc8d32"
+  ],
+  "zeroPriorityFeeDeploymentVerified": true
+}

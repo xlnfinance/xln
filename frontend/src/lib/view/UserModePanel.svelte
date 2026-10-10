@@ -895,7 +895,7 @@
 {:else if showVaultPanelVisible}
   <main class="panel-content">
     <!-- Onboarding Screen 1: derive/import seed and atomically create/select runtime. -->
-    <RuntimeCreation embedded={true} on:nodeReadyComplete={(event) => void handleNodeReadyComplete(event)} />
+    <RuntimeCreation embedded={true} unlockRuntimeId={activeVaultLocked && $activeRuntimeStore ? $activeRuntimeStore.id : null} on:nodeReadyComplete={(event) => void handleNodeReadyComplete(event)} />
   </main>
 {:else if viewMode === 'entity' && selectedEntityId && selectedSignerId && !onboardingComplete}
   <main class="panel-content">

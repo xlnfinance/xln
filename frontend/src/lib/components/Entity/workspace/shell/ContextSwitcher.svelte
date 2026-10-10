@@ -89,10 +89,16 @@
   type RuntimeMenuGroup = RuntimeSummary & {
     jurisdictions: JurisdictionGroup[];
   };
+  let runtimeGroups: RuntimeSummary[] = [];
 
   $: xlnReady = !!$xlnInstance;
   $: activeXlnFunctions = xlnReady ? $xlnFunctions : null;
-  $: runtimeGroups = buildRuntimeGroups();
+  // Svelte cannot see store reads hidden inside these helper functions. Rebuild
+  // when the restored projection arrives, not only when the menu mounts.
+  $: {
+    $allRuntimes; $runtimeEntries; $runtimeView; controllerRuntimeId; activeXlnFunctions;
+    runtimeGroups = buildRuntimeGroups();
+  }
   $: runtimeMenuGroups = buildRuntimeMenuGroups(runtimeGroups);
   $: runtimeMutationControlsEnabled = $runtimeControllerHandle.permissions === 'write';
   $: controllerRuntimeId = normalizeId($runtimeControllerHandle.runtimeId || $runtimeControllerHandle.id);
@@ -128,13 +134,13 @@
       const signerId = signer?.address || '';
       const runtimeEntry = $runtimeEntries.get(runtime.id);
       const status = runtimeEntry?.status || 'inactive';
-      const knownSignerSummaries = signer?.entityId ? [{
-        entityId: signer.entityId,
-        signerId,
-        label: signer.entityId,
+      const knownSignerSummaries = runtime.signers.filter(signer => signer.entityId).map(signer => ({
+        entityId: signer.entityId || '',
+        signerId: signer.address,
+        label: signer.entityId || '',
         height: 0,
         ...(signer.jurisdiction ? { jurisdiction: { name: signer.jurisdiction } } : {}),
-      }] : [];
+      }));
       const entityMap = collectEntitySummaries(
         projectionSummariesForRuntime(runtime.id, knownSignerSummaries),
         signerId,
@@ -510,7 +516,6 @@
   }
 
   async function handleReset() {
-    if (!confirm('Reset ALL data? Wallets, accounts, settings — everything will be wiped.')) return;
     open = false;
     await resetEverything({ confirmed: true, reason: 'context-switcher-manual-reset' });
   }

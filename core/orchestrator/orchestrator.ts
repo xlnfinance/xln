@@ -49,6 +49,7 @@ import { maybeHandleQaRequest } from '../qa/api';
 import { serveStaticApp } from '../api/server/static-assets';
 import { enforceFaucetPolicy } from '../api/server/faucet/policy';
 import { handleWatchtowerProxy } from '../api/server/rpc/watchtower-proxy';
+import { withApiBodyLimit, WATCHTOWER_PROXY_BODY_MAX_BYTES } from '../api/server/http-body-limit';
 import { createAssistantProxyFromEnv, resolveAssistantDirectClientIp, resolveAssistantRateClientId } from '../api/server/assistant/proxy';
 import { createHttpDrainTracker, stopServerGracefully } from './graceful-server';
 import { publicAggregatedHealth, resolveSocketPeerAddress } from '../api/server/health/redaction';
@@ -2698,8 +2699,8 @@ const server = Bun.serve<OrchestratorWebSocket['data']>({
   hostname: args.host,
   port: args.port,
   idleTimeout: 120,
-  maxRequestBodySize: 1024 * 1024,
-  async fetch(request, serverRef) {
+  maxRequestBodySize: WATCHTOWER_PROXY_BODY_MAX_BYTES,
+  fetch: withApiBodyLimit<Bun.Server<OrchestratorWebSocket['data']>>(async (request, serverRef) => {
     const releaseHttp = httpDrain.begin();
     try {
     const url = new URL(request.url);
@@ -2848,7 +2849,7 @@ const server = Bun.serve<OrchestratorWebSocket['data']>({
     } finally {
       releaseHttp();
     }
-  },
+  }),
   websocket: {
     maxPayloadLength: resolveRuntimeWsMaxMessageBytes(),
     open(ws) {

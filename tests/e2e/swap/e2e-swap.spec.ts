@@ -1599,7 +1599,7 @@ async function executeOrderbookClickFill(
       )
       .toBe(true);
     const clickToClosedStateMs = Date.now() - swapClickStartedAt;
-    const fillModal = page.locator('.swap-modal').first();
+    const fillModal = page.getByTestId('swap-completion-notice').first();
     await expect(fillModal).toContainText(/Swap Filled/i, { timeout: 10_000 });
     await fillModal.getByRole('button', { name: /Close/i }).click();
     await expect(fillModal).toBeHidden();

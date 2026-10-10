@@ -68,19 +68,22 @@ describe('entity asset value helpers', () => {
     expect(helpers.formatUsdExact(5)).toBe('$5.00');
     expect(helpers.getAssetPrice('USDC')).toBe(1);
     expect(helpers.getAssetValue(1, 2_500_000n)).toBe(2.5);
+    expect(helpers.getAssetValue(1, -2_500_000n)).toBe(-2.5);
     expect(helpers.getExternalValue({ symbol: 'USDC', decimals: 6, balance: 3_000_000n })).toBe(3);
     expect(helpers.calculatePortfolioValue(new Map([[1, 4_000_000n]]))).toBe(4);
   });
 
   test('builds account portfolio totals from derived deltas', () => {
     const accounts = new Map<string, import('../../../core/types/account').AccountReplica>([
-      ['0xbb', { state: { deltas: new Map([[1, Symbol('delta')]]) } } as import('../../../core/types/account').AccountReplica],
+      ['0xbb', { status: 'active', state: { deltas: new Map([[1, Symbol('delta')]]) } } as import('../../../core/types/account').AccountReplica],
     ]);
     const deriveDelta = (() => ({
       outCapacity: 5_000_000n,
       inCapacity: 2_000_000n,
       outCollateral: 3_000_000n,
       outOwnCredit: 1_000_000n,
+      outPeerCredit: 2_000_000n,
+      inOwnCredit: 1_000_000n,
     })) as FrontendXlnFunctions['deriveDelta'];
 
     expect(buildAccountPortfolioData({
@@ -94,7 +97,7 @@ describe('entity asset value helpers', () => {
       outCollateral: 3,
       outOurCredit: 1,
       count: 1,
-      total: 5,
+      total: 4,
     });
   });
 
@@ -108,7 +111,7 @@ describe('entity asset value helpers', () => {
         tokenId: 0,
       }],
       reserves: new Map(),
-      accountSpendable: new Map(),
+      accountBalances: new Map(),
       getExternalValue: () => 0,
       getAssetValue: () => 0,
       resolveReserveTokenMeta: () => ({ symbol: 'UNKNOWN', decimals: 18 }),

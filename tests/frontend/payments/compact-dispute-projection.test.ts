@@ -8,7 +8,7 @@ import {
   findReplicaForEntityTab,
 } from '../../../frontend/src/lib/components/Entity/core/entity-panel-model';
 import { buildPaymentPanelViewFromRuntimeView } from '../../../frontend/src/lib/components/Entity/payments/payment-panel-view';
-import { buildAccountSpendableByToken } from '../../../frontend/src/lib/components/Entity/assets/entity-asset-values';
+import { buildAccountBalancesByToken } from '../../../frontend/src/lib/components/Entity/assets/entity-asset-values';
 import type { ExternalToken } from '../../../frontend/src/lib/components/Entity/assets/entity-asset-catalog';
 import {
   buildExternalWalletStateSyncSignature,
@@ -182,9 +182,9 @@ test('remote projection without a live environment preserves nonzero assets for 
   expect(panel.runtimeId).toBeNull();
   expect(visible.reserves).toBe(frame.activeEntity.core.reserves);
   expect(buildOnchainReserves(visible.reserves, tokens)).toEqual(new Map([[1, 70_000_000n]]));
-  expect(buildAccountSpendableByToken({
+  expect(buildAccountBalancesByToken({
     accounts: visible.accounts, localEntityId: visible.entityId, deriveDelta,
-  })).toEqual(new Map([[1, 65_000_000n]]));
+  })).toEqual(new Map([[1, 50_000_000n]]));
   expect(visible.externalWallet).toBe(frame.activeEntity.core.externalWallet);
   expect(readExternalWalletState(visible.externalWallet, tokens, SIGNER, [])).toEqual({
     nativeBalance: 500_000_000_000_000_000n, balances: [30_000_000n], allowanceValues: [], sourceHeight: 77,

@@ -25,11 +25,11 @@
           "txType": "lending_borrow_request"
         },
         {
-          "accountStateRoot": "0x7fd8bbc439047ed615b2d113cabac0c5e81a71c784a252a60bde25e1b9995604",
+          "accountStateRoot": "0x203b78d5de9c96a1cf256bc423f7de3719f1f4d29556c2e37ba213b16c80491f",
           "byLeft": true,
-          "deltasRoot": "0x67104d5645f8cbe8fb1126337873d8c4b6e4ec199e58b941339a0b2df76ed4dc",
+          "deltasRoot": "0x976d4aa614528a04f130a48894313e5602bd0fba30eb27ae0cc9de5affa0dcf1",
           "events": [
-            "💳 Right credit limit = 22500 for token 1"
+            "💸 Sent 2500 token 1 to Entity 3030 (xln:lending_disburse)"
           ],
           "intentEntries": [
             [
@@ -37,21 +37,21 @@
               "borrow"
             ],
             [
-              "grant:loan-0327fd9035d42518",
-              "credit-grant"
+              "disburse:loan-0327fd9035d42518",
+              "disburse"
             ]
           ],
           "leftCreditLimit": "20000",
-          "lendingIntentsRoot": "0x9b2f5ad5e2aa5cf1dd9421849aa0d69f755a4074b33eef0c1f7903346146d59d",
-          "offdelta": "0",
+          "lendingIntentsRoot": "0x9ff075b49662492faa43131b77e795451e686578eb57384f3d00d9c08ead4d6b",
+          "offdelta": "-2500",
           "outputCount": 0,
-          "rightCreditLimit": "22500",
-          "txType": "lending_credit"
+          "rightCreditLimit": "20000",
+          "txType": "lending_disburse"
         },
         {
-          "accountStateRoot": "0xfeb2145a265c2661cc272fd6411258539ac2902445793bbe63b8f3e332632854",
+          "accountStateRoot": "0x2773fb65ee004ae4e16f5bb53db5b5de55711a71a655b7c41fd448eb208d12fc",
           "byLeft": false,
-          "deltasRoot": "0x80745f115f3476b50089a73bcde6b4640984f93919de16d12029be80acf60e2c",
+          "deltasRoot": "0xb8e1b93e520293113e8a6ea2e63ec701146ea7f56688f63f1aefe338a2133450",
           "events": [
             "💰 Received 2525 token 1 from Entity 3030 (xln:lending_repay)"
           ],
@@ -61,8 +61,8 @@
               "borrow"
             ],
             [
-              "grant:loan-0327fd9035d42518",
-              "credit-grant"
+              "disburse:loan-0327fd9035d42518",
+              "disburse"
             ],
             [
               "repay:loan-0327fd9035d42518",
@@ -70,10 +70,10 @@
             ]
           ],
           "leftCreditLimit": "20000",
-          "lendingIntentsRoot": "0x94bb7c3dade3df160b7012ffdab94d1c870b804fc9db8b1b9887a46753947d1f",
-          "offdelta": "2525",
+          "lendingIntentsRoot": "0xd5b8648bb91bb4062f493cfabdd92bad89d25e4ccf1fcf334c75973af3d78c28",
+          "offdelta": "25",
           "outputCount": 0,
-          "rightCreditLimit": "22500",
+          "rightCreditLimit": "20000",
           "txType": "lending_repay"
         }
       ]

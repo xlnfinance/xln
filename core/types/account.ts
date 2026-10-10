@@ -110,8 +110,7 @@ export type AccountLendingIntentKind =
   | 'fund'
   | 'borrow'
   | 'repay'
-  | 'credit-grant'
-  | 'credit-revoke'
+  | 'disburse'
   | 'close-request'
   | 'close-payout';
 
@@ -703,14 +702,13 @@ export type AccountTx =
       };
     }
   | {
-      type: 'lending_credit';
+      type: 'lending_disburse';
       data: {
-        action: 'grant' | 'revoke';
         loanId: string;
         hubEntityId: string;
         borrowerEntityId: string;
         tokenId: number;
-        creditLimit: bigint;
+        amount: bigint;
       };
     }
   | {

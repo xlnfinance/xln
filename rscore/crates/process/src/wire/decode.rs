@@ -8,9 +8,9 @@ use xln_rscore_engine::{
     AccountState, AccountStateSeed, AccountTx, BilateralRebalanceFeePolicy, CarriedSections,
     DeliveryMode, Delta, DepositoryAddress, HtlcDeliveryMode, HtlcHashlock, HtlcLock, HtlcLockTx,
     HtlcResolveOutcome, HtlcResolveTx, JClaimAccumulator, JClaimNode, JClaimProof, JClaimRecord,
-    JClaimSide, JEventClaimTx, JurisdictionEvent, LendingAction, LendingTermId,
-    OpaqueHtlcCiphertext, RebalanceFeePolicySnapshot, RebalanceRefundReason, Side,
-    SwapMarketPolicy, SwapOffer, SwapToken, TokenId, WatchSeed,
+    JClaimSide, JEventClaimTx, JurisdictionEvent, LendingTermId, OpaqueHtlcCiphertext,
+    RebalanceFeePolicySnapshot, RebalanceRefundReason, Side, SwapMarketPolicy, SwapOffer,
+    SwapToken, TokenId, WatchSeed,
 };
 
 use crate::wire_value::{
@@ -903,7 +903,7 @@ pub(crate) fn decode_tx(value: &AbiValue) -> Result<AccountTx, ProcessError> {
         10 => decode_lending_fund(fields),
         11 => decode_lending_borrow_request(fields),
         12 => decode_lending_repay(fields),
-        13 => decode_lending_credit(fields),
+        24 => decode_lending_disburse(fields),
         14 => decode_lending_close_request(fields),
         15 => decode_lending_close_payout(fields),
         17 => decode_request_collateral(fields),
@@ -985,24 +985,14 @@ fn decode_lending_repay(fields: &[AbiValue]) -> Result<AccountTx, ProcessError> 
     })
 }
 
-fn decode_lending_credit(fields: &[AbiValue]) -> Result<AccountTx, ProcessError> {
-    let fields = exact(fields, 7, "lendingCredit")?;
-    Ok(AccountTx::LendingCredit {
-        action: match integer(&fields[1])? {
-            0 => LendingAction::Grant,
-            1 => LendingAction::Revoke,
-            value => {
-                return Err(ProcessError::Tag {
-                    field: "lendingAction",
-                    value,
-                });
-            }
-        },
-        loan_id: text(&fields[2])?.into(),
-        hub_entity_id: text(&fields[3])?.into(),
-        borrower_entity_id: text(&fields[4])?.into(),
-        token_id: token(&fields[5])?,
-        credit_limit: bigint(&fields[6], "creditLimit")?,
+fn decode_lending_disburse(fields: &[AbiValue]) -> Result<AccountTx, ProcessError> {
+    let fields = exact(fields, 6, "lendingDisburse")?;
+    Ok(AccountTx::LendingDisburse {
+        loan_id: text(&fields[1])?.into(),
+        hub_entity_id: text(&fields[2])?.into(),
+        borrower_entity_id: text(&fields[3])?.into(),
+        token_id: token(&fields[4])?,
+        amount: bigint(&fields[5], "amount")?,
     })
 }
 

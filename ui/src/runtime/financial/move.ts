@@ -10,6 +10,7 @@ import {
 	type MovePostSettleOp,
 } from '@xln/frontend/lib/components/Entity/account/entity-action-txs';
 import {
+	withdrawableCollateral,
 	MOVE_ENDPOINT_LABEL,
 	MOVE_ENDPOINTS,
 	buildMoveRouteSteps,
@@ -127,7 +128,9 @@ export function availableAt(place: MoveEndpoint, wallet: WalletView, tokenId: nu
 		}
 		case 'account': {
 			const account = wallet.accounts.find(entry => entry.counterpartyId === normalizeId(sourceAccountId));
-			return account?.tokens.find(token => token.tokenId === tokenId)?.derived.outCapacity ?? 0n;
+			if (!account || account.disputed) return 0n;
+			const token = account.tokens.find(token => token.tokenId === tokenId);
+			return token ? withdrawableCollateral(token.derived) : 0n;
 		}
 	}
 }

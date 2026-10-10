@@ -224,7 +224,7 @@ export const provisionFaucetWalletFunding = async (
     const faucetAddress = await wallet.getAddress();
     if (adapter.mode === 'browservm') {
       if (options.ensureEth) {
-        const funded = await context.fundBrowserVmWallet(faucetAddress, context.faucetWalletEthTarget);
+        const funded = await context.fundBrowserVmWallet(faucetAddress, context.faucetWalletEthTarget, undefined, adapter);
         if (!funded) throw new Error('BROWSERVM_FAUCET_UNAVAILABLE');
       }
       return;

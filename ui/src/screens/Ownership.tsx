@@ -18,8 +18,10 @@ import {
 	type EntityShareTokenProjection,
 	type TakeoverStatus,
 } from '../runtime/financial/ownership';
+import { takeoverActivationReady } from '../runtime/financial/ownership-activation';
 
 const SHARE_DECIMALS = 0;
+const formatUnix = (seconds: bigint): string => seconds > 0n ? new Date(Number(seconds) * 1000).toLocaleString() : '—';
 
 /**
  * Who owns this entity: its CONTROL and DIVIDEND share tokens on the
@@ -36,11 +38,15 @@ export function Ownership() {
 	const release = releaseState(wallet.frame);
 	const core = wallet.frame?.activeEntity?.core;
 	const depository = String(core?.config?.jurisdiction?.depositoryAddress || '').toLowerCase();
+	// A numbered Entity cannot authorize commands until its registration is certified locally.
+	const boardReady = Number(core?.height ?? 0) > 0;
 	const [shares, setShares] = useState<readonly EntityShareTokenProjection[]>([]);
 	const [sharesError, setSharesError] = useState('');
 	const [busy, setBusy] = useState<string | null>(null);
 	const [targetId, setTargetId] = useState('');
-	const [status, setStatus] = useState<TakeoverStatus | null>(null);
+	const [takeoverStatus, setStatus] = useState<TakeoverStatus | null>(null);
+	const status = takeoverStatus?.targetEntityId === targetId ? takeoverStatus : null;
+	const activationReady = takeoverActivationReady(status);
 	const targets = takeoverTargets(wallet.entityId, wallet.signerId, wallet.names);
 	const validators = core?.config?.validators ?? [];
 	const threshold = core?.config?.threshold ?? 0n;
@@ -59,6 +65,7 @@ export function Ownership() {
 	useEffect(() => {
 		void refreshShares();
 	}, [refreshShares, height]);
+	useEffect(() => { setTargetId(''); setStatus(null); }, [wallet.entityId]);
 
 	const run = async (key: string, label: string, work: () => Promise<void>): Promise<void> => {
 		setBusy(key);
@@ -135,7 +142,7 @@ export function Ownership() {
 							{shares.map(share => (
 								<div key={share.shareClass} className="kv">
 									<span className="k">{share.shareClass === 'control' ? 'CONTROL' : 'DIVIDEND'} in reserve</span>
-									<span className="v num">{share.internalTokenId === null ? 'not issued' : formatMoney(share.reserve, SHARE_DECIMALS, 0)}</span>
+									<span className="v num" data-testid={`shares-${share.shareClass}`}>{share.internalTokenId === null ? 'not issued' : formatMoney(share.reserve, SHARE_DECIMALS, 0)}</span>
 								</div>
 							))}
 							<div className="kv">
@@ -148,11 +155,11 @@ export function Ownership() {
 								type="button"
 								className="btn"
 								style={{ marginTop: 10 }}
-								disabled={busy !== null || release.pendingNonce !== null || !depository}
+								disabled={busy !== null || release.pendingNonce !== null || !depository || !boardReady}
 								onClick={() => void run('release', 'Share issuance submitted to the board', () => releaseShares(wallet.entityId, wallet.signerId, depository))}
 								data-testid="release-shares"
 							>
-								{busy === 'release' ? 'Submitting…' : 'Release treasury shares to the Depository'}
+								{!boardReady ? 'Syncing registered board…' : busy === 'release' ? 'Submitting…' : 'Release treasury shares to the Depository'}
 							</button>
 							<p className="note" style={{ marginTop: 8 }}>
 								Mints the full CONTROL and DIVIDEND supply into this entity's Depository reserve. From there they move like any other token.
@@ -195,9 +202,9 @@ export function Ownership() {
 											</span>
 										</div>
 										<div className="kv">
-											<span className="k">Activates at block</span>
+											<span className="k">Activation time</span>
 											<span className="v num">
-												{status.activateAtBlock.toString()} · now {status.currentBlock.toString()}
+												{formatUnix(status.activateAt)} · chain now {formatUnix(status.currentUnix)}
 											</span>
 										</div>
 									</>
@@ -209,12 +216,12 @@ export function Ownership() {
 									<button type="button" className="btn" disabled={!targetId || busy !== null} onClick={() => void run('propose', 'CONTROL board proposal submitted', () => proposeTakeover(wallet.entityId, wallet.signerId, targetId))} data-testid="takeover-propose">
 										{busy === 'propose' ? 'Proposing…' : 'Propose a board with only me'}
 									</button>
-									<button type="button" className="btn danger" disabled={!targetId || busy !== null} onClick={() => void run('activate', 'Board activation and handover submitted', () => activateTakeover(wallet.entityId, wallet.signerId, targetId))} data-testid="takeover-activate">
+										<button type="button" className="btn danger" disabled={!targetId || busy !== null || !activationReady} onClick={() => void run('activate', 'Board activation and handover submitted', () => activateTakeover(wallet.entityId, wallet.signerId, targetId))} data-testid="takeover-activate">
 										{busy === 'activate' ? 'Activating…' : 'Activate after the delay'}
 									</button>
 								</div>
 								<p className="note" style={{ marginTop: 8 }}>
-									The proposal needs a CONTROL majority on-chain and waits out the activation delay before the handover.
+										The proposal needs a CONTROL majority on-chain and waits out the activation delay before the handover. Read status again after the deadline to enable activation.
 								</p>
 							</>
 						)}

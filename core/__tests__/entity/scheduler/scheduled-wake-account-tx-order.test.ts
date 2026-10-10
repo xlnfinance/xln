@@ -191,6 +191,6 @@ test('a wake with an overdue loan and an expired lock emits the htlc resolve bef
   const result = await applyEntityFrameWithMaterializedTestInfraContext(env, state, [tx], TRIGGER_AT);
 
   const proposed = result.newState.accounts.get(BORROWER)?.pendingFrame?.accountTxs ?? [];
-  expect(proposed.map(entry => entry.type)).toEqual(['htlc_resolve', 'lending_credit']);
+  expect(proposed.map(entry => entry.type)).toEqual(['htlc_resolve']);
   expect(result.newState.lending?.loans.get(LOAN_ID)?.status).toBe('defaulted');
 });

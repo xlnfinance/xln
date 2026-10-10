@@ -8,8 +8,10 @@ is a capped public-testnet / pre-mainnet gate with every product surface turned
 on, a public landing page, one official tower, three hubs, and a maximum
 aggregate user-risk budget of USD 10,000 equivalent.
 
-Uncapped mainnet must clear this gate first, then add external audit sign-off
-and a higher-value ops posture. No wording in this document downgrades the
+Owner update, 2026-10-10: external audit sign-off is optional. Codex performs
+the engineering review without claiming independent external assurance.
+Mainnet still requires the applicable financial/recovery gates and a real-funds
+ops posture. No wording in this document downgrades the
 real-funds bar in [mainnet.md](mainnet.md).
 
 ## Decision Snapshot
@@ -21,7 +23,7 @@ Date: 2026-06-16
 | Launch scope | Everything currently user-facing, plus landing |
 | Value cap | Public testnet / capped beta, max USD 10,000 equivalent at risk |
 | Soak duration | 1 hour uninterrupted for capped testnet |
-| External audit | Not required for this capped testnet; required before uncapped mainnet |
+| External audit | Optional for testnet and mainnet, owner decision 2026-10-10; engineering/security gates remain required |
 | Topology | One official tower and three hubs |
 | Default exception rule | P0/P1 exceptions forbidden; P2 only with explicit owner sign-off |
 | Default recovery SLA | Restore path must complete in less than 60 seconds after seed entry or local backup upload |

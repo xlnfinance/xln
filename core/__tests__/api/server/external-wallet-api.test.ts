@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { ethers } from 'ethers';
+import { safeStringify } from '../../../protocol/serialization';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { deriveSignerKeySync } from '../../../account/crypto';
@@ -104,6 +105,61 @@ const createBlockingFaucetFund = () => {
 };
 
 describe('external wallet API faucet transaction gate', () => {
+  test('routes the token catalog and BrowserVM funding to the requested jurisdiction', async () => {
+    const provider = makeTestProvider();
+    const adapter = makeBrowserVmAdapter(provider);
+    const selected: Array<string | undefined> = [];
+    const funded: JAdapter[] = [];
+    try {
+      const context = makeContext(adapter, async (_address, _amount, _symbol, target) => {
+        funded.push(target);
+        return true;
+      });
+      const catalog = context.getTokenCatalog;
+      context.getTokenCatalog = async (_entity, jurisdiction) => {
+        selected.push(jurisdiction);
+        return catalog();
+      };
+      context.getJAdapter = (_entity, jurisdiction) => {
+        selected.push(jurisdiction);
+        return jurisdiction === 'Tron' ? adapter : null;
+      };
+      const response = await createExternalWalletApi(context).handleErc20Faucet(new Request('http://localhost/api/faucet/erc20', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: safeStringify({ userAddress: USER_ADDRESS, tokenSymbol: 'USDC', amount: '1', jurisdiction: 'Tron' }),
+      }));
+      expect(response.status).toBe(200);
+      expect(selected).toEqual(['Tron', 'Tron']);
+      expect(funded).toEqual([adapter]);
+      selected.length = 0;
+      await createExternalWalletApi(context).provisionFaucetWallet('Tron');
+      expect(selected).toEqual(['Tron', 'Tron']);
+      expect(funded).toEqual([adapter, adapter]);
+    } finally {
+      provider.destroy();
+    }
+  });
+
+  test('returns the full asynchronous faucet failure and releases the wallet lock', async () => {
+    const provider = makeTestProvider();
+    const adapter = makeBrowserVmAdapter(provider);
+    try {
+      const api = createExternalWalletApi(makeContext(adapter, async () => {
+        throw new Error('FAUCET_WALLET_ETH_UNDERFUNDED current=0 required=120000000000000000');
+      }));
+      for (let attempt = 0; attempt < 2; attempt++) {
+        const response = await api.handleErc20Faucet(makeFaucetRequest());
+        expect(response.status).toBe(500);
+        expect(await response.json()).toEqual({
+          error: 'FAUCET_WALLET_ETH_UNDERFUNDED current=0 required=120000000000000000',
+        });
+      }
+    } finally {
+      provider.destroy();
+    }
+  });
+
   test('funds a dev-chain faucet without consuming the shared contract-admin nonce', async () => {
     const calls: Array<{ method: string; params: unknown[] }> = [];
     const provider = {

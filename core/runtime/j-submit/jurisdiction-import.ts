@@ -169,7 +169,7 @@ const validateImportResult = (
     }
   }
   const tokenIds = new Set<number>();
-  const tokenAddresses = new Set<string>();
+  const tokenReferences = new Set<string>();
   for (const [index, token] of raw.tokenRegistry.entries()) {
     const prefix = `IMPORT_J_RESULT_TOKEN_${index}`;
     if (!Number.isSafeInteger(token.tokenId) || token.tokenId < 1 || tokenIds.has(token.tokenId)) {
@@ -180,12 +180,15 @@ const validateImportResult = (
       throw new Error(`${prefix}_DECIMALS_INVALID:${String(token.decimals)}`);
     }
     const address = normalizeJurisdictionImportAddress(token.address, `${prefix}_ADDRESS`);
-    if (tokenAddresses.has(address)) throw new Error(`${prefix}_ADDRESS_DUPLICATE:${address}`);
     if (typeof token.symbol !== 'string' || typeof token.name !== 'string' || token.externalTokenId < 0n) {
       throw new Error(`${prefix}_METADATA_INVALID`);
     }
     tokenIds.add(token.tokenId);
-    tokenAddresses.add(address);
+    // Depository._packTokenReference identifies a listed asset by type, contract and external id.
+    // CONTROL and DIVIDEND legitimately share their EP address; only the exact triple is a duplicate.
+    const reference = `${token.tokenType}:${address}:${token.externalTokenId}`;
+    if (tokenReferences.has(reference)) throw new Error(`${prefix}_REFERENCE_DUPLICATE:${reference}`);
+    tokenReferences.add(reference);
     token.address = address;
   }
   raw.tokenRegistry.sort((left, right) => left.tokenId - right.tokenId);

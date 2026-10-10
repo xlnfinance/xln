@@ -5,10 +5,14 @@ import type { AccountTokenView } from '../../runtime/views';
 /** Balance backing and payment limits are different quantities; both use canonical deriveDelta fields. */
 export function AccountBalance({
   token,
+  disputed,
+  closed,
   symbol,
   money,
 }: {
   token: AccountTokenView;
+  disputed: boolean;
+  closed: boolean;
   symbol: string;
   money: (amount: bigint) => string;
 }) {
@@ -46,17 +50,18 @@ export function AccountBalance({
           </span>
         )}
       </div>
+      {disputed ? <p className="note">{closed ? 'Account permanently closed after dispute. Connect another account to resume payments.' : 'Account frozen by dispute. Payments are unavailable.'}</p> : null}
       <div className="account-limits">
         <span>
           Can send now
           <strong className="num">
-            {money(d.outCapacity)} {symbol}
+            {money(disputed ? 0n : d.outCapacity)} {symbol}
           </strong>
         </span>
         <span>
           Can receive now
           <strong className="num">
-            {money(d.inCapacity)} {symbol}
+            {money(disputed ? 0n : d.inCapacity)} {symbol}
           </strong>
         </span>
       </div>

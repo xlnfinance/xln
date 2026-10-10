@@ -16,7 +16,7 @@ pub const ACCOUNT_TX_TYPES: [&str; 21] = [
     "lending_fund",
     "lending_borrow_request",
     "lending_repay",
-    "lending_credit",
+    "lending_disburse",
     "lending_close_request",
     "lending_close_payout",
     "add_delta",
@@ -73,21 +73,6 @@ impl LendingTermId {
             Self::OneHour => "1h",
             Self::OneDay => "1d",
             Self::OneMonth => "1m",
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum LendingAction {
-    Grant,
-    Revoke,
-}
-
-impl LendingAction {
-    pub const fn wire_name(self) -> &'static str {
-        match self {
-            Self::Grant => "grant",
-            Self::Revoke => "revoke",
         }
     }
 }
@@ -208,13 +193,12 @@ pub enum AccountTx {
         token_id: TokenId,
         amount: BigInt,
     },
-    LendingCredit {
-        action: LendingAction,
+    LendingDisburse {
         loan_id: String,
         hub_entity_id: String,
         borrower_entity_id: String,
         token_id: TokenId,
-        credit_limit: BigInt,
+        amount: BigInt,
     },
     LendingCloseRequest {
         position_id: String,
@@ -266,7 +250,7 @@ impl AccountTx {
             Self::LendingFund { .. } => "lending_fund",
             Self::LendingBorrowRequest { .. } => "lending_borrow_request",
             Self::LendingRepay { .. } => "lending_repay",
-            Self::LendingCredit { .. } => "lending_credit",
+            Self::LendingDisburse { .. } => "lending_disburse",
             Self::LendingCloseRequest { .. } => "lending_close_request",
             Self::LendingClosePayout { .. } => "lending_close_payout",
             Self::AddDelta { .. } => "add_delta",

@@ -297,6 +297,8 @@
     }
   }
 
+  let voiceConfigStatus = '';
+
   async function saveVoiceConfig() {
     try {
       const res = await fetch(`${API_URL}/api/voice/config`, {
@@ -305,12 +307,12 @@
         body: JSON.stringify(voiceConfig),
       });
       const data = await res.json();
-      if (data.success) {
-        alert('Voice config saved! Restart voice-paste if running.');
-      }
+      voiceConfigStatus = data.success
+        ? 'Voice config saved. Restart voice-paste if running.'
+        : 'Failed to save config';
     } catch (e) {
       console.error('Failed to save voice config:', e);
-      alert('Failed to save config');
+      voiceConfigStatus = 'Failed to save config';
     }
   }
 
@@ -1158,6 +1160,7 @@ Help the user understand this entity's state, suggest actions, or answer questio
         <button class="save-config-btn" on:click={saveVoiceConfig}>
           Save Config
         </button>
+        {#if voiceConfigStatus}<p role="status">{voiceConfigStatus}</p>{/if}
 
         <div class="voice-paste-instructions">
           <p>Start: <code>bun run ai/voice-paste.ts</code></p>

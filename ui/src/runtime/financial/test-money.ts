@@ -3,7 +3,7 @@ import { requireAdapter } from '../adapter';
 import { peekXLN } from '../xln-loader';
 import { requestFaucet } from '../financial/external';
 import { readAccountState } from '../financial/swap';
-import { accountNetBalance } from '../financial/balance';
+import { accountNetBalance } from '@xln/frontend/lib/utils/ui/accountBalance';
 import { sendEntityTxs, waitFor } from '../tx';
 
 export async function receiveTestMoney(wallet: WalletView, onStage: (stage: string) => void): Promise<void> {
@@ -48,6 +48,7 @@ export async function receiveTestMoney(wallet: WalletView, onStage: (stage: stri
   }
   onStage('Receiving…');
   await requestFaucet('offchain', {
+    jurisdiction: wallet.jurisdiction,
     entityId,
     signerId: wallet.signerId,
     runtimeId: requireAdapter().runtimeId,

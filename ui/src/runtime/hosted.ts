@@ -1,3 +1,4 @@
+import { getHubOpeningCredit, getOpenAccountRebalancePolicyData, hydrateJurisdictionPolicyDefaults } from '@xln/frontend/lib/utils/onboarding/onboardingPreferences';
 import { sendRuntimeInput } from './commands';
 import { getXLN } from './xln-loader';
 import type { RuntimeRecoveryCandidate } from './restore';
@@ -342,13 +343,17 @@ export async function bootHostedVault(seed: string, options: HostedVaultOptions)
 					);
 			}
 			if (disputeConfig) {
+				await hydrateJurisdictionPolicyDefaults(stack.jurisdiction.name);
+				const decimals = xln.getTokenInfo(USDC).decimals;
+				const rebalancePolicy = getOpenAccountRebalancePolicyData(decimals);
 				await sendEntity(entityId, signerId, [
 					{
 						type: 'openAccount',
-						// Opening an account grants no unsecured exposure; Receive asks for explicit credit consent.
+						// Use the same hub credit and collateral policy as the reference wallet.
 						data: {
 							targetEntityId: hub.entityId,
-							creditAmount: 0n,
+							creditAmount: getHubOpeningCredit(decimals),
+							...(rebalancePolicy ? { rebalancePolicy } : {}),
 							tokenId: USDC,
 							disputeConfig,
 						},

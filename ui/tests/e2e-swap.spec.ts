@@ -75,31 +75,14 @@ test(
     expect(BigInt(quote.give)).toBeGreaterThan(0n);
     expect(BigInt(quote.give)).toBeLessThanOrEqual(BigInt(before.usdc));
     expect(BigInt(quote.want)).toBeGreaterThan(0n);
-    const spectrum = page.getByTestId('receive-spectrum');
     const submit = page.getByTestId('swap-submit');
-    await expect(spectrum).toBeVisible();
-    await expect(spectrum).toContainText('WETH');
-    await expect(page.getByTestId('receive-spectrum-slider')).toHaveValue('0');
-    const chooseCredit = spectrum.getByRole('button', { name: 'Accept it as credit instead', exact: true });
-    await expect(chooseCredit).toBeEnabled();
-    await expect(submit).toBeDisabled();
-    await chooseCredit.click();
-    await expect(page.getByTestId('receive-spectrum-slider')).toHaveValue('100');
-    await expect(spectrum.getByRole('checkbox')).toBeChecked();
-    await expect(submit).toBeDisabled();
-    const chosenAccount = await readAccount(page, hubId);
-    expect(chosenAccount.wethCredit).toBe(before.wethCredit);
-    expect(chosenAccount.usdc).toBe(before.usdc);
-    expect(chosenAccount.weth).toBe(before.weth);
-    expect(chosenAccount.offers).toBe(0);
-    await expect(page.getByTestId('receive-spectrum-confirm')).toHaveText('Extend credit limit');
-    await page.getByTestId('receive-spectrum-confirm').click();
-    await expect(spectrum).toHaveCount(0, { timeout: 15_000 });
+    await expect(page.getByText(/Placing this order also prepares incoming capacity/)).toBeVisible();
     await expect(submit).toBeEnabled();
     const preparedAccount = await readAccount(page, hubId);
-    const creditWithBuffer = BigInt(quote.want) + (BigInt(quote.want) + 9n) / 10n;
-    expect(preparedAccount.wethCredit).toBe(creditWithBuffer.toString());
-    expect(BigInt(preparedAccount.wethCapacity)).toBeGreaterThanOrEqual(BigInt(quote.want));
+    // Preview and invalid edits must not silently grant credit. The one Swap
+    // action uses the canonical planner to prepare exactly the required limit.
+    expect(preparedAccount.wethCredit).toBe('0');
+    expect(preparedAccount.wethCapacity).toBe('0');
     expect(preparedAccount.usdc).toBe(before.usdc);
     expect(preparedAccount.weth).toBe(before.weth);
     expect(preparedAccount.offers).toBe(0);
@@ -151,7 +134,7 @@ test(
     expect(debit).toBeGreaterThan(0n);
     expect(debit).toBeLessThanOrEqual(BigInt(quote.give));
     expect(received).toBeGreaterThanOrEqual(BigInt(quote.minNet));
-    expect(after.wethCredit).toBe(preparedAccount.wethCredit);
+    expect(after.wethCredit).toBe(quote.want);
     expect(after.holds.every(hold => hold.outgoing === '0' && hold.incoming === '0')).toBe(true);
     console.log(
       `SWAP_COMMITTED accountHeight=${after.height} usdcDebit=${debit} wethReceived=${received} permanentWethCredit=${after.wethCredit} root=${after.root}`,
@@ -189,7 +172,8 @@ test(
     );
     console.log('SWAP_HISTORY_MS', Date.now() - started, 'fee', String(fee));
     await page.getByTestId('nav-home').first().click();
-    await expect(page.getByTestId('home-balance-asset')).toHaveValue('1');
+    await expect(page.getByTestId('home-balance-asset')).toHaveValue('0');
+    await page.getByTestId('home-balance-asset').selectOption('1');
     const headlineUnits = async (decimals: number) => parseUnits(
       (await page.getByTestId('home-total').innerText()).replaceAll(',', '').replace('−', '-'), decimals,
     ).toString();

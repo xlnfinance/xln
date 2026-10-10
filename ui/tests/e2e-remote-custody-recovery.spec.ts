@@ -241,6 +241,7 @@ for (const fundingMode of ['direct', 'instant'] as const) {
         expect(senderAmount).toBe(1_000_000n + fee);
         expect(senderAmount).toBeLessThanOrEqual(2_000_000n);
         await page.getByTestId('pay-submit').click();
+        await page.getByTestId('receipt-open').click();
         await expect(page.getByTestId('receipt-kicker')).toHaveText('Paid', { timeout: 30_000 });
         await expect(page.getByTestId('receipt-amount')).toHaveText('1.00 USDC');
         await page.getByTestId('receipt-done').click();

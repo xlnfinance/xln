@@ -38,7 +38,8 @@ const parseWsUrl = (value: string): URL | null => {
 export const normalizeWsUrl = (value: string): string => {
   const parsed = parseWsUrl(value);
   if (!parsed) return String(value || '').trim();
-  parsed.hostname = normalizeLoopbackHost(parsed.hostname);
+  // The relay hello authenticates this exact origin. Alias equivalence belongs
+  // only to settings comparisons; rewriting the connection breaks its audience.
   parsed.hash = '';
   parsed.search = '';
   parsed.pathname = parsed.pathname.replace(/\/+$/, '') || '/';

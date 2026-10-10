@@ -8,7 +8,7 @@ import { ScanSheet } from '../components/ScanSheet';
 import { TokenPicker } from '../components/TokenPicker';
 import { PaymentTopUp } from '../components/PaymentTopUp';
 import { paymentMode } from '../runtime/financial/payment-funding';
-import { accountNetBalance } from '../runtime/financial/balance';
+import { accountNetBalance } from '@xln/frontend/lib/utils/ui/accountBalance';
 import { useApp } from '../runtime/store';
 import { peekXLN } from '../runtime/xln-loader';
 import { DELIVERY_OPTIONS, eligibleRoutes, isEntityId, quotePaymentRoutes, routeModeError, submitPayment, type PaymentRouteQuote } from '../runtime/financial/payments';

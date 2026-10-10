@@ -46,15 +46,13 @@ test('mobile resting swap survives reload and cancellation restores exact spenda
   const requested = quotedWant * 25_000_000n * 11n / (quotedGive * 10n);
   await give.fill('25');
   await want.fill(formatUnits(requested, 18));
-  const spectrum = page.getByTestId('receive-spectrum');
-  await spectrum.getByRole('button', { name: 'Accept it as credit instead', exact: true }).click();
-  await page.getByTestId('receive-spectrum-confirm').click();
-  await expect(spectrum).toHaveCount(0, { timeout: 15_000 });
+  await expect(page.getByText(/Placing this order also prepares incoming capacity/)).toBeVisible();
   await expect(page.getByTestId('swap-submit')).toBeEnabled();
   const before = await readAccount(page, hubId);
   expect(before.usdc).toBe('100000000');
   expect(before.weth).toBe('0');
   expect(before.offers).toBe(0);
+  expect(before.wethCredit).toBe('0');
   await page.getByTestId('swap-submit').click();
   await expect.poll(async () => {
     const account = await readAccount(page, hubId);
@@ -68,6 +66,7 @@ test('mobile resting swap survives reload and cancellation restores exact spenda
   expect(order.resolves).toHaveLength(0);
   expect(resting.usdc).toBe(before.usdc);
   expect(resting.weth).toBe(before.weth);
+  expect(resting.wethCredit).toBe(String(order.originalWantAmount));
   expect(BigInt(before.usdcSpendable) - BigInt(resting.usdcSpendable)).toBe(order.originalGiveAmount);
   expect(resting.holds.find(hold => hold.tokenId === 1)?.outgoing).toBe(String(order.originalGiveAmount));
 
@@ -90,7 +89,7 @@ test('mobile resting swap survives reload and cancellation restores exact spenda
   expect(canceled.usdc).toBe(before.usdc);
   expect(canceled.weth).toBe(before.weth);
   expect(canceled.usdcSpendable).toBe(before.usdcSpendable);
-  expect(canceled.wethCredit).toBe(before.wethCredit);
+  expect(canceled.wethCredit).toBe(resting.wethCredit);
   expect(canceled.holds.every(hold => hold.outgoing === '0' && hold.incoming === '0')).toBe(true);
   const closed = await readOrders(page, hubId);
   expect(closed.items).toHaveLength(1);

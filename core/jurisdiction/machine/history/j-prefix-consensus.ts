@@ -202,6 +202,11 @@ const isolatedEventBlockClaim = (claim: JPrefixClaim, block: JurisdictionEventBl
 export const getLocalJPrefixAttestableHeight = (state: EntityState, history: ValidatorJHistory): number | null => {
   const baseHeight = state.lastFinalizedJHeight;
   const contiguousHeight = getValidatorJContiguousThroughHeight(state, history);
+  const registrationBlock = state.config.jurisdiction?.registrationBlock;
+  // The first numbered-Entity frame must certify its own registration. Voting
+  // for an earlier RPC chunk freezes that round before authority can exist.
+  // Keep every observed header/event, but wait for the registration prefix.
+  if (registrationBlock !== undefined && baseHeight < registrationBlock && contiguousHeight < registrationBlock) return null;
   if (contiguousHeight > baseHeight) return contiguousHeight;
   const hasSparsePendingEvent = Array.from(history.eventBlocks.keys()).some(
     height => height > baseHeight && height <= history.scannedThroughHeight,

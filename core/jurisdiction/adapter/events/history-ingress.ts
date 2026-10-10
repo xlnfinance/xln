@@ -199,7 +199,12 @@ export function buildJHistoryRangeRuntimeInput(
     // independent of whether this validator can emit a new attestation now:
     // it may already have signed the current Entity-height round, in which
     // case the event belongs to the next round after that one commits.
-    if (observations.length > 0) finalityReplicaKeys.push(replicaKey);
+    const registrationBlock = replica.state.config.jurisdiction?.registrationBlock;
+    const awaitingRegistration = registrationBlock !== undefined &&
+      replica.state.lastFinalizedJHeight < registrationBlock && scannedThroughHeight < registrationBlock;
+    // Pre-registration history is WAL-durable above, but cannot yet be signed
+    // by this numbered Entity. Fencing here prevents fetching its authority.
+    if (observations.length > 0 && !awaitingRegistration) finalityReplicaKeys.push(replicaKey);
     // An authenticated empty suffix is still durable local evidence, but it is
     // not an Entity range until the liveness interval is due. Treating every
     // scanned replica as pending finality deadlocks the watcher one empty block

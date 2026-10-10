@@ -96,6 +96,7 @@ test(
       const ceiling = await a.getByTestId('pay-quote').getAttribute('data-sender-amount');
       if (!ceiling) throw new Error('Displayed sender debit missing');
       await a.getByTestId('pay-submit').dblclick();
+      await a.getByTestId('receipt-open').click();
       await expect(a.getByTestId('receipt-kicker')).toHaveText('Paid', { timeout: 10_000 });
       const payment = await readCommittedPayment(a, alice.wallet.entityId, beforeA.frame.height + 1);
       expect(payment.amount).toBe('25000000');

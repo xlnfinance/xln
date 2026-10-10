@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { withdrawableCollateral } from '../move-routes';
 import type { AccountReadView, EntityReadView } from '#lib/components/Entity/core/entity-panel-types.ts';
 
   import { getXLN, submitEntityInputs, xlnFunctions } from '../../../stores/xlnStore';
@@ -121,13 +122,6 @@ import type { AccountReadView, EntityReadView } from '#lib/components/Entity/cor
 
   function formatInlineMaxHint(amountBig: bigint, currentTokenId: number): string {
     if (amountBig <= 0n) return '0';
-    return formatTokenInputAmount(amountBig, getTokenDecimals(currentTokenId));
-  }
-
-  function formatConfirmAmount(currentTokenId: number, amountBig: bigint): string {
-    if (activeXlnFunctions?.formatTokenAmount) {
-      return activeXlnFunctions.formatTokenAmount(currentTokenId, amountBig);
-    }
     return formatTokenInputAmount(amountBig, getTokenDecimals(currentTokenId));
   }
 
@@ -599,8 +593,7 @@ import type { AccountReadView, EntityReadView } from '#lib/components/Entity/cor
   function getWorkspaceWithdrawableCollateral(currentTokenId: number): bigint {
     const derived = getWorkspaceDerivedDelta(currentTokenId);
     if (!derived) return 0n;
-    const hold = derived.outTotalHold ?? 0n;
-    return derived.outCollateral > hold ? derived.outCollateral - hold : 0n;
+    return withdrawableCollateral(derived);
   }
 
   function isLocalExecutorForWorkspace(counterparty: string, account: AccountReadView | null): boolean {
@@ -653,7 +646,6 @@ import type { AccountReadView, EntityReadView } from '#lib/components/Entity/cor
 
   async function clearBatch() {
     if (!hasAnyBatch) return;
-    if (!confirm('Clear current draft and sent batch state?')) return;
 
     sending = true;
     try {
@@ -765,18 +757,6 @@ import type { AccountReadView, EntityReadView } from '#lib/components/Entity/cor
     try {
       if (!counterpartyEntityId) throw new Error('Select account first');
       const parsedAmount = parsePositiveAmount(amount, tokenId);
-      const reserveBalance = getReserveBalance(tokenId);
-      if (parsedAmount > reserveBalance) {
-        const requestedLabel = formatConfirmAmount(tokenId, parsedAmount);
-        const reserveLabel = formatConfirmAmount(tokenId, reserveBalance);
-        const proceed = confirm(
-          `Requested Reserve → Collateral exceeds current reserve.\n\n` +
-          `Current reserve: ${reserveLabel}\n` +
-          `Requested amount: ${requestedLabel}\n\n` +
-          `Queue it anyway?`,
-        );
-        if (!proceed) return;
-      }
       const env = activeEnv;
       if (!env || !isRuntimeEnv(env)) throw new Error('Runtime environment not available');
       if (!activeIsLive) throw new Error('On-chain actions are only available in LIVE mode');

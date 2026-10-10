@@ -4,10 +4,9 @@ mod validation;
 use num_bigint::BigInt;
 
 use crate::tx::apply_types::MutationDecision;
-use crate::tx::handlers::balance::set_credit_limit;
 use crate::{
-    AccountRejection, AccountReplica, AccountTx, LendingAction, LendingIntentKind, Side, TokenId,
-    TransitionError, ValidationRejection,
+    AccountRejection, AccountReplica, AccountTx, LendingIntentKind, Side, TokenId, TransitionError,
+    ValidationRejection,
 };
 use payment::{consume_if_applied, payment};
 use validation::{
@@ -72,22 +71,20 @@ pub(crate) fn apply(
             *token_id,
             amount,
         ),
-        AccountTx::LendingCredit {
-            action,
+        AccountTx::LendingDisburse {
             loan_id,
             hub_entity_id,
             borrower_entity_id,
             token_id,
-            credit_limit,
-        } => credit(
+            amount,
+        } => disburse(
             replica,
             proposer,
-            *action,
             loan_id,
             hub_entity_id,
             borrower_entity_id,
             *token_id,
-            credit_limit,
+            amount,
         ),
         AccountTx::LendingCloseRequest {
             position_id,
@@ -220,35 +217,32 @@ fn repay(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn credit(
+fn disburse(
     replica: &mut AccountReplica,
     proposer: Side,
-    action: LendingAction,
     loan_id: &str,
     hub: &str,
     borrower: &str,
     token_id: TokenId,
-    credit_limit: &BigInt,
+    amount: &BigInt,
 ) -> Result<MutationDecision, TransitionError> {
     require_intent_id(loan_id, "loan")?;
     require_role(replica, proposer, "HUB", hub)?;
     require_counterparty(replica, hub, borrower)?;
-    if credit_limit < &BigInt::from(0) {
-        return Err(TransitionError::LendingCreditLimitNegative(
-            credit_limit.clone(),
-        ));
-    }
-    let result = set_credit_limit(replica, token_id, credit_limit, proposer)?;
-    let (prefix, kind) = match action {
-        LendingAction::Grant => ("grant", LendingIntentKind::CreditGrant),
-        LendingAction::Revoke => ("revoke", LendingIntentKind::CreditRevoke),
-    };
-    consume_if_applied(
+    positive_amount(amount, "LENDING_DISBURSE")?;
+    // Authenticate the hub payer and consume the loan before any duplicate can pay twice.
+    let key = format!("disburse:{}", normalize(loan_id));
+    require_unused_intent(replica, &key)?;
+    let result = payment(
         replica,
-        result,
-        format!("{prefix}:{}", normalize(loan_id)),
-        kind,
-    )
+        proposer,
+        token_id,
+        amount,
+        hub,
+        borrower,
+        "lending_disburse",
+    )?;
+    consume_if_applied(replica, result, key, LendingIntentKind::Disburse)
 }
 
 fn close_request(

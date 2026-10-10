@@ -2,6 +2,7 @@ import { writable } from 'svelte/store';
 
 export type PaymentSpotlight = {
   id: string;
+  observedAt: number;
   ownerKey: string;
   ownerHeight: number;
   kicker?: string;
@@ -15,6 +16,10 @@ export function createPaymentSpotlightStore() {
   const { subscribe, set } = writable<PaymentSpotlight | null>(null);
   let activeTimer: ReturnType<typeof setTimeout> | null = null;
   let activeSpotlight: PaymentSpotlight | null = null;
+  let openedSpotlight: PaymentSpotlight | null = null;
+  const opened = writable<PaymentSpotlight | null>(null);
+  const close = () => { openedSpotlight = null; opened.set(null); };
+  const open = () => { openedSpotlight = activeSpotlight; opened.set(openedSpotlight); clear(); };
 
   function clear() {
     if (activeTimer) {
@@ -25,11 +30,12 @@ export function createPaymentSpotlightStore() {
     set(null);
   }
 
-  function show(payload: Omit<PaymentSpotlight, 'id'>) {
+  function show(payload: Omit<PaymentSpotlight, 'id' | 'observedAt'>) {
     clear();
     const spotlight: PaymentSpotlight = {
       id: `payment-spotlight-${Date.now()}`,
-      duration: 3200,
+      observedAt: Date.now(),
+      duration: 8000,
       ...payload,
     };
     activeSpotlight = spotlight;
@@ -48,9 +54,10 @@ export function createPaymentSpotlightStore() {
       activeSpotlight &&
       (activeSpotlight.ownerKey !== ownerKey || activeSpotlight.ownerHeight > ownerHeight)
     ) clear();
+    if (openedSpotlight && (openedSpotlight.ownerKey !== ownerKey || openedSpotlight.ownerHeight > ownerHeight)) close();
   }
 
-  return { subscribe, show, clear, retainForOwner };
+  return { subscribe, show, clear, retainForOwner, opened, open, close };
 }
 
 export const paymentSpotlight = createPaymentSpotlightStore();

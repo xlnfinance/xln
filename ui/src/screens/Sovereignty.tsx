@@ -36,7 +36,7 @@ export function Sovereignty() {
 
 	const keysWhere =
 		vault?.kind === 'brainvault'
-			? `Derived from your name and passphrase on this device (brainvault, factor ${vault.brainvault?.factor ?? '—'}). Nothing is stored anywhere.`
+			? 'Derived from your exact name, passphrase, and work factor. The encrypted wallet and transaction history are stored in this browser; configured towers hold encrypted backups.'
 			: vault?.kind === 'mnemonic'
 				? 'A recovery phrase unlocked on this device; it never leaves the page.'
 				: vault?.kind === 'remote'
@@ -98,8 +98,9 @@ export function Sovereignty() {
 							</span>
 						</div>
 						<p className="note" style={{ marginTop: 10 }}>
-							Green is yours whatever anyone does: on-chain, in the Depository, or locked as collateral by a counterparty. Violet is what a
-							counterparty owes you on their signature alone; if they vanish, that is the most you can lose.
+								Green shows on-chain funds, reserve and collateral backing your account claims. Enforcing an account claim requires signed evidence and gas;
+								outdated-state disputes must be answered before their deadlines. Keep your wallet online or verify current tower protection.
+								Violet shows unsecured promises: repayment depends on the counterparty. These amounts are not a guarantee of recovery.
 						</p>
 					</div>
 

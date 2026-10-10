@@ -1,12 +1,14 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { isAccountTxKindAvailable } from '@xln/core/account/tx/admission-policy';
+import { computeLendingInterest, normalizeInterestBps } from '@xln/core/extensions/lending';
 import { Icon } from '../components/Icons';
 import { TokenIcon } from '../components/TokenPicker';
 import { LendingClose } from '../components/LendingClose';
+import { walletHelp } from '@xln/frontend/lib/utils/ui/walletHelp';
 import { useApp } from '../runtime/store';
 import { sendEntityTxs } from '../runtime/tx';
-import { formatMoney, getTokenMeta, parseAmount, timeAgo } from '../runtime/format';
+import { formatAmount, formatMoney, getTokenMeta, parseAmount } from '../runtime/format';
 import { useWallet } from '../runtime/views';
 import {
 	LENDING_TERMS,
@@ -50,6 +52,17 @@ export function Lending() {
 	const borrowAvailable = isAccountTxKindAvailable('lending_borrow_request');
 	const repayAvailable = isAccountTxKindAvailable('lending_repay');
 	const submitAvailable = side === 'lend' ? offerAvailable : borrowAvailable;
+	const borrowPreview = useMemo(() => {
+		if (side !== 'borrow' || !amountText.trim()) return null;
+		try {
+			const principal = parseAmount(amountText, meta.decimals);
+			if (principal <= 0n) throw new Error('Enter a positive amount');
+			const bps = normalizeInterestBps(rateText);
+			return { repayment: principal + computeLendingInterest(principal, bps), error: '' };
+		} catch (error) {
+			return { repayment: null, error: error instanceof Error ? error.message : String(error) };
+		}
+	}, [side, amountText, rateText, meta.decimals]);
 
 	useEffect(() => {
 		if (!hubId && hubs.length > 0) setHubId(hubs[0]!.counterpartyId);
@@ -128,6 +141,7 @@ export function Lending() {
 			{!offerAvailable || !borrowAvailable || !repayAvailable ? (
 				<p className="note" role="status" data-testid="lending-unavailable">{UNAVAILABLE}. Existing positions remain visible below.</p>
 			) : null}
+			<details className="disclosure"><summary>How lending works — with an example</summary><p className="note">{walletHelp.lendingBalance}</p></details>
 			<div className="two-col">
 				<div>
 					{hubs.length === 0 ? (
@@ -188,13 +202,19 @@ export function Lending() {
 									<span className="muted">= {rate(Math.max(0, Math.floor(Number(rateText) || 0)))} per term</span>
 								</div>
 							</div>
-							<button type="button" className="btn primary" disabled={!submitAvailable || busy || !amountText.trim() || !hubId} onClick={() => void submit()} data-testid="lend-submit">
+							{borrowPreview && <p className="note" data-testid="lending-borrow-preview">
+								{borrowPreview.repayment === null ? borrowPreview.error : <>
+									Maximum repayment: {formatAmount(borrowPreview.repayment, meta.decimals, meta.decimals)} {meta.symbol}, due {termId === '1m' ? '30 days' : LENDING_TERMS.find(entry => entry.id === termId)!.label} after approval.
+									{' '}Estimate at your maximum rate; the matched rate may be lower. Check the confirmed loan for its exact due date.
+								</>}
+							</p>}
+							<button type="button" className="btn primary" disabled={!submitAvailable || busy || !amountText.trim() || !hubId || Boolean(borrowPreview?.error)} onClick={() => void submit()} data-testid="lend-submit">
 								{busy ? 'Sending…' : side === 'lend' ? 'Offer to the pool' : 'Request the loan'}
 							</button>
 							<p className="note" style={{ marginTop: 10 }}>
 								{side === 'lend'
-									? 'Your offer sits in the hub pool until borrowed; principal and interest come back on your account with the hub at term end.'
-									: 'The hub matches your request against open offers. Approval grants account credit for spending; it does not deposit principal. Repay before it is due.'}
+									? 'Your deposit remains part of your total balance. Close the position to receive it back once no loans are outstanding. Interest is earned only when a borrower repays.'
+									: 'The hub matches your request against open offers. Approval transfers the principal to your account once. Your credit limit stays unchanged. Repay the principal plus agreed interest before it is due.'}
 							</p>
 						</>
 					)}
@@ -264,7 +284,7 @@ export function Lending() {
 										<span className="tx">
 											<span className="t">{formatMoney(loan.principalAmount, meta.decimals)} {meta.symbol}</span>
 											<span className="s">
-												{loan.termId} · {rate(loan.interestBps)} · {loan.status} · due {loan.dueAt ? timeAgo(loan.dueAt) : '—'} · repaid{' '}
+												{loan.termId} · {rate(loan.interestBps)} · {loan.status} · due {loan.dueAt ? new Date(loan.dueAt).toLocaleString() : '—'} · repaid{' '}
 												{formatMoney(loan.repaidAmount, meta.decimals)} of {formatMoney(loan.repaymentAmount, meta.decimals)}
 											</span>
 										</span>

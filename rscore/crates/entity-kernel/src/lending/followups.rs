@@ -1,9 +1,8 @@
 use num_bigint::BigInt;
 use sha3::{Digest as _, Keccak256};
-use xln_rscore_engine::{AccountTx, LendingAction, LendingTermId, TokenId};
+use xln_rscore_engine::{AccountTx, LendingTermId, TokenId};
 
 use crate::EntityKernelError;
-use crate::local_financial::LocalAccountFinancialView;
 use crate::types::TargetedAccountTx;
 
 use super::{LendingLoan, LendingLoanStatus, LendingPoolPosition, LendingPoolStatus, LendingState};
@@ -67,50 +66,6 @@ pub(super) fn require_empty_outputs(
     } else {
         Err(EntityKernelError::output("LENDING_TX_OUTPUTS"))
     }
-}
-
-pub(super) fn projected_credit(
-    view: &LocalAccountFinancialView,
-    account_id: &str,
-    token_id: TokenId,
-    queued: &[TargetedAccountTx],
-) -> BigInt {
-    projected_credit_from(
-        view.owner_peer_credit_limit
-            .get(&token_id)
-            .cloned()
-            .unwrap_or_else(|| BigInt::from(0)),
-        account_id,
-        token_id,
-        queued,
-    )
-}
-
-/// The single credit-grant projection: the committed grant plus every write
-/// this frame already decided. Repay, close and the overdue settlement share
-/// it so no second grant formula can drift.
-pub(super) fn projected_credit_from(
-    committed: BigInt,
-    account_id: &str,
-    token_id: TokenId,
-    queued: &[TargetedAccountTx],
-) -> BigInt {
-    let mut value = committed;
-    for (_, tx) in queued.iter().filter(|(target, _)| target == account_id) {
-        match tx {
-            AccountTx::SetCreditLimit {
-                token_id: tx_token,
-                amount,
-            } if tx_token == &token_id => value = amount.clone(),
-            AccountTx::LendingCredit {
-                token_id: tx_token,
-                credit_limit,
-                ..
-            } if tx_token == &token_id => value = credit_limit.clone(),
-            _ => {}
-        }
-    }
-    value
 }
 
 fn best_pool(
@@ -183,10 +138,6 @@ pub(super) fn apply_fund(
     })
 }
 
-#[expect(
-    clippy::too_many_arguments,
-    reason = "the pure lending transition keeps financial authority and output sinks explicit"
-)]
 pub(super) fn apply_borrow(
     state: &mut LendingState,
     tx: &AccountTx,
@@ -194,8 +145,6 @@ pub(super) fn apply_borrow(
     counterparty: &str,
     hub: &str,
     now: u64,
-    account_id: &str,
-    view: &LocalAccountFinancialView,
     queued: &mut Vec<TargetedAccountTx>,
 ) -> Result<(), EntityKernelError> {
     let AccountTx::LendingBorrowRequest {
@@ -250,71 +199,51 @@ pub(super) fn apply_borrow(
         updated_at: now,
         status: LendingLoanStatus::Opening,
     })?;
-    let credit_limit = projected_credit(view, account_id, token, queued) + amount;
     queued.push((
         proposer.to_string(),
-        AccountTx::LendingCredit {
-            action: LendingAction::Grant,
+        AccountTx::LendingDisburse {
             loan_id,
             hub_entity_id: hub.to_string(),
             borrower_entity_id: proposer.to_string(),
             token_id: token,
-            credit_limit,
+            amount: amount.clone(),
         },
     ));
     Ok(())
 }
 
-pub(super) fn apply_credit(
+pub(super) fn apply_disburse(
     state: &mut LendingState,
     tx: &AccountTx,
     proposer: &str,
     hub: &str,
     now: u64,
 ) -> Result<(), EntityKernelError> {
-    let AccountTx::LendingCredit {
-        action, loan_id, ..
+    let AccountTx::LendingDisburse {
+        loan_id,
+        borrower_entity_id,
+        token_id,
+        amount,
+        ..
     } = tx
     else {
         unreachable!()
     };
     if proposer != hub {
-        return Err(EntityKernelError::lending("CREDIT_PROPOSER_MISMATCH"));
+        return Err(EntityKernelError::lending("DISBURSE_PROPOSER_MISMATCH"));
     }
     let mut loan = state
         .loan(loan_id)
         .cloned()
-        .ok_or_else(|| EntityKernelError::lending("CREDIT_LOAN_MISSING"))?;
-    match action {
-        LendingAction::Grant if loan.status == LendingLoanStatus::Opening => {
-            loan.status = LendingLoanStatus::Active;
-            loan.updated_at = now;
-            state.put_loan(loan)
-        }
-        LendingAction::Revoke if loan.status == LendingLoanStatus::Closing => {
-            let mut pool = state
-                .pool(&loan.position_id)
-                .cloned()
-                .ok_or_else(|| EntityKernelError::lending("POOL_MISSING_FOR_LOAN"))?;
-            if pool.borrowed_amount < loan.principal_amount {
-                return Err(EntityKernelError::lending("POOL_BORROWED_UNDERFLOW"));
-            }
-            loan.repaid_amount = loan.repayment_amount.clone();
-            loan.status = LendingLoanStatus::Repaid;
-            loan.updated_at = now;
-            pool.borrowed_amount -= &loan.principal_amount;
-            pool.available_amount += &loan.repayment_amount;
-            pool.updated_at = now;
-            state.put_loan(loan)?;
-            state.put_pool(pool)
-        }
-        // The overdue settlement already released the pool at the derived
-        // deadline. This revoke only lands the credit-line reduction.
-        LendingAction::Revoke if loan.status == LendingLoanStatus::Defaulted => {
-            loan.updated_at = now;
-            state.put_loan(loan)
-        }
-        LendingAction::Grant => Err(EntityKernelError::lending("GRANT_STATUS_INVALID")),
-        LendingAction::Revoke => Err(EntityKernelError::lending("REVOKE_STATUS_INVALID")),
+        .filter(|loan| loan.status == LendingLoanStatus::Opening)
+        .ok_or_else(|| EntityKernelError::lending("DISBURSE_LOAN_NOT_OPENING"))?;
+    if loan.borrower_entity_id != *borrower_entity_id
+        || loan.token_id != token_id.get()
+        || loan.principal_amount != *amount
+    {
+        return Err(EntityKernelError::lending("DISBURSE_MISMATCH"));
     }
+    loan.status = LendingLoanStatus::Active;
+    loan.updated_at = now;
+    state.put_loan(loan)
 }

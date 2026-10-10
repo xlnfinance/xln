@@ -239,7 +239,6 @@
       title: elapsedMs ? `${isSender ? 'Paid' : 'Received'} in ${elapsedMs}ms` : (isSender ? 'Paid' : 'Received'),
       amountLine: formatSpotlightAmount(event.data['tokenId'], event.data['amount']),
       ...(String(event.data['description'] || '').trim() ? { detail: String(event.data['description'] || '').trim() } : {}),
-      duration: 4200,
     });
   };
 

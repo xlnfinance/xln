@@ -15,8 +15,8 @@ use xln_rscore_engine::{
     AccountTx, BoardHankoRefreshInput, CounterpartyDispute, DeliveryMode, DepositoryAddress,
     EntityId, HtlcDeliveryMode, HtlcHashlock, HtlcLockTx, HtlcResolveOutcome, HtlcResolveTx,
     IncomingAck, IncomingFrame, JClaimNode, JClaimProof, JClaimRecord, JClaimSide, JEventClaimTx,
-    JEventMetadata, JurisdictionEvent, LendingAction, LendingTermId, OpaqueHtlcCiphertext,
-    RebalanceRefundReason, TokenId, WatchSeed,
+    JEventMetadata, JurisdictionEvent, LendingTermId, OpaqueHtlcCiphertext, RebalanceRefundReason,
+    TokenId, WatchSeed,
 };
 
 use super::tagged_json::canonical_value_from_tagged_json;
@@ -905,7 +905,7 @@ fn decode_lending_repay(
     })
 }
 
-fn decode_lending_credit(
+fn decode_lending_disburse(
     value: &Map<String, Value>,
     operation_index: u64,
     path: &str,
@@ -913,36 +913,17 @@ fn decode_lending_credit(
     exact_fields(
         value,
         &[
-            "action",
             "loanId",
             "hubEntityId",
             "borrowerEntityId",
             "tokenId",
-            "creditLimit",
+            "amount",
         ],
         &[],
         operation_index,
         path,
     )?;
-    let action = match text(
-        field(value, "action", operation_index, path)?,
-        operation_index,
-        &format!("{path}.action"),
-    )?
-    .as_str()
-    {
-        "grant" => LendingAction::Grant,
-        "revoke" => LendingAction::Revoke,
-        _ => {
-            return Err(invalid(
-                operation_index,
-                format!("{path}.action"),
-                "VALUE_INVALID",
-            ));
-        }
-    };
-    Ok(AccountTx::LendingCredit {
-        action,
+    Ok(AccountTx::LendingDisburse {
         loan_id: text(
             field(value, "loanId", operation_index, path)?,
             operation_index,
@@ -963,10 +944,10 @@ fn decode_lending_credit(
             operation_index,
             &format!("{path}.tokenId"),
         )?,
-        credit_limit: tagged_bigint(
-            field(value, "creditLimit", operation_index, path)?,
+        amount: tagged_bigint(
+            field(value, "amount", operation_index, path)?,
             operation_index,
-            &format!("{path}.creditLimit"),
+            &format!("{path}.amount"),
         )?,
     })
 }
@@ -1575,7 +1556,7 @@ fn decode_account_tx_at(
             decode_lending_borrow_request(data, operation_index, &data_path)
         }
         "lending_repay" => decode_lending_repay(data, operation_index, &data_path),
-        "lending_credit" => decode_lending_credit(data, operation_index, &data_path),
+        "lending_disburse" => decode_lending_disburse(data, operation_index, &data_path),
         "lending_close_request" => decode_lending_close_request(data, operation_index, &data_path),
         "lending_close_payout" => decode_lending_close_payout(data, operation_index, &data_path),
         "add_delta" => {

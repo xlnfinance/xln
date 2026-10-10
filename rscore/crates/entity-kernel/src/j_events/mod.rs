@@ -24,7 +24,7 @@ pub(crate) fn account_tx_kind(tx: &AccountTx) -> &'static str {
         AccountTx::LendingFund { .. } => "lending_fund",
         AccountTx::LendingBorrowRequest { .. } => "lending_borrow_request",
         AccountTx::LendingRepay { .. } => "lending_repay",
-        AccountTx::LendingCredit { .. } => "lending_credit",
+        AccountTx::LendingDisburse { .. } => "lending_disburse",
         AccountTx::LendingCloseRequest { .. } => "lending_close_request",
         AccountTx::LendingClosePayout { .. } => "lending_close_payout",
         AccountTx::RequestCollateral { .. } => "request_collateral",

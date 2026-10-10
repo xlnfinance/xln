@@ -1,19 +1,22 @@
 <script lang="ts">
-  import { fade, fly } from 'svelte/transition';
-  import { paymentSpotlight, type PaymentSpotlight } from '#lib/stores/network/paymentSpotlightStore.ts';
+  import { paymentSpotlight } from '#lib/stores/network/paymentSpotlightStore.ts';
 
-  let spotlight: PaymentSpotlight | null = null;
-  paymentSpotlight.subscribe((value) => spotlight = value);
-
-  function dismiss() {
-    paymentSpotlight.clear();
-  }
+  const opened = paymentSpotlight.opened;
+  $: spotlight = $opened;
+  const dismiss = paymentSpotlight.close;
+  const openReceipt = (dialog: HTMLDialogElement) => { dialog.showModal(); };
 </script>
 
+{#if $paymentSpotlight}
+  <aside class="payment-notice" data-testid="payment-notification" role="status" aria-live="polite">
+    <span>{$paymentSpotlight.kicker || 'Payment'} {$paymentSpotlight.amountLine}</span>
+    <button data-testid="receipt-open" on:click={paymentSpotlight.open}>Receipt</button>
+    <button aria-label="Dismiss payment notification" on:click={paymentSpotlight.clear}>×</button>
+  </aside>
+{/if}
+
 {#if spotlight}
-  <!-- svelte-ignore a11y-click-events-have-key-events -->
-  <div class="receipt-backdrop" in:fade={{ duration: 150 }} out:fade={{ duration: 120 }} on:click={dismiss} role="presentation">
-    <div class="receipt-card" in:fly={{ y: 30, duration: 250 }} out:fly={{ y: -20, duration: 150 }} on:click|stopPropagation role="dialog" tabindex="-1">
+    <dialog class="receipt-card" use:openReceipt on:cancel={(event) => { event.preventDefault(); dismiss(); }} aria-label="Payment receipt" data-testid="payment-receipt">
       <div class="receipt-check">
         <svg width="48" height="48" viewBox="0 0 48 48" fill="none">
           <circle cx="24" cy="24" r="24" fill="rgba(74, 222, 128, 0.12)" />
@@ -35,28 +38,22 @@
       <div class="receipt-divider"></div>
 
       <div class="receipt-meta">
-        <span class="receipt-time">{new Date().toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</span>
+        <span class="receipt-time">{new Date(spotlight.observedAt).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</span>
         <span class="receipt-status">Confirmed</span>
       </div>
 
       <button class="receipt-dismiss" on:click={dismiss}>Done</button>
-    </div>
-  </div>
+    </dialog>
 {/if}
 
 <style>
-  .receipt-backdrop {
-    position: fixed;
-    inset: 0;
-    z-index: 12000;
-    display: grid;
-    place-items: center;
-    background: rgba(0, 0, 0, 0.55);
-    backdrop-filter: blur(8px);
-    padding: 24px;
-  }
+  .payment-notice { position: fixed; bottom: 24px; left: 24px; z-index: 9998; display: flex; align-items: center; gap: 12px; max-width: calc(100vw - 48px); padding: 12px 16px; border-radius: 12px; color: #e7e5e4; background: #1c1917; border: 1px solid #44403c; pointer-events: none; }
+  .payment-notice button { pointer-events: auto; cursor: pointer; color: #86efac; background: transparent; border: 0; padding: 8px; }
+
+  .receipt-card::backdrop { background: rgba(0, 0, 0, 0.55); backdrop-filter: blur(8px); }
 
   .receipt-card {
+    margin: auto;
     width: min(380px, calc(100vw - 48px));
     padding: 32px 28px 24px;
     border-radius: 20px;

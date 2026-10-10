@@ -1,5 +1,80 @@
 # xlnc: programmable jurisdiction and multi-J launch
 
+## Current owner scope — 2026-10-10
+
+The owner selects Ethereum, TRON and **XLNC** as the three launch jurisdictions.
+A jurisdiction is the blockchain execution field; a stack is a concrete
+Depository, EntityProvider and its linked contracts inside that field. Each
+independently governed launch stack has its own EntityProvider Foundation #1
+and onchain shares. Companies are ordinary multisig numbered Entities in the
+existing EntityProvider, with its existing onchain CONTROL/DIVIDEND shares;
+do not introduce a separate company factory, wrapper token or index product.
+
+XLNC must have **four nodes** and a **10-fold lower per-block gas limit than
+Ethereum mainnet**. The owner explicitly replaced the earlier 100-fold request
+with 10-fold after seeing the deployment and dispute gas measurements. The
+four-validator topology uses the existing Besu/QBFT prototype; four processes
+on one host are not four independent failure domains. Pin the reference
+Ethereum block/hash and gas limit in the final network manifest. A 60,000,000
+reference gives **6,000,000 gas per XLNC block**; this is a reference calculation,
+not a claim to have sampled a current Ethereum block. Block period and gas
+price are separate parameters.
+
+Use normal EVM deployment transactions at the selected limit. Genesis contract
+predeployment, temporary higher limits and splitting disputes across transactions
+are not the chosen implementation. Measure complete deployment receipts rather
+than substituting bytecode-deposit lower bounds for actual gas use.
+
+The earlier 600,000 budget could not fit the current contracts: runtime code
+storage alone costs 3,802,600 gas for EntityProvider, 4,437,000 for Depository
+and 4,548,400 for Account, before constructor execution and intrinsic gas.
+These lower bounds do not block deployment at the new 6,000,000 limit.
+
+The existing `BatchBoundsTest.test_gas_disputeFinalizeWithMaxProofTokens` measured
+733,682 execution gas to start and 2,074,972 to finalize a valid 128-token proof,
+plus transaction intrinsic gas. This particular shape no longer demonstrates
+an impossible fit at 6,000,000. It does not close the more expensive mixed-proof
+and correlated-exit gates recorded below. Keep those gates; do not silently
+reduce accepted financial proof bounds or change EVM gas pricing.
+
+The focused `test/governance/company/MultisigCompany.test.ts` contract scenario
+proves 2-of-3 registration and onchain share allocation using the existing EP:
+registration 246,829 gas, allocation 198,068 gas. It checks treasury issuance,
+insufficient signatures, recipient substitution, replay rejection and exact
+balances/nonces. This local contract scenario is not a browser journey or proof
+that every possible company board fits XLNC.
+
+The previous producer/verifier prototype and measurements below are historical
+evidence, not compliance with the new four-validator launch target.
+
+### Four-validator local evidence — 2026-10-10
+
+The updated `xlnc:prototype` passed on Besu 25.9.0 with four separate validator
+keys, four full-state processes, a static peer mesh, one-second QBFT blocks and
+a 6,000,000 block gas limit throughout. Eight contracts deployed by ordinary
+transactions; the ninth transaction bound the share Depository. The largest
+receipt used 4,971,259 gas (Account); Depository used 4,905,451 gas. Every deployed
+contract's code matched across all four nodes, as did the block hash/state root.
+With validator 4 stopped, the remaining three committed a signed transaction;
+validator 4 then restarted on its existing database, caught up and matched roots.
+All processes were stopped at the end. No public deployment or real funds.
+
+The first run reached deployment/root equality and chain progress during an
+outage but exceeded the 60-second stand limit during restart. The correction
+starts nodes concurrently with a full static mesh and sets `--sync-min-peers=1`:
+Besu's default of five sync peers cannot be met by a four-node network. This
+setting changes peer discovery/sync startup, not the QBFT signing quorum.
+
+[Receipts and roots](evidence/xlnc-20261010/four-validators.json) and
+[successful stand log](evidence/xlnc-20261010/four-validators.log) preserve the
+local evidence. These same-host nodes do not prove independent-operator fault
+tolerance. A separate, existing mixed-proof regression remains red:
+`test_gas_mixedDefensiveFinalizeWithMaxAccountDimensions` uses 17,388,717
+execution gas to finalize, before intrinsic gas, exceeding both 6M and its 15M
+assertion. [Failure evidence](evidence/xlnc-20261010/mixed-exit-gas.log).
+The owner-selected 6M limit is unchanged; full financial launch readiness is
+not claimed and no proof bounds or dispute semantics were weakened.
+
 Date: 2026-09-05. Investigated SHA: `b97c454d605e750a08da7ff6baab645330175468`.
 Status: proposal, no change to consensus, network configuration, or capital limits.
 Owner scope clarified 2026-09-30: Ethereum, TRON and XLNC are the initial focus;

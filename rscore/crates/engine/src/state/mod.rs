@@ -81,8 +81,7 @@ pub enum LendingIntentKind {
     Fund,
     Borrow,
     Repay,
-    CreditGrant,
-    CreditRevoke,
+    Disburse,
     CloseRequest,
     ClosePayout,
 }
@@ -93,8 +92,7 @@ impl LendingIntentKind {
             Self::Fund => "fund",
             Self::Borrow => "borrow",
             Self::Repay => "repay",
-            Self::CreditGrant => "credit-grant",
-            Self::CreditRevoke => "credit-revoke",
+            Self::Disburse => "disburse",
             Self::CloseRequest => "close-request",
             Self::ClosePayout => "close-payout",
         }

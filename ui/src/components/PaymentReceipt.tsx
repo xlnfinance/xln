@@ -6,7 +6,7 @@ import { CopyId } from './CopyId';
 import { Icon } from './Icons';
 import { Sheet } from './Sheet';
 import { useApp } from '../runtime/store';
-import { useReceipts } from '../runtime/financial/receipts';
+import { useReceipts } from '../runtime/financial/receipt-state';
 import { formatClock, formatMoney, getTokenMeta } from '../runtime/format';
 import { displayEntityName, useWallet } from '../runtime/views';
 
@@ -15,8 +15,8 @@ import { displayEntityName, useWallet } from '../runtime/views';
  * runtime committed, never from an optimistic local guess.
  */
 export function PaymentReceiptSheet() {
-	const receipt = useReceipts(s => s.latest);
-	const dismiss = useReceipts(s => s.dismiss);
+	const receipt = useReceipts(s => s.opened);
+	const dismiss = useReceipts(s => s.close);
 	const entityId = useApp(s => s.activeEntityId);
 	// Same name source as Home: the entity's own view frame.
 	const { names } = useWallet(receipt ? entityId : null);

@@ -7,7 +7,6 @@ import { receiveTestMoney } from '../../runtime/financial/test-money';
 /** Test-credit consent stays beside the action; success requires committed funds. */
 export function TestMoney({ wallet }: { wallet: WalletView }) {
   const commandReady = useApp(state => state.commandReady);
-  const setTour = useApp(state => state.setTour);
   const hub = wallet.accounts.find(account => account.isHub && !account.disputed);
   const [stage, setStage] = useState('');
   const [error, setError] = useState('');
@@ -32,21 +31,18 @@ export function TestMoney({ wallet }: { wallet: WalletView }) {
   return (
     <section className="test-money" aria-label="Test money faucet">
       <div className="test-money-intro">
-        <span className="test-money-label">Test money</span>
+        <span className="test-money-label">Testnet faucet</span>
         <span className="note">For trying payments · no real value</span>
       </div>
       <button
         type="button"
-        className="btn sm"
+        className="btn primary sm"
         disabled={busy || !hub || !commandReady}
         onClick={() => void receive()}
         data-testid="home-faucet"
         aria-label="Get 100 test USDC"
       >
-        {busy ? stage || 'Receiving…' : 'Get 100 USDC'}
-      </button>
-      <button type="button" className="more" onClick={() => setTour({ active: true, index: 0 })}>
-        Tour
+        {busy ? stage || 'Receiving…' : 'Get 100 test USDC'}
       </button>
       {hub && (
         <details className="disclosure">
@@ -62,7 +58,11 @@ export function TestMoney({ wallet }: { wallet: WalletView }) {
           100 USDC received
         </span>
       )}
-      {!hub && <p role="status">Connecting your hub account…</p>}
+      {!hub && <p role="status">{wallet.accounts.some(account => account.isHub && account.disputed)
+        ? wallet.accounts.some(account => account.isHub && account.disputed && account.dispute !== 'closed')
+          ? 'Your hub account is frozen by a dispute. Connect another hub below to receive test money.'
+          : 'Your hub account is closed after a dispute. Connect another hub below to receive test money.'
+        : 'Connecting your hub account…'}</p>}
       {error && <p role="alert">{error} Check your balance before trying again.</p>}
     </section>
   );

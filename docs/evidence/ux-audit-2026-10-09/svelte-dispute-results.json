@@ -1,0 +1,140 @@
+{
+  "config": {
+    "argv": [
+      "/Users/zigota/.bun/bin/bun",
+      "/Users/zigota/xln/ui/node_modules/playwright/cli.js",
+      "test",
+      "--config",
+      "ui/playwright.config.ts",
+      "--project=chromium",
+      "--max-failures=1",
+      "--reporter=list,json",
+      "--output",
+      "/tmp/xln-ux-svelte-dispute-proof-5/wallet-artifacts",
+      "ui/tests/e2e-svelte-dispute-finality.spec.ts"
+    ],
+    "configFile": "/Users/zigota/xln/ui/playwright.config.ts",
+    "rootDir": "/Users/zigota/xln/ui/tests",
+    "failOnFlakyTests": false,
+    "forbidOnly": false,
+    "fullyParallel": false,
+    "globalSetup": null,
+    "globalTeardown": null,
+    "globalTimeout": 0,
+    "grep": {},
+    "grepInvert": null,
+    "maxFailures": 1,
+    "metadata": {
+      "actualWorkers": 1
+    },
+    "preserveOutput": "always",
+    "projects": [
+      {
+        "outputDir": "/tmp/xln-ux-svelte-dispute-proof-5/wallet-artifacts",
+        "repeatEach": 1,
+        "retries": 0,
+        "metadata": {
+          "actualWorkers": 1
+        },
+        "id": "chromium",
+        "name": "chromium",
+        "testDir": "/Users/zigota/xln/ui/tests",
+        "testIgnore": [],
+        "testMatch": [
+          "**/*.@(spec|test).?(c|m)[jt]s?(x)"
+        ],
+        "timeout": 240000
+      }
+    ],
+    "quiet": false,
+    "reporter": [
+      [
+        "list"
+      ],
+      [
+        "json"
+      ]
+    ],
+    "reportSlowTests": {
+      "max": 5,
+      "threshold": 300000
+    },
+    "shard": null,
+    "tags": [],
+    "updateSnapshots": "missing",
+    "updateSourceMethod": "patch",
+    "version": "1.62.1",
+    "workers": 1,
+    "webServer": {
+      "command": "cd .. && bun run dev",
+      "url": "http://127.0.0.1:20002/api/jurisdictions",
+      "reuseExistingServer": true,
+      "gracefulShutdown": {
+        "signal": "SIGTERM",
+        "timeout": 60000
+      },
+      "timeout": 240000
+    }
+  },
+  "suites": [
+    {
+      "title": "e2e-svelte-dispute-finality.spec.ts",
+      "file": "e2e-svelte-dispute-finality.spec.ts",
+      "column": 0,
+      "line": 0,
+      "specs": [
+        {
+          "title": "Svelte dispute returns collateral to reserve and permanently removes dispute actions",
+          "ok": true,
+          "tags": [
+            "functional"
+          ],
+          "tests": [
+            {
+              "timeout": 60000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 20193,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-09T21:27:21.723Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "svelte-dispute-finality",
+                      "contentType": "application/json",
+                      "body": "eyJiZWZvcmUiOnsiY29sbGF0ZXJhbCI6IjAiLCJkZXBvc2l0b3J5IjoiMHhhNTEzZTZlNGI4ZjJhOTIzZDk4MzA0ZWM4N2Y2NDM1M2M0ZDVjODUzIiwiZGlzcHV0ZSI6bnVsbCwiZW50aXR5SWQiOiIweDUyNTY0NjUzZDRhOGZiYzljNzM0YzljMDA0NjY3Y2M2Zjg1OWVkOGE1MTNjOTE4MTM0NmNmYjVhYTFkMDJkMDQiLCJodWJJZCI6IjB4YmI2OWY2NzU0Mjg2ZjRlYTNiMmJjMzFiNGQ2MTE5Zjc4N2QwOWMxNTY0Mjk2YTNhOWE0MWE4OGM4NmIyZWI1NyIsImpOb25jZSI6MCwicmVzZXJ2ZSI6IjEwMDAwMDAwMCIsInN0YXR1cyI6ImFjdGl2ZSJ9LCJmaW5hbENoYWluIjp7ImNvbGxhdGVyYWwiOiIwIiwiZGlzcHV0ZUhhc2giOiIweDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAiLCJub25jZSI6IjIiLCJvbmRlbHRhIjoiMCIsInBlZXJSZXNlcnZlIjoiMTk5OTkwMDAwMDAwMCIsInJlc2VydmUiOiIxMDAwMDAwMDAiLCJ0aW1lb3V0IjowfSwiZmluaXNoZWQiOnsiY29sbGF0ZXJhbCI6IjAiLCJkZXBvc2l0b3J5IjoiMHhhNTEzZTZlNGI4ZjJhOTIzZDk4MzA0ZWM4N2Y2NDM1M2M0ZDVjODUzIiwiZGlzcHV0ZSI6bnVsbCwiZW50aXR5SWQiOiIweDUyNTY0NjUzZDRhOGZiYzljNzM0YzljMDA0NjY3Y2M2Zjg1OWVkOGE1MTNjOTE4MTM0NmNmYjVhYTFkMDJkMDQiLCJodWJJZCI6IjB4YmI2OWY2NzU0Mjg2ZjRlYTNiMmJjMzFiNGQ2MTE5Zjc4N2QwOWMxNTY0Mjk2YTNhOWE0MWE4OGM4NmIyZWI1NyIsImpOb25jZSI6MiwicmVzZXJ2ZSI6IjEwMDAwMDAwMCIsInN0YXR1cyI6ImRpc3B1dGVkIn0sImZ1bmRlZCI6eyJjb2xsYXRlcmFsIjoiMTAwMDAwMDAwIiwiZGVwb3NpdG9yeSI6IjB4YTUxM2U2ZTRiOGYyYTkyM2Q5ODMwNGVjODdmNjQzNTNjNGQ1Yzg1MyIsImRpc3B1dGUiOm51bGwsImVudGl0eUlkIjoiMHg1MjU2NDY1M2Q0YThmYmM5YzczNGM5YzAwNDY2N2NjNmY4NTllZDhhNTEzYzkxODEzNDZjZmI1YWExZDAyZDA0IiwiaHViSWQiOiIweGJiNjlmNjc1NDI4NmY0ZWEzYjJiYzMxYjRkNjExOWY3ODdkMDljMTU2NDI5NmEzYTlhNDFhODhjODZiMmViNTciLCJqTm9uY2UiOjAsInJlc2VydmUiOiIwIiwic3RhdHVzIjoiYWN0aXZlIn0sImZ1bmRlZENoYWluIjp7ImNvbGxhdGVyYWwiOiIxMDAwMDAwMDAiLCJkaXNwdXRlSGFzaCI6IjB4MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMCIsIm5vbmNlIjoiMCIsIm9uZGVsdGEiOiIxMDAwMDAwMDAiLCJwZWVyUmVzZXJ2ZSI6IjE5OTk5MDAwMDAwMDAiLCJyZXNlcnZlIjoiMCIsInRpbWVvdXQiOjB9LCJzdGFydGVkIjp7ImNvbGxhdGVyYWwiOiIxMDAwMDAwMDAiLCJkZXBvc2l0b3J5IjoiMHhhNTEzZTZlNGI4ZjJhOTIzZDk4MzA0ZWM4N2Y2NDM1M2M0ZDVjODUzIiwiZGlzcHV0ZSI6eyJiYXRjaE5vbmNlIjoyLCJkaXNwdXRlU3RhcnRUaW1lc3RhbXAiOjE3OTE1ODEyNTgsImRpc3B1dGVUaW1lb3V0IjoxNzkxNjcxMjU4LCJmaW5hbGl6ZVF1ZXVlZCI6ZmFsc2UsImluaXRpYWxOb25jZSI6MSwiaW5pdGlhbFByb29mYm9keUhhc2giOiIweDdkNzJkOGE5NmU2YThhYjQ4Nzg1Y2M5MzA1YjRhZGVkMGRkNWViNGI4YTJkMTA2YTNkY2FlNzYxMmE5NjIyM2IiLCJpbml0aWFsUHJvcG9zZXJJc0xlZnQiOnRydWUsImpOb25jZSI6MSwib2JzZXJ2ZWRCbG9ja051bWJlciI6NDcsIm9ic2VydmVkT25DaGFpbiI6dHJ1ZSwic3RhcnRlZEJ5TGVmdCI6dHJ1ZSwic3RhcnRlckNvdW50ZXJBcmd1bWVudHMiOiIweCIsInN0YXJ0ZXJDb3VudGVyUHJvb2ZDb21taXRtZW50IjoiMHgwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwIiwic3RhcnRlckluaXRpYWxBcmd1bWVudHMiOiIweCJ9LCJlbnRpdHlJZCI6IjB4NTI1NjQ2NTNkNGE4ZmJjOWM3MzRjOWMwMDQ2NjdjYzZmODU5ZWQ4YTUxM2M5MTgxMzQ2Y2ZiNWFhMWQwMmQwNCIsImh1YklkIjoiMHhiYjY5ZjY3NTQyODZmNGVhM2IyYmMzMWI0ZDYxMTlmNzg3ZDA5YzE1NjQyOTZhM2E5YTQxYTg4Yzg2YjJlYjU3Iiwiak5vbmNlIjoxLCJyZXNlcnZlIjoiMCIsInN0YXR1cyI6ImRpc3B1dGVkIn19"
+                    }
+                  ]
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "c759de8ca6c84b714549-f9915595a8d264935476",
+          "file": "e2e-svelte-dispute-finality.spec.ts",
+          "line": 34,
+          "column": 0
+        }
+      ]
+    }
+  ],
+  "errors": [],
+  "stats": {
+    "startTime": "2026-10-09T21:27:20.737Z",
+    "duration": 22260.651,
+    "expected": 1,
+    "skipped": 0,
+    "unexpected": 0,
+    "flaky": 0
+  }
+}

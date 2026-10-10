@@ -1,3 +1,4 @@
+import { getEmbeddedEnv } from '../runtime/adapter';
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Bar } from '../components/Bars';
@@ -82,7 +83,10 @@ export function Move() {
 	}, [funding, fundingStarted, fundingReady, fundingKey, navigate]);
 
 	const meta = getTokenMeta(tokenId);
-	const external = useMemo(() => externalTokens(wallet.frame, wallet.signerId, depository), [wallet.frame, wallet.signerId, depository]);
+	const externalRows = useApp(s => s.externalRows);
+	const external = useMemo(() => getEmbeddedEnv()
+		? externalRows.filter(row => row.tokenId > 0 && !row.error).map(row => ({ tokenAddress: row.address, tokenId: row.tokenId, balance: row.balance, allowance: row.allowance }))
+		: externalTokens(wallet.frame, wallet.signerId, depository), [externalRows, wallet.frame, wallet.signerId, depository]);
 	const externalRow = external.find(row => row.tokenId === tokenId) ?? null;
 	const accounts = wallet.accounts.filter(account => !account.disputed);
 	const firstAccount = accounts[0]?.counterpartyId ?? '';

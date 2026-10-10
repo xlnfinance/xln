@@ -936,9 +936,9 @@ export const accountTxWire = (tx: AccountTx): RscoreWireValue[] => {
     case 'lending_repay':
       return [12, tx.data.loanId, tx.data.hubEntityId, tx.data.borrowerEntityId,
         tx.data.tokenId, tx.data.amount.toString()];
-    case 'lending_credit':
-      return [13, tx.data.action === 'grant' ? 0 : 1, tx.data.loanId, tx.data.hubEntityId,
-        tx.data.borrowerEntityId, tx.data.tokenId, tx.data.creditLimit.toString()];
+    case 'lending_disburse':
+      return [24, tx.data.loanId, tx.data.hubEntityId,
+        tx.data.borrowerEntityId, tx.data.tokenId, tx.data.amount.toString()];
     case 'lending_close_request':
       return [14, tx.data.positionId, tx.data.hubEntityId, tx.data.lenderEntityId];
     case 'lending_close_payout':

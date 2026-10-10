@@ -12,7 +12,7 @@ import { useWallet } from '../runtime/views';
 import { requestFaucet, readExternalWallet, type ExternalWallet, type FaucetKind } from '../runtime/financial/external';
 import { debtGroups, enforceDebts, type DebtGroup } from '../runtime/financial/debts';
 import { getAdapter } from '../runtime/adapter';
-import { accountNetBalance } from '../runtime/financial/balance';
+import { accountNetBalance } from '@xln/frontend/lib/utils/ui/accountBalance';
 
 /**
  * Money outside the bilateral accounts: the signer's on-chain wallet with
@@ -104,6 +104,7 @@ export function Assets() {
           throw new Error('Prepare capacity in the selected account before requesting this payment.');
         const amount = faucetAmount.trim() || '0';
         await requestFaucet(kind, {
+          jurisdiction: wallet.jurisdiction,
           entityId: wallet.entityId,
           signerId: wallet.signerId,
           runtimeId: getAdapter()?.runtimeId ?? '',
@@ -141,6 +142,7 @@ export function Assets() {
                   <CopyId value={wallet.signerId} label="Signer address" />
                 </span>
               </div>
+              <p className="note">Gas and fungible tokens at your signing address. Company share reserves are in <button type="button" className="more" onClick={() => navigate('/ownership')}>Ownership</button>; external NFT and share balances are not shown here.</p>
               {external ? (
                 <>
                   <div className="kv">
@@ -157,7 +159,7 @@ export function Assets() {
                   </div>
                   {external.rows.map((row, index) => (
                     <div
-                      key={row.address}
+                      key={row.tokenId}
                       className={`row${index === 0 ? ' first' : ''}`}
                       data-testid={`external-row-${row.symbol}`}
                     >

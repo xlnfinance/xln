@@ -1125,11 +1125,6 @@ impl ResidentConsensusEngine {
                                     token_id: tx_token,
                                     amount,
                                 } if tx_token == &token_id => *projected = amount.clone(),
-                                AccountTx::LendingCredit {
-                                    token_id: tx_token,
-                                    credit_limit,
-                                    ..
-                                } if tx_token == &token_id => *projected = credit_limit.clone(),
                                 _ => {}
                             }
                         }

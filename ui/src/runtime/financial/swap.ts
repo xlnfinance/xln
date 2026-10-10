@@ -7,12 +7,10 @@ import type {
 	RuntimeAdapterViewFrame,
 } from '@xln/core/api/public/runtime-module';
 import { getJurisdictionStackId } from '@xln/core/api/public/runtime-module';
-import { defaultAccountDisputeConfigForRoleEvidence } from '@xln/core/account/config/dispute-config';
 import type { SwapCommandPlan, SwapCommandPlanInput } from '@xln/core/runtime/swap-cmd/swap-command-plan';
 
 import { getEmbeddedEnv, requireAdapter } from '../adapter';
 import { getXLN } from '../xln-loader';
-import { sendEntityTxs } from '../tx';
 import { committedRoles, gossipProfile, partyRoles } from './roles';
 
 const normalizeId = (value: unknown): string => String(value || '').trim().toLowerCase();
@@ -38,24 +36,25 @@ export function hubTakerFeeBps(hubEntityId: string): number {
 	return Number(feeBps);
 }
 
+export function compatibleSwapHubs(sourceHubId: string, targetHubId: string): boolean {
+	const sourceRuntime = normalizeId(gossipProfile(sourceHubId)?.runtimeId);
+	const targetRuntime = normalizeId(gossipProfile(targetHubId)?.runtimeId);
+	return Boolean(sourceRuntime && sourceRuntime === targetRuntime);
+}
+
 export async function readAccountState(entityId: string, counterpartyId: string): Promise<AccountState | null> {
 	try {
 		const doc = await requireAdapter().read<AccountReplica>(
 			`entity/${encodeURIComponent(normalizeId(entityId))}/account/${encodeURIComponent(normalizeId(counterpartyId))}`,
 		);
+		if (doc && (doc.status !== 'active' || doc.activeDispute)) {
+			throw new Error(`ACCOUNT_FROZEN:${counterpartyId}`);
+		}
 		return (doc?.state as AccountState | undefined) ?? null;
 	} catch (error) {
 		if (error instanceof Error && /E_NOT_FOUND|account not found/i.test(error.message)) return null;
 		throw error;
 	}
-}
-
-/** Opening an incoming account is explicit and grants no credit. */
-export async function openSwapReceiveAccount(party: { entityId: string; signerId: string; hubEntityId: string }, tokenId: number, summaries: readonly RuntimeAdapterEntitySummary[]): Promise<void> {
-	const roles = committedRoles(summaries);
-	const evidence = partyRoles({ ...party, roles, summaries, label: 'TARGET' });
-	const disputeConfig = defaultAccountDisputeConfigForRoleEvidence(evidence.entityRoleEvidence, evidence.hubRoleEvidence, roles);
-	await sendEntityTxs(party.entityId, party.signerId, [{ type: 'openAccount', data: { targetEntityId: party.hubEntityId, tokenId, creditAmount: 0n, disputeConfig } }]);
 }
 
 export type SwapPlanRequest = {
@@ -186,7 +185,7 @@ async function submitCrossIntent(route: CrossJurisdictionSwapRoute, waitForTarge
 			return;
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
-			if (!waitForTargetReady || !message.startsWith('CROSS_J_TARGET_INBOUND_NOT_READY:')) throw error;
+			if (!waitForTargetReady || !(message.startsWith('CROSS_J_TARGET_INBOUND_NOT_READY:') || message.startsWith('RECEIVE_CAPACITY_ACCOUNT_MISSING:'))) throw error;
 			if (Date.now() >= deadline) throw new Error(`CROSS_J_TARGET_READINESS_TIMEOUT:${message}`, { cause: error });
 			await sleep(100);
 		}
@@ -195,12 +194,17 @@ async function submitCrossIntent(route: CrossJurisdictionSwapRoute, waitForTarge
 
 export async function submitSwapPlan(plan: SwapCommandPlan): Promise<void> {
 	if (plan.mode === 'same') {
-		if (plan.runtimeInput.entityInputs.some(input => (input.entityTxs ?? []).some(tx => tx.type !== 'placeSwapOffer'))) throw new Error('Prepare incoming capacity before placing the order.');
 		await sendRuntimeInput(plan.runtimeInput);
 		return;
 	}
-	if (plan.targetSetupInput) throw new Error('Prepare the target account capacity before swapping.');
-	await submitCrossIntent(plan.crossJurisdictionIntent, false);
+	if (plan.targetSetupInput) {
+		const env = getEmbeddedEnv();
+		if (!env) throw new Error('SWAP_TARGET_SETUP_REQUIRES_EMBEDDED_RUNTIME');
+		const xln = await getXLN();
+		await xln.ensureGossipProfiles(env, plan.targetSetupInput.entityInputs.flatMap(input => (input.entityTxs ?? []).flatMap(tx => tx.type === 'openAccount' ? [tx.data.targetEntityId] : [])));
+		await sendRuntimeInput(plan.targetSetupInput);
+	}
+	await submitCrossIntent(plan.crossJurisdictionIntent, plan.targetSetupInput !== null);
 }
 
 /**

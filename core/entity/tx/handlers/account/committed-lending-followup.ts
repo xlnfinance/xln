@@ -6,7 +6,6 @@ import {
   computeLendingInterest,
   ensureLendingState,
   LENDING_TERM_MS,
-  projectedHubCreditLimit,
   selectBestLendingPool,
 } from '../../../../extensions/lending';
 import type { AccountTxTarget } from './orderbook/queue';
@@ -27,25 +26,6 @@ export type LendingFollowupContext = {
   now: number;
   accountTxs: AccountTxTarget[];
 };
-
-const projectedContextCreditLimit = (
-  context: LendingFollowupContext,
-  tokenId: number,
-): bigint => projectedHubCreditLimit(
-  context.account,
-  context.hubEntityId,
-  context.counterpartyId,
-  context.accountTxs,
-  tokenId,
-);
-
-const lendingCreditOp = (
-  accountId: string,
-  data: Extract<AccountTx, { type: 'lending_credit' }>['data'],
-): AccountTxTarget => ({
-  accountId,
-  tx: { type: 'lending_credit', data },
-});
 
 function applyLendingFund(
   context: LendingFollowupContext,
@@ -133,62 +113,31 @@ function applyLendingBorrow(
     updatedAt: now,
     status: 'opening',
   });
-  const currentLimit = projectedContextCreditLimit(context, tx.data.tokenId);
-  accountTxs.push(lendingCreditOp(proposer, {
-    action: 'grant',
-    loanId,
-    hubEntityId,
-    borrowerEntityId: proposer,
-    tokenId: tx.data.tokenId,
-    creditLimit: currentLimit + tx.data.amount,
-  }));
+  accountTxs.push({ accountId: proposer, tx: { type: 'lending_disburse', data: {
+    loanId, hubEntityId, borrowerEntityId: proposer, tokenId: tx.data.tokenId, amount: tx.data.amount,
+  } } });
 }
 
-function applyLendingCredit(
+function applyLendingDisburse(
   context: LendingFollowupContext,
-  tx: Extract<AccountTx, { type: 'lending_credit' }>,
+  tx: Extract<AccountTx, { type: 'lending_disburse' }>,
 ): void {
   const { lending, hubEntityId, proposer, now } = context;
-  if (proposer !== hubEntityId) {
-    throw new Error(`LENDING_CREDIT_PROPOSER_MISMATCH:${tx.data.loanId}`);
-  }
+  if (proposer !== hubEntityId) throw new Error(`LENDING_DISBURSE_PROPOSER_MISMATCH:${tx.data.loanId}`);
   const loan = lending.loans.get(tx.data.loanId);
-  if (!loan) throw new Error(`LENDING_CREDIT_LOAN_MISSING:${tx.data.loanId}`);
-  if (tx.data.action === 'grant') {
-    if (loan.status !== 'opening') {
-      throw new Error(`LENDING_GRANT_STATUS_INVALID:${loan.loanId}:${loan.status}`);
-    }
-    loan.status = 'active';
-    loan.updatedAt = now;
-    return;
+  if (!loan || loan.status !== 'opening') throw new Error(`LENDING_DISBURSE_LOAN_NOT_OPENING:${tx.data.loanId}`);
+  if (loan.borrowerEntityId !== tx.data.borrowerEntityId || loan.tokenId !== tx.data.tokenId || loan.principalAmount !== tx.data.amount) {
+    throw new Error(`LENDING_DISBURSE_MISMATCH:${loan.loanId}`);
   }
-  if (loan.status === 'defaulted') {
-    // The overdue settlement already released the pool at the derived
-    // deadline. This revoke only lands the credit-line reduction.
-    loan.updatedAt = now;
-    return;
-  }
-  if (loan.status !== 'closing') {
-    throw new Error(`LENDING_REVOKE_STATUS_INVALID:${loan.loanId}:${loan.status}`);
-  }
-  const pool = lending.pools.get(loan.positionId);
-  if (!pool) throw new Error(`LENDING_POOL_MISSING_FOR_LOAN:${loan.loanId}`);
-  if (pool.borrowedAmount < loan.principalAmount) {
-    throw new Error(`LENDING_POOL_BORROWED_UNDERFLOW:${pool.positionId}`);
-  }
-  loan.repaidAmount = loan.repaymentAmount;
-  loan.status = 'repaid';
+  loan.status = 'active';
   loan.updatedAt = now;
-  pool.borrowedAmount -= loan.principalAmount;
-  pool.availableAmount += loan.repaymentAmount;
-  pool.updatedAt = now;
 }
 
 function applyLendingRepay(
   context: LendingFollowupContext,
   tx: Extract<AccountTx, { type: 'lending_repay' }>,
 ): void {
-  const { lending, hubEntityId, counterpartyId, proposer, now, accountTxs } = context;
+  const { lending, counterpartyId, proposer, now } = context;
   if (
     proposer !== normalizeEntityRef(tx.data.borrowerEntityId) ||
     proposer !== counterpartyId
@@ -207,20 +156,16 @@ function applyLendingRepay(
   ) {
     throw new Error(`LENDING_REPAYMENT_MISMATCH:${tx.data.loanId}`);
   }
-  loan.status = 'closing';
+  const pool = lending.pools.get(loan.positionId);
+  if (!pool || pool.borrowedAmount < loan.principalAmount) throw new Error(`LENDING_POOL_BORROWED_UNDERFLOW:${loan.positionId}`);
+  // The bilateral repayment already moved principal plus interest. Its commit
+  // settles the book; no second payment or credit-limit rewrite is needed.
+  loan.repaidAmount = loan.repaymentAmount;
+  loan.status = 'repaid';
   loan.updatedAt = now;
-  const currentLimit = projectedContextCreditLimit(context, loan.tokenId);
-  accountTxs.push(lendingCreditOp(proposer, {
-    action: 'revoke',
-    loanId: loan.loanId,
-    hubEntityId,
-    borrowerEntityId: proposer,
-    tokenId: loan.tokenId,
-    creditLimit:
-      currentLimit > loan.principalAmount
-        ? currentLimit - loan.principalAmount
-        : 0n,
-  }));
+  pool.borrowedAmount -= loan.principalAmount;
+  pool.availableAmount += tx.data.amount;
+  pool.updatedAt = now;
 }
 
 export function applyCommittedLendingFollowup(
@@ -253,7 +198,7 @@ export function applyCommittedLendingFollowup(
   };
   if (tx.type === 'lending_fund') return applyLendingFund(context, tx);
   if (tx.type === 'lending_borrow_request') return applyLendingBorrow(context, tx);
-  if (tx.type === 'lending_credit') return applyLendingCredit(context, tx);
+  if (tx.type === 'lending_disburse') return applyLendingDisburse(context, tx);
   if (tx.type === 'lending_repay') return applyLendingRepay(context, tx);
   if (tx.type === 'lending_close_request') return applyLendingCloseRequest(context, tx);
   if (tx.type === 'lending_close_payout') applyLendingClosePayout(context, tx);

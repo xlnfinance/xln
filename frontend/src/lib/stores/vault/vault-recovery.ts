@@ -234,8 +234,6 @@ export const serializeVaultState = (state: RuntimesState): string =>
 
 export const RECOVERY_UPLOAD_DEBOUNCE_MS = 1_500;
 
-export const RECOVERY_SNAPSHOT_INTERVAL_FRAMES = 10_000;
-
 export const RUNTIME_P2P_SHUTDOWN_TIMEOUT_MS = 10_000;
 
 export const RECOVERY_TOWER_STATUS_LIMIT = 16;

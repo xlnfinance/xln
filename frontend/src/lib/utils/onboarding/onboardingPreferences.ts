@@ -190,4 +190,6 @@ export const getOpenAccountRebalancePolicyData = (tokenDecimals: number): {
   if (r2cRequestSoftLimit <= 0n || hardLimit < r2cRequestSoftLimit || maxAcceptableFee < 0n) return null;
   return { r2cRequestSoftLimit, hardLimit, maxAcceptableFee };
 };
-import { isUnknownRecord, parseJsonUnknown, readJsonUnknown } from '#lib/utils/boundary/index.ts';
+import { isUnknownRecord, parseJsonUnknown, readJsonUnknown } from '../boundary/index.ts';
+
+export const getHubOpeningCredit = (tokenDecimals: number): bigint => usdToRawTokenAmount(10_000, tokenDecimals);

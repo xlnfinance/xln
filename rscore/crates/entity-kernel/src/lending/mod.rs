@@ -60,22 +60,14 @@ pub fn overdue_lending_loans(
 pub fn settle_overdue_lending_loans(
     state: &mut EntityStateSlice,
     loans: &[OverdueLendingLoan],
-    account_txs: &mut Vec<TargetedAccountTx>,
+    _account_txs: &mut Vec<TargetedAccountTx>,
 ) -> Result<(), EntityKernelError> {
-    let hub = state.entity_id.clone();
     let now = state.timestamp;
     let Some(lending) = state.lending.as_mut() else {
         return Ok(());
     };
     for loan in loans {
-        terminal::settle_overdue(
-            lending,
-            &loan.loan_id,
-            loan.committed_credit_limit.clone(),
-            &hub,
-            now,
-            account_txs,
-        )?;
+        terminal::settle_overdue(lending, &loan.loan_id, now)?;
     }
     Ok(())
 }
@@ -85,7 +77,7 @@ fn hub_entity_id(tx: &AccountTx) -> &str {
         AccountTx::LendingFund { hub_entity_id, .. }
         | AccountTx::LendingBorrowRequest { hub_entity_id, .. }
         | AccountTx::LendingRepay { hub_entity_id, .. }
-        | AccountTx::LendingCredit { hub_entity_id, .. }
+        | AccountTx::LendingDisburse { hub_entity_id, .. }
         | AccountTx::LendingCloseRequest { hub_entity_id, .. }
         | AccountTx::LendingClosePayout { hub_entity_id, .. } => hub_entity_id,
         _ => unreachable!("lending transaction required"),
@@ -104,7 +96,7 @@ pub(crate) fn apply_committed_lending_followup(
         AccountTx::LendingFund { .. }
             | AccountTx::LendingBorrowRequest { .. }
             | AccountTx::LendingRepay { .. }
-            | AccountTx::LendingCredit { .. }
+            | AccountTx::LendingDisburse { .. }
             | AccountTx::LendingCloseRequest { .. }
             | AccountTx::LendingClosePayout { .. }
     ) {
@@ -133,23 +125,14 @@ pub(crate) fn apply_committed_lending_followup(
             &commit.account_id,
             &hub,
             now,
-            &commit.account_id,
-            account_view.ok_or_else(|| EntityKernelError::lending("ACCOUNT_VIEW_MISSING"))?,
             account_txs,
         )?,
-        tx @ AccountTx::LendingCredit { .. } => {
-            followups::apply_credit(lending, tx, proposer, &hub, now)?
+        tx @ AccountTx::LendingDisburse { .. } => {
+            followups::apply_disburse(lending, tx, proposer, &hub, now)?
         }
-        tx @ AccountTx::LendingRepay { .. } => terminal::apply_repay(
-            lending,
-            tx,
-            proposer,
-            &commit.account_id,
-            &hub,
-            now,
-            account_view.ok_or_else(|| EntityKernelError::lending("ACCOUNT_VIEW_MISSING"))?,
-            account_txs,
-        )?,
+        tx @ AccountTx::LendingRepay { .. } => {
+            terminal::apply_repay(lending, tx, proposer, &commit.account_id, now)?
+        }
         tx @ AccountTx::LendingCloseRequest { .. } => terminal::apply_close_request(
             lending,
             tx,
@@ -173,9 +156,7 @@ mod tests {
     use std::collections::BTreeMap;
 
     use num_bigint::BigInt;
-    use xln_rscore_engine::{
-        AccountDomain, AccountTx, DepositoryAddress, LendingAction, LendingTermId, TokenId,
-    };
+    use xln_rscore_engine::{AccountDomain, AccountTx, DepositoryAddress, LendingTermId, TokenId};
 
     use super::*;
     use crate::{CommittedAccountTransition, JurisdictionScope};
@@ -290,16 +271,14 @@ mod tests {
             &mut queued,
         );
         let grant = queued.pop().expect("grant").1;
-        let AccountTx::LendingCredit {
-            loan_id,
-            credit_limit,
-            ..
+        let AccountTx::LendingDisburse {
+            loan_id, amount, ..
         } = &grant
         else {
             panic!("grant")
         };
         assert_eq!(loan_id, "loan-0327fd9035d42518");
-        assert_eq!(credit_limit, &BigInt::from(22_500));
+        assert_eq!(amount, &BigInt::from(2_500));
         apply(
             &mut state,
             commit(BORROWER, 2_001, true, grant),
@@ -339,21 +318,7 @@ mod tests {
             }),
             &mut queued,
         );
-        let revoke = queued.pop().expect("revoke").1;
-        assert!(matches!(
-            &revoke,
-            AccountTx::LendingCredit {
-                action: LendingAction::Revoke,
-                credit_limit,
-                ..
-            } if credit_limit == &BigInt::from(20_000)
-        ));
-        apply(
-            &mut state,
-            commit(BORROWER, 3_001, true, revoke),
-            None,
-            &mut queued,
-        );
+        assert!(queued.is_empty());
         let loan = state.lending.as_ref().unwrap().loan(&loan_id).unwrap();
         assert_eq!(loan.status, LendingLoanStatus::Repaid);
         assert_eq!(loan.repaid_amount, BigInt::from(2_525));
@@ -508,33 +473,12 @@ mod tests {
             .unwrap();
         assert_eq!(pool.available_amount, BigInt::from(10_000));
         assert_eq!(pool.borrowed_amount, BigInt::from(0));
-        assert_eq!(queued.len(), 1);
-        let revoke = queued.pop().expect("revoke").1;
-        assert!(matches!(
-            &revoke,
-            AccountTx::LendingCredit {
-                action: LendingAction::Revoke,
-                credit_limit,
-                ..
-            } if credit_limit == &BigInt::from(20_000)
-        ));
-        // The deadline is drained by the settlement: it never re-arms.
+        assert!(queued.is_empty());
         assert!(
             overdue_lending_loans(&state, due_at)
                 .expect("overdue")
                 .is_empty()
         );
-
-        // Committing the revoke lands only the credit-line reduction.
-        apply(
-            &mut state,
-            commit(BORROWER, due_at + 1, true, revoke),
-            None,
-            &mut queued,
-        );
-        let loan = state.lending.as_ref().unwrap().loan(&loan_id).unwrap();
-        assert_eq!(loan.status, LendingLoanStatus::Defaulted);
-        assert_eq!(loan.repaid_amount, BigInt::from(0));
 
         // The lender withdraws the released capital.
         apply(

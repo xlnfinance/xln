@@ -1,9 +1,11 @@
+import { useNavigate } from 'react-router-dom';
 import { Bar } from '../Bars';
 import { Icon } from '../Icons';
 import { useApp } from '../../runtime/store';
 import { ACCENTS, MATERIALS, NUMBER_FONTS, RISK_COLORS } from '../../runtime/design';
 
 export function Appearance() {
+  const navigate = useNavigate();
   const theme = useApp(s => s.theme);
   const density = useApp(s => s.density);
   const setDensity = useApp(s => s.setDensity);
@@ -186,7 +188,7 @@ export function Appearance() {
           <div className="t">Guided tour</div>
           <div className="s">
             {tour.completed
-              ? 'Finished once. Replay any time.'
+              ? 'Completed on this device, across wallets. Replay any time.'
               : tour.index > 0
                 ? `Paused at step ${tour.index + 1}.`
                 : 'Credit, payment, collateral, swap, dispute: five minutes on a live sandbox.'}
@@ -198,7 +200,7 @@ export function Appearance() {
               Resume
             </button>
           ) : null}
-          <button type="button" onClick={() => setTour({ active: true, index: 0 })} data-testid="tour-replay">
+          <button type="button" onClick={() => { setTour({ active: true, index: 0, completed: false }); navigate('/'); }} data-testid="tour-replay">
             {tour.completed || tour.index > 0 ? 'Replay' : 'Start'}
           </button>
         </span>

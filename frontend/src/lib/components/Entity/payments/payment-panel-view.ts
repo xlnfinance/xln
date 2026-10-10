@@ -1,8 +1,15 @@
+import { sameJurisdictionIdentity } from '@xln/core/jurisdiction/machine/jurisdiction-runtime';
 import type { EntityReadView } from '#lib/components/Entity/core/entity-panel-types.ts';
 import type { Delta, PaymentRoute, Profile as GossipProfile, RuntimeAdapterEntitySummary, RuntimeAdapterViewFrame } from '@xln/core/api/public/runtime-module';
 
 import type { LocalAccountLike, LocalReplicaLike } from './../payment-routing';
 import { normalizeEntityId } from './../payment-routing';
+
+/** Payment suggestions use the canonical chain + Depository identity, never the display name. */
+export function paymentRecipientProfiles(profiles: readonly GossipProfile[], entityId: string): GossipProfile[] {
+  const self = profiles.find(profile => normalizeEntityId(profile.entityId) === normalizeEntityId(entityId));
+  return profiles.filter(profile => sameJurisdictionIdentity(self?.metadata.jurisdiction, profile.metadata.jurisdiction));
+}
 
 export type PaymentRuntimeGraph = {
   findPaths?: (
