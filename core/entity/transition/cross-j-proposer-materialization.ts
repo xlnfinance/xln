@@ -57,7 +57,7 @@ const entityTxContainsCrossJRegistration = (tx: EntityTx): boolean =>
 export const entityTxContainsCrossJSetup = (tx: EntityTx): boolean =>
   entityTxContainsCrossJMaterialization(tx) || entityTxContainsCrossJRegistration(tx);
 
-export type CrossJCommitPhaseSelection = Readonly<{
+type CrossJCommitPhaseSelection = Readonly<{
   txs: EntityTx[];
   deferredCrossJSetup: boolean;
 }>;

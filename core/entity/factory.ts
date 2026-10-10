@@ -13,12 +13,6 @@ import type { ConsensusConfig, JurisdictionConfig } from './types';
 import type { EntityRuntimeContext } from './runtime-context';
 import type { EntityType } from '../protocol/identity';
 
-// Extend globalThis to include our entity counter
-declare global {
-  // eslint-disable-next-line no-var
-  var _entityCounter: number | undefined;
-}
-
 const factoryLog = createStructuredLogger('entity.factory');
 
 // Entity encoding utilities
