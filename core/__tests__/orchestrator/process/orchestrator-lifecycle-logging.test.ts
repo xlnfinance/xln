@@ -6,6 +6,7 @@ import { scheduler } from 'node:timers/promises';
 
 import { createHttpDrainTracker, stopServerGracefully } from '../../../orchestrator/graceful-server';
 import { startParentLivenessWatch } from '../../../support/process/parent-watch';
+import { writePrefixedLogChunk, type PrefixLogState } from '../../../orchestrator/process/child-log-buffer';
 
 const withSuppressedStructuredLogs = async <T>(fn: () => T | Promise<T>): Promise<T> => {
   const previousScopes = process.env['XLN_LOG_SCOPES'];
@@ -122,4 +123,21 @@ test('managed child survives with its parent and exits after the exact parent is
       }
     }
   }
+});
+
+test('a child that never writes a newline cannot grow the prefixed log buffer without bound', () => {
+  const written: string[] = [];
+  const stream = {
+    write: (text: string): boolean => {
+      written.push(text);
+      return true;
+    },
+  } as unknown as NodeJS.WritableStream;
+  const state: PrefixLogState = { pending: '' };
+  const chunk = 'x'.repeat(16 * 1024);
+  for (let index = 0; index < 64; index += 1) writePrefixedLogChunk(stream, '[H1]', state, chunk);
+
+  expect(state.pending.length).toBeLessThanOrEqual(64 * 1024);
+  const forwarded = written.map(line => line.slice('[H1] '.length, -1)).join('');
+  expect(forwarded.length + state.pending.length).toBe(64 * chunk.length);
 });

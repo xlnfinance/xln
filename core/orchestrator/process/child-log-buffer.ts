@@ -2,6 +2,10 @@ import { CHILD_LOG_RING_MAX } from '../orchestrator-config';
 
 export type PrefixLogState = { pending: string };
 
+// A child that never writes a newline must not grow the orchestrator heap:
+// an unfinished line beyond this size is forwarded as its own record.
+const MAX_PENDING_LOG_LINE_CHARS = 64 * 1024;
+
 /**
  * Retains a small diagnostic tail without allowing noisy children to grow the
  * orchestrator heap forever. Lines are also capped because one malformed log
@@ -31,6 +35,10 @@ export const writePrefixedLogChunk = (
 ): void => {
   const lines = `${state.pending}${chunk.toString()}`.split(/\r?\n/);
   state.pending = lines.pop() ?? '';
+  if (state.pending.length > MAX_PENDING_LOG_LINE_CHARS) {
+    lines.push(state.pending);
+    state.pending = '';
+  }
   for (const line of lines) {
     onLine?.(line);
     stream.write(`${prefix} ${line}\n`);
