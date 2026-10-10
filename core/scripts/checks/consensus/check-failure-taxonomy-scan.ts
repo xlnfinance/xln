@@ -838,6 +838,7 @@ assertNotIncludes(externalWalletApi, '[EXT-WALLET/', externalWalletApiPath);
 for (const runtimeAdapterServerPath of [
   'core/api/runtime-adapter/server.ts',
   'core/api/runtime-adapter/session/context.ts',
+  'core/api/runtime-adapter/session/read.ts',
 ]) {
   const runtimeAdapterServer = readText(runtimeAdapterServerPath);
   assertNotIncludes(runtimeAdapterServer, 'console.', runtimeAdapterServerPath);
