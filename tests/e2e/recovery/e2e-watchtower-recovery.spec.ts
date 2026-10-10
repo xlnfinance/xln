@@ -570,15 +570,23 @@ async function createRuntimeViaUi(
   const termsCheckbox = page.getByRole('checkbox', {
     name: /I understand this is testnet software and I accept the associated risks/i,
   }).first();
-  await expect(termsCheckbox).toBeVisible({ timeout: 75_000 });
-  const checked = await termsCheckbox.isChecked().catch(() => false);
-  if (!checked) {
-    await termsCheckbox.check({ force: true });
-  }
+  // A restored backup carries its completed onboarding, so the wallet opens
+  // directly; the terms and Start step only follows a new wallet.
+  const needsOnboarding = decision !== 'restore' || await Promise.race([
+    termsCheckbox.waitFor({ state: 'visible', timeout: 75_000 }).then(() => true),
+    displayNameInput.waitFor({ state: 'hidden', timeout: 75_000 }).then(() => false),
+  ]);
+  if (needsOnboarding) {
+    await expect(termsCheckbox).toBeVisible({ timeout: 75_000 });
+    const checked = await termsCheckbox.isChecked().catch(() => false);
+    if (!checked) {
+      await termsCheckbox.check({ force: true });
+    }
 
-  const startButton = page.getByRole('button', { name: /^Start$/i }).first();
-  await expect(startButton).toBeEnabled({ timeout: 15_000 });
-  await startButton.click({ force: true });
+    const startButton = page.getByRole('button', { name: /^Start$/i }).first();
+    await expect(startButton).toBeEnabled({ timeout: 15_000 });
+    await startButton.click({ force: true });
+  }
 
   const identity = await waitForLocalRuntimeIdentity(page);
   if (!await displayNameInput.waitFor({ state: 'hidden', timeout: 30_000 }).then(() => true).catch(() => false)) {
