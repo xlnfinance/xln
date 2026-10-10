@@ -6,7 +6,7 @@ import type { ConsensusConfig, EntityState, ProposalAction } from '../types';
 import type { CrossJurisdictionSwapRoute } from '../../types/cross-jurisdiction';
 import type { EntityTx } from '../../types/entity-tx';
 import { isCrossJurisdictionTerminalStatus } from '../../extensions/cross-j';
-import { EntityCommandRejectionError } from '../tx/processing/invariant-errors';
+import { EntityCommandRejectionError, MalformedEntityFrameInputError } from '../tx/processing/invariant-errors';
 
 import { assertNoConsensusVisibleHtlcPaymentSecrets } from '../../protocol/htlc/consensus-secret-guard';
 import {
@@ -227,6 +227,19 @@ const normalizeEntityRef = (value: unknown): string =>
     .trim()
     .toLowerCase();
 
+/**
+ * A cross-J Runtime output that fails its route/role binding. Who caused it
+ * decides the disposition in assertRuntimeOutputAuthorization: a sibling
+ * Entity's output is that sender's input (typed reject of the runtimeOutput
+ * tx); this Entity's own continuation is a local invariant (stays fatal).
+ */
+class RuntimeOutputAuthorityError extends Error {
+  constructor(code: string) {
+    super(code);
+    this.name = 'RuntimeOutputAuthorityError';
+  }
+}
+
 const routeBookOwner = (route: CrossJurisdictionSwapRoute): string =>
   normalizeEntityRef(route.bookOwnerEntityId || route.source.counterpartyEntityId || route.hubEntityId);
 
@@ -239,13 +252,13 @@ const requireSemanticRoute = (
   const stored = state.crossJurisdictionSwaps?.get(canonicalOrderId);
   const route = stored ?? supplied;
   if (!route || route.orderId !== canonicalOrderId) {
-    throw new Error(`RUNTIME_OUTPUT_ROUTE_MISSING:${canonicalOrderId || 'missing'}`);
+    throw new RuntimeOutputAuthorityError(`RUNTIME_OUTPUT_ROUTE_MISSING:${canonicalOrderId || 'missing'}`);
   }
   if (stored && supplied) {
     const storedHash = normalizeEntityRef(stored.routeHash);
     const suppliedHash = normalizeEntityRef(supplied.routeHash);
     if (!storedHash || !suppliedHash || storedHash !== suppliedHash) {
-      throw new Error(
+      throw new RuntimeOutputAuthorityError(
         `RUNTIME_OUTPUT_ROUTE_HASH_MISMATCH:${canonicalOrderId}:${suppliedHash || 'missing'}:${storedHash || 'missing'}`,
       );
     }
@@ -256,7 +269,7 @@ const requireSemanticRoute = (
 const assertSemanticSource = (txType: string, source: string, expected: readonly string[]): void => {
   const allowed = new Set(expected.map(normalizeEntityRef).filter(Boolean));
   if (!allowed.has(source)) {
-    throw new Error(
+    throw new RuntimeOutputAuthorityError(
       `RUNTIME_OUTPUT_SEMANTIC_SOURCE_MISMATCH:${txType}:${source || 'missing'}:${Array.from(allowed).join(',') || 'none'}`,
     );
   }
@@ -265,7 +278,7 @@ const assertSemanticSource = (txType: string, source: string, expected: readonly
 const assertSemanticTarget = (txType: string, target: string, expected: unknown): void => {
   const canonicalExpected = normalizeEntityRef(expected);
   if (!canonicalExpected || target !== canonicalExpected) {
-    throw new Error(
+    throw new RuntimeOutputAuthorityError(
       `RUNTIME_OUTPUT_SEMANTIC_TARGET_MISMATCH:${txType}:${target || 'missing'}:${canonicalExpected || 'missing'}`,
     );
   }
@@ -278,17 +291,17 @@ const assertRuntimeCrossJSourceDispute = (
   currentState: EntityState,
 ): void => {
   const routeId = String(tx.data.crossJurisdictionRouteId ?? '');
-  if (!routeId) throw new Error('RUNTIME_OUTPUT_CROSS_J_DISPUTE_ROUTE_REQUIRED');
+  if (!routeId) throw new RuntimeOutputAuthorityError('RUNTIME_OUTPUT_CROSS_J_DISPUTE_ROUTE_REQUIRED');
   const route = requireSemanticRoute(currentState, routeId);
   const allowedFields = new Set(['counterpartyEntityId', 'crossJurisdictionRouteId']);
   if (Object.keys(tx.data).some(field => !allowedFields.has(field))) {
-    throw new Error('RUNTIME_OUTPUT_CROSS_J_DISPUTE_DATA_FORBIDDEN');
+    throw new RuntimeOutputAuthorityError('RUNTIME_OUTPUT_CROSS_J_DISPUTE_DATA_FORBIDDEN');
   }
   if (isCrossJurisdictionTerminalStatus(route.status) || !route.targetPull) {
-    throw new Error(`RUNTIME_OUTPUT_CROSS_J_DISPUTE_ROUTE_INACTIVE:${route.orderId}:${route.status}`);
+    throw new RuntimeOutputAuthorityError(`RUNTIME_OUTPUT_CROSS_J_DISPUTE_ROUTE_INACTIVE:${route.orderId}:${route.status}`);
   }
   if (normalizeEntityRef(tx.data.counterpartyEntityId) !== normalizeEntityRef(route.source.counterpartyEntityId)) {
-    throw new Error(
+    throw new RuntimeOutputAuthorityError(
       `RUNTIME_OUTPUT_CROSS_J_DISPUTE_COUNTERPARTY_MISMATCH:` +
         `${tx.data.counterpartyEntityId}:${route.source.counterpartyEntityId}`,
     );
@@ -315,7 +328,7 @@ const assertRuntimeBookOutputAuthority = (
       const route = requireSemanticRoute(currentState, tx.data.orderId);
       const sourceHub = normalizeEntityRef(route.source.counterpartyEntityId);
       if (target !== sourceHub) {
-        throw new Error(`RUNTIME_OUTPUT_CROSS_J_PROGRESS_TARGET_INVALID:${target}`);
+        throw new RuntimeOutputAuthorityError(`RUNTIME_OUTPUT_CROSS_J_PROGRESS_TARGET_INVALID:${target}`);
       }
       assertSemanticSource(tx.type, source, [routeBookOwner(route)]);
       return true;
@@ -337,7 +350,7 @@ const assertRuntimeBookLifecycleAuthority = (
       assertSemanticSource(tx.type, source, [route.source.counterpartyEntityId]);
       assertSemanticTarget(tx.type, target, route.target.entityId);
       if (normalizeEntityRef(tx.data.counterpartyEntityId) !== normalizeEntityRef(route.target.counterpartyEntityId)) {
-        throw new Error(
+        throw new RuntimeOutputAuthorityError(
           `RUNTIME_OUTPUT_CROSS_PULL_COUNTERPARTY_MISMATCH:` +
             `${tx.data.counterpartyEntityId}:${route.target.counterpartyEntityId}`,
         );
@@ -347,7 +360,7 @@ const assertRuntimeBookLifecycleAuthority = (
     case 'removeCrossJurisdictionBookOrder': {
       const route = requireSemanticRoute(currentState, tx.data.orderId, tx.data.route);
       if (normalizeEntityRef(tx.data.sourceEntityId) !== normalizeEntityRef(route.source.entityId)) {
-        throw new Error(
+        throw new RuntimeOutputAuthorityError(
           `RUNTIME_OUTPUT_BOOK_SOURCE_ENTITY_MISMATCH:${tx.data.sourceEntityId}:${route.source.entityId}`,
         );
       }
@@ -358,12 +371,12 @@ const assertRuntimeBookLifecycleAuthority = (
     case 'crossJurisdictionBookOrderRemoved': {
       const route = requireSemanticRoute(currentState, tx.data.orderId, tx.data.route);
       if (normalizeEntityRef(tx.data.sourceEntityId) !== normalizeEntityRef(route.source.entityId)) {
-        throw new Error(
+        throw new RuntimeOutputAuthorityError(
           `RUNTIME_OUTPUT_BOOK_REMOVAL_SOURCE_MISMATCH:${tx.data.sourceEntityId}:${route.source.entityId}`,
         );
       }
       if (normalizeEntityRef(tx.data.sourceAccountId) !== normalizeEntityRef(route.source.entityId)) {
-        throw new Error(
+        throw new RuntimeOutputAuthorityError(
           `RUNTIME_OUTPUT_BOOK_REMOVAL_ACCOUNT_MISMATCH:${tx.data.sourceAccountId}:${route.source.entityId}`,
         );
       }
@@ -402,25 +415,25 @@ const assertRuntimeCrossJRecoveryAuthority = (
         [route.target.entityId, route.source.counterpartyEntityId, route.target.counterpartyEntityId],
       ] as const;
       const edge = edges.find(([emitter]) => normalizeEntityRef(emitter) === source);
-      if (!edge) throw new Error(`RUNTIME_OUTPUT_SIBLING_DISPUTE_SOURCE_INVALID:${source}`);
+      if (!edge) throw new RuntimeOutputAuthorityError(`RUNTIME_OUTPUT_SIBLING_DISPUTE_SOURCE_INVALID:${source}`);
       assertSemanticTarget(tx.type, target, edge[1]);
       const observed = normalizeEntityRef(tx.data.observedCounterpartyEntityId);
       if (observed !== normalizeEntityRef(edge[2])) {
-        throw new Error(`RUNTIME_OUTPUT_SIBLING_DISPUTE_OBSERVED_MISMATCH:${observed}:${edge[2]}`);
+        throw new RuntimeOutputAuthorityError(`RUNTIME_OUTPUT_SIBLING_DISPUTE_OBSERVED_MISMATCH:${observed}:${edge[2]}`);
       }
       return true;
     }
     case 'crossJurisdictionSalvage': {
       const route = requireSemanticRoute(currentState, tx.data.routeId);
       if (normalizeEntityRef(tx.data.sourceEntityId) !== normalizeEntityRef(route.source.entityId)) {
-        throw new Error(
+        throw new RuntimeOutputAuthorityError(
           `RUNTIME_OUTPUT_SALVAGE_SOURCE_ENTITY_MISMATCH:${tx.data.sourceEntityId}:${route.source.entityId}`,
         );
       }
       if (
         normalizeEntityRef(tx.data.sourceCounterpartyEntityId) !== normalizeEntityRef(route.source.counterpartyEntityId)
       ) {
-        throw new Error(
+        throw new RuntimeOutputAuthorityError(
           `RUNTIME_OUTPUT_SALVAGE_SOURCE_COUNTERPARTY_MISMATCH:` +
             `${tx.data.sourceCounterpartyEntityId}:${route.source.counterpartyEntityId}`,
         );
@@ -433,18 +446,18 @@ const assertRuntimeCrossJRecoveryAuthority = (
         assertSemanticSource(tx.type, source, [route.target.counterpartyEntityId]);
         assertSemanticTarget(tx.type, target, route.source.entityId);
       } else {
-        throw new Error(`RUNTIME_OUTPUT_SALVAGE_TARGET_INVALID:${target}`);
+        throw new RuntimeOutputAuthorityError(`RUNTIME_OUTPUT_SALVAGE_TARGET_INVALID:${target}`);
       }
       return true;
     }
     case 'resolveHtlcLock': {
       const routeId = String(tx.data.crossJurisdictionRouteId ?? '');
-      if (!routeId) throw new Error('RUNTIME_OUTPUT_CROSS_J_HTLC_ROUTE_REQUIRED');
+      if (!routeId) throw new RuntimeOutputAuthorityError('RUNTIME_OUTPUT_CROSS_J_HTLC_ROUTE_REQUIRED');
       const route = requireSemanticRoute(currentState, routeId);
       assertSemanticSource(tx.type, source, [route.source.entityId]);
       assertSemanticTarget(tx.type, target, route.target.counterpartyEntityId);
       if (normalizeEntityRef(tx.data.counterpartyEntityId) !== normalizeEntityRef(route.target.entityId)) {
-        throw new Error(`RUNTIME_OUTPUT_CROSS_J_HTLC_COUNTERPARTY_MISMATCH:${routeId}`);
+        throw new RuntimeOutputAuthorityError(`RUNTIME_OUTPUT_CROSS_J_HTLC_COUNTERPARTY_MISMATCH:${routeId}`);
       }
       return true;
     }
@@ -480,12 +493,12 @@ const assertRuntimeOutputSemanticAuthority = (
       const sourceHub = normalizeEntityRef(route.source.counterpartyEntityId);
       const targetHub = normalizeEntityRef(route.target.entityId);
       if (target !== sourceHub && target !== targetHub) {
-        throw new Error(`RUNTIME_OUTPUT_SEMANTIC_TARGET_MISMATCH:${tx.type}:${target}:${sourceHub},${targetHub}`);
+        throw new RuntimeOutputAuthorityError(`RUNTIME_OUTPUT_SEMANTIC_TARGET_MISMATCH:${tx.type}:${target}:${sourceHub},${targetHub}`);
       }
       return;
     }
     default:
-      throw new Error(`RUNTIME_OUTPUT_SEMANTIC_VARIANT_FORBIDDEN:${tx.type}`);
+      throw new RuntimeOutputAuthorityError(`RUNTIME_OUTPUT_SEMANTIC_VARIANT_FORBIDDEN:${tx.type}`);
   }
 };
 
@@ -501,13 +514,13 @@ const assertSelfRuntimeContinuations = (
   }
     const board = resolveCanonicalEntityBoardShares(currentState.config);
     if (!board.bySigner.has(sourceSigner)) {
-      throw new Error(
+      throw new RuntimeOutputAuthorityError(
         `RUNTIME_OUTPUT_SOURCE_SIGNER_MISMATCH:${source}:${sourceSigner}:current-board`,
       );
     }
     for (const tx of txs) {
       if (protocolTxTypes.has(tx.type)) {
-        throw new Error(`RUNTIME_OUTPUT_NESTED_PROTOCOL_TX_FORBIDDEN:${tx.type}`);
+        throw new RuntimeOutputAuthorityError(`RUNTIME_OUTPUT_NESTED_PROTOCOL_TX_FORBIDDEN:${tx.type}`);
       }
       if (tx.type !== 'requestCrossJurisdictionClear') continue;
       const route = currentState.crossJurisdictionSwaps?.get(tx.data.orderId);
@@ -516,10 +529,10 @@ const assertSelfRuntimeContinuations = (
         !route ||
         !isCrossJurisdictionRouteParticipant(route, source)
       ) {
-        throw new Error(`RUNTIME_OUTPUT_NON_SIBLING_FORBIDDEN:${tx.type}:${source}:${target}`);
+        throw new RuntimeOutputAuthorityError(`RUNTIME_OUTPUT_NON_SIBLING_FORBIDDEN:${tx.type}:${source}:${target}`);
       }
       if (!expectedSourceSigner || expectedSourceSigner !== sourceSigner) {
-        throw new Error(
+        throw new RuntimeOutputAuthorityError(
           `RUNTIME_OUTPUT_SOURCE_SIGNER_MISMATCH:${source}:${sourceSigner}:` +
             `${expectedSourceSigner || 'missing'}`,
         );
@@ -574,11 +587,11 @@ const assertSiblingRuntimeOutputs = (
         normalizeEntityRef(tx.data.route.source.counterpartyEntityId) === source,
     )
   ) {
-    throw new Error(`RUNTIME_OUTPUT_SELF_FORBIDDEN:${source}:${txs.map(tx => tx.type).join(',')}`);
+    throw new RuntimeOutputAuthorityError(`RUNTIME_OUTPUT_SELF_FORBIDDEN:${source}:${txs.map(tx => tx.type).join(',')}`);
   }
   for (const tx of txs) {
     if (protocolTxTypes.has(tx.type)) {
-      throw new Error(`RUNTIME_OUTPUT_NESTED_PROTOCOL_TX_FORBIDDEN:${tx.type}`);
+      throw new RuntimeOutputAuthorityError(`RUNTIME_OUTPUT_NESTED_PROTOCOL_TX_FORBIDDEN:${tx.type}`);
     }
     const semanticRoute = runtimeOutputSemanticRoute(tx, currentState);
     if (
@@ -586,11 +599,11 @@ const assertSiblingRuntimeOutputs = (
       !isCrossJurisdictionRouteParticipant(semanticRoute, source) ||
       !isCrossJurisdictionRouteParticipant(semanticRoute, target)
     ) {
-      throw new Error(`RUNTIME_OUTPUT_NON_SIBLING_FORBIDDEN:${tx.type}:${source}:${target}`);
+      throw new RuntimeOutputAuthorityError(`RUNTIME_OUTPUT_NON_SIBLING_FORBIDDEN:${tx.type}:${source}:${target}`);
     }
     const expectedSourceSigner = crossJurisdictionRouteSigner(semanticRoute, source);
     if (!expectedSourceSigner || expectedSourceSigner !== sourceSigner) {
-      throw new Error(
+      throw new RuntimeOutputAuthorityError(
         `RUNTIME_OUTPUT_SOURCE_SIGNER_MISMATCH:${source}:${sourceSigner}:` +
           `${expectedSourceSigner || 'missing'}`,
       );
@@ -614,5 +627,15 @@ export const assertRuntimeOutputAuthorization = (
   }
   if (txs.length === 0) throw new Error('RUNTIME_OUTPUT_TXS_MISSING');
   if (assertSelfRuntimeContinuations(source, sourceSigner, target, txs, currentState)) return;
-  assertSiblingRuntimeOutputs(source, sourceSigner, target, txs, currentState);
+  try {
+    assertSiblingRuntimeOutputs(source, sourceSigner, target, txs, currentState);
+  } catch (error) {
+    // A peer's output naming an unknown/retired route or the wrong role, or a
+    // late honest notice for a route this Entity already closed: reject and
+    // evict exactly this runtimeOutput tx, never halt the receiving Runtime.
+    if (error instanceof RuntimeOutputAuthorityError) {
+      throw new MalformedEntityFrameInputError('runtimeOutput', error.message);
+    }
+    throw error;
+  }
 };

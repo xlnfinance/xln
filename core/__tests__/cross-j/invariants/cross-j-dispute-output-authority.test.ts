@@ -1,5 +1,7 @@
 import { expect, test } from 'bun:test';
 import { assertRuntimeOutputAuthorization } from '../../../entity/auth/authorization';
+import { MalformedEntityFrameInputError } from '../../../entity/tx/processing/invariant-errors';
+import { FailureDispositionError } from '../../../protocol/errors/failure-taxonomy';
 import type { CrossJurisdictionSwapRoute } from '../../../types/cross-jurisdiction';
 import type { EntityTx } from '../../../types/entity-tx';
 import { addr, entity, jref, makeJurisdiction, makeState } from '../../helpers/cross-j';
@@ -37,3 +39,40 @@ for (const [source, target, observed] of [[0, 3, 1], [1, 2, 0], [3, 0, 2], [2, 1
     })).toThrow('SIBLING_DISPUTE_OBSERVED_MISMATCH');
   });
 }
+
+test('a sibling output that fails its route binding rejects that tx; a self continuation stays fatal', () => {
+  // Any peer with a verified profile route can address a hub with a
+  // runtimeOutput. An unknown or already retired order used to throw a
+  // plain RUNTIME_OUTPUT_NON_SIBLING_FORBIDDEN and halt the receiving Runtime.
+  const state = makeState(users[1], signers[1], sourceJ);
+  state.crossJurisdictionSwaps!.set(route.orderId, route);
+  const notice: EntityTx = { type: 'crossJurisdictionFillNotice', data: {
+    orderId: 'retired-or-unknown', filledRatio: 1,
+  } } as unknown as EntityTx;
+  const rejectOf = (run: () => void): MalformedEntityFrameInputError => {
+    try {
+      run();
+    } catch (error) {
+      if (error instanceof MalformedEntityFrameInputError) return error;
+      throw error;
+    }
+    throw new Error('TEST_EXPECTED_RUNTIME_OUTPUT_REJECT');
+  };
+  const unknown = rejectOf(() => assertRuntimeOutputAuthorization(users[2], signers[2], users[1], [notice], state));
+  expect(unknown.disposition).toBe('reject');
+  expect(unknown.txType).toBe('runtimeOutput');
+  expect(unknown.rejection).toBe(`RUNTIME_OUTPUT_NON_SIBLING_FORBIDDEN:crossJurisdictionFillNotice:${users[2]}:${users[1]}`);
+
+  const clear: EntityTx = { type: 'requestCrossJurisdictionClear', data: {
+    orderId: 'retired-or-unknown', reason: 'test',
+  } } as unknown as EntityTx;
+  let selfError: unknown;
+  try {
+    assertRuntimeOutputAuthorization(users[1], signers[1], users[1], [clear], state);
+  } catch (error) {
+    selfError = error;
+  }
+  expect(selfError).toBeInstanceOf(Error);
+  expect(selfError).not.toBeInstanceOf(FailureDispositionError);
+  expect((selfError as Error).message).toContain('RUNTIME_OUTPUT_NON_SIBLING_FORBIDDEN');
+});

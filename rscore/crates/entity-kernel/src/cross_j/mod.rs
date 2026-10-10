@@ -2034,40 +2034,58 @@ pub fn authorize_runtime_output(
         }
         return Ok(());
     }
-    if source == target
-        && !output.entity_txs.iter().all(|tx| {
-            tx.kind == EntityTxKind::RegisterCrossJurisdictionSwap
-                && tx
-                    .frame_data()
-                    .and_then(|data| field(data, "route"))
-                    .and_then(|route| nested_text(route, "source", "counterpartyEntityId"))
-                    .is_some_and(|value| normalized(value) == source)
-        })
-    {
-        return Err(runtime_invalid(format!(
-            "RUNTIME_OUTPUT_SELF_FORBIDDEN:{source}"
-        )));
-    }
-    for tx in &output.entity_txs {
-        let route = semantic_route(state, tx)?;
-        let participants = route_participants(route);
-        if !participants.iter().any(|value| value == &source)
-            || !participants.iter().any(|value| value == &target)
+    let authorize_sibling = || -> Result<(), EntityKernelError> {
+        if source == target
+            && !output.entity_txs.iter().all(|tx| {
+                tx.kind == EntityTxKind::RegisterCrossJurisdictionSwap
+                    && tx
+                        .frame_data()
+                        .and_then(|data| field(data, "route"))
+                        .and_then(|route| nested_text(route, "source", "counterpartyEntityId"))
+                        .is_some_and(|value| normalized(value) == source)
+            })
         {
             return Err(runtime_invalid(format!(
-                "RUNTIME_OUTPUT_NON_SIBLING_FORBIDDEN:{}:{source}:{target}",
-                tx.kind.as_str()
+                "RUNTIME_OUTPUT_SELF_FORBIDDEN:{source}"
             )));
         }
-        let expected = route_signer(route, &source).unwrap_or_default();
-        if expected.is_empty() || expected != source_signer {
-            return Err(runtime_invalid(format!(
-                "RUNTIME_OUTPUT_SOURCE_SIGNER_MISMATCH:{source}:{source_signer}:{expected}"
-            )));
+        for tx in &output.entity_txs {
+            let route = semantic_route(state, tx)?;
+            let participants = route_participants(route);
+            if !participants.iter().any(|value| value == &source)
+                || !participants.iter().any(|value| value == &target)
+            {
+                return Err(runtime_invalid(format!(
+                    "RUNTIME_OUTPUT_NON_SIBLING_FORBIDDEN:{}:{source}:{target}",
+                    tx.kind.as_str()
+                )));
+            }
+            let expected = route_signer(route, &source).unwrap_or_default();
+            if expected.is_empty() || expected != source_signer {
+                return Err(runtime_invalid(format!(
+                    "RUNTIME_OUTPUT_SOURCE_SIGNER_MISMATCH:{source}:{source_signer}:{expected}"
+                )));
+            }
+            authorize_semantic_role(state, &source, &target, tx, route)?;
         }
-        authorize_semantic_role(state, &source, &target, tx, route)?;
+        Ok(())
+    };
+    authorize_sibling().map_err(sibling_output_rejected)
+}
+
+/// A sibling Entity's output is that sender's input: a failed route or role
+/// binding (unknown or retired order, wrong role, wrong signer) rejects
+/// exactly this runtimeOutput tx, as TS assertRuntimeOutputAuthorization does.
+/// This Entity's own continuations return earlier and stay fatal.
+fn sibling_output_rejected(error: EntityKernelError) -> EntityKernelError {
+    match error {
+        EntityKernelError::InvalidLocalEntityTx { kind, detail }
+            if kind == EntityTxKind::RuntimeOutput.as_str() =>
+        {
+            EntityKernelError::rejected(kind, detail)
+        }
+        other => other,
     }
-    Ok(())
 }
 
 fn collection(value: &mut Option<EntityCanonicalCollection>) -> &mut EntityCanonicalCollection {
@@ -6487,6 +6505,15 @@ mod tests {
                 .to_string()
                 .contains("RUNTIME_OUTPUT_SOURCE_SIGNER_MISMATCH")
         );
+        // A sibling's failed binding is that sender's input: a typed reject
+        // the Runtime evicts, never a fatal kernel fault.
+        assert!(matches!(
+            error,
+            EntityKernelError::RejectedEntityTx {
+                kind: "runtimeOutput",
+                ..
+            }
+        ));
     }
 
     #[test]
@@ -6620,6 +6647,14 @@ mod tests {
                 .to_string()
                 .contains("RUNTIME_OUTPUT_SOURCE_SIGNER_MISMATCH")
         );
+        // A self continuation is this Entity's own output: stays fatal.
+        assert!(matches!(
+            attacker,
+            EntityKernelError::InvalidLocalEntityTx {
+                kind: "runtimeOutput",
+                ..
+            }
+        ));
 
         let arbitrary = authorize_runtime_output(
             &state,
