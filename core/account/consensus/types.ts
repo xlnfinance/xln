@@ -1,7 +1,6 @@
 import type { AccountFrame, AccountInput, AccountOutput } from '../../types/account';
 import type { HankoString } from '../../types/hanko';
 import type { AccountJClaimNodeChanges } from '../../types/finance/account-j-claims';
-import type { AccountDisputeFinalityResult } from '../settlement/j-finality';
 import type { AccountTxRejection } from '../tx/apply-types';
 import type { AccountInputRejectionCode } from '../input/input-rejection';
 
@@ -67,19 +66,18 @@ export type AccountAdmissionRejection = Readonly<{
 
 type AccountConsensusOkEffects = {
   events: string[];
-  revealedSecrets?: Array<{ secret: string; hashlock: string }>;
-  swapOffersCreated?: AccountSwapOfferCreated[];
-  swapCancelRequests?: Array<{ offerId: string; accountId: string }>;
-  swapOffersCancelled?: Array<{ offerId: string; accountId: string }>;
   hashesToSign?: AccountConsensusHashToSign[];
   candidateEffects?: AccountOutput[];
 };
 
 export type HandleAccountInputApplied = Readonly<AccountConsensusOkEffects & {
   ok: true;
+  revealedSecrets?: Array<{ secret: string; hashlock: string }>;
+  swapOffersCreated?: AccountSwapOfferCreated[];
+  swapCancelRequests?: Array<{ offerId: string; accountId: string }>;
+  swapOffersCancelled?: Array<{ offerId: string; accountId: string }>;
   admittedAccountTxCount?: number;
   admissionRejections?: readonly AccountAdmissionRejection[];
-  externalFinality?: AccountDisputeFinalityResult;
   accountJClaimNodeChanges?: AccountJClaimNodeChanges;
   response?: AccountInput;
   timedOutHashlocks?: string[];

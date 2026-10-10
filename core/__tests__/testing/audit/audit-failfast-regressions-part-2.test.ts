@@ -10,11 +10,13 @@ import { x25519 } from '@noble/curves/ed25519.js';
 
 import {
   applyAccountInput,
+  proposeAccountFrame,
+} from '../../../account/consensus/index';
+import {
   getIncomingAccountDeadlineViolation,
   HTLC_ENFORCEMENT_RESERVE_MS,
   isHtlcSecretEnforcementWindowClosed,
-  proposeAccountFrame,
-} from '../../../account/consensus/index';
+} from '../../../account/consensus/dispute/deadline-policy';
 import {
   computeFrameHash,
   getAccountFrameStructuralError,

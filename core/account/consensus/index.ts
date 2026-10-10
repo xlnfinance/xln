@@ -13,7 +13,6 @@ import type {
   AccountReplica,
   AccountDisputeHanko,
   AccountTxBatch,
-  AccountFinality,
   AccountFrame,
   AccountInput,
   AccountOutput,
@@ -50,10 +49,6 @@ import {
   runPostFrameAutoRebalanceCheck,
 } from './helpers';
 import { appendAccountMempoolTxs } from '../input/mempool';
-import {
-  applyAccountDisputeFinality,
-  applyAccountDisputeStarted,
-} from '../settlement/j-finality';
 import { applyAccountEnqueue } from '../input/local-tx-admission';
 import { getAccountInputEnvelopeError } from '../input';
 import type {
@@ -61,7 +56,6 @@ import type {
   AccountConsensusHashToSign,
   AccountSwapOfferCreated,
   HandleAccountInputResult,
-  ProposeAccountFrameResult,
 } from './types';
 import { createDisputeProofHashWithNonce } from '../../protocol/dispute/proof-builder';
 import { getMinimumSafeSettlementNonce } from '../../protocol/settlement/operations';
@@ -71,12 +65,7 @@ import type {
   AccountJClaimNodeChanges,
   AccountJClaimNodeStore,
 } from '../../types/finance/account-j-claims';
-import {
-  getIncomingAccountDeadlineViolation,
-  HTLC_ENFORCEMENT_RESERVE_MS,
-  isHtlcSecretEnforcementWindowClosed,
-  type AccountInputSecurityContext,
-} from './dispute/deadline-policy';
+import type { AccountInputSecurityContext } from './dispute/deadline-policy';
 import { accountInputAck, accountInputProposal, accountInputReferenceHeight } from './flush';
 import { handleBoardHankoRefresh } from './incoming/board-hanko-refresh';
 import { handleImmediatePredecessorAck, handlePendingAckFrame } from './incoming/ack-commit';
@@ -101,7 +90,6 @@ import {
   accountInputFailureMessage,
   accountInputTxRejected,
   accountInputValidationRejected,
-  isProposedAccountFrame,
   rejectAccountInputEvidenceError,
   rejectAccountInput,
 } from './result';
@@ -109,11 +97,9 @@ import { timePerfPhase } from '../../support/performance/profile';
 import { installCommittedAccountFrameHead } from './frame/committed-envelope';
 import { countOp } from '../../support/performance/op-counters';
 export { proposeAccountFrame } from './proposal/propose';
-export type { HandleAccountInputResult } from './types';
 
 const accountLog = createStructuredLogger('account');
 
-export { getIncomingAccountDeadlineViolation, HTLC_ENFORCEMENT_RESERVE_MS, isHtlcSecretEnforcementWindowClosed };
 export type { AccountInputSecurityContext };
 export { computeFrameHash } from './frame/hash';
 
@@ -555,9 +541,6 @@ type IncomingAckFrameMaterial = {
   proofChanged: boolean;
 };
 
-type IncomingAckFrameMaterialResult =
-  { kind: 'continue'; material: IncomingAckFrameMaterial } | { kind: 'return'; result: HandleAccountInputResult };
-
 const selectAckDisputeHanko = (
   account: AccountReplica,
   proofBodyHash: string,
@@ -590,14 +573,13 @@ const selectAckDisputeHanko = (
   };
 };
 
-async function buildIncomingAckFrameMaterial(
+function buildIncomingAckFrameMaterial(
   account: AccountReplica,
   input: AccountInput,
   receivedFrame: AccountFrame,
   proposerIsLeft: boolean,
   ackProofResult: ReturnType<typeof buildAccountProofBodyFromJurisdictions>,
-  events: string[],
-): Promise<IncomingAckFrameMaterialResult> {
+): IncomingAckFrameMaterial {
   const ackEntityId = account.proofHeader.fromEntity;
   accountLog.debug('hanko.ack.defer_to_entity_consensus', {
     entity: shortId(ackEntityId),
@@ -619,11 +601,6 @@ async function buildIncomingAckFrameMaterial(
         proposerIsLeft,
       )
     : undefined;
-  if (proofChanged) {
-    if (!ackDisputeHash) {
-      return { kind: 'return', result: accountInputValidationRejected('Failed to build ACK dispute hanko', events) };
-    }
-  }
 
   const ackDisputeHanko = selectAckDisputeHanko(
     account,
@@ -649,20 +626,17 @@ async function buildIncomingAckFrameMaterial(
   };
 
   return {
-    kind: 'continue',
-    material: {
-      response,
-      outboundAck: {
-        height: receivedFrame.height,
-        counterpartyEntityId: input.fromEntityId,
-        response: structuredClone(response),
-      },
-      ...(ackDisputeHash ? { ackDisputeHash } : {}),
-      ackProofBodyHash: ackProofResult.proofBodyHash,
-      ackSignedNonce,
-      ackProposerIsLeft: proposerIsLeft,
-      proofChanged,
+    response,
+    outboundAck: {
+      height: receivedFrame.height,
+      counterpartyEntityId: input.fromEntityId,
+      response: structuredClone(response),
     },
+    ...(ackDisputeHash ? { ackDisputeHash } : {}),
+    ackProofBodyHash: ackProofResult.proofBodyHash,
+    ackSignedNonce,
+    ackProposerIsLeft: proposerIsLeft,
+    proofChanged,
   };
 }
 
@@ -682,28 +656,11 @@ function buildIncomingFrameReturnPayload(
   receivedFrame: AccountFrame,
   response: Extract<AccountInput, { kind: 'ack' }>,
   validation: IncomingFrameValidation,
-  proposeResult: ProposeAccountFrameResult | undefined,
   ackDisputeHash: string | undefined,
   events: string[],
   timedOutHashlocks: string[],
   committedFrames: AccountCommittedFrame[],
 ): HandleAccountInputResult {
-  const allRevealedSecrets = [
-    ...validation.revealedSecrets,
-    ...(proposeResult && isProposedAccountFrame(proposeResult) ? proposeResult.revealedSecrets ?? [] : []),
-  ];
-  const allSwapOffersCreated = [
-    ...validation.swapOffersCreated,
-    ...(proposeResult && isProposedAccountFrame(proposeResult) ? proposeResult.swapOffersCreated ?? [] : []),
-  ];
-  const allSwapCancelRequests = [
-    ...validation.swapCancelRequests,
-    ...(proposeResult && isProposedAccountFrame(proposeResult) ? proposeResult.swapCancelRequests ?? [] : []),
-  ];
-  const allSwapOffersCancelled = [
-    ...validation.swapOffersCancelled,
-    ...(proposeResult && isProposedAccountFrame(proposeResult) ? proposeResult.swapOffersCancelled ?? [] : []),
-  ];
   const hashesToSign: AccountConsensusHashToSign[] = [
     {
       hash: receivedFrame.stateHash,
@@ -719,7 +676,6 @@ function buildIncomingFrameReturnPayload(
           },
         ]
       : []),
-    ...(proposeResult && isProposedAccountFrame(proposeResult) ? proposeResult.hashesToSign ?? [] : []),
   ];
 
   if (HEAVY_LOGS) {
@@ -732,10 +688,10 @@ function buildIncomingFrameReturnPayload(
   return accountInputApplied({
     response,
     events,
-    revealedSecrets: allRevealedSecrets,
-    swapOffersCreated: allSwapOffersCreated,
-    swapCancelRequests: allSwapCancelRequests,
-    swapOffersCancelled: allSwapOffersCancelled,
+    revealedSecrets: [...validation.revealedSecrets],
+    swapOffersCreated: [...validation.swapOffersCreated],
+    swapCancelRequests: [...validation.swapCancelRequests],
+    swapOffersCancelled: [...validation.swapOffersCancelled],
     timedOutHashlocks,
     ...(committedFrames.length > 0 && { committedFrames }),
     ...(hashesToSign.length > 0 && { hashesToSign }),
@@ -752,16 +708,13 @@ async function buildAckResponseForIncomingFrame(
   timedOutHashlocks: string[],
   committedFrames: AccountCommittedFrame[],
 ): Promise<HandleAccountInputResult> {
-  const ackMaterial = await buildIncomingAckFrameMaterial(
+  const material = buildIncomingAckFrameMaterial(
     account,
     input,
     receivedFrame,
     proposerIsLeft,
     validation.proofResult,
-    events,
   );
-  if (ackMaterial.kind === 'return') return ackMaterial.result;
-  const { material } = ackMaterial;
   storeAckDisputeState(account, material);
   if (material.proofChanged) account.proofHeader.nextProofNonce = material.ackSignedNonce + 1;
   // Install the reusable ACK before the final Entity flush. The flush may
@@ -777,7 +730,6 @@ async function buildAckResponseForIncomingFrame(
     receivedFrame,
     material.response,
     validation,
-    undefined,
     material.ackDisputeHash,
     events,
     timedOutHashlocks,
@@ -1140,29 +1092,10 @@ const resolveAccountInputSecurityContext = (
     verifyHanko: context.verifyHanko,
   });
 
-const applyExternalFinalityInput = (
-  account: AccountReplica,
-  input: AccountFinality,
-): HandleAccountInputResult => {
-  if (input.finality.kind === 'dispute_started') {
-    applyAccountDisputeStarted(account, input.finality);
-    return accountInputApplied({ events: ['ACCOUNT_DISPUTE_STARTED_APPLIED'] });
-  }
-  const { finalizedJNonce, finalizedTokenIds } = input.finality;
-  return accountInputApplied({
-    events: ['ACCOUNT_DISPUTE_FINALITY_APPLIED'],
-    externalFinality: applyAccountDisputeFinality(
-      account,
-      finalizedJNonce,
-      finalizedTokenIds,
-    ),
-  });
-};
-
 export async function applyAccountInput(
   context: AccountConsensusContext,
   account: AccountReplica,
-  input: AccountInput | AccountTxBatch | AccountFinality,
+  input: AccountInput | AccountTxBatch,
   providedSecurityContext?: AccountInputSecurityContext,
 ): Promise<HandleAccountInputResult> {
   const authorityScope = context.accountAuthorityExecutionScope;
@@ -1195,13 +1128,7 @@ export async function applyAccountInput(
     }
     const envelopeError = getAccountInputEnvelopeError(account.state, input);
     if (envelopeError) {
-      if (input.kind === 'external_finality') {
-        return accountInputValidationRejected(envelopeError.reason, []);
-      }
       return rejectAccountInput(envelopeError.code, envelopeError.reason, []);
-    }
-    if (input.kind === 'external_finality') {
-      return applyExternalFinalityInput(account, input);
     }
     return applyAccountConsensusInput(context, account, input, providedSecurityContext);
   })();
@@ -1222,7 +1149,7 @@ const rejectMalformedAccountHanko = (
 const applyAccountConsensusInput = async (
   context: AccountConsensusContext,
   account: AccountReplica,
-  input: Exclude<AccountInput, { kind: 'enqueue' | 'external_finality' }>,
+  input: AccountInput,
   providedSecurityContext: AccountInputSecurityContext | undefined,
 ): Promise<HandleAccountInputResult> => {
   const securityContext = resolveAccountInputSecurityContext(context, account, providedSecurityContext);
@@ -1261,18 +1188,7 @@ const applyAccountConsensusInput = async (
   const shapeRejection = rejectMalformedAccountHanko(input, events);
   if (shapeRejection) return shapeRejection;
   const boardHankoRefresh = await handleBoardHankoRefresh(account, input, securityContext);
-  if (boardHankoRefresh) {
-    const session = createAccountInputSession(
-      context,
-      account,
-      input,
-      securityContext,
-      normalizedInputHeight,
-      classifyAccountInputReplay(account, input),
-      events,
-    );
-    return finishAccountInput(session, boardHankoRefresh);
-  }
+  if (boardHankoRefresh) return boardHankoRefresh;
   const replay = classifyAccountInputReplay(account, input);
   const replayGateResult = await handleReplayOrObsoleteAccountInput(
     account,

@@ -6,9 +6,6 @@ import { x25519 } from '@noble/curves/ed25519.js';
 
 import {
   applyAccountInput,
-  getIncomingAccountDeadlineViolation,
-  HTLC_ENFORCEMENT_RESERVE_MS,
-  isHtlcSecretEnforcementWindowClosed,
   proposeAccountFrame,
 } from '../../../account/consensus/index';
 

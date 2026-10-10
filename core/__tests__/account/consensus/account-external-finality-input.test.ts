@@ -1,20 +1,19 @@
 import { expect, test } from 'bun:test';
 
-import { applyAccountInput } from '../../../account/consensus';
+import {
+  applyAccountDisputeFinality,
+  applyAccountDisputeStarted,
+} from '../../../account/settlement/j-finality';
 import {
   createAccountDisputeFinalityInput,
   createAccountDisputeStartedInput,
 } from '../../../account/input';
-import { cloneIsolatedAccountInput } from '../../../protocol/state/account-input-clone';
 import { safeStringify } from '../../../protocol/serialization';
 import { createDefaultDelta } from '../../../account/state/delta';
-import { createEmptyEnv } from '../../../runtime';
-import { createAccountConsensusContext } from '../../../entity/account/account-consensus-context';
 import { PersistentAccountStateMap } from '../../../account/state/persistent-state-map';
-import { getDisputeProofTupleError } from '../../../account/consensus/dispute/proof-views';
 import { addr, makeAccount } from '../../helpers/cross-j';
 
-test('authenticated J finality enters the canonical AccountInput boundary', async () => {
+test('authenticated J finality retires the Account dispute epoch', () => {
   const leftEntity = `0x${'11'.repeat(32)}`;
   const rightEntity = `0x${'22'.repeat(32)}`;
   const account = makeAccount(leftEntity, rightEntity, {
@@ -66,7 +65,6 @@ test('authenticated J finality enters the canonical AccountInput boundary', asyn
   account.counterpartyDisputeProofProposerIsLeft = true;
   account.counterpartyDisputeProofBodyHash = `0x${'55'.repeat(32)}`;
   account.counterpartyDisputeHash = `0x${'66'.repeat(32)}`;
-  expect(getDisputeProofTupleError(account)).toBeNull();
 
   const input = createAccountDisputeFinalityInput(
     account.state,
@@ -74,22 +72,14 @@ test('authenticated J finality enters the canonical AccountInput boundary', asyn
     4,
     [1],
   );
-  const cloned = cloneIsolatedAccountInput(input);
-  expect(cloned).toEqual(input);
-  expect(cloned).not.toBe(input);
-  expect(cloned.finality.finalizedTokenIds).not.toBe(
+  if (input.finality.kind !== 'dispute_finalized') throw new Error('expected dispute_finalized');
+  const result = applyAccountDisputeFinality(
+    account,
+    input.finality.finalizedJNonce,
     input.finality.finalizedTokenIds,
   );
 
-  const env = createEmptyEnv('account-external-finality');
-  const result = await applyAccountInput(
-    createAccountConsensusContext(env),
-    account,
-    cloned,
-  );
-
-  expect(result.ok).toBe(true);
-  expect(result.externalFinality).toEqual({
+  expect(result).toEqual({
     hadActiveDispute: false,
     hadSettlementWorkspace: false,
     removedSettlementTxs: 0,
@@ -119,7 +109,6 @@ test('authenticated J finality enters the canonical AccountInput boundary', asyn
   expect(account.counterpartyDisputeProofProposerIsLeft).toBeUndefined();
   expect(account.counterpartyDisputeProofBodyHash).toBeUndefined();
   expect(account.counterpartyDisputeHash).toBeUndefined();
-  expect(getDisputeProofTupleError(account)).toBeNull();
 });
 
 test('external finality rejects an entity outside the bilateral account', () => {
@@ -137,7 +126,7 @@ test('external finality rejects an entity outside the bilateral account', () => 
   ).toThrow('ACCOUNT_FINALITY_INPUT_OWNER_MISMATCH');
 });
 
-test('DisputeStarted enters Account through the same external-finality boundary', async () => {
+test('DisputeStarted freezes the Account with the on-chain dispute clock', () => {
   const leftEntity = `0x${'11'.repeat(32)}`;
   const rightEntity = `0x${'22'.repeat(32)}`;
   const account = makeAccount(leftEntity, rightEntity);
@@ -158,21 +147,9 @@ test('DisputeStarted enters Account through the same external-finality boundary'
     observedBlockNumber: 100,
     batchNonce: 3,
   });
+  if (input.finality.kind !== 'dispute_started') throw new Error('expected dispute_started');
+  applyAccountDisputeStarted(account, input.finality);
 
-  const cloned = cloneIsolatedAccountInput(input);
-  expect(cloned).toEqual(input);
-  expect(cloned).not.toBe(input);
-  const env = createEmptyEnv('account-dispute-started-finality');
-  const result = await applyAccountInput(
-    createAccountConsensusContext(env),
-    account,
-    cloned,
-  );
-
-  expect(result).toMatchObject({
-    ok: true,
-    events: ['ACCOUNT_DISPUTE_STARTED_APPLIED'],
-  });
   expect(account.status).toBe('disputed');
   expect(account.state.jNonce).toBe(9);
   expect(account.activeDispute).toEqual({
@@ -193,7 +170,7 @@ test('DisputeStarted enters Account through the same external-finality boundary'
   });
 });
 
-test('invalid DisputeStarted finality leaves Account byte-identical', async () => {
+test('invalid DisputeStarted finality leaves Account byte-identical', () => {
   const leftEntity = `0x${'11'.repeat(32)}`;
   const rightEntity = `0x${'22'.repeat(32)}`;
   const account = makeAccount(leftEntity, rightEntity);
@@ -215,17 +192,14 @@ test('invalid DisputeStarted finality leaves Account byte-identical', async () =
     observedBlockNumber: 100,
   });
 
-  await expect(
-    applyAccountInput(
-      createAccountConsensusContext(createEmptyEnv('invalid-dispute-started')),
-      account,
-      input,
-    ),
-  ).rejects.toThrow('ACCOUNT_DISPUTE_CLOCK_MISMATCH:100:100:10:10:10:10');
+  if (input.finality.kind !== 'dispute_started') throw new Error('expected dispute_started');
+  const finality = input.finality;
+  expect(() => applyAccountDisputeStarted(account, finality))
+    .toThrow('ACCOUNT_DISPUTE_CLOCK_MISMATCH:100:100:10:10:10:10');
   expect(safeStringify(account)).toBe(before);
 });
 
-test('zero-window DisputeStarted accepts the exact same-second deadline', async () => {
+test('zero-window DisputeStarted accepts the exact same-second deadline', () => {
   const leftEntity = `0x${'11'.repeat(32)}`;
   const rightEntity = `0x${'22'.repeat(32)}`;
   const account = makeAccount(leftEntity, rightEntity);
@@ -247,16 +221,12 @@ test('zero-window DisputeStarted accepts the exact same-second deadline', async 
     observedBlockNumber: 100,
   });
 
-  const result = await applyAccountInput(
-    createAccountConsensusContext(createEmptyEnv('zero-window-dispute-started')),
-    account,
-    input,
-  );
-  expect(result.ok).toBe(true);
+  if (input.finality.kind !== 'dispute_started') throw new Error('expected dispute_started');
+  applyAccountDisputeStarted(account, input.finality);
   expect(account.activeDispute?.disputeTimeout).toBe(100);
 });
 
-test('DisputeStarted atomically moves cross-j recovery into the active phase', async () => {
+test('DisputeStarted atomically moves cross-j recovery into the active phase', () => {
   const leftEntity = `0x${'11'.repeat(32)}`;
   const rightEntity = `0x${'22'.repeat(32)}`;
   const account = makeAccount(leftEntity, rightEntity);
@@ -288,13 +258,9 @@ test('DisputeStarted atomically moves cross-j recovery into the active phase', a
     observedBlockNumber: 100,
   });
 
-  const result = await applyAccountInput(
-    createAccountConsensusContext(createEmptyEnv('account-dispute-started-cross-j-phase')),
-    account,
-    input,
-  );
+  if (input.finality.kind !== 'dispute_started') throw new Error('expected dispute_started');
+  applyAccountDisputeStarted(account, input.finality);
 
-  expect(result.ok).toBe(true);
   expect(account.disputePrepare).toBeUndefined();
   expect(account.activeDispute?.crossJurisdictionRecovery).toEqual(recovery);
 });

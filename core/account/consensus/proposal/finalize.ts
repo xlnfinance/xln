@@ -139,10 +139,6 @@ export const finalizeAccountProposal = (
     accountInput,
     events,
     proposalDroppedTransactions,
-    revealedSecrets: effects.revealedSecrets,
-    swapOffersCreated: effects.swapOffersCreated,
-    swapCancelRequests: effects.swapCancelRequests,
-    swapOffersCancelled: effects.swapOffersCancelled,
     hashesToSign,
     ...(effects.failedHtlcLocks.length > 0
       ? { failedHtlcLocks: effects.failedHtlcLocks }

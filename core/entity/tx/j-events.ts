@@ -78,7 +78,7 @@ import {
 } from '../../jurisdiction/machine/board-registry';
 import { validateJEventRangeEnvelope } from '../../jurisdiction/machine/j-event-range-validation';
 import { applyEntityAccountEnvelopeUpdate } from '../account-envelope-update';
-import type { HandleAccountInputApplied } from '../../account/consensus/types';
+import type { AccountDisputeFinalityResult } from '../../account/settlement/j-finality';
 import {
   createAccountDisputeFinalityInput,
   createAccountDisputeStartedInput,
@@ -123,7 +123,7 @@ const incrementAccountNonce = (nonce: number, code: string): number => {
 const invalidateSettlementIntentAfterDisputeFinality = (
   state: EntityState,
   counterpartyId: string,
-  accountResult: NonNullable<HandleAccountInputApplied['externalFinality']>,
+  accountResult: AccountDisputeFinalityResult,
 ): void => {
   const removedDeferred = state.deferredAccountProposals?.delete(counterpartyId) ?? false;
   if (

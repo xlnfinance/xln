@@ -1,6 +1,5 @@
 import type {
   AccountTxBatch,
-  AccountFinality,
   AccountInput,
   AccountReplica,
   AccountTx,
@@ -48,7 +47,7 @@ export type AccountAuthorityExecutionScope = Readonly<{
 export type AccountAuthorityInputRequest = Readonly<{
   collectorFrameId: string;
   account: AccountReplica;
-  input: AccountInput | AccountTxBatch | AccountFinality;
+  input: AccountInput | AccountTxBatch;
   entityTimestamp: number;
   finalizedJHeight: number;
 }>;

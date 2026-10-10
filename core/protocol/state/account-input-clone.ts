@@ -3,7 +3,6 @@ import type {
   AccountFrame,
   AccountAckFrame,
   AccountTxBatch,
-  AccountFinality,
   AccountFrameProposal,
   AccountInput,
   AccountState,
@@ -51,11 +50,11 @@ const cloneFrameProposal = (proposal: AccountFrameProposal): AccountFrameProposa
 });
 
 export function cloneIsolatedAccountInput<
-  T extends AccountInput | AccountTxBatch | AccountFinality,
+  T extends AccountInput | AccountTxBatch,
 >(input: T): T;
 export function cloneIsolatedAccountInput(
-  input: AccountInput | AccountTxBatch | AccountFinality,
-): AccountInput | AccountTxBatch | AccountFinality {
+  input: AccountInput | AccountTxBatch,
+): AccountInput | AccountTxBatch {
   if (input.kind === 'enqueue') {
     return { kind: 'enqueue', txs: input.txs.map(cloneIsolatedAccountTx) };
   }
@@ -67,18 +66,6 @@ export function cloneIsolatedAccountInput(
     ...(input.watchSeed !== undefined ? { watchSeed: input.watchSeed } : {}),
   };
   switch (input.kind) {
-    case 'external_finality':
-      return {
-        ...base,
-        kind: input.kind,
-        finality:
-          input.finality.kind === 'dispute_finalized'
-            ? {
-                ...input.finality,
-                finalizedTokenIds: [...input.finality.finalizedTokenIds],
-              }
-            : { ...input.finality },
-      };
     case 'ack':
       return { ...base, kind: input.kind, ack: cloneAckFrame(input.ack) };
     case 'ack_frame':

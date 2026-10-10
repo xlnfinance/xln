@@ -36,7 +36,6 @@ import type {
   AccountFrame,
   AccountAckFrame,
   AccountTxBatch,
-  AccountFinality,
   AccountFrameProposal,
   AccountInput,
   AccountReplica,
@@ -54,8 +53,7 @@ import type { CertifiedBoardRecord } from '../types/entity-board-registry';
 
 const authorityLog = createStructuredLogger('rscore.authority');
 
-type RawAccountInputKind = 'create' | 'enqueue' | 'ack' | 'ack_frame' | 'dispute'
-  | 'external_finality' | 'other';
+type RawAccountInputKind = 'create' | 'enqueue' | 'ack' | 'ack_frame' | 'dispute' | 'other';
 
 type AuthorityAccountInput = Extract<
   AccountInput,
@@ -216,11 +214,10 @@ let report = {
 };
 
 const classify = (
-  input: AccountInput | AccountTxBatch | AccountFinality,
+  input: AccountInput | AccountTxBatch,
 ): RawAccountInputKind => {
   switch (input.kind) {
     case 'enqueue': return 'enqueue';
-    case 'external_finality': return 'external_finality';
     case 'dispute': return 'dispute';
     case 'ack': return 'ack';
     case 'ack_frame': return 'ack_frame';
@@ -237,7 +234,7 @@ export const noteRawAccountInput = (
   /** From the caller's own consensus context, never from module state. */
   frameId: string | null | undefined,
   account: AccountReplica,
-  input: AccountInput | AccountTxBatch | AccountFinality,
+  input: AccountInput | AccountTxBatch,
 ): AuthorityRecordedAccountInput | null => {
   if (!authorityRecordEnabled()) return null;
   // `null` is an explicit detached/read-only scope. It is not a gap and must
@@ -391,7 +388,7 @@ export const noteAuthorityAccountCreate = (
  * rows for the one AccountInput TypeScript received.
  */
 const payloadsOf = (
-  input: AccountInput | AccountTxBatch | AccountFinality,
+  input: AccountInput | AccountTxBatch,
 ): RecordedPayload[] => {
   switch (input.kind) {
     case 'enqueue':
@@ -400,7 +397,6 @@ const payloadsOf = (
       return [{ kind: 'ack', input }];
     case 'ack_frame':
       return [{ kind: 'ack_frame', input }];
-    case 'external_finality':
     case 'dispute':
     case 'board_hanko_refresh':
       return [{ kind: 'unsupported', reason: input.kind }];

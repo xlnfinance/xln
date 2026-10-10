@@ -23,7 +23,6 @@ import type { AccountJClaimNodeStore } from '../../../types/finance/account-j-cl
 import { getNextSettlementNonce } from '../../../protocol/settlement/operations';
 import type {
   AccountFailedHtlcLock,
-  AccountSwapOfferCreated,
   ProposalDroppedTransaction,
 } from '../types';
 import {
@@ -41,10 +40,6 @@ const accountLog = createStructuredLogger('account');
 
 export type ProposalTransactionEffects = {
   events: string[];
-  revealedSecrets: Array<{ secret: string; hashlock: string }>;
-  swapOffersCreated: AccountSwapOfferCreated[];
-  swapCancelRequests: Array<{ offerId: string; accountId: string }>;
-  swapOffersCancelled: Array<{ offerId: string; accountId: string }>;
   failedHtlcLocks: AccountFailedHtlcLock[];
   /** Commit-time effects of the validated txs, kept for the prepared ACK commit. */
   candidateEffects: AccountOutput[];
@@ -80,10 +75,6 @@ type AppliedProposalTx = {
 
 const createTransactionEffects = (): ProposalTransactionEffects => ({
   events: [],
-  revealedSecrets: [],
-  swapOffersCreated: [],
-  swapCancelRequests: [],
-  swapOffersCancelled: [],
   failedHtlcLocks: [],
   candidateEffects: [],
   txResults: [],
@@ -160,7 +151,6 @@ const applyProposalTransaction = async (
 };
 
 const collectSuccessfulTransaction = (
-  account: AccountReplica,
   effects: ProposalTransactionEffects,
   validTxs: AccountTx[],
   validMempoolTxs: AccountTx[],
@@ -180,25 +170,14 @@ const collectSuccessfulTransaction = (
     });
   }
   switch (result.outcome) {
-    case 'applied':
-      return;
-    case 'htlc_secret':
-      effects.revealedSecrets.push({ secret: result.secret, hashlock: result.hashlock });
-      return;
     case 'htlc_error':
       effects.timedOutHashlocks.push(result.hashlock);
       return;
+    case 'applied':
+    case 'htlc_secret':
     case 'swap_offer_created':
-      effects.swapOffersCreated.push(result.swapOfferCreated);
-      return;
     case 'swap_cancel_requested':
-      effects.swapCancelRequests.push({
-        ...result.swapOfferCancelRequested,
-        accountId: account.proofHeader.toEntity,
-      });
-      return;
     case 'swap_cancelled':
-      effects.swapOffersCancelled.push(result.swapOfferCancelled);
       return;
     default:
       assertNever(result);
@@ -327,7 +306,6 @@ export const validateProposalTransactions = async (
   if (optimistic) {
     for (const applied of optimistic.applied) {
       collectSuccessfulTransaction(
-        context.account,
         effects,
         validTxs,
         validMempoolTxs,
@@ -374,7 +352,6 @@ export const validateProposalTransactions = async (
     }
     clonedMachine = commitAccountTransition(transition, 'proposalTx').account;
     collectSuccessfulTransaction(
-      context.account,
       effects,
       validTxs,
       validMempoolTxs,

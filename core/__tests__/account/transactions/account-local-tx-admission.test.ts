@@ -5,10 +5,8 @@ import { applyAccountInput } from '../../../account/consensus/index';
 import { proposeAccountFrame } from '../../../account/consensus/proposal/propose';
 import { prependUniqueMempoolTxs } from '../../../account/consensus/helpers';
 import {
-  canProcessAccountTxForDisputeStatus,
   freezeAccountForDispute,
   isDisputeStartedByLeft,
-  returnPreparedAccountToActive,
 } from '../../../account/consensus/dispute/policy';
 import { LIMITS } from '../../../config/constants';
 import type { AccountReplica, AccountTx } from '../../../types/account';
@@ -149,32 +147,6 @@ describe('account mempool multiplicity', () => {
     expect(account.mempool).toEqual([]);
   });
 
-  test('returning preparation to active reopens the deferred J claim lane', () => {
-    const claim: AccountTx = {
-      type: 'j_event_claim',
-      data: {
-        jHeight: 4,
-        jBlockHash: `0x${'44'.repeat(32)}`,
-        events: [],
-      },
-    };
-    const account = accountWithPending(claim);
-    account.status = 'dispute_preparing';
-    account.disputePrepare = {
-      startedAt: 1,
-      readyAfter: 1,
-      reason: 'cross-j-recovery',
-    };
-
-    returnPreparedAccountToActive(account);
-
-    expect(account.status).toBe('active');
-    expect(account.disputePrepare).toBeUndefined();
-    expect(account.pendingFrame).toBeUndefined();
-    expect(account.mempool).toEqual([claim]);
-    expect(canProcessAccountTxForDisputeStatus(account.status)).toBe(true);
-  });
-
   test('direct proposal cannot consume deferred work from a preparing Account', async () => {
     const claim: AccountTx = {
       type: 'j_event_claim',
@@ -200,15 +172,6 @@ describe('account mempool multiplicity', () => {
     expect(account.status).toBe('dispute_preparing');
     expect(account.mempool).toEqual(beforeMempool);
     expect(account.pendingFrame).toBe(beforePendingFrame);
-  });
-
-  test('preparation return rejects active and permanently disputed Accounts', () => {
-    const active = accountWithPending(PAYMENT);
-    expect(() => returnPreparedAccountToActive(active))
-      .toThrow('ACCOUNT_DISPUTE_PREPARATION_RETURN_INVALID:active');
-    active.status = 'disputed';
-    expect(() => returnPreparedAccountToActive(active))
-      .toThrow('ACCOUNT_DISPUTE_PREPARATION_RETURN_INVALID:disputed');
   });
 
   test('counts pending and queued transactions under one outstanding limit', () => {

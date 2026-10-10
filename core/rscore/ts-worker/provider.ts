@@ -154,7 +154,7 @@ const reachableJClaimNodes = (
 
 const accountInput = (request: AccountAuthorityInputRequest): AccountInput => {
   const input = request.input;
-  if (input.kind === 'enqueue' || input.kind === 'external_finality') {
+  if (input.kind === 'enqueue') {
     throw new Error(`TS_ACCOUNT_WORKER_PROVIDER_INBOUND_KIND:${input.kind}`);
   }
   return input;

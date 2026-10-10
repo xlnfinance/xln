@@ -12,8 +12,6 @@ import { computeFrameHash } from '../frame/hash';
 const collisionLog = createStructuredLogger('account.collision');
 
 export type AccountAckTarget = {
-  pendingHeight: number;
-  bundledNewFrameHeight: number | undefined;
   ackHeight: number | undefined;
 };
 
@@ -33,8 +31,6 @@ export const resolveAccountAckTarget = (
     (normalizedInputHeight === pendingHeight ||
       (bundledNewFrameHeight !== undefined && bundledNewFrameHeight === pendingHeight + 1));
   return {
-    pendingHeight,
-    bundledNewFrameHeight,
     ackHeight: ackTargetsPendingFrame ? pendingHeight : normalizedInputHeight,
   };
 };

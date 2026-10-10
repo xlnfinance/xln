@@ -3,8 +3,6 @@ import { describe, expect, test } from 'bun:test';
 import {
   isCertifiedAccountAckFrame,
   isCertifiedAccountFrameProposal,
-  isDraftAccountAckFrame,
-  isDraftAccountFrameProposal,
 } from '../../../../account/consensus/frame/phase-views';
 import type { AccountFrame, AccountAckFrame, AccountFrameProposal } from '../../../../types/account';
 
@@ -24,8 +22,8 @@ describe('FinTS Account frame certification views', () => {
   test('narrows proposal and ACK phases without cloning', () => {
     const proposal: AccountFrameProposal = { frame: frame() };
     const ack: AccountAckFrame = { height: 1, frameHash: proposal.frame.stateHash };
-    expect(isDraftAccountFrameProposal(proposal)).toBe(true);
-    expect(isDraftAccountAckFrame(ack)).toBe(true);
+    expect(isCertifiedAccountFrameProposal(proposal)).toBe(false);
+    expect(isCertifiedAccountAckFrame(ack)).toBe(false);
 
     proposal.frameHanko = '0x01';
     ack.frameHanko = '0x02';

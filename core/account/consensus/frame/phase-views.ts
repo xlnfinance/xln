@@ -7,19 +7,9 @@ import type { HankoString } from '../../../types/hanko';
 
 type CertifiedDisputeHanko = AccountDisputeHanko & { hanko: HankoString };
 
-export type DraftAccountFrameProposal = AccountFrameProposal & {
-  frameHanko?: never;
-  disputeHanko?: (AccountDisputeHanko & { hanko?: never });
-};
-
 export type CertifiedAccountFrameProposal = AccountFrameProposal & {
   frameHanko: HankoString;
   disputeHanko?: CertifiedDisputeHanko;
-};
-
-export type DraftAccountAckFrame = AccountAckFrame & {
-  frameHanko?: never;
-  disputeHanko?: (AccountDisputeHanko & { hanko?: never });
 };
 
 export type CertifiedAccountAckFrame = AccountAckFrame & {
@@ -33,20 +23,10 @@ const hasText = (value: string | undefined): value is HankoString =>
 const hasCertifiedOptionalDisputeHanko = (disputeHanko: AccountDisputeHanko | undefined): boolean =>
   disputeHanko === undefined || hasText(disputeHanko.hanko);
 
-export const isDraftAccountFrameProposal = (
-  proposal: AccountFrameProposal,
-): proposal is DraftAccountFrameProposal => proposal.frameHanko === undefined
-  && proposal.disputeHanko?.hanko === undefined;
-
 export const isCertifiedAccountFrameProposal = (
   proposal: AccountFrameProposal,
 ): proposal is CertifiedAccountFrameProposal => hasText(proposal.frameHanko)
   && hasCertifiedOptionalDisputeHanko(proposal.disputeHanko);
-
-export const isDraftAccountAckFrame = (
-  ack: AccountAckFrame,
-): ack is DraftAccountAckFrame => ack.frameHanko === undefined
-  && ack.disputeHanko?.hanko === undefined;
 
 export const isCertifiedAccountAckFrame = (
   ack: AccountAckFrame,

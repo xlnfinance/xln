@@ -85,7 +85,6 @@ export const describeAccountState = (
 
 export type AccountInputReplayClassification = {
   currentHeight: number;
-  pendingHeight: number;
   inputHeight: number;
   newFrameHeight: number | undefined;
   frameIsStale: boolean;
@@ -98,7 +97,6 @@ export const classifyAccountInputReplay = (
   const ack = accountInputAck(input);
   const proposal = accountInputProposal(input);
   const currentHeight = Number(account.currentHeight ?? 0);
-  const pendingHeight = Number(account.pendingFrame?.height ?? 0);
   const inputHeight = ack?.height === undefined || ack.height === null
     ? 0
     : Number(ack.height);
@@ -107,7 +105,6 @@ export const classifyAccountInputReplay = (
     : Number(proposal.frame.height);
   return {
     currentHeight,
-    pendingHeight,
     inputHeight,
     newFrameHeight,
     // Equal height is a duplicate of the committed frame, not a stale ancestor.

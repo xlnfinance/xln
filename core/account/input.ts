@@ -67,7 +67,7 @@ export const createAccountDisputeStartedInput = (
 /** Validate the common envelope before any Account variant can mutate state. */
 export const getAccountInputEnvelopeError = (
   account: Pick<AccountState, 'leftEntity' | 'rightEntity' | 'domain' | 'watchSeed' | 'disputeConfig'>,
-  input: AccountFinality | AccountInput,
+  input: AccountInput,
 ): AccountInputEnvelopeError | undefined => {
   if (
     !input.domain ||

@@ -77,18 +77,6 @@ export const freezeAccountForDispute = (
   delete account.lastRollbackFrameHash;
 };
 
-export const returnPreparedAccountToActive = (account: AccountReplica): void => {
-  if (account.status !== 'dispute_preparing') {
-    throw new Error(`ACCOUNT_DISPUTE_PREPARATION_RETURN_INVALID:${account.status ?? 'active'}`);
-  }
-  // Preserve deferred J claims while the preparation fence still owns them,
-  // then reopen the ordinary proposal lane. Reversing this order would make
-  // freezeAccountForDispute classify the claims as terminal and drop them.
-  freezeAccountForDispute(account, false);
-  account.status = 'active';
-  delete account.disputePrepare;
-};
-
 export const isDisputeStartedByLeft = (
   starterEntityId: string,
   leftEntityId: string,

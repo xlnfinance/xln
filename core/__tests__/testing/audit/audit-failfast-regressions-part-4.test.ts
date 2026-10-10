@@ -8,11 +8,11 @@ import { x25519 } from '@noble/curves/ed25519.js';
 
 import {
   applyAccountInput,
-  getIncomingAccountDeadlineViolation,
-  HTLC_ENFORCEMENT_RESERVE_MS,
-  isHtlcSecretEnforcementWindowClosed,
   proposeAccountFrame,
 } from '../../../account/consensus/index';
+import {
+  HTLC_ENFORCEMENT_RESERVE_MS,
+} from '../../../account/consensus/dispute/deadline-policy';
 
 import { computeAccountStateRoot, computeAccountStateRootCold } from '../../../account/commitment/state-root';
 import { PersistentAccountStateMap } from '../../../account/state/persistent-state-map';
