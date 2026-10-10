@@ -508,6 +508,31 @@ const readPreparedWire = async <T>(read: () => Promise<T>): Promise<T> => {
 const preparedWireFailure = (txHash: string, code: string): JSubmitResult =>
   ({ ...makeJAdapterFailureResult(code, { category: 'terminal', code }), txHash });
 
+const REVERT_AWAITING_FINALITY = 'J_PREPARED_RECEIPT_REVERTED_AWAITING_FINALITY';
+
+// A revert is final only at the watcher's boundary (safe head - finality depth)
+// on the canonical block. On EVM the safe head is the latest block, so without
+// the depth every unfinalized revert quarantined a batch a reorg could include.
+const classifyPreparedRevert = async (
+  adapter: JAdapter,
+  txHash: string,
+  receipt: { blockNumber: number; blockHash: string },
+): Promise<JSubmitResult> => {
+  const awaitingFinality = {
+    ...makeJAdapterFailureResult(REVERT_AWAITING_FINALITY, { category: 'transient', code: REVERT_AWAITING_FINALITY }),
+    txHash,
+  };
+  const depth = adapter.getFinalityDepth?.();
+  const safeHead = await readPreparedWire(async () => adapter.getCurrentBlockNumber?.());
+  if (safeHead === undefined || depth === undefined || !Number.isSafeInteger(depth) || depth < 0
+    || safeHead - depth < receipt.blockNumber) return awaitingFinality;
+  const block = await readPreparedWire(async () => adapter.mode === 'tron'
+    ? await (adapter.provider as ethers.JsonRpcProvider).send('eth_getBlockByNumber', [ethers.toQuantity(receipt.blockNumber), false])
+    : await adapter.provider.getBlock(receipt.blockNumber));
+  if (!block || String(block.hash).toLowerCase() !== receipt.blockHash.toLowerCase()) return awaitingFinality;
+  return { ...makeJAdapterFailureResult('transaction reverted', { category: 'terminal' }), txHash };
+};
+
 // Only a contradiction or a finalized revert is terminal for a signed wire. A
 // read failure is retried: ethers reports most node errors ("header not found",
 // rate limits) as UNKNOWN_ERROR, which the generic classifier calls terminal.
@@ -527,20 +552,7 @@ const submitPreparedJBatch = async (adapter: JAdapter, raw: string): Promise<JSu
     }
     if (!receipt) throw new Error('transaction was not mined');
     if (receipt.hash.toLowerCase() !== txHash.toLowerCase()) return preparedWireFailure(txHash, 'J_PREPARED_RECEIPT_HASH_MISMATCH');
-    if (receipt.status !== 1) {
-      const minedBlock = receipt.blockNumber;
-      const safeHead = await readPreparedWire(async () => adapter.getCurrentBlockNumber?.());
-      if (safeHead === undefined || safeHead < minedBlock) {
-        throw new Error('transaction was not mined at a finalized boundary');
-      }
-      const block = await readPreparedWire(async () => adapter.mode === 'tron'
-        ? await (adapter.provider as ethers.JsonRpcProvider).send('eth_getBlockByNumber', [ethers.toQuantity(minedBlock), false])
-        : await adapter.provider.getBlock(minedBlock));
-      if (!block || String(block.hash).toLowerCase() !== receipt.blockHash.toLowerCase()) {
-        throw new Error('transaction was not mined on the canonical finalized chain');
-      }
-      return { ...makeJAdapterFailureResult('transaction reverted'), txHash };
-    }
+    if (receipt.status !== 1) return await classifyPreparedRevert(adapter, txHash, receipt);
     return successfulJReceiptResult(receipt, eventCarriers(adapter.depository, adapter.entityProvider));
   } catch (error) {
     if (error instanceof PreparedWireReadError) {

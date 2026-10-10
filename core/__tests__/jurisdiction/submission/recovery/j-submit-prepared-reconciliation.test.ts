@@ -98,4 +98,27 @@ describe('prepared J batch wire reconciliation', () => {
     expect(replica.jSubmitState?.terminalFailure).toBeUndefined();
     expect(env.infrastructure?.pendingCommittedJOutbox).toHaveLength(1);
   });
+
+  test('a reverted receipt is terminal only once its block is behind the finality depth', async () => {
+    // On EVM the adapter's safe head is the latest block, so `head >= receipt`
+    // always held and an unfinalized revert quarantined a batch a reorg could include.
+    const blockHash = `0x${'a7'.repeat(32)}`;
+    const outcomeAtHead = async (head: number) => {
+      const { env, jOutbox, txHash } = await preparedAttempt({
+        getTransactionReceipt: async () => ({ hash: txHash, status: 0, blockNumber: 100, blockHash }),
+        getBlock: async () => ({ hash: blockHash }),
+      }, { getCurrentBlockNumber: async () => head, getFinalityDepth: () => 12 });
+      const [result] = await submit(env, jOutbox);
+      return result?.type === 'recordJSubmitResult' ? result.data : null;
+    };
+
+    expect(await outcomeAtHead(105)).toMatchObject({
+      outcome: 'transientFailure',
+      adapterFailure: { category: 'transient', code: 'J_PREPARED_RECEIPT_REVERTED_AWAITING_FINALITY' },
+    });
+    expect(await outcomeAtHead(112)).toMatchObject({
+      outcome: 'terminalFailure',
+      message: 'transaction reverted',
+    });
+  });
 });
