@@ -57,6 +57,10 @@ export const handleOrderbookSweepCrossJurisdictionEntityTx = (
       waitingRoutes++;
       continue;
     }
+    // An unmaterialized intent (no pulls) holds no book order or lock: there is
+    // nothing to clear, and clearing it was a CROSS_J_CLEAR_CORRUPT_ROUTE halt.
+    // Counted as expired exactly as before, so committed sweep events replay.
+    if (!route.sourcePull || !route.targetPull) continue;
     const clear = handleRequestCrossJurisdictionClearEntityTx(
       env,
       newState,

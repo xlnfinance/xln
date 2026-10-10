@@ -1,4 +1,5 @@
-import { haltRuntimeFailure } from "../../../../protocol/errors/failure-taxonomy";
+import { haltRuntimeFailure, rejectFailure } from "../../../../protocol/errors/failure-taxonomy";
+import { assertCrossJurisdictionRouteTokensKnown, canonicalPeerCrossJurisdictionRoute } from './peer-route';
 
 import { normalizeEntityRef , findAccountKey } from '../../account-key';
 import { getTokenInfo } from '../../../../account/utils';
@@ -191,17 +192,20 @@ export const handleAdmitCrossJurisdictionBookOrderEntityTx = (
   options?: ApplyEntityTxOptions,
 ) => {
   const newState = stateForEntityTx(entityState, options);
-  const route = withCanonicalCrossJurisdictionRouteHash(entityTx.data.route);
+  // The source hub sends this admit over the cross-J lane: every refusal of its
+  // route is a typed reject of that runtimeOutput, never a book-owner halt.
+  const route = canonicalPeerCrossJurisdictionRoute(entityTx.data.route, 'CROSS_J_BOOK_ADMIT_ROUTE_INVALID');
+  assertCrossJurisdictionRouteTokensKnown(route);
   const now = deterministicEntityTimestamp(newState, env);
   const bookOwner = crossJurisdictionBookOwnerRef(route);
   if (bookOwner !== normalizeEntityRef(newState.entityId)) {
-    throw haltRuntimeFailure("CROSS_J_BOOK_ADMIT_WRONG_OWNER", `CROSS_J_BOOK_ADMIT_WRONG_OWNER: order=${route.orderId} owner=${bookOwner} current=${newState.entityId}`);
+    throw rejectFailure('CROSS_J_BOOK_ADMIT_WRONG_OWNER', `CROSS_J_BOOK_ADMIT_WRONG_OWNER: order=${route.orderId} owner=${bookOwner} current=${newState.entityId}`);
   }
   const admissionKey = crossJurisdictionBookAdmissionKey(route);
   const existingAdmission = newState.crossJurisdictionBookAdmissions?.get(admissionKey);
   if (existingAdmission?.status === 'closed' || existingAdmission?.status === 'resolving') {
     if ((existingAdmission.routeHash || '').toLowerCase() !== (route.routeHash || '').toLowerCase()) {
-      throw haltRuntimeFailure("CROSS_J_BOOK_ADMIT_ROUTE_INVALID", `CROSS_J_BOOK_ADMIT_ROUTE_INVALID: order=${route.orderId} existing admission route hash mismatch`);
+      throw rejectFailure('CROSS_J_BOOK_ADMIT_ROUTE_INVALID', `CROSS_J_BOOK_ADMIT_ROUTE_INVALID: order=${route.orderId} existing admission route hash mismatch`);
     }
     addMessage(newState, `🌉 Cross-j book admit ${route.orderId}: duplicate ${existingAdmission.status}`);
     return { newState, outputs: [], swapOffersCreated: [] };
@@ -221,7 +225,7 @@ export const handleAdmitCrossJurisdictionBookOrderEntityTx = (
       existingRouteHash === routeHash &&
       compareCrossJurisdictionRouteStatus(existing?.status, route.status) < 0;
     if (transitionError && !staleSameRoute) {
-      throw haltRuntimeFailure("CROSS_J_BOOK_ADMIT_ROUTE_INVALID", `CROSS_J_BOOK_ADMIT_ROUTE_INVALID: order=${route.orderId} ${transitionError}`);
+      throw rejectFailure('CROSS_J_BOOK_ADMIT_ROUTE_INVALID', `CROSS_J_BOOK_ADMIT_ROUTE_INVALID: order=${route.orderId} ${transitionError}`);
     }
     newState.crossJurisdictionSwaps.set(
       route.orderId,
@@ -263,7 +267,8 @@ export const handleAdmitCrossJurisdictionBookOrderEntityTx = (
       addMessage(newState, `🌉 Cross-j book reject ${route.orderId}: ${admissionFailure.message}`);
       return { newState, outputs: [], swapOffersCreated: [] };
     }
-    throw new Error(admissionFailure.message);
+    // An expired, closed, resolving or mismatched route at admission.
+    throw rejectFailure('CROSS_J_BOOK_ADMIT_REJECTED', admissionFailure.message);
   }
 
   admission.status = 'admitted';
@@ -395,23 +400,24 @@ export const handleRemoveCrossJurisdictionBookOrderEntityTx = (
   const newState = stateForEntityTx(entityState, options);
   const now = deterministicEntityTimestamp(newState, env);
   // Same fences as Rust `apply_remove_book_order`: the removal must name this
-  // book's admitted route.
+  // book's admitted route. The source hub sends it, so each refusal is a
+  // typed reject of its runtimeOutput.
   if (!entityTx.data.route) {
-    throw haltRuntimeFailure("CROSS_J_BOOK_REMOVAL_ROUTE_MISSING", `CROSS_J_BOOK_REMOVAL_ROUTE_MISSING:${entityTx.data.orderId}`);
+    throw rejectFailure('CROSS_J_BOOK_REMOVAL_ROUTE_MISSING', `CROSS_J_BOOK_REMOVAL_ROUTE_MISSING:${entityTx.data.orderId}`);
   }
-  const route = withCanonicalCrossJurisdictionRouteHash(entityTx.data.route);
+  const route = canonicalPeerCrossJurisdictionRoute(entityTx.data.route, 'CROSS_J_BOOK_REMOVAL_ROUTE_MISMATCH');
   if (
     route.orderId !== entityTx.data.orderId ||
     normalizeEntityRef(route.source.entityId) !== normalizeEntityRef(entityTx.data.sourceEntityId) ||
     crossJurisdictionBookOwnerRef(route) !== normalizeEntityRef(newState.entityId)
   ) {
-    throw haltRuntimeFailure("CROSS_J_BOOK_REMOVAL_ROUTE_MISMATCH", `CROSS_J_BOOK_REMOVAL_ROUTE_MISMATCH:${entityTx.data.orderId}`);
+    throw rejectFailure('CROSS_J_BOOK_REMOVAL_ROUTE_MISMATCH', `CROSS_J_BOOK_REMOVAL_ROUTE_MISMATCH:${entityTx.data.orderId}`);
   }
   const admission = newState.crossJurisdictionBookAdmissions?.get(
     crossJurisdictionBookAdmissionKeyFor(entityTx.data.sourceEntityId, entityTx.data.orderId),
   );
   if (admission && normalizeEntityRef(admission.routeHash || '') !== normalizeEntityRef(route.routeHash || '')) {
-    throw haltRuntimeFailure("CROSS_J_CANCEL_ADMISSION_ROUTE_MISMATCH", `CROSS_J_CANCEL_ADMISSION_ROUTE_MISMATCH:${entityTx.data.orderId}`);
+    throw rejectFailure('CROSS_J_CANCEL_ADMISSION_ROUTE_MISMATCH', `CROSS_J_CANCEL_ADMISSION_ROUTE_MISMATCH:${entityTx.data.orderId}`);
   }
   const removed = removeCrossJurisdictionBookOrderByRouteId(
     newState,

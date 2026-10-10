@@ -883,12 +883,13 @@ describe('cross-jurisdiction hashledger swap', () => {
     const targetHub = entity('83');
     const targetUser = entity('84');
     const state = makeState(sourceUser, addr('85'), eth, sourceHub);
-    await expect(
-      applyEntityTx(env, state, {
-        type: 'requestCrossJurisdictionClear',
-        data: { orderId: 'missing-cross-j-route', cancelRemainder: true },
-      }),
-    ).rejects.toThrow('CROSS_J_CLEAR_ROUTE_MISSING:missing-cross-j-route');
+    // A peer may name an orderId this Entity never stored: a typed reject
+    // (skipped tx), never a halt.
+    const missing = await applyEntityTx(env, state, {
+      type: 'requestCrossJurisdictionClear',
+      data: { orderId: 'missing-cross-j-route', cancelRemainder: true },
+    });
+    expect(missing.skippedError).toContain('CROSS_J_CLEAR_ROUTE_MISSING:missing-cross-j-route');
     const prepared = buildPreparedCrossJurisdictionRoute(
       {
         orderId: 'cross-clear-source-account',

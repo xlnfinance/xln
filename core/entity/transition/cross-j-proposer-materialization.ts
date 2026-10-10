@@ -6,6 +6,7 @@ import {
   buildPreparedCrossJurisdictionRoute,
   getCrossJurisdictionCommittedFillAmounts,
   getCrossJurisdictionPrivateSeed,
+  isCrossJurisdictionRouteExpired,
 } from '../../extensions/cross-j';
 import { MAX_ACCOUNT_FRAME_TXS } from '../../account/consensus/frame/hash';
 import { safeStringify } from '../../protocol/serialization';
@@ -378,7 +379,10 @@ export const appendDefaultProposerCrossJMaterializations = (
       route.sourcePull ||
       route.targetPull ||
       pending.has(`setup:${route.orderId}`) ||
-      normalized(route.source.counterpartyEntityId) !== normalized(replica.entityId)
+      normalized(route.source.counterpartyEntityId) !== normalized(replica.entityId) ||
+      // A peer chooses expiresAt; an intent past it can no longer be prepared
+      // (CROSS_J_EXPIRES_AT_INVALID halted the hub on the next wake).
+      isCrossJurisdictionRouteExpired(route, env.state.timestamp)
     ) continue;
     const preparedRoute = buildPreparedCrossJurisdictionRoute(route, {
       runtimeSeed: env.runtimeSeed,

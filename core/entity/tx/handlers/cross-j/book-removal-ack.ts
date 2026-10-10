@@ -1,5 +1,6 @@
-import { haltRuntimeFailure } from '../../../../protocol/errors/failure-taxonomy';
-import { getCrossJurisdictionCommittedProofRatio, isCrossJurisdictionTerminalStatus, withCanonicalCrossJurisdictionRouteHash } from '../../../../extensions/cross-j';
+import { rejectFailure } from '../../../../protocol/errors/failure-taxonomy';
+import { canonicalPeerCrossJurisdictionRoute } from './peer-route';
+import { getCrossJurisdictionCommittedProofRatio, isCrossJurisdictionTerminalStatus } from '../../../../extensions/cross-j';
 import { markCrossJurisdictionBookAdmissionClosed } from '../../../../extensions/cross-j/orderbook';
 import type { EntityInput, EntityState } from '../../../types';
 import type { EntityRuntimeContext } from '../../../runtime-context';
@@ -20,18 +21,20 @@ export const handleCrossJurisdictionBookOrderRemovedEntityTx = async (
   options?: ApplyEntityTxOptions,
 ) => {
   const newState = prepareEntityTxState(entityState, options?.mutableFrameState);
-  const route = withCanonicalCrossJurisdictionRouteHash(entityTx.data.route);
+  // The book owner sends this ACK with a route it supplies: an orderId this
+  // source hub never stored, or a mismatched route, is that sender's input.
+  const route = canonicalPeerCrossJurisdictionRoute(entityTx.data.route, 'CROSS_J_BOOK_REMOVAL_ACK_ROUTE_INVALID');
   if (normalizeEntityRef(newState.entityId) !== normalizeEntityRef(route.source.counterpartyEntityId)) {
-    throw haltRuntimeFailure('CROSS_J_BOOK_REMOVAL_ACK_SOURCE_HUB_REQUIRED', `CROSS_J_BOOK_REMOVAL_ACK_SOURCE_HUB_REQUIRED:order=${route.orderId}:entity=${newState.entityId}`);
+    throw rejectFailure('CROSS_J_BOOK_REMOVAL_ACK_SOURCE_HUB_REQUIRED', `CROSS_J_BOOK_REMOVAL_ACK_SOURCE_HUB_REQUIRED:order=${route.orderId}:entity=${newState.entityId}`);
   }
   const visible = newState.accounts.get(entityTx.data.sourceAccountId);
   const offer = visible?.state.swapOffers?.get(route.orderId);
   const currentRoute = newState.crossJurisdictionSwaps?.get(route.orderId);
   if (!currentRoute) {
-    throw haltRuntimeFailure('CROSS_J_BOOK_REMOVAL_ACK_SOURCE_STATE_MISSING', `CROSS_J_BOOK_REMOVAL_ACK_SOURCE_STATE_MISSING:order=${route.orderId}:account=${entityTx.data.sourceAccountId}`);
+    throw rejectFailure('CROSS_J_BOOK_REMOVAL_ACK_SOURCE_STATE_MISSING', `CROSS_J_BOOK_REMOVAL_ACK_SOURCE_STATE_MISSING:order=${route.orderId}:account=${entityTx.data.sourceAccountId}`);
   }
   if (normalizeEntityRef(currentRoute.routeHash || '') !== normalizeEntityRef(route.routeHash || '')) {
-    throw haltRuntimeFailure('CROSS_J_BOOK_REMOVAL_ACK_ROUTE_HASH_MISMATCH', `CROSS_J_BOOK_REMOVAL_ACK_ROUTE_HASH_MISMATCH:order=${route.orderId}`);
+    throw rejectFailure('CROSS_J_BOOK_REMOVAL_ACK_ROUTE_HASH_MISMATCH', `CROSS_J_BOOK_REMOVAL_ACK_ROUTE_HASH_MISMATCH:order=${route.orderId}`);
   }
   // A dispute waiting on this removal must be released even when the route
   // already settled: the ACK can race the close that retired the offer.
@@ -57,7 +60,7 @@ export const handleCrossJurisdictionBookOrderRemovedEntityTx = async (
     return { newState, outputs: [], accountTxs: [] };
   }
   if (!visible || !offer?.crossJurisdiction) {
-    throw haltRuntimeFailure('CROSS_J_BOOK_REMOVAL_ACK_SOURCE_STATE_MISSING', `CROSS_J_BOOK_REMOVAL_ACK_SOURCE_STATE_MISSING:order=${route.orderId}:account=${entityTx.data.sourceAccountId}`);
+    throw rejectFailure('CROSS_J_BOOK_REMOVAL_ACK_SOURCE_STATE_MISSING', `CROSS_J_BOOK_REMOVAL_ACK_SOURCE_STATE_MISSING:order=${route.orderId}:account=${entityTx.data.sourceAccountId}`);
   }
   markCrossJurisdictionBookAdmissionClosed(
     newState,

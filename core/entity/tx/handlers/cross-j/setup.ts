@@ -1,5 +1,5 @@
 import { MalformedEntityFrameInputError } from '../../processing/invariant-errors';
-import { haltRuntimeFailure } from "../../../../protocol/errors/failure-taxonomy";
+import { haltRuntimeFailure, rejectFailure } from "../../../../protocol/errors/failure-taxonomy";
 
 import { deterministicEntityTimestamp } from '../../../../orderbook/cross-j/orderbook';
 import {
@@ -30,6 +30,7 @@ import { ensureEntityCollectionCandidate } from '../../../state/persistent-colle
 import { addMessage } from '../../../frame-events';
 import { safeStringify } from '../../../../protocol/serialization';
 import { getTokenInfo } from '../../../../account/utils';
+import { assertCrossJurisdictionRouteTokensKnown } from './peer-route';
 import type { CrossJurisdictionSwapRoute } from '../../../../types/cross-jurisdiction';
 import type { EntityInput, EntityState } from '../../../types';
 import type { EntityRuntimeContext } from '../../../runtime-context';
@@ -150,9 +151,12 @@ const prepareRawCrossJurisdictionIntent = (
   route: CrossJurisdictionSwapRoute,
   outputs: EntityInput[],
 ): CrossJSetupResult => {
+  // The sender (the user's Runtime) controls every field below: each refusal
+  // is a typed reject of its runtimeOutput, never a hub halt.
   if (route.status !== 'intent') {
-    throw haltRuntimeFailure("CROSS_J_RAW_PREPARE_STATUS_INVALID", `CROSS_J_RAW_PREPARE_STATUS_INVALID:${route.orderId}:${route.status}`);
+    throw rejectFailure('CROSS_J_RAW_PREPARE_STATUS_INVALID', `CROSS_J_RAW_PREPARE_STATUS_INVALID:${route.orderId}:${route.status}`);
   }
+  assertCrossJurisdictionRouteTokensKnown(route);
   if (isCrossJurisdictionRouteExpired(route, deterministicEntityTimestamp(state, env))) {
     addMessage(state, `❌ Cross-j prepare ${route.orderId} expired`);
     return { newState: state, outputs };
@@ -323,10 +327,10 @@ export const handlePrepareCrossJurisdictionSwapEntityTx = (
   const hasSourcePull = route.sourcePull !== undefined;
   const hasTargetPull = route.targetPull !== undefined;
   if (hasSourcePull !== hasTargetPull) {
-    throw haltRuntimeFailure("CROSS_J_PREPARED_PAYLOAD_PARTIAL", `CROSS_J_PREPARED_PAYLOAD_PARTIAL:${route.orderId}`);
+    throw rejectFailure('CROSS_J_PREPARED_PAYLOAD_PARTIAL', `CROSS_J_PREPARED_PAYLOAD_PARTIAL:${route.orderId}`);
   }
   if (localEntityId === sourceUserId || localEntityId === targetUserId) {
-    if (hasSourcePull) throw haltRuntimeFailure("CROSS_J_USER_AUTH_PREPARED_FORBIDDEN", `CROSS_J_USER_AUTH_PREPARED_FORBIDDEN:${route.orderId}`);
+    if (hasSourcePull) throw rejectFailure('CROSS_J_USER_AUTH_PREPARED_FORBIDDEN', `CROSS_J_USER_AUTH_PREPARED_FORBIDDEN:${route.orderId}`);
     return authorizeCrossJurisdictionIntent(
       env,
       newState,
@@ -363,7 +367,9 @@ export const handleMaterializeCrossJurisdictionSwapEntityTx = (
   const expectedProposer = normalizeEntityRef(entityState.config.validators[0] || '');
   const claimedProposer = normalizeEntityRef(entityTx.data.proposerSignerId);
   if (!expectedProposer || claimedProposer !== expectedProposer) {
-    throw haltRuntimeFailure("CROSS_J_MATERIALIZE_PROPOSER_INVALID", `CROSS_J_MATERIALIZE_PROPOSER_INVALID:${claimedProposer || 'missing'}:${expectedProposer || 'missing'}`);
+    // A non-default board member's command: reject it, as clear.ts and Rust
+    // validate_materialize_proposer do, instead of halting every validator.
+    throw new MalformedEntityFrameInputError('materializeCrossJurisdictionSwap', `CROSS_J_MATERIALIZE_PROPOSER_INVALID:${claimedProposer || 'missing'}:${expectedProposer || 'missing'}`);
   }
   const existing = entityState.crossJurisdictionSwaps?.get(entityTx.data.route.orderId);
   if (
@@ -505,6 +511,7 @@ export const handleRegisterCrossJurisdictionSwapEntityTx = (
     addMessage(newState, `❌ Cross-j register ${route.orderId} blocked: ${bindingError}`);
     return { newState, outputs: [] };
   }
+  assertCrossJurisdictionRouteTokensKnown(route);
   const localEntityId = normalizeEntityRef(newState.entityId);
   const sourceHubEntityId = normalizeEntityRef(route.source.counterpartyEntityId);
   const targetHubEntityId = normalizeEntityRef(route.target.entityId);
@@ -516,6 +523,10 @@ export const handleRegisterCrossJurisdictionSwapEntityTx = (
   }
   const openingTransition =
     !existing || existing.status === 'intent' || existing.status === 'target_prepared';
+  // The sending hub controls the route; refuse before anything is stored.
+  if (openingTransition && route.status === 'resting' && (!route.sourcePull || !route.targetPull)) {
+    throw rejectFailure('CROSS_J_REGISTER_OPENING_PULLS_MISSING', `CROSS_J_REGISTER_OPENING_PULLS_MISSING:${route.orderId}`);
+  }
   if (openingTransition && route.status === 'resting') {
     const localPull = localEntityId === sourceHubEntityId
       ? route.sourcePull
@@ -528,7 +539,7 @@ export const handleRegisterCrossJurisdictionSwapEntityTx = (
     if (localPull) {
       const accountId = findAccountKey(newState, localPeer);
       const account = accountId ? newState.accounts.get(accountId) : undefined;
-      if (!account) throw haltRuntimeFailure("CROSS_J_REGISTER_ACCOUNT_MISSING", `CROSS_J_REGISTER_ACCOUNT_MISSING:${route.orderId}:${localPeer}`);
+      if (!account) throw rejectFailure('CROSS_J_REGISTER_ACCOUNT_MISSING', `CROSS_J_REGISTER_ACCOUNT_MISSING:${route.orderId}:${localPeer}`);
       const pullTx = (localEntityId === sourceHubEntityId
         ? buildSourceRegistrationTxs(newState, route)
         : buildTargetRegistrationTxs(newState, route))
@@ -550,9 +561,6 @@ export const handleRegisterCrossJurisdictionSwapEntityTx = (
   newState.crossJurisdictionSwaps.set(route.orderId, mergeCrossJurisdictionRoute(existing, route));
   addMessage(newState, `🌉 Cross-j swap ${route.orderId} registered`);
   if (!openingTransition || route.status !== 'resting') return { newState, outputs: [] };
-  if (!route.sourcePull || !route.targetPull) {
-    throw haltRuntimeFailure("CROSS_J_REGISTER_OPENING_PULLS_MISSING", `CROSS_J_REGISTER_OPENING_PULLS_MISSING:${route.orderId}`);
-  }
 
   if (localEntityId === sourceHubEntityId) {
     const prepared = {

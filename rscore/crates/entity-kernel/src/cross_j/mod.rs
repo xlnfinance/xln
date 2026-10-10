@@ -4893,6 +4893,11 @@ fn apply_orderbook_sweep(
             waiting_routes += 1;
             continue;
         }
+        // An unmaterialized intent (no pulls) holds no book order or lock:
+        // nothing to clear (TS sweep). Still counted as expired above.
+        if field(&route, "sourcePull").is_none() || field(&route, "targetPull").is_none() {
+            continue;
+        }
         validate_local_route_binding(
             state,
             &route,

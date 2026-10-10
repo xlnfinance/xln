@@ -160,6 +160,43 @@ describe('cross-jurisdiction security invariants', () => {
     })).rejects.toThrow('CROSS_J_ROUTE_HASH_MISMATCH');
   });
 
+  test('peer cross-J route failures are typed rejects at the receiving hub', async () => {
+    // Each of these used to throw haltRuntimeFailure inside a sibling's
+    // runtimeOutput and halt the receiving hub. The applied tx is now skipped
+    // with a typed reject, which evicts the whole runtimeOutput.
+    const env = createEmptyEnv('cross-peer-route-rejects');
+    env.state.timestamp = 2_000;
+    env.quietRuntimeLogs = true;
+    const eth = makeJurisdiction('Ethereum', 1, '11', '12');
+    const route = buildRoute('cross-peer-route-rejects', 'cross-peer-route-rejects', eth);
+
+    const notOwner = makeState(entity('09'), addr('39'), eth, entity('01'));
+    const admit = await applyEntityTx(env, notOwner, {
+      type: 'admitCrossJurisdictionBookOrder',
+      data: { route },
+    });
+    expect(admit.skippedError).toContain('CROSS_J_BOOK_ADMIT_WRONG_OWNER');
+
+    const sourceHub = makeState(entity('02'), addr('33'), eth, entity('01'));
+    const ack = await applyEntityTx(env, sourceHub, {
+      type: 'crossJurisdictionBookOrderRemoved',
+      data: {
+        orderId: route.orderId,
+        sourceEntityId: entity('01'),
+        sourceAccountId: entity('01'),
+        route,
+        removedAt: 2_000,
+      },
+    });
+    expect(ack.skippedError).toContain('CROSS_J_BOOK_REMOVAL_ACK_SOURCE_STATE_MISSING');
+
+    const materialize = await applyEntityTx(env, sourceHub, {
+      type: 'materializeCrossJurisdictionSwap',
+      data: { proposerSignerId: addr('44'), route },
+    });
+    expect(materialize.skippedError).toContain('CROSS_J_MATERIALIZE_PROPOSER_INVALID');
+  });
+
   test('source clear throws on corrupted committed route without pull commitments', async () => {
     const env = createEmptyEnv('cross-clear-corrupt-route');
     env.state.timestamp = 2_000;

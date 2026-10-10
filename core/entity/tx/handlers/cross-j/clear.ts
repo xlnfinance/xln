@@ -1,5 +1,5 @@
 import { MalformedEntityFrameInputError } from '../../processing/invariant-errors';
-import { haltRuntimeFailure } from "../../../../protocol/errors/failure-taxonomy";
+import { haltRuntimeFailure, rejectFailure } from "../../../../protocol/errors/failure-taxonomy";
 
 import { deterministicEntityTimestamp } from '../../../../orderbook/cross-j/orderbook';
 import {
@@ -207,8 +207,11 @@ export const handleRequestCrossJurisdictionClearEntityTx = (
   let route = routes
     ? getEntityCollectionValueForWrite(routes, orderId)
     : undefined;
+  // A remote requestCrossJurisdictionClear may name an orderId this hub never
+  // stored (authorization accepts a supplied route); local sweeps visit only
+  // stored routes. A typed reject, never a hub halt.
   if (!routes || !route) {
-    throw haltRuntimeFailure("CROSS_J_CLEAR_ROUTE_MISSING", `CROSS_J_CLEAR_ROUTE_MISSING:${orderId}`);
+    throw rejectFailure('CROSS_J_CLEAR_ROUTE_MISSING', `CROSS_J_CLEAR_ROUTE_MISSING:${orderId}`);
   }
   if (isCrossJurisdictionTerminalStatus(route.status)) {
     // A replayed cancel or a late sweep after the close: nothing left to decide.
@@ -233,6 +236,12 @@ export const handleRequestCrossJurisdictionClearEntityTx = (
 
   const canonicalRoute: CrossJurisdictionSwapRoute = withCanonicalCrossJurisdictionRouteHash(route);
   if (!canonicalRoute.sourcePull || !canonicalRoute.targetPull) {
+    // An unmaterialized intent has nothing on the book to clear; a user's
+    // cancel of it is a typed reject. Any later status without pulls is
+    // corrupted committed state and stays fatal.
+    if (canonicalRoute.status === 'intent') {
+      throw rejectFailure('CROSS_J_CLEAR_INTENT_UNMATERIALIZED', `CROSS_J_CLEAR_INTENT_UNMATERIALIZED:${orderId}`);
+    }
     throw haltRuntimeFailure("CROSS_J_CLEAR_CORRUPT_ROUTE", `CROSS_J_CLEAR_CORRUPT_ROUTE: order=${orderId} pull commitments missing`);
   }
 
