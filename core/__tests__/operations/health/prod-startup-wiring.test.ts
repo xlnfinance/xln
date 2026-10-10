@@ -987,7 +987,7 @@ describe('production startup wiring', () => {
     expect(mmNode).toContain('priceTicks: amounts.priceTicks');
     expect(mmNode).toContain('hasCrossRouteRegistered(env, route.source.entityId, route.orderId)');
     expect(mmNode).toContain('hasCrossRouteRegistered(env, route.source.counterpartyEntityId, route.orderId)');
-    expect(mmNode).toContain('countCrossSpecBootstrapProgressByPair(env, specs, getPendingCrossRequestOrderIds)');
+    expect(mmNode).toContain('countCrossSpecBootstrapProgressByPair(env, specs)');
     expect(mmNode).toContain('const visibleByPair = countCrossSpecVisibleOffersByPair(env, specs);');
     expect(mmNode).toContain('countCrossPairCoverageGaps(env, right[1]) -');
     expect(mmNode).toContain('(visibleByPair.get(left.pairId) || 0) - (visibleByPair.get(right.pairId) || 0)');

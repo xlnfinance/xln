@@ -1731,12 +1731,9 @@ export const isSameQuoteJobDepthReady = (env: RuntimeReplica, job: SameQuoteJob)
   });
 };
 
-type PendingCrossRequestReader = (entityId: string) => Set<string>;
-
 export const hasCrossSpecBootstrapProgress = (
   env: RuntimeReplica,
   spec: MarketMakerOfferSpec,
-  getPendingCrossRequestOrderIds: PendingCrossRequestReader,
 ): boolean => {
   const route = spec.crossJurisdiction;
   if (!route) return false;
@@ -1758,20 +1755,16 @@ export const hasCrossSpecBootstrapProgress = (
   // resubmits it: a missing Account transition is a loud consensus failure,
   // not permission to manufacture another EntityTx.
   if (hasCrossRouteRegistered(env, route.source.entityId, route.orderId)) return true;
-  if (hasCrossRouteRegistered(env, route.source.counterpartyEntityId, route.orderId)) return true;
-  // Same rule for the pending-request view, which reads the very same map.
-  return hasCrossRouteRegistered(env, route.source.entityId, route.orderId) &&
-    getPendingCrossRequestOrderIds(route.source.entityId).has(route.orderId);
+  return hasCrossRouteRegistered(env, route.source.counterpartyEntityId, route.orderId);
 };
 
 export const countCrossSpecBootstrapProgress = (
   env: RuntimeReplica,
   specs: MarketMakerOfferSpec[],
-  getPendingCrossRequestOrderIds: PendingCrossRequestReader,
 ): number => {
   let count = 0;
   for (const spec of specs) {
-    if (hasCrossSpecBootstrapProgress(env, spec, getPendingCrossRequestOrderIds)) count += 1;
+    if (hasCrossSpecBootstrapProgress(env, spec)) count += 1;
   }
   return count;
 };
@@ -1779,11 +1772,10 @@ export const countCrossSpecBootstrapProgress = (
 export const countCrossSpecBootstrapProgressByPair = (
   env: RuntimeReplica,
   specs: MarketMakerOfferSpec[],
-  getPendingCrossRequestOrderIds: PendingCrossRequestReader,
 ): Map<string, number> => {
   const counts = new Map<string, number>();
   for (const spec of specs) {
-    if (!hasCrossSpecBootstrapProgress(env, spec, getPendingCrossRequestOrderIds)) continue;
+    if (!hasCrossSpecBootstrapProgress(env, spec)) continue;
     counts.set(spec.pairId, (counts.get(spec.pairId) || 0) + 1);
   }
   return counts;

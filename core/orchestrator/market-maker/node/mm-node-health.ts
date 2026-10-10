@@ -575,13 +575,13 @@ const selectEligibleCrossOfferSpecs = (
 ): MarketMakerOfferSpec[] => {
   const { env, sourceContext, targetContext } = context;
   const visibleByPair = countCrossSpecVisibleOffersByPair(env, specs);
-  const progressByPair = countCrossSpecBootstrapProgressByPair(env, specs, getPendingCrossRequestOrderIds);
+  const progressByPair = countCrossSpecBootstrapProgressByPair(env, specs);
   return specs
     .filter(spec => {
       const route = spec.crossJurisdiction;
       if (!route) return false;
       if (excludedOfferIds?.has(spec.offerId)) return false;
-      if (hasCrossSpecBootstrapProgress(env, spec, getPendingCrossRequestOrderIds)) return false;
+      if (hasCrossSpecBootstrapProgress(env, spec)) return false;
       const targetAccount = getAccountReplica(env, targetContext.entityId, route.target.entityId);
       if (!targetAccount || String(targetAccount.status || 'active') !== 'active') return false;
       if (!isAccountWriteLaneIdle(targetAccount)) return false;
@@ -661,7 +661,7 @@ const planBootstrapCrossQuoteRoutes = (
     // bootstrap batch must never merge across that consensus boundary.
     if (hasUncommittedMarketMakerCrossOffer(env, sourceHubSpecs)) continue;
     const coverageGaps = countCrossPairCoverageGaps(env, sourceHubSpecs);
-    const progress = countCrossSpecBootstrapProgress(env, sourceHubSpecs, getPendingCrossRequestOrderIds);
+    const progress = countCrossSpecBootstrapProgress(env, sourceHubSpecs);
     const existingOfferIds = collectOfferIdsForAccount(account);
     let selectedForSourceHub = 0;
     let candidateCount = 0;
@@ -783,7 +783,7 @@ const maintainSteadyCrossQuotes = async (
       const route = spec.crossJurisdiction;
       if (!route) continue;
       if (hasFinalizedMarketMakerCrossOffer(env, spec)) counts.committed += 1;
-      else if (hasCrossSpecBootstrapProgress(env, spec, lookup)) counts.pending += 1;
+      else if (hasCrossSpecBootstrapProgress(env, spec)) counts.pending += 1;
       else if (hasCrossRouteRegistered(env, route.source.counterpartyEntityId, route.orderId)) counts.registered += 1;
       else if (lookup(route.source.entityId).has(route.orderId)) counts.requested += 1;
       else { counts.free += 1; if (sampleFree.length < 2) sampleFree.push(route.orderId); }
@@ -800,8 +800,8 @@ const maintainSteadyCrossQuotes = async (
   const groupedEntries = [...grouped.entries()].sort(
     (left, right) =>
       countCrossPairCoverageGaps(env, right[1]) - countCrossPairCoverageGaps(env, left[1]) ||
-      countCrossSpecBootstrapProgress(env, left[1], getPendingCrossRequestOrderIds) -
-        countCrossSpecBootstrapProgress(env, right[1], getPendingCrossRequestOrderIds) ||
+      countCrossSpecBootstrapProgress(env, left[1]) -
+        countCrossSpecBootstrapProgress(env, right[1]) ||
       compareStableText(left[0], right[0]),
   );
   let submittedIntentCount = 0;

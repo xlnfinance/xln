@@ -868,7 +868,7 @@ describe('production startup wiring', () => {
     );
     expect(bootstrapCrossBranch).toContain('coverageGaps = countCrossPairCoverageGaps(env, sourceHubSpecs)');
     expect(bootstrapCrossBranch).toContain(
-      'progress = countCrossSpecBootstrapProgress(env, sourceHubSpecs, getPendingCrossRequestOrderIds)',
+      'progress = countCrossSpecBootstrapProgress(env, sourceHubSpecs)',
     );
     expect(mmNode).not.toContain('deferredBootstrapCrossInputs');
     expect(mmNode).not.toContain("direction: 'bootstrap-batch'");
