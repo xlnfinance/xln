@@ -56,6 +56,7 @@ const readOrchestratorSource = (): string =>
     'market-maker/identity-resolver.ts',
     'bootstrap/native-h1-bootstrap.ts',
     'bootstrap/readiness-waits.ts',
+    'process/supervisor/child-failure-records.ts',
   ]
     .map(file => readFileSync(join(repoRoot, 'core/orchestrator', file), 'utf8'))
     .join('\n');

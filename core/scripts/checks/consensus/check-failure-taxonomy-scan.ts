@@ -101,6 +101,7 @@ const readText = (path: string): string => {
     ],
     'core/orchestrator/orchestrator.ts': [
       'core/orchestrator/orchestrator.ts',
+      'core/orchestrator/process/supervisor/child-failure-records.ts',
       'core/orchestrator/process/spawn/hub.ts',
       'core/orchestrator/process/spawn/market-maker.ts',
       'core/orchestrator/replica-import/runtime-import-controller.ts',
