@@ -152,6 +152,13 @@ fn observe(
     }
 }
 
+fn is_book_full(events: &[BookEvent]) -> bool {
+    matches!(
+        events,
+        [BookEvent::Reject { reason, blocking_order_id: None }] if *reason == BOOK_FULL_REJECT
+    )
+}
+
 fn apply_step(
     book: &mut BookState,
     dimensions: PairDimensions,
@@ -176,7 +183,11 @@ fn apply_step(
                 time_in_force: *time_in_force,
             };
             let events = apply_gtc(book, input, dimensions, classifier(suspended))?;
-            Ok(observe(book, "applied", &events, None, Vec::new()))
+            Ok(if is_book_full(&events) {
+                observe(book, "book-full", &[], None, Vec::new())
+            } else {
+                observe(book, "applied", &events, None, Vec::new())
+            })
         }
         Operation::Resume { suspended } => Ok(
             match resume_crossed(book, dimensions, classifier(suspended))? {
@@ -246,6 +257,7 @@ fn typescript_book_operations_replay_with_identical_events_and_commitments() {
     assert_eq!(
         names.into_iter().collect::<Vec<_>>(),
         [
+            "full-book-cancels-resting-remainder",
             "out-of-band-sweep-cancel-order",
             "resume-skips-suspended-taker",
             "resume-stp-cancels-resting-taker",

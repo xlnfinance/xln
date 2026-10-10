@@ -9,6 +9,8 @@ use super::{BookOrder, BookState, PairDimensions, Side};
 const PRIME: u64 = 0x0100_0001;
 const EVENT_MASK: u64 = 0x1f_ffff_ffff_ffff;
 const MAX_QTY_LOTS_POWER: u32 = 24;
+/// Reject reason of a GTC remainder that cannot rest because the book is full.
+pub(crate) const BOOK_FULL_REJECT: &str = "book-full";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum MakerDisposition {
@@ -360,8 +362,12 @@ where
     // The Entity transition owns this book value and drops it on any error.
     // A second transactional clone here would make a sweep O(orders * offers);
     // only FOK keeps one, because a partial FOK match must leave no trace (TS
-    // `forkBookState`).
+    // `forkBookState`). A GTC order on a full book keeps one too: TS discards
+    // its fills when the remainder cannot rest. Matching only removes orders,
+    // so a book that is not full on entry cannot be full after matching.
     let fok_snapshot = (input.time_in_force == 2).then(|| state.clone());
+    let full_book_snapshot =
+        (input.time_in_force == 0 && state.orders.len() >= state.max_orders).then(|| state.clone());
     let mut events = Vec::new();
     let matched = match_order(
         state,
@@ -384,6 +390,18 @@ where
         && matched.blocking_order_id.is_none()
         && input.time_in_force == 0
     {
+        // TS `OrderbookCapacityError`: a full book is a per-offer outcome
+        // (book-full cancel of this offer), never a Runtime halt. The check
+        // precedes lot rounding exactly like TS `applyCommand`.
+        if state.orders.len() >= state.max_orders {
+            *state = full_book_snapshot.ok_or_else(|| {
+                EntityKernelError::orderbook("ORDERBOOK_CAPACITY_SNAPSHOT_MISSING")
+            })?;
+            return Ok(vec![BookEvent::Reject {
+                reason: BOOK_FULL_REJECT,
+                blocking_order_id: None,
+            }]);
+        }
         let multiple = exact_quote_lot_multiple(dimensions, &input.price_ticks)?;
         let resting = execution_qty(&matched.remaining, &multiple);
         if resting > BigInt::from(0) {

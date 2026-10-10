@@ -9,8 +9,8 @@ use crate::types::TargetedAccountTx;
 use crate::{DeterministicContext, EntityKernelError, HubProfile, LocalEntityOutput};
 
 use super::book::{
-    AddOrder, BookEvent, MakerDisposition, add_resting, apply_gtc, apply_gtc_with_execution_price,
-    cancel_order, record_accepted_usd_ask_price, resume_crossed,
+    AddOrder, BOOK_FULL_REJECT, BookEvent, MakerDisposition, add_resting, apply_gtc,
+    apply_gtc_with_execution_price, cancel_order, record_accepted_usd_ask_price, resume_crossed,
 };
 use super::math::{
     PRICE_SCALE, base_amount_from_lots, canonical_pair, exact_quote_lot_multiple, lot_scale,
@@ -899,10 +899,12 @@ fn process_events(
             .map(|value| value.0)
             .collect::<Vec<_>>()
             .join(",");
+        // A full venue joins them: TS cancels the cross offer exactly like an
+        // expected lifecycle reject (`queueRejectedCrossOfferCancellation`).
         if !rejects.iter().all(|(reason, _)| {
             matches!(
                 *reason,
-                "no fill" | "FOK cannot fill entirely" | "STP cancel taker"
+                "no fill" | "FOK cannot fill entirely" | "STP cancel taker" | BOOK_FULL_REJECT
             )
         }) {
             return Err(EntityKernelError::orderbook(format!(
@@ -924,19 +926,28 @@ fn process_events(
         return Ok(());
     }
     if !rejects.is_empty() && trades == 0 {
-        let comment = rejects
+        let comment = if rejects
             .iter()
-            .find_map(|(reason, blocking)| {
-                (*reason == "STP cancel taker")
-                    .then(|| format!("STP:{}", blocking.clone().unwrap_or_default()))
-            })
-            .unwrap_or_else(|| {
-                rejects
-                    .iter()
-                    .map(|value| value.0)
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            });
+            .any(|(reason, _)| *reason == BOOK_FULL_REJECT)
+        {
+            // TS `rejectFullBook` comment: `book-full:<maxOrders>`.
+            let max_orders = require_book(state, &materialized.pair_id)?.max_orders;
+            format!("{BOOK_FULL_REJECT}:{max_orders}")
+        } else {
+            rejects
+                .iter()
+                .find_map(|(reason, blocking)| {
+                    (*reason == "STP cancel taker")
+                        .then(|| format!("STP:{}", blocking.clone().unwrap_or_default()))
+                })
+                .unwrap_or_else(|| {
+                    rejects
+                        .iter()
+                        .map(|value| value.0)
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                })
+        };
         queue_cancel(
             state,
             effects,
@@ -1581,6 +1592,46 @@ mod tests {
         let book = state.books.values().next().expect("pair book");
         assert_eq!(book.trade_count, 0);
         assert_eq!(book.orders.len(), 2);
+    }
+
+    #[test]
+    fn full_book_cancels_the_offer_instead_of_halting() {
+        let context = DeterministicContext::hlt_default();
+        let resting = resting_ask("account-a", "resting", 2, 18, 25_000_000, 1);
+        let incoming = resting_ask("account-b", "incoming", 2, 18, 25_100_000, 2);
+        let mut state = OrderbookState::empty(1);
+        apply_orderbook_outputs(
+            &mut state,
+            &[upsert("account-a", &resting)],
+            &context,
+            "hub",
+        )
+        .expect("first ask rests");
+        let books = state.books.clone();
+        let effects = apply_orderbook_outputs(
+            &mut state,
+            &[upsert("account-b", &incoming)],
+            &context,
+            "hub",
+        )
+        .expect("a full book is a per-offer cancel, never a halt");
+
+        assert_eq!(state.books, books);
+        assert!(matches!(
+            effects.account_txs.as_slice(),
+            [(account_id, AccountTx::SwapResolve {
+                offer_id,
+                fill_ratio: 0,
+                cancel_remainder: true,
+                comment: Some(comment),
+                ..
+            })] if account_id == "account-b" && offer_id == "incoming" && comment == "book-full:1"
+        ));
+        assert!(
+            state
+                .resolving_offers
+                .contains(&("account-b".to_string(), "incoming".to_string()))
+        );
     }
 
     #[test]

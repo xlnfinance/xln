@@ -230,6 +230,19 @@ const cases: readonly BookCase[] = [
       { kind: 'sweep', minPriceTicks: '105', maxPriceTicks: '195' },
     ],
   },
+  {
+    // A GTC remainder that cannot rest in a full book is a per-offer outcome:
+    // the incoming offer is cancelled and the book is left untouched.
+    name: 'full-book-cancels-resting-remainder',
+    maxOrders: 2,
+    steps: [
+      add('a:ask', 'owner-a', 'ask', 100n),
+      add('b:ask', 'owner-b', 'ask', 110n),
+      add('c:bid', 'owner-c', 'bid', 90n),
+      { ...add('d:bid', 'owner-d', 'bid', 90n), timeInForce: 1 },
+      add('e:bid', 'owner-e', 'bid', 100n, [], 2n),
+    ],
+  },
 ];
 
 const executeCase = (testCase: BookCase) => {

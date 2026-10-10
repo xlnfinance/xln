@@ -787,6 +787,140 @@
           }
         }
       ]
+    },
+    {
+      "maxOrders": 2,
+      "name": "full-book-cancels-resting-remainder",
+      "steps": [
+        {
+          "expected": {
+            "bookCommitmentHash": "0xff39d703a461f4d255aa16c3abed7c71",
+            "eventHash": "9007197614209365",
+            "events": [
+              "ACK"
+            ],
+            "orderIds": [
+              "a:ask"
+            ],
+            "outcome": "applied",
+            "sweptOrderIds": [],
+            "takerOrderId": null
+          },
+          "step": {
+            "kind": "add",
+            "orderId": "a:ask",
+            "ownerId": "owner-a",
+            "priceTicks": "100",
+            "qtyLots": "1",
+            "side": "ask",
+            "suspended": [],
+            "timeInForce": 0
+          }
+        },
+        {
+          "expected": {
+            "bookCommitmentHash": "0x8240fa7cdb3c6de967cbe58603370623",
+            "eventHash": "8505240276890292",
+            "events": [
+              "ACK"
+            ],
+            "orderIds": [
+              "a:ask",
+              "b:ask"
+            ],
+            "outcome": "applied",
+            "sweptOrderIds": [],
+            "takerOrderId": null
+          },
+          "step": {
+            "kind": "add",
+            "orderId": "b:ask",
+            "ownerId": "owner-b",
+            "priceTicks": "110",
+            "qtyLots": "1",
+            "side": "ask",
+            "suspended": [],
+            "timeInForce": 0
+          }
+        },
+        {
+          "expected": {
+            "bookCommitmentHash": "0x8240fa7cdb3c6de967cbe58603370623",
+            "eventHash": "8505240276890292",
+            "events": [],
+            "orderIds": [
+              "a:ask",
+              "b:ask"
+            ],
+            "outcome": "book-full",
+            "sweptOrderIds": [],
+            "takerOrderId": null
+          },
+          "step": {
+            "kind": "add",
+            "orderId": "c:bid",
+            "ownerId": "owner-c",
+            "priceTicks": "90",
+            "qtyLots": "1",
+            "side": "bid",
+            "suspended": [],
+            "timeInForce": 0
+          }
+        },
+        {
+          "expected": {
+            "bookCommitmentHash": "0x8240fa7cdb3c6de967cbe58603370623",
+            "eventHash": "8505240276890292",
+            "events": [
+              "REJECT:no fill:-"
+            ],
+            "orderIds": [
+              "a:ask",
+              "b:ask"
+            ],
+            "outcome": "applied",
+            "sweptOrderIds": [],
+            "takerOrderId": null
+          },
+          "step": {
+            "kind": "add",
+            "orderId": "d:bid",
+            "ownerId": "owner-d",
+            "priceTicks": "90",
+            "qtyLots": "1",
+            "side": "bid",
+            "suspended": [],
+            "timeInForce": 1
+          }
+        },
+        {
+          "expected": {
+            "bookCommitmentHash": "0x77687e33c4576f055c56e20b8dc2b44a",
+            "eventHash": "4428606970059264",
+            "events": [
+              "TRADE:100:1:a:ask:e:bid:1:2",
+              "ACK"
+            ],
+            "orderIds": [
+              "b:ask",
+              "e:bid"
+            ],
+            "outcome": "applied",
+            "sweptOrderIds": [],
+            "takerOrderId": null
+          },
+          "step": {
+            "kind": "add",
+            "orderId": "e:bid",
+            "ownerId": "owner-e",
+            "priceTicks": "100",
+            "qtyLots": "2",
+            "side": "bid",
+            "suspended": [],
+            "timeInForce": 0
+          }
+        }
+      ]
     }
   ],
   "quoteTokenDecimals": 18,
