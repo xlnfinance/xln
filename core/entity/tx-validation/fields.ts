@@ -12,7 +12,6 @@ import {
 type EntityTxFieldKind =
   | 'array'
   | 'bigint'
-  | 'bigintOrString'
   | 'boolean'
   | 'integer'
   | 'record'
@@ -36,9 +35,6 @@ const validateField = (
       return;
     case 'bigint':
       requireBigInt(value, code);
-      return;
-    case 'bigintOrString':
-      if (typeof value !== 'bigint' && typeof value !== 'string') throw new Error(code);
       return;
     case 'boolean':
       requireBoolean(value, code);

@@ -153,7 +153,6 @@ export class EntityCandidateMap<K, V> implements Map<K, V> {
   constructor(
     base: Map<K, V>,
     forkValue: (value: V) => V,
-    _cloneOnIteration = false,
     radix: CandidateMapRadix = 16,
   ) {
     this.#forkValue = forkValue;
@@ -314,10 +313,6 @@ export class EntityCandidateMap<K, V> implements Map<K, V> {
     }
   }
 
-  snapshot(): Map<K, V> {
-    return new Map(this.entries());
-  }
-
   commit(): Map<K, V> {
     if (this.#sealed) return this;
     const visible = this.#visibleRoot();
@@ -381,13 +376,6 @@ export class EntityCandidateMap<K, V> implements Map<K, V> {
   }
 }
 
-export const getEntityCandidateValueForWrite = <K, V>(
-  map: Map<K, V>,
-  key: K,
-): V | undefined => map instanceof EntityCandidateMap
-  ? map.getForWrite(key)
-  : map.get(key);
-
 import {
   EntityAccountCandidateMap,
   type PersistentEntityAccountMap,
@@ -438,10 +426,10 @@ type OrderbookCandidate = OrderbookExtState & { [ORDERBOOK_CANDIDATE_BASE]?: Ord
 export const createEntityOrderbookCandidate = (
   source: OrderbookExtState,
 ): OrderbookExtState => ({
-  books: new EntityCandidateMap(source.books, forkBook, false),
-  orderPairs: new EntityCandidateMap(source.orderPairs, clonePairs, false),
-  pairDimensions: new EntityCandidateMap(source.pairDimensions, clonePairDimensions, false),
-  referrals: new EntityCandidateMap(source.referrals, cloneReferral, false),
+  books: new EntityCandidateMap(source.books, forkBook),
+  orderPairs: new EntityCandidateMap(source.orderPairs, clonePairs),
+  pairDimensions: new EntityCandidateMap(source.pairDimensions, clonePairDimensions),
+  referrals: new EntityCandidateMap(source.referrals, cloneReferral),
   hubProfile: forkHubProfile(source.hubProfile),
   [ORDERBOOK_CANDIDATE_BASE]: source,
 } as OrderbookCandidate);

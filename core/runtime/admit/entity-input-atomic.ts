@@ -8,7 +8,7 @@ import {
   accountInputProposal,
 } from '../../account/consensus/flush.ts';
 import type { RoutedEntityInput, RuntimeReplica } from '../types.ts';
-import { commitEntityFrameCandidateState, committedEntityStateRoot } from '../../entity/state-clone.ts';
+import { commitEntityFrameCandidateState } from '../../entity/state-clone.ts';
 import {
   isCommittedEntityInput,
   RuntimeEntityInputApplyError,
@@ -243,10 +243,7 @@ const publishCommittedAtomicPair = async (
 ): Promise<void> => {
   // No effect escapes before both touched Account candidates are committable.
   for (const entry of staged) {
-    commitEntityFrameCandidateState(
-      entry.result.nextReplica.state,
-      committedEntityStateRoot(entry.result.nextReplica),
-    );
+    commitEntityFrameCandidateState(entry.result.nextReplica.state);
   }
   for (const entry of staged) await settleStagedAuthority(env, entry, true);
   for (const entry of staged) collectStagedEntityInput(env, entry, options, context);

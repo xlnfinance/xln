@@ -1,9 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import {
-  EntityCandidateMap,
-  getEntityCandidateValueForWrite,
-} from '../../../entity/state/candidate-map';
+import { EntityCandidateMap } from '../../../entity/state/candidate-map';
 
 describe('Entity persistent candidate map', () => {
   test('rejection leaves a shared certified root untouched', () => {
@@ -11,9 +8,9 @@ describe('Entity persistent candidate map', () => {
       ['alice', { balance: 10n }],
       ['bob', { balance: 20n }],
     ]);
-    const proposer = new EntityCandidateMap(shared, value => ({ ...value }), false);
+    const proposer = new EntityCandidateMap(shared, value => ({ ...value }));
 
-    getEntityCandidateValueForWrite(proposer, 'alice')!.balance = 99n;
+    proposer.getForWrite('alice')!.balance = 99n;
 
     expect(shared.get('alice')?.balance).toBe(10n);
     expect(proposer.get('alice')?.balance).toBe(99n);
@@ -27,11 +24,10 @@ describe('Entity persistent candidate map', () => {
         ['bob', { balance: 20n }],
       ]),
       value => ({ ...value }),
-      false,
     );
     shared.commit();
-    const proposer = new EntityCandidateMap(shared, value => ({ ...value }), false);
-    getEntityCandidateValueForWrite(proposer, 'alice')!.balance = 99n;
+    const proposer = new EntityCandidateMap(shared, value => ({ ...value }));
+    proposer.getForWrite('alice')!.balance = 99n;
     const committed = proposer.commit();
 
     expect(shared.get('alice')?.balance).toBe(10n);
@@ -41,10 +37,10 @@ describe('Entity persistent candidate map', () => {
 
   test('a candidate over an uncommitted candidate captures only its visible dirty root', () => {
     const base = new Map([['alice', { balance: 10n }]]);
-    const first = new EntityCandidateMap(base, value => ({ ...value }), false);
-    getEntityCandidateValueForWrite(first, 'alice')!.balance = 20n;
-    const second = new EntityCandidateMap(first, value => ({ ...value }), false);
-    getEntityCandidateValueForWrite(second, 'alice')!.balance = 30n;
+    const first = new EntityCandidateMap(base, value => ({ ...value }));
+    first.getForWrite('alice')!.balance = 20n;
+    const second = new EntityCandidateMap(first, value => ({ ...value }));
+    second.getForWrite('alice')!.balance = 30n;
     second.commit();
 
     expect(base.get('alice')?.balance).toBe(10n);

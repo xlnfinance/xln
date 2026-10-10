@@ -218,7 +218,7 @@ const installCommittedState = (
   const { env, workingReplica, candidateEffects, storageChanges } = context;
   const previousState = workingReplica.state;
   if (context.promoteCandidateState) {
-    commitEntityFrameCandidateState(execution.state, frame.stateRoot);
+    commitEntityFrameCandidateState(execution.state);
   }
   execution.state.entityId = previousState.entityId;
   execution.state.height = frame.height;

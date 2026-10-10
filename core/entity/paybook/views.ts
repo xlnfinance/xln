@@ -3,12 +3,7 @@ import type { PaybookEntry } from '../types';
 type InboundPayment = PaybookEntry & Required<Pick<PaybookEntry, 'inboundEntity'>>;
 type OutboundPayment = PaybookEntry & Required<Pick<PaybookEntry, 'outboundEntity'>>;
 
-export type ForwardingPayment = InboundPayment & OutboundPayment;
-
-export type FinalRecipientPayment = InboundPayment & {
-  originated?: never;
-  outboundEntity?: never;
-};
+type ForwardingPayment = InboundPayment & OutboundPayment;
 
 export type SecretAckPendingPayment = InboundPayment & {
   secret: string;
@@ -29,12 +24,6 @@ const hasOutboundPayment = (entry: PaybookEntry): entry is OutboundPayment =>
 export const isForwardingPayment = (
   entry: PaybookEntry,
 ): entry is ForwardingPayment => hasInboundPayment(entry) && hasOutboundPayment(entry);
-
-export const isFinalRecipientPayment = (
-  entry: PaybookEntry,
-): entry is FinalRecipientPayment => hasInboundPayment(entry)
-  && entry.originated !== true
-  && entry.outboundEntity === undefined;
 
 export const isSecretAckPendingPayment = (
   entry: PaybookEntry,

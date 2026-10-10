@@ -1,4 +1,4 @@
-import type { EntityReplica, EntityState } from './types';
+import type { EntityState } from './types';
 import type { LendingLoan, LendingPoolPosition, LendingState } from '../types/finance/lending';
 import {
   cloneCrossJurisdictionBookAdmission,
@@ -233,10 +233,7 @@ export const createEntityFrameCandidateState = (
 };
 
 /** Fold the Entity overlay into this same state object. Hash stays lazy until state-root. */
-export const commitEntityFrameCandidateState = (
-  state: EntityState,
-  _stateRoot?: string,
-): EntityState => {
+export const commitEntityFrameCandidateState = (state: EntityState): EntityState => {
   state.accounts = commitEntityAccountCandidate(state.accounts);
   if (state.orderbookExt) {
     state.orderbookExt = commitEntityOrderbookCandidate(state.orderbookExt);
@@ -263,21 +260,4 @@ export const commitEntityFrameCandidateState = (
     state.crossJurisdictionBookAdmissions = state.crossJurisdictionBookAdmissions.sealCandidate();
   }
   return state;
-};
-
-/**
- * Root of the certified frame this replica just committed, whether the
- * current endpoint is carried by its one full certified head.
- * A committed input that does not advance the height (mempool admission,
- * deferred proposal, precommit collection) must not write any
- * ENTITY_STATE_ROOT_FIELDS. Entity State changes only through certified frames.
- */
-export const committedEntityStateRoot = (replica: EntityReplica): string | undefined => {
-  const head = replica.certifiedFrameHead?.frame;
-  if (
-    head &&
-    head.height === replica.state.height &&
-    head.hash === replica.state.prevFrameHash
-  ) return head.stateRoot;
-  return undefined;
 };

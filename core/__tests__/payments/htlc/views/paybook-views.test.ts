@@ -2,7 +2,6 @@ import { describe, expect, test } from 'bun:test';
 import type { PaybookEntry } from '../../../../entity/types';
 import {
   isDisputeReadyPayment,
-  isFinalRecipientPayment,
   isForwardingPayment,
   isSecretAckPendingPayment,
 } from '../../../../entity/paybook/views';
@@ -16,10 +15,8 @@ describe('Paybook views', () => {
   test('one hashlock-keyed entry distinguishes inbound, forwarding and final payment state', () => {
     const payment = { ...entry(), inboundEntity: 'alice' };
     expect(isForwardingPayment(payment)).toBe(false);
-    expect(isFinalRecipientPayment(payment)).toBe(true);
     Object.assign(payment, { outboundEntity: 'bob' });
     expect(isForwardingPayment(payment)).toBe(true);
-    expect(isFinalRecipientPayment(payment)).toBe(false);
   });
 
   test('secret ACK deadline is read from the same Paybook entry', () => {

@@ -9,8 +9,8 @@ import {
 import {
   commitEntityAccountCandidate,
   EntityAccountCandidateMap,
-  getEntityCandidateValueForWrite,
- EntityCandidateMap } from '../../../entity/state/candidate-map';
+  EntityCandidateMap,
+} from '../../../entity/state/candidate-map';
 import { getEntityAccountForWrite , PersistentEntityAccountMap } from '../../../entity/state/persistent-account-map';
 import {
   EntityCollectionCandidateMap,
@@ -421,7 +421,8 @@ describe('state cloning', () => {
     const addOrder = (state: EntityState): void => {
       const books = state.orderbookExt?.books;
       if (!books) throw new Error('TEST_ENTITY_CANDIDATE_BOOKS_MISSING');
-      const book = getEntityCandidateValueForWrite(books, firstPair);
+      if (!(books instanceof EntityCandidateMap)) throw new Error('TEST_ENTITY_CANDIDATE_BOOKS_NOT_CANDIDATE');
+      const book = books.getForWrite(firstPair);
       if (!book) throw new Error('TEST_ENTITY_CANDIDATE_BOOK_MISSING');
       const applied = applyCommand(book, {
         kind: 0,

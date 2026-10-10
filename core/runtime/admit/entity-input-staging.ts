@@ -9,7 +9,7 @@ import {
 } from '../../account/consensus/flush.ts';
 import type { EntityReplica } from '../../entity/types.ts';
 import type { RoutedEntityInput, RuntimeReplica } from '../types.ts';
-import { commitEntityFrameCandidateState, committedEntityStateRoot } from '../../entity/state-clone.ts';
+import { commitEntityFrameCandidateState } from '../../entity/state-clone.ts';
 import { getPerfMs } from '../../support/time.ts';
 import { shortId } from '../../support/logger.ts';
 import {
@@ -288,10 +288,7 @@ export const applyExternalEntityInput = async (
     // Local commands and remote bytes share one isolated candidate boundary.
     // Expected rejection cannot partially mutate the Runtime-owned Entity State.
     if (env.infrastructure) env.infrastructure.runtimeFramePhase = 'apply.entity.commit-root';
-    commitEntityFrameCandidateState(
-      staged.result.nextReplica.state,
-      committedEntityStateRoot(staged.result.nextReplica),
-    );
+    commitEntityFrameCandidateState(staged.result.nextReplica.state);
   }
   if (env.infrastructure) env.infrastructure.runtimeFramePhase = 'apply.entity.authority-settle';
   await settleStagedAuthority(

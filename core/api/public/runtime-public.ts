@@ -149,9 +149,6 @@ export {
   normalizeEntityId,
   compareEntityIds,
   isLeftEntity,
-  parseUniversalEntityId,
   createProviderScopedEntityId,
-  getShortId,
 } from '../../entity/id';
-export type { ParsedEntityId } from '../../entity/id';
 export { formatRuntime, formatEntity, formatAccount } from '../../qa/runtime-ascii';

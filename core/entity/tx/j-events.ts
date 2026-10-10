@@ -546,8 +546,6 @@ type DisputeStartedEventData = {
 
 type StartedDispute = {
   counterpartyId: string;
-  senderStr: string;
-  entityIdNorm: string;
   weAreStarter: boolean;
   starterInitialArguments: string;
   disputeTimeout: UnixS;
@@ -831,8 +829,6 @@ const initializeStartedDispute = async (
   dirtyAccounts.add(counterpartyId.toLowerCase());
   return {
     counterpartyId,
-    senderStr,
-    entityIdNorm,
     weAreStarter,
     starterInitialArguments: data.starterInitialArguments || '0x',
     disputeTimeout,

@@ -40,7 +40,7 @@ if (
   !/stageExternalEntityInput\([\s\S]*?options,\s*false,(\s*deferProposal,)?\s*\)/.test(
     entityInputStaging,
   ) ||
-  !/commitEntityFrameCandidateState\(\s*staged\.result\.nextReplica\.state,/.test(entityInputStaging)
+  !/commitEntityFrameCandidateState\(\s*staged\.result\.nextReplica\.state\s*\)/.test(entityInputStaging)
 ) {
   throw new Error('ORDINARY_ENTITY_INPUT_CANDIDATE_BOUNDARY_MISSING');
 }
