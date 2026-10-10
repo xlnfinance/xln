@@ -774,14 +774,19 @@ pub(crate) fn dispute_evidence_secret(
     if route.token_id.is_some_and(|known| known != token_id) {
         return Err(EntityKernelError::htlc("PAYBOOK_TOKEN_CONFLICT"));
     }
-    if route
-        .amount
-        .as_ref()
-        .is_some_and(|known| known != lock.amount())
+    let local_sent_lock = lock.sender() == account_view.owner_side;
+    // The entry amount is the inbound lock amount (forwarder, final recipient)
+    // or the recipient amount (originator); our outbound lock differs by the
+    // route fees. Only an inbound lock must match (TS
+    // persistVerifiedPaymentSecret).
+    if !local_sent_lock
+        && route
+            .amount
+            .as_ref()
+            .is_some_and(|known| known != lock.amount())
     {
         return Err(EntityKernelError::htlc("PAYBOOK_AMOUNT_CONFLICT"));
     }
-    let local_sent_lock = lock.sender() == account_view.owner_side;
     let endpoint = if local_sent_lock {
         &mut route.outbound_entity
     } else {
@@ -1016,6 +1021,80 @@ mod key_tests {
         assert_eq!([zero[0], middle[0], high[0]], [0x00, 0x7f, 0xff]);
         assert!(paybook_key(&format!("0X{}", "ff".repeat(32))).is_err());
         assert!(paybook_key(&format!("0x{}", "FF".repeat(32))).is_err());
+    }
+
+    #[test]
+    fn fee_charging_forwarder_accepts_a_late_downstream_secret() {
+        // The forwarding entry keeps the inbound amount (50); our outbound
+        // lock carries 50 minus the fee. Comparing them returned
+        // PAYBOOK_AMOUNT_CONFLICT and halted every fee-charging hub whose
+        // next hop revealed inside the enforcement reserve.
+        let (hashlock, secret) = evidence();
+        let mut state = EntityStateSlice::empty("local", 1_700_000_000_000);
+        state.crontab = Some(CrontabState::default());
+        let mut entry = route(&hashlock, Some("upstream"));
+        entry.pending_fee = Some(BigInt::from(1));
+        state.paybook = PaybookState::from_entries([entry], BigInt::from(0)).expect("paybook");
+        let outbound = HtlcLock::restore(
+            hashlock.clone(),
+            HtlcHashlock::parse(&hashlock).expect("hashlock"),
+            BigInt::from(1_700_000_100_000_u64),
+            100,
+            BigInt::from(49),
+            TokenId::new(1).expect("token"),
+            Side::Left,
+            1,
+            1_700_000_000_000,
+            None,
+        )
+        .expect("lock");
+        let outbound_view = view(Side::Left, outbound.clone());
+        let mut changes = PaybookChanges::default();
+        let mut account_txs = Vec::new();
+        let mut outputs = Vec::<EntityKernelOutput>::new();
+        dispute_evidence_secret(
+            &mut state,
+            &mut changes,
+            "downstream",
+            &outbound_view,
+            &outbound,
+            &secret,
+            &mut PaybookEffects {
+                account_txs: &mut account_txs,
+                outputs: &mut outputs,
+            },
+        )
+        .expect("outbound leg amount differs by the fee");
+        assert_eq!(account_txs.len(), 1);
+
+        // The inbound leg still must match the entry exactly.
+        let inbound_lock = HtlcLock::restore(
+            hashlock.clone(),
+            HtlcHashlock::parse(&hashlock).expect("hashlock"),
+            BigInt::from(1_700_000_100_000_u64),
+            100,
+            BigInt::from(51),
+            TokenId::new(1).expect("token"),
+            Side::Right,
+            1,
+            1_700_000_000_000,
+            None,
+        )
+        .expect("lock");
+        let error = dispute_evidence_secret(
+            &mut state,
+            &mut PaybookChanges::default(),
+            "upstream",
+            &view(Side::Left, inbound_lock.clone()),
+            &inbound_lock,
+            &secret,
+            &mut PaybookEffects {
+                account_txs: &mut Vec::new(),
+                outputs: &mut Vec::new(),
+            },
+        )
+        .expect_err("inbound amount conflict");
+        assert!(error.to_string().contains("PAYBOOK_AMOUNT_CONFLICT"));
     }
 
     #[test]

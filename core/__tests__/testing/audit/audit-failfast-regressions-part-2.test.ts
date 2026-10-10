@@ -660,10 +660,14 @@ describe('audit fail-fast regressions', () => {
     receiverState.timestamp = env.state.timestamp;
     receiverState.lastFinalizedJHeight = 1;
     receiverState.accounts.set(left.entityId, receiver);
+    // A fee-charging forwarder: the entry keeps the inbound amount, the
+    // outbound lock carries it minus the fee. Equal amounts hid a
+    // PAYBOOK_AMOUNT_CONFLICT halt on every late downstream reveal.
     receiverState.paybook.entries.set(hashlock, {
       hashlock,
       tokenId: 1,
-      amount,
+      amount: amount + 1n,
+      pendingFee: 1n,
       inboundEntity: upstreamEntityId,
       outboundEntity: left.entityId,
       createdTimestamp: env.state.timestamp,

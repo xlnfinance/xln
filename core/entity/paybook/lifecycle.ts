@@ -45,12 +45,16 @@ export function persistVerifiedPaymentSecret(
   if (entry.tokenId !== undefined && entry.tokenId !== lock.tokenId) {
     throw new Error(`PAYBOOK_TOKEN_CONFLICT:${lock.hashlock}`);
   }
-  if (entry.amount !== undefined && entry.amount !== lock.amount) {
-    throw new Error(`PAYBOOK_AMOUNT_CONFLICT:${lock.hashlock}`);
-  }
-
   const account = state.accounts.get(counterpartyId)!;
   const localSentLock = lock.senderIsLeft === (account.state.leftEntity.toLowerCase() === state.entityId.toLowerCase());
+  // entry.amount is the inbound lock amount (forwarder, final recipient) or the
+  // recipient amount (originator). Our own outbound lock carries that minus
+  // the forwarding fee, or plus the route fees, so only an inbound lock must
+  // match it. Checking the outbound leg let a next hop that revealed late,
+  // inside the enforcement reserve, halt every fee-charging forwarder.
+  if (!localSentLock && entry.amount !== undefined && entry.amount !== lock.amount) {
+    throw new Error(`PAYBOOK_AMOUNT_CONFLICT:${lock.hashlock}`);
+  }
   assertEndpoint(
     localSentLock ? entry.outboundEntity : entry.inboundEntity,
     counterpartyId,
