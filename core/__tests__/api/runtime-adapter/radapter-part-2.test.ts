@@ -1121,10 +1121,12 @@ test('runtime adapter rejects send and cross-j before either reaches a halted ru
     error: { code: string; message: string; retryable: boolean };
   }>(messages.pop());
   expect(sendResponse.ok).toBe(false);
+  // A halted Runtime needs an operator; a retryable answer made clients poll
+  // it every 250 ms forever.
   expect(sendResponse.error).toMatchObject({
-    code: 'E_COMMAND_PENDING',
+    code: 'E_INTERNAL',
     message: 'RUNTIME_COMMAND_NOT_READY:phase=halted',
-    retryable: true,
+    retryable: false,
   });
 
   await handleRuntimeAdapterMessage(
@@ -1144,9 +1146,9 @@ test('runtime adapter rejects send and cross-j before either reaches a halted ru
   }>(messages.pop());
   expect(crossJResponse.ok).toBe(false);
   expect(crossJResponse.error).toMatchObject({
-    code: 'E_COMMAND_PENDING',
+    code: 'E_INTERNAL',
     message: 'RUNTIME_COMMAND_NOT_READY:phase=halted',
-    retryable: true,
+    retryable: false,
   });
   expect(enqueued).toBe(0);
   expect(submitted).toBe(0);

@@ -16,9 +16,9 @@ import type {
 	  RuntimeAdapterSendResult,
 	  RuntimeAdapterStatus,
 	} from './types';
-import { RuntimeAdapterError } from './errors';
+import { RuntimeAdapterError, requireRuntimeAdapterCommandReady } from './errors';
 import { resolveRuntimeAdapterRead, type RuntimeAdapterResolveContext } from './resolve';
-import { assertRuntimeCommandReady, getRuntimeCommandReadiness } from '../../runtime/replica/lifecycle';
+import { getRuntimeCommandReadiness } from '../../runtime/replica/lifecycle';
 import { ensureRuntimeInfrastructure } from '../../runtime/envelope/replica-envelope';
 import type { RuntimePublishedNotice } from '../../runtime/loop/loop-environment.ts';
 import { withRuntimeCommittedRead } from '../../runtime/frame/lifecycle/writer-lock';
@@ -142,7 +142,7 @@ export class EmbeddedRuntimeAdapter implements RuntimeAdapter {
   async send(input: RuntimeInput): Promise<RuntimeAdapterSendResult> {
     const env = this.resolveEnv();
     if (!env) throw new RuntimeAdapterError('E_INTERNAL', 'embedded runtime env is not ready', true);
-    this.requireCommandReady(env);
+    requireRuntimeAdapterCommandReady(env);
     this.deps.validateRuntimeInputAdmission(env, input);
     this.deps.enqueueRuntimeInput(env, input);
     return { height: Math.max(0, Math.floor(Number(env.state.height ?? 0))) };
@@ -153,7 +153,7 @@ export class EmbeddedRuntimeAdapter implements RuntimeAdapter {
   ): Promise<RuntimeAdapterCrossJurisdictionIntentResult> {
     const env = this.resolveEnv();
     if (!env) throw new RuntimeAdapterError('E_INTERNAL', 'embedded runtime env is not ready', true);
-    this.requireCommandReady(env);
+    requireRuntimeAdapterCommandReady(env);
     return await this.deps.submitCrossJurisdictionIntent(env, route);
   }
 
@@ -162,7 +162,7 @@ export class EmbeddedRuntimeAdapter implements RuntimeAdapter {
   ): Promise<NumberedRegistrationCommandResult> {
     const env = this.resolveEnv();
     if (!env) throw new RuntimeAdapterError('E_INTERNAL', 'embedded runtime env is not ready', true);
-    this.requireCommandReady(env);
+    requireRuntimeAdapterCommandReady(env);
     await ensurePendingNumberedRegistrationsResumed(env);
     return registerNumberedEntities(env, input);
   }
@@ -244,16 +244,4 @@ export class EmbeddedRuntimeAdapter implements RuntimeAdapter {
     this.publishedCommandReadyReason = notice.commandReadyReason;
   }
 
-  private requireCommandReady(env: RuntimeReplica): void {
-    try {
-      assertRuntimeCommandReady(env);
-    } catch (error) {
-      throw new RuntimeAdapterError(
-        'E_COMMAND_PENDING',
-        error instanceof Error ? error.message : String(error),
-        true,
-        250,
-      );
-    }
-  }
 }

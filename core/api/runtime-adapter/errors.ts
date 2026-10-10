@@ -1,4 +1,6 @@
 import type { RuntimeAdapterErrorCode, RuntimeAdapterErrorPayload } from './types';
+import type { RuntimeReplica } from '../../runtime/types';
+import { getRuntimeCommandReadiness } from '../../runtime/replica/lifecycle';
 
 export class RuntimeAdapterError extends Error {
   readonly code: RuntimeAdapterErrorCode;
@@ -36,4 +38,21 @@ export const toRuntimeAdapterErrorPayload = (error: unknown): RuntimeAdapterErro
     message,
     retryable: false,
   };
+};
+
+const TERMINAL_COMMAND_READINESS = new Set(['HALTED_REQUIRES_OPERATOR', 'phase=halted']);
+
+/**
+ * Catch-up and persistence fences clear by themselves; a halted Runtime needs
+ * an operator. Reporting a halt as retryable made clients poll it every 250 ms
+ * forever.
+ */
+export const requireRuntimeAdapterCommandReady = (env: RuntimeReplica): void => {
+  const readiness = getRuntimeCommandReadiness(env);
+  if (readiness.ready) return;
+  const message = `RUNTIME_COMMAND_NOT_READY:${readiness.reason}`;
+  if (TERMINAL_COMMAND_READINESS.has(readiness.reason)) {
+    throw new RuntimeAdapterError('E_INTERNAL', message, false);
+  }
+  throw new RuntimeAdapterError('E_COMMAND_PENDING', message, true, 250);
 };

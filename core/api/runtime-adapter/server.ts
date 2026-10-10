@@ -11,11 +11,11 @@ import {
 } from './codec';
 import type { RuntimeFrame, StorageHead } from '../../storage/types';
 import type { StorageAccountDoc, StorageEntityViewPage } from '../../storage';
-import { RuntimeAdapterError, toRuntimeAdapterErrorPayload } from './errors';
+import { RuntimeAdapterError, requireRuntimeAdapterCommandReady, toRuntimeAdapterErrorPayload } from './errors';
 import { consumeToken, createTokenBucket, tokenRetryAfterMs, type TokenBucket } from './security/rate-limit';
 import { resolveRuntimeAdapterRead } from './resolve';
 import { createStructuredLogger } from '../../support/logger';
-import { assertRuntimeCommandReady, getRuntimeCommandReadiness } from '../../runtime/replica/lifecycle';
+import { getRuntimeCommandReadiness } from '../../runtime/replica/lifecycle';
 import { safeStringify } from '../../protocol/serialization';
 import { keccak256, toUtf8Bytes } from 'ethers';
 import type {
@@ -159,14 +159,6 @@ const RUNTIME_ADAPTER_BACKPRESSURE_DEFAULT_BYTES = 2 * 1024 * 1024;
 const RUNTIME_ADAPTER_PENDING_READ_LOG_MS = 1_000;
 const runtimeAdapterLog = createStructuredLogger('runtime.radapter');
 const errorMessage = (error: unknown): string => error instanceof Error ? error.message : String(error);
-
-const requireRuntimeCommandReady = (env: RuntimeReplica): void => {
-  try {
-    assertRuntimeCommandReady(env);
-  } catch (error) {
-    throw new RuntimeAdapterError('E_COMMAND_PENDING', errorMessage(error), true, 250);
-  }
-};
 
 type PendingRuntimeAdapterCommand = {
   sequence: number;
@@ -872,7 +864,7 @@ const requireMutatingRuntimeAdapterReady = (
   env: RuntimeReplica,
   deps: RuntimeAdapterServerDeps,
 ): void => {
-  requireRuntimeCommandReady(env);
+  requireRuntimeAdapterCommandReady(env);
   if (deps.isMutatingIngressReady?.() === false) {
     throw new RuntimeAdapterError(
       'E_COMMAND_PENDING',
