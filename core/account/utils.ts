@@ -197,7 +197,7 @@ export function getTokenIdsForJurisdiction(
 // Prices for volatile/non-reference assets are displayed and quoted as stable per 1 asset.
 const REFERENCE_STABLE_TOKEN_IDS = new Set<number>([1, 3]); // USDC, USDT
 const DEFAULT_ENTITY_SWAP_PAIR_TOKENS = [1, 2, 3] as const;
-type EntitySwapPairConfig = {
+export type EntitySwapPairConfig = {
   baseTokenId: number;
   quoteTokenId: number;
   pairId: string;
