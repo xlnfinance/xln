@@ -44,6 +44,7 @@ type MarketMakerTokenIdsByContext,
 buildMarketMakerCrossOfferSpecs,
 buildMarketMakerCrossTokenPairs,
 buildMarketMakerOfferSpecs,
+collectCommittedMarketMakerOfferIds,
 collectOfferIdsForAccount,
 deriveMarketMakerCrossOffersPerDirectedRoute,
 collectPendingCrossRequestOrderIds,
@@ -1194,8 +1195,10 @@ const collectCommittedMarketMakerOfferFingerprintsForHub = (
 ): Array<Record<string, unknown>> => {
   const account = getAccountReplica(env, mmEntityId, hubEntityId);
   const prefix = `mm-${hubEntityId.slice(-6).toLowerCase()}-`;
+  // Hub-made offers on this Account are foreign: never parsed, never fingerprinted.
+  const ownOfferIds = account ? collectCommittedMarketMakerOfferIds(account, mmEntityId) : new Set<string>();
   return Array.from(account?.state.swapOffers?.entries?.() ?? [])
-    .filter(([offerId]) => String(offerId).startsWith(prefix))
+    .filter(([offerId]) => ownOfferIds.has(String(offerId)) && String(offerId).startsWith(prefix))
     .map(([offerId, offer]) => {
       const parsed = parseMarketMakerSameOfferId(String(offerId));
       return {
@@ -1223,8 +1226,11 @@ const collectCommittedMarketMakerCrossOfferFingerprints = (
     const sourceHubs = visibleHubs.filter(profile => sameJurisdiction(sourceContext, profile));
     for (const sourceHub of sourceHubs) {
       const account = getAccountReplica(env, sourceContext.entityId, sourceHub.entityId);
+      const ownOfferIds = account
+        ? collectCommittedMarketMakerOfferIds(account, sourceContext.entityId)
+        : new Set<string>();
       for (const [offerId, offer] of account?.state.swapOffers ?? []) {
-        if (!String(offerId).startsWith('mmx-')) continue;
+        if (!ownOfferIds.has(String(offerId)) || !String(offerId).startsWith('mmx-')) continue;
         const route = offer.crossJurisdiction;
         if (!route) {
           throw new Error(`MARKET_MAKER_BOOTSTRAP_FINGERPRINT_CROSS_ROUTE_MISSING:${offerId}`);

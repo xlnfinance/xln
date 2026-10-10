@@ -687,6 +687,49 @@ test('runtime market maker health stays red when same-chain offers are committed
   expect(pendingRoute?.depthReady).toBe(false);
 });
 
+const requireDefined = <T>(value: T | undefined, label: string): T => {
+  if (value === undefined) throw new Error(`TEST_${label}_MISSING`);
+  return value;
+};
+
+test('Hub-made offers on the MM Account are neither MM depth nor fingerprint input', () => {
+  const topology = buildBootstrapTopology();
+  const mm = requireDefined(topology.contexts[0], 'MM');
+  const sibling = requireDefined(topology.contexts[1], 'SIBLING_MM');
+  const hub = requireDefined(topology.visibleHubs[0], 'HUB');
+  const offers = committedSameChainOffers(hub.entityId, [1, 2, 3]);
+  const [deterministicId, mmOffer] = requireDefined([...offers.entries()][0], 'MM_OFFER');
+  const hubMade = (offerId: string): SwapOffer => ({ ...mmOffer, offerId, makerIsLeft: false });
+  // The Hub is the right party: it may place offers on this Account under any
+  // free-text id, including one of the MM's deterministic ladder ids.
+  const unparseableSameId = `mm-${hub.entityId.slice(-6)}-x`;
+  offers.set(deterministicId, hubMade(deterministicId));
+  offers.set(unparseableSameId, hubMade(unparseableSameId));
+  offers.set('mmx-forged', hubMade('mmx-forged'));
+  addReplica(topology.env, mm.entityId, mm.signerId, new Map([[hub.entityId, makeAccount(mm.entityId, hub.entityId, offers)]]));
+  addReplica(topology.env, sibling.entityId, sibling.signerId);
+
+  const health = getRuntimeMarketMakerHealth(
+    topology.env,
+    mm.entityId,
+    [hub.entityId],
+    [1, 2, 3],
+    { contexts: topology.contexts, visibleHubs: topology.visibleHubs, tokenIdsByContext: topology.tokenIdsByContext },
+  );
+
+  expect(health.hubs[0]?.offers).toBe(health.expectedOffersPerHub - 1);
+  expect(health.hubs[0]?.depthReady).toBe(false);
+  expect(health.cross.expectedRoutes).toBeGreaterThan(0);
+  const fingerprint = buildMarketMakerBootstrapFingerprint(
+    topology.env,
+    topology.contexts,
+    topology.visibleHubs,
+    topology.tokenIdsByContext,
+    health,
+  );
+  expect(fingerprint.hash).toMatch(/^[0-9a-f]{64}$/);
+});
+
 const gossipHub = (
   entityId: string,
   name: string,

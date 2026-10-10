@@ -1090,34 +1090,45 @@ export const getMarketMakerTokenIds = (
   return ids && ids.length >= HUB_REQUIRED_TOKEN_COUNT ? ids : defaultTokenIds;
 };
 
+/** Offers this side proposed and that still await their Account frame. */
+const collectProposedOfferIds = (account: AccountReplica): string[] =>
+  [...(account.mempool ?? []), ...(account.pendingFrame?.accountTxs ?? [])].flatMap(tx => {
+    if (tx?.type !== 'swap_offer') return [];
+    const offerId = String(tx?.data?.offerId || '');
+    return offerId ? [offerId] : [];
+  });
+
+/** Every offerId on the Account, whichever party made it: placement must never collide. */
 export const collectOfferIdsForAccount = (
   account: AccountReplica | null | undefined,
 ): Set<string> => {
+  if (!account) return new Set();
+  return new Set([...[...account.state.swapOffers.keys()].map(String), ...collectProposedOfferIds(account)]);
+};
+
+/**
+ * Committed offers the MM itself made. The Hub may place its own offers on the
+ * same Account under any free-text offerId, including the MM's deterministic
+ * ids, so depth, health and fingerprints never trust the id prefix alone.
+ */
+export const collectCommittedMarketMakerOfferIds = (
+  account: Pick<AccountReplica, 'state'>,
+  mmEntityId: string,
+): Set<string> => {
+  const mmIsLeft = normalizeEntityRef(account.state.leftEntity) === normalizeEntityRef(mmEntityId);
   const ids = new Set<string>();
-  if (account) {
-    for (const offerId of account.state.swapOffers.keys()) ids.add(String(offerId));
-  }
-  for (const tx of account?.mempool ?? []) {
-    if (tx?.type !== 'swap_offer') continue;
-    const offerId = String(tx?.data?.offerId || '');
-    if (offerId) ids.add(offerId);
-  }
-  for (const tx of account?.pendingFrame?.accountTxs ?? []) {
-    if (tx?.type !== 'swap_offer') continue;
-    const offerId = String(tx?.data?.offerId || '');
-    if (offerId) ids.add(offerId);
+  for (const [offerId, offer] of account.state.swapOffers.entries()) {
+    if (offer.makerIsLeft === mmIsLeft) ids.add(String(offerId));
   }
   return ids;
 };
 
-const collectCommittedOfferIdsForAccount = (
-  account: Pick<AccountReplica, 'state'> | null | undefined,
-): Set<string> => {
-  const ids = new Set<string>();
-  if (account) {
-    for (const offerId of account.state.swapOffers.keys()) ids.add(String(offerId));
+const countOfferIdsWithPrefix = (offerIds: Iterable<string>, prefix: string): number => {
+  let count = 0;
+  for (const offerId of offerIds) {
+    if (offerId.startsWith(prefix)) count += 1;
   }
-  return ids;
+  return count;
 };
 
 export const getMarketMakerOfferLevel = (spec: Pick<MarketMakerOfferSpec, 'offerId'>): number => {
@@ -1653,22 +1664,15 @@ export const countCommittedMarketMakerOffersForHubPair = (
   const account = getAccountReplica(env, mmEntityId, hubEntityId);
   if (!account) return 0;
   const prefix = `mm-${hubEntityId.slice(-6).toLowerCase()}-${pair.baseTokenId}-${pair.quoteTokenId}-`;
-  let count = 0;
-  for (const offerId of collectCommittedOfferIdsForAccount(account)) {
-    if (offerId.startsWith(prefix)) count += 1;
-  }
-  return count;
+  return countOfferIdsWithPrefix(collectCommittedMarketMakerOfferIds(account, mmEntityId), prefix);
 };
 
 const countMarketMakerOffersForHub = (env: RuntimeReplica, mmEntityId: string, hubEntityId: string): number => {
   const account = getAccountReplica(env, mmEntityId, hubEntityId);
   if (!account) return 0;
-  const prefix = `mm-${hubEntityId.slice(-6).toLowerCase()}-`;
-  let count = 0;
-  for (const offerId of collectOfferIdsForAccount(account)) {
-    if (offerId.startsWith(prefix)) count += 1;
-  }
-  return count;
+  const ownOfferIds = collectCommittedMarketMakerOfferIds(account, mmEntityId);
+  for (const offerId of collectProposedOfferIds(account)) ownOfferIds.add(offerId);
+  return countOfferIdsWithPrefix(ownOfferIds, `mm-${hubEntityId.slice(-6).toLowerCase()}-`);
 };
 
 export const countCommittedMarketMakerOffersForHub = (
@@ -1678,12 +1682,10 @@ export const countCommittedMarketMakerOffersForHub = (
 ): number => {
   const account = getAccountReplica(env, mmEntityId, hubEntityId);
   if (!account) return 0;
-  const prefix = `mm-${hubEntityId.slice(-6).toLowerCase()}-`;
-  let count = 0;
-  for (const offerId of collectCommittedOfferIdsForAccount(account)) {
-    if (offerId.startsWith(prefix)) count += 1;
-  }
-  return count;
+  return countOfferIdsWithPrefix(
+    collectCommittedMarketMakerOfferIds(account, mmEntityId),
+    `mm-${hubEntityId.slice(-6).toLowerCase()}-`,
+  );
 };
 
 export const isSameQuoteJobDepthReady = (env: RuntimeReplica, job: SameQuoteJob): boolean => {
