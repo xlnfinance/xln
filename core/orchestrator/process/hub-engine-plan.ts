@@ -3,6 +3,7 @@ import { join, resolve } from 'node:path';
 
 import { isSingleSignerBoard } from '../../entity/consensus/replica-validation';
 import type { ConsensusConfig } from '../../entity/types';
+import { createStructuredLogger } from '../../support/logger';
 
 export type HubEngineKind = 'rust' | 'typescript';
 
@@ -169,6 +170,16 @@ export type RustHubStatus = Readonly<{
   listen?: string;
 }>;
 
+const rustHubStatusLog = createStructuredLogger('orchestrator.rust_hub_status');
+
+// The line arrives in the child's stdout listener: a throw there would be an
+// uncaught exception that stops every hub. Reject it loudly instead; a hub
+// that never reports a valid ready line fails its self-ready deadline.
+const rejectRustHubStatus = (code: string, line: string): null => {
+  rustHubStatusLog.error('status.rejected', { code, line: line.slice(0, 512) });
+  return null;
+};
+
 export const parseRustHubStatus = (line: string): RustHubStatus | null => {
   const trimmed = line.trim();
   if (!trimmed.startsWith('{') || !trimmed.endsWith('}')) return null;
@@ -182,13 +193,13 @@ export const parseRustHubStatus = (line: string): RustHubStatus | null => {
   const row = value as Record<string, unknown>;
   if (row['status'] !== 'ready' && row['status'] !== 'metrics') return null;
   if (!Number.isSafeInteger(row['height']) || Number(row['height']) < 0) {
-    throw new Error(`RUST_HUB_STATUS_HEIGHT_INVALID:${String(row['height'])}`);
+    return rejectRustHubStatus('RUST_HUB_STATUS_HEIGHT_INVALID', trimmed);
   }
   if (row['status'] === 'ready') {
     const runtimeId = String(row['runtimeId'] || '').toLowerCase();
     const listen = String(row['listen'] || '');
     if (!/^0x[0-9a-f]{40}$/.test(runtimeId) || !listen) {
-      throw new Error('RUST_HUB_READY_IDENTITY_INVALID');
+      return rejectRustHubStatus('RUST_HUB_READY_IDENTITY_INVALID', trimmed);
     }
     return { status: 'ready', runtimeId, height: Number(row['height']), listen };
   }

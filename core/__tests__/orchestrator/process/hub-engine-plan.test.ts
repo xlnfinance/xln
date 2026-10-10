@@ -202,7 +202,13 @@ test('Rust stdout readiness is strict and process-owned', () => {
     listen: '127.0.0.1:22001',
     height: 0,
   });
-  expect(() => parseRustHubStatus('{"status":"ready","height":0}')).toThrow('RUST_HUB_READY_IDENTITY_INVALID');
+});
+
+test('a malformed Rust status line is rejected without throwing out of the stdout listener', () => {
+  expect(parseRustHubStatus('{"status":"ready","height":0}')).toBeNull();
+  expect(parseRustHubStatus('{"status":"metrics","height":-1}')).toBeNull();
+  expect(parseRustHubStatus('{"status":"metrics","height":"7"}')).toBeNull();
+  expect(parseRustHubStatus('{"status":"metrics","height":7}')).toEqual({ status: 'metrics', height: 7 });
 });
 
 test.each([
