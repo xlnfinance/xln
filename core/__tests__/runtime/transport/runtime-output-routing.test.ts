@@ -12,6 +12,7 @@ import {
   sendEntityInputWithRouting as sendEntityInputWithRoutingRaw,
 } from '../../../runtime/delivery/topology/output-routing';
 import { deliveryAccepted, deliveryDeferred, deliveryFailure } from '../../../protocol/payments/delivery-result';
+import { LIMITS } from '../../../config/constants';
 import type { DeliverableEntityInput, RuntimeReplica, RoutedEntityInput, RuntimeEntityInputsEnvelope } from '../../../runtime/types';
 import type { EntityLeaderTimeoutVote } from '../../../entity/types';
 import { deriveSignerAddressSync, signDigest } from '../../../account/crypto';
@@ -960,6 +961,19 @@ describe('runtime output routing', () => {
     });
     expect(queued).toHaveLength(1);
     expect(queued[0]?.entityId).toBe(localEntityId);
+  });
+
+  test('more retained outputs than the outbox cap are kept, never a Hub halt', () => {
+    // Slots are per target, so the cap counts distinct offline counterparties:
+    // a Hub reaches it organically, and the throw halted it on every restart.
+    const outputs: RoutedEntityInput[] = Array.from({ length: LIMITS.MAX_PENDING_NETWORK_OUTPUTS + 1 }, (_, index) => ({
+      runtimeId: runtimeId('a1'),
+      entityId: `0x${index.toString(16).padStart(64, '0')}`,
+      signerId: runtimeId('a2'),
+      sourceRuntimeFrame: { height: 1, timestamp: 1 },
+      entityTxs: [{ type: 'openAccount', data: { targetEntityId: entityId('a3') } } as any],
+    }));
+    expect(buildPendingNetworkOutputs(outputs)).toHaveLength(LIMITS.MAX_PENDING_NETWORK_OUTPUTS + 1);
   });
 
   test('a dropped direct send retains that target in committed order, never a Hub halt', () => {

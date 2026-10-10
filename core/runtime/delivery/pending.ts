@@ -13,6 +13,7 @@ import { validateDeliverableEntityInput } from '../delivery/topology/routing-val
 import { computeProfileRouteHash } from '../../entity/profile/profile-signing';
 import { recoverDigestSignerAddress } from '../../account/crypto';
 import { LIMITS } from '../../config/constants';
+import { createStructuredLogger } from '../../support/logger';
 
 import { getEffectiveEntityInputTxs } from '../../entity/consensus/output/envelope';
 import { accountInputAck, accountInputProposal } from '../../account/consensus/flush';
@@ -34,6 +35,7 @@ import {
 import { createPreparedOutputGraph, type PreparedOutputGraph } from './prepared-output';
 
 export const MAX_PENDING_NETWORK_OUTPUTS = LIMITS.MAX_PENDING_NETWORK_OUTPUTS;
+const pendingOutboxLog = createStructuredLogger('runtime.outbox');
 
 export const isCrossJAdmissionSourceProposal = (output: RoutedEntityInput): boolean =>
   getEffectiveEntityInputTxs(output).some(tx => {
@@ -406,10 +408,16 @@ export const buildPendingNetworkOutputs = (
   // Map preserves the first accepted position. Dedup merges into that slot;
   // neither payload kind nor destination may rewrite committed outbox order.
   const pending = [...deduped.values()];
+  // Slots are per target and kind, so this counts distinct waiting peers: a
+  // Hub with that many offline counterparties reaches it organically. The
+  // outputs are committed; retaining them is the only correct outcome (Rust
+  // defers staging). A throw here halted the Hub again on every restart.
+  // Hub API admission still applies backpressure at this size.
   if (pending.length > MAX_PENDING_NETWORK_OUTPUTS) {
-    throw new Error(
-      `NETWORK_OUTBOX_CAPACITY_EXCEEDED: pending=${pending.length} max=${MAX_PENDING_NETWORK_OUTPUTS}`,
-    );
+    pendingOutboxLog.warn('NETWORK_OUTBOX_CAPACITY_EXCEEDED', {
+      pending: pending.length,
+      max: MAX_PENDING_NETWORK_OUTPUTS,
+    });
   }
   return pending;
 };
