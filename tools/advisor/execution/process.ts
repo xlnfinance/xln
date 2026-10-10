@@ -24,7 +24,11 @@ const terminateGroup = (pid: number | undefined): void => {
   try {
     process.kill(-pid, 'SIGKILL');
   } catch (error) {
-    if (!(error instanceof Error && 'code' in error && error.code === 'ESRCH')) throw error;
+    // ESRCH: the group is gone. EPERM: macOS refuses to signal a group whose
+    // members are already exiting (seen under load right after close).
+    if (!(error instanceof Error && 'code' in error && (error.code === 'ESRCH' || error.code === 'EPERM'))) {
+      throw error;
+    }
   }
 };
 
