@@ -3,7 +3,7 @@ import { createHmac } from 'node:crypto';
 const MESH_SEED_DOMAIN = 'xln:mesh-child-seed:v1';
 
 export const requireMeshRootSeed = (env: NodeJS.ProcessEnv = process.env): string => {
-  const seed = String(env['XLN_MESH_ROOT_SEED'] || env['XLN_RUNTIME_SEED'] || '').trim();
+  const seed = String(env['XLN_MESH_ROOT_SEED'] || '').trim();
   if (!seed) {
     throw new Error('XLN_MESH_ROOT_SEED_MISSING: provision an operator seed before starting the mesh');
   }

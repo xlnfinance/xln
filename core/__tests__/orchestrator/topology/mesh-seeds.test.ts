@@ -23,6 +23,11 @@ describe('mesh operator seed derivation', () => {
     expect(() => requireMeshRootSeed({})).toThrow('XLN_MESH_ROOT_SEED_MISSING');
   });
 
+  test('a single-runtime seed never stands in for the mesh root', () => {
+    expect(() => requireMeshRootSeed({ XLN_RUNTIME_SEED: 'main-runtime-seed' })).toThrow('XLN_MESH_ROOT_SEED_MISSING');
+    expect(requireMeshRootSeed({ XLN_MESH_ROOT_SEED: 'mesh-root', XLN_RUNTIME_SEED: 'main-runtime-seed' })).toBe('mesh-root');
+  });
+
   test('accepts explicit named seeds only through a validated override map', () => {
     expect(readMeshSeedOverrides('{"h1":"test-seed"}', 'TEST_SEEDS')).toEqual({ H1: 'test-seed' });
     expect(() => readMeshSeedOverrides('{"h1":""}', 'TEST_SEEDS')).toThrow('TEST_SEEDS_INVALID');
