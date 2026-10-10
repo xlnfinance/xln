@@ -31,12 +31,13 @@ import {
 import { openRelayIncidentJournal } from '../network/relay/incident-journal';
 import { forgetRelaySocketRuntimeId, isRelaySocketAuthenticated, relayRoute, type RelayRouterConfig } from '../network/relay/router';
 import { closeRelayClientsForReset } from '../network/relay/reset';
-import { canonicalizeRuntimeWsAudience, deserializeWsMessage, resolveRuntimeWsMaxMessageBytes, serializeWsMessage, toRuntimeWsBytes, type RuntimeWsMessage } from '../network/p2p/ws-protocol';
+import { canonicalizeRuntimeWsAudience, resolveRuntimeWsMaxMessageBytes, serializeWsMessage, toRuntimeWsBytes } from '../network/p2p/ws-protocol';
 import { createHelloChallengeRegistry } from '../network/p2p/auth/hello-challenge';
 import { type MarketSnapshotPayload } from '../network/relay/market/snapshot';
 import { createMarketSubscriptionStack } from '../network/relay/market/subscriptions';
 import { createMarketCapController } from '../network/relay/market/cap/market-cap-controller';
-import { decodeMarketWireRequest, encodeMarketWireMessage, type MarketWireRequest } from '../network/relay/market/wire';
+import { encodeMarketWireMessage } from '../network/relay/market/wire';
+import { decodeRelaySocketFrame } from '../api/server/network/relay-frame';
 import {
   fetchMarketPairCatalogFromHub,
   fetchMarketSnapshotsFromHub,
@@ -2862,26 +2863,15 @@ const server = Bun.serve<OrchestratorWebSocket['data']>({
     },
     message(ws, raw) {
       try {
-        let peerMessage: RuntimeWsMessage | null = null;
-        let marketMessage: MarketWireRequest | null = null;
-        try {
-          peerMessage = deserializeWsMessage(raw as string | Buffer | ArrayBuffer, {
-            authenticated: isRelaySocketAuthenticated(ws),
-          });
-        } catch (binaryError) {
-          try {
-            marketMessage = decodeMarketWireRequest(raw.toString());
-          } catch {
-            throw binaryError;
-          }
-        }
-        if (marketMessage) {
+        const frame = decodeRelaySocketFrame(raw, isRelaySocketAuthenticated(ws));
+        if (frame.kind === 'market') {
+          const marketMessage = frame.message;
           Promise.resolve(marketSubscriptionStack.handleMessage(ws, marketMessage)).catch(error => {
             const reason = serializeError(error);
             pushDebugEvent(relayStore, {
               event: 'error',
               reason: 'MARKET_HANDLER_EXCEPTION',
-              details: { error: reason, msgType: marketMessage?.type },
+              details: { error: reason, msgType: marketMessage.type },
             });
             try {
               ws.send(encodeMarketWireMessage({ type: 'error', error: reason }));
@@ -2891,17 +2881,17 @@ const server = Bun.serve<OrchestratorWebSocket['data']>({
           });
           return;
         }
-        if (!peerMessage) throw new Error('RELAY_MESSAGE_DECODE_INVARIANT');
-        Promise.resolve(relayRoute(routerConfig, ws, peerMessage, typeof raw === 'string' ? undefined : toRuntimeWsBytes(raw as Buffer | ArrayBuffer))).catch(error => {
+        const peerMessage = frame.message;
+        Promise.resolve(relayRoute(routerConfig, ws, peerMessage, typeof raw === 'string' ? undefined : toRuntimeWsBytes(raw))).catch(error => {
           const reason = serializeError(error);
           pushDebugEvent(relayStore, {
             event: 'error',
             reason: 'RELAY_HANDLER_EXCEPTION',
             details: {
               error: reason,
-              msgType: peerMessage?.type,
-              from: peerMessage?.from,
-              to: peerMessage?.to,
+              msgType: peerMessage.type,
+              from: peerMessage.from,
+              to: peerMessage.to,
             },
           });
           try {
