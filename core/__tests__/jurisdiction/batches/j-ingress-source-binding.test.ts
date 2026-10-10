@@ -15,6 +15,7 @@ import {
 } from '../../../jurisdiction/adapter/events/manual-event-ingress';
 import { parseReceiptLogsToJEvents } from '../../../jurisdiction/adapter/j-event-log-decoder';
 import { bindLocalJEventIngressSource } from '../../../jurisdiction/adapter/events/local-ingress-source';
+import { setJHistoryRangeIngressTransform } from '../../../jurisdiction/adapter/watcher';
 import { resolveApprovalReceiptLogIndex } from '../../../jurisdiction/adapter/rpc-public';
 import { createEmptyEnv } from '../../../runtime';
 import { emptyEntityAccountMap } from '../../helpers/entity-account-map';
@@ -328,6 +329,53 @@ describe('manual J-event ingress source binding', () => {
     } finally {
       await adapterA.close();
       await adapterB.close();
+    }
+  }, 120_000);
+
+  test('a BrowserVM poll that fails before its enqueue delivers the same J events on retry', async () => {
+    const adapter = await createJAdapter({ mode: 'browservm', chainId: 31_337 });
+    adapter.setQuietLogs?.(true);
+    try {
+      await adapter.deployStack();
+      const chain = jurisdiction('browservm-retry', adapter.chainId, '01', '02');
+      chain.depositoryAddress = adapter.addresses.depository;
+      chain.entityProviderAddress = adapter.addresses.entityProvider;
+      const env = createEmptyEnv('browservm-retry-seen-logs');
+      env.quietRuntimeLogs = true;
+      env.state.jReplicas.set(chain.name, {
+        ...jReplica(chain),
+        contracts: { ...adapter.addresses },
+        watcherConfirmationDepth: 0,
+      });
+      attachLiveJAdapter(env, chain.name, adapter);
+      const funded = entityId('73');
+      env.state.eReplicas.set(`${funded}:1`, entityReplica(funded, '1', chain));
+      adapter.startWatching(env);
+
+      let failNext = true;
+      const restore = setJHistoryRangeIngressTransform(ingress => {
+        if (failNext) {
+          failNext = false;
+          throw new Error('TEST_INGRESS_FAILURE');
+        }
+        return ingress;
+      });
+      try {
+        // The first poll records the ReserveUpdated key, then fails before
+        // its enqueue; the retry used to drop the event as already seen and
+        // still mark the block scanned.
+        await expect(adapter.debugFundReserves(funded, 1, 5n)).rejects.toThrow('TEST_INGRESS_FAILURE');
+        await adapter.pollNow?.();
+      } finally {
+        restore();
+        detachLiveJAdapter(env, chain.name, adapter);
+      }
+      const observed = (env.runtimeMempool?.runtimeTxs ?? [])
+        .filter(tx => tx.type === 'observeJRange')
+        .flatMap(tx => tx.type === 'observeJRange' ? tx.data.blocks.flatMap(block => block.events) : []);
+      expect(observed.map(event => event.type)).toContain('ReserveUpdated');
+    } finally {
+      await adapter.close();
     }
   }, 120_000);
 

@@ -6,6 +6,8 @@ import {
   getMinimumScannedSignerJHeight,
   isEntityReplicaRelevantToWatcher,
   processEventBatch,
+  settleSeenLogs,
+  stageSeenLogs,
   updateWatcherJurisdictionCursor,
   type EventBatchCounter,
 } from '../watcher';
@@ -233,23 +235,34 @@ export const createBrowserVmHistoryWatcher = (options: BrowserVmHistoryOptions) 
       targetBlock,
       tipBlockHash,
     );
-    const observedInputs = buildObservedInputs(
-      options,
-      env,
-      byBlock,
-      authorityTxsByBlock,
-      txCounter,
-      fromBlock <= committedCursor,
-    );
-    const range = enqueueJHistoryRange(
-      env,
-      observedInputs,
-      targetBlock,
-      tipBlockHash,
-      options.depositoryAddress,
-      buildHistoryHeaders(options.browserVM, fromBlock, targetBlock),
-      options.chainId,
-    );
+    // A poll that throws before its enqueue is re-read from the same block;
+    // its dedup keys must not outlive it or those J events are dropped.
+    stageSeenLogs(txCounter);
+    let enqueued = false;
+    let observedInputs: ReturnType<typeof buildObservedInputs>;
+    let range: ReturnType<typeof enqueueJHistoryRange>;
+    try {
+      observedInputs = buildObservedInputs(
+        options,
+        env,
+        byBlock,
+        authorityTxsByBlock,
+        txCounter,
+        fromBlock <= committedCursor,
+      );
+      range = enqueueJHistoryRange(
+        env,
+        observedInputs,
+        targetBlock,
+        tipBlockHash,
+        options.depositoryAddress,
+        buildHistoryHeaders(options.browserVM, fromBlock, targetBlock),
+        options.chainId,
+      );
+      enqueued = true;
+    } finally {
+      settleSeenLogs(txCounter, enqueued);
+    }
     if (observedInputs.length > 0 || range.scannedReplicaKeys.length > 0) {
       updateWatcherJurisdictionCursor(env, targetBlock, options.depositoryAddress, options.chainId);
     }
