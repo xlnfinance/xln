@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { LIMITS } from '../../../config/constants';
 import { createOnionEnvelopes, validateEnvelope } from '../../../protocol/htlc/codec/envelope';
 import { decodeAccountTx } from '../../../account/tx-validation';
+import { FailureDispositionError } from '../../../protocol/errors/failure-taxonomy';
 
 describe('htlc envelope validation', () => {
   test('rejects oversized final recipient envelope payload', () => {
@@ -85,5 +86,34 @@ describe('htlc envelope validation', () => {
       binding,
       () => `0x${'77'.repeat(32)}`,
     )).rejects.toThrow(`Missing Entity encryption key for final recipient ${route[1]}`);
+  });
+
+  test('a low-order recipient key from a peer profile rejects the payment, not the payer', async () => {
+    const route = [`0x${'11'.repeat(32)}`, `0x${'22'.repeat(32)}`];
+    const binding = {
+      hashlock: `0x${'44'.repeat(32)}`,
+      tokenId: 1,
+      senderLockAmount: 1n,
+      timelock: 60_000n,
+      revealBeforeHeight: 100,
+    };
+    // u = 0 and u = 1 are small-order Curve25519 points: X25519 with them
+    // yields the all-zero secret, which both DH backends refuse.
+    for (const lowOrderKey of [`0x${'00'.repeat(32)}`, `0x01${'00'.repeat(31)}`]) {
+      const failure = await createOnionEnvelopes(
+        route,
+        `0x${'55'.repeat(32)}`,
+        new Map([[route[1]!, lowOrderKey]]),
+        [{ chainId: 31337, depositoryAddress: `0x${'66'.repeat(20)}` }],
+        new Map(),
+        undefined,
+        1,
+        binding,
+        () => `0x${'77'.repeat(32)}`,
+      ).then(() => null, (error: unknown) => error);
+      expect(failure).toBeInstanceOf(FailureDispositionError);
+      expect((failure as FailureDispositionError).disposition).toBe('reject');
+      expect((failure as FailureDispositionError).code).toBe('HTLC_RECIPIENT_ENCRYPTION_KEY_INVALID');
+    }
   });
 });

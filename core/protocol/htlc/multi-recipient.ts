@@ -7,6 +7,7 @@ import { MAX_HTLC_BINARY_LAYER_BYTES } from './codec/binary';
 import { RecencyMemo } from '../../support/collections/recency-memo';
 import { computeIntegrityDigest } from '../../support/bytes/integrity-checksum';
 import { countOp } from '../../support/performance/op-counters';
+import { FailureDispositionError } from '../errors/failure-taxonomy';
 
 export const HTLC_OPAQUE_CIPHERTEXT_VERSION = 'xln:htlc-opaque:aes-gcm' as const;
 export type OpaqueHtlcCiphertext = Readonly<{
@@ -160,10 +161,20 @@ export const encryptOpaqueHtlcBytes = (
   ephemeralPrivateKey: string,
 ): OpaqueHtlcCiphertext => {
   if (plaintext.length > MAX_HTLC_BINARY_LAYER_BYTES) throw new Error('HTLC_ENCRYPTION_PLAINTEXT_TOO_LARGE');
-  const recipient = keyBytes(recipientPublicKey, 'HTLC_ENTITY_ENCRYPTION_PUBLIC_KEY_INVALID');
   const ephemeralSecret = keyBytes(ephemeralPrivateKey, 'HTLC_EPHEMERAL_PRIVATE_KEY_INVALID');
   const ephemeralPublic = x25519PublicKey(ephemeralSecret);
-  const shared = x25519SharedSecret(ephemeralSecret, recipient);
+  let recipient: Uint8Array;
+  let shared: Uint8Array;
+  try {
+    recipient = keyBytes(recipientPublicKey, 'HTLC_ENTITY_ENCRYPTION_PUBLIC_KEY_INVALID');
+    shared = x25519SharedSecret(ephemeralSecret, recipient);
+  } catch (error) {
+    // The recipient key comes from a peer-signed gossip profile. A zero or
+    // low-order point fails here; that rejects this payment, it is not a
+    // payer fault. Mirrors the decrypt side (HtlcCiphertextAuthenticationError).
+    const code = 'HTLC_RECIPIENT_ENCRYPTION_KEY_INVALID';
+    throw new FailureDispositionError('reject', code, code, { cause: error });
+  }
   const context = contextBytes(contextHash);
   const nonce = deriveNonce(ephemeralPublic, recipient, context);
   const encrypted = aead(aeadKey(shared, context), nonce, context).encrypt(plaintext);
