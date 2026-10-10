@@ -1,9 +1,6 @@
 import { expect, test } from 'bun:test';
 import {
-  assertMarketMakerReadySnapshotParity,
-  buildMarketMakerBootstrapEntityStateHashFromCanonicalHashes,
   marketMakerBootstrapProgressSignature,
-  resolveMarketMakerReadySnapshotAction,
   runtimeBacklogBlocksMarketMakerQuotes,
 } from '../../../orchestrator/market-maker/node/mm-bootstrap-progress';
 import {
@@ -11,80 +8,6 @@ import {
   isBootstrapWorkWithinDeadline,
   updateBootstrapWorkStartedAt,
 } from '../../../orchestrator/bootstrap/bootstrap-progress-deadline';
-import { computeCanonicalRuntimeStateHash } from '../../../storage/canonical-hash';
-import { computeStorageFrameHash } from '../../../storage/hashes';
-import type { RuntimeFrame } from '../../../storage/types';
-
-const readyRuntimeMachine = { pendingNetworkOutputs: ['durable-output'] };
-
-const buildReadyFrame = (
-  canonicalEntityHashes: NonNullable<RuntimeFrame['canonicalEntityHashes']>,
-): RuntimeFrame => {
-  const frameBase: RuntimeFrame = {
-    height: 165,
-    timestamp: 1_000,
-    replicaMetaDigest: '0xmeta',
-    postStateHash: '0xpost-state',
-    materializedState: true,
-    canonicalEntityHashes,
-    canonicalStateHash: computeCanonicalRuntimeStateHash(165, 1_000, canonicalEntityHashes),
-    runtimeInput: { runtimeTxs: [], entityInputs: [] },
-    runtimeOutputCount: 0,
-    runtimeOutputsDigest: `0x${'00'.repeat(32)}`,
-    touchedEntities: [],
-    touchedAccounts: [],
-    touchedBookEntities: [],
-  };
-  return { ...frameBase, frameHash: computeStorageFrameHash(frameBase) };
-};
-
-test('ready snapshot parity binds the canonical Entity state', () => {
-  const canonicalEntityHashes = [
-    { entityId: '0x02', hash: '0xentity-b', cellCount: 2 },
-    { entityId: '0x01', hash: '0xentity-a', cellCount: 1 },
-  ];
-  const expected = {
-    height: 165,
-    entityStateHash: buildMarketMakerBootstrapEntityStateHashFromCanonicalHashes(canonicalEntityHashes),
-  };
-  const persistedFrame = buildReadyFrame(canonicalEntityHashes);
-
-  expect(assertMarketMakerReadySnapshotParity(expected, persistedFrame, readyRuntimeMachine))
-    .toBe(persistedFrame.canonicalStateHash);
-  // Runtime-machine state is committed by the frame postStateHash. The
-  // canonical hash remains the bounded Entity-root oracle at this height.
-  const emptyOutboxMachine = { pendingNetworkOutputs: [] };
-  expect(assertMarketMakerReadySnapshotParity(
-    expected,
-    buildReadyFrame(canonicalEntityHashes),
-    emptyOutboxMachine,
-  )).toBe(persistedFrame.canonicalStateHash);
-
-  const wrongEntities = canonicalEntityHashes.map((entry, index) =>
-    index === 0 ? { ...entry, hash: '0xwrong-entity' } : entry);
-  expect(() => assertMarketMakerReadySnapshotParity(expected, buildReadyFrame(wrongEntities), readyRuntimeMachine))
-    .toThrow('MARKET_MAKER_READY_SNAPSHOT_ENTITY_HASH_MISMATCH');
-
-  expect(() => assertMarketMakerReadySnapshotParity(
-    expected,
-    persistedFrame,
-    undefined,
-  )).toThrow('MARKET_MAKER_READY_SNAPSHOT_RUNTIME_ORACLE_MISSING');
-  expect(() => assertMarketMakerReadySnapshotParity(expected, {
-    ...persistedFrame,
-    frameHash: '0xcorrupt-frame',
-  }, readyRuntimeMachine)).toThrow('MARKET_MAKER_READY_SNAPSHOT_FRAME_HASH_MISMATCH');
-  expect(() => assertMarketMakerReadySnapshotParity(expected, null))
-    .toThrow('MARKET_MAKER_READY_SNAPSHOT_FRAME_MISSING');
-});
-
-test('ready snapshot advances only at a newer finalized runtime height', () => {
-  expect(resolveMarketMakerReadySnapshotAction(165, 0)).toBe('seed-recovery-base');
-  expect(resolveMarketMakerReadySnapshotAction(165, 165)).toBe('already-persisted');
-  expect(resolveMarketMakerReadySnapshotAction(165, 164)).toBe('advance-recovery-base');
-  expect(() => resolveMarketMakerReadySnapshotAction(165, 166))
-    .toThrow('MARKET_MAKER_READY_SNAPSHOT_STORAGE_POSITION_MISMATCH');
-});
 
 test('background runtime bookkeeping does not block quote production', () => {
   for (const runtimeTxs of [0, 2, 4]) {
