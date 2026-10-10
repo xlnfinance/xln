@@ -12,6 +12,7 @@ import {
   type StorageWriterLockBoundary,
 } from '../../../storage/runtime-dbs';
 import type { RuntimeReplica } from '../../../runtime/types';
+import { safeStringify } from '../../../protocol/serialization';
 
 const waitForReadyWorkers = async (directory: string, count: number): Promise<void> => {
   const deadline = Date.now() + 10_000;
@@ -343,8 +344,8 @@ test('a writer restarted under its crashed predecessor\'s PID reclaims that lock
     acquiredAt: Date.now(),
     expiresAt: Date.now() + STORAGE_WRITER_LOCK_TTL_MS,
   };
-  writeFileSync(lockPath, `${JSON.stringify(previousIncarnation)}\n`, 'utf8');
-  writeFileSync(candidatePath, `${JSON.stringify(previousIncarnation)}\n`, 'utf8');
+  writeFileSync(lockPath, `${safeStringify(previousIncarnation)}\n`, 'utf8');
+  writeFileSync(candidatePath, `${safeStringify(previousIncarnation)}\n`, 'utf8');
 
   let calls = 0;
   try {
