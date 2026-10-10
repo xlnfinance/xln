@@ -14,7 +14,6 @@ import { getPerfMs } from '../../support/time.ts';
 import { shortId } from '../../support/logger.ts';
 import {
   assertExternalEntityInputAllowed,
-  collectAppliedAccountSenderHints,
   resolveEntityInputReplica,
 } from './entity-input-admission.ts';
 import {
@@ -177,24 +176,40 @@ export const stageExternalEntityInput = async (
   };
 };
 
+/**
+ * A raw accountInput's fromEntityId is unverified until its frame Hanko checks
+ * out, so an Account route is learned only from a frame the Entity committed.
+ * A deferred proposal commits at the batch flush, which calls this again.
+ */
+export const registerCommittedAccountRoutes = (
+  env: RuntimeReplica,
+  input: RoutedEntityInput,
+  committedAccountFrames: RuntimeEntityInputApplyResult['inputOutcomes'][number]['committedAccountFrames'],
+  options: RuntimeEntityInputApplyOptions,
+): void => {
+  if (!input.from) return;
+  for (const { counterpartyEntityId } of committedAccountFrames) {
+    registerEntityRuntimeHintWithDeps(env, counterpartyEntityId, input.from, options.routingDeps);
+  }
+};
+
 const registerCommittedInputRoutes = (
   env: RuntimeReplica,
   staged: StagedEntityInput,
+  committedAccountFrames: RuntimeEntityInputApplyResult['inputOutcomes'][number]['committedAccountFrames'],
   options: RuntimeEntityInputApplyOptions,
 ): void => {
   if (!isCommittedEntityInput(staged.result.outcome) || !staged.input.from) {
     return;
   }
-  const hints = new Set([
-    ...collectAppliedAccountSenderHints(staged.input),
-    ...collectCrossJurisdictionRemoteEntityHints(
-      env,
-      staged.input,
-      staged.input.from,
-      options.routingDeps,
-    ),
-  ]);
-  for (const entityId of hints) {
+  registerCommittedAccountRoutes(env, staged.input, committedAccountFrames, options);
+  const crossJurisdictionHints = collectCrossJurisdictionRemoteEntityHints(
+    env,
+    staged.input,
+    staged.input.from,
+    options.routingDeps,
+  );
+  for (const entityId of new Set(crossJurisdictionHints)) {
     registerEntityRuntimeHintWithDeps(
       env,
       entityId,
@@ -221,16 +236,17 @@ export const collectStagedEntityInput = (
       context.entityCommitInputShapes,
     );
   }
+  const committedAccountFrames = isCommittedEntityInput(result.outcome)
+    ? collectCommittedAccountFrames(input, result.nextReplica)
+    : [];
   context.inputOutcomes.push({
     inputIndex,
     outcome: result.outcome,
     entityFrameCommitted: result.entityFrameCommitted,
-    committedAccountFrames: isCommittedEntityInput(result.outcome)
-      ? collectCommittedAccountFrames(input, result.nextReplica)
-      : [],
+    committedAccountFrames,
   });
   context.entityFrameCommitted ||= result.entityFrameCommitted;
-  registerCommittedInputRoutes(env, staged, options);
+  registerCommittedInputRoutes(env, staged, committedAccountFrames, options);
   context.externalApplyMs += elapsedMs;
   recordEntityInputProfile(context, input, signerId, elapsedMs, result);
   if (isCommittedEntityInput(result.outcome)) {

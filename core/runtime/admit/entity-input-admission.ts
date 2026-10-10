@@ -21,36 +21,6 @@ export const assertRuntimeEntityIngress: (
   throw new Error(`${code}: ${message}${detailText}`);
 };
 
-export const collectAppliedAccountSenderHints = (
-  input: RoutedEntityInput,
-): string[] => {
-  const localEntityId = String(input.entityId || '').toLowerCase();
-  const hints = new Set<string>();
-  for (const tx of getEffectiveEntityInputTxs(input)) {
-    if (tx.type !== 'accountInput') continue;
-    const data = tx.data as {
-      fromEntityId?: unknown;
-      toEntityId?: unknown;
-    };
-    const fromEntityId =
-      typeof data.fromEntityId === 'string'
-        ? data.fromEntityId.toLowerCase()
-        : '';
-    const toEntityId =
-      typeof data.toEntityId === 'string'
-        ? data.toEntityId.toLowerCase()
-        : '';
-    if (
-      fromEntityId &&
-      toEntityId === localEntityId &&
-      fromEntityId !== localEntityId
-    ) {
-      hints.add(fromEntityId);
-    }
-  }
-  return [...hints];
-};
-
 export const assertExternalEntityInputAllowed = (
   entityInput: RoutedEntityInput,
 ): void => {

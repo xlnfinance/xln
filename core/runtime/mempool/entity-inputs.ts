@@ -11,6 +11,8 @@ import {
 } from '../admit/entity-input-contract.ts';
 import {
   applyExternalEntityInput,
+  collectCommittedAccountFrames,
+  registerCommittedAccountRoutes,
   rejectMalformedEntityInput,
   type StagedEntityInput,
 } from '../admit/entity-input-staging.ts';
@@ -38,10 +40,7 @@ export {
   type RuntimeEntityInputApplyOptions,
   type RuntimeEntityInputApplyResult,
 } from '../admit/entity-input-contract.ts';
-export {
-  collectAppliedAccountSenderHints,
-  validateExternalEntityInputTargets,
-} from '../admit/entity-input-admission.ts';
+export { validateExternalEntityInputTargets } from '../admit/entity-input-admission.ts';
 
 type EntityInputBatchContext = ReturnType<typeof createRuntimeEntityInputBatchContext>;
 
@@ -182,6 +181,7 @@ const createDeferredProposalBatch = (
 ) => {
   const replicas = new Map<string, { entityId: string; signerId: string }>();
   const outcomeSlots = new Map<string, number[]>();
+  const deferredInputs = new Map<string, RoutedEntityInput[]>();
   let flushIndex = initialFlushIndex;
   const noteStaged = (staged: StagedEntityInput, deferred: boolean): void => {
     if (staged.result.entityFrameCommitted) {
@@ -190,12 +190,22 @@ const createDeferredProposalBatch = (
         context.inputOutcomes[slot]!.entityFrameCommitted = true;
       }
       outcomeSlots.delete(staged.replicaKey);
+      for (const input of deferredInputs.get(staged.replicaKey) ?? []) {
+        const frames = collectCommittedAccountFrames(input, staged.result.nextReplica);
+        registerCommittedAccountRoutes(env, input, frames, options);
+      }
+      deferredInputs.delete(staged.replicaKey);
     }
     if (!deferred || !isCommittedEntityInput(staged.result.outcome) || staged.result.entityFrameCommitted) return;
     replicas.set(staged.replicaKey, {
       entityId: staged.input.entityId,
       signerId: staged.signerId,
     });
+    if (staged.input.from) {
+      const inputs = deferredInputs.get(staged.replicaKey) ?? [];
+      inputs.push(staged.input);
+      deferredInputs.set(staged.replicaKey, inputs);
+    }
     const slot = context.inputOutcomes.findLastIndex(entry => entry.inputIndex === staged.inputIndex);
     if (slot < 0) return;
     const slots = outcomeSlots.get(staged.replicaKey) ?? [];

@@ -628,7 +628,9 @@ describe('runtime frame atomicity', () => {
       timestamp: control.state.timestamp,
     });
     expect(control.state.eReplicas.get(`${controlReplica.entityId}:${validator}`)?.mempool).toHaveLength(1);
-    expect(control.infrastructure?.entityRuntimeHints?.get(remoteEntityId)?.runtimeId).toBe(remoteRuntimeId);
+    // An unverified accountInput never binds its claimed sender Entity to the
+    // sending Runtime; only a committed Account frame does.
+    expect(control.infrastructure?.entityRuntimeHints?.has(remoteEntityId)).toBe(false);
     // Import creates the local replica; a 2-of-2 board cannot certify an
     // Entity frame before collecting both signatures.
     const controlImported = control.state.eReplicas.get(`${imported.entityId}:${imported.signerId}`);
