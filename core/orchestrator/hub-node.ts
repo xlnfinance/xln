@@ -248,7 +248,7 @@ const readRpcUrls = (): Record<number, string> => {
     const envName = index === 1 ? 'ANVIL_RPC' : `ANVIL_RPC${index}`;
     const defaultRpcUrl = index === 1
       ? process.env['ANVIL_RPC'] || ''
-      : process.env[envName] || process.env[`RPC${index}`] || process.env[`XLN_RPC${index}_URL`] || '';
+      : process.env[envName] || '';
     urls[index] = getArg(flag, index === 2 ? (process.env['ANVIL_RPC2'] || process.env['RPC_TRON'] || defaultRpcUrl) : defaultRpcUrl);
   }
   return urls;
