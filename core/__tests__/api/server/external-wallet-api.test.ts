@@ -304,6 +304,43 @@ describe('external wallet API faucet transaction gate', () => {
     }
   });
 
+  test('gas faucet bounds its receipt wait and answers a typed retryable 504 with the tx hash', async () => {
+    // `await tx.wait()` had no timeout while holding the per-wallet lock, so a
+    // dropped transaction blocked every later faucet request forever.
+    const txHash = `0x${'ab'.repeat(32)}`;
+    const waitTimeouts: unknown[] = [];
+    const provider = {
+      getBalance: async () => 10n ** 21n,
+      getNetwork: async () => new ethers.Network('faucet-test', 31337n),
+      getTransactionCount: async () => 0,
+      estimateGas: async () => 21_000n,
+      getFeeData: async () => new ethers.FeeData(null, 1n, 1n),
+      broadcastTransaction: async () => ({
+        hash: txHash,
+        wait: async (_confirms?: number, timeout?: number) => {
+          waitTimeouts.push(timeout);
+          throw Object.assign(new Error('wait for transaction timeout'), { code: 'TIMEOUT' });
+        },
+      }),
+    } as unknown as ethers.Provider;
+    const adapter = { mode: 'rpc', chainId: 31337, provider, signer: {} } as unknown as JAdapter;
+    const api = createExternalWalletApi(makeContext(adapter, async () => false));
+    const gasRequest = () => new Request('http://localhost/api/faucet/gas', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: safeStringify({ userAddress: USER_ADDRESS, amount: '0.1' }),
+    });
+
+    for (let attempt = 0; attempt < 2; attempt++) {
+      // The second attempt proves the timed-out holder released the lock.
+      const response = await api.handleGasFaucet(gasRequest());
+      expect(response.status).toBe(504);
+      expect(await response.json()).toMatchObject({ code: 'FAUCET_TX_PENDING', txHash, retryable: true });
+    }
+    expect(waitTimeouts).toHaveLength(2);
+    expect(waitTimeouts.every(timeout => Number.isSafeInteger(timeout) && Number(timeout) > 0)).toBe(true);
+  });
+
   test('serializes startup provision and user faucet through the same gate', async () => {
     const provider = makeTestProvider();
     const adapter = makeBrowserVmAdapter(provider);

@@ -101,24 +101,46 @@ export const withFaucetWalletLock = async <Result>(
   }
 };
 
+/**
+ * A broadcast faucet transaction whose receipt did not arrive: PENDING when the
+ * bounded wait expired (the transaction may still be mined; retryable, the
+ * hash lets the caller check it), FAILED when the receipt wait itself failed.
+ */
+export class FaucetTxWaitError extends Error {
+  readonly code: 'FAUCET_TX_PENDING' | 'FAUCET_TX_FAILED';
+  readonly txHash: string;
+
+  constructor(code: FaucetTxWaitError['code'], txHash: string, message: string) {
+    super(message);
+    this.name = 'FaucetTxWaitError';
+    this.code = code;
+    this.txHash = txHash;
+  }
+}
+
 export const waitForFaucetTx = async (
   tx: WaitableTransaction,
   label: string,
   details: Record<string, unknown>,
 ): Promise<void> => {
+  const fail = (code: FaucetTxWaitError['code'], error: unknown): FaucetTxWaitError => new FaucetTxWaitError(
+    code,
+    tx.hash,
+    `FAUCET_TX_WAIT_FAILED:${safeStringify({
+      label,
+      hash: tx.hash,
+      timeoutMs: FAUCET_TX_WAIT_TIMEOUT_MS,
+      error: error instanceof Error ? error.message : String(error),
+      ...details,
+    })}`,
+  );
+  let receipt: unknown;
   try {
-    if (!(await tx.wait(1, FAUCET_TX_WAIT_TIMEOUT_MS))) throw new Error('receipt_timeout');
+    receipt = await tx.wait(1, FAUCET_TX_WAIT_TIMEOUT_MS);
   } catch (error) {
-    throw new Error(
-      `FAUCET_TX_WAIT_FAILED:${safeStringify({
-        label,
-        hash: tx.hash,
-        timeoutMs: FAUCET_TX_WAIT_TIMEOUT_MS,
-        error: error instanceof Error ? error.message : String(error),
-        ...details,
-      })}`,
-    );
+    throw fail(ethers.isError(error, 'TIMEOUT') ? 'FAUCET_TX_PENDING' : 'FAUCET_TX_FAILED', error);
   }
+  if (!receipt) throw fail('FAUCET_TX_PENDING', 'receipt_timeout');
 };
 
 const refillThresholdFor = (target: bigint): bigint => {

@@ -3,6 +3,7 @@ import { ERC20Mock__factory } from '../../../../jurisdictions/typechain-types/in
 import type { JAdapter, JTokenInfo } from '../../../jurisdiction/adapter/types';
 import type { ExternalWalletApiContext } from './context';
 import {
+  FaucetTxWaitError,
   requireFaucetWalletBalances,
   toErc20ContractRunner,
   waitForFaucetTx,
@@ -12,8 +13,17 @@ import {
 import { createJsonResponse, externalWalletLog, readFaucetBody, readGasFaucetBody } from './http';
 import { BoundedLockBusyError } from '../../../support/bounded-lock';
 
-/** Typed answers for the faucet's own retryable conditions; anything else stays a 500. */
-const faucetBusyResponse = (context: ExternalWalletApiContext, error: unknown): Response | null => {
+/** Typed answers for the faucet's own known conditions; anything else stays a 500. */
+const faucetKnownFailureResponse = (context: ExternalWalletApiContext, error: unknown): Response | null => {
+  if (error instanceof FaucetTxWaitError) {
+    const pending = error.code === 'FAUCET_TX_PENDING';
+    return createJsonResponse(context.jsonHeaders, {
+      error: error.message,
+      code: error.code,
+      txHash: error.txHash,
+      retryable: pending,
+    }, pending ? 504 : 500);
+  }
   if (!(error instanceof BoundedLockBusyError)) return null;
   return createJsonResponse(context.jsonHeaders, {
     error: 'Faucet is busy; retry later',
@@ -180,8 +190,8 @@ export const handleErc20Faucet = async (context: ExternalWalletApiContext, reque
       ? handleBrowserVmErc20Faucet(context, adapter, parsed.request)
       : transferErc20AndGas(context, adapter, parsed.tokens, parsed.request));
   } catch (error) {
-    const busy = faucetBusyResponse(context, error);
-    if (busy) return busy;
+    const known = faucetKnownFailureResponse(context, error);
+    if (known) return known;
     const message = error instanceof Error ? error.message : String(error);
     externalWalletLog.error('faucet.erc20.failed', { error: message });
     context.emitDebugEvent({
@@ -212,7 +222,8 @@ export const handleGasFaucet = async (context: ExternalWalletApiContext, request
         requiredEth: topupAmount + ethers.parseEther('0.01'),
       });
       const tx = await wallet.sendTransaction({ to: userAddress, value: topupAmount });
-      await tx.wait();
+      // An unbounded wait held the per-wallet lock forever on a dropped tx.
+      await waitForFaucetTx(tx, 'gas-faucet-transfer', { requestId, userAddress });
       return createJsonResponse(context.jsonHeaders, {
         success: true,
         type: 'gas',
@@ -223,8 +234,8 @@ export const handleGasFaucet = async (context: ExternalWalletApiContext, request
       });
     });
   } catch (error) {
-    const busy = faucetBusyResponse(context, error);
-    if (busy) return busy;
+    const known = faucetKnownFailureResponse(context, error);
+    if (known) return known;
     const message = error instanceof Error ? error.message : String(error);
     externalWalletLog.error('faucet.gas.failed', { error: message });
     return createJsonResponse(context.jsonHeaders, { error: message }, 500);
