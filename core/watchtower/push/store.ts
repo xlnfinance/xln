@@ -10,14 +10,17 @@ import { mkdir } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { Level } from 'level';
 import { serializeTaggedJson } from '../../protocol/serialization';
+import { createStructuredLogger } from '../../support/logger';
 import { decodeStoredPushRegistration } from './registration';
 import type { StoredPushRegistration } from './types';
 
 const DEFAULT_REGISTRATION_TTL_MS = 90 * 24 * 60 * 60 * 1000;
 const DEFAULT_WAKE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+const pushStoreLog = createStructuredLogger('watchtower.push_store');
 
 export type PushStoreStats = {
   registrationCount: number;
+  invalidRegistrationCount: number;
   watchTargetCount: number;
 };
 
@@ -79,6 +82,28 @@ const ensureOpen = async (context: PushStoreContext): Promise<void> => {
   }
 };
 
+/**
+ * Registry-wide scans serve every registration, so one undecodable row is
+ * reported and skipped there instead of failing the scan for everyone.
+ */
+const decodeScannedRegistration = (
+  key: string,
+  raw: string,
+  scan: 'targets' | 'unregister' | 'prune' | null,
+): StoredPushRegistration | null => {
+  try {
+    return decodeStoredPushRegistration(raw, key);
+  } catch (error) {
+    if (scan) {
+      pushStoreLog.error('registration.undecodable', {
+        scan,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+    return null;
+  }
+};
+
 const getStoredValue = async (
   context: PushStoreContext,
   key: string,
@@ -132,9 +157,10 @@ const removeToken = async (
   const normalizedTokenHash = String(tokenHash).toLowerCase();
   const keys: string[] = [];
   for await (const [key, raw] of context.db.iterator({ gte: 'reg:', lte: 'reg:\xff' })) {
-    const registration = decodeStoredPushRegistration(String(raw), key);
+    const registration = decodeScannedRegistration(key, String(raw), 'unregister');
     if (
-      registration.runtimeId.toLowerCase() === normalizedRuntimeId
+      registration
+      && registration.runtimeId.toLowerCase() === normalizedRuntimeId
       && registration.tokenHash.toLowerCase() === normalizedTokenHash
     ) {
       keys.push(key);
@@ -169,8 +195,8 @@ const listWatchTargets = async (
   const cutoff = context.now() - context.registrationTtlMs;
   const targets = new Map<string, PushWatchTarget & { updatedAt: number }>();
   for await (const [storageKey, raw] of context.db.iterator({ gte: 'reg:', lte: 'reg:\xff' })) {
-    const registration = decodeStoredPushRegistration(String(raw), storageKey);
-    if (Number(registration.updatedAt || 0) < cutoff) continue;
+    const registration = decodeScannedRegistration(storageKey, String(raw), 'targets');
+    if (!registration || Number(registration.updatedAt || 0) < cutoff) continue;
     const key = normTarget(registration.chainId, registration.depositoryAddress);
     const existing = targets.get(key);
     if (!existing || Number(registration.updatedAt || 0) > existing.updatedAt) {
@@ -232,13 +258,15 @@ const markWoken = async (
 const getStats = async (context: PushStoreContext): Promise<PushStoreStats> => {
   await ensureOpen(context);
   let registrationCount = 0;
+  let invalidRegistrationCount = 0;
   const targets = new Set<string>();
   for await (const [key, raw] of context.db.iterator({ gte: 'reg:', lte: 'reg:\xff' })) {
     registrationCount += 1;
-    const registration = decodeStoredPushRegistration(String(raw), key);
-    targets.add(normTarget(registration.chainId, registration.depositoryAddress));
+    const registration = decodeScannedRegistration(key, String(raw), null);
+    if (!registration) invalidRegistrationCount += 1;
+    else targets.add(normTarget(registration.chainId, registration.depositoryAddress));
   }
-  return { registrationCount, watchTargetCount: targets.size };
+  return { registrationCount, invalidRegistrationCount, watchTargetCount: targets.size };
 };
 
 const pruneExpired = async (
@@ -250,8 +278,8 @@ const pruneExpired = async (
   const keys: string[] = [];
   for await (const [key, raw] of context.db.iterator()) {
     if (key.startsWith('reg:')) {
-      const registration = decodeStoredPushRegistration(String(raw), key);
-      if (Number(registration.updatedAt || 0) < registrationCutoff) keys.push(key);
+      const registration = decodeScannedRegistration(key, String(raw), 'prune');
+      if (registration && Number(registration.updatedAt || 0) < registrationCutoff) keys.push(key);
     } else if (key.startsWith('wake:')) {
       const timestamp = Number(raw);
       if (Number.isFinite(timestamp) && timestamp < wakeCutoff) keys.push(key);

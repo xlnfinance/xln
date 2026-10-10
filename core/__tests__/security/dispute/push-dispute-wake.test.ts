@@ -21,6 +21,7 @@ import {
 import { runDisputeWatchSweep, type DisputeWatchStore } from '../../../watchtower/dispute-watch';
 import { ConsolePushSender, WebhookPushSender } from '../../../watchtower/push/sender';
 import type { PushNotificationV1, PushSender, StoredPushRegistration } from '../../../watchtower/push/types';
+import { serializeTaggedJson } from '../../../protocol/serialization';
 
 const DEPOSITORY = '0x000000000000000000000000000000000000dead';
 const CHAIN_ID = 31337;
@@ -208,6 +209,41 @@ describe('push registration signature', () => {
     try {
       await expect(store.listRegistrationsForTarget(CHAIN_ID, DEPOSITORY))
         .rejects.toThrow(`PUSH_STORED_REGISTRATION_INVALID:key=${storageKey}`);
+    } finally {
+      await store.close();
+    }
+  });
+
+  test('refuses a chain id the stored registration reader would refuse', async () => {
+    const wallet = Wallet.createRandom();
+    const runtimeId = wallet.address.toLowerCase();
+    const signedAt = Date.now();
+    const chainId = 1e300;
+    const ownerSignature = await wallet.signMessage(buildPushRegistrationMessage(
+      runtimeId, entityId(7), hashPushToken('poison'), 'web', chainId, DEPOSITORY, 'http://127.0.0.1:8545/', signedAt,
+    ));
+    expect(() => verifyPushRegistration({
+      type: 'push_registration', version: 1, runtimeId, entityId: entityId(7), token: 'poison', platform: 'web',
+      chainId, depositoryAddress: DEPOSITORY, rpcUrl: 'http://127.0.0.1:8545/', signedAt, ownerSignature,
+    }, { now: signedAt })).toThrow('PUSH_CHAIN_ID_INVALID');
+  });
+
+  test('one undecodable registration does not stop registry scans for everyone', async () => {
+    const dbPath = join(await mkdtemp(join(tmpdir(), 'xln-push-isolate-')), 'push.level');
+    const corruptKey = `reg:${CHAIN_ID}:${DEPOSITORY}:${entityId(1)}:${hashPushToken('corrupt')}`;
+    const rawDb = new Level<string, string>(dbPath, { valueEncoding: 'utf8' });
+    await rawDb.open();
+    await rawDb.put(corruptKey, serializeTaggedJson({ ...makeRegistration(), chainId: 1e300 }));
+    await rawDb.close();
+
+    const store = createPushStore({ dbPath, now: () => 2_000 });
+    const other = { chainId: 1, depositoryAddress: `0x${'ab'.repeat(20)}` };
+    try {
+      await store.registerToken(makeRegistration({ ...other, entityId: entityId(5) }));
+      expect(await store.listWatchTargets()).toEqual([{ ...other, rpcUrl: 'http://127.0.0.1:8545/' }]);
+      expect(await store.getStats()).toEqual({ registrationCount: 2, invalidRegistrationCount: 1, watchTargetCount: 1 });
+      expect(await store.pruneExpired()).toEqual({ deleted: 0 });
+      expect(await store.removeToken(ZeroAddress, hashPushToken('tok-1'))).toBe(1);
     } finally {
       await store.close();
     }

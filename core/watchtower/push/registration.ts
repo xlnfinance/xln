@@ -67,11 +67,9 @@ const normalizeTokenHash = (value: unknown): string => {
   return tokenHash;
 };
 
-const normalizeChainId = (value: unknown): number => {
-  const chainId = Math.floor(Number(value));
-  if (!Number.isFinite(chainId) || chainId <= 0) throw new Error('PUSH_CHAIN_ID_INVALID');
-  return chainId;
-};
+// The stored decoder requires a safe integer. Flooring 1e300 here stored a
+// row that made every later registry scan throw for every registration.
+const normalizeChainId = (value: unknown): number => requireBoundaryInteger(value, 'PUSH_CHAIN_ID_INVALID', 1);
 
 const normalizePushRpcUrl = (value: unknown): string => {
   const raw = String(value || '').trim();
