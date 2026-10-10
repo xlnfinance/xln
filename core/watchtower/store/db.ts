@@ -183,6 +183,10 @@ export const writeLookup = async (context: WatchtowerStoreContext, doc: StoredLo
   await ensureWatchtowerStoreOpen(context);
   const storageKey = lookupKeyFor(doc.lookupKey);
   const serialized = serializeTaggedJson(doc);
+  // The stored reader is the boundary. A record it refuses was once written
+  // from a self-signed request, and every later sweep threw on it before
+  // sending any counter-dispute.
+  decodeStoredLookupDoc(serialized, doc.lookupKey);
   const storedBytes = Buffer.byteLength(serialized, 'utf8');
   // Enforce the limit on the final document, including newly signed receipts.
   // Preparation estimates must never authorize an oversized persisted backup.

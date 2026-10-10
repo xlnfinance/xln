@@ -86,6 +86,73 @@ const encodeDisputeHash = (
   ),
 );
 
+const sequenceAppointment = async (lookupKey: string, runtimeId: string) => {
+  const encryptedRemedy = await encryptTowerPayloadForWatchSeed(
+    encodeTowerCounterDisputeRemedy({
+      version: 1,
+      type: 'counter_dispute_remedy',
+      rpcUrl: 'http://127.0.0.1:8545',
+      chainId: 31337,
+      depositoryAddress: '0x1111111111111111111111111111111111111111',
+      watchedEntityId: '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+      towerAddress: Wallet.createRandom().address.toLowerCase(),
+      lastResortWindowSeconds: 8,
+      appointmentSequence: 4,
+      ownerAuthorizationHanko: '0xbeef',
+      latestProof: {
+        counterentity: '0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+        finalNonce: 4,
+        proposerIsLeft: false,
+        finalProofbody: makeProofBody(`0x${'ee'.repeat(32)}`),
+        leftArguments: '0x',
+        rightArguments: '0x',
+        sig: '0xcafe',
+      },
+    }),
+    `0x${'ee'.repeat(32)}`,
+  );
+
+  return {
+    type: 'tower_appointment' as const,
+    version: 1 as const,
+    towerMode: 'delayed_last_resort' as const,
+    lookupKey,
+    slot: 0,
+    bundle: {
+      version: 1 as const,
+      runtimeId: runtimeId,
+      lookupKey,
+      height: 10,
+      createdAt: 1_717_171_721_000,
+      bundleHash: keccak256(toUtf8Bytes('bundle:sequence:base')),
+      iv: '0x1234',
+      ciphertext: '0xabcd',
+    },
+    lastResortPayload: {
+      triggerHint: 'chain:31337:acct:sequence',
+      encryptedRemedy,
+      watch: {
+        rpcUrl: 'http://127.0.0.1:8545',
+        chainId: 31337,
+        depositoryAddress: '0x1111111111111111111111111111111111111111',
+        watchedEntityId: '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+        counterentity: '0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+      },
+      actionKind: 'counter_dispute_only' as const,
+      appointmentSequence: 4,
+      proofNonce: 4,
+      proofBodyHash: '0xdddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd',
+      responseMode: 'last_resort' as const,
+      lastResortWindowSeconds: 8,
+    },
+    ownerProof: {
+      runtimeId: runtimeId,
+      signedAt: Date.now(),
+      signature: '0xdead',
+    },
+  };
+};
+
 describe('watchtower delayed last-resort sweep', () => {
   test('rejects malformed signed remedy authority instead of repairing it', async () => {
     const remedy = {
@@ -800,70 +867,7 @@ describe('watchtower delayed last-resort sweep', () => {
       towerId: 'tower-last-resort-sequence',
       dbPath: join(tempRoot, 'tower.level'),
     });
-    const encryptedRemedy = await encryptTowerPayloadForWatchSeed(
-      encodeTowerCounterDisputeRemedy({
-        version: 1,
-        type: 'counter_dispute_remedy',
-        rpcUrl: 'http://127.0.0.1:8545',
-        chainId: 31337,
-        depositoryAddress: '0x1111111111111111111111111111111111111111',
-        watchedEntityId: '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
-        towerAddress: Wallet.createRandom().address.toLowerCase(),
-        lastResortWindowSeconds: 8,
-        appointmentSequence: 4,
-        ownerAuthorizationHanko: '0xbeef',
-        latestProof: {
-          counterentity: '0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
-          finalNonce: 4,
-          proposerIsLeft: false,
-          finalProofbody: makeProofBody(`0x${'ee'.repeat(32)}`),
-          leftArguments: '0x',
-          rightArguments: '0x',
-          sig: '0xcafe',
-        },
-      }),
-      `0x${'ee'.repeat(32)}`,
-    );
-
-    const baseAppointment = {
-      type: 'tower_appointment' as const,
-      version: 1 as const,
-      towerMode: 'delayed_last_resort' as const,
-      lookupKey,
-      slot: 0,
-      bundle: {
-        version: 1 as const,
-        runtimeId: runtimeWallet.address.toLowerCase(),
-        lookupKey,
-        height: 10,
-        createdAt: 1_717_171_721_000,
-        bundleHash: keccak256(toUtf8Bytes('bundle:sequence:base')),
-        iv: '0x1234',
-        ciphertext: '0xabcd',
-      },
-      lastResortPayload: {
-        triggerHint: 'chain:31337:acct:sequence',
-        encryptedRemedy,
-        watch: {
-          rpcUrl: 'http://127.0.0.1:8545',
-          chainId: 31337,
-          depositoryAddress: '0x1111111111111111111111111111111111111111',
-          watchedEntityId: '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
-          counterentity: '0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
-        },
-        actionKind: 'counter_dispute_only' as const,
-        appointmentSequence: 4,
-        proofNonce: 4,
-        proofBodyHash: '0xdddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd',
-        responseMode: 'last_resort' as const,
-        lastResortWindowSeconds: 8,
-      },
-      ownerProof: {
-        runtimeId: runtimeWallet.address.toLowerCase(),
-        signedAt: Date.now(),
-        signature: '0xdead',
-      },
-    };
+    const baseAppointment = await sequenceAppointment(lookupKey, runtimeWallet.address.toLowerCase());
 
     await store.upsertAppointment({
       ...baseAppointment,
@@ -897,5 +901,35 @@ describe('watchtower delayed last-resort sweep', () => {
     const [latest] = await store.listLatestLastResortAppointments();
     expect(latest?.lastResortPayload.appointmentSequence).toBe(5);
     expect(latest?.bundle.height).toBe(11);
+  });
+
+  test('refuses a record the stored reader rejects, so one request cannot stop every counter-dispute', async () => {
+    const runtimeWallet = Wallet.createRandom();
+    const lookupKey = makeLookupKey('tower:last-resort:poison-record');
+    const tempRoot = join(process.cwd(), '.tmp-tests', `tower-last-resort-poison-${Date.now()}`);
+    tempRoots.push(tempRoot);
+    await mkdir(tempRoot, { recursive: true });
+    const store = createWatchtowerStore({
+      towerId: 'tower-last-resort-poison',
+      dbPath: join(tempRoot, 'tower.level'),
+    });
+    const appointment = await sequenceAppointment(lookupKey, runtimeWallet.address.toLowerCase());
+    await store.upsertAppointment(appointment);
+
+    // The appointment checks let these through; the stored reader refused them
+    // later, inside the sweep listing, before any counter-dispute was sent.
+    await expect(store.upsertAppointment({
+      ...appointment,
+      slot: 1,
+      bundle: { ...appointment.bundle, kind: 'x' } as unknown as TowerAppointmentV1['bundle'],
+    })).rejects.toThrow('TOWER_STORED_BUNDLE_KIND_INVALID');
+    await expect(store.upsertAppointment({
+      ...appointment,
+      slot: 1,
+      bundle: { ...appointment.bundle, height: 1e300 },
+    })).rejects.toThrow(/TOWER_STORED_\w+_HEIGHT_INVALID/);
+
+    const [latest] = await store.listLatestLastResortAppointments();
+    expect(latest?.lastResortPayload.appointmentSequence).toBe(4);
   });
 });
