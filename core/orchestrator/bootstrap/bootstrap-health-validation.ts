@@ -47,6 +47,15 @@ const requiredNullableSafeInteger = (record: Record<string, unknown>, key: strin
   }
 };
 
+const requiredField = (
+  record: Record<string, unknown>,
+  key: string,
+  type: 'boolean' | 'string',
+  path: string,
+): void => {
+  if (typeof record[key] !== type) invalid(`${path}.${key}`, type);
+};
+
 const requiredNullableString = (record: Record<string, unknown>, key: string, path: string): void => {
   const value = record[key];
   if (value !== null && typeof value !== 'string') invalid(`${path}.${key}`, 'null-or-string');
@@ -73,13 +82,15 @@ const validateMesh = (value: unknown): void => {
   for (const [index, valueAtIndex] of optionalArray(mesh['pairs'], 'mesh.pairs').entries()) {
     const path = `mesh.pairs[${index}]`;
     const pair = recordAt(valueAtIndex, path);
-    for (const key of ['counterpartyId', 'counterpartyName', 'grantedByMe', 'grantedByPeer'] as const) {
-      optionalField(pair, key, 'string', path);
-    }
-    for (const key of ['hasAccount', 'ready'] as const) optionalField(pair, key, 'boolean', path);
     requiredSafeInteger(pair, 'currentHeight', path);
     requiredNullableSafeInteger(pair, 'pendingFrameHeight', path);
     requiredNullableString(pair, 'pendingFrameHash', path);
+    // Every pair field is read unconditionally downstream (hub baseline
+    // progress lowercases counterpartyId), so none of them is optional here.
+    for (const key of ['counterpartyId', 'counterpartyName', 'grantedByMe', 'grantedByPeer'] as const) {
+      requiredField(pair, key, 'string', path);
+    }
+    for (const key of ['hasAccount', 'ready'] as const) requiredField(pair, key, 'boolean', path);
   }
 };
 

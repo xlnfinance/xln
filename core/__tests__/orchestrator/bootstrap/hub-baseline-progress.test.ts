@@ -77,6 +77,26 @@ describe('hub baseline progress', () => {
     })).toThrow('BOOTSTRAP_HEALTH_PAYLOAD_INVALID:path=health.runtime.halted:expected=boolean');
   });
 
+  test('rejects a mesh pair without the counterparty fields that baseline progress reads', () => {
+    const pair = {
+      counterpartyId: 'h2',
+      counterpartyName: 'H2',
+      hasAccount: true,
+      currentHeight: 1,
+      pendingFrameHeight: null,
+      pendingFrameHash: null,
+      grantedByMe: '0',
+      grantedByPeer: '0',
+      ready: false,
+    };
+    expect(() => validateHubHealthPayload({ height: 1, mesh: { pairs: [pair] } })).not.toThrow();
+    for (const key of Object.keys(pair).filter(name => !['pendingFrameHeight', 'pendingFrameHash'].includes(name))) {
+      const { [key]: _omitted, ...incomplete } = pair as Record<string, unknown>;
+      expect(() => validateHubHealthPayload({ height: 1, mesh: { pairs: [incomplete] } }))
+        .toThrow(`BOOTSTRAP_HEALTH_PAYLOAD_INVALID:path=mesh.pairs[0].${key}`);
+    }
+  });
+
   test('counts runtime frames while startup catch-up is still forming', () => {
     expect(signature(health({ height: 2 }))).not.toBe(signature(health({ height: 1 })));
   });
