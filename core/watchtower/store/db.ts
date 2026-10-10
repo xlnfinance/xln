@@ -210,3 +210,25 @@ export const writeLookup = async (context: WatchtowerStoreContext, doc: StoredLo
   usage.totalStoredBytes = nextTotalStoredBytes;
   invalidateWatchtowerStats(context);
 };
+
+/**
+ * A lookup document lives as long as its receipt promised (expiresAt =
+ * updatedAt + receiptTtlMs); every upload refreshes it. Kept forever, abandoned
+ * or junk documents held the global key and byte quota and every sweep slot.
+ * Serialized with appointment writes so a concurrent refresh is never deleted.
+ */
+export const deleteExpiredLookups = async (context: WatchtowerStoreContext, cutoff: number): Promise<number> =>
+  runSerializedAppointmentWrite(context, async () => {
+    await ensureWatchtowerStoreOpen(context);
+    const expired: string[] = [];
+    for await (const [key, raw] of context.db.iterator({ gte: 'lookup:', lte: 'lookup:\xff' })) {
+      const doc = decodeWatchtowerStoredValue('lookup', String(key), String(raw), decodeStoredLookupDoc);
+      if (doc.updatedAt < cutoff) expired.push(String(key));
+    }
+    if (expired.length === 0) return 0;
+    await context.db.batch(expired.map(key => ({ type: 'del' as const, key })));
+    // The next write rescans usage from disk, freeing the deleted slots.
+    context.lookupUsage = null;
+    invalidateWatchtowerStats(context);
+    return expired.length;
+  });

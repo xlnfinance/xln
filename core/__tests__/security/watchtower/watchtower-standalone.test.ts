@@ -18,6 +18,7 @@ import {
 } from '../../../storage/recovery/bundle/crypto';
 import { serializeTaggedJson, safeStringify } from '../../../protocol/serialization';
 import type { JurisdictionConfig, TowerAppointmentV1 } from '../../../api/public/runtime-module';
+import { createWatchtowerStore } from '../../../watchtower/store';
 import { decodeStoredLookupDoc } from '../../../watchtower/store/decode';
 import { startStandaloneWatchtowerServer, type StandaloneWatchtowerServer } from '../../../watchtower/standalone-server';
 import { createTestJReplica } from '../../helpers/j-replica';
@@ -481,6 +482,56 @@ describe('standalone watchtower service', () => {
       server.store.getLatest(second.appointment.lookupKey),
     ]);
     expect(retained.filter(Boolean)).toHaveLength(1);
+  });
+
+  test('an appointment not refreshed within its receipt lifetime is pruned and frees its quota slot', async () => {
+    const tempRoot = join(process.cwd(), '.tmp-tests', `watchtower-lookup-expiry-${Date.now()}`);
+    rmSync(tempRoot, { recursive: true, force: true });
+    mkdirSync(tempRoot, { recursive: true });
+    let now = 1_000_000;
+    const ttl = 60_000;
+    const store = createWatchtowerStore({
+      dbPath: join(tempRoot, 'tower.level'),
+      maxLookupKeys: 2,
+      receiptTtlMs: ttl,
+      now: () => now,
+    });
+    const backup = (label: string): TowerAppointmentV1 => {
+      const runtimeId = Wallet.createRandom().address.toLowerCase();
+      const lookupKey = keccak256(toUtf8Bytes(`tower:expiry:${label}`));
+      return {
+        type: 'tower_appointment', version: 1, towerMode: 'blind_backup', lookupKey, slot: 0,
+        bundle: {
+          version: 1, runtimeId, lookupKey, height: 1, createdAt: now,
+          bundleHash: keccak256(toUtf8Bytes(`bundle:${label}`)), iv: '0x1234', ciphertext: '0xabcd',
+        },
+        ownerProof: { runtimeId, signedAt: now, signature: '0xdead' },
+      };
+    };
+    try {
+      const abandoned = backup('abandoned');
+      const refreshed = backup('refreshed');
+      const receipt = await store.upsertAppointment(abandoned);
+      expect(receipt.expiresAt).toBe(now + ttl);
+      await store.upsertAppointment(refreshed);
+      await expect(store.upsertAppointment(backup('newcomer'))).rejects.toThrow('TOWER_GLOBAL_QUOTA_EXCEEDED');
+
+      now += ttl / 2;
+      await store.upsertAppointment({
+        ...refreshed,
+        bundle: { ...refreshed.bundle, height: 2 },
+        ownerProof: { ...refreshed.ownerProof, signedAt: now },
+      });
+      now += ttl / 2 + 1;
+      expect(await store.pruneExpired()).toEqual({ deleted: 1 });
+      expect(await store.getLatest(abandoned.lookupKey)).toBeNull();
+      expect((await store.getLatest(refreshed.lookupKey))?.bundle.height).toBe(2);
+      // Junk or abandoned documents held the key quota forever.
+      await expect(store.upsertAppointment(backup('newcomer'))).resolves.toMatchObject({ quotaOk: true });
+    } finally {
+      await store.close();
+      rmSync(tempRoot, { recursive: true, force: true });
+    }
   });
 
   test('rejects plaintext last-resort remedies over HTTP', async () => {

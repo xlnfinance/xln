@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { serializeTaggedJson } from '../../protocol/serialization';
 import {
+  deleteExpiredLookups,
   ensureWatchtowerStoreOpen,
   invalidateWatchtowerStats,
   META_STATS_KEY,
@@ -139,8 +140,10 @@ const collectExpiredKeys = async (context: WatchtowerStoreContext, cutoff: numbe
 
 export const pruneExpired = async (context: WatchtowerStoreContext): Promise<{ deleted: number }> => {
   await ensureWatchtowerStoreOpen(context);
-  const keysToDelete = await collectExpiredKeys(context, context.now() - context.receiptTtlMs);
-  if (keysToDelete.length === 0) return { deleted: 0 };
+  const cutoff = context.now() - context.receiptTtlMs;
+  const deletedLookups = await deleteExpiredLookups(context, cutoff);
+  const keysToDelete = await collectExpiredKeys(context, cutoff);
+  if (keysToDelete.length === 0) return { deleted: deletedLookups };
   const metaStats = await readMetaStats(context);
   const deletedActionReceipts = keysToDelete.filter(key => key.startsWith('action:')).length;
   await context.db.batch([
@@ -154,5 +157,5 @@ export const pruneExpired = async (context: WatchtowerStoreContext): Promise<{ d
     },
   ]);
   invalidateWatchtowerStats(context);
-  return { deleted: keysToDelete.length };
+  return { deleted: deletedLookups + keysToDelete.length };
 };
