@@ -1,6 +1,7 @@
 import { decodeAccountInput } from '../../account/validation/input-validation';
 import type { EntityTx } from '../../types/entity-tx';
 import { assertEntityProposalAction } from '../auth/authorization';
+import { getRuntimeOutputEnvelopeError } from '../consensus/output/envelope';
 import { validateConsensusConfig } from '../consensus/config-validation';
 import { normalizeSignedEntityCommand } from '../command/command-codec';
 import type { ProposalAction } from '../types';
@@ -59,6 +60,8 @@ const validateRuntimeOutput = (value: unknown, code: string, depth: number): voi
   requireString(data['sourceSignerId'], `${code}_SOURCE_SIGNER`);
   requireString(data['targetEntityId'], `${code}_TARGET`);
   validateNestedTxs(data['entityTxs'], `${code}_ENTITY_TXS`, depth + 1);
+  const envelopeError = getRuntimeOutputEnvelopeError(data['entityTxs'] as EntityTx[]);
+  if (envelopeError) throw new Error(`${code}_${envelopeError}`);
 };
 
 const validateScheduledWake = (value: unknown, code: string): void => {

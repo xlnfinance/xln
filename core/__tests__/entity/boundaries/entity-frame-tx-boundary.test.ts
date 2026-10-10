@@ -37,6 +37,21 @@ test('proposed Entity frames reject malformed transactions before replay', () =>
 
   expect(() => validateProposedEntityFrame(malformedFrame, 'EntityFrame'))
     .toThrow('EntityFrame.txs_0_DATA_FIELDS');
+
+  // An empty or protocol-nested runtimeOutput used to pass the decoder and
+  // throw a plain Error in every validator's replay.
+  const runtimeOutput = (entityTxs: unknown[]) => ({
+    ...malformedFrame,
+    txs: [{
+      type: 'runtimeOutput',
+      data: { protocol: 'cross-j', sourceEntityId: entityId, sourceSignerId: signerId, targetEntityId: entityId, entityTxs },
+    }],
+  });
+  expect(() => validateProposedEntityFrame(runtimeOutput([]), 'EntityFrame'))
+    .toThrow('RUNTIME_OUTPUT_ENTITY_TXS_MISSING');
+  expect(() => validateProposedEntityFrame(runtimeOutput([
+    { type: 'scheduledWake', data: { version: 1, proposerSignerId: signerId, dueAt: 1, jobs: [] } },
+  ]), 'EntityFrame')).toThrow('RUNTIME_OUTPUT_NESTED_PROTOCOL_TX_FORBIDDEN');
 });
 
 test('Entity frame total byte budget rejects aggregate payloads', () => {

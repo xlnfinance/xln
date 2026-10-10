@@ -13,15 +13,23 @@ const NESTED_PROTOCOL_TXS = new Set<EntityTx['type']>([
   'proposeAccountsNow',
 ]);
 
+/** The envelope shape rule; the Entity tx decoder applies it at every boundary. */
+export const getRuntimeOutputEnvelopeError = (nested: readonly EntityTx[]): string | null => {
+  if (nested.length === 0) return 'RUNTIME_OUTPUT_ENTITY_TXS_MISSING';
+  if (nested.some(candidate => NESTED_PROTOCOL_TXS.has(candidate.type))) {
+    return 'RUNTIME_OUTPUT_NESTED_PROTOCOL_TX_FORBIDDEN';
+  }
+  return null;
+};
+
 const getRuntimeOutputNestedTxs = (
   tx: EntityTx,
 ): readonly EntityTx[] | null => {
   if (tx.type !== 'runtimeOutput') return null;
   const nested = tx.data.entityTxs;
-  if (!Array.isArray(nested) || nested.length === 0) throw new Error('RUNTIME_OUTPUT_ENTITY_TXS_MISSING');
-  if (nested.some(candidate => NESTED_PROTOCOL_TXS.has(candidate.type))) {
-    throw new Error('RUNTIME_OUTPUT_NESTED_PROTOCOL_TX_FORBIDDEN');
-  }
+  if (!Array.isArray(nested)) throw new Error('RUNTIME_OUTPUT_ENTITY_TXS_MISSING');
+  const envelopeError = getRuntimeOutputEnvelopeError(nested);
+  if (envelopeError) throw new Error(envelopeError);
   return nested;
 };
 
