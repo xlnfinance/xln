@@ -211,13 +211,22 @@ export const applyRetryEntityProviderActionRuntimeTx = (
   const replica = findEntityProviderActionReplica(env, tx.data.entityId, tx.data.signerId);
   if (!replica) throw new Error(`ENTITY_PROVIDER_ACTION_LOCAL_REPLICA_MISSING:${tx.data.entityId}:${tx.data.signerId}`);
   if (!isEntityActiveLeader(replica)) throw new Error(`ENTITY_PROVIDER_ACTION_NOT_ACTIVE_LEADER:${tx.data.signerId}`);
-  const { pending, jurisdictionName } = requireTrustedPending(env, replica);
+  // Retry intents are durable scheduling hints built at frame N and applied
+  // at N+1: a committed J event (e.g. BoardActivated) can clear or replace the
+  // pending action first. The stale hint is a no-op, like the batch twin and
+  // Rust (provider_lifecycle.rs); a throw halted the Runtime and could not
+  // replay a Rust-recorded WAL.
+  const committed = replica.state.entityProviderActionState?.pending;
   if (
-    normalizeSubmitId(jurisdictionName) !== normalizeSubmitId(tx.data.jurisdictionName) ||
-    normalizeSubmitId(pending.actionHash) !== normalizeSubmitId(tx.data.actionHash) ||
-    pending.actionNonce !== tx.data.actionNonce ||
-    pending.generation !== tx.data.generation
-  ) throw new Error(`ENTITY_PROVIDER_ACTION_COMMITTED_INTENT_MISMATCH:${tx.data.entityId}`);
+    !committed ||
+    normalizeSubmitId(committed.actionHash) !== normalizeSubmitId(tx.data.actionHash) ||
+    committed.actionNonce !== tx.data.actionNonce ||
+    committed.generation !== tx.data.generation
+  ) return [];
+  const { pending, jurisdictionName } = requireTrustedPending(env, replica);
+  if (normalizeSubmitId(jurisdictionName) !== normalizeSubmitId(tx.data.jurisdictionName)) {
+    throw new Error(`ENTITY_PROVIDER_ACTION_COMMITTED_INTENT_MISMATCH:${tx.data.entityId}`);
+  }
   const identity = {
     jurisdictionName,
     entityId: replica.entityId,

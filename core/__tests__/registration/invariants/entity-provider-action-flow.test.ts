@@ -638,6 +638,23 @@ describe('EntityProvider action flow', () => {
     expect(collectDueEntityProviderActionRuntimeTxs(fixture.env, fixture.env.state.timestamp)).toEqual([]);
   });
 
+  test('a retry hint whose pending action was cleared or replaced is a no-op, never a halt', async () => {
+    // Hints are built at frame N and applied at N+1; a committed J event can
+    // clear or replace the pending action first. The batch twin and Rust treat
+    // that as a no-op; TS threw inside RuntimeTx apply and halted.
+    const fixture = setup('stale-retry-hint');
+    const { jTx, pending } = await buildPending(fixture);
+    jTx.data.hankoSignature = fixture.replica.hankoWitness?.get(pending.actionHash)?.hanko;
+    const retry = splitJOutboxForDurableSubmit([{ jurisdictionName: 'EntityProviderActions', jTxs: [jTx] }])
+      .retries[0] as Extract<ReturnType<typeof splitJOutboxForDurableSubmit>['retries'][number], { type: 'retryEntityProviderAction' }>;
+
+    expect(applyRetryEntityProviderActionRuntimeTx(fixture.env, { ...retry, data: { ...retry.data, generation: retry.data.generation + 1 } }))
+      .toEqual([]);
+    const actionState = fixture.replica.state.entityProviderActionState!;
+    fixture.replica.state.entityProviderActionState = { ...actionState, pending: undefined };
+    expect(applyRetryEntityProviderActionRuntimeTx(fixture.env, retry)).toEqual([]);
+  });
+
   test('BoardActivated expires pending only for this Entity and preserves nonce plus generation', async () => {
     const fixture = setup('board-activation-pending-scope');
     const { pending } = await buildPending(fixture);
