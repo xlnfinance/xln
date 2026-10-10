@@ -551,8 +551,11 @@ describe('runtime output routing', () => {
       resolveSoleLocalSignerForEntity: () => null,
       resolveRuntimeIdForEntity: () => targetRuntimeId,
       resolveRuntimeIdForCrossJurisdictionEntity: () => targetRuntimeId,
-    })).toThrow('ROUTE_DIRECT_NOT_DELIVERED');
+    })).not.toThrow();
 
+    // A direct miss retains the committed output for this target; it never
+    // falls through to P2P and never halts the Hub.
+    expect(env.pendingNetworkOutputs).toHaveLength(1);
     expect(p2pCalls).toHaveLength(0);
     expect(warnings).not.toContain('ROUTE_DIRECT_SOCKET_REQUIRED');
   });
@@ -959,7 +962,53 @@ describe('runtime output routing', () => {
     expect(queued[0]?.entityId).toBe(localEntityId);
   });
 
-  test('fails loud when P2P reports any transport failure', () => {
+  test('a dropped direct send retains that target in committed order, never a Hub halt', () => {
+    // A peer that stops reading its socket makes Bun drop the send. That was a
+    // post-commit ROUTE_DIRECT_NOT_DELIVERED throw, again after every restart.
+    const slow = runtimeId('91');
+    const live = runtimeId('92');
+    const sent: Array<{ target: string; height: number }> = [];
+    const env = {
+      runtimeId: runtimeId('11'),
+      state: { timestamp: 4_000 },
+      infrastructure: {
+        directEntityInputsDispatch: (target: string, envelope: RuntimeEntityInputsEnvelope) => {
+          sent.push({ target, height: envelope.sourceRuntimeHeight });
+          return target === slow
+            ? deliveryFailure({ category: 'TransientRace', code: 'ROUTE_DIRECT_SEND_FAILED', terminal: true })
+            : deliveryAccepted('ROUTE_DIRECT_DELIVERED');
+        },
+      },
+      warn: () => {},
+      error: () => {},
+    } as unknown as RuntimeReplica;
+    const output = (target: string, signer: string, height: number): DeliverableEntityInput => ({
+      runtimeId: target,
+      entityId: entityId(signer),
+      signerId: runtimeId(signer),
+      sourceRuntimeFrame: { height, timestamp: 4_000 + height },
+      entityTxs: [{ type: 'openAccount', data: { targetEntityId: entityId('99') } } as any],
+    });
+    const outputs = [output(slow, '93', 1), output(live, '94', 1), output(slow, '95', 2)];
+
+    expect(() => dispatchEntityOutputs(env, outputs.map(item => ({ output: item, targetRuntimeId: item.runtimeId! })), {
+      ensureRuntimeInfrastructure: (targetEnv) => targetEnv.infrastructure!,
+      getP2P: () => null,
+      enqueueRuntimeInputs: () => {},
+      extractEntityId: (replicaKey) => String(replicaKey).split(':')[0] || '',
+      hasLocalSignerForEntity: () => false,
+      hasLocalSignerForEntitySigner: () => false,
+      resolveSoleLocalSignerForEntity: () => null,
+      resolveRuntimeIdForEntity: () => slow,
+      resolveRuntimeIdForCrossJurisdictionEntity: () => slow,
+    })).not.toThrow();
+
+    expect(sent.filter(item => item.target === slow)).toHaveLength(1);
+    expect(sent.some(item => item.target === live)).toBe(true);
+    expect(env.pendingNetworkOutputs?.map(item => item.runtimeId)).toEqual([slow, slow]);
+  });
+
+  test('retains the output when P2P reports a transient transport failure', () => {
     const targetRuntimeId = runtimeId('77');
     const output: DeliverableEntityInput = {
       runtimeId: targetRuntimeId,
@@ -1000,7 +1049,8 @@ describe('runtime output routing', () => {
       resolveSoleLocalSignerForEntity: () => null,
       resolveRuntimeIdForEntity: () => targetRuntimeId,
       resolveRuntimeIdForCrossJurisdictionEntity: () => targetRuntimeId,
-    })).toThrow('ROUTE_SEND_NOT_DELIVERED');
+    })).not.toThrow();
+    expect(env.pendingNetworkOutputs).toHaveLength(1);
     expect(errors).toEqual([expect.objectContaining({
       code: 'ROUTE_SEND_FAILED',
       runtimeId: targetRuntimeId,

@@ -11,16 +11,14 @@ import { validateDeliverableEntityInput } from '../delivery/topology/routing-val
 import {
   isDeliveryDelivered,
   isDeliveryRecipientNotReady,
-  requireDeliveryDelivered,
+  isDeliveryRetainable,
   requireDeliveryResult,
-  type DeliveryResult,
 } from '../../protocol/payments/delivery-result';
 import { selectPotentialCrossJAccountInputPairs } from '../delivery/topology/entity-routing';
 import { buildUnsignedRuntimeEntityInputsEnvelope } from '../admit/entity-input-envelope-auth.ts';
 import {
   buildPendingNetworkOutputs,
   buildRoutingDeliveryResult,
-  enqueueP2PEntityInputsDelivery,
   groupAtomicCrossJAdmissionOutputs,
   isCrossJAdmissionSourceProposal,
   mergeRoutedEntityOutput,
@@ -312,16 +310,21 @@ const dispatchDirectOutputEnvelope = (
   );
   if (isDeliveryRecipientNotReady(delivery)) return false;
   if (!isDeliveryDelivered(delivery)) {
-    const detail = {
+    env.error?.('network', 'ROUTE_DIRECT_NOT_DELIVERED', {
       targetRuntimeId: group.targetRuntimeId,
       sourceRuntimeHeight: envelope.sourceRuntimeHeight,
       delivery,
       outputs: summarizeAccountEnvelopeOutputs(sendable),
-    };
-    env.error?.('network', 'ROUTE_DIRECT_NOT_DELIVERED', detail);
-    requireDeliveryDelivered(delivery, result =>
-      `ROUTE_DIRECT_NOT_DELIVERED:runtime=${group.targetRuntimeId}:code=${result.code}:` +
-      `sourceHeight=${envelope.sourceRuntimeHeight}:inputs=${sendable.length}`);
+    });
+    // A peer that stops reading its socket makes the send drop. The outputs
+    // are committed; retain them for this target (Rust retain_failed) instead
+    // of a post-commit throw that halted the Hub again on every restart. Only
+    // a local contradiction is fatal.
+    if (isDeliveryRetainable(delivery)) return false;
+    throw new Error(
+      `ROUTE_DIRECT_NOT_DELIVERED:runtime=${group.targetRuntimeId}:code=${delivery.code}:` +
+      `sourceHeight=${envelope.sourceRuntimeHeight}:inputs=${sendable.length}`,
+    );
   }
   routeLog.debug('output.accepted', {
     atMs: getWallClockMs(),
@@ -356,40 +359,40 @@ const dispatchP2POutputEnvelope = (
     sourceHeight: envelope.sourceRuntimeHeight,
     inputs: envelope.entityInputs.length,
   });
-  let delivery: DeliveryResult | null = null;
+  let sent: unknown;
   try {
-    delivery = enqueueP2PEntityInputsDelivery(
-      p2p,
-      group.targetRuntimeId,
-      envelope,
-      envelope.sourceRuntimeTimestamp,
-    );
-    if (isDeliveryRecipientNotReady(delivery)) return false;
-    if (isDeliveryDelivered(delivery)) {
-      routeLog.debug('output.accepted', {
-        atMs: getWallClockMs(),
-        transport: 'p2p',
-        code: delivery.code,
-        targetRuntimeId: group.targetRuntimeId,
-        sourceRuntimeHeight: envelope.sourceRuntimeHeight,
-        outputs: summarizeAccountEnvelopeOutputs(sendable),
-      });
-      return true;
-    }
-    requireDeliveryDelivered(delivery, result =>
-      'ROUTE_SEND_NOT_DELIVERED: runtime=' + group.targetRuntimeId +
-      ' code=' + result.code + ' inputs=' + sendable.length);
+    sent = p2p.enqueueEntityInputsDelivery(group.targetRuntimeId, envelope, envelope.sourceRuntimeTimestamp);
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
+    // A send throw is the peer's socket state: retain, never halt.
     env.error?.('network', 'ROUTE_SEND_FAILED', {
       runtimeId: group.targetRuntimeId,
       inputCount: sendable.length,
-      error: message,
-      ...(delivery ? { delivery } : {}),
+      error: error instanceof Error ? error.message : String(error),
     });
-    throw error;
+    return false;
   }
-  return false;
+  const delivery = requireDeliveryResult(sent, 'ROUTE_P2P_INVALID_DELIVERY_RESULT');
+  if (isDeliveryRecipientNotReady(delivery)) return false;
+  if (isDeliveryDelivered(delivery)) {
+    routeLog.debug('output.accepted', {
+      atMs: getWallClockMs(),
+      transport: 'p2p',
+      code: delivery.code,
+      targetRuntimeId: group.targetRuntimeId,
+      sourceRuntimeHeight: envelope.sourceRuntimeHeight,
+      outputs: summarizeAccountEnvelopeOutputs(sendable),
+    });
+    return true;
+  }
+  env.error?.('network', 'ROUTE_SEND_FAILED', {
+    runtimeId: group.targetRuntimeId,
+    inputCount: sendable.length,
+    delivery,
+  });
+  if (isDeliveryRetainable(delivery)) return false;
+  throw new Error(
+    `ROUTE_SEND_NOT_DELIVERED: runtime=${group.targetRuntimeId} code=${delivery.code} inputs=${sendable.length}`,
+  );
 };
 
 const dispatchOutputEnvelope = (
@@ -448,11 +451,15 @@ export const dispatchEntityOutputs = (
   const groups = buildOutputEnvelopeGroups(outputs, graph);
   env.pendingNetworkOutputs = outputs.flatMap(({ output }) => graph.split(output));
   const accepted = new Set<string>();
+  // A target whose envelope was retained keeps its later envelopes too, so
+  // delivery to it stays in committed order.
+  const retainedTargets = new Set<string>();
   try {
     for (const group of groups) {
       if (!group.complete) {
         failIncompleteCrossJCohort(env, group, outputs);
       }
+      if (retainedTargets.has(group.targetRuntimeId)) continue;
       const sendable = group.outputs;
       const envelope = buildRuntimeEntityInputsEnvelope(env, group.targetRuntimeId, sendable);
       traceAccountDeliveryHop('committed-output', envelope, {
@@ -469,7 +476,10 @@ export const dispatchEntityOutputs = (
           outputs: summarizeAccountEnvelopeOutputs(sendable),
         });
       }
-      if (!dispatchOutputEnvelope(env, group, sendable, envelope, deps)) continue;
+      if (!dispatchOutputEnvelope(env, group, sendable, envelope, deps)) {
+        retainedTargets.add(group.targetRuntimeId);
+        continue;
+      }
       // Retirement follows exact accepted transport units. A later peer may still
       // be catching up or a send may fail: retain every untouched original slot.
       for (const output of group.sources) accepted.add(graph.prepare(output).routeKey);

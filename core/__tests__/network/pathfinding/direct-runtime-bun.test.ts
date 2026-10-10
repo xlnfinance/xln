@@ -973,8 +973,8 @@ describe('direct runtime websocket route', () => {
     expect(route.sendEntityInputsDelivery(clientRuntimeId, envelope)).toMatchObject({
       outcome: 'failed',
       code: 'ROUTE_DIRECT_SEND_FAILED',
-      retryable: false,
-      fatal: true,
+      retryable: true,
+      fatal: false,
       terminal: true,
     });
     expect(route.getSessionState()).toEqual([
@@ -1035,8 +1035,8 @@ describe('direct runtime websocket route', () => {
     })).toMatchObject({
       outcome: 'failed',
       code: 'ROUTE_DIRECT_SEND_FAILED',
-      retryable: false,
-      fatal: true,
+      retryable: true,
+      fatal: false,
       terminal: true,
     });
     expect(ws.readyState).toBe(1);
@@ -1257,11 +1257,11 @@ describe('direct runtime websocket route', () => {
     expect(delivery).toMatchObject({
       outcome: 'failed',
       code: 'ROUTE_DIRECT_SEND_FAILED',
-      retryable: false,
-      fatal: true,
+      retryable: true,
+      fatal: false,
       terminal: true,
       failure: {
-        category: 'Contradiction',
+        category: 'TransientRace',
         message: 'socket write exploded',
       },
     });

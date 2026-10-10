@@ -20,7 +20,6 @@ import {
   deliveryAccepted,
   deliveryDeferred,
   deliveryQueued,
-  requireDeliveryResult,
   type DeliveryResult,
 } from '../../protocol/payments/delivery-result';
 import { selectPotentialCrossJAccountInputPairs } from '../delivery/topology/entity-routing';
@@ -345,18 +344,6 @@ export const buildRoutingDeliveryResult = (input: {
     });
   }
   return deliveryAccepted('ROUTE_NOOP');
-};
-
-export const enqueueP2PEntityInputsDelivery = (
-  p2p: RuntimeP2PDispatch,
-  targetRuntimeId: string,
-  envelope: RuntimeEntityInputsEnvelope,
-  ingressTimestamp: number | undefined,
-): DeliveryResult => {
-  return requireDeliveryResult(
-    p2p.enqueueEntityInputsDelivery(targetRuntimeId, envelope, ingressTimestamp),
-    'ROUTE_P2P_INVALID_DELIVERY_RESULT',
-  );
 };
 
 export const resolveGossipBoardSignerIds = (env: RuntimeReplica, entityId: string): string[] => {

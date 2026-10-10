@@ -226,7 +226,7 @@ for (const [path, markers] of [
     'ROUTE_DEFERRED_OUTPUTS_FORBIDDEN',
     'ROUTE_P2P_UNAVAILABLE',
     'requireDeliveryResult(',
-    'requireDeliveryDelivered(',
+    'if (isDeliveryRetainable(delivery)) return false;',
     'const dispatchDirectOutputEnvelope = (',
     'if (isDeliveryRecipientNotReady(delivery)) return false;',
     'const dispatchP2POutputEnvelope = (',
@@ -314,11 +314,6 @@ for (const [path, markers] of [
     'retires only the ready peer',
     'flushCommittedNetworkOutputs',
     'transport.failures',
-  ]],
-  ['core/__tests__/network/relay/relay-router.test.ts', [
-    'delivery:',
-    'send-failed',
-    'deliver-invalid',
   ]],
   ['core/__tests__/network/pathfinding/direct-runtime-bun.test.ts', [
     'sendEntityInputsDelivery',

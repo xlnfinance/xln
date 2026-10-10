@@ -463,8 +463,10 @@ const resultFromSendAttempt = (
   failureCode: string,
 ): DeliveryResult => {
   if (attempt.sent) return deliveryAccepted(acceptedCode);
+  // A dropped or throwing send is the peer's socket state (backpressure, a
+  // closing socket), not a local contradiction: callers retain, never halt.
   return deliveryFailure({
-    category: 'Contradiction',
+    category: 'TransientRace',
     code: failureCode,
     message: attempt.error ?? 'WebSocket send returned dropped',
     terminal: true,

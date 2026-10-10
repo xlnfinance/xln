@@ -72,6 +72,13 @@ export const isDeliveryRecipientNotReady = (delivery: DeliveryResult): boolean =
     delivery.code === 'P2P_DIRECT_RECIPIENT_NOT_READY' ||
     delivery.code === 'P2P_DIRECT_SOURCE_PROFILE_NOT_READY');
 
+/**
+ * A committed output whose send failed without a local contradiction stays in
+ * the outbox for its target: a peer's socket state never halts the sender.
+ */
+export const isDeliveryRetainable = (delivery: DeliveryResult): boolean =>
+  !isDeliveryDelivered(delivery) && !delivery.fatal;
+
 export const shouldRetryDelivery = (delivery: DeliveryResult): boolean =>
   !isDeliveryDelivered(delivery) && !delivery.terminal;
 
