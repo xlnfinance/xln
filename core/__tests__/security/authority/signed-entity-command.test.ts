@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { FailureDispositionError } from '../../../protocol/errors/failure-taxonomy';
 import { PersistentEntityAccountMap } from '../../../entity/state/persistent-account-map';
 import { computeEntityAccountValueHash } from '../../../entity/consensus/state-root';
 
@@ -851,12 +852,17 @@ describe('signed Entity command admission', () => {
         action: { type: 'collective_message', data: { message: 'pending-2' } },
       },
     }]);
-    await expect(applyEntityFrameWithMaterializedTestInfraContext(
+    const spamError = await applyEntityFrameWithMaterializedTestInfraContext(
       env,
       pending.newState,
       [signedEntityCommandTx(spam)],
       2_002,
-    )).rejects.toThrow('ENTITY_PROPOSAL_PROPOSER_PENDING_LIMIT');
+    ).then(() => null, (error: unknown) => error);
+    // A board member's extra proposal is that member's input: a typed reject
+    // that evicts the command, never a Runtime halt (Rust RejectedEntityTx).
+    expect(spamError).toBeInstanceOf(FailureDispositionError);
+    expect((spamError as FailureDispositionError).disposition).toBe('reject');
+    expect((spamError as Error).message).toContain('ENTITY_PROPOSAL_PROPOSER_PENDING_LIMIT');
     expect(pending.newState.proposals.size).toBe(1);
   });
 

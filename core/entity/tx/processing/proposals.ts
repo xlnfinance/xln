@@ -7,6 +7,7 @@ import { canonicalEntityBoardSignerId, hashEntityProposalAction } from '../../au
 import { addMessage } from '../../frame-events';
 import { nextEntityCommandNonce, resolveEntityCommandBoard } from '../../command';
 import { LIMITS } from '../../../config/constants';
+import { rejectFailure } from '../../../protocol/errors/failure-taxonomy';
 
 const proposalLog = createStructuredLogger('entity.basic');
 
@@ -47,14 +48,18 @@ const MAX_PENDING_ENTITY_PROPOSALS = LIMITS.MAX_PENDING_PROPOSALS_PER_ENTITY;
 export const assertEntityProposalCapacity = (state: EntityState, rawProposer: string): void => {
   const proposer = canonicalEntityBoardSignerId(rawProposer);
   if (state.proposals.size >= MAX_PENDING_ENTITY_PROPOSALS) {
-    throw new Error(
+    throw rejectFailure(
+      'ENTITY_PROPOSAL_PENDING_LIMIT_EXCEEDED',
       `ENTITY_PROPOSAL_PENDING_LIMIT_EXCEEDED:${state.proposals.size}:${MAX_PENDING_ENTITY_PROPOSALS}`,
     );
   }
   const existing = Array.from(state.proposals.values())
     .find(proposal => canonicalEntityBoardSignerId(proposal.proposer) === proposer);
   if (existing) {
-    throw new Error(`ENTITY_PROPOSAL_PROPOSER_PENDING_LIMIT:${proposer}:${existing.id}`);
+    throw rejectFailure(
+      'ENTITY_PROPOSAL_PROPOSER_PENDING_LIMIT',
+      `ENTITY_PROPOSAL_PROPOSER_PENDING_LIMIT:${proposer}:${existing.id}`,
+    );
   }
 };
 

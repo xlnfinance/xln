@@ -1,4 +1,4 @@
-import { haltRuntimeFailure } from "../../../../protocol/errors/failure-taxonomy";
+import { haltRuntimeFailure, rejectFailure } from "../../../../protocol/errors/failure-taxonomy";
 
 import { createOrderbookExtState, validateSpreadDistribution } from '../../../../orderbook';
 import type { EntityInput, EntityState, Proposal } from '../../../types';
@@ -98,12 +98,12 @@ export const handleProposeEntityTx = (
   const proposer = entityTx.data.proposer.trim().toLowerCase();
   const shares = resolveCanonicalEntityBoardShares(entityState.config);
   const proposerPower = shares.bySigner.get(proposer);
-  if (proposerPower === undefined) throw new Error(`ENTITY_PROPOSAL_PROPOSER_UNKNOWN:${proposer}`);
+  if (proposerPower === undefined) throw rejectFailure('ENTITY_PROPOSAL_PROPOSER_UNKNOWN', `ENTITY_PROPOSAL_PROPOSER_UNKNOWN:${proposer}`);
   const board = resolveEntityCommandBoard(env, entityState);
   const action = assertEntityProposalAction(entityTx.data.action);
   assertEntityProposalCapacity(entityState, proposer);
   const proposalId = generateProposalId(env, action, proposer, entityState);
-  if (entityState.proposals.has(proposalId)) throw new Error(`ENTITY_PROPOSAL_DUPLICATE:${proposalId}`);
+  if (entityState.proposals.has(proposalId)) throw rejectFailure('ENTITY_PROPOSAL_DUPLICATE', `ENTITY_PROPOSAL_DUPLICATE:${proposalId}`);
 
   basicLog.debug('proposal.create', {
     proposal: shortHash(proposalId),
@@ -166,17 +166,17 @@ export const handleVoteEntityTx = (
   const voter = entityTx.data.voter.trim().toLowerCase();
   const proposal = entityState.proposals.get(proposalId);
 
-  if (!proposal) throw new Error(`ENTITY_PROPOSAL_VOTE_TARGET_MISSING:${proposalId}`);
+  if (!proposal) throw rejectFailure('ENTITY_PROPOSAL_VOTE_TARGET_MISSING', `ENTITY_PROPOSAL_VOTE_TARGET_MISSING:${proposalId}`);
   const shares = resolveCanonicalEntityBoardShares(entityState.config);
-  if (!shares.bySigner.has(voter)) throw new Error(`ENTITY_PROPOSAL_VOTER_UNKNOWN:${voter}`);
+  if (!shares.bySigner.has(voter)) throw rejectFailure('ENTITY_PROPOSAL_VOTER_UNKNOWN', `ENTITY_PROPOSAL_VOTER_UNKNOWN:${voter}`);
   const board = resolveEntityCommandBoard(env, entityState);
   if (proposal.boardHash.toLowerCase() !== board.boardHash) {
-    throw new Error(`ENTITY_PROPOSAL_BOARD_MISMATCH:${proposalId}:${proposal.boardHash}:${board.boardHash}`);
+    throw rejectFailure('ENTITY_PROPOSAL_BOARD_MISMATCH', `ENTITY_PROPOSAL_BOARD_MISMATCH:${proposalId}:${proposal.boardHash}:${board.boardHash}`);
   }
   if (proposal.boardEpoch !== board.boardEpoch) {
-    throw new Error(`ENTITY_PROPOSAL_EPOCH_MISMATCH:${proposalId}:${proposal.boardEpoch}:${board.boardEpoch}`);
+    throw rejectFailure('ENTITY_PROPOSAL_EPOCH_MISMATCH', `ENTITY_PROPOSAL_EPOCH_MISMATCH:${proposalId}:${proposal.boardEpoch}:${board.boardEpoch}`);
   }
-  if (proposal.votes.has(voter)) throw new Error(`ENTITY_PROPOSAL_DUPLICATE_VOTE:${proposalId}:${voter}`);
+  if (proposal.votes.has(voter)) throw rejectFailure('ENTITY_PROPOSAL_DUPLICATE_VOTE', `ENTITY_PROPOSAL_DUPLICATE_VOTE:${proposalId}:${voter}`);
 
   basicLog.debug('vote.received', { proposal: shortHash(proposalId), voter: shortId(voter), choice });
 
@@ -241,7 +241,7 @@ export const handleProfileUpdateEntityTx = (
 ): BasicEntityTxResult => {
   const profileData = entityTx.data.profile;
   if (!profileData || profileData.entityId !== entityState.entityId) {
-    throw new Error(`PROFILE_UPDATE_INVALID_ENTITY: expected=${entityState.entityId} got=${String(profileData?.entityId || '')}`);
+    throw rejectFailure('PROFILE_UPDATE_INVALID_ENTITY', `PROFILE_UPDATE_INVALID_ENTITY: expected=${entityState.entityId} got=${String(profileData?.entityId || '')}`);
   }
   const entityKind = profileData.entityKind === undefined
     ? entityState.profile.entityKind
@@ -249,7 +249,7 @@ export const handleProfileUpdateEntityTx = (
       ? undefined
       : profileData.entityKind;
   if (entityKind !== undefined && !isProfileEntityKind(entityKind)) {
-    throw new Error(`PROFILE_UPDATE_ENTITY_KIND_INVALID:${String(entityKind)}`);
+    throw rejectFailure('PROFILE_UPDATE_ENTITY_KIND_INVALID', `PROFILE_UPDATE_ENTITY_KIND_INVALID:${String(entityKind)}`);
   }
   const sectors = profileData.sectors === undefined
     ? entityState.profile.sectors ?? []
@@ -259,7 +259,7 @@ export const handleProfileUpdateEntityTx = (
   }
   const canonicalSectors = [...sectors].sort(compareStableText);
   if (new Set(sectors).size !== sectors.length || canonicalSectors.some((value, index) => value !== sectors[index])) {
-    throw new Error('PROFILE_UPDATE_ENTITY_SECTORS_NONCANONICAL');
+    throw rejectFailure('PROFILE_UPDATE_ENTITY_SECTORS_NONCANONICAL');
   }
   const newState = prepareEntityTxState(entityState, mutableFrameState);
   newState.profile = {
