@@ -26,6 +26,8 @@ import {
 import { createEntityProposalFixture } from '../helpers/entity-proposal-fixture';
 import { getLocalRuntimeSignerIds } from '../../runtime/loop/loop-identity';
 import { registerSignerKey } from '../../account/crypto';
+import { createStackManagerController } from '../../api/server/control/stack-manager';
+import { createEmptyEnv } from '../../runtime';
 
 const signer = new Wallet(`0x${'11'.repeat(32)}`).address;
 const foundation = new Wallet(`0x${'22'.repeat(32)}`).address;
@@ -271,6 +273,28 @@ describe('Stack Manager exact boundaries', () => {
       else process.env['XLN_JURISDICTIONS_PATH'] = previous;
       await rm(directory, { recursive: true, force: true });
     }
+  });
+
+  test('claims the deployment before reading the body, so a concurrent POST gets 409', async () => {
+    // Both POSTs used to pass `status.active` while awaiting their bodies and
+    // then race two deployments with the same signer nonce.
+    let releaseBody!: (value: unknown) => void;
+    const body = new Promise<unknown>(resolve => {
+      releaseBody = resolve;
+    });
+    const controller = createStackManagerController({ parseBody: () => body, headers: {} });
+    const env = createEmptyEnv('stack-manager-deploy-claim');
+    const post = () => new Request('http://localhost/api/control/stack-manager/deploy', { method: 'POST' });
+
+    const first = controller.deploy(post(), env);
+    const second = await controller.deploy(post(), env);
+    expect(second.status).toBe(409);
+    expect(await second.json()).toEqual({ ok: false, error: 'STACK_MANAGER_DEPLOYMENT_ACTIVE' });
+
+    releaseBody({ stackVersion: 'V1' });
+    expect((await first).status).toBe(400);
+    const afterFailure = await controller.deploy(post(), env);
+    expect(afterFailure.status).toBe(400);
   });
 
   test('passes only the explicit deployment environment to Hardhat', () => {

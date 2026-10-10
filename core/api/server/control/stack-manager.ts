@@ -84,9 +84,11 @@ export const createStackManagerController = (
       if (status.active) {
         return new Response(serializeTaggedJson({ ok: false, error: 'STACK_MANAGER_DEPLOYMENT_ACTIVE' }), { status: 409, headers: deps.headers });
       }
+      // Claim before the first await: two POSTs used to both pass the check
+      // while their bodies were read and race two deployments on one signer.
+      setPhase('preflight');
       try {
         const request = decodeDeployJurisdictionStackRequest(await deps.parseBody(req));
-        setPhase('preflight');
         const signerPrivateKey = getLocalSignerPrivateKey(env, request.signerId);
         if (!signerPrivateKey) throw new Error(`STACK_MANAGER_SIGNER_NOT_OWNED:${request.signerId}`);
         const officialFoundationSignerId = getConfiguredOfficialFoundationSignerId();
