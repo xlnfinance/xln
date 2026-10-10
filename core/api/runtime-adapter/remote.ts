@@ -34,6 +34,13 @@ import {
   type RuntimeAdapterServerIdentityProof,
 } from './security/server-identity';
 import { XLN_PROTOCOL_VERSION } from '../../protocol/version';
+import {
+  heightFromPayload,
+  parseBrainVaultRecovery,
+  parseBrainVaultResult,
+  parseCommandReadiness,
+  parseNumberedRegistrationResult,
+} from './wire/response-payloads';
 
 type PendingRequest = {
   op: RuntimeAdapterRequestBody['op'];
@@ -74,9 +81,6 @@ const toWebSocketBuffer = (bytes: Uint8Array): ArrayBuffer => {
   return buffer;
 };
 
-const recordOrNull = (value: unknown): Record<string, unknown> | null =>
-  value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null;
-
 const assertBrainVaultTransportIsConfidential = (wsUrl: string | undefined): void => {
   const url = new URL(String(wsUrl || ''));
   const loopback = url.hostname === 'localhost' || url.hostname === '127.0.0.1' || url.hostname === '[::1]';
@@ -86,93 +90,6 @@ const assertBrainVaultTransportIsConfidential = (wsUrl: string | undefined): voi
       'BrainVault secrets require wss:// or a localhost ws:// node',
     );
   }
-};
-
-const parseBrainVaultResult = (value: unknown): RuntimeAdapterBrainVaultResult => {
-  const result = recordOrNull(value);
-  if (!result) throw new RuntimeAdapterError('E_INTERNAL', 'BrainVault node returned an invalid result');
-  for (const key of ['specId', 'ethereumAddress', 'entityId'] as const) {
-    if (typeof result[key] !== 'string' || !result[key]) {
-      throw new RuntimeAdapterError('E_INTERNAL', `BrainVault node omitted ${key}`);
-    }
-  }
-  if (result['backend'] !== 'native-node') {
-    throw new RuntimeAdapterError('E_INTERNAL', 'BrainVault node returned the wrong backend');
-  }
-  for (const key of ['shardCount', 'factor', 'workers', 'derivationTimeMs', 'height'] as const) {
-    if (!Number.isSafeInteger(result[key]) || Number(result[key]) < 0) {
-      throw new RuntimeAdapterError('E_INTERNAL', `BrainVault node returned invalid ${key}`);
-    }
-  }
-  if (typeof result['created'] !== 'boolean') {
-    throw new RuntimeAdapterError('E_INTERNAL', 'BrainVault node returned invalid owner state');
-  }
-  return result as RuntimeAdapterBrainVaultResult;
-};
-
-const parseBrainVaultRecovery = (value: unknown): RuntimeAdapterBrainVaultRecovery => {
-  const result = recordOrNull(value);
-  if (!result || typeof result['mnemonic24'] !== 'string' || !result['mnemonic24'].trim()) {
-    throw new RuntimeAdapterError('E_INTERNAL', 'BrainVault node returned an invalid mnemonic');
-  }
-  return { mnemonic24: result['mnemonic24'] };
-};
-
-const parseNumberedRegistrationResult = (value: unknown): NumberedRegistrationCommandResult => {
-  const result = recordOrNull(value);
-  if (
-    !result ||
-    typeof result['intentId'] !== 'string' ||
-    typeof result['transactionHash'] !== 'string' ||
-    !Number.isSafeInteger(result['committedHeight']) ||
-    !Array.isArray(result['entities'])
-  ) {
-    throw new RuntimeAdapterError('E_INTERNAL', 'numbered registration returned an invalid result');
-  }
-  for (const entity of result['entities']) {
-    const record = recordOrNull(entity);
-    if (
-      !record ||
-      typeof record['entityId'] !== 'string' ||
-      !Number.isSafeInteger(record['entityNumber']) ||
-      !recordOrNull(record['config']) ||
-      (record['localSignerId'] !== null && typeof record['localSignerId'] !== 'string') ||
-      typeof record['isProposer'] !== 'boolean' ||
-      typeof record['imported'] !== 'boolean'
-    ) {
-      throw new RuntimeAdapterError('E_INTERNAL', 'numbered registration returned an invalid entity');
-    }
-  }
-  return result as NumberedRegistrationCommandResult;
-};
-
-const heightFromPayload = (payload: unknown): number => {
-  const record = recordOrNull(payload);
-  if (!record) return 0;
-  const direct = Math.max(0, Math.floor(Number(record['latestHeight'] ?? record['height'] ?? 0)));
-  const head = recordOrNull(record['head']);
-  const headHeight = Math.max(0, Math.floor(Number(head?.['latestHeight'] ?? 0)));
-  return Math.max(direct, headHeight);
-};
-
-const parseCommandReadiness = (
-  value: Record<string, unknown>,
-): { ready: boolean; reason: string | null } => {
-  const ready = value['commandReady'];
-  const reason = value['commandReadyReason'];
-  if (typeof ready !== 'boolean') {
-    throw new RuntimeAdapterError('E_UNAUTHORIZED', 'runtime adapter server omitted canonical command readiness');
-  }
-  if (ready) {
-    if (reason !== null) {
-      throw new RuntimeAdapterError('E_UNAUTHORIZED', 'runtime adapter server returned contradictory command readiness');
-    }
-    return { ready: true, reason: null };
-  }
-  if (typeof reason !== 'string' || !reason.trim()) {
-    throw new RuntimeAdapterError('E_UNAUTHORIZED', 'runtime adapter server omitted command readiness reason');
-  }
-  return { ready: false, reason: reason.trim() };
 };
 
 export class RemoteRuntimeAdapter implements RuntimeAdapter {
