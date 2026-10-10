@@ -132,6 +132,48 @@ fn reserve_event(
 }
 
 #[test]
+fn settlement_of_token_outside_static_catalog_queues_claim_with_raw_units_status() {
+    // Parity: entity-account-resource-bounds.test.ts. EP share releases
+    // register token ids past 1..5; format_token_amount failed with
+    // TOKEN_METADATA_UNAVAILABLE and the whole Entity frame halted.
+    let owner = entity(0xaa);
+    let peer = entity(0xbb);
+    let mut state = EntityStateSlice::empty(owner.as_hex(), 1);
+    state.known_accounts.insert(peer.as_hex());
+    let (claim, reserve) = claim(&owner, &peer, 43, 0xcc, 0xdd, 1, 77, 0, 1_000_000, 0);
+    let batch = FinalizedJEventBatch {
+        j_height: 43,
+        j_block_hash: [0xcc; 32],
+        events: {
+            let mut events = claim_events(&[&claim]);
+            events.push(reserve_event(&owner, 43, 0xcc, 0xdd, 2, 77, 0));
+            xln_rscore_engine::canonical_events(&events).expect("events")
+        },
+        dispute_finalization_evidence: vec![],
+        reserve_updates: vec![reserve],
+        account_claims: vec![claim],
+    };
+    let result = apply_finalized_j_event_batches(
+        &mut state,
+        43,
+        &[batch],
+        "runtime-seed",
+        None,
+        &BTreeSet::from([peer.as_hex()]),
+        &BTreeMap::new(),
+    )
+    .expect("unknown token is not a fatal ingress error");
+    assert_eq!(result.proposal_work.len(), 1);
+    assert_eq!(
+        result.frame_events[0],
+        EntityFrameEvent::Status {
+            message: "⚖️ OBSERVED: bbbb | coll=1000000 raw units of token #77 | j-block 43 (awaiting 2-of-2)"
+                .into(),
+        }
+    );
+}
+
+#[test]
 fn watcher_ingress_matches_typescript_claim_and_reserves_goldens() {
     let owner = entity(0xaa);
     let peer = entity(0xbb);

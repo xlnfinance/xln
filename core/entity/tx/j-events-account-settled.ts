@@ -4,12 +4,23 @@ import type { EntityCandidateEffect, EntityState } from '../types';
 import type { AccountReplica } from '../../types/account';
 import { addMessage } from '../frame-events';
 import { formatTokenAmount } from '../../account/financial-utils';
+import { getKnownTokenIds } from '../../account/utils';
 import { requireCanonicalJurisdictionEvents } from '../../jurisdiction/machine/events/event-normalization';
 import { createStructuredLogger, shortId } from '../../support/logger';
 import { getEntityAccountForWrite } from '../state/persistent-account-map';
 import type { FinalizedJEventContext } from './j-events';
 
 const jEventLog = createStructuredLogger('j.event');
+
+// A certified frame event in both engines, so it must be total. EP share
+// releases auto-register token ids beyond the static catalog, and anyone can
+// settle such a token into an Account with a hub; getTokenInfo then threw
+// TOKEN_METADATA_UNAVAILABLE and halted that hub. Unknown ids use the RESERVE
+// wording. Parity: format_observed_collateral (entity-kernel ingress.rs).
+const formatObservedCollateral = (tokenId: number, amount: bigint): string =>
+  getKnownTokenIds().includes(tokenId)
+    ? formatTokenAmount(tokenId, amount)
+    : `${amount.toString()} raw units of token #${tokenId}`;
 
 const applyObservedReserve = (
   state: EntityState,
@@ -135,7 +146,7 @@ export const applyAccountSettledJEvent = (
       jHeight,
     },
   });
-  const collateralDisplay = formatTokenAmount(
+  const collateralDisplay = formatObservedCollateral(
     tokenIdNum,
     BigInt(collateral as string | number | bigint),
   );

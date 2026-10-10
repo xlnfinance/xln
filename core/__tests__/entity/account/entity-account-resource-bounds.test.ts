@@ -20,6 +20,7 @@ import { isLeftEntity } from '../../../entity/id';
 import { applyAccountInputToEntity } from '../../../entity/tx/handlers/account/index';
 import { handleOpenAccountEntityTx } from '../../../entity/tx/handlers/account/lifecycle/open-account';
 import { applyAccountSettledJEvent } from '../../../entity/tx/j-events-account-settled';
+import { readEntityFrameEvents } from '../../../entity/frame-events';
 import { createEmptyEnv } from '../../../runtime';
 import { hydrateAccountDocFromStorage, hydrateEntityStateFromStorage } from '../../../storage/read/hydration';
 import { projectAccountDoc, projectEntityCoreDoc } from '../../../storage/read/projections';
@@ -227,6 +228,50 @@ test('settlements update Entity reserve without filling a permanently closed Acc
   expect(accountTxs).toEqual([]);
   expect(dirtyAccounts.size).toBe(0);
   expect(finalized.mempool).toEqual([]);
+});
+
+test('a settlement of a token outside the static catalog queues its claim without halting', () => {
+  // EP share releases register token ids past 1..5. The OBSERVED status used
+  // getTokenInfo and threw TOKEN_METADATA_UNAVAILABLE for them, halting any hub
+  // a stranger deposited such a token with. Parity: Rust ingress.rs golden.
+  const state = makeState();
+  state.accounts.set(counterpartyId, makeAccount());
+  const env = createEmptyEnv('unknown-token-settlement');
+  const accountTxs: Array<{ accountId: string; tx: AccountTx }> = [];
+  const event: JurisdictionEvent = {
+    blockNumber: 43,
+    blockHash: `0x${'cc'.repeat(32)}`,
+    transactionHash: `0x${'dd'.repeat(32)}`,
+    logIndex: 1,
+    type: 'AccountSettled',
+    data: {
+      leftEntity: entityId,
+      rightEntity: counterpartyId,
+      tokenId: 77,
+      leftReserve: 0n,
+      rightReserve: 0n,
+      collateral: 1_000_000n,
+      ondelta: 0n,
+      nonce: 1,
+    },
+  };
+  applyAccountSettledJEvent({
+    entityState: state,
+    newState: state,
+    event,
+    env,
+    accountConsensusContext: createAccountConsensusContext(env),
+    blockNumber: 43,
+    transactionHash: event.transactionHash,
+    accountTxs,
+    outputs: [],
+    dirtyAccounts: new Set<string>(),
+  }, []);
+  expect(accountTxs.map(entry => entry.tx.type)).toEqual(['j_event_claim']);
+  expect(readEntityFrameEvents(state).at(-1)).toEqual({
+    type: 'status',
+    message: '⚖️ OBSERVED: 2222 | coll=1000000 raw units of token #77 | j-block 43 (awaiting 2-of-2)',
+  });
 });
 
 test('only an accepted signed genesis can reserve an Account slot', async () => {

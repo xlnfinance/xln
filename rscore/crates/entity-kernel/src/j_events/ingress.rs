@@ -171,6 +171,17 @@ fn token_metadata(token_id: u16) -> Result<(u32, &'static str), EntityKernelErro
         .ok_or_else(|| invalid(format!("TOKEN_METADATA_UNAVAILABLE:{token_id}")))
 }
 
+/// Parity target: `formatObservedCollateral` (core/entity/tx/j-events-account-settled.ts).
+/// The OBSERVED status is a certified frame event, so it must be total: EP
+/// share releases register token ids beyond the static catalog, and a deposit
+/// of one into a hub Account would otherwise fail TOKEN_METADATA_UNAVAILABLE.
+fn format_observed_collateral(token_id: u16, amount: &BigInt) -> Result<String, EntityKernelError> {
+    if xln_rscore_protocol::canonical_token_metadata(u32::from(token_id)).is_none() {
+        return Ok(format!("{amount} raw units of token #{token_id}"));
+    }
+    format_token_amount(token_id, amount)
+}
+
 fn format_token_amount(token_id: u16, amount: &BigInt) -> Result<String, EntityKernelError> {
     let (decimals, symbol) = token_metadata(token_id)?;
     let negative = amount.sign() == Sign::Minus;
@@ -2215,7 +2226,10 @@ pub(crate) fn apply_finalized_j_event_batches_in_frame(
                             format!(
                                 "⚖️ OBSERVED: {} | coll={} | j-block {} (awaiting 2-of-2)",
                                 suffix(&counterparty, 4),
-                                format_token_amount(value.token_id.get(), &value.collateral)?,
+                                format_observed_collateral(
+                                    value.token_id.get(),
+                                    &value.collateral
+                                )?,
                                 event_block(&event)
                             ),
                         );
