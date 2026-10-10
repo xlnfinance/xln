@@ -942,5 +942,49 @@ describe('entity leader policy', () => {
     expect(delayedOldCommit.workingReplica.state.height).toBe(2);
     expect(delayedOldCommit.workingReplica.state.prevFrameHash).toBe(heightTwoHash);
     expect(delayedOldCommit.workingReplica.state.leaderState?.activeValidatorId).toBe('2');
+
+    // The relay keeps the committed CEO in office and leaves it holding the
+    // height-1 relay certificate. Its height-2 frame must not carry that
+    // certificate, or every validator rejects the frame as a leader change.
+    const replicaAt = (signerId: string): EntityReplica => ({
+      entityId: base.entityId,
+      signerId,
+      entityEncPubKey: '',
+      state: createEntityFrameCandidateState(base),
+      mempool: [],
+      isProposer: signerId === proposerId,
+    });
+    const commitRelayed = async (signerId: string) => {
+      const relayed = certified.outputs.find(output =>
+        output.signerId === signerId && output.proposedFrame?.hash === preparedHash
+      );
+      if (!relayed) throw new Error(`TEST_RELAYED_FRAME_MISSING:${signerId}`);
+      const committed = await applyEntityInput(env, replicaAt(signerId), structuredClone(relayed));
+      expect(committed.workingReplica.state.height).toBe(1);
+      return committed.workingReplica;
+    };
+    const ceo = await commitRelayed(proposerId);
+    expect(ceo.pendingLeaderCertificate?.targetHeight).toBe(1);
+    expect(ceo.state.leaderState).toEqual(getEntityLeaderState(base));
+    const ceoProposal = await applyEntityInput(env, ceo, {
+      entityId: base.entityId,
+      signerId: proposerId,
+      entityTxs: [signedEntityCommandTx(buildSignedEntityCommand(env, ceo.state, proposerId, [{
+        type: 'chat',
+        data: { from: proposerId, message: 'first frame after the relay' },
+      }]))],
+    });
+    const heightTwo = ceoProposal.workingReplica.proposal;
+    if (!heightTwo) throw new Error('TEST_POST_RELAY_PROPOSAL_MISSING');
+    expect(heightTwo.height).toBe(2);
+    expect(heightTwo.leader).toEqual({ proposerSignerId: proposerId, view: 0 });
+    expect(ceoProposal.workingReplica.candidate?.state.leaderState).toEqual(ceo.state.leaderState);
+    const sentToValidator = ceoProposal.outputs.find(output =>
+      output.signerId === '3' && output.proposedFrame?.hash === heightTwo.hash
+    );
+    if (!sentToValidator) throw new Error('TEST_POST_RELAY_PROPOSAL_NOT_SENT');
+    const validatorVote = await applyEntityInput(env, await commitRelayed('3'), sentToValidator);
+    expect(validatorVote.outcome.kind).toBe('committed');
+    expect(validatorVote.workingReplica.lockedFrame?.hash).toBe(heightTwo.hash);
   });
 });

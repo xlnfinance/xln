@@ -242,7 +242,7 @@ const buildProposalState = (
     leaderState: handoverLeader ?? {
       activeValidatorId: replica.signerId.toLowerCase(),
       view,
-      changedAtHeight: replica.pendingLeaderCertificate
+      changedAtHeight: replica.pendingLeaderCertificate?.targetHeight === height
         ? height
         : (replica.state.leaderState?.changedAtHeight ?? 0),
     },
@@ -473,7 +473,12 @@ const certifyEntityProposal = async (
   const leaderBody = {
     proposerSignerId: workingReplica.signerId.toLowerCase(),
     view: leader.view,
-    ...(workingReplica.pendingLeaderCertificate ? { certificate: workingReplica.pendingLeaderCertificate } : {}),
+    // Only the certificate for this height (getReplicaProposalLeader). A relay
+    // certificate kept after its frame committed is stale: every validator
+    // would fail it and wait for a view change.
+    ...(workingReplica.pendingLeaderCertificate?.targetHeight === height
+      ? { certificate: workingReplica.pendingLeaderCertificate }
+      : {}),
   };
   const certifiedContext = selection.isSingleSigner ? 'SingleSignerEntityFrame' : 'MultiSignerEntityFrame';
   const estimatedWireBytes = assertEstimatedCertifiedEntityFrameWire({
