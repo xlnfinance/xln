@@ -77,6 +77,12 @@ const KEY_RSCORE_CHECKPOINT = 0x17;
 const KEY_RSCORE_ACCOUNT = 0x18;
 /** Rust-owned Account Patricia records, scoped by owner, peer and namespace. */
 const KEY_RSCORE_ACCOUNT_NODE = 0x19;
+/**
+ * 0x19 namespaces, as in Rust `valid_path_key`: radix-16 Account trees and one
+ * binary-Patricia J-claim section.
+ */
+export const RSCORE_ACCOUNT_TREE_NAMESPACES = [1, 2, 3, 4, 5, 6, 8, 9] as const;
+export const RSCORE_ACCOUNT_J_CLAIM_NAMESPACE = 7;
 export const KEY_LIVE_ENTITY = 0x21;
 export const KEY_LIVE_ACCOUNT = 0x22;
 export const KEY_LIVE_BOOK = 0x23;
@@ -452,7 +458,7 @@ export const keyRscoreAccountJClaimPathNode = (
   return keyRscoreAccountNode(
     ownerEntityId,
     accountId,
-    7,
+    RSCORE_ACCOUNT_J_CLAIM_NAMESPACE,
     kind,
     Buffer.concat([Buffer.from([side]), encodedPath.subarray(1)]),
   );
@@ -851,7 +857,7 @@ export const parseRscoreAccountJClaimPathNodeKey = (key: Buffer) => {
   if (
     key.byteLength <= 68 ||
     key[0] !== KEY_RSCORE_ACCOUNT_NODE ||
-    key[65] !== 7
+    key[65] !== RSCORE_ACCOUNT_J_CLAIM_NAMESPACE
   ) {
     throw new Error('STORAGE_RSCORE_J_CLAIM_PATH_KEY_INVALID');
   }

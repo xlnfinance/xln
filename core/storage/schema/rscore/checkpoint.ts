@@ -23,6 +23,8 @@ import {
 } from '../../codec/bounded-value';
 import { iterateKeys, readRawOrNull } from '../../database/level';
 import {
+  RSCORE_ACCOUNT_J_CLAIM_NAMESPACE,
+  RSCORE_ACCOUNT_TREE_NAMESPACES,
   keyRscoreAccount,
   keyRscoreAccountJClaimPathNode,
   keyRscoreAccountRadixBranchNode,
@@ -44,8 +46,6 @@ import {
 import { accountJClaimKeyBit } from '../../../account/j-claims/j-claim-codec';
 import type { AccountJClaimNode } from '../../../types/finance/account-j-claims';
 
-const TREE_TAGS = [1, 2, 3, 4, 5, 6, 8, 9] as const;
-const J_CLAIM_NODE_NAMESPACE = 7;
 const OWNER_PATTERN = /^0x[0-9a-f]{64}$/;
 
 export type RscoreCheckpointStorageInput = Readonly<{
@@ -178,7 +178,7 @@ const readStoredJClaimEntries = async (
 ): Promise<Readonly<{ entries: Map<string, StoredJClaimEntry>; keys: Buffer[] }>> => {
   const entries = new Map<string, StoredJClaimEntry>();
   const keys: Buffer[] = [];
-  const prefix = keyRscoreAccountNodePrefix(owner, account, J_CLAIM_NODE_NAMESPACE);
+  const prefix = keyRscoreAccountNodePrefix(owner, account, RSCORE_ACCOUNT_J_CLAIM_NAMESPACE);
   for await (const key of iterateKeys(db, { prefix })) {
     parseRscoreAccountJClaimPathNodeKey(key);
     const raw = await readBoundedEncodedValue(db, key);
@@ -456,7 +456,7 @@ export const prepareRscoreCheckpointStorage = async (
       );
       for (const key of accountMutation.dels) addDel(puts, dels, key);
       for (const put of accountMutation.puts) addEncodedPut(puts, dels, put.key, put.value);
-      for (const [offset, namespace] of TREE_TAGS.entries()) {
+      for (const [offset, namespace] of RSCORE_ACCOUNT_TREE_NAMESPACES.entries()) {
         const changes = rscoreCheckpointTuple(row[4 + offset], 2, `TREE_${namespace}`);
         for (const rawDel of rscoreCheckpointList(changes[1], `TREE_${namespace}_DELS`)) {
           const nodeMutation = await prepareBoundedStorageValueMutation(

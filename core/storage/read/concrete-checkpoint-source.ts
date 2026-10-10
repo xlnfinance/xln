@@ -8,6 +8,8 @@ import { iterateKeys } from '../database/level';
 import {
   KEY_HEAD,
   KEY_RUNTIME_MACHINE_LEAF,
+  RSCORE_ACCOUNT_J_CLAIM_NAMESPACE,
+  RSCORE_ACCOUNT_TREE_NAMESPACES,
   decodeEntityId,
   keyFrame,
   keyRscoreCheckpoint,
@@ -52,6 +54,7 @@ const STATE_TAGS = new Set([
 const NON_STATE_TAGS = new Set([0x20, 0x31, 0x32, 0x33, 0x34, 0x35]);
 const WAL_OWNED_TAGS = [0x17, 0x18, 0x19, 0x26] as const;
 const DEDICATED_FIELD_TAGS = new Set([0x24, 0x36]);
+const RSCORE_TREE_NAMESPACES: ReadonlySet<number> = new Set(RSCORE_ACCOUNT_TREE_NAMESPACES);
 
 const hex = (value: Uint8Array): HexBytes => `0x${Buffer.from(value).toString('hex')}`;
 
@@ -99,11 +102,11 @@ const assertCanonicalRscoreNodeKey = (key: Buffer): void => {
   const namespace = key[65];
   const kind = key[66];
   const payload = key.subarray(67);
-  if (namespace === 6) {
+  if (namespace === RSCORE_ACCOUNT_J_CLAIM_NAMESPACE) {
     parseRscoreAccountJClaimPathNodeKey(key);
     return;
   }
-  if (namespace === undefined || namespace < 1 || namespace > 5 || (kind !== 0 && kind !== 1)) {
+  if (namespace === undefined || !RSCORE_TREE_NAMESPACES.has(namespace) || (kind !== 0 && kind !== 1)) {
     throw new Error(`CHECKPOINT_RSCORE_NODE_KEY_HEADER:${hex(key)}`);
   }
   if (kind === 0) unpackRadixMerklePath(16, payload);
