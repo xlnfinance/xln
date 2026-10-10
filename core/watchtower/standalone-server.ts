@@ -24,11 +24,11 @@ import { createPushStore, type PushStore } from './push/store';
 import { createPushSender, type PushSenderConfig } from './push/sender';
 import { createStructuredLogger } from '../support/logger';
 import {
-  createSweepLock,
+  createSerialLock,
   disabledIntervalSweep,
   startIntervalSweep,
   type IntervalSweep,
-  type SweepLock,
+  type SerialLock,
 } from './sweep-health';
 
 export type StandaloneWatchtowerOptions = {
@@ -67,7 +67,7 @@ type StandaloneWatchtowerContext = {
   pushSender: ReturnType<typeof createPushSender>;
   scheduler: IntervalSweep;
   pushScheduler: IntervalSweep;
-  sweepLock: SweepLock;
+  sweepLock: SerialLock;
   operatorApiEnabled: boolean;
   operatorToken: string;
 };
@@ -99,7 +99,7 @@ const withCors = (response: Response): Response => {
 const startLastResortSweep = (
   store: WatchtowerStore,
   options: StandaloneWatchtowerOptions,
-  lock: SweepLock,
+  lock: SerialLock,
 ): IntervalSweep => {
   const towerPrivateKey = String(options.towerPrivateKey || '').trim();
   const intervalMs = Math.max(1_000, Math.floor(Number(options.sweepIntervalMs ?? 30_000)));
@@ -133,7 +133,7 @@ const startPushWatchSweep = (
   sender: ReturnType<typeof createPushSender>,
 ): IntervalSweep => startIntervalSweep({
   intervalMs: Math.max(1_000, Math.floor(Number(options.pushSweepIntervalMs ?? 15_000))),
-  lock: createSweepLock(),
+  lock: createSerialLock(),
   log: watchtowerLog,
   events: { complete: 'push_sweep.complete', failed: 'push_sweep.failed', errorsCode: 'WATCHTOWER_PUSH_SWEEP_ERRORS' },
   prune: () => store.pruneExpired(),
@@ -332,7 +332,7 @@ export const startStandaloneWatchtowerServer = (options: StandaloneWatchtowerOpt
   });
   // The operator endpoint and the scheduler share this lock: two concurrent
   // sweeps sent the same counter-dispute twice from one wallet nonce lane.
-  const sweepLock = createSweepLock();
+  const sweepLock = createSerialLock();
   const scheduler = startLastResortSweep(store, options, sweepLock);
   const pushEnabled = options.enablePushWake === true;
   const pushStore = pushEnabled

@@ -38,10 +38,10 @@ export const createSweepHealthTracker = (failureThreshold = 3): SweepHealthTrack
   };
 };
 
-/** Runs one sweep at a time. The scheduler and the operator endpoint share one lock. */
-export type SweepLock = <T>(run: () => Promise<T>) => Promise<T>;
+/** Runs one operation at a time, in call order. */
+export type SerialLock = <T>(run: () => Promise<T>) => Promise<T>;
 
-export const createSweepLock = (): SweepLock => {
+export const createSerialLock = (): SerialLock => {
   let queue = Promise.resolve();
   return async run => {
     const predecessor = queue;
@@ -71,7 +71,7 @@ export type IntervalSweep = {
 
 type IntervalSweepOptions = {
   intervalMs: number;
-  lock: SweepLock;
+  lock: SerialLock;
   run: () => Promise<SweepOutcome>;
   prune: () => Promise<unknown>;
   log: ReturnType<typeof createStructuredLogger>;

@@ -11,11 +11,14 @@ import { dirname, join } from 'node:path';
 import { Level } from 'level';
 import { serializeTaggedJson } from '../../protocol/serialization';
 import { createStructuredLogger } from '../../support/logger';
+import { createSerialLock, type SerialLock } from '../sweep-health';
 import { decodeStoredPushRegistration } from './registration';
 import type { StoredPushRegistration } from './types';
 
 const DEFAULT_REGISTRATION_TTL_MS = 90 * 24 * 60 * 60 * 1000;
 const DEFAULT_WAKE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+const DEFAULT_MAX_REGISTRATIONS = 10_000;
+const DEFAULT_MAX_REGISTRATIONS_PER_RUNTIME = 64;
 const pushStoreLog = createStructuredLogger('watchtower.push_store');
 
 export type PushStoreStats = {
@@ -34,18 +37,38 @@ type PushStoreOptions = {
   dbPath?: string;
   registrationTtlMs?: number;
   wakeTtlMs?: number;
+  maxRegistrations?: number;
+  maxRegistrationsPerRuntime?: number;
   now?: () => number;
 };
+
+type RegistrationCounts = { total: number; byRuntime: Map<string, number> };
 
 type PushStoreContext = {
   dbPath: string;
   db: Level<string, string>;
   registrationTtlMs: number;
   wakeTtlMs: number;
+  maxRegistrations: number;
+  maxRegistrationsPerRuntime: number;
   now: () => number;
   opened: boolean;
   openPromise: Promise<void> | null;
+  /** Registry writes are read-check-write; one at a time keeps the counts exact. */
+  writeLock: SerialLock;
+  /** Built by one scan on the first new registration; dropped after deletes. */
+  registrationCounts: RegistrationCounts | null;
 };
+
+/** Registrations are unauthenticated input: each one costs every later registry scan. */
+export class PushRegistrationQuotaError extends Error {
+  readonly code = 'PUSH_REGISTRATION_QUOTA_EXCEEDED';
+
+  constructor(detail: string) {
+    super(`PUSH_REGISTRATION_QUOTA_EXCEEDED:${detail}`);
+    this.name = 'PushRegistrationQuotaError';
+  }
+}
 
 export type PushStore = ReturnType<typeof createPushStore>;
 
@@ -117,6 +140,40 @@ const getStoredValue = async (
   }
 };
 
+const readRegistrationCounts = async (context: PushStoreContext): Promise<RegistrationCounts> => {
+  if (context.registrationCounts) return context.registrationCounts;
+  const counts: RegistrationCounts = { total: 0, byRuntime: new Map() };
+  for await (const [key, raw] of context.db.iterator({ gte: 'reg:', lte: 'reg:\xff' })) {
+    counts.total += 1;
+    const registration = decodeScannedRegistration(key, String(raw), null);
+    if (registration) counts.byRuntime.set(registration.runtimeId, (counts.byRuntime.get(registration.runtimeId) ?? 0) + 1);
+  }
+  context.registrationCounts = counts;
+  return counts;
+};
+
+/** A refresh of the runtime's own row is free; a new row must fit both caps. */
+const admitRegistration = async (
+  context: PushStoreContext,
+  runtimeId: string,
+  replacedRuntimeId: string | null,
+): Promise<void> => {
+  if (replacedRuntimeId === runtimeId) return;
+  const counts = await readRegistrationCounts(context);
+  if (replacedRuntimeId === null && counts.total >= context.maxRegistrations) {
+    throw new PushRegistrationQuotaError(`registrations=${counts.total}:max=${context.maxRegistrations}`);
+  }
+  const runtimeCount = counts.byRuntime.get(runtimeId) ?? 0;
+  if (runtimeCount >= context.maxRegistrationsPerRuntime) {
+    throw new PushRegistrationQuotaError(
+      `runtime=${runtimeId}:registrations=${runtimeCount}:max=${context.maxRegistrationsPerRuntime}`,
+    );
+  }
+  if (replacedRuntimeId === null) counts.total += 1;
+  else counts.byRuntime.set(replacedRuntimeId, Math.max(0, (counts.byRuntime.get(replacedRuntimeId) ?? 0) - 1));
+  counts.byRuntime.set(runtimeId, runtimeCount + 1);
+};
+
 const registerToken = async (
   context: PushStoreContext,
   registration: StoredPushRegistration,
@@ -124,8 +181,8 @@ const registerToken = async (
   await ensureOpen(context);
   const key = registrationKey(registration);
   const existingRaw = await getStoredValue(context, key);
-  if (existingRaw) {
-    const existing = decodeStoredPushRegistration(existingRaw, key);
+  const existing = existingRaw ? decodeStoredPushRegistration(existingRaw, key) : null;
+  if (existing) {
     if (existing.signedAt > registration.signedAt) {
       throw new Error('PUSH_REGISTRATION_STALE');
     }
@@ -143,7 +200,13 @@ const registerToken = async (
     }
   }
   const stored: StoredPushRegistration = { ...registration, updatedAt: context.now() };
-  await context.db.put(key, serializeTaggedJson(stored));
+  await admitRegistration(context, registration.runtimeId, existing?.runtimeId ?? null);
+  try {
+    await context.db.put(key, serializeTaggedJson(stored));
+  } catch (error) {
+    context.registrationCounts = null;
+    throw error;
+  }
   return stored;
 };
 
@@ -168,6 +231,7 @@ const removeToken = async (
   }
   if (keys.length > 0) {
     await context.db.batch(keys.map(key => ({ type: 'del' as const, key })));
+    context.registrationCounts = null;
   }
   return keys.length;
 };
@@ -287,6 +351,7 @@ const pruneExpired = async (
   }
   if (keys.length > 0) {
     await context.db.batch(keys.map(key => ({ type: 'del' as const, key })));
+    context.registrationCounts = null;
   }
   return { deleted: keys.length };
 };
@@ -309,14 +374,23 @@ export const createPushStore = (options: PushStoreOptions = {}) => {
       Math.floor(Number(options.registrationTtlMs ?? DEFAULT_REGISTRATION_TTL_MS)),
     ),
     wakeTtlMs: Math.max(60_000, Math.floor(Number(options.wakeTtlMs ?? DEFAULT_WAKE_TTL_MS))),
+    maxRegistrations: Math.max(1, Math.floor(Number(options.maxRegistrations ?? DEFAULT_MAX_REGISTRATIONS))),
+    maxRegistrationsPerRuntime: Math.max(
+      1,
+      Math.floor(Number(options.maxRegistrationsPerRuntime ?? DEFAULT_MAX_REGISTRATIONS_PER_RUNTIME)),
+    ),
     now: options.now || Date.now,
     opened: false,
     openPromise: null,
+    writeLock: createSerialLock(),
+    registrationCounts: null,
   };
   return {
     dbPath,
-    registerToken: (registration: StoredPushRegistration) => registerToken(context, registration),
-    removeToken: (runtimeId: string, tokenHash: string) => removeToken(context, runtimeId, tokenHash),
+    registerToken: (registration: StoredPushRegistration) =>
+      context.writeLock(() => registerToken(context, registration)),
+    removeToken: (runtimeId: string, tokenHash: string) =>
+      context.writeLock(() => removeToken(context, runtimeId, tokenHash)),
     listRegistrationsForTarget: (chainId: number, depository: string) =>
       listRegistrationsForTarget(context, chainId, depository),
     listWatchTargets: () => listWatchTargets(context),
@@ -326,7 +400,7 @@ export const createPushStore = (options: PushStoreOptions = {}) => {
     wasRecentlyWoken: (key: string) => wasRecentlyWoken(context, key),
     markWoken: (key: string, timestamp: number) => markWoken(context, key, timestamp),
     getStats: () => getStats(context),
-    pruneExpired: () => pruneExpired(context),
+    pruneExpired: () => context.writeLock(() => pruneExpired(context)),
     close: () => closeStore(context),
   };
 };

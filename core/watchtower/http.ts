@@ -18,7 +18,7 @@ import {
 import type { WatchtowerStore } from './store';
 import { WatchtowerGlobalQuotaError } from './store/db';
 import type { WatchtowerSweepResult } from './action';
-import type { PushStore } from './push/store';
+import { PushRegistrationQuotaError, type PushStore } from './push/store';
 import {
   PUSH_REGISTRATION_MAX_CLOCK_SKEW_MS,
   verifyPushRegistration,
@@ -181,6 +181,7 @@ const optionalTowerInteger = (value: unknown, label: string): number | undefined
 
 const quotaExceededStatus = (error: unknown, message: string): number =>
   error instanceof WatchtowerGlobalQuotaError ||
+  error instanceof PushRegistrationQuotaError ||
   message.startsWith('TOWER_QUOTA_EXCEEDED') ||
   message.startsWith('TOWER_BODY_TOO_LARGE') ? 413 : 400;
 

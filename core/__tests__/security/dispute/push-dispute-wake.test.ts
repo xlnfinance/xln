@@ -249,6 +249,52 @@ describe('push registration signature', () => {
     }
   });
 
+  test('caps registrations per runtime and in total with a typed 413', async () => {
+    const dbPath = join(await mkdtemp(join(tmpdir(), 'xln-push-caps-')), 'push.level');
+    const store = createPushStore({ dbPath, now: () => Date.now(), maxRegistrations: 3, maxRegistrationsPerRuntime: 2 });
+    const wallet = Wallet.createRandom();
+    const runtimeId = wallet.address.toLowerCase();
+    const signedRegistration = async (entity: number, token: string, signer = wallet) => {
+      const signedAt = Date.now();
+      const owner = signer.address.toLowerCase();
+      return {
+        type: 'push_registration', version: 1, runtimeId: owner, entityId: entityId(entity), token, platform: 'web',
+        chainId: CHAIN_ID, depositoryAddress: DEPOSITORY, rpcUrl: 'http://127.0.0.1:8545/', signedAt,
+        ownerSignature: await signer.signMessage(buildPushRegistrationMessage(
+          owner, entityId(entity), hashPushToken(token), 'web', CHAIN_ID, DEPOSITORY, 'http://127.0.0.1:8545/', signedAt,
+        )),
+      };
+    };
+    const register = async (body: unknown) => {
+      const response = await handlePushRegister(new Request('http://tower.local/api/push/register', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: serializeTaggedJson(body),
+      }), store);
+      return { status: response.status, body: await response.json() as { ok: boolean; error?: string } };
+    };
+    try {
+      expect((await register(await signedRegistration(1, 'device-a'))).status).toBe(200);
+      expect((await register(await signedRegistration(2, 'device-a'))).status).toBe(200);
+      const overRuntime = await register(await signedRegistration(3, 'device-a'));
+      expect(overRuntime.status).toBe(413);
+      expect(overRuntime.body.error).toContain(`PUSH_REGISTRATION_QUOTA_EXCEEDED:runtime=${runtimeId}`);
+      // Refreshing an existing row is not a new registration.
+      expect((await register(await signedRegistration(1, 'device-a'))).status).toBe(200);
+
+      expect((await register(await signedRegistration(4, 'device-b', Wallet.createRandom()))).status).toBe(200);
+      const overTotal = await register(await signedRegistration(5, 'device-c', Wallet.createRandom()));
+      expect(overTotal.status).toBe(413);
+      expect(overTotal.body.error).toContain('PUSH_REGISTRATION_QUOTA_EXCEEDED:registrations=3:max=3');
+
+      // Unregistering frees the slot.
+      expect(await store.removeToken(runtimeId, hashPushToken('device-a'))).toBe(2);
+      expect((await register(await signedRegistration(5, 'device-c', Wallet.createRandom()))).status).toBe(200);
+    } finally {
+      await store.close();
+    }
+  });
+
   test('http register and unregister handlers require signed runtime ownership', async () => {
     const dbPath = join(await mkdtemp(join(tmpdir(), 'xln-push-http-')), 'push.level');
     const store = createPushStore({ dbPath, now: () => Date.now() });

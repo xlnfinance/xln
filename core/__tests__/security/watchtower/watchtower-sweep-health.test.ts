@@ -12,7 +12,7 @@ import { startStandaloneWatchtowerServer, type StandaloneWatchtowerServer } from
 import { createStructuredLogger } from '../../../support/logger';
 import {
   createSweepHealthTracker,
-  createSweepLock,
+  createSerialLock,
   startIntervalSweep,
 } from '../../../watchtower/sweep-health';
 
@@ -193,7 +193,7 @@ test('a sweep is unhealthy only when every item failed', async () => {
   const runSweeps = async (items: number, itemErrors: number) => {
     const sweep = startIntervalSweep({
       intervalMs: 1,
-      lock: createSweepLock(),
+      lock: createSerialLock(),
       log: createStructuredLogger('watchtower.sweep_health_test'),
       events: { complete: 'test.complete', failed: 'test.failed', errorsCode: 'TEST_ERRORS' },
       prune: async () => undefined,
