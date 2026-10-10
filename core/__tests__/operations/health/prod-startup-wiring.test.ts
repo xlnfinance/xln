@@ -941,10 +941,12 @@ describe('production startup wiring', () => {
     expect(orchestratorConfig).toContain('Math.max(MARKET_MAKER_BOOTSTRAP_TIMEOUT_MS, STARTUP_TIMEOUT_MS)');
     expect(mmNode).toContain("import { MARKET_MAKER_BOOTSTRAP_STALL_TIMEOUT_MS } from '../../orchestrator-config';");
     expect(orchestratorConfig).toContain("readPositiveIntegerEnv('MARKET_MAKER_BOOTSTRAP_STALL_TIMEOUT_MS', 60_000)");
-    expect(mmNode).toContain("MARKET_MAKER_BOOTSTRAP_LOOP_MS'] || '1'");
+    expect(mmNode).toContain("readPositiveIntegerEnv('MARKET_MAKER_BOOTSTRAP_LOOP_MS', 1)");
     expect(mmNode).toContain("MARKET_MAKER_BOOTSTRAP_START_DELAY_MS'] || '0'");
-    expect(mmNode).toContain("MARKET_MAKER_OFFERS_PER_ACCOUNT_PER_TICK'] || '5'");
-    expect(mmNode).toContain("MARKET_MAKER_MAX_NEW_OFFERS_PER_TICK'] ||\n    LIMITS.MAX_MARKET_MAKER_NEW_OFFERS_PER_TICK");
+    expect(mmNode).toContain("readPositiveIntegerEnv('MARKET_MAKER_OFFERS_PER_ACCOUNT_PER_TICK', 5)");
+    expect(mmNode).toContain(
+      "readPositiveIntegerEnv('MARKET_MAKER_MAX_NEW_OFFERS_PER_TICK', LIMITS.MAX_MARKET_MAKER_NEW_OFFERS_PER_TICK)",
+    );
     expect(mmNode).not.toContain('MARKET_MAKER_BOOTSTRAP_DEFAULT_OFFERS_PER_ACCOUNT_PER_TICK');
     expect(mmNode).not.toContain('MARKET_MAKER_BOOTSTRAP_DEFAULT_MAX_NEW_OFFERS_PER_TICK');
     expect(mmNode).not.toContain('MARKET_MAKER_BOOTSTRAP_DEFAULT_CROSS_OFFERS_PER_ACCOUNT_PER_TICK');
@@ -953,7 +955,7 @@ describe('production startup wiring', () => {
     expect(mmNode).toContain('await submitCrossJurisdictionIntents(input.deps.env, routes);');
     expect(mmNode).toContain('planMarketMakerBootstrapCrossQuoteRoutes(');
     expect(mmNode).toContain('export const MARKET_MAKER_LEVELS_PER_SIDE = 10;');
-    expect(mmNode).toContain("MARKET_MAKER_CROSS_MAX_TOKEN_PAIRS_PER_ROUTE'] || '1000'");
+    expect(mmNode).toContain("readPositiveIntegerEnv('MARKET_MAKER_CROSS_MAX_TOKEN_PAIRS_PER_ROUTE', 1000)");
     expect(mmNode).toContain('pairs.slice(0, MARKET_MAKER_CROSS_MAX_TOKEN_PAIRS_PER_ROUTE)');
     expect(mmNode).not.toContain("MARKET_MAKER_MAX_LEVELS_PER_PAIR']");
     expect(mmNode).not.toContain("MARKET_MAKER_BOOTSTRAP_MAX_NEW_CROSS_OFFERS_PER_TICK'] || '6'");
@@ -992,7 +994,7 @@ describe('production startup wiring', () => {
     expect(mmNode).toContain('countCrossPairCoverageGaps(env, right[1]) -');
     expect(mmNode).toContain('(visibleByPair.get(left.pairId) || 0) - (visibleByPair.get(right.pairId) || 0)');
     expect(mmNode).toContain("MARKET_MAKER_RUNTIME_TICK_DELAY_MS'] || '0'");
-    expect(mmNode).toContain("MARKET_MAKER_API_YIELD_MS'] || '5'");
+    expect(mmNode).toContain("readPositiveIntegerEnv('MARKET_MAKER_API_YIELD_MS', 5)");
     expect(mmNode).toContain('const yieldMarketMakerApi = async (): Promise<void> => {');
     expect(mmNode).toContain('await new Promise<void>(resolve => setTimeout(resolve, MARKET_MAKER_API_YIELD_MS));');
     expect(mmNode).not.toContain('const emitCrossProgress =');
@@ -1005,17 +1007,17 @@ describe('production startup wiring', () => {
     expect(mmNode).not.toContain('setImmediate(resolve)');
     expect(mmNode).not.toContain('await sleep(0);');
     expect(mmNode).toContain(
-      "MARKET_MAKER_STEADY_CROSS_ROUTE_JOBS_PER_TICK'] ||\n    LIMITS.MAX_MARKET_MAKER_CROSS_ROUTE_JOBS_PER_TICK",
+      "'MARKET_MAKER_STEADY_CROSS_ROUTE_JOBS_PER_TICK',\n  LIMITS.MAX_MARKET_MAKER_CROSS_ROUTE_JOBS_PER_TICK",
     );
     expect(mmNode).not.toContain('MARKET_MAKER_MAX_NEW_OFFERS_PER_ENTITY_INPUT');
     expect(mmNode).not.toContain('MARKET_MAKER_MAX_NEW_CROSS_REQUESTS_PER_ENTITY_INPUT');
     expect(mmNode).not.toContain('MARKET_MAKER_MAX_NEW_CROSS_DEPTH_REQUESTS_PER_ENTITY_INPUT');
     expect(mmNode).not.toContain('MARKET_MAKER_BOOTSTRAP_CROSS_ROUTE_JOBS_PER_TICK');
     expect(mmNode).toContain(
-      "MARKET_MAKER_CONNECTIVITY_MAX_TXS_PER_TICK'] ||\n    LIMITS.MAX_MARKET_MAKER_CONNECTIVITY_TXS_PER_TICK",
+      "'MARKET_MAKER_CONNECTIVITY_MAX_TXS_PER_TICK',\n  LIMITS.MAX_MARKET_MAKER_CONNECTIVITY_TXS_PER_TICK",
     );
     expect(mmNode).toContain(
-      "MARKET_MAKER_BOOTSTRAP_CONNECTIVITY_MAX_TXS_PER_TICK'] ||\n    LIMITS.MAX_MARKET_MAKER_CONNECTIVITY_TXS_PER_TICK",
+      "'MARKET_MAKER_BOOTSTRAP_CONNECTIVITY_MAX_TXS_PER_TICK',\n  LIMITS.MAX_MARKET_MAKER_CONNECTIVITY_TXS_PER_TICK",
     );
     expect(mmNode).not.toContain('MARKET_MAKER_BOOTSTRAP_SAME_QUOTE_HUB_GROUPS_PER_WAVE');
     expect(mmNode).not.toContain('MARKET_MAKER_MAX_CONNECTIVITY_TXS_PER_ENTITY_INPUT');

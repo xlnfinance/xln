@@ -24,7 +24,7 @@ import {
 } from '../../../account/config/dispute-config';
 import { LIMITS, SWAP_CONSTANTS } from '../../../config/constants';
 import { readCliOption } from '../../../config/cli';
-import { readBooleanEnv } from '../../../config/environment';
+import { readBooleanEnv, readPositiveIntegerEnv } from '../../../config/environment';
 import { resolveCrossJurisdictionRuntimeTopology } from '../../../extensions/cross-j/boundary';
 import {
   deriveCanonicalCrossJurisdictionBookOwnerForLegs,
@@ -270,16 +270,18 @@ export type MarketMakerHealth = {
   };
 };
 
-export const MARKET_MAKER_QUOTE_LOOP_MS = Math.max(1000, Number(process.env['MARKET_MAKER_QUOTE_LOOP_MS'] || '30000'));
+// Positive operator limits are decoded strictly: a value such as `30s` used to
+// become NaN and run setInterval as a tight loop. Floors stay as before.
+export const MARKET_MAKER_QUOTE_LOOP_MS = Math.max(1000, readPositiveIntegerEnv('MARKET_MAKER_QUOTE_LOOP_MS', 30_000));
 export const MARKET_MAKER_STEADY_QUOTES_ENABLED = readBooleanEnv(
   'MARKET_MAKER_STEADY_QUOTES_ENABLED',
   true,
 );
 export const MARKET_MAKER_HEALTH_REFRESH_MS = Math.max(
   250,
-  Number(process.env['MARKET_MAKER_HEALTH_REFRESH_MS'] || '1000'),
+  readPositiveIntegerEnv('MARKET_MAKER_HEALTH_REFRESH_MS', 1_000),
 );
-export const MARKET_MAKER_BOOTSTRAP_LOOP_MS = Math.max(1, Number(process.env['MARKET_MAKER_BOOTSTRAP_LOOP_MS'] || '1'));
+export const MARKET_MAKER_BOOTSTRAP_LOOP_MS = readPositiveIntegerEnv('MARKET_MAKER_BOOTSTRAP_LOOP_MS', 1);
 export const MARKET_MAKER_BOOTSTRAP_START_DELAY_MS = Math.max(
   0,
   Number(process.env['MARKET_MAKER_BOOTSTRAP_START_DELAY_MS'] || '0'),
@@ -296,17 +298,14 @@ export const MARKET_MAKER_MAX_ENTITY_TXS_PER_RUNTIME_FRAME = Math.max(
   0,
   Number(process.env['MARKET_MAKER_MAX_ENTITY_TXS_PER_RUNTIME_FRAME'] || '0'),
 );
-const MARKET_MAKER_API_YIELD_MS = Math.max(1, Number(process.env['MARKET_MAKER_API_YIELD_MS'] || '5'));
+const MARKET_MAKER_API_YIELD_MS = readPositiveIntegerEnv('MARKET_MAKER_API_YIELD_MS', 5);
 export const MARKET_MAKER_OFFERS_PER_ACCOUNT_PER_TICK = Math.max(
   2,
-  Number(process.env['MARKET_MAKER_OFFERS_PER_ACCOUNT_PER_TICK'] || '5'),
+  readPositiveIntegerEnv('MARKET_MAKER_OFFERS_PER_ACCOUNT_PER_TICK', 5),
 );
 export const MARKET_MAKER_MAX_NEW_OFFERS_PER_TICK = Math.max(
   4,
-  Number(
-    process.env['MARKET_MAKER_MAX_NEW_OFFERS_PER_TICK'] ||
-    LIMITS.MAX_MARKET_MAKER_NEW_OFFERS_PER_TICK,
-  ),
+  readPositiveIntegerEnv('MARKET_MAKER_MAX_NEW_OFFERS_PER_TICK', LIMITS.MAX_MARKET_MAKER_NEW_OFFERS_PER_TICK),
 );
 // Steady quote maintenance is paced. Bootstrap is intentionally not: it plans
 // all books first and commits one same-J batch followed by one cross-J batch.
@@ -314,34 +313,25 @@ export const MARKET_MAKER_MAX_NEW_OFFERS_PER_TICK = Math.max(
 // Bootstrap submits each cross-J quote exactly once. Account consensus owns
 // proposal/ACK retry; regenerating EntityTxs on a wall-clock TTL creates a
 // second authority path, inflates WAL, and races an already pending frame.
-export const MARKET_MAKER_STEADY_CROSS_ROUTE_JOBS_PER_TICK = Math.max(
-  1,
-  Number(
-    process.env['MARKET_MAKER_STEADY_CROSS_ROUTE_JOBS_PER_TICK'] ||
-    LIMITS.MAX_MARKET_MAKER_CROSS_ROUTE_JOBS_PER_TICK,
-  ),
+export const MARKET_MAKER_STEADY_CROSS_ROUTE_JOBS_PER_TICK = readPositiveIntegerEnv(
+  'MARKET_MAKER_STEADY_CROSS_ROUTE_JOBS_PER_TICK',
+  LIMITS.MAX_MARKET_MAKER_CROSS_ROUTE_JOBS_PER_TICK,
 );
-export const MARKET_MAKER_CONNECTIVITY_MAX_TXS_PER_TICK = Math.max(
-  1,
-  Number(
-    process.env['MARKET_MAKER_CONNECTIVITY_MAX_TXS_PER_TICK'] ||
-    LIMITS.MAX_MARKET_MAKER_CONNECTIVITY_TXS_PER_TICK,
-  ),
+export const MARKET_MAKER_CONNECTIVITY_MAX_TXS_PER_TICK = readPositiveIntegerEnv(
+  'MARKET_MAKER_CONNECTIVITY_MAX_TXS_PER_TICK',
+  LIMITS.MAX_MARKET_MAKER_CONNECTIVITY_TXS_PER_TICK,
 );
-export const MARKET_MAKER_BOOTSTRAP_CONNECTIVITY_MAX_TXS_PER_TICK = Math.max(
-  1,
-  Number(
-    process.env['MARKET_MAKER_BOOTSTRAP_CONNECTIVITY_MAX_TXS_PER_TICK'] ||
-    LIMITS.MAX_MARKET_MAKER_CONNECTIVITY_TXS_PER_TICK,
-  ),
+export const MARKET_MAKER_BOOTSTRAP_CONNECTIVITY_MAX_TXS_PER_TICK = readPositiveIntegerEnv(
+  'MARKET_MAKER_BOOTSTRAP_CONNECTIVITY_MAX_TXS_PER_TICK',
+  LIMITS.MAX_MARKET_MAKER_CONNECTIVITY_TXS_PER_TICK,
 );
 // One canonical visible ladder for every market. A production shell override
 // previously reduced cross-J to three levels while same-J exposed ten, so
 // health was green although users saw a materially thinner cross-J book.
 export const MARKET_MAKER_LEVELS_PER_SIDE = 10;
-const MARKET_MAKER_CROSS_MAX_TOKEN_PAIRS_PER_ROUTE = Math.max(
-  1,
-  Math.min(1000, Number(process.env['MARKET_MAKER_CROSS_MAX_TOKEN_PAIRS_PER_ROUTE'] || '1000')),
+const MARKET_MAKER_CROSS_MAX_TOKEN_PAIRS_PER_ROUTE = Math.min(
+  1000,
+  readPositiveIntegerEnv('MARKET_MAKER_CROSS_MAX_TOKEN_PAIRS_PER_ROUTE', 1000),
 );
 export const MARKET_MAKER_BOOTSTRAP_EVENTS_JSONL = String(
   process.env['XLN_MARKET_MAKER_BOOTSTRAP_EVENTS_JSONL'] || '',
@@ -368,7 +358,7 @@ export const emitMarketMakerBootstrapDebugEvent = (event: string, fields: Record
 };
 const MARKET_MAKER_CROSS_EXPIRY_MS = Math.max(
   60_000,
-  Number(process.env['MARKET_MAKER_CROSS_EXPIRY_MS'] || String(24 * 60 * 60 * 1000)),
+  readPositiveIntegerEnv('MARKET_MAKER_CROSS_EXPIRY_MS', 24 * 60 * 60 * 1000),
 );
 export const yieldMarketMakerApi = async (): Promise<void> => {
   await new Promise<void>(resolve => setTimeout(resolve, MARKET_MAKER_API_YIELD_MS));

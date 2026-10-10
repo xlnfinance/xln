@@ -208,3 +208,29 @@ describe('market maker quote planning', () => {
     expect(queuedEntityTxTypes(env)).toEqual(['openAccount', 'extendCredit', 'extendCredit']);
   });
 });
+
+describe('market maker operator limits', () => {
+  const importCoreWith = (environment: Record<string, string>) => {
+    const modulePath = new URL('../../../orchestrator/market-maker/node/mm-node-core.ts', import.meta.url).pathname;
+    return Bun.spawnSync({
+      cmd: [
+        process.execPath,
+        '-e',
+        `const core = await import('${modulePath}'); console.log(String(core.MARKET_MAKER_QUOTE_LOOP_MS));`,
+      ],
+      env: { ...process.env, ...environment },
+      stdout: 'pipe',
+      stderr: 'pipe',
+    });
+  };
+
+  test('a malformed quote-loop interval fails startup instead of becoming a NaN tight loop', () => {
+    const malformed = importCoreWith({ MARKET_MAKER_QUOTE_LOOP_MS: '30s' });
+    expect(malformed.exitCode).not.toBe(0);
+    expect(malformed.stderr.toString()).toContain('ENV_POSITIVE_INTEGER_INVALID:MARKET_MAKER_QUOTE_LOOP_MS:30s');
+
+    const configured = importCoreWith({ MARKET_MAKER_QUOTE_LOOP_MS: '45000' });
+    expect(configured.exitCode).toBe(0);
+    expect(configured.stdout.toString().trim().split('\n').at(-1)).toBe('45000');
+  });
+});
