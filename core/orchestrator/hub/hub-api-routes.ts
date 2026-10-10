@@ -17,7 +17,6 @@ export const createHubApiRoutes = (
   handleHubApiRequest: (
     request: Request,
     url: URL,
-    headers: Record<string, string>,
   ) => Promise<Response | null>;
   handleHubAccountRequest: (
     request: Request,

@@ -2716,7 +2716,7 @@ const server = Bun.serve<OrchestratorWebSocket['data']>({
       return await proxyRpc(request, args.rpcUrls[rpcProxyIndex] || '', operatorAuthorized);
     }
 
-    const hubApiResponse = await handleHubApiRequest(request, url, headers);
+    const hubApiResponse = await handleHubApiRequest(request, url);
     if (hubApiResponse) return hubApiResponse;
     const hubAccountResponse = await handleHubAccountRequest(
       request,
