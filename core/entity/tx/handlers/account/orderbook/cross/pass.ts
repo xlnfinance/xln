@@ -1,5 +1,6 @@
 import { forkBookState, type BookState } from '../../../../../../orderbook';
 import {
+  buildCrossJurisdictionCancelInstruction,
   buildCrossJurisdictionMarketOffer,
   crossJurisdictionBookAdmissionKeyFor,
   type CrossMarketOffer,
@@ -78,4 +79,26 @@ export const committedCrossRouteStatus = (
     ?.state.swapOffers?.get(offerId)
     ?.crossJurisdiction;
   return offerRoute?.status ?? admission?.route?.status;
+};
+
+/**
+ * A cross offer the venue cannot hold (an expected lifecycle reject, an
+ * executable remainder of 0 lots, a full book) is cancelled through the pull
+ * clearing path: never a plain SwapResolve on a Pull-bearing offer, never a
+ * live projection halt.
+ */
+export const queueCrossOfferCancellation = (
+  pass: CrossOrderbookPass,
+  accountId: string,
+  offerId: string,
+  namespacedOrderId: string,
+  route: CrossMarketOffer['route'],
+): void => {
+  pass.suspendedOrderIds.add(namespacedOrderId);
+  pass.crossJurisdictionFills.push(buildCrossJurisdictionCancelInstruction(
+    accountId,
+    offerId,
+    namespacedOrderId,
+    route,
+  ));
 };

@@ -10,7 +10,7 @@ import { getSwapPairPolicyByBaseQuote } from '../../../../../../account/utils';
 import { swapKey, type CrossJurisdictionWorkingOrderbookOffer } from '../../../../../../orderbook/swap-execution';
 import { createEmptyPairBook } from '../helpers';
 import { hasQueuedSwapResolveForEntityState } from '../queue';
-import { getCrossMarketOffer } from './pass';
+import { getCrossMarketOffer, queueCrossOfferCancellation } from './pass';
 import {
   crossBookQtyLots,
 } from './book';
@@ -54,11 +54,10 @@ export const prepareCrossOrderbookOffer = (
   }
   const qtyLots = crossBookQtyLots(marketOffer.baseTokenId, marketOffer.quoteTokenId, marketOffer.baseAmount, marketOffer.quoteAmount, marketOffer.priceTicks);
   if (qtyLots <= 0n) {
-    pass.rejectInvalidCrossOffer(
-      accountId,
-      rawOffer.offerId,
-      `cross-dust-remainder:${marketOffer.baseAmount.toString()}`,
-    );
+    // The user's price and size floor to 0 executable lots: nothing can ever
+    // fill, so cancel through pull clearing (Rust cancels cross-dust-remainder
+    // too) instead of a live projection halt.
+    queueCrossOfferCancellation(pass, accountId, rawOffer.offerId, namespacedOrderId, marketOffer.route);
     return null;
   }
   if (qtyLots > MAX_ORDERBOOK_QTY_LOTS) {

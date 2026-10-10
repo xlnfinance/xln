@@ -4,12 +4,10 @@ import {
   applyCommand,
   commitBookOverlay,
   getSwapExactQuoteLotMultipleAtPriceForDimensions,
+  OrderbookCapacityError,
 } from '../../../../../../orderbook';
 import { createStructuredLogger, shortOrder } from '../../../../../../support/logger';
-import {
-  buildCrossJurisdictionCancelInstruction,
-  resolveCrossJurisdictionExecutionPriceTicks,
-} from '../../../../../../extensions/cross-j/orderbook';
+import { resolveCrossJurisdictionExecutionPriceTicks } from '../../../../../../extensions/cross-j/orderbook';
 import {
   aggregateCrossTradeFills,
   buildCrossMarketOfferFromBookOrder,
@@ -18,7 +16,7 @@ import {
 } from '../helpers';
 import { prepareCrossOrderbookOffer } from './admission';
 import { classifyCrossBookMaker } from './book';
-import { getWorkingCrossBook } from './pass';
+import { getWorkingCrossBook, queueCrossOfferCancellation } from './pass';
 import type {
   CrossOrderbookPass,
   PreparedCrossOffer,
@@ -82,6 +80,12 @@ const applySpeculativeCrossCommand = (
       },
     );
   } catch (error) {
+    // A full venue is a lifecycle outcome for this offer (the same-J path
+    // cancels as book-full), not a corrupt projection that halts the hub.
+    if (error instanceof OrderbookCapacityError) {
+      queueRejectedCrossOfferCancellation(pass, offer);
+      return null;
+    }
     pass.rejectInvalidCrossOffer(
       offer.accountId,
       offer.rawOffer.offerId,
@@ -177,15 +181,13 @@ const isExpectedLifecycleReject = (reason: string): boolean =>
 const queueRejectedCrossOfferCancellation = (
   pass: CrossOrderbookPass,
   offer: PreparedCrossOffer,
-): void => {
-  pass.suspendedOrderIds.add(offer.namespacedOrderId);
-  pass.crossJurisdictionFills.push(buildCrossJurisdictionCancelInstruction(
-    offer.accountId,
-    offer.rawOffer.offerId,
-    offer.namespacedOrderId,
-    offer.marketOffer.route,
-  ));
-};
+): void => queueCrossOfferCancellation(
+  pass,
+  offer.accountId,
+  offer.rawOffer.offerId,
+  offer.namespacedOrderId,
+  offer.marketOffer.route,
+);
 
 export const processCrossOrderbookOffer = (
   pass: CrossOrderbookPass,
