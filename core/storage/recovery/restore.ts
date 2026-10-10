@@ -23,7 +23,9 @@ import type { StorageDbRole } from '../runtime-dbs';
 import {
   decodeCheckpointSnapshot,
   type CheckpointRestoreOptions,
+  type DecodedCheckpointSnapshot,
 } from './checkpoint';
+import type { Profile } from '../../entity/profile';
 import { persistRestoredRuntimeState, type PersistRestoredRuntimeOptions } from './import';
 import { restoreRuntimeFromBundles, type RuntimeBundleRestoreOptions } from './bundle/restore';
 
@@ -72,39 +74,52 @@ export const createRuntimeRecoveryApi = (deps: RuntimeRecoveryDeps) => {
     setAccountAuthoritySuppressed,
   } = deps;
 
-  const restoreEnvFromCheckpointSnapshot = async (
+  // Decodes and verifies the checkpoint in memory. It opens no database and
+  // starts no adapter, so a later verification failure has nothing live to undo.
+  const decodeRestoredCheckpoint = async (
     snapshot: Record<string, unknown>,
-    options: CheckpointRestoreOptions = {},
-  ): Promise<RuntimeReplica> => {
+    options: CheckpointRestoreOptions,
+  ): Promise<DecodedCheckpointSnapshot> => {
     if (accountAuthorityConfigured() && options.readOnly !== true) {
       throw new Error('RSCORE_PORTABLE_RESTORE_EXACT_CHECKPOINT_REQUIRED');
     }
-    const { env, gossipProfiles } = await decodeCheckpointSnapshot(
+    const decoded = await decodeCheckpointSnapshot(
       { createEmptyEnv },
       snapshot,
       options,
     );
+    const { env, gossipProfiles } = decoded;
     env.persistenceLastMaterializedHeight = env.state.height;
-    // A read-only restore never writes, so the engine it starts can never
-    // become durable. That is why the benchmark replay may opt in explicitly;
-    // silence stays the default.
-    if (options.readOnly === true && !authorityReplayEnabled()) {
-      setAccountAuthoritySuppressed(env, true);
-    }
-    if (!options.readOnly) {
-      await rehydrateRestoredRuntimeInfra(env, {
-        loadGossipProfiles: target => loadGossipProfilesFromInfraDb(target, infraGossipDbAccess),
-        assertPersistedContractConfigReady,
-        assertBrowserVMJurisdiction,
-      });
-    }
-    registerCommittedSingleSignerWallets(env);
-    if (options.readOnly) {
+    if (options.readOnly === true) {
+      // A read-only restore never writes, so the engine it starts can never
+      // become durable. That is why the benchmark replay may opt in explicitly;
+      // silence stays the default.
+      if (!authorityReplayEnabled()) setAccountAuthoritySuppressed(env, true);
+      registerCommittedSingleSignerWallets(env);
       if (!env.gossip?.setProfiles) throw new Error('RECOVERY_GOSSIP_HYDRATION_UNAVAILABLE');
       env.gossip.setProfiles(gossipProfiles);
-    } else {
-      for (const profile of gossipProfiles) env.gossip?.announce?.(profile);
     }
+    return decoded;
+  };
+
+  // Opens the infra DB, starts live J adapters, binds wallets and announces
+  // profiles. Runs only on fully verified state, as loadEnvFromDB does.
+  const activateRestoredRuntime = async (env: RuntimeReplica, gossipProfiles: readonly Profile[]): Promise<void> => {
+    await rehydrateRestoredRuntimeInfra(env, {
+      loadGossipProfiles: target => loadGossipProfilesFromInfraDb(target, infraGossipDbAccess),
+      assertPersistedContractConfigReady,
+      assertBrowserVMJurisdiction,
+    });
+    registerCommittedSingleSignerWallets(env);
+    for (const profile of gossipProfiles) env.gossip?.announce?.(profile);
+  };
+
+  const restoreEnvFromCheckpointSnapshot = async (
+    snapshot: Record<string, unknown>,
+    options: CheckpointRestoreOptions = {},
+  ): Promise<RuntimeReplica> => {
+    const { env, gossipProfiles } = await decodeRestoredCheckpoint(snapshot, options);
+    if (!options.readOnly) await activateRestoredRuntime(env, gossipProfiles);
     return env;
   };
 
@@ -142,7 +157,8 @@ export const createRuntimeRecoveryApi = (deps: RuntimeRecoveryDeps) => {
   ): Promise<RuntimeReplica> =>
     restoreRuntimeFromBundles(
       {
-        restoreCheckpoint: restoreEnvFromCheckpointSnapshot,
+        restoreCheckpoint: decodeRestoredCheckpoint,
+        activateRestoredRuntime,
         replayJournals: replayRecoveryFrameJournals,
         failAfterCleanup: failRecoveryRestoreAfterCleanup,
       },

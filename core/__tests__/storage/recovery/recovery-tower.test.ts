@@ -32,6 +32,7 @@ import {
 } from '../../../storage/recovery/bundle/crypto';
 import type { TowerAppointmentV1 } from '../../../storage/recovery/bundle/types';
 import { computeCanonicalStateHashFromEnv } from '../../../storage/canonical-hash';
+import { resolveDbPath } from '../../../storage/runtime-db-path';
 import { buildRuntimeCheckpointSnapshot } from '../../../storage/wal';
 import { createWatchtowerStore } from '../../../watchtower/store';
 import { handleRecoveryDiscover, handleTowerAppointment, handleTowerRestore } from '../../../watchtower/http';
@@ -318,6 +319,26 @@ describe('runtime recovery tower', () => {
     expect(env.networkInbox).toHaveLength(1);
     expect(restoredEnv.pendingOutputs).toEqual([]);
     expect(restoredEnv.networkInbox).toEqual([]);
+  });
+
+  test('a live restore rejecting the signed tip frame leaves no database open', async () => {
+    // Live restore opened the infra DB and started J adapters before checking
+    // the tip frame, and that rejection skipped cleanup: the orphan env kept
+    // the namespace's infra DB locked for the rest of the process.
+    const { env, runtimeSeed, runtimeId, entityId, jurisdiction } = await buildRuntimeEnv();
+    const signers = [{
+      index: 0, derivationIndex: 0, address: runtimeId, name: 'Signer 1', entityId, jurisdiction: jurisdiction.name,
+    }];
+    const [tip] = await readCheckpointFrames(env);
+    if (!tip) throw new Error('RECOVERY_TEST_CHECKPOINT_FRAME_MISSING');
+    const forged = buildRuntimeRecoveryBundle(env, {
+      signers, frames: [{ ...tip, postStateHash: `0x${'99'.repeat(32)}` }], createdAt: 10_000,
+    });
+    await expect(restoreEnvFromRecoveryBundles([forged], { runtimeSeed, runtimeId }))
+      .rejects.toThrow('RECOVERY_BUNDLE_CHECKPOINT_FRAME_STATE_MISMATCH');
+    const infraDb = new Level<Buffer, Buffer>(resolveDbPath({ ...createEmptyEnv(runtimeSeed), dbNamespace: runtimeId }, 'infra'));
+    await infraDb.open();
+    await infraDb.close();
   });
 
   test('portable Entity projection preserves persistent crontab hooks', async () => {

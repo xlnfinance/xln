@@ -1,5 +1,6 @@
 import type { RuntimeReplica } from '../../../runtime/types';
-import type { CheckpointRestoreOptions } from '../checkpoint';
+import type { CheckpointRestoreOptions, DecodedCheckpointSnapshot } from '../checkpoint';
+import type { Profile } from '../../../entity/profile';
 import type { PersistedFrameJournal } from '../../types';
 import { assertRuntimeRecoveryBundleAuthenticity } from './index';
 import type { RuntimeRecoveryBundleV1 } from './types';
@@ -10,7 +11,9 @@ export interface RuntimeBundleRestoreOptions extends CheckpointRestoreOptions {
 }
 
 export interface RuntimeBundleRestoreDeps {
-  restoreCheckpoint(snapshot: Record<string, unknown>, options: CheckpointRestoreOptions): Promise<RuntimeReplica>;
+  /** In-memory decode only: no database, adapter or announcement. */
+  restoreCheckpoint(snapshot: Record<string, unknown>, options: CheckpointRestoreOptions): Promise<DecodedCheckpointSnapshot>;
+  activateRestoredRuntime(env: RuntimeReplica, gossipProfiles: readonly Profile[]): Promise<void>;
   replayJournals(env: RuntimeReplica, frames: PersistedFrameJournal[]): Promise<void>;
   failAfterCleanup(env: RuntimeReplica, error: unknown): Promise<never>;
 }
@@ -67,23 +70,19 @@ const replayCandidateTail = async (
   deps: RuntimeBundleRestoreDeps,
   env: RuntimeReplica,
   candidate: RecoveryCandidate,
-  readOnly: boolean,
 ): Promise<void> => {
   if (!candidate.tail || candidate.height <= candidate.snapshot.runtimeHeight) return;
-  try {
-    await deps.replayJournals(
-      env,
-      (candidate.tail.frames || []).filter(frame => frame.height <= candidate.height),
-    );
-  } catch (error) {
-    if (readOnly) throw error;
-    await deps.failAfterCleanup(env, error);
-  }
+  await deps.replayJournals(
+    env,
+    (candidate.tail.frames || []).filter(frame => frame.height <= candidate.height),
+  );
 };
 
 // Bundle signatures establish provenance; the checkpoint hash and journal chain then
 // establish one deterministic state at the requested height. Never "best effort"
 // partial replay: a mismatch closes the opened databases and aborts the import.
+// A live restore starts infra (infra DB, J adapters, profiles) only after the
+// tip outbox and the tail are verified, so a rejected bundle leaves nothing live.
 export const restoreRuntimeFromBundles = async (
   deps: RuntimeBundleRestoreDeps,
   bundles: RuntimeRecoveryBundleV1[],
@@ -94,15 +93,19 @@ export const restoreRuntimeFromBundles = async (
     assertRuntimeRecoveryBundleAuthenticity(bundle, options.runtimeSeed!, options.runtimeId),
   );
   const candidate = selectRecoveryCandidate(validated, options.targetHeight);
-  const env = await deps.restoreCheckpoint(candidate.snapshot.checkpoint!, options);
-  restoreRecoveryCheckpointOutbox(env, candidate.snapshot);
-  await replayCandidateTail(deps, env, candidate, Boolean(options.readOnly));
-  if (env.state.height !== candidate.height) {
-    const mismatch = new Error(
-      `RECOVERY_BUNDLE_TARGET_HEIGHT_MISMATCH:expected=${candidate.height}:actual=${env.state.height}`,
-    );
-    if (options.readOnly) throw mismatch;
-    await deps.failAfterCleanup(env, mismatch);
+  const { env, gossipProfiles } = await deps.restoreCheckpoint(candidate.snapshot.checkpoint!, options);
+  try {
+    restoreRecoveryCheckpointOutbox(env, candidate.snapshot);
+    await replayCandidateTail(deps, env, candidate);
+    if (env.state.height !== candidate.height) {
+      throw new Error(
+        `RECOVERY_BUNDLE_TARGET_HEIGHT_MISMATCH:expected=${candidate.height}:actual=${env.state.height}`,
+      );
+    }
+    if (!options.readOnly) await deps.activateRestoredRuntime(env, gossipProfiles);
+  } catch (error) {
+    if (options.readOnly) throw error;
+    await deps.failAfterCleanup(env, error);
   }
   // Both restore modes retain the verified tip outbox. A live Runtime retires
   // those exact units only after its normal transport accepts them.
