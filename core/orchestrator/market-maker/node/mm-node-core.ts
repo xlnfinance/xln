@@ -75,7 +75,7 @@ import {
   deriveMarketMakerEntityId,
   getAccountReplica,
   getBootstrapCreditAmount,
-  getEntityOutCapacity,
+  getCreditGrantedByEntity,
   getEntityReplicaById,
   hasCommittedAccountState,
   hasPairMutualCredit,
@@ -1900,21 +1900,21 @@ export const ensureMarketMakerHubConnectivity = async (
       const creditAmount = getBootstrapCreditAmount(tokenId);
       if (hasPairMutualCredit(env, mmEntityId, hubEntityId, tokenId, creditAmount)) continue;
       if (hasQueuedExtendCredit(env, mmEntityId, hubEntityId, tokenId, creditAmount)) continue;
-      const hubOutCapacity = getEntityOutCapacity(mmAccount, hubEntityId, tokenId);
-
-      if (hubOutCapacity < creditAmount) {
-        if (
-          !pushLocalConnectivityTx(mmEntityId, mmSignerId, {
-            type: 'extendCredit',
-            data: {
-              counterpartyEntityId: hubEntityId,
-              tokenId,
-              amount: creditAmount,
-            },
-          })
-        ) {
-          break collectCreditInputs;
-        }
+      // extendCredit sets only the MM's own grant. A Hub that lowered its grant,
+      // or fills that consumed the Hub's out-capacity, leave that grant intact;
+      // re-sending the same set-semantics limit is a no-op that blocks quoting.
+      if (getCreditGrantedByEntity(mmAccount, mmEntityId, tokenId) >= creditAmount) continue;
+      if (
+        !pushLocalConnectivityTx(mmEntityId, mmSignerId, {
+          type: 'extendCredit',
+          data: {
+            counterpartyEntityId: hubEntityId,
+            tokenId,
+            amount: creditAmount,
+          },
+        })
+      ) {
+        break collectCreditInputs;
       }
     }
   }
