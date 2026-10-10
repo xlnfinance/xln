@@ -37,23 +37,6 @@ export const advanceBootstrapProgress = (
   return { ...progress, lastProgressAtMs: now, step: normalizedStep };
 };
 
-export const assertBootstrapNotStalled = (
-  progress: BootstrapProgress,
-  nowMs: number,
-  stallTimeoutMs: number,
-): void => {
-  const now = requireTimestamp('check', nowMs);
-  if (!Number.isFinite(stallTimeoutMs) || stallTimeoutMs <= 0) {
-    throw new Error(`BOOTSTRAP_STALL_TIMEOUT_INVALID:${stallTimeoutMs}`);
-  }
-  const idleMs = Math.max(0, now - progress.lastProgressAtMs);
-  if (idleMs <= stallTimeoutMs) return;
-  const totalMs = Math.max(0, now - progress.startedAtMs);
-  throw new Error(
-    `MESH_BOOTSTRAP_STALLED step=${progress.step} idleMs=${idleMs} totalMs=${totalMs} timeoutMs=${stallTimeoutMs}`,
-  );
-};
-
 export const buildBootstrapProgressHealth = (
   progress: BootstrapProgress,
   active: boolean,

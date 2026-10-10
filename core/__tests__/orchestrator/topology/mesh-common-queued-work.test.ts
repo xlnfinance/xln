@@ -6,7 +6,6 @@ import {
   hasPendingRuntimeWork,
   hasQueuedExtendCredit,
   hasQueuedOpenAccount,
-  hasQueuedSwapOffer,
 } from '../../../orchestrator/mesh/mesh-common';
 import { buildCollectiveEntityProposalTx } from '../../../entity/auth/authorization';
 import { hashEntityCommand, hashEntityCommandTxs, signedEntityCommandTx } from '../../../entity/command/command-codec';
@@ -131,7 +130,7 @@ describe('mesh queued work detection', () => {
 
     expect(hasQueuedOpenAccount(env, entityId, counterpartyId)).toBe(true);
     expect(hasQueuedExtendCredit(env, entityId, counterpartyId, 2, 1000n)).toBe(true);
-    expect(hasQueuedSwapOffer(env, entityId, counterpartyId, 'nested-mm-offer')).toBe(true);
+    expect(collectQueuedSwapOfferIds(env, entityId, counterpartyId).has('nested-mm-offer')).toBe(true);
   });
 
   test('collects placeSwapOffer queued in runtime mempool before account consensus sees it', () => {
@@ -160,7 +159,5 @@ describe('mesh queued work detection', () => {
     } as unknown as RuntimeReplica;
 
     expect([...collectQueuedSwapOfferIds(env, entityId, counterpartyId)]).toEqual(['mm-queued-ask-1']);
-    expect(hasQueuedSwapOffer(env, entityId, counterpartyId, 'mm-queued-ask-1')).toBe(true);
-    expect(hasQueuedSwapOffer(env, entityId, counterpartyId, 'mm-queued-bid-1')).toBe(false);
   });
 });

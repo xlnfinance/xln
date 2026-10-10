@@ -253,13 +253,6 @@ export const collectQueuedSwapOfferIds = (
   return ids;
 };
 
-export const hasQueuedSwapOffer = (
-  env: RuntimeReplica,
-  entityId: string,
-  counterpartyId: string,
-  offerId: string,
-): boolean => collectQueuedSwapOfferIds(env, entityId, counterpartyId).has(String(offerId || '').trim());
-
 export const getAccountReplica = (
   env: RuntimeReplica,
   entityId: string,
