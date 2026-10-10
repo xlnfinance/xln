@@ -1248,7 +1248,8 @@ describe('audit fail-fast regressions', () => {
     expect(exits).toEqual([1]);
     expect(String(logs[0]?.[0] || '')).toContain('mesh bootstrap tick fatal');
 
-    const ignored = handleMeshBootstrapLoopError(new Error('ECONNRESET: response ended prematurely'), {
+    const socketReset = Object.assign(new Error('socket closed by peer'), { code: 'ECONNRESET' });
+    const ignored = handleMeshBootstrapLoopError(new TypeError('fetch failed', { cause: socketReset }), {
       nodeName: 'H1',
       clearLoop: () => {
         cleared += 1;
@@ -1265,6 +1266,19 @@ describe('audit fail-fast regressions', () => {
     expect(cleared).toBe(1);
     expect(exits).toEqual([1]);
     expect(String(logs.at(-1)?.[0] || '')).toContain('mesh bootstrap transport retry');
+
+    // Retry is decided by the typed transport code, never by message text.
+    const textOnly = handleMeshBootstrapLoopError(new Error('MESH_CREDIT_PLAN_INVALID: frame aborted, ECONNRESET'), {
+      nodeName: 'H1',
+      clearLoop: () => {
+        cleared += 1;
+      },
+      exit: code => {
+        exits.push(code);
+      },
+    });
+    expect(textOnly).toBe(true);
+    expect(exits).toEqual([1, 1]);
   });
 
   test('runtime input admission accounts for importReplica earlier in the same batch', () => {
