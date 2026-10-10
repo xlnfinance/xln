@@ -2,7 +2,6 @@ import { describe, expect, test } from 'bun:test';
 
 import type { AccountConsensusContext } from '../../../account/consensus/context';
 import { applyAccountTx } from '../../../account/tx/apply';
-import { handleAddDelta } from '../../../account/tx/handlers/balance/add-delta';
 import { handleDirectPayment } from '../../../account/tx/handlers/balance/direct-payment';
 import { handleHtlcLock } from '../../../account/tx/handlers/htlc/lock';
 import { handleHtlcResolve } from '../../../account/tx/handlers/htlc/resolve';
@@ -84,37 +83,65 @@ describe('ApplyAccountTxResult units', () => {
 });
 
 describe('ApplyAccountTxResult payment/HTLC/settlement dispositions', () => {
-  test('add_delta rejects an over-capacity token without mutation', () => {
-    const account = makeAccount(LEFT, RIGHT);
-    const transition = beginAccountTransition(account);
+  const ROW_LIMIT_MESSAGE =
+    `ACCOUNT_DELTA_ROW_LIMIT_EXCEEDED:insert:` +
+    `${LIMITS.MAX_ACCOUNT_TOKEN_ROWS + 1}:${LIMITS.MAX_ACCOUNT_TOKEN_ROWS}`;
+  const fullAccountDraft = () => {
+    const transition = beginAccountTransition(makeAccount(LEFT, RIGHT));
     const draft = accountTransitionView(transition);
     for (let tokenId = 2; tokenId <= LIMITS.MAX_ACCOUNT_TOKEN_ROWS; tokenId += 1) {
       draft.state.deltas.put(tokenId, createDefaultDelta(tokenId));
     }
     expect(draft.state.deltas.size).toBe(LIMITS.MAX_ACCOUNT_TOKEN_ROWS);
-    const result = handleAddDelta(draft.state, {
+    return { transition, draft };
+  };
+
+  test('add_delta rejects an over-capacity token without mutation', async () => {
+    const { transition, draft } = fullAccountDraft();
+    const result = await applyAccountTx(draft, {
       type: 'add_delta',
       data: { tokenId: LIMITS.MAX_ACCOUNT_TOKEN_ROWS + 1 },
-    });
+    }, true);
     const rejection = rejectionOf(result);
     expect(rejection).toEqual({
       kind: 'delta_row_limit_exceeded',
       code: ACCOUNT_TX_REJECTION_CODES.deltaRowLimitExceeded,
-      message:
-        `ACCOUNT_DELTA_ROW_LIMIT_EXCEEDED:insert:` +
-        `${LIMITS.MAX_ACCOUNT_TOKEN_ROWS + 1}:${LIMITS.MAX_ACCOUNT_TOKEN_ROWS}`,
+      message: ROW_LIMIT_MESSAGE,
     });
     expect(result.events).toEqual([rejection.message]);
     expect(draft.state.deltas.size).toBe(LIMITS.MAX_ACCOUNT_TOKEN_ROWS);
     discardAccountTransition(transition);
   });
 
-  test('add_delta rejects a token id outside the canonical domain', () => {
-    const account = makeAccount(LEFT, RIGHT);
-    const result = handleAddDelta(account.state, {
+  // A peer chooses the token id of a payment or HTLC lock. Before the
+  // conversion moved to applyAccountTx, both drafted the 129th row unguarded
+  // and the thrown AccountDeltaError halted the Runtime.
+  test('direct_payment and htlc_lock on a 129th token row are typed rejects', async () => {
+    const { transition, draft } = fullAccountDraft();
+    const newToken = LIMITS.MAX_ACCOUNT_TOKEN_ROWS + 1;
+    const paid = await applyAccountTx(draft, {
+      ...payment(),
+      data: { ...payment().data, tokenId: newToken },
+    }, true);
+    expect(rejectionOf(paid)).toMatchObject({ kind: 'delta_row_limit_exceeded', message: ROW_LIMIT_MESSAGE });
+    const hashlock = hashHtlcSecret(HEX32('45'));
+    const locked = await applyAccountTx(draft, {
+      type: 'htlc_lock',
+      data: { lockId: hashlock, hashlock, timelock: 60_000n, revealBeforeHeight: 10, amount: 7n, tokenId: newToken },
+    }, true, 1_000);
+    expect(rejectionOf(locked)).toMatchObject({ kind: 'delta_row_limit_exceeded', message: ROW_LIMIT_MESSAGE });
+    expect(draft.state.deltas.size).toBe(LIMITS.MAX_ACCOUNT_TOKEN_ROWS);
+    expect(draft.state.locks.size).toBe(0);
+    discardAccountTransition(transition);
+  });
+
+  test('add_delta rejects a token id outside the canonical domain', async () => {
+    const transition = beginAccountTransition(makeAccount(LEFT, RIGHT));
+    const account = accountTransitionView(transition);
+    const result = await applyAccountTx(account, {
       type: 'add_delta',
       data: { tokenId: TOKENS.MAX_TOKEN_ID + 1 },
-    });
+    }, true);
     const rejection = rejectionOf(result);
     expect(rejection).toEqual({
       kind: 'delta_token_invalid',
@@ -123,6 +150,7 @@ describe('ApplyAccountTxResult payment/HTLC/settlement dispositions', () => {
       tokenId: TOKENS.MAX_TOKEN_ID + 1,
     });
     expect(account.state.deltas.size).toBe(1);
+    discardAccountTransition(transition);
   });
 
   test('direct_payment applies and rejects forged direction without mutation', async () => {

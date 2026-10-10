@@ -40,7 +40,6 @@ export const ACCOUNT_TX_REJECTION_CODES = {
   settlementSignedAccountFrozen: 'SETTLEMENT_SIGNED_ACCOUNT_FROZEN',
   settlementHankoNonceMismatch: 'SETTLEMENT_HANKO_NONCE_MISMATCH',
   deltaTokenInvalid: 'ACCOUNT_DELTA_TOKEN_INVALID',
-  deltaRowCountInvalid: 'ACCOUNT_DELTA_ROW_COUNT_INVALID',
   deltaRowLimitExceeded: 'ACCOUNT_DELTA_ROW_LIMIT_EXCEEDED',
   htlcLockCapacity: 'ACCOUNT_HTLC_LOCK_CAPACITY',
 } as const satisfies Record<string, string>;
@@ -83,11 +82,6 @@ export type AccountTxRejection =
       code: typeof ACCOUNT_TX_REJECTION_CODES.deltaTokenInvalid;
       message: string;
       tokenId: number;
-    }>
-  | Readonly<{
-      kind: 'delta_row_count_invalid';
-      code: typeof ACCOUNT_TX_REJECTION_CODES.deltaRowCountInvalid;
-      message: string;
     }>
   | Readonly<{
       kind: 'delta_row_limit_exceeded';

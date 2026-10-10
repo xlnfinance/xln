@@ -186,7 +186,7 @@ pub(crate) fn apply_to_candidate(
     {
         return Ok(MutationDecision::rejected(rejection));
     }
-    match tx {
+    let decision = match tx {
         AccountTx::JEventClaim(tx) => {
             crate::tx::handlers::j_events::apply_j_event_claim(candidate, tx, proposer)
         }
@@ -400,6 +400,32 @@ pub(crate) fn apply_to_candidate(
                 context.ok_or(TransitionError::ExecutionContextRequired("htlc_resolve"))?;
             crate::tx::handlers::htlc::apply_resolve(candidate, proposer, tx, context)
         }
+    };
+    sender_delta_rejection(decision)
+}
+
+/// Parity target: `senderDeltaRejection` (core/account/tx/apply-result.ts).
+/// The tx author chooses the token row, so inserting a 129th row is a typed
+/// reject at this one router whichever handler drafted it (payment, HTLC
+/// lock, swap, credit limit). Before, `delta_or_zero(..)?` made it a fatal
+/// `TransitionError` and a peer frame could halt the Runtime.
+fn sender_delta_rejection(
+    decision: Result<MutationDecision, TransitionError>,
+) -> Result<MutationDecision, TransitionError> {
+    match decision {
+        Err(TransitionError::InvalidState(crate::error::StateError::DeltaRowLimitExceeded {
+            context: "insert",
+            attempted,
+            maximum,
+        })) => {
+            let rejection = AccountRejection::DeltaRowLimitExceeded { attempted, maximum };
+            let message = rejection.message();
+            Ok(MutationDecision::rejected_with_events(
+                rejection,
+                vec![message],
+            ))
+        }
+        other => other,
     }
 }
 

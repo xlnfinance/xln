@@ -35,7 +35,7 @@ const validateHtlcLock = (value: unknown, code: string): void => {
   const data = validateAccountTxDataFields(value, {
     required: {
       lockId: 'string', hashlock: 'string', timelock: 'bigint',
-      revealBeforeHeight: 'integer', amount: 'bigint', tokenId: 'integer',
+      revealBeforeHeight: 'integer', amount: 'bigint', tokenId: 'tokenId',
     },
     optional: { deliveryMode: 'string', envelope: 'recordOrString' },
     literals: { deliveryMode: ['instant', 'async'] },

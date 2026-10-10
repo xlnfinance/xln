@@ -254,3 +254,50 @@ fn non_htlc_holds_do_not_create_a_fictitious_conditional_offdelta_ceiling() {
         );
     }
 }
+
+#[test]
+fn payment_and_credit_limit_on_a_129th_token_row_are_typed_rejections() {
+    // Parity: core/__tests__/account/transactions/apply-account-tx-result.test.ts.
+    // `delta_or_zero(..)?` used to turn the 129th row into a fatal
+    // TransitionError, so a peer frame on a fresh token halted the Runtime.
+    let rows = (1..=128_u32)
+        .map(|id| {
+            Delta::new(
+                token(id),
+                0.into(),
+                0.into(),
+                0.into(),
+                0.into(),
+                0.into(),
+                0.into(),
+                0.into(),
+                0.into(),
+                0.into(),
+            )
+            .expect("zero row")
+        })
+        .collect();
+    let base = replica(entity(0x11), entity(0x11), entity(0x22), rows);
+    let mut paid = payment(Side::Left, 1.into());
+    if let AccountTx::DirectPayment { token_id, .. } = &mut paid {
+        *token_id = token(129);
+    }
+    let credit = AccountTx::SetCreditLimit {
+        token_id: token(129),
+        amount: 1.into(),
+    };
+    for tx in [paid, credit] {
+        let transition = SequentialAccountEngine::apply(&base, Side::Left, &tx)
+            .expect("typed row-limit rejection, not a TransitionError");
+        let AccountVerdict::Rejected(reason) = transition.verdict() else {
+            panic!("129th row accepted");
+        };
+        assert_eq!(reason.code(), "ACCOUNT_DELTA_ROW_LIMIT_EXCEEDED");
+        assert_eq!(
+            reason.message(),
+            "ACCOUNT_DELTA_ROW_LIMIT_EXCEEDED:insert:129:128"
+        );
+        assert_eq!(transition.events(), [reason.message()]);
+        assert!(transition.candidate().is_none());
+    }
+}

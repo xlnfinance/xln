@@ -3,6 +3,7 @@ import {
   requireBoundaryRecord,
   requireExactBoundaryKeys,
 } from '../../protocol/boundary-validation';
+import { TOKENS } from '../../config/constants';
 
 type AccountTxFieldKind =
   | 'array'
@@ -12,7 +13,8 @@ type AccountTxFieldKind =
   | 'record'
   | 'recordOrString'
   | 'string'
-  | 'stringArray';
+  | 'stringArray'
+  | 'tokenId';
 
 export type AccountTxDataSchema = Readonly<{
   required?: Readonly<Record<string, AccountTxFieldKind>>;
@@ -26,6 +28,12 @@ const validateField = (value: unknown, kind: AccountTxFieldKind, code: string): 
   if (kind === 'boolean' && typeof value === 'boolean') return;
   if (kind === 'integer') {
     requireBoundaryInteger(value, code);
+    return;
+  }
+  // Rust decodes every token id as u16. Without the upper bound a peer frame
+  // reached createDeltaDraft with id 65536 and failed inside the transition.
+  if (kind === 'tokenId') {
+    if (requireBoundaryInteger(value, code) > TOKENS.MAX_TOKEN_ID) throw new Error(`${code}_DOMAIN`);
     return;
   }
   if (kind === 'record') {

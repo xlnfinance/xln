@@ -16,7 +16,7 @@ import {
 } from '../state/candidate-overlay';
 import type { ApplyAccountTxResult } from './apply-types';
 import { applyAccountTxMutation } from './mutation';
-import { withAccountTxCandidateEffects } from './apply-result';
+import { accountTxRejected, senderDeltaRejection, withAccountTxCandidateEffects } from './apply-result';
 import { collectSameJurisdictionSwapOutputs } from './same-j-swap-output';
 
 export async function applyAccountTx(
@@ -32,19 +32,31 @@ export async function applyAccountTx(
   htlcEnforcementClock?: HtlcEnforcementClock,
 ): Promise<ApplyAccountTxResult> {
   const candidateEffects: AccountOutput[] = [];
-  const result = await applyAccountTxMutation(
-    account,
-    accountTx,
-    byLeft,
-    currentTimestamp,
-    currentJHeight,
-    isValidation,
-    consensusContext,
-    jClaimSession,
-    counterpartyCertifiedBoardHash,
-    candidateEffects,
-    htlcEnforcementClock,
-  );
+  let result: ApplyAccountTxResult;
+  try {
+    result = await applyAccountTxMutation(
+      account,
+      accountTx,
+      byLeft,
+      currentTimestamp,
+      currentJHeight,
+      isValidation,
+      consensusContext,
+      jClaimSession,
+      counterpartyCertifiedBoardHash,
+      candidateEffects,
+      htlcEnforcementClock,
+    );
+  } catch (error) {
+    // Every handler drafts token rows through createDeltaDraft. Converting its
+    // sender-caused failures here covers payments, HTLC locks, swaps and
+    // settlement alike; before, only add_delta/set_credit_limit caught them
+    // and a peer payment on a 129th token row halted the Runtime. The caller
+    // discards this tx's transition, so a partial draft never commits.
+    const rejection = senderDeltaRejection(error);
+    if (!rejection) throw error;
+    return accountTxRejected(rejection, [rejection.message]);
+  }
   if (result.ok) {
     candidateEffects.push(...collectSameJurisdictionSwapOutputs(account, accountTx));
   }

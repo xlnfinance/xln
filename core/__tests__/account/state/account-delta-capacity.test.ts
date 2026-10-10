@@ -6,16 +6,17 @@ import { commitDeltaDraft, createDeltaDraft } from '../../../account/tx/delta-ut
 import { beginAccountStateDraft } from '../../../account/state/account-state-draft';
 import { PersistentAccountStateMap } from '../../../account/state/persistent-state-map';
 import { makeAccount } from '../../helpers/cross-j';
-import { handleAddDelta } from '../../../account/tx/handlers/balance/add-delta';
+import { applyAccountTx } from '../../../account/tx/apply';
 import { decodeAccountFrame } from '../../../account/validation/frame-validation';
 import { decodeAccountTx } from '../../../account/tx-validation';
 import { LIMITS, TOKENS } from '../../../config/constants';
 
-const emptyDraft = () => {
+const emptyReplicaDraft = () => {
   const base = makeAccount('alice', 'hub');
   base.state.deltas = PersistentAccountStateMap.empty('deltas');
-  return beginAccountStateDraft(base).draft.state;
+  return beginAccountStateDraft(base).draft;
 };
+const emptyDraft = () => emptyReplicaDraft().state;
 
 test('Account accepts exactly the on-chain enforceable Delta row limit', () => {
   const account = emptyDraft();
@@ -45,14 +46,16 @@ test('Account restore rejects an oversized Delta map before accepting partial st
     );
 });
 
-test('add_delta rejects a 129th row at the mutation sink without throwing or mutation', () => {
-  const account = emptyDraft();
+test('add_delta rejects a 129th row at the Account tx boundary without throwing or mutation', async () => {
+  const draft = emptyReplicaDraft();
+  const account = draft.state;
   for (let tokenId = 1; tokenId <= LIMITS.MAX_ACCOUNT_TOKEN_ROWS; tokenId += 1) {
     commitDeltaDraft(account, createDeltaDraft(account, tokenId));
   }
-  const result = handleAddDelta(
-    account,
+  const result = await applyAccountTx(
+    draft,
     { type: 'add_delta', data: { tokenId: LIMITS.MAX_ACCOUNT_TOKEN_ROWS + 1 } },
+    true,
   );
   expect(result).toEqual({
     ok: false,
@@ -71,15 +74,17 @@ test('add_delta rejects a 129th row at the mutation sink without throwing or mut
   expect(account.deltas.size).toBe(LIMITS.MAX_ACCOUNT_TOKEN_ROWS);
 });
 
-test('add_delta boundary and mutation sink reject token ids outside the canonical domain', () => {
-  const account = emptyDraft();
+test('add_delta boundary and Account tx boundary reject token ids outside the canonical domain', async () => {
+  const draft = emptyReplicaDraft();
+  const account = draft.state;
   expect(() => decodeAccountTx(
     { type: 'add_delta', data: { tokenId: TOKENS.MAX_TOKEN_ID + 1 } },
     'peer-add-delta',
   )).toThrow('peer-add-delta_DATA_TOKENID_DOMAIN');
-  const result = handleAddDelta(
-    account,
+  const result = await applyAccountTx(
+    draft,
     { type: 'add_delta', data: { tokenId: TOKENS.MAX_TOKEN_ID + 1 } },
+    true,
   );
   expect(result.ok).toBe(false);
   if (result.ok) throw new Error('expected add_delta rejection');

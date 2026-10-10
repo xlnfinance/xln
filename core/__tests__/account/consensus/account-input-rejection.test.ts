@@ -21,7 +21,8 @@ import {
 } from '../../../account/consensus/result';
 import { fintsPositiveAccountConsensusResult } from '../../types/fints/results/account-consensus-result.positive';
 import { openWritableEntityAccounts } from '../../helpers/cross-j';
-import { handleSetCreditLimit } from '../../../account/tx/handlers/balance/set-credit-limit';
+import { applyAccountTx } from '../../../account/tx/apply';
+import { accountTransitionView, beginAccountTransition, discardAccountTransition } from '../../../account/state/candidate-overlay';
 
 const leftEntity = `0x${'11'.repeat(32)}`;
 const rightEntity = `0x${'22'.repeat(32)}`;
@@ -581,7 +582,9 @@ describe('typed Account input rejection', () => {
     expect(verificationCalls).toBe(0);
     expect(safeStringify(account)).toBe(before);
 
-    const reducerResult = handleSetCreditLimit(account.state, frame.accountTxs[0], false);
+    const transition = beginAccountTransition(account);
+    const reducerResult = await applyAccountTx(accountTransitionView(transition), frame.accountTxs[0]!, false);
+    discardAccountTransition(transition);
     expect(reducerResult.ok).toBe(false);
     if (reducerResult.ok) throw new Error('SET_CREDIT_LIMIT_TOKEN_REJECTION_REQUIRED');
     expect(reducerResult.rejection).toMatchObject({

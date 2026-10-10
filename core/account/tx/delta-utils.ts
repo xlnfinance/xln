@@ -13,7 +13,7 @@ import {
 /** Own one mutable leaf copy; caller must publish it with `commitDeltaDraft`. */
 export function createDeltaDraft(account: AccountDraftState, tokenId: number): Delta {
   if (!Number.isSafeInteger(tokenId) || tokenId < 0 || tokenId > TOKENS.MAX_TOKEN_ID) {
-    throw new AccountDeltaError(ACCOUNT_DELTA_ERROR_CODES.tokenInvalid, String(tokenId));
+    throw new AccountDeltaError(ACCOUNT_DELTA_ERROR_CODES.tokenInvalid, String(tokenId), tokenId);
   }
   const existing = account.deltas.get(tokenId);
   if (!existing) {

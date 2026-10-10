@@ -12,11 +12,14 @@ export type AccountDeltaErrorCode =
 
 export class AccountDeltaError extends Error {
   readonly code: AccountDeltaErrorCode;
+  /** Present for `tokenInvalid`: the token id the transaction asked for. */
+  readonly tokenId: number | undefined;
 
-  constructor(code: AccountDeltaErrorCode, detail: string) {
+  constructor(code: AccountDeltaErrorCode, detail: string, tokenId?: number) {
     super(`${code}:${detail}`);
     this.name = 'AccountDeltaError';
     this.code = code;
+    this.tokenId = tokenId;
   }
 }
 

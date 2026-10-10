@@ -177,16 +177,21 @@ export const settlementHankoNonceRejection = (
   basis,
 });
 
-export const rejectionFromDeltaError = (
-  error: AccountDeltaError,
-  tokenId: number,
-): AccountTxRejection => {
-  if (error.code === ACCOUNT_TX_REJECTION_CODES.deltaTokenInvalid) {
+/**
+ * The transaction author chooses the token id and whether a new row is
+ * inserted, so an out-of-range id or a 129th row is a typed reject wherever a
+ * handler drafts the row. A malformed row count is a local invariant and
+ * returns null so the caller rethrows. Parity: Rust apply_to_candidate maps
+ * StateError::DeltaRowLimitExceeded{insert} to the same rejection.
+ */
+export const senderDeltaRejection = (error: unknown): AccountTxRejection | null => {
+  if (!(error instanceof AccountDeltaError)) return null;
+  if (error.code === ACCOUNT_TX_REJECTION_CODES.deltaTokenInvalid && error.tokenId !== undefined) {
     return {
       kind: 'delta_token_invalid',
       code: ACCOUNT_TX_REJECTION_CODES.deltaTokenInvalid,
       message: error.message,
-      tokenId,
+      tokenId: error.tokenId,
     };
   }
   if (error.code === ACCOUNT_TX_REJECTION_CODES.deltaRowLimitExceeded) {
@@ -196,11 +201,7 @@ export const rejectionFromDeltaError = (
       message: error.message,
     };
   }
-  return {
-    kind: 'delta_row_count_invalid',
-    code: ACCOUNT_TX_REJECTION_CODES.deltaRowCountInvalid,
-    message: error.message,
-  };
+  return null;
 };
 
 export const assertNever = (value: never): never => {
