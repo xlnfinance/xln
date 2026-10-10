@@ -8,6 +8,7 @@ import {
   isEntityLeaderTimeoutInput,
 } from '../../../../entity/consensus/input/phase-views';
 import type { EntityInput } from '../../../../entity/types';
+import type { JPrefixAttestation } from '../../../../types/jurisdiction-events';
 
 const base = (): EntityInput => ({ entityId: 'entity', signerId: 'signer' });
 
@@ -34,6 +35,26 @@ describe('FinTS EntityInput phase views', () => {
     expect(getEntityInputPhaseCombinationError({ ...dedicated, entityTxs: [] })).toBe(
       'ENTITY_INPUT_LEADER_TIMEOUT_LANE_MIXED',
     );
+  });
+
+  test('accepts only the per-lane shapes delivery emits', () => {
+    // A peer controls both maps. An empty bundle merged into an honest
+    // proposal stripped its frame reference; two attestations threw in the
+    // input merge key after Runtime mutation started (halt).
+    const frame = { height: 1, frameHash: 'frame' };
+    expect(getEntityInputPhaseCombinationError({
+      ...base(), hashPrecommitFrame: frame, hashPrecommits: new Map(),
+    })).toBe('ENTITY_INPUT_PRECOMMIT_BUNDLE_EMPTY');
+    const attestation = {} as JPrefixAttestation;
+    expect(getEntityInputPhaseCombinationError({
+      ...base(), jPrefixAttestations: new Map([['a', attestation], ['b', attestation]]),
+    })).toBe('ENTITY_INPUT_J_PREFIX_MUST_BE_SPLIT');
+    expect(getEntityInputPhaseCombinationError({
+      ...base(), jPrefixAttestations: new Map(),
+    })).toBe('ENTITY_INPUT_J_PREFIX_MUST_BE_SPLIT');
+    expect(getEntityInputPhaseCombinationError({
+      ...base(), jPrefixAttestations: new Map([['a', attestation]]),
+    })).toBeNull();
   });
 
   test('catalog covers every current wire field deliberately', () => {

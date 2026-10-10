@@ -60,5 +60,16 @@ export const getEntityInputPhaseCombinationError = (
   if ((input.hashPrecommitFrame === undefined) !== (input.hashPrecommits === undefined)) {
     return 'ENTITY_INPUT_PRECOMMIT_PAIR_INCOMPLETE';
   }
+  // Delivery emits the precommit and J-prefix lanes only in this shape
+  // (splitRoutedOutputByDeliveryLane), and the input merge key relies on it:
+  // an empty bundle lands in the bare lane and strips the frame reference
+  // from the honest input it merges into; a multi-signer attestation map
+  // throws inside the Runtime reducer after mutation started.
+  if (input.hashPrecommits !== undefined && input.hashPrecommits.size === 0) {
+    return 'ENTITY_INPUT_PRECOMMIT_BUNDLE_EMPTY';
+  }
+  if (input.jPrefixAttestations !== undefined && input.jPrefixAttestations.size !== 1) {
+    return 'ENTITY_INPUT_J_PREFIX_MUST_BE_SPLIT';
+  }
   return null;
 };
