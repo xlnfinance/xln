@@ -1827,26 +1827,15 @@ const projectHistoryFrameBatch = async (
   const unavailable: RuntimeAdapterHistoryFrameBatch['unavailable'] = [];
   const baseQuery: RuntimeAdapterReadQuery = { ...(query ?? {}) };
   delete baseQuery.heights;
-  const isUnavailableHistoryError = (error: unknown): boolean => {
-    if (error instanceof RuntimeAdapterError) {
-      return error.code === 'E_NOT_FOUND';
-    }
-    const message = error instanceof Error ? error.message : String(error || '');
-    return message.includes('STORAGE_DIFF_MISSING') ||
-      message.includes('entity not found at height') ||
-      message.includes('height unavailable');
-  };
-
   for (const height of requestedHeights) {
     try {
       frames.push(await projectViewFrame(ctx, { ...baseQuery, atHeight: height }));
     } catch (error) {
-      if (isUnavailableHistoryError(error)) {
-        unavailable.push({
-          height,
-          code: error instanceof RuntimeAdapterError ? error.code : 'E_NOT_FOUND',
-          message: error instanceof Error ? error.message : String(error || 'history frame unavailable'),
-        });
+      // Storage reports an unretained height as null, which the projection
+      // types as E_NOT_FOUND. Any other failure is real and propagates; text
+      // matching used to turn unrelated storage errors into "unavailable".
+      if (error instanceof RuntimeAdapterError && error.code === 'E_NOT_FOUND') {
+        unavailable.push({ height, code: error.code, message: error.message });
         continue;
       }
       throw error;

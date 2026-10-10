@@ -41,6 +41,7 @@ import {
   assertRuntimeAdapterGraphFrameWireBudget,
   resolveRuntimeAdapterRead,
   type RuntimeAdapterGraphFrame,
+  type RuntimeAdapterResolveContext,
 } from '../../../api/runtime-adapter/resolve';
 
 import { decryptRuntimeRecoveryBundle, deriveRuntimeRecoveryLookupKey } from '../../../storage/recovery/bundle/crypto';
@@ -1940,55 +1941,51 @@ test('runtime adapter history-frame-batch returns bounded historical view frames
   expect(loadedHeights).toEqual([8, 8, 9, 9]);
 });
 
-test('runtime adapter history-frame-batch marks missing storage diffs unavailable without failing the batch', async () => {
+test('runtime adapter history-frame-batch marks an unretained height unavailable without failing the batch', async () => {
   const env = makeEnv();
   const replica = Array.from(env.state.eReplicas.values())[0]!;
   const account = replica.state.accounts.get(counterpartyId)!;
+  const ctx = (loadEntityViewPage: NonNullable<RuntimeAdapterResolveContext['loadEntityViewPage']>): RuntimeAdapterResolveContext => ({
+    env,
+    readHead: async () => ({
+      schemaVersion: STORAGE_SCHEMA_VERSION,
+      latestHeight: 9,
+      latestMaterializedHeight: 8,
+      latestSnapshotHeight: 8,
+      snapshotPeriodFrames: 256,
+      retainSnapshots: 3,
+      epochMaxBytes: 1,
+      accountMerkleRadix: 16,
+      epochReplayBytes: 0,
+      retainedWalBytes: 0,
+    }),
+    listEntityIdsAtHeight: async () => [entityId],
+    loadEntityViewPage,
+  });
+  const query = { heights: [8, 9], entityId, accountsLimit: 1, booksLimit: 1 };
+  const page = {
+    core: projectEntityReplicaCoreView(replica.state, replica),
+    accounts: { items: [projectAccountDoc(account)], nextCursor: null },
+    books: { items: [], nextCursor: null },
+  };
 
+  // Storage reports an unretained height as null: a typed E_NOT_FOUND row.
   const batch = await resolveRuntimeAdapterRead<{
     frames: Array<{ height: number }>;
     unavailable: Array<{ height: number; code: string; message: string }>;
-  }>(
-    {
-      env,
-      readHead: async () => ({
-        schemaVersion: STORAGE_SCHEMA_VERSION,
-        latestHeight: 9,
-        latestMaterializedHeight: 8,
-        latestSnapshotHeight: 8,
-        snapshotPeriodFrames: 256,
-        retainSnapshots: 3,
-        epochMaxBytes: 1,
-        accountMerkleRadix: 16,
-        epochReplayBytes: 0,
-        retainedWalBytes: 0,
-      }),
-      listEntityIdsAtHeight: async () => [entityId],
-      loadEntityViewPage: async (_entityId, height) => {
-        if (height === 8) throw new Error(`STORAGE_DIFF_MISSING: height=${height} scope=entity:${entityId}`);
-        return {
-          core: projectEntityReplicaCoreView(replica.state, replica),
-          accounts: { items: [projectAccountDoc(account)], nextCursor: null },
-          books: { items: [], nextCursor: null },
-        };
-      },
-    },
-    'history-frame-batch',
-    {
-      heights: [8, 9],
-      entityId,
-      accountsLimit: 1,
-      booksLimit: 1,
-    },
-  );
-
+  }>(ctx(async (_entityId, height) => (height === 8 ? null : page)), 'history-frame-batch', query);
   expect(batch.frames.map(frame => frame.height)).toEqual([9]);
-  expect(batch.unavailable).toHaveLength(1);
-  expect(batch.unavailable[0]).toMatchObject({
+  expect(batch.unavailable).toEqual([{
     height: 8,
     code: 'E_NOT_FOUND',
-  });
-  expect(batch.unavailable[0]?.message).toContain('STORAGE_DIFF_MISSING');
+    message: `entity summary not found at height 8: ${entityId}`,
+  }]);
+
+  // Any other storage failure is real and propagates, whatever its text says.
+  await expect(resolveRuntimeAdapterRead(ctx(async (_entityId, height) => {
+    if (height === 8) throw new Error(`STORAGE_DIFF_MISSING: height unavailable at ${height}`);
+    return page;
+  }), 'history-frame-batch', query)).rejects.toThrow('STORAGE_DIFF_MISSING');
 });
 
 test('runtime adapter history-frame-batch fails fast on malformed queries', async () => {
