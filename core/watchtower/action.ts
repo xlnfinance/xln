@@ -820,6 +820,24 @@ const appendAppointmentReceipt = (
   blockNumber,
 ));
 
+/**
+ * Mirrors Account._registerCounterDispute against the counter already on
+ * chain: an equal counter is a no-op that still costs gas, and a lower or
+ * conflicting one reverts. The tower re-sent its counter every sweep until
+ * the deadline, paying or failing each time.
+ */
+const counterAlreadySelectedOnChain = (
+  account: { disputeCounterNonce?: bigint; disputeCounterProposerIsLeft?: boolean },
+  finalNonce: bigint,
+  proposerIsLeft: boolean,
+): boolean => {
+  const selectedNonce = BigInt(account.disputeCounterNonce || 0n);
+  if (selectedNonce === 0n || finalNonce > selectedNonce) return false;
+  if (finalNonce < selectedNonce) return true;
+  // Equal nonce: only a LEFT proof replaces a selected RIGHT one.
+  return proposerIsLeft === Boolean(account.disputeCounterProposerIsLeft) || !proposerIsLeft;
+};
+
 const processLastResortAppointment = async (
   context: WatchtowerSweepContext,
   appointment: LastResortTowerAppointment,
@@ -879,6 +897,10 @@ const processLastResortAppointment = async (
     throw new Error(
       `WATCHTOWER_ADDRESS_MISMATCH:${remedy.towerAddress}:${context.towerWallet.address.toLowerCase()}`,
     );
+  }
+  if (counterAlreadySelectedOnChain(account, finalNonce, remedy.latestProof.proposerIsLeft)) {
+    await appendAppointmentReceipt(context, appointment, createdAt, 'skipped');
+    return 'skipped';
   }
 
   // Solidity binds the counter-dispute to the side recorded in

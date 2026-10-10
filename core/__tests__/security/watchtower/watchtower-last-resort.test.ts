@@ -390,7 +390,10 @@ describe('watchtower delayed last-resort sweep', () => {
     };
     await store.upsertAppointment(appointment);
 
-    const result = await runWatchtowerSweep(store, {
+    let onChainCounter: { nonce: bigint; proposerIsLeft: boolean } | null = null;
+    const onChainCounterBodyHash = `0x${'ce'.repeat(32)}`;
+    let submissions = 0;
+    const sweepOptions: Parameters<typeof runWatchtowerSweep>[1] = {
       towerPrivateKey: towerWallet.privateKey,
       providerFactory: () => ({
         // The active start is 49,900 blocks old. A fixed recent-log window
@@ -433,16 +436,23 @@ describe('watchtower delayed last-resort sweep', () => {
         accountKey: async () => '0xacc1',
         _accounts: async () => ({
           nonce: 1n,
-          disputeHash,
+          // The contract rewrites disputeHash when it records a counter.
+          disputeHash: onChainCounter
+            ? encodeDisputeHash(
+                1, true, true, 100n, 4n, 6n, initialProofbodyHash, disputeStartTimestamp,
+                starterInitialArguments, starterCounterArguments, starterCounterProofCommitment,
+                onChainCounter.nonce, onChainCounterBodyHash, onChainCounter.proposerIsLeft,
+              )
+            : disputeHash,
           disputeTimeout: 100n,
           disputeStartTimestamp,
           leftResponseSeconds: 4n,
           rightResponseSeconds: 6n,
           disputeInitialProofbodyHash: initialProofbodyHash,
           disputeInitialProposerIsLeft: true,
-          disputeCounterNonce: 0n,
-          disputeCounterProofbodyHash: `0x${'00'.repeat(32)}`,
-          disputeCounterProposerIsLeft: false,
+          disputeCounterNonce: onChainCounter?.nonce ?? 0n,
+          disputeCounterProofbodyHash: onChainCounter ? onChainCounterBodyHash : `0x${'00'.repeat(32)}`,
+          disputeCounterProposerIsLeft: onChainCounter?.proposerIsLeft ?? false,
           starterInitialArgumentsCommitment: initialArgumentsCommitment,
           starterCounterArgumentsCommitment: counterArgumentsCommitment,
           starterCounterProofCommitment,
@@ -450,13 +460,19 @@ describe('watchtower delayed last-resort sweep', () => {
         }),
         watchtowerCounterDispute: async (_entityId, finalization) => {
           submittedFinalization = finalization as unknown as Record<string, unknown>;
+          submissions += 1;
+          onChainCounter = {
+            nonce: BigInt(submittedFinalization['finalNonce'] as bigint),
+            proposerIsLeft: Boolean(submittedFinalization['proposerIsLeft']),
+          };
           return {
             hash: '0xtxhash',
             wait: async () => ({ blockNumber: 96 }),
           };
         },
       }),
-    });
+    };
+    const result = await runWatchtowerSweep(store, sweepOptions);
 
     expect(result).toEqual({
       scanned: 1,
@@ -464,11 +480,19 @@ describe('watchtower delayed last-resort sweep', () => {
       skipped: 0,
       errors: 0,
     });
+    // The chain now holds this counter. Re-sending it was an on-chain no-op
+    // the tower paid gas for on every 30 s sweep until the deadline.
+    expect(await runWatchtowerSweep(store, sweepOptions)).toEqual({
+      scanned: 1,
+      submitted: 0,
+      skipped: 1,
+      errors: 0,
+    });
+    expect(submissions).toBe(1);
 
     const receipts = await store.listActionReceipts(lookupKey);
-    expect(receipts.length).toBe(1);
-    expect(receipts[0]?.status).toBe('submitted');
-    expect(receipts[0]?.txHash).toBe('0xtxhash');
+    expect(receipts.map(receipt => receipt.status)).toEqual(['skipped', 'submitted']);
+    expect(receipts[1]?.txHash).toBe('0xtxhash');
     expect(queriedFromBlocks.length).toBeGreaterThan(successfulLogRanges.length);
     expect(Math.max(...successfulLogRanges.map(([from, to]) => to - from + 1))).toBeLessThanOrEqual(5_000);
     expect(successfulLogRanges.some(([from, to]) => from <= 100 && to >= 100)).toBe(true);
