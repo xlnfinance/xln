@@ -56,7 +56,7 @@ test('the explicit plan engine selects H1 while H2/H3 remain TypeScript', () => 
 });
 
 test('mesh supervisor dispatches canonical per-hub process kinds', () => {
-  const supervisor = ['orchestrator.ts', 'bootstrap/native-h1-bootstrap.ts']
+  const supervisor = ['orchestrator.ts', 'bootstrap/native-h1-bootstrap.ts', 'bootstrap/readiness-waits.ts']
     .map(file => readFileSync(join(import.meta.dir, '../../../orchestrator', file), 'utf8'))
     .join('\n');
   const hubSpawner = readFileSync(join(import.meta.dir, '../../../orchestrator/process/spawn/hub.ts'), 'utf8');

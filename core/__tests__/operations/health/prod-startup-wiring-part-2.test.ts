@@ -54,6 +54,8 @@ const readOrchestratorSource = (): string =>
     'replica-import/runtime-import-controller.ts',
     'health/orchestrator-health-support.ts',
     'market-maker/identity-resolver.ts',
+    'bootstrap/native-h1-bootstrap.ts',
+    'bootstrap/readiness-waits.ts',
   ]
     .map(file => readFileSync(join(repoRoot, 'core/orchestrator', file), 'utf8'))
     .join('\n');
@@ -430,9 +432,10 @@ describe('production startup wiring', () => {
 
     const orchestrator = readOrchestratorSource();
     expect(orchestrator).toContain('const MARKET_MAKER_RESTART_FENCING_GRACE_MS = STORAGE_WRITER_LOCK_TTL_MS + 1_000;');
+    expect(orchestrator).toContain('marketMakerRestartFencingGraceMs: MARKET_MAKER_RESTART_FENCING_GRACE_MS,');
     const restartLog = orchestrator.indexOf('[MESH] restarting MM during readiness');
     const restartGrace = orchestrator.indexOf(
-      'await scheduler.wait(MARKET_MAKER_RESTART_FENCING_GRACE_MS);',
+      'await scheduler.wait(marketMakerRestartFencingGraceMs);',
       restartLog,
     );
     const restartSpawn = orchestrator.indexOf('await spawnMarketMaker();', restartGrace);
@@ -1259,11 +1262,11 @@ describe('production startup wiring', () => {
   test('orchestrator health does not enrich cross market snapshots by default', () => {
     const orchestrator = readOrchestratorSource();
     const buildHealthStart = orchestrator.indexOf('const buildAggregatedHealthResponse = async (');
-    const waitBaselineStart = orchestrator.indexOf('const waitForHubBaseline = async (): Promise<void> => {');
+    const buildHealthEnd = orchestrator.indexOf('} = createRuntimeImportController({', buildHealthStart);
     expect(buildHealthStart).toBeGreaterThan(0);
-    expect(waitBaselineStart).toBeGreaterThan(buildHealthStart);
+    expect(buildHealthEnd).toBeGreaterThan(buildHealthStart);
 
-    const buildHealth = orchestrator.slice(buildHealthStart, waitBaselineStart);
+    const buildHealth = orchestrator.slice(buildHealthStart, buildHealthEnd);
     expect(buildHealth).toContain('includeMarketSnapshots?: boolean;');
     expect(buildHealth).toContain('marketMakerHealthOverride?: MarketMakerHealthPayload | null | undefined;');
     expect(buildHealth).toContain('const baseHealth = computeAggregatedHealth({');
@@ -1592,8 +1595,8 @@ describe('production startup wiring', () => {
     const orchestrator = readOrchestratorSource();
     const readiness = extractSourceBlock(
       orchestrator,
-      'const waitForShardJurisdictions = async (child: HubChild): Promise<void> =>',
-      'const runReset = async (options: OrchestratorResetOptions = configuredResetOptions): Promise<void> =>',
+      'const waitForShardJurisdictions = async (deps: ReadinessWaitDeps, child: HubChild): Promise<void> =>',
+      'export const createReadinessWaits = (deps: ReadinessWaitDeps) =>',
     );
 
     expect(readiness).toContain('await findMissingRpcContractCode(args.rpcUrl, contracts)');

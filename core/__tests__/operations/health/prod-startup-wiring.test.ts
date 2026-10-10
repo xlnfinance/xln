@@ -582,7 +582,13 @@ describe('production startup wiring', () => {
     expect(script).not.toContain('MARKET_MAKER_BOOTSTRAP_CROSS_OFFERS_PER_ACCOUNT_PER_TICK');
     expect(script).not.toContain('MARKET_MAKER_BOOTSTRAP_MAX_NEW_CROSS_OFFERS_PER_TICK');
 
-    const orchestrator = ['orchestrator.ts', 'process/spawn/hub.ts', 'process/spawn/market-maker.ts', 'market-maker/identity-resolver.ts']
+    const orchestrator = [
+      'orchestrator.ts',
+      'process/spawn/hub.ts',
+      'process/spawn/market-maker.ts',
+      'market-maker/identity-resolver.ts',
+      'bootstrap/readiness-waits.ts',
+    ]
       .map(file => readFileSync(join(repoRoot, 'core/orchestrator', file), 'utf8')).join('\n');
     const marketMakerPoller = readFileSync(join(repoRoot, 'core/orchestrator/market-maker/health/market-maker-child-poll.ts'), 'utf8');
     const marketMakerAggregation = readFileSync(
@@ -679,10 +685,10 @@ describe('production startup wiring', () => {
     expect(standaloneServer).not.toContain('entries.find(entry => samePredeployedRpc(entry.rpc, rpcUrl))');
     expect(standaloneServer).not.toContain('arrakisConfig');
     const waitForMarketMakerReady = orchestrator.slice(
-      orchestrator.indexOf('const waitForMarketMakerReady = async (): Promise<void> => {'),
+      orchestrator.indexOf('const waitForMarketMakerReady = async (deps: ReadinessWaitDeps): Promise<void> => {'),
     );
     const waitForMarketMakerReadyEnd = waitForMarketMakerReady.indexOf(
-      'const waitForHubSelfReady = async (child: HubChild): Promise<void> => {',
+      'const waitForHubSelfReady = async (deps: ReadinessWaitDeps, child: HubChild): Promise<void> => {',
     );
     expect(waitForMarketMakerReadyEnd).toBeGreaterThan(0);
     const waitForMarketMakerReadyBody = waitForMarketMakerReady.slice(0, waitForMarketMakerReadyEnd);
@@ -692,8 +698,10 @@ describe('production startup wiring', () => {
     expect(waitForMarketMakerReadyBody).toContain('while (true)');
     expect(waitForMarketMakerReadyBody).not.toContain('const deadline =');
     const waitForHubSelfReady = orchestrator.slice(
-      orchestrator.indexOf('const waitForHubSelfReady = async (child: HubChild): Promise<void> => {'),
-      orchestrator.indexOf('const waitForShardJurisdictions = async (child: HubChild): Promise<void> => {'),
+      orchestrator.indexOf('const waitForHubSelfReady = async (deps: ReadinessWaitDeps, child: HubChild): Promise<void> => {'),
+      orchestrator.indexOf(
+        'const waitForShardJurisdictions = async (deps: ReadinessWaitDeps, child: HubChild): Promise<void> => {',
+      ),
     );
     expect(waitForHubSelfReady).toContain('idleMs >= HUB_BASELINE_TIMEOUT_MS');
     expect(waitForHubSelfReady).not.toContain('idleMs >= HUB_BASELINE_STALL_TIMEOUT_MS');
