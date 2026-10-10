@@ -1301,6 +1301,39 @@ describe('atomic settlement Account transition', () => {
       .not.toBe(buildAccountProofBody(account, TEST_DELTA_TRANSFORMER).proofBodyHash);
   });
 
+  test('a first settlement Hanko cannot choose the post-settlement proposer side', async () => {
+    // Both builders use workspace.lastModifiedByLeft. Accepting the other side
+    // pinned a proof our deferred counter-Hanko could never match, and
+    // POST_SETTLEMENT_PROOF_PIN_MISMATCH halted the Runtime after commit.
+    const jurisdiction = makeJurisdiction('settlement-proposer-pin', 31337, 'ac', 'bd');
+    const state = makeState(LEFT, addr('3a'), jurisdiction, RIGHT);
+    expect((await upsertOnState(state, RIGHT, {
+      revision: 1,
+      ops: [{ type: 'r2r', tokenId: 1, amount: 4n }],
+      executorIsLeft: true,
+    })).ok).toBe(true);
+    const account = writableAccount(state, RIGHT);
+    const env = createEmptyEnv('settlement-proposer-pin');
+    installProofStack(env, state);
+    const draft = buildSettlementHankoDraft(account, state, RIGHT, env).tx;
+    if (draft.type !== 'settle_transition' || draft.data.kind !== 'hanko') {
+      throw new Error('TEST_SETTLEMENT_HANKO_DRAFT_MISSING');
+    }
+    const modifierIsLeft = account.state.settlementWorkspace!.lastModifiedByLeft;
+    expect(draft.data.postProof.proposerIsLeft).toBe(modifierIsLeft);
+    const forged = transition({
+      ...draft.data,
+      postProof: { ...draft.data.postProof, proposerIsLeft: !modifierIsLeft, hanko: '0x1234' },
+      settlementHanko: '0x5678',
+    });
+    const result = await applyAccountTxToMutableReplica(account, forged, true, 2_000, 0, false, env);
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error('expected post-settlement proposer rejection');
+    expect(result.rejection.message)
+      .toBe(`POST_SETTLEMENT_PROOF_PROPOSER_MISMATCH:${!modifierIsLeft}:${modifierIsLeft}`);
+    expect(account.state.settlementWorkspace?.postSettlementDisputeProof).toBeUndefined();
+  });
+
   test('pure-forgiveness AccountSettled finality activates the exact projected recovery proof', async () => {
     const jurisdiction = makeJurisdiction('settlement-forgiveness-finality', 31337, 'aa', 'bb');
     const state = makeState(LEFT, addr('39'), jurisdiction, RIGHT);

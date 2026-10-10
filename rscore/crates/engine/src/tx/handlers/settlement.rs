@@ -301,6 +301,16 @@ fn apply_hanko(
         required(post, "proposerIsLeft")?,
         "POST_SETTLEMENT_PROOF_PROPOSER_INVALID",
     )?;
+    // Parity target: transition.ts prepareSettlementHanko. Honest builders
+    // use the workspace's last modifier; accepting another value pinned a
+    // proof the counterparty's deferred Hanko could never match, freezing the
+    // Account until a dispute.
+    if proposer_is_left != workspace.last_modified_by_left {
+        return Err(format!(
+            "POST_SETTLEMENT_PROOF_PROPOSER_MISMATCH:{proposer_is_left}:{}",
+            workspace.last_modified_by_left
+        ));
+    }
     let proof_body_hash = projected_proof_body_hash(account, &compiled)?;
     let supplied_body = hex32(
         string(
@@ -2151,6 +2161,62 @@ mod tests {
         assert_eq!(local.nonce, 4);
         assert_eq!(next_proof_nonce, 5);
         assert!(account.state().settlement_workspace().is_none());
+    }
+
+    #[test]
+    fn first_hanko_cannot_choose_the_post_settlement_proposer_side() {
+        // Parity: settlement-transition.test.ts. Both builders use the
+        // workspace's last modifier; another value pinned a proof the
+        // counterparty's deferred Hanko could never match.
+        let mut account = replica();
+        account.set_delta_transformer([0x77; 20]);
+        let context = AccountExecutionContext::new(1_000, 1_000, 10, 0, 10);
+        assert!(matches!(
+            apply(&mut account, &upsert(), Side::Left, &context).expect("upsert"),
+            MutationDecision::Applied { .. }
+        ));
+        let settlement = crate::SettlementExecutionContext {
+            next_proof_nonce: 1,
+            current_dispute_proof_nonce: None,
+            counterparty_dispute_proof_nonce: None,
+            proposer_board_authority: None,
+        };
+        let draft = build_settlement_hanko_draft(&account, &settlement).expect("draft");
+        let crate::AccountTx::SettleTransition {
+            data: CanonicalValue::Object(fields),
+        } = draft.tx
+        else {
+            panic!("draft is a settle_transition object");
+        };
+        let Some(CanonicalValue::Object(post)) = field(&fields, "postProof").cloned() else {
+            panic!("draft carries postProof");
+        };
+        assert_eq!(
+            field(&post, "proposerIsLeft"),
+            Some(&CanonicalValue::Bool(true))
+        );
+        let forged = replace_fields(
+            &fields,
+            &[(
+                "postProof",
+                replace_fields(&post, &[("proposerIsLeft", CanonicalValue::Bool(false))]),
+            )],
+        );
+        let before = account.state().settlement_workspace().cloned();
+        let MutationDecision::Rejected { rejection, .. } = apply(
+            &mut account,
+            &forged,
+            Side::Left,
+            &context.clone().with_settlement(settlement),
+        )
+        .expect("typed result") else {
+            panic!("forged post-settlement proposer accepted");
+        };
+        assert_eq!(
+            rejection.message(),
+            "POST_SETTLEMENT_PROOF_PROPOSER_MISMATCH:false:true"
+        );
+        assert_eq!(account.state().settlement_workspace().cloned(), before);
     }
 
     #[test]

@@ -359,6 +359,16 @@ const prepareSettlementHanko = (
   if (postNonce !== settlementNonce + 1) {
     throw new Error(`POST_SETTLEMENT_PROOF_NONCE_MISMATCH:${postNonce}:${settlementNonce + 1}`);
   }
+  // Both honest builders (settle.ts buildSettlementHankoDraft, Rust
+  // build_settlement_hanko_draft) set the post-settlement proposer to the
+  // workspace's last modifier. A first signer free to choose it pinned a
+  // proof our deferred counter-Hanko could never match
+  // (POST_SETTLEMENT_PROOF_PIN_MISMATCH halted the Runtime after commit).
+  if (transition.postProof.proposerIsLeft !== workspace.lastModifiedByLeft) {
+    throw new Error(
+      `POST_SETTLEMENT_PROOF_PROPOSER_MISMATCH:${transition.postProof.proposerIsLeft}:${workspace.lastModifiedByLeft}`,
+    );
+  }
   const projectedDeltas = projectSettlementDeltaOverrides(
     draft,
     diffs,
