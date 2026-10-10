@@ -61,10 +61,9 @@ export const assertScheduledWakeMatchesState = (
  * unique first transaction so every validator runs scheduled work against the
  * same pre-command EntityState.
  */
-export const assertScheduledWakeFrameOrder = (entityTxs: readonly EntityTx[]): void => {
+export const getScheduledWakeFrameOrderError = (entityTxs: readonly EntityTx[]): string | null => {
   const wakeIndexes = entityTxs.flatMap((tx, index) => tx.type === 'scheduledWake' ? [index] : []);
-  if (wakeIndexes.length === 0) return;
-  if (wakeIndexes.length !== 1 || wakeIndexes[0] !== 0) {
-    throw new Error(`SCHEDULED_WAKE_FRAME_ORDER_INVALID: indexes=${wakeIndexes.join(',')}`);
-  }
+  return wakeIndexes.length === 0 || (wakeIndexes.length === 1 && wakeIndexes[0] === 0)
+    ? null
+    : `SCHEDULED_WAKE_FRAME_ORDER_INVALID: indexes=${wakeIndexes.join(',')}`;
 };

@@ -2,6 +2,7 @@ import { verifyAccountSignature } from '../../../account/crypto';
 import type { EntityFrame } from '../../types';
 import { createEntityFrameHashFromStateRoot, isCanonicalEntityFrameDigest } from '../frame';
 import { getPrevFrameHash } from '../frame/lineage';
+import { getEntityFrameShapeError } from '../frame/application';
 import { buildEntityHashesToSign } from '../input/hanko-witness';
 import {
   rejectEntityConsensusInput,
@@ -53,6 +54,10 @@ const hasCanonicalProposalEnvelope = (
   if (findCounterpartyBoardActivationConflict(state.entityId, frame.txs)) {
     return 'PROPOSAL_COUNTERPARTY_BOARD_ACTIVATION_MIXED';
   }
+  // The same rules the proposer asserts locally. Here a break is one board
+  // member's proposal: reject it instead of halting every co-validator.
+  const shapeError = getEntityFrameShapeError(state, frame.entityContext, frame.txs);
+  if (shapeError) return `PROPOSAL_FRAME_SHAPE_INVALID:${shapeError}`;
   return null;
 };
 

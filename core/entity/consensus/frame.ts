@@ -199,11 +199,11 @@ const getEntityFrameTxByteLength = (txs: EntityTx[]): number => {
   return prefixAt(frameTxs.prefixBytes, frameTxs.length);
 };
 
-export const assertEntityFrameTxByteBudget = (txs: EntityTx[]): void => {
+export const getEntityFrameTxByteBudgetError = (txs: EntityTx[]): string | null => {
   const byteLength = getEntityFrameTxByteLength(txs);
-  if (byteLength > MAX_ENTITY_FRAME_TX_BYTES) {
-    throw new Error(`ENTITY_FRAME_TX_BYTE_LIMIT_EXCEEDED:${byteLength}:${MAX_ENTITY_FRAME_TX_BYTES}`);
-  }
+  return byteLength > MAX_ENTITY_FRAME_TX_BYTES
+    ? `ENTITY_FRAME_TX_BYTE_LIMIT_EXCEEDED:${byteLength}:${MAX_ENTITY_FRAME_TX_BYTES}`
+    : null;
 };
 
 const largestPrefixWithin = (prefixBytes: number[], maxBytes: number): number => {

@@ -16,7 +16,7 @@ import {
 import { shortHash, shortId, shortOrder } from '../../../support/logger';
 import { cumulativeMarksToPhases } from '../../../support/performance/profile';
 import { countOp } from '../../../support/performance/op-counters';
-import { assertEntityFrameJRangeBudget } from '../../../jurisdiction/machine/range-budget';
+import { getEntityFrameJRangeBudgetError } from '../../../jurisdiction/machine/range-budget';
 import { replaceOrderbookPair, type OrderbookExtState } from '../../../orderbook';
 import {
   applyCommittedSwapCancelsToOrderbook,
@@ -27,7 +27,7 @@ import { normalizeSwapOfferForOrderbook, swapKey, type WorkingOrderbookOffer } f
 import { mergeStorageOverlayRecords } from '../../../protocol/state/overlay';
 import { compareStableText, safeStringify } from '../../../protocol/serialization';
 import { getNextSettlementNonce } from '../../../protocol/settlement/operations';
-import { assertScheduledWakeFrameOrder } from '../../scheduler/wake/scheduled-wake-validation';
+import { getScheduledWakeFrameOrderError } from '../../scheduler/wake/scheduled-wake-validation';
 import { createEntityFrameCandidateState } from '../../state-clone';
 import {
   getEntityAccountForWrite,
@@ -95,7 +95,7 @@ import {
   noteAuthorityAccountProposalResult,
 } from '../../../rscore/authority-wave';
 import { createAccountConsensusContext } from '../../account/account-consensus-context';
-import { assertEntityFrameTxByteBudget } from '../frame';
+import { getEntityFrameTxByteBudgetError } from '../frame';
 import { invalidateEntityAccountCommitment } from '../state-root';
 import type { ApplyEntityTxsInOrderContext } from './application-types';
 import { validateEntityInfraContext } from './infra-context-validation';
@@ -1216,10 +1216,10 @@ const primeEntityFrameAccountWork = async (
   }
 };
 
-const assertEntityFrameInfraBinding = (
+const getEntityFrameInfraBindingError = (
   entityState: EntityState,
   entityContext: import('../../../types/entity/infra-context').EntityInfraContext,
-): void => {
+): string | null => {
   const expectedEntityId = entityState.entityId.trim().toLowerCase();
   const expectedParentFrameHash = entityState.height === 0 ? 'genesis' : String(entityState.prevFrameHash || '');
   if (
@@ -1227,8 +1227,8 @@ const assertEntityFrameInfraBinding = (
     && entityContext.proposerReplicaId === `${expectedEntityId}:${entityContext.proposerSignerId}`
     && entityContext.parentFrameHash === expectedParentFrameHash
     && entityContext.height === entityState.height + 1
-  ) return;
-  throw new Error(
+  ) return null;
+  return (
     `ENTITY_INFRA_CONTEXT_BINDING_MISMATCH:${safeStringify({
       actual: {
         entityId: entityContext.entityId,
@@ -1243,9 +1243,40 @@ const assertEntityFrameInfraBinding = (
         parentFrameHash: expectedParentFrameHash,
         proposerReplicaId: `${expectedEntityId}:${entityContext.proposerSignerId}`,
       },
-    })}`,
+    })}`
   );
 };
+
+// At frame top level only protocol txs stand alone; everything else must
+// arrive inside a signed command, a collective action or a Runtime output
+// (assertEntityTxAuthorization).
+const getTopLevelEntityTxError = (entityTxs: readonly EntityTx[]): string | null => {
+  const stray = entityTxs.find(tx => !isEntityCommandForbiddenTx(tx));
+  if (!stray) return null;
+  return stray.type === 'crossJurisdictionSalvage'
+    ? 'CROSS_J_SALVAGE_RUNTIME_OUTPUT_REQUIRED'
+    : `ENTITY_COMMAND_REQUIRED:${stray.type}`;
+};
+
+/**
+ * Shape rules of a proposed Entity frame that need no execution. Validators
+ * reject a proposal that breaks one (preauthentication): it comes from one
+ * board member and must not halt the co-validators. The local proposer
+ * asserts the same rules, where a failure is its own bug.
+ */
+export const getEntityFrameShapeError = (
+  entityState: EntityState,
+  entityContext: import('../../../types/entity/infra-context').EntityInfraContext,
+  entityTxs: EntityTx[],
+): string | null =>
+  getEntityFrameInfraBindingError(entityState, entityContext)
+  ?? getEntityFrameTxByteBudgetError(entityTxs)
+  ?? getEntityFrameJRangeBudgetError(entityTxs)
+  ?? getScheduledWakeFrameOrderError(entityTxs)
+  ?? (entityTxs.some(entityTxContainsCrossJSetup) && entityTxs.some(entityTxContainsAccountTransition)
+    ? 'CROSS_J_SETUP_ACCOUNT_TRANSITION_MIXED'
+    : null)
+  ?? getTopLevelEntityTxError(entityTxs);
 
 const prepareEntityFrameWorkingSet = async (
   env: EntityRuntimeContext,
@@ -1256,14 +1287,9 @@ const prepareEntityFrameWorkingSet = async (
   isolateState: boolean,
 ): Promise<EntityFrameWorkingSet> => {
   markRuntimeEntityFramePhase(env, 'apply.entity.frame.prepare.validate');
-  assertEntityFrameInfraBinding(entityState, entityContext);
-  assertEntityFrameTxByteBudget(entityTxs);
-  assertEntityFrameJRangeBudget(entityTxs);
-  assertScheduledWakeFrameOrder(entityTxs);
+  const shapeError = getEntityFrameShapeError(entityState, entityContext, entityTxs);
+  if (shapeError) throw new Error(shapeError);
   const crossJSetupPhase = entityTxs.some(entityTxContainsCrossJSetup);
-  if (crossJSetupPhase && entityTxs.some(entityTxContainsAccountTransition)) {
-    throw haltRuntimeFailure("CROSS_J_SETUP_ACCOUNT_TRANSITION_MIXED", 'CROSS_J_SETUP_ACCOUNT_TRANSITION_MIXED');
-  }
   markRuntimeEntityFramePhase(env, 'apply.entity.frame.prepare.normalize');
   const normalized = normalizeEntityProposalBoard(
     env,

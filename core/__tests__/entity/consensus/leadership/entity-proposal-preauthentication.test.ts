@@ -143,6 +143,27 @@ describe('Entity proposal pre-authentication', () => {
     expect(result.workingReplica).toEqual(validator.replica);
   });
 
+  test('rejects an authenticated proposal that breaks frame shape instead of halting', async () => {
+    // One board member signs a frame with a stray top-level chat. Replay used
+    // to throw a plain ENTITY_COMMAND_REQUIRED and halt every co-validator.
+    const { frame, proposer } = await buildHonestProposal();
+    frame.txs.push({ type: 'chat', data: { from: proposer.signerId, message: 'not in a command' } });
+    bindMutatedFrame(frame, proposer, false);
+    const validator = createValidator('2');
+
+    const result = await applyEntityInput(validator.env, validator.replica, {
+      entityId,
+      signerId: validator.signerId,
+      proposedFrame: frame,
+    });
+
+    expect(result.outcome).toEqual({
+      kind: 'rejected',
+      code: 'PROPOSAL_FRAME_SHAPE_INVALID:ENTITY_COMMAND_REQUIRED:chat',
+    });
+    expect(result.workingReplica).toEqual(validator.replica);
+  });
+
   test('rejects non-canonical and parent-mismatched envelopes before replay', async () => {
     const validator = createValidator('2');
     const canonical = await buildHonestProposal();
