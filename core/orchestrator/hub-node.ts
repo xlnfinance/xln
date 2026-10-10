@@ -114,6 +114,7 @@ import {
   registerRuntimeFrameCommitCallback,
   validateRuntimeInputAdmission,
   buildRuntimeRecoveryBundle,
+  waitForRuntimeWorkDrained,
 } from '../runtime.ts';
 import { withRuntimeCommittedRead } from '../runtime/frame/lifecycle/writer-lock';
 import { registerEnvChangeCallback } from '../runtime/loop/loop-environment.ts';
@@ -784,6 +785,8 @@ const waitForTokenCatalog = async (jadapter: JAdapter, rounds = 80): Promise<JTo
   throw new Error(`TOKEN_CATALOG_INCOMPLETE required=${requiredHubTokenCount(jadapter.chainId)}`);
 };
 
+const ORDERBOOK_INIT_DRAIN_TIMEOUT_MS = 10_000;
+
 const ensureOrderbook = async (env: RuntimeReplica, entityId: string, signerId: string): Promise<void> => {
   const replica = getEntityReplicaById(env, entityId);
   if (replica?.state?.orderbookExt) return;
@@ -817,7 +820,14 @@ const ensureOrderbook = async (env: RuntimeReplica, entityId: string, signerId: 
       },
     ],
   });
-  await settleRuntimeFor(env, 45);
+  // A rejected init (for example a bad quote authority) must stop the boot,
+  // not leave a hub serving without an orderbook until the next restart.
+  if (!await waitForRuntimeWorkDrained(env, ORDERBOOK_INIT_DRAIN_TIMEOUT_MS, 0)) {
+    throw new Error(`ORDERBOOK_INIT_DRAIN_TIMEOUT:${entityId}`);
+  }
+  if (!getEntityReplicaById(env, entityId)?.state.orderbookExt) {
+    throw new Error(`ORDERBOOK_INIT_NOT_COMMITTED:${entityId}`);
+  }
   finishTiming('orderbook_init', startedAt);
 };
 

@@ -1468,6 +1468,20 @@ describe('production startup wiring', () => {
     expect(reserveBootstrap).not.toContain('catalog.slice(0, HUB_REQUIRED_TOKEN_COUNT)');
   });
 
+  test('hub orderbook init stops the boot unless orderbookExt committed', () => {
+    const hubNode = readFileSync(join(repoRoot, 'core/orchestrator/hub-node.ts'), 'utf8');
+    const start = hubNode.indexOf('const ensureOrderbook = async (');
+    const ensureOrderbook = hubNode.slice(start, hubNode.indexOf('\n};\n', start));
+    const enqueue = ensureOrderbook.indexOf("type: 'initOrderbookExt'");
+    const drain = ensureOrderbook.indexOf('await waitForRuntimeWorkDrained(env, ORDERBOOK_INIT_DRAIN_TIMEOUT_MS, 0)');
+    const committed = ensureOrderbook.indexOf('if (!getEntityReplicaById(env, entityId)?.state.orderbookExt) {');
+    expect(start).toBeGreaterThan(0);
+    expect(drain).toBeGreaterThan(enqueue);
+    expect(committed).toBeGreaterThan(drain);
+    expect(ensureOrderbook).toContain('ORDERBOOK_INIT_NOT_COMMITTED:${entityId}');
+    expect(ensureOrderbook).not.toContain('settleRuntimeFor');
+  });
+
   test('every hub auto-finalizes its disputes unless the E2E dispute stand opts one out', () => {
     const hubNode = readFileSync(join(repoRoot, 'core/orchestrator/hub-node.ts'), 'utf8');
     const hubSpawn = readFileSync(join(repoRoot, 'core/orchestrator/process/spawn/hub.ts'), 'utf8');
