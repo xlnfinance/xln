@@ -921,6 +921,43 @@ describe('audit fail-fast regressions', () => {
     expect(finalized.newState.accounts.get(fixture.counterpartyId)!.state.jNonce).toBe(7);
   });
 
+  test('DisputeFinalized accepts a winning body that is not our committed state', async () => {
+    // The peer withheld its ACK of our frame and the chain finalized that
+    // signed-but-uncommitted body (or an older one). Requiring it to equal our
+    // committed body halted the Runtime on every replay of this J event.
+    const finalProofbody: ProofBodyStruct = {
+      watchSeed: `0x${'f1'.repeat(32)}`,
+      leftResponseSeconds: 10,
+      rightResponseSeconds: 10,
+      offdeltas: [encodeInt512(50n)],
+      tokenIds: [1n],
+      transformers: [],
+    };
+    const fixture = makeDisputeFinalizedFixture('final-body-not-committed', finalProofbody);
+    fixture.account.state.deltas = PersistentAccountStateMap.fromEntries('deltas', [
+      [1, { ...createDefaultDelta(1), offdelta: 40n }] as const,
+    ]);
+    const evidence: DisputeFinalizationEvidence[] = [{
+      sender: fixture.state.entityId,
+      counterentity: fixture.counterpartyId,
+      initialNonce: '7',
+      finalNonce: '7',
+      proposerIsLeft: true,
+      initialProofbodyHash: fixture.finalProofbodyHash,
+      finalProofbodyHash: fixture.finalProofbodyHash,
+      leftArguments: '0x',
+      rightArguments: '0x',
+      startedByLeft: true,
+      sig: '0x',
+    }];
+
+    const finalized = await applyDisputeFinalizedFixture(fixture, evidence);
+    const account = finalized.newState.accounts.get(fixture.counterpartyId)!;
+    // Unselected finality of nonce 7 consumes it on-chain: next nonce is 8.
+    expect(account.state.jNonce).toBe(8);
+    expect(account.activeDispute).toBeUndefined();
+  });
+
   test('DisputeFinalized rejects malformed token/offdelta shape instead of clearing every delta', async () => {
     const malformedProofbody: ProofBodyStruct = {
       watchSeed: `0x${'f1'.repeat(32)}`,

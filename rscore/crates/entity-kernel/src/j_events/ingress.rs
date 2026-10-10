@@ -886,26 +886,6 @@ fn resident_proof_body(
     .map_err(|error| invalid(format!("{context}:ACCOUNT_PROOFBODY:{error}")))
 }
 
-fn require_frozen_proof_body(
-    event_body: &xln_rscore_engine::ProofBody,
-    expected_hash: [u8; 32],
-    view: &xln_rscore_batch::ResidentAccountDisputeView,
-    context: &'static str,
-) -> Result<crate::j_batch::ProofBody, EntityKernelError> {
-    let event_body = require_event_proof_body(event_body, expected_hash, context)?;
-    let resident_body = resident_proof_body(view, context)?;
-    if event_body != resident_body {
-        let resident_hash = crate::proof_body_hash(&resident_body)
-            .map_err(|error| invalid(format!("{context}:ACCOUNT_PROOFBODY_HASH:{error}")))?;
-        return Err(invalid(format!(
-            "DISPUTE_FROZEN_ACCOUNT_STATE_MISMATCH:{context}:{}:{}",
-            prefixed_hex(&expected_hash),
-            prefixed_hex(&resident_hash)
-        )));
-    }
-    Ok(event_body)
-}
-
 fn sync_j_batch_nonce(
     state: &mut EntityStateSlice,
     sender: &str,
@@ -1745,10 +1725,12 @@ fn apply_counter_dispute_registered(
     else {
         return Ok(());
     };
-    let body = require_frozen_proof_body(
+    // The counter body is the peer's signed state, which need not be our
+    // committed one (our unACKed frame). Bind it to the certified event only,
+    // as DisputeStarted does (TS selectObservedCounterDispute).
+    let body = require_event_proof_body(
         &event.counter_proofbody,
         event.proofbody_hash,
-        view,
         "jEvent.counterDisputeRegistered",
     )?;
     let nonce = safe_i64_u64(event.nonce, "COUNTER_DISPUTE_NONCE_INVALID")?;
@@ -1882,10 +1864,11 @@ fn apply_dispute_finalized(
         &event.final_proofbody_hash,
         "J_EVENT_DISPUTE_FINAL_PROOFBODY_HASH",
     )?;
-    let final_body = require_frozen_proof_body(
+    // The winning body may be older or newer than our committed state;
+    // finality reconciles either (TS applyDisputeFinalized).
+    let final_body = require_event_proof_body(
         &event.final_proofbody,
         final_hash,
-        view,
         "jEvent.disputeFinalized",
     )?;
     let initial_nonce = safe_bigint_u64(

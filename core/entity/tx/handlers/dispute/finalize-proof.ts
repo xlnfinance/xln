@@ -145,11 +145,28 @@ export const selectFinalProof = (
   );
   const finalProofbodyHash = counter.usable ? counter.hash! : activeDispute.initialProofbodyHash;
   if (currentProof.proofBodyHash.toLowerCase() !== finalProofbodyHash.toLowerCase()) {
-    throw haltRuntimeFailure(
-      'DISPUTE_FROZEN_ACCOUNT_STATE_MISMATCH',
-      `DISPUTE_FROZEN_ACCOUNT_STATE_MISMATCH:finalize:${counterpartyId}:` +
-      `${finalProofbodyHash}:${currentProof.proofBodyHash}`,
+    // Only our stored counterparty proof must sign our committed body. A body
+    // the chain chose (the starter's initial body or an on-chain selected
+    // counter) may be our own signed-but-unACKed frame or an older state: we
+    // hold no bytes for it, so its holder finalizes and DisputeFinalized
+    // reconciles us. Halting here was permanent (every replay re-halts).
+    if (counter.usable && activeDispute.selectedCounterNonce === undefined) {
+      throw haltRuntimeFailure(
+        'DISPUTE_FROZEN_ACCOUNT_STATE_MISMATCH',
+        `DISPUTE_FROZEN_ACCOUNT_STATE_MISMATCH:finalize:${counterpartyId}:` +
+        `${finalProofbodyHash}:${currentProof.proofBodyHash}`,
+      );
+    }
+    addMessage(
+      state,
+      `⏳ Dispute final body ${finalProofbodyHash.toLowerCase()} is not our committed state; its holder finalizes`,
     );
+    disputeLog.warn('finalize.body_not_committed', {
+      counterparty: shortId(counterpartyId),
+      finalProofbodyHash,
+      committedProofbodyHash: currentProof.proofBodyHash,
+    });
+    return null;
   }
   const shouldUseCounterProof = counter.usable;
   return {
@@ -170,7 +187,13 @@ export const verifyCounterProofIdentity = (
   counterpartyId: string,
   selection: FinalProofSelection,
 ): void => {
-  if (!selection.shouldUseCounterProof || !account.counterpartyDisputeHash) return;
+  // An on-chain selected counter is already bound by the chain (Rust never
+  // re-checks it); our stored tuple belongs to the peer's signature instead.
+  if (
+    !selection.shouldUseCounterProof
+    || !account.counterpartyDisputeHash
+    || account.activeDispute?.selectedCounterNonce !== undefined
+  ) return;
   const domain = resolveDepositoryHankoDomain(sourceState);
   if (!domain) throw haltRuntimeFailure("DISPUTE_COUNTER_FINALIZE_DEPOSITORY_MISSING", 'DISPUTE_COUNTER_FINALIZE_DEPOSITORY_MISSING');
   const expectedHash = createDisputeProofHashWithNonce(

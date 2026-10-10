@@ -28,11 +28,7 @@ import {
 } from '../../jurisdiction/machine/event-observation';
 import { verifyAccountSignature } from '../../account/crypto';
 import { hashProofBodyStruct } from '../../protocol/dispute/proof-builder';
-import {
-  buildAccountProofBodyFromJurisdictions,
-  requireAccountDeltaTransformerAddress,
-  type AccountJurisdictionView,
-} from '../../account/consensus/helpers';
+import { requireAccountDeltaTransformerAddress } from '../../account/consensus/helpers';
 import {
   assertDisputeProofBodyWithinContractLimits,
   batchAddCounterDispute,
@@ -529,32 +525,6 @@ const requireOnchainProofBodyEvidence = (
   return { finalProofbodyHash, proofbody, tokenIds };
 };
 
-const requireFrozenAccountProofBody = (
-  jurisdictions: AccountJurisdictionView,
-  account: AccountReplica,
-  rawProofbody: ProofBodyStruct,
-  expectedHashRaw: unknown,
-  counterpartyId: string,
-  context: string,
-): ProofBodyStruct => {
-  const evidence = requireOnchainProofBodyEvidence(
-    account,
-    rawProofbody,
-    expectedHashRaw,
-    counterpartyId,
-    context,
-  );
-  const current = buildAccountProofBodyFromJurisdictions(jurisdictions, account);
-  if (current.proofBodyHash.toLowerCase() !== evidence.finalProofbodyHash) {
-    throw haltRuntimeFailure(
-      'DISPUTE_FROZEN_ACCOUNT_STATE_MISMATCH',
-      `DISPUTE_FROZEN_ACCOUNT_STATE_MISMATCH:${context}:${counterpartyId}:` +
-      `${evidence.finalProofbodyHash}:${current.proofBodyHash}`,
-    );
-  }
-  return evidence.proofbody;
-};
-
 type DisputeStartedEventData = {
   sender: string;
   counterentity: string;
@@ -600,6 +570,17 @@ const queueSelectedPullCounterProof = (
     || account.counterpartyDisputeProofHanko === '0x'
     || account.counterpartyDisputeProofNonce === undefined
     || !account.counterpartyDisputeProofBodyHash
+  ) return false;
+  // Rust order (ingress.rs queue_counter_pull): only a counter that outranks
+  // the started body is ours to submit. Otherwise the chain's body may be our
+  // own unACKed frame, which selectFinalProof cannot rebuild from state.
+  const counterNonce = account.counterpartyDisputeProofNonce;
+  if (
+    counterNonce < active.initialNonce
+    || (
+      counterNonce === active.initialNonce
+      && (account.counterpartyDisputeProofProposerIsLeft !== true || active.initialProposerIsLeft)
+    )
   ) return false;
   const selection = selectFinalProof(
     context.entityState,
@@ -994,14 +975,17 @@ const selectObservedCounterDispute = (
   if (!account?.activeDispute) {
     throw new Error(`COUNTER_DISPUTE_ACTIVE_ACCOUNT_MISSING:${resolved.candidateCounterpartyId}`);
   }
-  const selectedProofbody = requireFrozenAccountProofBody(
-    context.env.state,
+  // The counter body is the peer's signed state, which need not be our
+  // committed one: it may carry a frame we proposed and they never ACKed.
+  // Bind it to the certified chain event only, as DisputeStarted does;
+  // requiring equality let the peer halt us on every replay.
+  const selectedProofbody = requireOnchainProofBodyEvidence(
     account,
     data.counterProofbody,
     proofbodyHash,
     resolved.counterpartyId,
     'jEvent.counterDisputeRegistered',
-  );
+  ).proofbody;
   const active = account.activeDispute;
   if (
     nonce < active.initialNonce ||
@@ -1301,18 +1285,12 @@ async function applyDisputeFinalizedJEvent(
     });
     return;
   }
-  const finalProofbody = requireFrozenAccountProofBody(
-    context.env.state,
-    account,
-    data.finalProofbody,
-    data.finalProofbodyHash,
-    counterpartyId,
-    'jEvent.disputeFinalized',
-  );
-  // Depository settles only tokenIds from this exact locally signed body.
+  // Depository settles only tokenIds from this exact winning body. It may be
+  // older (an unanswered stale start) or newer (our unACKed frame) than our
+  // committed state; finality reconciles either (reconcileFinalizedDeltas).
   const finalizedProof = requireOnchainProofBodyEvidence(
     account,
-    finalProofbody,
+    data.finalProofbody,
     data.finalProofbodyHash,
     counterpartyId,
     'jEvent.disputeFinalized',

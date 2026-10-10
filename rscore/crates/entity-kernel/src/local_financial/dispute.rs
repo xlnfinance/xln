@@ -1165,15 +1165,29 @@ pub(super) fn apply_finalize(
     let rebuilt_hash =
         proof_body_hash(&final_body).map_err(|error| invalid(KIND, error.to_string()))?;
     if rebuilt_hash != final_hash {
-        return Err(invalid(
-            KIND,
+        // Only our stored counterparty proof must sign our committed body. A
+        // body the chain chose (initial or on-chain selected counter) may be
+        // our own unACKed frame or an older state: its holder finalizes and
+        // DisputeFinalized reconciles us (TS selectFinalProof).
+        if selected_nonce.is_none() && use_counter {
+            return Err(invalid(
+                KIND,
+                format!(
+                    "DISPUTE_FROZEN_ACCOUNT_STATE_MISMATCH:finalize:{}:{}:{}",
+                    tx.counterparty_entity_id,
+                    hex(&final_hash),
+                    hex(&rebuilt_hash)
+                ),
+            ));
+        }
+        status(
+            events,
             format!(
-                "DISPUTE_FROZEN_ACCOUNT_STATE_MISMATCH:finalize:{}:{}:{}",
-                tx.counterparty_entity_id,
-                hex(&final_hash),
-                hex(&rebuilt_hash)
+                "⏳ Dispute final body {} is not our committed state; its holder finalizes",
+                hex(&final_hash)
             ),
-        ));
+        );
+        return Ok(());
     }
     let has_pulls = dispute.pull_count > 0;
     let has_selected_counter = selected_nonce.is_some();
@@ -1794,6 +1808,67 @@ mod tests {
             }],
         );
     }
+    #[test]
+    fn finalize_with_a_chain_chosen_body_we_never_committed_waits_for_its_holder() {
+        // The peer started with our own signed-but-unACKed frame: the chain's
+        // initial body is not our committed one, so we hold no bytes for it.
+        // This used to be a fatal DISPUTE_FROZEN_ACCOUNT_STATE_MISMATCH.
+        let unacked_hash = [0x5a; 32];
+        let active = active_dispute_value(
+            &account_view("active", None, None, None)
+                .get(PEER)
+                .unwrap()
+                .dispute
+                .clone()
+                .unwrap(),
+            unacked_hash,
+            1,
+            false,
+            &[],
+            &[],
+            ZERO_WORD,
+        )
+        .expect("active");
+        let mut active = active;
+        set_object_field(&mut active, "observedOnChain", CanonicalValue::Bool(true));
+        set_object_field(&mut active, "startedByLeft", CanonicalValue::Bool(false));
+        let views = account_view("disputed", None, Some(active), None);
+        let mut state = state(1_000);
+        let mut mutations = Vec::new();
+        let mut routed_outputs = Vec::new();
+        let mut events = Vec::new();
+        apply_finalize(
+            &mut state,
+            &PaybookChanges::default(),
+            DisputeFinalizeEntityTx {
+                counterparty_entity_id: PEER.into(),
+                use_onchain_registry: false,
+                description: None,
+            },
+            &views,
+            &mut mutations,
+            &mut routed_outputs,
+            &mut events,
+        )
+        .expect("a chain-chosen body is never fatal");
+        assert!(mutations.is_empty());
+        assert!(
+            state
+                .j_batch_state
+                .as_ref()
+                .is_none_or(|j| j.batch.dispute_finalizations.is_empty())
+        );
+        assert_eq!(
+            events,
+            [EntityFrameEvent::Status {
+                message: format!(
+                    "⏳ Dispute final body {} is not our committed state; its holder finalizes",
+                    hex(&unacked_hash)
+                ),
+            }],
+        );
+    }
+
     #[test]
     fn dispute_arguments_slice_each_signed_swap_clause_in_counterparty_order() {
         use xln_rscore_engine::{DisputeTransformerClause, SwapOfferSnapshot};
