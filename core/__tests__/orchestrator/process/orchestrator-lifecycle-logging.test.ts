@@ -6,7 +6,7 @@ import { scheduler } from 'node:timers/promises';
 
 import { createHttpDrainTracker, stopServerGracefully } from '../../../orchestrator/graceful-server';
 import { startParentLivenessWatch } from '../../../support/process/parent-watch';
-import { writePrefixedLogChunk, type PrefixLogState } from '../../../orchestrator/process/child-log-buffer';
+import { takeCompleteLines, writePrefixedLogChunk, type PrefixLogState } from '../../../orchestrator/process/child-log-buffer';
 
 const withSuppressedStructuredLogs = async <T>(fn: () => T | Promise<T>): Promise<T> => {
   const previousScopes = process.env['XLN_LOG_SCOPES'];
@@ -140,4 +140,17 @@ test('a child that never writes a newline cannot grow the prefixed log buffer wi
   expect(state.pending.length).toBeLessThanOrEqual(64 * 1024);
   const forwarded = written.map(line => line.slice('[H1] '.length, -1)).join('');
   expect(forwarded.length + state.pending.length).toBe(64 * chunk.length);
+});
+
+test('the Rust hub status stream uses the same bounded line framing', () => {
+  const state: PrefixLogState = { pending: '' };
+  const chunk = 'y'.repeat(16 * 1024);
+  let lines = 0;
+  for (let index = 0; index < 64; index += 1) lines += takeCompleteLines(state, chunk).length;
+  expect(state.pending.length).toBeLessThanOrEqual(64 * 1024);
+  expect(lines).toBeGreaterThan(0);
+  // spawn/hub.ts kept its own unbounded `rustStatusPending` string before.
+  const spawnHub = readFileSync(join(process.cwd(), 'core/orchestrator/process/spawn/hub.ts'), 'utf8');
+  expect(spawnHub).toContain('takeCompleteLines(rustStatusState, chunk)');
+  expect(spawnHub).not.toContain('rustStatusPending');
 });

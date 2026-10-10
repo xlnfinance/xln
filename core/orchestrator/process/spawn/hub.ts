@@ -15,6 +15,7 @@ import { buildPublicDirectWsUrl } from '../../replica-import/runtime-import-mani
 import {
   flushPrefixedLogChunk,
   pushChildLogLines,
+  takeCompleteLines,
   type PrefixLogState,
   writePrefixedLogChunk,
 } from '../child-log-buffer';
@@ -230,14 +231,13 @@ const attachHubProcess = (
 ): void => {
   const stdoutPrefixState: PrefixLogState = { pending: '' };
   const stderrPrefixState: PrefixLogState = { pending: '' };
-  let rustStatusPending = '';
+  // Same bounded framing as the log prefixer: a status stream with no newline
+  // must not grow the orchestrator heap.
+  const rustStatusState: PrefixLogState = { pending: '' };
   proc.stdout?.on('data', chunk => {
     pushChildLogLines(child.recentStdout, chunk);
     if (rustIdentity) {
-      rustStatusPending += String(chunk);
-      const lines = rustStatusPending.split(/\r?\n/);
-      rustStatusPending = lines.pop() ?? '';
-      for (const line of lines) projectRustHubStatus(child, rustIdentity, line, deps);
+      for (const line of takeCompleteLines(rustStatusState, chunk)) projectRustHubStatus(child, rustIdentity, line, deps);
     }
     writePrefixedLogChunk(process.stdout, `[${child.name}]`, stdoutPrefixState, chunk);
   });
