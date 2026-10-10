@@ -16,7 +16,7 @@ import {
 } from '../storage/recovery/bundle/crypto';
 import type { WatchtowerStore } from './store';
 import { WatchtowerGlobalQuotaError } from './store/db';
-import { runWatchtowerSweep } from './action';
+import type { WatchtowerSweepResult } from './action';
 import type { PushStore } from './push/store';
 import {
   PUSH_REGISTRATION_MAX_CLOCK_SKEW_MS,
@@ -451,18 +451,15 @@ export const handleRecoveryComplaint = async (req: Request, store: WatchtowerSto
   }
 };
 
+/** The caller owns the sweep: its key, RPC allowlist and single-flight lock. */
 export const handleWatchtowerSweep = async (
   req: Request,
-  store: WatchtowerStore,
-  options?: { towerPrivateKey?: string },
+  runSweep: (lookupKey: string | undefined) => Promise<WatchtowerSweepResult>,
 ): Promise<Response> => {
   try {
     const body = decodeTowerRecord(await parseJsonBody(req), 'TOWER_SWEEP_BODY_INVALID');
     const lookupKey = typeof body['lookupKey'] === 'string' ? normalizeLookupKey(body['lookupKey']) : undefined;
-    const result = await runWatchtowerSweep(store, {
-      ...(lookupKey ? { lookupKey } : {}),
-      ...(options?.towerPrivateKey ? { towerPrivateKey: options.towerPrivateKey } : {}),
-    });
+    const result = await runSweep(lookupKey);
     return new Response(serializeTaggedJson({ ok: true, ...result }), {
       headers: { 'content-type': 'application/json' },
     });

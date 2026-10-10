@@ -1,6 +1,6 @@
 /**
- * Standalone watchtower service for blind backup recovery and future
- * last-resort dispute appointments. This stays outside core/api/server/index.ts so
+ * Standalone watchtower service for blind backup recovery and delayed
+ * last-resort counter-disputes. This stays outside core/api/server/index.ts so
  * runtime logs and operator surface remain separated from tower storage.
  */
 
@@ -24,8 +24,11 @@ import { createPushStore, type PushStore } from './push/store';
 import { createPushSender, type PushSenderConfig } from './push/sender';
 import { createStructuredLogger } from '../support/logger';
 import {
-  createSweepHealthTracker,
-  type SweepHealthSnapshot,
+  createSweepLock,
+  disabledIntervalSweep,
+  startIntervalSweep,
+  type IntervalSweep,
+  type SweepLock,
 } from './sweep-health';
 
 export type StandaloneWatchtowerOptions = {
@@ -57,25 +60,18 @@ export type StandaloneWatchtowerServer = {
   close: () => Promise<void>;
 };
 
-type SweepScheduler = {
-  enabled: boolean;
-  intervalMs: number;
-  health: () => SweepHealthSnapshot;
-  close: () => void;
-};
-
 type StandaloneWatchtowerContext = {
   options: StandaloneWatchtowerOptions;
   store: WatchtowerStore;
   pushStore: PushStore | null;
   pushSender: ReturnType<typeof createPushSender>;
-  scheduler: SweepScheduler;
-  pushScheduler: SweepScheduler;
+  scheduler: IntervalSweep;
+  pushScheduler: IntervalSweep;
+  sweepLock: SweepLock;
   operatorApiEnabled: boolean;
   operatorToken: string;
 };
 
-const SWEEP_PRUNE_INTERVAL_MS = 60 * 60 * 1000;
 const watchtowerLog = createStructuredLogger('watchtower.standalone');
 const WATCHTOWER_CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
@@ -87,8 +83,6 @@ const WATCHTOWER_JSON_HEADERS = {
   'content-type': 'application/json',
   'cache-control': 'no-store, max-age=0',
 } as const;
-
-const formatError = (error: unknown): string => error instanceof Error ? error.message : String(error);
 
 const withCors = (response: Response): Response => {
   const headers = new Headers(response.headers);
@@ -102,163 +96,61 @@ const withCors = (response: Response): Response => {
   });
 };
 
-const startSweepScheduler = (
+const startLastResortSweep = (
   store: WatchtowerStore,
-  options: {
-    towerPrivateKey?: string;
-    enabled?: boolean;
-    intervalMs?: number;
-    allowedRpcUrls?: string[];
-  },
-): SweepScheduler => {
+  options: StandaloneWatchtowerOptions,
+  lock: SweepLock,
+): IntervalSweep => {
   const towerPrivateKey = String(options.towerPrivateKey || '').trim();
-  const intervalMs = Math.max(1_000, Math.floor(Number(options.intervalMs ?? 30_000)));
-  if (!options.enabled) {
-    const health = createSweepHealthTracker();
-    return { enabled: false, intervalMs, health: health.snapshot, close: () => {} };
-  }
+  const intervalMs = Math.max(1_000, Math.floor(Number(options.sweepIntervalMs ?? 30_000)));
+  if (options.enableLastResortAgent !== true) return disabledIntervalSweep(intervalMs);
   if (!towerPrivateKey) {
     throw new Error('WATCHTOWER_LAST_RESORT_AGENT_PRIVATE_KEY_REQUIRED');
   }
-
-  let closed = false;
-  let running = false;
-  let timer: ReturnType<typeof setTimeout> | null = null;
-  let nextPruneAt = Date.now() + SWEEP_PRUNE_INTERVAL_MS;
-  const health = createSweepHealthTracker();
-
-  const schedule = (): void => {
-    if (closed) return;
-    timer = setTimeout(tick, intervalMs);
-    timer.unref?.();
-  };
-
-  const tick = async (): Promise<void> => {
-    if (closed) return;
-    if (running) {
-      schedule();
-      return;
-    }
-    running = true;
-    try {
-      const now = Date.now();
-      if (now >= nextPruneAt) {
-        nextPruneAt = now + SWEEP_PRUNE_INTERVAL_MS;
-        await store.pruneExpired();
-      }
+  return startIntervalSweep({
+    intervalMs,
+    lock,
+    log: watchtowerLog,
+    events: { complete: 'sweep.complete', failed: 'sweep.failed', errorsCode: 'WATCHTOWER_SWEEP_APPOINTMENT_ERRORS' },
+    prune: () => store.pruneExpired(),
+    run: async () => {
       const result = await runWatchtowerSweep(store, {
         towerPrivateKey,
         ...(options.allowedRpcUrls ? { allowedRpcUrls: options.allowedRpcUrls } : {}),
       });
-      if (result.scanned > 0 || result.submitted > 0 || result.errors > 0) {
-        const fields = {
-          scanned: result.scanned,
-          submitted: result.submitted,
-          errors: result.errors,
-        };
-        if (result.errors > 0) watchtowerLog.warn('sweep.complete', fields);
-        else watchtowerLog.info('sweep.complete', fields);
-      }
-      if (result.errors > 0) health.failure(`WATCHTOWER_SWEEP_APPOINTMENT_ERRORS:${result.errors}`);
-      else health.success();
-    } catch (error) {
-      const message = formatError(error);
-      health.failure(message);
-      watchtowerLog.error('sweep.failed', { error: message });
-    } finally {
-      running = false;
-      schedule();
-    }
-  };
-
-  schedule();
-  return {
-    enabled: true,
-    intervalMs,
-    health: health.snapshot,
-    close: () => {
-      closed = true;
-      if (timer) clearTimeout(timer);
+      return {
+        errors: result.errors,
+        fields: { scanned: result.scanned, submitted: result.submitted, errors: result.errors },
+      };
     },
-  };
+  });
 };
 
-const startPushWatchScheduler = (
+const startPushWatchSweep = (
   store: PushStore,
-  options: {
-    enabled?: boolean;
-    intervalMs?: number;
-    allowedRpcUrls?: string[];
-    sender: ReturnType<typeof createPushSender>;
+  options: StandaloneWatchtowerOptions,
+  sender: ReturnType<typeof createPushSender>,
+): IntervalSweep => startIntervalSweep({
+  intervalMs: Math.max(1_000, Math.floor(Number(options.pushSweepIntervalMs ?? 15_000))),
+  lock: createSweepLock(),
+  log: watchtowerLog,
+  events: { complete: 'push_sweep.complete', failed: 'push_sweep.failed', errorsCode: 'WATCHTOWER_PUSH_SWEEP_ERRORS' },
+  prune: () => store.pruneExpired(),
+  run: async () => {
+    const result = await runDisputeWatchSweep(store, sender, {
+      ...(options.allowedRpcUrls ? { allowedRpcUrls: options.allowedRpcUrls } : {}),
+    });
+    return {
+      errors: result.errors,
+      fields: {
+        eventsObserved: result.eventsObserved,
+        notificationsSent: result.notificationsSent,
+        notificationsSkipped: result.notificationsSkipped,
+        errors: result.errors,
+      },
+    };
   },
-): SweepScheduler => {
-  const intervalMs = Math.max(1_000, Math.floor(Number(options.intervalMs ?? 15_000)));
-  if (!options.enabled) {
-    const health = createSweepHealthTracker();
-    return { enabled: false, intervalMs, health: health.snapshot, close: () => {} };
-  }
-
-  let closed = false;
-  let running = false;
-  let timer: ReturnType<typeof setTimeout> | null = null;
-  let nextPruneAt = Date.now() + SWEEP_PRUNE_INTERVAL_MS;
-  const health = createSweepHealthTracker();
-
-  const schedule = (): void => {
-    if (closed) return;
-    timer = setTimeout(tick, intervalMs);
-    timer.unref?.();
-  };
-
-  const tick = async (): Promise<void> => {
-    if (closed) return;
-    if (running) {
-      schedule();
-      return;
-    }
-    running = true;
-    try {
-      const now = Date.now();
-      if (now >= nextPruneAt) {
-        nextPruneAt = now + SWEEP_PRUNE_INTERVAL_MS;
-        await store.pruneExpired();
-      }
-      const result = await runDisputeWatchSweep(store, options.sender, {
-        ...(options.allowedRpcUrls ? { allowedRpcUrls: options.allowedRpcUrls } : {}),
-      });
-      if (result.eventsObserved > 0 || result.notificationsSent > 0 || result.errors > 0) {
-        const fields = {
-          eventsObserved: result.eventsObserved,
-          notificationsSent: result.notificationsSent,
-          notificationsSkipped: result.notificationsSkipped,
-          errors: result.errors,
-        };
-        if (result.errors > 0) watchtowerLog.warn('push_sweep.complete', fields);
-        else watchtowerLog.info('push_sweep.complete', fields);
-      }
-      if (result.errors > 0) health.failure(`WATCHTOWER_PUSH_SWEEP_ERRORS:${result.errors}`);
-      else health.success();
-    } catch (error) {
-      const message = formatError(error);
-      health.failure(message);
-      watchtowerLog.error('push_sweep.failed', { error: message });
-    } finally {
-      running = false;
-      schedule();
-    }
-  };
-
-  schedule();
-  return {
-    enabled: true,
-    intervalMs,
-    health: health.snapshot,
-    close: () => {
-      closed = true;
-      if (timer) clearTimeout(timer);
-    },
-  };
-};
+});
 
 const operatorAllowed = (
   context: StandaloneWatchtowerContext,
@@ -359,11 +251,12 @@ const handleOperatorRoute = async (
 ): Promise<Response | null> => {
   if (pathname === '/api/watchtower/sweep' && request.method === 'POST') {
     if (!operatorAllowed(context, request)) return operatorDenied(context);
-    return withCors(await handleWatchtowerSweep(request, context.store, {
-      ...(context.options.towerPrivateKey
-        ? { towerPrivateKey: context.options.towerPrivateKey }
-        : {}),
-    }));
+    const { store, options, sweepLock } = context;
+    return withCors(await handleWatchtowerSweep(request, lookupKey => sweepLock(() => runWatchtowerSweep(store, {
+      ...(lookupKey ? { lookupKey } : {}),
+      ...(options.towerPrivateKey ? { towerPrivateKey: options.towerPrivateKey } : {}),
+      ...(options.allowedRpcUrls ? { allowedRpcUrls: options.allowedRpcUrls } : {}),
+    }))));
   }
   const receiptMatch = pathname.match(/^\/api\/watchtower\/actions\/([^/]+)$/);
   if (!receiptMatch || request.method !== 'GET') return null;
@@ -431,28 +324,18 @@ export const startStandaloneWatchtowerServer = (options: StandaloneWatchtowerOpt
     ...(options.receiptTtlMs !== undefined ? { receiptTtlMs: options.receiptTtlMs } : {}),
     ...(options.towerPrivateKey ? { towerPrivateKey: options.towerPrivateKey } : {}),
   });
-  const scheduler = startSweepScheduler(store, {
-    ...(options.towerPrivateKey ? { towerPrivateKey: options.towerPrivateKey } : {}),
-    enabled: options.enableLastResortAgent === true,
-    ...(options.sweepIntervalMs !== undefined ? { intervalMs: options.sweepIntervalMs } : {}),
-    ...(options.allowedRpcUrls ? { allowedRpcUrls: options.allowedRpcUrls } : {}),
-  });
+  // The operator endpoint and the scheduler share this lock: two concurrent
+  // sweeps sent the same counter-dispute twice from one wallet nonce lane.
+  const sweepLock = createSweepLock();
+  const scheduler = startLastResortSweep(store, options, sweepLock);
   const pushEnabled = options.enablePushWake === true;
   const pushStore = pushEnabled
     ? createPushStore({ ...(options.pushDbPath ? { dbPath: options.pushDbPath } : {}) })
     : null;
   const pushSender = createPushSender(options.pushSender);
   const pushScheduler = pushStore
-    ? startPushWatchScheduler(pushStore, {
-        enabled: true,
-        sender: pushSender,
-        ...(options.pushSweepIntervalMs !== undefined ? { intervalMs: options.pushSweepIntervalMs } : {}),
-        ...(options.allowedRpcUrls ? { allowedRpcUrls: options.allowedRpcUrls } : {}),
-      })
-    : (() => {
-        const health = createSweepHealthTracker();
-        return { enabled: false, intervalMs: 0, health: health.snapshot, close: () => {} };
-      })();
+    ? startPushWatchSweep(pushStore, options, pushSender)
+    : disabledIntervalSweep(0);
   const context: StandaloneWatchtowerContext = {
     options,
     store,
@@ -460,6 +343,7 @@ export const startStandaloneWatchtowerServer = (options: StandaloneWatchtowerOpt
     pushSender,
     scheduler,
     pushScheduler,
+    sweepLock,
     operatorApiEnabled,
     operatorToken,
   };

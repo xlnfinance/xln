@@ -143,8 +143,8 @@ describe('standalone watchtower service', () => {
     expect(source).toContain('const handleWatchtowerRequest');
     expect(source).toContain("request.method === 'OPTIONS'");
     expect(source).toContain("watchtowerLog.info('service.listen'");
-    expect(source).toContain("watchtowerLog.error('sweep.failed'");
-    expect(source).toContain("watchtowerLog.error('push_sweep.failed'");
+    expect(source).toContain("failed: 'sweep.failed'");
+    expect(source).toContain("failed: 'push_sweep.failed'");
     expect(source).not.toContain('console.');
     expect(source).not.toContain('[WATCHTOWER] sweep');
     expect(source).not.toContain('[PUSH-WATCH] sweep');

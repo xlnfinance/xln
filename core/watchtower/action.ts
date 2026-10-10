@@ -963,10 +963,12 @@ const processLastResortAppointment = async (
   return 'submitted';
 };
 
+export type WatchtowerSweepResult = { scanned: number; submitted: number; skipped: number; errors: number };
+
 export const runWatchtowerSweep = async (
   store: WatchtowerStore,
   options?: WatchtowerSweepOptions,
-): Promise<{ scanned: number; submitted: number; skipped: number; errors: number }> => {
+): Promise<WatchtowerSweepResult> => {
   const towerPrivateKey = String(
     options?.towerPrivateKey
     || process.env['XLN_WATCHTOWER_PRIVATE_KEY']
