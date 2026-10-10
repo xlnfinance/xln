@@ -697,7 +697,7 @@ describe('runtime output routing', () => {
       targetSignerId,
       4,
       '0xframe04',
-      '0xproposer-sig',
+      `0x${'a1'.repeat(65)}`,
     );
     const certificate = committedOutput(
       targetRuntimeId,
@@ -705,7 +705,7 @@ describe('runtime output routing', () => {
       targetSignerId,
       4,
       '0xframe04',
-      '0xquorum-sig',
+      `0x${'b2'.repeat(65)}`,
     );
 
     expect(carriesEntityCommitNotification(proposal)).toBe(false);

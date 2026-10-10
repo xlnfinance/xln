@@ -247,3 +247,26 @@ test('Entity frame tx selector cuts the FIFO prefix at MAX_ENTITY_FRAME_TXS befo
   expect(selected.meter.txBytes(LIMITS.MAX_ENTITY_FRAME_TXS)).toBeGreaterThan(0);
   expect(() => selected.meter.txBytes(LIMITS.MAX_ENTITY_FRAME_TXS + 1)).toThrow('ENTITY_FRAME_WIRE_PREFIX_COUNT_INVALID');
 });
+
+test('proposed Entity frame signatures must be compact signature strings before any reader', () => {
+  // A peer's collectedSigs entry of [null] passed validation and threw a
+  // TypeError in the commit precheck (isLockedEntityFrame), halting the Runtime.
+  const frame = (signatures: unknown[]) => ({
+    height: 1,
+    parentFrameHash: 'genesis',
+    stateRoot: `0x${'11'.repeat(32)}`,
+    authorityRoot: `0x${'22'.repeat(32)}`,
+    timestamp: 1,
+    entityContext: emptyContext,
+    txs: [],
+    events: [],
+    hash: `0x${'33'.repeat(32)}`,
+    leader: { proposerSignerId: signerId, view: 0 },
+    hashesToSign: [{ hash: `0x${'33'.repeat(32)}`, type: 'entityFrame', context: 'entity-frame:1' }],
+    collectedSigs: new Map([[signerId, signatures]]),
+  });
+  for (const bad of [null, 42, '0x1234', { r: 1 }]) {
+    expect(() => validateProposedEntityFrame(frame([bad]), 'EntityFrame'))
+      .toThrow(`EntityFrame.collectedSigs[${signerId}][0] must be a compact signature`);
+  }
+});

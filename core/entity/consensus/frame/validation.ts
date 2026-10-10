@@ -293,7 +293,16 @@ const validateFrameOptionalEvidence = (
           `${context}.collectedSigs signer must be string`,
         );
       }
-      validateArray(values, `${context}.collectedSigs[${signerId}]`);
+      // Each entry must be a 65-byte compact signature before anything reads
+      // it: a peer's `[null]` passed here and threw a TypeError in the commit
+      // precheck (isLockedEntityFrame), halting the Runtime during frame prep.
+      validateArray(values, `${context}.collectedSigs[${signerId}]`).forEach((value, index) => {
+        if (typeof value !== 'string' || !/^0x[0-9a-fA-F]{130}$/.test(value)) {
+          throw new FinancialDataCorruptionError(
+            `${context}.collectedSigs[${signerId}][${index}] must be a compact signature`,
+          );
+        }
+      });
     }
   }
   if (frame['hankos'] !== undefined) {
