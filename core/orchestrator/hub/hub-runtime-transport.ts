@@ -32,6 +32,7 @@ import { applyTransportPeerFailurePolicy } from '../../network/p2p/transport-pee
 import { requestRuntimeLoopWake } from '../../runtime/mempool/input-queue';
 import { enqueuePeerReadyProposeAccountsNow } from '../../runtime/mempool/propose-accounts-now';
 import { getEffectiveEntityInputTxs } from '../../entity/consensus/output/envelope';
+import { getEntityReplicaById } from '../../entity/replica/replica-lookup';
 import {
   crossJurisdictionRouteProfileEntityIds,
   extractCrossJurisdictionRouteFromTx,
@@ -69,14 +70,6 @@ const collectCrossJProfileIds = (
   }),
 ))];
 
-const hasLocalEntityReplica = (env: RuntimeReplica, entityId: string): boolean => {
-  const wanted = entityId.toLowerCase();
-  for (const key of env.state.eReplicas.keys()) {
-    if (key.split(':')[0]?.toLowerCase() === wanted) return true;
-  }
-  return false;
-};
-
 const warmCrossJProfileRoutes = async (
   env: RuntimeReplica,
   envelope: import('../../runtime/types').RuntimeEntityInputsEnvelope,
@@ -87,7 +80,7 @@ const warmCrossJProfileRoutes = async (
   // route is local. Only remote parties need a verified profile route.
   const missing = required.filter(entityId =>
     !env.infrastructure?.verifiedProfileRoutes?.has(entityId)
-    && !hasLocalEntityReplica(env, entityId));
+    && getEntityReplicaById(env, entityId) === null);
   if (missing.length === 0) return;
   const p2p = env.infrastructure?.p2p;
   if (!p2p) throw new Error(`CROSS_J_PROFILE_WARMUP_UNAVAILABLE:${missing.join(',')}`);
