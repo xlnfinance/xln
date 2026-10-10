@@ -512,7 +512,7 @@ export const sendEntityInputWithRouting = (
     ...(env.pendingNetworkOutputs ?? []),
     originatedInput,
   ]), preparedOutputGraph);
-  const { localOutputs, remoteOutputs, deferredOutputs } = planEntityOutputs(
+  const { localOutputs, remoteOutputs } = planEntityOutputs(
     env,
     pendingBeforePlan,
     deps,
@@ -521,7 +521,6 @@ export const sendEntityInputWithRouting = (
   if (remoteOutputs.length > 0 && state.recoveryBackupBarrier) {
     throw new Error('DIRECT_NETWORK_SEND_REQUIRES_COMMITTED_RECOVERY_BACKUP');
   }
-  if (deferredOutputs.length > 0) throw new Error('ROUTE_DEFERRED_OUTPUTS_FORBIDDEN');
   dispatchEntityOutputs(env, remoteOutputs, deps, preparedOutputGraph);
   if (localOutputs.length > 0) {
     deps.enqueueRuntimeInputs(env, localOutputs, undefined, undefined, env.state.timestamp);

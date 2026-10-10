@@ -223,7 +223,6 @@ for (const [path, markers] of [
     'delivery: DeliveryResult;',
     'export const buildPendingNetworkOutputs',
     'NETWORK_OUTBOX_CAPACITY_EXCEEDED',
-    'ROUTE_DEFERRED_OUTPUTS_FORBIDDEN',
     'ROUTE_P2P_UNAVAILABLE',
     'requireDeliveryResult(',
     'if (isDeliveryRetainable(delivery)) return false;',

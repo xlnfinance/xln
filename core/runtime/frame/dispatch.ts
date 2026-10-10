@@ -4,7 +4,7 @@ import { createStructuredLogger } from '../../support/logger';
 import { announceCertifiedLocalProfiles } from '../../network/p2p/gossip/local-profile-lifecycle';
 import { computeEntityProfileHash } from '../../entity/profile/profile-descriptor';
 import type { EntityReplica } from '../../entity/types';
-import type { RuntimeReplica, RoutedEntityInput } from '../types';
+import type { RuntimeReplica } from '../types';
 import {
   dispatchEntityOutputs,
   planEntityOutputs,
@@ -42,7 +42,6 @@ const hasCurrentProfileWitness = (env: RuntimeReplica, entityId: string): boolea
 
 export type CommittedEntityOutputPlan = {
   remoteOutputs: PlannedRemoteOutput[];
-  deferredOutputs: RoutedEntityInput[];
   preparedOutputGraph: PreparedOutputGraph;
 };
 
@@ -72,9 +71,6 @@ export const dispatchCommittedEntityOutputs = async (
     runtimeLog.debug('side_effect.remote_outputs.dispatch', {
       remoteOutputs: plan.remoteOutputs.length,
     });
-  }
-  if (plan.deferredOutputs.length > 0) {
-    throw new Error(`ROUTE_DEFERRED_OUTPUTS_FORBIDDEN:${plan.deferredOutputs.length}`);
   }
   // Sovereign clients open only the routes used by this committed frame. A
   // Profile supplies the endpoint; the actual socket is established lazily at

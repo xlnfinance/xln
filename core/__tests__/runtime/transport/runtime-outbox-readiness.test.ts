@@ -124,7 +124,6 @@ describe('committed Runtime outbox recipient readiness', () => {
         { output: readyOutput, targetRuntimeId: first.runtimeId },
         { output: blockedOutput, targetRuntimeId: second.runtimeId },
       ],
-      deferredOutputs: [],
       preparedOutputGraph: createPreparedOutputGraph(),
     }, deps);
     await waitFor(() => first.envelopes.length === 1);

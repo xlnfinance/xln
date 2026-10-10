@@ -22,7 +22,6 @@ const output = (): RoutedEntityInput => ({
 
 const planFor = (pending: RoutedEntityInput) => ({
   remoteOutputs: [{ output: pending, targetRuntimeId }],
-  deferredOutputs: [],
   preparedOutputGraph: createPreparedOutputGraph(),
 });
 

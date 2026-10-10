@@ -1173,7 +1173,6 @@ describe('runtime output routing', () => {
 
     expect(result.localOutputs).toHaveLength(1);
     expect(result.localOutputs[0]?.signerId).toBe(actualSignerId);
-    expect(result.deferredOutputs).toEqual([]);
     expect(warnings).toContain('ROUTE_RETARGET_LOCAL_TRIGGER_SIGNER');
   });
 

@@ -12,7 +12,6 @@ const runtimeLog = createStructuredLogger('runtime');
 export type RuntimeFrameOutputPlan = {
   localOutputs: RoutedEntityInput[];
   remoteOutputs: PlannedRemoteOutput[];
-  deferredOutputs: RoutedEntityInput[];
   preparedOutputGraph: PreparedOutputGraph;
 };
 
@@ -36,7 +35,6 @@ export const planRuntimeFrameOutputs = (
   const plan = deps.applyOutputPlan(env, entityOutbox, routing);
   profile.metrics.localOutputs = plan.localOutputs.length;
   profile.metrics.remoteOutputs = plan.remoteOutputs.length;
-  profile.metrics.deferredOutputs = plan.deferredOutputs.length;
   profile.mark('planOutputs');
   if (plan.localOutputs.length > 0 && !quietLogs) {
     runtimeLog.debug('tick.local_outputs.queued', {

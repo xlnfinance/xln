@@ -263,7 +263,6 @@ export const planEntityOutputs = (
 ): {
   localOutputs: RoutedEntityInput[];
   remoteOutputs: PlannedRemoteOutput[];
-  deferredOutputs: RoutedEntityInput[];
   preparedOutputGraph: PreparedOutputGraph;
 } => {
   const localOutputs: RoutedEntityInput[] = [];
@@ -279,5 +278,5 @@ export const planEntityOutputs = (
       remoteOutputs.push(decision.output);
     }
   }
-  return { localOutputs, remoteOutputs, deferredOutputs: [], preparedOutputGraph: graph };
+  return { localOutputs, remoteOutputs, preparedOutputGraph: graph };
 };

@@ -43,9 +43,6 @@ export const applyRecoveryRuntimeOutputPlan = (
   ));
   const plan = timePerfPhase('recovery.output.plan', () =>
     planEntityOutputs(env, pending, routing, preparedOutputGraph));
-  if (plan.deferredOutputs.length > 0) {
-    throw new Error(`ROUTE_DEFERRED_OUTPUTS_FORBIDDEN:${plan.deferredOutputs.length}`);
-  }
   const localContinuations = plan.localOutputs.map(({
     sourceRuntimeFrame: _sourceRuntimeFrame,
     ...output
