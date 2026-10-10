@@ -11,8 +11,7 @@ import {
 
 import { computeBatchHankoHash } from '../../../../jurisdiction/machine/batch';
 import {
-  createCooperativeDisputeProofHash,
-  createDisputeProofHash,
+  createDisputeProofHashWithNonce,
   createSettlementHashWithNonce,
 } from '../../../../protocol/dispute/proof-builder';
 import { computeWatchtowerCounterDisputeAuthorizationHash } from '../../../../storage/recovery/bundle/crypto';
@@ -37,6 +36,7 @@ import {
   hashBoardProposalCancelHankoPayload,
   hashBoardProposalHankoPayload,
   hashCancelEntityProviderActionHankoPayload,
+  hashCooperativeDisputeProofHankoPayload,
   hashFinalDisputeProofHankoPayload,
   hashReleaseControlSharesHankoPayload,
 } from '../../../../hanko/onchain-domain';
@@ -62,10 +62,6 @@ const ACCOUNT_STATE = {
   leftEntity: LEFT,
   rightEntity: RIGHT,
   watchSeed: WATCH_SEED,
-};
-const ACCOUNT_REPLICA = {
-  state: ACCOUNT_STATE,
-  proofHeader: { nextProofNonce: 7 },
 };
 const DIFFS = [{
   tokenId: 9,
@@ -165,18 +161,18 @@ describe('on-chain Hanko domain golden vectors', () => {
     expect(createSettlementHashWithNonce(ACCOUNT_STATE, DIFFS, [12], DOMAIN, 7)).toBe(
       ONCHAIN_HANKO_GOLDEN_HASHES.settlement,
     );
-    expect(createDisputeProofHash(ACCOUNT_REPLICA, PROOF_BODY_HASH, DOMAIN, true)).toBe(
+    expect(createDisputeProofHashWithNonce(ACCOUNT_STATE, PROOF_BODY_HASH, DOMAIN, 7, true)).toBe(
       ONCHAIN_HANKO_GOLDEN_HASHES.dispute,
     );
     expect(hashFinalDisputeProofHankoPayload(DOMAIN, ACCOUNT_KEY, 7)).toBe(
       ONCHAIN_HANKO_GOLDEN_HASHES.final,
     );
-    expect(createCooperativeDisputeProofHash(
-      ACCOUNT_STATE,
+    expect(hashCooperativeDisputeProofHankoPayload(
+      DOMAIN,
+      ACCOUNT_KEY,
+      7,
       PROOF_BODY_HASH,
       STARTER_ARGUMENTS_HASH,
-      DOMAIN,
-      7,
     )).toBe(ONCHAIN_HANKO_GOLDEN_HASHES.cooperative);
   });
 
@@ -258,8 +254,8 @@ describe('on-chain Hanko domain golden vectors', () => {
     expect(createSettlementHashWithNonce(ACCOUNT_STATE, DIFFS, [12], otherDomain, 7)).not.toBe(
       createSettlementHashWithNonce(ACCOUNT_STATE, DIFFS, [12], DOMAIN, 7),
     );
-    expect(createDisputeProofHash(ACCOUNT_REPLICA, PROOF_BODY_HASH, otherDomain, true)).not.toBe(
-      createDisputeProofHash(ACCOUNT_REPLICA, PROOF_BODY_HASH, DOMAIN, true),
+    expect(createDisputeProofHashWithNonce(ACCOUNT_STATE, PROOF_BODY_HASH, otherDomain, 7, true)).not.toBe(
+      createDisputeProofHashWithNonce(ACCOUNT_STATE, PROOF_BODY_HASH, DOMAIN, 7, true),
     );
     expect(hashEntityTransferHankoPayload(
       { ...ENTITY_PROVIDER_DOMAIN, chainId: 1 },

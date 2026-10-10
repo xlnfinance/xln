@@ -14,7 +14,6 @@ export type {
   EntityId,
   SignerId,
   JId,
-  EntityProviderAddress,
   ReplicaKey,
   EntityType,
 } from '../../protocol/identity';
@@ -100,25 +99,13 @@ export {
   createReplicaKey,
   isValidEntityId,
   isValidSignerId,
-  isValidJId,
-  isValidEpAddress,
   toEntityId,
   toSignerId,
   toJId,
-  toEpAddress,
   isNumberedEntity,
-  isLazyEntity,
-  XLN_URI_SCHEME,
-  DEFAULT_RUNTIME_HOST,
   MAX_NUMBERED_ENTITY,
 } from '../../protocol/identity';
-export {
-  formatEntityDisplay,
-  formatSignerDisplay,
-  formatReplicaDisplay,
-  getEntityDisplayNumber,
-} from '../../protocol/identity/identity-display';
-export { formatReplicaUri, parseReplicaUri } from '../../protocol/identity/identity-uri';
+export { formatEntityDisplay } from '../../protocol/identity/identity-display';
 
 import type {
   RuntimeAdapterGraphEntityCore,

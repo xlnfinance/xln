@@ -5,7 +5,7 @@ import {
   entityInputFailureDisposition,
 } from '../../../../entity/tx/processing/invariant-errors';
 import {
-  disputeFailure,
+  FailureDispositionError,
   haltRuntimeFailure,
   rejectFailure,
   retryFailure,
@@ -17,7 +17,7 @@ describe('EntityInput typed failure dispositions', () => {
     const failures = [
       rejectFailure('PEER_MALFORMED', message),
       retryFailure('PEER_HEAD_STALE', message),
-      disputeFailure('SIGNED_REPLAY_UNSAFE', message),
+      new FailureDispositionError('dispute', 'SIGNED_REPLAY_UNSAFE', message),
       haltRuntimeFailure('STATE_ROOT_DIVERGED', message),
     ] as const;
 

@@ -58,12 +58,6 @@ export type DisputeTokenFinalization = Readonly<{
   }>;
 }>;
 
-export type DisputeFinalization = Readonly<{
-  tokens: readonly DisputeTokenFinalization[];
-  tokenCount: number;
-  allTokensConserved: boolean;
-}>;
-
 function fail(path: string, detail: string): never {
   throw new Error(`DISPUTE_FINALIZATION_INVALID: ${path} ${detail}`);
 }
@@ -224,20 +218,4 @@ export function deriveDisputeTokenFinalization(
   const newDebt = deriveNewDebt(shortfall, paid);
   const reserves = derivePostReserves(input, allocation, paid);
   return buildResult(input, finalDelta, debt, allocation, shortfall, paid, newDebt, reserves);
-}
-
-export function deriveDisputeFinalization(
-  inputs: readonly DisputeTokenFinalizationInput[],
-): DisputeFinalization {
-  const seen = new Set<number>();
-  const tokens = inputs.map((input) => {
-    if (seen.has(input.tokenId)) fail(`tokenId.${input.tokenId}`, 'must be unique');
-    seen.add(input.tokenId);
-    return deriveDisputeTokenFinalization(input);
-  });
-  return {
-    tokens,
-    tokenCount: tokens.length,
-    allTokensConserved: tokens.every(({ conservation }) => conservation.conserved),
-  };
 }

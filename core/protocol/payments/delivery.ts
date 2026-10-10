@@ -7,7 +7,7 @@ import {
 } from '../../types/finance/payment';
 import { toJHeight, type JHeight, type UnixMs } from '../units';
 
-export type ConditionalPaymentMode = Extract<PaymentDeliveryMode, 'instant' | 'async'>;
+type ConditionalPaymentMode = Extract<PaymentDeliveryMode, 'instant' | 'async'>;
 
 export const resolvePaymentDeadlineWindow = (input: {
   mode: ConditionalPaymentMode;

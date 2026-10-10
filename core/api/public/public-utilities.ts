@@ -46,31 +46,19 @@ export {
 export { decode, encode } from '../../storage/codec/snapshot-coder';
 export {
   createReplicaKey,
-  DEFAULT_RUNTIME_HOST,
   extractEntityId,
   extractSignerId,
   formatReplicaKey,
-  isLazyEntity,
   isNumberedEntity,
   isValidEntityId,
-  isValidEpAddress,
-  isValidJId,
   isValidSignerId,
   MAX_NUMBERED_ENTITY,
   parseReplicaKey,
-  toEpAddress,
   toEntityId,
   toJId,
   toSignerId,
-  XLN_URI_SCHEME,
 } from '../../protocol/identity';
-export {
-  formatEntityDisplay,
-  formatSignerDisplay,
-  formatReplicaDisplay,
-  getEntityDisplayNumber,
-} from '../../protocol/identity/identity-display';
-export { formatReplicaUri, parseReplicaUri } from '../../protocol/identity/identity-uri';
+export { formatEntityDisplay } from '../../protocol/identity/identity-display';
 export { clearDatabase } from '../../storage/database/clear-database';
 export { generateEntityAvatar, generateSignerAvatar, getEntityDisplayInfo, getSignerDisplayInfo, hashToAvatar } from '../../presentation/identity-display';
 export { getEntityShortId } from '../../presentation/identity-display';

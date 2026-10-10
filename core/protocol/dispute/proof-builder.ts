@@ -24,7 +24,6 @@ import { abiSchemaFromFragment, encodeAbi } from '../crypto/abi-encode';
 import { deriveSwapOffdeltaChanges } from '../../orderbook/swap-execution.ts';
 import { deriveTransferOffdeltaChange } from '../transform/delta-movement';
 import {
-  hashCooperativeDisputeProofHankoPayload,
   hashCooperativeUpdateHankoPayload,
   hashDisputeProofHankoPayload,
   type DepositoryHankoDomain,
@@ -76,7 +75,6 @@ export class AccountDisputeProofBudgetError extends Error {
 }
 
 type DisputeHashState = Pick<AccountState, 'leftEntity' | 'rightEntity' | 'watchSeed'>;
-type DisputeHashReplica = Pick<AccountReplica, 'state' | 'proofHeader'>;
 type SettlementHashState = Pick<AccountState, 'leftEntity' | 'rightEntity'>;
 
 const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000';
@@ -425,26 +423,6 @@ function getCanonicalAccountKey(account: DisputeHashState): string {
 }
 
 /**
- * Create full dispute proof hash for signing
- * This is what both parties sign to authorize a dispute proof
- */
-export function createDisputeProofHash(
-  account: DisputeHashReplica,
-  proofBodyHash: string,
-  domain: DepositoryHankoDomain,
-  proposerIsLeft: boolean,
-): string {
-  return hashDisputeProofHankoPayload(
-    domain,
-    getCanonicalAccountKey(account.state),
-    account.proofHeader.nextProofNonce,
-    proposerIsLeft,
-    proofBodyHash,
-    normalizeAccountWatchSeed(account.state.watchSeed, 'DISPUTE_MESSAGE'),
-  );
-}
-
-/**
  * Create dispute proof hash with explicit nonce.
  * Used for nonce+1 pre-signing during settlement: after a settlement is applied
  * on-chain, nonce is counter. Proofs signed at the old nonce
@@ -465,23 +443,6 @@ export function createDisputeProofHashWithNonce(
   const chKey = getCanonicalAccountKey(account);
   const watchSeed = normalizeAccountWatchSeed(account.watchSeed, 'DISPUTE_MESSAGE');
   return hashDisputeProofHankoPayload(domain, chKey, nonce, proposerIsLeft, proofBodyHash, watchSeed);
-}
-
-/** Matches Account.sol MessageType.CooperativeDisputeProof exactly. */
-export function createCooperativeDisputeProofHash(
-  account: DisputeHashState,
-  proofBodyHash: string,
-  starterInitialArgumentsHash: string,
-  domain: DepositoryHankoDomain,
-  nonce: number,
-): string {
-  return hashCooperativeDisputeProofHankoPayload(
-    domain,
-    getCanonicalAccountKey(account),
-    nonce,
-    proofBodyHash,
-    starterInitialArgumentsHash,
-  );
 }
 
 /**

@@ -45,12 +45,8 @@ export type {
   EntityId,
   SignerId,
   JId,
-  EntityProviderAddress,
   ReplicaKey,
-  FullReplicaAddress,
-  ReplicaUri,
 } from '../../protocol/identity';
-export type { JurisdictionInfo } from '../../protocol/identity/jurisdiction-identity';
 export {
   deriveSignerKeySync,
   getCachedSignerPrivateKey,

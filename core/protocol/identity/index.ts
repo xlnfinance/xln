@@ -4,8 +4,6 @@
  * Canonical addressing for entities and replicas across jurisdictions.
  * Runtime is single source of truth - frontend imports from here.
  *
- * URI Format: xln://{host}:{port}/{jId}/{epAddress}/{entityId}/{signerId}
- *
  * Entity Types:
  * - Numbered: entityId < 1,000,000 (display as #1, #2, etc.)
  * - Lazy: entityId = keccak256(governance_structure) (display as abc123...)
@@ -19,8 +17,6 @@ declare const EntityIdBrand: unique symbol;
 declare const SignerIdBrand: unique symbol;
 declare const JIdBrand: unique symbol;
 declare const RuntimeIdBrand: unique symbol;
-declare const AccountPairKeyBrand: unique symbol;
-declare const EntityProviderAddressBrand: unique symbol;
 
 /** Entity identifier - 32-byte hex string (0x + 64 chars) */
 export type EntityId = string & { readonly [EntityIdBrand]: typeof EntityIdBrand };
@@ -34,26 +30,12 @@ export type JId = string & { readonly [JIdBrand]: typeof JIdBrand };
 /** Runtime transport identity - canonical lowercase 20-byte EVM address. */
 export type RuntimeId = string & { readonly [RuntimeIdBrand]: typeof RuntimeIdBrand };
 
-/** Canonical lower-Entity-first key for a bilateral Account pair. */
-export type AccountPairKey = `${EntityId}:${EntityId}` & {
-  readonly [AccountPairKeyBrand]: typeof AccountPairKeyBrand;
-};
-
-/** EntityProvider contract address - 20-byte hex (0x + 40 chars) */
-export type EntityProviderAddress = string & { readonly [EntityProviderAddressBrand]: typeof EntityProviderAddressBrand };
-
 // =============================================================================
 // CONSTANTS
 // =============================================================================
 
 /** Maximum entity number for "numbered" entities (vs lazy hash entities) */
 export const MAX_NUMBERED_ENTITY = 1_000_000n;
-
-/** URI scheme for XLN addresses */
-export const XLN_URI_SCHEME = 'xln://';
-
-/** Default runtime host (for local single-runtime setup) */
-export const DEFAULT_RUNTIME_HOST = 'localhost:8080';
 
 // =============================================================================
 // REPLICA KEY - Structured, type-safe
@@ -63,17 +45,6 @@ export const DEFAULT_RUNTIME_HOST = 'localhost:8080';
 export interface ReplicaKey {
   readonly entityId: EntityId;
   readonly signerId: SignerId;
-}
-
-/** Full address including jurisdiction context */
-export interface FullReplicaAddress extends ReplicaKey {
-  readonly jId: JId;
-  readonly epAddress: EntityProviderAddress;
-}
-
-/** Complete URI with runtime host for networking */
-export interface ReplicaUri extends FullReplicaAddress {
-  readonly runtimeHost: string; // host:port
 }
 
 // =============================================================================
@@ -91,18 +62,13 @@ export const isValidSignerId = (s: string): s is SignerId => {
 };
 
 /** Check if string is valid JId (chainId number or hash) */
-export const isValidJId = (s: string): s is JId => {
+const isValidJId = (s: string): s is JId => {
   return typeof s === 'string' && s.length > 0;
 };
 
 /** Runtime IDs are canonical lowercase EVM addresses at every routing boundary. */
 export const isValidRuntimeId = (s: string): s is RuntimeId =>
   /^0x[0-9a-f]{40}$/.test(s);
-
-/** Check if string is valid EntityProviderAddress (0x + 40 hex chars) */
-export const isValidEpAddress = (s: string): s is EntityProviderAddress => {
-  return typeof s === 'string' && /^0x[a-fA-F0-9]{40}$/i.test(s);
-};
 
 // =============================================================================
 // CONSTRUCTORS - Validate at source, trust at use
@@ -135,26 +101,6 @@ export const toJId = (s: string): JId => {
 export const toRuntimeId = (s: string): RuntimeId => {
   if (!isValidRuntimeId(s)) {
     throw new Error(`FINTECH-SAFETY: Invalid RuntimeId: ${s}`);
-  }
-  return s;
-};
-
-export const createAccountPairKey = (first: string, second: string): AccountPairKey => {
-  const firstEntity = toEntityId(first).toLowerCase() as EntityId;
-  const secondEntity = toEntityId(second).toLowerCase() as EntityId;
-  if (firstEntity === secondEntity) {
-    throw new Error(`FINTECH-SAFETY: AccountPairKey requires distinct entities: ${firstEntity}`);
-  }
-  const [left, right] = firstEntity < secondEntity
-    ? [firstEntity, secondEntity]
-    : [secondEntity, firstEntity];
-  return `${left}:${right}` as AccountPairKey;
-};
-
-/** Create validated EntityProviderAddress - throws if invalid */
-export const toEpAddress = (s: string): EntityProviderAddress => {
-  if (!isValidEpAddress(s)) {
-    throw new Error(`FINTECH-SAFETY: Invalid EntityProviderAddress: ${s}`);
   }
   return s;
 };
@@ -245,14 +191,3 @@ export const detectEntityType = (entityId: EntityId): EntityType => {
 export const isNumberedEntity = (entityId: EntityId): boolean => {
   return detectEntityType(entityId) === 'numbered';
 };
-
-/**
- * Check if entityId is a lazy entity (hash-based)
- */
-export const isLazyEntity = (entityId: EntityId): boolean => {
-  return detectEntityType(entityId) === 'lazy';
-};
-
-// =============================================================================
-// TOLERANT API BOUNDARY HELPERS
-// =============================================================================

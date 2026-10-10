@@ -37,9 +37,6 @@ export const rejectFailure = (code: string, message = code): FailureDispositionE
 export const retryFailure = (code: string, message = code): FailureDispositionError =>
   new FailureDispositionError('retry', code, message);
 
-export const disputeFailure = (code: string, message = code): FailureDispositionError =>
-  new FailureDispositionError('dispute', code, message);
-
 export const haltRuntimeFailure = (
   code: string,
   message = code,
@@ -145,11 +142,6 @@ const MARKET_MAKER_FAILURE_CATEGORIES: Record<string, RuntimeFailureCategory> = 
 
 const J_BATCH_FAILURE_CATEGORIES: Record<string, RuntimeFailureCategory> = {
   J_BATCH_EMPTY: 'ExpectedEmpty',
-  J_BATCH_SENT_PENDING: 'TransientRace',
-  J_BATCH_JURISDICTION_MISSING: 'Contradiction',
-  J_BATCH_JURISDICTION_UNAVAILABLE: 'TransientRace',
-  J_BATCH_CHAIN_ID_MISSING: 'Contradiction',
-  J_BATCH_SIGNER_MISSING: 'Contradiction',
   J_BATCH_LIMIT_EXCEEDED: 'Contradiction',
   J_BATCH_CONSENSUS_HANKO_MISSING: 'Contradiction',
   J_SUBMIT_MISSING_JREPLICA: 'TransientRace',

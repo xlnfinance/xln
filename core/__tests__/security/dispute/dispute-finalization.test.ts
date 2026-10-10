@@ -1,7 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
 import {
-  deriveDisputeFinalization,
   deriveDisputeTokenFinalization,
   type DisputeTokenFinalizationInput,
 } from '../../../protocol/dispute/finalization';
@@ -175,26 +174,5 @@ describe('deriveDisputeTokenFinalization', () => {
     expect(result.newDebt).toEqual({ leftToRight: 1n << 255n, rightToLeft: 0n });
     expect(result.after.reserves).toEqual({ left: 0n, right: 100n });
     expect(result.conservation.conserved).toBe(true);
-  });
-});
-
-describe('deriveDisputeFinalization', () => {
-  test('composes four independent token rows with both delta signs', () => {
-    const result = deriveDisputeFinalization([
-      token({ tokenId: 1, collateral: 100n, offdelta: 70n }),
-      token({ tokenId: 2, collateral: 70n, offdelta: 100n }),
-      token({ tokenId: 3, collateral: 70n, offdelta: -30n }),
-      token({ tokenId: 4, collateral: 0n, offdelta: 0n }),
-    ]);
-
-    expect(result.tokenCount).toBe(4);
-    expect(result.tokens.map(({ tokenId }) => tokenId)).toEqual([1, 2, 3, 4]);
-    expect(result.tokens.map(({ conservation }) => conservation.conserved)).toEqual([true, true, true, true]);
-    expect(result.allTokensConserved).toBe(true);
-  });
-
-  test('rejects duplicate token rows', () => {
-    expect(() => deriveDisputeFinalization([token({ tokenId: 1 }), token({ tokenId: 1 })]))
-      .toThrow('tokenId.1 must be unique');
   });
 });

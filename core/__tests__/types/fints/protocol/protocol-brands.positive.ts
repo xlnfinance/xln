@@ -1,13 +1,11 @@
 import {
   createReplicaKey,
-  createAccountPairKey,
   formatReplicaKey,
   toEntityId,
   toJId,
   toRuntimeId,
   toSignerId,
   type EntityId,
-  type AccountPairKey,
   type JId,
   type RuntimeId,
   type SignerId,
@@ -36,10 +34,8 @@ import type { DecodedAccountFrame } from '../../../../account/validation/frame-v
 import type { DecodedEntityFrame } from '../../../../entity/consensus/frame/validation';
 import type { DecodedProfile } from '../../../../entity/profile';
 import {
-  toEvidenceHash,
   toFrameHash,
   toStateHash,
-  type EvidenceHash,
   type FrameHash,
   type StateHash,
 } from '../../../../protocol/hashes';
@@ -51,7 +47,6 @@ type Expect<T extends true> = T;
 type NotEqual<A, B> = Equal<A, B> extends true ? false : true;
 
 type DistinctIdentities = Expect<NotEqual<EntityId, SignerId>>;
-type PairIsNotEntity = Expect<NotEqual<AccountPairKey, EntityId>>;
 type DistinctRuntimeAndJ = Expect<NotEqual<RuntimeId, JId>>;
 type DistinctTimes = Expect<NotEqual<UnixMs, UnixS>>;
 type DistinctMachineHeights = Expect<NotEqual<RuntimeHeight, EntityHeight>>;
@@ -66,7 +61,6 @@ type WalJurisdictionIsJId = Expect<Equal<DecodedJInput['jurisdictionName'], JId>
 type WalJTxClockIsUnixMs = Expect<Equal<DecodedJTx['timestamp'], UnixMs>>;
 type StorageRuntimeHeight = Expect<Equal<ReturnType<typeof parseSnapshotEntityKey>['height'], RuntimeHeight>>;
 type DistinctFrameAndStateHashes = Expect<NotEqual<FrameHash, StateHash>>;
-type DistinctEvidenceAndFrameHashes = Expect<NotEqual<EvidenceHash, FrameHash>>;
 type AccountDecoderMintsHeight = Expect<Equal<DecodedAccountFrame['height'], AccountHeight>>;
 type AccountDecoderMintsRoot = Expect<Equal<DecodedAccountFrame['accountStateRoot'], StateHash>>;
 type EntityDecoderMintsHeight = Expect<Equal<DecodedEntityFrame['height'], EntityHeight>>;
@@ -87,12 +81,9 @@ export const fintsPositiveProtocolBrands = (): readonly [
   EntityHeight,
   AccountHeight,
   JHeight,
-  AccountPairKey,
   FrameHash,
   StateHash,
-  EvidenceHash,
   DistinctIdentities,
-  PairIsNotEntity,
   DistinctRuntimeAndJ,
   DistinctTimes,
   DistinctMachineHeights,
@@ -107,7 +98,6 @@ export const fintsPositiveProtocolBrands = (): readonly [
   WalJTxClockIsUnixMs,
   StorageRuntimeHeight,
   DistinctFrameAndStateHashes,
-  DistinctEvidenceAndFrameHashes,
   AccountDecoderMintsHeight,
   AccountDecoderMintsRoot,
   EntityDecoderMintsHeight,
@@ -124,12 +114,8 @@ export const fintsPositiveProtocolBrands = (): readonly [
   toEntityHeight(1),
   toAccountHeight(1),
   toJHeight(1),
-  createAccountPairKey(`0x${'11'.repeat(32)}`, `0x${'22'.repeat(32)}`),
   toFrameHash(`0x${'33'.repeat(32)}`),
   toStateHash(`0x${'44'.repeat(32)}`),
-  toEvidenceHash(`0x${'55'.repeat(32)}`),
-  true,
-  true,
   true,
   true,
   true,

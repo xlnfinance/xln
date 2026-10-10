@@ -10,14 +10,10 @@ import {
   toSignerId,
   toJId,
   toRuntimeId,
-  toEpAddress,
-  createAccountPairKey,
 
   // Validators
   isValidEntityId,
   isValidSignerId,
-  isValidJId,
-  isValidEpAddress,
 
   // ReplicaKey operations
   parseReplicaKey,
@@ -28,24 +24,12 @@ import {
 
   // Entity type detection
   isNumberedEntity,
-  isLazyEntity,
   detectEntityType,
 
   // Constants
-  XLN_URI_SCHEME,
-  DEFAULT_RUNTIME_HOST,
   MAX_NUMBERED_ENTITY,
 } from '../../../protocol/identity/index.js';
-import {
-  formatEntityDisplay,
-  formatSignerDisplay,
-  formatReplicaDisplay,
-  getEntityDisplayNumber,
-} from '../../../protocol/identity/identity-display.js';
-import {
-  parseReplicaUri,
-  formatReplicaUri,
-} from '../../../protocol/identity/identity-uri.js';
+import { formatEntityDisplay } from '../../../protocol/identity/identity-display.js';
 
 describe('Identity System - Type Constructors', () => {
   test('toEntityId creates branded EntityId', () => {
@@ -69,17 +53,6 @@ describe('Identity System - Type Constructors', () => {
     expect(() => toRuntimeId(`0x${'AB'.repeat(20)}`)).toThrow('Invalid RuntimeId');
   });
 
-  test('AccountPairKey is ordered and rejects a self-account', () => {
-    const left = `0x${'11'.repeat(32)}`;
-    const right = `0x${'22'.repeat(32)}`;
-    expect(createAccountPairKey(right, left)).toBe(`${left}:${right}`);
-    expect(() => createAccountPairKey(left, left)).toThrow('requires distinct entities');
-  });
-
-  test('toEpAddress creates branded address', () => {
-    const addr = toEpAddress('0x1234567890123456789012345678901234567890');
-    expect(addr).toBe('0x1234567890123456789012345678901234567890');
-  });
 });
 
 describe('Identity System - Validators', () => {
@@ -103,22 +76,8 @@ describe('Identity System - Validators', () => {
     expect(isValidSignerId('')).toBe(false);
   });
 
-  test('isValidJId accepts valid chain IDs', () => {
-    expect(isValidJId('1')).toBe(true);
-    expect(isValidJId('31337')).toBe(true);
-  });
-
-  test('isValidJId rejects invalid formats', () => {
-    expect(isValidJId('')).toBe(false);
-  });
-
-  test('isValidEpAddress accepts valid 42-char hex', () => {
-    expect(isValidEpAddress('0x1234567890123456789012345678901234567890')).toBe(true);
-  });
-
-  test('isValidEpAddress rejects invalid formats', () => {
-    expect(isValidEpAddress('')).toBe(false);
-    expect(isValidEpAddress('0x123')).toBe(false);
+  test('toJId rejects an empty jurisdiction id', () => {
+    expect(() => toJId('')).toThrow('FINTECH-SAFETY');
   });
 });
 
@@ -179,26 +138,6 @@ describe('Identity System - Display Formatting', () => {
     expect(display).toContain('#1');
   });
 
-  test('formatSignerDisplay handles short names', () => {
-    expect(formatSignerDisplay(toSignerId('alice'))).toBe('alice');
-  });
-
-  test('formatSignerDisplay handles long names', () => {
-    const longName = 'verylongsigneridthatexceedslimit';
-    const display = formatSignerDisplay(toSignerId(longName));
-    // Returns full name - truncation handled at display layer
-    expect(display).toBe(longName);
-  });
-
-  test('formatReplicaDisplay combines entity and signer', () => {
-    const key = createReplicaKey(
-      '0x0000000000000000000000000000000000000000000000000000000000000001',
-      'alice'
-    );
-    const display = formatReplicaDisplay(key);
-    expect(display).toContain('#1');
-    expect(display).toContain('alice');
-  });
 });
 
 describe('Identity System - Entity Type Detection', () => {
@@ -206,12 +145,6 @@ describe('Identity System - Entity Type Detection', () => {
     // Entity #1 (low number = numbered)
     const numbered = toEntityId('0x0000000000000000000000000000000000000000000000000000000000000001');
     expect(isNumberedEntity(numbered)).toBe(true);
-  });
-
-  test('isLazyEntity detects lazy (hash) entities', () => {
-    // Random hash (lazy entity)
-    const lazy = toEntityId('0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890');
-    expect(isLazyEntity(lazy)).toBe(true);
   });
 
   test('detectEntityType returns correct type', () => {
@@ -222,59 +155,11 @@ describe('Identity System - Entity Type Detection', () => {
     expect(detectEntityType(lazy)).toBe('lazy');
   });
 
-  test('getEntityDisplayNumber returns number for numbered entities', () => {
-    const entity1 = toEntityId('0x0000000000000000000000000000000000000000000000000000000000000001');
-    expect(getEntityDisplayNumber(entity1)).toBe(1);
-
-    const entity42 = toEntityId('0x000000000000000000000000000000000000000000000000000000000000002a');
-    expect(getEntityDisplayNumber(entity42)).toBe(42);
-  });
-});
-
-describe('Identity System - URI Operations', () => {
-  const testUri = {
-    runtimeHost: 'localhost:8080',
-    jId: toJId('31337'),
-    epAddress: toEpAddress('0x1234567890123456789012345678901234567890'),
-    entityId: toEntityId('0x0000000000000000000000000000000000000000000000000000000000000001'),
-    signerId: toSignerId('alice'),
-  };
-
-  test('formatReplicaUri creates valid URI', () => {
-    const uri = formatReplicaUri(testUri);
-    expect(uri).toContain(XLN_URI_SCHEME);
-    expect(uri).toContain('localhost:8080');
-    expect(uri).toContain('31337');
-    expect(uri).toContain('alice');
-  });
-
-  test('parseReplicaUri extracts all components', () => {
-    const uriString = formatReplicaUri(testUri);
-    const parsed = parseReplicaUri(uriString);
-
-    expect(parsed.runtimeHost).toBe(testUri.runtimeHost);
-    expect(parsed.jId).toBe(testUri.jId);
-    expect(parsed.epAddress).toBe(testUri.epAddress);
-    expect(parsed.entityId).toBe(testUri.entityId);
-    expect(parsed.signerId).toBe(testUri.signerId);
-  });
-
-  test('parseReplicaUri throws on invalid scheme', () => {
-    expect(() => parseReplicaUri('http://invalid/path')).toThrow('FINTECH-SAFETY');
-  });
-
-  test('DEFAULT_RUNTIME_HOST is localhost:8080', () => {
-    expect(DEFAULT_RUNTIME_HOST).toBe('localhost:8080');
-  });
 });
 
 describe('Identity System - Constants', () => {
   test('MAX_NUMBERED_ENTITY is 1 million', () => {
     expect(MAX_NUMBERED_ENTITY).toBe(1_000_000n);
-  });
-
-  test('XLN_URI_SCHEME is xln://', () => {
-    expect(XLN_URI_SCHEME).toBe('xln://');
   });
 });
 
@@ -283,7 +168,7 @@ describe('Identity System - Edge Cases', () => {
     // Entity 0 is a special case - it's the zero hash, not a valid numbered entity
     const entity0 = toEntityId('0x0000000000000000000000000000000000000000000000000000000000000000');
     expect(isNumberedEntity(entity0)).toBe(false);
-    expect(isLazyEntity(entity0)).toBe(true);
+    expect(detectEntityType(entity0)).toBe('lazy');
   });
 
   test('empty signer throws on parseReplicaKey', () => {

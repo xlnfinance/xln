@@ -9,7 +9,6 @@ import {
   classifyRuntimeJBatchFailure,
   classifyRuntimeMarketMakerFailure,
   classifyRuntimeTransportFailure,
-  disputeFailure,
   haltRuntimeFailure,
   isRuntimeFailureSignal,
   rejectFailure,
@@ -23,9 +22,6 @@ describe('runtime failure taxonomy', () => {
     });
     expect(retryFailure('HEAD_STALE', 'same text')).toMatchObject({
       disposition: 'retry', code: 'HEAD_STALE', message: 'same text',
-    });
-    expect(disputeFailure('SIGNED_REPLAY_UNSAFE', 'same text')).toMatchObject({
-      disposition: 'dispute', code: 'SIGNED_REPLAY_UNSAFE', message: 'same text',
     });
     expect(haltRuntimeFailure('STATE_ROOT_DIVERGED', 'same text')).toMatchObject({
       disposition: 'halt_runtime', code: 'STATE_ROOT_DIVERGED', message: 'same text',

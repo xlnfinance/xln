@@ -15,12 +15,9 @@ const OWNER_MODULES = new Set([
 ]);
 const BRAND_NAMES = new Set([
   'AccountHeight',
-  'AccountPairKey',
   'EntityHeight',
   'EntityContextPayloadHash',
   'EntityId',
-  'EntityProviderAddress',
-  'EvidenceHash',
   'FrameHash',
   'Hashlock',
   'HtlcSecret',

@@ -6,7 +6,7 @@ const HASHLADDER_MAX_NIBBLE = 15;
 
 const HEX_32_RE = /^0x[0-9a-fA-F]{64}$/;
 
-export type HashLadderCommitment = {
+type HashLadderCommitment = {
   fullHash: string;
   partialRoot: string;
 };
@@ -25,7 +25,7 @@ export type HashLadderReveal = {
   reveals?: [string, string, string, string];
 };
 
-export type DecodedHashLadderBinary = {
+type DecodedHashLadderBinary = {
   fillRatio: number;
   fullSecret?: string;
   reveals?: [string, string, string, string];

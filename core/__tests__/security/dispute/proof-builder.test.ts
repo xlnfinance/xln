@@ -3,7 +3,6 @@ import { ethers } from 'ethers';
 import {
   MAX_ACCOUNT_DISPUTE_PROOF_ATOM_BYTES,
   buildAccountProofBody,
-  createDisputeProofHash,
   createDisputeProofHashWithNonce,
 } from '../../../protocol/dispute/proof-builder';
 import { encodeAccountStateValue } from '../../../account/commitment/state-root';
@@ -144,8 +143,6 @@ describe('proof-builder dispute hash', () => {
       ),
     );
 
-    expect(createDisputeProofHash(leftOriented, PROOF_BODY_HASH, HANKO_DOMAIN, true)).toBe(expected);
-    expect(createDisputeProofHash(rightOriented, PROOF_BODY_HASH, HANKO_DOMAIN, true)).toBe(expected);
     expect(createDisputeProofHashWithNonce(leftOriented.state, PROOF_BODY_HASH, HANKO_DOMAIN, 1, true)).toBe(expected);
     expect(createDisputeProofHashWithNonce(rightOriented.state, PROOF_BODY_HASH, HANKO_DOMAIN, 1, true)).toBe(expected);
   });
@@ -156,9 +153,6 @@ describe('proof-builder dispute hash', () => {
       '0xbf2891acf55a366fb4f28727dfc301b1f5cd70eb0f3b8a029a31b2ac4478e1da',
     );
     const missingAddress = { chainId: 31337, depositoryAddress: '' };
-    expect(() => createDisputeProofHash(account, PROOF_BODY_HASH, missingAddress, true)).toThrow(
-      'INVALID_HANKO_DEPOSITORY_ADDRESS:missing',
-    );
     expect(() => createDisputeProofHashWithNonce(account.state, PROOF_BODY_HASH, missingAddress, 1, true)).toThrow(
       'INVALID_HANKO_DEPOSITORY_ADDRESS:missing',
     );
@@ -170,7 +164,7 @@ describe('proof-builder dispute hash', () => {
       '0xbf2891acf55a366fb4f28727dfc301b1f5cd70eb0f3b8a029a31b2ac4478e1da',
     );
     expect(() =>
-      createDisputeProofHash(account, PROOF_BODY_HASH, { chainId: 0, depositoryAddress: DEPOSITORY }, true),
+      createDisputeProofHashWithNonce(account.state, PROOF_BODY_HASH, { chainId: 0, depositoryAddress: DEPOSITORY }, 1, true),
     ).toThrow('INVALID_HANKO_DOMAIN_CHAIN_ID:0');
   });
 
