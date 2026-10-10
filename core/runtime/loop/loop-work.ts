@@ -20,7 +20,8 @@ import { enqueueRuntimeInputs } from './loop-envelope.ts';
 import { ensureRuntimeInfrastructure } from '../envelope/replica-envelope.ts';
 import { hasReadyCommittedJOutbox } from '../j-submit/j-submit-state.ts';
 import type { EntityInput, EntityReplica } from '../../entity/types.ts';
-import type { RoutedEntityInput, RuntimeReplica, RuntimeInput } from '../types.ts';
+import type { RoutedEntityInput, RuntimeReplica, RuntimeInput, RuntimeTx } from '../types.ts';
+import type { JInput } from '../../jurisdiction/machine/input';
 import { atomicCrossJInputCohortKey } from '../delivery/topology/entity-routing.ts';
 import { canDeliverCommittedOutput } from '../delivery/readiness.ts';
 
@@ -128,7 +129,13 @@ export const collectEntityMempoolWakeInputs = (env: RuntimeReplica): EntityInput
 const runtimeWakeDeps = {
   ensureRuntimeInfrastructure,
   requireRuntimeMempool,
-  enqueueRuntimeInputs,
+  enqueueRuntimeInputs: (
+    env: RuntimeReplica,
+    inputs?: EntityInput[],
+    runtimeTxs?: RuntimeTx[],
+    jInputs?: JInput[],
+    explicitTimestamp?: number,
+  ) => enqueueRuntimeInputs(env, inputs, runtimeTxs, jInputs, explicitTimestamp, { localContinuation: true }),
   getRuntimeNowMs: (env: RuntimeReplica) => env.state.timestamp ?? 0,
 };
 

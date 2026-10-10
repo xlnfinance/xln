@@ -23,6 +23,8 @@ import {
   registerRuntimeFrameCommitCallback,
   startRuntimeLoop,
 } from '../../../runtime';
+import { enqueueRuntimeContinuation } from '../../../runtime/loop/loop-envelope';
+import { generateHookPings } from '../../../runtime/loop/loop-work';
 import { computeCanonicalStateHashFromEnv } from '../../../storage/canonical-hash';
 import type { EntityReplica, JurisdictionConfig } from '../../../entity/types';
 import type { RuntimeReplica } from '../../../runtime/types';
@@ -287,6 +289,34 @@ describe('runtime ingress timestamp', () => {
     expect(env.infrastructure?.halted).toBe(false);
     expect(env.state.height).toBe(1);
     expect(env.runtimeMempool?.entityInputs).toHaveLength(overLimit - 2);
+  });
+
+  test('a peer-filled mempool refuses peer ingress but never local continuations or hook pings', () => {
+    // Local continuations and hook pings shared the peer ingress budget: a
+    // peer that filled the mempool made a due hook or a committed local output
+    // throw RUNTIME_MEMPOOL_CAPACITY_EXCEEDED, which halted the Runtime.
+    const env = createIsolatedEnv('runtime-peer-filled-mempool');
+    env.quietRuntimeLogs = true;
+    env.state.timestamp = 5_000;
+    const signerId = deriveSignerAddressSync(env.runtimeSeed!, 'peer-filled').toLowerCase();
+    const entityId = generateLazyEntityId([signerId], 1n).toLowerCase();
+    const replica = makeReplica(entityId, 1_000, signerId);
+    env.state.eReplicas.set(`${entityId}:${signerId}`, replica);
+    scheduleHook(replica.state.crontabState!, { id: 'watchdog:due', triggerAt: 2_000, type: 'watchdog', data: {} });
+    rebuildScheduledWakeIndex(env);
+    const peerInput = (index: number) => ({ entityId: `peer-${index}`, signerId: `peer-${index}`, entityTxs: [] });
+    enqueueRuntimeInput(env, {
+      runtimeTxs: [],
+      entityInputs: Array.from({ length: LIMITS.MAX_RUNTIME_MEMPOOL_ENTITY_INPUTS }, (_, index) => peerInput(index)),
+    });
+
+    expect(() => enqueueRuntimeInput(env, { runtimeTxs: [], entityInputs: [peerInput(-1)] }))
+      .toThrow('RUNTIME_MEMPOOL_CAPACITY_EXCEEDED:entityInputs');
+    enqueueRuntimeContinuation(env, [{ entityId, signerId, entityTxs: [] }]);
+    generateHookPings(env, env.state.timestamp, env.state.timestamp);
+    const local = env.runtimeMempool!.entityInputs.slice(LIMITS.MAX_RUNTIME_MEMPOOL_ENTITY_INPUTS);
+    expect(local.map(input => input.entityId)).toEqual([entityId, entityId]);
+    expect(local[1]!.entityTxs?.[0]?.type).toBe('scheduledWake');
   });
 
   test('J inputs above the per-frame limits wait for later frames as an ordered prefix', () => {

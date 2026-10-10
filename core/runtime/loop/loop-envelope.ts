@@ -137,7 +137,10 @@ export const enqueueRuntimeContinuation = (
   runtimeTxs?: RuntimeTx[],
   jInputs?: JInput[],
   explicitTimestamp?: number,
-): void => enqueueRuntimeInputs(env, inputs, runtimeTxs, jInputs, explicitTimestamp, { acceptedBeforeQuiesce: true });
+): void => enqueueRuntimeInputs(env, inputs, runtimeTxs, jInputs, explicitTimestamp, {
+  acceptedBeforeQuiesce: true,
+  localContinuation: true,
+});
 
 export const tryOpenRuntimeInfraDb = async (env: RuntimeReplica): Promise<boolean> => {
   // `storage.enabled=false` means the whole Runtime is ephemeral. Opening the

@@ -22,6 +22,12 @@ export type RuntimeInputQueueDeps = {
 export type RuntimeInputQueueOptions = {
   /** Pre-fence work, including a deterministic continuation of that work. */
   acceptedBeforeQuiesce?: boolean;
+  /**
+   * Work this Runtime derives from already-accepted input: continuations,
+   * local outputs, hook pings, retries. Peers can fill the mempool, so this
+   * work never shares their ingress budget; frame caps drain the excess.
+   */
+  localContinuation?: boolean;
 };
 
 export const requestRuntimeLoopWake = (env: RuntimeReplica): void => {
@@ -113,11 +119,13 @@ export const enqueueRuntimeInputsWithDeps = (
       `entityInputs=${inputs?.length ?? 0}:jInputs=${jInputs?.length ?? 0}`,
     );
   }
-  assertRuntimeMempoolCapacity(mempool, {
-    runtimeTxs: runtimeTxs?.length ?? 0,
-    entityInputs: inputs?.length ?? 0,
-    jInputs: jInputs?.length ?? 0,
-  });
+  if (options.localContinuation !== true) {
+    assertRuntimeMempoolCapacity(mempool, {
+      runtimeTxs: runtimeTxs?.length ?? 0,
+      entityInputs: inputs?.length ?? 0,
+      jInputs: jInputs?.length ?? 0,
+    });
+  }
   const normalizedTimestamp = normalizeIngressTimestamp(env, explicitTimestamp);
   if (runtimeTxs && runtimeTxs.length > 0) {
     mempool.runtimeTxs.push(...runtimeTxs);

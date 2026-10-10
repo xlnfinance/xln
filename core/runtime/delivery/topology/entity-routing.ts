@@ -1,4 +1,5 @@
 import type { AccountInput, AccountFrame, AccountTx } from '../../../types/account';
+import type { RuntimeInputQueueOptions } from '../../mempool/input-queue';
 import type { EntityInput, EntityReplica } from '../../../entity/types';
 import type { RuntimeReplica, RoutedEntityInput, RuntimeEntityInputsEnvelope, RuntimeTx } from '../../types';
 import type { JInput } from '../../../jurisdiction/machine/input';
@@ -37,7 +38,7 @@ export type RuntimeEntityRoutingDeps = {
     runtimeTxs?: RuntimeTx[],
     jInputs?: JInput[],
     ingressTimestamp?: number,
-    options?: RuntimeInboundEntityInputOptions,
+    options?: RuntimeInputQueueOptions,
   ): void;
   extractEntityId(replicaKey: string): string;
   hasLocalSignerForEntity(env: RuntimeReplica, entityId: string): boolean;
@@ -1703,8 +1704,9 @@ export const createRuntimeOutputRoutingDeps = (
 ): RuntimeOutputRoutingDeps => ({
   ensureRuntimeInfrastructure: deps.ensureRuntimeInfrastructure,
   getP2P: deps.getP2P,
+  // Committed outputs to local Entities: accepted work, not peer ingress.
   enqueueRuntimeInputs: (env, inputs, _runtimeTxs, _jInputs, ingressTimestamp) => {
-    deps.enqueueRuntimeInputs(env, inputs, undefined, undefined, ingressTimestamp);
+    deps.enqueueRuntimeInputs(env, inputs, undefined, undefined, ingressTimestamp, { localContinuation: true });
   },
   extractEntityId: deps.extractEntityId,
   hasLocalSignerForEntity: deps.hasLocalSignerForEntity,
