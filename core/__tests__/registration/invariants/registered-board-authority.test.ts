@@ -893,14 +893,18 @@ describe('registered Entity certified board authority', () => {
     if (!proposerJPrefix || !validatorJPrefix) {
       throw new Error('TEST_BOARD_ROTATION_J_PREFIX_ATTESTATION_MISSING');
     }
-    const proposed = await applyEntityInput(env, proposerReplica, {
+    // Delivery carries one attestation per input lane; the proposer gathers
+    // the quorum across them.
+    const attested = await applyEntityInput(env, proposerReplica, {
       entityId: registeredEntityId,
       signerId: signerA,
       entityTxs: [{ type: 'j_event', data: rotationData }],
-      jPrefixAttestations: new Map([
-        [signerA, proposerJPrefix],
-        [signerB, validatorJPrefix],
-      ]),
+      jPrefixAttestations: new Map([[signerA, proposerJPrefix]]),
+    });
+    const proposed = await applyEntityInput(env, attested.workingReplica, {
+      entityId: registeredEntityId,
+      signerId: signerA,
+      jPrefixAttestations: new Map([[signerB, validatorJPrefix]]),
     });
     const proposal = proposed.workingReplica.proposal;
     if (!proposal) throw new Error('TEST_BOARD_ROTATION_PROPOSAL_MISSING');
@@ -1018,14 +1022,16 @@ describe('registered Entity certified board authority', () => {
     const wakeInput = createDueScheduledWakeInputs(env, committed.workingReplica.state.timestamp)
       .find(input => input.entityId.toLowerCase() === registeredEntityId);
     if (!wakeInput) throw new Error('TEST_BOARD_ROTATION_HANKO_REFRESH_WAKE_MISSING');
-    wakeInput.jPrefixAttestations = new Map([
-      [signerA, wakeProposerPrefix],
-      [signerB, wakeValidatorPrefix],
-    ]);
+    wakeInput.jPrefixAttestations = new Map([[signerA, wakeProposerPrefix]]);
     const wakeTx = wakeInput.entityTxs?.[0];
     if (!wakeTx || wakeTx.type !== 'scheduledWake') throw new Error('TEST_BOARD_HANKO_REFRESH_SCHEDULED_WAKE_TX_MISSING');
     expect(wakeTx.data.jobs.some(job => job.kind === 'hook' && job.id === 'board-hanko-refresh')).toBe(true);
-    const wakeProposed = await applyEntityInput(env, committed.workingReplica, wakeInput);
+    const wakeAttested = await applyEntityInput(env, committed.workingReplica, wakeInput);
+    const wakeProposed = await applyEntityInput(env, wakeAttested.workingReplica, {
+      entityId: registeredEntityId,
+      signerId: signerA,
+      jPrefixAttestations: new Map([[signerB, wakeValidatorPrefix]]),
+    });
     const wakeProposal = wakeProposed.workingReplica.proposal;
     if (!wakeProposal) {
       throw new Error(
