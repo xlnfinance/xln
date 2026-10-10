@@ -555,7 +555,7 @@ describe('watchtower delayed last-resort sweep', () => {
       },
     });
 
-    const result = await runWatchtowerSweep(store, {
+    const sweepOptions: Parameters<typeof runWatchtowerSweep>[1] = {
       towerPrivateKey: towerWallet.privateKey,
       providerFactory: () => ({
         getBlockNumber: async () => 10,
@@ -585,7 +585,8 @@ describe('watchtower delayed last-resort sweep', () => {
           throw new Error('should not be called');
         },
       }),
-    });
+    };
+    const result = await runWatchtowerSweep(store, sweepOptions);
 
     expect(result).toEqual({
       scanned: 1,
@@ -593,6 +594,9 @@ describe('watchtower delayed last-resort sweep', () => {
       skipped: 1,
       errors: 0,
     });
+    // Sweeps run every 30 s; an unchanged skip used to append a receipt each
+    // time and keep it 365 days.
+    await runWatchtowerSweep(store, sweepOptions);
 
     const receipts = await store.listActionReceipts(lookupKey);
     expect(receipts.length).toBe(1);

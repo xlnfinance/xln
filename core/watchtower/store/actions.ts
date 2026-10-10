@@ -36,11 +36,29 @@ export const appendComplaint = async (
   invalidateWatchtowerStats(context);
 };
 
+const readLatestActionReceipt = async (
+  context: WatchtowerStoreContext,
+  lookupKey: string,
+): Promise<StoredTowerActionReceipt | null> => {
+  const prefix = actionReceiptPrefix(lookupKey);
+  for await (const [key, raw] of context.db.iterator({ gte: prefix, lte: `${prefix}\xff`, reverse: true, limit: 1 })) {
+    return decodeWatchtowerStoredValue('action-receipt', String(key), String(raw), decodeStoredActionReceipt);
+  }
+  return null;
+};
+
 export const appendActionReceipt = async (
   context: WatchtowerStoreContext,
   receipt: StoredTowerActionReceipt,
 ): Promise<void> => {
   await ensureWatchtowerStoreOpen(context);
+  // A sweep runs every 30 s and appended a fresh 'skipped' receipt per
+  // appointment each time, kept 365 days (about 525 MB per appointment per
+  // year). Only a change of state is recorded.
+  if (receipt.status === 'skipped') {
+    const latest = await readLatestActionReceipt(context, receipt.lookupKey);
+    if (latest?.status === 'skipped' && latest.appointmentSequence === receipt.appointmentSequence) return;
+  }
   const metaStats = await readMetaStats(context);
   await context.db.batch([
     {
