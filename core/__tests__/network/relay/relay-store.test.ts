@@ -88,14 +88,21 @@ test('relay incidents group repeated root errors and reopen after a new occurren
 
 test('debug timeline enforces per-event and aggregate byte limits', () => {
   const store = createRelayStore('relay-test');
-  expect(() => pushDebugEvent(store, {
+  // Peers size these fields and this runs in catch handlers, where a throw
+  // exited the process: oversized text is bounded, never thrown.
+  pushDebugEvent(store, {
     event: 'debug_event',
+    reason: 'x'.repeat(MAX_DEBUG_EVENT_BYTES),
     details: { blob: 'x'.repeat(MAX_DEBUG_EVENT_BYTES) },
-  })).toThrow('DEBUG_EVENT_TOO_LARGE');
-  expect(store).toMatchObject({ debugId: 0, debugEventBytes: 0 });
-  expect(store.debugEvents).toHaveLength(0);
-  expect(store.debugEventByteLengths).toHaveLength(0);
-  expect(store.debugIncidents.size).toBe(0);
+  });
+  expect(store.debugEvents).toHaveLength(1);
+  expect(store.debugEventByteLengths[0]).toBeLessThanOrEqual(MAX_DEBUG_EVENT_BYTES);
+  expect(store.debugEvents[0]?.reason).toEndWith(`...[+${MAX_DEBUG_EVENT_BYTES - 8_192} chars]`);
+  clearDebugTimeline(store);
+  const wide = Object.fromEntries(Array.from({ length: 64 }, (_, index) => [`k${index}`, 'z'.repeat(8_000)]));
+  pushDebugEvent(store, { event: 'debug_event', details: wide });
+  expect(store.debugEvents[0]?.details).toEqual({ droppedBytes: expect.any(Number) });
+  clearDebugTimeline(store);
 
   for (let index = 0; index < 150; index += 1) {
     pushDebugEvent(store, {

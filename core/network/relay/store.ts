@@ -402,6 +402,29 @@ const updateDebugIncident = (store: RelayStore, event: RelayDebugEvent): RelayDe
 
 const relayDeliveryWarnAt = new Map<string, number>();
 
+const MAX_DEBUG_EVENT_TEXT_CHARS = 8_192;
+
+// Peers size these fields (error text, rejected key names). Bound each string
+// rather than throw: this runs in catch handlers, where a throw exited the
+// process.
+const boundDebugEventText = (value: unknown, depth: number): unknown => {
+  if (typeof value === 'string') {
+    return value.length > MAX_DEBUG_EVENT_TEXT_CHARS
+      ? `${value.slice(0, MAX_DEBUG_EVENT_TEXT_CHARS)}...[+${value.length - MAX_DEBUG_EVENT_TEXT_CHARS} chars]`
+      : value;
+  }
+  if (depth >= 4 || value === null || typeof value !== 'object') return value;
+  if (Array.isArray(value)) return value.map(item => boundDebugEventText(item, depth + 1));
+  if (Object.getPrototypeOf(value) !== Object.prototype) return value;
+  return Object.fromEntries(Object.entries(value).map(([key, item]) => [
+    key.length > MAX_DEBUG_EVENT_TEXT_CHARS ? key.slice(0, MAX_DEBUG_EVENT_TEXT_CHARS) : key,
+    boundDebugEventText(item, depth + 1),
+  ]));
+};
+
+const debugEventBytes = (event: RelayDebugEvent): number =>
+  new TextEncoder().encode(safeStringify(event)).byteLength;
+
 export const pushDebugEvent = (
   store: RelayStore,
   event: Omit<RelayDebugEvent, 'id' | 'ts'>,
@@ -413,13 +436,21 @@ export const pushDebugEvent = (
   const redactedEvent = redactTelemetryValue(event) as Omit<RelayDebugEvent, 'id' | 'ts'>;
   const delivery = redactedEvent.delivery ??
     (redactedEvent.event === 'delivery' ? classifyRelayDeliveryEvent(redactedEvent) ?? undefined : undefined);
-  const storedEvent: RelayDebugEvent = {
+  let storedEvent: RelayDebugEvent = {
     id: nextDebugId,
     ts: Date.now(),
     ...redactedEvent,
     ...(delivery ? { delivery } : {}),
   };
-  const eventBytes = new TextEncoder().encode(safeStringify(storedEvent)).byteLength;
+  let eventBytes = debugEventBytes(storedEvent);
+  if (eventBytes > MAX_DEBUG_EVENT_BYTES) {
+    storedEvent = boundDebugEventText(storedEvent, 0) as RelayDebugEvent;
+    eventBytes = debugEventBytes(storedEvent);
+  }
+  if (eventBytes > MAX_DEBUG_EVENT_BYTES) {
+    storedEvent = { ...storedEvent, details: { droppedBytes: eventBytes } };
+    eventBytes = debugEventBytes(storedEvent);
+  }
   if (eventBytes > MAX_DEBUG_EVENT_BYTES) {
     throw new Error(`DEBUG_EVENT_TOO_LARGE:bytes=${eventBytes}:max=${MAX_DEBUG_EVENT_BYTES}`);
   }

@@ -10,6 +10,19 @@ export const requireBoundaryRecord = (
   return value as Record<string, unknown>;
 };
 
+const MAX_LISTED_KEYS = 8;
+const MAX_LISTED_KEY_CHARS = 64;
+
+// Extra key names are attacker-sized; an unbounded list made the error text
+// itself oversized wherever it was logged or recorded.
+const listKeys = (keys: readonly string[]): string => {
+  if (keys.length === 0) return 'none';
+  const shown = keys.slice(0, MAX_LISTED_KEYS).map(key =>
+    key.length > MAX_LISTED_KEY_CHARS ? `${key.slice(0, MAX_LISTED_KEY_CHARS)}...` : key);
+  const hidden = keys.length - shown.length;
+  return hidden > 0 ? `${shown.join(',')},+${hidden}` : shown.join(',');
+};
+
 export const requireExactBoundaryKeys = (
   value: Record<string, unknown>,
   required: readonly string[],
@@ -20,7 +33,7 @@ export const requireExactBoundaryKeys = (
   const missing = required.filter(key => !Object.hasOwn(value, key));
   const extra = Object.keys(value).filter(key => !allowed.has(key));
   if (missing.length > 0 || extra.length > 0) {
-    throw new Error(`${code}:missing=${missing.join(',') || 'none'}:extra=${extra.join(',') || 'none'}`);
+    throw new Error(`${code}:missing=${listKeys(missing)}:extra=${listKeys(extra)}`);
   }
 };
 
