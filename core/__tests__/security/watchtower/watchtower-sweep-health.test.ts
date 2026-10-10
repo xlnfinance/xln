@@ -67,7 +67,7 @@ const startBlockingRpc = (): FakeRpc => {
     hostname: '127.0.0.1',
     port: 0,
     fetch: async request => {
-      const body = deserializeTaggedJson<{ id: number; method: string }>(await request.text());
+      const body = deserializeTaggedJson(await request.text()) as { id: number; method: string };
       return new Response(safeStringify({ jsonrpc: '2.0', id: body.id, result: await result(body.method) }), {
         headers: { 'content-type': 'application/json' },
       });
@@ -217,13 +217,16 @@ test('one appointment whose RPC the tower refuses does not make the tower unheal
   // Stored before ingress refused unlisted RPCs; every sweep errors on it.
   await tower.store.upsertAppointment(await idleLastResortAppointment('https://unlisted.example/rpc', 'refused'));
 
-  let health: { ok: boolean; sweep: { consecutiveFailures: number; itemErrors?: number } } | null = null;
+  type Health = { ok: boolean; sweep: { consecutiveFailures: number; itemErrors?: number } };
+  const readHealth = async (): Promise<Health> =>
+    await (await fetch(`http://127.0.0.1:${tower.server.port}/healthz`)).json() as Health;
+  let health = await readHealth();
   const deadline = Date.now() + 15_000;
-  while (Date.now() < deadline && (health?.sweep.itemErrors ?? 0) === 0) {
+  while (Date.now() < deadline && (health.sweep.itemErrors ?? 0) === 0) {
     await Bun.sleep(200);
-    health = await (await fetch(`http://127.0.0.1:${tower.server.port}/healthz`)).json() as typeof health;
+    health = await readHealth();
   }
-  expect(health?.sweep.itemErrors).toBe(1);
+  expect(health.sweep.itemErrors).toBe(1);
   // Wallets refuse to appoint a tower whose /healthz is not ok; three such
   // sweeps used to flip it for every user.
   await Bun.sleep(3_500);

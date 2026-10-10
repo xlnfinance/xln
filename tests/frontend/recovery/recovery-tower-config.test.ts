@@ -365,7 +365,7 @@ test('one account that cannot be appointed does not leave the other accounts unp
   const healthy = replica?.state.accounts.get(counterpartyId);
   if (!replica || !healthy) throw new Error('TEST_ACCOUNT_MISSING');
   // Its stored counterparty proof no longer matches the frozen account state.
-  replica.state.accounts.set(brokenCounterpartyId, {
+  (replica.state.accounts as unknown as Map<string, typeof healthy>).set(brokenCounterpartyId, {
     ...healthy,
     counterpartyDisputeProofBodyHash: `0x${'99'.repeat(32)}`,
   });

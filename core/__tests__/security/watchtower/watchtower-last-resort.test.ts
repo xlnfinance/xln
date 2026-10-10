@@ -963,7 +963,7 @@ describe('watchtower delayed last-resort sweep', () => {
 });
 
 /** One live dispute the tower must answer: every chain read succeeds unless told to hang. */
-const activeDisputeScenario = async (towerWallet: Wallet, lookupKey: string, runtimeId: string) => {
+const activeDisputeScenario = async (towerWallet: { address: string }, lookupKey: string, runtimeId: string) => {
   const watchedEntityId = `0x${'aa'.repeat(32)}`;
   const counterentity = `0x${'bb'.repeat(32)}`;
   const initialProofbodyHash = `0x${'cc'.repeat(32)}`;
@@ -1050,14 +1050,14 @@ test('a chain call that never answers fails its appointment instead of stalling 
   const scenario = await activeDisputeScenario(towerWallet, lookupKey, Wallet.createRandom().address.toLowerCase());
   await store.upsertAppointment(scenario.appointment);
   const latestBlock = 95;
-  const never = <T>(): Promise<T> => new Promise<T>(() => {});
+  const never = (): Promise<never> => new Promise<never>(() => {});
 
   const sweepWithHang = (hang: string) => runWatchtowerSweep(store, {
     towerPrivateKey: towerWallet.privateKey,
     rpcTimeoutMs: 20,
     providerFactory: () => ({
       getBlockNumber: () => hang === 'block-number' ? never() : Promise.resolve(latestBlock),
-      getBlock: (blockTag) => {
+      getBlock: (blockTag: string | number) => {
         const isLatest = Number(blockTag) === latestBlock;
         if ((hang === 'block-timestamp' && isLatest) || (hang === 'block-search' && !isLatest)) return never();
         return Promise.resolve({ timestamp: 95 });
