@@ -979,9 +979,9 @@ describe('production startup wiring', () => {
     expect(rpcAdapter).toContain('J_WATCHER_BLOCK_NUMBER_INVALID');
     expect(rpcAdapter).toContain('getCurrentBlockNumber: chainIo.readSafeBlockNumber');
     expect(rpcAdapter).toContain('getFinalityDepth: () => chainIo.resolveFinalityDepth(false)');
-    expect(mmNode).toContain('const selectMarketMakerBootstrapTokenIds = (tokenIds: readonly number[]): number[] => {');
-    expect(mmNode).toContain('return unique;');
-    expect(mmNode).not.toContain('return unique.slice(0, HUB_REQUIRED_TOKEN_COUNT);');
+    // The MM quotes every token of its jurisdiction, never a truncated catalog.
+    expect(mmNode).toContain('normalizePositiveTokenIds(getTokenIdsForJurisdiction({');
+    expect(mmNode).not.toContain('unique.slice(0, HUB_REQUIRED_TOKEN_COUNT)');
     expect(mmNode).toContain('const hasCrossSpecBootstrapProgress = (');
     expect(mmNode).toContain('const computeCrossOrderbookPriceTicks = (');
     expect(mmNode).toContain('priceTicks: amounts.priceTicks');

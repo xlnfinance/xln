@@ -936,7 +936,7 @@ const initializeMarketMakerContexts = async (
   const jadapter = await waitForJurisdictionAdapter(env, jurisdiction);
   ensureJurisdictionReplica(env, jadapter, resolveImportedJurisdictionRpc(jurisdiction));
   setStartupPhase('token-catalog');
-  const tokenCatalog = await waitForTokenCatalog(jadapter);
+  await waitForTokenCatalog(jadapter);
   const appendPairShards = async (
     base: MarketMakerEntityContext,
     targetJurisdiction: Parameters<typeof createMarketMakerEntityContext>[1],
@@ -944,10 +944,7 @@ const initializeMarketMakerContexts = async (
     profileName: string,
     position: { x: number; y: number; z: number; jurisdiction?: string },
   ): Promise<void> => {
-    const tokenIds = getMarketMakerTokenIds(
-      buildMarketMakerTokenIdsByContext(tokenCatalog, [base]),
-      base,
-    );
+    const tokenIds = getMarketMakerTokenIds(buildMarketMakerTokenIdsByContext([base]), base);
     const pairPlans = planMarketMakerIdentityLabels(signerLabel, profileName, tokenIds);
     for (const plan of pairPlans.slice(1)) {
       contexts.push(await createMarketMakerEntityContext(
@@ -1005,7 +1002,7 @@ const initializeMarketMakerContexts = async (
       entityId: context.entityId,
     });
   }
-  const tokenIdsByContext = buildMarketMakerTokenIdsByContext(tokenCatalog, contexts);
+  const tokenIdsByContext = buildMarketMakerTokenIdsByContext(contexts);
   nodeLog.debug('token_universe.ready', {
     jurisdictions: contexts.map(context => ({
       jurisdiction: formatJurisdictionDisplayName(context.jurisdictionName) || context.jurisdictionName,

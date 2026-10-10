@@ -538,7 +538,7 @@ export const buildLocalMarketMakerSignerLabels = (): string[] => {
     const label = index === 0
       ? resolvedArgs.signerLabel
       : `${resolvedArgs.signerLabel}:${jurisdiction.name.trim()}`;
-    const tokenIds = selectMarketMakerBootstrapTokenIds(getTokenIdsForJurisdiction({
+    const tokenIds = normalizePositiveTokenIds(getTokenIdsForJurisdiction({
       name: jurisdiction.name,
       chainId: jurisdiction.chainId,
     }));
@@ -1062,52 +1062,28 @@ const isWithinPairBand = (anchorTicks: bigint, priceTicks: bigint): boolean => {
   return priceTicks >= minAllowed && priceTicks <= maxAllowed;
 };
 
-const selectMarketMakerBootstrapTokenIds = (tokenIds: readonly number[]): number[] => {
-  const unique = normalizePositiveTokenIds([...tokenIds]);
-  if (unique.length >= HUB_REQUIRED_TOKEN_COUNT) {
-    return unique;
-  }
-  return [...DEFAULT_ACCOUNT_TOKEN_IDS];
-};
-
-const normalizeTokenIdsForMm = (tokenCatalog: JTokenInfo[]): number[] =>
-  selectMarketMakerBootstrapTokenIds(tokenCatalog.map(token => Number(token.tokenId)));
-
 export const marketMakerContextKey = (context: Pick<MarketMakerEntityContext, 'entityId'>): string =>
   normalizeEntityRef(context.entityId);
 
+/** Every jurisdiction token set already carries the three default tokens. */
 export const buildMarketMakerTokenIdsByContext = (
-  tokenCatalog: JTokenInfo[],
-  contexts: MarketMakerEntityContext[],
-): Map<string, number[]> => {
-  const catalogTokenIds = normalizeTokenIdsForMm(tokenCatalog);
-  const defaultTokenIds =
-    catalogTokenIds.length >= HUB_REQUIRED_TOKEN_COUNT ? catalogTokenIds : [...DEFAULT_ACCOUNT_TOKEN_IDS];
-  const byContext = new Map<string, number[]>();
-  for (const context of contexts) {
-    const jurisdictionTokenIds = normalizePositiveTokenIds(
-      getTokenIdsForJurisdiction({
-        name: context.jurisdictionName,
-        chainId: context.chainId,
-      }),
-    );
-    byContext.set(
-      marketMakerContextKey(context),
-      jurisdictionTokenIds.length >= HUB_REQUIRED_TOKEN_COUNT
-        ? selectMarketMakerBootstrapTokenIds(jurisdictionTokenIds)
-        : defaultTokenIds,
-    );
-  }
-  return byContext;
-};
+  contexts: readonly MarketMakerEntityContext[],
+): Map<string, number[]> => new Map(contexts.map(context => [
+  marketMakerContextKey(context),
+  normalizePositiveTokenIds(getTokenIdsForJurisdiction({
+    name: context.jurisdictionName,
+    chainId: context.chainId,
+  })),
+]));
 
+// Health can be read while contexts are still being created, before the token
+// map is published; that window reports the default token set.
 export const getMarketMakerTokenIds = (
   tokenIdsByContext: MarketMakerTokenIdsByContext,
   context: MarketMakerEntityContext,
-  defaultTokenIds: number[] = [...DEFAULT_ACCOUNT_TOKEN_IDS],
 ): number[] => {
   const ids = tokenIdsByContext.get(marketMakerContextKey(context));
-  return ids && ids.length >= HUB_REQUIRED_TOKEN_COUNT ? ids : defaultTokenIds;
+  return ids && ids.length >= HUB_REQUIRED_TOKEN_COUNT ? ids : [...DEFAULT_ACCOUNT_TOKEN_IDS];
 };
 
 /** Offers this side proposed and that still await their Account frame. */
