@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use super::abi::{
     ContractEventKind, address_word, bigint, bool_word, decode_account_settled,
@@ -20,8 +20,7 @@ use xln_rscore_engine::{
     ProofAllowance, ProofBody, ProofTransformerClause, ReserveUpdatedEvent, SecretRevealedEvent,
 };
 use xln_rscore_entity_kernel::{
-    FinalizedJEventBatch, JBatch,
-    j_batch::{CounterDisputeProof, ProofBody as JBatchProofBody},
+    FinalizedJEventBatch, JBatch, j_batch::ProofBody as JBatchProofBody,
     project_finalized_j_event_batch,
 };
 
@@ -198,7 +197,7 @@ fn authenticate_blocks(
     Ok(batches)
 }
 
-fn build_block_batch(
+pub(super) fn build_block_batch(
     rpc: &impl JsonRpc,
     config: &JWatcherConfig,
     block: &RpcBlock,
@@ -243,11 +242,77 @@ fn build_block_batch(
     .map_err(|error| JWatcherError::Account(error.to_string()))
 }
 
-#[derive(Clone, Debug)]
+/// Dispute evidence of one receipt: every dispute call its transaction carries,
+/// and the Hanko batch nonce each Entity's processBatch committed in it.
 struct ReceiptDisputeBatch {
-    nonce: Option<i64>,
-    sender: Option<EntityId>,
-    batch: JBatch,
+    calls: Vec<super::calldata::DisputeCall>,
+    batch_nonces: BTreeMap<EntityId, i64>,
+}
+
+impl ReceiptDisputeBatch {
+    /// Calls an event from `sender` may come from: a watchtower call is bound
+    /// to the Entity it names, a processBatch call to its Hanko signer.
+    fn batches_for<'a>(&'a self, sender: &'a EntityId) -> impl Iterator<Item = &'a JBatch> {
+        self.calls
+            .iter()
+            .filter(move |call| call.sender.as_ref().is_none_or(|named| named == sender))
+            .map(|call| &call.batch)
+    }
+
+    /// Same source as the TS watcher: the HankoBatchProcessed nonce the sender
+    /// committed in this transaction, never a calldata copy a wrapper could forge.
+    fn batch_nonce(&self, sender: &EntityId) -> Option<i64> {
+        self.batch_nonces.get(sender).copied()
+    }
+}
+
+fn is_dispute_kind(kind: ContractEventKind) -> bool {
+    matches!(
+        kind,
+        ContractEventKind::DisputeStarted
+            | ContractEventKind::DisputeFinalized
+            | ContractEventKind::CounterDisputeRegistered
+    )
+}
+
+/// The audience of every dispute event: its sender and its counterentity, as
+/// in TS `isEventRelevantToEntity`. This watcher serves `config.entity_id`, so
+/// any other dispute is never emitted and its calldata is never needed.
+fn dispute_log_is_local(
+    config: &JWatcherConfig,
+    log: &super::types::RpcLog,
+) -> Result<bool, JWatcherError> {
+    if log.topics.len() != 4 {
+        return Err(JWatcherError::EventAbi("disputeTopics"));
+    }
+    let sender = entity_word_value(
+        &fixed_hex::<32>(&log.topics[1], "disputeSender")?,
+        "disputeSender",
+    )?;
+    let counterentity = entity_word_value(
+        &fixed_hex::<32>(&log.topics[2], "disputeCounterentity")?,
+        "disputeCounterentity",
+    )?;
+    Ok(local_entity(config, &sender) || local_entity(config, &counterentity))
+}
+
+fn receipt_batch_nonces(
+    config: &JWatcherConfig,
+    receipt: &RpcReceipt,
+) -> Result<BTreeMap<EntityId, i64>, JWatcherError> {
+    let mut nonces = BTreeMap::new();
+    for log in &receipt.logs {
+        if fixed_hex::<20>(&log.address, "logAddress")? != config.depository_address
+            || event_kind(log)? != Some(ContractEventKind::HankoBatchProcessed)
+        {
+            continue;
+        }
+        let words = decode_static_words(log, 2, 1)?;
+        let nonce = i64::try_from(safe_uint(&words.data[0], "batchNonce")?)
+            .map_err(|_| JWatcherError::SafeInteger("batchNonce"))?;
+        nonces.insert(entity_word_value(&words.topics[0], "batchEntity")?, nonce);
+    }
+    Ok(nonces)
 }
 
 fn receipt_dispute_batch(
@@ -255,62 +320,23 @@ fn receipt_dispute_batch(
     config: &JWatcherConfig,
     receipt: &RpcReceipt,
 ) -> Result<Option<ReceiptDisputeBatch>, JWatcherError> {
-    let mut has_dispute = false;
+    let mut has_local_dispute = false;
     for log in &receipt.logs {
         if fixed_hex::<20>(&log.address, "logAddress")? != config.depository_address {
             continue;
         }
-        has_dispute |= matches!(
-            event_kind(log)?,
-            Some(
-                ContractEventKind::DisputeStarted
-                    | ContractEventKind::DisputeFinalized
-                    | ContractEventKind::CounterDisputeRegistered
-            )
-        );
+        if event_kind(log)?.is_some_and(is_dispute_kind) && dispute_log_is_local(config, log)? {
+            has_local_dispute = true;
+        }
     }
-    if !has_dispute {
+    if !has_local_dispute {
         return Ok(None);
     }
     let transaction_hash = fixed_hex::<32>(&receipt.transaction_hash, "transactionHash")?;
     let calldata = super::calldata::read_authenticated_calldata(rpc, &transaction_hash)?;
-    use sha3::{Digest, Keccak256};
-    let process_selector = &Keccak256::digest(b"processBatch(bytes,bytes,uint256)")[..4];
-    if calldata.get(..4) == Some(process_selector) {
-        let (_, _, nonce, batch) = crate::j_submit::decode_process_batch_calldata(&calldata)
-            .map_err(|error| JWatcherError::DisputeCalldata(error.to_string()))?;
-        let mut nonce_bytes = [0_u8; 32];
-        nonce.to_big_endian(&mut nonce_bytes);
-        let nonce = i64::try_from(safe_uint(&nonce_bytes, "batchNonce")?)
-            .map_err(|_| JWatcherError::SafeInteger("batchNonce"))?;
-        return Ok(Some(ReceiptDisputeBatch {
-            nonce: Some(nonce),
-            sender: None,
-            batch,
-        }));
-    }
-    let watchtower = crate::j_submit::decode_watchtower_counter_dispute_calldata(&calldata)
-        .map_err(|error| JWatcherError::DisputeCalldata(error.to_string()))?;
-    let sender = EntityId::parse(&hex(&watchtower.entity_id))
-        .map_err(|error| JWatcherError::Account(error.to_string()))?;
-    let proof = watchtower.proof;
-    let counter = CounterDisputeProof {
-        counterentity: proof.counterentity,
-        initial_nonce: proof.initial_nonce,
-        initial_proofbody_hash: proof.initial_proofbody_hash,
-        counter_nonce: proof.final_nonce,
-        proposer_is_left: proof.proposer_is_left,
-        counter_proofbody: proof.final_proofbody.clone(),
-        sig: proof.sig.clone(),
-    };
     Ok(Some(ReceiptDisputeBatch {
-        nonce: None,
-        sender: Some(sender),
-        batch: JBatch {
-            counter_disputes: vec![counter],
-            dispute_finalizations: vec![proof],
-            ..JBatch::default()
-        },
+        calls: super::calldata::decode_dispute_calls(&calldata)?,
+        batch_nonces: receipt_batch_nonces(config, receipt)?,
     }))
 }
 
@@ -637,16 +663,15 @@ fn collect_single_event(
         ContractEventKind::DisputeStarted
         | ContractEventKind::DisputeFinalized
         | ContractEventKind::CounterDisputeRegistered => {
-            let Some(decoded) = decode_dispute_event(
-                config,
+            if !dispute_log_is_local(config, log)? {
+                return Ok(());
+            }
+            let decoded = decode_dispute_event(
                 kind,
                 log,
                 metadata,
                 dispute_batch.ok_or(JWatcherError::DisputeCalldataRequired)?,
-            )?
-            else {
-                return Ok(());
-            };
+            )?;
             if let Some(evidence) = decoded.evidence {
                 dispute_finalization_evidence.push(evidence);
             }
@@ -810,189 +835,178 @@ struct DecodedDisputeEvent {
     evidence: Option<DisputeFinalizationEvidence>,
 }
 
+fn proof_body_hash_is(value: &JBatchProofBody, expected: &[u8; 32]) -> bool {
+    xln_rscore_entity_kernel::proof_body_hash(value)
+        .ok()
+        .as_ref()
+        == Some(expected)
+}
+
+/// The caller has already established that this dispute is local. Its body
+/// comes from the one call entry that matches the authenticated event
+/// exactly; a decoy entry elsewhere in wrapper calldata never matches it.
 fn decode_dispute_event(
-    config: &JWatcherConfig,
     kind: ContractEventKind,
     log: &super::types::RpcLog,
     metadata: JEventMetadata,
     receipt: &ReceiptDisputeBatch,
-) -> Result<Option<DecodedDisputeEvent>, JWatcherError> {
+) -> Result<DecodedDisputeEvent, JWatcherError> {
     match kind {
-        ContractEventKind::DisputeStarted => {
-            let decoded = decode_dispute_started(log)?;
-            if !local_entity(config, &decoded.sender)
-                && !local_entity(config, &decoded.counterentity)
-            {
-                return Ok(None);
-            }
-            if receipt
-                .sender
-                .as_ref()
-                .is_some_and(|sender| sender != &decoded.sender)
-            {
-                return Err(JWatcherError::DisputeEvidence("sender"));
-            }
-            let candidate = receipt
-                .batch
-                .dispute_starts
-                .iter()
-                .find(|candidate| {
-                    candidate.counterentity == *decoded.counterentity.as_bytes()
-                        && u256_eq_biguint(&candidate.nonce, &decoded.nonce)
-                        && candidate.proposer_is_left == decoded.proposer_is_left
-                        && candidate.proofbody_hash == decoded.proofbody_hash
-                })
-                .ok_or(JWatcherError::DisputeEvidence("start"))?;
-            if candidate.watch_seed != decoded.watch_seed
-                || decoded.dispute_start_timestamp == 0
-                || decoded.dispute_timeout
-                    != decoded
-                        .dispute_start_timestamp
-                        .checked_add(decoded.left_response_seconds)
-                        .and_then(|value| value.checked_add(decoded.right_response_seconds))
-                        .ok_or(JWatcherError::EventAbi("disputeClock"))?
-                || u64::from(candidate.initial_proofbody.left_response_seconds)
-                    != decoded.left_response_seconds
-                || u64::from(candidate.initial_proofbody.right_response_seconds)
-                    != decoded.right_response_seconds
-                || xln_rscore_entity_kernel::proof_body_hash(&candidate.initial_proofbody)
-                    .map_err(|error| JWatcherError::DisputeCalldata(error.to_string()))?
-                    != decoded.proofbody_hash
-            {
-                return Err(JWatcherError::DisputeEvidence("start-binding"));
-            }
-            Ok(Some(DecodedDisputeEvent {
-                event: JurisdictionEvent::DisputeStarted(DisputeStartedEvent {
-                    metadata,
-                    sender: decoded.sender.as_hex(),
-                    counterentity: decoded.counterentity.as_hex(),
-                    nonce: num_bigint::BigInt::from_biguint(num_bigint::Sign::Plus, decoded.nonce),
-                    proposer_is_left: decoded.proposer_is_left,
-                    proofbody_hash: hex(&decoded.proofbody_hash),
-                    watch_seed: decoded.watch_seed,
-                    starter_initial_arguments: decoded.starter_initial_arguments,
-                    starter_counter_arguments: decoded.starter_counter_arguments,
-                    starter_counter_proof_commitment: decoded.starter_counter_proof_commitment,
-                    initial_proofbody: proof_body(&candidate.initial_proofbody),
-                    dispute_timeout: decoded.dispute_timeout,
-                    dispute_start_timestamp: decoded.dispute_start_timestamp,
-                    left_response_seconds: decoded.left_response_seconds,
-                    right_response_seconds: decoded.right_response_seconds,
-                    batch_nonce: receipt.nonce,
-                }),
-                evidence: None,
-            }))
-        }
+        ContractEventKind::DisputeStarted => decode_dispute_started_event(log, metadata, receipt),
         ContractEventKind::CounterDisputeRegistered => {
-            let words = decode_static_words(log, 3, 2)?;
-            let sender = entity_word_value(&words.topics[0], "counterSender")?;
-            let counterentity = entity_word_value(&words.topics[1], "counterEntity")?;
-            if !local_entity(config, &sender) && !local_entity(config, &counterentity) {
-                return Ok(None);
-            }
-            if receipt
-                .sender
-                .as_ref()
-                .is_some_and(|expected| expected != &sender)
-            {
-                return Err(JWatcherError::DisputeEvidence("sender"));
-            }
-            let nonce = safe_uint(&words.topics[2], "counterNonce")?;
-            let proposer_is_left = bool_word(&words.data[0], "counterProposerIsLeft")?;
-            let proofbody_hash = words.data[1];
-            let candidate = receipt
-                .batch
-                .counter_disputes
-                .iter()
-                .find(|candidate| {
-                    candidate.counterentity == *counterentity.as_bytes()
-                        && candidate.counter_nonce == nonce.into()
-                        && candidate.proposer_is_left == proposer_is_left
-                        && xln_rscore_entity_kernel::proof_body_hash(&candidate.counter_proofbody)
-                            .ok()
-                            == Some(proofbody_hash)
-                })
-                .ok_or(JWatcherError::DisputeEvidence("counter"))?;
-            Ok(Some(DecodedDisputeEvent {
-                event: JurisdictionEvent::CounterDisputeRegistered(CounterDisputeRegisteredEvent {
-                    metadata,
-                    sender: sender.as_hex(),
-                    counterentity: counterentity.as_hex(),
-                    nonce: i64::try_from(nonce)
-                        .map_err(|_| JWatcherError::SafeInteger("counterNonce"))?,
-                    proposer_is_left,
-                    proofbody_hash,
-                    counter_proofbody: proof_body(&candidate.counter_proofbody),
-                }),
-                evidence: None,
-            }))
+            decode_counter_dispute_event(log, metadata, receipt)
         }
         ContractEventKind::DisputeFinalized => {
-            let words = decode_static_words(log, 3, 2)?;
-            let sender = entity_word_value(&words.topics[0], "finalSender")?;
-            let counterentity = entity_word_value(&words.topics[1], "finalCounterentity")?;
-            if !local_entity(config, &sender) && !local_entity(config, &counterentity) {
-                return Ok(None);
-            }
-            if receipt
-                .sender
-                .as_ref()
-                .is_some_and(|expected| expected != &sender)
-            {
-                return Err(JWatcherError::DisputeEvidence("sender"));
-            }
-            let initial_nonce = bigint(&words.topics[2]);
-            let final_proofbody_hash = words.data[0];
-            let evidence_hash = words.data[1];
-            let candidate = receipt
-                .batch
-                .dispute_finalizations
-                .iter()
-                .find(|candidate| {
-                    candidate.counterentity == *counterentity.as_bytes()
-                        && u256_bigint(&candidate.initial_nonce) == initial_nonce
-                        && xln_rscore_entity_kernel::proof_body_hash(&candidate.final_proofbody)
-                            .ok()
-                            == Some(final_proofbody_hash)
-                        && finalization_evidence_hash(candidate) == evidence_hash
-                })
-                .ok_or(JWatcherError::DisputeEvidence("finalized"))?;
-            let starter_arguments = hex(&candidate.starter_arguments);
-            let other_arguments = hex(&candidate.other_arguments);
-            let (left_arguments, right_arguments) = if candidate.started_by_left {
-                (starter_arguments, other_arguments)
-            } else {
-                (other_arguments, starter_arguments)
-            };
-            Ok(Some(DecodedDisputeEvent {
-                event: JurisdictionEvent::DisputeFinalized(DisputeFinalizedEvent {
-                    metadata,
-                    sender: sender.as_hex(),
-                    counterentity: counterentity.as_hex(),
-                    initial_nonce: initial_nonce.clone(),
-                    initial_proofbody_hash: hex(&candidate.initial_proofbody_hash),
-                    final_proofbody_hash: hex(&final_proofbody_hash),
-                    finalization_evidence_hash: hex(&evidence_hash),
-                    final_proofbody: proof_body(&candidate.final_proofbody),
-                    batch_nonce: receipt.nonce,
-                }),
-                evidence: Some(DisputeFinalizationEvidence {
-                    sender: sender.as_hex(),
-                    counterentity: counterentity.as_hex(),
-                    initial_nonce: initial_nonce.to_string(),
-                    final_nonce: u256_bigint(&candidate.final_nonce).to_string(),
-                    initial_proofbody_hash: hex(&candidate.initial_proofbody_hash),
-                    final_proofbody_hash: hex(&final_proofbody_hash),
-                    proposer_is_left: candidate.proposer_is_left,
-                    left_arguments,
-                    right_arguments,
-                    started_by_left: candidate.started_by_left,
-                    sig: hex(&candidate.sig),
-                }),
-            }))
+            decode_dispute_finalized_event(log, metadata, receipt)
         }
         _ => Err(JWatcherError::EventAbi("disputeDispatch")),
     }
+}
+
+fn decode_dispute_started_event(
+    log: &super::types::RpcLog,
+    metadata: JEventMetadata,
+    receipt: &ReceiptDisputeBatch,
+) -> Result<DecodedDisputeEvent, JWatcherError> {
+    let decoded = decode_dispute_started(log)?;
+    if decoded.dispute_start_timestamp == 0
+        || decoded.dispute_timeout
+            != decoded
+                .dispute_start_timestamp
+                .checked_add(decoded.left_response_seconds)
+                .and_then(|value| value.checked_add(decoded.right_response_seconds))
+                .ok_or(JWatcherError::EventAbi("disputeClock"))?
+    {
+        return Err(JWatcherError::DisputeEvidence("start-binding"));
+    }
+    let candidate = receipt
+        .batches_for(&decoded.sender)
+        .flat_map(|batch| &batch.dispute_starts)
+        .find(|candidate| {
+            candidate.counterentity == *decoded.counterentity.as_bytes()
+                && u256_eq_biguint(&candidate.nonce, &decoded.nonce)
+                && candidate.proposer_is_left == decoded.proposer_is_left
+                && candidate.proofbody_hash == decoded.proofbody_hash
+                && candidate.watch_seed == decoded.watch_seed
+                && u64::from(candidate.initial_proofbody.left_response_seconds)
+                    == decoded.left_response_seconds
+                && u64::from(candidate.initial_proofbody.right_response_seconds)
+                    == decoded.right_response_seconds
+                && proof_body_hash_is(&candidate.initial_proofbody, &decoded.proofbody_hash)
+        })
+        .ok_or(JWatcherError::DisputeEvidence("start"))?;
+    Ok(DecodedDisputeEvent {
+        event: JurisdictionEvent::DisputeStarted(DisputeStartedEvent {
+            metadata,
+            sender: decoded.sender.as_hex(),
+            counterentity: decoded.counterentity.as_hex(),
+            nonce: num_bigint::BigInt::from_biguint(num_bigint::Sign::Plus, decoded.nonce),
+            proposer_is_left: decoded.proposer_is_left,
+            proofbody_hash: hex(&decoded.proofbody_hash),
+            watch_seed: decoded.watch_seed,
+            starter_initial_arguments: decoded.starter_initial_arguments,
+            starter_counter_arguments: decoded.starter_counter_arguments,
+            starter_counter_proof_commitment: decoded.starter_counter_proof_commitment,
+            initial_proofbody: proof_body(&candidate.initial_proofbody),
+            dispute_timeout: decoded.dispute_timeout,
+            dispute_start_timestamp: decoded.dispute_start_timestamp,
+            left_response_seconds: decoded.left_response_seconds,
+            right_response_seconds: decoded.right_response_seconds,
+            batch_nonce: receipt.batch_nonce(&decoded.sender),
+        }),
+        evidence: None,
+    })
+}
+
+fn decode_counter_dispute_event(
+    log: &super::types::RpcLog,
+    metadata: JEventMetadata,
+    receipt: &ReceiptDisputeBatch,
+) -> Result<DecodedDisputeEvent, JWatcherError> {
+    let words = decode_static_words(log, 3, 2)?;
+    let sender = entity_word_value(&words.topics[0], "counterSender")?;
+    let counterentity = entity_word_value(&words.topics[1], "counterEntity")?;
+    let nonce = safe_uint(&words.topics[2], "counterNonce")?;
+    let proposer_is_left = bool_word(&words.data[0], "counterProposerIsLeft")?;
+    let proofbody_hash = words.data[1];
+    let candidate = receipt
+        .batches_for(&sender)
+        .flat_map(|batch| &batch.counter_disputes)
+        .find(|candidate| {
+            candidate.counterentity == *counterentity.as_bytes()
+                && candidate.counter_nonce == nonce.into()
+                && candidate.proposer_is_left == proposer_is_left
+                && proof_body_hash_is(&candidate.counter_proofbody, &proofbody_hash)
+        })
+        .ok_or(JWatcherError::DisputeEvidence("counter"))?;
+    Ok(DecodedDisputeEvent {
+        event: JurisdictionEvent::CounterDisputeRegistered(CounterDisputeRegisteredEvent {
+            metadata,
+            sender: sender.as_hex(),
+            counterentity: counterentity.as_hex(),
+            nonce: i64::try_from(nonce).map_err(|_| JWatcherError::SafeInteger("counterNonce"))?,
+            proposer_is_left,
+            proofbody_hash,
+            counter_proofbody: proof_body(&candidate.counter_proofbody),
+        }),
+        evidence: None,
+    })
+}
+
+fn decode_dispute_finalized_event(
+    log: &super::types::RpcLog,
+    metadata: JEventMetadata,
+    receipt: &ReceiptDisputeBatch,
+) -> Result<DecodedDisputeEvent, JWatcherError> {
+    let words = decode_static_words(log, 3, 2)?;
+    let sender = entity_word_value(&words.topics[0], "finalSender")?;
+    let counterentity = entity_word_value(&words.topics[1], "finalCounterentity")?;
+    let initial_nonce = bigint(&words.topics[2]);
+    let final_proofbody_hash = words.data[0];
+    let evidence_hash = words.data[1];
+    let candidate = receipt
+        .batches_for(&sender)
+        .flat_map(|batch| &batch.dispute_finalizations)
+        .find(|candidate| {
+            candidate.counterentity == *counterentity.as_bytes()
+                && u256_bigint(&candidate.initial_nonce) == initial_nonce
+                && proof_body_hash_is(&candidate.final_proofbody, &final_proofbody_hash)
+                && finalization_evidence_hash(candidate) == evidence_hash
+        })
+        .ok_or(JWatcherError::DisputeEvidence("finalized"))?;
+    let starter_arguments = hex(&candidate.starter_arguments);
+    let other_arguments = hex(&candidate.other_arguments);
+    let (left_arguments, right_arguments) = if candidate.started_by_left {
+        (starter_arguments, other_arguments)
+    } else {
+        (other_arguments, starter_arguments)
+    };
+    Ok(DecodedDisputeEvent {
+        event: JurisdictionEvent::DisputeFinalized(DisputeFinalizedEvent {
+            metadata,
+            sender: sender.as_hex(),
+            counterentity: counterentity.as_hex(),
+            initial_nonce: initial_nonce.clone(),
+            initial_proofbody_hash: hex(&candidate.initial_proofbody_hash),
+            final_proofbody_hash: hex(&final_proofbody_hash),
+            finalization_evidence_hash: hex(&evidence_hash),
+            final_proofbody: proof_body(&candidate.final_proofbody),
+            batch_nonce: receipt.batch_nonce(&sender),
+        }),
+        evidence: Some(DisputeFinalizationEvidence {
+            sender: sender.as_hex(),
+            counterentity: counterentity.as_hex(),
+            initial_nonce: initial_nonce.to_string(),
+            final_nonce: u256_bigint(&candidate.final_nonce).to_string(),
+            initial_proofbody_hash: hex(&candidate.initial_proofbody_hash),
+            final_proofbody_hash: hex(&final_proofbody_hash),
+            proposer_is_left: candidate.proposer_is_left,
+            left_arguments,
+            right_arguments,
+            started_by_left: candidate.started_by_left,
+            sig: hex(&candidate.sig),
+        }),
+    })
 }
 
 fn relevant_settlements(

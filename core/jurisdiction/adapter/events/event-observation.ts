@@ -1,5 +1,5 @@
 import type { DisputeFinalizationEvidence, ValidatorJEventBlock } from '../../../types/jurisdiction-events';
-import type { EntityInput } from '../../../entity/types';
+import type { EntityInput, EntityReplica } from '../../../entity/types';
 import type { RuntimeInput, RuntimeReplica, RuntimeTx } from '../../../runtime/types';
 import type { JReplica } from '../../../types/jurisdiction-runtime';
 import { createStructuredLogger, shortId } from '../../../support/logger';
@@ -114,6 +114,37 @@ type Delivery = {
   events: JEventIngress[];
 };
 
+const deliveryIdentity = (
+  replicaKey: string,
+  replica: EntityReplica,
+): { entityId: string; signerId: string } => {
+  const [keyEntityId, keySignerId] = replicaKey.split(':');
+  return {
+    entityId: String(replica.entityId || keyEntityId || '').toLowerCase(),
+    signerId: String(replica.signerId || keySignerId || ''),
+  };
+};
+
+/**
+ * True when some Entity replica this watcher serves is in the event audience,
+ * by the exact replica and audience rule `collectDeliveries` applies below.
+ * An event outside it is never delivered, so no external evidence (dispute
+ * calldata) may be required to decode it: a third party's dispute between two
+ * foreign Entities must never be able to stop this Runtime's watcher.
+ */
+export const isJEventDeliveredByWatcher = (
+  env: RuntimeReplica,
+  watcher: JReplica,
+  event: JEventIngress,
+): boolean => {
+  for (const [replicaKey, replica] of env.state.eReplicas) {
+    if (!isEntityReplicaRelevantToWatcher(env, replica, watcher)) continue;
+    const { entityId, signerId } = deliveryIdentity(replicaKey, replica);
+    if (entityId && signerId && isEventRelevantToEntity(event, entityId, replica.state)) return true;
+  }
+  return false;
+};
+
 const collectDeliveries = (
   env: RuntimeReplica,
   events: JEventIngress[],
@@ -131,9 +162,7 @@ const collectDeliveries = (
         `:watcher=${watcherRef}:entity=${jurisdictionRef}:replica=${replicaKey}`,
       );
     }
-    const [keyEntityId, keySignerId] = replicaKey.split(':');
-    const entityId = String(replica.entityId || keyEntityId || '').toLowerCase();
-    const signerId = String(replica.signerId || keySignerId || '');
+    const { entityId, signerId } = deliveryIdentity(replicaKey, replica);
     if (!entityId || !signerId || blockNumber <= Number(replica.state.lastFinalizedJHeight || 0)) continue;
     const relevant = events.filter(event => isEventRelevantToEntity(event, entityId, replica.state));
     if (relevant.length > 0) {

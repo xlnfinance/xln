@@ -10,10 +10,13 @@ import {
   settleSeenLogs,
   stageSeenLogs,
 } from '../../watcher';
+import { Depository__factory } from '../../../../../jurisdictions/typechain-types';
 import { prepareAuthenticatedWatcherIngress } from '../../rpc-public';
 import { readAuthenticatedReceiptRange } from '../../receipt-root';
 import { buildTrackedExternalOwners } from '../../rpc-watcher-inputs';
 import { decodeAuthenticatedWatcherEvents } from '../../rpc-watcher-events';
+import { isJEventDeliveredByWatcher } from '../../events/event-observation';
+import { decodeJEventLog } from '../../j-event-log-decoder';
 import type {
   RpcWatcherServices,
   RpcWatcherSession,
@@ -21,6 +24,57 @@ import type {
 import type { JEvent } from '../../types';
 
 type WatcherReplica = NonNullable<ReturnType<typeof findWatcherJurisdictionReplica>>;
+type WatcherDecodeInput = Parameters<typeof decodeAuthenticatedWatcherEvents>[0];
+
+const depositoryInterface = Depository__factory.createInterface();
+const CALLDATA_DISPUTE_TOPICS = new Set(
+  (['DisputeStarted', 'CounterDisputeRegistered', 'DisputeFinalized'] as const)
+    .map(name => depositoryInterface.getEvent(name).topicHash.toLowerCase()),
+);
+
+const undeliveredDisputeEvent = (
+  input: WatcherDecodeInput,
+  log: WatcherDecodeInput['logs'][number],
+): JEvent | null => {
+  if (log.address.toLowerCase() !== input.depositoryAddress) return null;
+  if (!CALLDATA_DISPUTE_TOPICS.has(String(log.topics[0] ?? '').toLowerCase())) return null;
+  let event: JEvent;
+  try {
+    event = decodeJEventLog(log, depositoryInterface, {
+      blockNumber: log.blockNumber,
+      blockHash: log.blockHash,
+      transactionHash: log.transactionHash,
+      logIndex: log.index,
+    }, 'J_WATCHER_CANONICAL_EVENT_DECODE_FAILED');
+  } catch {
+    // Not dropped: the canonical decoder below re-decodes this exact log and
+    // fails the range with its usual J_EVENT_LOG_DECODE_FAILED evidence.
+    return null;
+  }
+  return isJEventDeliveredByWatcher(input.env, input.watcherReplica, event) ? null : event;
+};
+
+/**
+ * Dispute events carry their signed ProofBody only in transaction calldata.
+ * Read it solely for disputes some served Entity will receive: a dispute
+ * between two foreign Entities, submitted through any wrapper contract, must
+ * not make this Runtime read, or fail on, calldata it never commits. The
+ * removed events are exactly those event delivery would drop, so every
+ * delivered event and its eventsHash keep the same bytes.
+ */
+export const decodeServedWatcherEvents = async (
+  input: WatcherDecodeInput,
+): Promise<Awaited<ReturnType<typeof decodeAuthenticatedWatcherEvents>> & {
+  undeliveredDisputes: JEvent[];
+}> => {
+  const undeliveredDisputes: JEvent[] = [];
+  const logs = input.logs.filter(log => {
+    const undelivered = undeliveredDisputeEvent(input, log);
+    if (undelivered) undeliveredDisputes.push(undelivered);
+    return !undelivered;
+  });
+  return { ...await decodeAuthenticatedWatcherEvents({ ...input, logs }), undeliveredDisputes };
+};
 
 const requireNativeRpcUrl = (services: RpcWatcherServices): string => {
   if (!services.rpcUrl) throw new Error('J_AUTHORITY_NATIVE_RPC_SOURCE_MISSING');
@@ -206,7 +260,7 @@ export const applyAuthenticatedWatcherRange = async (
       : undefined,
   );
   const tokenByAddress = new Map(watchedTokens.map(token => [token.address, token]));
-  const decoded = await decodeAuthenticatedWatcherEvents({
+  const decoded = await decodeServedWatcherEvents({
     env: request.activeEnv,
     watcherReplica: request.watcherReplica,
     logs: authenticatedIngress.logs,
@@ -254,6 +308,17 @@ export const applyAuthenticatedWatcherRange = async (
       fromBlock: request.fromBlock,
       toBlock: request.toBlock,
       nextFromBlock: minimumLocalScan + 1,
+    });
+    return false;
+  }
+  // The same import race can add an Entity that receives a dispute decoded
+  // above without its calldata. Re-read the range; never deliver it bodiless.
+  if (decoded.undeliveredDisputes.some(event =>
+    isJEventDeliveredByWatcher(request.activeEnv, request.watcherReplica, event))) {
+    request.emitDebug({
+      event: 'j_watch_range_dispute_audience_changed',
+      fromBlock: request.fromBlock,
+      toBlock: request.toBlock,
     });
     return false;
   }

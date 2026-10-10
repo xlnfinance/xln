@@ -17,22 +17,64 @@ pub struct WatchtowerCounterDisputeCall {
     pub owner_authorization_hanko: Vec<u8>,
 }
 
+const WATCHTOWER_COUNTER_DISPUTE_SIGNATURE: &[u8] = b"watchtowerCounterDispute(bytes32,(bytes32,uint256,uint256,bool,bytes32,(bytes32,uint32,uint32,(int256,uint256)[],uint256[],(address,bytes,(uint256,uint256,uint256)[])[]),bytes,bytes,bytes,bool,bool),uint256,uint256,bytes)";
+
+fn selector(signature: &[u8]) -> [u8; 4] {
+    let mut selector = [0; 4];
+    selector.copy_from_slice(&Keccak256::digest(signature)[..4]);
+    selector
+}
+
+fn process_batch_params() -> Vec<ethabi::ParamType> {
+    vec![
+        ethabi::ParamType::Bytes,
+        ethabi::ParamType::Bytes,
+        ethabi::ParamType::Uint(256),
+    ]
+}
+
+fn watchtower_params() -> Vec<ethabi::ParamType> {
+    vec![
+        ethabi::ParamType::FixedBytes(32),
+        final_dispute_param(),
+        ethabi::ParamType::Uint(256),
+        ethabi::ParamType::Uint(256),
+        ethabi::ParamType::Bytes,
+    ]
+}
+
+/// Selectors of the two Depository calls that carry a signed dispute ProofBody:
+/// `processBatch` and `watchtowerCounterDispute`.
+pub(crate) fn dispute_call_selectors() -> [[u8; 4]; 2] {
+    [
+        selector(b"processBatch(bytes,bytes,uint256)"),
+        selector(WATCHTOWER_COUNTER_DISPUTE_SIGNATURE),
+    ]
+}
+
+/// The canonical ABI dispute call that starts `bytes`, when one does. A call
+/// embedded in wrapper calldata is followed by the wrapper's own bytes, so the
+/// call ends where its canonical re-encoding ends; any other encoding is not it.
+pub(crate) fn canonical_dispute_call_prefix(bytes: &[u8]) -> Option<&[u8]> {
+    let selectors = dispute_call_selectors();
+    let params = match bytes.get(..4)? {
+        found if found == selectors[0] => process_batch_params(),
+        found if found == selectors[1] => watchtower_params(),
+        _ => return None,
+    };
+    let encoded = ethabi::encode(&ethabi::decode(&params, &bytes[4..]).ok()?);
+    let end = encoded.len().checked_add(4)?;
+    (bytes.get(4..end)? == encoded.as_slice()).then(|| &bytes[..end])
+}
+
 pub fn decode_process_batch_calldata(
     calldata: &[u8],
 ) -> Result<(Vec<u8>, Vec<u8>, U256, JBatch), JSubmitError> {
-    let selector = &Keccak256::digest(b"processBatch(bytes,bytes,uint256)")[..4];
-    if calldata.len() < 4 || &calldata[..4] != selector {
+    if calldata.len() < 4 || calldata[..4] != dispute_call_selectors()[0] {
         return Err(JSubmitError::Transaction("process-batch-selector"));
     }
-    let values = ethabi::decode(
-        &[
-            ethabi::ParamType::Bytes,
-            ethabi::ParamType::Bytes,
-            ethabi::ParamType::Uint(256),
-        ],
-        &calldata[4..],
-    )
-    .map_err(|error| JSubmitError::Rpc(error.to_string()))?;
+    let values = ethabi::decode(&process_batch_params(), &calldata[4..])
+        .map_err(|error| JSubmitError::Rpc(error.to_string()))?;
     let (Token::Bytes(encoded), Token::Bytes(hanko), Token::Uint(nonce)) =
         (&values[0], &values[1], &values[2])
     else {
@@ -48,20 +90,10 @@ pub fn decode_process_batch_calldata(
 pub fn decode_watchtower_counter_dispute_calldata(
     calldata: &[u8],
 ) -> Result<WatchtowerCounterDisputeCall, JSubmitError> {
-    let selector = &Keccak256::digest(
-        b"watchtowerCounterDispute(bytes32,(bytes32,uint256,uint256,bool,bytes32,(bytes32,uint32,uint32,(int256,uint256)[],uint256[],(address,bytes,(uint256,uint256,uint256)[])[]),bytes,bytes,bytes,bool,bool),uint256,uint256,bytes)",
-    )[..4];
-    if calldata.len() < 4 || &calldata[..4] != selector {
+    if calldata.len() < 4 || calldata[..4] != dispute_call_selectors()[1] {
         return Err(JSubmitError::Transaction("watchtower-selector"));
     }
-    let params = [
-        ethabi::ParamType::FixedBytes(32),
-        final_dispute_param(),
-        ethabi::ParamType::Uint(256),
-        ethabi::ParamType::Uint(256),
-        ethabi::ParamType::Bytes,
-    ];
-    let values = ethabi::decode(&params, &calldata[4..])
+    let values = ethabi::decode(&watchtower_params(), &calldata[4..])
         .map_err(|error| JSubmitError::Rpc(error.to_string()))?;
     if ethabi::encode(&values) != calldata[4..] {
         return Err(JSubmitError::Transaction("watchtower-non-canonical"));

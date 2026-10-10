@@ -3,6 +3,10 @@ use rlp::RlpStream;
 use serde_json::{Map, Value, json};
 use sha3::{Digest, Keccak256};
 
+use xln_rscore_engine::EntityId;
+use xln_rscore_entity_kernel::{JBatch, j_batch::CounterDisputeProof};
+
+use super::abi::hex;
 use super::receipt::{fixed_hex, parse_hex, parse_quantity};
 use super::types::{JWatcherError, JsonRpc};
 
@@ -184,6 +188,80 @@ fn authenticated_input(expected_hash: &[u8; 32], value: Value) -> Result<Vec<u8>
         .and_then(Value::as_str)
         .ok_or(JWatcherError::TransactionField("input"))?;
     parse_hex(input, None, "input")
+}
+
+/// Selector hits decoded per transaction; a decoy flood cannot cost more.
+const DISPUTE_CALLDATA_SCAN_MAX_HITS: usize = 64;
+
+/// One Depository dispute call carried by a transaction. A watchtower call
+/// names its Entity explicitly; a processBatch Entity is the Hanko signer.
+pub(super) struct DisputeCall {
+    pub sender: Option<EntityId>,
+    pub batch: JBatch,
+}
+
+fn decode_dispute_call(calldata: &[u8]) -> Result<DisputeCall, JWatcherError> {
+    if calldata.get(..4) == Some(&crate::j_submit::dispute_call_selectors()[0][..]) {
+        let (_, _, _, batch) = crate::j_submit::decode_process_batch_calldata(calldata)
+            .map_err(|error| JWatcherError::DisputeCalldata(error.to_string()))?;
+        return Ok(DisputeCall {
+            sender: None,
+            batch,
+        });
+    }
+    let watchtower = crate::j_submit::decode_watchtower_counter_dispute_calldata(calldata)
+        .map_err(|error| JWatcherError::DisputeCalldata(error.to_string()))?;
+    let proof = watchtower.proof;
+    let counter = CounterDisputeProof {
+        counterentity: proof.counterentity,
+        initial_nonce: proof.initial_nonce,
+        initial_proofbody_hash: proof.initial_proofbody_hash,
+        counter_nonce: proof.final_nonce,
+        proposer_is_left: proof.proposer_is_left,
+        counter_proofbody: proof.final_proofbody.clone(),
+        sig: proof.sig.clone(),
+    };
+    Ok(DisputeCall {
+        sender: Some(
+            EntityId::parse(&hex(&watchtower.entity_id))
+                .map_err(|error| JWatcherError::Account(error.to_string()))?,
+        ),
+        batch: JBatch {
+            counter_disputes: vec![counter],
+            dispute_finalizations: vec![proof],
+            ..JBatch::default()
+        },
+    })
+}
+
+/// Every Depository dispute call one transaction carries.
+///
+/// A direct processBatch/watchtowerCounterDispute call keeps its strict
+/// decoder. A wrapper (Safe, ERC-4337, forwarder, packed MultiSend) places the
+/// call at any byte offset, so each selector hit is decoded and kept only when
+/// its canonical re-encoding is a byte prefix there and its batch decodes; an
+/// embedded call that does not could never have executed. A hit proves nothing
+/// about execution: the caller accepts a body only when it matches the
+/// authenticated event exactly, proofbodyHash included. Mirrors the TS
+/// `extractEmbeddedDisputeCalls` scan so both engines resolve the same body.
+pub(super) fn decode_dispute_calls(calldata: &[u8]) -> Result<Vec<DisputeCall>, JWatcherError> {
+    let selectors = crate::j_submit::dispute_call_selectors();
+    let is_selector = |bytes: &[u8]| selectors.iter().any(|selector| bytes.starts_with(selector));
+    if is_selector(calldata) {
+        return Ok(vec![decode_dispute_call(calldata)?]);
+    }
+    let calls: Vec<DisputeCall> = (1..=calldata.len().saturating_sub(4))
+        .filter(|offset| is_selector(&calldata[*offset..]))
+        .take(DISPUTE_CALLDATA_SCAN_MAX_HITS)
+        .filter_map(|offset| crate::j_submit::canonical_dispute_call_prefix(&calldata[offset..]))
+        .filter_map(|call| decode_dispute_call(call).ok())
+        .collect();
+    if calls.is_empty() {
+        return Err(JWatcherError::DisputeCalldata(
+            "DISPUTE_CALL_NOT_FOUND".into(),
+        ));
+    }
+    Ok(calls)
 }
 
 pub(crate) fn read_authenticated_calldata(

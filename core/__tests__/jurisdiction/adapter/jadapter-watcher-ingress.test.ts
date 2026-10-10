@@ -42,6 +42,10 @@ import {
 } from '../../../runtime/mempool/input-queue';
 import { findReserveUpdatedEvidence } from '../../../jurisdiction/machine/events/event-evidence';
 import { decodeAuthenticatedWatcherEvents } from '../../../jurisdiction/adapter/rpc-watcher-events';
+import { decodeServedWatcherEvents } from '../../../jurisdiction/adapter/rpc/watcher/rpc-watcher-ingress';
+import { Depository__factory } from '../../../../jurisdictions/typechain-types';
+import { encodeInt512 } from '../../../protocol/crypto/abi-money';
+import { safeStringify } from '../../../protocol/serialization';
 import { createWatchedErc20TokenReader } from '../../../jurisdiction/adapter/rpc-watcher-inputs';
 import { canonicalJurisdictionEventsHash, getJEventJurisdictionRef } from '../../../jurisdiction/machine/event-observation';
 import {
@@ -1739,5 +1743,66 @@ describe('JAdapter watcher ingress', () => {
     expect(observations.map((tx) => tx.data.entityId).sort()).toEqual([leftEntityId, rightEntityId].sort());
     expect(observations.map((tx) => tx.data.blocks[0]?.events[0]?.logIndex)).toEqual([4, 4]);
     expect(env.runtimeMempool?.entityInputs ?? []).toEqual([]);
+  });
+
+  test('a foreign dispute needs no calldata and committed bytes of a served dispute are unchanged', async () => {
+    const env = createEmptyEnv('jadapter-foreign-dispute-calldata');
+    env.quietRuntimeLogs = true;
+    const jurisdiction = makeJurisdiction('dispute-audience', 31_337, `0x${'47'.repeat(20)}`);
+    const depository = jurisdiction.depositoryAddress!;
+    const watcherReplica = makeJReplica(jurisdiction.name, 0n, depository, 31_337, jurisdiction.entityProviderAddress);
+    env.state.jReplicas.set(watcherReplica.name, watcherReplica);
+    const local = `0x${'a1'.repeat(32)}`;
+    const replica = makeReplica(local, '1', true);
+    replica.state.config = { ...replica.state.config, jurisdiction };
+    env.state.eReplicas.set(`${local}:1`, replica);
+    const body = {
+      watchSeed: `0x${'44'.repeat(32)}`, leftResponseSeconds: 10, rightResponseSeconds: 10,
+      offdeltas: [encodeInt512(5n)], tokenIds: [1n], transformers: [],
+    };
+    const depositoryEvents = Depository__factory.createInterface();
+    const blockHash = `0x${'81'.repeat(32)}`;
+    const disputeLog = (sender: string, counterentity: string, index: number) => ({
+      ...depositoryEvents.encodeEventLog('DisputeStarted', [
+        sender, counterentity, 7n, true, `0x${'77'.repeat(32)}`, body.watchSeed, '0x', '0x',
+        `0x${'00'.repeat(32)}`, 120n, 100n, 10n, 10n,
+      ]),
+      address: depository, blockNumber: 9, blockHash, authenticatedBlockHash: blockHash,
+      transactionHash: `0x${(90 + index).toString(16).repeat(32)}`, index,
+    });
+    const foreign = disputeLog(`0x${'b2'.repeat(32)}`, `0x${'c3'.repeat(32)}`, 0);
+    const served = disputeLog(`0x${'b2'.repeat(32)}`, local, 1);
+    const reads: string[] = [];
+    const input = {
+      env, watcherReplica, depositoryAddress: depository,
+      entityProviderAddress: jurisdiction.entityProviderAddress!.toLowerCase(),
+      tokenByAddress: new Map(), trackedOwners: new Map(),
+      observedThroughHeight: 9, observedTipBlockHash: blockHash, observedHeadHeight: 9, confirmationDepth: 0,
+      findDisputeFinalizationEvidence: async () => undefined,
+      findDisputeProofBody: async (txHash: string) => {
+        reads.push(txHash);
+        if (txHash === foreign.transactionHash) throw new Error('J_DISPUTE_PROOFBODY_CALLDATA_UNKNOWN');
+        return body;
+      },
+    };
+    const decoded = await decodeServedWatcherEvents({ ...input, logs: [foreign, served] });
+    expect(reads).toEqual([served.transactionHash]);
+    expect(decoded.undeliveredDisputes.map(event => event.transactionHash)).toEqual([foreign.transactionHash]);
+    expect(decoded.events.map(event => event.transactionHash)).toEqual([served.transactionHash]);
+    await expect(decodeAuthenticatedWatcherEvents({ ...input, logs: [foreign, served] }))
+      .rejects.toThrow('J_EVENT_LOG_DECODE_FAILED');
+
+    // The pre-gate decode of the same range, given a body for every log, must
+    // commit the identical observation: the gate only drops undelivered events.
+    const everyBody = await decodeAuthenticatedWatcherEvents({
+      ...input, logs: [foreign, served], findDisputeProofBody: async () => body,
+    });
+    const observe = (events: typeof decoded.events) =>
+      processEventBatch(events, env, 9, blockHash, { value: 0 }, 'rpc', depository, true, 'chain', 31_337)
+        ?.runtimeTxs.filter(tx => tx.type === 'observeJRange');
+    const gated = observe(decoded.events);
+    expect(gated).toHaveLength(1);
+    expect(gated?.[0]?.data.blocks[0]?.events).toHaveLength(1);
+    expect(safeStringify(gated)).toBe(safeStringify(observe(everyBody.events)));
   });
 });

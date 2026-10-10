@@ -15,6 +15,8 @@ use xln_rscore_engine::{AccountTx, EntityId, JurisdictionEvent};
 use super::types::ACCOUNT_SETTLED_TOPIC;
 use super::*;
 
+mod dispute;
+
 // Current Depository ABI: ondelta is Int512(high, low). Receipt root below
 // is independently encoded by the TS canonical receipt codec, not Rust.
 const EVENT_DATA: &str = concat!(

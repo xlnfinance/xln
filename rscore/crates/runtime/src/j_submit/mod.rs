@@ -34,6 +34,7 @@ pub use calldata::{
     WatchtowerCounterDisputeCall, decode_process_batch_calldata,
     decode_watchtower_counter_dispute_calldata,
 };
+pub(crate) use calldata::{canonical_dispute_call_prefix, dispute_call_selectors};
 pub(crate) use financial_replacement::decode_replacement;
 pub use financial_replacement::{JPreparedReplacement, apply_j_prepared_replacement};
 pub(crate) use governance_lifecycle::decode_governance_result;

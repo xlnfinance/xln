@@ -10,7 +10,9 @@ import {
   type TxDisputeProofBodyEvidence,
   type TxFinalizationEvidence,
 } from './rpc-public';
+import { hashProofBodyStruct } from '../../protocol/dispute/proof-builder';
 import { watcherErrorDetails } from './rpc/rpc-boundary';
+import { extractEmbeddedDisputeCalls } from './rpc/watcher/rpc-watcher-calldata';
 
 export type WatchedErc20Token = {
   tokenId: number;
@@ -62,6 +64,37 @@ const readAuthenticatedTransactionCalldata = async (
   if (!data || data === '0x') throw new Error(`J_DISPUTE_TX_CALLDATA_MISSING:${normalizedHash}`);
   return data;
 };
+
+/**
+ * Every dispute call one transaction carries. A direct call, or calldata with
+ * no embedded call, keeps the strict decoder and its exact failure. An
+ * embedded call whose batch does not decode could never have executed, so it
+ * only stops being a candidate; the event match still decides acceptance.
+ */
+const decodeDisputeCalls = <T>(
+  data: string,
+  decode: (calldata: string) => T[],
+  isSelfConsistent: (candidate: T) => boolean = () => true,
+): T[] => {
+  const embedded = extractEmbeddedDisputeCalls(data);
+  if (!embedded || embedded.length === 0) return decode(data);
+  return embedded.flatMap(call => {
+    try {
+      return decode(call).filter(isSelfConsistent);
+    } catch {
+      return [];
+    }
+  });
+};
+
+/**
+ * A dispute start states its proofbodyHash beside the body. Depository
+ * reverts an executed start whose body does not hash to it, but a decoy copy
+ * in wrapper calldata never executes: only a body that hashes to its claim
+ * may match the event, exactly as counter and final bodies are hashed.
+ */
+const isProofBodyHashConsistent = (candidate: TxDisputeProofBodyEvidence): boolean =>
+  hashProofBodyStruct(candidate.proofbody).toLowerCase() === candidate.proofbodyHash.toLowerCase();
 
 export const normalizeEvmAddress = (value: unknown): string => {
   const candidate = String(value || '')
@@ -158,7 +191,7 @@ export const createTxFinalizationEvidenceReader = (
     }
     const pending = (async (): Promise<TxFinalizationEvidence[]> => {
       const data = await readAuthenticatedTransactionCalldata(provider, txHash, location);
-      return decodeDisputeFinalizationEvidenceCalldata(data);
+      return decodeDisputeCalls(data, decodeDisputeFinalizationEvidenceCalldata);
     })();
     cache.set(normalizedHash, pending);
     if (cache.size > 2_000) {
@@ -195,7 +228,7 @@ export const createTxDisputeProofBodyReader = (
       }
       pending = (async () => {
         const data = await readAuthenticatedTransactionCalldata(provider, txHash, location);
-        return decodeDisputeProofBodyEvidenceCalldata(data);
+        return decodeDisputeCalls(data, decodeDisputeProofBodyEvidenceCalldata, isProofBodyHashConsistent);
       })();
       cache.set(normalizedHash, pending);
       if (cache.size > 2_000) {
