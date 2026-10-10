@@ -676,7 +676,7 @@ test('credit and collateral configure forms submit RuntimeInput through shared c
   const collateralSource = readFileSync('frontend/src/lib/components/Entity/account/ui/CollateralForm.svelte', 'utf8');
   const configureSource = readFileSync('frontend/src/lib/components/Entity/account/ui/AccountConfigurePanel.svelte', 'utf8');
   const accountWorkspaceSource = readFileSync('frontend/src/lib/components/Entity/workspace/AccountWorkspaceView.svelte', 'utf8');
-  const resolverSource = readFileSync('core/api/runtime-adapter/resolve.ts', 'utf8');
+  const resolverSource = readFileSync('core/api/runtime-adapter/read/compact-view.ts', 'utf8');
 
   for (const source of [creditSource, collateralSource]) {
     expect(source).toContain('export let submitRuntimeInput');
