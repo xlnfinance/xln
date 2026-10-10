@@ -14,7 +14,7 @@ const DOUBLE_ASSERTION_DEBT: Readonly<Record<string, number>> = {};
 const TS_SUPPRESSION_DEBT: Readonly<Record<string, number>> = {};
 const NON_NULL_ASSERTION_FILES = 174;
 const NON_NULL_ASSERTION_COUNT = 617;
-const NON_NULL_ASSERTION_SHA256 = '9b8cea193d8ce3ef826930467e54383fb30cf276dc02e4c07875c6aad8a15008';
+const NON_NULL_ASSERTION_SHA256 = 'b5412aac07c5e3f155b7ba34a3f51eb9a2d59357c78ea5917a4ef8f82e301d25';
 
 type UnsafeTypeCounts = {
   explicitAnyLines: number[];

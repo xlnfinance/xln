@@ -1,5 +1,5 @@
 #!/usr/bin/env bun
-import { canDeployHubDefaultTokens, requiredHubTokenCount, tokenCatalogForHubJurisdiction } from './hub/node/token-catalog';
+import { canDeployHubDefaultTokens, ensureTokenCatalog, waitForTokenCatalog } from './hub/node/token-catalog';
 import { importJurisdiction } from './hub/node/import-jurisdiction';
 import {
   attachValidatedJurisdictionAdapter,
@@ -11,6 +11,13 @@ import {
   planMeshBootstrapInputs,
   supportPeerProvisioningReady,
 } from './hub/node/hub-mesh-plan';
+import {
+  buildHubBootstrapReserveHealth,
+  ensureHubBootstrapReserves,
+  getEntityJurisdictionName,
+  normalizeEntityId,
+  type HubReserveDeps,
+} from './hub/node/hub-reserves';
 import { configureCryptoPoolEntry } from '../protocol/crypto/crypto-pool';
 import { ethers, getIndexedAccountPath, HDNodeWallet, Mnemonic } from 'ethers';
 import { existsSync, mkdirSync, readFileSync } from 'node:fs';
@@ -20,13 +27,11 @@ import { createBrainVaultOwnerController, type BrainVaultOwnerController } from 
 import { hasCliFlag, readCliOption } from '../config/cli';
 import { readBooleanEnv, readNonNegativeIntegerEnv, readPositiveIntegerEnv } from '../config/environment';
 import { bootstrapHub } from '../../scripts/bootstrap-hub';
-import { defaultTokensForJurisdiction } from '../jurisdiction/machine/config/default-tokens';
 import {
   normalizeJurisdictionDisplayName,
   readVisibleHubProfiles,
   type VisibleHubProfile,
 } from './hub/hub-visible-profiles';
-import { deployMissingDefaultTokens } from '../jurisdiction/adapter/operations/dev-token-deployment';
 import type { JAdapter, JTokenInfo } from '../jurisdiction/adapter/types';
 import { getLiveJAdapter } from '../runtime/j-submit/live-jadapters';
 import {
@@ -48,7 +53,6 @@ import { startParentLivenessWatch } from '../support/process/parent-watch';
 import { createHttpDrainTracker, stopServerGracefully } from './graceful-server';
 import { checkpointNodeRuntime, quiesceNodeRuntime } from './process/node-runtime-quiesce';
 import { pauseJurisdictionWatchersAndWait } from '../runtime/loop/loop-watchers';
-import { applyJEventsToEnv } from '../jurisdiction/adapter/watcher';
 import { drainJWatcherBacklog } from '../jurisdiction/adapter/operations/backlog-drain';
 import { createRelayStore } from '../network/relay/store';
 import { safeStringify, serializeTaggedJson } from '../protocol/serialization';
@@ -127,13 +131,11 @@ import {
   DEFAULT_ACCOUNT_TOKEN_IDS,
   getAccountReplica,
   getBootstrapCreditAmount,
-  getBootstrapTokenAmount,
   getCreditGrantedByEntity,
   getEntityOutCapacity,
   getEntityReplicaById,
   HUB_DEFAULT_MIN_TRADE_SIZE,
   HUB_DEFAULT_SUPPORTED_PAIRS,
-  HUB_REQUIRED_TOKEN_COUNT,
   hasAccount,
   hasPendingRuntimeWork,
   hasPairMutualCredits,
@@ -168,8 +170,6 @@ import {
   startRuntimeSamplingProfiler,
 } from '../support/performance/sampling-profiler';
 import type {
-  BootstrapReserveEntityHealth,
-  BootstrapReserveHealth,
   HubBootstrapEntry,
   HubNodeArgs,
   HubNodeLiveContext,
@@ -625,49 +625,6 @@ const ensureRpcStackReady = async (env: RuntimeReplica, jadapter: JAdapter): Pro
   throw new Error('RPC_STACK_ADDRESSES_MISSING');
 };
 
-const ensureTokenCatalog = async (jadapter: JAdapter, allowDeploy: boolean, jurisdictionName = ''): Promise<JTokenInfo[]> => {
-  const current = await jadapter.getTokenRegistry();
-  if (!canDeployHubDefaultTokens(jadapter.chainId)) {
-    if (current.length >= requiredHubTokenCount(jadapter.chainId)) return current;
-    throw new Error(`TOKEN_CATALOG_EMPTY:chainId=${jadapter.chainId}`);
-  }
-  const desiredTokens = defaultTokensForJurisdiction({
-    name: jurisdictionName,
-    chainId: Number((jadapter as { chainId?: number }).chainId),
-  });
-  const existingSymbols = new Set(
-    current
-      .map(token => String(token.symbol || '').trim().toUpperCase())
-      .filter(Boolean),
-  );
-  const hasDesiredTokens = desiredTokens.every(token => existingSymbols.has(token.symbol.trim().toUpperCase()));
-  if (current.length >= HUB_REQUIRED_TOKEN_COUNT && hasDesiredTokens) return current;
-  if (allowDeploy) {
-    await deployMissingDefaultTokens(jadapter, jurisdictionName);
-    return await waitForTokenCatalog(jadapter);
-  }
-  throw new Error(`TOKEN_CATALOG_INCOMPLETE required=${HUB_REQUIRED_TOKEN_COUNT} actual=${current.length}`);
-};
-
-const waitForTokenCatalog = async (jadapter: JAdapter, rounds = 80): Promise<JTokenInfo[]> => {
-  let lastReadError: unknown = null;
-  for (let i = 0; i < rounds; i += 1) {
-    try {
-      const tokens = await jadapter.getTokenRegistry();
-      if (tokens.length >= requiredHubTokenCount(jadapter.chainId)) return tokens;
-      lastReadError = null;
-    } catch (error) {
-      lastReadError = error;
-    }
-    await sleep(250);
-  }
-  if (lastReadError) {
-    const message = lastReadError instanceof Error ? lastReadError.message : String(lastReadError);
-    throw new Error(`TOKEN_CATALOG_READ_FAILED:${message}`, { cause: lastReadError });
-  }
-  throw new Error(`TOKEN_CATALOG_INCOMPLETE required=${requiredHubTokenCount(jadapter.chainId)}`);
-};
-
 const ORDERBOOK_INIT_DRAIN_TIMEOUT_MS = 10_000;
 
 const ensureOrderbook = async (env: RuntimeReplica, entityId: string, signerId: string): Promise<void> => {
@@ -884,240 +841,18 @@ const bootstrapHubJurisdictions = async (
 
 const tokenCatalogsByEntityId = new Map<string, JTokenInfo[]>();
 
-const normalizeEntityId = (entityId: string): string => String(entityId || '').trim().toLowerCase();
-
-const requireJAdapterForEntity = (env: RuntimeReplica, entityId: string, purpose: string): JAdapter => {
-  const adapter = getEntityJAdapter(env, entityId);
-  if (!adapter) {
-    throw new Error(`${purpose}_JADAPTER_MISSING: entity=${entityId}`);
-  }
-  return adapter;
-};
-
-const getReserveHealth = (env: RuntimeReplica, entityId: string, tokenCatalog: JTokenInfo[]): LocalHealthResponse['bootstrapReserves'] => {
-  const replica = getEntityReplicaById(env, entityId);
-  const tokens = tokenCatalogForHubJurisdiction(tokenCatalog, {
-    jurisdictionName: getEntityJurisdictionName(env, entityId),
-    chainId: requireJAdapterForEntity(env, entityId, 'RESERVE_HEALTH').chainId,
-  }).map(token => {
-    const tokenId = Number(token.tokenId);
-    const decimals = Number(token.decimals);
-    const current = replica?.state?.reserves?.get(tokenId) ?? 0n;
-    const expectedMin = getBootstrapTokenAmount(tokenId, decimals);
-    return {
-      tokenId,
-      symbol: String(token.symbol || `token-${tokenId}`),
-      decimals,
-      current: current.toString(),
-      expectedMin: expectedMin.toString(),
-      ready: current > 0n,
-      operational: current > 0n,
-      targetMet: current >= expectedMin,
-    };
-  });
-  return {
-    ok: tokens.length >= requiredHubTokenCount(requireJAdapterForEntity(env, entityId, 'RESERVE_HEALTH').chainId) && tokens.every(token => token.operational === true),
-    targetMet: tokens.length >= requiredHubTokenCount(requireJAdapterForEntity(env, entityId, 'RESERVE_HEALTH').chainId) && tokens.every(token => token.targetMet === true),
-    tokens,
-  };
-};
-
-const refreshReserveStateFromWatcher = async (
-  env: RuntimeReplica,
-  entityId: string,
-  tokenCatalog: JTokenInfo[],
-): Promise<LocalHealthResponse['bootstrapReserves']> => {
-  const jadapter = requireJAdapterForEntity(env, entityId, 'RESERVE_SYNC');
-  const replica = getEntityReplicaById(env, entityId);
-  if (!replica?.state) {
-    throw new Error(`HUB_REPLICA_MISSING_FOR_RESERVE_SYNC: ${entityId}`);
-  }
-  if (jadapter.isWatching()) {
-    await jadapter.pollNow?.();
-    await settleRuntimeFor(env, 10);
-  }
-  return getReserveHealth(env, entityId, tokenCatalog);
-};
-
-const ensureBootstrapReserves = async (
-  env: RuntimeReplica,
-  entityId: string,
-  tokenCatalog: JTokenInfo[],
-  reportProgress: (step: string) => void,
-): Promise<LocalHealthResponse['bootstrapReserves']> => {
-  const startedAt = startTiming('reserve_funding');
-  const jadapter = requireJAdapterForEntity(env, entityId, 'RESERVE_FUNDING');
-
-  const bootstrapTokens = tokenCatalogForHubJurisdiction(tokenCatalog, {
-    jurisdictionName: getEntityJurisdictionName(env, entityId),
-    chainId: jadapter.chainId,
-  });
-  reportProgress('watcher-refresh:start');
-  await refreshReserveStateFromWatcher(env, entityId, tokenCatalog);
-  reportProgress('watcher-refresh:done');
-  if (!resolvedArgs.deployTokens || !canDeployHubDefaultTokens(jadapter.chainId)) {
-    const reserveHealth = getReserveHealth(env, entityId, tokenCatalog);
-    finishTiming('reserve_funding', startedAt);
-    return reserveHealth;
-  }
-  const replica = getEntityReplicaById(env, entityId);
-
-  const mints: Array<{ entityId: string; tokenId: number; amount: bigint }> = [];
-  const reserveMismatches: string[] = [];
-  for (const token of bootstrapTokens) {
-    const tokenId = Number(token.tokenId);
-    const decimals = Number(token.decimals);
-    const target = getBootstrapTokenAmount(tokenId, decimals);
-    const localCurrent = replica?.state?.reserves?.get(tokenId) ?? 0n;
-    reportProgress(`chain-reserve:${tokenId}:start`);
-    const chainCurrent = await jadapter.getReserves(entityId, tokenId);
-    reportProgress(`chain-reserve:${tokenId}:done`);
-    if (chainCurrent !== localCurrent) {
-      reserveMismatches.push(`token=${tokenId} local=${localCurrent.toString()} chain=${chainCurrent.toString()}`);
-      continue;
-    }
-    if (localCurrent >= target) continue;
-    mints.push({
-      entityId,
-      tokenId,
-      amount: target - localCurrent,
-    });
-  }
-  if (reserveMismatches.length > 0) {
-    throw new Error(
-      `HUB_RESERVE_STATE_MISMATCH: entity=${entityId} ${reserveMismatches.join('; ')}; ` +
-      'runtime reserve state must be replayed from canonical J-events before bootstrap funding',
-    );
-  }
-
-  if (mints.length > 0) {
-    reportProgress('fund-batch:start');
-    const events = await jadapter.debugFundReservesBatch(mints);
-    reportProgress('fund-batch:done');
-    await applyJEventsToEnv(env, events, `${resolvedArgs.name}-reserve-fund`, jadapter);
-    reportProgress('fund-events:applied');
-    await settleRuntimeFor(env, 30);
-    reportProgress('fund-runtime:settled');
-  }
-  reportProgress('final-watcher-refresh:start');
-  const reserveHealth = await refreshReserveStateFromWatcher(env, entityId, tokenCatalog);
-  reportProgress('complete');
-
-  finishTiming('reserve_funding', startedAt);
-  return reserveHealth;
-};
-
-const getEntityJurisdictionName = (env: RuntimeReplica, entityId: string | null): string => {
-  if (!entityId) return '';
-  const replica = getEntityReplicaById(env, entityId);
-  return normalizeJurisdictionDisplayName(replica?.state?.config?.jurisdiction?.name || '');
+const hubReserveDeps: HubReserveDeps = {
+  hubName: resolvedArgs.name,
+  deployTokens: resolvedArgs.deployTokens,
+  tokenCatalogsByEntityId,
+  startTiming,
+  finishTiming,
 };
 
 const getEntityJurisdiction = (env: RuntimeReplica, entityId: string | null): unknown | null => {
   if (!entityId) return null;
   const replica = getEntityReplicaById(env, entityId);
   return replica?.state?.config?.jurisdiction ?? null;
-};
-
-const resolveEntityTokenCatalog = async (
-  env: RuntimeReplica,
-  entityId: string,
-): Promise<JTokenInfo[]> => {
-  const normalizedEntityId = normalizeEntityId(entityId);
-  const cached = tokenCatalogsByEntityId.get(normalizedEntityId);
-  const jadapter = requireJAdapterForEntity(env, entityId, 'TOKEN_CATALOG');
-  if (cached && cached.length >= requiredHubTokenCount(jadapter.chainId)) return cached;
-  const jurisdictionName = getEntityJurisdictionName(env, entityId);
-  const catalog = resolvedArgs.deployTokens
-    ? await ensureTokenCatalog(jadapter, true, jurisdictionName)
-    : await waitForTokenCatalog(jadapter);
-  if (catalog.length < requiredHubTokenCount(jadapter.chainId)) {
-    throw new Error(
-      `TOKEN_CATALOG_INCOMPLETE_FOR_ENTITY: entity=${entityId} jurisdiction=${jurisdictionName || 'unknown'} ` +
-        `count=${catalog.length} required=${requiredHubTokenCount(jadapter.chainId)}`,
-    );
-  }
-  tokenCatalogsByEntityId.set(normalizedEntityId, catalog);
-  return catalog;
-};
-
-const buildAggregateReserveHealth = (
-  primaryHealth: BootstrapReserveHealth | null,
-  entities: BootstrapReserveEntityHealth[],
-): BootstrapReserveHealth => ({
-  ok: entities.length > 0 && entities.every(entity => entity.ready),
-  targetMet: entities.length > 0 && entities.every(entity => entity.targetMet),
-  tokens: primaryHealth?.tokens ?? entities[0]?.tokens ?? [],
-  entities,
-});
-
-const buildHubBootstrapReserveHealth = (
-  env: RuntimeReplica,
-  primaryEntityId: string | null,
-  defaultCatalog: JTokenInfo[],
-  hubEntities: HubBootstrapEntry[] = [],
-): BootstrapReserveHealth => {
-  const entries = hubEntities.length > 0
-    ? hubEntities
-    : primaryEntityId
-      ? [{
-          entityId: primaryEntityId,
-          signerId: '',
-          name: resolvedArgs.name,
-          jurisdictionName: getEntityJurisdictionName(env, primaryEntityId),
-          primary: true,
-        }]
-      : [];
-  const entities = entries.map((entry) => {
-    const catalog = tokenCatalogsByEntityId.get(normalizeEntityId(entry.entityId)) ?? defaultCatalog;
-    const health = getReserveHealth(env, entry.entityId, catalog);
-    return {
-      entityId: entry.entityId,
-      jurisdictionName: entry.jurisdictionName,
-      primary: entry.primary,
-      ready: health.ok === true,
-      targetMet: health.targetMet === true,
-      tokens: health.tokens,
-    };
-  });
-  const primary = entries.findIndex(entry => entry.primary);
-  const primaryHealth = primary >= 0 && entities[primary]
-    ? { ok: entities[primary]!.ready, targetMet: entities[primary]!.targetMet, tokens: entities[primary]!.tokens }
-    : null;
-  return buildAggregateReserveHealth(primaryHealth, entities);
-};
-
-const ensureHubBootstrapReserves = async (
-  env: RuntimeReplica,
-  hubEntities: HubBootstrapEntry[],
-  reportProgress: (step: string) => void,
-): Promise<BootstrapReserveHealth> => {
-  const entities: BootstrapReserveEntityHealth[] = [];
-  let primaryHealth: BootstrapReserveHealth | null = null;
-
-  for (const entry of hubEntities) {
-    reportProgress(`${entry.name}:catalog:start`);
-    const catalog = await resolveEntityTokenCatalog(env, entry.entityId);
-    reportProgress(`${entry.name}:catalog:done`);
-    const health = await ensureBootstrapReserves(
-      env,
-      entry.entityId,
-      catalog,
-      (step) => reportProgress(`${entry.name}:${step}`),
-    );
-    const entityHealth: BootstrapReserveEntityHealth = {
-      entityId: entry.entityId,
-      jurisdictionName: entry.jurisdictionName,
-      primary: entry.primary,
-      ready: health.ok === true,
-      targetMet: health.targetMet === true,
-      tokens: health.tokens,
-    };
-    entities.push(entityHealth);
-    if (entry.primary) primaryHealth = health;
-  }
-
-  return buildAggregateReserveHealth(primaryHealth, entities);
 };
 
 const directHubPeersReady = (env: RuntimeReplica, peers: HubMeshPeer<VisibleHubProfile>[]): boolean =>
@@ -1168,7 +903,7 @@ const buildLocalHealth = (
       pairs,
     },
     bootstrapProgress,
-    bootstrapReserves: buildHubBootstrapReserveHealth(env, entityId, tokenCatalog, hubEntities),
+    bootstrapReserves: buildHubBootstrapReserveHealth(hubReserveDeps, env, entityId, tokenCatalog, hubEntities),
     jurisdiction: jurisdictionImportDiagnostics,
     jadapter: {
       ready: Boolean(jadapter?.addresses?.depository && jadapter?.addresses?.entityProvider),
@@ -1789,6 +1524,7 @@ const ensureHubMeshReserves = async (
 ): Promise<boolean> => {
   input.markProgress('local-reserve-funding');
   const health = await ensureHubBootstrapReserves(
+    hubReserveDeps,
     input.env,
     input.hubBootstraps,
     step => input.markProgress(`local-reserve:${step}`),

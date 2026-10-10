@@ -16,6 +16,7 @@ const readText = (path: string): string => {
       'hub/node/token-catalog.ts',
       'hub/node/hub-jurisdiction-binding.ts',
       'hub/node/hub-mesh-plan.ts',
+      'hub/node/hub-reserves.ts',
       'hub-node.ts',
     ]
       .map(file => readFileSync(`core/orchestrator/${file}`, 'utf8'))
