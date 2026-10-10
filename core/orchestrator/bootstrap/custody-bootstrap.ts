@@ -24,9 +24,9 @@ const sleep = async (ms: number): Promise<void> => {
 };
 
 const assertChildStillRunning = (child: ManagedChild | null): void => {
-  if (!child || child.proc.exitCode === null) return;
+  if (!child || !hasManagedChildExited(child)) return;
   throw new Error(
-    `${child.name} exited early with code=${String(child.proc.exitCode)}\n` +
+    `${child.name} exited early with code=${String(child.proc.exitCode)} signal=${String(child.proc.signalCode)}\n` +
     `stdout:\n${tailLines(child.stdoutLines)}\n\nstderr:\n${tailLines(child.stderrLines)}`,
   );
 };
@@ -66,7 +66,7 @@ const waitForCustodyServiceReady = async (
         lastError = error instanceof Error ? error.message : String(error);
       }
     }
-    if (child.proc.exitCode !== null) {
+    if (hasManagedChildExited(child)) {
       break;
     }
   }
@@ -182,7 +182,8 @@ const DEFAULT_CUSTODY_TOKEN_IDS = [1, 2, 3] as const;
 
 const tailLines = (lines: string[]): string => lines.slice(-LOG_TAIL_LINES).join('\n');
 
-const hasManagedChildExited = (child: ManagedChild): boolean =>
+// A signal kill (OOM, SIGKILL) leaves exitCode null and sets only signalCode.
+export const hasManagedChildExited = (child: ManagedChild): boolean =>
   child.proc.exitCode !== null || child.proc.signalCode !== null;
 
 const waitForManagedChildExit = async (child: ManagedChild, timeoutMs: number): Promise<boolean> => {

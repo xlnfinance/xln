@@ -6,6 +6,7 @@ import type {
   MarketMakerChild,
 } from '../orchestrator-types';
 import { deriveResetHealthOk } from './health-model';
+import { hasManagedChildExited } from '../bootstrap/custody-bootstrap';
 import {
   resolveHealthResetOptions,
   resolveResetCapabilityHealth,
@@ -27,8 +28,8 @@ export const resolveCurrentCapabilityHealth = (
     marketMakerChild.lastHealth?.runtime?.halted !== true;
   const custodyOnline = Boolean(
     custodySupport?.identity.entityId &&
-    custodySupport.daemonChild.proc.exitCode === null &&
-    custodySupport.custodyChild.proc.exitCode === null,
+    !hasManagedChildExited(custodySupport.daemonChild) &&
+    !hasManagedChildExited(custodySupport.custodyChild),
   );
   const resetOptions = resolveHealthResetOptions(
     activeResetOptions,

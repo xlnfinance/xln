@@ -1,8 +1,11 @@
 import { expect, test } from 'bun:test';
 
 import { deriveHubRuntimeHealth, deriveResetHealthOk } from '../../../orchestrator/health/health-model';
-import { createHealthRecomputer } from '../../../orchestrator/health/orchestrator-health-support';
-import type { AggregatedHealth } from '../../../orchestrator/orchestrator-types';
+import {
+  createHealthRecomputer,
+  resolveCurrentCapabilityHealth,
+} from '../../../orchestrator/health/orchestrator-health-support';
+import type { AggregatedHealth, CustodySupportState, MarketMakerChild } from '../../../orchestrator/orchestrator-types';
 
 test('orchestrator health treats hub process health separately from relay self-presence', () => {
   const health = deriveHubRuntimeHealth({
@@ -82,4 +85,18 @@ test('a disabled market maker does not degrade recomputed health', () => {
 
   const enabled = recompute(health, { ...disabledMarketMaker, enabled: true });
   expect(enabled.degraded).toEqual(['marketMakerSameChain', 'marketMakerCross']);
+});
+
+test('a signal-killed custody child is not reported online', () => {
+  const liveProc = { exitCode: null, signalCode: null };
+  const marketMaker = { proc: null, exitCode: null, exitSignal: null, lastHealth: null } as unknown as MarketMakerChild;
+  const custody = (daemonSignal: NodeJS.Signals | null) => ({
+    identity: { entityId: `0x${'33'.repeat(32)}` },
+    daemonChild: { proc: { exitCode: null, signalCode: daemonSignal } },
+    custodyChild: { proc: liveProc },
+  }) as unknown as CustodySupportState;
+  const options = { enableMarketMaker: false, enableCustody: true };
+
+  expect(resolveCurrentCapabilityHealth(marketMaker, custody(null), options, null, false).custodyOk).toBe(true);
+  expect(resolveCurrentCapabilityHealth(marketMaker, custody('SIGKILL'), options, null, false).custodyOk).toBe(false);
 });

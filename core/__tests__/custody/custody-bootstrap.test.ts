@@ -127,6 +127,28 @@ test('waitForHttpReady rejects when the spawned child exited behind a stale read
   }
 });
 
+test('waitForHttpReady rejects at once when the child was killed by a signal', async () => {
+  const server = Bun.serve({
+    hostname: '127.0.0.1',
+    port: 0,
+    fetch: () => new Response('starting', { status: 503 }),
+  });
+  const killedChild = {
+    name: 'custody-service',
+    proc: { exitCode: null, signalCode: 'SIGKILL' },
+    stdoutLines: [],
+    stderrLines: [],
+  } as unknown as ManagedChild;
+
+  try {
+    await expect(
+      waitForHttpReady(`http://127.0.0.1:${server.port}/api/me`, killedChild, 1_500),
+    ).rejects.toThrow(/custody-service exited early with code=null signal=SIGKILL/);
+  } finally {
+    server.stop(true);
+  }
+});
+
 test('waitForCustodyRouteableState accepts hub-side custody capacity for non-routing custody', async () => {
   const custodyId = '0xcustody';
   const hubIds = ['0xhub1', '0xhub2', '0xhub3'];
