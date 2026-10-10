@@ -710,7 +710,7 @@ describe('production startup wiring', () => {
     );
     expect(mmNode).toContain("state.phase = 'bootstrap-same-chain';\n    health.publishBootstrap();");
     expect(mmNode).toContain('if (state.bootstrapCrossStarted) {');
-    expect(mmNode).toContain('readModel.allSameDepthReady(readVisibleHubProfiles(env, true)) &&');
+    expect(mmNode).toContain('readModel.allSameDepthReady(readVisibleHubProfiles(env)) &&');
     expect(mmNode).toContain('isMarketMakerSameDepthComplete(currentHealth)');
     expect(mmNode).not.toContain('bootstrapCrossStarted || isMarketMakerSameReady(health)');
     expect(mmNode).not.toContain("if (startupPhase !== 'offers-ready' && bootstrapCrossStarted) {");
@@ -748,7 +748,7 @@ describe('production startup wiring', () => {
     expect(mmNode).toContain('includeQueuedEntityInputs: includeCrossDebug');
     expect(mmNode).toContain('crossDebug: buildMarketMakerCrossDebugSummary(');
     expect(mmNode).toContain('infoResponseJson = buildInfoResponse(false);');
-    expect(infoRoute).not.toContain('const allVisibleHubs = readVisibleHubProfiles(env, true);');
+    expect(infoRoute).not.toContain('const allVisibleHubs = readVisibleHubProfiles(env);');
     expect(infoRoute).not.toContain('buildMarketMakerHealthSnapshot({ includeCross: true })');
   });
 
@@ -1406,6 +1406,10 @@ describe('production startup wiring', () => {
     expect(mmNode).not.toContain('RoutedEntityInput');
     expect(orchestrator).toMatch(/'--support-peer-identities-json',\s*safeStringify\(deps.getMarketMakerIdentities\(\)\)/);
     expect(orchestrator).not.toContain('--mesh-hub-identities-json');
+    // The MM quotes only on configured hub Entities, never on self-declared isHub profiles.
+    expect(orchestrator).toContain("'--hub-identities-json', safeStringify(deps.getHubIdentities()),");
+    expect(orchestrator).not.toContain('--mesh-hub-names');
+    expect(mmNode).toContain('const identity = configured.get(String(profile.entityId).toLowerCase());');
   });
 
   test('hub and market maker require one authenticated direct entity route', () => {

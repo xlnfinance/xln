@@ -26,7 +26,12 @@ import {
   type MarketMakerTokenIdsByContext,
 } from '../../../orchestrator/mm-node';
 import { submitMarketMakerBootstrapCrossQuotes } from '../../../orchestrator/market-maker/node/mm-node-run';
-import { MARKET_MAKER_LEVELS_PER_SIDE } from '../../../orchestrator/market-maker/node/mm-node-core';
+import {
+  MARKET_MAKER_LEVELS_PER_SIDE,
+  resolvedArgs as marketMakerArgs,
+} from '../../../orchestrator/market-maker/node/mm-node-core';
+import { parseConfiguredPeerIdentities } from '../../../orchestrator/mesh/hub-mesh-peers';
+import { safeStringify } from '../../../protocol/serialization';
 import { getBootstrapCreditAmount, HUB_DEFAULT_MIN_TRADE_SIZE } from '../../../orchestrator/mesh/mesh-common';
 import { createEmptyEnv } from '../../../runtime';
 import type { AccountReplica, SwapOffer } from '../../../types/account';
@@ -596,43 +601,43 @@ test('runtime market maker health stays red when same-chain offers are committed
   expect(pendingRoute?.depthReady).toBe(false);
 });
 
-test('market maker hub discovery uses stable hubName instead of mutable display name', () => {
-  const env = createEmptyEnv('market-maker-stable-hub-name');
+const gossipHub = (
+  entityId: string,
+  name: string,
+  hubName: string,
+  jurisdiction: Record<string, unknown> = { name: 'Arrakis', chainId: 31337, depositoryAddress: addr('11') },
+) => ({
+  name,
+  entityId,
+  runtimeId: `0x${entityId.slice(-4)}`,
+  metadata: { isHub: true, hubName, jurisdiction, board: { validators: [{ signerId: addr(entityId.slice(2, 4)) }] } },
+});
+
+test('market maker quotes only configured hub Entities under their configured name', () => {
+  const env = createEmptyEnv('market-maker-configured-hubs');
   env.gossip = {
     getProfiles: () => [
-      {
-        name: 'Name Only Hub',
-        entityId: entity('91'),
-        runtimeId: '0xnameonly',
-        metadata: {
-          isHub: true,
-          hubName: 'H1',
-          jurisdiction: { name: 'Arrakis' },
-          board: { validators: [{ signerId: addr('91') }] },
-        },
-      },
-      {
-        name: 'Desk Renamed By Admin',
-        entityId: entity('90'),
-        runtimeId: '0xruntime',
-        metadata: {
-          isHub: true,
-          hubName: 'H1',
-          jurisdiction: {
-            name: 'Arrakis',
-            chainId: 31337,
-            depositoryAddress: addr('11'),
-          },
-          board: { validators: [{ signerId: addr('90') }] },
-        },
-      },
+      gossipHub(entity('91'), 'Name Only Hub', 'H1', { name: 'Arrakis' }),
+      gossipHub(entity('90'), 'Desk Renamed By Admin', 'H9'),
+      // Any Entity can set isHub on itself; neither a configured name nor a
+      // fresh one makes it a counterparty that receives bootstrap credit.
+      gossipHub(entity('92'), 'H1', 'H1'),
+      gossipHub(entity('93'), 'Evil Hub', 'Evil'),
     ],
   } as RuntimeReplica['gossip'];
-
-  const visibleHubs = readVisibleHubProfiles(env);
-  expect(visibleHubs.map(hub => hub.entityId)).toEqual([entity('90')]);
-  expect(visibleHubs[0]?.name).toBe('Desk Renamed By Admin');
-  expect(visibleHubs[0]?.hubName).toBe('h1');
+  const previous = marketMakerArgs.hubIdentities;
+  marketMakerArgs.hubIdentities = parseConfiguredPeerIdentities(safeStringify([
+    { name: 'H1', entityId: entity('90'), signerId: addr('90'), jurisdictionName: 'Arrakis', chainId: 31337, depositoryAddress: addr('11') },
+    { name: 'H1', entityId: entity('91'), signerId: addr('91'), jurisdictionName: 'Arrakis', chainId: 31337, depositoryAddress: addr('11') },
+  ]), 'HUB_IDENTITIES');
+  try {
+    const visibleHubs = readVisibleHubProfiles(env);
+    expect(visibleHubs.map(hub => hub.entityId)).toEqual([entity('90')]);
+    expect(visibleHubs[0]?.name).toBe('Desk Renamed By Admin');
+    expect(visibleHubs[0]?.hubName).toBe('h1');
+  } finally {
+    marketMakerArgs.hubIdentities = previous;
+  }
 });
 
 test('runtime market maker health stays red until every byte-budgeted cross market is covered', () => {

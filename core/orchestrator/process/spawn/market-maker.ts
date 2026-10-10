@@ -19,6 +19,8 @@ import {
 } from '../child-recovery-policy';
 import { attachManagedChildFatalIpc, type ManagedChildFatalReport } from '../managed-child-fatal-ipc';
 import { createManagedRuntimeLeaseManager } from '../managed-runtime-leases';
+import { safeStringify } from '../../../protocol/serialization';
+import type { ManagedPeerIdentity } from '../../market-maker/identity-resolver';
 
 type LeaseManager = ReturnType<typeof createManagedRuntimeLeaseManager>;
 
@@ -31,7 +33,7 @@ type MarketMakerSpawnerDeps = {
   marketMakerChild: MarketMakerChild;
   buildSecondaryRpcArgs(): string[];
   buildRpcChildEnv(): Record<string, string>;
-  getHubSpecsArg(): string;
+  getHubIdentities(): ManagedPeerIdentity[];
   managedSpecForMarketMaker(): ManagedRuntimeSpec;
   reapStaleMarketMakerProcess(): Promise<void>;
   resetSupervisedChildForSpawn(child: MarketMakerChild): void;
@@ -121,7 +123,7 @@ export const createMarketMakerSpawner = (
     '--direct-ws-url', buildPublicDirectWsUrl(deps.args.publicWsBaseUrl, child.publicPort),
     '--rpc-url', deps.args.rpcUrl,
     ...deps.buildSecondaryRpcArgs(),
-    '--mesh-hub-names', deps.getHubSpecsArg(),
+    '--hub-identities-json', safeStringify(deps.getHubIdentities()),
     '--db-path', child.dbPath,
   ];
   deps.resetSupervisedChildForSpawn(child);

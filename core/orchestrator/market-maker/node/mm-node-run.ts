@@ -331,7 +331,7 @@ const computeMarketMakerHealthSnapshot = (
     return { health: null, visibleHubs: [], allVisibleHubs: [] };
   }
   const visibleHubs = readVisibleHubProfiles(env).filter(profile => sameJurisdiction(primaryContext, profile));
-  const allVisibleHubs = readVisibleHubProfiles(env, true);
+  const allVisibleHubs = readVisibleHubProfiles(env);
   const crossOverride = options.crossOverride;
   // With cross-J switched off the MM never plans a route, so health takes the
   // same "not applicable" path a single-jurisdiction topology takes.
@@ -479,7 +479,7 @@ const buildMarketMakerInfoResponseJson = (input: MarketMakerInfoProjection, incl
           crossDebug: buildMarketMakerCrossDebugSummary(
             input.env,
             [...input.contexts],
-            readVisibleHubProfiles(input.env, true),
+            readVisibleHubProfiles(input.env),
             new Map(input.tokenIdsByContext),
           ),
         }
@@ -667,7 +667,7 @@ const createMarketMakerHealthController = (deps: MarketMakerHealthControllerDeps
       allVisibleHubs,
       activeEntityId: deps.activeEntityId(),
       startupPhase: deps.startupPhase(),
-      expectedHubCount: resolvedArgs.meshHubNames.length,
+      expectedHubCount: new Set(resolvedArgs.hubIdentities.map(hub => hub.name)).size,
       readyHash: bootstrap.readyHash,
       runtimeStateHash: bootstrap.runtimeStateHash,
       entityStateHash: bootstrap.entityStateHash,
@@ -688,7 +688,7 @@ const createMarketMakerHealthController = (deps: MarketMakerHealthControllerDeps
   };
   const publishBootstrap = (): MarketMakerHealth | null => {
     if (!deps.bootstrapCrossStarted()) return publish({ includeCross: false });
-    const hubs = readVisibleHubProfiles(deps.env, true);
+    const hubs = readVisibleHubProfiles(deps.env);
     const plan = buildMarketMakerCrossPlanSummary([...deps.contexts()], hubs, new Map(deps.tokenIdsByContext()));
     return publish({ includeCross: false, crossOverride: buildPlannedMarketMakerCrossHealth(plan) });
   };
@@ -1521,7 +1521,7 @@ type MarketMakerBootstrapFinalizerDeps = {
 
 const createMarketMakerBootstrapFinalizer = (deps: MarketMakerBootstrapFinalizerDeps) => {
   const build = (): MarketMakerBootstrapFinalization => {
-    const visibleHubs = readVisibleHubProfiles(deps.env, true);
+    const visibleHubs = readVisibleHubProfiles(deps.env);
     if (!deps.allSameQuoteDepthReady(visibleHubs)) {
       throw new Error(
         `MARKET_MAKER_BOOTSTRAP_INCOMPLETE: ${safeStringify({
@@ -1734,7 +1734,7 @@ const createMarketMakerQuoteReadModel = (deps: MarketMakerQuoteReadModelDeps) =>
     });
   };
   const isBootstrapDepthComplete = (health: MarketMakerHealth | null): boolean =>
-    allSameDepthReady(readVisibleHubProfiles(deps.env, true)) &&
+    allSameDepthReady(readVisibleHubProfiles(deps.env)) &&
     isMarketMakerDepthComplete(health);
   const buildCompletionHealth = (): MarketMakerHealth | null => {
     if (completionHealthHeight === deps.env.state.height) return completionHealth;
@@ -1753,7 +1753,7 @@ const createMarketMakerQuoteReadModel = (deps: MarketMakerQuoteReadModelDeps) =>
     if (hasMarketMakerRuntimeBacklog(deps.env)) return false;
     const bootstrapCross = deps.bootstrapCross();
     if (!bootstrapCross.started) return false;
-    const visibleHubs = readVisibleHubProfiles(deps.env, true);
+    const visibleHubs = readVisibleHubProfiles(deps.env);
     const plan = buildMarketMakerCrossPlanSummary([...deps.contexts()], visibleHubs, new Map(deps.tokenIdsByContext()));
     if (plan.expectedRoutes > 0 && !bootstrapCross.producerAttempted) return false;
     return plan.expectedRoutes === 0 || !hasCrossAccountBacklog(visibleHubs);
@@ -1967,7 +1967,7 @@ const driveMarketMakerQuotes = async (
           ? MARKET_MAKER_BOOTSTRAP_CONNECTIVITY_MAX_TXS_PER_TICK
           : MARKET_MAKER_CONNECTIVITY_MAX_TXS_PER_TICK,
     };
-    const visibleHubs = readVisibleHubProfiles(deps.env, true);
+    const visibleHubs = readVisibleHubProfiles(deps.env);
     const shouldContinue = () => !deps.isShuttingDown();
     if (visibleHubs.length === 0 || !shouldContinue()) return false;
     if (!areMarketMakerHubTransportsReady(getP2PState(deps.env), visibleHubs)) return false;
@@ -2358,7 +2358,7 @@ const createMarketMakerQuoteLifecycle = (
     if (state.bootstrapCrossStarted) {
       state.phase = 'bootstrap-cross';
     } else if (
-      readModel.allSameDepthReady(readVisibleHubProfiles(env, true)) &&
+      readModel.allSameDepthReady(readVisibleHubProfiles(env)) &&
       isMarketMakerSameDepthComplete(currentHealth)
     ) {
       state.bootstrapCrossStarted = true;

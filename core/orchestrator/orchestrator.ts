@@ -1240,8 +1240,6 @@ const refreshChildHealthForResponse = async (): Promise<void> => {
   lastHealthResponseRefreshMs = Date.now() - startedAt;
 };
 
-const getHubSpecsArg = (): string => HUB_NAMES.join(',');
-
 const {
   getMarketMakerIdentities,
   getHubIdentities,
@@ -1766,7 +1764,7 @@ const spawnMarketMaker = createMarketMakerSpawner({
   marketMakerChild,
   buildSecondaryRpcArgs,
   buildRpcChildEnv,
-  getHubSpecsArg,
+  getHubIdentities,
   managedSpecForMarketMaker,
   reapStaleMarketMakerProcess,
   resetSupervisedChildForSpawn,

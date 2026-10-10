@@ -1100,7 +1100,7 @@ describe('production startup wiring', () => {
     expect(mmNode).not.toContain('launch one per-account settlement wave and wait for');
     expect(mmNode).not.toContain('MARKET_MAKER_BOOTSTRAP_MAX_NEW_CROSS_OFFERS_PER_TICK');
     expect(mmNode).toContain('bootstrapCrossStarted: false,');
-    expect(mmNode).toContain('readModel.allSameDepthReady(readVisibleHubProfiles(env, true))');
+    expect(mmNode).toContain('readModel.allSameDepthReady(readVisibleHubProfiles(env))');
     expect(mmNode).not.toContain('\n      state.bootstrapCrossStarted = false;');
     expect(mmNode).toContain('const previousPhase = state.phase;');
     expect(mmNode).toContain('if (state.phase === previousPhase) return;');
@@ -1116,7 +1116,7 @@ describe('production startup wiring', () => {
     expect(mmNode).toContain('targetHubs,');
     expect(mmNode).toContain("if (input.mode === 'bootstrap') {");
     expect(mmNode.replace(/\s+/g, '')).toContain(
-      'allSameDepthReady(readVisibleHubProfiles(deps.env,true))&&isMarketMakerDepthComplete(health)',
+      'allSameDepthReady(readVisibleHubProfiles(deps.env))&&isMarketMakerDepthComplete(health)',
     );
     expect(mmNode).toContain("scope: 'same-chain-all-contexts-depth'");
     expect(mmNode).not.toContain("if (mode !== 'bootstrap') return;");

@@ -20,7 +20,7 @@ import {
   defaultAccountDisputeConfigForRoleEvidence,
   type AccountRoleEvidence,
 } from '../../../account/config/dispute-config';
-import { HUB_NAMES, LIMITS, SWAP_CONSTANTS } from '../../../config/constants';
+import { LIMITS, SWAP_CONSTANTS } from '../../../config/constants';
 import { readCliOption } from '../../../config/cli';
 import { readBooleanEnv } from '../../../config/environment';
 import { resolveCrossJurisdictionRuntimeTopology } from '../../../extensions/cross-j/boundary';
@@ -94,6 +94,7 @@ import {
   type ResolvedMeshJurisdictionConfig,
 } from '../../mesh/mesh-jurisdictions';
 import { runtimeBacklogBlocksMarketMakerQuotes } from './mm-bootstrap-progress';
+import { parseConfiguredPeerIdentities, type ConfiguredPeerIdentity } from '../../mesh/hub-mesh-peers';
 
 type Args = {
   name: string;
@@ -106,7 +107,7 @@ type Args = {
   rpcUrl: string;
   rpc2Url: string;
   rpcUrls: Record<number, string>;
-  meshHubNames: string[];
+  hubIdentities: ConfiguredPeerIdentity[];
   dbPath: string;
 };
 
@@ -461,6 +462,8 @@ const parseArgs = (): Args => {
   }
   const seed = resolveChildSecret(childSecrets, 'runtimeSeed', getArg('--seed', process.env['XLN_RUNTIME_SEED'] || ''));
   if (!seed) throw new Error('Market-maker seed is required via inherited secret FD, --seed, or XLN_RUNTIME_SEED');
+  const hubIdentities = parseConfiguredPeerIdentities(getArg('--hub-identities-json', '[]'), 'HUB_IDENTITIES');
+  if (hubIdentities.length === 0) throw new Error('HUB_IDENTITIES_MISSING');
   return {
     name: getArg('--name', 'MM'),
     seed,
@@ -472,10 +475,7 @@ const parseArgs = (): Args => {
     rpcUrl: rpcUrls[1] || '',
     rpc2Url: rpcUrls[2] || '',
     rpcUrls,
-    meshHubNames: getArg('--mesh-hub-names', HUB_NAMES.join(','))
-      .split(',')
-      .map(part => part.trim())
-      .filter(Boolean),
+    hubIdentities,
     dbPath: getArg('--db-path', ''),
   };
 };
@@ -491,7 +491,7 @@ const defaultArgsForImport = (): Args => ({
   rpcUrl: '',
   rpc2Url: '',
   rpcUrls: {},
-  meshHubNames: [...HUB_NAMES],
+  hubIdentities: [],
   dbPath: '',
 });
 
@@ -770,25 +770,25 @@ const hubBaseName = (name: string): string =>
     ?.toLowerCase() || '';
 export const hubRoleName = (profile: Pick<HubProfile, 'name' | 'hubName'>): string =>
   hubBaseName(profile.hubName || profile.name);
-const readHubRoleName = (profile: { name?: string; metadata?: { hubName?: unknown } }): string => {
-  const metadataName = typeof profile.metadata?.hubName === 'string' ? profile.metadata.hubName : '';
-  return hubBaseName(metadataName || String(profile.name || ''));
-};
 
-export const readVisibleHubProfiles = (env: RuntimeReplica, includeSiblings = false): HubProfile[] => {
-  const required = new Set(resolvedArgs.meshHubNames.map(name => name.toLowerCase()));
+/**
+ * Any Entity can set isHub on itself, so gossip only locates hubs. The MM
+ * opens Accounts, grants bootstrap credit and quotes only on the hub Entities
+ * the orchestrator configured, under their configured name.
+ */
+export const readVisibleHubProfiles = (env: RuntimeReplica): HubProfile[] => {
+  const configured = new Map(resolvedArgs.hubIdentities.map(identity => [identity.entityId, identity] as const));
   return (env.gossip?.getProfiles?.() || [])
     .filter(
       profile =>
         typeof profile?.name === 'string' && typeof profile?.entityId === 'string' && profile.metadata?.isHub === true,
     )
-    .filter(profile => {
-      const roleName = readHubRoleName(profile);
-      if (required.has(roleName)) return true;
-      return includeSiblings && roleName.length > 0;
+    .flatMap(profile => {
+      const identity = configured.get(String(profile.entityId).toLowerCase());
+      return identity ? [{ profile, identity }] : [];
     })
-    .map(profile => {
-      const entityId = String(profile.entityId || '').toLowerCase();
+    .map(({ profile, identity }) => {
+      const entityId = identity.entityId;
       const committed = getEntityReplicaById(env, entityId);
       const roleEvidence = canonicalAccountRoleEvidence(
         { entityId, isHub: true, source: 'verified-gossip-profile' },
@@ -797,7 +797,7 @@ export const readVisibleHubProfiles = (env: RuntimeReplica, includeSiblings = fa
       );
       return {
       name: String(profile.name || '').trim(),
-      hubName: readHubRoleName(profile),
+      hubName: hubBaseName(identity.name),
       entityId,
       signerId: String(env.infrastructure?.verifiedProfileRoutes?.get(entityId)?.runtimeSignerId || '').toLowerCase(),
       runtimeId: normalizeRuntimeId(profile.runtimeId || ''),
