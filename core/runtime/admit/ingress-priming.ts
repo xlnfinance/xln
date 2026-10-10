@@ -23,12 +23,15 @@ const flushPending = (): void => {
   pendingByEntity.clear();
   pendingItems = 0;
   for (const [entityId, { txs, env }] of batches) {
-    void primeProposalHankos(txs);
-    const replica = Array.from(env.state.eReplicas.values()).find(
-      candidate => candidate.entityId.toLowerCase() === entityId,
-    );
-    if (!replica) continue;
+    // Priming is best effort and runs from a timer: a malformed input (or a
+    // missing local key) must reach the frame that judges it, never escape
+    // here as an uncaught exception that exits the process.
     try {
+      void primeProposalHankos(txs);
+      const replica = Array.from(env.state.eReplicas.values()).find(
+        candidate => candidate.entityId.toLowerCase() === entityId,
+      );
+      if (!replica) continue;
       primeInboundLayersAtIngress({
         state: replica.state,
         proposalTxs: txs,
@@ -36,7 +39,7 @@ const flushPending = (): void => {
         entityEncryptionPrivateKey: requireEntityEncryptionPrivateKey(env, replica.entityId),
       });
     } catch {
-      // No local encryption key for this Entity: nothing to prime.
+      // Nothing to prime; the synchronous path does the work.
     }
   }
 };
