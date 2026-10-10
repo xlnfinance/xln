@@ -189,10 +189,8 @@ const targetProposalResolved = (accountInput: AccountInput): boolean => {
   if (!proposal) return false;
   const pulls = crossPulls(proposal.frame.accountTxs, 'target');
   if (pulls.length === 0) return false;
-  const routeKeys = pulls.map(pull => admissionKey(
-    pull.data.crossJurisdiction!.orderId,
-    pull.data.crossJurisdiction!.routeHash,
-  ));
+  const bindings = pulls.map(pull => pull.data.crossJurisdiction!);
+  const routeKeys = bindings.map(binding => admissionKey(binding.orderId, binding.routeHash));
   return new Set(routeKeys).size === routeKeys.length;
 };
 
