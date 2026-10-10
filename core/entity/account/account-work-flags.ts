@@ -1,4 +1,4 @@
-import { getDefaultRebalancePolicyForToken } from '../../account/config/defaults';
+import { getDefaultRebalancePolicyForToken, hasRebalanceTokenMetadata } from '../../account/config/defaults';
 import { hasPendingSettlementTransition } from '../../account/tx/handlers/settlement/transition';
 import { deriveDelta } from '../../account/utils';
 import type { AccountReplica } from '../../types/account';
@@ -39,6 +39,7 @@ const hasRebalanceWork = (
     // Most Account rows have no withdrawable collateral. Avoid both registry
     // lookup and policy construction for that overwhelmingly common hot path.
     if (availableCollateral <= 0n) continue;
+    if (!hasRebalanceTokenMetadata(tokenId)) continue;
     if (availableCollateral > getDefaultRebalancePolicyForToken(tokenId).r2cRequestSoftLimit) return true;
   }
   return false;

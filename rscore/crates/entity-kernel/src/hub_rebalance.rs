@@ -382,6 +382,29 @@ fn collect_r2c_targets(
                 ));
                 continue;
             }
+            // Default fees exist only for catalog tokens; a delta may hold any
+            // u16 id (TS hasRebalanceTokenMetadata). Block, never halt.
+            if crate::canonical_token_decimals(u32::from(token_id.get())).is_none() {
+                effects.push(diagnostic(
+                    state,
+                    2,
+                    "blocked",
+                    "token_metadata_unavailable_manual",
+                    vec![
+                        (
+                            "counterpartyId".into(),
+                            CanonicalValue::String(view.account_id.clone()),
+                        ),
+                        (
+                            "tokenId".into(),
+                            CanonicalValue::Number(CanonicalNumber::from_u32(u32::from(
+                                token_id.get(),
+                            ))),
+                        ),
+                    ],
+                ));
+                continue;
+            }
             let minimum_fee = default_base_fee(*token_id)?
                 + requested_raw * liquidity_fee_bps / BigInt::from(10_000_u32);
             if fee.fee_paid_upfront < minimum_fee {
@@ -628,6 +651,9 @@ fn collect_c2r(
             }
             let (_, out_collateral, out_hold) = delta_parts(delta, view.owner_side);
             let free = (&out_collateral - &out_hold).max(BigInt::from(0_u8));
+            if crate::canonical_token_decimals(u32::from(token_id.get())).is_none() {
+                continue;
+            }
             let soft_limit = default_soft_limit(*token_id)?;
             if free <= soft_limit {
                 continue;
@@ -967,7 +993,16 @@ mod tests {
     }
 
     fn r2c_view(account_byte: u8, requested: u64, requested_at: u64) -> HubRebalanceAccountView {
-        let token = TokenId::new(1).expect("token");
+        r2c_view_for_token(1, account_byte, requested, requested_at)
+    }
+
+    fn r2c_view_for_token(
+        token_id: u32,
+        account_byte: u8,
+        requested: u64,
+        requested_at: u64,
+    ) -> HubRebalanceAccountView {
+        let token = TokenId::new(token_id).expect("token");
         let amount = BigInt::from(requested);
         let delta = Delta::new(
             token,
@@ -1030,6 +1065,33 @@ mod tests {
         assert_eq!(
             effects.iter().map(diagnostic_event).collect::<Vec<_>>(),
             ["hub_reserve_zero"]
+        );
+    }
+
+    #[test]
+    fn r2c_request_for_a_non_catalog_token_blocks_instead_of_halting() {
+        // A delta may hold any u16 token id. Pricing the default fee of one
+        // without catalog metadata returned TOKEN_METADATA_UNAVAILABLE and
+        // halted the hub; it now blocks with the TS diagnostic.
+        let mut state = hub_state(100);
+        state.reserves.insert(77, BigInt::from(600_u64));
+        let views = [r2c_view_for_token(77, 0x22, 400, 1)];
+        let mut effects = Vec::new();
+
+        let targets = collect_r2c_targets(
+            &state,
+            &views,
+            MatchingStrategy::Amount,
+            1,
+            &BigInt::from(0_u8),
+            &mut effects,
+        )
+        .expect("targets");
+
+        assert!(targets.is_empty());
+        assert_eq!(
+            effects.iter().map(diagnostic_event).collect::<Vec<_>>(),
+            ["token_metadata_unavailable_manual"]
         );
     }
 

@@ -91,32 +91,32 @@ fn initial_hub_policy_txs(
             detail: "rebalanceLiquidityFeeBps".to_string(),
         });
     }
-    let token_ids = commit
+    // The opener picks genesis token ids (any u16). A hub has a default policy
+    // only for tokens with catalog metadata; any other id gets none instead of
+    // TOKEN_METADATA_UNAVAILABLE halting the hub after the frame committed
+    // (TS buildInitialHubPolicyTargets).
+    let token_decimals = commit
         .transitions
         .iter()
         .filter_map(|transition| match transition.tx {
             AccountTx::AddDelta { token_id } => Some(token_id.get()),
             _ => None,
         })
-        .collect::<BTreeSet<_>>();
-    token_ids
+        .collect::<BTreeSet<_>>()
         .into_iter()
-        .map(|token_id| {
-            let decimals =
-                crate::canonical_token_decimals(u32::from(token_id)).ok_or_else(|| {
-                    EntityKernelError::HubRebalanceConfigInvalid {
-                        detail: format!("TOKEN_METADATA_UNAVAILABLE:{token_id}"),
-                    }
-                })?;
-            Ok(AccountTx::RebalancePolicy {
-                token_id: u32::from(token_id),
-                policy_version,
-                base_fee: BigInt::from(10_u8).pow(decimals - 1),
-                liquidity_fee_bps: liquidity_fee_bps.clone(),
-                gas_fee: BigInt::from(0),
-            })
+        .filter_map(|token_id| {
+            crate::canonical_token_decimals(u32::from(token_id))
+                .map(|decimals| (token_id, decimals))
+        });
+    Ok(token_decimals
+        .map(|(token_id, decimals)| AccountTx::RebalancePolicy {
+            token_id: u32::from(token_id),
+            policy_version,
+            base_fee: BigInt::from(10_u8).pow(decimals - 1),
+            liquidity_fee_bps: liquidity_fee_bps.clone(),
+            gas_fee: BigInt::from(0),
         })
-        .collect()
+        .collect())
 }
 
 fn require_one_output<'a>(

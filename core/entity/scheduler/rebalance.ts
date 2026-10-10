@@ -10,6 +10,7 @@ import {
   assertNoTokenlessHubRawOverrides,
   getDefaultRebalanceBaseFeeForToken,
   getDefaultRebalancePolicyForToken,
+  hasRebalanceTokenMetadata,
 } from '../../account/config/defaults';
 import { createStructuredLogger, shortId } from '../../support/logger';
 import {
@@ -182,6 +183,20 @@ const validateR2CRequestPolicy = (
       tokenId,
       requestPolicyVersion: feeState.policyVersion || 0,
       hubPolicyVersion: run.policyVersion,
+    });
+    return null;
+  }
+  if (!hasRebalanceTokenMetadata(tokenId)) {
+    console.warn(
+      `⏸️ R→C request pending (no catalog metadata, manual action required): ` +
+      `token=${tokenId} cp=${counterpartyId.slice(-4)}`,
+    );
+    run.debug({
+      step: 2,
+      status: 'blocked',
+      event: 'token_metadata_unavailable_manual',
+      counterpartyId,
+      tokenId,
     });
     return null;
   }
@@ -448,6 +463,7 @@ const collectC2RAccountWork = (
       derived.outCollateral > derived.outTotalHold
         ? derived.outCollateral - derived.outTotalHold
         : 0n;
+    if (!hasRebalanceTokenMetadata(tokenId)) continue;
     const softLimit =
       getDefaultRebalancePolicyForToken(tokenId).r2cRequestSoftLimit;
     if (free <= softLimit) continue;

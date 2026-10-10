@@ -22,6 +22,7 @@ import { getRebalanceAccountIds } from '../../../consensus/account/work-index';
 import { putEntityAccountCandidate } from '../../../state/persistent-account-map';
 import type { ApplyEntityTxOptions } from '../../apply';
 import { buildHubRebalancePolicyTx } from './lifecycle/admin';
+import { hasRebalanceTokenMetadata } from '../../../../account/config/defaults';
 import { applyCommittedCrossJurisdictionAccountTxFollowup } from '../account-cross-j-followups';
 import { processCommittedSettlementTransitionFollowup } from '../payments/settle';
 import { applyCommittedAccountFrameFollowups } from './committed-frame-followups';
@@ -405,9 +406,13 @@ export const buildInitialHubPolicyTargets = (
   config: HubRebalanceConfig,
   committedInboundGenesis: Pick<AccountFrame, 'accountTxs'>,
 ): AccountTxTarget[] => {
+  // The opener picks genesis token ids (any u16). A hub has a default policy
+  // only for tokens with catalog metadata; any other id gets none instead of
+  // TOKEN_METADATA_UNAVAILABLE halting the hub after the frame committed.
   const tokenIds = new Set(committedInboundGenesis.accountTxs
     .filter(tx => tx.type === 'add_delta')
-    .map(tx => tx.data.tokenId));
+    .map(tx => tx.data.tokenId)
+    .filter(hasRebalanceTokenMetadata));
   return [...tokenIds]
     .sort((left, right) => left - right)
     .map(tokenId => ({

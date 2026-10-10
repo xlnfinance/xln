@@ -98,6 +98,10 @@ test('inbound H1 policies derive from committed add_delta transitions, not a sta
       { type: 'add_delta', data: { tokenId: 1 } },
       { type: 'add_delta', data: { tokenId: 3 } },
       { type: 'add_delta', data: { tokenId: 2 } },
+      // The opener picks any u16. A token outside the catalog has no default
+      // policy: no target, instead of TOKEN_METADATA_UNAVAILABLE halting the
+      // hub after the genesis frame committed.
+      { type: 'add_delta', data: { tokenId: 77 } },
     ],
   });
 

@@ -5,7 +5,7 @@ import {
   scaleWholeTokenAmount,
   type RebalancePolicy,
 } from '../../types/finance/rebalance';
-import { getTokenInfo } from '../utils';
+import { getKnownTokenIds, getTokenInfo } from '../utils';
 
 export const DEFAULT_ACCOUNT_TOKEN_IDS = [1, 3, 2] as const; // USDC, USDT, WETH
 
@@ -27,6 +27,16 @@ export const assertNoTokenlessHubRawOverrides = (config: TokenlessHubRawOverride
 };
 
 const tokenDecimals = (tokenId: number): number => getTokenInfo(tokenId).decimals;
+
+const REBALANCE_CATALOG_TOKEN_IDS = new Set(getKnownTokenIds());
+
+/**
+ * Default rebalance policy and fees exist only for catalog tokens. Account
+ * deltas may hold any u16 token id (genesis add_delta, on-chain tokens beyond
+ * the catalog), so every hub rebalance path checks this before pricing one.
+ */
+export const hasRebalanceTokenMetadata = (tokenId: number): boolean =>
+  REBALANCE_CATALOG_TOKEN_IDS.has(tokenId);
 
 export const getDefaultRebalancePolicyForToken = (tokenId: number): RebalancePolicy =>
   buildDefaultRebalancePolicy(tokenDecimals(tokenId));
