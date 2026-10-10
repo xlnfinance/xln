@@ -1213,22 +1213,26 @@ describe('runtime output routing', () => {
     expect(warnings).toContain('ROUTE_RETARGET_REMOTE_PROFILE_SIGNER');
   });
 
-  test('fails fast on tx-bearing remote outputs with stale signer instead of gossip retargeting', () => {
+  test('a tx-bearing output keeps its certified signer when the gossip profile lags, never a halt', () => {
+    // The signer comes from the counterparty's certified Account Hanko. After
+    // a board rotation the Profile can lag; the throw halted the sender on
+    // every re-plan of the retained output. Never retargeted to gossip either.
     const targetRuntimeId = runtimeId('69');
     const targetEntityId = entityId('6a');
     const staleSenderSignerId = runtimeId('6b');
     const profileSeed = 'runtime-routing-stale-profile';
     const targetSignerId = deriveSignerAddressSync(profileSeed, '1').toLowerCase();
     const errors: string[] = [];
+    const warnings: string[] = [];
     const env = {
       runtimeId: runtimeId('11'),
-      warn: () => {},
+      warn: (_scope: string, code: string) => warnings.push(code),
       error: (_scope: string, code: string) => errors.push(code),
       infrastructure: {},
       gossip: gossipProfiles([signedRouteProfile(targetEntityId, targetRuntimeId, profileSeed)]),
     } as unknown as RuntimeReplica;
 
-    expect(() => planEntityOutputs(env, [{
+    const result = planEntityOutputs(env, [{
       entityId: targetEntityId,
       signerId: staleSenderSignerId,
       entityTxs: [{ type: 'accountInput', data: { fromEntityId: entityId('6d'), toEntityId: targetEntityId } } as any],
@@ -1242,9 +1246,12 @@ describe('runtime output routing', () => {
       resolveSoleLocalSignerForEntity: () => null,
       resolveRuntimeIdForEntity: () => targetRuntimeId,
       resolveRuntimeIdForCrossJurisdictionEntity: () => targetRuntimeId,
-    })).toThrow('ROUTE_REMOTE_SIGNER_MISMATCH');
+    });
 
-    expect(errors).toContain('ROUTE_REMOTE_SIGNER_MISMATCH');
+    expect(result.remoteOutputs[0]?.output.signerId).toBe(staleSenderSignerId);
+    expect(result.remoteOutputs[0]?.output.signerId).not.toBe(targetSignerId);
+    expect(warnings).toContain('ROUTE_REMOTE_SIGNER_PROFILE_STALE');
+    expect(errors).toEqual([]);
   });
 
   test('routes tx-bearing remote outputs when signer matches signed Profile authority', () => {

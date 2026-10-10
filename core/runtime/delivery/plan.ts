@@ -120,21 +120,18 @@ const alignRemoteOutputSigner = (
     signerId => signerId.toLowerCase() === outputSignerId.toLowerCase(),
   );
   if (!isTxBearingOutput(output) || signerKnown) return output;
-  const txTypes = (output.entityTxs || []).map(tx => tx.type);
-  env.error?.('network', 'ROUTE_REMOTE_SIGNER_MISMATCH', {
+  // A tx-bearing output's signer comes from the counterparty's certified
+  // Account Hanko. After a board rotation the gossip Profile can lag behind
+  // it, in either order; the certified signer is authoritative (Rust binds
+  // the route-table signer). A throw here halted the sender on every
+  // frame-start re-plan of the retained output.
+  env.warn?.('network', 'ROUTE_REMOTE_SIGNER_PROFILE_STALE', {
     entityId: output.entityId,
     signerId: output.signerId,
-    resolvedSignerId: preferredSignerId,
-    boardSignerIds: gossipSignerIds,
-    txTypes,
-    hasProposedFrame: Boolean(output.proposedFrame),
-    hasHashPrecommits: Boolean(output.hashPrecommits && output.hashPrecommits.size > 0),
+    profileSignerIds: gossipSignerIds,
+    txTypes: (output.entityTxs || []).map(tx => tx.type),
   }, output.entityId);
-  throw new Error(
-    'ROUTE_REMOTE_SIGNER_MISMATCH: entity=' + output.entityId +
-    ' signer=' + output.signerId + ' resolved=' + preferredSignerId +
-    ' txTypes=' + txTypes.join(','),
-  );
+  return output;
 };
 
 const bindVerifiedTargetRuntime = (
