@@ -30,6 +30,8 @@ type HtlcLockClock = Readonly<{
   enforcementJHeight: number;
 }>;
 
+const MAX_HTLC_TIMELOCK_MS = BigInt(Number.MAX_SAFE_INTEGER);
+
 const validateHtlcLock = (
   account: AccountReplica,
   tx: HtlcLockTx,
@@ -41,6 +43,13 @@ const validateHtlcLock = (
   if (account.state.locks.has(lockId)) return `Lock ${lockId} already exists`;
   if (isHtlcTimelockExpired(currentTimestamp, timelock)) {
     return `Timelock ${timelock} already expired (timestamp)`;
+  }
+  // The dispute ProofBody carries the deadline as a safe-integer unix second.
+  // A larger timelock made the receiver's proof build throw
+  // HTLC_LOCK_INVALID_TIMELOCK before the peer signature was even checked.
+  // Parity: HtlcRejection::TimelockOutOfRange (Rust htlc/transition.rs).
+  if (timelock > MAX_HTLC_TIMELOCK_MS) {
+    return `Timelock ${timelock} exceeds maximum ${MAX_HTLC_TIMELOCK_MS}`;
   }
   if (revealBeforeHeight <= currentJHeight) {
     return `revealBeforeHeight ${revealBeforeHeight} already passed (current J height: ${currentJHeight})`;

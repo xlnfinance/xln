@@ -392,3 +392,40 @@ fn restored_htlc_full_uint256_matches_admission_for_both_directions() {
         }
     }
 }
+
+#[test]
+fn lock_timelock_beyond_the_safe_integer_ms_domain_is_a_typed_rejection() {
+    // Parity: apply-account-tx-result.test.ts (TS validateHtlcLock). The TS
+    // ProofBody deadline is a safe-integer second; Rust accepted a larger
+    // timelock and the TS receiver threw while building the dispute proof.
+    let base = left_base(100);
+    let with_timelock = |timelock: u64| {
+        let mut tx = lock_tx(HASHLOCK, 10.into());
+        let AccountTx::HtlcLock(lock) = &mut tx else {
+            unreachable!("fixture is an HTLC lock")
+        };
+        lock.timelock = BigInt::from(timelock);
+        tx
+    };
+    assert_eq!(
+        rejected_message(
+            &base,
+            Side::Left,
+            &with_timelock(9_007_199_254_740_992),
+            1_000,
+            10
+        ),
+        (
+            "ACCOUNT_TX_VALIDATION".to_string(),
+            "Timelock 9007199254740992 exceeds maximum 9007199254740991".to_string()
+        )
+    );
+    let at_maximum = SequentialAccountEngine::apply_with_context(
+        &base,
+        Side::Left,
+        &with_timelock(9_007_199_254_740_991),
+        &execution_context(1_000, 10),
+    )
+    .expect("maximum timelock");
+    assert_eq!(at_maximum.verdict(), &AccountVerdict::Applied);
+}

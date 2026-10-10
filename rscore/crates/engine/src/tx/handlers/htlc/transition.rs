@@ -11,6 +11,9 @@ use crate::{
 
 const MAX_ACCOUNT_HTLC_LOCKS: usize = 32;
 
+/// JavaScript `Number.MAX_SAFE_INTEGER`, the TS UnixMs domain.
+const MAX_HTLC_TIMELOCK_MS: u64 = 9_007_199_254_740_991;
+
 pub(crate) fn apply_lock(
     replica: &mut AccountReplica,
     proposer: Side,
@@ -32,6 +35,16 @@ pub(crate) fn apply_lock(
     if BigInt::from(context.enforcement_timestamp) >= tx.timelock.clone() {
         return Ok(rejected(HtlcRejection::TimelockExpired {
             timelock: tx.timelock.clone(),
+        }));
+    }
+    // Parity target: validateHtlcLock (core/account/tx/handlers/htlc/lock.ts).
+    // The ProofBody deadline is a safe-integer unix second on the TS side, so
+    // a larger timelock is refused here instead of diverging at proof build.
+    let maximum = BigInt::from(MAX_HTLC_TIMELOCK_MS);
+    if tx.timelock > maximum {
+        return Ok(rejected(HtlcRejection::TimelockOutOfRange {
+            timelock: tx.timelock.clone(),
+            maximum,
         }));
     }
     if tx.reveal_before_height <= context.enforcement_j_height {

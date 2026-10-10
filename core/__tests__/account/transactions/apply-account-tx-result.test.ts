@@ -221,6 +221,30 @@ describe('ApplyAccountTxResult payment/HTLC/settlement dispositions', () => {
     discardAccountTransition(transition);
   });
 
+  test('htlc_lock timelock beyond the safe-integer ms domain is a typed rejection', async () => {
+    // Parity: Rust lock_timelock_beyond_the_safe_integer_ms_domain_is_a_typed_rejection.
+    // The ProofBody deadline is a safe-integer second; a larger timelock made
+    // the receiver's proof build throw before the peer signature was checked.
+    const transition = beginAccountTransition(makeAccount(LEFT, RIGHT));
+    const draft = accountTransitionView(transition);
+    const lock = (timelock: bigint): Extract<AccountTx, { type: 'htlc_lock' }> => {
+      const hashlock = hashHtlcSecret(HEX32('46'));
+      return {
+        type: 'htlc_lock',
+        data: { lockId: hashlock, hashlock, timelock, revealBeforeHeight: 10, amount: 7n, tokenId: 1 },
+      };
+    };
+    const tooLate = await applyAccountTx(draft, lock(9_007_199_254_740_992n), true, 1_000);
+    expect(rejectionOf(tooLate)).toEqual({
+      kind: 'validation',
+      code: ACCOUNT_TX_REJECTION_CODES.validation,
+      message: 'Timelock 9007199254740992 exceeds maximum 9007199254740991',
+    });
+    expect(draft.state.locks.size).toBe(0);
+    expect((await applyAccountTx(draft, lock(9_007_199_254_740_991n), true, 1_000)).ok).toBe(true);
+    discardAccountTransition(transition);
+  });
+
   test('htlc timeout returns htlc_error and releases the hold', async () => {
     const account = makeAccount(LEFT, RIGHT);
     const transition = beginAccountTransition(account);

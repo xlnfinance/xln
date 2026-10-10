@@ -209,6 +209,10 @@ pub enum HtlcRejection {
     TimelockExpired {
         timelock: BigInt,
     },
+    TimelockOutOfRange {
+        timelock: BigInt,
+        maximum: BigInt,
+    },
     RevealHeightPassed {
         reveal_before_height: u64,
         current_j_height: u64,
@@ -262,6 +266,9 @@ impl HtlcRejection {
             Self::LockExists { lock_id } => format!("Lock {lock_id} already exists"),
             Self::TimelockExpired { timelock } => {
                 format!("Timelock {timelock} already expired (timestamp)")
+            }
+            Self::TimelockOutOfRange { timelock, maximum } => {
+                format!("Timelock {timelock} exceeds maximum {maximum}")
             }
             Self::RevealHeightPassed {
                 reveal_before_height,
