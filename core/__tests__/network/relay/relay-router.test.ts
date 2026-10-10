@@ -457,8 +457,10 @@ describe('relay-router gossip fanout', () => {
       },
     };
     const wsA: FakeWs = { label: 'A' };
+    const wsB: FakeWs = { label: 'B' };
 
     await relayRoute(config, wsA, signedHello(RUNTIME_A, SEED_A, KEY_A));
+    await relayRoute(config, wsB, signedHello(RUNTIME_B, SEED_B, KEY_B));
 
     await relayRoute(config, wsA, {
       type: 'gossip_announce',
@@ -467,8 +469,19 @@ describe('relay-router gossip fanout', () => {
       fromEncryptionPubKey: KEY_A,
       to: SERVER_RUNTIME_ID,
       payload: {
+        profiles: [buildProfile(ENTITY_A, RUNTIME_A, KEY_A, { lastUpdated: 100, name: 'leaf-a' })],
+        jurisdictions: [],
+      },
+    });
+    // A Runtime announces only its own Entities' profiles.
+    await relayRoute(config, wsB, {
+      type: 'gossip_announce',
+      id: 'announce-b',
+      from: RUNTIME_B,
+      fromEncryptionPubKey: KEY_B,
+      to: SERVER_RUNTIME_ID,
+      payload: {
         profiles: [
-          buildProfile(ENTITY_A, RUNTIME_A, KEY_A, { lastUpdated: 100, name: 'leaf-a' }),
           buildProfile(ENTITY_B, RUNTIME_B, KEY_B, {
             lastUpdated: 200,
             name: 'hub-b',
@@ -1184,6 +1197,33 @@ describe('relay-router gossip fanout', () => {
 
     expect(store.gossipProfiles.size).toBe(0);
     expect(store.debugEvents.some(event => event.reason === 'GOSSIP_PROFILE_SIGNATURE_INVALID')).toBe(true);
+  });
+
+  test('drops a gossip profile that claims another runtime than its announcer', async () => {
+    // Anyone can self-sign a lazy Entity profile. Unbound, it claimed a victim
+    // Runtime's id with another key or endpoint (Rust RUNTIME_BINDING).
+    const store = createRelayStore(SERVER_RUNTIME_ID);
+    const config = { store, localRuntimeId: SERVER_RUNTIME_ID, send: () => {}, verifyProfile: async () => ({ valid: true }) };
+    const wsA: FakeWs = { label: 'A' };
+
+    await relayRoute(config, wsA, signedHello(RUNTIME_A, SEED_A, KEY_A));
+    await relayRoute(config, wsA, {
+      type: 'gossip_announce',
+      id: 'announce-foreign-runtime',
+      from: RUNTIME_A,
+      fromEncryptionPubKey: KEY_A,
+      to: SERVER_RUNTIME_ID,
+      payload: {
+        profiles: [
+          buildProfile(ENTITY_A, RUNTIME_A, KEY_A),
+          buildProfile(ENTITY_B, RUNTIME_B, KEY_A),
+        ],
+        jurisdictions: [],
+      },
+    });
+
+    expect([...store.gossipProfiles.keys()]).toEqual([ENTITY_A.toLowerCase()]);
+    expect(store.debugEvents.some(event => event.reason === 'GOSSIP_PROFILE_RUNTIME_BINDING')).toBe(true);
   });
 
   test('prefers verified relay socket encryption key over gossip profile cache', () => {

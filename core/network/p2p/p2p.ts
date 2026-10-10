@@ -1318,7 +1318,27 @@ export class RuntimeP2P {
   async admitGossipAnnouncement(from: string, payload: unknown): Promise<void> {
     const decoded = decodeGossipPayload(payload);
     this.applyIncomingJurisdictions(from, decoded.jurisdictions);
-    await this.applyIncomingProfiles(from, decoded.profiles);
+    await this.applyIncomingProfiles(
+      from,
+      decoded.profiles.filter(profile => this.isAnnouncersOwnProfile(from, profile)),
+    );
+  }
+
+  /**
+   * A Runtime announces only its own Entities' routes (Rust RUNTIME_BINDING).
+   * Anyone can self-sign a lazy Entity profile; unbound, it could claim a
+   * victim Runtime's id with another key or endpoint.
+   */
+  private isAnnouncersOwnProfile(from: string, profile: unknown): boolean {
+    const runtimeId = typeof profile === 'object' && profile !== null
+      ? (profile as { runtimeId?: unknown }).runtimeId
+      : undefined;
+    if (typeof runtimeId === 'string' && normalizeRuntimeId(runtimeId) === normalizeRuntimeId(from)) return true;
+    this.env.warn('network', 'P2P_GOSSIP_PROFILE_RUNTIME_BINDING', {
+      from: String(from),
+      runtimeId: String(runtimeId ?? ''),
+    });
+    return false;
   }
 
   private async ensureProfilesUncoalesced(requestedEntityIds: string[], depth: number = 1): Promise<boolean> {
@@ -1996,21 +2016,21 @@ export class RuntimeP2P {
   private resolveTargetEncryptionKey(targetRuntimeId: string): Uint8Array | null {
     const normalizedTargetRuntimeId = normalizeRuntimeId(targetRuntimeId);
     if (!normalizedTargetRuntimeId) return null;
-    const signedKeys = new Set<string>();
+    // Routes are bound to the announcing Runtime, so two keys for one Runtime
+    // mean it re-keyed and some of its profiles are stale: the newest wins.
+    // A throw here halted every sender to that Runtime.
+    let selected: { key: string; lastUpdated: number } | null = null;
     for (const route of this.verifiedProfileRoutes.values()) {
       if (normalizeRuntimeId(route.runtimeId) !== normalizedTargetRuntimeId) continue;
       const rawKey = route.runtimeEncPubKey;
       if (typeof rawKey !== 'string' || rawKey.length === 0) continue;
       const normalizedKey = rawKey.startsWith('0x') ? rawKey.toLowerCase() : `0x${rawKey.toLowerCase()}`;
       if (!/^0x[0-9a-f]{64}$/.test(normalizedKey)) continue;
-      signedKeys.add(normalizedKey);
+      if (!selected || route.lastUpdated > selected.lastUpdated) {
+        selected = { key: normalizedKey, lastUpdated: route.lastUpdated };
+      }
     }
-    if (signedKeys.size > 1) {
-      throw new Error(`P2P_SIGNED_RUNTIME_KEY_CONFLICT: runtimeId=${normalizedTargetRuntimeId}`);
-    }
-    const selectedKey = signedKeys.values().next().value as string | undefined;
-    if (!selectedKey) return null;
-    return hexToPubKey(selectedKey);
+    return selected ? hexToPubKey(selected.key) : null;
   }
 
   private validateTransportEncryptionHint(fromRuntimeId: string, pubKeyHex: string): void {

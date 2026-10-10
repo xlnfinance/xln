@@ -384,6 +384,7 @@ type StoredGossipProfiles = {
   stored: number;
   droppedMalformed: number;
   droppedInvalidSignature: number;
+  droppedRuntimeBinding: number;
   profiles: Profile[];
 };
 
@@ -397,12 +398,28 @@ const storeAnnouncedProfiles = async (
     stored: 0,
     droppedMalformed: 0,
     droppedInvalidSignature: 0,
+    droppedRuntimeBinding: 0,
     profiles: [],
   };
   const verifyProfile = config.verifyProfile ?? verifyProfileSignature;
   for (const value of profiles) {
     try {
       const profile = parseProfile(value);
+      // A Runtime announces only its own Entities' routes (Rust RUNTIME_BINDING).
+      // Anyone can self-sign a lazy Entity profile; without this binding it
+      // could claim a victim Runtime's id with another key or endpoint.
+      if (profile.runtimeId && normalizeRuntimeKey(profile.runtimeId) !== fromKey) {
+        result.droppedRuntimeBinding += 1;
+        pushDebugEvent(config.store, {
+          event: 'error',
+          from,
+          msgType: type,
+          status: 'rejected',
+          reason: 'GOSSIP_PROFILE_RUNTIME_BINDING',
+          details: { entityId: String(profile.entityId ?? ''), traceId },
+        });
+        continue;
+      }
       const normalized: Profile = { ...profile, runtimeId: profile.runtimeId || fromKey };
       const verified = await verifyProfile(normalized);
       if (!verified.valid) {
@@ -545,6 +562,7 @@ const handleGossipAnnounce = async (context: RelayRouteContext): Promise<boolean
       stored: stored.stored,
       droppedMalformed: stored.droppedMalformed,
       droppedInvalidSignature: stored.droppedInvalidSignature,
+      droppedRuntimeBinding: stored.droppedRuntimeBinding,
       jurisdictionsStored: storedJurisdictions.length,
       broadcastTargets,
       traceId,

@@ -223,7 +223,10 @@ describe('RuntimeP2P direct transport policy', () => {
       .toBe('33'.repeat(32));
   });
 
-  test('fails closed when signed profiles disagree on one runtime encryption key', () => {
+  test('a re-keyed runtime resolves to its newest signed profile key, never a halt', () => {
+    // Routes are bound to the announcing Runtime, so two keys for one Runtime
+    // mean it re-keyed and some profiles are stale. The conflict used to
+    // throw on the send path and halt every sender to that Runtime.
     const hubRuntimeId = runtimeIdFor('conflicting-key');
     const p2p = makeP2P([
       buildProfile('44', hubRuntimeId, key('44'), true, 'ws://127.0.0.1:9104/direct-runtime'),
@@ -236,11 +239,29 @@ describe('RuntimeP2P direct transport policy', () => {
     internal.rememberVerifiedProfileRoute(
       buildProfile('44', hubRuntimeId, key('44'), true, 'ws://127.0.0.1:9104/direct-runtime'),
     );
-    internal.rememberVerifiedProfileRoute(
-      buildProfile('55', hubRuntimeId, key('55'), true, 'ws://127.0.0.1:9104/direct-runtime'),
-    );
+    internal.rememberVerifiedProfileRoute({
+      ...buildProfile('55', hubRuntimeId, key('55'), true, 'ws://127.0.0.1:9104/direct-runtime'),
+      lastUpdated: 2,
+    });
 
-    expect(() => internal.resolveTargetEncryptionKey(hubRuntimeId))
-      .toThrow('P2P_SIGNED_RUNTIME_KEY_CONFLICT');
+    expect(Buffer.from(internal.resolveTargetEncryptionKey(hubRuntimeId) ?? []).toString('hex'))
+      .toBe('55'.repeat(32));
+  });
+
+  test('a direct announcement carries only the announcing runtime\'s own profiles', async () => {
+    // Anyone can self-sign a lazy Entity profile. Unbound, it could claim a
+    // victim Runtime's id with another key or endpoint (Rust RUNTIME_BINDING).
+    const announcer = runtimeIdFor('announcer');
+    const victim = runtimeIdFor('victim');
+    const p2p = makeP2P([]);
+    const admitted: unknown[][] = [];
+    const internal = p2p as unknown as {
+      applyIncomingProfiles: (from: string, profiles: unknown[]) => Promise<void>;
+    };
+    internal.applyIncomingProfiles = async (_from, profiles) => { admitted.push(profiles); };
+    const own = buildProfile('66', announcer, key('66'), false, null);
+    const claimed = buildProfile('77', victim, key('77'), true, 'ws://127.0.0.1:9107/direct-runtime');
+    await p2p.admitGossipAnnouncement(announcer, { profiles: [own, claimed], jurisdictions: [] });
+    expect(admitted).toEqual([[own]]);
   });
 });
