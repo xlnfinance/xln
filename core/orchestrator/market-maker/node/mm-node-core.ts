@@ -948,11 +948,31 @@ const withCrossMinQuoteNotionalSourceAmount = (
   return quoteAmount >= minimumSourceAmount ? quoteAmount : minimumSourceAmount;
 };
 
-const getCrossSourceToTargetMidTicks = (sourceTokenId: number, targetTokenId: number): bigint => {
-  if (sourceTokenId === targetTokenId) return ORDERBOOK_PRICE_SCALE;
-  const oriented = getSwapPairOrientation(sourceTokenId, targetTokenId);
-  const policy = getSwapPairPolicyByBaseQuote(oriented.baseTokenId, oriented.quoteTokenId);
-  return sourceTokenId === oriented.baseTokenId ? policy.mmMidPriceTicks : invertPriceTicks(policy.mmMidPriceTicks);
+/**
+ * One cross level in quote per canonical base. The source leg sells: a
+ * base-source offer is an ask above the venue mid, a quote-source offer a bid
+ * below it. Both directions of a venue derive the mid from the policy once;
+ * inverting the scaled integer twice moved quote-source bids off mid (1e8/3 at
+ * mid 3000 is 11% high), crossing the MM's own asks.
+ */
+export const deriveMarketMakerCrossLevelPriceTicks = (input: Readonly<{
+  policyMidTicks: bigint;
+  canonicalBaseIsPolicyBase: boolean;
+  sourceIsBase: boolean;
+  offsetBps: number;
+  priceStepTicks: number;
+}>): Readonly<{ venueMidTicks: bigint; priceTicks: bigint }> => {
+  // The venue orients by asset key, so its base can be the policy quote (both-stable pairs).
+  const venueMidTicks = input.canonicalBaseIsPolicyBase
+    ? input.policyMidTicks
+    : invertPriceTicks(input.policyMidTicks);
+  const rawPriceTicks = input.sourceIsBase
+    ? (venueMidTicks * BigInt(10_000 + input.offsetBps)) / 10_000n
+    : (venueMidTicks * BigInt(Math.max(1, 10_000 - input.offsetBps))) / 10_000n;
+  return {
+    venueMidTicks,
+    priceTicks: snapPriceTicks(rawPriceTicks, input.priceStepTicks, input.sourceIsBase ? 'up' : 'down'),
+  };
 };
 
 const computeCrossTargetAmount = (
@@ -1552,26 +1572,25 @@ export const buildMarketMakerCrossOfferSpecs = (
         targetJurisdictionRef,
         pair.targetTokenId,
       );
-      const sourceToTargetMidTicks = getCrossSourceToTargetMidTicks(pair.sourceTokenId, pair.targetTokenId);
-      const canonicalMidTicks = market.sourceIsBase ? sourceToTargetMidTicks : invertPriceTicks(sourceToTargetMidTicks);
       const oriented =
         pair.sourceTokenId === pair.targetTokenId
           ? { baseTokenId: pair.sourceTokenId, quoteTokenId: pair.targetTokenId }
           : getSwapPairOrientation(pair.sourceTokenId, pair.targetTokenId);
       const pairPolicy = getSwapPairPolicyByBaseQuote(oriented.baseTokenId, oriented.quoteTokenId);
+      const canonicalBaseIsPolicyBase =
+        (market.sourceIsBase ? pair.sourceTokenId : pair.targetTokenId) === oriented.baseTokenId;
       const levelProfile = getMarketMakerLevelProfile(oriented.baseTokenId, oriented.quoteTokenId);
       const levelCount = Math.min(MARKET_MAKER_LEVELS_PER_SIDE, levelProfile.offsetsBps.length);
 
       for (let level = 0; level < levelCount; level += 1) {
         const offsetBps = levelProfile.offsetsBps[level]!;
-        const rawPriceTicks = market.sourceIsBase
-          ? (canonicalMidTicks * BigInt(10_000 + offsetBps)) / 10_000n
-          : (canonicalMidTicks * BigInt(Math.max(1, 10_000 - offsetBps))) / 10_000n;
-        const priceTicks = snapPriceTicks(
-          rawPriceTicks,
-          pairPolicy.priceStepTicks,
-          market.sourceIsBase ? 'up' : 'down',
-        );
+        const { venueMidTicks: canonicalMidTicks, priceTicks } = deriveMarketMakerCrossLevelPriceTicks({
+          policyMidTicks: pairPolicy.mmMidPriceTicks,
+          canonicalBaseIsPolicyBase,
+          sourceIsBase: market.sourceIsBase,
+          offsetBps,
+          priceStepTicks: pairPolicy.priceStepTicks,
+        });
         if (!isWithinPairBand(canonicalMidTicks, priceTicks)) continue;
         const sourceAmount = withCrossMinQuoteNotionalSourceAmount(
           pair.sourceTokenId,

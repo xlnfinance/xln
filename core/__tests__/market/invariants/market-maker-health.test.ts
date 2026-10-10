@@ -29,6 +29,7 @@ import { submitMarketMakerBootstrapCrossQuotes } from '../../../orchestrator/mar
 import { buildMarketMakerCrossPlanSummary } from '../../../orchestrator/market-maker/node/mm-node-health';
 import {
   MARKET_MAKER_LEVELS_PER_SIDE,
+  deriveMarketMakerCrossLevelPriceTicks,
   listMarketMakerQuotablePairs,
   resolvedArgs as marketMakerArgs,
 } from '../../../orchestrator/market-maker/node/mm-node-core';
@@ -585,6 +586,26 @@ test('three-jurisdiction cross depth keeps every MM Account inside the cross-j p
   const plan = buildMarketMakerCrossPlanSummary(contexts, hubs, new Map(contexts.map(context => [context.entityId, [1, 2, 3]])));
   expect(plan.expectedRoutes).toBe(6);
   expect(plan.expectedOffersPerRoute).toBe(Math.floor(LIMITS.MAX_ACCOUNT_CROSS_J_SWAP_OFFERS / 4));
+});
+
+test('both cross directions of one venue price off one mid, so the bids never cross the own asks', () => {
+  // 3000 quote per base: 1e8 / 30_000_000 is not an integer at the 10_000 tick scale.
+  const policyMidTicks = 30_000_000n;
+  const level = (sourceIsBase: boolean) => deriveMarketMakerCrossLevelPriceTicks({
+    policyMidTicks,
+    canonicalBaseIsPolicyBase: true,
+    sourceIsBase,
+    offsetBps: 2,
+    priceStepTicks: 1,
+  });
+  const ask = level(true);
+  const bid = level(false);
+
+  expect(ask.venueMidTicks).toBe(policyMidTicks);
+  expect(bid.venueMidTicks).toBe(policyMidTicks);
+  expect(ask.priceTicks).toBe(30_006_000n);
+  expect(bid.priceTicks).toBe(29_994_000n);
+  expect(bid.priceTicks).toBeLessThan(ask.priceTicks);
 });
 
 test('cross offer construction requires the deterministic Runtime-frame timestamp', () => {
