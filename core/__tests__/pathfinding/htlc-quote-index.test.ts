@@ -5,6 +5,7 @@ import {
   lookupUniqueRoutingProfile,
   quoteHtlcPaymentRoute,
 } from '../../pathfinding/htlc-quote';
+import { calculateRequiredInboundForDesiredForward } from '../../protocol/htlc/utils';
 
 const id = (nibble: string): string => `0x${nibble.repeat(32)}`;
 const ALICE = id('1');
@@ -45,6 +46,35 @@ describe('routing profile index', () => {
     expect(() => lookupUniqueRoutingProfile(index, id('4'))).toThrow('HTLC_PAYMENT_PROFILE_MATCH_COUNT');
     const duplicated = buildRoutingProfileIndex([userProfile(BOB, HUB), userProfile(BOB, HUB)]);
     expect(() => lookupUniqueRoutingProfile(duplicated, BOB)).toThrow(':2');
+  });
+
+  test('a hub base fee far above the payment quotes instead of throwing', () => {
+    // 10 units through a hub charging base 10_000_000 + 1 ppm. The first
+    // search probe already has fee >= amount; the old inversion threw
+    // "Fee ... exceeds amount" there and halted the payer's Runtime.
+    const greedyHub = { ...hubProfile(), metadata: { routingFeePPM: 1, baseFee: 10_000_000n } };
+    const quote = quoteHtlcPaymentRoute(
+      [userProfile(ALICE, HUB), greedyHub, userProfile(BOB, HUB)],
+      [ALICE, HUB, BOB],
+      1,
+      10n,
+    );
+    expect(quote.senderLockAmount).toBe(10_000_020n);
+    expect(quote.hopForwardAmounts.get(HUB)).toBe(10n);
+  });
+
+  test('fee inversion returns the exact minimum inbound, like Rust required_htlc_inbound', () => {
+    const forwarded = (amountIn: bigint, ppm: number, base: bigint) =>
+      amountIn - (base + (amountIn * BigInt(ppm)) / 1_000_000n);
+    for (const [desired, ppm, base] of [
+      [1n, 0, 0n], [10n, 1, 10_000_000n], [1n, 999_999, 0n], [123_456n, 2_500, 7n],
+    ] as const) {
+      const inbound = calculateRequiredInboundForDesiredForward(desired, ppm, base);
+      expect(forwarded(inbound, ppm, base) >= desired).toBe(true);
+      expect(forwarded(inbound - 1n, ppm, base) < desired).toBe(true);
+    }
+    expect(() => calculateRequiredInboundForDesiredForward(1n, 1_000_000, 0n))
+      .toThrow('HTLC_QUOTE_FEE_INVALID');
   });
 
   test('a missing hop profile fails quote instead of inventing capacity', () => {

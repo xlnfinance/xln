@@ -173,17 +173,6 @@ export const HTLC = {
 
   /** Default HTLC expiry (baseline, may be raised per-route) */
   DEFAULT_EXPIRY_MS: 30_000,
-
-  /** Base fee in USD (micro basis points) */
-  BASE_FEE_USD: 0n, // No base fee
-
-  /** Fee rate in micro basis points (μbp) */
-  // 1 μbp = 0.0001 bp = 0.00001% = 1/10,000,000
-  // 100 μbp = 0.01 bp = 0.001% = 1 bp for hubs
-  FEE_RATE_UBP: 100n, // 1 basis point for hubs to see profits
-
-  /** Fee denominator for μbp calculation */
-  FEE_DENOMINATOR: 10_000_000n, // Fee = (amount × FEE_RATE_UBP) / FEE_DENOMINATOR
 } as const;
 
 // ═══════════════════════════════════════════════════════════════

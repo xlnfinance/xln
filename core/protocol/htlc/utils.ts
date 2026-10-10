@@ -6,56 +6,35 @@
 import { ethers } from 'ethers';
 import { HTLC } from '../../config/constants';
 
-const DEFAULT_FEE_PPM = Number((HTLC.FEE_RATE_UBP * 1_000_000n) / HTLC.FEE_DENOMINATOR);
-
 /**
- * Calculate forwarded amount after fees.
- * Fee = baseFee + floor(amountIn * feePPM / 1,000,000)
- */
-function calculateHtlcForwardAmount(
-  amountIn: bigint,
-  feePPM: number = DEFAULT_FEE_PPM,
-  baseFee: bigint = HTLC.BASE_FEE_USD
-): bigint {
-  if (amountIn <= 0n) {
-    throw new Error(`Amount must be positive (got ${amountIn})`);
-  }
-  const ppm = Number.isFinite(feePPM) && feePPM >= 0 ? BigInt(Math.floor(feePPM)) : 0n;
-  const rateFee = (amountIn * ppm) / 1_000_000n;
-  const totalFee = baseFee + rateFee;
-
-  if (totalFee >= amountIn) {
-    throw new Error(`Fee ${totalFee} exceeds amount ${amountIn}`);
-  }
-
-  return amountIn - totalFee;
-}
-
-/**
- * Compute minimal inbound amount needed to guarantee desired forwarded amount.
- * Inversion of calculateHtlcForwardAmount with integer rounding.
+ * Minimal inbound amount whose forward, after `baseFee + floor(in * ppm / 1e6)`,
+ * still reaches `desiredForwardAmount`. Parity: Rust `required_htlc_inbound`
+ * (entity-kernel prepared_context/htlc.rs).
+ *
+ * The forward is allowed to go negative while searching. A hub may advertise
+ * a base fee far above the payment, so the first probe can already be "fee >=
+ * amount"; treating that as an error halted the payer on a valid profile.
  */
 export function calculateRequiredInboundForDesiredForward(
   desiredForwardAmount: bigint,
-  feePPM: number = DEFAULT_FEE_PPM,
-  baseFee: bigint = HTLC.BASE_FEE_USD
+  feePPM: number,
+  baseFee: bigint,
 ): bigint {
-  if (desiredForwardAmount <= 0n) {
-    throw new Error(`Desired forward amount must be positive (got ${desiredForwardAmount})`);
+  if (
+    desiredForwardAmount <= 0n
+    || !Number.isSafeInteger(feePPM) || feePPM < 0 || feePPM >= 1_000_000
+    || baseFee < 0n
+  ) {
+    throw new Error('HTLC_QUOTE_FEE_INVALID');
   }
-  const ppm = Number.isFinite(feePPM) && feePPM >= 0 ? Math.floor(feePPM) : 0;
-  if (ppm === 0 && baseFee === 0n) return desiredForwardAmount;
-
+  const ppm = BigInt(feePPM);
+  const forwarded = (amountIn: bigint): bigint => amountIn - (baseFee + (amountIn * ppm) / 1_000_000n);
   let low = desiredForwardAmount + baseFee;
   let high = low;
-  while (calculateHtlcForwardAmount(high, ppm, baseFee) < desiredForwardAmount) {
-    high = high * 2n;
-  }
-
+  while (forwarded(high) < desiredForwardAmount) high *= 2n;
   while (low < high) {
     const mid = (low + high) / 2n;
-    const out = calculateHtlcForwardAmount(mid, ppm, baseFee);
-    if (out >= desiredForwardAmount) high = mid;
+    if (forwarded(mid) >= desiredForwardAmount) high = mid;
     else low = mid + 1n;
   }
   return low;
