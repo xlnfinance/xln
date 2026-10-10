@@ -44,6 +44,18 @@ describe('local runtime pairing', () => {
     expect(isTrustedLocalPairingOrigin(consumeRequest('token', 'https://evil.example'))).toBe(false);
   });
 
+  test('answers the pending-pairing limit with a typed 429, never a throw', async () => {
+    // The handler runs before the server's request try/catch; a throw reached
+    // Bun's default error page.
+    const controller = createLocalPairingController({ controlToken: CONTROL_TOKEN, instanceId: 'limit', version: 'test' });
+    for (let index = 0; index < 16; index += 1) {
+      expect((await controller.handle(issueRequest(), '/api/local-pairing/issue', env))?.status).toBe(200);
+    }
+    const limited = await controller.handle(issueRequest(), '/api/local-pairing/issue', env);
+    expect(limited?.status).toBe(429);
+    expect(await limited?.json()).toEqual({ ok: false, error: 'LOCAL_PAIRING_LIMIT_REACHED' });
+  });
+
   test('exchanges one CLI-issued token for one real runtime capability', async () => {
     const controller = createLocalPairingController({
       controlToken: CONTROL_TOKEN,

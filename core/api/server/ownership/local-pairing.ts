@@ -131,9 +131,9 @@ export const createLocalPairingController = (options: LocalPairingOptions = {}):
     }
   };
 
-  const issue = (now: number): { token: string; expiresAt: number } => {
+  const issue = (now: number): { token: string; expiresAt: number } | null => {
     pruneExpired(now);
-    if (pending.size >= MAX_PENDING_PAIRINGS) throw new Error('LOCAL_PAIRING_LIMIT_REACHED');
+    if (pending.size >= MAX_PENDING_PAIRINGS) return null;
     const token = randomBytes(32).toString('base64url');
     const expiresAt = now + pairingTtlMs;
     pending.set(pairingDigest(token), { expiresAt });
@@ -160,6 +160,9 @@ export const createLocalPairingController = (options: LocalPairingOptions = {}):
       }
       if (!env) return jsonResponse({ ok: false, error: 'LOCAL_PAIRING_RUNTIME_NOT_READY' }, 503);
       const pairing = issue(Date.now());
+      // Runs before the server's request try/catch: a throw here reached
+      // Bun's default error page instead of a typed answer.
+      if (!pairing) return jsonResponse({ ok: false, error: 'LOCAL_PAIRING_LIMIT_REACHED' }, 429);
       return jsonResponse({ ok: true, pairingToken: pairing.token, expiresAt: pairing.expiresAt });
     }
 
