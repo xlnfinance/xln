@@ -41,6 +41,7 @@ const readHubNodeSource = (): string =>
     'hub/node/hub-jurisdiction-binding.ts',
     'hub/node/hub-mesh-plan.ts',
     'hub/node/hub-reserves.ts',
+    'hub/node/hub-http.ts',
     'hub-node.ts',
   ].map(file => readFileSync(join(repoRoot, 'core/orchestrator', file), 'utf8')).join('\n');
 
@@ -311,7 +312,7 @@ describe('production startup wiring', () => {
         ? extractSourceBlock(
             source,
             'const createHubControlRequestHandler = (',
-            'const handleHubJurisdictionsRequest = (',
+            'const currentRuntimeHeight = (',
           )
         : extractSourceBlock(source, 'const quiesceMarketMakerRuntime = async (', 'const createMarketMakerHttpHandler');
       expect(quiesceBlock).toContain('quiesceNodeRuntime(');

@@ -16,6 +16,7 @@ const readHubNodeSource = (): string =>
     'hub/node/hub-jurisdiction-binding.ts',
     'hub/node/hub-mesh-plan.ts',
     'hub/node/hub-reserves.ts',
+    'hub/node/hub-http.ts',
     'hub-node.ts',
   ].map(file => readFileSync(join(process.cwd(), 'core/orchestrator', file), 'utf8')).join('\n');
 
