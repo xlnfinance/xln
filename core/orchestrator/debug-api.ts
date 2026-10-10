@@ -18,7 +18,6 @@ type OrchestratorDebugApiDeps = {
   operatorAuthorized: boolean;
   pollAllHubHealth: () => Promise<void>;
   pollMarketMakerHealth: () => Promise<void>;
-  proxyAnyHubGet: (request: Request, path: string) => Promise<Response>;
 };
 
 const handleDebugEntities = async (deps: OrchestratorDebugApiDeps): Promise<Response> => {
@@ -213,9 +212,6 @@ export const maybeHandleOrchestratorDebugApi = async (
   }
   if (deps.pathname === '/api/gossip/profile') {
     return handleGossipProfile(deps);
-  }
-  if (deps.pathname === '/api/debug/reserve' && deps.request.method === 'GET') {
-    return await deps.proxyAnyHubGet(deps.request, `${deps.pathname}${deps.url.search}`);
   }
   if (deps.pathname === '/api/debug/activity' && deps.request.method === 'GET') {
     return await handleDebugActivity(deps);

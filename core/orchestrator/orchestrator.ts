@@ -2811,7 +2811,6 @@ const server = Bun.serve<OrchestratorWebSocket['data']>({
       operatorAuthorized,
       pollAllHubHealth,
       pollMarketMakerHealth,
-      proxyAnyHubGet,
     });
     if (debugResponse) return debugResponse;
 
