@@ -1468,6 +1468,14 @@ describe('production startup wiring', () => {
     expect(reserveBootstrap).not.toContain('catalog.slice(0, HUB_REQUIRED_TOKEN_COUNT)');
   });
 
+  test('orchestrator relay sockets never echo internal exception text to a peer', () => {
+    const orchestrator = readFileSync(join(repoRoot, 'core/orchestrator/orchestrator.ts'), 'utf8');
+    const socket = orchestrator.slice(orchestrator.indexOf('  websocket: {'));
+    expect(socket).toContain("ws.send(encodeMarketWireMessage({ type: 'error', error: 'Market handler exception' }));");
+    expect(socket).toContain("ws.send(serializeWsMessage({ type: 'error', error: 'Relay handler exception' }));");
+    expect(socket).not.toContain("type: 'error', error: reason }");
+  });
+
   test('hub orderbook init stops the boot unless orderbookExt committed', () => {
     const hubNode = readFileSync(join(repoRoot, 'core/orchestrator/hub-node.ts'), 'utf8');
     const start = hubNode.indexOf('const ensureOrderbook = async (');

@@ -2871,8 +2871,10 @@ const server = Bun.serve<OrchestratorWebSocket['data']>({
               reason: 'MARKET_HANDLER_EXCEPTION',
               details: { error: reason, msgType: marketMessage.type },
             });
+            meshLog.error('relay.market_handler_exception', { error: reason, msgType: marketMessage.type });
+            // The peer may be unauthenticated: it gets a fixed code, never internal exception text.
             try {
-              ws.send(encodeMarketWireMessage({ type: 'error', error: reason }));
+              ws.send(encodeMarketWireMessage({ type: 'error', error: 'Market handler exception' }));
             } catch (sendError) {
               meshLog.warn('relay.market_error_send_failed', { error: serializeError(sendError) });
             }
@@ -2892,8 +2894,9 @@ const server = Bun.serve<OrchestratorWebSocket['data']>({
               to: peerMessage.to,
             },
           });
+          meshLog.error('relay.handler_exception', { error: reason, msgType: peerMessage.type });
           try {
-            ws.send(serializeWsMessage({ type: 'error', error: reason }));
+            ws.send(serializeWsMessage({ type: 'error', error: 'Relay handler exception' }));
           } catch (sendError) {
             meshLog.warn('relay.error_send_failed', { error: serializeError(sendError) });
           }
