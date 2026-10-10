@@ -147,11 +147,13 @@ const runRuntimeLoop = async (
     while (control.running) {
       try {
         await processAvailableRuntimeWork(env, deps);
+        // Inside the try: a throw while waiting is a reported halt, not a
+        // loop that silently reads "stopped" behind an unobserved rejection.
+        if (control.running) await waitForNextRuntimeWork(env, tickDelayMs, deps);
       } catch (error) {
         haltedMessage = await reportFatalLoopError(env, config, error);
         control.running = false;
       }
-      if (control.running) await waitForNextRuntimeWork(env, tickDelayMs, deps);
     }
   } finally {
     finishRuntimeLoop(env, state, control, haltedMessage);
