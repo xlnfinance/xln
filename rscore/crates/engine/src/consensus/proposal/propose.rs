@@ -341,11 +341,13 @@ pub fn propose_account_frame_with_selection(
         consensus_effects,
         dropped,
     } = execution;
-    // A rejection the machine itself caused is not a dropped transaction.
-    if let Some(dropped_tx) = dropped
-        .iter()
-        .find(|dropped| critical_kind(&dropped.tx).is_some())
-    {
+    // A rejection the machine itself caused is not a dropped transaction. A
+    // deferred row (e.g. a swap_resolve held by the signed-settlement freeze)
+    // stays queued for the next frame; TS classifies retry before
+    // throwCriticalProposalFailure, so only removals are critical.
+    if let Some(dropped_tx) = dropped.iter().find(|dropped| {
+        dropped.disposition == Disposition::Removed && critical_kind(&dropped.tx).is_some()
+    }) {
         let kind = critical_kind(&dropped_tx.tx).unwrap_or("unknown");
         return Err(StateError::CriticalProposalFailure {
             kind,

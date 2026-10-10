@@ -2891,6 +2891,56 @@ fn the_proposal_window_defers_a_payment_frozen_by_a_signed_settlement() {
     assert_eq!(left.account.mempool(), [payment]);
 }
 
+/// Parity target: classifyFailedTransaction (transactions.ts) returns
+/// 'deferred' before throwCriticalProposalFailure. A matcher swap_resolve held
+/// by the signed-settlement freeze must wait, not fail the whole Entity batch.
+#[test]
+fn the_proposal_window_defers_a_swap_resolve_frozen_by_a_signed_settlement() {
+    let (mut left, _right) = parties_with_signed_workspace();
+    let resolve = AccountTx::SwapResolve {
+        offer_id: "offer-1".to_string(),
+        fill_ratio: 10_000,
+        fill_numerator: None,
+        fill_denominator: None,
+        cancel_remainder: false,
+        comment: None,
+        fee_token_id: None,
+        fee_amount: None,
+        execution_give_amount: None,
+        execution_want_amount: None,
+        resting_give_token_id: None,
+        resting_want_token_id: None,
+        resting_price_ticks: None,
+        resting_give_amount: None,
+        resting_want_amount: None,
+        resting_quantized_give: None,
+        resting_quantized_want: None,
+    };
+    left.account
+        .admit_txs(vec![resolve.clone()], "signed-workspace")
+        .expect("admit");
+    let outcome = propose_account_frame(
+        &mut left.account,
+        &left.identity,
+        1_700_000_000_000,
+        7,
+        &market(),
+    )
+    .expect("a frozen swap_resolve is deferred, not a CriticalProposalFailure");
+    let ProposalOutcome::Idle { dropped } = outcome else {
+        panic!("a frozen swap_resolve was proposed");
+    };
+    assert_eq!(
+        dropped[0].rejection.message(),
+        "SETTLEMENT_SIGNED_ACCOUNT_FROZEN:swap_resolve"
+    );
+    assert_eq!(
+        dropped[0].disposition,
+        xln_rscore_engine::Disposition::Deferred
+    );
+    assert_eq!(left.account.mempool(), [resolve]);
+}
+
 /// A frame's effects do not leave the account until the peer has committed
 /// it. The proposal carries none; the ack carries them.
 #[test]
