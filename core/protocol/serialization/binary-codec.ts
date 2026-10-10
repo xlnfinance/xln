@@ -30,11 +30,14 @@ const SUPPORTED_TYPED_ARRAYS = new Set([
   'BigUint64Array',
 ]);
 // moreTypes keeps Map/Set/typed arrays/undefined round-tripping exactly.
-// structuredClone was NOT used: it adds reference markers for repeated object
-// instances, so bytes depended on object sharing rather than value.
+// structuredClone must be explicitly false, not merely absent: msgpackr still
+// decodes its reference extensions (0x69/0x70) when the option is undefined.
+// Peer bytes could then decode into a shared or cyclic graph whose re-encode
+// (frame MAC preimage, canonical hash) grows 2^depth from a few hundred bytes.
 const msgpackCodec = new Packr({
   mapsAsObjects: false,
   moreTypes: true,
+  structuredClone: false,
 });
 
 /**
@@ -364,7 +367,12 @@ export const createSequentialTransportValueCodec = (): Readonly<{
   pack(value: unknown): Uint8Array;
   unpack(bytes: Uint8Array): unknown;
 }> => {
-  const codec = new Packr({ mapsAsObjects: false, moreTypes: true, sequential: true });
+  const codec = new Packr({
+    mapsAsObjects: false,
+    moreTypes: true,
+    sequential: true,
+    structuredClone: false,
+  });
   return {
     pack: value => asBytes(codec.pack(projectBinaryValue(value))),
     unpack: bytes => codec.unpack(bytes),

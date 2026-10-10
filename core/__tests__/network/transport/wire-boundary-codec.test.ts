@@ -19,7 +19,14 @@ import {
   assertRuntimeAdapterCommandTxAuthorized,
   markLocalRuntimeAdapterCommandTx,
 } from '../../../runtime/command/frontier-auth';
-import { encodeBinaryPayload } from '../../../protocol/serialization/binary-codec';
+import { Packr } from 'msgpackr';
+import {
+  XLN_BINARY_MSGPACK_MAGIC,
+  createSequentialTransportValueCodec,
+  decodeBinaryPayload,
+  encodeBinaryPayload,
+  unpackTransportValue,
+} from '../../../protocol/serialization/binary-codec';
 import type { RuntimeTx } from '../../../runtime/types';
 import type { RuntimeAdapterWireMessage } from '../../../api/runtime-adapter/wire-schema';
 
@@ -254,5 +261,27 @@ describe('rAdapter trusted decode boundary', () => {
     expect(Object.getOwnPropertySymbols(decoded.payload.attemptedMarker)).toHaveLength(0);
     expect(() => assertRuntimeAdapterCommandTxAuthorized(decoded.payload.attemptedMarker, false))
       .toThrow('RADAPTER_COMMAND_RUNTIME_TX_UNAUTHORIZED');
+  });
+});
+
+describe('binary decoders reject msgpack reference extensions', () => {
+  // A peer controls these bytes before the frame MAC/signature is checked.
+  // With references, 20 shared levels decode from ~300 bytes but re-encode to
+  // 2^20 copies; 40 levels never finish and pin the hub's event loop.
+  const sharedGraphBody = (): Uint8Array => {
+    let node: unknown = { leaf: 1 };
+    for (let level = 0; level < 20; level += 1) node = { a: node, b: node };
+    return new Packr({ structuredClone: true, mapsAsObjects: false, moreTypes: true }).pack(node);
+  };
+
+  test('every peer-facing decoder refuses the shared graph', () => {
+    const body = sharedGraphBody();
+    expect(body.length).toBeLessThan(400);
+    const framed = new Uint8Array([XLN_BINARY_MSGPACK_MAGIC, ...body]);
+    const disabled = 'Structured clone extension is disabled';
+    expect(() => decodeBinaryPayload(framed)).toThrow(disabled);
+    expect(() => deserializeWsMessage(framed)).toThrow(disabled);
+    expect(() => unpackTransportValue(body)).toThrow(disabled);
+    expect(() => createSequentialTransportValueCodec().unpack(body)).toThrow(disabled);
   });
 });
