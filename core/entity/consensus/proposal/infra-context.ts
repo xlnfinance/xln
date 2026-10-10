@@ -225,13 +225,13 @@ export const materializeEntityInfraContext = async (
       replica.state.height + 1,
     );
     const decodedReplayContext = validateEntityInfraContext(replayContext);
-    await assertEntityInfraContextAuthority(env, decodedReplayContext, replica.state);
+    await assertEntityInfraContextAuthority(env, decodedReplayContext, replica.state, proposalTxs);
     return structuredClone(decodedReplayContext);
   }
   const context = await materializeFreshEntityInfraContext(env, replica, proposalTxs);
   // validateEntityInfraContext already enforces MAX_FRAME_SIZE_BYTES on the
   // canonical encoding; re-encoding a multi-MB Hub context here was pure cost.
   await timePerfPhase('entity.infraMaterialize.authority', () =>
-    assertEntityInfraContextAuthority(env, context, replica.state));
+    assertEntityInfraContextAuthority(env, context, replica.state, proposalTxs));
   return context;
 });

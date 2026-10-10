@@ -18,6 +18,12 @@ import {
 } from '../../helpers/cryptographic-profile';
 import { canonicalizeProfile, parseProfile } from '../../../entity/profile';
 import { verifyProfileSignature } from '../../../entity/profile/profile-signing';
+import { assertEntityInfraContextAuthority } from '../../../entity/consensus/frame/infra-context-validation';
+import { hashRawHtlcPaymentTx } from '../../../entity/paybook/payment-admission';
+import { MalformedEntityFrameInputError } from '../../../entity/tx/processing/invariant-errors';
+import { createEmptyEnv } from '../../../runtime';
+import type { EntityTx } from '../../../types/entity-tx';
+import type { EntityInfraContext } from '../../../types/entity/infra-context';
 
 const id = (value: number): string => `0x${value.toString(16).padStart(64, '0')}`;
 const address = `0x${'11'.repeat(20)}`;
@@ -201,4 +207,64 @@ test('canonicalizeProfile is identity on a gossip-cached output', () => {
     canonical.lastUpdated += 1;
   }).toThrow();
   expect(parseProfile(canonical)).toBe(canonical);
+});
+
+test('a gossip profile from a foreign stack rejects the payment routed through it, never halts', async () => {
+  // Discovery verifies without an observer, so a lazy Entity's self-signed
+  // profile naming another stack is admitted to gossip. The consensus
+  // observer used to throw PROFILE_OBSERVER_JURISDICTION_MISMATCH, which
+  // halted the paying Runtime once a route went through that Entity.
+  const seed = 'profile-foreign-jurisdiction';
+  const foreignId = deriveSingleSignerFixtureEntityId(seed);
+  const foreign = certifySingleSignerProfileFixture(buildCryptographicProfileFixture({
+    entityId: foreignId,
+    signingSeed: seed,
+    name: 'foreign-hub',
+    jurisdiction: {
+      name: 'foreign',
+      chainId: 999,
+      entityProviderAddress: `0x${'aa'.repeat(20)}`,
+      depositoryAddress: `0x${'bb'.repeat(20)}`,
+    },
+  }), seed);
+  const env = createEmptyEnv('profile-foreign-jurisdiction');
+  expect((await verifyProfileSignature(foreign, env)).valid).toBe(true);
+
+  const observer = stateWithAccounts(id(1), 0, 0);
+  observer.config.jurisdiction = {
+    name: 'local',
+    chainId: 31_337,
+    entityProviderAddress: `0x${'33'.repeat(20)}`,
+    depositoryAddress: address,
+  };
+  expect(await verifyProfileSignature(foreign, env, observer)).toMatchObject({
+    valid: false,
+    reason: 'jurisdiction_mismatch',
+  });
+
+  const payment = {
+    type: 'htlcPayment',
+    data: { targetEntityId: id(3), tokenId: 1, amount: 5n, maxSenderDebit: 6n, route: [], deliveryMode: 'instant' },
+  } as unknown as EntityTx;
+  const context = {
+    gossipProfiles: [foreign],
+    htlc: {
+      version: 1,
+      entries: [],
+      originated: [{
+        txHash: hashRawHtlcPaymentTx(payment as Extract<EntityTx, { type: 'htlcPayment' }>),
+        route: [id(1), foreignId, id(3)],
+      }],
+    },
+  } as unknown as EntityInfraContext;
+  try {
+    await assertEntityInfraContextAuthority(env, context, observer, [payment]);
+    throw new Error('TEST_EXPECTED_PROFILE_AUTHORITY_REJECT');
+  } catch (error) {
+    expect(error).toBeInstanceOf(MalformedEntityFrameInputError);
+    expect((error as MalformedEntityFrameInputError).disposition).toBe('reject');
+    expect((error as MalformedEntityFrameInputError).rejection)
+      .toBe(`HTLC_PAYMENT_PROFILE_AUTHORITY_INVALID:${foreignId}:jurisdiction_mismatch`);
+    expect((error as MalformedEntityFrameInputError).frameTx).toBe(payment);
+  }
 });

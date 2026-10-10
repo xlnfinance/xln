@@ -2,9 +2,13 @@ import { timePerfPhase } from '../../../support/performance/profile';
 import { parseProfile, type DecodedProfile } from '../../profile';
 import { canonicalConsensusValuesEqual } from '../../../protocol/serialization/binary-codec';
 import { validateHtlcPreparedInfraContext } from '../../paybook/prepared-context-validation';
+import { getEffectiveHtlcFrameTxs } from '../../paybook/materialize-context';
+import { hashRawHtlcPaymentTx } from '../../paybook/payment-admission';
 import type { EntityInfraContext } from '../../../types/entity/infra-context';
+import type { EntityTx } from '../../../types/entity-tx';
 import type { EntityRuntimeContext } from '../../runtime-context';
 import { verifyProfileSignature } from '../../profile/profile-signing';
+import { MalformedEntityFrameInputError } from '../../tx/processing/invariant-errors';
 import type { EntityState } from '../../types';
 import {
   toEntityId,
@@ -126,18 +130,43 @@ export const validateEntityInfraContext = (value: unknown): DecodedEntityInfraCo
   };
 };
 
-/** Authenticate every committed Profile before any key/domain/capacity is trusted. */
+/** The top-level frame tx whose originated payment routes through `entityId`. */
+const originatedPaymentOwner = (
+  state: EntityState,
+  frameTxs: readonly EntityTx[],
+  context: EntityInfraContext,
+  entityId: string,
+): EntityTx | undefined => {
+  const txHashes = new Set(context.htlc.originated
+    .filter(originated => originated.route.includes(entityId))
+    .map(originated => originated.txHash));
+  return frameTxs.find(tx => getEffectiveHtlcFrameTxs(state, [tx]).some(child =>
+    child.type === 'htlcPayment' && txHashes.has(hashRawHtlcPaymentTx(child))));
+};
+
+/**
+ * Authenticate every committed Profile before any key/domain/capacity is
+ * trusted. Profiles come from public gossip: one that fails here (a foreign
+ * stack, a rotated board) rejects the payment routed through it. The proposer
+ * evicts that tx; a validator rejects the proposal.
+ */
 export const assertEntityInfraContextAuthority = async (
   env: EntityRuntimeContext,
   context: EntityInfraContext,
   observerState: EntityState,
+  frameTxs: readonly EntityTx[],
 ): Promise<void> => {
   for (const profile of context.gossipProfiles) {
     const result = await verifyProfileSignature(profile, env, observerState);
-    if (!result.valid) {
-      throw new Error(
-        `ENTITY_INFRA_PROFILE_AUTHORITY_INVALID:${profile.entityId}:${result.reason ?? 'unknown'}`,
-      );
-    }
+    if (result.valid) continue;
+    const entityId = profile.entityId.toLowerCase();
+    const owner = originatedPaymentOwner(observerState, frameTxs, context, entityId);
+    const rejected = new MalformedEntityFrameInputError(
+      owner?.type ?? 'htlcPayment',
+      `HTLC_PAYMENT_PROFILE_AUTHORITY_INVALID:${entityId}:${result.reason ?? 'unknown'}`,
+    );
+    if (owner) rejected.frameTx = owner;
+    rejected.attemptedEntityContext = context;
+    throw rejected;
   }
 };

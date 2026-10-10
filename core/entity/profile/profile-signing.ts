@@ -103,6 +103,31 @@ export const computeProfileRouteHash = (profile: Profile): string => {
   );
 };
 
+/**
+ * Whether a profile's signed jurisdiction claim names the observer's own
+ * certified-board stack. Only a fully specified claim is compared: anything
+ * less carries no registered board to resolve and is verified as lazy.
+ */
+const sameObserverJurisdiction = (profile: Profile, observerState: EntityState): boolean => {
+  const observerJurisdiction = observerState.config.jurisdiction;
+  if (!observerJurisdiction) {
+    throw new Error(`PROFILE_OBSERVER_JURISDICTION_MISSING:${observerState.entityId}`);
+  }
+  const jurisdiction = profile.metadata.jurisdiction;
+  if (
+    !jurisdiction ||
+    !Number.isSafeInteger(Number(jurisdiction.chainId)) ||
+    Number(jurisdiction.chainId) <= 0 ||
+    typeof jurisdiction.depositoryAddress !== 'string' ||
+    typeof jurisdiction.entityProviderAddress !== 'string'
+  ) return true;
+  return getCertifiedBoardStackKey(observerJurisdiction) === getCertifiedBoardStackKey({
+    chainId: Number(jurisdiction.chainId),
+    depositoryAddress: jurisdiction.depositoryAddress,
+    entityProviderAddress: jurisdiction.entityProviderAddress,
+  });
+};
+
 const resolveProfileCertifiedBoardHash = (
   env: EntityRuntimeContext,
   profile: Profile,
@@ -117,16 +142,7 @@ const resolveProfileCertifiedBoardHash = (
     typeof jurisdiction.entityProviderAddress !== 'string'
   ) return null;
   if (observerState) {
-    const observerJurisdiction = observerState.config.jurisdiction;
-    if (!observerJurisdiction) {
-      throw new Error(`PROFILE_OBSERVER_JURISDICTION_MISSING:${observerState.entityId}`);
-    }
-    const claimedJurisdiction = {
-      chainId: Number(jurisdiction.chainId),
-      depositoryAddress: jurisdiction.depositoryAddress,
-      entityProviderAddress: jurisdiction.entityProviderAddress,
-    };
-    if (getCertifiedBoardStackKey(observerJurisdiction) !== getCertifiedBoardStackKey(claimedJurisdiction)) {
+    if (!sameObserverJurisdiction(profile, observerState)) {
       throw new Error(`PROFILE_OBSERVER_JURISDICTION_MISMATCH:${profile.entityId}`);
     }
     return resolveObserverCertifiedBoardHash(
@@ -236,6 +252,11 @@ export async function verifyProfileSignature(
   const hash = computeCanonicalProfileHash(canonicalProfile);
   const hanko = canonicalProfile.metadata.profileHanko as HankoString | undefined;
   if (!hanko) return { valid: false, reason: 'entity_certification_missing', hash };
+  // Gossip admits a self-signed profile from any stack. For a consensus
+  // observer it is just unusable here, never a local invariant failure.
+  if (env && observerState && !sameObserverJurisdiction(canonicalProfile, observerState)) {
+    return { valid: false, reason: 'jurisdiction_mismatch', hash };
+  }
   let registeredBoardHash: string | null = null;
   if (env && canonicalProfile.metadata.jurisdiction) {
     registeredBoardHash = resolveProfileCertifiedBoardHash(env, canonicalProfile, observerState);

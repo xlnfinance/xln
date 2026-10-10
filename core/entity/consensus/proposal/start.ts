@@ -85,7 +85,7 @@ const replayPreparedFrameForRelay = async (
   const jRangeError = getReplicaJRangeValidationError(env, replica, frame.txs);
   if (jRangeError) throw new Error(`ENTITY_PREPARED_J_RANGE_MISMATCH:${jRangeError}`);
   assertFrameJPrefix(env, replica, frame);
-  await assertEntityInfraContextAuthority(env, frame.entityContext, replica.state);
+  await assertEntityInfraContextAuthority(env, frame.entityContext, replica.state, frame.txs);
   await assertHtlcPreparedInfraContext({
     state: { ...replica.state, timestamp: frame.timestamp },
     proposalTxs: frame.txs,

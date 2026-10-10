@@ -129,6 +129,7 @@ export const replayProposedEntityFrame = async (
       context.env,
       frame.entityContext,
       context.workingReplica.state,
+      frame.txs,
     );
     await assertHtlcPreparedInfraContext({
       state: { ...context.workingReplica.state, timestamp: frame.timestamp },
