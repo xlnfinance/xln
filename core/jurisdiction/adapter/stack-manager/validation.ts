@@ -212,16 +212,26 @@ export const decodeJurisdictionStackManifest = (value: unknown): JurisdictionSta
     ? undefined
     : decodeDeployment(deploymentsInput['stablecoin'], 'stablecoin');
   if (usdt['tokenId'] !== 1 || usdt['decimals'] !== 6) throw new Error('STACK_MANAGER_USDT_CANONICAL_INVALID');
+  const entityProviderDeploymentBlock = safePositiveInteger(
+    manifest['entityProviderDeploymentBlock'],
+    'STACK_MANAGER_ENTITY_PROVIDER_BLOCK_INVALID',
+  );
+  // This block is persisted and announced as the history scan floor; it must
+  // be the verified deployment receipt's block, or watchers skip every
+  // FoundationBootstrapped/EntityRegistered log before it.
+  if (entityProviderDeploymentBlock !== deployments.entityProvider.deploymentBlock) {
+    throw new Error(
+      `STACK_MANAGER_ENTITY_PROVIDER_BLOCK_MISMATCH:${entityProviderDeploymentBlock}:` +
+      `${deployments.entityProvider.deploymentBlock}`,
+    );
+  }
   return {
     stackVersion: JURISDICTION_STACK_VERSION,
     network: nonEmpty(manifest['network'], 'STACK_MANAGER_NETWORK_INVALID'),
     chainId: safePositiveInteger(manifest['chainId'], 'STACK_MANAGER_CHAIN_ID_INVALID'),
     deployer: address(manifest['deployer'], 'STACK_MANAGER_DEPLOYER_INVALID'),
     foundationRecipient: address(manifest['foundationRecipient'], 'STACK_MANAGER_FOUNDATION_RECIPIENT_INVALID'),
-    entityProviderDeploymentBlock: safePositiveInteger(
-      manifest['entityProviderDeploymentBlock'],
-      'STACK_MANAGER_ENTITY_PROVIDER_BLOCK_INVALID',
-    ),
+    entityProviderDeploymentBlock,
     contracts,
     evmContracts: {
       ...deployments,

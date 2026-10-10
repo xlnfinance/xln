@@ -59,7 +59,8 @@ const manifest = () => ({
   chainId: 42161,
   deployer: signer,
   foundationRecipient: foundation,
-  entityProviderDeploymentBlock: 7,
+  // The verified EntityProvider receipt block (entityProvider is names[5]).
+  entityProviderDeploymentBlock: 6,
   contracts: Object.fromEntries(names.map((name, index) => [name, address((index + 1).toString(16))])),
   evmContracts: {
     ...Object.fromEntries(names.map((name, index) => [name, {
@@ -94,6 +95,13 @@ const announcement = () => {
 };
 
 describe('Stack Manager exact boundaries', () => {
+  test('refuses a scan floor that is not the verified EntityProvider deployment block', () => {
+    // The floor is persisted and announced to watchers; a later block made
+    // them skip every FoundationBootstrapped/EntityRegistered log before it.
+    expect(() => decodeJurisdictionStackManifest({ ...manifest(), entityProviderDeploymentBlock: 7 }))
+      .toThrow('STACK_MANAGER_ENTITY_PROVIDER_BLOCK_MISMATCH:7:6');
+  });
+
   test('accepts canonical V1 operator input and normalizes EOAs', () => {
     const decoded = decodeDeployJurisdictionStackRequest(request());
     expect(decoded.expectedChainId).toBe(42161);
