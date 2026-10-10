@@ -505,20 +505,6 @@ export class DaemonControlClient {
     return { ready: missing.length === 0, missing };
   }
 
-  /**
-   * Counterparties this Runtime currently sees in `entityId`'s gossip profile.
-   * A routed payment is admitted against the sender's own gossip view, so a
-   * load driver must observe that view rather than the Hub's own state.
-   * Returns null when the profile has not propagated to this Runtime yet.
-   */
-  async gossipProfileCounterparties(entityId: string): Promise<string[] | null> {
-    const response = decodeGossipProfileResponse(await this.get(
-      `/api/gossip/profile?entityId=${encodeURIComponent(entityId)}`,
-    ));
-    if (response.ok !== true || response.found !== true || !response.profile) return null;
-    return response.profile.accounts.map(account => account.counterpartyId.toLowerCase());
-  }
-
   async gossipProfilesCounterparties(entityIds: readonly string[]): Promise<Map<string, string[] | null>> {
     const response = requireBoundaryRecord(
       await this.post('/api/control/gossip-profile-counterparties', { entityIds }),
