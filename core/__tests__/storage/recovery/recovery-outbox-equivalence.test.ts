@@ -1,6 +1,10 @@
 import { expect, test } from 'bun:test';
 
-import { assertRecoveryOutboxMatches, selectRetainedRecoveryOutbox } from '../../../storage/recovery/journal/verification';
+import {
+  assertRecoveryOutboxMatches,
+  collectCurrentOutputSignerHints,
+  selectRetainedRecoveryOutbox,
+} from '../../../storage/recovery/journal/verification';
 import { prepareRuntimeOutputRows } from '../../../storage/wal/outbox-payload';
 import type { RoutedEntityInput } from '../../../runtime/types';
 
@@ -54,4 +58,21 @@ test('retained output permits a new Runtime route without changing its financial
   expect(selectRetainedRecoveryOutbox([previous], [rebound], 8)).toEqual([rebound]);
   expect(() => selectRetainedRecoveryOutbox([previous], [{ ...rebound, signerId: `0x${'44'.repeat(20)}` }], 8))
     .toThrow('RECOVERY_OUTBOX_RETAINED_OUTPUT_UNPROVEN');
+});
+
+test('a peer re-announcing a new signer never bricks replay through a retained output', () => {
+  // The retained frame-7 output still names signer 33; the peer re-announced
+  // and frame 8 sent to signer 44. Hints from both made replay throw a
+  // signer conflict on every restart.
+  const accountInput = { type: 'accountInput', data: {} } as RoutedEntityInput['entityTxs'][number];
+  const retained = { ...output('1a'), entityTxs: [accountInput] };
+  const current = {
+    ...retained,
+    signerId: `0x${'44'.repeat(20)}`,
+    sourceRuntimeFrame: { height: 8, timestamp: 9_500 },
+  };
+  expect(collectCurrentOutputSignerHints([retained, current], 8))
+    .toEqual(new Map([[current.entityId, current.signerId]]));
+  expect(() => collectCurrentOutputSignerHints([current, { ...current, signerId: `0x${'55'.repeat(20)}` }], 8))
+    .toThrow('RECOVERY_OUTPUT_SIGNER_HINT_CONFLICT');
 });

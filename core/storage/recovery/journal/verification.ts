@@ -36,6 +36,39 @@ import {
 } from '../../wal/outbox-payload';
 import { timePerfPhase } from '../../../support/performance/profile';
 
+/**
+ * Replay regenerates only this frame's outputs, so only they need the signer
+ * the live route chose. A retained output keeps the signer it was committed
+ * with; the peer may have re-announced a new signer since, and hinting from it
+ * made replay throw a conflict on every restart.
+ */
+export const collectCurrentOutputSignerHints = (
+  outputs: readonly RoutedEntityInput[],
+  height: number,
+): Map<string, string> => {
+  const hints = new Map<string, string>();
+  for (const output of outputs) {
+    if (output.sourceRuntimeFrame?.height !== height) continue;
+    // Account delivery has one persisted shape: a raw atomic AccountInput.
+    const carriesAccountInput = (output.entityTxs ?? []).some(tx => tx.type === 'accountInput');
+    if (!carriesAccountInput) continue;
+    const entityId = String(output.entityId || '').trim().toLowerCase();
+    const signerId = String(output.signerId || '').trim().toLowerCase();
+    if (!entityId || !signerId) {
+      throw new Error(`RECOVERY_OUTPUT_SIGNER_HINT_INVALID:height=${height}`);
+    }
+    const existing = hints.get(entityId);
+    if (existing && existing !== signerId) {
+      throw new Error(
+        `RECOVERY_OUTPUT_SIGNER_HINT_CONFLICT:height=${height}:` +
+        `entity=${entityId}:left=${existing}:right=${signerId}`,
+      );
+    }
+    hints.set(entityId, signerId);
+  }
+  return hints;
+};
+
 /** Transport retirement is external; retained rows must be exact prior verified outputs. */
 export const selectRetainedRecoveryOutbox = (
   previous: readonly RoutedEntityInput[],

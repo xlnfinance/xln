@@ -39,6 +39,7 @@ import {
 import { createStructuredLogger } from '../../../support/logger';
 import {
   assertRecoveryOutboxMatches,
+  collectCurrentOutputSignerHints,
   selectRetainedRecoveryOutbox,
   verifyRecoveryJournalFrame,
 } from './verification';
@@ -96,33 +97,6 @@ const validateReplayFrameHeader = (
   return height;
 };
 
-const collectOutputSignerHints = (
-  frame: PersistedFrameJournal,
-  height: number,
-): Map<string, string> => {
-  const hints = new Map<string, string>();
-  for (const output of frame.runtimeOutputs ?? []) {
-    // Account delivery has one persisted shape: a raw atomic AccountInput.
-    // Account delivery has no generic wrapper or recovery alias.
-    const carriesAccountInput = (output.entityTxs ?? []).some(tx => tx.type === 'accountInput');
-    if (!carriesAccountInput) continue;
-    const entityId = String(output.entityId || '').trim().toLowerCase();
-    const signerId = String(output.signerId || '').trim().toLowerCase();
-    if (!entityId || !signerId) {
-      throw new Error(`RECOVERY_OUTPUT_SIGNER_HINT_INVALID:height=${height}`);
-    }
-    const existing = hints.get(entityId);
-    if (existing && existing !== signerId) {
-      throw new Error(
-        `RECOVERY_OUTPUT_SIGNER_HINT_CONFLICT:height=${height}:` +
-        `entity=${entityId}:left=${existing}:right=${signerId}`,
-      );
-    }
-    hints.set(entityId, signerId);
-  }
-  return hints;
-};
-
 export type RecoveryReplayOptions = Readonly<{
   /**
    * `false` skips the per-frame outbox/journal/post-state equivalence checks.
@@ -154,7 +128,7 @@ const replayOneFrame = async (
     frame.timestamp,
     `RECOVERY_JOURNAL_TIMESTAMP_INVALID:height=${height}`,
   );
-  installReplayOutputSignerHints(env, collectOutputSignerHints(frame, height));
+  installReplayOutputSignerHints(env, collectCurrentOutputSignerHints(frame.runtimeOutputs ?? [], height));
   installReplayOutputRuntimeRoutes(env, frame.runtimeOutputs ?? []);
   if (!env.infrastructure) throw new Error('RECOVERY_RUNTIME_INFRASTRUCTURE_REQUIRED');
   // validateEntityInfraContext constructs an isolated decoded value before
