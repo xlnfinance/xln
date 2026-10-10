@@ -1503,6 +1503,9 @@ describe('audit fail-fast regressions', () => {
         },
       ],
     ]);
+    // A committed pull always has its token row; the dispute gas charge
+    // (82e34b604) builds the proof body before any tx and requires it.
+    account.state.deltas = PersistentAccountStateMap.fromEntries('deltas', [[1, createDefaultDelta(1)]]);
 
     // The close proof claims a cumulative target amount the chain-proportional
     // settlement at `fillRatio` would never pay. `proposeAccountFrame` must

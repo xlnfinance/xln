@@ -2141,11 +2141,13 @@ describe('audit fail-fast regressions', () => {
 
     const receiver = makeProposalAccount([{ type: 'add_delta', data: { tokenId: 2 } }], left.entityId, right.entityId);
     receiver.proofHeader = { fromEntity: right.entityId, toEntity: left.entityId, nextProofNonce: 0 };
+    // Since 82e34b604 a same-j offer commits its want-token row too; the
+    // mempool's add_delta owns token 2, so the live offer wants token 3.
     receiver.state.deltas = PersistentAccountStateMap.fromEntries('deltas', [[1, {
       ...createDefaultDelta(1),
       rightCreditLimit: 100n,
       rightHold: 5n,
-    }]]);
+    }], [3, createDefaultDelta(3)]]);
     receiver.state.locks = PersistentAccountStateMap.fromEntries('locks', [['existing-lock', {
       lockId: 'existing-lock',
       hashlock: `0x${'31'.repeat(32)}`,
@@ -2161,7 +2163,7 @@ describe('audit fail-fast regressions', () => {
       offerId: 'existing-offer',
       giveTokenId: 1,
       giveAmount: 7n,
-      wantTokenId: 2,
+      wantTokenId: 3,
       wantAmount: 9n,
       makerIsLeft: false,
       createdHeight: 0,
