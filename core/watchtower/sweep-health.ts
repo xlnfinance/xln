@@ -4,11 +4,12 @@ type SweepHealthSnapshot = {
   healthy: boolean;
   consecutiveFailures: number;
   lastError?: string;
+  itemErrors?: number;
 };
 
 export type SweepHealthTracker = {
   failure(error: string): void;
-  success(): void;
+  success(itemErrors?: number): void;
   snapshot(): SweepHealthSnapshot;
 };
 
@@ -16,19 +17,23 @@ export const createSweepHealthTracker = (failureThreshold = 3): SweepHealthTrack
   const threshold = Math.max(1, Math.floor(failureThreshold));
   let consecutiveFailures = 0;
   let lastError = '';
+  let itemErrors = 0;
   return {
     failure: error => {
       consecutiveFailures += 1;
       lastError = error;
+      itemErrors = 0;
     },
-    success: () => {
+    success: (failedItems = 0) => {
       consecutiveFailures = 0;
       lastError = '';
+      itemErrors = failedItems;
     },
     snapshot: () => ({
       healthy: consecutiveFailures < threshold,
       consecutiveFailures,
       ...(lastError ? { lastError } : {}),
+      ...(itemErrors > 0 ? { itemErrors } : {}),
     }),
   };
 };
@@ -52,7 +57,8 @@ export const createSweepLock = (): SweepLock => {
 };
 
 type SweepOutcome = {
-  errors: number;
+  items: number;
+  itemErrors: number;
   fields: Record<string, number>;
 };
 
@@ -99,11 +105,17 @@ export const startIntervalSweep = (options: IntervalSweepOptions): IntervalSweep
     }
     const outcome = await options.run();
     if (Object.values(outcome.fields).some(value => value > 0)) {
-      if (outcome.errors > 0) log.warn(events.complete, outcome.fields);
+      if (outcome.itemErrors > 0) log.warn(events.complete, outcome.fields);
       else log.info(events.complete, outcome.fields);
     }
-    if (outcome.errors > 0) health.failure(`${events.errorsCode}:${outcome.errors}`);
-    else health.success();
+    // One appointment or target is the sender's input: its failure is a
+    // receipt and a log line. The tower is unhealthy only when the sweep cannot
+    // run at all or when every item it had failed.
+    if (outcome.items > 0 && outcome.itemErrors >= outcome.items) {
+      health.failure(`${events.errorsCode}:${outcome.itemErrors}`);
+    } else {
+      health.success(outcome.itemErrors);
+    }
   };
 
   const tick = async (): Promise<void> => {

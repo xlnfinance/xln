@@ -9,7 +9,12 @@ import { deserializeTaggedJson, safeStringify } from '../../../protocol/serializ
 import { encryptTowerPayloadForWatchSeed } from '../../../storage/recovery/bundle/crypto';
 import type { TowerAppointmentV1 } from '../../../storage/recovery/bundle/types';
 import { startStandaloneWatchtowerServer, type StandaloneWatchtowerServer } from '../../../watchtower/standalone-server';
-import { createSweepHealthTracker } from '../../../watchtower/sweep-health';
+import { createStructuredLogger } from '../../../support/logger';
+import {
+  createSweepHealthTracker,
+  createSweepLock,
+  startIntervalSweep,
+} from '../../../watchtower/sweep-health';
 
 const cleanups: Array<() => Promise<void> | void> = [];
 
@@ -80,9 +85,9 @@ const startBlockingRpc = (): FakeRpc => {
   };
 };
 
-const idleLastResortAppointment = async (rpcUrl: string): Promise<TowerAppointmentV1> => {
+const idleLastResortAppointment = async (rpcUrl: string, label = 'idle'): Promise<TowerAppointmentV1> => {
   const runtimeId = Wallet.createRandom().address.toLowerCase();
-  const lookupKey = keccak256(toUtf8Bytes(`tower:operator-lock:${rpcUrl}`));
+  const lookupKey = keccak256(toUtf8Bytes(`tower:operator-lock:${label}:${rpcUrl}`));
   return {
     type: 'tower_appointment',
     version: 1,
@@ -183,3 +188,46 @@ test('the operator sweep uses the configured RPC allowlist', async () => {
   // Only the private key was forwarded before, so this RPC was refused.
   expect(await response.json()).toEqual({ ok: true, scanned: 1, submitted: 0, skipped: 1, errors: 0 });
 });
+
+test('a sweep is unhealthy only when every item failed', async () => {
+  const runSweeps = async (items: number, itemErrors: number) => {
+    const sweep = startIntervalSweep({
+      intervalMs: 1,
+      lock: createSweepLock(),
+      log: createStructuredLogger('watchtower.sweep_health_test'),
+      events: { complete: 'test.complete', failed: 'test.failed', errorsCode: 'TEST_ERRORS' },
+      prune: async () => undefined,
+      run: async () => ({ items, itemErrors, fields: {} }),
+    });
+    cleanups.push(() => sweep.close());
+    await Bun.sleep(60);
+    sweep.close();
+    return sweep.health();
+  };
+  expect(await runSweeps(3, 1)).toEqual({ healthy: true, consecutiveFailures: 0, itemErrors: 1 });
+  expect(await runSweeps(2, 2)).toMatchObject({ healthy: false, lastError: 'TEST_ERRORS:2' });
+  expect(await runSweeps(0, 0)).toEqual({ healthy: true, consecutiveFailures: 0 });
+});
+
+test('one appointment whose RPC the tower refuses does not make the tower unhealthy', async () => {
+  const rpc = startBlockingRpc();
+  rpc.release();
+  const tower = startTower(rpc.url, true);
+  await tower.store.upsertAppointment(await idleLastResortAppointment(rpc.url, 'healthy'));
+  // Stored before ingress refused unlisted RPCs; every sweep errors on it.
+  await tower.store.upsertAppointment(await idleLastResortAppointment('https://unlisted.example/rpc', 'refused'));
+
+  let health: { ok: boolean; sweep: { consecutiveFailures: number; itemErrors?: number } } | null = null;
+  const deadline = Date.now() + 15_000;
+  while (Date.now() < deadline && (health?.sweep.itemErrors ?? 0) === 0) {
+    await Bun.sleep(200);
+    health = await (await fetch(`http://127.0.0.1:${tower.server.port}/healthz`)).json() as typeof health;
+  }
+  expect(health?.sweep.itemErrors).toBe(1);
+  // Wallets refuse to appoint a tower whose /healthz is not ok; three such
+  // sweeps used to flip it for every user.
+  await Bun.sleep(3_500);
+  const later = await fetch(`http://127.0.0.1:${tower.server.port}/healthz`);
+  expect(later.status).toBe(200);
+  expect(await later.json()).toMatchObject({ ok: true, sweep: { healthy: true, consecutiveFailures: 0, itemErrors: 1 } });
+}, 30_000);

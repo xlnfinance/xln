@@ -10,7 +10,12 @@ import { deriveSignerKeySync } from '../../../account/crypto';
 import { generateLazyEntityId } from '../../../entity/factory';
 import { createEmptyEnv, enqueueRuntimeInput, processRuntime, readPersistedFrameJournal } from '../../../runtime.ts';
 import { buildRuntimeRecoveryBundle } from '../../../storage/recovery/bundle';
-import { buildTowerAppointmentOwnerMessage, encryptRuntimeRecoveryBundle, decryptRuntimeRecoveryBundle } from '../../../storage/recovery/bundle/crypto';
+import {
+  buildTowerAppointmentOwnerMessage,
+  decryptRuntimeRecoveryBundle,
+  encryptRuntimeRecoveryBundle,
+  encryptTowerPayloadForWatchSeed,
+} from '../../../storage/recovery/bundle/crypto';
 import { serializeTaggedJson, safeStringify } from '../../../protocol/serialization';
 import type { JurisdictionConfig, TowerAppointmentV1 } from '../../../api/public/runtime-module';
 import { decodeStoredLookupDoc } from '../../../watchtower/store/decode';
@@ -134,7 +139,94 @@ const createRuntimeAppointment = async (runtimeSeed = 'watchtower-http-seed', la
   return { appointment, encrypted, wallet };
 };
 
+/** A self-signed delayed appointment: anyone can produce one, so ingress must refuse what the sweep refuses. */
+const signedLastResortAppointment = async (
+  overrides: Record<string, unknown>,
+  watchOverrides: Record<string, unknown> = {},
+) => {
+  const runtimeWallet = Wallet.createRandom();
+  const runtimeId = runtimeWallet.address.toLowerCase();
+  const lookupKey = keccak256(toUtf8Bytes(`tower:ingress:${runtimeId}`));
+  const lastResortPayload = {
+    triggerHint: 'chain:31337:acct:ingress',
+    encryptedRemedy: await encryptTowerPayloadForWatchSeed('{}', `0x${'ee'.repeat(32)}`),
+    actionKind: 'counter_dispute_only' as const,
+    watch: {
+      rpcUrl: 'http://127.0.0.1:8545/',
+      chainId: 31337,
+      depositoryAddress: addr('11'),
+      watchedEntityId: `0x${'aa'.repeat(32)}`,
+      counterentity: `0x${'bb'.repeat(32)}`,
+      ...watchOverrides,
+    },
+    appointmentSequence: 1,
+    proofNonce: 1,
+    proofBodyHash: keccak256(toUtf8Bytes('proof-body')),
+    responseMode: 'last_resort' as const,
+    lastResortWindowSeconds: 8,
+    ...overrides,
+  } as unknown as NonNullable<TowerAppointmentV1['lastResortPayload']>;
+  const bundle = {
+    version: 1 as const,
+    runtimeId,
+    lookupKey,
+    height: 3,
+    createdAt: 123_456,
+    bundleHash: keccak256(toUtf8Bytes(`bundle:${runtimeId}`)),
+    iv: '0x1234',
+    ciphertext: '0xabcd',
+  };
+  const signedAt = Date.now();
+  const signature = await runtimeWallet.signMessage(buildTowerAppointmentOwnerMessage(
+    runtimeId, 'delayed_last_resort', lookupKey, 0, bundle, signedAt, lastResortPayload,
+  ));
+  return {
+    type: 'tower_appointment', version: 1, towerMode: 'delayed_last_resort', lookupKey, slot: 0, bundle,
+    lastResortPayload, ownerProof: { runtimeId, signedAt, signature },
+  };
+};
+
 describe('standalone watchtower service', () => {
+  test('a sweeping tower refuses at upload what every later sweep would refuse', async () => {
+    const tempRoot = join(process.cwd(), '.tmp-tests', `watchtower-ingress-${Date.now()}`);
+    rmSync(tempRoot, { recursive: true, force: true });
+    mkdirSync(tempRoot, { recursive: true });
+    const server = startStandaloneWatchtowerServer({
+      host: '127.0.0.1',
+      port: 0,
+      towerId: 'tower-ingress-test',
+      dbPath: join(tempRoot, 'tower.level'),
+      towerPrivateKey: Wallet.createRandom().privateKey,
+      enableLastResortAgent: true,
+      sweepIntervalMs: 60_000,
+      allowedRpcUrls: ['http://127.0.0.1:8545/'],
+    });
+    servers.push(server);
+    const put = async (appointment: unknown) => {
+      const response = await fetch(`http://127.0.0.1:${server.server.port}/api/tower/appointment`, {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: safeStringify(appointment),
+      });
+      return { status: response.status, body: await response.json() as { ok: boolean; error?: string } };
+    };
+
+    expect((await put(await signedLastResortAppointment({}))).status).toBe(200);
+    const refused = [
+      [await signedLastResortAppointment({}, { rpcUrl: 'https://evil.example/' }), 'WATCHTOWER_RPC_URL_NOT_ALLOWED'],
+      [await signedLastResortAppointment({ appointmentSequence: '5' }), 'APPOINTMENT_SEQUENCE_INVALID'],
+      [await signedLastResortAppointment({ proofNonce: 1.5 }), 'PROOF_NONCE_INVALID'],
+      [await signedLastResortAppointment({ lastResortWindowSeconds: 1e300 }), 'LAST_RESORT_WINDOW_INVALID'],
+      [await signedLastResortAppointment({}, { chainId: '31337' }), 'WATCH_CHAIN_ID_INVALID'],
+    ] as const;
+    for (const [appointment, code] of refused) {
+      const response = await put(appointment);
+      expect(response.status).toBe(400);
+      expect(response.body.error).toContain(code);
+    }
+    expect((await server.store.listLatestLastResortAppointments()).length).toBe(1);
+  });
+
   test('uses structured logging without direct console output', () => {
     const source = readFileSync(join(process.cwd(), 'core/watchtower/standalone-server.ts'), 'utf8');
 

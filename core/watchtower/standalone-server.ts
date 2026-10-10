@@ -17,7 +17,7 @@ import {
   handleWatchtowerSweep,
   resolveAppointmentBodyLimit,
 } from './http';
-import { runWatchtowerSweep } from './action';
+import { assertWatchtowerRpcUrlAllowed, runWatchtowerSweep } from './action';
 import { runDisputeWatchSweep } from './dispute-watch';
 import { createWatchtowerStore, type WatchtowerStore } from './store';
 import { createPushStore, type PushStore } from './push/store';
@@ -119,7 +119,8 @@ const startLastResortSweep = (
         ...(options.allowedRpcUrls ? { allowedRpcUrls: options.allowedRpcUrls } : {}),
       });
       return {
-        errors: result.errors,
+        items: result.scanned,
+        itemErrors: result.errors,
         fields: { scanned: result.scanned, submitted: result.submitted, errors: result.errors },
       };
     },
@@ -141,7 +142,8 @@ const startPushWatchSweep = (
       ...(options.allowedRpcUrls ? { allowedRpcUrls: options.allowedRpcUrls } : {}),
     });
     return {
-      errors: result.errors,
+      items: result.targetsScanned,
+      itemErrors: result.errors,
       fields: {
         eventsObserved: result.eventsObserved,
         notificationsSent: result.notificationsSent,
@@ -223,7 +225,11 @@ const handlePublicTowerRoute = async (
 ): Promise<Response | null> => {
   const { store } = context;
   if (pathname === '/api/tower/appointment' && request.method === 'PUT') {
-    return withCors(await handleTowerAppointment(request, store));
+    const { enableLastResortAgent, allowedRpcUrls } = context.options;
+    // A sweeping tower refuses an RPC it would refuse on every later sweep.
+    return withCors(await handleTowerAppointment(request, store, enableLastResortAgent === true
+      ? rpcUrl => { assertWatchtowerRpcUrlAllowed(rpcUrl, allowedRpcUrls); }
+      : undefined));
   }
   if (pathname === '/api/tower/restore' && request.method === 'POST') {
     return withCors(await handleTowerRestore(request, store));

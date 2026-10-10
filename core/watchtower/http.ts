@@ -1,6 +1,7 @@
 import { ethers } from 'ethers';
 import { deserializeTaggedJson, serializeTaggedJson } from '../protocol/serialization';
 import {
+  requireBoundaryInteger,
   requireBoundaryRecord,
   requireExactBoundaryKeys,
 } from '../protocol/boundary-validation';
@@ -167,13 +168,16 @@ const normalizeHexBytes = (value: unknown, label: string): string => {
   return normalized;
 };
 
-const normalizeNonNegativeInt = (value: unknown, label: string): number => {
-  const parsed = Number(value);
-  if (!Number.isFinite(parsed) || parsed < 0) {
-    throw new Error(`TOWER_${label}_INVALID`);
-  }
-  return Math.floor(parsed);
-};
+/**
+ * The sweep and the stored reader accept only safe integers. A string, float
+ * or 1e300 that ingress floored into a number was stored and then failed the
+ * sweep on every pass, so ingress applies the same rule.
+ */
+const requireTowerInteger = (value: unknown, label: string, minimum = 0): number =>
+  requireBoundaryInteger(value, `TOWER_${label}_INVALID`, minimum);
+
+const optionalTowerInteger = (value: unknown, label: string): number | undefined =>
+  value === undefined ? undefined : requireTowerInteger(value, label);
 
 const quotaExceededStatus = (error: unknown, message: string): number =>
   error instanceof WatchtowerGlobalQuotaError ||
@@ -189,8 +193,9 @@ const verifyEncryptedBundleShape = (appointment: TowerAppointmentV1): void => {
     throw new Error('TOWER_BUNDLE_RUNTIME_ID_REQUIRED');
   }
   normalizeLookupKey(appointment.bundle.lookupKey);
-  normalizeNonNegativeInt(appointment.bundle.height, 'BUNDLE_HEIGHT');
-  normalizeNonNegativeInt(appointment.bundle.createdAt, 'BUNDLE_CREATED_AT');
+  requireTowerInteger(appointment.bundle.height, 'BUNDLE_HEIGHT');
+  requireTowerInteger(appointment.bundle.createdAt, 'BUNDLE_CREATED_AT');
+  optionalTowerInteger(appointment.bundle.baseRuntimeHeight, 'BUNDLE_BASE_RUNTIME_HEIGHT');
   normalizeBytes32(appointment.bundle.bundleHash, 'BUNDLE_HASH');
   normalizeHexBytes(appointment.bundle.iv, 'BUNDLE_IV');
   const ciphertext = normalizeHexBytes(appointment.bundle.ciphertext, 'BUNDLE_CIPHERTEXT');
@@ -224,7 +229,10 @@ const assertEncryptedLastResortPayload = (lastResortPayload: TowerAppointmentV1[
   }
 };
 
-const verifyLastResortWatch = (watch: unknown): void => {
+/** Present only when this tower sweeps: it refuses appointments it could never act on. */
+type TowerActionRpcPolicy = (rpcUrl: string) => void;
+
+const verifyLastResortWatch = (watch: unknown, assertActionRpcUrl: TowerActionRpcPolicy | undefined): void => {
   if (!watch || typeof watch !== 'object') {
     throw new Error('TOWER_LAST_RESORT_PAYLOAD_WATCH_MISSING');
   }
@@ -233,9 +241,8 @@ const verifyLastResortWatch = (watch: unknown): void => {
   if (!rpcUrl || rpcUrl.length > 512 || !/^https?:\/\//i.test(rpcUrl)) {
     throw new Error('TOWER_LAST_RESORT_PAYLOAD_WATCH_RPC_INVALID');
   }
-  if (normalizeNonNegativeInt(candidate['chainId'], 'LAST_RESORT_PAYLOAD_WATCH_CHAIN_ID') <= 0) {
-    throw new Error('TOWER_LAST_RESORT_PAYLOAD_WATCH_CHAIN_ID_INVALID');
-  }
+  assertActionRpcUrl?.(rpcUrl);
+  requireTowerInteger(candidate['chainId'], 'LAST_RESORT_PAYLOAD_WATCH_CHAIN_ID', 1);
   if (!ethers.isAddress(String(candidate['depositoryAddress'] || ''))) {
     throw new Error('TOWER_LAST_RESORT_PAYLOAD_WATCH_DEPOSITORY_INVALID');
   }
@@ -243,7 +250,10 @@ const verifyLastResortWatch = (watch: unknown): void => {
   normalizeBytes32(candidate['counterentity'], 'LAST_RESORT_PAYLOAD_WATCH_COUNTERENTITY');
 };
 
-const verifyLastResortPayload = (lastResortPayload: TowerAppointmentV1['lastResortPayload']): void => {
+const verifyLastResortPayload = (
+  lastResortPayload: TowerAppointmentV1['lastResortPayload'],
+  assertActionRpcUrl: TowerActionRpcPolicy | undefined,
+): void => {
   if (!lastResortPayload) {
     throw new Error('TOWER_LAST_RESORT_PAYLOAD_MISSING');
   }
@@ -253,25 +263,22 @@ const verifyLastResortPayload = (lastResortPayload: TowerAppointmentV1['lastReso
   if (lastResortPayload.responseMode !== 'last_resort') {
     throw new Error('TOWER_LAST_RESORT_PAYLOAD_RESPONSE_MODE_UNSUPPORTED');
   }
-  verifyLastResortWatch(lastResortPayload.watch);
+  verifyLastResortWatch(lastResortPayload.watch, assertActionRpcUrl);
   const triggerHint = String(lastResortPayload.triggerHint || '').trim();
   if (!triggerHint || triggerHint.length > 256) {
     throw new Error('TOWER_LAST_RESORT_PAYLOAD_TRIGGER_HINT_INVALID');
   }
-  if (normalizeNonNegativeInt(lastResortPayload.appointmentSequence, 'LAST_RESORT_PAYLOAD_APPOINTMENT_SEQUENCE') <= 0) {
-    throw new Error('TOWER_LAST_RESORT_PAYLOAD_APPOINTMENT_SEQUENCE_INVALID');
-  }
-  if (normalizeNonNegativeInt(lastResortPayload.proofNonce, 'LAST_RESORT_PAYLOAD_PROOF_NONCE') <= 0) {
-    throw new Error('TOWER_LAST_RESORT_PAYLOAD_PROOF_NONCE_INVALID');
-  }
+  requireTowerInteger(lastResortPayload.appointmentSequence, 'LAST_RESORT_PAYLOAD_APPOINTMENT_SEQUENCE', 1);
+  requireTowerInteger(lastResortPayload.proofNonce, 'LAST_RESORT_PAYLOAD_PROOF_NONCE', 1);
   normalizeBytes32(lastResortPayload.proofBodyHash, 'LAST_RESORT_PAYLOAD_PROOF_BODY_HASH');
-  if (normalizeNonNegativeInt(lastResortPayload.lastResortWindowSeconds, 'LAST_RESORT_PAYLOAD_LAST_RESORT_WINDOW') <= 0) {
-    throw new Error('TOWER_LAST_RESORT_PAYLOAD_LAST_RESORT_WINDOW_INVALID');
-  }
+  requireTowerInteger(lastResortPayload.lastResortWindowSeconds, 'LAST_RESORT_PAYLOAD_LAST_RESORT_WINDOW', 1);
   assertEncryptedLastResortPayload(lastResortPayload);
 };
 
-const verifyTowerAppointment = (input: unknown): TowerAppointmentV1 => {
+const verifyTowerAppointment = (
+  input: unknown,
+  assertActionRpcUrl: TowerActionRpcPolicy | undefined,
+): TowerAppointmentV1 => {
   const appointment = decodeTowerAppointmentEnvelope(input);
   if (!appointment || appointment.type !== 'tower_appointment' || appointment.version !== 1) {
     throw new Error('TOWER_APPOINTMENT_INVALID');
@@ -285,20 +292,17 @@ const verifyTowerAppointment = (input: unknown): TowerAppointmentV1 => {
   if (!runtimeId || runtimeId !== String(appointment.bundle.runtimeId || '').trim().toLowerCase()) {
     throw new Error('TOWER_APPOINTMENT_RUNTIME_ID_MISMATCH');
   }
-  const signedAt = Math.max(0, Math.floor(Number(appointment.ownerProof?.signedAt || 0)));
-  if (!Number.isSafeInteger(signedAt) || signedAt <= 0) {
-    throw new Error('TOWER_APPOINTMENT_SIGNED_AT_INVALID');
-  }
+  const signedAt = requireTowerInteger(appointment.ownerProof.signedAt, 'APPOINTMENT_SIGNED_AT', 1);
   if (Math.abs(Date.now() - signedAt) > TOWER_APPOINTMENT_MAX_CLOCK_SKEW_MS) {
     throw new Error('TOWER_APPOINTMENT_STALE');
   }
-  const slot = Math.max(0, Math.floor(Number(appointment.slot ?? 0)));
+  const slot = optionalTowerInteger(appointment.slot, 'APPOINTMENT_SLOT') ?? 0;
   const towerMode = normalizeTowerModeV1(appointment.towerMode);
   if (towerMode === 'blind_backup' && appointment.lastResortPayload) {
     throw new Error('TOWER_BACKUP_LAST_RESORT_PAYLOAD_FORBIDDEN');
   }
   if (towerMode === 'delayed_last_resort') {
-    verifyLastResortPayload(appointment.lastResortPayload);
+    verifyLastResortPayload(appointment.lastResortPayload, assertActionRpcUrl);
   }
   const message = buildTowerAppointmentOwnerMessage(
     runtimeId,
@@ -328,8 +332,6 @@ const verifyTowerAppointment = (input: unknown): TowerAppointmentV1 => {
       ...appointment.bundle,
       runtimeId,
       lookupKey,
-      height: Math.max(0, Math.floor(Number(appointment.bundle.height || 0))),
-      createdAt: Math.max(0, Math.floor(Number(appointment.bundle.createdAt || 0))),
     },
   };
 };
@@ -345,7 +347,11 @@ const errorResponse = (error: unknown): Response => {
   );
 };
 
-export const handleTowerAppointment = async (req: Request, store: WatchtowerStore): Promise<Response> => {
+export const handleTowerAppointment = async (
+  req: Request,
+  store: WatchtowerStore,
+  assertActionRpcUrl?: TowerActionRpcPolicy,
+): Promise<Response> => {
   try {
     // The HTTP envelope must be able to carry any bundle that the configured
     // storage quota can accept. Keep a bounded allowance for signatures and
@@ -353,8 +359,11 @@ export const handleTowerAppointment = async (req: Request, store: WatchtowerStor
     const body = await parseJsonBody(req, resolveAppointmentBodyLimit(store));
     if (Array.isArray(body) && body.length !== 2) throw new Error('TOWER_ARCHIVE_PAIR_INVALID');
     const receipt = Array.isArray(body)
-      ? await store.upsertRecoveryArchive([verifyTowerAppointment(body[0]), verifyTowerAppointment(body[1])])
-      : await store.upsertAppointment(verifyTowerAppointment(body));
+      ? await store.upsertRecoveryArchive([
+          verifyTowerAppointment(body[0], assertActionRpcUrl),
+          verifyTowerAppointment(body[1], assertActionRpcUrl),
+        ])
+      : await store.upsertAppointment(verifyTowerAppointment(body, assertActionRpcUrl));
     return new Response(serializeTaggedJson({ ok: true, receipt }), {
       headers: { 'content-type': 'application/json' },
     });
