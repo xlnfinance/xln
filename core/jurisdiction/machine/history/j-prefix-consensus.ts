@@ -559,6 +559,20 @@ export type JPrefixSelection = {
   signerIds: string[];
 };
 
+const highestQuorumReachableTip = (
+  state: EntityState,
+  attestations: ReadonlyMap<string, JPrefixAttestation>,
+): number | null => {
+  const byTip = Array.from(attestations, ([signerId, head]) => [signerId, head.scannedThroughHeight] as const)
+    .sort((left, right) => right[1] - left[1]);
+  const signerIds: string[] = [];
+  for (const [signerId, tip] of byTip) {
+    signerIds.push(signerId);
+    if (calculateJPrefixQuorumPower(state.config, signerIds) >= state.config.threshold) return tip;
+  }
+  return null;
+};
+
 export const selectHighestWeightedCommonJPrefix = (
   state: EntityState,
   attestations: ReadonlyMap<string, JPrefixAttestation>,
@@ -573,7 +587,11 @@ export const selectHighestWeightedCommonJPrefix = (
     assertBoardSigner(state.config, key);
     normalized.set(key, attestation);
   }
-  const highestTip = Math.max(...Array.from(normalized.values(), head => head.scannedThroughHeight));
+  // A height certifies only if signers whose tips reach it hold the threshold.
+  // Scanning above that point re-clipped one signer's fabricated headers at
+  // every height, so one Byzantine validator could stall the Runtime loop.
+  const highestTip = highestQuorumReachableTip(state, normalized);
+  if (highestTip === null) return null;
   // Before the first Entity-certified J anchor, the registration scan base is
   // still validator-local. A partial validator set must remain below quorum;
   // synthesizing a base certificate here makes the first multi-validator

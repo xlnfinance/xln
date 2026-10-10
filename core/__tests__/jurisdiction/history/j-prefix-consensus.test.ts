@@ -569,6 +569,50 @@ describe('validator J-prefix consensus', () => {
     expect(verifyJPrefixCertificate(proposerEnv, baseState, certificate!).selected.scannedThroughHeight).toBe(12);
   });
 
+  test('one validator\'s fabricated far tip never makes selection scan every height above the quorum', () => {
+    // Selection walked every height from the highest attested tip down,
+    // re-clipping the far attestation at each one: one Byzantine validator
+    // could stall the Runtime loop for minutes.
+    const proposerEnv = createEmptyEnv('j-prefix-far-tip-runtime');
+    const validatorEnv = createEmptyEnv('j-prefix-far-tip-validator');
+    const laggingEnv = createEmptyEnv('j-prefix-far-tip-lagging');
+    const proposerId = installOwnKey(proposerEnv, 'proposer-far');
+    const validatorId = installOwnKey(validatorEnv, 'validator-far');
+    const laggingId = installOwnKey(laggingEnv, 'lagging-far');
+    entityId = generateLazyEntityId(
+      [
+        { name: proposerId, weight: 2 },
+        { name: validatorId, weight: 2 },
+        { name: laggingId, weight: 1 },
+      ],
+      4n,
+    );
+    const baseState = makeState([proposerId, validatorId, laggingId]);
+    baseState.config.threshold = 4n;
+    baseState.config.shares = { [proposerId]: 2n, [validatorId]: 2n, [laggingId]: 1n };
+    const head = (env: RuntimeReplica, signerId: string, tip: number, isProposer: boolean) =>
+      buildLocalJPrefixAttestation(env, {
+        entityId,
+        signerId,
+        entityEncPubKey: '',
+        state: cloneEntityState(baseState),
+        mempool: [],
+        isProposer,
+        jHistory: observedThrough(tip, tip > 10),
+      })!;
+    const heads = new Map([
+      [proposerId, head(proposerEnv, proposerId, 20_000, true)],
+      [validatorId, head(validatorEnv, validatorId, 12, false)],
+      [laggingId, head(laggingEnv, laggingId, 10, false)],
+    ]);
+
+    const startedAt = performance.now();
+    const selection = selectHighestWeightedCommonJPrefix(baseState, heads);
+    expect(performance.now() - startedAt).toBeLessThan(2_000);
+    expect(selection?.claim.scannedThroughHeight).toBe(12);
+    expect(selection?.signerIds).toEqual([proposerId, validatorId].sort());
+  }, 10_000);
+
   test('three isolated validators independently sign and route one J-prefix head into a real quorum certificate', async () => {
     const proposerEnv = createEmptyEnv('j-prefix-isolated-proposer');
     const validatorEnv = createEmptyEnv('j-prefix-isolated-validator');
