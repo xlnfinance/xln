@@ -573,6 +573,44 @@ const highestQuorumReachableTip = (
   return null;
 };
 
+/**
+ * Normalized attestations share jurisdiction and base, so two clips at one
+ * height are the same claim exactly when the header there and the event blocks
+ * at or below it are byte-identical. Prefix digests make that an O(1) compare
+ * per height. Re-clipping instead cost heights x blocks: a pivotal validator
+ * on another fork (or Byzantine) forced the scan down to the floor and stalled
+ * the Runtime loop for minutes on a 2k-block backlog.
+ */
+type PrefixClip = {
+  signerId: string;
+  attestation: JPrefixAttestation;
+  /** prefixDigests[n] commits to the first n event blocks. */
+  prefixDigests: string[];
+  /** Blocks at or below the current scan height; heights only descend. */
+  blockCount: number;
+};
+
+const blockPrefixDigests = (blocks: readonly JurisdictionEventBlock[]): string[] => {
+  const digests = [''];
+  for (const block of blocks) {
+    digests.push(keccakBytesHash(encodeCanonicalConsensusBytes([digests.at(-1), block])));
+  }
+  return digests;
+};
+
+const clipKeyAt = (clip: PrefixClip, height: number): string => {
+  const { attestation } = clip;
+  if (height === attestation.baseHeight) return 'base';
+  const tip = attestation.headers[height - attestation.baseHeight - 1];
+  if (!tip || tip.jHeight !== height) throw new Error(`J_PREFIX_CLIP_HEADER_MISSING:${height}`);
+  let last = attestation.blocks[clip.blockCount - 1];
+  while (last && last.blockNumber > height) {
+    clip.blockCount -= 1;
+    last = attestation.blocks[clip.blockCount - 1];
+  }
+  return `${tip.jBlockHash}:${clip.prefixDigests[clip.blockCount]}`;
+};
+
 export const selectHighestWeightedCommonJPrefix = (
   state: EntityState,
   attestations: ReadonlyMap<string, JPrefixAttestation>,
@@ -597,18 +635,19 @@ export const selectHighestWeightedCommonJPrefix = (
   // synthesizing a base certificate here makes the first multi-validator
   // observation fail before the remaining authenticated heads can arrive.
   const candidateFloor = state.jHistoryFinality ? state.lastFinalizedJHeight : state.lastFinalizedJHeight + 1;
-  const candidates = Array.from(
-    { length: Math.max(0, highestTip - candidateFloor + 1) },
-    (_, index) => highestTip - index,
-  );
-  for (const height of candidates) {
-    const groups = new Map<string, { claim: JPrefixClaim; signerIds: string[] }>();
-    for (const [signerId, attestation] of normalized) {
-      if (attestation.scannedThroughHeight < height) continue;
-      const claim = clipAttestation(state, attestation, height);
-      const key = claimKey(claim);
-      const group = groups.get(key) ?? { claim, signerIds: [] };
-      group.signerIds.push(signerId);
+  const clips = Array.from(normalized, ([signerId, attestation]): PrefixClip => ({
+    signerId,
+    attestation,
+    prefixDigests: blockPrefixDigests(attestation.blocks),
+    blockCount: attestation.blocks.length,
+  }));
+  for (let height = highestTip; height >= candidateFloor; height -= 1) {
+    const groups = new Map<string, { clip: PrefixClip; signerIds: string[] }>();
+    for (const clip of clips) {
+      if (clip.attestation.scannedThroughHeight < height) continue;
+      const key = clipKeyAt(clip, height);
+      const group = groups.get(key) ?? { clip, signerIds: [] };
+      group.signerIds.push(clip.signerId);
       groups.set(key, group);
     }
     const certified = Array.from(groups.values()).filter(
@@ -617,8 +656,10 @@ export const selectHighestWeightedCommonJPrefix = (
     if (certified.length > 1) throw new Error(`J_PREFIX_CONFLICTING_QUORUMS:${height}`);
     if (certified.length === 1) {
       const selected = certified[0]!;
-      selected.signerIds.sort(compareStableText);
-      return selected;
+      return {
+        claim: clipAttestation(state, selected.clip.attestation, height),
+        signerIds: selected.signerIds.sort(compareStableText),
+      };
     }
   }
   return null;

@@ -613,6 +613,55 @@ describe('validator J-prefix consensus', () => {
     expect(selection?.signerIds).toEqual([proposerId, validatorId].sort());
   }, 10_000);
 
+  test('a pivotal validator on another fork with dense event blocks never makes selection cost heights x blocks', () => {
+    // All three shares are required. A validator on another fork disagrees at
+    // every height, so selection scans down to the certified base. Re-clipping
+    // its 790 event blocks at each of 800 heights took about 30 s.
+    const envs = [
+      createEmptyEnv('j-prefix-fork-a'),
+      createEmptyEnv('j-prefix-fork-b'),
+      createEmptyEnv('j-prefix-fork-c'),
+    ];
+    const signerIds = envs.map((env, index) => installOwnKey(env, `fork-${index}`));
+    entityId = generateLazyEntityId(signerIds.map(name => ({ name, weight: 1 })), 3n);
+    const baseState = makeState(signerIds);
+    const tip = 800;
+    const forkHash = (height: number): string => height === 10 ? blockHash(10) : `0x${'f'.repeat(24)}${height.toString(16).padStart(40, '0')}`;
+    const forkBlocks = Array.from({ length: tip - 10 }, (_, index) => {
+      const height = 11 + index;
+      const event = { ...reserveUpdatedAt(height, BigInt(height)), blockHash: forkHash(height) };
+      return {
+        jurisdictionRef,
+        jHeight: height,
+        jBlockHash: forkHash(height),
+        eventsHash: canonicalJurisdictionEventsHash([event]),
+        events: [event],
+      };
+    });
+    const forked = recordValidatorJHistory(undefined, {
+      jurisdictionRef,
+      scannedThroughHeight: tip,
+      tipBlockHash: forkHash(tip),
+      headers: Array.from({ length: tip - 9 }, (_, index) => ({ jHeight: 10 + index, jBlockHash: forkHash(10 + index) })),
+      blocks: forkBlocks,
+    });
+    const heads = new Map(signerIds.map((signerId, index) => [signerId, buildLocalJPrefixAttestation(envs[index]!, {
+      entityId,
+      signerId,
+      entityEncPubKey: '',
+      state: cloneEntityState(baseState),
+      mempool: [],
+      isProposer: index === 0,
+      jHistory: index === 2 ? forked : observedThrough(tip, true),
+    })!] as const));
+
+    const startedAt = performance.now();
+    const selection = selectHighestWeightedCommonJPrefix(baseState, heads);
+    expect(performance.now() - startedAt).toBeLessThan(2_000);
+    expect(selection?.claim.scannedThroughHeight).toBe(10);
+    expect(selection?.signerIds).toEqual([...signerIds].sort());
+  }, 10_000);
+
   test('three isolated validators independently sign and route one J-prefix head into a real quorum certificate', async () => {
     const proposerEnv = createEmptyEnv('j-prefix-isolated-proposer');
     const validatorEnv = createEmptyEnv('j-prefix-isolated-validator');
