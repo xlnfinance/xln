@@ -821,21 +821,27 @@ const appendAppointmentReceipt = (
 ));
 
 /**
- * Mirrors Account._registerCounterDispute against the counter already on
- * chain: an equal counter is a no-op that still costs gas, and a lower or
- * conflicting one reverts. The tower re-sent its counter every sweep until
- * the deadline, paying or failing each time.
+ * Before T a counter-dispute only registers (locks) a counter: re-sending one
+ * the chain already holds is a no-op the tower paid gas for every sweep, and a
+ * lower or conflicting one reverts (Account._registerCounterDispute). At/after
+ * T the same call executes, and only the exact selected counter can.
  */
-const counterAlreadySelectedOnChain = (
-  account: { disputeCounterNonce?: bigint; disputeCounterProposerIsLeft?: boolean },
-  finalNonce: bigint,
-  proposerIsLeft: boolean,
+const counterSubmissionIsMoot = (
+  account: { disputeCounterNonce?: bigint; disputeCounterProofbodyHash?: string; disputeCounterProposerIsLeft?: boolean },
+  counter: Readonly<{ nonce: bigint; proposerIsLeft: boolean; bodyHash: string }>,
+  atOrAfterDeadline: boolean,
 ): boolean => {
   const selectedNonce = BigInt(account.disputeCounterNonce || 0n);
-  if (selectedNonce === 0n || finalNonce > selectedNonce) return false;
-  if (finalNonce < selectedNonce) return true;
+  if (selectedNonce === 0n) return false;
+  const selectedIsLeft = Boolean(account.disputeCounterProposerIsLeft);
+  if (atOrAfterDeadline) {
+    return counter.nonce !== selectedNonce
+      || counter.proposerIsLeft !== selectedIsLeft
+      || counter.bodyHash.toLowerCase() !== String(account.disputeCounterProofbodyHash || '').toLowerCase();
+  }
+  if (counter.nonce !== selectedNonce) return counter.nonce < selectedNonce;
   // Equal nonce: only a LEFT proof replaces a selected RIGHT one.
-  return proposerIsLeft === Boolean(account.disputeCounterProposerIsLeft) || !proposerIsLeft;
+  return counter.proposerIsLeft === selectedIsLeft || !counter.proposerIsLeft;
 };
 
 const processLastResortAppointment = async (
@@ -898,7 +904,11 @@ const processLastResortAppointment = async (
       `WATCHTOWER_ADDRESS_MISMATCH:${remedy.towerAddress}:${context.towerWallet.address.toLowerCase()}`,
     );
   }
-  if (counterAlreadySelectedOnChain(account, finalNonce, remedy.latestProof.proposerIsLeft)) {
+  if (counterSubmissionIsMoot(account, {
+    nonce: finalNonce,
+    proposerIsLeft: remedy.latestProof.proposerIsLeft,
+    bodyHash: computeProofBodyHash(remedy.latestProof.finalProofbody),
+  }, currentTimestamp >= disputeTimeout)) {
     await appendAppointmentReceipt(context, appointment, createdAt, 'skipped');
     return 'skipped';
   }
