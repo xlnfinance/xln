@@ -82,8 +82,8 @@ const readJsonBody = async (request: Request): Promise<Record<string, unknown> |
   let value: unknown;
   try {
     value = JSON.parse(text);
-  } catch (error) {
-    if (!(error instanceof SyntaxError)) throw error;
+  } catch {
+    // JSON.parse of an already-read string can only fail on its syntax.
     return bodyRejection('LOCAL_PAIRING_BODY_INVALID');
   }
   if (!value || typeof value !== 'object' || Array.isArray(value)) return bodyRejection('LOCAL_PAIRING_BODY_INVALID');
