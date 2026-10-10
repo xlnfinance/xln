@@ -309,6 +309,73 @@ describe('node runtime quiesce', () => {
     }
   });
 
+  test('a failed checkpoint drain resumes the prior loop instead of leaving the runtime inert', async () => {
+    const env = createEmptyEnv(null);
+    env.runtimeConfig = { ...env.runtimeConfig, storage: { enabled: false } };
+    startRuntimeLoop(env, { tickDelayMs: 0 });
+    const infrastructure = env.infrastructure;
+    if (!infrastructure) throw new Error('TEST_INFRASTRUCTURE_MISSING');
+    // Accepted input that never settles keeps the drain from completing.
+    infrastructure.inFlightEntityInputs = 1;
+    let persisted = 0;
+    const checkpoint = () => checkpointNodeRuntime(env, {
+      workTimeoutMs: 30,
+      loopTimeoutMs: 200,
+      quietMs: 1,
+      loopConfig: { tickDelayMs: 0 },
+      persist: async () => {
+        persisted += 1;
+      },
+    });
+
+    try {
+      await expect(checkpoint()).rejects.toThrow(
+        'NODE_RUNTIME_CHECKPOINT_FAILED:quiesce:NODE_RUNTIME_QUIESCE_FAILED:work_drain_timeout',
+      );
+      expect(persisted).toBe(0);
+      expect(infrastructure.loopActive).toBe(true);
+      expect(infrastructure.persistenceQuiescing).toBe(false);
+      expect(infrastructure.halted).toBe(false);
+
+      infrastructure.inFlightEntityInputs = 0;
+      await checkpoint();
+      expect(persisted).toBe(1);
+      expect(infrastructure.loopActive).toBe(true);
+    } finally {
+      await stopRuntimeLoopAndWait(env, 200);
+    }
+  });
+
+  test('a checkpoint whose runtime work outlives the loop deadline halts instead of resuming', async () => {
+    const env = createEmptyEnv(null);
+    env.runtimeConfig = { ...env.runtimeConfig, storage: { enabled: false } };
+    startRuntimeLoop(env, { tickDelayMs: 0 });
+    const infrastructure = env.infrastructure;
+    if (!infrastructure) throw new Error('TEST_INFRASTRUCTURE_MISSING');
+    // A frame writer that never releases: resuming beside it would run two writers.
+    let release: () => void = () => {};
+    infrastructure.processingPromise = new Promise<void>(resolve => {
+      release = resolve;
+    });
+
+    try {
+      await expect(checkpointNodeRuntime(env, {
+        workTimeoutMs: 30,
+        loopTimeoutMs: 30,
+        quietMs: 1,
+        loopConfig: { tickDelayMs: 0 },
+        persist: async () => {},
+      })).rejects.toThrow('|halted:loop_not_drained');
+      expect(infrastructure.lifecyclePhase).toBe('halted');
+      expect(infrastructure.operatorStatus).toBe('HALTED_REQUIRES_OPERATOR');
+      expect(infrastructure.loopActive).toBe(false);
+    } finally {
+      infrastructure.processingPromise = null;
+      release();
+      await stopRuntimeLoopAndWait(env, 200);
+    }
+  });
+
   test('bootstrap checkpoint drains accepted in-memory work before publishing the first durable snapshot', async () => {
     const env = createEmptyEnv(`node-bootstrap-checkpoint-${process.pid}-${Date.now()}`);
     env.quietRuntimeLogs = true;

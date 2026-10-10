@@ -286,11 +286,13 @@ describe('production startup wiring', () => {
     expect(nodeQuiesce.indexOf('runtimeIdle = await stopRuntimeLoopAndWait(')).toBeLessThan(
       nodeQuiesce.indexOf('await stopP2PAndWait('),
     );
-    expect(nodeQuiesce.indexOf('const quiesceResult = await quiesceNodeRuntime(env, {')).toBeLessThan(
-      nodeQuiesce.indexOf('state.persistencePaused = true;'),
+    const checkpoint = extractSourceBlock(nodeQuiesce, 'export const checkpointNodeRuntime = async (', 'wasPersistencePaused,\n  };');
+    expect(checkpoint.indexOf('const quiesceResult = await quiesceForCheckpoint(')).toBeGreaterThan(0);
+    expect(checkpoint.indexOf('const quiesceResult = await quiesceForCheckpoint(')).toBeLessThan(
+      checkpoint.indexOf('state.persistencePaused = true;'),
     );
-    expect(nodeQuiesce.indexOf('await options.persist();')).toBeLessThan(
-      nodeQuiesce.indexOf("transitionRuntimeLifecycle(state, 'stopped');"),
+    expect(checkpoint.indexOf('await options.persist();')).toBeLessThan(
+      checkpoint.indexOf('restoreNodeRuntimeProducers('),
     );
     for (const source of sources) {
       expect(source).toContain('node-runtime-quiesce');
