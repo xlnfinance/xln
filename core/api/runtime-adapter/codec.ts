@@ -34,12 +34,20 @@ export const runtimeAdapterMessageByteLength = (raw: unknown): number => {
   return 0;
 };
 
+/** Typed so transports choose close code 1009 without parsing error text. */
+export class RuntimeAdapterMessageTooLargeError extends Error {
+  readonly code = 'RADAPTER_MESSAGE_TOO_LARGE';
+
+  constructor(byteLength: number, maxBytes: number) {
+    super(`RADAPTER_MESSAGE_TOO_LARGE: bytes=${byteLength} max=${maxBytes}`);
+    this.name = 'RuntimeAdapterMessageTooLargeError';
+  }
+}
+
 export const assertRuntimeAdapterMessageSize = (raw: unknown): void => {
   const byteLength = runtimeAdapterMessageByteLength(raw);
   const maxBytes = runtimeAdapterMaxMessageBytes();
-  if (byteLength > maxBytes) {
-    throw new Error(`RADAPTER_MESSAGE_TOO_LARGE: bytes=${byteLength} max=${maxBytes}`);
-  }
+  if (byteLength > maxBytes) throw new RuntimeAdapterMessageTooLargeError(byteLength, maxBytes);
 };
 
 const assertRuntimeAdapterMessagePack = (bytes: Uint8Array): void => {

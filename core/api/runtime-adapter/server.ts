@@ -8,6 +8,7 @@ import {
   encodeRuntimeAdapterMessageForBrowser,
   runtimeAdapterMessageByteLength,
   runtimeAdapterMaxMessageBytes,
+  RuntimeAdapterMessageTooLargeError,
 } from './codec';
 import type { RuntimeFrame, StorageHead } from '../../storage/types';
 import type { StorageAccountDoc, StorageEntityViewPage } from '../../storage';
@@ -540,8 +541,7 @@ export const forgetRuntimeAdapterClient = (ws: RuntimeAdapterSocket): void => {
 };
 
 export const closeInvalidRuntimeAdapterMessage = (ws: RuntimeAdapterSocket, error: unknown): void => {
-  const message = error instanceof Error ? error.message : String(error || '');
-  ws.close?.(message.includes('RADAPTER_MESSAGE_TOO_LARGE') ? 1009 : 1003, 'Invalid runtime adapter message');
+  ws.close?.(error instanceof RuntimeAdapterMessageTooLargeError ? 1009 : 1003, 'Invalid runtime adapter message');
 };
 
 export const broadcastRuntimeAdapterTick = (env: RuntimeReplica): void => {

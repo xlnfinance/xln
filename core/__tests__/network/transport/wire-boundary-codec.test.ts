@@ -13,7 +13,9 @@ import {
 import {
   decodeRuntimeAdapterMessage,
   encodeRuntimeAdapterMessage,
+  RuntimeAdapterMessageTooLargeError,
 } from '../../../api/runtime-adapter/codec';
+import { closeInvalidRuntimeAdapterMessage } from '../../../api/runtime-adapter/server';
 import {
   assertRuntimeAdapterCommandTxAuthorized,
   markLocalRuntimeAdapterCommandTx,
@@ -234,6 +236,24 @@ describe('rAdapter trusted decode boundary', () => {
     process.env['XLN_RADAPTER_MAX_MESSAGE_BYTES'] = '4';
     expect(() => decodeRuntimeAdapterMessage(new Uint8Array([0x01, 0xff, 0xff, 0xff, 0xff])))
       .toThrow('RADAPTER_MESSAGE_TOO_LARGE: bytes=5 max=4');
+  });
+
+  test('closes an oversized frame with 1009 by error type, never by message text', () => {
+    // The close code was chosen by message.includes(...), so any error whose
+    // text mentioned the code got 1009.
+    const codes: Array<number | undefined> = [];
+    const ws = { send: () => undefined, close: (code?: number) => void codes.push(code) };
+    process.env['XLN_RADAPTER_MAX_MESSAGE_BYTES'] = '4';
+    let oversized: unknown;
+    try {
+      decodeRuntimeAdapterMessage(new Uint8Array([0x01, 0xff, 0xff, 0xff, 0xff]));
+    } catch (error) {
+      oversized = error;
+    }
+    expect(oversized).toBeInstanceOf(RuntimeAdapterMessageTooLargeError);
+    closeInvalidRuntimeAdapterMessage(ws, oversized);
+    closeInvalidRuntimeAdapterMessage(ws, new Error('RADAPTER_MESSAGE_TOO_LARGE: echoed peer text'));
+    expect(codes).toEqual([1009, 1003]);
   });
 
   test('wire decoding cannot recreate local command authority', () => {
