@@ -1,5 +1,9 @@
 import type { EntityState } from '../../../entity/types';
-import { retryFailure } from '../../../protocol/errors/failure-taxonomy';
+import {
+  type FailureDispositionError,
+  haltRuntimeFailure,
+  retryFailure,
+} from '../../../protocol/errors/failure-taxonomy';
 import type {
   JurisdictionEventBlock,
   JurisdictionEventData,
@@ -30,11 +34,15 @@ import {
 
 const normalizedText = (value: unknown): string => String(value ?? '').trim().toLowerCase();
 
-const normalizedHistoryRoot = (value: unknown, errorCode: string): string => {
-  const root = normalizedText(value);
-  if (!/^0x[0-9a-f]{64}$/.test(root)) throw new Error(errorCode);
-  return root;
-};
+/**
+ * The Entity-certified J anchor is local authority. Its corruption, or a local
+ * scan that contradicts it, halts this Runtime; it is never a peer rejection.
+ */
+const certifiedJHistoryCorruption = (code: string, detail?: string | number): FailureDispositionError =>
+  haltRuntimeFailure(code, detail === undefined ? code : `${code}:${detail}`);
+
+const finalizedJHistoryReorg = (height: number): FailureDispositionError =>
+  certifiedJHistoryCorruption('J_HISTORY_FINALIZED_REORG', height);
 
 const normalizeEventBlock = (
   jurisdictionRef: string,
@@ -75,11 +83,6 @@ const blockIdentity = (block: ExactJBlockIdentity): string =>
   `${normalizedText(block.jBlockHash)}:${normalizedText(block.eventsHash)}:` +
   normalizedText(block.disputeFinalizationEvidenceHash);
 
-export const isCertifiedJHistoryCorruption = (error: unknown): boolean => {
-  const message = error instanceof Error ? error.message : String(error);
-  return /^J_HISTORY_(?:FINALITY|FINALIZED)_/.test(message);
-};
-
 export type EntityCertifiedJAnchor = {
   height: number;
   hash: string;
@@ -95,31 +98,36 @@ export const getEntityCertifiedJAnchor = (state: EntityState): EntityCertifiedJA
   const finality = state.jHistoryFinality;
   const stateHeight = Number(state.lastFinalizedJHeight || 0);
   if (!Number.isSafeInteger(stateHeight) || stateHeight < 0) {
-    throw new Error(`J_HISTORY_FINALITY_HEIGHT_CORRUPTION:state=${String(state.lastFinalizedJHeight)}`);
+    throw certifiedJHistoryCorruption(
+      'J_HISTORY_FINALITY_HEIGHT_CORRUPTION',
+      `state=${String(state.lastFinalizedJHeight)}`,
+    );
   }
   if (!finality) {
     const registrationBase = getJHistoryRegistrationBaseHeight(state.config.jurisdiction);
     if (stateHeight !== registrationBase) {
-      throw new Error(
-        `J_HISTORY_FINALITY_MISSING:state=${stateHeight}:registrationBase=${registrationBase}`,
+      throw certifiedJHistoryCorruption(
+        'J_HISTORY_FINALITY_MISSING',
+        `state=${stateHeight}:registrationBase=${registrationBase}`,
       );
     }
     return null;
   }
   const height = Number(finality.finalizedThroughHeight);
   if (!Number.isSafeInteger(height) || height <= 0 || height !== stateHeight) {
-    throw new Error(
-      `J_HISTORY_FINALITY_HEIGHT_CORRUPTION:state=${stateHeight}:anchor=${String(finality.finalizedThroughHeight)}`,
+    throw certifiedJHistoryCorruption(
+      'J_HISTORY_FINALITY_HEIGHT_CORRUPTION',
+      `state=${stateHeight}:anchor=${String(finality.finalizedThroughHeight)}`,
     );
   }
   const hash = normalizedText(finality.tipBlockHash);
-  if (!/^0x[0-9a-f]{64}$/.test(hash)) throw new Error('J_HISTORY_FINALITY_HASH_CORRUPTION');
+  if (!/^0x[0-9a-f]{64}$/.test(hash)) throw certifiedJHistoryCorruption('J_HISTORY_FINALITY_HASH_CORRUPTION');
   const jurisdictionRef = normalizedText(finality.jurisdictionRef);
-  if (!jurisdictionRef) throw new Error('J_HISTORY_FINALITY_JURISDICTION_CORRUPTION');
-  const eventHistoryRoot = normalizedHistoryRoot(
-    finality.eventHistoryRoot,
-    'J_HISTORY_FINALITY_ROOT_CORRUPTION:certified-root-invalid',
-  );
+  if (!jurisdictionRef) throw certifiedJHistoryCorruption('J_HISTORY_FINALITY_JURISDICTION_CORRUPTION');
+  const eventHistoryRoot = normalizedText(finality.eventHistoryRoot);
+  if (!/^0x[0-9a-f]{64}$/.test(eventHistoryRoot)) {
+    throw certifiedJHistoryCorruption('J_HISTORY_FINALITY_ROOT_CORRUPTION', 'certified-root-invalid');
+  }
   return { height, hash, jurisdictionRef, eventHistoryRoot };
 };
 
@@ -153,15 +161,15 @@ const assertValidatorJHistoryMatchesAnchor = (
   }
   if (!anchor) return;
   if (normalizedText(history.jurisdictionRef) !== anchor.jurisdictionRef) {
-    throw new Error('J_HISTORY_FINALITY_JURISDICTION_CONFLICT');
+    throw certifiedJHistoryCorruption('J_HISTORY_FINALITY_JURISDICTION_CONFLICT');
   }
   const localAnchorHash = history.blockHashes.get(anchor.height);
   if (localAnchorHash && normalizedText(localAnchorHash) !== anchor.hash) {
-    throw new Error(`J_HISTORY_FINALIZED_REORG:${anchor.height}`);
+    throw finalizedJHistoryReorg(anchor.height);
   }
   const localAnchorBlock = history.eventBlocks.get(anchor.height);
   if (localAnchorBlock && normalizedText(localAnchorBlock.jBlockHash) !== anchor.hash) {
-    throw new Error(`J_HISTORY_FINALIZED_REORG:${anchor.height}`);
+    throw finalizedJHistoryReorg(anchor.height);
   }
 };
 
@@ -265,7 +273,7 @@ export const recordValidatorJHistory = (
 
   const anchor = state ? getEntityCertifiedJAnchor(state) : null;
   if (anchor && anchor.jurisdictionRef !== jurisdictionRef) {
-    throw new Error('J_HISTORY_FINALITY_JURISDICTION_CONFLICT');
+    throw certifiedJHistoryCorruption('J_HISTORY_FINALITY_JURISDICTION_CONFLICT');
   }
   if (anchor && scannedThroughHeight < anchor.height) {
     throw new Error(`J_HISTORY_LOCAL_BEHIND_FINALIZED_ANCHOR:${scannedThroughHeight}:${anchor.height}`);
@@ -286,7 +294,7 @@ export const recordValidatorJHistory = (
     if (!jBlockHash) throw new Error('J_HISTORY_LOCAL_HEADER_HASH_MISSING');
     if (anchor && jHeight < anchor.height) continue;
     if (anchor && jHeight === anchor.height && jBlockHash !== anchor.hash) {
-      throw new Error(`J_HISTORY_FINALIZED_REORG:${jHeight}`);
+      throw finalizedJHistoryReorg(jHeight);
     }
     // The anchor height was seeded above and checked on the previous line, so
     // any remaining mismatch is a validator-local reorg.
@@ -302,7 +310,7 @@ export const recordValidatorJHistory = (
     if (block.jHeight > scannedThroughHeight) throw new Error('J_HISTORY_LOCAL_BLOCK_ABOVE_SCAN_TIP');
     if (anchor && block.jHeight <= anchor.height) {
       if (block.jHeight === anchor.height && block.jBlockHash !== anchor.hash) {
-        throw new Error(`J_HISTORY_FINALIZED_REORG:${block.jHeight}`);
+        throw finalizedJHistoryReorg(block.jHeight);
       }
       continue;
     }
@@ -321,7 +329,7 @@ export const recordValidatorJHistory = (
   const existingTipHash = blockHashes.get(scannedThroughHeight);
   if (existingTipHash && normalizedText(existingTipHash) !== tipBlockHash) {
     if (anchor?.height === scannedThroughHeight) {
-      throw new Error(`J_HISTORY_FINALIZED_REORG:${scannedThroughHeight}`);
+      throw finalizedJHistoryReorg(scannedThroughHeight);
     }
     throw new Error(`J_HISTORY_LOCAL_REORG_AT_TIP:${scannedThroughHeight}`);
   }
@@ -391,7 +399,7 @@ export const reconcileJEventRangeWithFinalizedState = (
   const anchor = getEntityCertifiedJAnchor(state);
   const jurisdictionRef = normalizedText(data.jurisdictionRef);
   if (anchor && jurisdictionRef !== anchor.jurisdictionRef) {
-    throw new Error('J_HISTORY_FINALITY_JURISDICTION_CONFLICT');
+    throw certifiedJHistoryCorruption('J_HISTORY_FINALITY_JURISDICTION_CONFLICT');
   }
   const suffixBlocks = data.blocks.filter((block) => Number(block.blockNumber) > finalizedHeight);
   const eventHistoryRoot = foldJHistoryRoot(
@@ -586,7 +594,7 @@ export const getValidatorJExpectedBlockHash = (
   if (anchor && jHeight === anchor.height) {
     const localHash = history?.blockHashes.get(jHeight);
     if (localHash && normalizedText(localHash) !== anchor.hash) {
-      throw new Error(`J_HISTORY_FINALIZED_REORG:${jHeight}`);
+      throw finalizedJHistoryReorg(jHeight);
     }
     return anchor.hash;
   }
@@ -605,7 +613,7 @@ export const rewindValidatorJHistory = (
   if (!anchor) return undefined;
   const localAnchorHash = history.blockHashes.get(anchor.height);
   if (localAnchorHash && normalizedText(localAnchorHash) !== anchor.hash) {
-    throw new Error(`J_HISTORY_FINALIZED_REORG:${anchor.height}`);
+    throw finalizedJHistoryReorg(anchor.height);
   }
   return {
     jurisdictionRef: normalizedText(history.jurisdictionRef),

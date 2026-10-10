@@ -45,6 +45,7 @@ import {
 import type { EntityReplica, EntityState } from '../../../entity/types';
 import type { JurisdictionEvent, ValidatorJEventBlock } from '../../../types/jurisdiction-events';
 import { hashProofBodyStruct } from '../../../protocol/dispute/proof-builder';
+import { FailureDispositionError } from '../../../protocol/errors/failure-taxonomy';
 
 const depositoryAddress = `0x${'dd'.repeat(20)}`;
 const jurisdictionRef = `stack:31337:${depositoryAddress}`;
@@ -1302,7 +1303,7 @@ describe('J validator-local history and Entity-finalized ranges', () => {
       entityContext,
     );
 
-    await expect(applyEntityInput(env, replica, {
+    const failure = await applyEntityInput(env, replica, {
       entityId,
       signerId: validatorId,
       proposedFrame: {
@@ -1319,7 +1320,10 @@ describe('J validator-local history and Entity-finalized ranges', () => {
         hashesToSign: buildEntityHashesToSign(entityState.entityId, proposalHeight, frameHash),
         collectedSigs: new Map([[activeLeaderId, [signAccountFrame(env, activeLeaderId, frameHash)]]]),
       },
-    })).rejects.toThrow('J_HISTORY_FINALITY_ROOT_CORRUPTION');
+    }).then(() => null, (error: unknown) => error);
+    // The classifier branches on the typed disposition, never on message text.
+    expect(failure).toBeInstanceOf(FailureDispositionError);
+    expect(failure).toMatchObject({ disposition: 'halt_runtime', code: 'J_HISTORY_FINALITY_ROOT_CORRUPTION' });
     expect(replica.lockedFrame).toBeUndefined();
   });
 
@@ -1669,18 +1673,24 @@ describe('J validator-local history and Entity-finalized ranges', () => {
       entityHeight: entityState.height,
     };
 
-    expect(() => assertCertifiedJHistoryIntegrity(entityState)).not.toThrow();
+    const haltCode = (): string | null => {
+      try {
+        assertCertifiedJHistoryIntegrity(entityState);
+        return null;
+      } catch (error) {
+        if (!(error instanceof FailureDispositionError) || error.disposition !== 'halt_runtime') throw error;
+        return error.code;
+      }
+    };
+    expect(haltCode()).toBeNull();
     expect(entityState.jBlockChain).toBeUndefined();
     entityState.jHistoryFinality.tipBlockHash = 'invalid';
-    expect(() => assertCertifiedJHistoryIntegrity(entityState))
-      .toThrow('J_HISTORY_FINALITY_HASH_CORRUPTION');
+    expect(haltCode()).toBe('J_HISTORY_FINALITY_HASH_CORRUPTION');
     entityState.jHistoryFinality.tipBlockHash = blockHash(3);
     entityState.jHistoryFinality.eventHistoryRoot = 'invalid';
-    expect(() => assertCertifiedJHistoryIntegrity(entityState))
-      .toThrow('J_HISTORY_FINALITY_ROOT_CORRUPTION');
+    expect(haltCode()).toBe('J_HISTORY_FINALITY_ROOT_CORRUPTION');
     entityState.jHistoryFinality.eventHistoryRoot = prefixRoot;
     entityState.lastFinalizedJHeight = 2;
-    expect(() => assertCertifiedJHistoryIntegrity(entityState))
-      .toThrow('J_HISTORY_FINALITY_HEIGHT_CORRUPTION');
+    expect(haltCode()).toBe('J_HISTORY_FINALITY_HEIGHT_CORRUPTION');
   });
 });

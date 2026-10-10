@@ -1,3 +1,7 @@
+/** Certified J-anchor corruption is typed halt_runtime at its source; never a peer reject. */
+const isRuntimeHalt = (error: unknown): boolean =>
+  error instanceof FailureDispositionError && error.disposition === 'halt_runtime';
+
 export const getReplicaJRangeValidationError = (
   env: EntityRuntimeContext,
   replica: EntityReplica,
@@ -23,7 +27,7 @@ export const getReplicaJRangeValidationError = (
       if (error) return error;
     }
   } catch (error) {
-    if (isCertifiedJHistoryCorruption(error)) throw error;
+    if (isRuntimeHalt(error)) throw error;
     return error instanceof Error ? error.message : String(error);
   }
   return null;
@@ -62,7 +66,7 @@ export const getFrameJPrefixValidationError = (
     assertFrameJPrefix(env, authorityReplica, frame);
     return null;
   } catch (error) {
-    if (isCertifiedJHistoryCorruption(error)) throw error;
+    if (isRuntimeHalt(error)) throw error;
     return {
       disposition: error instanceof FailureDispositionError && error.disposition === 'retry'
         ? 'retry'
@@ -204,7 +208,6 @@ import {
 import {
   getJEventRangeValidationError,
   getValidatorJContiguousThroughHeight,
-  isCertifiedJHistoryCorruption,
   pruneFinalizedValidatorJHistory,
 } from '../../../jurisdiction/machine/local-history';
 import { getEntityFrameJRangeBudgetError } from '../../../jurisdiction/machine/range-budget';
