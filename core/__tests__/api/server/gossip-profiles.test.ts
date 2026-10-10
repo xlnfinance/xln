@@ -4,6 +4,11 @@ import { handleKnownProfileRequest } from '../../../api/server/network/gossip-pr
 import type { Profile } from '../../../entity/profile';
 import { safeParse } from '../../../protocol/serialization';
 import { createEmptyEnv } from '../../../runtime';
+import { createGossipProfileAdmission } from '../../../api/server/network/gossip-admission';
+import {
+  createGossipProfileLookupBatcher,
+  GOSSIP_PROFILE_LOOKUP_BATCH_MAX_IDS,
+} from '../../../api/server/network/gossip-lookup';
 
 const entityId = (index: number): string => `0x${index.toString(16).padStart(64, '0')}`;
 
@@ -46,4 +51,25 @@ test('known-profile inspection resolves a large peer bundle from the keyed Runti
   expect(payload.found).toBe(true);
   expect(payload.peers).toHaveLength(peerIds.length);
   expect(new Set(payload.peers.map(item => item.entityId)).size).toBe(peerIds.length);
+});
+
+test('a profile lookup batch never outgrows the relay cap, and a full batch costs a new admission', async () => {
+  // Only the miss that opened a batch was charged, and batches had no size
+  // cap: one caller could pile thousands of ids into one relay request, which
+  // the relay refused whole, failing every caller riding in it.
+  const batcher = createGossipProfileLookupBatcher(createGossipProfileAdmission(60_000, 1, 300));
+  const fetched: number[] = [];
+  const fetchProfiles = async (entityIds: string[]) => { fetched.push(entityIds.length); };
+  const id = (index: number) => `0x${index.toString(16).padStart(64, '0')}`;
+  const pending: Array<Promise<void>> = [];
+  for (let index = 0; index < GOSSIP_PROFILE_LOOKUP_BATCH_MAX_IDS; index += 1) {
+    const lookup = batcher.lookup(id(index), 'client-a', fetchProfiles);
+    expect(lookup).not.toBe('rate-limited');
+    pending.push(lookup as Promise<void>);
+  }
+  expect(batcher.lookup(id(GOSSIP_PROFILE_LOOKUP_BATCH_MAX_IDS), 'client-a', fetchProfiles)).toBe('rate-limited');
+  const other = batcher.lookup(id(GOSSIP_PROFILE_LOOKUP_BATCH_MAX_IDS), 'client-b', fetchProfiles);
+  expect(other).not.toBe('rate-limited');
+  await Promise.all([...pending, other as Promise<void>]);
+  expect(fetched).toEqual([GOSSIP_PROFILE_LOOKUP_BATCH_MAX_IDS, 1]);
 });

@@ -134,6 +134,7 @@ import { readInheritedChildSecrets } from '../../support/process/child-secrets';
 import { decodeStartupSigners } from './startup-signers';
 import { createLocalPairingController } from './ownership/local-pairing';
 import { createGossipProfileAdmission } from './network/gossip-admission';
+import { createGossipProfileLookupBatcher } from './network/gossip-lookup';
 import { createBrainVaultOwnerController } from './ownership/brainvault';
 import { dbRootPath } from '../../runtime/replica/platform';
 import { withRuntimeCommittedRead } from '../../runtime/frame/lifecycle/writer-lock';
@@ -570,76 +571,31 @@ const gossipProfileAdmission = createGossipProfileAdmission(
   readPositiveIntegerEnv('XLN_GOSSIP_PROFILE_LOOKUP_PER_CLIENT_LIMIT', 30),
   readPositiveIntegerEnv('XLN_GOSSIP_PROFILE_LOOKUP_GLOBAL_LIMIT', 300),
 );
-/** A missing profile is looked up on the relay at most once per minute per entity. */
-const GOSSIP_PROFILE_LOOKUP_MIN_INTERVAL_MS = 60_000;
-/**
- * Lookups arriving within this window travel as one batched relay request; a
- * caller walking a list sequentially keeps extending the batch until it goes
- * quiet, so a hundred misses cost the relay one or two requests.
- */
-const GOSSIP_PROFILE_LOOKUP_BATCH_QUIET_MS = 30;
-const GOSSIP_PROFILE_LOOKUP_BATCH_MAX_MS = 300;
-const gossipProfileLookupAt = new Map<string, number>();
-let gossipProfileLookupBatch: { entityIds: Set<string>; done: Promise<void>; touch: () => void } | null = null;
+const gossipProfileLookups = createGossipProfileLookupBatcher(gossipProfileAdmission);
 
-/**
- * Coalesce concurrent misses into one relay request and remember when each
- * entity was last asked for, so a caller polling for a profile that has not
- * been announced yet costs the relay one lookup per minute, not one per poll.
- */
 const lookupMissingGossipProfile = (
   env: RuntimeReplica,
   targetEntityId: string,
   clientId: string,
 ): Promise<void> | Response => {
-  const now = Date.now();
-  const lastAt = gossipProfileLookupAt.get(targetEntityId) ?? 0;
-  if (now - lastAt < GOSSIP_PROFILE_LOOKUP_MIN_INTERVAL_MS) return Promise.resolve();
-  // The budget guards the relay: one batched relay request spends one unit,
-  // however many misses it carries.
-  if (!gossipProfileLookupBatch && !gossipProfileAdmission.admit(clientId)) {
-    return new Response(safeStringify({ ok: false, error: 'GOSSIP_PROFILE_LOOKUP_RATE_LIMITED' }), {
-      status: 429,
-      headers: {
-        ...JSON_HEADERS,
-        'retry-after': String(gossipProfileAdmission.retryAfterSeconds),
-      },
-    });
-  }
-  gossipProfileLookupAt.set(targetEntityId, now);
-  if (gossipProfileLookupAt.size > 100_000) {
-    for (const [entityId, at] of gossipProfileLookupAt) {
-      if (now - at >= GOSSIP_PROFILE_LOOKUP_MIN_INTERVAL_MS) gossipProfileLookupAt.delete(entityId);
+  const lookup = gossipProfileLookups.lookup(targetEntityId, clientId, async entityIds => {
+    try {
+      await ensureGossipProfiles(env, entityIds);
+    } catch (error) {
+      serverLog.warn('gossip.profile_ensure_failed', {
+        targetEntityIds: entityIds,
+        error: error instanceof Error ? error.message : String(error),
+      });
     }
-  }
-  if (!gossipProfileLookupBatch) {
-    const entityIds = new Set<string>();
-    const openedAt = now;
-    let lastAddedAt = now;
-    const settle = (resolve: () => void) => {
-      const wait = Math.min(GOSSIP_PROFILE_LOOKUP_BATCH_QUIET_MS, openedAt + GOSSIP_PROFILE_LOOKUP_BATCH_MAX_MS - Date.now());
-      setTimeout(() => {
-        const quiet = Date.now() - lastAddedAt >= GOSSIP_PROFILE_LOOKUP_BATCH_QUIET_MS;
-        if (quiet || Date.now() - openedAt >= GOSSIP_PROFILE_LOOKUP_BATCH_MAX_MS) resolve();
-        else settle(resolve);
-      }, Math.max(1, wait));
-    };
-    const done = new Promise<void>(resolve => settle(resolve)).then(async () => {
-      gossipProfileLookupBatch = null;
-      try {
-        await ensureGossipProfiles(env, [...entityIds]);
-      } catch (error) {
-        serverLog.warn('gossip.profile_ensure_failed', {
-          targetEntityIds: [...entityIds],
-          error: error instanceof Error ? error.message : String(error),
-        });
-      }
-    });
-    gossipProfileLookupBatch = { entityIds, done, touch: () => { lastAddedAt = Date.now(); } };
-  }
-  gossipProfileLookupBatch.entityIds.add(targetEntityId);
-  gossipProfileLookupBatch.touch();
-  return gossipProfileLookupBatch.done;
+  });
+  if (lookup !== 'rate-limited') return lookup;
+  return new Response(safeStringify({ ok: false, error: 'GOSSIP_PROFILE_LOOKUP_RATE_LIMITED' }), {
+    status: 429,
+    headers: {
+      ...JSON_HEADERS,
+      'retry-after': String(gossipProfileAdmission.retryAfterSeconds),
+    },
+  });
 };
 
 const prepareGossipProfileApi = async (
