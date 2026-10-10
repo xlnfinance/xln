@@ -878,8 +878,13 @@ export const hasPendingLocalJEvent = (state: EntityState, history: ValidatorJHis
  * prefix. A sparse future event remains a durable watcher obligation, but it
  * must not manufacture one empty Entity frame per intermediate header while
  * the watcher closes the gap.
+ *
+ * Only semantic J work may create an otherwise-empty Entity frame. Header-only
+ * scan progress stays validator-local and is certified by the next real Entity
+ * input or hook. Chain liveness is transport evidence, not Entity consensus
+ * state, so it must never manufacture financial history on its own.
  */
-const hasAttestablePendingLocalJEvent = (
+export const hasDueLocalJPrefixAdvance = (
   state: EntityState,
   history: ValidatorJHistory | undefined,
 ): boolean => {
@@ -890,15 +895,6 @@ const hasAttestablePendingLocalJEvent = (
     height => height > state.lastFinalizedJHeight && height <= attestableHeight,
   );
 };
-
-/**
- * Only semantic J work may create an otherwise-empty Entity frame. Header-only
- * scan progress stays validator-local and is certified by the next real Entity
- * input or hook. Chain liveness is transport evidence, not Entity consensus
- * state, so it must never manufacture financial history on its own.
- */
-export const hasDueLocalJPrefixAdvance = (state: EntityState, history: ValidatorJHistory | undefined): boolean =>
-  hasAttestablePendingLocalJEvent(state, history);
 
 /**
  * A validator that already signed the certified base cannot replace that vote

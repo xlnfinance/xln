@@ -598,7 +598,7 @@ export function summarizeBatch(batch: JBatch): Record<string, unknown> {
   };
 }
 
-export function preflightBatchForE2(entityId: string, batch: JBatch, _blockTimestampSec?: number): string[] {
+export function preflightBatchForE2(entityId: string, batch: JBatch): string[] {
   const issues: string[] = [];
   const normalizedEntityId = normalizeEntityId(entityId);
 
@@ -997,7 +997,7 @@ export function batchAddSettlement(
   );
 
   // Validate entities are in canonical order
-  if (leftEntity >= rightEntity) {
+  if (compareEntityIds(leftEntity, rightEntity) >= 0) {
     throw new Error(`Settlement entities must be ordered: ${leftEntity} >= ${rightEntity}`);
   }
 

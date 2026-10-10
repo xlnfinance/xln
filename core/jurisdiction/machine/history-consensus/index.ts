@@ -116,10 +116,6 @@ export const canonicalJEventRangeHash = (
   blocks: readonly JurisdictionEventBlock[],
 ): string => {
   const identities = normalizeRangeBlocks(jurisdictionRef, blocks);
-  const evidenceHashes = blocks.map((block) => {
-    const evidenceHash = String(block.disputeFinalizationEvidenceHash || '').trim().toLowerCase();
-    return evidenceHash ? normalizeRoot(evidenceHash, 'RANGE_EVIDENCE_ROOT') : ethers.ZeroHash;
-  });
   return ethers.keccak256(encodeAbiParams(
     RANGE_HASH_SCHEMAS,
     [
@@ -127,7 +123,7 @@ export const canonicalJEventRangeHash = (
       identities.map((block) => block.jHeight),
       identities.map((block) => textHash(block.jBlockHash)),
       identities.map((block) => block.eventsHash),
-      evidenceHashes,
+      identities.map((block) => block.disputeFinalizationEvidenceHash ?? ethers.ZeroHash),
     ],
   ));
 };
