@@ -12,6 +12,7 @@ import { openWritableEntityAccounts, entity, makeAccount, makeJurisdiction, make
 import { createOnionEnvelopes } from '../../../../protocol/htlc/codec/envelope';
 import { hashHtlcSecret } from '../../../../protocol/htlc/utils';
 import type { EntityTx } from '../../../../types/entity-tx';
+import { MalformedEntityFrameInputError } from '../../../../entity/tx/processing/invariant-errors';
 import {
   applyBookIntentProgram,
   createBookIntentProgram,
@@ -149,5 +150,73 @@ describe('offline HTLC forwarding from committed Entity context', () => {
         data: { lockId: hashlock, outcome: 'error', reason: 'next_hop_offline' },
       },
     }]);
+  });
+
+  test('a peer frame with two different locks for one hashlock rejects that accountInput', async () => {
+    // Nothing before materialization rejects a duplicate hashlock inside one
+    // Account frame (the duplicate-lockId check runs in Account apply). Two
+    // different bindings used to throw a plain HTLC_PREPARED_BINDING_CONFLICT
+    // and halt the proposer before Account validation could run.
+    const source = entity('11');
+    const hub = entity('22');
+    const target = entity('33');
+    const jurisdiction = makeJurisdiction('binding-conflict', 31_337, '44', '55');
+    const state = makeState(hub, entity('66'), jurisdiction, source);
+    openWritableEntityAccounts(state).set(target, makeAccount(hub, target, jurisdiction));
+    const hubPrivateKey = hexlify(deriveSignerKeySync(hub, 'entity-encryption'));
+    const sourcePrivateKey = secret('71');
+    const publicKeys = new Map([
+      [source, x25519Public(sourcePrivateKey)],
+      [hub, state.entityEncryptionPublicKey],
+      [target, x25519Public(secret('73'))],
+    ]);
+    const preimage = secret('81');
+    const hashlock = hashHtlcSecret(preimage);
+    const domain = { chainId: jurisdiction.chainId, depositoryAddress: jurisdiction.depositoryAddress };
+    const envelope = await createOnionEnvelopes(
+      [source, hub, target], preimage, publicKeys, [domain, domain],
+      new Map([[hub, 9n]]), undefined, state.timestamp,
+      { hashlock, tokenId: 1, senderLockAmount: 10n, timelock: 100_000n, revealBeforeHeight: 100 },
+      () => sourcePrivateKey,
+    );
+    const lockOf = (amount: bigint) => ({
+      type: 'htlc_lock' as const,
+      data: { lockId: hashlock, hashlock, tokenId: 1, amount, timelock: 100_000n, revealBeforeHeight: 100, envelope },
+    });
+    const accountInput = {
+      type: 'accountInput',
+      data: {
+        kind: 'ack_frame',
+        fromEntityId: source,
+        toEntityId: hub,
+        domain,
+        disputeConfig: { leftResponseSeconds: 10, rightResponseSeconds: 10 },
+        proposal: {
+          frame: {
+            height: 1, timestamp: state.timestamp, jHeight: 0,
+            accountTxs: [lockOf(10n), lockOf(11n)],
+            prevFrameHash: '', accountStateRoot: secret('91'), stateHash: secret('92'),
+          },
+          frameHanko: secret('93'),
+        },
+      },
+    } satisfies EntityTx;
+    const error = await materializeHtlcPreparedInfraContext({
+      state,
+      proposalTxs: [accountInput],
+      entityEncryptionPublicKey: state.entityEncryptionPublicKey,
+      entityEncryptionPrivateKey: hubPrivateKey,
+      isEntityOnline: () => true,
+      profiles: [],
+      parentFrameHash: state.prevFrameHash,
+      height: state.height + 1,
+      resolveRoute: async () => { throw new Error('test route resolver must not run'); },
+    }).then(() => null, (caught: unknown) => caught);
+    expect(error).toBeInstanceOf(MalformedEntityFrameInputError);
+    expect((error as MalformedEntityFrameInputError).disposition).toBe('reject');
+    expect((error as MalformedEntityFrameInputError).rejection).toBe(
+      `HTLC_PREPARED_BINDING_CONFLICT:${secret('92')}:${hashlock}`,
+    );
+    expect((error as MalformedEntityFrameInputError).frameTx).toBe(accountInput);
   });
 });

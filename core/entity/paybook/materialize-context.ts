@@ -277,15 +277,17 @@ const materializeInboundEntry = (
   return materializeForwardOutcome(input, binding, envelope);
 };
 
+type OwnedInboundEntry = { entry: PreparedHtlcEntry; ownerTx: EntityTx };
+
 const collectInboundEntries = (
   input: MaterializeHtlcPreparedContextInput,
-): PreparedHtlcEntry[] => input.proposalTxs.flatMap(tx => {
+): OwnedInboundEntry[] => input.proposalTxs.flatMap(tx => {
   if (tx.type !== 'accountInput') return [];
   const proposal = accountInputProposal(tx.data);
   if (!proposal) return [];
   return proposal.frame.accountTxs.flatMap(accountTx =>
     accountTx.type === 'htlc_lock' && accountTx.data.envelope !== undefined
-      ? [materializeInboundEntry(input, tx, proposal, accountTx)]
+      ? [{ entry: materializeInboundEntry(input, tx, proposal, accountTx), ownerTx: tx }]
       : []);
 });
 
@@ -315,14 +317,16 @@ export const collectInboundHtlcBindingKeys = (
  * peer retransmits, or the same proposal arrives over two transports — and
  * batching makes that ordinary rather than rare, because a wider frame covers
  * a wider delivery window. Two materializations of the same lock are the same
- * fact, so an identical repeat collapses. Only a genuine contradiction, two
- * different outcomes claimed for one lock, is a fault worth halting on.
+ * fact, so an identical repeat collapses. A genuine contradiction, two
+ * different locks claimed for one frame and hashlock, is the sending peer's
+ * frame: reject that accountInput (the proposer evicts it, a validator rejects
+ * the proposal) instead of halting before Account validation could run.
  */
-const canonicalizeInboundEntries = (entries: PreparedHtlcEntry[]): PreparedHtlcEntry[] => {
-  const decorated = entries.map(entry => ({ key: preparedHtlcBindingKey(entry.binding), entry }));
+const canonicalizeInboundEntries = (entries: OwnedInboundEntry[]): PreparedHtlcEntry[] => {
+  const decorated = entries.map(owned => ({ key: preparedHtlcBindingKey(owned.entry.binding), ...owned }));
   decorated.sort((left, right) => compareStableText(left.key, right.key));
   const canonical: PreparedHtlcEntry[] = [];
-  for (const { entry } of decorated) {
+  for (const { entry, ownerTx } of decorated) {
     const previous = canonical[canonical.length - 1];
     if (
       previous === undefined ||
@@ -333,9 +337,12 @@ const canonicalizeInboundEntries = (entries: PreparedHtlcEntry[]): PreparedHtlcE
       continue;
     }
     if (!canonicalConsensusValuesEqual(previous, entry)) {
-      throw new Error(
+      const rejected = new MalformedEntityFrameInputError(
+        ownerTx.type,
         `HTLC_PREPARED_BINDING_CONFLICT:${entry.binding.accountFrameHash}:${entry.binding.hashlock}`,
       );
+      rejected.frameTx = ownerTx;
+      throw rejected;
     }
   }
   return canonical;
@@ -431,10 +438,11 @@ export const materializeHtlcPreparedInfraContext = async (
   if (!inflight || !isPrefixOf(effectiveInput.proposalTxs, inflight.txs)) {
     await timePerfPhase('htlc.materialize.prime', () => primeInboundLayerDecryption(effectiveInput));
   }
-  const entries = timePerfPhase('htlc.materialize.collect', () =>
-    canonicalizeInboundEntries(collectInboundEntries(effectiveInput)));
+  let entries: HtlcPreparedInfraContext['entries'];
   let originated: HtlcPreparedInfraContext['originated'];
   try {
+    entries = timePerfPhase('htlc.materialize.collect', () =>
+      canonicalizeInboundEntries(collectInboundEntries(effectiveInput)));
     originated = await timePerfPhase('htlc.materialize.originated', () =>
       materializeOriginatedHtlcPayments({
         state: effectiveInput.state,
