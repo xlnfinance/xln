@@ -11,7 +11,8 @@ import {
   withRuntimeCommittedRead,
 } from '../../../runtime/frame/lifecycle/writer-lock';
 import { toRuntimeAdapterErrorPayload } from '../../../api/runtime-adapter/errors';
-import { resolveRuntimeAdapterRead, type RuntimeAdapterResolveContext } from '../../../api/runtime-adapter/resolve';
+import { resolveRuntimeAdapterRead } from '../../../api/runtime-adapter/resolve';
+import type { RuntimeAdapterResolveContext } from '../../../api/runtime-adapter/read/context';
 import { serializeTaggedJson } from '../../../protocol/serialization';
 
 const radapterAuthSeed = process.env['XLN_RADAPTER_AUTH_SEED'] || 'seed';

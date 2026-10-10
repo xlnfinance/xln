@@ -41,8 +41,8 @@ import {
   assertRuntimeAdapterGraphFrameWireBudget,
   resolveRuntimeAdapterRead,
   type RuntimeAdapterGraphFrame,
-  type RuntimeAdapterResolveContext,
 } from '../../../api/runtime-adapter/resolve';
+import type { RuntimeAdapterResolveContext } from '../../../api/runtime-adapter/read/context';
 
 import { decryptRuntimeRecoveryBundle, deriveRuntimeRecoveryLookupKey } from '../../../storage/recovery/bundle/crypto';
 

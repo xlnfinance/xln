@@ -17,7 +17,8 @@ import type {
 	  RuntimeAdapterStatus,
 	} from './types';
 import { RuntimeAdapterError, requireRuntimeAdapterCommandReady } from './errors';
-import { resolveRuntimeAdapterRead, type RuntimeAdapterResolveContext } from './resolve';
+import { resolveRuntimeAdapterRead } from './resolve';
+import type { RuntimeAdapterResolveContext } from './read/context';
 import { getRuntimeCommandReadiness } from '../../runtime/replica/lifecycle';
 import { ensureRuntimeInfrastructure } from '../../runtime/envelope/replica-envelope';
 import type { RuntimePublishedNotice } from '../../runtime/loop/loop-environment.ts';
