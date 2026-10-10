@@ -36,7 +36,7 @@ import {
   getEntityFrameTxByteBudgetError,
   MAX_ENTITY_FRAME_EVENT_BYTES,
   MAX_ENTITY_FRAME_TX_BYTES,
-  selectEntityFrameTxByteBudget,
+  selectEntityFrameTxByteBudgetWithMeter,
 } from '../../../entity/consensus/frame';
 import { provisionTestEntityEncryptionKey } from '../../helpers/cross-j';
 import { encodeBoard, hashBoard } from '../../../entity/factory';
@@ -989,7 +989,7 @@ describe('signed Entity command admission', () => {
       { type: 'chatMessage', data: { message: payload, timestamp: 2 } },
     ];
     expect(getEntityFrameTxByteBudgetError(txs)).toStartWith('ENTITY_FRAME_TX_BYTE_LIMIT_EXCEEDED:');
-    expect(selectEntityFrameTxByteBudget(txs)).toEqual([txs[0]]);
+    expect(selectEntityFrameTxByteBudgetWithMeter(txs).txs).toEqual([txs[0]]);
   });
 
   test('caps signed Entity frame events independently from transaction bytes', () => {

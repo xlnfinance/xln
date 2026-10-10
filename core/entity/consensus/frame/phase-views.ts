@@ -1,11 +1,6 @@
 import type { HankoString } from '../../../types/hanko';
 import type { EntityFrame } from '../../types';
 
-export type DraftEntityFrame = EntityFrame & {
-  collectedSigs?: never;
-  hankos?: never;
-};
-
 export type LockedEntityFrame = EntityFrame & {
   collectedSigs: Map<string, string[]>;
 };
@@ -23,9 +18,6 @@ const hasExactSignatureManifest = (
     && values.length === hashCount
     && values.every(value => value.length > 0),
 );
-
-export const isDraftEntityFrame = (frame: EntityFrame): frame is DraftEntityFrame =>
-  frame.collectedSigs === undefined && frame.hankos === undefined;
 
 export const isLockedEntityFrame = (frame: EntityFrame): frame is LockedEntityFrame =>
   frame.collectedSigs instanceof Map

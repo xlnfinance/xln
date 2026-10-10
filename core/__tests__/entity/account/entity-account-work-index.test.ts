@@ -2,7 +2,6 @@ import { describe, expect, test } from 'bun:test';
 
 import {
   getProposableAccountIds,
-  getPendingAccountIds,
   getQueuedAccountIds,
   getRebalanceAccountIds,
   hasProposableAccount,
@@ -85,7 +84,6 @@ describe('Entity Account work indexes', () => {
       account.state.requestedRebalance,
       'requestedRebalance',
     ).updated(1, 10n);
-    expect([...getPendingAccountIds(candidate)]).toEqual([counterparty]);
     expect([...getRebalanceAccountIds(candidate)]).toEqual([counterparty]);
 
     const committed = commitEntityFrameCandidateState(candidate);
@@ -98,7 +96,6 @@ describe('Entity Account work indexes', () => {
       ),
     };
     expect([...getQueuedAccountIds(recovered)]).toEqual([counterparty]);
-    expect([...getPendingAccountIds(recovered)]).toEqual([counterparty]);
     expect([...getRebalanceAccountIds(recovered)]).toEqual([counterparty]);
     expect([...getQueuedAccountIds(state)]).toEqual([]);
   });

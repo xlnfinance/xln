@@ -2,7 +2,6 @@ import { describe, expect, test } from 'bun:test';
 
 import {
   hasCertifiedEntityFrameProofShape,
-  isDraftEntityFrame,
   isLockedEntityFrame,
   requireCertifiedEntityFrameAfterQuorum,
 } from '../../../../entity/consensus/frame/phase-views';
@@ -35,11 +34,10 @@ const frame = (): EntityFrame => ({
 describe('FinTS EntityFrame phase views', () => {
   test('narrows the same object without cloning or changing bytes', () => {
     const candidate = frame();
-    expect(isDraftEntityFrame(candidate)).toBe(true);
+    expect(isLockedEntityFrame(candidate)).toBe(false);
 
     candidate.collectedSigs = new Map([['signer', ['signature']]]);
     expect(isLockedEntityFrame(candidate)).toBe(true);
-    expect(isDraftEntityFrame(candidate)).toBe(false);
 
     candidate.hankos = ['hanko'];
     expect(hasCertifiedEntityFrameProofShape(candidate)).toBe(true);

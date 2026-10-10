@@ -19,7 +19,7 @@ const entityInputOutput = await Bun.file(entityInputOutputPath).text();
 
 if (
   !frameApplication.includes(
-    '? createEntityFrameCandidateState(normalized)',
+    'const state = createEntityFrameCandidateState(normalized);',
   )
 ) {
   throw new Error('ENTITY_FRAME_TOUCHED_CANDIDATE_MISSING');
@@ -27,7 +27,7 @@ if (
 if (frameApplication.includes('cloneEntityState(normalized)')) {
   throw new Error('ENTITY_FRAME_FULL_STATE_CLONE_FORBIDDEN');
 }
-if (!/export const applyEntityFrame[\s\S]*?frameTimestamp,\s*true,\s*inProcessInfraValidated,\s*\);/.test(frameApplication)) {
+if (!/export const applyEntityFrame[\s\S]*?frameTimestamp,\s*inProcessInfraValidated,\s*\);/.test(frameApplication)) {
   throw new Error('SINGLE_SIGNER_ENTITY_CANDIDATE_BOUNDARY_MISSING');
 }
 if (singleSigner.includes('applyRuntimeOwnedEntityFrame') || multiSigner.includes('applyRuntimeOwnedEntityFrame')) {

@@ -217,24 +217,12 @@ const largestPrefixWithin = (prefixBytes: number[], maxBytes: number): number =>
   return low;
 };
 
-export const selectEntityFrameTxByteBudget = (txs: EntityTx[]): EntityTx[] => {
-  const prefixBytes = buildEntityFrameTxPrefixBytes(txs);
-  if (prefixAt(prefixBytes, txs.length) <= MAX_ENTITY_FRAME_TX_BYTES) return txs;
-  const low = largestPrefixWithin(prefixBytes, MAX_ENTITY_FRAME_TX_BYTES);
-  if (low === 0 && txs.length > 0) {
-    throw new Error(
-      `ENTITY_FRAME_HEAD_TX_BYTE_LIMIT_EXCEEDED:${prefixBytes[1]}:${MAX_ENTITY_FRAME_TX_BYTES}`,
-    );
-  }
-  return txs.slice(0, low);
-};
-
 // Events are not known before apply. 500 users needed 1.7 MB beyond a 256 KB
 // slack. Mixed 1000e certified 11.5 MB at 208 txs after a 2 MB event reserve —
 // events+hankos still overflowed validateProposedEntityFrame. Reserve a third.
 export const ENTITY_FRAME_WIRE_EVENT_SLACK_BYTES = Math.floor(LIMITS.MAX_FRAME_SIZE_BYTES / 3);
 
-export type EntityFrameWireBudgetInput = {
+type EntityFrameWireBudgetInput = {
   prevFrameHash: string;
   height: number;
   timestamp: number;
@@ -345,24 +333,6 @@ export const selectEntityFrameTxByteBudgetWithMeter = (
     );
   }
   return { txs: txs.slice(0, low), meter };
-};
-
-export const selectEntityFrameTxPrefixForWireBudget = (
-  txs: EntityTx[],
-  rest: Omit<EntityFrameWireBudgetInput, 'txs'>,
-  maxBytes = LIMITS.MAX_FRAME_SIZE_BYTES - ENTITY_FRAME_WIRE_EVENT_SLACK_BYTES,
-): EntityTx[] => {
-  if (txs.length === 0) return txs;
-  const framingBytes = measureEntityFrameRestBytes(rest);
-  const prefixBytes = buildEntityFrameTxPrefixBytes(txs).map(bytes => framingBytes + bytes);
-  if (prefixAt(prefixBytes, txs.length) <= maxBytes) return txs;
-  const low = largestPrefixWithin(prefixBytes, maxBytes);
-  if (low === 0) {
-    throw new Error(
-      `ENTITY_FRAME_HEAD_WIRE_LIMIT_EXCEEDED:${prefixBytes[1]}:${maxBytes}`,
-    );
-  }
-  return txs.slice(0, low);
 };
 
 /** Frame-hash preimage; throws when the frame would exceed the wire limit. */

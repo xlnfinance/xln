@@ -89,7 +89,6 @@ const buildCommitHankos = async (
   }
   for (const [signerId, signatures] of signaturesBySigner) {
     if (
-      (localProposal && signerId.toLowerCase() === workingReplica.signerId.toLowerCase()) ||
       verifyHashPrecommitSignatures(
         env,
         signerId,

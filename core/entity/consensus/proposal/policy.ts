@@ -217,9 +217,6 @@ export const selectProposableEntityTxs = async (
     });
   }
   if (handovers.length > 0) {
-    if (handovers.length !== 1) {
-      throw new Error(`BOARD_HANDOVER_COUNT_INVALID:${handovers.length}`);
-    }
     return {
       txs: [],
       currentAuthorityReady,

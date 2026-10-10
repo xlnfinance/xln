@@ -1139,12 +1139,9 @@ type EntityFrameWorkingSet = {
 const initializeEntityFrameState = (
   env: EntityRuntimeContext,
   normalized: EntityState,
-  isolateState: boolean,
   frameTimestamp: number | undefined,
 ): EntityState => {
-  const state = isolateState
-    ? createEntityFrameCandidateState(normalized)
-    : normalized;
+  const state = createEntityFrameCandidateState(normalized);
   clearEntityFrameEvents(state);
   state.crontabState ??= initCrontab();
   const timestamp = frameTimestamp ?? env.state.timestamp;
@@ -1284,7 +1281,6 @@ const prepareEntityFrameWorkingSet = async (
   entityContext: import('../../../types/entity/infra-context').EntityInfraContext,
   entityTxs: EntityTx[],
   frameTimestamp: number | undefined,
-  isolateState: boolean,
 ): Promise<EntityFrameWorkingSet> => {
   markRuntimeEntityFramePhase(env, 'apply.entity.frame.prepare.validate');
   const shapeError = getEntityFrameShapeError(entityState, entityContext, entityTxs);
@@ -1316,7 +1312,6 @@ const prepareEntityFrameWorkingSet = async (
   const currentEntityState = initializeEntityFrameState(
     env,
     normalized,
-    isolateState,
     frameTimestamp,
   );
   markFrameProfile('clone');
@@ -1627,7 +1622,6 @@ const applyEntityFrameWithIsolation = async (
   entityContext: import('../../../types/entity/infra-context').EntityInfraContext,
   entityTxs: EntityTx[],
   frameTimestamp: number | undefined,
-  isolateState: boolean,
   inProcessInfraValidated = false,
 ): Promise<EntityFrameResult> => {
   // Live proposal already ran validateEntityInfraContext in materialize.
@@ -1648,7 +1642,6 @@ const applyEntityFrameWithIsolation = async (
     entityContext,
     entityTxs,
     frameTimestamp,
-    isolateState,
   );
   markRuntimeEntityFramePhase(
     env,
@@ -1717,6 +1710,5 @@ export const applyEntityFrame = (
     entityContext,
     entityTxs,
     frameTimestamp,
-    true,
     inProcessInfraValidated,
   );

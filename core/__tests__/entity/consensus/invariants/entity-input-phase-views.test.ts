@@ -3,8 +3,6 @@ import { describe, expect, test } from 'bun:test';
 import {
   ENTITY_INPUT_FIELD_PHASE,
   getEntityInputPhaseCombinationError,
-  hasEntityHashPrecommits,
-  hasEntityTransactions,
   isEntityLeaderTimeoutInput,
 } from '../../../../entity/consensus/input/phase-views';
 import type { EntityInput } from '../../../../entity/types';
@@ -13,15 +11,13 @@ import type { JPrefixAttestation } from '../../../../types/jurisdiction-events';
 const base = (): EntityInput => ({ entityId: 'entity', signerId: 'signer' });
 
 describe('FinTS EntityInput phase views', () => {
-  test('keeps ordinary phases multiplexed and extracts exact present lanes', () => {
+  test('keeps ordinary phases multiplexed', () => {
     const input: EntityInput = {
       ...base(),
       entityTxs: [{ type: 'text', data: { message: 'hello' } }],
       hashPrecommitFrame: { height: 1, frameHash: 'frame' },
       hashPrecommits: new Map([['signer', ['signature']]]),
     };
-    expect(hasEntityTransactions(input)).toBe(true);
-    expect(hasEntityHashPrecommits(input)).toBe(true);
     expect(getEntityInputPhaseCombinationError(input)).toBeNull();
   });
 

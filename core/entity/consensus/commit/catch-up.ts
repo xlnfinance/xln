@@ -223,22 +223,5 @@ export const resolveCommitExecution = async (
   const { workingReplica } = context;
   const existing = getValidatorExecutionForFrame(workingReplica, frame);
   if (existing) return { kind: 'execution', execution: existing };
-  const expectedPreviousHeight = frame.height - 1;
-  if (workingReplica.state.height !== expectedPreviousHeight) {
-    entityLog.warn('commit.catch_up_state_wait', {
-      height: workingReplica.state.height,
-      expectedPrevHeight: expectedPreviousHeight,
-      commitHeight: frame.height,
-      frame: shortHash(frame.hash),
-    });
-    // Do not ACK a certificate before the exact predecessor state exists.
-    return {
-      kind: 'result',
-      result: deferEntityConsensusInput(
-        context,
-        'COMMIT_CATCH_UP_STATE_WAIT',
-      ),
-    };
-  }
   return replayCommitFrame(context, frame);
 };

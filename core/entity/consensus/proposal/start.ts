@@ -64,13 +64,12 @@ import { MalformedEntityFrameInputError } from '../../tx/processing/invariant-er
 import { entityFrameProfileEnabled, entityFrameSlowMs } from '../frame/profile';
 import { getPerfMs } from '../../../support/time';
 
-export type ProposalProfile = {
+type ProposalProfile = {
   startedAt: number;
   checkpoints: Record<string, number>;
   checkpoint: (label: string) => void;
 };
 
-const noProfile: ProposalProfile = { startedAt: 0, checkpoints: {}, checkpoint: () => undefined };
 
 const markProposalPhase = (env: EntityRuntimeContext, phase: string): void => {
   if (env.infrastructure) env.infrastructure.runtimeFramePhase = phase;
@@ -634,7 +633,7 @@ export const startEntityProposalIfReady = async (
   context: ApplyEntityInputContext,
   selection: EntityProposalSelection,
   localCanPropose: boolean,
-  profile: ProposalProfile = noProfile,
+  profile: ProposalProfile,
 ): Promise<ApplyEntityInputResult | null> => {
   const { workingReplica } = context;
   if (!shouldStartProposal(workingReplica, selection, localCanPropose)) return null;

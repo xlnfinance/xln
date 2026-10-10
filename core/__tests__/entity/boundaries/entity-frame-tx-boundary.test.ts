@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { validateProposedEntityFrame, assertEstimatedCertifiedEntityFrameWire } from '../../../entity/consensus/frame/validation';
-import { assertEntityFrameTotalByteBudget, createEntityFrameWirePrefixMeter, ENTITY_FRAME_WIRE_EVENT_SLACK_BYTES, measureEntityFrameWireBytes, selectEntityFrameTxByteBudgetWithMeter, selectEntityFrameTxPrefixForWireBudget } from '../../../entity/consensus/frame';
+import { assertEntityFrameTotalByteBudget, createEntityFrameWirePrefixMeter, ENTITY_FRAME_WIRE_EVENT_SLACK_BYTES, measureEntityFrameWireBytes, selectEntityFrameTxByteBudgetWithMeter } from '../../../entity/consensus/frame';
 import { LIMITS } from '../../../config/constants';
 import { packTransportValue } from '../../../protocol/serialization/binary-codec';
 
@@ -67,32 +67,6 @@ test('Entity frame total byte budget rejects aggregate payloads', () => {
     authorityRoot: `0x${'22'.repeat(32)}`,
     entityContext: emptyContext,
   })).toThrow('ENTITY_FRAME_TOTAL_BYTE_LIMIT_EXCEEDED');
-});
-
-test('Entity frame wire selector defers the tail instead of overflowing', () => {
-  const bulky = {
-    ...emptyContext,
-    gossipProfiles: [{ pad: 'x'.repeat(4_000) }],
-  };
-  const txs = [
-    { type: 'chat' as const, data: { from: signerId, message: 'a'.repeat(2_000) } },
-    { type: 'chat' as const, data: { from: signerId, message: 'b'.repeat(2_000) } },
-  ];
-  const rest = {
-    prevFrameHash: 'genesis',
-    height: 1,
-    timestamp: 1,
-    events: [] as const,
-    entityId,
-    stateRoot: `0x${'11'.repeat(32)}`,
-    authorityRoot: `0x${'22'.repeat(32)}`,
-    entityContext: bulky,
-  };
-  const one = measureEntityFrameWireBytes({ ...rest, txs: [txs[0]!] });
-  const two = measureEntityFrameWireBytes({ ...rest, txs });
-  expect(two).toBeGreaterThan(one);
-  const selected = selectEntityFrameTxPrefixForWireBudget(txs, rest, Math.floor((one + two) / 2));
-  expect(selected).toEqual([txs[0]]);
 });
 
 test('Entity frame wire prefix meter is byte-exact for every prefix', () => {

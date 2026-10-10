@@ -49,9 +49,6 @@ const workSet = (state: EntityState, flag: AccountWorkFlag): AccountWorkIdSet =>
 export const getQueuedAccountIds = (state: EntityState): AccountWorkIdSet =>
   workSet(state, ACCOUNT_WORK_QUEUED);
 
-export const getPendingAccountIds = (state: EntityState): AccountWorkIdSet =>
-  workSet(state, ACCOUNT_WORK_PENDING);
-
 export const getRebalanceAccountIds = (state: EntityState): AccountWorkIdSet =>
   workSet(state, ACCOUNT_WORK_REBALANCE);
 
