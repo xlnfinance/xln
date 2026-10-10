@@ -4,7 +4,6 @@ import type { EntityOutput } from '../../../entity/types';
 import { filterEntityFrameBroadcastContinuations } from '../../../entity/consensus/j-prefix/broadcast-continuation';
 import { assertEntityJBroadcastOrder } from '../../../entity/consensus/frame/application';
 import {
-  shouldAutoBroadcastDraft,
   takeBroadcastBatch,
 } from '../../../entity/tx/handlers/j-batch/j-broadcast';
 import { applyEntityTx } from '../../../entity/tx/apply';
@@ -103,7 +102,6 @@ describe('Entity-frame j_broadcast continuation ownership', () => {
     expect(selected.hashLadderRegistrations).toHaveLength(1);
     expect(selected.reserveToReserve).toEqual([]);
     expect(remainder.reserveToReserve).toHaveLength(1);
-    expect(shouldAutoBroadcastDraft(remainder)).toBe(true);
   });
 });
 

@@ -20,7 +20,7 @@ import type { EntityAccountInputWork } from '../../../consensus/account/canonica
 
 const proposeAccountsNowLog = createStructuredLogger('entity.tx.propose_accounts_now');
 
-export type ProposeAccountsNowResult = Readonly<{
+type ProposeAccountsNowResult = Readonly<{
   newState: EntityState;
   outputs: [];
   accountInputWorks: EntityAccountInputWork[];

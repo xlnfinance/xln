@@ -7,7 +7,6 @@ import {
 } from '../../../../account/consensus/flush';
 import { createStructuredLogger, shortId } from '../../../../support/logger';
 import { addMessage } from '../../../frame-events';
-import { acceptsExternalAccountInput } from '../../../../account/consensus/dispute/policy';
 
 const accountHandlerLog = createStructuredLogger('account.handler');
 
@@ -25,25 +24,15 @@ export const frozenAccountInputLogLevel = (
   return durableOnchainFreeze && input.kind === 'ack_frame' ? 'info' : 'error';
 };
 
-export const canProcessFrozenAccountInput = (
-  status: AccountReplica['status'],
-  _hasActiveDispute: boolean,
-  _hasAck: boolean,
-  _frameTxTypes: readonly string[],
-): boolean => {
-  if (acceptsExternalAccountInput({ status })) return true;
-  // Finalization removes activeDispute but deliberately leaves the Account
-  // permanently closed. No ordinary peer frame may cross this fence. A future
-  // recovery mechanism must use a new, bilateral, domain-separated protocol.
-  return false;
-};
-
 export const rejectFrozenAccountInput = (
   state: EntityState,
   account: AccountReplica,
   input: AccountInput,
   counterpartyId: string,
 ): boolean => {
+  // Finalization removes activeDispute but deliberately leaves the Account
+  // permanently closed. No ordinary peer frame may cross this fence. A future
+  // recovery mechanism must use a new, bilateral, domain-separated protocol.
   if ((account.status ?? 'active') === 'active') return false;
   const incomingProposal = accountInputProposal(input);
   const incomingAck = accountInputAck(input);
@@ -52,12 +41,6 @@ export const rejectFrozenAccountInput = (
     ? account.pendingFrame?.accountTxs.map(tx => tx.type) ?? []
     : [];
   const frameTxTypes = proposalTxTypes.length > 0 ? proposalTxTypes : pendingAckTxTypes;
-  if (canProcessFrozenAccountInput(
-    account.status,
-    Boolean(account.activeDispute),
-    Boolean(incomingAck),
-    frameTxTypes,
-  )) return false;
 
   const severity = frozenAccountInputLogLevel(account, input);
   const logFrozenInput = severity === 'info'

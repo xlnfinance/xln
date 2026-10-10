@@ -529,11 +529,9 @@ const entityTxDispatchers = {
   crossJurisdictionFillNotice: (env, state, tx, options) => handleCrossJurisdictionFillNoticeEntityTx(env, state, tx as Extract<EntityTx, { type: 'crossJurisdictionFillNotice' }>, options?.storageChanges, options?.mutableFrameState),
   materializeCrossJurisdictionClear: (env, state, tx, options) => handleMaterializeCrossJurisdictionClearEntityTx(env, state, tx as Extract<EntityTx, { type: 'materializeCrossJurisdictionClear' }>, options?.mutableFrameState),
   requestCrossJurisdictionClear: (env, state, tx, options) => handleRequestCrossJurisdictionClearEntityTx(env, state, tx as Extract<EntityTx, { type: 'requestCrossJurisdictionClear' }>, options?.storageChanges, options?.mutableFrameState),
-  crossJurisdictionSalvage: (env, state, tx, options) => handleCrossJurisdictionSalvageEntityTx(
-    env,
+  crossJurisdictionSalvage: (_env, state, tx, options) => handleCrossJurisdictionSalvageEntityTx(
     state,
     tx as Extract<EntityTx, { type: 'crossJurisdictionSalvage' }>,
-    options?.storageChanges,
     options?.mutableFrameState,
   ),
   crossJurisdictionForceSiblingDispute: (env, state, tx, options) =>

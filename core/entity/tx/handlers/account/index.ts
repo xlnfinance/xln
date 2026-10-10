@@ -18,7 +18,6 @@ import type { CommittedAccountEffects } from './committed-input';
 import {
   finishAccountConsensusInput,
   prepareAccountConsensusRun,
-  completeAccountConsensusRun,
   type AccountInputPhaseContext,
   type PreparedAccountConsensusRun,
 } from './input-phases';
@@ -39,10 +38,7 @@ import {
 } from '../../../../rscore/authority-wave';
 import { normalizeEntityRef } from '../../account-key';
 
-export {
-  canProcessFrozenAccountInput,
-  frozenAccountInputLogLevel,
-} from './frozen-input';
+export { frozenAccountInputLogLevel } from './frozen-input';
 export type { AccountHandlerResult } from './lifecycle/result';
 export type { AccountTxTarget } from './orderbook/queue';
 export {
@@ -274,8 +270,8 @@ const finishPreparedAccountInput = async (
   prepared: PreparedEntityAccountInput,
   result: Awaited<ReturnType<typeof applyAccountInput>>,
 ): Promise<AccountHandlerResult> => {
-  const { context, consensus: consensusRun } = prepared;
-  completeAccountConsensusRun(context, consensusRun, result);
+  const { context } = prepared;
+  context.checkpointProfile('consensus');
   const consensus = await finishAccountConsensusInput(context, result);
   if (consensus.terminalResult) return consensus.terminalResult;
 

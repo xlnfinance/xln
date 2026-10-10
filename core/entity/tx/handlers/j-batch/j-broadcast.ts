@@ -68,7 +68,6 @@ type PreparedBroadcast = {
   opCount: number;
 };
 
-export const shouldAutoBroadcastDraft = (batch: JBatch): boolean => !isBatchEmpty(batch);
 
 export const takeBroadcastBatch = (current: JBatch): {
   selected: JBatch;

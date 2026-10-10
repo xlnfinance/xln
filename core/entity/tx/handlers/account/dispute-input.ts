@@ -21,7 +21,7 @@ type UnsafeFrameContext = {
   bookIntentSlot?: BookIntentSlotWriter;
 };
 
-export type UnsafeFrameOutcome = {
+type UnsafeFrameOutcome = {
   newState: EntityState;
   outputs: EntityInput[];
 };

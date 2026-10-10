@@ -10,9 +10,7 @@ import {
 } from '../../j-events-htlc';
 import { prepareEntityTxState } from '../../../state-clone';
 import { addMessage } from '../../../frame-events';
-import type { RuntimeOverlayRecord } from '../../../../types/account';
 import type { EntityInput, EntityState } from '../../../types';
-import type { EntityRuntimeContext } from '../../../runtime-context';
 import type { EntityTx } from '../../../../types/entity-tx';
 import { normalizeEntityRef } from '../../account-key';
 import { isCrossJurisdictionTerminalStatus } from '../../../../extensions/cross-j';
@@ -91,10 +89,8 @@ const verifySalvageFillRatio = (
  * dispute-argument injection and no source-mirror commit anywhere in this path.
  */
 export const handleCrossJurisdictionSalvageEntityTx = async (
-  _env: EntityRuntimeContext,
   entityState: EntityState,
   entityTx: CrossJurisdictionSalvageTx,
-  _storageChanges: RuntimeOverlayRecord[] = [],
   mutableFrameState = false,
 ): Promise<CrossJurisdictionSalvageResult> => {
   const { routeId, binary, fillRatio } = entityTx.data;

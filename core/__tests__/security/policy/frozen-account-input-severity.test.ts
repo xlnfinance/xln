@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { canProcessFrozenAccountInput, frozenAccountInputLogLevel } from '../../../entity/tx/handlers/account/index';
+import { frozenAccountInputLogLevel } from '../../../entity/tx/handlers/account/index';
 import { canProcessAccountTxForDisputeStatus } from '../../../account/consensus/dispute/policy';
 import type { AccountInput, AccountState } from '../../../types/account';
 
@@ -19,20 +19,6 @@ describe('frozen Account input severity', () => {
     expect(canProcessAccountTxForDisputeStatus('active')).toBe(true);
     expect(canProcessAccountTxForDisputeStatus('dispute_preparing')).toBe(false);
     expect(canProcessAccountTxForDisputeStatus('disputed')).toBe(false);
-  });
-
-  test('rejects every external AccountInput from prepare through on-chain dispute', () => {
-    expect(canProcessFrozenAccountInput('dispute_preparing', false, false, ['swap_resolve'])).toBe(false);
-    expect(canProcessFrozenAccountInput('dispute_preparing', false, true, [])).toBe(false);
-    expect(canProcessFrozenAccountInput('disputed', true, true, ['j_event_claim'])).toBe(false);
-    expect(canProcessFrozenAccountInput('active', false, true, [])).toBe(true);
-  });
-
-  test('rejects every ordinary peer frame after finalization', () => {
-    expect(canProcessFrozenAccountInput('disputed', false, false, ['j_event_claim'])).toBe(false);
-    expect(canProcessFrozenAccountInput('disputed', false, true, ['j_event_claim'])).toBe(false);
-    expect(canProcessFrozenAccountInput('disputed', false, false, ['add_delta'])).toBe(false);
-    expect(canProcessFrozenAccountInput('disputed', false, false, [])).toBe(false);
   });
 
   test('classifies an authenticated in-flight ack_frame after durable on-chain freeze as expected terminal traffic', () => {

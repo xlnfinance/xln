@@ -68,7 +68,7 @@ export type AccountInputPhaseContext = {
   checkpointProfile(label: string): void;
 };
 
-export type AccountConsensusOutcome = {
+type AccountConsensusOutcome = {
   forceAccountFlush?: boolean;
   forcedAccountInput?: AccountInput;
   accountJClaimNodeChanges?: AccountJClaimNodeChanges;
@@ -76,8 +76,6 @@ export type AccountConsensusOutcome = {
 };
 
 export type PreparedAccountConsensusRun = Readonly<{
-  pendingBeforeTxs: string[];
-  inputFrameTxs: string[];
   securityContext: AccountInputSecurityContext;
 }>;
 
@@ -209,8 +207,6 @@ export const prepareAccountConsensusRun = (
     rejectEmptyAccountInput(context);
   }
 
-  const pendingBeforeTxs = account.pendingFrame?.accountTxs.map(tx => tx.type) ?? [];
-  const inputFrameTxs = incomingProposal?.frame.accountTxs.map(tx => tx.type) ?? [];
   accountHandlerLog.debug('frame.process', {
     from: shortId(input.fromEntityId),
     pending: account.pendingFrame?.height ?? null,
@@ -221,8 +217,6 @@ export const prepareAccountConsensusRun = (
     input.fromEntityId,
   );
   return {
-    pendingBeforeTxs,
-    inputFrameTxs,
     securityContext: {
       entityTimestamp: state.timestamp,
       finalizedJHeight: state.lastFinalizedJHeight ?? 0,
@@ -243,12 +237,4 @@ export const prepareAccountConsensusRun = (
         : {}),
     },
   };
-};
-
-export const completeAccountConsensusRun = (
-  context: AccountInputPhaseContext,
-  _prepared: PreparedAccountConsensusRun,
-  _result: Awaited<ReturnType<typeof applyAccountInput>>,
-): void => {
-  context.checkpointProfile('consensus');
 };

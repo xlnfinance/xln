@@ -34,7 +34,7 @@ const rejectAccountInput = (code: AccountInputRejectionCode, reason: string): ne
   throw new AccountInputEvidenceError(code, reason);
 };
 
-export type InboundAccountResolution = {
+type InboundAccountResolution = {
   account: AccountReplica;
   counterpartyId: string;
   createdAccount: boolean;
