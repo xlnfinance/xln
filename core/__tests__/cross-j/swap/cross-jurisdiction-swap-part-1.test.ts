@@ -941,6 +941,75 @@ describe('cross-jurisdiction hashledger swap', () => {
     expect(targetAccount.mempool).toHaveLength(2);
   });
 
+  test('a local sibling\'s typed reject drops the command, never a Runtime halt', async () => {
+    // Both hub siblings live in one Runtime: the local drain applies the
+    // source hub's register immediately. The target hub has no Account with
+    // the target user, a typed reject (CROSS_J_REGISTER_ACCOUNT_MISSING) that
+    // a remote sibling gets; locally it threw and halted the Runtime.
+    const seed = 'cross-j-local-sibling-reject';
+    const env = createEmptyEnv(seed);
+    env.state.timestamp = 10_000;
+    env.quietRuntimeLogs = true;
+    const sourceJ = makeJurisdiction('Source', 1, '11', '12');
+    const targetJ = makeJurisdiction('Target', 8453, '21', '22');
+    installJurisdictions(env, sourceJ, targetJ);
+    const sourceHubSigner = registerTestSigner(env, seed, '1');
+    const targetHubSigner = registerTestSigner(env, seed, '2');
+    const sourceHub = generateLazyEntityId([sourceHubSigner], 1n).toLowerCase();
+    const targetHub = generateLazyEntityId([targetHubSigner], 1n).toLowerCase();
+    const sourceUser = entity('7b');
+    const targetUser = entity('7c');
+    const targetUserSigner = addr('c3');
+    const sourceUserSigner = addr('c4');
+    env.gossip = {
+      getProfiles: () => [
+        { entityId: sourceUser, metadata: { board: { validators: [{ signerId: sourceUserSigner }] } } },
+        { entityId: targetUser, metadata: { board: { validators: [{ signerId: targetUserSigner }] } } },
+      ],
+    } as RuntimeReplica['gossip'];
+    const sourceState = makeState(sourceHub, sourceHubSigner, sourceJ, sourceUser);
+    const targetState = makeState(targetHub, targetHubSigner, targetJ);
+    sourceState.height = 0;
+    targetState.height = 0;
+    sourceState.prevFrameHash = 'genesis';
+    targetState.prevFrameHash = 'genesis';
+    const intent = withCanonicalCrossJurisdictionRouteHash({
+      orderId: 'cross-j-local-sibling-reject',
+      makerEntityId: sourceUser,
+      hubEntityId: sourceHub,
+      bookOwnerEntityId: sourceHub,
+      sourceSignerId: sourceUserSigner,
+      sourceHubSignerId: sourceHubSigner,
+      targetHubSignerId: targetHubSigner,
+      targetSignerId: targetUserSigner,
+      bookHubSignerId: sourceHubSigner,
+      source: { jurisdiction: jref(sourceJ), entityId: sourceUser, counterpartyEntityId: sourceHub, tokenId: 1, amount: 1_000n },
+      target: { jurisdiction: jref(targetJ), entityId: targetHub, counterpartyEntityId: targetUser, tokenId: 1, amount: 900n },
+      status: 'intent',
+      createdAt: env.state.timestamp,
+      updatedAt: env.state.timestamp,
+      expiresAt: 70_000,
+    });
+    sourceState.crossJurisdictionSwaps?.set(intent.orderId, intent);
+    addReplica(env, sourceState, sourceHubSigner);
+    addReplica(env, targetState, targetHubSigner);
+    registerVerifiedOwnerRoute(env, sourceUser, sourceUserSigner, env.runtimeId!);
+    registerVerifiedOwnerRoute(env, targetUser, targetUserSigner, env.runtimeId!);
+    const prepared = buildPreparedCrossJurisdictionRoute(intent, { runtimeSeed: seed, now: env.state.timestamp });
+
+    const pass = await applyMergedEntityInputs(env, [{
+      entityId: sourceHub,
+      signerId: sourceHubSigner,
+      entityTxs: [{ type: 'materializeCrossJurisdictionSwap', data: { proposerSignerId: sourceHubSigner, route: prepared } }],
+    }], [], { isReplay: false, routingDeps: makeLocalCrossJRoutingDeps() });
+
+    expect(pass.appliedEntityInputs.map(input => input.entityId)).toEqual([sourceHub]);
+    expect(env.state.eReplicas.get(`${sourceHub}:${sourceHubSigner}`)?.state.height).toBeGreaterThan(0);
+    const target = env.state.eReplicas.get(`${targetHub}:${targetHubSigner}`)!.state;
+    expect(target.height).toBe(0);
+    expect(target.crossJurisdictionSwaps?.has(intent.orderId) ?? false).toBe(false);
+  });
+
   test('hub sibling cascade commits both Entity frames in one Runtime input pass', async () => {
     const seed = 'cross-j-runtime-same-frame-cascade';
     const env = createEmptyEnv(seed);

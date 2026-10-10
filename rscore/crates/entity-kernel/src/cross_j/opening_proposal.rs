@@ -290,7 +290,13 @@ fn selected_for_group(
     binding: &SiblingBinding,
     siblings: &[CrossJOpeningSiblingEntityView],
 ) -> Result<Option<Vec<AccountTx>>, CrossJOpeningSelectionError> {
-    let (entity, account) = find_sibling(binding, siblings)?;
+    // A sibling with no Account to the route's user can never post the
+    // reciprocal leg: the user chose that counterparty, so wait (the route
+    // expires and sweeps) instead of a Runtime halt.
+    let (entity, account) = match find_sibling(binding, siblings) {
+        Err(CrossJOpeningSelectionError::SiblingAccountMissing { .. }) => return Ok(None),
+        other => other?,
+    };
     let (sibling_txs, pending) = sibling_opening_source(account)?;
     let reciprocal = reciprocal_order_ids(
         sibling_txs,
@@ -592,7 +598,7 @@ mod tests {
         );
         assert!(matches!(
             select_cross_j_opening_proposal("source-user", "source-hub", &[pull("a")], &[view]),
-            Err(CrossJOpeningSelectionError::SiblingAccountMissing { .. })
+            Ok(CrossJOpeningProposalSelection::Wait)
         ));
     }
 

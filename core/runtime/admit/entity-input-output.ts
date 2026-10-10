@@ -6,7 +6,7 @@ import {
 import type { RoutedEntityInput, RuntimeReplica } from '../types.ts';
 import { safeStringify } from '../../protocol/serialization';
 import { getPerfMs } from '../../support/time.ts';
-import { shortId } from '../../support/logger.ts';
+import { createStructuredLogger, shortId } from '../../support/logger.ts';
 import {
   assertRuntimeEntityIngress,
   findEntityReplicaKey,
@@ -15,6 +15,7 @@ import {
   entityInputLog,
   entityInputProfileEnabled,
   entityInputSlowMs,
+  RuntimeEntityInputApplyError,
   type CrossJCommand,
   type RuntimeEntityInputApplyOptions,
   type RuntimeEntityInputBatchContext,
@@ -36,6 +37,8 @@ import {
   acceptAuthorityEntityStage,
   discardAuthorityEntityStage,
 } from '../../rscore/authority-driver.ts';
+
+const runtimeCrossJLog = createStructuredLogger('runtime.cross_j');
 
 export const recordEntityInputProfile = (
   context: RuntimeEntityInputBatchContext,
@@ -341,6 +344,61 @@ const rememberImmediateCommand = (
   fingerprints.add(fingerprint);
 };
 
+type LocalCrossJApplyResult = Awaited<ReturnType<typeof applyEntityInputToReplica>>;
+
+/**
+ * Apply one sibling command in this Runtime. A sibling's typed reject is the
+ * outcome a remote sibling gets (271dfd942, 8e91e6070): the command is
+ * dropped (null) and replay re-derives the same reject. A throw here halted
+ * the Runtime whenever both siblings lived in it.
+ */
+const applyLocalCrossJCommand = async (
+  env: RuntimeReplica,
+  options: RuntimeEntityInputApplyOptions,
+  context: RuntimeEntityInputBatchContext,
+  command: CrossJCommand,
+  input: ReturnType<typeof commandToEntityInput>,
+  replica: EntityReplica,
+  replicaKey: string,
+  round: number,
+): Promise<LocalCrossJApplyResult | null> => {
+  const dropRejected = (code: string): null => {
+    runtimeCrossJLog.warn('local_event.rejected', { entity: input.entityId, round, code });
+    return null;
+  };
+  let result: LocalCrossJApplyResult;
+  try {
+    result = await applyEntityInputToReplica(
+      env,
+      replica,
+      replicaKey,
+      input,
+      command.targetSignerId,
+      options.isReplay,
+      true,
+      command.kind === 'entity-txs' ? 'cross-j' : 'account-work',
+      false,
+      undefined,
+      { kind: 'local-event', ordinal: context.localEventCount },
+    );
+  } catch (error) {
+    if (!(error instanceof RuntimeEntityInputApplyError) || error.failureKind !== 'malformed-ingress') throw error;
+    return dropRejected(error.rejectionCode);
+  }
+  if (result.outcome.kind === 'rejected') {
+    await discardAuthorityEntityStage(env, result.authorityStage);
+    return dropRejected(result.outcome.code);
+  }
+  if (result.outcome.kind !== 'committed') {
+    await discardAuthorityEntityStage(env, result.authorityStage);
+    throw new Error(
+      `RUNTIME_CROSS_J_LOCAL_EVENT_NOT_COMMITTED:entity=${input.entityId}:` +
+        `round=${round}:outcome=${result.outcome.kind}:detail=${result.outcome.reason}`,
+    );
+  }
+  return result;
+};
+
 export const drainImmediateCrossJurisdictionOutputs = async (
   env: RuntimeReplica,
   options: RuntimeEntityInputApplyOptions,
@@ -372,29 +430,8 @@ export const drainImmediateCrossJurisdictionOutputs = async (
     );
     options.beforeEntityApply?.(input.entityId);
     const startedAt = getPerfMs();
-    const result = await applyEntityInputToReplica(
-      env,
-      replica,
-      replicaKey,
-      input,
-      signerId,
-      options.isReplay,
-      true,
-      command.kind === 'entity-txs' ? 'cross-j' : 'account-work',
-      false,
-      undefined,
-      { kind: 'local-event', ordinal: context.localEventCount },
-    );
-    if (result.outcome.kind !== 'committed') {
-      await discardAuthorityEntityStage(env, result.authorityStage);
-      const detail = result.outcome.kind === 'rejected'
-        ? result.outcome.code
-        : result.outcome.reason;
-      throw new Error(
-        `RUNTIME_CROSS_J_LOCAL_EVENT_NOT_COMMITTED:entity=${input.entityId}:` +
-          `round=${round}:outcome=${result.outcome.kind}:detail=${detail}`,
-      );
-    }
+    const result = await applyLocalCrossJCommand(env, options, context, command, input, replica, replicaKey, round);
+    if (!result) continue;
     await acceptAuthorityEntityStage(env, result.authorityStage);
     // Proposal construction reads public infrastructure before a quorum may
     // commit. Journal that exact context now so replay can rebuild the same

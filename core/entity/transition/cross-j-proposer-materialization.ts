@@ -306,7 +306,10 @@ export const selectCrossJOpeningAccountProposalTxs = (
     if (!replica) throw haltRuntimeFailure("CROSS_J_OPENING_SIBLING_REPLICA_MISSING", `CROSS_J_OPENING_SIBLING_REPLICA_MISSING:${siblingKey(sibling)}`);
     const siblingAccountKey = findAccountKey(replica.state, sibling.accountId);
     const siblingAccount = siblingAccountKey ? replica.state.accounts.get(siblingAccountKey) : undefined;
-    if (!siblingAccount) throw haltRuntimeFailure("CROSS_J_OPENING_SIBLING_ACCOUNT_MISSING", `CROSS_J_OPENING_SIBLING_ACCOUNT_MISSING:${siblingKey(sibling)}`);
+    // A sibling with no Account to the route's user can never post the
+    // reciprocal leg: the user chose that counterparty, so wait (the route
+    // expires and sweeps) instead of a Runtime halt. Rust waits too.
+    if (!siblingAccount) continue;
     // Only a pending OPENING freezes the cohort. An unrelated pending frame
     // (credit, rebalance, …) must not hide opening legs already queued in
     // the sibling mempool — otherwise dual-Runtime credit ACKs permanently
