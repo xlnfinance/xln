@@ -28,6 +28,27 @@ export const readPositiveIntegerEnv = (
   return value;
 };
 
+/** Like readPositiveIntegerEnv, for a limit where 0 is a documented setting. */
+export const readNonNegativeIntegerEnv = (
+  name: string,
+  defaultValue: number,
+  environment: Readonly<Record<string, string | undefined>> = readProcessEnvironment(),
+): number => {
+  if (!Number.isSafeInteger(defaultValue) || defaultValue < 0) {
+    throw new Error(`ENV_NON_NEGATIVE_INTEGER_DEFAULT_INVALID:${name}:${defaultValue}`);
+  }
+  const raw = environment[name];
+  if (raw === undefined) return defaultValue;
+  if (!/^(0|[1-9]\d*)$/.test(raw)) {
+    throw new Error(`ENV_NON_NEGATIVE_INTEGER_INVALID:${name}:${raw}`);
+  }
+  const value = Number(raw);
+  if (!Number.isSafeInteger(value)) {
+    throw new Error(`ENV_NON_NEGATIVE_INTEGER_UNSAFE:${name}:${raw}`);
+  }
+  return value;
+};
+
 /**
  * Decode an operator boolean exactly once.
  *

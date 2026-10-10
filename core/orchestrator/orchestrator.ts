@@ -8,7 +8,7 @@ import { scheduler } from 'node:timers/promises';
 import { compareStableText, safeStringify } from '../protocol/serialization';
 import { requireBoundaryRecord } from '../protocol/boundary-validation';
 import { REMOTE_RUNTIME } from '../config/constants';
-import { readBooleanEnv } from '../config/environment';
+import { readBooleanEnv, readNonNegativeIntegerEnv, readPositiveIntegerEnv } from '../config/environment';
 import { createStructuredLogger, registerStructuredLogSink } from '../support/logger';
 import { getTokenIdsForJurisdiction } from '../account/utils';
 import { DEFAULT_ACCOUNT_TOKEN_IDS } from '../account/config/defaults';
@@ -201,12 +201,9 @@ const orchestratorCodeFingerprint = readOrchestratorCodeFingerprint();
 const staleReapEnabled = process.env['XLN_SKIP_STALE_REAP'] !== '1';
 const MARKET_MAKER_FULL_HEALTH_TIMEOUT_MS = Math.max(
   CHILD_HEALTH_TIMEOUT_MS,
-  Math.floor(Number(process.env['XLN_MARKET_MAKER_FULL_HEALTH_TIMEOUT_MS'] || '60000')),
+  readPositiveIntegerEnv('XLN_MARKET_MAKER_FULL_HEALTH_TIMEOUT_MS', 60_000),
 );
-const marketMakerReadyRestartLimit = Math.max(
-  0,
-  Math.floor(Number(process.env['XLN_MARKET_MAKER_READY_RESTARTS'] ?? '2')),
-);
+const marketMakerReadyRestartLimit = readNonNegativeIntegerEnv('XLN_MARKET_MAKER_READY_RESTARTS', 2);
 const MARKET_MAKER_RESTART_FENCING_GRACE_MS = STORAGE_WRITER_LOCK_TTL_MS + 1_000;
 const relayUrl = args.relayUrl;
 // There is one relay store/process. These are only its explicitly authenticated
@@ -402,13 +399,13 @@ const orchestratorOperatorToken = loadOrCreateOperatorToken(
 );
 const runtimeImportTokenTtlMs = Math.max(
   60_000,
-  Math.floor(Number(process.env['XLN_RUNTIME_IMPORT_TOKEN_TTL_MS'] || String(REMOTE_RUNTIME.IMPORT_TOKEN_TTL_MS))),
+  readPositiveIntegerEnv('XLN_RUNTIME_IMPORT_TOKEN_TTL_MS', REMOTE_RUNTIME.IMPORT_TOKEN_TTL_MS),
 );
 const runtimeImportRefreshMarginMs = Math.max(
   10_000,
   Math.min(
     runtimeImportTokenTtlMs - 1_000,
-    Math.floor(Number(process.env['XLN_RUNTIME_IMPORT_REFRESH_MARGIN_MS'] || String(REMOTE_RUNTIME.IMPORT_TOKEN_REFRESH_MARGIN_MS))),
+    readPositiveIntegerEnv('XLN_RUNTIME_IMPORT_REFRESH_MARGIN_MS', REMOTE_RUNTIME.IMPORT_TOKEN_REFRESH_MARGIN_MS),
   ),
 );
 const runtimeImportManifestPath = process.env['XLN_RUNTIME_IMPORT_MANIFEST_PATH']?.trim()
@@ -421,7 +418,7 @@ const CHILD_GRACEFUL_SHUTDOWN_MS = 20_000;
 const CHILD_RESET_QUIESCE_TIMEOUT_MS = 45_000;
 const CHILD_SHUTDOWN_QUIESCE_TIMEOUT_MS = Math.max(
   1_000,
-  Math.floor(Number(process.env['XLN_CHILD_SHUTDOWN_QUIESCE_MS'] || '5000')),
+  readPositiveIntegerEnv('XLN_CHILD_SHUTDOWN_QUIESCE_MS', 5_000),
 );
 
 type StopAllChildrenOptions = {
@@ -2476,7 +2473,7 @@ const runReset = async (options: OrchestratorResetOptions = configuredResetOptio
           additionalStartupSigners: deriveManagedSignerInventory(runtimeSeedFor('CUSTODY'),
             process.env['XLN_LOCAL_PROD_SMOKE_SWAP_LOAD_SMOKE'] === '1' &&
             process.env['XLN_LOCAL_PROD_SMOKE_SWAP_LOAD_MODE'] === 'cross'
-              ? buildCrossLoadStartupSignerLabels(Number(process.env['XLN_LOCAL_PROD_SMOKE_SWAP_LOAD_SWAPS'] || '1')) : []),
+              ? buildCrossLoadStartupSignerLabels(readPositiveIntegerEnv('XLN_LOCAL_PROD_SMOKE_SWAP_LOAD_SWAPS', 1)) : []),
           profileName: 'Custody',
           jurisdictionId: primaryJurisdiction.key,
         });

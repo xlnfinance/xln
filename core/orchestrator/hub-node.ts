@@ -8,7 +8,7 @@ import { dirname, isAbsolute } from 'node:path';
 import { createExternalWalletApi } from '../api/public/external-wallet-api';
 import { createBrainVaultOwnerController, type BrainVaultOwnerController } from '../api/server/ownership/brainvault';
 import { hasCliFlag, readCliOption } from '../config/cli';
-import { readBooleanEnv } from '../config/environment';
+import { readBooleanEnv, readNonNegativeIntegerEnv, readPositiveIntegerEnv } from '../config/environment';
 import { bootstrapHub } from '../../scripts/bootstrap-hub';
 import { defaultTokensForJurisdiction } from '../jurisdiction/machine/config/default-tokens';
 import {
@@ -365,11 +365,11 @@ if (!directWsUrl) {
 const AUTO_PROVISION_EXTERNAL_FAUCET = process.env['XLN_AUTO_PROVISION_EXTERNAL_FAUCET'] !== '0';
 const MESH_BOOTSTRAP_STALL_TIMEOUT_MS = Math.max(
   5_000,
-  Math.floor(Number(process.env['XLN_MESH_BOOTSTRAP_STALL_TIMEOUT_MS'] || '30000')),
+  readPositiveIntegerEnv('XLN_MESH_BOOTSTRAP_STALL_TIMEOUT_MS', 30_000),
 );
 const MESH_PRODUCER_PAUSE_TIMEOUT_MS = Math.max(
   1_000,
-  Math.floor(Number(process.env['XLN_MESH_PRODUCER_PAUSE_TIMEOUT_MS'] || '5000')),
+  readPositiveIntegerEnv('XLN_MESH_PRODUCER_PAUSE_TIMEOUT_MS', 5_000),
 );
 const nodeLog = createStructuredLogger('mesh.hub', { hub: resolvedArgs.name });
 
@@ -399,18 +399,10 @@ const restoreHubBrainVaultOwner = async (
   });
 };
 let jurisdictionImportDiagnostics: JurisdictionImportDiagnostics | null = null;
-const HUB_RUNTIME_TICK_DELAY_MS = Math.max(
-  0,
-  Number(process.env['HUB_RUNTIME_TICK_DELAY_MS'] || process.env['XLN_RUNTIME_TICK_DELAY_MS'] || '0'),
-);
-const HUB_MAX_ENTITY_INPUTS_PER_RUNTIME_FRAME = Math.max(
-  0,
-  Number(process.env['HUB_MAX_ENTITY_INPUTS_PER_RUNTIME_FRAME'] || process.env['XLN_MAX_ENTITY_INPUTS_PER_RUNTIME_FRAME'] || '0'),
-);
-const HUB_MAX_ENTITY_TXS_PER_RUNTIME_FRAME = Math.max(
-  0,
-  Number(process.env['HUB_MAX_ENTITY_TXS_PER_RUNTIME_FRAME'] || process.env['XLN_MAX_ENTITY_TXS_PER_RUNTIME_FRAME'] || '0'),
-);
+// 0 means no delay / no cap.
+const HUB_RUNTIME_TICK_DELAY_MS = readNonNegativeIntegerEnv('XLN_RUNTIME_TICK_DELAY_MS', 0);
+const HUB_MAX_ENTITY_INPUTS_PER_RUNTIME_FRAME = readNonNegativeIntegerEnv('XLN_MAX_ENTITY_INPUTS_PER_RUNTIME_FRAME', 0);
+const HUB_MAX_ENTITY_TXS_PER_RUNTIME_FRAME = readNonNegativeIntegerEnv('XLN_MAX_ENTITY_TXS_PER_RUNTIME_FRAME', 0);
 
 const LOG_HUB_ADMIN_URL = readBooleanEnv('XLN_HUB_ADMIN_URL_LOG', false);
 

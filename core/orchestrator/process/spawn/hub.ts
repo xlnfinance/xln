@@ -136,7 +136,7 @@ const buildRustHubInvocation = (child: HubChild, deps: HubSpawnerDeps, rustIdent
     runtimeSignerLabel: '1',
     entitySignerLabel: child.signerLabel,
     primaryEntityId: rustIdentity.entityId,
-    workers: Number(process.env['XLN_RSCORE_AUTHORITY_WORKERS'] || '8'),
+    workers: readPositiveIntegerEnv('XLN_RSCORE_AUTHORITY_WORKERS', 8),
     ...(process.env['XLN_RSCORE_BINARY'] ? { binary: process.env['XLN_RSCORE_BINARY'] } : {}),
   });
   return { executable: plan.executable, processArgs: plan.args, rustIdentity };

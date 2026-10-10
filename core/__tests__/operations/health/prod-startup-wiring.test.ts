@@ -591,7 +591,7 @@ describe('production startup wiring', () => {
     expect(orchestratorConfig).toContain("readPositiveIntegerEnv('XLN_CHILD_HEALTH_TIMEOUT_MS', 30_000)");
     expect(orchestrator).toContain('const relayUrl = args.relayUrl;');
     expect(orchestrator).not.toContain('XLN_MARKET_MAKER_INFO_TIMEOUT_MS');
-    expect(orchestrator).toContain("process.env['XLN_CHILD_SHUTDOWN_QUIESCE_MS'] || '5000'");
+    expect(orchestrator).toContain("readPositiveIntegerEnv('XLN_CHILD_SHUTDOWN_QUIESCE_MS', 5_000)");
     expect(orchestrator).toContain('const CHILD_RESET_QUIESCE_TIMEOUT_MS = 45_000;');
     expect(orchestrator).toContain("meshLog.warn('child.stop_timeout_sigkill'");
     expect(orchestrator).toContain("meshLog.error('child.unexpected_exit'");
@@ -927,9 +927,9 @@ describe('production startup wiring', () => {
     expect(mmNode).toContain("MARKET_MAKER_MAX_ENTITY_TXS_PER_RUNTIME_FRAME'] || '0'");
     expect(mmNode).toContain('maxEntityInputsPerFrame: MARKET_MAKER_MAX_ENTITY_INPUTS_PER_RUNTIME_FRAME');
     expect(mmNode).toContain('maxEntityTxsPerFrame: MARKET_MAKER_MAX_ENTITY_TXS_PER_RUNTIME_FRAME');
-    expect(hubNode).toContain("process.env['XLN_RUNTIME_TICK_DELAY_MS'] || '0'");
-    expect(hubNode).toContain("process.env['XLN_MAX_ENTITY_INPUTS_PER_RUNTIME_FRAME'] || '0'");
-    expect(hubNode).toContain("process.env['XLN_MAX_ENTITY_TXS_PER_RUNTIME_FRAME'] || '0'");
+    expect(hubNode).toContain("readNonNegativeIntegerEnv('XLN_RUNTIME_TICK_DELAY_MS', 0)");
+    expect(hubNode).toContain("readNonNegativeIntegerEnv('XLN_MAX_ENTITY_INPUTS_PER_RUNTIME_FRAME', 0)");
+    expect(hubNode).toContain("readNonNegativeIntegerEnv('XLN_MAX_ENTITY_TXS_PER_RUNTIME_FRAME', 0)");
     expect(hubNode).toContain('maxEntityInputsPerFrame: HUB_MAX_ENTITY_INPUTS_PER_RUNTIME_FRAME');
     expect(hubNode).toContain('maxEntityTxsPerFrame: HUB_MAX_ENTITY_TXS_PER_RUNTIME_FRAME');
     expect(mmNode).toContain('const pushMarketMakerEntityTx = (');

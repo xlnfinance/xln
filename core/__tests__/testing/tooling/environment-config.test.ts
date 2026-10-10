@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { readBooleanEnv, readPositiveIntegerEnv } from '../../../config/environment';
+import { readBooleanEnv, readNonNegativeIntegerEnv, readPositiveIntegerEnv } from '../../../config/environment';
 
 describe('environment configuration boundary', () => {
   test('uses the documented default only when the variable is absent', () => {
@@ -22,6 +22,17 @@ describe('environment configuration boundary', () => {
     expect(() => readPositiveIntegerEnv('LIMIT', 12, { LIMIT: raw })).toThrow(
       `ENV_POSITIVE_INTEGER_UNSAFE:LIMIT:${raw}`,
     );
+  });
+
+  test('a non-negative limit accepts 0 and rejects every other malformed value', () => {
+    expect(readNonNegativeIntegerEnv('LIMIT', 2, {})).toBe(2);
+    expect(readNonNegativeIntegerEnv('LIMIT', 2, { LIMIT: '0' })).toBe(0);
+    expect(readNonNegativeIntegerEnv('LIMIT', 2, { LIMIT: '7' })).toBe(7);
+    for (const raw of ['', '-1', '1.5', 'NaN', '07', ' 1']) {
+      expect(() => readNonNegativeIntegerEnv('LIMIT', 2, { LIMIT: raw })).toThrow(
+        `ENV_NON_NEGATIVE_INTEGER_INVALID:LIMIT:${raw}`,
+      );
+    }
   });
 
   test('decodes explicit booleans and defaults only when absent', () => {
