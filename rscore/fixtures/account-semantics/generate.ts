@@ -5,11 +5,13 @@ import { safeStringify } from '../../../core/protocol/serialization';
 import { executeLendingAccountSemanticVector } from './lending';
 import { executeCrossJAccountSemanticVector } from './cross-j';
 import { executeRebalanceSettlementAccountSemanticVector } from './rebalance-settlement';
+import { executeSwapOfferIdAccountSemanticVector } from './swap-offer-id';
 
 const fixtures = [
   ['lending-v1.json', await executeLendingAccountSemanticVector()],
   ['cross-j-v1.json', await executeCrossJAccountSemanticVector()],
   ['rebalance-settlement-v1.json', await executeRebalanceSettlementAccountSemanticVector()],
+  ['swap-offer-id-v1.json', await executeSwapOfferIdAccountSemanticVector()],
 ] as const;
 for (const [name, fixture] of fixtures) {
   const target = join(import.meta.dir, name);

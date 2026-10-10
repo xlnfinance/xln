@@ -143,9 +143,7 @@ pub enum ValidationRejection {
         token_id: u32,
         version: u64,
     },
-    SwapOfferId {
-        offer_id: String,
-    },
+    SwapOfferId,
     SwapOfferExists {
         offer_id: String,
     },
@@ -257,9 +255,10 @@ impl ValidationRejection {
                     "REBALANCE_POLICY_EQUIVOCATION: side={side} token={token_id} version={version}"
                 )
             }
-            Self::SwapOfferId { offer_id } => {
-                format!("Invalid offerId: colons not allowed (got {offer_id})")
-            }
+            Self::SwapOfferId => format!(
+                "Invalid offerId: expected 1-{} characters of [A-Za-z0-9._-]",
+                crate::swap::MAX_SWAP_OFFER_ID_BYTES
+            ),
             Self::SwapOfferExists { offer_id } => format!("Offer {offer_id} already exists"),
             Self::SwapOfferLimit { maximum } => {
                 format!("Too many open swap offers: max {maximum}")

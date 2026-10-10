@@ -10,6 +10,8 @@ mod holds;
 mod representation;
 #[path = "monetary/swap.rs"]
 mod swap;
+#[path = "monetary/swap_offer_id.rs"]
+mod swap_offer_id;
 #[path = "monetary/transfer.rs"]
 mod transfer;
 

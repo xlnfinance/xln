@@ -3,6 +3,7 @@ import type { AccountState, AccountTx } from '../../../../../types/account';
 import { FINANCIAL, LIMITS } from '../../../../../config/constants';
 import { getAccountSwapMarketLimitError } from '../../../../swap/swap-limits';
 import { assertSwapNetAuthorization } from '../../../../swap/swap-net-authorization';
+import { isCanonicalOfferId, SWAP_OFFER_ID_REJECTION } from '../../../../../orderbook/swap-keys';
 
 export type SwapOfferTx = Extract<AccountTx, { type: 'swap_offer' }>;
 
@@ -14,9 +15,7 @@ export type SwapOfferAdmission = {
 
 const validateOfferCapacityLimits = (account: AccountState, tx: SwapOfferTx): string | null => {
   const { offerId, crossJurisdiction } = tx.data;
-  if (offerId.includes(':')) {
-    return `Invalid offerId: colons not allowed (got ${offerId})`;
-  }
+  if (!isCanonicalOfferId(offerId)) return SWAP_OFFER_ID_REJECTION;
   if (account.swapOffers!.has(offerId)) return `Offer ${offerId} already exists`;
   if (account.swapOffers!.size >= LIMITS.MAX_ACCOUNT_SWAP_OFFERS) {
     return `Too many open swap offers: max ${LIMITS.MAX_ACCOUNT_SWAP_OFFERS}`;

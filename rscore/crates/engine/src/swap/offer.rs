@@ -39,6 +39,20 @@ pub const MAX_ACCOUNT_SWAP_OFFERS: usize = 50;
 pub const MAX_ACCOUNT_SAME_J_SWAP_OFFERS: usize = 32;
 pub const MAX_ACCOUNT_CROSS_J_SWAP_OFFERS: usize = 18;
 pub const MAX_ACCOUNT_SWAP_OFFERS_PER_SIDE_PER_MARKET: usize = 32;
+/// `LIMITS.MAX_SWAP_OFFER_ID_LENGTH`; offerIds are ASCII, so bytes = chars.
+pub const MAX_SWAP_OFFER_ID_BYTES: usize = 256;
+
+/// TS `isCanonicalOfferId` (core/orderbook/swap-keys.ts): 1..=256 bytes of
+/// `[A-Za-z0-9._-]`. ASCII-only keeps Rust UTF-8 byte order equal to TS
+/// UTF-16 order (match and dispute-proof order) and keeps
+/// `{entity}:{offer}` within the 323-byte book page order id.
+pub(crate) fn is_canonical_offer_id(offer_id: &str) -> bool {
+    !offer_id.is_empty()
+        && offer_id.len() <= MAX_SWAP_OFFER_ID_BYTES
+        && offer_id
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SwapOffer {

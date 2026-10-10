@@ -7,7 +7,7 @@ use super::market::lot_scale;
 use super::net_authorization::{SwapNetAuthorization, assert_offer_authorization, requantize};
 use super::offer::{
     MAX_ACCOUNT_CROSS_J_SWAP_OFFERS, MAX_ACCOUNT_SAME_J_SWAP_OFFERS, MAX_ACCOUNT_SWAP_OFFERS,
-    MAX_ACCOUNT_SWAP_OFFERS_PER_SIDE_PER_MARKET, SwapOffer,
+    MAX_ACCOUNT_SWAP_OFFERS_PER_SIDE_PER_MARKET, SwapOffer, is_canonical_offer_id,
 };
 use super::quantization::{PreparedSwapOrder, prepare_swap_order, quote_amount_at_price};
 use crate::state::delta::uint_max;
@@ -294,10 +294,8 @@ fn admission(
     proposer: Side,
 ) -> Result<Side, ValidationRejection> {
     let state = replica.state();
-    if tx.offer_id.contains(':') {
-        return Err(ValidationRejection::SwapOfferId {
-            offer_id: tx.offer_id.to_owned(),
-        });
+    if !is_canonical_offer_id(tx.offer_id) {
+        return Err(ValidationRejection::SwapOfferId);
     }
     if state.swap_offer(tx.offer_id).is_some() {
         return Err(ValidationRejection::SwapOfferExists {

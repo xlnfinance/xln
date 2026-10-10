@@ -102,6 +102,12 @@ const MIXED_REPLAY_EVIDENCE = [
   'core/scripts/operations/hlt/replay/authority-evidence.ts',
   'core/scripts/operations/hlt/replay/commands/run-mixed-ts-rust-parity.ts',
 ] as const;
+const ACCOUNT_SWAP_OFFER_EVIDENCE = [
+  ...MIXED_REPLAY_EVIDENCE,
+  'core/__tests__/account/transactions/account-swap-offer-id.test.ts',
+  'rscore/crates/engine/tests/monetary/swap_offer_id.rs',
+  'rscore/fixtures/account-semantics/swap-offer-id-v1.json',
+] as const;
 
 /**
  * Semantic parity inventory, in exact canonical AccountTx catalog order.
@@ -131,7 +137,7 @@ export const ACCOUNT_TX_SEMANTIC_CATALOG = [
   covered('account', 'htlc_resolve', 'core/account/tx/handlers/htlc/resolve.ts', ACCOUNT_HTLC_EVIDENCE),
   covered('account', 'cross_pull_lock', 'core/account/tx/handlers/settlement/pull.ts', ACCOUNT_CROSS_J_EVIDENCE),
   covered('account', 'cross_pull_close', 'core/account/tx/handlers/settlement/pull.ts', ACCOUNT_CROSS_J_EVIDENCE),
-  covered('account', 'swap_offer', 'core/account/tx/handlers/swap/offer/index.ts', MIXED_REPLAY_EVIDENCE),
+  covered('account', 'swap_offer', 'core/account/tx/handlers/swap/offer/index.ts', ACCOUNT_SWAP_OFFER_EVIDENCE),
   covered('account', 'swap_cancel_request', 'core/account/tx/handlers/swap/lifecycle/cancel.ts', MIXED_REPLAY_EVIDENCE),
   covered('account', 'swap_resolve', 'core/account/tx/handlers/swap/resolve/index.ts', MIXED_REPLAY_EVIDENCE),
   covered('account', 'settle_transition', 'core/account/tx/handlers/settlement/transition.ts', ACCOUNT_REBALANCE_SETTLEMENT_EVIDENCE),

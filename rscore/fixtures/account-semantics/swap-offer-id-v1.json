@@ -1,0 +1,132 @@
+{
+  "canonicalSource": "TypeScript Account swap_offer admission",
+  "cases": [
+    {
+      "offerId": "offer-1",
+      "utf8Bytes": 7,
+      "verdict": "applied"
+    },
+    {
+      "offerId": "swap-lk3fz-1a-0123456789abc",
+      "utf8Bytes": 27,
+      "verdict": "applied"
+    },
+    {
+      "offerId": "mm-abcdef-2-1-ask-1",
+      "utf8Bytes": 19,
+      "verdict": "applied"
+    },
+    {
+      "offerId": "mmx-abcdef-123456-2-1-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-sell-1",
+      "utf8Bytes": 93,
+      "verdict": "applied"
+    },
+    {
+      "offerId": "prod-load-0-realistic-trader-1-1",
+      "utf8Bytes": 32,
+      "verdict": "applied"
+    },
+    {
+      "offerId": "A.Z_0-9",
+      "utf8Bytes": 7,
+      "verdict": "applied"
+    },
+    {
+      "offerId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "utf8Bytes": 256,
+      "verdict": "applied"
+    },
+    {
+      "code": "ACCOUNT_TX_VALIDATION",
+      "message": "Invalid offerId: expected 1-256 characters of [A-Za-z0-9._-]",
+      "offerId": "",
+      "utf8Bytes": 0,
+      "verdict": "rejected"
+    },
+    {
+      "code": "ACCOUNT_TX_VALIDATION",
+      "message": "Invalid offerId: expected 1-256 characters of [A-Za-z0-9._-]",
+      "offerId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "utf8Bytes": 257,
+      "verdict": "rejected"
+    },
+    {
+      "code": "ACCOUNT_TX_VALIDATION",
+      "message": "Invalid offerId: expected 1-256 characters of [A-Za-z0-9._-]",
+      "offerId": "€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€",
+      "utf8Bytes": 600,
+      "verdict": "rejected"
+    },
+    {
+      "code": "ACCOUNT_TX_VALIDATION",
+      "message": "Invalid offerId: expected 1-256 characters of [A-Za-z0-9._-]",
+      "offerId": "￿",
+      "utf8Bytes": 3,
+      "verdict": "rejected"
+    },
+    {
+      "code": "ACCOUNT_TX_VALIDATION",
+      "message": "Invalid offerId: expected 1-256 characters of [A-Za-z0-9._-]",
+      "offerId": "𐀀",
+      "utf8Bytes": 4,
+      "verdict": "rejected"
+    },
+    {
+      "code": "ACCOUNT_TX_VALIDATION",
+      "message": "Invalid offerId: expected 1-256 characters of [A-Za-z0-9._-]",
+      "offerId": "colon:id",
+      "utf8Bytes": 8,
+      "verdict": "rejected"
+    },
+    {
+      "code": "ACCOUNT_TX_VALIDATION",
+      "message": "Invalid offerId: expected 1-256 characters of [A-Za-z0-9._-]",
+      "offerId": "space id",
+      "utf8Bytes": 8,
+      "verdict": "rejected"
+    },
+    {
+      "code": "ACCOUNT_TX_VALIDATION",
+      "message": "Invalid offerId: expected 1-256 characters of [A-Za-z0-9._-]",
+      "offerId": "slash/id",
+      "utf8Bytes": 8,
+      "verdict": "rejected"
+    },
+    {
+      "code": "ACCOUNT_TX_VALIDATION",
+      "message": "Invalid offerId: expected 1-256 characters of [A-Za-z0-9._-]",
+      "offerId": "line\nbreak",
+      "utf8Bytes": 10,
+      "verdict": "rejected"
+    }
+  ],
+  "offer": {
+    "giveAmount": {
+      "__xlnType": "BigInt",
+      "value": "1000000000000000000"
+    },
+    "giveTokenDecimals": 18,
+    "giveTokenId": 2,
+    "maxFee": {
+      "__xlnType": "BigInt",
+      "value": "25000"
+    },
+    "minNetReceive": {
+      "__xlnType": "BigInt",
+      "value": "2475000"
+    },
+    "offerId": "<offerId>",
+    "priceTicks": {
+      "__xlnType": "BigInt",
+      "value": "25000"
+    },
+    "timeInForce": 0,
+    "wantAmount": {
+      "__xlnType": "BigInt",
+      "value": "2500000"
+    },
+    "wantTokenDecimals": 6,
+    "wantTokenId": 1
+  },
+  "version": 1
+}
