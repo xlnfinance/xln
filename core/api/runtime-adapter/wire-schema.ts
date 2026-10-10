@@ -3,7 +3,7 @@ import {
   requireBoundaryRecord,
   requireExactBoundaryKeys,
 } from '../../protocol/boundary-validation';
-import { decodeRuntimeInput } from '../../runtime/decode';
+import { decodeLocalRuntimeInput } from '../../runtime/decode';
 import { validateStorageSafeValue } from '../../protocol/boundary/boundary-primitives';
 import { MAX_NUMBERED_REGISTRATION_ENTITIES } from '../../runtime/registration/numbered/numbered-registration-codec';
 import { LIMITS } from '../../config/constants';
@@ -238,7 +238,7 @@ function assertRequest(
       );
       requireNonEmptyString(message['commandId'], 'RADAPTER_REQUEST_SEND_COMMAND_ID_INVALID');
       requireBoundaryInteger(message['commandSequence'], 'RADAPTER_REQUEST_SEND_SEQUENCE_INVALID', 1);
-      decodeRuntimeInput(message['input'], 'RADAPTER_REQUEST_SEND_INPUT');
+      decodeLocalRuntimeInput(message['input'], 'RADAPTER_REQUEST_SEND_INPUT');
       break;
     case 'control':
       requireExactBoundaryKeys(message, ['v', 'id', 'op', 'action'], [], 'RADAPTER_REQUEST_CONTROL_FIELDS_INVALID');

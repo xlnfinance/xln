@@ -3,7 +3,7 @@ import { serializeTaggedJson } from '../../../protocol/serialization';
 import { getControlBodyErrorStatus } from './auth';
 import type { parseTaggedControlBody } from './auth';
 import type { enqueueRuntimeInput } from '../../../runtime';
-import { decodeRuntimeInput } from '../../../runtime/decode';
+import { decodeLocalRuntimeInput } from '../../../runtime/decode';
 
 type RuntimeInputControlDeps = {
   enqueueRuntimeInput: typeof enqueueRuntimeInput;
@@ -22,7 +22,7 @@ export const handleRuntimeInputControl = async (
   }
   try {
     const body = await deps.parseTaggedControlBody(req);
-    const runtimeInput = decodeRuntimeInput(body, 'CONTROL_RUNTIME_INPUT');
+    const runtimeInput = decodeLocalRuntimeInput(body, 'CONTROL_RUNTIME_INPUT');
     const { runtimeTxs, entityInputs, jInputs = [] } = runtimeInput;
     if (runtimeTxs.length === 0 && entityInputs.length === 0 && jInputs.length === 0) {
       return new Response(

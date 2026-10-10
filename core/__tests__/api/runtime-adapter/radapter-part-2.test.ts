@@ -855,51 +855,28 @@ test('runtime adapter compact book view preserves full level depth while trimmin
 });
 
 test('runtime adapter binary codec preserves structured payloads', () => {
+  // Response payloads are free-form; a send input must pass the exact EntityTx decoder.
   const encoded = encodeRuntimeAdapterMessage({
     v: XLN_PROTOCOL_VERSION,
-    id: 'send-1',
-    op: 'send',
-    commandId: 'binary-command-0001',
-    commandSequence: 1,
-    input: {
-      runtimeTxs: [],
-      entityInputs: [
-        {
-          entityId,
-          signerId: 'signer',
-          entityTxs: [
-            {
-              type: 'directPayment',
-              data: {
-                targetEntityId: counterpartyId,
-                tokenId: 1,
-                amount: 1234567890123456789n,
-                route: [entityId, counterpartyId],
-                metadata: new Map([['purpose', 'radapter-binary-test']]),
-                tags: new Set(['binary', 'codec']),
-                bytes: new Uint8Array([1, 2, 3]),
-              },
-            },
-          ],
-        },
-      ],
+    inReplyTo: 'read-1',
+    ok: true,
+    payload: {
+      amount: 1234567890123456789n,
+      route: [entityId, counterpartyId],
+      metadata: new Map([['purpose', 'radapter-binary-test']]),
+      tags: new Set(['binary', 'codec']),
+      bytes: new Uint8Array([1, 2, 3]),
     },
   });
   const decoded = decodeTestRuntimeAdapterMessage<{
-    input: {
-      entityInputs: Array<{
-        entityTxs: Array<{
-          data: { amount: bigint; metadata: Map<string, string>; tags: Set<string>; bytes: Uint8Array };
-        }>;
-      }>;
-    };
+    payload: { amount: bigint; metadata: Map<string, string>; tags: Set<string>; bytes: Uint8Array };
   }>(encoded);
 
-  const data = decoded.input.entityInputs[0]?.entityTxs[0]?.data;
-  expect(data?.amount).toBe(1234567890123456789n);
-  expect(data?.metadata.get('purpose')).toBe('radapter-binary-test');
-  expect(data?.tags.has('codec')).toBe(true);
-  expect(Array.from(data?.bytes ?? [])).toEqual([1, 2, 3]);
+  const data = decoded.payload;
+  expect(data.amount).toBe(1234567890123456789n);
+  expect(data.metadata.get('purpose')).toBe('radapter-binary-test');
+  expect(data.tags.has('codec')).toBe(true);
+  expect(Array.from(data.bytes)).toEqual([1, 2, 3]);
 });
 
 test('runtime adapter rejects oversized wire messages before decoding', () => {

@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 
-import { decodeRuntimeInput } from '../../../runtime/decode';
+import { decodeLocalRuntimeInput, decodeRuntimeInput } from '../../../runtime/decode';
 
 test('RuntimeInput decoder owns the exact envelope and RuntimeTx boundary', () => {
   expect(() => decodeRuntimeInput({
@@ -53,7 +53,7 @@ test('RuntimeInput decoder mints exact Entity, Signer, Runtime, and unix-ms valu
   expect(() => decodeRuntimeInput({
     runtimeTxs: [],
     entityInputs: [{ entityId, signerId: '', entityTxs: [] }],
-  }, 'RUNTIME_INPUT')).toThrow('Invalid SignerId');
+  }, 'RUNTIME_INPUT')).toThrow('signerId is missing');
   expect(() => decodeRuntimeInput({
     runtimeTxs: [],
     entityInputs: [{
@@ -67,4 +67,26 @@ test('RuntimeInput decoder mints exact Entity, Signer, Runtime, and unix-ms valu
     runtimeTxs: [],
     entityInputs: [{ entityId: '0007', signerId: 'signer-1', entityTxs: [] }],
   }, 'RUNTIME_INPUT')).toThrow('Invalid EntityId');
+});
+
+test('local API ingress refuses malformed EntityTxs and JInputs at the wire', () => {
+  // The shallow decode checked only tx type names: an RAdapter send of an
+  // openAccount without data reached the Entity transition and halted the Runtime.
+  const entityId = `0x${'11'.repeat(32)}`;
+  const malformedEntityTx = {
+    runtimeTxs: [],
+    entityInputs: [{ entityId, signerId: 'signer-1', entityTxs: [{ type: 'openAccount' }] }],
+  };
+  const malformedJTx = {
+    runtimeTxs: [],
+    entityInputs: [],
+    jInputs: [{ jurisdictionName: 'arrakis', jTxs: [{ type: 'x' }] }],
+  };
+  expect(() => decodeLocalRuntimeInput(malformedEntityTx, 'RADAPTER_REQUEST_SEND_INPUT'))
+    .toThrow('RADAPTER_REQUEST_SEND_INPUT_ENTITY_INPUT_0_TX_0');
+  expect(() => decodeLocalRuntimeInput(malformedJTx, 'RADAPTER_REQUEST_SEND_INPUT'))
+    .toThrow('RADAPTER_REQUEST_SEND_INPUT_J_INPUTS_0_TX_0');
+  // The WAL schema keeps the shallow decode so committed frames still replay.
+  expect(decodeRuntimeInput(malformedEntityTx, 'RUNTIME_INPUT').entityInputs).toHaveLength(1);
+  expect(decodeRuntimeInput(malformedJTx, 'RUNTIME_INPUT').jInputs).toHaveLength(1);
 });
