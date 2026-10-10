@@ -7,8 +7,10 @@ import { handleRuntimeAdapterMessage } from '../../../api/runtime-adapter/server
 import {
   acquireRuntimeCommittedRead,
   acquireRuntimeFrameWriter,
+  RuntimeCommittedStateUnavailableError,
   withRuntimeCommittedRead,
 } from '../../../runtime/frame/lifecycle/writer-lock';
+import { toRuntimeAdapterErrorPayload } from '../../../api/runtime-adapter/errors';
 import { resolveRuntimeAdapterRead, type RuntimeAdapterResolveContext } from '../../../api/runtime-adapter/resolve';
 import { serializeTaggedJson } from '../../../protocol/serialization';
 
@@ -141,6 +143,20 @@ describe('runtime committed read barrier', () => {
     await expect(acquireRuntimeCommittedRead(env)).rejects.toThrow(
       'RUNTIME_COMMITTED_STATE_UNAVAILABLE_RELOAD_REQUIRED',
     );
+  });
+
+  test('the RAdapter classifies the unavailable-state error by type, not by message text', async () => {
+    // errors.ts compared error.message to the code; any plain Error carrying
+    // that text was answered as a retryable contention.
+    const env = createEmptyEnv('typed committed-state unavailable');
+    const releaseWriter = await acquireRuntimeFrameWriter(env.infrastructure!);
+    env.infrastructure!.stateMutationInFlight = true;
+    releaseWriter();
+    const typed = await acquireRuntimeCommittedRead(env).catch((error: unknown) => error);
+    expect(typed).toBeInstanceOf(RuntimeCommittedStateUnavailableError);
+    expect(toRuntimeAdapterErrorPayload(typed)).toMatchObject({ code: 'E_INTERNAL', retryable: true });
+    expect(toRuntimeAdapterErrorPayload(new Error('RUNTIME_COMMITTED_STATE_UNAVAILABLE_RELOAD_REQUIRED')))
+      .toMatchObject({ code: 'E_INTERNAL', retryable: false });
   });
 
   test('a nested read inside a held lease never deadlocks behind a queued writer', async () => {

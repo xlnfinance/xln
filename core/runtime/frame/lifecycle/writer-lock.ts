@@ -5,6 +5,19 @@ import { nodeProcess } from '../../../support/process/runtime-process';
 
 type RuntimeLifecycleState = NonNullable<RuntimeReplica['infrastructure']>;
 
+/**
+ * A halted writer left State mutated but not durable. Typed so API layers
+ * classify it by instanceof rather than by comparing message text.
+ */
+export class RuntimeCommittedStateUnavailableError extends Error {
+  readonly code = 'RUNTIME_COMMITTED_STATE_UNAVAILABLE_RELOAD_REQUIRED';
+
+  constructor() {
+    super('RUNTIME_COMMITTED_STATE_UNAVAILABLE_RELOAD_REQUIRED');
+    this.name = 'RuntimeCommittedStateUnavailableError';
+  }
+}
+
 export const assertRuntimeWriterAcceptingIngress = (state: RuntimeLifecycleState): void => {
   if (inferRuntimeLifecyclePhase(state) === 'halted') {
     throw new Error('RUNTIME_PROCESS_HALTED');
@@ -93,9 +106,7 @@ export const acquireRuntimeCommittedRead = async (
     }
     await state.frameWriterProgress;
   }
-  if (state.stateMutationInFlight) {
-    throw new Error('RUNTIME_COMMITTED_STATE_UNAVAILABLE_RELOAD_REQUIRED');
-  }
+  if (state.stateMutationInFlight) throw new RuntimeCommittedStateUnavailableError();
   state.activeCommittedReaders = (state.activeCommittedReaders ?? 0) + 1;
   if (state.activeCommittedReaders === 1) {
     let resolve!: () => void;

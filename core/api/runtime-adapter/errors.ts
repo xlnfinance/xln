@@ -1,6 +1,7 @@
 import type { RuntimeAdapterErrorCode, RuntimeAdapterErrorPayload } from './types';
 import type { RuntimeReplica } from '../../runtime/types';
 import { getRuntimeCommandReadiness } from '../../runtime/replica/lifecycle';
+import { RuntimeCommittedStateUnavailableError } from '../../runtime/frame/lifecycle/writer-lock';
 
 export class RuntimeAdapterError extends Error {
   readonly code: RuntimeAdapterErrorCode;
@@ -30,7 +31,7 @@ export const toRuntimeAdapterErrorPayload = (error: unknown): RuntimeAdapterErro
   const message = error instanceof Error ? error.message : String(error || 'Runtime adapter error');
   // A committed-state read that races an in-flight frame writer is contention,
   // not corruption: the very next read succeeds once the writer publishes.
-  if (message === 'RUNTIME_COMMITTED_STATE_UNAVAILABLE_RELOAD_REQUIRED') {
+  if (error instanceof RuntimeCommittedStateUnavailableError) {
     return { code: 'E_INTERNAL', message, retryable: true, retryAfterMs: 50 };
   }
   return {
