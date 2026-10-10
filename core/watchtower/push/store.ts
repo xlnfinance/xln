@@ -27,10 +27,11 @@ export type PushStoreStats = {
   watchTargetCount: number;
 };
 
+/** rpcUrls are the registrants' candidates, sorted: the sweep verifies each one's chain. */
 export type PushWatchTarget = {
   chainId: number;
   depositoryAddress: string;
-  rpcUrl: string;
+  rpcUrls: string[];
 };
 
 type PushStoreOptions = {
@@ -257,24 +258,22 @@ const listWatchTargets = async (
 ): Promise<PushWatchTarget[]> => {
   await ensureOpen(context);
   const cutoff = context.now() - context.registrationTtlMs;
-  const targets = new Map<string, PushWatchTarget & { updatedAt: number }>();
+  // The newest unauthenticated registration used to pick the RPC for the whole
+  // jurisdiction; now every registrant's URL is only a candidate.
+  const targets = new Map<string, { chainId: number; depositoryAddress: string; rpcUrls: Set<string> }>();
   for await (const [storageKey, raw] of context.db.iterator({ gte: 'reg:', lte: 'reg:\xff' })) {
     const registration = decodeScannedRegistration(storageKey, String(raw), 'targets');
-    if (!registration || Number(registration.updatedAt || 0) < cutoff) continue;
+    if (!registration || registration.updatedAt < cutoff) continue;
     const key = normTarget(registration.chainId, registration.depositoryAddress);
-    const existing = targets.get(key);
-    if (!existing || Number(registration.updatedAt || 0) > existing.updatedAt) {
-      targets.set(key, {
-        chainId: registration.chainId,
-        depositoryAddress: registration.depositoryAddress.toLowerCase(),
-        rpcUrl: registration.rpcUrl,
-        updatedAt: Number(registration.updatedAt || 0),
-      });
-    }
+    const target = targets.get(key) ?? {
+      chainId: registration.chainId,
+      depositoryAddress: registration.depositoryAddress.toLowerCase(),
+      rpcUrls: new Set<string>(),
+    };
+    target.rpcUrls.add(registration.rpcUrl);
+    targets.set(key, target);
   }
-  return [...targets.values()].map(
-    ({ chainId, depositoryAddress, rpcUrl }) => ({ chainId, depositoryAddress, rpcUrl }),
-  );
+  return [...targets.values()].map(target => ({ ...target, rpcUrls: [...target.rpcUrls].sort() }));
 };
 
 const getCursor = async (

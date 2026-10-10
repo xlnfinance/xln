@@ -20,6 +20,7 @@ import {
 } from '../../../watchtower/push/dispute-wake';
 import { runDisputeWatchSweep, type DisputeWatchStore } from '../../../watchtower/dispute-watch';
 import { ConsolePushSender, WebhookPushSender } from '../../../watchtower/push/sender';
+import { startStandaloneWatchtowerServer } from '../../../watchtower/standalone-server';
 import type { PushNotificationV1, PushSender, StoredPushRegistration } from '../../../watchtower/push/types';
 import { serializeTaggedJson } from '../../../protocol/serialization';
 
@@ -240,7 +241,7 @@ describe('push registration signature', () => {
     const other = { chainId: 1, depositoryAddress: `0x${'ab'.repeat(20)}` };
     try {
       await store.registerToken(makeRegistration({ ...other, entityId: entityId(5) }));
-      expect(await store.listWatchTargets()).toEqual([{ ...other, rpcUrl: 'http://127.0.0.1:8545/' }]);
+      expect(await store.listWatchTargets()).toEqual([{ ...other, rpcUrls: ['http://127.0.0.1:8545/'] }]);
       expect(await store.getStats()).toEqual({ registrationCount: 2, invalidRegistrationCount: 1, watchTargetCount: 1 });
       expect(await store.pruneExpired()).toEqual({ deleted: 0 });
       expect(await store.removeToken(ZeroAddress, hashPushToken('tok-1'))).toBe(1);
@@ -406,7 +407,7 @@ describe('runDisputeWatchSweep', () => {
     const cursors = new Map<string, number>();
     const reg = makeRegistration({ entityId: entityId(2), token: 'victim', tokenHash: hashPushToken('victim') });
     const store: DisputeWatchStore = {
-      listWatchTargets: async () => [{ chainId: CHAIN_ID, depositoryAddress: DEPOSITORY, rpcUrl: 'http://127.0.0.1:8545/' }],
+      listWatchTargets: async () => [{ chainId: CHAIN_ID, depositoryAddress: DEPOSITORY, rpcUrls: ['http://127.0.0.1:8545/'] }],
       listRegistrationsForTarget: async () => [reg],
       getCursor: async (c, d) => cursors.get(`${c}:${d}`) ?? null,
       setCursor: async (c, d, b) => { cursors.set(`${c}:${d}`, b); },
@@ -418,7 +419,9 @@ describe('runDisputeWatchSweep', () => {
 
   // DisputeStarted(sender indexed, counterentity indexed, nonce indexed, ...)
   const TOPIC0 = '0x' + '0'.repeat(64); // placeholder; replaced by real topic via interface in engine
+  const chainIdHex = `0x${CHAIN_ID.toString(16)}`;
   const makeProvider = (logs: Array<{ topics: string[]; data: string; blockNumber: number }>) => () => ({
+    send: async () => chainIdHex,
     getBlockNumber: async () => 200,
     getLogs: async () => logs,
   });
@@ -509,6 +512,7 @@ describe('runDisputeWatchSweep', () => {
       maxBlockRange: 100,
       maxBackfillBlocks: 100,
       providerFactory: () => ({
+        send: async () => chainIdHex,
         getBlockNumber: async () => 200,
         getLogs: async () => { reads += 1; return []; },
       }),
@@ -530,6 +534,7 @@ describe('runDisputeWatchSweep', () => {
     }, {
       confirmations: 0,
       providerFactory: () => ({
+        send: async () => chainIdHex,
         getBlockNumber: async () => 200,
         getLogs: async () => [{
           topics: [iface.getEvent('DisputeStarted')!.topicHash],
@@ -551,12 +556,101 @@ describe('runDisputeWatchSweep', () => {
       rpcTimeoutMs: 5,
       confirmations: 0,
       providerFactory: () => ({
+        send: async () => chainIdHex,
         getBlockNumber: async () => 200,
         getLogs: () => new Promise<never>(() => {}),
       }),
     });
     expect(result.errors).toBe(1);
     expect(cursors.size).toBe(0);
+  });
+
+  test('a newer registration cannot point the jurisdiction scan at another chain', async () => {
+    const { Interface, id } = await import('ethers');
+    const iface = new Interface([
+      'event DisputeStarted(bytes32 indexed sender, bytes32 indexed counterentity, uint256 indexed nonce, bool proposerIsLeft, bytes32 proofbodyHash, bytes32 watchSeed, bytes starterInitialArguments, bytes starterCounterArguments, bytes32 starterCounterProofCommitment, uint256 disputeTimeout, uint256 disputeStartTimestamp, uint32 leftResponseSeconds, uint32 rightResponseSeconds)',
+    ]);
+    const encoded = iface.encodeEventLog('DisputeStarted', [
+      entityId(1), entityId(2), 8, false, id('proof-chain'), id('seed-chain'), '0x', '0x',
+      `0x${'00'.repeat(32)}`, 5_910, 5_000, 600, 310,
+    ]);
+    const honestRpc = 'http://b-honest.test/';
+    // Sorts first and was registered last: both orders the old pick could use.
+    const otherChainRpc = 'http://a-other-chain.test/';
+    let now = 2_000;
+    const store = createPushStore({
+      dbPath: join(await mkdtemp(join(tmpdir(), 'xln-push-chain-')), 'push.level'),
+      now: () => now,
+    });
+    const otherChainLogReads: number[] = [];
+    try {
+      await store.registerToken(makeRegistration({ entityId: entityId(2), token: 'victim', tokenHash: hashPushToken('victim'), rpcUrl: honestRpc }));
+      now += 1_000;
+      await store.registerToken(makeRegistration({ entityId: entityId(9), token: 'attacker', tokenHash: hashPushToken('attacker'), rpcUrl: otherChainRpc }));
+
+      const sent: PushNotificationV1[] = [];
+      const result = await runDisputeWatchSweep(store, {
+        kind: 'capture',
+        send: async notification => { sent.push(notification); return { ok: true }; },
+      }, {
+        confirmations: 0,
+        maxBlockRange: 1_000,
+        providerFactory: rpcUrl => rpcUrl === honestRpc
+          ? {
+              send: async () => chainIdHex,
+              getBlockNumber: async () => 200,
+              getLogs: async () => [{ topics: [...encoded.topics], data: encoded.data, blockNumber: 150 }],
+            }
+          : {
+              send: async () => '0x1',
+              getBlockNumber: async () => 9_000_000,
+              getLogs: async filter => { otherChainLogReads.push(filter.toBlock); return []; },
+            },
+      });
+      expect(result.errors).toBe(0);
+      expect(sent.map(notification => notification.token)).toEqual(['victim']);
+      expect(otherChainLogReads).toEqual([]);
+      expect(await store.getCursor(CHAIN_ID, DEPOSITORY)).toBe(200);
+    } finally {
+      await store.close();
+    }
+  });
+
+  test('a tower with push wake refuses a registration whose RPC it may not use', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'xln-push-ingress-'));
+    const server = startStandaloneWatchtowerServer({
+      host: '127.0.0.1',
+      port: 0,
+      dbPath: join(root, 'tower.level'),
+      enablePushWake: true,
+      pushDbPath: join(root, 'push.level'),
+      allowedRpcUrls: ['http://127.0.0.1:8545/'],
+    });
+    const wallet = Wallet.createRandom();
+    const runtimeId = wallet.address.toLowerCase();
+    const register = async (rpcUrl: string) => {
+      const signedAt = Date.now();
+      const response = await fetch(`http://127.0.0.1:${server.server.port}/api/push/register`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: serializeTaggedJson({
+          type: 'push_registration', version: 1, runtimeId, entityId: entityId(3), token: `device-${rpcUrl}`,
+          platform: 'web', chainId: CHAIN_ID, depositoryAddress: DEPOSITORY, rpcUrl, signedAt,
+          ownerSignature: await wallet.signMessage(buildPushRegistrationMessage(
+            runtimeId, entityId(3), hashPushToken(`device-${rpcUrl}`), 'web', CHAIN_ID, DEPOSITORY, rpcUrl, signedAt,
+          )),
+        }),
+      });
+      return { status: response.status, body: await response.json() as { ok: boolean; error?: string } };
+    };
+    try {
+      expect((await register('http://127.0.0.1:8545/')).status).toBe(200);
+      const refused = await register('https://attacker.invalid/');
+      expect(refused.status).toBe(400);
+      expect(refused.body.error).toContain('WATCHTOWER_RPC_URL_NOT_ALLOWED');
+    } finally {
+      await server.close();
+    }
   });
 
   test('scans and persists only through the confirmation-safe head', async () => {
@@ -569,6 +663,7 @@ describe('runDisputeWatchSweep', () => {
       confirmations: 12,
       maxBlockRange: 1000,
       providerFactory: () => ({
+        send: async () => chainIdHex,
         getBlockNumber: async () => 200,
         getLogs: async filter => {
           ranges.push({ fromBlock: filter.fromBlock, toBlock: filter.toBlock });

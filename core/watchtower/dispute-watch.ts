@@ -41,6 +41,7 @@ const formatError = (error: unknown): string => error instanceof Error ? error.m
 type WatchLog = { topics: readonly string[]; data: string; blockNumber?: number; transactionHash?: string };
 
 type WatchProvider = {
+  send: (method: 'eth_chainId', params: []) => Promise<unknown>;
   getBlockNumber: () => Promise<number>;
   getLogs: (filter: {
     address: string;
@@ -50,8 +51,10 @@ type WatchProvider = {
   }) => Promise<readonly WatchLog[]>;
 };
 
+type WatchTarget = { chainId: number; depositoryAddress: string; rpcUrls: string[] };
+
 export interface DisputeWatchStore {
-  listWatchTargets(): Promise<Array<{ chainId: number; depositoryAddress: string; rpcUrl: string }>>;
+  listWatchTargets(): Promise<WatchTarget[]>;
   listRegistrationsForTarget(chainId: number, depositoryAddress: string): Promise<StoredPushRegistration[]>;
   getCursor(chainId: number, depositoryAddress: string): Promise<number | null>;
   setCursor(chainId: number, depositoryAddress: string, blockNumber: number): Promise<void>;
@@ -117,6 +120,43 @@ const withTimeout = async <T>(promise: Promise<T>, timeoutMs: number, label: str
   }
 };
 
+/**
+ * Registrations are unauthenticated, so their RPC URLs are candidates only: a
+ * candidate must pass the operator allowlist and prove the target chain id
+ * before its logs can move the cursor. A wrong-chain URL from a newer
+ * registration used to scan another chain and push the cursor to its head.
+ */
+const connectTargetProvider = async (
+  target: WatchTarget,
+  options: DisputeWatchOptions | undefined,
+  rpcTimeoutMs: number,
+): Promise<WatchProvider> => {
+  const customProviderFactory = options?.providerFactory;
+  const providerFactory = customProviderFactory
+    || ((rpcUrl: string, chainId: number) => createXlnJsonRpcProvider(rpcUrl, chainId));
+  for (const candidate of target.rpcUrls) {
+    try {
+      const rpcUrl = customProviderFactory
+        ? candidate
+        : assertWatchtowerRpcUrlAllowed(candidate, options?.allowedRpcUrls);
+      const provider = providerFactory(rpcUrl, target.chainId);
+      const chainId = await withTimeout(provider.send('eth_chainId', []), rpcTimeoutMs, 'WATCHTOWER_DISPUTE_CHAIN_ID');
+      if (typeof chainId !== 'string' || !/^0x[0-9a-f]+$/i.test(chainId) || BigInt(chainId) !== BigInt(target.chainId)) {
+        throw new Error(`WATCHTOWER_DISPUTE_RPC_CHAIN_ID_MISMATCH:${String(chainId)}`);
+      }
+      return provider;
+    } catch (error) {
+      disputeWatchLog.warn('target.rpc_rejected', {
+        chainId: target.chainId,
+        depositoryAddress: target.depositoryAddress,
+        rpcUrl: candidate,
+        error: formatError(error),
+      });
+    }
+  }
+  throw new Error(`WATCHTOWER_DISPUTE_RPC_UNAVAILABLE:${target.chainId}:${target.depositoryAddress}`);
+};
+
 export const runDisputeWatchSweep = async (
   store: DisputeWatchStore,
   sender: PushSender,
@@ -128,9 +168,6 @@ export const runDisputeWatchSweep = async (
   const confirmations = Math.max(0, Math.floor(Number(options?.confirmations ?? DEFAULT_CONFIRMATIONS)));
   const rpcTimeoutMs = Math.max(1, Math.floor(Number(options?.rpcTimeoutMs ?? DEFAULT_RPC_TIMEOUT_MS)));
   const maxLogsPerChunk = Math.max(1, Math.floor(Number(options?.maxLogsPerChunk ?? DEFAULT_MAX_LOGS_PER_CHUNK)));
-  const customProviderFactory = options?.providerFactory;
-  const providerFactory = customProviderFactory
-    || ((rpcUrl: string) => createXlnJsonRpcProvider(rpcUrl));
 
   const watchTargets = await store.listWatchTargets();
   let eventsObserved = 0;
@@ -140,12 +177,9 @@ export const runDisputeWatchSweep = async (
 
   for (const target of watchTargets) {
     try {
-      const rpcUrl = customProviderFactory
-        ? target.rpcUrl
-        : assertWatchtowerRpcUrlAllowed(target.rpcUrl, options?.allowedRpcUrls);
-      const provider = providerFactory(rpcUrl, target.chainId);
       const registrations = await store.listRegistrationsForTarget(target.chainId, target.depositoryAddress);
       if (registrations.length === 0) continue;
+      const provider = await connectTargetProvider(target, options, rpcTimeoutMs);
 
       const head = Math.max(0, Math.floor(Number(await withTimeout(
         provider.getBlockNumber(),

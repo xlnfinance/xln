@@ -490,13 +490,19 @@ export const handleWatchtowerActions = async (lookupKey: string, store: Watchtow
   }
 };
 
-export const handlePushRegister = async (req: Request, store: PushStore): Promise<Response> => {
+export const handlePushRegister = async (
+  req: Request,
+  store: PushStore,
+  assertWatchRpcUrl?: (rpcUrl: string) => void,
+): Promise<Response> => {
   try {
     const body = await parseJsonBody(req, SMALL_MAX_JSON_BODY_BYTES);
     const registration = verifyPushRegistration(body, {
       now: Date.now(),
       maxClockSkewMs: PUSH_REGISTRATION_MAX_CLOCK_SKEW_MS,
     });
+    // The sweep watches only through operator-allowlisted RPCs.
+    assertWatchRpcUrl?.(registration.rpcUrl);
     const stored = await store.registerToken(registration);
     return new Response(serializeTaggedJson({ ok: true, updatedAt: stored.updatedAt }), {
       headers: { 'content-type': 'application/json' },

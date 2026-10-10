@@ -280,7 +280,10 @@ const handlePushRoute = async (
 ): Promise<Response | null> => {
   if (pathname === '/api/push/register' && (request.method === 'PUT' || request.method === 'POST')) {
     if (!context.pushStore) return pushDisabled();
-    return withCors(await handlePushRegister(request, context.pushStore));
+    const { allowedRpcUrls } = context.options;
+    return withCors(await handlePushRegister(request, context.pushStore, rpcUrl => {
+      assertWatchtowerRpcUrlAllowed(rpcUrl, allowedRpcUrls);
+    }));
   }
   if (pathname !== '/api/push/unregister' || request.method !== 'POST') return null;
   if (!context.pushStore) return pushDisabled();
