@@ -366,7 +366,13 @@ test('runtime adapter server diagnostics use structured logging only', () => {
 
   expect(source).toContain("createStructuredLogger('runtime.radapter')");
   expect(source).toContain('response_too_large');
-  for (const file of ['server.ts', 'session/context.ts', 'session/read.ts', 'session/command-lane.ts']) {
+  for (const file of [
+    'server.ts',
+    'session/context.ts',
+    'session/read.ts',
+    'session/command-lane.ts',
+    'session/auth.ts',
+  ]) {
     const text = readFileSync(new URL(`../../../api/runtime-adapter/${file}`, import.meta.url), 'utf8');
     expect(text).not.toContain('[RADAPTER] RESPONSE_TOO_LARGE');
     expect(text).not.toContain('console.');

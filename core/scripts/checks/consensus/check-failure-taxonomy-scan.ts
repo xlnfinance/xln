@@ -840,6 +840,7 @@ for (const runtimeAdapterServerPath of [
   'core/api/runtime-adapter/session/context.ts',
   'core/api/runtime-adapter/session/read.ts',
   'core/api/runtime-adapter/session/command-lane.ts',
+  'core/api/runtime-adapter/session/auth.ts',
 ]) {
   const runtimeAdapterServer = readText(runtimeAdapterServerPath);
   assertNotIncludes(runtimeAdapterServer, 'console.', runtimeAdapterServerPath);
