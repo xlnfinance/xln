@@ -328,6 +328,28 @@ fn watcher_ingress_applies_external_wallet_snapshot_then_delta() {
 }
 
 #[test]
+fn j_history_block_rejects_one_log_carried_twice() {
+    // Parity: j-history-consensus.test.ts. TS rejects the same block with
+    // J_RANGE_EVENT_DUPLICATE (strict decoder) and J_HISTORY_LOCAL_EVENT_DUPLICATE
+    // (local recorder); an equal canonical key would hash and apply twice.
+    let owner = entity(0xaa);
+    let event = reserve_event(&owner, 43, 0xcc, 0xdd, 1, 1, 7);
+    let batch = FinalizedJEventBatch {
+        j_height: 43,
+        j_block_hash: [0xcc; 32],
+        events: vec![event.clone(), event],
+        dispute_finalization_evidence: vec![],
+        reserve_updates: vec![],
+        account_claims: vec![],
+    };
+    assert!(matches!(
+        canonical_j_event_blocks(&[batch]),
+        Err(EntityKernelError::JEventInvalid { detail })
+            if detail == "ACCOUNT_J_CLAIM_EVENT_DUPLICATE"
+    ));
+}
+
+#[test]
 fn j_history_range_hashes_match_typescript_goldens() {
     let owner = entity(0xaa);
     let peer = entity(0xbb);

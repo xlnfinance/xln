@@ -45,10 +45,18 @@ const hash = (value: unknown, code: string): string => {
   return normalized;
 };
 
-const canonicalEventOrder = (events: JurisdictionEventBlock['events']): boolean => {
+/**
+ * Canonical order is strictly increasing. An equal key is one log carried
+ * twice: it would enter eventsHash and apply twice. Rust canonical_events
+ * rejects the same block as a duplicate.
+ */
+const canonicalEventOrderError = (events: JurisdictionEventBlock['events']): 'DUPLICATE' | 'ORDER_INVALID' | null => {
+  const keys = events.map(canonicalJurisdictionEventKey);
+  if (new Set(keys).size !== keys.length) return 'DUPLICATE';
   const ordered = [...events].sort(compareCanonicalJurisdictionEvents);
-  return events.every((event, index) =>
-    canonicalJurisdictionEventKey(event) === canonicalJurisdictionEventKey(ordered[index]!));
+  return ordered.every((event, index) => canonicalJurisdictionEventKey(event) === keys[index])
+    ? null
+    : 'ORDER_INVALID';
 };
 
 /**
@@ -79,8 +87,8 @@ export const normalizeStrictJEventBlock = (
     throw new Error(`${codePrefix}_EVENT_BLOCK_EMPTY`);
   }
   const events = requireCanonicalJurisdictionEvents(raw['events']);
-  if (events.length !== raw['events'].length) throw new Error(`${codePrefix}_EVENT_INVALID`);
-  if (!canonicalEventOrder(events)) throw new Error(`${codePrefix}_EVENT_ORDER_INVALID`);
+  const orderError = canonicalEventOrderError(events);
+  if (orderError) throw new Error(`${codePrefix}_EVENT_${orderError}`);
   for (const event of events) {
     if (Number(event.blockNumber) !== blockNumber || text(event.blockHash) !== blockHash) {
       throw new Error(`${codePrefix}_EVENT_BLOCK_MISMATCH`);

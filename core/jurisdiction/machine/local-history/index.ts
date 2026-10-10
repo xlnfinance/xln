@@ -18,6 +18,7 @@ import {
   normalizeDisputeFinalizationEvidence,
 } from '../event-observation';
 import {
+  canonicalJurisdictionEventKey,
   compareCanonicalJurisdictionEvents,
   requireCanonicalJurisdictionEvents,
 } from '../events/event-normalization';
@@ -55,6 +56,10 @@ const normalizeEventBlock = (
   const jBlockHash = normalizedText(block.jBlockHash);
   if (!jBlockHash) throw new Error('J_HISTORY_LOCAL_BLOCK_HASH_MISSING');
   const events = requireCanonicalJurisdictionEvents(block.events).sort(compareCanonicalJurisdictionEvents);
+  // One log recorded twice would hash and apply twice; Rust rejects it too.
+  if (new Set(events.map(canonicalJurisdictionEventKey)).size !== events.length) {
+    throw new Error('J_HISTORY_LOCAL_EVENT_DUPLICATE');
+  }
   const eventsHash = canonicalJurisdictionEventsHash(events);
   if (normalizedText(block.eventsHash) !== eventsHash) throw new Error('J_HISTORY_LOCAL_EVENTS_HASH_MISMATCH');
   const evidence = normalizeDisputeFinalizationEvidence(block.disputeFinalizationEvidence ?? []);

@@ -300,6 +300,36 @@ describe('J validator-local history and Entity-finalized ranges', () => {
       .toBe('J_RANGE_PROPOSER_SIGNATURE_INVALID');
   });
 
+  test('one log carried twice in a block is rejected by the local recorder and the strict decoder', () => {
+    const event = reserveEvent(7, '7');
+    const duplicated = [event, structuredClone(event)];
+    const eventsHash = canonicalJurisdictionEventsHash(duplicated);
+    expect(() => recordValidatorJHistory(undefined, {
+      jurisdictionRef,
+      scannedThroughHeight: 7,
+      tipBlockHash: blockHash(7),
+      blocks: [{ jurisdictionRef, jHeight: 7, jBlockHash: blockHash(7), eventsHash, events: duplicated }],
+    })).toThrow('J_HISTORY_LOCAL_EVENT_DUPLICATE');
+
+    const blocks = [{ blockNumber: 7, blockHash: blockHash(7), eventsHash, events: duplicated }];
+    const proposal = {
+      from: 'leader',
+      jurisdictionRef,
+      baseHeight: 0,
+      scannedThroughHeight: 7,
+      observedAt: 7,
+      tipBlockHash: blockHash(7),
+      eventHistoryRoot: foldJHistoryRoot(EMPTY_J_HISTORY_ROOT, [
+        { jurisdictionRef, jHeight: 7, jBlockHash: blockHash(7), eventsHash },
+      ]),
+      rangeHash: canonicalJEventRangeHash(jurisdictionRef, blocks),
+      blocks,
+      signature: '0xsig',
+    };
+    expect(getJEventRangeValidationError(state(), undefined, proposal, 'leader', () => true))
+      .toBe('J_RANGE_EVENT_DUPLICATE');
+  });
+
   test('rejects validly signed proposer evidence that differs from the validator-local receipt evidence', () => {
     const env = createEmptyEnv('j-evidence-prefix-agreement');
     const signerId = deriveSignerAddressSync(env.runtimeSeed!, 'evidence-proposer').toLowerCase();
