@@ -18,7 +18,7 @@ test('a relay socket never decodes a binary non-peer frame as text', () => {
 
 test('every relay socket server decodes frames through the one relay frame decoder', () => {
   // The orchestrator relay (pm2 xln-server) kept its own copy of the text
-  // fallback after the API server was fixed.
+  // decode path after the API server was fixed.
   const root = join(import.meta.dir, '..', '..', '..');
   for (const path of ['api/server/index.ts', 'orchestrator/orchestrator.ts']) {
     const source = readFileSync(join(root, path), 'utf8');
