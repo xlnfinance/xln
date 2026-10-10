@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
 import { splitJOutboxForDurableSubmit , registerPendingCommittedJOutbox } from '../../../runtime/j-submit/j-submit-state';
+import { resolveRuntimeWorkReason } from '../../../runtime/loop/loop-work';
 import { createEmptyEnv } from '../../../runtime';
 import {
   applyGovernanceSubmitResultRuntimeTx,
@@ -85,7 +86,71 @@ describe('J submit maintenance lane', () => {
     applyGovernanceSubmitResultRuntimeTx(env, submitted);
     expect(env.infrastructure?.pendingCommittedJOutbox).toEqual([]);
   });
+
+  test('a governance retry the loop reports ready is the retry post-commit submits', async () => {
+    // Readiness read the wall clock while submission read the committed
+    // timestamp, which an empty frame never advances: the loop re-ran empty
+    // frames without submitting until unrelated input moved the clock.
+    const governanceTx = makeGovernanceTx();
+    const env = createEmptyEnv('governance-submit-clock');
+    env.runtimeId = governanceTx.data.signerId;
+    env.state.timestamp = 2_000;
+    registerPendingCommittedJOutbox(env, splitJOutboxForDurableSubmit(input(governanceTx)).durable);
+    const pending = () => env.infrastructure?.pendingCommittedJOutbox ?? [];
+    const first = pending()[0]?.jTxs[0];
+    if (first?.type !== 'entityProviderProposeControlBoard') throw new Error('governance attempt missing');
+    applyGovernanceSubmitResultRuntimeTx(env, makeGovernanceSubmitResultRuntimeTx('Testnet', first, 'transientFailure', {
+      message: 'rpc unavailable',
+      adapterFailure: { category: 'transient', code: 'RPC_UNAVAILABLE', message: 'rpc unavailable' },
+    }));
+    let submitCalls = 0;
+    installTestnetAdapter(env, async () => {
+      submitCalls += 1;
+      return { success: true, txHash: `0x${'72'.repeat(32)}` };
+    });
+    const queued: unknown[] = [];
+    const deps = { enqueueRuntimeInputs: (_env: unknown, _inputs: unknown, runtimeTxs?: unknown[]) => queued.push(...(runtimeTxs ?? [])) };
+
+    // Due by the wall clock, not by the committed timestamp 2_000.
+    expect(resolveRuntimeWorkReason(env, { runtimeInputHasQueuedWork: () => false })).toBe('committed-j-outbox');
+    await submitRuntimeJOutbox(env, pending(), deps as never);
+    expect(submitCalls).toBe(1);
+    expect(queued).toHaveLength(1);
+  });
 });
+
+const makeGovernanceTx = (): Extract<JTx, { type: 'entityProviderProposeControlBoard' }> => ({
+  type: 'entityProviderProposeControlBoard',
+  entityId: `0x${'31'.repeat(32)}`,
+  data: {
+    targetEntityId: `0x${'32'.repeat(32)}`,
+    newBoardHash: `0x${'41'.repeat(32)}`,
+    boardEpoch: 2n,
+    actionNonce: 7n,
+    proposalHash: `0x${'51'.repeat(32)}`,
+    supporterVotes: [{ entityId: `0x${'31'.repeat(32)}`, hankoSignature: '0x1234' }],
+    signerId: `0x${'61'.repeat(20)}`,
+  },
+  timestamp: 1_000,
+});
+
+const installTestnetAdapter = (env: ReturnType<typeof createEmptyEnv>, submitTx: JAdapter['submitTx']): void => {
+  env.state.jReplicas = new Map([['Testnet', {
+    name: 'Testnet',
+    chainId: 31337,
+    blockNumber: 0n,
+    stateRoot: null,
+    mempool: [],
+    blockDelayMs: 0,
+    lastBlockTimestamp: 0,
+    position: { x: 0, y: 0, z: 0 },
+  }]]);
+  ensureRuntimeInfrastructure(env).liveJAdapters = new Map([['Testnet', {
+    mode: 'rpc',
+    pollNow: async () => {},
+    submitTx,
+  } as unknown as JAdapter]]);
+};
 
 describe('J submit maintenance failures', () => {
   test('a failed or throwing maintenance submit is logged, never a Runtime halt', async () => {

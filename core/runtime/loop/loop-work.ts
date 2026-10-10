@@ -138,7 +138,7 @@ export const resolveRuntimeWorkReason = (
   deps: RuntimeWorkDeps,
 ): string | null => {
   const mempool = requireRuntimeMempool(env);
-  if (hasReadyCommittedJOutbox(env, getWallClockMs())) return 'committed-j-outbox';
+  if (hasReadyCommittedJOutbox(env)) return 'committed-j-outbox';
   if ((env.infrastructure?.pendingJurisdictionImports?.size ?? 0) > 0) return 'jurisdiction-import';
   if (mempool.runtimeTxs.length > 0 || mempool.entityInputs.length > 0) return 'runtime-mempool';
   if ((mempool.jInputs?.length ?? 0) > 0) return 'j-input';

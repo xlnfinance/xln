@@ -21,6 +21,7 @@ import {
   findJSubmitReplica,
   hasInFlightJPreparation,
   isMatchingJSubmitBatch,
+  jSubmitDueClockMs,
   makeJSubmitResultRuntimeTx,
 } from './j-submit-state';
 import {
@@ -322,8 +323,9 @@ const collectActiveJTxs = (
   env: RuntimeReplica,
   deps: RuntimeJSubmitDeps,
   jInput: JInput,
-): JTx[] =>
-  jInput.jTxs.filter(jTx =>
+): JTx[] => {
+  const now = jSubmitDueClockMs(env);
+  return jInput.jTxs.filter(jTx =>
     !completedJSubmitAttempt(env, jTx) &&
     // A non-first preparation is not awaited and may still queue its own
     // preflight result; a barrier or reconcile result here would conflict.
@@ -331,7 +333,8 @@ const collectActiveJTxs = (
     !hasQueuedJSubmitResult(env, jTx) &&
     !reconcileDurablyAbortedBatch(env, deps, jInput.jurisdictionName, jTx) &&
     !reconcileDurablyStaleEntityProviderAction(env, deps, jInput.jurisdictionName, jTx) &&
-    (!isGovernanceJTx(jTx) || governanceAttemptIsDue(jTx, env.state.timestamp)));
+    (!isGovernanceJTx(jTx) || governanceAttemptIsDue(jTx, now)));
+};
 
 const queueUnavailableAdapterResults = (
   env: RuntimeReplica,

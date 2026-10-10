@@ -217,7 +217,7 @@ describe('durable validator-local J submit state', () => {
 
     expect(queued).toEqual([]);
     expect(submitCalls).toBe(0);
-    expect(hasReadyCommittedJOutbox(env, env.state.timestamp)).toBe(false);
+    expect(hasReadyCommittedJOutbox(env)).toBe(false);
   });
 
   test('authenticated J input arriving during a failed submit defers failure classification', async () => {
@@ -602,7 +602,7 @@ describe('durable validator-local J submit state', () => {
       await applyRuntimeTx(env, result, { isReplay: true });
       await applyRuntimeTx(env, structuredClone(result), { isReplay: true });
       expect(env.infrastructure?.pendingCommittedJOutbox).toHaveLength(1);
-      expect(hasReadyCommittedJOutbox(env, env.state.timestamp)).toBe(false);
+      expect(hasReadyCommittedJOutbox(env)).toBe(false);
       env.state.timestamp += ENTITY_J_SUBMIT_RETRY_MS;
       const [retry] = collectDueJSubmitRuntimeTxs(env, env.state.timestamp);
       if (!retry) throw new Error('prepared retry missing');

@@ -6,6 +6,7 @@ import type { JTx } from '../../types/jurisdiction-runtime';
 import { keccak256, toUtf8Bytes } from 'ethers';
 import { batchOpCount, cloneJBatch } from '../../jurisdiction/machine/batch';
 import { safeStringify } from '../../protocol/serialization';
+import { getWallClockMs } from '../../support/time';
 import {
   ENTITY_J_SUBMIT_RETRY_MS,
   isEntityActiveLeader,
@@ -200,7 +201,17 @@ export const hasInFlightJPreparation = (env: RuntimeReplica, tx: JTx): boolean =
   tx.type === 'batch' && !tx.data.runtimeSubmitAttempt?.rawTransaction
   && Boolean(env.infrastructure?.jPreparationTasks?.has(tx.data.runtimeSubmitAttempt?.attemptId ?? ''));
 
-export const hasReadyCommittedJOutbox = (env: RuntimeReplica, now: number): boolean => {
+/**
+ * Clock for the post-commit due check of a governance retry. Loop readiness and
+ * submission must read the same one: an empty frame never advances the
+ * committed timestamp, so wall-clock readiness against committed-time submission
+ * re-ran empty frames until unrelated input arrived.
+ */
+export const jSubmitDueClockMs = (env: RuntimeReplica): number =>
+  env.scenarioMode ? env.state.timestamp : getWallClockMs();
+
+export const hasReadyCommittedJOutbox = (env: RuntimeReplica): boolean => {
+  const now = jSubmitDueClockMs(env);
   for (const input of env.infrastructure?.pendingCommittedJOutbox ?? []) {
     for (const tx of input.jTxs) {
       if (completedJSubmitAttempt(env, tx) || hasInFlightJPreparation(env, tx)) continue;
