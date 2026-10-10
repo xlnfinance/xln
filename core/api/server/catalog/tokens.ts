@@ -4,10 +4,11 @@ import type { JTokenInfo } from '../../../jurisdiction/adapter/types';
 import { defaultTokensForJurisdiction } from '../../../jurisdiction/machine/config/default-tokens';
 import { deployMissingDefaultTokens } from '../../../jurisdiction/adapter/operations/dev-token-deployment';
 import { createStructuredLogger } from '../../../support/logger';
+import { readPositiveIntegerEnv } from '../../../config/environment';
 import { HUB_REQUIRED_TOKEN_COUNT } from '../health/hub';
 
 const serverLog = createStructuredLogger('server');
-const TOKEN_CATALOG_TIMEOUT_MS = Math.max(1000, Number(process.env['TOKEN_CATALOG_TIMEOUT_MS'] || '6000'));
+const TOKEN_CATALOG_TIMEOUT_MS = Math.max(1000, readPositiveIntegerEnv('TOKEN_CATALOG_TIMEOUT_MS', 6_000));
 const withTimeout = async <T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> => {
   let timer: ReturnType<typeof setTimeout> | null = null;
   try {

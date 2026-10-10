@@ -171,10 +171,8 @@ const requireWatcherConfirmationDepth = (adapter: JAdapter): number => {
   return depth;
 };
 
-const STARTUP_STEP_TIMEOUT_MS = Math.max(
-  5_000,
-  Math.floor(Number(process.env['XLN_STARTUP_STEP_TIMEOUT_MS'] ?? '20000')),
-);
+// A malformed value used to become NaN, which timed out every startup step.
+const STARTUP_STEP_TIMEOUT_MS = Math.max(5_000, readPositiveIntegerEnv('XLN_STARTUP_STEP_TIMEOUT_MS', 20_000));
 
 const withStartupStepTimeout = async <T>(
   label: string,

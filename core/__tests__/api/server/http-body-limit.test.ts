@@ -34,3 +34,16 @@ describe('API recovery transport limits', () => {
     expect(await request.json()).toEqual({ amount: '100' });
   });
 });
+
+test('a malformed server timeout env fails startup instead of becoming NaN', () => {
+  // TOKEN_CATALOG_TIMEOUT_MS / XLN_STARTUP_STEP_TIMEOUT_MS used Number(raw):
+  // a typo became NaN and every startup step timed out immediately.
+  const child = Bun.spawnSync({
+    cmd: [process.execPath, '-e', `await import('${import.meta.dir}/../../../api/server/catalog/tokens.ts')`],
+    env: { ...process.env, TOKEN_CATALOG_TIMEOUT_MS: '6s' },
+    stdout: 'pipe',
+    stderr: 'pipe',
+  });
+  expect(child.exitCode).not.toBe(0);
+  expect(child.stderr.toString()).toContain('ENV_POSITIVE_INTEGER_INVALID:TOKEN_CATALOG_TIMEOUT_MS:6s');
+});
