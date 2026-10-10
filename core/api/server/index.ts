@@ -48,7 +48,6 @@ import { maybeHandleRelayDebugRequest } from '../../network/relay/debug-http';
 import { forgetRelaySocketRuntimeId, isRelaySocketAuthenticated, relayRoute, type RelayRouterConfig } from '../../network/relay/router';
 import {
   canonicalizeRuntimeWsAudience,
-  deserializeWsMessage,
   resolveRuntimeWsMaxMessageBytes,
   resolveRuntimeWsRelayAudience,
   serializeWsMessage,
@@ -67,7 +66,8 @@ import {
   type MarketSnapshotPayload,
 } from '../../network/relay/market/snapshot';
 import { createMarketSubscriptionStack } from '../../network/relay/market/subscriptions';
-import { decodeMarketWireRequest, encodeMarketWireMessage, type MarketWireRequest } from '../../network/relay/market/wire';
+import { encodeMarketWireMessage } from '../../network/relay/market/wire';
+import { decodeRelaySocketFrame } from './network/relay-frame';
 import { JSON_HEADERS, getErrorMessage, resolveRequiredAnvilRpc } from './utils';
 import { enforceFaucetPolicy } from './faucet/policy';
 import { ethers } from 'ethers';
@@ -1032,10 +1032,7 @@ const handleWebSocketMessage = (
     ws.close(1013, 'Runtime transport not ready');
     return;
   }
-  const messageText = (): string =>
-    typeof message === 'string'
-      ? message
-      : new TextDecoder().decode(message instanceof ArrayBuffer ? new Uint8Array(message) : message);
+  const messageLength = (): number => typeof message === 'string' ? message.length : message.byteLength;
   const wsType = ws.data.type;
   try {
     if (wsType === 'rpc') {
@@ -1060,35 +1057,25 @@ const handleWebSocketMessage = (
       return;
     }
 
-    let peerMessage: RuntimeWsMessage | null = null;
-    let marketMessage: MarketWireRequest | null = null;
-    try {
-      peerMessage = deserializeWsMessage(message, { authenticated: isRelaySocketAuthenticated(ws) });
-    } catch (binaryError) {
-      try {
-        marketMessage = decodeMarketWireRequest(messageText());
-      } catch {
-        throw binaryError;
-      }
-    }
-    if (marketMessage) {
+    const frame = decodeRelaySocketFrame(message, isRelaySocketAuthenticated(ws));
+    if (frame.kind === 'market') {
+      const marketMessage = frame.message;
       Promise.resolve(marketSubscriptionStack.handleMessage(ws, marketMessage)).catch(error => {
         const reason = getErrorMessage(error);
-        serverLog.error('ws.market_handler_error', { reason, type: marketMessage?.type });
+        serverLog.error('ws.market_handler_error', { reason, type: marketMessage.type });
         pushDebugEvent(relayStore, {
           event: 'error',
           reason: 'MARKET_HANDLER_EXCEPTION',
-          details: { error: reason, msgType: marketMessage?.type },
+          details: { error: reason, msgType: marketMessage.type },
         });
         ws.send(encodeMarketWireMessage({ type: 'error', error: reason }));
       });
       return;
     }
-    if (!peerMessage) throw new Error('RELAY_MESSAGE_DECODE_INVARIANT');
 
-    routeRelaySocketMessage(session, ws, peerMessage, typeof message === 'string' ? undefined : toRuntimeWsBytes(message));
+    routeRelaySocketMessage(session, ws, frame.message, typeof message === 'string' ? undefined : toRuntimeWsBytes(message));
   } catch (error) {
-    const byteLength = wsType === 'rpc' ? runtimeAdapterMessageByteLength(message) : messageText().length;
+    const byteLength = wsType === 'rpc' ? runtimeAdapterMessageByteLength(message) : messageLength();
     const errorMessage = getErrorMessage(error);
     serverLog.error('ws.parse_error', { type: wsType, len: byteLength, error: errorMessage });
     pushDebugEvent(relayStore, {
