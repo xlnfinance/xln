@@ -705,8 +705,11 @@ const runStorageSnapshotLifecycle = async (
         ? { onPersistenceProgress: options.onPersistenceProgress }
         : {}),
     });
+    // The durable snapshot is copied from the authoritative WAL rows. The
+    // current cache is disposable, and the check above is structural, so a
+    // divergent cache under matching heads would otherwise be frozen here.
     const snapshot = await createSnapshot(
-      db,
+      walDb,
       walDb,
       options.env.state.height,
       options.env.state.timestamp,
