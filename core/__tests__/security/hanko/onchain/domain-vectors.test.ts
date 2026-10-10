@@ -3,7 +3,6 @@ import { createVM } from '@ethereumjs/vm';
 import { getBytes, hexlify, Interface, keccak256 } from 'ethers';
 
 import {
-  ONCHAIN_HANKO_GOLDEN_ACTION_CANCEL_RECEIPT,
   ONCHAIN_HANKO_GOLDEN_ACTION_RECEIPT,
   ONCHAIN_HANKO_GOLDEN_HASHES,
   ONCHAIN_HANKO_GOLDEN_PAYLOADS,
@@ -16,10 +15,6 @@ import {
 } from '../../../../protocol/dispute/proof-builder';
 import { computeWatchtowerCounterDisputeAuthorizationHash } from '../../../../storage/recovery/bundle/crypto';
 import {
-  ENTITY_PROVIDER_ACTION_CANCELLED_EVENT,
-  ENTITY_PROVIDER_ACTION_CANCELLED_TOPIC,
-  ENTITY_PROVIDER_ACTION_EXECUTED_EVENT,
-  ENTITY_PROVIDER_ACTION_EXECUTED_TOPIC,
   ENTITY_PROVIDER_ACTION_KIND,
   encodeBoardProposalCancelHankoPayload,
   encodeBoardProposalHankoPayload,
@@ -230,14 +225,8 @@ describe('on-chain Hanko domain golden vectors', () => {
     })).toBe(ONCHAIN_HANKO_GOLDEN_HASHES.boardProposalCancel);
   });
 
-  test('pins the exact EntityProvider action receipt identity', () => {
-    expect(ENTITY_PROVIDER_ACTION_EXECUTED_EVENT).toBe(ONCHAIN_HANKO_GOLDEN_ACTION_RECEIPT.signature);
-    expect(ENTITY_PROVIDER_ACTION_EXECUTED_TOPIC).toBe(ONCHAIN_HANKO_GOLDEN_ACTION_RECEIPT.topic);
+  test('pins the exact EntityProvider action kinds', () => {
     expect(ENTITY_PROVIDER_ACTION_KIND).toEqual(ONCHAIN_HANKO_GOLDEN_ACTION_RECEIPT.kinds);
-    expect(ENTITY_PROVIDER_ACTION_CANCELLED_EVENT)
-      .toBe(ONCHAIN_HANKO_GOLDEN_ACTION_CANCEL_RECEIPT.signature);
-    expect(ENTITY_PROVIDER_ACTION_CANCELLED_TOPIC)
-      .toBe(ONCHAIN_HANKO_GOLDEN_ACTION_CANCEL_RECEIPT.topic);
   });
 
   test('rejects an empty cancellation target before signing', () => {

@@ -316,7 +316,6 @@ describe('PersistentRadixValueMap', () => {
     expect(afterFirst).toBeGreaterThan(0);
     map.rootHash();
     expect(hashes).toBe(afterFirst);
-    expect(map.hashStats().valueHashes).toBe(afterFirst);
   });
 
   test('commitment:false locators cannot serialize or root', () => {
@@ -409,9 +408,14 @@ describe('PersistentRadixValueMap', () => {
   });
 
   test('foldMutations inserts multiple siblings across a compressed branch', () => {
+    let valueHashes = 0;
     const hexOptions = {
       ...options,
       keyBytes: (key: string): Uint8Array => ethers.getBytes(key),
+      valueHash: (value: string): string => {
+        valueHashes += 1;
+        return options.valueHash(value);
+      },
     };
     const base = fromMap([
       ['0x0000', 'base-0'],
@@ -431,7 +435,7 @@ describe('PersistentRadixValueMap', () => {
       ['0x0200', 'new-2'],
     ], hexOptions);
 
-    expect(folded.hashStats().valueHashes).toBe(0);
+    expect(valueHashes).toBe(0);
     expect([...folded]).toEqual([...sequential]);
     expect(folded.rootHash()).toBe(sequential.rootHash());
     expect(folded.rootHash()).toBe(cold.rootHash());

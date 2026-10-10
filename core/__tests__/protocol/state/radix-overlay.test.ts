@@ -44,7 +44,7 @@ describe('radix overlay', () => {
     expect(owner.view.size).toBe(1);
 
     const prepared = prepareRadixOverlay(owner);
-    expect(prepared.root).toBe(base.rootHash());
+    expect(prepared.values.rootHash()).toBe(base.rootHash());
     expect(prepared.nodeChanges).toEqual({ puts: [], dels: [] });
   });
 
@@ -67,7 +67,7 @@ describe('radix overlay', () => {
     expect(base.rootHash()).toBe(baseRoot);
 
     const prepared = prepareRadixOverlay(owner);
-    expect(prepared.root).not.toBe(baseRoot);
+    expect(prepared.values.rootHash()).not.toBe(baseRoot);
     expect(prepared.values.get(first)).toEqual(value(15, 'edited'));
     expect(prepared.values.get(second)).toEqual(value(20, 'new'));
     expect(prepared.nodeChanges.puts.length).toBeGreaterThan(0);
@@ -153,7 +153,7 @@ describe('radix overlay', () => {
     expect(hashes).toBe(0);
     const prepared = prepareRadixOverlay(owner);
     expect(hashes).toBe(0);
-    expect(prepared.hash).toBeDefined();
+    expect(prepared.values.rootHash()).toBeDefined();
     expect(hashes).toBe(1);
   });
 
@@ -199,16 +199,13 @@ describe('radix overlay', () => {
 
     const prepared = prepareRadixOverlay(owner);
     expect(hashes).toBe(afterSeal);
-    expect(prepared.hash).toBeDefined();
+    expect(prepared.values.rootHash()).toBeDefined();
     expect(hashes).toBe(afterSeal + 2);
-    expect(prepared.values.hashStats().valueHashes).toBe(2);
     const afterFold = hashes;
-    expect(prepared.values.rootHash()).toBe(prepared.hash);
-    expect(prepared.root).toBe(prepared.hash);
     expect(hashes).toBe(afterFold);
     expect(base.get(first)).toEqual(value(1, 'a'));
     expect(base.get(second)).toBe(untouched);
-    expect(base.rootHash()).not.toBe(prepared.root);
+    expect(base.rootHash()).not.toBe(prepared.values.rootHash());
   });
 
   test('overlay fold root does not depend on mutation order', () => {
@@ -225,7 +222,7 @@ describe('radix overlay', () => {
     right.view.edit(key(1, 1), previous => value(previous.amount + 4, 'edited'));
     right.view.del(key(1, 2));
     right.view.put(key(2, 1), value(3, 'new'));
-    expect(prepareRadixOverlay(left).root).toBe(prepareRadixOverlay(right).root);
+    expect(prepareRadixOverlay(left).values.rootHash()).toBe(prepareRadixOverlay(right).values.rootHash());
   });
 
   test('prepare and discard consume their owner exactly once', () => {

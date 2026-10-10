@@ -113,7 +113,6 @@ const writeHexInto = (target: Uint8Array, offset: number, hex: string): number =
 const branchHashOrdered = (
   radix: RadixMerkleRadix,
   children: Array<[number, string]>,
-  hashAlgorithm: RadixMerkleHashAlgorithm = 'integrity',
 ): string => {
   if (children.length === 0) return EMPTY_RADIX_MERKLE_ROOT;
   // One preimage buffer per branch: a Hub seals thousands of dirty branches a
@@ -129,14 +128,13 @@ const branchHashOrdered = (
     offset += writeHexInto(payload, offset, hash);
   }
   if (offset !== size) throw new Error('RADIX_MERKLE_BRANCH_PREIMAGE_SIZE');
-  return hashAlgorithm === 'keccak256' ? ethers.keccak256(payload) : computeIntegrityDigest(payload);
+  return computeIntegrityDigest(payload);
 };
 
 /** Dense slot form used by the persistent Patricia hot path; no sort is needed. */
 export const computeRadixMerkleBranchHashFromSlots = (
   radix: RadixMerkleRadix,
   children: readonly (string | undefined)[],
-  hashAlgorithm: RadixMerkleHashAlgorithm = 'integrity',
 ): string => {
   if (children.length !== radix) {
     throw new Error(`RADIX_MERKLE_BRANCH_WIDTH_INVALID:${children.length}:${radix}`);
@@ -146,7 +144,7 @@ export const computeRadixMerkleBranchHashFromSlots = (
     const hash = children[slot];
     if (hash !== undefined) ordered.push([slot, hash]);
   }
-  return branchHashOrdered(radix, ordered, hashAlgorithm);
+  return branchHashOrdered(radix, ordered);
 };
 
 const encodePathSegment = (radix: RadixMerkleRadix, path: number[]): Uint8Array => {
@@ -198,13 +196,12 @@ const extensionHash = (
   radix: RadixMerkleRadix,
   path: number[],
   childHash: string,
-  hashAlgorithm: RadixMerkleHashAlgorithm = 'integrity',
 ): string =>
   hashParts(EXTENSION_DOMAIN, [
     Uint8Array.of(radixTag(radix)),
     encodePathSegment(radix, path),
     hashHexToBytes(childHash),
-  ], hashAlgorithm);
+  ]);
 
 export const computeRadixMerkleEdgeHash = (
   radix: RadixMerkleRadix,
@@ -212,11 +209,10 @@ export const computeRadixMerkleEdgeHash = (
   childKind: 'branch' | 'leaf',
   childPath: readonly number[],
   childNodeHash: string,
-  hashAlgorithm: RadixMerkleHashAlgorithm = 'integrity',
 ): string => {
   if (childKind === 'leaf') return childNodeHash;
   const segment = childPath.slice(parentPath.length + 1);
   return segment.length > 0
-    ? extensionHash(radix, segment, childNodeHash, hashAlgorithm)
+    ? extensionHash(radix, segment, childNodeHash)
     : childNodeHash;
 };

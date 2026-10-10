@@ -14,7 +14,6 @@
 import { keccak256Bytes } from './fast/fast-keccak';
 import {
   decryptOpaqueHtlcBytes,
-  HtlcCiphertextAuthenticationError,
   type OpaqueHtlcCiphertext,
 } from '../htlc/multi-recipient';
 
@@ -55,7 +54,7 @@ const loadNative = (): NativeSecp256k1 | null => {
   }
 };
 
-export const recoverBatchSync = (native: NativeSecp256k1, records: Uint8Array): Uint8Array => {
+const recoverBatchSync = (native: NativeSecp256k1, records: Uint8Array): Uint8Array => {
   const count = Math.floor(records.length / ECDSA_RECOVER_RECORD_BYTES);
   const out = new Uint8Array(count * ECDSA_RECOVER_RESULT_BYTES);
   for (let index = 0; index < count; index += 1) {
@@ -94,14 +93,14 @@ export type OnionJobItem = Readonly<{
   privateKey: string;
   contextHash: string;
 }>;
-/** Plaintext, or the failure class the synchronous path would report. */
-export type OnionJobResult = Uint8Array | 'auth' | 'invalid';
+/** Plaintext, or null when the synchronous path would reject the layer. */
+type OnionJobResult = Uint8Array | null;
 
 const onionBatchSync = (items: readonly OnionJobItem[]): OnionJobResult[] => items.map(item => {
   try {
     return decryptOpaqueHtlcBytes(item.ciphertext, item.publicKey, item.privateKey, item.contextHash);
-  } catch (error) {
-    return error instanceof HtlcCiphertextAuthenticationError ? 'auth' : 'invalid';
+  } catch {
+    return null;
   }
 });
 

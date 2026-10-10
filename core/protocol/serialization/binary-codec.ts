@@ -383,14 +383,6 @@ export const createSequentialTransportValueCodec = (): Readonly<{
 export const canonicalizeBinaryPayload = <T>(value: T, options: { omitSymbolKeys?: boolean } = {}): T =>
   canonicalize(value, '$', new Set(), true, options.omitSymbolKeys === true, false) as T;
 
-export const encodeBinaryPayloadWithCanonical = (
-  value: unknown,
-  options: { omitSymbolKeys?: boolean } = {},
-): { bytes: Uint8Array; canonical: unknown } => {
-  const canonical = canonicalize(value, '$', new Set(), true, options.omitSymbolKeys === true, false);
-  return { bytes: packCanonical(canonical), canonical };
-};
-
 /**
  * Strict canonical msgpack bytes for consensus hashing: `undefined` is
  * rejected rather than preserved, so a hash never silently covers a missing
@@ -419,7 +411,9 @@ export const canonicalConsensusValuesEqual = (left: unknown, right: unknown): bo
 export const encodeBinaryPayload = (
   value: unknown,
   options: { omitSymbolKeys?: boolean } = {},
-): Uint8Array => encodeBinaryPayloadWithCanonical(value, options).bytes;
+): Uint8Array => packCanonical(
+  canonicalize(value, '$', new Set(), true, options.omitSymbolKeys === true, false),
+);
 
 export const decodeBinaryPayload = (
   bytes: Uint8Array,

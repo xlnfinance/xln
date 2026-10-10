@@ -7,14 +7,12 @@ import {
   buildRadixValueTree,
   type PersistentRadixValueMapOptions,
   type RadixFoldMutation,
-  type RadixHashStats,
   type RadixValueBranch,
   type RadixValueLeaf,
   type RadixValueNode,
 } from './persistent-radix-value-build';
 import {
   deleteRadixNode,
-  emptyRadixHashStats,
   ensureRadixRootBranch,
   foldRadixMutations,
   makeRadixBranch,
@@ -30,7 +28,6 @@ import {
 export type {
   PersistentRadixValueMapOptions,
   RadixFoldMutation,
-  RadixHashStats,
 } from './persistent-radix-value-build';
 
 type ValueLeaf<K, V> = RadixValueLeaf<K, V>;
@@ -368,7 +365,6 @@ export class PersistentRadixValueMap<K, V> implements ReadonlyMap<K, V> {
   #hash: string | undefined;
   readonly #leafCount: number;
   readonly #options: PersistentRadixValueMapOptions<K, V>;
-  readonly #stats = emptyRadixHashStats();
 
   private constructor(
     root: ValueBranch<K, V> | null,
@@ -406,9 +402,8 @@ export class PersistentRadixValueMap<K, V> implements ReadonlyMap<K, V> {
     const built = leaves.length === 0
       ? null
       : buildRadixValueTree(
-          options.radix,
           leaves,
-          (_radix, path, nodes) => makeRadixBranch(options, path, nodes),
+          (path, nodes) => makeRadixBranch(options, path, nodes),
         );
     return new PersistentRadixValueMap(
       ensureRadixRootBranch(options, built),
@@ -468,7 +463,6 @@ export class PersistentRadixValueMap<K, V> implements ReadonlyMap<K, V> {
     const leaf = getLeaf(this.#root, radixPathSlots(keyBytes, this.#options.radix), keyBytes);
     if (!leaf) return undefined;
     if (leaf.valueHash === undefined) {
-      this.#stats.valueHashes += 1;
       leaf.valueHash = this.#options.valueHash(leaf.value);
     }
     return leaf.valueHash;
@@ -507,10 +501,6 @@ export class PersistentRadixValueMap<K, V> implements ReadonlyMap<K, V> {
     if (folded.root === this.#root && folded.leafCount === this.#leafCount) return this;
     radixLog.debug('fold', { leaves: folded.leafCount, reset });
     return new PersistentRadixValueMap(folded.root, folded.leafCount, this.#options);
-  }
-
-  hashStats(): RadixHashStats {
-    return { ...this.#stats };
   }
 
   updated(key: K, value: V): PersistentRadixValueMap<K, V> {
@@ -565,7 +555,7 @@ export class PersistentRadixValueMap<K, V> implements ReadonlyMap<K, V> {
       this.#hash = EMPTY_RADIX_MERKLE_ROOT;
       return this.#hash;
     }
-    this.#hash = sealRadixNode(this.#options, this.#root, this.#stats);
+    this.#hash = sealRadixNode(this.#options, this.#root);
     return this.#hash;
   }
 
@@ -582,7 +572,7 @@ export class PersistentRadixValueMap<K, V> implements ReadonlyMap<K, V> {
     return {
       kind: node.kind,
       path: [...node.path],
-      hash: sealRadixNode(this.#options, node, this.#stats),
+      hash: sealRadixNode(this.#options, node),
     };
   }
 

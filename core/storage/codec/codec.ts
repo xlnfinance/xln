@@ -2,7 +2,6 @@ import {
   decodeBinaryPayload,
   decodeValidatedBinaryPayload,
   encodeBinaryPayload,
-  encodeBinaryPayloadWithCanonical,
   packPreorderedBinaryPayload,
   XLN_BINARY_MSGPACK_MAGIC,
 } from '../../protocol/serialization/binary-codec';
@@ -34,11 +33,10 @@ export const encodeBufferAsIs = (value: unknown): Buffer => {
 export const encodeBufferPrepared = (
   value: unknown,
   options: { omitSymbolKeys?: boolean } = {},
-): { buffer: Buffer; canonical: unknown } => {
-  const encoded = encodeBinaryPayloadWithCanonical(value, options);
-  const buffer = Buffer.from(encoded.bytes);
+): Buffer => {
+  const buffer = Buffer.from(encodeBinaryPayload(value, options));
   countOpWithSite('storage.encodePrepared', buffer.byteLength, 1);
-  return { buffer, canonical: encoded.canonical };
+  return buffer;
 };
 
 const requireStorageMsgpack = (buffer: Buffer): void => {

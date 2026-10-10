@@ -13,7 +13,6 @@ import {
   buildRadixValueTree,
   type PersistentRadixValueMapOptions,
   type RadixFoldMutation,
-  type RadixHashStats,
   type RadixValueBranch,
   type RadixValueLeaf,
   type RadixValueNode,
@@ -36,12 +35,6 @@ type FoldResult<K, V> = Readonly<{
   node: ValueNode<K, V> | null;
   delta: number;
 }>;
-
-export const emptyRadixHashStats = (): { -readonly [K in keyof RadixHashStats]: number } => ({
-  valueHashes: 0,
-  leafHashes: 0,
-  branchHashes: 0,
-});
 
 export const radixPathSlots = (bytes: Uint8Array, radix: PersistentRadixValueMapOptions<unknown, unknown>['radix']): readonly number[] =>
   radixMerklePathSlots(bytes, radix);
@@ -208,7 +201,6 @@ export const ensureRadixRootBranch = <K, V>(
 export const sealRadixNode = <K, V>(
   options: PersistentRadixValueMapOptions<K, V>,
   node: ValueNode<K, V>,
-  stats: { -readonly [K in keyof RadixHashStats]: number },
 ): string => {
   if (options.commitment === false) {
     throw new Error('PERSISTENT_RADIX_COMMITMENT_DISABLED');
@@ -216,18 +208,16 @@ export const sealRadixNode = <K, V>(
   if (node.hash !== undefined) return node.hash;
   if (node.kind === 'leaf') {
     if (node.valueHash === undefined) {
-      stats.valueHashes += 1;
       node.valueHash = options.valueHash(node.value);
     }
     const digest = node.valueHash;
-    stats.leafHashes += 1;
     node.hash = computeRadixMerkleLeafHash(node.keyBytes, hexToBytes(digest));
     return node.hash;
   }
   for (let slot = 0; slot < node.children.length; slot += 1) {
     const child = node.children[slot];
     if (!child) continue;
-    const childHash = sealRadixNode(options, child, stats);
+    const childHash = sealRadixNode(options, child);
     if (node.edgeHashes[slot] === undefined) {
       node.edgeHashes[slot] = computeRadixMerkleEdgeHash(
         options.radix,
@@ -238,7 +228,6 @@ export const sealRadixNode = <K, V>(
       );
     }
   }
-  stats.branchHashes += 1;
   node.hash = computeRadixMerkleBranchHashFromSlots(options.radix, node.edgeHashes);
   return node.hash;
 };
@@ -307,9 +296,8 @@ const foldEmpty = <K, V>(
   if (leaves.length === 1) return { node: leaves[0]!, delta: 1 };
   return {
     node: buildRadixValueTree(
-      options.radix,
       leaves,
-      (_radix, path, nodes) => makeRadixBranch(options, path, nodes),
+      (path, nodes) => makeRadixBranch(options, path, nodes),
     ),
     delta: leaves.length,
   };

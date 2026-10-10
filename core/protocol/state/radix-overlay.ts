@@ -47,9 +47,6 @@ export interface RadixOverlayOwner<K, V> {
 
 export type PreparedRadixOverlay<K, V> = Readonly<{
   values: PersistentRadixValueMap<K, V>;
-  readonly hash: string;
-  readonly root: string;
-  readonly baseRoot: string;
   readonly nodeChanges: PersistentRadixNodeChanges<K, V>;
 }>;
 
@@ -185,9 +182,6 @@ class RadixOverlayTransaction<K, V> implements RadixOverlayOwner<K, V> {
     this.#lifecycle = 'prepared';
     return Object.freeze({
       values,
-      get hash() { return values.rootHash(); },
-      get root() { return values.rootHash(); },
-      get baseRoot() { return base.rootHash(); },
       get nodeChanges() { return values.nodeChangesSince(base); },
     });
   }

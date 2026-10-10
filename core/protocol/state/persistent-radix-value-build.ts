@@ -12,12 +12,6 @@ export type PersistentRadixValueMapOptions<K, V> = Readonly<{
   commitment?: boolean;
 }>;
 
-export type RadixHashStats = Readonly<{
-  valueHashes: number;
-  leafHashes: number;
-  branchHashes: number;
-}>;
-
 export type RadixFoldMutation<K, V> =
   | Readonly<{ kind: 'put'; key: K; value: V }>
   | Readonly<{ kind: 'delete'; key: K }>;
@@ -47,7 +41,6 @@ export type RadixValueBranch<K, V> = {
 export type RadixValueNode<K, V> = RadixValueLeaf<K, V> | RadixValueBranch<K, V>;
 
 type BranchFactory<K, V> = (
-  radix: RadixMerkleRadix,
   path: readonly number[],
   nodes: readonly RadixValueNode<K, V>[],
 ) => RadixValueBranch<K, V>;
@@ -82,7 +75,6 @@ const bucketLeaves = <K, V>(
 
 /** One bottom-up tree from raw prefix-free key bytes. No key sort/hash, no path-copy. */
 export const buildRadixValueTree = <K, V>(
-  radix: RadixMerkleRadix,
   leaves: readonly RadixValueLeaf<K, V>[],
   makeBranch: BranchFactory<K, V>,
 ): RadixValueNode<K, V> => {
@@ -92,7 +84,7 @@ export const buildRadixValueTree = <K, V>(
   const depth = sharedPrefix(leaves);
   const children: RadixValueNode<K, V>[] = [];
   for (const bucket of bucketLeaves(leaves, depth).values()) {
-    children.push(buildRadixValueTree(radix, bucket, makeBranch));
+    children.push(buildRadixValueTree(bucket, makeBranch));
   }
-  return makeBranch(radix, first.path.slice(0, depth), children);
+  return makeBranch(first.path.slice(0, depth), children);
 };

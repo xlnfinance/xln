@@ -1382,7 +1382,7 @@ const buildEntityFrameResult = (
   outputs: context.allOutputs,
   jOutputs: context.allJOutputs,
   candidateEffects: context.candidateEffects,
-  storageChanges: mergeStorageOverlayRecords(undefined, context.storageChanges),
+  storageChanges: mergeStorageOverlayRecords(context.storageChanges),
   proposableAccounts: copyProposableAccounts(context.proposableAccounts.keys()),
   accountsToProposeFramesCount,
   events: readEntityFrameEvents(currentEntityState),

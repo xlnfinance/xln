@@ -21,10 +21,9 @@ const MAX_BOARD_POWER = 0xffffn;
 const MAX_SAFE_INDEX = BigInt(Number.MAX_SAFE_INTEGER);
 const MAX_BOARD_DELAY = 0xffff_ffffn;
 
-export type HankoBoardAuthorityValidator = (
+type HankoBoardAuthorityValidator = (
   entityId: HankoHex,
   reconstructedBoardHash: HankoHex,
-  claimIndex: number,
 ) => boolean;
 
 interface VerifiedHankoClaim extends HankoSemanticClaim {
@@ -32,7 +31,7 @@ interface VerifiedHankoClaim extends HankoSemanticClaim {
   readonly votingPower: bigint;
 }
 
-export interface VerifiedHanko {
+interface VerifiedHanko {
   readonly targetEntityId: HankoHex;
   readonly envelope: HankoEnvelope;
   readonly signatures: readonly HankoRecoveredSignature[];
@@ -176,7 +175,7 @@ const assertAuthority = (
   validate?: HankoBoardAuthorityValidator,
 ): void => {
   if (claim.entityId === claim.boardHash) return;
-  if (!validate?.(claim.entityId, claim.boardHash, claimIndex)) {
+  if (!validate?.(claim.entityId, claim.boardHash)) {
     invalidHanko(`HANKO_BOARD_AUTHORITY_INVALID:${claimIndex}:${claim.entityId}:${claim.boardHash}`);
   }
 };

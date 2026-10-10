@@ -8,10 +8,8 @@ import {
   UINT256_MAX,
   INT256_MIN,
   INT256_MAX,
-  UINT512_MAX,
   INT512_MIN,
   INT512_MAX,
-  UINT768_MAX,
   INT768_MIN,
   INT768_MAX,
 } from '../boundary/integer-ranges';
@@ -19,8 +17,6 @@ import {
 export type SignedAmount = Readonly<{ negative: boolean; magnitude: bigint }>;
 export type Int512 = Readonly<{ high: bigint; low: bigint }>;
 export type Int768 = Readonly<{ high: bigint; middle: bigint; low: bigint }>;
-export type Uint512 = Readonly<{ high: bigint; low: bigint }>;
-export type Uint768 = Readonly<{ high: bigint; middle: bigint; low: bigint }>;
 
 export const SIGNED_AMOUNT_ABI_COMPONENTS = [
   { name: 'negative', type: 'bool' },
@@ -28,20 +24,6 @@ export const SIGNED_AMOUNT_ABI_COMPONENTS = [
 ] as const;
 export const INT512_ABI_COMPONENTS = [
   { name: 'high', type: 'int256' },
-  { name: 'low', type: 'uint256' },
-] as const;
-export const INT768_ABI_COMPONENTS = [
-  { name: 'high', type: 'int256' },
-  { name: 'middle', type: 'uint256' },
-  { name: 'low', type: 'uint256' },
-] as const;
-export const UINT512_ABI_COMPONENTS = [
-  { name: 'high', type: 'uint256' },
-  { name: 'low', type: 'uint256' },
-] as const;
-export const UINT768_ABI_COMPONENTS = [
-  { name: 'high', type: 'uint256' },
-  { name: 'middle', type: 'uint256' },
   { name: 'low', type: 'uint256' },
 ] as const;
 
@@ -118,22 +100,12 @@ export const decodeInt768 = (value: unknown): bigint => {
   );
 };
 
-export const encodeUint512 = (value: bigint): Uint512 => {
-  const integer = requireRange(value, 0n, UINT512_MAX, 'Uint512');
-  return { high: integer >> WORD_BITS, low: integer & UINT256_MAX };
-};
-
 export const decodeUint512 = (value: unknown): bigint => {
   const [high, low] = tupleValues(value, ['high', 'low'], 'Uint512');
   return (
     (requireRange(high, 0n, UINT256_MAX, 'Uint512.high') << WORD_BITS) +
     requireRange(low, 0n, UINT256_MAX, 'Uint512.low')
   );
-};
-
-export const encodeUint768 = (value: bigint): Uint768 => {
-  const integer = requireRange(value, 0n, UINT768_MAX, 'Uint768');
-  return { high: integer >> 512n, middle: (integer >> WORD_BITS) & UINT256_MAX, low: integer & UINT256_MAX };
 };
 
 export const decodeUint768 = (value: unknown): bigint => {

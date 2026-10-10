@@ -10,19 +10,21 @@ import {
   decodeInt512,
   encodeInt768,
   decodeInt768,
-  encodeUint512,
   decodeUint512,
-  encodeUint768,
   decodeUint768,
   SIGNED_AMOUNT_ABI_COMPONENTS,
   INT512_ABI_COMPONENTS,
-  INT768_ABI_COMPONENTS,
-  UINT512_ABI_COMPONENTS,
-  UINT768_ABI_COMPONENTS,
 } from '../../protocol/crypto/abi-money';
 
 const coder = ethers.AbiCoder.defaultAbiCoder();
 const wordMax = (1n << 256n) - 1n;
+const limb = (name: string, type: string) => ({ name, type });
+const uint512Limbs = (value: bigint) => ({ high: value >> 256n, low: value & wordMax });
+const uint768Limbs = (value: bigint) => ({
+  high: value >> 512n,
+  middle: (value >> 256n) & wordMax,
+  low: value & wordMax,
+});
 
 describe('canonical wide money ABI', () => {
   test('production Account proof before Hanko matches the contract Int512 ABI for negative offdelta', () => {
@@ -76,26 +78,26 @@ describe('canonical wide money ABI', () => {
     expect(() => encodeInt512(-(1n << 511n) - 1n)).toThrow('ABI_MONEY_WIDTH');
   });
 
-  test('Int768 transformer and unsigned debt/aggregate use exact Solidity limbs', () => {
+  test('Int768 transformer and unsigned debt/aggregate decode exact Solidity limbs', () => {
     expect(encodeInt768(-1n)).toEqual({ high: -1n, middle: wordMax, low: wordMax });
     expect(decodeInt768({ high: -1n, middle: 0n, low: 0n })).toBe(-(1n << 512n));
     const vectors = [
       {
         encode: encodeInt768,
         decode: decodeInt768,
-        components: INT768_ABI_COMPONENTS,
+        components: [limb('high', 'int256'), limb('middle', 'uint256'), limb('low', 'uint256')],
         values: [-(1n << 767n), -1n, 0n, 1n << 512n, (1n << 767n) - 1n],
       },
       {
-        encode: encodeUint512,
+        encode: uint512Limbs,
         decode: decodeUint512,
-        components: UINT512_ABI_COMPONENTS,
+        components: [limb('high', 'uint256'), limb('low', 'uint256')],
         values: [0n, wordMax, 1n << 256n, (1n << 512n) - 1n],
       },
       {
-        encode: encodeUint768,
+        encode: uint768Limbs,
         decode: decodeUint768,
-        components: UINT768_ABI_COMPONENTS,
+        components: [limb('high', 'uint256'), limb('middle', 'uint256'), limb('low', 'uint256')],
         values: [0n, wordMax, 1n << 512n, (1n << 768n) - 1n],
       },
     ];
@@ -108,9 +110,6 @@ describe('canonical wide money ABI', () => {
       }
     }
     expect(() => encodeInt768(1n << 767n)).toThrow('ABI_MONEY_WIDTH');
-    expect(() => encodeUint512(1n << 512n)).toThrow('ABI_MONEY_WIDTH');
-    expect(() => encodeUint768(1n << 768n)).toThrow('ABI_MONEY_WIDTH');
-    expect(() => encodeUint512(-1n)).toThrow('ABI_MONEY_WIDTH');
   });
 
   test('untrusted tuples reject missing, extra, wrong-width and non-integer limbs', () => {

@@ -806,7 +806,7 @@ const buildStorageCheckpointRequest = (
   );
   const finiteEpochByteBudget = config.epochMaxBytes !== Number.MAX_SAFE_INTEGER;
   const appliedRuntimeInputBytes = finiteEpochByteBudget
-    ? encodeBufferPrepared(appliedRuntimeInput, { omitSymbolKeys: true }).buffer.byteLength
+    ? encodeBufferPrepared(appliedRuntimeInput, { omitSymbolKeys: true }).byteLength
     : 0;
   const snapshotRequested =
     height === 1 || height - head.latestSnapshotHeight >= config.snapshotPeriodFrames;

@@ -18,7 +18,7 @@ type TaggedTypedArray = { __xlnType: 'TypedArray'; kind: TypedArrayKind; value: 
 
 type TaggedJsonRecord = { [key: string]: TaggedJsonValue };
 
-export type TaggedJsonValue =
+type TaggedJsonValue =
   | JsonPrimitive
   | TaggedBigInt
   | TaggedMap
@@ -272,7 +272,7 @@ export function safeParse(jsonString: string): unknown {
 /**
  * Universal Buffer comparison (works in both Node.js and browser).
  */
-export function bufferCompare(buf1: Buffer, buf2: Buffer): number {
+function bufferCompare(buf1: Buffer, buf2: Buffer): number {
   if (typeof Buffer !== 'undefined' && Buffer.compare) {
     return Buffer.compare(buf1, buf2);
   }
