@@ -105,6 +105,13 @@ test('shard and canonical jurisdictions files are replaced atomically, never rew
   }
 });
 
+test('every jurisdictions.json writer goes through the atomic replace', async () => {
+  // The two deploy-persist writers still rewrote the file in place.
+  const source = await readFile(join(process.cwd(), 'core/orchestrator/j-select/jurisdictions.ts'), 'utf8');
+  expect(source).not.toContain('writeFileSync(');
+  expect(source.match(/writeJurisdictionsFileAtomic\(/g)?.length).toBeGreaterThanOrEqual(5);
+});
+
 const reservePort = async (): Promise<number> => await new Promise((resolve, reject) => {
   const server = createServer();
   server.once('error', reject);

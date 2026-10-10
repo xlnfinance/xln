@@ -1,5 +1,5 @@
 import { nativeRestProxyHost } from '../../api/server/rpc/tron-proxy';
-import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, writeFileSync, writeSync } from 'node:fs';
+import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, writeSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { createJAdapter } from '../../jurisdiction/adapter';
 import type { JAdapter, JTokenInfo } from '../../jurisdiction/adapter/types';
@@ -272,6 +272,10 @@ const resolvePublicRpcPath = (
 // jurisdictions.json carries deployed contract addresses and the token
 // registry: a crash mid-write must leave the previous complete file, never a
 // truncated one.
+// One serializer for the file. Key insertion order is kept (no canonical
+// sort): readers may take the first jurisdiction entry.
+const formatJurisdictionsFile = (payload: unknown): string => `${JSON.stringify(payload, null, 2)}\n`;
+
 const writeJurisdictionsFileAtomic = (path: string, body: string): void => {
   const tmpPath = `${path}.tmp-${process.pid}`;
   const fd = openSync(tmpPath, 'w');
@@ -299,7 +303,7 @@ export const readShardJurisdictions = (config: OrchestratorJurisdictionsConfig):
     const shardVersion = String(shardPayload.version || '').trim();
     if (shardVersion !== canonicalVersion) {
       shardPayload.version = canonicalVersion;
-      const next = `${JSON.stringify(shardPayload, null, 2)}\n`;
+      const next = formatJurisdictionsFile(shardPayload);
       writeJurisdictionsFileAtomic(config.shardJurisdictionsPath, next);
       return next;
     }
@@ -467,7 +471,7 @@ const persistPrimaryRpcStack = (
   const networkVersion = computeJurisdictionsNetworkVersion(payload, version);
   payload['deployVersion'] = networkVersion;
   payload['networkVersion'] = networkVersion;
-  writeFileSync(config.shardJurisdictionsPath, `${JSON.stringify(payload, null, 2)}\n`, 'utf8');
+  writeJurisdictionsFileAtomic(config.shardJurisdictionsPath, formatJurisdictionsFile(payload));
 };
 
 export const provisionPrimaryRpcJurisdictionStack = async (
@@ -632,7 +636,7 @@ export const deployRpc2JurisdictionStack = async (config: OrchestratorJurisdicti
   const networkVersion = computeJurisdictionsNetworkVersion(nextPayload, String(nextPayload.version || '1'));
   nextPayload['deployVersion'] = networkVersion;
   nextPayload['networkVersion'] = networkVersion;
-  writeFileSync(config.shardJurisdictionsPath, JSON.stringify(nextPayload, null, 2) + '\n', 'utf8');
+  writeJurisdictionsFileAtomic(config.shardJurisdictionsPath, formatJurisdictionsFile(nextPayload));
   console.log(
     `RPC2_JURISDICTION_READY chainId=${chainId} rpc=${config.rpc2Url} ` +
     `deployed=${missingCode.length > 0 ? 'yes' : 'no'} ms=${Date.now() - startedAt}`,
