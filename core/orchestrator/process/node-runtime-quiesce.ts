@@ -45,6 +45,23 @@ export type NodeRuntimeCheckpointResult = NodeRuntimeQuiesceResult & {
 const errorText = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);
 
+type ChildQuiesceLog = (event: 'quiesce.refused' | 'quiesce.post_failed', details: Record<string, unknown>) => void;
+
+/**
+ * Orchestrator side: ask a child Runtime to quiesce before it is stopped. The
+ * stop proceeds either way, but a refusal (for example a 503 "runtime quiesce
+ * failed") or a transport failure is logged instead of being dropped.
+ */
+export const requestChildQuiesce = async (url: string, timeoutMs: number, log: ChildQuiesceLog): Promise<void> => {
+  try {
+    const response = await fetch(url, { method: 'POST', signal: AbortSignal.timeout(timeoutMs) });
+    if (response.ok) return;
+    log('quiesce.refused', { url, status: response.status, body: (await response.text()).slice(0, 500) });
+  } catch (error) {
+    log('quiesce.post_failed', { url, error: errorText(error) });
+  }
+};
+
 export const quiesceNodeRuntime = async (
   env: RuntimeReplica,
   options: NodeRuntimeQuiesceOptions,

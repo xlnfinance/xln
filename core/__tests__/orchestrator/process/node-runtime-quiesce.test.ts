@@ -19,6 +19,7 @@ import { generateLazyEntityId } from '../../../entity/factory';
 import {
   checkpointNodeRuntime,
   quiesceNodeRuntime,
+  requestChildQuiesce,
 } from '../../../orchestrator/process/node-runtime-quiesce';
 import { resolveDbPath } from '../../../storage/runtime-dbs';
 import type { JReplica } from '../../../types/jurisdiction-runtime';
@@ -33,6 +34,28 @@ const removeRuntimeStorage = (basePath: string): void => {
 };
 
 describe('node runtime quiesce', () => {
+  test('a child that refuses or cannot be reached for quiesce is logged, not dropped', async () => {
+    const originalFetch = globalThis.fetch;
+    const events: Array<[string, Record<string, unknown>]> = [];
+    const log = (event: string, details: Record<string, unknown>): void => {
+      events.push([event, details]);
+    };
+    try {
+      globalThis.fetch = (async () => new Response('runtime quiesce failed', { status: 503 })) as unknown as typeof fetch;
+      await requestChildQuiesce('http://127.0.0.1:1/api/control/core/quiesce', 1_000, log);
+      globalThis.fetch = (async () => { throw new Error('ECONNREFUSED'); }) as unknown as typeof fetch;
+      await requestChildQuiesce('http://127.0.0.1:2/api/control/core/quiesce', 1_000, log);
+      globalThis.fetch = (async () => new Response('{}', { status: 200 })) as unknown as typeof fetch;
+      await requestChildQuiesce('http://127.0.0.1:3/api/control/core/quiesce', 1_000, log);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+    expect(events).toEqual([
+      ['quiesce.refused', { url: 'http://127.0.0.1:1/api/control/core/quiesce', status: 503, body: 'runtime quiesce failed' }],
+      ['quiesce.post_failed', { url: 'http://127.0.0.1:2/api/control/core/quiesce', error: 'ECONNREFUSED' }],
+    ]);
+  });
+
   test('drains runtime work, loop, and P2P before reporting success', async () => {
     const env = createEmptyEnv(null);
     const result = await quiesceNodeRuntime(env, {

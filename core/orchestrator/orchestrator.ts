@@ -16,6 +16,7 @@ import { DEFAULT_SPREAD_DISTRIBUTION } from '../orderbook';
 import { createHubSpawner } from './process/spawn/hub';
 import { createMarketMakerSpawner } from './process/spawn/market-maker';
 import { canonicalHubEngine } from './process/hub-engine-plan';
+import { requestChildQuiesce } from './process/node-runtime-quiesce';
 import { parseProfile } from '../entity/profile';
 import { verifyProfileSignature } from '../entity/profile/profile-signing';
 import { startCustodySupport, stopManagedChild } from './bootstrap/custody-bootstrap';
@@ -558,29 +559,6 @@ const fetchJson = async <T>(
     return null;
   } finally {
     clearTimeout(timer);
-  }
-};
-
-const postJson = async (url: string, timeoutMs = 1_000): Promise<void> => {
-  const controller = new AbortController();
-  let timer: ReturnType<typeof setTimeout> | null = null;
-  try {
-    await Promise.race([
-      fetch(url, { method: 'POST', signal: controller.signal }).catch(() => null),
-      new Promise<null>((resolve) => {
-        timer = setTimeout(() => {
-          controller.abort();
-          resolve(null);
-        }, timeoutMs);
-      }),
-    ]);
-  } catch (error) {
-    meshLog.warn('quiesce.post_failed', {
-      url,
-      error: error instanceof Error ? error.message : String(error),
-    });
-  } finally {
-    if (timer) clearTimeout(timer);
   }
 };
 
@@ -1800,7 +1778,8 @@ const stopAllChildren = async (options: StopAllChildrenOptions = {}): Promise<vo
   ];
   // Initial reset often has no owned children yet. Do not probe random old listeners on the same ports.
   for (let round = 0; round < quiesceRounds && quiesceUrls.length > 0; round += 1) {
-    await Promise.all(quiesceUrls.map((url) => postJson(url, quiesceTimeoutMs)));
+    await Promise.all(quiesceUrls.map((url) =>
+      requestChildQuiesce(url, quiesceTimeoutMs, (event, details) => meshLog.warn(event, details))));
     await scheduler.wait(quiescePauseMs);
   }
 
