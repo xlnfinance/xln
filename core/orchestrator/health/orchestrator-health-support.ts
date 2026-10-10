@@ -50,9 +50,12 @@ export const createHealthRecomputer = (
     marketMaker.ok === true &&
     health.custody.ok === true &&
     health.bootstrapReserves.ok === true;
-  const sameChainOk = marketMaker.hubs.length > 0 &&
-    marketMaker.hubs.every(hub => hub.depthReady === true);
-  const crossOk = marketMaker.cross.applicable !== true || marketMaker.cross.ok === true;
+  // A disabled market maker publishes no depth; its per-hub rows are not a
+  // degradation (the bootstrap timeline gates the same way).
+  const sameChainOk = !marketMaker.enabled || (marketMaker.hubs.length > 0 &&
+    marketMaker.hubs.every(hub => hub.depthReady === true));
+  const crossOk = !marketMaker.enabled ||
+    marketMaker.cross.applicable !== true || marketMaker.cross.ok === true;
   const degraded = [
     health.storage.ok ? null : 'storage',
     health.hubs.every(hub => hub.online) ? null : 'hubs',
