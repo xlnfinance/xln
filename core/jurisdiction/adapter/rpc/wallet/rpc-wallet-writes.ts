@@ -19,9 +19,6 @@ type ApprovalDeltaContext = {
 type RpcWalletWriteDeps = {
   provider: Provider;
   signerForPrivateKey(privateKey: string): Promise<Signer>;
-  buildFeeOverrides(): Promise<FeeOverrides>;
-  waitForReceipt(tx: unknown, label: string): Promise<RpcReceipt>;
-  asRpcTxResponse(tx: unknown): { hash: string };
   runSerializedBatchFor<T>(signer: Signer, work: () => Promise<T>): Promise<T>;
   sendSignerTxWithExplicitNonce(
     signer: Signer,
@@ -66,9 +63,6 @@ export const createRpcWalletWriteMethods = (deps: RpcWalletWriteDeps): WalletMet
   const {
     provider,
     signerForPrivateKey,
-    buildFeeOverrides,
-    waitForReceipt,
-    asRpcTxResponse,
     runSerializedBatchFor,
     sendSignerTxWithExplicitNonce,
   } = deps;
@@ -164,6 +158,9 @@ export const createRpcWalletWriteMethods = (deps: RpcWalletWriteDeps): WalletMet
       }
     },
 
+    // Transfers share the per-signer sequencer and explicit nonce with
+    // approvals and prepared batches; a bare send let the provider pick a
+    // nonce a queued batch was about to use.
     async transferErc20(
       signerPrivateKey: Uint8Array,
       tokenAddress: string,
@@ -179,22 +176,20 @@ export const createRpcWalletWriteMethods = (deps: RpcWalletWriteDeps): WalletMet
       const transferFn = erc20.getFunction('transfer') as (
         recipient: string,
         transferAmount: bigint,
-        overrides?: FeeOverrides,
+        overrides?: FeeOverrides & { nonce: number },
       ) => Promise<unknown>;
-      const tx = await transferFn(to, amount, await buildFeeOverrides());
-      await waitForReceipt(tx, 'transferErc20');
-      return asRpcTxResponse(tx).hash;
+      const receipt = await runSerializedBatchFor(signerWallet, () =>
+        sendSignerTxWithExplicitNonce(signerWallet, 'transferErc20', (nonce, feeOverrides) =>
+          transferFn(to, amount, { ...feeOverrides, nonce })));
+      return receipt.hash;
     },
 
     async transferNative(signerPrivateKey: Uint8Array, to: string, amount: bigint): Promise<string> {
       const signerWallet = await signerForPrivateKey(`0x${Buffer.from(signerPrivateKey).toString('hex')}`);
-      const tx = await signerWallet.sendTransaction({
-        to,
-        value: amount,
-        ...(await buildFeeOverrides()),
-      });
-      await waitForReceipt(tx, 'transferNative');
-      return tx.hash;
+      const receipt = await runSerializedBatchFor(signerWallet, () =>
+        sendSignerTxWithExplicitNonce(signerWallet, 'transferNative', (nonce, feeOverrides) =>
+          signerWallet.sendTransaction({ to, value: amount, ...feeOverrides, nonce })));
+      return receipt.hash;
     },
   };
 };

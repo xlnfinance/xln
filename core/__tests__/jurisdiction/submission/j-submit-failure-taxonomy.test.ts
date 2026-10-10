@@ -6,6 +6,7 @@ import {
   submitBoardActivation,
   type RpcEntityProviderSubmitContext,
 } from '../../../jurisdiction/adapter/rpc/write/rpc-submit-entity-provider';
+import { createRpcWalletWriteMethods } from '../../../jurisdiction/adapter/rpc/wallet/rpc-wallet-writes';
 import { isTransientJSubmitFailure } from '../../../runtime/j-submit/j-submit';
 
 const ethersError = (code: string, message: string): Error & { code: string } =>
@@ -94,4 +95,40 @@ test('a broadcast that times out inside the submit lane keeps its typed failure 
     undefined,
   );
   expect(result).toMatchObject({ success: false, txHash });
+});
+
+test('external wallet transfers take the signer lane and its explicit nonce', async () => {
+  // transferErc20/transferNative skipped the per-signer sequencer, so the
+  // provider could hand them a nonce a prepared batch was about to use.
+  const lane: string[] = [];
+  const sent: Array<Record<string, unknown>> = [];
+  const signer = {
+    getAddress: async () => `0x${'12'.repeat(20)}`,
+    sendTransaction: async (tx: Record<string, unknown>) => {
+      sent.push(tx);
+      return { hash: `0x${'cd'.repeat(32)}` };
+    },
+  };
+  const writes = createRpcWalletWriteMethods({
+    provider: {} as never,
+    signerForPrivateKey: async () => signer as never,
+    runSerializedBatchFor: async (_signer, work) => {
+      lane.push('enter');
+      try {
+        return await work();
+      } finally {
+        lane.push('exit');
+      }
+    },
+    sendSignerTxWithExplicitNonce: async (_signer, label, send) => {
+      lane.push(label);
+      await send(41, { maxFeePerGas: 2n });
+      return { hash: `0x${'cd'.repeat(32)}`, blockNumber: 7, blockHash: `0x${'ef'.repeat(32)}`, logs: [] };
+    },
+  });
+
+  expect(await writes.transferNative(new Uint8Array(32).fill(1), `0x${'34'.repeat(20)}`, 5n))
+    .toBe(`0x${'cd'.repeat(32)}`);
+  expect(lane).toEqual(['enter', 'transferNative', 'exit']);
+  expect(sent[0]).toMatchObject({ to: `0x${'34'.repeat(20)}`, value: 5n, nonce: 41, maxFeePerGas: 2n });
 });

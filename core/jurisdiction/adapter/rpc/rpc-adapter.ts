@@ -25,7 +25,6 @@ import {
   createTxFinalizationEvidenceReader,
 } from '../rpc-watcher-inputs';
 import { createRpcWriteMethods } from './write/rpc-write-methods';
-import { asRpcTxResponse } from './rpc-boundary';
 import { prepareDurableTransaction } from './write/prepared/durable-transaction';
 
 export const isRpcWatcherTransientError = (error: unknown): boolean =>
@@ -116,9 +115,6 @@ export async function createRpcAdapter(
   const walletWrites = createRpcWalletWriteMethods({
     provider,
     signerForPrivateKey: chainIo.signerForPrivateKey,
-    buildFeeOverrides: chainIo.buildFeeOverrides,
-    waitForReceipt: chainIo.waitForReceipt,
-    asRpcTxResponse,
     runSerializedBatchFor: sequencer.runFor,
     sendSignerTxWithExplicitNonce: sequencer.send,
   });
