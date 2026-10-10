@@ -145,14 +145,13 @@ const authorizeCrossJurisdictionIntent = (
   return { newState: state, outputs };
 };
 
+/** The sender (the user's Runtime) controls the route: refusals are typed rejects. */
 const prepareRawCrossJurisdictionIntent = (
   env: EntityRuntimeContext,
   state: EntityState,
   route: CrossJurisdictionSwapRoute,
   outputs: EntityInput[],
 ): CrossJSetupResult => {
-  // The sender (the user's Runtime) controls every field below: each refusal
-  // is a typed reject of its runtimeOutput, never a hub halt.
   if (route.status !== 'intent') {
     throw rejectFailure('CROSS_J_RAW_PREPARE_STATUS_INVALID', `CROSS_J_RAW_PREPARE_STATUS_INVALID:${route.orderId}:${route.status}`);
   }
