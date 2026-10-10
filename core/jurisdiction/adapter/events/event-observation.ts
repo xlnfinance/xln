@@ -25,6 +25,8 @@ const log = createStructuredLogger('jadapter.event-observation');
 export type EventBatchCounter = {
   value: number;
   _seenLogs?: { set: Set<string>; order: string[] };
+  /** Keys first seen by an ingress attempt that has not been enqueued yet. */
+  _stagedKeys?: string[];
 };
 
 export type JEventsRuntimeInputBuildResult = {

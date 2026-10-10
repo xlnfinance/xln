@@ -1,5 +1,7 @@
 import { BLOCKCHAIN } from '../../../../config/constants';
 import type { RuntimeReplica } from '../../../../runtime/types';
+import { isRuntimeMempoolCapacityError } from '../../../../runtime/mempool/input-queue';
+import { nextWatcherPollWindow } from '../../watcher/observe/watcher-poll-policy';
 import { isDebugEventEmitter } from '../../rpc-utils';
 import {
   haltProcessForFatalWatcherError,
@@ -72,6 +74,7 @@ const createWatcherSession = (
     lastCanonicalAuditAtMs: 0,
     transientFailures: 0,
     lastTransientLogAtMs: 0,
+    maxBlocksPerPoll: BLOCKCHAIN.J_WATCHER_MAX_BLOCKS_PER_POLL,
     txCounter: { value: 0, _seenLogs: { set: new Set<string>(), order: [] } },
     readWatchedErc20Tokens,
   };
@@ -149,6 +152,13 @@ const handlePollFailure = (
       toBlock: trace.toBlock,
       lastSyncedBlock: session.lastSyncedBlock,
     });
+    return;
+  }
+  if (isRuntimeMempoolCapacityError(error)) {
+    // A catch-up window can carry more runtime txs than the mempool holds.
+    // Retry a smaller window once frames drain; never exit the process.
+    session.maxBlocksPerPoll = nextWatcherPollWindow(session.maxBlocksPerPoll, false);
+    handleTransientFailure(services, session, trace, message, error);
     return;
   }
   if (services.isTransientRpcUnavailable(error)) {

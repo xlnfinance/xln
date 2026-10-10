@@ -63,6 +63,22 @@ const normalizeIngressTimestamp = (env: RuntimeReplica, explicitTimestamp?: numb
   return env.state.timestamp ?? 0;
 };
 
+/** Backpressure, not corruption: the caller may retry once frames drain the mempool. */
+class RuntimeMempoolCapacityError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'RuntimeMempoolCapacityError';
+  }
+}
+
+export const isRuntimeMempoolCapacityError = (error: unknown): boolean => {
+  for (let current = error, depth = 0; current !== undefined && depth < 8; depth += 1) {
+    if (current instanceof RuntimeMempoolCapacityError) return true;
+    current = current instanceof Error ? current.cause : undefined;
+  }
+  return false;
+};
+
 const assertRuntimeMempoolCapacity = (
   mempool: RuntimeInput,
   incoming: {
@@ -85,7 +101,9 @@ const assertRuntimeMempoolCapacity = (
   ] as const;
   const exceeded = limits.find(([, count, limit]) => count > limit);
   if (exceeded) {
-    throw new Error(`RUNTIME_MEMPOOL_CAPACITY_EXCEEDED:${exceeded[0]}:${exceeded[1]}:${exceeded[2]}`);
+    throw new RuntimeMempoolCapacityError(
+      `RUNTIME_MEMPOOL_CAPACITY_EXCEEDED:${exceeded[0]}:${exceeded[1]}:${exceeded[2]}`,
+    );
   }
 };
 

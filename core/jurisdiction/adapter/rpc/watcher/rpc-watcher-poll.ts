@@ -18,7 +18,10 @@ import {
   resolveWatcherPollToBlock,
   rpcLog,
 } from '../../rpc-public';
-import { shouldAuditCanonicalWatcherState } from '../../watcher/observe/watcher-poll-policy';
+import {
+  nextWatcherPollWindow,
+  shouldAuditCanonicalWatcherState,
+} from '../../watcher/observe/watcher-poll-policy';
 import {
   assertAuthorityEvidenceCanonical,
   reconcileWatcherCanonicalTip,
@@ -251,7 +254,10 @@ export const runWatcherPoll = async (request: PollRequest): Promise<void> => {
     rememberScanProgress(session, services, Math.min(committedCursor, safeToBlock));
     return;
   }
-  const toBlock = resolveWatcherPollToBlock(fromBlock, safeToBlock);
+  const toBlock = Math.min(
+    resolveWatcherPollToBlock(fromBlock, safeToBlock),
+    fromBlock + session.maxBlocksPerPoll - 1,
+  );
   request.trace.fromBlock = fromBlock;
   request.trace.toBlock = toBlock;
   const parent = resolveExpectedParent(session.env, watcherReplica, fromBlock - 1);
@@ -277,4 +283,5 @@ export const runWatcherPoll = async (request: PollRequest): Promise<void> => {
   if (!committed) return;
   rememberScanProgress(session, services, toBlock);
   session.transientFailures = 0;
+  session.maxBlocksPerPoll = nextWatcherPollWindow(session.maxBlocksPerPoll, true);
 };

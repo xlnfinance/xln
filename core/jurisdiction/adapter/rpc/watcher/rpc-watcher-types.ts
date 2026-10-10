@@ -79,6 +79,8 @@ export type RpcWatcherSession = {
   lastCanonicalAuditAtMs: number;
   transientFailures: number;
   lastTransientLogAtMs: number;
+  /** Shrinks while the Runtime mempool pushes back, grows back after success. */
+  maxBlocksPerPoll: number;
   txCounter: EventBatchCounter;
   readWatchedErc20Tokens(): Promise<WatchedErc20Token[]>;
 };

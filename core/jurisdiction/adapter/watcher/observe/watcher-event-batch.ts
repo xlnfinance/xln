@@ -34,6 +34,25 @@ const eventIdentity = (
     : `${event.blockHash ?? blockHash}:${event.name}${entity}:${index}`;
 };
 
+/**
+ * Seen keys of one ingress attempt count only once its input is enqueued. A
+ * window that fails, pauses or is cancelled before the enqueue is read again
+ * from the same block, and keeping its keys would drop those events for good.
+ */
+export const stageSeenLogs = (counter: EventBatchCounter): void => {
+  counter._stagedKeys = [];
+};
+
+export const settleSeenLogs = (counter: EventBatchCounter, enqueued: boolean): void => {
+  const staged = counter._stagedKeys;
+  delete counter._stagedKeys;
+  const seen = counter._seenLogs;
+  if (enqueued || !staged?.length || !seen) return;
+  const dropped = new Set(staged);
+  for (const key of dropped) seen.set.delete(key);
+  seen.order = seen.order.filter(key => !dropped.has(key));
+};
+
 const deduplicate = (
   events: JEventIngress[],
   counter: EventBatchCounter,
@@ -48,6 +67,7 @@ const deduplicate = (
     if (!seen.set.has(key)) {
       seen.set.add(key);
       seen.order.push(key);
+      counter._stagedKeys?.push(key);
     }
     result.push(event);
   });

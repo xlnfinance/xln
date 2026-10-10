@@ -31,8 +31,15 @@ import {
   resolveCommittedWatcherCursor,
   setJEventIngressTransform,
   setJHistoryRangeIngressTransform,
+  settleSeenLogs,
+  stageSeenLogs,
   updateWatcherJurisdictionCursor,
 } from '../../../jurisdiction/adapter/watcher';
+import { nextWatcherPollWindow } from '../../../jurisdiction/adapter/watcher/observe/watcher-poll-policy';
+import {
+  enqueueRuntimeInput,
+  isRuntimeMempoolCapacityError,
+} from '../../../runtime/mempool/input-queue';
 import { findReserveUpdatedEvidence } from '../../../jurisdiction/machine/events/event-evidence';
 import { decodeAuthenticatedWatcherEvents } from '../../../jurisdiction/adapter/rpc-watcher-events';
 import { createWatchedErc20TokenReader } from '../../../jurisdiction/adapter/rpc-watcher-inputs';
@@ -45,7 +52,7 @@ import { recordValidatorJHistory } from '../../../jurisdiction/machine/local-his
 import { createEmptyEnv } from '../../../runtime';
 import { applyRuntimeTx } from '../../../runtime/tx/tx-handlers';
 import type { EntityReplica, JurisdictionConfig } from '../../../entity/types';
-import type { RuntimeReplica } from '../../../runtime/types';
+import type { RuntimeReplica, RuntimeTx } from '../../../runtime/types';
 import type { JReplica } from '../../../types/jurisdiction-runtime';
 import { emptyEntityAccountMap } from '../../helpers/entity-account-map';
 
@@ -341,6 +348,26 @@ describe('JAdapter watcher ingress', () => {
     expect(() => resolveWatcherPollToBlock(0, 10_000, 256)).toThrow(/J_WATCHER_FROM_BLOCK_INVALID/);
     expect(() => resolveWatcherPollToBlock(2, 1, 256)).toThrow(/J_WATCHER_SAFE_TO_BLOCK_INVALID/);
     expect(() => resolveWatcherPollToBlock(1, 10_000, 0)).toThrow(/J_WATCHER_BLOCK_RANGE_INVALID/);
+  });
+
+  test('RPC watcher treats mempool backpressure as a smaller window, never a process exit', () => {
+    // A catch-up window can carry more runtime txs than the mempool holds; the
+    // untyped capacity error exited the process and the restart re-read the
+    // same window.
+    const env = createEmptyEnv('jadapter-mempool-backpressure');
+    const runtimeTxs = Array.from({ length: 10_001 }, () => ({ type: 'noop' }) as unknown as RuntimeTx);
+    let capacity: unknown;
+    try {
+      enqueueRuntimeInput(env, { runtimeTxs, entityInputs: [] });
+    } catch (error) {
+      capacity = error;
+    }
+    expect(isRuntimeMempoolCapacityError(capacity)).toBe(true);
+    expect(isRuntimeMempoolCapacityError(new Error('J_WATCHER_POLL', { cause: capacity }))).toBe(true);
+    expect(nextWatcherPollWindow(2048, false)).toBe(1024);
+    expect(nextWatcherPollWindow(1, false)).toBe(1);
+    expect(nextWatcherPollWindow(1024, true)).toBe(2048);
+    expect(nextWatcherPollWindow(2048, true)).toBe(2048);
   });
 
   test('j-event ingress rejects during persistence quiesce before cursor or dedup mutation', () => {
@@ -1162,6 +1189,39 @@ describe('JAdapter watcher ingress', () => {
       tipBlockHash: `0x${'10'.repeat(32)}`,
       replicaKeys: new Set([replicaKey]),
     })).toBe(true);
+  });
+
+  test('a watcher window that never reaches the mempool redelivers its events on retry', () => {
+    // Dedup kept the keys of a window whose enqueue failed, paused or was
+    // cancelled. The retry starts at the same block and is not historical
+    // catch-up, so those events were dropped for good.
+    const env = createEmptyEnv('jadapter-dedup-rollback');
+    env.state.timestamp = 1_000;
+    env.quietRuntimeLogs = true;
+    const entityId = `0x${'44'.repeat(32)}`;
+    env.state.eReplicas.set(`${entityId}:1`, makeReplica(entityId, '1', true));
+    const counter: Parameters<typeof processEventBatch>[4] = { value: 0 };
+    const blockHash = `0x${'66'.repeat(32)}`;
+    const ingest = () => processEventBatch([{
+      name: 'ReserveUpdated',
+      args: { entity: entityId, tokenId: 2, newBalance: 123n },
+      blockNumber: 7,
+      blockHash,
+      transactionHash: `0x${'77'.repeat(32)}`,
+      logIndex: 0,
+    }], env, 7, blockHash, counter, 'test', undefined, true);
+
+    stageSeenLogs(counter);
+    expect(ingest()).not.toBeNull();
+    settleSeenLogs(counter, false);
+
+    stageSeenLogs(counter);
+    expect(ingest()).not.toBeNull();
+    settleSeenLogs(counter, true);
+
+    stageSeenLogs(counter);
+    expect(ingest()).toBeNull();
+    settleSeenLogs(counter, false);
   });
 
   test('processEventBatch durably fans out sparse observations and defers unsigned prefix heads', () => {

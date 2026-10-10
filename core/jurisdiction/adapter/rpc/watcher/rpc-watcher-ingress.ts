@@ -7,6 +7,8 @@ import {
   type findWatcherJurisdictionReplica,
   processEventBatch,
   rememberPendingWatcherJBlock,
+  settleSeenLogs,
+  stageSeenLogs,
 } from '../../watcher';
 import { prepareAuthenticatedWatcherIngress } from '../../rpc-public';
 import { readAuthenticatedReceiptRange } from '../../receipt-root';
@@ -255,6 +257,21 @@ export const applyAuthenticatedWatcherRange = async (
     });
     return false;
   }
+  stageSeenLogs(request.session.txCounter);
+  let enqueued = false;
+  try {
+    enqueued = ingestAuthenticatedRange(request, decoded, authenticatedIngress);
+    return enqueued;
+  } finally {
+    settleSeenLogs(request.session.txCounter, enqueued);
+  }
+};
+
+const ingestAuthenticatedRange = (
+  request: AuthenticatedWatcherRangeRequest,
+  decoded: Awaited<ReturnType<typeof decodeAuthenticatedWatcherEvents>>,
+  authenticatedIngress: ReturnType<typeof prepareAuthenticatedWatcherIngress>,
+): boolean => {
   const observedInputs = decoded.events.length > 0
     ? buildObservedRuntimeInputs(request, decoded.events, decoded.authorityTxsByBlock)
     : [];

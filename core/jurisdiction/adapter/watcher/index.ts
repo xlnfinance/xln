@@ -43,6 +43,8 @@ export {
 
 export {
   processEventBatch,
+  settleSeenLogs,
+  stageSeenLogs,
 } from './observe/watcher-event-batch';
 
 export {
