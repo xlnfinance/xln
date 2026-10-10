@@ -148,11 +148,12 @@ test('candidate recovery preserves a candidate owned by a live process', async (
   const namespace = `storage-writer-live-candidate-${process.pid}-${Date.now()}`;
   const env = { dbNamespace: namespace, runtimeId: namespace, state: { height: 3 } } as RuntimeReplica;
   const lockPath = resolveStorageWriterLockPath(env);
-  const candidatePath = `${lockPath}.candidate-${process.pid}-${Date.now()}-777`;
+  // The parent process is alive and is not this process.
+  const candidatePath = `${lockPath}.candidate-${process.ppid}-${Date.now()}-777`;
   mkdirSync(dirname(lockPath), { recursive: true });
   writeFileSync(candidatePath, `${JSON.stringify({
-    owner: `live-owner-${process.pid}`,
-    pid: process.pid,
+    owner: `live-owner-${process.ppid}`,
+    pid: process.ppid,
     runtimeId: namespace,
     frameHeight: 2,
     acquiredAt: Date.now(),
@@ -323,6 +324,37 @@ test('a new writer reclaims a non-expired lock immediately when the recorded pid
     expect(existsSync(lockPath)).toBe(false);
   } finally {
     rmSync(lockPath, { force: true });
+  }
+});
+
+test('a writer restarted under its crashed predecessor\'s PID reclaims that lock', async () => {
+  // Containers restart a crashed writer under the same PID. The leftover lock
+  // and candidate then looked alive and refused startup until a manual delete.
+  const namespace = `storage-writer-reused-pid-${process.pid}-${Date.now()}`;
+  const env = { dbNamespace: namespace, runtimeId: namespace, state: { height: 9 } } as RuntimeReplica;
+  const lockPath = resolveStorageWriterLockPath(env);
+  const candidatePath = `${lockPath}.candidate-${process.pid}-${Date.now() - 1_000}-1`;
+  mkdirSync(dirname(lockPath), { recursive: true });
+  const previousIncarnation = {
+    owner: `${process.pid}:previous-incarnation`,
+    pid: process.pid,
+    runtimeId: namespace,
+    frameHeight: 8,
+    acquiredAt: Date.now(),
+    expiresAt: Date.now() + STORAGE_WRITER_LOCK_TTL_MS,
+  };
+  writeFileSync(lockPath, `${JSON.stringify(previousIncarnation)}\n`, 'utf8');
+  writeFileSync(candidatePath, `${JSON.stringify(previousIncarnation)}\n`, 'utf8');
+
+  let calls = 0;
+  try {
+    await withStorageWriterLock(env, async () => { calls += 1; });
+    expect(calls).toBe(1);
+    expect(existsSync(lockPath)).toBe(false);
+    expect(existsSync(candidatePath)).toBe(false);
+  } finally {
+    rmSync(lockPath, { force: true });
+    rmSync(candidatePath, { force: true });
   }
 });
 

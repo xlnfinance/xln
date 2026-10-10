@@ -979,7 +979,9 @@ describe('storage frame journal retention', () => {
     const lockPath = resolveStorageWriterLockPath(env);
     writeFileSync(lockPath, `${safeStringify({
       owner: 'test-writer',
-      pid: process.pid,
+      // Another live process: this process's own PID now means a crashed
+      // predecessor unless this process holds the lock.
+      pid: process.ppid,
       runtimeId: env.runtimeId,
       frameHeight: 2,
       acquiredAt: Date.now(),
@@ -1007,7 +1009,9 @@ describe('storage frame journal retention', () => {
     const lockPath = resolveStorageWriterLockPath(env);
     writeFileSync(lockPath, `${safeStringify({
       owner: 'test-live-writer',
-      pid: process.pid,
+      // Another live process: this process's own PID now means a crashed
+      // predecessor unless this process holds the lock.
+      pid: process.ppid,
       runtimeId: env.runtimeId,
       frameHeight: 2,
       acquiredAt: Date.now() - STORAGE_WRITER_LOCK_TTL_MS - 1_000,

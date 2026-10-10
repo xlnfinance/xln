@@ -229,6 +229,19 @@ const storageWriterPidIsAlive = (pid: number | undefined): boolean => {
   }
 };
 
+/**
+ * Owner and candidate tokens this process holds right now. A PID equal to ours
+ * is alive only for one of these: containers restart a crashed writer under
+ * the same PID, and its leftover lock then refused startup until someone
+ * deleted the file by hand.
+ */
+const liveStorageWriterTokens = new Set<string>();
+
+const storageWriterTokenIsAlive = (pid: number | undefined, token: string): boolean =>
+  pid !== undefined && pid === nodeProcess?.pid
+    ? liveStorageWriterTokens.has(token)
+    : storageWriterPidIsAlive(pid);
+
 let staleStorageLockSequence = 0;
 
 const readStorageWriterLock = async (
@@ -282,7 +295,7 @@ const cleanupDeadStorageWriterCandidates = async (
     // the exclusive filename is therefore the only recovery evidence that is
     // guaranteed to survive a kill at every write boundary. Never inspect or
     // delete a candidate while that owner PID is alive.
-    if (storageWriterPidIsAlive(ownerPid)) continue;
+    if (storageWriterTokenIsAlive(ownerPid, candidatePath)) continue;
     await unlinkStorageFileIfPresent(candidatePath, fs);
     sawDeadCandidate = true;
   }
@@ -295,7 +308,7 @@ const storageWriterLockIsReclaimable = (lock: StorageWriterLockBody | null): loc
   // A recorded local PID is a stronger liveness oracle than the lease clock.
   // Reclaim a SIGKILL orphan immediately; never steal from a live process even
   // if a long persistence operation outlives the advisory TTL.
-  if (typeof lock.pid === 'number') return !storageWriterPidIsAlive(lock.pid);
+  if (typeof lock.pid === 'number') return !storageWriterTokenIsAlive(lock.pid, lock.owner);
   return lock.expiresAt <= Date.now();
 };
 
@@ -393,6 +406,7 @@ const releaseStorageRecoveryLock = async (
   owner: StorageWriterLockBody,
   fs: typeof import('fs/promises'),
 ): Promise<void> => {
+  liveStorageWriterTokens.delete(owner.owner);
   await removeStorageLockIfOwned(lockPath, owner.owner, 'release', fs);
 };
 
@@ -418,6 +432,22 @@ const tryAcquireStorageWriterLock = async (
   const candidatePath = `${lockPath}.candidate-${nodeProcess?.pid ?? 'unknown'}-${now}-${ownerSequence}`;
   await fs.mkdir(directory, { recursive: true });
   await cleanupDeadStorageWriterCandidates(lockPath, fs, path);
+  liveStorageWriterTokens.add(candidatePath);
+  try {
+    return await publishStorageWriterCandidate(lockPath, candidatePath, directory, body, fs, options);
+  } finally {
+    liveStorageWriterTokens.delete(candidatePath);
+  }
+};
+
+const publishStorageWriterCandidate = async (
+  lockPath: string,
+  candidatePath: string,
+  directory: string,
+  body: StorageWriterLockBody,
+  fs: typeof import('fs/promises'),
+  options: StorageWriterLockOptions,
+): Promise<StorageWriterLockBody> => {
   const handle = await fs.open(candidatePath, 'wx');
   try {
     await handle.writeFile(`${safeStringify(body)}\n`, 'utf8');
@@ -447,6 +477,7 @@ const tryAcquireStorageWriterLock = async (
     throw error;
   }
   await unlinkStorageFileIfPresent(candidatePath, fs);
+  liveStorageWriterTokens.add(body.owner);
   return body;
 };
 
@@ -455,6 +486,7 @@ const releaseStorageWriterLock = async (
   owner: StorageWriterLockBody,
   fs: typeof import('fs/promises'),
 ): Promise<void> => {
+  liveStorageWriterTokens.delete(owner.owner);
   if (!await removeStorageLockIfOwned(lockPath, owner.owner, 'release', fs)) {
     throw new Error(
       `STORAGE_WRITER_LOCK_OWNERSHIP_LOST: path=${lockPath} expected=${owner.owner} ` +
