@@ -56,6 +56,8 @@ const address = (value: Uint8Array): string => {
   return ethers.hexlify(value.slice(1)).toLowerCase();
 };
 
+/** Hard cap on a signed wire's fee limit; the signer can only lower it. */
+export const TRON_MAX_FEE_LIMIT_SUN = 15_000_000_000;
 const TRIGGER_SMART_CONTRACT = 'type.googleapis.com/protocol.TriggerSmartContract';
 
 type TronFieldSet = { raw: number[]; contract: number[]; call: number[] };
@@ -96,7 +98,7 @@ export const decodeSignedTronTransaction = (rawTransaction: string) => {
   const expiration = number(data, 8);
   const timestamp = number(data, 14);
   const feeLimit = number(data, 18);
-  if (timestamp <= 0n || expiration !== timestamp + 60_000n || feeLimit <= 0n || feeLimit > 15_000_000_000n) {
+  if (timestamp <= 0n || expiration !== timestamp + 60_000n || feeLimit <= 0n || feeLimit > BigInt(TRON_MAX_FEE_LIMIT_SUN)) {
     throw new Error('TRON_TRANSACTION_LIFETIME_OR_FEE_INVALID');
   }
   const call = triggerSmartContract(data, SUBMITTED_FIELDS);

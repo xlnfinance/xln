@@ -36,6 +36,23 @@ describe('TRON signer boundary', () => {
     await provider.destroy();
   });
 
+  test('refuses a fee limit the signed-wire decoder would reject', async () => {
+    const provider = createXlnJsonRpcProvider('http://127.0.0.1:1/jsonrpc', 3448148188);
+    const previous = process.env['TRON_FEE_LIMIT'];
+    process.env['TRON_FEE_LIMIT'] = '20000000000';
+    try {
+      await expect(createTronSigner({
+        provider,
+        privateKey: PRIVATE_KEY,
+        rpcUrl: 'http://127.0.0.1:1/jsonrpc',
+      })).rejects.toThrow('TRON_FEE_LIMIT_INVALID:20000000000:max=15000000000');
+    } finally {
+      if (previous === undefined) delete process.env['TRON_FEE_LIMIT'];
+      else process.env['TRON_FEE_LIMIT'] = previous;
+      await provider.destroy();
+    }
+  });
+
   test('rejects contract creation before requesting native transaction preparation', async () => {
     const provider = createXlnJsonRpcProvider('http://127.0.0.1:1/jsonrpc', 3448148188);
     const signer = await createTronSigner({

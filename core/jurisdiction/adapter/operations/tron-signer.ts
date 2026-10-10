@@ -3,6 +3,7 @@ import { ethers } from 'ethers';
 import type { TronWeb, Types } from 'tronweb';
 import { safeStringify } from '../../../protocol/serialization';
 import { broadcastTronTransaction, encodeSignedTronTransaction } from './tron-broadcast';
+import { TRON_MAX_FEE_LIMIT_SUN } from './tron-transaction';
 
 type TronWebConstructor = typeof import('tronweb')['TronWeb'];
 type TronTransferTransaction = Awaited<
@@ -13,7 +14,6 @@ type TronTriggerResult = Awaited<
 >;
 type TronContractTransaction = NonNullable<TronTriggerResult['transaction']>;
 
-const DEFAULT_TRON_FEE_LIMIT = 15_000_000_000;
 const DEFAULT_TRON_BROADCAST_POLL_MS = 250;
 const DEFAULT_TRON_BROADCAST_VISIBILITY_MS = 30_000;
 
@@ -54,9 +54,11 @@ export class TronSigner extends ethers.AbstractSigner<ethers.JsonRpcProvider> {
     this.#solidityHost = params.solidityHost;
     this.#apiKey = params.apiKey;
     this.#wallet = new ethers.Wallet(`0x${this.#privateKey}`);
-    this.#maxFeeLimit = Number(process.env['TRON_FEE_LIMIT'] || DEFAULT_TRON_FEE_LIMIT);
-    if (!Number.isSafeInteger(this.#maxFeeLimit) || this.#maxFeeLimit <= 0) {
-      throw new Error(`TRON_FEE_LIMIT_INVALID:${String(this.#maxFeeLimit)}`);
+    this.#maxFeeLimit = Number(process.env['TRON_FEE_LIMIT'] || TRON_MAX_FEE_LIMIT_SUN);
+    // Above the decoder's hard cap every signed wire would be refused at
+    // preparation and the Runtime halted for an operator.
+    if (!Number.isSafeInteger(this.#maxFeeLimit) || this.#maxFeeLimit <= 0 || this.#maxFeeLimit > TRON_MAX_FEE_LIMIT_SUN) {
+      throw new Error(`TRON_FEE_LIMIT_INVALID:${String(this.#maxFeeLimit)}:max=${TRON_MAX_FEE_LIMIT_SUN}`);
     }
     this.#tronWeb = new this.#TronWeb({
       fullHost: resolveFullHost(params.rpcUrl, params.fullHost),
