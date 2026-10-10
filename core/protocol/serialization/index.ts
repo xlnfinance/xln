@@ -33,7 +33,6 @@ type TaggedEnvelope = TaggedBigInt | TaggedMap | TaggedSet | TaggedTypedArray | 
 
 type SerializeOptions = {
   excludeKeys?: ReadonlySet<string>;
-  includeVolatileKeys?: boolean;
   space?: number;
 };
 
@@ -200,7 +199,7 @@ const normalizeSerializableValue = (
     const result: TaggedJsonRecord = {};
     const keys = Object.keys(source)
       .filter((key) =>
-        (options.includeVolatileKeys || !ALWAYS_EXCLUDED_KEYS.has(key)) &&
+        !ALWAYS_EXCLUDED_KEYS.has(key) &&
         !options.excludeKeys?.has(key))
       .sort(compareStableText);
     for (const key of keys) {
@@ -257,10 +256,6 @@ export function safeStringify(obj: unknown, space?: number): string {
     throw new Error(`SAFE_STRINGIFY_FAILED: ${message}`, err instanceof Error ? { cause: err } : undefined);
   }
 }
-
-/** Authoritative codec variant: never drops a named field from the payload. */
-export const serializeCanonicalTaggedJson = (value: unknown): string =>
-  stringifyCanonical(value, { includeVolatileKeys: true });
 
 /**
  * BigInt-safe JSON.parse replacement.

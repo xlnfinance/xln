@@ -1,4 +1,4 @@
-import type { AccountFrame, AccountInput, AccountTx , AccountOutput } from '../../types/account';
+import type { AccountFrame, AccountInput, AccountOutput } from '../../types/account';
 import type { HankoString } from '../../types/hanko';
 import type { AccountJClaimNodeChanges } from '../../types/finance/account-j-claims';
 import type { AccountDisputeFinalityResult } from '../settlement/j-finality';
@@ -82,7 +82,6 @@ export type HandleAccountInputApplied = Readonly<AccountConsensusOkEffects & {
   externalFinality?: AccountDisputeFinalityResult;
   accountJClaimNodeChanges?: AccountJClaimNodeChanges;
   response?: AccountInput;
-  approvalNeeded?: AccountTx;
   timedOutHashlocks?: string[];
   committedFrames?: AccountCommittedFrame[];
 }>;
