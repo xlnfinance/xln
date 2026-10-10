@@ -23,6 +23,8 @@ import { htlcRouteConvergenceCycleBudget } from './test-economy';
 import { quoteHtlcPaymentRoute } from '../../pathfinding/htlc-quote';
 import { createTestEntityImportRuntimeTx } from '../../qa/entity-creation-fixture';
 import { calculateRequiredInboundForDesiredForward } from '../../protocol/htlc/utils';
+import { deriveTransferOffdeltaChange } from '../../protocol/transform/delta-movement';
+import { isLeftEntity } from '../../protocol/identity/entity-id';
 
 const USDC_TOKEN_ID = 1;
 const HTLC_TEST_SECRET = '0x0000000000000000000000000000000000000000000000000000000000000001';
@@ -306,10 +308,10 @@ export async function htlcLazy(env: RuntimeReplica): Promise<void> {
       ? Math.max(0, Math.floor(Number(hubProfile?.metadata?.routingFeePPM)))
       : 10;
     const senderGross = calculateRequiredInboundForDesiredForward(paymentAmount, hubFeePpm, 0n);
-    // HTLC resolve adds +amount to right-sender's offdelta (Alice is right in A-H)
-    // and -amount to left-sender's offdelta (Hub is left in H-B).
-    const expectedAhDelta = preAhDelta + senderGross;
-    const expectedHbDelta = preHbDelta - paymentAmount;
+    // Entity ids come from the runtime seed, so either side may be LEFT.
+    // The canonical movement (LEFT pays negative) fixes the sign per leg.
+    const expectedAhDelta = preAhDelta + deriveTransferOffdeltaChange(isLeftEntity(alice.id, hub.id), senderGross);
+    const expectedHbDelta = preHbDelta + deriveTransferOffdeltaChange(isLeftEntity(hub.id, bob.id), paymentAmount);
 
     console.log(`   A-H delta: ${ahDelta} (expected: ${expectedAhDelta})`);
     console.log(`   H-B delta: ${hbDelta} (expected: ${expectedHbDelta})`);
