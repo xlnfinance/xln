@@ -33,7 +33,7 @@ import { applyEntityFrameWithMaterializedTestInfraContext } from '../../helpers/
 import { readEntityFrameEventMessages } from '../../../entity/frame-events';
 import {
   assertEntityFrameEventByteBudget,
-  assertEntityFrameTxByteBudget,
+  getEntityFrameTxByteBudgetError,
   MAX_ENTITY_FRAME_EVENT_BYTES,
   MAX_ENTITY_FRAME_TX_BYTES,
   selectEntityFrameTxByteBudget,
@@ -988,7 +988,7 @@ describe('signed Entity command admission', () => {
       { type: 'chatMessage', data: { message: payload, timestamp: 1 } },
       { type: 'chatMessage', data: { message: payload, timestamp: 2 } },
     ];
-    expect(() => assertEntityFrameTxByteBudget(txs)).toThrow('ENTITY_FRAME_TX_BYTE_LIMIT_EXCEEDED');
+    expect(getEntityFrameTxByteBudgetError(txs)).toStartWith('ENTITY_FRAME_TX_BYTE_LIMIT_EXCEEDED:');
     expect(selectEntityFrameTxByteBudget(txs)).toEqual([txs[0]]);
   });
 
