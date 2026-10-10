@@ -4,9 +4,7 @@ import { ethers } from 'ethers';
 import { PersistentRadixValueMap } from '../../../protocol/state/persistent-radix-value-map';
 import type { PersistentRadixValueMapOptions } from '../../../protocol/state/persistent-radix-value-map';
 import {
-  buildRadixMerkle,
-  buildRadixMerkleMaterialized,
-  buildHexKeyedMerkle,
+  computeRadixMerkleEdgeHash,
   encodeRawRadixTextKey,
   RADIX_MERKLE_RADICES,
   radixMerklePathSlots,
@@ -35,42 +33,32 @@ const fromMap = <K, V>(
 ): PersistentRadixValueMap<K, V> => PersistentRadixValueMap.fromMap(entries, treeOptions);
 
 describe('PersistentRadixValueMap', () => {
-  test('compact root projection is byte-identical to the persisted graph projection', () => {
-    const cases = [
-      [],
-      [{ key: Uint8Array.of(0x10), value: Uint8Array.of(1) }],
-      [
-        { key: Uint8Array.of(0x10, 0x01), value: Uint8Array.of(1, 2) },
-        { key: Uint8Array.of(0x10, 0x02), value: Uint8Array.of(3, 4) },
-        { key: Uint8Array.of(0xf0, 0xff), value: Uint8Array.of(5, 6) },
-      ],
-    ];
+  test('multi-leaf roots keep the pinned flat-tree vectors for every fanout', () => {
+    // Pinned from the retired flat builder. A single-entry map still roots at a
+    // branch, so only multi-leaf shapes are comparable.
+    const expected: Record<number, string> = {
+      2: '0x94966511873049826a8a3e4dcff92af87f9e3d7c2ce63c32411bded20b262d91',
+      4: '0x3826c7065a09c7d5af10a6f5e34ddf0dadd0ff23a428cc1a3825847671d2fe07',
+      16: '0xe85d93b22cc6106475028b15aae4388e9ef946ef92e01d86c49665b9c87753d8',
+      256: '0x89df80a7136cb75da6f17b75c76afe99251f13de815b0cd907b2a9e3b0777553',
+    };
     for (const radix of RADIX_MERKLE_RADICES) {
-      for (const hashAlgorithm of ['integrity', 'keccak256'] as const) {
-        for (const leaves of cases) {
-          const compact = buildRadixMerkle(leaves, { radix, hashAlgorithm });
-          const persisted = buildRadixMerkleMaterialized(leaves, { radix, hashAlgorithm });
-          expect(compact).toEqual({
-            radix: persisted.radix,
-            depth: persisted.depth,
-            leafCount: persisted.leafCount,
-            branchCount: persisted.branchCount,
-            extensionCount: persisted.extensionCount,
-            maxDepth: persisted.maxDepth,
-            root: persisted.root,
-          });
-        }
-      }
+      const tree = fromMap([['0x1001', '0x0102'], ['0x1002', '0x0304'], ['0xf0ff', '0x0506']], {
+        radix,
+        ownKey: (key: string): string => key,
+        keyBytes: (key: string): Uint8Array => ethers.getBytes(key),
+        valueHash: (digest: string): string => digest,
+        ownValue: (digest: string): string => digest,
+      });
+      expect(tree.rootHash()).toBe(expected[radix]!);
     }
   });
 
   test('fast hex decoding preserves bytes and rejects every non-canonical shape', () => {
-    const lower = buildHexKeyedMerkle([{ hexKey: '0xabcd', value: Uint8Array.of(1) }]);
-    const upper = buildHexKeyedMerkle([{ hexKey: '0xABCD', value: Uint8Array.of(1) }]);
-    expect(upper.root).toBe(lower.root);
-    for (const hexKey of ['', '0x', '0x0', '0xgg']) {
-      expect(() => buildHexKeyedMerkle([{ hexKey, value: Uint8Array.of(1) }]))
-        .toThrow('RADIX_MERKLE_HASH_HEX_INVALID');
+    const edge = (hash: string): string => computeRadixMerkleEdgeHash(2, [], 'branch', [0, 1], hash);
+    expect(edge('0xABCD')).toBe(edge('0xabcd'));
+    for (const hash of ['', '0x', '0x0', '0xgg']) {
+      expect(() => edge(hash)).toThrow('RADIX_MERKLE_HASH_HEX_INVALID');
     }
   });
 

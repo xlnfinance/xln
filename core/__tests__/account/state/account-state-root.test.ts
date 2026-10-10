@@ -1,12 +1,13 @@
 import { describe, expect, test } from 'bun:test';
 
 import {
-  computeAccountShadowRoot,
   computeAccountStateRoot,
+  computeCanonicalKeccakLeafRoot,
   encodeAccountStateValue,
   encodeAccountStateValueOracle,
 } from '../../../account/commitment/state-root';
 import { createEmptyAccountJClaimAccumulator } from '../../../account/j-claims/j-claim-accumulator';
+import { computeEntityAccountValueHash } from '../../../entity/consensus/state-root';
 import { buildAccountProofBody } from '../../../protocol/dispute/proof-builder';
 import type { AccountReplica } from '../../../types/account';
 import { createDefaultDelta } from '../../../account/state/delta';
@@ -171,10 +172,16 @@ describe('canonical account state root', () => {
     expect(computeAccountStateRoot(base.state)).toBe(root);
   });
 
+  test('the settlement workspace keccak root is its single radix leaf hash', () => {
+    // Pinned from the retired keccak radix builder; Rust settlement.rs hashes the same preimage.
+    expect(computeCanonicalKeccakLeafRoot('settlement.workspace', 'body', { a: 1 }))
+      .toBe('0xc4e9dab10b3475aae943139c7ea6a866bd84ff6254f4415ebc08c2fce8d48d6c');
+  });
+
   test('commits settlement authority bilaterally while keeping entity-only lifecycle state out', () => {
     const base = account();
     const bilateralRoot = computeAccountStateRoot(base.state);
-    const overlayRoot = computeAccountShadowRoot(new Map([[RIGHT, base]]));
+    const overlayRoot = computeEntityAccountValueHash(base);
 
     const settlement = account();
     settlement.state.settlementWorkspace = {
@@ -188,7 +195,7 @@ describe('canonical account state root', () => {
       executorIsLeft: true,
     };
     expect(computeAccountStateRoot(settlement.state)).not.toBe(bilateralRoot);
-    expect(computeAccountShadowRoot(new Map([[RIGHT, settlement]]))).not.toBe(overlayRoot);
+    expect(computeEntityAccountValueHash(settlement)).not.toBe(overlayRoot);
 
     const disputed = account();
     disputed.status = 'disputed';
@@ -204,7 +211,7 @@ describe('canonical account state root', () => {
         starterCounterProofCommitment: '0x0000000000000000000000000000000000000000000000000000000000000000',
     };
     expect(computeAccountStateRoot(disputed.state)).toBe(bilateralRoot);
-    expect(computeAccountShadowRoot(new Map([[RIGHT, disputed]]))).not.toBe(overlayRoot);
+    expect(computeEntityAccountValueHash(disputed)).not.toBe(overlayRoot);
 
     const withdrawal = account();
     withdrawal.pendingWithdrawals = PersistentAccountStateMap.fromEntries('pendingWithdrawals', [['withdraw-1', {
@@ -216,7 +223,7 @@ describe('canonical account state root', () => {
       status: 'pending',
     }]]);
     expect(computeAccountStateRoot(withdrawal.state)).toBe(bilateralRoot);
-    expect(computeAccountShadowRoot(new Map([[RIGHT, withdrawal]]))).not.toBe(overlayRoot);
+    expect(computeEntityAccountValueHash(withdrawal)).not.toBe(overlayRoot);
   });
 
   test('commits settlement targets but excludes non-unique quorum Hanko bytes', () => {
@@ -245,7 +252,6 @@ describe('canonical account state root', () => {
       status: 'approved',
     }]]);
     const bilateralRoot = computeAccountStateRoot(base.state);
-    const overlayRoot = computeAccountShadowRoot(new Map([[RIGHT, base]]));
 
     base.state.settlementWorkspace.leftHanko = '0x1234';
     base.state.settlementWorkspace.rightHanko = '0x5678';
@@ -259,20 +265,21 @@ describe('canonical account state root', () => {
 
     const sealedBilateralRoot = computeAccountStateRoot(base.state);
     expect(sealedBilateralRoot).toBe(bilateralRoot);
-    expect(computeAccountShadowRoot(new Map([[RIGHT, base]]))).toBe(overlayRoot);
+    // The Entity leaf commits the peer's settlement Hankos, never withdrawal signature bytes.
+    const sealedEntityLeaf = computeEntityAccountValueHash(base);
 
     base.pendingWithdrawals = PersistentAccountStateMap.fromEntries(
       'pendingWithdrawals',
       [['withdraw-1', { ...pending, signature: '0xcafe' }]],
     );
     expect(computeAccountStateRoot(base.state)).toBe(sealedBilateralRoot);
-    expect(computeAccountShadowRoot(new Map([[RIGHT, base]]))).toBe(overlayRoot);
+    expect(computeEntityAccountValueHash(base)).toBe(sealedEntityLeaf);
   });
 
   test('separates bilateral state from entity-private automation state', () => {
     const base = account();
     const bilateralRoot = computeAccountStateRoot(base.state);
-    const shadowRoot = computeAccountShadowRoot(new Map([[RIGHT, base]]));
+    const shadowRoot = computeEntityAccountValueHash(base);
 
     base.shadow.rebalance.policy = PersistentAccountStateMap.fromEntries('rebalanceShadowPolicy', [[1, {
       r2cRequestSoftLimit: 500n,
@@ -285,7 +292,7 @@ describe('canonical account state root', () => {
     );
 
     expect(computeAccountStateRoot(base.state)).toBe(bilateralRoot);
-    expect(computeAccountShadowRoot(new Map([[RIGHT, base]]))).not.toBe(shadowRoot);
+    expect(computeEntityAccountValueHash(base)).not.toBe(shadowRoot);
   });
 
   test('commits bilateral lending receipts while excluding local lifecycle state', () => {

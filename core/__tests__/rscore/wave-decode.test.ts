@@ -110,7 +110,6 @@ const accountStateRoot = (
       rebalanceFeePoliciesRoot: EMPTY_ACCOUNT_STATE_ROOT,
     }],
   ],
-  'integrity',
 );
 
 const entityAccountLeaf = (

@@ -1,7 +1,7 @@
 import { ethers } from 'ethers';
 
 import type { AccountReplica, AccountState, AccountTx, Delta, SettlementDiff, SettlementOp, SettlementWorkspace } from '../../../../types/account';
-import { computeCanonicalMerkleRoot } from '../../../commitment/state-root';
+import { computeCanonicalKeccakLeafRoot } from '../../../commitment/state-root';
 import { deriveDelta } from '../../../utils';
 import {
   assertSettlementTokenId,
@@ -135,9 +135,11 @@ const canonicalWorkspaceBody = (
 export const createSettlementWorkspaceHash = (
   account: Pick<AccountState, 'leftEntity' | 'rightEntity'>,
   workspace: Pick<SettlementWorkspace, 'revision' | 'ops' | 'lastModifiedByLeft' | 'executorIsLeft' | 'memo'>,
-): string => computeCanonicalMerkleRoot('settlement.workspace', [
-  ['body', canonicalWorkspaceBody(account, workspace)],
-]);
+): string => computeCanonicalKeccakLeafRoot(
+  'settlement.workspace',
+  'body',
+  canonicalWorkspaceBody(account, workspace),
+);
 
 export const assertCanonicalSettlementWorkspace = (
   account: Pick<AccountState, 'leftEntity' | 'rightEntity'>,

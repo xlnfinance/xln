@@ -136,7 +136,6 @@ const computeRestoredAccountStateRoot = (seed: RscoreAccountStateSeed): string =
         },
       ],
     ],
-    'integrity',
   );
 
 const expectedDisputeHash = (
@@ -240,7 +239,6 @@ const restoredMempoolRoot = (
     : computeCanonicalMerkleRoot(
         'entity.account-mempool',
         canonicalMempool.map((tx, index) => [String(index), tx] as const),
-        'integrity',
       );
 };
 

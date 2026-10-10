@@ -6,9 +6,9 @@
 import { ethers } from 'ethers';
 import { readRuntimeEnv } from '../../support/process/runtime-process';
 import { toLowerAddressOrNull } from '../../protocol/crypto/address-cache';
-import type { AccountReplica, AccountState, AccountStateDomain } from '../../types/account';
+import type { AccountState, AccountStateDomain } from '../../types/account';
 import type { JurisdictionConfig } from '../../protocol/config/jurisdiction-config';
-import { buildHexKeyedMerkle, type RadixMerkleHashAlgorithm } from '../../protocol/state/radix-merkle';
+import { computeRadixMerkleLeafHash } from '../../protocol/state/radix-merkle';
 import { computeIntegrityDigest } from '../../support/bytes/integrity-checksum';
 import { hexToBytes } from '../../support/bytes/hex-bytes';
 import { assertAccountJClaimAccumulatorState } from '../j-claims/j-claim-accumulator';
@@ -137,7 +137,6 @@ const FLAT_DIGEST_DOMAIN = new TextEncoder().encode('xln.flat-digest.v1');
  * Account state, mempool) are one digest over the key-sorted
  * (labelKey ‖ sha256(section)) pairs. Nothing proves one section against the
  * root, so the radix tree those roots used to be built from was only cost.
- * keccak commitments keep the Merkle shape.
  */
 const computeFlatIntegrityRoot = (
   namespace: string,
@@ -163,13 +162,22 @@ const computeFlatIntegrityRoot = (
 export const computeCanonicalMerkleRoot = (
   namespace: string,
   entries: ReadonlyArray<readonly [path: string, value: unknown]>,
-  hashAlgorithm: RadixMerkleHashAlgorithm = 'keccak256',
-): string => hashAlgorithm === 'integrity'
-  ? computeFlatIntegrityRoot(namespace, entries)
-  : buildHexKeyedMerkle(entries.map(([path, value]) => ({
-    hexKey: keccakLabelDigest(`xln.${namespace}.${path}`),
-    value: encodeAccountStateValue(value),
-  })), { hashAlgorithm }).root;
+): string => computeFlatIntegrityRoot(namespace, entries);
+
+/**
+ * The one keccak commitment (the settlement workspace) is a single labelled
+ * leaf, and a one-leaf radix root is that leaf's hash. Rust settlement.rs
+ * hashes the same preimage.
+ */
+export const computeCanonicalKeccakLeafRoot = (
+  namespace: string,
+  path: string,
+  value: unknown,
+): string => computeRadixMerkleLeafHash(
+  hexToBytes(keccakLabelDigest(`xln.${namespace}.${path}`)),
+  encodeAccountStateValue(value),
+  'keccak256',
+);
 
 const accountStateRootEntries = (
   account: AccountState,
@@ -500,40 +508,3 @@ const computeAccountStateRootUncached = (
 export const computeAccountStateRootCold = (account: AccountState): string => {
   return computeFlatIntegrityRoot('account.state', accountStateRootEntries(account, true));
 };
-
-const pendingWithdrawalOverlayRoot = (
-  withdrawals: AccountReplica['pendingWithdrawals'],
-): string => requirePersistentAccountStateMap(withdrawals, 'pendingWithdrawals').rootHash();
-
-const accountEntityOverlayState = (account: AccountReplica): unknown => ({
-  status: account.status,
-  disputePrepare: account.disputePrepare,
-  settlementWorkspace: settlementWorkspaceWithoutHankos(account.state.settlementWorkspace),
-  activeDispute: account.activeDispute,
-  pendingWithdrawalsRoot: pendingWithdrawalOverlayRoot(account.pendingWithdrawals),
-  shadow: {
-    rebalance: {
-      policyRoot: requirePersistentAccountStateMap(
-        account.shadow.rebalance.policy,
-        'rebalanceShadowPolicy',
-      ).rootHash(),
-      submittedAtByTokenRoot: requirePersistentAccountStateMap(
-        account.shadow.rebalance.submittedAtByToken,
-        'rebalanceShadowSubmitted',
-      ).rootHash(),
-      activeQuote: account.shadow.rebalance.activeQuote,
-      pendingRequest: account.shadow.rebalance.pendingRequest,
-    },
-    rejectedFrameEvidence: account.shadow.rejectedFrameEvidence,
-  },
-});
-
-export const computeAccountShadowRoot = (
-  accounts: ReadonlyMap<string, AccountReplica>,
-): string => computeCanonicalMerkleRoot(
-  'entity.account-shadow',
-  Array.from(accounts.entries()).map(([counterpartyId, account]) => [
-    counterpartyId.toLowerCase(),
-    accountEntityOverlayState(account),
-  ] as const),
-);

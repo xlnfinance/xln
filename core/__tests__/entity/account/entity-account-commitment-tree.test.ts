@@ -1,6 +1,5 @@
 import { describe, expect, test } from 'bun:test';
 import { computeIntegrityDigest } from '../../../support/bytes/integrity-checksum';
-import { buildRadixMerkle } from '../../../protocol/state/radix-merkle';
 import { ethers } from 'ethers';
 import { PersistentRadixValueMap } from '../../../protocol/state/persistent-radix-value-map';
 import { ENTITY_ACCOUNT_VALUE_MAP_RADIX } from '../../../entity/state/persistent-account-map';
@@ -38,14 +37,9 @@ describe('Entity Account commitment tree', () => {
     expect(forward.rootHash()).toBe(reverse.rootHash());
     expect(forward.size).toBe(3);
     expect(reverse.size).toBe(3);
+    // Pinned from the retired flat builder over the same three leaves.
     expect(forward.rootHash()).toBe(
-      buildRadixMerkle(
-        entries.map(([key, value]) => ({
-          key: ethers.getBytes(key),
-          value: ethers.getBytes(value),
-        })),
-        { radix: ENTITY_ACCOUNT_VALUE_MAP_RADIX },
-      ).root,
+      '0x150f0bdc1fe98628809e2cfb1a3b779988ec853f5ca043f5852d290e8c4bf234',
     );
     expect(PersistentRadixValueMap.fromMap(entries, options).rootHash()).toBe(
       forward.rootHash(),

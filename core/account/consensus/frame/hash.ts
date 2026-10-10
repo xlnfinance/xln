@@ -122,7 +122,7 @@ const computeCanonicalAccountFrameHash = (frame: AccountFrame): string => {
     }],
     ['transactions', frame.accountTxs.map(canonicalAccountTxForFrameHash)],
     ['accountStateRoot', frame.accountStateRoot],
-  ], 'integrity');
+  ]);
   countOp(
     'account.frame.hash',
     0,
