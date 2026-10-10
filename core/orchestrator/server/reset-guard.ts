@@ -1,3 +1,5 @@
+import { equalSecret, readBearer } from '../hub/operator-access';
+
 export const ORCHESTRATOR_RESET_CONFIRMATION = 'RESET_MESH_STATE';
 
 export type OrchestratorResetGuardConfig = {
@@ -39,19 +41,14 @@ const isLoopbackBindHost = (host: string): boolean => {
   return normalized === 'localhost' || normalized === '127.0.0.1' || normalized === '::1';
 };
 
-const readBearer = (header: string | null): string => {
-  const match = String(header || '').trim().match(/^Bearer\s+(.+)$/i);
-  return match ? match[1]!.trim() : '';
-};
-
 const hasResetConfirmation = (request: Request, body: OrchestratorResetBody | null): boolean => {
   if (body?.confirm === ORCHESTRATOR_RESET_CONFIRMATION) return true;
   return request.headers.get('x-xln-reset-confirm') === ORCHESTRATOR_RESET_CONFIRMATION;
 };
 
 const hasResetToken = (request: Request, expectedToken: string): boolean => {
-  const token = request.headers.get('x-xln-reset-token') || readBearer(request.headers.get('authorization'));
-  return token === expectedToken;
+  const token = request.headers.get('x-xln-reset-token') || readBearer(request);
+  return equalSecret(token, expectedToken);
 };
 
 export const assertOrchestratorResetAllowed = (

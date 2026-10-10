@@ -27,12 +27,13 @@ export const operatorPreflightResponse = (
   });
 };
 
-const readBearer = (request: Request): string => {
+export const readBearer = (request: Request): string => {
   const match = String(request.headers.get('authorization') || '').trim().match(/^Bearer\s+(.+)$/i);
   return match?.[1]?.trim() ?? '';
 };
 
-const equalSecret = (left: string, right: string): boolean => {
+/** Constant-time for equal lengths; secret comparisons never short-circuit on content. */
+export const equalSecret = (left: string, right: string): boolean => {
   const leftBytes = Buffer.from(left);
   const rightBytes = Buffer.from(right);
   return leftBytes.length === rightBytes.length && timingSafeEqual(leftBytes, rightBytes);

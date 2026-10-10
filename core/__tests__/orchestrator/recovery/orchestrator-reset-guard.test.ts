@@ -101,4 +101,19 @@ describe('orchestrator reset guardrails', () => {
       { resetAllowed: true, operatorAuthorized: true, bindHost: '0.0.0.0', resetToken: 'secret' },
     )).not.toThrow();
   });
+
+  test('compares the reset token as a secret, rejecting an equal-length mismatch', () => {
+    const config = { resetAllowed: true, operatorAuthorized: true, bindHost: '0.0.0.0', resetToken: 'reset-secret-1' };
+    const body = { confirm: ORCHESTRATOR_RESET_CONFIRMATION };
+    expectRejected(
+      () => assertOrchestratorResetAllowed(makeRequest({ 'X-XLN-Reset-Token': 'reset-secret-2' }), body, config),
+      'RESET_TOKEN_INVALID',
+      401,
+    );
+    expect(() => assertOrchestratorResetAllowed(
+      makeRequest({ 'X-XLN-Reset-Token': 'reset-secret-1' }),
+      body,
+      config,
+    )).not.toThrow();
+  });
 });
