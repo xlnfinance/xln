@@ -130,7 +130,8 @@ import {
 } from './assistant/proxy';
 import { selectPredeployedJurisdiction } from './catalog/predeployed-jurisdiction';
 import { buildPredeployedRestoreRpcBindings } from './catalog/restore-rpc-bindings';
-import { readInheritedChildSecrets } from '../../support/process/child-secrets';
+import { readInheritedChildSecrets, resolveChildSecret } from '../../support/process/child-secrets';
+import { registerRuntimeAdapterAuthSeed } from '../runtime-adapter/security/auth';
 import { decodeStartupSigners } from './startup-signers';
 import { createLocalPairingController } from './ownership/local-pairing';
 import { createGossipProfileAdmission } from './network/gossip-admission';
@@ -197,17 +198,26 @@ const withStartupStepTimeout = async <T>(
 
 const currentRuntimeHeight = (env: RuntimeReplica | null): number => Math.max(0, Math.floor(Number(env?.state.height ?? 0)));
 
+// A managed child (custody daemon) receives its secrets on the stdin pipe;
+// a standalone server still reads its own environment.
+const INHERITED_CHILD_SECRETS = readInheritedChildSecrets();
 const SERVER_RUNTIME_SEED = (() => {
-  const seed = process.env['XLN_RUNTIME_SEED']?.trim();
+  const seed = resolveChildSecret(INHERITED_CHILD_SECRETS, 'runtimeSeed', process.env['XLN_RUNTIME_SEED'] || '');
   if (!seed) {
     throw new Error('XLN_RUNTIME_SEED is required for core/api/server/index.ts');
   }
   return seed;
 })();
-const STARTUP_SIGNERS = (() => {
-  const secrets = readInheritedChildSecrets();
-  return decodeStartupSigners(secrets['startupSignersJson']);
-})();
+const SERVER_RADAPTER_AUTH_SEED = resolveChildSecret(
+  INHERITED_CHILD_SECRETS,
+  'radapterAuthSeed',
+  process.env['XLN_RADAPTER_AUTH_SEED'] || '',
+);
+if (SERVER_RADAPTER_AUTH_SEED) {
+  registerRuntimeAdapterAuthSeed(SERVER_RADAPTER_AUTH_SEED);
+  delete process.env['XLN_RADAPTER_AUTH_SEED'];
+}
+const STARTUP_SIGNERS = decodeStartupSigners(INHERITED_CHILD_SECRETS['startupSignersJson']);
 const LOCAL_RUNTIME_OWNER = (() => {
   const label = String(process.env['XLN_LOCAL_OWNER_LABEL'] || '').trim();
   if (!label) return null;

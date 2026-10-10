@@ -657,7 +657,7 @@ describe('production startup wiring', () => {
     expect(standaloneServer).toContain('await globalJAdapter?.close();');
     expect(custodyBootstrap).toContain('startupSignersJson: safeStringify([');
     expect(custodyBootstrap).toContain('...(options.additionalStartupSigners ?? [])');
-    expect(standaloneServer).toContain('const STARTUP_SIGNERS = (() => {');
+    expect(standaloneServer).toContain("const STARTUP_SIGNERS = decodeStartupSigners(INHERITED_CHILD_SECRETS['startupSignersJson']);");
     expect(standaloneServer).toContain('localSigners: [');
     expect(standaloneServer).toContain('...STARTUP_SIGNERS');
     expect(standaloneServer).toContain('...(LOCAL_RUNTIME_OWNER ? [{ label: LOCAL_RUNTIME_OWNER.label }] : [])');

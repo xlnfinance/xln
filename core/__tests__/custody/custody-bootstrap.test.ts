@@ -4,6 +4,8 @@ import { EventEmitter } from 'node:events';
 import { safeStringify } from '../../protocol/serialization';
 
 import {
+  buildCustodyDaemonLaunch,
+  buildCustodyServiceLaunch,
   decodeDaemonControlCliResult,
   isPublicDaemonHealthReady,
   stopManagedChild,
@@ -39,6 +41,36 @@ test('daemon control setup result accepts only the public identity projection', 
     command: 'setup-custody',
     result: identity,
   })).toThrow('DAEMON_CONTROL_RESULT_IDENTITY_FIELDS_INVALID');
+});
+
+test('custody daemon and service receive every secret through the stdin pipe, never the environment', () => {
+  const options = {
+    apiBaseUrl: 'http://127.0.0.1:8080',
+    daemonPort: 8088,
+    custodyPort: 8087,
+    relayUrl: 'ws://127.0.0.1:8080/relay',
+    rpcUrl: 'http://127.0.0.1:8545',
+    walletUrl: 'https://localhost:8080/app',
+    dbRoot: '/tmp/custody',
+    seed: 'custody-startup-signer-seed',
+    signerLabel: 'custody-1',
+    profileName: 'Custody',
+    jurisdictionId: 'arrakis',
+  };
+  const auth = { seed: 'ab'.repeat(32), audience: 'custody-daemon-8088' };
+  const identity = { entityId: `0x${'11'.repeat(32)}`, signerId: `0x${'22'.repeat(20)}`, name: 'Custody' };
+  const daemon = buildCustodyDaemonLaunch(options, '/tmp/custody/jurisdictions.json', auth);
+  const service = buildCustodyServiceLaunch(options, identity, auth, false);
+
+  for (const launch of [daemon, service]) {
+    const environment = Object.values(launch.env).join('\n');
+    expect(environment).not.toContain(options.seed);
+    expect(environment).not.toContain(auth.seed);
+  }
+  expect(daemon.secrets['runtimeSeed']).toBe(`${options.seed}:runtime`);
+  expect(daemon.secrets['radapterAuthSeed']).toBe(auth.seed);
+  expect(daemon.secrets['startupSignersJson']).toContain(options.seed);
+  expect(service.secrets).toEqual({ daemonRuntimeSeed: `${options.seed}:runtime`, daemonAuthSeed: auth.seed });
 });
 
 const publicHealth = (runtime: boolean, phase: 'starting' | 'ready'): Record<string, unknown> => ({

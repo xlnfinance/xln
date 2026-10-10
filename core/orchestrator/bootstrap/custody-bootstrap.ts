@@ -687,6 +687,76 @@ export const discoverHubIds = async (
   );
 };
 
+type CustodyDaemonAuth = Readonly<{ seed: string; audience: string }>;
+
+type CustodyChildLaunch = Readonly<{
+  args: string[];
+  env: NodeJS.ProcessEnv;
+  secrets: ChildSecrets;
+}>;
+
+const custodyDaemonRuntimeSeed = (options: StartCustodySupportOptions): string =>
+  options.daemonRuntimeSeed || `${options.seed}:runtime`;
+
+// Every secret crosses the stdin pipe: a child environment is readable by any
+// same-uid process and inherited by every grandchild.
+export const buildCustodyDaemonLaunch = (
+  options: StartCustodySupportOptions,
+  jurisdictionsPath: string,
+  auth: CustodyDaemonAuth,
+): CustodyChildLaunch => ({
+  args: ['core/api/server/index.ts', '--port', String(options.daemonPort), '--host', '127.0.0.1', '--server-id', `custody-daemon-${options.daemonPort}`],
+  env: {
+    USE_ANVIL: 'true',
+    XLN_USE_PREDEPLOYED_ADDRESSES: 'true',
+    XLN_PREDEPLOYED_JURISDICTION_KEY: options.jurisdictionId,
+    BOOTSTRAP_LOCAL_HUBS: '0',
+    XLN_SKIP_SERVER_BOOTSTRAP: '1',
+    XLN_EARLY_HTTP_BIND: '1',
+    XLN_RADAPTER_AUDIENCE: auth.audience,
+    XLN_RADAPTER_REQUIRE_STRONG_AUTH_SEED: '1',
+    ANVIL_RPC: options.rpcUrl,
+    PUBLIC_RPC: options.rpcUrl,
+    XLN_STARTUP_STEP_TIMEOUT_MS: process.env['XLN_STARTUP_STEP_TIMEOUT_MS'] ?? '60000',
+    RELAY_URL: options.relayUrl,
+    XLN_DB_PATH: `${options.dbRoot}/daemon-db`,
+    XLN_JURISDICTIONS_PATH: jurisdictionsPath,
+  },
+  secrets: {
+    runtimeSeed: custodyDaemonRuntimeSeed(options),
+    radapterAuthSeed: auth.seed,
+    startupSignersJson: safeStringify([
+      { seed: options.seed, label: options.signerLabel },
+      ...(options.additionalStartupSigners ?? []),
+    ]),
+  },
+});
+
+export const buildCustodyServiceLaunch = (
+  options: StartCustodySupportOptions,
+  identity: ManagedIdentity,
+  auth: CustodyDaemonAuth,
+  useHttps: boolean,
+): CustodyChildLaunch => ({
+  args: ['custody/server.ts'],
+  env: {
+    CUSTODY_HOST: '127.0.0.1',
+    CUSTODY_PORT: String(options.custodyPort),
+    CUSTODY_HTTPS: useHttps ? '1' : '0',
+    CUSTODY_DAEMON_WS: `ws://127.0.0.1:${options.daemonPort}/rpc`,
+    CUSTODY_DAEMON_AUTH_AUDIENCE: auth.audience,
+    CUSTODY_WALLET_URL: options.walletUrl,
+    CUSTODY_ENTITY_ID: identity.entityId,
+    CUSTODY_SIGNER_ID: identity.signerId,
+    CUSTODY_JURISDICTION_ID: options.jurisdictionId,
+    CUSTODY_DB_PATH: `${options.dbRoot}/custody.sqlite`,
+  },
+  secrets: {
+    daemonRuntimeSeed: custodyDaemonRuntimeSeed(options),
+    daemonAuthSeed: auth.seed,
+  },
+});
+
 export const startCustodySupport = async (
   options: StartCustodySupportOptions,
 ): Promise<StartedCustodySupport> => {
@@ -710,34 +780,9 @@ export const startCustodySupport = async (
       },
     );
     const daemonAuthKey = deriveDaemonAdminKey();
-    daemonChild = spawnBunChild(
-      'custody-daemon',
-      ['core/api/server/index.ts', '--port', String(options.daemonPort), '--host', '127.0.0.1', '--server-id', `custody-daemon-${options.daemonPort}`],
-      {
-        USE_ANVIL: 'true',
-        XLN_USE_PREDEPLOYED_ADDRESSES: 'true',
-        XLN_PREDEPLOYED_JURISDICTION_KEY: options.jurisdictionId,
-        BOOTSTRAP_LOCAL_HUBS: '0',
-        XLN_SKIP_SERVER_BOOTSTRAP: '1',
-        XLN_EARLY_HTTP_BIND: '1',
-        XLN_RADAPTER_AUTH_SEED: daemonAuthSeed,
-        XLN_RADAPTER_AUDIENCE: daemonAuthAudience,
-        XLN_RADAPTER_REQUIRE_STRONG_AUTH_SEED: '1',
-        ANVIL_RPC: options.rpcUrl,
-        PUBLIC_RPC: options.rpcUrl,
-        XLN_STARTUP_STEP_TIMEOUT_MS: process.env['XLN_STARTUP_STEP_TIMEOUT_MS'] ?? '60000',
-        RELAY_URL: options.relayUrl,
-        XLN_RUNTIME_SEED: options.daemonRuntimeSeed || `${options.seed}:runtime`,
-        XLN_DB_PATH: `${options.dbRoot}/daemon-db`,
-        XLN_JURISDICTIONS_PATH: shardJurisdictionsPath,
-      },
-      {
-        startupSignersJson: safeStringify([
-          { seed: options.seed, label: options.signerLabel },
-          ...(options.additionalStartupSigners ?? []),
-        ]),
-      },
-    );
+    const daemonAuth = { seed: daemonAuthSeed, audience: daemonAuthAudience };
+    const daemonLaunch = buildCustodyDaemonLaunch(options, shardJurisdictionsPath, daemonAuth);
+    daemonChild = spawnBunChild('custody-daemon', daemonLaunch.args, daemonLaunch.env, daemonLaunch.secrets);
     const [, hubIds] = await Promise.all([
       waitForHttpReady(`http://127.0.0.1:${options.daemonPort}/api/health`, daemonChild, DEFAULT_CHILD_READY_TIMEOUT_MS, isDaemonHealthReady),
       discoverHubIds(options.apiBaseUrl, 3, 30_000, jurisdictionTarget),
@@ -766,24 +811,8 @@ export const startCustodySupport = async (
     await waitForCustodyRouteableState(options.apiBaseUrl, identity.entityId, hubIds);
     const custodyHttps = resolveCustodyServiceHttps();
 
-    custodyChild = spawnBunChild(
-      'custody-service',
-      ['custody/server.ts'],
-      {
-        CUSTODY_HOST: '127.0.0.1',
-        CUSTODY_PORT: String(options.custodyPort),
-        CUSTODY_HTTPS: custodyHttps ? '1' : '0',
-        CUSTODY_DAEMON_WS: `ws://127.0.0.1:${options.daemonPort}/rpc`,
-        CUSTODY_DAEMON_AUTH_SEED: daemonAuthSeed,
-        CUSTODY_DAEMON_AUTH_AUDIENCE: daemonAuthAudience,
-        CUSTODY_WALLET_URL: options.walletUrl,
-        CUSTODY_ENTITY_ID: identity.entityId,
-        CUSTODY_SIGNER_ID: identity.signerId,
-        CUSTODY_JURISDICTION_ID: options.jurisdictionId,
-        CUSTODY_DB_PATH: `${options.dbRoot}/custody.sqlite`,
-      },
-      { daemonRuntimeSeed: options.daemonRuntimeSeed || `${options.seed}:runtime` },
-    );
+    const serviceLaunch = buildCustodyServiceLaunch(options, identity, daemonAuth, custodyHttps);
+    custodyChild = spawnBunChild('custody-service', serviceLaunch.args, serviceLaunch.env, serviceLaunch.secrets);
     const custodyReadyUrl = await waitForCustodyServiceReady(options.custodyPort, custodyChild, custodyHttps);
     const custodyBaseUrl = new URL(custodyReadyUrl).origin;
 

@@ -25,7 +25,11 @@ const inheritedSecrets = readInheritedChildSecrets();
 const HOST = process.env['CUSTODY_HOST'] || 'localhost';
 const PORT = Number(process.env['CUSTODY_PORT'] || '8087');
 const DAEMON_WS_URL = process.env['CUSTODY_DAEMON_WS'] || 'ws://127.0.0.1:8088/rpc';
-const DAEMON_AUTH_SEED = String(process.env['CUSTODY_DAEMON_AUTH_SEED'] || '').trim();
+const DAEMON_AUTH_SEED = resolveChildSecret(
+  inheritedSecrets,
+  'daemonAuthSeed',
+  String(process.env['CUSTODY_DAEMON_AUTH_SEED'] || ''),
+);
 const DAEMON_AUTH_AUDIENCE = String(process.env['CUSTODY_DAEMON_AUTH_AUDIENCE'] || '').trim().toLowerCase();
 const DAEMON_RUNTIME_SEED = resolveChildSecret(inheritedSecrets, 'daemonRuntimeSeed', '');
 const WALLET_URL = process.env['CUSTODY_WALLET_URL'] || 'https://localhost:8080/app';
