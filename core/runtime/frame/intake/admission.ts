@@ -9,7 +9,7 @@ import {
 } from '../../mempool/entity-inputs';
 import { assertScheduledWakeTxAuthorized } from '../../mempool/scheduled-wake';
 import { assertProposeAccountsNowTxAuthorized } from '../../mempool/propose-accounts-now';
-import { validateRuntimeInputShapeAndLimits } from '../../mempool/input-validation';
+import { validateRuntimeInputShapeAndLimits, type RuntimeInputLimitOptions } from '../../mempool/input-validation';
 
 const runtimeLog = createStructuredLogger('runtime');
 
@@ -102,8 +102,9 @@ export const validateRuntimeInputIngress = (
   runtimeInput: RuntimeInput,
   isReplay: boolean,
   deps: RuntimeInputAdmissionDeps,
+  options: RuntimeInputLimitOptions = {},
 ): PreparedRuntimeIngress => {
-  validateRuntimeInputShapeAndLimits(env, runtimeInput, rejectRuntimeInput);
+  validateRuntimeInputShapeAndLimits(env, runtimeInput, rejectRuntimeInput, options);
   const jOutbox = collectJOutbox(env, runtimeInput);
   const entityInputs = validateEntityInputs(env, runtimeInput, isReplay, deps);
   validateExternalEntityInputTargets(env, entityInputs, runtimeInput.runtimeTxs);

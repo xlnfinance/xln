@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 
 import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../../../account/crypto';
-import { TIMING } from '../../../config/constants';
+import { LIMITS, TIMING } from '../../../config/constants';
+import { MAX_RUNTIME_J_INPUTS, runtimeJInputFramePrefixLength } from '../../../runtime/mempool/input-validation';
 import { initCrontab, scheduleHook } from '../../../entity/scheduler';
 import { generateLazyEntityId } from '../../../entity/factory';
 import { PersistentEntityAccountMap } from '../../../entity/state/persistent-account-map';
@@ -255,6 +256,46 @@ describe('runtime ingress timestamp', () => {
     expect(committedEntityIds.at(-1)).toEqual(entityIds.slice(2, 3));
     expect(env.runtimeMempool?.entityInputs ?? []).toHaveLength(0);
     expect(env.runtimeMempool?.queuedAt).toBeUndefined();
+  });
+
+  test('a detached mempool above the per-frame limits runs a capped frame, never a halt', async () => {
+    // Wakes and requeued deferred work join the detached mempool outside
+    // admission. The preflight used to apply the 10k per-frame count to the
+    // whole of it, so a full mempool plus one wake halted the Runtime.
+    const env = createIsolatedEnv('runtime-over-limit-detached-mempool');
+    env.quietRuntimeLogs = true;
+    env.scenarioMode = true;
+    env.state.timestamp = 1_000;
+    env.infrastructure = { loopActive: false, halted: false, maxEntityInputsPerFrame: 2 };
+    const signerId = deriveSignerAddressSync(env.runtimeSeed!, 'over-limit').toLowerCase();
+    registerSignerKey(env, signerId, deriveSignerKeySync(env.runtimeSeed!, 'over-limit'));
+    const entityId = generateLazyEntityId([signerId], 1n).toLowerCase();
+    env.state.eReplicas.set(`${entityId}:${signerId}`, makeReplica(entityId, 1_000, signerId, env));
+    const overLimit = LIMITS.MAX_RUNTIME_INPUT_ENTITY_INPUTS + 1;
+    env.runtimeMempool = {
+      runtimeTxs: [],
+      entityInputs: Array.from({ length: overLimit }, (_, index) => ({
+        entityId,
+        signerId,
+        entityTxs: [{ type: 'profile-update' as const, data: { profile: { entityId, name: `over-${index}` } } }],
+      })),
+      queuedAt: 1_000,
+    };
+
+    await processRuntime(env);
+
+    expect(env.infrastructure?.halted).toBe(false);
+    expect(env.state.height).toBe(1);
+    expect(env.runtimeMempool?.entityInputs).toHaveLength(overLimit - 2);
+  });
+
+  test('J inputs above the per-frame limits wait for later frames as an ordered prefix', () => {
+    const jInputs = Array.from({ length: MAX_RUNTIME_J_INPUTS + 44 }, (_, index) => ({
+      jurisdictionName: 'prefix-j',
+      jTxs: [{ type: 'mint' as const, data: { index } }],
+    })) as never[];
+    expect(runtimeJInputFramePrefixLength(jInputs)).toBe(MAX_RUNTIME_J_INPUTS);
+    expect(runtimeJInputFramePrefixLength(jInputs.slice(0, 3))).toBe(3);
   });
 
   test('runtime frame caps keep an atomic cross-j sibling cohort indivisible', () => {

@@ -8,6 +8,8 @@ import {
 } from '../../../qa/account-causal-trace';
 import type { RuntimeReplica, RuntimeInput } from '../../types';
 import { applyEntityHeightDurabilityBarrier } from '../../mempool/entity-height-barrier';
+import { runtimeJInputFramePrefixLength } from '../../mempool/input-validation';
+import { LIMITS } from '../../../config/constants';
 import type { FrameExecutionState } from '../intake/execution-state';
 import {
   ACCOUNT_CAUSAL_TRACE,
@@ -19,6 +21,15 @@ export type RuntimeFramePreparationDeps = {
   prioritizeJEventFrame(input: RuntimeInput, mempool: RuntimeInput, timestamp: number): boolean;
   applyEntityTxFrameCap(input: RuntimeInput, mempool: RuntimeInput, limit: number, timestamp: number): boolean;
   applyEntityInputFrameCap(input: RuntimeInput, mempool: RuntimeInput, limit: number, timestamp: number): boolean;
+};
+
+const applyJInputFrameCap = (input: RuntimeInput, mempool: RuntimeInput, timestamp: number): void => {
+  const jInputs = input.jInputs ?? [];
+  const selected = runtimeJInputFramePrefixLength(jInputs);
+  if (selected >= jInputs.length) return;
+  input.jInputs = jInputs.slice(0, selected);
+  mempool.jInputs = [...jInputs.slice(selected), ...(mempool.jInputs ?? [])];
+  mempool.queuedAt ??= timestamp;
 };
 
 const countEntityTxs = (input: RuntimeInput): number =>
@@ -50,7 +61,16 @@ export const prepareRuntimeFrameInput = async (
     hasVerifiedEntityCommitPrecertificate(env, entityInput));
   applyEntityHeightDurabilityBarrier(env, input, mempool, timestamp);
   deps.applyEntityTxFrameCap(input, mempool, state.maxEntityTxsPerFrame ?? 0, timestamp);
-  deps.applyEntityInputFrameCap(input, mempool, state.maxEntityInputsPerFrame ?? 0, timestamp);
+  // Wakes and requeued deferred work join the detached mempool outside
+  // admission, so even an uncapped Runtime bounds the frame by the per-input
+  // limit; the remainder waits for the next frame.
+  deps.applyEntityInputFrameCap(
+    input,
+    mempool,
+    Math.min(state.maxEntityInputsPerFrame || LIMITS.MAX_RUNTIME_INPUT_ENTITY_INPUTS, LIMITS.MAX_RUNTIME_INPUT_ENTITY_INPUTS),
+    timestamp,
+  );
+  applyJInputFrameCap(input, mempool, timestamp);
   frame.inputForRequeue = input;
 
   if (ACCOUNT_CAUSAL_TRACE) {

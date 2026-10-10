@@ -3,6 +3,7 @@ import { safeStringify } from '../../protocol/serialization';
 import { MAX_ENTITY_FRAME_J_RANGE_BYTES } from '../../jurisdiction/machine/range-budget';
 import type { EntityTx } from '../../types/entity-tx';
 import type { RuntimeReplica, RuntimeInput, RoutedEntityInput } from '../types';
+import type { JInput } from '../../jurisdiction/machine/input';
 import { isCheckpointBarrierRuntimeTx } from '../checkpoint/barrier';
 
 export const MAX_RUNTIME_J_INPUTS = 256;
@@ -16,16 +17,59 @@ export const MAX_RUNTIME_J_INPUT_BYTES = MAX_ENTITY_FRAME_J_RANGE_BYTES + 1024 *
 
 type RejectRuntimeInput = (message: string) => never;
 
+export type RuntimeInputLimitOptions = {
+  /**
+   * Per-frame count and byte limits. A whole detached mempool (plus automatic
+   * wakes and requeued deferred work) legitimately exceeds them: the frame
+   * caps select a prefix within them, and that prefix is validated with them.
+   */
+  frameLimits?: boolean;
+};
+
+const jInputBytes = (input: JInput): number => new TextEncoder().encode(safeStringify(input)).byteLength;
+
+/**
+ * Longest jInput prefix within the per-frame J limits. A single jInput above
+ * them is still taken, so validation names it instead of deferring forever.
+ */
+export const runtimeJInputFramePrefixLength = (jInputs: readonly JInput[]): number => {
+  let totalTxs = 0;
+  let totalBytes = 0;
+  const txsByJurisdiction = new Map<string, number>();
+  for (const [index, input] of jInputs.entries()) {
+    // Frame selection runs before validation; a malformed jInput weighs 0
+    // here and is rejected by name when its frame validates.
+    const jurisdictionName = String(input?.jurisdictionName || '');
+    const txs = Array.isArray(input?.jTxs) ? input.jTxs.length : 0;
+    const nextTxs = totalTxs + txs;
+    const nextJurisdictionTxs = (txsByJurisdiction.get(jurisdictionName) ?? 0) + txs;
+    const nextBytes = totalBytes + jInputBytes(input);
+    if (
+      index > 0 && (
+        index >= MAX_RUNTIME_J_INPUTS ||
+        nextTxs > MAX_RUNTIME_J_TXS ||
+        nextJurisdictionTxs > MAX_RUNTIME_J_TXS_PER_JURISDICTION ||
+        nextBytes > MAX_RUNTIME_J_INPUT_BYTES
+      )
+    ) return index;
+    totalTxs = nextTxs;
+    totalBytes = nextBytes;
+    txsByJurisdiction.set(jurisdictionName, nextJurisdictionTxs);
+  }
+  return jInputs.length;
+};
+
 const validateRuntimeJIngressLimits = (
   env: RuntimeReplica,
   runtimeInput: RuntimeInput,
   reject: RejectRuntimeInput,
+  frameLimits: boolean,
 ): void => {
   if (runtimeInput.jInputs === undefined) return;
   if (!Array.isArray(runtimeInput.jInputs)) {
     reject(`Invalid jInputs: expected array, got ${typeof runtimeInput.jInputs}`);
   }
-  if (runtimeInput.jInputs.length > MAX_RUNTIME_J_INPUTS) {
+  if (frameLimits && runtimeInput.jInputs.length > MAX_RUNTIME_J_INPUTS) {
     reject(`Too many J inputs: ${runtimeInput.jInputs.length} > ${MAX_RUNTIME_J_INPUTS}`);
   }
 
@@ -38,6 +82,7 @@ const validateRuntimeJIngressLimits = (
     if (!env.state.jReplicas.has(jurisdictionName)) {
       reject(`Unknown J jurisdiction: ${jurisdictionName}`);
     }
+    if (!frameLimits) continue;
     totalTxs += input.jTxs.length;
     if (totalTxs > MAX_RUNTIME_J_TXS) {
       reject(`Too many J transactions: ${totalTxs} > ${MAX_RUNTIME_J_TXS}`);
@@ -50,7 +95,7 @@ const validateRuntimeJIngressLimits = (
       );
     }
     txsByJurisdiction.set(jurisdictionName, jurisdictionTxs);
-    totalBytes += new TextEncoder().encode(safeStringify(input)).byteLength;
+    totalBytes += jInputBytes(input);
     if (totalBytes > MAX_RUNTIME_J_INPUT_BYTES) {
       reject(`J payload too large: ${totalBytes} > ${MAX_RUNTIME_J_INPUT_BYTES}`);
     }
@@ -66,7 +111,9 @@ export const validateRuntimeInputShapeAndLimits = (
   env: RuntimeReplica,
   runtimeInput: RuntimeInput,
   reject: RejectRuntimeInput,
+  options: RuntimeInputLimitOptions = {},
 ): void => {
+  const frameLimits = options.frameLimits !== false;
   if (!runtimeInput) reject('Null runtime input provided');
   if (!Array.isArray(runtimeInput.runtimeTxs)) {
     reject(`Invalid runtimeTxs: expected array, got ${typeof runtimeInput.runtimeTxs}`);
@@ -86,7 +133,8 @@ export const validateRuntimeInputShapeAndLimits = (
   ) {
     reject('Checkpoint barrier must be the only item in its Runtime input');
   }
-  validateRuntimeJIngressLimits(env, runtimeInput, reject);
+  validateRuntimeJIngressLimits(env, runtimeInput, reject, frameLimits);
+  if (!frameLimits) return;
   if (runtimeInput.runtimeTxs.length > LIMITS.MAX_RUNTIME_INPUT_RUNTIME_TXS) {
     reject(
       `Too many runtime transactions: ${runtimeInput.runtimeTxs.length} > ` +

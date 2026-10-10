@@ -32,6 +32,7 @@ import {
   summarizeAtomicCrossJAccountInput,
 } from '../cross-j/evidence';
 import { validateRuntimeInputIngress, type RuntimeInputAdmissionDeps } from './admission';
+import type { RuntimeInputLimitOptions } from '../../mempool/input-validation';
 import type { RejectedEntityIngressEvidence } from './discard';
 import { advanceAppliedRuntimeFrame, buildAppliedRuntimeInput } from './finalize';
 import { safeStringify } from '../../../protocol/serialization';
@@ -72,7 +73,7 @@ type AppliedRuntimeInput = {
 
 export type RuntimeInputReducer = {
   (env: RuntimeReplica, runtimeInput: RuntimeInput): Promise<AppliedRuntimeInput>;
-  validate(env: RuntimeReplica, runtimeInput: RuntimeInput): void;
+  validate(env: RuntimeReplica, runtimeInput: RuntimeInput, options?: RuntimeInputLimitOptions): void;
 };
 
 type ApplyProfiler = {
@@ -366,11 +367,11 @@ export const createRuntimeInputReducer = (
       throw error;
     }
   };
-  reducer.validate = (env, runtimeInput): void => {
+  reducer.validate = (env, runtimeInput, options): void => {
     preparedIngress = {
       env,
       runtimeInput,
-      prepared: validateRuntimeInputIngress(env, runtimeInput, deps.isReplay(env), deps),
+      prepared: validateRuntimeInputIngress(env, runtimeInput, deps.isReplay(env), deps, options),
     };
   };
   return reducer;

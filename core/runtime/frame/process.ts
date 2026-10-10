@@ -606,11 +606,11 @@ const applyAndCommitRuntimeFrame = async (
     state = rollback.state;
     return rollback.error;
   };
-  // Preflight the whole accepted ingress before any state mutation so one
-  // malformed tail cannot commit a valid prefix. Frame caps below then split
-  // execution from deferred RAM work and revalidate only the selected frame.
+  // Preflight every accepted input's shape before mutation so a malformed tail
+  // cannot commit a valid prefix. Frame caps then select a prefix that is
+  // revalidated with the per-frame counts the whole ingress may exceed.
   candidate.state.runtimeFramePhase = 'candidate.validate';
-  deps.applyRuntimeInput.validate(candidate.env, candidate.runtimeInput);
+  deps.applyRuntimeInput.validate(candidate.env, candidate.runtimeInput, { frameLimits: false });
   candidate.state.runtimeFramePhase = 'candidate.prepare';
   const applied = await applyRuntimeFrameCandidate(env, state, candidate, frame, profile, deps);
   candidate.state.runtimeFramePhase = 'outputs.plan';
