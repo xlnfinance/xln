@@ -2,10 +2,7 @@
 
 import { createHash } from 'node:crypto';
 import { drainJWatcherBacklog } from '../../../jurisdiction/adapter/operations/backlog-drain';
-import {
-  createDirectRuntimeWsRoute,
-  hasUndeliveredDirectRuntimeSessionBytes,
-} from '../../../network/p2p/direct-runtime-bun';
+import { createDirectRuntimeWsRoute } from '../../../network/p2p/direct-runtime-bun';
 import { assertRuntimeEntityInputsEnvelopeSource } from '../../../runtime/admit/entity-input-envelope-auth.ts';
 import { compareStableText, safeStringify } from '../../../protocol/serialization';
 import { decodeRuntimeAdapterRequest } from '../../../api/runtime-adapter/codec';
@@ -47,8 +44,13 @@ import { readRuntimeSecurityIncidentTelemetry } from '../../../runtime/observabi
 import { requiresLocalNodeOperator } from '../../../api/server/control/node-http-access';
 import { resolveRuntimeAdminControl } from '../../../api/server/control/runtime-admin';
 import { computeCanonicalStateHashFromEnv } from '../../../storage/canonical-hash';
-import type { RuntimeReplica } from '../../../runtime/types';
-import { haltRuntimeRequiresOperator } from '../../../runtime/replica/lifecycle';
+import type { RuntimeEntityInputsEnvelope, RuntimeReplica } from '../../../runtime/types';
+import {
+  handleDirectDeliveryFailure,
+  handleDirectSessionClose,
+  type DirectEntityInputDebug,
+  type DirectInputDebugState,
+} from '../../hub/hub-runtime-transport';
 import {
   evaluateBootstrapProgressDeadline,
   isBootstrapWorkWithinDeadline,
@@ -156,15 +158,6 @@ import {
   maintainMarketMakerCrossQuotes,
   planMarketMakerBootstrapCrossQuoteRoutes,
 } from './mm-node-health';
-
-type DirectEntityInputDebug = {
-  at: number;
-  fromRuntimeId: string;
-  entityIds: string[];
-  signerIds: string[];
-  txTypes: string[];
-  error?: string;
-};
 
 type MarketMakerQuoteMode = 'bootstrap' | 'steady';
 
@@ -2055,8 +2048,7 @@ type MarketMakerNodeState = {
   bootstrapCrossStarted: boolean;
   bootstrapCrossPlanJobCount: number | null;
   bootstrapCrossProducerAttempted: boolean;
-  lastDirectInput: DirectEntityInputDebug | null;
-  lastDirectInputError: DirectEntityInputDebug | null;
+  directInput: DirectInputDebugState;
   shuttingDown: boolean;
   stopRuntimeLoops: () => void;
 };
@@ -2086,8 +2078,7 @@ const createMarketMakerNodeContext = (
     bootstrapCrossStarted: false,
     bootstrapCrossPlanJobCount: null,
     bootstrapCrossProducerAttempted: false,
-    lastDirectInput: null,
-    lastDirectInputError: null,
+    directInput: { lastSeen: null, lastError: null },
     shuttingDown: false,
     stopRuntimeLoops: () => {
       state.shuttingDown = true;
@@ -2110,12 +2101,66 @@ const createMarketMakerNodeContext = (
       restoredEntityStateHash,
       readyAt: state.bootstrapReadyAt,
     }),
-    directInput: () => ({
-      lastSeen: state.lastDirectInput,
-      lastError: state.lastDirectInputError,
-    }),
+    directInput: () => state.directInput,
   });
   return { env, state, health, emit, checkpoint };
+};
+
+const admitMarketMakerDirectEntityInputs = (
+  env: RuntimeReplica,
+  isIngressReady: () => boolean,
+  debug: DirectInputDebugState,
+  from: string,
+  envelope: RuntimeEntityInputsEnvelope,
+  ingressTimestamp: number | undefined,
+  sessionAuthenticated: boolean,
+): void => {
+  if (!isIngressReady()) throw new Error('RUNTIME_STARTUP_J_CATCHUP_PENDING');
+  const entry: DirectEntityInputDebug = {
+    at: Date.now(),
+    fromRuntimeId: String(from || ''),
+    entityIds: envelope.entityInputs.map(input => String(input.entityId || '')),
+    signerIds: envelope.entityInputs.map(input => String(input.signerId || '')),
+    txTypes: envelope.entityInputs.flatMap(input => (input.entityTxs || []).map(tx => String(tx?.type || ''))),
+  };
+  debug.lastSeen = entry;
+  try {
+    assertRuntimeEntityInputsEnvelopeSource(env, from, envelope, sessionAuthenticated);
+    handleInboundP2PEntityInputs(env, from, envelope, ingressTimestamp, {
+      envelopeSourceVerified: true,
+      entityInputsValidated: true,
+    });
+  } catch (error) {
+    debug.lastError = { ...entry, error: error instanceof Error ? error.message : String(error) };
+    throw error;
+  }
+};
+
+/**
+ * MM ingress-only direct route. Any runtime that completes the hello handshake,
+ * and any Hub that answers an MM output with an error, reaches these callbacks,
+ * so they share the Hub's reject-policy handlers: a peer-caused failure is
+ * logged or closes that peer session; it never halts the MM Runtime.
+ */
+export const createMarketMakerDirectRuntimeRoute = (
+  env: RuntimeReplica,
+  runtimeSeed: string,
+  isIngressReady: () => boolean,
+  debug: DirectInputDebugState,
+): ReturnType<typeof createDirectRuntimeWsRoute> => {
+  const route: ReturnType<typeof createDirectRuntimeWsRoute> = createDirectRuntimeWsRoute({
+    runtimeId: String(env.runtimeId || ''),
+    runtimeSeed,
+    onRecoveryBundleRequest: async (_from, lookupKey) =>
+      resolveRuntimeAdapterRead({ env }, `recovery/bundles/${encodeURIComponent(lookupKey)}`),
+    onDeliveryFailure: failure => handleDirectDeliveryFailure(env, debug, () => route, failure),
+    onSessionClose: failure => handleDirectSessionClose(env, failure),
+    onEntityInputs: async (from, envelope, ingressTimestamp, sessionAuthenticated) =>
+      admitMarketMakerDirectEntityInputs(
+        env, isIngressReady, debug, from, envelope, ingressTimestamp, sessionAuthenticated === true,
+      ),
+  });
+  return route;
 };
 
 type StartedMarketMakerServices = {
@@ -2134,60 +2179,12 @@ const startMarketMakerServices = async (context: MarketMakerNodeContext): Promis
     gossipSet: 'default',
   });
   if (!p2p) throw new Error('P2P_START_FAILED');
-  const directRuntimeWs = createDirectRuntimeWsRoute({
-    runtimeId: String(env.runtimeId || ''),
-    runtimeSeed: resolvedArgs.seed,
-    onRecoveryBundleRequest: async (_from, lookupKey) =>
-      resolveRuntimeAdapterRead({ env }, `recovery/bundles/${encodeURIComponent(lookupKey)}`),
-    onDeliveryFailure: failure => {
-      const error = new Error(`DIRECT_ACCOUNT_DELIVERY_FATAL:${safeStringify(failure)}`);
-      state.lastDirectInputError = {
-        at: Date.now(),
-        fromRuntimeId: failure.peerRuntimeId,
-        entityIds: failure.envelope?.entityInputs.map(input => String(input.entityId || '')) ?? [],
-        signerIds: failure.envelope?.entityInputs.map(input => String(input.signerId || '')) ?? [],
-        txTypes: failure.envelope?.entityInputs.flatMap(input =>
-          (input.entityTxs || []).map(tx => String(tx?.type || ''))
-        ) ?? [],
-        error: error.message,
-      };
-      env.error?.('network', 'DIRECT_ACCOUNT_DELIVERY_FATAL', failure);
-      haltRuntimeRequiresOperator(env, error);
-    },
-    onSessionClose: failure => {
-      if (!hasUndeliveredDirectRuntimeSessionBytes(failure)) {
-        env.warn?.('network', 'DIRECT_RUNTIME_PEER_OFFLINE', failure);
-        return;
-      }
-      const error = new Error(`DIRECT_RUNTIME_SESSION_CLOSED:${safeStringify(failure)}`);
-      env.error?.('network', 'DIRECT_RUNTIME_SESSION_CLOSED', failure);
-      haltRuntimeRequiresOperator(env, error);
-    },
-    onEntityInputs: async (from, envelope, ingressTimestamp, sessionAuthenticated) => {
-      if (!state.externalIngressReady) throw new Error('RUNTIME_STARTUP_J_CATCHUP_PENDING');
-      const debugEntry: DirectEntityInputDebug = {
-        at: Date.now(),
-        fromRuntimeId: String(from || ''),
-        entityIds: envelope.entityInputs.map(input => String(input.entityId || '')),
-        signerIds: envelope.entityInputs.map(input => String(input.signerId || '')),
-        txTypes: envelope.entityInputs.flatMap(input => (input.entityTxs || []).map(tx => String(tx?.type || ''))),
-      };
-      state.lastDirectInput = debugEntry;
-      try {
-        assertRuntimeEntityInputsEnvelopeSource(env, from, envelope, sessionAuthenticated === true);
-        handleInboundP2PEntityInputs(env, from, envelope, ingressTimestamp, {
-          envelopeSourceVerified: true,
-          entityInputsValidated: true,
-        });
-      } catch (error) {
-        state.lastDirectInputError = {
-          ...debugEntry,
-          error: error instanceof Error ? error.message : String(error),
-        };
-        throw error;
-      }
-    },
-  });
+  const directRuntimeWs = createMarketMakerDirectRuntimeRoute(
+    env,
+    resolvedArgs.seed,
+    () => state.externalIngressReady,
+    state.directInput,
+  );
   // MM is a client of Hub Runtime servers. Its outbound AccountInput path is
   // the authenticated MM -> Hub duplex client owned by RuntimeP2P; installing
   // server dispatch here made MM look for H1 in the wrong inbound-session map.
@@ -2213,8 +2210,8 @@ const startMarketMakerServices = async (context: MarketMakerNodeContext): Promis
           entityId,
           counterpartyEntityId,
           tokenIds,
-          state.lastDirectInput,
-          state.lastDirectInputError,
+          state.directInput.lastSeen,
+          state.directInput.lastError,
         ),
       buildInfoResponseJson: health.buildInfoResponse,
       readCachedInfoResponseJson: health.readInfoResponseJson,
@@ -2375,7 +2372,7 @@ const createMarketMakerQuoteLifecycle = (
     primaryContext,
     phase: () => state.phase,
     checkpoint: context.checkpoint,
-    directInput: () => ({ lastSeen: state.lastDirectInput, lastError: state.lastDirectInputError }),
+    directInput: () => state.directInput,
     emit,
   });
   const loops = createMarketMakerMaintenanceLoops({

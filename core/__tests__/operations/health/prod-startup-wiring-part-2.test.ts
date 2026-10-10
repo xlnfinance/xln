@@ -413,7 +413,8 @@ describe('production startup wiring', () => {
       'type StartedMarketMakerServices =',
     );
     expect(mmContext).toContain('externalIngressReady: false,');
-    expect(mmSource).toContain("if (!state.externalIngressReady) throw new Error('RUNTIME_STARTUP_J_CATCHUP_PENDING');");
+    expect(mmSource).toContain("if (!isIngressReady()) throw new Error('RUNTIME_STARTUP_J_CATCHUP_PENDING');");
+    expect(mmSource).toContain('() => state.externalIngressReady,\n    state.directInput,');
     expect(mmSource).toContain('isMutatingIngressReady: () => state.externalIngressReady,');
 
     const orchestrator = readOrchestratorSource();

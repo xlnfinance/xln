@@ -101,7 +101,7 @@ type DirectRuntimeRoute = ReturnType<typeof createDirectRuntimeWsRoute>;
  * production logs, closes that peer session and leaves the outbox rows for the
  * outbox owner. Never a retry.
  */
-const handleDirectDeliveryFailure = (
+export const handleDirectDeliveryFailure = (
   env: RuntimeReplica,
   debug: DirectInputDebugState,
   getRoute: () => DirectRuntimeRoute,
@@ -133,7 +133,7 @@ const handleDirectDeliveryFailure = (
   });
 };
 
-const handleDirectSessionClose = (
+export const handleDirectSessionClose = (
   env: RuntimeReplica,
   failure: Parameters<NonNullable<Parameters<typeof createDirectRuntimeWsRoute>[0]['onSessionClose']>>[0],
 ): void => {
