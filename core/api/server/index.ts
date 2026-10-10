@@ -541,10 +541,6 @@ const maybeHandleRuntimeInfoApi = async (
     );
   }
 
-  if (pathname === '/api/watchtower-proxy' && (req.method === 'GET' || req.method === 'POST' || req.method === 'PUT')) {
-    return handleWatchtowerProxy(req);
-  }
-
   const qaResponse = await maybeHandleQaRequest(req, pathname, headers, { operatorAuthorized });
   if (qaResponse) return qaResponse;
 
@@ -801,9 +797,6 @@ const maybeHandleFinancialApi = (
     }
     return new Response(safeStringify(buildMarketPairCatalogForReplica(replica, hubEntityId)), { headers });
   }
-  if (pathname === '/api/tokens') {
-    return externalWalletApi.handleTokens();
-  }
   if (pathname === '/api/external-wallet/snapshot' && req.method === 'POST') {
     return externalWalletApi.handleWalletSnapshot(req);
   }
@@ -862,22 +855,11 @@ const handleApiAgainstCommittedState = async (
   req: Request,
   pathname: string,
   env: RuntimeReplica | null,
-  clientId: string,
   operatorAuthorized: boolean,
 ): Promise<Response> => {
   const headers = JSON_HEADERS;
-  if (req.method === 'OPTIONS') return new Response(null, { headers });
-  if (requiresLocalNodeOperator(new URL(req.url)) && !operatorAuthorized) {
-    return new Response(safeStringify({ error: 'Operator access required' }), {
-      status: 403,
-      headers,
-    });
-  }
-  const assistantResponse = await assistantProxy.handle(req, pathname, clientId);
-  if (assistantResponse) return assistantResponse;
   const controlResponse = await maybeHandleControlApi(req, pathname, env, headers);
   if (controlResponse) return controlResponse;
-  if (pathname.startsWith('/api/tron/')) return handleNativeRestProxy(req, headers);
   if (pathname === '/rpc' && req.method === 'POST') {
     return handleRuntimeRpcProxy({ req, pathname, env, relayStore, headers, operatorAuthorized });
   }
@@ -894,6 +876,26 @@ const handleApiAgainstCommittedState = async (
   return new Response(safeStringify({ error: 'Not found' }), { status: 404, headers });
 };
 
+/**
+ * Upstream proxies never read committed State. Answering them inside the
+ * committed-read lease let any public GET hold the frame writer for the
+ * upstream timeout (assistant 2.5 s, TRON 5 s, tokens 6 s, watchtower 30 s).
+ */
+const maybeHandleUpstreamApi = async (
+  req: Request,
+  pathname: string,
+  clientId: string,
+): Promise<Response | null> => {
+  const assistantResponse = await assistantProxy.handle(req, pathname, clientId);
+  if (assistantResponse) return assistantResponse;
+  if (pathname.startsWith('/api/tron/')) return handleNativeRestProxy(req, JSON_HEADERS);
+  if (pathname === '/api/watchtower-proxy' && (req.method === 'GET' || req.method === 'POST' || req.method === 'PUT')) {
+    return handleWatchtowerProxy(req);
+  }
+  if (pathname === '/api/tokens') return externalWalletApi.handleTokens();
+  return null;
+};
+
 const handleApi = async (
   req: Request,
   pathname: string,
@@ -901,6 +903,15 @@ const handleApi = async (
   clientId: string,
   operatorAuthorized: boolean,
 ): Promise<Response> => {
+  if (req.method === 'OPTIONS') return new Response(null, { headers: JSON_HEADERS });
+  if (requiresLocalNodeOperator(new URL(req.url)) && !operatorAuthorized) {
+    return new Response(safeStringify({ error: 'Operator access required' }), {
+      status: 403,
+      headers: JSON_HEADERS,
+    });
+  }
+  const upstreamResponse = await maybeHandleUpstreamApi(req, pathname, clientId);
+  if (upstreamResponse) return upstreamResponse;
   if (env && req.method === 'GET' && pathname === '/api/gossip/profile') {
     // Network refresh happens before the committed-State lease. A slow public
     // relay lookup must never delay the Runtime writer/WAL commit path.
@@ -911,7 +922,6 @@ const handleApi = async (
     req,
     pathname,
     env,
-    clientId,
     operatorAuthorized,
   );
   // GET handlers may await storage or network projections after reading live
