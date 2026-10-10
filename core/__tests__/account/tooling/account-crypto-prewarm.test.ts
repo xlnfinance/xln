@@ -3,9 +3,7 @@ import {
   clearSignerKeys,
   deriveSignerAddressSync,
   deriveSignerKeySync,
-  getCachedSignerAddress,
   getCachedSignerPrivateKey,
-  getCachedSignerPublicKey,
   getSignerPrivateKey,
   getSignerPrivateKeyIfAvailable,
   prewarmSignerLabels,
@@ -115,8 +113,6 @@ describe('signer cache prewarm', () => {
       expect(() => registerSignerKey(firstSeed, signerId, deriveSignerKeySync(firstSeed, signerId)))
         .toThrow('NUMERIC_SIGNER_REGISTRATION_FORBIDDEN');
       expect(() => getCachedSignerPrivateKey(firstSeed, signerId)).toThrow('NUMERIC_SIGNER_CACHE_LOOKUP_FORBIDDEN');
-      expect(() => getCachedSignerPublicKey(firstSeed, signerId)).toThrow('NUMERIC_SIGNER_CACHE_LOOKUP_FORBIDDEN');
-      expect(() => getCachedSignerAddress(firstSeed, signerId)).toThrow('NUMERIC_SIGNER_CACHE_LOOKUP_FORBIDDEN');
       const secondPrivateKey = getSignerPrivateKey({ runtimeSeed: secondSeed }, signerId);
       expect(Buffer.from(secondPrivateKey).toString('hex')).toBe(
         Buffer.from(deriveSignerKeySync(secondSeed, signerId)).toString('hex'),

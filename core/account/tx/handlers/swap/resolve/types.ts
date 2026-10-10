@@ -10,8 +10,6 @@ export type SwapResolveFailure = ApplyAccountTxRejected;
 export type ValidatedSwapResolve = {
   offerId: string;
   offer: SwapOffer;
-  canonicalGiveAmount: bigint;
-  canonicalWantAmount: bigint;
   canonicalQuantizedGive: bigint;
   canonicalQuantizedWant: bigint;
   canonicalPriceTicks: bigint;
@@ -19,7 +17,6 @@ export type ValidatedSwapResolve = {
   filledGive: bigint;
   filledWant: bigint;
   canonicalFillRatio: number;
-  exactFillRatio: { numerator: bigint; denominator: bigint };
   effectiveFeeTokenId: number;
   feeAmount: bigint;
 };

@@ -5,7 +5,6 @@ import {
   deriveSignerAddressSync,
   getLocalSignerPrivateKey,
   getSignerPublicKey,
-  registerSignerPublicKey,
   signAccountFrame,
   verifyAccountSignature,
 } from '../../../account/crypto';
@@ -13,7 +12,7 @@ import {
 const digest = `0x${'ab'.repeat(32)}`;
 
 describe('signer public-key binding', () => {
-  test('an externally cached key cannot impersonate a different EOA signer id', () => {
+  test('a signature from another runtime never verifies for a different EOA signer id', () => {
     const attackerEnv = {
       runtimeSeed: 'signer-public-key-binding-attacker',
       quietRuntimeLogs: true,
@@ -23,16 +22,9 @@ describe('signer public-key binding', () => {
       quietRuntimeLogs: true,
     };
     const victimId = deriveSignerAddressSync(victimEnv.runtimeSeed, '1');
-    const attackerPublicKey = getSignerPublicKey(attackerEnv, '1');
-    if (!attackerPublicKey) throw new Error('TEST_ATTACKER_PUBLIC_KEY_MISSING');
-    const victimPublicKey = getSignerPublicKey(victimEnv, '1');
-    if (!victimPublicKey) throw new Error('TEST_VICTIM_PUBLIC_KEY_MISSING');
+    getSignerPublicKey(victimEnv, '1');
 
     try {
-      expect(() => registerSignerPublicKey(victimEnv, victimId, attackerPublicKey)).toThrow(
-        'SIGNER_PUBLIC_KEY_MISMATCH',
-      );
-      registerSignerPublicKey(victimEnv, victimId, victimPublicKey);
       const attackerSignature = signAccountFrame(attackerEnv, '1', digest);
 
       expect(verifyAccountSignature(attackerEnv, victimId, digest, attackerSignature)).toBe(false);
@@ -66,18 +58,5 @@ describe('signer public-key binding', () => {
 
     expect(verifyAccountSignature(restartedEnv, signerId, digest, signature)).toBe(true);
     expect(verifyAccountSignature(restartedEnv, `0x${'11'.repeat(20)}`, digest, signature)).toBe(false);
-  });
-
-  test('external public-key registration rejects aliases without cryptographic identity', () => {
-    const env = { runtimeSeed: 'signer-alias-rejection' };
-    const publicKey = getSignerPublicKey(env, '1');
-    if (!publicKey) throw new Error('TEST_PUBLIC_KEY_MISSING');
-    try {
-      expect(() => registerSignerPublicKey(env, 'alice', publicKey)).toThrow(
-        'SIGNER_PUBLIC_KEY_ID_NOT_EOA',
-      );
-    } finally {
-      clearSignerKeys(env);
-    }
   });
 });

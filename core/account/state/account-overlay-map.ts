@@ -103,9 +103,6 @@ class AccountCollectionDraftView<K extends AccountStateMapKey, V>
   *entries(): MapIterator<[K, Readonly<V>]> {
     for (const [key, value] of this.#view.entries()) yield [key, value];
   }
-  *entriesWithPrefix(prefixBytes: Uint8Array): MapIterator<[K, Readonly<V>]> {
-    for (const [key, value] of this.#view.entriesWithPrefix(prefixBytes)) yield [key, value];
-  }
   *keys(): MapIterator<K> { for (const [key] of this.entries()) yield key; }
   *values(): MapIterator<Readonly<V>> { for (const [, value] of this.entries()) yield value; }
   [Symbol.iterator](): MapIterator<[K, Readonly<V>]> { return this.entries(); }

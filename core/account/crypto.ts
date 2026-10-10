@@ -27,7 +27,7 @@ type NativeSecp256k1 = {
   ecdsaVerify(signature: Uint8Array, message: Uint8Array, publicKey: Uint8Array): boolean;
 };
 
-export type SignerKeyEnv = {
+type SignerKeyEnv = {
   runtimeSeed?: Uint8Array | string | null | undefined;
   quietRuntimeLogs?: boolean | undefined;
 };
@@ -44,7 +44,6 @@ type SignerKeyStore = {
   privateKeys: Map<string, Uint8Array>;
   publicKeys: Map<string, Uint8Array>;
   addresses: Map<string, string>;
-  externalPublicKeys: Map<string, Uint8Array>;
   numericKeys: Map<string, NumericSignerKey>;
   mnemonic?: string;
 };
@@ -153,7 +152,6 @@ const createSignerKeyStore = (): SignerKeyStore => ({
   privateKeys: new Map(),
   publicKeys: new Map(),
   addresses: new Map(),
-  externalPublicKeys: new Map(),
   numericKeys: new Map(),
 });
 
@@ -415,48 +413,6 @@ const getExactRegisteredSignerAddress = (
   return address;
 };
 
-/**
- * Get cached signer public key (no derivation, cache-only)
- * Used by components that don't have env access
- */
-export function getCachedSignerPublicKey(scope: SignerKeyScope, signerId: string): Uint8Array | null {
-  const key = signerId.toLowerCase();
-  if (parseSignerIndex(key) !== null) {
-    throw new Error(`NUMERIC_SIGNER_CACHE_LOOKUP_FORBIDDEN: signerId=${key}`);
-  }
-  const store = getSignerKeyStore(scope);
-  const external = store?.externalPublicKeys.get(key);
-  if (external) return external;
-  const cached = store?.publicKeys.get(key);
-  if (cached) return cached;
-  // Try deriving from cached private key
-  const privateKey = store?.privateKeys.get(key);
-  if (!privateKey) return null;
-  const publicKey = secp256k1.getPublicKey(privateKey);
-  store!.publicKeys.set(key, publicKey);
-  return publicKey;
-}
-
-/**
- * Get cached signer address (no derivation, cache-only)
- * Used by components that don't have env access
- */
-export function getCachedSignerAddress(scope: SignerKeyScope, signerId: string): string | null {
-  const key = signerId.toLowerCase();
-  if (parseSignerIndex(key) !== null) {
-    throw new Error(`NUMERIC_SIGNER_CACHE_LOOKUP_FORBIDDEN: signerId=${key}`);
-  }
-  const store = getSignerKeyStore(scope);
-  const cached = store?.addresses.get(key);
-  if (cached) return cached;
-  // Try deriving from cached private key
-  const privateKey = store?.privateKeys.get(key);
-  if (!privateKey) return null;
-  const address = privateKeyToAddress(privateKey);
-  store!.addresses.set(key, address);
-  return address;
-}
-
 export function getSignerPrivateKeyIfAvailable(env: SignerKeyEnv, signerId: string): Uint8Array | null {
   const key = signerId.toLowerCase();
   if (parseSignerIndex(key) !== null) {
@@ -502,8 +458,6 @@ export function getSignerPublicKey(env: SignerKeyEnv, signerId: string): Uint8Ar
   const store = getSignerKeyStore(env);
   const exactRegistered = getExactRegisteredSignerPublicKey(env, key);
   if (exactRegistered) return exactRegistered;
-  const external = store?.externalPublicKeys.get(key);
-  if (external) return external;
   const cached = store?.publicKeys.get(key);
   if (cached) return cached;
 
@@ -556,43 +510,6 @@ export function registerSignerKey(
   store.privateKeys.set(key, privateKey);
   store.publicKeys.set(key, secp256k1.getPublicKey(privateKey));
   store.addresses.set(key, privateKeyToAddress(privateKey));
-  store.externalPublicKeys.delete(key);
-}
-
-export function registerSignerPublicKey(
-  scope: SignerKeyScope,
-  signerId: string,
-  publicKey: Uint8Array | string,
-): void {
-  const key = signerId.toLowerCase();
-  if (parseSignerIndex(key) !== null) {
-    throw new Error(`NUMERIC_SIGNER_REGISTRATION_FORBIDDEN: signerId=${key}`);
-  }
-  if (!isHexAddress(key)) {
-    throw new Error(`SIGNER_PUBLIC_KEY_ID_NOT_EOA: signerId=${key}`);
-  }
-  const bytes =
-    typeof publicKey === 'string'
-      ? Uint8Array.from(Buffer.from(publicKey.replace(/^0x/, ''), 'hex'))
-      : publicKey;
-  const derivedAddress = addressFromPublicKey(bytes);
-  if (!derivedAddress) {
-    throw new Error(`SIGNER_PUBLIC_KEY_INVALID: signerId=${key}`);
-  }
-  if (isHexAddress(key) && derivedAddress !== key) {
-    throw new Error(
-      `SIGNER_PUBLIC_KEY_MISMATCH: signerId=${key} derived=${derivedAddress}`
-    );
-  }
-  const canonicalBytes = secp256k1.Point.fromHex(bytes).toRawBytes(true);
-  const store = getSignerKeyStore(scope, true)!;
-  if (store.privateKeys.has(key)) return; // Local private key already proves the same EOA binding.
-  const existing = store.externalPublicKeys.get(key);
-  if (existing && !equalBytes(existing, canonicalBytes)) {
-    throw new Error(`SIGNER_PUBLIC_KEY_CONFLICT: signerId=${key}`);
-  }
-  store.externalPublicKeys.set(key, canonicalBytes);
-  store.publicKeys.delete(key);
 }
 
 /**
@@ -832,7 +749,6 @@ export function verifyAccountSignature(
     if (!quiet) {
       const store = getSignerKeyStore(env);
       console.warn(`⚠️ Available keys:`, Array.from(store?.publicKeys.keys() ?? []).map(k => k.slice(-4)));
-      console.warn(`⚠️ Available external keys:`, Array.from(store?.externalPublicKeys.keys() ?? []).map(k => k.slice(-4)));
     }
     return false;
   }

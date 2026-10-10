@@ -55,7 +55,6 @@ export {
   deriveSignerKeySync,
   getCachedSignerPrivateKey,
   registerSignerKey,
-  registerSignerPublicKey,
   clearSignerKeys,
   signAccountFrame,
   verifyAccountSignature,

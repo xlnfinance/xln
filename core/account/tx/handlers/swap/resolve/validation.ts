@@ -26,7 +26,6 @@ type ExecutionFill = {
   filledGive: bigint;
   filledWant: bigint;
   canonicalFillRatio: number;
-  exactFillRatio: { numerator: bigint; denominator: bigint };
   executionProvided: boolean;
 };
 
@@ -101,10 +100,8 @@ const deriveExecutionFill = (
   if (fillRatio > 0 && !executionProvided) {
     return failure(events, 'executionGiveAmount and executionWantAmount required for non-zero fills');
   }
-  const limitFilledGive = (offer.quantizedGive * BigInt(fillRatio)) / BigInt(MAX_SWAP_FILL_RATIO);
-  const limitFilledWant = (limitFilledGive * offer.quantizedWant + offer.quantizedGive - 1n) / offer.quantizedGive;
-  const filledGive = executionProvided ? executionGiveAmount! : limitFilledGive;
-  const filledWant = executionProvided ? executionWantAmount! : limitFilledWant;
+  const filledGive = executionGiveAmount ?? 0n;
+  const filledWant = executionWantAmount ?? 0n;
   const exactFillRatio = deriveExactSwapFillRatio(offer.quantizedGive, filledGive);
   const canonicalFillRatio = executionProvided ? exactFillRatioToUint16(exactFillRatio) : fillRatio;
   const exactRatioProvided = fillNumerator !== undefined || fillDenominator !== undefined;
@@ -124,7 +121,6 @@ const deriveExecutionFill = (
     filledGive,
     filledWant,
     canonicalFillRatio,
-    exactFillRatio,
     executionProvided,
   };
 };
@@ -249,8 +245,6 @@ export const validateSwapResolve = (
   return {
     offerId: tx.data.offerId,
     offer: canonical.offer,
-    canonicalGiveAmount: canonical.give,
-    canonicalWantAmount: canonical.want,
     canonicalQuantizedGive: canonical.quantizedGive,
     canonicalQuantizedWant: canonical.quantizedWant,
     canonicalPriceTicks: canonical.priceTicks,
@@ -258,7 +252,6 @@ export const validateSwapResolve = (
     filledGive: fill.filledGive,
     filledWant: fill.filledWant,
     canonicalFillRatio: fill.canonicalFillRatio,
-    exactFillRatio: fill.exactFillRatio,
     effectiveFeeTokenId: tx.data.feeTokenId ?? canonical.offer.wantTokenId,
     feeAmount: tx.data.feeAmount ?? 0n,
   };

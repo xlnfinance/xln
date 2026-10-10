@@ -32,8 +32,6 @@ export {
 } from '../../orderbook';
 export { listOpenSwapOffers } from '../../orderbook/open-swap-offers';
 export {
-  convertTokenPrecision,
-  FINANCIAL_CONSTANTS,
   formatTokenAmount,
   parseTokenAmount,
 } from '../../account/financial-utils';

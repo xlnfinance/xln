@@ -78,26 +78,12 @@ const planLocalAccountTxAdmission = (
 };
 
 /**
- * Admit one locally authorized Account transaction into the future-frame
- * mempool. This policy belongs to the Account machine even though an EntityTx
- * commonly produces the command.
+ * Apply the local-only branch of the canonical AccountInput boundary.
  *
  * Separately authorized payments retain multiplicity: identical payment bytes
  * still represent distinct money movement. Protocol lifecycle commands are
  * idempotent by exact payload across both queued and pending-frame work.
  */
-export const admitLocalAccountTx = (
-  account: AccountReplica,
-  tx: AccountTx,
-  jClaimNodeStore: AccountJClaimNodeStore,
-): boolean => {
-  assertAccountTxsAdmissible([tx]);
-  const { admitted } = planLocalAccountTxAdmission(account, [tx], jClaimNodeStore);
-  appendAccountMempoolTxs(account, admitted, 'account:localAdmission');
-  return admitted.length === 1;
-};
-
-/** Apply the local-only branch of the canonical AccountInput boundary. */
 export const applyAccountEnqueue = (
   account: AccountReplica,
   input: AccountTxBatch,

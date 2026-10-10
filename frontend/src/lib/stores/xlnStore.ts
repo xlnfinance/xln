@@ -91,7 +91,6 @@ import type {
   NumberedRegistrationCommand,
   NumberedRegistrationCommandResult,
   EntityDisplayInfo,
-  FinancialConstants,
   CrossJurisdictionSwapRoute,
   Profile as GossipProfile,
 } from '@xln/core/api/public/runtime-module';
@@ -157,8 +156,6 @@ export interface FrontendXlnFunctions {
   getDefaultCreditLimit: XLNModule['getDefaultCreditLimit'];
   safeStringify: XLNModule['safeStringify'];
   parseTokenAmount: XLNModule['parseTokenAmount'];
-  convertTokenPrecision: XLNModule['convertTokenPrecision'];
-  FINANCIAL_CONSTANTS: FinancialConstants;
   getEntity: (entityId: string) => FrontendEntitySummary;
   getEntityShortId: XLNModule['getEntityShortId'];
   formatEntityDisplay: XLNModule['formatEntityDisplay'];
@@ -1810,8 +1807,6 @@ export const xlnFunctions = derived([xlnInstance, settings], ([$xlnInstance, $se
       getDefaultCreditLimit: failFn('getDefaultCreditLimit'),
       safeStringify: failFn('safeStringify'),
       parseTokenAmount: failFn('parseTokenAmount'),
-      convertTokenPrecision: failFn('convertTokenPrecision'),
-      FINANCIAL_CONSTANTS: {} as FinancialConstants,
       getEntity: failFn('getEntity'),
       getEntityShortId: failFn('getEntityShortId'),
       formatEntityDisplay: failFn('formatEntityDisplay'),
@@ -1869,8 +1864,6 @@ export const xlnFunctions = derived([xlnInstance, settings], ([$xlnInstance, $se
 
     // Financial utilities (ethers.js-based, precision-safe)
     parseTokenAmount: $xlnInstance.parseTokenAmount,
-    convertTokenPrecision: $xlnInstance.convertTokenPrecision,
-    FINANCIAL_CONSTANTS: $xlnInstance.FINANCIAL_CONSTANTS,
 
     // Entity utilities - UNIFIED ENTITY ACCESS
     getEntity: (entityId: string) => {

@@ -44,7 +44,7 @@ export const getDefaultRebalancePolicyForToken = (tokenId: number): RebalancePol
 export const getDefaultRebalanceBaseFeeForToken = (tokenId: number): bigint =>
   buildDefaultRebalanceBaseFee(tokenDecimals(tokenId));
 
-export type ResolvedRebalancePolicy = {
+type ResolvedRebalancePolicy = {
   r2cRequestSoftLimit: bigint;
   hardLimit: bigint;
   maxAcceptableFee: bigint;

@@ -166,10 +166,6 @@ export interface EntityDisplayInfo {
   type: 'numbered' | 'lazy' | 'named';
 }
 
-/** Exact financial utility shapes exported by runtime. */
-export type FinancialConstants =
-  typeof import('../../account/financial-utils').FINANCIAL_CONSTANTS;
-
 /**
  * Exact browser bundle namespace; no handwritten mirror may drift.
  *

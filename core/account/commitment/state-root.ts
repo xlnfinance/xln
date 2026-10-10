@@ -38,9 +38,9 @@ export type AccountStateRootDebugRecord = {
   entries: ReadonlyArray<readonly [path: string, value: unknown]>;
 };
 
-export type AccountStateSectionHashes = Readonly<Record<string, string>>;
+type AccountStateSectionHashes = Readonly<Record<string, string>>;
 
-export type AccountCommitmentSectionDetail = Readonly<{
+type AccountCommitmentSectionDetail = Readonly<{
   locksRoot: string;
   pullsRoot: string;
   swapOffersRoot: string;
@@ -60,7 +60,7 @@ export type AccountStateRootTiming = {
   mapStatus?: Record<string, AccountMapCommitmentTiming>;
 };
 
-export type AccountMapCommitmentTiming = {
+type AccountMapCommitmentTiming = {
   mode: 'persistent' | 'cold-oracle';
   entries: number;
   dirtyKeys: 0;

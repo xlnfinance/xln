@@ -30,36 +30,3 @@ export function parseTokenAmount(tokenId: number, humanAmount: string): bigint {
   const tokenInfo = getTokenInfo(tokenId);
   return parseUnits(humanAmount, tokenInfo.decimals);
 }
-
-/**
- * Convert between different token precisions while maintaining BigInt
- * Useful for cross-token calculations
- */
-export function convertTokenPrecision(
-  amount: bigint,
-  fromDecimals: number,
-  toDecimals: number
-): bigint {
-  if (fromDecimals === toDecimals) return amount;
-
-  if (fromDecimals > toDecimals) {
-    const divisor = 10n ** BigInt(fromDecimals - toDecimals);
-    return amount / divisor;
-  } else {
-    const multiplier = 10n ** BigInt(toDecimals - fromDecimals);
-    return amount * multiplier;
-  }
-}
-
-
-/**
- * Financial constants in proper BigInt format
- */
-export const FINANCIAL_CONSTANTS = {
-  ZERO: 0n,
-  ONE: 1n,
-  WEI_PER_ETH: 10n ** 18n,
-  USDC_DECIMALS: 6,
-  ETH_DECIMALS: 18,
-  DEFAULT_DECIMALS: 18,
-} as const;

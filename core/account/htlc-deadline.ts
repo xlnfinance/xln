@@ -3,7 +3,7 @@ export type HtlcEnforcementClock = Readonly<{
   jHeight: number;
 }>;
 
-export type HtlcDeadline = Readonly<{
+type HtlcDeadline = Readonly<{
   timelock: bigint;
   revealBeforeHeight: number;
 }>;

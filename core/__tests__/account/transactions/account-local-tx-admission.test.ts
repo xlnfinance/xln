@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { admitLocalAccountTx } from '../../../account/input/local-tx-admission';
+import { applyAccountEnqueue } from '../../../account/input/local-tx-admission';
 import { applyAccountInput } from '../../../account/consensus/index';
 import { proposeAccountFrame } from '../../../account/consensus/proposal/propose';
 import { prependUniqueMempoolTxs } from '../../../account/consensus/helpers';
@@ -79,7 +79,9 @@ describe('account mempool multiplicity', () => {
   test('keeps a second authorized payment while identical bytes are pending', () => {
     const account = accountWithPending(PAYMENT);
 
-    expect(admitLocalAccountTx(account, structuredClone(PAYMENT), jClaimNodeStore())).toBe(true);
+    const input = { kind: 'enqueue' as const, txs: [structuredClone(PAYMENT)] };
+    expect(applyAccountEnqueue(account, input, jClaimNodeStore()))
+      .toMatchObject({ ok: true, admittedAccountTxCount: 1 });
     expect(account.mempool).toEqual([PAYMENT]);
     expect(account.pendingFrame?.accountTxs).toEqual([PAYMENT]);
   });
@@ -91,7 +93,9 @@ describe('account mempool multiplicity', () => {
     };
     const account = accountWithPending(lifecycle);
 
-    expect(admitLocalAccountTx(account, structuredClone(lifecycle), jClaimNodeStore())).toBe(false);
+    const input = { kind: 'enqueue' as const, txs: [structuredClone(lifecycle)] };
+    expect(applyAccountEnqueue(account, input, jClaimNodeStore()))
+      .toMatchObject({ ok: true, admittedAccountTxCount: 0 });
     expect(account.mempool).toEqual([]);
   });
 
@@ -181,7 +185,8 @@ describe('account mempool multiplicity', () => {
       () => structuredClone(PAYMENT),
     );
 
-    expect(() => admitLocalAccountTx(account, structuredClone(PAYMENT), jClaimNodeStore()))
+    const input = { kind: 'enqueue' as const, txs: [structuredClone(PAYMENT)] };
+    expect(() => applyAccountEnqueue(account, input, jClaimNodeStore()))
       .toThrow('ACCOUNT_MEMPOOL_LIMIT_EXCEEDED');
     expect(account.mempool).toHaveLength(LIMITS.ACCOUNT_MEMPOOL_SIZE - 1);
     expect(account.pendingFrame?.accountTxs).toHaveLength(1);

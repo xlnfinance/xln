@@ -2,8 +2,6 @@ import type { AccountState } from '../../types/account';
 
 export type AccountPerspective = {
   iAmLeft: boolean;
-  from: string;
-  to: string;
   counterparty: string;
 };
 
@@ -17,8 +15,6 @@ export const getAccountPerspective = (account: AccountState, myEntityId: string)
   const iAmLeft = myEntityId === account.leftEntity;
   return {
     iAmLeft,
-    from: iAmLeft ? account.leftEntity : account.rightEntity,
-    to: iAmLeft ? account.rightEntity : account.leftEntity,
     counterparty: iAmLeft ? account.rightEntity : account.leftEntity,
   };
 };
