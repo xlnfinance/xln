@@ -1244,10 +1244,12 @@ const getHubSpecsArg = (): string => HUB_NAMES.join(',');
 
 const {
   getMarketMakerIdentities,
+  getHubIdentities,
   resolveLocalMarketMakerRpcUrl,
 } = createMarketMakerIdentityResolver({
   args,
   marketMakerChild,
+  hubChildren,
   requiredTokenCount: HUB_REQUIRED_TOKEN_COUNT,
 });
 
@@ -1740,7 +1742,7 @@ const spawnHub = createHubSpawner({
   startupTimeoutMs: STARTUP_TIMEOUT_MS,
   hubChildren,
   marketMakerChild,
-  getHubSpecsArg,
+  getHubIdentities,
   getMarketMakerIdentities,
   runtimeSeedFor,
   buildSecondaryRpcArgs,

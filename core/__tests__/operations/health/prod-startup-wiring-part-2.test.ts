@@ -1473,7 +1473,15 @@ describe('production startup wiring', () => {
     const driveMeshBootstrap = hubNode.slice(driveStart, driveEnd);
     expect(driveMeshBootstrap).toContain('getEntityJurisdiction(input.env, input.bootstrap.entityId)');
     expect(driveMeshBootstrap).toContain('readVisibleHubProfiles(input.env, jurisdiction)');
-    expect(driveMeshBootstrap).toContain('if (requiredProfiles.length !== resolvedArgs.meshHubNames.length) return false;');
+    // Mesh peers are the configured hub Entities, never self-declared names.
+    expect(driveMeshBootstrap).toContain('const mesh = bindHubMesh(');
+    expect(driveMeshBootstrap).toContain('if (!mesh.gossipReady) return false;');
+    expect(hubNode).not.toContain('meshHubNames');
+    expect(hubNode).toContain(
+      "const mesh = bindHubMesh(meshHubIdentities, selfJurisdiction, entityId ?? '', readVisibleHubProfiles(env, selfJurisdiction));",
+    );
+    expect(hubNode).toContain('const meshReady = Boolean(entityId) && hubMeshReady(mesh, pairs);');
+    expect(hubNode).not.toContain('profile.hubName || profile.name');
     expect(driveMeshBootstrap).toContain('const supportReady = supportPeerProvisioningReady(');
     expect(driveMeshBootstrap).toContain('input.milestones.reserveReady = await ensureHubMeshReserves(input);');
     const creditFence = driveMeshBootstrap.indexOf('if (!creditReady) return false;');

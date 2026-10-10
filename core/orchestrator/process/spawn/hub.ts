@@ -9,6 +9,7 @@ import { deriveEntityEncryptionPrivateKey } from '../../../runtime/registration/
 import { sanitizeChildProcessEnv } from '../../../api/server/child-process-env';
 import { writeInheritedChildSecrets } from '../../../support/process/child-secrets';
 import { deriveManagedEntityIdentity } from '../../daemon-control';
+import type { ManagedPeerIdentity } from '../../market-maker/identity-resolver';
 import type { Args, HubChild, ManagedRuntimeSpec, MarketMakerChild } from '../../orchestrator-types';
 import { buildPublicDirectWsUrl } from '../../replica-import/runtime-import-manifest';
 import {
@@ -28,11 +29,6 @@ import { buildRustHubProcessPlan, parseRustHubStatus } from '../hub-engine-plan'
 import { buildRustHubGenesisConfig } from '../rust-hub-genesis';
 import { createManagedRuntimeLeaseManager } from '../managed-runtime-leases';
 
-type MarketMakerSupportPeerIdentity = {
-  entityId: string;
-  signerId: string;
-};
-
 type RustIdentity = ReturnType<typeof deriveManagedEntityIdentity>;
 type LeaseManager = ReturnType<typeof createManagedRuntimeLeaseManager>;
 
@@ -44,8 +40,8 @@ export type HubSpawnerDeps = {
   startupTimeoutMs: number;
   hubChildren: readonly HubChild[];
   marketMakerChild: Pick<MarketMakerChild, 'seed'>;
-  getHubSpecsArg(): string;
-  getMarketMakerIdentities(): MarketMakerSupportPeerIdentity[];
+  getHubIdentities(): ManagedPeerIdentity[];
+  getMarketMakerIdentities(): ManagedPeerIdentity[];
   runtimeSeedFor(name: string): string;
   buildSecondaryRpcArgs(): string[];
   buildRpcChildEnv(): Record<string, string>;
@@ -168,8 +164,8 @@ const buildHubInvocation = (child: HubChild, deps: HubSpawnerDeps): HubInvocatio
     '--rpc-url',
     deps.args.rpcUrl,
     ...deps.buildSecondaryRpcArgs(),
-    '--mesh-hub-names',
-    deps.getHubSpecsArg(),
+    '--hub-identities-json',
+    safeStringify(deps.getHubIdentities()),
     '--support-peer-identities-json',
     safeStringify(deps.getMarketMakerIdentities()),
     '--db-path',

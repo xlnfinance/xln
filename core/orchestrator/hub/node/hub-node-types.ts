@@ -16,20 +16,10 @@ export type HubNodeArgs = {
   rpcUrl: string;
   rpc2Url: string;
   rpcUrls: Record<number, string>;
-  meshHubNames: string[];
+  hubIdentitiesJson: string;
   supportPeerIdentitiesJson: string;
   dbPath: string;
   deployTokens: boolean;
-};
-
-export type SupportPeerIdentity = {
-  name: string;
-  entityId: string;
-  signerId: string;
-  jurisdictionName: string;
-  chainId?: number;
-  depositoryAddress?: string;
-  jurisdictionRef: string;
 };
 
 export type HubPairHealth = {

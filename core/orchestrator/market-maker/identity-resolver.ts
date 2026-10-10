@@ -13,9 +13,11 @@ import {
   planMarketMakerIdentityLabels,
   type MarketMakerEntityJurisdictionConfig,
 } from '../mesh/mesh-common';
-import type { Args, MarketMakerChild } from '../orchestrator-types';
+import { deriveManagedEntityIdentity } from '../daemon-control';
+import type { Args, HubChild, MarketMakerChild } from '../orchestrator-types';
 
-export type MarketMakerSupportPeerIdentity = {
+/** A managed Entity as passed to hub and MM children, which parse it back. */
+export type ManagedPeerIdentity = {
   name: string;
   entityId: string;
   signerId: string;
@@ -27,6 +29,7 @@ export type MarketMakerSupportPeerIdentity = {
 type IdentityResolverDeps = {
   args: Pick<Args, 'host' | 'rpcUrl' | 'rpcUrls'>;
   marketMakerChild: Pick<MarketMakerChild, 'apiPort' | 'name' | 'seed' | 'signerLabel'>;
+  hubChildren: readonly Pick<HubChild, 'name' | 'seed' | 'signerLabel'>[];
   requiredTokenCount: number;
 };
 
@@ -63,7 +66,7 @@ export const createMarketMakerIdentityResolver = (deps: IdentityResolverDeps) =>
     jurisdiction: ResolvedMeshJurisdictionConfig,
     signerLabel: string,
     name: string,
-  ): MarketMakerSupportPeerIdentity => {
+  ): ManagedPeerIdentity => {
     const signerId = deriveSignerAddressSync(deps.marketMakerChild.seed, signerLabel).toLowerCase();
     const entityId = deriveMarketMakerEntityId(signerId, toJurisdictionConfig(jurisdiction));
     return {
@@ -80,7 +83,7 @@ export const createMarketMakerIdentityResolver = (deps: IdentityResolverDeps) =>
     jurisdiction: ResolvedMeshJurisdictionConfig,
     signerLabel: string,
     name: string,
-  ): MarketMakerSupportPeerIdentity[] => {
+  ): ManagedPeerIdentity[] => {
     const configuredTokenIds = getTokenIdsForJurisdiction({
       name: jurisdiction.name,
       chainId: jurisdiction.chainId,
@@ -92,7 +95,7 @@ export const createMarketMakerIdentityResolver = (deps: IdentityResolverDeps) =>
       buildIdentity(jurisdiction, plan.signerLabel, plan.profileName));
   };
 
-  const getMarketMakerIdentities = (): MarketMakerSupportPeerIdentity[] => {
+  const getMarketMakerIdentities = (): ManagedPeerIdentity[] => {
     resetMeshJurisdictionsCache();
     const primary = resolveMeshJurisdictionConfig(deps.args.rpcUrl);
     const identities = buildJurisdictionIdentities(
@@ -111,8 +114,42 @@ export const createMarketMakerIdentityResolver = (deps: IdentityResolverDeps) =>
     }
     return identities;
   };
+
+  const buildHubIdentities = (
+    jurisdiction: ResolvedMeshJurisdictionConfig,
+    labelSuffix: string,
+  ): ManagedPeerIdentity[] => deps.hubChildren.map(hub => {
+    const identity = deriveManagedEntityIdentity({
+      name: hub.name,
+      seed: hub.seed,
+      signerLabel: `${hub.signerLabel}${labelSuffix}`,
+    });
+    return {
+      name: hub.name,
+      entityId: identity.entityId,
+      signerId: identity.signerId,
+      jurisdictionName: jurisdiction.name,
+      chainId: Number(jurisdiction.chainId || 0),
+      depositoryAddress: jurisdiction.contracts.depository,
+    };
+  });
+
+  // Every hub Entity per jurisdiction, in hub order. Hub-node signs a sibling
+  // jurisdiction's Entity with `<label>:<jurisdiction name>`, and the board
+  // hash does not cover the jurisdiction, so the seed alone fixes each id.
+  const getHubIdentities = (): ManagedPeerIdentity[] => {
+    resetMeshJurisdictionsCache();
+    const primary = resolveMeshJurisdictionConfig(deps.args.rpcUrl);
+    const identities = buildHubIdentities(primary, '');
+    for (const [index, secondary] of resolveSecondaryJurisdictions(primary.rpc).entries()) {
+      const secondaryName = String(secondary.name || `Secondary ${index + 1}`).trim();
+      if (secondaryName) identities.push(...buildHubIdentities(secondary, `:${secondaryName}`));
+    }
+    return identities;
+  };
   return {
     getMarketMakerIdentities,
+    getHubIdentities,
     resolveLocalMarketMakerRpcUrl: resolveLocalRpcUrl,
   };
 };

@@ -4,7 +4,7 @@ import { HUB_BASELINE_TIMEOUT_MS, HUB_REQUIRED_TOKEN_COUNT } from '../orchestrat
 import { captureAuthorityEvidenceBase } from './authority-evidence-base';
 import { DEFAULT_ACCOUNT_TOKEN_IDS } from '../../account/config/defaults';
 import { getTokenIdsForJurisdiction } from '../../account/utils';
-import type { MarketMakerSupportPeerIdentity } from '../market-maker/identity-resolver';
+import type { ManagedPeerIdentity } from '../market-maker/identity-resolver';
 
 type BootstrapOwner = { entityId: string; signerId: string; jurisdictionName: string };
 
@@ -12,7 +12,7 @@ export const planNativeHubBootstrapPeers = (
   primaryEntityId: string,
   owners: readonly BootstrapOwner[],
   hubs: readonly { name: string; owners: readonly BootstrapOwner[] }[],
-  supportIdentities: readonly MarketMakerSupportPeerIdentity[],
+  supportIdentities: readonly ManagedPeerIdentity[],
 ) => owners.flatMap(owner => {
   // Match hub-node planMeshBootstrapInputs: named hub mesh belongs to the
   // primary Entity; MM Accounts belong to every jurisdiction's local owner.

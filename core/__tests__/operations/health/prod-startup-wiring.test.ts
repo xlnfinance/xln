@@ -753,8 +753,8 @@ describe('production startup wiring', () => {
       "XLN_LOG_LEVEL: process.env['XLN_MARKET_MAKER_LOG_LEVEL'] ?? process.env['XLN_LOG_LEVEL'] ?? 'warn'",
     );
     expect(orchestrator).not.toContain('XLN_MARKET_MAKER_SKIP_CROSS_BOOTSTRAP');
-    expect(orchestrator).toContain('const getMarketMakerIdentities = (): MarketMakerSupportPeerIdentity[] => {');
-    const identities = orchestrator.slice(orchestrator.indexOf('const getMarketMakerIdentities = (): MarketMakerSupportPeerIdentity[] => {'));
+    expect(orchestrator).toContain('const getMarketMakerIdentities = (): ManagedPeerIdentity[] => {');
+    const identities = orchestrator.slice(orchestrator.indexOf('const getMarketMakerIdentities = (): ManagedPeerIdentity[] => {'));
     expect(identities.indexOf('resetMeshJurisdictionsCache();')).toBeLessThan(identities.indexOf('resolveMeshJurisdictionConfig(deps.args.rpcUrl)'));
     expect(orchestrator).toMatch(/resetMeshJurisdictionsCache\(\);\s*const primary = resolveMeshJurisdictionConfig\(deps.args.rpcUrl\);/);
     expect(orchestrator).toContain(
@@ -805,8 +805,10 @@ describe('production startup wiring', () => {
     expect(hubNode).toContain('const readRpcUrls = (): Record<number, string> => {');
     expect(hubNode).toContain('const match = raw.match(/^\\/(?:api\\/)?rpc([2-8])?(?:\\?.*)?$/);');
     expect(hubNode).toContain('configuredSupportPeers');
-    expect(hubNode).toContain("jurisdictionName: normalizeJurisdictionDisplayName(entry['jurisdictionName'])");
-    expect(hubNode).toContain('SUPPORT_PEER_IDENTITIES_JSON_INVALID:malformed JSON');
+    expect(hubNode).toContain(
+      "parseConfiguredPeerIdentities(resolvedArgs.supportPeerIdentitiesJson, 'SUPPORT_PEER_IDENTITIES')",
+    );
+    expect(hubNode).toContain("parseConfiguredPeerIdentities(resolvedArgs.hubIdentitiesJson, 'HUB_IDENTITIES')");
     expect(hubNode).not.toContain('} catch {\n    return [];\n  }\n};\n\nconst resolvedArgs');
     expect(hubNode).not.toContain("normalized === 'arrakis'");
     expect(hubNode).not.toContain("normalized === 'wakanda'");
@@ -842,8 +844,9 @@ describe('production startup wiring', () => {
     expect(standaloneServer).not.toContain("const jName = 'arrakis';");
     expect(hubNode).toContain('selectWritableJurisdictionKey(jurisdictions, undefined, [rpcUrl, publicRpcUrl])');
     expect(hubNode).not.toContain("targetKey = 'arrakis'");
-    expect(hubNode).toContain('const jurisdictionRef = getJurisdictionIdentityRef({ chainId, depositoryAddress });');
-    expect(hubNode).toContain('!identity.jurisdictionRef');
+    const hubMeshPeers = readFileSync(join(repoRoot, 'core/orchestrator/mesh/hub-mesh-peers.ts'), 'utf8');
+    expect(hubMeshPeers).toContain('jurisdictionRef: getJurisdictionIdentityRef({ chainId, depositoryAddress }),');
+    expect(hubMeshPeers).toContain('!identity.jurisdictionRef');
     expect(mmNode).toContain('.filter(profile => profile.jurisdictionRef.length > 0)');
     expect(hubVisibleProfiles).toContain(
       'getJurisdictionIdentityRef(profile.metadata?.jurisdiction) === targetRef',
@@ -1217,7 +1220,7 @@ describe('production startup wiring', () => {
     expect(mmNode).toContain(
       'const targetAccount = getAccountReplica(env, targetContext.entityId, route.target.entityId);',
     );
-    expect(hubNode).toContain('configuredOwnerIndex > configuredPeerIndex');
+    expect(hubNode).toContain('ownerIndex > meshIndex &&');
     expect(hubNode).toContain('H2/H3 open toward H1 and H3');
   });
 });
