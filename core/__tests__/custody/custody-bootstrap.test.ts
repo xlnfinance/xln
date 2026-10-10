@@ -8,6 +8,7 @@ import {
   buildCustodyServiceLaunch,
   decodeDaemonControlCliResult,
   isPublicDaemonHealthReady,
+  runDaemonControl,
   stopManagedChild,
   waitForCustodyRouteableState,
   waitForHttpReady,
@@ -242,4 +243,21 @@ test('stopManagedChild fails loudly when neither signal reaches a live child', a
     stopManagedChild(child, { terminateTimeoutMs: 10, killTimeoutMs: 10 }),
   ).rejects.toThrow(/MANAGED_CHILD_STOP_TIMEOUT[\s\S]*SIGTERM_FAILED[\s\S]*SIGKILL_FAILED/);
   expect(signals).toEqual(['SIGTERM', 'SIGKILL']);
+});
+
+test('a failed daemon-control secret handshake rejects once and leaves no unhandled rejection', async () => {
+  const unhandled: unknown[] = [];
+  const onUnhandled = (reason: unknown): void => {
+    unhandled.push(reason);
+  };
+  process.on('unhandledRejection', onUnhandled);
+  try {
+    // `bun` cannot be resolved: the spawn fails and so does the secret write.
+    await expect(runDaemonControl(['setup-custody'], { PATH: '' }, { seed: 'daemon-control-seed' }))
+      .rejects.toBeInstanceOf(Error);
+    await Bun.sleep(50);
+    expect(unhandled).toEqual([]);
+  } finally {
+    process.off('unhandledRejection', onUnhandled);
+  }
 });

@@ -390,7 +390,7 @@ const isDaemonHealthReady = (_response: Response, bodyText: string): boolean => 
   }
 };
 
-const runDaemonControl = async (
+export const runDaemonControl = async (
   args: string[],
   env: NodeJS.ProcessEnv,
   secrets: ChildSecrets,
@@ -452,8 +452,10 @@ const runDaemonControl = async (
       }
     });
   });
-  await writeInheritedChildSecrets(proc, secrets);
-  return await result;
+  // One await owns both outcomes: a failed secret write must not leave the
+  // child's close rejection unobserved, which would end the orchestrator.
+  const [, payload] = await Promise.all([writeInheritedChildSecrets(proc, secrets), result]);
+  return payload;
 };
 
 const fetchDebugEntities = async (apiBaseUrl: string): Promise<DebugEntitySummary[]> => {
