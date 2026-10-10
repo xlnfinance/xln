@@ -6,6 +6,7 @@ import { computeRuntimePostStateComponentDigests, computeStoragePostStateHash } 
 import { buildReplayVerifiableRuntimePostStateView, buildStorageRuntimeMachineSnapshot } from '../../../../storage/wal/snapshot';
 import { prepareRuntimeOutputRows } from '../../../../storage/wal/outbox-payload';
 import type { PersistedFrameJournal } from '../../../../storage/types';
+import { assertRecoveryRuntimeMachineMatches } from '../../../../storage/recovery/machine';
 
 const SEED_SENTINEL = 'recovery-diagnostic-private-seed-sentinel';
 const KEY_SENTINEL = `0x${'ad'.repeat(32)}`;
@@ -80,4 +81,28 @@ test('empty snapshot infrastructure is named as diagnostic evidence and never be
   expect(diagnostic['componentMismatches']).toEqual(['infrastructure']);
   fixture.frame.postStateHash = fixture.actualHash;
   expect(() => verifyRecoveryJournalFrame(fixture.env, fixture.frame, 2, fixture.result)).not.toThrow();
+});
+
+test('a runtime-machine mismatch names the field without leaking its secret value', () => {
+  // The mismatch detail embedded raw field values, and machine fields include
+  // entity encryption seeds; the message reaches logs and incident journals.
+  const env = createEmptyEnv(SEED_SENTINEL);
+  if (!env.infrastructure) throw new Error('TEST_INFRASTRUCTURE_MISSING');
+  const entityId = `0x${'11'.repeat(32)}`;
+  const recordedSeed = `0x${'ad'.repeat(64)}`;
+  const liveSeed = `0x${'be'.repeat(64)}`;
+  env.infrastructure.entityEncryptionSeeds = new Map([[entityId, recordedSeed]]);
+  const recorded = buildStorageRuntimeMachineSnapshot(env);
+  env.infrastructure.entityEncryptionSeeds = new Map([[entityId, liveSeed]]);
+
+  let message = '';
+  try {
+    assertRecoveryRuntimeMachineMatches(env, recorded, 7);
+  } catch (error) {
+    message = String((error as Error).message);
+  }
+  expect(message).toContain('RECOVERY_JOURNAL_RUNTIME_MACHINE_MISMATCH:height=7');
+  expect(message).toContain('entityEncryptionSeeds');
+  expect(message).not.toContain('ad'.repeat(64));
+  expect(message).not.toContain('be'.repeat(64));
 });

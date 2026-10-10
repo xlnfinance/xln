@@ -122,16 +122,17 @@ export const assertRecoveryRuntimeMachineMatches = (
     firstField,
   );
   const actualValue = readMachineField(actualMachine, firstField);
+  // Digests only: machine fields include infrastructure.entityEncryptionSeeds,
+  // and this message reaches logs and incident journals.
+  const fieldEvidence = (value: unknown) => {
+    if (value === undefined) return { present: false };
+    const encoded = canonicalMachine({ value });
+    return { present: true, bytes: encoded.length, digest: ethers.keccak256(ethers.toUtf8Bytes(encoded)) };
+  };
   const detail = canonicalMachine({
-    actual:
-      actualValue === undefined
-        ? { present: false }
-        : { present: true, value: actualValue },
-    expected:
-      expectedValue === undefined
-        ? { present: false }
-        : { present: true, value: expectedValue },
-  }).slice(0, 5_000);
+    actual: fieldEvidence(actualValue),
+    expected: fieldEvidence(expectedValue),
+  });
   throw new Error(
     `RECOVERY_JOURNAL_RUNTIME_MACHINE_MISMATCH:height=${height}:` +
     `fields=${fields.join(',') || 'unknown'}:` +
