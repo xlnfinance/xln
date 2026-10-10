@@ -46,7 +46,7 @@ import {
   listConnectedMarketHubEntityIds,
 } from './hub/market-client';
 import { handleMarketCapRequest } from './hub/market-cap-http';
-import { assertMinDiskFree, getStorageHealth, getStorageHealthSnapshotSync } from '../support/storage-monitor';
+import { assertMinDiskFree, buildDiskSummary, getStorageHealth, getStorageHealthSnapshotSync } from '../support/storage-monitor';
 import { maybeHandleQaRequest } from '../qa/api';
 import { serveStaticApp } from '../api/server/static-assets';
 import { enforceFaucetPolicy } from '../api/server/faucet/policy';
@@ -178,7 +178,6 @@ import {
   resolveActiveResetOptions,
   type OrchestratorResetOptions,
 } from './process/reset-coordinator';
-import { buildDiskSummary } from './health/disk-health';
 import { completeResetStartup, planNativeHubBootstrapPeers, waitForNativeH1DeliveryReady } from './process/reset-startup';
 import {
   createBaselineWaitReporter,
