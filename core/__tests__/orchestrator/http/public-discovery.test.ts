@@ -98,4 +98,21 @@ describe('public discovery', () => {
       [TRON_HUB_ID, 'Tron'],
     ]);
   });
+
+  test('debug entities reject a malformed limit instead of returning an empty list', () => {
+    const relayStore = createRelayStore('debug-limit-test');
+    const hubChildren = [makeHubChild()];
+    const entries = (limit: string): number => getDebugEntityEntries({
+      requestUrl: new URL(`http://localhost/api/debug/entities?limit=${limit}`),
+      relayStore,
+      hubChildren,
+      serverTime: 1234,
+    }).length;
+
+    expect(entries('1')).toBe(1);
+    expect(entries('99999')).toBe(2);
+    for (const malformed of ['abc', '0', '-5', '1.5', '1e3']) {
+      expect(() => entries(malformed)).toThrow('DEBUG_ENTITY_LIMIT_INVALID');
+    }
+  });
 });
