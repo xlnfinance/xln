@@ -3,6 +3,7 @@ import type { ServerWebSocket } from 'bun';
 import type { RuntimeFailureSignal } from '../protocol/errors/failure-taxonomy';
 import type { RuntimeSecurityIncidentTelemetry } from '../protocol/errors/security-incident';
 import type { ManagedChild, ManagedIdentity } from './bootstrap/custody-bootstrap';
+import type { ChildFailureHistory } from './process/child-recovery-policy';
 import type { StorageHealth } from '../support/storage-monitor';
 
 export type Args = {
@@ -124,7 +125,7 @@ export type HubChild = HubProcessSpec & {
   restartTimer: ReturnType<typeof setTimeout> | null;
   restartCount: number;
   recoveryInProgress: boolean;
-  failureCounts: Record<string, number>;
+  failureCounts: ChildFailureHistory;
   lastHealth: HubHealthPayload | null;
   lastInfo: HubInfoPayload | null;
   recentStdout: string[];
@@ -554,7 +555,7 @@ export type MarketMakerChild = {
   restartTimer: ReturnType<typeof setTimeout> | null;
   restartCount: number;
   recoveryInProgress: boolean;
-  failureCounts: Record<string, number>;
+  failureCounts: ChildFailureHistory;
   lastHealth: MarketMakerHealthPayload | null;
   lastInfo: MarketMakerInfoPayload | null;
   lastStartupPhase: string | null;

@@ -57,6 +57,30 @@ describe('managed child recovery policy', () => {
     expect(new Set([first.fingerprint, second.fingerprint, third.fingerprint]).size).toBe(1);
   });
 
+  test('identical crashes hours apart recover; only a crash loop inside one hour fail-stops', () => {
+    const hour = 60 * 60_000;
+    const first = decideChildFailure({}, crash('RPC_RESPONSE_JSON_TRUNCATED'), 0);
+    const second = decideChildFailure(first.counts, crash('RPC_RESPONSE_JSON_TRUNCATED'), 3 * hour);
+    const third = decideChildFailure(second.counts, crash('RPC_RESPONSE_JSON_TRUNCATED'), 6 * hour);
+    expect([first, second, third].map(decision => [decision.action, decision.count])).toEqual([
+      ['recover', 1],
+      ['recover', 1],
+      ['recover', 1],
+    ]);
+
+    const loopSecond = decideChildFailure(third.counts, crash('RPC_RESPONSE_JSON_TRUNCATED'), 6 * hour + 30_000);
+    const loopThird = decideChildFailure(loopSecond.counts, crash('RPC_RESPONSE_JSON_TRUNCATED'), 6 * hour + 60_000);
+    expect(loopSecond).toMatchObject({ action: 'recover', count: 2 });
+    expect(loopThird).toMatchObject({ action: 'fail-stop', count: 3 });
+  });
+
+  test('failure history keeps only failures inside the window', () => {
+    const hour = 60 * 60_000;
+    const old = decideChildFailure({}, crash('JOURNAL_HASH_MISMATCH'), 0);
+    const later = decideChildFailure(old.counts, crash('MESH_PEER_TIMEOUT'), 2 * hour);
+    expect(Object.keys(later.counts)).toEqual([later.fingerprint]);
+  });
+
   test('tracks distinct failure reasons independently', () => {
     const first = decideChildFailure({}, crash('MESH_BOOTSTRAP_STALLED'));
     const different = decideChildFailure(first.counts, crash('JOURNAL_HASH_MISMATCH'));

@@ -1,6 +1,13 @@
 import { createHash } from 'node:crypto';
 
 const MAX_IDENTICAL_CHILD_FAILURES = 3;
+// A crash loop repeats within minutes (startup plus at most 10 s backoff).
+// Identical crashes further apart each ended in recovered service and must not
+// accumulate into a fail-stop of the whole production orchestrator.
+const IDENTICAL_CHILD_FAILURE_WINDOW_MS = 60 * 60_000;
+
+/** Failure times (ms) inside the window, per failure fingerprint. */
+export type ChildFailureHistory = Readonly<Record<string, readonly number[]>>;
 
 export type ChildFailureObservation = {
   role: 'hub' | 'market-maker' | 'orchestrator';
@@ -16,7 +23,7 @@ export type ChildFailureDecision = {
   count: number;
   fingerprint: string;
   reasonCode: string;
-  counts: Record<string, number>;
+  counts: ChildFailureHistory;
 };
 
 const stableReasonCode = (reason: string): string => {
@@ -67,9 +74,15 @@ export const selectChildFailureReason = (
     ?? defaultValue;
 };
 
+const recentFailureHistory = (history: ChildFailureHistory, nowMs: number): Record<string, number[]> =>
+  Object.fromEntries(Object.entries(history)
+    .map(([fingerprint, times]) => [fingerprint, times.filter(at => nowMs - at < IDENTICAL_CHILD_FAILURE_WINDOW_MS)] as const)
+    .filter(([, times]) => times.length > 0));
+
 export const decideChildFailure = (
-  counts: Readonly<Record<string, number>>,
+  counts: ChildFailureHistory,
   observation: ChildFailureObservation,
+  nowMs: number = Date.now(),
 ): ChildFailureDecision => {
   const reasonCode = stableReasonCode(observation.reason);
   const identity = [
@@ -80,14 +93,16 @@ export const decideChildFailure = (
     `reason=${reasonCode}`,
   ].join(':');
   const fingerprint = createHash('sha256').update(identity).digest('hex');
-  const count = (counts[fingerprint] ?? 0) + 1;
-  const nextCounts = { ...counts, [fingerprint]: count };
+  const recent = recentFailureHistory(counts, nowMs);
+  const failureTimes = [...(recent[fingerprint] ?? []), nowMs];
+  const count = failureTimes.length;
   const terminalBootstrapFailure = isTerminalBootstrapFailureReasonCode(reasonCode);
   const runtimeLoopFatal = isRuntimeLoopFatalReason(observation.reason);
   return {
     // A Runtime fatal must exit the broken child, but the first occurrence is
     // not evidence that the durable checkpoint is poisoned. Recover it
-    // immediately; only an identical crash loop exhausts the bounded budget.
+    // immediately; only an identical crash loop inside the window exhausts
+    // the bounded budget.
     action: terminalBootstrapFailure || count >= MAX_IDENTICAL_CHILD_FAILURES
       ? 'fail-stop'
       : 'recover',
@@ -95,6 +110,6 @@ export const decideChildFailure = (
     count,
     fingerprint,
     reasonCode,
-    counts: nextCounts,
+    counts: { ...recent, [fingerprint]: failureTimes },
   };
 };
