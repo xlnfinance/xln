@@ -1,5 +1,5 @@
 import { nativeRestProxyHost } from '../../api/server/rpc/tron-proxy';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, writeFileSync, writeSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { createJAdapter } from '../../jurisdiction/adapter';
 import type { JAdapter, JTokenInfo } from '../../jurisdiction/adapter/types';
@@ -269,6 +269,21 @@ const resolvePublicRpcPath = (
   return '/rpc';
 };
 
+// jurisdictions.json carries deployed contract addresses and the token
+// registry: a crash mid-write must leave the previous complete file, never a
+// truncated one.
+const writeJurisdictionsFileAtomic = (path: string, body: string): void => {
+  const tmpPath = `${path}.tmp-${process.pid}`;
+  const fd = openSync(tmpPath, 'w');
+  try {
+    writeSync(fd, body);
+    fsyncSync(fd);
+  } finally {
+    closeSync(fd);
+  }
+  renameSync(tmpPath, path);
+};
+
 export const readShardJurisdictions = (config: OrchestratorJurisdictionsConfig): string => {
   const canonicalPath = resolveJurisdictionsJsonPath();
   if (!existsSync(config.shardJurisdictionsPath)) {
@@ -285,7 +300,7 @@ export const readShardJurisdictions = (config: OrchestratorJurisdictionsConfig):
     if (shardVersion !== canonicalVersion) {
       shardPayload.version = canonicalVersion;
       const next = `${JSON.stringify(shardPayload, null, 2)}\n`;
-      writeFileSync(config.shardJurisdictionsPath, next, 'utf8');
+      writeJurisdictionsFileAtomic(config.shardJurisdictionsPath, next);
       return next;
     }
   } catch (error) {
@@ -686,7 +701,7 @@ export const seedShardJurisdictions = (config: OrchestratorJurisdictionsConfig):
     ? isolateEphemeralJurisdictions(config, rawSeed)
     : rawSeed;
   mkdirSync(dirname(config.shardJurisdictionsPath), { recursive: true });
-  writeFileSync(config.shardJurisdictionsPath, seed, 'utf8');
+  writeJurisdictionsFileAtomic(config.shardJurisdictionsPath, seed);
 };
 
 /**
@@ -715,5 +730,5 @@ export const syncCanonicalJurisdictionsFromShard = (config: OrchestratorJurisdic
   if (resolve(canonicalPath) === resolve(config.shardJurisdictionsPath)) return;
   const payload = readShardJurisdictions(config);
   mkdirSync(dirname(canonicalPath), { recursive: true });
-  writeFileSync(canonicalPath, payload, 'utf8');
+  writeJurisdictionsFileAtomic(canonicalPath, payload);
 };

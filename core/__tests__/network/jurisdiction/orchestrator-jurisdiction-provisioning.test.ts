@@ -1,5 +1,6 @@
 import { expect, test } from 'bun:test';
 import { spawn } from 'node:child_process';
+import { readdirSync, statSync } from 'node:fs';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -17,6 +18,7 @@ import {
   provisionPrimaryRpcJurisdictionStack,
   readShardJurisdictions,
   resetLocalAnvilChains,
+  syncCanonicalJurisdictionsFromShard,
   type OrchestratorJurisdictionsConfig,
 } from '../../../orchestrator/j-select/jurisdictions';
 import { createEmptyEnv, enqueueRuntimeInput, processRuntime } from '../../../runtime';
@@ -77,6 +79,32 @@ test('malformed shard jurisdiction config fails before version synchronization',
     await rm(root, { recursive: true, force: true });
   }
 });
+test('shard and canonical jurisdictions files are replaced atomically, never rewritten in place', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'xln-atomic-jurisdictions-'));
+  const shardPath = join(root, 'shard.json');
+  const canonicalPath = join(root, 'canonical.json');
+  const previousPath = process.env['XLN_JURISDICTIONS_PATH'];
+  process.env['XLN_JURISDICTIONS_PATH'] = canonicalPath;
+  try {
+    await writeFile(canonicalPath, safeStringify({ version: '7', jurisdictions: {} }), 'utf8');
+    await writeFile(shardPath, safeStringify({ version: '6', jurisdictions: {} }), 'utf8');
+    const shardInode = statSync(shardPath).ino;
+    const canonicalInode = statSync(canonicalPath).ino;
+
+    // The stale shard version is rewritten first, then copied over the canonical file.
+    syncCanonicalJurisdictionsFromShard({ shardJurisdictionsPath: shardPath, rpc2Url: '' });
+
+    expect(statSync(shardPath).ino).not.toBe(shardInode);
+    expect(statSync(canonicalPath).ino).not.toBe(canonicalInode);
+    expect(JSON.parse(await readFile(canonicalPath, 'utf8')).version).toBe('7');
+    expect(readdirSync(root).sort()).toEqual(['canonical.json', 'shard.json']);
+  } finally {
+    if (previousPath === undefined) delete process.env['XLN_JURISDICTIONS_PATH'];
+    else process.env['XLN_JURISDICTIONS_PATH'] = previousPath;
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 const reservePort = async (): Promise<number> => await new Promise((resolve, reject) => {
   const server = createServer();
   server.once('error', reject);
