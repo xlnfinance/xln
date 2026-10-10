@@ -7,6 +7,7 @@ import type {
   NumberedRegistrationCommand,
   NumberedRegistrationCommandResult,
   NumberedRegistrationRequest,
+  PendingNumberedRegistration,
   RuntimeReplica,
   RuntimeTx,
 } from '../../types';
@@ -195,22 +196,29 @@ export const registerNumberedEntities = (
   }));
 };
 
+const reportResumeFailure = (env: RuntimeReplica, record: PendingNumberedRegistration, error: unknown): void => {
+  const resolved = getNumberedRegistrationRecord(env, record.request.intentId);
+  const fields = { intentId: record.request.intentId, transactionHash: record.transactionHash };
+  if (resolved?.status === 'quarantined') {
+    env.warn('system', 'NUMBERED_REGISTRATION_RESUME_QUARANTINED', { ...fields, reason: resolved.reason });
+    return;
+  }
+  // The intent stays durably pending; the next resume scan retries this exact wire.
+  env.error('system', 'NUMBERED_REGISTRATION_RESUME_FAILED', {
+    ...fields,
+    error: error instanceof Error ? error.message : String(error),
+  });
+};
+
+// A resumed registration can wait up to 15 minutes each for mining, finality
+// and evidence. Each one runs in the background in isolation: startup ingress
+// and the other registrations never wait for, or fail with, one stuck wire.
 const resumePendingNumberedRegistrations = async (env: RuntimeReplica): Promise<void> => {
   const pending = [...(env.infrastructure?.numberedRegistrationIntents?.values() ?? [])]
-    .filter(record => record.status === 'pending')
+    .filter((record): record is PendingNumberedRegistration => record.status === 'pending')
     .sort((left, right) => left.transactionNonce - right.transactionNonce);
   for (const record of pending) {
-    try {
-      await enqueueRequest(env, record.request);
-    } catch (error) {
-      const resolved = getNumberedRegistrationRecord(env, record.request.intentId);
-      if (resolved?.status !== 'quarantined') throw error;
-      env.warn('system', 'NUMBERED_REGISTRATION_RESUME_QUARANTINED', {
-        intentId: record.request.intentId,
-        transactionHash: record.transactionHash,
-        reason: resolved.reason,
-      });
-    }
+    void enqueueRequest(env, record.request).catch(error => reportResumeFailure(env, record, error));
   }
 };
 

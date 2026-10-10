@@ -24,7 +24,7 @@ import {
   buildDurableRuntimeMachineSnapshot,
   restoreDurableRuntimeSnapshot,
 } from '../../../storage/wal/snapshot';
-import type { RuntimeReplica } from '../../../runtime/types';
+import type { PendingNumberedRegistration, RuntimeReplica } from '../../../runtime/types';
 import type { JurisdictionConfig } from '../../../entity/types';
 import type { JReplica } from '../../../types/jurisdiction-runtime';
 import { attachLiveJAdapter, detachLiveJAdapter, getLiveJAdapter } from '../../../runtime/j-submit/live-jadapters';
@@ -80,6 +80,42 @@ describe('durable numbered registration intent', () => {
     const later = ensurePendingNumberedRegistrationsResumed(env);
     expect(later).not.toBe(first);
     await later;
+  });
+
+  test('startup resume neither waits for nor fails with one pending registration', async () => {
+    // Resume awaited every registration to completion (up to 15 min per wait)
+    // and rethrew non-quarantine failures, so one stuck wire held node ingress
+    // closed and one failing intent aborted startup on every restart.
+    const env = createEmptyEnv('numbered-registration:resume-isolation');
+    const pending = (byte: string, transactionNonce: number) => ({
+      status: 'pending',
+      transactionNonce,
+      transactionHash: `0x${byte.repeat(32)}`,
+      request: { intentId: `0x${byte.repeat(32)}`, entities: [{ config: { jurisdiction: { chainId: 0 } } }] },
+    }) as unknown as PendingNumberedRegistration;
+    const stuck = pending('0a', 1);
+    const failing = pending('0b', 2);
+    env.infrastructure ??= {};
+    env.infrastructure.numberedRegistrationIntents = new Map([
+      [stuck.request.intentId, stuck],
+      [failing.request.intentId, failing],
+    ]);
+    env.infrastructure.numberedRegistrationDriver = {
+      inFlight: new Map([[stuck.request.intentId, new Promise(() => {})]]),
+      resumeRun: null,
+    };
+    const errors: string[] = [];
+    env.error = (_category, message) => { errors.push(message); };
+
+    const resumed = await Promise.race([
+      ensurePendingNumberedRegistrationsResumed(env).then(() => 'resumed'),
+      Bun.sleep(1_000).then(() => 'blocked'),
+    ]);
+    await Bun.sleep(0);
+
+    expect(resumed).toBe('resumed');
+    expect(errors).toEqual(['NUMBERED_REGISTRATION_RESUME_FAILED']);
+    expect(getNumberedRegistrationRecord(env, failing.request.intentId)?.status).toBe('pending');
   });
 
   test('a mined revert is durably quarantined and never rebroadcast', async () => {
