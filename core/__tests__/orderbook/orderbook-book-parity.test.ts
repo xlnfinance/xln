@@ -16,6 +16,8 @@ test('orderbook book operations match the shared TypeScript book vector', () => 
   expect(`${safeStringify(actual, 2)}\n`).toBe(expected);
   expect(actual.cases.map(testCase => testCase.name)).toEqual([
     'resume-stp-cancels-resting-taker',
+    'resume-skips-suspended-taker',
+    'resume-takes-newest-eligible-order',
   ]);
 });
 

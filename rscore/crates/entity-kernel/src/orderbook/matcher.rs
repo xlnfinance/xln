@@ -1508,6 +1508,60 @@ mod tests {
         }
     }
 
+    fn resting_bid(account_id: &str, offer_id: &str, created_height: u64) -> SameJOffer {
+        let ask = resting_ask(account_id, offer_id, 2, 18, 25_000_000, created_height);
+        let max_fee = &ask.give_amount / BigInt::from(100_u8);
+        SameJOffer {
+            give_token_id: ask.want_token_id,
+            give_token_decimals: ask.want_token_decimals,
+            give_amount: ask.want_amount.clone(),
+            want_token_id: ask.give_token_id,
+            want_token_decimals: ask.give_token_decimals,
+            want_amount: ask.give_amount.clone(),
+            min_net_receive: &ask.give_amount - &max_fee,
+            max_fee,
+            quantized_give: ask.want_amount,
+            quantized_want: ask.give_amount,
+            ..ask
+        }
+    }
+
+    fn upsert(account_id: &str, offer: &SameJOffer) -> SameJOutputDelta {
+        SameJOutputDelta::Upsert {
+            account_id: account_id.to_string(),
+            offer: Box::new(offer.clone()),
+        }
+    }
+
+    #[test]
+    fn crossed_resume_never_trades_a_suspended_resting_taker() {
+        let context = DeterministicContext::hlt_default();
+        let ask = resting_ask("account-a", "ask", 2, 18, 25_000_000, 1);
+        let bid = resting_bid("account-b", "bid", 2);
+        let mut state = OrderbookState::empty(20_000);
+        apply_orderbook_outputs(&mut state, &[upsert("account-a", &ask)], &context, "hub")
+            .expect("ask rests");
+        // The ask has a queued resolve, so the bid skips it and rests crossed.
+        state
+            .resolving_offers
+            .insert(("account-a".to_string(), "ask".to_string()));
+        apply_orderbook_outputs(&mut state, &[upsert("account-b", &bid)], &context, "hub")
+            .expect("bid rests crossed");
+        // Next frame the ask's resolve commits unchanged while the newer bid
+        // now carries its own queued resolve. The bid is not an eligible taker.
+        state
+            .resolving_offers
+            .insert(("account-b".to_string(), "bid".to_string()));
+        let effects =
+            apply_orderbook_outputs(&mut state, &[upsert("account-a", &ask)], &context, "hub")
+                .expect("resume must not trade a suspended taker");
+
+        assert!(effects.account_txs.is_empty());
+        let book = state.books.values().next().expect("pair book");
+        assert_eq!(book.trade_count, 0);
+        assert_eq!(book.orders.len(), 2);
+    }
+
     #[test]
     fn usd_reference_ask_authority_excludes_other_makers_and_cross_jurisdiction() {
         let authority = UsdQuoteAuthority {

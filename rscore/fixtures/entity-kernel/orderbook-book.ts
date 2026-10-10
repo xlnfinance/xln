@@ -183,6 +183,29 @@ const cases: readonly BookCase[] = [
       { kind: 'resume', suspended: [] },
     ],
   },
+  {
+    // The newest crossed order is suspended by its queued resolve. Resume must
+    // pick takers only among eligible orders, so nothing trades.
+    name: 'resume-skips-suspended-taker',
+    maxOrders: 16,
+    steps: [
+      add('a:ask', 'owner-a', 'ask', 100n),
+      add('b:bid', 'owner-b', 'bid', 100n, ['a:ask']),
+      { kind: 'resume', suspended: ['b:bid'] },
+    ],
+  },
+  {
+    // The raw top ask is suspended. The newest eligible crossing order is the
+    // next ask, so it is the taker and trades at the resting bid price.
+    name: 'resume-takes-newest-eligible-order',
+    maxOrders: 16,
+    steps: [
+      add('a1:ask', 'owner-a1', 'ask', 99n),
+      add('b:bid', 'owner-b', 'bid', 101n, ['a1:ask']),
+      add('a2:ask', 'owner-a2', 'ask', 100n, ['b:bid']),
+      { kind: 'resume', suspended: ['a1:ask'] },
+    ],
+  },
 ];
 
 const executeCase = (testCase: BookCase) => {

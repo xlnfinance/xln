@@ -245,6 +245,10 @@ fn typescript_book_operations_replay_with_identical_events_and_commitments() {
     assert!(divergences.is_empty(), "{}", divergences.join("\n"));
     assert_eq!(
         names.into_iter().collect::<Vec<_>>(),
-        ["resume-stp-cancels-resting-taker"]
+        [
+            "resume-skips-suspended-taker",
+            "resume-stp-cancels-resting-taker",
+            "resume-takes-newest-eligible-order",
+        ]
     );
 }

@@ -405,15 +405,49 @@ where
     Ok(events)
 }
 
-fn crossed_taker(state: &BookState) -> Option<BookOrder> {
-    let bid_id = state.bids.first_key_value()?.1;
-    let ask_id = state.asks.first_key_value()?.1;
-    let bid = state.orders.get(bid_id)?;
-    let ask = state.orders.get(ask_id)?;
-    if bid.price_ticks < ask.price_ticks {
-        return None;
+/// First order in price-time priority whose verdict is `Eligible` (TS
+/// `findBestOrder` with a maker classifier).
+fn best_eligible_order<'a, F, I>(
+    state: &BookState,
+    order_ids: I,
+    classify: &mut F,
+) -> Result<Option<BookOrder>, EntityKernelError>
+where
+    F: FnMut(&BookOrder) -> Result<MakerDisposition, EntityKernelError>,
+    I: Iterator<Item = &'a String>,
+{
+    for order_id in order_ids {
+        let order = state
+            .orders
+            .get(order_id)
+            .ok_or_else(|| EntityKernelError::orderbook("BOOK_ORDER_INDEX_MISSING"))?;
+        if classify(order)? == MakerDisposition::Eligible {
+            return Ok(Some(order.clone()));
+        }
     }
-    Some(if bid.seq > ask.seq { bid } else { ask }.clone())
+    Ok(None)
+}
+
+/// TS `resumeCrossedBook`: only the best *eligible* bid and ask decide whether
+/// the book is still crossed, and the newer of the two is the taker. A
+/// suspended order already has a queued resolve; picking it from the raw top
+/// of book traded it again and halted on a second resolve for the same offer.
+fn crossed_taker<F>(
+    state: &BookState,
+    classify: &mut F,
+) -> Result<Option<BookOrder>, EntityKernelError>
+where
+    F: FnMut(&BookOrder) -> Result<MakerDisposition, EntityKernelError>,
+{
+    let bid = best_eligible_order(state, state.bids.values(), classify)?;
+    let ask = best_eligible_order(state, state.asks.values(), classify)?;
+    let (Some(bid), Some(ask)) = (bid, ask) else {
+        return Ok(None);
+    };
+    if bid.price_ticks < ask.price_ticks {
+        return Ok(None);
+    }
+    Ok(Some(if bid.seq > ask.seq { bid } else { ask }))
 }
 
 pub(crate) fn resume_crossed<F>(
@@ -424,7 +458,7 @@ pub(crate) fn resume_crossed<F>(
 where
     F: FnMut(&BookOrder) -> Result<MakerDisposition, EntityKernelError>,
 {
-    let Some(taker_order) = crossed_taker(state) else {
+    let Some(taker_order) = crossed_taker(state, &mut classify)? else {
         return Ok(None);
     };
     let taker = AddOrder {
