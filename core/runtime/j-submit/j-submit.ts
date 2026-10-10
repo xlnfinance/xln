@@ -489,44 +489,74 @@ const reconcileKnownBatchTransaction = async (
   return successfulJReceiptResult(receipt, eventCarriers(adapter.depository, adapter.entityProvider));
 };
 
+/** A failed read about an already-signed wire proves nothing about that wire's fate. */
+class PreparedWireReadError extends Error {
+  constructor(cause: unknown) {
+    super(cause instanceof Error ? cause.message : String(cause), { cause });
+    this.name = 'PreparedWireReadError';
+  }
+}
+
+const readPreparedWire = async <T>(read: () => Promise<T>): Promise<T> => {
+  try {
+    return await read();
+  } catch (error) {
+    throw new PreparedWireReadError(error);
+  }
+};
+
+const preparedWireFailure = (txHash: string, code: string): JSubmitResult =>
+  ({ ...makeJAdapterFailureResult(code, { category: 'terminal', code }), txHash });
+
+// Only a contradiction or a finalized revert is terminal for a signed wire. A
+// read failure is retried: ethers reports most node errors ("header not found",
+// rate limits) as UNKNOWN_ERROR, which the generic classifier calls terminal.
+const submitPreparedJBatch = async (adapter: JAdapter, raw: string): Promise<JSubmitResult> => {
+  const transaction = decodePreparedJTransaction(raw, adapter.mode === 'tron');
+  if (!transaction.hash) throw new Error('J_PREPARED_HASH_MISSING');
+  const txHash = transaction.hash;
+  try {
+    let receipt = await readPreparedWire(() => adapter.provider.getTransactionReceipt(txHash));
+    if (!receipt) {
+      const pending = adapter.mode === 'tron' ? null : await readPreparedWire(() => adapter.provider.getTransaction(txHash));
+      if (!pending) {
+        const hash = await adapter.broadcastPreparedTransaction(raw);
+        if (hash.toLowerCase() !== txHash.toLowerCase()) return preparedWireFailure(txHash, 'J_PREPARED_BROADCAST_HASH_MISMATCH');
+      }
+      receipt = await readPreparedWire(() => adapter.provider.waitForTransaction(txHash, 1, 10_000));
+    }
+    if (!receipt) throw new Error('transaction was not mined');
+    if (receipt.hash.toLowerCase() !== txHash.toLowerCase()) return preparedWireFailure(txHash, 'J_PREPARED_RECEIPT_HASH_MISMATCH');
+    if (receipt.status !== 1) {
+      const minedBlock = receipt.blockNumber;
+      const safeHead = await readPreparedWire(async () => adapter.getCurrentBlockNumber?.());
+      if (safeHead === undefined || safeHead < minedBlock) {
+        throw new Error('transaction was not mined at a finalized boundary');
+      }
+      const block = await readPreparedWire(async () => adapter.mode === 'tron'
+        ? await (adapter.provider as ethers.JsonRpcProvider).send('eth_getBlockByNumber', [ethers.toQuantity(minedBlock), false])
+        : await adapter.provider.getBlock(minedBlock));
+      if (!block || String(block.hash).toLowerCase() !== receipt.blockHash.toLowerCase()) {
+        throw new Error('transaction was not mined on the canonical finalized chain');
+      }
+      return { ...makeJAdapterFailureResult('transaction reverted'), txHash };
+    }
+    return successfulJReceiptResult(receipt, eventCarriers(adapter.depository, adapter.entityProvider));
+  } catch (error) {
+    if (error instanceof PreparedWireReadError) {
+      return { ...makeJAdapterFailureResult(error, { category: 'transient', code: 'J_PREPARED_CHAIN_READ_UNAVAILABLE' }), txHash };
+    }
+    return { ...makeJAdapterFailureResult(error), txHash };
+  }
+};
+
 const submitJTxToAdapter = async (
   env: RuntimeReplica,
   adapter: JAdapter,
   jTx: JTx,
 ): Promise<JSubmitResult> => {
   if (jTx.type === 'batch' && jTx.data.runtimeSubmitAttempt?.rawTransaction) {
-    const raw = jTx.data.runtimeSubmitAttempt.rawTransaction;
-    const transaction = decodePreparedJTransaction(raw, adapter.mode === 'tron');
-    if (!transaction.hash) throw new Error('J_PREPARED_HASH_MISSING');
-    try {
-      let receipt = await adapter.provider.getTransactionReceipt(transaction.hash);
-      if (!receipt) {
-        const pending = adapter.mode === 'tron' ? null : await adapter.provider.getTransaction(transaction.hash);
-        if (!pending) {
-          const hash = await adapter.broadcastPreparedTransaction(raw);
-          if (hash.toLowerCase() !== transaction.hash.toLowerCase()) throw new Error('J_PREPARED_BROADCAST_HASH_MISMATCH');
-        }
-        receipt = await adapter.provider.waitForTransaction(transaction.hash, 1, 10_000);
-      }
-      if (!receipt) throw new Error('transaction was not mined');
-      if (receipt.hash.toLowerCase() !== transaction.hash.toLowerCase()) throw new Error('J_PREPARED_RECEIPT_HASH_MISMATCH');
-      if (receipt.status !== 1) {
-        const safeHead = await adapter.getCurrentBlockNumber?.();
-        if (safeHead === undefined || safeHead < receipt.blockNumber) {
-          throw new Error('transaction was not mined at a finalized boundary');
-        }
-        const block = adapter.mode === 'tron'
-          ? await (adapter.provider as ethers.JsonRpcProvider).send('eth_getBlockByNumber', [ethers.toQuantity(receipt.blockNumber), false])
-          : await adapter.provider.getBlock(receipt.blockNumber);
-        if (!block || String(block.hash).toLowerCase() !== receipt.blockHash.toLowerCase()) {
-          throw new Error('transaction was not mined on the canonical finalized chain');
-        }
-        return { ...makeJAdapterFailureResult('transaction reverted'), txHash: transaction.hash };
-      }
-      return successfulJReceiptResult(receipt, eventCarriers(adapter.depository, adapter.entityProvider));
-    } catch (error) {
-      return { ...makeJAdapterFailureResult(error), txHash: transaction.hash };
-    }
+    return submitPreparedJBatch(adapter, jTx.data.runtimeSubmitAttempt.rawTransaction);
   }
   const known = await reconcileKnownBatchTransaction(env, adapter, jTx);
   if (known) return known;
