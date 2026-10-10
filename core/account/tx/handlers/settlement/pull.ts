@@ -72,6 +72,11 @@ const validateCrossPullCloseEvidence = (
   }
   const proofError = crossProofMatchesBinding(binding, proof, pull);
   if (proofError) return { ok: false, error: `Cross-j close proof mismatch: ${proofError}` };
+  // The peer chooses `binary`; ethers.keccak256 threw on non-hex text and
+  // halted the Runtime. Same shape and message as Rust variable_hex_bytes.
+  if (!/^0x(?:[0-9a-fA-F]{2})*$/.test(binary)) {
+    return { ok: false, error: 'Invalid cross-j close binary' };
+  }
   const binaryHash = hashCrossJurisdictionCloseBinary(binary);
   if (binaryHash.toLowerCase() !== proof.binaryHash.toLowerCase()) {
     return { ok: false, error: 'Cross-j close binary hash mismatch' };

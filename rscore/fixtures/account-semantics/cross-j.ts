@@ -51,7 +51,7 @@ type CrossJInputs = Readonly<{
   buyerSourceClose: Extract<AccountTx, { type: 'cross_pull_close' }>;
 }>;
 
-const route = (buyer = false): CrossJurisdictionSwapRoute => {
+export const route = (buyer = false): CrossJurisdictionSwapRoute => {
   const prepared = buildPreparedCrossJurisdictionRoute({
     orderId: buyer ? 'buyer-order' : 'order-1',
     makerEntityId: SOURCE_USER,
@@ -80,7 +80,7 @@ const route = (buyer = false): CrossJurisdictionSwapRoute => {
   return { ...prepared, status: 'resting' };
 };
 
-const inputs = (prepared: CrossJurisdictionSwapRoute): Pick<CrossJInputs, 'sourceLock' | 'targetLock' | 'swapOffer' | 'sourceClose'> => {
+export const inputs = (prepared: CrossJurisdictionSwapRoute): Pick<CrossJInputs, 'sourceLock' | 'targetLock' | 'swapOffer' | 'sourceClose'> => {
   const sourcePull = prepared.sourcePull;
   const targetPull = prepared.targetPull;
   if (!sourcePull || !targetPull) throw new Error('CROSS_J_VECTOR_PULLS_MISSING');
@@ -132,7 +132,7 @@ const inputs = (prepared: CrossJurisdictionSwapRoute): Pick<CrossJInputs, 'sourc
   };
 };
 
-const makeAccount = (
+export const makeAccount = (
   leftEntity: string,
   rightEntity: string,
   tokenId: number,
