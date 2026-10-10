@@ -22,7 +22,9 @@ import {
   decodeRuntimeAdapterBrowserMessage,
   decodeRuntimeAdapterMessage,
   encodeRuntimeAdapterMessage,
+  encodeRuntimeAdapterMessageForBrowser,
   runtimeAdapterMaxMessageBytes,
+  runtimeAdapterMessageByteLength,
 } from '../../../api/runtime-adapter/codec';
 
 import { EmbeddedRuntimeAdapter } from '../../../api/runtime-adapter/embedded';
@@ -1082,6 +1084,55 @@ test('runtime adapter graph-frame wire DTO stays below budget near topology limi
   expect(() => assertRuntimeAdapterGraphFrameWireBudget(overBudgetFrame)).toThrow(
     'graph-frame response exceeds wire budget',
   );
+});
+
+test('runtime adapter graph-frame budget measures the tagged JSON the server sends', () => {
+  // The budget was measured on msgpack, but the server sends tagged JSON
+  // (BigInt and Map tagged, so larger). A frame between the two sizes passed
+  // here and then failed as a generic E_INTERNAL "response too large".
+  const frame: RuntimeAdapterGraphFrame = {
+    head: {
+      schemaVersion: STORAGE_SCHEMA_VERSION,
+      latestHeight: 1,
+      latestMaterializedHeight: 1,
+      latestSnapshotHeight: 1,
+      snapshotPeriodFrames: 5,
+      retainSnapshots: 3,
+      epochMaxBytes: 1_024,
+      accountMerkleRadix: 16,
+      epochReplayBytes: 0,
+      retainedWalBytes: 0,
+    },
+    runtimeId: 'runtime:budget-encoder',
+    height: 1,
+    timestamp: 1,
+    stateHash: `0x${'11'.repeat(32)}`,
+    entities: [{
+      summary: { entityId, label: 'budget', height: 1 },
+      core: {
+        entityId,
+        height: 1,
+        timestamp: 1,
+        reserves: new Map(Array.from({ length: 64 }, (_, tokenId) => [tokenId + 1, BigInt(tokenId + 1)])),
+        profile: { name: 'budget', isHub: false },
+      },
+      accounts: { items: [], nextCursor: null, totalItems: 0, limit: 1 },
+    }],
+  };
+  const message = { v: XLN_PROTOCOL_VERSION, inReplyTo: 'graph-frame-budget', ok: true as const, payload: frame };
+  const msgpackBytes = encodeRuntimeAdapterMessage(message).byteLength;
+  const sentBytes = runtimeAdapterMessageByteLength(encodeRuntimeAdapterMessageForBrowser(message));
+  expect(sentBytes).toBeGreaterThan(msgpackBytes);
+  const previous = process.env['XLN_RADAPTER_MAX_MESSAGE_BYTES'];
+  process.env['XLN_RADAPTER_MAX_MESSAGE_BYTES'] = String(msgpackBytes);
+  try {
+    expect(() => assertRuntimeAdapterGraphFrameWireBudget(frame)).toThrow('graph-frame response exceeds wire budget');
+    process.env['XLN_RADAPTER_MAX_MESSAGE_BYTES'] = String(sentBytes);
+    expect(assertRuntimeAdapterGraphFrameWireBudget(frame)).toBe(sentBytes);
+  } finally {
+    if (previous === undefined) delete process.env['XLN_RADAPTER_MAX_MESSAGE_BYTES'];
+    else process.env['XLN_RADAPTER_MAX_MESSAGE_BYTES'] = previous;
+  }
 });
 
 test('runtime adapter graph-frame synthesizes missing account endpoint nodes', async () => {

@@ -26,7 +26,12 @@ import type {
 } from '../../storage/types';
 import { compareAscii, sortedStringMapKeys, sortedStringMapStartIndex } from '../../support/collections/sorted-map-index';
 import { RuntimeAdapterError } from './errors';
-import { encodeRuntimeAdapterMessage, runtimeAdapterMaxMessageBytes , detachRuntimeAdapterPayload } from './codec';
+import {
+  detachRuntimeAdapterPayload,
+  encodeRuntimeAdapterMessageForBrowser,
+  runtimeAdapterMaxMessageBytes,
+  runtimeAdapterMessageByteLength,
+} from './codec';
 import { XLN_PROTOCOL_VERSION } from '../../protocol/version';
 import { copyAccountStateDomain } from '../../protocol/state/account-input-clone';
 import { buildRuntimeRecoveryBundle } from '../../storage/recovery/bundle';
@@ -1572,21 +1577,26 @@ const projectGraphAccount = (doc: StorageAccountDoc): RuntimeAdapterGraphAccount
   } : {}),
 });
 
+/**
+ * Budget the bytes the server actually sends: tagged JSON, which is larger
+ * than msgpack (BigInt and Map are tagged). A msgpack budget let a frame pass
+ * here and then fail as a generic E_INTERNAL "response too large".
+ */
 export const assertRuntimeAdapterGraphFrameWireBudget = (frame: RuntimeAdapterGraphFrame): number => {
-  const encoded = encodeRuntimeAdapterMessage({
+  const encodedBytes = runtimeAdapterMessageByteLength(encodeRuntimeAdapterMessageForBrowser({
     v: XLN_PROTOCOL_VERSION,
     inReplyTo: 'graph-frame-budget',
     ok: true,
     payload: frame,
-  });
+  }));
   const maxBytes = runtimeAdapterMaxMessageBytes();
-  if (encoded.byteLength > maxBytes) {
+  if (encodedBytes > maxBytes) {
     throw new RuntimeAdapterError(
       'E_BAD_QUERY',
-      `graph-frame response exceeds wire budget: ${encoded.byteLength} bytes > ${maxBytes}`,
+      `graph-frame response exceeds wire budget: ${encodedBytes} bytes > ${maxBytes}`,
     );
   }
-  return encoded.byteLength;
+  return encodedBytes;
 };
 
 type CapturedLiveGraph = {
