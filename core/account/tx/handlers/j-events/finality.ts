@@ -7,16 +7,6 @@ import { createSettlementDeltaValue } from '../../../settlement/settlement-proje
 import { commitDeltaDraft } from '../../delta-utils';
 import { assertAccountDeltaCapacity } from '../../../state/delta';
 import { assertSettlementTokenId } from '../../../../protocol/settlement/operations';
-import {
-  accountTransitionView,
-  beginAccountTransition,
-  countAccountTransitionNodeChanges,
-  discardAccountTransition,
-  publishAccountTransition,
-} from '../../../state/candidate-overlay';
-import { createStructuredLogger } from '../../../../support/logger';
-
-const jEventFinalityLog = createStructuredLogger('account.j_event.finality');
 
 const normalizedEntityId = (value: unknown): string => String(value ?? '').trim().toLowerCase();
 
@@ -202,35 +192,4 @@ export const applyFinalizedAccountJEventsOnView = (
     collected.finalizedNonce,
     deltaTransformerAddress,
   );
-};
-
-export const applyFinalizedAccountJEvents = (
-  account: AccountReplica,
-  counterpartyId: string,
-  events: readonly JurisdictionEvent[],
-  deltaTransformerAddress: string,
-): void => {
-  const collected = collectSettledEvents(account, events);
-  if (!collected) return;
-
-  // J-claim finality is atomic: malformed structural proof data must not leave
-  // reserves changed while the workspace/proof transition is rejected.
-  const overlay = beginAccountTransition(account);
-  try {
-    applySettledEventsOnView(
-      accountTransitionView(overlay),
-      counterpartyId,
-      collected.settledEvents,
-      collected.finalizedNonce,
-      deltaTransformerAddress,
-    );
-    const committed = publishAccountTransition(account, overlay, 'jFinality');
-    jEventFinalityLog.debug('finality.overlay_committed', {
-      changedPatriciaNodes: countAccountTransitionNodeChanges(committed.nodeChanges),
-      jNonce: collected.finalizedNonce,
-    });
-  } catch (error) {
-    if (overlay.lifecycle.status === 'active') discardAccountTransition(overlay);
-    throw error;
-  }
 };

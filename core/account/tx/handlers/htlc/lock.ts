@@ -67,7 +67,6 @@ export async function handleHtlcLock(
   accountTx: HtlcLockTx,
   byLeft: boolean,
   clock: HtlcLockClock,
-  _isValidation: boolean = false,
 ): Promise<ApplyAccountTxResult> {
   const { lockId, hashlock, timelock, revealBeforeHeight, amount, tokenId } = accountTx.data;
   const events: string[] = [];

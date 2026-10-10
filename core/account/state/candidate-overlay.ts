@@ -19,22 +19,6 @@ export type AccountTransitionCommit = Readonly<{
   nodeChanges: AccountStateDraftNodeChanges;
 }>;
 
-export const countAccountTransitionNodeChanges = (
-  changes: AccountStateDraftNodeChanges,
-): number =>
-  changes.deltas.puts.length + changes.deltas.dels.length
-  + changes.locks.puts.length + changes.locks.dels.length
-  + changes.swapOffers.puts.length + changes.swapOffers.dels.length
-  + changes.pulls.puts.length + changes.pulls.dels.length
-  + changes.subcontracts.puts.length + changes.subcontracts.dels.length
-  + changes.lendingIntents.puts.length + changes.lendingIntents.dels.length
-  + changes.requestedRebalance.puts.length + changes.requestedRebalance.dels.length
-  + changes.requestedRebalanceFeeState.puts.length + changes.requestedRebalanceFeeState.dels.length
-  + changes.rebalanceFeePolicies.puts.length + changes.rebalanceFeePolicies.dels.length
-  + changes.pendingWithdrawals.puts.length + changes.pendingWithdrawals.dels.length
-  + changes.rebalanceShadowPolicy.puts.length + changes.rebalanceShadowPolicy.dels.length
-  + changes.rebalanceShadowSubmitted.puts.length + changes.rebalanceShadowSubmitted.dels.length;
-
 type OverlayStatus = 'active' | 'committed' | 'discarded';
 export class AccountTransitionOverlay {
   readonly lifecycle: { status: OverlayStatus };

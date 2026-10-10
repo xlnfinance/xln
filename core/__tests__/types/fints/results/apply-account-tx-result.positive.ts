@@ -8,12 +8,10 @@ import { ACCOUNT_TX_REJECTION_CODES } from '../../../../account/tx/apply-types';
 import {
   toHashlock,
   toHtlcSecret,
-  toLockId,
   toTokenAmount,
   toTokenId,
   type Hashlock,
   type HtlcSecret,
-  type LockId,
   type TokenAmount,
   type TokenId,
 } from '../../../../account/tx/units';
@@ -34,7 +32,6 @@ type AppliedHasNoRejection = Expect<Equal<keyof ApplyAccountTxApplied & 'rejecti
 type RejectedHasNoOutcome = Expect<Equal<keyof ApplyAccountTxRejected & 'outcome', never>>;
 type OkHasNoSuccessAlias = Expect<Equal<keyof ApplyAccountTxOk & 'success', never>>;
 type ResultHasNoErrorField = Expect<Equal<keyof ApplyAccountTxResult & 'error', never>>;
-type HashlockIsNotLockId = Expect<NotEqual<Hashlock, LockId>>;
 type UnixMsIsNotJHeight = Expect<NotEqual<UnixMs, JHeight>>;
 
 const applied: ApplyAccountTxResult = {
@@ -59,12 +56,11 @@ export const fintsPositiveAccountTxResult = (): {
   rejected: ApplyAccountTxRejected;
   hashlock: Hashlock;
   secret: HtlcSecret;
-  lockId: LockId;
   tokenId: TokenId;
   amount: TokenAmount;
   timestamp: UnixMs;
   jHeight: JHeight;
-  covered: [AppliedHasNoRejection, RejectedHasNoOutcome, OkHasNoSuccessAlias, ResultHasNoErrorField, HashlockIsNotLockId, UnixMsIsNotJHeight];
+  covered: [AppliedHasNoRejection, RejectedHasNoOutcome, OkHasNoSuccessAlias, ResultHasNoErrorField, UnixMsIsNotJHeight];
 } => {
   if (!applied.ok) throw new Error('FINTS_POSITIVE_APPLIED');
   if (rejected.ok) throw new Error('FINTS_POSITIVE_REJECTED');
@@ -73,11 +69,10 @@ export const fintsPositiveAccountTxResult = (): {
     rejected,
     hashlock: toHashlock(`0x${'11'.repeat(32)}`),
     secret: toHtlcSecret(`0x${'22'.repeat(32)}`),
-    lockId: toLockId('lock-timeout-boundary'),
     tokenId: toTokenId(1),
     amount: toTokenAmount(7n),
     timestamp: toUnixMs(1_000),
     jHeight: toJHeight(0),
-    covered: [true, true, true, true, true, true],
+    covered: [true, true, true, true, true],
   };
 };

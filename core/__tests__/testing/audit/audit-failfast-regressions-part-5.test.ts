@@ -128,7 +128,13 @@ import { applyJEvent } from '../../../entity/tx/j-events';
 
 import { applyJEventRange, buildJEventRangeData } from '../../helpers/j-history';
 
-import { applyFinalizedAccountJEvents } from '../../../account/tx/handlers/j-events/finality';
+import { applyFinalizedAccountJEventsOnView } from '../../../account/tx/handlers/j-events/finality';
+import {
+  accountTransitionView,
+  beginAccountTransition,
+  discardAccountTransition,
+  publishAccountTransition,
+} from '../../../account/state/candidate-overlay';
 
 import { queueCrossJurisdictionSalvageFromFinalizedArguments } from '../../../entity/tx/j-events-htlc';
 
@@ -275,6 +281,28 @@ const makeSingleSignerConfigFor = (signerId: string): EntityState['config'] => (
 const hex20 = (byte: string): string => `0x${byte.repeat(byte.length === 2 ? 20 : 40)}`;
 
 const HANKO_DELAYS = resolveHankoBoardDelays();
+
+/** Atomic J finality on a committed replica, the way an Account transition applies it. */
+const applyFinalizedAccountJEvents = (
+  account: AccountReplica,
+  counterpartyId: string,
+  events: readonly JurisdictionEvent[],
+  deltaTransformerAddress: string,
+): void => {
+  const overlay = beginAccountTransition(account);
+  try {
+    applyFinalizedAccountJEventsOnView(
+      accountTransitionView(overlay),
+      counterpartyId,
+      events,
+      deltaTransformerAddress,
+    );
+    publishAccountTransition(account, overlay, 'jFinality');
+  } catch (error) {
+    if (overlay.lifecycle.status === 'active') discardAccountTransition(overlay);
+    throw error;
+  }
+};
 
 const makeEmptyProofBody = () => ({
   watchSeed: `0x${'f1'.repeat(32)}`,

@@ -26,7 +26,6 @@ const BRAND_NAMES = new Set([
   'HtlcSecret',
   'JHeight',
   'JId',
-  'LockId',
   'RuntimeHeight',
   'RuntimeId',
   'RuntimeMachineRootHash',

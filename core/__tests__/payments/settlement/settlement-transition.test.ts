@@ -52,7 +52,7 @@ import {
   initCrontab,
 } from '../../../entity/scheduler';
 import { hubRebalanceHandler } from '../../../entity/scheduler/rebalance';
-import { applyFinalizedAccountJEvents } from '../../../account/tx/handlers/j-events/finality';
+import { applyFinalizedAccountJEventsOnView } from '../../../account/tx/handlers/j-events/finality';
 import { createEmptyBatch, encodeJBatch, initJBatch } from '../../../jurisdiction/machine/batch';
 import { buildAccountProofBody } from '../../../protocol/dispute/proof-builder';
 import { compileOps } from '../../../protocol/settlement/operations';
@@ -85,6 +85,7 @@ import {
   beginAccountTransition,
   commitAccountTransition,
   discardAccountTransition,
+  publishAccountTransition,
 } from '../../../account/state/candidate-overlay';
 import {
   addReplica,
@@ -101,6 +102,28 @@ const LEFT = entity('11');
 const RIGHT = entity('22');
 const TEST_ACCOUNT_CONTRACT = addr('c1');
 const TEST_DELTA_TRANSFORMER = addr('d1');
+
+/** Atomic J finality on a committed replica, the way an Account transition applies it. */
+const applyFinalizedAccountJEvents = (
+  account: AccountReplica,
+  counterpartyId: string,
+  events: readonly JurisdictionEvent[],
+  deltaTransformerAddress: string,
+): void => {
+  const overlay = beginAccountTransition(account);
+  try {
+    applyFinalizedAccountJEventsOnView(
+      accountTransitionView(overlay),
+      counterpartyId,
+      events,
+      deltaTransformerAddress,
+    );
+    publishAccountTransition(account, overlay, 'jFinality');
+  } catch (error) {
+    if (overlay.lifecycle.status === 'active') discardAccountTransition(overlay);
+    throw error;
+  }
+};
 
 const transition = (data: Record<string, unknown>): AccountTx => ({
   type: 'settle_transition',

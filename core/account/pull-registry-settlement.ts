@@ -21,7 +21,7 @@ type FinalizedRouteProjection = Readonly<{
   target: CrossJurisdictionSwapLeg;
 }>;
 
-export type SignedProofBodyPull = Readonly<{
+type SignedProofBodyPull = Readonly<{
   amount: bigint;
   claimedRatio: number;
   targetRole: boolean;

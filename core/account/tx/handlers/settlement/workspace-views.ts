@@ -27,7 +27,7 @@ export type UnsignedSettlementWorkspace = SettlementWorkspace & {
   postSettlementDisputeProof?: never;
 };
 
-export type HankoPendingSettlementWorkspace = PinnedSettlementWorkspace & {
+type HankoPendingSettlementWorkspace = PinnedSettlementWorkspace & {
   status: 'awaiting_counterparty';
 };
 
@@ -36,7 +36,7 @@ type ReadySettlementWorkspaceBase = PinnedSettlementWorkspace & {
   postSettlementDisputeProof: CompletePostSettlementProof;
 };
 
-export type ReadySettlementWorkspace =
+type ReadySettlementWorkspace =
   | (ReadySettlementWorkspaceBase & {
       executorIsLeft: true;
       leftHanko?: never;
@@ -48,12 +48,12 @@ export type ReadySettlementWorkspace =
       rightHanko?: never;
     });
 
-export type SubmittedSettlementWorkspace = Omit<
+type SubmittedSettlementWorkspace = Omit<
   ReadySettlementWorkspace,
   'status'
 > & { status: 'submitted' };
 
-export type ValidSettlementWorkspacePhase =
+type ValidSettlementWorkspacePhase =
   | UnsignedSettlementWorkspace
   | HankoPendingSettlementWorkspace
   | ReadySettlementWorkspace

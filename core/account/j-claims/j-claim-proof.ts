@@ -45,7 +45,7 @@ const parseProof = (value: unknown): AccountJClaimProof => {
 const getAccountJClaimProofByteLength = (proof: AccountJClaimProof): number =>
   3 + proof.nodes.reduce((total, node) => total + (node.type === 'branch' ? 68 : 140), 0);
 
-export type AccountJClaimInspection = Readonly<{
+type AccountJClaimInspection = Readonly<{
   result: AccountJClaimProofResult;
   path: AccountJClaimProofPath;
   terminal?: AccountJClaimLeafNode;

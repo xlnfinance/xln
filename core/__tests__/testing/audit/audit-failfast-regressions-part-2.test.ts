@@ -148,7 +148,6 @@ import {
   putTestAccountDelta,
 } from '../../helpers/cross-j';
 
-import { applyFinalizedAccountJEvents } from '../../../account/tx/handlers/j-events/finality';
 
 import { queueCrossJurisdictionSalvageFromFinalizedArguments } from '../../../entity/tx/j-events-htlc';
 

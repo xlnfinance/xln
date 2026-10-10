@@ -40,10 +40,8 @@ type MutationContext = {
   byLeft: boolean;
   timestamp: UnixMs;
   jHeight: JHeight;
-  isValidation: boolean;
   consensusContext?: AccountConsensusContext;
   jClaimSession?: AccountJClaimSession;
-  counterpartyCertifiedBoardHash?: string;
   htlcEnforcementClock?: HtlcEnforcementClock;
   candidateEffects: AccountOutput[];
   myEntityId: string;
@@ -160,10 +158,8 @@ export const applyAccountTxMutation = async (
     byLeft,
     timestamp,
     jHeight,
-    isValidation,
     ...(consensusContext ? { consensusContext } : {}),
     ...(jClaimSession ? { jClaimSession } : {}),
-    ...(counterpartyCertifiedBoardHash ? { counterpartyCertifiedBoardHash } : {}),
     ...(htlcEnforcementClock ? { htlcEnforcementClock } : {}),
     candidateEffects,
     myEntityId,
@@ -206,7 +202,6 @@ export const applyAccountTxMutation = async (
           enforcementTimestamp: context.htlcEnforcementClock?.timestamp ?? timestamp,
           enforcementJHeight: context.htlcEnforcementClock?.jHeight ?? jHeight,
         },
-        isValidation,
       );
     case 'htlc_resolve': return applyHtlcResolve(context);
     case 'cross_pull_lock': return handlePullLock(account.state, tx, byLeft, jHeight, timestamp);
