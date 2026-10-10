@@ -1,6 +1,7 @@
 import type { RuntimeReplica } from '../../types';
 import { inferRuntimeLifecyclePhase } from '../../replica/lifecycle';
 import { ensureRuntimeInfrastructure } from '../../envelope/replica-envelope';
+import { nodeProcess } from '../../../support/process/runtime-process';
 
 type RuntimeLifecycleState = NonNullable<RuntimeReplica['infrastructure']>;
 
@@ -118,6 +119,22 @@ export const acquireRuntimeCommittedRead = async (
   };
 };
 
+type CommittedReadScope = {
+  run<T>(env: RuntimeReplica, read: () => T): T;
+  getStore(): RuntimeReplica | undefined;
+};
+
+// Server only, loaded without a static import: the browser bundle has no async
+// context and serves no nested HTTP reads.
+const committedReadScope: CommittedReadScope | undefined = (() => {
+  const getBuiltinModule = (nodeProcess as { getBuiltinModule?: (id: string) => unknown } | undefined)
+    ?.getBuiltinModule;
+  const hooks = getBuiltinModule?.('node:async_hooks') as
+    | { AsyncLocalStorage?: new () => CommittedReadScope }
+    | undefined;
+  return hooks?.AsyncLocalStorage ? new hooks.AsyncLocalStorage() : undefined;
+})();
+
 /**
  * Run an external read while the Runtime's published State is durable.
  *
@@ -129,9 +146,16 @@ export const withRuntimeCommittedRead = async <T>(
   env: RuntimeReplica,
   read: () => T | Promise<T>,
 ): Promise<T> => {
+  // A read nested inside a lease this async task already holds reuses it.
+  // Acquiring again waited behind any writer queued since the outer read
+  // began, while that writer waited for the outer read: a permanent deadlock
+  // (GET /api/health nested three leases).
+  if (committedReadScope?.getStore() === env) return await read();
   const release = await acquireRuntimeCommittedRead(env);
   try {
-    return await read();
+    return committedReadScope
+      ? await committedReadScope.run(env, read)
+      : await read();
   } finally {
     release();
   }

@@ -141,6 +141,30 @@ describe('runtime committed read barrier', () => {
     );
   });
 
+  test('a nested read inside a held lease never deadlocks behind a queued writer', async () => {
+    // The inner acquire waited for the writer queued after the outer read,
+    // and that writer waited for the outer read (GET /api/health nested three).
+    const env = createEmptyEnv('nested committed read');
+    let writerEntered = false;
+    let writer: Promise<() => void> | undefined;
+    const nested = withRuntimeCommittedRead(env, async () => {
+      writer = acquireRuntimeFrameWriter(env.infrastructure!).then(release => {
+        writerEntered = true;
+        return release;
+      });
+      await Promise.resolve();
+      return withRuntimeCommittedRead(env, () => writerEntered);
+    });
+    const outcome = await Promise.race([
+      nested,
+      new Promise<'deadlock'>(resolve => setTimeout(() => resolve('deadlock'), 500)),
+    ]);
+    expect(outcome).toBe(false);
+    const releaseWriter = await writer!;
+    expect(writerEntered).toBeTrue();
+    releaseWriter();
+  });
+
   test('scoped committed reads always release their writer fence', async () => {
     const env = createEmptyEnv('scoped read releases fence');
     await expect(withRuntimeCommittedRead(env, () => {
