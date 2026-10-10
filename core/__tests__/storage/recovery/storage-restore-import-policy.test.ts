@@ -357,6 +357,38 @@ describe('restored checkpoint conflict policy', () => {
     await closeRecoveryEnv(current.env);
   });
 
+  test('a committed profile kind and sectors survive a restart', async () => {
+    // profile-update commits entityKind and sectors (consensus state, also in
+    // the Rust EntityProfile), but the Entity document schema accepted only
+    // name/isHub/avatar/bio/website, so the next restart refused the document.
+    const seed = `restore profile kind ${process.pid} deterministic seed`;
+    const current = await createRecoveryEnv(seed, true);
+    cleanupPaths.push(resolveDbPath(current.env, 'core'));
+    enqueueRuntimeInput(current.env, {
+      runtimeTxs: [],
+      entityInputs: [{
+        entityId: current.entityId,
+        signerId: current.signerId,
+        entityTxs: [{
+          type: 'profile-update',
+          data: { profile: { entityId: current.entityId, entityKind: 'company', sectors: ['commerce', 'finance'] } },
+        }],
+      }],
+    });
+    await processRuntime(current.env, []);
+    enqueueRuntimeInput(current.env, { runtimeTxs: [createCheckpointBarrierRuntimeTx()], entityInputs: [] });
+    await processRuntime(current.env, []);
+    await closeRecoveryEnv(current.env);
+    const restored = await loadEnvFromDB(current.signerId, seed);
+    if (!restored) throw new Error('restore profile kind lost authoritative state');
+    try {
+      expect(Array.from(restored.state.eReplicas.values())[0]?.state.profile)
+        .toMatchObject({ entityKind: 'company', sectors: ['commerce', 'finance'] });
+    } finally {
+      await closeRecoveryEnv(restored);
+    }
+  });
+
   test('a new base that fails verification never replaces the previous WAL', async () => {
     // The swap deleted every WAL key and wrote the new base before verifying
     // it, so a failed check left the device with no loadable WAL.

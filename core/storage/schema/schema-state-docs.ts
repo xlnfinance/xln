@@ -1,4 +1,6 @@
 import { validateSpreadDistribution } from '../../orderbook';
+import { isProfileEntityKind, isProfileEntitySector } from '../../entity/profile';
+import { compareStableText } from '../../protocol/serialization';
 import { assertAccountFrameHash } from '../../account/consensus/frame/hash';
 import { canonicalAccountDisputeConfig } from '../../account/config/dispute-config';
 import { validateAccountReplica } from '../../account/validation/state-validation';
@@ -343,6 +345,30 @@ const validateStorageAccountReplicaCore = (doc: Record<string, unknown>, code: s
   }
 };
 
+// profile-update commits entityKind and a canonical sector list (also fields of
+// the Rust EntityProfile); storage accepts exactly what that admission accepts.
+const validateStorageEntityProfile = (value: unknown, code: string): void => {
+  const profile = requireBoundaryRecord(value, code);
+  requireExactBoundaryKeys(
+    profile,
+    ['name', 'isHub', 'avatar', 'bio', 'website'],
+    ['entityKind', 'sectors'],
+    `${code}_FIELDS`,
+  );
+  for (const key of ['name', 'avatar', 'bio', 'website']) {
+    if (typeof profile[key] !== 'string') throw new Error(`${code}_${key}`);
+  }
+  if (typeof profile['isHub'] !== 'boolean') throw new Error(`${code}_IS_HUB`);
+  if (profile['entityKind'] !== undefined && !isProfileEntityKind(profile['entityKind'])) {
+    throw new Error(`${code}_ENTITY_KIND`);
+  }
+  if (profile['sectors'] === undefined) return;
+  const sectors = requireStorageArray(profile['sectors'], `${code}_SECTORS`);
+  const canonical = sectors.length > 0 && sectors.length <= 4 && sectors.every((sector, index) =>
+    isProfileEntitySector(sector) && (index === 0 || compareStableText(String(sectors[index - 1]), sector) < 0));
+  if (!canonical) throw new Error(`${code}_SECTORS`);
+};
+
 export const validateStorageEntityCoreDocValue = (value: unknown): StorageEntityCoreDoc => {
   const code = 'STORAGE_ENTITY_DOC_INVALID';
   const doc = requireBoundaryRecord(value, code);
@@ -354,12 +380,7 @@ export const validateStorageEntityCoreDocValue = (value: unknown): StorageEntity
   requireStorageMap(doc['proposals'], `${code}_PROPOSALS`);
   requireStorageMap(doc['reserves'], `${code}_RESERVES`);
   requireBoundaryInteger(doc['lastFinalizedJHeight'], `${code}_FINALIZED_J_HEIGHT`);
-  const profile = requireBoundaryRecord(doc['profile'], `${code}_PROFILE`);
-  requireExactBoundaryKeys(profile, ['name', 'isHub', 'avatar', 'bio', 'website'], [], `${code}_PROFILE_FIELDS`);
-  for (const key of ['name', 'avatar', 'bio', 'website']) {
-    if (typeof profile[key] !== 'string') throw new Error(`${code}_PROFILE_${key}`);
-  }
-  if (typeof profile['isHub'] !== 'boolean') throw new Error(`${code}_PROFILE_IS_HUB`);
+  validateStorageEntityProfile(doc['profile'], `${code}_PROFILE`);
   const paybook = requireBoundaryRecord(doc['paybook'], `${code}_PAYBOOK`);
   requireExactBoundaryKeys(paybook, ['entries', 'feesEarned'], [], `${code}_PAYBOOK_FIELDS`);
   requireStorageMap(paybook['entries'], `${code}_PAYBOOK_ENTRIES`);
