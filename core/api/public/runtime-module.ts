@@ -107,11 +107,11 @@ export {
 } from '../../protocol/identity';
 export { formatEntityDisplay } from '../../protocol/identity/identity-display';
 
+import type { RuntimeAdapterFrameSummary } from '../runtime-adapter/resolve';
 import type {
   RuntimeAdapterGraphEntityCore,
   RuntimeAdapterGraphFrame,
-  RuntimeAdapterFrameSummary,
-} from '../runtime-adapter/resolve';
+} from '../runtime-adapter/read/graph-frame';
 import type {
   RuntimeAdapterHistoryFrameBatch,
   RuntimeAdapterViewFrame,

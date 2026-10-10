@@ -37,11 +37,11 @@ import { buildRuntimeAdapterOwnerBindingDigest } from '../../../api/runtime-adap
 
 import { signRuntimeAdapterServerIdentity } from '../../../api/runtime-adapter/security/server-identity-signer';
 
+import { resolveRuntimeAdapterRead } from '../../../api/runtime-adapter/resolve';
 import {
   assertRuntimeAdapterGraphFrameWireBudget,
-  resolveRuntimeAdapterRead,
   type RuntimeAdapterGraphFrame,
-} from '../../../api/runtime-adapter/resolve';
+} from '../../../api/runtime-adapter/read/graph-frame';
 import type { RuntimeAdapterResolveContext } from '../../../api/runtime-adapter/read/context';
 
 import { decryptRuntimeRecoveryBundle, deriveRuntimeRecoveryLookupKey } from '../../../storage/recovery/bundle/crypto';

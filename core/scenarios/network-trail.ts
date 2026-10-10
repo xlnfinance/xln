@@ -1,4 +1,4 @@
-import type { RuntimeAdapterGraphFrame } from '../api/runtime-adapter/resolve';
+import type { RuntimeAdapterGraphFrame } from '../api/runtime-adapter/read/graph-frame';
 import { buildRuntimeActivityEvents } from '../api/public/activity-history';
 import { serializeTaggedJson } from '../protocol/serialization';
 import type { EnvSnapshot } from '../runtime/types';
