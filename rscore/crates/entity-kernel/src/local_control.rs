@@ -878,9 +878,34 @@ fn reject_negative_hub_amounts(
 
 /// Token 0 cannot be a quote reference and a negative minimum trade has no
 /// meaning; the TS Entity document schema and the Rust snapshot reader refuse
-/// both on every read. Typed reject before mutation; parity: TS
-/// rejectInvalidOrderbookProfile (entity/tx/handlers/system/basic.ts).
+/// both on every read. A spread that does not sum to 100% was silently
+/// ignored, and a duplicate supported pair was admitted but refused by
+/// restore_entity_state on the next restart. Typed reject before mutation;
+/// parity: TS rejectInvalidOrderbookProfile (entity/tx/handlers/system/basic.ts).
 fn reject_invalid_hub_profile(profile: &HubProfile) -> Result<(), EntityKernelError> {
+    let spread = &profile.spread_distribution;
+    let total = u64::from(spread.maker_bps)
+        + u64::from(spread.taker_bps)
+        + u64::from(spread.hub_bps)
+        + u64::from(spread.maker_referrer_bps)
+        + u64::from(spread.taker_referrer_bps);
+    if total != 10_000 {
+        return Err(EntityKernelError::rejected(
+            "initOrderbookExt",
+            format!("ORDERBOOK_SPREAD_DISTRIBUTION_INVALID:{total}"),
+        ));
+    }
+    let mut pairs = std::collections::BTreeSet::new();
+    if let Some(pair) = profile
+        .supported_pairs
+        .iter()
+        .find(|pair| !pairs.insert(pair.as_str()))
+    {
+        return Err(EntityKernelError::rejected(
+            "initOrderbookExt",
+            format!("ORDERBOOK_SUPPORTED_PAIR_DUPLICATE:{pair}"),
+        ));
+    }
     if profile.reference_token_id == 0 {
         return Err(EntityKernelError::rejected(
             "initOrderbookExt",
@@ -2272,20 +2297,12 @@ pub fn apply_local_entity_control_tx(
         LocalEntityControlTx::InitOrderbookExt(mut profile) => {
             reject_invalid_hub_profile(&profile)?;
             if state.orderbook.is_none() {
-                let spread = &profile.spread_distribution;
-                let total = u64::from(spread.maker_bps)
-                    + u64::from(spread.taker_bps)
-                    + u64::from(spread.hub_bps)
-                    + u64::from(spread.maker_referrer_bps)
-                    + u64::from(spread.taker_referrer_bps);
-                if total == 10_000 {
-                    profile.entity_id = state.entity_id.clone();
-                    state.orderbook = Some(OrderbookState::empty(10_000));
-                    state.orderbook_metadata = Some(OrderbookConsensusMetadata {
-                        hub_profile: profile,
-                        referrals: Default::default(),
-                    });
-                }
+                profile.entity_id = state.entity_id.clone();
+                state.orderbook = Some(OrderbookState::empty(10_000));
+                state.orderbook_metadata = Some(OrderbookConsensusMetadata {
+                    hub_profile: profile,
+                    referrals: Default::default(),
+                });
             }
         }
         LocalEntityControlTx::SetHubConfig(data) => {
@@ -2515,6 +2532,46 @@ mod tests {
         let mut state = EntityStateSlice::empty(format!("0x{}", "11".repeat(32)), 1);
         apply_control(&mut state, &init_orderbook_tx(1, 0)).expect("zero minimum trade");
         assert!(state.orderbook.is_some());
+    }
+
+    /// A spread below 100% was a silent no-op, and a duplicate pair was
+    /// admitted but refused by restore_entity_state on the next restart;
+    /// parity: TS hub-config-admission-bounds.test.ts.
+    #[test]
+    fn init_orderbook_ext_rejects_partial_spread_and_duplicate_pairs() {
+        let profile = || match decode_local_entity_control_tx(&init_orderbook_tx(1, 0))
+            .expect("decode")
+            .expect("control")
+        {
+            LocalEntityControlTx::InitOrderbookExt(profile) => profile,
+            _ => panic!("init orderbook"),
+        };
+        let mut partial = profile();
+        partial.spread_distribution.taker_bps = 9_999;
+        let mut duplicate = profile();
+        duplicate.supported_pairs = vec!["1/2".into(), "1/2".into()];
+        for (profile, expected) in [
+            (partial, "ORDERBOOK_SPREAD_DISTRIBUTION_INVALID:9999"),
+            (duplicate, "ORDERBOOK_SUPPORTED_PAIR_DUPLICATE:1/2"),
+        ] {
+            let mut state = EntityStateSlice::empty(format!("0x{}", "11".repeat(32)), 1);
+            let before = state.clone();
+            let error = apply_local_entity_control_tx(
+                &mut state,
+                LocalEntityControlTx::InitOrderbookExt(profile),
+                &mut Vec::new(),
+                &authority(),
+                0,
+            )
+            .expect_err("typed reject");
+            assert!(
+                matches!(&error, EntityKernelError::RejectedEntityTx {
+                    kind: "initOrderbookExt", detail,
+                } if detail == expected),
+                "{error}"
+            );
+            assert_eq!(state, before);
+        }
     }
 
     #[test]

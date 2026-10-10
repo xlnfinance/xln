@@ -1,6 +1,6 @@
-import { haltRuntimeFailure, rejectFailure } from "../../../../protocol/errors/failure-taxonomy";
+import { rejectFailure } from "../../../../protocol/errors/failure-taxonomy";
 
-import { createOrderbookExtState, validateSpreadDistribution } from '../../../../orderbook';
+import { createOrderbookExtState, spreadDistributionTotal, validateSpreadDistribution } from '../../../../orderbook';
 import type { EntityInput, EntityState, Proposal } from '../../../types';
 import type { EntityRuntimeContext } from '../../../runtime-context';
 import type { EntityTx } from '../../../../types/entity-tx';
@@ -269,15 +269,35 @@ export const handleProfileUpdateEntityTx = (
 
 // Token 0 cannot be a quote reference and a negative minimum trade has no
 // meaning; the Entity document schema refuses both on every read, so
-// committing one bricked the next restart. Typed reject before mutation.
+// committing one bricked the next restart. A spread that does not sum to 100%
+// was silently ignored, an invalid quote authority halted the Runtime, and a
+// duplicate supported pair bricked the Rust restore. Typed rejects before
+// mutation; returns the normalized quote authority.
 // Parity: Rust reject_invalid_hub_profile (entity-kernel local_control.rs).
-const rejectInvalidOrderbookProfile = ({ referenceTokenId, minTradeSize }: EntityTxOf<'initOrderbookExt'>['data']): void => {
+const rejectInvalidOrderbookProfile = (data: EntityTxOf<'initOrderbookExt'>['data']): string => {
+  const { referenceTokenId, minTradeSize, spreadDistribution, supportedPairs } = data;
   if (referenceTokenId < 1) {
     throw rejectFailure('ORDERBOOK_REFERENCE_TOKEN_INVALID', `ORDERBOOK_REFERENCE_TOKEN_INVALID:${referenceTokenId}`);
   }
   if (minTradeSize < 0n) {
     throw rejectFailure('ORDERBOOK_MIN_TRADE_SIZE_NEGATIVE', `ORDERBOOK_MIN_TRADE_SIZE_NEGATIVE:${minTradeSize}`);
   }
+  if (!validateSpreadDistribution(spreadDistribution)) {
+    const total = spreadDistributionTotal(spreadDistribution);
+    throw rejectFailure('ORDERBOOK_SPREAD_DISTRIBUTION_INVALID', `ORDERBOOK_SPREAD_DISTRIBUTION_INVALID:${total}`);
+  }
+  const pairs = new Set<string>();
+  for (const pair of supportedPairs) {
+    if (pairs.has(pair)) {
+      throw rejectFailure('ORDERBOOK_SUPPORTED_PAIR_DUPLICATE', `ORDERBOOK_SUPPORTED_PAIR_DUPLICATE:${pair}`);
+    }
+    pairs.add(pair);
+  }
+  const usdQuoteAuthorityEntityId = normalizeEntityRef(data.usdQuoteAuthorityEntityId);
+  if (!/^0x[0-9a-f]{64}$/.test(usdQuoteAuthorityEntityId)) {
+    throw rejectFailure('ORDERBOOK_USD_QUOTE_AUTHORITY_INVALID', `ORDERBOOK_USD_QUOTE_AUTHORITY_INVALID:${usdQuoteAuthorityEntityId}`);
+  }
+  return usdQuoteAuthorityEntityId;
 };
 
 export const handleInitOrderbookExtEntityTx = (
@@ -285,18 +305,9 @@ export const handleInitOrderbookExtEntityTx = (
   entityTx: EntityTxOf<'initOrderbookExt'>,
   mutableFrameState = false,
 ): BasicEntityTxResult => {
-  rejectInvalidOrderbookProfile(entityTx.data);
+  const usdQuoteAuthorityEntityId = rejectInvalidOrderbookProfile(entityTx.data);
   if (entityState.orderbookExt) {
     return { newState: entityState, outputs: [] };
-  }
-
-  if (!validateSpreadDistribution(entityTx.data.spreadDistribution)) {
-    log.error(`❌ Invalid spread distribution for initOrderbookExt on ${entityState.entityId}`);
-    return { newState: entityState, outputs: [] };
-  }
-  const usdQuoteAuthorityEntityId = normalizeEntityRef(entityTx.data.usdQuoteAuthorityEntityId);
-  if (!/^0x[0-9a-f]{64}$/.test(usdQuoteAuthorityEntityId)) {
-    throw haltRuntimeFailure("ORDERBOOK_USD_QUOTE_AUTHORITY_INVALID", `ORDERBOOK_USD_QUOTE_AUTHORITY_INVALID:${usdQuoteAuthorityEntityId}`);
   }
 
   const hubProfile = {

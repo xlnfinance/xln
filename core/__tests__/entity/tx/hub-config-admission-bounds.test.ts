@@ -15,7 +15,12 @@ const hubConfig = (data: Extract<EntityTx, { type: 'setHubConfig' }>['data']): E
   type: 'setHubConfig',
   data,
 });
-const orderbookExt = (referenceTokenId: number, minTradeSize: bigint): EntityTx => ({
+type OrderbookExtData = Extract<EntityTx, { type: 'initOrderbookExt' }>['data'];
+const orderbookExt = (
+  referenceTokenId: number,
+  minTradeSize: bigint,
+  overrides: Partial<OrderbookExtData> = {},
+): EntityTx => ({
   type: 'initOrderbookExt',
   data: {
     name: 'bounds-hub',
@@ -24,6 +29,7 @@ const orderbookExt = (referenceTokenId: number, minTradeSize: bigint): EntityTx 
     usdQuoteAuthorityEntityId: entity('32'),
     minTradeSize,
     supportedPairs: ['1/2'],
+    ...overrides,
   },
 });
 
@@ -86,6 +92,21 @@ describe('hub settings the Entity document cannot read back are rejected at admi
       hubConfig({ rebalanceBaseFee: 1n }),
       'HUB_REBALANCE_TOKENLESS_RAW_OVERRIDE_FORBIDDEN:rebalanceBaseFee',
     ],
+    // Silently ignored before: the tx committed as a no-op.
+    [
+      'spread below 100%',
+      orderbookExt(1, 0n, {
+        spreadDistribution: { makerBps: 0, takerBps: 9_999, hubBps: 0, makerReferrerBps: 0, takerReferrerBps: 0 },
+      }),
+      'ORDERBOOK_SPREAD_DISTRIBUTION_INVALID:9999',
+    ],
+    // Admitted before, then refused by the Rust restore on the next restart.
+    ['duplicate supported pair', orderbookExt(1, 0n, { supportedPairs: ['1/2', '1/2'] }), 'ORDERBOOK_SUPPORTED_PAIR_DUPLICATE:1/2'],
+    [
+      'invalid quote authority',
+      orderbookExt(1, 0n, { usdQuoteAuthorityEntityId: '0x1234' }),
+      'ORDERBOOK_USD_QUOTE_AUTHORITY_INVALID:0x1234',
+    ],
   ];
   for (const [name, tx, code] of signerErrors) {
     test(`${name} is a typed reject, not a Runtime halt`, async () => {
@@ -94,6 +115,7 @@ describe('hub settings the Entity document cannot read back are rejected at admi
       expect(result.skippedError).toBe(code);
       expect(result.newState).toBe(state);
       expect(state.hubRebalanceConfig).toBeUndefined();
+      expect(state.orderbookExt).toBeUndefined();
     });
   }
 

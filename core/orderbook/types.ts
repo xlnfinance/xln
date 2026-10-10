@@ -627,10 +627,11 @@ export interface SpreadDistribution {
 }
 
 /** Validate spread distribution sums to 100% */
+export const spreadDistributionTotal = (dist: SpreadDistribution): number =>
+  dist.makerBps + dist.takerBps + dist.hubBps + dist.makerReferrerBps + dist.takerReferrerBps;
+
 export function validateSpreadDistribution(dist: SpreadDistribution): boolean {
-  const total = dist.makerBps + dist.takerBps + dist.hubBps +
-                dist.makerReferrerBps + dist.takerReferrerBps;
-  return total === BPS_BASE;
+  return spreadDistributionTotal(dist) === BPS_BASE;
 }
 
 /** Default: 100% to taker so limit orders always get full market price improvement */
