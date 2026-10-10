@@ -582,7 +582,6 @@ const buildUpsertWorkspace = (
   if (typeof transition.executorIsLeft !== 'boolean') {
     throw new Error('SETTLEMENT_WORKSPACE_EXECUTOR_INVALID');
   }
-  compileOps(transition.ops, byLeft);
   const current = account.state.settlementWorkspace;
   if (transition.revision === 1) {
     if (current) throw new Error('SETTLEMENT_WORKSPACE_ALREADY_EXISTS');
@@ -604,6 +603,12 @@ const buildUpsertWorkspace = (
       throw new Error(`SETTLEMENT_WORKSPACE_PREVIOUS_HASH_MISMATCH:${currentHash}:${previousHash}`);
     }
   }
+  const { diffs, forgiveTokenIds } = compileOps(transition.ops, byLeft);
+  // A peer may have credit but no on-chain collateral. Reject its impossible
+  // withdrawal before committing the workspace: deferred auto-approval must
+  // never be the first place that discovers an invalid post-settlement proof.
+  // Order matches Rust apply_upsert: predecessor, compile, projection.
+  projectSettlementDeltaOverrides(account, diffs, forgiveTokenIds);
   const workspace: UnsignedSettlementWorkspace = {
     workspaceHash: '',
     ops: transition.ops.map((op) => ({ ...op })),

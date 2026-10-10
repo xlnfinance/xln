@@ -210,6 +210,11 @@ fn apply_upsert(
     let current = account.state().settlement_workspace().cloned();
     validate_upsert_predecessor(account, current.as_ref(), fields, revision)?;
     let compiled = compile_ops(ops, proposer == Side::Left)?;
+    // Reject impossible peer withdrawals before publishing a workspace that
+    // deferred Entity auto-approval would otherwise attempt to sign.
+    for diff in &compiled.diffs {
+        project_delta(account, diff)?;
+    }
     let workspace = unsigned_workspace(
         account,
         revision,
@@ -441,6 +446,32 @@ fn assert_settlement_nonce(
     Ok(())
 }
 
+fn project_delta(account: &AccountReplica, diff: &OpDiff) -> Result<crate::Delta, String> {
+    let mut delta = account
+        .state()
+        .delta_or_zero(diff.token_id)
+        .map_err(|error| error.to_string())?;
+    let collateral = delta.collateral() + &diff.collateral;
+    let ondelta = delta.ondelta() + &diff.ondelta;
+    if collateral < BigInt::from(0) || collateral > crate::state::delta::uint_max(256) {
+        return Err(format!(
+            "SETTLEMENT_PROJECTED_COLLATERAL_RANGE:token={}",
+            diff.token_id.get()
+        ));
+    }
+    let bound = BigInt::from(1) << 511usize;
+    if ondelta < -&bound || ondelta >= bound {
+        return Err(format!(
+            "SETTLEMENT_PROJECTED_ONDELTA_RANGE:token={}",
+            diff.token_id.get()
+        ));
+    }
+    delta
+        .apply_j_settlement(&collateral, &ondelta)
+        .map_err(|error| error.to_string())?;
+    Ok(delta)
+}
+
 fn projected_proof_body_hash(
     account: &AccountReplica,
     compiled: &CompiledOps,
@@ -450,16 +481,7 @@ fn projected_proof_body_hash(
         .ok_or("SETTLEMENT_DELTA_TRANSFORMER_MISSING")?;
     let mut projected = account.clone();
     for diff in &compiled.diffs {
-        let mut delta = projected
-            .state()
-            .delta_or_zero(diff.token_id)
-            .map_err(|error| error.to_string())?;
-        delta
-            .apply_j_settlement(
-                &(delta.collateral() + &diff.collateral),
-                &(delta.ondelta() + &diff.ondelta),
-            )
-            .map_err(|error| error.to_string())?;
+        let delta = project_delta(&projected, diff)?;
         projected
             .state_mut()
             .put_delta(delta)
@@ -2006,6 +2028,48 @@ mod tests {
             &BigInt::from(0)
         );
         assert!(account.state().settlement_workspace().is_none());
+    }
+
+    #[test]
+    fn upsert_rejects_credit_backed_collateral_withdrawal_without_mutation() {
+        for side in [Side::Left, Side::Right] {
+            let mut account = replica();
+            let before = account
+                .state()
+                .payment_profile_account_state_root()
+                .expect("root");
+            let template = upsert();
+            let withdrawal = replace_fields(
+                object(&template, "upsert").expect("fields"),
+                &[(
+                    "ops",
+                    CanonicalValue::Array(vec![CanonicalValue::Object(vec![
+                        ("type".into(), CanonicalValue::String("c2r".into())),
+                        ("tokenId".into(), number(1).expect("token")),
+                        ("amount".into(), CanonicalValue::BigInt(1.into())),
+                    ])]),
+                )],
+            );
+            let context = AccountExecutionContext::new(1_000, 1_000, 10, 0, 10);
+            let MutationDecision::Rejected { rejection, .. } =
+                apply(&mut account, &withdrawal, side, &context).expect("typed result")
+            else {
+                panic!("credit-backed withdrawal must be rejected");
+            };
+            // Same code TS asserts in settlement-transition.test.ts.
+            assert_eq!(
+                rejection.message(),
+                "SETTLEMENT_PROJECTED_COLLATERAL_RANGE:token=1"
+            );
+            assert_eq!(
+                account
+                    .state()
+                    .payment_profile_account_state_root()
+                    .expect("root"),
+                before
+            );
+            assert!(account.state().settlement_workspace().is_none());
+        }
     }
 
     #[test]

@@ -209,7 +209,9 @@ const throwCriticalProposalFailure = (
   rejection: AccountTxRejection,
 ): void => {
   const reason = accountTxRejectionMessage(rejection);
-  if (tx.type === 'settle_transition') {
+  // Upserts are user-authored proposals. Invalid amounts must be evicted with
+  // a typed rejection, not poison the Runtime before an honest tx can run.
+  if (tx.type === 'settle_transition' && tx.data.kind !== 'upsert') {
     throw new Error(`SETTLEMENT_TRANSITION_PROPOSAL_FAILED:${tx.data.kind}:${reason}`);
   }
   // swap_resolve is emitted only by the deterministic matcher. Rejecting it

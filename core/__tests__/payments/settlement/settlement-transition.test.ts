@@ -18,6 +18,11 @@ import { selectSettlementContinuation } from '../../../entity/consensus/account/
 import { runAccountAuthorityEntityStage } from '../../../rscore/authority/entity-stage';
 import { TsAccountWorkerAuthority } from '../../../rscore/ts-worker';
 import { proposeAccountFrame } from '../../../account/consensus/proposal/propose';
+import { applyAccountInput } from '../../../account/consensus';
+import { accountInputFailureMessage } from '../../../account/consensus/result';
+import { computeFrameHash } from '../../../account/consensus/frame/hash';
+import { computeAccountStateRoot } from '../../../account/commitment/state-root';
+import { safeStringify } from '../../../protocol/serialization';
 import {
   assertEntityStateRootCache,
   computeCanonicalEntityConsensusStateHash,
@@ -440,6 +445,7 @@ describe('atomic settlement Account transition', () => {
     const jurisdiction = makeJurisdiction('settlement-transition-scheduler', 31337, 'a1', 'b2');
     const signer = registerTestSigner(env, 'settlement-transition-scheduler-awaiting-hanko', '1');
     const state = makeState(LEFT, signer, jurisdiction, RIGHT);
+    putDelta(writableAccount(state, RIGHT), { ...createDefaultDelta(1), collateral: 1n, ondelta: 1n });
     state.timestamp = HUB_REBALANCE_INTERVAL_MS;
     state.hubRebalanceConfig = {
       matchingStrategy: 'amount',
@@ -479,6 +485,7 @@ describe('atomic settlement Account transition', () => {
     const jurisdiction = makeJurisdiction('settlement-transition-scheduler', 31337, 'a1', 'b2');
     const signer = registerTestSigner(env, 'settlement-transition-scheduler-pending-submit', '1');
     const state = makeState(LEFT, signer, jurisdiction, RIGHT);
+    putDelta(writableAccount(state, RIGHT), { ...createDefaultDelta(1), collateral: 1n, ondelta: 1n });
     state.timestamp = HUB_REBALANCE_INTERVAL_MS;
     state.hubRebalanceConfig = {
       matchingStrategy: 'amount',
@@ -920,6 +927,7 @@ describe('atomic settlement Account transition', () => {
     const [left, right] = entityA < entityB ? [entityA, entityB] : [entityB, entityA];
     const signer = left === entityA ? signerA : signerB;
     const state = makeState(left, signer, jurisdiction, right);
+    putDelta(writableAccount(state, right), { ...createDefaultDelta(1), collateral: 4n, ondelta: 4n });
     addReplica(env, state, signer);
     installProofStack(env, state);
     const command = buildCollectiveEntityProposalTx(signer, [{ type: 'settle_propose', data: {
@@ -1030,6 +1038,23 @@ describe('atomic settlement Account transition', () => {
     });
   });
 
+  test('settle_transition rejects collateral withdrawal backed only by credit before committing a workspace', async () => {
+    for (const byLeft of [true, false]) {
+      const account = makeAccount(LEFT, RIGHT);
+      const before = account.state;
+      const result = await applyAccountTxToMutableReplica(account, {
+        type: 'settle_transition',
+        data: { kind: 'upsert', revision: 1, executorIsLeft: !byLeft,
+          ops: [{ type: 'c2r', tokenId: 1, amount: 1n }] },
+      }, byLeft, 1_000);
+      expect(result.ok).toBe(false);
+      if (result.ok) throw new Error('Expected invalid collateral withdrawal rejection');
+      expect(result.rejection.message).toBe('SETTLEMENT_PROJECTED_COLLATERAL_RANGE:token=1');
+      expect(account.state).toEqual(before);
+      expect(account.state.settlementWorkspace).toBeUndefined();
+    }
+  });
+
   test('an Account frame creates the workspace and its holds without Entity-local prestate', async () => {
     const account = makeAccount(LEFT, RIGHT);
 
@@ -1050,6 +1075,65 @@ describe('atomic settlement Account transition', () => {
     });
     expect(account.state.settlementWorkspace?.workspaceHash).toMatch(/^0x[0-9a-f]{64}$/);
     expect(account.state.deltas.get(1)?.leftHold).toBe(4n);
+  });
+
+  test('invalid user settlement is evicted without halting Account proposal processing', async () => {
+    const account = makeAccount(LEFT, RIGHT);
+    account.mempool.push({ type: 'settle_transition', data: {
+      kind: 'upsert', revision: 1, executorIsLeft: true,
+      ops: [{ type: 'c2r', tokenId: 1, amount: 1n }],
+    } });
+    const result = await proposeAccountFrame(
+      createAccountConsensusContext(createEmptyEnv('invalid-settlement-eviction')), account, 1_000,
+    );
+    expect(result).toMatchObject({ ok: true, outcome: 'idle', proposalDroppedTransactions: [{
+      index: 0, disposition: 'removed', message: 'SETTLEMENT_PROJECTED_COLLATERAL_RANGE:token=1',
+    }] });
+    expect(account.mempool).toHaveLength(0);
+    expect(account.state.settlementWorkspace).toBeUndefined();
+    expect((await upsert(account, { revision: 1, executorIsLeft: true,
+      ops: [{ type: 'r2c', tokenId: 1, amount: 1n }],
+    })).ok).toBe(true);
+  });
+
+  test('peer-signed frame with a credit-only collateral withdrawal is a typed failure, not a Runtime halt', async () => {
+    const account = makeAccount(LEFT, RIGHT);
+    account.currentFrame.accountStateRoot = computeAccountStateRoot(account.state);
+    const frame = {
+      height: 1,
+      timestamp: 1_000,
+      jHeight: 0,
+      accountTxs: [transition({ kind: 'upsert', revision: 1, executorIsLeft: false,
+        ops: [{ type: 'c2r', tokenId: 1, amount: 1n }] })],
+      prevFrameHash: 'genesis',
+      accountStateRoot: computeAccountStateRoot(account.state),
+      deltas: [],
+      stateHash: '',
+      byLeft: false,
+    };
+    frame.stateHash = computeFrameHash(frame);
+    const context = {
+      ...createAccountConsensusContext(createEmptyEnv('peer-invalid-settlement-frame')),
+      verifyHanko: async (_hanko: string, _hash: string, expectedEntityId: string) =>
+        ({ valid: true, entityId: expectedEntityId }),
+    };
+    const before = safeStringify(account);
+
+    const result = await applyAccountInput(context, account, {
+      kind: 'ack_frame',
+      fromEntityId: RIGHT,
+      toEntityId: LEFT,
+      domain: { ...account.state.domain },
+      disputeConfig: { ...account.state.disputeConfig },
+      watchSeed: account.state.watchSeed,
+      proposal: { frame, frameHanko: `0x${'66'.repeat(65)}` },
+    });
+
+    expect(result.ok).toBe(false);
+    expect('committedFrames' in result).toBe(false);
+    expect(accountInputFailureMessage(result)).toContain('SETTLEMENT_PROJECTED_COLLATERAL_RANGE:token=1');
+    expect(safeStringify(account)).toBe(before);
+    expect(account.state.settlementWorkspace).toBeUndefined();
   });
 
   test('safe counterparty auto-approval starts only after the upsert Account frame commits', async () => {
