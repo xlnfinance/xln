@@ -21,6 +21,7 @@ import {
 import { withRuntimeCommittedRead } from '../../../runtime/frame/lifecycle/writer-lock';
 
 const faucetLog = createStructuredLogger('server.faucet');
+const INVALID_AMOUNT_ERROR = 'Invalid amount: expected a positive decimal within the token precision';
 
 export type ReserveFaucetDependencies = {
   req: Request;
@@ -78,11 +79,15 @@ const parseRequest = async (req: Request, headers: HeadersInit): Promise<Reserve
   if (!Number.isSafeInteger(tokenId) || tokenId < 0) {
     return failure(headers, 400, 'FAUCET_INVALID_TOKEN_ID', 'Invalid tokenId');
   }
+  const amount = value['amount'] ?? '100';
+  if (typeof amount !== 'string' && typeof amount !== 'number') {
+    return failure(headers, 400, 'FAUCET_AMOUNT_INVALID', INVALID_AMOUNT_ERROR);
+  }
   return {
     userEntityId: value['userEntityId'],
     tokenId,
     tokenSymbol: typeof value['tokenSymbol'] === 'string' ? value['tokenSymbol'] : undefined,
-    amount: typeof value['amount'] === 'string' ? value['amount'] : String(value['amount'] ?? '100'),
+    amount: String(amount).trim(),
     requestId: globalThis.crypto.randomUUID(),
   };
 };
@@ -104,7 +109,10 @@ const resolveToken = (
       tokenSymbol: request.tokenSymbol,
     });
   }
-  return { tokenId, amountWei: parseReserveFaucetAmount(request.amount, token) };
+  // A malformed amount reached parseUnits and surfaced as an unhandled 500.
+  const amountWei = parseReserveFaucetAmount(request.amount, token);
+  if (amountWei === null) return failure(headers, 400, 'FAUCET_AMOUNT_INVALID', INVALID_AMOUNT_ERROR);
+  return { tokenId, amountWei };
 };
 
 const admitRequest = async (

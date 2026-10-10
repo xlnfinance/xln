@@ -21,6 +21,13 @@ const parsePositiveDecimal = (value: unknown): Decimal | null => {
   return coefficient > 0n ? { coefficient, scale: fraction.length } : null;
 };
 
+/** Base units of a faucet amount, or null unless it is a positive plain decimal within `decimals`. */
+export const parseFaucetAmountUnits = (value: unknown, decimals: number): bigint | null => {
+  const amount = parsePositiveDecimal(value);
+  if (!amount || amount.scale > decimals) return null;
+  return amount.coefficient * 10n ** BigInt(decimals - amount.scale);
+};
+
 const exceeds = (value: Decimal, maximum: Decimal): boolean => {
   const scale = Math.max(value.scale, maximum.scale);
   return value.coefficient * 10n ** BigInt(scale - value.scale)

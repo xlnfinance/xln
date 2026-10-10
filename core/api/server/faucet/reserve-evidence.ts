@@ -1,9 +1,9 @@
-import { ethers } from 'ethers';
 import type { RuntimeReplica } from '../../../runtime/types';
 import {
   findReserveUpdatedEvidence,
   type ReserveUpdatedEvidence,
 } from '../../../jurisdiction/machine/events/event-evidence';
+import { parseFaucetAmountUnits } from './policy';
 
 export type TokenCatalogEntry = {
   tokenId?: number | string | null;
@@ -11,15 +11,16 @@ export type TokenCatalogEntry = {
   decimals?: number | null;
 };
 
+/** Null for a caller amount that is not a positive decimal within the token precision. */
 export const parseReserveFaucetAmount = (
   amount: string,
   tokenMeta: Pick<TokenCatalogEntry, 'tokenId' | 'decimals'>,
-): bigint => {
+): bigint | null => {
   const decimals = tokenMeta.decimals;
   if (typeof decimals !== 'number' || !Number.isSafeInteger(decimals) || decimals < 0 || decimals > 255) {
     throw new Error(`FAUCET_TOKEN_DECIMALS_INVALID:${String(tokenMeta.tokenId)}:${String(tokenMeta.decimals)}`);
   }
-  return ethers.parseUnits(amount, decimals);
+  return parseFaucetAmountUnits(amount, decimals);
 };
 
 export const waitForReserveUpdatedEvidence = async (

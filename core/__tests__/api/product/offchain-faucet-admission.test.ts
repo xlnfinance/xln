@@ -260,6 +260,21 @@ describe('offchain faucet admission', () => {
     expect(enqueued).toBeNull();
   });
 
+  test('rejects malformed, non-positive and over-precise amounts with a typed 400', async () => {
+    // Operator callers skip the public policy; these reached parseUnits as a
+    // 500, or (zero, a one-element array) were queued as payments.
+    const account = makeAccount({ currentHeight: 1, outCapacity: 1_000n * USDC_UNIT });
+    for (const amount of ['1e2', 'abc', '-1', '0', '1.0000001', [100], '9'.repeat(81)]) {
+      const { response, body, enqueued } = await callFaucet(account, { requestBody: { amount } });
+      expect(response.status).toBe(400);
+      expect(body.code).toBe('FAUCET_AMOUNT_INVALID');
+      expect(enqueued).toBeNull();
+    }
+    const { response, enqueued } = await callFaucet(account, { requestBody: { amount: '1.5' } });
+    expect(response.status).toBe(200);
+    expect(enqueued?.entityInputs[0]?.entityTxs?.[0]).toMatchObject({ data: { amount: 1_500_000n } });
+  });
+
   test('still rejects insufficient capacity from a settled account snapshot', () => {
     const account = makeAccount({
       currentHeight: 1,

@@ -98,6 +98,25 @@ describe('reserve faucet failures', () => {
       .toThrow('FAUCET_TOKEN_DECIMALS_INVALID:9:null');
   });
 
+  test('rejects malformed and over-precise amounts with a typed 400 before any reserve read', async () => {
+    // These reached parseUnits and surfaced as FAUCET_RESERVE_UNHANDLED_ERROR 500.
+    const adapter = makeAdapter();
+    adapter.getReserves = async () => {
+      throw new Error('RESERVE_READ_MUST_NOT_RUN');
+    };
+    for (const amount of ['1e2', 'abc', '0', '1.0000001']) {
+      const { response, body, enqueued } = await callReserveFaucet({
+        adapter,
+        amount,
+        env: makeEnv({ hubReserve: 1_000n * 10n ** 6n }),
+      });
+      expect(response.status).toBe(400);
+      expect(body.code).toBe('FAUCET_AMOUNT_INVALID');
+      expect(enqueued).toHaveLength(0);
+    }
+    expect(parseReserveFaucetAmount('1.0000001', { tokenId: 1, decimals: 6 })).toBeNull();
+  });
+
   test('reports typed transient failure when j-adapter is unavailable', async () => {
     const { response, body, enqueued } = await callReserveFaucet({ adapter: null });
 

@@ -1,4 +1,3 @@
-import { ethers } from 'ethers';
 import type { EntityTx } from '../../../types/entity-tx';
 import type { RuntimeReplica, RuntimeInput } from '../../../runtime/types';
 import { safeStringify } from '../../../protocol/serialization';
@@ -15,6 +14,7 @@ import {
   shouldRejectOffchainFaucetForSettledCapacity,
 } from './offchain-admission';
 import { faucetFailureBody } from './failure';
+import { parseFaucetAmountUnits } from './policy';
 import { getTokenInfo } from '../../../account/utils';
 import { getDefaultRebalanceBaseFeeForToken } from '../../../account/config/defaults';
 
@@ -37,6 +37,7 @@ type FaucetRequest = {
   requestedHubId: string;
   tokenId: number;
   amount: string;
+  amountWei: bigint;
 };
 
 type FaucetHub = {
@@ -116,6 +117,16 @@ const parseFaucetRequest = async (
       extra: { message: 'Runtime is offline or not initialized yet. Re-open runtime and retry faucet.' },
     });
   }
+  // Operator and hub callers skip the public policy pre-check; a malformed
+  // amount reached parseUnits and surfaced as a 500.
+  const rawAmount = body['amount'] ?? '100';
+  const amountWei = parseFaucetAmountUnits(rawAmount, getTokenInfo(tokenId).decimals);
+  if (amountWei === null) {
+    return fail(input.headers, 400, {
+      error: 'Invalid amount: expected a positive decimal within the token precision',
+      code: 'FAUCET_AMOUNT_INVALID',
+    });
+  }
   return {
     ok: true,
     value: {
@@ -124,7 +135,8 @@ const parseFaucetRequest = async (
       userRuntimeId: normalizedUserRuntimeId,
       requestedHubId: typeof requestedHubEntityId === 'string' ? requestedHubEntityId.toLowerCase() : '',
       tokenId,
-      amount: String(body['amount'] ?? '100'),
+      amount: String(rawAmount).trim(),
+      amountWei,
     },
   };
 };
@@ -232,7 +244,7 @@ const admitFaucetAccount = (
       },
     });
   }
-  const amountWei = ethers.parseUnits(request.amount, getTokenInfo(request.tokenId).decimals);
+  const amountWei = request.amountWei;
   const currentOutCapacity = getEntityOutCapacity(account?.state ?? null, hub.entityId, request.tokenId);
   if (shouldRejectOffchainFaucetForSettledCapacity({
     account,
