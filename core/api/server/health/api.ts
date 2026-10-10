@@ -116,7 +116,7 @@ const mergeHubHealth = (
 
 const buildHealthBodies = async (deps: RuntimeHealthDeps): Promise<HealthBodies> => {
   const env = deps.env;
-  const health = await getHealthStatus(env);
+  const health = getHealthStatus(env);
   const storage = getStorageHealthSnapshotSync();
   const relay = collectRelayHealth(deps);
   const hubs = mergeHubHealth(health, env, deps, relay.activeClientRuntimeIds, relay.profiles);

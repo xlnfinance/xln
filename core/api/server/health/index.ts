@@ -5,7 +5,6 @@ import type { RuntimeReplica } from '../../../runtime/types.js';
 import type { EntityReplica } from '../../../entity/types.js';
 import { getP2PState } from '../../../runtime.js';
 import { compareStableText } from '../../../protocol/serialization';
-import { withRuntimeCommittedRead } from '../../../runtime/frame/lifecycle/writer-lock';
 import { getLiveJAdapter } from '../../../runtime/j-submit/live-jadapters';
 
 export interface HealthStatus {
@@ -168,10 +167,8 @@ const buildHealthStatus = (env: RuntimeReplica | null): HealthStatus => {
 /**
  * Project health from one WAL-confirmed Runtime view.
  *
- * Health is externally visible. It must not leak balances from H+1 while the
- * writer is still awaiting the WAL commit that makes H+1 real.
+ * Health is externally visible: it must not leak balances from H+1 while the
+ * writer is still awaiting the WAL commit that makes H+1 real. The caller
+ * holds that committed-read lease (handleRuntimeHealth owns the only one).
  */
-export const getHealthStatus = (env: RuntimeReplica | null): Promise<HealthStatus> =>
-  env
-    ? withRuntimeCommittedRead(env, () => buildHealthStatus(env))
-    : Promise.resolve(buildHealthStatus(null));
+export const getHealthStatus = (env: RuntimeReplica | null): HealthStatus => buildHealthStatus(env);
