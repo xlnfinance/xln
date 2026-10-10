@@ -1617,26 +1617,32 @@ const scheduleDisposableActivityView = (
   frame: RuntimeFramePlan,
 ): void => {
   const events = structuredClone(frame.frameLogs);
+  const height = frame.record.height;
+  const recordFailure = (message: string): void => {
+    options.env.infrastructure ??= {};
+    const failure = options.env.infrastructure.runtimeActivityViewFailure;
+    if (!failure || failure.height <= height) {
+      options.env.infrastructure.runtimeActivityViewFailure = { height, message };
+    }
+  };
   void appendRuntimeActivityViewFrame(options.env, frame.record, events).then(outcome => {
-    if (outcome === 'gap') throw new Error(`RUNTIME_ACTIVITY_VIEW_GAP:height=${frame.record.height}`);
+    if (outcome === 'gap') {
+      // The append runs after the WAL commit and is not awaited, so a restart
+      // can lose the last one. The view is then behind the WAL, which is not a
+      // write failure: the next history read rebuilds it from the WAL.
+      const alreadyBehind = options.env.infrastructure?.runtimeActivityViewFailure !== undefined;
+      recordFailure(`RUNTIME_ACTIVITY_VIEW_GAP:height=${height}`);
+      if (!alreadyBehind) storageLog.info('activity_view.behind_wal', { height });
+      return;
+    }
     const failure = options.env.infrastructure?.runtimeActivityViewFailure;
-    if (failure && failure.height <= frame.record.height) {
+    if (failure && failure.height <= height) {
       delete options.env.infrastructure?.runtimeActivityViewFailure;
     }
   }).catch(error => {
     const message = error instanceof Error ? error.message : String(error);
-    options.env.infrastructure ??= {};
-    const failure = options.env.infrastructure.runtimeActivityViewFailure;
-    if (!failure || failure.height <= frame.record.height) {
-      options.env.infrastructure.runtimeActivityViewFailure = {
-        height: frame.record.height,
-        message,
-      };
-    }
-    storageLog.warn('activity_view.write_failed', {
-      height: frame.record.height,
-      error: message,
-    });
+    recordFailure(message);
+    storageLog.warn('activity_view.write_failed', { height, error: message });
   });
 };
 

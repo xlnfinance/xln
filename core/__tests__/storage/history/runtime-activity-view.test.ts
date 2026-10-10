@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, spyOn, test } from 'bun:test';
 import { createActivityPageReader } from '../../../../ui/src/runtime/financial/activity-reader';
 import { mkdirSync, rmSync } from 'fs';
 import { join } from 'path';
@@ -338,8 +338,17 @@ describe('disposable Runtime activity view', () => {
   test('keeps a skipped disposable write visible until verified repair', async () => {
     const { env, runtimeId } = await createStoredRuntime('activity-visible-gap');
     await resetRuntimeActivityViewAtFloor(env, 0);
-    await commitRuntimeTick(env);
-    await readRuntimeActivityViewStatus(env);
+    const warn = spyOn(console, 'warn');
+    try {
+      await commitRuntimeTick(env);
+      await readRuntimeActivityViewStatus(env);
+      // A view behind the WAL (the last append lost at restart) is repaired on
+      // read; it is not a write failure, and the browser health gate fails on
+      // every console warning.
+      expect(warn.mock.calls.flat().join(' ')).not.toContain('activity_view.write_failed');
+    } finally {
+      warn.mockRestore();
+    }
     expect(env.infrastructure?.runtimeActivityViewFailure).toEqual({
       height: 2,
       message: 'RUNTIME_ACTIVITY_VIEW_GAP:height=2',
