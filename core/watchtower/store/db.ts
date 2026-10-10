@@ -32,12 +32,12 @@ export class WatchtowerGlobalQuotaError extends Error {
   }
 }
 
-export const normalizeLookupKey = (lookupKey: string): string => {
+export const normalizeLookupKey = (lookupKey: unknown): string => {
   const normalized = String(lookupKey || '')
     .trim()
     .toLowerCase();
   if (!/^0x[0-9a-f]{64}$/.test(normalized)) {
-    throw new Error(`TOWER_LOOKUP_KEY_INVALID: ${lookupKey}`);
+    throw new Error(`TOWER_LOOKUP_KEY_INVALID: ${String(lookupKey)}`);
   }
   return normalized;
 };

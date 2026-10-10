@@ -1,5 +1,5 @@
 import { ethers } from 'ethers';
-import { deserializeTaggedJson, serializeTaggedJson } from '../protocol/serialization';
+import { serializeTaggedJson } from '../protocol/serialization';
 import {
   requireBoundaryInteger,
   requireBoundaryRecord,
@@ -16,7 +16,8 @@ import {
   buildTowerAppointmentOwnerMessage,
 } from '../storage/recovery/bundle/crypto';
 import type { WatchtowerStore } from './store';
-import { WatchtowerGlobalQuotaError } from './store/db';
+import { normalizeLookupKey, WatchtowerGlobalQuotaError } from './store/db';
+import { assertEncryptedLastResortPayload } from './store/appointments';
 import type { WatchtowerSweepResult } from './action';
 import { PushRegistrationQuotaError, type PushStore } from './push/store';
 import {
@@ -144,14 +145,6 @@ const decodeTowerAppointmentEnvelope = (value: unknown): TowerAppointmentV1 => {
   return appointment as TowerAppointmentV1;
 };
 
-const normalizeLookupKey = (lookupKey: unknown): string => {
-  const value = String(lookupKey || '').trim().toLowerCase();
-  if (!/^0x[0-9a-f]{64}$/.test(value)) {
-    throw new Error(`TOWER_LOOKUP_KEY_INVALID: ${String(lookupKey)}`);
-  }
-  return value;
-};
-
 const normalizeBytes32 = (value: unknown, label: string): string => {
   const normalized = String(value || '').trim().toLowerCase();
   if (!/^0x[0-9a-f]{64}$/.test(normalized)) {
@@ -205,28 +198,6 @@ const verifyEncryptedBundleShape = (appointment: TowerAppointmentV1): void => {
   }
   if (appointment.bundle.compression !== undefined && appointment.bundle.compression !== 'gzip') {
     throw new Error(`TOWER_BUNDLE_COMPRESSION_UNSUPPORTED: ${String(appointment.bundle.compression)}`);
-  }
-};
-
-const assertEncryptedLastResortPayload = (lastResortPayload: TowerAppointmentV1['lastResortPayload']): void => {
-  const raw = String(lastResortPayload?.encryptedRemedy || '').trim();
-  if (!raw) {
-    throw new Error('TOWER_LAST_RESORT_PAYLOAD_REMEDY_MISSING');
-  }
-  let parsed: Record<string, unknown>;
-  try {
-    parsed = requireBoundaryRecord(deserializeTaggedJson(raw), 'TOWER_LAST_RESORT_PAYLOAD_REMEDY_NOT_ENCRYPTED');
-  } catch {
-    throw new Error('TOWER_LAST_RESORT_PAYLOAD_REMEDY_NOT_ENCRYPTED');
-  }
-  if (
-    parsed['type'] !== 'tower_encrypted_payload' ||
-    parsed['version'] !== 1 ||
-    parsed['alg'] !== 'watch-seed-aes-256-gcm' ||
-    typeof parsed['iv'] !== 'string' ||
-    typeof parsed['ciphertext'] !== 'string'
-  ) {
-    throw new Error('TOWER_LAST_RESORT_PAYLOAD_REMEDY_NOT_ENCRYPTED');
   }
 };
 

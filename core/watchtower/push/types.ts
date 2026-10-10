@@ -85,7 +85,6 @@ export type PushNotificationV1 = {
 
 export type PushSendResult = {
   ok: boolean;
-  skipped?: boolean;
   error?: string;
 };
 

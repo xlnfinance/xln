@@ -28,7 +28,8 @@ const towerModeOf = (appointment: TowerAppointmentV1): TowerModeV1 => normalizeT
 
 const slotOf = (appointment: TowerAppointmentV1): number => Math.max(0, Math.floor(Number(appointment.slot ?? 0)));
 
-const assertEncryptedLastResortPayload = (payload: TowerLastResortPayloadV1 | null | undefined): void => {
+/** Ingress and the store both refuse a remedy the tower could read in plaintext. */
+export const assertEncryptedLastResortPayload = (payload: TowerLastResortPayloadV1 | null | undefined): void => {
   const raw = String(payload?.encryptedRemedy || '').trim();
   if (!raw) throw new Error('TOWER_LAST_RESORT_PAYLOAD_REMEDY_MISSING');
   let parsed: Record<string, unknown>;
