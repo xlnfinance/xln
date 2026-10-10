@@ -268,6 +268,525 @@
           }
         }
       ]
+    },
+    {
+      "maxOrders": 64,
+      "name": "out-of-band-sweep-cancel-order",
+      "steps": [
+        {
+          "expected": {
+            "bookCommitmentHash": "0x355022976680ffe22958a8cba9dc4285",
+            "eventHash": "9007197614209380",
+            "events": [
+              "ACK"
+            ],
+            "orderIds": [
+              "bid-85-a"
+            ],
+            "outcome": "applied",
+            "sweptOrderIds": [],
+            "takerOrderId": null
+          },
+          "step": {
+            "kind": "add",
+            "orderId": "bid-85-a",
+            "ownerId": "owner-1",
+            "priceTicks": "85",
+            "qtyLots": "1",
+            "side": "bid",
+            "suspended": "all",
+            "timeInForce": 0
+          }
+        },
+        {
+          "expected": {
+            "bookCommitmentHash": "0x26cb4a921a2b4adac302e130533929f3",
+            "eventHash": "8505240528548537",
+            "events": [
+              "ACK"
+            ],
+            "orderIds": [
+              "bid-85-a",
+              "bid-100"
+            ],
+            "outcome": "applied",
+            "sweptOrderIds": [],
+            "takerOrderId": null
+          },
+          "step": {
+            "kind": "add",
+            "orderId": "bid-100",
+            "ownerId": "owner-2",
+            "priceTicks": "100",
+            "qtyLots": "1",
+            "side": "bid",
+            "suspended": "all",
+            "timeInForce": 0
+          }
+        },
+        {
+          "expected": {
+            "bookCommitmentHash": "0xca748103bc43dbddcbaca15c11c085c0",
+            "eventHash": "8627227652942877",
+            "events": [
+              "ACK"
+            ],
+            "orderIds": [
+              "bid-85-a",
+              "bid-100",
+              "bid-85-b"
+            ],
+            "outcome": "applied",
+            "sweptOrderIds": [],
+            "takerOrderId": null
+          },
+          "step": {
+            "kind": "add",
+            "orderId": "bid-85-b",
+            "ownerId": "owner-3",
+            "priceTicks": "85",
+            "qtyLots": "1",
+            "side": "bid",
+            "suspended": "all",
+            "timeInForce": 0
+          }
+        },
+        {
+          "expected": {
+            "bookCommitmentHash": "0x574991ed3efa91d071f748e87a8250b2",
+            "eventHash": "6276934495233416",
+            "events": [
+              "ACK"
+            ],
+            "orderIds": [
+              "bid-85-a",
+              "bid-100",
+              "bid-85-b",
+              "bid-90"
+            ],
+            "outcome": "applied",
+            "sweptOrderIds": [],
+            "takerOrderId": null
+          },
+          "step": {
+            "kind": "add",
+            "orderId": "bid-90",
+            "ownerId": "owner-4",
+            "priceTicks": "90",
+            "qtyLots": "1",
+            "side": "bid",
+            "suspended": "all",
+            "timeInForce": 0
+          }
+        },
+        {
+          "expected": {
+            "bookCommitmentHash": "0x948e7d8c34eb82ebc7f03c0801ef9f1e",
+            "eventHash": "2580261079703343",
+            "events": [
+              "ACK"
+            ],
+            "orderIds": [
+              "bid-85-a",
+              "bid-100",
+              "bid-85-b",
+              "bid-90",
+              "bid-150"
+            ],
+            "outcome": "applied",
+            "sweptOrderIds": [],
+            "takerOrderId": null
+          },
+          "step": {
+            "kind": "add",
+            "orderId": "bid-150",
+            "ownerId": "owner-5",
+            "priceTicks": "150",
+            "qtyLots": "1",
+            "side": "bid",
+            "suspended": "all",
+            "timeInForce": 0
+          }
+        },
+        {
+          "expected": {
+            "bookCommitmentHash": "0xad6edb5407b6d9e74e962b8bc309f2d6",
+            "eventHash": "633433156802834",
+            "events": [
+              "ACK"
+            ],
+            "orderIds": [
+              "bid-85-a",
+              "bid-100",
+              "bid-85-b",
+              "bid-90",
+              "bid-150",
+              "bid-210-a"
+            ],
+            "outcome": "applied",
+            "sweptOrderIds": [],
+            "takerOrderId": null
+          },
+          "step": {
+            "kind": "add",
+            "orderId": "bid-210-a",
+            "ownerId": "owner-6",
+            "priceTicks": "210",
+            "qtyLots": "1",
+            "side": "bid",
+            "suspended": "all",
+            "timeInForce": 0
+          }
+        },
+        {
+          "expected": {
+            "bookCommitmentHash": "0xe55968d9256ce188049668815f94a0f1",
+            "eventHash": "2406776570139403",
+            "events": [
+              "ACK"
+            ],
+            "orderIds": [
+              "bid-85-a",
+              "bid-100",
+              "bid-85-b",
+              "bid-90",
+              "bid-150",
+              "bid-210-a",
+              "bid-200"
+            ],
+            "outcome": "applied",
+            "sweptOrderIds": [],
+            "takerOrderId": null
+          },
+          "step": {
+            "kind": "add",
+            "orderId": "bid-200",
+            "ownerId": "owner-7",
+            "priceTicks": "200",
+            "qtyLots": "1",
+            "side": "bid",
+            "suspended": "all",
+            "timeInForce": 0
+          }
+        },
+        {
+          "expected": {
+            "bookCommitmentHash": "0x0aad0136fe74792f06dfe4e622abc160",
+            "eventHash": "8744716618943726",
+            "events": [
+              "ACK"
+            ],
+            "orderIds": [
+              "bid-85-a",
+              "bid-100",
+              "bid-85-b",
+              "bid-90",
+              "bid-150",
+              "bid-210-a",
+              "bid-200",
+              "bid-210-b"
+            ],
+            "outcome": "applied",
+            "sweptOrderIds": [],
+            "takerOrderId": null
+          },
+          "step": {
+            "kind": "add",
+            "orderId": "bid-210-b",
+            "ownerId": "owner-8",
+            "priceTicks": "210",
+            "qtyLots": "1",
+            "side": "bid",
+            "suspended": "all",
+            "timeInForce": 0
+          }
+        },
+        {
+          "expected": {
+            "bookCommitmentHash": "0x5265b773ba0619618388456170527774",
+            "eventHash": "8669728842401275",
+            "events": [
+              "ACK"
+            ],
+            "orderIds": [
+              "bid-85-a",
+              "bid-100",
+              "bid-85-b",
+              "bid-90",
+              "bid-150",
+              "bid-210-a",
+              "bid-200",
+              "bid-210-b",
+              "ask-60-a"
+            ],
+            "outcome": "applied",
+            "sweptOrderIds": [],
+            "takerOrderId": null
+          },
+          "step": {
+            "kind": "add",
+            "orderId": "ask-60-a",
+            "ownerId": "owner-9",
+            "priceTicks": "60",
+            "qtyLots": "1",
+            "side": "ask",
+            "suspended": "all",
+            "timeInForce": 0
+          }
+        },
+        {
+          "expected": {
+            "bookCommitmentHash": "0x219bf3ccd2cf6432c0c9d0a2e0df2dc9",
+            "eventHash": "3026234580319998",
+            "events": [
+              "ACK"
+            ],
+            "orderIds": [
+              "bid-85-a",
+              "bid-100",
+              "bid-85-b",
+              "bid-90",
+              "bid-150",
+              "bid-210-a",
+              "bid-200",
+              "bid-210-b",
+              "ask-60-a",
+              "ask-50"
+            ],
+            "outcome": "applied",
+            "sweptOrderIds": [],
+            "takerOrderId": null
+          },
+          "step": {
+            "kind": "add",
+            "orderId": "ask-50",
+            "ownerId": "owner-10",
+            "priceTicks": "50",
+            "qtyLots": "1",
+            "side": "ask",
+            "suspended": "all",
+            "timeInForce": 0
+          }
+        },
+        {
+          "expected": {
+            "bookCommitmentHash": "0xeacbaa60caed7bb7711fb87ad9a46acd",
+            "eventHash": "4480607616907275",
+            "events": [
+              "ACK"
+            ],
+            "orderIds": [
+              "bid-85-a",
+              "bid-100",
+              "bid-85-b",
+              "bid-90",
+              "bid-150",
+              "bid-210-a",
+              "bid-200",
+              "bid-210-b",
+              "ask-60-a",
+              "ask-50",
+              "ask-60-b"
+            ],
+            "outcome": "applied",
+            "sweptOrderIds": [],
+            "takerOrderId": null
+          },
+          "step": {
+            "kind": "add",
+            "orderId": "ask-60-b",
+            "ownerId": "owner-11",
+            "priceTicks": "60",
+            "qtyLots": "1",
+            "side": "ask",
+            "suspended": "all",
+            "timeInForce": 0
+          }
+        },
+        {
+          "expected": {
+            "bookCommitmentHash": "0xeccc26f6803301eb8323ad4ecd1f4d3b",
+            "eventHash": "4870073795326364",
+            "events": [
+              "ACK"
+            ],
+            "orderIds": [
+              "bid-85-a",
+              "bid-100",
+              "bid-85-b",
+              "bid-90",
+              "bid-150",
+              "bid-210-a",
+              "bid-200",
+              "bid-210-b",
+              "ask-60-a",
+              "ask-50",
+              "ask-60-b",
+              "ask-160"
+            ],
+            "outcome": "applied",
+            "sweptOrderIds": [],
+            "takerOrderId": null
+          },
+          "step": {
+            "kind": "add",
+            "orderId": "ask-160",
+            "ownerId": "owner-12",
+            "priceTicks": "160",
+            "qtyLots": "1",
+            "side": "ask",
+            "suspended": "all",
+            "timeInForce": 0
+          }
+        },
+        {
+          "expected": {
+            "bookCommitmentHash": "0xf64730b2d571c378c4844c28d9751031",
+            "eventHash": "7853810027407801",
+            "events": [
+              "ACK"
+            ],
+            "orderIds": [
+              "bid-85-a",
+              "bid-100",
+              "bid-85-b",
+              "bid-90",
+              "bid-150",
+              "bid-210-a",
+              "bid-200",
+              "bid-210-b",
+              "ask-60-a",
+              "ask-50",
+              "ask-60-b",
+              "ask-160",
+              "ask-300-a"
+            ],
+            "outcome": "applied",
+            "sweptOrderIds": [],
+            "takerOrderId": null
+          },
+          "step": {
+            "kind": "add",
+            "orderId": "ask-300-a",
+            "ownerId": "owner-13",
+            "priceTicks": "300",
+            "qtyLots": "1",
+            "side": "ask",
+            "suspended": "all",
+            "timeInForce": 0
+          }
+        },
+        {
+          "expected": {
+            "bookCommitmentHash": "0x2c6bd15b15dc8ae72357273cea052bd1",
+            "eventHash": "202486166626752",
+            "events": [
+              "ACK"
+            ],
+            "orderIds": [
+              "bid-85-a",
+              "bid-100",
+              "bid-85-b",
+              "bid-90",
+              "bid-150",
+              "bid-210-a",
+              "bid-200",
+              "bid-210-b",
+              "ask-60-a",
+              "ask-50",
+              "ask-60-b",
+              "ask-160",
+              "ask-300-a",
+              "ask-310"
+            ],
+            "outcome": "applied",
+            "sweptOrderIds": [],
+            "takerOrderId": null
+          },
+          "step": {
+            "kind": "add",
+            "orderId": "ask-310",
+            "ownerId": "owner-14",
+            "priceTicks": "310",
+            "qtyLots": "1",
+            "side": "ask",
+            "suspended": "all",
+            "timeInForce": 0
+          }
+        },
+        {
+          "expected": {
+            "bookCommitmentHash": "0x98edf9c8fb982e1bc2b7ef6c7c38cb9c",
+            "eventHash": "8093274677975517",
+            "events": [
+              "ACK"
+            ],
+            "orderIds": [
+              "bid-85-a",
+              "bid-100",
+              "bid-85-b",
+              "bid-90",
+              "bid-150",
+              "bid-210-a",
+              "bid-200",
+              "bid-210-b",
+              "ask-60-a",
+              "ask-50",
+              "ask-60-b",
+              "ask-160",
+              "ask-300-a",
+              "ask-310",
+              "ask-300-b"
+            ],
+            "outcome": "applied",
+            "sweptOrderIds": [],
+            "takerOrderId": null
+          },
+          "step": {
+            "kind": "add",
+            "orderId": "ask-300-b",
+            "ownerId": "owner-15",
+            "priceTicks": "300",
+            "qtyLots": "1",
+            "side": "ask",
+            "suspended": "all",
+            "timeInForce": 0
+          }
+        },
+        {
+          "expected": {
+            "bookCommitmentHash": "0x3bfed4b92f7f4e44b7e12603db2db646",
+            "eventHash": "7746568477606198",
+            "events": [],
+            "orderIds": [
+              "bid-150",
+              "ask-160"
+            ],
+            "outcome": "applied",
+            "sweptOrderIds": [
+              "bid-85-a",
+              "bid-85-b",
+              "bid-90",
+              "bid-100",
+              "bid-210-a",
+              "bid-210-b",
+              "bid-200",
+              "ask-50",
+              "ask-60-a",
+              "ask-60-b",
+              "ask-310",
+              "ask-300-a",
+              "ask-300-b"
+            ],
+            "takerOrderId": null
+          },
+          "step": {
+            "kind": "sweep",
+            "maxPriceTicks": "195",
+            "minPriceTicks": "105"
+          }
+        }
+      ]
     }
   ],
   "quoteTokenDecimals": 18,

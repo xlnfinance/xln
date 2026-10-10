@@ -18,6 +18,7 @@ test('orderbook book operations match the shared TypeScript book vector', () => 
     'resume-stp-cancels-resting-taker',
     'resume-skips-suspended-taker',
     'resume-takes-newest-eligible-order',
+    'out-of-band-sweep-cancel-order',
   ]);
 });
 

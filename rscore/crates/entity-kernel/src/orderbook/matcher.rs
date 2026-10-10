@@ -651,16 +651,36 @@ fn band_anchor(book: &BookState, policy: &PairPolicy, has_explicit_policy: bool)
     }
 }
 
+/// Stable price re-order of one index range. Equal prices keep their index
+/// order, which is seq ascending (FIFO) on both sides.
+fn by_price<'a, P: Ord + 'a>(
+    range: impl Iterator<Item = (P, &'a String)>,
+    descending: bool,
+) -> Vec<String> {
+    let mut rows = range.collect::<Vec<_>>();
+    rows.sort_by(|left, right| {
+        let order = left.0.cmp(&right.0);
+        if descending { order.reverse() } else { order }
+    });
+    rows.into_iter()
+        .map(|(_, order_id)| order_id.clone())
+        .collect()
+}
+
+/// Exact TS `bookOrdersOutsidePriceRange` order. Each sweep cancel folds into
+/// the order-dependent event hash and queues a resolve, so this order is
+/// consensus: bids then asks; per side, prices below `min` ascending, then
+/// prices above `max` descending; FIFO within one price.
 fn out_of_band_order_ids(book: &BookState, min: &BigInt, max: &BigInt) -> Vec<String> {
-    let mut ids = Vec::new();
-    ids.extend(
+    let mut ids = by_price(
         book.bids
-            .range(..(Reverse(max.clone()), 0))
-            .map(|(_, order_id)| order_id.clone()),
+            .range((Excluded((Reverse(min.clone()), u64::MAX)), Unbounded))
+            .map(|((Reverse(price), _), order_id)| (price, order_id)),
+        false,
     );
     ids.extend(
         book.bids
-            .range((Excluded((Reverse(min.clone()), u64::MAX)), Unbounded))
+            .range(..(Reverse(max.clone()), 0))
             .map(|(_, order_id)| order_id.clone()),
     );
     ids.extend(
@@ -668,11 +688,12 @@ fn out_of_band_order_ids(book: &BookState, min: &BigInt, max: &BigInt) -> Vec<St
             .range(..(min.clone(), 0))
             .map(|(_, order_id)| order_id.clone()),
     );
-    ids.extend(
+    ids.extend(by_price(
         book.asks
             .range((Excluded((max.clone(), u64::MAX)), Unbounded))
-            .map(|(_, order_id)| order_id.clone()),
-    );
+            .map(|((price, _), order_id)| (price, order_id)),
+        true,
+    ));
     ids
 }
 

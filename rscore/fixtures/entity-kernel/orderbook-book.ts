@@ -206,6 +206,30 @@ const cases: readonly BookCase[] = [
       { kind: 'resume', suspended: ['a1:ask'] },
     ],
   },
+  {
+    // Out-of-band sweep cancel order: per side (bids, then asks), prices below
+    // the band ascending, then prices above it descending, FIFO within a price.
+    name: 'out-of-band-sweep-cancel-order',
+    maxOrders: 64,
+    steps: [
+      add('bid-85-a', 'owner-1', 'bid', 85n, 'all'),
+      add('bid-100', 'owner-2', 'bid', 100n, 'all'),
+      add('bid-85-b', 'owner-3', 'bid', 85n, 'all'),
+      add('bid-90', 'owner-4', 'bid', 90n, 'all'),
+      add('bid-150', 'owner-5', 'bid', 150n, 'all'),
+      add('bid-210-a', 'owner-6', 'bid', 210n, 'all'),
+      add('bid-200', 'owner-7', 'bid', 200n, 'all'),
+      add('bid-210-b', 'owner-8', 'bid', 210n, 'all'),
+      add('ask-60-a', 'owner-9', 'ask', 60n, 'all'),
+      add('ask-50', 'owner-10', 'ask', 50n, 'all'),
+      add('ask-60-b', 'owner-11', 'ask', 60n, 'all'),
+      add('ask-160', 'owner-12', 'ask', 160n, 'all'),
+      add('ask-300-a', 'owner-13', 'ask', 300n, 'all'),
+      add('ask-310', 'owner-14', 'ask', 310n, 'all'),
+      add('ask-300-b', 'owner-15', 'ask', 300n, 'all'),
+      { kind: 'sweep', minPriceTicks: '105', maxPriceTicks: '195' },
+    ],
+  },
 ];
 
 const executeCase = (testCase: BookCase) => {

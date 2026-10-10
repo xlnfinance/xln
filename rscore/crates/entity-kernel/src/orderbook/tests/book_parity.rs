@@ -246,6 +246,7 @@ fn typescript_book_operations_replay_with_identical_events_and_commitments() {
     assert_eq!(
         names.into_iter().collect::<Vec<_>>(),
         [
+            "out-of-band-sweep-cancel-order",
             "resume-skips-suspended-taker",
             "resume-stp-cancels-resting-taker",
             "resume-takes-newest-eligible-order",
