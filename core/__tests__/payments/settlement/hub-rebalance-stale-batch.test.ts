@@ -65,28 +65,24 @@ const makeHubState = (frozenTimestamp: number, lastSubmittedAt: number): EntityS
 
 /**
  * A hub that sent a J-batch which never confirms must eventually abort and
- * requeue it. The age of that batch used to be measured on the entity's own
- * frame clock, but state.timestamp only advances when the entity commits a
- * frame, and this handler refuses to produce one while a sentBatch is pending.
- * The age therefore froze at the moment of submission, the stale threshold was
- * never reached, and the hub latched on the unconfirmed batch forever. Every
- * later rebalance request was accepted and then silently stalled behind it.
- *
- * lastSubmittedAt is stamped from env.timestamp, so the check must read the
- * same clock.
+ * requeue it. The crontab runs inside a scheduledWake frame, and every frame
+ * sets state.timestamp to its certified frame timestamp before any tx
+ * (applyEntityFrame), so the Entity clock advances with each wake. It is also
+ * the only clock every validator shares: the Runtime clock differs per
+ * replica, so an abort decided on it could diverge (Rust resolve_sent_batch
+ * reads the Entity clock too).
  */
-test('a hub aborts an unconfirmed sent batch even while its own frame clock is frozen', async () => {
+test('a hub aborts an unconfirmed sent batch once its wake frame is past the stale threshold', async () => {
   const submittedAt = 1_000_000;
-  const frozenEntityClock = submittedAt + 500;
+  const wakeFrameTimestamp = submittedAt + HUB_PENDING_BROADCAST_STALE_MS + 5_000;
 
   const env = createEmptyEnv('hub-rebalance-stale-batch');
   env.scenarioMode = true;
   env.quietRuntimeLogs = true;
-  // The runtime clock keeps advancing past the stale threshold while the
-  // entity's own clock stays where the blocked handler left it.
-  env.state.timestamp = submittedAt + HUB_PENDING_BROADCAST_STALE_MS + 5_000;
+  // A local Runtime clock that lags the certified frame must not matter.
+  env.state.timestamp = submittedAt;
 
-  const state = makeHubState(frozenEntityClock, submittedAt);
+  const state = makeHubState(wakeFrameTimestamp, submittedAt);
   state.crontabState = initCrontab();
   for (const task of state.crontabState.tasks.values()) task.lastRun = 0;
 
@@ -113,7 +109,9 @@ test('a hub still waits while the sent batch is younger than the stale threshold
   const env = createEmptyEnv('hub-rebalance-fresh-batch');
   env.scenarioMode = true;
   env.quietRuntimeLogs = true;
-  env.state.timestamp = submittedAt + 1_000;
+  // This replica's Runtime clock is far ahead; another validator's is not.
+  // Only the certified frame timestamp may decide the abort.
+  env.state.timestamp = submittedAt + HUB_PENDING_BROADCAST_STALE_MS + 5_000;
 
   const state = makeHubState(submittedAt + 500, submittedAt);
   state.crontabState = initCrontab();

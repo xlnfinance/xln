@@ -44,7 +44,6 @@ type RebalanceRun = {
   localEntityTxs: EntityTx[];
   signerId: string;
   now: number;
-  submitClockNow: number;
   strategy: ReturnType<typeof normalizeRebalanceMatchingStrategy>;
   liquidityFeeBps: bigint;
   policyVersion: number;
@@ -95,9 +94,6 @@ const createRebalanceRun = (
     // depend on local topology instead of the signed Entity authority.
     signerId: getEntityLeaderState(replica.state).activeValidatorId,
     now: replica.state.timestamp,
-    // `sentBatch.lastSubmittedAt` uses Runtime time. Comparing it with Entity
-    // time would freeze age while the pending batch blocks Entity frames.
-    submitClockNow: env.state.timestamp,
     strategy: normalizeRebalanceMatchingStrategy(config.matchingStrategy),
     liquidityFeeBps: config.rebalanceLiquidityFeeBps,
     policyVersion:
@@ -113,12 +109,14 @@ const resolveBatchAvailability = (run: RebalanceRun): {
   canTouchBatch: boolean;
   terminal: boolean;
 } => {
-  const { replica, submitClockNow, hubId, localEntityTxs, outputs, signerId } = run;
+  const { replica, now, hubId, localEntityTxs, outputs, signerId } = run;
   replica.state.jBatchState ??= initJBatch();
   const sent = replica.state.jBatchState.sentBatch;
   if (!sent) return { canTouchBatch: true, terminal: false };
+  // Entity clock only (Rust resolve_sent_batch). The Runtime clock differs per
+  // validator, so an abort decided on it could diverge between replicas.
   const ageMs =
-    submitClockNow -
+    now -
     (sent.lastSubmittedAt || replica.state.jBatchState.lastBroadcast || 0);
   if (ageMs <= HUB_PENDING_BROADCAST_STALE_MS) {
     console.warn(
