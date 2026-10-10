@@ -43,17 +43,25 @@ const entityIdsOnPeerRuntime = (
   return hosted;
 };
 
-const alreadyQueuedReplicaKeys = (env: RuntimeReplica): Set<string> => {
-  const queued = new Set<string>();
+/**
+ * Counterparties already named by a queued marker, per replica. Deduping by
+ * replica alone dropped a second peer that came online in the same frame:
+ * its retained proposals were never re-sent.
+ */
+const alreadyQueuedCounterparties = (env: RuntimeReplica): Map<string, Set<string>> => {
+  const queued = new Map<string, Set<string>>();
+  const note = (entityId: string, signerId: string, tx: EntityTx): void => {
+    if (tx.type !== 'proposeAccountsNow') return;
+    const key = replicaKey(entityId, signerId);
+    const covered = queued.get(key) ?? new Set<string>();
+    for (const counterparty of tx.data.counterparties) covered.add(counterparty.trim().toLowerCase());
+    queued.set(key, covered);
+  };
   for (const input of env.runtimeMempool?.entityInputs ?? []) {
-    if (input.entityTxs?.some(tx => tx.type === 'proposeAccountsNow')) {
-      queued.add(replicaKey(input.entityId, input.signerId));
-    }
+    for (const tx of input.entityTxs ?? []) note(input.entityId, input.signerId, tx);
   }
   for (const replica of env.state.eReplicas.values()) {
-    if (replica.mempool.some((tx: EntityTx) => tx.type === 'proposeAccountsNow')) {
-      queued.add(replicaKey(replica.entityId, replica.signerId));
-    }
+    for (const tx of replica.mempool) note(replica.entityId, replica.signerId, tx);
   }
   return queued;
 };
@@ -69,15 +77,16 @@ export const createProposeAccountsNowInputs = (
 ): EntityInput[] => {
   const peerEntityIds = entityIdsOnPeerRuntime(env, peerRuntimeId);
   if (peerEntityIds.size === 0) return [];
-  const queued = alreadyQueuedReplicaKeys(env);
+  const queued = alreadyQueuedCounterparties(env);
   const inputs: EntityInput[] = [];
   for (const replica of env.state.eReplicas.values()) {
     const key = replicaKey(replica.entityId, replica.signerId);
-    if (queued.has(key)) continue;
     if (!isEntityActiveLeader(replica)) continue;
+    const covered = queued.get(key);
     const counterparties = [...replica.state.accounts]
       .filter(([accountId, account]) =>
         peerEntityIds.has(accountId.trim().toLowerCase()) &&
+        !covered?.has(accountId.trim().toLowerCase()) &&
         account.pendingAccountInput !== undefined)
       .map(([accountId]) => accountId.trim().toLowerCase())
       .sort(compareStableText)
@@ -93,7 +102,6 @@ export const createProposeAccountsNowInputs = (
     };
     Object.defineProperty(tx, LOCAL_PROPOSE_ACCOUNTS_NOW, { value: true, enumerable: false });
     inputs.push({ entityId: replica.entityId, signerId: replica.signerId, entityTxs: [tx] });
-    queued.add(key);
   }
   return inputs;
 };
@@ -128,6 +136,9 @@ export const enqueuePeerReadyProposeAccountsNow = (
     undefined,
     undefined,
     env.state.timestamp ?? 0,
+    // Derived from committed state, never peer ingress: a full mempool must
+    // not throw out of the transport callback.
+    { localContinuation: true },
   );
 };
 

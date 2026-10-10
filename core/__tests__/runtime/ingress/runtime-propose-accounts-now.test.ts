@@ -181,6 +181,23 @@ describe('runtime proposeAccountsNow', () => {
     expect(env.runtimeMempool?.entityInputs).toEqual([]);
   });
 
+  test('a second peer online in the same frame gets its own marker', () => {
+    // Deduping by replica alone hid the second peer: a queued marker for the
+    // first peer made the second peer's retained proposals never re-sent.
+    const { env, state } = fixture('propose-accounts-now-two-peers');
+    withPendingAccount(state, OTHER_HOST_PEER, true);
+
+    enqueuePeerReadyProposeAccountsNow(env, PEER_RUNTIME, true);
+    enqueuePeerReadyProposeAccountsNow(env, OTHER_RUNTIME, true);
+    enqueuePeerReadyProposeAccountsNow(env, OTHER_RUNTIME, true);
+
+    const markers = env.runtimeMempool!.entityInputs.map(input => {
+      const tx = input.entityTxs?.[0];
+      return tx?.type === 'proposeAccountsNow' ? tx.data.counterparties : [];
+    });
+    expect(markers).toEqual([[PEER.toLowerCase()], [OTHER_HOST_PEER.toLowerCase()]]);
+  });
+
   test('rejects the same marker arriving from an external peer', () => {
     const { env } = fixture('propose-accounts-now-authorization');
     const [input] = createProposeAccountsNowInputs(env, PEER_RUNTIME);
