@@ -3,7 +3,7 @@ import { requireBoundaryRecord } from '../protocol/boundary-validation';
 import { maybeHandleRelayDebugRequest } from '../network/relay/debug-http';
 import type { RelayStore } from '../network/relay/store';
 import { handleKnownProfileRequest } from '../api/server/network/gossip-profiles';
-import { getDebugEntityEntries } from './hub/public-discovery';
+import { DebugEntityLimitError, getDebugEntityEntries, parseDebugEntityLimit } from './hub/public-discovery';
 import type { HubChild, MarketMakerChild } from './orchestrator-types';
 
 type OrchestratorDebugApiDeps = {
@@ -21,12 +21,20 @@ type OrchestratorDebugApiDeps = {
 };
 
 const handleDebugEntities = async (deps: OrchestratorDebugApiDeps): Promise<Response> => {
+  let limit: number;
+  try {
+    limit = parseDebugEntityLimit(deps.url.searchParams.get('limit'));
+  } catch (error) {
+    if (!(error instanceof DebugEntityLimitError)) throw error;
+    return new Response(safeStringify({ error: error.message, code: error.code }), { status: 400, headers: deps.headers });
+  }
   await deps.pollAllHubHealth();
   await deps.pollMarketMakerHealth();
   const entities = getDebugEntityEntries({
     requestUrl: deps.url,
     relayStore: deps.relayStore,
     hubChildren: deps.hubChildren,
+    limit,
   }).map((entity) => {
     const hubChild = deps.hubChildren.find((child) => {
       const childEntityId = String(child.lastInfo?.entityId || child.lastHealth?.entityId || '').toLowerCase();

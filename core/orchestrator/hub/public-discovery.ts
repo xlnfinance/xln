@@ -176,12 +176,12 @@ export type DebugEntityEntry = {
 const DEBUG_ENTITY_DEFAULT_LIMIT = 1000;
 const DEBUG_ENTITY_MAX_LIMIT = 5000;
 
-class DebugEntityLimitError extends Error {
+export class DebugEntityLimitError extends Error {
   readonly code = 'DEBUG_ENTITY_LIMIT_INVALID';
 }
 
 // A malformed limit used to become NaN and silently return an empty list.
-const parseDebugEntityLimit = (raw: string | null): number => {
+export const parseDebugEntityLimit = (raw: string | null): number => {
   if (!raw) return DEBUG_ENTITY_DEFAULT_LIMIT;
   if (!/^[1-9]\d{0,8}$/.test(raw)) {
     throw new DebugEntityLimitError(`DEBUG_ENTITY_LIMIT_INVALID:${raw.slice(0, 32)}`);
@@ -193,12 +193,13 @@ export const getDebugEntityEntries = (input: {
   requestUrl: URL;
   relayStore: RelayStore;
   hubChildren: HubChild[];
+  /** Already parsed with parseDebugEntityLimit, so a malformed limit is the caller's 400. */
+  limit: number;
   serverTime?: number;
 }): DebugEntityEntry[] => {
-  const { requestUrl, relayStore, hubChildren } = input;
+  const { requestUrl, relayStore, hubChildren, limit } = input;
   const serverTime = input.serverTime ?? Date.now();
   const q = (requestUrl.searchParams.get('q') || '').trim().toLowerCase();
-  const limit = parseDebugEntityLimit(requestUrl.searchParams.get('limit'));
   const onlineOnly = requestUrl.searchParams.get('online') === 'true';
 
   const entities = new Map<string, DebugEntityEntry>();

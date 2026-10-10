@@ -1,6 +1,11 @@
 import { describe, expect, test } from 'bun:test';
-import { buildPublicHubDiscoveryPayload, getDebugEntityEntries } from '../../../orchestrator/hub/public-discovery';
-import type { HubChild } from '../../../orchestrator/orchestrator-types';
+import {
+  buildPublicHubDiscoveryPayload,
+  getDebugEntityEntries,
+  parseDebugEntityLimit,
+} from '../../../orchestrator/hub/public-discovery';
+import { maybeHandleOrchestratorDebugApi } from '../../../orchestrator/debug-api';
+import type { HubChild, MarketMakerChild } from '../../../orchestrator/orchestrator-types';
 import { createRelayStore } from '../../../network/relay/store';
 
 const RUNTIME_ID = '0x' + '11'.repeat(20);
@@ -82,6 +87,7 @@ describe('public discovery', () => {
       serverTime: 1234,
     });
     const debugEntries = getDebugEntityEntries({
+      limit: parseDebugEntityLimit('5000'),
       requestUrl: new URL('http://localhost/api/debug/entities?limit=5000'),
       relayStore,
       hubChildren,
@@ -106,6 +112,7 @@ describe('public discovery', () => {
       requestUrl: new URL(`http://localhost/api/debug/entities?limit=${limit}`),
       relayStore,
       hubChildren,
+      limit: parseDebugEntityLimit(limit),
       serverTime: 1234,
     }).length;
 
@@ -114,5 +121,28 @@ describe('public discovery', () => {
     for (const malformed of ['abc', '0', '-5', '1.5', '1e3']) {
       expect(() => entries(malformed)).toThrow('DEBUG_ENTITY_LIMIT_INVALID');
     }
+  });
+
+  test('the debug entities route answers a malformed limit with 400 before polling any hub', async () => {
+    let polls = 0;
+    const url = new URL('http://localhost/api/debug/entities?limit=abc');
+    const response = await maybeHandleOrchestratorDebugApi({
+      request: new Request(url),
+      pathname: url.pathname,
+      url,
+      headers: { 'content-type': 'application/json' },
+      hubApiHost: '127.0.0.1',
+      relayStore: createRelayStore('debug-limit-route-test'),
+      hubChildren: [makeHubChild()],
+      // Never read: the limit is refused first.
+      marketMakerChild: {} as MarketMakerChild,
+      operatorAuthorized: true,
+      pollAllHubHealth: async () => { polls += 1; },
+      pollMarketMakerHealth: async () => { polls += 1; },
+    });
+    // It surfaced as a 500 after a full poll of every hub.
+    expect(response?.status).toBe(400);
+    expect(((await response?.json()) as { code?: string }).code).toBe('DEBUG_ENTITY_LIMIT_INVALID');
+    expect(polls).toBe(0);
   });
 });
