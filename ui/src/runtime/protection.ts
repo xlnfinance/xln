@@ -83,7 +83,7 @@ export async function appointProtection(
     try {
       const health = await towerHealth(url);
       if (!isAddress(health.signerAddress)) throw new Error('TOWER_SIGNER_ADDRESS_INVALID');
-      const uploads = await withRuntimeCommittedRead(env, () =>
+      const { uploads, failures } = await withRuntimeCommittedRead(env, () =>
         xln.buildDelayedLastResortAppointments(
           {
             runtimeId: String(env.runtimeId).toLowerCase(),
@@ -96,7 +96,13 @@ export async function appointProtection(
           watchedEntities(env, seed),
         ),
       );
-      if (uploads.length === 0) throw new Error('No eligible signed account proofs. Make a payment and try again.');
+      // An account that cannot be appointed is reported; the others still upload.
+      for (const failure of failures) {
+        result.errors.push(`${url}: ${failure.entityId}:${failure.counterpartyId}:${failure.error}`);
+      }
+      if (uploads.length === 0 && failures.length === 0) {
+        throw new Error('No eligible signed account proofs. Make a payment and try again.');
+      }
       for (const { appointment } of uploads) {
         const response = await fetch(towerRequestUrl(url, '/api/tower/appointment'), {
           method: 'PUT',

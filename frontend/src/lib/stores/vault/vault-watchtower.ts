@@ -76,9 +76,9 @@ export async function buildDelayedLastResortAppointmentsForTower(
   tower: RecoveryTowerConfig,
   towerSignerAddress: string,
   encryptedBundle: EncryptedRuntimeRecoveryBundleV1,
-): Promise<LastResortTowerAppointmentUpload[]> {
+): ReturnType<typeof buildDelayedLastResortAppointments> {
   const normalizedRuntimeId = normalizeRuntimeId(runtime.id);
-  if (!normalizedRuntimeId || !runtime.seed) return [];
+  if (!normalizedRuntimeId || !runtime.seed) return { uploads: [], failures: [] };
   return await buildDelayedLastResortAppointments(
     {
       runtimeId: normalizedRuntimeId,

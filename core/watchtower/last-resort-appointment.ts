@@ -41,6 +41,18 @@ export type LastResortTowerAppointmentUpload = {
   triggerHint: string;
 };
 
+/** One account whose appointment could not be built; the others are still published. */
+type LastResortAppointmentFailure = {
+  entityId: string;
+  counterpartyId: string;
+  error: string;
+};
+
+type LastResortAppointmentBuild = {
+  uploads: LastResortTowerAppointmentUpload[];
+  failures: LastResortAppointmentFailure[];
+};
+
 export type LastResortAppointmentContext = {
   /** Owner Runtime id, lowercase. Signs every appointment envelope with HD account 0. */
   runtimeId: string;
@@ -302,16 +314,28 @@ const buildAccountLastResortAppointment = async (
  * Callers resolve which Entity replicas they own and which jurisdiction each one
  * settles in; this decides what a tower is allowed to submit on their behalf.
  * The highest proof nonce wins per lookup key, so a re-run never downgrades an
- * already published appointment.
+ * already published appointment. An account that cannot be built is returned
+ * as a failure: one such account used to leave every other account unprotected.
  */
 export async function buildDelayedLastResortAppointments(
   context: LastResortAppointmentContext,
   entities: readonly LastResortEntityContext[],
-): Promise<LastResortTowerAppointmentUpload[]> {
+): Promise<LastResortAppointmentBuild> {
   const uploads = new Map<string, LastResortTowerAppointmentUpload>();
+  const failures: LastResortAppointmentFailure[] = [];
   for (const entity of entities) {
     for (const [rawCounterpartyId, account] of entity.entityState.accounts.entries()) {
-      const upload = await buildAccountLastResortAppointment(context, entity, rawCounterpartyId, account);
+      let upload: LastResortTowerAppointmentUpload | null;
+      try {
+        upload = await buildAccountLastResortAppointment(context, entity, rawCounterpartyId, account);
+      } catch (error) {
+        failures.push({
+          entityId: entity.entityId,
+          counterpartyId: lowerId(rawCounterpartyId),
+          error: error instanceof Error ? error.message : String(error),
+        });
+        continue;
+      }
       if (!upload) continue;
       const previous = uploads.get(upload.lookupKey);
       const previousNonce = previous?.appointment.lastResortPayload?.proofNonce || 0;
@@ -320,5 +344,5 @@ export async function buildDelayedLastResortAppointments(
       }
     }
   }
-  return [...uploads.values()];
+  return { uploads: [...uploads.values()], failures };
 }

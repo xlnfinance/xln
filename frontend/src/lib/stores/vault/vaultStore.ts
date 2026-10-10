@@ -612,7 +612,13 @@ async function uploadRuntimeRecoverySnapshot(
         towerSignerAddress,
         encrypted,
       );
-      for (const upload of lastResortAppointments) {
+      // An account that cannot be appointed is reported; the others still upload.
+      for (const failure of lastResortAppointments.failures) {
+        const errorText = `${failure.entityId}:${failure.counterpartyId}:${failure.error}`;
+        activeTowerErrors.push(`${tower.url}:${errorText}`);
+        failureSummaries.push(summarizeRuntimeRecoveryTowerFailure(tower, errorText, uploadCheckedAt));
+      }
+      for (const upload of lastResortAppointments.uploads) {
         const appointmentUrl = buildTowerRequestUrl(tower.url, '/api/tower/appointment');
         const response = await fetch(appointmentUrl, {
           method: 'PUT',

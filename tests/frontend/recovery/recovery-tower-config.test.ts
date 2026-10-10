@@ -329,7 +329,7 @@ test('delayed last-resort appointments require encrypted tower action payloads',
     },
   };
 
-  const uploads = await buildDelayedLastResortAppointmentsForTower(
+  const { uploads, failures } = await buildDelayedLastResortAppointmentsForTower(
     runtime,
     env,
     { url: 'http://127.0.0.1:9100', towerMode: 'delayed_last_resort' },
@@ -337,6 +337,7 @@ test('delayed last-resort appointments require encrypted tower action payloads',
     encryptedBundle,
   );
 
+  expect(failures).toEqual([]);
   expect(uploads.length).toBe(1);
   const encryptedRemedy = uploads[0]!.appointment.lastResortPayload?.encryptedRemedy || '';
   const encryptedPayload = deserializeTaggedJson<Record<string, unknown>>(encryptedRemedy);
@@ -352,6 +353,50 @@ test('delayed last-resort appointments require encrypted tower action payloads',
   expect(remedy.latestProof.finalProofbody.offdeltas).toEqual([0n]);
   expect(remedy.latestProof.finalProofbody.leftResponseSeconds).toBe(3_600n);
   expect(remedy.latestProof.finalProofbody.rightResponseSeconds).toBe(86_400n);
+});
+
+test('one account that cannot be appointed does not leave the other accounts unprotected', async () => {
+  const runtimeId = deriveTestAddress(0);
+  const entityId = `0x${'ab'.repeat(32)}`;
+  const counterpartyId = `0x${'cd'.repeat(32)}`;
+  const brokenCounterpartyId = `0x${'ef'.repeat(32)}`;
+  const env = makeTestRecoveryEnv(runtimeId, entityId, counterpartyId);
+  const replica = env.state.eReplicas.get(`${entityId}:${runtimeId}`);
+  const healthy = replica?.state.accounts.get(counterpartyId);
+  if (!replica || !healthy) throw new Error('TEST_ACCOUNT_MISSING');
+  // Its stored counterparty proof no longer matches the frozen account state.
+  replica.state.accounts.set(brokenCounterpartyId, {
+    ...healthy,
+    counterpartyDisputeProofBodyHash: `0x${'99'.repeat(32)}`,
+  });
+  const runtime = {
+    id: runtimeId,
+    label: 'Tower Partial Build',
+    seed: testMnemonic,
+    signers: [{ index: 0, derivationIndex: 0, address: runtimeId, name: 'Signer 1', entityId, jurisdiction: 'Local' }],
+    activeSignerIndex: 0,
+    createdAt: 1,
+  };
+  const { uploads, failures } = await buildDelayedLastResortAppointmentsForTower(
+    runtime,
+    env,
+    { url: 'http://127.0.0.1:9100', towerMode: 'delayed_last_resort' },
+    Wallet.createRandom().address.toLowerCase(),
+    {
+      version: 1,
+      runtimeId,
+      lookupKey: keccak256(toUtf8Bytes('partial-build-lookup')),
+      height: 7,
+      createdAt: 123_456,
+      bundleHash: keccak256(toUtf8Bytes('partial-build-bundle')),
+      iv: '0x1234',
+      ciphertext: '0xabcd',
+    },
+  );
+  expect(uploads.map(upload => upload.appointment.lastResortPayload?.watch.counterentity)).toEqual([counterpartyId]);
+  expect(failures).toHaveLength(1);
+  expect(failures[0]).toMatchObject({ entityId, counterpartyId: brokenCounterpartyId });
+  expect(failures[0]?.error).toContain('WATCHTOWER_FROZEN_PROOF_MISMATCH');
 });
 
 test('tower restore checks discovery before restore to avoid expected missing-backup 404s', async () => {
