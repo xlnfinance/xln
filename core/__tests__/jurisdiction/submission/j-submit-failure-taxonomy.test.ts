@@ -1,7 +1,11 @@
 import { describe, expect, test } from 'bun:test';
 
 import { isTransientJAdapterStartupError } from '../../../jurisdiction/adapter/kernel/retry';
-import { makeJAdapterFailureResult } from '../../../jurisdiction/adapter/kernel/failure';
+import { JBroadcastReceiptError, makeJAdapterFailureResult } from '../../../jurisdiction/adapter/kernel/failure';
+import {
+  submitBoardActivation,
+  type RpcEntityProviderSubmitContext,
+} from '../../../jurisdiction/adapter/rpc/write/rpc-submit-entity-provider';
 import { isTransientJSubmitFailure } from '../../../runtime/j-submit/j-submit';
 
 const ethersError = (code: string, message: string): Error & { code: string } =>
@@ -67,4 +71,27 @@ describe('structured J-adapter failure taxonomy', () => {
       message: 'could not coalesce error',
     });
   });
+});
+
+test('a broadcast that times out inside the submit lane keeps its typed failure and txHash', async () => {
+  // `return context.runSerialized(...)` inside try had no await: the lane's
+  // rejection skipped the catch, so the caller got a raw throw and lost the
+  // hash of a transaction that was already broadcast.
+  const txHash = `0x${'ab'.repeat(32)}`;
+  const context = {
+    watchOnly: false,
+    signer: {},
+    entityProvider: { connect: () => ({}) },
+    runSerialized: async () => {
+      throw new JBroadcastReceiptError(txHash, new Error('receipt wait timed out'));
+    },
+  } as unknown as RpcEntityProviderSubmitContext;
+  const result = await submitBoardActivation(
+    context,
+    { type: 'entityProviderActivateBoard', data: { targetEntityId: `0x${'11'.repeat(32)}` } } as unknown as Parameters<
+      typeof submitBoardActivation
+    >[1],
+    undefined,
+  );
+  expect(result).toMatchObject({ success: false, txHash });
 });

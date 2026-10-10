@@ -140,7 +140,7 @@ export const submitEntityProviderAction = async (
       entityProviderAddress: await context.getEntityProviderAddress(),
       depositoryAddress: await context.getDepositoryAddress(),
     });
-    return context.runSerialized(async () => {
+    return await context.runSerialized(async () => {
       const chainNonce = await context.entityProvider.entityActionNonces(intent.entityId);
       if (chainNonce >= intent.actionNonce) {
         const receipt = await context.readActionReceipt(intent.entityId, intent.actionNonce);
@@ -230,7 +230,7 @@ export const submitControlBoardProposal = async (
       ? await context.signerForPrivateKey(ethers.hexlify(signerPrivateKey))
       : context.signer;
     const contract = context.entityProvider.connect(signer);
-    return context.runSerialized(async () => {
+    return await context.runSerialized(async () => {
       const chainNonce = await context.entityProvider.boardActionNonces(jTx.data.targetEntityId);
       if (chainNonce >= jTx.data.actionNonce) {
         const entity = await context.entityProvider.entities(jTx.data.targetEntityId);
@@ -297,7 +297,7 @@ export const submitBoardActivation = async (
       ? await context.signerForPrivateKey(ethers.hexlify(signerPrivateKey))
       : context.signer;
     const contract = context.entityProvider.connect(signer);
-    return context.runSerialized(async () => {
+    return await context.runSerialized(async () => {
       const entity = await context.entityProvider.entities(jTx.data.targetEntityId);
       if (String(entity.proposedBoardHash).toLowerCase() === ethers.ZeroHash) return { success: true };
       try {
