@@ -33,7 +33,7 @@ import { markLocalJAuthorityRuntimeTx } from '../../../jurisdiction/machine/regi
 import {
   assertCertifiedJHistoryIntegrity,
   assertValidatorJHistoryIntegrity,
-  buildUnsignedJEventRange,
+  buildUnsignedJEventRangeAtHeight,
   finalizedJHistoryRoot,
   getValidatorJExpectedBlockHash,
   getJEventRangeValidationError,
@@ -226,7 +226,7 @@ describe('J validator-local history and Entity-finalized ranges', () => {
       headers: [10, 12].map((jHeight) => ({ jHeight, jBlockHash: blockHash(jHeight) })),
       blocks: [proposerBlock, laterBlock],
     });
-    const unsigned = buildUnsignedJEventRange(state(), proposerHistory)!;
+    const unsigned = buildUnsignedJEventRangeAtHeight(state(), proposerHistory, proposerHistory.scannedThroughHeight)!;
     const proposal = { from: 'leader', signature: '0xsig', observedAt: 10, ...unsigned };
 
     expect(getJEventRangeValidationError(state(), validatorHistory, proposal, 'leader', () => true)).toBeNull();
@@ -264,7 +264,7 @@ describe('J validator-local history and Entity-finalized ranges', () => {
       tipBlockHash: blockHash(7),
       blocks: [localBlock],
     });
-    const unsigned = buildUnsignedJEventRange(state(), history)!;
+    const unsigned = buildUnsignedJEventRangeAtHeight(state(), history, history.scannedThroughHeight)!;
     const canonical = { from: 'leader', signature: '0xsig', observedAt: 7, ...unsigned };
 
     expect(getJEventRangeValidationError(
@@ -347,7 +347,7 @@ describe('J validator-local history and Entity-finalized ranges', () => {
       tipBlockHash: blockHash(7),
       blocks: [localBlock],
     });
-    const unsigned = buildUnsignedJEventRange(state(), history)!;
+    const unsigned = buildUnsignedJEventRangeAtHeight(state(), history, history.scannedThroughHeight)!;
     const forgedEvidence = [{
       ...localEvidence[0]!,
       finalNonce: '999999',
@@ -517,7 +517,7 @@ describe('J validator-local history and Entity-finalized ranges', () => {
       tipBlockHash: blockHash(10),
       blocks: [],
     });
-    const unsigned = buildUnsignedJEventRange(validatorState, maliciousHistory)!;
+    const unsigned = buildUnsignedJEventRangeAtHeight(validatorState, maliciousHistory, maliciousHistory.scannedThroughHeight)!;
     const digest = buildJEventRangeDigest({
       entityId: validatorState.entityId,
       signerId: activeLeaderId,
@@ -787,7 +787,7 @@ describe('J validator-local history and Entity-finalized ranges', () => {
       headers: [10, 11, 12].map((jHeight) => ({ jHeight, jBlockHash: blockHash(jHeight) })),
       blocks: [eventBlock(12, '12')],
     }, entityState);
-    const unsignedRange = buildUnsignedJEventRange(entityState, localHistory);
+    const unsignedRange = buildUnsignedJEventRangeAtHeight(entityState, localHistory, localHistory.scannedThroughHeight);
     if (!unsignedRange) throw new Error('TEST_J_RANGE_MISSING');
     const lockedFrame = {
       height: entityState.height + 1,

@@ -288,9 +288,10 @@ export const recordValidatorJHistory = (
     if (anchor && jHeight === anchor.height && jBlockHash !== anchor.hash) {
       throw new Error(`J_HISTORY_FINALIZED_REORG:${jHeight}`);
     }
+    // The anchor height was seeded above and checked on the previous line, so
+    // any remaining mismatch is a validator-local reorg.
     const existingHash = blockHashes.get(jHeight);
     if (existingHash && normalizedText(existingHash) !== jBlockHash) {
-      if (anchor?.height === jHeight) throw new Error(`J_HISTORY_FINALIZED_REORG:${jHeight}`);
       throw new Error(`J_HISTORY_LOCAL_REORG_AT_BLOCK:${jHeight}`);
     }
     blockHashes.set(jHeight, jBlockHash);
@@ -305,17 +306,12 @@ export const recordValidatorJHistory = (
       }
       continue;
     }
-    if (anchor && block.jHeight === anchor.height && block.jBlockHash !== anchor.hash) {
-      throw new Error(`J_HISTORY_FINALIZED_REORG:${block.jHeight}`);
-    }
     const existing = eventBlocks.get(block.jHeight);
     if (existing && blockIdentity(existing) !== blockIdentity(block)) {
-      if (anchor?.height === block.jHeight) throw new Error(`J_HISTORY_FINALIZED_REORG:${block.jHeight}`);
       throw new Error(`J_HISTORY_LOCAL_REORG_AT_EVENT_BLOCK:${block.jHeight}`);
     }
     const existingHash = blockHashes.get(block.jHeight);
     if (existingHash && normalizedText(existingHash) !== block.jBlockHash) {
-      if (anchor?.height === block.jHeight) throw new Error(`J_HISTORY_FINALIZED_REORG:${block.jHeight}`);
       throw new Error(`J_HISTORY_LOCAL_REORG_AT_BLOCK:${block.jHeight}`);
     }
     eventBlocks.set(block.jHeight, block);
@@ -474,12 +470,6 @@ export const buildUnsignedJEventRangeAtHeight = (
     blocks,
   };
 };
-
-export const buildUnsignedJEventRange = (
-  state: EntityState,
-  history: ValidatorJHistory,
-): Omit<JurisdictionEventData, 'from' | 'signature' | 'observedAt'> | null =>
-  buildUnsignedJEventRangeAtHeight(state, history, history.scannedThroughHeight);
 
 export const buildValidatorJPrefixHeaders = (
   state: EntityState,
