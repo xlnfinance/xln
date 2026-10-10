@@ -284,12 +284,18 @@ export function validateEnvelope(envelope: DecodedOnionLayer): boolean {
     throw new Error(`Envelope exceeds ${MAX_ENVELOPE_SERIALIZED_BYTES} bytes`);
   }
   if ('finalRecipient' in envelope) {
-    if (envelope.description !== undefined && envelope.description.length > 256) {
-      throw new Error('Envelope description exceeds 256 characters');
-    }
     if (!/^0x[0-9a-f]{64}$/.test(envelope.secret)) throw new Error('Final recipient envelope must have secret');
     if (envelope.description !== undefined && typeof envelope.description !== 'string') {
       throw new Error('Final recipient envelope description must be string');
+    }
+    // UTF-8 bytes, the unit the prepared Entity context and Rust (String::len)
+    // enforce. Counting UTF-16 units admitted 256 "€" (768 bytes) here and
+    // then halted the recipient when its own prepared context failed validation.
+    if (
+      envelope.description !== undefined
+      && new TextEncoder().encode(envelope.description).byteLength > LIMITS.MAX_ENTITY_HTLC_NOTE_LENGTH
+    ) {
+      throw new Error(`Envelope description exceeds ${LIMITS.MAX_ENTITY_HTLC_NOTE_LENGTH} UTF-8 bytes`);
     }
     if (envelope.startedAtMs !== undefined) {
       if (!Number.isFinite(envelope.startedAtMs) || envelope.startedAtMs <= 0) {

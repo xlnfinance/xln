@@ -8,10 +8,24 @@ describe('htlc envelope validation', () => {
     expect(() =>
       validateEnvelope({
         finalRecipient: true,
-        secret: 's',
+        secret: `0x${'ab'.repeat(32)}`,
         description: 'x'.repeat(3000),
       }),
-    ).toThrow(/Envelope exceeds 2048 bytes|description exceeds 256 characters/);
+    ).toThrow('Envelope description exceeds 256 UTF-8 bytes');
+  });
+
+  test('measures the final description in UTF-8 bytes, like the prepared context and Rust', () => {
+    const final = (description: string) => ({
+      finalRecipient: true as const,
+      secret: `0x${'ab'.repeat(32)}`,
+      description,
+    });
+    // 85 x 3-byte euro = 255 bytes: inside the prepared-context limit.
+    expect(validateEnvelope(final('€'.repeat(85)))).toBe(true);
+    // 86 UTF-16 units but 258 bytes. Counting units admitted this, then the
+    // recipient's own prepared context threw HTLC_PREPARED_DESCRIPTION_INVALID.
+    expect(() => validateEnvelope(final('€'.repeat(86))))
+      .toThrow('Envelope description exceeds 256 UTF-8 bytes');
   });
 
   test('rejects oversized intermediary envelope payload', () => {
