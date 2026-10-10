@@ -1,11 +1,16 @@
 #!/usr/bin/env bun
-import { canDeployHubDefaultTokens, requiredHubTokenCount, selectHubTokenCatalog } from './hub/node/token-catalog';
+import { canDeployHubDefaultTokens, requiredHubTokenCount, tokenCatalogForHubJurisdiction } from './hub/node/token-catalog';
 import { importJurisdiction } from './hub/node/import-jurisdiction';
 import {
   attachValidatedJurisdictionAdapter,
   hasLiveJAdapterForJurisdiction,
   requireJAdapterForDebugReserve,
 } from './hub/node/hub-jurisdiction-binding';
+import {
+  buildPairHealth,
+  planMeshBootstrapInputs,
+  supportPeerProvisioningReady,
+} from './hub/node/hub-mesh-plan';
 import { configureCryptoPoolEntry } from '../protocol/crypto/crypto-pool';
 import { ethers, getIndexedAccountPath, HDNodeWallet, Mnemonic } from 'ethers';
 import { existsSync, mkdirSync, readFileSync } from 'node:fs';
@@ -16,12 +21,6 @@ import { hasCliFlag, readCliOption } from '../config/cli';
 import { readBooleanEnv, readNonNegativeIntegerEnv, readPositiveIntegerEnv } from '../config/environment';
 import { bootstrapHub } from '../../scripts/bootstrap-hub';
 import { defaultTokensForJurisdiction } from '../jurisdiction/machine/config/default-tokens';
-import {
-  defaultAccountDisputeConfigForRoleEvidence,
-} from '../account/config/dispute-config';
-import {
-  committedAccountRoleEvidence,
-} from '../account/config/role-evidence';
 import {
   normalizeJurisdictionDisplayName,
   readVisibleHubProfiles,
@@ -71,7 +70,6 @@ import { restoredRuntimeRouteRelocated } from './mesh/restored-gossip-route';
 import { readInheritedChildSecrets, resolveChildSecret } from '../support/process/child-secrets';
 import { findMissingRpcContractCode } from './bootstrap/contract-readiness';
 import { parseShardJurisdictions } from './j-select/jurisdictions';
-import { getTokenIdsForJurisdiction } from '../account/utils';
 import { isLocalOperatorRequest, publicLocalHubHealth, resolveSocketPeerAddress } from '../api/server/health/redaction';
 import { requiresLocalNodeOperator } from '../api/server/control/node-http-access';
 import {
@@ -123,7 +121,6 @@ import { withRuntimeCommittedRead } from '../runtime/frame/lifecycle/writer-lock
 import { registerEnvChangeCallback } from '../runtime/loop/loop-environment.ts';
 import { ensurePendingNumberedRegistrationsResumed } from '../runtime/registration/numbered/numbered-registration-driver';
 import { setRuntimeDeliveryReady } from '../runtime/envelope/p2p-lifecycle';
-import type { EntityInput } from '../entity/types';
 import type { RuntimeReplica } from '../runtime/types';
 import {
   BOOTSTRAP_POLL_MS,
@@ -136,11 +133,9 @@ import {
   getEntityReplicaById,
   HUB_DEFAULT_MIN_TRADE_SIZE,
   HUB_DEFAULT_SUPPORTED_PAIRS,
-  HUB_MESH_TOKEN_ID,
   HUB_REQUIRED_TOKEN_COUNT,
   hasAccount,
   hasPendingRuntimeWork,
-  hasQueuedOpenAccount,
   hasPairMutualCredits,
   serializeAccountDelta,
   settleRuntimeFor,
@@ -178,7 +173,6 @@ import type {
   HubBootstrapEntry,
   HubNodeArgs,
   HubNodeLiveContext,
-  HubPairHealth,
   JurisdictionConfig,
   JurisdictionImportDiagnostics,
   JurisdictionsFile,
@@ -189,15 +183,8 @@ import {
   bindHubMesh,
   hubMeshReady,
   parseConfiguredPeerIdentities,
-  type ConfiguredPeerIdentity,
   type HubMeshPeer,
 } from './mesh/hub-mesh-peers';
-
-const sameJurisdictionRef = (left: unknown, right: unknown): boolean => {
-  const leftRef = getJurisdictionIdentityRef(left);
-  const rightRef = getJurisdictionIdentityRef(right);
-  return Boolean(leftRef && rightRef && leftRef === rightRef);
-};
 
 const argsRaw = process.argv.slice(2);
 
@@ -288,30 +275,6 @@ const supportPeerIdentities = parseConfiguredPeerIdentities(resolvedArgs.support
 const meshHubIdentities = parseConfiguredPeerIdentities(resolvedArgs.hubIdentitiesJson, 'HUB_IDENTITIES');
 if (meshHubIdentities.length === 0) throw new Error('HUB_IDENTITIES_MISSING');
 const apiUrl = `http://${resolvedArgs.apiHost}:${resolvedArgs.apiPort}`;
-const normalizePositiveTokenIds = (tokenIds: readonly number[]): number[] =>
-  Array.from(new Set(tokenIds.filter(tokenId => Number.isFinite(tokenId) && tokenId > 0).map(tokenId => Math.floor(tokenId))))
-    .sort((a, b) => a - b);
-
-const tokenIdsForHubJurisdiction = (
-  hub: Pick<HubBootstrapEntry, 'jurisdictionName' | 'chainId'>,
-): number[] => {
-  const jurisdictionTokenIds = normalizePositiveTokenIds(getTokenIdsForJurisdiction({
-    name: hub.jurisdictionName,
-    chainId: hub.chainId ?? null,
-  }));
-  return jurisdictionTokenIds.length >= HUB_REQUIRED_TOKEN_COUNT
-    ? jurisdictionTokenIds
-    : [...DEFAULT_ACCOUNT_TOKEN_IDS];
-};
-
-const tokenCatalogForHubJurisdiction = (
-  tokenCatalog: JTokenInfo[],
-  hub: Pick<HubBootstrapEntry, 'jurisdictionName' | 'chainId'>,
-): JTokenInfo[] => {
-  if (!hub.chainId) throw new Error('HUB_TOKEN_CATALOG_CHAIN_ID_MISSING');
-  return selectHubTokenCatalog(tokenCatalog, hub.chainId, tokenIdsForHubJurisdiction(hub));
-};
-
 const resolveLocalApiUrl = (value: string): string => {
   const raw = String(value || '').trim();
   if (!raw.startsWith('/')) return raw;
@@ -1159,205 +1122,6 @@ const ensureHubBootstrapReserves = async (
 
 const directHubPeersReady = (env: RuntimeReplica, peers: HubMeshPeer<VisibleHubProfile>[]): boolean =>
   getP2P(env)?.prepareDirectEntityRoutes(peers.map(peer => peer.identity.entityId)) ?? false;
-
-const configuredSupportPeers = (
-  identities: ConfiguredPeerIdentity[],
-  selfEntityId: string,
-  jurisdiction: unknown,
-): ConfiguredPeerIdentity[] => identities.filter(identity =>
-  identity.entityId.toLowerCase() !== selfEntityId.toLowerCase() &&
-  sameJurisdictionRef(identity, jurisdiction),
-);
-
-type HubMeshInputPlan = {
-  openInputs: EntityInput[];
-  creditInputs: EntityInput[];
-};
-
-const planSupportAccountSetupInputs = (
-  env: RuntimeReplica,
-  owner: Pick<
-    HubBootstrapEntry,
-    'entityId' | 'signerId' | 'jurisdictionName' | 'chainId' | 'depositoryAddress'
-  >,
-  supportPeerIdentities: ConfiguredPeerIdentity[],
-): HubMeshInputPlan => {
-  const creditInputs: EntityInput[] = [];
-  const tokenIds = tokenIdsForHubJurisdiction(owner);
-  // The configured identity selects the managed peer; the committed Account is
-  // the financial authority. Gossip is discovery only and must not gate credit.
-  const peers = configuredSupportPeers(
-    supportPeerIdentities,
-    owner.entityId,
-    owner,
-  );
-  for (const peer of peers) {
-    const account = getAccountReplica(env, owner.entityId, peer.entityId);
-    const canWrite =
-      !account?.pendingFrame && Number(account?.mempool?.length || 0) === 0;
-    // Managed MM identities exclusively open their Accounts and therefore own
-    // the genesis watchSeed. The Hub only grants reciprocal credit after the
-    // allowlisted Account exists; this prevents two competing H=1 frames.
-    if (!account || !canWrite) continue;
-    const missingTokenIds = tokenIds.filter(
-      tokenId =>
-        getCreditGrantedByEntity(account, owner.entityId, tokenId) <
-        getBootstrapCreditAmount(tokenId),
-    );
-    if (missingTokenIds.length === 0) continue;
-    creditInputs.push({
-      entityId: owner.entityId,
-      signerId: owner.signerId,
-      entityTxs: missingTokenIds.map(tokenId => ({
-        type: 'extendCredit' as const,
-        data: {
-          counterpartyEntityId: peer.entityId,
-          tokenId,
-          amount: getBootstrapCreditAmount(tokenId),
-        },
-      })),
-    });
-  }
-  return { openInputs: [], creditInputs };
-};
-
-const planHubAccountSetupInputs = (
-  env: RuntimeReplica,
-  bootstrap: Pick<HubBootstrapEntry, 'entityId' | 'signerId'>,
-  ownerIndex: number,
-  meshPeers: HubMeshPeer<VisibleHubProfile>[],
-): HubMeshInputPlan => {
-  const openInputs: EntityInput[] = [];
-  const creditInputs: EntityInput[] = [];
-  const ownerReplica = getEntityReplicaById(env, bootstrap.entityId);
-  if (!ownerReplica) throw new Error(`HUB_PEER_OWNER_ROLE_COMMITTED_MISSING:${bootstrap.entityId}`);
-  const ownerRole = committedAccountRoleEvidence(
-    bootstrap.entityId,
-    ownerReplica.state.profile.isHub === true,
-  );
-  for (const { profile: peer, meshIndex } of meshPeers) {
-    const account = getAccountReplica(env, bootstrap.entityId, peer.entityId);
-    const canWrite =
-      !account?.pendingFrame && Number(account?.mempool?.length || 0) === 0;
-    if (
-      // The configured mesh order owns every genesis: H2/H3 open toward H1 and H3
-      // opens toward H2. H3 may propose both independent Accounts in one
-      // Entity/Runtime frame; only reciprocal credit waits for their ACKs.
-      ownerIndex > meshIndex &&
-      !hasAccount(env, bootstrap.entityId, peer.entityId) &&
-      !hasQueuedOpenAccount(env, bootstrap.entityId, peer.entityId) &&
-      canWrite
-    ) {
-      openInputs.push({
-        entityId: bootstrap.entityId,
-        signerId: bootstrap.signerId,
-        entityTxs: [
-          {
-            type: 'openAccount',
-            data: {
-              targetEntityId: peer.entityId,
-              disputeConfig: defaultAccountDisputeConfigForRoleEvidence(
-                ownerRole,
-                peer.roleEvidence,
-                new Map([[ownerRole.entityId, ownerRole.isHub]]),
-              ),
-              tokenId: HUB_MESH_TOKEN_ID,
-              creditAmount: getBootstrapCreditAmount(HUB_MESH_TOKEN_ID),
-            },
-          },
-          ...DEFAULT_ACCOUNT_TOKEN_IDS.slice(1).map(tokenId => ({
-            type: 'extendCredit' as const,
-            data: {
-              counterpartyEntityId: peer.entityId,
-              tokenId,
-              amount: getBootstrapCreditAmount(tokenId),
-            },
-          })),
-        ],
-      });
-    }
-    if (!account || !canWrite) continue;
-    const missingTokenIds = DEFAULT_ACCOUNT_TOKEN_IDS.filter(
-      tokenId =>
-        getCreditGrantedByEntity(account, bootstrap.entityId, tokenId) <
-        getBootstrapCreditAmount(tokenId),
-    );
-    if (missingTokenIds.length === 0) continue;
-    creditInputs.push({
-      entityId: bootstrap.entityId,
-      signerId: bootstrap.signerId,
-      entityTxs: missingTokenIds.map(tokenId => ({
-        type: 'extendCredit' as const,
-        data: {
-          counterpartyEntityId: peer.entityId,
-          tokenId,
-          amount: getBootstrapCreditAmount(tokenId),
-        },
-      })),
-    });
-  }
-  return { openInputs, creditInputs };
-};
-
-const planMeshBootstrapInputs = (
-  env: RuntimeReplica,
-  bootstrap: Pick<HubBootstrapEntry, 'entityId' | 'signerId'>,
-  hubBootstraps: HubBootstrapEntry[],
-  ownerIndex: number,
-  peers: HubMeshPeer<VisibleHubProfile>[],
-  supportPeerIdentities: ConfiguredPeerIdentity[],
-): HubMeshInputPlan => {
-  const plans = [
-    planHubAccountSetupInputs(env, bootstrap, ownerIndex, peers),
-    ...hubBootstraps.map(owner =>
-      planSupportAccountSetupInputs(
-        env,
-        owner,
-        supportPeerIdentities,
-      ),
-    ),
-  ];
-  return {
-    openInputs: plans.flatMap(plan => plan.openInputs),
-    creditInputs: plans.flatMap(plan => plan.creditInputs),
-  };
-};
-
-const supportPeerProvisioningReady = (
-  env: RuntimeReplica,
-  hubBootstraps: HubBootstrapEntry[],
-  identities: ConfiguredPeerIdentity[],
-): boolean => hubBootstraps.every(owner => {
-  const peers = configuredSupportPeers(identities, owner.entityId, owner);
-  const tokenIds = tokenIdsForHubJurisdiction(owner);
-  return peers.every(peer => {
-    const account = getAccountReplica(env, owner.entityId, peer.entityId);
-    if (!account || account.pendingFrame || account.mempool.length > 0) return false;
-    return tokenIds.every(tokenId =>
-      getCreditGrantedByEntity(account, owner.entityId, tokenId) >=
-      getBootstrapCreditAmount(tokenId),
-    );
-  });
-});
-
-const buildPairHealth = (env: RuntimeReplica, selfEntityId: string, peers: Array<{ name: string; entityId: string }>): HubPairHealth[] => {
-  return peers.map(peer => {
-    const account = getAccountReplica(env, selfEntityId, peer.entityId);
-    const grantedByMe = account ? getCreditGrantedByEntity(account, selfEntityId, HUB_MESH_TOKEN_ID) : 0n;
-    const grantedByPeer = account ? getCreditGrantedByEntity(account, peer.entityId, HUB_MESH_TOKEN_ID) : 0n;
-    return {
-      counterpartyId: peer.entityId,
-      counterpartyName: peer.name,
-      hasAccount: hasAccount(env, selfEntityId, peer.entityId),
-      currentHeight: Number(account?.currentHeight ?? 0),
-      pendingFrameHeight: account?.pendingFrame ? Number(account.pendingFrame.height) : null,
-      pendingFrameHash: account?.pendingFrame?.stateHash ?? null,
-      grantedByMe: grantedByMe.toString(),
-      grantedByPeer: grantedByPeer.toString(),
-      ready: hasPairMutualCredits(env, selfEntityId, peer.entityId, DEFAULT_ACCOUNT_TOKEN_IDS, getBootstrapCreditAmount),
-    };
-  });
-};
 
 const buildLocalHealth = (
   env: RuntimeReplica,

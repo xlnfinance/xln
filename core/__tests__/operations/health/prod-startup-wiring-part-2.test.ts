@@ -37,7 +37,9 @@ const readMarketMakerNodeSource = (): string =>
 // hub-node.ts goes last so declaration-order slices keep ending inside it.
 const readHubNodeSource = (): string =>
   [
+    'hub/node/token-catalog.ts',
     'hub/node/hub-jurisdiction-binding.ts',
+    'hub/node/hub-mesh-plan.ts',
     'hub-node.ts',
   ].map(file => readFileSync(join(repoRoot, 'core/orchestrator', file), 'utf8')).join('\n');
 
@@ -1447,7 +1449,7 @@ describe('production startup wiring', () => {
 
   test('hub support-peer provisioning uses full jurisdiction token sets', () => {
     const hubNode = readHubNodeSource();
-    expect(hubNode).toContain("import { getTokenIdsForJurisdiction } from '../account/utils';");
+    expect(hubNode).toContain("import { getTokenIdsForJurisdiction } from '../../../account/utils';");
     expect(hubNode).toContain('const tokenIdsForHubJurisdiction = (');
     expect(hubNode).toContain('const tokenCatalogForHubJurisdiction = (');
 
@@ -1641,7 +1643,7 @@ describe('production startup wiring', () => {
   test('production account openers bind one explicit role authority per party', () => {
     const sources = [
       'core/orchestrator/daemon-control.ts',
-      'core/orchestrator/hub-node.ts',
+      'core/orchestrator/hub/node/hub-mesh-plan.ts',
       'core/orchestrator/market-maker/node/mm-node-core.ts',
       'core/runtime/swap-cmd/swap-command-plan.ts',
       'frontend/src/lib/components/Entity/onboarding/onboarding-runtime-input.ts',
