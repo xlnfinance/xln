@@ -1498,12 +1498,25 @@ fn decode_j_event_claim(
             decode_account_settled_event(event, operation_index, &event_path)
         })
         .collect::<Result<Vec<_>, _>>()?;
-    Ok(AccountTx::JEventClaim(JEventClaimTx {
-        j_height: unsigned(
-            field(value, "jHeight", operation_index, path)?,
+    // Parity target: validateJEventClaim (core/account/tx-validation/special.ts).
+    // Empty or duplicate events and height 0 were fatal StateErrors inside the
+    // claim transition; at this decode boundary they reject only the input.
+    xln_rscore_engine::canonical_events(&events)
+        .map_err(|error| invalid(operation_index, format!("{path}.events"), error.to_string()))?;
+    let j_height = unsigned(
+        field(value, "jHeight", operation_index, path)?,
+        operation_index,
+        &format!("{path}.jHeight"),
+    )?;
+    if j_height == 0 {
+        return Err(invalid(
             operation_index,
-            &format!("{path}.jHeight"),
-        )?,
+            format!("{path}.jHeight"),
+            "POSITIVE_REQUIRED",
+        ));
+    }
+    Ok(AccountTx::JEventClaim(JEventClaimTx {
+        j_height,
         j_block_hash: fixed_hex(
             field(value, "jBlockHash", operation_index, path)?,
             operation_index,
@@ -2588,6 +2601,37 @@ mod tests {
             }
             Ok(other) => panic!("wrong tx: {other:?}"),
             Err(error) => panic!("decode failed: {error}"),
+        }
+    }
+
+    #[test]
+    fn j_event_claim_rejects_empty_duplicate_and_zero_height_at_decode() {
+        // Parity: account-frame-integrity.test.ts (TS validateJEventClaim). These
+        // were fatal StateErrors in the claim transition before decode checked them.
+        let event = json!({
+            "type": "AccountSettled",
+            "blockNumber": 100,
+            "logIndex": 2,
+            "data": {
+                "leftEntity": id("11"), "rightEntity": id("22"), "tokenId": 1,
+                "leftReserve": "10", "rightReserve": "20", "collateral": "30",
+                "ondelta": "-5", "nonce": 7
+            }
+        });
+        let claim = |height: u64, events: Value| {
+            json!({
+                "type": "j_event_claim",
+                "data": { "jHeight": height, "jBlockHash": id("99"), "events": events }
+            })
+        };
+        assert!(decode_account_tx_json(&claim(5, json!([event.clone()])), 0).is_ok());
+        for (tx, field) in [
+            (claim(5, json!([])), "events"),
+            (claim(5, json!([event.clone(), event.clone()])), "events"),
+            (claim(0, json!([event])), "jHeight"),
+        ] {
+            let error = decode_account_tx_json(&tx, 0).expect_err("malformed claim decoded");
+            assert!(error.to_string().contains(field), "{error}");
         }
     }
 }

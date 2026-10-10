@@ -17,6 +17,7 @@ import type {
   AccountFrame,
   AccountInput,
   AccountOutput,
+  AccountTx,
 } from '../../types/account';
 import type { AccountConsensusContext } from './context';
 import {
@@ -35,9 +36,12 @@ import { HEAVY_LOGS } from '../../support/debug-flags';
 import { applyAccountTx } from '../tx/apply';
 import type { AccountDraftReplica } from '../state/account-state-draft';
 import type { AccountTxRejection, ApplyAccountTxOk } from '../tx/apply-types';
-import { accountTxFailureMessage, assertNever } from '../tx/apply-result';
+import { accountTxFailureMessage, accountTxValidationRejected, assertNever } from '../tx/apply-result';
+import { prepareAccountJClaimTx } from '../j-claims/j-claim-transition';
+import { encodeAccountStateValue } from '../commitment/account-state-value';
+import { computeIntegrityDigest } from '../../support/bytes/integrity-checksum';
 import { createStructuredLogger, shortHash, shortId } from '../../support/logger';
-import { assertAccountFrameHash } from './frame/hash';
+import { assertAccountFrameHash, canonicalAccountTxForFrameHash } from './frame/hash';
 import {
   assertNoUnilateralSettlementMutation,
   buildAccountProofBodyFromJurisdictions,
@@ -223,6 +227,26 @@ const collectIncomingOkOutcome = (
   }
 };
 
+const accountTxFrameDigest = (tx: AccountTx): string =>
+  computeIntegrityDigest(encodeAccountStateValue(canonicalAccountTxForFrameHash(tx)));
+
+/**
+ * Both claim witnesses are derivable from the committed accumulators, so the
+ * receiver rebuilds them like the proposer did and requires the signed tx to
+ * match. Verifying the peer's own witness instead threw on a bad link, order
+ * or missing proof and halted the Runtime. Parity: Rust regenerates prepared
+ * claims and rejects `applied != frame.txs` (consensus/incoming/apply.rs).
+ */
+const jEventClaimWitnessMismatch = (
+  machine: AccountDraftReplica,
+  tx: Extract<AccountTx, { type: 'j_event_claim' }>,
+  session: AccountJClaimSession,
+): boolean => {
+  if (tx.data.leftProof === undefined || tx.data.rightProof === undefined) return true;
+  const expected = prepareAccountJClaimTx(machine.state, tx, getAccountStateDomain(machine.state), session);
+  return accountTxFrameDigest(expected) !== accountTxFrameDigest(tx);
+};
+
 const replayIncomingFrameOnClone = async (
   context: AccountConsensusContext,
   clonedMachine: AccountDraftReplica,
@@ -245,6 +269,17 @@ const replayIncomingFrameOnClone = async (
     timedOutHashlocks: [],
   };
   for (const accountTx of receivedFrame.accountTxs) {
+    if (accountTx.type === 'j_event_claim' && jEventClaimWitnessMismatch(clonedMachine, accountTx, jClaimSession)) {
+      const message = 'ACCOUNT_INPUT_FRAME_J_CLAIM_WITNESS_MISMATCH';
+      return {
+        kind: 'return',
+        result: accountInputTxRejected(
+          accountTxValidationRejected(message, []).rejection,
+          events,
+          `Frame application failed: ${message}`,
+        ),
+      };
+    }
     const beforeSettlement = captureSettlementVector(clonedMachine);
     const result = await applyAccountTx(
       clonedMachine,

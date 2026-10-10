@@ -1,6 +1,10 @@
-import { normalizeJurisdictionEvent } from '../../jurisdiction/machine/events/event-normalization';
+import {
+  canonicalJurisdictionEventKey,
+  normalizeJurisdictionEvent,
+} from '../../jurisdiction/machine/events/event-normalization';
 import { assertOpaqueHtlcCiphertext } from '../../protocol/htlc/multi-recipient';
 import {
+  requireBoundaryInteger,
   requireBoundaryRecord,
   requireExactBoundaryKeys,
 } from '../../protocol/boundary-validation';
@@ -163,10 +167,19 @@ const validateJEventClaim = (value: unknown, code: string): void => {
     required: { jHeight: 'integer', jBlockHash: 'string', events: 'array' },
     optional: { leftProof: 'record', rightProof: 'record' },
   }, code);
+  // A peer j_event_claim reaches the accumulator, which threw on each of
+  // these shapes inside the Account transition. Rust: account_input_json.rs.
+  if (requireBoundaryInteger(data['jHeight'], `${code}_JHEIGHT`) < 1) throw new Error(`${code}_JHEIGHT`);
+  if (!/^0x[0-9a-fA-F]{64}$/.test(String(data['jBlockHash']))) throw new Error(`${code}_JBLOCKHASH`);
   const events = data['events'];
-  if (!Array.isArray(events)) throw new Error(`${code}_EVENTS`);
+  if (!Array.isArray(events) || events.length === 0) throw new Error(`${code}_EVENTS`);
+  const keys = new Set<string>();
   for (const [index, event] of events.entries()) {
-    if (!normalizeJurisdictionEvent(event)) throw new Error(`${code}_EVENT_${index}`);
+    const normalized = normalizeJurisdictionEvent(event);
+    if (!normalized) throw new Error(`${code}_EVENT_${index}`);
+    const key = canonicalJurisdictionEventKey(normalized);
+    if (keys.has(key)) throw new Error(`${code}_EVENT_DUPLICATE_${index}`);
+    keys.add(key);
   }
   if (data['leftProof'] !== undefined) validateJClaimProof(data['leftProof'], `${code}_LEFT_PROOF`);
   if (data['rightProof'] !== undefined) validateJClaimProof(data['rightProof'], `${code}_RIGHT_PROOF`);
