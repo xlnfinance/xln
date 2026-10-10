@@ -1,4 +1,3 @@
-import { runtimeIsBrowser } from '../support/process/runtime-process';
 export { getLiveJAdapter, getLiveJAdapterEntries } from './j-submit/live-jadapters';
 
 // The testnet exposes one canonical runtime contract. Breaking changes replace
@@ -90,9 +89,6 @@ const {
   tryOpenRuntimeWalDb,
   closeRuntimeDb,
   closeInfraDb,
-  getCleanLogs,
-  clearCleanLogs,
-  copyCleanLogs,
   enqueueRuntimeInputs,
   enqueueRuntimeContinuation,
   infraGossipDbAccess,
@@ -111,10 +107,6 @@ const {
   setRuntimeId,
   deriveRuntimeId,
   registerEntityRuntimeHint,
-  MAX_RUNTIME_J_INPUTS,
-  MAX_RUNTIME_J_TXS,
-  MAX_RUNTIME_J_TXS_PER_JURISDICTION,
-  MAX_RUNTIME_J_INPUT_BYTES,
   handleInboundP2PEntityInput,
   handleInboundP2PEntityInputs,
   normalizeRuntimeEntityInput,
@@ -145,7 +137,6 @@ export {
   findCommittedRuntimeInputHeight,
   findPersistedRuntimeInputHeight,
   runtimeFrameContainsSubmittedInput,
-  runtimeInputParts,
   waitForRuntimeInputCommitted,
 } from './mempool/input-completion';
 
@@ -160,9 +151,6 @@ export {
   tryOpenRuntimeWalDb,
   closeRuntimeDb,
   closeInfraDb,
-  getCleanLogs,
-  clearCleanLogs,
-  copyCleanLogs,
   hasRuntimeWork,
   prioritizeJEventFrame,
   startRuntimeLoop,
@@ -176,10 +164,6 @@ export {
   setRuntimeId,
   deriveRuntimeId,
   registerEntityRuntimeHint,
-  MAX_RUNTIME_J_INPUTS,
-  MAX_RUNTIME_J_TXS,
-  MAX_RUNTIME_J_TXS_PER_JURISDICTION,
-  MAX_RUNTIME_J_INPUT_BYTES,
   handleInboundP2PEntityInput,
   handleInboundP2PEntityInputs,
   validateRuntimeInputAdmission,
@@ -358,7 +342,6 @@ export const loadEnvFromDB = async (
   loadByReplay: loadEnvFromStorageByReplay,
   rehydrate: (env, trustedJurisdictionRpcBindings) =>
     rehydrateRestoredRuntimeInfra(env, {
-      isBrowser: runtimeIsBrowser,
       loadGossipProfiles: targetEnv =>
         loadGossipProfilesFromInfraDb(targetEnv, infraGossipDbAccess),
       assertPersistedContractConfigReady,

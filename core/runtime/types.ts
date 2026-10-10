@@ -584,7 +584,6 @@ interface RuntimeInfrastructure {
   storageVerifiedPreviousHeight?: number;
   storageVerifiedWalHeight?: number;
   storageEpochRotatePromise?: Promise<void> | null;
-  storageEntityHashDocs?: unknown;
   /** Last physically committed Book roots; identity enables O(dirty-path) storage diffs. */
   storagePersistedBooks?: Map<string, BookState>;
   /**
@@ -660,12 +659,6 @@ interface RuntimeInfrastructure {
     observedAt: number;
   }>;
   cleanLogs?: string[];
-  routeDeferState?: Map<string, {
-    warnAt: number;
-    gossipAt: number;
-    deferredCount: number;
-    escalated: boolean;
-  }>;
   verifiedProfileRoutes?: Map<string, {
     runtimeId: string;
     runtimeSignerId: string;

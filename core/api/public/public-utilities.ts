@@ -35,7 +35,7 @@ export {
   formatTokenAmount,
   parseTokenAmount,
 } from '../../account/financial-utils';
-export { calculateSolvency, verifySolvency } from '../../runtime/swap-cmd/solvency';
+export { calculateSolvency } from '../../runtime/swap-cmd/solvency';
 export { classifyBilateralState, getAccountBarVisual } from '../../account/view-state';
 export { createDefaultDelta } from '../../account/state/delta';
 export { deriveSwapNetAuthorization } from '../../account/swap/swap-net-authorization';

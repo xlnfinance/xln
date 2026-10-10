@@ -1,12 +1,11 @@
 import { describe, expect, test } from 'bun:test';
 
+import { createEmptyEnv, validateRuntimeInputAdmission } from '../../../runtime';
 import {
   MAX_RUNTIME_J_INPUT_BYTES,
   MAX_RUNTIME_J_TXS,
   MAX_RUNTIME_J_TXS_PER_JURISDICTION,
-  createEmptyEnv,
-  validateRuntimeInputAdmission,
-} from '../../../runtime';
+} from '../../../runtime/mempool/input-validation';
 import type { JTx } from '../../../types/jurisdiction-runtime';
 import type { RuntimeInput } from '../../../runtime/types';
 import { MAX_ENTITY_FRAME_J_RANGE_BYTES } from '../../../jurisdiction/machine/range-budget';

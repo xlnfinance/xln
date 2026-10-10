@@ -1,10 +1,7 @@
 import { computeCanonicalEntityConsensusStateHash } from '../../entity/consensus/state-root';
 import { isLeftEntity } from '../../protocol/identity/entity-id';
-import { createStructuredLogger } from '../../support/logger';
 import type { EntityState } from '../../entity/types';
 import type { RuntimeReplica } from '../types';
-
-const solvencyLog = createStructuredLogger('runtime.solvency');
 
 /**
  * Off-chain mirror of the quantity the jurisdiction constrains.
@@ -165,45 +162,4 @@ export const calculateSolvency = (
         ? true
         : null,
   };
-};
-
-/**
- * Assert the conservation law against authoritative on-chain totals.
- *
- * Diagnostic only: nothing in the canonical tick calls this, and it must stay
- * that way. Recomputing a whole-Runtime aggregate per frame would spend real
- * work to restate what the jurisdiction already enforces on every batch.
- *
- * Without `onChainTotals` there is nothing to verify, and this throws rather
- * than returning a green it did not earn.
- */
-export const verifySolvency = (
-  env: RuntimeReplica,
-  label?: string,
-  onChainTotals?: OnChainTokenTotals,
-): boolean => {
-  const solvency = calculateSolvency(env, undefined, onChainTotals);
-  const unchecked = Array.from(solvency.byAsset.entries())
-    .filter(([, asset]) => asset.isValid === null)
-    .map(([key]) => key);
-  if (solvency.isValid === null) {
-    const reason = unchecked.length === solvency.byAsset.size
-      ? `no on-chain totals supplied for ${solvency.byAsset.size} asset(s)`
-      : `incomplete on-chain totals; missing ${unchecked.join(',')}`;
-    throw new Error(
-      `Solvency check failed: ${reason}`,
-    );
-  }
-  const invalid = Array.from(solvency.byAsset.values()).filter(asset => asset.isValid === false);
-  if (!solvency.isValid) {
-    solvencyLog.error('violation', {
-      label: label ?? '',
-      assets: invalid.map(asset => ({ key: `${asset.stackId}:${asset.tokenId}`, delta: String(asset.delta) })),
-    });
-    throw new Error(
-      `Solvency check failed: ${invalid.map(asset => `${asset.stackId}:${asset.tokenId}=${String(asset.delta)}`).join(',') || 'no assets'}`,
-    );
-  }
-  solvencyLog.info('ok', { label: label ?? '', assets: solvency.byAsset.size });
-  return true;
 };

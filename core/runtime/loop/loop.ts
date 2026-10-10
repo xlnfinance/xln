@@ -1,9 +1,3 @@
-import {
-  MAX_RUNTIME_J_INPUT_BYTES,
-  MAX_RUNTIME_J_INPUTS,
-  MAX_RUNTIME_J_TXS,
-  MAX_RUNTIME_J_TXS_PER_JURISDICTION,
-} from '../mempool/input-validation.ts';
 import { ensureRuntimeInfrastructure } from '../envelope/replica-envelope.ts';
 import type { RuntimeReplica, RuntimeInput } from '../types.ts';
 import {
@@ -25,12 +19,9 @@ import {
   writeRuntimeMetadata,
 } from './loop-environment.ts';
 import {
-  clearCleanLogs,
-  copyCleanLogs,
   drainInfraDbWrites,
   enqueueRuntimeContinuation,
   enqueueRuntimeInputs,
-  getCleanLogs,
   getRuntimeWal,
   getRuntimeInfraDb,
   getRuntimeStorageDb,
@@ -44,8 +35,6 @@ import {
 import {
   applyEntityInputFrameCap,
   applyEntityTxFrameCap,
-  collectAccountMempoolWakeInputs,
-  collectEntityMempoolWakeInputs,
   collectReplicaMempoolWakeInputs,
   generateHookPings,
   isRuntimeFrameReady,
@@ -134,7 +123,6 @@ export const createRuntimeLoopApi = (deps: RuntimeLoopApiDeps) => {
   const routing = createRuntimeRoutingApi({ notifyEnvChange: deps.notifyEnvChange });
   const workDeps: RuntimeWorkDeps = {
     runtimeInputHasQueuedWork: deps.runtimeInputHasQueuedWork,
-    getOutputRoutingDeps: routing.getRuntimeOutputRoutingDeps,
   };
   const getRuntimeWorkReason = (env: RuntimeReplica): string | null =>
     resolveRuntimeWorkReason(env, workDeps);
@@ -168,9 +156,6 @@ export const createRuntimeLoopApi = (deps: RuntimeLoopApiDeps) => {
     tryOpenRuntimeWalDb: tryOpenRuntimeWal,
     closeRuntimeDb,
     closeInfraDb: closeManagedInfraDb,
-    getCleanLogs,
-    clearCleanLogs,
-    copyCleanLogs,
     enqueueRuntimeInputs,
     enqueueRuntimeContinuation,
     tryOpenInfraDb: tryOpenRuntimeInfraDb,
@@ -178,8 +163,6 @@ export const createRuntimeLoopApi = (deps: RuntimeLoopApiDeps) => {
     trackInfraDbWrite,
     hasRuntimeWork,
     getRuntimeWorkReason,
-    collectAccountMempoolWakeInputs,
-    collectEntityMempoolWakeInputs,
     collectReplicaMempoolWakeInputs,
     prioritizeJEventFrame,
     applyEntityInputFrameCap,
@@ -191,9 +174,5 @@ export const createRuntimeLoopApi = (deps: RuntimeLoopApiDeps) => {
     waitForPromiseBeforeTimeout,
     ...lifecycle,
     ...routing,
-    MAX_RUNTIME_J_INPUTS,
-    MAX_RUNTIME_J_TXS,
-    MAX_RUNTIME_J_TXS_PER_JURISDICTION,
-    MAX_RUNTIME_J_INPUT_BYTES,
   };
 };

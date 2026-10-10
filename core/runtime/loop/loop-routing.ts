@@ -2,11 +2,8 @@ import { extractEntityId } from '../../protocol/identity';
 import { createStructuredLogger } from '../../support/logger.ts';
 import { normalizeRuntimeId } from '../../network/p2p/auth/runtime-id.ts';
 import { safeStringify } from '../../protocol/serialization';
-import { runtimeInputRequiresOutboxCapacity ,
-  MAX_RUNTIME_J_INPUT_BYTES,
-  MAX_RUNTIME_J_INPUTS,
-  MAX_RUNTIME_J_TXS,
-  MAX_RUNTIME_J_TXS_PER_JURISDICTION,
+import {
+  runtimeInputRequiresOutboxCapacity,
   validateRuntimeInputShapeAndLimits,
 } from '../mempool/input-validation.ts';
 import {
@@ -45,7 +42,6 @@ import { assertRuntimeInputCapabilitiesAuthorized } from '../tx/internal-tx-auth
 import {
   deriveRuntimeId,
   getLocalSignerIdsForEntity,
-  getRuntimeEnv,
   hasLocalSignerForEntity,
   hasLocalSignerForEntitySigner,
   resolveSoleLocalSignerForEntity,
@@ -218,7 +214,6 @@ export const createRuntimeRoutingApi = (deps: RuntimeRoutingApiDeps) => {
   const outputRoutingDeps = () => createRuntimeOutputRoutingDeps(entityRoutingDeps());
   const p2pDeps = () => getRuntimeP2PLifecycleDeps(deps);
   return {
-    getEnv: getRuntimeEnv,
     setRuntimeId: (env: RuntimeReplica, id: string | null) => setRuntimeId(deps, env, id),
     deriveRuntimeId,
     registerEntityRuntimeHint: (env: RuntimeReplica, entityId: string, runtimeId: string) =>
@@ -253,9 +248,5 @@ export const createRuntimeRoutingApi = (deps: RuntimeRoutingApiDeps) => {
       ensureRuntimeGossipProfiles(env, p2pDeps(), entityIds),
     clearGossip: (env: RuntimeReplica, options: { runtimeId?: string } = {}) =>
       clearRuntimeGossip(env, deps.notifyEnvChange, options),
-    MAX_RUNTIME_J_INPUTS,
-    MAX_RUNTIME_J_TXS,
-    MAX_RUNTIME_J_TXS_PER_JURISDICTION,
-    MAX_RUNTIME_J_INPUT_BYTES,
   };
 };

@@ -1,16 +1,11 @@
-import type { EntityInput } from '../../../entity/types';
 import type { RuntimeReplica } from '../../types';
 import type { RuntimeProcessProfile } from '../process-profile';
 import { getWallClockMs } from '../../../support/time';
-
-type RuntimeLifecycleState = NonNullable<RuntimeReplica['infrastructure']>;
 
 export type RuntimeFrameStartDeps = {
   attachEventEmitters(env: RuntimeReplica): void;
   collectIngress(
     env: RuntimeReplica,
-    inputs: EntityInput[] | undefined,
-    state: RuntimeLifecycleState,
     profile: RuntimeProcessProfile,
   ): Promise<{ ready: true } | { ready: false; outcome: string }>;
 };
@@ -36,8 +31,6 @@ const stopAtDebugFrame = async (env: RuntimeReplica): Promise<void> => {
 
 export const startRuntimeFrame = async (
   env: RuntimeReplica,
-  inputs: EntityInput[] | undefined,
-  state: RuntimeLifecycleState,
   profile: RuntimeProcessProfile,
   deps: RuntimeFrameStartDeps,
 ): Promise<RuntimeFrameStart> => {
@@ -51,7 +44,7 @@ export const startRuntimeFrame = async (
   if (!env.emit) deps.attachEventEmitters(env);
   await stopAtDebugFrame(env);
 
-  const ingress = await deps.collectIngress(env, inputs, state, profile);
+  const ingress = await deps.collectIngress(env, profile);
   if (!ingress.ready) profile.outcome = ingress.outcome;
   return {
     ready: ingress.ready,

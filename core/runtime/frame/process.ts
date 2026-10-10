@@ -111,13 +111,11 @@ type RuntimeIngressDecision =
 
 const collectRuntimeIngress = async (
   env: RuntimeReplica,
-  inputs: EntityInput[] | undefined,
   profile: RuntimeProcessProfile,
   deps: RuntimeProcessDeps,
 ): Promise<RuntimeIngressDecision> => {
   const { loop } = deps;
   const ingressTimestamp = env.scenarioMode ? (env.state.timestamp ?? 0) : getWallClockMs();
-  if (inputs?.length) loop.enqueueRuntimeInputs(env, inputs, undefined, undefined, ingressTimestamp);
   if (env.pendingOutputs?.length) {
     loop.enqueueRuntimeContinuation(env, env.pendingOutputs, undefined, undefined, ingressTimestamp);
     env.pendingOutputs = [];
@@ -699,13 +697,10 @@ const processRuntimeFrameOnce = async (
     await flushCommittedNetworkOutputs(env, deps.getRuntimeOutputRoutingDeps());
     const started = await startRuntimeFrame(
       env,
-      undefined,
-      processState,
       profile,
       {
         attachEventEmitters: deps.attachEventEmitters,
-        collectIngress: (target, queued, _state, processProfile) =>
-          collectRuntimeIngress(target, queued, processProfile, deps),
+        collectIngress: (target, processProfile) => collectRuntimeIngress(target, processProfile, deps),
       },
     );
     if (!started.ready) return env;

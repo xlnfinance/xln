@@ -47,7 +47,7 @@ const entityInputParts = (input: RuntimeInput['entityInputs'][number]): RuntimeI
   return parts;
 };
 
-export const runtimeInputParts = (input: RuntimeInput): RuntimeInputPart[] => {
+const runtimeInputParts = (input: RuntimeInput): RuntimeInputPart[] => {
   const parts: RuntimeInputPart[] = (input.runtimeTxs ?? []).map((value) => ({
     kind: 'runtimeTx', owner: '', value,
   }));

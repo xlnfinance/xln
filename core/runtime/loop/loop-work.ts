@@ -8,10 +8,9 @@ import {
   isFrozenBaseJPrefixRollAuthorized,
 } from '../../jurisdiction/machine/history/j-prefix-consensus.ts';
 import { getWallClockMs } from '../../support/time.ts';
-import type { RuntimeOutputRoutingDeps } from '../delivery/topology/output-routing.ts';
 import {
   generateHookPingsWithDeps,
-  getNextWallClockWakeTimestampWithDeps,
+  getNextWallClockWakeTimestamp,
   hasDueEntityHooksWithDeps,
 } from '../mempool/wake.ts';
 import { requireRuntimeMempool } from '../mempool/input-queue.ts';
@@ -31,7 +30,6 @@ const loopWorkLog = createStructuredLogger('runtime.loop-work');
 
 export type RuntimeWorkDeps = {
   runtimeInputHasQueuedWork(input: RuntimeInput): boolean;
-  getOutputRoutingDeps(): RuntimeOutputRoutingDeps;
 };
 
 const entityJPrefixReadyForWake = (replica: EntityReplica): boolean => {
@@ -120,14 +118,7 @@ export const collectReplicaMempoolWakeInputs = (env: RuntimeReplica): ReplicaMem
   return { entityInputs, accountInputs };
 };
 
-export const collectAccountMempoolWakeInputs = (env: RuntimeReplica): EntityInput[] =>
-  collectReplicaMempoolWakeInputs(env).accountInputs;
-
-export const collectEntityMempoolWakeInputs = (env: RuntimeReplica): EntityInput[] =>
-  collectReplicaMempoolWakeInputs(env).entityInputs;
-
 const runtimeWakeDeps = {
-  ensureRuntimeInfrastructure,
   requireRuntimeMempool,
   enqueueRuntimeInputs: (
     env: RuntimeReplica,
@@ -302,8 +293,7 @@ export const applyEntityTxFrameCap = (
 export const resolveNextWallClockWakeTimestamp = (
   env: RuntimeReplica,
 ): number | null => {
-  const entityDueAt = getNextWallClockWakeTimestampWithDeps(env, runtimeWakeDeps);
-  return entityDueAt;
+  return getNextWallClockWakeTimestamp(env);
 };
 
 export const generateHookPings = (

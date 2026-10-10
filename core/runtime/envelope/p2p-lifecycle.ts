@@ -299,24 +299,6 @@ export const stopRuntimeP2PAndWait = async (
   state.lastP2PConfig = null;
 };
 
-export const detachRuntimeP2P = (env: RuntimeReplica, deps: RuntimeP2PLifecycleDeps): void => {
-  const state = env.infrastructure;
-  if (!state?.p2p) return;
-  try {
-    state.p2p.close();
-  } catch (error) {
-    p2pLifecycleLog.warn('detach.close_failed', {
-      error: error instanceof Error ? error.message : String(error),
-    });
-  }
-  const singleton = p2pState(env)[ENV_P2P_SINGLETON_KEY];
-  if (singleton === state.p2p) {
-    delete p2pState(env)[ENV_P2P_SINGLETON_KEY];
-  }
-  state.p2p = null;
-  deps.ensureRuntimeInfrastructure(env);
-};
-
 export const getRuntimeP2P = (env: RuntimeReplica, deps: RuntimeP2PLifecycleDeps): RuntimeP2P | null =>
   deps.ensureRuntimeInfrastructure(env).p2p ?? null;
 

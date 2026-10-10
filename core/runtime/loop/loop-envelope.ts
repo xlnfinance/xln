@@ -1,9 +1,4 @@
 import { Level } from 'level';
-import {
-  clearRuntimeCleanLogs,
-  copyRuntimeCleanLogs,
-  getRuntimeCleanLogs,
-} from '../observability/clean-logs.ts';
 import { createStructuredLogger } from '../../support/logger.ts';
 import {
   enqueueRuntimeInputsWithDeps,
@@ -26,7 +21,6 @@ import type { JInput } from '../../jurisdiction/machine/input.ts';
 
 const infrastructureLog = createStructuredLogger('runtime.envelope');
 const storageDeps = { ensureRuntimeInfrastructure };
-const cleanLogDeps = { ensureRuntimeInfrastructure };
 const inputQueueDeps = { ensureRuntimeInfrastructure, requestRuntimeLoopWake };
 
 export const getRuntimeStorageDb = (
@@ -110,15 +104,6 @@ export const waitForRuntimeLoopWakeOrTimeout = async (
     timeoutId = setTimeout(finish, timeoutMs);
   });
 };
-
-export const getCleanLogs = (env: RuntimeReplica): string =>
-  getRuntimeCleanLogs(env, cleanLogDeps);
-
-export const clearCleanLogs = (env: RuntimeReplica): void =>
-  clearRuntimeCleanLogs(env, cleanLogDeps);
-
-export const copyCleanLogs = (env: RuntimeReplica): Promise<string> =>
-  copyRuntimeCleanLogs(env, cleanLogDeps);
 
 export const enqueueRuntimeInputs = (
   env: RuntimeReplica,

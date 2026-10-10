@@ -15,10 +15,7 @@ import {
 } from '../registration/entity-provider-action-submit-scheduler';
 import { getNextGovernanceSubmitTimestamp } from '../registration/governance-submit-state';
 
-type RuntimeLifecycleState = NonNullable<RuntimeReplica['infrastructure']>;
-
 export type RuntimeWakeDeps = {
-  ensureRuntimeInfrastructure(env: RuntimeReplica): RuntimeLifecycleState;
   requireRuntimeMempool(env: RuntimeReplica): RuntimeInput;
   enqueueRuntimeInputs(
     env: RuntimeReplica,
@@ -49,7 +46,7 @@ export const hasDueEntityHooksWithDeps = (env: RuntimeReplica, deps: RuntimeWake
     (governanceDueAt !== null && governanceDueAt <= now);
 };
 
-export const getNextWallClockWakeTimestampWithDeps = (env: RuntimeReplica, _deps: RuntimeWakeDeps): number | null => {
+export const getNextWallClockWakeTimestamp = (env: RuntimeReplica): number | null => {
   const due = [
     getNextScheduledWakeTimestamp(env),
     getNextJSubmitRetryTimestamp(env),

@@ -12,7 +12,6 @@ import {
   registerCommittedSingleSignerWallets,
 } from '../../runtime/recovery/restore-adapters';
 import { rehydrateRestoredRuntimeInfra } from '../../runtime/recovery/j-adapter-restore';
-import { runtimeIsBrowser } from '../../support/process/runtime-process';
 import { assertBrowserVMJurisdiction } from '../../jurisdiction/adapter/browservm/browservm-registry';
 import { replayPersistedRuntimeJournals, type RecoveryReplayOptions } from './journal';
 import { authorityReplayEnabled } from '../../rscore/authority-driver';
@@ -94,7 +93,6 @@ export const createRuntimeRecoveryApi = (deps: RuntimeRecoveryDeps) => {
     }
     if (!options.readOnly) {
       await rehydrateRestoredRuntimeInfra(env, {
-        isBrowser: runtimeIsBrowser,
         loadGossipProfiles: target => loadGossipProfilesFromInfraDb(target, infraGossipDbAccess),
         assertPersistedContractConfigReady,
         assertBrowserVMJurisdiction,

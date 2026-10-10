@@ -1,8 +1,6 @@
 import { expect, test } from 'bun:test';
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
 
-import { calculateSolvency, verifySolvency } from '../../../runtime/swap-cmd/solvency';
+import { calculateSolvency } from '../../../runtime/swap-cmd/solvency';
 import { computeCanonicalEntityConsensusStateHash, computeEntityAccountValueHash } from '../../../entity/consensus/state-root';
 import { PersistentEntityAccountMap } from '../../../entity/state/persistent-account-map';
 import type { RuntimeReplica } from '../../../runtime/types';
@@ -16,21 +14,6 @@ const SECOND_DEPOSITORY = `0x${'66'.repeat(20)}`;
 
 /** Depository totals the jurisdiction would report, keyed `stackId:tokenId`. */
 const onChain = (entries: Array<[string, bigint]>): Map<string, bigint> => new Map(entries);
-
-const expectVerificationFailure = (
-  env: RuntimeReplica,
-  label: string,
-  totals: Map<string, bigint>,
-): void => {
-  const previousScopes = process.env['XLN_LOG_SCOPES'];
-  process.env['XLN_LOG_SCOPES'] = 'test-suppressed';
-  try {
-    expect(() => verifySolvency(env, label, totals)).toThrow('Solvency check failed');
-  } finally {
-    if (previousScopes === undefined) delete process.env['XLN_LOG_SCOPES'];
-    else process.env['XLN_LOG_SCOPES'] = previousScopes;
-  }
-};
 
 const makeEnv = (): RuntimeReplica => ({
   state: {
@@ -66,16 +49,7 @@ const makeEnv = (): RuntimeReplica => ({
   },
 } as unknown as RuntimeReplica);
 
-test('solvency diagnostics use structured logging only', () => {
-  const source = readFileSync(join(process.cwd(), 'core/runtime/swap-cmd/solvency.ts'), 'utf8');
-
-  expect(source).toContain("const solvencyLog = createStructuredLogger('runtime.solvency');");
-  expect(source).toContain("solvencyLog.error('violation'");
-  expect(source).toContain("solvencyLog.info('ok'");
-  expect(source).not.toContain('console.');
-});
-
-test('calculate and verify solvency keep every jurisdiction asset independent', () => {
+test('calculate solvency keeps every jurisdiction asset independent', () => {
   const env = makeEnv();
   const assetKey = `31337:${DEPOSITORY}:1`;
   // reserves 3 + collateral 3: the Depository would report 6 held for token 1.
@@ -96,21 +70,13 @@ test('calculate and verify solvency keep every jurisdiction asset independent', 
     isValid: true,
   });
 
-  const previousScopes = process.env['XLN_LOG_SCOPES'];
-  process.env['XLN_LOG_SCOPES'] = 'test-suppressed';
-  try {
-    expect(verifySolvency(env, 'unit', totals)).toBe(true);
-    env.state.eReplicas.values().next().value!.state.reserves = new Map([[1, 1n], [2, 2n]]);
-    env.state.eReplicas.values().next().value!.state.accounts.get(ENTITY_B)!.state.deltas = new Map([
-      [1, { collateral: 2n }],
-      [2, { collateral: 1n }],
-    ] as never);
-    // Internal value for token 1 is now 3, but the Depository still holds 6.
-    expectVerificationFailure(env, 'unit', totals);
-  } finally {
-    if (previousScopes === undefined) delete process.env['XLN_LOG_SCOPES'];
-    else process.env['XLN_LOG_SCOPES'] = previousScopes;
-  }
+  env.state.eReplicas.values().next().value!.state.reserves = new Map([[1, 1n], [2, 2n]]);
+  env.state.eReplicas.values().next().value!.state.accounts.get(ENTITY_B)!.state.deltas = new Map([
+    [1, { collateral: 2n }],
+    [2, { collateral: 1n }],
+  ] as never);
+  // Internal value for token 1 is now 3, but the Depository still holds 6.
+  expect(calculateSolvency(env, undefined, totals).isValid).toBe(false);
 });
 
 /**
@@ -130,15 +96,6 @@ test('an unchecked asset reports no verdict rather than a green one', () => {
   expect(asset?.delta).toBeNull();
   expect(asset?.isValid).toBeNull();
   expect(solvency.isValid).toBeNull();
-
-  const previousScopes = process.env['XLN_LOG_SCOPES'];
-  process.env['XLN_LOG_SCOPES'] = 'test-suppressed';
-  try {
-    expect(() => verifySolvency(env, 'unchecked')).toThrow('no on-chain totals supplied');
-  } finally {
-    if (previousScopes === undefined) delete process.env['XLN_LOG_SCOPES'];
-    else process.env['XLN_LOG_SCOPES'] = previousScopes;
-  }
 });
 
 test('partial on-chain totals never produce a green aggregate verdict', () => {
@@ -158,9 +115,6 @@ test('partial on-chain totals never produce a green aggregate verdict', () => {
   expect(solvency.byAsset.get(tokenOneKey)?.isValid).toBe(true);
   expect(solvency.byAsset.get(tokenTwoKey)?.isValid).toBeNull();
   expect(solvency.isValid).toBeNull();
-  expect(() => verifySolvency(env, 'partial', totals)).toThrow(
-    `incomplete on-chain totals; missing ${tokenTwoKey}`,
-  );
 });
 
 test('a surplus in one token never covers a deficit in another token', () => {
@@ -182,7 +136,6 @@ test('a surplus in one token never covers a deficit in another token', () => {
   expect(solvency.byAsset.get(`31337:${DEPOSITORY}:1`)?.delta).toBe(-1n);
   expect(solvency.byAsset.get(`31337:${DEPOSITORY}:2`)?.delta).toBe(1n);
   expect(solvency.isValid).toBe(false);
-  expectVerificationFailure(env, 'cross-token-cancellation', totals);
 });
 
 test('the same token id in two Depositories remains two independent assets', () => {

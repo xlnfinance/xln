@@ -210,7 +210,6 @@ export const ensureLiveJAdapterForReplica = async (
 export const rehydrateRestoredRuntimeInfra = async (
   env: RuntimeReplica,
   options: {
-    isBrowser: boolean;
     loadGossipProfiles: (env: RuntimeReplica) => Promise<void>;
     assertPersistedContractConfigReady: (env: RuntimeReplica, label: string) => void;
     assertBrowserVMJurisdiction: (

@@ -557,7 +557,7 @@ for (const [path, markers] of [
     ["createStructuredLogger('runtime.entity_inputs')", 'inputs.profile', 'replay.merged_input'],
   ],
   ['core/runtime/mempool/input-queue.ts', ["createStructuredLogger('runtime.input_queue')", 'interesting_entity_inputs']],
-  ['core/runtime/envelope/p2p-lifecycle.ts', ["createStructuredLogger('p2p.lifecycle')", 'detach.close_failed']],
+  ['core/runtime/envelope/p2p-lifecycle.ts', ["createStructuredLogger('p2p.lifecycle')", 'gossip.accepted']],
   ['core/network/relay/standalone-server.ts', ["createStructuredLogger('relay.standalone')", 'service.listen']],
   ['core/entity/consensus/input/merge.ts', ["createStructuredLogger('entity.input.merge')", 'frame.conflict']],
   ['core/entity/tx/handlers/account/index.ts', ["createStructuredLogger('account.handler')", 'ACCOUNT_INPUT_EMPTY']],
@@ -954,10 +954,6 @@ for (const [path, markers] of [
   [
     'core/__tests__/runtime/transport/runtime-ws-recovery.test.ts',
     ['standalone relay uses structured startup logging', 'relay.standalone'],
-  ],
-  [
-    'core/__tests__/runtime/observability/solvency-logging.test.ts',
-    ['solvency diagnostics use structured logging only', 'runtime.solvency'],
   ],
   [
     'core/__tests__/storage/runtime/runtime-storage-logging.test.ts',

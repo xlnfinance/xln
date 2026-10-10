@@ -4,19 +4,8 @@ import {
   getSignerPrivateKeyIfAvailable,
 } from '../../account/crypto.ts';
 import { extractEntityId, extractSignerId } from '../../protocol/identity';
-import { createStructuredLogger } from '../../support/logger.ts';
 import { normalizeRuntimeId } from '../../network/p2p/auth/runtime-id.ts';
 import type { RuntimeReplica } from '../types.ts';
-
-const identityLog = createStructuredLogger('runtime.identity');
-
-export const getRuntimeEnv = (env?: RuntimeReplica | null): RuntimeReplica | null => {
-  if (!env) {
-    identityLog.warn('env.missing');
-    return null;
-  }
-  return env;
-};
 
 export const deriveRuntimeId = (seed: string): string =>
   normalizeRuntimeId(deriveSignerAddressSync(seed, '1'));
