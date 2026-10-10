@@ -1249,6 +1249,7 @@ describe('storage frame journal retention', () => {
     const previousNodeEnv = process.env['NODE_ENV'];
     const previousSkip = process.env['XLN_STORAGE_SKIP_VERIFY_ON_OPEN'];
     const previousForce = process.env['XLN_STORAGE_FORCE_RESTORE'];
+    const previousWalSync = process.env['XLN_STORAGE_WAL_SYNC'];
     const previousSync = process.env['XLN_STORAGE_SYNC_WRITES'];
 
     try {
@@ -1269,7 +1270,15 @@ describe('storage frame journal retention', () => {
       await expect(loadEnvFromDB(runtimeId, seed)).rejects.toThrow(
         'STORAGE_SAFETY_OVERRIDE_FORBIDDEN_IN_PRODUCTION: flags=XLN_STORAGE_SYNC_WRITES',
       );
+      delete process.env['XLN_STORAGE_SYNC_WRITES'];
+      // The frame WAL fsync is XLN_STORAGE_WAL_SYNC; it used to be unguarded.
+      process.env['XLN_STORAGE_WAL_SYNC'] = '0';
+      await expect(loadEnvFromDB(runtimeId, seed)).rejects.toThrow(
+        'STORAGE_SAFETY_OVERRIDE_FORBIDDEN_IN_PRODUCTION: flags=XLN_STORAGE_WAL_SYNC',
+      );
     } finally {
+      if (previousWalSync === undefined) delete process.env['XLN_STORAGE_WAL_SYNC'];
+      else process.env['XLN_STORAGE_WAL_SYNC'] = previousWalSync;
       if (previousNodeEnv === undefined) delete process.env['NODE_ENV'];
       else process.env['NODE_ENV'] = previousNodeEnv;
       if (previousSkip === undefined) delete process.env['XLN_STORAGE_SKIP_VERIFY_ON_OPEN'];

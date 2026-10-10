@@ -17,6 +17,11 @@ export const assertStorageSafetyOverridesAllowed = (): void => {
   if (syncWrites === '0' || syncWrites === 'false' || syncWrites === 'off' || syncWrites === 'no') {
     blockedFlags.push('XLN_STORAGE_SYNC_WRITES');
   }
+  // The frame WAL fsync itself (storage/index.ts WAL_SYNC_ENABLED); load-test
+  // user Runtimes turn it off, a production Runtime never may.
+  if (String(runtimeProcessEnv?.['XLN_STORAGE_WAL_SYNC'] ?? '').trim() === '0') {
+    blockedFlags.push('XLN_STORAGE_WAL_SYNC');
+  }
 
   if (blockedFlags.length > 0) {
     throw new Error(`STORAGE_SAFETY_OVERRIDE_FORBIDDEN_IN_PRODUCTION: flags=${blockedFlags.join(',')}`);
