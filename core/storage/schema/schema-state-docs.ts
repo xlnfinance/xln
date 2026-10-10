@@ -348,12 +348,6 @@ export const validateStorageEntityCoreDocValue = (value: unknown): StorageEntity
   const doc = requireBoundaryRecord(value, code);
   requireExactBoundaryKeys(doc, ENTITY_REQUIRED, ENTITY_OPTIONAL, `${code}_FIELDS`);
   requireStorageString(doc['entityId'], `${code}_ENTITY_ID`);
-  if (
-    !/^0x[0-9a-f]{64}$/.test(
-      requireStorageString(doc['entityEncryptionPublicKey'], `${code}_ENTITY_ENCRYPTION_PUBLIC_KEY`),
-    )
-  )
-    throw new Error(`${code}_ENTITY_ENCRYPTION_PUBLIC_KEY`);
   requireBoundaryInteger(doc['height'], `${code}_HEIGHT`);
   requireBoundaryInteger(doc['timestamp'], `${code}_TIMESTAMP`);
   requireStorageMap(doc['nonces'], `${code}_NONCES`);
