@@ -40,16 +40,9 @@ export const validateDelta = (delta: unknown, source = 'unknown'): Delta => {
       errors.push(`${field} cannot be null/undefined, got: ${fieldValue}`);
       continue;
     }
+    // No numeric-string coercion: every decoder hands over real bigints, and
+    // converting here rewrote the caller's (possibly committed) Delta in place.
     if (typeof fieldValue === 'bigint') continue;
-    if (typeof fieldValue === 'string' && /^-?\d+n?$/.test(fieldValue)) {
-      try {
-        value[field] = BigInt(fieldValue.replace(/n$/, ''));
-        continue;
-      } catch {
-        errors.push(`${field} invalid BigInt string: ${fieldValue}`);
-        continue;
-      }
-    }
     errors.push(`${field} must be BigInt, got: ${typeof fieldValue} (${fieldValue})`);
   }
   for (const field of UNSIGNED_FIELDS) {

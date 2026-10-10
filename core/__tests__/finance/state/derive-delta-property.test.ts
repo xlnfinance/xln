@@ -321,3 +321,11 @@ describe('deriveDelta deterministic property invariants', () => {
     }
   });
 });
+
+test('a numeric string is not a Delta amount and the input is never rewritten', () => {
+  const input = { ...makeDelta({}), offdelta: '5' } as unknown as Delta;
+  expect(() => validateDelta(input, 'string-amount')).toThrow('offdelta must be BigInt, got: string (5)');
+  // The validator used to convert the string in place, silently rewriting the
+  // caller's Delta (deriveDelta validates live Account state).
+  expect(input.offdelta as unknown).toBe('5');
+});
