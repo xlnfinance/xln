@@ -26,6 +26,8 @@ export type Args = {
   custodyDaemonPort: number;
   custodyDbRoot: string;
   walletUrl: string;
+  /** Hub whose own disputes are never auto-finalized; set only by the E2E dispute stand. */
+  manualDisputeHub: string;
 };
 
 export type OrchestratorSocketType = 'relay' | 'market';

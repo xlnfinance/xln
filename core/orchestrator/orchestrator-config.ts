@@ -2,6 +2,7 @@ import { join, resolve } from 'node:path';
 import { normalizeLoopbackUrl } from '../network/p2p/loopback-url';
 import { readPositiveIntegerEnv } from '../config/environment';
 import { hasCliFlag, readCliOption } from '../config/cli';
+import { HUB_NAMES } from '../config/constants';
 import type { Args } from './orchestrator-types';
 import { relayAudienceFromWebUrl } from './mesh/relay-audience';
 
@@ -118,6 +119,10 @@ export const parseArgs = (): Args => {
     const raw = getArg(flag, index === 2 ? (process.env['ANVIL_RPC2'] || process.env['RPC_TRON'] || defaultRpcUrl) : defaultRpcUrl);
     rpcUrls[index] = raw ? normalizeLoopbackUrl(raw) : '';
   }
+  const manualDisputeHub = getArg('--manual-dispute-hub', '');
+  if (manualDisputeHub && !HUB_NAMES.includes(manualDisputeHub)) {
+    throw new Error(`MANUAL_DISPUTE_HUB_UNKNOWN:${manualDisputeHub}`);
+  }
   return {
     host,
     port,
@@ -139,5 +144,6 @@ export const parseArgs = (): Args => {
     custodyDaemonPort: Number(getArg('--custody-daemon-port', String(port + 8))),
     custodyDbRoot: resolve(getArg('--custody-db-root', join(dbRoot, 'custody'))),
     walletUrl: getArg('--wallet-url', `https://localhost:${port + 4}/app`),
+    manualDisputeHub,
   };
 };

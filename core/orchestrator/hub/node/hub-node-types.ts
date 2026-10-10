@@ -20,6 +20,7 @@ export type HubNodeArgs = {
   supportPeerIdentitiesJson: string;
   dbPath: string;
   deployTokens: boolean;
+  manualDisputeFinalize: boolean;
 };
 
 export type HubPairHealth = {

@@ -292,6 +292,7 @@ const parseArgs = (): HubNodeArgs => {
     supportPeerIdentitiesJson: getArg('--support-peer-identities-json', '[]'),
     dbPath: getArg('--db-path', ''),
     deployTokens: hasFlag('--deploy-tokens'),
+    manualDisputeFinalize: hasFlag('--manual-dispute-finalize'),
   };
 };
 
@@ -870,8 +871,7 @@ const bootstrapHubEntity = async (
     routingFeePPM: 1,
     baseFee: 0n,
     swapTakerFeeBps: 1,
-    disputeAutoFinalizeMode:
-      resolvedArgs.name.toLowerCase() === 'h2' ? 'ignore' : 'auto',
+    disputeAutoFinalizeMode: resolvedArgs.manualDisputeFinalize ? 'ignore' : 'auto',
     rebalanceLiquidityFeeBps: 1n,
     rebalanceTimeoutMs: 10 * 60 * 1000,
     relayUrl: resolvedArgs.relayUrl,

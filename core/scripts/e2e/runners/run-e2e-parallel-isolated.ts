@@ -1991,6 +1991,10 @@ const runShard = async (
         '--wallet-url',
         `${webUrl}/app`,
         '--allow-reset',
+        // tests/e2e-dispute.spec.ts observes an active dispute against H2
+        // before its timeout; a hub that auto-finalizes would close it first.
+        '--manual-dispute-hub',
+        'H2',
         ...(args.prewaitHealth === 'reset' ? ['--defer-initial-reset'] : []),
         ...(task.requireMarketMaker ? ['--mm'] : []),
         ...(task.requireCustody ? [

@@ -33,7 +33,7 @@ type RustIdentity = ReturnType<typeof deriveManagedEntityIdentity>;
 type LeaseManager = ReturnType<typeof createManagedRuntimeLeaseManager>;
 
 export type HubSpawnerDeps = {
-  args: Pick<Args, 'host' | 'publicWsBaseUrl' | 'rpcUrl' | 'rpcUrls'>;
+  args: Pick<Args, 'host' | 'publicWsBaseUrl' | 'rpcUrl' | 'rpcUrls' | 'manualDisputeHub'>;
   relayUrl: string;
   shardJurisdictionsPath: string;
   orchestratorOwnerId: string;
@@ -171,6 +171,7 @@ const buildHubInvocation = (child: HubChild, deps: HubSpawnerDeps): HubInvocatio
     '--db-path',
     child.dbPath,
     ...(child.deployTokens ? ['--deploy-tokens'] : []),
+    ...(child.name === deps.args.manualDisputeHub ? ['--manual-dispute-finalize'] : []),
   ];
   const rustIdentity =
     child.engine === 'rust'

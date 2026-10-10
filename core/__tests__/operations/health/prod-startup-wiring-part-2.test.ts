@@ -1468,6 +1468,19 @@ describe('production startup wiring', () => {
     expect(reserveBootstrap).not.toContain('catalog.slice(0, HUB_REQUIRED_TOKEN_COUNT)');
   });
 
+  test('every hub auto-finalizes its disputes unless the E2E dispute stand opts one out', () => {
+    const hubNode = readFileSync(join(repoRoot, 'core/orchestrator/hub-node.ts'), 'utf8');
+    const hubSpawn = readFileSync(join(repoRoot, 'core/orchestrator/process/spawn/hub.ts'), 'utf8');
+    const isolatedRunner = readFileSync(join(repoRoot, 'core/scripts/e2e/runners/run-e2e-parallel-isolated.ts'), 'utf8');
+    expect(hubNode).not.toContain("resolvedArgs.name.toLowerCase() === 'h2'");
+    expect(hubNode).toContain("disputeAutoFinalizeMode: resolvedArgs.manualDisputeFinalize ? 'ignore' : 'auto',");
+    expect(hubSpawn).toContain("...(child.name === deps.args.manualDisputeHub ? ['--manual-dispute-finalize'] : []),");
+    expect(isolatedRunner).toContain("'--manual-dispute-hub',\n        'H2',");
+    for (const productionLauncher of ['scripts/operations/start-server.sh', 'scripts/dev/run-dev-child.sh']) {
+      expect(readFileSync(join(repoRoot, productionLauncher), 'utf8')).not.toContain('--manual-dispute-hub');
+    }
+  });
+
   test('hub mesh bootstrap uses live entity jurisdiction and provisions the external faucet by default', () => {
     const hubNode = readFileSync(join(repoRoot, 'core/orchestrator/hub-node.ts'), 'utf8');
     const driveStart = hubNode.indexOf('const advanceHubMeshBootstrap = async (');
