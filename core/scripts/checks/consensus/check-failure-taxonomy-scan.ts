@@ -641,7 +641,7 @@ for (const [path, markers] of [
     ["createStructuredLogger('runtime.jurisdiction_loader')", 'JURISDICTIONS_CONFIG_MISSING', 'decodeJurisdictionsData',
       'JURISDICTIONS_BROWSER_FETCH_FAILED', 'JURISDICTIONS_BROWSER_CONFIG_INVALID'],
   ],
-  ['core/api/runtime-adapter/server.ts', ["createStructuredLogger('runtime.radapter')", 'response_too_large']],
+  ['core/api/runtime-adapter/session/context.ts', ["createStructuredLogger('runtime.radapter')", 'response_too_large']],
   ['core/orchestrator/proxy.ts', ['classifyRuntimeTransportFailure', 'failure,']],
   [
     'core/runtime/j-submit/j-submit.ts',
@@ -835,10 +835,14 @@ assertNotIncludes(externalWalletApi, 'console.', externalWalletApiPath);
 assertNotIncludes(externalWalletApi, '[EXT-FAUCET/', externalWalletApiPath);
 assertNotIncludes(externalWalletApi, '[EXT-WALLET/', externalWalletApiPath);
 
-const runtimeAdapterServerPath = 'core/api/runtime-adapter/server.ts';
-const runtimeAdapterServer = readText(runtimeAdapterServerPath);
-assertNotIncludes(runtimeAdapterServer, 'console.', runtimeAdapterServerPath);
-assertNotIncludes(runtimeAdapterServer, '[RADAPTER] RESPONSE_TOO_LARGE', runtimeAdapterServerPath);
+for (const runtimeAdapterServerPath of [
+  'core/api/runtime-adapter/server.ts',
+  'core/api/runtime-adapter/session/context.ts',
+]) {
+  const runtimeAdapterServer = readText(runtimeAdapterServerPath);
+  assertNotIncludes(runtimeAdapterServer, 'console.', runtimeAdapterServerPath);
+  assertNotIncludes(runtimeAdapterServer, '[RADAPTER] RESPONSE_TOO_LARGE', runtimeAdapterServerPath);
+}
 
 for (const jBatchHandlerPath of [
   'core/entity/tx/handlers/j-batch/r2r.ts',

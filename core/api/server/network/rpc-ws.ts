@@ -17,7 +17,8 @@ import {
   readPersistedStorageHead,
   submitCrossJurisdictionIntent,
 } from '../../../runtime.ts';
-import { handleRuntimeAdapterMessage, type RuntimeAdapterServerDeps } from '../../runtime-adapter/server';
+import { handleRuntimeAdapterMessage } from '../../runtime-adapter/server';
+import type { RuntimeAdapterServerDeps } from '../../runtime-adapter/session/context';
 import { RuntimeAdapterError } from '../../runtime-adapter/errors';
 import { resolveRuntimeAdminControl } from '../control/runtime-admin';
 import type {

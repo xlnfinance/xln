@@ -362,12 +362,15 @@ test('runtime adapter solvency-summary rejects historical substitution until a p
 });
 
 test('runtime adapter server diagnostics use structured logging only', () => {
-  const source = readFileSync(new URL('../../../api/runtime-adapter/server.ts', import.meta.url), 'utf8');
+  const source = readFileSync(new URL('../../../api/runtime-adapter/session/context.ts', import.meta.url), 'utf8');
 
   expect(source).toContain("createStructuredLogger('runtime.radapter')");
   expect(source).toContain('response_too_large');
-  expect(source).not.toContain('[RADAPTER] RESPONSE_TOO_LARGE');
-  expect(source).not.toContain('console.');
+  for (const file of ['server.ts', 'session/context.ts']) {
+    const text = readFileSync(new URL(`../../../api/runtime-adapter/${file}`, import.meta.url), 'utf8');
+    expect(text).not.toContain('[RADAPTER] RESPONSE_TOO_LARGE');
+    expect(text).not.toContain('console.');
+  }
 });
 
 test('runtime adapter capability tokens are scoped by level', () => {

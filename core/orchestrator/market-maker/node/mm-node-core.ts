@@ -59,7 +59,7 @@ import {
 import { hasCrossJurisdictionBookOrder } from '../../../orderbook/cross-j';
 import { compareStableText, safeStringify } from '../../../protocol/serialization';
 import { registerRuntimeAdapterAuthSeed } from '../../../api/runtime-adapter/security/auth';
-import { type RuntimeAdapterSocket } from '../../../api/runtime-adapter/server';
+import { type RuntimeAdapterSocket } from '../../../api/runtime-adapter/session/context';
 import { enqueueRuntimeInput, getP2P } from '../../../runtime';
 import type { AccountReplica, SwapOffer } from '../../../types/account';
 import type { CrossJurisdictionSwapRoute } from '../../../types/cross-jurisdiction';

@@ -10,8 +10,8 @@ import { resolveRuntimeAdapterRead } from '../../api/runtime-adapter/resolve';
 import {
   closeInvalidRuntimeAdapterMessage,
   handleRuntimeAdapterMessage,
-  type RuntimeAdapterSocket,
 } from '../../api/runtime-adapter/server';
+import type { RuntimeAdapterSocket } from '../../api/runtime-adapter/session/context';
 import { assertRuntimeEntityInputsEnvelopeSource, signRuntimeEntityInputsEnvelope } from '../../runtime/admit/entity-input-envelope-auth.ts';
 import {
   enqueueRuntimeInput,
