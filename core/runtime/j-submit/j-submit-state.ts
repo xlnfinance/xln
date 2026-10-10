@@ -195,12 +195,15 @@ export const completedJSubmitAttempt = (env: RuntimeReplica, jTx: JTx): boolean 
   return local?.lastResultAttemptId === id || Object.prototype.hasOwnProperty.call(local?.resultFingerprints ?? {}, id);
 };
 
+/** An unsigned attempt whose preparation task is running: that task owns its result. */
+export const hasInFlightJPreparation = (env: RuntimeReplica, tx: JTx): boolean =>
+  tx.type === 'batch' && !tx.data.runtimeSubmitAttempt?.rawTransaction
+  && Boolean(env.infrastructure?.jPreparationTasks?.has(tx.data.runtimeSubmitAttempt?.attemptId ?? ''));
+
 export const hasReadyCommittedJOutbox = (env: RuntimeReplica, now: number): boolean => {
   for (const input of env.infrastructure?.pendingCommittedJOutbox ?? []) {
     for (const tx of input.jTxs) {
-      if (completedJSubmitAttempt(env, tx)) continue;
-      if (tx.type === 'batch' && !tx.data.runtimeSubmitAttempt?.rawTransaction
-        && env.infrastructure?.jPreparationTasks?.has(tx.data.runtimeSubmitAttempt?.attemptId ?? '')) continue;
+      if (completedJSubmitAttempt(env, tx) || hasInFlightJPreparation(env, tx)) continue;
       if (!isGovernanceJTx(tx) || governanceAttemptIsDue(tx, now)) return true;
     }
   }

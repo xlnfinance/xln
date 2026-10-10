@@ -189,6 +189,37 @@ describe('durable validator-local J submit state', () => {
     expect(collectDueJSubmitRuntimeTxs(env, env.state.timestamp)).toHaveLength(1);
   });
 
+  test('an in-flight preparation alone owns its attempt result, even behind an event barrier', async () => {
+    // A non-first preparation is not awaited. Re-driving its attempt while J
+    // events were queued recorded an event barrier, and the task's later
+    // preflight result for the same attempt halted on DUPLICATE_CONFLICT.
+    const { env, jOutbox } = await commitAttempt();
+    const batch = jOutbox[0]?.jTxs[0];
+    if (batch?.type !== 'batch' || !batch.data.runtimeSubmitAttempt) throw new Error('unsigned attempt fixture missing');
+    ensureRuntimeInfrastructure(env).jPreparationTasks = new Map([
+      [batch.data.runtimeSubmitAttempt.attemptId, new Promise<void>(() => {})],
+    ]);
+    env.runtimeMempool!.entityInputs.push({ entityId, signerId, entityTxs: [{ type: 'j_event', data: {} as never }] });
+    let submitCalls = 0;
+    installSubmitAdapter(env, {
+      mode: 'rpc',
+      pollNow: async () => {},
+      submitTx: async () => {
+        submitCalls += 1;
+        return { success: true, events: [] };
+      },
+    } as unknown as JAdapter);
+    const queued: Parameters<typeof applyRuntimeTx>[1][] = [];
+
+    await submitRuntimeJOutbox(env, jOutbox, {
+      enqueueRuntimeInputs: (_target, _inputs, runtimeTxs) => queued.push(...(runtimeTxs ?? [])),
+    });
+
+    expect(queued).toEqual([]);
+    expect(submitCalls).toBe(0);
+    expect(hasReadyCommittedJOutbox(env, env.state.timestamp)).toBe(false);
+  });
+
   test('authenticated J input arriving during a failed submit defers failure classification', async () => {
     const { env, replica, jOutbox } = await commitAttempt();
     let pollCalls = 0;

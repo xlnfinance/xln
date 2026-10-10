@@ -19,6 +19,7 @@ import { createStructuredLogger, shortId } from '../../support/logger';
 import {
   completedJSubmitAttempt,
   findJSubmitReplica,
+  hasInFlightJPreparation,
   isMatchingJSubmitBatch,
   makeJSubmitResultRuntimeTx,
 } from './j-submit-state';
@@ -324,6 +325,9 @@ const collectActiveJTxs = (
 ): JTx[] =>
   jInput.jTxs.filter(jTx =>
     !completedJSubmitAttempt(env, jTx) &&
+    // A non-first preparation is not awaited and may still queue its own
+    // preflight result; a barrier or reconcile result here would conflict.
+    !hasInFlightJPreparation(env, jTx) &&
     !hasQueuedJSubmitResult(env, jTx) &&
     !reconcileDurablyAbortedBatch(env, deps, jInput.jurisdictionName, jTx) &&
     !reconcileDurablyStaleEntityProviderAction(env, deps, jInput.jurisdictionName, jTx) &&
