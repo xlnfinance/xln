@@ -17,7 +17,7 @@ Sepolia ETH to a fresh independent signer, with both receipts checked.
 Public startup blockers fixed: exact four-address import projection; full-block
 receipt retrieval in place of per-transaction RPC fan-out; fee-sized faucet gas
 grants. Receipt tests: 18/18, 585 assertions. Faucet tests: 24/24, 110 assertions.
-Last full check: 38 source gates, 26.923s; external-wallet API 20/20, 90 assertions.
+Last full check: 38 source gates, 25.991s; external-wallet API 20/20, 90 assertions.
 The wallet now reads token metadata from its selected network; both HTTP entry
 points pass the required request through the catalog handler. Public malformed
 Entity scope changed from an incorrect 200 to a typed 400. The proxy selects the explicitly
@@ -28,8 +28,8 @@ Current boundary: public browser wallet tab 21 awaits the owner entering a local
 password (required handoff under the browser tool policy). No password is known
 or requested in chat. UI render/network detection and console checks pass; do
 not claim its authenticated payment/reload flow passed yet. The CLI Runtime
-flow is separate evidence. Public alpha is not mainnet acceptance: integrated
-TS release vectors, lending completion and valid load gates remain open. Existing
+flow is separate evidence. Public alpha is not mainnet acceptance: the full
+release profile, lending completion and valid load gates remain open. Existing
 unrelated/unfinished Rust edits stay unstaged. Rust is not the public alpha engine.
 
 Public offline watchtower exit passed with a separate 1-USDT Account: the daemon
@@ -59,6 +59,31 @@ proof scripts without inspecting their persisted receipt guards. Operator keys
 and the cold backup are outside the repository under protected local/server
 configuration directories. The public faucet and contract tokens have no real
 monetary value.
+
+Post-alpha verification: the complete current TS runtime family passed in four
+disjoint sequential groups: 79 files, 690 tests, 4,141 assertions, zero failures.
+Each group exited 0 under the stand lock. The real-clock tower case passed
+unchanged in 46.69s. Earlier interrupted commands used the unsupported
+`--timeout-ms=60000` spelling and hit the default 30s limit; they are not green
+evidence. Always pass `--timeout-ms 60000` to this launcher.
+The first real gate defect was a reference to a test deleted in August: Bun
+silently ignored `tests/unit/resetdb-guard.test.ts`. The gate now rejects absent
+paths before execution. The regression failed in all three profiles, then passed
+9 tests / 73 assertions. Evidence: `docs/evidence/sepolia-20261011/ts-runtime-gate.json`.
+
+Additional current gates passed: 260 Solidity tests; bilateral simultaneous
+proposal/reload (Runtime height 27, Account heights 12, no pending frames);
+RPC settlement parity (123 transferred, three exact receipt/refetched events);
+static security audit pack; WAL restore; watchtower backup/restart smoke; and
+flow-marker coverage. Marker coverage is not executed browser E2E, and these
+individual gates do not certify the complete release profile or mainnet.
+
+The old localhost preview was gracefully stopped to free the single heavy stand.
+Both Anvil dumps and a cold backup of J/R state, metadata and operator secrets
+are outside Git under `/Users/zigota/.config/xln/owner-preview-20261011/`.
+Backup SHA-256: `efd242b74f3d95ee11270c6e1dca2e0ede170441de7f056ec82ba837a634b2bd`.
+Original data remains at `db/owner-preview-20261011`. Do not restart it with
+`bun run dev`, which deliberately resets JDB/RDB. Public Sepolia stayed online.
 
 Public funding is resolved: the existing project deployer's key was available in
 macOS Keychain under its lowercase account address. A chain-11155111-guarded
@@ -177,9 +202,9 @@ The current TS lending vector passes with partial repayment and signed expiry;
 Rust authorization is now exact, but disbursement and later steps are not parity-proven.
 Do not include that work or the six foreign Rust files in the UI checkpoint.
 
-## Current SHA
+## Earlier code checkpoints
 
-Latest UI checkpoint: `f9f5388cc`, main, 2026-10-11; funding fix follows.
+Historical UI checkpoint: `f9f5388cc`, main, 2026-10-11; funding fix follows.
 Book checkpoint: `cd345aafd`.
 The three books now have sibling `paybook`, `swapbook`, `lendbook` module paths in
 TypeScript and Rust; retired directories and imports are removed. Full check
@@ -223,7 +248,7 @@ Credit limits bound unsecured risk. Only collateral secures recovery. Testnet ke
 management/funding/deployment is authorized. Mainnet is open participation; exact
 build promotion and mainnet signatures remain owner-controlled.
 
-## Last green command
+## Earlier partial-repayment checks
 
 Latest: `bun run check` -> `.logs/crisis-20261011/reserve-evidence-check.log`;
 65 focused tests -> `.logs/crisis-20261011/reserve-evidence-related.log`;
@@ -289,8 +314,8 @@ mismatch after 77 tests. Its first difference is dispute ProofBody hashing:
 read-only reconstruction proves the frozen vector uses the old three-component
 stock batch ABI; current production has the fourth loans component. Financial
 roots match at the first boundary. Frozen native vectors are now excluded from TS
-launch discovery; their direct tests remain red. The corrected integrated TS
-boundary still needs execution with the stand free.
+launch discovery; their direct tests remain red. The corrected TS runtime family
+now passes all 79 existing files; the full release profile remains incomplete.
 
 The prior 1,000-user stand committed 20,000 payments with zero pending ACKs but
 needed 26,183ms against the 25,000ms acceptance window. No valid TPS claim.
@@ -305,32 +330,18 @@ Durable evidence index: `docs/evidence/crisis-20261011.json`.
 
 ## Next single command
 
-`bun run stand:status` before any heavy work; the owner preview currently holds it.
-Next: check the submitted faucet receipt if the owner completes the prepared claim;
-then deploy current Sepolia bytecode and prove real-clock exit. Guided-demo reload
-and the corrected integrated runtime boundary remain unverified on this candidate.
-The owner also delegates demand-rate design: prospective
-variable rates, earned interest preserved, one signed accrual mechanism.
+Check the stand with `bun run stand:status` before heavy work. The local preview
+was preserved and stopped, freeing the stand. Continue the remaining release
+profile, then the missing demand-savings product. Deployment and offline defense
+have receipts; do not redeploy or repeat funding. Personal browser reload remains
+unverified pending password handoff. The owner delegates demand-rate design:
+prospective variable rates, earned interest preserved, one signed accrual mechanism.
 Do not repeat unchanged green gates without a new concern.
-
-Sepolia runner: `/Users/zigota/.config/xln/sepolia-deployer/run.ts`.
-Address `0x4a009FaaA692DE8f66d70b53E785Ae0f7a307902`; key stays in macOS Keychain.
-After funding, current-bytecode dry-run, deploy, secured exit and debt proof.
-The owner answered the CAPTCHA confirmation with an instruction to complete
-funding autonomously. Ghostchain verification completed and its UI reported
-success, but receipt `0x77e02ca76d2a1b929ad16a849968e326125c1c2b085671e0354af7f60ab88a1e`
-has status 0: the faucet sent 21,000 gas; the current RPC estimate is 207,391.
-Balance remains zero. The PoW faucet verification also completed, then rejected
-the connection as a hosting IP range. No mining started; no restriction bypassed.
-Zalalena image input hit a browser coordinate limitation; Google/Metana require
-a login absent from the current session. Do not retry these unchanged failures.
-Quicknode's revised FAQ says no mainnet balance is needed, but its UI still
-rejects this empty signer. Latest check at the partial-repayment checkpoint still
-shows 0 ETH on chain 11155111; `partial-sepolia-status.log`. No public deployment.
 
 ## Remaining final gates
 
-Demand savings, book refactor/financial parity, integrated TS release vectors, valid 1,000-user
-live load; funded public Sepolia current-bytecode identity and three real-clock
-exit paths including an offline-wallet watchtower; immutable tested source/config/
-artifacts and recovery/rollback package. Local checkpoints are not release candidates.
+Demand savings, native financial parity, the rest of the integrated release profile,
+personal-wallet browser lifecycle, valid 1,000-user live load, required topology
+and soak, and final immutable candidate/rollback evidence. Public Sepolia alpha,
+secured/unsecured exits, offline watchtower defense and the TS runtime family now
+have evidence; none of them alone establishes mainnet acceptance.

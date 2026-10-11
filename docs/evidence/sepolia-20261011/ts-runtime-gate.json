@@ -1,0 +1,251 @@
+{
+  "recordedAt": "2026-10-11T19:43:21.276Z",
+  "productionSource": "f62e86dc42a74850db2005cf671cc72411789aff",
+  "verificationBase": "8571af76ecd5ad805b827e256f01e6281fac4f82",
+  "scope": "Complete TS runtime core test family, executed in disjoint sequential groups under the machine stand lock; not the complete gate:release profile.",
+  "firstFailure": {
+    "kind": "missing planned test silently ignored by Bun",
+    "path": "tests/unit/resetdb-guard.test.ts",
+    "regressionBefore": {
+      "passed": 6,
+      "failed": 3
+    },
+    "regressionAfter": {
+      "passed": 9,
+      "failed": 0,
+      "assertions": 73
+    }
+  },
+  "coverage": {
+    "files": 79,
+    "tests": 690,
+    "assertions": 4141,
+    "failures": 0,
+    "duplicateFiles": 0
+  },
+  "runs": [
+    {
+      "log": ".logs/crisis-20261011/ts-watchtower-real-clock-release-final.log",
+      "sha256": "e261f581ab31d27492e1d4154e9c02f86f6d2cce88b439de13834930a73df4d2",
+      "tests": 2,
+      "assertions": 129,
+      "fileCount": 1,
+      "durationSeconds": 46.69,
+      "files": [
+        "core/__tests__/security/watchtower/watchtower-rpc-last-resort.test.ts"
+      ]
+    },
+    {
+      "log": ".logs/crisis-20261011/ts-runtime-family-final-0.log",
+      "sha256": "fa01722921598ea585f169aa35a03c6cc761096fa46d157b080ade72dadcc39a",
+      "tests": 154,
+      "assertions": 850,
+      "fileCount": 24,
+      "durationSeconds": 27.71,
+      "files": [
+        "native/__tests__/lazy-entity-id.test.ts",
+        "native/__tests__/desktop-security.test.ts",
+        "core/__tests__/registration/numbered/tron-registration-replacement.test.ts",
+        "core/__tests__/payments/hash-ladder/hash-ladder-single-shot.test.ts",
+        "core/__tests__/security/watchtower/watchtower-restart-resilience.test.ts",
+        "core/__tests__/security/authority/transformer-ordering.test.ts",
+        "core/__tests__/jurisdiction/submission/tron-signed-transaction.test.ts",
+        "core/__tests__/network/p2p/p2p-direct-policy.test.ts",
+        "core/__tests__/network/p2p/p2p-connect-idempotent.test.ts",
+        "core/__tests__/network/relay/relay-router.test.ts",
+        "core/__tests__/operations/health/native-server-jurisdiction.test.ts",
+        "core/__tests__/storage/durability/lending-real-crash-recovery.test.ts",
+        "core/__tests__/storage/recovery/storage-crash-recovery.test.ts",
+        "core/__tests__/testing/audit/audit-failfast-regressions-part-6.test.ts",
+        "core/__tests__/cross-j/swap/cross-jurisdiction-swap-part-2a.test.ts",
+        "core/__tests__/cross-j/swap/cross-jurisdiction-security.test.ts",
+        "core/__tests__/cross-j/swap/cross-jurisdiction-swap-part-1.test.ts",
+        "core/__tests__/cross-j/invariants/cross-j-usd-cap.test.ts",
+        "core/__tests__/cross-j/invariants/cross-j-status-validation.test.ts",
+        "core/__tests__/finance/lending/loan-covenant.test.ts",
+        "core/__tests__/orchestrator/recovery/orchestrator-reset-guard.test.ts",
+        "core/__tests__/orchestrator/health/orchestrator-health-model.test.ts",
+        "core/__tests__/jurisdiction/adapter/tron/tron-broadcast.test.ts",
+        "core/__tests__/jurisdiction/submission/recovery/j-submit-crash-recovery.test.ts"
+      ]
+    },
+    {
+      "log": ".logs/crisis-20261011/ts-runtime-family-final-1.log",
+      "sha256": "0b6b4b1ec3f2a9177e890dd34f604bccad8896ae5e47fc4d0e42a65159f616ab",
+      "tests": 287,
+      "assertions": 1371,
+      "fileCount": 28,
+      "durationSeconds": 26.82,
+      "files": [
+        "native/__tests__/watchtower-recovery-flow.test.ts",
+        "native/__tests__/native-build-options.test.ts",
+        "tests/frontend/move/external-recipient.test.ts",
+        "core/__tests__/registration/numbered/tron-registration-finality.test.ts",
+        "core/__tests__/payments/settlement/pull-registry-settlement.test.ts",
+        "core/__tests__/payments/hash-ladder/hash-ladder-finalize-cobatch.test.ts",
+        "core/__tests__/payments/hash-ladder/hash-ladder-reveal-event-normalization.test.ts",
+        "core/__tests__/security/policy/terminal-resource-bounds.test.ts",
+        "core/__tests__/jurisdiction/history/jreplica-state-root.test.ts",
+        "core/__tests__/storage/runtime/storage-canonical-hash.test.ts",
+        "core/__tests__/storage/history/storage-frame-journal-retention.test.ts",
+        "core/__tests__/testing/audit/audit-failfast-regressions-part-5.test.ts",
+        "core/__tests__/testing/audit/audit-failfast-regressions-part-2.test.ts",
+        "core/__tests__/testing/audit/audit-failfast-regressions-part-3.test.ts",
+        "core/__tests__/cross-j/swap/cross-jurisdiction-swap-part-3b.test.ts",
+        "core/__tests__/cross-j/swap/cross-jurisdiction-swap-part-1b.test.ts",
+        "core/__tests__/cross-j/invariants/cross-j-opening-fat-frame.test.ts",
+        "core/__tests__/cross-j/invariants/cross-j-outside-band-admission.test.ts",
+        "core/__tests__/cross-j/invariants/cross-j-sub-step-parity.test.ts",
+        "core/__tests__/cross-j/invariants/cross-j-sibling-dispute-fanout.test.ts",
+        "core/__tests__/cross-j/invariants/cross-j-boundary.test.ts",
+        "core/__tests__/cross-j/invariants/cross-j-dispute-output-authority.test.ts",
+        "core/__tests__/finance/lending/savings-covenant.test.ts",
+        "core/__tests__/finance/lending/savings-finality.test.ts",
+        "core/__tests__/jurisdiction/adapter/tron/tron-finality.test.ts",
+        "core/__tests__/jurisdiction/submission/recovery/j-submit-durability.test.ts",
+        "core/__tests__/jurisdiction/submission/recovery/j-submit-real-rpc-crash-recovery.test.ts",
+        "core/__tests__/storage/recovery/portable/cross-j-output-replay-route.test.ts"
+      ]
+    },
+    {
+      "log": ".logs/crisis-20261011/ts-runtime-family-final-2.log",
+      "sha256": "24a6701c619872f010edd6ccb74af37f6a83fcd6552d1214cb5569ab888c9801",
+      "tests": 247,
+      "assertions": 1791,
+      "fileCount": 26,
+      "durationSeconds": 27.09,
+      "files": [
+        "native/__tests__/native-deeplink.test.ts",
+        "native/__tests__/capacitor-config.test.ts",
+        "native/__tests__/extension-security.test.ts",
+        "core/__tests__/registration/numbered/numbered-registration-intent.test.ts",
+        "core/__tests__/registration/numbered/numbered-registration-rpc.test.ts",
+        "core/__tests__/payments/hash-ladder/hash-ladder-reveal-queue.test.ts",
+        "core/__tests__/security/dispute/proof-builder.test.ts",
+        "core/__tests__/entity/boundaries/entity-frame-j-broadcast-continuation.test.ts",
+        "core/__tests__/entity/tx/cross-j-pull-close-sealed-leaf.test.ts",
+        "core/__tests__/network/pathfinding/direct-runtime-bun.test.ts",
+        "core/__tests__/storage/recovery/runtime-recovery-timestamp.test.ts",
+        "core/__tests__/storage/recovery/persistence-inspect.test.ts",
+        "core/__tests__/testing/audit/audit-failfast-regressions-part-4.test.ts",
+        "core/__tests__/testing/audit/audit-failfast-regressions-part-1.test.ts",
+        "core/__tests__/cross-j/swap/cross-jurisdiction-swap-part-5.test.ts",
+        "core/__tests__/cross-j/swap/cross-jurisdiction-swap-part-2b.test.ts",
+        "core/__tests__/cross-j/swap/cross-jurisdiction-swap-part-4.test.ts",
+        "core/__tests__/cross-j/swap/cross-jurisdiction-order-id.test.ts",
+        "core/__tests__/cross-j/swap/cross-jurisdiction-swap-part-3.test.ts",
+        "core/__tests__/cross-j/invariants/cross-j-domain-parity.test.ts",
+        "core/__tests__/api/product/lending-api.test.ts",
+        "core/__tests__/finance/state/lending-funding.test.ts",
+        "core/__tests__/finance/state/lending.test.ts",
+        "core/__tests__/cross-j/swap/lifecycle/cross-jurisdiction-fill-progress.test.ts",
+        "core/__tests__/cross-j/swap/lifecycle/cross-jurisdiction-removal-ack-idempotence.test.ts",
+        "core/__tests__/cross-j/swap/lifecycle/cross-jurisdiction-expiry.test.ts"
+      ]
+    }
+  ],
+  "limitations": [
+    "The full release profile, browser personal-wallet lifecycle, demand savings, native parity and load/soak gates remain incomplete.",
+    "Earlier interrupted commands passed timeout with an unsupported equals spelling and were terminated at the default 30 seconds; they are not green evidence.",
+    "A duplicate concurrent frontend check caused ENOTEMPTY in the first final check; the sole canonical check then completed green. Do not run a parent check concurrently with its child build."
+  ],
+  "additionalGates": [
+    {
+      "name": "contracts",
+      "command": "bun run test:contracts:full",
+      "exitCode": 0,
+      "log": ".logs/crisis-20261011/release-contract-full.log",
+      "sha256": "aa5072fa8f8be6f235baf19067bbb55f4447f0d5c67a972db7c1e2af8d2f1a50",
+      "observations": {
+        "tests": 260
+      }
+    },
+    {
+      "name": "collision",
+      "command": "bun run test:consensus:collision",
+      "exitCode": 0,
+      "log": ".logs/crisis-20261011/release-account-collision.log",
+      "sha256": "2c697c71ea440d6df92c2e6064dd937abe289c53920875a318810372e6162db1",
+      "observations": {
+        "runtimeBefore": 27,
+        "runtimeAfter": 27,
+        "accountHeight": 12,
+        "pendingFrames": 0
+      }
+    },
+    {
+      "name": "settlement",
+      "command": "bun run test:rpc-settlement",
+      "exitCode": 0,
+      "log": ".logs/crisis-20261011/release-rpc-settlement.log",
+      "sha256": "81deffc6846c52a788858174a326b5063d29abe0267afc0d2846ca9925f932f0",
+      "observations": {
+        "amount": "123",
+        "senderBefore": "1000",
+        "senderAfter": "877",
+        "recipientBefore": "0",
+        "recipientAfter": "123",
+        "receiptEvents": 3,
+        "fetchedEvents": 3,
+        "equalEventHashes": true
+      }
+    },
+    {
+      "name": "staticSecurityPolicy",
+      "command": "bun run security:audit-pack",
+      "exitCode": 0,
+      "log": ".logs/crisis-20261011/release-security-pack.log",
+      "sha256": "fd91a9c7f56cc48ab50e8825cda9e082103532aa176e67290ecb37d539613e41",
+      "observations": {}
+    },
+    {
+      "name": "watchtowerBackupRestart",
+      "command": "bun run test:watchtower:smoke",
+      "exitCode": 0,
+      "log": ".logs/crisis-20261011/release-watchtower-smoke.log",
+      "sha256": "f4165de8a374304c138d77bacb4ad2a2c533d8567ea232c0141b184da412e9c5",
+      "observations": {}
+    },
+    {
+      "name": "walRestore",
+      "command": "bun run test:persistence:cli",
+      "exitCode": 0,
+      "log": ".logs/crisis-20261011/release-wal-smoke.log",
+      "sha256": "8841e526d5f1808917094ee539d36a57566a95f42b2024f1664d21e42960467b",
+      "observations": {
+        "checkpointHeight": 1,
+        "restoredHeight": 4,
+        "replicasBefore": 2,
+        "replicasAfter": 2
+      }
+    },
+    {
+      "name": "flowMarkers",
+      "command": "bun run test:e2e:coverage",
+      "exitCode": 0,
+      "log": ".logs/crisis-20261011/release-flow-coverage.log",
+      "sha256": "c4e32567e2043c99aac818a92849754cbaadc5a1499ced61a40fc4609c817aff",
+      "observations": {
+        "browserExecuted": false
+      }
+    }
+  ],
+  "harnessFiles": [
+    {
+      "file": "core/scripts/release/run-release-gate.ts",
+      "sha256": "3f054844b985f94021a8216607551e886dd1f549596dbeebcf930ac0224f1b61"
+    },
+    {
+      "file": "tests/release-integrity/release-gate-order.test.ts",
+      "sha256": "4277d55d5a34b8b6631e112d2c8090275f82296033bae6d5e97cc084ad6d7286"
+    }
+  ],
+  "finalCheck": {
+    "command": "bun run check",
+    "exitCode": 0,
+    "sourceGates": 38,
+    "sourceDurationMs": 25991,
+    "log": ".logs/crisis-20261011/post-alpha-final-check-serial.log",
+    "sha256": "545ef43fee0b9d877532d4652e43528e3ff20c90dcc9dd4b9ae0b94737b3f252"
+  }
+}

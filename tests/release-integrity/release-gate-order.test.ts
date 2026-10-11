@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 
 import { XLN_RELEASE_PATHS } from '../../tools/release-snapshot/scope.ts';
 
@@ -96,12 +96,20 @@ describe('release gate ordering', () => {
     test(`${profile} runs bank funding, covenants and crash recovery`, () => {
       const result = Bun.spawnSync({
         cmd: ['bun', 'core/scripts/release/run-release-gate.ts', `--profile=${profile}`, '--plan'],
-        cwd: process.cwd(), stdout: 'pipe', stderr: 'pipe',
+        cwd: process.cwd(),
+        stdout: 'pipe',
+        stderr: 'pipe',
       });
       expect(result.exitCode).toBe(0);
-      const command = result.stdout.toString().split('\n').map(line => line.trim())
+      const command = result.stdout
+        .toString()
+        .split('\n')
+        .map(line => line.trim())
         .find(line => line.startsWith('bun test core/__tests__'));
       const paths = command?.split(/\s+/).slice(2) ?? [];
+      // Bun treats explicit paths as filters and silently ignores a deleted
+      // test when another filter matches. A green partial run is not coverage.
+      expect(paths.filter(path => !existsSync(path))).toEqual([]);
       // Rust's frozen shared vectors use the previous proof ABI. They remain
       // separately runnable, but cannot certify or block the TS launch engine.
       expect(paths.some(path => path.startsWith('core/__tests__/rscore/'))).toBe(false);
@@ -114,7 +122,8 @@ describe('release gate ordering', () => {
         'core/__tests__/finance/lending/savings-finality.test.ts',
         'core/__tests__/storage/durability/lending-real-crash-recovery.test.ts',
         'core/__tests__/api/product/lending-api.test.ts',
-      ]) expect(paths.filter(path => path === required)).toEqual([required]);
+      ])
+        expect(paths.filter(path => path === required)).toEqual([required]);
     });
   }
 

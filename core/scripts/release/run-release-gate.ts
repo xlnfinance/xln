@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 
 import { spawn, type ChildProcessByStdio } from 'node:child_process';
-import { readdirSync } from 'node:fs';
+import { existsSync, readdirSync } from 'node:fs';
 import type { Readable } from 'node:stream';
 import { GATE_CHILD_PROCESS_DETACHED, terminateGateProcessGroup } from './gate-child-process';
 
@@ -102,7 +102,6 @@ const RUNTIME_CORE_TESTS = [
   'core/__tests__/orchestrator/recovery/orchestrator-reset-guard.test.ts',
   'core/__tests__/jurisdiction/history/jreplica-state-root.test.ts',
   'core/__tests__/storage/recovery/persistence-inspect.test.ts',
-  'tests/unit/resetdb-guard.test.ts',
   'core/__tests__/security/watchtower/watchtower-rpc-last-resort.test.ts',
   'core/__tests__/security/watchtower/watchtower-restart-resilience.test.ts',
   'core/__tests__/security/policy/terminal-resource-bounds.test.ts',
@@ -113,7 +112,12 @@ const RUNTIME_CORE_TESTS = [
   'native/__tests__/native-deeplink.test.ts',
   'native/__tests__/lazy-entity-id.test.ts',
   'native/__tests__/watchtower-recovery-flow.test.ts',
-].join(' ');
+]
+  .map(path => {
+    if (!existsSync(path)) throw new Error(`RELEASE_GATE_TEST_MISSING:${path}`);
+    return path;
+  })
+  .join(' ');
 
 const RELEASE_PATHS = XLN_RELEASE_PATHS.join(' ');
 
