@@ -70,6 +70,7 @@ const RUNTIME_CORE_TESTS = [
   'core/__tests__/finance/state/lending.test.ts',
   'core/__tests__/finance/state/lending-funding.test.ts',
   'core/__tests__/finance/lending/savings-covenant.test.ts',
+  'core/__tests__/finance/lending/demand-savings.test.ts',
   'core/__tests__/finance/lending/loan-covenant.test.ts',
   'core/__tests__/finance/lending/savings-finality.test.ts',
   'core/__tests__/storage/durability/lending-real-crash-recovery.test.ts',

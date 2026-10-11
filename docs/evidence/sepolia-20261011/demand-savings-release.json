@@ -1,0 +1,165 @@
+{
+  "recordedAt": "2026-10-11T20:46:26.338Z",
+  "source": "7c3f63f9841f4e8b61ac5eee5dbe4f9710b10621",
+  "url": "https://sepolia.xln.finance",
+  "chainId": 11155111,
+  "product": {
+    "savings": [
+      "fixed-term",
+      "demand"
+    ],
+    "demandRate": "prospective simple annual interest",
+    "signedCoverageMs": 31536000000,
+    "preserves": [
+      "principal",
+      "whole earned interest",
+      "fractional numerator"
+    ],
+    "renewal": "bank policy, bilateral Account signatures and accepted risk; no repricing after withdrawal request",
+    "offlineExpiry": "earnings stop at signed coverage end; principal and earned interest remain owed",
+    "solidityChanged": false
+  },
+  "validation": {
+    "financial": {
+      "passed": 122,
+      "failed": 0,
+      "assertions": 1103,
+      "files": 9,
+      "seconds": 26.3
+    },
+    "demandAccount": {
+      "passed": 6,
+      "assertions": 49
+    },
+    "crash": {
+      "processes": 4,
+      "sigkills": 3,
+      "exactRestore": true,
+      "finalSaverBalance": "10112",
+      "closedOnBothAccounts": true
+    },
+    "contract": {
+      "demandCases": 4,
+      "maximumGas": 368350,
+      "gasBudget": 5000000,
+      "orientations": 2,
+      "collateralShortage": true,
+      "debtorOffline": true
+    },
+    "browser": {
+      "passed": 1,
+      "seconds": 14.4,
+      "pageErrors": 0,
+      "consoleErrors": 0,
+      "flow": [
+        "fund",
+        "rate 500 to 200 bps",
+        "reload",
+        "unlock same wallet",
+        "withdraw"
+      ]
+    },
+    "sourceCheck": {
+      "command": "bun run check",
+      "exitCode": 0,
+      "sourceGates": 38,
+      "sourceSeconds": 26.476
+    }
+  },
+  "public": {
+    "systemOk": true,
+    "coreOk": true,
+    "dirty": false,
+    "account": {
+      "beforeHeight": 11,
+      "afterHeight": 11,
+      "tokensExact": true,
+      "tokens": [
+        {
+          "delta": {
+            "collateral": "25000000",
+            "leftCreditLimit": "0",
+            "leftHold": "0",
+            "offdelta": "25000000",
+            "ondelta": "0",
+            "rightCreditLimit": "0",
+            "rightHold": "0"
+          },
+          "hasDelta": true,
+          "hubGranted": "0",
+          "hubOutCapacity": "25000000",
+          "peerGranted": "0",
+          "tokenId": 1
+        }
+      ],
+      "mempool": 0,
+      "pendingFrame": null
+    },
+    "watchtower": {
+      "ok": true,
+      "sweep": {
+        "enabled": true,
+        "intervalMs": 12000,
+        "healthy": true,
+        "consecutiveFailures": 0
+      },
+      "stats": {
+        "lookupCount": 2,
+        "lastResortAppointmentCount": 1,
+        "actionReceiptCount": 11
+      }
+    },
+    "browser": {
+      "network": "Ethereum Sepolia · Connected",
+      "consoleErrors": 0,
+      "screenshot": ".logs/crisis-20261011/sepolia-7c3f63f98.png",
+      "personalWalletAuthenticationPending": true
+    },
+    "demandFundingExercisedOnPublicSepolia": false
+  },
+  "productionBundle": {
+    "archiveSha256": "9cfc4e0113b052bcdbc9017c9e26aa904b478f59b62b2ae1a10e93ba0eaadb7a",
+    "runtimeSha256": "993f7aa92a316d0a6edc9734533e406fedde01b74fa65185e26ac96d8b3eff09",
+    "servedRuntimeSha256": "993f7aa92a316d0a6edc9734533e406fedde01b74fa65185e26ac96d8b3eff09"
+  },
+  "coldBackup": {
+    "name": "7c3f63f98-cold.tgz",
+    "sha256": "53ab403956318e9bf026abfb72e819cec670770dd3ffd8357c8bb1f984026c52",
+    "protectedLocalAndServerCopies": true,
+    "includesSecrets": true,
+    "published": false
+  },
+  "logs": [
+    {
+      "path": ".logs/crisis-20261011/demand-release-commit-finance.log",
+      "sha256": "222049193f5a731de4e54dd63a681a1f4633934a0317ff0240c135b94c448acd"
+    },
+    {
+      "path": ".logs/crisis-20261011/demand-contract.log",
+      "sha256": "e93e1eecd29ec8407bec17bc1c4ed7731057e455ed13dc14dbb02f8ff5b0ef60"
+    },
+    {
+      "path": ".logs/crisis-20261011/demand-browser-final.log",
+      "sha256": "4668d854bac15f11cddc867b788d815a668067272298ece333eca970b85d211e"
+    },
+    {
+      "path": ".logs/crisis-20261011/demand-react-final/wallet-browser.log",
+      "sha256": "21b3ce49d4172110d9a4e05ab7edac9ab7835fac4ac805facb526c5d4611a02b"
+    },
+    {
+      "path": ".logs/crisis-20261011/demand-check-green.log",
+      "sha256": "46814a4af71df8c9a4a83364cc01220cbb9e06a4dce8ff342b33705fc829e0bf"
+    },
+    {
+      "path": ".logs/crisis-20261011/demand-rollout.log",
+      "sha256": "6811c95eefc277a01f69f1ca17b9c7a092703a998dc66d17d6bb6631df6579f5"
+    }
+  ],
+  "limits": [
+    "Testnet assets have no monetary value.",
+    "The personal public-origin wallet still needs owner password entry.",
+    "Local demand financial tests are not a public Sepolia demand flow.",
+    "Full release profile, valid live load and soak remain open.",
+    "Rust is not the deployed engine."
+  ]
+}

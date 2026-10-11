@@ -6,7 +6,7 @@ before resuming Rust book parity. Mainnet activation remains a separate exact-bu
 decision; a local Anvil wallet or test tokens are not real-value mainnet assets.
 
 Live public alpha: `https://sepolia.xln.finance`, immutable source
-`98cfbf3bfde2561e28ec0530ae50919cd45320f5`, TS only, one hub, Test USDT on
+`7c3f63f9841f4e8b61ac5eee5dbe4f9710b10621`, TS only, one hub, Test USDT on
 Sepolia 11155111. The normal production Runtime path passed external deposit
 100 -> collateral 100 -> payment 25 to the hub -> external withdrawal 75.
 Client restart preserved the identity and zero Account/reserve balances;
@@ -41,7 +41,7 @@ The first backup attempt named a nonexistent `main` directory and automatically
 restored the previous healthy release. The successful retry archives the actual
 whole state directory excluding prior backups. No contract or financial transfer
 changed. Evidence: `docs/evidence/sepolia-20261011/public-clock-rollout.json`.
-Next candidate adds demand savings through the existing signed Account covenant:
+The deployed candidate adds demand savings through the existing signed Account covenant:
 prospective annual rates, a one-year renewable coverage window, preserved whole
 and fractional earnings, and actual-time withdrawal. Renewal requires current
 bank policy and accepted Account risk; queued withdrawals keep their last signed
@@ -49,8 +49,28 @@ rate. The wallet exposes coverage expiry. No new Solidity or durable rate ledger
 Account regressions pass (6 tests / 49 assertions); production Depository demand
 exits pass (4 cases, both sides and collateral shortage, maximum gas 368,350).
 Four real Runtime processes and three SIGKILL boundaries preserve funding,
-rate amendment, queued withdrawal and final payout. Browser and final source
-gates are still in progress; this candidate is not deployed yet.
+rate amendment, queued withdrawal and final payout. Exact-commit financial set:
+122 tests / 1,103 assertions / nine files / 26.30s. The browser flow funds,
+changes 5% to 2%, reloads the same wallet and withdraws (14.4s, no page or console
+errors). The bank administration flow passes separately (13.0s). Full source
+check passes 38 source gates in 26.476s, plus frontend build and UI types.
+
+This public rollout holds new ingress during restart, then verifies the exact
+clean Git source before reopening. Account height 11 and all token deltas remain
+exact; no mempool or pending frame. Tower sweep is healthy and its offline
+appointment remains present. Served runtime bytes equal the production artifact.
+Cold backup `7c3f63f98-cold.tgz` is protected locally and on the server; SHA-256
+`53ab403956318e9bf026abfb72e819cec670770dd3ffd8357c8bb1f984026c52`.
+Evidence: `docs/evidence/sepolia-20261011/demand-savings-release.json`.
+Demand financial scenarios ran on real local Runtimes and the production
+Depository; this rollout did not originate a new public Sepolia demand deposit.
+
+Method review: finish each production boundary before expanding scope. Two
+nonfinancial blockers were removed: pure amount formatting no longer initializes
+the browser store, and the lending handler stays below the function-size limit.
+Keep the new demand regression in the integrated release profile. Next is the
+remaining full release profile, then valid live load/soak; do not mistake this
+public alpha or local browser evidence for mainnet acceptance.
 
 Current boundary: public browser wallet tab 21 awaits the owner entering a local
 password (required handoff under the browser tool policy). No password is known
