@@ -4,6 +4,7 @@ import { CopyId } from '../components/CopyId';
 import { TokenRow, AccountRow } from '../components/home/Balances';
 import { WalletScale } from '../components/home/WalletScale';
 import { BalanceDetails } from '../components/home/BalanceDetails';
+import { CreditDetails } from '../components/home/CreditDetails';
 import { TestMoney } from '../components/home/TestMoney';
 import { OpenAccountSheet } from '../components/home/OpenAccountSheet';
 import { EntitySwitcher } from '../components/EntitySwitcher';
@@ -25,6 +26,8 @@ export function Home() {
   const commandReady = useApp(s => s.commandReady);
   const entityId = useApp(s => s.activeEntityId);
   const places = useApp(s => s.places);
+  const scaleMode = useApp(s => s.scaleMode);
+  const setScaleMode = useApp(s => s.setScaleMode);
   const wallet = useWallet(entityId);
   const lending = useLendingBalance(wallet);
   const lendingUsd = [...lending.byToken].reduce((sum, [token, value]) => sum + usdOf(token, value), 0);
@@ -42,23 +45,34 @@ export function Home() {
   const balanceTokens = wallet.totals.filter(total => total.active || total.tokenId === 1);
   const balanceToken = balanceTokens.find(total => total.tokenId === selectedToken);
   const meta = balanceToken ? getTokenMeta(balanceToken.tokenId) : null;
-  const visibleNet = balanceToken ?
-    (places.onchain ? balanceToken.onchain : 0n) +
-    (places.reserve ? balanceToken.reserve : 0n) +
-    (places.accounts ? balanceToken.receivable + balanceToken.owed + (lending.byToken.get(balanceToken.tokenId) ?? 0n) : 0n) : 0n;
-  const visibleUsd = (places.onchain ? wallet.usd.onchain : 0) + (places.reserve ? wallet.usd.reserve : 0) + (places.accounts ? wallet.usd.receivable - wallet.usd.owed + lendingUsd : 0);
+  const visibleNet = balanceToken
+    ? (places.onchain ? balanceToken.onchain : 0n) +
+      (places.reserve ? balanceToken.reserve : 0n) +
+      (places.accounts
+        ? balanceToken.receivable + balanceToken.owed + (lending.byToken.get(balanceToken.tokenId) ?? 0n)
+        : 0n)
+    : 0n;
+  const visibleUsd =
+    (places.onchain ? wallet.usd.onchain : 0) +
+    (places.reserve ? wallet.usd.reserve : 0) +
+    (places.accounts ? wallet.usd.receivable - wallet.usd.owed + lendingUsd : 0);
   const lendingUnavailable = places.accounts && (lending.loading || Boolean(lending.error));
-  const money = (amount: bigint) => meta ? `${formatAmount(amount, meta.decimals, meta.decimals)} ${meta.symbol}` : '0';
+  const money = (amount: bigint) =>
+    meta ? `${formatAmount(amount, meta.decimals, meta.decimals)} ${meta.symbol}` : '0';
   const held = wallet.accounts.reduce(
     (sum, account) =>
-      sum + account.tokens.filter(token => token.tokenId === balanceToken?.tokenId)
+      sum +
+      account.tokens
+        .filter(token => token.tokenId === balanceToken?.tokenId)
         .reduce((amount, token) => amount + token.derived.outTotalHold, 0n),
     0n,
   );
-  const heldUsd = wallet.accounts.reduce((sum, account) => sum + account.tokens.reduce(
-    (value, token) => value + usdOf(token.tokenId, token.derived.outTotalHold), 0,
-  ), 0);
-  const pendingAmount = meta ? (held > 0n ? money(held) : '') : (heldUsd > 0 ? formatUsd(heldUsd) : '');
+  const heldUsd = wallet.accounts.reduce(
+    (sum, account) =>
+      sum + account.tokens.reduce((value, token) => value + usdOf(token.tokenId, token.derived.outTotalHold), 0),
+    0,
+  );
+  const pendingAmount = meta ? (held > 0n ? money(held) : '') : heldUsd > 0 ? formatUsd(heldUsd) : '';
 
   return (
     <WalletScale>
@@ -78,16 +92,27 @@ export function Home() {
         </span>
       </div>
       <section className="wallet-overview" aria-label="Your balance">
-        <span className="hero-label">
-          {places.onchain && places.reserve && places.accounts ? 'Total balance' : 'Selected balances'}
-        </span>
-        {<select className="input" style={{ width: 'auto', marginBottom: 8 }} aria-label="Balance asset" data-testid="home-balance-asset"
-          value={balanceToken?.tokenId ?? 0} onChange={event => setSelectedToken(Number(event.target.value))}>
-          <option value={0}>All assets · USD estimate</option>
-          {balanceTokens.map(token => <option key={token.tokenId} value={token.tokenId}>{getTokenMeta(token.tokenId).symbol}</option>)}
-        </select>}
+        <div className="wallet-balance-heading">
+          <span className="hero-label">
+            {places.onchain && places.reserve && places.accounts ? 'Total balance' : 'Selected balances'}
+          </span>
+          <select
+            className="wallet-asset-select"
+            aria-label="Balance asset"
+            data-testid="home-balance-asset"
+            value={balanceToken?.tokenId ?? 0}
+            onChange={event => setSelectedToken(Number(event.target.value))}
+          >
+            <option value={0}>All assets · USD estimate</option>
+            {balanceTokens.map(token => (
+              <option key={token.tokenId} value={token.tokenId}>
+                {getTokenMeta(token.tokenId).symbol}
+              </option>
+            ))}
+          </select>
+        </div>
         {wallet.frame && !lendingUnavailable ? (
-          <div className="display num" style={{ fontSize: 52, overflowWrap: 'anywhere' }} data-testid="home-total">
+          <div className="display num wallet-total" data-testid="home-total">
             {meta ? formatAmount(visibleNet, meta.decimals, meta.decimals) : formatUsd(visibleUsd)}
           </div>
         ) : (
@@ -97,10 +122,17 @@ export function Home() {
         )}
         {places.accounts && (lendingUsd !== 0 || lendingUnavailable) && (
           <div className="note" data-testid="home-lending-balance">
-            {lendingUnavailable ? 'Lending positions are being reconciled with your wallet.' : `Lending deposits minus loans: ${meta ? money(lending.byToken.get(balanceToken!.tokenId) ?? 0n) : formatUsd(lendingUsd)} · reported by your hub`}
+            {lendingUnavailable
+              ? 'Lending positions are being reconciled with your wallet.'
+              : `Lending deposits minus loans: ${meta ? money(lending.byToken.get(balanceToken!.tokenId) ?? 0n) : formatUsd(lendingUsd)} · reported by your hub`}
             {lending.error && <p role="alert">{lending.error}</p>}
-            <details><summary>How lending affects my balance</summary><p>{walletHelp.lendingBalance}</p></details>
-            <button className="more" type="button" onClick={() => navigate('/lend')}>View lending positions</button>
+            <details>
+              <summary>How lending affects my balance</summary>
+              <p>{walletHelp.lendingBalance}</p>
+            </details>
+            <button className="more" type="button" onClick={() => navigate('/lend')}>
+              View lending positions
+            </button>
           </div>
         )}
         {wallet.frame && places.accounts && (
@@ -116,8 +148,7 @@ export function Home() {
           </button>
         )}
       </section>
-      <TestMoney key={wallet.entityId} wallet={wallet} />
-      <div className="actions wallet-actions">
+      <div className="wallet-actions">
         <button
           type="button"
           className="btn primary"
@@ -129,7 +160,13 @@ export function Home() {
           <Icon name="pay" size={18} />
           Pay
         </button>
-        <button type="button" className="btn" onClick={() => navigate('/receive')} data-testid="home-receive" title={walletHelp.receive}>
+        <button
+          type="button"
+          className="btn"
+          onClick={() => navigate('/receive')}
+          data-testid="home-receive"
+          title={walletHelp.receive}
+        >
           <Icon name="receive" size={18} />
           Receive
         </button>
@@ -144,29 +181,52 @@ export function Home() {
           <Icon name="swap" size={18} />
           Swap
         </button>
+        <details className="wallet-more">
+          <summary>
+            More <Icon name="chevronDown" size={14} />
+          </summary>
+          <nav aria-label="All wallet functions">
+            {[
+              { to: '/move', label: 'Move', topic: 'move' },
+              { to: '/assets', label: 'Assets', topic: 'assets' },
+              { to: '/lend', label: 'Lending', topic: 'lending' },
+              { to: '/manage', label: 'Limits and disputes', topic: 'configure' },
+              { to: '/ownership', label: 'Ownership', topic: 'ownership' },
+              { to: '/activity', label: 'History', topic: 'history' },
+            ].map(action => (
+              <button
+                key={action.to}
+                type="button"
+                className="btn quiet sm"
+                title={walletHelp[action.topic]}
+                onClick={() => navigate(action.to)}
+              >
+                {action.label}
+              </button>
+            ))}
+          </nav>
+        </details>
       </div>
-      <nav className="actions" aria-label="All wallet functions" style={{ flexWrap: 'wrap', marginBottom: 12 }}>
-        {[
-          { to: '/move', label: 'Move', topic: 'move' },
-          { to: '/assets', label: 'Assets', topic: 'assets' },
-          { to: '/lend', label: 'Lending', topic: 'lending' },
-          { to: '/manage', label: 'Limits and disputes', topic: 'configure' },
-          { to: '/ownership', label: 'Ownership', topic: 'ownership' },
-          { to: '/activity', label: 'History', topic: 'history' },
-        ].map(action => <button key={action.to} type="button" className="btn quiet sm" title={walletHelp[action.topic]} onClick={() => navigate(action.to)}>{action.label}</button>)}
-      </nav>
-      <Help topic="balance" label="What is included in my balance?" />
-      <details className="disclosure" style={{ marginBottom: 16 }}>
-        <summary>Learn the wallet functions</summary>
-        {['pay', 'receive', 'swap', 'move', 'lending', 'configure', 'open', 'protection'].map(topic => <Help key={topic} topic={topic} label={topic === 'configure' ? 'Limits and disputes' : topic === 'open' ? 'Connect a hub' : topic.charAt(0).toUpperCase() + topic.slice(1)} />)}
-      </details>
-      <details className="disclosure" style={{ marginBottom: 16 }}>
-        <summary>Backup and dispute protection</summary>
-        <p className="note">Encrypted backups help recover this wallet. Dispute protection is a separate service; its actual response status is shown below.</p>
-        <Watchtower accountCount={wallet.accounts.length} />
-      </details>
+      {wallet.frame && !wallet.error && (
+        <>
+          <div className="wallet-finances">
+            <BalanceDetails wallet={wallet} token={balanceToken} />
+            {places.accounts && <CreditDetails wallet={wallet} tokenId={balanceToken?.tokenId} />}
+          </div>
+          <div className="wallet-scale-note note">
+            Equal value, equal length · {meta ? meta.symbol : 'USD estimates at fixed reference prices'}
+            <button
+              className="more"
+              type="button"
+              onClick={() => setScaleMode(scaleMode === 'auto' ? 'fixed' : 'auto')}
+            >
+              {scaleMode === 'auto' ? 'Auto scale' : 'Fixed scale · fit all'}
+            </button>
+          </div>
+        </>
+      )}
+      <TestMoney key={wallet.entityId} wallet={wallet} />
       <PendingBatch wallet={wallet} compact />
-      <BalanceDetails wallet={wallet} />
       <div className="wallet-sections">
         <section aria-label="Assets">
           <div className="sect">
@@ -249,6 +309,24 @@ export function Home() {
         </section>
       </div>
       <footer className="wallet-details">
+        <Help topic="balance" label="What is included in my balance?" />
+        <details className="disclosure">
+          <summary>Wallet guide and protection</summary>
+          {['pay', 'receive', 'swap', 'move', 'lending', 'configure', 'open', 'protection'].map(topic => (
+            <Help
+              key={topic}
+              topic={topic}
+              label={
+                topic === 'configure'
+                  ? 'Limits and disputes'
+                  : topic === 'open'
+                    ? 'Connect a hub'
+                    : topic.charAt(0).toUpperCase() + topic.slice(1)
+              }
+            />
+          ))}
+          <Watchtower accountCount={wallet.accounts.length} />
+        </details>
         <section className="wallet-connections" data-testid="home-accounts">
           <h3 className="caps">Connected accounts</h3>
           {wallet.accounts.map((account, index) => (
@@ -259,7 +337,12 @@ export function Home() {
               onClick={() => navigate(`/accounts/${account.counterpartyId}`)}
             />
           ))}
-          <button type="button" className="btn quiet sm" onClick={() => setOpening(true)} data-testid="home-open-account">
+          <button
+            type="button"
+            className="btn quiet sm"
+            onClick={() => setOpening(true)}
+            data-testid="home-open-account"
+          >
             Connect another account
           </button>
         </section>

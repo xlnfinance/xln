@@ -1,5 +1,25 @@
 # Current xln execution handoff
 
+Owner priority on 2026-10-11: redesign the React wallet with one bounded Opus
+consultation. Backing and signed credit now sit next to the balance; compact
+actions precede the charts, secondary actions use More, tutorial details disclose.
+All amounts still use committed projections/deriveDelta. Equal $100 segments
+measure the same width in all seven visible bars; 320px buttons do not overflow.
+Browser evidence: `.logs/crisis-20261011/wallet-design-{desktop,mobile}.jpg`.
+An independent demo wallet has 200 USDC: 100 collateral-backed plus 100 unsecured,
+after actual reserve-to-Account funding on the running local chain. This is not
+a restore of the owner's earlier 699.85 USDC Tour wallet. Editing the Vite entry
+caused a reload; that older mnemonic wallet now needs its recovery phrase.
+Do not reload the current demo or rebuild served runtime files during preview.
+Fix next: guided-demo recovery requests a random phrase users may never have saved;
+reserve faucet also displayed PROXY_UPSTREAM_TIMEOUT:5000 after crediting 100 USDC.
+No repeated faucet request was made after that ambiguous result.
+
+The unfinished Rust lending parity work is preserved separately, uncommitted.
+The current TS lending vector passes with partial repayment and signed expiry;
+Rust authorization/wire fields are partially ported, not compiled or parity-proven.
+Do not include that work or the six foreign Rust files in the UI checkpoint.
+
 ## Current SHA
 
 Latest source checkpoint: `cd345aafd`, main, 2026-10-11; documentation may follow.
@@ -32,7 +52,10 @@ and lowers non-null assertion debt from 617 to 616. Earlier `87f860bd1` and
 `494b162cc` repair release fixtures, remove saver allocation and charge actual
 elapsed loan interest. Not pushed.
 Preserve unrelated frozen Rust changes, HANDOFF.md, output/ and tmp/.
-TS launch engine, React only, Ethereum same-J. Work solo; no external-model spend.
+TS launch engine, React only, Ethereum same-J. Work solo. The owner's explicit
+Opus design request permitted one packet-only response on `bc75c6a4cdfc48870f997beefc3663ec24f7941d`:
+`wallet-design-opus-20261011`, requested `anthropic/claude-opus-5` via pi/OpenRouter,
+reported cost USD 0.1476725, completed. No recurring grant or further calls.
 
 All six owner choices are resolved: term and demand savings; lending above deposits
 inside signed bank facilities; withdrawal order by maturity then request admission;

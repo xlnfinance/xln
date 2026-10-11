@@ -1,0 +1,102 @@
+/* One home layout; money and credit share the same value scale. */
+.wallet-home { max-width: 1120px; margin-inline: auto; padding-top: 20px; }
+.wallet-home .screen-header { margin-bottom: 24px; }
+.wallet-home .entity-switch .note { font-size: 12px; font-weight: 400; }
+.wallet-overview { padding: 0 0 8px; }
+.wallet-balance-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.wallet-balance-heading .hero-label { margin: 0; }
+.wallet-asset-select { max-width: 65%; min-height: 40px; border: 1px solid var(--line-2); border-radius: 8px; background: var(--surface); padding: 6px 10px; font-size: 12px; }
+.wallet-total { font-size: clamp(40px, 7vw, 64px); line-height: 1.14; letter-spacing: -.055em; margin: 6px 0 12px; overflow-wrap: anywhere; }
+.wallet-overview .note { margin-top: 8px; }
+.wallet-pending { display: inline-flex; align-items: center; gap: 6px; margin-top: 12px; color: var(--ink-2); font-size: 13px; }
+.wallet-finances { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); border: 1px solid var(--line-2); border-radius: 16px; background: var(--surface); }
+.wallet-finances > section { min-width: 0; padding: 22px; }
+.wallet-breakdown > .bw { margin: 20px 0; }
+.wallet-breakdown > .bw .bar { height: 18px; }
+.wallet-credit { border-left: 1px solid var(--line); }
+.wallet-credit .field-head { margin: 0; }
+.credit-tag { font-size: 10px; color: var(--ink-2); border: 1px solid var(--line-2); border-radius: 4px; padding: 2px 6px; white-space: nowrap; }
+.credit-line { margin-top: 18px; }
+.credit-line-head { display: flex; justify-content: space-between; gap: 12px; font-size: 13px; margin-bottom: 10px; }
+.credit-line-head strong { font-weight: 600; overflow-wrap: anywhere; text-align: right; }
+.credit-line-caption { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 12px; margin-top: 7px; font-size: 12px; color: var(--ink-2); }
+.credit-line-caption b { font-weight: 500; color: var(--ink); margin-left: 4px; }
+.wallet-credit > .note { margin-top: 16px; font-size: 12px; max-width: 44ch; }
+.wallet-home .bw::after { display: none; }
+.wallet-home .bw .bar { gap: 0; }
+.wallet-home .bw .seg { min-width: 0; border-radius: 0; transition: none; }
+.wallet-finances .bw { border-radius: 3px; }
+.wallet-finances .bw[data-bar-usd='0'] { background: var(--line); }
+.wallet-finances .seg.c-room { background: transparent; border: 1px dashed var(--ink-2); }
+.wallet-finances .seg.c-risk { background: repeating-linear-gradient(135deg, var(--risk) 0 4px, color-mix(in srgb, var(--risk), var(--surface) 24%) 4px 6px); }
+.wallet-scale-note { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 6px; font-size: 11px; }
+.wallet-scale-note .more { min-height: 32px; font-size: 11px; flex-shrink: 0; }
+.balance-parts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px 20px; }
+.balance-part > div { display: flex; flex-direction: column; gap: 5px; font-size: 12px; }
+.balance-part > div > span { color: var(--ink-2); }
+.balance-part strong { font-size: 20px; letter-spacing: -.025em; font-weight: 550; overflow-wrap: anywhere; }
+.balance-part .note { font-size: 12px; margin-top: 5px; max-width: 28ch; }
+.balance-part.empty > div { flex-direction: row; flex-wrap: wrap; align-items: baseline; justify-content: space-between; }
+.balance-part.empty strong { font-size: 14px; color: var(--ink-2); }
+.balance-part.empty .note { display: none; }
+.wallet-breakdown > .note { margin-top: 14px; }
+.sw { display: inline-block; width: 7px; height: 7px; border-radius: 2px; margin-right: 6px; vertical-align: 1px; }
+.wallet-actions { display: flex; align-items: center; gap: 10px; margin: 12px 0 24px; }
+.wallet-actions > .btn { min-width: 112px; min-height: 46px; width: auto; border: 1px solid var(--line-2); font-size: 13px; }
+.wallet-actions > .primary { border-color: transparent; }
+.wallet-more { position: relative; margin-left: auto; font-size: 13px; }
+.wallet-more > summary { display: flex; align-items: center; justify-content: center; gap: 8px; min-height: 46px; padding: 0 14px; list-style: none; cursor: pointer; color: var(--ink-2); }
+.wallet-more > summary::-webkit-details-marker { display: none; }
+.wallet-more[open] > summary { color: var(--ink); background: var(--surface-2); border-radius: 8px; }
+.wallet-more nav { position: absolute; z-index: 10; right: 0; top: calc(100% + 8px); display: grid; min-width: 210px; padding: 6px; border: 1px solid var(--line-2); border-radius: 12px; background: var(--surface); box-shadow: 0 12px 30px #0003; }
+.wallet-more nav .btn { justify-content: flex-start; min-height: 44px; padding: 8px 12px; }
+.test-money { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 16px; margin: 12px 0 28px; padding: 12px 0; border-block: 1px solid var(--line); }
+.test-money-intro { display: flex; flex-direction: column; gap: 2px; }
+.test-money-label { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: .07em; color: var(--ink-2); }
+.test-money-intro .note { font-size: 11px; }
+.test-money > .btn { min-height: 40px; padding: 8px 12px; background: var(--surface-2); color: var(--ink); font-size: 12px; }
+.test-money > .disclosure { border: 0; padding: 0; font-size: 11px; }
+.test-money > .disclosure > summary { min-height: 40px; align-content: center; }
+.test-money .disclosure[open] { flex-basis: 100%; }
+.test-money > [role] { flex-basis: 100%; font-size: 12px; }
+.wallet-sections { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr); gap: 32px; margin-top: 28px; }
+.wallet-sections > section { min-width: 0; }
+.wallet-sections .sect { margin-top: 0; }
+.wallet-empty { padding: 20px 0; }
+.wallet-show-assets { margin-top: 16px; }
+.wallet-details { border-top: 1px solid var(--line); margin-top: 36px; padding-top: 12px; }
+.wallet-connections { margin: 20px 0; max-width: 500px; }
+.wallet-connections .avatar { width: 32px; height: 32px; font-size: 13px; }
+.wallet-home .wallet-account { padding: 16px; margin-top: 12px; border: 1px solid var(--line); border-radius: 12px; }
+.wallet-account .rt { flex-wrap: wrap; }
+.wallet-account .rt .r { overflow-wrap: anywhere; }
+.wallet-account .rt .t { flex-wrap: wrap; white-space: normal; overflow: visible; }
+.wallet-account .rt .s { display: block; white-space: normal; }
+.account-funding { margin-top: 12px; }
+.account-backing { display: flex; flex-direction: column; gap: 6px; margin-top: 12px; font-size: 12px; color: var(--ink-2); }
+.account-backing > span { display: flex; align-items: baseline; flex-wrap: wrap; gap: 3px; }
+.account-backing b { font-weight: 500; color: var(--ink); margin-left: auto; overflow-wrap: anywhere; }
+.account-limits { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; border-top: 1px solid var(--line); margin-top: 14px; padding-top: 12px; }
+.account-limits > span { font-size: 12px; color: var(--ink-2); }
+.account-limits strong { display: block; margin-top: 4px; color: var(--ink); font-size: 13px; font-weight: 500; overflow-wrap: anywhere; }
+.account-link { display: block; margin-top: 14px; font-size: 12px; color: var(--ink-2); }
+@media (max-width: 760px) {
+  .wallet-finances { grid-template-columns: minmax(0, 1fr); }
+  .wallet-finances > section { padding: 18px; }
+  .wallet-credit { border-left: 0; border-top: 1px solid var(--line); }
+  .wallet-sections { grid-template-columns: minmax(0, 1fr); gap: 28px; }
+  .wallet-home .wallet-account { padding: 12px; }
+  .wallet-account .rt .tx, .wallet-account .rt .r { flex-basis: 100%; text-align: left; white-space: normal; }
+}
+@media (max-width: 480px) {
+  .wallet-home .screen-header { margin-bottom: 16px; }
+  .wallet-overview { padding-bottom: 4px; }
+  .wallet-actions { gap: 6px; }
+  .wallet-actions > .btn { flex: 1; min-width: 0; padding: 10px; gap: 6px; }
+  .wallet-more > summary { padding: 0 8px; }
+  .wallet-scale-note { align-items: baseline; }
+  .balance-part strong { font-size: 18px; }
+}
+@media (max-width: 360px) {
+  .wallet-actions > .btn svg { display: none; }
+}

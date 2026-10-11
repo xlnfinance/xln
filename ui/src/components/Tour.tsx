@@ -97,12 +97,6 @@ export function Tour() {
             <Icon name="close" size={14} />
           </button>
         </div>
-        {step.value && (
-          <p className="tour-value" data-testid="tour-value">
-            {step.value}
-          </p>
-        )}
-        {step.prerequisite && <p className="note" data-testid="tour-prerequisite"><strong>Before you start: </strong>{step.prerequisite}</p>}
         <p className="tour-body" data-testid="tour-hint">
           {step.instruction(ctx)}
           {step.id === 'company' && (
@@ -114,15 +108,29 @@ export function Tour() {
             </>
           )}
         </p>
-        {step.outcome && <p className="note" data-testid="tour-result"><strong>Check the result: </strong>{step.outcome}</p>}
         <div className="tour-footer">
-          {step.example && (
-            <details className="tour-example">
-              <summary>Example & result</summary>
-              <p>{step.example}</p>
-              <p className="note">Changing chapters explores the guide; it does not complete a transaction.</p>
-            </details>
-          )}
+          <details className="tour-example" key={step.id}>
+            <summary>How this works</summary>
+            {step.value && (
+              <p className="tour-value" data-testid="tour-value">
+                {step.value}
+              </p>
+            )}
+            {step.prerequisite && (
+              <p className="note" data-testid="tour-prerequisite">
+                <strong>Before you start: </strong>
+                {step.prerequisite}
+              </p>
+            )}
+            <p>{step.example}</p>
+            {step.outcome && (
+              <p className="note" data-testid="tour-result">
+                <strong>Check the result: </strong>
+                {step.outcome}
+              </p>
+            )}
+            <p className="note">Changing chapters explores the guide; it does not complete a transaction.</p>
+          </details>
           {!finish ? (
             <div className="tour-actions">
               <button

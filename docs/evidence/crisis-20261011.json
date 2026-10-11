@@ -2908,5 +2908,127 @@
       "balanceEth": "0.0",
       "log": "partial-sepolia-status.log"
     }
+  },
+  "walletDesignConsultation": {
+    "ownerAuthorization": "2026-10-11: codesign wallet with Opus",
+    "scope": "one read-only packet-only design response",
+    "reservationOwner": "root/wallet-design-opus-20261011",
+    "maxCalls": 1,
+    "reservedUsd": 0,
+    "deadlineMs": 120000,
+    "status": "completed",
+    "expiry": "one response or timeout; no retries or automatic renewal",
+    "costLimit": "local reservation, not provider-enforced dollar cap",
+    "job": "wallet-design-opus-20261011",
+    "sourceSha": "bc75c6a4cdfc48870f997beefc3663ec24f7941d",
+    "settledAt": "2026-10-11T16:43:21.520Z",
+    "costUsd": 0.1476725,
+    "requestedModel": "anthropic/claude-opus-5",
+    "servedProvider": "unknown",
+    "adopted": [
+      "Promote backing next to balance",
+      "Compact primary actions and disclose secondary navigation",
+      "Distinguish unused credit visually"
+    ],
+    "rejected": [
+      "Solid fill does not imply guaranteed recovery: unsecured claims remain conditional",
+      "Do not append credit to owned-balance bar",
+      "Zero bars already do not constrain WalletScale; no workaround required"
+    ],
+    "evaluation": "Advice independently filtered against financial semantics; no model quality ranking."
+  },
+  "walletDesign": {
+    "date": "2026-10-11T16:58:24.027Z",
+    "files": [
+      {
+        "path": "ui/src/screens/Home.tsx",
+        "sha256": "2639e49127612d5a870e98db97d6fdfd7f9615fcee09ad6a27bde575fcdcd8e5"
+      },
+      {
+        "path": "ui/src/components/home/BalanceDetails.tsx",
+        "sha256": "46e0ee50355a2d5996d49933001a03158a300d663e0b889e371f4b72ce266f3a"
+      },
+      {
+        "path": "ui/src/components/home/CreditDetails.tsx",
+        "sha256": "cf6de0f3a823a9f47913e9485a6e455158a5733e9bd346ffb49ef56813332e54"
+      },
+      {
+        "path": "ui/src/components/Tour.tsx",
+        "sha256": "c807e87a01f6b1bfc76983a113a9787e7f15ffdfe53d8b325f854281a85aa29b"
+      },
+      {
+        "path": "ui/src/styles/home.css",
+        "sha256": "9dd6b1243a0a21c6a4158f443e3d7fd4bc70d25dd9c7d7ce26bf80f4a078fe28"
+      },
+      {
+        "path": "ui/src/styles/app.css",
+        "sha256": "4976beef1a7f5f79775a416f22f660ff577c9eff73cd9c4f856be247314bbc75"
+      },
+      {
+        "path": "ui/src/main.tsx",
+        "sha256": "08a65a18579b6467b60615cc94170057b06c656e59fea9bcd07d63cae3e146c4"
+      }
+    ],
+    "verification": {
+      "unit": {
+        "passed": 16,
+        "failed": 0,
+        "assertions": 44,
+        "command": "bun test ui/src/runtime/bar-scale.test.ts ui/src/runtime/financial/balance.test.ts"
+      },
+      "check": {
+        "command": "bun run check",
+        "status": "passed",
+        "sourceGates": 38,
+        "sourceElapsedMs": 26840,
+        "log": ".logs/crisis-20261011/wallet-design-check.log"
+      },
+      "build": {
+        "command": "cd ui && bunx vite build",
+        "status": "passed",
+        "seconds": 2.64,
+        "log": ".logs/crisis-20261011/wallet-design-build.log",
+        "warning": "Existing main chunk exceeds 500 kB"
+      },
+      "browser": {
+        "cssWidths": [
+          1236,
+          443,
+          320
+        ],
+        "horizontalOverflow": false,
+        "minimumActionHeightPx": 47.99,
+        "buttonContentOverflowAt320": false,
+        "selectedUSDC": {
+          "balance": "100",
+          "unsecured": "100 USDC",
+          "extendedLimit": "100 USDC"
+        },
+        "finalWallet": {
+          "total": "200 USDC",
+          "collateralBacked": "100 USDC",
+          "unsecured": "100 USDC",
+          "reserve": "0 USDC"
+        },
+        "funding": "Live reserve faucet 100 USDC then signed reserve-to-Account 100 USDC on local chain 31337",
+        "sameValueScale": {
+          "segments": 7,
+          "usdPerSegment": 100,
+          "pxPerUsd": 0.9999998474121092
+        },
+        "newConsoleErrorsAfterCorrection": 0,
+        "screenshots": [
+          ".logs/crisis-20261011/wallet-design-desktop.jpg",
+          ".logs/crisis-20261011/wallet-design-mobile.jpg"
+        ]
+      }
+    },
+    "limitations": [
+      "Original Tour wallet required an unknown recovery phrase after entrypoint HMR reload; its records were not deleted or its funds moved. Current 200 USDC is a different demo wallet.",
+      "Reserve faucet returned PROXY_UPSTREAM_TIMEOUT:5000 after crediting funds; balance was verified before proceeding, no ambiguous retry.",
+      "Rust lending edits remain separate, uncompiled and uncommitted. No mainnet readiness claim."
+    ],
+    "methodCorrection": "Validate TSX before live writes; install styles before consuming classes; avoid Vite entrypoint/runtime reloads while a demo without confirmed recovery is open.",
+    "storageCleanup": "Removed only regenerable Rust dev incremental/package compiler cache via Cargo, freeing 3.2 GiB; kept wallet DBs and test evidence."
   }
 }

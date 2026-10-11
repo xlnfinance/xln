@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 1,
+  "id": "wallet-design-opus-20261011",
+  "project": "xln",
+  "task": "design",
+  "sourceSha": "bc75c6a4cdfc48870f997beefc3663ec24f7941d",
+  "harness": "pi",
+  "provider": "openrouter",
+  "model": "anthropic/claude-opus-5",
+  "family": "claude",
+  "effort": "low",
+  "timeoutMs": 120000,
+  "question": "Give one concrete implementation-ready design direction for this existing React fintech wallet. Owner says ugly and wants visceral collateral/credit bars with Stripe-quality hierarchy. Current screenshot: dark bank theme; hero $699.85; available pay $699.85; giant faucet; 3 large Pay Receive Swap buttons then 6 equally large secondary actions then 3 help accordions then buried 6px balance bar ($499.85 collateral/$200 unsecured). Redesign Home, not protocol. Financial truths: unused credit is not wealth, only collateral secures recovery. Keep exact deriveDelta semantics and global dollars-per-pixel comparability; no guessed protection percentages or yield. Actual wallet values and settings must survive. Need desktop + narrow mobile, keyboard/touch accessibility. Return <=650 words: precise first-viewport structure, how to visibly distinguish backing vs credit capacity, actionable component/CSS changes, 3 important edge cases. Reuse existing bars; reduce code and visual clutter. No research, tools or execution. Supplied source is immutable; cite relevant paths. This is one bounded design consultation, not a security audit or release certification.",
+  "evidence": [
+    {
+      "path": "ui/src/screens/Home.tsx",
+      "sha256": "sha256:4b20b3bdc1e37998a770bbca7ea165ddc5767b598a9cdc809b49f9bb96c4d70f"
+    },
+    {
+      "path": "ui/src/components/home/BalanceDetails.tsx",
+      "sha256": "sha256:116f15341c850cef9e20dd7f047f4a0a93f799814cb7c8323f7a3481eccd3d8c"
+    },
+    {
+      "path": "ui/src/components/Bars.tsx",
+      "sha256": "sha256:7c1c4062c22763656eca44849e3723ba52752049abc379768d3c1f132866aa8e"
+    },
+    {
+      "path": "ui/src/components/home/WalletScale.tsx",
+      "sha256": "sha256:6891bd77f071f4452618d7a1a264ceace6415a4f15676bf6cabdcdae4f23dd6f"
+    },
+    {
+      "path": "ui/src/styles/tokens.css",
+      "sha256": "sha256:a00b6452f0d2bd7b333b6841e7fe6076eb423eceec2bb9af22fbaed100c04975"
+    }
+  ],
+  "kind": "run",
+  "recordedAt": "2026-10-11T16:36:22.329Z",
+  "candidateHash": "sha256:686b1f427c4f4fcbcb7bd99e47e022dd4825e2d7de6a1f9673b6b0cac36fdf49",
+  "promptHash": "sha256:f38df4753c8c48a388e26a56c5254d4d04f5feb978066fc8756524ef1231ad84"
+}
