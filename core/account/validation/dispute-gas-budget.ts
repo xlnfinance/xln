@@ -19,12 +19,18 @@ export const accountDisputeGasCharge = (
   additionalTokens = 0,
   additionalConditions = 0,
 ): number => {
-  if ((state.subcontracts?.size ?? 0) > 0) return Number.MAX_SAFE_INTEGER;
+  let savings = 0;
+  for (const subcontract of state.subcontracts?.values() ?? []) {
+    // Only the typed stock program is bounded. A user-supplied address or an
+    // opaque encoded program remains unbounded, even with a savings-like id.
+    if (!('kind' in subcontract)) return Number.MAX_SAFE_INTEGER;
+    savings++;
+  }
   let swaps = 0;
   for (const offer of state.swapOffers.values()) if (!offer.crossJurisdiction) swaps++;
   return disputeGasCharge(
     state.deltas.size + additionalTokens,
-    state.locks.size + swaps + (state.pulls?.size ?? 0) + additionalConditions,
+    state.locks.size + swaps + (state.pulls?.size ?? 0) + savings * 2 + additionalConditions,
     buildCanonicalProofBatches({ state }).length + additionalConditions,
   );
 };
@@ -33,21 +39,37 @@ export const accountDisputeGasCharge = (
  * The exception never admits another lock, offer, payment or borrowing request.
  * A resolved obligation may not increase the prepaid stock-program footprint.
  */
-export const disputeGasAdmissionError = (before: number, after: number, tx: AccountTx): string | undefined => {
+const disputeGasResolving = (tx: AccountTx): boolean =>
+  tx.type === 'htlc_resolve' ||
+  tx.type === 'swap_resolve' ||
+  tx.type === 'swap_cancel_request' ||
+  tx.type === 'cross_pull_close' ||
+  tx.type === 'settle_transition' ||
+  tx.type === 'lending_repay' ||
+  tx.type === 'lending_close_request' ||
+  tx.type === 'lending_close_payout';
+
+/** Only grandfathered resolution and idempotent token admission compare the old
+ * footprint. New work is judged solely by its full post-transition proof charge.
+ * Do not build the same proof before mutation when that value cannot be used.
+ */
+export const previousDisputeGasCharge = (state: AccountState, tx: AccountTx): number | undefined =>
+  tx.type === 'add_delta' || disputeGasResolving(tx) ? accountDisputeGasCharge(state) : undefined;
+
+export const disputeGasAdmissionError = (
+  before: number | undefined,
+  after: number,
+  tx: AccountTx,
+): string | undefined => {
   if (after <= ACCOUNT_DISPUTE_GAS_BUDGET || tx.type === 'j_event_claim') return undefined;
   // Re-adding an existing row is idempotent; a genuinely new row raises the
   // charge. Unknown custom programs use a sentinel, not a comparable charge.
-  if (tx.type === 'add_delta' && after === before && after < Number.MAX_SAFE_INTEGER) return undefined;
-  const resolving =
-    tx.type === 'htlc_resolve' ||
-    tx.type === 'swap_resolve' ||
-    tx.type === 'swap_cancel_request' ||
-    tx.type === 'cross_pull_close' ||
-    tx.type === 'settle_transition' ||
-    tx.type === 'lending_repay' ||
-    tx.type === 'lending_close_request' ||
-    tx.type === 'lending_close_payout';
-  if (resolving && after <= before) return undefined;
+  const resolving = disputeGasResolving(tx);
+  if (tx.type === 'add_delta' || resolving) {
+    if (before === undefined) throw new Error('ACCOUNT_DISPUTE_PREVIOUS_CHARGE_REQUIRED');
+    if (tx.type === 'add_delta' && after === before && after < Number.MAX_SAFE_INTEGER) return undefined;
+    if (resolving && after <= before) return undefined;
+  }
   return `ACCOUNT_DISPUTE_GAS_BUDGET_EXCEEDED:${after}/${ACCOUNT_DISPUTE_GAS_BUDGET}`;
 };
 

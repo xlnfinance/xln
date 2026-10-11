@@ -7,9 +7,33 @@ results with metrics.
 Mission: fintech-grade deterministic xln. J/E/A correctness before features. Pure
 transitions, one canonical production path, no silent fallback.
 
-Owner-directed autonomous task selection follows [docs/owner-profile.md](docs/owner-profile.md)
-and the current section of [docs/night-work-plan.md](docs/night-work-plan.md).
-These preserve owner preferences; newer owner instructions and the technical rules below prevail.
+## RELEASE SCOPE (owner decision 2026-10-11)
+
+This scope prevails over older plans in `docs/` and over the history in `todo.md`.
+
+- Engine: TypeScript is the only canonical engine. Rust `rscore/` is frozen at tag
+  `rscore-freeze-f1464e84e`: no commits under `rscore/` and no Rust gates in `check` or the
+  release gates until the owner lifts the freeze. Lift conditions: a frozen protocol spec v1
+  with shared vectors; measured demand above 500 tps on one hub; multisig in scope.
+- Wallet: React `ui/` is the only wallet. Svelte `frontend/` is frozen: no new wallet
+  features; only landing/static copy and build health change there.
+- First jurisdiction: Ethereum same-J (Sepolia, then a mainnet canary).
+- Owner update 2026-10-11: the agent may create a dedicated Sepolia signer, obtain test
+  ETH and deploy the current contracts without another signing question. Mainnet is
+  open to all participants using their own funds; do not add invite gates or arbitrary
+  protocol monetary caps. Financial correctness and recovery gates remain mandatory.
+- Lending is in scope: savers lend to a bank Entity for interest; borrowers borrow
+  from that Entity. Both obligations live in bilateral Accounts. Borrower default
+  never erases the bank's debt to its savers. Only collateral secures recovery.
+- Deferred: TRON, XLNC, Base, cross-J as a headline, companies/IPO,
+  iOS/Electron/extension and custody.
+- MML counts only obligations between unaffiliated Entities. A payment routed through a hub
+  counts once, on the commercial edge; hub hops and affiliated transfers never count.
+- Metrics: XLN-1000 ([docs/xln1000.md](docs/xln1000.md), `bun run xln1000`) steers task selection
+  with [docs/owner-profile.md](docs/owner-profile.md) and the current section of
+  [docs/night-work-plan.md](docs/night-work-plan.md); newer owner instructions and this file prevail.
+  Release authority stays the binary evidence-coverage gate (passed / frozen required checks) in
+  [docs/improvement-loop.md](docs/improvement-loop.md) and [docs/mainnet-acceptance-gate.md](docs/mainnet-acceptance-gate.md).
 
 ## EXECUTION PRIORITY
 
@@ -23,8 +47,6 @@ This order overrides attractive side work:
 
 - Never invent a catalog, taxonomy, abstraction, audit campaign or intermediate gate that
   blocks an explicit production artifact, replay or TPS deliverable.
-- Synthetic completeness never blocks the first production replay. It remains a final release
-  gate after the production artifact is exact.
 - At most one implementer owns an area. A reviewer starts only after the implementer produces
   a stable diff; never assign overlapping implementation work.
 - Every handoff contains only: current SHA, last green command, first red command/error,
@@ -83,9 +105,8 @@ Do not duplicate or weaken it.
   counterexample in a focused comment/test.
 - Detailed dispute, Hanko and hash-ladder rules live in
   [`docs/consensus-invariants.md`](docs/consensus-invariants.md),
-  [`docs/counterfactual-transformers.md`](docs/counterfactual-transformers.md), and
-  [`docs/hashladder-registry-spec.md`](docs/hashladder-registry-spec.md). Load them when that path
-  is in scope; do not keep their full text in every task context.
+  [`docs/counterfactual-transformers.md`](docs/counterfactual-transformers.md) and
+  [`docs/hashladder-registry-spec.md`](docs/hashladder-registry-spec.md); load them only when in scope.
 
 ## REJECT POLICY (owner canon 2026-09-05, quorum-confirmed 2026-09-07)
 
@@ -93,9 +114,9 @@ Do not duplicate or weaken it.
   disposition decided inside the RJEA transition without reading process env; the Runtime
   loop applies fail-fast (tests/dev) or log-and-drop (production) exactly once, outside the
   state machine, so replay never depends on `NODE_ENV`/`XLN_REJECT_FAIL_FAST`.
-- Granularity is per transaction on both engines: evict exactly the rejected tx and certify
-  the rest of the same signer's queue. Never drop a signer lane or a whole peer envelope for
-  one bad tx. Transport-level peer misbehaviour closes that session; it never halts the Hub.
+- Granularity is per transaction: evict exactly the rejected tx and certify the rest of the same
+  signer's queue. Never drop a signer lane or a whole peer envelope for one bad tx. Transport-level
+  peer misbehaviour closes that session; it never halts the Hub.
 - Details and the log lines to watch: [`docs/reject-policy.md`](docs/reject-policy.md).
 
 ## ONE CANONICAL PRODUCTION PATH
@@ -121,8 +142,7 @@ Do not duplicate or weaken it.
   non-derivability and one adversarial recovery test.
 - Replay reads only checkpoint plus ordered Runtime WAL inputs and compares per-frame roots and
   ordered event/effect/outbox digests. Detailed Account dumps are lazy after first mismatch.
-- Storage/recovery details: [`docs/wal.md`](docs/wal.md) and
-  [`docs/runtime/storage.md`](docs/runtime/storage.md).
+- Storage/recovery details: [`docs/wal.md`](docs/wal.md) and [`docs/runtime/storage.md`](docs/runtime/storage.md).
 
 ## FROZEN CORE
 
@@ -165,30 +185,21 @@ Use the smallest failing boundary first:
 3. L3: related broad suite, then `bun run check` once per unchanged candidate.
 
 - Default process wall budget is 30 seconds; the owner permits up to 60 seconds for ordinary
-  verification while reducing the feedback cycle (2026-09-05). Preserve semantic assertions.
-  The owner-approved exception is 180 seconds for the
-  canonical HLT recorder, exact replay and live economic stand under the machine lock.
+  verification while reducing the feedback cycle (2026-09-05). Preserve semantic assertions. The
+  owner-approved exception is 180 seconds for the canonical HLT recorder, exact replay and live
+  economic stand under the machine lock.
 - A live process must be polled by its existing handle; do not restart merely because observation
   timed out. Report progress while it runs.
 - Show command output/counts. A build, codec/catalog equality or smoke is not semantic parity.
-- Browser build command:
-  `bun build core/runtime.ts --target=browser --external http --external https --external zlib --external fs --external path --external stream --external buffer --external url --external net --external tls --external os --external util`.
+- Browser runtime bundle: `bun run build` (`scripts/build-runtime.sh`).
 
-## PARITY CRITICAL PATH
+## REPLAY DETERMINISM
 
-1. Record one immutable production mixed WAL as early as possible.
-2. Replay the same checkpoint/WAL through TS W1, TS W4, Rust W1 and Rust W4.
-3. Compare every Runtime/Entity/Account root and ordered event/effect/outbox digest per frame.
-4. Fix only the first divergent frame and add its named regression vector.
-5. Repeat until the full WAL is exact.
-6. Prove live Rust J watcher → Entity → batch → receipt.
-7. Run final transaction-kind completeness plus production and `cfg(test)` Rust compilation.
-8. Run `bun run check`, then live TPS gates, then push.
-
-- Transaction-kind completeness is a final audit, not the first implementation activity. Each test
-  case is named for the concrete `AccountTx`/`EntityTx`; do not create meaningless A/B/C groups.
-- Full parity requires production and `cfg(test)` Rust trees, live J coverage, and per-frame roots
-  plus ordered outputs. Replay alone is necessary but not sufficient.
+- Record one immutable production WAL early. Replay the same checkpoint/WAL through TS W1 and
+  TS W4 and compare every R/E/A root and ordered event/effect/outbox digest per frame.
+- Fix only the first divergent frame, add its named regression vector, and repeat until exact.
+- Transaction-kind completeness is a final audit named per concrete `AccountTx`/`EntityTx`,
+  never meaningless A/B/C groups. Rust W1/W4 replay, live Rust J and Rust builds are frozen.
 
 ## TPS AND PERFORMANCE
 
@@ -198,18 +209,16 @@ TPS is valid only from the production H1 live path with:
 - a full 20-second offered window and at least 1,000 offered payments/s;
 - at least 1,000 committed economic operations, zero transport loss and zero pending Account ACKs
   after the five-second drain;
-- explicit `XLN_HLT_ENGINE=ts|rust`, real WAL/fsync, and the stand lock held for the whole run.
+- the TS engine (`XLN_HLT_ENGINE=ts`), real WAL/fsync, and the stand lock held for the whole run.
 
 Replay, smoke, microbenchmarks, AccountTx/s and submitted/enqueued counts are never TPS. Startup is a
-separate reusable preparation phase. Before Rust TPS, the exact Rust H1 must pass bootstrap/cutover
-with TS↔Rust roots equal and complete the live J gate.
+separate reusable preparation phase.
 
 Performance work begins only after a valid baseline. Build a unique-operation ledger, measure live
 phase wall times, state the Amdahl ceiling, and change only a measured >5% phase. Prefer deleting a
 duplicate encode/hash/materialization/scan or batching an existing transition before adding state.
-Worker trials run sequentially against independent DB copies. See
-[`docs/mainnet-acceptance-gate.md`](docs/mainnet-acceptance-gate.md) and
-[`docs/parallel.md`](docs/parallel.md).
+Worker trials run sequentially against independent DB copies. See [`docs/parallel.md`](docs/parallel.md)
+and [`docs/mainnet-acceptance-gate.md`](docs/mainnet-acceptance-gate.md).
 
 ## ENTITY FINANCIAL PIPELINE
 
@@ -230,39 +239,36 @@ surface or fuse stages 2 and 3.
   (<300 lines). Do not add abstractions that are used once or hide protocol ownership.
 - Use `safeStringify` for BigInt, `buffersEqual` for buffers, and
   `getAvailableJurisdictions()` for contract addresses.
-- `frontend` is UI only; runtime owns logic. `localhost:8080` is the single local entry point.
+- `ui` and `frontend` are UI only; runtime owns logic. `localhost:8080` is the single local entry point.
 - `xln` and markdown filenames are lowercase.
 
 ## DEBUGGING AND COMMUNICATION
 
-- Owner preference (updated 2026-09-18): English, MAX ADHD readability. Lead with the result; use short
-  paragraphs, concrete numbers and next actions. Remove filler, repeated context and invented certainty.
-- Proactively recommend the better next step without waiting for an owner question. Prioritize MML:
-  useful unique economic value processed by xln, never double-counted hops, submitted traffic or hype.
+- Respond in the owner's language (Russian); source code, comments and docs stay English. MAX ADHD
+  readability: lead with the result (reasoning only when asked why/how or for discussion); compact
+  ASCII sections, 3–5 bullets maximum per section, concrete numbers first, end with
+  `NEXT: A) B) C)`. Remove filler, repeated context and invented certainty.
+- Proactively recommend the better next step without waiting for an owner question. Prioritize MML
+  (counting rule in RELEASE SCOPE), never submitted traffic or hype.
 - Use /1000 comparisons only when useful. Label subjective estimates, name the criteria, and separate
   measured results from hypotheses. Model rankings require task kind, exact identity, sample count and
   evidence; unknown is not zero. Never present peer praise as verified intelligence or release readiness.
 - Cross-harness collaboration follows [`docs/agent-workflow.md`](docs/agent-workflow.md).
   This file remains the single project authority; harness personas do not override its invariants.
-- Current autonomous goal and one shared external-model budget are recorded in
-  [`docs/night-work-plan.md`](docs/night-work-plan.md). From 2026-09-06 18:31:42 UTC,
-  the owner authorizes USD 10 per rolling hour across all agents, harnesses and retries.
-  Use the single Quorum reservation owner. Unresolved calls retain their full reserved
-  maximum; old overnight grants and unresolved costs remain in the historical ledger.
-  A new hour, agent or restart never independently renews the same allocation.
+- One shared external-model budget: from 2026-09-06 18:31:42 UTC the owner authorizes USD 10 per
+  rolling hour across all agents, harnesses and retries. Use the single Quorum reservation owner.
+  Unresolved calls retain their full reserved maximum; old overnight grants and unresolved costs
+  remain in the historical ledger. A new hour, agent or restart never independently renews the
+  same allocation.
 - During authorized sustained work, review the plan and working method every 30 minutes.
   Repeated failure without new evidence requires a changed hypothesis or approach.
 - For consensus, dump and diff both sides at the first divergent frame. Use
   `core/qa/runtime-ascii.ts` for scanning and `/tmp/*-frames.json`/`*-final.json` with `jq` for depth.
 - Detailed workflow: [`docs/debug.md`](docs/debug.md) and
   [`docs/debugging/consensus-debugging-guide.md`](docs/debugging/consensus-debugging-guide.md).
-- Responses use compact ASCII sections, 3–5 bullets maximum per section, metrics first, and end
-  with `NEXT: A) B) C)`.
-- During autonomous long work, report user-visible progress at least every ten minutes. Do not write
-  a separate progress log unless the owner asks.
-- Owner update (2026-09-06): include progress percentages in every progress update, tied to
-  explicit completed/total checks for the current stage; do not imply unmeasured mainnet readiness.
-- If the user asks why/how or requests discussion, give the reasoning; otherwise lead with results.
+- During autonomous long work, report user-visible progress at least every ten minutes, with a
+  percentage tied to explicit completed/total checks for the current stage (owner, 2026-09-06);
+  never imply unmeasured mainnet readiness. No separate progress log unless the owner asks.
 - External auditors/models run only when the owner explicitly requests them. One bounded question,
   immutable SHA, read-only scope, independently verified finding. Never let audit replace execution.
 - Never launch Codex Security scans unless the owner explicitly asks for a Codex Security scan by

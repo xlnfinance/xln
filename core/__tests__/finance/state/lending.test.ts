@@ -11,6 +11,14 @@ import type { ConsensusConfig, EntityState } from '../../../entity/types';
 import { deriveDelta } from '../../../account/utils';
 import { createDefaultDelta } from '../../../account/state/delta';
 import { PersistentAccountStateMap } from '../../../account/state/persistent-state-map';
+import { readEntityFrameEventMessages } from '../../../entity/frame-events';
+import { authorizeTestLending } from '../lending/bank-policy-fixture';
+import { bankSavingsAdmissionError, approvedLendingDraw, lendingFacilityKey } from '../../../entity/lending-policy';
+import { handleLendingPolicy } from '../../../entity/tx/handlers/payments/lending-policy';
+import { summarizeLendingState } from '../../../extensions/lending';
+import { encodeBuffer, decodeValidatedBuffer } from '../../../storage/codec/codec';
+import { projectEntityCoreDoc } from '../../../storage/read/projections';
+import { validateStorageEntityCoreDocValue } from '../../../storage/schema/schema-state-docs';
 import { PersistentEntityAccountMap } from '../../../entity/state/persistent-account-map';
 import { computeEntityAccountValueHash } from '../../../entity/consensus/state-root';
 import {
@@ -38,6 +46,7 @@ const makeConfig = (): ConsensusConfig => ({
 
 const makeState = (): EntityState => ({
   entityId: HUB,
+  entityEncryptionPublicKey: `0x${'77'.repeat(32)}`,
   height: 0,
   timestamp: 1_000,
   nonces: new Map(),
@@ -162,10 +171,212 @@ const applyOnly = async (
 };
 
 describe('payer-authenticated hub lending', () => {
+  test('bank pricing and approval survive recovery; concurrent draws cannot exceed the facility', async () => {
+    const state = makeState();
+    state.accounts = state.accounts.updated(LENDER, makeAccount(LENDER));
+    state.accounts = state.accounts.updated(BORROWER, makeAccount(BORROWER));
+    authorizeTestLending(state, BORROWER, { savingsInterestBps: 100, loanInterestBps: 200, maxPrincipal: 2_500n });
+    const fund: AccountTx = { type: 'lending_fund', data: {
+      positionId: POSITION_ID, hubEntityId: HUB, lenderEntityId: LENDER,
+      tokenId: 1, amount: 10_000n, termId: '1d', interestBps: 100,
+    } };
+    expect(bankSavingsAdmissionError(state, state.accounts.get(LENDER)!, fund, 1_000)).toBeUndefined();
+    expect(bankSavingsAdmissionError(state, state.accounts.get(LENDER)!, { ...fund, data: { ...fund.data, interestBps: 101 } }, 1_000)).toBe('LENDING_SAVINGS_RATE_NOT_APPROVED');
+    await commit(state, LENDER, fund, false, 1_000);
+    const request = (requestId: string): AccountTx => ({ type: 'lending_borrow_request', data: {
+      requestId, hubEntityId: HUB, borrowerEntityId: BORROWER,
+      tokenId: 1, amount: 1_500n, termId: '1d', maxInterestBps: 200, maxLateMs: 0, expiresAt: 9_000_000_000_000,
+    } });
+    const [draw] = await commit(state, BORROWER, request(BORROW_REQUEST_ID), false, 2_000);
+    expect(draw!.tx).toMatchObject({ type: 'lending_disburse', data: { interestBps: 200 } });
+    expect(await commit(state, BORROWER, request('borrow-3333333333333333'), false, 2_001)).toEqual([]);
+    expect(state.lending!.pools.get(POSITION_ID)).toMatchObject({ availableAmount: 8_500n, borrowedAmount: 1_500n, interestBps: 100 });
+    const loan = [...state.lending!.loans.values()][0]!;
+    expect(loan).toMatchObject({ status: 'opening', interestAmount: 30n, repaymentAmount: 1_530n, approval: { maxPrincipal: 2_500n, jNonce: 0 } });
+    const wire = encodeBuffer(projectEntityCoreDoc(state));
+    const restored = decodeValidatedBuffer(wire, validateStorageEntityCoreDocValue);
+    expect(restored.lending).toEqual(state.lending);
+    const forged = decodeValidatedBuffer(wire, validateStorageEntityCoreDocValue);
+    const facilityKey = lendingFacilityKey(BORROWER, 1, '1d');
+    forged.lending!.facilities!.set(facilityKey, { ...forged.lending!.facilities!.get(facilityKey)!, borrowerEntityId: LENDER });
+    expect(() => validateStorageEntityCoreDocValue(forged)).toThrow('LENDING_FACILITY_KEY_INVALID');
+    expect(approvedLendingDraw({ ...state, lending: restored.lending! }, state.accounts.get(BORROWER)!, BORROWER,
+      { requestId: 'borrow-4444444444444444', hubEntityId: HUB, borrowerEntityId: BORROWER, tokenId: 1, amount: 1_500n, termId: '1d', maxInterestBps: 200, maxLateMs: 0, expiresAt: 9_000_000_000_000 }, 2_002)).toEqual({ ok: false, reason: 'approved facility exhausted' });
+    handleLendingPolicy(state, { type: 'lendingApprove', data: { borrowerEntityId: BORROWER, tokenId: 1, termId: '1d', maxPrincipal: 0n, expiresAt: 9_000 } }, true);
+    expect(loan.approval?.maxPrincipal).toBe(2_500n);
+    // Revocation stops new draws; it cannot retract a signed pending funding
+    // commitment or change the loan's terms when its Account ACK arrives.
+    await commit(state, BORROWER, draw!.tx, true, 2_003);
+    expect(loan).toMatchObject({ status: 'active', repaymentAmount: 1_530n });
+    expect(await commit(state, BORROWER, request('borrow-5555555555555555'), false, 2_004)).toEqual([]);
+  });
+
+  for (const constraint of ['absent', 'expired', 'revoked', 'wrong-epoch', 'rate'] as const) {
+    test(`a bank declines a draw with ${constraint} authority without allocating saver capital`, async () => {
+      const state = makeState();
+      state.accounts = state.accounts.updated(LENDER, makeAccount(LENDER));
+      state.accounts = state.accounts.updated(BORROWER, makeAccount(BORROWER));
+      authorizeTestLending(state, BORROWER, { expiresAt: constraint === 'expired' ? 1_999 : 9_000, maxPrincipal: constraint === 'revoked' ? 0n : 20_000n });
+      if (constraint === 'absent') state.lending!.facilities!.clear();
+      if (constraint === 'wrong-epoch') {
+        const key = lendingFacilityKey(BORROWER, 1, '1d');
+        state.lending!.facilities!.set(key, { ...state.lending!.facilities!.get(key)!, jNonce: 1 });
+      }
+      await commit(state, LENDER, { type: 'lending_fund', data: {
+        positionId: POSITION_ID, hubEntityId: HUB, lenderEntityId: LENDER,
+        tokenId: 1, amount: 10_000n, termId: '1d', interestBps: 100,
+      } }, false, 1_000);
+      expect(await commit(state, BORROWER, { type: 'lending_borrow_request', data: {
+        requestId: BORROW_REQUEST_ID, hubEntityId: HUB, borrowerEntityId: BORROWER,
+        tokenId: 1, amount: 2_500n, termId: '1d', maxInterestBps: constraint === 'rate' ? 99 : 100, maxLateMs: 0, expiresAt: 9_000_000_000_000,
+      } }, false, 2_000)).toEqual([]);
+      expect(state.lending!.pools.get(POSITION_ID)).toMatchObject({ availableAmount: 10_000n, borrowedAmount: 0n });
+      expect(state.lending!.loans.size).toBe(0);
+      expect(summarizeLendingState(state, { userEntityId: BORROWER, tokenId: 1, requestId: BORROW_REQUEST_ID }).requestStatus).toBe('not-funded');
+      expect(summarizeLendingState(state, { userEntityId: LENDER, tokenId: 1, requestId: BORROW_REQUEST_ID }).requestStatus).toBe('unseen');
+    });
+  }
+
+  test('a close request without a saver covenant rejects before consuming its id', async () => {
+    const state = makeState();
+    state.accounts = state.accounts.updated(LENDER, makeAccount(LENDER));
+    const before = state.accounts.get(LENDER);
+    const result = await applyOnly(state, LENDER, { type: 'lending_close_request', data: {
+      positionId: POSITION_ID, hubEntityId: HUB, lenderEntityId: LENDER,
+    } }, false, 2_000);
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error('Unfunded withdrawal unexpectedly accepted');
+    expect(result.rejection.message).toBe('LENDING_CLOSE_COVENANT_MISMATCH');
+    expect(state.accounts.get(LENDER)).toBe(before);
+  });
+
+  for (const blockedBy of ['active-loan', 'payout-capacity'] as const) {
+    test(`a saver can retry a withdrawal deferred by ${blockedBy} without duplicate payout`, async () => {
+      const state = makeState();
+      state.accounts = state.accounts.updated(LENDER, makeAccount(LENDER));
+      state.accounts = state.accounts.updated(BORROWER, makeAccount(BORROWER));
+    authorizeTestLending(state, BORROWER);
+      await commit(state, LENDER, { type: 'lending_fund', data: {
+        positionId: POSITION_ID, hubEntityId: HUB, lenderEntityId: LENDER,
+        tokenId: 1, amount: 10_000n, termId: '1d', interestBps: 100,
+      } }, false, 1_000);
+      if (blockedBy === 'active-loan') {
+        const [draw] = await commit(state, BORROWER, { type: 'lending_borrow_request', data: {
+          requestId: BORROW_REQUEST_ID, hubEntityId: HUB, borrowerEntityId: BORROWER,
+          tokenId: 1, amount: 2_500n, termId: '1d', maxInterestBps: 100, maxLateMs: 0, expiresAt: 9_000_000_000_000,
+        } }, false, 2_000);
+        await commit(state, BORROWER, draw!.tx, true, 2_001);
+        state.timestamp = 3_000;
+      } else {
+        await commit(state, LENDER, { type: 'set_credit_limit', data: { tokenId: 1, amount: 0n } }, false, 2_000);
+        state.timestamp = 1_000 + 86_400_000;
+      }
+      const pool = state.lending!.pools.get(POSITION_ID)!;
+      const before = { ...pool };
+      const close: AccountTx = { type: 'lending_close_request', data: {
+        positionId: POSITION_ID, hubEntityId: HUB, lenderEntityId: LENDER,
+      } };
+      expect(await commit(state, LENDER, close, false, state.timestamp)).toEqual([]);
+      expect(pool).toEqual(before);
+      expect(readEntityFrameEventMessages(state)).toContain(
+        `Lending close ${POSITION_ID} deferred: ${blockedBy === 'active-loan' ? 'active loans before maturity' : 'insufficient payout capacity'}`,
+      );
+      if (blockedBy === 'active-loan') {
+        const loan = [...state.lending!.loans.values()][0]!;
+        await commit(state, BORROWER, { type: 'lending_repay', data: {
+          loanId: loan.loanId, hubEntityId: HUB, borrowerEntityId: BORROWER, tokenId: 1, amount: loan.repaymentAmount,
+        } }, false, state.timestamp + 1);
+      } else {
+        await commit(state, LENDER, { type: 'set_credit_limit', data: { tokenId: 1, amount: 100n } }, false, state.timestamp + 1);
+      }
+      const [payout] = await commit(state, LENDER, close, false, state.timestamp + 2);
+      expect(payout!.tx).toMatchObject({ type: 'lending_close_payout', data: { amount: blockedBy === 'active-loan' ? 10_000n : 10_100n } });
+      expect(await commit(state, LENDER, close, false, state.timestamp + 3)).toEqual([]);
+      await commit(state, LENDER, payout!.tx, true, state.timestamp + 4);
+      expect(pool).toMatchObject({ status: 'closed', availableAmount: 0n, borrowedAmount: 0n });
+      expect((await applyOnly(state, LENDER, close, false, state.timestamp + 5)).ok).toBe(false);
+    });
+  }
+
+  test('an unfunded signed borrow request declines without halting or reserving money', async () => {
+    const state = makeState();
+    state.accounts = state.accounts.updated(BORROWER, makeAccount(BORROWER));
+    authorizeTestLending(state, BORROWER);
+    const delta = state.accounts.get(BORROWER)!.state.deltas.get(1);
+    const outputs = await commit(state, BORROWER, { type: 'lending_borrow_request', data: {
+      requestId: BORROW_REQUEST_ID, hubEntityId: HUB, borrowerEntityId: BORROWER,
+      tokenId: 1, amount: 2_500n, termId: '1d', maxInterestBps: 100, maxLateMs: 0, expiresAt: 9_000_000_000_000,
+    } }, false, 2_000);
+    expect(outputs).toEqual([]);
+    expect(state.accounts.get(BORROWER)!.state.deltas.get(1)).toEqual(delta);
+    expect(state.accounts.get(BORROWER)!.state.lendingIntents?.get(`borrow:${BORROW_REQUEST_ID}`)).toBe('borrow');
+    expect(state.lending?.loans.size).toBe(0);
+    expect(state.lending?.pools.size).toBe(0);
+    expect(readEntityFrameEventMessages(state)).toContain(`Lending request ${BORROW_REQUEST_ID} declined: no matching liquidity`);
+  });
+  for (const mature of [false, true]) test(`saver claim has its own term interest, matured=${mature}`, async () => {
+    const state = makeState();
+    state.accounts = state.accounts.updated(LENDER, makeAccount(LENDER));
+    await commit(state, LENDER, { type: 'lending_fund', data: {
+      positionId: POSITION_ID, hubEntityId: HUB, lenderEntityId: LENDER,
+      tokenId: 1, amount: 10_000n, termId: '1d', interestBps: 100,
+    } }, false, 1_000);
+    state.timestamp = 1_000 + 86_400_000 - (mature ? 0 : 1);
+    const [payout] = await commit(state, LENDER, { type: 'lending_close_request', data: {
+      positionId: POSITION_ID, hubEntityId: HUB, lenderEntityId: LENDER,
+    } }, false, state.timestamp);
+    expect(payout?.tx).toMatchObject({ type: 'lending_close_payout', data: { amount: mature ? 10_100n : 10_000n } });
+    await commit(state, LENDER, payout!.tx, true, state.timestamp + 1);
+    expect(state.lending!.pools.get(POSITION_ID)).toMatchObject({ status: 'closed', availableAmount: 0n });
+    expect(state.lending!.loans.size).toBe(0);
+  });
+
+  for (const recovery of ['before-payout', 'after-payout', 'default-after-payout']) {
+    test(`mature saver payout is independent of borrower recovery: ${recovery}`, async () => {
+      const state = makeState();
+      state.accounts = state.accounts.updated(LENDER, makeAccount(LENDER));
+      state.accounts = state.accounts.updated(BORROWER, makeAccount(BORROWER));
+    authorizeTestLending(state, BORROWER);
+      await commit(state, LENDER, { type: 'lending_fund', data: {
+        positionId: POSITION_ID, hubEntityId: HUB, lenderEntityId: LENDER,
+        tokenId: 1, amount: 10_000n, termId: '1d', interestBps: 100,
+      } }, false, 1_000);
+      const [draw] = await commit(state, BORROWER, { type: 'lending_borrow_request', data: {
+        requestId: BORROW_REQUEST_ID, hubEntityId: HUB, borrowerEntityId: BORROWER,
+        tokenId: 1, amount: 2_500n, termId: '1d', maxInterestBps: 100, maxLateMs: 0, expiresAt: 9_000_000_000_000,
+      } }, false, 2_000);
+      await commit(state, BORROWER, draw!.tx, true, 2_001);
+      const loan = [...state.lending!.loans.values()][0]!;
+      const pool = state.lending!.pools.get(POSITION_ID)!;
+      state.timestamp = 1_000 + 86_400_000;
+      expect(loan.dueAt).toBeGreaterThan(state.timestamp);
+      const [payout] = await commit(state, LENDER, { type: 'lending_close_request', data: {
+        positionId: POSITION_ID, hubEntityId: HUB, lenderEntityId: LENDER,
+      } }, false, state.timestamp);
+      expect(payout!.tx).toMatchObject({ type: 'lending_close_payout', data: { amount: 10_100n } });
+      const repay: AccountTx = { type: 'lending_repay', data: {
+        loanId: loan.loanId, hubEntityId: HUB, borrowerEntityId: BORROWER, tokenId: 1, amount: 2_525n,
+      } };
+      if (recovery === 'before-payout') await commit(state, BORROWER, repay, false, state.timestamp + 1);
+      expect(pool.availableAmount).toBe(10_100n);
+      await commit(state, LENDER, payout!.tx, true, state.timestamp + 2);
+      if (recovery === 'default-after-payout') {
+        state.timestamp = loan.dueAt;
+        settleOverdueLendingLoan(state, loan.loanId, []);
+        expect(loan.status).toBe('defaulted');
+        expect(pool.availableAmount).toBe(0n);
+      }
+      if (recovery !== 'before-payout') await commit(state, BORROWER, repay, false, state.timestamp + 3);
+      expect(loan).toMatchObject({ status: 'repaid', repaidAmount: 2_525n });
+      expect(pool).toMatchObject({ status: 'closed', availableAmount: 0n, borrowedAmount: 0n });
+    });
+  }
+
   test('batched loans transfer each principal and settle each repayment exactly once', async () => {
     const state = makeState();
     state.accounts = state.accounts.updated(LENDER, makeAccount(LENDER));
     state.accounts = state.accounts.updated(BORROWER, makeAccount(BORROWER));
+    authorizeTestLending(state, BORROWER);
     await commit(state, LENDER, {
       type: 'lending_fund',
       data: {
@@ -189,7 +400,7 @@ describe('payer-authenticated hub lending', () => {
         tokenId: 1,
         amount,
         termId: '1d',
-        maxInterestBps: 150,
+        maxInterestBps: 150, maxLateMs: 0, expiresAt: 9_000_000_000_000,
       },
     }));
     for (const tx of borrows) expect((await applyOnly(state, BORROWER, tx, false, 2_000)).ok).toBe(true);
@@ -249,6 +460,7 @@ describe('payer-authenticated hub lending', () => {
     const state = makeState();
     state.accounts = state.accounts.updated(LENDER, makeAccount(LENDER));
     state.accounts = state.accounts.updated(BORROWER, makeAccount(BORROWER));
+    authorizeTestLending(state, BORROWER);
 
     const fundTx: AccountTx = {
       type: 'lending_fund',
@@ -275,13 +487,14 @@ describe('payer-authenticated hub lending', () => {
         tokenId: 1,
         amount: 2_500n,
         termId: '1d',
-        maxInterestBps: 150,
+        maxInterestBps: 150, maxLateMs: 0, expiresAt: 9_000_000_000_000,
       },
     };
     const [grant] = await commit(state, BORROWER, borrowTx, false, 2_000);
     expect(grant?.tx.type).toBe('lending_disburse');
     const loan = Array.from(state.lending!.loans.values())[0]!;
     expect(loan).toMatchObject({ status: 'opening', principalAmount: 2_500n, repaymentAmount: 2_525n });
+    expect(summarizeLendingState(state, { userEntityId: BORROWER, requestId: BORROW_REQUEST_ID }).requestStatus).toBe('opening');
     expect(pool).toMatchObject({ availableAmount: 7_500n, borrowedAmount: 2_500n });
 
     const beforeDisbursement = deriveDelta(state.accounts.get(BORROWER)!.state.deltas.get(1)!, false);
@@ -291,6 +504,7 @@ describe('payer-authenticated hub lending', () => {
     expect(afterDisbursement.outCollateral + afterDisbursement.outPeerCredit - afterDisbursement.inOwnCredit)
       .toBe(beforeDisbursement.outCollateral + beforeDisbursement.outPeerCredit - beforeDisbursement.inOwnCredit + 2_500n);
     expect(loan.status).toBe('active');
+    expect(summarizeLendingState(state, { userEntityId: BORROWER, requestId: BORROW_REQUEST_ID }).requestStatus).toBe('active');
     const principalDelta = state.accounts.get(BORROWER)!.state.deltas.get(1)!.offdelta;
     await expect(applyOnly(state, BORROWER, grant!.tx, true, 2_002)).rejects.toThrow('LENDING_INTENT_REPLAY');
     expect(state.accounts.get(BORROWER)!.state.deltas.get(1)!.offdelta).toBe(principalDelta);
@@ -312,7 +526,9 @@ describe('payer-authenticated hub lending', () => {
     expect(afterRepayment.outCollateral + afterRepayment.outPeerCredit - afterRepayment.inOwnCredit)
       .toBe(beforeDisbursement.outCollateral + beforeDisbursement.outPeerCredit - beforeDisbursement.inOwnCredit - 25n);
     expect(loan).toMatchObject({ status: 'repaid', repaidAmount: 2_525n });
-    expect(pool).toMatchObject({ availableAmount: 10_025n, borrowedAmount: 0n });
+    // The bank collected 25 interest. Early saver cancellation does not earn
+    // the separate one-day deposit return or receive that borrower's payment.
+    expect(pool).toMatchObject({ availableAmount: 10_000n, borrowedAmount: 0n });
 
     const closeTx: AccountTx = {
       type: 'lending_close_request',
@@ -321,7 +537,7 @@ describe('payer-authenticated hub lending', () => {
     const [payout] = await commit(state, LENDER, closeTx, false, 4_000);
     expect(payout?.tx).toMatchObject({
       type: 'lending_close_payout',
-      data: { positionId: POSITION_ID, amount: 10_025n },
+      data: { positionId: POSITION_ID, amount: 10_000n },
     });
     expect(pool.status).toBe('closing');
 
@@ -329,10 +545,11 @@ describe('payer-authenticated hub lending', () => {
     expect(pool).toMatchObject({ status: 'closed', availableAmount: 0n, borrowedAmount: 0n });
   });
 
-  test('an overdue loan preserves the depositor claim without changing bilateral credit', async () => {
+  test.each([[false, 0], [true, 0], [false, 86_400_000], [true, 86_400_000]] as const)('overdue repayment: saver withdrawn=%s, late window=%s', async (withdraw, lateMs) => {
     const state = makeState();
     state.accounts = state.accounts.updated(LENDER, makeAccount(LENDER));
     state.accounts = state.accounts.updated(BORROWER, makeAccount(BORROWER));
+    authorizeTestLending(state, BORROWER, { loanLateMs: lateMs });
     await commit(state, LENDER, {
       type: 'lending_fund',
       data: {
@@ -354,13 +571,14 @@ describe('payer-authenticated hub lending', () => {
         tokenId: 1,
         amount: 2_500n,
         termId: '1d',
-        maxInterestBps: 150,
+        maxInterestBps: 150, maxLateMs: lateMs, expiresAt: 9_000_000_000_000,
       },
     }, false, 2_000);
     await commit(state, BORROWER, grant!.tx, true, 2_001);
     const loan = Array.from(state.lending!.loans.values())[0]!;
     const pool = state.lending!.pools.get(POSITION_ID)!;
-    expect(loan).toMatchObject({ status: 'active', dueAt: 2_000 + 86_400_000 });
+    // The committed disbursement starts the signed term, not the earlier request.
+    expect(loan).toMatchObject({ status: 'active', openedAt: 2_001, dueAt: 2_001 + 86_400_000 });
     expect(pool).toMatchObject({ availableAmount: 7_500n, borrowedAmount: 2_500n });
 
     // Nothing fires before the term ends; the deadline is the loan's own dueAt.
@@ -381,17 +599,42 @@ describe('payer-authenticated hub lending', () => {
     expect(settlement).toEqual([]);
     expect(deriveDelta(state.accounts.get(BORROWER)!.state.deltas.get(1)!, false).ownCreditLimit).toBe(20_000n);
 
-    // The lender withdraws the released capital; the borrower keeps the debt.
-    const [payout] = await commit(state, LENDER, {
-      type: 'lending_close_request',
-      data: { positionId: POSITION_ID, hubEntityId: HUB, lenderEntityId: LENDER },
-    }, false, loan.dueAt + 2);
-    expect(payout?.tx).toMatchObject({
-      type: 'lending_close_payout',
-      data: { positionId: POSITION_ID, amount: 10_000n },
-    });
-    await commit(state, LENDER, payout!.tx, true, loan.dueAt + 3);
-    expect(pool).toMatchObject({ status: 'closed', availableAmount: 0n });
+    if (withdraw) {
+      // The bank pays its own depositor liability; its borrower still owes it.
+      const [payout] = await commit(state, LENDER, {
+        type: 'lending_close_request',
+        data: { positionId: POSITION_ID, hubEntityId: HUB, lenderEntityId: LENDER },
+      }, false, loan.dueAt + 2);
+      expect(payout?.tx).toMatchObject({
+        type: 'lending_close_payout',
+        data: { positionId: POSITION_ID, amount: 10_100n },
+      });
+      await commit(state, LENDER, payout!.tx, true, loan.dueAt + 3);
+      expect(pool).toMatchObject({ status: 'closed', availableAmount: 0n });
+    }
+    const restored = decodeValidatedBuffer(encodeBuffer(projectEntityCoreDoc(state)), validateStorageEntityCoreDocValue);
+    expect(restored.lending?.loans.get(loan.loanId)?.lateMs).toBe(lateMs);
+    // A newer Entity clock cannot charge more than the certified Account clock.
+    state.timestamp = loan.dueAt + 86_400_000;
+    expect(summarizeLendingState(state).loans[0]?.repaymentAmount).toBe(lateMs ? 2_550n : 2_525n);
+    const repaymentAt = loan.dueAt + 43_200_000;
+    const actualPaid = lateMs ? 2_537n : 2_525n;
+    const poolBeforeRecovery = { ...pool };
+    const beforeRepay = state.accounts.get(BORROWER)!.state.deltas.get(1)!.offdelta;
+    const repayment: AccountTx = {
+      type: 'lending_repay',
+      data: { loanId: loan.loanId, hubEntityId: HUB, borrowerEntityId: BORROWER, tokenId: 1, amount: lateMs ? 2_550n : 2_525n },
+    };
+    expect(await commit(state, BORROWER, repayment, false, repaymentAt)).toEqual([]);
+    expect(loan).toMatchObject({ status: 'repaid', repaidAmount: actualPaid, repaymentAmount: actualPaid });
+    // Default already released the depositor principal. Recovery belongs to
+    // the bank: adding it to that position again would create a second claim.
+    expect(pool).toEqual(poolBeforeRecovery);
+    const afterRepay = state.accounts.get(BORROWER)!.state.deltas.get(1)!.offdelta;
+    expect(afterRepay).toBe(beforeRepay + actualPaid);
+    await expect(applyOnly(state, BORROWER, repayment, false, repaymentAt + 1))
+      .rejects.toThrow('LENDING_INTENT_REPLAY');
+    expect(state.accounts.get(BORROWER)!.state.deltas.get(1)!.offdelta).toBe(afterRepay);
   });
 
   test('rejects forged payer direction and duplicate financial intents before moving delta twice', async () => {

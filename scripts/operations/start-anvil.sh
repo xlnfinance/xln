@@ -23,7 +23,7 @@ ANVIL_STATE_INTERVAL="${ANVIL_STATE_INTERVAL:-60}"
 assert_port_available() {
     local port="$1"
     local pids
-    pids="$(lsof -ti TCP:${port} -sTCP:LISTEN 2>/dev/null || true)"
+    pids="$(/bin/sh "$REPO_ROOT/scripts/lib/lsof.sh" -ti TCP:${port} -sTCP:LISTEN 2>/dev/null || true)"
     if [ -n "$pids" ]; then
         echo "ANVIL_PORT_ALREADY_BOUND:port=${port}:pids=${pids}" >&2
         return 1

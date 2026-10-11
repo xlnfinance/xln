@@ -266,11 +266,11 @@ const decodeLendingFund = (row: readonly unknown[]): AccountTx => {
     termId: lendingTerm(f[6]), interestBps: rscoreWireInt(f[7], 'tx.interestBps') } };
 };
 const decodeLendingBorrow = (row: readonly unknown[]): AccountTx => {
-  const f = rscoreWireTuple(row, 8, 'tx.lendingBorrow');
+  const f = rscoreWireTuple(row, 10, 'tx.lendingBorrow');
   return { type: 'lending_borrow_request', data: { requestId: rscoreWireText(f[1], 'tx.requestId'),
     hubEntityId: rscoreWireText(f[2], 'tx.hubEntityId'), borrowerEntityId: rscoreWireText(f[3], 'tx.borrowerEntityId'),
     tokenId: rscoreWireUint(f[4], 'tx.tokenId'), amount: rscoreWireBig(f[5], 'tx.amount'),
-    termId: lendingTerm(f[6]), maxInterestBps: rscoreWireInt(f[7], 'tx.maxInterestBps') } };
+    termId: lendingTerm(f[6]), maxInterestBps: rscoreWireInt(f[7], 'tx.maxInterestBps'), expiresAt: rscoreWireUint(f[8], 'tx.expiresAt'), maxLateMs: rscoreWireUint(f[9], 'tx.maxLateMs') } };
 };
 const decodeLendingRepay = (row: readonly unknown[]): AccountTx => {
   const f = rscoreWireTuple(row, 6, 'tx.lendingRepay');
@@ -279,11 +279,14 @@ const decodeLendingRepay = (row: readonly unknown[]): AccountTx => {
     tokenId: rscoreWireUint(f[4], 'tx.tokenId'), amount: rscoreWireBig(f[5], 'tx.amount') } };
 };
 const decodeLendingDisburse = (row: readonly unknown[]): AccountTx => {
-  const f = rscoreWireTuple(row, 6, 'tx.lendingDisburse');
+  const f = rscoreWireTuple(row, 13, 'tx.lendingDisburse');
   return { type: 'lending_disburse', data: {
     loanId: rscoreWireText(f[1], 'tx.loanId'), hubEntityId: rscoreWireText(f[2], 'tx.hubEntityId'),
     borrowerEntityId: rscoreWireText(f[3], 'tx.borrowerEntityId'), tokenId: rscoreWireUint(f[4], 'tx.tokenId'),
-    amount: rscoreWireBig(f[5], 'tx.amount') } };
+    amount: rscoreWireBig(f[5], 'tx.amount'), termId: lendingTerm(f[6]),
+    interestBps: rscoreWireUint(f[7], 'tx.interestBps'), requestId: rscoreWireText(f[8], 'tx.requestId'),
+    maxInterestBps: rscoreWireUint(f[9], 'tx.maxInterestBps'), expiresAt: rscoreWireUint(f[10], 'tx.expiresAt'),
+    maxLateMs: rscoreWireUint(f[11], 'tx.maxLateMs'), lateMs: rscoreWireUint(f[12], 'tx.lateMs') } };
 };
 const decodeLendingCloseRequest = (row: readonly unknown[]): AccountTx => {
   const f = rscoreWireTuple(row, 4, 'tx.lendingCloseRequest');

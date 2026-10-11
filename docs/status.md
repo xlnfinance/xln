@@ -1,11 +1,10 @@
 # XLN Status
 
-This is the canonical status surface for XLN. Use it for the current launch
-picture, blocker order, active engineering backlog, and assumptions for the
-current network shape.
-
-For executable work, use the repository root [todo.md](../todo.md). This file
-summarizes why those items matter and how they fit the protocol.
+Use the repository root [todo.md](../todo.md) for current release scope and
+blocker order, and [night-work-plan.md](night-work-plan.md) for the current
+execution handoff. This file preserves architectural context and dated status;
+its historical results are not current acceptance evidence. The
+[2026-10-11 crisis review](crisis-review-20261011.md) explains the current diagnosis.
 
 ## Owner alignment — 2026-09-30
 
@@ -56,14 +55,12 @@ What was reported at that snapshot:
 
 ## Precedence
 
-When docs disagree, use this order:
-
-1. code + tests
-2. root [todo.md](../todo.md)
-3. this file
-4. [mainnet.md](mainnet.md)
-5. protocol/spec docs
-6. archive docs
+Newer owner decisions and [AGENTS.md](../AGENTS.md) govern scope and authority.
+The canonical protocol specifications define intended behavior; code and tests
+provide evidence of implemented behavior, including defects. An implementation
+does not silently override an invariant. Use [todo.md](../todo.md) for the current
+queue and [mainnet.md](mainnet.md) for the real-funds release bar. Dated snapshots
+and archives do not override current decisions or prove current readiness.
 
 ## Non-Negotiable Current Assumptions
 

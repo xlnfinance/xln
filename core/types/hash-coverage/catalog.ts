@@ -1,6 +1,7 @@
 import { HASHABLE_ACCOUNT_TX_DATA_FIELDS } from './tx-nested';
 import {
   HASHABLE_ACCOUNT_SUBCONTRACT_FIELDS,
+  HASHABLE_ACCOUNT_LENDING_COVENANT_FIELDS,
   HASHABLE_CROSS_J_SECRET_RELAY_FIELDS,
   HASHABLE_DELTA_FIELDS,
   HASHABLE_HTLC_LOCK_FIELDS,
@@ -31,6 +32,7 @@ import {
   HASHABLE_RUNTIME_PROOF_BODY_FIELDS,
   HASHABLE_RUNTIME_PULL_FIELDS,
   HASHABLE_RUNTIME_SWAP_FIELDS,
+  HASHABLE_RUNTIME_TERM_LOAN_FIELDS,
   type EvidenceNestedFieldCoverage,
 } from './evidence-nested';
 
@@ -64,7 +66,8 @@ export const NESTED_HASH_COVERAGE: NestedHashCoverageHeld<
   { typeName: 'SettlementWorkspace', sourceFile: 'core/types/account.ts', fields: HASHABLE_SETTLEMENT_WORKSPACE_FIELDS, shape: 'interface' },
   { typeName: 'PaybookEntry', sourceFile: 'core/entity/types.ts', fields: HASHABLE_PAYBOOK_ENTRY_FIELDS, shape: 'interface' },
   { typeName: 'CrossJurisdictionSecretRelay', sourceFile: 'core/entity/types.ts', fields: HASHABLE_CROSS_J_SECRET_RELAY_FIELDS, shape: 'interface' },
-  { typeName: 'AccountSubcontract', sourceFile: 'core/types/account.ts', fields: HASHABLE_ACCOUNT_SUBCONTRACT_FIELDS, shape: 'interface' },
+  { typeName: 'AccountExternalSubcontract', sourceFile: 'core/types/account.ts', fields: HASHABLE_ACCOUNT_SUBCONTRACT_FIELDS, shape: 'interface' },
+  { typeName: 'AccountLendingCovenant', sourceFile: 'core/types/account.ts', fields: HASHABLE_ACCOUNT_LENDING_COVENANT_FIELDS, shape: 'interface' },
   { typeName: 'SettlementOp', sourceFile: 'core/types/account.ts', fields: Object.keys(HASHABLE_SETTLEMENT_OP_FIELDS), shape: 'union-by-type' },
   { typeName: 'AccountTx', sourceFile: 'core/types/account.ts', fields: Object.keys(HASHABLE_ACCOUNT_TX_DATA_FIELDS), shape: 'union-by-type' },
   { typeName: 'CrossJurisdictionSwapStatus', sourceFile: 'core/types/cross-jurisdiction.ts', fields: CROSS_JURISDICTION_SWAP_STATUSES, shape: 'string-union' },
@@ -80,6 +83,7 @@ export const NESTED_HASH_COVERAGE: NestedHashCoverageHeld<
   { typeName: 'RuntimePayment', sourceFile: 'core/protocol/dispute/proof-body.ts', fields: HASHABLE_RUNTIME_PAYMENT_FIELDS, shape: 'interface' },
   { typeName: 'RuntimeSwap', sourceFile: 'core/protocol/dispute/proof-body.ts', fields: HASHABLE_RUNTIME_SWAP_FIELDS, shape: 'interface' },
   { typeName: 'RuntimePull', sourceFile: 'core/protocol/dispute/proof-body.ts', fields: HASHABLE_RUNTIME_PULL_FIELDS, shape: 'interface' },
+  { typeName: 'RuntimeTermLoan', sourceFile: 'core/protocol/dispute/proof-body.ts', fields: HASHABLE_RUNTIME_TERM_LOAN_FIELDS, shape: 'interface' },
   { typeName: 'RuntimeAllowance', sourceFile: 'core/protocol/dispute/proof-body.ts', fields: HASHABLE_RUNTIME_ALLOWANCE_FIELDS, shape: 'interface' },
   { typeName: 'RuntimeBatch', sourceFile: 'core/protocol/dispute/proof-body.ts', fields: HASHABLE_RUNTIME_BATCH_FIELDS, shape: 'interface' },
 ];

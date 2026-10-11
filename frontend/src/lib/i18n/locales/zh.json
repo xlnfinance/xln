@@ -2,7 +2,7 @@
   "app": {
     "name": "xln",
     "tagline": "可扩展性、安全性和简洁性的数学终局",
-    "description": "链下即时支付，链上安全保障"
+    "description": "具有签名证明和抵押保障的双边支付"
   },
   "landing": {
     "hero": {
@@ -18,7 +18,7 @@
       "cost": "零费用",
       "costDesc": "无Gas费，无矿工费",
       "security": "安全",
-      "securityDesc": "链上结算保障"
+      "securityDesc": "仅抵押品保障偿付；信用额度限制无担保风险"
     },
     "invite": {
       "title": "输入邀请码",

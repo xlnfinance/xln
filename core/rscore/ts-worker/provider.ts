@@ -429,6 +429,13 @@ export class TsAccountWorkerAuthority {
         .reduce((sum, metric) => sum + metric.workerEncodeMs, 0) * 1_000));
       countOp(`${prefix}.workerWorkSum`, 0, Math.round(result.workers
         .reduce((sum, metric) => sum + metric.workMs, 0) * 1_000));
+      // These are sums across workers, not sequential coordinator wall time.
+      // Preserve the existing worker timings in live HLT reports as well as
+      // replay telemetry so a slow join can be attributed before tuning it.
+      for (const stage of ['transition', 'proposal', 'root', 'materialize', 'threadCpuUser', 'threadCpuSystem'] as const) {
+        countOp(`${prefix}.${stage}Sum`, 0, Math.round(result.workers
+          .reduce((sum, metric) => sum + metric[`${stage}Ms`], 0) * 1_000));
+      }
     }
     for (const metric of result.workers) {
       const worker = this.#workers.get(metric.workerIndex) ?? emptyWorkerTotals();

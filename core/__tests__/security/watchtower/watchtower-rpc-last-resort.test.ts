@@ -141,7 +141,7 @@ const waitForRpcReady = async (rpcUrl: string): Promise<void> => {
   throw new Error(`RPC not ready at ${rpcUrl}: ${lastError}`);
 };
 
-const startAnvil = async (port: number): Promise<{ child: ChildProcessWithoutNullStreams; rpcUrl: string }> => {
+const startAnvil = async (port: number, blockTimeSeconds = 0): Promise<{ child: ChildProcessWithoutNullStreams; rpcUrl: string }> => {
   const rpcUrl = `http://127.0.0.1:${port}`;
   const anvilTmpRoot = await mkdtemp(join(tmpdir(), 'xln-watchtower-anvil-'));
   tempRoots.push(anvilTmpRoot);
@@ -149,6 +149,7 @@ const startAnvil = async (port: number): Promise<{ child: ChildProcessWithoutNul
     '--host', '127.0.0.1',
     '--port', String(port),
     '--chain-id', '31337',
+    ...(blockTimeSeconds > 0 ? ['--block-time', String(blockTimeSeconds)] : []),
     '--block-gas-limit', '60000000',
     '--code-size-limit', '65536',
     '--prune-history', '256',
@@ -262,13 +263,14 @@ const disputeProofHash = async (
 };
 
 describe('watchtower rpc last-resort integration', () => {
-  test('standalone tower automatically skips early, counters in its window and finalizes on chain', async () => {
+  test('standalone tower protects an offline wallet against a stale proof on a real clock', async () => {
     const tempRoot = await mkdtemp(join(tmpdir(), 'xln-watchtower-rpc-'));
     tempRoots.push(tempRoot);
 
     const anvilPort = await reserveFreePort();
-    const { rpcUrl } = await startAnvil(anvilPort);
+    const { rpcUrl } = await startAnvil(anvilPort, 1);
     const provider = createXlnJsonRpcProvider(rpcUrl, 31337);
+    provider.pollingInterval = 100;
     const nextNonce = createNonceManager(provider);
 
     const left = new Wallet(derivePrivateKey(0), provider);
@@ -314,7 +316,9 @@ describe('watchtower rpc last-resort integration', () => {
     )).wait();
 
     const accountKey = computeAccountKey(watched.entityId, counterparty.entityId);
-    const initialProofbody = proofBody(watchSeed, [0n], [tokenId]);
+    // The stale state would pay the attacker 200. The latest signed state
+    // restores the offline wallet's full 300 collateral entitlement.
+    const initialProofbody = { ...proofBody(watchSeed, [-200n], [tokenId]), leftResponseSeconds: 15n, rightResponseSeconds: 15n };
     const initialProofbodyHash = proofBodyHash(initialProofbody);
     const startHash = await disputeProofHash(depository, accountKey, disputeNonce, true, initialProofbodyHash, watchSeed);
     const startSig = signEntityHash(watched.entityId, startHash, watched.privateKey);
@@ -344,7 +348,7 @@ describe('watchtower rpc last-resort integration', () => {
       { nonce: await nextNonce(counterparty.wallet) },
     )).wait();
 
-    const finalProofbody = proofBody(watchSeed, [-200n], [tokenId]);
+    const finalProofbody = { ...proofBody(watchSeed, [0n], [tokenId]), leftResponseSeconds: 15n, rightResponseSeconds: 15n };
     const finalProofbodyHash = proofBodyHash(finalProofbody);
     const finalHash = await disputeProofHash(depository, accountKey, finalNonce, false, finalProofbodyHash, watchSeed);
     const finalSig = signEntityHash(counterparty.entityId, finalHash, counterparty.privateKey);
@@ -460,8 +464,9 @@ describe('watchtower rpc last-resort integration', () => {
     });
     expect(upload.ok).toBe(true);
 
-    // Only the daemon's production scheduler may submit. The test advances
-    // the isolated chain clock and observes receipts; it never calls sweep.
+    // Only the daemon's production scheduler may submit. No chain time warp,
+    // direct sweep call or further wallet transaction is allowed in this drill.
+    const offlineNonce = await provider.getTransactionCount(watched.wallet.address, 'pending');
     const waitForAction = async (submitted: number): Promise<void> => {
       const deadline = Date.now() + 15_000;
       while (Date.now() < deadline) {
@@ -482,12 +487,15 @@ describe('watchtower rpc last-resort integration', () => {
       const raw = await provider.send('eth_getBlockByNumber', ['latest', false]) as { timestamp?: string };
       return BigInt(raw.timestamp || '0x0');
     };
-    const currentTimestamp = await readLatestTimestamp();
+    const waitForTimestamp = async (target: bigint): Promise<void> => {
+      const deadline = Date.now() + 35_000;
+      while (await readLatestTimestamp() < target) {
+        if (Date.now() >= deadline) throw new Error(`WATCHTOWER_REAL_CLOCK_TIMEOUT:${target}`);
+        await Bun.sleep(200);
+      }
+    };
     const lastResortStartTimestamp = disputeTimeout - BigInt(lastResortWindowSeconds);
-    if (lastResortStartTimestamp > currentTimestamp) {
-      await provider.send('evm_increaseTime', [Number(lastResortStartTimestamp - currentTimestamp)]);
-      await provider.send('evm_mine', []);
-    }
+    await waitForTimestamp(lastResortStartTimestamp);
     expect(await readLatestTimestamp() + BigInt(lastResortWindowSeconds) >= disputeTimeout).toBe(true);
 
     await waitForAction(1);
@@ -500,11 +508,9 @@ describe('watchtower rpc last-resort integration', () => {
     expect(lockedAccount.disputeCounterNonce).toBe(finalNonce);
     expect(lockedAccount.disputeCounterProofbodyHash).toBe(finalProofbodyHash);
     expect(lockedAccount.disputeCounterProposerIsLeft).toBe(false);
-    const timestampAfterLock = await readLatestTimestamp();
-    if (disputeTimeout > timestampAfterLock) {
-      await provider.send('evm_increaseTime', [Number(disputeTimeout - timestampAfterLock)]);
-      await provider.send('evm_mine', []);
-    }
+    const counterObservedTimestamp = await readLatestTimestamp();
+    expect(counterObservedTimestamp < disputeTimeout).toBe(true);
+    await waitForTimestamp(disputeTimeout);
     await waitForAction(2);
     // A failed submission is recorded as an error receipt and nowhere else, so
     // read the reason back before asserting: a bare count tells nobody why the
@@ -522,8 +528,21 @@ describe('watchtower rpc last-resort integration', () => {
     expect(finalizedAccount.disputeHash).toBe(ethers.ZeroHash);
     expect(collateralAfter.collateral).toBe(0n);
     expect(decodeInt512(collateralAfter.ondelta)).toBe(0n);
-    expect(await depository._reserves(watched.entityId, tokenId)).toBe(800n);
-    expect(await depository._reserves(counterparty.entityId, tokenId)).toBe(200n);
+    const watchedReserve = await depository._reserves(watched.entityId, tokenId);
+    const counterpartyReserve = await depository._reserves(counterparty.entityId, tokenId);
+    const finalOwnerNonce = await provider.getTransactionCount(watched.wallet.address, 'pending');
+    expect(watchedReserve).toBe(1_000n);
+    expect(counterpartyReserve).toBe(0n);
+    expect(finalOwnerNonce).toBe(offlineNonce);
+    console.log(safeStringify({
+      kind: 'WATCHTOWER_REAL_CLOCK_PROOF', chainId: 31337,
+      depository: await depository.getAddress(), accountKey,
+      responseWindowSeconds: Number(initialProofbody.leftResponseSeconds + initialProofbody.rightResponseSeconds),
+      counterObservedTimestamp, disputeTimeout,
+      finalizedNonce: finalizedAccount.nonce, watchedReserve, counterpartyReserve,
+      offlineOwnerNonce: offlineNonce, finalOwnerNonce,
+      submissions: sweepReceipts.filter(receipt => receipt.status === 'submitted').map(receipt => receipt.txHash),
+    }));
 
     const actionResponse = await fetch(`http://127.0.0.1:${towerServer.server.port}/api/watchtower/actions/${lookupKey}`);
     expect(actionResponse.ok).toBe(true);

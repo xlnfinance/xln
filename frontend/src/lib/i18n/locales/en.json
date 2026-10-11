@@ -2,7 +2,7 @@
   "app": {
     "name": "xln",
     "tagline": "The mathematical endgame in scalability, security, and simplicity",
-    "description": "Instant off-chain payments with on-chain security guarantees"
+    "description": "Bilateral payments with signed proofs and collateral-backed claims"
   },
   "landing": {
     "hero": {
@@ -18,7 +18,7 @@
       "cost": "Zero Fees",
       "costDesc": "No gas, no mining fees",
       "security": "Secure",
-      "securityDesc": "On-chain settlement guarantees"
+      "securityDesc": "Only collateral secures repayment; credit limits cap unsecured risk"
     },
     "invite": {
       "title": "Enter Invite Code",

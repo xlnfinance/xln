@@ -6,6 +6,9 @@ import {
 import { ENTITY_TX_CROSS_J_SCHEMAS } from './cross-j-schemas';
 import { ENTITY_TX_OPERATION_SCHEMAS } from './operation-schemas';
 import { ENTITY_TX_PAYMENT_SCHEMAS } from './payment-schemas';
+import { decodeLendingBankTerms } from '../lending-policy';
+import { UINT256_MAX } from '../../protocol/boundary/integer-ranges';
+import { requireBoundaryRecord, requireBigInt, requireBoundaryInteger } from '../../protocol/boundary/boundary-primitives';
 
 const ENTITY_TX_SIMPLE_SCHEMAS = {
   ...ENTITY_TX_PAYMENT_SCHEMAS,
@@ -55,6 +58,16 @@ export const validateSimpleEntityTxData = (
 ): void => {
   const schema: EntityTxDataSchema = ENTITY_TX_SIMPLE_SCHEMAS[type];
   validateEntityTxDataFields(value, schema, code);
+  if (type === 'lendingSetTerms') decodeLendingBankTerms(value);
+  if (type === 'lendingApprove') {
+    const data = requireBoundaryRecord(value, code);
+    const borrower = data['borrowerEntityId'];
+    const amount = requireBigInt(data['maxPrincipal'], 'LENDING_FACILITY_AMOUNT_INVALID', 0n);
+    if (amount > UINT256_MAX) throw new Error('LENDING_FACILITY_AMOUNT_INVALID');
+    if (typeof borrower !== 'string' || !/^0x[0-9a-f]{64}$/.test(borrower)) throw new Error('LENDING_FACILITY_BORROWER_INVALID');
+    requireBoundaryInteger(data['tokenId'], 'LENDING_POLICY_TOKEN_INVALID', 1);
+    requireBoundaryInteger(data['expiresAt'], 'LENDING_POLICY_EXPIRY_INVALID', 0);
+  }
   if (type === 'directPayment') {
     const data = value as Record<string, unknown>;
     const gateway = data['trustedGatewayEntityId'];

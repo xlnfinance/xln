@@ -2098,7 +2098,7 @@ describe('Depository', () => {
           subAmount: 100n,
         },
       ],
-      pull: [],
+      loans: [], pull: [],
     });
     const proofbody = proofBody(
       [0n, 0n],
@@ -2371,13 +2371,21 @@ describe('Depository', () => {
       transformers,
     );
 
-    await expect(
-      depository
-        .connect(dispute.left.signer)
-        .processBatch(dispute.final.encodedBatch, dispute.final.hankoData, dispute.final.nonce, {
-          gasLimit: 2_500_000n,
-        }),
-    ).to.be.revertedWithCustomError(depository, 'TransformerGasBudgetUnavailable');
+    // Measure the starvation limit instead of hardcoding it: bisect eth_call for the least gas at which
+    // this exact finalization succeeds. One gas below, the caller cannot cover the transformer budget
+    // (argument decode + settlement reserve) and must get exactly the budget error, never a starved run.
+    const finalizeArgs = [dispute.final.encodedBatch, dispute.final.hankoData, dispute.final.nonce] as const;
+    const finalizer = depository.connect(dispute.left.signer);
+    const succeeds = (gasLimit: bigint) => finalizer.processBatch.staticCall(...finalizeArgs, { gasLimit })
+      .then(() => true, () => false);
+    let [starvedGas, finalizeGas] = [0n, 15_000_000n];
+    expect(await succeeds(finalizeGas)).to.equal(true);
+    while (finalizeGas - starvedGas > 1n) {
+      const midpoint = (starvedGas + finalizeGas) / 2n;
+      [starvedGas, finalizeGas] = (await succeeds(midpoint)) ? [starvedGas, midpoint] : [midpoint, finalizeGas];
+    }
+    await expect(finalizer.processBatch(...finalizeArgs, { gasLimit: starvedGas }))
+      .to.be.revertedWithCustomError(depository, 'TransformerGasBudgetUnavailable');
     expect((await depository._accounts(dispute.accountKey)).disputeHash).to.not.equal(ethers.ZeroHash);
 
     await expect(
@@ -2604,7 +2612,7 @@ describe('Depository', () => {
     const { depository, deltaTransformer } = await loadFixture(deployFixture);
     const tokenA = await registerFixedSupplyErc20(depository, 10_000n);
     const tokenB = await registerFixedSupplyErc20(depository, 10_000n);
-    const encodedBatch = await deltaTransformer.encodeBatch({ payment: [], pull: [], swap:
+    const encodedBatch = await deltaTransformer.encodeBatch({ payment: [], loans: [], pull: [], swap:
       Array.from({ length: 1_000 }, () => ({
         ownerIsLeft: false, addDeltaIndex: 0, addAmount: 1n, subDeltaIndex: 1, subAmount: 1n,
       })),
@@ -2741,7 +2749,7 @@ describe('Depository', () => {
         subDeltaIndex: 1,
         subAmount: 1n,
       })),
-      pull: [],
+      loans: [], pull: [],
     });
     const fullFillArguments = encodeDeltaTransformerArguments(
       Array.from({ length: 1_000 }, () => Number(MAX_FILL_RATIO)),

@@ -283,7 +283,7 @@ describe_dev_port_listener() {
   ppid="$(LC_ALL=C ps -p "$pid" -o ppid= 2>/dev/null | dev_single_line || true)"
   pgid="$(LC_ALL=C ps -p "$pid" -o pgid= 2>/dev/null | dev_single_line || true)"
   process_start="$(read_dev_process_start_identity "$pid" 2>/dev/null || printf 'unavailable')"
-  cwd="$(lsof -a -p "$pid" -d cwd -Fn 2>/dev/null | sed -n 's/^n//p' | dev_single_line || true)"
+  cwd="$(/bin/sh "${BASH_SOURCE[0]%/*}/../lib/lsof.sh" -a -p "$pid" -d cwd -Fn 2>/dev/null | sed -n 's/^n//p' | dev_single_line || true)"
   command="$(LC_ALL=C ps -ww -p "$pid" -o command= 2>/dev/null | dev_single_line || true)"
   ownership='none'
   for pid_file in "$pid_dir"/*.pid; do
@@ -307,7 +307,7 @@ assert_dev_ports_clear() {
   fi
   local port pids pid
   for port in "$@"; do
-    pids="$(lsof -nP -tiTCP:"$port" -sTCP:LISTEN 2>/dev/null || true)"
+    pids="$(/bin/sh "${BASH_SOURCE[0]%/*}/../lib/lsof.sh" -nP -tiTCP:"$port" -sTCP:LISTEN 2>/dev/null || true)"
     [[ -z "$pids" ]] && continue
     echo "DEV_PORT_BUSY_UNOWNED:port=${port} pids=$(echo "$pids" | paste -sd, -) ownerFile=$([[ -f "$owner_file" ]] && printf present || printf missing)" >&2
     while IFS= read -r pid; do

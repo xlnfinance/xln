@@ -250,6 +250,8 @@ const makeTestDelta = (tokenId: number, value: bigint): Delta => ({
   rightCreditLimit: 1_000_000n,
   leftAllowance: 0n,
   rightAllowance: 0n,
+  leftHold: 0n,
+  rightHold: 0n,
 });
 
 const compareAscii = (left: string, right: string): number => (left < right ? -1 : left > right ? 1 : 0);
@@ -573,7 +575,7 @@ test('runtime adapter direct read paths return compact read snapshots', async ()
       collateral: 0n,
     })),
   };
-  account.state.settlementWorkspace = { notes: 'w'.repeat(100_000) };
+  account.state.settlementWorkspace = { ops: [], lastModifiedByLeft: true, notes: 'w'.repeat(100_000) };
   account.state.swapOffers = new Map(
     Array.from({ length: 101 }, (_, index) => [
       `offer-${index}`,

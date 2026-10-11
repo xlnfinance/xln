@@ -322,11 +322,13 @@ import type { EntityReadView } from '#lib/components/Entity/core/entity-panel-ty
       type: 'lendingBorrow',
       data: {
         requestId: newIntentId('borrow'),
+        expiresAt: Date.now() + 5 * 60_000,
         hubEntityId: selectedHubEntityId,
         tokenId: selectedTokenId,
         amount: borrowAmount,
         termId: borrowTermId,
         maxInterestBps: Math.max(0, Math.floor(Number(maxBorrowInterestBps) || 0)),
+        maxLateMs: 0,
       },
     });
     if (!lastError) borrowAmount = 0n;

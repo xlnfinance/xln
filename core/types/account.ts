@@ -92,7 +92,7 @@ interface AccountRejectedFrameEvidence {
   frameHanko: HankoString;
 }
 
-export interface AccountSubcontract {
+export interface AccountExternalSubcontract {
   transformerAddress: string;
   encodedBatch: string;
   allowances: Array<{
@@ -106,13 +106,32 @@ export interface AccountSubcontract {
   rightArgumentsHash?: string;
 }
 
+/** Bilaterally signed term obligation. The existing subcontract tree owns the
+ * outstanding claim; the bank portfolio is only its allocation/servicing view.
+ * Principal was already transferred at funding. Closing pays it once and removes
+ * this program in the same Account transition. */
+export interface AccountLendingCovenant {
+  kind: 'savings' | 'loan';
+  tokenId: number;
+  creditorIsLeft: boolean;
+  principal: bigint;
+  interest: bigint;
+  openedAt: number;
+  termMs: number;
+  /** Signed simple-interest extension after maturity; zero for fixed savings. */
+  lateMs: number;
+}
+
+export type AccountSubcontract = AccountExternalSubcontract | AccountLendingCovenant;
+
 export type AccountLendingIntentKind =
   | 'fund'
   | 'borrow'
   | 'repay'
   | 'disburse'
   | 'close-request'
-  | 'close-payout';
+  | 'close-payout'
+  | 'dispute-close';
 
 /** Immutable jurisdiction-stack identity shared by both Account replicas. */
 export type AccountStateDomain = {
@@ -689,6 +708,8 @@ export type AccountTx =
         amount: bigint;
         termId: LendingTermId;
         maxInterestBps: number;
+        maxLateMs: number;
+        expiresAt: number;
       };
     }
   | {
@@ -698,6 +719,7 @@ export type AccountTx =
         hubEntityId: string;
         borrowerEntityId: string;
         tokenId: number;
+        /** Maximum authorized debit; the Account settles its exact committed-time quote. */
         amount: bigint;
       };
     }
@@ -705,10 +727,17 @@ export type AccountTx =
       type: 'lending_disburse';
       data: {
         loanId: string;
+        requestId: string;
+        maxInterestBps: number;
+        maxLateMs: number;
+        lateMs: number;
+        expiresAt: number;
         hubEntityId: string;
         borrowerEntityId: string;
         tokenId: number;
         amount: bigint;
+        termId: LendingTermId;
+        interestBps: number;
       };
     }
   | {

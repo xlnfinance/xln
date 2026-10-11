@@ -187,7 +187,7 @@ export const applyAccountTxMutation = async (
     case 'lending_disburse':
     case 'lending_close_request':
     case 'lending_close_payout':
-      return handleLendingAccountTx(account, tx, byLeft);
+      return handleLendingAccountTx(account, tx, byLeft, timestamp);
     case 'request_collateral': return applyCollateralRequest(context);
     case 'rebalance_refund': return handleRebalanceRefund(account, tx, byLeft);
     case 'rebalance_policy': return handleRebalancePolicy(account.state, tx, byLeft, timestamp);

@@ -2,6 +2,7 @@
 pragma solidity ^0.8.24;
 
 import "./math/WideMath.sol";
+import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 
 /// @notice The Depository's hash-ladder reveal registry. The transformer reads
 /// it through msg.sender: applyBatch only ever runs (via Account's DELEGATECALL
@@ -43,6 +44,7 @@ contract DeltaTransformer {
   error PullRevealWindowActive(uint256 disputeTimeout);
   error PullRevealRegistryUnavailable(address caller);
   error InvalidPullAmount();
+  error InvalidLendingCovenant();
   event SecretRevealed(bytes32 indexed hashlock, bytes32 secret);
   // Sole payment-secret evidence store. `hashToTimestamp[hash] != 0` means
   // revealed; `revealedAt` is the first-seen block.timestamp (sticky).
@@ -54,6 +56,19 @@ contract DeltaTransformer {
     Payment[] payment;
     Swap[] swap;
     Pull[] pull;
+    TermLoan[] loans;
+  }
+
+  struct TermLoan {
+    uint256 deltaIndex;
+    bool creditorIsLeft;
+    uint256 principal;
+    uint256 interest;
+    // Signed Account timestamps remain milliseconds. The on-chain dispute
+    // start has second resolution and is converted exactly at this boundary.
+    uint256 openedAt;
+    uint256 termMs;
+    uint256 lateMs;
   }
 
   // actual subcontract structs
@@ -225,7 +240,30 @@ contract DeltaTransformer {
       );
     }
 
+    for (uint i = 0; i < decodedBatch.loans.length; i++) {
+      applyTermLoan(deltas, decodedBatch.loans[i], disputeStartTimestamp);
+    }
     return deltas;
+  }
+
+  function applyTermLoan(Int768[] memory deltas, TermLoan memory claim, uint256 disputeStartTimestamp) private pure {
+    if (claim.deltaIndex >= deltas.length) revert InvalidDeltaIndex();
+    if (claim.principal == 0 || claim.termMs == 0 || claim.lateMs > type(uint256).max - claim.termMs || claim.interest > type(uint256).max - claim.principal || disputeStartTimestamp == 0) {
+      revert InvalidLendingCovenant();
+    }
+    // Both parties signed this exact principal, coupon, clock and beneficiary.
+    // Funding already moved principal creditor -> debtor. Exit reverses that transfer
+    // once and adds earned interest. Freeze at dispute start: neither delayed
+    // finalization nor fresh adversarial arguments can inflate the signed debt.
+    uint256 atMs = disputeStartTimestamp * 1000;
+    uint256 elapsed = atMs > claim.openedAt ? atMs - claim.openedAt : 0;
+    uint256 end = claim.termMs + claim.lateMs;
+    if (Math.mulDiv(claim.interest, end, claim.termMs) > type(uint256).max - claim.principal) revert InvalidLendingCovenant();
+    if (elapsed > end) elapsed = end;
+    uint256 amount = claim.principal + Math.mulDiv(claim.interest, elapsed, claim.termMs);
+    deltas[claim.deltaIndex] = claim.creditorIsLeft
+      ? WideMath.addUint(deltas[claim.deltaIndex], amount)
+      : WideMath.subUint(deltas[claim.deltaIndex], amount);
   }
 
   function decodeArgumentsStrict(bytes calldata encoded) external pure returns (Arguments memory) {

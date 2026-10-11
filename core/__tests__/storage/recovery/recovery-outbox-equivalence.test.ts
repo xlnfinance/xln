@@ -1,4 +1,9 @@
-import { expect, test } from 'bun:test';
+import { createEmptyEnv } from '../../../runtime';
+import { deriveSignerAddressSync } from '../../../account/crypto';
+import { localOutputIncludedIn, retireAppliedLocalOutputs } from '../../../runtime/delivery/local-outbox';
+import type { EntityInput } from '../../../entity/types';
+import type { EntityTx } from '../../../types/entity-tx';
+import { describe, expect, test } from 'bun:test';
 
 import {
   assertRecoveryOutboxMatches,
@@ -81,7 +86,7 @@ test('a peer re-announcing a new signer never bricks replay through a retained o
   // The retained frame-7 output still names signer 33; the peer re-announced
   // and frame 8 sent to signer 44. Hints from both made replay throw a
   // signer conflict on every restart.
-  const accountInput = { type: 'accountInput', data: {} } as RoutedEntityInput['entityTxs'][number];
+  const accountInput = { type: 'accountInput', data: {} } as EntityTx;
   const retained = { ...output('1a'), entityTxs: [accountInput] };
   const current = {
     ...retained,
@@ -92,4 +97,50 @@ test('a peer re-announcing a new signer never bricks replay through a retained o
     .toEqual(new Map([[current.entityId, current.signerId]]));
   expect(() => collectCurrentOutputSignerHints([current, { ...current, signerId: `0x${'55'.repeat(20)}` }], 8))
     .toThrow('RECOVERY_OUTPUT_SIGNER_HINT_CONFLICT');
+});
+
+describe("local outbox recipient commitment", () => {
+  const seed = 'local-outbox-payload-matching';
+  const runtimeId = deriveSignerAddressSync(seed, '1').toLowerCase();
+  const entityId = `0x${'11'.repeat(32)}`;
+  const peer = `0x${'22'.repeat(32)}`;
+  const payment = (amount: bigint): EntityTx => ({ type: 'directPayment', data: {
+    targetEntityId: peer, tokenId: 1, amount, route: [entityId, peer], deliveryMode: 'direct',
+  } });
+  const output = (amount: bigint): RoutedEntityInput => ({
+    entityId, signerId: runtimeId, runtimeId, sourceRuntimeFrame: { height: 7, timestamp: 700 },
+    entityTxs: [payment(amount)],
+  });
+
+  // These are exact-payload index vectors, not signature-verification fixtures.
+  // Production retirement receives only inputs returned by authenticated admission.
+  test('merged recipient inputs match each original output without requiring transport metadata', () => {
+    const rows = [output(100n), output(200n)];
+    const merged: EntityInput = { entityId, signerId: runtimeId, entityTxs: [payment(100n), payment(200n)] };
+    expect(rows.map(localOutputIncludedIn([merged], rows))).toEqual([true, true]);
+    expect(rows.map(localOutputIncludedIn([{ ...merged, entityTxs: [payment(100n)] }], rows))).toEqual([true, false]);
+  });
+
+  test('different financial bytes, recipient or signer cannot retire the original output', () => {
+    const row = output(100n);
+    for (const changed of [output(101n), { ...row, entityId: peer }, { ...row, signerId: `0x${'33'.repeat(20)}` }]) {
+      expect(localOutputIncludedIn([changed], [row])(row)).toBe(false);
+    }
+  });
+
+  test('RAM admission cannot retire an output; committed input retires only the matching local row', () => {
+    const env = createEmptyEnv(seed);
+    env.runtimeId = runtimeId;
+    const first = output(100n);
+    const deferred = output(200n);
+    const remote = { ...first, runtimeId: `0x${'44'.repeat(20)}` };
+    env.pendingNetworkOutputs = [first, remote, deferred];
+    env.runtimeMempool = { runtimeTxs: [], entityInputs: [first, deferred] };
+    retireAppliedLocalOutputs(env, []);
+    expect(env.pendingNetworkOutputs).toEqual([first, remote, deferred]);
+    retireAppliedLocalOutputs(env, [first]);
+    expect(env.pendingNetworkOutputs).toEqual([remote, deferred]);
+    retireAppliedLocalOutputs(env, [deferred]);
+    expect(env.pendingNetworkOutputs).toEqual([remote]);
+  });
 });

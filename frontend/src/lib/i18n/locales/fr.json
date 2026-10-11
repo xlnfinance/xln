@@ -2,7 +2,7 @@
   "app": {
     "name": "xln",
     "tagline": "L'endgame mathématique en évolutivité, sécurité et simplicité",
-    "description": "Paiements off-chain instantanés avec garanties de sécurité on-chain"
+    "description": "Paiements bilatéraux avec preuves signées et créances couvertes par du collatéral"
   },
   "landing": {
     "hero": {
@@ -18,7 +18,7 @@
       "cost": "Frais Zéro",
       "costDesc": "Pas de gas, pas de frais de minage",
       "security": "Sécurisé",
-      "securityDesc": "Garanties de règlement on-chain"
+      "securityDesc": "Seul le collatéral garantit le remboursement ; la limite de crédit borne le risque non garanti"
     },
     "invite": {
       "title": "Entrez le Code d'Invitation",

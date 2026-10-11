@@ -263,7 +263,7 @@ describe("DeltaTransformer", function () {
           subAmount: 2_000,
         },
       ],
-      pull: [],
+      loans: [], pull: [],
     };
     const encodedBatch = await transformer.encodeBatch(batch);
     const rightArguments = encodeTransformerArguments([32767]);
@@ -288,7 +288,7 @@ describe("DeltaTransformer", function () {
           subAmount: 2_000,
         },
       ],
-      pull: [],
+      loans: [], pull: [],
     };
     const encodedBatch = await transformer.encodeBatch(batch);
 
@@ -300,7 +300,7 @@ describe("DeltaTransformer", function () {
 
   it("requires token IDs to stay aligned one-to-one with deltas", async function () {
     const { transformer } = await loadFixture(deployFixture);
-    const encodedBatch = await transformer.encodeBatch({ payment: [], swap: [], pull: [] });
+    const encodedBatch = await transformer.encodeBatch({ payment: [], swap: [], loans: [], pull: [] });
     const timestamp = await time.latest();
     const disputeStartTimestamp = Math.max(1, timestamp - 2);
 
@@ -337,7 +337,7 @@ describe("DeltaTransformer", function () {
           subAmount: 1,
         },
       ],
-      pull: [],
+      loans: [], pull: [],
     };
     const encodedBatch = await transformer.encodeBatch(batch);
     const rightArguments = encodeTransformerArguments([65535]);
@@ -364,7 +364,7 @@ describe("DeltaTransformer", function () {
     const batch = {
       payment: [],
       swap: [],
-      pull: [
+      loans: [], pull: [
         {
           deltaIndex: 0,
           amount: encodeSignedAmount(BigInt(MAX_FILL_RATIO)),
@@ -409,7 +409,7 @@ describe("DeltaTransformer", function () {
     const lateBatch = await transformer.encodeBatch({
       payment: [],
       swap: [],
-      pull: [{
+      loans: [], pull: [{
         deltaIndex: 0,
         amount: encodeSignedAmount(BigInt(MAX_FILL_RATIO)),
         claimedRatio: 0,
@@ -442,7 +442,7 @@ describe("DeltaTransformer", function () {
     const staleBatch = await transformer.encodeBatch({
       payment: [],
       swap: [],
-      pull: [{
+      loans: [], pull: [{
         deltaIndex: 0,
         amount: encodeSignedAmount(BigInt(MAX_FILL_RATIO)),
         claimedRatio: 0,
@@ -478,7 +478,7 @@ describe("DeltaTransformer", function () {
     const targetBatch = await transformer.encodeBatch({
       payment: [],
       swap: [],
-      pull: [{
+      loans: [], pull: [{
         deltaIndex: 0,
         amount: encodeSignedAmount(BigInt(MAX_FILL_RATIO)),
         claimedRatio: 0,
@@ -525,7 +525,7 @@ describe("DeltaTransformer", function () {
     const noneBatch = await transformer.encodeBatch({
       payment: [],
       swap: [],
-      pull: [{
+      loans: [], pull: [{
         deltaIndex: 0,
         amount: encodeSignedAmount(BigInt(MAX_FILL_RATIO)),
         claimedRatio: 0,
@@ -545,7 +545,7 @@ describe("DeltaTransformer", function () {
     const cumulativeBatch = await transformer.encodeBatch({
       payment: [],
       swap: [],
-      pull: [{
+      loans: [], pull: [{
         deltaIndex: 0,
         amount: encodeSignedAmount(BigInt(MAX_FILL_RATIO)),
         claimedRatio: previouslyClaimed,
@@ -580,7 +580,7 @@ describe("DeltaTransformer", function () {
         hash,
       }],
       swap: [],
-      pull: [],
+      loans: [], pull: [],
     };
     const encodedBatch = await transformer.encodeBatch(batch);
     const leftArguments = encodeTransformerArguments([], [secretValue]);
@@ -673,7 +673,7 @@ describe("DeltaTransformer", function () {
           subAmount: 8000,
         },
       ],
-      pull: [],
+      loans: [], pull: [],
     };
 
     const encodedBatch = await transformer.encodeBatch(batch);

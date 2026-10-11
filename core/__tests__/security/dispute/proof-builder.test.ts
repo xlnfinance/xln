@@ -535,6 +535,29 @@ describe('proof-builder dispute hash', () => {
     expect(() => buildAccountProofBody(proofAccount(deltas), '')).toThrow('ABI_MONEY_WIDTH:PROOFBODY_OFFDELTA:token=1');
   });
 
+  test.each([1n, UINT256_MAX])('greedy proof batches reserve both directions independently: %s', amount => {
+    const locks = new Map(['a', 'b', 'c', 'd'].map((id, index) => [id, {
+      tokenId: 1,
+      senderIsLeft: index % 2 === 0,
+      amount,
+      timelock: 100_000n,
+      hashlock: `0x${(index + 1).toString(16).padStart(64, '0')}`,
+    }]));
+    const proof = buildAccountProofBody(proofAccount({
+      deltas: new Map([[1, { ondelta: 0n, offdelta: 0n }]]), locks,
+    }), DEPOSITORY);
+    const batches = proof.runtimeProofBody.transformers.flatMap(clause => 'batch' in clause ? [clause.batch] : []);
+    // Opposite movements cannot cancel prepaid authority. With full-width
+    // amounts the maximal valid prefix is a,b, followed by c,d in that order.
+    expect(batches.map(batch => batch.payments.map(payment => payment.amount))).toEqual(
+      amount === 1n ? [[-1n, 1n, -1n, 1n]] : [[-amount, amount], [-amount, amount]],
+    );
+    const allowance = amount === 1n ? 2n : UINT256_MAX;
+    expect(proof.runtimeProofBody.transformers.map(clause => clause.allowances)).toEqual(
+      batches.map(() => [{ deltaIndex: 0, leftAllowance: allowance, rightAllowance: allowance }]),
+    );
+  });
+
   test('retains full uint256 HTLC obligations by splitting overflowing allowance words', () => {
     const locks = new Map(
       ['a', 'b'].map((lockId, index) => [

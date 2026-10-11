@@ -128,12 +128,13 @@ export const validateCappedTestnetPolicy = (policy: CappedTestnetPolicy): string
   if (policy.$schema !== MAINNET_GATE_LABELS.cappedPolicySchema) {
     errors.push('POLICY_SCHEMA_INVALID');
   }
-  const riskCapUsd = asFiniteNumber(policy.riskCapUsd);
-  if (riskCapUsd !== null) errors.push(`POLICY_UNENFORCED_RISK_CAP_CLAIM:${String(policy.riskCapUsd)}`);
-  if (policy.riskCapEnforcement !== 'not_implemented') {
-    errors.push(`POLICY_RISK_CAP_ENFORCEMENT_MUST_ADMIT_MISSING:${String(policy.riskCapEnforcement)}`);
+  // Owner decision 2026-10-11: open participation, no global financial ceiling.
+  // Bilateral credit limits and financial/recovery gates still apply. Reject a
+  // stale capped-policy claim instead of presenting unrestricted funds as capped.
+  if (policy.riskCapUsd !== null) errors.push(`POLICY_GLOBAL_RISK_CAP_FORBIDDEN:${String(policy.riskCapUsd)}`);
+  if (policy.riskCapEnforcement !== 'not_applicable') {
+    errors.push(`POLICY_RISK_CAP_ENFORCEMENT_NOT_APPLICABLE:${String(policy.riskCapEnforcement)}`);
   }
-  errors.push('CAPPED_TESTNET_EXECUTABLE_RISK_CAP_ENFORCEMENT_MISSING');
   if (asFiniteNumber(policy.expectedTowers) !== MAINNET_GATE.expectedTowers) {
     errors.push(`POLICY_EXPECTED_TOWERS_INVALID:${String(policy.expectedTowers)}`);
   }

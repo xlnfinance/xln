@@ -2,7 +2,7 @@
  * Files that can affect an XLN production release or its release evidence.
  *
  * This is deliberately an inclusion list. External/reference projects such as
- * brainvault/, ui/, design/ and ai/ have their own release lifecycle and must
+ * brainvault/, design/ and ai/ have their own release lifecycle and must
  * not silently expand the XLN signed code root. BrainVault is an independent
  * product and its source tree is never part of XLN release immutability.
  */
@@ -46,6 +46,7 @@ export const XLN_RELEASE_PATHS = [
   'tsconfig.runtime-contract-tests.json',
   'tsconfig.runtime.json',
   'types',
+  'ui',
 ] as const;
 
 export const isXlnReleasePath = (

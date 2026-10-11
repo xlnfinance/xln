@@ -6,6 +6,7 @@ import { normalizeEntityId } from '../../../storage/keys';
 import type { StorageAccountDoc, StorageEntityCoreDoc } from '../../../storage/types';
 import { compareAscii } from '../../../support/collections/sorted-map-index';
 import { copyAccountStateDomain } from '../../../protocol/state/account-input-clone';
+import { accountLendingRisk, type LendingRisk } from '../../../account/validation/lending-risk';
 import {
   emptyPageMeta,
   withDefinedProp,
@@ -18,6 +19,21 @@ import {
 
 // Bounded network DTOs for Entity cores, Account docs, J-batches and books:
 // samples, counts and redactions so a view never clones unbounded live state.
+
+type RuntimeAdapterDebtTotals = Readonly<{
+  incoming: ReadonlyMap<number, bigint>;
+  outgoing: ReadonlyMap<number, bigint>;
+}>;
+
+export type RuntimeAdapterEntityCoreView = RuntimeAdapterEntityCoreDoc & {
+  /** Full active debt amounts, computed before the bounded detail sample. */
+  debtTotals: RuntimeAdapterDebtTotals;
+};
+
+const debtTotalsByToken = (ledger: StorageEntityCoreDoc['inDebtsByToken']): Map<number, bigint> =>
+  new Map(Array.from(ledger ?? [], ([tokenId, entries]) => [
+    tokenId, Array.from(entries.values()).reduce((total, entry) => total + entry.remainingAmount, 0n),
+  ]));
 
 type AccountStateDoc = StorageAccountDoc['state'];
 type RuntimeAdapterAccountStateDoc = Omit<
@@ -51,6 +67,8 @@ type RuntimeAdapterActiveDispute = Pick<NonNullable<StorageAccountDoc['activeDis
 >;
 type RuntimeAdapterAccountDoc = Omit<StorageAccountDoc, 'state' | 'pendingWithdrawals' | 'shadow' | 'activeDispute' | 'disputePrepare'> & {
   state: RuntimeAdapterAccountStateDoc;
+  /** Exact current exposure, including every signed claim and settlement hold. */
+  lendingRisk: LendingRisk;
   /** Bodies stay redacted; zero here means the live Account queue is actually empty. */
   mempoolCount: number;
   activeDispute?: RuntimeAdapterActiveDispute;
@@ -142,6 +160,8 @@ export const compactAccountDocForView = (
     ...boundedState
   } = doc.state;
   const compact: RuntimeAdapterAccountDoc = {
+    // Compute against every claim before matching the visible token page.
+    lendingRisk: compactMapHead(accountLendingRisk(doc), 100) ?? new Map(),
     state: {
       ...boundedState,
       domain: copyAccountStateDomain(doc.state.domain),
@@ -347,8 +367,8 @@ const compactJBatchStateForView = (state: JBatchState | undefined): JBatchState 
   return compactState;
 };
 
-export const compactEntityCoreForRemote = (core: RuntimeAdapterEntityCoreDoc): RuntimeAdapterEntityCoreDoc => {
-  const compact: RuntimeAdapterEntityCoreDoc = {
+export const compactEntityCoreForRemote = (core: RuntimeAdapterEntityCoreDoc): RuntimeAdapterEntityCoreView => {
+  const compact: RuntimeAdapterEntityCoreView = {
     entityId: core.entityId,
     entityEncryptionPublicKey: core.entityEncryptionPublicKey,
     ...withDefinedProp('signerId', core.signerId),
@@ -366,6 +386,10 @@ export const compactEntityCoreForRemote = (core: RuntimeAdapterEntityCoreDoc): R
       feesEarned: core.paybook.feesEarned,
     },
     paybookOpen: core.paybook.entries.size,
+    debtTotals: {
+      incoming: debtTotalsByToken(core.inDebtsByToken),
+      outgoing: debtTotalsByToken(core.outDebtsByToken),
+    },
     ...withDefinedProp('metrics', core.metrics),
   };
 
@@ -480,7 +504,7 @@ export const compactViewPageForRemote = (entityId: string, view: {
   accounts: RuntimeAdapterAccountPage;
   books: RuntimeAdapterBookPage;
 }): {
-  core: RuntimeAdapterEntityCoreDoc;
+  core: RuntimeAdapterEntityCoreView;
   accounts: RuntimeAdapterAccountViewPage;
   books: RuntimeAdapterPortableBookPage;
 } => ({

@@ -14,13 +14,13 @@ import {
   readAtHeight,
   readBestHead,
   readBoundedLimit,
-  type RuntimeAdapterEntityCoreDoc,
   type RuntimeAdapterResolveContext,
 } from './context';
 import {
   compactViewPageForRemote,
   type RuntimeAdapterAccountViewPage,
   type RuntimeAdapterPortableBookPage,
+  type RuntimeAdapterEntityCoreView,
 } from './compact-view';
 
 // The view-frame projection (entity list plus one active Entity page) at the
@@ -28,7 +28,7 @@ import {
 
 type RuntimeAdapterViewEntityFrame = {
   summary: RuntimeAdapterEntitySummary;
-  core: RuntimeAdapterEntityCoreDoc;
+  core: RuntimeAdapterEntityCoreView;
   accounts: RuntimeAdapterAccountViewPage;
   books: RuntimeAdapterPortableBookPage;
 };

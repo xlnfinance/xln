@@ -10,6 +10,7 @@ import { validateEntityState } from '../../entity/state/state-validation';
 import { FINANCIAL, TOKENS } from '../../config/constants';
 import { normalizeAccountWatchSeed } from '../../protocol/identity/account-watch-seed';
 import { UINT256_MAX } from '../../protocol/boundary/integer-ranges';
+import { assertLendingCovenant } from '../../protocol/dispute/lending-covenant';
 import { HASHABLE_DELTA_FIELDS } from '../../types/hash-coverage/account-nested';
 import type { AccountFrame, AccountState } from '../../types/account';
 import type { StorageAccountDoc, StorageEntityCoreDoc } from '../types';
@@ -304,6 +305,10 @@ const validateStorageAccountStateMaps = (state: AccountState, code: string): voi
   if (state.subcontracts !== undefined) {
     for (const subcontract of requireStorageMap(state.subcontracts, `${code}_SUBCONTRACTS`).values()) {
       const row = requireBoundaryRecord(subcontract, `${code}_SUBCONTRACT`);
+      if ('kind' in row) {
+        assertLendingCovenant(row);
+        continue;
+      }
       const address = requireStorageString(row['transformerAddress'], `${code}_TRANSFORMER`);
       if (!/^0x[0-9a-f]{40}$/.test(address)) throw new Error(`${code}_TRANSFORMER`);
       for (const allowance of requireStorageArray(row['allowances'], `${code}_ALLOWANCES`))

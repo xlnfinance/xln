@@ -1,4 +1,5 @@
 import { validateAccountReplica } from '../../account/validation/state-validation';
+import { validateLendingPolicies } from '../lending-policy';
 import {
   FinancialDataCorruptionError,
   validateMapInstance,
@@ -189,6 +190,7 @@ function assertEntityState(
     const lending = validateObject(entity['lending'], `${context}.lending`);
     validateMapInstance(lending['pools'], `${context}.lending.pools`);
     validateMapInstance(lending['loans'], `${context}.lending.loans`);
+    validateLendingPolicies(lending);
   }
 }
 

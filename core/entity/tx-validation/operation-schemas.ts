@@ -60,12 +60,24 @@ export const ENTITY_TX_OPERATION_SCHEMAS = {
     },
     literals: { termId: ['1h', '1d', '1m'] },
   },
+  lendingSetTerms: {
+    required: {
+      chainId: 'integer', depositoryAddress: 'string', tokenId: 'integer', termId: 'string',
+      savingsInterestBps: 'integer', loanInterestBps: 'integer', loanLateMs: 'integer', expiresAt: 'integer',
+    },
+    literals: { termId: ['1h', '1d', '1m'] },
+  },
+  lendingApprove: {
+    required: {
+      borrowerEntityId: 'string', tokenId: 'integer', termId: 'string', maxPrincipal: 'bigint', expiresAt: 'integer',
+    },
+    literals: { termId: ['1h', '1d', '1m'] },
+  },
   lendingBorrow: {
     required: {
       requestId: 'string', hubEntityId: 'string', tokenId: 'integer',
-      amount: 'bigint', termId: 'string',
+      amount: 'bigint', termId: 'string', maxInterestBps: 'integer', maxLateMs: 'integer', expiresAt: 'integer',
     },
-    optional: { maxInterestBps: 'integer' },
     literals: { termId: ['1h', '1d', '1m'] },
   },
   lendingRepay: {

@@ -147,6 +147,20 @@ const clearFinalizedCollections = (account: AccountReplica): void => {
   if (account.state.pulls && account.state.pulls.size > 0) {
     account.state.pulls = requirePersistentAccountStateMap(account.state.pulls, 'pulls').emptied();
   }
+  if (account.state.subcontracts && account.state.subcontracts.size > 0) {
+    for (const [id, claim] of account.state.subcontracts) {
+      if (!('kind' in claim)) continue;
+      // Finality consumes the old epoch, including claims absent from an older
+      // winning proof. Preserve replay protection without forging a cash payout:
+      // the Depository's reserves/debt events now own recovery of any shortfall.
+      const intents = account.state.lendingIntents;
+      if (!intents) throw new Error(`SAVINGS_FINALITY_RECEIPTS_MISSING:${id}`);
+      account.state.lendingIntents = requirePersistentAccountStateMap(
+        intents, 'lendingIntents',
+      ).updated(`dispute:${id}`, 'dispute-close');
+    }
+    account.state.subcontracts = requirePersistentAccountStateMap(account.state.subcontracts, 'subcontracts').emptied();
+  }
 };
 
 /**

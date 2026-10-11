@@ -2,7 +2,7 @@
   "app": {
     "name": "xln",
     "tagline": "O endgame matemático em escalabilidade, segurança e simplicidade",
-    "description": "Pagamentos off-chain instantâneos com garantias de segurança on-chain"
+    "description": "Pagamentos bilaterais com provas assinadas e direitos cobertos por colateral"
   },
   "landing": {
     "hero": {
@@ -18,7 +18,7 @@
       "cost": "Taxa Zero",
       "costDesc": "Sem gas, sem taxas de mineração",
       "security": "Seguro",
-      "securityDesc": "Garantias de liquidação on-chain"
+      "securityDesc": "Só o colateral assegura o pagamento; o limite de crédito limita o risco sem garantia"
     },
     "invite": {
       "title": "Digite o Código de Convite",

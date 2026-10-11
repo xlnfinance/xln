@@ -27,7 +27,7 @@ const flushPending = (): void => {
     // missing local key) must reach the frame that judges it, never escape
     // here as an uncaught exception that exits the process.
     try {
-      void primeProposalHankos(txs);
+      void primeProposalHankos(txs, env.accountAuthorityExecutionMode === 'cutover' ? 'frame' : 'frame-and-dispute');
       const replica = Array.from(env.state.eReplicas.values()).find(
         candidate => candidate.entityId.toLowerCase() === entityId,
       );

@@ -10,25 +10,9 @@ import { decodeRscoreAccountTx } from '../../rscore/wave-decode';
 import { ACCOUNT_TX_TYPES } from '../../account/tx/catalog';
 import type { AccountTx } from '../../types/account';
 
-/**
- * The transaction wire is a contract between two languages, and each side
- * being self-consistent is exactly what a silent disagreement also looks
- * like. These vectors are the shared bytes: this file holds TypeScript to
- * them, and crates/process/tests/tx_wire_vectors.rs holds Rust to the same
- * file.
- *
- * Scope: every canonical AccountTx. The catalog assertion below is the gate:
- * adding or removing a TypeScript variant without a shared TS/Rust byte vector
- * fails before either engine may claim parity.
- *
- * Every case appears twice — once with every optional field present, once
- * with none — because absent and present take different branches on both
- * sides, and a codec that only ever sees one shape is only half tested.
- *
- * To regenerate after a transaction gains a field, run the generator at the
- * bottom of this file and review the diff: a changed vector is a changed
- * protocol.
- */
+/** Exact canonical TS Account worker wire. Rust is frozen and these vectors do
+ * not claim Rust parity. Changed rows require an independently derived literal;
+ * never regenerate the whole catalog to bless a protocol change. */
 
 const VECTORS = join(import.meta.dir, 'tx-wire-vectors.json');
 
@@ -43,9 +27,9 @@ export const TX_WIRE_CASES: { name: string; tx: AccountTx }[] = [
   { name: 'direct_payment/full', tx: { type: 'direct_payment', data: { tokenId: 1, amount: 25n, route: [B], description: 'memo', fromEntityId: A, toEntityId: B, deliveryMode: 'trusted', trustedGatewayEntityId: B } } },
   { name: 'direct_payment/minimal', tx: { type: 'direct_payment', data: { tokenId: 1, amount: 1n, route: [], fromEntityId: A, toEntityId: B, deliveryMode: 'direct' } } },
   { name: 'lending_fund', tx: { type: 'lending_fund', data: { positionId: 'position-1', hubEntityId: A, lenderEntityId: B, tokenId: 1, amount: 100n, termId: '1d', interestBps: 250 } } },
-  { name: 'lending_borrow_request', tx: { type: 'lending_borrow_request', data: { requestId: 'borrow-1', hubEntityId: A, borrowerEntityId: B, tokenId: 1, amount: 50n, termId: '1h', maxInterestBps: 300 } } },
+  { name: 'lending_borrow_request', tx: { type: 'lending_borrow_request', data: { requestId: 'borrow-1', hubEntityId: A, borrowerEntityId: B, tokenId: 1, amount: 50n, termId: '1h', maxInterestBps: 300, maxLateMs: 0, expiresAt: 60_000 } } },
   { name: 'lending_repay', tx: { type: 'lending_repay', data: { loanId: 'loan-1', hubEntityId: A, borrowerEntityId: B, tokenId: 1, amount: 25n } } },
-  { name: 'lending_disburse', tx: { type: 'lending_disburse', data: { loanId: 'loan-1', hubEntityId: A, borrowerEntityId: B, tokenId: 1, amount: 500n } } },
+  { name: 'lending_disburse', tx: { type: 'lending_disburse', data: { loanId: 'loan-1', requestId: 'borrow-1', maxInterestBps: 300, maxLateMs: 0, lateMs: 0, expiresAt: 60_000, hubEntityId: A, borrowerEntityId: B, tokenId: 1, amount: 500n, termId: '1d', interestBps: 100 } } },
   { name: 'lending_close_request', tx: { type: 'lending_close_request', data: { positionId: 'position-1', hubEntityId: A, lenderEntityId: B } } },
   { name: 'lending_close_payout', tx: { type: 'lending_close_payout', data: { positionId: 'position-1', hubEntityId: A, lenderEntityId: B, tokenId: 1, amount: 75n } } },
   { name: 'htlc_lock/full', tx: { type: 'htlc_lock', data: { lockId: 'lock-1', hashlock: HASHLOCK, timelock: 1_700_000_000_000n, revealBeforeHeight: 12, amount: 500n, tokenId: 1, deliveryMode: 'async' } } },
@@ -110,6 +94,15 @@ if (Bun.env['RSCORE_GENERATE_TX_WIRE'] === '1') {
 
   test('retired revolving-credit wire cannot be decoded as a principal transfer', () => {
     expect(() => decodeRscoreAccountTx([13, 0, 'loan-1', A, B, 1, '500'])).toThrow();
+  });
+
+  test('disbursement without signed term and rate is rejected', () => {
+    expect(() => decodeRscoreAccountTx([24, 'loan-1', A, B, 1, '500'])).toThrow();
+  });
+
+  test('old borrow and disburse rows cannot acquire unsigned late-interest terms', () => {
+    expect(() => decodeRscoreAccountTx([11, 'borrow-1', A, B, 1, '50', 0, 300, 60000])).toThrow();
+    expect(() => decodeRscoreAccountTx([24, 'loan-1', A, B, 1, '500', 1, 100, 'borrow-1', 300, 60000])).toThrow();
   });
 
   test('TypeScript reads back the transaction it wrote', () => {

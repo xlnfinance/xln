@@ -16,7 +16,7 @@ import { RuntimeWsClient } from './ws-client';
 import { canonicalizeRuntimeWsAudience, directRuntimeWsAudience } from './ws-protocol';
 import { buildLocalEntityProfile } from './gossip/helper';
 import { extractEntityId } from '../../protocol/identity';
-import type { EntityState } from '../../entity/types';
+import { buildEntityProfileDescriptor } from '../../entity/profile/profile-descriptor';
 import { getEntityReplicaById } from '../../entity/replica/replica-lookup';
 import {
   computeProfileHash,
@@ -355,13 +355,23 @@ const GOSSIP_ROUTE_FETCH_RETRY_DELAYS_MS = [60, 120, 240];
 // bounded relay request instead of creating one gossip exchange per envelope.
 const PROFILE_PREFETCH_COALESCE_MS = 10;
 
-/** Everything a peer needs from a non-hub profile except live capacities. */
+/** Routing policy changes publish immediately; ordinary balances use the heartbeat. */
 type AnnounceStateTopology = Readonly<{
   accountsKey: string;
-  profile: EntityState['profile'];
-  config: EntityState['config'];
-  hubConfig: EntityState['hubRebalanceConfig'];
+  policyKey: string;
+  routingKey: string;
 }>;
+
+const profileAccountTopology = (profile: Pick<Profile, 'publicAccounts' | 'accounts'>) => [
+  profile.publicAccounts,
+  profile.accounts.map(account => [
+    account.counterpartyId,
+    account.domain,
+    Object.keys(account.tokenCapacities instanceof Map
+      ? Object.fromEntries(account.tokenCapacities)
+      : account.tokenCapacities).sort(compareStableText),
+  ]),
+];
 
 const profileTopologyKey = (profile: Profile): string => safeStringify([
   profile.entityId,
@@ -371,14 +381,7 @@ const profileTopologyKey = (profile: Profile): string => safeStringify([
   profile.runtimeEncPubKey,
   profile.wsUrl,
   profile.relays,
-  profile.publicAccounts,
-  profile.accounts.map(account => [
-    account.counterpartyId,
-    account.domain,
-    Object.keys(account.tokenCapacities instanceof Map
-      ? Object.fromEntries(account.tokenCapacities)
-      : account.tokenCapacities).sort(compareStableText),
-  ]),
+  ...profileAccountTopology(profile),
   { ...profile.metadata, profileHanko: undefined },
 ]);
 export class RuntimeP2P {
@@ -1602,10 +1605,9 @@ export class RuntimeP2P {
   }
 
   /**
-   * Cheap pre-check from the replica State itself: a profile whose routing
-   * topology cannot have changed since the last announcement, inside the
-   * heartbeat window, is not even built. Building and re-certifying the
-   * profile on every debounce tick was most of a user Runtime's frame cost.
+   * Compare values from the canonical descriptor before signing a route.
+   * Its selected token rows and receive edges must refresh on first funding
+   * or exhaustion even when credit policy and stored row counts are unchanged.
    */
   private announceStateTopology(entityId: string): AnnounceStateTopology | undefined {
     const replica = getEntityReplicaById(this.env, entityId);
@@ -1613,13 +1615,21 @@ export class RuntimeP2P {
     const state = replica.state;
     const accounts: string[] = [];
     for (const [counterpartyId, account] of state.accounts) {
-      accounts.push(`${counterpartyId}:${account.state.deltas.size}`);
+      // A newly authorized receive limit must reach senders immediately. With
+      // a one-hour user heartbeat, suppressing this change leaves a solvent
+      // recipient advertised at zero capacity after its first payment.
+      const limits = account.publicPinned === true
+        ? [...account.state.deltas].map(([id, delta]) => `${id}:${delta.leftCreditLimit}:${delta.rightCreditLimit}`).join(';')
+        : '';
+      accounts.push(`${counterpartyId}:${account.state.deltas.size}:${limits}`);
     }
     return {
       accountsKey: `${state.entityEncryptionPublicKey}|${accounts.sort(compareStableText).join(',')}`,
-      profile: state.profile,
-      config: state.config,
-      hubConfig: state.hubRebalanceConfig,
+      // Every Entity commit clones its bounded shell. Object identity therefore
+      // changed even after chat/payment-only frames and defeated the heartbeat.
+      // Compare exact policy values; board, pricing and profile edits still publish.
+      policyKey: safeStringify([state.profile, state.config, state.hubRebalanceConfig]),
+      routingKey: safeStringify(profileAccountTopology(buildEntityProfileDescriptor(state))),
     };
   }
 
@@ -1629,21 +1639,21 @@ export class RuntimeP2P {
     const current = this.announceStateTopology(entityId);
     if (!current) return false;
     return previous.accountsKey === current.accountsKey
-      && previous.profile === current.profile
-      && previous.config === current.config
-      && previous.hubConfig === current.hubConfig
+      && previous.policyKey === current.policyKey
+      && previous.routingKey === current.routingKey
       && Date.now() - (this.lastAnnouncedProfiles.get(normalizeId(entityId))?.at ?? 0) < this.profileHeartbeatMs;
   }
 
   /**
    * Capacity changes on every financial frame and are stale immediately under
    * load. Relay publication is therefore topology-triggered for every Entity,
-   * including hubs; capacity hints refresh on the configured heartbeat. Exact
-   * bilateral admission remains the financial capacity authority.
+   * including hubs; credit-policy changes publish immediately, while ordinary
+   * balance hints refresh on the heartbeat. Bilateral admission remains final.
    */
   private shouldAnnounceProfile(profile: Profile): boolean {
     const previous = this.lastAnnouncedProfiles.get(normalizeId(profile.entityId));
     if (!previous) return true;
+    if (!this.announceTopologyUnchanged(profile.entityId)) return true;
     if (previous.topologyKey !== profileTopologyKey(profile)) return true;
     return Date.now() - previous.at >= this.profileHeartbeatMs;
   }

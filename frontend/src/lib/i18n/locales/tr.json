@@ -2,7 +2,7 @@
   "app": {
     "name": "xln",
     "tagline": "Ölçeklenebilirlik, güvenlik ve sadelikte matematiksel son nokta",
-    "description": "Zincir üstü güvenlik garantileri ile anında zincir dışı ödemeler"
+    "description": "İmzalı kanıtlar ve teminatla desteklenen alacaklarla ikili ödemeler"
   },
   "landing": {
     "hero": {
@@ -18,7 +18,7 @@
       "cost": "Sıfır Ücret",
       "costDesc": "Gas yok, madencilik ücreti yok",
       "security": "Güvenli",
-      "securityDesc": "Zincir üstü uzlaşma garantileri"
+      "securityDesc": "Yalnızca teminat geri ödemeyi güvenceye alır; kredi limiti teminatsız riski sınırlar"
     },
     "invite": {
       "title": "Davet Kodunu Girin",

@@ -118,20 +118,51 @@ export declare namespace DeltaTransformer {
     targetRole: boolean;
   };
 
+  export type TermLoanStruct = {
+    deltaIndex: BigNumberish;
+    creditorIsLeft: boolean;
+    principal: BigNumberish;
+    interest: BigNumberish;
+    openedAt: BigNumberish;
+    termMs: BigNumberish;
+    lateMs: BigNumberish;
+  };
+
+  export type TermLoanStructOutput = [
+    deltaIndex: bigint,
+    creditorIsLeft: boolean,
+    principal: bigint,
+    interest: bigint,
+    openedAt: bigint,
+    termMs: bigint,
+    lateMs: bigint
+  ] & {
+    deltaIndex: bigint;
+    creditorIsLeft: boolean;
+    principal: bigint;
+    interest: bigint;
+    openedAt: bigint;
+    termMs: bigint;
+    lateMs: bigint;
+  };
+
   export type BatchStruct = {
     payment: DeltaTransformer.PaymentStruct[];
     swap: DeltaTransformer.SwapStruct[];
     pull: DeltaTransformer.PullStruct[];
+    loans: DeltaTransformer.TermLoanStruct[];
   };
 
   export type BatchStructOutput = [
     payment: DeltaTransformer.PaymentStructOutput[],
     swap: DeltaTransformer.SwapStructOutput[],
-    pull: DeltaTransformer.PullStructOutput[]
+    pull: DeltaTransformer.PullStructOutput[],
+    loans: DeltaTransformer.TermLoanStructOutput[]
   ] & {
     payment: DeltaTransformer.PaymentStructOutput[];
     swap: DeltaTransformer.SwapStructOutput[];
     pull: DeltaTransformer.PullStructOutput[];
+    loans: DeltaTransformer.TermLoanStructOutput[];
   };
 }
 

@@ -1,5 +1,7 @@
 import { describe, expect, test } from 'bun:test';
-import { makeAccount } from '../../helpers/cross-j';
+import { makeAccount, putTestAccountDelta } from '../../helpers/cross-j';
+import { buildLocalEntityProfile } from '../../../network/p2p/gossip/helper';
+import { computeEntityProfileHash } from '../../../entity/profile/profile-descriptor';
 import { PersistentEntityAccountMap } from '../../../entity/state/persistent-account-map';
 import { computeEntityAccountValueHash } from '../../../entity/consensus/state-root';
 
@@ -67,7 +69,7 @@ const createHub = (seed: string) => {
 };
 
 describe('cold committed Runtime outbox', () => {
-  test('a new local Entity announces its signed route on an already authenticated direct socket before output', async () => {
+  test('certified routes and new credit limits publish on the authenticated socket without ordinary balance spam', async () => {
     const seed = 'late-local-direct-profile';
     const env = createEmptyEnv(seed, 1);
     env.runtimeConfig = { minFrameDelayMs: 0, loopIntervalMs: 1, storage: { enabled: false } };
@@ -91,7 +93,7 @@ describe('cold committed Runtime outbox', () => {
       p2p.prepareDirectEntityRoutes([hub.profile.entityId]);
       await waitFor(() => p2p.canDeliver(hub.runtimeId));
       expect(hub.announcements).toEqual([]);
-      const local = await bootstrapHub(env, { name: 'Late owner', seed, signerId: 'late-owner' });
+      const local = await bootstrapHub(env, { name: 'Late owner', seed, signerId: '2' });
       if (!local) throw new Error('TEST_LATE_OWNER_MISSING');
       await p2p.announceProfilesForEntitiesNow([local.entityId]);
       const frame = { height: env.state.height, timestamp: env.state.timestamp };
@@ -113,11 +115,38 @@ describe('cold committed Runtime outbox', () => {
       expect(hub.order).toEqual(['gossip_announce', 'entity_inputs', 'entity_inputs']);
       expect(hub.announcements).toHaveLength(1);
       expect(hub.failures).toEqual([]);
+      const owner = [...env.state.eReplicas.values()].find(replica => replica.entityId === local.entityId)!;
+      const installCertifiedAccount = (limit: bigint, offdelta = 0n) => {
+        const [left, right] = [local.entityId, hub.profile.entityId].sort();
+        const account = makeAccount(left!, right!);
+        account.publicPinned = true;
+        putTestAccountDelta(account, { ...account.state.deltas.get(1)!,
+          collateral: 0n, ondelta: 0n, offdelta, leftCreditLimit: limit, rightCreditLimit: limit });
+        owner.state.accounts = owner.state.accounts.updated(hub.profile.entityId, account);
+        const signed = certifySingleSignerProfileFixture(buildLocalEntityProfile(env, owner.state, env.state.timestamp), seed, '2');
+        const hanko = signed.metadata.profileHanko;
+        if (!hanko || !owner.hankoWitness) throw new Error('TEST_CURRENT_PROFILE_CERTIFICATE_MISSING');
+        owner.hankoWitness.set(computeEntityProfileHash(owner.state), {
+          hanko, type: 'profile', entityHeight: owner.state.height, createdAt: env.state.timestamp,
+        });
+      };
+      installCertifiedAccount(100_000_000n);
+      await p2p.announceProfilesForEntitiesNow([local.entityId]);
+      await waitFor(() => hub.announcements.length === 2);
+      // A signed policy increase must be visible before the one-hour heartbeat.
+      installCertifiedAccount(103_000_000n);
+      await p2p.announceProfilesForEntitiesNow([local.entityId]);
+      await waitFor(() => hub.announcements.length === 3);
+      const updated = parseProfile((hub.announcements[2] as { profiles: unknown[] }).profiles[0]);
+      expect((await verifyProfileSignature(updated)).valid).toBe(true);
+      expect(updated.accounts[0]?.tokenCapacities).toEqual({ '1': { inCapacity: 103_000_000n, outCapacity: 103_000_000n } });
+      installCertifiedAccount(103_000_000n, 1n);
+      await p2p.announceProfilesForEntitiesNow([local.entityId]);
+      expect(hub.announcements).toHaveLength(3);
       // Restore an idle receiver: no outgoing payment may be required to
       // recreate the authenticated inbound route for an existing Account.
       await stopP2PAndWait(env);
       await waitFor(() => !hub.route.hasOpenSession(env.runtimeId!));
-      const owner = [...env.state.eReplicas.values()].find(replica => replica.entityId === local.entityId)!;
       owner.state.accounts = PersistentEntityAccountMap.fromMap(
         new Map([[hub.profile.entityId, makeAccount(local.entityId, hub.profile.entityId)]]),
         local.entityId, computeEntityAccountValueHash,

@@ -150,6 +150,7 @@ const makeState = (timestamp: number): EntityState => ({
       termId: '1d',
       termMs: 86_400_000,
       openedAt: 1_000,
+      lateMs: 0,
       dueAt: TRIGGER_AT,
       updatedAt: 1_000,
       status: 'active',

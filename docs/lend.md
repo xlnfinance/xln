@@ -1,7 +1,13 @@
 # XLN Lend/Borrow
 
-**Status:** required for first launch by owner instruction on 2026-09-07
-(Istanbul time); implementation is not yet production-ready.
+**Status:** restored to launch scope by the owner's latest 2026-10-11 instruction;
+implementation is not yet production-ready. TypeScript, React and Ethereum same-J
+are the release paths; Rust and the Svelte wallet remain frozen.
+
+The product has two actions: **Save with a bank** (lend to the bank Entity for
+agreed interest) and **Borrow from a bank**. These create separate bilateral
+Account obligations. The bank owes its saver even when its borrower defaults.
+Users should not need to understand internal funding-allocation labels.
 
 ## Current implementation and accounting
 
@@ -14,31 +20,173 @@ once, then its bilateral commit finalizes the hub book without a credit-revoke
 round trip. Defaults preserve the unpaid loan and the depositor's principal claim;
 a withdrawal still requires actual bilateral payout capacity.
 
-The old revolving-credit transaction is removed. Its numeric wire tag 13 is
-rejected; disbursement uses tag 24. Old credit-grant/revoke intent tags 3/4 are
-rejected on restore; disbursement uses tag 7. Existing data containing the old
-lending protocol requires an explicit offline migration. It must not be replayed
-under the new principal-transfer semantics. Disposable local test data is reset.
+The saver now has an independent term return: at maturity the bank owes the
+original principal plus the deposit's agreed term interest, even with no matched
+borrower or with loans still active. Borrower interest belongs to the bank.
+Early cancellation is available only after allocated loans are cleared and does
+not earn unelapsed deposit interest. Already committed position earnings are
+preserved. Closing fixes the payout amount; subsequent borrower repayment or
+default cannot change that payout or recreate a paid position. Actual Account
+payout capacity remains necessary; this is a debt obligation, not a guarantee
+that an insolvent bank can pay.
 
-Both wallets include hub-reported deposits and subtract unpaid term-loan
-repayments in total balance. Example: start with 100, borrow 2 at 1% per term;
-the account contains 102, the loan obligation is 2.02, and net balance is 99.98.
-This projection is an estimate from the hub, not new settlement authority.
+Savings and borrower loans now share a signed executable term covenant in the
+existing Account subcontract tree. Funding transfers principal once and commits the asset, creditor side, principal,
+term coupon and Account-frame clock. The stock DeltaTransformer realizes principal
+plus accrued simple interest at unilateral exit. Savings stop at the term coupon;
+loans stop at their individually signed late-interest end and maximum amount.
+Accrual freezes at dispute start; delaying finalization earns nothing extra. An
+early cooperative cancellation can waive earned interest through the bilateral
+payout. That payout removes the same claim atomically; a smaller-than-principal
+payment or a different asset cannot erase it. The bank portfolio uses the signed
+Account clock, not a later Entity observation time.
 
-Verification commands:
+Disbursement includes the exact term, rate and `lateMs` in the Account transaction.
+Bank policy publishes `loanLateMs`; the borrower request signs `maxLateMs` alongside
+its maximum rate. The bank cannot exceed either authorization. Savings sign zero
+late duration and keep their independent fixed return. No interest compounds.
 
-- `bun run test:lending:fast`: deterministic Account/Entity scenarios, shared
-  TS/Rust semantic vectors, wire rejection and signed portfolio valuation.
-- `bun run test:lending:e2e`: real React and Svelte controls on `bun run dev`.
-  React uses separate lender and borrower wallets and spends the proceeds before
-  repayment. Svelte exercises the full fund/disburse/repay/withdraw path.
-  Use a clean disposable stand; pre-existing competitive offers can change the
-  selected lender, and the test must fail rather than claim the wrong payout.
+For principal `P`, agreed term coupon `I`, term `T`, signed late window `L`, and
+elapsed milliseconds `e`, exit pays `P + floor(I * clamp(e, 0, T + L) / T)`.
+The maximum is `P + floor(I * (T + L) / T)`. Cooperative full repayment charges at
+least the ordinary term coupon, then follows that same clock. Dispute execution
+freezes `e` at dispute start. All sums and clock endpoints are range checked.
 
-Admission is open. The implementation still automatically matches offers;
-manual underwriting, jurisdiction-enforceable term claims and late repayment
-remain separate release requirements. The design below describes the broader
-product target, not evidence that all release requirements are implemented.
+Repayment `amount` is the borrower's signed **maximum debit**. The Account pays only
+the amount due at its committed frame timestamp and atomically removes the claim;
+a maximum below that quote rejects without mutation. The bank books that same
+Account timestamp, even if its Entity has since observed a later clock. React
+shows the maximum before submission. This prevents a quote/signing delay from
+causing rejection or overcharging. Partial payments remain unsupported; a lower
+maximum does not partially erase or alter the covenant.
+
+The Account owns `lateMs` in its existing root-bound subcontract. The bank retains
+the same origination field in its committed servicing book because the Account
+claim is deleted at repayment and current bank policy can change. Cold restore
+validates these fields; repayment and default regressions preserve the original
+terms and the saver's independent claim. No new receipt or historical scan is added.
+
+Dispute finality retires every old-epoch subcontract and records `dispute-close`
+in the existing lending receipt tree. It never invents a `repay` or `close-payout`.
+The bank book marks affected positions/loans `disputed`; authenticated reserve and
+debt events own subsequent recovery. A saver exit does not erase a different
+borrower's receivable. Retired capital cannot fund another loan or a second payout,
+and a stale HTTP portfolio cannot restore it in the wallet's lending estimate.
+
+Savings, ordinary debt and pending spending share the existing signed credit limit.
+Admission reserves the full promised term-plus-late coupon and checks pending collateral withdrawals;
+it never treats opposite unearned interest as collateral. Lowering a limit remains
+prospective and does not erase the claim or prevent a collateral top-up. This is
+Account risk enforcement. Bank approval is a separate authenticated Entity policy.
+
+Current implementation also checks bank-published saver/borrower rates and a named,
+unexpired borrower facility bound to the Account jurisdiction and J nonce. Revoking
+or exhausting the facility stops new allocations without erasing signed claims.
+The saver receives the published savings coupon; borrower interest belongs to the
+bank and can differ. Configuration uses authenticated bank Entity commands. React Bank administration
+lets the signed-in bank publish rates, approve a named Account facility and revoke
+new draws; it displays committed policy and its expiry. A real remote-owner browser
+journey verifies all three actions. Ordinary borrower wallets do not show the panel. The React borrower now sees
+processing, not-funded, opening and committed loan status, derived from the current
+bank Account receipt and loan book. A request nonce scopes the response so a stale
+HTTP response cannot describe a newer request as funded. This creates no durable
+request-status ledger and scans no Account history.
+
+Wire cutover: the Account borrow row has ten fields; disbursement has thirteen.
+The late duration is also signed into the stock transformer ABI and native claim.
+Old pending rows and native claims missing explicit late terms reject loudly;
+never insert a default into previously signed state. Deploy this schema into a
+fresh jurisdiction domain. Existing obligations on an older deployment must use
+their original signed proof and transformer; this change cannot grant them new
+interest. The changed Account and Entity rows have independent byte fixtures.
+Rust is frozen and these fixtures make no Rust parity claim.
+
+Each draw requires an earlier borrower-signed request with exact bank, borrower,
+asset, principal, term, maximum rate, maximum late duration and expiry. Its authorization commitment lives
+in the existing Account lending-intent tree, bound to jurisdiction and J nonce.
+Funding consumes it atomically with payment and covenant creation, so a fresh loan
+ID cannot draw twice. The request ID remains consumed after expiry or funding.
+The React wallet signs a five-minute request; reducers use only the signed deadline
+and controlled frame clock. A timeout cannot erase an already signed disbursement.
+
+A saver can retry a committed close request after a temporary liquidity constraint;
+the active covenant and single-use payout receipt prevent duplicate withdrawal.
+Authenticated J finality also retires an opening loan reservation when the old
+Account epoch ends, without pretending principal was paid or recovered.
+
+Current late-interest evidence includes 40 production-Depository settlement cases
+covering both directions, offline debtors, collateral shortfalls, capped accrual
+and duplicate finalization. Focused Account/Entity tests cover cold restore,
+late repayment after saver withdrawal, maximum debit, full risk reservation and
+strict peer-ingress fields. EVM time advances and controlled Account clocks are
+not a public real-clock recovery drill. Current browser, replay, gas and source
+results are recorded in [the evidence file](evidence/crisis-20261011.json).
+Historical 130/132-frame recordings predate this ABI and cannot validate it.
+Public deployment, live recovery evidence and the full release gates remain open.
+
+## Credit policy and loan authority
+
+A hub acts as the depositor's debtor and the borrower's creditor. Its deposit
+liability survives a borrower default. Matching a deposit with a loan is funding
+allocation, not a transfer of the borrower's default risk to that depositor.
+The hub must distinguish cash available to pay withdrawals, performing loan
+claims, overdue claims and losses; a receivable is not withdrawal liquidity.
+
+Use an approved facility, followed by automatic draws within that facility:
+
+1. The hub's authorized credit officer or board approves a named borrower,
+   asset and jurisdiction, principal funding cap, permitted terms and
+   approval expiry. The Account credit limit separately bounds unsecured risk. First release uses explicit approval. A future automated
+   underwriter must have the same bounded, signed delegation; an offer match
+   alone never approves credit.
+2. Before disbursement, the borrower and hub commit the exact loan covenant
+   bilaterally: principal, maturity, interest calculation, payment allocation,
+   late-interest terms, maximum amount due and relevant collateral allocation.
+   Bind it to the parties, Account, jurisdiction, asset, loan id and nonce.
+3. Admission checks the whole borrower exposure, outstanding and reserved draws,
+   the hub's available liquidity and its own portfolio limits. A credit limit is
+   maximum accepted unsecured risk, not promised funding or guaranteed repayment.
+   Interest and outstanding ordinary Account debt must not create an uncounted
+   second credit line. A policy limit belongs to the risk-taking hub, not a global
+   protocol ceiling on other users' money.
+4. Transfer principal once through the existing canonical payment path, after
+   both the covenant and approval are committed. Cancellation before commitment
+   transfers nothing; duplicate delivery cannot pay twice. Every accepted draw
+   retains the exact approval authority and covenant that authorized it.
+5. Show maturity, delinquency, remaining claim, allocated collateral and repayment
+   history. Stopping new draws does not erase existing debt or prevent repayment.
+   Restructuring needs a newly agreed covenant and nonce; it cannot silently reset
+   the original obligation or make the depositor whole without a real payment.
+
+This separates credit approval from execution without requiring a human click
+for every draw. The design follows the emphasis on approval authority, exposure
+limits and ongoing monitoring in the [Basel credit-risk principles](https://www.bis.org/bcbs/publ/d595.pdf)
+and [EBA loan-origination guidance](https://www.eba.europa.eu/activities/single-rulebook/regulatory-activities/credit-risk/guidelines-loan-origination-and-monitoring?version=2020).
+It does not claim that a protocol implementation makes a hub a licensed bank.
+
+## Maturity, default and late repayment
+
+Selected default for the first term product: fixed agreed term interest; after
+maturity, simple interest on unpaid principal at the ordinary contracted rate,
+only where the original covenant explicitly authorizes it. Do not compound unpaid
+interest, invent a penalty after default or apply a changed rate retroactively.
+The signed covenant specifies a late-accrual end and maximum amount due, allowing
+the lender to bound its risk before lending. These are loan terms, not arbitrary
+protocol monetary caps. Exact rounding and partial-payment allocation belong to
+that one covenant calculation, shared by quote, TS and jurisdiction execution.
+
+`defaulted` must remain repayable. A late payment reduces the outstanding claim
+exactly once and updates actual hub liquidity; it does not pretend the missed
+payment arrived on time. Accrued income, cash collected and recoverable collateral
+remain separate quantities. Only the allocated collateral-backed entitlement is
+secured; an executable signed debt claim cannot manufacture a solvent borrower.
+
+Jurisdiction settlement must enforce the signed maturity/default covenant even
+when the borrower or hub is offline. Fit the covenant into the existing signed
+Account proof and transformer mechanism, with explicit gas admission and nonce
+consumption. Do not add a second loan settlement authority or debit principal
+again when realizing the repayment claim. Until this path passes contract,
+TS, restart and React wallet lifecycle tests, lending still blocks release.
 
 ## Product Shape
 
@@ -57,52 +205,14 @@ Initial terms:
 The first release should keep the flow intentionally bank-like and predictable:
 quote, accept, locked principal, accrued interest, repayment, closed receipt.
 
-## State Model
+## State ownership
 
-Hub entity state owns lending pools per asset and jurisdiction:
-
-```ts
-type LendingPool = {
-  assetId: string;
-  jurisdictionId: string;
-  availablePrincipal: bigint;
-  lentPrincipal: bigint;
-  borrowedPrincipal: bigint;
-  accruedInterest: bigint;
-  offers: Map<string, LendingOffer>;
-  loans: Map<string, LoanPosition>;
-};
-```
-
-User positions are bilateral account facts against the hub:
-
-```ts
-type LendingOffer = {
-  id: string;
-  lenderAccountId: string;
-  assetId: string;
-  principal: bigint;
-  termSeconds: bigint;
-  annualRatePpm: bigint;
-  status: 'open' | 'matched' | 'cancelled' | 'closed';
-};
-
-type LoanPosition = {
-  id: string;
-  borrowerAccountId: string;
-  lenderAccountId?: string;
-  hubEntityId: string;
-  assetId: string;
-  principal: bigint;
-  interestDue: bigint;
-  openedAt: bigint;
-  maturesAt: bigint;
-  status: 'active' | 'repaid' | 'defaulted' | 'cancelled';
-};
-```
-
-All financial amounts and timestamps that affect settlement are `bigint`.
-No `number` arithmetic is allowed in money-moving code.
+Current structures live in `core/types/finance/lending.ts`; the hub owns the
+portfolio and the Account owns bilateral financial authority. Extend those
+canonical paths with the agreed covenant, not the former illustrative types in
+this document. Money uses exact integer arithmetic and timestamps use the units
+and checked ranges required by [FinTS](fints.md). Retained approval/covenant fields
+must satisfy the existing ownership, commitment and recovery requirements.
 
 ## First Executable Flow
 
@@ -138,9 +248,22 @@ Implement only with tests that prove the full lifecycle:
 - user borrows from hub liquidity;
 - user repays before maturity;
 - insufficient hub liquidity is a clean terminal UI state;
-- expired/defaulted position is visible and does not loop errors;
-- same entity behavior is consistent on Testnet and Tron;
+- overdue/defaulted position remains visible and accepts late repayment;
+- refused or expired approval moves no principal, and concurrent draws cannot
+  exceed the approved aggregate exposure;
+- partial/late payments, restart and duplicate delivery preserve exact debt,
+  interest, collateral allocation and the depositor's independent claim;
+- offline counterparties cannot prevent jurisdiction execution of the covenant;
+- same entity behavior is consistent on Ethereum testnet and mainnet;
 - all assertions are visible in the interface, not only logs.
+
+The Runtime crash regression creates saver and borrower Accounts through real
+commands and signed Account consensus, persists an active loan, then SIGKILLs
+through overdue processing, saver withdrawal, repayment and a capped unrelated
+frame. Recovery reads LevelDB and WAL; saved assertion evidence is never an input
+to restoration. A recovered or duplicate ACK must preserve both Account roots,
+debit repayment once and leave the closed saver position unchanged. Its controlled
+clock proves Runtime recovery, not public-chain real-time maturity or availability.
 
 ## Out Of Scope For First Pass
 

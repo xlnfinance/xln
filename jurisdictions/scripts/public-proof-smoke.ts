@@ -12,7 +12,10 @@ import {
 } from '../../core/hanko/onchain-domain';
 import { createEmptyBatch, type JBatch } from '../../core/jurisdiction/machine/batch';
 import { PROOF_BODY_ABI } from '../../core/protocol/dispute/proof-body';
-import { Depository__factory } from '../typechain-types/factories/contracts/Depository.sol/Depository__factory';
+import { decodeInt512, decodeUint512, decodeUint768, encodeInt512 } from '../../core/protocol/crypto/abi-money';
+import { deriveDisputeTokenFinalization } from '../../core/protocol/dispute/finalization';
+import { assertCanonicalRpcContractStack } from '../../core/orchestrator/bootstrap/contract-readiness';
+import { Depository__factory } from '../typechain-types/index';
 
 type PublicJurisdiction = Readonly<{
   chainId: number;
@@ -31,12 +34,15 @@ const jurisdictionId = argument('--jurisdiction') || '';
 const depositAmount = BigInt(argument('--deposit') || '1000');
 const settlementAmount = BigInt(argument('--settle') || '100');
 const withdrawalAmount = BigInt(argument('--withdraw') || '50');
+const unsecuredClaim = BigInt(argument('--unsecured-claim') || '0');
 const allowTestTokenMint = process.env['PUBLIC_PROOF_ALLOW_TEST_TOKEN_MINT'] === '1';
 if (!/^0x[0-9a-f]{64}$/i.test(privateKey)) throw new Error('PUBLIC_PROOF_PRIVATE_KEY_REQUIRED');
 if (!jurisdictionId) throw new Error('PUBLIC_PROOF_JURISDICTION_REQUIRED');
+if (unsecuredClaim < 0n) throw new Error('PUBLIC_PROOF_UNSECURED_CLAIM_INVALID');
 if (depositAmount <= settlementAmount + withdrawalAmount || settlementAmount <= 0n || withdrawalAmount <= 0n) {
   throw new Error(`PUBLIC_PROOF_AMOUNTS_INVALID:${depositAmount}:${settlementAmount}:${withdrawalAmount}`);
 }
+const collateralAmount = depositAmount - settlementAmount - withdrawalAmount;
 
 const allJurisdictions = JSON.parse(
   readFileSync(resolve(process.cwd(), 'jurisdictions/jurisdictions.json'), 'utf8'),
@@ -47,7 +53,10 @@ if (jurisdiction.tokens.USDT.tokenId !== 1) throw new Error('PUBLIC_PROOF_USDT_T
 
 const provider = new ethers.JsonRpcProvider(jurisdiction.rpc);
 const wallet = new ethers.Wallet(privateKey, provider);
-const depository = Depository__factory.connect(jurisdiction.contracts.depository, wallet);
+// Approval and every batch share one EOA sequence. A provider's cached pending
+// nonce may lag the just-mined finalization and replay it for withdrawal.
+const signer = new ethers.NonceManager(wallet);
+const depository = Depository__factory.connect(jurisdiction.contracts.depository, signer);
 const token = new ethers.Contract(
   jurisdiction.tokens.USDT.address,
   [
@@ -56,7 +65,7 @@ const token = new ethers.Contract(
     'function balanceOf(address owner) view returns (uint256)',
     'function mint(address to,uint256 amount)',
   ],
-  wallet,
+  signer,
 );
 const tokenAllowance = token.getFunction('allowance');
 const tokenApprove = token.getFunction('approve');
@@ -82,8 +91,8 @@ const proofBody = {
   watchSeed,
   leftResponseSeconds: 5,
   rightResponseSeconds: 5,
-  offdeltas: [] as bigint[],
-  tokenIds: [] as bigint[],
+  offdeltas: [encodeInt512(ownerIsLeft ? unsecuredClaim : -unsecuredClaim)],
+  tokenIds: [1n],
   transformers: [],
 };
 const proofBodyHash = ethers.keccak256(
@@ -155,13 +164,28 @@ try {
   if (network.chainId !== BigInt(jurisdiction.chainId)) {
     throw new Error(`PUBLIC_PROOF_CHAIN_ID_MISMATCH:${network.chainId}:${jurisdiction.chainId}`);
   }
+  // A proof against older contracts cannot certify this candidate. Pin the same
+  // linked code and immutable bindings as Runtime bootstrap before any approval
+  // or deposit can spend the operator's funds.
+  await assertCanonicalRpcContractStack(jurisdiction.rpc, jurisdiction.contracts, 'PUBLIC_PROOF', 10_000);
   const [leftEntity, rightEntity] = BigInt(ownerEntityId) < BigInt(counterpartyEntityId)
     ? [ownerEntityId, counterpartyEntityId]
     : [counterpartyEntityId, ownerEntityId];
   const accountKey = ethers.solidityPacked(['bytes32', 'bytes32'], [leftEntity, rightEntity]);
   const accountBefore = await depository._accounts(accountKey);
+  const collateralBefore = await depository._collaterals(accountKey, 1);
+  if (accountBefore.disputeHash !== ethers.ZeroHash || collateralBefore.collateral !== 0n || decodeInt512(collateralBefore.ondelta) !== 0n) {
+    throw new Error('PUBLIC_PROOF_REQUIRES_SETTLED_ACCOUNT');
+  }
   const ownerReserveBefore = await depository._reserves(ownerEntityId, 1) as bigint;
   const counterpartyReserveBefore = await depository._reserves(counterpartyEntityId, 1) as bigint;
+  // This controlled proof isolates one new claim. Prior FIFO obligations would
+  // change who receives reserve collection; refuse them before spending funds.
+  for (const entity of [ownerEntityId, counterpartyEntityId]) {
+    if (decodeUint768(await depository.debtOutstanding(entity, 1)) !== 0n) {
+      throw new Error(`PUBLIC_PROOF_REQUIRES_DEBT_FREE_ENTITIES:${entity}`);
+    }
+  }
   let tokenMintTransactionHash: string | null = null;
   const tokenBalance = await tokenBalanceOf(wallet.address) as bigint;
   if (tokenBalance < depositAmount) {
@@ -256,19 +280,36 @@ try {
     domain,
     accountKey,
     disputeNonce,
+    ownerIsLeft,
     proofBodyHash,
     watchSeed,
   );
+  // Obtain the peer's exact one-asset evidence before funding. After this
+  // signature, recovery needs no fresh peer signature or collateral handshake.
+  const disputeSignature = buildSingleSignerHanko(counterpartyEntityId, disputeHash, counterpartyPrivateKey);
+  const funding = createEmptyBatch();
+  funding.reserveToCollateral.push({
+    tokenId: 1,
+    receivingEntity: ownerEntityId,
+    pairs: [{ entity: counterpartyEntityId, amount: collateralAmount }],
+  });
+  const fundingReceipt = await sendBatch(funding);
+  const funded = await depository._collaterals(accountKey, 1);
+  if (funded.collateral !== collateralAmount || decodeInt512(funded.ondelta) !== (ownerIsLeft ? collateralAmount : 0n)) {
+    throw new Error('PUBLIC_PROOF_COLLATERAL_FUNDING_MISMATCH');
+  }
   const disputeStart = createEmptyBatch();
   disputeStart.disputeStarts.push({
     counterentity: counterpartyEntityId,
     nonce: Number(disputeNonce),
+    proposerIsLeft: ownerIsLeft,
     proofbodyHash: proofBodyHash,
     initialProofbody: proofBody,
     watchSeed,
-    sig: buildSingleSignerHanko(counterpartyEntityId, disputeHash, counterpartyPrivateKey),
+    sig: disputeSignature,
     starterInitialArguments: '0x',
     starterCounterArguments: '0x',
+    starterCounterProofCommitment: ethers.ZeroHash,
   });
   const disputeStartReceipt = await sendBatch(disputeStart);
   const startedAccount = await depository._accounts(accountKey);
@@ -279,6 +320,7 @@ try {
     counterentity: counterpartyEntityId,
     initialNonce: Number(disputeNonce),
     finalNonce: Number(disputeNonce),
+    proposerIsLeft: ownerIsLeft,
     initialProofbodyHash: proofBodyHash,
     finalProofbody: proofBody,
     starterArguments: '0x',
@@ -307,10 +349,43 @@ try {
 
   const targetTimestamp = Number(startedAccount.disputeTimeout);
   await waitForUnixTimestamp(targetTimestamp);
+  const expectedExit = deriveDisputeTokenFinalization({
+    tokenId: 1,
+    leftReserve: await depository._reserves(leftEntityId, 1),
+    rightReserve: await depository._reserves(rightEntityId, 1),
+    collateral: funded.collateral,
+    ondelta: decodeInt512(funded.ondelta),
+    offdelta: ownerIsLeft ? unsecuredClaim : -unsecuredClaim,
+  });
   const finalizationReceipt = await sendBatch(finalization);
   const finalizedAccount = await depository._accounts(accountKey);
   if (finalizedAccount.disputeHash !== ethers.ZeroHash || finalizedAccount.disputeTimeout !== 0n) {
     throw new Error('PUBLIC_PROOF_DISPUTE_NOT_FINALIZED');
+  }
+  const finalizedCollateral = await depository._collaterals(accountKey, 1);
+  if (finalizedCollateral.collateral !== 0n || decodeInt512(finalizedCollateral.ondelta) !== 0n) {
+    throw new Error('PUBLIC_PROOF_COLLATERAL_NOT_RECOVERED');
+  }
+  const collectedUnsecured = ownerIsLeft ? expectedExit.reservePaid.rightToLeft : expectedExit.reservePaid.leftToRight;
+  const remainingDebt = ownerIsLeft ? expectedExit.newDebt.rightToLeft : expectedExit.newDebt.leftToRight;
+  if (decodeUint768(await depository.debtOutstanding(counterpartyEntityId, 1)) !== remainingDebt ||
+      decodeUint768(await depository.debtOutstanding(ownerEntityId, 1)) !== 0n) {
+    throw new Error('PUBLIC_PROOF_DEBT_PARITY_MISMATCH');
+  }
+  const debtLogs = finalizationReceipt.logs.filter(log =>
+    log.address.toLowerCase() === jurisdiction.contracts.depository.toLowerCase() &&
+    log.topics[0] === depository.interface.getEvent('DebtCreated').topicHash);
+  if (debtLogs.length !== (remainingDebt > 0n ? 1 : 0)) throw new Error('PUBLIC_PROOF_DEBT_EVENT_COUNT_MISMATCH');
+  let debtIndex: string | null = null;
+  if (debtLogs.length === 1) {
+    const log = debtLogs[0]!;
+    const event = depository.interface.decodeEventLog('DebtCreated', log.data, log.topics);
+    const row = await depository._debts(counterpartyEntityId, 1, event['debtIndex']);
+    if (event['debtor'] !== counterpartyEntityId || event['creditor'] !== ownerEntityId || event['tokenId'] !== 1n ||
+        decodeUint512(event['amount']) !== remainingDebt || row.creditor !== ownerEntityId || decodeUint512(row.amount) !== remainingDebt) {
+      throw new Error('PUBLIC_PROOF_DEBT_ROW_MISMATCH');
+    }
+    debtIndex = event['debtIndex'].toString();
   }
 
   const tokenBalanceBeforeWithdrawal = await tokenBalanceOf(wallet.address) as bigint;
@@ -331,8 +406,8 @@ try {
 
   const ownerReserve = await depository._reserves(ownerEntityId, 1);
   const counterpartyReserve = await depository._reserves(counterpartyEntityId, 1);
-  const expectedOwnerReserve = ownerReserveBefore + depositAmount - settlementAmount - withdrawalAmount;
-  const expectedCounterpartyReserve = counterpartyReserveBefore + settlementAmount;
+  const expectedOwnerReserve = ownerReserveBefore + depositAmount - settlementAmount - withdrawalAmount + collectedUnsecured;
+  const expectedCounterpartyReserve = counterpartyReserveBefore + settlementAmount - collectedUnsecured;
   if (ownerReserve !== expectedOwnerReserve || counterpartyReserve !== expectedCounterpartyReserve) {
     throw new Error(
       `PUBLIC_PROOF_RESERVE_PARITY_MISMATCH:` +
@@ -345,11 +420,20 @@ try {
     jurisdictionId,
     compiler: '0.8.36',
     ownerEntityId,
+    ownerIsLeft,
     counterpartyEntityId,
     accountKey,
     tokenMintTransactionHash,
     depositTransactionHash: depositReceipt.hash,
     settlementTransactionHash: settlementReceipt.hash,
+    collateralFundingTransactionHash: fundingReceipt.hash,
+    fundedCollateral: collateralAmount.toString(),
+    unsecuredClaim: unsecuredClaim.toString(),
+    collectedUnsecured: collectedUnsecured.toString(),
+    remainingDebt: remainingDebt.toString(),
+    debtCreditor: remainingDebt > 0n ? ownerEntityId : null,
+    debtIndex,
+    finalCollateral: finalizedCollateral.collateral.toString(),
     disputeStartTransactionHash: disputeStartReceipt.hash,
     disputeFinalizeTransactionHash: finalizationReceipt.hash,
     withdrawalTransactionHash: withdrawalReceipt.hash,

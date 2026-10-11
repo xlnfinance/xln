@@ -1,14 +1,43 @@
 import { expect, type Page } from '@playwright/test';
-import type { RuntimeAdapterViewFrame, XLNModule } from '../../../core/api/public/runtime-module';
+import type { RuntimeAdapterViewFrame, RuntimeReplica, XLNModule } from '../../../core/api/public/runtime-module';
 import type { RuntimeAdapter } from '../../../core/api/runtime-adapter/types';
 import { safeStringify } from '../../../core/protocol/serialization';
 
 type DebugWindow = Window & {
-  __xln?: { adapter: () => RuntimeAdapter | null; xln: () => Promise<XLNModule> };
+  __xln?: { adapter: () => RuntimeAdapter | null; xln: () => Promise<XLNModule>; env: () => RuntimeReplica | null };
 };
 export type Parties = { ownerId: string; hubId: string; tokenId: number };
 
-/** Read current committed money. All credit, lending and closing mutations use the UI. */
+/** Public route advertisements only: no Runtime secrets or input payloads. */
+export const readRoutingEvidence = (page: Page) => page.evaluate(() => {
+  const env = (window as DebugWindow).__xln?.env();
+  if (!env) throw new Error('Lending routing diagnostics unavailable');
+  return env.gossip.getProfiles().map(profile => ({
+    entityId: profile.entityId, lastUpdated: profile.lastUpdated,
+    publicAccounts: profile.publicAccounts,
+    accounts: profile.accounts.map(account => ({
+      counterpartyId: account.counterpartyId,
+      capacities: Object.fromEntries(Object.entries(account.tokenCapacities).map(([id, capacity]) => [id, {
+        incoming: capacity.inCapacity.toString(), outgoing: capacity.outCapacity.toString(),
+      }])),
+    })),
+  }));
+});
+
+/** Exercise a signed early withdrawal through production admission despite the UI guard. */
+export const requestEarlyClose = (page: Page, parties: Parties, positionId: string) => page.evaluate(async input => {
+  const adapter = (window as DebugWindow).__xln?.adapter();
+  if (!adapter) throw new Error('Lending adapter unavailable');
+  const view = await adapter.read<RuntimeAdapterViewFrame>('view-frame', { entityId: input.ownerId });
+  const signerId = view.activeEntity?.core.signerId;
+  if (!signerId) throw new Error('Lending signer unavailable');
+  await adapter.send({ runtimeTxs: [], entityInputs: [{
+    entityId: input.ownerId, signerId,
+    entityTxs: [{ type: 'lendingClosePosition', data: { hubEntityId: input.hubId, positionId: input.positionId } }],
+  }] });
+}, { ...parties, positionId });
+
+/** Read current committed money; never edit Runtime or Account state. */
 export const readAccount = (page: Page, parties: Parties) =>
   page.evaluate(async ids => {
     const debug = (window as DebugWindow).__xln;
@@ -36,6 +65,7 @@ export const readAccount = (page: Page, parties: Parties) =>
       offdelta: delta.offdelta.toString(),
       pending: Boolean(account.pendingFrame),
       mempool: account.mempoolCount,
+      closeRequests: [...account.state.lendingIntents ?? []].filter(([, kind]) => kind === 'close-request').map(([id]) => id),
       feePolicy: policy
         ? {
             version: policy.policyVersion,

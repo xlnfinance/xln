@@ -932,13 +932,14 @@ export const accountTxWire = (tx: AccountTx): RscoreWireValue[] => {
     case 'lending_borrow_request':
       return [11, tx.data.requestId, tx.data.hubEntityId, tx.data.borrowerEntityId,
         tx.data.tokenId, tx.data.amount.toString(),
-        tx.data.termId === '1h' ? 0 : tx.data.termId === '1d' ? 1 : 2, tx.data.maxInterestBps];
+        tx.data.termId === '1h' ? 0 : tx.data.termId === '1d' ? 1 : 2, tx.data.maxInterestBps, tx.data.expiresAt, tx.data.maxLateMs];
     case 'lending_repay':
       return [12, tx.data.loanId, tx.data.hubEntityId, tx.data.borrowerEntityId,
         tx.data.tokenId, tx.data.amount.toString()];
     case 'lending_disburse':
       return [24, tx.data.loanId, tx.data.hubEntityId,
-        tx.data.borrowerEntityId, tx.data.tokenId, tx.data.amount.toString()];
+        tx.data.borrowerEntityId, tx.data.tokenId, tx.data.amount.toString(),
+        tx.data.termId === '1h' ? 0 : tx.data.termId === '1d' ? 1 : 2, tx.data.interestBps, tx.data.requestId, tx.data.maxInterestBps, tx.data.expiresAt, tx.data.maxLateMs, tx.data.lateMs];
     case 'lending_close_request':
       return [14, tx.data.positionId, tx.data.hubEntityId, tx.data.lenderEntityId];
     case 'lending_close_payout':

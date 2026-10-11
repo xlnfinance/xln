@@ -14,7 +14,7 @@ const validPolicy = (): CappedTestnetPolicy => ({
   name: MAINNET_GATE_LABELS.cappedPolicyName,
   scope: ['landing', 'all-current-user-facing-flows'],
   riskCapUsd: null,
-  riskCapEnforcement: 'not_implemented',
+  riskCapEnforcement: 'not_applicable',
   expectedTowers: MAINNET_GATE.expectedTowers,
   expectedHubs: MAINNET_GATE.expectedHubs,
   recoverySlaSeconds: MAINNET_GATE.recoverySlaSeconds,
@@ -28,10 +28,12 @@ const validPolicy = (): CappedTestnetPolicy => ({
   soakMinutes: MAINNET_GATE.soakMinutes,
 });
 
-test('capped testnet policy fails closed until the cap has executable enforcement', () => {
-  expect(validateCappedTestnetPolicy(validPolicy())).toEqual([
-    'CAPPED_TESTNET_EXECUTABLE_RISK_CAP_ENFORCEMENT_MISSING',
-  ]);
+test('public testnet policy permits open funding while retaining recovery and authority gates', () => {
+  expect(validateCappedTestnetPolicy(validPolicy())).toEqual([]);
+  expect(validateCappedTestnetPolicy({ ...validPolicy(), recoverySlaSeconds: 61 }))
+    .toContain('POLICY_RECOVERY_SLA_INVALID:61');
+  expect(validateCappedTestnetPolicy({ ...validPolicy(), riskCapUsd: undefined }))
+    .toContain('POLICY_GLOBAL_RISK_CAP_FORBIDDEN:undefined');
 });
 
 test('capped testnet policy rejects operator-only cap claims and weak exceptions', () => {
@@ -47,9 +49,9 @@ test('capped testnet policy rejects operator-only cap claims and weak exceptions
     },
   };
 
-  expect(validateCappedTestnetPolicy(policy)).toContain('POLICY_UNENFORCED_RISK_CAP_CLAIM:10001');
+  expect(validateCappedTestnetPolicy(policy)).toContain('POLICY_GLOBAL_RISK_CAP_FORBIDDEN:10001');
   expect(validateCappedTestnetPolicy(policy)).toContain(
-    'POLICY_RISK_CAP_ENFORCEMENT_MUST_ADMIT_MISSING:operator_config',
+    'POLICY_RISK_CAP_ENFORCEMENT_NOT_APPLICABLE:operator_config',
   );
   expect(validateCappedTestnetPolicy(policy)).toContain('POLICY_P0_EXCEPTION_INVALID');
 });

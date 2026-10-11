@@ -47,13 +47,13 @@ const mechanicFor = (event: RuntimeActivityEvent): string => {
   // so compare on letters alone.
   const rawType = text(event.rawType).toLowerCase().replace(/[^a-z0-9]/g, '');
   if (rawType.includes('creditlimit')) {
-    return 'Unsecured credit extended — capacity without locking collateral.';
+    return 'Credit limit — the maximum accepted unsecured exposure, not collateral.';
   }
   if (rawType.includes('reserve') && rawType.includes('collateral')) {
     return 'Reserves become collateral: this is the step that costs a J-transaction.';
   }
   if (rawType.includes('dispute')) {
-    return 'Unilateral exit — the last signed frame is enough to reclaim funds.';
+    return 'Unilateral dispute — signed evidence enforces the collateral-backed claim; unsecured debt is not guaranteed.';
   }
   if (rawType.includes('openaccount')) {
     return 'A new bilateral account: one counterparty, no network-wide registration.';

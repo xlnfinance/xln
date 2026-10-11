@@ -56,8 +56,9 @@ or recreate the account's credit-limit policy as a second authority.
 ## Three protections
 
 1. **Proof of the obligation:** retained signed evidence allows unilateral dispute.
-2. **Chosen collateral backing:** parties select secured exposure and acceptable
-   unsecured credit, with manual policy and soft/hard limits in the user experience.
+2. **Chosen collateral backing:** only collateral-backed entitlement is secured.
+   Credit limits cap accepted unsecured risk; they do not guarantee repayment.
+   Parties select that exposure through manual policy and soft/hard limits.
 3. **Delta Transformers — security in motion:** signed programmable conditions
    protect pending payments, swaps and other financial operations. Their dispute
    execution is bounded by the signed allowances and evidence rules.

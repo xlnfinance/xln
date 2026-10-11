@@ -2,7 +2,7 @@
   "app": {
     "name": "xln",
     "tagline": "확장성, 보안, 단순성의 수학적 종착점",
-    "description": "온체인 보안 보장이 있는 오프체인 즉시 결제"
+    "description": "서명된 증거와 담보로 뒷받침되는 청구권을 이용한 양자 결제"
   },
   "landing": {
     "hero": {
@@ -18,7 +18,7 @@
       "cost": "수수료 제로",
       "costDesc": "가스비, 채굴 수수료 없음",
       "security": "안전",
-      "securityDesc": "온체인 정산 보장"
+      "securityDesc": "상환을 보장하는 것은 담보뿐이며, 신용 한도는 무담보 위험의 상한입니다"
     },
     "invite": {
       "title": "초대 코드 입력",

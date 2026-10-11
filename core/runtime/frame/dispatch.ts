@@ -14,6 +14,7 @@ import {
 } from '../delivery/topology/output-routing';
 import { ensureRuntimeInfrastructure } from '../envelope/replica-envelope';
 import { createPreparedOutputGraph, type PreparedOutputGraph } from '../delivery/prepared-output';
+import { isLocalRuntimeOutput, localOutputIncludedIn } from '../delivery/local-outbox';
 
 const runtimeLog = createStructuredLogger('runtime');
 
@@ -97,7 +98,12 @@ export const dispatchCommittedEntityOutputs = async (
       });
     }
   }
+  const committedOutbox = env.pendingNetworkOutputs ?? [];
   dispatchEntityOutputs(env, plan.remoteOutputs, routing, plan.preparedOutputGraph);
+  const retainedRemoteKeys = new Set((env.pendingNetworkOutputs ?? []).map(output =>
+    plan.preparedOutputGraph.prepare(output).routeKey));
+  env.pendingNetworkOutputs = committedOutbox.filter(output =>
+    isLocalRuntimeOutput(env, output) || retainedRemoteKeys.has(plan.preparedOutputGraph.prepare(output).routeKey));
   // dispatchEntityOutputs retires only accepted units; readiness changes wake
   // the same Runtime writer to republish the existing remaining outbox.
   if (p2p && refreshIds.length > 0) {
@@ -121,8 +127,10 @@ export const flushCommittedNetworkOutputs = async (
   if (!env.pendingNetworkOutputs?.length) return;
   const graph = createPreparedOutputGraph();
   const plan = planEntityOutputs(env, pruneSettledOutputs(env, env.pendingNetworkOutputs), routing, graph);
+  env.pendingNetworkOutputs = plan.orderedOutputs;
   if (plan.localOutputs.length > 0) {
-    routing.enqueueRuntimeInputs(env, plan.localOutputs, undefined, undefined, env.state.timestamp);
+    const queued = localOutputIncludedIn(env.runtimeMempool?.entityInputs ?? [], plan.localOutputs);
+    routing.enqueueRuntimeInputs(env, plan.localOutputs.filter(output => !queued(output)), undefined, undefined, env.state.timestamp);
   }
   await runCommittedRecoveryBarrier(env, plan.remoteOutputs.length, 0, 0);
   await dispatchCommittedEntityOutputs(env, new Set(), plan, routing);

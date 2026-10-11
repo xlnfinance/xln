@@ -45,6 +45,7 @@ import {
   processCommittedSettlementTransitionFollowup,
 } from '../../../entity/tx/handlers/payments/settle';
 import { handleJAbortSentBatch } from '../../../entity/tx/handlers/j-batch/j-abort-sent-batch';
+import { handleR2C } from '../../../entity/tx/handlers/j-batch/r2c';
 import { applyHankoBatchProcessedEvent } from '../../../entity/tx/j-events-batch';
 import {
   executeCrontab,
@@ -877,6 +878,37 @@ describe('atomic settlement Account transition', () => {
     expect(createSettlementWorkspaceHash(makeAccount(entity('01'), RIGHT).state, body)).not.toBe(hash);
   });
 
+  test.each([LEFT, RIGHT])('R2C funds an agreed asset from zero without another settlement handshake (%s)', async self => {
+    const peer = self === LEFT ? RIGHT : LEFT;
+    const env = createEmptyEnv('first-r2c-funding');
+    const state = makeState(self, addr('31'), makeJurisdiction('first-r2c', 31337, 'a1', 'b2'), peer);
+    state.reserves.set(1, 100n);
+    const account = writableAccount(state, peer);
+    putDelta(account, { ...createDefaultDelta(1), collateral: 0n });
+    sealWritableAccounts(state);
+    const result = await handleR2C(env, state, {
+      type: 'r2c', data: { counterpartyId: peer, tokenId: 1, amount: 60n },
+    });
+    expect(result.newState.jBatchState?.batch.reserveToCollateral).toEqual([
+      { tokenId: 1, receivingEntity: self, pairs: [{ entity: peer, amount: 60n }] },
+    ]);
+    expect(result.newState.reserves.get(1)).toBe(100n);
+    expect(result.newState.accounts.get(peer)?.state.deltas.get(1)?.collateral).toBe(0n);
+    expect(result.accountTxs).toEqual([]);
+    expect(result.newState.settlementContinuations?.get(peer)).toBeUndefined();
+
+    const funded = writableAccount(state, peer);
+    putDelta(funded, { ...createDefaultDelta(1), collateral: 10n });
+    sealWritableAccounts(state);
+    const topup = await handleR2C(env, state, {
+      type: 'r2c', data: { counterpartyId: peer, tokenId: 1, amount: 60n },
+    });
+    expect(topup.accountTxs).toEqual([]);
+    expect(topup.newState.jBatchState?.batch.reserveToCollateral).toEqual([
+      { tokenId: 1, receivingEntity: self, pairs: [{ entity: peer, amount: 60n }] },
+    ]);
+  });
+
   test('Entity proposal only queues the bilateral transition and does not pre-mutate workspace', async () => {
     const env = createEmptyEnv('settlement-transition-entity-proposal');
     const jurisdiction = makeJurisdiction('settlement-transition', 31337, 'a1', 'b2');
@@ -1330,6 +1362,7 @@ describe('atomic settlement Account transition', () => {
     const state = makeState(LEFT, addr('38'), jurisdiction, RIGHT);
     const tokenId = 9;
     expect(state.accounts.get(RIGHT)?.state.deltas.has(tokenId)).toBe(false);
+    const before = buildAccountProofBody(state.accounts.get(RIGHT)!, TEST_DELTA_TRANSFORMER).proofBodyHash;
     expect((await upsertOnState(state, RIGHT, {
       revision: 1,
       ops: [{ type: 'forgive', tokenId }],
@@ -1348,7 +1381,10 @@ describe('atomic settlement Account transition', () => {
     expect(draft.data.postProof.proofBodyHash)
       .toBe(buildAccountProofBody(expected, TEST_DELTA_TRANSFORMER).proofBodyHash);
     expect(draft.data.postProof.proofBodyHash)
-      .not.toBe(buildAccountProofBody(account, TEST_DELTA_TRANSFORMER).proofBodyHash);
+      .not.toBe(before);
+    expect(account.state.deltas.has(tokenId)).toBe(true);
+    expect(draft.data.postProof.proofBodyHash)
+      .toBe(buildAccountProofBody(account, TEST_DELTA_TRANSFORMER).proofBodyHash);
   });
 
   test('a first settlement Hanko cannot choose the post-settlement proposer side', async () => {
@@ -2211,17 +2247,16 @@ describe('atomic settlement Account transition', () => {
     expect(account.state.deltas.has(event.data.tokenId)).toBe(false);
   });
 
-  test('AccountSettled finality rejects cumulative token-row overflow atomically', () => {
+  test('unsolicited AccountSettled custody cannot consume the token-row budget', () => {
     const account = makeAccount(LEFT, RIGHT);
     for (let tokenId = 2; tokenId <= LIMITS.MAX_ACCOUNT_TOKEN_ROWS; tokenId += 1) {
       putDelta(account, createDefaultDelta(tokenId));
     }
-    const event = accountSettledEvent(1);
+    const event = accountSettledEvent(0);
     event.data.tokenId = TOKENS.MAX_TOKEN_ID;
     event.data.collateral = '99';
 
-    expect(() => applyFinalizedAccountJEvents(account, RIGHT, [event], TEST_DELTA_TRANSFORMER))
-      .toThrow('ACCOUNT_DELTA_ROW_LIMIT_EXCEEDED:insert');
+    applyFinalizedAccountJEvents(account, RIGHT, [event], TEST_DELTA_TRANSFORMER);
     expect(account.state.jNonce).toBe(0);
     expect(account.state.deltas.size).toBe(LIMITS.MAX_ACCOUNT_TOKEN_ROWS);
     expect(account.state.deltas.has(TOKENS.MAX_TOKEN_ID)).toBe(false);

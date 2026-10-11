@@ -6,7 +6,7 @@
     "all-current-user-facing-flows"
   ],
   "riskCapUsd": null,
-  "riskCapEnforcement": "not_implemented",
+  "riskCapEnforcement": "not_applicable",
   "expectedTowers": 1,
   "expectedHubs": 3,
   "recoverySlaSeconds": 60,

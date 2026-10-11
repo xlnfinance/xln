@@ -23,6 +23,7 @@ import type { RuntimeReplica } from '../../../runtime/types';
 import type { JurisdictionEvent } from '../../../types/jurisdiction-events';
 import { PersistentAccountStateMap } from '../../../account/state/persistent-state-map';
 import { createDefaultDelta } from '../../../account/state/delta';
+import { buildAccountProofBody } from '../../../protocol/dispute/proof-builder';
 
 const LEFT = `0x${'11'.repeat(32)}`;
 const RIGHT = `0x${'22'.repeat(32)}`;
@@ -116,6 +117,36 @@ const rawClaim = (): Extract<AccountTx, { type: 'j_event_claim' }> => ({
 });
 
 describe('account J-event validate/commit parity', () => {
+  test.each([true, false])('unsolicited custody cannot add proof assets; includes normal funding: %s', includeAdmitted => {
+    const runtime = env();
+    let account = machine();
+    const transformer = `0x${'99'.repeat(20)}`;
+    const beforeProof = buildAccountProofBody(account, transformer).proofBodyHash;
+    const claim = rawClaim();
+    // A real R2C receipt does not advance the Account nonce. The first row is
+    // the already agreed asset; the other 127 are unsolicited company shares.
+    claim.data.events = Array.from({ length: includeAdmitted ? 128 : 127 }, (_, index) => ({
+      type: 'AccountSettled',
+      data: { ...settledEvent.data, tokenId: index + (includeAdmitted ? 1 : 2), nonce: 0 },
+      logIndex: index,
+    }));
+    for (const byLeft of [true, false]) {
+      const transition = beginAccountTransition(account);
+      const draft = accountTransitionView(transition);
+      const session = createAccountJClaimSession(getAccountJClaimNodeStore(runtime));
+      const prepared = prepareAccountJClaimTx(draft.state, claim, DOMAIN, session);
+      expect(handleJEventClaim(draft, prepared, byLeft, 100, LEFT, [], runtime.state, session).ok).toBe(true);
+      account = commitAccountTransition(transition).account;
+      cacheCommittedAccountJClaimNodeChanges(runtime, session.changes());
+    }
+    expect(account.state.deltas.size).toBe(1);
+    expect(account.state.deltas.get(1)?.collateral).toBe(includeAdmitted ? 125n : 0n);
+    expect(account.state.deltas.get(1)?.ondelta).toBe(includeAdmitted ? 7n : 0n);
+    expect(account.state.jNonce).toBe(0);
+    expect(account.state.lastFinalizedJHeight).toBe(7);
+    expect(buildAccountProofBody(account, transformer).proofBodyHash).toBe(beforeProof);
+  });
+
   test('independently verifies both proofs, applies once, and retains no finalized body', () => {
     const runtime = env();
     const live = machine();

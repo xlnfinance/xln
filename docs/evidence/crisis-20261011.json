@@ -1,0 +1,1967 @@
+{
+  "baselineDocumentationInventory": {
+    "includes": "Generated release snapshots, reports and history; not an active-documentation or defect count.",
+    "lines": 82414,
+    "trackedMarkdownUnderDocs": 147
+  },
+  "checks": [
+    {
+      "command": "bun run check",
+      "finalDurationMs": 684,
+      "firstFailure": "check:contract-artifact-drift",
+      "initialDurationMs": 13054,
+      "log": ".logs/crisis-20261011/final-check.log",
+      "result": "FAIL",
+      "sideEffect": "Canonical contracts:sync regenerated 9 tracked JSON artifacts and 4 TypeChain factories for pre-existing source edits; diff against HEAD remains red. check:long did not run."
+    },
+    {
+      "command": "bun core/scripts/release/run-mainnet-preflight-gate.ts --dry-run --allow-dirty --out /tmp/xln-crisis-preflight-20261011.json",
+      "limitation": "Dry run executes no financial or full release gates.",
+      "result": "DRY_RUN_BLOCKED"
+    },
+    {
+      "command": "forge test --match-contract DisputeIngressGasTest --match-test test_unsolicitedCompanySharesCannotEnlargeExitProof -vv",
+      "conservativeFinalizeGas": 1206513,
+      "conservativeStartGas": 681627,
+      "cwd": "jurisdictions",
+      "limitation": "One existing working-tree fixture; setup gas excluded from dispute gas. Not a universal exit bound.",
+      "result": "PASS",
+      "skipped": 0,
+      "standLock": true,
+      "tests": 1
+    },
+    {
+      "assertions": 128,
+      "command": "bun test core/__tests__/account/transactions/dispute-gas-budget.test.ts core/__tests__/operations/release/mainnet-preflight-gate.test.ts",
+      "elapsedSeconds": 1.66,
+      "result": "PASS",
+      "standLock": true,
+      "tests": 17
+    },
+    {
+      "assertions": 61,
+      "command": "bun test tests/frontend/graph/network-timeline-source.test.ts",
+      "elapsedSeconds": 0.3,
+      "result": "PASS",
+      "tests": 21
+    },
+    {
+      "command": "bun run check:frontend",
+      "errors": 0,
+      "note": "Svelte diagnostic counts; production build emitted ordinary tool notices.",
+      "result": "PASS",
+      "warnings": 0
+    },
+    {
+      "command": "bun run check:single-live-todo",
+      "result": "PASS"
+    },
+    {
+      "command": "bun run check:english-source",
+      "result": "PASS",
+      "trackedFiles": 5976
+    },
+    {
+      "command": "git diff --check",
+      "result": "PASS"
+    },
+    {
+      "command": "Browser inspect built landing at http://localhost:8080/",
+      "consoleErrors": 0,
+      "consoleWarnings": 0,
+      "limitation": "Copy/rendering inspection, not wallet financial E2E. Temporary local preview stopped by its 60-second stand timeout; no preview children left running.",
+      "renderedLanguages": [
+        "en",
+        "ru"
+      ],
+      "result": "PASS",
+      "screenshots": [
+        ".logs/crisis-20261011/risk-copy-en.png",
+        ".logs/crisis-20261011/risk-copy-ru.png"
+      ]
+    }
+  ],
+  "continuation": {
+    "assetAdmission": {
+      "contract": {
+        "conservativeAttackFinalizationGas": 921213,
+        "conservativeAttackStartGas": 660772,
+        "limitation": "One original signed asset/32-payment proof after 127 real company-share donations; donations remain on-chain outside the proof. Not a universal bound.",
+        "log": ".logs/crisis-20261011/proof-scoped-funding-exit-r4.log",
+        "skipped": 0,
+        "standLock": true,
+        "tests": 3
+      },
+      "native": {
+        "accountUnitTests": 50,
+        "entityUnitTests": 232,
+        "log": ".logs/crisis-20261011/proof-scoped-native-suite.log"
+      },
+      "relatedTs": {
+        "assertions": 437,
+        "log": ".logs/crisis-20261011/proof-scoped-runtime-suite.log",
+        "seconds": 1.95,
+        "tests": 73
+      },
+      "rule": "Custody updates an agreed asset but cannot add assets to its proof; first funding needs no new settlement handshake.",
+      "tsPairedClaims": {
+        "log": ".logs/crisis-20261011/custody-proof-green.log",
+        "tests": 5
+      },
+      "tsRed": "1 agreed asset became 128"
+    },
+    "canonicalPreparation": {
+      "before": {
+        "failed": 2,
+        "passed": 3
+      },
+      "browser": {
+        "failed": 0,
+        "flaky": 0,
+        "log": ".logs/crisis-20261011/canonical-marker-react/wallet-browser.log",
+        "report": ".logs/crisis-20261011/canonical-marker-react/wallet-results.json",
+        "seconds": 65.683,
+        "skipped": 0,
+        "tests": 7
+      },
+      "firstFailureLog": ".logs/crisis-20261011/canonical-marker-regression-before.log",
+      "frozenCore": "unchanged 0x4eccf4492e5d085b24162f86d327e003c36b7e2a90ad527db1653fde391946a7",
+      "problem": "The same semantic value produced different consensus bytes after payload preparation; its marker also bypassed strict undefined rejection.",
+      "regression": {
+        "assertions": 95,
+        "log": ".logs/crisis-20261011/canonical-marker-regression-after.log",
+        "seconds": 0.394,
+        "tests": 26
+      },
+      "replay": {
+        "engines": [
+          "ts-w1",
+          "ts-w4",
+          "ts-w8"
+        ],
+        "exact": true,
+        "frames": 498,
+        "log": ".logs/crisis-20261011/canonical-marker-ts-parity.log",
+        "reports": ".logs/crisis-20261011/canonical-marker-ts-parity",
+        "seconds": 83.149
+      },
+      "status": "PASS"
+    },
+    "completeCheck": {
+      "frontendGates": 1,
+      "log": ".logs/crisis-20261011/proof-scoped-check-r3.log",
+      "result": "PASS before subsequent concurrent scope/package changes",
+      "sourceGates": 39,
+      "sourceSeconds": 42.9
+    },
+    "completeContracts": {
+      "log": ".logs/crisis-20261011/current-contract-full.log",
+      "result": "PASS",
+      "skipped": 0,
+      "tests": 202
+    },
+    "currentCheck": {
+      "limitation": "Current source; shared uncommitted tree is not an immutable RC.",
+      "log": ".logs/crisis-20261011/current-candidate-check-r8.log",
+      "outerGates": 3,
+      "result": "PASS",
+      "sourceGates": 38,
+      "sourceSeconds": 26.493
+    },
+    "deploymentRehearsal": {
+      "log": ".logs/crisis-20261011/current-deployment-rehearsal.log",
+      "network": "local Hardhat",
+      "report": ".logs/crisis-20261011/current-stack-local-deployment.json",
+      "result": "PASS"
+    },
+    "disputeH474": {
+      "cause": "Rust invented a counter-proof commitment from a newer local draft; TS did not.",
+      "green": ".logs/crisis-20261011/dispute-h474-regression-green.log",
+      "red": ".logs/crisis-20261011/dispute-h474-regression-red.log",
+      "regression": "prepare_dispute_h474_does_not_bind_a_local_draft_as_counter_evidence"
+    },
+    "exitBudgets": {
+      "failed": 0,
+      "fuzzRunsPerInheritedSuite": 256,
+      "limitation": "Named admitted proof shapes and seeded fuzz, not a universal liveness guarantee.",
+      "log": ".logs/crisis-20261011/current-contract-exit-budgets.log",
+      "result": "PASS",
+      "skipped": 0,
+      "tests": 42
+    },
+    "finalLogSha256": {
+      ".logs/crisis-20261011/current-candidate-check-r7.log": "c47d81307133c4180b7fe683800ea75d6b04da8ae2f425b746b547c4f181ddcf",
+      ".logs/crisis-20261011/current-candidate-check-r8.log": "d4ddbe717c660d4e419ddcf118a30e66d38bb0a3cdedc2aa1ed2324746eb0630",
+      ".logs/crisis-20261011/live-ts1000-w32/hlt-payment-load-report.json": "139263d6c489e4601ca9c93b4b5d88b0d14ed4810199714e774e7a56ea886b91",
+      ".logs/crisis-20261011/public-proof-debt-after.log": "ff34e52b4ea6bbbeaebe5b21f3ae5839054132c3b83a936ad1f458395131b63f",
+      ".logs/crisis-20261011/public-proof-debt-before.log": "ff43c3aabbddcc0d752ee93cbb359be9d92a2fc28e87c447f102198cee504961",
+      ".logs/crisis-20261011/public-proof-debt-directions.log": "f20d80c4402eda3aecf96bbe1e08c301e806a4618faae6e71ce04c4d9b2837a5",
+      ".logs/crisis-20261011/public-proof-rehearsal-r7.log": "31b2f67ebb914bc87dd3c7b1328c689b24f093f15efa6c09b7ebffb3d54eebc0",
+      ".logs/crisis-20261011/react-deploy-untracked-before.log": "2f7c45fa70caf21d325d98cafc7d25e6c9ced691df7b272a9369157467a1667d",
+      ".logs/crisis-20261011/react-release-authority-final.log": "7d669dbae10db9c0c8e5f968783128de7177b1e566da8ca1e6603cf43eb53079",
+      ".logs/crisis-20261011/watchtower-real-clock-evidence.log": "94ab86cc0e540be8876c059a11eed7deb4f549054494d0fc9a81d1ca2d50fbf2"
+    },
+    "lending": {
+      "choice": "Approved credit facilities, bounded automatic draws, bilaterally signed term/default covenant, capped originally agreed simple late interest; unsecured solvency risk remains.",
+      "design": "docs/lend.md",
+      "implemented": false,
+      "releaseScope": "DEFERRED by current AGENTS.md; production profile must close admission"
+    },
+    "liveTs1000": {
+      "deadlineMs": 25000,
+      "diagnosis": {
+        "inboundTransitionWorkerSumUs": 25011371,
+        "inboundWorkerJoinWallUs": 6842378,
+        "limitation": "Worker CPU and phase sums overlap wall time and must not be added as sequential phases.",
+        "note": "Separate fresh stands; all retain WAL/fsync, 1000 sovereign runtimes packed 200 per OS process, 20s offered window at 1000/s. Other sessions ran tests on the host; timings do not establish an isolated optimization effect. No worker-count default changed.",
+        "proposalWorkerJoinWallUs": 3131596,
+        "proposalWorkerSumUs": 9011961,
+        "workerProfile": ".logs/crisis-20261011/live-ts1000-worker-profile/hlt-op-counters-report.json"
+      },
+      "diagnosticTrials": [
+        {
+          "deadlineMs": 25000,
+          "deliveredPayments": 20000,
+          "drainCompleteElapsedMs": 30837,
+          "path": ".logs/crisis-20261011/live-ts1000-profile/hlt-payment-load-report.json",
+          "pendingAccountFrames": 0,
+          "status": "FAIL_DRAIN",
+          "submittedPayments": 20000,
+          "validTps": false,
+          "workers": 8
+        },
+        {
+          "deadlineMs": 25000,
+          "deliveredPayments": 20000,
+          "drainCompleteElapsedMs": 32184,
+          "path": ".logs/crisis-20261011/live-ts1000-w4/hlt-payment-load-report.json",
+          "pendingAccountFrames": 0,
+          "status": "FAIL_DRAIN",
+          "submittedPayments": 20000,
+          "validTps": false,
+          "workers": 4
+        },
+        {
+          "deadlineMs": 25000,
+          "deliveredPayments": 20000,
+          "drainCompleteElapsedMs": 30742,
+          "path": ".logs/crisis-20261011/live-ts1000-worker-profile/hlt-payment-load-report.json",
+          "pendingAccountFrames": 0,
+          "status": "FAIL_DRAIN",
+          "submittedPayments": 20000,
+          "validTps": false,
+          "workers": 8
+        },
+        {
+          "deadlineMs": 25000,
+          "deliveredPayments": 20000,
+          "drainCompleteElapsedMs": 29381,
+          "path": ".logs/crisis-20261011/live-ts1000-w32/hlt-payment-load-report.json",
+          "pendingAccountFrames": 0,
+          "status": "FAIL_DRAIN",
+          "submittedPayments": 20000,
+          "validTps": false,
+          "workers": 32
+        }
+      ],
+      "drainCompleteElapsedMs": 30387,
+      "hubWalSync": true,
+      "limitation": "All tested worker configurations miss the drain gate; no valid release TPS claim. Worker configuration defaults are unchanged.",
+      "log": ".logs/crisis-20261011/live-ts1000.log",
+      "offeredPaymentsPerSecond": 1000,
+      "offeredSeconds": 20,
+      "pendingAccountFrames": 0,
+      "pendingRuntimeWork": 0,
+      "report": ".logs/crisis-20261011/live-ts1000/hlt-payment-load-report.json",
+      "result": "FAIL_DRAIN_DEADLINE",
+      "submitted": 20000,
+      "uniqueCommittedPayments": 20000,
+      "users": 1000,
+      "usersPerProcess": 200
+    },
+    "mainnetPreflight": {
+      "limitation": "No financial gates executed. Existing lending/risk-policy blockers are still present; production lending has not yet been closed.",
+      "report": ".logs/crisis-20261011/current-mainnet-preflight.json",
+      "result": "DRY_RUN_BLOCKED"
+    },
+    "methodReview": {
+      "at": "2026-10-11T04:38:01.475Z",
+      "conclusion": "Worker-count trials did not close the drain gap. Stop blind configuration trials; prioritize release identity, production admission and current-bytecode public exit proof. Public signing path and existing funded lending status are pending owner input."
+    },
+    "metricsEntrypoint": {
+      "change": "package.json xln1000 points to existing tools/xln1000/cli.ts; metrics implementation untouched.",
+      "checks": [
+        "bun run xln1000 --help",
+        "bun run check:dead-code"
+      ],
+      "log": ".logs/crisis-20261011/dead-code-after-entrypoint.log",
+      "status": "PASS"
+    },
+    "nativeBeforeFreeze": {
+      "executables": 40,
+      "failed": 0,
+      "ignored": 0,
+      "log": ".logs/crisis-20261011/proof-scoped-rscore-tests.log",
+      "note": "Historical evidence; current scope forbids new rscore commits/checks.",
+      "patch": ".logs/crisis-20261011/rscore-verified-before-freeze.patch",
+      "result": "PASS",
+      "tests": 1121
+    },
+    "productionProfile": {
+      "evidence": "core/account/tx/admission-policy.ts currently has an empty OUT_OF_PROFILE_TX_KINDS set while AGENTS.md defers production lending.",
+      "next": "Close new lending admission without stranding repayment/withdrawal of existing positions; owner asked whether real funded positions exist.",
+      "status": "OPEN"
+    },
+    "publicCodeGuard": {
+      "assertions": 217,
+      "log": ".logs/crisis-20261011/public-proof-code-regression.log",
+      "rejection": ".logs/crisis-20261011/sepolia-canonical-code-rejection.log",
+      "result": "PASS",
+      "seconds": 4.48,
+      "tests": 19
+    },
+    "publicProofRehearsal": {
+      "assertions": 64,
+      "command": "bun jurisdictions/scripts/public-proof-smoke.ts --jurisdiction=ethereum-sepolia --unsecured-claim=150",
+      "debtOutcome": {
+        "collectedUnsecured": "100",
+        "creditorAndQueueRowVerified": true,
+        "fundedCollateral": "850",
+        "remainingDebt": "50",
+        "unsecuredClaim": "150"
+      },
+      "firstFailure": ".logs/crisis-20261011/public-proof-debt-before.log",
+      "guards": [
+        "changed linked bytecode rejected before another transaction",
+        "existing debt rejected before another transaction"
+      ],
+      "limitation": "Fresh local Anvil deployments, one-second blocks and real time; no public Sepolia proof. 150 is the fresh-pair fixture claim in atomic token units, not an exposure limit. A funded existing pair has different reserves.",
+      "logs": [
+        ".logs/crisis-20261011/public-proof-debt-after.log",
+        ".logs/crisis-20261011/public-proof-debt-directions.log"
+      ],
+      "paymentSurface": {
+        "assertions": 86,
+        "log": ".logs/crisis-20261011/public-proof-debt-surface.log",
+        "tests": 7
+      },
+      "result": "PASS",
+      "scenarios": [
+        "secured collateral",
+        "unsecured shortfall, owner on right",
+        "unsecured shortfall, owner on left"
+      ],
+      "tests": 3,
+      "typeCheck": ".logs/crisis-20261011/public-proof-debt-types-final.log"
+    },
+    "react": {
+      "browserSeconds": 17.6,
+      "journey": "100 USDC reserve funding, collateral move, early-finalization prevention, timed dispute, exact reserve recovery and external withdrawal",
+      "log": ".logs/crisis-20261011/proof-scoped-wallet-react-r2.log",
+      "report": ".logs/crisis-20261011/wallet-react-r2-results.json",
+      "result": "PASS",
+      "skipped": 0,
+      "tests": 1
+    },
+    "reactDeployRevision": {
+      "assertions": 15,
+      "before": ".logs/crisis-20261011/react-deploy-untracked-before.log",
+      "behavior": "Select the Runtime checkout full SHA; explicit reviewed SHA allowed; tracked and untracked non-ignored source rejected before checkout/build; existing artifact and revision preserved on rejection.",
+      "command": "bun test core/__tests__/operations/release/react-deploy-revision.test.ts",
+      "elapsedSeconds": 1.143,
+      "limitation": "Real local Git and Bun build regression; no remote rollout. Ignored environment files are not covered by this source guard; production configuration remains a separate approval input.",
+      "log": ".logs/crisis-20261011/react-deploy-untracked-after.log",
+      "status": "PASS",
+      "tests": 2
+    },
+    "reactHostedBuild": {
+      "command": "bun run --cwd ui build:hosted",
+      "limitation": "Build is not financial correctness or deployment evidence.",
+      "log": ".logs/crisis-20261011/react-hosted-artifact.log",
+      "status": "PASS"
+    },
+    "reactPaymentSwap": {
+      "browserSeconds": 40.2,
+      "log": ".logs/crisis-20261011/react-payment-swap.log",
+      "report": ".logs/crisis-20261011/react-payment-swap-results.json",
+      "result": "PASS",
+      "skipped": 0,
+      "tests": 5
+    },
+    "reactRecovery": {
+      "browserSeconds": 23.1,
+      "limitation": "Backup/proof restoration and continued payments; does not prove offline counter-dispute.",
+      "log": ".logs/crisis-20261011/proof-scoped-recovery-react.log",
+      "report": ".logs/crisis-20261011/recovery-react-results.json",
+      "result": "PASS",
+      "skipped": 0,
+      "tests": 1
+    },
+    "reactReleaseScope": {
+      "assertions": 250,
+      "before": ".logs/crisis-20261011/react-release-scope-before.log",
+      "behavior": "React ui/ participates in code-root membership, source cleanliness and source-to-release-tag binding.",
+      "elapsedSeconds": 4.3,
+      "limitation": "Working-tree release-tool evidence; not a signed release.",
+      "log": ".logs/crisis-20261011/react-release-authority-final.log",
+      "status": "PASS",
+      "tests": 31
+    },
+    "recording": {
+      "entityInputs": 9586,
+      "frames": 498,
+      "limitation": "130-user recording; not production-valid TPS evidence.",
+      "log": ".logs/crisis-20261011/proof-scoped-six-way-parity.log",
+      "manifest": ".logs/hlt-evidence/2026-10-11T02-37-40-400Z/recording-manifest.json",
+      "outboxEnvelopes": 9470,
+      "replayEngines": [
+        "ts-w1",
+        "ts-w4",
+        "ts-w8",
+        "rust-w1",
+        "rust-w4",
+        "rust-w8"
+      ],
+      "report": ".logs/hlt-evidence/2026-10-11T02-37-40-400Z/replays/1791688280064-parity.json",
+      "result": "PASS after final asset-admission simplification; native trials completed before freeze"
+    },
+    "sepolia": {
+      "checkedContracts": 5,
+      "limitation": "Read-only RPC and deployment dry run; no signatures or transactions sent.",
+      "mismatchedLengths": 5,
+      "preflight": ".logs/crisis-20261011/sepolia-deploy-preflight.log",
+      "report": ".logs/crisis-20261011/sepolia-bytecode-inventory.json",
+      "result": "BLOCKED_CURRENT_BYTECODE_IDENTITY"
+    },
+    "svelte": {
+      "report": ".logs/crisis-20261011/wallet-svelte-results.json",
+      "result": "PASS before wallet freeze",
+      "skipped": 0,
+      "tests": 1
+    },
+    "watchtower": {
+      "assertions": 129,
+      "automaticRealClock": {
+        "counterObservedSecondsBeforeDeadline": 12,
+        "counterpartyFinalReserve": "0",
+        "directSweep": false,
+        "finalOwnerNonce": 1,
+        "offlineOwnerNonce": 1,
+        "protectedCollateral": "300",
+        "responseWindowSeconds": 30,
+        "staleProofCounterpartyAllocation": "200",
+        "submissions": [
+          "0x2384ab550af1d5d1864fb46db3c44538864c4d187abcd8e79a7809e901fb4689",
+          "0x1d5e26432338ef247872f43dcede1f731a73c1be94d9c412ff0d0bea79c3d111"
+        ],
+        "timeWarp": false,
+        "watchedFinalReserve": "1000"
+      },
+      "limitation": "The automatic defense case uses the production daemon and current contracts on a local one-second chain; reserves are seeded by the existing contract fixture. It is not public-chain latency, finality or operator-availability evidence. The second stale-remedy rejection remains a separate focused local test.",
+      "log": ".logs/crisis-20261011/watchtower-real-clock-evidence.log",
+      "result": "PASS",
+      "seconds": 46.72,
+      "tests": 2
+    },
+    "workerProfiling": {
+      "limitation": "Temporary diagnostic preloads enable existing Bun sampling on workers. Profiling timings are not a live TPS baseline or a demonstrated performance gain.",
+      "mainExclusiveSamples": 7950,
+      "replayExactFrames": 498,
+      "report": ".logs/crisis-20261011/worker-sampling-report.json",
+      "status": "DIAGNOSTIC",
+      "summary": ".logs/crisis-20261011/worker-exclusive-summary.json",
+      "workerExclusiveSamples": 3411
+    },
+    "ownerUpdate20261011": {
+      "scope": "TS, React, Ethereum same-J including lending; open participation with no global funding cap",
+      "sepolia": {
+        "address": "0x4a009FaaA692DE8f66d70b53E785Ae0f7a307902",
+        "chainId": 11155111,
+        "keyManagement": "macOS Keychain; dedicated local testnet runner",
+        "keyReadback": "PASS",
+        "deploymentDryRun": "PASS",
+        "balanceEth": "0",
+        "broadcast": false,
+        "log": ".logs/crisis-20261011/sepolia-keychain-dry-run.log",
+        "blocker": "Faucet CAPTCHA confirmation pending; unauthenticated Google claim refused; published CLI faucet hosts return 404"
+      },
+      "openParticipation": {
+        "tests": 16,
+        "assertions": 50,
+        "log": ".logs/crisis-20261011/open-participation-gates.log",
+        "lendingCovenantGatesRetained": true
+      },
+      "lending": {
+        "firstFailure": "LENDING_REPAY_LOAN_NOT_ACTIVE for a valid overdue repayment",
+        "nextFailure": {
+          "log": ".logs/crisis-20261011/lending-proof-covenant-before.log",
+          "reproducer": ".logs/crisis-20261011/lending-proof-covenant.test.ts",
+          "result": "FAIL",
+          "claim": "10000-unit deposits at 100 and 200 bps produce identical executable dispute proofs despite distinct portfolio rates",
+          "proofBodyHash": "0xa0d91e6e05ee7ce2454d49974f20b697d49301bc314ee78d44ccab34643a097a"
+        },
+        "coreTests": 46,
+        "assertions": 238,
+        "coreLog": ".logs/crisis-20261011/saver-interest-core.log",
+        "browserTests": 2,
+        "skipped": 0,
+        "browserSeconds": 28.7,
+        "browserReport": ".logs/crisis-20261011/saver-interest-react/wallet-results.json",
+        "behavior": "Bank retains borrower interest; saver receives its independent term return at maturity; late recovery cannot recreate paid saver capital",
+        "limits": [
+          "Maturity/default cases are Account/Entity evidence, not a public-chain or full browser maturity drill",
+          "Signed lending covenant, on-chain enforcement, approved exposure and restart validation remain required"
+        ]
+      },
+      "check": {
+        "result": "PASS",
+        "sourceGates": 38,
+        "outerGates": 3,
+        "sourceMs": 27257,
+        "log": ".logs/crisis-20261011/current-candidate-check-r10.log"
+      },
+      "logSha256": {
+        "sepolia-keychain-dry-run.log": "9b2dcaeb0b385564e35539ed5277372c36cf64462af042fc23377eb48c1d0f69",
+        "open-participation-gates.log": "5d54c819a2606093500fc4af97b2e8aee7a985cbf48fdb0723eec5a4dd511376",
+        "lending-late-repayment-before.log": "772286240e95ff86dd8b330c168ea9b6c9421deaba98de0608bdf83d1ee72660",
+        "saver-interest-independent-before.log": "f24fed0a26db34d978f5fa25663c12eee61774347b25578a6d5d9c0289905fbc",
+        "saver-interest-core.log": "996c5c4745dd65fd8a1b1927edd9959a57ff3801f79dff8ac6dde2f2b51d52e2",
+        "current-candidate-check-r10.log": "2fe2359be0cfcad73ff9f1fcc04cdd4a4e48525c3d741eb52337c0b120ef8c75",
+        "lending-proof-covenant-before.log": "c5fec22ccdf7c7ac65f68d79367150361d7f318098f0f0f308c20ab6f1374e9a"
+      }
+    },
+    "loanAndWallet20261011": {
+      "at": "2026-10-11T07:29:45Z",
+      "status": "local_candidate_verified_not_release_ready",
+      "contractCases": 41,
+      "gasCases": 16,
+      "wal": {
+        "workers": [
+          1,
+          4
+        ],
+        "frames": 111,
+        "workerOperationsEach": 382,
+        "exact": true,
+        "limitation": "Not TPS or maturity/default crash injection",
+        "currentCandidate": true,
+        "evidenceDigest": "0ee8aa539bf3ab5bb04b5dc5c991316922209454891d8ba759a6af1ed182ae63"
+      },
+      "wallet": {
+        "debtSummary": "complete before truncation",
+        "openingCredit": 0,
+        "savingsCoupon": "explicit consent",
+        "loanReceive": "canonical receiving capacity control",
+        "browser": {
+          "passed": 4,
+          "total": 4,
+          "skipped": 0,
+          "seconds": 53.8,
+          "report": "lending-final-wallet-react/wallet-results.json"
+        },
+        "routing": "Credit-limit policy changes publish immediately; balances retain heartbeat policy"
+      },
+      "adapterRegression": {
+        "passed": 97,
+        "assertions": 647
+      },
+      "remaining": [
+        "bank-approved facilities",
+        "signed late interest",
+        "maturity/default/restart coverage",
+        "fresh funded Sepolia deployment and real-clock exits",
+        "live load drain",
+        "immutable candidate and green full check"
+      ],
+      "evidence": {
+        "loan-contract-tests.log": "ed8aa1bec2caec6bc1c2c3f82feb4dc76eeb277b422db5fa47e8099680de7858",
+        "loan-gas-budget.log": "5f618325732690e2c2c3b031658bc6b95552f55f8be48df4c3a135622cd86f01",
+        "loan-bytecode-literal-review.json": "33bebbd534a28ce199a975288c5256eb01a570893a872353d4cb2f97ae73e176",
+        "loan-covenant-react/lending-parity-comparison.json": "9430e32324339230571ec1e5168b931b55462a083df04a74095ca5ccea70017b",
+        "wallet-debt-related.log": "9a39f74e477251249de3dc851f20eafbf1cf84936ae56829094addaec0ad8f58",
+        "lending-view-regression.log": "83f010918776ccf235187b014654188207d4e64c9b6e959b54ff1ea1150b0b2a",
+        "lending-consent-react/wallet-results.json": "8f404ecdff15d189d490429123e3dc46037a36ae688cf8e74429eece705b8184",
+        "lending-final-wallet-react/wallet-results.json": "6722d435a0afeb501ed7570dc54792214e8bbced4b3f439817d04958e6dd96f1",
+        "lending-credit-publication-test.log": "9b1be8224fc6196e8385aba5cbe3602ece3110881b1e3d8eada06ec58d12c23a",
+        "lending-wallet-final-related.log": "e9b12f1105c4ba9fa6c552f1f6222c6451d93b7140d0039052de8c922c762ef4",
+        "lending-wallet-final-check-long.log": "ec4d0b4cdb623bb7424e730bd03ce168dd8f4ead263a55944c509c55a0ad56d0",
+        "lending-wallet-final-full-check.log": "da424dca15c7e5374353ba1e8ead9166f3cff1dd27f929e19600e05a0e225287",
+        "loan-covenant-react/lending-parity-wallet-final-comparison.json": "a3d3a1e8ce1f34ef20d24e3487ae7c4d1e72d8f1217a70b5172fcd759cb2f7e9",
+        "lending-no-liquidity-before.log": "f2eb985ce4fafd17a8ebd83ccb3a260255fba16b392baa22ae4e6865060b4d37",
+        "lending-no-liquidity-after.log": "14dae04e23b2029b39bde52a8aae3a9dbc20939dc3ab79b77236deb40376f0f5",
+        "lending-unfunded-react/wallet-results.json": "bd8a13d217e3e0a0f90d1945c5d5099e536cad0c139b85b362777623123ab2a5",
+        "lending-unfunded-react/lending-parity-comparison.json": "e3bd8d9f8f1440ca2d97e9c823d5b7a377c8bcbb19f1978c71b910ae37099dec",
+        "lending-unfunded-related.log": "0efa744d1588c4274e8bd49227816bfb419cf15ee7e0626c1f0841f7bbdeebc3",
+        "lending-unfunded-check-long.log": "1af22fc418321d0b538129d985eda7e0b00ed692f136d19fe3d44bac418d4f43",
+        "lending-unfunded-full-check.log": "4ae6dd893415a17f110c8ba243d2035ba4fcccde91d8ebef1b691e3aa3af8b3b",
+        "sepolia-loan-current-dry-run.log": "671abb741792dd16d4b92fed360036dfa2f2b29fa65f01bc112308a330e6a86f"
+      },
+      "related": {
+        "passed": 226,
+        "assertions": 5953,
+        "files": 16
+      },
+      "source": {
+        "gates": 38,
+        "outerGates": 3,
+        "passed": true,
+        "sourceMs": 27880
+      },
+      "fullCheck": {
+        "passed": false,
+        "firstFailure": "check:contract-artifact-drift",
+        "note": "Synchronized artifacts remain uncommitted in shared tree"
+      },
+      "nextBoundary": {
+        "name": "unfunded signed request declines without halting",
+        "status": "verified",
+        "unit": {
+          "tests": 12,
+          "assertions": 138
+        },
+        "related": {
+          "tests": 182,
+          "assertions": 1185
+        },
+        "browser": {
+          "tests": 2,
+          "seconds": 27,
+          "skipped": 0,
+          "report": "lending-unfunded-react/wallet-results.json"
+        },
+        "wal": {
+          "ok": true,
+          "workers": [
+            1,
+            4
+          ],
+          "frames": 113,
+          "baseHeight": 1,
+          "targetHeight": 114,
+          "transcriptDigest": "5eb844306e5fbd02658dd58649fc500cce2e65733716635b41b997c751b21a60",
+          "evidenceDigest": "ee4e4943fa52e48b243e9232f2f22f86a94c8817be6412e8f5e82c105c75da85",
+          "inputOccurrences": {
+            "lending_borrow_request": 2,
+            "lending_close_request": 1,
+            "lending_fund": 1,
+            "lending_repay": 1
+          }
+        },
+        "source": {
+          "gates": 38,
+          "outerGates": 3,
+          "passed": true,
+          "sourceMs": 27878
+        },
+        "fullCheck": {
+          "passed": false,
+          "firstFailure": "check:contract-artifact-drift"
+        },
+        "limitations": [
+          "decline is recorded in the bank signed frame; borrower status presentation remains open",
+          "bank-approved facilities and pricing remain open"
+        ]
+      },
+      "sepolia": {
+        "currentBytecodeDryRun": true,
+        "balanceEth": "0",
+        "broadcast": false
+      }
+    }
+  },
+  "currentReleaseScope": {
+    "authority": "AGENTS.md RELEASE SCOPE 2026-10-11",
+    "deferred": [
+      "TRON",
+      "XLNC",
+      "Base",
+      "cross-J headline",
+      "companies/IPO",
+      "native clients",
+      "custody"
+    ],
+    "engine": "typescript",
+    "frozen": [
+      "rscore",
+      "svelte wallet"
+    ],
+    "jurisdiction": "ethereum same-J",
+    "wallet": "react"
+  },
+  "date": "2026-10-11",
+  "generatedArtifactReview": {
+    "artifacts": [
+      {
+        "abiChanged": true,
+        "addedErrors": [
+          "AccountTokenNotInitialized"
+        ],
+        "name": "Account",
+        "newRuntimeBytes": 22824,
+        "newRuntimeHexTextSha256": "10dde4573d23b6d28876a7c2dda28a05a23582fdf1a842af7f0de5fe9c062a07",
+        "oldRuntimeBytes": 22791,
+        "oldRuntimeHexTextSha256": "019a2d21eb4d723a3ad99508ac01e6bc68ac5f4d28400b335e0986294a3f26c6",
+        "path": "frontend/static/contracts/Account.json",
+        "runtimeChanged": true
+      },
+      {
+        "abiChanged": false,
+        "addedErrors": [],
+        "name": "DeltaTransformer",
+        "newRuntimeBytes": 6714,
+        "newRuntimeHexTextSha256": "0cfc960be3a348a8b8577524f04359b4d0cb8f410385565592b937122dbd0c9f",
+        "oldRuntimeBytes": 6714,
+        "oldRuntimeHexTextSha256": "0cfc960be3a348a8b8577524f04359b4d0cb8f410385565592b937122dbd0c9f",
+        "path": "frontend/static/contracts/DeltaTransformer.json",
+        "runtimeChanged": false
+      },
+      {
+        "abiChanged": true,
+        "addedErrors": [
+          "AccountTokenNotInitialized"
+        ],
+        "name": "Depository",
+        "newRuntimeBytes": 22185,
+        "newRuntimeHexTextSha256": "6a1c6b80d25fed0c8b0f189166d8636bb7f1ec739d04ff9a95b93e3fd631bf4e",
+        "oldRuntimeBytes": 22185,
+        "oldRuntimeHexTextSha256": "6a1c6b80d25fed0c8b0f189166d8636bb7f1ec739d04ff9a95b93e3fd631bf4e",
+        "path": "frontend/static/contracts/Depository.json",
+        "runtimeChanged": false
+      },
+      {
+        "abiChanged": false,
+        "addedErrors": [],
+        "name": "DepositoryBounds",
+        "newRuntimeBytes": 4609,
+        "newRuntimeHexTextSha256": "536c4aeb16570a7998c731fc1ee46fdc878fbc776d0a01bed5e4054bade52600",
+        "oldRuntimeBytes": 4609,
+        "oldRuntimeHexTextSha256": "536c4aeb16570a7998c731fc1ee46fdc878fbc776d0a01bed5e4054bade52600",
+        "path": "frontend/static/contracts/DepositoryBounds.json",
+        "runtimeChanged": false
+      },
+      {
+        "abiChanged": false,
+        "addedErrors": [],
+        "name": "ERC20Mock",
+        "newRuntimeBytes": 1672,
+        "newRuntimeHexTextSha256": "84b3c0a389b615e5f622d2d3ec3e56cfd29da924a2ccb033409985731423b556",
+        "oldRuntimeBytes": 1672,
+        "oldRuntimeHexTextSha256": "84b3c0a389b615e5f622d2d3ec3e56cfd29da924a2ccb033409985731423b556",
+        "path": "frontend/static/contracts/ERC20Mock.json",
+        "runtimeChanged": false
+      },
+      {
+        "abiChanged": false,
+        "addedErrors": [],
+        "name": "EntityProvider",
+        "newRuntimeBytes": 19013,
+        "newRuntimeHexTextSha256": "e095db448fe003360bc2466a813924a638cf5f44b40527e1bb3698d35d3a91ad",
+        "oldRuntimeBytes": 19013,
+        "oldRuntimeHexTextSha256": "e095db448fe003360bc2466a813924a638cf5f44b40527e1bb3698d35d3a91ad",
+        "path": "frontend/static/contracts/EntityProvider.json",
+        "runtimeChanged": false
+      },
+      {
+        "abiChanged": false,
+        "addedErrors": [],
+        "name": "HankoVerifier",
+        "newRuntimeBytes": 5251,
+        "newRuntimeHexTextSha256": "2b7a39441563facf35d0e31d4eec2ac1bca94ad9eddc91132dd5dc413bbec11a",
+        "oldRuntimeBytes": 5251,
+        "oldRuntimeHexTextSha256": "2b7a39441563facf35d0e31d4eec2ac1bca94ad9eddc91132dd5dc413bbec11a",
+        "path": "frontend/static/contracts/HankoVerifier.json",
+        "runtimeChanged": false
+      },
+      {
+        "abiChanged": false,
+        "addedErrors": [],
+        "name": "HashLadderRegistry",
+        "newRuntimeBytes": 1589,
+        "newRuntimeHexTextSha256": "5d07071ae9f773dbb4568e5b0861ef6867b21a137b6b2ca5ad9d414542c8210f",
+        "oldRuntimeBytes": 1589,
+        "oldRuntimeHexTextSha256": "5d07071ae9f773dbb4568e5b0861ef6867b21a137b6b2ca5ad9d414542c8210f",
+        "path": "frontend/static/contracts/HashLadderRegistry.json",
+        "runtimeChanged": false
+      },
+      {
+        "abiChanged": false,
+        "addedErrors": [],
+        "name": "NftCustody",
+        "newRuntimeBytes": 2055,
+        "newRuntimeHexTextSha256": "97bcc3b641cb515acb6bf097f7c7fddd26577aa0c41fb1bde7d2b33958ffbd00",
+        "oldRuntimeBytes": 2055,
+        "oldRuntimeHexTextSha256": "97bcc3b641cb515acb6bf097f7c7fddd26577aa0c41fb1bde7d2b33958ffbd00",
+        "path": "frontend/static/contracts/NftCustody.json",
+        "runtimeChanged": false
+      }
+    ],
+    "hashEncoding": "SHA-256 of deployedBytecode hex template string, including 0x and any library placeholders; not deployed chain addresses or runtime code hashes.",
+    "note": "Historical review of the superseded collateral-positive guard. Owner asset-list clarification led to removing that guard; canonical regeneration now produces zero contract-artifact/TypeChain diff against HEAD."
+  },
+  "handoff": {
+    "afterLines": 68,
+    "archive": "docs/night-work-history-20261011.md",
+    "beforeLines": 3566,
+    "method": "Original text preserved verbatim after an archive banner; same directory preserves relative link bases.",
+    "originalBytes": 256262,
+    "originalSha256": "015aac5cbd259d4b5d159b40bf4b2083ce99d03c7941baf4db0b7cb8532907fd"
+  },
+  "head": "f1464e84e916a65146c046b576a976c4359bcd25",
+  "historicalAttack": {
+    "gas": 12657990,
+    "source": "docs/evidence/xlnc-20261010/unsolicited-custody-before.json",
+    "status": "Historical pre-fix artifact inspected; not reproduced against old source in this review."
+  },
+  "history": {
+    "commits": 3752,
+    "method": "git log reachable from HEAD; --since=2026-04-11T00:00:00+03:00 --until=2026-10-11T23:59:59+03:00 --no-merges; month buckets use author date; category uses commit subject prefix. Counts are not engineering hours or value.",
+    "months": {
+      "2026-04": 69,
+      "2026-05": 461,
+      "2026-06": 432,
+      "2026-07": 1335,
+      "2026-08": 850,
+      "2026-09": 346,
+      "2026-10": 259
+    },
+    "refactorMovementSubjects": {
+      "count": 241,
+      "limitation": "Subject search used day-boundary git filters without the explicit timezone; descriptive sample, not time allocation.",
+      "pattern": "^refactor.*(split|move|extract|lives|size|facade)"
+    },
+    "refactorPrefix": 584
+  },
+  "initialWorkingSourceHashes": {
+    "core/__tests__/account/transactions/dispute-gas-budget.test.ts": "a7079b92bd40f8f416bb786f493fa9560ffe1aca32f1b03efe6b5b87e18abebf",
+    "core/account/tx/handlers/settlement/transition.ts": "02f17363e02cda264abbe9cab73c7d51c606d8b5dc6c4bab9abdced01aea3dee",
+    "jurisdictions/contracts/Account.sol": "b9b295c40e2a1fbbc676d9377a887d74e15388772400b7d0712441eddf8cdbfc",
+    "jurisdictions/contracts/Types.sol": "b74343404c040937142141784919623c73a5b01a51f4bec3eb5518b9e28d976a",
+    "jurisdictions/test/foundry/stress/DisputeIngressGas.t.sol": "9bebbcb10fc04773c74699a47cc6e9462510bae024d799745506f09f7c5e33be",
+    "rscore/crates/engine/src/tx/handlers/settlement.rs": "8c45e614a82563fc1a4af09cd70b61ac72138f6953fd20d14b5e41a3b7cff025",
+    "rscore/crates/engine/tests/monetary/dispute_gas_budget.rs": "f14d9c88578cfe1cbd67e58d1750b0a246d8250dc1bbbd2981cba2a039229e74"
+  },
+  "logHashes": {
+    ".logs/crisis-20261011/caption-tests.log": "9c37b10fb1819f932cea9b96588ead54013e1554da037b628980e8961141e960",
+    ".logs/crisis-20261011/check.log": "4a700940a6ed0b7acf4385d7bf0615a9e8feb17a519f6e77068b07bdcb5c1a12",
+    ".logs/crisis-20261011/current-contract-exit-budgets.log": "e22ae9aa4d2b444171db4ac253f2cb839075cab6351d41046e57912e909a1820",
+    ".logs/crisis-20261011/current-contract-full.log": "f8f429adc2d619b677e58e444209198e8f02b61e2a1dbd81b50ab2b4fe6cbe8e",
+    ".logs/crisis-20261011/current-deployment-rehearsal.log": "cf4cd76c02fd02881cca118ef7ec94907bbd8d112b0274bfbbeca161cf39f948",
+    ".logs/crisis-20261011/current-stack-local-deployment.json": "abd9ff548df4e9946727ae767a6aa3de8468f562b6ad9b2456286ebb810c4fb1",
+    ".logs/crisis-20261011/current-watchtower-rpc.log": "4f2517fbc73e97da6341ceb1e9d3d185a98b89b8e8e52c473e476644691c022f",
+    ".logs/crisis-20261011/ethereum-candidate-check-r2.log": "63952f1eb2cf11cecfcecfca343e4ce49067153844a23ed137fde1d3671b3224",
+    ".logs/crisis-20261011/ethereum-candidate-check.log": "2f253f0b3815b1b64eaf18c341976adb258592d010e7dc03a106fc74253a848f",
+    ".logs/crisis-20261011/exit.log": "28f29be5d565ed58b4186c2979e43e7306333ec429e3d653fe37d3e8106f401d",
+    ".logs/crisis-20261011/final-check.log": "965bda200ca6d054d2829dd40a2dce5e7a81f5d357ed7e25889567342541f830",
+    ".logs/crisis-20261011/focused.log": "124ab7f28cd52d996f0efe6b325d4c92648a93897b92d7fc2313e25b60c400dd",
+    ".logs/crisis-20261011/frontend-check.log": "e3562343110fb0893ef7d9e619a25a77918b37ce48f504bf00135aa0da8daa06",
+    ".logs/crisis-20261011/live-ts1000.log": "7e69a76f75cb3d615c269b302d009a77e5c2e4dded66e322c6b18c9bbd91ddd7",
+    ".logs/crisis-20261011/live-ts1000/hlt-payment-load-report.json": "7605f8505f35ade7d154a2a4f096bd1160a5291a33ef1ed3269feb5b6f794d0c",
+    ".logs/crisis-20261011/preflight.json": "ca0d180356b2844e430b147eaab7a1c9bb492fb9893040b096d715f7467e309c",
+    ".logs/crisis-20261011/proof-scoped-check-r3.log": "cb5160fb182403b515c4ec3c33d12e79d2884a8269d1a5540117e777ea64eb94",
+    ".logs/crisis-20261011/proof-scoped-recovery-react.log": "229e2190479bf71dab963a6782ef28da3f3747ed106ee3ebc6348375885c7f07",
+    ".logs/crisis-20261011/proof-scoped-rscore-tests.log": "2846d7d6331ac4bc6e6b5d0e14b44381c58b91ec566e275ba6b0340cf8e42807",
+    ".logs/crisis-20261011/proof-scoped-six-way-parity.log": "8a284be73119c23cd9e465f9ea45912265f94d559a9c31983fb74f65a7fb3b75",
+    ".logs/crisis-20261011/proof-scoped-wallet-react-r2.log": "e9440fc47acec50a3c26382cad75d16eb11bd0f4fcefaa352bb4e6a186ad9603",
+    ".logs/crisis-20261011/public-proof-code-regression.log": "20ffc8633d4b99b10c04b819095801a91697b41d46226f0ead23e20e0abcdfb8",
+    ".logs/crisis-20261011/public-proof-contract-types-r3.log": "4e116acac30dc912de034e7ba66cb7464a5ea8a3daec5ae337bfd7d34981558e",
+    ".logs/crisis-20261011/public-proof-rehearsal-r6.log": "f00e02aea375cd0310b8ff49974c759c63f3a7d77880b6bfba7e02c5aa4ee545",
+    ".logs/crisis-20261011/react-payment-swap-results.json": "44a108a85b29069d7f8c4744ef3e1133102e943595f33725373b6e0938f5a31b",
+    ".logs/crisis-20261011/react-payment-swap.log": "cf60136cb5f0a8e67a7cee018bec04c1ab98e03cf4ea20cf8b6fc35505c8ca4a",
+    ".logs/crisis-20261011/recovery-react-results.json": "56d674ff2eb85c38623c47ea6ae95510cd2922f328d568b073be7a61e7932fe2",
+    ".logs/crisis-20261011/risk-copy-en.png": "cc17d4fad31591209683cf381b2daea2327f277dbfc8d889d008e91c95a35eb6",
+    ".logs/crisis-20261011/risk-copy-ru.png": "c7b1a0043fdc116091ed16201fb93f8d8d7caa67d9c4b5a9350cad562de77050",
+    ".logs/crisis-20261011/sepolia-bytecode-inventory.json": "8a8a6ea3ea4ef098e6066d39811a7f7c94a0f249ab32c3dfbe27cf6db784c873",
+    ".logs/crisis-20261011/sepolia-canonical-code-rejection.log": "d18535afa955bb72cd5c800130150eede8ba727710316cbbb6b5bdb1bf37683d",
+    ".logs/crisis-20261011/sepolia-deploy-preflight.log": "daed7777cd4b6de623db14aecdf99444e58d5611dae96105e1ee6e5e675d4f4e",
+    ".logs/crisis-20261011/sepolia-release-inputs.json": "9d258bd2ec5fb49662759ed8f1a09100fef5da100264c2f1294df2137bda34c9",
+    ".logs/crisis-20261011/wallet-react-r2-results.json": "6dea0db2d016469761174316cf5f4f6ce3caebd388bb3f2c4bdf9a78e9ecb811",
+    ".logs/crisis-20261011/wallet-svelte-results.json": "070d9067bb549e0257463ba10b0e314f2820704e4844fe80db340035d022630f",
+    ".logs/hlt-evidence/2026-10-11T02-37-40-400Z/replays/1791688280064-parity.json": "ccbdcb94b1c12544eeaa1745bf0449ee9e7ade5af4b80739f82ad413b73d9046"
+  },
+  "releaseStatus": "NOT_RELEASE_CANDIDATE: local source/tests/artifacts checkpoint validated by full bun run check, 554 regressions, 3 local real-clock funding/exit proofs, 2 watchtower tests, 3 rebuilt React journeys and 145 fixed WAL frames exact before/after TS W1/W4. Live 20000 payments/zero pending drains in 26077ms, above 25000ms. Public Sepolia unfunded; no public deployment or push.",
+  "scope": "Crisis review followed by owner-authorized runtime funding/exit repairs. Shared working tree, not a frozen release candidate.",
+  "timezone": "Europe/Istanbul",
+  "lendingAuthorityClosure": {
+    "at": "2026-10-11T08:17:00Z",
+    "source": "shared dirty main; no immutable candidate",
+    "bankPolicy": "Authenticated Entity commands publish saver/borrower rates and named, expiring, epoch-bound principal facilities. Account credit limits remain separate.",
+    "borrowerConsent": "Reproduced unsolicited debt creation; fixed with exact single-use authorization commitment in the existing lending-intent tree, domain/J nonce, requested principal, asset, term, maximum rate and deadline. Expiry and successful funding cannot reuse the nonce.",
+    "unit": {
+      "tests": 44,
+      "assertions": 518,
+      "failed": 0
+    },
+    "related": {
+      "tests": 219,
+      "assertions": 1616,
+      "files": 12,
+      "failed": 0
+    },
+    "browser": {
+      "tests": 3,
+      "skipped": 0,
+      "seconds": 37.8,
+      "report": "lending-borrower-consent-react-2/wallet-results.json"
+    },
+    "replay": {
+      "frames": 132,
+      "digest": "4526c770403f82763ef02159ce237c636de3b7de3248616e10e35cd6332a4e16",
+      "transcriptDigest": "c16d05dcef1fdb94408fb8c4570d0e284976780a7e70f0db2b8941595dab692a",
+      "workers": [
+        1,
+        4
+      ],
+      "exact": true
+    },
+    "otherFixes": [
+      "Close retry after temporary bank liquidity constraint preserves the single payout covenant.",
+      "Authenticated Account finality retires undisbursed reservations without inventing repayment.",
+      "Unused-export checker handles apostrophes inside comments; exact UI decoder consumer proof retained."
+    ],
+    "wireMigration": "Borrow Account row 8->9; disburse 8->11. Old pending rows reject loudly; funded native covenants remain valid. Three Entity vectors changed/added from an independent MessagePack oracle. Rust frozen.",
+    "limitations": [
+      "Original term coupon only; late accrual not implemented.",
+      "No maturity/default live crash drill or public real-clock proof."
+    ],
+    "artifactsSha256": {
+      "lending-borrower-consent-before.log": "85422e39afa73b015f9afaa7d1c22a59efd7fc223062a54935b0cd8954980b05",
+      "lending-borrower-consent-unit.log": "307a6dd8435c2a8935d29f048e5d93cf8ab05e52c95294deb1a9da2f0f1dd70b",
+      "lending-borrower-consent-related.log": "a2f33e01c64a9ec68ce42bc9d4fa8cf14ad33864b5b5ca0ecbb6d7b331c092a0",
+      "lending-borrower-consent-react-2/wallet-results.json": "de5366876bd97f021fc9072b012726cfd4bf84ce8940a15d4a53a62ddc09a012",
+      "lending-borrower-consent-react-2/lending-parity-comparison.json": "7a758562d2320baa0b3d9c977177b15f0d1f86af710e4aeff4639e8104cf2fed",
+      "lending-bank-policy-react-2/lending-parity-comparison.json": "afbb0930aed5f2a59c8ddcc48c19c85bc0461974c9547b22815d9c2c77f5c6d4",
+      "lending-close-retry-react/lending-parity-comparison.json": "7366e970ebdaa97feefb9222a5b224138562ed68e072ce76cc653c1dc937863f",
+      "lending-opening-finality-after.log": "e8d2be091a4b65b15a9826d1d7f6e5e6c8efd59436ca63c2213869b262f83da6",
+      "lending-consumer-gate-before.log": "dfe1ae6e3493d2692a5d411773b1a48b9fdd47d78b468d64f71ec56d3646d26e",
+      "lending-consumer-gate-after.log": "189236dc65ca9f049e3dce338441dcbdf6513648419840b0693fce0445b44136",
+      "lending-consumer-surface.log": "1824f966981242b5fb3b17cb7c40a71cf405feb12f0c1b7e50a7c8301081e21b",
+      "entity-lending-wire-oracle.py": "f1e9a712025a536a9c64e3789ef7c1988c967e5ab439acd90ac96413bdc9fcbb",
+      "sepolia-sido-faucet-result.json": "3fee701420378a81dd006e43b9736cd6a1e789171e2dbcb549caab0795787c8c",
+      "lending-borrower-consent-check-long-final.log": "b51fdf6165e30f40f8a5c62a45988d2b14b9b8e55a9c09c2d8713274acd24679",
+      "lending-borrower-consent-full-check.log": "0c78e3d95c9c80275225c5fc74b2603eca7b41ad97f713c4d23f0aa931828dda"
+    },
+    "sourceGate": {
+      "result": "PASS",
+      "sourceGates": 38,
+      "outerGates": 3,
+      "sourceDurationMs": 27395,
+      "log": "lending-borrower-consent-check-long-final.log"
+    },
+    "fullCheck": {
+      "result": "FAIL",
+      "gate": "check:contract-artifact-drift",
+      "log": "lending-borrower-consent-full-check.log"
+    }
+  },
+  "methodReviewCurrent": {
+    "at": "2026-10-11T11:41:43.324Z",
+    "decision": "Stop treating intentionally synchronized artifacts as an indefinite drift blocker. Commit a reviewed coherent local checkpoint, excluding frozen Rust and foreign CI. Isolate real-clock tests within their economic-stand budget rather than running impossible combined ordinary suites.",
+    "evidence": "All five checkpoint gate groups pass. 554 regressions, 3 funding/exit cases, 2 watchtower cases, 3 React journeys, 145 exact fixed WAL frames and full bun run check. Source manifest unchanged during full check.",
+    "next": "Inspect the remaining measured live completion tail after checkpoint. Preserve 25-second drain, exact financial verification and WAL/fsync. Public deployment still needs test ETH; no repeated unchanged faucet attempts."
+  },
+  "lendingRequestStatus": {
+    "result": "PASS",
+    "projection": "Current Account request receipt and bank loan allocation; no new durable data and no Account history scan. HTTP response binds request nonce.",
+    "unit": {
+      "tests": 27,
+      "assertions": 248,
+      "failed": 0
+    },
+    "browser": {
+      "passed": 2,
+      "skipped": 0,
+      "seconds": 30,
+      "report": "lending-request-status-react-final/wallet-results.json"
+    },
+    "sourceGate": {
+      "sourceGates": 38,
+      "outerGates": 3,
+      "sourceDurationMs": 30427
+    },
+    "fullCheck": "FAIL check:contract-artifact-drift",
+    "artifactsSha256": {
+      "lending-request-status-unit.log": "71374c0a4d91587f5f6d6adc40ad6d7aa7fcbe576be94bd39899e28bd75d92ab",
+      "lending-request-status-react-final/wallet-results.json": "e0791032b7838fcac6a7bda76c8393ac7f0278173687f99df9b99ab7418fb976",
+      "lending-request-status-check-long-final.log": "144eea4c97b22d23bfd671b701975731cd865d698fd9bb5348ca5f232e321f1b",
+      "lending-request-status-full-check.log": "545a36d61b4138602a32e5d9d1de393463d2dcbecf894549f813009d3f67e40b"
+    }
+  },
+  "publicFundingLatest": {
+    "signer": "0x4a009FaaA692DE8f66d70b53E785Ae0f7a307902",
+    "balanceEth": "0",
+    "broadcast": false,
+    "newAttempts": [
+      {
+        "url": "https://sepolia-faucet-five.vercel.app/api/request-funds",
+        "result": "HTTP 500: Faucet balance is too low."
+      },
+      {
+        "url": "https://patient-gabrielle-aayushgiri-683357f0.koyeb.app/api/v1/info?network=ethereum",
+        "result": "HTTP 404: No active service. URL read from publisher v2.0.4 binary; binary not executed."
+      }
+    ],
+    "reviewedButIneligible": "rpc.aurpay.net requires mainnet balance; no mainnet funds spent.",
+    "captcha": "Specific action-time confirmation still pending; no bypass.",
+    "currentStatus": {
+      "mode": "status",
+      "address": "0x4a009FaaA692DE8f66d70b53E785Ae0f7a307902",
+      "chainId": 11155111,
+      "balanceEth": "0.0",
+      "gasPriceGwei": "0.000000015"
+    },
+    "currentStatusArtifact": ".logs/crisis-20261011/sepolia-topology-status.json",
+    "currentDryRun": "PASS sepolia-late-dry-run.log",
+    "latestInspection": {
+      "url": "https://faucet.free/",
+      "requirement": "Registered 0xNAME instead of an address. No request or registration made; fresh signer remains unfunded."
+    },
+    "quicknode": {
+      "url": "https://faucet.quicknode.com/ethereum/sepolia",
+      "result": "Dedicated address entered through official UI. Continue rejected: Invalid ETH mainnet balance. FAQ claimed no minimum balance; actual UI rejection is authoritative. No funds received.",
+      "screenshot": ".logs/crisis-20261011/quicknode-mainnet-balance-rejection.png"
+    }
+  },
+  "bankOfficerReleaseBoundary": {
+    "at": "2026-10-11T08:35:11Z",
+    "source": "f1464e84e916a65146c046b576a976c4359bcd25 plus shared dirty tree",
+    "implemented": [
+      "Bank publishes savings and loan rates independently through authenticated Entity commands.",
+      "Bank approves named borrower principal facilities and revokes only new draws.",
+      "Borrower sees bank terms and committed request outcome; customer wallet has no bank-admin controls.",
+      "Exact single-use borrower consent remains mandatory before funding."
+    ],
+    "unitRelated": {
+      "tests": 225,
+      "assertions": 1652,
+      "files": 14,
+      "failed": 0
+    },
+    "browser": {
+      "passed": 3,
+      "failed": 0,
+      "skipped": 0,
+      "seconds": 41.5
+    },
+    "replay": {
+      "frames": 130,
+      "digest": "4beb8471ff69bae0a40c6b3e3b43f83aa04d55d84dd584c05fabeeec6a78be50",
+      "transcriptDigest": "2b09a03504178c0c52183dc91579b0a56b44e74a4b59229661b4ac8878595a2d",
+      "workers": [
+        1,
+        4
+      ],
+      "exact": true
+    },
+    "sourceGate": {
+      "result": "PASS",
+      "sourceGates": 38,
+      "outerGates": 3,
+      "sourceDurationMs": 27163
+    },
+    "fullCheck": {
+      "result": "FAIL",
+      "firstGate": "check:contract-artifact-drift",
+      "durationMs": 718
+    },
+    "publicDeployment": false,
+    "pushed": false,
+    "artifactsSha256": {
+      "lending-bank-ui-related.log": "b9f5fe7c4eb835f59148ada864a59b8dd417c1d3ff7c5ad27c45d8395b0acec6",
+      "lending-bank-ui-react/wallet-results.json": "683407502ad05065539e715755521e34f7a6ac5ae565b0d14256bdeab0cfd928",
+      "lending-bank-ui-react/lending-parity-comparison.json": "5b8e21a9e3a10ea1f9c86d7d9398b22ea81fe30e3b2a1d14e21e0874e3bc491a",
+      "lending-bank-ui-check-long.log": "2c29db9bb55acb5dafe663bc4bb3f572c99019c14687637b6052f90c2043e062",
+      "lending-bank-ui-full-check.log": "b1facd72b2650a36a5f557e0527b18035951d3018c00c6bc5ce5d859b2a0c83d",
+      "faucet-terminal-inspection.json": "5a187a5718d1e6c724e1a5d3db80f7b6d781f46e87567ec73393ceb85250616c",
+      "faucet-terminal-info.log": "22175b4cff602a0c86d9130a56d4999c784ce7347711ae98da10c761cd884ae5"
+    }
+  },
+  "signedLateInterestBoundary": {
+    "at": "2026-10-11T09:07:30.290362+00:00",
+    "dirtyTree": true,
+    "firstFailure": {
+      "log": "lending-late-before.log",
+      "expectedDue": "10150",
+      "actualDue": "10100"
+    },
+    "semantics": [
+      "Bank publishes loanLateMs; borrower signs maxLateMs; covenant binds lateMs in the Account root and stock transformer ABI.",
+      "Simple interest on the original principal, no compounding, signed end and maximum claim; savings retain zero late duration.",
+      "Account repayment amount is maximum debit; exact quote and bank servicing use the same Account frame timestamp.",
+      "Entire term-plus-late coupon is reserved in accepted Account risk before funding.",
+      "Old wire rows and native claims without explicit late terms reject; fresh deployment domain, no retroactive addition to old signed state."
+    ],
+    "unit": {
+      "passed": 263,
+      "failed": 0,
+      "assertions": 1959,
+      "files": 17
+    },
+    "browser": {
+      "startTime": "2026-10-11T09:01:25.885Z",
+      "duration": 41791.248999999996,
+      "expected": 3,
+      "skipped": 0,
+      "unexpected": 0,
+      "flaky": 0
+    },
+    "replay": {
+      "checks": [
+        "Runtime/Entity/Account roots",
+        "ordered Entity frames/events/effects/continuations",
+        "verified Runtime output counts/digests"
+      ],
+      "engines": [
+        "TS W1",
+        "TS W4"
+      ],
+      "evidenceDigest": "1939ff183c797de7bc0ccd4654b3b75c17c8ea3f3888f125b26257d5b031af23",
+      "exact": true,
+      "frames": 133,
+      "limitation": "Dirty-tree replay of the browser production WAL; not live TPS or a real-clock maturity/restart drill.",
+      "transcriptDigest": "f336952db3a549b1853f81e77ae436ab0fa18457ad4f89ef993534d63a6e9003"
+    },
+    "contracts": {
+      "settlementCases": 40,
+      "stockCases": 9,
+      "gasCases": 16,
+      "largest80ClaimConservativeFinalizeGas": 3623080,
+      "fullWidth18ClaimConservativeFinalizeGas": 3483560,
+      "budget": 5000000,
+      "bytecode": [
+        {
+          "name": "Account",
+          "creationEqual": true,
+          "runtimeEqual": true,
+          "runtimeLiteralSha256": "019a2d21eb4d723a3ad99508ac01e6bc68ac5f4d28400b335e0986294a3f26c6"
+        },
+        {
+          "name": "Depository",
+          "creationEqual": true,
+          "runtimeEqual": true,
+          "runtimeLiteralSha256": "6a1c6b80d25fed0c8b0f189166d8636bb7f1ec739d04ff9a95b93e3fd631bf4e"
+        },
+        {
+          "name": "DeltaTransformer",
+          "creationEqual": false,
+          "runtimeEqual": false,
+          "runtimeLiteralSha256": "09ba3463d768f7f06894c0fc50c8ee3d31e0f5973293848858e95de9085995c6",
+          "runtimeBytes": 7867,
+          "creationBytes": 7893,
+          "runtimeKeccak": "0x0771c06db45d23cadb711ffc6c78278399132674c8fd7c739aa7838c6b34dff9"
+        },
+        {
+          "name": "EntityProvider",
+          "creationEqual": true,
+          "runtimeEqual": true,
+          "runtimeLiteralSha256": "e095db448fe003360bc2466a813924a638cf5f44b40527e1bb3698d35d3a91ad"
+        },
+        {
+          "name": "HankoVerifier",
+          "creationEqual": true,
+          "runtimeEqual": true,
+          "runtimeLiteralSha256": "2b7a39441563facf35d0e31d4eec2ac1bca94ad9eddc91132dd5dc413bbec11a"
+        },
+        {
+          "name": "HashLadderRegistry",
+          "creationEqual": true,
+          "runtimeEqual": true,
+          "runtimeLiteralSha256": "5d07071ae9f773dbb4568e5b0861ef6867b21a137b6b2ca5ad9d414542c8210f"
+        },
+        {
+          "name": "DepositoryBounds",
+          "creationEqual": true,
+          "runtimeEqual": true,
+          "runtimeLiteralSha256": "536c4aeb16570a7998c731fc1ee46fdc878fbc776d0a01bed5e4054bade52600"
+        },
+        {
+          "name": "NftCustody",
+          "creationEqual": true,
+          "runtimeEqual": true,
+          "runtimeLiteralSha256": "97bcc3b641cb515acb6bf097f7c7fddd26577aa0c41fb1bde7d2b33958ffbd00"
+        },
+        {
+          "name": "ERC20Mock",
+          "creationEqual": true,
+          "runtimeEqual": true,
+          "runtimeLiteralSha256": "84b3c0a389b615e5f622d2d3ec3e56cfd29da924a2ccb033409985731423b556"
+        }
+      ]
+    },
+    "sourceChecks": {
+      "sourcePassed": 38,
+      "outerPassed": 3,
+      "sourceMs": 27897,
+      "fullCheck": "FAIL check:contract-artifact-drift against HEAD, 744ms",
+      "frozenRoot": "0x4eccf4492e5d085b24162f86d327e003c36b7e2a90ad527db1653fde391946a7"
+    },
+    "repairsDuringVerification": [
+      "Strict P2P Account ingress omitted new late fields; reproduced locally, exact schema corrected, missing terms still reject.",
+      "Browser bootstrap helper read identity as soon as navigation rendered; it now waits for actual vault/runtime/entity selection.",
+      "Initial full-width gas fixture accidentally exceeded uint256 after doubling its coupon; corrected to an admissible full-width maximum, retaining the 5M assertion."
+    ],
+    "limitations": [
+      "Controlled clocks prove deterministic maturity/default repayment and Account plus Entity-core restore; full Runtime crash/outbox maturity drill remains.",
+      "Public Sepolia deployment and real-clock offline-wallet watchtower exits remain unfunded.",
+      "Full repayments only; no partial-payment restructuring.",
+      "No immutable candidate, valid live TPS, public broadcast, push or mainnet approval."
+    ],
+    "artifactSha256": {
+      "lending-late-before.log": "8ccbc6ac08b45bd45d7c4f52795e30b6c3a691e405a42122b8190a6312bf55b5",
+      "lending-late-related-final.log": "9cb88bb969f957e13eeb52c16c9807f0d3c3a75b64435242ff9632906ed698b0",
+      "lending-late-contract.log": "5c07c0c90748d27bc389e3daa32f21c84a0999d6eb176395ae8ede1f268a793b",
+      "lending-late-gas-final.log": "cac85f1f6e6560a552410c6aa2c613c771c0883dd3e49d35827bf36769b00157",
+      "lending-late-stock-transformer.log": "f2e5088bc596b4cb6f01e9de25ca5509b1364e3da8968ba1159dc693817ab466",
+      "lending-late-check-long-final.log": "f33f6451126bc2bd4f11a85a3a7ae66cf71b89589225ad60d0ed4347f5b9352b",
+      "lending-late-full-check.log": "d3c203c3f9f82fe4780c15d012d38b212d2ec95d7f8a5dab5c303b6ed3678755",
+      "lending-late-bytecode-review.json": "1a6f30fcec97e73491ffd8daba8298542ccbdf24e6ebd7967d4f267565808d71",
+      "lending-late-ingress-before.log": "034e9b6ac7ea07c6c4c0c988e40e8339ea9d6b2bb22ed15a9a205838472e9bb7",
+      "lending-late-ingress-after.log": "c86f22cfd0cf7422ded7f78121c5b405ad2940fbc78c3e7f0d4f95b7aa946af8",
+      "lending-late-react-3/wallet-results.json": "8131edb8a1e1f98eb45ac6082e6386dd4088b2392a3d1a14597f81869adffcb0",
+      "lending-late-react-3/lending-parity-comparison.json": "a74cba9115f930afaca9c23ae2908c1708bff9e0b83fa5aaee5bf62fe80f2ec9",
+      "sepolia-late-status.json": "bbedc5411ffabd341b4e1a8a7c4a1869332c4b165646a38b5eae065d9330efad",
+      "sepolia-late-dry-run.log": "671abb741792dd16d4b92fed360036dfa2f2b29fa65f01bc112308a330e6a86f"
+    }
+  },
+  "lendingRuntimeCrashBoundary": {
+    "at": "2026-10-11T09:51:33.219Z",
+    "dirtyTree": true,
+    "firstFailure": "Bank booked 2575, borrower remained 12500 with pending Account ACK; 40 Runtime cycles did not converge after SIGKILL.",
+    "secondFailure": "RAM enqueue retired the local ACK before a one-input frame admitted it; an unrelated saver chat and second SIGKILL lost it again.",
+    "fix": "One positional WAL outbox holds local and remote outputs. Local rows retire only with exact authenticated applied recipient payloads in the same Runtime commit. One local EntityTx per row preserves partial admission; no second durable queue or receipt.",
+    "crash": {
+      "forcedKills": 4,
+      "processes": 5,
+      "cases": [
+        "origination",
+        "maturity/default and saver close",
+        "bank repayment before borrower ACK",
+        "capped frame defers ACK before second crash",
+        "cold restore and duplicate redelivery"
+      ],
+      "finalBorrowerBalance": "9925",
+      "finalSaverBalance": "10050",
+      "repayment": "2575",
+      "maximumAuthorizedRepayment": "2600",
+      "limitation": "Real processes and canonical WAL, controlled clock and explicit bank IOUs; no public-chain funding or real-clock maturity claim."
+    },
+    "unit": {
+      "passed": 319,
+      "failed": 0,
+      "assertions": 2173,
+      "files": 24,
+      "seconds": 22.82,
+      "standLock": true
+    },
+    "browser": {
+      "startTime": "2026-10-11T09:45:09.013Z",
+      "duration": 41884.036,
+      "expected": 3,
+      "skipped": 0,
+      "unexpected": 0,
+      "flaky": 0
+    },
+    "replay": {
+      "exact": true,
+      "frames": 136,
+      "transcriptDigest": "c276f23b0ecb84502942282e8c8487a31f7a6bf1ca4c02b073515f046329e929",
+      "evidenceDigest": "3ccb007dc22ca4073df35f8e07005e482a7e7ebe62cfc9e7e178cb389f0781c6",
+      "engines": [
+        "TS W1",
+        "TS W4"
+      ],
+      "checks": [
+        "Runtime/Entity/Account roots",
+        "ordered Entity frames/events/effects/continuations",
+        "verified Runtime output counts/digests"
+      ],
+      "limitation": "Dirty-tree browser production WAL replay; not live TPS or a public-chain maturity drill."
+    },
+    "sourceChecks": {
+      "sourcePassed": 38,
+      "outerPassed": 3,
+      "sourceMs": 26373,
+      "fullCheck": "FAIL check:contract-artifact-drift against HEAD, 751ms",
+      "frozenRoot": "0x4eccf4492e5d085b24162f86d327e003c36b7e2a90ad527db1653fde391946a7"
+    },
+    "contracts": "No bytecode change in this boundary; signedLateInterestBoundary contract evidence remains current.",
+    "artifactSha256": {
+      "lending-crash-before.log": "1704ae3999c427a260748f5cc8674f63c544e19caba60c4f594a6d244096f9a1",
+      "lending-crash-capped-before-4.log": "31085023faca45b24dee64e4bcd3cceb1e7e53ec4e79329686e85f8e3268c4ed",
+      "lending-crash-regression-final.log": "8eecf780010fe091c855801c684a5dd8fba274953a4c15cdfcd7d1cf70da7b6e",
+      "lending-crash-check-long-green.log": "b0848959bbcd1c2861eabd4167c54242b2ba47f33638db48325dd9ff82b71c7e",
+      "lending-crash-release-check.log": "3b78ce45d2f48e91f8e1c71af0164bee4f08268d42ed9a1979c9568d1af2df29",
+      "lending-crash-release-w1.log": "88fdea7246551763ab8f998e661db4814c27e8e3e8a3bfbdbca734a057eb1b68",
+      "lending-crash-release-w4.log": "5d876ade1085c948cd92babacc6f14aa1d524be908d55e284a80b598cb2881cd",
+      "lending-crash-release-artifact/wallet-results.json": "24b74b10780efdecc5fd77537e7a6e8f9c71cef52b9ad6bc4191525a26b5dfb8",
+      "lending-crash-release-artifact/lending-parity-comparison.json": "a6ffa92645b4583726953c19095b366ff265ce74769dbf0daeea51ef185c9005",
+      "sepolia-crash-status.json": "c1e9049b26e064265d920f397a3f93357304dc6892b259bc4fe602eeb8bab4e1"
+    }
+  },
+  "liveTs1000AfterCrashFix": {
+    "at": "2026-10-11T10:05:55.444Z",
+    "attempts": [
+      {
+        "path": ".logs/crisis-20261011/lending-crash-live-ts1000/hlt-payment-load-report.json",
+        "role": "current baseline",
+        "users": 1000,
+        "offeredPerSecond": 1000,
+        "offeredSeconds": 20,
+        "submitted": 20000,
+        "delivered": 20000,
+        "drainCompleteElapsedMs": 30849,
+        "deadlineMs": 25000,
+        "result": "FAIL_DRAIN_DEADLINE",
+        "validTps": false,
+        "quiescence": {
+          "accountMempoolTxs": 0,
+          "openHubPeers": 1000,
+          "pendingAccountFrames": 0,
+          "pendingRuntimeWork": 0,
+          "runtimes": 1000
+        },
+        "environment": {
+          "accountWorkers": 8,
+          "cryptoPoolWorkers": "default",
+          "cryptoSignWorkers": "default",
+          "disputeHankos": "always",
+          "hubWalSync": true,
+          "laneNice": 0,
+          "lanePersistence": false,
+          "laneWalSync": false,
+          "provenance": {
+            "gitDirtyFiles": 91,
+            "gitSha": "f1464e84e916a65146c046b576a976c4359bcd25",
+            "parityRecordingSha256": null,
+            "rustBinarySha256": null,
+            "standLockToken": "d4701524-fa92-4cd0-a74c-685132ae7705"
+          }
+        }
+      },
+      {
+        "path": ".logs/crisis-20261011/lending-crash-live-profile/hlt-payment-load-report.json",
+        "role": "phase diagnostic",
+        "users": 1000,
+        "offeredPerSecond": 1000,
+        "offeredSeconds": 20,
+        "submitted": 20000,
+        "delivered": 20000,
+        "drainCompleteElapsedMs": 30458,
+        "deadlineMs": 25000,
+        "result": "FAIL_DRAIN_DEADLINE",
+        "validTps": false,
+        "quiescence": {
+          "accountMempoolTxs": 0,
+          "openHubPeers": 1000,
+          "pendingAccountFrames": 0,
+          "pendingRuntimeWork": 0,
+          "runtimes": 1000
+        },
+        "environment": {
+          "accountWorkers": 8,
+          "cryptoPoolWorkers": "default",
+          "cryptoSignWorkers": "default",
+          "disputeHankos": "always",
+          "hubWalSync": true,
+          "laneNice": 0,
+          "lanePersistence": false,
+          "laneWalSync": false,
+          "provenance": {
+            "gitDirtyFiles": 91,
+            "gitSha": "f1464e84e916a65146c046b576a976c4359bcd25",
+            "parityRecordingSha256": null,
+            "rustBinarySha256": null,
+            "standLockToken": "144ca6e9-94ea-41b5-9ea5-56e7607dd885"
+          }
+        }
+      },
+      {
+        "path": ".logs/crisis-20261011/lending-crash-live-cap500/hlt-payment-load-report.json",
+        "role": "bounded intake hypothesis",
+        "users": 1000,
+        "offeredPerSecond": 1000,
+        "offeredSeconds": 20,
+        "submitted": 20000,
+        "delivered": 20000,
+        "drainCompleteElapsedMs": 31361,
+        "deadlineMs": 25000,
+        "result": "FAIL_DRAIN_DEADLINE",
+        "validTps": false,
+        "quiescence": {
+          "accountMempoolTxs": 0,
+          "openHubPeers": 1000,
+          "pendingAccountFrames": 0,
+          "pendingRuntimeWork": 0,
+          "runtimes": 1000
+        },
+        "environment": {
+          "accountWorkers": 8,
+          "cryptoPoolWorkers": "default",
+          "cryptoSignWorkers": "default",
+          "disputeHankos": "always",
+          "hubWalSync": true,
+          "laneNice": 0,
+          "lanePersistence": false,
+          "laneWalSync": false,
+          "provenance": {
+            "gitDirtyFiles": 91,
+            "gitSha": "f1464e84e916a65146c046b576a976c4359bcd25",
+            "parityRecordingSha256": null,
+            "rustBinarySha256": null,
+            "standLockToken": "60fcf4fe-6df9-47b1-9cca-f305421a4ccc"
+          }
+        }
+      }
+    ],
+    "ledger": {
+      "from": 16,
+      "to": 36,
+      "frames": 21,
+      "economicPayments": 20000,
+      "expectedAccountSubpayments": 40000,
+      "hubEntityId": "0x71fea420e5b6bb1f54c58d6b8122849c2b63caad49906ae13e0c45a12dc727cb",
+      "bilateralAccounts": 1000,
+      "nonHubEntities": 1000,
+      "uniqueLockLegs": 40000,
+      "uniqueResolveLegs": 40000,
+      "ingress": {
+        "entityInputs": 10001,
+        "entityTxs": 10001,
+        "accountInputs": 10001,
+        "accountInputKinds": {
+          "ack_frame": 9001,
+          "ack": 1000
+        },
+        "proposalFrames": 9001,
+        "uniqueProposalFrames": 9001,
+        "repeatedProposalFrames": 0,
+        "accountTxAppearances": {
+          "htlc_lock": 20000,
+          "htlc_resolve": 20000
+        }
+      },
+      "egress": {
+        "entityInputs": 9004,
+        "entityTxs": 9004,
+        "accountInputs": 9004,
+        "accountInputKinds": {
+          "ack": 2,
+          "ack_frame": 9002
+        },
+        "proposalFrames": 9002,
+        "uniqueProposalFrames": 9002,
+        "repeatedProposalFrames": 0,
+        "accountTxAppearances": {
+          "htlc_lock": 20002,
+          "htlc_resolve": 20000
+        }
+      }
+    },
+    "replay": {
+      "exact": true,
+      "frames": 35,
+      "engines": [
+        "TS W1",
+        "TS W4"
+      ],
+      "transcriptDigest": "e7acf2ee763ac196a0531e055a9c5578d8d6a1aa28d65a90e7aedee85be63483",
+      "evidenceDigest": "d29524a49f071eddfaca1a69fb71b2e24fe5cbd0e814f1d035b3d6ea32def5b5",
+      "limitation": "Recorded production load replay, not valid live TPS; live drain gate fails."
+    },
+    "phases": {
+      "inboundJoinMs": 7758.669,
+      "proposalJoinMs": 4055.419,
+      "frameEncodeMs": 1621.146,
+      "accountWorkerJoinShare": 0.38296502317741254,
+      "idealAccountWorkerJoinRemovalSpeedup": 1.6206536704766483,
+      "idealFrameEncodingRemovalSpeedup": 1.0554657895855097,
+      "limitation": "Optimistic Amdahl bounds, not achievable gains; worker CPU sums overlap wall time. Existing op counters enabled. Separate fresh stands on a shared desktop, not an isolated causal estimate."
+    },
+    "conclusion": "All 20000 unique payments settle, but the 25s drain gate remains red. A 500-input Runtime cap did not improve completion (31361ms versus baseline 30849ms); no default changed. Do not repeat worker/cap trials without new evidence. Inspect Account transition costs next; storage alone cannot close the gap.",
+    "artifactSha256": {
+      "lending-crash-live-ts1000.log": "f0ee480c120d7570f38d5edd31e894dda0a43a8f0217c7f8a2f840f433fd50d6",
+      "lending-crash-live-ts1000/hlt-payment-load-report.json": "c53ed945cb45ca12cb1e22f83a46d19faa5476d98046a82b87f9a5bee50447a0",
+      "lending-crash-live-ts1000/hlt-op-counters-report.json": "d440c11ec3d00fdc9b5618ee2e488df83f8c0e6b3036cda5abf3f41e0a97dfbd",
+      "lending-crash-live-profile.log": "18913f7b50b70b933162a8c9f3f7ae5bf5f859ce260e9828410e4a18a7171f9a",
+      "lending-crash-live-profile/hlt-payment-load-report.json": "7ff8d99b7429fb2fb3ff04fd22eadbe016b2952199425673ab27a096393eed49",
+      "lending-crash-live-profile/hlt-op-counters-report.json": "73ed25f80dbc2f015edc737b457f53445fef26e7719607bc6cf3bfe0c658a346",
+      "lending-crash-live-cap500.log": "9f32b5a884d437cb578b169f89e8ca0af53ddd547a4e4fd9954bf7e8ec5c1610",
+      "lending-crash-live-cap500/hlt-payment-load-report.json": "8f06cec6ded75584516b6b278752b5062c952ed1437a70a7cf98a20b187a5009",
+      "lending-crash-live-cap500/hlt-op-counters-report.json": "ccbf2f1fee85ab215619c021e99ba579ea926e3a847dbf135f5c4f188dc77493",
+      "lending-crash-live-ts1000/payment-work-ledger.json": "e291dbf167e3fd5246f1cd8c44587f122b33b5b965f405e672005cba6f3c10d4",
+      "lending-crash-live-ts1000/payment-parity-comparison.json": "d73e3bb441d6248c45ee48feecfed6824ab017cc65d9d80a299fb3a0881540dc",
+      "quicknode-mainnet-balance-rejection.png": "f284b3259c4484b521a4bfbf7e62d6f726ef3b356cdb10b456281bc5afb24bd8",
+      "sepolia-post-load-status.json": "c1e9049b26e064265d920f397a3f93357304dc6892b259bc4fe602eeb8bab4e1"
+    }
+  },
+  "proofBatchOptimization": {
+    "at": "2026-10-11T10:22:07.751Z",
+    "dirtyTree": true,
+    "finding": "1448 single-worker replay samples: 26.6% inclusive in dispute gas admission; repeated ABI encoding of every growing batch prefix.",
+    "fix": "Six-line exact whole-batch fit shortcut; independent left/right allowance bounds and atom-size monotonicity preserve existing greedy split output. No cache, durable field, contract change or threshold change.",
+    "focused": {
+      "passed": 42,
+      "failed": 0,
+      "assertions": 181,
+      "files": 3
+    },
+    "related": {
+      "passed": 352,
+      "failed": 0,
+      "assertions": 2253,
+      "files": 26,
+      "seconds": 23.09,
+      "standLock": true
+    },
+    "browser": {
+      "startTime": "2026-10-11T10:15:42.515Z",
+      "duration": 36861.664000000004,
+      "expected": 3,
+      "skipped": 0,
+      "unexpected": 0,
+      "flaky": 0
+    },
+    "replay": [
+      {
+        "artifact": "lending-crash-release-artifact",
+        "frames": 136,
+        "transcriptDigest": "c276f23b0ecb84502942282e8c8487a31f7a6bf1ca4c02b073515f046329e929",
+        "evidenceDigest": "3ccb007dc22ca4073df35f8e07005e482a7e7ebe62cfc9e7e178cb389f0781c6",
+        "exactBeforeAfterW1W4": true
+      },
+      {
+        "artifact": "lending-crash-live-ts1000",
+        "frames": 35,
+        "transcriptDigest": "e7acf2ee763ac196a0531e055a9c5578d8d6a1aa28d65a90e7aedee85be63483",
+        "evidenceDigest": "d29524a49f071eddfaca1a69fb71b2e24fe5cbd0e814f1d035b3d6ea32def5b5",
+        "exactBeforeAfterW1W4": true
+      }
+    ],
+    "sourceChecks": {
+      "passed": 38,
+      "outerPassed": 3,
+      "sourceMs": 27060,
+      "fullCheck": "FAIL check:contract-artifact-drift against HEAD, 726ms; staging is not a workaround."
+    },
+    "live": {
+      "users": 1000,
+      "submitted": 20000,
+      "delivered": 20000,
+      "drainCompleteElapsedMs": 28911,
+      "limitMs": 25000,
+      "result": "FAIL_DRAIN_DEADLINE",
+      "validTps": false,
+      "quiescence": {
+        "accountMempoolTxs": 0,
+        "openHubPeers": 1000,
+        "pendingAccountFrames": 0,
+        "pendingRuntimeWork": 0,
+        "runtimes": 1000
+      },
+      "environment": {
+        "accountWorkers": 8,
+        "cryptoPoolWorkers": "default",
+        "cryptoSignWorkers": "default",
+        "disputeHankos": "always",
+        "hubWalSync": true,
+        "laneNice": 0,
+        "lanePersistence": false,
+        "laneWalSync": false,
+        "provenance": {
+          "gitDirtyFiles": 92,
+          "gitSha": "f1464e84e916a65146c046b576a976c4359bcd25",
+          "parityRecordingSha256": null,
+          "rustBinarySha256": null,
+          "standLockToken": "08fabd18-427d-40cb-8a87-059d2ec39c1c"
+        }
+      },
+      "limitation": "Before/after N=1 fresh stands on a shared desktop; no isolated speedup claim. Hub WAL/fsync true, lanePersistence and laneWalSync false."
+    },
+    "artifactSha256": {
+      "proof-batch-prefix-after.log": "0951baa5ef35dc35fde5fb96944e15a4f575c08ba2e6d6f210f5af2369546f89",
+      "proof-batch-related.log": "9e9a32a09abf4daba611d68a527932d796fda5d9b3b2fb87045bfb7f1b2f5ef5",
+      "proof-batch-check-long.log": "d4933f27c9f6592a781e6d1fa082c2a4f5a3664d74cd09fc5aece860151c926f",
+      "proof-batch-check.log": "c197da956f80e8588d107a216b8aafd4c57c82f9b6efcbe3543c3d93474a6e42",
+      "proof-batch-react/wallet-results.json": "7ed9829147c0e5f5a3e3a2fe7b625aade0ad0bcd4728216f49b3f6972dc6e3d8",
+      "proof-batch-live-ts1000/hlt-payment-load-report.json": "a608d34be9a0fceb668faadfdd0ee5a5f5ba39aa840bda30cafb1a97e8809e96",
+      "proof-batch-live-ts1000/hlt-op-counters-report.json": "54173a7ef2ebffc316c25588b39eb3e9151e74f644df82b6417d2626e47147b2",
+      "payment-worker-summary.json": "b4e08abd75ab1df5a439f469d42c9dca544fbad08bc06c74d3c45dc6168684d7",
+      "proof-batch-replay-w1.log": "169dd238d4ed5c8370db444df7ec30223cc0fdecbf6dfd83f6d5f822acd9dffc",
+      "proof-batch-replay-w4.log": "405effa48a5d660c5fc930a1bac14fcd5c8ebc90bab50891c3b98c8d9448e910",
+      "proof-batch-lending-w1.log": "d3bba079a8bad7a98cf5144853b0a9ddc21f0829300765dc83e7386af5979124",
+      "proof-batch-lending-w4.log": "93206db0fa8f4691a3656a48a876a2577f28c77d5a32371274b31a7bfff31e0c"
+    },
+    "sourceSha256": {
+      "core/protocol/dispute/proof-builder.ts": "c9c9f98e608014f61c556aaf7c5ec59fca7bdc321602ecd8f1b4563a45b23602",
+      "core/__tests__/security/dispute/proof-builder.test.ts": "2823a28a0093c5f72c0831c5f8025921a18ab1e0961b124c023b357a7c84ebf3"
+    }
+  },
+  "profileRoutingBoundary": {
+    "at": "2026-10-11T10:54:39.514Z",
+    "source": "shared dirty main; not a release checkpoint",
+    "diagnosis": "A real Entity chat commit cloned policy objects and defeated routing heartbeat suppression. The canonical descriptor also changes advertised edges on first collateral without a stored row-count or credit-limit change.",
+    "fix": "Compare policy values and canonical descriptor topology in the existing ephemeral announcement cache. Signatures remain required; no durable field or financial formula added.",
+    "walletRegression": "After unnecessary gossip stopped, bank state could become active after the last borrower ACK while React remained awaiting confirmation. Lending now polls the bank HTTP view serially every two seconds and ignores responses from superseded queries.",
+    "regressions": {
+      "related": {
+        "tests": 375,
+        "assertions": 2306,
+        "files": 29,
+        "seconds": 22.76,
+        "exitCode": 0
+      },
+      "profiles": {
+        "tests": 4,
+        "assertions": 39,
+        "files": 3,
+        "mode": "separate Bun processes",
+        "exitCode": 0
+      },
+      "groupedRunnerFailure": "Earlier four tests asserted green then Bun aborted during teardown (skiplist.h:155, exit 134). Preserved, not reported as a green command; isolated files all exit 0."
+    },
+    "browser": {
+      "startTime": "2026-10-11T10:45:26.413Z",
+      "duration": 39136.791000000005,
+      "expected": 3,
+      "skipped": 0,
+      "unexpected": 0,
+      "flaky": 0,
+      "rebuilt": true,
+      "originalFailure": "Bank HTTP state active while wallet still awaited Account confirmation; one failure, one not run, one pass.",
+      "assertionsWeakened": false
+    },
+    "replay": {
+      "frames": 110,
+      "transcriptDigest": "563872c1550d6f65cc397505295bbaaaadb28cde7a99cf943dc25d3daf215539",
+      "evidenceDigest": "56aaa8623fb99a4179fae381cb678109019434d8450babcd69a55fdf4599e546",
+      "workers": [
+        1,
+        4
+      ],
+      "exact": true
+    },
+    "sourceGates": {
+      "source": 38,
+      "outer": 3,
+      "sourceMs": 27204,
+      "exitCode": 0,
+      "fullCheck": "FAIL check:contract-artifact-drift, 751ms; synchronized artifacts uncommitted",
+      "diffCheck": "PASS"
+    },
+    "live": {
+      "users": 1000,
+      "offeredRate": 1000,
+      "delivered": 20000,
+      "drainMs": 27665,
+      "limitMs": 25000,
+      "quiescence": {
+        "accountMempoolTxs": 0,
+        "openHubPeers": 1000,
+        "pendingAccountFrames": 0,
+        "pendingRuntimeWork": 0,
+        "runtimes": 1000
+      },
+      "environment": {
+        "accountWorkers": 8,
+        "cryptoPoolWorkers": "default",
+        "cryptoSignWorkers": "default",
+        "disputeHankos": "always",
+        "hubWalSync": true,
+        "laneNice": 0,
+        "lanePersistence": false,
+        "laneWalSync": false,
+        "provenance": {
+          "gitDirtyFiles": 93,
+          "gitSha": "f1464e84e916a65146c046b576a976c4359bcd25",
+          "parityRecordingSha256": null,
+          "rustBinarySha256": null,
+          "standLockToken": "cb9216e2-976d-4a6a-b088-c41e2388085a"
+        }
+      },
+      "recoverCalls": 52,
+      "runtimeApplyMs": 20355.519,
+      "conclusion": "FAIL duration gate. N=1 per configuration, shared desktop; no causal speedup or valid TPS claim. Hub WAL/fsync enabled, load users intentionally RAM-only in the canonical stand."
+    },
+    "rejectedExperiment": "Native hex round-trip projection: 28853ms versus prior 28911ms (N=1), no established improvement. Exploratory implementation and test reverted; existing canonical marker changes preserved.",
+    "publicFunding": {
+      "status": "No funding or broadcast",
+      "extraAttempt": "PoW faucet rejected start with INVALID_CAPTCHA; no CAPTCHA bypass or mining session started.",
+      "url": "https://sepolia-faucet.pk910.de/"
+    },
+    "sourceSha256": {
+      "core/network/p2p/p2p.ts": "649374fa13e7ad4c65ec524c282fa612235f4586c21873c660b741533ed46ea2",
+      "core/__tests__/entity/profile/profile-recertify-on-state-change.test.ts": "f469210297cc970b162e12bd0902cdd92e2748d23314f4458a235cf5f4d2559a",
+      "ui/src/screens/Lending.tsx": "5cb39ca4b20032e45980f405efbf0c2d266c6ecf9e997f9d90b6a44b34f207d3",
+      "tsconfig.runtime-contract-tests.json": "4a8ee9bb5d8011c98a6275cebca81bf2e6a2833f32129dfdcf214572025857fd"
+    },
+    "artifactSha256": {
+      "profile-topology-before.log": "116a3daa746e964b3f42a237e0c5feb8f2e2411951ba8dc25d72b8719aeed3b3",
+      "profile-topology-collateral-before.log": "74c7fbca96cd7395a8122ddb942ef96a2ed27959ec6f3a237d3aa89ea17fd106",
+      "profile-topology-after.log": "9a7a2a98ed6d4d2af174cc2bd8a514fea63c28185fe491b1c7c81cbb25a6c8ee",
+      "profile-routing-isolated.log": "6147bd8863be944585dfcfd4e0dcc05d3e5c82d48785fcbcbc00a2eeb5dd117f",
+      "profile-routing-related.log": "d0532e37d30767cf013ed34bacee4e02c4b75a612c532e844b009c9752f45f23",
+      "profile-routing-react/wallet-results.json": "1a62493a79cda540e8f74d234a69a03fa90cc35508141853d38a03a3f05d4a62",
+      "profile-routing-react-fixed/wallet-results.json": "e1b73a87f2794f8db47c918cbb5ccd97f308a7c4e9c38f859a00a50689c9d267",
+      "profile-routing-react-fixed/lending-parity-comparison.json": "83c6eada2df7821a293758680335c12344951fe88ab974e86cf53f4412d07664",
+      "profile-routing-replay-w1.log": "4683435d7e6373efe480c830494cc9d925dc03c14125fd36a8c72b4856af4a0b",
+      "profile-routing-replay-w4.log": "41ae87af3b3c358961dac9771f9bcb8c86f7a26baf3d4c5de81a8cbe7a112716",
+      "profile-routing-check-long.log": "d773c2faf407ef476c8efae4be8c0a46b4dcfa12ead1ec6cfa6037a7637f1e1f",
+      "profile-routing-check.log": "dc30addcd6c6c50cd7e8b9e69b25d43e6afe0c36474f21663a952fc02a58ed35",
+      "profile-routing-live/hlt-payment-load-report.json": "70d2a0254fa843806b9fa91c35ee987396411edc36346b0359498d957c547385",
+      "profile-routing-live/hlt-op-counters-report.json": "9a9af6008a6d96d47108b649a349a6dcdf9724e001226d5a0bbd8563cb9a3f2d",
+      "hex-projection-live/hlt-payment-load-report.json": "498fdc8583961fca817b587ba48784d4e496f94879926b465cc2059538716b3e",
+      "pow-faucet-captcha-rejection.png": "c6d2a657ad204d22cca6af1ef3fee3b66f96abc892e7a7adac4128e20e912c8f"
+    }
+  },
+  "previousProofChargeBoundary": {
+    "at": "2026-10-11T11:07:39.898Z",
+    "fix": "Build the previous gas-admission proof only for resolution and idempotent add_delta, which actually compare it. Every successful transition still checks its full resulting proof. Grandfathered resolution retains before/after comparison; missing required previous charge fails loudly.",
+    "adversarial": "A direct payment on an existing oversized Account rejects atomically even though its proof footprint stays unchanged.",
+    "measuredReason": "The prior exact-WAL worker sample attributed 14.7% inclusive stacks to gas admission; old-state calculation was 8.3%. Those diagnostic sample shares overlap and are not live wall time.",
+    "checks": {
+      "focused": {
+        "tests": 56,
+        "assertions": 210,
+        "files": 3
+      },
+      "related": {
+        "tests": 376,
+        "assertions": 2309,
+        "files": 29,
+        "seconds": 23.96
+      },
+      "browser": {
+        "startTime": "2026-10-11T11:03:48.802Z",
+        "duration": 39265.25,
+        "expected": 3,
+        "skipped": 0,
+        "unexpected": 0,
+        "flaky": 0
+      },
+      "source": {
+        "gates": 38,
+        "outer": 3,
+        "sourceMs": 27206
+      },
+      "fullCheck": "FAIL check:contract-artifact-drift, 735ms",
+      "diffCheck": "PASS"
+    },
+    "replay": [
+      {
+        "frames": 35,
+        "transcriptDigest": "e7acf2ee763ac196a0531e055a9c5578d8d6a1aa28d65a90e7aedee85be63483",
+        "evidenceDigest": "d29524a49f071eddfaca1a69fb71b2e24fe5cbd0e814f1d035b3d6ea32def5b5",
+        "files": [
+          "lending-parity-w1-proof-batch.json",
+          "lending-parity-w4-proof-batch.json",
+          "lending-parity-w1-proof-charge.json",
+          "lending-parity-w4-proof-charge.json"
+        ],
+        "exact": true
+      },
+      {
+        "frames": 110,
+        "transcriptDigest": "563872c1550d6f65cc397505295bbaaaadb28cde7a99cf943dc25d3daf215539",
+        "evidenceDigest": "56aaa8623fb99a4179fae381cb678109019434d8450babcd69a55fdf4599e546",
+        "files": [
+          "lending-parity-w1.json",
+          "lending-parity-w4.json",
+          "lending-parity-w1-proof-charge.json",
+          "lending-parity-w4-proof-charge.json"
+        ],
+        "exact": true
+      }
+    ],
+    "replayDiagnostic": {
+      "operations": [
+        68003,
+        68003
+      ],
+      "workerCpuUserMs": [
+        17449.463000000007,
+        16362.293
+      ],
+      "workerWorkMs": [
+        17866.966,
+        16751.343
+      ],
+      "samplesPerCandidate": 1,
+      "limitation": "Same immutable WAL, exact roots/outputs; timing is diagnostic, not a causal speedup estimate or live TPS."
+    },
+    "live": {
+      "users": 1000,
+      "delivered": 20000,
+      "drainMs": 27244,
+      "limitMs": 25000,
+      "pending": {
+        "accountMempoolTxs": 0,
+        "openHubPeers": 1000,
+        "pendingAccountFrames": 0,
+        "pendingRuntimeWork": 0,
+        "runtimes": 1000
+      },
+      "environment": {
+        "accountWorkers": 8,
+        "cryptoPoolWorkers": "default",
+        "cryptoSignWorkers": "default",
+        "disputeHankos": "always",
+        "hubWalSync": true,
+        "laneNice": 0,
+        "lanePersistence": false,
+        "laneWalSync": false,
+        "provenance": {
+          "gitDirtyFiles": 93,
+          "gitSha": "f1464e84e916a65146c046b576a976c4359bcd25",
+          "parityRecordingSha256": null,
+          "rustBinarySha256": null,
+          "standLockToken": "408127b3-304f-4b05-9c84-aaf6f6359506"
+        }
+      },
+      "result": "FAIL timing gate; one run; no valid TPS claim"
+    },
+    "sourceBinding": {
+      "before": "9804dbe3f65096bbb964226d1f6f176174ccf531b2d8464fc5f6575a0bcd9034",
+      "afterBrowserBuild": "a8d774267edcd784be5506a413c6b0834053605147e77837c608a335974f1d25",
+      "files": 5194,
+      "onlyChangedPath": "frontend/static/account-worker.js",
+      "note": "Expected browser rebuild; complete manifest hashes 5194 release-scope files. This is dirty-tree evidence, not a clean signed Git checkpoint."
+    },
+    "sourceSha256": {
+      "core/account/validation/dispute-gas-budget.ts": "87c3301dbcac3c4cae4d98372609258765897f6193465d814d7bc2816910e205",
+      "core/account/tx/apply.ts": "18c8209ef529bd662c94ce798e010b47e29fb72beec4dec7242dd8ccbec1c6b5",
+      "core/__tests__/account/transactions/dispute-gas-budget.test.ts": "64f86635b95c4ed4905073b911407951a6c8fb68219906cd0e9650a505bb69a9"
+    },
+    "artifactSha256": {
+      "proof-charge-l1.log": "7aa368aff5d649d8fe3547159ff01bafb62950d20d0bffa5e32dcd587c400085",
+      "proof-charge-related.log": "e34d05be95737621dd1e39465289399452ca8fa2adb346500d65205e1a26cd26",
+      "proof-charge-related-harness-rejection.log": "9c87559a1b0833dc44a10a4e1ddcfdf4e5bc799c0109524a4910955735faf354",
+      "proof-charge-react/wallet-results.json": "1b7a68628d55e3fae9b386a2c3d779c9c6ff32137e255064409223a496067fc3",
+      "proof-charge-check-long.log": "dede2c1249d6ac2fde8eb5233bd8ff4f81fcf27e65b8231fe7aecdf3a154257d",
+      "proof-charge-check.log": "0e681a3e1abc010af32a5aea5a2b04d8e5e073f9a08270025078f326cb6d3ce6",
+      "proof-charge-live/hlt-payment-load-report.json": "5d1fceb5eb816cdce7ec2e9c0f2f6f96ee6355c8363ffa068d9d7d3fefaaef1d",
+      "proof-charge-live/hlt-op-counters-report.json": "4b25a8d604af98700decd75c18caf222e33ba07227d342f10f8a9e7999186f84",
+      "lending-crash-live-ts1000/proof-charge-comparison.json": "5a17b58e74f2a493d13e46522f0f53c883092bb5aa83c04399c3f7e0a3c91958",
+      "profile-routing-react-fixed/proof-charge-comparison.json": "4102a9137301e7db094957a72f5ffa82f2f7f8f62f38e76e408edc429d4be579",
+      "proof-charge-source-manifest.json": "8434590801d65fa5776086048ffca55eb9acfb72dba19ec1832888c83fe68f78",
+      "proof-charge-source-after.json": "e72bb459ce1ce78341027f7ad0633a051aaf5b9f307dae645fc60cf73bb268aa",
+      "sepolia-proof-charge-status.json": "dcf7506b981b0a4af2cdaea454ab9c3bdd3a5e75f30556b470f8f4c940e88a01"
+    }
+  },
+  "primingScopeBoundary": {
+    "at": "2026-10-11T11:39:49.959Z",
+    "baseSha": "f1464e84e916a65146c046b576a976c4359bcd25",
+    "change": "Parent Hanko warm-up primes frame evidence only when isolated Account workers own dispute verification. Existing worker verification is unchanged. No state, wire, WAL or ordered-output change.",
+    "checks": {
+      "related": {
+        "tests": 554,
+        "assertions": 448400,
+        "files": 46,
+        "wallSeconds": 34.76
+      },
+      "watchtower": {
+        "tests": 2,
+        "assertions": 130,
+        "wallSeconds": 46.74
+      },
+      "fundingExit": {
+        "tests": 3,
+        "assertions": 64,
+        "wallSeconds": 148,
+        "chain": "local Anvil",
+        "realClock": true,
+        "collateral": "850",
+        "unsecuredClaim": "150",
+        "collectedUnsecured": "100",
+        "remainingDebt": "50"
+      },
+      "browser": {
+        "startTime": "2026-10-11T11:36:29.993Z",
+        "duration": 38065.655,
+        "expected": 3,
+        "skipped": 0,
+        "unexpected": 0,
+        "flaky": 0
+      },
+      "paymentReplay": {
+        "frames": 35,
+        "exact": true,
+        "transcriptDigest": "e7acf2ee763ac196a0531e055a9c5578d8d6a1aa28d65a90e7aedee85be63483",
+        "evidenceDigest": "d29524a49f071eddfaca1a69fb71b2e24fe5cbd0e814f1d035b3d6ea32def5b5",
+        "names": [
+          "lending-parity-w1-proof-charge.json",
+          "lending-parity-w4-proof-charge.json",
+          "lending-parity-w1-priming-scope.json",
+          "lending-parity-w4-priming-scope.json"
+        ]
+      },
+      "lendingReplay": {
+        "frames": 110,
+        "exact": true,
+        "transcriptDigest": "563872c1550d6f65cc397505295bbaaaadb28cde7a99cf943dc25d3daf215539",
+        "evidenceDigest": "56aaa8623fb99a4179fae381cb678109019434d8450babcd69a55fdf4599e546",
+        "names": [
+          "lending-parity-w1-proof-charge.json",
+          "lending-parity-w4-proof-charge.json",
+          "lending-parity-w1-priming-scope.json",
+          "lending-parity-w4-priming-scope.json"
+        ]
+      },
+      "fullCheck": {
+        "command": "bun run check",
+        "exitCode": 0,
+        "sourceGates": 38,
+        "outerLongGates": 3,
+        "shortGates": 2,
+        "sourceWallMs": 26840,
+        "log": ".logs/crisis-20261011/checkpoint-check.log",
+        "sha256": "0ca339d29eda4408ed3c8a9515f9584c517f5a67033886d0ee5a0bd49b058f21"
+      }
+    },
+    "live": {
+      "users": 1000,
+      "usersPerProcess": 200,
+      "offeredMs": 20000,
+      "offeredPerSecond": 1000,
+      "settled": 20000,
+      "pendingAcks": 0,
+      "drainMs": 26077,
+      "limitMs": 25000,
+      "passed": false,
+      "operationCounters": false,
+      "hubWalFsync": true,
+      "userPersistence": "RAM-only canonical load lanes",
+      "sourceAckMs": 20094,
+      "hubIngressMs": 23564,
+      "deliveredMs": 25909,
+      "causalSpeedupEstablished": false
+    },
+    "failuresPreserved": "Two combined test commands exceeded their 60-second ordinary budget. Separately run real-clock stands pass with unchanged semantic assertions and dispute windows. Live load remains failed.",
+    "logHashes": {
+      ".logs/crisis-20261011/checkpoint-fast-regressions.log": "512a59985e638557e34374837798b1827c4d3acdce8548f9405df13a4b9f51e4",
+      ".logs/crisis-20261011/checkpoint-watchtower.log": "4f9060413e006a23e95aedbb2300fc95b163cc2aed959e836d024421bc8b6397",
+      ".logs/crisis-20261011/checkpoint-funding-exit.log": "1cc23fb8268c41ca5e7b4ec31efffb5c83cc86fa2ad307f8b8c447d73009c188",
+      ".logs/crisis-20261011/checkpoint-react.log": "596737fac74e7995872649f1e89136be2ba71c349206215027a479cb1682daf1",
+      ".logs/crisis-20261011/checkpoint-bytecode-review.log": "844534ed18be53723a28dd2ccba30d600c9a17dc22a7bf66342bae6e8df19252",
+      ".logs/crisis-20261011/priming-scope-production-load.log": "e4f8909d536b5a4e3c6e1d9cf780957946286a6c2bf5b7a36fcbd5a37167e4f1",
+      ".logs/crisis-20261011/priming-scope-live.log": "eab6d9b3d4dd12295ced08c0613d9b6d0512d11f30caa7ecf2ea6fdc828e7799",
+      ".logs/crisis-20261011/checkpoint-regressions.log": "45683948f363a77160f9ba6f31e25994ed5423826a3e345d11e76cf4003c1179",
+      ".logs/crisis-20261011/checkpoint-regressions-focused.log": "ecd1f54546bb46139445b0aee0585612df6459655eac04b790a8fbe8e1d343bc"
+    },
+    "checkpoint": {
+      "baseSha": "f1464e84e916a65146c046b576a976c4359bcd25",
+      "paths": 201,
+      "excluded": [
+        "rscore/",
+        ".github/workflows/build-and-test.yml",
+        "docs/evidence/xlnc-20261010/unsolicited-custody-before.json",
+        "HANDOFF.md",
+        "output/",
+        "tmp/"
+      ],
+      "sourceManifestBefore": ".logs/crisis-20261011/checkpoint-source-before.json",
+      "sourceManifestAfter": ".logs/crisis-20261011/checkpoint-source-after-check.json",
+      "sourceDigestDuringCheck": "3e2d264b0bf9f813766c26f20d57480b0dde11568f40b7a11db0fac2bec49afa",
+      "sourceChangesDuringCheck": [],
+      "releaseCandidate": false
+    }
+  }
+}

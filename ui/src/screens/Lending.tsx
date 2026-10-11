@@ -1,10 +1,13 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { LENDING_TERM_MS, lendingLoanMaximumAmount } from '@xln/core/extensions/lending';
 import { isAccountTxKindAvailable } from '@xln/core/account/tx/admission-policy';
-import { computeLendingInterest, normalizeInterestBps } from '@xln/core/extensions/lending';
 import { Icon } from '../components/Icons';
 import { TokenIcon } from '../components/TokenPicker';
 import { LendingClose } from '../components/LendingClose';
+import { LendingRiskConsent } from '../components/LendingRiskConsent';
+import { BankLendingPolicy } from '../components/BankLendingPolicy';
+import { ReceiveCapacity } from '../components/ReceiveCapacity';
 import { walletHelp } from '@xln/frontend/lib/utils/ui/walletHelp';
 import { useApp } from '../runtime/store';
 import { sendEntityTxs } from '../runtime/tx';
@@ -12,10 +15,13 @@ import { formatAmount, formatMoney, getTokenMeta, parseAmount } from '../runtime
 import { useWallet } from '../runtime/views';
 import {
 	LENDING_TERMS,
+	previewLendingTerms,
+	previewSavingsRisk,
 	buildLendingBorrowTx,
 	buildLendingOfferTx,
 	buildLendingRepayTx,
 	fetchLendingState,
+	isLendingLoanRepayable,
 	type LendingState,
 	type TermId,
 } from '../runtime/financial/lending';
@@ -23,11 +29,6 @@ import {
 const rate = (bps: number): string => `${(bps / 100).toFixed(2)}%`;
 const UNAVAILABLE = 'Lending is unavailable in this release';
 
-/**
- * Lend to a hub's pool or borrow from it. The pool state is the hub runtime's
- * HTTP view; the offers, borrows and repayments are entity txs committed on
- * the bilateral account with the hub.
- */
 export function Lending() {
 	const navigate = useNavigate();
 	const entityId = useApp(s => s.activeEntityId);
@@ -45,24 +46,26 @@ export function Lending() {
 	const [state, setState] = useState<LendingState | null>(null);
 	const [stateError, setStateError] = useState('');
 	const [loading, setLoading] = useState(false);
+	const refreshVersion = useRef(0);
 	const [busy, setBusy] = useState(false);
+	const [submittedRequest, setSubmittedRequest] = useState<{ id: string; owner: string; hub: string; token: number } | null>(null);
+	const requestId = submittedRequest?.owner === wallet.entityId && submittedRequest.hub === hubId && submittedRequest.token === tokenId ? submittedRequest.id : undefined;
 	const meta = getTokenMeta(tokenId);
 	const hub = hubs.find(account => account.counterpartyId === hubId) ?? null;
 	const offerAvailable = isAccountTxKindAvailable('lending_fund');
 	const borrowAvailable = isAccountTxKindAvailable('lending_borrow_request');
 	const repayAvailable = isAccountTxKindAvailable('lending_repay');
 	const submitAvailable = side === 'lend' ? offerAvailable : borrowAvailable;
-	const borrowPreview = useMemo(() => {
-		if (side !== 'borrow' || !amountText.trim()) return null;
-		try {
-			const principal = parseAmount(amountText, meta.decimals);
-			if (principal <= 0n) throw new Error('Enter a positive amount');
-			const bps = normalizeInterestBps(rateText);
-			return { repayment: principal + computeLendingInterest(principal, bps), error: '' };
-		} catch (error) {
-			return { repayment: null, error: error instanceof Error ? error.message : String(error) };
-		}
-	}, [side, amountText, rateText, meta.decimals]);
+	const bankTerms = hub ? state?.terms.find(value => value.tokenId === tokenId && value.termId === termId
+		&& value.chainId === hub.doc.state.domain.chainId && value.depositoryAddress === hub.doc.state.domain.depositoryAddress
+		&& value.expiresAt > Date.now()) : undefined;
+	const quotedRate = side === 'lend' ? (bankTerms ? String(bankTerms.savingsInterestBps) : '') : rateText;
+	const bankOfferUnavailable = !bankTerms;
+	const borrowPreview = side === 'borrow' ? previewLendingTerms(amountText, rateText, meta.decimals, { termMs: LENDING_TERM_MS[termId], lateMs: bankTerms?.loanLateMs ?? 0 }) : null;
+	const savingsRisk = side === 'lend' && hub && bankTerms ? previewSavingsRisk(hub, tokenId, amountText, quotedRate, meta.decimals) : null;
+	const needsRiskConsent = savingsRisk?.ok === true && savingsRisk.requiredLimit > savingsRisk.currentLimit;
+	const quoteError = borrowPreview?.ok === false || savingsRisk?.ok === false;
+	const needsReceiveCapacity = borrowPreview?.ok === true && borrowPreview.principal > (hub?.tokens.find(token => token.tokenId === tokenId)?.derived.inCapacity ?? 0n);
 
 	useEffect(() => {
 		if (!hubId && hubs.length > 0) setHubId(hubs[0]!.counterpartyId);
@@ -70,38 +73,57 @@ export function Lending() {
 
 	const refresh = useCallback(async () => {
 		if (!hubId || !wallet.entityId) return;
+		const version = ++refreshVersion.current;
 		setLoading(true);
 		try {
-			setState(await fetchLendingState({ hubEntityId: hubId, userEntityId: wallet.entityId, tokenId }));
+			const next = await fetchLendingState({ hubEntityId: hubId, userEntityId: wallet.entityId, tokenId, ...(requestId ? { requestId } : {}) });
+			if (version !== refreshVersion.current) return;
+			setState(next);
 			setStateError('');
 		} catch (error) {
+			if (version !== refreshVersion.current) return;
 			setState(null);
 			setStateError(error instanceof Error ? error.message : String(error));
 		} finally {
-			setLoading(false);
+			if (version === refreshVersion.current) setLoading(false);
 		}
-	}, [hubId, wallet.entityId, tokenId]);
+	}, [hubId, wallet.entityId, tokenId, requestId]);
 
 	useEffect(() => {
-		void refresh();
+		let stopped = false;
+		let timer = 0;
+		// The bank can commit after our last Account ACK. Its HTTP view must
+		// refresh independently of local heights and routing-profile gossip.
+		const poll = async () => {
+			await refresh();
+			if (!stopped) timer = window.setTimeout(poll, 2_000);
+		};
+		void poll();
+		return () => {
+			stopped = true;
+			window.clearTimeout(timer);
+			refreshVersion.current++;
+		};
 	}, [refresh, height]);
 
 	const submit = async (): Promise<void> => {
 		if (!submitAvailable) { toast(UNAVAILABLE, 'danger'); return; }
+		if (!bankTerms || bankOfferUnavailable || needsRiskConsent || needsReceiveCapacity || quoteError) return;
 		if (!wallet.signerId || !hubId) return;
 		setBusy(true);
 		try {
 			const amount = parseAmount(amountText, meta.decimals);
 			if (amount <= 0n) throw new Error('Enter a positive amount');
-			const bps = Math.max(0, Math.floor(Number(rateText) || 0));
+			const bps = Math.max(0, Math.floor(Number(quotedRate) || 0));
 			const tx =
 				side === 'lend'
 					? buildLendingOfferTx({ hubEntityId: hubId, tokenId, amount, termId, interestBps: bps })
-					: buildLendingBorrowTx({ hubEntityId: hubId, tokenId, amount, termId, maxInterestBps: bps });
+					: buildLendingBorrowTx({ hubEntityId: hubId, tokenId, amount, termId, maxInterestBps: bps, maxLateMs: bankTerms.loanLateMs });
 			await sendEntityTxs(wallet.entityId, wallet.signerId, [tx]);
+			if (tx.type === 'lendingBorrow') setSubmittedRequest({ id: tx.data.requestId, owner: wallet.entityId, hub: hubId, token: tokenId });
 			toast(side === 'lend' ? `Offered ${formatMoney(amount, meta.decimals)} ${meta.symbol} to ${hub?.label ?? 'the hub'}` : `Borrow request for ${formatMoney(amount, meta.decimals)} ${meta.symbol} sent`);
 			setAmountText('');
-			void refresh();
+			if (tx.type !== 'lendingBorrow') void refresh();
 		} catch (error) {
 			toast(error instanceof Error ? error.message : String(error), 'danger');
 		} finally {
@@ -142,6 +164,7 @@ export function Lending() {
 				<p className="note" role="status" data-testid="lending-unavailable">{UNAVAILABLE}. Existing positions remain visible below.</p>
 			) : null}
 			<details className="disclosure"><summary>How lending works — with an example</summary><p className="note">{walletHelp.lendingBalance}</p></details>
+			{wallet.frame?.activeEntity?.core.profile?.isHub === true && <BankLendingPolicy wallet={wallet} />}
 			<div className="two-col">
 				<div>
 					{hubs.length === 0 ? (
@@ -196,25 +219,44 @@ export function Lending() {
 								</div>
 							</div>
 							<div className="field">
-								<span className="field-label">{side === 'lend' ? 'Interest you ask · basis points' : 'Maximum interest you accept · basis points'}</span>
+								<span className="field-label">{side === 'lend' ? 'Bank savings rate · basis points' : 'Maximum interest you accept · basis points'}</span>
 								<div className="field-row">
-									<input className="input" inputMode="numeric" value={rateText} onChange={event => setRateText(event.target.value)} data-testid="lend-rate" />
-									<span className="muted">= {rate(Math.max(0, Math.floor(Number(rateText) || 0)))} per term</span>
+									<input className="input" inputMode="numeric" readOnly={side === 'lend'} value={quotedRate} onChange={event => setRateText(event.target.value)} data-testid="lend-rate" />
+									<span className="muted">{quotedRate ? `= ${rate(Number(quotedRate))} per term` : 'No current offer'}</span>
 								</div>
 							</div>
+							{bankOfferUnavailable && <p className="note" data-testid="lending-bank-terms">This bank has not published a current offer for this asset and term.</p>}
+							{side === 'borrow' && <p className="note" data-testid="lending-bank-approval">{bankTerms ? `Bank loan rate: ${rate(bankTerms.loanInterestBps)} per term. ` : ''}The bank must approve your facility before it can fund a request.</p>}
 							{borrowPreview && <p className="note" data-testid="lending-borrow-preview">
-								{borrowPreview.repayment === null ? borrowPreview.error : <>
-									Maximum repayment: {formatAmount(borrowPreview.repayment, meta.decimals, meta.decimals)} {meta.symbol}, due {termId === '1m' ? '30 days' : LENDING_TERMS.find(entry => entry.id === termId)!.label} after approval.
-									{' '}Estimate at your maximum rate; the matched rate may be lower. Check the confirmed loan for its exact due date.
+								{!borrowPreview.ok ? borrowPreview.error : <>
+									Term repayment: {formatAmount(borrowPreview.repayment, meta.decimals, meta.decimals)} {meta.symbol}, due {termId === '1m' ? '30 days' : LENDING_TERMS.find(entry => entry.id === termId)!.label} after approval.
+									{' '}After maturity, simple interest continues for at most {(bankTerms?.loanLateMs ?? 0) / 3_600_000} hours. Maximum repayment: {formatAmount(borrowPreview.maximum, meta.decimals, meta.decimals)} {meta.symbol}. No compounding. These bounds use your maximum rate; the confirmed rate may be lower.
 								</>}
 							</p>}
-							<button type="button" className="btn primary" disabled={!submitAvailable || busy || !amountText.trim() || !hubId || Boolean(borrowPreview?.error)} onClick={() => void submit()} data-testid="lend-submit">
-								{busy ? 'Sending…' : side === 'lend' ? 'Offer to the pool' : 'Request the loan'}
+							{savingsRisk?.ok === false && <p role="alert">{savingsRisk.error}</p>}
+							{hub && borrowPreview?.ok && <ReceiveCapacity
+								account={hub.doc.state} ownerEntityId={wallet.entityId} signerId={wallet.signerId}
+								counterpartyEntityId={hubId} accountLabel={hub.label} jurisdiction={wallet.jurisdiction}
+								tokenId={tokenId} requiredAmount={borrowPreview.principal} disabled={busy || hub.disputed || !borrowAvailable}
+							/>}
+							{needsRiskConsent && savingsRisk?.ok && <LendingRiskConsent
+								entityId={wallet.entityId} signerId={wallet.signerId} hubId={hubId} tokenId={tokenId}
+								currentLimit={savingsRisk.currentLimit} requiredLimit={savingsRisk.requiredLimit}
+								disabled={!submitAvailable || busy || !wallet.signerId || Boolean(hub?.disputed)}
+							/>}
+							<button type="button" className="btn primary" disabled={!submitAvailable || bankOfferUnavailable || busy || !amountText.trim() || !hubId || quoteError || needsRiskConsent || needsReceiveCapacity} onClick={() => void submit()} data-testid="lend-submit">
+								{busy ? 'Sending…' : side === 'lend' ? 'Save with this bank' : 'Request the loan'}
 							</button>
+							{requestId && <p role="status" data-testid="lending-request-status">
+								{!state || state.requestId !== requestId || state.requestStatus === null || state.requestStatus === 'unseen' ? 'Waiting for the bank to process your request.'
+									: state.requestStatus === 'not-funded' ? 'Request processed. No loan was funded. The bank needs an approved facility and available funds.'
+										: state.requestStatus === 'opening' ? 'Bank funding is awaiting Account confirmation.'
+											: `Loan ${state.requestStatus}. See your loan below for the committed balance and terms.`}
+							</p>}
 							<p className="note" style={{ marginTop: 10 }}>
 								{side === 'lend'
-									? 'Your deposit remains part of your total balance. Close the position to receive it back once no loans are outstanding. Interest is earned only when a borrower repays.'
-									: 'The hub matches your request against open offers. Approval transfers the principal to your account once. Your credit limit stays unchanged. Repay the principal plus agreed interest before it is due.'}
+									? 'The bank owes your principal and agreed interest independently of its borrowers. Before maturity, cancellation requires no allocated loans and returns the early-close amount. At maturity the full agreed return is due; actual payout depends on the bank’s available funds.'
+									: 'An approved facility and available bank funding are required. A funded loan transfers principal to your account once at the bank’s agreed rate. Your credit limit stays unchanged. Repay the principal plus agreed interest before it is due.'}
 							</p>
 						</>
 					)}
@@ -286,9 +328,10 @@ export function Lending() {
 											<span className="s">
 												{loan.termId} · {rate(loan.interestBps)} · {loan.status} · due {loan.dueAt ? new Date(loan.dueAt).toLocaleString() : '—'} · repaid{' '}
 												{formatMoney(loan.repaidAmount, meta.decimals)} of {formatMoney(loan.repaymentAmount, meta.decimals)}
+											{isLendingLoanRepayable(loan) && <> · Repay authorizes up to {formatAmount(lendingLoanMaximumAmount(loan), meta.decimals, meta.decimals)} {meta.symbol}; only the amount due at confirmation is debited.</>}
 											</span>
 										</span>
-										{loan.status === 'active' ? (
+										{isLendingLoanRepayable(loan) ? (
 											<button type="button" className="btn ghost sm" disabled={!repayAvailable || busy} onClick={() => void repay(loan.loanId)} data-testid="lending-repay">
 												Repay
 											</button>

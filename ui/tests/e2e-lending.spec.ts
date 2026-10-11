@@ -2,6 +2,7 @@ import { expect, test } from '@playwright/test';
 import { safeStringify } from '../../core/protocol/serialization';
 import { enterStack, fundFromHub } from './stack';
 import { readAccount, readPools } from './lending/financial-evidence';
+import { setBankPolicy } from './lending/bank-policy';
 
 test(
   'lending close prepares incoming capacity before a manual committed payout',
@@ -31,12 +32,13 @@ test(
     const hubId = new URL(page.url()).pathname.split('/accounts/')[1];
     if (!hubId) throw new Error('Lender hub Account unavailable');
     const parties = { ownerId, hubId, tokenId: 1 };
+    await setBankPolicy(page, parties, { termId: '1d', savingsInterestBps: 100, loanInterestBps: 200 });
     await expect.poll(async () => (await readAccount(page, parties)).balance).toBe('100000000');
     const funded = await readAccount(page, parties);
     await page.getByTestId('nav-manage').locator('visible=true').first().click();
     await page.getByTestId('manage-lend').click();
     await page.getByTestId('lend-side-borrow').click();
-    await expect(page.getByText('Approval transfers the principal to your account once.', { exact: false })).toBeVisible();
+    await expect(page.getByText('A funded loan transfers principal to your account once', { exact: false })).toBeVisible();
     await expect(page.getByTestId('receive-spectrum')).toHaveCount(0);
     await page.getByTestId('lend-side-lend').click();
     await page.getByTestId('lend-amount').fill('100');

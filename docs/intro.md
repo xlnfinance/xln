@@ -36,6 +36,12 @@ volume by GDP does not establish GDP coverage. The attribution method for GDP
 coverage remains to be specified with the owner. Count the same economic activity
 once and distinguish demonstrated coverage from adoption targets.
 
+Owner clarification, 2026-10-11: broad adoption of disputable bilateral
+relationships is the mechanism; 51% of GDP remains the economic outcome.
+Raw account counts cannot measure it: creating many empty accounts adds no
+economic coverage. A covered relationship must retain usable signed evidence
+and an executable dispute path, with secured value and unsecured risk explicit.
+
 A feature advances MML when it makes a real financial relationship easier to
 adopt, verify or enforce. The first user journey is funding, payment, same-J and
 cross-J swaps, withdrawal, and recovery after operator failure.
@@ -44,9 +50,9 @@ cross-J swaps, withdrawal, and recovery after operator failure.
 
 1. **Proof:** retained signed account evidence lets a party establish the agreed
    obligation and dispute it without the counterparty's cooperation.
-2. **Collateral:** the parties choose backing and credit exposure, manually or
-   through soft-limit policy. Secured entitlement and unsecured receivable remain
-   distinct; proof alone cannot turn an unpaid debt into available money.
+2. **Collateral:** only the collateral-backed entitlement is secured. A credit
+   limit is the grantor's maximum accepted unsecured exposure, not a repayment
+   guarantee or additional collateral. Proof alone cannot turn unpaid debt into money.
 3. **Delta Transformers:** signed conditions govern value while it moves, such
    as conditional payments and swaps. J enforces the agreed transformation within
    signed allowances when cooperation fails.
@@ -54,6 +60,11 @@ cross-J swaps, withdrawal, and recovery after operator failure.
 This makes financial claims more verifiable and their secured portion enforceable.
 It can reduce and contain hub-run exposure; it does not eliminate maturity mismatch
 or insolvency on the unsecured portion.
+
+For example, a claim of 100 with 70 of collateral allocated to the claimant
+contains 70 secured and 30 unsecured. A credit limit of 50 permits that 30 of
+exposure; it does not insure it. Exercising the secured entitlement still requires
+valid evidence and the jurisdiction's dispute, inclusion and finality rules.
 
 ## The RCPAN bound
 

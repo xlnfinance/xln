@@ -30,6 +30,37 @@ also have unrestricted root or permission to replace active code, service units
 or the release verifier. This is the agreed authority model, not a claim that
 the existing root-based testnet deployment scripts already enforce it.
 
+### Current-contract exit rehearsal
+
+After deploying and verifying the current Sepolia stack, the operator command is:
+
+```bash
+bun jurisdictions/scripts/public-proof-smoke.ts --jurisdiction=ethereum-sepolia
+```
+
+Configure the funded test signer's `PUBLIC_CHAIN_PRIVATE_KEY` locally. The command
+checks canonical linked bytecode before approval or deposit, signs the asset proof
+before funding, waits for the real dispute deadline, verifies exact reserve recovery
+and withdraws to the signer. Default amounts are atomic token units: deposit 1,000,
+settle 100 to the controlled counterparty, allocate 850 collateral and withdraw 50.
+Both Entities are controlled by the test operator; this is enforcement evidence,
+not independent customer activity.
+
+For a fresh pair with no reserves or debts, `--unsecured-claim=150` additionally
+proves 100 collected from the counterparty's free reserve and a 50-unit debt row
+owed to the signer. If the secured rehearsal ran first with the same signer, use
+250 instead: that counterparty now has another 100 reserve units. Inspect the
+reported `collectedUnsecured` and `remainingDebt`; a signed claim is not guaranteed
+repayment. Existing outstanding debts cause rejection before another transaction,
+so a completed debt rehearsal requires settling its debt or using a fresh test pair
+before repeating it. Never use these controlled test identities as customer accounts.
+
+Local real-clock coverage lives in
+`core/__tests__/network/jurisdiction/public-proof-smoke.test.ts`; automatic offline
+defense is exercised in
+`core/__tests__/security/watchtower/watchtower-rpc-last-resort.test.ts`.
+Passing local Anvil tests does not replace the public Sepolia receipts and tower drill.
+
 ## Wallet-managed launch — owner scope 2026-10-10
 
 The owner creates one BrainVault wallet and manages XLN from the wallet UI.
@@ -277,12 +308,21 @@ location ~ ^/rpc[2-8]$ {
 
 `https://xln.finance/ui/` serves `ui/dist` built with `bun run build:hosted`
 (vite `base=/ui/`, router basename and runtime bundle follow it). The build
-lives in a separate worktree (`/root/xln-ui`, detached at `origin/main`) so a
-UI deploy never changes the checkout the pm2 services run from:
+lives in a separate worktree (`/root/xln-ui`, detached at the exact commit in
+`/root/xln`) so a UI deploy never changes the checkout the pm2 services run from.
+Fetching a newer `origin/main` does not change that selected revision. Existing
+tracked edits and untracked, non-ignored files in the UI worktree block deployment:
 
 ```bash
 bun run deploy:ui        # = ssh root@xln.finance 'bash -s' < scripts/deployment/deploy-ui.sh
 ```
+
+To select a different reviewed commit explicitly, set `XLN_UI_DEPLOY_SHA` in
+the remote command to its full 40-character SHA. It must be reachable from
+`origin/main`. A source revision alone does not prove current release gates;
+retain the matching build, browser and financial evidence before promotion.
+The central signed release scope includes `ui/`; a wallet source change must
+participate in the same approval as its Runtime source.
 
 nginx (inside the 443 server block, before `location /`):
 

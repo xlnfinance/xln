@@ -2,6 +2,26 @@
 
 critical rules for bilateral consensus correctness. update this when bugs are found.
 
+## custody does not admit an asset (2026-10-11)
+
+`AccountSettled` authenticates on-chain custody for the pair. It may update an
+already agreed Delta row, including first funding from zero. It cannot create
+a new row: arbitrary third parties can donate collateral without either Account
+party approving that asset. The claim still advances authenticated J progress and
+reports excluded rows; unsolicited custody remains on-chain, outside this proof.
+
+Only the bilateral Account transition admits assets, including settlement upsert
+reserving its token rows before signatures are produced. Retain those rows after
+workspace clear and dispute finality: a previously signed higher-nonce settlement
+can still execute. Never infer asset authorization from a positive collateral
+balance or require an extra first-funding handshake for an agreed asset.
+
+Evidence: the paired J-claim regression previously expanded one agreed asset to
+128; now both TS and Rust retain one. A pre-donation signed proof with one asset
+and 32 payments still exits after 127 real public-company share donations under
+the 5M transaction allowance. This does not promise recovery of unadmitted gifts
+or prove every possible transformer shape's gas bound.
+
 ## byLeft pattern (channel.ts block.isLeft)
 
 **rule:** handler effects MUST use `byLeft` (frame-level, same on both sides), NEVER perspective-dependent `isOurFrame`.

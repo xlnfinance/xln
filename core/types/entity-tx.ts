@@ -572,6 +572,29 @@ type EntityTxPayload =
       };
     }
   | {
+      type: 'lendingSetTerms';
+      data: {
+        chainId: number;
+        depositoryAddress: string;
+        tokenId: number;
+        termId: LendingTermId;
+        savingsInterestBps: number;
+        loanInterestBps: number;
+        loanLateMs: number;
+        expiresAt: number;
+      };
+    }
+  | {
+      type: 'lendingApprove';
+      data: {
+        borrowerEntityId: string;
+        tokenId: number;
+        termId: LendingTermId;
+        maxPrincipal: bigint;
+        expiresAt: number;
+      };
+    }
+  | {
       type: 'lendingBorrow';
       data: {
         requestId: string;
@@ -579,7 +602,9 @@ type EntityTxPayload =
         tokenId: number;
         amount: bigint;
         termId: LendingTermId;
-        maxInterestBps?: number;
+        maxInterestBps: number;
+        maxLateMs: number;
+        expiresAt: number;
       };
     }
   | {
@@ -588,6 +613,7 @@ type EntityTxPayload =
         hubEntityId: string;
         loanId: string;
         tokenId: number;
+        /** Maximum debit, bounded by the signed loan; no quote-time overpayment. */
         amount: bigint;
       };
     }

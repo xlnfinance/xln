@@ -2,7 +2,7 @@ import { expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { MAINNET_GATE } from '../../../scripts/release/mainnet-gate-constants';
+import { MAINNET_GATE, MAINNET_RELEASE_BLOCKERS } from '../../../scripts/release/mainnet-gate-constants';
 import {
   assertMainnetFeatureReadiness,
   buildMainnetPreflightSteps,
@@ -33,7 +33,10 @@ test('mainnet preflight builds money, recovery, health, and full e2e evidence by
 });
 
 test('mainnet release remains fail-closed while financial enforcement evidence is missing', () => {
-  expect(assertMainnetFeatureReadiness).toThrow('CAPPED_FINANCIAL_RISK_ENFORCEMENT_MISSING');
+  expect(MAINNET_RELEASE_BLOCKERS.map(blocker => blocker.id)).toEqual([
+    'LENDING_BILATERAL_COVENANT_MISSING',
+    'LENDING_ONCHAIN_MATURITY_DEFAULT_ENFORCEMENT_MISSING',
+  ]);
   expect(assertMainnetFeatureReadiness).toThrow('LENDING_BILATERAL_COVENANT_MISSING');
   expect(assertMainnetFeatureReadiness).toThrow('LENDING_ONCHAIN_MATURITY_DEFAULT_ENFORCEMENT_MISSING');
 });

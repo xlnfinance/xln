@@ -54,3 +54,15 @@ test('term-loan principal is not profit and repayment is not counted twice', () 
   expect(() => projectLendingBalance(response([]), 'user', borrower)).toThrow('LENDING_BALANCE_SYNC_PENDING');
   expect(projectLendingBalance({ ...data, loans: [{ ...loan, status: 'defaulted' }] }, 'user', borrower).get(1)).toBe(-2020n);
 });
+
+test('authenticated dispute retirement overrides stale hub claims without inventing payment', () => {
+  const retiredSaver: LendingBalanceAccount = { ...account, intents: [...account.intents, ['dispute:deposit', 'dispute-close']] };
+  expect(balance([pool], retiredSaver)).toBe(0n);
+  expect(balance([{ ...pool, status: 'disputed' }], retiredSaver)).toBe(0n);
+  expect(balance([], retiredSaver)).toBe(0n);
+  expect(() => balance([{ ...pool, status: 'disputed' }])).toThrow('LENDING_BALANCE_SYNC_PENDING');
+  const borrower: LendingBalanceAccount = { hubEntityId: 'hub', intents: [['disburse:loan', 'disburse'], ['dispute:loan', 'dispute-close']] };
+  const loan = { loanId: 'loan', hubEntityId: 'hub', borrowerEntityId: 'user', tokenId: 1, status: 'active', repaymentAmount: '2020', repaidAmount: '0' };
+  expect(projectLendingBalance({ ...response([]), loans: [loan] }, 'user', borrower).size).toBe(0);
+  expect(projectLendingBalance(response([]), 'user', borrower).size).toBe(0);
+});

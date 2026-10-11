@@ -1,7 +1,8 @@
 import { expect, test, type Page } from '@playwright/test';
 import { safeStringify } from '../../../core/protocol/serialization';
 import { enterStack } from '../stack';
-import { readAccount, readPools, type Parties } from './financial-evidence';
+import { readAccount, readPools, readRoutingEvidence, requestEarlyClose, type Parties } from './financial-evidence';
+import { setBankPolicy } from './bank-policy';
 
 const lending = async (page: Page) => {
   await page.getByTestId('nav-manage').locator('visible=true').first().click();
@@ -43,31 +44,62 @@ test('term loan transfers principal once, spends it, repays and returns lender m
     const lenderIds = await fundedWallet(page);
     const borrowerIds = await fundedWallet(borrower);
     expect(borrowerIds.hubId).toBe(lenderIds.hubId);
+    await setBankPolicy(page, borrowerIds, { termId: '1h', savingsInterestBps: 100, loanInterestBps: 200, loanLateMs: 3_600_000, maxPrincipal: 2_000_000n });
     const before = await readAccount(borrower, borrowerIds);
     await page.getByTestId('wallet-tutorial').click();
     await page.getByTestId('tour-chapter').selectOption('lending');
     await page.getByRole('button', { name: '1 hour', exact: true }).click();
     await page.getByTestId('lend-amount').fill('5');
-    await page.getByTestId('lend-rate').fill('100');
+    await expect(page.getByTestId('lend-rate')).toHaveValue('100');
+    await expect(page.getByTestId('lend-submit')).toBeDisabled();
+    await expect(page.getByTestId('lending-risk-consent')).toContainText('100.05 USDC');
+    await page.getByTestId('lending-risk-authorize').click();
+    await expect.poll(async () => (await readAccount(page, lenderIds)).credit).toBe('100050000');
+    await expect(page.getByTestId('lend-submit')).toBeEnabled();
     await page.getByTestId('lend-submit').click();
     await expect.poll(async () => (await readPools(page, lenderIds)).map(pool => pool.available)).toEqual(['5000000']);
     await home(page);
     await expect(page.getByTestId('home-total')).toContainText('100.00');
+    // Receiving the borrower's later 2 USDC also needs saver-approved bank risk.
+    // Include that payment and the coupon in a deliberate 103 USDC limit.
+    await page.getByTestId('account-row').first().click();
+    await page.getByRole('button', { name: 'Extend credit', exact: true }).click();
+    const credit = page.getByRole('dialog', { name: 'Extend credit', exact: true });
+    await credit.locator('input').fill('103');
+    await credit.getByRole('button', { name: 'Extend credit', exact: true }).click();
+    await expect.poll(async () => (await readAccount(page, lenderIds)).credit).toBe('103000000');
+    await home(page);
     await borrower.getByTestId('wallet-tutorial').click();
     await borrower.getByTestId('tour-chapter').selectOption('borrow');
     await borrower.getByTestId('lend-side-borrow').click();
     await borrower.getByRole('button', { name: '1 hour', exact: true }).click();
     await borrower.getByTestId('lend-amount').fill('2');
-    await borrower.getByTestId('lend-rate').fill('100');
-    await expect(borrower.getByTestId('lending-borrow-preview')).toContainText('Maximum repayment: 2.02 USDC, due 1 hour after approval.');
+    await borrower.getByTestId('lend-rate').fill('200');
+    await expect(borrower.getByTestId('lending-borrow-preview')).toContainText('Term repayment: 2.04 USDC, due 1 hour after approval.');
+    await expect(borrower.getByTestId('lending-borrow-preview')).toContainText('Maximum repayment: 2.08 USDC');
+    await expect(borrower.getByTestId('lend-submit')).toBeDisabled();
+    const receive = borrower.getByTestId('receive-spectrum');
+    await receive.getByRole('button', { name: 'Accept it as credit instead', exact: true }).click();
+    await receive.getByRole('checkbox').uncheck();
+    await borrower.getByTestId('receive-spectrum-confirm').click();
+    await expect.poll(async () => (await readAccount(borrower, borrowerIds)).credit).toBe('102000000');
+    await expect(borrower.getByTestId('lend-submit')).toBeEnabled();
     await borrower.getByTestId('lend-submit').click();
-    await expect.poll(() => loans(borrower, borrowerIds)).toEqual([{ status: 'active', repaymentAmount: '2020000' }]);
+    await expect.poll(() => loans(borrower, borrowerIds)).toEqual([{ status: 'active', repaymentAmount: '2040000' }]);
+    await expect(borrower.getByTestId('lending-request-status')).toContainText('Loan active');
     await expect.poll(async () => (await readAccount(borrower, borrowerIds)).balance).toBe('102000000');
     await expect.poll(async () => (await readPools(page, lenderIds)).map(pool => pool.borrowed)).toEqual(['2000000']);
+    const [fundedPool] = await readPools(page, lenderIds);
+    if (!fundedPool) throw new Error('LENDING_POOL_MISSING');
+    // The bank must survive this valid but premature signed request. After loan
+    // repayment, the ordinary Close UI retries the same position successfully.
+    await requestEarlyClose(page, lenderIds, fundedPool.positionId);
+    await expect.poll(async () => (await readAccount(page, lenderIds)).closeRequests).toEqual([`close:${fundedPool.positionId}`]);
+    expect((await readPools(page, lenderIds))[0]).toMatchObject({ status: 'open', borrowed: '2000000' });
     const disbursed = await readAccount(borrower, borrowerIds);
     expect(disbursed.borrowingLimit).toBe(before.borrowingLimit);
     await home(borrower);
-    await expect(borrower.getByTestId('home-total')).toContainText('99.98');
+    await expect(borrower.getByTestId('home-total')).toContainText('99.96');
     await borrower.getByTestId('home-pay').click();
     await borrower.getByTestId('pay-to').fill(lenderIds.ownerId);
     await borrower.getByTestId('pay-amount').fill('2');
@@ -84,8 +116,8 @@ test('term loan transfers principal once, spends it, repays and returns lender m
     await page.getByRole('button', { name: 'Dismiss payment notification' }).click();
     await borrower.getByTestId('tour-chapter').selectOption('repay');
     await borrower.getByTestId('lending-repay').click();
-    await expect.poll(() => loans(borrower, borrowerIds)).toEqual([{ status: 'repaid', repaymentAmount: '2020000' }]);
-    await expect.poll(async () => (await readAccount(borrower, borrowerIds)).balance).toBe((100000000n - debit - 20000n).toString());
+    await expect.poll(() => loans(borrower, borrowerIds)).toEqual([{ status: 'repaid', repaymentAmount: '2040000' }]);
+    await expect.poll(async () => (await readAccount(borrower, borrowerIds)).balance).toBe((100000000n - debit - 40000n).toString());
     const repaid = await readAccount(borrower, borrowerIds);
     expect(repaid.borrowingLimit).toBe(before.borrowingLimit);
     expect(repaid.debt).toBe('0');
@@ -93,10 +125,18 @@ test('term loan transfers principal once, spends it, repays and returns lender m
     await expect(page.getByTestId('lending-close')).toBeEnabled();
     await page.getByTestId('lending-close').click();
     await expect.poll(async () => (await readPools(page, lenderIds)).map(pool => pool.status)).toEqual(['closed']);
-    await expect.poll(async () => (await readAccount(page, lenderIds)).balance).toBe('102020000');
+    // The saver cancels before its one-hour maturity. Its principal is returned;
+    // the borrower's 0.04 interest belongs to the bank, not this early withdrawal.
+    await expect.poll(async () => (await readAccount(page, lenderIds)).balance).toBe('102000000');
     await home(page);
-    await expect(page.getByTestId('home-total')).toContainText('102.02');
+    await expect(page.getByTestId('home-total')).toContainText('102.00');
     await test.info().attach('lending-money-evidence', { body: safeStringify({ before, disbursed, repaid, debit }), contentType: 'application/json' });
     expect(errors).toEqual([]);
+  } catch (error) {
+    await test.info().attach('lending-route-failure', {
+      body: safeStringify({ lender: await readRoutingEvidence(page), borrower: await readRoutingEvidence(borrower) }),
+      contentType: 'application/json',
+    });
+    throw error;
   } finally { await borrowerContext.close(); }
 });

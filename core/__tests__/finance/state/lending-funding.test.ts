@@ -22,8 +22,10 @@ for (const byLeft of [true, false]) for (const vector of cases) {
     const account = makeAccount(left, right);
     const delta = createDefaultDelta(1);
     delta.offdelta = byLeft ? vector.owned : -vector.owned;
-    delta.leftCreditLimit = byLeft ? vector.credit : 100n;
-    delta.rightCreditLimit = byLeft ? 100n : vector.credit;
+    // These vectors isolate the saver-owned principal check. The bank already
+    // owes up to 100 and needs one explicitly permitted unit for the coupon.
+    delta.leftCreditLimit = byLeft ? vector.credit : 101n;
+    delta.rightCreditLimit = byLeft ? 101n : vector.credit;
     delta.leftHold = byLeft ? vector.hold : 0n;
     delta.rightHold = byLeft ? 0n : vector.hold;
     account.state.deltas = PersistentAccountStateMap.fromEntries('deltas', [[1, delta]]);

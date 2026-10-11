@@ -460,7 +460,7 @@ test('runtime adapter view-frame excludes unbounded account internals from remot
     type: 'queued_memo',
     data: { index, note: 'z'.repeat(160) },
   }));
-  account.state.settlementWorkspace = { notes: 's'.repeat(500_000) };
+  account.state.settlementWorkspace = { ops: [], lastModifiedByLeft: true, notes: 's'.repeat(500_000) };
   prepareAccountFixtureForGraph(account);
 
   const frame = await resolveRuntimeAdapterRead<RuntimeAdapterViewFrame>({ env }, 'view-frame', { entityId, accountsLimit: 1, booksLimit: 1 });
@@ -477,6 +477,8 @@ test('runtime adapter view-frame excludes unbounded account internals from remot
   expect(compact.pendingFrame?.accountTxs).toHaveLength(20);
   expect(compact.pendingFrame).not.toHaveProperty('deltas');
   expect(compact.state.deltas.size).toBe(100);
+  expect(compact.lendingRisk.size).toBe(100);
+  expect([...compact.lendingRisk.keys()]).toEqual([...compact.state.deltas.keys()]);
   expect(account.state.deltas.size).toBe(5_000);
   for (const [tokenId, delta] of compact.state.deltas) expect(delta).toEqual(account.state.deltas.get(tokenId));
   expect(compact.state.settlementWorkspace).toBeUndefined();

@@ -22,6 +22,7 @@ import { normalizeAccountStateDomain } from '../commitment/state-root';
 import { assertSwapNetAuthorization } from '../swap/swap-net-authorization';
 import { validateAccountFinancialMaps } from './financial-state-validation';
 import { validateAccountStateCollection } from './collection-validation';
+import { assertAccountLendingCovenants } from '../../protocol/dispute/lending-covenant';
 
 const LENDING_INTENTS = new Set([
   'fund',
@@ -30,6 +31,7 @@ const LENDING_INTENTS = new Set([
   'disburse',
   'close-request',
   'close-payout',
+  'dispute-close',
 ]);
 
 const validateSwapOffers = (value: unknown, context: string): void => {
@@ -150,6 +152,11 @@ function assertAccountReplica(
   validateSwapOffers(state['swapOffers'], `${context}.state.swapOffers`);
   validateAccountFinancialMaps(state, account, context);
   validateLendingIntents(state['lendingIntents'], `${context}.state.lendingIntents`);
+  assertAccountLendingCovenants({
+    deltas,
+    ...(state['subcontracts'] === undefined ? {} : { subcontracts: validateAccountStateCollection(state['subcontracts'], `${context}.state.subcontracts`) }),
+    ...(state['lendingIntents'] === undefined ? {} : { lendingIntents: validateAccountStateCollection(state['lendingIntents'], `${context}.state.lendingIntents`) }),
+  });
   requireBoundaryInteger(account['currentHeight'], `${context}.currentHeight`);
   validatePendingAccountProposal(account, context);
   requireBoundaryInteger(account['rollbackCount'], `${context}.rollbackCount`);

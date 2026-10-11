@@ -10,6 +10,7 @@ import {
 import { createPreparedOutputGraph } from './prepared-output';
 import { timePerfPhase } from '../../support/performance/profile';
 import { capturePlannedLocalContinuations } from '../observability/parity-evidence';
+import { localOutputIncludedIn } from './local-outbox';
 
 export type RuntimeContinuationEnqueuer = (
   env: RuntimeReplica,
@@ -43,7 +44,8 @@ export const applyRecoveryRuntimeOutputPlan = (
   ));
   const plan = timePerfPhase('recovery.output.plan', () =>
     planEntityOutputs(env, pending, routing, preparedOutputGraph));
-  const localContinuations = plan.localOutputs.map(({
+  const queued = localOutputIncludedIn(env.runtimeMempool?.entityInputs ?? [], plan.localOutputs);
+  const localContinuations = plan.localOutputs.filter(output => !queued(output)).map(({
     sourceRuntimeFrame: _sourceRuntimeFrame,
     ...output
   }) => output);
@@ -55,9 +57,13 @@ export const applyRecoveryRuntimeOutputPlan = (
     undefined,
     env.state.timestamp,
   ));
-  env.pendingNetworkOutputs = timePerfPhase('recovery.output.remotePending', () =>
+  // Local delivery is still only RAM admission. Keep its signed ACK/proposal
+  // in the same ordered WAL outbox until the recipient input commits.
+  // Otherwise a crash after the receiver commits loses its
+  // ACK and strands the co-hosted proposer with a permanently pending debit.
+  env.pendingNetworkOutputs = timePerfPhase('recovery.output.pendingCommit', () =>
     buildPendingNetworkOutputs(
-      plan.remoteOutputs.map(({ output }) => output),
+      plan.orderedOutputs,
       preparedOutputGraph,
     ));
   return plan;

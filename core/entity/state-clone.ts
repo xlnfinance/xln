@@ -52,7 +52,10 @@ const cloneLendingPosition = (
   position: LendingPoolPosition,
 ): LendingPoolPosition => ({ ...position });
 
-const cloneLendingLoan = (loan: LendingLoan): LendingLoan => ({ ...loan });
+const cloneLendingLoan = (loan: LendingLoan): LendingLoan => ({
+  ...loan,
+  ...(loan.approval === undefined ? {} : { approval: { ...loan.approval } }),
+});
 
 const cloneLendingState = (lending: LendingState): LendingState => ({
   pools: new Map(
@@ -67,6 +70,8 @@ const cloneLendingState = (lending: LendingState): LendingState => ({
       cloneLendingLoan(loan),
     ]),
   ),
+  ...(lending.terms === undefined ? {} : { terms: new Map(lending.terms) }),
+  ...(lending.facilities === undefined ? {} : { facilities: new Map(lending.facilities) }),
 });
 
 const cloneCrossJurisdictionState = (

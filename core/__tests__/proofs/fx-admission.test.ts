@@ -100,7 +100,7 @@ const LENDING_TXS: Array<[AccountTx['type'], AccountTx]> = [
       tokenId: 1,
       amount: 10n,
       termId: '1d',
-      maxInterestBps: 100,
+      maxInterestBps: 100, maxLateMs: 0, expiresAt: 9_000_000_000_000,
     },
   }],
   ['lending_repay', {
@@ -116,11 +116,13 @@ const LENDING_TXS: Array<[AccountTx['type'], AccountTx]> = [
   ['lending_disburse', {
     type: 'lending_disburse',
     data: {
-      loanId: 'loan-1',
+      loanId: 'loan-1', requestId: 'borrow-1', maxInterestBps: 100, maxLateMs: 0, lateMs: 0, expiresAt: 60_000,
       hubEntityId: '0xhub',
       borrowerEntityId: '0xsender',
       tokenId: 1,
       amount: 10n,
+      termId: '1d',
+      interestBps: 100,
     },
   }],
   ['lending_close_request', {

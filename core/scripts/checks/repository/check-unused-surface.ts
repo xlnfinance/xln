@@ -22,6 +22,14 @@ type ExternalRuntimeConsumer = {
 };
 
 const EXTERNAL_RUNTIME_CONSUMERS: Readonly<Record<string, readonly ExternalRuntimeConsumer[]>> = {
+  'core/extensions/lending.ts': [{
+    consumer: 'ui/src/runtime/financial/lending.ts',
+    specifier: '@xln/core/extensions/lending',
+  }],
+  'core/entity/lending-policy.ts': [{
+    consumer: 'ui/src/runtime/financial/lending.ts',
+    specifier: '@xln/core/entity/lending-policy',
+  }],
   'core/account/tx/admission-policy.ts': [{
     consumer: 'ui/src/screens/Lending.tsx',
     specifier: '@xln/core/account/tx/admission-policy',
@@ -106,9 +114,12 @@ export const usesNamedBinding = (source: string, binding: NamedBinding): boolean
     /(?:import|export)\s+(?:type\s+)?\{[\s\S]*?\}\s+from\s+['"][^'"]+['"];?/g,
     '',
   );
-  const codeOnly = withoutModuleStatements
-    .replace(/'(?:\\.|[^'\\])*'|"(?:\\.|[^"\\])*"|`(?:\\.|[^`\\])*`/g, '')
-    .replace(/\/\*[\s\S]*?\*\/|\/\/[^\r\n]*/g, '');
+  // Consume comments and literals in one pass: an apostrophe inside a comment
+  // must not pair with a later quote and erase a real call between two literals.
+  const codeOnly = withoutModuleStatements.replace(
+    /\/\*[\s\S]*?\*\/|\/\/[^\r\n]*|'(?:\\.|[^'\\])*'|"(?:\\.|[^"\\])*"|`(?:\\.|[^`\\])*`/g,
+    '',
+  );
   const escaped = binding.localName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   return new RegExp(`\\b${escaped}\\b`).test(codeOnly);
 };

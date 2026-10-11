@@ -12,11 +12,11 @@ export const HASHABLE_ACCOUNT_TX_DATA_FIELDS = {
     'positionId', 'hubEntityId', 'lenderEntityId', 'tokenId', 'amount', 'termId', 'interestBps',
   ],
   lending_borrow_request: [
-    'requestId', 'hubEntityId', 'borrowerEntityId', 'tokenId', 'amount', 'termId', 'maxInterestBps',
+    'requestId', 'hubEntityId', 'borrowerEntityId', 'tokenId', 'amount', 'termId', 'maxInterestBps', 'expiresAt', 'maxLateMs',
   ],
   lending_repay: ['loanId', 'hubEntityId', 'borrowerEntityId', 'tokenId', 'amount'],
   lending_disburse: [
-    'loanId', 'hubEntityId', 'borrowerEntityId', 'tokenId', 'amount',
+    'loanId', 'hubEntityId', 'borrowerEntityId', 'tokenId', 'amount', 'termId', 'interestBps', 'requestId', 'maxInterestBps', 'expiresAt', 'maxLateMs', 'lateMs',
   ],
   lending_close_request: ['positionId', 'hubEntityId', 'lenderEntityId'],
   lending_close_payout: ['positionId', 'hubEntityId', 'lenderEntityId', 'tokenId', 'amount'],

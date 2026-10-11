@@ -6,10 +6,11 @@ import { getPullLockAdmissionError } from '../../../account/tx/handlers/settleme
 import type { AccountTx } from '../../../types/account';
 import { expect, test } from 'bun:test';
 import { makeAccount, entity, jref, makeJurisdiction, putTestAccountDelta } from '../../helpers/cross-j';
+import { applyAccountDisputeFinality } from '../../../account/settlement/j-finality';
 import { createDefaultDelta } from '../../../account/state/delta';
 import { buildCanonicalProofBatches } from '../../../protocol/dispute/proof-builder';
 import { applyAccountTxToMutableReplica } from '../../../account/tx/apply';
-import { disputeGasCharge, disputeGasAdmissionError } from '../../../account/validation/dispute-gas-budget';
+import { accountDisputeGasCharge, disputeGasCharge, disputeGasAdmissionError } from '../../../account/validation/dispute-gas-budget';
 
 const LEFT = entity('11');
 const RIGHT = entity('22');
@@ -40,7 +41,7 @@ test('same-j swap admits a signable proof before the receiving token has a balan
   expect(buildCanonicalProofBatches(account)).toHaveLength(1);
 });
 
-test('re-adding a existing over-budget token preserves its committed rows', async () => {
+test('re-adding an existing over-budget token preserves its committed rows', async () => {
   const account = makeAccount(LEFT, RIGHT);
   for (let tokenId = 2; tokenId <= 11; tokenId++) putTestAccountDelta(account, createDefaultDelta(tokenId));
   const before = [...account.state.deltas];
@@ -86,6 +87,20 @@ test('combined proof budget charges all dimensions, not separate lock maxima', (
   expect(disputeGasCharge(2, 32, 1)).toBe(3_778_000);
   expect(disputeGasCharge(2, 32, 32)).toBeGreaterThan(5_000_000);
   expect(disputeGasCharge(128, 82, 3)).toBeGreaterThan(17_000_000);
+});
+
+test('direct_payment cannot reuse an oversized proof even when its footprint stays unchanged', async () => {
+  const account = makeAccount(LEFT, RIGHT);
+  for (let tokenId = 2; tokenId <= 11; tokenId++) putTestAccountDelta(account, createDefaultDelta(tokenId));
+  const before = account.state.deltas;
+  const result = await applyAccountTxToMutableReplica(account, {
+    type: 'direct_payment',
+    data: { tokenId: 1, amount: 1n, fromEntityId: LEFT, toEntityId: RIGHT, route: [RIGHT], deliveryMode: 'direct' },
+  }, true);
+  expect(result.ok).toBe(false);
+  if (result.ok) throw new Error('Expected oversized payment rejection');
+  expect(result.rejection.message).toBe('ACCOUNT_DISPUTE_GAS_BUDGET_EXCEEDED:5200000/5000000');
+  expect(account.state.deltas).toBe(before);
 });
 
 test('existing oversized obligations can cancel, but cannot add new work', () => {
@@ -194,4 +209,56 @@ test('htlc_lock rejects the clause-splitting boundary without reserving funds', 
   }
   expect(account.state.locks.size).toBe(29);
   expect(account.state.deltas.get(1)?.leftHold).toBe(29n);
+});
+
+
+test('settlement reserves new proof rows even for zero diffs and forgiveness', async () => {
+  for (const type of ['rawDiff', 'forgive'] as const) {
+    const account = makeAccount(LEFT, RIGHT);
+    for (let tokenId = 2; tokenId <= 10; tokenId++) putTestAccountDelta(account, createDefaultDelta(tokenId));
+    const before = account.state.deltas;
+    const op = type === 'rawDiff'
+      ? { type, tokenId: 11, leftDiff: 0n, rightDiff: 0n, collateralDiff: 0n, ondeltaDiff: 0n }
+      : { type, tokenId: 11 };
+    const result = await applyAccountTxToMutableReplica(account, {
+      type: 'settle_transition', data: { kind: 'upsert', revision: 1, executorIsLeft: true, ops: [op] },
+    }, true);
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error('Over-budget post-settlement proof admitted');
+    expect(result.rejection.message).toBe('ACCOUNT_DISPUTE_GAS_BUDGET_EXCEEDED:5200000/5000000');
+    expect(account.state.settlementWorkspace).toBeUndefined();
+    expect(account.state.deltas).toBe(before);
+  }
+});
+
+test('settlement footprint survives clear and older dispute finality', async () => {
+  const account = makeAccount(LEFT, RIGHT);
+  for (let tokenId = 2; tokenId <= 9; tokenId++) putTestAccountDelta(account, createDefaultDelta(tokenId));
+  const result = await applyAccountTxToMutableReplica(account, {
+    type: 'settle_transition', data: { kind: 'upsert', revision: 1, executorIsLeft: true, ops: [
+      { type: 'rawDiff', tokenId: 10, leftDiff: 0n, rightDiff: 0n, collateralDiff: 0n, ondeltaDiff: 0n },
+      { type: 'forgive', tokenId: 10 },
+    ] },
+  }, true);
+  expect(result.ok).toBe(true);
+  expect(account.state.deltas.has(10)).toBe(true);
+  const hashlock = entity('44');
+  const lock: AccountTx = { type: 'htlc_lock', data: {
+    lockId: hashlock, hashlock, tokenId: 1, amount: 1n, timelock: 60_000n, revealBeforeHeight: 10,
+  } };
+  const rejected = await applyAccountTxToMutableReplica(account, lock, true, 1000, 0);
+  expect(rejected.ok).toBe(false);
+  if (rejected.ok) throw new Error('Settlement gas reservation spent twice');
+  expect(rejected.rejection.message).toBe('ACCOUNT_DISPUTE_GAS_BUDGET_EXCEEDED:5100000/5000000');
+  expect(account.state.locks.size).toBe(0);
+  const workspace = account.state.settlementWorkspace;
+  if (!workspace) throw new Error('Expected admitted settlement workspace');
+  expect((await applyAccountTxToMutableReplica(account, {
+    type: 'settle_transition', data: { kind: 'clear', revision: 1, workspaceHash: workspace.workspaceHash },
+  }, true)).ok).toBe(true);
+  expect(account.state.settlementWorkspace).toBeUndefined();
+  expect(accountDisputeGasCharge(account.state)).toBe(5_000_000);
+  applyAccountDisputeFinality(account, 1, [1]);
+  expect(account.state.deltas.has(10)).toBe(true);
+  expect(accountDisputeGasCharge(account.state)).toBe(5_000_000);
 });

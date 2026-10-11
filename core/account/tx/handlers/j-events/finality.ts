@@ -5,7 +5,6 @@ import { clearFinalizedSettlementWorkspace } from '../settlement/transition';
 import { buildAccountProofBody } from '../../../../protocol/dispute/proof-builder';
 import { createSettlementDeltaValue } from '../../../settlement/settlement-projection';
 import { commitDeltaDraft } from '../../delta-utils';
-import { assertAccountDeltaCapacity } from '../../../state/delta';
 import { assertSettlementTokenId } from '../../../../protocol/settlement/operations';
 
 const normalizedEntityId = (value: unknown): string => String(value ?? '').trim().toLowerCase();
@@ -35,9 +34,11 @@ const applyAccountSettledEvent = (account: AccountDraftReplica, event: Jurisdict
   if (event.type !== 'AccountSettled') return;
   const { tokenId, collateral, ondelta } = event.data;
   const tokenIdNum = assertSettlementTokenId(tokenId, 'AccountSettled');
-  if (!account.state.deltas.has(tokenIdNum)) {
-    assertAccountDeltaCapacity(account.state.deltas.size + 1, 'insert');
-  }
+  // A custody receipt authenticates balances, not bilateral asset admission.
+  // Anyone can donate a new token on-chain. Importing it here would enlarge
+  // the peer's signed exit proof without consent and exhaust its gas budget.
+  // add_delta / an agreed settlement reserves the row before it can be funded.
+  if (!account.state.deltas.has(tokenIdNum)) return;
   const delta = createSettlementDeltaValue(account, tokenIdNum);
   const previousCollateral = delta.collateral;
   delta.collateral = BigInt(collateral);
@@ -182,9 +183,10 @@ export const applyFinalizedAccountJEventsOnView = (
   counterpartyId: string,
   events: readonly JurisdictionEvent[],
   deltaTransformerAddress: string,
-): void => {
+): number => {
   const collected = collectSettledEvents(account, events);
-  if (!collected) return;
+  if (!collected) return 0;
+  const unadmitted = collected.settledEvents.filter(event => !account.state.deltas.has(event.data.tokenId)).length;
   applySettledEventsOnView(
     account,
     counterpartyId,
@@ -192,4 +194,5 @@ export const applyFinalizedAccountJEventsOnView = (
     collected.finalizedNonce,
     deltaTransformerAddress,
   );
+  return unadmitted;
 };

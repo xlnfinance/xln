@@ -434,10 +434,11 @@ describe('network caption', () => {
     expect(mechanicOf('settlement', 'settle_approve')).toContain('only the difference');
     expect(mechanicOf('j_batch', 'jInput')).toContain('one on-chain transaction');
     // Raw type is sharper than the coarse category where it matters.
-    expect(mechanicOf('account', 'set_credit_limit')).toContain('without locking collateral');
+    expect(mechanicOf('account', 'set_credit_limit')).toContain('maximum accepted unsecured exposure');
     expect(mechanicOf('account', 'reserveToCollateral')).toContain('costs a J-transaction');
     expect(mechanicOf('account', 'openAccount')).toContain('no network-wide registration');
-    expect(mechanicOf('j_event', 'disputeStarted')).toContain('last signed frame');
+    expect(mechanicOf('j_event', 'disputeStarted')).toContain('collateral-backed claim');
+    expect(mechanicOf('j_event', 'disputeStarted')).toContain('unsecured debt is not guaranteed');
     expect(mechanicOf('unknown-type', 'whatever')).toBe('');
   });
 

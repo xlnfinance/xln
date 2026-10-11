@@ -16,7 +16,7 @@ import {
 } from '../../../../protocol/dispute/proof-builder';
 import { buildAccountProofBodyFromJurisdictions, getAccountStateDomain } from '../../../consensus/helpers';
 import type { AccountConsensusContext } from '../../../consensus/context';
-import { projectSettlementDeltaOverrides } from '../../../settlement/settlement-projection';
+import { createSettlementDeltaValue, projectSettlementDeltaOverrides } from '../../../settlement/settlement-projection';
 import { ACCOUNT_TX_REJECTION_CODES } from '../../apply-types';
 import type {
   AccountTxRejection,
@@ -696,6 +696,14 @@ export async function handleSettleTransition(
       const planned: SettlementDeltaPlan = new Map();
       if (previous) {
         planWorkspaceHoldRelease(account, previous, planned);
+      }
+      // Keep agreed token rows after clear/finality: a higher-nonce settlement
+      // signature may still execute after an older dispute retired its workspace.
+      // Reserve in the canonical Delta map, not a second durable gas ledger.
+      for (const op of next.ops) {
+        if (!account.state.deltas.has(op.tokenId) && !planned.has(op.tokenId)) {
+          planned.set(op.tokenId, createSettlementDeltaValue(account, op.tokenId));
+        }
       }
       planWorkspaceHoldAdd(account, next, planned);
       publishSettlementDeltaPlan(account, planned);

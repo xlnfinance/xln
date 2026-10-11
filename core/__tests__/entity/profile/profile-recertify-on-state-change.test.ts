@@ -7,6 +7,11 @@ import { createEmptyEnv, enqueueRuntimeInput, processRuntime } from '../../../ru
 import { setScenarioStorageEnabled } from '../../../scenarios/harness/helpers';
 import type { EntityReplica } from '../../../entity/types';
 import type { EntityTx } from '../../../types/entity-tx';
+import { RuntimeP2P } from '../../../network/p2p/p2p';
+import { buildEntityProfileDescriptor } from '../../../entity/profile/profile-descriptor';
+import { createEntityFrameCandidateState } from '../../../entity/state-clone';
+import { createDefaultDelta } from '../../../account/state/delta';
+import { makeAccount, openWritableEntityAccounts, putTestAccountDelta } from '../../helpers/cross-j';
 
 const TEST_JURISDICTION = {
   address: 'rpc://profile-recertify',
@@ -102,16 +107,45 @@ test('gossip profile Hanko recertifies at genesis and when the advertised descri
   ]);
   expect(genesis.state.height).toBe(1);
   expect(profileWitnessAt(genesis, 1)).toBe(1);
+  const p2p = new RuntimeP2P({
+    env, runtimeId: signerId, signerId, relayUrls: [],
+    onEntityInputs: () => { throw new Error('UNEXPECTED_PROFILE_TEST_INPUT'); },
+    onGossipProfiles: () => { throw new Error('UNEXPECTED_PROFILE_TEST_PEER'); },
+  });
+  await p2p.announceProfilesForEntitiesNow([entityId]);
+  const topologyUnchanged = (): boolean => Reflect.get(p2p, 'announceTopologyUnchanged').call(p2p, entityId);
+  expect(topologyUnchanged()).toBe(true);
 
   const idle = await drive(env, entityId, signerId, [
     { type: 'chat', data: { from: signerId, message: 'idle' } },
   ]);
   expect(idle.state.height).toBe(2);
   expect(profileWitnessAt(idle, 2)).toBe(0);
+  expect(idle.state.config).not.toBe(genesis.state.config);
+  expect(topologyUnchanged()).toBe(true);
 
   const recertified = await drive(env, entityId, signerId, [hubConfigTx()]);
   expect(recertified.state.height).toBe(3);
   expect(recertified.state.profile.isHub).toBe(true);
   expect(profileWitnessAt(recertified, 3)).toBe(1);
   expect(env.gossip.getHubs().some(profile => profile.entityId === entityId)).toBe(true);
+  expect(topologyUnchanged()).toBe(false);
+  await p2p.announceProfilesForEntitiesNow([entityId]);
+  expect(topologyUnchanged()).toBe(true);
+  // Complete routing-state fixture: adding collateral to an existing zero row
+  // makes its token visible without changing row count or either credit limit.
+  const peer = `0x${'22'.repeat(32)}`;
+  const account = makeAccount(entityId, peer, TEST_JURISDICTION);
+  account.publicPinned = true;
+  const zero = createDefaultDelta(1);
+  putTestAccountDelta(account, zero);
+  recertified.state = createEntityFrameCandidateState(recertified.state);
+  openWritableEntityAccounts(recertified.state).set(peer, account);
+  const snapshot = (): unknown => Reflect.get(p2p, 'announceStateTopology').call(p2p, entityId);
+  const empty = snapshot();
+  expect(buildEntityProfileDescriptor(recertified.state).accounts).toHaveLength(0);
+  putTestAccountDelta(account, { ...zero, collateral: 2_000n });
+  expect(buildEntityProfileDescriptor(recertified.state).accounts).toHaveLength(1);
+  expect(snapshot()).not.toEqual(empty);
+  p2p.close();
 });

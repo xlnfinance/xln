@@ -15,6 +15,8 @@ contract DisputeGasAdmissionTest is XlnFixture {
   uint256 internal chunkSize = 8;
   bool internal maximalStarter;
   bool internal irrelevantSecrets;
+  uint256 internal savingsCount;
+  bool internal wideSavings;
 
   function setUp() public { _deployXln(); }
 
@@ -62,18 +64,19 @@ contract DisputeGasAdmissionTest is XlnFixture {
       // Exercise cold debt creation; wide values require both Uint512 limbs.
       pb.offdeltas[i] = wide ? Int512(1, 1) : Int512(1, 0);
     }
-    uint256 clauses = (payments + chunkSize - 1) / chunkSize + (swaps + chunkSize - 1) / chunkSize + (pulls + chunkSize - 1) / chunkSize;
+    uint256 clauses = (payments + chunkSize - 1) / chunkSize + (swaps + chunkSize - 1) / chunkSize + (pulls + chunkSize - 1) / chunkSize + (savingsCount + chunkSize - 1) / chunkSize;
     pb.transformers = new TransformerClause[](clauses);
     bytes[] memory args = new bytes[](clauses);
     uint256 clause;
-    for (uint256 kind; kind < 3; kind++) {
-      uint256 count = kind == 0 ? payments : kind == 1 ? swaps : pulls;
+    for (uint256 kind; kind < 4; kind++) {
+      uint256 count = kind == 0 ? payments : kind == 1 ? swaps : kind == 2 ? pulls : savingsCount;
       for (uint256 offset; offset < count; offset += chunkSize) {
         uint256 n = count - offset < chunkSize ? count - offset : chunkSize;
         DeltaTransformer.Batch memory b;
         b.payment = new DeltaTransformer.Payment[](kind == 0 ? n : 0);
         b.swap = new DeltaTransformer.Swap[](kind == 1 ? n : 0);
         b.pull = new DeltaTransformer.Pull[](kind == 2 ? n : 0);
+        b.loans = new DeltaTransformer.TermLoan[](kind == 3 ? n : 0);
         DeltaTransformer.Arguments memory a;
         a.secrets = new bytes32[](kind == 0 ? n : 0);
         a.fillRatios = new uint16[](kind == 1 ? n : 0);
@@ -84,13 +87,23 @@ contract DisputeGasAdmissionTest is XlnFixture {
           } else if (kind == 1) {
             a.fillRatios[i] = 65535;
             b.swap[i] = DeltaTransformer.Swap(true, i % tokens, 1, (i + 1) % tokens, 1);
-          } else {
+          } else if (kind == 2) {
             (bytes32 fullHash, bytes32 root,) = _ladder(offset + i);
             b.pull[i] = DeltaTransformer.Pull(i % tokens, SignedAmount(false, 10000), 0, fullHash, root, false);
+          } else {
+            uint256 principal = wideSavings ? type(uint256).max / 2 : 10000;
+            // Principal plus both term and late coupons remains a full-width
+            // uint256 claim. A half-width coupon doubled here would be invalid
+            // at admission, so it cannot represent a signed production state.
+            uint256 interest = wideSavings ? type(uint256).max / 4 : 100;
+            b.loans[i] = DeltaTransformer.TermLoan(i % tokens, i % 2 == 0, principal, interest, 0, 86400000, 86400000);
           }
         }
         Allowance[] memory allowances = new Allowance[](tokens);
-        for (uint256 i; i < tokens; i++) allowances[i] = Allowance(i, 100000, 100000);
+        for (uint256 i; i < tokens; i++) {
+          uint256 allowance = wideSavings ? type(uint256).max : 1000000;
+          allowances[i] = Allowance(i, allowance, allowance);
+        }
         pb.transformers[clause] = TransformerClause(address(deltaTransformer), abi.encode(b), allowances);
         args[clause++] = abi.encode(a);
       }
@@ -157,6 +170,28 @@ contract DisputeGasAdmissionTest is XlnFixture {
   function test_budget5m_partialPulls18() public { pullRatio = 65534; _exercise(5, 0, 32, 18, true); }
 
   function test_budget5m_mmFrontier() public { _exercise(5, 0, 32, 18, true); }
+
+  function test_budget5m_savings80MaxStarter() public {
+    maximalStarter = true;
+    savingsCount = 80;
+    chunkSize = 19;
+    _exercise(1, 0, 0, 0, true);
+  }
+
+  function test_budget5m_savingsMixedMaxStarter() public {
+    maximalStarter = true;
+    savingsCount = 20;
+    chunkSize = 19;
+    _exercise(3, 8, 8, 8, true);
+  }
+
+  function test_budget5m_fullWidthSavings18MaxStarter() public {
+    maximalStarter = true;
+    wideSavings = true;
+    savingsCount = 18;
+    chunkSize = 1;
+    _exercise(1, 0, 0, 0, true);
+  }
 
   function testFuzz_budget5m_combinedStockFrontier(uint8 tokenSeed, uint8 paymentSeed, uint8 swapSeed, uint8 pullSeed) public {
     uint256 tokens = bound(uint256(tokenSeed), 1, 10);

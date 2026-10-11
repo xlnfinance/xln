@@ -1,5 +1,4 @@
 import type {
-  AccountState,
   Delta,
   HtlcLock,
   PullCommitment,
@@ -7,13 +6,13 @@ import type {
   SettlementOp,
   SettlementWorkspace,
   SwapOffer,
+  AccountExternalSubcontract,
+  AccountLendingCovenant,
 } from '../account';
+import { LENDING_COVENANT_FIELDS } from '../../protocol/dispute/lending-covenant';
 import type { PaybookEntry } from '../../entity/types';
 import type { AssertNever, FieldGap } from './coverage';
 
-type AccountSubcontract = NonNullable<AccountState['subcontracts']> extends ReadonlyMap<string, infer Value>
-  ? Value
-  : never;
 type CrossJurisdictionSecretRelay = NonNullable<PaybookEntry['crossJurisdictionRelay']>;
 type PostSettlementDisputeProof = NonNullable<SettlementWorkspace['postSettlementDisputeProof']>;
 
@@ -159,13 +158,15 @@ export const HASHABLE_ACCOUNT_SUBCONTRACT_FIELDS = [
   'allowances',
   'leftArgumentsHash',
   'rightArgumentsHash',
-] as const satisfies readonly (keyof AccountSubcontract)[];
+] as const satisfies readonly (keyof AccountExternalSubcontract)[];
+
+export const HASHABLE_ACCOUNT_LENDING_COVENANT_FIELDS = LENDING_COVENANT_FIELDS;
 
 const HASHABLE_ACCOUNT_SUBCONTRACT_ALLOWANCE_FIELDS = [
   'deltaIndex',
   'rightAllowance',
   'leftAllowance',
-] as const satisfies readonly (keyof AccountSubcontract['allowances'][number])[];
+] as const satisfies readonly (keyof AccountExternalSubcontract['allowances'][number])[];
 
 export type AccountNestedFieldCoverage = [
   AssertNever<FieldGap<Delta, typeof HASHABLE_DELTA_FIELDS>>,
@@ -177,9 +178,10 @@ export type AccountNestedFieldCoverage = [
   AssertNever<FieldGap<PostSettlementDisputeProof, typeof HASHABLE_POST_SETTLEMENT_DISPUTE_PROOF_FIELDS>>,
   AssertNever<FieldGap<PaybookEntry, typeof HASHABLE_PAYBOOK_ENTRY_FIELDS>>,
   AssertNever<FieldGap<CrossJurisdictionSecretRelay, typeof HASHABLE_CROSS_J_SECRET_RELAY_FIELDS>>,
-  AssertNever<FieldGap<AccountSubcontract, typeof HASHABLE_ACCOUNT_SUBCONTRACT_FIELDS>>,
+  AssertNever<FieldGap<AccountExternalSubcontract, typeof HASHABLE_ACCOUNT_SUBCONTRACT_FIELDS>>,
+  AssertNever<FieldGap<AccountLendingCovenant, typeof HASHABLE_ACCOUNT_LENDING_COVENANT_FIELDS>>,
   AssertNever<FieldGap<
-    AccountSubcontract['allowances'][number],
+    AccountExternalSubcontract['allowances'][number],
     typeof HASHABLE_ACCOUNT_SUBCONTRACT_ALLOWANCE_FIELDS
   >>,
 ];

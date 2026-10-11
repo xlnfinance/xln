@@ -26,6 +26,12 @@ Credit-field names identify the borrowing side:
 - Right grants Left credit by setting **leftCreditLimit**, permitting negative Δ.
 - Left grants Right credit by setting **rightCreditLimit**, permitting Δ above collateral.
 
+A credit limit caps the grantor's accepted unsecured risk on this account and
+asset. It is not money, collateral or a repayment guarantee. Only the claimant's
+allocated share of actual collateral is secured; the total collateral must never
+be promised independently to both parties. Credit-limit reductions govern new
+admission and cannot retroactively eliminate existing signed exposure.
+
 For user-facing balances and capacity, use the canonical
 [deriveDelta](../../core/account/utils.ts). Holds, allowances and already drawn
 credit affect current capacity. A reduced limit does not erase a signed debt;

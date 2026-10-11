@@ -1,5 +1,12 @@
 import { describe, expect, test } from 'bun:test';
-import { decodeBinaryPayload, encodeBinaryPayload, packPreorderedBinaryPayload } from '../../../protocol/serialization/binary-codec';
+import {
+  canonicalizeBinaryPayload,
+  canonicalConsensusValuesEqual,
+  decodeBinaryPayload,
+  encodeBinaryPayload,
+  encodeCanonicalConsensusBytes,
+  packPreorderedBinaryPayload,
+} from '../../../protocol/serialization/binary-codec';
 
 const hex = (bytes: Uint8Array): string => Buffer.from(bytes).toString('hex');
 
@@ -11,6 +18,28 @@ const hex = (bytes: Uint8Array): string => Buffer.from(bytes).toString('hex');
  * bytes Bun produced before the pin, so Rust parity and stored hashes hold.
  */
 describe('binary codec byte form', () => {
+  test('canonical preparation cannot change consensus bytes or long-hex projection', () => {
+    const digest = `0x${'ab'.repeat(32)}`;
+    const values = [
+      { digest }, [digest], new Map([[digest, { digest }]]), new Set([digest]),
+      { nested: [{ digest }, new Map([[digest, new Set([digest])]])] },
+    ];
+    for (const value of values) {
+      const prepared = canonicalizeBinaryPayload(value);
+      expect(hex(encodeCanonicalConsensusBytes(prepared))).toBe(hex(encodeCanonicalConsensusBytes(value)));
+      expect(canonicalConsensusValuesEqual(prepared, value)).toBe(true);
+      expect(hex(encodeCanonicalConsensusBytes({ child: prepared })))
+        .toBe(hex(encodeCanonicalConsensusBytes({ child: value })));
+    }
+  });
+
+  test('a payload preparation marker cannot admit undefined into consensus bytes', () => {
+    for (const value of [{ missing: undefined }, [undefined], new Map([['missing', undefined]]), new Set([undefined])]) {
+      expect(() => encodeCanonicalConsensusBytes(value)).toThrow('type=undefined');
+      expect(() => encodeCanonicalConsensusBytes(canonicalizeBinaryPayload(value))).toThrow('type=undefined');
+    }
+  });
+
   test('Uint8Array encodes as the typed-array extension (c7/c8/c9, 0x74, index 1)', () => {
     expect(hex(packPreorderedBinaryPayload(new Uint8Array([1, 2, 3, 4, 5])))).toBe('03c70674010102030405');
     expect(hex(packPreorderedBinaryPayload(new Uint8Array(0)))).toBe('03c7017401');

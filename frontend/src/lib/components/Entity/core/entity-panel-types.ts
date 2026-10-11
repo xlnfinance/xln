@@ -9,7 +9,7 @@ type ReadMap<T> = T extends ReadonlyMap<infer Key, infer Value> ? ReadonlyMap<Ke
 type ReadMapFields<T> = { [Key in keyof T]: ReadMap<T[Key]> };
 
 /** A compact display page carries lifecycle metadata, never full dispute arguments. */
-export type AccountReadView = Omit<AccountDoc, 'state' | 'mempoolCount' | 'pendingWithdrawals' | 'shadow'> & {
+export type AccountReadView = Omit<AccountDoc, 'state' | 'mempoolCount' | 'pendingWithdrawals' | 'shadow' | 'lendingRisk'> & {
   state: ReadMapFields<AccountDoc['state']>;
   mempoolCount?: number;
   pendingWithdrawals: ReadMap<AccountDoc['pendingWithdrawals']>;

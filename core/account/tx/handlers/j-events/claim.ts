@@ -58,7 +58,7 @@ export function handleJEventClaim(
   // discards that one owner at the Account-machine boundary.
   account.state.leftPendingJClaims = transition.left;
   account.state.rightPendingJClaims = transition.right;
-  applyFinalizedAccountJEventsOnView(
+  const unadmitted = applyFinalizedAccountJEventsOnView(
     account,
     counterparty,
     transition.events,
@@ -67,10 +67,11 @@ export function handleJEventClaim(
   account.state.lastFinalizedJHeight = jHeight;
   jEventClaimLog.debug('claim.applied_to_draft', { jHeight });
 
-  const settledTokenId = Number(
-    transition.events.find((event) => event.type === 'AccountSettled')?.data?.tokenId ?? 1,
-  );
-  const delta = account.state.deltas.get(settledTokenId);
+  const settled = transition.events.filter(event => event.type === 'AccountSettled');
+  const first = settled[0];
+  if (!first) throw new Error('ACCOUNT_J_CLAIM_ACCOUNT_SETTLED_REQUIRED');
+  const last = settled.findLast(event => event.data.tokenId === first.data.tokenId);
+  if (!last) throw new Error('ACCOUNT_J_CLAIM_ACCOUNT_SETTLED_REQUIRED');
   // This function only describes candidate effects; Runtime dispatch happens
   // after Entity commit. Retaining the effect during validation lets the
   // receiver install one verified Account transition instead of replaying it
@@ -78,10 +79,10 @@ export function handleJEventClaim(
   const data = {
     entityId: myEntityId,
     accountId: counterparty,
-    tokenId: settledTokenId,
+    tokenId: first.data.tokenId,
     jHeight,
-    collateral: String(delta?.collateral ?? 0n),
-    ondelta: String(delta?.ondelta ?? 0n),
+    collateral: String(last.data.collateral),
+    ondelta: String(last.data.ondelta),
   };
   candidateEffects.push({
     kind: 'runtimeEvent',
@@ -99,5 +100,7 @@ export function handleJEventClaim(
       ...data,
     },
   });
-  return accountTxApplied(['✅ J-event claim finalized bilaterally']);
+  return accountTxApplied([unadmitted === 0
+    ? '✅ J-event claim finalized bilaterally'
+    : `✅ J-event claim finalized bilaterally; unadmitted asset rows excluded: ${unadmitted}`]);
 }

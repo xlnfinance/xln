@@ -43,7 +43,7 @@ xln_configure_start_policy() {
     return 1
   fi
   local guard_pids guard_status
-  if guard_pids="$(lsof -nP -a -sTCP:LISTEN -t -iTCP:"$XLN_LOCAL_TEST_LEASE_GUARD" 2>/dev/null)"; then
+  if guard_pids="$(/bin/sh "${BASH_SOURCE[0]%/*}/lsof.sh" -nP -a -sTCP:LISTEN -t -iTCP:"$XLN_LOCAL_TEST_LEASE_GUARD" 2>/dev/null)"; then
     guard_status=0
   else
     guard_status=$?
@@ -59,7 +59,7 @@ xln_configure_start_policy() {
 
 xln_assert_port_available() {
   local port="$1" prefix="${2:-xln-start}" pids status
-  if pids="$(lsof -nP -a -sTCP:LISTEN -t -iTCP:"$port" 2>/dev/null)"; then
+  if pids="$(/bin/sh "${BASH_SOURCE[0]%/*}/lsof.sh" -nP -a -sTCP:LISTEN -t -iTCP:"$port" 2>/dev/null)"; then
     status=0
   else
     status=$?
@@ -87,7 +87,7 @@ xln_kill_by_port() {
   local port="$1"
   local prefix="${2:-xln-start}"
   local pids
-  pids="$(lsof -ti TCP:${port} -sTCP:LISTEN 2>/dev/null || true)"
+  pids="$(/bin/sh "${BASH_SOURCE[0]%/*}/lsof.sh" -ti TCP:${port} -sTCP:LISTEN 2>/dev/null || true)"
   if [ -n "$pids" ]; then
     echo "[${prefix}] killing stale listeners on :${port} -> ${pids}"
     echo "$pids" | xargs kill -9 2>/dev/null || true

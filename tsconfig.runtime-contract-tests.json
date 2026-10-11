@@ -1,6 +1,11 @@
 {
   "extends": "./tsconfig.runtime.json",
   "files": [
-    "core/__tests__/entity/consensus/invariants/entity-consensus-state-root.test.ts"
+    "core/__tests__/fixtures/storage/lending-crash-child.ts",
+    "core/__tests__/storage/recovery/recovery-outbox-equivalence.test.ts",
+    "core/__tests__/storage/durability/lending-real-crash-recovery.test.ts",
+    "core/__tests__/entity/profile/profile-recertify-on-state-change.test.ts",
+    "core/__tests__/entity/consensus/invariants/entity-consensus-state-root.test.ts",
+    "jurisdictions/scripts/public-proof-smoke.ts"
   ]
 }

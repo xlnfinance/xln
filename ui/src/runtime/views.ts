@@ -4,6 +4,7 @@ import { useAdapterRead, type ReadState } from './hooks';
 import { useApp } from './store';
 import { peekXLN } from './xln-loader';
 import { usdOf } from './financial/prices';
+import { walletTokenTotals } from './financial/token-totals';
 import { accountNetBalance } from '@xln/frontend/lib/utils/ui/accountBalance';
 import { disputeView, settlementView, type AccountDoc, type DisputePhase, type SettlementPhase } from './financial/manage';
 
@@ -56,13 +57,13 @@ export type TokenTotals = {
 	onchain: bigint;
 	reserve: bigint;
 	pending: bigint;
-	/** Sum of positive account positions: what counterparties owe us. */
+	/** Positive Account positions plus unresolved on-chain debts owed to us. */
 	receivable: bigint;
 	/** The part of `receivable` backed by collateral on-chain. */
 	secured: bigint;
 	/** The part of `receivable` backed by nothing but the counterparty's signature. */
 	risk: bigint;
-	/** Sum of negative account positions: what we owe. Never positive. */
+	/** Account liabilities plus unresolved on-chain debts we owe. Never positive. */
 	owed: bigint;
 	net: bigint;
 	/** Instant send / receive room across every account holding this token. */
@@ -212,52 +213,9 @@ export function useWallet(entityId: string | null): WalletView {
 			.filter(row => row.amount > 0n || row.pending > 0n)
 			.sort((a, b) => a.tokenId - b.tokenId);
 
-		const tokenIds = new Set<number>([...onchain.map(row => row.tokenId), ...reserves.map(row => row.tokenId), ...accounts.flatMap(account => account.tokens.map(token => token.tokenId))]);
-		const totals: TokenTotals[] = Array.from(tokenIds)
-			.sort((a, b) => a - b)
-			.map(tokenId => {
-				const onchainAmount = onchain.filter(row => row.tokenId === tokenId).reduce((sum, row) => sum + row.amount, 0n);
-				const reserveAmount = reserves.filter(row => row.tokenId === tokenId).reduce((sum, row) => sum + row.amount, 0n);
-				const pending = reserves.filter(row => row.tokenId === tokenId).reduce((sum, row) => sum + row.pending, 0n);
-				let receivable = 0n;
-				let secured = 0n;
-				let risk = 0n;
-				let owed = 0n;
-				let sendCapacity = 0n;
-				let receiveCapacity = 0n;
-				for (const account of accounts) {
-					for (const token of account.tokens) {
-						if (token.tokenId !== tokenId) continue;
-						if (token.signed > 0n) {
-							receivable += token.signed;
-							// deriveDelta splits a positive position into the slice collateral covers and the rest.
-							const unsecured = token.derived.outPeerCredit < token.signed ? token.derived.outPeerCredit : token.signed;
-							risk += unsecured;
-							secured += token.signed - unsecured;
-						} else owed += token.signed;
-						if (!account.disputed) {
-							sendCapacity += token.derived.outCapacity;
-							receiveCapacity += token.derived.inCapacity;
-						}
-					}
-				}
-				const active = onchainAmount > 0n || reserveAmount > 0n || pending > 0n || receivable > 0n || owed < 0n || sendCapacity > 0n || receiveCapacity > 0n;
-				return {
-					tokenId,
-					onchain: onchainAmount,
-					reserve: reserveAmount,
-					pending,
-					receivable,
-					secured,
-					risk,
-					owed,
-					net: onchainAmount + reserveAmount + receivable + owed,
-					sendCapacity,
-					receiveCapacity,
-					active,
-					jurisdictions: jurisdiction ? [jurisdiction] : [],
-				};
-			});
+		const debtTotals = core ? core.debtTotals : { incoming: new Map<number, bigint>(), outgoing: new Map<number, bigint>() };
+		if (!debtTotals) throw new Error('WALLET_DEBT_TOTALS_MISSING');
+		const totals = walletTokenTotals({ onchain, reserves, accounts, jurisdiction, debtTotals });
 
 		const usd = {
 			onchain: 0,

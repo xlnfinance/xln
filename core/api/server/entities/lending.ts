@@ -44,13 +44,19 @@ export const handleLendingStateRequest = async (input: {
   if (userEntityId && !isEntityId32(userEntityId)) {
     return new Response(safeStringify({ success: false, error: 'Invalid userEntityId' }), { status: 400, headers });
   }
+  const requestId = url.searchParams.get('requestId');
+  if (requestId !== null && (!userEntityId || !/^borrow-[0-9a-f]{16}$/.test(requestId))) {
+    return new Response(safeStringify({ success: false, error: 'Invalid borrower request' }), { status: 400, headers });
+  }
   const summary = summarizeLendingState(replica.state, {
     ...(userEntityId ? { userEntityId } : {}),
     ...(tokenId !== undefined ? { tokenId } : {}),
+    ...(requestId !== null ? { requestId } : {}),
   });
   return new Response(safeStringify({
     success: true,
     hubEntityId,
+    requestId,
     ...bigintFieldsToStrings(summary) as Record<string, unknown>,
   }), { headers });
 };

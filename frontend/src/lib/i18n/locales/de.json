@@ -2,7 +2,7 @@
   "app": {
     "name": "xln",
     "tagline": "Das mathematische Endspiel in Skalierbarkeit, Sicherheit und Einfachheit",
-    "description": "Sofortige Off-Chain-Zahlungen mit On-Chain-Sicherheitsgarantien"
+    "description": "Bilaterale Zahlungen mit signierten Nachweisen und besicherten Forderungen"
   },
   "landing": {
     "hero": {
@@ -18,7 +18,7 @@
       "cost": "Null Gebühren",
       "costDesc": "Kein Gas, keine Mining-Gebühren",
       "security": "Sicher",
-      "securityDesc": "On-Chain-Abwicklungsgarantien"
+      "securityDesc": "Nur Sicherheiten sichern die Rückzahlung; Kreditlimits begrenzen das unbesicherte Risiko"
     },
     "invite": {
       "title": "Einladungscode Eingeben",

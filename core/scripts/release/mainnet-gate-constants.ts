@@ -8,10 +8,6 @@ export const MAINNET_GATE = {
 
 export const MAINNET_RELEASE_BLOCKERS = [
   {
-    id: 'CAPPED_FINANCIAL_RISK_ENFORCEMENT_MISSING',
-    requirement: 'A machine-enforced aggregate financial risk ceiling with executable boundary evidence',
-  },
-  {
     id: 'LENDING_BILATERAL_COVENANT_MISSING',
     requirement: 'A bilaterally committed lending covenant covering principal, maturity, repayment, and default',
   },

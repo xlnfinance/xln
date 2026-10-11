@@ -51,8 +51,8 @@ export const content = {
       title: "Key Properties",
       items: [
         "Infinite scalability: O(1) per-hop updates vs O(n) broadcast",
-        "No inbound liquidity problem: credit + collateral hybrid",
-        "Bounded risk: counterparty loss capped at collateral + credit",
+        "Inbound capacity requires collateral or explicitly accepted credit",
+        "Only collateral secures repayment; credit limits cap unsecured risk",
         "Strong privacy: onion-routing (payment sender/receiver anonymous to routing hubs, like Tor for money)",
         "<strong>Local state: no sequencers, no data availability dependencies</strong>"
       ]
@@ -158,8 +158,8 @@ export const content = {
       title: "Ключевые свойства",
       items: [
         "Бесконечная масштабируемость: O(1) обновлений на хоп vs O(n) broadcast",
-        "Нет проблемы входящей ликвидности: гибрид кредита + залога",
-        "Ограниченный риск: потери контрагента ограничены залогом + кредитом",
+        "Входящая ёмкость требует залога или явно принятого кредитного риска",
+        "Возврат обеспечен только залогом; кредитный лимит ограничивает необеспеченный риск",
         "Сильная приватность: onion-routing (отправитель/получатель анонимны для хабов, как Tor для денег)",
         "<strong>Локальное состояние: нет секвенсеров, нет зависимостей от data availability</strong>"
       ]
@@ -265,8 +265,8 @@ export const content = {
       title: "核心特性",
       items: [
         "无限可扩展性：每跳O(1)更新 vs O(n)广播",
-        "无入站流动性问题：信用 + 抵押混合",
-        "有限风险：对手方损失上限为抵押 + 信用",
+        "收款容量需要抵押品或明确接受的信用风险",
+        "仅抵押品保障偿付；信用额度限制无担保风险",
         "强隐私：洋葱路由（支付发送方/接收方对路由枢纽匿名，如同货币版Tor）",
         "<strong>本地状态：无排序器，无数据可用性依赖</strong>"
       ]
@@ -372,8 +372,8 @@ export const content = {
       title: "Propiedades Clave",
       items: [
         "Escalabilidad infinita: actualizaciones O(1) por salto vs broadcast O(n)",
-        "Sin problema de liquidez entrante: híbrido crédito + colateral",
-        "Riesgo acotado: pérdida de contraparte limitada a colateral + crédito",
+        "La capacidad de recepción requiere colateral o crédito aceptado explícitamente",
+        "Solo el colateral respalda el pago; el límite de crédito acota el riesgo no garantizado",
         "Privacidad fuerte: enrutamiento cebolla (emisor/receptor anónimos para hubs de enrutamiento, como Tor para dinero)",
         "<strong>Estado local: sin secuenciadores, sin dependencias de disponibilidad de datos</strong>"
       ]
@@ -479,8 +479,8 @@ export const content = {
       title: "主要な特性",
       items: [
         "無限のスケーラビリティ：ホップごとO(1)更新 vs O(n)ブロードキャスト",
-        "インバウンド流動性問題なし：クレジット + 担保ハイブリッド",
-        "限定されたリスク：カウンターパーティ損失は担保 + クレジットが上限",
+        "受取可能額には担保または明示的に受け入れた信用リスクが必要",
+        "返済を担保するのは担保資産のみ。信用枠は無担保リスクの上限",
         "強力なプライバシー：オニオンルーティング（支払い送信者/受信者はルーティングハブに対して匿名、マネー版Tor）",
         "<strong>ローカルステート：シーケンサーなし、データ可用性依存なし</strong>"
       ]
@@ -586,8 +586,8 @@ export const content = {
       title: "핵심 속성",
       items: [
         "무한한 확장성: 홉당 O(1) 업데이트 vs O(n) 브로드캐스트",
-        "인바운드 유동성 문제 없음: 신용 + 담보 하이브리드",
-        "제한된 위험: 상대방 손실이 담보 + 신용으로 상한",
+        "수취 가능액에는 담보 또는 명시적으로 수락한 신용 위험이 필요합니다",
+        "상환을 보장하는 것은 담보뿐이며, 신용 한도는 무담보 위험의 상한입니다",
         "강력한 프라이버시: 어니언 라우팅 (결제 발신자/수신자가 라우팅 허브에 익명, 돈을 위한 Tor처럼)",
         "<strong>로컬 상태: 시퀀서 없음, 데이터 가용성 의존성 없음</strong>"
       ]
@@ -693,8 +693,8 @@ export const content = {
       title: "Propriedades Chave",
       items: [
         "Escalabilidade infinita: atualizações O(1) por hop vs broadcast O(n)",
-        "Sem problema de liquidez de entrada: híbrido crédito + colateral",
-        "Risco limitado: perda de contraparte limitada a colateral + crédito",
+        "A capacidade de recebimento exige colateral ou crédito explicitamente aceito",
+        "Só o colateral assegura o pagamento; o limite de crédito limita o risco sem garantia",
         "Privacidade forte: roteamento cebola (emissor/receptor anônimos para hubs de roteamento, como Tor para dinheiro)",
         "<strong>Estado local: sem sequenciadores, sem dependências de disponibilidade de dados</strong>"
       ]
@@ -800,8 +800,8 @@ export const content = {
       title: "Schlüsseleigenschaften",
       items: [
         "Unendliche Skalierbarkeit: O(1) Updates pro Hop vs O(n) Broadcast",
-        "Kein Problem mit eingehender Liquidität: Kredit + Sicherheiten Hybrid",
-        "Begrenztes Risiko: Gegenpartei-Verlust begrenzt auf Sicherheiten + Kredit",
+        "Empfangskapazität erfordert Sicherheiten oder ausdrücklich akzeptierten Kredit",
+        "Nur Sicherheiten sichern die Rückzahlung; Kreditlimits begrenzen das unbesicherte Risiko",
         "Starke Privatsphäre: Zwiebel-Routing (Zahlungssender/-empfänger anonym für Routing-Hubs, wie Tor für Geld)",
         "<strong>Lokaler Zustand: keine Sequencer, keine Datenverfügbarkeitsabhängigkeiten</strong>"
       ]
@@ -907,8 +907,8 @@ export const content = {
       title: "Propriétés Clés",
       items: [
         "Évolutivité infinie : mises à jour O(1) par saut vs broadcast O(n)",
-        "Pas de problème de liquidité entrante : hybride crédit + collatéral",
-        "Risque limité : perte de contrepartie plafonnée au collatéral + crédit",
+        "La capacité de réception exige du collatéral ou un crédit explicitement accepté",
+        "Seul le collatéral garantit le remboursement ; la limite de crédit borne le risque non garanti",
         "Confidentialité forte : routage en oignon (expéditeur/destinataire anonymes pour les hubs de routage, comme Tor pour l'argent)",
         "<strong>État local : pas de séquenceurs, pas de dépendances de disponibilité des données</strong>"
       ]
@@ -1014,8 +1014,8 @@ export const content = {
       title: "Temel Özellikler",
       items: [
         "Sonsuz ölçeklenebilirlik: atlama başına O(1) güncellemeler vs O(n) yayın",
-        "Gelen likidite sorunu yok: kredi + teminat hibriti",
-        "Sınırlı risk: karşı taraf kaybı teminat + kredi ile sınırlı",
+        "Gelen ödeme kapasitesi teminat veya açıkça kabul edilen kredi gerektirir",
+        "Yalnızca teminat geri ödemeyi güvenceye alır; kredi limiti teminatsız riski sınırlar",
         "Güçlü gizlilik: soğan yönlendirme (ödeme gönderen/alıcı yönlendirme hub'larına anonim, para için Tor gibi)",
         "<strong>Yerel durum: sıralayıcı yok, veri kullanılabilirliği bağımlılığı yok</strong>"
       ]

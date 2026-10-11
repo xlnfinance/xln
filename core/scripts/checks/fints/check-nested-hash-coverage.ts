@@ -15,6 +15,7 @@ import {
   HASHABLE_RUNTIME_PROOF_BODY_FIELDS,
   HASHABLE_RUNTIME_PULL_FIELDS,
   HASHABLE_RUNTIME_SWAP_FIELDS,
+  HASHABLE_RUNTIME_TERM_LOAN_FIELDS,
 } from '../../../types/hash-coverage/evidence-nested';
 
 const ROOT = path.resolve(import.meta.dir, '../../../..');
@@ -209,6 +210,7 @@ compareOrder(
   HASHABLE_RUNTIME_PULL_FIELDS,
   abiComponentNames(BATCH_ABI.components[2]!.components),
 );
+compareOrder('RuntimeTermLoan.abi', HASHABLE_RUNTIME_TERM_LOAN_FIELDS, abiComponentNames(BATCH_ABI.components[3]!.components));
 
 if (errors.length > 0) {
   console.error('NESTED_HASH_COVERAGE_FAILED');

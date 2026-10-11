@@ -13,7 +13,7 @@ export const ACCOUNT_TX_LENDING_SCHEMAS = {
   lending_borrow_request: {
     required: {
       requestId: 'string', hubEntityId: 'string', borrowerEntityId: 'string',
-      tokenId: 'integer', amount: 'bigint', termId: 'string', maxInterestBps: 'integer',
+      tokenId: 'integer', amount: 'bigint', termId: 'string', maxInterestBps: 'integer', maxLateMs: 'integer', expiresAt: 'integer',
     },
     literals: { termId: TERM_IDS },
   },
@@ -25,9 +25,11 @@ export const ACCOUNT_TX_LENDING_SCHEMAS = {
   },
   lending_disburse: {
     required: {
-      loanId: 'string', hubEntityId: 'string',
+      loanId: 'string', hubEntityId: 'string', requestId: 'string', maxInterestBps: 'integer', maxLateMs: 'integer', lateMs: 'integer', expiresAt: 'integer',
       borrowerEntityId: 'string', tokenId: 'integer', amount: 'bigint',
+      termId: 'string', interestBps: 'integer',
     },
+    literals: { termId: TERM_IDS },
   },
   lending_close_request: {
     required: { positionId: 'string', hubEntityId: 'string', lenderEntityId: 'string' },

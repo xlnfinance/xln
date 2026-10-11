@@ -1,4 +1,4 @@
-import { getHubOpeningCredit, getOpenAccountRebalancePolicyData, hydrateJurisdictionPolicyDefaults } from '@xln/frontend/lib/utils/onboarding/onboardingPreferences';
+import { getOpenAccountRebalancePolicyData, hydrateJurisdictionPolicyDefaults } from '@xln/frontend/lib/utils/onboarding/onboardingPreferences';
 import { sendRuntimeInput } from './commands';
 import { getXLN } from './xln-loader';
 import type { RuntimeRecoveryCandidate } from './restore';
@@ -349,10 +349,11 @@ export async function bootHostedVault(seed: string, options: HostedVaultOptions)
 				await sendEntity(entityId, signerId, [
 					{
 						type: 'openAccount',
-						// Use the same hub credit and collateral policy as the reference wallet.
+						// Automatic discovery opens the Account, not an unsecured exposure.
+						// Only the user's receive/credit controls may authorize that risk.
 						data: {
 							targetEntityId: hub.entityId,
-							creditAmount: getHubOpeningCredit(decimals),
+							creditAmount: 0n,
 							...(rebalancePolicy ? { rebalancePolicy } : {}),
 							tokenId: USDC,
 							disputeConfig,

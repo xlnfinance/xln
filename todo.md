@@ -6,30 +6,60 @@ product backlog; long-term work belongs in `docs/roadmap.md`.
 September 30 implementation and verification: [J/E/A continuation](docs/jea-continuation.md).
 The 138-target E2E snapshot and green full check are dated evidence, not mainnet acceptance.
 
-## Current execution order — 2026-10-10
+## Current execution order — 2026-10-11
 
-Latest owner decisions override the historical launch snapshots below: Ethereum,
-native TRON and four-node XLNC; 10-fold lower XLNC gas budget; equal React/Svelte
-priority; lending and multisig companies with existing EP shares included.
-The owner signs mainnet transactions and approves the exact production build.
+Owner release scope (`AGENTS.md` RELEASE SCOPE) overrides the history below: TypeScript is
+the only engine (`rscore/` frozen at tag `rscore-freeze-f1464e84e`), React `ui/` is the only
+wallet, Ethereum same-J goes first (Sepolia, then a mainnet canary). TRON, XLNC, Base,
+cross-J as a headline, companies/IPO, iOS/Electron/extension and
+custody are deferred. The owner signs mainnet transactions and approves the exact
+production build.
 
-1. Preserve the shared working candidate in a WIP checkpoint and execute current
-   source checks. Missing full-suite evidence stays explicit.
-2. Verify the owner-selected 5M dispute admission policy on the release candidate.
-   [Measured proof admission](docs/xlnc-soft-mainnet.md#proof-admission-budget--owner-decision-2026-10-10)
-   adds an aggregate gas gate beyond the independent dimension limits. Keep old signed
-   obligations intact and the selected 6M network limit unchanged. Close the
-   authoritative J-claim / onchain-growth exception before claiming a universal
-   bounded-exit guarantee; current admission evidence covers discretionary work.
-3. Finish actual tutorial journeys on both UIs: payments, swaps/cross-swaps,
-   lending/withdrawal/borrow/repay, disputes/recovery and companies. Existing React
-   tutorial run is 8/8; newly changed Svelte financial regressions remain pending.
-4. Freeze the candidate and satisfy the existing replay/native-J/recovery/load and
-   release gates. Prepare the xln.finance deployment and rollback package tied to
-   exact hashes; only then request the owner's build approval and signatures.
+Latest October 11 owner update: create/manage the Sepolia signer, obtain test ETH
+and deploy current contracts autonomously. Mainnet participation is open; no
+invite restriction or arbitrary protocol funding ceiling. Lending is in scope:
+savers lend to a bank Entity for interest, borrowers borrow from it, and both
+claims live in bilateral Accounts. Only collateral secures recovery; a borrower
+default never erases the bank's liability to its savers. Prove the signed lending
+and maturity/default paths before calling the product release-ready.
 
-Working method: [improvement-loop.md](docs/improvement-loop.md). No additional
-agent framework, duplicated checklist or new financial implementation is needed.
+Current lending boundary: the bank publishes rates and a bounded late-interest
+window; a named, expiring facility and exact borrower authorization gate funding.
+Only collateral secures recovery. The full signed term-plus-late coupon reserves
+accepted Account risk. Repayment debits the exact Account-clock quote within the
+borrower's maximum; borrower default never erases the saver liability.
+
+Current evidence: 554 related tests / 448,400 assertions, three real-clock local
+funding/exit proofs, two watchtower tests, three rebuilt browser journeys,
+145 exact fixed WAL frames before/after through TS W1/W4, 49 Hardhat cases and
+16 gas vectors. Old native claims missing explicit late terms reject;
+use a fresh deployment domain, never retrofit old signatures. The full `bun run check` passes for the coherent local
+source/tests/artifacts checkpoint. Four real SIGKILL boundaries preserve
+loan maturity/default, saver close and exact repayment, including a deferred local
+ACK across two crashes. This uses a controlled clock; funded public Sepolia
+real-clock exits, valid live load and immutable release gates remain required.
+The current 1,000-user run settles 20,000 payments with zero pending ACKs but
+drains in 26,077ms against the unchanged 25,000ms limit, with production diagnostic
+counters disabled. Redundant signed gossip, old-state proof calculation and parent
+dispute-signature warming are removed; resulting proofs and worker verification
+stay mandatory. First funding still refreshes routing. React refreshes the bank's
+state independently of local Account ACKs. Load and public deployment remain red.
+See `docs/night-work-plan.md` for the current boundary.
+
+30-day plan:
+
+1. R2C guard with runtime parity — owned by the parallel session.
+2. Honest CI green on `main`, 10 consecutive runs.
+3. TS = Solidity entitlement differential harness.
+4. Sepolia, current bytecode, real clock — three disputes: own collateral; counterparty
+   owes beyond collateral → exact payout plus debt row; stale dispute against an offline
+   wallet → watchtower counters.
+5. MML v0 formula in `docs/intro.md`: unaffiliated obligations only; a hub-routed payment
+   counts once, on the commercial edge.
+6. Owner: 10 conversations with OTC/MM/payout firms → at least 2 written intents.
+
+Working method: [improvement-loop.md](docs/improvement-loop.md). XLN-1000 steers the work;
+binary evidence coverage (passed / frozen required checks) decides release.
 
 ## Adopted launch design — 2026-09-05
 

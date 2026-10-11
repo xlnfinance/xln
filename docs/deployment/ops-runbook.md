@@ -120,8 +120,10 @@ bun run gate:release
 bun run soak:release
 ```
 
-For the capped public-testnet launch envelope with all user-facing flows,
-landing, one tower, three hubs, and a USD 10,000 aggregate risk cap:
+For the public-testnet launch envelope in the current `AGENTS.md` scope,
+with one tower and three hubs, use the existing operator gate below. The owner
+removed the global monetary cap on 2026-10-11; these historical command names
+do not restrict participation or imply guaranteed unsecured recovery.
 
 ```bash
 export XLN_CAPPED_TESTNET_TOWER_URLS=https://tower.example.com

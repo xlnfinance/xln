@@ -380,6 +380,14 @@ is committed before the outbox entry may be deleted. Recovery restores every
 non-terminal entry and resumes delivery; duplicate delivery is acceptable,
 loss of a committed output is forbidden.
 
+The same ordered outbox includes local recipients. Enqueuing a local ACK or
+proposal is volatile admission, not delivery: a frame cap can defer that input
+behind unrelated work. Retire a local row only when authenticated recipient
+inputs containing its exact payload have been applied and the consuming Runtime
+frame commits. Local transaction lanes have one transaction per outbox row so
+partial admission can retire each row independently. Keep deferred rows in their
+original order; recovery must not need a second queue or a receipt sidecar.
+
 Repeating a content-addressed payload with the same hash and the same bytes is a
 no-op. Different bytes under the same hash are a fatal collision.
 

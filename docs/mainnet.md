@@ -16,10 +16,11 @@ For the current capped public-testnet / pre-mainnet launch loop, use the strict
 acceptance prompt and evidence loop in
 [mainnet-acceptance-gate.md](mainnet-acceptance-gate.md).
 
-## Current Position
+## Historical position
 
 **Date:** 2026-07-09
-**State:** current `main` is not mainnet-ready.
+**State recorded then:** not mainnet-ready. Current scope and blockers are in
+[todo.md](../todo.md); the following results apply only to this dated snapshot.
 
 The current branch materially raised the floor: watchtower recovery is live,
 encrypted, scheduled, covered by browser E2E, direct same-chain/cross-j swaps

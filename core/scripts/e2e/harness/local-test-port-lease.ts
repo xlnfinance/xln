@@ -1,5 +1,6 @@
 import { spawnSync } from 'node:child_process';
 import { realpathSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 
 /**
  * Machine-wide local test stack leases.
@@ -149,23 +150,18 @@ export const parseLocalTestListeningPortOutput = (output: string): Map<number, n
     .map(([port, pids]) => [port, Array.from(pids).sort((left, right) => left - right)]));
 };
 
+const scanListeningPorts = (selectors: readonly string[]): ReturnType<typeof spawnSync> =>
+  spawnSync('/bin/sh', [
+    fileURLToPath(new URL('../../../../scripts/lib/lsof.sh', import.meta.url)),
+    '-nP', '-a', '-sTCP:LISTEN', '-FnP', ...selectors,
+  ], { stdio: ['ignore', 'pipe', 'ignore'], encoding: 'utf8', timeout: 5_000, killSignal: 'SIGKILL' });
+
 export const readLocalTestListeningPortPids = (ports: readonly number[]): Map<number, number[]> => {
   const normalizedPorts = Array.from(new Set(ports))
     .filter(port => Number.isSafeInteger(port) && port > 0 && port <= 65_535)
     .sort((left, right) => left - right);
   if (normalizedPorts.length === 0) return new Map();
-  const result = spawnSync('lsof', [
-    '-nP',
-    '-a',
-    '-sTCP:LISTEN',
-    '-FnP',
-    ...normalizedPorts.map(port => `-iTCP:${port}`),
-  ], {
-    stdio: ['ignore', 'pipe', 'ignore'],
-    encoding: 'utf8',
-    timeout: 5_000,
-    killSignal: 'SIGKILL',
-  });
+  const result = scanListeningPorts(normalizedPorts.map(port => `-iTCP:${port}`));
   const output = String(result.stdout || '').trim();
   // `lsof` exits 1 whenever *any* `-i` selector matched nothing, even when the
   // other selectors produced rows. A partially occupied lane is the normal case
@@ -191,12 +187,7 @@ export const assertLocalTestPortsFree = (ports: readonly number[]): void => {
 };
 
 const readListeningPortsInRange = (first: number, last: number): Map<number, number[]> => {
-  const result = spawnSync('lsof', ['-nP', '-iTCP', '-sTCP:LISTEN', '-FnP'], {
-    stdio: ['ignore', 'pipe', 'ignore'],
-    encoding: 'utf8',
-    timeout: 5_000,
-    killSignal: 'SIGKILL',
-  });
+  const result = scanListeningPorts(['-iTCP']);
   if (result.error || (result.status !== 0 && result.status !== 1)) {
     throw new Error(`HLT_LANE_PORT_SCAN_FAILED:${result.error?.message || String(result.status)}`);
   }

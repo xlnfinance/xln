@@ -8,7 +8,7 @@ import { amountInputText, formatMoney, getTokenMeta } from '../runtime/format';
 import { counterpartyFeePolicy } from '../runtime/financial/manage';
 import { ReceiveCapacity } from './ReceiveCapacity';
 
-/** Only the lender receives a close payout. Borrowing itself grants outbound credit. */
+/** The bank pays the saver claim through the same bilateral Account. */
 export function LendingClose({
 	pool,
 	wallet,
@@ -24,7 +24,7 @@ export function LendingClose({
 	const account = wallet.accounts.find(entry => entry.counterpartyId === pool.hubEntityId.toLowerCase());
 	if (
 		pool.status !== 'open' ||
-		pool.borrowedAmount !== 0n ||
+		(pool.borrowedAmount !== 0n && !pool.matured) ||
 		!account ||
 		pool.lenderEntityId.toLowerCase() !== wallet.entityId
 	)
@@ -34,7 +34,7 @@ export function LendingClose({
 	const tariff = counterpartyFeePolicy(account.doc, account.isLeft, pool.tokenId);
 	const close = async () => {
 		if (!closeAvailable) { toast('Lending is unavailable in this release', 'danger'); return; }
-		if (busy || account.disputed || available < pool.availableAmount || !wallet.signerId) return;
+		if (busy || account.disputed || available < pool.closeAmount || !wallet.signerId) return;
 		setBusy(true);
 		try {
 			await sendEntityTxs(wallet.entityId, wallet.signerId, [
@@ -51,7 +51,7 @@ export function LendingClose({
 	return (
 		<div className="stack" style={{ marginBottom: 12 }}>
 			{!closeAvailable ? <p className="note">Lending is unavailable in this release. This position remains unchanged.</p> : null}
-			{pool.availableAmount > 0n ? (
+			{pool.closeAmount > 0n ? (
 				<ReceiveCapacity
 					account={account.doc.state}
 					ownerEntityId={wallet.entityId}
@@ -60,7 +60,7 @@ export function LendingClose({
 					accountLabel={account.label}
 					jurisdiction={wallet.jurisdiction}
 					tokenId={pool.tokenId}
-					requiredAmount={pool.availableAmount}
+					requiredAmount={pool.closeAmount}
 					disabled={!closeAvailable || busy || account.disputed}
 				/>
 			) : null}
@@ -72,11 +72,11 @@ export function LendingClose({
 			<button
 				type="button"
 				className="btn ghost"
-				disabled={!closeAvailable || busy || account.disputed || available < pool.availableAmount || !wallet.signerId}
+				disabled={!closeAvailable || busy || account.disputed || available < pool.closeAmount || !wallet.signerId}
 				onClick={() => void close()}
 				data-testid="lending-close"
 			>
-				{busy ? 'Closing…' : `Close & receive ${formatMoney(pool.availableAmount, meta.decimals)} ${meta.symbol}`}
+				{busy ? 'Closing…' : `Close & receive ${formatMoney(pool.closeAmount, meta.decimals)} ${meta.symbol}`}
 			</button>
 		</div>
 	);

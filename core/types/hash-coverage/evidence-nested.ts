@@ -5,6 +5,7 @@ import type {
   RuntimeProofBody,
   RuntimePull,
   RuntimeSwap,
+  RuntimeTermLoan,
   RuntimeTransformerClause,
 } from '../../protocol/dispute/proof-body';
 import type { AllKeys, AssertNever, FieldGap } from './coverage';
@@ -52,7 +53,12 @@ export const HASHABLE_RUNTIME_BATCH_FIELDS = [
   'payments',
   'swaps',
   'pulls',
+  'loans',
 ] as const satisfies readonly (keyof RuntimeBatch)[];
+
+export const HASHABLE_RUNTIME_TERM_LOAN_FIELDS = [
+  'deltaIndex', 'creditorIsLeft', 'principal', 'interest', 'openedAt', 'termMs', 'lateMs',
+] as const satisfies readonly (keyof RuntimeTermLoan)[];
 
 const HASHABLE_RUNTIME_TRANSFORMER_CLAUSE_FIELDS = [
   'transformerAddress',
@@ -66,6 +72,7 @@ export type EvidenceNestedFieldCoverage = [
   AssertNever<FieldGap<RuntimePayment, typeof HASHABLE_RUNTIME_PAYMENT_FIELDS>>,
   AssertNever<FieldGap<RuntimeSwap, typeof HASHABLE_RUNTIME_SWAP_FIELDS>>,
   AssertNever<FieldGap<RuntimePull, typeof HASHABLE_RUNTIME_PULL_FIELDS>>,
+  AssertNever<FieldGap<RuntimeTermLoan, typeof HASHABLE_RUNTIME_TERM_LOAN_FIELDS>>,
   AssertNever<FieldGap<RuntimeAllowance, typeof HASHABLE_RUNTIME_ALLOWANCE_FIELDS>>,
   AssertNever<FieldGap<RuntimeBatch, typeof HASHABLE_RUNTIME_BATCH_FIELDS>>,
   AssertNever<FieldGap<RuntimeTransformerClause, typeof HASHABLE_RUNTIME_TRANSFORMER_CLAUSE_FIELDS>>,

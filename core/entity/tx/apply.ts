@@ -69,6 +69,7 @@ import {
   handleLendingOfferEntityTx,
   handleLendingRepayEntityTx,
 } from './handlers/payments/lending';
+import { handleLendingPolicy } from './handlers/payments/lending-policy';
 import {
   handleMaterializeCrossJurisdictionSwapEntityTx,
   handlePrepareCrossJurisdictionSwapEntityTx,
@@ -502,6 +503,8 @@ const entityTxDispatchers = {
     options?.mutableFrameState,
   ),
   lendingOffer: (_env, state, tx, options) => handleLendingOfferEntityTx(state, tx as Extract<EntityTx, { type: 'lendingOffer' }>, options?.mutableFrameState),
+  lendingSetTerms: (_env, state, tx, options) => handleLendingPolicy(state, tx as Extract<EntityTx, { type: 'lendingSetTerms' }>, options?.mutableFrameState),
+  lendingApprove: (_env, state, tx, options) => handleLendingPolicy(state, tx as Extract<EntityTx, { type: 'lendingApprove' }>, options?.mutableFrameState),
   lendingBorrow: (_env, state, tx, options) => handleLendingBorrowEntityTx(state, tx as Extract<EntityTx, { type: 'lendingBorrow' }>, options?.mutableFrameState),
   lendingRepay: (_env, state, tx, options) => handleLendingRepayEntityTx(state, tx as Extract<EntityTx, { type: 'lendingRepay' }>, options?.mutableFrameState),
   lendingClosePosition: (_env, state, tx, options) => handleLendingClosePositionEntityTx(state, tx as Extract<EntityTx, { type: 'lendingClosePosition' }>, options?.mutableFrameState),

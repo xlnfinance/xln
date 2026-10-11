@@ -198,7 +198,7 @@ describe('HashLadderRegistry (cross-j pull settlement authority)', function () {
     const encodedPullBatch = await transformer.encodeBatch({
       payment: [],
       swap: [],
-      pull: [
+      loans: [], pull: [
         {
           deltaIndex: 0,
           amount: encodeSignedAmount(pullAmount),
@@ -849,7 +849,7 @@ describe('HashLadderRegistry (cross-j pull settlement authority)', function () {
     const encoded = await transformer.encodeBatch({
       payment: [],
       swap: [],
-      pull: [
+      loans: [], pull: [
         { deltaIndex: 0, amount: encodeSignedAmount(-MAX_FILL_RATIO), claimedRatio: 0, fullHash: proofA.fullHash, partialRoot: proofA.partialRoot, targetRole: false },
         { deltaIndex: 0, amount: encodeSignedAmount(-MAX_FILL_RATIO), claimedRatio: 0, fullHash: proofB.fullHash, partialRoot: proofB.partialRoot, targetRole: false },
       ],

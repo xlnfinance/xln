@@ -46,12 +46,23 @@ interface RuntimeEncodedTransformerClause {
 }
 
 /**
- * Runtime-friendly Batch (HTLCs + Swaps)
+ * Runtime-friendly stock programs (HTLCs, swaps, pulls and savings)
  */
 export interface RuntimeBatch {
   payments: RuntimePayment[];
   swaps: RuntimeSwap[];
   pulls: RuntimePull[];
+  loans: RuntimeTermLoan[];
+}
+
+export interface RuntimeTermLoan {
+  deltaIndex: number;
+  creditorIsLeft: boolean;
+  principal: bigint;
+  interest: bigint;
+  openedAt: number;
+  termMs: number;
+  lateMs: number;
 }
 
 /**
@@ -185,6 +196,19 @@ export const BATCH_ABI = {
         { name: 'fullHash', type: 'bytes32' },
         { name: 'partialRoot', type: 'bytes32' },
         { name: 'targetRole', type: 'bool' },
+      ],
+    },
+    {
+      name: 'loans',
+      type: 'tuple[]',
+      components: [
+        { name: 'deltaIndex', type: 'uint256' },
+        { name: 'creditorIsLeft', type: 'bool' },
+        { name: 'principal', type: 'uint256' },
+        { name: 'interest', type: 'uint256' },
+        { name: 'openedAt', type: 'uint256' },
+        { name: 'termMs', type: 'uint256' },
+        { name: 'lateMs', type: 'uint256' },
       ],
     },
   ],

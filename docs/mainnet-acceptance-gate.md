@@ -3,10 +3,12 @@
 **[Index](readme.md)** | **[Mainnet Bar](mainnet.md)** | **[Ops Runbook](deployment/ops-runbook.md)**
 
 This document is the strict release gate for the next public xln launch loop.
-Based on the current launch answers, this is not an uncapped mainnet gate. It
-is a capped public-testnet / pre-mainnet gate with every product surface turned
-on, a public landing page, one official tower, three hubs, and a maximum
-aggregate user-risk budget of USD 10,000 equivalent.
+Owner update 2026-10-11: participation is open, including the owner, friends and
+other users spending their own funds. There is no global protocol funding ceiling.
+The current scope is TypeScript, React and Ethereum same-J, including lending.
+Sepolia evidence precedes mainnet. Financial, signer-authority and recovery gates
+remain mandatory. Existing `capped-testnet` command names identify the historical
+operator gate; they no longer promise or require a monetary cap.
 
 Owner update, 2026-10-10: external audit sign-off is optional. Codex performs
 the engineering review without claiming independent external assurance.
@@ -16,12 +18,12 @@ real-funds bar in [mainnet.md](mainnet.md).
 
 ## Decision Snapshot
 
-Date: 2026-06-16
+Date: 2026-10-11
 
 | Item | Decision |
 |------|----------|
-| Launch scope | Everything currently user-facing, plus landing |
-| Value cap | Public testnet / capped beta, max USD 10,000 equivalent at risk |
+| Launch scope | TypeScript, React, Ethereum same-J and lending |
+| Value cap | None at protocol level; each creditor accepts its own bilateral risk |
 | Soak duration | 1 hour uninterrupted for capped testnet |
 | External audit | Optional for testnet and mainnet, owner decision 2026-10-10; engineering/security gates remain required |
 | Topology | One official tower and three hubs |
@@ -86,7 +88,7 @@ Concrete examples:
   decrypts candidates locally, presents the highest runtime-height versions,
   allows local encrypted backup upload, and creates a new wallet only after the
   user explicitly chooses that path.
-- The USD 10,000 cap still means money-moving code. Fail closed. No silent
+- Open participation still means money-moving code. Fail closed. No silent
   fallback, no mocks in evidence, no swallowed errors.
 
 ## Strict Acceptance Prompt
@@ -96,9 +98,10 @@ Use this prompt for every release-candidate review:
 ```text
 You are the xln capped-testnet release gatekeeper.
 
-Your job is to decide whether this exact commit may launch with all current
-features plus landing, one official tower, three hubs, and a maximum aggregate
-user-risk budget of USD 10,000 equivalent.
+Your job is to decide whether this exact commit may launch within the current
+AGENTS.md scope, with one official tower, three hubs and open participation.
+There is no global monetary ceiling. Credit limits bound accepted unsecured risk;
+only collateral secures recovery.
 
 Output only one of:
 - CAPPED_TESTNET_PASS
@@ -161,7 +164,7 @@ Hard FAIL if any of these are true:
   operator-only ritual.
 - Health does not prove exactly the intended one-tower / three-hub topology.
 - Secrets, RPC endpoints, gas funding, or rollback are implicit.
-- The USD 10,000 cap is not enforceable enough for the launch plan.
+- Bilateral exposure limits, financial correctness or recovery lack executable evidence.
 
 Report format:
 - Verdict: CAPPED_TESTNET_PASS or CAPPED_TESTNET_FAIL

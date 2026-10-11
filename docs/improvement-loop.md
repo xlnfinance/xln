@@ -1,18 +1,27 @@
 # XLN release execution loop
 
-Owner direction, 2026-10-10: autonomously prepare a usable mainnet candidate,
-reduce unnecessary code, preserve all requested wallet journeys, and checkpoint
-current work. This replaces the older October 1 scope that excluded lending and
-preferred Svelte. React and Svelte now have equal priority.
+Owner direction, 2026-10-11: autonomously prepare a usable mainnet candidate,
+reduce unnecessary code and follow the release scope in [AGENTS.md](../AGENTS.md):
+TypeScript, React and Ethereum same-J, first Sepolia and then a mainnet canary.
+Rust is frozen; Svelte changes are limited to landing/static copy and build health.
+Lending is included by the owner's later October 11 instruction. Cross-J, other
+launch chains, companies, native clients and custody are deferred. This supersedes
+the October 10 multi-chain, two-wallet plan.
+
+Owner request, 2026-10-11: diagnose the development trajectory, improve the
+repository and make this loop learn from results. The [crisis review](crisis-review-20261011.md)
+records the evidence and priorities. Its governing principle is **a financial
+promise is implemented only when its failure path is executable**. Keep the
+current release scope; sequence its work through complete user journeys.
 
 ## Outcome and authority
 
 The deliverable is a reproducible candidate with executable financial journeys,
 recovery evidence and a concrete deployment/rollback package for xln.finance.
-Launch jurisdictions are Ethereum, native TRON and four-validator XLNC with the
-owner-selected 10-fold gas reduction. Stacks use the existing Depository and
-EntityProvider; companies use existing multisig Entities and onchain shares.
-See [XLNC decisions](xlnc-soft-mainnet.md) and [mainnet bar](mainnet.md).
+The first jurisdiction is Ethereum. Use the current Depository and EntityProvider
+artifacts and require deployed-code identity before public-chain evidence. Older
+multi-chain plans are historical, not additional gates for this candidate.
+See the [mainnet bar](mainnet.md).
 
 Prepare code, local testnet resets, evidence and releases without repeated owner
 questions. The owner retains seeds and signs mainnet deployment transactions;
@@ -50,19 +59,19 @@ implementation. Frozen-core approval remains owner-only.
 
 - Fast: smallest financial/unit regression plus UI compilation. Green counts
   describe only those tests; they never imply mainnet readiness.
-- Journey: actual payments, receive links, same-J and cross-J swaps, lend/withdraw,
-  borrow/repay, funding/withdrawal, limits, hubs, disputes, recovery and companies
-  through both interfaces. Inspect desktop/mobile rendering and interruption.
-  Multisig registration, share issuance and board activation are distinct results.
-- Release: same immutable production WAL through TS/Rust W1/W4, exact per-frame
-  roots and ordered outputs; live native J receipts/finality; contract/adversarial
+- Journey: actual payments, receive links, same-J swaps, funding/withdrawal,
+  limits, hubs, disputes and recovery through React. Inspect desktop/mobile
+  rendering and interruption. Deferred features must be absent from the
+  production profile; their tests cannot substitute for these journeys.
+- Release: same immutable production WAL through TS W1/W4/W8, exact per-frame
+  roots and ordered outputs; Ethereum receipts/finality; contract/adversarial
   exit bounds; fresh-device recovery and crash drills; current full required
   suites; `bun run check`; production-valid load; deployment/rollback evidence.
   Existing [acceptance rules](mainnet-acceptance-gate.md) remain authoritative.
 
 Treat expensive legal exit as a release blocker even when ordinary payments
-work. A four-process local chain proves neither independent operators nor public
-inclusion capacity. Native TRON cannot be replaced by a second Anvil chain.
+work. A local Anvil proof establishes local execution; it cannot substitute for
+current Sepolia bytecode, real public inclusion and the real dispute deadline.
 
 ## Reflection that changes the next action
 
@@ -83,6 +92,32 @@ Measure closed/reopened release gaps, time to reproducible artifacts and retaine
 failure evidence. Report done/total for a named stage, not a guessed readiness
 percentage. If blocked on a real owner decision, state the exact fork and continue
 independent authorized work. Do not claim background execution after the turn.
+
+For each 30-minute work block, record only the result in the existing handoff:
+the gap attempted, command/artifact, elapsed time and whether it closed or
+reopened. Use net closures per engineering hour and time to the first reproducible
+failure to compare methods over the next two blocks. A smaller denominator,
+weaker assertion or changed scope is not an improvement. Keep an unsuccessful
+method change only if it produced new evidence that explains the next action.
+This improves the development process and retained instructions; it does not
+claim to modify model weights or become more intelligent automatically.
+
+## Evidence coverage out of 1000
+
+The requested metric is `1000 * passed required checks / frozen required checks`,
+using the existing release criteria for one identified candidate. List PASS,
+FAIL and UNKNOWN counts alongside it. UNKNOWN means unverified, not defective.
+Freeze the denominator before collection for the declared engine, interface and
+jurisdiction; do not increase the score with redundant tests,
+split trivial checks, removed features or skipped failures. Repeated runs count
+once. Stale evidence becomes UNKNOWN when its relevant source/configuration changes.
+
+Any failed or unknown mandatory financial, recovery or operational gate blocks
+release regardless of the number. 1000 means complete evidence for that declared
+scope, never universal correctness or a measure of MML adoption. A second pass
+uses the same criteria and retained artifacts; it cannot grade by appearance.
+Until the candidate and required-check denominator are frozen, report counts
+for the actual checks run and leave the overall score unassigned.
 
 MML remains the owner ambition: useful unique economic value, not self-transfers,
 routed hops or test-token throughput. Reliability of a user's first payment and

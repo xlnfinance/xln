@@ -27,7 +27,7 @@ const amount = (value: unknown): bigint => {
 function subtractLoans(data: Record<string, unknown>, user: string, account: LendingBalanceAccount, totals: Map<number, bigint>): void {
   if (!Array.isArray(data['loans'])) throw new Error('LENDING_BALANCE_RESPONSE_INVALID');
   const intents = new Map(account.intents);
-  const awaiting = new Set(account.intents.filter(([key]) => key.startsWith('disburse:') && !intents.has(`repay:${key.slice(9)}`)).map(([key]) => key.slice(9)));
+  const awaiting = new Set(account.intents.filter(([key]) => key.startsWith('disburse:') && !intents.has(`repay:${key.slice(9)}`) && !intents.has(`dispute:${key.slice(9)}`)).map(([key]) => key.slice(9)));
   const seen = new Set<string>();
   for (const raw of data['loans']) {
     const loan = record(raw);
@@ -36,8 +36,8 @@ function subtractLoans(data: Record<string, unknown>, user: string, account: Len
     seen.add(id);
     if (loan['hubEntityId'] !== account.hubEntityId) throw new Error('LENDING_BALANCE_OWNER_MISMATCH');
     if (loan['borrowerEntityId'] !== user) continue; // Lender's claim is already counted in its pool.
-    if (intents.has(`repay:${id}`)) { awaiting.delete(id); continue; }
-    if (loan['status'] === 'repaid') {
+    if (intents.has(`repay:${id}`) || intents.has(`dispute:${id}`)) { awaiting.delete(id); continue; }
+    if (loan['status'] === 'repaid' || loan['status'] === 'disputed') {
       if (awaiting.has(id)) throw new Error(`LENDING_BALANCE_SYNC_PENDING:${id}`);
       continue;
     }
@@ -61,7 +61,7 @@ export function projectLendingBalance(
   if (data['success'] !== true) throw new Error(String(data['error'] || 'LENDING_BALANCE_REQUEST_FAILED'));
   if (data['hubEntityId'] !== account.hubEntityId || !Array.isArray(data['pools'])) throw new Error('LENDING_BALANCE_RESPONSE_INVALID');
   const intents = new Map(account.intents);
-  const awaiting = new Set(account.intents.filter(([key]) => key.startsWith('fund:') && !intents.has(`payout:${key.slice(5)}`)).map(([key]) => key.slice(5)));
+  const awaiting = new Set(account.intents.filter(([key]) => key.startsWith('fund:') && !intents.has(`payout:${key.slice(5)}`) && !intents.has(`dispute:${key.slice(5)}`)).map(([key]) => key.slice(5)));
   const totals = new Map<number, bigint>();
   const seen = new Set<string>();
   for (const value of data['pools']) {
@@ -70,9 +70,10 @@ export function projectLendingBalance(
     if (seen.has(id)) throw new Error(`LENDING_BALANCE_DUPLICATE:${id}`);
     seen.add(id);
     if (pool['hubEntityId'] !== account.hubEntityId || pool['lenderEntityId'] !== userEntityId) throw new Error('LENDING_BALANCE_OWNER_MISMATCH');
-    // A received payout already belongs to the signed account balance, even if HTTP lags.
-    if (intents.has(`payout:${id}`)) continue;
-    if (pool['status'] === 'closed') {
+    // A payout belongs to Account balance; dispute retirement belongs to J
+    // reserves/debt. Neither can remain a second hub-reported lending claim.
+    if (intents.has(`payout:${id}`) || intents.has(`dispute:${id}`)) continue;
+    if (pool['status'] === 'closed' || pool['status'] === 'disputed') {
       if (awaiting.has(id)) throw new Error(`LENDING_BALANCE_SYNC_PENDING:${id}`);
       continue;
     }

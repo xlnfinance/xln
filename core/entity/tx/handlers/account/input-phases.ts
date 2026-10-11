@@ -17,6 +17,7 @@ import {
   accountInputProposal,
 } from '../../../../account/consensus/flush';
 import { addMessage } from '../../../frame-events';
+import { bankSavingsAdmissionError } from '../../../lending-policy';
 import { createStructuredLogger, shortId } from '../../../../support/logger';
 import {
   getCertifiedBoardNodeStore,
@@ -198,6 +199,12 @@ export const prepareAccountConsensusRun = (
   const { env, state, input, account } = context;
   const incomingAck = accountInputAck(input);
   const incomingProposal = accountInputProposal(input);
+  if (incomingProposal && incomingProposal.frame.height > account.currentHeight) {
+    for (const tx of incomingProposal.frame.accountTxs) {
+      const rejection = bankSavingsAdmissionError(state, account, tx, Math.max(state.timestamp, incomingProposal.frame.timestamp));
+      if (rejection) throw new AccountFrameRejectionError(rejection);
+    }
+  }
   const hasConsensusInput =
     Boolean(incomingAck) ||
     Boolean(incomingProposal) ||

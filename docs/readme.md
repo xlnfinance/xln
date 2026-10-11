@@ -75,12 +75,15 @@ claims require their own supporting arguments and evidence.
 
 ## Release and launch status
 
+- [crisis-review-20261011.md](crisis-review-20261011.md) — six-month diagnosis, release blockers and development priorities
+- [improvement-loop.md](improvement-loop.md) — execution method and evidence coverage metric
+
 - [jea-continuation.md](jea-continuation.md) — September 30 implementation, verified E2E evidence and the next production boundary
 
 - [launch-design.md](launch-design.md#minimum-remaining-work--owner-alignment-2026-09-30) — minimum implementation tasks and accepted timing policy
 
 - [../todo.md](../todo.md) — active work and blockers
-- [status.md](status.md) — current operational status
+- [status.md](status.md) — architectural context and historical operational status
 - [mainnet.md](mainnet.md) — real-user-fund release bar
 - [mainnet-acceptance-gate.md](mainnet-acceptance-gate.md) — executable acceptance loop
 - [releases/manifest.json](releases/manifest.json) — signed immutable release history

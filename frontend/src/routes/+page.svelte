@@ -3,6 +3,8 @@
   import { goto } from '$app/navigation';
   import { browser } from '$app/env';
 
+  const description = 'Bilateral accounts with signed proofs, collateral-backed settlement, and explicit credit risk.';
+
   function handleUnlock() {
     // Navigate to /app when user clicks "Launch App"
     if (browser) {
@@ -14,20 +16,20 @@
 
 <svelte:head>
   <title>xln - cross-local network</title>
-  <meta name="description" content="The first credible alternative to TradFi/CEX custody. Credit-extended bilateral accounts with mechanical enforcement. Δ ≤ R + C" />
+  <meta name="description" content={description} />
 
   <!-- Open Graph / Facebook -->
   <meta property="og:type" content="website" />
   <meta property="og:url" content="https://xln.finance/" />
   <meta property="og:title" content="xln - cross-local network" />
-  <meta property="og:description" content="The first credible alternative to TradFi/CEX custody. The only architecture that scales to $100T without sacrificing decentralization." />
+  <meta property="og:description" content={description} />
   <meta property="og:image" content="https://xln.finance/img/preview.png" />
 
   <!-- Twitter -->
   <meta property="twitter:card" content="summary_large_image" />
   <meta property="twitter:url" content="https://xln.finance/" />
   <meta property="twitter:title" content="xln - cross-local network" />
-  <meta property="twitter:description" content="The first credible alternative to TradFi/CEX custody. Δ ≤ R + C — Credit-extended bilateral accounts with mechanical enforcement." />
+  <meta property="twitter:description" content={description} />
   <meta property="twitter:image" content="https://xln.finance/img/preview.png" />
   <meta property="twitter:site" content="@xlnfinance" />
 </svelte:head>

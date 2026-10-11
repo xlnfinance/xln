@@ -11,10 +11,8 @@ import type { CrossJurisdictionCloseProof, CrossJurisdictionSwapRoute } from '..
 import type { EntityTx } from '../../types/entity-tx';
 
 /**
- * Actual EntityTx payload bytes shared with Rust. Every row is accepted by the
- * production TypeScript boundary decoder before encoding. Rust feeds the same
- * row through RuntimeEntityInput::decode, so a missing per-kind native decoder
- * is a loud coverage failure rather than a successful generic object parse.
+ * Canonical EntityTx payload bytes accepted by production TypeScript admission.
+ * Native development is frozen; these current TS rows do not attest Rust parity.
  */
 const VECTORS = join(import.meta.dir, 'entity-tx-wire-vectors.json');
 const A = `0x${'aa'.repeat(32)}`;
@@ -76,10 +74,12 @@ const CASES = [
   { type: 'j_clear_batch', data: { reason: 'clear' } },
   { type: 'j_event', data: { from: SIGNER, jurisdictionRef: 'j1', baseHeight: 0, scannedThroughHeight: 0, tipBlockHash: H, eventHistoryRoot: H, rangeHash: H2, blocks: [], signature: SIGNATURE, observedAt: 100 } },
   { type: 'j_rebroadcast', data: { gasBumpBps: 100 } },
-  { type: 'lendingBorrow', data: { requestId: 'request-1', hubEntityId: B, tokenId: 1, amount: 5n, termId: '1h', maxInterestBps: 100 } },
+  { type: 'lendingApprove', data: { borrowerEntityId: B, tokenId: 1, termId: '1d', maxPrincipal: 5n, expiresAt: 60_000 } },
+  { type: 'lendingBorrow', data: { requestId: 'request-1', hubEntityId: B, tokenId: 1, amount: 5n, termId: '1h', maxInterestBps: 100, maxLateMs: 0, expiresAt: 60_000 } },
   { type: 'lendingClosePosition', data: { hubEntityId: B, positionId: 'position-1' } },
   { type: 'lendingOffer', data: { positionId: 'position-1', hubEntityId: B, tokenId: 1, amount: 5n, termId: '1d', interestBps: 100 } },
   { type: 'lendingRepay', data: { hubEntityId: B, loanId: 'loan-1', tokenId: 1, amount: 5n } },
+  { type: 'lendingSetTerms', data: { chainId: 31_337, depositoryAddress: ADDRESS, tokenId: 1, termId: '1d', savingsInterestBps: 100, loanInterestBps: 200, loanLateMs: 0, expiresAt: 60_000 } },
   { type: 'mintReserves', data: { tokenId: 1, amount: 5n } },
   { type: 'openAccount', data: { targetEntityId: B, disputeConfig: { leftResponseSeconds: 10, rightResponseSeconds: 20 }, accountDomain: { chainId: 31_337, depositoryAddress: ADDRESS }, watchSeed: H, creditAmount: 5n, tokenId: 1, rebalancePolicy: { r2cRequestSoftLimit: 1n, hardLimit: 2n, maxAcceptableFee: 0n } } },
   { type: 'orderbookSweepCrossJurisdiction', data: { reason: 'sweep' } },
@@ -126,10 +126,10 @@ if (Bun.env['RSCORE_GENERATE_ENTITY_TX_WIRE'] === '1') {
     await Bun.write(VECTORS, `${safeStringify(rows, 2)}\n`);
   });
 } else describe('EntityTx wire', () => {
-  test('production TypeScript admission covers exactly the canonical 63-kind catalog', () => {
+  test('production TypeScript admission covers exactly the canonical 65-kind catalog', () => {
     expect(validatedCases().map(tx => tx.type)).toEqual([...ENTITY_TX_TYPES]);
     expect(vectors().map(row => row.name)).toEqual([...ENTITY_TX_TYPES]);
-    expect(new Set(ENTITY_TX_TYPES).size).toBe(63);
+    expect(new Set(ENTITY_TX_TYPES).size).toBe(65);
   });
   test('TypeScript writes the reviewed shared bytes', () => {
     const recorded = new Map(vectors().map(row => [row.name, row.bytes]));

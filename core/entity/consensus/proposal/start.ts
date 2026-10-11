@@ -410,7 +410,8 @@ const fitAndApplyEntityProposal = async (
   // Hanko recovery for the candidate set started at proposal start; the
   // synchronous verifiers below hit the memo once it lands.
   markProposalPhase(env, 'apply.entity.proposal.hanko-prime');
-  await (context.hankoPriming ?? primeProposalHankos(selection.proposalTxs));
+  await (context.hankoPriming ??
+    primeProposalHankos(selection.proposalTxs, env.accountAuthorityEntityStage ? 'frame' : 'frame-and-dispute'));
   markProposalPhase(env, 'apply.entity.proposal.frame-apply');
   const applied = await applyEntityFrame(
     env,
@@ -654,7 +655,10 @@ export const startEntityProposalIfReady = async (
     entityEncryptionPublicKey: workingReplica.state.entityEncryptionPublicKey,
     entityEncryptionPrivateKey: requireEntityEncryptionPrivateKey(context.env, workingReplica.entityId),
   });
-  context.hankoPriming = primeProposalHankos(selection.proposalTxs);
+  context.hankoPriming = primeProposalHankos(
+    selection.proposalTxs,
+    context.env.accountAuthorityEntityStage ? 'frame' : 'frame-and-dispute',
+  );
   markProposalPhase(context.env, 'apply.entity.proposal.build');
   const certified = await buildEntityProposalEvictingRejected(context, selection, profile);
   if (!certified) return null;

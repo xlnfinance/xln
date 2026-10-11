@@ -263,20 +263,33 @@ export const planEntityOutputs = (
 ): {
   localOutputs: RoutedEntityInput[];
   remoteOutputs: PlannedRemoteOutput[];
+  orderedOutputs: RoutedEntityInput[];
   preparedOutputGraph: PreparedOutputGraph;
 } => {
   const localOutputs: RoutedEntityInput[] = [];
   const remoteOutputs: PlannedRemoteOutput[] = [];
+  const orderedOutputs: RoutedEntityInput[] = [];
   for (const output of dedupeEntityOutputs(outputs, graph)) {
     const decision = resolveLocalEntityOutput(env, output, deps) ??
       planRemoteEntityOutput(env, output, deps);
     if (decision.kind === 'local') {
-      graph.prepare(decision.output);
-      localOutputs.push(decision.output);
+      const runtimeId = normalizeRuntimeId(String(env.runtimeId ?? ''));
+      if (!runtimeId) throw new Error('ROUTE_LOCAL_RUNTIME_ID_MISSING');
+      const local = { ...decision.output, runtimeId };
+      // A Runtime tx cap may admit just one tx from this lane. Each local
+      // outbox row must therefore be independently retireable after commit.
+      const txs = local.entityTxs ?? [];
+      const rows = txs.length > 1 ? txs.map(tx => ({ ...local, entityTxs: [tx] })) : [local];
+      for (const row of rows) {
+        graph.prepare(row);
+        localOutputs.push(row);
+        orderedOutputs.push(row);
+      }
     } else if (decision.kind === 'remote') {
       graph.prepare(decision.output.output);
       remoteOutputs.push(decision.output);
+      orderedOutputs.push(decision.output.output);
     }
   }
-  return { localOutputs, remoteOutputs, preparedOutputGraph: graph };
+  return { localOutputs, remoteOutputs, orderedOutputs, preparedOutputGraph: graph };
 };

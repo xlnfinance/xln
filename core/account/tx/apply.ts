@@ -17,8 +17,9 @@ import {
 import type { ApplyAccountTxResult } from './apply-types';
 import { applyAccountTxMutation } from './mutation';
 import { accountTxRejected, accountTxValidationRejected, senderDeltaRejection, withAccountTxCandidateEffects } from './apply-result';
-import { accountDisputeGasCharge, disputeGasAdmissionError } from '../validation/dispute-gas-budget';
+import { accountDisputeGasCharge, disputeGasAdmissionError, previousDisputeGasCharge } from '../validation/dispute-gas-budget';
 import { collectSameJurisdictionSwapOutputs } from './same-j-swap-output';
+import { accountLendingRisk, lendingRiskAdmissionError } from '../validation/lending-risk';
 
 export async function applyAccountTx(
   account: AccountDraftReplica,
@@ -32,7 +33,10 @@ export async function applyAccountTx(
   counterpartyCertifiedBoardHash?: string,
   htlcEnforcementClock?: HtlcEnforcementClock,
 ): Promise<ApplyAccountTxResult> {
-  const previousDisputeGas = accountDisputeGasCharge(account.state);
+  const previousDisputeGas = previousDisputeGasCharge(account.state, accountTx);
+  const previousLendingRisk = accountTx.type !== 'j_event_claim' &&
+    (accountTx.type === 'lending_fund' || accountTx.type === 'lending_disburse' || (account.state.subcontracts?.size ?? 0) > 0)
+    ? accountLendingRisk(account) : undefined;
   const candidateEffects: AccountOutput[] = [];
   let result: ApplyAccountTxResult;
   try {
@@ -60,6 +64,8 @@ export async function applyAccountTx(
     return accountTxRejected(rejection, [rejection.message]);
   }
   if (result.ok) {
+    const riskError = previousLendingRisk && lendingRiskAdmissionError(previousLendingRisk, accountLendingRisk(account));
+    if (riskError) return accountTxValidationRejected(riskError, [riskError]);
     const budgetError = disputeGasAdmissionError(previousDisputeGas, accountDisputeGasCharge(account.state), accountTx);
     if (budgetError) return accountTxValidationRejected(budgetError, [budgetError]);
     candidateEffects.push(...collectSameJurisdictionSwapOutputs(account, accountTx));

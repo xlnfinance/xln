@@ -13,6 +13,7 @@ import {
   type RuntimeProofBody,
   type RuntimePull,
   type RuntimeSwap,
+  type RuntimeTermLoan,
   type RuntimeTransformerClause,
 } from './proof-body.ts';
 import { sortTransformerEntries } from '../transform/transformer-ordering';
@@ -31,6 +32,7 @@ import {
 import { keccakHexHash } from '../crypto/keccak-text';
 import { assertSignedAmount, assertInt512, encodeInt512, encodeSignedAmount } from '../crypto/abi-money';
 import { UINT256_MAX } from '../boundary/integer-ranges';
+import { assertLendingCovenant, lendingMaximumAmount } from './lending-covenant';
 import type {
   ProofBodyStruct,
   TransformerClauseStruct,
@@ -131,6 +133,10 @@ function buildTransformerAllowances(batch: RuntimeBatch): RuntimeAllowance[] {
   for (const pull of batch.pulls) {
     addDeltaAllowance(allowances, pull.deltaIndex, pull.amount);
   }
+  for (const savings of batch.loans) {
+    const maximum = lendingMaximumAmount(savings);
+    addDeltaAllowance(allowances, savings.deltaIndex, savings.creditorIsLeft ? maximum : -maximum);
+  }
 
   return Array.from(allowances.entries())
     .sort(([a], [b]) => a - b)
@@ -227,7 +233,8 @@ const buildProofPulls = (account: Pick<AccountReplica, 'state'>, deltaIndex: Rea
 const buildSubcontractTransformers = (account: Pick<AccountReplica, 'state'>): RuntimeTransformerClause[] =>
   Array.from(account.state.subcontracts ?? [])
     .sort(([left], [right]) => compareStableText(left, right))
-    .map(([subcontractId, subcontract]) => {
+    .flatMap(([subcontractId, subcontract]) => {
+      if ('kind' in subcontract) return [];
       const transformerAddress = requireContractAddress(`subcontract_${subcontractId}`, subcontract.transformerAddress);
       if (!ethers.isHexString(subcontract.encodedBatch)) {
         throw new Error(`SUBCONTRACT_ENCODED_BATCH_INVALID:${subcontractId}`);
@@ -242,6 +249,21 @@ const buildSubcontractTransformers = (account: Pick<AccountReplica, 'state'>): R
       };
     });
 
+const buildProofTermLoans = (account: Pick<AccountReplica, 'state'>, deltaIndex: ReadonlyMap<number, number>): RuntimeTermLoan[] =>
+  sortTransformerEntries((account.state.subcontracts ?? new Map()).entries()).flatMap(([id, claim]) => {
+    if (!('kind' in claim)) return [];
+    assertLendingCovenant(claim);
+    return [{
+      deltaIndex: requireProofDeltaIndex(deltaIndex, claim.tokenId, `SAVINGS_PROOF_TOKEN_MISSING:${id}`),
+      creditorIsLeft: claim.creditorIsLeft,
+      principal: claim.principal,
+      interest: claim.interest,
+      openedAt: claim.openedAt,
+      termMs: claim.termMs,
+      lateMs: claim.lateMs,
+    }];
+  });
+
 const proofBatchFits = (batch: RuntimeBatch): boolean => {
   const atomBytes = storageAtomBytes(encodeAbi(DELTA_BATCH_SCHEMA, runtimeToBatchStruct(batch)));
   const allowances = buildTransformerAllowances(batch);
@@ -252,6 +274,12 @@ const proofBatchFits = (batch: RuntimeBatch): boolean => {
 };
 
 const chunkProofItems = <T>(items: T[], makeBatch: (chunk: T[]) => RuntimeBatch): RuntimeBatch[] => {
+  if (items.length === 0) return [];
+  const whole = makeBatch(items);
+  // ABI atom size and each side's uint256 allowance grow monotonically;
+  // opposite directions never net. If the whole ordered batch fits, every
+  // prefix fits too. Avoid encoding every growing prefix on each AccountTx.
+  if (proofBatchFits(whole)) return [whole];
   const batches: RuntimeBatch[] = [];
   let chunk: T[] = [];
   for (const item of items) {
@@ -279,9 +307,10 @@ export const buildCanonicalProofBatches = (
   account: Pick<AccountReplica, 'state'>,
   deltaIndex: ReadonlyMap<number, number> = buildProofDeltaIndex(account).byTokenId,
 ): RuntimeBatch[] => [
-  ...chunkProofItems(buildProofPayments(account, deltaIndex), payments => ({ payments, swaps: [], pulls: [] })),
-  ...chunkProofItems(buildProofSwaps(account, deltaIndex), swaps => ({ payments: [], swaps, pulls: [] })),
-  ...chunkProofItems(buildProofPulls(account, deltaIndex), pulls => ({ payments: [], swaps: [], pulls })),
+  ...chunkProofItems(buildProofPayments(account, deltaIndex), payments => ({ payments, swaps: [], pulls: [], loans: [] })),
+  ...chunkProofItems(buildProofSwaps(account, deltaIndex), swaps => ({ payments: [], swaps, pulls: [], loans: [] })),
+  ...chunkProofItems(buildProofPulls(account, deltaIndex), pulls => ({ payments: [], swaps: [], pulls, loans: [] })),
+  ...chunkProofItems(buildProofTermLoans(account, deltaIndex), savings => ({ payments: [], swaps: [], pulls: [], loans: savings })),
 ];
 
 const buildProofTransformers = (
@@ -293,7 +322,7 @@ const buildProofTransformers = (
   if (batches.length === 0) return buildSubcontractTransformers(account);
   const transformerAddress = requireContractAddress('delta_transformer', deltaTransformerAddress);
   // DeltaTransformer executes clauses sequentially. The canonical order
-  // payment→swap→pull preserves every original obligation and its order. Each
+  // payment→swap→pull→savings preserves every obligation and its order. Each
   // stock clause fits the exact storage atom and uint256 allowance domains;
   // chunking cannot alter its linear authorized movements. Argument generation
   // uses this same plan, including each swap chunk's counterparty-owned ratio
@@ -385,6 +414,7 @@ function runtimeToBatchStruct(batch: RuntimeBatch): DeltaTransformer.BatchStruct
       partialRoot: p.partialRoot,
       targetRole: p.targetRole === true,
     })),
+    loans: batch.loans.map(s => ({ ...s, deltaIndex: BigInt(s.deltaIndex), openedAt: BigInt(s.openedAt), termMs: BigInt(s.termMs), lateMs: BigInt(s.lateMs) })),
   };
 }
 

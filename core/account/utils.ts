@@ -132,9 +132,12 @@ const formatDeltaAscii = (
  * @param isLeft - Whether we are the left party in this account
  * @returns Derived balance information including capacities and credits
  */
-export function deriveDelta(delta: Delta, isLeft: boolean): DerivedDelta {
+export function deriveDelta(delta: Delta, isLeft: boolean, signedProgramMovement = 0n): DerivedDelta {
   validateDelta(delta, 'deriveDelta');
-  const totalDelta = delta.ondelta + delta.offdelta;
+  // Executable signed programs may project beyond an individual Int512 stored
+  // component; Solidity combines them in Int768. Keep the projection ephemeral
+  // and use the same bilateral derivation, never a fabricated stored Delta.
+  const totalDelta = delta.ondelta + delta.offdelta + signedProgramMovement;
   const collateral = nonNegative(delta.collateral);
   const left = deriveLeftPerspective(delta, totalDelta, collateral);
   const { effectiveOwnCreditWindow, totalCapacity, ...leftPerspective } = left;

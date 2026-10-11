@@ -59,7 +59,7 @@ const randBatch = () => ({
     subDeltaIndex: BigInt(randInt(10)),
     subAmount: randUint(128),
   })),
-  pull: Array.from({ length: randInt(2) }, () => ({
+  loans: [], pull: Array.from({ length: randInt(2) }, () => ({
     deltaIndex: BigInt(randInt(10)),
     amount: encodeSignedAmount(randInt256()),
     claimedRatio: randUint(16),

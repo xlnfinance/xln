@@ -111,6 +111,7 @@ import {
 } from './handlers/dispute/finalize-proof';
 import { proofBodyHasPulls } from './handlers/dispute/start-admission';
 import type { BookIntentSlotWriter } from '../books/book-intents';
+import { retireDisputedLendingClaims } from './handlers/account/committed-lending-close';
 
 const jEventLog = createStructuredLogger('j.event');
 const normalizeSignerId = (value: unknown): string => String(value || '').trim().toLowerCase();
@@ -1356,6 +1357,7 @@ const applyResolvedDisputeFinality = async (
   if (accountInput.finality.kind !== 'dispute_finalized') {
     throw new Error(`ACCOUNT_DISPUTE_FINALITY_INPUT_KIND:${accountInput.finality.kind}`);
   }
+  retireDisputedLendingClaims(newState, account);
   const accountFinality = applyEntityAccountEnvelopeUpdate(
     context.env,
     counterpartyId,

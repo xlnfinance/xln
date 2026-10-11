@@ -1,5 +1,6 @@
 import { hasVerifiedEntityCommitPrecertificate } from '../../../entity/consensus/commit/precheck';
 import { mergeEntityInputs } from '../../../entity/consensus';
+import { retireAppliedLocalOutputs } from '../../delivery/local-outbox';
 import { cumulativeMarksToPhases } from '../../../support/performance/profile';
 import {
   authorityRecordEnabled,
@@ -247,6 +248,7 @@ const finalizeRuntimeInputApply = (
   );
   profile.mark('finalize');
   const appliedRuntimeInput = buildAppliedRuntimeInput(runtimeInput, ingress.runtimeTxs, batch.appliedEntityInputs);
+  retireAppliedLocalOutputs(env, batch.appliedEntityInputs);
   return {
     // collectRuntimeEntityContext already snapshots each committed context.
     // Cloning the HTLC graph again every Runtime frame doubled Hub CPU and

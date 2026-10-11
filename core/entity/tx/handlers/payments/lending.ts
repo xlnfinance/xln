@@ -97,7 +97,7 @@ export const handleLendingBorrowEntityTx = (
   requireIntentId(entityTx.data.requestId, 'borrow');
   requirePositiveAmount(entityTx.data.amount, 'LENDING_BORROW');
   const termId = normalizeLendingTerm(entityTx.data.termId);
-  const maxInterestBps = normalizeInterestBps(entityTx.data.maxInterestBps ?? 10_000);
+  const maxInterestBps = normalizeInterestBps(entityTx.data.maxInterestBps);
   return queueAccountTx(entityState, hubEntityId, {
     type: 'lending_borrow_request',
     data: {
@@ -108,6 +108,8 @@ export const handleLendingBorrowEntityTx = (
       amount: entityTx.data.amount,
       termId,
       maxInterestBps,
+      maxLateMs: entityTx.data.maxLateMs,
+      expiresAt: entityTx.data.expiresAt,
     },
   }, `Loan requested: ${entityTx.data.amount} token=${entityTx.data.tokenId}`, mutableFrameState);
 };

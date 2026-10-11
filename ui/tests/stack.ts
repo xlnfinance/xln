@@ -60,6 +60,15 @@ async function importStackPhrase(page: Page, phrase: string): Promise<Omit<Stack
 }
 
 async function readWalletIdentity(page: Page): Promise<Omit<StackWallet, 'phrase'>> {
+  // The navigation shell renders before asynchronous vault/runtime selection.
+  // Observe that selection before reading its identity; Home visibility alone
+  // is not evidence that a funded-wallet fixture is ready.
+  await expect.poll(() => page.evaluate(() => {
+    const debug = (window as DebugWindow).__xln;
+    if (!debug) return false;
+    const state = debug.store.getState();
+    return Boolean(debug.adapter()?.runtimeId && state.activeEntityId && state.activeVaultId);
+  })).toBe(true);
   return page.evaluate(() => {
     const debug = (window as DebugWindow).__xln;
     if (!debug) throw new Error('Wallet diagnostics unavailable');

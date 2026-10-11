@@ -701,7 +701,7 @@ describe('Depository', () => {
     const encodedPullBatch = await transformer.encodeBatch({
       payment: [],
       swap: [],
-      pull: [
+      loans: [], pull: [
         {
           deltaIndex: 1,
           amount: encodeSignedAmount(-MAX_FILL_RATIO),

@@ -58,4 +58,15 @@ describe('unused surface ratchet', () => {
       '../rpc-proxy-safety',
     )).toBe('frontend/src/routes/rpc-proxy-safety.ts');
   });
+
+  test('an apostrophe in documentation cannot hide a real decoder call', () => {
+    const source = `/** The bank's facility. */
+      import { decodeFacility } from '@xln/core/policy';
+      const label = 'facility';
+      decodeFacility(value);
+      const status = 'ready';
+    `;
+    const binding = findNamedBinding(source, '@xln/core/policy', 'decodeFacility');
+    expect(binding && usesNamedBinding(source, binding)).toBe(true);
+  });
 });

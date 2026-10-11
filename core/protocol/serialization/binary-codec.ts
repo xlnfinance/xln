@@ -224,7 +224,11 @@ const canonicalize = (
     return unsupported(path, `type=${typeof value}`);
   }
   if (typeof value !== 'object') return unsupported(path, `type=${typeof value}`);
-  if (isAlreadyCanonical(value)) return value;
+  const alreadyCanonical = isAlreadyCanonical(value);
+  // Payload preparation preserves undefined and leaves hex as text. Its
+  // marker certifies key order, not the stricter consensus representation:
+  // skipping this walk changed hashes and admitted undefined after preparation.
+  if (alreadyCanonical && preserveUndefined) return value;
   if (stack.has(value)) throw new Error(`XLN_BINARY_CODEC_CYCLE:path=${path}`);
 
   if (value instanceof Date) {
@@ -247,7 +251,8 @@ const canonicalize = (
   stack.add(value);
   try {
     if (Array.isArray(value)) {
-      if (!omitSymbolKeys && Object.getOwnPropertySymbols(value).length > 0) {
+      if (!omitSymbolKeys && Object.getOwnPropertySymbols(value)
+        .some(symbol => !alreadyCanonical || symbol !== ALREADY_CANONICAL)) {
         return unsupported(path, 'symbol-key');
       }
       const output = new Array<unknown>(value.length);
@@ -309,7 +314,8 @@ const canonicalize = (
     if (prototype !== Object.prototype && prototype !== null) {
       return unsupported(path, `prototype=${value.constructor?.name ?? 'unknown'}`);
     }
-    if (!omitSymbolKeys && Object.getOwnPropertySymbols(value).length > 0) {
+    if (!omitSymbolKeys && Object.getOwnPropertySymbols(value)
+      .some(symbol => !alreadyCanonical || symbol !== ALREADY_CANONICAL)) {
       return unsupported(path, 'symbol-key');
     }
     // Null prototype prevents an own `__proto__` data key from invoking the
