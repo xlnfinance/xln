@@ -37,12 +37,13 @@ const requirePositiveAmount = (amount: bigint, context: string): void => {
   if (amount <= 0n) throw new Error(`${context}_AMOUNT_MUST_BE_POSITIVE`);
 };
 
-const requireHubAccount = (state: EntityState, hubEntityId: string): string => {
+const requireHubAccount = (state: EntityState, hubEntityId: string) => {
   const hub = normalized(hubEntityId);
-  if (!hub || !state.accounts.has(hub)) {
+  const account = state.accounts.get(hub);
+  if (!hub || !account) {
     throw new Error(`LENDING_HUB_ACCOUNT_MISSING:${hub || 'missing'}`);
   }
-  return hub;
+  return { hubEntityId: hub, account };
 };
 
 const queueAccountTx = (
@@ -66,12 +67,11 @@ export const handleLendingOfferEntityTx = (
   entityTx: EntityTxOf<'lendingOffer'>,
   mutableFrameState = false,
 ): LendingResult => {
-  const hubEntityId = requireHubAccount(entityState, entityTx.data.hubEntityId);
+  const { hubEntityId, account } = requireHubAccount(entityState, entityTx.data.hubEntityId);
   requireIntentId(entityTx.data.positionId, 'lend');
   requirePositiveAmount(entityTx.data.amount, 'LENDING_FUND');
   const termId = normalizeLendingTerm(entityTx.data.termId);
   const interestBps = normalizeInterestBps(entityTx.data.interestBps);
-  const account = entityState.accounts.get(hubEntityId)!;
   if (!account.state.deltas.has(entityTx.data.tokenId)) {
     throw new Error(`LENDING_TOKEN_NOT_ENABLED:${entityTx.data.tokenId}`);
   }
@@ -94,7 +94,7 @@ export const handleLendingBorrowEntityTx = (
   entityTx: EntityTxOf<'lendingBorrow'>,
   mutableFrameState = false,
 ): LendingResult => {
-  const hubEntityId = requireHubAccount(entityState, entityTx.data.hubEntityId);
+  const { hubEntityId } = requireHubAccount(entityState, entityTx.data.hubEntityId);
   requireIntentId(entityTx.data.requestId, 'borrow');
   requirePositiveAmount(entityTx.data.amount, 'LENDING_BORROW');
   const termId = normalizeLendingTerm(entityTx.data.termId);
@@ -120,10 +120,10 @@ export const handleLendingRepayEntityTx = (
   entityTx: EntityTxOf<'lendingRepay'>,
   mutableFrameState = false,
 ): LendingResult => {
-  const hubEntityId = requireHubAccount(entityState, entityTx.data.hubEntityId);
+  const { hubEntityId, account } = requireHubAccount(entityState, entityTx.data.hubEntityId);
   requireIntentId(entityTx.data.loanId, 'loan');
   requirePositiveAmount(entityTx.data.amount, 'LENDING_REPAY');
-  const claim = entityState.accounts.get(hubEntityId)!.state.subcontracts?.get(normalized(entityTx.data.loanId));
+  const claim = account.state.subcontracts?.get(normalized(entityTx.data.loanId));
   assertLendingCovenant(claim);
   return queueAccountTx(entityState, hubEntityId, {
     type: 'lending_repay',
@@ -143,7 +143,7 @@ export const handleLendingClosePositionEntityTx = (
   entityTx: EntityTxOf<'lendingClosePosition'>,
   mutableFrameState = false,
 ): LendingResult => {
-  const hubEntityId = requireHubAccount(entityState, entityTx.data.hubEntityId);
+  const { hubEntityId } = requireHubAccount(entityState, entityTx.data.hubEntityId);
   requireIntentId(entityTx.data.positionId, 'lend');
   return queueAccountTx(entityState, hubEntityId, {
     type: 'lending_close_request',
