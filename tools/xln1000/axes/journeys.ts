@@ -1,11 +1,12 @@
 /**
  * J: user-journey reality, J = 1.5 * sum(w * L / 3). L1 headless test, L2 browser E2E through the visible UI,
  * L3 public J + fresh profile + real clock. Owner scope (2026-10-11): the React wallet (ui/) is the only wallet,
- * so only ui/tests specs count. Strict L2 needs a clean passing ledger run whose product paths are unchanged.
+ * so only ui/tests specs count. Strict L2 needs a clean passing ledger run (`--ledger`) on the measured commit or an
+ * ancestor whose product paths are unchanged; runs on later or side commits never count for this SHA.
  */
 import type { Ledger, QaRun } from '../ledger';
 import { gap, type Axis } from '../model';
-import { changedSince, commitKnown, filesContaining, lineCounts, type Repo } from '../repo';
+import { changedSince, commitKnown, filesContaining, isAncestorOrSelf, lineCounts, type Repo } from '../repo';
 
 type Level = 0 | 1 | 2 | 3;
 type Journey = Readonly<{
@@ -133,25 +134,37 @@ const JOURNEYS: readonly Journey[] = [
   },
 ];
 
-const cleanPasses = (ledger: Ledger, journey: Journey): QaRun[] =>
-  ledger.runs
-    .filter(
-      run =>
-        run.status === 'passed' && !run.dirty && run.gitHead && run.files.some(file => journey.specs.includes(file)),
-    )
+const SPECS: ReadonlySet<string> = new Set(JOURNEYS.flatMap(journey => journey.specs));
+
+const isCleanPass = (run: QaRun, specs: ReadonlySet<string>): boolean =>
+  run.status === 'passed' && !run.dirty && !!run.gitHead && run.files.some(file => specs.has(file));
+
+/** Heads of clean journey passes that are the measured SHA or an ancestor; one git check per distinct head. */
+const anchoredHeads = (repo: Repo, ledger: Ledger | null): ReadonlySet<string> => {
+  const heads = new Set((ledger?.runs ?? []).filter(run => isCleanPass(run, SPECS)).map(run => run.gitHead ?? ''));
+  return new Set([...heads].filter(head => commitKnown(repo, head) && isAncestorOrSelf(repo, head)));
+};
+
+/** Newest anchored clean passes first; anchoring happens before the cut, so later runs cannot crowd them out. */
+const cleanPasses = (ledger: Ledger, journey: Journey, anchored: ReadonlySet<string>): QaRun[] => {
+  const specs = new Set(journey.specs);
+  return ledger.runs
+    .filter(run => isCleanPass(run, specs) && anchored.has(run.gitHead ?? ''))
     .sort((left, right) => right.createdAt - left.createdAt || left.runId.localeCompare(right.runId))
     .slice(0, MAX_CANDIDATE_RUNS);
+};
 
-/** L2 only when a clean pass ran on a known commit whose product paths equal those at the measured SHA. */
+/** L2 only when a clean pass ran on the SHA or an ancestor whose product paths equal those at the measured SHA. */
 const strictLevel = (
   repo: Repo,
   ledger: Ledger | null,
   journey: Journey,
+  anchored: ReadonlySet<string>,
 ): { level: Level; cleanPassSha: string | null } => {
   if (!ledger) return { level: 0, cleanPassSha: null };
-  for (const pass of cleanPasses(ledger, journey)) {
+  for (const pass of cleanPasses(ledger, journey, anchored)) {
     const head = pass.gitHead ?? '';
-    if (commitKnown(repo, head) && !changedSince(repo, head, PRODUCT_PATHS)) return { level: 2, cleanPassSha: head };
+    if (!changedSince(repo, head, PRODUCT_PATHS)) return { level: 2, cleanPassSha: head };
   }
   return { level: 0, cleanPassSha: null };
 };
@@ -173,9 +186,10 @@ const journeyGaps = (rows: readonly (Journey & { level: Level })[]) =>
 
 export const measureJourneys = (repo: Repo, ledger: Ledger | null): Axis => {
   const visible = visibleUiSpecs(repo);
+  const anchored = anchoredHeads(repo, ledger);
   const rows = JOURNEYS.map(journey => ({
     ...journey,
-    ...strictLevel(repo, ledger, journey),
+    ...strictLevel(repo, ledger, journey, anchored),
     specsViaVisibleUi: journey.specs.filter(spec => visible.has(spec)).length,
   }));
   const score = 1.5 * rows.reduce((sum, row) => sum + (row.w * row.level) / 3, 0);

@@ -1,4 +1,4 @@
-/** Runs every axis against one SHA and assembles the result. Only `--ci` touches the network. */
+/** Runs every axis against one SHA and assembles the result. Only `--ci` touches the network; `--ledger` is opt-in. */
 import { analyzeCore } from './ast';
 import { measureCanonical } from './axes/canonical';
 import { measureExit } from './axes/exit';
@@ -15,7 +15,7 @@ import { ledgerFingerprint, loadLedger, type Ledger } from './ledger';
 import { round, type Axis, type Gap } from './model';
 import { ensureCoreSnapshot, openRepo, type Repo } from './repo';
 
-const TOOL_VERSION = 'xln1000/1';
+const TOOL_VERSION = 'xln1000/2';
 
 export type MeasureOptions = Readonly<{ root: string; rev: string; ledgerDir: string | null; ci: boolean }>;
 
@@ -54,7 +54,7 @@ const measureAxes = (repo: Repo, ledger: Ledger | null, ci: CiEvidence | null): 
     measureHonesty(repo, ledger, ci),
     kernel.axis,
     measureCanonical(repo, info),
-    measureFeedback(repo, ledger),
+    measureFeedback(ledger),
     measureProcess(repo, kernel.closureLoc),
     measurePublicJ(repo),
     measureMml(),

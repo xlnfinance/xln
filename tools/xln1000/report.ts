@@ -9,8 +9,8 @@ const pad = (value: string | number, width: number): string => String(value).pad
 const inputsLine = (result: Measurement): string => {
   const ledger = result.inputs.ledger;
   const ledgerText = ledger
-    ? `ledger ${String(ledger.qaRuns)} QA runs + ${String(ledger.logFiles)} logs (${ledger.dir})`
-    : 'ledger absent';
+    ? `ledger ${String(ledger.qaRunsInWindow)} QA runs + ${String(ledger.logFilesInWindow)} logs to ${ledger.windowEnd} (${ledger.dir})`
+    : 'ledger off (--ledger)';
   const ciText = result.inputs.ci ? `ci run ${String(result.inputs.ci.runIdAtSha)}` : 'ci off (--ci)';
   const worktree = result.inputs.worktreeNegativeEvidence;
   const worktreeText =

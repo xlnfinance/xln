@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 /**
  * XLN-1000 steering metric (docs/xln1000.md).
- *   measure  read-only against one git revision; offline unless --ci; prints the table, JSON to stdout or --out
+ *   measure  read-only against one git revision; tree only unless --ledger / --ci; prints the table, JSON to stdout or --out
  *   record   measure, then append one line to docs/evidence/xln1000/history.jsonl (refuses a dirty kernel tree)
  */
 import { appendFileSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
@@ -12,12 +12,13 @@ import { dirtyPaths } from './repo';
 
 const HISTORY_FILE = 'docs/evidence/xln1000/history.jsonl';
 const RECORD_GUARDED_PATHS = ['core', 'jurisdictions', 'ui'];
-const VALUE_FLAGS = new Set(['repo', 'rev', 'out', 'ledger']);
-const BOOLEAN_FLAGS = new Set(['json', 'ci', 'no-ledger', 'allow-dirty', 'help']);
+const VALUE_FLAGS = new Set(['repo', 'rev', 'out', 'ledger-dir']);
+const BOOLEAN_FLAGS = new Set(['json', 'ci', 'ledger', 'allow-dirty', 'help']);
 const USAGE = `usage: bun tools/xln1000/cli.ts [measure|record] [options]
   --rev <rev>        revision to measure (default HEAD)
   --repo <dir>       repository root (default: the repository holding this tool)
-  --ledger <dir>     local QA ledger directory (default <repo>/.logs); --no-ledger ignores it
+  --ledger           also read the local QA ledger <repo>/.logs (grows over time; windows end at the commit time)
+  --ledger-dir <dir> read the QA ledger from <dir> instead (implies --ledger)
   --ci               also read GitHub Actions status for the SHA (networked, via gh)
   --json             print the JSON result on stdout (table goes to stderr)
   --out <file>       write the JSON result to a file
@@ -59,7 +60,8 @@ const parseOptions = (argv: readonly string[]): Options => {
     throw new Error(`XLN1000_UNKNOWN_COMMAND ${command}\n${USAGE}`);
   if (positional.length > 1) throw new Error(`XLN1000_UNEXPECTED_ARGUMENT ${positional[1] ?? ''}`);
   const repo = resolve(flags.get('repo') ?? join(import.meta.dir, '..', '..'));
-  const ledger = flags.has('no-ledger') ? null : resolve(flags.get('ledger') ?? join(repo, '.logs'));
+  const wantsLedger = flags.has('ledger') || flags.has('ledger-dir');
+  const ledger = wantsLedger ? resolve(flags.get('ledger-dir') ?? join(repo, '.logs')) : null;
   return {
     command,
     repo,

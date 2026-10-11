@@ -1,18 +1,20 @@
 /**
- * Local ledger input (offline, but it grows over time): the QA run history sqlite and recent `.logs` files.
- * The sqlite is APFS-cloned into a private temp copy before it is opened, so the live ledger is never touched.
- * Time windows are anchored at the measured commit, not at the wall clock.
+ * Local ledger input (opt-in with --ledger; offline, but it grows over time): the QA run history sqlite and
+ * `.logs` files. The sqlite is APFS-cloned into a private temp copy before it is opened, so the live ledger is
+ * never touched. Time windows end at the measured commit time, so later runs and logs never feed an older SHA.
  */
 import { Database } from 'bun:sqlite';
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, relative } from 'node:path';
 import { DAY_MS } from './model';
 import { run, type Repo } from './repo';
 
 export const FEEDBACK_WINDOW_DAYS = 21;
+export const CLEAN_WINDOW_DAYS = 30;
 const QA_DB = 'qa-history.sqlite';
 const LOG_PATTERN = 'Ran [0-9]+ tests across|PASS check:src|FAIL check:|lock-ahb';
+const GREP_BATCH = 400;
 
 export type QaRun = Readonly<{
   runId: string;
@@ -34,6 +36,8 @@ type LogSamples = Readonly<{
 }>;
 export type Ledger = Readonly<{
   dir: string;
+  /** Commit time of the measured SHA: every time window ends here. */
+  endMs: number;
   runs: readonly QaRun[];
   futureRunIds: readonly string[];
   logs: LogSamples;
@@ -88,21 +92,48 @@ const readQaRows = (dir: string): Row[] => {
   }
 };
 
-const recentLogFiles = (dir: string, sinceMs: number): string[] => {
-  const minutes = Math.max(1, Math.ceil((Date.now() - sinceMs) / 60_000));
-  const command = ['find', dir, '-name', '*.log', '-mmin', `-${String(minutes)}`, '-size', '-50M'];
+/** QA runs created inside the `days` that end at the measured commit time. */
+export const runsInWindow = (ledger: Ledger, days: number): QaRun[] =>
+  ledger.runs.filter(row => row.createdAt >= ledger.endMs - days * DAY_MS && row.createdAt <= ledger.endMs);
+
+/** `find -mmin` only narrows the scan; the exact [from, to] mtime window is applied with stat. */
+const logsModifiedIn = (dir: string, fromMs: number, toMs: number): string[] => {
+  const minutes = Math.max(1, Math.ceil((Date.now() - fromMs) / 60_000));
+  const command = ['find', dir, '-name', '*.log', '-type', 'f', '-mmin', `-${String(minutes)}`, '-size', '-50M'];
   const filters = ['-not', '-path', '*/e2e-build-cache/*', '-not', '-path', '*/e2e-parallel/*'];
-  const output = run([...command, ...filters, '-exec', 'grep', '-lE', LOG_PATTERN, '{}', '+'], { okExitCodes: [0, 1] });
-  return output.split('\n').filter(Boolean).sort();
+  return run([...command, ...filters])
+    .split('\n')
+    .filter(Boolean)
+    .filter(file => {
+      const mtime = statSync(file).mtimeMs;
+      return mtime >= fromMs && mtime <= toMs;
+    });
 };
 
+const logsWithSamples = (files: readonly string[]): string[] => {
+  const matched: string[] = [];
+  for (let start = 0; start < files.length; start += GREP_BATCH) {
+    const batch = files.slice(start, start + GREP_BATCH);
+    matched.push(...run(['grep', '-lE', LOG_PATTERN, ...batch], { okExitCodes: [0, 1] }).split('\n'));
+  }
+  return matched.filter(Boolean).sort();
+};
+
+const lastCount = (block: string, label: string): number | null => {
+  const match = [...block.matchAll(new RegExp(`^\\s*(\\d+) ${label}$`, 'gm'))].pop();
+  return match ? Number(match[1]) : null;
+};
+
+/** Full unit run (>= 700 files). Green only with 0 fail, 0 skip and 0 todo in its own summary block. */
 const unitSample = (text: string): StageSample | null => {
   const ran = [...text.matchAll(/Ran (\d+) tests across (\d+) files\. \[([\d.]+)s\]/g)]
     .filter(match => Number(match[2]) >= 700)
     .pop();
   if (!ran) return null;
-  const fails = [...text.matchAll(/^\s*(\d+) fail$/gm)].pop();
-  return { ok: !!fails && Number(fails[1]) === 0, minutes: Number(ran[3]) / 60 };
+  const block = text.slice(0, ran.index).split('\n').slice(-8).join('\n');
+  const fails = lastCount(block, 'fail');
+  const notRun = (lastCount(block, 'skip') ?? 0) + (lastCount(block, 'todo') ?? 0);
+  return { ok: fails === 0 && notRun === 0, minutes: Number(ran[3]) / 60 };
 };
 
 const checkSample = (text: string): StageSample | null => {
@@ -132,25 +163,33 @@ const parseLogs = (dir: string, files: readonly string[]): LogSamples => {
   };
 };
 
-/** Null when the ledger directory is absent; the run then scores ledger-dependent sub-items as unknown (0). */
+/**
+ * Null when the ledger directory is absent; the run then scores ledger-dependent sub-items as unknown (0).
+ * The future-dated row check is the one comparison against the wall clock (a row dated after "now" is corrupt).
+ */
 export const loadLedger = (dir: string, repo: Repo): Ledger | null => {
   if (!existsSync(dir)) return null;
   const futureCutoff = Date.now() + DAY_MS;
   const rows = readQaRows(dir).map(toRun);
-  const logs = parseLogs(dir, recentLogFiles(dir, repo.commitTimeMs - FEEDBACK_WINDOW_DAYS * DAY_MS));
+  const fromMs = repo.commitTimeMs - FEEDBACK_WINDOW_DAYS * DAY_MS;
+  const logs = parseLogs(dir, logsWithSamples(logsModifiedIn(dir, fromMs, repo.commitTimeMs)));
   return {
     dir,
+    endMs: repo.commitTimeMs,
     runs: rows.filter(row => row.createdAt <= futureCutoff),
     futureRunIds: rows.filter(row => row.createdAt > futureCutoff).map(row => row.runId),
     logs,
   };
 };
 
+/** Only window-bounded counts, so the fingerprint of a past SHA does not change as the ledger grows. */
 export const ledgerFingerprint = (ledger: Ledger | null) =>
   ledger && {
     dir: ledger.dir,
-    qaRuns: ledger.runs.length,
-    newestRunAt:
-      ledger.runs.length > 0 ? new Date(Math.max(...ledger.runs.map(row => row.createdAt))).toISOString() : null,
-    logFiles: ledger.logs.files.length,
+    windowEnd: new Date(ledger.endMs).toISOString(),
+    qaRunsInWindow: runsInWindow(ledger, CLEAN_WINDOW_DAYS).length,
+    runWindowDays: CLEAN_WINDOW_DAYS,
+    logFilesInWindow: ledger.logs.files.length,
+    logWindowDays: FEEDBACK_WINDOW_DAYS,
+    futureDatedRows: ledger.futureRunIds.length,
   };

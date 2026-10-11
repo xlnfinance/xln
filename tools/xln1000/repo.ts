@@ -94,6 +94,13 @@ export const listTree = (repo: Repo, path: string): string[] =>
 export const commitKnown = (repo: Repo, sha: string): boolean =>
   /^[0-9a-f]{7,40}$/.test(sha) && exitCode(['git', '-C', repo.root, 'cat-file', '-e', `${sha}^{commit}`]) === 0;
 
+/** True when `base` is the measured SHA or one of its ancestors (evidence from later or side commits never counts). */
+export const isAncestorOrSelf = (repo: Repo, base: string): boolean => {
+  const code = exitCode(['git', '-C', repo.root, 'merge-base', '--is-ancestor', base, repo.sha]);
+  if (code === 0 || code === 1) return code === 0;
+  throw new Error(`XLN1000_ANCESTRY_FAILED ${base}..${repo.sha} exit=${String(code)}`);
+};
+
 /** True when any covered path differs between `base` and the measured SHA. */
 export const changedSince = (repo: Repo, base: string, paths: readonly string[]): boolean => {
   const code = exitCode(['git', '-C', repo.root, 'diff', '--quiet', base, repo.sha, '--', ...paths]);

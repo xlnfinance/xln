@@ -1,14 +1,14 @@
 /**
  * H: evidence honesty, H = 120 * (0.3 clean + 0.2 shaBound + 0.2 durable + 0.2 ci + 0.1 ledger).
- * Counts artifacts, not claims. Tree parts are exact for the SHA; clean/ledger need the local ledger, ci needs `--ci`.
+ * Counts artifacts, not claims. Tree parts are exact for the SHA; clean/ledger need `--ledger` (QA runs created in
+ * the 30 days that end at the commit time), ci needs `--ci`.
  */
 import type { CiEvidence } from '../ci';
-import type { Ledger } from '../ledger';
-import { DAY_MS, gap, weightedSum, type Axis } from '../model';
+import { CLEAN_WINDOW_DAYS, runsInWindow, type Ledger } from '../ledger';
+import { gap, weightedSum, type Axis } from '../model';
 import { countMatches, filesMatching, listTree, type Repo } from '../repo';
 
 const WEIGHTS = { cleanRuns: 0.3, shaBoundEvidence: 0.2, durableRefs: 0.2, ciGreen: 0.2, ledgerIntegrity: 0.1 };
-const CLEAN_WINDOW_DAYS = 30;
 const SHA_FIELD =
   '"[A-Za-z]*(sha|Sha|SHA|commit|Commit|head|Head|candidate)[A-Za-z]*"[[:space:]]*:[[:space:]]*"[0-9a-f]{7,40}"';
 const EPHEMERAL_REF = '(/tmp/|/private/tmp/|\\.logs/)[A-Za-z0-9_./-]+';
@@ -23,10 +23,9 @@ const treeFacts = (repo: Repo) => {
   return { evidenceJson, shaBound, ephemeralRefs, durableRefs };
 };
 
-const ledgerFacts = (repo: Repo, ledger: Ledger | null) => {
+const ledgerFacts = (ledger: Ledger | null) => {
   if (!ledger) return { windowRuns: 0, cleanRuns: 0, futureDatedRuns: [] as readonly string[] };
-  const since = repo.commitTimeMs - CLEAN_WINDOW_DAYS * DAY_MS;
-  const window = ledger.runs.filter(run => run.createdAt >= since);
+  const window = runsInWindow(ledger, CLEAN_WINDOW_DAYS);
   return {
     windowRuns: window.length,
     cleanRuns: window.filter(run => !run.dirty && run.gitHead).length,
@@ -40,7 +39,7 @@ type LedgerFacts = ReturnType<typeof ledgerFacts>;
 const gapLabels = (tree: TreeFacts, local: LedgerFacts, ledger: boolean, ci: CiEvidence | null) => ({
   cleanRuns: ledger
     ? `clean QA runs with a known SHA (${String(local.cleanRuns)}/${String(local.windowRuns)} in ${String(CLEAN_WINDOW_DAYS)} days)`
-    : 'clean QA runs with a known SHA (unknown: ledger absent)',
+    : 'clean QA runs with a known SHA (unknown without --ledger)',
   shaBoundEvidence: `SHA-bound evidence JSON (${String(tree.shaBound)}/${String(tree.evidenceJson)})`,
   durableRefs: `durable evidence refs in docs (${String(tree.durableRefs)} vs ${String(tree.ephemeralRefs)} /tmp or .logs)`,
   ciGreen: ci
@@ -48,12 +47,12 @@ const gapLabels = (tree: TreeFacts, local: LedgerFacts, ledger: boolean, ci: CiE
     : 'green build-and-test (unknown without --ci)',
   ledgerIntegrity: ledger
     ? `QA ledger integrity (${String(local.futureDatedRuns.length)} future-dated rows)`
-    : 'QA ledger integrity (unknown: ledger absent)',
+    : 'QA ledger integrity (unknown without --ledger)',
 });
 
 export const measureHonesty = (repo: Repo, ledger: Ledger | null, ci: CiEvidence | null): Axis => {
   const tree = treeFacts(repo);
-  const local = ledgerFacts(repo, ledger);
+  const local = ledgerFacts(ledger);
   const refs = tree.durableRefs + tree.ephemeralRefs;
   const sub = {
     cleanRuns: local.windowRuns > 0 ? local.cleanRuns / local.windowRuns : 0,
