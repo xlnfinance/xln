@@ -716,6 +716,47 @@
         "log": ".logs/crisis-20261011/withdrawal-check-complete.log"
       },
       "limitation": "Term savings only. Demand rate updates, current TS/Rust bank parity, integrated release gate and public deployment remain incomplete."
+    },
+    "bookAlignment": {
+      "sourceCheckpoint": "cd345aafd",
+      "purpose": "Canonical paybook, swapbook and lendbook source owners in TS and Rust; no protocol/state-field rename",
+      "check": {
+        "passed": true,
+        "sourceGates": 38,
+        "sourceWallMs": 25807,
+        "outerGates": 3,
+        "log": "books-check-final.log"
+      },
+      "rust": {
+        "tests": 26,
+        "failed": 0,
+        "scope": "existing three-book tests in shared workspace with six unrelated dirty Rust files retained; not new lending semantic parity"
+      },
+      "typescript": {
+        "sharedBookTests": 2,
+        "assertions": 8,
+        "replayFrames": 108,
+        "workers": [
+          1,
+          4
+        ],
+        "matchesCheckpoint": "079c101cc"
+      },
+      "debt": {
+        "nonNullFiles": 174,
+        "nonNullAssertions": 616,
+        "oldPathHashRecovered": true,
+        "eslint": 324,
+        "rustRootDirectFilesBefore": 12,
+        "rustRootDirectFilesAfter": 11
+      },
+      "sha256": {
+        "books-check-final.log": "b60e0f34d4a7f832d09e696540b0297ca47919b62f9ed125cc16645d77953796",
+        "books-rust-vectors.log": "fa0c1569faf01a056b45c881e253898ac0dc99a7f6cf78edf66596bf1035cd82",
+        "books-shared-vector.log": "1b5b3a743a6b06487cabea4d8b6b4cfe9c7d514ca8ab4b598688c137727c37e8",
+        "books-unsafe-path-proof.json": "347db38a67b88edddf40a046da358ff066bd0fe9361955ba59ecaf34d7ab1836",
+        "withdrawal-react/books-comparison.json": "4587b2933f9ddb5c43e4c214f96e3fedba789612687527a8a0ed8708e14b9855"
+      }
     }
   },
   "currentReleaseScope": {

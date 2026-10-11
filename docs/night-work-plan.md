@@ -2,8 +2,17 @@
 
 ## Current SHA
 
-Tested source checkpoint: `079c101cc`, main, 2026-10-11; documentation may follow.
-This checkpoint isolates Lendbook and fixes queued withdrawals. Related tests
+Latest source checkpoint: `cd345aafd`, main, 2026-10-11; documentation may follow.
+The three books now have sibling `paybook`, `swapbook`, `lendbook` module paths in
+TypeScript and Rust; retired directories and imports are removed. Full check
+passes (38 source gates, 25.807s), 26 existing Rust book tests and two shared TS
+book tests pass. The same 108-frame production WAL is byte-exact before/after
+through TS W1/W4. This proves the move, not modern lending parity in Rust.
+Evidence: `.logs/crisis-20261011/books-*` and
+`withdrawal-react/books-comparison.json`. Rust tests ran with the six unrelated
+dirty Rust files retained, not a clean-checkout claim. No push.
+
+Previous checkpoint `079c101cc` isolates Lendbook and fixes queued withdrawals. Related tests
 564/564, six SIGKILLs across seven processes, three browser journeys and all
 108 TS W1/W4 replay frames pass. Full check: 38 source gates plus short/outer
 gates pass. Evidence: `.logs/crisis-20261011/withdrawal-*` and
@@ -35,7 +44,24 @@ build promotion and mainnet signatures remain owner-controlled.
 
 ## Last green command
 
-Current partial-repayment candidate:
+Latest: `bun run check` -> `.logs/crisis-20261011/books-check-final.log`;
+`cargo test -p xln-rscore-entity-kernel --lib --locked book::` -> 26 pass;
+production replay W1/W4 -> 108/108 exact, matching `079c101cc`.
+
+Owner preview is running via the canonical `bun run dev`, TS engine, dedicated
+`db/owner-preview-20261011`, stand holder PID 51040 (verify before use).
+React URL: `http://localhost:5183/`. Browser tab 18 has a disposable tour wallet
+with 100 test USDC received, zero captured console errors. Do not reset its data
+or start another heavy stand while the owner is trying it. The current dev
+launcher still exposes Svelte at 8080; unify the advertised React entry without
+weakening singleton/port ownership or adding a second launcher.
+
+Method review, 16:22 UTC: closed the book-path migration through immutable WAL
+comparison and full check before starting another refactor. Updated the existing
+improvement loop with the owner's Japanese-inspired quality direction. Retained
+the generator-path failure and folder-width reduction as evidence; no new gates.
+
+Earlier partial-repayment candidate (historical evidence):
 
 - Related suite: 562 tests, 448,491 assertions, 46 files, 33.88s.
 - Production Depository/transformer: 65 cases; partial claims in both directions,
@@ -95,9 +121,9 @@ Durable evidence index: `docs/evidence/crisis-20261011.json`.
 
 ## Next single command
 
-Unify source module paths to `paybook`, `swapbook`, `lendbook` in TS and Rust,
-preserving protocol bytes; then verify the first Rust lending divergence against
-current TS vectors. The owner also delegates demand-rate design: prospective
+`bun run stand:status` before any heavy work; the owner preview currently holds it.
+Next implementation: verify the first Rust lending divergence against current TS
+vectors. The owner also delegates demand-rate design: prospective
 variable rates, earned interest preserved, one signed accrual mechanism.
 Do not repeat unchanged green gates without a new concern.
 
