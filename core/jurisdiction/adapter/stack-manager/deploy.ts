@@ -15,10 +15,7 @@ import {
   persistVerifiedJurisdictionStack,
 } from './persistence';
 import { verifyJurisdictionStack } from './verification';
-import {
-  createJurisdictionGossipAnnouncement,
-  type JurisdictionGossipAnnouncement,
-} from '../../gossip/announcement';
+import { createJurisdictionGossipAnnouncement, type JurisdictionGossipAnnouncement } from '../../gossip/announcement';
 import type {
   DeployJurisdictionStackRequest,
   DeployJurisdictionStackResult,
@@ -62,19 +59,19 @@ const sanitizeDeployTail = (tail: string, secretHex: string, rpcUrl: string): st
     .slice(-4_096)
     .trim();
 
-const CHILD_ENV_ALLOWLIST = [
-  'PATH', 'HOME', 'TMPDIR', 'XDG_CACHE_HOME', 'BUN_INSTALL', 'CI', 'NO_COLOR',
-] as const;
+const CHILD_ENV_ALLOWLIST = ['PATH', 'HOME', 'TMPDIR', 'XDG_CACHE_HOME', 'BUN_INSTALL', 'CI', 'NO_COLOR'] as const;
 
-export const buildStackManagerChildEnv = (deployment: Readonly<{
-  rpcUrl: string;
-  chainId: number;
-  signerPrivateKeyHex: string;
-  foundationRecipient: string;
-  stablecoinAddress: string;
-  deployTestStablecoin: boolean;
-  outputPath: string;
-}>): Record<string, string> => {
+export const buildStackManagerChildEnv = (
+  deployment: Readonly<{
+    rpcUrl: string;
+    chainId: number;
+    signerPrivateKeyHex: string;
+    foundationRecipient: string;
+    stablecoinAddress: string;
+    deployTestStablecoin: boolean;
+    outputPath: string;
+  }>,
+): Record<string, string> => {
   const env: Record<string, string> = {};
   for (const name of CHILD_ENV_ALLOWLIST) {
     const value = process.env[name];
@@ -94,8 +91,7 @@ export const buildStackManagerChildEnv = (deployment: Readonly<{
 };
 
 export const probeJurisdictionStackTarget = async (
-  request: Pick<DeployJurisdictionStackRequest, 'rpcUrl' | 'signerId'> &
-    Readonly<{ expectedChainId?: number }>,
+  request: Pick<DeployJurisdictionStackRequest, 'rpcUrl' | 'signerId'> & Readonly<{ expectedChainId?: number }>,
 ): Promise<StackManagerProbe> => {
   const provider = new JsonRpcProvider(request.rpcUrl);
   try {
@@ -124,7 +120,11 @@ export const deployJurisdictionStack = async (
   }
   if (request.publication === 'official') {
     const authority = officialFoundationSignerId;
-    if (!authority || authority !== request.signerId.toLowerCase() || authority !== request.foundationRecipient.toLowerCase()) {
+    if (
+      !authority ||
+      authority !== request.signerId.toLowerCase() ||
+      authority !== request.foundationRecipient.toLowerCase()
+    ) {
       throw new Error('FOUNDATION_PUBLICATION_AUTHORITY_UNAVAILABLE');
     }
   }
@@ -139,22 +139,25 @@ export const deployJurisdictionStack = async (
     const outputPath = join(temporaryDirectory, 'manifest.json');
     provider = new JsonRpcProvider(request.rpcUrl);
     options.onPhase?.('deploying');
-    const child = Bun.spawn([
-      'bunx', 'hardhat', 'run', 'scripts/deploy-stack.cjs', '--network', 'stack-manager',
-    ], {
-      cwd: new URL('../../../../jurisdictions', import.meta.url).pathname,
-      env: buildStackManagerChildEnv({
-        rpcUrl: request.rpcUrl,
-        chainId: request.expectedChainId,
-        signerPrivateKeyHex,
-        foundationRecipient: request.foundationRecipient,
-        stablecoinAddress: request.stablecoin.kind === 'existing' ? request.stablecoin.address : '',
-        deployTestStablecoin: request.stablecoin.kind === 'test',
-        outputPath,
-      }),
-      stdout: 'pipe',
-      stderr: 'pipe',
-    });
+    // Deployment shares the canonical TypeScript Hanko encoder. The runner
+    // must use Bun rather than the host Node version's optional TS support.
+    const child = Bun.spawn(
+      ['bunx', '--bun', 'hardhat', 'run', 'scripts/deploy-stack.cjs', '--network', 'stack-manager'],
+      {
+        cwd: new URL('../../../../jurisdictions', import.meta.url).pathname,
+        env: buildStackManagerChildEnv({
+          rpcUrl: request.rpcUrl,
+          chainId: request.expectedChainId,
+          signerPrivateKeyHex,
+          foundationRecipient: request.foundationRecipient,
+          stablecoinAddress: request.stablecoin.kind === 'existing' ? request.stablecoin.address : '',
+          deployTestStablecoin: request.stablecoin.kind === 'test',
+          outputPath,
+        }),
+        stdout: 'pipe',
+        stderr: 'pipe',
+      },
+    );
     const [exitCode, stdoutTail, stderrTail] = await Promise.all([
       child.exited,
       readBoundedTail(child.stdout),
@@ -166,28 +169,36 @@ export const deployJurisdictionStack = async (
     }
     const manifest = decodeJurisdictionStackManifest(JSON.parse(await readFile(outputPath, 'utf8')));
     if (manifest.chainId !== request.expectedChainId) throw new Error('STACK_MANAGER_DEPLOY_CHAIN_ID_MISMATCH');
-    if (manifest.deployer.toLowerCase() !== request.signerId.toLowerCase()) throw new Error('STACK_MANAGER_DEPLOYER_MISMATCH');
+    if (manifest.deployer.toLowerCase() !== request.signerId.toLowerCase())
+      throw new Error('STACK_MANAGER_DEPLOYER_MISMATCH');
     if (manifest.foundationRecipient.toLowerCase() !== request.foundationRecipient.toLowerCase()) {
       throw new Error('STACK_MANAGER_FOUNDATION_RECIPIENT_MISMATCH');
     }
     options.onPhase?.('verifying');
     await verifyJurisdictionStack(provider, manifest, request.confirmations);
-    const announcement = request.publication === 'local' ? undefined : createJurisdictionGossipAnnouncement({
-      scope: request.publication,
-      key: request.key,
-      name: request.name,
-      rpcUrl: request.rpcUrl,
-      blockTimeMs: request.blockTimeMs,
-      currency: request.currency,
-      explorer: request.explorer,
-      ...(request.description ? { description: request.description } : {}),
-      chainId: manifest.chainId,
-      deployer: manifest.deployer,
-      foundationRecipient: manifest.foundationRecipient,
-      entityProviderDeploymentBlock: manifest.entityProviderDeploymentBlock,
-      contracts: manifest.contracts,
-      stablecoin: { symbol: 'USDT', ...manifest.registeredTokens.USDT },
-    }, options.signerPrivateKey, officialFoundationSignerId);
+    const announcement =
+      request.publication === 'local'
+        ? undefined
+        : createJurisdictionGossipAnnouncement(
+            {
+              scope: request.publication,
+              key: request.key,
+              name: request.name,
+              rpcUrl: request.rpcUrl,
+              blockTimeMs: request.blockTimeMs,
+              currency: request.currency,
+              explorer: request.explorer,
+              ...(request.description ? { description: request.description } : {}),
+              chainId: manifest.chainId,
+              deployer: manifest.deployer,
+              foundationRecipient: manifest.foundationRecipient,
+              entityProviderDeploymentBlock: manifest.entityProviderDeploymentBlock,
+              contracts: manifest.contracts,
+              stablecoin: { symbol: 'USDT', ...manifest.registeredTokens.USDT },
+            },
+            options.signerPrivateKey,
+            officialFoundationSignerId,
+          );
     options.onPhase?.('persisting');
     const localJurisdiction = await persistVerifiedJurisdictionStack(
       request,
@@ -198,7 +209,7 @@ export const deployJurisdictionStack = async (
     const publication = !announcement
       ? { status: 'not_requested' as const, scope: 'local' as const }
       : {
-          status: options.publishJurisdiction?.(announcement) ? 'published' as const : 'queued' as const,
+          status: options.publishJurisdiction?.(announcement) ? ('published' as const) : ('queued' as const),
           scope: announcement.scope,
           announcement,
         };

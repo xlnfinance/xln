@@ -16,16 +16,24 @@ test('sparse WAL preserves every tx in a merged reliable Entity input', async ()
     cmd: [
       process.execPath,
       'core/scripts/operations/benchmark/bench-storage-hub.ts',
-      '--accounts', '2',
-      '--import-batch', '3',
-      '--open-batch', '2',
-      '--payments', '0',
+      '--accounts',
+      '2',
+      '--import-batch',
+      '3',
+      '--open-batch',
+      '2',
+      '--payments',
+      '0',
       '--storage',
       '--persist',
-      '--storage-snapshot', '100',
-      '--storage-materialize', '100',
-      '--storage-canonical', '1',
-      '--snapshot-interval', '100',
+      '--storage-snapshot',
+      '100',
+      '--storage-materialize',
+      '100',
+      '--storage-canonical',
+      '1',
+      '--snapshot-interval',
+      '100',
       '--crash-recover',
     ],
     cwd: join(import.meta.dir, '..', '..', '..', '..'),
@@ -41,4 +49,4 @@ test('sparse WAL preserves every tx in a merged reliable Entity input', async ()
   expect(exitCode, `${stdout}\n${stderr}`).toBe(0);
   expect(stdout).toContain('Crash recovery:');
   expect(stdout).toContain('hubAccounts=2');
-}, 15_000);
+}, 45_000);

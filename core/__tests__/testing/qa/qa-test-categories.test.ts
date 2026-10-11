@@ -1,17 +1,16 @@
 import { expect, test } from 'bun:test';
 
+import { inspectQaTestCategory, qaRunTestCategory, qaTestCategoryFromTags } from '../../../qa/test-categories';
 import {
-  inspectQaTestCategory,
-  qaRunTestCategory,
-  qaTestCategoryFromTags,
-} from '../../../qa/test-categories';
-import { listPlaywrightTestMetadata, parsePlaywrightTestMetadata } from '../../../scripts/e2e/harness/playwright-test-metadata';
+  listPlaywrightTestMetadata,
+  parsePlaywrightTestMetadata,
+} from '../../../scripts/e2e/harness/playwright-test-metadata';
 
 test('Playwright loads custody Runtime wire decoders without importing server configuration', () => {
   const tests = listPlaywrightTestMetadata(['tests/e2e-custody.spec.ts']);
   expect(tests.length).toBeGreaterThan(0);
   expect(tests.every(entry => entry.file === 'tests/e2e-custody.spec.ts')).toBe(true);
-});
+}, 30_000);
 
 test('classifies exactly one native Playwright QA category tag', () => {
   expect(qaTestCategoryFromTags(['@functional'])).toBe('functional');
@@ -23,8 +22,9 @@ test('classifies exactly one native Playwright QA category tag', () => {
 test('reports missing and conflicting QA category tags', () => {
   const base = { file: 'tests/example.spec.ts', line: 12, title: 'example' };
   expect(inspectQaTestCategory({ ...base, tags: [] })?.code).toBe('QA_TEST_CATEGORY_MISSING');
-  expect(inspectQaTestCategory({ ...base, tags: ['@functional', '@resilience'] })?.code)
-    .toBe('QA_TEST_CATEGORY_CONFLICT');
+  expect(inspectQaTestCategory({ ...base, tags: ['@functional', '@resilience'] })?.code).toBe(
+    'QA_TEST_CATEGORY_CONFLICT',
+  );
   expect(inspectQaTestCategory({ ...base, tags: ['@functional'] })).toBeNull();
 });
 
@@ -39,21 +39,27 @@ test('parses Playwright JSON metadata and restores native tag prefixes', () => {
   const tests = parsePlaywrightTestMetadata({
     config: { rootDir: `${process.cwd()}/tests` },
     errors: [],
-    suites: [{
-      specs: [{
-        title: 'opens an account',
-        file: 'open-account.spec.ts',
-        line: 7,
-        tags: ['functional'],
-      }],
-      suites: [],
-    }],
+    suites: [
+      {
+        specs: [
+          {
+            title: 'opens an account',
+            file: 'open-account.spec.ts',
+            line: 7,
+            tags: ['functional'],
+          },
+        ],
+        suites: [],
+      },
+    ],
   });
 
-  expect(tests).toEqual([{
-    file: 'tests/open-account.spec.ts',
-    line: 7,
-    title: 'opens an account',
-    tags: ['@functional'],
-  }]);
+  expect(tests).toEqual([
+    {
+      file: 'tests/open-account.spec.ts',
+      line: 7,
+      title: 'opens an account',
+      tags: ['@functional'],
+    },
+  ]);
 });

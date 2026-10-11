@@ -402,7 +402,10 @@ jobs:
         with:
           name: e2e-test-results
           path: |
-            .logs/gates/
+            .logs/gates/*.log
+            .logs/gates/react-*/wallet-browser.log
+            .logs/gates/react-*/wallet-results.json
+            .logs/gates/react-*/wallet-artifacts/
             .logs/e2e-parallel/
             test-results/
             playwright-report/

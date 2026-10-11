@@ -12,22 +12,23 @@ import {
 
 const entityId = (index: number): string => `0x${index.toString(16).padStart(64, '0')}`;
 
-const profile = (id: string, peers: string[] = []): Profile => ({
-  entityId: id,
-  entityEncryptionPublicKey: `0x${'11'.repeat(32)}`,
-  runtimeId: `0x${id.slice(2, 42)}`,
-  runtimeEncPubKey: `0x${'22'.repeat(32)}`,
-  name: id.slice(-8),
-  avatar: '',
-  bio: '',
-  website: '',
-  lastUpdated: 1,
-  publicAccounts: peers,
-  accounts: peers.map(counterpartyId => ({ counterpartyId })),
-  wsUrl: null,
-  relays: [],
-  metadata: { isHub: peers.length > 0 },
-}) as Profile;
+const profile = (id: string, peers: string[] = []): Profile =>
+  ({
+    entityId: id,
+    entityEncryptionPublicKey: `0x${'11'.repeat(32)}`,
+    runtimeId: `0x${id.slice(2, 42)}`,
+    runtimeEncPubKey: `0x${'22'.repeat(32)}`,
+    name: id.slice(-8),
+    avatar: '',
+    bio: '',
+    website: '',
+    lastUpdated: 1,
+    publicAccounts: peers,
+    accounts: peers.map(counterpartyId => ({ counterpartyId })),
+    wsUrl: null,
+    relays: [],
+    metadata: { isHub: peers.length > 0 },
+  }) as Profile;
 
 test('known-profile inspection resolves a large peer bundle from the keyed Runtime graph', async () => {
   const env = createEmptyEnv('gossip-profile-keyed-lookup');
@@ -58,8 +59,10 @@ test('a profile lookup batch never outgrows the relay cap, and a full batch cost
   // cap: one caller could pile thousands of ids into one relay request, which
   // the relay refused whole, failing every caller riding in it.
   const batcher = createGossipProfileLookupBatcher(createGossipProfileAdmission(60_000, 1, 300));
-  const fetched: number[] = [];
-  const fetchProfiles = async (entityIds: string[]) => { fetched.push(entityIds.length); };
+  const fetched: string[][] = [];
+  const fetchProfiles = async (entityIds: string[]) => {
+    fetched.push(entityIds);
+  };
   const id = (index: number) => `0x${index.toString(16).padStart(64, '0')}`;
   const pending: Array<Promise<void>> = [];
   for (let index = 0; index < GOSSIP_PROFILE_LOOKUP_BATCH_MAX_IDS; index += 1) {
@@ -71,5 +74,9 @@ test('a profile lookup batch never outgrows the relay cap, and a full batch cost
   const other = batcher.lookup(id(GOSSIP_PROFILE_LOOKUP_BATCH_MAX_IDS), 'client-b', fetchProfiles);
   expect(other).not.toBe('rate-limited');
   await Promise.all([...pending, other as Promise<void>]);
-  expect(fetched).toEqual([GOSSIP_PROFILE_LOOKUP_BATCH_MAX_IDS, 1]);
+  // Independent quiet-window timers may flush either request first. Neither
+  // completion order nor wall-clock scheduling owns financial output order.
+  expect(fetched).toHaveLength(2);
+  expect(fetched).toContainEqual(Array.from({ length: GOSSIP_PROFILE_LOOKUP_BATCH_MAX_IDS }, (_, index) => id(index)));
+  expect(fetched).toContainEqual([id(GOSSIP_PROFILE_LOOKUP_BATCH_MAX_IDS)]);
 });
