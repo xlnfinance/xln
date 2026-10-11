@@ -16,7 +16,7 @@ function book(env: RuntimeReplica) {
   const state = replica(env, bank).state.lending;
   assert(state);
   const loan = [...state.loans.values()][0];
-  const pool = state.pools.get(positionId);
+  const pool = state.savings.get(positionId);
   assert(loan && pool);
   return { loan, pool };
 }
@@ -77,8 +77,8 @@ if (mode === 'originate') {
     env.state.timestamp = book(env).loan.dueAt + termMs / 2;
     await converge(env, 40);
     assert.equal(book(env).loan.status, 'defaulted');
-    assert.equal(book(env).pool.borrowedAmount, 0n);
-    assert.equal(book(env).pool.availableAmount, 5_000n);
+    assert.equal(book(env).pool.principalAmount, 5_000n);
+    assert.equal(book(env).pool.status, 'open');
     // A borrower's default does not erase the bank's independent saver claim.
     await command(env, saver, { type: 'lendingClosePosition', data: {
       hubEntityId: bank.entityId, positionId,
@@ -135,7 +135,7 @@ if (mode === 'originate') {
     assert.deepEqual(financialState(env).accounts, accountsBefore);
     assert.equal(balance(env, borrower, bank), before);
     assert.equal(balance(env, saver, bank), 10_050n);
-    assert.equal(book(env).pool.availableAmount, 0n);
+    assert.equal(book(env).pool.status, 'closed');
     evidence(env, 'redelivered');
     await closeRuntimeDb(env);
     await closeInfraDb(env);

@@ -35,7 +35,7 @@ function subtractLoans(data: Record<string, unknown>, user: string, account: Len
     if (seen.has(id)) throw new Error(`LENDING_BALANCE_DUPLICATE:${id}`);
     seen.add(id);
     if (loan['hubEntityId'] !== account.hubEntityId) throw new Error('LENDING_BALANCE_OWNER_MISMATCH');
-    if (loan['borrowerEntityId'] !== user) continue; // Lender's claim is already counted in its pool.
+    if (loan['borrowerEntityId'] !== user) throw new Error('LENDING_BALANCE_OWNER_MISMATCH');
     if (intents.has(`repay:${id}`) || intents.has(`dispute:${id}`)) { awaiting.delete(id); continue; }
     if (loan['status'] === 'repaid' || loan['status'] === 'disputed') {
       if (awaiting.has(id)) throw new Error(`LENDING_BALANCE_SYNC_PENDING:${id}`);
@@ -59,12 +59,12 @@ export function projectLendingBalance(
 ): Map<number, bigint> {
   const data = record(response);
   if (data['success'] !== true) throw new Error(String(data['error'] || 'LENDING_BALANCE_REQUEST_FAILED'));
-  if (data['hubEntityId'] !== account.hubEntityId || !Array.isArray(data['pools'])) throw new Error('LENDING_BALANCE_RESPONSE_INVALID');
+  if (data['hubEntityId'] !== account.hubEntityId || !Array.isArray(data['savings'])) throw new Error('LENDING_BALANCE_RESPONSE_INVALID');
   const intents = new Map(account.intents);
   const awaiting = new Set(account.intents.filter(([key]) => key.startsWith('fund:') && !intents.has(`payout:${key.slice(5)}`) && !intents.has(`dispute:${key.slice(5)}`)).map(([key]) => key.slice(5)));
   const totals = new Map<number, bigint>();
   const seen = new Set<string>();
-  for (const value of data['pools']) {
+  for (const value of data['savings']) {
     const pool = record(value);
     const id = String(pool['positionId']);
     if (seen.has(id)) throw new Error(`LENDING_BALANCE_DUPLICATE:${id}`);
@@ -80,9 +80,9 @@ export function projectLendingBalance(
     if (pool['status'] !== 'open' && pool['status'] !== 'closing') throw new Error('LENDING_BALANCE_STATUS_INVALID');
     const tokenId = pool['tokenId'];
     if (typeof tokenId !== 'number' || !Number.isSafeInteger(tokenId) || tokenId <= 0) throw new Error('LENDING_BALANCE_TOKEN_INVALID');
-    // Available includes received interest; allocated principal remains the lender's claim.
-    // Never add principalAmount or future loan interest again.
-    const balance = amount(pool['availableAmount']) + amount(pool['borrowedAmount']);
+    // The bank's independent savings quote includes principal once. Borrower
+    // allocation, collection or default cannot change this saver liability.
+    const balance = amount(pool['closeAmount']);
     totals.set(tokenId, (totals.get(tokenId) ?? 0n) + balance);
     awaiting.delete(id);
   }

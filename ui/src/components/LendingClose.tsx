@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { isAccountTxKindAvailable } from '@xln/core/account/tx/admission-policy';
-import type { LendingPool } from '../runtime/financial/lending';
+import type { LendingSavings } from '../runtime/financial/lending';
 import type { WalletView } from '../runtime/views';
 import { sendEntityTxs } from '../runtime/tx';
 import { useApp } from '../runtime/store';
@@ -14,7 +14,7 @@ export function LendingClose({
 	wallet,
 	onSubmitted,
 }: {
-	pool: LendingPool;
+	pool: LendingSavings;
 	wallet: WalletView;
 	onSubmitted: () => void;
 }) {
@@ -24,7 +24,6 @@ export function LendingClose({
 	const account = wallet.accounts.find(entry => entry.counterpartyId === pool.hubEntityId.toLowerCase());
 	if (
 		pool.status !== 'open' ||
-		(pool.borrowedAmount !== 0n && !pool.matured) ||
 		!account ||
 		pool.lenderEntityId.toLowerCase() !== wallet.entityId
 	)

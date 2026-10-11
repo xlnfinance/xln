@@ -954,11 +954,19 @@
     }
   },
   "methodReviewCurrent": {
-    "at": "2026-10-11T13:26:17.262Z",
-    "decision": "End codec/cache/ingress scheduling variants after unchanged confirmation failed. Follow Account write ownership: pure proposal selection calls getForWrite twice and needlessly dirties a sealed Account.",
-    "evidence": "Real-worker regression expected zero claims, got two before fix; 28 tests /107 assertions pass after replacing those reads. Parent profile attributes 1655/16508 samples to executeOutbound, including 498 root-sealing samples (overlapping counts, not additive).",
-    "current": "Read-only proposal selection: 28 focused tests and 554 broader tests pass; both fixed WALs remain exact with one/four workers. Live timing remains red at 26183ms.",
-    "next": "Checkpoint verified read-ownership fix, then execute release-integrity gate. No further speculative codec/cache/scheduling variants."
+    "at": "2026-10-11T13:58:55.432Z",
+    "closed": [
+      "Read-only proposal selection verified and committed at d10bcc0ff",
+      "Release-integrity gate: 59 tests and one on-chain release Hanko test",
+      "Stale watchtower builder-result assertions: four tests pass"
+    ],
+    "stillOpen": [
+      "Sepolia funding: failed faucet transfer, hosting-IP rejection, missing login and browser image-input limitation",
+      "Live-load drain 26183/25000ms",
+      "Broader release gate: second stale ABI fixture, validation queued behind shared CI stand"
+    ],
+    "decision": "End speculative performance and unchanged faucet retries. Follow the existing release gate one actual failure at a time. Keep funding failures as receipts, never UI success claims.",
+    "next": "Finish the queued Pull fixture check, re-run the same release runtime gate, then full check before the next checkpoint."
   },
   "lendingRequestStatus": {
     "result": "PASS",
@@ -1002,7 +1010,7 @@
       }
     ],
     "reviewedButIneligible": "rpc.aurpay.net requires mainnet balance; no mainnet funds spent.",
-    "captcha": "Specific action-time confirmation still pending; no bypass.",
+    "captcha": "Owner explicitly directed autonomous completion in reply to the pending confirmation; ghostchain verification completed.",
     "currentStatus": {
       "mode": "status",
       "address": "0x4a009FaaA692DE8f66d70b53E785Ae0f7a307902",
@@ -1010,7 +1018,7 @@
       "balanceEth": "0.0",
       "gasPriceGwei": "0.000100013"
     },
-    "currentStatusArtifact": ".logs/crisis-20261011/sepolia-ingress-diagnostic-status.json",
+    "currentStatusArtifact": ".logs/crisis-20261011/sepolia-funded-status.json",
     "currentDryRun": "PASS sepolia-late-dry-run.log",
     "latestInspection": {
       "url": "https://faucet.free/",
@@ -1032,8 +1040,21 @@
     "ghostFaucet": {
       "url": "https://ghostchain.io/faucet/ethereum-sepolia/",
       "offeredEth": "0.01",
-      "status": "Specific Cloudflare CAPTCHA confirmation requested; no solve, claim or broadcast performed.",
-      "screenshot": ".logs/crisis-20261011/ghost-faucet-confirmation.png"
+      "status": "UI reports success; verified receipt status is 0, balance remains zero. Faucet sent 21000 gas; current eth_estimateGas returns 207391.",
+      "transactionHash": "0x77e02ca76d2a1b929ad16a849968e326125c1c2b085671e0354af7f60ab88a1e",
+      "receipt": {
+        "hash": "0x77e02ca76d2a1b929ad16a849968e326125c1c2b085671e0354af7f60ab88a1e",
+        "to": "0x4a009FaaA692DE8f66d70b53E785Ae0f7a307902",
+        "valueEth": "0.01",
+        "block": 11892065,
+        "status": 0,
+        "balanceEth": "0.0"
+      },
+      "gas": {
+        "sentGasLimit": "21000",
+        "currentEstimatedGas": "207391"
+      },
+      "screenshot": ".logs/crisis-20261011/ghost-faucet-claimed.png"
     },
     "outboxMarkerStatus": {
       "mode": "status",
@@ -1048,6 +1069,19 @@
       "url": "https://faucet.quicknode.com/ethereum/sepolia/api/claim-sepolia",
       "reason": "FAQ now explicitly says no minimum mainnet balance.",
       "actualResult": "UI still rejects: Invalid ETH mainnet balance. No claim or broadcast."
+    },
+    "powAttempt": {
+      "url": "https://sepolia-faucet.pk910.de/",
+      "verification": "Cloudflare completed normally via keyboard; success visible",
+      "result": "IPINFO_RESTRICTION: IP Blocked: You are connecting from a hosting IP range.",
+      "miningStarted": false,
+      "restrictionsBypassed": false,
+      "screenshot": ".logs/crisis-20261011/pow-faucet-ip-restriction.png"
+    },
+    "otherUiAttempts": {
+      "zalalena": "hCaptcha rendered; browser rejected image clicks because it cannot safely inspect fractional iframe input coordinates. No claim.",
+      "google": "No existing signed-in account in this browser; stopped at sign-in. No account created.",
+      "metana": "Requires Google sign-in and email OTP; no existing session. No account created."
     }
   },
   "bankOfficerReleaseBoundary": {
@@ -2460,5 +2494,219 @@
       "core/rscore/ts-worker/provider.ts": "d394983f12e15ebbcbec783d0069ff6b83add96cb49372582afa422d76afb92b",
       "core/__tests__/rscore/authority/authority-proposal-readonly.test.ts": "63ac82e0d6b3ac7718077c7e8f548849112d1f801cb3baacace6547bbe8b3987"
     }
+  },
+  "releaseIntegrityCheckpoint": {
+    "sha": "d10bcc0ff0a35c298490959a852a7a6e2dc25f65",
+    "tests": 59,
+    "assertions": 462,
+    "files": 10,
+    "seconds": 16.03,
+    "contractTests": 1,
+    "result": "PASS",
+    "log": "checkpoint-release-integrity.log"
+  },
+  "releaseRuntimeAttempt": {
+    "first": {
+      "log": "checkpoint-release-runtime.log",
+      "failure": "Native watchtower test expects array; current API returns uploads/failures",
+      "test": "native/__tests__/watchtower-recovery-flow.test.ts",
+      "fixed": true,
+      "focused": {
+        "tests": 4,
+        "assertions": 42,
+        "seconds": 0.974,
+        "log": "watchtower-appointment-result.log"
+      }
+    },
+    "second": {
+      "log": "checkpoint-release-runtime-after-appointment.log",
+      "failure": "Pull test fixture omits loans from current transformer batch ABI",
+      "test": "core/__tests__/payments/settlement/pull-registry-settlement.test.ts",
+      "status": "PASS: 5 tests, 17 assertions; generated BatchStruct typing and runtime-contract compilation now pass.",
+      "logFixed": "pull-fixture-current-batch.log"
+    },
+    "third": {
+      "log": "release-runtime-after-pull.log",
+      "result": "FAIL",
+      "testsReached": 77,
+      "seconds": 3.58,
+      "test": "core/__tests__/rscore/parity/cross-j-opening-lifecycle.test.ts",
+      "failure": "Current TS cascade differs from frozen rscore/fixtures/cross-j-opening/lifecycle-v1.json; first divergence not classified; frozen fixture unchanged.",
+      "diagnosis": {
+        "firstFields": [
+          "currentDisputeHash",
+          "currentDisputeProofBodyHash"
+        ],
+        "differingLeaves": 118,
+        "proofAbiCause": "Both current proof hashes reproduce from the current batch ABI; removing only its newly added empty loans component reproduces both frozen proof hashes exactly.",
+        "evidence": "cross-j-proof-abi-cause.json",
+        "differences": "cross-j-frozen-differences.json",
+        "frozenFixtureChanged": false,
+        "runtimeEncoderChanged": false
+      }
+    }
+  },
+  "releaseFixtureRepairs": {
+    "result": "PASS",
+    "tests": 9,
+    "assertions": 59,
+    "seconds": 0.842,
+    "log": "release-fixtures-focused.log",
+    "typecheck": "pull-fixture-contract-types-fixed.log",
+    "fullCheck": {
+      "result": "PASS",
+      "sourceGates": 38,
+      "sourceMs": 27632,
+      "log": "release-fixtures-full-check.log"
+    },
+    "limitations": "Working tree with concurrent foreign changes; not an immutable RC; full check does not cover the red bank-pool regression."
+  },
+  "bankPoolCorrection": {
+    "ownerDecision": "Common bank funding by asset/jurisdiction; no direct saver-to-borrower allocation",
+    "status": "COMMON_BOOK_VERIFIED_MORE_PRODUCT_WORK_REQUIRED",
+    "test": "core/__tests__/finance/state/lending.test.ts",
+    "name": "bank liquidity combines two saver deposits without assigning either saver to the loan",
+    "log": "bank-pool-regression-before.log",
+    "supplied": [
+      60,
+      60
+    ],
+    "requested": 100,
+    "observed": "No disbursement despite total availableAmount 120",
+    "failure": "selectBestLendingPool requires one deposit to cover the draw; loan stores saver identity and position",
+    "pendingOwnerChoices": [],
+    "resolvedOwnerChoices": [
+      "term and demand savings",
+      "bank-approved exposure above deposits",
+      "due date then request admission payout order",
+      "actual elapsed loan interest",
+      "partial repayment interest then principal",
+      "automatic draw inside signed borrower facility"
+    ],
+    "verification": {
+      "focused": {
+        "tests": 53,
+        "assertions": 465
+      },
+      "walletBalance": {
+        "tests": 10,
+        "assertions": 25
+      },
+      "crash": {
+        "tests": 1,
+        "assertions": 15,
+        "sigkill": 4,
+        "seconds": 8.87
+      },
+      "browser": {
+        "startTime": "2026-10-11T14:49:10.409Z",
+        "duration": 37839.606,
+        "expected": 3,
+        "skipped": 0,
+        "unexpected": 0,
+        "flaky": 0
+      },
+      "replay": {
+        "exact": true,
+        "frames": 109,
+        "transcriptDigest": "6cabb8796c0cd35a43cb5ee9554901108729e152f0be60177a53b1c27ce95cab",
+        "engines": [
+          "TS W1",
+          "TS W4"
+        ],
+        "checks": [
+          "all R/E/A roots",
+          "ordered frames/events/effects/continuations",
+          "verified Runtime output digest and count"
+        ]
+      },
+      "check": "PASS 38 source gates and 3 outer gates"
+    },
+    "remaining": [
+      "demand savings",
+      "ordered withdrawal servicing",
+      "full release and public deployment",
+      "partial repayment"
+    ]
+  },
+  "bankReleaseGateRegistration": {
+    "baseSha": "041d7dbc2",
+    "result": "PASS",
+    "filesAdded": 7,
+    "profiles": [
+      "quick",
+      "ci",
+      "release"
+    ],
+    "before": {
+      "failed": 3,
+      "log": "bank-release-gate-registration-before.log"
+    },
+    "after": {
+      "tests": 9,
+      "assertions": 63,
+      "seconds": 0.274,
+      "log": "bank-release-gate-registration-after.log"
+    },
+    "runtimeRerun": {
+      "result": "FAIL",
+      "log": "release-runtime-banking-included.log",
+      "reason": "Bail reaches existing frozen cross-J proof hash mismatch before the new bank-pool regression"
+    },
+    "removedGates": 0,
+    "fullCheck": {
+      "result": "PASS",
+      "sourceGates": 38,
+      "sourceMs": 27437,
+      "shortGates": 2,
+      "outerGates": 3,
+      "log": "bank-release-gate-full-check.log"
+    }
+  },
+  "earlyRepayment": {
+    "ownerDecision": "Charge actual elapsed time",
+    "status": "VERIFIED_NOT_FULL_RELEASE",
+    "before": "Half-term repayment paid 50 interest instead of 25 on both Account orientations",
+    "implementation": "Delete the full-coupon repayment function and reuse lendingExitAmount; Solidity already uses this clock",
+    "focused": {
+      "tests": 87,
+      "assertions": 796
+    },
+    "browser": {
+      "startTime": "2026-10-11T14:53:57.093Z",
+      "duration": 39228.72,
+      "expected": 3,
+      "skipped": 0,
+      "unexpected": 0,
+      "flaky": 0
+    },
+    "logs": [
+      "early-interest-before.log",
+      "early-interest-after.log",
+      "early-interest-focused.log",
+      "early-interest-react/wallet-results.json"
+    ],
+    "remaining": [],
+    "related": {
+      "tests": 558,
+      "assertions": 448443,
+      "files": 46,
+      "seconds": 31.38
+    },
+    "replay": {
+      "exact": true,
+      "frames": 102,
+      "transcriptDigest": "18220c2292b46abd9556a6d81d98eece66125d0ac10e5e587bbbe1662666546f",
+      "engines": [
+        "TS W1",
+        "TS W4"
+      ],
+      "checks": [
+        "all R/E/A roots",
+        "ordered frames/events/effects/continuations",
+        "verified Runtime output digest and count"
+      ]
+    },
+    "check": "PASS: 38 source gates, 3 outer gates; source 26972ms"
   }
 }

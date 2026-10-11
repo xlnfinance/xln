@@ -29,6 +29,20 @@ Only collateral secures recovery. The full signed term-plus-late coupon reserves
 accepted Account risk. Repayment debits the exact Account-clock quote within the
 borrower's maximum; borrower default never erases the saver liability.
 
+Latest owner correction: bank funding must be pooled by asset/jurisdiction, with
+no direct saver-to-borrower allocation. That matcher and its allocation counters
+are now removed: two 60-unit deposits support an approved 100 or 150 draw, with
+independent savings liabilities. Focused tests, real SIGKILL recovery,
+three rebuilt browser journeys and source checks pass. All six owner policy choices are
+resolved: both term and demand deposits; bank-authorized lending above deposits;
+maturity/request ordered unpaid withdrawals; actual-time loan interest; partial
+interest-first repayments; automatic draws inside signed borrower facilities.
+Early repayment now uses the same elapsed-time formula as the contract. Current
+evidence: 558 related tests, 87 focused financial cases, three React journeys,
+102 fresh WAL frames exact through TS W1/W4, and full check. Demand terms,
+ordered servicing and partial repayment remain release work.
+Prefer one general signed-obligation mechanism and delete redundant paths.
+
 Checkpoint evidence: 554 related tests / 448,400 assertions, three real-clock local
 funding/exit proofs, two watchtower tests, nine rebuilt browser journeys,
 145 exact fixed WAL frames before/after through TS W1/W4, 49 Hardhat cases and

@@ -9,7 +9,6 @@ import {
   lendingLoanRepaymentAmount,
   ensureLendingState,
   LENDING_TERM_MS,
-  selectBestLendingPool,
 } from '../../../../extensions/lending';
 import type { AccountTxTarget } from './orderbook/queue';
 import { assertLendingCovenant } from '../../../../protocol/dispute/lending-covenant';
@@ -44,19 +43,17 @@ function applyLendingFund(
   ) {
     throw new Error(`LENDING_FUND_PROPOSER_MISMATCH:${tx.data.positionId}`);
   }
-  if (lending.pools.has(tx.data.positionId)) {
+  if (lending.savings.has(tx.data.positionId)) {
     throw new Error(`LENDING_POSITION_ALREADY_EXISTS:${tx.data.positionId}`);
   }
   const covenant = context.account.state.subcontracts?.get(tx.data.positionId);
   assertLendingCovenant(covenant);
-  lending.pools.set(tx.data.positionId, {
+  lending.savings.set(tx.data.positionId, {
     positionId: tx.data.positionId,
     hubEntityId,
     lenderEntityId: proposer,
     tokenId: tx.data.tokenId,
     principalAmount: tx.data.amount,
-    availableAmount: tx.data.amount,
-    borrowedAmount: 0n,
     interestBps: tx.data.interestBps,
     termId: tx.data.termId,
     termMs: LENDING_TERM_MS[tx.data.termId],
@@ -80,17 +77,9 @@ function applyLendingBorrow(
   if (now >= tx.data.expiresAt) return { status: 'declined', reason: 'borrower authorization expired' };
   const authorized = approvedLendingDraw(context.state, context.account, proposer, tx.data, now);
   if (!authorized.ok) return { status: 'declined', reason: authorized.reason };
-  const pool = selectBestLendingPool(
-    lending,
-    tx.data.tokenId,
-    tx.data.amount,
-    tx.data.termId,
-    authorized.interestBps,
-  );
-  // The borrower signed a request, not a bank funding commitment. A valid
-  // request arriving at an empty bank must not throw after Account commit.
-  // Retain its consumed id and certify the decline without reserving any funds.
-  if (!pool) return { status: 'declined', reason: 'no matching liquidity' };
+  // The bank's signed facility authorizes its own credit exposure. Depositors
+  // are creditors of the bank, never counterparties or funding slots of a draw.
+  // Actual disbursement still passes the canonical Account payment/risk checks.
   const loanId = buildLendingLoanId({
     hubEntityId,
     borrowerEntityId: proposer,
@@ -104,27 +93,22 @@ function applyLendingBorrow(
     throw new Error(`LENDING_LOAN_ALREADY_EXISTS:${loanId}`);
   }
   const interestAmount = computeLendingInterest(tx.data.amount, authorized.interestBps);
-  pool.availableAmount -= tx.data.amount;
-  pool.borrowedAmount += tx.data.amount;
-  pool.updatedAt = now;
   lending.loans.set(loanId, {
     requestId: tx.data.requestId,
     loanId,
     hubEntityId,
     borrowerEntityId: proposer,
-    lenderEntityId: pool.lenderEntityId,
-    positionId: pool.positionId,
     tokenId: tx.data.tokenId,
     principalAmount: tx.data.amount,
     interestAmount,
     repaymentAmount: tx.data.amount + interestAmount,
     repaidAmount: 0n,
     interestBps: authorized.interestBps,
-    termId: pool.termId,
-    termMs: pool.termMs,
+    termId: tx.data.termId,
+    termMs: LENDING_TERM_MS[tx.data.termId],
     openedAt: now,
     lateMs: authorized.lateMs,
-    dueAt: now + pool.termMs,
+    dueAt: now + LENDING_TERM_MS[tx.data.termId],
     updatedAt: now,
     status: 'opening',
     approval: { ...authorized.approval },
@@ -132,7 +116,7 @@ function applyLendingBorrow(
   accountTxs.push({ accountId: proposer, tx: { type: 'lending_disburse', data: {
     loanId, requestId: tx.data.requestId, maxInterestBps: tx.data.maxInterestBps, maxLateMs: tx.data.maxLateMs, lateMs: authorized.lateMs, expiresAt: tx.data.expiresAt,
     hubEntityId, borrowerEntityId: proposer, tokenId: tx.data.tokenId, amount: tx.data.amount,
-    termId: pool.termId, interestBps: authorized.interestBps,
+    termId: tx.data.termId, interestBps: authorized.interestBps,
   } } });
   return { status: 'opening' };
 }
@@ -179,29 +163,12 @@ function applyLendingRepay(
   ) {
     throw new Error(`LENDING_REPAYMENT_MISMATCH:${tx.data.loanId}`);
   }
-  const pool = lending.pools.get(loan.positionId);
-  if (!pool) throw new Error(`LENDING_POOL_MISSING:${loan.positionId}`);
-  const defaulted = loan.status === 'defaulted';
-  if (!defaulted && pool.borrowedAmount < loan.principalAmount) {
-    throw new Error(`LENDING_POOL_BORROWED_UNDERFLOW:${loan.positionId}`);
-  }
   // The bilateral repayment already moved principal plus interest. Its commit
   // settles the book; no second payment or credit-limit rewrite is needed.
   loan.repaymentAmount = loan.repaidAmount + remaining;
   loan.repaidAmount = loan.repaymentAmount;
   loan.status = 'repaid';
   loan.updatedAt = now;
-  // The borrower's authenticated repayment intent moves money once. Default
-  // already released the depositor's principal, including when it was withdrawn.
-  // Crediting that position again would pay the same principal twice; late
-  // recovery belongs to the bank that retained the defaulted receivable.
-  if (!defaulted) {
-    pool.borrowedAmount -= loan.principalAmount;
-    // Borrower interest is bank income. The saver has its own independently
-    // agreed term return, included by the canonical close calculation at maturity.
-    if (pool.status === 'open') pool.availableAmount += loan.principalAmount;
-    pool.updatedAt = now;
-  }
 }
 
 export function applyCommittedLendingFollowup(
@@ -246,9 +213,8 @@ export function applyCommittedLendingFollowup(
   if (tx.type === 'lending_repay') return applyLendingRepay(context, tx);
   if (tx.type === 'lending_close_request') {
     const result = applyLendingCloseRequest(context, tx);
-    if (result === 'active-loans' || result === 'payout-capacity') {
-      const reason = result === 'active-loans' ? 'active loans before maturity' : 'insufficient payout capacity';
-      addMessage(state, `Lending close ${tx.data.positionId} deferred: ${reason}`);
+    if (result === 'payout-capacity') {
+      addMessage(state, `Lending close ${tx.data.positionId} deferred: insufficient payout capacity`);
     }
     return;
   }

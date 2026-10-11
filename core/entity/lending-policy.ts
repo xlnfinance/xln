@@ -63,6 +63,11 @@ export const decodeLendingFacility = (value: unknown): LendingFacility => {
 
 /** Validate policy authority when restoring, before it may authorize new money. */
 export const validateLendingPolicies = (lending: Record<string, unknown>): void => {
+  requireExactBoundaryKeys(lending, ['savings', 'loans'], ['terms', 'facilities'], 'LENDING_BOOK_FIELDS');
+  for (const raw of requireMap(lending['savings'], 'LENDING_SAVINGS_MAP_INVALID').values()) {
+    const savings = requireBoundaryRecord(raw, 'LENDING_SAVINGS_INVALID');
+    if ('availableAmount' in savings || 'borrowedAmount' in savings) throw new Error('LENDING_ALLOCATION_MIGRATION_REQUIRED');
+  }
   if (lending['terms'] !== undefined) for (const [key, raw] of requireMap(lending['terms'], 'LENDING_TERMS_MAP_INVALID')) {
     if (key !== lendingTermsKey(decodeLendingBankTerms(raw))) throw new Error('LENDING_TERMS_KEY_INVALID');
   }
@@ -72,6 +77,7 @@ export const validateLendingPolicies = (lending: Record<string, unknown>): void 
   }
   for (const raw of requireMap(lending['loans'], 'LENDING_LOANS_MAP_INVALID').values()) {
     const loan = requireBoundaryRecord(raw, 'LENDING_LOAN_INVALID');
+    if ('lenderEntityId' in loan || 'positionId' in loan) throw new Error('LENDING_ALLOCATION_MIGRATION_REQUIRED');
     assertLendingClock({ principal: loan['principalAmount'], interest: loan['interestAmount'], openedAt: loan['openedAt'], termMs: loan['termMs'], lateMs: loan['lateMs'] });
     if (loan['approval'] !== undefined) {
       const approval = decodeLendingFacility(loan['approval']);

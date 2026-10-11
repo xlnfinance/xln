@@ -11,9 +11,11 @@ separates new checks, historical records and interpretation. This is an engineer
 and strategy review, not an exhaustive audit or independent assurance.
 
 Continuation: current `AGENTS.md` narrows launch to TypeScript, React and Ethereum
-same-J. Rust and Svelte wallet development are frozen; lending, companies and
-other jurisdictions are deferred. Earlier broad-scope conclusions below describe
-the initial review, not the current release denominator.
+same-J. Rust and Svelte wallet development are frozen; companies and other
+jurisdictions are deferred. The owner's later October 11 instruction includes
+lending: savers lend to a bank, borrowers borrow from it, and the bank retains its
+liability to savers after borrower default. Earlier broad-scope conclusions below
+describe the initial review, not the current release denominator.
 
 ## The idea and the outcome
 
@@ -83,10 +85,16 @@ They are essential infrastructure for enforceable accounts.
    and external withdrawal pass for both sides on the existing contract. React
    funding/exit, recovery, payment and same-J swap pass seven browser cases. One shape
    under 5M does not prove every admitted shape or correlated exit capacity.
-2. **Production scope enforced in code.** Lending is now deferred. Its missing
-   facility/covenant/default machinery remains recorded in [lend.md](lend.md).
-   Deferral requires production admission and UI closure, not merely removing
-   failed release checks. The parallel scope/CI work owns that reconciliation.
+2. **Lending within the current scope.** Named borrower facilities, bilateral
+   covenants, bounded signed late interest and repayment authorization are now
+   implemented; [lend.md](lend.md) defines their limits. Local maturity/default
+   and crash recovery pass. The owner's common-bank-pool requirement remains
+   unimplemented: allocation still ties each loan to a saver position. A named
+   regression rejects a 100-unit draw against two committed 60-unit deposits.
+   These existing green tests do not prove pooled-bank semantics.
+   Current public-chain enforcement and immutable
+   release evidence remain required; neither local tests nor the bank's promise
+   guarantee unsecured repayment.
 3. **One current candidate with full evidence.** October 9 replay/native-J results
    and October 10 tutorial results are useful historical evidence. They do not
    certify the changed October 11 runtime candidate. The current local contract
@@ -460,3 +468,22 @@ Repeatedly treating intentional synchronized artifacts as an unresolvable drift
 was a workflow mistake. A reviewed coherent source/tests/artifacts checkpoint
 is the correct next step. Frozen Rust and foreign CI edits remain unstaged;
 a local checkpoint does not grant release readiness or mainnet promotion.
+
+## October 11 common bank book and elapsed repayment
+
+The saver matcher was the wrong abstraction. Independent saver liabilities and
+borrower facilities now replace per-deposit loan allocation; no loan names a saver.
+The bank's existing authenticated facility is its exposure policy, including
+approval above deposited principal. Account risk and payment capacity remain
+separate. Default cannot replenish synthetic liquidity or change a saver claim.
+
+Cooperative repayment now reuses the existing dispute-clock formula. Half-term
+repayment no longer charges the entire term coupon. This deletes a financial
+branch without changing Solidity bytecode. The React balance projection consumes
+the independent savings quote instead of removed allocation counters.
+
+Evidence: 558 related tests, 87 focused financial cases, three rebuilt React
+journeys, 102 fresh WAL frames exact through TS W1/W4, and full check. The common
+book also survived four actual SIGKILLs across five processes. All six product
+choices are now resolved; demand savings, queued payouts and partial repayment
+remain implementation work. No mainnet-readiness or public-deployment claim follows.

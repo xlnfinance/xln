@@ -42,16 +42,14 @@ export const LENDING_TERMS: Array<{ id: TermId; label: string }> = [
 	{ id: '1m', label: '1 month' },
 ];
 
-export type LendingPool = {
+export type LendingSavings = {
 	positionId: string;
 	hubEntityId: string;
 	lenderEntityId: string;
 	tokenId: number;
 	principalAmount: bigint;
-	availableAmount: bigint;
 	closeAmount: bigint;
 	matured: boolean;
-	borrowedAmount: bigint;
 	interestBps: number;
 	termId: TermId;
 	status: string;
@@ -62,8 +60,6 @@ export type LendingLoan = {
 	loanId: string;
 	hubEntityId: string;
 	borrowerEntityId: string;
-	lenderEntityId: string;
-	positionId: string;
 	tokenId: number;
 	principalAmount: bigint;
 	interestAmount: bigint;
@@ -80,13 +76,13 @@ export type LendingLoan = {
 
 export type LendingState = {
 	hubEntityId: string;
-	pools: LendingPool[];
+	savings: LendingSavings[];
 	requestId: string | null;
 	loans: LendingLoan[];
 	terms: LendingBankTerms[];
 	facilities: LendingFacility[];
 	requestStatus: CoreLendingLoan['status'] | 'unseen' | 'not-funded' | null;
-	totals: { available: bigint; borrowed: bigint; activePrincipal: bigint };
+	totals: { savingsPrincipal: bigint; loanPrincipal: bigint; activePrincipal: bigint };
 };
 
 const big = (value: unknown): bigint => {
@@ -107,8 +103,9 @@ const term = (value: unknown): TermId => (value === '1h' || value === '1m' ? val
 export async function fetchLendingState(input: { hubEntityId: string; userEntityId: string; tokenId: number; requestId?: string }): Promise<LendingState> {
 	const { getJson } = await import('../http');
 	const result = await getJson('/api/lending/state', { hubEntityId: input.hubEntityId, userEntityId: input.userEntityId, tokenId: String(input.tokenId), ...(input.requestId ? { requestId: input.requestId } : {}) });
-	const pools = Array.isArray(result['pools']) ? (result['pools'] as Array<Record<string, unknown>>) : [];
-	const loans = Array.isArray(result['loans']) ? (result['loans'] as Array<Record<string, unknown>>) : [];
+	if (!Array.isArray(result['savings']) || !Array.isArray(result['loans'])) throw new Error('Bank lending book schema mismatch');
+	const savings = result['savings'] as Array<Record<string, unknown>>;
+	const loans = result['loans'] as Array<Record<string, unknown>>;
 	const totals = (result['totals'] ?? {}) as Record<string, unknown>;
 	if (!Array.isArray(result['terms']) || !Array.isArray(result['facilities'])) throw new Error('Bank lending policy unavailable');
 	const requestStatus = result['requestStatus'];
@@ -124,16 +121,14 @@ export async function fetchLendingState(input: { hubEntityId: string; userEntity
 			if (!value || typeof value !== 'object' || !('maxPrincipal' in value) || typeof value.maxPrincipal !== 'string' || !/^\d+$/.test(value.maxPrincipal)) throw new Error('Invalid bank facility');
 			return decodeLendingFacility({ ...value, maxPrincipal: BigInt(value.maxPrincipal) });
 		}),
-		pools: pools.map(pool => ({
+		savings: savings.map(pool => ({
 			positionId: String(pool['positionId'] || ''),
 			hubEntityId: String(pool['hubEntityId'] || ''),
 			lenderEntityId: String(pool['lenderEntityId'] || ''),
 			tokenId: Number(pool['tokenId'] || 0),
 			principalAmount: big(pool['principalAmount']),
-			availableAmount: big(pool['availableAmount']),
 			closeAmount: BigInt(String(pool['closeAmount'])),
 			matured: pool['matured'] === true,
-			borrowedAmount: big(pool['borrowedAmount']),
 			interestBps: Number(pool['interestBps'] || 0),
 			termId: term(pool['termId']),
 			status: String(pool['status'] || ''),
@@ -143,8 +138,6 @@ export async function fetchLendingState(input: { hubEntityId: string; userEntity
 			loanId: String(loan['loanId'] || ''),
 			hubEntityId: String(loan['hubEntityId'] || ''),
 			borrowerEntityId: String(loan['borrowerEntityId'] || ''),
-			lenderEntityId: String(loan['lenderEntityId'] || ''),
-			positionId: String(loan['positionId'] || ''),
 			tokenId: Number(loan['tokenId'] || 0),
 			principalAmount: big(loan['principalAmount']),
 			interestAmount: big(loan['interestAmount']),
@@ -156,7 +149,7 @@ export async function fetchLendingState(input: { hubEntityId: string; userEntity
 			openedAt: clock(loan['openedAt'], 0), termMs: clock(loan['termMs'], 1), lateMs: clock(loan['lateMs'], 0),
 			status: String(loan['status'] || ''),
 		})),
-		totals: { available: big(totals['availableAmount']), borrowed: big(totals['borrowedAmount']), activePrincipal: big(totals['activePrincipalAmount']) },
+		totals: { savingsPrincipal: big(totals['savingsPrincipalAmount']), loanPrincipal: big(totals['loanPrincipalAmount']), activePrincipal: big(totals['activePrincipalAmount']) },
 	};
 }
 

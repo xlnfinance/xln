@@ -12,10 +12,9 @@ import {
 type LendingStateResponse = {
   success?: boolean;
   error?: string;
-  pools?: Array<{
+  savings?: Array<{
     positionId: string;
-    availableAmount: string;
-    borrowedAmount: string;
+    principalAmount: string;
     status: string;
   }>;
   loans?: Array<{
@@ -265,9 +264,9 @@ test.describe('E2E Lending Flow', () => {
     await waitForLendingState(
       page,
       { hubEntityId: hubId, userEntityId: identity!.entityId },
-      (state) => (state.pools ?? []).some((pool) =>
+      (state) => (state.savings ?? []).some((pool) =>
         pool.status === 'open' &&
-        BigInt(pool.availableAmount) >= BigInt(tokenAmount(1000n))
+        BigInt(pool.principalAmount) >= BigInt(tokenAmount(1000n))
       ),
       'funded lending pool must enter hub state',
     );

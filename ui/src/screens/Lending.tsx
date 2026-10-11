@@ -148,7 +148,7 @@ export function Lending() {
 	};
 
 	const myLoans = state?.loans.filter(loan => loan.borrowerEntityId.toLowerCase() === wallet.entityId) ?? [];
-	const myPools = state?.pools.filter(pool => pool.lenderEntityId.toLowerCase() === wallet.entityId) ?? [];
+	const myPools = state?.savings.filter(pool => pool.lenderEntityId.toLowerCase() === wallet.entityId) ?? [];
 
 	return (
 		<div className="screen fade-in">
@@ -230,7 +230,7 @@ export function Lending() {
 							{borrowPreview && <p className="note" data-testid="lending-borrow-preview">
 								{!borrowPreview.ok ? borrowPreview.error : <>
 									Term repayment: {formatAmount(borrowPreview.repayment, meta.decimals, meta.decimals)} {meta.symbol}, due {termId === '1m' ? '30 days' : LENDING_TERMS.find(entry => entry.id === termId)!.label} after approval.
-									{' '}After maturity, simple interest continues for at most {(bankTerms?.loanLateMs ?? 0) / 3_600_000} hours. Maximum repayment: {formatAmount(borrowPreview.maximum, meta.decimals, meta.decimals)} {meta.symbol}. No compounding. These bounds use your maximum rate; the confirmed rate may be lower.
+									{' '}Early repayment charges only elapsed interest. After maturity, simple interest continues for at most {(bankTerms?.loanLateMs ?? 0) / 3_600_000} hours. Maximum repayment: {formatAmount(borrowPreview.maximum, meta.decimals, meta.decimals)} {meta.symbol}. No compounding. These bounds use your maximum rate; the confirmed rate may be lower.
 								</>}
 							</p>}
 							{savingsRisk?.ok === false && <p role="alert">{savingsRisk.error}</p>}
@@ -255,8 +255,8 @@ export function Lending() {
 							</p>}
 							<p className="note" style={{ marginTop: 10 }}>
 								{side === 'lend'
-									? 'The bank owes your principal and agreed interest independently of its borrowers. Before maturity, cancellation requires no allocated loans and returns the early-close amount. At maturity the full agreed return is due; actual payout depends on the bank’s available funds.'
-									: 'An approved facility and available bank funding are required. A funded loan transfers principal to your account once at the bank’s agreed rate. Your credit limit stays unchanged. Repay the principal plus agreed interest before it is due.'}
+									? 'The bank owes your principal and agreed interest independently of its borrowers. Early cancellation returns principal; at maturity the full agreed return is due. Payout requires capacity in your Account with the bank.'
+									: 'The bank must approve your borrowing facility. Draws within it transfer principal once, subject to Account capacity and accepted risk. Your credit limit stays unchanged. Repayment charges principal plus interest for the actual elapsed time.'}
 							</p>
 						</>
 					)}
@@ -277,12 +277,12 @@ export function Lending() {
 						{state ? (
 							<>
 								<div className="kv">
-									<span className="k">Available</span>
-									<span className="v num">{formatMoney(state.totals.available, meta.decimals)}</span>
+									<span className="k">Savings principal</span>
+									<span className="v num">{formatMoney(state.totals.savingsPrincipal, meta.decimals)}</span>
 								</div>
 								<div className="kv">
-									<span className="k">Borrowed</span>
-									<span className="v num">{formatMoney(state.totals.borrowed, meta.decimals)}</span>
+									<span className="k">Outstanding loan principal</span>
+									<span className="v num">{formatMoney(state.totals.loanPrincipal, meta.decimals)}</span>
 								</div>
 								<div className="kv">
 									<span className="k">Active principal</span>
@@ -306,7 +306,7 @@ export function Lending() {
 										<span className="tx">
 											<span className="t">{formatMoney(pool.principalAmount, meta.decimals)} {meta.symbol}</span>
 											<span className="s">
-												{pool.termId} · {rate(pool.interestBps)} · {pool.status} · {formatMoney(pool.availableAmount, meta.decimals)} free
+												{pool.termId} · {rate(pool.interestBps)} · {pool.status} · {formatMoney(pool.closeAmount, meta.decimals)} claim
 											</span>
 										</span>
 									</span>

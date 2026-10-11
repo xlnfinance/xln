@@ -112,8 +112,7 @@ test('overdue borrower repayment preserves the original claim and rejects a seco
   const borrower = `0x${'20'.repeat(32)}`;
   const loan: LendingLoan = {
     loanId: 'loan-1111111111111111', hubEntityId: `0x${'10'.repeat(32)}`,
-    borrowerEntityId: borrower, lenderEntityId: `0x${'30'.repeat(32)}`,
-    positionId: 'lend-2222222222222222', tokenId: 1, principalAmount: 2_500n,
+    borrowerEntityId: borrower, tokenId: 1, principalAmount: 2_500n,
     interestAmount: 25n, repaymentAmount: 2_525n, repaidAmount: 0n,
     interestBps: 100, termId: '1d', openedAt: 0, termMs: 86_400_000, lateMs: 0, dueAt: 86_400_000, status: 'defaulted',
   };
@@ -121,7 +120,7 @@ test('overdue borrower repayment preserves the original claim and rejects a seco
   expect(buildLendingRepayTx(loan, borrower)).toEqual({
     type: 'lendingRepay', data: { hubEntityId: loan.hubEntityId, loanId: loan.loanId, tokenId: 1, amount: 2_525n },
   });
-  expect(() => buildLendingRepayTx(loan, loan.lenderEntityId)).toThrow('Only the borrower');
+  expect(() => buildLendingRepayTx(loan, `0x${'30'.repeat(32)}`)).toThrow('Only the borrower');
   const repaid = { ...loan, status: 'repaid', repaidAmount: 2_525n };
   expect(isLendingLoanRepayable(repaid)).toBe(false);
   expect(() => buildLendingRepayTx(repaid, borrower)).toThrow('no repayable claim');

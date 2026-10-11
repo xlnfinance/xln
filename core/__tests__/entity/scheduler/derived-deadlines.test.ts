@@ -124,7 +124,7 @@ describe('derived per-payment deadlines', () => {
     const loan = (loanId: string, dueAt: number, status: string) =>
       [loanId, { loanId, positionId: 'lend-1111111111111111', dueAt, status }] as const;
     base.lending = {
-      pools: new Map(),
+      savings: new Map(),
       loans: new Map([
         loan('loan-b', 150, 'active'),
         loan('loan-a', 150, 'active'),

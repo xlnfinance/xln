@@ -30,7 +30,8 @@ async function loans(page: Page, ids: Parties) {
   return value.loans.map((loan: unknown) => {
     if (!loan || typeof loan !== 'object' || !('status' in loan) || typeof loan.status !== 'string'
       || !('repaymentAmount' in loan) || typeof loan.repaymentAmount !== 'string') throw new Error('LENDING_LOAN_INVALID');
-    return { status: loan.status, repaymentAmount: loan.repaymentAmount };
+    if (!('openedAt' in loan) || typeof loan.openedAt !== 'number' || !('termMs' in loan) || typeof loan.termMs !== 'number') throw new Error('LENDING_CLOCK_INVALID');
+    return { status: loan.status, repaymentAmount: loan.repaymentAmount, openedAt: loan.openedAt, termMs: loan.termMs };
   });
 }
 
@@ -57,7 +58,7 @@ test('term loan transfers principal once, spends it, repays and returns lender m
     await expect.poll(async () => (await readAccount(page, lenderIds)).credit).toBe('100050000');
     await expect(page.getByTestId('lend-submit')).toBeEnabled();
     await page.getByTestId('lend-submit').click();
-    await expect.poll(async () => (await readPools(page, lenderIds)).map(pool => pool.available)).toEqual(['5000000']);
+    await expect.poll(async () => (await readPools(page, lenderIds)).map(pool => pool.principal)).toEqual(['5000000']);
     await home(page);
     await expect(page.getByTestId('home-total')).toContainText('100.00');
     // Receiving the borrower's later 2 USDC also needs saver-approved bank risk.
@@ -85,21 +86,22 @@ test('term loan transfers principal once, spends it, repays and returns lender m
     await expect.poll(async () => (await readAccount(borrower, borrowerIds)).credit).toBe('102000000');
     await expect(borrower.getByTestId('lend-submit')).toBeEnabled();
     await borrower.getByTestId('lend-submit').click();
-    await expect.poll(() => loans(borrower, borrowerIds)).toEqual([{ status: 'active', repaymentAmount: '2040000' }]);
+    await expect.poll(async () => (await loans(borrower, borrowerIds)).map(loan => loan.status)).toEqual(['active']);
     await expect(borrower.getByTestId('lending-request-status')).toContainText('Loan active');
     await expect.poll(async () => (await readAccount(borrower, borrowerIds)).balance).toBe('102000000');
-    await expect.poll(async () => (await readPools(page, lenderIds)).map(pool => pool.borrowed)).toEqual(['2000000']);
+    await expect.poll(async () => (await readPools(page, lenderIds)).map(pool => pool.principal)).toEqual(['5000000']);
     const [fundedPool] = await readPools(page, lenderIds);
     if (!fundedPool) throw new Error('LENDING_POOL_MISSING');
-    // The bank must survive this valid but premature signed request. After loan
-    // repayment, the ordinary Close UI retries the same position successfully.
+    // The saver can close while the separate borrower obligation remains active.
     await requestEarlyClose(page, lenderIds, fundedPool.positionId);
     await expect.poll(async () => (await readAccount(page, lenderIds)).closeRequests).toEqual([`close:${fundedPool.positionId}`]);
-    expect((await readPools(page, lenderIds))[0]).toMatchObject({ status: 'open', borrowed: '2000000' });
+    await expect.poll(async () => (await readPools(page, lenderIds))[0]?.status).toBe('closed');
+    await expect.poll(async () => (await readAccount(page, lenderIds)).balance).toBe('100000000');
+    expect((await loans(borrower, borrowerIds)).map(loan => loan.status)).toEqual(['active']);
     const disbursed = await readAccount(borrower, borrowerIds);
     expect(disbursed.borrowingLimit).toBe(before.borrowingLimit);
     await home(borrower);
-    await expect(borrower.getByTestId('home-total')).toContainText('99.96');
+    await expect(borrower.getByTestId('home-total')).toContainText('100.00');
     await borrower.getByTestId('home-pay').click();
     await borrower.getByTestId('pay-to').fill(lenderIds.ownerId);
     await borrower.getByTestId('pay-amount').fill('2');
@@ -111,22 +113,28 @@ test('term loan transfers principal once, spends it, repays and returns lender m
     await borrower.getByTestId('receipt-open').click();
     await expect(borrower.getByTestId('payment-receipt')).toBeVisible();
     await borrower.getByTestId('receipt-done').click();
-    await expect.poll(async () => (await readAccount(page, lenderIds)).balance).toBe('97000000');
+    await expect.poll(async () => (await readAccount(page, lenderIds)).balance).toBe('102000000');
     await expect(page.getByTestId('payment-notification')).toContainText('Received');
     await page.getByRole('button', { name: 'Dismiss payment notification' }).click();
     await borrower.getByTestId('tour-chapter').selectOption('repay');
     await borrower.getByTestId('lending-repay').click();
-    await expect.poll(() => loans(borrower, borrowerIds)).toEqual([{ status: 'repaid', repaymentAmount: '2040000' }]);
-    await expect.poll(async () => (await readAccount(borrower, borrowerIds)).balance).toBe((100000000n - debit - 40000n).toString());
+    await expect.poll(async () => (await loans(borrower, borrowerIds)).map(loan => loan.status)).toEqual(['repaid']);
     const repaid = await readAccount(borrower, borrowerIds);
+    const [settled] = await loans(borrower, borrowerIds);
+    if (!settled) throw new Error('LENDING_REPAYMENT_MISSING');
+    const elapsed = repaid.timestamp - settled.openedAt;
+    expect(elapsed).toBeGreaterThan(0);
+    expect(elapsed).toBeLessThan(settled.termMs);
+    const interest = 40_000n * BigInt(elapsed) / BigInt(settled.termMs);
+    expect(settled.repaymentAmount).toBe((2_000_000n + interest).toString());
+    expect(repaid.balance).toBe((100_000_000n - debit - interest).toString());
     expect(repaid.borrowingLimit).toBe(before.borrowingLimit);
     expect(repaid.debt).toBe('0');
     await lending(page);
-    await expect(page.getByTestId('lending-close')).toBeEnabled();
-    await page.getByTestId('lending-close').click();
+    await expect(page.getByTestId('lending-close')).toHaveCount(0);
     await expect.poll(async () => (await readPools(page, lenderIds)).map(pool => pool.status)).toEqual(['closed']);
     // The saver cancels before its one-hour maturity. Its principal is returned;
-    // the borrower's 0.04 interest belongs to the bank, not this early withdrawal.
+    // the borrower's actual elapsed interest belongs to the bank.
     await expect.poll(async () => (await readAccount(page, lenderIds)).balance).toBe('102000000');
     await home(page);
     await expect(page.getByTestId('home-total')).toContainText('102.00');

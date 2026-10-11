@@ -1,5 +1,5 @@
 import type { EntityState } from './types';
-import type { LendingLoan, LendingPoolPosition, LendingState } from '../types/finance/lending';
+import type { LendingLoan, LendingSavings, LendingState } from '../types/finance/lending';
 import {
   cloneCrossJurisdictionBookAdmission,
   cloneCrossJurisdictionRoute,
@@ -49,8 +49,8 @@ const cloneJBatchState = (state: JBatchState): JBatchState => {
 };
 
 const cloneLendingPosition = (
-  position: LendingPoolPosition,
-): LendingPoolPosition => ({ ...position });
+  position: LendingSavings,
+): LendingSavings => ({ ...position });
 
 const cloneLendingLoan = (loan: LendingLoan): LendingLoan => ({
   ...loan,
@@ -58,8 +58,8 @@ const cloneLendingLoan = (loan: LendingLoan): LendingLoan => ({
 });
 
 const cloneLendingState = (lending: LendingState): LendingState => ({
-  pools: new Map(
-    Array.from(lending.pools.entries()).map(([id, position]) => [
+  savings: new Map(
+    Array.from(lending.savings.entries()).map(([id, position]) => [
       id,
       cloneLendingPosition(position),
     ]),

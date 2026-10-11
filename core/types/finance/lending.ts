@@ -25,28 +25,25 @@ export type LendingFacility = Readonly<{
 }>;
 
 /** `disputed` retires the Account claim; it does not assert full cash recovery. */
-type LendingPoolStatus = 'open' | 'closing' | 'closed' | 'disputed';
+type LendingSavingsStatus = 'open' | 'closing' | 'closed' | 'disputed';
 /**
- * `defaulted` remains repayable: the term passed without repayment and the hub
- * released the depositor claim. The signed clock determines the bank's current
- * claim against the borrower; recovery must not credit the depositor twice.
+ * `defaulted` remains repayable. Changing a receivable's status never changes
+ * the bank's independent savings liabilities or creates payment capacity.
  */
 type LendingLoanStatus = 'opening' | 'active' | 'closing' | 'repaid' | 'defaulted' | 'disputed';
 
-export interface LendingPoolPosition {
+export interface LendingSavings {
   positionId: string;
   hubEntityId: string;
   lenderEntityId: string;
   tokenId: number;
   principalAmount: bigint;
-  availableAmount: bigint;
-  borrowedAmount: bigint;
   interestBps: number;
   termId: LendingTermId;
   termMs: number;
   createdAt: number;
   updatedAt: number;
-  status: LendingPoolStatus;
+  status: LendingSavingsStatus;
 }
 
 export interface LendingLoan {
@@ -54,8 +51,6 @@ export interface LendingLoan {
   loanId: string;
   hubEntityId: string;
   borrowerEntityId: string;
-  lenderEntityId: string;
-  positionId: string;
   tokenId: number;
   principalAmount: bigint;
   interestAmount: bigint;
@@ -75,7 +70,7 @@ export interface LendingLoan {
 }
 
 export interface LendingState {
-  pools: Map<string, LendingPoolPosition>;
+  savings: Map<string, LendingSavings>;
   loans: Map<string, LendingLoan>;
   /** Absence means the bank has authorized no new business. */
   terms?: Map<string, LendingBankTerms>;

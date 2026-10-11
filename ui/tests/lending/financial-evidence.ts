@@ -55,6 +55,7 @@ export const readAccount = (page: Page, parties: Parties) =>
     return {
       root: account.currentFrame.accountStateRoot,
       height: account.currentHeight,
+      timestamp: account.currentFrame.timestamp,
       balance: (derived.outCollateral + derived.outPeerCredit - derived.inOwnCredit).toString(),
       borrowingLimit: derived.ownCreditLimit.toString(),
       debt: derived.inOwnCredit.toString(),
@@ -90,11 +91,11 @@ export async function readPools(page: Page, ids: Parties) {
     body.success !== true ||
     !('hubEntityId' in body) ||
     body.hubEntityId !== ids.hubId ||
-    !('pools' in body) ||
-    !Array.isArray(body.pools)
+    !('savings' in body) ||
+    !Array.isArray(body.savings)
   )
     throw new Error(`Invalid lending state response: ${safeStringify(body)}`);
-  return body.pools.map((pool: unknown) => {
+  return body.savings.map((pool: unknown) => {
     if (
       !pool ||
       typeof pool !== 'object' ||
@@ -109,19 +110,13 @@ export async function readPools(page: Page, ids: Parties) {
       !('tokenId' in pool) ||
       pool.tokenId !== ids.tokenId ||
       !('principalAmount' in pool) ||
-      typeof pool.principalAmount !== 'string' ||
-      !('availableAmount' in pool) ||
-      typeof pool.availableAmount !== 'string' ||
-      !('borrowedAmount' in pool) ||
-      typeof pool.borrowedAmount !== 'string'
+      typeof pool.principalAmount !== 'string'
     )
       throw new Error(`Invalid lending position: ${safeStringify(pool)}`);
     return {
       positionId: pool.positionId,
       status: pool.status,
       principal: pool.principalAmount,
-      available: pool.availableAmount,
-      borrowed: pool.borrowedAmount,
     };
   });
 }

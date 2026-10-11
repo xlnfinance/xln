@@ -188,7 +188,7 @@ function assertEntityState(
   }
   if (entity['lending'] !== undefined) {
     const lending = validateObject(entity['lending'], `${context}.lending`);
-    validateMapInstance(lending['pools'], `${context}.lending.pools`);
+    validateMapInstance(lending['savings'], `${context}.lending.savings`);
     validateMapInstance(lending['loans'], `${context}.lending.loans`);
     validateLendingPolicies(lending);
   }

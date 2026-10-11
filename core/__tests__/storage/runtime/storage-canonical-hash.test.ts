@@ -456,14 +456,12 @@ test('storage projection round-trip preserves canonical account optional-field s
     reason: 'projection-round-trip',
   };
   state.lending = {
-    pools: new Map([['lend-0123456789abcdef', {
+    savings: new Map([['lend-0123456789abcdef', {
       positionId: 'lend-0123456789abcdef',
       hubEntityId: entityId,
       lenderEntityId: counterpartyId,
       tokenId: 1,
       principalAmount: 25n,
-      availableAmount: 25n,
-      borrowedAmount: 0n,
       interestBps: 100,
       termId: '1h',
       termMs: 3_600_000,

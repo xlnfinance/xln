@@ -35,11 +35,6 @@ export const lendingExitAmount = (claim: LendingClock, timestampMs: number): big
   return claim.principal + claim.interest * elapsed / BigInt(claim.termMs);
 };
 
-/** Cooperative repayment pays the agreed term coupon even when early. A signed
- * maximum debit tolerates a stale UI quote without granting any extra interest. */
-export const lendingRepaymentAmount = (claim: LendingClock, timestampMs: number): bigint =>
-  lendingExitAmount(claim, Math.max(claim.openedAt + claim.termMs, timestampMs));
-
 export const lendingMaximumAmount = (claim: LendingClock): bigint =>
   lendingExitAmount(claim, claim.openedAt + claim.termMs + claim.lateMs);
 

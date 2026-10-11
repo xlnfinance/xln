@@ -7,7 +7,7 @@ import { applyAccountTxToMutableReplica } from '../../../account/tx/apply';
 import { applyCommittedLendingFollowup } from '../../../entity/tx/handlers/account/committed-lending-followup';
 import { buildAccountProofBody } from '../../../protocol/dispute/proof-builder';
 import { getJEventJurisdictionRef } from '../../../jurisdiction/machine/event-observation';
-import { selectBestLendingPool, summarizeLendingState } from '../../../extensions/lending';
+import { summarizeLendingState } from '../../../extensions/lending';
 import type { AccountTx } from '../../../types/account';
 import type { AccountTxTarget } from '../../../entity/tx/handlers/account/orderbook/queue';
 import { settleOverdueLendingLoan } from '../../../entity/tx/handlers/account/committed-lending-close';
@@ -50,7 +50,7 @@ for (const saverIsLeft of [true, false]) for (const overdue of [false, true]) {
     expect((await applyAccountTxToMutableReplica(borrowerAccount, disburse, true, state.timestamp)).ok).toBe(true);
     applyCommittedLendingFollowup(state, borrower, disburse, { ...borrowerAccount.currentFrame, accountTxs: [disburse] }, true, []);
     const proof = buildAccountProofBody(account, addr('99'));
-    expect(state.lending?.pools.get(positionId)?.availableAmount).toBe(7_500n);
+    expect(state.lending?.savings.get(positionId)?.principalAmount).toBe(10_000n);
     const result = await applyJEventRange(state, {
       from: signer, jurisdictionRef: getJEventJurisdictionRef(jurisdiction),
       blockNumber: 22, blockHash: entity('aa'), observedAt: 22, transactionHash: entity('bb'),
@@ -60,13 +60,13 @@ for (const saverIsLeft of [true, false]) for (const overdue of [false, true]) {
         finalizationEvidenceHash: entity('00'), finalProofbody: proof.proofBodyStruct,
       } },
     }, env);
-    expect(result.newState.lending?.pools.get(positionId)).toMatchObject({ status: 'disputed', availableAmount: 0n });
+    expect(result.newState.lending?.savings.get(positionId)).toMatchObject({ status: 'disputed', principalAmount: 10_000n });
     expect(result.newState.reserves).toEqual(state.reserves);
-    expect(summarizeLendingState(result.newState).totals.availableAmount).toBe('0');
-    expect(selectBestLendingPool(result.newState.lending!, 1, 1n, '1d', 100)).toBeNull();
+    expect(summarizeLendingState(result.newState).totals.savingsPrincipalAmount).toBe('0');
+    expect(summarizeLendingState(result.newState).totals.loanPrincipalAmount).toBe('2500');
     expect(result.newState.accounts.get(saver)?.state.subcontracts?.size).toBe(0);
     expect(result.newState.accounts.get(saver)?.state.lendingIntents?.has(`payout:${positionId}`)).toBe(false);
-    expect(state.lending?.pools.get(positionId)?.status).toBe('open');
+    expect(state.lending?.savings.get(positionId)?.status).toBe('open');
     expect(result.newState.lending?.loans.get(disburse.data.loanId)).toEqual(state.lending?.loans.get(disburse.data.loanId));
     if (overdue) {
       result.newState.timestamp += 86_400_001;
@@ -84,7 +84,7 @@ for (const saverIsLeft of [true, false]) for (const overdue of [false, true]) {
       } },
     }, env);
     expect(finalized.newState.lending?.loans.get(disburse.data.loanId)).toMatchObject({ status: 'disputed', repaymentAmount: 2_525n, repaidAmount: 0n });
-    expect(finalized.newState.lending?.pools.get(positionId)).toMatchObject({ status: 'disputed', availableAmount: 0n, borrowedAmount: 0n });
+    expect(finalized.newState.lending?.savings.get(positionId)).toMatchObject({ status: 'disputed', principalAmount: 10_000n });
     expect(finalized.newState.accounts.get(borrower)?.state.subcontracts?.size).toBe(0);
     expect(finalized.newState.accounts.get(borrower)?.state.lendingIntents?.has(`repay:${disburse.data.loanId}`)).toBe(false);
     expect(finalized.newState.reserves).toEqual(state.reserves);
@@ -138,7 +138,7 @@ test.each([true, false])('borrower J finality releases an undisbursed reservatio
   };
   const { newState } = await applyJEventRange(state, finality, env);
   expect(newState.lending?.loans.get(disburse.data.loanId)).toMatchObject({ status: 'disputed', repaidAmount: 0n });
-  expect(newState.lending?.pools.get(positionId)).toMatchObject({ status: 'open', availableAmount: 10_000n, borrowedAmount: 0n });
+  expect(newState.lending?.savings.get(positionId)).toMatchObject({ status: 'open', principalAmount: 10_000n });
   expect(newState.accounts.get(saver)?.state.subcontracts?.has(positionId)).toBe(true);
   expect(newState.accounts.get(borrower)?.state.lendingIntents?.has(`repay:${disburse.data.loanId}`)).toBe(false);
   expect(newState.reserves).toEqual(state.reserves);

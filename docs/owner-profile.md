@@ -6,6 +6,11 @@ release. Newer owner instructions and the project's technical rules prevail.
 These are working preferences, not a psychological assessment or permission
 for unlimited actions.
 
+Owner instruction, 2026-10-11: prefer the simpler, more reliable general mechanism
+that covers several use cases. Minimize code; delete redundant paths when retained
+financial semantics and recovery are proved. A superset is explicit product terms
+on one mechanism, not another framework or parallel implementation.
+
 ## Goal and responsibilities
 
 Egor sets architecture and product direction. The engineering agent independently

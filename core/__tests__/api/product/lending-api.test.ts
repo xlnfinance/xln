@@ -19,7 +19,7 @@ describe('lending API boundary', () => {
           entityEncPubKey: '',
           state: {
             entityId: HUB,
-            lending: { pools: new Map(), loans: new Map() },
+            lending: { savings: new Map(), loans: new Map() },
           },
         }]]),
       },
@@ -27,7 +27,7 @@ describe('lending API boundary', () => {
     const request = new Request(`http://xln.local/api/lending/state?hubEntityId=${HUB}&userEntityId=${USER}&tokenId=1`);
     const response = await handleLendingStateRequest({ req: request, env, headers: {}, activeHubEntityIds: [HUB] });
     expect(response.status).toBe(200);
-    expect(await response.json()).toMatchObject({ success: true, hubEntityId: HUB, pools: [], loans: [] });
+    expect(await response.json()).toMatchObject({ success: true, hubEntityId: HUB, savings: [], loans: [] });
   });
 
   test('unauthenticated POST mutation routes are absent', () => {

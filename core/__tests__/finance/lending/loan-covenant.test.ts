@@ -86,6 +86,22 @@ test('lending_disburse binds different returns into different executable borrowe
 });
 
 for (const bankIsLeft of [true, false]) {
+  test(`early repayment charges the same earned interest as unilateral exit, bankLeft=${bankIsLeft}`, async () => {
+    const account = restore(await funded(bankIsLeft, 200));
+    const claim = account.state.subcontracts?.get(ID);
+    assertLendingCovenant(claim);
+    const at = claim.openedAt + claim.termMs / 2;
+    expect(lendingExitAmount(claim, at)).toBe(2_525n);
+    const repay: AccountTx = { type: 'lending_repay', data: {
+      loanId: ID, hubEntityId: bankIsLeft ? LEFT : RIGHT, borrowerEntityId: bankIsLeft ? RIGHT : LEFT,
+      tokenId: 1, amount: 2_550n,
+    } };
+    expect((await applyAccountTxToMutableReplica(account, repay, !bankIsLeft, at)).ok).toBe(true);
+    expect(account.state.deltas.get(1)?.offdelta).toBe(bankIsLeft ? 25n : -25n);
+    expect(account.state.subcontracts?.size).toBe(0);
+    expect(computeAccountStateRoot(restore(account).state)).toBe(computeAccountStateRoot(account.state));
+    await expect(applyAccountTxToMutableReplica(account, repay, !bankIsLeft, at + 1)).rejects.toThrow('LENDING_INTENT_REPLAY');
+  });
   test(`loan repayment consumes one exact claim and survives recovery, bankLeft=${bankIsLeft}`, async () => {
     const account = await funded(bankIsLeft);
     const restored = restore(account);

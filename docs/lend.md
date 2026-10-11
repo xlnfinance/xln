@@ -9,6 +9,37 @@ agreed interest) and **Borrow from a bank**. These create separate bilateral
 Account obligations. The bank owes its saver even when its borrower defaults.
 Users should not need to understand internal funding-allocation labels.
 
+Owner clarification (2026-10-11): funding belongs to the bank's common pool for
+the asset and jurisdiction, never to a matched saver/borrower pair. A loan must
+not identify a saver position. Savings liabilities and borrower receivables
+have independent terms; borrower collections and defaults must not change a
+saver's signed claim. Account payment capacity and secured recovery still follow
+the individual bilateral Account, not an invented globally spendable balance.
+
+The canonical book now stores independent `savings` and `loans`. The direct
+saver matcher and per-saver allocation counters are removed. The regression
+`bank liquidity combines two saver deposits without assigning either saver to
+the loan` covers both 100 and 150 draws against two 60 deposits. The bank's
+existing signed facility permits the exposure; Account settlement still enforces
+capacity. Portfolio principal totals are claims, never spendable cash. Old books
+containing saver allocations reject on restore; no silent conversion is allowed.
+
+Owner decisions (2026-10-11): both fixed-term and on-demand savings at launch;
+lending above deposits is allowed by the bank's signed risk policy; insufficient
+liquidity queues payments by due date then request admission order, preserving
+unpaid debt and separate Account collateral; early loan repayment charges actual
+elapsed time; partial repayments pay interest then principal; a preapproved
+borrower facility authorizes automatic draws. The existing authenticated facility
+is the bank's bounded exposure policy: do not add a second lending permission or
+global funding cap. Demand terms, ordered withdrawal servicing and partial
+repayment remain implementation work. Early repayment is verified using the
+same existing elapsed-time claim as unilateral exit, without changing bytecode.
+
+Implementation principle: prefer deletion and one general signed-obligation
+mechanism across products. Product differences are explicit terms, not separate
+balance engines. Financial correctness, deterministic recovery and enforceable
+claims remain mandatory.
+
 ## Current implementation and accounting
 
 The owner approved on 2026-09-07 that principal is transferred exactly once and
@@ -23,9 +54,8 @@ a withdrawal still requires actual bilateral payout capacity.
 The saver now has an independent term return: at maturity the bank owes the
 original principal plus the deposit's agreed term interest, even with no matched
 borrower or with loans still active. Borrower interest belongs to the bank.
-Early cancellation is available only after allocated loans are cleared and does
-not earn unelapsed deposit interest. Already committed position earnings are
-preserved. Closing fixes the payout amount; subsequent borrower repayment or
+Early cancellation is independent of borrower loans and does not earn the
+fixed-term deposit coupon. Closing fixes the payout amount; subsequent borrower repayment or
 default cannot change that payout or recreate a paid position. Actual Account
 payout capacity remains necessary; this is a debt obligation, not a guarantee
 that an insolvent bank can pay.
@@ -48,8 +78,8 @@ late duration and keep their independent fixed return. No interest compounds.
 
 For principal `P`, agreed term coupon `I`, term `T`, signed late window `L`, and
 elapsed milliseconds `e`, exit pays `P + floor(I * clamp(e, 0, T + L) / T)`.
-The maximum is `P + floor(I * (T + L) / T)`. Cooperative full repayment charges at
-least the ordinary term coupon, then follows that same clock. Dispute execution
+The maximum is `P + floor(I * (T + L) / T)`. Cooperative full repayment uses that
+same elapsed-time formula, including early repayment. Dispute execution
 freezes `e` at dispute start. All sums and clock endpoints are range checked.
 
 Repayment `amount` is the borrower's signed **maximum debit**. The Account pays only
@@ -127,8 +157,7 @@ Public deployment, live recovery evidence and the full release gates remain open
 ## Credit policy and loan authority
 
 A hub acts as the depositor's debtor and the borrower's creditor. Its deposit
-liability survives a borrower default. Matching a deposit with a loan is funding
-allocation, not a transfer of the borrower's default risk to that depositor.
+liability survives a borrower default. A loan never allocates a named deposit.
 The hub must distinguish cash available to pay withdrawals, performing loan
 claims, overdue claims and losses; a receivable is not withdrawal liquidity.
 

@@ -8,7 +8,7 @@ import { accountTxApplied, accountTxValidationRejected } from '../../apply-resul
 import { deriveDelta } from '../../../utils';
 import { keccakTextHash } from '../../../../protocol/crypto/keccak-text';
 import { safeStringify } from '../../../../protocol/serialization';
-import { assertLendingCovenant, lendingRepaymentAmount } from '../../../../protocol/dispute/lending-covenant';
+import { assertLendingCovenant, lendingExitAmount } from '../../../../protocol/dispute/lending-covenant';
 import { requireBoundaryInteger } from '../../../../protocol/boundary-validation';
 
 type LendingAccountTx = Extract<AccountTx, {
@@ -220,7 +220,7 @@ export const handleLendingAccountTx = (
     if (!covenant || !('kind' in covenant) || covenant.kind !== 'loan' || covenant.creditorIsLeft === byLeft || covenant.tokenId !== tx.data.tokenId) {
       return accountTxValidationRejected('LENDING_REPAY_COVENANT_MISMATCH', []);
     }
-    const amount = lendingRepaymentAmount(covenant, timestamp);
+    const amount = lendingExitAmount(covenant, timestamp);
     if (amount > tx.data.amount) return accountTxValidationRejected('LENDING_REPAY_MAXIMUM_EXCEEDED', []);
     const result = applyPayment(account, { ...tx, data: { ...tx.data, amount } }, byLeft);
     if (result.ok) {

@@ -1,7 +1,7 @@
 import type { AccountReplica, AccountTx } from '../../../../types/account';
 import type { EntityState } from '../../../types';
 import type { LendingLoan } from '../../../../types/finance/lending';
-import { getAccountOutCapacity, lendingLoanRepaymentAmount, lendingPositionCloseAmount, lendingPositionMatured } from '../../../../extensions/lending';
+import { getAccountOutCapacity, lendingLoanRepaymentAmount, lendingPositionCloseAmount } from '../../../../extensions/lending';
 import type { LendingFollowupContext } from './committed-lending-followup';
 import type { AccountTxTarget } from './orderbook/queue';
 import { createStructuredLogger, shortId } from '../../../../support/logger';
@@ -13,16 +13,8 @@ const normalizeEntityRef = (value: unknown): string =>
 
 const retireDisputedLoan = (state: EntityState, loan: LendingLoan): void => {
   if (loan.status === 'repaid' || loan.status === 'disputed') return;
-  const pool = state.lending?.pools.get(loan.positionId);
-  if (!pool) throw new Error(`LENDING_FINALITY_POOL_MISSING:${loan.positionId}`);
-  if (loan.status !== 'defaulted') {
-    if (pool.borrowedAmount < loan.principalAmount) throw new Error(`LENDING_FINALITY_POOL_UNDERFLOW:${loan.positionId}`);
-    pool.borrowedAmount -= loan.principalAmount;
-    if (pool.status === 'open') pool.availableAmount += loan.principalAmount;
-  }
   loan.status = 'disputed';
   loan.updatedAt = state.timestamp;
-  pool.updatedAt = state.timestamp;
 };
 
 /** Authenticated J finality replaces this Account epoch with reserves/on-chain
@@ -45,9 +37,8 @@ export const retireDisputedLendingClaims = (state: EntityState, account: Account
       if (loan) retireDisputedLoan(state, loan);
       continue;
     }
-    const pool = state.lending?.pools.get(id);
+    const pool = state.lending?.savings.get(id);
     if (!pool || (pool.status !== 'open' && pool.status !== 'closing')) continue;
-    pool.availableAmount = 0n;
     pool.status = 'disputed';
     pool.updatedAt = state.timestamp;
   }
@@ -56,7 +47,7 @@ export const retireDisputedLendingClaims = (state: EntityState, account: Account
 export function applyLendingCloseRequest(
   context: LendingFollowupContext,
   tx: Extract<AccountTx, { type: 'lending_close_request' }>,
-): 'queued' | 'closing' | 'closed' | 'active-loans' | 'payout-capacity' {
+): 'queued' | 'closing' | 'closed' | 'payout-capacity' {
   const {
     account,
     lending,
@@ -72,15 +63,12 @@ export function applyLendingCloseRequest(
   ) {
     throw new Error(`LENDING_CLOSE_PROPOSER_MISMATCH:${tx.data.positionId}`);
   }
-  const pool = lending.pools.get(tx.data.positionId);
+  const pool = lending.savings.get(tx.data.positionId);
   if (!pool || pool.lenderEntityId !== proposer) {
     throw new Error(`LENDING_CLOSE_POSITION_NOT_OPEN:${tx.data.positionId}`);
   }
   if (pool.status === 'closing') return 'closing';
   if (pool.status !== 'open') throw new Error(`LENDING_CLOSE_POSITION_NOT_OPEN:${tx.data.positionId}`);
-  if (pool.borrowedAmount !== 0n && !lendingPositionMatured(pool, now)) {
-    return 'active-loans';
-  }
   const payoutAmount = lendingPositionCloseAmount(pool, now);
   if (payoutAmount === 0n) {
     pool.status = 'closed';
@@ -92,7 +80,6 @@ export function applyLendingCloseRequest(
     return 'payout-capacity';
   }
   pool.status = 'closing';
-  pool.availableAmount = payoutAmount;
   pool.updatedAt = now;
   accountTxs.push({
     accountId: proposer,
@@ -118,26 +105,22 @@ export function applyLendingClosePayout(
   if (proposer !== hubEntityId) {
     throw new Error(`LENDING_PAYOUT_PROPOSER_MISMATCH:${tx.data.positionId}`);
   }
-  const pool = lending.pools.get(tx.data.positionId);
+  const pool = lending.savings.get(tx.data.positionId);
   if (!pool || pool.status !== 'closing') {
     throw new Error(`LENDING_PAYOUT_POSITION_NOT_CLOSING:${tx.data.positionId}`);
   }
   if (
     pool.lenderEntityId !== normalizeEntityRef(tx.data.lenderEntityId) ||
     pool.tokenId !== tx.data.tokenId ||
-    pool.availableAmount !== tx.data.amount
+    lendingPositionCloseAmount(pool, now) !== tx.data.amount
   ) {
     throw new Error(`LENDING_PAYOUT_MISMATCH:${tx.data.positionId}`);
   }
-  pool.availableAmount = 0n;
   pool.status = 'closed';
   pool.updatedAt = now;
 }
 
-/** The hub retains its obligation to the depositor after borrower default.
- * Releasing the claim does not create cash: withdrawal still requires actual
- * bilateral payout capacity. The unpaid loan remains a hub receivable.
- */
+/** Default marks an unpaid receivable; it cannot create cash or alter savings. */
 export const settleOverdueLendingLoan = (
   state: EntityState,
   loanId: string,
@@ -146,28 +129,14 @@ export const settleOverdueLendingLoan = (
   const lending = state.lending;
   const loan = lending?.loans.get(loanId);
   if (!lending || !loan || loan.status !== 'active' || loan.dueAt > state.timestamp) return;
-  const pool = lending.pools.get(loan.positionId);
   const account = state.accounts.get(loan.borrowerEntityId);
-  if (!pool || !account || pool.borrowedAmount < loan.principalAmount) {
-    lendingLog.warn('lending_overdue.unsettled', {
-      loanId,
-      borrower: shortId(loan.borrowerEntityId),
-      reason: !pool ? 'pool-missing' : !account ? 'account-missing' : 'pool-borrowed-underflow',
-    });
-    return;
-  }
+  if (!account) throw new Error(`LENDING_OVERDUE_ACCOUNT_MISSING:${loanId}`);
   const now = state.timestamp;
   loan.status = 'defaulted';
   loan.updatedAt = now;
-  pool.borrowedAmount -= loan.principalAmount;
-  // A closing/closed saver already has a fixed payout. The bank retains the
-  // receivable; default must not increase that payout or resurrect paid capital.
-  if (pool.status === 'open') pool.availableAmount += loan.principalAmount;
-  pool.updatedAt = now;
   lendingLog.warn('lending_overdue.defaulted', {
     loanId,
     borrower: shortId(loan.borrowerEntityId),
     outstanding: (lendingLoanRepaymentAmount(loan, now) - loan.repaidAmount).toString(),
-    releasedPrincipal: loan.principalAmount.toString(),
   });
 };

@@ -119,14 +119,12 @@ const makeState = (timestamp: number): EntityState => ({
   swapTradingPairs: [],
   crontabState: initCrontab(),
   lending: {
-    pools: new Map([[POSITION_ID, {
+    savings: new Map([[POSITION_ID, {
       positionId: POSITION_ID,
       hubEntityId: HUB,
       lenderEntityId: `0x${'20'.repeat(32)}`,
       tokenId: 1,
       principalAmount: 10_000n,
-      availableAmount: 7_500n,
-      borrowedAmount: 2_500n,
       interestBps: 100,
       termId: '1d',
       termMs: 86_400_000,
@@ -139,8 +137,6 @@ const makeState = (timestamp: number): EntityState => ({
       loanId: LOAN_ID,
       hubEntityId: HUB,
       borrowerEntityId: BORROWER,
-      lenderEntityId: `0x${'20'.repeat(32)}`,
-      positionId: POSITION_ID,
       tokenId: 1,
       principalAmount: 2_500n,
       interestAmount: 25n,

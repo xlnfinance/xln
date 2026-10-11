@@ -5,7 +5,7 @@ import { readAccount } from './financial-evidence';
 import type { RuntimeAdapter } from '../../../core/api/runtime-adapter/types';
 import type { RuntimeAdapterViewFrame } from '../../../core/api/public/runtime-module';
 
-test('an unfunded loan request leaves the bank serving real payments', { tag: '@functional' }, async ({ page }) => {
+test('an unapproved loan request leaves the bank serving real payments', { tag: '@functional' }, async ({ page }) => {
   test.setTimeout(50_000);
   const errors: string[] = [];
   page.on('pageerror', error => errors.push(error.message));
@@ -22,7 +22,7 @@ test('an unfunded loan request leaves the bank serving real payments', { tag: '@
   ]) {
     expect((await page.request.get('/api/lending/state', { params })).status()).toBe(400);
   }
-  await setBankPolicy(page, ids, { termId: '1m', savingsInterestBps: 0, loanInterestBps: 0, maxPrincipal: 1_000_000n });
+  await setBankPolicy(page, ids, { termId: '1m', savingsInterestBps: 0, loanInterestBps: 0, maxPrincipal: 0n });
   await page.getByTestId('nav-manage').locator('visible=true').first().click();
   await page.getByTestId('manage-lend').click();
   await page.getByTestId('lend-side-borrow').click();
