@@ -1,18 +1,19 @@
 import { describe, expect, test } from 'bun:test';
 import { ethers } from 'ethers';
+import type { DeltaTransformer } from '../../../../jurisdictions/typechain-types/DeltaTransformer.sol/DeltaTransformer';
 
 import {
   resolveFinalizedCrossJurisdictionRouteLeg,
   resolveFinalizedPullFillRatio,
 } from '../../../account/pull-registry-settlement';
 import { BATCH_ABI, type ProofBodyStruct } from '../../../protocol/dispute/proof-body';
-import { encodeSignedAmount } from '../../../protocol/crypto/abi-money';
+import { encodeInt512, encodeSignedAmount } from '../../../protocol/crypto/abi-money';
 import type { CrossJurisdictionPullLeg } from '../../../types/cross-jurisdiction';
-import { entity, makeAccount, makeJurisdiction, secret } from '../../helpers/cross-j';
+import { addr, entity, makeAccount, secret } from '../../helpers/cross-j';
 
 const left = entity('11');
 const right = entity('22');
-const jurisdiction = makeJurisdiction('Ethereum', 1, '31', '32');
+const jurisdiction = { chainId: 1, depositoryAddress: addr('31') };
 const deltaTransformerAddress = `0x${'44'.repeat(20)}`;
 const pull: CrossJurisdictionPullLeg = {
   pullId: 'target-pull',
@@ -27,7 +28,7 @@ const proofbody = (claimedRatio: number, targetRole = true, signedAmount = pull.
   watchSeed: secret('43'),
   leftResponseSeconds: 10,
   rightResponseSeconds: 20,
-  offdeltas: [0n],
+  offdeltas: [encodeInt512(0n)],
   tokenIds: [1n],
   transformers: [{
     transformerAddress: deltaTransformerAddress,
@@ -36,6 +37,7 @@ const proofbody = (claimedRatio: number, targetRole = true, signedAmount = pull.
       [{
         payment: [],
         swap: [],
+        loans: [],
         pull: [{
           deltaIndex: 0,
           amount: encodeSignedAmount(signedAmount),
@@ -44,7 +46,7 @@ const proofbody = (claimedRatio: number, targetRole = true, signedAmount = pull.
           partialRoot: pull.partialRoot,
           targetRole,
         }],
-      }],
+      } satisfies DeltaTransformer.BatchStruct],
     ),
     allowances: [],
   }],

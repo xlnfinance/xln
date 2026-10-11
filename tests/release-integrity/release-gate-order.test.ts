@@ -91,6 +91,28 @@ describe('release gate ordering', () => {
     expect(plannedFamily).toEqual(expectedFamily);
   });
 
+  for (const profile of ['quick', 'ci', 'release']) {
+    test(`${profile} runs bank funding, covenants and crash recovery`, () => {
+      const result = Bun.spawnSync({
+        cmd: ['bun', 'core/scripts/release/run-release-gate.ts', `--profile=${profile}`, '--plan'],
+        cwd: process.cwd(), stdout: 'pipe', stderr: 'pipe',
+      });
+      expect(result.exitCode).toBe(0);
+      const command = result.stdout.toString().split('\n').map(line => line.trim())
+        .find(line => line.startsWith('bun test core/__tests__'));
+      const paths = command?.split(/\s+/).slice(2) ?? [];
+      for (const required of [
+        'core/__tests__/finance/state/lending.test.ts',
+        'core/__tests__/finance/state/lending-funding.test.ts',
+        'core/__tests__/finance/lending/savings-covenant.test.ts',
+        'core/__tests__/finance/lending/loan-covenant.test.ts',
+        'core/__tests__/finance/lending/savings-finality.test.ts',
+        'core/__tests__/storage/durability/lending-real-crash-recovery.test.ts',
+        'core/__tests__/api/product/lending-api.test.ts',
+      ]) expect(paths.filter(path => path === required)).toEqual([required]);
+    });
+  }
+
   test('publishes only a checked canonical tag through immutable actions', () => {
     const workflow = readFileSync('.github/workflows/distribution-release.yml', 'utf8');
     const actions = [...workflow.matchAll(/uses:\s+\S+@([^\s#]+)/g)].map((match) => match[1]);

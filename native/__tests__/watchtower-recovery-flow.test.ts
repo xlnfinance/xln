@@ -489,7 +489,7 @@ describe('watchtower recovery full flow', () => {
       ciphertext: '0xabcd',
     };
 
-    const uploads = await buildDelayedLastResortAppointmentsForTower(
+    const { uploads, failures } = await buildDelayedLastResortAppointmentsForTower(
       runtime,
       env,
       { url: 'http://tower.test', towerMode: 'delayed_last_resort', enabled: true },
@@ -497,6 +497,7 @@ describe('watchtower recovery full flow', () => {
       encryptedBundle,
     );
 
+    expect(failures).toEqual([]);
     expect(uploads.length).toBe(1);
     const upload = uploads[0]!;
     expect(upload.lookupKey).not.toBe(encryptedBundle.lookupKey);
@@ -603,13 +604,14 @@ describe('watchtower recovery full flow', () => {
       ciphertext: '0xabcd',
     };
 
-    const uploads = await buildDelayedLastResortAppointmentsForTower(
+    const { uploads, failures } = await buildDelayedLastResortAppointmentsForTower(
       runtime,
       env,
       { url: 'http://tower.flow', towerMode: 'delayed_last_resort', enabled: true },
       towerWallet.address.toLowerCase(),
       encryptedBundle,
     );
+    expect(failures).toEqual([]);
     expect(uploads.length).toBe(1);
     const upload = uploads[0]!;
 

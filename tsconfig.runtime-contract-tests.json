@@ -1,6 +1,7 @@
 {
   "extends": "./tsconfig.runtime.json",
   "files": [
+    "core/__tests__/payments/settlement/pull-registry-settlement.test.ts",
     "core/__tests__/fixtures/storage/lending-crash-child.ts",
     "core/__tests__/storage/recovery/recovery-outbox-equivalence.test.ts",
     "core/__tests__/storage/durability/lending-real-crash-recovery.test.ts",
