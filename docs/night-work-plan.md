@@ -30,10 +30,27 @@ The follow-up unsecured proof exposed a public RPC head race: the same signed
 batch rejects at block 11893378 and estimates successfully at deposit block
 11893379. The proof runner now reads nonce and estimates against one explicit
 block, at least its last mined batch. The interrupted deposit was withdrawn back
-to the signer with exact reserve/token deltas; the corrected proof is running.
+to the signer with exact reserve/token deltas; the corrected proof passed.
+Of the 250-unit unsecured claim, 200 available reserve units were collected and
+50 remained in the on-chain debt row. No insolvency guarantee is claimed.
 Evidence: `docs/evidence/sepolia-20261011/rpc-head-regression.json` and
 `.logs/crisis-20261011/release-sepolia-*`. Latest full check passes 38 source gates
 in 26.737s. The wallet is not yet released against this stack.
+
+Public Runtime startup exposed a deployment/configuration boundary mismatch.
+The matrix wrote linked libraries into `contracts`; the config loader accepts
+five addresses, but durable `importJ` accepts only the four Runtime entry points.
+The writer now projects those four and retains every library address/receipt in
+the existing deployment evidence. The regression exercises both real decoders,
+first red then green (12 tests / 96 assertions). The first unfunded bootstrap's
+invalid import WAL is preserved outside the checkout; the corrected startup
+uses `/var/lib/xln/sepolia-20261011/mesh`, with the same operator keys. No user
+Account or funded Hub state was discarded. Latest full check: 38 gates, 27.159s.
+
+Method review, 18:19 UTC: funding, deployment and both public exit proofs now have
+receipts. Keep the next boundary the real hosted wallet. The server uses the
+canonical orchestrator and a dedicated persistent Sepolia state root, never the
+Anvil-reset deployment script. Do not overwrite the older public stack.
 
 Guided demo checkpoint `cca6cd8fe` reuses PasswordEntry and canonical Runtime ids; the encrypted
 key is saved before boot and wallet metadata before chain sync. The owner completed

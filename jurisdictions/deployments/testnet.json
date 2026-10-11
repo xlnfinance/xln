@@ -70,10 +70,6 @@
       "entityProviderDeploymentBlock": 11893359,
       "contracts": {
         "account": "0x1a1C16E886385A4720952b0D2b3845A258d559a9",
-        "depositoryBounds": "0xD6e456Bf701DF94726d9509D841ff8AeF474C4AB",
-        "hashLadderRegistry": "0x2c16732c6f08c941a551b31F5854a9efC2874665",
-        "nftCustody": "0x027757f1B494865373420116aC2ada70667B997E",
-        "hankoVerifier": "0xaF64461c214DC1a6Db164b5838Eb6A7F108d474F",
         "entityProvider": "0xa4f82fcB80D6198Fb64F75D7B8242643Ca3c960C",
         "depository": "0x4e7333463cDde39AA58587D58AF3f66757117f61",
         "deltaTransformer": "0x3189d71877F2CE96922FC88d0e9E56f6078A7D04"

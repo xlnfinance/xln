@@ -2,10 +2,13 @@ import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { join } from 'node:path';
+import { validateJurisdictionsDataValue } from '../../../jurisdiction/adapter/kernel/jurisdiction-loader';
+import { validateRuntimeTx } from '../../../runtime/decode/runtime-tx';
 
 const repoRoot = process.cwd();
 const require = createRequire(import.meta.url);
 const chainMatrix = require('../../../../jurisdictions/scripts/deploy-chain-matrix.cjs') as {
+  jurisdictionEntry(result: Record<string, unknown>): Record<string, unknown>;
   evmStablecoinFor(chain: Record<string, unknown>, env?: Record<string, string | undefined>): {
     address: string;
     deployTestStablecoin: boolean;
@@ -42,6 +45,46 @@ const readRpcAdapterSource = (): string => [
 ].map(file => readFileSync(join(repoRoot, 'core/jurisdiction/adapter', file), 'utf8')).join('\n');
 
 describe('mainnet chain deployment wiring', () => {
+  test('the deployed Sepolia graph produces a loadable Runtime configuration without losing library evidence', () => {
+    const deployment = JSON.parse(
+      readFileSync(join(repoRoot, 'jurisdictions/deployments/ethereum-sepolia.json'), 'utf8'),
+    );
+    const configured = JSON.parse(readFileSync(join(repoRoot, 'jurisdictions/jurisdictions.json'), 'utf8'));
+    const chain = configured.jurisdictions['ethereum-sepolia'];
+    const entry = chainMatrix.jurisdictionEntry({ ...deployment, chain, preflight: { url: chain.rpc } });
+    const output = {
+      version: '1',
+      lastUpdated: configured.lastUpdated,
+      jurisdictions: { 'ethereum-sepolia': entry },
+      defaults: configured.defaults,
+    };
+    expect(() => validateJurisdictionsDataValue(output)).not.toThrow();
+    expect(() =>
+      validateRuntimeTx(
+        {
+          type: 'importJ',
+          data: {
+            name: entry.name,
+            chainId: entry.chainId,
+            ticker: 'XLN',
+            rpcs: [entry.rpc],
+            blockTimeMs: entry.blockTimeMs,
+            entityProviderDeploymentBlock: entry.entityProviderDeploymentBlock,
+            contracts: entry.contracts,
+          },
+        },
+        'DEPLOYED_J_IMPORT',
+      ),
+    ).not.toThrow();
+    expect(entry.evmContracts).toEqual(deployment.evmContracts);
+    expect(entry.contracts).toEqual({
+      account: deployment.contracts.account,
+      entityProvider: deployment.contracts.entityProvider,
+      depository: deployment.contracts.depository,
+      deltaTransformer: deployment.contracts.deltaTransformer,
+    });
+  });
+
   test('root scripts expose one-click testnet and mainnet chain deploy commands', () => {
     const pkg = JSON.parse(readFileSync(join(repoRoot, 'package.json'), 'utf8')) as {
       scripts: Record<string, string>;

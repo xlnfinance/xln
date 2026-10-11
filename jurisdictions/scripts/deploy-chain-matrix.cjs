@@ -559,13 +559,20 @@ const tokenConfig = (chain, registeredTokens) => {
   };
 };
 
-const jurisdictionEntry = (result) => ({
+const jurisdictionEntry = result => ({
   name: result.chain.name,
   chainId: result.chain.chainId,
   rpc: result.preflight.url,
   blockTimeMs: result.chain.kind === 'tron' ? 3000 : 12000,
   entityProviderDeploymentBlock: result.entityProviderDeploymentBlock,
-  contracts: result.contracts,
+  // Runtime binds the four entry points. Linked library
+  // addresses and receipts remain in evmContracts/tronContracts, not its schema.
+  contracts: {
+    account: result.contracts.account,
+    entityProvider: result.contracts.entityProvider,
+    depository: result.contracts.depository,
+    deltaTransformer: result.contracts.deltaTransformer,
+  },
   explorer: result.chain.explorer,
   currency: result.chain.currency,
   // Deployment evidence never activates a jurisdiction. Promotion to active
@@ -683,6 +690,7 @@ if (require.main === module) {
 }
 
 module.exports = {
+  jurisdictionEntry,
   deployTron,
   deployTronContract,
   evmStablecoinFor,
