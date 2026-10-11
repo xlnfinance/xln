@@ -1,4 +1,5 @@
 import { useNavigate } from 'react-router-dom';
+import { HDNodeWallet } from 'ethers';
 import { explainWalletError } from '@xln/frontend/lib/utils/ui/walletError';
 import { PasswordEntry } from '../components/PasswordEntry';
 import { hasPasswordVault, savePasswordVault } from '../../../frontend/src/lib/security/passwordVault';
@@ -10,7 +11,7 @@ import { RestoreChoice } from '../components/RestoreChoice';
 import { discoverTowerRestore } from '../runtime/restore';
 import { defaultTowerUrl, normalizeTowerUrl, saveRecovery } from '../runtime/recovery';
 import { useApp } from '../runtime/store';
-import { bootHostedVault, bootLearnVault, detectStack, type Stack } from '../runtime/hosted';
+import { bootHostedVault, detectStack, type Stack } from '../runtime/hosted';
 import {
 	FACTOR_PRESETS,
 	customWork,
@@ -93,13 +94,20 @@ export function Gate() {
 
 	const NO_STACK = 'No xln network answers at this address. Open the wallet from a running stack (bun run dev, or xln.finance/ui).';
 
-	/** A throwaway wallet on the live network, with the guided tour open from step one. */
+	/** The demo uses the same encrypted local wallet and reopen path as an import. */
 	const learn = (): void => {
 		void run(async () => {
 			if (!stack) throw new Error(NO_STACK);
-			await bootLearnVault(stack, step => setBusyStep(step));
-			navigate('/', { replace: true });
-			useApp.getState().setTour({ active: true, index: 0 });
+			const seed = HDNodeWallet.createRandom().mnemonic?.phrase;
+			if (!seed) throw new Error('MNEMONIC_GENERATION_FAILED');
+			const id = runtimeIdForSeed(seed).toLowerCase();
+			setPasswordEntry({ id, name: 'Tour wallet', seed, open: async unlocked => {
+				await bootHostedVault(unlocked, {
+					vaultId: id, vaultName: 'Tour wallet', kind: 'mnemonic', selfLabel: 'Alice', stack, onStep: setBusyStep,
+				});
+				navigate('/', { replace: true });
+				useApp.getState().setTour({ active: true, index: 0 });
+			} });
 		});
 	};
 
@@ -211,7 +219,7 @@ export function Gate() {
 		setMode('import');
 	};
 
-	if (passwordEntry) return <PasswordEntry {...passwordEntry} status={busyStep} onOpen={passwordEntry.open} onBack={() => setPasswordEntry(null)} />;
+	if (passwordEntry) return <PasswordEntry {...passwordEntry} status={busyStep} onOpen={passwordEntry.open} onBack={() => { setPasswordEntry(null); setBusyStep(null); }} />;
 
 	if (busyStep) {
 		const etaSeconds =

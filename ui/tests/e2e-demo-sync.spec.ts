@@ -1,14 +1,15 @@
 import { expect, test } from '@playwright/test';
 import type { RuntimeReplica } from '../../core/api/public/runtime-module';
+import { readWalletCheckpoint } from './stack';
 
 // Capture compact scan evidence without recording every historical RPC payload.
 test.use({ trace: 'off', video: 'off' });
 
 test(
-	'guided demo reaches Home and receives test funds on the running chain',
+	'guided demo preserves its funded Runtime and Account heads after a password unlock',
 	{ tag: '@resilience' },
 	async ({ page }, info) => {
-		test.setTimeout(57_000);
+		test.setTimeout(60_000);
 		page.on('console', message => {
 			if (message.type() === 'error') console.error('DEMO_BROWSER_ERROR', message.text());
 		});
@@ -17,6 +18,12 @@ test(
 		console.log('DEMO_STAGE start');
 		const startedAt = Date.now();
 		await page.getByTestId('gate-learn').click({ timeout: 10_000 });
+		await expect(page.getByRole('heading', { name: 'Set a local password' })).toBeVisible();
+		await expect(page.getByTestId('home-total')).toHaveCount(0);
+		const password = 'demo-recovery-test-password';
+		await page.getByLabel('Password', { exact: true }).fill(password);
+		await page.getByLabel('Confirm password', { exact: true }).fill(password);
+		await page.getByRole('button', { name: 'Save and open', exact: true }).click();
 		console.log('DEMO_STAGE syncing');
 		try {
 			await expect(page.getByTestId('home-total')).toBeVisible({ timeout: 55_000 });
@@ -26,6 +33,23 @@ test(
 			await expect(page.getByTestId('token-net-USDC')).toContainText('100');
 			await expect(page).toHaveURL(/\/$/);
 			console.log('DEMO_FUNDED_ELAPSED_MS', Date.now() - startedAt);
+			await expect.poll(async () => {
+				const checkpoint = await readWalletCheckpoint(page);
+				return checkpoint.accounts.length > 0 && checkpoint.accounts.every(account => !account.pending && account.mempool === 0);
+			}).toBe(true);
+			const before = await readWalletCheckpoint(page);
+			const balance = await page.getByTestId('home-total').innerText();
+			await page.reload({ waitUntil: 'domcontentloaded' });
+			await page.getByRole('button', { name: 'Continue', exact: true }).click();
+			await expect(page.getByRole('heading', { name: 'Unlock wallet' })).toBeVisible();
+			await page.getByLabel('Password', { exact: true }).fill(password);
+			await page.getByRole('button', { name: 'Unlock', exact: true }).click();
+			await expect(page.getByTestId('home-total')).toHaveText(balance);
+			const restored = await readWalletCheckpoint(page, before.frame.height);
+			expect(restored.runtimeId).toBe(before.runtimeId);
+			expect(restored.entityId).toBe(before.entityId);
+			expect(restored.frame).toEqual(before.frame);
+			expect(restored.accounts).toEqual(before.accounts);
 		} finally {
 			const evidence = await page.evaluate(() => {
 				const debug = (

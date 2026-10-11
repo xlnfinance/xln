@@ -10,7 +10,6 @@ import { accountDisputeConfig } from './financial/roles';
 import type { EntityTx, RuntimeAdapterEntitySummary, RuntimeReplica } from '@xln/core/api/public/runtime-module';
 import type { AccountDisputeConfig } from '@xln/core/account/config/dispute-config';
 import { deriveJurisdictionSignerIndex } from '@xln/core/jurisdiction/machine/config/signer-derivation';
-import { HDNodeWallet } from 'ethers';
 import { useApp, type VaultKind } from './store';
 
 /**
@@ -84,19 +83,6 @@ export async function sendEntity(entityId: string, signerId: string, entityTxs: 
 	await sendRuntimeInput({ runtimeTxs: [], entityInputs: [{ entityId, signerId, entityTxs }] });
 }
 
-/** "Learn xln": a throwaway phrase on the live network. The user can keep it afterwards. */
-export async function bootLearnVault(stack: Stack, onStep?: (step: string) => void): Promise<void> {
-	const phrase = HDNodeWallet.createRandom().mnemonic?.phrase;
-	if (!phrase) throw new Error('MNEMONIC_GENERATION_FAILED');
-	await bootHostedVault(phrase, {
-		vaultId: `tour-${Date.now().toString(36)}`,
-		vaultName: 'Tour wallet',
-		kind: 'mnemonic',
-		selfLabel: 'Alice',
-		stack,
-		...(onStep ? { onStep } : {}),
-	});
-}
 declare const __XLN_STACK_ORIGIN__: string;
 /** Same origin as the API (proxied in dev), except a TLS stack the dev server cannot WebSocket-proxy. */
 const socketOrigin = (apiBase: string): string => (typeof __XLN_STACK_ORIGIN__ === 'string' && __XLN_STACK_ORIGIN__.startsWith('https:') ? __XLN_STACK_ORIGIN__ : apiBase);
@@ -220,6 +206,12 @@ export async function bootHostedVault(seed: string, options: HostedVaultOptions)
 	const step = (text: string): void => options.onStep?.(text);
 	useApp.getState().setBooting(true);
 	try {
+		// The caller has saved the encrypted key before starting the Runtime.
+		// Keep the wallet discoverable even if chain sync or this tab stops here.
+		const app = useApp.getState();
+		if (!app.vaults.some(v => v.id === options.vaultId)) {
+			app.addVault({ id: options.vaultId, name: options.vaultName, kind: options.kind, createdAt: Date.now() });
+		}
 		step('Starting your runtime');
 		const xln = await getXLN();
 		// Replay can sign for any local jurisdiction before main() returns. Register
@@ -369,12 +361,8 @@ export async function bootHostedVault(seed: string, options: HostedVaultOptions)
 		}
 
 		step('Ready');
-		const app = useApp.getState();
 		app.setActiveEntityId(entityId);
 		app.setActiveVault(options.vaultId);
-		if (!app.vaults.some(v => v.id === options.vaultId)) {
-			app.addVault({ id: options.vaultId, name: options.vaultName, kind: options.kind, createdAt: Date.now() });
-		}
 		app.unlockSeed(options.vaultId, seed);
 	} finally {
 		useApp.getState().setBooting(false);

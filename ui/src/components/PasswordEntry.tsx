@@ -36,6 +36,7 @@ export function PasswordEntry({ status, id, name, seed, onOpen, onBack }: Props)
       >
         <p className="muted">{name}</p>
         <h1>{seed ? 'Set a local password' : 'Unlock wallet'}</h1>
+        {seed && <p className="note">Encrypts this wallet on this device so you can reopen it after a reload. Save your recovery phrase in Settings to recover on another device.</p>}
         <label htmlFor="wallet-password">Password</label>
         <input
           className="input"
