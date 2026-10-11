@@ -2,7 +2,7 @@ import type { AccountInput, AccountReplica, AccountTx } from '../../../types/acc
 import type { EntityOutput, EntityState, HashToSign, HashType, EntityFrame } from '../../types';
 import type { JInput } from '../../../jurisdiction/machine/input';
 import type { HankoString } from '../../../types/hanko';
-import { compareCanonicalText } from '../../../orderbook/swap-execution';
+import { compareCanonicalText } from '../../../swapbook/swap-execution';
 import { normalizeSignatureMap } from '../../auth/signatures';
 import {
   accountInputAck,

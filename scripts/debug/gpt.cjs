@@ -164,14 +164,14 @@ const CORE_FILES = {
 
     // Swaps, orderbooks, and cross-jurisdiction markets (critical for current product)
     'runtime/swap-cmd/swap-pairs.ts',         // Canonical same-chain swap pair orientation and policies
-    'orderbook/swap-execution.ts',                     // Swap lifecycle helpers and terminal settlement summaries
-    'orderbook/swap-keys.ts',                          // Swap/order identifier keys and namespacing
-    'orderbook/open-swap-offers.ts',                   // Open swap offer projection
+    'swapbook/swap-execution.ts',                     // Swap lifecycle helpers and terminal settlement summaries
+    'swapbook/swap-keys.ts',                          // Swap/order identifier keys and namespacing
+    'swapbook/open-swap-offers.ts',                   // Open swap offer projection
     'extensions/cross-j/index.ts',                 // Cross-j route hash, market, and fill-progress helpers
     'extensions/cross-j/market.ts',          // Canonical cross-j market derivation
     'extensions/cross-j/orderbook.ts',       // Cross-j book-owner and route ownership rules
     'extensions/cross-j/boundary.ts',        // Runtime topology for source/target/book-owner roles
-    'orderbook/cross-j/orderbook.ts', // Cross-j admission lookup/stash/drain helpers
+    'swapbook/cross-j/orderbook.ts', // Cross-j admission lookup/stash/drain helpers
     'entity/tx/j-events-htlc/cross-j-outputs.ts',          // Cross-j runtime outputs and notices
     'entity/tx/j-events-htlc/cross-jurisdiction-helpers.ts', // Cross-j account/route helper logic
     'entity/tx/handlers/payments/swap-requests.ts',   // Same-chain and cross-j swap request creation
@@ -192,7 +192,7 @@ const CORE_FILES = {
     'account/tx/handlers/swap/offer/index.ts',     // Account-level swap offer placement
     'account/tx/handlers/swap/resolve/index.ts',   // Swap settlement / hashladder resolution
     'account/tx/handlers/swap/lifecycle/cancel.ts',    // Swap cancellation
-    'orderbook/cross-j/index.ts',            // Cross-j book types and conversion helpers
+    'swapbook/cross-j/index.ts',            // Cross-j book types and conversion helpers
     'network/relay/market/snapshot.ts',            // Market snapshot projection
     'network/relay/market/subscriptions.ts',       // Orderbook streaming subscriptions
     'network/relay/market/subscription-limiter.ts', // Stream rate limiting
@@ -343,7 +343,7 @@ const CROSS_FILES = {
     'account/input.ts',
     'account/settlement/j-finality.ts',
     'entity/consensus/index.ts',
-    'orderbook/cross-j/orderbook.ts',
+    'swapbook/cross-j/orderbook.ts',
     'account/consensus/index.ts',
     'account/view-state.ts',
     'account/consensus/dispute/policy.ts',
@@ -353,9 +353,9 @@ const CROSS_FILES = {
     'jurisdiction/machine/event-observation.ts',
     'jurisdiction/machine/jurisdiction-runtime/index.ts',
     'protocol/htlc/hash-ladder.ts',
-    'orderbook/swap-execution.ts',
-    'orderbook/swap-keys.ts',
-    'orderbook/open-swap-offers.ts',
+    'swapbook/swap-execution.ts',
+    'swapbook/swap-keys.ts',
+    'swapbook/open-swap-offers.ts',
     'extensions/cross-j/index.ts',
     'extensions/cross-j/market.ts',
     'extensions/cross-j/orderbook.ts',
@@ -391,10 +391,10 @@ const CROSS_FILES = {
     'account/tx/handlers/balance/add-delta.ts',
     'account/tx/handlers/j-events/claim.ts',
     'account/tx/handlers/settlement/transition.ts',
-    'orderbook/index.ts',
-    'orderbook/types.ts',
-    'orderbook/core.ts',
-    'orderbook/cross-j/index.ts',
+    'swapbook/index.ts',
+    'swapbook/types.ts',
+    'swapbook/core.ts',
+    'swapbook/cross-j/index.ts',
     'network/relay/market/snapshot.ts',
     'network/relay/market/subscription-limiter.ts',
     'network/relay/market/subscriptions.ts',
@@ -659,10 +659,10 @@ const PERFORMANCE_FILES = {
     'account/validation/pending-proposal-validation.ts',
     'protocol/htlc/multi-recipient.ts',
     'protocol/htlc/codec/envelope.ts',
-    'orderbook/core.ts',
-    'orderbook/book-overlay.ts',
-    'orderbook/pages/page.ts',
-    'orderbook/commitment.ts',
+    'swapbook/core.ts',
+    'swapbook/book-overlay.ts',
+    'swapbook/pages/page.ts',
+    'swapbook/commitment.ts',
     'support/bytes/integrity-checksum.ts',
     'support/bytes/hex-bytes.ts',
     'support/collections/recency-memo.ts',
@@ -707,11 +707,11 @@ const ORDERBOOK_FILES = {
     'entity/state-clone.ts',
     'entity/replica/replica-clone.ts',
     'runtime/swap-cmd/swap-pairs.ts',
-    'orderbook/swap-execution.ts',
-    'orderbook/swap-keys.ts',
-    'orderbook/open-swap-offers.ts',
+    'swapbook/swap-execution.ts',
+    'swapbook/swap-keys.ts',
+    'swapbook/open-swap-offers.ts',
     'entity/consensus/index.ts',
-    'orderbook/cross-j/orderbook.ts',
+    'swapbook/cross-j/orderbook.ts',
     'entity/tx/handlers/account/index.ts',
     'entity/tx/handlers/account/orderbook/offers.ts',
     'entity/tx/handlers/account/orderbook/queue.ts',
@@ -722,10 +722,10 @@ const ORDERBOOK_FILES = {
     'account/tx/handlers/swap/resolve/index.ts',
     'account/tx/handlers/swap/lifecycle/cancel.ts',
     'storage/queries/history.ts',
-    'orderbook/index.ts',
-    'orderbook/types.ts',
-    'orderbook/core.ts',
-    'orderbook/cross-j/index.ts',
+    'swapbook/index.ts',
+    'swapbook/types.ts',
+    'swapbook/core.ts',
+    'swapbook/cross-j/index.ts',
     'network/relay/market/snapshot.ts',
     'network/relay/market/subscription-limiter.ts',
     'network/relay/market/subscriptions.ts',
@@ -774,9 +774,9 @@ const SWAP_FILES = {
     'entity/state-clone.ts',
     'entity/replica/replica-clone.ts',
     'runtime/swap-cmd/swap-pairs.ts',
-    'orderbook/swap-execution.ts',
-    'orderbook/swap-keys.ts',
-    'orderbook/open-swap-offers.ts',
+    'swapbook/swap-execution.ts',
+    'swapbook/swap-keys.ts',
+    'swapbook/open-swap-offers.ts',
     'entity/tx/apply.ts',
     'entity/tx/handlers/account/index.ts',
     'entity/tx/handlers/payments/swap-requests.ts',
@@ -791,9 +791,9 @@ const SWAP_FILES = {
     'account/tx/handlers/swap/lifecycle/cancel.ts',
     'storage/queries/history.ts',
     'account/tx/handlers/balance/add-delta.ts',
-    'orderbook/index.ts',
-    'orderbook/types.ts',
-    'orderbook/core.ts',
+    'swapbook/index.ts',
+    'swapbook/types.ts',
+    'swapbook/core.ts',
     'network/relay/market/snapshot.ts',
     'api/server/health/market-maker.ts',
   ]),
@@ -1263,7 +1263,7 @@ Read these together:
 - \`core/extensions/cross-j/market.ts\`
 - \`core/extensions/cross-j/orderbook.ts\`
 - \`core/extensions/cross-j/boundary.ts\`
-- \`core/orderbook/cross-j/orderbook.ts\`
+- \`core/swapbook/cross-j/orderbook.ts\`
 - \`core/entity/tx/handlers/cross-j-*.ts\`
 
 Design rule: expected market failures (no liquidity, no market, quote expired)
@@ -1377,11 +1377,11 @@ xln/
 
     swap/cross-j/orderbook:
       core/swap-cmd/swap-pairs.ts ${fileSizes['core/runtime/swap-cmd/swap-pairs.ts'] || '?'} lines - Same-chain pair orientation/policies
-      orderbook/swap-execution.ts           ${fileSizes['core/orderbook/swap-execution.ts'] || '?'} lines - Swap lifecycle helpers
+      orderbook/swap-execution.ts           ${fileSizes['core/swapbook/swap-execution.ts'] || '?'} lines - Swap lifecycle helpers
       extensions/cross-j/index.ts       ${fileSizes['core/extensions/cross-j/index.ts'] || '?'} lines - Cross-j route hashes and fill progress
       extensions/cross-j/market.ts ${fileSizes['core/extensions/cross-j/market.ts'] || '?'} lines - Cross-j market derivation
       extensions/cross-j/orderbook.ts ${fileSizes['core/extensions/cross-j/orderbook.ts'] || '?'} lines - Cross-j book owner rules
-      orderbook/cross-j/orderbook.ts ${fileSizes['core/orderbook/cross-j/orderbook.ts'] || '?'} lines - Cross-j admissions
+      orderbook/cross-j/orderbook.ts ${fileSizes['core/swapbook/cross-j/orderbook.ts'] || '?'} lines - Cross-j admissions
       entity/tx/handlers/cross-j-*.ts - Cross-j setup/book/fill/salvage/clear/sweep
       entity/tx/handlers/account/orderbook-matching-*.ts - Same/cross matching
       account/tx/handlers/swap-*.ts - Account-level offer/resolve/cancel

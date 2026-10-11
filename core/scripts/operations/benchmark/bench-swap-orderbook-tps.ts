@@ -9,7 +9,7 @@ import {
   getBestBid,
   type BookEvent,
   type BookState,
-} from '../../../orderbook';
+} from '../../../swapbook';
 import { getPerfMs } from '../../../support/time';
 
 type Cli = {

@@ -47,7 +47,7 @@ export type { Profile } from '../../entity/profile';
 export type { PaymentRoute } from '../../pathfinding/pathfinding';
 export type { JBatch, JBatchState } from '../../jurisdiction/machine/batch';
 export type { JAdapter } from '../../jurisdiction/adapter/types';
-export type { BookState } from '../../orderbook';
+export type { BookState } from '../../swapbook';
 export type {
   AccountCapacityView,
   AccountCapacitySource,
@@ -68,7 +68,7 @@ export type {
   NumberedRegistrationCommand,
   NumberedRegistrationCommandResult,
 } from '../runtime-adapter';
-export { getBestBid, getBestAsk, getBookSideLevels } from '../../orderbook';
+export { getBestBid, getBestAsk, getBookSideLevels } from '../../swapbook';
 export { isTronChainId } from '../../jurisdiction/adapter/chain-ids';
 export {
   buildMppChallengeHeader,

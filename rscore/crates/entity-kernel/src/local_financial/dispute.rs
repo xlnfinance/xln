@@ -9,7 +9,7 @@ use crate::j_batch::{
     FinalDisputeProof, InitialDisputeProof, JBatch, JBatchState, SecretReveal,
     proof_body_from_engine, proof_body_hash,
 };
-use crate::orderbook::SameJOutputDelta;
+use crate::swapbook::SameJOutputDelta;
 use crate::paybook::PaybookChanges;
 use crate::{EntityFrameEvent, EntityKernelError, EntityStateSlice, LocalEntityOutput};
 

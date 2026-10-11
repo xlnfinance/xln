@@ -7,13 +7,13 @@ import type {
 } from './types';
 import { getEntityCertifiedJurisdictionHeight } from '../../jurisdiction/machine/history/height';
 import { createStructuredLogger, shortHash, shortId } from '../../support/logger';
-import { programPaymentTermination } from '../paybook/lifecycle';
+import { programPaymentTermination } from '../../paybook/lifecycle';
 import type { DerivedDeadline, DerivedSecretAckTimeout } from './derived-deadlines';
 import { J_BATCH_CONTRACT_LIMITS } from '../../jurisdiction/machine/batch';
 import { createDueHookPlan, type DueHookPlan } from './due-hook-types';
 import { processDisputeDeadlineHook } from './dispute-deadline-hook';
 import { processBoardHankoRefreshHook } from './board-hanko-refresh-hook';
-import { isDisputeReadyPayment } from '../paybook/views';
+import { isDisputeReadyPayment } from '../../paybook/views';
 import { settleOverdueLendingLoan } from '../../lendbook/lifecycle';
 import { scheduleHook } from './hook-state';
 

@@ -50,7 +50,7 @@ import { primeProposalHankos } from './hanko/prime-hankos';
 import { countOp, OP_COUNTERS_ENABLED } from '../../../support/performance/op-counters';
 import { assertEstimatedCertifiedEntityFrameWire } from '../frame/validation';
 import { cumulativeMarksToPhases, snapshotPerfPhases } from '../../../support/performance/profile';
-import { assertHtlcPreparedInfraContext, startInboundLayerPriming } from '../../paybook/materialize-context';
+import { assertHtlcPreparedInfraContext, startInboundLayerPriming } from '../../../paybook/materialize-context';
 import { requireEntityEncryptionPrivateKey } from '../../auth/crypto';
 import { assertEntityInfraContextAuthority } from '../frame/infra-context-validation';
 import {

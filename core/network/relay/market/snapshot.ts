@@ -1,5 +1,5 @@
 import type { EntityReplica } from '../../../entity/types';
-import { ORDERBOOK_PRICE_SCALE, getBookSideLevels, type BookState } from '../../../orderbook';
+import { ORDERBOOK_PRICE_SCALE, getBookSideLevels, type BookState } from '../../../swapbook';
 import { getJurisdictionIdentityRef } from '../../../jurisdiction/machine/jurisdiction-runtime';
 export { normalizeMarketEntityId, normalizeMarketPairId } from './identifiers';
 

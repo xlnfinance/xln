@@ -1,8 +1,8 @@
-import type { HtlcPreparedInfraContext } from '../../types/entity/htlc-infra-context';
-import { assertOpaqueHtlcCiphertext } from '../../protocol/htlc/multi-recipient';
-import { cloneIsolatedProtocolValue } from '../../protocol/state/isolated-value-clone';
-import { LIMITS, TOKENS } from '../../config/constants';
-import { normalizeAccountStateDomain } from '../../account/commitment/state-root';
+import type { HtlcPreparedInfraContext } from '../types/entity/htlc-infra-context';
+import { assertOpaqueHtlcCiphertext } from '../protocol/htlc/multi-recipient';
+import { cloneIsolatedProtocolValue } from '../protocol/state/isolated-value-clone';
+import { LIMITS, TOKENS } from '../config/constants';
+import { normalizeAccountStateDomain } from '../account/commitment/state-root';
 
 const bytes32 = (value: unknown, code: string): string => {
   const normalized = String(value || '').trim().toLowerCase();

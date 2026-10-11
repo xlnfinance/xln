@@ -7,7 +7,7 @@ import { initCrontab } from '../../../entity/scheduler';
 import { collectDerivedDeadlines } from '../../../entity/scheduler/derived-deadlines';
 import { applyCommittedAccountFrameFollowups } from '../../../entity/tx/handlers/account/committed-frame-followups';
 import { applyHtlcSecretFollowups } from '../../../entity/tx/handlers/account/committed-htlc-followups';
-import { programPaymentTermination } from '../../../entity/paybook/lifecycle';
+import { programPaymentTermination } from '../../../paybook/lifecycle';
 import { hashHtlcSecret } from '../../../protocol/htlc/utils';
 import { applyKnownHtlcSecret } from '../../../entity/tx/j-events-htlc';
 

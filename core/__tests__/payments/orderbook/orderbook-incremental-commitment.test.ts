@@ -4,15 +4,15 @@ import {
   clearBookCommitmentCache,
   computeBookCommitmentHash,
   verifyAndWarmBookCommitment,
-} from '../../../orderbook/commitment';
-import { applyCommand, createBook, type BookState } from '../../../orderbook/core';
-import { commitBookOverlay } from '../../../orderbook/book-overlay';
+} from '../../../swapbook/commitment';
+import { applyCommand, createBook, type BookState } from '../../../swapbook/core';
+import { commitBookOverlay } from '../../../swapbook/book-overlay';
 import { getPerfMs } from '../../../support/time';
 import { computeIntegrityChecksum, computeIntegrityDigest } from '../../../support/bytes/integrity-checksum';
 import {
   decodeBookPricePageTree,
   projectBookPricePageTree,
-} from '../../../orderbook/pages/page';
+} from '../../../swapbook/pages/page';
 
 const buildFatBook = (orderCount: number) => {
   let book = createBook({ bucketWidthTicks: 10n, maxOrders: orderCount + 1, stpPolicy: 1 });

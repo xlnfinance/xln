@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { deriveDelta, isLeftEntity } from '../../../../account/utils';
 import { validateAccountDeltas } from '../../../../account/validation/delta-validation';
 import { deriveSwapFillPolicyFee, deriveSwapNetAuthorization } from '../../../../account/swap/swap-net-authorization';
-import { getStaticSwapTokenDimensions, getSwapLotScale } from '../../../../orderbook';
+import { getStaticSwapTokenDimensions, getSwapLotScale } from '../../../../swapbook';
 import { requireBoundaryInteger, requireBoundaryRecord } from '../../../../protocol/boundary-validation';
 import { safeStringify } from '../../../../protocol/serialization';
 import type { EntityTx } from '../../../../types/entity-tx';

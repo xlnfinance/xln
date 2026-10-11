@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { computeSwapPriceTicks, prepareSwapOrder, quantizeSwapOrder, SWAP_LOT_SCALE } from '../../../orderbook';
+import { computeSwapPriceTicks, prepareSwapOrder, quantizeSwapOrder, SWAP_LOT_SCALE } from '../../../swapbook';
 
 describe('prepareSwapOrder', () => {
   test('prices raw WETH-18 and USDC-6 amounts in human token units', () => {

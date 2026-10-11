@@ -55,7 +55,7 @@ pub(crate) struct LocalFinancialResult {
     pub wake_targets: Vec<String>,
     pub envelope_mutations: Vec<(String, AccountEnvelopeMutation)>,
     pub routed_entity_outputs: Vec<crate::LocalEntityOutput>,
-    pub orderbook_deltas: Vec<crate::orderbook::SameJOutputDelta>,
+    pub orderbook_deltas: Vec<crate::swapbook::SameJOutputDelta>,
 }
 
 pub(crate) fn apply_local_entity_financial_txs(

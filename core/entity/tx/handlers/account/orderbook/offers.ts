@@ -1,6 +1,6 @@
 import type { AccountState, SwapOffer } from '../../../../../types/account';
 import type { SwapCancelEvent, SwapCancelRequestEvent, SwapOfferEvent } from '../../../../../account/tx/apply-types';
-import type { BookState } from '../../../../../orderbook';
+import type { BookState } from '../../../../../swapbook';
 import type { CrossJurisdictionFillInstruction } from '../../../../../extensions/cross-j/orderbook';
 import type { AccountTxTarget } from './queue';
 

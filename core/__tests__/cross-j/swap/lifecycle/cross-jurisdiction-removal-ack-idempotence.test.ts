@@ -14,7 +14,7 @@ import {
   withCanonicalCrossJurisdictionRouteHash,
 } from '../../../../extensions/cross-j';
 import { mergeCrossJurisdictionBookAdmission } from '../../../../extensions/cross-j/orderbook';
-import { getStaticSwapTokenDimensions } from '../../../../orderbook/types';
+import { getStaticSwapTokenDimensions } from '../../../../swapbook/types';
 import { createEmptyEnv } from '../../../../runtime';
 import type { AccountTx } from '../../../../types/account';
 import type { CrossJurisdictionSwapRoute } from '../../../../types/cross-jurisdiction';

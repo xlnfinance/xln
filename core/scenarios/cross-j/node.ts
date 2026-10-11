@@ -52,8 +52,8 @@ import {
 import { assertScenarioRpcOutsideDev } from '../harness/scenario-isolation';
 import { ensureLiveJAdapterForReplica } from '../../runtime/recovery/j-adapter-restore';
 import { deriveDelta, isLeftEntity } from '../../account/utils';
-import { DEFAULT_SPREAD_DISTRIBUTION } from '../../orderbook';
-import { hasCrossJurisdictionBookOrder } from '../../orderbook/cross-j';
+import { DEFAULT_SPREAD_DISTRIBUTION } from '../../swapbook';
+import { hasCrossJurisdictionBookOrder } from '../../swapbook/cross-j';
 import type { AccountReplica } from '../../types/account';
 import {
   assertAccountsOpenPhase,

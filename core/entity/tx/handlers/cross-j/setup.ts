@@ -1,7 +1,7 @@
 import { MalformedEntityFrameInputError } from '../../processing/invariant-errors';
 import { haltRuntimeFailure, rejectFailure } from "../../../../protocol/errors/failure-taxonomy";
 
-import { deterministicEntityTimestamp } from '../../../../orderbook/cross-j/orderbook';
+import { deterministicEntityTimestamp } from '../../../../swapbook/cross-j/orderbook';
 import {
   buildCrossJurisdictionPullBinding,
   cloneCrossJurisdictionRoute,

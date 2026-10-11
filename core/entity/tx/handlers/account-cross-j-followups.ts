@@ -32,7 +32,7 @@ import {
 } from '../../../extensions/cross-j/orderbook';
 import { decodeHashLadderBinary } from '../../../protocol/htlc/hash-ladder';
 import { createStructuredLogger, shortId, shortOrder } from '../../../support/logger';
-import { removeCrossJurisdictionBookOrder } from '../../../orderbook/cross-j';
+import { removeCrossJurisdictionBookOrder } from '../../../swapbook/cross-j';
 import { addMessage } from '../../frame-events';
 import { getEntityCollectionValueForWrite, ensureEntityCollectionCandidate } from '../../state/persistent-collection-map';
 import { cancelHook, scheduleHook } from '../../scheduler';

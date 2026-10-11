@@ -2,12 +2,12 @@ import { describe, expect, test } from 'bun:test';
 
 import { createEmptyAccountJClaimAccumulator } from '../../../account/j-claims/j-claim-accumulator';
 
-import { createBook, applyCommand, getBestAsk, getBestBid, getBookOrder, getBookSideLevels } from '../../../orderbook/core';
-import { commitBookOverlay, setBookPageTree } from '../../../orderbook/book-overlay';
+import { createBook, applyCommand, getBestAsk, getBestBid, getBookOrder, getBookSideLevels } from '../../../swapbook/core';
+import { commitBookOverlay, setBookPageTree } from '../../../swapbook/book-overlay';
 
-import { getStaticSwapTokenDimensions, getSwapExactQuoteLotMultipleAtPriceForDimensions, getSwapLotScale, ORDERBOOK_PRICE_SCALE, quoteAmountAtPrice, SWAP_LOT_SCALE } from '../../../orderbook/types';
+import { getStaticSwapTokenDimensions, getSwapExactQuoteLotMultipleAtPriceForDimensions, getSwapLotScale, ORDERBOOK_PRICE_SCALE, quoteAmountAtPrice, SWAP_LOT_SCALE } from '../../../swapbook/types';
 
-import { removeCrossJurisdictionBookOrderByRouteId } from '../../../orderbook/cross-j';
+import { removeCrossJurisdictionBookOrderByRouteId } from '../../../swapbook/cross-j';
 
 import { processOrderbookCancels, processOrderbookSwaps } from '../../../entity/tx/handlers/account/index';
 
@@ -24,7 +24,7 @@ import {
   deriveCanonicalSwapFillRatio,
   markWorkingOrderbookOffer,
   type NormalizedOrderbookOffer,
-} from '../../../orderbook/swap-execution';
+} from '../../../swapbook/swap-execution';
 
 import type { AccountReplica, AccountTx, SwapOffer } from '../../../types/account';
 import type { EntityCandidateEffect } from '../../../entity/types';

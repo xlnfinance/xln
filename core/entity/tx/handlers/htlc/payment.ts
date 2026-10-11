@@ -13,7 +13,7 @@ import type { EntityRuntimeContext } from '../../../runtime-context';
 import type { EntityTx } from '../../../../types/entity-tx';
 import { prepareEntityTxState } from '../../../state-clone';
 import { addMessage } from '../../../frame-events';
-import { validatePreparedHtlcPayment } from '../../../paybook/payment-admission';
+import { validatePreparedHtlcPayment } from '../../../../paybook/payment-admission';
 import { createStructuredLogger, formatAmount, shortHash, shortId } from '../../../../support/logger';
 import type { EntityInfraContext } from '../../../../types/entity/infra-context';
 import type { BookIntentSlotWriter } from '../../../books/book-intents';

@@ -13,11 +13,11 @@ import {
   replaceOrderbookPair,
   type BookState,
   type OrderCmd,
-} from '../../../orderbook';
+} from '../../../swapbook';
 import {
   decodeBookPricePageTree,
   projectBookPricePageTree,
-} from '../../../orderbook/pages/page';
+} from '../../../swapbook/pages/page';
 
 const hubProfile = {
   entityId: `0x${'11'.repeat(32)}`,

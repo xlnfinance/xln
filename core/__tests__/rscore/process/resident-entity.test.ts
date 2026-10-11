@@ -7,14 +7,14 @@ import { Level } from 'level';
 import { deriveSignerAddressSync, deriveSignerKeySync } from '../../../account/crypto';
 import { PersistentAccountStateMap } from '../../../account/state/persistent-state-map';
 import { generateLazyEntityId } from '../../../entity/factory';
-import { applyCommand, createBook } from '../../../orderbook/core';
-import { replaceOrderbookPair } from '../../../orderbook/order-index';
+import { applyCommand, createBook } from '../../../swapbook/core';
+import { replaceOrderbookPair } from '../../../swapbook/order-index';
 import {
   createOrderbookExtState,
   getStaticSwapTokenDimensions,
   getSwapLotScaleForDecimals,
   quoteAmountAtPriceForDecimals,
-} from '../../../orderbook/types';
+} from '../../../swapbook/types';
 import {
   RSCORE_PROTOCOL_FINGERPRINT,
   RscoreProcessClient,

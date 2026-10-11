@@ -6,7 +6,7 @@ import {
   prepareSwapOrderForDimensions,
   quoteAmountAtPriceForDecimals,
   getSwapLotScaleForDecimals,
-} from '../../../../../orderbook';
+} from '../../../../../swapbook';
 import { deriveCanonicalCrossJurisdictionMarket } from '../../../../../extensions/cross-j';
 import { getSwapPairPolicyForDimensions } from '../../../../utils';
 import type { SwapOfferTx } from './admission';

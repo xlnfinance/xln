@@ -2,7 +2,7 @@ import { expect, test } from 'bun:test';
 import {
   hashRawHtlcPaymentTx,
   validatePreparedHtlcPayment,
-} from '../../../entity/paybook/payment-admission';
+} from '../../../paybook/payment-admission';
 import { handleHtlcPayment } from '../../../entity/tx/handlers/htlc/payment';
 import type { EntityCandidateEffect } from '../../../entity/types';
 import type { EntityRuntimeContext } from '../../../entity/runtime-context';

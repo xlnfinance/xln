@@ -1,5 +1,5 @@
 import { expect, spyOn, test } from 'bun:test';
-import { generateHtlcPaymentPreimage } from '../../../entity/paybook/payment-admission';
+import { generateHtlcPaymentPreimage } from '../../../paybook/payment-admission';
 import {
   getDeterministicHtlcTestSecret,
   withDeterministicHtlcTestSecret,

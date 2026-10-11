@@ -4,7 +4,7 @@ import { formatUnits, JsonRpcProvider, parseUnits, ZeroHash } from 'ethers';
 import type { RuntimeAdapterViewFrame, RuntimeReplica, XLNModule } from '../../core/api/public/runtime-module';
 import type { RuntimeAdapter } from '../../core/api/runtime-adapter/types';
 import { getCrossJurisdictionRouteRemainingAmounts } from '../../core/extensions/cross-j/orderbook';
-import { requantizeRemainingSwapAtPriceForDimensions } from '../../core/orderbook';
+import { requantizeRemainingSwapAtPriceForDimensions } from '../../core/swapbook';
 import { computeAccountKey } from '../../core/jurisdiction/adapter/events/contract-codec';
 import { safeStringify } from '../../core/protocol/serialization';
 import { selectMarketMakerCrossRoutes } from '../../core/scripts/operations/hlt/cross/cross-boundary';

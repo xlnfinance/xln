@@ -10,7 +10,7 @@ import {
 import { handleRuntimeAdapterMessage } from '../../../api/runtime-adapter/server';
 import { resolveRuntimeAdminControl } from '../../../api/server/control/runtime-admin';
 import { validateRuntimeAdapterWireMessage } from '../../../api/runtime-adapter/wire-schema';
-import { applyCommand, canonicalPair, createBook } from '../../../orderbook';
+import { applyCommand, canonicalPair, createBook } from '../../../swapbook';
 import { createEmptyEnv } from '../../../runtime';
 import {
   addReplica,

@@ -28,7 +28,7 @@ import {
 import { handleHtlcPayment } from '../../../core/entity/tx/handlers/htlc/payment';
 import { handleResolveHtlcLockEntityTx } from '../../../core/entity/tx/handlers/htlc/direct';
 import { handleOpenAccountEntityTx } from '../../../core/entity/tx/handlers/account/lifecycle/open-account';
-import { hashRawHtlcPaymentTx } from '../../../core/entity/paybook/payment-admission';
+import { hashRawHtlcPaymentTx } from '../../../core/paybook/payment-admission';
 import { hashHtlcSecret } from '../../../core/protocol/htlc/utils';
 import { createEmptyEnv } from '../../../core/runtime';
 import type { EntityState } from '../../../core/entity/types';

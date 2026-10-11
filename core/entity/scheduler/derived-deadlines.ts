@@ -9,7 +9,7 @@
  */
 import type { EntityState } from '../types';
 import type { ScheduledHookBase } from './types';
-import { isSecretAckPendingPayment, type SecretAckPendingPayment } from '../paybook/views';
+import { isSecretAckPendingPayment, type SecretAckPendingPayment } from '../../paybook/views';
 import { HTLC_ENFORCEMENT_RESERVE_MS } from '../../account/consensus/dispute/deadline-policy';
 import { compareStableText } from '../../protocol/serialization';
 import { canProcessAccountTxForDisputeStatus } from '../../account/consensus/dispute/policy';

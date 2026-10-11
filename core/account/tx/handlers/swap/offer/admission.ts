@@ -3,7 +3,7 @@ import type { AccountState, AccountTx } from '../../../../../types/account';
 import { FINANCIAL, LIMITS } from '../../../../../config/constants';
 import { getAccountSwapMarketLimitError } from '../../../../swap/swap-limits';
 import { assertSwapNetAuthorization } from '../../../../swap/swap-net-authorization';
-import { isCanonicalOfferId, SWAP_OFFER_ID_REJECTION } from '../../../../../orderbook/swap-keys';
+import { isCanonicalOfferId, SWAP_OFFER_ID_REJECTION } from '../../../../../swapbook/swap-keys';
 
 export type SwapOfferTx = Extract<AccountTx, { type: 'swap_offer' }>;
 

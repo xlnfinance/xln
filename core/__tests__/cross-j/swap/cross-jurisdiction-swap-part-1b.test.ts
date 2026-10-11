@@ -131,14 +131,14 @@ import { normalizeEntitySwapTradingPairs } from '../../../runtime/swap-cmd/swap-
 
 import { verifyHashLadderBinary } from '../../../protocol/htlc/hash-ladder';
 
-import { createBook, recordAcceptedUsdAskPrice } from '../../../orderbook/core';
+import { createBook, recordAcceptedUsdAskPrice } from '../../../swapbook/core';
 import {
   createOrderbookExtState,
   getStaticSwapTokenDimensions,
   ORDERBOOK_PRICE_SCALE,
   SWAP_LOT_SCALE,
   quoteAmountAtPrice,
-} from '../../../orderbook/types';
+} from '../../../swapbook/types';
 
 import { buildAccountProofBody, createDisputeProofHashWithNonce } from '../../../protocol/dispute/proof-builder';
 

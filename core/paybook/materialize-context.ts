@@ -1,15 +1,15 @@
-import { MalformedEntityFrameInputError } from '../tx/processing/invariant-errors';
-import { deriveDelta } from '../../account/utils';
-import { getAccountPerspective } from '../../account/state/perspective';
-import { accountInputProposal } from '../../account/consensus/flush';
-import type { AccountTx } from '../../types/account';
-import type { EntityTx } from '../../types/entity-tx';
+import { MalformedEntityFrameInputError } from '../entity/tx/processing/invariant-errors';
+import { deriveDelta } from '../account/utils';
+import { getAccountPerspective } from '../account/state/perspective';
+import { accountInputProposal } from '../account/consensus/flush';
+import type { AccountTx } from '../types/account';
+import type { EntityTx } from '../types/entity-tx';
 import {
   preparedHtlcBindingKey,
   type HtlcPreparedInfraContext,
   type PreparedHtlcEntry,
-} from '../../types/entity/htlc-infra-context';
-import { computeHtlcEnvelopeContextHash , unwrapEnvelope, validateEnvelope } from '../../protocol/htlc/codec/envelope';
+} from '../types/entity/htlc-infra-context';
+import { computeHtlcEnvelopeContextHash , unwrapEnvelope, validateEnvelope } from '../protocol/htlc/codec/envelope';
 import {
   assertEntityEncryptionKeypair,
   assertOpaqueHtlcCiphertext,
@@ -17,26 +17,26 @@ import {
   HtlcCiphertextAuthenticationError,
   isDecryptedOpaqueHtlcLayerPrimed,
   primeDecryptedOpaqueHtlcLayer,
-} from '../../protocol/htlc/multi-recipient';
-import { encryptedHtlcLayer, hashEncryptedHtlcLayer } from '../../protocol/htlc/codec/onion-layer';
-import type { EntityState } from '../types';
-import { findAccountKey } from '../tx/account-key';
-import { HTLC } from '../../config/constants';
-import { calculateDirectionalFeePPM, calculateHopFee, sanitizeBaseFee, sanitizeFeePPM } from '../../pathfinding/fees';
-import type { Profile } from '../profile';
+} from '../protocol/htlc/multi-recipient';
+import { encryptedHtlcLayer, hashEncryptedHtlcLayer } from '../protocol/htlc/codec/onion-layer';
+import type { EntityState } from '../entity/types';
+import { findAccountKey } from '../entity/tx/account-key';
+import { HTLC } from '../config/constants';
+import { calculateDirectionalFeePPM, calculateHopFee, sanitizeBaseFee, sanitizeFeePPM } from '../pathfinding/fees';
+import type { Profile } from '../entity/profile';
 import { assertOriginatedHtlcPayments, materializeOriginatedHtlcPayments } from './payment-admission';
-import type { EntityInfraContext } from '../../types/entity/infra-context';
-import { canonicalConsensusValuesEqual } from '../../protocol/serialization/binary-codec';
+import type { EntityInfraContext } from '../types/entity/infra-context';
+import { canonicalConsensusValuesEqual } from '../protocol/serialization/binary-codec';
 import { validateHtlcPreparedInfraContext } from './prepared-context-validation';
-import { getEffectiveEntityInputTxs } from '../consensus/output/envelope';
-import { resolveCanonicalEntityBoardShares } from '../auth/authorization';
-import { normalizeAccountStateDomain } from '../../account/commitment/state-root';
-import { cryptoPoolEnabled, decryptOnionLayersBatch, type OnionJobItem } from '../../protocol/crypto/crypto-pool';
-import { countOp, OP_COUNTERS_ENABLED } from '../../support/performance/op-counters';
-import { getPerfMs } from '../../support/time';
-import { RecencyMemo } from '../../support/collections/recency-memo';
-import { timePerfPhase } from '../../support/performance/profile';
-import { compareStableText } from '../../protocol/serialization';
+import { getEffectiveEntityInputTxs } from '../entity/consensus/output/envelope';
+import { resolveCanonicalEntityBoardShares } from '../entity/auth/authorization';
+import { normalizeAccountStateDomain } from '../account/commitment/state-root';
+import { cryptoPoolEnabled, decryptOnionLayersBatch, type OnionJobItem } from '../protocol/crypto/crypto-pool';
+import { countOp, OP_COUNTERS_ENABLED } from '../support/performance/op-counters';
+import { getPerfMs } from '../support/time';
+import { RecencyMemo } from '../support/collections/recency-memo';
+import { timePerfPhase } from '../support/performance/profile';
+import { compareStableText } from '../protocol/serialization';
 
 export type MaterializeHtlcPreparedContextInput = Readonly<{
   state: EntityState;

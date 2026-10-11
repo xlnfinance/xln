@@ -1,38 +1,38 @@
-import { getAccountPerspective } from '../../account/state/perspective';
-import { sameAccountStateDomain } from '../../account/commitment/state-root';
-import { canProcessAccountTxForDisputeStatus } from '../../account/consensus/dispute/policy';
-import { deriveDelta } from '../../account/utils';
-import { HTLC, LIMITS, TOKENS } from '../../config/constants';
+import { getAccountPerspective } from '../account/state/perspective';
+import { sameAccountStateDomain } from '../account/commitment/state-root';
+import { canProcessAccountTxForDisputeStatus } from '../account/consensus/dispute/policy';
+import { deriveDelta } from '../account/utils';
+import { HTLC, LIMITS, TOKENS } from '../config/constants';
 import {
   buildRoutingProfileIndex,
   lookupUniqueRoutingProfile,
   quoteHtlcPaymentRouteWithIndex,
   type RoutingProfile,
   type RoutingProfileIndex,
-} from '../../pathfinding/htlc-quote';
-import { resolvePaymentDeadlineWindow } from '../../protocol/payments/delivery';
-import { createOnionEnvelopes } from '../../protocol/htlc/codec/envelope';
+} from '../pathfinding/htlc-quote';
+import { resolvePaymentDeadlineWindow } from '../protocol/payments/delivery';
+import { createOnionEnvelopes } from '../protocol/htlc/codec/envelope';
 import {
   calculateHopRevealHeight,
   calculateHopTimelock,
   hashHtlcSecret,
-} from '../../protocol/htlc/utils';
+} from '../protocol/htlc/utils';
 import {
   canonicalConsensusValuesEqual,
   encodeCanonicalConsensusBytes,
-} from '../../protocol/serialization/binary-codec';
-import { keccakBytesHash } from '../../protocol/crypto/keccak-text';
-import { getDeterministicHtlcTestSecret } from '../../protocol/htlc/test-secret-capability';
-import type { EntityInfraContext } from '../../types/entity/infra-context';
-import type { PreparedOriginatedHtlcPayment } from '../../types/entity/htlc-infra-context';
-import type { EntityTx } from '../../types/entity-tx';
-import { FailureDispositionError, rejectFailure } from '../../protocol/errors/failure-taxonomy';
-import { toJHeight, toUnixMs } from '../../protocol/units';
-import { compareStableText } from '../../protocol/serialization';
-import type { Profile } from '../profile';
-import type { EntityState } from '../types';
-import type { AccountStateDomain } from '../../types/account';
-import { MalformedEntityFrameInputError } from '../tx/processing/invariant-errors';
+} from '../protocol/serialization/binary-codec';
+import { keccakBytesHash } from '../protocol/crypto/keccak-text';
+import { getDeterministicHtlcTestSecret } from '../protocol/htlc/test-secret-capability';
+import type { EntityInfraContext } from '../types/entity/infra-context';
+import type { PreparedOriginatedHtlcPayment } from '../types/entity/htlc-infra-context';
+import type { EntityTx } from '../types/entity-tx';
+import { FailureDispositionError, rejectFailure } from '../protocol/errors/failure-taxonomy';
+import { toJHeight, toUnixMs } from '../protocol/units';
+import { compareStableText } from '../protocol/serialization';
+import type { Profile } from '../entity/profile';
+import type { EntityState } from '../entity/types';
+import type { AccountStateDomain } from '../types/account';
+import { MalformedEntityFrameInputError } from '../entity/tx/processing/invariant-errors';
 
 type HtlcPaymentTx = Extract<EntityTx, { type: 'htlcPayment' }>;
 

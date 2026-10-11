@@ -9,7 +9,7 @@ use xln_rscore_protocol::CanonicalValue;
 use crate::commitment::compute_commitments;
 use crate::j_events::apply_committed_j_event_claim;
 use crate::local_financial::{LocalAccountFinancialView, apply_local_entity_financial_txs};
-use crate::orderbook::{
+use crate::swapbook::{
     OrderbookPairJob, OrderbookPairResult, PreparedOrderbookStage, SameJOffer, SameJOutputDelta,
     install_orderbook_outputs, prepare_orderbook_outputs, validate_orderbook_outputs,
 };
@@ -487,7 +487,7 @@ fn apply_commit_transitions(
             }
             continue;
         }
-        if crate::lending::apply_committed_lending_followup(
+        if crate::lendbook::apply_committed_lending_followup(
             state,
             commit,
             &transition,
@@ -722,7 +722,7 @@ fn append_scheduled_account_txs(
     for command in commands {
         match command {
             SchedulerCommand::SettleOverdueLending { loans } => {
-                crate::lending::settle_overdue_lending_loans(state, loans, account_txs)?;
+                crate::lendbook::settle_overdue_lending_loans(state, loans, account_txs)?;
             }
             SchedulerCommand::ProcessHtlcTimeouts { .. }
             | SchedulerCommand::PrepareSecretAckDisputes { .. }
@@ -1163,7 +1163,7 @@ pub(crate) fn finish_orderbook_stage(
                 .orderbook
                 .as_mut()
                 .ok_or_else(|| EntityKernelError::orderbook("ORDERBOOK_EXTENSION_REQUIRED"))?;
-            crate::orderbook::apply_cross_jurisdiction_fill_deltas(
+            crate::swapbook::apply_cross_jurisdiction_fill_deltas(
                 orderbook,
                 &applied.orderbook_deltas,
             )?;

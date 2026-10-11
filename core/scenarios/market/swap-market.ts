@@ -31,8 +31,8 @@ import {
 } from '../harness/boot';
 import { findReplica, converge, assert, assertRuntimeIdle, processUntil, enableStrictScenario, ensureSignerKeysFromSeed, requireRuntimeSeed } from '../harness/helpers';
 import { createGossipLayer } from '../../network/p2p/gossip';
-import { getBookOrders } from '../../orderbook/core';
-import { getStaticSwapTokenDimensions } from '../../orderbook';
+import { getBookOrders } from '../../swapbook/core';
+import { getStaticSwapTokenDimensions } from '../../swapbook';
 
 type MarketHub = { name: string; id: string; signer: string; role: string; pairs: string[] };
 type MarketTrader = { name: string; id: string; signer: string; role: string };
@@ -253,7 +253,7 @@ export async function swapMarket(env: RuntimeReplica): Promise<void> {
   const grace = requireDefined(traders[6], 'Grace');
 
   // Initialize orderbookExt for each hub
-  const { DEFAULT_SPREAD_DISTRIBUTION } = await import('../../orderbook');
+  const { DEFAULT_SPREAD_DISTRIBUTION } = await import('../../swapbook');
   await process(env, hubs.map(hub => ({
     entityId: hub.id,
     signerId: hub.signer,
@@ -909,7 +909,7 @@ export async function swapMarketStress(env: RuntimeReplica): Promise<void> {
   console.log(`✅ Created ${allEntities.length} entities\n`);
 
   // Initialize hub orderbook
-  const { DEFAULT_SPREAD_DISTRIBUTION } = await import('../../orderbook');
+  const { DEFAULT_SPREAD_DISTRIBUTION } = await import('../../swapbook');
   await process(env, [{
     entityId: hub.id,
     signerId: hub.signer,

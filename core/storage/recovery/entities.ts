@@ -181,7 +181,7 @@ const hydrateRestoredEntityTrees = async (
 
 const seedPersistedBookRoots = (env: RuntimeReplica): void => {
   env.infrastructure ??= {};
-  const roots = new Map<string, import('../../orderbook/core').BookState>();
+  const roots = new Map<string, import('../../swapbook/core').BookState>();
   const seenEntities = new Set<string>();
   for (const replica of env.state.eReplicas.values()) {
     const entityId = replica.entityId.toLowerCase();

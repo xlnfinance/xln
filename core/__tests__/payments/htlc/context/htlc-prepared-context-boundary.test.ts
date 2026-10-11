@@ -1,8 +1,8 @@
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { validateHtlcPreparedInfraContext } from '../../../../entity/paybook/prepared-context-validation';
-import { getEffectiveHtlcFrameTxs } from '../../../../entity/paybook/materialize-context';
+import { validateHtlcPreparedInfraContext } from '../../../../paybook/prepared-context-validation';
+import { getEffectiveHtlcFrameTxs } from '../../../../paybook/materialize-context';
 import type { EntityTx } from '../../../../types/entity-tx';
 import type { EntityState } from '../../../../entity/types';
 
@@ -104,13 +104,13 @@ describe('HTLC prepared Entity context boundary', () => {
   });
 
   test('does not spanning-structuredClone the HTLC graph', () => {
-    const source = readFileSync(join(import.meta.dir, '../../../../entity/paybook/prepared-context-validation.ts'), 'utf8');
+    const source = readFileSync(join(import.meta.dir, '../../../../paybook/prepared-context-validation.ts'), 'utf8');
     expect(source).toContain('cloneIsolatedProtocolValue(context');
     expect(source).not.toContain('structuredClone(context)');
   });
 
   test('inbound canonicalize decorate-sorts binding keys once', () => {
-    const source = readFileSync(join(import.meta.dir, '../../../../entity/paybook/materialize-context.ts'), 'utf8');
+    const source = readFileSync(join(import.meta.dir, '../../../../paybook/materialize-context.ts'), 'utf8');
     expect(source).toContain('const decorated = entries.map(owned => ({ key: preparedHtlcBindingKey(owned.entry.binding), ...owned }))');
     expect(source).toContain('decorated.sort((left, right) => compareStableText(left.key, right.key))');
     expect(source).not.toContain('preparedHtlcBindingKey(left.binding).localeCompare(preparedHtlcBindingKey(right.binding))');

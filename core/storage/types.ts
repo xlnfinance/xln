@@ -1,4 +1,4 @@
-import type { BookState, EntityReferral, HubProfile, OrderbookExtState } from '../orderbook';
+import type { BookState, EntityReferral, HubProfile, OrderbookExtState } from '../swapbook';
 import type { CrontabState } from '../entity/scheduler/types';
 import type { JBatchState } from '../jurisdiction/machine/batch';
 import type { AccountReplica } from '../types/account';

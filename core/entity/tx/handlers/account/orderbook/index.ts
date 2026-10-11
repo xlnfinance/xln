@@ -4,15 +4,15 @@ import type { EntityState } from '../../../../types';
 import {
   type BookState,
   type OrderbookExtState,
-} from '../../../../../orderbook';
+} from '../../../../../swapbook';
 import { createStructuredLogger, shortId, shortOrder } from '../../../../../support/logger';
-import { type WorkingOrderbookOffer, swapKey } from '../../../../../orderbook/swap-execution';
+import { type WorkingOrderbookOffer, swapKey } from '../../../../../swapbook/swap-execution';
 import { type CrossJurisdictionFillInstruction } from '../../../../../extensions/cross-j/orderbook';
 import {
   type AccountTxTarget,
 } from './queue';
 import type { MatchResult } from './offers';
-import { sortSwapOffersForOrderbook } from '../../../../../orderbook/swap-execution';
+import { sortSwapOffersForOrderbook } from '../../../../../swapbook/swap-execution';
 import {
   splitWorkingOrderbookOffers,
   type OrderbookProcessOptions,

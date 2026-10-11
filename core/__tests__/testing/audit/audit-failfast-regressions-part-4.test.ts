@@ -85,7 +85,7 @@ import {
 import {
   assertCrossJurisdictionOrderAdmissible,
   findCrossJurisdictionBookAdmissionForAck,
-} from '../../../orderbook/cross-j/orderbook';
+} from '../../../swapbook/cross-j/orderbook';
 
 import {
   buildCrossJurisdictionMarketOffer,
@@ -160,7 +160,7 @@ import {
   ORDERBOOK_PRICE_SCALE,
   SWAP_LOT_SCALE,
   type OrderbookExtState,
-} from '../../../orderbook';
+} from '../../../swapbook';
 
 import {
   createEmptyEnv,

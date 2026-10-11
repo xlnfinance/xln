@@ -8,7 +8,7 @@ import {
   type SwapFormValidationInput,
   validateSwapForm,
 } from '../../../frontend/src/lib/components/Entity/swap/swap-order-math';
-import { getSwapLotScale, requantizeRemainingSwapAtPrice } from '../../../core/orderbook';
+import { getSwapLotScale, requantizeRemainingSwapAtPrice } from '../../../core/swapbook';
 
 describe('swap order math', () => {
   test('formats token amounts for display and bounded inputs', () => {

@@ -12,7 +12,7 @@ import {
 } from '../../../entity/state/persistent-account-map';
 import { makeAccount } from '../../helpers/cross-j';
 import { computeEntityAccountValueHash } from '../../../entity/consensus/state-root';
-import { listOpenSwapOffers } from '../../../orderbook/open-swap-offers';
+import { listOpenSwapOffers } from '../../../swapbook/open-swap-offers';
 
 const hash = (value: AccountReplica): string =>
   `0x${String((value as unknown as { marker: number }).marker).padStart(64, '0')}`;

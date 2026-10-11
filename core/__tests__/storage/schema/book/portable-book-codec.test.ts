@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { applyCommand, commitBookOverlay, createBook } from '../../../../orderbook';
+import { applyCommand, commitBookOverlay, createBook } from '../../../../swapbook';
 import { projectPortableBook, decodePortableBook } from '../../../../storage/schema/book/portable';
 import { safeParse, safeStringify } from '../../../../protocol/serialization';
 

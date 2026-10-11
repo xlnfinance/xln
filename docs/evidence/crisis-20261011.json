@@ -667,6 +667,55 @@
         "balanceEth": "0",
         "broadcast": false
       }
+    },
+    "lendbookWithdrawals": {
+      "sourceCheckpoint": "079c101cc",
+      "module": "core/lendbook",
+      "result": "PASS",
+      "firstFailure": {
+        "log": ".logs/crisis-20261011/withdrawal-queue-before.log",
+        "expected": "queued",
+        "actual": "open"
+      },
+      "related": {
+        "tests": 564,
+        "assertions": 448521,
+        "files": 46,
+        "seconds": 36.28,
+        "log": ".logs/crisis-20261011/withdrawal-related.log"
+      },
+      "recovery": {
+        "sigkills": 6,
+        "processes": 7,
+        "tests": 1,
+        "assertions": 21,
+        "seconds": 12.55,
+        "log": ".logs/crisis-20261011/withdrawal-queue-crash.log"
+      },
+      "browser": {
+        "passed": 3,
+        "skipped": 0,
+        "flaky": 0,
+        "pageErrors": 0,
+        "seconds": 40.255,
+        "report": ".logs/crisis-20261011/withdrawal-react/wallet-results.json"
+      },
+      "replay": {
+        "frames": 108,
+        "workers": [
+          1,
+          4
+        ],
+        "exact": true,
+        "transcriptDigest": "bfeef7065f24d509bf1a0280093e47bb9bd99e59b9c257076b6b38382439efbc",
+        "report": ".logs/crisis-20261011/withdrawal-react/queue-comparison.json"
+      },
+      "fullCheck": {
+        "passed": true,
+        "sourceGates": 38,
+        "log": ".logs/crisis-20261011/withdrawal-check-complete.log"
+      },
+      "limitation": "Term savings only. Demand rate updates, current TS/Rust bank parity, integrated release gate and public deployment remain incomplete."
     }
   },
   "currentReleaseScope": {

@@ -1106,15 +1106,15 @@ const prepareBookGraphWrites = async (
 ): Promise<Readonly<{
   puts: readonly Readonly<{ key: Buffer; value: Buffer }>[];
   dels: readonly Buffer[];
-  cachePuts: ReadonlyMap<string, import('../orderbook/core').BookState>;
+  cachePuts: ReadonlyMap<string, import('../swapbook/core').BookState>;
   cacheDels: ReadonlySet<string>;
 }>> => {
   const cache = prepared.state.storagePersistedBooks instanceof Map
-    ? prepared.state.storagePersistedBooks as Map<string, import('../orderbook/core').BookState>
-    : new Map<string, import('../orderbook/core').BookState>();
+    ? prepared.state.storagePersistedBooks as Map<string, import('../swapbook/core').BookState>
+    : new Map<string, import('../swapbook/core').BookState>();
   const puts: Array<Readonly<{ key: Buffer; value: Buffer }>> = [];
   const dels: Buffer[] = [];
-  const cachePuts = new Map<string, import('../orderbook/core').BookState>();
+  const cachePuts = new Map<string, import('../swapbook/core').BookState>();
   const cacheDels = new Set<string>();
   const bookPuts = putsToMaterialize
     .filter((doc): doc is Extract<StorageDoc, { family: 'book' }> => doc.family === 'book')

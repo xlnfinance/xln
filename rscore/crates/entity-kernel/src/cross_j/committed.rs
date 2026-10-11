@@ -9,7 +9,7 @@ use num_bigint::BigInt;
 use xln_rscore_engine::AccountTx;
 use xln_rscore_protocol::CanonicalValue;
 
-use crate::orderbook::SameJOutputDelta;
+use crate::swapbook::SameJOutputDelta;
 use crate::scheduler::{ScheduledHook, ScheduledHookKind, cancel_hook, schedule_hook};
 use crate::{EntityFrameEvent, EntityKernelError, EntityStateSlice, EntityTxKind};
 

@@ -24,7 +24,7 @@ import {
   hashRawHtlcPaymentTx,
   assertOriginatedHtlcPayments,
   materializeOriginatedHtlcPayments,
-} from '../../../../entity/paybook/payment-admission';
+} from '../../../../paybook/payment-admission';
 import type { Profile } from '../../../../entity/profile';
 import type { EntityTx } from '../../../../types/entity-tx';
 import { entity, makeJurisdiction, makeState } from '../../../helpers/cross-j';

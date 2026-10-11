@@ -13,7 +13,7 @@ import { readRuntimeFrameEvents } from '../runtime/observability/env-events';
 import type { EntityState } from '../entity/types';
 import type { AccountReplica } from '../types/account';
 import { getWallClockMs } from '../support/time';
-import { listOpenSwapOffers } from '../orderbook/open-swap-offers';
+import { listOpenSwapOffers } from '../swapbook/open-swap-offers';
 
 export interface FormatOptions {
   maxAccounts?: number;

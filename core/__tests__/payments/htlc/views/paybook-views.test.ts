@@ -4,7 +4,7 @@ import {
   isDisputeReadyPayment,
   isForwardingPayment,
   isSecretAckPendingPayment,
-} from '../../../../entity/paybook/views';
+} from '../../../../paybook/views';
 
 const entry = (): PaybookEntry => ({
   hashlock: `0x${'11'.repeat(32)}`,

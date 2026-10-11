@@ -318,6 +318,7 @@
       "criticality": "critical",
       "structuralDebt": 4,
       "sourceGlobs": [
+        "core/paybook/**/*.ts",
         "core/runtime/registration/**/*.ts",
         "core/protocol/payments/**/*.ts",
         "core/protocol/htlc/**/*.ts",
@@ -352,7 +353,7 @@
       "criticality": "high",
       "structuralDebt": 5,
       "sourceGlobs": [
-        "core/orderbook/**/*.ts",
+        "core/swapbook/**/*.ts",
         "core/extensions/**/*.ts",
         "core/lendbook/**/*.ts"
       ],
@@ -968,6 +969,7 @@
         "independentVerification"
       ],
       "sourceGlobs": [
+        "core/paybook/**/*.ts",
         "core/runtime/registration/**/*.ts",
         "core/protocol/payments/**/*.ts",
         "core/protocol/htlc/**/*.ts",
@@ -1003,7 +1005,7 @@
         "independentVerification"
       ],
       "sourceGlobs": [
-        "core/orderbook/**/*.ts",
+        "core/swapbook/**/*.ts",
         "core/extensions/**/*.ts"
       ],
       "testGlobs": [

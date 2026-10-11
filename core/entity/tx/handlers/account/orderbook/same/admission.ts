@@ -1,8 +1,8 @@
 import { haltRuntimeFailure } from "../../../../../../protocol/errors/failure-taxonomy";
 
-import { equalSwapPairDimensions, forkBookState, getBestAsk, getBestBid, getBookOrder } from '../../../../../../orderbook';
+import { equalSwapPairDimensions, forkBookState, getBestAsk, getBestBid, getBookOrder } from '../../../../../../swapbook';
 import { createStructuredLogger, shortId, shortOrder } from '../../../../../../support/logger';
-import type { SameJurisdictionWorkingOrderbookOffer } from '../../../../../../orderbook/swap-execution';
+import type { SameJurisdictionWorkingOrderbookOffer } from '../../../../../../swapbook/swap-execution';
 import {
   createEmptyPairBook,
   deriveSameOrderbookMaterialization,

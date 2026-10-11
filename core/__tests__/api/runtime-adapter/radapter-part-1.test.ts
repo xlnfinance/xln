@@ -86,9 +86,9 @@ import type {
 
 import type { AccountTx, CrossJurisdictionSwapRoute, Delta, EntityReplica, RuntimeReplica, RuntimeInput } from '../../../runtime/types';
 
-import type { BookState } from '../../../orderbook';
+import type { BookState } from '../../../swapbook';
 
-import { DEFAULT_SPREAD_DISTRIBUTION, type OrderbookExtState } from '../../../orderbook/types';
+import { DEFAULT_SPREAD_DISTRIBUTION, type OrderbookExtState } from '../../../swapbook/types';
 
 import { createGossipLayer } from '../../../network/p2p/gossip';
 import type { Profile } from '../../../entity/profile';

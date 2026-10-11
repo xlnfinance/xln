@@ -11,6 +11,22 @@ that covers several use cases. Minimize code; delete redundant paths when retain
 financial semantics and recovery are proved. A superset is explicit product terms
 on one mechanism, not another framework or parallel implementation.
 
+Owner reinforcement, 2026-10-11: treat the codebase as a precise, coherent
+canonical reference. Align `paybook`, `swapbook` and `lendbook` naming and module
+ownership in TypeScript and Rust. Prefer explicit invariants, one production
+path and the smallest implementation that preserves financial behavior. Delete
+replaced code, duplicate formulas and redundant state; do not retain aliases or
+unfinished alternate paths. Beauty means legible authority and proved behavior,
+not identical empty wrappers, a line-count target or an unsupported claim of
+perfection. This is a standing review standard, not evidence that the code has
+already achieved it.
+
+Owner direction, 2026-10-11: use Japanese-inspired continuous improvement,
+error prevention and restrained product design. Apply these through the existing
+[execution loop](improvement-loop.md#reflection-that-changes-the-next-action):
+one completed improvement, visible failures and less unnecessary work. Preserve
+financial precision; avoid decorative process, terminology and parallel rules.
+
 ## Goal and responsibilities
 
 Egor sets architecture and product direction. The engineering agent independently
@@ -47,7 +63,8 @@ to MML; counting accounts or gross turnover does not replace GDP attribution.
 - Current scope, updated 2026-10-11: TypeScript, React `ui/`, Ethereum same-J.
   Sepolia verification precedes the Ethereum mainnet canary. This supersedes
   the October 10 multi-engine, multi-wallet and multi-jurisdiction scope.
-- Rust `rscore/` is frozen; Svelte wallet development is frozen. TRON, XLNC,
+- Rust `rscore/` is frozen except for the owner's later explicit three-book
+  refactor and its required financial parity. Svelte wallet development is frozen. TRON, XLNC,
   Base, cross-J as a headline, companies/IPO,
   native clients and custody are deferred. Apply the exact freeze and reopening
   rules in [AGENTS.md](../AGENTS.md); do not repeat excluded release gates.

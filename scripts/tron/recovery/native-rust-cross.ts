@@ -19,7 +19,7 @@ import { readNativeCrossState } from '../../../core/scripts/operations/hlt/cross
 import { buildCrossJurisdictionSwapSubmission } from '../../../core/runtime/j-submit/api';
 import { createHubDirectRuntimeRoute } from '../../../core/orchestrator/hub/hub-runtime-transport';
 import { defaultAccountDisputeConfigForParties } from '../../../core/account/config/dispute-config';
-import { DEFAULT_SPREAD_DISTRIBUTION } from '../../../core/orderbook/types';
+import { DEFAULT_SPREAD_DISTRIBUTION } from '../../../core/swapbook/types';
 import { safeStringify } from '../../../core/protocol/serialization';
 import { party, walletFor, connectChains, createParties, account, accountSnapshot, credit, amount } from '../cross-swap-context';
 

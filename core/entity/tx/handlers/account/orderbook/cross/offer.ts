@@ -5,7 +5,7 @@ import {
   commitBookOverlay,
   getSwapExactQuoteLotMultipleAtPriceForDimensions,
   OrderbookCapacityError,
-} from '../../../../../../orderbook';
+} from '../../../../../../swapbook';
 import { createStructuredLogger, shortOrder } from '../../../../../../support/logger';
 import { resolveCrossJurisdictionExecutionPriceTicks } from '../../../../../../extensions/cross-j/orderbook';
 import {
@@ -21,7 +21,7 @@ import type {
   CrossOrderbookPass,
   PreparedCrossOffer,
 } from './types';
-import type { CrossJurisdictionWorkingOrderbookOffer } from '../../../../../../orderbook/swap-execution';
+import type { CrossJurisdictionWorkingOrderbookOffer } from '../../../../../../swapbook/swap-execution';
 
 const orderbookCrossLog = createStructuredLogger('orderbook.cross');
 

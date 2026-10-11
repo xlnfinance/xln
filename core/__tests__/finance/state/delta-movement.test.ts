@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
 import { deriveTransferOffdeltaChange } from '../../../protocol/transform/delta-movement';
-import { deriveSwapOffdeltaChanges } from '../../../orderbook/swap-execution';
+import { deriveSwapOffdeltaChanges } from '../../../swapbook/swap-execution';
 
 describe('canonical Account delta movement', () => {
   test('uses one direction rule for payment and HTLC transfers', () => {

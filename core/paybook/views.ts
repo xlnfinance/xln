@@ -1,4 +1,4 @@
-import type { PaybookEntry } from '../types';
+import type { PaybookEntry } from '../entity/types';
 
 type InboundPayment = PaybookEntry & Required<Pick<PaybookEntry, 'inboundEntity'>>;
 type OutboundPayment = PaybookEntry & Required<Pick<PaybookEntry, 'outboundEntity'>>;

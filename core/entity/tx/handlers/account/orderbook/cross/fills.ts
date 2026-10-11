@@ -1,7 +1,7 @@
 import { haltRuntimeFailure } from "../../../../../../protocol/errors/failure-taxonomy";
 
 import { createStructuredLogger, shortOrder } from '../../../../../../support/logger';
-import { compareCanonicalText } from '../../../../../../orderbook/swap-execution';
+import { compareCanonicalText } from '../../../../../../swapbook/swap-execution';
 import {
   buildCrossJurisdictionCancelInstruction,
   buildCrossJurisdictionFillInstruction,

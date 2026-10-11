@@ -83,7 +83,7 @@ import { PersistentEntityAccountMap } from '../../../entity/state/persistent-acc
 import {
   assertCrossJurisdictionOrderAdmissible,
   findCrossJurisdictionBookAdmissionForAck,
-} from '../../../orderbook/cross-j/orderbook';
+} from '../../../swapbook/cross-j/orderbook';
 
 import {
   buildCrossJurisdictionMarketOffer,
@@ -167,7 +167,7 @@ import {
   ORDERBOOK_PRICE_SCALE,
   SWAP_LOT_SCALE,
   type OrderbookExtState,
-} from '../../../orderbook';
+} from '../../../swapbook';
 
 import {
   createEmptyEnv,
@@ -243,7 +243,7 @@ import type { DisputeFinalizationEvidence, JurisdictionEvent } from '../../../ty
 import type { EntityTx } from '../../../types/entity-tx';
 
 import { installCanonicalRegisteredBoardAuthority } from '../../helpers/registration-evidence';
-import { exactFillRatioToUint16 } from '../../../orderbook/swap-execution';
+import { exactFillRatioToUint16 } from '../../../swapbook/swap-execution';
 
 import { ethers } from 'ethers';
 import {

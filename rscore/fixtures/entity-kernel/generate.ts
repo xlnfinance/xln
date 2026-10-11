@@ -31,12 +31,12 @@ import {
   replaceOrderbookPair,
   type BookState,
   type HubProfile,
-} from '../../../core/orderbook';
-import type { BookPricePageTree } from '../../../core/orderbook/pages/page';
+} from '../../../core/swapbook';
+import type { BookPricePageTree } from '../../../core/swapbook/pages/page';
 import {
   markWorkingOrderbookOffer,
   type NormalizedOrderbookOffer,
-} from '../../../core/orderbook/swap-execution';
+} from '../../../core/swapbook/swap-execution';
 import { hashHtlcSecret } from '../../../core/protocol/htlc/utils';
 import {
   HTLC_OPAQUE_CIPHERTEXT_VERSION,

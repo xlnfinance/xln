@@ -61,7 +61,7 @@ import { HTLC, LIMITS } from '../../../config/constants';
 
 import { executeCrontab, initCrontab } from '../../../entity/scheduler';
 import { collectDerivedDeadlines } from '../../../entity/scheduler/derived-deadlines';
-import { HTLC_SECRET_ACK_TIMEOUT_MS } from '../../../entity/paybook/lifecycle';
+import { HTLC_SECRET_ACK_TIMEOUT_MS } from '../../../paybook/lifecycle';
 
 import { encodeBoard, generateLazyEntityId, generateNumberedEntityId, hashBoard } from '../../../entity/factory';
 
@@ -97,7 +97,7 @@ import {
 import {
   assertCrossJurisdictionOrderAdmissible,
   findCrossJurisdictionBookAdmissionForAck,
-} from '../../../orderbook/cross-j/orderbook';
+} from '../../../swapbook/cross-j/orderbook';
 
 import {
   buildCrossJurisdictionMarketOffer,
@@ -179,7 +179,7 @@ import {
   ORDERBOOK_PRICE_SCALE,
   SWAP_LOT_SCALE,
   type OrderbookExtState,
-} from '../../../orderbook';
+} from '../../../swapbook';
 
 import {
   createEmptyEnv,

@@ -2,13 +2,28 @@
 
 ## Current SHA
 
-Tested source checkpoint: `5a2025a81`, main, 2026-10-11; documentation may follow.
+Tested source checkpoint: `079c101cc`, main, 2026-10-11; documentation may follow.
+This checkpoint isolates Lendbook and fixes queued withdrawals. Related tests
+564/564, six SIGKILLs across seven processes, three browser journeys and all
+108 TS W1/W4 replay frames pass. Full check: 38 source gates plus short/outer
+gates pass. Evidence: `.logs/crisis-20261011/withdrawal-*` and
+`withdrawal-react/queue-comparison.json`; transcript
+`bfeef7065f24d509bf1a0280093e47bb9bd99e59b9c257076b6b38382439efbc`.
+
+Latest owner instruction: all three books must have consistent names and module
+boundaries in TS and Rust, deleting retired paths. Rust freeze is lifted for
+that refactor and the books' financial parity; TS remains the launch engine.
+Rust baseline `cargo check -p xln-rscore-entity-kernel --all-targets --locked`
+passes in 7.47s. Its lending still uses the old saver allocation/credit-grant
+semantics; a module rename alone is not financial parity. Preserve the six
+unrelated dirty Rust files (baseline patch in
+`.logs/crisis-20261011/books-foreign-rust-before.patch`).
 `8c5ef2793` implements partial repayment; `5a2025a81` validates Account access once
 and lowers non-null assertion debt from 617 to 616. Earlier `87f860bd1` and
 `494b162cc` repair release fixtures, remove saver allocation and charge actual
 elapsed loan interest. Not pushed.
 Preserve unrelated frozen Rust changes, HANDOFF.md, output/ and tmp/.
-TS only, React only, Ethereum same-J. Work solo; no external-model spend.
+TS launch engine, React only, Ethereum same-J. Work solo; no external-model spend.
 
 All six owner choices are resolved: term and demand savings; lending above deposits
 inside signed bank facilities; withdrawal order by maturity then request admission;
@@ -56,7 +71,8 @@ Other bytecode/ABI templates are identical; build metadata/AST ids differ.
 ## First red command/error
 
 No remaining partial-repayment L1/L2 or full source-check failure.
-Demand savings and due/request-ordered payout servicing are not implemented.
+Demand savings are not implemented. Due/request-ordered withdrawal servicing
+is implemented and verified at `079c101cc`; see the newer evidence above.
 
 The integrated runtime release gate still reaches the frozen cross-J fixture
 mismatch after 77 tests. Its first difference is dispute ProofBody hashing:
@@ -79,10 +95,10 @@ Durable evidence index: `docs/evidence/crisis-20261011.json`.
 
 ## Next single command
 
-`bun test core/__tests__/finance/state/lending.test.ts --test-name-pattern 'close'`
-Inspect that existing production boundary, then reproduce demand savings and
-ordered payout behavior there before implementing the first missing case.
-Use the same signed obligation/close path.
+Unify source module paths to `paybook`, `swapbook`, `lendbook` in TS and Rust,
+preserving protocol bytes; then verify the first Rust lending divergence against
+current TS vectors. The owner also delegates demand-rate design: prospective
+variable rates, earned interest preserved, one signed accrual mechanism.
 Do not repeat unchanged green gates without a new concern.
 
 Sepolia runner: `/Users/zigota/.config/xln/sepolia-deployer/run.ts`.
@@ -102,7 +118,7 @@ shows 0 ETH on chain 11155111; `partial-sepolia-status.log`. No public deploymen
 
 ## Remaining final gates
 
-Demand savings, ordered payouts, integrated TS release vectors, valid 1,000-user
+Demand savings, book refactor/financial parity, integrated TS release vectors, valid 1,000-user
 live load; funded public Sepolia current-bytecode identity and three real-clock
 exit paths including an offline-wallet watchtower; immutable tested source/config/
 artifacts and recovery/rollback package. Local checkpoints are not release candidates.

@@ -1,7 +1,7 @@
 {
   "baseTokenDecimals": 6,
   "bucketWidthTicks": 100,
-  "canonicalSource": "TypeScript core/orderbook/core.ts",
+  "canonicalSource": "TypeScript core/swapbook/core.ts",
   "cases": [
     {
       "maxOrders": 16,

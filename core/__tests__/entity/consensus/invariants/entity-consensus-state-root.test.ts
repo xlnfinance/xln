@@ -19,7 +19,7 @@ import { certifiedEntityFrameLinkFingerprint } from '../../../../entity/consensu
 import type { EntityFrame, EntityState } from '../../../../entity/types';
 import { makeAccount as makeAccountReplica } from '../../../helpers/cross-j';
 import { PersistentEntityAccountMap } from '../../../../entity/state/persistent-account-map';
-import { createBook } from '../../../../orderbook/core';
+import { createBook } from '../../../../swapbook/core';
 import { PersistentAccountStateMap } from '../../../../account/state/persistent-state-map';
 import { initCrontab } from '../../../../entity/scheduler';
 

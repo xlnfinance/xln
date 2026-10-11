@@ -1,9 +1,9 @@
 import { timePerfPhase } from '../../../support/performance/profile';
 import { parseProfile, type DecodedProfile } from '../../profile';
 import { canonicalConsensusValuesEqual } from '../../../protocol/serialization/binary-codec';
-import { validateHtlcPreparedInfraContext } from '../../paybook/prepared-context-validation';
-import { getEffectiveHtlcFrameTxs } from '../../paybook/materialize-context';
-import { hashRawHtlcPaymentTx } from '../../paybook/payment-admission';
+import { validateHtlcPreparedInfraContext } from '../../../paybook/prepared-context-validation';
+import { getEffectiveHtlcFrameTxs } from '../../../paybook/materialize-context';
+import { hashRawHtlcPaymentTx } from '../../../paybook/payment-admission';
 import type { EntityInfraContext } from '../../../types/entity/infra-context';
 import type { EntityTx } from '../../../types/entity-tx';
 import type { EntityRuntimeContext } from '../../runtime-context';

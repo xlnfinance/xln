@@ -2,7 +2,7 @@ import type { AccountState } from '../../../../../types/account';
 import type { AccountDraftState } from '../../../../state/account-state-draft';
 import { deriveDelta } from '../../../../utils';
 import { createDefaultDelta } from '../../../../state/delta';
-import { deriveSwapOffdeltaChanges } from '../../../../../orderbook/swap-execution';
+import { deriveSwapOffdeltaChanges } from '../../../../../swapbook/swap-execution';
 import { getHold, releaseHold } from '../../../hold-utils';
 import { createDeltaDraft, getOffdeltaRepresentationError } from '../../../delta-utils';
 import { deriveTransferOffdeltaChange } from '../../../../../protocol/transform/delta-movement';

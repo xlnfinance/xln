@@ -7,7 +7,7 @@ import {
   type BookEvent,
   type BookState,
   type Side,
-} from '../../../orderbook';
+} from '../../../swapbook';
 import { getPerfMs } from '../../../support/time';
 import { runSwapRuntimeBenchmark } from './bench-swap-runtime-tps';
 

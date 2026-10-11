@@ -6,7 +6,7 @@ import { getTokenInfo } from '../../../../account/utils';
 import {
   deterministicEntityTimestamp,
   getTypedCrossJurisdictionBookAdmissionFailure,
-} from '../../../../orderbook/cross-j/orderbook';
+} from '../../../../swapbook/cross-j/orderbook';
 import {
   CROSS_J_MAX_FILL_RATIO,
   cloneCrossJurisdictionRoute,
@@ -32,12 +32,12 @@ import type { EntityRuntimeContext } from '../../../runtime-context';
 import type { EntityTx } from '../../../../types/entity-tx';
 import type { RuntimeOverlayRecord } from '../../../../types/account';
 import { getEntityCollectionValueForWrite, ensureEntityCollectionCandidate } from '../../../state/persistent-collection-map';
-import { crossJurisdictionExecutableQtyLots } from '../../../../orderbook';
+import { crossJurisdictionExecutableQtyLots } from '../../../../swapbook';
 import {
   materializeCrossJurisdictionBookRemainder,
   removeCrossJurisdictionBookOrderByRouteId,
   resizeCrossJurisdictionBookOrderByRouteId,
-} from '../../../../orderbook/cross-j';
+} from '../../../../swapbook/cross-j';
 import { prepareEntityTxState } from '../../../state-clone';
 import { addMessage } from '../../../frame-events';
 import {
@@ -45,7 +45,7 @@ import {
   validateCrossJurisdictionRouteTransition,
 } from '../../j-events-htlc/cross-jurisdiction-helpers';
 import type { SwapOfferEvent } from '../account/orderbook/offers';
-import { normalizeSwapOfferForOrderbook } from '../../../../orderbook/swap-execution';
+import { normalizeSwapOfferForOrderbook } from '../../../../swapbook/swap-execution';
 import type { ApplyEntityTxOptions } from '../../apply';
 import {
   buildCrossJurisdictionEntityOutput,

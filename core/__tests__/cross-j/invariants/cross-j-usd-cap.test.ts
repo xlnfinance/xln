@@ -8,7 +8,7 @@ import {
   getCrossJurisdictionLocalUsdCapError,
   isCrossJurisdictionBookRiskRejection,
 } from '../../../extensions/cross-j/orderbook';
-import { applyCommand, createBook, recordAcceptedUsdAskPrice } from '../../../orderbook';
+import { applyCommand, createBook, recordAcceptedUsdAskPrice } from '../../../swapbook';
 import type { CrossJurisdictionSwapRoute } from '../../../types/cross-jurisdiction';
 import { isAuthorizedUsdReferenceAsk } from '../../../entity/tx/handlers/account/orderbook/same/results';
 import { decodeValidatedBuffer, encodeBuffer } from '../../../storage/codec/codec';

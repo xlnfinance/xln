@@ -1,7 +1,7 @@
 import { MalformedEntityFrameInputError } from '../../processing/invariant-errors';
 import { haltRuntimeFailure, rejectFailure } from "../../../../protocol/errors/failure-taxonomy";
 
-import { deterministicEntityTimestamp } from '../../../../orderbook/cross-j/orderbook';
+import { deterministicEntityTimestamp } from '../../../../swapbook/cross-j/orderbook';
 import {
   CROSS_J_MAX_FILL_RATIO,
   buildCrossJurisdictionCloseProof,
@@ -14,7 +14,7 @@ import {
   cooperativeCrossJurisdictionSourceSpend,
 } from '../../../../extensions/cross-j/index';
 import { verifyHashLadderBinary } from '../../../../protocol/htlc/hash-ladder';
-import { removeBookOrderById } from '../../../../orderbook/cross-j';
+import { removeBookOrderById } from '../../../../swapbook/cross-j';
 import { prepareEntityTxState } from '../../../state-clone';
 import { getEntityCollectionValueForWrite } from '../../../state/persistent-collection-map';
 import { addMessage } from '../../../frame-events';

@@ -5,8 +5,8 @@ import type { DeltaTransformer } from "../../typechain-types/index.js";
 import { buildAccountProofBody } from "../../../core/protocol/dispute/proof-builder.ts";
 import { createEmptyAccountJClaimAccumulator } from "../../../core/account/j-claims/j-claim-accumulator";
 import { buildPositionalSwapFillRatioBuckets } from "../../../core/protocol/transform/transformer-ordering";
-import { asOfferId } from "../../../core/orderbook/swap-keys.ts";
-import { deriveSwapOffdeltaChanges } from "../../../core/orderbook/swap-execution.ts";
+import { asOfferId } from "../../../core/swapbook/swap-keys.ts";
+import { deriveSwapOffdeltaChanges } from "../../../core/swapbook/swap-execution.ts";
 import type { AccountReplica, SwapOffer } from "../../../core/types/account.ts";
 
 const { ethers, networkHelpers } = await hre.network.getOrCreate("hardhat");

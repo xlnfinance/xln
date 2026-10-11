@@ -3,7 +3,8 @@
 Owner direction, 2026-10-11: autonomously prepare a usable mainnet candidate,
 reduce unnecessary code and follow the release scope in [AGENTS.md](../AGENTS.md):
 TypeScript, React and Ethereum same-J, first Sepolia and then a mainnet canary.
-Rust is frozen; Svelte changes are limited to landing/static copy and build health.
+Rust is frozen except for the later owner-authorized three-book refactor and its
+financial parity; Svelte changes are limited to landing/static copy and build health.
 Lending is included by the owner's later October 11 instruction. Cross-J, other
 launch chains, companies, native clients and custody are deferred. This supersedes
 the October 10 multi-chain, two-wallet plan.
@@ -74,6 +75,29 @@ work. A local Anvil proof establishes local execution; it cannot substitute for
 current Sepolia bytecode, real public inclusion and the real dispute deadline.
 
 ## Reflection that changes the next action
+
+Owner direction, 2026-10-11: apply Japanese continuous-improvement practices to
+the existing loop. These are engineering choices inspired by the
+[Toyota Production System](https://global.toyota/en/company/vision-and-philosophy/production-system/),
+not a new framework or a claim about all Japanese design.
+
+- **Kaizen:** finish one observed failure through fix, regression and production
+  verification before opening another refactor. Work in progress is one candidate.
+- **Jidoka / andon:** surface the first failed invariant with reproducible evidence.
+  Reject sender-caused errors per transaction; halt on consensus/storage corruption
+  according to the existing reject policy. A peer must never stop the whole Hub.
+- **Poka-yoke:** prevent an invalid operation at its authoritative input boundary.
+  UI guidance explains the same rule; it must not become a second financial formula.
+- **Remove waste:** delete superseded paths, repeated signing steps and redundant
+  state only when the same financial journey and recovery proof still pass.
+- **Purpose and restraint:** every wallet action must make the obligation legible:
+  who owes whom, how much, when, what is secured, and what happens next. Keep the
+  interface quiet; precision, failure evidence and unpaid debts remain visible.
+
+Use the existing evidence counts, time to a working journey and reopened failures
+to judge these changes. Do not add ceremonies, dashboards or quality scores merely
+to make the process look more Japanese. Simplicity is compatible with continuous
+revision; aesthetic imperfection never excuses incorrect financial state.
 
 Every 30 minutes, spend at most five minutes reviewing: which acceptance gap
 closed, what actually failed, and how much time was spent without new evidence.

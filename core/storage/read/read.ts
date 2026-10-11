@@ -1,4 +1,4 @@
-import type { BookState } from '../../orderbook';
+import type { BookState } from '../../swapbook';
 import type { EntityState } from '../../entity/types';
 import type { RuntimeReplica } from '../../runtime/types';
 import { decodeBuffer, decodeValidatedBuffer } from '../codec/codec';

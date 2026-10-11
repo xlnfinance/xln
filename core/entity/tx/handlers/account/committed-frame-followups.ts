@@ -2,7 +2,7 @@ import type { AccountFrame, AccountTx } from '../../../../types/account';
 import type { EntityCandidateEffect, EntityState, PaybookEntry } from '../../../types';
 import type { EntityRuntimeContext } from '../../../runtime-context';
 import { HEAVY_LOGS } from '../../../../support/debug-flags';
-import { programPaymentTermination } from '../../../paybook/lifecycle';
+import { programPaymentTermination } from '../../../../paybook/lifecycle';
 import { buildHtlcFinalizedEventPayload, buildHtlcReceivedEventPayload } from '../../../../protocol/htlc/events';
 import { createStructuredLogger } from '../../../../support/logger';
 import { hashHtlcSecret } from '../../../../protocol/htlc/utils';
@@ -12,7 +12,7 @@ import type { BookIntentSlotWriter } from '../../../books/book-intents';
 import {
   hasInboundPayment,
   isForwardingPayment,
-} from '../../../paybook/views';
+} from '../../../../paybook/views';
 
 const accountFollowupLog = createStructuredLogger('account.followup');
 

@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 
 import { executeCrontab, initCrontab } from '../../../entity/scheduler';
 import { collectDerivedDeadlines, earliestDerivedDeadline } from '../../../entity/scheduler/derived-deadlines';
-import { armPaymentSecretAckTimeout } from '../../../entity/paybook/lifecycle';
+import { armPaymentSecretAckTimeout } from '../../../paybook/lifecycle';
 import { HTLC_ENFORCEMENT_RESERVE_MS } from '../../../account/consensus/dispute/deadline-policy';
 import { createEmptyAccountJClaimAccumulator } from '../../../account/j-claims/j-claim-accumulator';
 import { installCommittedAccountFrameHead } from '../../../account/consensus/frame/committed-envelope';

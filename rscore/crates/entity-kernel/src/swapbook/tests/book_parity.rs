@@ -11,7 +11,7 @@ use num_bigint::BigInt;
 use serde::Deserialize;
 
 use super::*;
-use crate::orderbook::compute_book_commitment_hash;
+use crate::swapbook::compute_book_commitment_hash;
 
 const FIXTURE: &str = include_str!("../../../../../fixtures/entity-kernel/orderbook-book-v1.json");
 
@@ -218,7 +218,7 @@ fn typescript_book_operations_replay_with_identical_events_and_commitments() {
     assert_eq!(fixture.version, 1);
     assert_eq!(
         fixture.canonical_source,
-        "TypeScript core/orderbook/core.ts"
+        "TypeScript core/swapbook/core.ts"
     );
     let dimensions = PairDimensions {
         base_token_decimals: fixture.base_token_decimals,

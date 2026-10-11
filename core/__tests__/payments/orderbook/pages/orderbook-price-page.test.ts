@@ -9,8 +9,8 @@ import {
   getBestBookPricePage,
   reduceBookPricePageOrder,
   removeBookPricePageOrder,
-} from '../../../../orderbook/pages/page';
-import { MAX_BOOK_PRICE_PAGE_SEQUENCE } from '../../../../orderbook/pages/key';
+} from '../../../../swapbook/pages/page';
+import { MAX_BOOK_PRICE_PAGE_SEQUENCE } from '../../../../swapbook/pages/key';
 
 test('price pages preserve price order and FIFO page order without storing price in value', () => {
   let tree = createBookPricePageTree();

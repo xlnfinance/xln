@@ -5,9 +5,9 @@ import {
   getBookOrder,
   getSwapExactQuoteLotMultipleAtPriceForDimensions,
   MAX_ORDERBOOK_QTY_LOTS,
-} from '../../../../../../orderbook';
+} from '../../../../../../swapbook';
 import { getSwapPairPolicyByBaseQuote } from '../../../../../../account/utils';
-import { swapKey, type CrossJurisdictionWorkingOrderbookOffer } from '../../../../../../orderbook/swap-execution';
+import { swapKey, type CrossJurisdictionWorkingOrderbookOffer } from '../../../../../../swapbook/swap-execution';
 import { createEmptyPairBook } from '../helpers';
 import { hasQueuedSwapResolveForEntityState } from '../queue';
 import { getCrossMarketOffer, queueCrossOfferCancellation } from './pass';

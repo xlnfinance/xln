@@ -3,7 +3,7 @@ import {
   getSwapExactQuoteLotMultipleAtPriceForDimensions,
   OrderbookCapacityError,
   resumeCrossedBook,
-} from '../../../../../../orderbook';
+} from '../../../../../../swapbook';
 import { createStructuredLogger, shortId, shortOrder } from '../../../../../../support/logger';
 import {
   classifySameBookMaker,

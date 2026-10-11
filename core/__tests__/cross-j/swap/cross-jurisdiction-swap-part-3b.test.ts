@@ -111,7 +111,7 @@ import { normalizeEntitySwapTradingPairs } from '../../../runtime/swap-cmd/swap-
 
 import { verifyHashLadderBinary } from '../../../protocol/htlc/hash-ladder';
 
-import { ORDERBOOK_PRICE_SCALE, SWAP_LOT_SCALE, quoteAmountAtPrice } from '../../../orderbook/types';
+import { ORDERBOOK_PRICE_SCALE, SWAP_LOT_SCALE, quoteAmountAtPrice } from '../../../swapbook/types';
 import { cloneJBatch, createEmptyBatch, initJBatch } from '../../../jurisdiction/machine/batch';
 import { applyHankoBatchProcessedEvent } from '../../../entity/tx/j-events-batch';
 

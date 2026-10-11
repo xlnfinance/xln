@@ -1,6 +1,6 @@
 import { ethers } from 'ethers';
 import type { AccountReplica } from '../../types/account';
-import { asOfferId, type OfferId } from '../../orderbook/swap-keys';
+import { asOfferId, type OfferId } from '../../swapbook/swap-keys';
 import { sortTransformerEntries } from '../transform/transformer-ordering';
 import { buildCanonicalProofBatches } from './proof-builder';
 import {

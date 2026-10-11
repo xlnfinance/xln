@@ -1,6 +1,6 @@
 import type { AccountTx } from '../../../../../types/account';
 import type { EntityState } from '../../../../types';
-import { swapKey } from '../../../../../orderbook/swap-execution';
+import { swapKey } from '../../../../../swapbook/swap-execution';
 
 export interface AccountTxTarget {
   accountId: string;

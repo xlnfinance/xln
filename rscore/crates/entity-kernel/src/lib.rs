@@ -24,11 +24,11 @@ mod hub_rebalance;
 pub mod j_batch;
 mod j_events;
 mod kernel;
-mod lending;
+mod lendbook;
 mod local_control;
 mod local_financial;
 mod local_tx;
-mod orderbook;
+mod swapbook;
 mod paybook;
 pub use paybook::secret_ack_trigger_at;
 mod prepared_context;
@@ -118,7 +118,7 @@ pub use j_events::{
     j_event_range_digest, project_finalized_j_event_batch,
 };
 pub use kernel::apply_entity_kernel;
-pub use lending::{
+pub use lendbook::{
     LendingLoan, LendingLoanStatus, LendingPoolPosition, LendingPoolStatus, LendingState,
     OverdueLendingLoan, canonical_lending_state, decode_canonical_lending_state,
     overdue_lending_loans, settle_overdue_lending_loans,
@@ -138,7 +138,7 @@ pub use local_tx::{
     AdmittedLocalEntityTx, CrossJurisdictionRuntimeOutput, LocalEntityTx, decode_local_entity_tx,
     is_cross_jurisdiction_entity_tx_kind,
 };
-pub use orderbook::{
+pub use swapbook::{
     BookOrder, BookPricePageEntrySnapshot, BookPricePageSnapshot, BookSideLevel, BookState,
     BookStateSnapshot, ORDERBOOK_PRICE_SCALE, OrderbookState, OrderbookStateSnapshot,
     PairDimensions, PairPolicy, SameJOffer, Side, canonical_pair_orientation,
@@ -146,7 +146,7 @@ pub use orderbook::{
     is_canonical_liquid_token,
 };
 #[cfg(feature = "bench")]
-pub use orderbook::{OrderbookBenchmarkResult, run_orderbook_benchmark};
+pub use swapbook::{OrderbookBenchmarkResult, run_orderbook_benchmark};
 pub use prepared_context::{
     DecodedOnionLayer, DecryptedHtlcLayer, DecryptedHtlcMaterializeInput,
     HtlcMaterializeEnvironment, HtlcMaterializeInput, PreparedAccountView, PreparedContextError,

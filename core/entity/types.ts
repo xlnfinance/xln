@@ -1,4 +1,4 @@
-import type { OrderbookExtState } from '../orderbook';
+import type { OrderbookExtState } from '../swapbook';
 import type { CrossJurisdictionBookAdmission, CrossJurisdictionSwapRoute } from '../types/cross-jurisdiction';
 import type { DebtEntry } from '../types/finance/debt';
 import type { JHistoryFinality, JPrefixAttestation, JPrefixCertificate, JPrefixRound, ValidatorJHistory } from '../types/jurisdiction-events';

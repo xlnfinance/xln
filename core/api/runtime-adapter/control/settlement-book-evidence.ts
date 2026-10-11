@@ -2,7 +2,7 @@
 
 import { keccak256, toUtf8Bytes } from 'ethers';
 import { getEntityReplicaById } from '../../../entity/replica/replica-lookup';
-import { getBestAsk, getBestBid } from '../../../orderbook';
+import { getBestAsk, getBestBid } from '../../../swapbook';
 import {
   requireBoundaryInteger,
   requireBoundaryRecord,

@@ -1,8 +1,8 @@
 import { expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { safeParse } from '../../../protocol/serialization';
-import { createOrderbookExtState } from '../../../orderbook';
-import { markWorkingOrderbookOffer } from '../../../orderbook/swap-execution';
+import { createOrderbookExtState } from '../../../swapbook';
+import { markWorkingOrderbookOffer } from '../../../swapbook/swap-execution';
 import { processOrderbookSwaps } from '../../../entity/tx/handlers/account/orderbook';
 import { createEmptyEntityCollectionCandidate } from '../../../entity/state/persistent-collection-map';
 import type { CrossJurisdictionSwapRoute } from '../../../types/cross-jurisdiction';

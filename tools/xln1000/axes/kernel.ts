@@ -8,7 +8,7 @@ const KERNEL_ROOTS = [
   'core/entity/',
   'core/protocol/',
   'core/hanko/',
-  'core/orderbook/',
+  'core/swapbook/',
   'core/types/',
   'core/extensions/',
   'core/pathfinding/',

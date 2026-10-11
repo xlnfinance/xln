@@ -10,7 +10,7 @@ import {
   getOrderbookPairsForOrder,
   type BookState,
   type OrderbookExtState,
-} from '../../../../../orderbook';
+} from '../../../../../swapbook';
 import { createStructuredLogger, shortId, shortOrder } from '../../../../../support/logger';
 import {
   buildCrossJurisdictionCancelInstruction,
@@ -18,7 +18,7 @@ import {
   markCrossJurisdictionBookAdmissionResolving,
   type CrossJurisdictionFillInstruction,
 } from '../../../../../extensions/cross-j/orderbook';
-import { crossJurisdictionBookOwnerRef } from '../../../../../orderbook/cross-j/orderbook';
+import { crossJurisdictionBookOwnerRef } from '../../../../../swapbook/cross-j/orderbook';
 import {
   buildCrossJurisdictionEntityOutput,
   crossJurisdictionRouteSignerHint,
@@ -31,7 +31,7 @@ import type {
   MatchResult,
   SwapCancelRequestEvent,
 } from './offers';
-import { swapKey } from '../../../../../orderbook/swap-execution';
+import { swapKey } from '../../../../../swapbook/swap-execution';
 
 const orderbookLog = createStructuredLogger('orderbook');
 

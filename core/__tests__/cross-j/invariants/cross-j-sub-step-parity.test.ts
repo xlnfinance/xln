@@ -5,7 +5,7 @@ import {
   buildCrossJurisdictionFillInstruction,
   buildCrossJurisdictionMarketOffer,
 } from '../../../extensions/cross-j/orderbook';
-import { normalizeSwapOfferForOrderbook } from '../../../orderbook/swap-execution';
+import { normalizeSwapOfferForOrderbook } from '../../../swapbook/swap-execution';
 
 test('cross-j one-leg sub-step preserves progress until full fill or cancellation', () => {
   // Same concrete amounts as Rust cross_j::tests::sub_step. A committed

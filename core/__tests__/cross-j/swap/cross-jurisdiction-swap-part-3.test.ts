@@ -117,7 +117,7 @@ import {
   ORDERBOOK_PRICE_SCALE,
   SWAP_LOT_SCALE,
   quoteAmountAtPrice,
-} from '../../../orderbook/types';
+} from '../../../swapbook/types';
 import { cloneJBatch, createEmptyBatch, initJBatch } from '../../../jurisdiction/machine/batch';
 import { applyHankoBatchProcessedEvent } from '../../../entity/tx/j-events-batch';
 

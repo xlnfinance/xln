@@ -14,7 +14,7 @@ import {
   deriveCanonicalCrossJurisdictionMarket,
   deriveCanonicalCrossJurisdictionVenueId,
 } from './market';
-import { exactFillRatioToUint16 } from '../../orderbook/swap-execution';
+import { exactFillRatioToUint16 } from '../../swapbook/swap-execution';
 import { abiSchemaFromType, encodeAbiParams } from '../../protocol/crypto/abi-encode';
 import { canonicalAccountDisputeConfig } from '../../account/config/dispute-config';
 import {

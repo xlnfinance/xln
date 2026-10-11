@@ -7,7 +7,7 @@ import {
   getBookOrder,
   type BookOrderState,
   type BookState,
-} from '../../../../../../orderbook';
+} from '../../../../../../swapbook';
 import { isCrossJurisdictionRouteExpired } from '../../../../../../extensions/cross-j';
 import { createStructuredLogger, shortOrder } from '../../../../../../support/logger';
 import {

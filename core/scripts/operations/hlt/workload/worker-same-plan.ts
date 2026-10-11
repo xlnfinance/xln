@@ -6,7 +6,7 @@ import {
   getSwapExactQuoteLotMultipleAtPriceForDimensions,
   getSwapLotScale,
   quoteAmountAtPrice,
-} from '../../../../orderbook';
+} from '../../../../swapbook';
 import type { EntityTx } from '../../../../types/entity-tx';
 import { safeStringify } from '../../../../protocol/serialization';
 import { deriveExecutableBidForAsk } from '../boundary/worker-book-boundary';

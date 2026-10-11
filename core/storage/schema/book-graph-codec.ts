@@ -1,14 +1,14 @@
-import { buildPersistentBookOrderMap } from '../../orderbook/book-overlay';
-import { computeBookCommitmentHash, verifyAndWarmBookCommitment } from '../../orderbook/commitment';
-import type { BookOrderState, BookState, Side } from '../../orderbook/core';
+import { buildPersistentBookOrderMap } from '../../swapbook/book-overlay';
+import { computeBookCommitmentHash, verifyAndWarmBookCommitment } from '../../swapbook/commitment';
+import type { BookOrderState, BookState, Side } from '../../swapbook/core';
 import {
   decodeBookPricePage,
   type BookPricePageTree,
-} from '../../orderbook/pages/page';
+} from '../../swapbook/pages/page';
 import {
   decodeBookPricePageKey,
   encodeBookPricePageKey,
-} from '../../orderbook/pages/key';
+} from '../../swapbook/pages/key';
 import {
   type PersistentRadixBranchRecord,
   type PersistentRadixNodeRecord,

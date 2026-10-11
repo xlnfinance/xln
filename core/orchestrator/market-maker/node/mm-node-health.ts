@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto';
 import { LIMITS } from '../../../config/constants';
 import { crossJurisdictionBookOwnerRef } from '../../../extensions/cross-j/orderbook';
 import { deriveCanonicalCrossJurisdictionMarket } from '../../../extensions/cross-j/market';
-import { hasCrossJurisdictionBookOrder } from '../../../orderbook/cross-j';
+import { hasCrossJurisdictionBookOrder } from '../../../swapbook/cross-j';
 import { compareStableText,safeStringify } from '../../../protocol/serialization';
 import {
 submitCrossJurisdictionIntent,

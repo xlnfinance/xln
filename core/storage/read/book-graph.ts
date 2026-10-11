@@ -1,5 +1,5 @@
-import type { BookState, Side } from '../../orderbook/core';
-import { hydrateBookPricePageTree } from '../../orderbook/pages/page';
+import type { BookState, Side } from '../../swapbook/core';
+import { hydrateBookPricePageTree } from '../../swapbook/pages/page';
 import type { PersistentRadixNodeRecord } from '../../protocol/state/persistent-radix-value-map';
 import { decodeValidatedBuffer } from '../codec/codec';
 import {
@@ -17,8 +17,8 @@ import {
 } from '../keys';
 import { iterateKeys, readValidatedOrNull } from '../database/level';
 import type { RuntimeDbLike } from '../types';
-import type { BookPricePage, BookPricePageTree } from '../../orderbook/pages/page';
-import type { BookPricePageKey } from '../../orderbook/pages/key';
+import type { BookPricePage, BookPricePageTree } from '../../swapbook/pages/page';
+import type { BookPricePageKey } from '../../swapbook/pages/key';
 
 type PageNodeRecord = PersistentRadixNodeRecord<BookPricePageKey, BookPricePage>;
 

@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 
 import { sha256 } from '@noble/hashes/sha2.js';
 
-import { validateHtlcPreparedInfraContext } from '../../entity/paybook/prepared-context-validation';
+import { validateHtlcPreparedInfraContext } from '../../paybook/prepared-context-validation';
 import { HTLC_OPAQUE_CIPHERTEXT_VERSION } from '../../protocol/htlc/multi-recipient';
 import { safeStringify } from '../../protocol/serialization';
 import type { HtlcPreparedInfraContext } from '../../types/entity/htlc-infra-context';

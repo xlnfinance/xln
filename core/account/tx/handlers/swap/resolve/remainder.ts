@@ -1,9 +1,9 @@
 import type { AccountDraftState } from '../../../../state/account-state-draft';
-import { MAX_SWAP_FILL_RATIO } from '../../../../../orderbook/swap-execution';
+import { MAX_SWAP_FILL_RATIO } from '../../../../../swapbook/swap-execution';
 import {
   deriveSide,
   requantizeRemainingSwapBaseAtPriceForDimensions,
-} from '../../../../../orderbook/types';
+} from '../../../../../swapbook/types';
 import { releaseHold } from '../../../hold-utils';
 import type {
   AppliedSwapResolve,

@@ -22,7 +22,7 @@ import { HASHLADDER_MAX_FILL_RATIO } from '../htlc/hash-ladder.ts';
 import { assertDisputeProofBodyWithinContractLimits } from '../../jurisdiction/machine/batch/index.ts';
 import { compareStableText } from '../serialization';
 import { abiSchemaFromFragment, encodeAbi } from '../crypto/abi-encode';
-import { deriveSwapOffdeltaChanges } from '../../orderbook/swap-execution.ts';
+import { deriveSwapOffdeltaChanges } from '../../swapbook/swap-execution.ts';
 import { deriveTransferOffdeltaChange } from '../transform/delta-movement';
 import {
   hashCooperativeUpdateHankoPayload,

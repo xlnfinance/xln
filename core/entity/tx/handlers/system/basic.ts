@@ -1,6 +1,6 @@
 import { rejectFailure } from "../../../../protocol/errors/failure-taxonomy";
 
-import { createOrderbookExtState, spreadDistributionTotal, validateSpreadDistribution } from '../../../../orderbook';
+import { createOrderbookExtState, spreadDistributionTotal, validateSpreadDistribution } from '../../../../swapbook';
 import type { EntityInput, EntityState, Proposal } from '../../../types';
 import type { EntityRuntimeContext } from '../../../runtime-context';
 import type { EntityTx } from '../../../../types/entity-tx';

@@ -7,7 +7,7 @@ import { applyCommittedHtlcLockFollowup } from '../../../../entity/tx/handlers/a
 import {
   assertHtlcPreparedInfraContext,
   materializeHtlcPreparedInfraContext,
-} from '../../../../entity/paybook/materialize-context';
+} from '../../../../paybook/materialize-context';
 import { openWritableEntityAccounts, entity, makeAccount, makeJurisdiction, makeState, secret } from '../../../helpers/cross-j';
 import { createOnionEnvelopes } from '../../../../protocol/htlc/codec/envelope';
 import { hashHtlcSecret } from '../../../../protocol/htlc/utils';

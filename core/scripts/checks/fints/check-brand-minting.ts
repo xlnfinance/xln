@@ -8,7 +8,7 @@ const ROOT = path.resolve(import.meta.dir, '../../../..');
 const RUNTIME = path.join(ROOT, 'core');
 const OWNER_MODULES = new Set([
   'core/account/tx/units.ts',
-  'core/orderbook/swap-keys.ts',
+  'core/swapbook/swap-keys.ts',
   'core/protocol/hashes.ts',
   'core/protocol/identity/index.ts',
   'core/protocol/units.ts',

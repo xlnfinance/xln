@@ -4,11 +4,11 @@ import { createDefaultDelta } from '../../../account/state/delta';
 import { applyAccountTxToMutableReplica } from '../../../account/tx/apply';
 import {
   exactFillRatioToUint16,
-} from '../../../orderbook/swap-execution';
+} from '../../../swapbook/swap-execution';
 import {
   getStaticSwapTokenDimensions,
   SWAP_LOT_SCALE,
-} from '../../../orderbook/types';
+} from '../../../swapbook/types';
 import type { AccountOutput, AccountReplica, AccountSwapOfferSnapshot } from '../../../types/account';
 import { makeAccount } from '../../helpers/cross-j';
 

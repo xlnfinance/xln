@@ -43,7 +43,7 @@ import {
   selectWritableJurisdictionKey,
 } from '../jurisdiction/machine/config/jurisdiction-key';
 import { resolveJurisdictionsJsonPath } from '../jurisdiction/adapter/jurisdictions-path';
-import { DEFAULT_SPREAD_DISTRIBUTION } from '../orderbook';
+import { DEFAULT_SPREAD_DISTRIBUTION } from '../swapbook';
 import { toPublicRpcUrl } from '../network/p2p/loopback-url';
 import { startParentLivenessWatch } from '../support/process/parent-watch';
 import { createHttpDrainTracker, stopServerGracefully } from './graceful-server';

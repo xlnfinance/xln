@@ -5,7 +5,7 @@ import {
   deriveExactSwapFillRatio,
   exactFillRatioToUint16,
   MAX_SWAP_FILL_RATIO,
-} from '../../../../../orderbook/swap-execution';
+} from '../../../../../swapbook/swap-execution';
 import { createStructuredLogger, shortOrder } from '../../../../../support/logger';
 import { accountTxValidationRejected } from '../../../apply-result';
 import type { SwapResolveFailure, SwapResolveTx, ValidatedSwapResolve } from './types';

@@ -3,10 +3,10 @@ import type { EntityInput, EntityState } from '../../../types';
 import type { EntityRuntimeContext } from '../../../runtime-context';
 import type { AccountInputDisputeRequired } from '../../../../account/consensus/types';
 import { addMessage } from '../../../frame-events';
-import { armPaymentSecretAckTimeout, persistVerifiedPaymentSecret } from '../../../paybook/lifecycle';
+import { armPaymentSecretAckTimeout, persistVerifiedPaymentSecret } from '../../../../paybook/lifecycle';
 import { handlePrepareDispute } from '../dispute';
 import type { CommittedAccountEffects } from './committed-input';
-import { hasInboundPayment } from '../../../paybook/views';
+import { hasInboundPayment } from '../../../../paybook/views';
 import type { BookIntentSlotWriter } from '../../../books/book-intents';
 
 type UnsafeFrameContext = {

@@ -6,7 +6,7 @@ import { safeStringify } from '../../protocol/serialization';
 import { executeOrderbookBookParityVector } from '../../../rscore/fixtures/entity-kernel/orderbook-book';
 
 // Rust replays this exact file in
-// rscore/crates/entity-kernel/src/orderbook/tests/book_parity.rs.
+// rscore/crates/entity-kernel/src/swapbook/tests/book_parity.rs.
 test('orderbook book operations match the shared TypeScript book vector', () => {
   const actual = executeOrderbookBookParityVector();
   const expected = readFileSync(

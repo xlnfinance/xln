@@ -12,7 +12,7 @@ import { getPrevFrameHash } from '../frame/lineage';
 import {
   getEffectiveHtlcFrameTxs,
   materializeHtlcPreparedInfraContext,
-} from '../../paybook/materialize-context';
+} from '../../../paybook/materialize-context';
 import { requireEntityEncryptionPrivateKey } from '../../auth/crypto';
 import {
   assertEntityInfraContextAuthority,

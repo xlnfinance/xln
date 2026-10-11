@@ -31,7 +31,7 @@ import {
   applyCommand,
   createBook,
   createOrderbookExtState,
-} from '../../../orderbook';
+} from '../../../swapbook';
 import { buildCanonicalEntityReplicaSnapshot } from '../../../storage/wal/snapshot';
 import { encodeBuffer } from '../../../storage/codec/codec';
 import { validateConsensusConfig } from '../../../entity/consensus/config-validation';

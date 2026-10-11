@@ -16,7 +16,7 @@ import { entityLog } from '../entity-log';
 import { timePerfPhase } from '../../../support/performance/profile';
 import { countOp } from '../../../support/performance/op-counters';
 import { preparedHtlcBindingKey } from '../../../types/entity/htlc-infra-context';
-import { collectInboundHtlcBindingKeys } from '../../paybook/materialize-context';
+import { collectInboundHtlcBindingKeys } from '../../../paybook/materialize-context';
 import { materializeEntityInfraContext, replayEntityContextsInstalled } from './infra-context';
 
 const DUMMY_ROOT = `0x${'00'.repeat(32)}`;

@@ -41,7 +41,7 @@ claims remain mandatory.
 
 ## Module ownership
 
-Paybook (`core/entity/paybook/`), Swapbook (`core/orderbook/`) and Lendbook
+Paybook (`core/paybook/`), Swapbook (`core/swapbook/`) and Lendbook
 (`core/lendbook/`) own the three Entity-level products. They use the same Account
 admission, balances, bilateral signatures and dispute machinery. Lendbook owns
 bank terms/facilities, independent liabilities/receivables and withdrawal servicing;

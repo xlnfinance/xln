@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 
-import { asOfferId, swapKey } from '../../orderbook/swap-keys';
+import { asOfferId, swapKey } from '../../swapbook/swap-keys';
 
 test('swap key constructor validates both canonical Entity and Offer identity', () => {
   const entityId = `0x${'12'.repeat(32)}`;

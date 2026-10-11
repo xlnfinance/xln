@@ -1,10 +1,10 @@
 import type { EntityCandidateEffect, EntityState } from '../../../../../types';
-import type { BookState, OrderbookExtState } from '../../../../../../orderbook';
+import type { BookState, OrderbookExtState } from '../../../../../../swapbook';
 import type {
   CrossJurisdictionFillInstruction,
   CrossMarketOffer,
 } from '../../../../../../extensions/cross-j/orderbook';
-import type { CrossJurisdictionWorkingOrderbookOffer } from '../../../../../../orderbook/swap-execution';
+import type { CrossJurisdictionWorkingOrderbookOffer } from '../../../../../../swapbook/swap-execution';
 import type { AccountTxTarget } from '../queue';
 
 type RejectInvalidCrossOffer = (

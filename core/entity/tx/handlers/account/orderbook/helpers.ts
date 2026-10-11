@@ -15,7 +15,7 @@ import {
   quoteAmountFromWeightedLotsForDecimals,
   type BookEvent,
   type BookState,
-} from '../../../../../orderbook';
+} from '../../../../../swapbook';
 import {
   getSwapPairPolicyForDimensions,
   getTokenInfo,
@@ -32,7 +32,7 @@ import {
   type SameJurisdictionWorkingOrderbookOffer,
   type WorkingOrderbookOffer,
   swapKey,
-} from '../../../../../orderbook/swap-execution';
+} from '../../../../../swapbook/swap-execution';
 import {
   assertSwapNetAuthorization,
   deriveSwapFillPolicyFee,
@@ -46,7 +46,7 @@ import {
   type CrossMarketOffer,
 } from '../../../../../extensions/cross-j/orderbook';
 import type { EntityCandidateEffect, EntityState } from '../../../../types';
-import { normalizeSwapOfferForOrderbook } from '../../../../../orderbook/swap-execution';
+import { normalizeSwapOfferForOrderbook } from '../../../../../swapbook/swap-execution';
 import { resolveStoredOfferEntityRefs } from './offers';
 import type { SwapResolveEnqueueData } from './queue';
 

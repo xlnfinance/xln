@@ -5,7 +5,7 @@ import { prepareEntityTxState } from '../../../state-clone';
 import { addMessage } from '../../../frame-events';
 import { findAccountKey } from '../../account-key';
 import type { AccountTxTarget } from '../account';
-import { persistVerifiedPaymentSecret } from '../../../paybook/lifecycle';
+import { persistVerifiedPaymentSecret } from '../../../../paybook/lifecycle';
 import type { BookIntentSlotWriter } from '../../../books/book-intents';
 
 type EntityTxOf<T extends EntityTx['type']> = Extract<EntityTx, { type: T }>;

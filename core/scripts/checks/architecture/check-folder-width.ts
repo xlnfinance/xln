@@ -87,7 +87,7 @@ export const FOLDER_WIDTH_DEBT: Readonly<Record<string, number>> = {
   'core/scripts/operations/hlt': 12,
   'frontend/src/lib/stores': 11,
   'jurisdictions/contracts': 16,
-  'rscore/crates/entity-kernel/src': 12,
+  'rscore/crates/entity-kernel/src': 11,
   'rscore/crates/entity-kernel/src/consensus': 11,
   'rscore/crates/entity-kernel/tests': 11,
   'scripts/dev': 12,

@@ -1,4 +1,4 @@
-import type { BookState } from '../../../orderbook';
+import type { BookState } from '../../../swapbook';
 import type { AccountFrame } from '../../../types/account';
 import type { EntityReplica, EntityState } from '../../../entity/types';
 import type { RuntimeEntityMetricStats, RuntimeReplica } from '../../../runtime/types';

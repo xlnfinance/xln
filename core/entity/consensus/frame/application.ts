@@ -17,13 +17,13 @@ import { shortHash, shortId, shortOrder } from '../../../support/logger';
 import { cumulativeMarksToPhases } from '../../../support/performance/profile';
 import { countOp } from '../../../support/performance/op-counters';
 import { getEntityFrameJRangeBudgetError } from '../../../jurisdiction/machine/range-budget';
-import { replaceOrderbookPair, type OrderbookExtState } from '../../../orderbook';
+import { replaceOrderbookPair, type OrderbookExtState } from '../../../swapbook';
 import {
   applyCommittedSwapCancelsToOrderbook,
   crossJurisdictionBookOwnerRef,
   normalizeEntityRef,
-} from '../../../orderbook/cross-j/orderbook';
-import { normalizeSwapOfferForOrderbook, swapKey, type WorkingOrderbookOffer } from '../../../orderbook/swap-execution';
+} from '../../../swapbook/cross-j/orderbook';
+import { normalizeSwapOfferForOrderbook, swapKey, type WorkingOrderbookOffer } from '../../../swapbook/swap-execution';
 import { mergeStorageOverlayRecords } from '../../../protocol/state/overlay';
 import { compareStableText, safeStringify } from '../../../protocol/serialization';
 import { getNextSettlementNonce } from '../../../protocol/settlement/operations';
@@ -77,7 +77,7 @@ import { buildSettlementHankoDraft } from '../../tx/handlers/payments/settle';
 import {
   failOriginatedPayment,
   terminatePayment,
-} from '../../paybook/lifecycle';
+} from '../../../paybook/lifecycle';
 import { MalformedEntityFrameInputError } from '../../tx/processing/invariant-errors';
 import { normalizeEntityProposalBoard } from '../../tx/processing/proposals';
 import { accountHasProposableMempool } from '../account/mempool-eligibility';

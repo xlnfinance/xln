@@ -1,11 +1,11 @@
-import { forkBookState, type BookState } from '../../../../../../orderbook';
+import { forkBookState, type BookState } from '../../../../../../swapbook';
 import {
   buildCrossJurisdictionCancelInstruction,
   buildCrossJurisdictionMarketOffer,
   crossJurisdictionBookAdmissionKeyFor,
   type CrossMarketOffer,
 } from '../../../../../../extensions/cross-j/orderbook';
-import { swapKey, type CrossJurisdictionWorkingOrderbookOffer } from '../../../../../../orderbook/swap-execution';
+import { swapKey, type CrossJurisdictionWorkingOrderbookOffer } from '../../../../../../swapbook/swap-execution';
 import type {
   CrossOrderbookPass,
   CrossOrderbookProcessInput,

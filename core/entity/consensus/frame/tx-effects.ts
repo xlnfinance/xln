@@ -5,7 +5,7 @@ import { canProcessAccountTxForDisputeStatus } from '../../../account/consensus/
 import type { EntityState } from '../../types';
 import type { EntityTx } from '../../../types/entity-tx';
 import { getPerfMs } from '../../../support/time';
-import { normalizeEntityRef } from '../../../orderbook/cross-j/orderbook';
+import { normalizeEntityRef } from '../../../swapbook/cross-j/orderbook';
 import { shortId } from '../../../support/logger';
 import { accountHasProposableMempool } from '../account/mempool-eligibility';
 import { applyAccountInput } from '../../../account/consensus';

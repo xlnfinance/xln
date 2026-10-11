@@ -1,6 +1,6 @@
-import type { BookState } from '../../../../../../orderbook';
+import type { BookState } from '../../../../../../swapbook';
 import type { SwapPairPolicy } from '../../../../../../account/utils';
-import type { SameJurisdictionWorkingOrderbookOffer } from '../../../../../../orderbook/swap-execution';
+import type { SameJurisdictionWorkingOrderbookOffer } from '../../../../../../swapbook/swap-execution';
 
 export type MaterializedSameOffer = {
   offer: SameJurisdictionWorkingOrderbookOffer;

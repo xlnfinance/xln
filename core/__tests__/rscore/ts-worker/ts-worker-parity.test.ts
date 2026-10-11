@@ -27,7 +27,7 @@ import { encodeBoard, hashBoard } from '../../../entity/factory';
 import { signEntityHashes } from '../../../hanko/signing';
 import { createDisputeProofHashWithNonce } from '../../../protocol/dispute/proof-builder';
 import { createEmptyEnv } from '../../../runtime';
-import { getStaticSwapTokenDimensions, SWAP_LOT_SCALE } from '../../../orderbook/types';
+import { getStaticSwapTokenDimensions, SWAP_LOT_SCALE } from '../../../swapbook/types';
 import { projectPortableAccountDoc } from '../../../storage/read/projections';
 
 /**

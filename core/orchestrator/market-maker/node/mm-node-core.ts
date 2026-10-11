@@ -55,8 +55,8 @@ import {
   MAX_ORDERBOOK_QTY_LOTS,
   ORDERBOOK_PRICE_SCALE,
   quoteAmountAtPrice,
-} from '../../../orderbook';
-import { hasCrossJurisdictionBookOrder } from '../../../orderbook/cross-j';
+} from '../../../swapbook';
+import { hasCrossJurisdictionBookOrder } from '../../../swapbook/cross-j';
 import { compareStableText, safeStringify } from '../../../protocol/serialization';
 import { registerRuntimeAdapterAuthSeed } from '../../../api/runtime-adapter/security/auth';
 import { type RuntimeAdapterSocket } from '../../../api/runtime-adapter/session/context';

@@ -11,7 +11,7 @@ import {
   hasCommittedAccountState,
   isAccountWriteLaneIdle,
 } from '../../orchestrator/mesh/mesh-common';
-import { hasCrossJurisdictionBookOrder } from '../../orderbook/cross-j';
+import { hasCrossJurisdictionBookOrder } from '../../swapbook/cross-j';
 import { getEntityReplicaById } from '../../api/server/entities/lookup';
 import { assert } from '../harness/helpers';
 

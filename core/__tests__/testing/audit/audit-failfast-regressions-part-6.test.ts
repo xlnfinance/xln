@@ -1,6 +1,6 @@
 import { applyEntityAccountEnvelopeUpdate } from "../../../entity/account-envelope-update";
 import { rejectFrozenAccountInput } from "../../../entity/tx/handlers/account/frozen-input";
-import { DEFAULT_SPREAD_DISTRIBUTION } from '../../../orderbook/types';
+import { DEFAULT_SPREAD_DISTRIBUTION } from '../../../swapbook/types';
 import { PersistentAccountStateMap } from '../../../account/state/persistent-state-map';
 import { PersistentEntityAccountMap } from '../../../entity/state/persistent-account-map';
 import { createEntityFrameCandidateState } from '../../../entity/state-clone';
@@ -87,7 +87,7 @@ import {
 import {
   assertCrossJurisdictionOrderAdmissible,
   findCrossJurisdictionBookAdmissionForAck,
-} from '../../../orderbook/cross-j/orderbook';
+} from '../../../swapbook/cross-j/orderbook';
 
 import {
   buildCrossJurisdictionMarketOffer,
@@ -162,7 +162,7 @@ import {
   ORDERBOOK_PRICE_SCALE,
   SWAP_LOT_SCALE,
   type OrderbookExtState,
-} from '../../../orderbook';
+} from '../../../swapbook';
 
 import {
   createEmptyEnv,

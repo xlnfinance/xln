@@ -1,7 +1,7 @@
-import type { HtlcLock } from '../../types/account';
-import type { EntityCandidateEffect, EntityState, PaybookEntry } from '../types';
+import type { HtlcLock } from '../types/account';
+import type { EntityCandidateEffect, EntityState, PaybookEntry } from '../entity/types';
 import { hasInboundPayment } from './views';
-import type { BookIntentSlotWriter } from '../books/book-intents';
+import type { BookIntentSlotWriter } from '../entity/books/book-intents';
 
 export const HTLC_SECRET_ACK_TIMEOUT_MS = 120_000;
 

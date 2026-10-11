@@ -1,6 +1,6 @@
 import { haltRuntimeFailure } from "../../../../protocol/errors/failure-taxonomy";
 
-import { deterministicEntityTimestamp } from '../../../../orderbook/cross-j/orderbook';
+import { deterministicEntityTimestamp } from '../../../../swapbook/cross-j/orderbook';
 import {
   isCrossJurisdictionRouteExpired,
   isCrossJurisdictionTerminalStatus,

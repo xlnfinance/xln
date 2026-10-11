@@ -4,7 +4,7 @@ import { join } from 'node:path';
 
 import { buildDeterministicSwapOfferId } from '../../../account/swap/swap-command-route';
 import { LIMITS } from '../../../config/constants';
-import { compareCanonicalText, isCanonicalOfferId, SWAP_OFFER_ID_REJECTION } from '../../../orderbook/swap-keys';
+import { compareCanonicalText, isCanonicalOfferId, SWAP_OFFER_ID_REJECTION } from '../../../swapbook/swap-keys';
 import { safeStringify } from '../../../protocol/serialization';
 import { executeSwapOfferIdAccountSemanticVector } from '../../../../rscore/fixtures/account-semantics/swap-offer-id';
 

@@ -32,11 +32,11 @@ import {
   applyCrossJurisdictionOrderbookFill,
 } from '../../../../entity/tx/handlers/account-cross-j-followups';
 import { buildCrossMarketOfferFromBookOrder } from '../../../../entity/tx/handlers/account/orderbook/helpers';
-import { createBook, getBookOrder } from '../../../../orderbook';
-import { replaceOrderbookPair } from '../../../../orderbook/order-index';
-import { crossJurisdictionBookQtyLots, crossJurisdictionExecutableQtyLots } from '../../../../orderbook/cross-j/quantity';
-import { createOrderbookExtState, getStaticSwapTokenDimensions, ORDERBOOK_PRICE_SCALE } from '../../../../orderbook/types';
-import { normalizeSwapOfferForOrderbook, swapKey } from '../../../../orderbook/swap-execution';
+import { createBook, getBookOrder } from '../../../../swapbook';
+import { replaceOrderbookPair } from '../../../../swapbook/order-index';
+import { crossJurisdictionBookQtyLots, crossJurisdictionExecutableQtyLots } from '../../../../swapbook/cross-j/quantity';
+import { createOrderbookExtState, getStaticSwapTokenDimensions, ORDERBOOK_PRICE_SCALE } from '../../../../swapbook/types';
+import { normalizeSwapOfferForOrderbook, swapKey } from '../../../../swapbook/swap-execution';
 import type { EntityInput, EntityState } from '../../../../entity/types';
 import type { CrossJurisdictionSwapRoute } from '../../../../types/cross-jurisdiction';
 import {

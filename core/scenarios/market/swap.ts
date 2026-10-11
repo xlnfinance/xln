@@ -24,7 +24,7 @@ import { deriveSwapNetAuthorization } from '../../account/swap/swap-net-authoriz
 import { getLiveJAdapterEntries } from '../../runtime/j-submit/live-jadapters';
 import type { EntityInput } from '../../entity/types';
 import { ethers } from 'ethers';
-import { getBestAsk, getStaticSwapTokenDimensions, SWAP_LOT_SCALE } from '../../orderbook';
+import { getBestAsk, getStaticSwapTokenDimensions, SWAP_LOT_SCALE } from '../../swapbook';
 import { bindScenarioJReplica, ensureJAdapter, getScenarioJAdapter, isScenarioJAdapterMissingError, createJReplica, createJurisdictionConfig } from '../harness/boot';
 import type { JAdapter } from '../../jurisdiction/adapter/types';
 import { formatRuntime } from '../../qa/runtime-ascii';
@@ -431,7 +431,7 @@ export async function swapWithOrderbook(env: RuntimeReplica): Promise<RuntimeRep
   const hub = getRegisteredEntity('2');
 
   // Initialize hub's orderbook extension (required for RJEA flow)
-  const { DEFAULT_SPREAD_DISTRIBUTION } = await import('../../orderbook');
+  const { DEFAULT_SPREAD_DISTRIBUTION } = await import('../../swapbook');
   await process(env, [{
     entityId: hub.id,
     signerId: hub.signer,
@@ -622,7 +622,7 @@ export async function swapWithOrderbook(env: RuntimeReplica): Promise<RuntimeRep
   const [, hubRepAfter] = findReplica(env, hub.id);
   const extAfter = hubRepAfter.state.orderbookExt;
   if (extAfter?.books) {
-    const { renderAscii } = await import('../../orderbook');
+    const { renderAscii } = await import('../../swapbook');
     const book = extAfter.books.get('1/2');
     if (book) {
       console.log(`\n📚 ORDERBOOK STATE:`);
@@ -1135,7 +1135,7 @@ export async function multiPartyTrading(env: RuntimeReplica): Promise<RuntimeRep
   await converge(env);
 
   // Print orderbook
-  const { renderAscii } = await import('../../orderbook');
+  const { renderAscii } = await import('../../swapbook');
   const [, hubRep1] = findReplica(env, hub.id);
   const book1 = hubRep1.state.orderbookExt?.books?.get('1/2');
   if (book1) {

@@ -6,7 +6,7 @@ import {
   publishAccountTransition,
 } from '../../../account/state/candidate-overlay';
 import { createEmptyAccountJClaimAccumulator } from '../../../account/j-claims/j-claim-accumulator';
-import { getStaticSwapTokenDimensions, ORDERBOOK_PRICE_SCALE, SWAP_LOT_SCALE } from '../../../orderbook';
+import { getStaticSwapTokenDimensions, ORDERBOOK_PRICE_SCALE, SWAP_LOT_SCALE } from '../../../swapbook';
 import type { AccountReplica, AccountTx, Delta, SwapOffer } from '../../../types/account';
 import { getPerfMs } from '../../../support/time';
 import { createDefaultDelta } from '../../../account/state/delta';

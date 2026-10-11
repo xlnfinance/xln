@@ -15,7 +15,7 @@ const FORBIDDEN_IDENTIFIERS = new Set([
   'getWritableBookLevel',
 ]);
 const SCOPES = [
-  '/core/orderbook/',
+  '/core/swapbook/',
   '/core/storage/',
   '/core/api/runtime-adapter/',
   '/core/entity/tx/handlers/account/orderbook/',
@@ -84,7 +84,7 @@ for (const source of program.getSourceFiles()) {
   const path = source.fileName.replaceAll('\\', '/');
   if (!path.includes('/core/') || path.includes('/core/__tests__/')) continue;
   if (SCOPES.some(scope => path.includes(scope))) visitForbiddenIdentifiers(source, source);
-  if (path.endsWith('/core/orderbook/core.ts')) checkHotMatcher(source);
+  if (path.endsWith('/core/swapbook/core.ts')) checkHotMatcher(source);
   if (
     path.endsWith('/core/entity/tx/handlers/account/orderbook/same/pass.ts') ||
     path.endsWith('/core/entity/tx/handlers/account/orderbook/cross/book.ts')

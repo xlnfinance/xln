@@ -22,7 +22,7 @@ import { collectHltRunProvenance } from '../boundary/environment-manifest';
 
 import { deriveSignerAddressSync, prewarmSignerLabels } from '../../../../account/crypto';
 import { computeAccountStateRootCold } from '../../../../account/commitment/state-root';
-import { computeBookCommitmentHash } from '../../../../orderbook/commitment';
+import { computeBookCommitmentHash } from '../../../../swapbook/commitment';
 import { deriveMeshChildSeed } from '../../../../orchestrator/mesh/mesh-seeds';
 import { safeStringify } from '../../../../protocol/serialization';
 import {

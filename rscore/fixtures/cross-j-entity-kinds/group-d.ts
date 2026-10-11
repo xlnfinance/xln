@@ -17,7 +17,7 @@ import {
   getCrossJurisdictionPrivateSeed,
   withCanonicalCrossJurisdictionRouteHash,
 } from '../../../core/extensions/cross-j';
-import { getStaticSwapTokenDimensions } from '../../../core/orderbook/types';
+import { getStaticSwapTokenDimensions } from '../../../core/swapbook/types';
 import { appendDefaultProposerCrossJMaterializations } from '../../../core/entity/transition/cross-j-proposer-materialization';
 import {
   addr,

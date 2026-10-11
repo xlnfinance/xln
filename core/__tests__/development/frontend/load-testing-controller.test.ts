@@ -10,7 +10,7 @@ import {
 } from '../../../../frontend/src/lib/components/Entity/account/load-testing-scheduler';
 import type { PaymentPanelView } from '../../../../frontend/src/lib/components/Entity/payments/payment-panel-view';
 import type { DeriveDeltaFn } from '../../../../frontend/src/lib/components/Entity/payment-routing';
-import { applyCommand, createBook } from '../../../orderbook';
+import { applyCommand, createBook } from '../../../swapbook';
 import type { Delta, DerivedDelta } from '../../../types/account';
 
 const delta = (capacity: bigint): Delta => ({

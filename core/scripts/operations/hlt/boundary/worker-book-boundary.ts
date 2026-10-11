@@ -13,11 +13,11 @@ import {
   getStaticSwapTokenDimensions,
   getSwapLotScale,
   quoteAmountAtPrice,
-} from '../../../../orderbook';
+} from '../../../../swapbook';
 import {
   decodeBookPricePageTree,
   type BookPricePageTree,
-} from '../../../../orderbook/pages/page';
+} from '../../../../swapbook/pages/page';
 
 export type LoadBookSnapshot = Readonly<{
   tradeCount: number;

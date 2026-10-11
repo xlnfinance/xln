@@ -4,12 +4,12 @@ import {
   deterministicEntityTimestamp,
   findAccountByCounterparty,
   getTypedCrossJurisdictionBookAdmissionFailure,
-} from '../../../orderbook/cross-j/orderbook';
+} from '../../../swapbook/cross-j/orderbook';
 import {
   markWorkingOrderbookOffer,
   type NormalizedOrderbookOffer,
   type WorkingOrderbookOffer,
-} from '../../../orderbook/swap-execution';
+} from '../../../swapbook/swap-execution';
 import { shortOrder } from '../../../support/logger';
 import type { EntityRuntimeContext } from '../../runtime-context';
 import type { EntityState } from '../../types';

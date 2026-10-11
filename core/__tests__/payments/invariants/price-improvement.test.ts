@@ -19,10 +19,10 @@ import { describe, expect, test } from 'bun:test';
 import { beginAccountStateDraft, type AccountDraftReplica } from '../../../account/state/account-state-draft';
 import { PersistentAccountStateMap } from '../../../account/state/persistent-state-map';
 import { makeAccount } from '../../helpers/cross-j';
-import { createBook, applyCommand, type BookState, type BookEvent } from '../../../orderbook/core';
-import { ORDERBOOK_PRICE_SCALE, SWAP_LOT_SCALE, computeSwapPriceTicks, deriveSide } from '../../../orderbook/types';
+import { createBook, applyCommand, type BookState, type BookEvent } from '../../../swapbook/core';
+import { ORDERBOOK_PRICE_SCALE, SWAP_LOT_SCALE, computeSwapPriceTicks, deriveSide } from '../../../swapbook/types';
 import { handleSwapResolve } from '../../../account/tx/handlers/swap/resolve/index';
-import { deriveCanonicalSwapFillRatio } from '../../../orderbook/swap-execution';
+import { deriveCanonicalSwapFillRatio } from '../../../swapbook/swap-execution';
 import type { AccountTx, SwapOffer } from '../../../types/account';
 import { createDefaultDelta } from '../../../account/state/delta';
 import {

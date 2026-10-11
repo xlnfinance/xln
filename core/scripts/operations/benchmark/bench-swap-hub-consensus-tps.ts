@@ -11,7 +11,7 @@ import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { generateLazyEntityId } from '../../../entity/factory';
 import { MAX_ACCOUNT_FRAME_TXS } from '../../../account/consensus/frame/hash';
-import { getStaticSwapTokenDimensions, ORDERBOOK_PRICE_SCALE, SWAP_LOT_SCALE } from '../../../orderbook';
+import { getStaticSwapTokenDimensions, ORDERBOOK_PRICE_SCALE, SWAP_LOT_SCALE } from '../../../swapbook';
 import { createEmptyEnv } from '../../../runtime';
 import type { AccountReplica, AccountTx, Delta, SwapOffer } from '../../../types/account';
 import type { ConsensusConfig, EntityReplica, EntityState, JurisdictionConfig } from '../../../entity/types';

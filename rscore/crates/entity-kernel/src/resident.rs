@@ -30,7 +30,7 @@ use crate::kernel::{
     prepare_orderbook_stage,
 };
 use crate::local_financial::LocalAccountFinancialView;
-use crate::orderbook::{OrderbookPairJob, OrderbookPairResult};
+use crate::swapbook::{OrderbookPairJob, OrderbookPairResult};
 use crate::paybook::{PaybookChanges, paybook_entry, terminate_route, terminate_route_in_frame};
 use crate::scheduler_runtime::validate_scheduled_wake;
 use crate::unsafe_account_frame::{
@@ -1714,7 +1714,7 @@ struct EntityTransitionAccumulator {
     local_hashes_to_sign: Vec<crate::HashToSign>,
     account_envelope_mutations: Vec<(String, crate::AccountEnvelopeMutation)>,
     paybook_changes: PaybookChanges,
-    orderbook_deltas: Vec<crate::orderbook::SameJOutputDelta>,
+    orderbook_deltas: Vec<crate::swapbook::SameJOutputDelta>,
 }
 
 impl EntityTransitionAccumulator {
@@ -2268,7 +2268,7 @@ fn apply_scheduled_wake(
     // Overdue loans are derived from committed lending state exactly like
     // Account timelocks: the hub reads its own credit grant on each borrower
     // Account so the settlement transition stays a pure state function.
-    let overdue = crate::lending::overdue_lending_loans(state, state.timestamp)?;
+    let overdue = crate::lendbook::overdue_lending_loans(state, state.timestamp)?;
     let overdue_lending_loans = if overdue.is_empty() {
         Vec::new()
     } else {

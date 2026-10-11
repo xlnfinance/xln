@@ -131,7 +131,7 @@ import {
   ORDERBOOK_PRICE_SCALE,
   SWAP_LOT_SCALE,
   quoteAmountAtPrice,
-} from '../../../orderbook/types';
+} from '../../../swapbook/types';
 
 import { buildAccountProofBody, createDisputeProofHashWithNonce } from '../../../protocol/dispute/proof-builder';
 

@@ -1,5 +1,5 @@
-import type { BookState } from '../../../orderbook';
-import { hydrateBookPricePageTree } from '../../../orderbook/pages/page';
+import type { BookState } from '../../../swapbook';
+import { hydrateBookPricePageTree } from '../../../swapbook/pages/page';
 import {
   branchRecordFromStorage,
   decodeStorageBookHeader,

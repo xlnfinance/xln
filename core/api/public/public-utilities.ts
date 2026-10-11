@@ -29,8 +29,8 @@ export {
   prepareSwapOrder,
   quantizeSwapOrder,
   requantizeRemainingSwapAtPrice,
-} from '../../orderbook';
-export { listOpenSwapOffers } from '../../orderbook/open-swap-offers';
+} from '../../swapbook';
+export { listOpenSwapOffers } from '../../swapbook/open-swap-offers';
 export {
   formatTokenAmount,
   parseTokenAmount,

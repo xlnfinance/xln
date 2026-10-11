@@ -10,7 +10,7 @@ import {
   buildCrossJurisdictionPullBinding,
   isCrossJurisdictionTerminalStatus,
 } from '../../../../extensions/cross-j';
-import { getStaticSwapTokenDimensions } from '../../../../orderbook/types';
+import { getStaticSwapTokenDimensions } from '../../../../swapbook/types';
 import { createEmptyEnv } from '../../../../runtime';
 import type { EntityInput } from '../../../../entity/types';
 import {

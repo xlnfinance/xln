@@ -1,4 +1,4 @@
-import { validateSpreadDistribution } from '../../orderbook';
+import { validateSpreadDistribution } from '../../swapbook';
 import { isProfileEntityKind, isProfileEntitySector } from '../../entity/profile';
 import { compareStableText } from '../../protocol/serialization';
 import { assertAccountFrameHash } from '../../account/consensus/frame/hash';

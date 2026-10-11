@@ -33,7 +33,7 @@ import type { GossipLayer } from '../network/p2p/gossip';
 import type { EntityInfraContext } from '../types/entity/infra-context';
 import type { Profile } from '../entity/profile';
 import type { RuntimeP2PConfig } from './envelope/p2p-types';
-import type { BookState } from '../orderbook/core';
+import type { BookState } from '../swapbook/core';
 
 import type {
   RuntimeSecurityIncident,

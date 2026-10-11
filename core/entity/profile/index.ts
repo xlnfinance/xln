@@ -5,7 +5,7 @@
  * It manages entity profiles in a distributed network.
  */
 
-import { compareCanonicalText } from '../../orderbook/swap-keys';
+import { compareCanonicalText } from '../../swapbook/swap-keys';
 import { observePerfCount, timePerfPhase } from '../../support/performance/profile';
 import { LIMITS, UINT16_MAX } from '../../config/constants';
 import {

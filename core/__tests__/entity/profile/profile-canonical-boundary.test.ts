@@ -19,7 +19,7 @@ import {
 import { canonicalizeProfile, parseProfile } from '../../../entity/profile';
 import { verifyProfileSignature } from '../../../entity/profile/profile-signing';
 import { assertEntityInfraContextAuthority } from '../../../entity/consensus/frame/infra-context-validation';
-import { hashRawHtlcPaymentTx } from '../../../entity/paybook/payment-admission';
+import { hashRawHtlcPaymentTx } from '../../../paybook/payment-admission';
 import { MalformedEntityFrameInputError } from '../../../entity/tx/processing/invariant-errors';
 import { createEmptyEnv } from '../../../runtime';
 import type { EntityTx } from '../../../types/entity-tx';

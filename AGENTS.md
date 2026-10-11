@@ -15,6 +15,11 @@ This scope prevails over older plans in `docs/` and over the history in `todo.md
   `rscore-freeze-f1464e84e`: no commits under `rscore/` and no Rust gates in `check` or the
   release gates until the owner lifts the freeze. Lift conditions: a frozen protocol spec v1
   with shared vectors; measured demand above 500 tps on one hub; multisig in scope.
+- Later owner update 2026-10-11: the freeze is lifted for the explicitly requested
+  `paybook` / `swapbook` / `lendbook` refactor in both TypeScript and Rust, including
+  the financial parity needed by those books. Preserve unrelated Rust changes.
+  TypeScript remains the launch engine; this does not add general Rust performance
+  work or restore every old Rust release gate.
 - Wallet: React `ui/` is the only wallet. Svelte `frontend/` is frozen: no new wallet
   features; only landing/static copy and build health change there.
 - First jurisdiction: Ethereum same-J (Sepolia, then a mainnet canary).

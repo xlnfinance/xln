@@ -20,13 +20,13 @@ import {
   crossJurisdictionExecutableQtyLots,
   ORDERBOOK_PRICE_SCALE,
   quoteAmountFromWeightedLots,
-} from '../../orderbook';
+} from '../../swapbook';
 import { getSwapPairOrientation, getTokenInfo, isLiquidSwapToken } from '../../account/utils';
 import {
   deriveExactSwapFillRatio,
   exactFillRatioToUint16,
   type NormalizedOrderbookOffer,
-} from '../../orderbook/swap-execution';
+} from '../../swapbook/swap-execution';
 import type { CrossJurisdictionBookAdmission, CrossJurisdictionSwapRoute } from '../../types/cross-jurisdiction';
 import type { EntityState } from '../../entity/types';
 import { getJurisdictionStackId } from '../../jurisdiction/machine/jurisdiction-stack';

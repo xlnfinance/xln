@@ -4,7 +4,7 @@ import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from 
 import { EmbeddedRuntimeAdapter } from '../../core/api/runtime-adapter/embedded';
 import { loadJurisdictionsAsync } from '../../core/jurisdiction/adapter/kernel/jurisdiction-loader';
 import { getLiveJAdapter } from '../../core/runtime/j-submit/live-jadapters';
-import { DEFAULT_SPREAD_DISTRIBUTION } from '../../core/orderbook/types';
+import { DEFAULT_SPREAD_DISTRIBUTION } from '../../core/swapbook/types';
 import { deriveDelta } from '../../core/account/utils';
 import { computeAccountStateRoot } from '../../core/account/commitment/state-root';
 import { safeStringify } from '../../core/protocol/serialization';

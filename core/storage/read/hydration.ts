@@ -1,5 +1,5 @@
 import { engineAccountValueHash } from '../../rscore/engine-leaf/leaf-cache';
-import { rebuildOrderbookPairIndex, type BookState, type OrderbookExtState } from '../../orderbook';
+import { rebuildOrderbookPairIndex, type BookState, type OrderbookExtState } from '../../swapbook';
 import type { AccountReplica } from '../../types/account';
 import type { EntityState } from '../../entity/types';
 import type { StorageAccountDoc, StorageEntityCoreDoc } from '../types';

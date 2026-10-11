@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { createEmptyAccountJClaimAccumulator } from '../../../account/j-claims/j-claim-accumulator';
 import { buildAccountProofBody } from '../../../protocol/dispute/proof-builder';
 import { buildPositionalSwapFillRatioBuckets, sortTransformerEntries } from '../../../protocol/transform/transformer-ordering';
-import { asOfferId } from '../../../orderbook/swap-keys';
+import { asOfferId } from '../../../swapbook/swap-keys';
 import type { AccountReplica, SwapOffer } from '../../../types/account';
 
 const MAX_FILL_RATIO = 65535n;

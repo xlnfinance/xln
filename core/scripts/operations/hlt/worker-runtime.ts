@@ -18,7 +18,7 @@ import { RemoteRuntimeAdapter } from '../../../api/runtime-adapter/remote';
 import type { RuntimeAdapterSendResult } from '../../../api/runtime-adapter/types';
 import { DaemonControlClient } from '../../../orchestrator/daemon-control';
 import { HUB_NAMES } from '../../../config/constants';
-import { canonicalPair } from '../../../orderbook';
+import { canonicalPair } from '../../../swapbook';
 import { safeParse, safeStringify } from '../../../protocol/serialization';
 import { requireBoundaryRecord, requireExactBoundaryKeys } from '../../../protocol/boundary-validation';
 import {

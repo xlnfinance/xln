@@ -12,15 +12,15 @@ import {
   type BookState,
   type BookOrderState,
   type OrderbookExtState,
-} from '../../../../../../orderbook';
+} from '../../../../../../swapbook';
 import { SWAP_CONSTANTS } from '../../../../../../config/constants';
 import type { SwapPairPolicy } from '../../../../../../account/utils';
 import { createStructuredLogger, shortId, shortOrder } from '../../../../../../support/logger';
 import type {
   NormalizedOrderbookOffer,
   SameJurisdictionWorkingOrderbookOffer,
-} from '../../../../../../orderbook/swap-execution';
-import { normalizeSwapOfferForOrderbook , swapKey } from '../../../../../../orderbook/swap-execution';
+} from '../../../../../../swapbook/swap-execution';
+import { normalizeSwapOfferForOrderbook , swapKey } from '../../../../../../swapbook/swap-execution';
 import {
   hasQueuedSwapResolveForEntityState,
   queueUniqueSwapResolveForEntityState,

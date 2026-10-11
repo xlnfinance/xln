@@ -12,7 +12,7 @@ import { prependUniqueMempoolTxs } from '../../../account/consensus/helpers';
 import { computeAccountStateRoot, EMPTY_ACCOUNT_STATE_ROOT } from '../../../account/commitment/state-root';
 import { createEmptyAccountJClaimAccumulator } from '../../../account/j-claims/j-claim-accumulator';
 import { LIMITS } from '../../../config/constants';
-import { createOrderbookExtState, DEFAULT_SPREAD_DISTRIBUTION } from '../../../orderbook';
+import { createOrderbookExtState, DEFAULT_SPREAD_DISTRIBUTION } from '../../../swapbook';
 import { applyEntityInput } from '../../../entity/consensus';
 import { encodeBoard, generateLazyEntityId, hashBoard } from '../../../entity/factory';
 import { provisionTestEntityEncryptionKey } from '../../helpers/cross-j';

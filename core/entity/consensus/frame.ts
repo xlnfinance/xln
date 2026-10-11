@@ -7,7 +7,7 @@ import type { JPrefixCertificate } from '../../types/jurisdiction-events';
 import type { EntityInfraContext } from '../../types/entity/infra-context';
 import { HEAVY_LOGS } from '../../support/debug-flags';
 import { createStructuredLogger, shortHash, shortId } from '../../support/logger';
-import { compareCanonicalText } from '../../orderbook/swap-execution';
+import { compareCanonicalText } from '../../swapbook/swap-execution';
 import { requireCanonicalJurisdictionEvents } from '../../jurisdiction/machine/events/event-normalization';
 import { canonicalAccountInputCommitment } from './frame/account-input-commitment';
 import {

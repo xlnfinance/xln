@@ -1,6 +1,6 @@
 import type { AccountFrame } from '../core/types/account';
 import { Wallet } from 'ethers';
-import { crossJurisdictionBookQtyLots } from '../core/orderbook';
+import { crossJurisdictionBookQtyLots } from '../core/swapbook';
 import {
   API_BASE_URL,
   APP_BASE_URL,

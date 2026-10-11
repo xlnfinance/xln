@@ -1,5 +1,5 @@
-import { getBookSideLevels, projectBookDepth, type BookState } from '../../../orderbook';
-import { projectBookPricePageTree, type BookPricePage } from '../../../orderbook/pages/page';
+import { getBookSideLevels, projectBookDepth, type BookState } from '../../../swapbook';
+import { projectBookPricePageTree, type BookPricePage } from '../../../swapbook/pages/page';
 import type { ExternalWalletState } from '../../../entity/types';
 import type { JBatch, JBatchState, SentJBatch } from '../../../jurisdiction/machine/batch';
 import { normalizeEntityId } from '../../../storage/keys';

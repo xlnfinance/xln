@@ -10,7 +10,7 @@ import type { EntityTx } from '../../types/entity-tx';
 import { deriveSwapFillPolicyFee, deriveSwapNetAuthorization } from '../../account/swap/swap-net-authorization';
 import { deriveDelta } from '../../account/utils';
 import { deriveTransferOffdeltaChange } from '../../protocol/transform/delta-movement';
-import { DEFAULT_SPREAD_DISTRIBUTION, quoteAmountAtPriceForDecimals } from '../../orderbook';
+import { DEFAULT_SPREAD_DISTRIBUTION, quoteAmountAtPriceForDecimals } from '../../swapbook';
 import { converge, findReplica, processUntil } from '../harness/helpers';
 import { executeCompanyAction } from './governance';
 import {

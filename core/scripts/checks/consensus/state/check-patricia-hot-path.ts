@@ -8,7 +8,7 @@ const files = [
   'core/protocol/state/radix-overlay.ts',
   'core/entity/state/persistent-account-map.ts',
   'core/entity/state/persistent-collection-map.ts',
-  'core/orderbook/book-overlay.ts',
+  'core/swapbook/book-overlay.ts',
 ] as const;
 const violations: string[] = [];
 

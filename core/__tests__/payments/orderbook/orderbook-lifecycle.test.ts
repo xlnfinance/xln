@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
-import { applyCommand, computeBookHash, createBook, getBookOrder, getBookOrders } from '../../../orderbook/core';
-import { commitBookOverlay } from '../../../orderbook/book-overlay';
+import { applyCommand, computeBookHash, createBook, getBookOrder, getBookOrders } from '../../../swapbook/core';
+import { commitBookOverlay } from '../../../swapbook/book-overlay';
 
 const activeOrderIds = (book: ReturnType<typeof createBook>): string[] =>
   getBookOrders(book).map((order) => order.orderId).sort();

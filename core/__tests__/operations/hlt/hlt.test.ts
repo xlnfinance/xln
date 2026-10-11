@@ -42,9 +42,9 @@ import {
   getSwapExactQuoteLotMultipleAtPriceForDimensions,
   quoteAmountFromWeightedLotsForDecimals,
   quoteAmountAtPrice,
-} from '../../../orderbook';
-import { projectBookPricePageTree } from '../../../orderbook/pages/page';
-import { getBookSideLevels } from '../../../orderbook/core';
+} from '../../../swapbook';
+import { projectBookPricePageTree } from '../../../swapbook/pages/page';
+import { getBookSideLevels } from '../../../swapbook/core';
 import {
   assertSwapNetAuthorization,
   deriveSwapNetAuthorization,

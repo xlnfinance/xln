@@ -32,7 +32,7 @@ const SCAN_ROOTS = [
   'core/entity/tx/handlers',
   'core/account/tx/handlers',
   'core/account/consensus',
-  'core/orderbook',
+  'core/swapbook',
   'core/extensions/cross-j',
 ] as const;
 

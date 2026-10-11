@@ -506,4 +506,4 @@ import {
   type HubProfile,
   type OrderbookExtState,
   type SpreadDistribution,
-} from '../../orderbook';
+} from '../../swapbook';

@@ -13,7 +13,7 @@ import { encryptedHtlcLayer, hashEncryptedHtlcLayer } from '../../../../protocol
 import {
   armPaymentSecretAckTimeout,
   programPaymentTermination,
-} from '../../../paybook/lifecycle';
+} from '../../../../paybook/lifecycle';
 import { pushCrossJurisdictionEntityOutput } from '../../j-events-htlc/cross-j-outputs';
 import { CROSS_J_MAX_FILL_RATIO } from '../../../../extensions/cross-j/index';
 import { buildHtlcFinalizedEventPayload } from '../../../../protocol/htlc/events';
@@ -24,7 +24,7 @@ import type { EntityInfraContext } from '../../../../types/entity/infra-context'
 import { preparedHtlcBindingKey, type PreparedHtlcEntry } from '../../../../types/entity/htlc-infra-context';
 import { HTLC } from '../../../../config/constants';
 import { haltRuntimeFailure } from '../../../../protocol/errors/failure-taxonomy';
-import { hasInboundPayment } from '../../../paybook/views';
+import { hasInboundPayment } from '../../../../paybook/views';
 import { countOp } from '../../../../support/performance/op-counters';
 import { sameAccountStateDomain } from '../../../../account/commitment/state-root';
 import type { BookIntentSlotWriter } from '../../../books/book-intents';

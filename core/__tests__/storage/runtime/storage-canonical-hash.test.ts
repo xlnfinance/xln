@@ -16,7 +16,7 @@ import { buildStorageLiveReplicaMetaCommitment } from '../../../storage/replica/
 import { createEmptyAccountJClaimAccumulator } from '../../../account/j-claims/j-claim-accumulator';
 import { PersistentAccountStateMap } from '../../../account/state/persistent-state-map';
 import { encodeBoard, hashBoard } from '../../../entity/factory';
-import { applyCommand, createBook, replaceOrderbookPair } from '../../../orderbook';
+import { applyCommand, createBook, replaceOrderbookPair } from '../../../swapbook';
 import { encodeReplicaMeta, hydrateEntityStateFromStorage, projectAccountDoc, projectEntityCoreDoc, projectReplicaMeta } from '../../../storage/read/projections';
 import {
   commitEntityFrameCandidateState,

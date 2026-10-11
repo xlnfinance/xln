@@ -577,7 +577,7 @@ fn group_d_cross_j_entity_kinds_match_typescript() {
 
 #[test]
 fn cross_quote_outside_same_j_anchor_uses_cross_admission() {
-    use crate::orderbook::{
+    use crate::swapbook::{
         OrderbookState, SameJOutputDelta, install_orderbook_outputs, prepare_orderbook_outputs,
         validate_orderbook_outputs,
     };

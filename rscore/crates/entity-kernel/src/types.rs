@@ -8,8 +8,8 @@ use xln_rscore_protocol::{
     CanonicalValue, PersistentRadixMap, encode_canonical_consensus_bytes, encode_raw_text_key,
 };
 
-use crate::lending::LendingState;
-use crate::orderbook::{OrderbookState, PairPolicy};
+use crate::lendbook::LendingState;
+use crate::swapbook::{OrderbookState, PairPolicy};
 use crate::scheduler::CrontabState;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

@@ -6,7 +6,7 @@ import {
   MAX_BOOK_PRICE_KEY_BYTES,
   MAX_BOOK_PRICE_PAGE_SEQUENCE,
   type BookPricePageKey,
-} from '../../../../orderbook/pages/key';
+} from '../../../../swapbook/pages/key';
 
 const compareBytes = (left: Uint8Array, right: Uint8Array): number => {
   const length = Math.min(left.length, right.length);

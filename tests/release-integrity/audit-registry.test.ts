@@ -69,7 +69,7 @@ describe('canonical audit registry', () => {
       'core/config/constants.ts',
       'core/extensions/cross-j/index.ts',
       'core/jurisdiction/machine/events/event-normalization.ts',
-      'core/orderbook/swap-execution.ts',
+      'core/swapbook/swap-execution.ts',
       'core/__tests__/payments/invariants/direct-payment-frame-integrity.test.ts',
       'jurisdictions/test/dispute/DeltaTransformer.test.ts',
     ]) {

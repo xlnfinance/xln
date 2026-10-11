@@ -2,7 +2,7 @@ import { ethers } from 'ethers';
 import { deriveSignerAddressSync, deriveSignerKeySync } from '../account/crypto';
 import { getTokenInfo } from '../account/utils';
 import { encodeBoard, hashBoard } from '../entity/factory';
-import { DEFAULT_SPREAD_DISTRIBUTION } from '../orderbook';
+import { DEFAULT_SPREAD_DISTRIBUTION } from '../swapbook';
 import { deserializeTaggedJson, serializeTaggedJson } from '../protocol/serialization';
 import type { ConsensusConfig } from '../entity/types';
 import type { JurisdictionConfig } from '../protocol/config/jurisdiction-config';

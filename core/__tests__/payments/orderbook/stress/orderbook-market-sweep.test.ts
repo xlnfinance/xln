@@ -7,7 +7,7 @@ import {
   createBook,
   forkBookState,
   getBestAsk,
-} from '../../../../orderbook';
+} from '../../../../swapbook';
 import { getPerfMs } from '../../../../support/time';
 
 test('one marketable order sweeps 1024 FIFO makers across prices and Patricia pages', () => {

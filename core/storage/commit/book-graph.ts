@@ -1,4 +1,4 @@
-import type { BookState } from '../../orderbook/core';
+import type { BookState } from '../../swapbook/core';
 import { encodeBuffer } from '../codec/codec';
 import { keyLiveBook } from '../keys';
 import { readStorageBookGraph } from '../read/book-graph';

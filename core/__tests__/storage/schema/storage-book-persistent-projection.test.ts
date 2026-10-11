@@ -4,8 +4,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Level } from 'level';
 
-import { applyCommand, commitBookOverlay, createBook, reduceBookOrderQuantity } from '../../../orderbook';
-import { hydrateBookPricePageTree } from '../../../orderbook/pages/page';
+import { applyCommand, commitBookOverlay, createBook, reduceBookOrderQuantity } from '../../../swapbook';
+import { hydrateBookPricePageTree } from '../../../swapbook/pages/page';
 import { decodeValidatedBuffer, encodeBuffer } from '../../../storage/codec/codec';
 import { prepareStorageBookGraphWrite } from '../../../storage/commit/book-graph';
 import { readStorageBookGraph } from '../../../storage/read/book-graph';

@@ -2,9 +2,9 @@
  * Canonical TypeScript book-level oracle for the Rust orderbook twin.
  *
  * Every case replays one ordered list of book operations through the
- * production `core/orderbook` transitions and records the exact event list,
+ * production `core/swapbook` transitions and records the exact event list,
  * event hash and book commitment after each step. The Rust replay lives in
- * `rscore/crates/entity-kernel/src/orderbook/tests/book_parity.rs`.
+ * `rscore/crates/entity-kernel/src/swapbook/tests/book_parity.rs`.
  *
  * Regenerate from the repository root:
  *   bun rscore/fixtures/entity-kernel/orderbook-book.ts
@@ -12,8 +12,8 @@
 import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
-import { commitBookOverlay } from '../../../core/orderbook/book-overlay';
-import { computeBookCommitmentHash } from '../../../core/orderbook/commitment';
+import { commitBookOverlay } from '../../../core/swapbook/book-overlay';
+import { computeBookCommitmentHash } from '../../../core/swapbook/commitment';
 import {
   applyCommand,
   bookOrdersOutsidePriceRange,
@@ -24,8 +24,8 @@ import {
   type ApplyCommandOptions,
   type BookEvent,
   type BookState,
-} from '../../../core/orderbook/core';
-import { getSwapExactQuoteLotMultipleAtPriceForDimensions } from '../../../core/orderbook/types';
+} from '../../../core/swapbook/core';
+import { getSwapExactQuoteLotMultipleAtPriceForDimensions } from '../../../core/swapbook/types';
 import { safeStringify } from '../../../core/protocol/serialization';
 
 const BASE_TOKEN_DECIMALS = 6;
@@ -266,7 +266,7 @@ const executeCase = (testCase: BookCase) => {
 
 export const executeOrderbookBookParityVector = () => ({
   version: 1,
-  canonicalSource: 'TypeScript core/orderbook/core.ts',
+  canonicalSource: 'TypeScript core/swapbook/core.ts',
   bucketWidthTicks: BUCKET_WIDTH_TICKS,
   baseTokenDecimals: BASE_TOKEN_DECIMALS,
   quoteTokenDecimals: QUOTE_TOKEN_DECIMALS,

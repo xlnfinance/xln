@@ -4,7 +4,7 @@ import { requireBoundaryRecord } from '../../protocol/boundary-validation';
 import { createStructuredLogger } from '../../support/logger';
 import { getTokenIdsForJurisdiction } from '../../account/utils';
 import { DEFAULT_ACCOUNT_TOKEN_IDS } from '../../account/config/defaults';
-import { DEFAULT_SPREAD_DISTRIBUTION } from '../../orderbook';
+import { DEFAULT_SPREAD_DISTRIBUTION } from '../../swapbook';
 import { parseProfile } from '../../entity/profile';
 import { verifyProfileSignature } from '../../entity/profile/profile-signing';
 import { storeVerifiedGossipProfile, type RelayStore } from '../../network/relay/store';

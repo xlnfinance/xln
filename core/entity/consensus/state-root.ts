@@ -22,7 +22,7 @@ import {
   encodeAccountStateValue,
 } from '../../account/commitment/state-root';
 import { counterpartySettlementHankos } from '../../account/settlement/witness-projection';
-import { computeBookCommitmentHash } from '../../orderbook/commitment';
+import { computeBookCommitmentHash } from '../../swapbook/commitment';
 import { createStructuredLogger } from '../../support/logger';
 import { readRuntimeEnv } from '../../support/process/runtime-process';
 import { getPerfMs } from '../../support/time';

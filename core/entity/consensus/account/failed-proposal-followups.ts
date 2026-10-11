@@ -1,7 +1,7 @@
 import type { AccountFailedHtlcLock } from '../../../account/consensus/types';
 import type { AccountTxBatch } from '../../../types/account';
 import type { EntityState } from '../../types';
-import { hasInboundPayment } from '../../paybook/views';
+import { hasInboundPayment } from '../../../paybook/views';
 
 export type FailedProposalHtlcFollowup =
   | Readonly<{ kind: 'absent' }>

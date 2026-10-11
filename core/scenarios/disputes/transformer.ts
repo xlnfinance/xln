@@ -14,7 +14,7 @@ import type { JAdapter } from '../../jurisdiction/adapter/types';
 import { deriveDisputeTokenFinalization } from '../../protocol/dispute/finalization';
 import { decodeInt512, decodeInt768, decodeUint768, encodeInt768 } from '../../protocol/crypto/abi-money';
 import { deriveSwapNetAuthorization } from '../../account/swap/swap-net-authorization';
-import { getStaticSwapTokenDimensions } from '../../orderbook';
+import { getStaticSwapTokenDimensions } from '../../swapbook';
 import { safeStringify } from '../../protocol/serialization';
 import { buildCurrentDisputeArgumentPlan } from '../../protocol/dispute/arguments';
 import { bootScenario, fundEntities, registerEntities } from '../harness/boot';
@@ -391,7 +391,7 @@ export async function runDisputeTransformer(runtimeReplica: RuntimeReplica): Pro
     ]);
     await converge(env, 16);
 
-    const { DEFAULT_SPREAD_DISTRIBUTION } = await import('../../orderbook');
+    const { DEFAULT_SPREAD_DISTRIBUTION } = await import('../../swapbook');
     await process(env, [{
       entityId: hub.id,
       signerId: hub.signer,

@@ -9,8 +9,8 @@ import { deriveSwapNetAuthorization } from '../../../account/swap/swap-net-autho
 import { handleSwapOffer } from '../../../account/tx/handlers/swap/offer/index';
 import { deriveSameOrderbookMaterialization } from '../../../entity/tx/handlers/account/orderbook/helpers';
 import { buildMarketSnapshotForReplica } from '../../../network/relay/market/snapshot';
-import { applyCommand, createBook } from '../../../orderbook';
-import { markWorkingOrderbookOffer } from '../../../orderbook/swap-execution';
+import { applyCommand, createBook } from '../../../swapbook';
+import { markWorkingOrderbookOffer } from '../../../swapbook/swap-execution';
 import {
   buildMarketMakerOfferSpecs,
   buildMarketMakerBootstrapFingerprint,

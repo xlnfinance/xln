@@ -3,7 +3,7 @@ import { applyCommittedHtlcLockFollowup, applyHtlcSecretFollowups, applyHtlcTime
 import { hashOpaqueHtlcCiphertext } from '../../../protocol/htlc/multi-recipient';
 import { quoteHtlcPaymentRoute } from '../../../pathfinding/htlc-quote';
 import { collectDerivedDeadlines } from '../../../entity/scheduler/derived-deadlines';
-import { failOriginatedPayment, HTLC_SECRET_ACK_TIMEOUT_MS } from '../../../entity/paybook/lifecycle';
+import { failOriginatedPayment, HTLC_SECRET_ACK_TIMEOUT_MS } from '../../../paybook/lifecycle';
 import { applyBookIntentProgram, createBookIntentProgram, type BookIntentProgram } from '../../../entity/books/book-intents';
 import type { EntityState, PaybookEntry } from '../../../entity/types';
 import { handleHtlcResolve } from '../../../account/tx/handlers/htlc/resolve';

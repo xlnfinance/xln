@@ -1,6 +1,6 @@
 import {
   requantizeRemainingSwapAtPriceForDimensions,
-} from '../../orderbook';
+} from '../../swapbook';
 import type { AccountState } from '../../types/account';
 import type { CrossJurisdictionSwapRoute } from '../../types/cross-jurisdiction';
 import type { EntityTx } from '../../types/entity-tx';

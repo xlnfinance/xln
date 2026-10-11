@@ -6,7 +6,7 @@ import {
   deliveryFailure,
   type DeliveryResult,
 } from '../../protocol/payments/delivery-result';
-import { compareCanonicalText } from '../../orderbook/swap-keys';
+import { compareCanonicalText } from '../../swapbook/swap-keys';
 import {
   decryptPayload,
   decryptSessionPayload,

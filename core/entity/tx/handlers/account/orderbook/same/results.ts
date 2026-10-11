@@ -1,6 +1,6 @@
 import { haltRuntimeFailure } from "../../../../../../protocol/errors/failure-taxonomy";
 
-import { recordAcceptedUsdAskPrice, type BookState } from '../../../../../../orderbook';
+import { recordAcceptedUsdAskPrice, type BookState } from '../../../../../../swapbook';
 import { createStructuredLogger, shortId, shortOrder } from '../../../../../../support/logger';
 import { HEAVY_LOGS } from '../../../../../../support/debug-flags';
 import {

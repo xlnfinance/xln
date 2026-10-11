@@ -32,7 +32,7 @@ use crate::{
 };
 
 use crate::local_tx::is_self_runtime_continuation_kind;
-use crate::orderbook::SameJOutputDelta;
+use crate::swapbook::SameJOutputDelta;
 
 #[derive(Clone, Debug, Default)]
 pub struct CrossJurisdictionApplyResult {
@@ -5646,7 +5646,7 @@ mod tests {
 
     #[test]
     fn cross_j_r6_h67_trade_preview_preserves_committed_book_until_fill_progress() {
-        use crate::orderbook::{
+        use crate::swapbook::{
             apply_cross_jurisdiction_fill_deltas, install_orderbook_outputs,
             prepare_orderbook_outputs, validate_orderbook_outputs,
         };
@@ -5978,7 +5978,7 @@ mod tests {
         let kind = EntityTxKind::RemoveCrossJurisdictionBookOrder;
         let canonical = canonical_route(&route("settled", true), kind).expect("route");
         let mut owner = EntityStateSlice::empty("source-hub", 2_000);
-        owner.orderbook = Some(crate::orderbook::OrderbookState::empty(10_000));
+        owner.orderbook = Some(crate::swapbook::OrderbookState::empty(10_000));
         let removal = CanonicalEntityTx::from_frame_projection(
             kind,
             obj(vec![

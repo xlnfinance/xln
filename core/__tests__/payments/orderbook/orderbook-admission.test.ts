@@ -12,8 +12,8 @@
 import { describe, expect, test } from 'bun:test';
 
 import { admitOrderbookOfferForMatching } from '../../../entity/consensus/account/orderbook-admission';
-import { normalizeSwapOfferForOrderbook } from '../../../orderbook/swap-execution';
-import { getStaticSwapTokenDimensions, SWAP_LOT_SCALE } from '../../../orderbook/types';
+import { normalizeSwapOfferForOrderbook } from '../../../swapbook/swap-execution';
+import { getStaticSwapTokenDimensions, SWAP_LOT_SCALE } from '../../../swapbook/types';
 import type { EntityRuntimeContext } from '../../../entity/runtime-context';
 import type { EntityState } from '../../../entity/types';
 import { createEntityFrameCandidateState } from '../../../entity/state-clone';
