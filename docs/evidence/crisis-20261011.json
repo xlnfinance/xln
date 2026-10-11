@@ -3030,5 +3030,68 @@
     ],
     "methodCorrection": "Validate TSX before live writes; install styles before consuming classes; avoid Vite entrypoint/runtime reloads while a demo without confirmed recovery is open.",
     "storageCleanup": "Removed only regenerable Rust dev incremental/package compiler cache via Cargo, freeing 3.2 GiB; kept wallet DBs and test evidence."
+  },
+  "reserveReceiptRepair": {
+    "baseSha": "f9f5388cc",
+    "cause": "5-second reserve proxy timeout masked RESERVE_EVENT_MISSING: watcher evidence included only local Entity deliveries, so external recipient evidence depended on an immediate submit receipt",
+    "change": "One chain-faucet endpoint set; retain external reserve evidence only for a locally delivered HankoBatchProcessed transaction, with identical Runtime input",
+    "unit": {
+      "tests": 65,
+      "assertions": 337,
+      "failed": 0,
+      "seconds": 1.74
+    },
+    "check": {
+      "sourceGates": 38,
+      "sourceDurationMs": 26200,
+      "result": "PASS"
+    },
+    "live": {
+      "chainId": 31337,
+      "entityId": "0x4232c08f7ba7b81a26eddad48c54a47f445ef404b2c277691932f775375ccd0c",
+      "failedRequest": {
+        "status": 500,
+        "elapsedMs": 5455,
+        "creditedUsdc": 1,
+        "retried": false
+      },
+      "fixedRequest": {
+        "status": 200,
+        "elapsedMs": 446,
+        "creditedUsdc": 1,
+        "receiptStatus": 1,
+        "transactionHash": "0x5e80033e6cab0a69d4378468f73d9fa953d4f4455c29a1caea51860111bfe59d"
+      },
+      "browser": {
+        "accepted": true,
+        "reserveBeforeUsdc": 2,
+        "reserveAfterUsdc": 3,
+        "payEnabledAfterReconnect": true,
+        "expectedWsCloseDuringH1Restart": 1
+      },
+      "limitation": "Fresh proxy function wired to real live H1. H1 restored existing DB under updated code; original orchestrator process retains old 5-second timeout policy until a safe restart. Not a production/mainnet deployment."
+    },
+    "ui": {
+      "balanceFontPx": 64,
+      "viewportCssPx": 1236,
+      "documentWidthCssPx": 1236,
+      "homeCssLoaded": true,
+      "viteBuildSeconds": 2.66,
+      "finalBalanceUsdc": 203,
+      "limitation": "Independent demo, not restoration of old 699.85-USDC wallet"
+    },
+    "next": "Guided-demo recovery must not require a phrase never shown to its user",
+    "hashes": {
+      "reserve-evidence-before.log": "fbfe8659d966a8fec9fa515bc6e6cbd27bc57d115c235e1ad3689f268996ad5e",
+      "reserve-evidence-missing.json": "93da7bcc0f3155688b2a2794ef424784c4158ea68ee7052dc274acda6666d290",
+      "reserve-timeout-receipt.json": "6a7ac1759fd71353bb901a8efee6d281cb5f5e69f1547792b53043b906c43a07",
+      "reserve-evidence-related.log": "017ed565b13d5dc8f316e1dfebbcc47fab2e3782d9a0332c9573dfe962a5ef42",
+      "reserve-evidence-check.log": "e2d80ea32c4088fd2b9ced46bb09ce1d724d56d4f78dd623bb3139dc80ebcd87",
+      "reserve-timeout-live.ts": "ba87b820710dd5387bfbe3b03bd6ee8f8d2163dc83f7875f2d21180983385dd2",
+      "reserve-timeout-live.json": "e978c1540ac0047a63255e977f3a805b074c526f2ab2c9eaff66625d46480cc7",
+      "reserve-timeout-live.log": "b3ac35d8e27c2d5b69d44654b28832b0a34bcd860c5d7905ac1c27dc2c36b8d9",
+      "reserve-browser-accepted.jpg": "6f35f92eaab64b4ef69c98dc3410b46352dbb205f130271182fa4c7066ccaec6",
+      "wallet-fonts-verified.jpg": "a36876589e76f4948657097c6848b906da4141652cc79688bd581e0d707ee70c"
+    }
   }
 }

@@ -104,7 +104,7 @@ describe('orchestrator proxy security', () => {
     }
   });
 
-  test('on-chain faucet allows mining without weakening the generic hub timeout', async () => {
+  test('all chain faucets allow confirmation without weakening the generic hub timeout', async () => {
     const requestedEngines: Array<string | undefined> = [];
     const previousHubTimeout = process.env['XLN_HUB_API_PROXY_TIMEOUT_MS'];
     const previousFaucetTimeout = process.env['XLN_HUB_FAUCET_PROXY_TIMEOUT_MS'];
@@ -138,13 +138,13 @@ describe('orchestrator proxy security', () => {
       expect(genericResponse.status).toBe(502);
       expect(((await genericResponse.json()) as { error?: string }).error).toContain('PROXY_UPSTREAM_TIMEOUT:25');
 
-      const faucetResponse = await handlers.proxyAnyHubRequest(
-        request('/api/faucet/erc20?chainId=31337'),
-        '/api/faucet/erc20?chainId=31337',
-      );
-      expect(faucetResponse.status).toBe(200);
-      expect(await faucetResponse.json()).toEqual({ success: true });
-      expect(requestedEngines).toEqual([undefined, 'typescript']);
+      for (const kind of ['erc20', 'gas', 'reserve']) {
+        const endpoint = `/api/faucet/${kind}?chainId=31337`;
+        const faucetResponse = await handlers.proxyAnyHubRequest(request(endpoint), endpoint);
+        expect(faucetResponse.status).toBe(200);
+        expect(await faucetResponse.json()).toEqual({ success: true });
+      }
+      expect(requestedEngines).toEqual([undefined, 'typescript', 'typescript', 'typescript']);
     } finally {
       if (previousHubTimeout === undefined) delete process.env['XLN_HUB_API_PROXY_TIMEOUT_MS'];
       else process.env['XLN_HUB_API_PROXY_TIMEOUT_MS'] = previousHubTimeout;

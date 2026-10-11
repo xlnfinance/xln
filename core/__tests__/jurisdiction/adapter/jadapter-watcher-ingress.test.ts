@@ -132,6 +132,41 @@ const makeReplica = (entityId: string, signerId: string, isProposer: boolean): E
   }) as EntityReplica;
 
 describe('JAdapter watcher ingress', () => {
+  test('a local batch retains external reserve receipt evidence without widening Entity delivery', () => {
+    const env = createEmptyEnv('external-reserve-receipt');
+    const hub = `0x${'71'.repeat(32)}`;
+    const recipient = `0x${'72'.repeat(32)}`;
+    const unrelated = `0x${'73'.repeat(32)}`;
+    const blockHash = `0x${'aa'.repeat(32)}`;
+    const transactionHash = `0x${'ab'.repeat(32)}`;
+    const otherTransaction = `0x${'ac'.repeat(32)}`;
+    env.state.eReplicas.set(`${hub}:1`, makeReplica(hub, '1', true));
+    const event = (name: string, args: Record<string, unknown>, logIndex: number, tx = transactionHash) =>
+      ({ name, args, logIndex, blockNumber: 20, blockHash, transactionHash: tx });
+    const reserve = event('ReserveUpdated', { entity: hub, tokenId: 1n, newBalance: 900n }, 0);
+    const batch = event('HankoBatchProcessed', { entityId: hub, batchHash: `0x${'bb'.repeat(32)}`, nonce: 3n }, 2);
+    const run = (events: Parameters<typeof processEventBatch>[0]) => processEventBatch(
+      events, env, 20, blockHash, { value: 0 }, 'external-reserve-receipt',
+      undefined, true,
+    );
+    const expectedInput = run([reserve, batch]);
+    const input = run([
+      reserve,
+      event('ReserveUpdated', { entity: recipient, tokenId: 1n, newBalance: 100n }, 1),
+      batch,
+      event('ReserveUpdated', { entity: unrelated, tokenId: 1n, newBalance: 999n }, 3, otherTransaction),
+      event('HankoBatchProcessed', { entityId: unrelated, batchHash: `0x${'bc'.repeat(32)}`, nonce: 1n }, 4, otherTransaction),
+    ]);
+    expect(input).toEqual(expectedInput);
+    expect(env.state.eReplicas.size).toBe(1);
+    expect(findReserveUpdatedEvidence(env, recipient, 1, 100n)).toMatchObject({
+      transactionHash, blockHash, blockNumber: 20,
+      args: { entity: recipient, tokenId: '1', newBalance: '100' },
+    });
+    expect(findReserveUpdatedEvidence(env, recipient, 1, 101n)).toBeNull();
+    expect(findReserveUpdatedEvidence(env, unrelated, 1, 1n)).toBeNull();
+  });
+
   test('pre-registration history stays durable without fencing the next bootstrap chunk', () => {
     const seed = 'numbered-bootstrap-history-chunk';
     const env = createEmptyEnv(seed);

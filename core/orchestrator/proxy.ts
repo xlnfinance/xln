@@ -23,8 +23,8 @@ type OrchestratorProxyDeps = {
   host: string;
   defaultRpcUrl: string;
   pollAllHubHealth: () => Promise<void>;
-  getHubChildByEntityId: (hubEntityId: string) => HubChild | null;
-  getHealthyHub: (requiredEngine?: HubChild['engine']) => HubChild | null;
+  getHubChildByEntityId: (hubEntityId: string) => Pick<HubChild, 'apiPort'> | null;
+  getHealthyHub: (requiredEngine?: HubChild['engine']) => Pick<HubChild, 'apiPort'> | null;
 };
 
 const CORS_JSON_HEADERS = {
@@ -41,12 +41,10 @@ const DEFAULT_HUB_API_PROXY_TIMEOUT_MS = 5_000;
 const DEFAULT_HUB_FAUCET_PROXY_TIMEOUT_MS = 30_000;
 const MAX_PUBLIC_HUB_PROXY_BODY_BYTES = 1024 * 1024;
 const PUBLIC_HUB_PROXY_MARKER = { forwarded: 'for=_xln_public_proxy' } as const;
-const LONG_RUNNING_HUB_ENDPOINTS = new Set([
-  '/api/faucet/erc20',
-  '/api/faucet/gas',
-]);
 // Chain funding is served by the existing TS faucet service. This capability
-// selection never changes the Account authority used by offchain operations.
+// selection never changes Account authority. All three routes also wait for
+// chain confirmation: reserve must not time out as a 5-second generic API call
+// after its transaction has already credited the user.
 const CHAIN_FAUCET_ENDPOINTS = new Set([
   '/api/faucet/erc20', '/api/faucet/gas', '/api/faucet/reserve',
 ]);
@@ -86,7 +84,7 @@ const readHubApiProxyTimeoutMs = (endpointWithQuery = ''): number => {
     readPositiveIntegerEnv('XLN_RPC_PROXY_TIMEOUT_MS', DEFAULT_HUB_API_PROXY_TIMEOUT_MS),
   );
   const pathname = endpointWithQuery.split('?', 1)[0] || '';
-  if (!LONG_RUNNING_HUB_ENDPOINTS.has(pathname)) return defaultTimeoutMs;
+  if (!CHAIN_FAUCET_ENDPOINTS.has(pathname)) return defaultTimeoutMs;
   return readPositiveIntegerEnv(
     'XLN_HUB_FAUCET_PROXY_TIMEOUT_MS',
     Math.max(defaultTimeoutMs, DEFAULT_HUB_FAUCET_PROXY_TIMEOUT_MS),

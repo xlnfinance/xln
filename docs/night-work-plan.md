@@ -6,14 +6,33 @@ actions precede the charts, secondary actions use More, tutorial details disclos
 All amounts still use committed projections/deriveDelta. Equal $100 segments
 measure the same width in all seven visible bars; 320px buttons do not overflow.
 Browser evidence: `.logs/crisis-20261011/wallet-design-{desktop,mobile}.jpg`.
-An independent demo wallet has 200 USDC: 100 collateral-backed plus 100 unsecured,
-after actual reserve-to-Account funding on the running local chain. This is not
+An independent demo wallet has 203 USDC: 100 collateral-backed, 100 unsecured,
+and 3 in reserve, after actual funding on the running local chain. This is not
 a restore of the owner's earlier 699.85 USDC Tour wallet. Editing the Vite entry
 caused a reload; that older mnemonic wallet now needs its recovery phrase.
 Do not reload the current demo or rebuild served runtime files during preview.
-Fix next: guided-demo recovery requests a random phrase users may never have saved;
-reserve faucet also displayed PROXY_UPSTREAM_TIMEOUT:5000 after crediting 100 USDC.
-No repeated faucet request was made after that ambiguous result.
+Fix next: guided-demo recovery requests a random phrase users may never have saved.
+The reserve faucet failure is fixed: the 5-second proxy timeout masked a missing
+external-recipient receipt event. The watcher now retains reserve evidence from a
+locally delivered Hanko batch without adding recipients to Entity delivery; an
+unrelated transaction is excluded. The three chain faucets share one timeout list.
+Regression: 65 tests / 337 assertions; full check 38 source gates / 26.200s.
+Live proof: fresh production proxy -> existing H1 -> local Depository returns 200
+in 446ms with exact +1 USDC and a successful matching receipt. H1 was gracefully
+restarted and recovered its existing DB (PID 84720, verify before use). A separate
+browser request then succeeded: reserve 2 -> 3 USDC, request accepted, Pay enabled.
+The orchestrator remains the original process; its timeout policy is not hot-loaded.
+No ambiguous request was retried. The initial failed 1-USDC request was confirmed
+credited before the two distinct verification requests. Evidence:
+`.logs/crisis-20261011/reserve-{evidence-missing,timeout-live}.{json,log}` and
+`reserve-browser-accepted.jpg`. One browser WS-close error is from the intentional
+H1 restart; it reconnected. The page was not reloaded or its wallet replaced.
+
+Method review, 17:17 UTC: a live request exposed the missing receipt behind the
+timeout; extending the wait alone was insufficient. Keep unit, chain receipt and
+browser success as separate claims. Use supervised single-hub recovery to load
+backend changes while preserving the owner's chain, databases and open wallet.
+Prioritize guided-demo recovery before another UI entrypoint change or mesh restart.
 
 The unfinished Rust lending parity work is preserved separately, uncommitted.
 The current TS lending vector passes with partial repayment and signed expiry;
@@ -22,7 +41,8 @@ Do not include that work or the six foreign Rust files in the UI checkpoint.
 
 ## Current SHA
 
-Latest source checkpoint: `cd345aafd`, main, 2026-10-11; documentation may follow.
+Latest UI checkpoint: `f9f5388cc`, main, 2026-10-11; funding fix follows.
+Book checkpoint: `cd345aafd`.
 The three books now have sibling `paybook`, `swapbook`, `lendbook` module paths in
 TypeScript and Rust; retired directories and imports are removed. Full check
 passes (38 source gates, 25.807s), 26 existing Rust book tests and two shared TS
@@ -67,14 +87,17 @@ build promotion and mainnet signatures remain owner-controlled.
 
 ## Last green command
 
-Latest: `bun run check` -> `.logs/crisis-20261011/books-check-final.log`;
+Latest: `bun run check` -> `.logs/crisis-20261011/reserve-evidence-check.log`;
+65 focused tests -> `.logs/crisis-20261011/reserve-evidence-related.log`;
+live handler/contract receipt -> `.logs/crisis-20261011/reserve-timeout-live.log`.
+Earlier book verification:
 `cargo test -p xln-rscore-entity-kernel --lib --locked book::` -> 26 pass;
 production replay W1/W4 -> 108/108 exact, matching `079c101cc`.
 
 Owner preview is running via the canonical `bun run dev`, TS engine, dedicated
 `db/owner-preview-20261011`, stand holder PID 51040 (verify before use).
 React URL: `http://localhost:5183/`. Browser tab 18 has a disposable tour wallet
-with 100 test USDC received, zero captured console errors. Do not reset its data
+with 203 test USDC. Do not reset its data
 or start another heavy stand while the owner is trying it. The current dev
 launcher still exposes Svelte at 8080; unify the advertised React entry without
 weakening singleton/port ownership or adding a second launcher.
@@ -145,8 +168,9 @@ Durable evidence index: `docs/evidence/crisis-20261011.json`.
 ## Next single command
 
 `bun run stand:status` before any heavy work; the owner preview currently holds it.
-Next implementation: verify the first Rust lending divergence against current TS
-vectors. The owner also delegates demand-rate design: prospective
+Next implementation: fix guided-demo recovery without discarding existing wallets;
+then verify the first Rust lending divergence against current TS vectors.
+The owner also delegates demand-rate design: prospective
 variable rates, earned interest preserved, one signed accrual mechanism.
 Do not repeat unchanged green gates without a new concern.
 

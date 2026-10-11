@@ -262,6 +262,18 @@ export const buildJEventObservationInput = (
     for (const [key, event] of built.evidence) evidence.set(key, event);
   }
   if (runtimeTxs.length === 0) return null;
+  // A local batch can fund a recipient hosted by another Runtime. Its reserve
+  // log is receipt evidence for the API, never an input to our Entity. Without
+  // it, mining after submit's immediate receipt read credits money but makes
+  // the faucet report RESERVE_EVENT_MISSING. Unrelated transactions stay out.
+  const localBatches = new Set([...evidence.values()].flatMap(event =>
+    event.name === 'HankoBatchProcessed' && event.transactionHash
+      ? [event.transactionHash.toLowerCase()] : []));
+  for (const [key, event] of evidenceEntries(rawEvents.filter(event =>
+    event.name === 'ReserveUpdated' && event.transactionHash
+      && localBatches.has(event.transactionHash.toLowerCase())), options.blockHash)) {
+    evidence.set(key, event);
+  }
   return {
     input: {
       timestamp: Number.isFinite(options.blockNumber) && options.blockNumber > 0
