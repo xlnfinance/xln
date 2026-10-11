@@ -96,6 +96,9 @@ export default defineConfig(({ mode }) => ({
 	},
 	resolve: {
 		alias: {
+			// Browser LevelDB needs EventEmitter; resolve the declared wallet dependency,
+			// including when the importing core source lives above ui/node_modules.
+			events: fileURLToPath(new URL('./node_modules/events/events.js', import.meta.url)),
 			'@': fileURLToPath(new URL('./src', import.meta.url)),
 			// Types come from ../core source; runtime values load from /runtime.js at runtime.
 			'@xln/core': fileURLToPath(new URL('../core', import.meta.url)),

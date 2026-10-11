@@ -82,7 +82,7 @@ export function DisputeControls({ account, wallet, onClose }: { account: Account
 								<li>
 									{account.label} has <b>{formatDuration(accountSafety(account).theirResponseSeconds)}</b> to answer with a newer signed page. The newer page wins.
 								</li>
-								<li>When the window closes, your online wallet submits finalization automatically. The chain pays the winning balance into your reserve.</li>
+								<li>When the window closes, your online wallet submits finalization automatically. Collateral and the debtor’s available reserve fund your payout; any unpaid remainder stays as debt.</li>
 							</ol>
 							{!confirmDispute ? (
 								<button type="button" className="btn danger" disabled={busy} onClick={() => setConfirmDispute(true)} data-testid="dispute-prepare">

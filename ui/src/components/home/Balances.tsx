@@ -189,6 +189,7 @@ export function AccountRow({ account, first, onClick }: { account: AccountView; 
       className={`row tappable${first ? ' first' : ''}`}
       onClick={onClick}
       data-testid="account-row"
+      data-counterparty-id={account.counterpartyId}
     >
       <span className="rt">
         <span className="avatar">{account.label.slice(0, 1).toUpperCase()}</span>
