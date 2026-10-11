@@ -77,7 +77,7 @@ export function projectLendingBalance(
       if (awaiting.has(id)) throw new Error(`LENDING_BALANCE_SYNC_PENDING:${id}`);
       continue;
     }
-    if (pool['status'] !== 'open' && pool['status'] !== 'closing') throw new Error('LENDING_BALANCE_STATUS_INVALID');
+    if (pool['status'] !== 'open' && pool['status'] !== 'queued') throw new Error('LENDING_BALANCE_STATUS_INVALID');
     const tokenId = pool['tokenId'];
     if (typeof tokenId !== 'number' || !Number.isSafeInteger(tokenId) || tokenId <= 0) throw new Error('LENDING_BALANCE_TOKEN_INVALID');
     // The bank's independent savings quote includes principal once. Borrower

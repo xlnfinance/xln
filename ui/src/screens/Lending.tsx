@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { LENDING_TERM_MS, lendingLoanMaximumAmount } from '@xln/core/extensions/lending';
+import { LENDING_TERM_MS, lendingLoanMaximumAmount } from '@xln/core/lendbook/state';
 import { isAccountTxKindAvailable } from '@xln/core/account/tx/admission-policy';
 import { Icon } from '../components/Icons';
 import { TokenIcon } from '../components/TokenPicker';

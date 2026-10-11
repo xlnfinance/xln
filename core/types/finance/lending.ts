@@ -25,7 +25,7 @@ export type LendingFacility = Readonly<{
 }>;
 
 /** `disputed` retires the Account claim; it does not assert full cash recovery. */
-type LendingSavingsStatus = 'open' | 'closing' | 'closed' | 'disputed';
+type LendingSavingsStatus = 'open' | 'queued' | 'closed' | 'disputed';
 /**
  * `defaulted` remains repayable. Changing a receivable's status never changes
  * the bank's independent savings liabilities or creates payment capacity.
@@ -44,6 +44,8 @@ export interface LendingSavings {
   createdAt: number;
   updatedAt: number;
   status: LendingSavingsStatus;
+  /** First withdrawal admission order. Root-bound; timestamps can tie across Accounts. */
+  closeOrder?: number;
 }
 
 export interface LendingLoan {

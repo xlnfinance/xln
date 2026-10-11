@@ -1,7 +1,7 @@
 import type { AccountTx } from '../../../../types/account';
 import type { EntityInput, EntityState } from '../../../types';
 import type { EntityTx } from '../../../../types/entity-tx';
-import { normalizeInterestBps, normalizeLendingTerm } from '../../../../extensions/lending';
+import { normalizeInterestBps, normalizeLendingTerm } from '../../../../lendbook/state';
 import { prepareEntityTxState } from '../../../state-clone';
 import { addMessage } from '../../../frame-events';
 import type { AccountTxTarget } from '../account';

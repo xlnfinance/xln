@@ -6,7 +6,7 @@ import {
 import { ENTITY_TX_CROSS_J_SCHEMAS } from './cross-j-schemas';
 import { ENTITY_TX_OPERATION_SCHEMAS } from './operation-schemas';
 import { ENTITY_TX_PAYMENT_SCHEMAS } from './payment-schemas';
-import { decodeLendingBankTerms } from '../lending-policy';
+import { decodeLendingBankTerms } from '../../lendbook/policy';
 import { UINT256_MAX } from '../../protocol/boundary/integer-ranges';
 import { requireBoundaryRecord, requireBigInt, requireBoundaryInteger } from '../../protocol/boundary/boundary-primitives';
 

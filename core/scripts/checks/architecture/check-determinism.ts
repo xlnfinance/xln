@@ -13,10 +13,10 @@ const ROOT = process.cwd();
 const SCAN_ROOTS = [
   'core/account',
   'core/entity',
+  'core/lendbook',
   'core/jurisdiction/machine',
   'core/runtime/frame',
 ];
-const SCAN_FILES = ['core/extensions/lending.ts'];
 const EXCLUDE_PARTS = [
   '/__tests__/',
   '/typechain/',
@@ -98,9 +98,6 @@ async function listTargetFiles(): Promise<string[]> {
   for (const root of SCAN_ROOTS) {
     const abs = path.join(ROOT, root);
     files.push(...await walk(abs));
-  }
-  for (const file of SCAN_FILES) {
-    files.push(path.join(ROOT, file));
   }
   return [...new Set(files.map(toRel))]
     .filter(isCodeFile)

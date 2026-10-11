@@ -6,7 +6,7 @@ import type { EntityReadView } from '#lib/components/Entity/core/entity-panel-ty
   import { onMount } from 'svelte';
   import type { RuntimeInput } from '@xln/core/runtime/types';
   import type { EntityTx } from '@xln/core/types/entity-tx';
-  import { computeLendingInterest, normalizeInterestBps } from '@xln/core/extensions/lending';
+  import { computeLendingInterest, normalizeInterestBps } from '@xln/core/lendbook/state';
 
   import { resolveConfiguredApiBase, xlnFunctions } from '../../../stores/xlnStore';
   import {

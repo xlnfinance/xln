@@ -1,5 +1,5 @@
 import { validateAccountReplica } from '../../account/validation/state-validation';
-import { validateLendingPolicies } from '../lending-policy';
+import { validateLendingPolicies } from '../../lendbook/policy';
 import {
   FinancialDataCorruptionError,
   validateMapInstance,

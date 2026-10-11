@@ -4,13 +4,13 @@ import { createEmptyEnv } from '../../../runtime';
 import { addReplica, addr, entity, getTestAccountForWrite, installJurisdictions, makeAccount, makeJurisdiction, makeState, openWritableEntityAccounts, putTestAccountDelta, registerTestSigner } from '../../helpers/cross-j';
 import { applyJEventRange } from '../../helpers/j-history';
 import { applyAccountTxToMutableReplica } from '../../../account/tx/apply';
-import { applyCommittedLendingFollowup } from '../../../entity/tx/handlers/account/committed-lending-followup';
+import { applyCommittedLendingFollowup } from '../../../lendbook/committed';
 import { buildAccountProofBody } from '../../../protocol/dispute/proof-builder';
 import { getJEventJurisdictionRef } from '../../../jurisdiction/machine/event-observation';
-import { summarizeLendingState } from '../../../extensions/lending';
+import { summarizeLendingState } from '../../../lendbook/state';
 import type { AccountTx } from '../../../types/account';
 import type { AccountTxTarget } from '../../../entity/tx/handlers/account/orderbook/queue';
-import { settleOverdueLendingLoan } from '../../../entity/tx/handlers/account/committed-lending-close';
+import { settleOverdueLendingLoan } from '../../../lendbook/lifecycle';
 
 for (const saverIsLeft of [true, false]) for (const overdue of [false, true]) {
   test(`authenticated DisputeFinalized retires both bank claims, left=${saverIsLeft}, overdue=${overdue}`, async () => {

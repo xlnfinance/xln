@@ -1,5 +1,5 @@
 import type { RuntimeReplica } from '../../../runtime/types';
-import { summarizeLendingState } from '../../../extensions/lending';
+import { summarizeLendingState } from '../../../lendbook/state';
 import { safeStringify } from '../../../protocol/serialization';
 import { isEntityId32 } from '../utils';
 import { getEntityReplicaById } from './lookup';

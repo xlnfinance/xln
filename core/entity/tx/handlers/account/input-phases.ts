@@ -17,7 +17,7 @@ import {
   accountInputProposal,
 } from '../../../../account/consensus/flush';
 import { addMessage } from '../../../frame-events';
-import { bankSavingsAdmissionError } from '../../../lending-policy';
+import { bankSavingsAdmissionError } from '../../../../lendbook/policy';
 import { createStructuredLogger, shortId } from '../../../../support/logger';
 import {
   getCertifiedBoardNodeStore,

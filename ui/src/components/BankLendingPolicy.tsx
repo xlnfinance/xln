@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { normalizeInterestBps } from '@xln/core/extensions/lending';
+import { normalizeInterestBps } from '@xln/core/lendbook/state';
 import type { EntityTx } from '@xln/core/types/entity-tx';
 import type { WalletView } from '../runtime/views';
 import { fetchLendingState, LENDING_TERMS, type LendingState, type TermId } from '../runtime/financial/lending';

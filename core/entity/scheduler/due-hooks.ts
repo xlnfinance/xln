@@ -14,7 +14,7 @@ import { createDueHookPlan, type DueHookPlan } from './due-hook-types';
 import { processDisputeDeadlineHook } from './dispute-deadline-hook';
 import { processBoardHankoRefreshHook } from './board-hanko-refresh-hook';
 import { isDisputeReadyPayment } from '../paybook/views';
-import { settleOverdueLendingLoan } from '../tx/handlers/account/committed-lending-close';
+import { settleOverdueLendingLoan } from '../../lendbook/lifecycle';
 import { scheduleHook } from './hook-state';
 
 const crontabLog = createStructuredLogger('entity.crontab');

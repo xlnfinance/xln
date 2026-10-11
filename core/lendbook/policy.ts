@@ -1,8 +1,8 @@
 import type { AccountReplica, AccountTx } from '../types/account';
 import type { LendingBankTerms, LendingFacility, LendingTermId } from '../types/finance/lending';
-import type { EntityState } from './types';
+import type { EntityState } from '../entity/types';
 import { requireBoundaryInteger, requireBoundaryRecord, requireExactBoundaryKeys, requireBigInt, requireMap } from '../protocol/boundary/boundary-primitives';
-import { LENDING_TERM_MS } from '../extensions/lending';
+import { LENDING_TERM_MS } from './state';
 import { UINT256_MAX } from '../protocol/boundary/integer-ranges';
 import { assertLendingClock } from '../protocol/dispute/lending-covenant';
 
@@ -64,9 +64,19 @@ export const decodeLendingFacility = (value: unknown): LendingFacility => {
 /** Validate policy authority when restoring, before it may authorize new money. */
 export const validateLendingPolicies = (lending: Record<string, unknown>): void => {
   requireExactBoundaryKeys(lending, ['savings', 'loans'], ['terms', 'facilities'], 'LENDING_BOOK_FIELDS');
+  const withdrawalOrders = new Set<number>();
   for (const raw of requireMap(lending['savings'], 'LENDING_SAVINGS_MAP_INVALID').values()) {
     const savings = requireBoundaryRecord(raw, 'LENDING_SAVINGS_INVALID');
     if ('availableAmount' in savings || 'borrowedAmount' in savings) throw new Error('LENDING_ALLOCATION_MIGRATION_REQUIRED');
+    if (savings['status'] === 'closing') throw new Error('LENDING_WITHDRAWAL_MIGRATION_REQUIRED');
+    if (savings['status'] === 'queued' || savings['closeOrder'] !== undefined) {
+      const order = requireBoundaryInteger(savings['closeOrder'], 'LENDING_WITHDRAWAL_ORDER_INVALID', 1);
+      if (savings['status'] === 'open' || withdrawalOrders.has(order)) throw new Error('LENDING_WITHDRAWAL_ORDER_INVALID');
+      withdrawalOrders.add(order);
+      const opened = requireBoundaryInteger(savings['createdAt'], 'LENDING_WITHDRAWAL_CLOCK_INVALID', 0);
+      requireBoundaryInteger(savings['updatedAt'], 'LENDING_WITHDRAWAL_CLOCK_INVALID', opened);
+      requireBoundaryInteger(opened + requireBoundaryInteger(savings['termMs'], 'LENDING_WITHDRAWAL_CLOCK_INVALID', 1), 'LENDING_WITHDRAWAL_CLOCK_INVALID');
+    }
   }
   if (lending['terms'] !== undefined) for (const [key, raw] of requireMap(lending['terms'], 'LENDING_TERMS_MAP_INVALID')) {
     if (key !== lendingTermsKey(decodeLendingBankTerms(raw))) throw new Error('LENDING_TERMS_KEY_INVALID');
@@ -115,6 +125,11 @@ export const approvedLendingDraw = (
   const domain = account.state.domain;
   if (approval.chainId !== domain.chainId || approval.depositoryAddress !== domain.depositoryAddress || approval.jNonce !== account.state.jNonce) {
     return { ok: false, reason: 'approval belongs to another Account epoch' };
+  }
+  for (const position of state.lending?.savings.values() ?? []) {
+    if (position.status === 'queued' && position.lenderEntityId === borrower && position.tokenId === request.tokenId) {
+      return { ok: false, reason: 'pending withdrawal takes priority on this Account' };
+    }
   }
   let reserved = 0n;
   for (const loan of state.lending?.loans.values() ?? []) {

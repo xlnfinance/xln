@@ -22,13 +22,13 @@ type ExternalRuntimeConsumer = {
 };
 
 const EXTERNAL_RUNTIME_CONSUMERS: Readonly<Record<string, readonly ExternalRuntimeConsumer[]>> = {
-  'core/extensions/lending.ts': [{
+  'core/lendbook/state.ts': [{
     consumer: 'ui/src/runtime/financial/lending.ts',
-    specifier: '@xln/core/extensions/lending',
+    specifier: '@xln/core/lendbook/state',
   }],
-  'core/entity/lending-policy.ts': [{
+  'core/lendbook/policy.ts': [{
     consumer: 'ui/src/runtime/financial/lending.ts',
-    specifier: '@xln/core/entity/lending-policy',
+    specifier: '@xln/core/lendbook/policy',
   }],
   'core/account/tx/admission-policy.ts': [{
     consumer: 'ui/src/screens/Lending.tsx',

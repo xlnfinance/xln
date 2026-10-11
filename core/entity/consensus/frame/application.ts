@@ -100,7 +100,8 @@ import { invalidateEntityAccountCommitment } from '../state-root';
 import type { ApplyEntityTxsInOrderContext } from './application-types';
 import { validateEntityInfraContext } from './infra-context-validation';
 import { filterEntityFrameBroadcastContinuations } from '../j-prefix/broadcast-continuation';
-import { applyEntityTxReturnedEffects } from './tx-effects';
+import { applyEntityTxReturnedEffects, applyLocalAccountEffects } from './tx-effects';
+import { collectLendingWithdrawals } from '../../../lendbook/withdrawals';
 import { selectSettlementContinuation } from '../account/settlement-continuation';
 import {
   buildChangedEntityProfileHashToSign,
@@ -1478,6 +1479,7 @@ const applyPostEntityTxPhases = async (
   markFrameProfile('orderbook');
   markRuntimeEntityFramePhase(context.env, 'apply.entity.frame.post-orderbook');
   await drainPostOrderbookAccountWork(context, currentEntityState);
+  await applyLocalAccountEffects(context, currentEntityState, collectLendingWithdrawals(currentEntityState));
   const proposalAccountIds = crossJSetupPhase
     ? []
     : [...context.proposableAccounts.keys()];

@@ -37,7 +37,7 @@ const lendingPositionMatured = (position: LendingSavings, timestamp: number): bo
 
 export const lendingPositionCloseAmount = (position: LendingSavings, timestamp: number): bigint => {
   if (position.status === 'closed' || position.status === 'disputed') return 0n;
-  const quoteAt = position.status === 'closing' ? position.updatedAt : timestamp;
+  const quoteAt = position.status === 'queued' ? position.updatedAt : timestamp;
   return position.principalAmount + (lendingPositionMatured(position, quoteAt)
     ? computeLendingInterest(position.principalAmount, position.interestBps) : 0n);
 };
@@ -137,7 +137,7 @@ export const summarizeLendingState = (
       ? { ...loan, repaymentAmount: loan.repaidAmount + lendingLoanRepaymentAmount(loan, state.timestamp) } : loan);
   const allPools = Array.from(lending.savings.values()).filter(position => tokenId === undefined || position.tokenId === tokenId);
   const allLoans = Array.from(lending.loans.values()).filter(loan => tokenId === undefined || loan.tokenId === tokenId);
-  const savingsPrincipalAmount = allPools.filter(position => position.status === 'open' || position.status === 'closing')
+  const savingsPrincipalAmount = allPools.filter(position => position.status === 'open' || position.status === 'queued')
     .reduce((sum, position) => sum + position.principalAmount, 0n);
   const loanPrincipalAmount = allLoans.filter(loan => loan.status !== 'repaid' && loan.status !== 'disputed')
     .reduce((sum, loan) => sum + loan.principalAmount, 0n);

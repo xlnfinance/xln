@@ -35,7 +35,7 @@ export const shouldSuppressReturnedAccountTx = (
   account: Pick<AccountReplica, 'status'>,
 ): boolean => !canProcessAccountTxForDisputeStatus(account.status);
 
-const applyLocalAccountEffects = async (
+export const applyLocalAccountEffects = async (
   context: ApplyEntityTxsInOrderContext,
   state: EntityState,
   accountTxs: Array<{ accountId: string; tx: AccountTx }>,

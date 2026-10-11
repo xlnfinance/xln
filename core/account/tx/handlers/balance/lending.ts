@@ -1,6 +1,6 @@
 import type { AccountLendingIntentKind, AccountReplica, AccountTx } from '../../../../types/account';
 import type { AccountDraftReplica } from '../../../state/account-state-draft';
-import { LENDING_TERM_MS, normalizeInterestBps, normalizeLendingTerm } from '../../../../extensions/lending';
+import { LENDING_TERM_MS, normalizeInterestBps, normalizeLendingTerm } from '../../../../lendbook/state';
 import { UINT256_MAX } from '../../../../protocol/boundary/integer-ranges';
 import { handleDirectPayment } from './direct-payment';
 import type { ApplyAccountTxResult } from '../../apply-types';

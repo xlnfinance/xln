@@ -9,7 +9,7 @@ const balance = (pools: unknown[], local = account) => projectLendingBalance(res
 describe('lending portfolio ownership', () => {
   test('deposit and payout preserve total owned value independently of borrowers', () => {
     expect(80n + balance([pool])).toBe(100n);
-    expect(80n + balance([{ ...pool, status: 'closing' }])).toBe(100n);
+    expect(80n + balance([{ ...pool, status: 'queued' }])).toBe(100n);
     expect(100n + balance([{ ...pool, status: 'closed', closeAmount: '0' }], {
       ...account, intents: [...account.intents, ['payout:deposit', 'close-payout']],
     })).toBe(100n);

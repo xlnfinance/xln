@@ -353,12 +353,18 @@
       "structuralDebt": 5,
       "sourceGlobs": [
         "core/orderbook/**/*.ts",
-        "core/extensions/**/*.ts"
+        "core/extensions/**/*.ts",
+        "core/lendbook/**/*.ts"
       ],
       "testGlobs": [
         "core/__tests__/**/*orderbook*",
         "core/__tests__/**/*swap*",
-        "core/scenarios/market/swap*.ts"
+        "core/scenarios/market/swap*.ts",
+        "core/__tests__/finance/state/lending.test.ts",
+        "core/__tests__/finance/state/lending-funding.test.ts",
+        "core/__tests__/finance/lending/savings-finality.test.ts",
+        "core/__tests__/storage/durability/lending-real-crash-recovery.test.ts",
+        "ui/tests/lending/e2e-principal.spec.ts"
       ],
       "dependencies": [
         "account-consensus",
@@ -1004,6 +1010,30 @@
         "core/__tests__/**/*orderbook*",
         "core/__tests__/**/*swap*",
         "core/scenarios/market/swap*.ts"
+      ]
+    },
+    {
+      "id": "markets.independent-bank-obligations",
+      "moduleId": "markets",
+      "title": "Saver liabilities and borrower receivables preserve signed principal and interest through repayment, queued withdrawal, recovery and dispute.",
+      "importance": 95,
+      "requiredEvidence": [
+        "codeTrace",
+        "l1Regression",
+        "l2TargetedFlow",
+        "failureInjection",
+        "l3BroadGate",
+        "independentVerification"
+      ],
+      "sourceGlobs": [
+        "core/lendbook/**/*.ts"
+      ],
+      "testGlobs": [
+        "core/__tests__/finance/state/lending.test.ts",
+        "core/__tests__/finance/state/lending-funding.test.ts",
+        "core/__tests__/finance/lending/savings-finality.test.ts",
+        "core/__tests__/storage/durability/lending-real-crash-recovery.test.ts",
+        "ui/tests/lending/e2e-principal.spec.ts"
       ]
     },
     {

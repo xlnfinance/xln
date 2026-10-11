@@ -68,7 +68,7 @@ if (mode === 'originate') {
   assert(env);
   env.scenarioMode = true;
   env.quietRuntimeLogs = true;
-  const previous = mode === 'partial' ? 'active' : mode === 'mature' ? 'partial' : mode === 'repay' ? 'defaulted'
+  const previous = mode === 'partial' ? 'active' : mode === 'mature' ? 'partial' : mode === 'withdraw' ? 'queued' : mode === 'repay' ? 'defaulted'
     : mode === 'recover' ? 'interleaved' : 'repayment-committed';
   // The files are assertion oracles only; restore reads exclusively LevelDB/WAL.
   assert.equal(safeStringify(financialState(env), 2), readFileSync(join(output, `${previous}.json`), 'utf8'));
@@ -102,9 +102,25 @@ if (mode === 'originate') {
     assert.equal(book(env).loan.status, 'defaulted');
     assert.equal(book(env).pool.principalAmount, 5_000n);
     assert.equal(book(env).pool.status, 'open');
+    await command(env, saver, { type: 'extendCredit', data: {
+      counterpartyEntityId: bank.entityId, tokenId: 1, amount: 5_000n,
+    } });
     // A borrower's default does not erase the bank's independent saver claim.
     await command(env, saver, { type: 'lendingClosePosition', data: {
       hubEntityId: bank.entityId, positionId,
+    } });
+    assert.equal(book(env).pool.status, 'queued');
+    assert.equal(book(env).pool.closeOrder, 1);
+    assert.equal(balance(env, saver, bank), 5_000n);
+    evidence(env, 'queued');
+    process.kill(process.pid, 'SIGKILL');
+  } else if (mode === 'withdraw') {
+    assert.equal(book(env).pool.status, 'queued');
+    assert.equal(book(env).pool.closeOrder, 1);
+    // Liquidity returns after SIGKILL. No new withdrawal request, timer or
+    // sidecar queue may be necessary to settle the retained bank liability.
+    await command(env, saver, { type: 'extendCredit', data: {
+      counterpartyEntityId: bank.entityId, tokenId: 1, amount: 100_000n,
     } });
     assert.equal(book(env).pool.status, 'closed');
     assert.equal(balance(env, saver, bank), 10_050n);

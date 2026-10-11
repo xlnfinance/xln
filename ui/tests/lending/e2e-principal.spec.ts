@@ -1,7 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 import { safeStringify } from '../../../core/protocol/serialization';
 import { enterStack } from '../stack';
-import { readAccount, readPools, readRoutingEvidence, requestEarlyClose, type Parties } from './financial-evidence';
+import { readAccount, readPools, readRoutingEvidence, type Parties } from './financial-evidence';
 import { setBankPolicy } from './bank-policy';
 
 const lending = async (page: Page) => {
@@ -67,14 +67,13 @@ test('term loan spends principal, repays partially then fully, and keeps saver m
     await expect.poll(async () => (await readPools(page, lenderIds)).map(pool => pool.principal)).toEqual(['5000000']);
     await home(page);
     await expect(page.getByTestId('home-total')).toContainText('100.00');
-    // Receiving the borrower's later 2 USDC also needs saver-approved bank risk.
-    // Include that payment and the coupon in a deliberate 103 USDC limit.
+    // Exhaust the saver's incoming capacity without changing the bank's debt.
     await page.getByTestId('account-row').first().click();
     await page.getByRole('button', { name: 'Extend credit', exact: true }).click();
     const credit = page.getByRole('dialog', { name: 'Extend credit', exact: true });
-    await credit.locator('input').fill('103');
+    await credit.locator('input').fill('95');
     await credit.getByRole('button', { name: 'Extend credit', exact: true }).click();
-    await expect.poll(async () => (await readAccount(page, lenderIds)).credit).toBe('103000000');
+    await expect.poll(async () => (await readAccount(page, lenderIds)).credit).toBe('95000000');
     await home(page);
     await borrower.getByTestId('wallet-tutorial').click();
     await borrower.getByTestId('tour-chapter').selectOption('borrow');
@@ -98,11 +97,25 @@ test('term loan spends principal, repays partially then fully, and keeps saver m
     await expect.poll(async () => (await readPools(page, lenderIds)).map(pool => pool.principal)).toEqual(['5000000']);
     const [fundedPool] = await readPools(page, lenderIds);
     if (!fundedPool) throw new Error('LENDING_POOL_MISSING');
-    // The saver can close while the separate borrower obligation remains active.
-    await requestEarlyClose(page, lenderIds, fundedPool.positionId);
+    // A real UI withdrawal stays payable while capacity is absent. The bank's
+    // independent borrower loan remains active throughout the withdrawal.
+    await lending(page);
+    await expect(page.getByTestId('lending-close')).toBeEnabled();
+    await page.getByTestId('lending-close').click();
     await expect.poll(async () => (await readAccount(page, lenderIds)).closeRequests).toEqual([`close:${fundedPool.positionId}`]);
+    await expect.poll(async () => (await readPools(page, lenderIds))[0]?.status).toBe('queued');
+    await expect(page.getByTestId('lending-withdrawal-queued')).toBeVisible();
+    await home(page);
+    await expect(page.getByTestId('home-total')).toContainText('100.00');
+    await page.getByTestId('account-row').first().click();
+    await page.getByRole('button', { name: 'Extend credit', exact: true }).click();
+    await credit.locator('input').fill('103');
+    await credit.getByRole('button', { name: 'Extend credit', exact: true }).click();
+    await expect.poll(async () => (await readAccount(page, lenderIds)).credit).toBe('103000000');
+    // Restored capacity services the original request; no second Close click.
     await expect.poll(async () => (await readPools(page, lenderIds))[0]?.status).toBe('closed');
     await expect.poll(async () => (await readAccount(page, lenderIds)).balance).toBe('100000000');
+    await home(page);
     expect((await loans(borrower, borrowerIds)).map(loan => loan.status)).toEqual(['active']);
     const disbursed = await readAccount(borrower, borrowerIds);
     expect(disbursed.borrowingLimit).toBe(before.borrowingLimit);

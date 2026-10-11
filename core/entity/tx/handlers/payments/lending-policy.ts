@@ -1,8 +1,8 @@
 import type { EntityState } from '../../../types';
 import type { EntityTx } from '../../../../types/entity-tx';
 import { prepareEntityTxState } from '../../../state-clone';
-import { ensureLendingState } from '../../../../extensions/lending';
-import { lendingFacilityKey, lendingTermsKey } from '../../../lending-policy';
+import { ensureLendingState } from '../../../../lendbook/state';
+import { lendingFacilityKey, lendingTermsKey } from '../../../../lendbook/policy';
 import { MalformedEntityFrameInputError } from '../../processing/invariant-errors';
 import { addMessage } from '../../../frame-events';
 

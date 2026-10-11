@@ -111,7 +111,7 @@ import {
 } from './handlers/dispute/finalize-proof';
 import { proofBodyHasPulls } from './handlers/dispute/start-admission';
 import type { BookIntentSlotWriter } from '../books/book-intents';
-import { retireDisputedLendingClaims } from './handlers/account/committed-lending-close';
+import { retireDisputedLendingClaims } from '../../lendbook/lifecycle';
 
 const jEventLog = createStructuredLogger('j.event');
 const normalizeSignerId = (value: unknown): string => String(value || '').trim().toLowerCase();

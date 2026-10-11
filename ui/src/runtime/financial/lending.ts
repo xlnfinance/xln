@@ -4,10 +4,10 @@
  * the hub runtime's HTTP API, so it is live only against a hosted runtime.
  */
 import type { EntityTx } from '@xln/core/api/public/runtime-module';
-import { computeLendingInterest, normalizeInterestBps, lendingLoanMaximumAmount } from '@xln/core/extensions/lending';
+import { computeLendingInterest, normalizeInterestBps, lendingLoanMaximumAmount } from '@xln/core/lendbook/state';
 import type { AccountView } from '../views';
 import { parseAmount } from '../format';
-import { decodeLendingBankTerms, decodeLendingFacility } from '@xln/core/entity/lending-policy';
+import { decodeLendingBankTerms, decodeLendingFacility } from '@xln/core/lendbook/policy';
 import type { LendingBankTerms, LendingFacility, LendingLoan as CoreLendingLoan } from '@xln/core/types/finance/lending';
 
 export function previewLendingTerms(amount: string, rate: string, decimals: number, late?: { termMs: number; lateMs: number }) {

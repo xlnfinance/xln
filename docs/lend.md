@@ -31,14 +31,48 @@ unpaid debt and separate Account collateral; early loan repayment charges actual
 elapsed time; partial repayments pay interest then principal; a preapproved
 borrower facility authorizes automatic draws. The existing authenticated facility
 is the bank's bounded exposure policy: do not add a second lending permission or
-global funding cap. Demand terms and ordered withdrawal servicing remain
-implementation work. Early and partial repayment share the signed accrual
+global funding cap. Demand terms remain implementation work. Early and partial repayment share the signed accrual
 checkpoint used by unilateral exit; the current transformer ABI carries it.
 
 Implementation principle: prefer deletion and one general signed-obligation
 mechanism across products. Product differences are explicit terms, not separate
 balance engines. Financial correctness, deterministic recovery and enforceable
 claims remain mandatory.
+
+## Module ownership
+
+Paybook (`core/entity/paybook/`), Swapbook (`core/orderbook/`) and Lendbook
+(`core/lendbook/`) own the three Entity-level products. They use the same Account
+admission, balances, bilateral signatures and dispute machinery. Lendbook owns
+bank terms/facilities, independent liabilities/receivables and withdrawal servicing;
+the Account owns executable covenants and money movement. Transaction handlers
+translate user commands and committed Account inputs into that book. There is no
+second lending balance engine or saver-to-borrower allocation.
+
+A signed close request changes its savings position from `open` to `queued`,
+even when the Account cannot pay. `updatedAt` freezes the requested quote;
+`closeOrder` preserves the first admission order when timestamps tie across
+Accounts. The order belongs to the bank's root-bound position: funding order and
+timestamps cannot reconstruct it after a crash. No separate durable queue or
+retry counter is stored. Duplicate requests preserve both quote and order.
+
+After inbound Accounts and book work, withdrawals are selected by due time,
+then request order. Early cancellation is due when requested. Capacity is local
+to each Account/asset: an unavailable lane keeps its oldest request, while another
+independently payable lane may proceed. New borrower draws cannot jump ahead of
+a queued withdrawal on the same Account/asset. One payout per idle Account uses
+normal local admission; pending proposals/mempools prevent duplicate scheduling.
+Only committed payout closes the debt. Rejected or interrupted proposals leave
+the position queued. Old `closing` books reject on restore instead of inventing
+missing request priority. The UI accepts withdrawal requests without capacity
+and keeps queued claims in portfolio value.
+
+Demand-rate direction (owner delegated, 2026-10-11): a prospective variable rate,
+actual-time earnings and withdrawal without losing earned interest. Existing
+earnings cannot be repriced. This follows the variable-rate savings model described
+in [CFPB Regulation DD](https://www.consumerfinance.gov/rules-policy/regulations/1030/4/),
+not a claim that XLN is a US regulated or insured deposit. The exact signed
+rate-update/renewal mechanism and its unilateral proof remain release work.
 
 ## Current implementation and accounting
 

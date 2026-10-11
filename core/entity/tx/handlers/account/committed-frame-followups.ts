@@ -7,7 +7,7 @@ import { buildHtlcFinalizedEventPayload, buildHtlcReceivedEventPayload } from '.
 import { createStructuredLogger } from '../../../../support/logger';
 import { hashHtlcSecret } from '../../../../protocol/htlc/utils';
 import type { AccountTxTarget } from './orderbook/queue';
-import { applyCommittedLendingFollowup } from './committed-lending-followup';
+import { applyCommittedLendingFollowup } from '../../../../lendbook/committed';
 import type { BookIntentSlotWriter } from '../../../books/book-intents';
 import {
   hasInboundPayment,

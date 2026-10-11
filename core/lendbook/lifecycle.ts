@@ -1,10 +1,10 @@
-import type { AccountReplica, AccountTx } from '../../../../types/account';
-import type { EntityState } from '../../../types';
-import type { LendingLoan } from '../../../../types/finance/lending';
-import { getAccountOutCapacity, lendingLoanRepaymentAmount, lendingPositionCloseAmount } from '../../../../extensions/lending';
-import type { LendingFollowupContext } from './committed-lending-followup';
-import type { AccountTxTarget } from './orderbook/queue';
-import { createStructuredLogger, shortId } from '../../../../support/logger';
+import type { AccountReplica, AccountTx } from '../types/account';
+import type { EntityState } from '../entity/types';
+import type { LendingLoan } from '../types/finance/lending';
+import { lendingLoanRepaymentAmount, lendingPositionCloseAmount } from './state';
+import type { LendingFollowupContext } from './committed';
+import type { AccountTxTarget } from '../entity/tx/handlers/account/orderbook/queue';
+import { createStructuredLogger, shortId } from '../support/logger';
 
 const lendingLog = createStructuredLogger('entity.lending');
 
@@ -38,7 +38,7 @@ export const retireDisputedLendingClaims = (state: EntityState, account: Account
       continue;
     }
     const pool = state.lending?.savings.get(id);
-    if (!pool || (pool.status !== 'open' && pool.status !== 'closing')) continue;
+    if (!pool || (pool.status !== 'open' && pool.status !== 'queued')) continue;
     pool.status = 'disputed';
     pool.updatedAt = state.timestamp;
   }
@@ -47,15 +47,12 @@ export const retireDisputedLendingClaims = (state: EntityState, account: Account
 export function applyLendingCloseRequest(
   context: LendingFollowupContext,
   tx: Extract<AccountTx, { type: 'lending_close_request' }>,
-): 'queued' | 'closing' | 'closed' | 'payout-capacity' {
+): void {
   const {
-    account,
     lending,
-    hubEntityId,
     counterpartyId,
     proposer,
     now,
-    accountTxs,
   } = context;
   if (
     proposer !== normalizeEntityRef(tx.data.lenderEntityId) ||
@@ -67,34 +64,17 @@ export function applyLendingCloseRequest(
   if (!pool || pool.lenderEntityId !== proposer) {
     throw new Error(`LENDING_CLOSE_POSITION_NOT_OPEN:${tx.data.positionId}`);
   }
-  if (pool.status === 'closing') return 'closing';
+  if (pool.status === 'queued') return;
   if (pool.status !== 'open') throw new Error(`LENDING_CLOSE_POSITION_NOT_OPEN:${tx.data.positionId}`);
-  const payoutAmount = lendingPositionCloseAmount(pool, now);
-  if (payoutAmount === 0n) {
-    pool.status = 'closed';
-    pool.updatedAt = now;
-    return 'closed';
-  }
-  const payoutCapacity = getAccountOutCapacity(account.state, hubEntityId, pool.tokenId);
-  if (payoutCapacity < payoutAmount) {
-    return 'payout-capacity';
-  }
-  pool.status = 'closing';
+  let lastOrder = 0;
+  for (const position of lending.savings.values()) lastOrder = Math.max(lastOrder, position.closeOrder ?? 0);
+  const order = lastOrder + 1;
+  if (!Number.isSafeInteger(order)) throw new Error('LENDING_WITHDRAWAL_ORDER_OVERFLOW');
+  // The saver already signed the Account request. Record it once even with no
+  // capacity; duplicate delivery cannot change its quote or queue priority.
+  pool.status = 'queued';
+  pool.closeOrder = order;
   pool.updatedAt = now;
-  accountTxs.push({
-    accountId: proposer,
-    tx: {
-      type: 'lending_close_payout',
-      data: {
-        positionId: pool.positionId,
-        hubEntityId,
-        lenderEntityId: proposer,
-        tokenId: pool.tokenId,
-        amount: payoutAmount,
-      },
-    },
-  });
-  return 'queued';
 }
 
 export function applyLendingClosePayout(
@@ -106,8 +86,8 @@ export function applyLendingClosePayout(
     throw new Error(`LENDING_PAYOUT_PROPOSER_MISMATCH:${tx.data.positionId}`);
   }
   const pool = lending.savings.get(tx.data.positionId);
-  if (!pool || pool.status !== 'closing') {
-    throw new Error(`LENDING_PAYOUT_POSITION_NOT_CLOSING:${tx.data.positionId}`);
+  if (!pool || pool.status !== 'queued') {
+    throw new Error(`LENDING_PAYOUT_POSITION_NOT_QUEUED:${tx.data.positionId}`);
   }
   if (
     pool.lenderEntityId !== normalizeEntityRef(tx.data.lenderEntityId) ||

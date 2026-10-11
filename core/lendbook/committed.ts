@@ -1,8 +1,8 @@
-import type { AccountFrame, AccountReplica, AccountTx } from '../../../../types/account';
-import type { EntityState } from '../../../types';
-import { addMessage } from '../../../frame-events';
-import { approvedLendingDraw } from '../../../lending-policy';
-import type { LendingState } from '../../../../types/finance/lending';
+import type { AccountFrame, AccountReplica, AccountTx } from '../types/account';
+import type { EntityState } from '../entity/types';
+import { addMessage } from '../entity/frame-events';
+import { approvedLendingDraw } from './policy';
+import type { LendingState } from '../types/finance/lending';
 import {
   buildLendingLoanId,
   computeLendingInterest,
@@ -10,13 +10,13 @@ import {
   lendingLoanClock,
   ensureLendingState,
   LENDING_TERM_MS,
-} from '../../../../extensions/lending';
-import type { AccountTxTarget } from './orderbook/queue';
-import { assertLendingCovenant, settleLendingPayment } from '../../../../protocol/dispute/lending-covenant';
+} from './state';
+import type { AccountTxTarget } from '../entity/tx/handlers/account/orderbook/queue';
+import { assertLendingCovenant, settleLendingPayment } from '../protocol/dispute/lending-covenant';
 import {
   applyLendingClosePayout,
   applyLendingCloseRequest,
-} from './committed-lending-close';
+} from './lifecycle';
 
 const normalizeEntityRef = (value: unknown): string =>
   String(value || '').toLowerCase();
@@ -217,11 +217,7 @@ export function applyCommittedLendingFollowup(
   if (tx.type === 'lending_disburse') return applyLendingDisburse(context, tx);
   if (tx.type === 'lending_repay') return applyLendingRepay(context, tx);
   if (tx.type === 'lending_close_request') {
-    const result = applyLendingCloseRequest(context, tx);
-    if (result === 'payout-capacity') {
-      addMessage(state, `Lending close ${tx.data.positionId} deferred: insufficient payout capacity`);
-    }
-    return;
+    return applyLendingCloseRequest(context, tx);
   }
   if (tx.type === 'lending_close_payout') applyLendingClosePayout(context, tx);
 }
