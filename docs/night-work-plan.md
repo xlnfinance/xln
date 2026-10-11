@@ -8,23 +8,25 @@ Keep the empty frozen-core mechanism for later use; its current protected-file
 count is zero, not security coverage. This correction supersedes earlier scope
 statements below; earlier deployment results remain historical evidence.
 
-- Current committed SHA: `5037b95b8ba0db17aea79bed3d3e80e162daf2cb` fixes proof nonce
-  selection after peer evidence and retires already-applied local delivery.
-  Pending release-profile changes have not yet been published.
-- Last green boundaries: 6 React E2E scenarios (4 payment/admission, 2 exit/restore),
-  zero skips; 126 focused release/admission tests. These dirty-tree runs are
-  diagnostics, not clean-SHA release evidence. The earlier runtime family passed
-  708 tests / 4,264 assertions before the admission-profile reduction.
-- First red: main CI `38173656472` killed the release-integrity contract proof at
-  its 30-second watchdog after 62 passing unit tests. The local watchdog correction
-  awaits committed-source CI. The latest legacy regression rerun had 129 passes,
-  one pre-existing skip and six failures: the two TS source-wiring failures are
-  fixed; four frozen Rust integration/parity fixtures remain red, not claimed green.
-- Artifact paths: `.logs/crisis-20261011/rc-react-payment-profile/`,
-  `.logs/crisis-20261011/rc-react-exit-recovery/`, and the current source-check log.
-  Copy accepted committed-source evidence into `docs/evidence/` before release.
-- Next command: `bun run check`, then commit only owned paths and verify the
-  immutable candidate with a clean source tree.
+- Current committed source SHA: `68cf424f2687760b404e9b02c7ddef04d087a9a1`.
+  The two local source commits fix proof nonces/local delivery and restore TS
+  launch admission plus React CI. Neither has been deployed. Foreign untracked
+  files are preserved in `/Users/zigota/.config/xln/parked-untracked-20261012/`;
+  `restore-paths.json` records their original paths.
+- Last green: clean-source React E2E 6/6, zero skips/retries, 78.232 seconds;
+  `lock-ahb` completes 85 Runtime frames; exit gas suite 17/17, including
+  127 unsolicited assets with finalize gas 928,658; `bun run check` passes.
+  All four checks used the same committed source SHA above.
+- First red: main CI `38173656472` expects profile-fetch batches to finish in
+  timer order, but receives the valid sizes `[1, 256]` instead of `[256, 1]`.
+  Other CI failures include Node loading TypeScript during deployment, resource
+  assumptions, timeouts and frozen Rust fixtures. CI is not green. The existing
+  watchdog fixes alone do not address all failures.
+- Artifact: `docs/evidence/rc-20261012/react-and-exit-68cf424f2.json` contains
+  case-level results, gas measurements, commands and full-log hashes. The public
+  alpha remains on `7c3f63f9841f4e8b61ac5eee5dbe4f9710b10621` and is healthy.
+- Next command: `bun test core/__tests__/api/server/gossip-profiles.test.ts`;
+  correct the batch-order assertion while retaining exact membership and limits.
 - Remaining final gates: ten consecutive green main CI runs and branch protection;
   remove production Rust/QA imports; complete React P5/P6 and proof import; refresh
   committed-SHA exit gas and Sepolia P4/P5/P6 receipts; owner-reviewed release package.

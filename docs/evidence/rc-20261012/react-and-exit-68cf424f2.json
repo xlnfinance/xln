@@ -1,0 +1,390 @@
+{
+  "recordedAt": "2026-10-11T22:27:29.144Z",
+  "sourceSha": "68cf424f2687760b404e9b02c7ddef04d087a9a1",
+  "sourceTreeCleanBeforeAndAfter": true,
+  "scope": "Local React Chromium release subset and TS funding/HTLC scenario. Contract measurements use the production contract test harness, not Sepolia transaction receipts.",
+  "react": {
+    "command": "XLN_LOCAL_PROD_SMOKE_WALLET_TESTS=e2e-payment.spec.ts,e2e-lending-availability.spec.ts,e2e-dispute-finality.spec.ts,e2e-tower-restore.spec.ts bun run stand:run --reason rc-68cf424f2-react --timeout-ms 180000 -- bun core/scripts/operations/production/local-prod-smoke.ts",
+    "exitCode": 0,
+    "stats": {
+      "startTime": "2026-10-11T22:22:58.103Z",
+      "duration": 78231.99600000001,
+      "expected": 6,
+      "skipped": 0,
+      "unexpected": 0,
+      "flaky": 0
+    },
+    "tests": [
+      {
+        "file": "e2e-dispute-finality.spec.ts",
+        "title": "UI dispute prevents early finalization, then releases exactly 100 USDC after its signed window",
+        "results": [
+          {
+            "project": "chromium",
+            "status": "passed",
+            "durationMs": 18263,
+            "retry": 0
+          }
+        ]
+      },
+      {
+        "file": "e2e-lending-availability.spec.ts",
+        "title": "deferred lending disables new commands and leaves the wallet able to pay",
+        "results": [
+          {
+            "project": "chromium",
+            "status": "passed",
+            "durationMs": 9530,
+            "retry": 0
+          }
+        ]
+      },
+      {
+        "file": "e2e-payment.spec.ts",
+        "title": "payment receipts and recovery dialogs keep keyboard focus inside and restore it on close",
+        "results": [
+          {
+            "project": "chromium",
+            "status": "passed",
+            "durationMs": 8493,
+            "retry": 0
+          }
+        ]
+      },
+      {
+        "file": "e2e-payment.spec.ts",
+        "title": "invalid amounts and recipients cannot admit a payment or retain a revoked quote",
+        "results": [
+          {
+            "project": "chromium",
+            "status": "passed",
+            "durationMs": 6370,
+            "retry": 0
+          }
+        ]
+      },
+      {
+        "file": "e2e-payment.spec.ts",
+        "title": "pays the merchant through the hub and shows the committed receipt",
+        "results": [
+          {
+            "project": "chromium",
+            "status": "passed",
+            "durationMs": 12151,
+            "retry": 0
+          }
+        ]
+      },
+      {
+        "file": "e2e-tower-restore.spec.ts",
+        "title": "tower backup restores funded Account proofs, refuses overwrite and continues payments",
+        "results": [
+          {
+            "project": "chromium",
+            "status": "passed",
+            "durationMs": 22058,
+            "retry": 0
+          }
+        ]
+      }
+    ],
+    "log": {
+      "path": ".logs/crisis-20261011/rc-68cf424f2-react/wallet-browser.log",
+      "sha256": "8c8b4fed79800ae56c4980b94eb42a510c62ffd2e511ef75b0e165780a2b317f"
+    },
+    "report": {
+      "path": ".logs/crisis-20261011/rc-68cf424f2-react/wallet-results.json",
+      "sha256": "3fe42561594c5ad90446ffaa6cd2b311f38081612b746ea3bfd1182918997474"
+    }
+  },
+  "fundingAndHtlc": {
+    "command": "bun run stand:run --reason rc-68cf424f2-lock-ahb --timeout-ms 180000 -- bun core/scenarios/run.ts lock-ahb --mode=browservm",
+    "exitCode": 0,
+    "runtimeFrames": 85,
+    "log": {
+      "path": ".logs/crisis-20261011/rc-68cf424f2-lock-ahb.log",
+      "sha256": "28a82ecabd91cf5aa5a3721ba759d79ae4c619f4083f16ecf0137c8acbb654b0"
+    }
+  },
+  "exitGas": {
+    "command": "bun run stand:run --reason rc-68cf424f2-exit-gas --timeout-ms 60000 -- forge test --root jurisdictions --match-contract DisputeIngressGasTest -vv",
+    "exitCode": 0,
+    "passed": 17,
+    "failed": 0,
+    "skipped": 0,
+    "budgetPerOperation": 5000000,
+    "unsolicitedAssetCount": 127,
+    "unsolicitedFinalizeGas": 928658,
+    "cases": [
+      {
+        "name": "testFuzz_budget5m_combinedStockFrontier",
+        "conservativeTransactionGas": [
+          {
+            "operation": "start",
+            "gas": 3326120
+          },
+          {
+            "operation": "reveal",
+            "gas": 501913
+          },
+          {
+            "operation": "finalize",
+            "gas": 3472040
+          }
+        ]
+      },
+      {
+        "name": "test_budget5m_coldDebts22",
+        "conservativeTransactionGas": [
+          {
+            "operation": "start",
+            "gas": 543321
+          },
+          {
+            "operation": "finalize",
+            "gas": 3087202
+          }
+        ]
+      },
+      {
+        "name": "test_budget5m_fullWidthSavings18MaxStarter",
+        "conservativeTransactionGas": [
+          {
+            "operation": "start",
+            "gas": 3418280
+          },
+          {
+            "operation": "finalize",
+            "gas": 3552680
+          }
+        ]
+      },
+      {
+        "name": "test_budget5m_irrelevantSecrets",
+        "conservativeTransactionGas": [
+          {
+            "operation": "start",
+            "gas": 2997160
+          },
+          {
+            "operation": "finalize",
+            "gas": 4453117
+          }
+        ]
+      },
+      {
+        "name": "test_budget5m_maxStarterMmFrontier",
+        "conservativeTransactionGas": [
+          {
+            "operation": "start",
+            "gas": 3423400
+          },
+          {
+            "operation": "reveal",
+            "gas": 851958
+          },
+          {
+            "operation": "finalize",
+            "gas": 3925229
+          }
+        ]
+      },
+      {
+        "name": "test_budget5m_maxStarterTenDebts",
+        "conservativeTransactionGas": [
+          {
+            "operation": "start",
+            "gas": 2807720
+          },
+          {
+            "operation": "finalize",
+            "gas": 3482802
+          }
+        ]
+      },
+      {
+        "name": "test_budget5m_mixed32",
+        "conservativeTransactionGas": [
+          {
+            "operation": "start",
+            "gas": 694062
+          },
+          {
+            "operation": "finalize",
+            "gas": 1181849
+          }
+        ]
+      },
+      {
+        "name": "test_budget5m_mixedWithRevealedPulls",
+        "conservativeTransactionGas": [
+          {
+            "operation": "start",
+            "gas": 709674
+          },
+          {
+            "operation": "reveal",
+            "gas": 696346
+          },
+          {
+            "operation": "finalize",
+            "gas": 1387255
+          }
+        ]
+      },
+      {
+        "name": "test_budget5m_mmFrontier",
+        "conservativeTransactionGas": [
+          {
+            "operation": "start",
+            "gas": 947367
+          },
+          {
+            "operation": "reveal",
+            "gas": 851958
+          },
+          {
+            "operation": "finalize",
+            "gas": 2263413
+          }
+        ]
+      },
+      {
+        "name": "test_budget5m_partialPulls18",
+        "conservativeTransactionGas": [
+          {
+            "operation": "start",
+            "gas": 947367
+          },
+          {
+            "operation": "reveal",
+            "gas": 1002252
+          },
+          {
+            "operation": "finalize",
+            "gas": 2263413
+          }
+        ]
+      },
+      {
+        "name": "test_budget5m_payments32",
+        "conservativeTransactionGas": [
+          {
+            "operation": "start",
+            "gas": 694050
+          },
+          {
+            "operation": "finalize",
+            "gas": 1214143
+          }
+        ]
+      },
+      {
+        "name": "test_budget5m_revealedPulls18",
+        "conservativeTransactionGas": [
+          {
+            "operation": "start",
+            "gas": 616772
+          },
+          {
+            "operation": "reveal",
+            "gas": 851958
+          },
+          {
+            "operation": "finalize",
+            "gas": 1008774
+          }
+        ]
+      },
+      {
+        "name": "test_budget5m_savings80MaxStarter",
+        "conservativeTransactionGas": [
+          {
+            "operation": "start",
+            "gas": 3912360
+          },
+          {
+            "operation": "finalize",
+            "gas": 3930280
+          }
+        ]
+      },
+      {
+        "name": "test_budget5m_savingsMixedMaxStarter",
+        "conservativeTransactionGas": [
+          {
+            "operation": "start",
+            "gas": 3364520
+          },
+          {
+            "operation": "reveal",
+            "gas": 463028
+          },
+          {
+            "operation": "finalize",
+            "gas": 3402920
+          }
+        ]
+      },
+      {
+        "name": "test_budget5m_swaps32",
+        "conservativeTransactionGas": [
+          {
+            "operation": "start",
+            "gas": 694062
+          },
+          {
+            "operation": "finalize",
+            "gas": 1069591
+          }
+        ]
+      },
+      {
+        "name": "test_budget5m_wideColdDebts22",
+        "conservativeTransactionGas": [
+          {
+            "operation": "start",
+            "gas": 543321
+          },
+          {
+            "operation": "finalize",
+            "gas": 3962802
+          }
+        ]
+      },
+      {
+        "name": "test_unsolicitedCompanySharesCannotEnlargeExitProof",
+        "conservativeTransactionGas": [
+          {
+            "operation": "start",
+            "gas": 665697
+          },
+          {
+            "operation": "finalize",
+            "gas": 928658
+          }
+        ]
+      }
+    ],
+    "log": {
+      "path": ".logs/crisis-20261011/rc-68cf424f2-exit-gas.log",
+      "sha256": "453e79e759a52573a7aeacc6d8730ed4c5e06f7c7c7a0218f32c2ed68ee08134"
+    }
+  },
+  "sourceChecks": {
+    "command": "bun run check",
+    "exitCode": 0,
+    "log": {
+      "path": ".logs/crisis-20261011/rc-68cf424f2-check.log",
+      "sha256": "24790024061492d80153d4976d284d9fec50332b2c6a7f631a7805a341fbdb3f"
+    }
+  },
+  "limitations": [
+    "The public Sepolia alpha still runs 7c3f63f9841f4e8b61ac5eee5dbe4f9710b10621; this candidate has not been deployed.",
+    "The six React cases do not prove P5 collateral shortfall or P6 stale-state defence of an offline wallet.",
+    "The local dispute browser case advances its private Anvil clock; it is not real-clock Sepolia evidence.",
+    "Worst-case counter-dispute gas and the dedicated minimal single-token case remain unmeasured here.",
+    "Main CI is still red; ten consecutive green runs and branch protection are not achieved.",
+    "Frozen Rust integration fixtures remain failing outside the TS launch scope; the empty frozen-core gate is retained without claiming protected files."
+  ]
+}
