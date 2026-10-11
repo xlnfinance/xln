@@ -6,7 +6,7 @@ before resuming Rust book parity. Mainnet activation remains a separate exact-bu
 decision; a local Anvil wallet or test tokens are not real-value mainnet assets.
 
 Live public alpha: `https://sepolia.xln.finance`, immutable source
-`f62e86dc42a74850db2005cf671cc72411789aff`, TS only, one hub, Test USDT on
+`98cfbf3bfde2561e28ec0530ae50919cd45320f5`, TS only, one hub, Test USDT on
 Sepolia 11155111. The normal production Runtime path passed external deposit
 100 -> collateral 100 -> payment 25 to the hub -> external withdrawal 75.
 Client restart preserved the identity and zero Account/reserve balances;
@@ -17,7 +17,7 @@ Sepolia ETH to a fresh independent signer, with both receipts checked.
 Public startup blockers fixed: exact four-address import projection; full-block
 receipt retrieval in place of per-transaction RPC fan-out; fee-sized faucet gas
 grants. Receipt tests: 18/18, 585 assertions. Faucet tests: 24/24, 110 assertions.
-Last full check: 38 source gates, 25.991s; external-wallet API 20/20, 90 assertions.
+Last full check: 38 source gates, 26.369s; external-wallet API 20/20, 90 assertions.
 The wallet now reads token metadata from its selected network; both HTTP entry
 points pass the required request through the catalog handler. Public malformed
 Entity scope changed from an incorrect 200 to a typed 400. The proxy selects the explicitly
@@ -32,6 +32,15 @@ delivered after it, killed while queued and restored pays exactly the early
 principal. Final focused financial set: 94 tests / 899 assertions / six files;
 full `bun run check`: 38 source gates, 26.369s. Evidence is
 `docs/evidence/sepolia-20261011/lending-close-clock.json`.
+This fix is deployed. The production wallet bundle matches the served bytes;
+the fresh browser reports Sepolia connected and zero console errors. Hub Account
+height 11, exact balances, zero mempool and no pending frame survived restart;
+the tower sweep is healthy. Cold backup `98cfbf3bf-cold.tgz` matches locally and
+remotely at SHA-256 `28dbca8d755c957a263e757c6140197cd92d1d1caadcb90262d6b793e77afbe1`.
+The first backup attempt named a nonexistent `main` directory and automatically
+restored the previous healthy release. The successful retry archives the actual
+whole state directory excluding prior backups. No contract or financial transfer
+changed. Evidence: `docs/evidence/sepolia-20261011/public-clock-rollout.json`.
 Demand savings remain unfinished: the current finite signed accrual window must
 have an explicit prospective renewal policy, preserve earned interest and its
 fractional carry, and expose the offline expiry honestly. No demand product or
@@ -57,7 +66,7 @@ reserve is historical, not the latest on-chain balance.
 Final deployment restart recovered Hub Account height 11, collateral 25 USDT,
 zero mempool and no pending frame. Public health reports systemOk/coreOk true,
 the exact source above and dirty false. Watchtower sweep health is green.
-Cold backup `f62e86dc4-cold.tgz` includes Hub/tower stores, protected secrets and
+The previous cold backup `f62e86dc4-cold.tgz` includes Hub/tower stores, protected secrets and
 startup configuration; local/server SHA-256 matches
 `8e4c23289a0cce0df6cae30940b362783601222b0fd3dac62f00fffdcd8503da`.
 It is outside Git. A real 5-GiB startup disk guard blocked the final restart;

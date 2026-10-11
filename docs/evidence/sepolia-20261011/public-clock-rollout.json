@@ -1,0 +1,134 @@
+{
+  "recordedAt": "2026-10-11T20:11:09.836Z",
+  "source": "98cfbf3bfde2561e28ec0530ae50919cd45320f5",
+  "url": "https://sepolia.xln.finance",
+  "chainId": 11155111,
+  "systemOk": true,
+  "coreOk": true,
+  "dirty": false,
+  "account": {
+    "beforeHeight": 11,
+    "afterHeight": 11,
+    "tokensExact": true,
+    "tokens": [
+      {
+        "delta": {
+          "collateral": "25000000",
+          "leftCreditLimit": "0",
+          "leftHold": "0",
+          "offdelta": "25000000",
+          "ondelta": "0",
+          "rightCreditLimit": "0",
+          "rightHold": "0"
+        },
+        "hasDelta": true,
+        "hubGranted": "0",
+        "hubOutCapacity": "25000000",
+        "peerGranted": "0",
+        "tokenId": 1
+      }
+    ],
+    "mempool": 0,
+    "pendingFrame": null
+  },
+  "watchtower": {
+    "ok": true,
+    "service": "xln-watchtower",
+    "towerId": "xln-sepolia-watchtower",
+    "signerAddress": "0x50c7fb1565988eb94bca5c525c4e5431a48cf9a4",
+    "maxStoredBytesPerLookupKey": 4194304,
+    "maxAppointmentBytes": 4259840,
+    "maxLookupKeys": 10000,
+    "maxTotalStoredBytes": 1073741824,
+    "maxBundlesPerLookupKey": 3,
+    "sweep": {
+      "enabled": true,
+      "intervalMs": 12000,
+      "healthy": true,
+      "consecutiveFailures": 0
+    },
+    "pushWake": {
+      "enabled": false,
+      "intervalMs": 0,
+      "sender": "console",
+      "healthy": true,
+      "consecutiveFailures": 0
+    },
+    "operatorApi": {
+      "enabled": false,
+      "auth": "local-only"
+    },
+    "stats": {
+      "lookupCount": 2,
+      "lastResortAppointmentCount": 1,
+      "actionReceiptCount": 9
+    }
+  },
+  "productionBundle": {
+    "archiveSha256": "7e8e4b4173cc0ef9f970319c1f09722069219b9c8adb2f1717accaba6bfc1b8c",
+    "runtimeSha256": "f7ba4fc45e1e743d5d9f28fa5706cc801b8039d340d606fba113c290324236ba",
+    "servedRuntimeSha256": "f7ba4fc45e1e743d5d9f28fa5706cc801b8039d340d606fba113c290324236ba"
+  },
+  "browser": {
+    "network": "Ethereum Sepolia · Connected",
+    "consoleErrors": 0,
+    "screenshot": ".logs/crisis-20261011/sepolia-98cfbf3bf.png",
+    "authenticatedWallet": "awaiting owner password handoff"
+  },
+  "coldBackup": {
+    "server": "/var/lib/xln/sepolia-20261011/backups/98cfbf3bf-cold.tgz",
+    "local": "/Users/zigota/.config/xln/sepolia-hub-20261011/98cfbf3bf-cold.tgz",
+    "sha256": "28dbca8d755c957a263e757c6140197cd92d1d1caadcb90262d6b793e77afbe1",
+    "scope": "Entire stopped Sepolia state/config directory excluding prior backups; contains private secrets and must not be published."
+  },
+  "rollback": {
+    "previousSource": "f62e86dc42a74850db2005cf671cc72411789aff",
+    "triggered": true,
+    "reason": "Initial backup named nonexistent main directory.",
+    "previousHealthRestored": true,
+    "resolution": "Archive actual whole state directory, excluding backups, with atomic archive publication."
+  },
+  "logs": [
+    {
+      "path": ".logs/crisis-20261011/public-health-98cfbf3bf.json",
+      "sha256": "b05b1c0c6cb459c63d562e612d05bf11306553059551079b118b3abc63b4cdf0"
+    },
+    {
+      "path": ".logs/crisis-20261011/public-tower-98cfbf3bf.json",
+      "sha256": "e29358ee1dcb0d71ea8d689c41cc610b50ff4882fe3cca14969175e9c21ebd8c"
+    },
+    {
+      "path": ".logs/crisis-20261011/public-account-before-clock-fix.json",
+      "sha256": "d88b1e81bde212950d1b44f2936c94846bae1c69e61a42d66272f4ebc816df20"
+    },
+    {
+      "path": ".logs/crisis-20261011/public-account-after-clock-fix.json",
+      "sha256": "5b102a913fb9a37875bc9db9589a161f9870fad93327d7430787e2eb5bdba620"
+    },
+    {
+      "path": ".logs/crisis-20261011/rollout-sepolia-clock.log",
+      "sha256": "35adeefd92e6326621696369836539dd2f0ad39cc883449ca26176bcf028cae4"
+    },
+    {
+      "path": ".logs/crisis-20261011/rollout-sepolia-clock-retry.log",
+      "sha256": "78fbefd008d5cad124bd5d148a86ce562d4ab1a4f2b6997fc04484d7a2666ec3"
+    },
+    {
+      "path": ".logs/crisis-20261011/sepolia-clock-ui-build.log",
+      "sha256": "c1c2028bea16e59924e3571c405dfbbc0c3588cfafdc7cc0ce93b3de4cc1ab1d"
+    }
+  ],
+  "limitations": [
+    "Sepolia assets have no monetary value.",
+    "No contracts changed and no new financial transaction was needed for this rollout.",
+    "Demand savings and full release/mainnet acceptance remain open."
+  ],
+  "postDeploymentCheck": {
+    "command": "bun run check",
+    "exitCode": 0,
+    "sourceGates": 38,
+    "sourceSeconds": 26.194,
+    "log": ".logs/crisis-20261011/clock-rollout-docs-check.log",
+    "sha256": "ddf669544d67f3141ed48481f0638180fb3094f6b0dca003efdd1a4426d04a7d"
+  }
+}
