@@ -1,8 +1,8 @@
 import type { ExternalWalletApiContext } from './context';
 import { createJsonResponse } from './http';
 
-export const handleTokens = async (context: ExternalWalletApiContext, request?: Request): Promise<Response> => {
-  const entityId = request ? (new URL(request.url).searchParams.get('entityId') ?? undefined) : undefined;
+export const handleTokens = async (context: ExternalWalletApiContext, request: Request): Promise<Response> => {
+  const entityId = new URL(request.url).searchParams.get('entityId') ?? undefined;
   if (entityId !== undefined && !/^0x[0-9a-f]{64}$/i.test(entityId))
     return createJsonResponse(context.jsonHeaders, { error: 'Invalid entityId' }, 400);
   if (!context.getJAdapter(entityId)) {

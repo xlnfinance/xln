@@ -555,7 +555,7 @@ export const handleHubHttpRequest = async (
     });
   }
   if (url.pathname === '/api/tokens' && request.method === 'GET') {
-    return context.externalWalletApi.handleTokens();
+    return context.externalWalletApi.handleTokens(request);
   }
   if (
     url.pathname === '/api/external-wallet/snapshot' &&

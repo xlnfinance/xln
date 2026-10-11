@@ -17,7 +17,7 @@ export const createExternalWalletApi = (context: ExternalWalletApiContext) => ({
       ensureTokens: adapter.mode !== 'browservm',
     });
   },
-  handleTokens: (request?: Request) => handleTokens(context, request),
+  handleTokens: (request: Request) => handleTokens(context, request),
   handleWalletSnapshot: (request: Request) => handleWalletSnapshot(context, request),
   handleErc20Faucet: (request: Request) => handleErc20Faucet(context, request),
   handleGasFaucet: (request: Request) => handleGasFaucet(context, request),
