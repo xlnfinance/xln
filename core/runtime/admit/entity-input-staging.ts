@@ -32,6 +32,7 @@ import {
   collectCommittedEntityResult,
   recordEntityInputProfile,
 } from './entity-input-output.ts';
+import { retireAppliedLocalOutputs } from '../delivery/local-outbox';
 import { cacheCommittedAccountJClaimNodeChanges } from '../../entity/account/account-j-claim-node-store';
 import {
   collectRuntimeEntityContext,
@@ -251,6 +252,15 @@ export const collectStagedEntityInput = (
   recordEntityInputProfile(context, input, signerId, elapsedMs, result);
   if (isCommittedEntityInput(result.outcome)) {
     context.appliedEntityInputs.push(result.appliedInput);
+  } else if (result.outcome.kind === 'noop') {
+    // Retire only the exact consensus lane consumed by the early no-op.
+    // Mixed transactions/attestations were not applied and remain queued.
+    if (input.proposedFrame) {
+      retireAppliedLocalOutputs(env, [{ entityId: input.entityId, signerId, proposedFrame: input.proposedFrame }]);
+    } else if (input.hashPrecommitFrame && input.hashPrecommits) {
+      retireAppliedLocalOutputs(env, [{ entityId: input.entityId, signerId,
+        hashPrecommitFrame: input.hashPrecommitFrame, hashPrecommits: input.hashPrecommits }]);
+    }
   }
   collectCommittedEntityResult(env, replicaKey, result, context);
 };

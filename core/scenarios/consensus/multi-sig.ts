@@ -585,6 +585,7 @@ export async function multiSig(env: RuntimeReplica): Promise<void> {
     // drain so this phase also proves deterministic catch-up from the committed
     // 3-of-4 frame.
     offlineSigners.delete(offlineAliceSigner);
+    await convergeWithOffline(env, offlineSigners, 20, 'rejoin-before-j-history');
     await syncChain(env, 5);
     assertReserve(
       env,

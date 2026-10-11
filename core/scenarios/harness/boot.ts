@@ -188,9 +188,11 @@ const startManagedAnvil = async (rpcUrl: string, chainId: number): Promise<void>
     '--host', '127.0.0.1',
     '--port', String(port),
     '--chain-id', String(chainId),
-    // Keep genesis ahead of wall clock so Anvil auto-mining advances by one
-    // deterministic second instead of jumping to the host's current time.
+    // Genesis and each subsequent block use a controlled scenario clock.
     '--timestamp', '4102444800',
+    // Stable EIP-1559 input: provider fee caches must not select a different
+    // decaying base fee merely because one oracle run executes faster.
+    '--block-base-fee-per-gas', '1',
     '--block-gas-limit', '60000000',
     '--code-size-limit', '65536',
     '--prune-history', '256',
@@ -207,7 +209,16 @@ const startManagedAnvil = async (rpcUrl: string, chainId: number): Promise<void>
       throw new Error(`Auto-started anvil exited early (rpc=${rpcUrl})`);
     }
     const readyChainId = await readRpcChainId(rpcUrl);
-    if (readyChainId !== null) return;
+    if (readyChainId !== null) {
+      const provider = createXlnJsonRpcProvider(rpcUrl);
+      try {
+        // A fixed genesis alone still lets automining follow elapsed host time.
+        await provider.send('anvil_setBlockTimestampInterval', [1]);
+      } finally {
+        provider.destroy();
+      }
+      return;
+    }
     await sleep(200);
   }
   throw new Error(`Timed out waiting for auto-started anvil on ${rpcUrl}`);

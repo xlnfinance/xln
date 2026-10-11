@@ -5,6 +5,7 @@ import { finalizeCommitNotification } from '../commit/finalization';
 import { getEntityHashManifestMismatch } from '../input/hanko-witness';
 import {
   commitEntityConsensusInput,
+  noopEntityConsensusInput,
   rejectEntityConsensusInput,
   type ApplyEntityInputContext,
   type ApplyEntityInputResult,
@@ -143,9 +144,15 @@ export const handleHashPrecommits = async (
   const { entityInput, workingReplica } = context;
   const hasIncoming = Boolean(entityInput.hashPrecommits?.size);
   const proposal = workingReplica.proposal ?? workingReplica.lockedFrame;
+  const reference = entityInput.hashPrecommitFrame;
+  // The certified head binds this frame even while its successor is in flight.
+  // A late precommit grants no authority and must not restart delivery.
+  if (
+    hasIncoming && reference?.height === workingReplica.state.height &&
+    reference.frameHash === workingReplica.state.prevFrameHash
+  ) return noopEntityConsensusInput(context, 'PRECOMMIT_ALREADY_APPLIED');
   if (!proposal) {
     if (!hasIncoming) return null;
-    const reference = entityInput.hashPrecommitFrame;
     // Same catch-up shape as stale j-prefix: the Entity height already moved on,
     // so commit as a no-op so reliable ingress can terminalize the delivery.
     if (reference && workingReplica.state.height > reference.height) {

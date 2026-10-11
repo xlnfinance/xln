@@ -14,6 +14,7 @@ import {
 import type { ProposeAccountFrameResult } from '../types';
 import { proposeAccountFrameRejected } from '../result';
 import { replaceLocalDisputeDraft } from '../dispute/hanko';
+import { AccountNonceExhaustedError, getMinimumSafeSettlementNonce } from '../../../protocol/settlement/operations';
 
 type DisputeProjection = {
   proof: ReturnType<typeof buildAccountProofBodyFromJurisdictions>;
@@ -50,10 +51,7 @@ const buildDisputeProjection = (
     const proposerIsLeft =
       account.proofHeader.fromEntity.toLowerCase() === candidate.state.leftEntity.toLowerCase();
     if (!bodyChanged && !nonceConsumed) return { proof, nonce: 0, proposerIsLeft };
-    const nonce = Math.max(
-      Number(candidate.proofHeader.nextProofNonce ?? 0),
-      Number(candidate.state.jNonce ?? 0) + 1,
-    );
+    const nonce = getMinimumSafeSettlementNonce(candidate);
     return {
       proof,
       nonce,
@@ -67,7 +65,7 @@ const buildDisputeProjection = (
       ),
     };
   } catch (error) {
-    if (error instanceof AccountDisputeProofBudgetError) throw error;
+    if (error instanceof AccountDisputeProofBudgetError || error instanceof AccountNonceExhaustedError) throw error;
     // Failure here is an invariant fault, not a rejected user transaction:
     // committing without the promised recovery proof would make funds unsafe.
     throw haltRuntimeFailure("DISPUTE_PROOF_BUILD_FAILED", `DISPUTE_PROOF_BUILD_FAILED: ${(error as Error).message}`, error);
@@ -120,7 +118,7 @@ export const prepareProposalProof = async (
   try {
     projection = buildDisputeProjection(jurisdictions, account, candidate);
   } catch (error) {
-    if (error instanceof AccountDisputeProofBudgetError) {
+    if (error instanceof AccountDisputeProofBudgetError || error instanceof AccountNonceExhaustedError) {
       return {
         ok: false,
         result: proposeAccountFrameRejected(error.message, events),

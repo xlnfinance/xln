@@ -82,7 +82,7 @@ export const advanceRpcToUnixSeconds = async (
     return { startUnix, finalUnix: startUnix, advancedSeconds: 0 };
   }
   const advancedSeconds = targetUnixSeconds - startUnix;
-  await provider.send('evm_increaseTime', [advancedSeconds]);
+  await provider.send('evm_setNextBlockTimestamp', [targetUnixSeconds]);
   await provider.send('evm_mine', []);
   const finalUnix = await readRpcUnixSeconds(provider);
   if (finalUnix < targetUnixSeconds) {

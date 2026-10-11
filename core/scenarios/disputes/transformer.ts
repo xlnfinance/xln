@@ -1,7 +1,8 @@
 /**
  * Worst-case programmable swap dispute: both peers hold a locally signed
  * resolution frame while the network is partitioned. The starter commits its
- * swap arguments at dispute start; the finalizer supplies the opposite side.
+ * swap arguments at dispute start; the non-starter closes with a newer signed
+ * proof and its opposite-side arguments before the timeout.
  */
 
 import { ethers } from 'ethers';
@@ -27,7 +28,6 @@ import {
   processJEvents,
   syncChain,
   pinScenarioJurisdictionUnix,
-  advanceScenarioPastDisputeTimeout,
   usd,
 } from '../harness/helpers';
 
@@ -244,20 +244,14 @@ const orderbookRowsByEntity = (
   ]),
 );
 
-const advancePastDisputeTimeout = async (
-  env: RuntimeReplica,
-  jadapter: JAdapter,
-  timeoutUnixSeconds: number,
-) => {
-  return await advanceScenarioPastDisputeTimeout(env, jadapter, timeoutUnixSeconds);
-};
-
 const transformerClauseArguments = (
   encoded: string,
   context: string,
   clauseIndex = 0,
 ): string => {
-  if (encoded === '0x') throw new Error(`DISPUTE_TRANSFORMER_ARGUMENTS_EMPTY:${context}`);
+  // Account.sol supplies empty evidence when the starter did not precommit
+  // arguments for the newer proof selected by the finalizer.
+  if (encoded === '0x') return '0x';
   const coder = ethers.AbiCoder.defaultAbiCoder();
   const [clauses] = coder.decode(['bytes[]'], encoded) as unknown as [string[]];
   const clause = clauses[clauseIndex];
@@ -703,14 +697,9 @@ export async function runDisputeTransformer(runtimeReplica: RuntimeReplica): Pro
     const disputeStartUnix = Number(aliceActive.disputeStartTimestamp || 0);
     const timeoutUnix = Number(aliceActive.disputeTimeout || 0);
     assert(disputeStartUnix > 0 && timeoutUnix > disputeStartUnix, 'Active dispute missing absolute unix clock', env);
-    const timeAdvance = await advancePastDisputeTimeout(env, jadapter, timeoutUnix);
-    // Entity clocks only move inside a signed frame; wake once after the jump.
-    await process(env);
-    console.log(`[DISPUTE_DEBUG:timeout-advance] ${safeStringify({
-      ...timeAdvance,
-      runtimeTs: env.state.timestamp,
-      aliceEntityTs: findReplica(env, alice.id)[1].state.timestamp,
-    })}`);
+    // A newer pull-free peer proof permits immediate closure. Exercise that
+    // production path before both parties become eligible to race the timeout;
+    // dispute-lifecycle separately verifies rejection before T and auto-exit at T.
 
     const aliceBeforeFinalizeState = findReplica(env, alice.id)[1].state;
     const aliceBeforeFinalize = aliceBeforeFinalizeState.accounts.get(hub.id);
@@ -730,22 +719,12 @@ export async function runDisputeTransformer(runtimeReplica: RuntimeReplica): Pro
       activeDispute: aliceBeforeFinalize?.activeDispute,
     })}`);
 
-    const readAliceFinalization = () => {
-      const state = findReplica(env, alice.id)[1].state;
-      return (
-        state.jBatchState?.batch.disputeFinalizations[0]
-        ?? state.jBatchState?.sentBatch?.batch.disputeFinalizations[0]
-      );
-    };
-
-    let finalization = readAliceFinalization();
-    if (!finalization) {
-      await process(env, [{ entityId: alice.id, signerId: alice.signer, entityTxs: [{
-        type: 'disputeFinalize', data: { counterpartyEntityId: hub.id, description: 'mixed-transformer-finalize' },
-      }] }]);
-      finalization = readAliceFinalization();
-    }
+    await process(env, [{ entityId: alice.id, signerId: alice.signer, entityTxs: [{
+      type: 'disputeFinalize', data: { counterpartyEntityId: hub.id, description: 'mixed-transformer-finalize' },
+    }] }]);
     const aliceAfterFinalizeAttempt = findReplica(env, alice.id)[1].state;
+    const finalization = aliceAfterFinalizeAttempt.jBatchState?.batch.disputeFinalizations[0]
+      ?? aliceAfterFinalizeAttempt.jBatchState?.sentBatch?.batch.disputeFinalizations[0];
     if (!finalization) {
       throw new Error(
         `DISPUTE_TRANSFORMER_FINALIZATION_NOT_DRAFTED:` +
@@ -759,6 +738,8 @@ export async function runDisputeTransformer(runtimeReplica: RuntimeReplica): Pro
         })}`,
       );
     }
+    assert(finalization.finalNonce > finalization.initialNonce, 'Newer signed proof must supersede the stale exit', env);
+    assert(finalization.starterArguments === '0x', 'Uncommitted starter arguments must not migrate to the newer proof', env);
     const finalizer = decodeArguments(finalization.otherArguments, 'finalizer.other');
     console.log(`[DISPUTE_DEBUG:finalize] ${safeStringify({
       initialNonce: finalization.initialNonce,
@@ -771,7 +752,7 @@ export async function runDisputeTransformer(runtimeReplica: RuntimeReplica): Pro
     assert(finalizer.fillRatios.some((ratio) => ratio > 0n), 'Finalizer swap fill argument missing', env);
     assert(finalizer.secrets.length === 0, 'Swap-only finalizer unexpectedly carried HTLC secrets', env);
 
-    // Timeout wake may already auto-draft + broadcast finalize into sentBatch.
+    // The scheduler may already have broadcast the explicitly requested close.
     const aliceBatch = findReplica(env, alice.id)[1].state.jBatchState;
     const finalizeAlreadySent = (aliceBatch?.sentBatch?.batch.disputeFinalizations?.length ?? 0) > 0;
     if (!finalizeAlreadySent) {
@@ -808,6 +789,7 @@ export async function runDisputeTransformer(runtimeReplica: RuntimeReplica): Pro
     }
     const finalizedBlock = await jadapter.provider.getBlock('latest');
     if (!finalizedBlock) throw new Error('DISPUTE_TRANSFORMER_FINALIZED_BLOCK_MISSING');
+    assert(finalizedBlock.timestamp < timeoutUnix, 'Newer proof must close before the timeout', env);
     const startedByLeft = finalization.startedByLeft;
     // Account.prepareSettlementDeltas feeds absolute ondelta + signed offdelta
     // into the first transformer; feeding offdelta alone changes its execution.

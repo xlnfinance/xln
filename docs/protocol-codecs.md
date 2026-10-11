@@ -68,7 +68,13 @@ the proof nonce.
 
 `nextProofNonce` is the next locally reserved nonce for a fresh dispute proof.
 `jNonce` is the nonce finalized by the jurisdiction machine. A fresh proof uses
-`max(nextProofNonce, jNonce + 1)`. Account frame height is unrelated to either.
+the same nonce selection as cooperative settlement: the maximum of the local
+reservation and each known on-chain, local-signed and peer-signed nonce plus one.
+This also applies immediately after restore; relying only on the local cursor
+could reuse a peer's nonce for a different body and fail to counter its stale
+exit. Live proof nonces are below `Number.MAX_SAFE_INTEGER`, matching the
+contract's reserved finalization successor. Account frame height is unrelated
+to either nonce.
 
 ## Payment delivery modes
 

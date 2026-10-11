@@ -350,14 +350,14 @@ export async function runSettleRebalance(runtimeReplica: RuntimeReplica): Promis
   // Alice → Hub → Bob: $8K
   await process(env, [{
     entityId: alice.id, signerId: alice.signer,
-    entityTxs: [{
+    entityTxs: [withDeterministicHtlcTestSecret({
       type: 'htlcPayment', data: {
         targetEntityId: bob.id, tokenId: USDC, amount: usd(8_000),
         maxSenderDebit: quoteHtlcPaymentRoute(env.gossip.getProfiles(), [alice.id, hub.id, bob.id], USDC, usd(8_000)).senderLockAmount,
         route: [alice.id, hub.id, bob.id], description: 'Alice→Bob $8K',
         deliveryMode: 'instant',
       }
-    }]
+    }, `0x${'84'.repeat(32)}`)]
   }]);
   for (let i = 0; i < 6; i++) await process(env);
   await convergeScenario(env);
@@ -365,14 +365,14 @@ export async function runSettleRebalance(runtimeReplica: RuntimeReplica): Promis
   // Charlie → Hub → Dave: $12K
   await process(env, [{
     entityId: charlie.id, signerId: charlie.signer,
-    entityTxs: [{
+    entityTxs: [withDeterministicHtlcTestSecret({
       type: 'htlcPayment', data: {
         targetEntityId: dave.id, tokenId: USDC, amount: usd(12_000),
         maxSenderDebit: quoteHtlcPaymentRoute(env.gossip.getProfiles(), [charlie.id, hub.id, dave.id], USDC, usd(12_000)).senderLockAmount,
         route: [charlie.id, hub.id, dave.id], description: 'Charlie→Dave $12K',
         deliveryMode: 'instant',
       }
-    }]
+    }, `0x${'85'.repeat(32)}`)]
   }]);
   for (let i = 0; i < 6; i++) await process(env);
   await convergeScenario(env);

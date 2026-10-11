@@ -794,8 +794,10 @@ describe('production startup wiring', () => {
     expect(packageJson).toContain(
       '"prod:bootstrap:hydrate": "bun core/scripts/e2e/runners/run-with-test-cleanup.ts --reason=bootstrap-hydrate --keep-test-artifacts -- bun core/scripts/operations/bootstrap/bootstrap-soundcheck.ts --mode=hydrate"',
     );
+    // Thin bootstrap inputs total less than 1 MiB per hub. This test budget
+    // must force a real rotation; production storage defaults stay unchanged.
     expect(packageJson).toContain(
-      '"prod:bootstrap:rotation": "XLN_STORAGE_EPOCH_MAX_BYTES=4194304 XLN_LOCAL_PROD_SMOKE_REQUIRE_EPOCH_ROTATION=1',
+      '"prod:bootstrap:rotation": "XLN_STORAGE_EPOCH_MAX_BYTES=524288 XLN_LOCAL_PROD_SMOKE_REQUIRE_EPOCH_ROTATION=1',
     );
     expect(smoke).toContain('await commitPostRotationProofFrames();');
     expect(smoke).toContain("recordStage('storage-epoch:post-rotation-wal-committed');");

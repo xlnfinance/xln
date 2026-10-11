@@ -108,6 +108,7 @@ describe('determinism cleanup lifecycle', () => {
     expect(rpcSource).toContain('manualPolling: env.scenarioMode === true,');
     expect(rpcSource).toContain('if (!session.manualPolling) {');
     expect(bootSource).toContain("'--timestamp', '4102444800'");
+    expect(bootSource).toContain("await provider.send('anvil_setBlockTimestampInterval', [1])");
   });
 
   test('dispute transformer pins the economically relevant RPC block before broadcasting', () => {

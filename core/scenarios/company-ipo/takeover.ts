@@ -140,7 +140,7 @@ export const proposeInvestorBoard = async (
  * Governance delays are jurisdiction SECONDS: activateBoard requires
  * block.timestamp >= Entity.activateAt. Jump both the chain clock and the
  * runtime clock past that unix deadline (BrowserVM: next block timestamp;
- * RPC: evm_increaseTime + evm_mine).
+ * RPC: evm_setNextBlockTimestamp + evm_mine).
  */
 const advanceControlDelay = async (
   env: RuntimeReplica,

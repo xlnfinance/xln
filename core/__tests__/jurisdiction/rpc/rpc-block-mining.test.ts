@@ -24,10 +24,10 @@ const createProvider = (startBlock: bigint, unsupported = new Set<string>()): Fa
       if (method === 'eth_getBlockByNumber') {
         return { timestamp: `0x${provider.unix.toString(16)}` };
       }
-      if (method === 'evm_increaseTime') {
-        const delta = params[0];
-        if (typeof delta !== 'number') throw new Error('increaseTime requires number');
-        provider.unix += delta;
+      if (method === 'evm_setNextBlockTimestamp') {
+        const timestamp = params[0];
+        if (typeof timestamp !== 'number') throw new Error('setNextBlockTimestamp requires number');
+        provider.unix = timestamp;
         return null;
       }
       if (method === 'evm_mine') {
@@ -125,10 +125,11 @@ describe('RPC unix dispute-clock advance', () => {
     expect(provider.block).toBe(4n);
     expect(provider.calls.map(({ method }) => method)).toEqual([
       'eth_getBlockByNumber',
-      'evm_increaseTime',
+      'evm_setNextBlockTimestamp',
       'evm_mine',
       'eth_getBlockByNumber',
     ]);
+    expect(provider.calls[1]?.params).toEqual([1_700_005_760]);
   });
 
   test('no-ops when the unix deadline is already satisfied', async () => {

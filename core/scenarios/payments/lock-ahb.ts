@@ -19,7 +19,7 @@ import type { RuntimeReplica } from '../../runtime/types';
 import { defaultAccountDisputeConfigForParties } from '../../account/config/dispute-config';
 import type { EntityInput } from '../../entity/types';
 import type { JAdapter } from '../../jurisdiction/adapter/types';
-import { getProcess, processWithOffline, usd, snap, assertRuntimeIdle, enableStrictScenario, ensureSignerKeysFromSeed, requireRuntimeSeed, findReplica, assert, assertBilateralSync, getOffdelta, processJEvents, converge, syncChain, commitRuntimeInput, setScenarioStorageEnabled } from '../harness/helpers';
+import { getProcess, usd, snap, assertRuntimeIdle, enableStrictScenario, ensureSignerKeysFromSeed, requireRuntimeSeed, findReplica, assert, assertBilateralSync, getOffdelta, processJEvents, converge, syncChain, commitRuntimeInput, setScenarioStorageEnabled } from '../harness/helpers';
 import { bindScenarioJReplica, ensureJAdapter, registerEntities, createJReplica, createJurisdictionConfig, getScenarioJAdapter, isScenarioJAdapterMissingError, resolveScenarioBoardSigner } from '../harness/boot';
 import { formatRuntime } from '../../qa/runtime-ascii';
 import { isLeftEntity } from '../../account/utils';
@@ -1472,57 +1472,8 @@ export async function lockAhb(env: RuntimeReplica): Promise<void> {
     console.log('✅ 4-HOP HTLC VERIFIED - Privacy-preserving multi-hop routing works!\n');
 
     // ============================================================================
-    // PHASE 8: MINIMAL OFFLINE SIM (single-tick drop + recovery)
-    // ============================================================================
-    console.log('\n🔌 PHASE 8: Minimal offline sim (drop Hub for 1 tick)');
-    const offlineAmount = usd(1);
-
-    await process(env, [{
-      entityId: alice.id,
-      signerId: alice.signer,
-      entityTxs: [{
-        type: 'directPayment',
-        data: {
-          targetEntityId: hub.id,
-          tokenId: USDC_TOKEN_ID,
-          amount: offlineAmount,
-          route: [alice.id, hub.id],
-          deliveryMode: 'direct',
-          description: 'Offline sim: A→H'
-        }
-      }]
-    }]);
-
-    const hubHeightBeforeOffline = findReplica(env, hub.id)[1].state.height;
-    await processWithOffline(env, undefined, new Set([hub.signer]), 'lock-ahb-hub-offline');
-    const deferred = (env.pendingOutputs ?? []).filter(input => input.entityId === hub.id);
-    assert(deferred.length > 0, 'Offline simulation must delay an actual Hub input');
-    assert(findReplica(env, hub.id)[1].state.height === hubHeightBeforeOffline,
-      'Offline Hub must not commit while its inputs are withheld');
-    console.log(`🔌 Offline: deferred ${deferred.length} Hub inputs; committed height unchanged`);
-    await converge(env);
-    assert(findReplica(env, hub.id)[1].state.height > hubHeightBeforeOffline,
-      'Reconnected Hub must commit the deferred payment');
-
-    await process(env, [{
-      entityId: hub.id,
-      signerId: hub.signer,
-      entityTxs: [{
-        type: 'directPayment',
-        data: {
-          targetEntityId: alice.id,
-          tokenId: USDC_TOKEN_ID,
-          amount: offlineAmount,
-          route: [hub.id, alice.id],
-          deliveryMode: 'direct',
-          description: 'Offline sim: H→A (net zero)'
-        }
-      }]
-    }]);
-    await converge(env);
-    console.log('✅ Offline sim complete (state converged)');
-
-    // ============================================================================
+    // Offline delivery and reconnection are proved with sovereign Runtimes in
+    // htlc-ack-recovery; filtering cohosted inputs cannot partition a WAL outbox.
     // FINAL SUMMARY
     // ============================================================================
 
@@ -1546,7 +1497,6 @@ export async function lockAhb(env: RuntimeReplica): Promise<void> {
     console.log('Phase 5: Rebalancing - TR $200K → $0');
     console.log('Phase 6: Account topology expansion');
     console.log('Phase 7: 4-Hop HTLC route test');
-    console.log('Phase 8: Offline simulation');
     console.log('=====================================\n');
     console.log(`[AHB] Runtime frames: ${env.state.height}`);
     await converge(env, htlcRouteConvergenceCycleBudget(2));

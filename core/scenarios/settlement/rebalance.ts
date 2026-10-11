@@ -30,7 +30,8 @@ import { formatRuntime } from '../../qa/runtime-ascii';
 import { deriveDelta } from '../../account/utils';
 import { isLeftEntity } from '../../entity/id';
 import { quoteHtlcPaymentRoute } from '../../pathfinding/htlc-quote';
-import { startRuntimeTraceForTesting } from '../../runtime/observability/runtime-trace';
+import { withDeterministicHtlcTestSecret } from '../../protocol/htlc/test-secret-capability';
+import { openRuntimeTraceScopeForTesting } from '../../runtime/observability/runtime-trace';
 import type { SentJBatch } from '../../jurisdiction/machine/batch';
 import {
   bindScenarioJReplica,
@@ -359,7 +360,7 @@ export async function runRebalanceScenario(env: RuntimeReplica): Promise<Runtime
   await process(env, [{
     entityId: alice.id,
     signerId: alice.signer,
-    entityTxs: [{
+    entityTxs: [withDeterministicHtlcTestSecret({
       type: 'htlcPayment',
       data: {
         targetEntityId: bob.id,
@@ -370,7 +371,7 @@ export async function runRebalanceScenario(env: RuntimeReplica): Promise<Runtime
         deliveryMode: 'instant',
         description: 'Alice→Hub→Bob $8K',
       }
-    }]
+    }, `0x${'82'.repeat(32)}`)]
   }]);
   for (let i = 0; i < 6; i++) await process(env);
   await convergeScenario(env);
@@ -379,7 +380,7 @@ export async function runRebalanceScenario(env: RuntimeReplica): Promise<Runtime
   await process(env, [{
     entityId: charlie.id,
     signerId: charlie.signer,
-    entityTxs: [{
+    entityTxs: [withDeterministicHtlcTestSecret({
       type: 'htlcPayment',
       data: {
         targetEntityId: dave.id,
@@ -390,7 +391,7 @@ export async function runRebalanceScenario(env: RuntimeReplica): Promise<Runtime
         deliveryMode: 'instant',
         description: 'Charlie→Hub→Dave $12K',
       }
-    }]
+    }, `0x${'83'.repeat(32)}`)]
   }]);
   for (let i = 0; i < 6; i++) await process(env);
   await convergeScenario(env);
@@ -430,7 +431,7 @@ export async function runRebalanceScenario(env: RuntimeReplica): Promise<Runtime
   }
 
   const batchNonceBeforeRebalance = hubAfterPayments.jBatchState?.entityNonce ?? 0;
-  const rebalanceTrace = startRuntimeTraceForTesting(env);
+  const rebalanceTrace = openRuntimeTraceScopeForTesting(env);
 
   // ══════════════════════════════════════════════════════════════
   // REBALANCE POLICIES: Users set their own (CRITICAL-3: auth)
@@ -562,7 +563,7 @@ export async function runRebalanceScenario(env: RuntimeReplica): Promise<Runtime
     env,
   );
 
-  const traceLogs = rebalanceTrace.snapshots.flatMap(snapshot => snapshot.logs ?? []);
+  const traceLogs = rebalanceTrace.snapshots.slice(rebalanceTrace.startIndex).flatMap(snapshot => snapshot.logs ?? []);
   const requestedByUser = new Map<string, bigint>();
   for (const user of [bob, dave]) {
     const receipts = traceLogs.filter(log => {
@@ -819,7 +820,7 @@ export async function runRebalanceScenario(env: RuntimeReplica): Promise<Runtime
   assert(pendingAfterBroadcast.length === 0, 'No requestedRebalance may remain after the completed cycle', env);
 
   hubFinal = findReplica(env, hub.id)[1].state;
-  const finalTraceLogs = rebalanceTrace.snapshots.flatMap(snapshot => snapshot.logs ?? []);
+  const finalTraceLogs = rebalanceTrace.snapshots.slice(rebalanceTrace.startIndex).flatMap(snapshot => snapshot.logs ?? []);
   const allRequestReceipts = finalTraceLogs.filter(log => {
     const data = (log.data ?? {}) as Record<string, unknown>;
     return log.message === 'request_collateral_committed' &&
@@ -829,7 +830,7 @@ export async function runRebalanceScenario(env: RuntimeReplica): Promise<Runtime
   assert(allRequestReceipts.length === 2, `Expected only Bob + Dave collateral requests (got ${allRequestReceipts.length})`, env);
 
   const sentBatches = new Map<string, SentJBatch>();
-  for (const snapshot of rebalanceTrace.snapshots) {
+  for (const snapshot of rebalanceTrace.snapshots.slice(rebalanceTrace.startIndex)) {
     const hubReplica = Array.from(snapshot.state.eReplicas.values()).find(
       replica => replica.entityId.toLowerCase() === hub.id.toLowerCase(),
     );

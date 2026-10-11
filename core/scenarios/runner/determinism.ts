@@ -8,6 +8,10 @@
 import type { EnvSnapshot, RuntimeReplica } from '../../runtime/types';
 import { getLiveJAdapterEntries } from '../../runtime/j-submit/live-jadapters';
 import { createHash } from 'node:crypto';
+import { writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { dbRootPath } from '../../runtime/replica/platform';
+import { formatRuntime } from '../../qa/runtime-ascii';
 import { safeStringify } from '../../protocol/serialization';
 import { clearSignerKeys } from '../../account/crypto';
 import { createGossipLayer } from '../../network/p2p/gossip';
@@ -496,7 +500,6 @@ const runScenarioOnce = async (
     const runtimeTrace = startRuntimeTraceForTesting(env);
     stopRuntimeTrace = runtimeTrace.stop;
     capturedSnapshots = runtimeTrace.snapshots;
-    env.dbNamespace = `determinism-${scenario.key}-${runIndex}`;
     env.gossip = createGossipLayer();
     env.scenarioMode = true;
     const verboseScenarioLogs = process.env['XLN_DETERMINISM_VERBOSE'] === '1';
@@ -540,6 +543,25 @@ const runScenarioOnce = async (
       );
     }
     return buildOracle(activeEnv, capturedSnapshots, frameHashRecords, accountStateRootRecords);
+  } catch (error) {
+    restoreConsole(originalConsole);
+    if (activeEnv) {
+      const evidencePath = join(dbRootPath, 'failure-state.json');
+      writeFileSync(evidencePath, safeStringify({
+        scenario: scenario.key, runIndex, state: snapshotEnvProjection(activeEnv),
+        frames: capturedSnapshots.map(snapshotProjection),
+        accounts: Array.from(activeEnv.state.eReplicas, ([id, replica]) => ({
+          id, paybook: Array.from(replica.state.paybook.entries),
+          accounts: Array.from(replica.state.accounts, ([peer, account]) => ({
+            peer, height: account.currentHeight, pending: account.pendingFrame,
+            locks: Array.from(account.state.locks), mempool: account.mempool,
+          })),
+        })),
+      }));
+      writeFileSync(join(dbRootPath, 'failure-state.txt'), formatRuntime(activeEnv));
+      console.error(`Determinism failure evidence: ${evidencePath}`);
+    }
+    throw error;
   } finally {
     stopRuntimeTrace?.();
     restoreFrameHashRecorder();
@@ -565,7 +587,11 @@ const runScenarioOnce = async (
   }
 };
 
-async function verifyScenarioDeterminism(scenario: ScenarioEntry, scenarioIndex: number): Promise<ScenarioResult> {
+async function verifyScenarioDeterminism(
+  scenario: ScenarioEntry,
+  scenarioIndex: number,
+  resetStorage: () => void,
+): Promise<ScenarioResult> {
   const runs: ScenarioOracle[] = [];
   const jEventTrace: JEventTrace = {
     batches: [],
@@ -577,6 +603,7 @@ async function verifyScenarioDeterminism(scenario: ScenarioEntry, scenarioIndex:
   };
   try {
     for (let runIndex = 0; runIndex < RUNS; runIndex += 1) {
+      resetStorage();
       jEventTrace.cursor = 0;
       jEventTrace.headerCursor = 0;
       jEventTrace.rangeCursor = 0;
@@ -612,7 +639,7 @@ const scenariosToRun = (): ScenarioEntry[] =>
     return requested.size === 0 || requested.has(scenario.key);
   });
 
-export async function runDeterminismTests(): Promise<void> {
+export async function runDeterminismTests(resetStorage: () => void): Promise<void> {
   console.log('== Scenario determinism oracle ==');
   console.log(`seed=${SEED} runs=${RUNS}`);
   console.log(`rpcBasePort=${RPC_BASE_PORT} freshAnvil=1`);
@@ -625,26 +652,17 @@ export async function runDeterminismTests(): Promise<void> {
     const scenario = scenarios[scenarioIndex];
     if (!scenario) throw new Error(`Scenario registry lookup failed at index ${scenarioIndex}`);
     console.log(`\n[${scenario.key}] ${scenario.name}`);
-    results.push(await verifyScenarioDeterminism(scenario, scenarioIndex));
-  }
-
-  const failed = results.filter((result) => !result.success);
-  console.log('\n== Summary ==');
-  for (const result of results) {
-    const status = result.success ? 'PASS' : 'FAIL';
-    const frameCount = result.runs[0]?.frameCount ?? 0;
-    const hash = result.runs[0]?.combinedHash.slice(0, 12) ?? 'no-hash';
-    console.log(`${status} ${result.key}: frames=${frameCount} hash=${hash}`);
-    if (!result.success && result.error) {
-      console.log(`  error=${result.error}`);
+    const result = await verifyScenarioDeterminism(scenario, scenarioIndex, resetStorage);
+    results.push(result);
+    if (!result.success) {
+      throw new Error(`Determinism oracle failed for ${scenario.key}: ${result.error}`);
     }
   }
 
-  if (failed.length > 0) {
-    throw new Error(`Determinism oracle failed for ${failed.map((result) => result.key).join(', ')}`);
+  console.log('\n== Summary ==');
+  for (const result of results) {
+    const frameCount = result.runs[0]?.frameCount ?? 0;
+    const hash = result.runs[0]?.combinedHash.slice(0, 12) ?? 'no-hash';
+    console.log(`PASS ${result.key}: frames=${frameCount} hash=${hash}`);
   }
-}
-
-if (import.meta.main) {
-  await runDeterminismTests();
 }

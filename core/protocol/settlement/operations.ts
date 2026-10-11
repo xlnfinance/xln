@@ -33,9 +33,16 @@ export const assertSettlementTokenId = (value: unknown, context: string): number
  * contract nonce. Every bilateral replica therefore chooses above every
  * locally-known signed proof, not merely above its own signing cursor.
  */
+export class AccountNonceExhaustedError extends Error {
+  constructor(value: number) {
+    super(`SETTLEMENT_NONCE_EXHAUSTED:${String(value)}`);
+    this.name = 'AccountNonceExhaustedError';
+  }
+}
+
 const assertSettlementNonceCursor = (value: number): number => {
   if (!Number.isSafeInteger(value) || value < 0 || value >= Number.MAX_SAFE_INTEGER) {
-    throw new Error(`SETTLEMENT_NONCE_EXHAUSTED:${String(value)}`);
+    throw new AccountNonceExhaustedError(value);
   }
   return value;
 };

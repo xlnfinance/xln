@@ -1,6 +1,7 @@
-import { promises } from 'node:fs';
+import { promises, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { runDeterminismTests } from '../../../scenarios/runner/determinism';
+import { buildScenarioIsolatedEnv } from '../../../scenarios/harness/scenario-isolation';
 
 type Violation = {
   file: string;
@@ -127,7 +128,16 @@ async function runStaticDeterminismGuard(): Promise<void> {
 async function main(): Promise<void> {
   await runStaticDeterminismGuard();
   if (process.argv.includes('--static-only')) return;
-  await runDeterminismTests();
+  // Runtime resolves its storage root on import. Own a fresh directory before
+  // loading it; scenario recovery must never open a previous run's WAL.
+  const dbRoot = mkdtempSync(path.join(tmpdir(), 'xln-determinism-'));
+  process.env = buildScenarioIsolatedEnv(process.env, dbRoot, null);
+  const { runDeterminismTests } = await import('../../../scenarios/runner/determinism');
+  console.log(`Determinism storage: ${dbRoot}`);
+  await runDeterminismTests(() => {
+    rmSync(dbRoot, { recursive: true, force: true });
+    mkdirSync(dbRoot, { recursive: true });
+  });
 }
 
 main()

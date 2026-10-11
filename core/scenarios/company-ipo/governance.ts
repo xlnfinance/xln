@@ -54,6 +54,9 @@ export const executeCompanyAction = async (
     voters: [requireValidator(actor, 1)],
     txs,
     offlineSigners: new Set(),
-    convergenceCycles: 50,
+    // One company action can settle several Accounts through successive 2-of-3
+    // frames and authenticated J-prefix rounds. Await the full cascade and its
+    // retained deliveries; the financial and empty-queue assertions still apply.
+    convergenceCycles: 100,
   });
 };

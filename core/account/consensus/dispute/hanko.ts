@@ -10,6 +10,7 @@ import {
 } from '../flush';
 import { getAccountStateDomain } from '../helpers';
 import { AccountInputEvidenceError } from '../../input/input-rejection';
+import { AccountNonceExhaustedError, getMinimumSafeSettlementNonce } from '../../../protocol/settlement/operations';
 
 export type ValidatedCounterpartyDisputeHanko = {
   hanko: string;
@@ -73,12 +74,24 @@ export const validateCounterpartyDisputeHanko = async (
     || !/^0x[0-9a-fA-F]{64}$/.test(disputeHanko.proofBodyHash)
     || !Number.isSafeInteger(disputeHanko.proofNonce)
     || disputeHanko.proofNonce < 0
+    || disputeHanko.proofNonce >= Number.MAX_SAFE_INTEGER
     || typeof disputeHanko.proposerIsLeft !== 'boolean'
   ) {
     throw new AccountInputEvidenceError(
       'ACCOUNT_INPUT_DISPUTE_HANKO_INVALID',
       `${context}:DISPUTE_HANKO_SHAPE_INVALID`,
     );
+  }
+
+  if (accountInputProposal(input)) {
+    // Reject before committing the peer frame if its proof leaves no executable
+    // nonce for our ACK. A peer may exhaust its Account, never the Runtime.
+    try {
+      getMinimumSafeSettlementNonce({ ...account, counterpartyDisputeProofNonce: disputeHanko.proofNonce });
+    } catch (error) {
+      if (!(error instanceof AccountNonceExhaustedError)) throw error;
+      throw new AccountInputEvidenceError('ACCOUNT_INPUT_DISPUTE_HANKO_INVALID', error.message);
+    }
   }
 
   const expectedHash = createDisputeProofHashWithNonce(

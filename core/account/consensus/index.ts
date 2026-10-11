@@ -591,7 +591,9 @@ function buildIncomingAckFrameMaterial(
     ackProofResult.proofBodyHash.toLowerCase() !== account.currentDisputeProofBodyHash?.toLowerCase() ||
     account.currentDisputeProofProposerIsLeft !== proposerIsLeft ||
     Number(account.currentDisputeProofNonce ?? 0) <= Number(account.state.jNonce ?? 0);
-  const ackSignedNonce = Math.max(Number(account.proofHeader.nextProofNonce ?? 0), Number(account.state.jNonce ?? 0) + 1);
+  const ackSignedNonce = proofChanged
+    ? getMinimumSafeSettlementNonce(account)
+    : Number(account.currentDisputeProofNonce ?? 0);
   const ackDisputeHash = proofChanged
     ? createDisputeProofHashWithNonce(
         account.state,
