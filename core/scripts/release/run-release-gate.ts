@@ -47,7 +47,9 @@ const collectCrossJRuntimeCoreTests = (directory: string): string[] => (
     .sort((left, right) => left.name.localeCompare(right.name))
     .flatMap(entry => {
       const path = `${directory}/${entry.name}`;
-      if (entry.isDirectory()) return collectCrossJRuntimeCoreTests(path);
+      // The launch engine is TS. Frozen Rust parity vectors retain their
+      // historical ABI and run separately from current production TS tests.
+      if (entry.isDirectory()) return entry.name === 'rscore' ? [] : collectCrossJRuntimeCoreTests(path);
       return entry.isFile() && isCrossJRuntimeCoreTest(entry.name) ? [path] : [];
     })
 );
@@ -117,9 +119,6 @@ const RELEASE_PATHS = XLN_RELEASE_PATHS.join(' ');
 
 const quickSteps: GateStep[] = [
   { name: 'frontend generated aliases', command: 'cd frontend && bunx svelte-kit sync', timeoutMs: 60_000 },
-  // CI starts from a cold Rust target. The complete Rust build and test chain
-  // exceeded five minutes on GitHub while every completed test stayed green;
-  // the watchdog must cover cold toolchain latency, not terminate healthy work.
   { name: 'source checks', command: 'bun run check:src', timeoutMs: 600_000 },
   { name: 'release integrity tests', command: 'bun run test:release-integrity', timeoutMs: 30_000 },
   { name: 'runtime core unit tests', command: `bun test ${RUNTIME_CORE_TESTS}`, timeoutMs: 180_000 },

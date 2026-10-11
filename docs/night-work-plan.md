@@ -1,5 +1,48 @@
 # Current xln execution handoff
 
+Owner priority, 2026-10-11 17:28 UTC: ship a public Sepolia deployment and usable
+asset flow; Base is an alternative, not a prerequisite. Finish the TS launch path
+before resuming Rust book parity. Mainnet activation remains a separate exact-build
+decision; a local Anvil wallet or test tokens are not real-value mainnet assets.
+
+Latest boundary: the dedicated Sepolia signer still has zero ETH. RPC/chain and
+deployment dry-run pass. The previous project deployer has 0.005955258191918243 ETH,
+but its key is absent from the checked deployment environment; no key was guessed
+and no funds moved. Triangle is suspended; Faucet Trade requires a social post
+and CAPTCHA. Testnet Help offers 0.0001 ETH without a mainnet balance. Its form is
+prepared in browser tab 20, but its terms prohibit bots: the final request is handed
+to the owner. No claim was submitted. Do not repeat the unchanged earlier faucets.
+
+Guided demo checkpoint `cca6cd8fe` reuses PasswordEntry and canonical Runtime ids; the encrypted
+key is saved before boot and wallet metadata before chain sync. The owner completed
+password creation and the wallet opened (tab 19); reload/unlock is not yet verified.
+Do not interrupt the owner's current payment. Crypto/recovery tests: 12/12, 28
+assertions. The older 203-USDC preview remains in tab 18, with its test phrase
+backed up outside the repository in the local xln configuration directory.
+
+Release discovery incorrectly included frozen Rust cross-J parity vectors using
+the old three-component proof ABI. Their mismatch is reproduced, not re-goldened.
+The TS release family now excludes only core/__tests__/rscore; all current TS
+cross-J, proof-builder, lending and recovery gates remain. Scope regression first
+failed 4 tests, then 30/30 scope/proof tests passed. Release integrity: 62/62 plus
+one Solidity Hanko parity case. Full check passes: 38 source gates, 27.329s.
+Fresh production browser Runtime/worker and React bundles build; files are under
+`.logs/crisis-20261011/sepolia-candidate`, not deployed or served to the owner.
+The full integrated runtime suite remains unrun
+on this candidate because the owner's preview holds the heavy stand.
+
+Current Rust evidence: engine all-target check passes; the shared borrow request
+commitment passes exactly. First native divergence is lending_disburse AccountState
+root: the old handler lacks the modern covenant and authorization consumption.
+Keep this unfinished port and the six foreign Rust files separate from TS launch.
+
+Method review, 17:42 UTC: stop spending the release path on Rust or UI polish.
+Obtain one actual public receipt before extending deployment scope. Preserve the
+owner's running local wallet and remote state; never use deploy:prod as a mainnet
+rollout, since that command resets Anvil and Runtime data.
+
+## Earlier checkpoint evidence
+
 Owner priority on 2026-10-11: redesign the React wallet with one bounded Opus
 consultation. Backing and signed credit now sit next to the balance; compact
 actions precede the charts, secondary actions use More, tutorial details disclose.
@@ -36,7 +79,7 @@ Prioritize guided-demo recovery before another UI entrypoint change or mesh rest
 
 The unfinished Rust lending parity work is preserved separately, uncommitted.
 The current TS lending vector passes with partial repayment and signed expiry;
-Rust authorization/wire fields are partially ported, not compiled or parity-proven.
+Rust authorization is now exact, but disbursement and later steps are not parity-proven.
 Do not include that work or the six foreign Rust files in the UI checkpoint.
 
 ## Current SHA
@@ -146,13 +189,13 @@ No remaining partial-repayment L1/L2 or full source-check failure.
 Demand savings are not implemented. Due/request-ordered withdrawal servicing
 is implemented and verified at `079c101cc`; see the newer evidence above.
 
-The integrated runtime release gate still reaches the frozen cross-J fixture
+The previous integrated runtime release gate reached the frozen cross-J fixture
 mismatch after 77 tests. Its first difference is dispute ProofBody hashing:
 read-only reconstruction proves the frozen vector uses the old three-component
 stock batch ABI; current production has the fourth loans component. Financial
-roots match at the first boundary. Do not edit root rscore/ or regenerate golden
-hashes to conceal this. Reconcile the TS release vectors with the explicit Rust
-freeze after the production banking path is complete.
+roots match at the first boundary. Frozen native vectors are now excluded from TS
+launch discovery; their direct tests remain red. The corrected integrated TS
+boundary still needs execution with the stand free.
 
 The prior 1,000-user stand committed 20,000 payments with zero pending ACKs but
 needed 26,183ms against the 25,000ms acceptance window. No valid TPS claim.
@@ -168,8 +211,9 @@ Durable evidence index: `docs/evidence/crisis-20261011.json`.
 ## Next single command
 
 `bun run stand:status` before any heavy work; the owner preview currently holds it.
-Next implementation: fix guided-demo recovery without discarding existing wallets;
-then verify the first Rust lending divergence against current TS vectors.
+Next: check the submitted faucet receipt if the owner completes the prepared claim;
+then deploy current Sepolia bytecode and prove real-clock exit. Guided-demo reload
+and the corrected integrated runtime boundary remain unverified on this candidate.
 The owner also delegates demand-rate design: prospective
 variable rates, earned interest preserved, one signed accrual mechanism.
 Do not repeat unchanged green gates without a new concern.

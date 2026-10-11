@@ -11,7 +11,7 @@ const isCrossJReleaseTest = (name: string): boolean => (
 const collectCrossJReleaseTests = (directory: string): string[] => (
   readdirSync(directory, { withFileTypes: true }).flatMap(entry => {
     const path = `${directory}/${entry.name}`;
-    if (entry.isDirectory()) return collectCrossJReleaseTests(path);
+    if (entry.isDirectory()) return entry.name === 'rscore' ? [] : collectCrossJReleaseTests(path);
     return entry.isFile() && isCrossJReleaseTest(entry.name) ? [path] : [];
   })
 );
@@ -88,6 +88,7 @@ describe('release gate ordering', () => {
     expect(result.exitCode).toBe(0);
     expect(expectedFamily).toContain('core/__tests__/cross-j/swap/cross-jurisdiction-swap-part-3.test.ts');
     expect(expectedFamily).toContain('core/__tests__/storage/recovery/portable/cross-j-output-replay-route.test.ts');
+    expect(plannedFamily?.some(path => path.startsWith('core/__tests__/rscore/'))).toBe(false);
     expect(plannedFamily).toEqual(expectedFamily);
   });
 
@@ -101,6 +102,10 @@ describe('release gate ordering', () => {
       const command = result.stdout.toString().split('\n').map(line => line.trim())
         .find(line => line.startsWith('bun test core/__tests__'));
       const paths = command?.split(/\s+/).slice(2) ?? [];
+      // Rust's frozen shared vectors use the previous proof ABI. They remain
+      // separately runnable, but cannot certify or block the TS launch engine.
+      expect(paths.some(path => path.startsWith('core/__tests__/rscore/'))).toBe(false);
+      expect(paths).toContain('core/__tests__/security/dispute/proof-builder.test.ts');
       for (const required of [
         'core/__tests__/finance/state/lending.test.ts',
         'core/__tests__/finance/state/lending-funding.test.ts',
