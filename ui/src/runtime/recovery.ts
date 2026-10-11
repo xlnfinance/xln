@@ -92,13 +92,13 @@ export function normalizeTowerUrl(value: string): string {
 }
 
 /**
- * The tower this network offers by default. A public host has the xln tower;
+ * The tower this network offers by default. A public host serves its own tower;
  * on a local stack there is no always-on tower to assume, so the person names
  * one (the dev stand runs its own on 127.0.0.1:9100).
  */
 export function defaultTowerUrl(): string {
   const hostname = window.location.hostname.toLowerCase();
-  return ['localhost', '127.0.0.1', '[::1]'].includes(hostname) ? '' : 'https://xln.finance';
+  return ['localhost', '127.0.0.1', '[::1]'].includes(hostname) ? '' : window.location.origin;
 }
 
 /**
