@@ -135,8 +135,10 @@ export function buildOnchainReserves(
   return next;
 }
 
-export async function fetchExternalTokenCatalog(apiBase: string): Promise<ExternalToken[]> {
-  const response = await fetch(`${apiBase}/api/tokens`, {
+export async function fetchExternalTokenCatalog(apiBase: string, entityId?: string): Promise<ExternalToken[]> {
+  const url = new URL('/api/tokens', apiBase);
+  if (entityId) url.searchParams.set('entityId', entityId);
+  const response = await fetch(url, {
     signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
   });
   const raw = await response.text();

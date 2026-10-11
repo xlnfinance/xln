@@ -856,7 +856,7 @@ const maybeHandleUpstreamApi = async (
   if (pathname === '/api/watchtower-proxy' && (req.method === 'GET' || req.method === 'POST' || req.method === 'PUT')) {
     return handleWatchtowerProxy(req);
   }
-  if (pathname === '/api/tokens') return externalWalletApi.handleTokens();
+  if (pathname === '/api/tokens') return externalWalletApi.handleTokens(req);
   return null;
 };
 

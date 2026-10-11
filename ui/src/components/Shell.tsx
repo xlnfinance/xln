@@ -55,7 +55,7 @@ export function Shell({ children }: { children: ReactNode }) {
   const entityId = useApp(s => s.activeEntityId);
   const wallet = useWallet(entityId);
   useRecoverySync();
-  useExternalWalletSync(wallet.entityId, wallet.signerId);
+  const assets = useExternalWalletSync(wallet.entityId, wallet.signerId);
   const batches = wallet.frame?.activeEntity?.core?.jBatchState;
   useEffect(() => {
     observeFundingBatches(wallet.entityId, [
@@ -69,7 +69,13 @@ export function Shell({ children }: { children: ReactNode }) {
   useEffect(() => clearToasts(), [pathname, clearToasts]);
 
   return (
-    <div className="app jurisdiction-surface" data-jurisdiction={getJurisdictionBadgeInfo(wallet.jurisdiction, wallet.frame?.activeEntity?.core?.config.jurisdiction?.chainId)?.className ?? 'generic'}>
+    <div
+      className="app jurisdiction-surface"
+      data-jurisdiction={
+        getJurisdictionBadgeInfo(wallet.jurisdiction, wallet.frame?.activeEntity?.core?.config.jurisdiction?.chainId)
+          ?.className ?? 'generic'
+      }
+    >
       <a className="skip-link" href="#wallet-content">
         Skip to content
       </a>
@@ -96,8 +102,24 @@ export function Shell({ children }: { children: ReactNode }) {
 
       <main className="main" id="wallet-content" tabIndex={-1}>
         <JurisdictionBanner wallet={wallet} />
-        <Tour />
-        {children}
+        {assets.ready ? (
+          <>
+            <Tour />
+            {children}
+          </>
+        ) : (
+          <section className="stack" role={assets.error ? 'alert' : 'status'}>
+            <p>{assets.error ? 'Could not load your assets.' : 'Loading your assets…'}</p>
+            {assets.error && (
+              <>
+                <p className="note">{assets.error}</p>
+                <button className="btn" onClick={assets.retry}>
+                  Retry
+                </button>
+              </>
+            )}
+          </section>
+        )}
       </main>
 
       <nav className={`tabbar${FLOW_ROUTES.has(pathname) ? ' flow' : ''}`} aria-label="Primary">

@@ -5,11 +5,17 @@
  * frontend sends them, with the sandbox's local equivalents where the page
  * hosts the chain itself.
  */
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { isAddress } from 'ethers';
-import { postJson } from '../http';
+import { postJson, resolveApiBase } from '../http';
 import { useApp } from '../store';
 import { hostedJAdapter } from './move';
+import { requireAdapter } from '../adapter';
+import type { RuntimeAdapterViewFrame } from '@xln/core/api/public/runtime-module';
+import {
+	fetchExternalTokenCatalog,
+	requestExternalWalletSnapshot,
+} from '@xln/frontend/lib/components/Entity/external-wallet-reader';
 
 export type ExternalWalletRow = {
 	tokenId: number;
@@ -31,10 +37,14 @@ export type ExternalWallet = {
 	rows: ExternalWalletRow[];
 };
 
-const normalize = (value: unknown): string => String(value || '').trim().toLowerCase();
+const normalize = (value: unknown): string =>
+	String(value || '')
+		.trim()
+		.toLowerCase();
 
 /** One snapshot of the signer's ERC20 balances and Depository allowances at the chain head. */
 export async function readExternalWallet(entityId: string, signerId: string): Promise<ExternalWallet> {
+	if (requireAdapter().mode === 'remote') return readRemoteExternalWallet(entityId, signerId);
 	const jadapter = await hostedJAdapter(entityId, signerId);
 	const registry = await jadapter.getTokenRegistry();
 	// readWalletSnapshot reads ERC-20 balanceOf/allowance. ERC-1155 company
@@ -49,7 +59,9 @@ export async function readExternalWallet(entityId: string, signerId: string): Pr
 		includeNativeBalance: true,
 		blockTag: headBlockNumber,
 	});
-	const tokenErrors = new Map((snapshot.tokenErrors ?? []).map(entry => [normalize(entry.tokenAddress), String(entry.error || 'read failed')]));
+	const tokenErrors = new Map(
+		(snapshot.tokenErrors ?? []).map(entry => [normalize(entry.tokenAddress), String(entry.error || 'read failed')]),
+	);
 	const rows: ExternalWalletRow[] = tokens.map((token, index) => {
 		const error = tokenErrors.get(normalize(token.address));
 		return {
@@ -66,6 +78,46 @@ export async function readExternalWallet(entityId: string, signerId: string): Pr
 	return { owner: normalize(signerId), depository, headBlockNumber, native: snapshot.nativeBalance, rows };
 }
 
+/** Remote wallets use the same validated HTTP catalog/snapshot reader as the full wallet. */
+async function readRemoteExternalWallet(entityId: string, signerId: string): Promise<ExternalWallet> {
+	const frame = await requireAdapter().read<RuntimeAdapterViewFrame>('view-frame', {
+		entityId,
+		accountsLimit: 1,
+		booksLimit: 1,
+	});
+	const depository = String(frame.activeEntity?.core?.config.jurisdiction?.depositoryAddress || '');
+	if (!isAddress(depository)) throw new Error('JURISDICTION_DEPOSITORY_UNAVAILABLE');
+	const apiBase = resolveApiBase();
+	const tokens = (await fetchExternalTokenCatalog(apiBase, entityId)).filter(token => token.tokenType === 0);
+	const snapshot = await requestExternalWalletSnapshot(
+		apiBase,
+		entityId,
+		signerId,
+		tokens,
+		tokens.map(token => ({ tokenAddress: token.address, spender: depository })),
+	);
+	if (!snapshot) throw new Error('EXTERNAL_WALLET_SNAPSHOT_UNAVAILABLE');
+	const headBlockNumber = snapshot.headBlockNumber;
+	if (typeof headBlockNumber !== 'number' || !Number.isSafeInteger(headBlockNumber))
+		throw new Error('EXTERNAL_WALLET_HEAD_MISSING');
+	const rows = tokens.map((token, index) => {
+		const error = snapshot.tokenErrors?.find(
+			entry => normalize(entry.tokenAddress) === normalize(token.address),
+		)?.error;
+		return {
+			tokenId: token.tokenId!,
+			symbol: token.symbol,
+			name: token.symbol,
+			address: token.address,
+			decimals: token.decimals,
+			balance: snapshot.balances[index]!,
+			allowance: snapshot.allowanceValues[index]!,
+			...(error ? { error } : {}),
+		};
+	});
+	return { owner: normalize(signerId), depository, headBlockNumber, native: snapshot.nativeBalance, rows };
+}
+
 export type FaucetKind = 'erc20' | 'gas' | 'reserve' | 'offchain';
 
 /**
@@ -74,26 +126,52 @@ export type FaucetKind = 'erc20' | 'gas' | 'reserve' | 'offchain';
  */
 export async function requestFaucet(
 	kind: FaucetKind,
-	input: { entityId: string; signerId: string; runtimeId: string; jurisdiction: string; hubEntityId?: string; tokenId: number; tokenSymbol: string; amount: string },
+	input: {
+		entityId: string;
+		signerId: string;
+		runtimeId: string;
+		jurisdiction: string;
+		hubEntityId?: string;
+		tokenId: number;
+		tokenSymbol: string;
+		amount: string;
+	},
 ): Promise<void> {
 	const jurisdiction = input.jurisdiction;
-	if ((kind === 'erc20' || kind === 'gas') && !jurisdiction) throw new Error('Select a network before requesting test funds.');
+	if ((kind === 'erc20' || kind === 'gas') && !jurisdiction)
+		throw new Error('Select a network before requesting test funds.');
 	switch (kind) {
 		case 'erc20':
-			await postJson('/api/faucet/erc20', { userAddress: input.signerId, tokenSymbol: input.tokenSymbol, amount: input.amount, jurisdiction });
+			await postJson('/api/faucet/erc20', {
+				userAddress: input.signerId,
+				tokenSymbol: input.tokenSymbol,
+				amount: input.amount,
+				jurisdiction,
+			});
 			return;
 		case 'gas':
 			// The server sizes a gas grant from current fees and its configured cap.
 			await postJson('/api/faucet/gas', { userAddress: input.signerId, jurisdiction });
 			return;
 		case 'reserve':
-			await postJson('/api/faucet/reserve', { userEntityId: input.entityId, tokenId: input.tokenId, tokenSymbol: input.tokenSymbol, amount: input.amount });
+			await postJson('/api/faucet/reserve', {
+				userEntityId: input.entityId,
+				tokenId: input.tokenId,
+				tokenSymbol: input.tokenSymbol,
+				amount: input.amount,
+			});
 			return;
 		case 'offchain':
 			if (!input.hubEntityId) throw new Error('Pick the hub that funds the account');
 			await postJson(
 				'/api/faucet/offchain',
-				{ userEntityId: input.entityId, userRuntimeId: input.runtimeId, hubEntityId: input.hubEntityId, tokenId: input.tokenId, amount: input.amount },
+				{
+					userEntityId: input.entityId,
+					userRuntimeId: input.runtimeId,
+					hubEntityId: input.hubEntityId,
+					tokenId: input.tokenId,
+					amount: input.amount,
+				},
 				30_000,
 			);
 			return;
@@ -107,24 +185,34 @@ export async function requestFaucet(
  * committed runtime frame, throttled, embedded runtimes only (a remote runtime
  * feeds the same numbers through its own watcher into `core.externalWallet`).
  */
-export function useExternalWalletSync(entityId: string, signerId: string): void {
+export function useExternalWalletSync(entityId: string, signerId: string) {
 	const height = useApp(s => s.height);
 	const setExternalRows = useApp(s => s.setExternalRows);
+	const [snapshot, setSnapshot] = useState({ entityId: '', error: '' });
+	const [attempt, setAttempt] = useState(0);
 	useEffect(() => {
 		if (!entityId || !signerId) return;
 		let cancelled = false;
 		const timer = setTimeout(() => {
 			readExternalWallet(entityId, signerId)
 				.then(wallet => {
-					if (!cancelled) setExternalRows(wallet.rows);
+					if (!cancelled) {
+						setExternalRows(wallet.rows);
+						setSnapshot({ entityId, error: '' });
+					}
 				})
-				.catch(() => {
-					if (!cancelled) setExternalRows([]);
+				.catch(error => {
+					if (!cancelled) setSnapshot({ entityId: '', error: error instanceof Error ? error.message : String(error) });
 				});
 		}, 400);
 		return () => {
 			cancelled = true;
 			clearTimeout(timer);
 		};
-	}, [entityId, signerId, height, setExternalRows]);
+	}, [entityId, signerId, height, setExternalRows, attempt]);
+	return {
+		ready: Boolean(entityId) && snapshot.entityId === entityId,
+		error: snapshot.error,
+		retry: () => setAttempt(value => value + 1),
+	};
 }

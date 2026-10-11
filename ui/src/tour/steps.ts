@@ -28,12 +28,12 @@ const weth = (ctx: TourContext) => ctx.wallet.totals.find(token => token.tokenId
 const steps: TourStep[] = [
   {
     id: 'faucet',
-    title: 'Get 100 test USDC',
+    title: 'Get test money',
     instruction: ctx =>
       ctx.pathname === '/'
         ? ctx.wallet.accounts.length === 0
-          ? 'Open an account with a hub first. Then request 100 test USDC.'
-          : 'Get 100 test USDC below your balance. Then send a payment with no real money.'
+          ? 'Open an account with a hub first. Then request 100 test tokens.'
+          : 'Get 100 test tokens below your balance. Then send a payment with no real money.'
         : 'Open Home to get your test money.',
     target: ctx => home(ctx, ctx.wallet.accounts.length === 0 ? 'home-open-account' : 'home-faucet'),
     // Starting the guide after funding must never request another payment.
@@ -56,11 +56,11 @@ const steps: TourStep[] = [
       ctx.dom.has('receipt-open')
         ? 'Payment confirmed. Open its receipt when you are ready.'
         : ctx.pathname !== '/pay'
-          ? 'Open Pay below your balance. Next, choose H2 and send 25 test USDC.'
+          ? 'Open Pay below your balance. Choose a connected recipient and send 25 test tokens.'
           : ctx.dom.has('pay-recipient-options') || !ctx.dom.value('pay-to').trim()
-            ? 'Choose a recipient from the suggestions, for example H2.'
+            ? 'Choose a connected recipient from the suggestions.'
             : !ctx.dom.value('pay-amount').trim()
-              ? 'Enter 25 USDC.'
+              ? 'Choose the funded asset and enter 25.'
               : 'Review the amount and fee, then confirm the payment.',
     done: ctx => ctx.dom.text('receipt-kicker') === 'Paid',
   },
@@ -89,10 +89,11 @@ const steps: TourStep[] = [
   {
     id: 'history',
     title: 'Find your payment and swap',
-    instruction: ctx => ctx.pathname === '/activity'
-      ? 'Select your payment or filled swap to read its receipt. Compare the amount and status, then choose Next chapter.'
-      : 'Open Activity. Select a record to see its amount, status and hashes.',
-    target: ctx => ctx.pathname === '/activity' ? 'activity-row' : 'nav-activity',
+    instruction: ctx =>
+      ctx.pathname === '/activity'
+        ? 'Select your payment or filled swap to read its receipt. Compare the amount and status, then choose Next chapter.'
+        : 'Open Activity. Select a record to see its amount, status and hashes.',
+    target: ctx => (ctx.pathname === '/activity' ? 'activity-row' : 'nav-activity'),
     // Reading a receipt is user-paced; entering Activity must not immediately navigate away.
   },
   ...FEATURE_CHAPTERS,
@@ -107,5 +108,11 @@ const steps: TourStep[] = [
 
 export const TOUR_STEPS = steps.map(step => {
   const lesson = WALLET_LESSONS.find(lesson => lesson.id === step.id);
-  return { ...step, example: lesson?.example, value: lesson?.value, outcome: lesson?.outcome, prerequisite: lesson?.prerequisite };
+  return {
+    ...step,
+    example: lesson?.example,
+    value: lesson?.value,
+    outcome: lesson?.outcome,
+    prerequisite: lesson?.prerequisite,
+  };
 });

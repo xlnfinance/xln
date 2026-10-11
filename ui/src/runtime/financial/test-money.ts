@@ -5,6 +5,7 @@ import { requestFaucet } from '../financial/external';
 import { readAccountState } from '../financial/swap';
 import { accountNetBalance } from '@xln/frontend/lib/utils/ui/accountBalance';
 import { sendEntityTxs, waitFor } from '../tx';
+import { getTokenMeta, knownTokenIds, parseAmount } from '../format';
 
 export async function receiveTestMoney(wallet: WalletView, onStage: (stage: string) => void): Promise<void> {
   const hub = wallet.accounts.find(account => account.isHub && !account.disputed);
@@ -12,11 +13,14 @@ export async function receiveTestMoney(wallet: WalletView, onStage: (stage: stri
   const xln = peekXLN();
   if (!xln) throw new Error('Wallet runtime is not ready');
   const entityId = wallet.entityId;
+  if (!knownTokenIds().includes(1)) throw new Error('The test faucet asset is not registered on this network.');
+  const token = getTokenMeta(1);
+  const amount = parseAmount('100', token.decimals);
   const input = {
     ownerEntityId: entityId,
     counterpartyEntityId: hub.counterpartyId,
     tokenId: 1,
-    requiredInboundAmount: 100_000_000n,
+    requiredInboundAmount: amount,
     collateralPercent: 0,
     creditBufferBps: 0 as const,
     allowOpenAccount: false,
@@ -54,8 +58,8 @@ export async function receiveTestMoney(wallet: WalletView, onStage: (stage: stri
     runtimeId: requireAdapter().runtimeId,
     hubEntityId: hub.counterpartyId,
     tokenId: 1,
-    tokenSymbol: 'USDC',
+    tokenSymbol: token.symbol,
     amount: '100',
   });
-  await waitFor(async () => balance(await read()) >= before + 100_000_000n, 'confirmed test payment');
+  await waitFor(async () => balance(await read()) >= before + amount, 'confirmed test payment');
 }

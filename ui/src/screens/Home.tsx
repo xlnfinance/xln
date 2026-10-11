@@ -371,7 +371,7 @@ export function Home() {
                 document.querySelector<HTMLElement>('[data-testid=home-faucet]')?.focus();
               }}
             >
-              Get test USDC
+              Get test money
             </button>
             <button type="button" className="btn" data-testid="add-money-request" onClick={() => navigate('/receive')}>
               Receive a payment
