@@ -1,6 +1,6 @@
 import type { EntityInput } from '../../entity/types';
 import type { RoutedEntityInput, RuntimeReplica } from '../types';
-import { encodeCanonicalConsensusBytes } from '../../protocol/serialization/binary-codec';
+import { encodeBinaryPayload } from '../../protocol/serialization/binary-codec';
 import { keccakBytesHash } from '../../protocol/crypto/keccak-text';
 
 export const isLocalRuntimeOutput = (env: RuntimeReplica, output: RoutedEntityInput): boolean => {
@@ -26,7 +26,11 @@ const payloadKeys = (input: EntityInput): string[] => {
   for (const [signer, attestation] of input.jPrefixAttestations ?? []) {
     payloads.push(['j-prefix', signer, attestation]);
   }
-  return payloads.map(value => keccakBytesHash(encodeCanonicalConsensusBytes(value)));
+  // Match the persisted Runtime input representation: local authority symbols
+  // are live admission metadata, never WAL payload. A peer-ready/scheduled wake
+  // can be queued beside the output; strict consensus hashing would halt dispatch.
+  // This index grants no authority and never changes the original signed input.
+  return payloads.map(value => keccakBytesHash(encodeBinaryPayload(value, { omitSymbolKeys: true })));
 };
 
 export const localOutputIncludedIn = (inputs: readonly EntityInput[], outputs: readonly RoutedEntityInput[]) => {

@@ -29,8 +29,8 @@ Only collateral secures recovery. The full signed term-plus-late coupon reserves
 accepted Account risk. Repayment debits the exact Account-clock quote within the
 borrower's maximum; borrower default never erases the saver liability.
 
-Current evidence: 554 related tests / 448,400 assertions, three real-clock local
-funding/exit proofs, two watchtower tests, three rebuilt browser journeys,
+Checkpoint evidence: 554 related tests / 448,400 assertions, three real-clock local
+funding/exit proofs, two watchtower tests, nine rebuilt browser journeys,
 145 exact fixed WAL frames before/after through TS W1/W4, 49 Hardhat cases and
 16 gas vectors. Old native claims missing explicit late terms reject;
 use a fresh deployment domain, never retrofit old signatures. The full `bun run check` passes for the coherent local
@@ -38,6 +38,10 @@ source/tests/artifacts checkpoint. Four real SIGKILL boundaries preserve
 loan maturity/default, saver close and exact repayment, including a deferred local
 ACK across two crashes. This uses a controlled clock; funded public Sepolia
 real-clock exits, valid live load and immutable release gates remain required.
+The subsequent payment/swap run exposed a bootstrap crash: outbox matching tried
+to consensus-hash a live recovery marker. Using the canonical WAL payload encoder
+fixes it without changing signed inputs. Six payment/swap journeys, 37 related
+recovery tests, 110-frame TS W1/W4 exact replay and full check now pass.
 The current 1,000-user run settles 20,000 payments with zero pending ACKs but
 drains in 26,077ms against the unchanged 25,000ms limit, with production diagnostic
 counters disabled. Redundant signed gossip, old-state proof calculation and parent

@@ -878,7 +878,7 @@
     ".logs/crisis-20261011/wallet-svelte-results.json": "070d9067bb549e0257463ba10b0e314f2820704e4844fe80db340035d022630f",
     ".logs/hlt-evidence/2026-10-11T02-37-40-400Z/replays/1791688280064-parity.json": "ccbdcb94b1c12544eeaa1745bf0449ee9e7ade5af4b80739f82ad413b73d9046"
   },
-  "releaseStatus": "NOT_RELEASE_CANDIDATE: local source/tests/artifacts checkpoint validated by full bun run check, 554 regressions, 3 local real-clock funding/exit proofs, 2 watchtower tests, 3 rebuilt React journeys and 145 fixed WAL frames exact before/after TS W1/W4. Live 20000 payments/zero pending drains in 26077ms, above 25000ms. Public Sepolia unfunded; no public deployment or push.",
+  "releaseStatus": "Local checkpoint plus verified outbox marker fix: full check, six new payment/swap journeys, 37 recovery tests and 110-frame W1/W4 replay pass. Live load remains 26077ms/25000ms. Public Sepolia unfunded; no public deployment or push.",
   "scope": "Crisis review followed by owner-authorized runtime funding/exit repairs. Shared working tree, not a frozen release candidate.",
   "timezone": "Europe/Istanbul",
   "lendingAuthorityClosure": {
@@ -954,10 +954,10 @@
     }
   },
   "methodReviewCurrent": {
-    "at": "2026-10-11T11:41:43.324Z",
-    "decision": "Stop treating intentionally synchronized artifacts as an indefinite drift blocker. Commit a reviewed coherent local checkpoint, excluding frozen Rust and foreign CI. Isolate real-clock tests within their economic-stand budget rather than running impossible combined ordinary suites.",
-    "evidence": "All five checkpoint gate groups pass. 554 regressions, 3 funding/exit cases, 2 watchtower cases, 3 React journeys, 145 exact fixed WAL frames and full bun run check. Source manifest unchanged during full check.",
-    "next": "Inspect the remaining measured live completion tail after checkpoint. Preserve 25-second drain, exact financial verification and WAL/fsync. Public deployment still needs test ETH; no repeated unchanged faucet attempts."
+    "at": "2026-10-11T12:13:48.900Z",
+    "decision": "Suspend performance work on any reproduced production crash. Reuse canonical WAL encoding instead of adding a second input projection; reproduce the crash before fixing, then rerun the failed production boundary.",
+    "evidence": "6/6 payment/swap browser journeys, 37 recovery tests including four SIGKILLs, 110 exact lending WAL frames W1/W4 and full check pass.",
+    "next": "Checkpoint the small outbox fix; inspect the measured live completion tail. Preserve the 25-second limit. Funding remains 0 ETH and the specific Ghost CAPTCHA confirmation is pending."
   },
   "lendingRequestStatus": {
     "result": "PASS",
@@ -1019,6 +1019,34 @@
       "url": "https://faucet.quicknode.com/ethereum/sepolia",
       "result": "Dedicated address entered through official UI. Continue rejected: Invalid ETH mainnet balance. FAQ claimed no minimum balance; actual UI rejection is authoritative. No funds received.",
       "screenshot": ".logs/crisis-20261011/quicknode-mainnet-balance-rejection.png"
+    },
+    "checkpointStatus": {
+      "mode": "status",
+      "address": "0x4a009FaaA692DE8f66d70b53E785Ae0f7a307902",
+      "chainId": 11155111,
+      "balanceEth": "0.0",
+      "gasPriceGwei": "0.000000015",
+      "path": ".logs/crisis-20261011/sepolia-checkpoint-status.json"
+    },
+    "ghostFaucet": {
+      "url": "https://ghostchain.io/faucet/ethereum-sepolia/",
+      "offeredEth": "0.01",
+      "status": "Specific Cloudflare CAPTCHA confirmation requested; no solve, claim or broadcast performed.",
+      "screenshot": ".logs/crisis-20261011/ghost-faucet-confirmation.png"
+    },
+    "outboxMarkerStatus": {
+      "mode": "status",
+      "address": "0x4a009FaaA692DE8f66d70b53E785Ae0f7a307902",
+      "chainId": 11155111,
+      "balanceEth": "0.0",
+      "gasPriceGwei": "0.000000016",
+      "path": ".logs/crisis-20261011/sepolia-outbox-marker-status.json"
+    },
+    "quicknodeRecheck": {
+      "at": "2026-10-11T12:13:48.900Z",
+      "url": "https://faucet.quicknode.com/ethereum/sepolia/api/claim-sepolia",
+      "reason": "FAQ now explicitly says no minimum mainnet balance.",
+      "actualResult": "UI still rejects: Invalid ETH mainnet balance. No claim or broadcast."
     }
   },
   "bankOfficerReleaseBoundary": {
@@ -1963,5 +1991,132 @@
       "sourceChangesDuringCheck": [],
       "releaseCandidate": false
     }
-  }
+  },
+  "localCheckpoint": {
+    "sha": "5d38b5d9bb6d81a4a9d4a806fddbece3813a5b88",
+    "paths": 201,
+    "pushed": false,
+    "releaseCandidate": false,
+    "excludedFrozenRustFiles": 6,
+    "foreignCiPreserved": true
+  },
+  "rejectedIpcProjectionExperiment": {
+    "at": "2026-10-11T11:58:55.964Z",
+    "baseSha": "5d38b5d9bb6d81a4a9d4a806fddbece3813a5b88",
+    "change": "Experiment skipped the recursive hex projection only in process-local sequential IPC. Reverted source and experiment-only vector after two failed live runs; current production code is the verified checkpoint.",
+    "checks": {
+      "l1": {
+        "tests": 58,
+        "assertions": 163,
+        "files": 3
+      },
+      "fixedReplayFrames": 35,
+      "exact": true
+    },
+    "diagnostic": {
+      "beforeWorkerEncodeMs": 2482.571,
+      "afterWorkerEncodeMs": 942.5439999999996,
+      "beforeResponseBytes": 280586748,
+      "afterResponseBytes": 456138414,
+      "samples": 1214,
+      "summary": ".logs/crisis-20261011/checkpoint-account-summary.json"
+    },
+    "runs": [
+      {
+        "path": ".logs/crisis-20261011/ipc-projection-live/hlt-payment-load-report.json",
+        "sha256": "e0fa0d6c511067b082afe2a0fe6326ffcc9603d934f115cd576e5bcfe521d224",
+        "settled": 20000,
+        "drainMs": 25191,
+        "limitMs": 25000,
+        "passed": false,
+        "pendingFrames": 0
+      },
+      {
+        "path": ".logs/crisis-20261011/ipc-projection-live-repeat/hlt-payment-load-report.json",
+        "sha256": "76341740431b30e6071c3b5de407906a7ed5660d6d23244e64def63335328b62",
+        "settled": 20000,
+        "drainMs": 26043,
+        "limitMs": 25000,
+        "passed": false,
+        "pendingFrames": 0
+      }
+    ],
+    "decision": "Do not retain a 63% IPC byte increase with no convincing live benefit. N=2 candidate runs versus one production-default baseline is not a stable causal estimate."
+  },
+  "outboxMarkerBoundary": {
+    "at": "2026-10-11T12:13:48.899Z",
+    "baseSha": "5d38b5d9bb6d81a4a9d4a806fddbece3813a5b88",
+    "firstFailure": "checkpoint-wallet-payments-swaps bootstrap halted H2: XLN_BINARY_CODEC_UNSUPPORTED:path=$[1]:detail=symbol-key; zero browser tests ran.",
+    "fix": "Use the existing canonical WAL payload encoder for process-local outbox matching. Runtime authority symbols never belong to persisted input bytes. Do not mutate input objects or weaken consensus hashing/authentication.",
+    "regression": "A real peer-ready recovery marker sharing the recipient queue cannot crash matching, retire unrelated Account evidence, or acquire authority after cloning.",
+    "l1": {
+      "tests": 36,
+      "assertions": 93,
+      "files": 3
+    },
+    "recovery": {
+      "tests": 37,
+      "assertions": 108,
+      "files": 4,
+      "processKills": 4
+    },
+    "browser": {
+      "startTime": "2026-10-11T12:09:19.132Z",
+      "duration": 54354.31,
+      "expected": 6,
+      "skipped": 0,
+      "unexpected": 0,
+      "flaky": 0,
+      "path": ".logs/crisis-20261011/outbox-marker-wallet-payments-swaps/wallet-results.json"
+    },
+    "replay": [
+      {
+        "workers": 1,
+        "frames": 110,
+        "exact": true,
+        "path": ".logs/crisis-20261011/profile-routing-react-fixed/lending-parity-w1-outbox-marker.json",
+        "sha256": "e54c27d3d78860efa8a5ec4eaa9347e13d7e0cf5c1e4fe2e865276441923a3c1"
+      },
+      {
+        "workers": 4,
+        "frames": 110,
+        "exact": true,
+        "path": ".logs/crisis-20261011/profile-routing-react-fixed/lending-parity-w4-outbox-marker.json",
+        "sha256": "d597515357606043caa0150812ffe4e5c2bf3bf201e6ed961129a896f5d418b9"
+      }
+    ],
+    "fullCheck": {
+      "exitCode": 0,
+      "sourceGates": 38,
+      "shortGates": 2,
+      "outerLongGates": 3,
+      "sourceWallMs": 27640
+    },
+    "sha256": {
+      ".logs/crisis-20261011/outbox-marker-red.log": "aa0dd318d7709220e7759086789942c73be9c4869fddd7e147698964e51b8a5b",
+      ".logs/crisis-20261011/outbox-marker-l1.log": "15e87852fb46e83d8b5a02fb90acf9d9ace319819fc6c9dbbdbd42722dff5e9e",
+      ".logs/crisis-20261011/outbox-marker-recovery.log": "a7309ee941e8f7f53dcd57303ebf5729d59209f3ccd04cabc91acd3a97508864",
+      ".logs/crisis-20261011/outbox-marker-check.log": "926186618405427ae4fabba16a2acd636fe1cb40cbd1ef098eb5a7a0eb537f02"
+    }
+  },
+  "checkpointAdditionalWalletEvidence": [
+    {
+      "path": ".logs/crisis-20261011/checkpoint-wallet-funding-exit/wallet-results.json",
+      "startTime": "2026-10-11T11:58:23.519Z",
+      "duration": 36827.994999999995,
+      "expected": 3,
+      "skipped": 0,
+      "unexpected": 0,
+      "flaky": 0
+    },
+    {
+      "path": ".logs/crisis-20261011/checkpoint-wallet-recovery/wallet-results.json",
+      "startTime": "2026-10-11T12:00:11.903Z",
+      "duration": 43603.424,
+      "expected": 3,
+      "skipped": 0,
+      "unexpected": 0,
+      "flaky": 0
+    }
+  ]
 }

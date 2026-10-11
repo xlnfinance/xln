@@ -2,7 +2,8 @@
 
 ## Current SHA
 
-Base `f1464e84e916a65146c046b576a976c4359bcd25`, shared dirty main, 2026-10-11.
+Runtime checkpoint `5d38b5d9bb6d81a4a9d4a806fddbece3813a5b88`, main, 2026-10-11.
+201 reviewed paths committed locally; no push. Frozen Rust and foreign CI remain dirty.
 TS only, React only, Ethereum same-J, lending included. Rust stays frozen.
 Work solo. Preserve frozen Rust, foreign CI edits and unknown-owner HANDOFF.md.
 Dedicated Sepolia key management, free faucet funding and deployment are authorized.
@@ -13,7 +14,15 @@ its saver despite borrower default. [todo.md](../todo.md) is the live queue.
 ## Last green command
 
 `bun run check` passes: two short gates, 38 source gates and three outer long gates;
-source wall 26,840ms. The source manifest is unchanged throughout verification.
+source wall 27,640ms after the local outbox marker fix.
+
+The payment/swap bootstrap reproduced a fatal strict-codec rejection of a Runtime
+authority symbol. Outbox matching now uses the existing canonical WAL payload
+encoder without mutating signed inputs or changing consensus hashing. The named
+regression fails before the fix. All six rebuilt payment/swap journeys pass,
+zero skips/flaky retries, 54.354s. Related recovery: 37 tests / 108 assertions,
+including four actual SIGKILLs. The 110-frame lending WAL remains exact through
+TS W1/W4. Full check passes. This closes the new production blocker.
 
 Checkpoint regressions: 554 passed, 448,400 assertions, 46 files, 34.76s.
 Isolated real-clock Anvil proofs: three passed / 64 assertions / 148.00s;
@@ -23,7 +32,9 @@ Offline-wallet watchtower: two passed / 130 assertions / 46.74s.
 The two earlier combined commands exceeded their 60s budget and remain failures;
 separating real-clock economic stands preserves every financial assertion.
 
-Three rebuilt React lending journeys pass, zero skips, 38.066s. Four actual
+At the preceding checkpoint, nine React journeys passed: three lending,
+three funding/exit and three recovery. Browser dispute deadlines use a private
+clock advance; separate CLI economic proofs above use real time. Four actual
 SIGKILLs across five processes preserve origination, controlled-clock default,
 saver close and repayment, including a local ACK deferred across another crash.
 Exact output redelivery causes no second debit. This does not prove public-chain exits.
@@ -42,6 +53,8 @@ Artifacts and TypeChain are synchronized; eight other contracts match literally.
 
 The production-default 1,000-user load commits 20,000 payments, zero pending ACKs,
 but drains in 26,077ms against 25,000ms. No valid TPS claim follows.
+A raw-string IPC experiment returned 25,191ms and 26,043ms, both failed, with
+63% more IPC bytes. It was fully reverted before the outbox correctness fix.
 Hub WAL/fsync is enabled; canonical load users are intentionally RAM-only.
 Diagnostic counters are off in this run. The instrumented run takes 26,392ms;
 N=1 shared-desktop runs do not establish a stable causal speedup.
@@ -55,6 +68,8 @@ Frozen Rust and foreign CI remain outside the checkpoint; this is not a release.
 Under `.logs/crisis-20261011/`: `checkpoint-fast-regressions.log`,
 `checkpoint-watchtower.log`, `checkpoint-funding-exit.log`, `checkpoint-react/`,
 `checkpoint-files.json`, `checkpoint-bytecode-review.log`,
+`outbox-marker-recovery.log`, `outbox-marker-check.log`,
+`outbox-marker-wallet-payments-swaps/`,
 `priming-scope-production-load/`, `priming-scope-live/`,
 `lending-crash-live-ts1000/priming-scope-comparison.json`,
 `profile-routing-react-fixed/priming-scope-comparison.json`.
@@ -72,7 +87,10 @@ Sepolia runner: `/Users/zigota/.config/xln/sepolia-deployer/run.ts`.
 Address `0x4a009FaaA692DE8f66d70b53E785Ae0f7a307902`; key stays in macOS Keychain.
 After funding, current-bytecode dry-run, deploy, secured exit and debt proof.
 Do not retry unchanged empty/retired faucets. Specific CAPTCHA confirmation remains
-unanswered; no bypass. The PoW faucet also rejects at CAPTCHA; no mining started.
+unanswered; no bypass. The PoW faucet also rejects at CAPTCHA; no mining started. A specific Cloudflare
+CAPTCHA confirmation for the 0.01 ETH ghostchain.io faucet is now pending.
+Quicknode's revised FAQ says no mainnet balance is needed, but its UI still
+rejects this empty signer. Latest chain check remains 0 ETH.
 
 ## Remaining final gates
 

@@ -19,8 +19,9 @@ import {
 } from '../../../runtime/mempool/propose-accounts-now';
 import { MAX_PROPOSE_ACCOUNTS_NOW_COUNTERPARTIES } from '../../../entity/consensus/account/propose-accounts-now-validation';
 import type { EntityReplica, EntityState } from '../../../entity/types';
-import type { RuntimeReplica } from '../../../runtime/types';
+import type { RoutedEntityInput, RuntimeReplica } from '../../../runtime/types';
 import type { AccountInput } from '../../../types/account';
+import { localOutputIncludedIn } from '../../../runtime/delivery/local-outbox';
 
 const entityId = (byte: string): string => `0x${byte.repeat(32)}`;
 const addr20 = (byte: string): string => `0x${byte.repeat(20)}`;
@@ -128,6 +129,29 @@ const fixture = (label: string, signerId = PROPOSER): Fixture => {
 };
 
 describe('runtime proposeAccountsNow', () => {
+  test('a queued local recovery marker cannot halt exact outbox payload matching', () => {
+    const { env } = fixture('propose-accounts-now-outbox');
+    const [marker] = createProposeAccountsNowInputs(env, PEER_RUNTIME);
+    if (!marker) throw new Error('TEST_RECOVERY_MARKER_MISSING');
+    const tx = { type: 'accountInput' as const, data: retainedProposal(PEER) };
+    const row: RoutedEntityInput = {
+      entityId: HUB,
+      signerId: PROPOSER,
+      runtimeId: env.runtimeId!,
+      entityTxs: [tx],
+    };
+    // The local marker can share a recipient/queue with signed Account evidence.
+    // It must neither crash dispatch nor make an unrelated output look delivered.
+    expect(localOutputIncludedIn([marker], [row])(row)).toBe(false);
+    expect(localOutputIncludedIn([{ ...marker, entityTxs: [...marker.entityTxs!, tx] }], [row])(row)).toBe(true);
+    const changed = { ...row, entityTxs: [{ ...tx, data: retainedProposal(OTHER_HOST_PEER) }] };
+    expect(localOutputIncludedIn([marker, changed], [row])(row)).toBe(false);
+    expect(() => assertProposeAccountsNowTxAuthorized(marker.entityTxs![0]!, false)).not.toThrow();
+    expect(() => assertProposeAccountsNowTxAuthorized(structuredClone(marker.entityTxs![0]!), false)).toThrow(
+      'PROPOSE_ACCOUNTS_NOW_EXTERNAL_INGRESS_REJECTED',
+    );
+  });
+
   test('creates exactly one marker for the peer runtime that owes an ACK', () => {
     const { env } = fixture('propose-accounts-now-create');
 
