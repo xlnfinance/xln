@@ -8,28 +8,34 @@ Keep the empty frozen-core mechanism for later use; its current protected-file
 count is zero, not security coverage. This correction supersedes earlier scope
 statements below; earlier deployment results remain historical evidence.
 
-- Current committed source SHA: `68cf424f2687760b404e9b02c7ddef04d087a9a1`.
-  The two local source commits fix proof nonces/local delivery and restore TS
-  launch admission plus React CI. Neither has been deployed. Foreign untracked
+- Current verified source SHA: `e3b624173fe3ddef858abf873b36880ccd6e6b0b`.
+  The candidate rejects deferred commands before batching, binds exit gas to
+  production compiler templates and repairs the React runner report path.
+  It has not been deployed. Foreign untracked
   files are preserved in `/Users/zigota/.config/xln/parked-untracked-20261012/`;
   `restore-paths.json` records their original paths.
-- Last green: clean-source React E2E 6/6, zero skips/retries, 78.232 seconds;
-  `lock-ahb` completes 85 Runtime frames; exit gas suite 17/17, including
-  127 unsolicited assets with finalize gas 928,658; `bun run check` passes.
-  All four checks used the same committed source SHA above.
-- First red: main CI `38173656472` expects profile-fetch batches to finish in
-  timer order, but receives the valid sizes `[1, 256]` instead of `[256, 1]`.
-  Other CI failures include Node loading TypeScript during deployment, resource
-  assumptions, timeouts and frozen Rust fixtures. CI is not green. The existing
-  watchdog fixes alone do not address all failures.
-- Artifact: `docs/evidence/rc-20261012/react-and-exit-68cf424f2.json` contains
-  case-level results, gas measurements, commands and full-log hashes. The public
-  alpha remains on `7c3f63f9841f4e8b61ac5eee5dbe4f9710b10621` and is healthy.
-- Next command: `bun test core/__tests__/api/server/gossip-profiles.test.ts`;
-  correct the batch-order assertion while retaining exact membership and limits.
+- Last green: clean-source React E2E 6/6, zero skips/retries, 78.686 seconds,
+  including the full production-smoke runner; `lock-ahb` completes 85 Runtime
+  frames; exit gas 25/25, including 512 bounded fuzz invocations and eight exact
+  production compiler-template matches; `bun run check` passes 38 source gates.
+  All four checks used the same committed source SHA above. Focused admission
+  and release-order regressions also pass: 12 tests, 191 assertions.
+- First red: latest completed main CI `38180822258` on `f22866824` passed 5/7
+  jobs. Failures were stale release-order expectations, frozen loan origination
+  and a two-Anvil deployment timeout. The candidate updates the expectations,
+  separates deferred loan tests and drains Anvil stdout. New CI must confirm
+  the timeout fix; no consecutive green CI run is claimed.
+- Artifact: `docs/evidence/rc-20261012/ts-react-exit-e3b624173.json` contains
+  case-level results, gas measurements, commands and log hashes; its adjacent
+  gas transcript is durable evidence. It supersedes the older gas measurements
+  that used a different Foundry compiler profile. The public alpha remains on
+  `7c3f63f9841f4e8b61ac5eee5dbe4f9710b10621`.
+- Next command: `git push origin main`; inspect the resulting build-and-test
+  run and fix its first remaining failure before promoting the candidate.
 - Remaining final gates: ten consecutive green main CI runs and branch protection;
   remove production Rust/QA imports; complete React P5/P6 and proof import; refresh
-  committed-SHA exit gas and Sepolia P4/P5/P6 receipts; owner-reviewed release package.
+  Sepolia P4/P5/P6 receipts; owner-reviewed release package. Local exit gas is
+  current; public-chain receipts still require refresh.
 
 Owner priority, 2026-10-11 17:28 UTC: ship a public Sepolia deployment and usable
 asset flow; Base is an alternative, not a prerequisite. Finish the TS launch path

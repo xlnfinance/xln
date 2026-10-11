@@ -1,0 +1,154 @@
+$ bun tools/stand-lock.ts run --reason "rc-e3b624173-exit-gas" --timeout-ms "60000" -- forge test --root jurisdictions --match-contract "Dispute(GasAdmission|IngressGas|CounterGas)Test|FundingExitTest" --fuzz-seed "0x20261012" -vv
+No files changed, compilation skipped
+
+Ran 2 tests for test/foundry/stress/FundingExit.t.sol:FundingExitTest
+[PASS] test_fundingTopupExitAndReopenLeft() (gas: 2092640)
+[PASS] test_fundingTopupExitAndReopenRight() (gas: 2047055)
+Suite result: ok. 2 passed; 0 failed; 0 skipped; finished in 5.34ms (7.05ms CPU time)
+
+Ran 1 test for test/foundry/stress/DisputeIngressGas.t.sol:DisputeIngressGasTest
+[PASS] test_unsolicitedCompanySharesCannotEnlargeExitProof() (gas: 79496496)
+Logs:
+  start total conservative gas 665697
+  finalize total conservative gas 928658
+
+Suite result: ok. 1 passed; 0 failed; 0 skipped; finished in 63.20ms (61.53ms CPU time)
+
+Ran 16 tests for test/foundry/stress/DisputeGasAdmission.t.sol:DisputeGasAdmissionTest
+[PASS] testFuzz_budget5m_combinedStockFrontier(uint8,uint8,uint8,uint8) (runs: 256, μ: 5240575, ~: 5314914)
+Logs:
+  Bound result 1
+  Bound result 18
+  Bound result 1
+  Bound result 1
+  start total conservative gas 3364520
+  reveal total conservative gas 191043
+  finalize total conservative gas 3541160
+
+[PASS] test_budget5m_coldDebts22() (gas: 3465060)
+Logs:
+  start total conservative gas 543321
+  finalize total conservative gas 3087202
+
+[PASS] test_budget5m_fullWidthSavings18MaxStarter() (gas: 5608823)
+Logs:
+  start total conservative gas 3418280
+  finalize total conservative gas 3552680
+
+[PASS] test_budget5m_irrelevantSecrets() (gas: 7702245)
+Logs:
+  start total conservative gas 2997160
+  finalize total conservative gas 4453117
+
+[PASS] test_budget5m_maxStarterMmFrontier() (gas: 6835895)
+Logs:
+  start total conservative gas 3423400
+  reveal total conservative gas 851958
+  finalize total conservative gas 3925229
+
+[PASS] test_budget5m_maxStarterTenDebts() (gas: 4401854)
+Logs:
+  start total conservative gas 2807720
+  finalize total conservative gas 3482802
+
+[PASS] test_budget5m_mixed32() (gas: 1532296)
+Logs:
+  start total conservative gas 694062
+  finalize total conservative gas 1181849
+
+[PASS] test_budget5m_mixedWithRevealedPulls() (gas: 2403518)
+Logs:
+  start total conservative gas 709674
+  reveal total conservative gas 696346
+  finalize total conservative gas 1387255
+
+[PASS] test_budget5m_mmFrontier() (gas: 3540625)
+Logs:
+  start total conservative gas 947367
+  reveal total conservative gas 851958
+  finalize total conservative gas 2263413
+
+[PASS] test_budget5m_partialPulls18() (gas: 4169331)
+Logs:
+  start total conservative gas 947367
+  reveal total conservative gas 1002252
+  finalize total conservative gas 2263413
+
+[PASS] test_budget5m_payments32() (gas: 1578318)
+Logs:
+  start total conservative gas 694050
+  finalize total conservative gas 1214143
+
+[PASS] test_budget5m_revealedPulls18() (gas: 2151319)
+Logs:
+  start total conservative gas 616772
+  reveal total conservative gas 851958
+  finalize total conservative gas 1008774
+
+[PASS] test_budget5m_savings80MaxStarter() (gas: 5184410)
+Logs:
+  start total conservative gas 3912360
+  finalize total conservative gas 3930280
+
+[PASS] test_budget5m_savingsMixedMaxStarter() (gas: 5408503)
+Logs:
+  start total conservative gas 3364520
+  reveal total conservative gas 463028
+  finalize total conservative gas 3402920
+
+[PASS] test_budget5m_swaps32() (gas: 1406845)
+Logs:
+  start total conservative gas 694062
+  finalize total conservative gas 1069591
+
+[PASS] test_budget5m_wideColdDebts22() (gas: 4340315)
+Logs:
+  start total conservative gas 543321
+  finalize total conservative gas 3962802
+
+Suite result: ok. 16 passed; 0 failed; 0 skipped; finished in 311.96ms (359.80ms CPU time)
+
+Ran 6 tests for test/foundry/stress/DisputeCounterGas.t.sol:DisputeCounterGasTest
+[PASS] testFuzz_budget5m_counterStockFrontier(uint8,uint8,uint8,uint8) (runs: 256, μ: 5418442, ~: 5503262)
+Logs:
+  Bound result 1
+  Bound result 16
+  Bound result 2
+  Bound result 0
+  start total conservative gas 2773160
+  counter total conservative gas 686286
+  finalize total conservative gas 3460520
+
+[PASS] test_budget5m_counterMmFrontierMaxStarter() (gas: 7033650)
+Logs:
+  start total conservative gas 2773160
+  counter total conservative gas 795560
+  reveal total conservative gas 834878
+  finalize total conservative gas 3934015
+
+[PASS] test_budget5m_counterPayments32MaxStarter() (gas: 5287076)
+Logs:
+  start total conservative gas 2773160
+  counter total conservative gas 451109
+  finalize total conservative gas 3648911
+
+[PASS] test_budget5m_counterSingleToken() (gas: 988215)
+Logs:
+  start total conservative gas 469203
+  counter total conservative gas 287970
+  finalize total conservative gas 430496
+
+[PASS] test_budget5m_counterWideColdDebts22() (gas: 4574172)
+Logs:
+  start total conservative gas 469203
+  counter total conservative gas 381973
+  finalize total conservative gas 3954400
+
+[PASS] test_budget5m_minimalSingleToken() (gas: 714372)
+Logs:
+  start total conservative gas 449300
+  finalize total conservative gas 399142
+
+Suite result: ok. 6 passed; 0 failed; 0 skipped; finished in 334.29ms (348.10ms CPU time)
+
+Ran 4 test suites in 334.83ms (714.78ms CPU time): 25 tests passed, 0 failed, 0 skipped (25 total tests)

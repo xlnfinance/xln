@@ -1,0 +1,417 @@
+{
+  "schema": 1,
+  "sourceSha": "e3b624173fe3ddef858abf873b36880ccd6e6b0b",
+  "recordedAt": "2026-10-11T23:15:52.823Z",
+  "sourceTreeCleanAtRecording": true,
+  "sourceTreeCleanDuringRuns": true,
+  "scope": "TypeScript, React wallet, Ethereum same-jurisdiction. Rust and new lending admission deferred.",
+  "check": {
+    "command": "bun run check",
+    "exitCode": 0,
+    "sourceGates": 38,
+    "sourceDurationMs": 26470
+  },
+  "focused": {
+    "command": "bun test core/__tests__/runtime/ingress/recovery/deferred-entity-admission.test.ts tests/release-integrity/release-gate-order.test.ts",
+    "exitCode": 0,
+    "tests": 12,
+    "assertions": 191
+  },
+  "lockAhb": {
+    "command": "bun run stand:run --reason rc-e3b624173-lock-ahb --timeout-ms 180000 -- bun core/scenarios/run.ts lock-ahb --mode=browservm",
+    "exitCode": 0,
+    "runtimeFrames": 85
+  },
+  "react": {
+    "command": "XLN_LOCAL_PROD_SMOKE_DIR=.logs/crisis-20261011/rc-e3b624173-react XLN_LOCAL_PROD_SMOKE_WALLET_TESTS=e2e-payment.spec.ts,e2e-lending-availability.spec.ts,e2e-dispute-finality.spec.ts,e2e-tower-restore.spec.ts bun run stand:run --reason rc-e3b624173-react --timeout-ms 180000 -- bun run prod:smoke:local",
+    "exitCode": 0,
+    "stats": {
+      "startTime": "2026-10-11T23:10:29.814Z",
+      "duration": 78685.917,
+      "expected": 6,
+      "skipped": 0,
+      "unexpected": 0,
+      "flaky": 0
+    },
+    "cases": [
+      {
+        "file": "e2e-dispute-finality.spec.ts",
+        "title": "UI dispute prevents early finalization, then releases exactly 100 USDC after its signed window",
+        "status": "expected",
+        "results": [
+          {
+            "status": "passed",
+            "durationMs": 18203,
+            "retry": 0
+          }
+        ]
+      },
+      {
+        "file": "e2e-lending-availability.spec.ts",
+        "title": "deferred lending disables new commands and leaves the wallet able to pay",
+        "status": "expected",
+        "results": [
+          {
+            "status": "passed",
+            "durationMs": 9630,
+            "retry": 0
+          }
+        ]
+      },
+      {
+        "file": "e2e-payment.spec.ts",
+        "title": "payment receipts and recovery dialogs keep keyboard focus inside and restore it on close",
+        "status": "expected",
+        "results": [
+          {
+            "status": "passed",
+            "durationMs": 8265,
+            "retry": 0
+          }
+        ]
+      },
+      {
+        "file": "e2e-payment.spec.ts",
+        "title": "invalid amounts and recipients cannot admit a payment or retain a revoked quote",
+        "status": "expected",
+        "results": [
+          {
+            "status": "passed",
+            "durationMs": 6404,
+            "retry": 0
+          }
+        ]
+      },
+      {
+        "file": "e2e-payment.spec.ts",
+        "title": "pays the merchant through the hub and shows the committed receipt",
+        "status": "expected",
+        "results": [
+          {
+            "status": "passed",
+            "durationMs": 12626,
+            "retry": 0
+          }
+        ]
+      },
+      {
+        "file": "e2e-tower-restore.spec.ts",
+        "title": "tower backup restores funded Account proofs, refuses overwrite and continues payments",
+        "status": "expected",
+        "results": [
+          {
+            "status": "passed",
+            "durationMs": 22305,
+            "retry": 0
+          }
+        ]
+      }
+    ],
+    "wholeRunnerPassed": true
+  },
+  "exitGas": {
+    "command": "bun run stand:run --reason rc-e3b624173-exit-gas --timeout-ms 60000 -- forge test --root jurisdictions --match-contract 'Dispute(GasAdmission|IngressGas|CounterGas)Test|FundingExitTest' --fuzz-seed 0x20261012 -vv",
+    "exitCode": 0,
+    "passed": 25,
+    "failed": 0,
+    "skipped": 0,
+    "gasBudgetPerTransaction": 5000000,
+    "fuzzRuns": 512,
+    "gasMeasurement": "Conservative operation gas from fixtures; setup/test-function gas is excluded. Printed fuzz measurements represent one sample, not maxima. Every fuzz invocation asserts the per-operation bound.",
+    "cases": [
+      {
+        "name": "test_fundingTopupExitAndReopenLeft()",
+        "conservativeGasByOperation": {}
+      },
+      {
+        "name": "test_fundingTopupExitAndReopenRight()",
+        "conservativeGasByOperation": {}
+      },
+      {
+        "name": "test_unsolicitedCompanySharesCannotEnlargeExitProof()",
+        "conservativeGasByOperation": {
+          "start": 665697,
+          "finalize": 928658
+        }
+      },
+      {
+        "name": "testFuzz_budget5m_combinedStockFrontier(uint8,uint8,uint8,uint8)",
+        "fuzzRuns": 256,
+        "printedGasIsOneSampleNotMaximum": true,
+        "conservativeGasByOperation": {
+          "start": 3364520,
+          "reveal": 191043,
+          "finalize": 3541160
+        }
+      },
+      {
+        "name": "test_budget5m_coldDebts22()",
+        "conservativeGasByOperation": {
+          "start": 543321,
+          "finalize": 3087202
+        }
+      },
+      {
+        "name": "test_budget5m_fullWidthSavings18MaxStarter()",
+        "conservativeGasByOperation": {
+          "start": 3418280,
+          "finalize": 3552680
+        }
+      },
+      {
+        "name": "test_budget5m_irrelevantSecrets()",
+        "conservativeGasByOperation": {
+          "start": 2997160,
+          "finalize": 4453117
+        }
+      },
+      {
+        "name": "test_budget5m_maxStarterMmFrontier()",
+        "conservativeGasByOperation": {
+          "start": 3423400,
+          "reveal": 851958,
+          "finalize": 3925229
+        }
+      },
+      {
+        "name": "test_budget5m_maxStarterTenDebts()",
+        "conservativeGasByOperation": {
+          "start": 2807720,
+          "finalize": 3482802
+        }
+      },
+      {
+        "name": "test_budget5m_mixed32()",
+        "conservativeGasByOperation": {
+          "start": 694062,
+          "finalize": 1181849
+        }
+      },
+      {
+        "name": "test_budget5m_mixedWithRevealedPulls()",
+        "conservativeGasByOperation": {
+          "start": 709674,
+          "reveal": 696346,
+          "finalize": 1387255
+        }
+      },
+      {
+        "name": "test_budget5m_mmFrontier()",
+        "conservativeGasByOperation": {
+          "start": 947367,
+          "reveal": 851958,
+          "finalize": 2263413
+        }
+      },
+      {
+        "name": "test_budget5m_partialPulls18()",
+        "conservativeGasByOperation": {
+          "start": 947367,
+          "reveal": 1002252,
+          "finalize": 2263413
+        }
+      },
+      {
+        "name": "test_budget5m_payments32()",
+        "conservativeGasByOperation": {
+          "start": 694050,
+          "finalize": 1214143
+        }
+      },
+      {
+        "name": "test_budget5m_revealedPulls18()",
+        "conservativeGasByOperation": {
+          "start": 616772,
+          "reveal": 851958,
+          "finalize": 1008774
+        }
+      },
+      {
+        "name": "test_budget5m_savings80MaxStarter()",
+        "conservativeGasByOperation": {
+          "start": 3912360,
+          "finalize": 3930280
+        }
+      },
+      {
+        "name": "test_budget5m_savingsMixedMaxStarter()",
+        "conservativeGasByOperation": {
+          "start": 3364520,
+          "reveal": 463028,
+          "finalize": 3402920
+        }
+      },
+      {
+        "name": "test_budget5m_swaps32()",
+        "conservativeGasByOperation": {
+          "start": 694062,
+          "finalize": 1069591
+        }
+      },
+      {
+        "name": "test_budget5m_wideColdDebts22()",
+        "conservativeGasByOperation": {
+          "start": 543321,
+          "finalize": 3962802
+        }
+      },
+      {
+        "name": "testFuzz_budget5m_counterStockFrontier(uint8,uint8,uint8,uint8)",
+        "fuzzRuns": 256,
+        "printedGasIsOneSampleNotMaximum": true,
+        "conservativeGasByOperation": {
+          "start": 2773160,
+          "counter": 686286,
+          "finalize": 3460520
+        }
+      },
+      {
+        "name": "test_budget5m_counterMmFrontierMaxStarter()",
+        "conservativeGasByOperation": {
+          "start": 2773160,
+          "counter": 795560,
+          "reveal": 834878,
+          "finalize": 3934015
+        }
+      },
+      {
+        "name": "test_budget5m_counterPayments32MaxStarter()",
+        "conservativeGasByOperation": {
+          "start": 2773160,
+          "counter": 451109,
+          "finalize": 3648911
+        }
+      },
+      {
+        "name": "test_budget5m_counterSingleToken()",
+        "conservativeGasByOperation": {
+          "start": 469203,
+          "counter": 287970,
+          "finalize": 430496
+        }
+      },
+      {
+        "name": "test_budget5m_counterWideColdDebts22()",
+        "conservativeGasByOperation": {
+          "start": 469203,
+          "counter": 381973,
+          "finalize": 3954400
+        }
+      },
+      {
+        "name": "test_budget5m_minimalSingleToken()",
+        "conservativeGasByOperation": {
+          "start": 449300,
+          "finalize": 399142
+        }
+      }
+    ],
+    "compiler": {
+      "solc": "0.8.36",
+      "evmVersion": "osaka",
+      "viaIR": true,
+      "optimizerRuns": 1,
+      "cborMetadata": false,
+      "bytecodeHash": "none"
+    },
+    "productionTemplateBinding": {
+      "command": "bun core/scripts/checks/contracts/check-exit-gas-bytecode.ts",
+      "exitCode": 0,
+      "rule": "Exact deployed compiler bytecode template equality after zeroing only declared library slots; library source/name/slot maps must also match. This is not a public-chain deployed address attestation.",
+      "contracts": [
+        {
+          "bytes": 22791,
+          "contract": "Account",
+          "librarySlots": 0,
+          "linkedTemplateKeccak256": "0xea0c98258bd0131b3e43deebe4c87c41a12f8616104c82cf6da5abbe1534652e"
+        },
+        {
+          "bytes": 4609,
+          "contract": "DepositoryBounds",
+          "librarySlots": 0,
+          "linkedTemplateKeccak256": "0x8a462bc56dc291d25e118de0d0fbb9120896477bfdeb1b09470d4a8592cb477f"
+        },
+        {
+          "bytes": 1589,
+          "contract": "HashLadderRegistry",
+          "librarySlots": 0,
+          "linkedTemplateKeccak256": "0xc31ae09e256651a7da58ed97dd991fdcd82001696e50062cb96ff946ba29b7f2"
+        },
+        {
+          "bytes": 2055,
+          "contract": "NftCustody",
+          "librarySlots": 0,
+          "linkedTemplateKeccak256": "0xaa94e286ac5f3156f565adb7727deb4386df1c7fbfac5cb989215aa6a734b282"
+        },
+        {
+          "bytes": 5251,
+          "contract": "HankoVerifier",
+          "librarySlots": 0,
+          "linkedTemplateKeccak256": "0x02413ad800e58e168089146dd8b10a7e36316bfbe35a201f1e6f02c12a2ed717"
+        },
+        {
+          "bytes": 19013,
+          "contract": "EntityProvider",
+          "librarySlots": 2,
+          "linkedTemplateKeccak256": "0x5b976ef7587fb2856b3592bf6eb8dcff06631e5c10ad2e5e588f2964a3bfef23"
+        },
+        {
+          "bytes": 22185,
+          "contract": "Depository",
+          "librarySlots": 30,
+          "linkedTemplateKeccak256": "0x9bb8a8d1d6f6ffb98c5d48266823b4b3c181af0d94c9a69d1bb0d5bb8c1a4ca9"
+        },
+        {
+          "bytes": 8326,
+          "contract": "DeltaTransformer",
+          "librarySlots": 0,
+          "linkedTemplateKeccak256": "0xf0b6c12143a14da9143b650dbb23895da3b01482dc352c2bb90b5ef76cf01b98"
+        }
+      ]
+    },
+    "rawLog": "exit-gas-e3b624173.txt"
+  },
+  "logHashes": [
+    {
+      "path": ".logs/crisis-20261011/rc-launch-clean-check.log",
+      "sha256": "dbc067e8b700395cebfbf812f92ffd24bd9d1d5309fb4b583bffd84dda52c156"
+    },
+    {
+      "path": ".logs/crisis-20261011/rc-e3b624173-exit-gas.log",
+      "sha256": "3451044a57a1085e7c651c6c4cb4bd74c65249088af3e9dc729e9b33479d5367"
+    },
+    {
+      "path": ".logs/crisis-20261011/rc-e3b624173-bytecode.log",
+      "sha256": "bcce45dabd988338b8b0d9d74adef8836a70a79bbebfea6a025339d004a9183d"
+    },
+    {
+      "path": ".logs/crisis-20261011/rc-e3b624173-react.log",
+      "sha256": "e4ac368095b87f585b9af539e6802f4127270d6fbe69d21d65c41227d041ee9a"
+    },
+    {
+      "path": ".logs/crisis-20261011/rc-e3b624173-react/wallet-browser.log",
+      "sha256": "6e271a789ed222ca517218f6123d6a167a8d1d31bd865a86918147e1f9847f90"
+    },
+    {
+      "path": ".logs/crisis-20261011/rc-e3b624173-react/wallet-results.json",
+      "sha256": "55a29e202c244d070d1e238a0310fd64067957fadcbd7ab27844096b85689ecf"
+    },
+    {
+      "path": ".logs/crisis-20261011/rc-e3b624173-lock-ahb.log",
+      "sha256": "bf5d1ae5627d7732ca375e546e86c39576d792962122ba1e0a6520f80a069d28"
+    },
+    {
+      "path": ".logs/crisis-20261011/rc-e3b624173-admission.log",
+      "sha256": "36d52a78f4c9869ff74e6de9550b160de3742a4d9cd8236eab7471821d50a021"
+    }
+  ],
+  "limitations": [
+    "Public Sepolia remains on 7c3f63f9841f4e8b61ac5eee5dbe4f9710b10621; this candidate is not deployed.",
+    "React covers P4; P5 and P6 are not yet covered by this browser suite.",
+    "Private Anvil time is advanced; these are not real-clock Sepolia dispute receipts.",
+    "Gas coverage is the named cases and 512 bounded fuzz invocations, not proof of all possible proof shapes.",
+    "CI has not run this candidate; ten consecutive green main runs and branch protection remain incomplete.",
+    "Evidence bundle import, external tower assignment and the owner-reviewed release package remain incomplete."
+  ],
+  "supersedes": "The gas portion of react-and-exit-68cf424f2.json used a different Foundry EVM/metadata profile and cannot attest production compiler-template gas. Its other results remain historical."
+}
