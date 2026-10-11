@@ -249,47 +249,26 @@ const validateReceiptSet = async (
   return receipts;
 };
 
-const readEthereumReceipts = async (
-  send: RpcSend,
-  block: CanonicalRpcBlock,
-  sendBatch?: RpcBatchSend,
-): Promise<{
-  receipts: CanonicalRpcReceipt[];
-  proofs: Map<number, Omit<CanonicalReceiptMptProof, 'receiptLogIndex'>>;
-}> => {
-  const calls = block.transactions.map((transactionHash, index): RpcBatchCall => ({
-    method: 'eth_getTransactionReceipt',
-    params: [normalizeReceiptHash(transactionHash, `TRANSACTION_${index}_HASH`)],
-  }));
-  const rawReceipts = sendBatch
-    ? await sendBatchInChunks(sendBatch, calls)
-    : await mapConcurrent(calls, 16, (call) => send(call.method, call.params));
-  if (rawReceipts.length !== block.transactions.length) {
-    throw new Error(
-      `J_RECEIPT_BATCH_LENGTH_MISMATCH:expected=${block.transactions.length}:actual=${rawReceipts.length}`,
-    );
-  }
-  const unordered = rawReceipts.map((raw, index) => {
-    const normalized = normalizeReceiptHash(block.transactions[index], `TRANSACTION_${index}_HASH`);
-    if (!raw || typeof raw !== 'object') {
-      throw new ReceiptAvailabilityError('J_RECEIPT_TRANSACTION_RECEIPT_MISSING', normalized);
-    }
-    return raw as CanonicalRpcReceipt;
-  });
-  const receipts = await validateReceiptSet(block, unordered);
-  const proofs = await createCanonicalReceiptProofs(receipts, block.receiptsRoot);
-  return { receipts, proofs };
-};
-
-const readTronReceipts = async (
+// Public RPCs rate-limit the per-transaction fan-out of busy blocks. Fetch the
+// complete set once; the block hash, transaction order and receiptsRoot still
+// authenticate every receipt before advancing the cursor.
+const readBlockReceipts = async (
   send: RpcSend,
   block: CanonicalRpcBlock,
 ): Promise<CanonicalRpcReceipt[]> => {
   const raw = await send('eth_getBlockReceipts', [
     ethers.toQuantity(parseReceiptQuantity(block.number, 'BLOCK_NUMBER')),
   ]);
+  if (raw === null) throw new ReceiptAvailabilityError('J_RECEIPT_BLOCK_MISSING', String(block.number));
   if (!Array.isArray(raw)) throw new Error('J_RECEIPT_BLOCK_RECEIPTS_INVALID');
-  const receipts = await validateReceiptSet(block, raw as CanonicalRpcReceipt[]);
+  return validateReceiptSet(block, raw as CanonicalRpcReceipt[]);
+};
+
+const readTronReceipts = async (
+  send: RpcSend,
+  block: CanonicalRpcBlock,
+): Promise<CanonicalRpcReceipt[]> => {
+  const receipts = await readBlockReceipts(send, block);
   const root = normalizeReceiptHash(block.receiptsRoot, 'ROOT');
   if (root !== ZERO_HASH) await assertCanonicalReceiptsRoot(receipts, root);
   return receipts;
@@ -439,8 +418,9 @@ export const readAuthenticatedReceiptRange = async (
     if (commitment === 'tron-complete-receipts') {
       return collectWatchedLogs(block, await readTronReceipts(send, block), addresses, undefined, profile.nativeRpc);
     }
-    const authenticated = await readEthereumReceipts(send, block, sendBatch);
-    return collectWatchedLogs(block, authenticated.receipts, addresses, authenticated.proofs);
+    const receipts = await readBlockReceipts(send, block);
+    const proofs = await createCanonicalReceiptProofs(receipts, block.receiptsRoot);
+    return collectWatchedLogs(block, receipts, addresses, proofs);
   });
   const logs = logsByBlock.flat().sort((left, right) =>
     left.blockNumber - right.blockNumber || left.index - right.index);

@@ -321,7 +321,7 @@ describe('authenticated J watcher receipts', () => {
     expect(() => createLogBloomMatcher(['invalid'])).toThrow();
   });
 
-  test('reconstructs real Anvil logs without trusting eth_getLogs', async () => {
+  test('authenticates whole-block receipts without per-transaction RPC fan-out or trusting eth_getLogs', async () => {
     const wallet = new ethers.Wallet(anvilPrivateKey, provider);
     const token = await new ERC20Mock__factory(wallet).deploy('Receipt Token', 'RCT', 18, 1000n);
     const deploymentReceipt = await token.deploymentTransaction()?.wait();
@@ -331,15 +331,15 @@ describe('authenticated J watcher receipts', () => {
       async (method, params) => {
         methods.push(method);
         const result = await provider.send(method, params);
-        if (method !== 'eth_getTransactionReceipt') return result;
-        const receipt = structuredClone(result) as { logs?: Array<Record<string, unknown>> };
-        for (const log of receipt.logs ?? []) {
+        if (method !== 'eth_getBlockReceipts') return result;
+        const receipts = structuredClone(result) as Array<{ logs: Array<Record<string, unknown>> }>;
+        for (const log of receipts.flatMap(receipt => receipt.logs)) {
           // logIndex is RPC metadata, not part of the receipt trie. A malicious
           // endpoint can forge it while still returning a valid receiptsRoot.
           log.logIndex = '0x3e7';
           log.index = '0x3e7';
         }
-        return receipt;
+        return receipts;
       },
       deploymentReceipt.blockNumber,
       deploymentReceipt.blockNumber,
@@ -351,7 +351,8 @@ describe('authenticated J watcher receipts', () => {
     expect(logs[0]?.address.toLowerCase()).toBe((await token.getAddress()).toLowerCase());
     expect(logs[0]?.topics[0]).toBe(ethers.id('Transfer(address,address,uint256)'));
     expect(methods).toContain('eth_getBlockByNumber');
-    expect(methods).toContain('eth_getTransactionReceipt');
+    expect(methods.filter(method => method === 'eth_getBlockReceipts')).toHaveLength(1);
+    expect(methods).not.toContain('eth_getTransactionReceipt');
     expect(methods).not.toContain('eth_getLogs');
   }, 20_000);
 
