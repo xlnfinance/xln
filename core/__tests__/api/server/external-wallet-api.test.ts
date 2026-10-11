@@ -328,13 +328,14 @@ describe('external wallet API faucet transaction gate', () => {
     }
   });
 
-  test('gas faucet bounds its receipt wait and answers a typed retryable 504 with the tx hash', async () => {
+  test('low-fee public gas faucet reaches a bounded receipt wait with its funded gas budget', async () => {
     // `await tx.wait()` had no timeout while holding the per-wallet lock, so a
-    // dropped transaction blocked every later faucet request forever.
+    // dropped transaction blocked every later faucet request forever. A fixed
+    // 0.01 ETH buffer also rejected a funded public testnet faucet at low fees.
     const txHash = `0x${'ab'.repeat(32)}`;
     const waitTimeouts: unknown[] = [];
     const provider = {
-      getBalance: async () => 10n ** 21n,
+      getBalance: async () => ethers.parseEther('0.0001'),
       getNetwork: async () => new ethers.Network('faucet-test', 31337n),
       getTransactionCount: async () => 0,
       estimateGas: async () => 21_000n,
@@ -352,7 +353,7 @@ describe('external wallet API faucet transaction gate', () => {
     const gasRequest = () => new Request('http://localhost/api/faucet/gas', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: safeStringify({ userAddress: USER_ADDRESS, amount: '0.1' }),
+      body: safeStringify({ userAddress: USER_ADDRESS, amount: '0.00001' }),
     });
 
     for (let attempt = 0; attempt < 2; attempt++) {

@@ -56,7 +56,7 @@ export const enforceFaucetPolicy = async (
     return errorResponse(400, 'FAUCET_AMOUNT_INVALID', 'Faucet amount must be a positive decimal', headers);
   }
   const amount = parsePositiveDecimal(
-    (body as Record<string, unknown>)['amount'] ?? (pathname === '/api/faucet/gas' ? '0.1' : '100'),
+    (body as Record<string, unknown>)['amount'] ?? (pathname === '/api/faucet/gas' ? maximumFor(pathname, env) : '100'),
   );
   if (!amount) {
     return errorResponse(400, 'FAUCET_AMOUNT_INVALID', 'Faucet amount must be a positive decimal', headers);

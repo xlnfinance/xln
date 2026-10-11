@@ -68,9 +68,6 @@ export async function readExternalWallet(entityId: string, signerId: string): Pr
 
 export type FaucetKind = 'erc20' | 'gas' | 'reserve' | 'offchain';
 
-/** ETH per gas faucet request: the public cap on the dev stack, enough for every on-chain action in the tour. */
-const GAS_FAUCET_ETH = '0.1';
-
 /**
  * Faucets, in the frontend's request shapes. `amount` is a decimal string in
  * token units ("100", "0.1"); the server parses it.
@@ -86,9 +83,8 @@ export async function requestFaucet(
 			await postJson('/api/faucet/erc20', { userAddress: input.signerId, tokenSymbol: input.tokenSymbol, amount: input.amount, jurisdiction });
 			return;
 		case 'gas':
-			// Gas is ETH, not the token amount in the form; the public faucet caps gas at 0.1 ETH (XLN_FAUCET_MAX_GAS_AMOUNT),
-			// the same amount the SvelteKit wallet asks for.
-			await postJson('/api/faucet/gas', { userAddress: input.signerId, amount: GAS_FAUCET_ETH, jurisdiction });
+			// The server sizes a gas grant from current fees and its configured cap.
+			await postJson('/api/faucet/gas', { userAddress: input.signerId, jurisdiction });
 			return;
 		case 'reserve':
 			await postJson('/api/faucet/reserve', { userEntityId: input.entityId, tokenId: input.tokenId, tokenSymbol: input.tokenSymbol, amount: input.amount });

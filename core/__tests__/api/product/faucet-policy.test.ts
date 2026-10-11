@@ -27,6 +27,12 @@ describe('public faucet policy', () => {
     expect((await enforceFaucetPolicy(request('/api/faucet/gas', '0.100000000000000001'), false, env))?.status).toBe(413);
   });
 
+  test('admits a server-sized gas grant under a small public testnet cap', async () => {
+    const env = { XLN_PUBLIC_FAUCET: '1', XLN_FAUCET_MAX_GAS_AMOUNT: '0.00001' };
+    expect(await enforceFaucetPolicy(request('/api/faucet/gas'), false, env)).toBeNull();
+    expect((await enforceFaucetPolicy(request('/api/faucet/gas', '0.1'), false, env))?.status).toBe(413);
+  });
+
   test('rejects invalid and non-positive amounts before faucet execution', async () => {
     const env = { XLN_PUBLIC_FAUCET: '1' };
     for (const amount of ['0', '-1', '1e2', 'not-a-number', [100], [[100]], {

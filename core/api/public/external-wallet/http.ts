@@ -82,7 +82,7 @@ export interface FaucetRequestBody {
 export interface GasFaucetRequestBody {
   jurisdiction?: string;
   userAddress: string;
-  amount: string;
+  amount?: string;
 }
 
 export interface WalletSnapshotRequestBody {
@@ -185,7 +185,7 @@ export const readGasFaucetBody = async (request: Request): Promise<GasFaucetRequ
   requireFaucetFields(body, ['amount', 'jurisdiction'], 'GAS_FAUCET_BODY_FIELDS_INVALID');
   return {
     userAddress: String(body['userAddress'] || '').trim(),
-    amount: String(body['amount'] || '0.1').trim(),
+    ...(body['amount'] === undefined ? {} : { amount: String(body['amount']).trim() }),
     ...readFaucetJurisdiction(body),
   };
 };

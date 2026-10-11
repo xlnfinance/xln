@@ -97,6 +97,19 @@ const handleBrowserVmErc20Faucet = (
     });
   });
 
+// Budget gas units at the provider's current fee cap, not a fixed ETH amount.
+// One million units covers faucet sends; ten such budgets fund user operations.
+const faucetGasBudget = async (adapter: JAdapter): Promise<{ reserve: bigint; grant: bigint }> => {
+  const fees = await adapter.provider.getFeeData();
+  const price = fees.maxFeePerGas ?? fees.gasPrice;
+  if (price === null || price <= 0n) throw new Error('FAUCET_GAS_PRICE_UNAVAILABLE');
+  const cap = parsePositiveDecimalUnits(process.env['XLN_FAUCET_MAX_GAS_AMOUNT'] ?? '0.1', 18);
+  if (cap === null) throw new Error('FAUCET_CAP_INVALID');
+  const reserve = price * 1_000_000n;
+  const target = reserve * 10n;
+  return { reserve, grant: target < cap ? target : cap };
+};
+
 const transferErc20AndGas = async (
   context: ExternalWalletApiContext,
   adapter: JAdapter,
@@ -105,11 +118,12 @@ const transferErc20AndGas = async (
 ): Promise<Response> =>
   withFaucetWalletLock(context, adapter, async () => {
     const userEth = await adapter.provider.getBalance(request.userAddress);
-    const minBalance = ethers.parseEther('0.01');
-    const targetBalance = ethers.parseEther('0.1');
+    const gasBudget = await faucetGasBudget(adapter);
+    const targetBalance = gasBudget.grant;
+    const minBalance = targetBalance / 2n;
     const userTopup = userEth < minBalance ? targetBalance - userEth : 0n;
     const wallet = await requireFaucetWalletBalances(context, adapter, tokens, {
-      requiredEth: ethers.parseEther('0.02') + userTopup,
+      requiredEth: gasBudget.reserve + userTopup,
       requiredTokenAddress: request.token.address,
       requiredTokenAmount: request.amountWei,
     });
@@ -229,10 +243,12 @@ export const handleGasFaucet = async (context: ExternalWalletApiContext, request
       return createJsonResponse(context.jsonHeaders, { error: 'Invalid userAddress' }, 400);
     }
     const requestId = crypto.randomUUID();
-    const topupAmount = requireFaucetAmountUnits(amount, 18);
+    const requestedAmount = amount === undefined ? null : requireFaucetAmountUnits(amount, 18);
+    const gasBudget = await faucetGasBudget(adapter);
+    const topupAmount = requestedAmount ?? gasBudget.grant;
     return await withFaucetWalletLock(context, adapter, async () => {
       const wallet = await requireFaucetWalletBalances(context, adapter, [], {
-        requiredEth: topupAmount + ethers.parseEther('0.01'),
+        requiredEth: topupAmount + gasBudget.reserve,
       });
       const tx = await wallet.sendTransaction({ to: userAddress, value: topupAmount });
       // An unbounded wait held the per-wallet lock forever on a dropped tx.
@@ -240,7 +256,7 @@ export const handleGasFaucet = async (context: ExternalWalletApiContext, request
       return createJsonResponse(context.jsonHeaders, {
         success: true,
         type: 'gas',
-        amount,
+        amount: ethers.formatEther(topupAmount),
         userAddress,
         txHash: tx.hash,
         requestId,
