@@ -205,7 +205,7 @@
     "check:runtime-dependencies": "bun core/scripts/checks/architecture/check-runtime-dependencies.ts",
     "check:e2e-categories": "bun core/scripts/checks/policy/check-e2e-test-categories.ts",
     "check:frontend": "cd frontend && bun run check",
-    "check:ui-types": "cd ui && bun run check",
+    "check:ui-types": "cd ui && bun node_modules/typescript/bin/tsc --noEmit -p tsconfig.json",
     "check:frontend-file-size": "bun core/scripts/checks/policy/check-frontend-file-size.ts",
     "check:fints-negative-types": "bun core/scripts/checks/fints/check-fints-negative-types.ts",
     "check:fints-compiler-policy": "bun core/scripts/checks/fints/check-compiler-policy.ts",

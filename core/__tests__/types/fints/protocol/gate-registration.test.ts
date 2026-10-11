@@ -12,10 +12,14 @@ const parallelGateNames = (scriptName: string): string[] =>
 const srcGateNames = (): string[] => parallelGateNames('check:src');
 
 describe('full check orchestration', () => {
-  test('runs short gates before parallel Rust, TypeScript, and frontend gates', () => {
+  test('runs short gates before parallel TypeScript, frontend, and React wallet gates', () => {
     expect(packageJson.scripts['check']).toBe('bun run check:short && bun run check:long');
-    expect(parallelGateNames('check:long')).toEqual(['check:src', 'check:frontend']);
-    expect(srcGateNames().slice(0, 2)).toEqual(['soundcheck:fast', 'rscore:check']);
+    expect(parallelGateNames('check:long')).toEqual(['check:src', 'check:frontend', 'check:ui-types']);
+    expect(packageJson.scripts['check:ui-types']).toBe(
+      'cd ui && bun node_modules/typescript/bin/tsc --noEmit -p tsconfig.json',
+    );
+    expect(srcGateNames()[0]).toBe('soundcheck:fast');
+    expect(srcGateNames().filter(name => name.startsWith('rscore:'))).toEqual([]);
     expect(packageJson.scripts['check:src:parallel']).toBeUndefined();
   });
 

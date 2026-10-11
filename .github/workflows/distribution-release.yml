@@ -32,6 +32,8 @@ jobs:
         working-directory: frontend
       - run: bun install --frozen-lockfile
         working-directory: jurisdictions
+      - run: bun install --frozen-lockfile
+        working-directory: ui
       - run: bun run check
       - run: bun run test:release-integrity
       - run: bun run foundation-release:publish-check

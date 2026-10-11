@@ -671,7 +671,7 @@ describe('test artifact cleanup', () => {
       'bun tools/run-parallel-checks.ts check:contract-artifact-drift check:frontend-file-size',
     );
     expect(rootScripts['check:long']).toBe(
-      'bun tools/run-parallel-checks.ts check:src check:frontend',
+      'bun tools/run-parallel-checks.ts check:src check:frontend check:ui-types',
     );
     expect(rootPackage).not.toContain('run-with-test-cleanup.ts --reason=check');
     expect(rootPackage).not.toContain('test-artifact-cleanup.ts --reason=check &&');
