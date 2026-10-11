@@ -8,34 +8,31 @@ Keep the empty frozen-core mechanism for later use; its current protected-file
 count is zero, not security coverage. This correction supersedes earlier scope
 statements below; earlier deployment results remain historical evidence.
 
-- Current verified source SHA: `e3b624173fe3ddef858abf873b36880ccd6e6b0b`.
-  The candidate rejects deferred commands before batching, binds exit gas to
-  production compiler templates and repairs the React runner report path.
-  It has not been deployed. Foreign untracked
-  files are preserved in `/Users/zigota/.config/xln/parked-untracked-20261012/`;
-  `restore-paths.json` records their original paths.
-- Last green: clean-source React E2E 6/6, zero skips/retries, 78.686 seconds,
-  including the full production-smoke runner; `lock-ahb` completes 85 Runtime
-  frames; exit gas 25/25, including 512 bounded fuzz invocations and eight exact
-  production compiler-template matches; `bun run check` passes 38 source gates.
-  All four checks used the same committed source SHA above. Focused admission
-  and release-order regressions also pass: 12 tests, 191 assertions.
-- First red: latest completed main CI `38180822258` on `f22866824` passed 5/7
-  jobs. Failures were stale release-order expectations, frozen loan origination
-  and a two-Anvil deployment timeout. The candidate updates the expectations,
-  separates deferred loan tests and drains Anvil stdout. New CI must confirm
-  the timeout fix; no consecutive green CI run is claimed.
-- Artifact: `docs/evidence/rc-20261012/ts-react-exit-e3b624173.json` contains
-  case-level results, gas measurements, commands and log hashes; its adjacent
-  gas transcript is durable evidence. It supersedes the older gas measurements
-  that used a different Foundry compiler profile. The public alpha remains on
-  `7c3f63f9841f4e8b61ac5eee5dbe4f9710b10621`.
+- Current verified source SHA: `40be495da3d41079596e5e32135d65e051c6cee4`.
+  React now pins its browser EventEmitter dependency and resolves it explicitly;
+  the CI-only blank page came from an undeclared local package. The P5 browser
+  path checks a 250-USDC claim, 200 paid, 50 preserved as debt, external withdrawal
+  and reload. The remaining payout copy no longer promises unsecured repayment.
+- Last green: clean-source React E2E 7/7, zero skips/retries, 106.061 seconds,
+  with an empty Vite cache and the full production-smoke runner under the stand
+  lock. On that same clean SHA, production UI build and `bun run check` passed
+  (38 source gates, 29.856 seconds). This is private-Anvil evidence with a
+  controlled dispute clock, not fresh public Sepolia receipts.
+- First red: completed main CI `38183661319` on `bd6877606` passed 6/7 jobs.
+  Only E2E failed: abstract-level received an undefined EventEmitter before
+  React mounted. The current candidate fixes the missing package/alias;
+  CI must still confirm it. No consecutive green CI run is claimed.
+- Artifact: `docs/evidence/rc-20261012/react-p5-40be495da.json` records case
+  outcomes, actual dispute amounts, commands and log hashes. Earlier
+  `ts-react-exit-e3b624173.json` retains clean-source lock-ahb and production
+  compiler-template gas evidence; jurisdictions is unchanged since that SHA.
+  The public alpha remains on `7c3f63f9841f4e8b61ac5eee5dbe4f9710b10621`.
 - Next command: `git push origin main`; inspect the resulting build-and-test
-  run and fix its first remaining failure before promoting the candidate.
+  run before promoting the candidate. Continue with React P6 after the first
+  CI failure is resolved; no broad refactor is on the critical path.
 - Remaining final gates: ten consecutive green main CI runs and branch protection;
-  remove production Rust/QA imports; complete React P5/P6 and proof import; refresh
-  Sepolia P4/P5/P6 receipts; owner-reviewed release package. Local exit gas is
-  current; public-chain receipts still require refresh.
+  remove production Rust/QA imports; complete React P6 and proof import; refresh
+  Sepolia P4/P5/P6 receipts; owner-reviewed release package. P5 React is covered.
 
 Owner priority, 2026-10-11 17:28 UTC: ship a public Sepolia deployment and usable
 asset flow; Base is an alternative, not a prerequisite. Finish the TS launch path

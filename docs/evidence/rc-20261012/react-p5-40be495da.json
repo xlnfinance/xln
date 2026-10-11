@@ -1,0 +1,143 @@
+{
+  "recordedAt": "2026-10-11T23:48:23.007Z",
+  "sourceSha": "40be495da3d41079596e5e32135d65e051c6cee4",
+  "sourceTreeCleanBeforeAndAfter": true,
+  "scope": "TS React, private leased Anvil, controlled dispute clock; not public Sepolia or mainnet acceptance.",
+  "commands": [
+    "bun run check",
+    "bun run --cwd ui build",
+    "XLN_LOCAL_PROD_SMOKE_DIR=.logs/crisis-20261011/react-40be495da-clean XLN_LOCAL_PROD_SMOKE_WALLET_TESTS=e2e-payment.spec.ts,e2e-lending-availability.spec.ts,e2e-dispute-finality.spec.ts,e2e-tower-restore.spec.ts bun run stand:run --reason react-40be495da-clean --timeout-ms 180000 -- bun run prod:smoke:local"
+  ],
+  "checks": {
+    "sourceGates": 38,
+    "sourceDurationMs": 29856,
+    "productionBuild": "passed",
+    "browser": {
+      "startTime": "2026-10-11T23:45:21.297Z",
+      "duration": 106060.907,
+      "expected": 7,
+      "skipped": 0,
+      "unexpected": 0,
+      "flaky": 0
+    },
+    "fullRunnerExitCode": 0,
+    "exclusiveStandLock": true,
+    "viteCache": "empty before start"
+  },
+  "cases": [
+    {
+      "name": "P4 UI dispute prevents early finalization, then releases exactly 100 USDC after its signed window",
+      "file": "e2e-dispute-finality.spec.ts",
+      "status": "passed",
+      "durationMs": 20560,
+      "dispute": {
+        "entityId": "0x868d9fbc6b5d6ef2c639069eea8b22bbf2e712b1d4047875d0d7845e57bbba05",
+        "claim": "100000000",
+        "collateral": "100000000",
+        "peerReserveBefore": "1999900000000",
+        "paidToReserve": "100000000",
+        "remainingDebt": "0",
+        "finalChain": {
+          "collateral": "0",
+          "disputeHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+          "nonce": "3",
+          "ondelta": "0",
+          "peerReserve": "1999900000000",
+          "reserve": "100000000",
+          "timeout": 0
+        },
+        "startTransaction": "0x41b5dbf19fc8dd39a9d59c0d05c24da9c2ca44e20e059b4314ae243f7d06e158",
+        "finalTransaction": "0xf72de30a603334efdfce6d7bcb1bb756f96e9083a63bbf0983fdb14d687b5523"
+      }
+    },
+    {
+      "name": "P5 UI dispute pays 200 of a 250 USDC claim and preserves 50 USDC of unsecured debt",
+      "file": "e2e-dispute-finality.spec.ts",
+      "status": "passed",
+      "durationMs": 26325,
+      "dispute": {
+        "entityId": "0x0e2e9382254c749d81f71623dc43335f94ea287461ab01a9352564567ccd9f03",
+        "claim": "250000000",
+        "collateral": "100000000",
+        "peerReserveBefore": "100000000",
+        "paidToReserve": "200000000",
+        "remainingDebt": "50000000",
+        "finalChain": {
+          "collateral": "0",
+          "disputeHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+          "nonce": "8",
+          "ondelta": "0",
+          "peerReserve": "0",
+          "reserve": "200000000",
+          "timeout": 0
+        },
+        "startTransaction": "0xa0fd4a8ec8696e5e7b49769b1aae65f836cb3063e92aadf0d21d44e2b7777b65",
+        "finalTransaction": "0xbb0d83379f99c71ad5bfc61cdb2b88024d57218cba6aa4c821a983f3c54b9547"
+      }
+    },
+    {
+      "name": "deferred lending disables new commands and leaves the wallet able to pay",
+      "file": "e2e-lending-availability.spec.ts",
+      "status": "passed",
+      "durationMs": 9804
+    },
+    {
+      "name": "payment receipts and recovery dialogs keep keyboard focus inside and restore it on close",
+      "file": "e2e-payment.spec.ts",
+      "status": "passed",
+      "durationMs": 8029
+    },
+    {
+      "name": "invalid amounts and recipients cannot admit a payment or retain a revoked quote",
+      "file": "e2e-payment.spec.ts",
+      "status": "passed",
+      "durationMs": 6385
+    },
+    {
+      "name": "pays the merchant through the hub and shows the committed receipt",
+      "file": "e2e-payment.spec.ts",
+      "status": "passed",
+      "durationMs": 11652
+    },
+    {
+      "name": "tower backup restores funded Account proofs, refuses overwrite and continues payments",
+      "file": "e2e-tower-restore.spec.ts",
+      "status": "passed",
+      "durationMs": 21671
+    }
+  ],
+  "coldStartFix": {
+    "failingCi": "https://github.com/xlnfinance/xln/actions/runs/38183661319",
+    "rootCause": "Undeclared events package existed locally but was absent in CI. Browser abstract-level threw before React mounted.",
+    "fix": "Pinned ui events@3.3.0 plus explicit Vite alias; observed ui/node_modules/events/events.js in cold dependency bundle."
+  },
+  "limitations": [
+    "React P6 is still missing.",
+    "Fresh public Sepolia P4-P6 receipts with real clocks are still required.",
+    "Latest completed CI has 6/7 green jobs; consecutive green CI count remains zero.",
+    "Production UI build retains its existing large-chunk warning.",
+    "jurisdictions is unchanged from e3b624173fe3ddef858abf873b36880ccd6e6b0b; gas evidence remains attributed to that earlier source."
+  ],
+  "logDigests": [
+    {
+      "sha256": "9f6d70a6d785b5ffd002a9721b7b4f47591708a54dc8fd66e4941fdb8bbc4825",
+      "localDiagnosticPath": ".logs/crisis-20261011/react-40be495da-clean/wallet-results.json"
+    },
+    {
+      "sha256": "e03dda647f810dbc96e52f6848ae2c2dc075119780ada9fe38c4af715fe993df",
+      "localDiagnosticPath": ".logs/crisis-20261011/react-40be495da-clean.log"
+    },
+    {
+      "sha256": "f002cb4b823be129cd16e8d1f27031c42f8a009fb686f483d14ae38e9c65fe6d",
+      "localDiagnosticPath": ".logs/crisis-20261011/react-40be495da-clean/wallet-browser.log"
+    },
+    {
+      "sha256": "0a0ac6e143979ed7df566f8bb87869093fd39bb4e27e2bb5d0ada5eaa351f9e3",
+      "localDiagnosticPath": ".logs/crisis-20261011/check-40be495da-clean.log"
+    },
+    {
+      "sha256": "25f87bd46012be903521413b1cd78ba0c4e8edcaaad23abad7fd0661843ec57a",
+      "localDiagnosticPath": ".logs/crisis-20261011/build-40be495da-clean.log"
+    }
+  ]
+}
