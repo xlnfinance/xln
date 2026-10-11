@@ -32,7 +32,7 @@ export function DisputeControls({ account, wallet, onClose }: { account: Account
 							</p>
 							<p className="note">
 								{dispute.timeout > 0 ? `Challenge window closes ${new Date(dispute.timeout * 1000).toLocaleString()}. ` : ''}
-								While this wallet is unlocked and online, it automatically submits finalization after the challenge window. If it locks, unlock it to resume. The chain releases the winning balance to your reserve; gas is required.
+								While this wallet is unlocked and online, it automatically submits finalization after the challenge window. If it locks, unlock it to resume. Your collateral-backed entitlement is paid to your reserve. Any excess is collected from the debtor’s available reserve; the unpaid remainder stays as debt. Gas is required.
 							</p>
 							<button type="button" className="btn primary danger" disabled={busy || dispute.finalizeQueued || !finalizationReady} onClick={() => void run('Dispute finalization queued', async () => { await send([buildDisputeFinalizeTx(counterpartyId)]); })} data-testid="dispute-finalize">
 								{dispute.finalizeQueued ? 'Finalize already queued' : !finalizationReady ? 'Waiting for challenge window' : busy ? 'Queuing…' : 'Queue dispute finalize'}

@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.24;
 
-import {DisputeGasAdmissionTest} from "./DisputeGasAdmission.t.sol";
+import {DisputeGasFixture} from "./DisputeGasAdmission.t.sol";
 import {XlnHanko} from "../helpers/XlnHanko.sol";
 import "../../../contracts/Types.sol";
 
 /// Actual ERC20 custody; funding and exit use an already signed asset proof.
-contract FundingExitTest is DisputeGasAdmissionTest {
+contract FundingExitTest is DisputeGasFixture {
   function _deposit(uint256 actor, uint256 amount) private {
     erc20.transfer(signer[actor], amount);
     vm.prank(signer[actor]);

@@ -134,7 +134,7 @@ import type { EntityReadView } from '#lib/components/Entity/core/entity-panel-ty
         <p class="danger-note">
           Active dispute in progress. {dispute?.disputeTimeout ? `Challenge window closes ${new Date(dispute.disputeTimeout * 1000).toLocaleString()}.` : 'Waiting for on-chain confirmation.'}
         </p>
-        <p class="muted">While this wallet is unlocked and online, it automatically submits finalization after the challenge window. If it locks, unlock it to resume. The chain releases the winning balance to your reserve; gas is required.</p>
+        <p class="muted">While this wallet is unlocked and online, it automatically submits finalization after the challenge window. If it locks, unlock it to resume. Your collateral-backed entitlement is paid to your reserve. Any excess is collected from the debtor’s available reserve; the unpaid remainder stays as debt. Gas is required.</p>
         <button
           class="btn-danger-batch"
           data-testid="configure-dispute-finalize"

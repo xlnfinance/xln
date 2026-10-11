@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.24;
 
-import {DisputeGasAdmissionTest} from "./DisputeGasAdmission.t.sol";
+import {DisputeGasFixture} from "./DisputeGasAdmission.t.sol";
 import {XlnHanko} from "../helpers/XlnHanko.sol";
 import {Board} from "../../../contracts/EntityTypes.sol";
 import "../../../contracts/Types.sol";
 import {console} from "forge-std/Test.sol";
 
 /// Public-company share spam must not enlarge another pair's exit proof.
-contract DisputeIngressGasTest is DisputeGasAdmissionTest {
+contract DisputeIngressGasTest is DisputeGasFixture {
   // Keep the large stock transformer builder out of the donation test's
   // inlined call frame; use the same real proof construction and signatures.
   function originalProof() external view returns (ProofBody memory, bytes memory) {

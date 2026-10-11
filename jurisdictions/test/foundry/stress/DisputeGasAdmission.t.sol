@@ -8,7 +8,7 @@ import "../../../contracts/HashLadder.sol";
 import {DeltaTransformer} from "../../../contracts/DeltaTransformer.sol";
 
 /// Real signed starts/finalizations with a hard transaction allowance, not gas estimates.
-contract DisputeGasAdmissionTest is XlnFixture {
+abstract contract DisputeGasFixture is XlnFixture {
   uint256 internal constant BUDGET = 5_000_000;
 
   uint16 internal pullRatio = 65535;
@@ -154,6 +154,9 @@ contract DisputeGasAdmissionTest is XlnFixture {
     console.log("finalize total conservative gas", _submitBudget(1, finish));
   }
 
+}
+
+contract DisputeGasAdmissionTest is DisputeGasFixture {
   function test_budget5m_coldDebts22() public { _exercise(22, 0, 0, 0, false); }
   function test_budget5m_wideColdDebts22() public { _exercise(22, 0, 0, 0, true); }
   function test_budget5m_payments32() public { _exercise(2, 32, 0, 0, false); }

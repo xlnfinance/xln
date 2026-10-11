@@ -32,17 +32,14 @@ type StepResult = {
 // sample. Discovering the family makes every new edge-case suite enter the
 // release gate automatically; a static list previously left nine financial
 // suites green locally but invisible to CI/release.
-const isCrossJRuntimeCoreTest = (name: string): boolean => (
+const isCrossJRuntimeCoreTest = (name: string): boolean =>
   name.endsWith('.test.ts') &&
-  (
-    name.includes('cross-j') ||
+  (name.includes('cross-j') ||
     name.includes('cross-jurisdiction') ||
     name.includes('hash-ladder') ||
-    name.includes('pull-registry')
-  )
-);
+    name.includes('pull-registry'));
 
-const collectCrossJRuntimeCoreTests = (directory: string): string[] => (
+const collectCrossJRuntimeCoreTests = (directory: string): string[] =>
   readdirSync(directory, { withFileTypes: true })
     .sort((left, right) => left.name.localeCompare(right.name))
     .flatMap(entry => {
@@ -51,8 +48,7 @@ const collectCrossJRuntimeCoreTests = (directory: string): string[] => (
       // historical ABI and run separately from current production TS tests.
       if (entry.isDirectory()) return entry.name === 'rscore' ? [] : collectCrossJRuntimeCoreTests(path);
       return entry.isFile() && isCrossJRuntimeCoreTest(entry.name) ? [path] : [];
-    })
-);
+    });
 
 const CROSS_J_RUNTIME_CORE_TESTS = collectCrossJRuntimeCoreTests('core/__tests__').sort();
 
@@ -145,6 +141,12 @@ const ciPreE2eSteps: GateStep[] = [
   { name: 'flow E2E coverage contract', command: 'bun run test:e2e:coverage', timeoutMs: 30_000 },
   { name: 'frontend check', command: 'bun run check:frontend', timeoutMs: 180_000 },
   { name: 'contract full suite', command: 'bun run test:contracts:full', timeoutMs: 240_000 },
+  {
+    name: 'signed exit gas budget',
+    command:
+      "bun run stand:run --reason signed-exit-gas --timeout-ms 180000 -- forge test --root jurisdictions --match-contract 'Dispute(GasAdmission|IngressGas|CounterGas)Test|FundingExitTest' --fuzz-seed 0x20261012 -vv",
+    timeoutMs: 190_000,
+  },
   { name: 'RPC settlement parity', command: 'bun run test:rpc-settlement', timeoutMs: 240_000 },
   { name: 'security audit pack', command: 'bun run security:audit-pack', timeoutMs: 30_000 },
   { name: 'storage WAL smoke', command: 'bun run test:persistence:cli', timeoutMs: 120_000 },
@@ -154,15 +156,18 @@ const ciPreE2eSteps: GateStep[] = [
 
 // React is the launch wallet. Each group uses the existing production stand,
 // its real contracts and an isolated state directory retained as CI evidence.
-const walletE2eSteps: GateStep[] = ([
-  ['React payment and admission E2E', 'e2e-payment.spec.ts,e2e-lending-availability.spec.ts', 'payment'],
-  ['React dispute E2E', 'e2e-dispute-finality.spec.ts', 'dispute'],
-  ['React recovery E2E', 'e2e-tower-restore.spec.ts', 'recovery'],
-] as const).map(([name, tests, directory]) => ({
+const walletE2eSteps: GateStep[] = (
+  [
+    ['React payment and admission E2E', 'e2e-payment.spec.ts,e2e-lending-availability.spec.ts', 'payment'],
+    ['React dispute E2E', 'e2e-dispute-finality.spec.ts', 'dispute'],
+    ['React recovery E2E', 'e2e-tower-restore.spec.ts', 'recovery'],
+  ] as const
+).map(([name, tests, directory]) => ({
   name,
-  command: `XLN_LOCAL_PROD_SMOKE_DIR=.logs/gates/react-${directory} `
-    + `XLN_LOCAL_PROD_SMOKE_WALLET_TESTS=${tests} `
-    + `bun run stand:run --reason react-${directory} --timeout-ms 240000 -- bun run prod:smoke:local`,
+  command:
+    `XLN_LOCAL_PROD_SMOKE_DIR=.logs/gates/react-${directory} ` +
+    `XLN_LOCAL_PROD_SMOKE_WALLET_TESTS=${tests} ` +
+    `bun run stand:run --reason react-${directory} --timeout-ms 240000 -- bun run prod:smoke:local`,
   timeoutMs: 300_000,
 }));
 
@@ -179,8 +184,16 @@ const releaseSteps: GateStep[] = [
   // could regress while every documented release command stayed green.
   { name: 'all deterministic scenarios', command: 'bun core/scenarios/run.ts --set=all', timeoutMs: 1_200_000 },
   { name: 'RPC system scenarios', command: 'bun run test:system:parallel', timeoutMs: 1_200_000 },
-  { name: 'cross-j system scenario', command: 'bun core/scenarios/run.ts cross-j --mode=rpc --single', timeoutMs: 600_000 },
-  { name: 'MM mesh system scenario', command: 'bun core/scenarios/run.ts mm-mesh --mode=rpc --single', timeoutMs: 600_000 },
+  {
+    name: 'cross-j system scenario',
+    command: 'bun core/scenarios/run.ts cross-j --mode=rpc --single',
+    timeoutMs: 600_000,
+  },
+  {
+    name: 'MM mesh system scenario',
+    command: 'bun core/scenarios/run.ts mm-mesh --mode=rpc --single',
+    timeoutMs: 600_000,
+  },
   { name: 'hub 10k storage benchmark', command: 'bun run bench:radapter:hub10k', timeoutMs: 1_200_000 },
   { name: 'frozen core final', command: 'bun run frozen-core:check', timeoutMs: 30_000 },
   { name: 'Foundation release Hanko', command: 'bun run foundation-release:verify', timeoutMs: 30_000 },
