@@ -1,0 +1,300 @@
+{
+  "status": "public-sepolia-alpha",
+  "url": "https://sepolia.xln.finance",
+  "chainId": 11155111,
+  "source": "f62e86dc42a74850db2005cf671cc72411789aff",
+  "engine": "ts",
+  "recordedAt": "2026-10-11T19:26:36.046Z",
+  "asset": {
+    "symbol": "USDT",
+    "testToken": true,
+    "decimals": 6,
+    "tokenId": 1,
+    "address": "0x4d6cF5B015567B598B5961f9662Fce6e5267d774"
+  },
+  "runtimeFlow": {
+    "chainId": 11155111,
+    "entityId": "0x319d897d61ff0780e002ea25b0e418aa8bb49f5b9dcac9a76075372027977bb3",
+    "signerId": "0x09db3467818db669cc331a9cc516e80a81ea86ca",
+    "hub": "0x2d08d3bb8f4102fb07fecef0b59f052139c99aa996239ebfc55baac82ac54dd6",
+    "source": "f67aaba4e6a7c49af177c8ddee97dc7e4336ca13",
+    "steps": [
+      {
+        "stage": "started",
+        "height": 15,
+        "reserve": "0",
+        "account": "0"
+      },
+      {
+        "stage": "deposit-100-confirmed",
+        "height": 25,
+        "reserve": "100000000",
+        "account": "0"
+      },
+      {
+        "stage": "collateral-100-confirmed",
+        "height": 35,
+        "reserve": "0",
+        "account": "100000000"
+      },
+      {
+        "stage": "payment-25-confirmed",
+        "height": 37,
+        "reserve": "0",
+        "account": "75000000"
+      },
+      {
+        "stage": "withdrawal-75-confirmed",
+        "height": 49,
+        "reserve": "0",
+        "account": "0"
+      }
+    ],
+    "verified": true,
+    "externalTokenBalance": "75000000"
+  },
+  "transactions": {
+    "deposit": {
+      "hash": "0x1c616a84fddf51f8396321224b5404654e8ff434a365103bfd9d18e290970de7",
+      "blockNumber": 11893590,
+      "blockHash": "0x0b80820948c636dc7a495db93c75892dcc7498730ab96c2ca1d9cd7870937b9b",
+      "status": 1,
+      "gasUsed": "333905"
+    },
+    "collateral": {
+      "hash": "0x72703b33f0a7927b2c2167c121ce7a138c8b8e36b069cce6acfc19864910a853",
+      "blockNumber": 11893593,
+      "blockHash": "0xb3cee57e111ecc7c2fb55b11a2217abb87bdbe4d48dc786c5700f538e76dfc34",
+      "status": 1,
+      "gasUsed": "234717"
+    },
+    "withdrawal": {
+      "hash": "0xedafe6f545c8f327c2ad8a0e08c1cd607edd8286180407d95cbd7b1e56d2f9bc",
+      "blockNumber": 11893596,
+      "blockHash": "0x1b60f9f86839ef1ed69da8cc6422f395d3a6501dfef887ca625c7a42b958cec8",
+      "status": 1,
+      "gasUsed": "448231"
+    }
+  },
+  "clientRecovery": {
+    "verified": true,
+    "runtimeId": "0x09db3467818db669cc331a9cc516e80a81ea86ca",
+    "entityId": "0x319d897d61ff0780e002ea25b0e418aa8bb49f5b9dcac9a76075372027977bb3",
+    "height": 49,
+    "accountBalance": "0",
+    "reserve": "0",
+    "integrity": {
+      "ok": true,
+      "runtimeId": "0x09db3467818db669cc331a9cc516e80a81ea86ca",
+      "latestHeight": 49,
+      "checkedFrames": 49
+    },
+    "withdrawalFrame": {
+      "height": 49,
+      "postStateHash": "0xd5988d124c2b506c43be6bb816535994a08e5c562be8553d53c0c3826bcde941",
+      "outputsDigest": "0x56cc30822c85fae6a34ca5bd7047a22371f2bc0101275dc7240013b675347827"
+    }
+  },
+  "hubAccountAfterRestart": {
+    "counterpartyEntityId": "0x319d897d61ff0780e002ea25b0e418aa8bb49f5b9dcac9a76075372027977bb3",
+    "currentHeight": 11,
+    "directInput": {
+      "lastError": null,
+      "lastSeen": null
+    },
+    "hasAccount": true,
+    "hubEntityId": "0x2d08d3bb8f4102fb07fecef0b59f052139c99aa996239ebfc55baac82ac54dd6",
+    "mempool": 0,
+    "pendingFrameHeight": null,
+    "ready": true,
+    "replica": {
+      "entityId": "0x2d08d3bb8f4102fb07fecef0b59f052139c99aa996239ebfc55baac82ac54dd6",
+      "key": "0x2d08d3bb8f4102fb07fecef0b59f052139c99aa996239ebfc55baac82ac54dd6:0x0027cd455279b210e198971070ef4694be8db3f5",
+      "lockedFrameTxs": [],
+      "mempool": [],
+      "proposalTxs": [],
+      "signerId": "0x0027cd455279b210e198971070ef4694be8db3f5"
+    },
+    "runtime": {
+      "activeStep": null,
+      "fatalDebugPayload": null,
+      "framePhase": null,
+      "halted": false,
+      "height": 285,
+      "inFlightEntityInputs": 0,
+      "loopActive": false,
+      "networkInbox": 0,
+      "operatorStatus": null,
+      "pendingNetworkOutputs": 0,
+      "pendingOutputs": 0,
+      "runtimeMempool": [],
+      "timestamp": 1791746706425
+    },
+    "success": true,
+    "tokens": [
+      {
+        "delta": {
+          "collateral": "25000000",
+          "leftCreditLimit": "0",
+          "leftHold": "0",
+          "offdelta": "25000000",
+          "ondelta": "0",
+          "rightCreditLimit": "0",
+          "rightHold": "0"
+        },
+        "hasDelta": true,
+        "hubGranted": "0",
+        "hubOutCapacity": "25000000",
+        "peerGranted": "0",
+        "tokenId": 1
+      }
+    ]
+  },
+  "healthAfterRestart": {
+    "systemOk": true,
+    "coreOk": true,
+    "source": {
+      "codeHash": "f62e86dc42a74850db2005cf671cc72411789aff",
+      "computedAt": 1791746692691,
+      "dirty": false,
+      "gitBranch": "main",
+      "gitHead": "f62e86dc42a74850db2005cf671cc72411789aff",
+      "height": 288,
+      "owner": "orchestrator"
+    },
+    "storage": {
+      "ok": true
+    },
+    "failures": [],
+    "disk": {
+      "freeGiB": 5.71,
+      "ok": true,
+      "usedPct": 87.66
+    }
+  },
+  "faucet": {
+    "chainId": 11155111,
+    "address": "0x09Db3467818DB669cC331a9Cc516e80A81Ea86ca",
+    "result": {
+      "amount": "100",
+      "ethTxHash": "0xcbabea978a59ea960b4eaad55bacd523a1907196bcb7d37fe50927e558e18863",
+      "requestId": "f621edaf-b025-414e-8858-edb12a0d2982",
+      "success": true,
+      "tokenSymbol": "USDT",
+      "txHash": "0xa80920aa43ccf9c8571846ce20749a74e0058e379476fd12946afaaca28d22f6",
+      "type": "erc20",
+      "userAddress": "0x09Db3467818DB669cC331a9Cc516e80A81Ea86ca"
+    },
+    "block": 11893564,
+    "after": {
+      "native": "10000000000000",
+      "token": "100000000"
+    },
+    "verified": true
+  },
+  "artifacts": {
+    "walletArchive": {
+      "file": "sepolia-wallet-catalog.tar.gz",
+      "sha256": "773cd60ea761350ec224b1ef83ab710d1f3d2bf3a1ae6c16dd8ea913c7cb8072",
+      "source": "2344d2a93367f6f19eaf1ed6e0320faccdd3c728",
+      "note": "Final backend patch only requires Request on the existing token route; browser source is unchanged."
+    },
+    "nginx": {
+      "file": "sepolia-final.nginx.conf",
+      "sha256": "4f2de1a3ef8de6fbed57554fea89c2d1fbfb9b92743f46fa40581255e8586e59"
+    },
+    "start": {
+      "file": "start-sepolia-final.sh",
+      "sha256": "fe8e95f053ffa5fec64f2bfc621940b4aa17762956491dfe1beca4323c07c35d"
+    },
+    "towerStart": {
+      "file": "start-sepolia-tower-final.sh",
+      "sha256": "b922a097cd78e15b1626e274ca02b7e3eefd4ac6b20c0e078f096594394a1ee2"
+    }
+  },
+  "validation": {
+    "receiptReader": {
+      "tests": 18,
+      "assertions": 585
+    },
+    "faucet": {
+      "tests": 24,
+      "assertions": 110
+    },
+    "check": {
+      "sourceGates": 38,
+      "durationSeconds": 26.923
+    },
+    "externalWalletApi": {
+      "tests": 20,
+      "assertions": 90
+    },
+    "tokenScope": {
+      "beforeStatus": 200,
+      "afterStatus": 400,
+      "invalidEntity": "invalid"
+    },
+    "browser": {
+      "productionArtifactReadOnlyHub": {
+        "symbol": "USDT",
+        "reserve": "2000000",
+        "receivedPayment": "25",
+        "errors": 0
+      },
+      "publicLanding": {
+        "network": "Ethereum Sepolia",
+        "connected": true
+      },
+      "personalWalletPaymentReload": "pending owner password handoff"
+    }
+  },
+  "limitations": [
+    "Sepolia test assets have no mainnet monetary value.",
+    "Authenticated browser payment and reload awaits password handoff.",
+    "Integrated TS release family, lending completion and valid load gates remain open.",
+    "Rust parity is incomplete and is not this TS alpha engine.",
+    "One registered test asset and one hub; swaps and lending are not accepted public release flows."
+  ],
+  "watchtower": {
+    "evidence": "offline-watchtower.json",
+    "health": {
+      "ok": true,
+      "service": "xln-watchtower",
+      "towerId": "xln-sepolia-watchtower",
+      "signerAddress": "0x50c7fb1565988eb94bca5c525c4e5431a48cf9a4",
+      "maxStoredBytesPerLookupKey": 4194304,
+      "maxAppointmentBytes": 4259840,
+      "maxLookupKeys": 10000,
+      "maxTotalStoredBytes": 1073741824,
+      "maxBundlesPerLookupKey": 3,
+      "sweep": {
+        "enabled": true,
+        "intervalMs": 12000,
+        "healthy": true,
+        "consecutiveFailures": 0
+      },
+      "pushWake": {
+        "enabled": false,
+        "intervalMs": 0,
+        "sender": "console",
+        "healthy": true,
+        "consecutiveFailures": 0
+      },
+      "operatorApi": {
+        "enabled": false,
+        "auth": "local-only"
+      },
+      "stats": {
+        "lookupCount": 2,
+        "lastResortAppointmentCount": 1,
+        "actionReceiptCount": 7
+      }
+    }
+  },
+  "coldBackup": {
+    "file": "f62e86dc4-cold.tgz",
+    "sha256": "8e4c23289a0cce0df6cae30940b362783601222b0fd3dac62f00fffdcd8503da",
+    "localAndServerHashesMatch": true,
+    "protectedOutsideRepository": true
+  }
+}

@@ -1,0 +1,157 @@
+{
+  "chainId": 11155111,
+  "source": "a90491d070e35aa8832c1f4445385c5c7d369fbd",
+  "tower": "0x50c7fb1565988eb94bca5c525c4e5431a48cf9a4",
+  "watched": "0x09Db3467818DB669cC331a9Cc516e80A81Ea86ca",
+  "watchedId": "0x319d897d61ff0780e002ea25b0e418aa8bb49f5b9dcac9a76075372027977bb3",
+  "peerId": "0xf07ce42823fcccac815c20b899b905258538b885ed02908d2f9d56f87e3fb964",
+  "accountKey": "0x319d897d61ff0780e002ea25b0e418aa8bb49f5b9dcac9a76075372027977bb3f07ce42823fcccac815c20b899b905258538b885ed02908d2f9d56f87e3fb964",
+  "quantity": "1000000",
+  "finalHash": "0x3c702b234d0dd96227c43e0ae6db71421935754d8dcd35b1869c5a8292b05d93",
+  "responseWindowSeconds": 360,
+  "lastResortWindowSeconds": 72,
+  "backupReadbackVerified": true,
+  "backupHeight": 49,
+  "appointmentReceipt": {
+    "ok": true,
+    "receipt": {
+      "appointmentSequence": 2,
+      "bundleHash": "0x299ceef7a13488fe2a1950dc3c56533224b04fdaf7a1fc49430889cd170a5010",
+      "expiresAt": 1823281169387,
+      "height": 49,
+      "lookupKey": "0x3c4b4122f45e3d7bc2a6526adffd79623085e7825b8fd1fd08bf30527c934b7e",
+      "maxStoredBytes": 4194304,
+      "quotaOk": true,
+      "receivedAt": 1791745169387,
+      "retainedSlots": 1,
+      "runtimeId": "0x09db3467818db669cc331a9cc516e80a81ea86ca",
+      "sequence": 1,
+      "slot": 0,
+      "storedAt": 1791745169387,
+      "storedBytes": 22569,
+      "towerId": "xln-sepolia-watchtower",
+      "towerMode": "delayed_last_resort",
+      "towerSignature": "0x2a6b4281774da4dcbb8f01d1b26a5fc726a161fe4031933adff061da1ea91cc778426454198f3a704cb57a63cf522b555fba35e362e0ebe0c34301d2364f68ef1b",
+      "type": "tower_receipt",
+      "version": 1
+    }
+  },
+  "receipts": [
+    {
+      "name": "deposit",
+      "hash": "0xd9555ccb8d7e23994254bca1aa26fb304b9f48b24e9fc27ba33d573ad874fcca",
+      "status": "confirmed",
+      "block": 11893668
+    },
+    {
+      "name": "collateral",
+      "hash": "0x86611114d0df4cece3debfa6828804812904b2888299246b1e0cfc621365162f",
+      "status": "confirmed",
+      "block": 11893669
+    },
+    {
+      "name": "stale-dispute-start",
+      "hash": "0x5341cc8112005b28577b6e15e7f0d58782800f530d4f4fcc627793208dd45bbb",
+      "status": "confirmed",
+      "block": 11893670
+    }
+  ],
+  "startedAt": "2026-10-11T18:59:29.444Z",
+  "status": "daemon-finalized",
+  "offlineOwnerNonce": 4,
+  "disputeTimeout": 1791745560,
+  "startedBlock": 11893670,
+  "observations": [
+    {
+      "block": 11893671,
+      "timestamp": 1791745212,
+      "nonce": "1",
+      "counterNonce": "0",
+      "counterHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+      "disputeHash": "0x3eb6a9b4e39c3ae5d8662af17de564c1e61d34c29fc280ea61250eac08503168",
+      "collateral": "1000000",
+      "reserve": "0",
+      "ownerNonce": 4,
+      "secondsRemaining": 348
+    },
+    {
+      "block": 11893687,
+      "timestamp": 1791745404,
+      "nonce": "1",
+      "counterNonce": "0",
+      "counterHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+      "disputeHash": "0x3eb6a9b4e39c3ae5d8662af17de564c1e61d34c29fc280ea61250eac08503168",
+      "collateral": "1000000",
+      "reserve": "0",
+      "ownerNonce": 4,
+      "secondsRemaining": 156
+    },
+    {
+      "block": 11893694,
+      "timestamp": 1791745488,
+      "nonce": "1",
+      "counterNonce": "0",
+      "counterHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+      "disputeHash": "0x3eb6a9b4e39c3ae5d8662af17de564c1e61d34c29fc280ea61250eac08503168",
+      "collateral": "1000000",
+      "reserve": "0",
+      "ownerNonce": 4,
+      "secondsRemaining": 72
+    },
+    {
+      "block": 11893698,
+      "timestamp": 1791745536,
+      "nonce": "1",
+      "counterNonce": "2",
+      "counterHash": "0x3c702b234d0dd96227c43e0ae6db71421935754d8dcd35b1869c5a8292b05d93",
+      "disputeHash": "0x22bf4a645d6d1d1c2f9320555b8f5daaeaa80f147a64bad4ea00a302313ae13a",
+      "collateral": "1000000",
+      "reserve": "0",
+      "ownerNonce": 4,
+      "secondsRemaining": 24
+    },
+    {
+      "block": 11893702,
+      "timestamp": 1791745584,
+      "nonce": "2",
+      "counterNonce": "0",
+      "counterHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+      "disputeHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+      "collateral": "0",
+      "reserve": "1000000",
+      "ownerNonce": 4,
+      "secondsRemaining": -24
+    },
+    {
+      "block": 11893710,
+      "timestamp": 1791745680,
+      "nonce": "2",
+      "counterNonce": "0",
+      "counterHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+      "disputeHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+      "collateral": "0",
+      "reserve": "1000000",
+      "ownerNonce": 4,
+      "secondsRemaining": -120
+    }
+  ],
+  "verified": true,
+  "daemonTransactions": [
+    {
+      "name": "CounterDisputeRegistered",
+      "hash": "0x68f394e20416292889c87d6c0120366fdfcf6bfb2ba12f62d25782189fbf3d4b",
+      "block": 11893695,
+      "timestamp": 1791745500,
+      "from": "0x50C7fB1565988EB94bca5c525C4E5431A48cF9A4",
+      "status": 1
+    },
+    {
+      "name": "DisputeFinalized",
+      "hash": "0x4b2f2189f6b5e5cca2a1536ecb998ebd32d8c9eeaa5bd31efc65029b4f8a49b9",
+      "block": 11893701,
+      "timestamp": 1791745572,
+      "from": "0x50C7fB1565988EB94bca5c525C4E5431A48cF9A4",
+      "status": 1
+    }
+  ]
+}

@@ -5,6 +5,61 @@ asset flow; Base is an alternative, not a prerequisite. Finish the TS launch pat
 before resuming Rust book parity. Mainnet activation remains a separate exact-build
 decision; a local Anvil wallet or test tokens are not real-value mainnet assets.
 
+Live public alpha: `https://sepolia.xln.finance`, immutable source
+`f62e86dc42a74850db2005cf671cc72411789aff`, TS only, one hub, Test USDT on
+Sepolia 11155111. The normal production Runtime path passed external deposit
+100 -> collateral 100 -> payment 25 to the hub -> external withdrawal 75.
+Client restart preserved the identity and zero Account/reserve balances;
+all 49 WAL frames passed storage integrity verification. Both timed contract
+exit proofs also passed. Public faucet delivered 100 test USDT plus 0.00001
+Sepolia ETH to a fresh independent signer, with both receipts checked.
+
+Public startup blockers fixed: exact four-address import projection; full-block
+receipt retrieval in place of per-transaction RPC fan-out; fee-sized faucet gas
+grants. Receipt tests: 18/18, 585 assertions. Faucet tests: 24/24, 110 assertions.
+Last full check: 38 source gates, 26.923s; external-wallet API 20/20, 90 assertions.
+The wallet now reads token metadata from its selected network; both HTTP entry
+points pass the required request through the catalog handler. Public malformed
+Entity scope changed from an incorrect 200 to a typed 400. The proxy selects the explicitly
+configured public audience for non-browser TLS clients while retaining rejection
+of foreign browser origins. Old production checkout/services remain untouched.
+
+Current boundary: public browser wallet tab 21 awaits the owner entering a local
+password (required handoff under the browser tool policy). No password is known
+or requested in chat. UI render/network detection and console checks pass; do
+not claim its authenticated payment/reload flow passed yet. The CLI Runtime
+flow is separate evidence. Public alpha is not mainnet acceptance: integrated
+TS release vectors, lending completion and valid load gates remain open. Existing
+unrelated/unfinished Rust edits stay unstaged. Rust is not the public alpha engine.
+
+Public offline watchtower exit passed with a separate 1-USDT Account: the daemon
+countered stale nonce 1 with signed nonce 2 before the deadline, finalized after
+the deadline, and restored 1 USDT to the owner's reserve. The offline owner's EOA
+nonce remained 4 throughout. Both transactions came from the tower signer.
+The encrypted height-49 backup was read back and decrypted successfully. Evidence:
+`docs/evidence/sepolia-20261011/offline-watchtower.json`. This later drill leaves
+1 USDT in the client's reserve; the earlier normal-flow recovery proof's zero
+reserve is historical, not the latest on-chain balance.
+
+Final deployment restart recovered Hub Account height 11, collateral 25 USDT,
+zero mempool and no pending frame. Public health reports systemOk/coreOk true,
+the exact source above and dirty false. Watchtower sweep health is green.
+Cold backup `f62e86dc4-cold.tgz` includes Hub/tower stores, protected secrets and
+startup configuration; local/server SHA-256 matches
+`8e4c23289a0cce0df6cae30940b362783601222b0fd3dac62f00fffdcd8503da`.
+It is outside Git. A real 5-GiB startup disk guard blocked the final restart;
+removing redundant old-checkout documentation through Git sparse checkout
+recovered space to 5.71 GiB. No guard, shared Git object store or funded state
+was removed. Retain the release parent object stores and shared node_modules.
+
+Method review, 19:27 UTC: the public economic path, offline defense and cold-backup
+restart now have evidence. Stop extending UI scope; save the exact release
+evidence and finish the personal browser flow on owner handoff. Do not repeat funding, minting or financial
+proof scripts without inspecting their persisted receipt guards. Operator keys
+and the cold backup are outside the repository under protected local/server
+configuration directories. The public faucet and contract tokens have no real
+monetary value.
+
 Public funding is resolved: the existing project deployer's key was available in
 macOS Keychain under its lowercase account address. A chain-11155111-guarded
 transfer funded the dedicated signer with 0.001 Sepolia ETH in block 11893327,
@@ -35,7 +90,8 @@ Of the 250-unit unsecured claim, 200 available reserve units were collected and
 50 remained in the on-chain debt row. No insolvency guarantee is claimed.
 Evidence: `docs/evidence/sepolia-20261011/rpc-head-regression.json` and
 `.logs/crisis-20261011/release-sepolia-*`. Latest full check passes 38 source gates
-in 26.737s. The wallet is not yet released against this stack.
+in 26.737s. This was the pre-wallet deployment checkpoint; the current alpha above
+supersedes that status.
 
 Public Runtime startup exposed a deployment/configuration boundary mismatch.
 The matrix wrote linked libraries into `contracts`; the config loader accepts
