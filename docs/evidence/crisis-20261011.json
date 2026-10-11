@@ -2772,7 +2772,14 @@
       "newRuntimeBytes": 8326,
       "newRuntimeKeccak": "0xf0b6c12143a14da9143b650dbb23895da3b01482dc352c2bb90b5ef76cf01b98"
     },
-    "check": "Pending on synchronized checkpoint; preceding checkpoint check is green.",
+    "check": {
+      "passed": true,
+      "sourceGates": 38,
+      "sourceWallMs": 28653,
+      "outerGates": 3,
+      "shortGates": 2,
+      "log": "partial-check-final.log"
+    },
     "remaining": [
       "demand savings",
       "due/request ordered withdrawal servicing",
@@ -2789,7 +2796,27 @@
       "partial-wire-ui.log": "f907aade66f07ac73865aee96991c57fda3bf84eb58bdba38d5f5c7fde69c883",
       "partial-bytecode-review.json": "a99a132175ca742b79da79809bc8c674a063de2b42068dfa19b29ac42830f9a5",
       "partial-react/wallet-results.json": "b3c2ff7e5f35a1ba542b7f461f8a32e05717d9993cd8a956e5150a5ebc064ca3",
-      "partial-react/partial-comparison.json": "a186a8d2f4106c7b469a4c9f738657b4172e1d0cb6a2bc6ca7dfd138d0a15ac7"
+      "partial-react/partial-comparison.json": "a186a8d2f4106c7b469a4c9f738657b4172e1d0cb6a2bc6ca7dfd138d0a15ac7",
+      "partial-check.log": "f7686acdac16dd595edabf1b7ccd44289b245b78d1e8beca7a89a5c1b886633b",
+      "partial-check-final.log": "c5e6129ff1c95ba0eb8e8f250d339c58aa23ec15f184776aacb6469daa293f85",
+      "partial-guard-replay.log": "a45adfbea1d3bc9bb0b53c995418e53cd92db8649d177184bc7cbb73c2b8ae94",
+      "partial-sepolia-status.log": "98bd018ba8a680cee85d47cc57f13baad6c19a5063db2b87adf8c332295712f8",
+      "partial-wire-final.log": "7cbe6d07fac559bb9602be1ddbc6aa8c8cacacf48eef29d2d42abc0e919f1655"
+    },
+    "sourceCheckpoint": "5a2025a81",
+    "implementationCommit": "8c5ef2793",
+    "sourceCheckCorrection": {
+      "firstFailure": "one new non-null assertion",
+      "fix": "Reuse the validated Account at ingress; no unchecked get at use",
+      "oldAssertions": 617,
+      "newAssertions": 616,
+      "replayFramesExact": 108
+    },
+    "sepolia": {
+      "deployed": false,
+      "chainId": 11155111,
+      "balanceEth": "0.0",
+      "log": "partial-sepolia-status.log"
     }
   }
 }

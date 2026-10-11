@@ -2,9 +2,11 @@
 
 ## Current SHA
 
-HEAD before the partial-repayment checkpoint: `494b162cc`, main, 2026-10-11.
-Local commits `87f860bd1` and `494b162cc` repair release fixtures, remove
-saver-to-borrower allocation and charge actual elapsed loan interest. Not pushed.
+Tested source checkpoint: `5a2025a81`, main, 2026-10-11; documentation may follow.
+`8c5ef2793` implements partial repayment; `5a2025a81` validates Account access once
+and lowers non-null assertion debt from 617 to 616. Earlier `87f860bd1` and
+`494b162cc` repair release fixtures, remove saver allocation and charge actual
+elapsed loan interest. Not pushed.
 Preserve unrelated frozen Rust changes, HANDOFF.md, output/ and tmp/.
 TS only, React only, Ethereum same-J. Work solo; no external-model spend.
 
@@ -32,8 +34,11 @@ Current partial-repayment candidate:
 - Fresh production WAL: all R/E/A roots and ordered outputs exact for 108 frames
   through TS W1/W4. Transcript digest
   `1d625ebbcd2212037c1326174fba51433706aaf88ec2c34c522df9fe39f84cff`.
-- Runtime, contract-test and UI types pass. Full check on the partial candidate
-  is the next gate; the preceding checkpoint passed all 38 source/3 outer gates.
+- Runtime, contract-test and UI types pass. Full check passes: two short gates,
+  38 source gates (28,653ms), three outer gates. The first check rejected one new
+  non-null assertion. Reusing the validated Account removed it and one older
+  assertion; the stricter ratchet passes. All 108 replay frames remain exact
+  before/after that source-only guard change.
 
 Partial payments mutate the same root-bound Account covenant. Interest accrues on
 remaining principal, carries its fractional numerator and never compounds. The
@@ -50,7 +55,7 @@ Other bytecode/ABI templates are identical; build metadata/AST ids differ.
 
 ## First red command/error
 
-No remaining partial-repayment L1/L2 failure. Full source check is pending.
+No remaining partial-repayment L1/L2 or full source-check failure.
 Demand savings and due/request-ordered payout servicing are not implemented.
 
 The integrated runtime release gate still reaches the frozen cross-J fixture
@@ -68,14 +73,16 @@ Do not resume speculative performance changes or relax the gate.
 ## Artifact path
 
 `.logs/crisis-20261011/partial-{related,contract-full,gas,crash-verified,wire-ui}.log`,
-`partial-bytecode-review.json`, and `partial-react/` browser/replay evidence.
+`partial-bytecode-review.json`, `partial-check-final.log`, and `partial-react/`
+browser/replay evidence.
 Durable evidence index: `docs/evidence/crisis-20261011.json`.
 
 ## Next single command
 
-`bun run check` on the checkpoint containing the synchronized artifacts.
-Then implement demand savings and ordered payouts with the existing signed
-obligation/close path; reproduce the first missing behavior before changing it.
+`bun test core/__tests__/finance/state/lending.test.ts --test-name-pattern 'close'`
+Inspect that existing production boundary, then reproduce demand savings and
+ordered payout behavior there before implementing the first missing case.
+Use the same signed obligation/close path.
 Do not repeat unchanged green gates without a new concern.
 
 Sepolia runner: `/Users/zigota/.config/xln/sepolia-deployer/run.ts`.
@@ -90,7 +97,8 @@ the connection as a hosting IP range. No mining started; no restriction bypassed
 Zalalena image input hit a browser coordinate limitation; Google/Metana require
 a login absent from the current session. Do not retry these unchanged failures.
 Quicknode's revised FAQ says no mainnet balance is needed, but its UI still
-rejects this empty signer. Latest chain check remains 0 ETH.
+rejects this empty signer. Latest check at the partial-repayment checkpoint still
+shows 0 ETH on chain 11155111; `partial-sepolia-status.log`. No public deployment.
 
 ## Remaining final gates
 

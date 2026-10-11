@@ -504,5 +504,8 @@ processes preserve fractional accrual and outbox redelivery. All 16 gas vectors
 pass: 80 claims finalize at 3,930,280 / 5M gas. Only DeltaTransformer bytecode
 changes among nine artifacts; runtime grows from 7,867 to 8,326 bytes. Synchronized
 ABI/types reject old claim schemas rather than reading them through a fallback.
-Full source check is the next checkpoint gate. Demand savings, ordered payouts
-and public Sepolia deployment remain open; this is not a mainnet-ready release.
+Full source check passes on source checkpoint `5a2025a81`: 38 source gates and
+three outer gates. A rejected non-null assertion was removed by sharing the
+validated Account, lowering existing debt from 617 to 616; all 108 replay frames
+remain exact. Demand savings, ordered payouts and public Sepolia deployment
+remain open; this is not a mainnet-ready release.
