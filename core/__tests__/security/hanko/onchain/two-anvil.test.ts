@@ -84,6 +84,9 @@ const startAnvil = async (chainId: number): Promise<ManagedAnvil> => {
     '--prune-history', '256',
     '--state', join(tmpRoot, 'state.json'),
   ], { env: { ...process.env, TMPDIR: tmpRoot } });
+  // Anvil logs every RPC request to stdout. An unread pipe can block its RPC
+  // task under the smaller pipe capacity of a busy Linux CI runner.
+  child.stdout.resume();
   const managed: ManagedAnvil = { child, rpcUrl, tmpRoot, stderr: '' };
   child.stderr.on('data', (chunk) => {
     managed.stderr += chunk.toString();

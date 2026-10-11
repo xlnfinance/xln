@@ -17,7 +17,7 @@ type Artifact = Readonly<{
 
 type ArtifactDescriptor = Readonly<{ path: string; sourceName: string; contractName: string }>;
 
-const ARTIFACTS: Readonly<Record<StackContractName, ArtifactDescriptor>> = {
+export const STACK_ARTIFACTS: Readonly<Record<StackContractName, ArtifactDescriptor>> = {
   account: { path: 'contracts/Account.sol/Account.json', sourceName: 'contracts/Account.sol', contractName: 'Account' },
   depositoryBounds: { path: 'contracts/DepositoryBounds.sol/DepositoryBounds.json', sourceName: 'contracts/DepositoryBounds.sol', contractName: 'DepositoryBounds' },
   hashLadderRegistry: { path: 'contracts/HashLadderRegistry.sol/HashLadderRegistry.json', sourceName: 'contracts/HashLadderRegistry.sol', contractName: 'HashLadderRegistry' },
@@ -116,7 +116,7 @@ const decodeArtifact = (value: unknown, name: string): Artifact => {
 };
 
 const readArtifact = async (name: StackContractName): Promise<Artifact> => {
-  const value: unknown = JSON.parse(await readFile(artifactUrl(ARTIFACTS[name].path), 'utf8'));
+  const value: unknown = JSON.parse(await readFile(artifactUrl(STACK_ARTIFACTS[name].path), 'utf8'));
   return decodeArtifact(value, name);
 };
 
@@ -155,7 +155,7 @@ export const verifyJurisdictionStack = async (
 ): Promise<void> => {
   const network = await provider.getNetwork();
   if (Number(network.chainId) !== manifest.chainId) throw new Error('STACK_MANAGER_MANIFEST_CHAIN_ID_MISMATCH');
-  const names = Object.keys(ARTIFACTS) as StackContractName[];
+  const names = Object.keys(STACK_ARTIFACTS) as StackContractName[];
   for (const name of names) {
     const deployment = manifest.evmContracts[name];
     if (!deployment) throw new Error(`STACK_MANAGER_DEPLOYMENT_MISSING:${name}`);
@@ -170,7 +170,7 @@ export const verifyJurisdictionStack = async (
     }
     const code = (await provider.getCode(deployment.address, receipt.blockNumber)).toLowerCase();
     const linked = linkExpectedBytecode(await readArtifact(name), manifest, name);
-    const descriptor = ARTIFACTS[name];
+    const descriptor = STACK_ARTIFACTS[name];
     const compilerEvidence = await readCompilerBytecodeEvidence(
       buildInfoUrl,
       descriptor.sourceName,

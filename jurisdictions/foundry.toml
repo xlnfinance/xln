@@ -10,8 +10,11 @@ optimizer_runs = 1
 via_ir = true
 # Keep invariant-test gas headroom independent of public-network block limits.
 # Production bytecode size is checked separately against EIP-170.
-evm_version = "cancun"
+# Match hardhat.config.ts's solc 0.8.36 production target and metadata policy;
+# exit-gas evidence must execute the same bytecode, not another compiler profile.
+evm_version = "osaka"
 bytecode_hash = "none"
+cbor_metadata = false
 gas_limit = 300000000
 block_gas_limit = 300000000
 # node_modules is hoisted to the monorepo root; solc needs it whitelisted.

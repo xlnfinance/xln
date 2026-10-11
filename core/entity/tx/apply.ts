@@ -19,6 +19,7 @@ import {
 } from './handlers/account';
 import { applyJEvent } from './j-events';
 import { FailureDispositionError } from '../../protocol/errors/failure-taxonomy';
+import { entityTxAdmissionError } from './processing/admission-policy';
 import { createStructuredLogger } from '../../support/logger';
 import { handleR2E } from './handlers/j-batch/r2e';
 import { handleHtlcPayment } from './handlers/htlc/payment';
@@ -578,6 +579,10 @@ export const applyEntityTx = async (
   }
 
   try {
+    // Check the static launch profile before any handler can mutate its book
+    // or enqueue unavailable Account work. Signed command bytes stay intact.
+    const admissionError = entityTxAdmissionError(entityTx);
+    if (admissionError) throw admissionError;
     // Every reducible type has a dispatcher (`satisfies Record<…>` above);
     // unknown type strings are rejected at both wire boundaries before here.
     const dispatcher: EntityTxDispatcher = entityTxDispatchers[entityTx.type];

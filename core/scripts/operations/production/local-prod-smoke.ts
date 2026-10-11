@@ -4,7 +4,7 @@ import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { runWalletBrowserGate } from './browser/wallet-gate';
 import { appendFileSync, cpSync, existsSync, mkdirSync, openSync, readdirSync, renameSync, closeSync, readFileSync, writeFileSync } from 'node:fs';
 import { createConnection } from 'node:net';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { Level } from 'level';
 import { readStorageHead } from '../../../storage';
@@ -255,7 +255,9 @@ const nodePortBase = portBase + 10;
 // The mesh hosts HUB_COUNT hubs on nodePortBase+0..HUB_COUNT-1; the market
 // maker takes the next port. Hard-coding +3 polls a hub once the mesh grows.
 const marketMakerApiPort = nodePortBase + HUB_COUNT;
-const workDir = process.env['XLN_LOCAL_PROD_SMOKE_DIR'] || join(tmpdir(), `xln-local-prod-smoke-${portBase}`);
+// Child tools resolve relative paths from their own config directories (e.g.
+// Playwright's ui/). Resolve once so logs, reports and state share one owner.
+const workDir = resolve(process.env['XLN_LOCAL_PROD_SMOKE_DIR'] || join(tmpdir(), `xln-local-prod-smoke-${portBase}`));
 const templateDir = String(process.env['XLN_LOCAL_PROD_SMOKE_TEMPLATE_DIR'] || '').trim();
 const useSnapshotTemplate = templateDir.length > 0;
 const hltH1Only = readBooleanEnv('XLN_HLT_H1_ONLY', false);

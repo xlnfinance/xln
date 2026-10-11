@@ -247,6 +247,11 @@ jobs:
           )
           ignore=()
           for file in "${red_at_head[@]}"; do ignore+=("--path-ignore-patterns=**/$file"); done
+          # Owner launch scope: new lending origination is rejected. Preserve
+          # its frozen crash scenarios without claiming the product works;
+          # deferred-entity-admission and historical proof/storage tests run.
+          frozen_profile=(core/__tests__/storage/durability/lending-real-crash-recovery.test.ts)
+          for file in "${frozen_profile[@]}"; do ignore+=("--path-ignore-patterns=**/$file"); done
           failed=()
           run_shard() {
             local label=$1

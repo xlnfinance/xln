@@ -1,6 +1,7 @@
 import { hasVerifiedEntityCommitPrecertificate } from '../../../entity/consensus/commit/precheck';
 import { mergeEntityInputs } from '../../../entity/consensus';
 import { retireAppliedLocalOutputs } from '../../delivery/local-outbox';
+import { admitEntityTxProfiles } from '../../admit/entity-tx-profile';
 import { cumulativeMarksToPhases } from '../../../support/performance/profile';
 import {
   authorityRecordEnabled,
@@ -283,7 +284,8 @@ const applyRuntimeInputPhases = async (
       ingress.runtimeTxs.some(tx => tx.type === 'checkpointBarrier'),
     );
     markRuntimeApplyPhase(env, 'apply.merge');
-    const cohortIsolatedInputs = markPotentialAtomicCrossJInputPairs(ingress.entityInputs);
+    const admitted = admitEntityTxProfiles(ingress.entityInputs);
+    const cohortIsolatedInputs = markPotentialAtomicCrossJInputPairs(admitted.inputs);
     const mergedInputs = mergeEntityInputs(cohortIsolatedInputs, input =>
       hasVerifiedEntityCommitPrecertificate(env, input));
     profile.mark('validateMerge');
@@ -295,6 +297,7 @@ const applyRuntimeInputPhases = async (
       deps,
       profile,
     );
+    batch.rejectedIngress = [...admitted.rejected, ...batch.rejectedIngress];
     const result = finalizeRuntimeInputApply(
       env,
       runtimeInput,

@@ -66,6 +66,7 @@ const RUNTIME_CORE_TESTS = [
   // Lending origination is deferred by the owner. Its release contract is
   // rejection before mutation, not execution of an unavailable product.
   'core/__tests__/proofs/fx-admission.test.ts',
+  'core/__tests__/runtime/ingress/recovery/deferred-entity-admission.test.ts',
   'core/__tests__/storage/runtime/storage-canonical-hash.test.ts',
   'core/__tests__/storage/recovery/storage-crash-recovery.test.ts',
   'core/__tests__/storage/recovery/portable/local-commit-outbox-replay.test.ts',
@@ -144,7 +145,7 @@ const ciPreE2eSteps: GateStep[] = [
   {
     name: 'signed exit gas budget',
     command:
-      "bun run stand:run --reason signed-exit-gas --timeout-ms 180000 -- forge test --root jurisdictions --match-contract 'Dispute(GasAdmission|IngressGas|CounterGas)Test|FundingExitTest' --fuzz-seed 0x20261012 -vv",
+      "bun run stand:run --reason signed-exit-gas --timeout-ms 180000 -- forge test --root jurisdictions --match-contract 'Dispute(GasAdmission|IngressGas|CounterGas)Test|FundingExitTest' --fuzz-seed 0x20261012 -vv && bun core/scripts/checks/contracts/check-exit-gas-bytecode.ts",
     timeoutMs: 190_000,
   },
   { name: 'RPC settlement parity', command: 'bun run test:rpc-settlement', timeoutMs: 240_000 },
