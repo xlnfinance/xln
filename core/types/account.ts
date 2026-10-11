@@ -107,7 +107,7 @@ export interface AccountExternalSubcontract {
 }
 
 /** Bilaterally signed term obligation. The existing subcontract tree owns the
- * outstanding claim; the bank portfolio is only its allocation/servicing view.
+ * outstanding claim; the bank portfolio is its servicing view.
  * Principal was already transferred at funding. Closing pays it once and removes
  * this program in the same Account transition. */
 export interface AccountLendingCovenant {
@@ -115,8 +115,13 @@ export interface AccountLendingCovenant {
   tokenId: number;
   creditorIsLeft: boolean;
   principal: bigint;
-  interest: bigint;
+  interestBps: number;
   openedAt: number;
+  /** Last settled accrual checkpoint, never later than the signed accrual end. */
+  accruedAt: number;
+  accruedInterest: bigint;
+  /** Fractional interest numerator; denominator is 10,000 * termMs. */
+  interestRemainder: bigint;
   termMs: number;
   /** Signed simple-interest extension after maturity; zero for fixed savings. */
   lateMs: number;
@@ -721,6 +726,8 @@ export type AccountTx =
         tokenId: number;
         /** Maximum authorized debit; the Account settles its exact committed-time quote. */
         amount: bigint;
+        /** Bind a partial debit to one signed claim state; stale retries reject. */
+        claimHash: string;
       };
     }
   | {

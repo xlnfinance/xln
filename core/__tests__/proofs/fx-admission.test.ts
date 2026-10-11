@@ -111,6 +111,7 @@ const LENDING_TXS: Array<[AccountTx['type'], AccountTx]> = [
       borrowerEntityId: '0xsender',
       tokenId: 1,
       amount: 10n,
+      claimHash: `0x${'11'.repeat(32)}`,
     },
   }],
   ['lending_disburse', {

@@ -273,10 +273,10 @@ const decodeLendingBorrow = (row: readonly unknown[]): AccountTx => {
     termId: lendingTerm(f[6]), maxInterestBps: rscoreWireInt(f[7], 'tx.maxInterestBps'), expiresAt: rscoreWireUint(f[8], 'tx.expiresAt'), maxLateMs: rscoreWireUint(f[9], 'tx.maxLateMs') } };
 };
 const decodeLendingRepay = (row: readonly unknown[]): AccountTx => {
-  const f = rscoreWireTuple(row, 6, 'tx.lendingRepay');
+  const f = rscoreWireTuple(row, 7, 'tx.lendingRepay');
   return { type: 'lending_repay', data: { loanId: rscoreWireText(f[1], 'tx.loanId'),
     hubEntityId: rscoreWireText(f[2], 'tx.hubEntityId'), borrowerEntityId: rscoreWireText(f[3], 'tx.borrowerEntityId'),
-    tokenId: rscoreWireUint(f[4], 'tx.tokenId'), amount: rscoreWireBig(f[5], 'tx.amount') } };
+    tokenId: rscoreWireUint(f[4], 'tx.tokenId'), amount: rscoreWireBig(f[5], 'tx.amount'), claimHash: rscoreWireText(f[6], 'tx.claimHash') } };
 };
 const decodeLendingDisburse = (row: readonly unknown[]): AccountTx => {
   const f = rscoreWireTuple(row, 13, 'tx.lendingDisburse');

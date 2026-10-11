@@ -2708,5 +2708,88 @@
       ]
     },
     "check": "PASS: 38 source gates, 3 outer gates; source 26972ms"
+  },
+  "partialRepayment": {
+    "baseSha": "494b162cc",
+    "scope": "TS/React/Ethereum same-J, working candidate; no public deployment or mainnet-readiness claim",
+    "mechanism": "One signed remaining-principal covenant and shared accrual/settlement function; interest first, then principal; fractional numerator carried without compounding; original term/late endpoint retained; prior claim hash prevents stale partial retries.",
+    "durableFields": "Account subcontract and Entity servicing book retain accruedAt, accruedInterest, interestRemainder and rate. Remaining principal cannot reconstruct earlier accrual after crash without history scanning. No new partial-payment receipt or side store.",
+    "migration": "Fresh domain; strict rejection of old coupon-only claims and six-field repayment worker tuples. Seven-field MessagePack literal independently derived by fixarray(7) plus str8(66). Root Rust unchanged.",
+    "related": {
+      "tests": 562,
+      "assertions": 448491,
+      "files": 46,
+      "durationSeconds": 33.88
+    },
+    "contracts": {
+      "tests": 65
+    },
+    "gas": {
+      "tests": 16,
+      "claim80Finalization": 3930280,
+      "fullWidth18Finalization": 3552680,
+      "limit": 5000000
+    },
+    "recovery": {
+      "tests": 1,
+      "assertions": 18,
+      "processes": 6,
+      "sigkills": 5,
+      "durationSeconds": 10.71,
+      "fractionalCarry": true,
+      "duplicateOutboxNoDebit": true
+    },
+    "browser": {
+      "tests": 3,
+      "skipped": 0,
+      "flaky": 0,
+      "pageErrors": 0,
+      "durationSeconds": 41.43
+    },
+    "replay": {
+      "exact": true,
+      "frames": 108,
+      "transcriptDigest": "1d625ebbcd2212037c1326174fba51433706aaf88ec2c34c522df9fe39f84cff",
+      "workers": [
+        1,
+        4
+      ],
+      "inputOccurrences": {
+        "lendingApprove": 4,
+        "lendingSetTerms": 3,
+        "lending_borrow_request": 2,
+        "lending_close_request": 1,
+        "lending_fund": 1,
+        "lending_repay": 2
+      }
+    },
+    "bytecode": {
+      "artifactsCompared": 9,
+      "changed": [
+        "DeltaTransformer"
+      ],
+      "oldRuntimeBytes": 7867,
+      "newRuntimeBytes": 8326,
+      "newRuntimeKeccak": "0xf0b6c12143a14da9143b650dbb23895da3b01482dc352c2bb90b5ef76cf01b98"
+    },
+    "check": "Pending on synchronized checkpoint; preceding checkpoint check is green.",
+    "remaining": [
+      "demand savings",
+      "due/request ordered withdrawal servicing",
+      "integrated TS release vectors",
+      "valid live 1000-user acceptance",
+      "funded public Sepolia proofs",
+      "immutable RC and recovery package"
+    ],
+    "sha256": {
+      "partial-related.log": "f01981c49687e56284495eff98fafdd739db8d6ba6ecd6cbde278e52685d254d",
+      "partial-contract-full.log": "29343f2218a9af4c8c0ba8aad949eb9b4d697f43f79b567f83135ce99e9b8f06",
+      "partial-gas.log": "ecf12d4dcaa7be08a0a2e2a1f4a75902df7bf4a8b582b2b2e8ae3bfe7bd9854b",
+      "partial-crash-verified.log": "12ee145800eb91ad531a3035e03ac721f83442eae4b869e179e66453bd36f31e",
+      "partial-wire-ui.log": "f907aade66f07ac73865aee96991c57fda3bf84eb58bdba38d5f5c7fde69c883",
+      "partial-bytecode-review.json": "a99a132175ca742b79da79809bc8c674a063de2b42068dfa19b29ac42830f9a5",
+      "partial-react/wallet-results.json": "b3c2ff7e5f35a1ba542b7f461f8a32e05717d9993cd8a956e5150a5ebc064ca3",
+      "partial-react/partial-comparison.json": "a186a8d2f4106c7b469a4c9f738657b4172e1d0cb6a2bc6ca7dfd138d0a15ac7"
+    }
   }
 }

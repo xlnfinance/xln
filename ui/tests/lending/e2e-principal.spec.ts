@@ -31,11 +31,17 @@ async function loans(page: Page, ids: Parties) {
     if (!loan || typeof loan !== 'object' || !('status' in loan) || typeof loan.status !== 'string'
       || !('repaymentAmount' in loan) || typeof loan.repaymentAmount !== 'string') throw new Error('LENDING_LOAN_INVALID');
     if (!('openedAt' in loan) || typeof loan.openedAt !== 'number' || !('termMs' in loan) || typeof loan.termMs !== 'number') throw new Error('LENDING_CLOCK_INVALID');
-    return { status: loan.status, repaymentAmount: loan.repaymentAmount, openedAt: loan.openedAt, termMs: loan.termMs };
+    if (!('principalAmount' in loan) || typeof loan.principalAmount !== 'string'
+      || !('repaidAmount' in loan) || typeof loan.repaidAmount !== 'string'
+      || !('accruedAt' in loan) || typeof loan.accruedAt !== 'number'
+      || !('interestRemainder' in loan) || typeof loan.interestRemainder !== 'string') throw new Error('LENDING_ACCRUAL_INVALID');
+    return { status: loan.status, repaymentAmount: loan.repaymentAmount, openedAt: loan.openedAt, termMs: loan.termMs,
+      principalAmount: loan.principalAmount, repaidAmount: loan.repaidAmount,
+      accruedAt: loan.accruedAt, interestRemainder: loan.interestRemainder };
   });
 }
 
-test('term loan transfers principal once, spends it, repays and returns lender money', { tag: '@functional' }, async ({ page, browser, baseURL }) => {
+test('term loan spends principal, repays partially then fully, and keeps saver money independent', { tag: '@functional' }, async ({ page, browser, baseURL }) => {
   test.setTimeout(60_000);
   const borrowerContext = await browser.newContext({ baseURL });
   const borrower = await borrowerContext.newPage();
@@ -117,6 +123,19 @@ test('term loan transfers principal once, spends it, repays and returns lender m
     await expect(page.getByTestId('payment-notification')).toContainText('Received');
     await page.getByRole('button', { name: 'Dismiss payment notification' }).click();
     await borrower.getByTestId('tour-chapter').selectOption('repay');
+    await borrower.getByTestId('lending-repay-amount').fill('1');
+    await borrower.getByTestId('lending-repay').click();
+    await expect.poll(async () => (await loans(borrower, borrowerIds))[0]?.repaidAmount).toBe('1000000');
+    await expect.poll(async () => (await readAccount(borrower, borrowerIds)).balance).toBe((101_000_000n - debit).toString());
+    const [partial] = await loans(borrower, borrowerIds);
+    if (!partial) throw new Error('LENDING_PARTIAL_MISSING');
+    const denominator = 10_000n * BigInt(partial.termMs);
+    const initialNumerator = 2_000_000n * 200n * BigInt(partial.accruedAt - partial.openedAt);
+    const initialInterest = initialNumerator / denominator;
+    expect(partial.status).toBe('active');
+    expect(partial.principalAmount).toBe((1_000_000n + initialInterest).toString());
+    expect(partial.interestRemainder).toBe((initialNumerator % denominator).toString());
+    await expect(borrower.getByTestId('lending-repay-amount')).toHaveValue('');
     await borrower.getByTestId('lending-repay').click();
     await expect.poll(async () => (await loans(borrower, borrowerIds)).map(loan => loan.status)).toEqual(['repaid']);
     const repaid = await readAccount(borrower, borrowerIds);
@@ -125,7 +144,9 @@ test('term loan transfers principal once, spends it, repays and returns lender m
     const elapsed = repaid.timestamp - settled.openedAt;
     expect(elapsed).toBeGreaterThan(0);
     expect(elapsed).toBeLessThan(settled.termMs);
-    const interest = 40_000n * BigInt(elapsed) / BigInt(settled.termMs);
+    const interest = initialInterest + (BigInt(partial.principalAmount) * 200n * BigInt(settled.accruedAt - partial.accruedAt)
+      + BigInt(partial.interestRemainder)) / denominator;
+    expect(settled.principalAmount).toBe('0');
     expect(settled.repaymentAmount).toBe((2_000_000n + interest).toString());
     expect(repaid.balance).toBe((100_000_000n - debit - interest).toString());
     expect(repaid.borrowingLimit).toBe(before.borrowingLimit);
@@ -138,7 +159,7 @@ test('term loan transfers principal once, spends it, repays and returns lender m
     await expect.poll(async () => (await readAccount(page, lenderIds)).balance).toBe('102000000');
     await home(page);
     await expect(page.getByTestId('home-total')).toContainText('102.00');
-    await test.info().attach('lending-money-evidence', { body: safeStringify({ before, disbursed, repaid, debit }), contentType: 'application/json' });
+    await test.info().attach('lending-money-evidence', { body: safeStringify({ before, disbursed, partial, repaid, debit }), contentType: 'application/json' });
     expect(errors).toEqual([]);
   } catch (error) {
     await test.info().attach('lending-route-failure', {

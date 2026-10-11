@@ -3,7 +3,7 @@ import { ethers } from 'ethers';
 import type { AccountState } from '../types/account';
 import type { EntityState } from '../entity/types';
 import type { LendingBankTerms, LendingFacility, LendingLoan, LendingSavings, LendingState, LendingTermId } from '../types/finance/lending';
-import { lendingMaximumAmount, lendingExitAmount } from '../protocol/dispute/lending-covenant';
+import { lendingMaximumAmount, lendingExitAmount, type LendingClock } from '../protocol/dispute/lending-covenant';
 import { deriveDelta } from '../account/utils';
 import { compareStableText } from '../protocol/serialization';
 
@@ -28,9 +28,7 @@ export const normalizeInterestBps = (value: unknown): number => {
 
 export const computeLendingInterest = (principal: bigint, interestBps: number): bigint => {
   if (principal <= 0n || interestBps <= 0) return 0n;
-  const numerator = principal * BigInt(interestBps);
-  const raw = numerator / 10_000n;
-  return raw === 0n ? 1n : raw;
+  return principal * BigInt(interestBps) / 10_000n;
 };
 
 /** Savings are bank liabilities, independent of any borrower or collection. */
@@ -44,12 +42,13 @@ export const lendingPositionCloseAmount = (position: LendingSavings, timestamp: 
     ? computeLendingInterest(position.principalAmount, position.interestBps) : 0n);
 };
 
-const loanClock = (loan: Pick<LendingLoan, 'principalAmount' | 'interestAmount' | 'openedAt' | 'termMs' | 'lateMs'>) => ({
-  principal: loan.principalAmount, interest: loan.interestAmount, openedAt: loan.openedAt, termMs: loan.termMs, lateMs: loan.lateMs,
+export const lendingLoanClock = (loan: Pick<LendingLoan, 'principalAmount' | Exclude<keyof LendingClock, 'principal'>>): LendingClock => ({
+  principal: loan.principalAmount, interestBps: loan.interestBps, openedAt: loan.openedAt, termMs: loan.termMs, lateMs: loan.lateMs,
+  accruedAt: loan.accruedAt, accruedInterest: loan.accruedInterest, interestRemainder: loan.interestRemainder,
 });
-export const lendingLoanRepaymentAmount = (loan: Parameters<typeof loanClock>[0], timestamp: number): bigint =>
-  lendingExitAmount(loanClock(loan), timestamp);
-export const lendingLoanMaximumAmount = (loan: Parameters<typeof loanClock>[0]): bigint => lendingMaximumAmount(loanClock(loan));
+export const lendingLoanRepaymentAmount = (loan: Parameters<typeof lendingLoanClock>[0], timestamp: number): bigint =>
+  lendingExitAmount(lendingLoanClock(loan), timestamp);
+export const lendingLoanMaximumAmount = (loan: Parameters<typeof lendingLoanClock>[0]): bigint => lendingMaximumAmount(lendingLoanClock(loan));
 
 const lendingHash = (parts: readonly unknown[]): string =>
   ethers.keccak256(ethers.toUtf8Bytes(parts.map(part => String(part)).join('|'))).toLowerCase();
@@ -135,7 +134,7 @@ export const summarizeLendingState = (
     .filter(loan => !userEntityId || loan.borrowerEntityId.toLowerCase() === userEntityId)
     .sort((left, right) => right.updatedAt - left.updatedAt || compareStableText(left.loanId, right.loanId))
     .map(loan => loan.status === 'active' || loan.status === 'defaulted'
-      ? { ...loan, repaymentAmount: lendingLoanRepaymentAmount(loan, state.timestamp) } : loan);
+      ? { ...loan, repaymentAmount: loan.repaidAmount + lendingLoanRepaymentAmount(loan, state.timestamp) } : loan);
   const allPools = Array.from(lending.savings.values()).filter(position => tokenId === undefined || position.tokenId === tokenId);
   const allLoans = Array.from(lending.loans.values()).filter(loan => tokenId === undefined || loan.tokenId === tokenId);
   const savingsPrincipalAmount = allPools.filter(position => position.status === 'open' || position.status === 'closing')

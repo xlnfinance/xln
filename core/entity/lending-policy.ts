@@ -78,7 +78,9 @@ export const validateLendingPolicies = (lending: Record<string, unknown>): void 
   for (const raw of requireMap(lending['loans'], 'LENDING_LOANS_MAP_INVALID').values()) {
     const loan = requireBoundaryRecord(raw, 'LENDING_LOAN_INVALID');
     if ('lenderEntityId' in loan || 'positionId' in loan) throw new Error('LENDING_ALLOCATION_MIGRATION_REQUIRED');
-    assertLendingClock({ principal: loan['principalAmount'], interest: loan['interestAmount'], openedAt: loan['openedAt'], termMs: loan['termMs'], lateMs: loan['lateMs'] });
+    assertLendingClock({ principal: loan['principalAmount'], interestBps: loan['interestBps'], openedAt: loan['openedAt'],
+      accruedAt: loan['accruedAt'], accruedInterest: loan['accruedInterest'], interestRemainder: loan['interestRemainder'],
+      termMs: loan['termMs'], lateMs: loan['lateMs'] });
     if (loan['approval'] !== undefined) {
       const approval = decodeLendingFacility(loan['approval']);
       if (approval.borrowerEntityId !== loan['borrowerEntityId'] || approval.tokenId !== loan['tokenId'] || approval.termId !== loan['termId']) throw new Error('LENDING_LOAN_APPROVAL_BINDING');

@@ -7,11 +7,12 @@ import {
   buildLendingLoanId,
   computeLendingInterest,
   lendingLoanRepaymentAmount,
+  lendingLoanClock,
   ensureLendingState,
   LENDING_TERM_MS,
 } from '../../../../extensions/lending';
 import type { AccountTxTarget } from './orderbook/queue';
-import { assertLendingCovenant } from '../../../../protocol/dispute/lending-covenant';
+import { assertLendingCovenant, settleLendingPayment } from '../../../../protocol/dispute/lending-covenant';
 import {
   applyLendingClosePayout,
   applyLendingCloseRequest,
@@ -100,7 +101,7 @@ function applyLendingBorrow(
     borrowerEntityId: proposer,
     tokenId: tx.data.tokenId,
     principalAmount: tx.data.amount,
-    interestAmount,
+    accruedAt: now, accruedInterest: 0n, interestRemainder: 0n,
     repaymentAmount: tx.data.amount + interestAmount,
     repaidAmount: 0n,
     interestBps: authorized.interestBps,
@@ -136,6 +137,7 @@ function applyLendingDisburse(
   const covenant = context.account.state.subcontracts?.get(loan.loanId);
   assertLendingCovenant(covenant);
   loan.openedAt = covenant.openedAt;
+  loan.accruedAt = covenant.accruedAt;
   loan.dueAt = covenant.openedAt + covenant.termMs;
   loan.updatedAt = now;
 }
@@ -155,19 +157,22 @@ function applyLendingRepay(
   if (!loan || (loan.status !== 'active' && loan.status !== 'defaulted')) {
     throw new Error(`LENDING_REPAY_LOAN_NOT_REPAYABLE:${tx.data.loanId}`);
   }
-  const remaining = lendingLoanRepaymentAmount(loan, context.accountTimestamp) - loan.repaidAmount;
   if (
     loan.borrowerEntityId !== proposer ||
-    loan.tokenId !== tx.data.tokenId ||
-    tx.data.amount < remaining
+    loan.tokenId !== tx.data.tokenId
   ) {
     throw new Error(`LENDING_REPAYMENT_MISMATCH:${tx.data.loanId}`);
   }
   // The bilateral repayment already moved principal plus interest. Its commit
   // settles the book; no second payment or credit-limit rewrite is needed.
-  loan.repaymentAmount = loan.repaidAmount + remaining;
-  loan.repaidAmount = loan.repaymentAmount;
-  loan.status = 'repaid';
+  const paid = settleLendingPayment(lendingLoanClock(loan), tx.data.amount, context.accountTimestamp);
+  loan.principalAmount = paid.clock.principal;
+  loan.accruedAt = paid.clock.accruedAt;
+  loan.accruedInterest = paid.clock.accruedInterest;
+  loan.interestRemainder = paid.clock.interestRemainder;
+  loan.repaidAmount += paid.amount;
+  loan.repaymentAmount = loan.repaidAmount + lendingLoanRepaymentAmount(loan, context.accountTimestamp);
+  if (loan.principalAmount === 0n) loan.status = 'repaid';
   loan.updatedAt = now;
 }
 

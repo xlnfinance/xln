@@ -15,8 +15,10 @@ export function previewLendingTerms(amount: string, rate: string, decimals: numb
   try {
     const principal = parseAmount(amount, decimals);
     if (principal <= 0n) throw new Error('Enter a positive amount');
-    const coupon = computeLendingInterest(principal, normalizeInterestBps(rate));
-    const maximum = late ? lendingLoanMaximumAmount({ principalAmount: principal, interestAmount: coupon, openedAt: 0, ...late }) : principal + coupon;
+    const interestBps = normalizeInterestBps(rate);
+    const coupon = computeLendingInterest(principal, interestBps);
+    const maximum = late ? lendingLoanMaximumAmount({ principalAmount: principal, interestBps, openedAt: 0,
+      accruedAt: 0, accruedInterest: 0n, interestRemainder: 0n, ...late }) : principal + coupon;
     return { ok: true as const, principal, coupon, repayment: principal + coupon, maximum };
   } catch (error) {
     return { ok: false as const, error: error instanceof Error ? error.message : String(error) };
@@ -62,7 +64,9 @@ export type LendingLoan = {
 	borrowerEntityId: string;
 	tokenId: number;
 	principalAmount: bigint;
-	interestAmount: bigint;
+	accruedAt: number;
+	accruedInterest: bigint;
+	interestRemainder: bigint;
 	repaymentAmount: bigint;
 	repaidAmount: bigint;
 	interestBps: number;
@@ -140,7 +144,9 @@ export async function fetchLendingState(input: { hubEntityId: string; userEntity
 			borrowerEntityId: String(loan['borrowerEntityId'] || ''),
 			tokenId: Number(loan['tokenId'] || 0),
 			principalAmount: big(loan['principalAmount']),
-			interestAmount: big(loan['interestAmount']),
+			accruedAt: clock(loan['accruedAt'], 0),
+			accruedInterest: BigInt(String(loan['accruedInterest'])),
+			interestRemainder: BigInt(String(loan['interestRemainder'])),
 			repaymentAmount: big(loan['repaymentAmount']),
 			repaidAmount: big(loan['repaidAmount']),
 			interestBps: Number(loan['interestBps'] || 0),
@@ -193,11 +199,11 @@ export function buildLendingBorrowTx(input: { hubEntityId: string; tokenId: numb
 export const isLendingLoanRepayable = (loan: LendingLoan): boolean =>
 	(loan.status === 'active' || loan.status === 'defaulted') && loan.repaymentAmount > loan.repaidAmount;
 
-export function buildLendingRepayTx(loan: LendingLoan, borrowerEntityId: string): EntityTx {
+export function buildLendingRepayTx(loan: LendingLoan, borrowerEntityId: string, amount?: bigint): EntityTx {
 	if (!isLendingLoanRepayable(loan)) throw new Error(`Loan ${loan.loanId} has no repayable claim`);
 	if (loan.borrowerEntityId.trim().toLowerCase() !== borrowerEntityId) throw new Error('Only the borrower repays this loan');
 	// Debit only the committed-time amount due, bounded by the signed covenant.
-	const remaining = lendingLoanMaximumAmount(loan) - loan.repaidAmount;
+	const remaining = amount ?? lendingLoanMaximumAmount(loan);
 	if (remaining <= 0n) throw new Error('Nothing left to repay');
 	return { type: 'lendingRepay', data: { hubEntityId: loan.hubEntityId, loanId: loan.loanId, tokenId: loan.tokenId, amount: remaining } };
 }

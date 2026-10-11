@@ -52,9 +52,12 @@ export interface LendingLoan {
   hubEntityId: string;
   borrowerEntityId: string;
   tokenId: number;
+  /** Remaining principal; historical draws live in their signed Account frames. */
   principalAmount: bigint;
-  interestAmount: bigint;
-  /** Term amount while live; actual settled amount once repaid. Views quote the signed clock. */
+  accruedAt: number;
+  accruedInterest: bigint;
+  interestRemainder: bigint;
+  /** Paid amount plus current outstanding quote; final paid amount once repaid. */
   repaymentAmount: bigint;
   repaidAmount: bigint;
   interestBps: number;

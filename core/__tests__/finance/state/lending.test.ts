@@ -16,6 +16,7 @@ import { authorizeTestLending } from '../lending/bank-policy-fixture';
 import { bankSavingsAdmissionError, approvedLendingDraw, lendingFacilityKey } from '../../../entity/lending-policy';
 import { handleLendingPolicy } from '../../../entity/tx/handlers/payments/lending-policy';
 import { lendingPositionCloseAmount, summarizeLendingState } from '../../../extensions/lending';
+import { assertLendingCovenant, lendingCovenantHash } from '../../../protocol/dispute/lending-covenant';
 import { encodeBuffer, decodeValidatedBuffer } from '../../../storage/codec/codec';
 import { projectEntityCoreDoc } from '../../../storage/read/projections';
 import { validateStorageEntityCoreDocValue } from '../../../storage/schema/schema-state-docs';
@@ -170,7 +171,46 @@ const applyOnly = async (
   return result;
 };
 
+const currentClaimHash = (state: EntityState, loanId: string): string => {
+  const claim = state.accounts.get(BORROWER)!.state.subcontracts!.get(loanId);
+  assertLendingCovenant(claim);
+  return lendingCovenantHash(claim);
+};
+
 describe('payer-authenticated hub lending', () => {
+  test('partial repayment reduces bank exposure, restores its signed facility and survives book recovery', async () => {
+    const state = makeState();
+    state.accounts = state.accounts.updated(BORROWER, makeAccount(BORROWER));
+    authorizeTestLending(state, BORROWER, { loanInterestBps: 200, maxPrincipal: 2_500n });
+    const request = { requestId: BORROW_REQUEST_ID, hubEntityId: HUB, borrowerEntityId: BORROWER,
+      tokenId: 1, amount: 2_500n, termId: '1d' as const, maxInterestBps: 200,
+      maxLateMs: 0, expiresAt: 9_000_000_000_000 };
+    const [draw] = await commit(state, BORROWER, { type: 'lending_borrow_request', data: request }, false, 2_000);
+    await commit(state, BORROWER, draw!.tx, true, 2_001);
+    const loan = [...state.lending!.loans.values()][0]!;
+    const at = loan.openedAt + loan.termMs / 2 + 1;
+    const partial: AccountTx = { type: 'lending_repay', data: {
+      loanId: loan.loanId, hubEntityId: HUB, borrowerEntityId: BORROWER, tokenId: 1,
+      amount: 1_025n, claimHash: currentClaimHash(state, loan.loanId),
+    } };
+    await commit(state, BORROWER, partial, false, at);
+    expect(loan).toMatchObject({ status: 'active', principalAmount: 1_500n, repaidAmount: 1_025n,
+      accruedAt: at, accruedInterest: 0n, interestRemainder: 500_000n });
+    const restored = decodeValidatedBuffer(encodeBuffer(projectEntityCoreDoc(state)), validateStorageEntityCoreDocValue);
+    expect(restored.lending).toEqual(state.lending);
+    state.lending = restored.lending!;
+    expect(summarizeLendingState(state).totals.loanPrincipalAmount).toBe('1500');
+    const approval = (amount: bigint) => approvedLendingDraw(state, state.accounts.get(BORROWER)!, BORROWER,
+      { ...request, requestId: 'borrow-3333333333333333', amount }, at);
+    expect(approval(1_000n).ok).toBe(true);
+    expect(approval(1_001n)).toEqual({ ok: false, reason: 'approved facility exhausted' });
+    expect((await applyOnly(state, BORROWER, partial, false, at + 1)).ok).toBe(false);
+    await commit(state, BORROWER, { type: 'lending_repay', data: {
+      ...partial.data, amount: 2_000n, claimHash: currentClaimHash(state, loan.loanId),
+    } }, false, loan.dueAt);
+    expect(state.lending.loans.get(loan.loanId)).toMatchObject({ status: 'repaid', principalAmount: 0n,
+      repaidAmount: 2_540n, repaymentAmount: 2_540n, accruedInterest: 0n, interestRemainder: 0n });
+  });
   test.each([100n, 150n])('bank liquidity combines two saver deposits without assigning either saver to the loan: %s', async amount => {
     const state = makeState();
     const otherSaver = entity('40');
@@ -228,7 +268,7 @@ describe('payer-authenticated hub lending', () => {
     expect(await commit(state, BORROWER, request('borrow-3333333333333333'), false, 2_001)).toEqual([]);
     expect(state.lending!.savings.get(POSITION_ID)).toMatchObject({ principalAmount: 10_000n, interestBps: 100 });
     const loan = [...state.lending!.loans.values()][0]!;
-    expect(loan).toMatchObject({ status: 'opening', interestAmount: 30n, repaymentAmount: 1_530n, approval: { maxPrincipal: 2_500n, jNonce: 0 } });
+    expect(loan).toMatchObject({ status: 'opening', accruedInterest: 0n, repaymentAmount: 1_530n, approval: { maxPrincipal: 2_500n, jNonce: 0 } });
     const wire = encodeBuffer(projectEntityCoreDoc(state));
     const restored = decodeValidatedBuffer(wire, validateStorageEntityCoreDocValue);
     expect(restored.lending).toEqual(state.lending);
@@ -388,6 +428,7 @@ describe('payer-authenticated hub lending', () => {
       expect(payout!.tx).toMatchObject({ type: 'lending_close_payout', data: { amount: 10_100n } });
       const repay: AccountTx = { type: 'lending_repay', data: {
         loanId: loan.loanId, hubEntityId: HUB, borrowerEntityId: BORROWER, tokenId: 1, amount: 2_525n,
+        claimHash: currentClaimHash(state, loan.loanId),
       } };
       if (recovery === 'before-payout') await commit(state, BORROWER, repay, false, state.timestamp + 1);
       expect(lendingPositionCloseAmount(pool, state.timestamp)).toBe(10_100n);
@@ -470,6 +511,7 @@ describe('payer-authenticated hub lending', () => {
         borrowerEntityId: BORROWER,
         tokenId: 1,
         amount: loan.repaymentAmount,
+        claimHash: currentClaimHash(state, loan.loanId),
       },
     }));
     for (const tx of repayments) expect((await applyOnly(state, BORROWER, tx, false, 3_000)).ok).toBe(true);
@@ -550,6 +592,7 @@ describe('payer-authenticated hub lending', () => {
         borrowerEntityId: BORROWER,
         tokenId: 1,
         amount: 2_525n,
+        claimHash: currentClaimHash(state, loan.loanId),
       },
     };
     const repaymentAt = loan.openedAt + loan.termMs / 2;
@@ -656,7 +699,7 @@ describe('payer-authenticated hub lending', () => {
     const beforeRepay = state.accounts.get(BORROWER)!.state.deltas.get(1)!.offdelta;
     const repayment: AccountTx = {
       type: 'lending_repay',
-      data: { loanId: loan.loanId, hubEntityId: HUB, borrowerEntityId: BORROWER, tokenId: 1, amount: lateMs ? 2_550n : 2_525n },
+      data: { loanId: loan.loanId, hubEntityId: HUB, borrowerEntityId: BORROWER, tokenId: 1, amount: lateMs ? 2_550n : 2_525n, claimHash: currentClaimHash(state, loan.loanId) },
     };
     expect(await commit(state, BORROWER, repayment, false, repaymentAt)).toEqual([]);
     expect(loan).toMatchObject({ status: 'repaid', repaidAmount: actualPaid, repaymentAmount: actualPaid });

@@ -5,6 +5,7 @@ import { normalizeInterestBps, normalizeLendingTerm } from '../../../../extensio
 import { prepareEntityTxState } from '../../../state-clone';
 import { addMessage } from '../../../frame-events';
 import type { AccountTxTarget } from '../account';
+import { assertLendingCovenant, lendingCovenantHash } from '../../../../protocol/dispute/lending-covenant';
 
 type EntityTxOf<T extends EntityTx['type']> = Extract<EntityTx, { type: T }>;
 
@@ -122,6 +123,8 @@ export const handleLendingRepayEntityTx = (
   const hubEntityId = requireHubAccount(entityState, entityTx.data.hubEntityId);
   requireIntentId(entityTx.data.loanId, 'loan');
   requirePositiveAmount(entityTx.data.amount, 'LENDING_REPAY');
+  const claim = entityState.accounts.get(hubEntityId)!.state.subcontracts?.get(normalized(entityTx.data.loanId));
+  assertLendingCovenant(claim);
   return queueAccountTx(entityState, hubEntityId, {
     type: 'lending_repay',
     data: {
@@ -130,6 +133,7 @@ export const handleLendingRepayEntityTx = (
       borrowerEntityId: normalized(entityState.entityId),
       tokenId: entityTx.data.tokenId,
       amount: entityTx.data.amount,
+      claimHash: lendingCovenantHash(claim),
     },
   }, `Loan repayment requested: ${entityTx.data.loanId}`, mutableFrameState);
 };

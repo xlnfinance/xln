@@ -9,7 +9,7 @@ import { encodeBuffer, decodeValidatedBuffer } from '../../../storage/codec/code
 import { projectPortableAccountDoc, hydrateAccountDocFromStorage } from '../../../storage/read/projections';
 import { validateStorageAccountDocValue } from '../../../storage/schema/authoritative-schema';
 import { PersistentAccountStateMap } from '../../../account/state/persistent-state-map';
-import { assertLendingCovenant, lendingExitAmount } from '../../../protocol/dispute/lending-covenant';
+import { assertLendingCovenant, lendingCovenantHash, lendingExitAmount } from '../../../protocol/dispute/lending-covenant';
 import type { AccountReplica, AccountTx } from '../../../types/account';
 import { decodeAccountTx } from '../../../account/tx-validation';
 
@@ -19,7 +19,7 @@ const ID = 'loan-1111111111111111';
 const TRANSFORMER = `0x${'33'.repeat(20)}`;
 test('signed late interest accrues simply, stops at its cap and never compounds', () => {
   const claim = { kind: 'loan' as const, tokenId: 1, creditorIsLeft: true,
-    principal: 10_000n, interest: 100n, openedAt: 1_000, termMs: 10_000, lateMs: 20_000 };
+    principal: 10_000n, interestBps: 100, openedAt: 1_000, accruedAt: 1_000, accruedInterest: 0n, interestRemainder: 0n, termMs: 10_000, lateMs: 20_000 };
   expect(lendingExitAmount(claim, 1_000)).toBe(10_000n);
   expect(lendingExitAmount(claim, 6_000)).toBe(10_050n);
   expect(lendingExitAmount(claim, 11_000)).toBe(10_100n);
@@ -86,6 +86,29 @@ test('lending_disburse binds different returns into different executable borrowe
 });
 
 for (const bankIsLeft of [true, false]) {
+  test(`partial repayment pays interest first and accrues only on remaining principal, bankLeft=${bankIsLeft}`, async () => {
+    const account = restore(await funded(bankIsLeft, 200));
+    const initial = account.state.subcontracts?.get(ID);
+    assertLendingCovenant(initial);
+    const at = initial.openedAt + initial.termMs / 2;
+    const partial: AccountTx = { type: 'lending_repay', data: {
+      loanId: ID, hubEntityId: bankIsLeft ? LEFT : RIGHT, borrowerEntityId: bankIsLeft ? RIGHT : LEFT,
+      tokenId: 1, amount: 1_025n, claimHash: lendingCovenantHash(initial),
+    } };
+    expect((await applyAccountTxToMutableReplica(account, partial, !bankIsLeft, at)).ok).toBe(true);
+    const outstanding = account.state.subcontracts?.get(ID);
+    assertLendingCovenant(outstanding);
+    expect(outstanding.principal).toBe(1_500n);
+    expect(lendingExitAmount(outstanding, at)).toBe(1_500n);
+    expect(lendingExitAmount(outstanding, at + initial.termMs / 4)).toBe(1_507n);
+    expect(lendingExitAmount(outstanding, initial.openedAt + initial.termMs)).toBe(1_515n);
+    expect(account.state.deltas.get(1)?.offdelta).toBe(bankIsLeft ? -1_475n : 1_475n);
+    expect(account.state.lendingIntents?.has(`repay:${ID}`)).toBe(false);
+    expect(computeAccountStateRoot(restore(account).state)).toBe(computeAccountStateRoot(account.state));
+    const after = computeAccountStateRoot(account.state);
+    expect((await applyAccountTxToMutableReplica(account, partial, !bankIsLeft, at + 1)).ok).toBe(false);
+    expect(computeAccountStateRoot(account.state)).toBe(after);
+  });
   test(`early repayment charges the same earned interest as unilateral exit, bankLeft=${bankIsLeft}`, async () => {
     const account = restore(await funded(bankIsLeft, 200));
     const claim = account.state.subcontracts?.get(ID);
@@ -94,7 +117,7 @@ for (const bankIsLeft of [true, false]) {
     expect(lendingExitAmount(claim, at)).toBe(2_525n);
     const repay: AccountTx = { type: 'lending_repay', data: {
       loanId: ID, hubEntityId: bankIsLeft ? LEFT : RIGHT, borrowerEntityId: bankIsLeft ? RIGHT : LEFT,
-      tokenId: 1, amount: 2_550n,
+      tokenId: 1, amount: 2_550n, claimHash: lendingCovenantHash(claim),
     } };
     expect((await applyAccountTxToMutableReplica(account, repay, !bankIsLeft, at)).ok).toBe(true);
     expect(account.state.deltas.get(1)?.offdelta).toBe(bankIsLeft ? 25n : -25n);
@@ -107,11 +130,16 @@ for (const bankIsLeft of [true, false]) {
     const restored = restore(account);
     expect(buildAccountProofBody(restored, TRANSFORMER)).toEqual(buildAccountProofBody(account, TRANSFORMER));
     const before = computeAccountStateRoot(restored.state);
+    const claim = restored.state.subcontracts?.get(ID);
+    assertLendingCovenant(claim);
     const repay = (amount: bigint): AccountTx => ({ type: 'lending_repay', data: {
       loanId: ID, hubEntityId: bankIsLeft ? LEFT : RIGHT, borrowerEntityId: bankIsLeft ? RIGHT : LEFT,
-      tokenId: 1, amount,
+      tokenId: 1, amount, claimHash: lendingCovenantHash(claim),
     } });
-    expect((await applyAccountTxToMutableReplica(restored, repay(1n), !bankIsLeft, 2_000)).ok).toBe(false);
+    const forged = repay(1n);
+    if (forged.type !== 'lending_repay') throw new Error('Expected repayment');
+    forged.data.claimHash = `0x${'00'.repeat(32)}`;
+    expect((await applyAccountTxToMutableReplica(restored, forged, !bankIsLeft, 2_000)).ok).toBe(false);
     expect(computeAccountStateRoot(restored.state)).toBe(before);
     expect((await applyAccountTxToMutableReplica(restored, repay(2_525n), !bankIsLeft, 86_401_000)).ok).toBe(true);
     expect(restored.state.subcontracts?.size).toBe(0);
@@ -200,10 +228,12 @@ for (const bankIsLeft of [true, false]) {
     const account = restore(original);
     expect(buildAccountProofBody(account, TRANSFORMER)).toEqual(buildAccountProofBody(original, TRANSFORMER));
     const at = 1_000 + 86_400_000 * 3 / 2;
+    const claim = account.state.subcontracts?.get(ID);
+    assertLendingCovenant(claim);
     const repay: AccountTx = { type: 'lending_repay', data: { loanId: ID,
-      hubEntityId: bankIsLeft ? LEFT : RIGHT, borrowerEntityId: bankIsLeft ? RIGHT : LEFT, tokenId: 1, amount: 2_575n } };
+      hubEntityId: bankIsLeft ? LEFT : RIGHT, borrowerEntityId: bankIsLeft ? RIGHT : LEFT, tokenId: 1, amount: 2_575n, claimHash: lendingCovenantHash(claim) } };
     const root = computeAccountStateRoot(account.state);
-    expect((await applyAccountTxToMutableReplica(account, { ...repay, data: { ...repay.data, amount: 2_536n } }, !bankIsLeft, at)).ok).toBe(false);
+    expect((await applyAccountTxToMutableReplica(account, { ...repay, data: { ...repay.data, claimHash: `0x${'00'.repeat(32)}` } }, !bankIsLeft, at)).ok).toBe(false);
     expect(computeAccountStateRoot(account.state)).toBe(root);
     expect((await applyAccountTxToMutableReplica(account, repay, !bankIsLeft, at)).ok).toBe(true);
     expect(account.state.deltas.get(1)?.offdelta).toBe(bankIsLeft ? 37n : -37n);

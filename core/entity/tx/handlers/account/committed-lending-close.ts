@@ -137,6 +137,6 @@ export const settleOverdueLendingLoan = (
   lendingLog.warn('lending_overdue.defaulted', {
     loanId,
     borrower: shortId(loan.borrowerEntityId),
-    outstanding: (lendingLoanRepaymentAmount(loan, now) - loan.repaidAmount).toString(),
+    outstanding: lendingLoanRepaymentAmount(loan, now).toString(),
   });
 };

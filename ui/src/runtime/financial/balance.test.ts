@@ -113,7 +113,7 @@ test('overdue borrower repayment preserves the original claim and rejects a seco
   const loan: LendingLoan = {
     loanId: 'loan-1111111111111111', hubEntityId: `0x${'10'.repeat(32)}`,
     borrowerEntityId: borrower, tokenId: 1, principalAmount: 2_500n,
-    interestAmount: 25n, repaymentAmount: 2_525n, repaidAmount: 0n,
+    accruedAt: 0, accruedInterest: 0n, interestRemainder: 0n, repaymentAmount: 2_525n, repaidAmount: 0n,
     interestBps: 100, termId: '1d', openedAt: 0, termMs: 86_400_000, lateMs: 0, dueAt: 86_400_000, status: 'defaulted',
   };
   expect(isLendingLoanRepayable(loan)).toBe(true);
@@ -121,6 +121,10 @@ test('overdue borrower repayment preserves the original claim and rejects a seco
     type: 'lendingRepay', data: { hubEntityId: loan.hubEntityId, loanId: loan.loanId, tokenId: 1, amount: 2_525n },
   });
   expect(() => buildLendingRepayTx(loan, `0x${'30'.repeat(32)}`)).toThrow('Only the borrower');
+  expect(buildLendingRepayTx(loan, borrower, 1_000n)).toMatchObject({ data: { amount: 1_000n } });
+  const partial = { ...loan, principalAmount: 1_500n, accruedAt: 43_200_000, repaidAmount: 1_012n, interestRemainder: 432_000_000_000n };
+  expect(buildLendingRepayTx(partial, borrower)).toMatchObject({ data: { amount: 1_508n } });
+  expect(() => buildLendingRepayTx(loan, borrower, 0n)).toThrow('Nothing left to repay');
   const repaid = { ...loan, status: 'repaid', repaidAmount: 2_525n };
   expect(isLendingLoanRepayable(repaid)).toBe(false);
   expect(() => buildLendingRepayTx(repaid, borrower)).toThrow('no repayable claim');

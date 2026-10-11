@@ -5,6 +5,7 @@ import { closeInfraDb, closeRuntimeDb, loadEnvFromDB, processRuntime } from '../
 import { converge } from '../../../scenarios/harness/helpers';
 import { safeStringify } from '../../../protocol/serialization';
 import { computeAccountStateRootCold } from '../../../account/commitment/state-root';
+import { assertLendingCovenant } from '../../../protocol/dispute/lending-covenant';
 import type { RuntimeReplica } from '../../../runtime/types';
 import { bank, borrower, command, fundedLoan, positionId, replica, saver, seed, termMs } from './lending-runtime';
 
@@ -67,11 +68,33 @@ if (mode === 'originate') {
   assert(env);
   env.scenarioMode = true;
   env.quietRuntimeLogs = true;
-  const previous = mode === 'mature' ? 'active' : mode === 'repay' ? 'defaulted'
+  const previous = mode === 'partial' ? 'active' : mode === 'mature' ? 'partial' : mode === 'repay' ? 'defaulted'
     : mode === 'recover' ? 'interleaved' : 'repayment-committed';
   // The files are assertion oracles only; restore reads exclusively LevelDB/WAL.
   assert.equal(safeStringify(financialState(env), 2), readFileSync(join(output, `${previous}.json`), 'utf8'));
-  if (mode === 'mature') {
+  if (mode === 'partial') {
+    const { loan } = book(env);
+    env.state.timestamp = loan.openedAt + termMs / 2 + 1;
+    await command(env, borrower, { type: 'lendingRepay', data: {
+      hubEntityId: bank.entityId, loanId: loan.loanId, tokenId: 1, amount: 1_025n,
+    } });
+    const remaining = book(env).loan;
+    assert.equal(remaining.status, 'active');
+    assert.equal(remaining.principalAmount, 1_500n);
+    assert.equal(remaining.repaidAmount, 1_025n);
+    assert.equal(remaining.accruedInterest, 0n);
+    assert.equal(remaining.interestRemainder,
+      2_500n * 200n * BigInt(remaining.accruedAt - remaining.openedAt) % (10_000n * BigInt(termMs)));
+    assert(remaining.interestRemainder > 0n, 'the crash must preserve fractional interest');
+    for (const party of [bank, borrower]) {
+      const claim: unknown = account(env, party, party === bank ? borrower : bank).state.subcontracts?.get(loan.loanId);
+      assertLendingCovenant(claim);
+      assert.equal(claim.principal, remaining.principalAmount);
+      assert.equal(claim.interestRemainder, remaining.interestRemainder);
+    }
+    evidence(env, 'partial');
+    process.kill(process.pid, 'SIGKILL');
+  } else if (mode === 'mature') {
     assert.equal(book(env).loan.status, 'active');
     assert.equal(book(env).loan.lateMs, termMs);
     env.state.timestamp = book(env).loan.dueAt + termMs / 2;
@@ -93,14 +116,15 @@ if (mode === 'originate') {
     assert.equal(loan.lateMs, termMs);
     await processRuntime(env, [{ ...borrower, entityTxs: [{ type: 'lendingRepay', data: {
       hubEntityId: bank.entityId, loanId: loan.loanId, tokenId: 1,
-      // 2,500 principal + 50 term coupon + at most 50 late coupon.
+      // The Account caps this authorization at the remaining debt. Earlier
+      // payments reduced principal; accrued fractions survived SIGKILL.
       amount: 2_600n,
     } }] }]);
     for (let round = 0; round < 40 && book(env).loan.status !== 'repaid'; round++) {
       await processRuntime(env);
     }
     assert.equal(book(env).loan.status, 'repaid');
-    assert.equal(book(env).loan.repaidAmount, 2_575n);
+    assert.equal(book(env).loan.repaidAmount, 2_555n);
     assert.equal(book(env).pool.status, 'closed');
     assert((env.runtimeMempool?.entityInputs.length ?? 0) > 0, 'crash must retain a real committed outbox');
     evidence(env, 'repayment-committed');
@@ -123,9 +147,9 @@ if (mode === 'originate') {
     assert(redelivery.length > 0, 'recovery must republish the durable outbox');
     evidence(env, 'recovered');
     const before = balance(env, borrower, bank);
-    assert.equal(before, 9_925n);
+    assert.equal(before, 9_945n);
     assert.equal(balance(env, saver, bank), 10_050n);
-    assert.equal(book(env).loan.repaidAmount, 2_575n);
+    assert.equal(book(env).loan.repaidAmount, 2_555n);
     assert.equal(account(env, bank, borrower).state.subcontracts?.has(book(env).loan.loanId) ?? false, false);
     assert.equal(account(env, borrower, bank).state.subcontracts?.has(book(env).loan.loanId) ?? false, false);
     // Exact authenticated ACK/proposal duplicates retain evidence without money movement.

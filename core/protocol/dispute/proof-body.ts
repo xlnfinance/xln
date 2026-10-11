@@ -59,8 +59,11 @@ export interface RuntimeTermLoan {
   deltaIndex: number;
   creditorIsLeft: boolean;
   principal: bigint;
-  interest: bigint;
+  interestBps: number;
   openedAt: number;
+  accruedAt: number;
+  accruedInterest: bigint;
+  interestRemainder: bigint;
   termMs: number;
   lateMs: number;
 }
@@ -205,8 +208,11 @@ export const BATCH_ABI = {
         { name: 'deltaIndex', type: 'uint256' },
         { name: 'creditorIsLeft', type: 'bool' },
         { name: 'principal', type: 'uint256' },
-        { name: 'interest', type: 'uint256' },
+        { name: 'interestBps', type: 'uint256' },
         { name: 'openedAt', type: 'uint256' },
+        { name: 'accruedAt', type: 'uint256' },
+        { name: 'accruedInterest', type: 'uint256' },
+        { name: 'interestRemainder', type: 'uint256' },
         { name: 'termMs', type: 'uint256' },
         { name: 'lateMs', type: 'uint256' },
       ],

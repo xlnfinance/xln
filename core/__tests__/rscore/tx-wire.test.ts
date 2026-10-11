@@ -28,7 +28,7 @@ export const TX_WIRE_CASES: { name: string; tx: AccountTx }[] = [
   { name: 'direct_payment/minimal', tx: { type: 'direct_payment', data: { tokenId: 1, amount: 1n, route: [], fromEntityId: A, toEntityId: B, deliveryMode: 'direct' } } },
   { name: 'lending_fund', tx: { type: 'lending_fund', data: { positionId: 'position-1', hubEntityId: A, lenderEntityId: B, tokenId: 1, amount: 100n, termId: '1d', interestBps: 250 } } },
   { name: 'lending_borrow_request', tx: { type: 'lending_borrow_request', data: { requestId: 'borrow-1', hubEntityId: A, borrowerEntityId: B, tokenId: 1, amount: 50n, termId: '1h', maxInterestBps: 300, maxLateMs: 0, expiresAt: 60_000 } } },
-  { name: 'lending_repay', tx: { type: 'lending_repay', data: { loanId: 'loan-1', hubEntityId: A, borrowerEntityId: B, tokenId: 1, amount: 25n } } },
+  { name: 'lending_repay', tx: { type: 'lending_repay', data: { loanId: 'loan-1', hubEntityId: A, borrowerEntityId: B, tokenId: 1, amount: 25n, claimHash: C } } },
   { name: 'lending_disburse', tx: { type: 'lending_disburse', data: { loanId: 'loan-1', requestId: 'borrow-1', maxInterestBps: 300, maxLateMs: 0, lateMs: 0, expiresAt: 60_000, hubEntityId: A, borrowerEntityId: B, tokenId: 1, amount: 500n, termId: '1d', interestBps: 100 } } },
   { name: 'lending_close_request', tx: { type: 'lending_close_request', data: { positionId: 'position-1', hubEntityId: A, lenderEntityId: B } } },
   { name: 'lending_close_payout', tx: { type: 'lending_close_payout', data: { positionId: 'position-1', hubEntityId: A, lenderEntityId: B, tokenId: 1, amount: 75n } } },
@@ -98,6 +98,10 @@ if (Bun.env['RSCORE_GENERATE_TX_WIRE'] === '1') {
 
   test('disbursement without signed term and rate is rejected', () => {
     expect(() => decodeRscoreAccountTx([24, 'loan-1', A, B, 1, '500'])).toThrow();
+  });
+
+  test('repayment without the exact previous covenant cannot authorize a second partial debit', () => {
+    expect(() => decodeRscoreAccountTx([12, 'loan-1', A, B, 1, '25'])).toThrow();
   });
 
   test('old borrow and disburse rows cannot acquire unsigned late-interest terms', () => {

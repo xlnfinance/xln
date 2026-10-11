@@ -31,9 +31,9 @@ unpaid debt and separate Account collateral; early loan repayment charges actual
 elapsed time; partial repayments pay interest then principal; a preapproved
 borrower facility authorizes automatic draws. The existing authenticated facility
 is the bank's bounded exposure policy: do not add a second lending permission or
-global funding cap. Demand terms, ordered withdrawal servicing and partial
-repayment remain implementation work. Early repayment is verified using the
-same existing elapsed-time claim as unilateral exit, without changing bytecode.
+global funding cap. Demand terms and ordered withdrawal servicing remain
+implementation work. Early and partial repayment share the signed accrual
+checkpoint used by unilateral exit; the current transformer ABI carries it.
 
 Implementation principle: prefer deletion and one general signed-obligation
 mechanism across products. Product differences are explicit terms, not separate
@@ -46,8 +46,8 @@ The owner approved on 2026-09-07 that principal is transferred exactly once and
 that the hub retains its obligation to depositors after borrower default.
 `lending_disburse` now pays hub → borrower through the canonical direct-payment
 handler; it never changes either credit limit. The signed `disburse:<loanId>`
-intent prevents a second transfer. Repayment pays principal plus agreed interest
-once, then its bilateral commit finalizes the hub book without a credit-revoke
+intent prevents a second transfer. Repayment settles earned interest before
+principal, then its bilateral commit updates the hub book without a credit-revoke
 round trip. Defaults preserve the unpaid loan and the depositor's principal claim;
 a withdrawal still requires actual bilateral payout capacity.
 
@@ -62,7 +62,7 @@ that an insolvent bank can pay.
 
 Savings and borrower loans now share a signed executable term covenant in the
 existing Account subcontract tree. Funding transfers principal once and commits the asset, creditor side, principal,
-term coupon and Account-frame clock. The stock DeltaTransformer realizes principal
+rate, accrual checkpoint and Account-frame clock. The stock DeltaTransformer realizes principal
 plus accrued simple interest at unilateral exit. Savings stop at the term coupon;
 loans stop at their individually signed late-interest end and maximum amount.
 Accrual freezes at dispute start; delaying finalization earns nothing extra. An
@@ -76,25 +76,38 @@ Bank policy publishes `loanLateMs`; the borrower request signs `maxLateMs` along
 its maximum rate. The bank cannot exceed either authorization. Savings sign zero
 late duration and keep their independent fixed return. No interest compounds.
 
-For principal `P`, agreed term coupon `I`, term `T`, signed late window `L`, and
-elapsed milliseconds `e`, exit pays `P + floor(I * clamp(e, 0, T + L) / T)`.
-The maximum is `P + floor(I * (T + L) / T)`. Cooperative full repayment uses that
-same elapsed-time formula, including early repayment. Dispute execution
-freezes `e` at dispute start. All sums and clock endpoints are range checked.
+For remaining principal `P`, signed rate `r` basis points per term `T`, accrued
+whole interest `A`, carried numerator `R`, and time `e` since the signed accrual
+checkpoint, let `D = 10,000 * T` and `N = P * r * e + R`. The outstanding claim is
+`P + A + floor(N / D)`. Clamp the clock at the original opening plus `T + lateMs`;
+neither partial payment nor default resets that endpoint. Initially `A = R = 0`.
+There is no minimum one-unit coupon: rounding down cannot raise the signed rate.
+Cooperative repayment and dispute use this same rule. Dispute execution freezes
+the clock at dispute start. All sums and clock endpoints are range checked.
 
 Repayment `amount` is the borrower's signed **maximum debit**. The Account pays only
-the amount due at its committed frame timestamp and atomically removes the claim;
-a maximum below that quote rejects without mutation. The bank books that same
-Account timestamp, even if its Entity has since observed a later clock. React
-shows the maximum before submission. This prevents a quote/signing delay from
-causing rejection or overcharging. Partial payments remain unsupported; a lower
-maximum does not partially erase or alter the covenant.
+the lesser of that maximum and the amount due at its committed frame timestamp.
+Pay whole accrued interest first, then reduce principal. A partial payment keeps
+the same covenant with the new principal, timestamp, unpaid interest and `N % D`.
+The carried fraction prevents repeated small payments from erasing interest;
+unpaid interest never compounds. Only full repayment deletes the claim. The bank
+books that same Account timestamp, even if its Entity has observed a later clock.
+React accepts a partial amount or a blank input for full repayment. Its full quote
+uses the remaining maximum, without subtracting historical payments again.
 
-The Account owns `lateMs` in its existing root-bound subcontract. The bank retains
-the same origination field in its committed servicing book because the Account
-claim is deleted at repayment and current bank policy can change. Cold restore
-validates these fields; repayment and default regressions preserve the original
-terms and the saver's independent claim. No new receipt or historical scan is added.
+Each `lending_repay` signs `claimHash`, the exact preceding covenant. Reusing it
+after a partial payment rejects before moving money; no per-payment durable
+receipt is added. The Account frame already authenticates payer, asset and claim.
+The TS worker tuple now has seven fields. Old tuples and old coupon-only claims
+reject loudly; deployment requires the synchronized transformer and ABI.
+
+The Account owns the rate, original end and accrual checkpoint in its existing
+root-bound subcontract. The bank retains the same fields in its committed
+servicing book. Remaining principal alone cannot reconstruct previously earned
+interest or fractional carry after a crash without a history scan. Cold restore
+validates the fields; the real six-process, five-SIGKILL regression preserves a
+nonzero fraction, later repayment and duplicate outbox delivery. Bank facilities
+count remaining principal, so principal repayment replenishes the approved line.
 
 Dispute finality retires every old-epoch subcontract and records `dispute-close`
 in the existing lending receipt tree. It never invents a `repay` or `close-payout`.

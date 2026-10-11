@@ -20,7 +20,7 @@ export const ACCOUNT_TX_LENDING_SCHEMAS = {
   lending_repay: {
     required: {
       loanId: 'string', hubEntityId: 'string', borrowerEntityId: 'string',
-      tokenId: 'integer', amount: 'bigint',
+      tokenId: 'integer', amount: 'bigint', claimHash: 'string',
     },
   },
   lending_disburse: {

@@ -122,8 +122,11 @@ export declare namespace DeltaTransformer {
     deltaIndex: BigNumberish;
     creditorIsLeft: boolean;
     principal: BigNumberish;
-    interest: BigNumberish;
+    interestBps: BigNumberish;
     openedAt: BigNumberish;
+    accruedAt: BigNumberish;
+    accruedInterest: BigNumberish;
+    interestRemainder: BigNumberish;
     termMs: BigNumberish;
     lateMs: BigNumberish;
   };
@@ -132,16 +135,22 @@ export declare namespace DeltaTransformer {
     deltaIndex: bigint,
     creditorIsLeft: boolean,
     principal: bigint,
-    interest: bigint,
+    interestBps: bigint,
     openedAt: bigint,
+    accruedAt: bigint,
+    accruedInterest: bigint,
+    interestRemainder: bigint,
     termMs: bigint,
     lateMs: bigint
   ] & {
     deltaIndex: bigint;
     creditorIsLeft: boolean;
     principal: bigint;
-    interest: bigint;
+    interestBps: bigint;
     openedAt: bigint;
+    accruedAt: bigint;
+    accruedInterest: bigint;
+    interestRemainder: bigint;
     termMs: bigint;
     lateMs: bigint;
   };

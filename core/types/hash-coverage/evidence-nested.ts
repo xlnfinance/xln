@@ -57,7 +57,8 @@ export const HASHABLE_RUNTIME_BATCH_FIELDS = [
 ] as const satisfies readonly (keyof RuntimeBatch)[];
 
 export const HASHABLE_RUNTIME_TERM_LOAN_FIELDS = [
-  'deltaIndex', 'creditorIsLeft', 'principal', 'interest', 'openedAt', 'termMs', 'lateMs',
+  'deltaIndex', 'creditorIsLeft', 'principal', 'interestBps', 'openedAt', 'accruedAt',
+  'accruedInterest', 'interestRemainder', 'termMs', 'lateMs',
 ] as const satisfies readonly (keyof RuntimeTermLoan)[];
 
 const HASHABLE_RUNTIME_TRANSFORMER_CLAUSE_FIELDS = [

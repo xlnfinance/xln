@@ -63,10 +63,13 @@ contract DeltaTransformer {
     uint256 deltaIndex;
     bool creditorIsLeft;
     uint256 principal;
-    uint256 interest;
+    uint256 interestBps;
     // Signed Account timestamps remain milliseconds. The on-chain dispute
     // start has second resolution and is converted exactly at this boundary.
     uint256 openedAt;
+    uint256 accruedAt;
+    uint256 accruedInterest;
+    uint256 interestRemainder;
     uint256 termMs;
     uint256 lateMs;
   }
@@ -248,22 +251,35 @@ contract DeltaTransformer {
 
   function applyTermLoan(Int768[] memory deltas, TermLoan memory claim, uint256 disputeStartTimestamp) private pure {
     if (claim.deltaIndex >= deltas.length) revert InvalidDeltaIndex();
-    if (claim.principal == 0 || claim.termMs == 0 || claim.lateMs > type(uint256).max - claim.termMs || claim.interest > type(uint256).max - claim.principal || disputeStartTimestamp == 0) {
+    // Match the exact safe-integer clock accepted by the TS Account boundary.
+    uint256 maxClock = 9007199254740991;
+    if (claim.principal == 0 || claim.termMs == 0 || claim.openedAt > maxClock ||
+      claim.termMs > maxClock - claim.openedAt || claim.lateMs > maxClock - claim.openedAt - claim.termMs ||
+      claim.interestBps > 10000 || claim.accruedInterest > type(uint256).max - claim.principal || disputeStartTimestamp == 0) {
       revert InvalidLendingCovenant();
     }
-    // Both parties signed this exact principal, coupon, clock and beneficiary.
+    uint256 end = claim.openedAt + claim.termMs + claim.lateMs;
+    if (claim.accruedAt < claim.openedAt || claim.accruedAt > end || claim.interestRemainder >= 10000 * claim.termMs) revert InvalidLendingCovenant();
+    // Both parties signed principal, rate, accrual checkpoint and beneficiary.
     // Funding already moved principal creditor -> debtor. Exit reverses that transfer
-    // once and adds earned interest. Freeze at dispute start: neither delayed
-    // finalization nor fresh adversarial arguments can inflate the signed debt.
+    // once and adds earned interest. Partial payments preserve fractional interest
+    // without capitalizing it. Neither finalization delay nor arguments reset the clock.
     uint256 atMs = disputeStartTimestamp * 1000;
-    uint256 elapsed = atMs > claim.openedAt ? atMs - claim.openedAt : 0;
-    uint256 end = claim.termMs + claim.lateMs;
-    if (Math.mulDiv(claim.interest, end, claim.termMs) > type(uint256).max - claim.principal) revert InvalidLendingCovenant();
-    if (elapsed > end) elapsed = end;
-    uint256 amount = claim.principal + Math.mulDiv(claim.interest, elapsed, claim.termMs);
+    if (atMs > end) atMs = end;
+    uint256 elapsed = atMs > claim.accruedAt ? atMs - claim.accruedAt : 0;
+    uint256 base = claim.principal + claim.accruedInterest;
+    if (_earnedLendingInterest(claim, end - claim.accruedAt) > type(uint256).max - base) revert InvalidLendingCovenant();
+    uint256 amount = base + _earnedLendingInterest(claim, elapsed);
     deltas[claim.deltaIndex] = claim.creditorIsLeft
       ? WideMath.addUint(deltas[claim.deltaIndex], amount)
       : WideMath.subUint(deltas[claim.deltaIndex], amount);
+  }
+
+  function _earnedLendingInterest(TermLoan memory claim, uint256 elapsed) private pure returns (uint256) {
+    uint256 denominator = 10000 * claim.termMs;
+    uint256 factor = claim.interestBps * elapsed;
+    return Math.mulDiv(claim.principal, factor, denominator)
+      + (mulmod(claim.principal, factor, denominator) + claim.interestRemainder) / denominator;
   }
 
   function decodeArgumentsStrict(bytes calldata encoded) external pure returns (Arguments memory) {

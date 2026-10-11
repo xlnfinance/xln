@@ -95,8 +95,8 @@ contract DisputeGasAdmissionTest is XlnFixture {
             // Principal plus both term and late coupons remains a full-width
             // uint256 claim. A half-width coupon doubled here would be invalid
             // at admission, so it cannot represent a signed production state.
-            uint256 interest = wideSavings ? type(uint256).max / 4 : 100;
-            b.loans[i] = DeltaTransformer.TermLoan(i % tokens, i % 2 == 0, principal, interest, 0, 86400000, 86400000);
+            uint256 rateBps = wideSavings ? 5000 : 100;
+            b.loans[i] = DeltaTransformer.TermLoan(i % tokens, i % 2 == 0, principal, rateBps, 0, 0, 0, 0, 86400000, 86400000);
           }
         }
         Allowance[] memory allowances = new Allowance[](tokens);

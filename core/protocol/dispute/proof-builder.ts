@@ -257,8 +257,11 @@ const buildProofTermLoans = (account: Pick<AccountReplica, 'state'>, deltaIndex:
       deltaIndex: requireProofDeltaIndex(deltaIndex, claim.tokenId, `SAVINGS_PROOF_TOKEN_MISSING:${id}`),
       creditorIsLeft: claim.creditorIsLeft,
       principal: claim.principal,
-      interest: claim.interest,
+      interestBps: claim.interestBps,
       openedAt: claim.openedAt,
+      accruedAt: claim.accruedAt,
+      accruedInterest: claim.accruedInterest,
+      interestRemainder: claim.interestRemainder,
       termMs: claim.termMs,
       lateMs: claim.lateMs,
     }];
@@ -414,7 +417,7 @@ function runtimeToBatchStruct(batch: RuntimeBatch): DeltaTransformer.BatchStruct
       partialRoot: p.partialRoot,
       targetRole: p.targetRole === true,
     })),
-    loans: batch.loans.map(s => ({ ...s, deltaIndex: BigInt(s.deltaIndex), openedAt: BigInt(s.openedAt), termMs: BigInt(s.termMs), lateMs: BigInt(s.lateMs) })),
+    loans: batch.loans.map(s => ({ ...s, deltaIndex: BigInt(s.deltaIndex), interestBps: BigInt(s.interestBps), openedAt: BigInt(s.openedAt), accruedAt: BigInt(s.accruedAt), termMs: BigInt(s.termMs), lateMs: BigInt(s.lateMs) })),
   };
 }
 

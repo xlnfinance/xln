@@ -487,3 +487,22 @@ journeys, 102 fresh WAL frames exact through TS W1/W4, and full check. The commo
 book also survived four actual SIGKILLs across five processes. All six product
 choices are now resolved; demand savings, queued payouts and partial repayment
 remain implementation work. No mainnet-readiness or public-deployment claim follows.
+
+## October 11 partial repayment through the same signed claim
+
+The next cutover implements partial repayment without a separate payment engine.
+The existing covenant carries remaining principal, rate, accrued interest and
+fractional carry. Both cooperative repayment and unilateral exit use that clock;
+interest is paid before principal and never compounds. The original end does not
+reset. An exact preceding-claim hash prevents a stale partial debit from executing
+twice, without adding another durable receipt. The bank uses the same settlement
+function, and principal repayment replenishes the approved facility.
+
+Evidence: 562 related tests; 65 production-contract cases; three React journeys;
+108 production WAL frames exact through TS W1/W4; five real SIGKILLs across six
+processes preserve fractional accrual and outbox redelivery. All 16 gas vectors
+pass: 80 claims finalize at 3,930,280 / 5M gas. Only DeltaTransformer bytecode
+changes among nine artifacts; runtime grows from 7,867 to 8,326 bytes. Synchronized
+ABI/types reject old claim schemas rather than reading them through a fallback.
+Full source check is the next checkpoint gate. Demand savings, ordered payouts
+and public Sepolia deployment remain open; this is not a mainnet-ready release.

@@ -1912,7 +1912,7 @@
     }
   },
   "immutableReferences": {
-    "21293": [
+    "21392": [
       {
         "length": 32,
         "start": 399
@@ -1958,7 +1958,7 @@
         "start": 16896
       }
     ],
-    "21295": [
+    "21394": [
       {
         "length": 32,
         "start": 1057
@@ -1976,7 +1976,7 @@
         "start": 17326
       }
     ],
-    "21350": [
+    "21449": [
       {
         "length": 32,
         "start": 15199
@@ -1984,5 +1984,5 @@
     ]
   },
   "inputSourceName": "project/contracts/Depository.sol",
-  "buildInfoId": "solc-0_8_36-cc1c2986719004a695ae35b7c986a6abbf7dae75"
+  "buildInfoId": "solc-0_8_36-b7dfe9ec666c33640b56c9abf55d0b414714b498"
 }

@@ -5,6 +5,7 @@ import { isAccountTxKindAvailable } from '@xln/core/account/tx/admission-policy'
 import { Icon } from '../components/Icons';
 import { TokenIcon } from '../components/TokenPicker';
 import { LendingClose } from '../components/LendingClose';
+import { LendingRepay } from '../components/LendingRepay';
 import { LendingRiskConsent } from '../components/LendingRiskConsent';
 import { BankLendingPolicy } from '../components/BankLendingPolicy';
 import { ReceiveCapacity } from '../components/ReceiveCapacity';
@@ -19,7 +20,6 @@ import {
 	previewSavingsRisk,
 	buildLendingBorrowTx,
 	buildLendingOfferTx,
-	buildLendingRepayTx,
 	fetchLendingState,
 	isLendingLoanRepayable,
 	type LendingState,
@@ -124,22 +124,6 @@ export function Lending() {
 			toast(side === 'lend' ? `Offered ${formatMoney(amount, meta.decimals)} ${meta.symbol} to ${hub?.label ?? 'the hub'}` : `Borrow request for ${formatMoney(amount, meta.decimals)} ${meta.symbol} sent`);
 			setAmountText('');
 			if (tx.type !== 'lendingBorrow') void refresh();
-		} catch (error) {
-			toast(error instanceof Error ? error.message : String(error), 'danger');
-		} finally {
-			setBusy(false);
-		}
-	};
-
-	const repay = async (loanId: string): Promise<void> => {
-		if (!repayAvailable) { toast(UNAVAILABLE, 'danger'); return; }
-		const loan = state?.loans.find(entry => entry.loanId === loanId);
-		if (!loan || !wallet.signerId) return;
-		setBusy(true);
-		try {
-			await sendEntityTxs(wallet.entityId, wallet.signerId, [buildLendingRepayTx(loan, wallet.entityId)]);
-			toast('Repayment sent');
-			void refresh();
 		} catch (error) {
 			toast(error instanceof Error ? error.message : String(error), 'danger');
 		} finally {
@@ -331,12 +315,8 @@ export function Lending() {
 											{isLendingLoanRepayable(loan) && <> · Repay authorizes up to {formatAmount(lendingLoanMaximumAmount(loan), meta.decimals, meta.decimals)} {meta.symbol}; only the amount due at confirmation is debited.</>}
 											</span>
 										</span>
-										{isLendingLoanRepayable(loan) ? (
-											<button type="button" className="btn ghost sm" disabled={!repayAvailable || busy} onClick={() => void repay(loan.loanId)} data-testid="lending-repay">
-												Repay
-											</button>
-										) : null}
 									</span>
+									<LendingRepay loan={loan} wallet={wallet} onSubmitted={() => void refresh()} />
 								</div>
 							))}
 						</div>

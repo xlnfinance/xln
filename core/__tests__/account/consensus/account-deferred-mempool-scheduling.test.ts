@@ -54,6 +54,7 @@ const repayment = (borrower: string, hub: string): AccountTx => ({
     borrowerEntityId: borrower,
     tokenId: 1,
     amount: 101_000_000n,
+    claimHash: `0x${'11'.repeat(32)}`,
   },
 });
 

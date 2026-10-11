@@ -1,6 +1,6 @@
 import type { AccountLendingIntentKind, AccountReplica, AccountTx } from '../../../../types/account';
 import type { AccountDraftReplica } from '../../../state/account-state-draft';
-import { computeLendingInterest, LENDING_TERM_MS, normalizeInterestBps, normalizeLendingTerm } from '../../../../extensions/lending';
+import { LENDING_TERM_MS, normalizeInterestBps, normalizeLendingTerm } from '../../../../extensions/lending';
 import { UINT256_MAX } from '../../../../protocol/boundary/integer-ranges';
 import { handleDirectPayment } from './direct-payment';
 import type { ApplyAccountTxResult } from '../../apply-types';
@@ -8,7 +8,7 @@ import { accountTxApplied, accountTxValidationRejected } from '../../apply-resul
 import { deriveDelta } from '../../../utils';
 import { keccakTextHash } from '../../../../protocol/crypto/keccak-text';
 import { safeStringify } from '../../../../protocol/serialization';
-import { assertLendingCovenant, lendingExitAmount } from '../../../../protocol/dispute/lending-covenant';
+import { assertLendingCovenant, lendingCovenantHash, lendingMaximumAmount, settleLendingPayment } from '../../../../protocol/dispute/lending-covenant';
 import { requireBoundaryInteger } from '../../../../protocol/boundary-validation';
 
 type LendingAccountTx = Extract<AccountTx, {
@@ -163,13 +163,14 @@ const applyTermLoanFunding = (
   }
   const covenant = {
     kind: isSavings ? 'savings' as const : 'loan' as const, tokenId: tx.data.tokenId, creditorIsLeft: byLeft,
-    principal: tx.data.amount, interest: computeLendingInterest(tx.data.amount, tx.data.interestBps),
+    principal: tx.data.amount, interestBps: tx.data.interestBps,
+    accruedAt: timestamp, accruedInterest: 0n, interestRemainder: 0n,
     openedAt: timestamp, termMs: LENDING_TERM_MS[tx.data.termId], lateMs: isSavings ? 0 : tx.data.lateMs,
   };
   if (!Number.isSafeInteger(covenant.openedAt + covenant.termMs)) {
     return accountTxValidationRejected('LENDING_SAVINGS_MATURITY_OVERFLOW', []);
   }
-  if (covenant.principal + covenant.interest > UINT256_MAX) return accountTxValidationRejected('LENDING_SAVINGS_AMOUNT_OVERFLOW', []);
+  if (lendingMaximumAmount(covenant) > UINT256_MAX) return accountTxValidationRejected('LENDING_SAVINGS_AMOUNT_OVERFLOW', []);
   assertLendingCovenant(covenant);
   const result = applyPayment(account, tx, byLeft);
   if (result.ok) {
@@ -215,17 +216,21 @@ export const handleLendingAccountTx = (
     const intentKey = `repay:${normalized(tx.data.loanId)}`;
     requireUnusedIntent(account, intentKey);
     const covenant = account.state.subcontracts.get(tx.data.loanId);
-    // The borrower and bank retire the exact signed claim with one payment.
-    // An unrelated loan, wrong asset or partial payment cannot erase principal.
+    // The debtor's frame authorizes a debit of this exact claim revision. A
+    // replayed partial payment cannot debit a second time or reset its clock.
     if (!covenant || !('kind' in covenant) || covenant.kind !== 'loan' || covenant.creditorIsLeft === byLeft || covenant.tokenId !== tx.data.tokenId) {
       return accountTxValidationRejected('LENDING_REPAY_COVENANT_MISMATCH', []);
     }
-    const amount = lendingExitAmount(covenant, timestamp);
-    if (amount > tx.data.amount) return accountTxValidationRejected('LENDING_REPAY_MAXIMUM_EXCEEDED', []);
-    const result = applyPayment(account, { ...tx, data: { ...tx.data, amount } }, byLeft);
+    if (tx.data.claimHash !== lendingCovenantHash(covenant)) return accountTxValidationRejected('LENDING_REPAY_COVENANT_CHANGED', []);
+    const paid = settleLendingPayment(covenant, tx.data.amount, timestamp);
+    const result = applyPayment(account, { ...tx, data: { ...tx.data, amount: paid.amount } }, byLeft);
     if (result.ok) {
-      consumeIntent(account, intentKey, 'repay');
-      account.state.subcontracts.del(tx.data.loanId);
+      if (paid.clock.principal === 0n) {
+        consumeIntent(account, intentKey, 'repay');
+        account.state.subcontracts.del(tx.data.loanId);
+      } else {
+        account.state.subcontracts.put(tx.data.loanId, { ...covenant, ...paid.clock });
+      }
     }
     return result;
   }
@@ -257,7 +262,7 @@ export const handleLendingAccountTx = (
   const covenant = account.state.subcontracts.get(tx.data.positionId);
   // Both parties certify the payout and extinguishment together. A token swap,
   // another saver, or a one-unit payout must never erase the funded principal.
-  if (!covenant || !('kind' in covenant) || covenant.kind !== 'savings' || covenant.creditorIsLeft === byLeft || covenant.tokenId !== tx.data.tokenId || tx.data.amount < covenant.principal || tx.data.amount > covenant.principal + covenant.interest) {
+  if (!covenant || !('kind' in covenant) || covenant.kind !== 'savings' || covenant.creditorIsLeft === byLeft || covenant.tokenId !== tx.data.tokenId || tx.data.amount < covenant.principal || tx.data.amount > lendingMaximumAmount(covenant)) {
     return accountTxValidationRejected('LENDING_PAYOUT_COVENANT_MISMATCH', []);
   }
   const result = applyPayment(account, tx, byLeft);

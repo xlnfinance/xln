@@ -139,7 +139,7 @@ const makeState = (timestamp: number): EntityState => ({
       borrowerEntityId: BORROWER,
       tokenId: 1,
       principalAmount: 2_500n,
-      interestAmount: 25n,
+      accruedAt: 1_000, accruedInterest: 0n, interestRemainder: 0n,
       repaymentAmount: 2_525n,
       repaidAmount: 0n,
       interestBps: 100,
