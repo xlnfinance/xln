@@ -1,0 +1,81 @@
+{
+  "recordedAt": "2026-10-11T20:04:53.068Z",
+  "baseCommit": "6e9e70acf9dd2931f34619ab785b6ac84649ddaa",
+  "productionChange": "Savings close quote uses the signed Account-frame timestamp, never later Entity processing time.",
+  "before": {
+    "boundaryTests": {
+      "failed": 2
+    },
+    "earlyExpected": "10000",
+    "earlyActual": "10100"
+  },
+  "after": {
+    "boundaryTests": {
+      "passed": 2,
+      "assertions": 20
+    },
+    "financialTests": {
+      "passed": 94,
+      "failed": 0,
+      "files": 6,
+      "assertions": 899,
+      "seconds": 18.88
+    },
+    "runtimeCrash": {
+      "passed": true,
+      "signedBeforeMaturityMs": 1000,
+      "deliveredAfterMaturityMs": 60000,
+      "restores": 2,
+      "endingSaverBalance": "10000",
+      "claimRemovedFromBothAccounts": true,
+      "pendingAccountFrames": 0
+    },
+    "check": {
+      "command": "bun run check",
+      "exitCode": 0,
+      "sourceGates": 38,
+      "sourceSeconds": 26.369
+    }
+  },
+  "logs": [
+    {
+      "path": ".logs/crisis-20261011/savings-close-clock-red.log",
+      "sha256": "58931ebdf62d02d79497e48487e9dd39923cc147421a13ce9d1744cb733a6e39"
+    },
+    {
+      "path": ".logs/crisis-20261011/savings-close-clock-runtime.log",
+      "sha256": "b961142cec3008676c4c488d77f9cfeae8c04e5a27e15f91bdf162c952d060d0"
+    },
+    {
+      "path": ".logs/crisis-20261011/savings-close-clock-final-finance.log",
+      "sha256": "4ed522d13a155366d68286dd09f1658a1ff6f2725d6b97ddc6ca4127897046b8"
+    },
+    {
+      "path": ".logs/crisis-20261011/savings-close-clock-check.log",
+      "sha256": "3d40b319fd5ffde0cb7fd4618cff0051c94dfcf2f1cbd535c67dd3ebefcb1cef"
+    }
+  ],
+  "sources": [
+    {
+      "path": "core/lendbook/lifecycle.ts",
+      "sha256": "f47957fa9fe760f7eed74b3efc2a3a8124527374e9e89601d3437f43110f9742"
+    },
+    {
+      "path": "core/__tests__/finance/state/lending.test.ts",
+      "sha256": "6bef73bd9de754be27c5ca129a6fd58d0ac31957a7cef08ce00d4baa37564e96"
+    },
+    {
+      "path": "core/__tests__/fixtures/storage/lending-crash-child.ts",
+      "sha256": "0e53c25e0a2c8c12acabe3dbbfa83cbeb5fb1c2100d0ed08e7854dad098da0a0"
+    },
+    {
+      "path": "core/__tests__/storage/durability/lending-real-crash-recovery.test.ts",
+      "sha256": "76bdd150c53de6c015c6e054526afea4fc3c2b5cb21443eaaefab71c17ce3dca"
+    }
+  ],
+  "limitations": [
+    "This is a focused deterministic financial/recovery regression, not a public Sepolia transaction.",
+    "Demand savings and prospective rate renewal remain unfinished.",
+    "The complete release profile and mainnet acceptance are not certified."
+  ]
+}

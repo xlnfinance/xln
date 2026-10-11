@@ -50,7 +50,9 @@ translate user commands and committed Account inputs into that book. There is no
 second lending balance engine or saver-to-borrower allocation.
 
 A signed close request changes its savings position from `open` to `queued`,
-even when the Account cannot pay. `updatedAt` freezes the requested quote;
+even when the Account cannot pay. `updatedAt` records the signed Account-frame
+timestamp and freezes the requested quote. A later Entity observation cannot
+turn early cancellation into a matured coupon, including after restart;
 `closeOrder` preserves the first admission order when timestamps tie across
 Accounts. The order belongs to the bank's root-bound position: funding order and
 timestamps cannot reconstruct it after a crash. No separate durable queue or

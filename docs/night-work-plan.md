@@ -24,6 +24,19 @@ Entity scope changed from an incorrect 200 to a typed 400. The proxy selects the
 configured public audience for non-browser TLS clients while retaining rejection
 of foreign browser origins. Old production checkout/services remain untouched.
 
+Post-alpha financial correction: delayed savings withdrawals now freeze their
+quote at the signed Account-frame time, rather than the later bank Entity clock.
+The boundary regression reproduced a 10,100 payout instead of 10,000 and then
+passed on both sides of maturity. A real Runtime request signed before maturity,
+delivered after it, killed while queued and restored pays exactly the early
+principal. Final focused financial set: 94 tests / 899 assertions / six files;
+full `bun run check`: 38 source gates, 26.369s. Evidence is
+`docs/evidence/sepolia-20261011/lending-close-clock.json`.
+Demand savings remain unfinished: the current finite signed accrual window must
+have an explicit prospective renewal policy, preserve earned interest and its
+fractional carry, and expose the offline expiry honestly. No demand product or
+rate-renewal implementation was added by this correction.
+
 Current boundary: public browser wallet tab 21 awaits the owner entering a local
 password (required handoff under the browser tool policy). No password is known
 or requested in chat. UI render/network detection and console checks pass; do

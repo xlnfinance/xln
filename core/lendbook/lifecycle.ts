@@ -8,8 +8,7 @@ import { createStructuredLogger, shortId } from '../support/logger';
 
 const lendingLog = createStructuredLogger('entity.lending');
 
-const normalizeEntityRef = (value: unknown): string =>
-  String(value || '').toLowerCase();
+const normalizeEntityRef = (value: unknown): string => String(value || '').toLowerCase();
 
 const retireDisputedLoan = (state: EntityState, loan: LendingLoan): void => {
   if (loan.status === 'repaid' || loan.status === 'disputed') return;
@@ -48,16 +47,8 @@ export function applyLendingCloseRequest(
   context: LendingFollowupContext,
   tx: Extract<AccountTx, { type: 'lending_close_request' }>,
 ): void {
-  const {
-    lending,
-    counterpartyId,
-    proposer,
-    now,
-  } = context;
-  if (
-    proposer !== normalizeEntityRef(tx.data.lenderEntityId) ||
-    proposer !== counterpartyId
-  ) {
+  const { lending, counterpartyId, proposer, accountTimestamp } = context;
+  if (proposer !== normalizeEntityRef(tx.data.lenderEntityId) || proposer !== counterpartyId) {
     throw new Error(`LENDING_CLOSE_PROPOSER_MISMATCH:${tx.data.positionId}`);
   }
   const pool = lending.savings.get(tx.data.positionId);
@@ -70,11 +61,12 @@ export function applyLendingCloseRequest(
   for (const position of lending.savings.values()) lastOrder = Math.max(lastOrder, position.closeOrder ?? 0);
   const order = lastOrder + 1;
   if (!Number.isSafeInteger(order)) throw new Error('LENDING_WITHDRAWAL_ORDER_OVERFLOW');
-  // The saver already signed the Account request. Record it once even with no
-  // capacity; duplicate delivery cannot change its quote or queue priority.
+  // The saver signed the Account clock, not its later Entity observation time.
+  // A delayed ACK across maturity must not turn early cancellation into a full
+  // coupon. Record once; retries cannot reprice the claim or change priority.
   pool.status = 'queued';
   pool.closeOrder = order;
-  pool.updatedAt = now;
+  pool.updatedAt = accountTimestamp;
 }
 
 export function applyLendingClosePayout(
@@ -101,11 +93,7 @@ export function applyLendingClosePayout(
 }
 
 /** Default marks an unpaid receivable; it cannot create cash or alter savings. */
-export const settleOverdueLendingLoan = (
-  state: EntityState,
-  loanId: string,
-  _accountTxs: AccountTxTarget[],
-): void => {
+export const settleOverdueLendingLoan = (state: EntityState, loanId: string, _accountTxs: AccountTxTarget[]): void => {
   const lending = state.lending;
   const loan = lending?.loans.get(loanId);
   if (!lending || !loan || loan.status !== 'active' || loan.dueAt > state.timestamp) return;

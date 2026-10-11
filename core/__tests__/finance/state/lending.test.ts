@@ -481,6 +481,54 @@ describe('payer-authenticated hub lending', () => {
     expect(state.lending!.loans.size).toBe(0);
   });
 
+  for (const mature of [false, true])
+    test(`delayed savings close preserves the signed Account quote across restore, matured=${mature}`, async () => {
+      const state = makeState();
+      state.accounts = state.accounts.updated(LENDER, makeAccount(LENDER));
+      await commit(
+        state,
+        LENDER,
+        {
+          type: 'lending_fund',
+          data: {
+            positionId: POSITION_ID,
+            hubEntityId: HUB,
+            lenderEntityId: LENDER,
+            tokenId: 1,
+            amount: 10_000n,
+            termId: '1d',
+            interestBps: 100,
+          },
+        },
+        false,
+        1_000,
+      );
+      const signedAt = 86_401_000 - (mature ? 0 : 1);
+      state.timestamp = signedAt + 60_000;
+      const close: AccountTx = {
+        type: 'lending_close_request',
+        data: {
+          positionId: POSITION_ID,
+          hubEntityId: HUB,
+          lenderEntityId: LENDER,
+        },
+      };
+      const [payout] = await commit(state, LENDER, close, false, signedAt);
+      expect(payout?.tx).toMatchObject({ type: 'lending_close_payout', data: { amount: mature ? 10_100n : 10_000n } });
+      expect(state.lending!.savings.get(POSITION_ID)).toMatchObject({ updatedAt: signedAt, closeOrder: 1 });
+      const restored = decodeValidatedBuffer(
+        encodeBuffer(projectEntityCoreDoc(state)),
+        validateStorageEntityCoreDocValue,
+      );
+      state.lending = restored.lending!;
+      // A later retry cannot reprice the already-signed withdrawal or move it back in the queue.
+      expect(await commit(state, LENDER, close, false, state.timestamp)).toEqual([]);
+      expect(state.lending.savings.get(POSITION_ID)).toMatchObject({ updatedAt: signedAt, closeOrder: 1 });
+      await commit(state, LENDER, payout!.tx, true, state.timestamp + 1);
+      expect(state.lending.savings.get(POSITION_ID)?.status).toBe('closed');
+      expect(state.accounts.get(LENDER)!.state.subcontracts?.has(POSITION_ID)).toBe(false);
+    });
+
   for (const recovery of ['before-payout', 'after-payout', 'default-after-payout']) {
     test(`mature saver payout is independent of borrower recovery: ${recovery}`, async () => {
       const state = makeState();

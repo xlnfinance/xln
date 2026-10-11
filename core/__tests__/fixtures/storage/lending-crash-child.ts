@@ -68,11 +68,42 @@ if (mode === 'originate') {
   assert(env);
   env.scenarioMode = true;
   env.quietRuntimeLogs = true;
-  const previous = mode === 'partial' ? 'active' : mode === 'mature' ? 'partial' : mode === 'withdraw' ? 'queued' : mode === 'repay' ? 'defaulted'
+  const previous = mode === 'partial' || mode === 'early-close' ? 'active' : mode === 'early-recover' ? 'early-queued' : mode === 'mature' ? 'partial' : mode === 'withdraw' ? 'queued' : mode === 'repay' ? 'defaulted'
     : mode === 'recover' ? 'interleaved' : 'repayment-committed';
   // The files are assertion oracles only; restore reads exclusively LevelDB/WAL.
   assert.equal(safeStringify(financialState(env), 2), readFileSync(join(output, `${previous}.json`), 'utf8'));
-  if (mode === 'partial') {
+  if (mode === 'early-close') {
+    const maturity = book(env).pool.createdAt + termMs;
+    env.state.timestamp = maturity - 1_000;
+    await processRuntime(env, [{ ...saver, entityTxs: [{ type: 'lendingClosePosition', data: {
+      hubEntityId: bank.entityId, positionId,
+    } }] }]);
+    const signed = account(env, saver, bank).pendingFrame;
+    assert(signed && signed.timestamp < maturity);
+    assert(signed.accountTxs.some(tx => tx.type === 'lending_close_request'));
+    // Deliver the signed request after maturity through the real Runtime inbox.
+    // The bank must preserve the Account quote even though its own clock is later.
+    env.state.timestamp = maturity + 60_000;
+    for (let round = 0; round < 40 && book(env).pool.status === 'open'; round++) await processRuntime(env);
+    assert.equal(book(env).pool.status, 'queued');
+    assert.equal(book(env).pool.updatedAt, signed.timestamp);
+    assert.equal(book(env).pool.closeOrder, 1);
+    evidence(env, 'early-queued');
+    process.kill(process.pid, 'SIGKILL');
+  } else if (mode === 'early-recover') {
+    assert.equal(book(env).pool.status, 'queued');
+    assert(book(env).pool.updatedAt < book(env).pool.createdAt + termMs);
+    await converge(env, 40);
+    assert.equal(book(env).pool.status, 'closed');
+    assert.equal(balance(env, saver, bank), 10_000n);
+    assert.equal(account(env, saver, bank).state.subcontracts?.has(positionId), false);
+    assert.equal(account(env, bank, saver).state.subcontracts?.has(positionId), false);
+    assert(!account(env, saver, bank).pendingFrame);
+    assert(!account(env, bank, saver).pendingFrame);
+    evidence(env, 'early-paid');
+    await closeRuntimeDb(env);
+    await closeInfraDb(env);
+  } else if (mode === 'partial') {
     const { loan } = book(env);
     env.state.timestamp = loan.openedAt + termMs / 2 + 1;
     await command(env, borrower, { type: 'lendingRepay', data: {
