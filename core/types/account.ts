@@ -111,7 +111,7 @@ export interface AccountExternalSubcontract {
  * Principal was already transferred at funding. Closing pays it once and removes
  * this program in the same Account transition. */
 export interface AccountLendingCovenant {
-  kind: 'savings' | 'loan';
+  kind: 'savings' | 'demand' | 'loan';
   tokenId: number;
   creditorIsLeft: boolean;
   principal: bigint;
@@ -700,6 +700,17 @@ export type AccountTx =
         tokenId: number;
         amount: bigint;
         termId: LendingTermId;
+        interestBps: number;
+      };
+    }
+  | {
+      type: 'lending_rate';
+      data: {
+        positionId: string;
+        hubEntityId: string;
+        lenderEntityId: string;
+        tokenId: number;
+        claimHash: string;
         interestBps: number;
       };
     }

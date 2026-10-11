@@ -13,7 +13,8 @@ import { accountSafety, formatDuration } from '../runtime/financial/sovereignty'
 import { usdOf } from '../runtime/financial/prices';
 import { disputeView } from '../runtime/financial/manage';
 import { sendEntityTxs } from '../runtime/tx';
-import { formatMoney, formatUsd, getTokenMeta, parseAmount } from '../runtime/format';
+import { formatMoney, formatUsd, parseAmount } from '../runtime/format';
+import { getTokenMeta } from '../runtime/token-meta';
 import { useWallet, type AccountTokenView } from '../runtime/views';
 
 export function AccountDetail() {

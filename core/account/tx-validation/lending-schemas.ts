@@ -8,7 +8,11 @@ export const ACCOUNT_TX_LENDING_SCHEMAS = {
       positionId: 'string', hubEntityId: 'string', lenderEntityId: 'string',
       tokenId: 'integer', amount: 'bigint', termId: 'string', interestBps: 'integer',
     },
-    literals: { termId: TERM_IDS },
+    literals: { termId: [...TERM_IDS, 'demand'] },
+  },
+  lending_rate: {
+    required: { positionId: 'string', hubEntityId: 'string', lenderEntityId: 'string',
+      tokenId: 'integer', claimHash: 'string', interestBps: 'integer' },
   },
   lending_borrow_request: {
     required: {

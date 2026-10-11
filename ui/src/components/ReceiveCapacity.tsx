@@ -3,7 +3,8 @@ import type { AccountCapacityViewInput } from '@xln/core/account/capacity-plan';
 import { peekXLN } from '../runtime/xln-loader';
 import { readAccountState } from '../runtime/financial/swap';
 import { sendEntityTxs } from '../runtime/tx';
-import { formatMoney, getTokenMeta } from '../runtime/format';
+import { formatMoney } from '../runtime/format';
+import { getTokenMeta } from '../runtime/token-meta';
 
 type Props = {
   account: NonNullable<AccountCapacityViewInput['account']>;

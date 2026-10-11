@@ -1,6 +1,6 @@
 import { getAssetUsdPrice } from '$lib/utils/assetPricing';
 import { getAssetValueUsd } from '$lib/components/Entity/assets/entity-asset-values';
-import { getTokenMeta } from '../format';
+import { getTokenMeta } from '../token-meta';
 
 /**
  * USD valuation for the visceral scale. Same static reference table the

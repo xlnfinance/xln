@@ -4,6 +4,7 @@ import type { AccountTx } from '../../types/account';
 export const ACCOUNT_TX_TYPES = [
   'direct_payment',
   'lending_fund',
+  'lending_rate',
   'lending_borrow_request',
   'lending_repay',
   'lending_disburse',

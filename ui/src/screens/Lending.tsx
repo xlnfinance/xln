@@ -12,7 +12,8 @@ import { ReceiveCapacity } from '../components/ReceiveCapacity';
 import { walletHelp } from '@xln/frontend/lib/utils/ui/walletHelp';
 import { useApp } from '../runtime/store';
 import { sendEntityTxs } from '../runtime/tx';
-import { formatAmount, formatMoney, getTokenMeta, parseAmount } from '../runtime/format';
+import { formatAmount, formatMoney, parseAmount } from '../runtime/format';
+import { getTokenMeta } from '../runtime/token-meta';
 import { useWallet } from '../runtime/views';
 import {
 	LENDING_TERMS,
@@ -41,7 +42,7 @@ export function Lending() {
 	const [tokenId, setTokenId] = useState(selectedTokenId);
 	const [side, setSide] = useState<'lend' | 'borrow'>('lend');
 	const [amountText, setAmountText] = useState('');
-	const [termId, setTermId] = useState<TermId>('1d');
+	const [termId, setTermId] = useState<TermId>('demand');
 	const [rateText, setRateText] = useState(side === 'lend' ? '100' : '250');
 	const [state, setState] = useState<LendingState | null>(null);
 	const [stateError, setStateError] = useState('');
@@ -181,7 +182,7 @@ export function Lending() {
 								<button type="button" role="tab" aria-selected={side === 'lend'} className={side === 'lend' ? 'active' : ''} onClick={() => { setSide('lend'); setRateText('100'); }} data-testid="lend-side-lend">
 									Lend
 								</button>
-								<button type="button" role="tab" aria-selected={side === 'borrow'} className={side === 'borrow' ? 'active' : ''} onClick={() => { setSide('borrow'); setRateText('250'); }} data-testid="lend-side-borrow">
+								<button type="button" role="tab" aria-selected={side === 'borrow'} className={side === 'borrow' ? 'active' : ''} onClick={() => { setSide('borrow'); setRateText('250'); if (termId === 'demand') setTermId('1d'); }} data-testid="lend-side-borrow">
 									Borrow
 								</button>
 							</div>
@@ -195,7 +196,7 @@ export function Lending() {
 							<div className="field">
 								<span className="field-label">Term</span>
 								<div className="mode-grid">
-									{LENDING_TERMS.map(entry => (
+									{LENDING_TERMS.filter(entry => side === 'lend' || entry.id !== 'demand').map(entry => (
 										<button key={entry.id} type="button" className={`mode-card${termId === entry.id ? ' active' : ''}`} onClick={() => setTermId(entry.id)}>
 											<span className="t">{entry.label}</span>
 										</button>
@@ -206,7 +207,7 @@ export function Lending() {
 								<span className="field-label">{side === 'lend' ? 'Bank savings rate · basis points' : 'Maximum interest you accept · basis points'}</span>
 								<div className="field-row">
 									<input className="input" inputMode="numeric" readOnly={side === 'lend'} value={quotedRate} onChange={event => setRateText(event.target.value)} data-testid="lend-rate" />
-									<span className="muted">{quotedRate ? `= ${rate(Number(quotedRate))} per term` : 'No current offer'}</span>
+									<span className="muted">{quotedRate ? `= ${rate(Number(quotedRate))} ${termId === 'demand' ? 'per year · simple interest' : 'per term'}` : 'No current offer'}</span>
 								</div>
 							</div>
 							{bankOfferUnavailable && <p className="note" data-testid="lending-bank-terms">This bank has not published a current offer for this asset and term.</p>}
@@ -239,7 +240,7 @@ export function Lending() {
 							</p>}
 							<p className="note" style={{ marginTop: 10 }}>
 								{side === 'lend'
-									? 'The bank owes your principal and agreed interest independently of its borrowers. Early cancellation returns principal; at maturity the full agreed return is due. Payout requires capacity in your Account with the bank.'
+									? termId === 'demand' ? 'Withdraw at any time with interest earned until payment. The bank may change future rates through a signed Account update; earned interest stays yours and never compounds. Each signed rate covers up to one year. Renewal requires current bank terms, Account risk capacity and both parties online. The coverage end is shown with your claim.' : 'The bank owes your principal and agreed interest independently of its borrowers. Early cancellation returns principal; at maturity the full agreed return is due. Payout requires capacity in your Account with the bank.'
 									: 'The bank must approve your borrowing facility. Draws within it transfer principal once, subject to Account capacity and accepted risk. Your credit limit stays unchanged. Repayment charges principal plus interest for the actual elapsed time.'}
 							</p>
 						</>
@@ -290,11 +291,12 @@ export function Lending() {
 										<span className="tx">
 											<span className="t">{formatMoney(pool.principalAmount, meta.decimals)} {meta.symbol}</span>
 											<span className="s">
-												{pool.termId} · {rate(pool.interestBps)} · {pool.status} · {formatMoney(pool.closeAmount, meta.decimals)} claim
+												{pool.termId === 'demand' ? 'On demand' : pool.termId} · {rate(pool.interestBps)}{pool.termId === 'demand' ? ' per year' : ''} · {pool.status} · {formatMoney(pool.closeAmount, meta.decimals)} claim
 											</span>
 										</span>
 									</span>
 								</div>
+								{pool.rateExpiresAt !== null && <p className="note" data-testid="savings-rate-coverage">{pool.rateExpiresAt <= Date.now() ? 'Rate coverage ended. Your principal and earned interest remain owed; further interest needs a signed renewal.' : `Signed rate coverage ends ${new Date(pool.rateExpiresAt).toLocaleString()}. Renewal cannot exceed your accepted risk.`}</p>}
 								<LendingClose pool={pool} wallet={wallet} onSubmitted={() => void refresh()} />
 								</div>
 							))}

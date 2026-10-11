@@ -1,20 +1,21 @@
 import { ethers } from 'ethers';
 
-import type { AccountState } from '../types/account';
+import type { AccountLendingCovenant, AccountState } from '../types/account';
 import type { EntityState } from '../entity/types';
 import type { LendingBankTerms, LendingFacility, LendingLoan, LendingSavings, LendingState, LendingTermId } from '../types/finance/lending';
-import { lendingMaximumAmount, lendingExitAmount, type LendingClock } from '../protocol/dispute/lending-covenant';
+import { lendingMaximumAmount, lendingExitAmount, assertLendingCovenant, LENDING_YEAR_MS, type LendingClock } from '../protocol/dispute/lending-covenant';
 import { deriveDelta } from '../account/utils';
 import { compareStableText } from '../protocol/serialization';
 
 export const LENDING_TERM_MS: Record<LendingTermId, number> = {
+  demand: LENDING_YEAR_MS,
   '1h': 60 * 60 * 1000,
   '1d': 24 * 60 * 60 * 1000,
   '1m': 30 * 24 * 60 * 60 * 1000,
 };
 
 export const normalizeLendingTerm = (value: unknown): LendingTermId => {
-  if (value === '1h' || value === '1d' || value === '1m') return value;
+  if (value === '1h' || value === '1d' || value === '1m' || value === 'demand') return value;
   throw new Error(`LENDING_INVALID_TERM: ${String(value)}`);
 };
 
@@ -35,8 +36,19 @@ export const computeLendingInterest = (principal: bigint, interestBps: number): 
 const lendingPositionMatured = (position: LendingSavings, timestamp: number): boolean =>
   timestamp >= position.createdAt + position.termMs;
 
-export const lendingPositionCloseAmount = (position: LendingSavings, timestamp: number): bigint => {
+/** Demand servicing reads the Account-owned checkpoint; no second accrual state. */
+export const demandSavingsClaim = (position: LendingSavings, account: AccountState | undefined): AccountLendingCovenant => {
+  if (!account) throw new Error('LENDING_DEMAND_ACCOUNT_MISSING');
+  const claim = account.subcontracts?.get(position.positionId);
+  assertLendingCovenant(claim);
+  if (claim.kind !== 'demand' || claim.tokenId !== position.tokenId || claim.principal !== position.principalAmount ||
+    claim.creditorIsLeft !== (account.leftEntity === position.lenderEntityId)) throw new Error('LENDING_DEMAND_CLAIM_BINDING');
+  return claim;
+};
+
+export const lendingPositionCloseAmount = (position: LendingSavings, timestamp: number, account?: AccountState): bigint => {
   if (position.status === 'closed' || position.status === 'disputed') return 0n;
+  if (position.termId === 'demand') return lendingExitAmount(demandSavingsClaim(position, account), timestamp);
   const quoteAt = position.status === 'queued' ? position.updatedAt : timestamp;
   return position.principalAmount + (lendingPositionMatured(position, quoteAt)
     ? computeLendingInterest(position.principalAmount, position.interestBps) : 0n);
@@ -100,7 +112,7 @@ export const summarizeLendingState = (
   state: EntityState,
   filter?: { userEntityId?: string; tokenId?: number; requestId?: string },
 ): {
-  savings: Array<LendingSavings & { closeAmount: bigint; matured: boolean }>;
+  savings: Array<LendingSavings & { closeAmount: bigint; matured: boolean; rateExpiresAt: number | null }> ;
   loans: LendingLoan[];
   terms: LendingBankTerms[];
   facilities: LendingFacility[];
@@ -123,12 +135,16 @@ export const summarizeLendingState = (
   const savings = Array.from(lending.savings.values())
     .filter(position => tokenId === undefined || position.tokenId === tokenId)
     .filter(position => !userEntityId || position.lenderEntityId.toLowerCase() === userEntityId)
-    .sort((left, right) => right.updatedAt - left.updatedAt || compareStableText(left.positionId, right.positionId))
-    .map(position => ({
-      ...position,
-      closeAmount: lendingPositionCloseAmount(position, state.timestamp),
-      matured: lendingPositionMatured(position, state.timestamp),
-    }));
+    .toSorted((left, right) => right.updatedAt - left.updatedAt || compareStableText(left.positionId, right.positionId))
+    .map(position => {
+      const account = state.accounts.get(position.lenderEntityId)?.state;
+      const claim = position.termId === 'demand' && (position.status === 'open' || position.status === 'queued')
+        ? demandSavingsClaim(position, account) : undefined;
+      return { ...position, interestBps: claim?.interestBps ?? position.interestBps,
+        closeAmount: lendingPositionCloseAmount(position, state.timestamp, account),
+        matured: position.termId !== 'demand' && lendingPositionMatured(position, state.timestamp),
+        rateExpiresAt: claim ? claim.openedAt + claim.termMs : null };
+    });
   const loans = Array.from(lending.loans.values())
     .filter(loan => tokenId === undefined || loan.tokenId === tokenId)
     .filter(loan => !userEntityId || loan.borrowerEntityId.toLowerCase() === userEntityId)

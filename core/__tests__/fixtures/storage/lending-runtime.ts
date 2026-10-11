@@ -41,7 +41,7 @@ export async function command(env: RuntimeReplica, party: typeof bank, tx: Entit
  * Initial balances are explicit bank IOUs within the saver/borrower's signed
  * credit limits, not fabricated collateral or a claim of on-chain funding.
  */
-export async function fundedLoan(): Promise<RuntimeReplica> {
+export async function fundedLoan(savingsTerm: '1h' | 'demand' = '1h'): Promise<RuntimeReplica> {
   const env = createEmptyEnv(seed);
   env.runtimeId = bank.signerId;
   env.dbNamespace = bank.signerId;
@@ -100,8 +100,13 @@ export async function fundedLoan(): Promise<RuntimeReplica> {
   await command(env, bank, { type: 'lendingApprove', data: {
     borrowerEntityId: borrower.entityId, tokenId: 1, termId: '1h', maxPrincipal: 2_500n, expiresAt,
   } });
+  if (savingsTerm === 'demand') await command(env, bank, { type: 'lendingSetTerms', data: {
+    chainId: jurisdiction.chainId, depositoryAddress: jurisdiction.depositoryAddress,
+    tokenId: 1, termId: 'demand', savingsInterestBps: 500, loanInterestBps: 0, loanLateMs: 0,
+    expiresAt: env.state.timestamp + 2 * 365 * 24 * 60 * 60 * 1000,
+  } });
   await command(env, saver, { type: 'lendingOffer', data: {
-    positionId, hubEntityId: bank.entityId, tokenId: 1, amount: 5_000n, termId: '1h', interestBps: 100,
+    positionId, hubEntityId: bank.entityId, tokenId: 1, amount: 5_000n, termId: savingsTerm, interestBps: savingsTerm === 'demand' ? 500 : 100,
   } });
   await command(env, borrower, { type: 'lendingBorrow', data: {
     requestId, hubEntityId: bank.entityId, tokenId: 1, amount: 2_500n, termId: '1h',

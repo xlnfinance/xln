@@ -4,6 +4,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 const cases = [
+  { name: 'demand savings rate, fractional earnings and queued actual-time payout survive three SIGKILL restarts',
+    modes: ['demand-originate', 'demand-rate', 'demand-close', 'demand-recover'],
+    phases: ['active', 'demand-rate', 'demand-queued', 'demand-paid'] },
   {
     name: 'signed loan and queued withdrawal survive SIGKILL, restored liquidity and outbox redelivery',
     modes: ['originate', 'partial', 'mature', 'withdraw', 'repay', 'interleave', 'recover'],

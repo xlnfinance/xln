@@ -13,6 +13,7 @@ import { decodeUint768 } from '../../../core/protocol/crypto/abi-money.ts';
 const { ethers, networkHelpers } = await hre.network.getOrCreate('hardhat');
 
 const TERM_MS = 86_400_000;
+const YEAR_MS = 365 * TERM_MS;
 
 const submit = async (stand: Stand, actor: Pair['left'], batch: Record<string, unknown>) => {
   const encoded = encodeBatch(batch);
@@ -27,7 +28,7 @@ const submit = async (stand: Stand, actor: Pair['left'], batch: Record<string, u
 describe('signed term claims on the production Depository', function () {
   let maximumGas = 0n;
   after(() => console.log(`SAVINGS_FINALIZATION_MAX_GAS=${maximumGas}`));
-  for (const kind of ['savings', 'loan'] as const) for (const creditorIsLeft of [true, false]) for (const elapsedMs of [0, TERM_MS / 2, TERM_MS, TERM_MS * 2, TERM_MS * 3]) for (const debtorCapital of [0n, 10_000n]) for (const partial of kind === 'loan' && elapsedMs >= TERM_MS / 2 ? [false, true] : [false]) {
+  for (const kind of ['savings', 'loan', 'demand'] as const) for (const creditorIsLeft of [true, false]) for (const elapsedMs of kind === 'demand' ? [YEAR_MS / 2] : [0, TERM_MS / 2, TERM_MS, TERM_MS * 2, TERM_MS * 3]) for (const debtorCapital of [0n, 10_000n]) for (const partial of kind === 'loan' && elapsedMs >= TERM_MS / 2 ? [false, true] : [false]) {
     it(`recovers ${kind} with the debtor offline: left=${creditorIsLeft}, elapsed=${elapsedMs}, debtorCapital=${debtorCapital}, partial=${partial}`, async function () {
       const stand = await deployStand(1000n + BigInt(elapsedMs) + (creditorIsLeft ? 1n : 2n), false);
       const pair = pairFor(stand, 0);
@@ -45,20 +46,32 @@ describe('signed term claims on the production Depository', function () {
       account.state.disputeConfig = { leftResponseSeconds: 1, rightResponseSeconds: 1 };
       putTestAccountDelta(account, { ...account.state.deltas.get(1)!, collateral, ondelta });
       const start = (await networkHelpers.time.latest()) + 3;
-      const claimId = kind === 'savings' ? 'lend-1111111111111111' : 'loan-1111111111111111';
+      const claimId = kind !== 'loan' ? 'lend-1111111111111111' : 'loan-1111111111111111';
       const authorization = {
         requestId: 'borrow-1111111111111111', hubEntityId: creditor.entityId, borrowerEntityId: debtor.entityId,
         tokenId: 1, amount: 10_000n, termId: '1d' as const, maxInterestBps: 100, maxLateMs: TERM_MS, expiresAt: start * 1000 + 1_000,
       };
       if (kind === 'loan') expect((await applyAccountTxToMutableReplica(account,
         { type: 'lending_borrow_request', data: authorization }, !creditorIsLeft, start * 1000 - elapsedMs - 1)).ok).to.equal(true);
-      const funding = await applyAccountTxToMutableReplica(account, kind === 'savings' ? { type: 'lending_fund', data: {
+      const funding = await applyAccountTxToMutableReplica(account, kind !== 'loan' ? { type: 'lending_fund', data: {
         positionId: claimId, hubEntityId: debtor.entityId, lenderEntityId: creditor.entityId,
-        tokenId: 1, amount: 10_000n, termId: '1d', interestBps: 100,
+        tokenId: 1, amount: 10_000n, termId: kind === 'demand' ? 'demand' : '1d', interestBps: kind === 'demand' ? 500 : 100,
       } } : { type: 'lending_disburse', data: {
         ...authorization, loanId: claimId, interestBps: 100, lateMs: TERM_MS,
       } }, creditorIsLeft, start * 1000 - elapsedMs);
       expect(funding.ok).to.equal(true);
+      if (kind === 'demand') {
+        const initialClaim = account.state.subcontracts!.get(claimId);
+        assertLendingCovenant(initialClaim);
+        expect((await applyAccountTxToMutableReplica(account, { type: 'lending_rate', data: {
+          positionId: claimId, hubEntityId: debtor.entityId, lenderEntityId: creditor.entityId,
+          tokenId: 1, claimHash: lendingCovenantHash(initialClaim), interestBps: 200,
+        } }, !creditorIsLeft, start * 1000 - YEAR_MS / 4 + 1)).ok).to.equal(true);
+        const renewed = account.state.subcontracts!.get(claimId);
+        assertLendingCovenant(renewed);
+        expect(renewed.accruedInterest).to.equal(125n);
+        expect(renewed.interestRemainder).to.equal(5_000_000n);
+      }
       if (partial) {
         const initialClaim = account.state.subcontracts!.get(claimId);
         assertLendingCovenant(initialClaim);
@@ -103,7 +116,7 @@ describe('signed term claims on the production Depository', function () {
       if (!('kind' in claim)) throw new Error('Missing signed savings covenant');
       const cappedElapsed = Math.min(elapsedMs, TERM_MS * (kind === 'loan' ? 2 : 1));
       const due = lendingExitAmount(claim, start * 1000) + (partial ? 5_050n : 0n);
-      const expectedInterest = partial
+      const expectedInterest = kind === 'demand' ? 175n : partial
         ? 50n + 50n * BigInt(cappedElapsed - TERM_MS / 2) / BigInt(TERM_MS)
         : 100n * BigInt(cappedElapsed) / BigInt(TERM_MS);
       expect(due).to.equal(10_000n + expectedInterest);

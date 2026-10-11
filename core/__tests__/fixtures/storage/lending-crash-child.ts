@@ -5,9 +5,9 @@ import { closeInfraDb, closeRuntimeDb, loadEnvFromDB, processRuntime } from '../
 import { converge } from '../../../scenarios/harness/helpers';
 import { safeStringify } from '../../../protocol/serialization';
 import { computeAccountStateRootCold } from '../../../account/commitment/state-root';
-import { assertLendingCovenant } from '../../../protocol/dispute/lending-covenant';
+import { assertLendingCovenant, LENDING_YEAR_MS, lendingExitAmount } from '../../../protocol/dispute/lending-covenant';
 import type { RuntimeReplica } from '../../../runtime/types';
-import { bank, borrower, command, fundedLoan, positionId, replica, saver, seed, termMs } from './lending-runtime';
+import { bank, borrower, command, fundedLoan, jurisdiction, positionId, replica, saver, seed, termMs } from './lending-runtime';
 
 const mode = process.argv[2];
 const output = process.env['XLN_DB_PATH'];
@@ -56,8 +56,8 @@ function evidence(env: RuntimeReplica, name: string) {
   console.log(`LENDING_CRASH_EVIDENCE:${name}:height=${env.state.height}:status=${loan.status}`);
 }
 
-if (mode === 'originate') {
-  const env = await fundedLoan();
+if (mode === 'originate' || mode === 'demand-originate') {
+  const env = await fundedLoan(mode === 'demand-originate' ? 'demand' : '1h');
   assert.equal(book(env).loan.status, 'active');
   assert.equal(balance(env, borrower, bank), 12_500n);
   assert.equal(balance(env, saver, bank), 5_000n);
@@ -68,11 +68,55 @@ if (mode === 'originate') {
   assert(env);
   env.scenarioMode = true;
   env.quietRuntimeLogs = true;
-  const previous = mode === 'partial' || mode === 'early-close' ? 'active' : mode === 'early-recover' ? 'early-queued' : mode === 'mature' ? 'partial' : mode === 'withdraw' ? 'queued' : mode === 'repay' ? 'defaulted'
+  const previous = mode === 'demand-rate' ? 'active' : mode === 'demand-close' ? 'demand-rate' : mode === 'demand-recover' ? 'demand-queued' : mode === 'partial' || mode === 'early-close' ? 'active' : mode === 'early-recover' ? 'early-queued' : mode === 'mature' ? 'partial' : mode === 'withdraw' ? 'queued' : mode === 'repay' ? 'defaulted'
     : mode === 'recover' ? 'interleaved' : 'repayment-committed';
   // The files are assertion oracles only; restore reads exclusively LevelDB/WAL.
   assert.equal(safeStringify(financialState(env), 2), readFileSync(join(output, `${previous}.json`), 'utf8'));
-  if (mode === 'early-close') {
+  if (mode === 'demand-rate') {
+    const opened = book(env).pool.createdAt;
+    env.state.timestamp = opened + LENDING_YEAR_MS / 4 + 1;
+    await command(env, bank, { type: 'lendingSetTerms', data: {
+      chainId: jurisdiction.chainId, depositoryAddress: jurisdiction.depositoryAddress,
+      tokenId: 1, termId: 'demand', savingsInterestBps: 200, loanInterestBps: 0, loanLateMs: 0,
+      expiresAt: env.state.timestamp + 2 * LENDING_YEAR_MS,
+    } });
+    const claim = account(env, bank, saver).state.subcontracts?.get(positionId);
+    assertLendingCovenant(claim);
+    assert.equal(claim.kind, 'demand');
+    assert.equal(claim.interestBps, 200);
+    assert.equal(claim.accruedInterest, 62n);
+    assert(claim.interestRemainder > 0n);
+    assert.equal(book(env).pool.interestBps, 200);
+    assert.deepEqual(claim, account(env, saver, bank).state.subcontracts?.get(positionId));
+    evidence(env, 'demand-rate');
+    process.kill(process.pid, 'SIGKILL');
+  } else if (mode === 'demand-close') {
+    env.state.timestamp = book(env).pool.createdAt + LENDING_YEAR_MS / 2;
+    await command(env, saver, { type: 'extendCredit', data: {
+      counterpartyEntityId: bank.entityId, tokenId: 1, amount: 5_000n,
+    } });
+    await command(env, saver, { type: 'lendingClosePosition', data: { hubEntityId: bank.entityId, positionId } });
+    assert.equal(book(env).pool.status, 'queued');
+    const claim = account(env, saver, bank).state.subcontracts?.get(positionId);
+    assertLendingCovenant(claim);
+    assert.equal(lendingExitAmount(claim, env.state.timestamp), 5_087n);
+    evidence(env, 'demand-queued');
+    process.kill(process.pid, 'SIGKILL');
+  } else if (mode === 'demand-recover') {
+    assert.equal(book(env).pool.status, 'queued');
+    env.state.timestamp = book(env).pool.createdAt + 3 * LENDING_YEAR_MS / 4;
+    await command(env, saver, { type: 'extendCredit', data: {
+      counterpartyEntityId: bank.entityId, tokenId: 1, amount: 100_000n,
+    } });
+    assert.equal(book(env).pool.status, 'closed');
+    assert.equal(balance(env, saver, bank), 10_112n);
+    assert.equal(account(env, saver, bank).state.subcontracts?.has(positionId), false);
+    assert.equal(account(env, bank, saver).state.subcontracts?.has(positionId), false);
+    assert(!account(env, saver, bank).pendingFrame && !account(env, bank, saver).pendingFrame);
+    evidence(env, 'demand-paid');
+    await closeRuntimeDb(env);
+    await closeInfraDb(env);
+  } else if (mode === 'early-close') {
     const maturity = book(env).pool.createdAt + termMs;
     env.state.timestamp = maturity - 1_000;
     await processRuntime(env, [{ ...saver, entityTxs: [{ type: 'lendingClosePosition', data: {

@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Icon } from './Icons';
-import { getTokenMeta, knownTokenIds, tokenGlyph } from '../runtime/format';
+import { tokenGlyph } from '../runtime/format';
+import { getTokenMeta, knownTokenIds } from '../runtime/token-meta';
 
 export function TokenIcon({ tokenId, size = 'md' }: { tokenId: number; size?: 'md' | 'sm' }) {
 	const meta = getTokenMeta(tokenId);

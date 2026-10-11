@@ -4,7 +4,8 @@ import { nativePaymentRequest, nativeInvoiceJurisdictionKeys } from './payment-r
 import { loadStackJurisdictions } from '../runtime/hosted';
 import { nativeLimitAmounts } from './market';
 import type { WalletView } from '../runtime/views';
-import { formatMoney, getTokenMeta, parseAmount } from '../runtime/format';
+import { formatMoney, parseAmount } from '../runtime/format';
+import { getTokenMeta } from '../runtime/token-meta';
 import {
   eligibleRoutes,
   isEntityId,

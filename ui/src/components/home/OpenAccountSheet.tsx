@@ -5,7 +5,8 @@ import { Sheet } from '../Sheet';
 import { useApp } from '../../runtime/store';
 import { sendEntityTxs } from '../../runtime/tx';
 import { accountDisputeConfig, gossipProfile } from '../../runtime/financial/roles';
-import { getTokenMeta, parseAmount, shortId, plainAmount } from '../../runtime/format';
+import { parseAmount, shortId, plainAmount } from '../../runtime/format';
+import { getTokenMeta } from '../../runtime/token-meta';
 import type { WalletView } from '../../runtime/views';
 
 export function OpenAccountSheet({ wallet, onClose }: { wallet: WalletView; onClose: () => void }) {

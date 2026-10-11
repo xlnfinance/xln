@@ -1,9 +1,10 @@
+import { lendingMaximumAmount } from '../protocol/dispute/lending-covenant';
 import type { EntityState } from '../entity/types';
 import type { AccountTxTarget } from '../entity/tx/handlers/account/orderbook/queue';
 import type { LendingSavings } from '../types/finance/lending';
-import { getAccountOutCapacity, lendingPositionCloseAmount } from './state';
+import { getAccountOutCapacity, lendingPositionCloseAmount, demandSavingsClaim } from './state';
 
-const dueAt = (position: LendingSavings): number => Math.min(position.createdAt + position.termMs, position.updatedAt);
+const dueAt = (position: LendingSavings): number => position.termId === 'demand' ? position.updatedAt : Math.min(position.createdAt + position.termMs, position.updatedAt);
 
 const order = (position: LendingSavings): number => {
   if (position.closeOrder === undefined) throw new Error(`LENDING_WITHDRAWAL_ORDER_MISSING:${position.positionId}`);
@@ -30,7 +31,7 @@ export const collectLendingWithdrawals = (state: EntityState): AccountTxTarget[]
     const account = state.accounts.get(accountId);
     if (!account) throw new Error(`LENDING_WITHDRAWAL_ACCOUNT_MISSING:${position.positionId}`);
     if (account.status !== 'active' || account.pendingFrame || account.mempool.length > 0) continue;
-    const amount = lendingPositionCloseAmount(position, state.timestamp);
+    const amount = lendingPositionCloseAmount(position, state.timestamp, account.state);
     if (getAccountOutCapacity(account.state, state.entityId, position.tokenId) < amount) continue;
     seen.add(accountId);
     outputs.push({
@@ -42,7 +43,8 @@ export const collectLendingWithdrawals = (state: EntityState): AccountTxTarget[]
           hubEntityId: state.entityId,
           lenderEntityId: accountId,
           tokenId: position.tokenId,
-          amount,
+          // Maximum debit; Account settlement pays only the earned-time quote.
+          amount: position.termId === 'demand' ? lendingMaximumAmount(demandSavingsClaim(position, account.state)) : amount,
         },
       },
     });

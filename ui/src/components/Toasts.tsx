@@ -1,6 +1,7 @@
 import { useReceipts } from '../runtime/financial/receipt-state';
 import { paymentReceiptFacts } from '../runtime/financial/payment-receipt-view';
-import { formatAmount, getTokenMeta } from '../runtime/format';
+import { formatAmount } from '../runtime/format';
+import { getTokenMeta } from '../runtime/token-meta';
 import { useApp } from '../runtime/store';
 import { explainWalletError } from '@xln/frontend/lib/utils/ui/walletError';
 

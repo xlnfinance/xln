@@ -6,7 +6,8 @@ import { Icon } from '../components/Icons';
 import { PendingBatch } from '../components/PendingBatch';
 import { TokenPicker } from '../components/TokenPicker';
 import { useApp } from '../runtime/store';
-import { formatMoney, getTokenMeta, parseAmount, amountInputText } from '../runtime/format';
+import { formatMoney, parseAmount, amountInputText } from '../runtime/format';
+import { getTokenMeta } from '../runtime/token-meta';
 import { usdOf } from '../runtime/financial/prices';
 import {
 	MOVE_ENDPOINTS,

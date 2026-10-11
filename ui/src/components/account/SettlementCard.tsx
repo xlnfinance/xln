@@ -2,7 +2,8 @@ import { useState } from 'react';
 import { Icon } from '../Icons';
 import { useApp } from '../../runtime/store';
 import { sendEntityTxs } from '../../runtime/tx';
-import { formatMoney, getTokenMeta } from '../../runtime/format';
+import { formatMoney } from '../../runtime/format';
+import { getTokenMeta } from '../../runtime/token-meta';
 import type { AccountView, WalletView } from '../../runtime/views';
 import { buildSettleApproveTx, describeSettlementOp, settlementView } from '../../runtime/financial/manage';
 const moneyOf = (tokenId: number, amount: bigint): string => {

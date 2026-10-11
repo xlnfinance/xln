@@ -7,7 +7,7 @@ import { UINT256_MAX } from '../protocol/boundary/integer-ranges';
 import { assertLendingClock } from '../protocol/dispute/lending-covenant';
 
 const term = (value: unknown): LendingTermId => {
-  if (value !== '1h' && value !== '1d' && value !== '1m') throw new Error('LENDING_POLICY_TERM_INVALID');
+  if (value !== '1h' && value !== '1d' && value !== '1m' && value !== 'demand') throw new Error('LENDING_POLICY_TERM_INVALID');
   return value;
 };
 const address = (value: unknown): string => {
@@ -29,6 +29,7 @@ export const decodeLendingBankTerms = (value: unknown): LendingBankTerms => {
   const data = requireBoundaryRecord(value, 'LENDING_TERMS_INVALID');
   requireExactBoundaryKeys(data, ['chainId', 'depositoryAddress', 'tokenId', 'termId', 'savingsInterestBps', 'loanInterestBps', 'loanLateMs', 'expiresAt'], [], 'LENDING_TERMS_FIELDS');
   const termId = term(data['termId']);
+  if (termId === 'demand' && (data['loanInterestBps'] !== 0 || data['loanLateMs'] !== 0)) throw new Error('LENDING_DEMAND_SAVINGS_ONLY');
   const loanLateMs = requireBoundaryInteger(data['loanLateMs'], 'LENDING_POLICY_LATE_INVALID');
   const expiresAt = requireBoundaryInteger(data['expiresAt'], 'LENDING_POLICY_EXPIRY_INVALID');
   requireBoundaryInteger(expiresAt + LENDING_TERM_MS[termId] + loanLateMs, 'LENDING_POLICY_CLOCK_OVERFLOW');
@@ -46,6 +47,7 @@ export const decodeLendingBankTerms = (value: unknown): LendingBankTerms => {
 export const decodeLendingFacility = (value: unknown): LendingFacility => {
   const data = requireBoundaryRecord(value, 'LENDING_FACILITY_INVALID');
   requireExactBoundaryKeys(data, ['borrowerEntityId', 'chainId', 'depositoryAddress', 'jNonce', 'tokenId', 'termId', 'maxPrincipal', 'expiresAt'], [], 'LENDING_FACILITY_FIELDS');
+  if (data['termId'] === 'demand') throw new Error('LENDING_LOAN_TERM_REQUIRED');
   const borrower = data['borrowerEntityId'];
   if (typeof borrower !== 'string' || !/^0x[0-9a-f]{64}$/.test(borrower)) throw new Error('LENDING_FACILITY_BORROWER_INVALID');
   const maxPrincipal = requireBigInt(data['maxPrincipal'], 'LENDING_FACILITY_AMOUNT_INVALID', 0n);
@@ -116,6 +118,7 @@ export const approvedLendingDraw = (
   state: EntityState, account: AccountReplica, borrower: string,
   request: Extract<AccountTx, { type: 'lending_borrow_request' }>['data'], now: number,
 ): { ok: true; approval: LendingFacility; interestBps: number; lateMs: number } | { ok: false; reason: string } => {
+  if (request.termId === 'demand') return { ok: false, reason: 'loan requires a fixed term' };
   const terms = bankTermsForAccount(state, account, request.tokenId, request.termId);
   if (!terms || terms.expiresAt <= now) return { ok: false, reason: 'bank terms unavailable' };
   if (terms.loanInterestBps > request.maxInterestBps) return { ok: false, reason: 'bank rate exceeds requested maximum' };

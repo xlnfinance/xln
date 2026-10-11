@@ -3,7 +3,8 @@ import { AccountBalance } from './AccountBalance';
 import { Icon } from '../Icons';
 import { TokenIcon } from '../TokenPicker';
 import { useApp } from '../../runtime/store';
-import { formatAmount, formatMoney, formatUsd, getTokenMeta } from '../../runtime/format';
+import { formatAmount, formatMoney, formatUsd } from '../../runtime/format';
+import { getTokenMeta } from '../../runtime/token-meta';
 import { isUsdStable, usdOf } from '../../runtime/financial/prices';
 import type { AccountView, TokenTotals, WalletView } from '../../runtime/views';
 

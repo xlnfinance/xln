@@ -8,11 +8,12 @@ import { accountTxApplied, accountTxValidationRejected } from '../../apply-resul
 import { deriveDelta } from '../../../utils';
 import { keccakTextHash } from '../../../../protocol/crypto/keccak-text';
 import { safeStringify } from '../../../../protocol/serialization';
-import { assertLendingCovenant, lendingCovenantHash, lendingMaximumAmount, settleLendingPayment } from '../../../../protocol/dispute/lending-covenant';
+import { assertLendingCovenant, lendingCovenantHash, lendingMaximumAmount, settleLendingPayment, renewDemandSavings, lendingExitAmount } from '../../../../protocol/dispute/lending-covenant';
 import { requireBoundaryInteger } from '../../../../protocol/boundary-validation';
 
 type LendingAccountTx = Extract<AccountTx, {
   type:
+    | 'lending_rate'
     | 'lending_fund'
     | 'lending_borrow_request'
     | 'lending_repay'
@@ -161,8 +162,9 @@ const applyTermLoanFunding = (
   if (isSavings && (!funds || tx.data.amount + funds.outOwnCredit > funds.outCapacity)) {
     return accountTxValidationRejected('LENDING_FUND_OWNED_BALANCE_INSUFFICIENT', []);
   }
+  if (!isSavings && tx.data.termId === 'demand') return accountTxValidationRejected('LENDING_LOAN_TERM_REQUIRED', []);
   const covenant = {
-    kind: isSavings ? 'savings' as const : 'loan' as const, tokenId: tx.data.tokenId, creditorIsLeft: byLeft,
+    kind: isSavings ? tx.data.termId === 'demand' ? 'demand' as const : 'savings' as const : 'loan' as const, tokenId: tx.data.tokenId, creditorIsLeft: byLeft,
     principal: tx.data.amount, interestBps: tx.data.interestBps,
     accruedAt: timestamp, accruedInterest: 0n, interestRemainder: 0n,
     openedAt: timestamp, termMs: LENDING_TERM_MS[tx.data.termId], lateMs: isSavings ? 0 : tx.data.lateMs,
@@ -183,15 +185,34 @@ const applyTermLoanFunding = (
   return result;
 };
 
+const applySavingsRate = (
+  account: AccountDraftReplica, tx: Extract<LendingAccountTx, { type: 'lending_rate' }>, byLeft: boolean, timestamp: number,
+): LendingResult => {
+  requireIntentId(tx.data.positionId, 'lend');
+  requireRole(account, byLeft, 'hub', tx.data.hubEntityId);
+  requireCounterparty(account, normalized(tx.data.hubEntityId), tx.data.lenderEntityId);
+  const claim = account.state.subcontracts.get(tx.data.positionId);
+  // Only the bank may propose a new prospective rate. The exact preceding
+  // signed claim prevents replay/repricing; pending withdrawal has priority.
+  if (!claim || !('kind' in claim) || claim.kind !== 'demand' || claim.creditorIsLeft === byLeft ||
+    claim.tokenId !== tx.data.tokenId || account.state.lendingIntents.has('close:' + tx.data.positionId)) {
+    return accountTxValidationRejected('LENDING_RATE_COVENANT_MISMATCH', []);
+  }
+  if (tx.data.claimHash !== lendingCovenantHash(claim)) return accountTxValidationRejected('LENDING_RATE_COVENANT_CHANGED', []);
+  const renewed = renewDemandSavings(claim, tx.data.interestBps, timestamp);
+  if (!renewed.ok) return accountTxValidationRejected(renewed.reason, []);
+  account.state.subcontracts.put(tx.data.positionId, renewed.claim);
+  return accountTxApplied(['Demand savings rate renewed']);
+};
+
 export const handleLendingAccountTx = (
-  account: AccountDraftReplica,
-  tx: LendingAccountTx,
-  byLeft: boolean,
-  timestamp: number,
+  account: AccountDraftReplica, tx: LendingAccountTx, byLeft: boolean, timestamp: number,
 ): LendingResult => {
   if (tx.type === 'lending_fund' || tx.type === 'lending_disburse') return applyTermLoanFunding(account, tx, byLeft, timestamp);
+  if (tx.type === 'lending_rate') return applySavingsRate(account, tx, byLeft, timestamp);
 
   if (tx.type === 'lending_borrow_request') {
+    if (tx.data.termId === 'demand') return accountTxValidationRejected('LENDING_LOAN_TERM_REQUIRED', []);
     requireIntentId(tx.data.requestId, 'borrow');
     requireRole(account, byLeft, 'borrower', tx.data.borrowerEntityId);
     requireCounterparty(account, normalized(tx.data.borrowerEntityId), tx.data.hubEntityId);
@@ -240,7 +261,7 @@ export const handleLendingAccountTx = (
     requireRole(account, byLeft, 'lender', tx.data.lenderEntityId);
     requireCounterparty(account, normalized(tx.data.lenderEntityId), tx.data.hubEntityId);
     const covenant = account.state.subcontracts.get(tx.data.positionId);
-    if (!covenant || !('kind' in covenant) || covenant.kind !== 'savings' || covenant.creditorIsLeft !== byLeft) {
+    if (!covenant || !('kind' in covenant) || (covenant.kind !== 'savings' && covenant.kind !== 'demand') || covenant.creditorIsLeft !== byLeft) {
       return accountTxValidationRejected('LENDING_CLOSE_COVENANT_MISMATCH', []);
     }
     // A saver may retry after a temporary bank liquidity constraint. This receipt
@@ -262,10 +283,14 @@ export const handleLendingAccountTx = (
   const covenant = account.state.subcontracts.get(tx.data.positionId);
   // Both parties certify the payout and extinguishment together. A token swap,
   // another saver, or a one-unit payout must never erase the funded principal.
-  if (!covenant || !('kind' in covenant) || covenant.kind !== 'savings' || covenant.creditorIsLeft === byLeft || covenant.tokenId !== tx.data.tokenId || tx.data.amount < covenant.principal || tx.data.amount > lendingMaximumAmount(covenant)) {
+  if (!covenant || !('kind' in covenant) || (covenant.kind !== 'savings' && covenant.kind !== 'demand') || covenant.creditorIsLeft === byLeft || covenant.tokenId !== tx.data.tokenId || tx.data.amount < covenant.principal || tx.data.amount > lendingMaximumAmount(covenant)) {
     return accountTxValidationRejected('LENDING_PAYOUT_COVENANT_MISMATCH', []);
   }
-  const result = applyPayment(account, tx, byLeft);
+  const amount = covenant.kind === 'demand' ? lendingExitAmount(covenant, timestamp) : tx.data.amount;
+  if (covenant.kind === 'demand' && (tx.data.amount < amount || account.state.lendingIntents.get('close:' + tx.data.positionId) !== 'close-request')) {
+    return accountTxValidationRejected('LENDING_DEMAND_PAYOUT_INCOMPLETE', []);
+  }
+  const result = applyPayment(account, { ...tx, data: { ...tx.data, amount } }, byLeft);
   if (result.ok) {
     consumeIntent(account, intentKey, 'close-payout');
     account.state.subcontracts.del(tx.data.positionId);

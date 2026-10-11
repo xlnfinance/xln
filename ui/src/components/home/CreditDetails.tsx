@@ -1,5 +1,6 @@
 import { Bar } from '../Bars';
-import { formatAmount, formatUsd, getTokenMeta } from '../../runtime/format';
+import { formatAmount, formatUsd } from '../../runtime/format';
+import { getTokenMeta } from '../../runtime/token-meta';
 import { usdOf } from '../../runtime/financial/prices';
 import type { WalletView } from '../../runtime/views';
 

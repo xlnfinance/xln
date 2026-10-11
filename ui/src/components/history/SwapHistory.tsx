@@ -1,7 +1,8 @@
 import { useMemo, useState } from 'react';
 import type { RuntimeAdapterSwapHistoryPage } from '@xln/core/api/runtime-adapter/types';
 import { useAdapterRead } from '../../runtime/hooks';
-import { formatMoney, getTokenMeta } from '../../runtime/format';
+import { formatMoney } from '../../runtime/format';
+import { getTokenMeta } from '../../runtime/token-meta';
 import { displayEntityName } from '../../runtime/views';
 import { CopyId } from '../CopyId';
 

@@ -13,7 +13,8 @@ import { switchActiveEntity } from '../runtime/entities';
 import { peekXLN } from '../runtime/xln-loader';
 import { sendEntityTxs } from '../runtime/tx';
 import { compatibleSwapHubs, hubTakerFeeBps, jurisdictionRef, liveCrossOrders, planSwap, readAccountState, submitSwapPlan } from '../runtime/financial/swap';
-import { amountInputText, formatMoney, getTokenMeta, parseAmount, plainAmount} from '../runtime/format';
+import { amountInputText, formatMoney, parseAmount, plainAmount } from '../runtime/format';
+import { getTokenMeta } from '../runtime/token-meta';
 import { openSwapOffers, useWallet } from '../runtime/views';
 import { counterpartyFeePolicy } from '../runtime/financial/manage';
 

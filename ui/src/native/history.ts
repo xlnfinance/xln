@@ -1,6 +1,7 @@
 import type { RuntimeActivityEvent } from '@xln/core/api/public/runtime-module';
 import { requireAdapter } from '../runtime/adapter';
-import { formatMoney, getTokenMeta } from '../runtime/format';
+import { formatMoney } from '../runtime/format';
+import { getTokenMeta } from '../runtime/token-meta';
 import { walletMovements } from '../runtime/financial/movement-projection';
 import { USER_ACTIVITY_TYPES } from '../runtime/financial/movements';
 import type { WalletView } from '../runtime/views';

@@ -8,7 +8,8 @@ import { Icon } from '../components/Icons';
 import { TokenPicker } from '../components/TokenPicker';
 import { ReceiveCapacity } from '../components/ReceiveCapacity';
 import { useApp } from '../runtime/store';
-import { formatMoney, getTokenMeta, parseAmount } from '../runtime/format';
+import { formatMoney, parseAmount } from '../runtime/format';
+import { getTokenMeta } from '../runtime/token-meta';
 import { usdOf } from '../runtime/financial/prices';
 import { useWallet } from '../runtime/views';
 

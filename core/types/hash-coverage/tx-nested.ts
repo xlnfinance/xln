@@ -11,6 +11,7 @@ export const HASHABLE_ACCOUNT_TX_DATA_FIELDS = {
   lending_fund: [
     'positionId', 'hubEntityId', 'lenderEntityId', 'tokenId', 'amount', 'termId', 'interestBps',
   ],
+  lending_rate: ['positionId', 'hubEntityId', 'lenderEntityId', 'tokenId', 'claimHash', 'interestBps'],
   lending_borrow_request: [
     'requestId', 'hubEntityId', 'borrowerEntityId', 'tokenId', 'amount', 'termId', 'maxInterestBps', 'expiresAt', 'maxLateMs',
   ],

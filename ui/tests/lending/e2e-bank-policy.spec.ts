@@ -41,6 +41,7 @@ test('bank officer publishes prices, approves and revokes a real borrower facili
     await expect(officer.getByTestId('bank-committed-facility')).toContainText('New draws revoked');
     await page.getByTestId('nav-manage').locator('visible=true').first().click();
     await page.getByTestId('manage-lend').click();
+    await page.getByRole('button', { name: '1 day', exact: true }).click();
     await expect(page.getByTestId('lend-rate')).toHaveValue('100');
     await expect(page.getByTestId('bank-lending-policy')).toHaveCount(0);
     expect(errors).toEqual([]);

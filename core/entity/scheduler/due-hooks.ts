@@ -101,6 +101,9 @@ const processDueHook = (
     case 'htlc_secret_ack_timeout':
       processSecretAckTimeout(hook, replica, context, plan);
       return;
+    case 'lending_renewal':
+      // Wake the Entity; post-book servicing owns Account rate admission, after withdrawals.
+      return;
     case 'lending_overdue': {
       const accountTxs = context.accountTxs;
       if (!accountTxs) throw new Error('SCHEDULED_WAKE_ACCOUNT_TX_SINK_REQUIRED');

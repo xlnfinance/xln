@@ -7,6 +7,7 @@
  * historical hook ids and ordering keys (`triggerAt`, then id) so a wake
  * drains them in exactly the order the hook map used to.
  */
+import { demandSavingsRenewals } from '../../lendbook/renewals';
 import type { EntityState } from '../types';
 import type { ScheduledHookBase } from './types';
 import { isSecretAckPendingPayment, type SecretAckPendingPayment } from '../../paybook/views';
@@ -32,7 +33,8 @@ type DerivedLendingOverdue = ScheduledHookBase<'lending_overdue', {
   loanId: string;
 }>;
 
-export type DerivedDeadline = DerivedHtlcTimeout | DerivedSecretAckTimeout | DerivedLendingOverdue;
+type DerivedLendingRenewal = ScheduledHookBase<'lending_renewal', { positionId: string }>;
+export type DerivedDeadline = DerivedHtlcTimeout | DerivedSecretAckTimeout | DerivedLendingOverdue | DerivedLendingRenewal;
 
 export const compareDeadlines = (
   left: Readonly<{ triggerAt: number; id: string }>,
@@ -103,6 +105,12 @@ export const collectDerivedDeadlines = (state: EntityState, now?: number): Deriv
       data: { loanId: loan.loanId },
     });
   }
+  for (const work of demandSavingsRenewals(state)) {
+    if (now !== undefined && work.triggerAt > now) continue;
+    if (work.tx.type !== 'lending_rate') throw new Error('LENDING_RENEWAL_TYPE');
+    due.push({ id: 'lending-renewal:' + work.tx.data.positionId, triggerAt: work.triggerAt,
+      type: 'lending_renewal', data: { positionId: work.tx.data.positionId } });
+  }
   return due.sort(compareDeadlines);
 };
 
@@ -124,5 +132,6 @@ export const earliestDerivedDeadline = (state: EntityState): number | null => {
   for (const loan of state.lending?.loans.values() ?? []) {
     if (loan.status === 'active' && loan.dueAt < earliest) earliest = loan.dueAt;
   }
+  for (const work of demandSavingsRenewals(state)) earliest = Math.min(earliest, work.triggerAt);
   return Number.isFinite(earliest) ? earliest : null;
 };

@@ -84,7 +84,7 @@ export function applyLendingClosePayout(
   if (
     pool.lenderEntityId !== normalizeEntityRef(tx.data.lenderEntityId) ||
     pool.tokenId !== tx.data.tokenId ||
-    lendingPositionCloseAmount(pool, now) !== tx.data.amount
+    (pool.termId !== 'demand' && lendingPositionCloseAmount(pool, now) !== tx.data.amount)
   ) {
     throw new Error(`LENDING_PAYOUT_MISMATCH:${tx.data.positionId}`);
   }

@@ -27,6 +27,8 @@ export const TX_WIRE_CASES: { name: string; tx: AccountTx }[] = [
   { name: 'direct_payment/full', tx: { type: 'direct_payment', data: { tokenId: 1, amount: 25n, route: [B], description: 'memo', fromEntityId: A, toEntityId: B, deliveryMode: 'trusted', trustedGatewayEntityId: B } } },
   { name: 'direct_payment/minimal', tx: { type: 'direct_payment', data: { tokenId: 1, amount: 1n, route: [], fromEntityId: A, toEntityId: B, deliveryMode: 'direct' } } },
   { name: 'lending_fund', tx: { type: 'lending_fund', data: { positionId: 'position-1', hubEntityId: A, lenderEntityId: B, tokenId: 1, amount: 100n, termId: '1d', interestBps: 250 } } },
+  { name: 'lending_fund/demand', tx: { type: 'lending_fund', data: { positionId: 'position-1', hubEntityId: A, lenderEntityId: B, tokenId: 1, amount: 100n, termId: 'demand', interestBps: 500 } } },
+  { name: 'lending_rate', tx: { type: 'lending_rate', data: { positionId: 'position-1', hubEntityId: A, lenderEntityId: B, tokenId: 1, claimHash: C, interestBps: 250 } } },
   { name: 'lending_borrow_request', tx: { type: 'lending_borrow_request', data: { requestId: 'borrow-1', hubEntityId: A, borrowerEntityId: B, tokenId: 1, amount: 50n, termId: '1h', maxInterestBps: 300, maxLateMs: 0, expiresAt: 60_000 } } },
   { name: 'lending_repay', tx: { type: 'lending_repay', data: { loanId: 'loan-1', hubEntityId: A, borrowerEntityId: B, tokenId: 1, amount: 25n, claimHash: C } } },
   { name: 'lending_disburse', tx: { type: 'lending_disburse', data: { loanId: 'loan-1', requestId: 'borrow-1', maxInterestBps: 300, maxLateMs: 0, lateMs: 0, expiresAt: 60_000, hubEntityId: A, borrowerEntityId: B, tokenId: 1, amount: 500n, termId: '1d', interestBps: 100 } } },

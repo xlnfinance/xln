@@ -3,7 +3,7 @@ import { useApp } from '../../runtime/store';
 import type { WalletView } from '../../runtime/views';
 import { requireAdapter } from '../../runtime/adapter';
 import { receiveTestMoney } from '../../runtime/financial/test-money';
-import { getTokenMeta } from '../../runtime/format';
+import { getTokenMeta } from '../../runtime/token-meta';
 
 /** Test-credit consent stays beside the action; success requires committed funds. */
 export function TestMoney({ wallet }: { wallet: WalletView }) {

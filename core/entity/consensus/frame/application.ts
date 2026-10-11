@@ -101,6 +101,7 @@ import type { ApplyEntityTxsInOrderContext } from './application-types';
 import { validateEntityInfraContext } from './infra-context-validation';
 import { filterEntityFrameBroadcastContinuations } from '../j-prefix/broadcast-continuation';
 import { applyEntityTxReturnedEffects, applyLocalAccountEffects } from './tx-effects';
+import { demandSavingsRenewals } from '../../../lendbook/renewals';
 import { collectLendingWithdrawals } from '../../../lendbook/withdrawals';
 import { selectSettlementContinuation } from '../account/settlement-continuation';
 import {
@@ -1480,6 +1481,8 @@ const applyPostEntityTxPhases = async (
   markRuntimeEntityFramePhase(context.env, 'apply.entity.frame.post-orderbook');
   await drainPostOrderbookAccountWork(context, currentEntityState);
   await applyLocalAccountEffects(context, currentEntityState, collectLendingWithdrawals(currentEntityState));
+  await applyLocalAccountEffects(context, currentEntityState, demandSavingsRenewals(currentEntityState)
+    .filter(work => work.triggerAt <= currentEntityState.timestamp));
   const proposalAccountIds = crossJSetupPhase
     ? []
     : [...context.proposableAccounts.keys()];

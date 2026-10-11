@@ -4,7 +4,8 @@ import type { LendingSavings } from '../runtime/financial/lending';
 import type { WalletView } from '../runtime/views';
 import { sendEntityTxs } from '../runtime/tx';
 import { useApp } from '../runtime/store';
-import { amountInputText, formatMoney, getTokenMeta } from '../runtime/format';
+import { amountInputText, formatMoney } from '../runtime/format';
+import { getTokenMeta } from '../runtime/token-meta';
 import { counterpartyFeePolicy } from '../runtime/financial/manage';
 import { ReceiveCapacity } from './ReceiveCapacity';
 
@@ -56,6 +57,7 @@ export function LendingClose({
       {queued ? (
         <p className="note" data-testid="lending-withdrawal-queued">
           Withdrawal queued. The bank still owes this amount; payment resumes when this account has capacity.
+          {pool.termId === 'demand' && ' Interest continues under the last signed rate until payment or its coverage end.'}
         </p>
       ) : null}
       {!closeAvailable ? (
@@ -87,6 +89,7 @@ export function LendingClose({
           : 'Collateral tariff unavailable; this does not mean zero fees.'}{' '}
         Applies if your account automatically requests collateral after the payout; deducted from your balance.
       </p>
+      {pool.termId === 'demand' && <p className="note">The Account calculates the final payout at confirmation. Earned interest is preserved; only collateral secures recovery.</p>}
       {!queued ? (
         <button
           type="button"

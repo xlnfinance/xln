@@ -4,6 +4,8 @@ import { UINT256_MAX } from '../boundary/integer-ranges';
 import { keccakTextHash } from '../crypto/keccak-text';
 import { safeStringify } from '../serialization';
 
+export const LENDING_YEAR_MS = 365 * 24 * 60 * 60 * 1000;
+
 export const LENDING_COVENANT_FIELDS = [
   'kind', 'tokenId', 'creditorIsLeft', 'principal', 'interestBps', 'openedAt',
   'accruedAt', 'accruedInterest', 'interestRemainder', 'termMs', 'lateMs',
@@ -32,13 +34,14 @@ export function assertLendingClock(row: { [K in keyof LendingClock]: unknown }):
 export function assertLendingCovenant(value: unknown): asserts value is AccountLendingCovenant {
   const row = requireBoundaryRecord(value, 'LENDING_COVENANT');
   requireExactBoundaryKeys(row, LENDING_COVENANT_FIELDS, [], 'LENDING_COVENANT_FIELDS');
-  if ((row['kind'] !== 'savings' && row['kind'] !== 'loan') || typeof row['creditorIsLeft'] !== 'boolean') throw new Error('LENDING_COVENANT_ROLE');
+  if ((row['kind'] !== 'savings' && row['kind'] !== 'demand' && row['kind'] !== 'loan') || typeof row['creditorIsLeft'] !== 'boolean') throw new Error('LENDING_COVENANT_ROLE');
   requireBoundaryInteger(row['tokenId'], 'LENDING_COVENANT_TOKEN', 1);
   assertLendingClock({ principal: row['principal'], interestBps: row['interestBps'], openedAt: row['openedAt'],
     accruedAt: row['accruedAt'], accruedInterest: row['accruedInterest'], interestRemainder: row['interestRemainder'],
     termMs: row['termMs'], lateMs: row['lateMs'] });
   if (row['principal'] === 0n) throw new Error('LENDING_COVENANT_EMPTY');
-  if (row['kind'] === 'savings' && row['lateMs'] !== 0) throw new Error('LENDING_SAVINGS_LATE_INTEREST');
+  if (row['kind'] !== 'loan' && row['lateMs'] !== 0) throw new Error('LENDING_SAVINGS_LATE_INTEREST');
+  if (row['kind'] === 'demand' && row['termMs'] !== LENDING_YEAR_MS) throw new Error('LENDING_DEMAND_RATE_PERIOD');
 }
 
 /** Exit accelerates principal and earned simple interest. Freeze the quote at
@@ -72,6 +75,21 @@ export const settleLendingPayment = (claim: LendingClock, maximum: bigint, times
     interestRemainder: principal === 0n ? 0n : accrued.interestRemainder } };
 };
 
+/** Bank-proposed, bilaterally signed prospective rate/coverage renewal. Preserve
+ * earned whole interest and its fractional numerator; never capitalize either.
+ * Offline expiry earns no invented interest before the next signed window. */
+export const renewDemandSavings = (claim: AccountLendingCovenant, interestBps: number, timestamp: number):
+  { ok: true; claim: AccountLendingCovenant } | { ok: false; reason: string } => {
+  if (claim.kind !== 'demand' || !Number.isSafeInteger(timestamp + LENDING_YEAR_MS) || timestamp <= claim.accruedAt ||
+    !Number.isSafeInteger(interestBps) || interestBps < 0 || interestBps > 10_000) {
+    return { ok: false, reason: 'LENDING_RATE_CLOCK_OR_PRODUCT' };
+  }
+  const next = { ...claim, ...accrueLendingInterest(claim, timestamp),
+    openedAt: timestamp, accruedAt: timestamp, interestBps };
+  if (lendingMaximumAmount(next) > UINT256_MAX) return { ok: false, reason: 'LENDING_RATE_AMOUNT_OVERFLOW' };
+  return { ok: true, claim: next };
+};
+
 export const lendingCovenantHash = (claim: AccountLendingCovenant): string =>
   keccakTextHash(safeStringify(LENDING_COVENANT_FIELDS.map(field => claim[field])));
 
@@ -94,7 +112,7 @@ export const assertAccountLendingCovenants = (state: LendingStateView): void => 
     assertLendingCovenant(claim);
     if (typeof id !== 'string' || !/^(lend|loan)-[0-9a-f]{16}$/.test(id)) throw new Error('LENDING_COVENANT_ID');
     const keys = receiptKeys(id);
-    if (claim.kind !== keys.kind || !state.deltas.has(claim.tokenId) || intents?.get(keys.open + ':' + id) !== keys.open || intents.has(keys.close + ':' + id) || intents.has('dispute:' + id)) {
+    if ((keys.kind === 'loan' ? claim.kind !== 'loan' : claim.kind === 'loan') || !state.deltas.has(claim.tokenId) || intents?.get(keys.open + ':' + id) !== keys.open || intents.has(keys.close + ':' + id) || intents.has('dispute:' + id)) {
       throw new Error('LENDING_COVENANT_BINDING:' + id);
     }
   }
@@ -111,7 +129,7 @@ export const assertAccountLendingCovenants = (state: LendingStateView): void => 
     const claimId = id.slice(kind.length + 1);
     const keys = receiptKeys(claimId);
     const claim = state.subcontracts?.get(claimId);
-    if (!intents?.has(keys.close + ':' + claimId) && intents?.get('dispute:' + claimId) !== 'dispute-close' && (!claim || typeof claim !== 'object' || !('kind' in claim) || claim.kind !== keys.kind)) {
+    if (!intents?.has(keys.close + ':' + claimId) && intents?.get('dispute:' + claimId) !== 'dispute-close' && (!claim || typeof claim !== 'object' || !('kind' in claim) || (keys.kind === 'loan' ? claim.kind !== 'loan' : claim.kind !== 'savings' && claim.kind !== 'demand'))) {
       throw new Error('LENDING_UNSIGNED_' + keys.kind.toUpperCase() + '_MIGRATION_REQUIRED:' + claimId);
     }
   }

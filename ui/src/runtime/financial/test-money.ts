@@ -5,7 +5,8 @@ import { requestFaucet } from '../financial/external';
 import { readAccountState } from '../financial/swap';
 import { accountNetBalance } from '@xln/frontend/lib/utils/ui/accountBalance';
 import { sendEntityTxs, waitFor } from '../tx';
-import { getTokenMeta, knownTokenIds, parseAmount } from '../format';
+import { parseAmount } from '../format';
+import { getTokenMeta, knownTokenIds } from '../token-meta';
 
 export async function receiveTestMoney(wallet: WalletView, onStage: (stage: string) => void): Promise<void> {
   const hub = wallet.accounts.find(account => account.isHub && !account.disputed);

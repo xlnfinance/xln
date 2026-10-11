@@ -238,6 +238,7 @@ export const decodeRscoreAccountTx = (value: unknown): AccountTx => {
     case 9:
       return jEventClaimFromWire(row);
     case 10: return decodeLendingFund(row);
+    case 25: return decodeLendingRate(row);
     case 11: return decodeLendingBorrow(row);
     case 12: return decodeLendingRepay(row);
     case 24: return decodeLendingDisburse(row);
@@ -253,17 +254,24 @@ export const decodeRscoreAccountTx = (value: unknown): AccountTx => {
   }
 };
 
-const lendingTerm = (value: unknown): '1h' | '1d' | '1m' => {
-  const term = ['1h', '1d', '1m'] as const;
+const lendingTerm = (value: unknown, savings = false): '1h' | '1d' | '1m' | 'demand' => {
+  const term = ['1h', '1d', '1m', 'demand'] as const;
+  if (value === 3 && !savings) return rscoreWireDecodeFail('tx.termId:loan');
   return term[rscoreWireInt(value, 'tx.termId')] ?? rscoreWireDecodeFail('tx.termId:unknown');
 };
 
+const decodeLendingRate = (row: readonly unknown[]): AccountTx => {
+  const f = rscoreWireTuple(row, 7, 'tx.lendingRate');
+  return { type: 'lending_rate', data: { positionId: rscoreWireText(f[1], 'tx.positionId'),
+    hubEntityId: rscoreWireText(f[2], 'tx.hubEntityId'), lenderEntityId: rscoreWireText(f[3], 'tx.lenderEntityId'),
+    tokenId: rscoreWireUint(f[4], 'tx.tokenId'), claimHash: rscoreWireText(f[5], 'tx.claimHash'), interestBps: rscoreWireUint(f[6], 'tx.interestBps') } };
+};
 const decodeLendingFund = (row: readonly unknown[]): AccountTx => {
   const f = rscoreWireTuple(row, 8, 'tx.lendingFund');
   return { type: 'lending_fund', data: { positionId: rscoreWireText(f[1], 'tx.positionId'),
     hubEntityId: rscoreWireText(f[2], 'tx.hubEntityId'), lenderEntityId: rscoreWireText(f[3], 'tx.lenderEntityId'),
     tokenId: rscoreWireUint(f[4], 'tx.tokenId'), amount: rscoreWireBig(f[5], 'tx.amount'),
-    termId: lendingTerm(f[6]), interestBps: rscoreWireInt(f[7], 'tx.interestBps') } };
+    termId: lendingTerm(f[6], true), interestBps: rscoreWireInt(f[7], 'tx.interestBps') } };
 };
 const decodeLendingBorrow = (row: readonly unknown[]): AccountTx => {
   const f = rscoreWireTuple(row, 10, 'tx.lendingBorrow');

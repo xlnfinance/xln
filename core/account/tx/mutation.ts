@@ -181,6 +181,7 @@ export const applyAccountTxMutation = async (
     case 'add_delta': return handleAddDelta(account.state, tx);
     case 'set_credit_limit': return handleSetCreditLimit(account.state, tx, byLeft);
     case 'direct_payment': return handleDirectPayment(account, tx, byLeft);
+    case 'lending_rate':
     case 'lending_fund':
     case 'lending_borrow_request':
     case 'lending_repay':

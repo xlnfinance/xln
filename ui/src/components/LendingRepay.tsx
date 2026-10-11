@@ -2,7 +2,8 @@ import { useState } from 'react';
 import { isAccountTxKindAvailable } from '@xln/core/account/tx/admission-policy';
 import { buildLendingRepayTx, isLendingLoanRepayable, type LendingLoan } from '../runtime/financial/lending';
 import type { WalletView } from '../runtime/views';
-import { getTokenMeta, parseAmount } from '../runtime/format';
+import { parseAmount } from '../runtime/format';
+import { getTokenMeta } from '../runtime/token-meta';
 import { sendEntityTxs } from '../runtime/tx';
 import { useApp } from '../runtime/store';
 

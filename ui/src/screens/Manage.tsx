@@ -3,7 +3,8 @@ import { isAccountTxKindAvailable } from '@xln/core/account/tx/admission-policy'
 import { Icon, type IconName } from '../components/Icons';
 import { PendingBatch } from '../components/PendingBatch';
 import { useApp } from '../runtime/store';
-import { formatMoney, formatUsd, getTokenMeta } from '../runtime/format';
+import { formatMoney, formatUsd } from '../runtime/format';
+import { getTokenMeta } from '../runtime/token-meta';
 import { useWallet } from '../runtime/views';
 import { debtGroups } from '../runtime/financial/debts';
 

@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { sendEntityTxs } from '../runtime/tx';
-import { formatAmount, getTokenMeta } from '../runtime/format';
+import { formatAmount } from '../runtime/format';
+import { getTokenMeta } from '../runtime/token-meta';
 
 /** The saver authorizes a maximum exposure; opening an Account never does. */
 export function LendingRiskConsent({ entityId, signerId, hubId, tokenId, currentLimit, requiredLimit, disabled }: {

@@ -2,7 +2,8 @@
 
 **Status:** restored to launch scope by the owner's latest 2026-10-11 instruction;
 implementation is not yet production-ready. TypeScript, React and Ethereum same-J
-are the release paths; Rust and the Svelte wallet remain frozen.
+are the release paths. Rust book parity is a separate scoped task; the Svelte
+wallet remains frozen.
 
 The product has two actions: **Save with a bank** (lend to the bank Entity for
 agreed interest) and **Borrow from a bank**. These create separate bilateral
@@ -31,7 +32,7 @@ unpaid debt and separate Account collateral; early loan repayment charges actual
 elapsed time; partial repayments pay interest then principal; a preapproved
 borrower facility authorizes automatic draws. The existing authenticated facility
 is the bank's bounded exposure policy: do not add a second lending permission or
-global funding cap. Demand terms remain implementation work. Early and partial repayment share the signed accrual
+global funding cap. Demand savings now use the same signed accrual covenant. Early and partial repayment share the signed accrual
 checkpoint used by unilateral exit; the current transformer ABI carries it.
 
 Implementation principle: prefer deletion and one general signed-obligation
@@ -51,12 +52,14 @@ second lending balance engine or saver-to-borrower allocation.
 
 A signed close request changes its savings position from `open` to `queued`,
 even when the Account cannot pay. `updatedAt` records the signed Account-frame
-timestamp and freezes the requested quote. A later Entity observation cannot
+timestamp and freezes a fixed-term withdrawal quote. A later Entity observation cannot
 turn early cancellation into a matured coupon, including after restart;
 `closeOrder` preserves the first admission order when timestamps tie across
 Accounts. The order belongs to the bank's root-bound position: funding order and
 timestamps cannot reconstruct it after a crash. No separate durable queue or
-retry counter is stored. Duplicate requests preserve both quote and order.
+retry counter is stored. Duplicate requests preserve the request clock and order.
+Demand withdrawals keep earning under their last signed rate until payout or
+coverage expiry.
 
 After inbound Accounts and book work, withdrawals are selected by due time,
 then request order. Early cancellation is due when requested. Capacity is local
@@ -74,7 +77,33 @@ actual-time earnings and withdrawal without losing earned interest. Existing
 earnings cannot be repriced. This follows the variable-rate savings model described
 in [CFPB Regulation DD](https://www.consumerfinance.gov/rules-policy/regulations/1030/4/),
 not a claim that XLN is a US regulated or insured deposit. The exact signed
-rate-update/renewal mechanism and its unilateral proof remain release work.
+rate-update/renewal mechanism uses the existing Account covenant and transformer.
+
+Demand savings quote simple annual interest with a 365-day denominator. Each
+bilaterally signed rate covers one year from its Account timestamp. The bank's
+`lending_rate` proposes a prospective amendment bound to the exact previous
+`claimHash`; it preserves both earned whole interest and the fractional numerator.
+It cannot capitalize interest, change principal, amend a queued withdrawal or
+increase exposure beyond the saver's accepted risk. Fixed-term claims cannot be
+converted by this operation. Loans still require a fixed term.
+
+The bank services changed rates immediately and unchanged rates one day before
+coverage ends, through ordinary Account admission. Both parties must be online,
+current bank terms must permit renewal and Account risk must allow it. Without
+renewal, earnings stop at the displayed coverage end; principal and earned
+interest remain owed. Resuming later starts a new prospective window and cannot
+invent interest for the unsigned gap. This finite horizon makes maximum risk
+and unilateral recovery exact. It is disclosed in the wallet, not hidden by an
+assumed perpetual rate.
+
+A demand withdrawal becomes due at its signed request time. Its bank payout
+authorizes the maximum remaining signed claim; the Account debits exactly the
+earned-time amount at payment. The request remains queued when capacity is
+insufficient. There is no separate demand accrual ledger, persisted renewal queue
+or Solidity change. Four real Runtime processes and three SIGKILL boundaries
+cover funding, rate change, queued withdrawal and eventual payout. The production
+Depository tests both creditor orientations and collateral shortages after a
+rate amendment; unpaid unsecured interest remains debt.
 
 ## Current implementation and accounting
 

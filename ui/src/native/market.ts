@@ -1,6 +1,7 @@
 import type { BookView } from '../runtime/financial/orderbook';
 import { quoteForBase } from '../runtime/financial/orderbook-quote';
-import { amountInputText, formatAmount, getTokenMeta, parseAmount } from '../runtime/format';
+import { amountInputText, formatAmount, parseAmount } from '../runtime/format';
+import { getTokenMeta } from '../runtime/token-meta';
 import { nativeAmountText } from './amount';
 
 export function nativeMarket(book: BookView, hubId: string, hubName: string) {

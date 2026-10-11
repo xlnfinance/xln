@@ -207,6 +207,14 @@ export function applyCommittedLendingFollowup(
     accountTxs,
   };
   if (tx.type === 'lending_fund') return applyLendingFund(context, tx);
+  if (tx.type === 'lending_rate') {
+    const position = context.lending.savings.get(tx.data.positionId);
+    if (context.proposer !== hubEntityId || !position || position.status !== 'open' || position.termId !== 'demand' ||
+      position.lenderEntityId !== tx.data.lenderEntityId || position.tokenId !== tx.data.tokenId) throw new Error('LENDING_RATE_BOOK_BINDING');
+    position.interestBps = tx.data.interestBps;
+    position.updatedAt = context.accountTimestamp;
+    return;
+  }
   if (tx.type === 'lending_borrow_request') {
     const result = applyLendingBorrow(context, tx);
     if (result.status === 'declined') {

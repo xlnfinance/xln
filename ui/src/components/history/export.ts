@@ -1,4 +1,5 @@
-import { formatMoney, getTokenMeta } from '../../runtime/format';
+import { formatMoney } from '../../runtime/format';
+import { getTokenMeta } from '../../runtime/token-meta';
 import type { Movement } from '../../runtime/financial/movements';
 /** A statement for the books: one line per movement, with the frame that carries it. */
 export function exportCsv(movements: Movement[]): void {

@@ -1,5 +1,6 @@
 import { Icon, type IconName } from '../Icons';
-import { formatAmount, getTokenMeta } from '../../runtime/format';
+import { formatAmount } from '../../runtime/format';
+import { getTokenMeta } from '../../runtime/token-meta';
 import { displayEntityName } from '../../runtime/views';
 import type { Movement } from '../../runtime/financial/movements';
 export const TONE_CLASS: Record<Movement['tone'], string> = {

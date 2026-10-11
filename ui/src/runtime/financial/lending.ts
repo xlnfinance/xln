@@ -4,11 +4,11 @@
  * the hub runtime's HTTP API, so it is live only against a hosted runtime.
  */
 import type { EntityTx } from '@xln/core/api/public/runtime-module';
-import { computeLendingInterest, normalizeInterestBps, lendingLoanMaximumAmount } from '@xln/core/lendbook/state';
+import { computeLendingInterest, normalizeInterestBps, normalizeLendingTerm, lendingLoanMaximumAmount } from '@xln/core/lendbook/state';
 import type { AccountView } from '../views';
 import { parseAmount } from '../format';
 import { decodeLendingBankTerms, decodeLendingFacility } from '@xln/core/lendbook/policy';
-import type { LendingBankTerms, LendingFacility, LendingLoan as CoreLendingLoan } from '@xln/core/types/finance/lending';
+import type { LendingTermId, LendingBankTerms, LendingFacility, LendingLoan as CoreLendingLoan } from '@xln/core/types/finance/lending';
 
 export function previewLendingTerms(amount: string, rate: string, decimals: number, late?: { termMs: number; lateMs: number }) {
   if (!amount.trim()) return null;
@@ -36,9 +36,10 @@ export function previewSavingsRisk(hub: AccountView, tokenId: number, amount: st
   return { ok: true as const, currentLimit, requiredLimit: currentLimit + shortfall };
 }
 
-export type TermId = '1h' | '1d' | '1m';
+export type TermId = LendingTermId;
 
 export const LENDING_TERMS: Array<{ id: TermId; label: string }> = [
+	{ id: 'demand', label: 'On demand' },
 	{ id: '1h', label: '1 hour' },
 	{ id: '1d', label: '1 day' },
 	{ id: '1m', label: '1 month' },
@@ -52,6 +53,7 @@ export type LendingSavings = {
 	principalAmount: bigint;
 	closeAmount: bigint;
 	matured: boolean;
+	rateExpiresAt: number | null;
 	interestBps: number;
 	termId: TermId;
 	status: string;
@@ -102,7 +104,7 @@ const clock = (value: unknown, minimum: number): number => {
 	return value;
 };
 
-const term = (value: unknown): TermId => (value === '1h' || value === '1m' ? value : '1d');
+const term = normalizeLendingTerm;
 
 export async function fetchLendingState(input: { hubEntityId: string; userEntityId: string; tokenId: number; requestId?: string }): Promise<LendingState> {
 	const { getJson } = await import('../http');
@@ -133,6 +135,7 @@ export async function fetchLendingState(input: { hubEntityId: string; userEntity
 			principalAmount: big(pool['principalAmount']),
 			closeAmount: BigInt(String(pool['closeAmount'])),
 			matured: pool['matured'] === true,
+			rateExpiresAt: pool['termId'] === 'demand' && (pool['status'] === 'open' || pool['status'] === 'queued') ? clock(pool['rateExpiresAt'], 1) : null,
 			interestBps: Number(pool['interestBps'] || 0),
 			termId: term(pool['termId']),
 			status: String(pool['status'] || ''),

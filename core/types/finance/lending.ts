@@ -1,4 +1,4 @@
-export type LendingTermId = '1h' | '1d' | '1m';
+export type LendingTermId = '1h' | '1d' | '1m' | 'demand';
 
 /** Bank-owned pricing; the Account domain prevents reuse on another deployment. */
 export type LendingBankTerms = Readonly<{

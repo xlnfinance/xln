@@ -14,7 +14,8 @@ import { bootHostedVault, detectStack } from '../runtime/hosted';
 import { lockEmbeddedRuntime, requireAdapter } from '../runtime/adapter';
 import { useApp } from '../runtime/store';
 import { useWallet, type WalletView } from '../runtime/views';
-import { formatAmount, getTokenMeta } from '../runtime/format';
+import { formatAmount } from '../runtime/format';
+import { getTokenMeta } from '../runtime/token-meta';
 import { useOrderbook, type BookView } from '../runtime/financial/orderbook';
 
 declare const __XLN_STACK_ORIGIN__: string;

@@ -1,5 +1,6 @@
 import { Bar } from './Bars';
-import { formatMoney, getTokenMeta } from '../runtime/format';
+import { formatMoney } from '../runtime/format';
+import { getTokenMeta } from '../runtime/token-meta';
 import { usdOf } from '../runtime/financial/prices';
 import { PRICE_SCALE, type BookLevel, type BookView } from '../runtime/financial/orderbook';
 

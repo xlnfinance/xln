@@ -7,7 +7,8 @@ import { Icon } from './Icons';
 import { Sheet } from './Sheet';
 import { useApp } from '../runtime/store';
 import { useReceipts } from '../runtime/financial/receipt-state';
-import { formatClock, formatMoney, getTokenMeta } from '../runtime/format';
+import { formatClock, formatMoney } from '../runtime/format';
+import { getTokenMeta } from '../runtime/token-meta';
 import { displayEntityName, useWallet } from '../runtime/views';
 
 /**

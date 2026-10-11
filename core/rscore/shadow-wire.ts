@@ -925,11 +925,14 @@ export const accountTxWire = (tx: AccountTx): RscoreWireValue[] => {
         : [2, tx.data.lockId, 1, tx.data.reason ?? null];
     case 'j_event_claim':
       return jEventClaimWire(tx);
+    case 'lending_rate':
+      return [25, tx.data.positionId, tx.data.hubEntityId, tx.data.lenderEntityId, tx.data.tokenId, tx.data.claimHash, tx.data.interestBps];
     case 'lending_fund':
       return [10, tx.data.positionId, tx.data.hubEntityId, tx.data.lenderEntityId,
         tx.data.tokenId, tx.data.amount.toString(),
-        tx.data.termId === '1h' ? 0 : tx.data.termId === '1d' ? 1 : 2, tx.data.interestBps];
+        tx.data.termId === '1h' ? 0 : tx.data.termId === '1d' ? 1 : tx.data.termId === '1m' ? 2 : 3, tx.data.interestBps];
     case 'lending_borrow_request':
+      if (tx.data.termId === 'demand') throw new Error('LENDING_LOAN_TERM_REQUIRED');
       return [11, tx.data.requestId, tx.data.hubEntityId, tx.data.borrowerEntityId,
         tx.data.tokenId, tx.data.amount.toString(),
         tx.data.termId === '1h' ? 0 : tx.data.termId === '1d' ? 1 : 2, tx.data.maxInterestBps, tx.data.expiresAt, tx.data.maxLateMs];
@@ -937,6 +940,7 @@ export const accountTxWire = (tx: AccountTx): RscoreWireValue[] => {
       return [12, tx.data.loanId, tx.data.hubEntityId, tx.data.borrowerEntityId,
         tx.data.tokenId, tx.data.amount.toString(), tx.data.claimHash];
     case 'lending_disburse':
+      if (tx.data.termId === 'demand') throw new Error('LENDING_LOAN_TERM_REQUIRED');
       return [24, tx.data.loanId, tx.data.hubEntityId,
         tx.data.borrowerEntityId, tx.data.tokenId, tx.data.amount.toString(),
         tx.data.termId === '1h' ? 0 : tx.data.termId === '1d' ? 1 : 2, tx.data.interestBps, tx.data.requestId, tx.data.maxInterestBps, tx.data.expiresAt, tx.data.maxLateMs, tx.data.lateMs];

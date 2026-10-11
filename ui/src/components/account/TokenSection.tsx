@@ -2,7 +2,8 @@ import { useState } from 'react';
 import { DeltaBar, DeltaCaption } from '../Bars';
 import { Icon } from '../Icons';
 import { TokenIcon } from '../TokenPicker';
-import { formatMoney, formatSigned, getTokenMeta } from '../../runtime/format';
+import { formatMoney, formatSigned } from '../../runtime/format';
+import { getTokenMeta } from '../../runtime/token-meta';
 import type { AccountTokenView } from '../../runtime/views';
 export function TokenSection({ token, disputed = false, closed = false }: { token: AccountTokenView; disputed?: boolean; closed?: boolean }) {
 	const meta = getTokenMeta(token.tokenId);

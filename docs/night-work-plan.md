@@ -41,10 +41,16 @@ The first backup attempt named a nonexistent `main` directory and automatically
 restored the previous healthy release. The successful retry archives the actual
 whole state directory excluding prior backups. No contract or financial transfer
 changed. Evidence: `docs/evidence/sepolia-20261011/public-clock-rollout.json`.
-Demand savings remain unfinished: the current finite signed accrual window must
-have an explicit prospective renewal policy, preserve earned interest and its
-fractional carry, and expose the offline expiry honestly. No demand product or
-rate-renewal implementation was added by this correction.
+Next candidate adds demand savings through the existing signed Account covenant:
+prospective annual rates, a one-year renewable coverage window, preserved whole
+and fractional earnings, and actual-time withdrawal. Renewal requires current
+bank policy and accepted Account risk; queued withdrawals keep their last signed
+rate. The wallet exposes coverage expiry. No new Solidity or durable rate ledger.
+Account regressions pass (6 tests / 49 assertions); production Depository demand
+exits pass (4 cases, both sides and collateral shortage, maximum gas 368,350).
+Four real Runtime processes and three SIGKILL boundaries preserve funding,
+rate amendment, queued withdrawal and final payout. Browser and final source
+gates are still in progress; this candidate is not deployed yet.
 
 Current boundary: public browser wallet tab 21 awaits the owner entering a local
 password (required handoff under the browser tool policy). No password is known
