@@ -19,7 +19,8 @@ test('EntityInput consumes projected profiles instead of global runtime env', ()
   expect(entityInput).not.toContain('getGossipProfile(');
   expect(entityInput).not.toContain('scheduleGossipProfileFetch');
 
-  expect(payment).toContain('profiles={runtimeProfiles}');
+  expect(payment).toContain('recipientProfiles = paymentRecipientProfiles(runtimeProfiles, entityId)');
+  expect(payment).toContain('profiles={recipientProfiles}');
   expect(move).toContain('export let profiles: GossipProfile[] = []');
   expect(settlement).toContain('export let profiles: GossipProfile[] = []');
   expect(settlement).toContain('export let env: RuntimeReplica | EnvSnapshot | null = null');

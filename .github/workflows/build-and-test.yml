@@ -228,17 +228,12 @@ jobs:
 
       # Bun segfaults when one process loads the whole test tree, so each
       # directory runs in its own process. Rust is frozen at tag
-      # rscore-freeze-f1464e84e, so CI builds no xlnrs binary; the TS tests in
-      # core/__tests__/rscore still run, and its suites that need the binary
-      # skip themselves when it is absent. The files listed below were red at
+      # rscore-freeze-f1464e84e. Rust integration/parity suites are outside this
+      # TS launch job, not claimed green against changed TS codecs. The files below were red at
       # f1464e84e; remove a file from the list in the same commit that makes it green.
       - name: Run TS unit tests one directory per process
         run: |
           red_at_head=(
-            # Stale: the appointment builder returns { uploads, failures } since fc2033a1f.
-            native/__tests__/watchtower-recovery-flow.test.ts
-            # Expects 'profiles={runtimeProfiles}' in the frozen Svelte payment view.
-            tests/frontend/assets/entity-input-projection.test.ts
             # Reads the developer TLS certificate frontend/localhost+3.pem.
             core/__tests__/dev-readiness.test.ts
             # Port-owner checks shell out to lsof; unverified (lsof hung on the verifying host).
@@ -249,8 +244,6 @@ jobs:
             core/__tests__/operations/hlt/sovereign-runtime-host.test.ts
             core/__tests__/testing/runner/e2e-runner-isolation.test.ts
             core/__tests__/testing/runner/e2e-runner-latency.test.ts
-            # Spawns rscore/target/release/xlnrs without an existence guard; CI builds no Rust.
-            core/__tests__/rscore/process/offline-account-import.test.ts
           )
           ignore=()
           for file in "${red_at_head[@]}"; do ignore+=("--path-ignore-patterns=**/$file"); done
@@ -262,7 +255,8 @@ jobs:
             if ! bun test "$@" "${ignore[@]}"; then failed+=("$label"); fi
             echo "::endgroup::"
           }
-          for dir in core/__tests__/*/ tests/unit/ tests/frontend/ native/__tests__/; do
+          mapfile -t core_dirs < <(find core/__tests__ -mindepth 1 -maxdepth 1 -type d ! -name rscore | sort)
+          for dir in "${core_dirs[@]}" tests/unit/ tests/frontend/ native/__tests__/; do
             if [ -n "$(find "$dir" -name '*.test.ts' -print -quit)" ]; then run_shard "$dir" "$dir"; fi
           done
           run_shard 'core/__tests__/*.test.ts' core/__tests__/*.test.ts
@@ -317,9 +311,9 @@ jobs:
   e2e-tests:
     name: E2E Tests
     runs-on: ubuntu-latest
-    # The sixteen gate:ci step watchdogs add up to 68.5 minutes; the job cap
+    # The gate:ci step watchdogs add up to 74 minutes; the job cap
     # must stay above them so a slow step fails with its own named watchdog.
-    timeout-minutes: 75
+    timeout-minutes: 90
     needs: [build-xln, frontend-build, contracts-test]
     steps:
       - name: Checkout
@@ -354,9 +348,11 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
-      - name: Install frontend dependencies
+      - name: Install frontend and React wallet dependencies
         run: |
           cd frontend
+          bun install --frozen-lockfile
+          cd ../ui
           bun install --frozen-lockfile
 
       - name: Cache Playwright browsers
@@ -402,10 +398,11 @@ jobs:
 
       - name: Upload E2E test results
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        if: failure()
+        if: always()
         with:
           name: e2e-test-results
           path: |
+            .logs/gates/
             .logs/e2e-parallel/
             test-results/
             playwright-report/

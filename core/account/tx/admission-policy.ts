@@ -17,21 +17,20 @@ import { TOKENS } from '../../config/constants';
 export const MAX_POLICY_VERSION = 9_007_199_254_740_991;
 
 /**
- * FX-2 (proofs/fixes.md, decision D3): the live Account admission profile.
- *
- * Lending was held outside it while its lifecycle was incomplete: a loan that
- * passed its term stayed `active` forever, so the pool's capital and the
- * borrower's credit line were both stranded with no transition that could end
- * them. `9acd5e3e6` closed that hole — an overdue loan defaults, releases the
- * pool and calls the credit line in, with TS/Rust parity evidence — so the six
- * `lending_*` variants are now inside the production profile and a hub accepts
- * them from local and peer admission alike.
- *
- * The set stays as the profile mechanism: a variant listed here is hashable
- * (historical signed frames still verify) but refused before any Account
- * mutation, in both engines.
+ * Launch profile: lending is deferred. Reject local and peer admission before
+ * mutation, through the same profile used by wallet availability. Do not change
+ * the codec or historical proof hashing: existing signed claims remain evidence
+ * for contract exit. This decision is static, never a process-env toggle.
  */
-const OUT_OF_PROFILE_TX_KINDS: ReadonlySet<AccountTx['type']> = new Set<AccountTx['type']>([]);
+const OUT_OF_PROFILE_TX_KINDS: ReadonlySet<AccountTx['type']> = new Set<AccountTx['type']>([
+  'lending_fund',
+  'lending_rate',
+  'lending_borrow_request',
+  'lending_repay',
+  'lending_disburse',
+  'lending_close_request',
+  'lending_close_payout',
+]);
 
 /** The live admission profile also owns which actions a client may offer. */
 export const isAccountTxKindAvailable = (kind: AccountTx['type']): boolean =>
@@ -69,7 +68,7 @@ export class AccountTxAdmissionError extends Error {
         ? `${ACCOUNT_TX_TOKEN_ID_OUT_OF_RANGE}:${txType}:${String(tokenId)} `
           + `(protocol range 0..=${TOKENS.MAX_TOKEN_ID})`
         : `${ACCOUNT_TX_KIND_OUT_OF_PROFILE}:${txType} `
-          + '(profile: pay/HTLC/same-J swap/j-event/rebalance/lending)');
+          + '(profile: pay/HTLC/same-J swap/j-event/rebalance)');
     this.name = 'AccountTxAdmissionError';
     this.code = code;
     this.txType = txType;

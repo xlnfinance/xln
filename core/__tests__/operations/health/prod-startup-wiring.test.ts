@@ -249,8 +249,9 @@ describe('production startup wiring', () => {
     const process = readFileSync(join(repoRoot, 'core/runtime/frame/process.ts'), 'utf8');
     const recoveryOutput = readFileSync(join(repoRoot, 'core/runtime/delivery/recovery-output.ts'), 'utf8');
     const postCommit = readFileSync(join(repoRoot, 'core/runtime/frame/lifecycle/post-commit.ts'), 'utf8');
-    const durableOutbox = recoveryOutput.indexOf("env.pendingNetworkOutputs = timePerfPhase('recovery.output.remotePending'");
+    const durableOutbox = recoveryOutput.indexOf("env.pendingNetworkOutputs = timePerfPhase('recovery.output.pendingCommit'");
     expect(recoveryOutput.indexOf('buildPendingNetworkOutputs(', durableOutbox)).toBeGreaterThan(durableOutbox);
+    expect(recoveryOutput.indexOf('plan.orderedOutputs,', durableOutbox)).toBeGreaterThan(durableOutbox);
     const save = process.indexOf('const outcome = await deps.storage.saveEnvToDB(');
     const plan = process.indexOf('const outputPlan = planRuntimeFrameOutputs(');
     const commit = process.indexOf('const commit = await commitRuntimeFrame(', plan);

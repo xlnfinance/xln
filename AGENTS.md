@@ -15,11 +15,8 @@ This scope prevails over older plans in `docs/` and over the history in `todo.md
   `rscore-freeze-f1464e84e`: no commits under `rscore/` and no Rust gates in `check` or the
   release gates until the owner lifts the freeze. Lift conditions: a frozen protocol spec v1
   with shared vectors; measured demand above 500 tps on one hub; multisig in scope.
-- Later owner update 2026-10-11: the freeze is lifted for the explicitly requested
-  `paybook` / `swapbook` / `lendbook` refactor in both TypeScript and Rust, including
-  the financial parity needed by those books. Preserve unrelated Rust changes.
-  TypeScript remains the launch engine; this does not add general Rust performance
-  work or restore every old Rust release gate.
+- Owner reaffirmation 2026-10-12: park unfinished Rust changes without committing
+  them. The earlier book-refactor exception is withdrawn for this release.
 - Wallet: React `ui/` is the only wallet. Svelte `frontend/` is frozen: no new wallet
   features; only landing/static copy and build health change there.
 - First jurisdiction: Ethereum same-J (Sepolia, then a mainnet canary).
@@ -27,9 +24,10 @@ This scope prevails over older plans in `docs/` and over the history in `todo.md
   ETH and deploy the current contracts without another signing question. Mainnet is
   open to all participants using their own funds; do not add invite gates or arbitrary
   protocol monetary caps. Financial correctness and recovery gates remain mandatory.
-- Lending is in scope: savers lend to a bank Entity for interest; borrowers borrow
-  from that Entity. Both obligations live in bilateral Accounts. Borrower default
-  never erases the bank's debt to its savers. Only collateral secures recovery.
+- Lending is deferred from the production admission profile. Restore typed
+  admission rejection and the corresponding wallet availability; do not extend
+  or repair the lending implementation. Existing signed claims remain evidence
+  for contract exit; only collateral secures recovery.
 - Deferred: TRON, XLNC, Base, cross-J as a headline, companies/IPO,
   iOS/Electron/extension and custody.
 - MML counts only obligations between unaffiliated Entities. A payment routed through a hub
@@ -167,8 +165,11 @@ Do not duplicate or weaken it.
 ## GIT AND SHARED WORKSPACE
 
 - Work and push on `main` only. No branch/worktree unless the owner explicitly requests it.
-- Preserve unrelated user changes. Checkpoint commits may use `wip:` when L1/L2 is not green.
+- Preserve unrelated user changes. Failed verification is not a release-ready commit.
+- No `wip:` commits on main. Commit only owned paths with `git commit -- <paths>`.
 - Before a shared-tree commit, stop concurrent writers, run formatting and `git diff --check`.
+- Release evidence must name a committed SHA checked with a clean source tree;
+  store durable evidence under `docs/evidence/`, never only in `/tmp`.
 - Never push without the relevant L1/L2 evidence and `bun run check`.
 - Auditors may use a read-only checkout pinned to an immutable SHA.
 

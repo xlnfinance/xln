@@ -67,14 +67,9 @@ const RUNTIME_CORE_TESTS = [
   'core/__tests__/testing/audit/audit-failfast-regressions-part-4.test.ts',
   'core/__tests__/testing/audit/audit-failfast-regressions-part-5.test.ts',
   'core/__tests__/testing/audit/audit-failfast-regressions-part-6.test.ts',
-  'core/__tests__/finance/state/lending.test.ts',
-  'core/__tests__/finance/state/lending-funding.test.ts',
-  'core/__tests__/finance/lending/savings-covenant.test.ts',
-  'core/__tests__/finance/lending/demand-savings.test.ts',
-  'core/__tests__/finance/lending/loan-covenant.test.ts',
-  'core/__tests__/finance/lending/savings-finality.test.ts',
-  'core/__tests__/storage/durability/lending-real-crash-recovery.test.ts',
-  'core/__tests__/api/product/lending-api.test.ts',
+  // Lending origination is deferred by the owner. Its release contract is
+  // rejection before mutation, not execution of an unavailable product.
+  'core/__tests__/proofs/fx-admission.test.ts',
   'core/__tests__/storage/runtime/storage-canonical-hash.test.ts',
   'core/__tests__/storage/recovery/storage-crash-recovery.test.ts',
   'core/__tests__/storage/recovery/portable/local-commit-outbox-replay.test.ts',
@@ -127,8 +122,12 @@ const RELEASE_PATHS = XLN_RELEASE_PATHS.join(' ');
 const quickSteps: GateStep[] = [
   { name: 'frontend generated aliases', command: 'cd frontend && bunx svelte-kit sync', timeoutMs: 60_000 },
   { name: 'source checks', command: 'bun run check:src', timeoutMs: 600_000 },
-  { name: 'release integrity tests', command: 'bun run test:release-integrity', timeoutMs: 30_000 },
-  { name: 'runtime core unit tests', command: `bun test ${RUNTIME_CORE_TESTS}`, timeoutMs: 180_000 },
+  // GitHub needed 29.2s for the unit portion alone, then the contract proof was
+  // killed by the old 30s watchdog. Keep both portions and allow cold CI setup.
+  { name: 'release integrity tests', command: 'bun run test:release-integrity', timeoutMs: 120_000 },
+  // The complete family takes ~160s locally, including its real-clock tower.
+  // CI needs headroom for slower execution without dropping any assertions.
+  { name: 'runtime core unit tests', command: `bun test ${RUNTIME_CORE_TESTS}`, timeoutMs: 420_000 },
   {
     name: 'bilateral same-height collision',
     command: 'bun run test:consensus:collision',
@@ -153,10 +152,21 @@ const ciPreE2eSteps: GateStep[] = [
   { name: 'bootstrap soundcheck', command: 'bun run prod:bootstrap:soundcheck', timeoutMs: 1_200_000 },
 ];
 
-const ciSteps: GateStep[] = [
-  ...ciPreE2eSteps,
-  { name: 'fast E2E gate', command: 'bun run test:e2e:fast', timeoutMs: 900_000 },
-];
+// React is the launch wallet. Each group uses the existing production stand,
+// its real contracts and an isolated state directory retained as CI evidence.
+const walletE2eSteps: GateStep[] = ([
+  ['React payment and admission E2E', 'e2e-payment.spec.ts,e2e-lending-availability.spec.ts', 'payment'],
+  ['React dispute E2E', 'e2e-dispute-finality.spec.ts', 'dispute'],
+  ['React recovery E2E', 'e2e-tower-restore.spec.ts', 'recovery'],
+] as const).map(([name, tests, directory]) => ({
+  name,
+  command: `XLN_LOCAL_PROD_SMOKE_DIR=.logs/gates/react-${directory} `
+    + `XLN_LOCAL_PROD_SMOKE_WALLET_TESTS=${tests} `
+    + `bun run stand:run --reason react-${directory} --timeout-ms 240000 -- bun run prod:smoke:local`,
+  timeoutMs: 300_000,
+}));
+
+const ciSteps: GateStep[] = [...ciPreE2eSteps, ...walletE2eSteps];
 
 const releaseSteps: GateStep[] = [
   ...ciPreE2eSteps,
@@ -174,12 +184,8 @@ const releaseSteps: GateStep[] = [
   { name: 'hub 10k storage benchmark', command: 'bun run bench:radapter:hub10k', timeoutMs: 1_200_000 },
   { name: 'frozen core final', command: 'bun run frozen-core:check', timeoutMs: 30_000 },
   { name: 'Foundation release Hanko', command: 'bun run foundation-release:verify', timeoutMs: 30_000 },
-  // Full browser E2E is intentionally last. A failure in any cheaper release
-  // check must never invalidate an expensive 125-target evidence run.
-  // The canonical 127-target isolated run is measured at roughly 42 minutes
-  // on the Mac Studio. Keep a bounded margin for startup/quiescence scans;
-  // 30 minutes deterministically killed a healthy run after target 113.
-  { name: 'full E2E gate', command: 'bun run test:e2e:full', timeoutMs: 3_600_000 },
+  // Frozen Svelte and deferred product journeys remain outside launch evidence.
+  ...walletE2eSteps,
 ];
 
 // A release candidate has not been deployed yet, so querying the current production

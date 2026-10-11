@@ -1,30 +1,7 @@
 /**
- * FX-1/FX-2 admission parity (proofs/fixes.md, decisions D2/D3).
- *
- * Verdict mapping to the Rust twin
- * (rscore/crates/engine/tests/fx_admission.rs) — same accept/reject
- * classification per case, different transport for the same verdict:
- *
- * - local enqueue/admission:
- *   TS   `applyAccountInput({kind:'enqueue'})` throws `AccountTxAdmissionError`
- *        with code `ACCOUNT_TX_POLICY_VERSION_OUT_OF_RANGE` /
- *        `ACCOUNT_TX_POLICY_VERSION_OUT_OF_RANGE`, mempool unchanged.
- *   Rust `AccountConsensus::admit_txs` returns
- *        `Err(StateError::PolicyVersionOutOfRange)`, mempool unchanged.
- *   FX-2: the six `lending_*` kinds are now inside the production profile
- *        (9acd5e3e6 completed the overdue-loan settlement), so both engines
- *        admit them; the profile set itself is empty in both.
- * - incoming counterparty frame:
- *   TS   preflight returns a typed Account input rejection
- *        `ACCOUNT_INPUT_FRAME_TX_POLICY_VERSION_OUT_OF_RANGE` before signature
- *        work, replay, or mutation; a lending frame passes that preflight.
- *   Rust `apply_incoming_frame` returns `Rejected` whose reason carries
- *        `ACCOUNT_TX_POLICY_VERSION_OUT_OF_RANGE` before replay; a lending
- *        frame likewise passes.
- * - boundary accept (policyVersion 0 and MAX): TS admits (ok result) and
- *   Rust admits (Ok, frame hashable) — the golden
- *   `matches_typescript_rebalance_policy_bytes_and_hashes` already pins
- *   MAX hashing identically in both engines.
+ * Production TS admission: bounded policy versions and deferred lending.
+ * Local and peer inputs reject before mutation; historical frames stay hashable.
+ * Frozen Rust fixtures are not evidence for this launch profile.
  */
 import { describe, expect, test } from 'bun:test';
 
@@ -79,75 +56,110 @@ const TWO_POW_54 = 2 ** 54;
 const U64_MAX_APPROXIMATE = 18_446_744_073_709_551_615;
 
 const LENDING_TXS: Array<[AccountTx['type'], AccountTx]> = [
-  ['lending_fund', {
-    type: 'lending_fund',
-    data: {
-      positionId: 'position-1',
-      hubEntityId: '0xhub',
-      lenderEntityId: '0xsender',
-      tokenId: 1,
-      amount: 10n,
-      termId: '1d',
-      interestBps: 100,
+  [
+    'lending_fund',
+    {
+      type: 'lending_fund',
+      data: {
+        positionId: 'position-1',
+        hubEntityId: '0xhub',
+        lenderEntityId: '0xsender',
+        tokenId: 1,
+        amount: 10n,
+        termId: '1d',
+        interestBps: 100,
+      },
     },
-  }],
-  ['lending_borrow_request', {
-    type: 'lending_borrow_request',
-    data: {
-      requestId: 'request-1',
-      hubEntityId: '0xhub',
-      borrowerEntityId: '0xsender',
-      tokenId: 1,
-      amount: 10n,
-      termId: '1d',
-      maxInterestBps: 100, maxLateMs: 0, expiresAt: 9_000_000_000_000,
+  ],
+  [
+    'lending_borrow_request',
+    {
+      type: 'lending_borrow_request',
+      data: {
+        requestId: 'request-1',
+        hubEntityId: '0xhub',
+        borrowerEntityId: '0xsender',
+        tokenId: 1,
+        amount: 10n,
+        termId: '1d',
+        maxInterestBps: 100,
+        maxLateMs: 0,
+        expiresAt: 9_000_000_000_000,
+      },
     },
-  }],
-  ['lending_repay', {
-    type: 'lending_repay',
-    data: {
-      loanId: 'loan-1',
-      hubEntityId: '0xhub',
-      borrowerEntityId: '0xsender',
-      tokenId: 1,
-      amount: 10n,
-      claimHash: `0x${'11'.repeat(32)}`,
+  ],
+  [
+    'lending_rate',
+    {
+      type: 'lending_rate',
+      data: {
+        positionId: 'position-1',
+        hubEntityId: '0xhub',
+        lenderEntityId: '0xsender',
+        tokenId: 1,
+        claimHash: `0x${'11'.repeat(32)}`,
+        interestBps: 100,
+      },
     },
-  }],
-  ['lending_disburse', {
-    type: 'lending_disburse',
-    data: {
-      loanId: 'loan-1', requestId: 'borrow-1', maxInterestBps: 100, maxLateMs: 0, lateMs: 0, expiresAt: 60_000,
-      hubEntityId: '0xhub',
-      borrowerEntityId: '0xsender',
-      tokenId: 1,
-      amount: 10n,
-      termId: '1d',
-      interestBps: 100,
+  ],
+  [
+    'lending_repay',
+    {
+      type: 'lending_repay',
+      data: {
+        loanId: 'loan-1',
+        hubEntityId: '0xhub',
+        borrowerEntityId: '0xsender',
+        tokenId: 1,
+        amount: 10n,
+        claimHash: `0x${'11'.repeat(32)}`,
+      },
     },
-  }],
-  ['lending_close_request', {
-    type: 'lending_close_request',
-    data: { positionId: 'position-1', hubEntityId: '0xhub', lenderEntityId: '0xsender' },
-  }],
-  ['lending_close_payout', {
-    type: 'lending_close_payout',
-    data: {
-      positionId: 'position-1',
-      hubEntityId: '0xhub',
-      lenderEntityId: '0xsender',
-      tokenId: 1,
-      amount: 10n,
+  ],
+  [
+    'lending_disburse',
+    {
+      type: 'lending_disburse',
+      data: {
+        loanId: 'loan-1',
+        requestId: 'borrow-1',
+        maxInterestBps: 100,
+        maxLateMs: 0,
+        lateMs: 0,
+        expiresAt: 60_000,
+        hubEntityId: '0xhub',
+        borrowerEntityId: '0xsender',
+        tokenId: 1,
+        amount: 10n,
+        termId: '1d',
+        interestBps: 100,
+      },
     },
-  }],
+  ],
+  [
+    'lending_close_request',
+    {
+      type: 'lending_close_request',
+      data: { positionId: 'position-1', hubEntityId: '0xhub', lenderEntityId: '0xsender' },
+    },
+  ],
+  [
+    'lending_close_payout',
+    {
+      type: 'lending_close_payout',
+      data: {
+        positionId: 'position-1',
+        hubEntityId: '0xhub',
+        lenderEntityId: '0xsender',
+        tokenId: 1,
+        amount: 10n,
+      },
+    },
+  ],
 ];
 
 const enqueue = async (account: AccountReplica, txs: AccountTx[]) =>
-  applyAccountInput(
-    createAccountConsensusContext(createEmptyEnv('fx-admission')),
-    account,
-    { kind: 'enqueue', txs },
-  );
+  applyAccountInput(createAccountConsensusContext(createEmptyEnv('fx-admission')), account, { kind: 'enqueue', txs });
 
 describe('FX-1 policyVersion protocol range 0..=MAX_SAFE_INTEGER', () => {
   test.each([
@@ -168,9 +180,9 @@ describe('FX-1 policyVersion protocol range 0..=MAX_SAFE_INTEGER', () => {
   ])('rejects policyVersion %s before the mempool', async (_name, policyVersion) => {
     const account = makeAccount('0xsender', '0xrecipient');
 
-    await expect(enqueue(account, [rebalancePolicy(policyVersion)]))
-      .rejects
-      .toThrow('ACCOUNT_TX_POLICY_VERSION_OUT_OF_RANGE:rebalance_policy');
+    await expect(enqueue(account, [rebalancePolicy(policyVersion)])).rejects.toThrow(
+      'ACCOUNT_TX_POLICY_VERSION_OUT_OF_RANGE:rebalance_policy',
+    );
     expect(account.mempool).toEqual([]);
   });
 
@@ -188,9 +200,9 @@ describe('FX-1 policyVersion protocol range 0..=MAX_SAFE_INTEGER', () => {
   test('a rejected batch admits nothing, mirroring Rust whole-batch admission', async () => {
     const account = makeAccount('0xsender', '0xrecipient');
 
-    await expect(enqueue(account, [structuredClone(PAYMENT), rebalancePolicy(TWO_POW_54)]))
-      .rejects
-      .toThrow('ACCOUNT_TX_POLICY_VERSION_OUT_OF_RANGE');
+    await expect(enqueue(account, [structuredClone(PAYMENT), rebalancePolicy(TWO_POW_54)])).rejects.toThrow(
+      'ACCOUNT_TX_POLICY_VERSION_OUT_OF_RANGE',
+    );
     expect(account.mempool).toEqual([]);
   });
 
@@ -209,8 +221,7 @@ describe('FX-1 policyVersion protocol range 0..=MAX_SAFE_INTEGER', () => {
     };
 
     expect(() => computeFrameHash(frame)).toThrow(AccountTxAdmissionError);
-    expect(() => computeFrameHash(frame))
-      .toThrow('ACCOUNT_TX_POLICY_VERSION_OUT_OF_RANGE:rebalance_policy');
+    expect(() => computeFrameHash(frame)).toThrow('ACCOUNT_TX_POLICY_VERSION_OUT_OF_RANGE:rebalance_policy');
   });
 });
 
@@ -254,32 +265,30 @@ describe('FX-3 exact lifecycle retry identity', () => {
     ]);
 
     expect(result).toMatchObject({ ok: true, admittedAccountTxCount: 4 });
-    expect(account.mempool).toEqual([
-      firstCredit,
-      PAYMENT,
-      secondCredit,
-      PAYMENT,
-    ]);
+    expect(account.mempool).toEqual([firstCredit, PAYMENT, secondCredit, PAYMENT]);
   });
 });
 
-describe('FX-2 lending kinds are inside the production RRS profile', () => {
-  test.each(LENDING_TXS)('enqueue admits %s into the mempool', async (kind, tx) => {
+describe('FX-2 lending kinds are outside the production profile', () => {
+  test.each(LENDING_TXS)('enqueue rejects %s without mutation', async (kind, tx) => {
     const account = makeAccount('0xsender', '0xrecipient');
-
-    const result = await enqueue(account, [structuredClone(tx)]);
-
-    expect(result).toMatchObject({ ok: true, admittedAccountTxCount: 1 });
-    expect(account.mempool.map(entry => entry.type)).toEqual([kind]);
+    const before = safeStringify(account);
+    await expect(enqueue(account, [structuredClone(tx)])).rejects.toMatchObject({
+      code: 'ACCOUNT_TX_KIND_OUT_OF_PROFILE',
+      txType: kind,
+    });
+    expect(safeStringify(account)).toBe(before);
   });
 
   // `isAccountTxKindAvailable` is deliberately not imported here: the wallet
   // (ui/src/screens/Lending.tsx) is its only consumer, and check:unused-surface
   // pins that external-consumer proof.
-  test('the live profile refuses no lending kind', () => {
-    expect(LENDING_TXS.map(([, tx]) => accountTxAdmissionError(tx))).toEqual(
-      LENDING_TXS.map(() => undefined),
-    );
+  test('every deferred kind remains hashable for signed historical evidence', () => {
+    for (const [kind, tx] of LENDING_TXS) {
+      expect(accountTxAdmissionError(tx)).toMatchObject({ code: 'ACCOUNT_TX_KIND_OUT_OF_PROFILE', txType: kind });
+      const account = makeAccount('0xsender', '0xrecipient');
+      expect(() => computeFrameHash({ ...account.currentFrame, accountTxs: [tx] })).not.toThrow();
+    }
   });
 });
 
@@ -312,35 +321,18 @@ describe('incoming counterparty frames reject before replay', () => {
     };
   };
 
-  // Lending now passes the profile preflight, so an incoming lending frame is
-  // judged on its own semantics like any other kind. Whatever verdict it gets,
-  // it is never the profile refusal any more.
   test.each(LENDING_TXS)(
-    'incoming %s is no longer refused by the admission profile',
+    'incoming %s is a typed profile rejection before signature work or mutation',
     async (kind, tx) => {
       const account = makeAccount('0xsender', '0xrecipient');
       const input = buildFrameInput(account, tx, '');
       input.proposal.frame.stateHash = computeFrameHash(input.proposal.frame);
-      const context = {
-        ...createAccountConsensusContext(createEmptyEnv('fx-admission-incoming')),
-        verifyHanko: async (_hanko: unknown, _hash: unknown, expectedEntityId: string) => ({
-          valid: true,
-          entityId: expectedEntityId,
-        }),
-      } as Parameters<typeof applyAccountInput>[0];
-
-      const outcome = await applyAccountInput(context, account, input)
-        .then(result => ({
-          code: accountInputPeerRejectionCode(result),
-          message: accountInputFailureMessage(result) ?? '',
-        }))
-        .catch((error: Error) => ({ code: undefined, message: error.message }));
-
-      expect(outcome.code).not.toBe('ACCOUNT_INPUT_FRAME_TX_OUT_OF_PROFILE');
-      expect(outcome.message).not.toContain(`ACCOUNT_TX_KIND_OUT_OF_PROFILE:${kind}`);
-      // Positive evidence that preflight let it through: the verdict now comes
-      // from the lending handler replaying the transaction.
-      expect(outcome.message).toMatch(/^LENDING_/);
+      const context = createAccountConsensusContext(createEmptyEnv('fx-admission-incoming'));
+      const before = safeStringify(account);
+      const outcome = await applyAccountInput(context, account, input);
+      expect(accountInputPeerRejectionCode(outcome)).toBe('ACCOUNT_INPUT_FRAME_TX_OUT_OF_PROFILE');
+      expect(accountInputFailureMessage(outcome)).toContain(`ACCOUNT_TX_KIND_OUT_OF_PROFILE:${kind}`);
+      expect(safeStringify(account)).toBe(before);
     },
   );
 
@@ -349,11 +341,7 @@ describe('incoming counterparty frames reject before replay', () => {
     // computeFrameHash refuses this tx by design (FX-1 tripwire), so the peer
     // frame carries an unverifiable stateHash; the preflight rejection fires
     // before any signature or hash work either way.
-    const input = buildFrameInput(
-      account,
-      rebalancePolicy(ABOVE_MAX),
-      `0x${'99'.repeat(32)}`,
-    );
+    const input = buildFrameInput(account, rebalancePolicy(ABOVE_MAX), `0x${'99'.repeat(32)}`);
     const context = {
       ...createAccountConsensusContext(createEmptyEnv('fx-admission-incoming')),
       verifyHanko: async (_hanko: unknown, _hash: unknown, expectedEntityId: string) => ({
@@ -365,8 +353,7 @@ describe('incoming counterparty frames reject before replay', () => {
 
     const result = await applyAccountInput(context, account, input);
 
-    expect(accountInputPeerRejectionCode(result))
-      .toBe('ACCOUNT_INPUT_FRAME_TX_POLICY_VERSION_OUT_OF_RANGE');
+    expect(accountInputPeerRejectionCode(result)).toBe('ACCOUNT_INPUT_FRAME_TX_POLICY_VERSION_OUT_OF_RANGE');
     expect(result.ok).toBe(false);
     expect(account.currentHeight).toBe(0);
     expect(safeStringify(account)).toBe(before);

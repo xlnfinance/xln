@@ -1,5 +1,34 @@
 # Current xln execution handoff
 
+Owner correction, 2026-10-12: launch TS + React + Ethereum same-J. Lending
+admission is deferred again; do not develop lending or Rust. The unfinished
+Rust/parity edits are preserved in stash
+`438bf1a6ddd8679bba0b63bdef11dd1fd1f45e90` (verify the stash subject before restore).
+Keep the empty frozen-core mechanism for later use; its current protected-file
+count is zero, not security coverage. This correction supersedes earlier scope
+statements below; earlier deployment results remain historical evidence.
+
+- Current committed SHA: `5037b95b8ba0db17aea79bed3d3e80e162daf2cb` fixes proof nonce
+  selection after peer evidence and retires already-applied local delivery.
+  Pending release-profile changes have not yet been published.
+- Last green boundaries: 6 React E2E scenarios (4 payment/admission, 2 exit/restore),
+  zero skips; 126 focused release/admission tests. These dirty-tree runs are
+  diagnostics, not clean-SHA release evidence. The earlier runtime family passed
+  708 tests / 4,264 assertions before the admission-profile reduction.
+- First red: main CI `38173656472` killed the release-integrity contract proof at
+  its 30-second watchdog after 62 passing unit tests. The local watchdog correction
+  awaits committed-source CI. The latest legacy regression rerun had 129 passes,
+  one pre-existing skip and six failures: the two TS source-wiring failures are
+  fixed; four frozen Rust integration/parity fixtures remain red, not claimed green.
+- Artifact paths: `.logs/crisis-20261011/rc-react-payment-profile/`,
+  `.logs/crisis-20261011/rc-react-exit-recovery/`, and the current source-check log.
+  Copy accepted committed-source evidence into `docs/evidence/` before release.
+- Next command: `bun run check`, then commit only owned paths and verify the
+  immutable candidate with a clean source tree.
+- Remaining final gates: ten consecutive green main CI runs and branch protection;
+  remove production Rust/QA imports; complete React P5/P6 and proof import; refresh
+  committed-SHA exit gas and Sepolia P4/P5/P6 receipts; owner-reviewed release package.
+
 Owner priority, 2026-10-11 17:28 UTC: ship a public Sepolia deployment and usable
 asset flow; Base is an alternative, not a prerequisite. Finish the TS launch path
 before resuming Rust book parity. Mainnet activation remains a separate exact-build
@@ -155,8 +184,7 @@ collateral funding, timed unilateral exit and ERC-20 withdrawal. Evidence is
 `docs/evidence/sepolia-20261011/contracts-and-exit.json`.
 
 The follow-up unsecured proof exposed a public RPC head race: the same signed
-batch rejects at block 11893378 and estimates successfully at deposit block
-11893379. The proof runner now reads nonce and estimates against one explicit
+batch rejects at block 11893378 and estimates successfully at deposit block 11893379. The proof runner now reads nonce and estimates against one explicit
 block, at least its last mined batch. The interrupted deposit was withdrawn back
 to the signer with exact reserve/token deltas; the corrected proof passed.
 Of the 250-unit unsecured claim, 200 available reserve units were collected and
@@ -190,7 +218,7 @@ backed up outside the repository in the local xln configuration directory.
 
 Release discovery incorrectly included frozen Rust cross-J parity vectors using
 the old three-component proof ABI. Their mismatch is reproduced, not re-goldened.
-The TS release family now excludes only core/__tests__/rscore; all current TS
+The TS release family now excludes only core/**tests**/rscore; all current TS
 cross-J, proof-builder, lending and recovery gates remain. Scope regression first
 failed 4 tests, then 30/30 scope/proof tests passed. Release integrity: 62/62 plus
 one Solidity Hanko parity case. Full check passes: 38 source gates, 27.329s.

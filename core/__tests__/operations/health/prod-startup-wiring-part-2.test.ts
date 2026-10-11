@@ -1143,7 +1143,12 @@ describe('production startup wiring', () => {
     expect(releaseGate.indexOf("'frontend generated aliases'")).toBeLessThan(
       releaseGate.indexOf("'runtime core unit tests'"),
     );
-    expect(releaseGate.indexOf("'bootstrap soundcheck'")).toBeLessThan(releaseGate.indexOf("'fast E2E gate'"));
+    expect(releaseGate.indexOf("'bootstrap soundcheck'")).toBeLessThan(releaseGate.indexOf("'React payment and admission E2E'"));
+    expect(releaseGate).toContain('e2e-payment.spec.ts,e2e-lending-availability.spec.ts');
+    expect(releaseGate).toContain('e2e-dispute-finality.spec.ts');
+    expect(releaseGate).toContain('e2e-tower-restore.spec.ts');
+    expect(releaseGate).not.toContain("command: 'bun run test:e2e:fast'");
+    expect(releaseGate).not.toContain("command: 'bun run test:e2e:full'");
     expect(releaseGate).toContain('cleanupTestArtifactsBeforeRun({ reason: `release-gate:${profile}` })');
     expect(releaseGate).toContain("process.env[TEST_ARTIFACT_CLEANUP_DONE_ENV] = '1'");
     expect(releaseGate).toContain('env: withoutTestArtifactCleanupDoneEnv()');

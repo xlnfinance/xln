@@ -1,6 +1,6 @@
 # Egor's working profile for xln
 
-Updated 2026-10-11 from the owner's recorded decisions and crisis review request.
+Updated 2026-10-12 from the owner's recorded decisions and release correction.
 Purpose: select useful work autonomously and bring xln to a verifiable mainnet
 release. Newer owner instructions and the project's technical rules prevail.
 These are working preferences, not a psychological assessment or permission
@@ -63,9 +63,10 @@ to MML; counting accounts or gross turnover does not replace GDP attribution.
 - Current scope, updated 2026-10-11: TypeScript, React `ui/`, Ethereum same-J.
   Sepolia verification precedes the Ethereum mainnet canary. This supersedes
   the October 10 multi-engine, multi-wallet and multi-jurisdiction scope.
-- Rust `rscore/` is frozen except for the owner's later explicit three-book
-  refactor and its required financial parity. Svelte wallet development is frozen. TRON, XLNC,
-  Base, cross-J as a headline, companies/IPO,
+- Rust `rscore/` is frozen at `rscore-freeze-f1464e84e`; the owner withdrew the
+  book-refactor exception for this release. Park unfinished Rust edits without
+  committing them. Svelte wallet development is frozen; its landing remains.
+  TRON, XLNC, Base, cross-J as a headline, lending in production, companies/IPO,
   native clients and custody are deferred. Apply the exact freeze and reopening
   rules in [AGENTS.md](../AGENTS.md); do not repeat excluded release gates.
 - Required evidence covers funding, payments, same-J swaps, disputes, exit,
@@ -77,12 +78,22 @@ to MML; counting accounts or gross turnover does not replace GDP attribution.
   and recovery; do not strand positions when closing new admission.
 - Do not introduce arbitrary deposit limits or unrelated features. Exact arithmetic,
   authorization, determinism and recovery remain mandatory.
-- Latest October 11 update: mainnet participation is open to the owner, friends
-  and anyone using their own funds. Lending is restored to scope: savers lend to
-  a bank Entity and earn agreed interest; borrowers owe the bank principal and
-  agreed interest. These are bilateral Account obligations. A borrower default
-  does not cancel the bank's liability to its savers. The agent should implement
-  this coherent banking model without asking the owner to choose internal labels.
+- Mainnet participation remains open to anyone using their own funds. The latest
+  release correction defers lending: reject its new Account admission with the
+  existing typed profile error; do not finish its implementation. Preserve signed
+  claim verification and contract exit. Borrower insolvency never guarantees
+  payment beyond available collateral.
+- MML counts obligations between unaffiliated Entities only. Count a routed
+  payment once on its commercial edge, excluding hub hops and affiliated transfers.
+- XLN-1000 guides priorities; evidence coverage remains the release gate. Count
+  only committed-source evidence from a clean tree, saved in `docs/evidence/`.
+  Canonical readiness requires ten consecutive green main CI runs, zero failing
+  current unit tests, one launch engine and no production imports of Rust or QA.
+- Mainnet needs current-bytecode Sepolia P4/P5/P6 exit receipts, measured exit
+  gas, wallet evidence import, external tower coverage and the exact release
+  package approved by Egor. Reserve pledges, stale-state penalties, debt-slot
+  redesign, exposure-based windows, Foundation grace and insolvency allocation
+  require measured alternatives and an owner decision before implementation.
 
 Acceptance criteria already exist in [improvement-loop.md](improvement-loop.md)
 and [mainnet-acceptance-gate.md](mainnet-acceptance-gate.md). The owner's requested
