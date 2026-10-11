@@ -428,7 +428,9 @@ class AccountAuthorityEntityStageImpl implements AccountAuthorityEntityStage {
     const proposalIds = [...new Set(request.proposalAccountIds.map(normalizeEntityId))]
       .filter(accountId => request.accounts.has(accountId));
     const proposals = proposalIds.map(accountId => {
-      const account = request.accountForWrite(accountId);
+      // Selection only reads the replica. Claiming it for write would fork an
+      // idle Account and invalidate its sealed leaf before any worker result.
+      const account = request.accounts.get(accountId);
       if (account === undefined) throw new Error(`ACCOUNT_AUTHORITY_PROPOSAL_ACCOUNT_MISSING:${accountId}`);
       return {
         collectorFrameId: this.ownerEntityId,

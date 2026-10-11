@@ -42,8 +42,12 @@ The subsequent payment/swap run exposed a bootstrap crash: outbox matching tried
 to consensus-hash a live recovery marker. Using the canonical WAL payload encoder
 fixes it without changing signed inputs. Six payment/swap journeys, 37 related
 recovery tests, 110-frame TS W1/W4 exact replay and full check now pass.
+The current read-only proposal candidate passes 28 focused tests, 554 related
+tests, three rebuilt lending journeys and exact 35/110-frame WAL replay with one
+and four TS workers. Selection no longer claims unchanged Accounts for writing;
+actual writes and all root/signature verification remain in place. Full check passes.
 The current 1,000-user run settles 20,000 payments with zero pending ACKs but
-drains in 26,077ms against the unchanged 25,000ms limit, with production diagnostic
+drains in 26,183ms against the unchanged 25,000ms limit, with production diagnostic
 counters disabled. Redundant signed gossip, old-state proof calculation and parent
 dispute-signature warming are removed; resulting proofs and worker verification
 stay mandatory. First funding still refreshes routing. React refreshes the bank's

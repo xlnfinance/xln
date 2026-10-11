@@ -2,8 +2,9 @@
 
 ## Current SHA
 
-Runtime checkpoint `5d38b5d9bb6d81a4a9d4a806fddbece3813a5b88`, main, 2026-10-11.
-201 reviewed paths committed locally; no push. Frozen Rust and foreign CI remain dirty.
+Base `42bfcfdc2`, main, 2026-10-11; coherent checkpoint `5d38b5d9b`.
+Read-only Account proposal selection is the current candidate; no push.
+Frozen Rust and foreign CI remain dirty.
 TS only, React only, Ethereum same-J, lending included. Rust stays frozen.
 Work solo. Preserve frozen Rust, foreign CI edits and unknown-owner HANDOFF.md.
 Dedicated Sepolia key management, free faucet funding and deployment are authorized.
@@ -13,6 +14,19 @@ its saver despite borrower default. [todo.md](../todo.md) is the live queue.
 
 ## Last green command
 
+Current candidate: proposal selection reads Account replicas instead of claiming
+them for writing. The real-worker regression fails before the change with two
+write claims, and passes after it with zero; actual materialization still claims
+writes. Focused tests: 28 passed / 107 assertions. Related suite: 554 passed /
+448,400 assertions / 34.74s, including actual SIGKILL recovery. Payment (35 frames)
+and lending (110 frames) remain byte-for-byte exact in their per-frame root/output
+evidence through TS W1 and W4. Three rebuilt lending browser journeys pass.
+No verifier, protocol deadline or live-load criterion changed. Full check passes:
+two short gates, 38 source gates (27,755ms), three outer long gates. The first
+full run rejected the new test's folder width; moving it to the existing authority
+test folder fixed that boundary without changing any assertion.
+
+Previous committed candidate:
 `bun run check` passes: two short gates, 38 source gates and three outer long gates;
 source wall 27,640ms after the local outbox marker fix.
 
@@ -52,9 +66,13 @@ Artifacts and TypeChain are synchronized; eight other contracts match literally.
 ## First red command/error
 
 The production-default 1,000-user load commits 20,000 payments, zero pending ACKs,
-but drains in 26,077ms against 25,000ms. No valid TPS claim follows.
+but drains in 26,183ms against 25,000ms on the read-only proposal candidate
+(25,955ms on the preceding outbox fix). No valid TPS or speedup claim follows.
 A raw-string IPC experiment returned 25,191ms and 26,043ms, both failed, with
 63% more IPC bytes. It was fully reverted before the outbox correctness fix.
+Further codec/cache/export/ingress trials failed the same timing gate and were
+reverted. Their patches and results remain in the evidence JSON. Only the two
+read-site changes and their regression are retained for proved write ownership.
 Hub WAL/fsync is enabled; canonical load users are intentionally RAM-only.
 Diagnostic counters are off in this run. The instrumented run takes 26,392ms;
 N=1 shared-desktop runs do not establish a stable causal speedup.
@@ -70,6 +88,8 @@ Under `.logs/crisis-20261011/`: `checkpoint-fast-regressions.log`,
 `checkpoint-files.json`, `checkpoint-bytecode-review.log`,
 `outbox-marker-recovery.log`, `outbox-marker-check.log`,
 `outbox-marker-wallet-payments-swaps/`,
+`proposal-readonly-parity-comparison.json`, `proposal-readonly-regressions.log`,
+`proposal-readonly-react/`, `proposal-readonly-load/`,
 `priming-scope-production-load/`, `priming-scope-live/`,
 `lending-crash-live-ts1000/priming-scope-comparison.json`,
 `profile-routing-react-fixed/priming-scope-comparison.json`.
@@ -77,10 +97,11 @@ Earlier exact replay, crash, profile and bytecode evidence remains retained ther
 
 ## Next single command
 
-`bun .logs/crisis-20261011/inspect-live-ledger.ts .logs/crisis-20261011/priming-scope-production-load`
+`bun run test:release-integrity`, under the machine stand lock with a 60-second wall budget.
 
-Inspect the measured live completion tail; do not loosen the drain limit,
-run blind cap/worker trials or rewrite serialization without a measured cause.
+Checkpoint this reviewed diff only. Stop speculative codec/cache/scheduling
+variants: none closed the live gate. Select the next missing production boundary
+from the release gate; do not loosen the drain limit or disable verification.
 No external model spend. Do not rerun unchanged green financial gates.
 
 Sepolia runner: `/Users/zigota/.config/xln/sepolia-deployer/run.ts`.

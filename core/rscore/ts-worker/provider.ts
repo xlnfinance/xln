@@ -246,7 +246,7 @@ const selectWorkerProposals = (
   batch: AccountAuthorityEntityBatchOutbound,
   accountIds: readonly string[],
 ) => accountIds.flatMap(accountId => {
-  const account = batch.accountForWrite(accountId);
+  const account = batch.entityState.accounts.get(accountId);
   if (account === undefined) throw new Error(`TS_ACCOUNT_WORKER_PROVIDER_POST_ACCOUNT_MISSING:${accountId}`);
   const selectedMempoolTxs = selectCrossJOpeningAccountProposalTxs(env, batch.entityState, account);
   if (selectedMempoolTxs === null) return [];

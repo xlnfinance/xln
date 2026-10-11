@@ -878,7 +878,7 @@
     ".logs/crisis-20261011/wallet-svelte-results.json": "070d9067bb549e0257463ba10b0e314f2820704e4844fe80db340035d022630f",
     ".logs/hlt-evidence/2026-10-11T02-37-40-400Z/replays/1791688280064-parity.json": "ccbdcb94b1c12544eeaa1745bf0449ee9e7ade5af4b80739f82ad413b73d9046"
   },
-  "releaseStatus": "Local checkpoint plus verified outbox marker fix: full check, six new payment/swap journeys, 37 recovery tests and 110-frame W1/W4 replay pass. Live load remains 26077ms/25000ms. Public Sepolia unfunded; no public deployment or push.",
+  "releaseStatus": "Read-only Account proposal selection verified on base 42bfcfdc2: 28 focused tests, 554 regressions, 35 payment/110 lending frames exact through TS W1/W4, three rebuilt lending journeys and full check pass. Live load settles 20000 with zero pending ACKs in 26183ms/25000ms; gate remains red. Sepolia remains at zero ETH; no public deployment or push. Foreign CI and frozen Rust edits remain outside this checkpoint.",
   "scope": "Crisis review followed by owner-authorized runtime funding/exit repairs. Shared working tree, not a frozen release candidate.",
   "timezone": "Europe/Istanbul",
   "lendingAuthorityClosure": {
@@ -954,10 +954,11 @@
     }
   },
   "methodReviewCurrent": {
-    "at": "2026-10-11T12:13:48.900Z",
-    "decision": "Suspend performance work on any reproduced production crash. Reuse canonical WAL encoding instead of adding a second input projection; reproduce the crash before fixing, then rerun the failed production boundary.",
-    "evidence": "6/6 payment/swap browser journeys, 37 recovery tests including four SIGKILLs, 110 exact lending WAL frames W1/W4 and full check pass.",
-    "next": "Checkpoint the small outbox fix; inspect the measured live completion tail. Preserve the 25-second limit. Funding remains 0 ETH and the specific Ghost CAPTCHA confirmation is pending."
+    "at": "2026-10-11T13:26:17.262Z",
+    "decision": "End codec/cache/ingress scheduling variants after unchanged confirmation failed. Follow Account write ownership: pure proposal selection calls getForWrite twice and needlessly dirties a sealed Account.",
+    "evidence": "Real-worker regression expected zero claims, got two before fix; 28 tests /107 assertions pass after replacing those reads. Parent profile attributes 1655/16508 samples to executeOutbound, including 498 root-sealing samples (overlapping counts, not additive).",
+    "current": "Read-only proposal selection: 28 focused tests and 554 broader tests pass; both fixed WALs remain exact with one/four workers. Live timing remains red at 26183ms.",
+    "next": "Checkpoint verified read-ownership fix, then execute release-integrity gate. No further speculative codec/cache/scheduling variants."
   },
   "lendingRequestStatus": {
     "result": "PASS",
@@ -1007,9 +1008,9 @@
       "address": "0x4a009FaaA692DE8f66d70b53E785Ae0f7a307902",
       "chainId": 11155111,
       "balanceEth": "0.0",
-      "gasPriceGwei": "0.000000015"
+      "gasPriceGwei": "0.000100013"
     },
-    "currentStatusArtifact": ".logs/crisis-20261011/sepolia-topology-status.json",
+    "currentStatusArtifact": ".logs/crisis-20261011/sepolia-ingress-diagnostic-status.json",
     "currentDryRun": "PASS sepolia-late-dry-run.log",
     "latestInspection": {
       "url": "https://faucet.free/",
@@ -2097,6 +2098,16 @@
       ".logs/crisis-20261011/outbox-marker-l1.log": "15e87852fb46e83d8b5a02fb90acf9d9ace319819fc6c9dbbdbd42722dff5e9e",
       ".logs/crisis-20261011/outbox-marker-recovery.log": "a7309ee941e8f7f53dcd57303ebf5729d59209f3ccd04cabc91acd3a97508864",
       ".logs/crisis-20261011/outbox-marker-check.log": "926186618405427ae4fabba16a2acd636fe1cb40cbd1ef098eb5a7a0eb537f02"
+    },
+    "commit": "42bfcfdc2",
+    "live": {
+      "path": ".logs/crisis-20261011/outbox-marker-production-load/hlt-payment-load-report.json",
+      "sha256": "c9760a3be0dcc183f2de02142348874bc7ed928cbb94b552b489f6eb4a38f765",
+      "settled": 20000,
+      "drainMs": 25955,
+      "limitMs": 25000,
+      "pendingFrames": 0,
+      "passed": false
     }
   },
   "checkpointAdditionalWalletEvidence": [
@@ -2118,5 +2129,336 @@
       "unexpected": 0,
       "flaky": 0
     }
-  ]
+  ],
+  "rejectedEncodingTrials": {
+    "at": "2026-10-11T12:33:17.450Z",
+    "retained": false,
+    "productionSourceRestoredTo": "42bfcfdc2",
+    "nativeHex": {
+      "change": "Replace the manual already-validated hexadecimal decoder with Buffer.from; byte representation stays identical.",
+      "wal": {
+        "diagnosticOnly": true,
+        "frames": 27,
+        "source": "accepted production Runtime WAL inputs",
+        "runs": [
+          {
+            "pass": 0,
+            "encodeMs": 306.64570799999956,
+            "bytes": 54803542,
+            "digest": "a071d0c38c085f7065cd627ac2f916c837f773598fd54de5a9fa0e8d16b903e8"
+          },
+          {
+            "pass": 1,
+            "encodeMs": 277.0271230000003,
+            "bytes": 54803542,
+            "digest": "a071d0c38c085f7065cd627ac2f916c837f773598fd54de5a9fa0e8d16b903e8"
+          },
+          {
+            "pass": 2,
+            "encodeMs": 279.858749,
+            "bytes": 54803542,
+            "digest": "a071d0c38c085f7065cd627ac2f916c837f773598fd54de5a9fa0e8d16b903e8"
+          },
+          {
+            "pass": 3,
+            "encodeMs": 275.51733499999864,
+            "bytes": 54803542,
+            "digest": "a071d0c38c085f7065cd627ac2f916c837f773598fd54de5a9fa0e8d16b903e8"
+          }
+        ]
+      },
+      "baselineWal": {
+        "diagnosticOnly": true,
+        "frames": 27,
+        "source": "accepted production Runtime WAL inputs",
+        "runs": [
+          {
+            "pass": 0,
+            "encodeMs": 365.0592070000016,
+            "bytes": 54803542,
+            "digest": "a071d0c38c085f7065cd627ac2f916c837f773598fd54de5a9fa0e8d16b903e8"
+          },
+          {
+            "pass": 1,
+            "encodeMs": 337.14633599999934,
+            "bytes": 54803542,
+            "digest": "a071d0c38c085f7065cd627ac2f916c837f773598fd54de5a9fa0e8d16b903e8"
+          },
+          {
+            "pass": 2,
+            "encodeMs": 338.3702500000004,
+            "bytes": 54803542,
+            "digest": "a071d0c38c085f7065cd627ac2f916c837f773598fd54de5a9fa0e8d16b903e8"
+          },
+          {
+            "pass": 3,
+            "encodeMs": 336.90312300000005,
+            "bytes": 54803542,
+            "digest": "a071d0c38c085f7065cd627ac2f916c837f773598fd54de5a9fa0e8d16b903e8"
+          }
+        ]
+      },
+      "l1": {
+        "tests": 6,
+        "assertions": 43
+      },
+      "live": {
+        "path": ".logs/crisis-20261011/native-hex-production-load/hlt-payment-load-report.json",
+        "sha256": "e0d04b7af0156d5baf769abb31d1c54d9c4fc5b6f12cfe59e01dcfb75a9f71f4",
+        "settled": 20000,
+        "drainMs": 26489,
+        "limitMs": 25000,
+        "pendingFrames": 0,
+        "passed": false
+      }
+    },
+    "phasePostExport": {
+      "change": "Export only current-phase Account writes while retaining the independent dirty-shard union until outbound sealing.",
+      "l1": {
+        "tests": 22,
+        "assertions": 84
+      },
+      "fixedReplay": {
+        "frames": 35,
+        "exact": true,
+        "baselineResponseBytes": 280586748,
+        "candidateResponseBytes": 271789576,
+        "baselineWorkerEncodeMs": 2482.571,
+        "candidateWorkerEncodeMs": 2542.411
+      },
+      "live": {
+        "path": ".logs/crisis-20261011/worker-post-export-production-load/hlt-payment-load-report.json",
+        "sha256": "e7e4ca274141847b448150039d23bb179908eb646b00fa3ab28c2d0fe1a61a23",
+        "settled": 20000,
+        "drainMs": 26662,
+        "limitMs": 25000,
+        "pendingFrames": 0,
+        "passed": false
+      }
+    },
+    "decision": "Neither candidate demonstrated end-to-end benefit. Both source and experiment-only vectors reverted exactly. No claim of speedup from N=1 live comparisons; no weakening of the 25000ms limit."
+  },
+  "frameDelayDiagnostics": {
+    "paths": [
+      ".logs/crisis-20261011/live-frame-delay-profile/frame-profiles.json",
+      ".logs/crisis-20261011/live-frame-delay-profile/entity-frame-profiles.json",
+      ".logs/crisis-20261011/live-frame-delay-profile/frame-cohorts.json",
+      ".logs/crisis-20261011/live-frame-cost-profile/frame-profiles.json"
+    ],
+    "diagnosticOnly": true,
+    "drainMs": [
+      27144,
+      27062
+    ],
+    "productionSource": "42bfcfdc2",
+    "cadenceChanged": false
+  },
+  "pendingAckPrimingCandidate": {
+    "source": "core/entity/consensus/proposal/hanko/prime-hankos.ts",
+    "test": "core/__tests__/protocol/crypto/crypto-pool-liveness.test.ts",
+    "l1": {
+      "tests": 14,
+      "assertions": 34
+    },
+    "live": {
+      "artifact": ".logs/crisis-20261011/ack-priming-production-load/hlt-payment-load-report.json",
+      "settled": 20000,
+      "pendingAck": 0,
+      "drainMs": 26722,
+      "limitMs": 25000,
+      "passed": false
+    },
+    "verificationRemoved": false,
+    "retained": false,
+    "decision": "Reverted exactly: no live improvement shown. The next diagnostic separates request queue, worker decode/work and response queue; no further speculative encoding or prefetch variants."
+  },
+  "rejectedIngressFairness": {
+    "retained": false,
+    "l1": {
+      "tests": 40,
+      "assertions": 463
+    },
+    "live": {
+      "artifact": ".logs/crisis-20261011/direct-ingress-fairness-load/hlt-payment-load-report.json",
+      "settled": 20000,
+      "pendingAck": 0,
+      "drainMs": 26959,
+      "limitMs": 25000
+    },
+    "reason": "Yielded authenticated 256-frame bursts in order, but no live benefit. Source and test reverted; not a production change."
+  },
+  "parentWaitDiagnostics": {
+    "artifact": ".logs/crisis-20261011/parent-wait-samples/wait-summary.json",
+    "totalSamples": 16508,
+    "binaryCodecInclusiveSamples": 5096,
+    "longResponseWaitSpans": 44,
+    "longResponseWaitUnionMs": 2909.925,
+    "clockAlignment": "Darwin CLOCK_UPTIME_RAW measured after the run; no intervening sleep/clock change. Worker process.hrtime is isolate-relative and was rejected for cross-thread comparison.",
+    "temporaryInstrumentationReverted": true
+  },
+  "rejectedDecodedHexReuse": {
+    "retained": false,
+    "sourceRestored": true,
+    "l1": {
+      "tests": 6,
+      "assertions": 42
+    },
+    "wal": {
+      "frames": 27,
+      "bytes": 54803542,
+      "identicalDigest": "a071d0c38c085f7065cd627ac2f916c837f773598fd54de5a9fa0e8d16b903e8"
+    },
+    "live": {
+      "artifact": ".logs/crisis-20261011/decoded-hex-reuse-load/hlt-payment-load-report.json",
+      "settled": 20000,
+      "pendingAck": 0,
+      "drainMs": 26467,
+      "limitMs": 25000
+    },
+    "decision": "No live benefit demonstrated; remove the added memo and its experiment-only test."
+  },
+  "startupQuiescenceDiagnostic": {
+    "artifact": ".logs/crisis-20261011/startup-quiescence-diagnostic.log",
+    "runtimes": 1000,
+    "openHubPeers": 1000,
+    "pendingRuntimeWork": 0,
+    "pendingAccountFrames": 0,
+    "accountMempoolTxs": 0,
+    "drainMs": 26120,
+    "temporaryInstrumentationReverted": true,
+    "conclusion": "The load already starts with quiescent sovereign users. Do not add an arbitrary warm-up delay or move the measured start."
+  },
+  "payloadSingleWalkCandidate": {
+    "retained": false,
+    "paths": [
+      "core/protocol/serialization/binary-codec.ts",
+      "core/__tests__/protocol/serialization/binary-codec-bytes-form.test.ts"
+    ],
+    "l1": {
+      "tests": 13,
+      "assertions": 100
+    },
+    "fixedPayloadBytes": {
+      "frames": 27,
+      "bytes": 54803542,
+      "digest": "a071d0c38c085f7065cd627ac2f916c837f773598fd54de5a9fa0e8d16b903e8",
+      "unchanged": true
+    },
+    "firstLive": {
+      "path": ".logs/crisis-20261011/payload-single-walk-load/hlt-payment-load-report.json",
+      "settled": 20000,
+      "pendingAck": 0,
+      "drainMs": 25483,
+      "limitMs": 25000,
+      "passed": false
+    },
+    "confirmation": {
+      "path": ".logs/crisis-20261011/payload-single-walk-confirm/hlt-payment-load-report.json",
+      "settled": 20000,
+      "pendingAck": 0,
+      "drainMs": 26384,
+      "limitMs": 25000,
+      "passed": false
+    },
+    "fullCheck": "not run on this uncommitted candidate",
+    "decision": "First 25483ms result did not repeat. Restored source/test exactly; no live speedup established."
+  },
+  "proposalReadonlyCandidate": {
+    "source": [
+      "core/rscore/authority/entity-stage.ts",
+      "core/rscore/ts-worker/provider.ts"
+    ],
+    "regression": "core/__tests__/rscore/authority/authority-proposal-readonly.test.ts",
+    "red": "Real resident worker selection claims an unchanged Account twice for writing, invalidating the sealed leaf and forking its envelope.",
+    "fix": "Both selection sites use current Account reads; materialization/admission keep the write boundary. No root verification, signer verification or deadline is removed.",
+    "l1": {
+      "tests": 28,
+      "assertions": 107,
+      "files": 4,
+      "seconds": 6.49
+    },
+    "live": {
+      "directory": "proposal-readonly-load",
+      "settled": 20000,
+      "pendingAck": 0,
+      "drainMs": 26183,
+      "limitMs": 25000,
+      "passed": false
+    },
+    "status": "Verified for checkpoint: 28 focused and 554 broader tests, four exact replays, three rebuilt lending browser journeys and full check pass. Live timing remains red; no measured speedup claim.",
+    "replays": [
+      {
+        "path": ".logs/crisis-20261011/lending-crash-live-ts1000/lending-parity-w1-proposal-readonly.json",
+        "workers": 1,
+        "frames": 35,
+        "transcriptDigest": "e7acf2ee763ac196a0531e055a9c5578d8d6a1aa28d65a90e7aedee85be63483",
+        "evidenceHash": "d29524a49f071eddfaca1a69fb71b2e24fe5cbd0e814f1d035b3d6ea32def5b5",
+        "exact": true
+      },
+      {
+        "path": ".logs/crisis-20261011/lending-crash-live-ts1000/lending-parity-w4-proposal-readonly.json",
+        "workers": 4,
+        "frames": 35,
+        "transcriptDigest": "e7acf2ee763ac196a0531e055a9c5578d8d6a1aa28d65a90e7aedee85be63483",
+        "evidenceHash": "d29524a49f071eddfaca1a69fb71b2e24fe5cbd0e814f1d035b3d6ea32def5b5",
+        "exact": true
+      },
+      {
+        "path": ".logs/crisis-20261011/profile-routing-react-fixed/lending-parity-w1-proposal-readonly.json",
+        "workers": 1,
+        "frames": 110,
+        "transcriptDigest": "563872c1550d6f65cc397505295bbaaaadb28cde7a99cf943dc25d3daf215539",
+        "evidenceHash": "56aaa8623fb99a4179fae381cb678109019434d8450babcd69a55fdf4599e546",
+        "exact": true
+      },
+      {
+        "path": ".logs/crisis-20261011/profile-routing-react-fixed/lending-parity-w4-proposal-readonly.json",
+        "workers": 4,
+        "frames": 110,
+        "transcriptDigest": "563872c1550d6f65cc397505295bbaaaadb28cde7a99cf943dc25d3daf215539",
+        "evidenceHash": "56aaa8623fb99a4179fae381cb678109019434d8450babcd69a55fdf4599e546",
+        "exact": true
+      }
+    ],
+    "regressions": {
+      "tests": 554,
+      "failed": 0,
+      "assertions": 448400,
+      "files": 46,
+      "seconds": 34.74,
+      "log": "proposal-readonly-regressions.log",
+      "includes": "Actual SIGKILL lending recovery; controlled clock"
+    },
+    "browser": {
+      "report": "proposal-readonly-react/wallet-results.json",
+      "stats": {
+        "startTime": "2026-10-11T13:32:04.966Z",
+        "duration": 39885.020000000004,
+        "expected": 3,
+        "skipped": 0,
+        "unexpected": 0,
+        "flaky": 0
+      }
+    },
+    "firstFullCheck": {
+      "result": "FAIL",
+      "reason": "New test made ts-worker directory 11 files against the 10-file limit",
+      "log": "proposal-readonly-check.log",
+      "fix": "Place the authority-stage regression in the existing authority test directory; no assertion or production change."
+    },
+    "fullCheck": {
+      "result": "PASS",
+      "sourceGates": 38,
+      "sourceMs": 27755,
+      "outerGates": 3,
+      "shortGates": 2,
+      "log": "proposal-readonly-check-final.log",
+      "frozenRoot": "0x4eccf4492e5d085b24162f86d327e003c36b7e2a90ad527db1653fde391946a7"
+    },
+    "sourceHashes": {
+      "core/rscore/authority/entity-stage.ts": "1c7ef921d0504cefbb89767ec0a28c805a0f7d13b512c2ada5b159748b5d2551",
+      "core/rscore/ts-worker/provider.ts": "d394983f12e15ebbcbec783d0069ff6b83add96cb49372582afa422d76afb92b",
+      "core/__tests__/rscore/authority/authority-proposal-readonly.test.ts": "63ac82e0d6b3ac7718077c7e8f548849112d1f801cb3baacace6547bbe8b3987"
+    }
+  }
 }
