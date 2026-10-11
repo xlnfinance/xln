@@ -1,0 +1,127 @@
+{
+  "chainId": 11155111,
+  "rpc": "https://ethereum-sepolia-rpc.publicnode.com",
+  "verifiedAt": "2026-10-11T18:02:20.413Z",
+  "status": "CONTRACTS_AND_SECURED_EXIT_VERIFIED_WALLET_NOT_RELEASED",
+  "deployer": "0x4a009FaaA692DE8f66d70b53E785Ae0f7a307902",
+  "canonicalStackBytecodeVerified": true,
+  "shareDepositoryBindingVerified": true,
+  "contracts": [
+    {
+      "name": "account",
+      "address": "0x1a1C16E886385A4720952b0D2b3845A258d559a9",
+      "transactionHash": "0x580533c5759001f5dcd69d36621c91113270ad1436eaa76065e13c4cef6c8fa7",
+      "blockNumber": 11893357,
+      "bytes": 22791,
+      "codeHash": "0x4b23f853f902325ca5b231fcc5fcaae9fde7a89eded60ee092cc5f03f5d62647",
+      "gasUsed": "35452749",
+      "feeWei": "35453458054980"
+    },
+    {
+      "name": "depositoryBounds",
+      "address": "0xD6e456Bf701DF94726d9509D841ff8AeF474C4AB",
+      "transactionHash": "0x34f66f6d2c54c4edad631ba76466000bf5a59e683b7ba43b8f0676c5bd861725",
+      "blockNumber": 11893361,
+      "bytes": 4609,
+      "codeHash": "0x8a462bc56dc291d25e118de0d0fbb9120896477bfdeb1b09470d4a8592cb477f",
+      "gasUsed": "7335361",
+      "feeWei": "7335507707220"
+    },
+    {
+      "name": "hashLadderRegistry",
+      "address": "0x2c16732c6f08c941a551b31F5854a9efC2874665",
+      "transactionHash": "0x8e6089e5ebc64a44bd17b1a7c16abcc671a2c3dd96396b0afde90915844b1aa9",
+      "blockNumber": 11893362,
+      "bytes": 1589,
+      "codeHash": "0xa47af2153cdc65d535564ea18532d9abfb55fbd74aec58ac0ad11826f4a7a127",
+      "gasUsed": "2665028",
+      "feeWei": "2665081300560"
+    },
+    {
+      "name": "nftCustody",
+      "address": "0x027757f1B494865373420116aC2ada70667B997E",
+      "transactionHash": "0x4ea7adec7245321aa41b8c82158440a24644001a7917dbca9992e96bc37ab5de",
+      "blockNumber": 11893363,
+      "bytes": 2055,
+      "codeHash": "0xb144bc6b11107955386e17e9b026aaeba50549221768d0acde4712c38e110a9e",
+      "gasUsed": "3385666",
+      "feeWei": "3385733713320"
+    },
+    {
+      "name": "hankoVerifier",
+      "address": "0xaF64461c214DC1a6Db164b5838Eb6A7F108d474F",
+      "transactionHash": "0x73d026d3262a5ff3401d5676db202a5e46a32d3f0c2d5ef17c783c0e3f6abebd",
+      "blockNumber": 11893358,
+      "bytes": 5251,
+      "codeHash": "0x02413ad800e58e168089146dd8b10a7e36316bfbe35a201f1e6f02c12a2ed717",
+      "gasUsed": "8327671",
+      "feeWei": "8327837553420"
+    },
+    {
+      "name": "entityProvider",
+      "address": "0xa4f82fcB80D6198Fb64F75D7B8242643Ca3c960C",
+      "transactionHash": "0x782dacf4b284ebd42339bf1e9fabc36577b3bfc0e02bd7f66a4be407ec2436dd",
+      "blockNumber": 11893359,
+      "bytes": 19013,
+      "codeHash": "0x39d53eecbc11d78aec8c2b96c40c8e53e1fcde5b8bad03d8538a41707b28d3ff",
+      "gasUsed": "30910256",
+      "feeWei": "30910874205120"
+    },
+    {
+      "name": "depository",
+      "address": "0x4e7333463cDde39AA58587D58AF3f66757117f61",
+      "transactionHash": "0x7760032fdd41624ad0a2e7fc8b238e152da717f3593add1012fce033339bd40b",
+      "blockNumber": 11893364,
+      "bytes": 22185,
+      "codeHash": "0x70a5b9b30932d6add71c24a56ad624ede560d53ea01b3b8870ddd0b525ddfe33",
+      "gasUsed": "34746105",
+      "feeWei": "34746799922100"
+    },
+    {
+      "name": "deltaTransformer",
+      "address": "0x3189d71877F2CE96922FC88d0e9E56f6078A7D04",
+      "transactionHash": "0x26f51dc601a70e3a06ebefa430cbcc3cd0b68c4a1683a6a442a9666d7281faee",
+      "blockNumber": 11893360,
+      "bytes": 8326,
+      "codeHash": "0xf0b6c12143a14da9143b650dbb23895da3b01482dc352c2bb90b5ef76cf01b98",
+      "gasUsed": "13082432",
+      "feeWei": "13082693648640"
+    },
+    {
+      "name": "stablecoin",
+      "address": "0x4d6cF5B015567B598B5961f9662Fce6e5267d774",
+      "transactionHash": "0x942b555a1cc0b96dddd6dd37906c0d221abc40834dd9ca3961f59a733a8341ff",
+      "blockNumber": 11893366,
+      "bytes": 1672,
+      "codeHash": "0xaf0a9a73b7e19ec15f88dbe0ee9a04739c1e5d494c4a87b43323221375abb1b3",
+      "gasUsed": "3255479",
+      "feeWei": "3255544109580"
+    }
+  ],
+  "securedProof": {
+    "kind": "PUBLIC_PROOF_SMOKE",
+    "jurisdictionId": "ethereum-sepolia",
+    "compiler": "0.8.36",
+    "ownerEntityId": "0x5b49e643532ffa56a667824edd35144221368e72c70a3f38a7c072fdb9e86244",
+    "ownerIsLeft": true,
+    "counterpartyEntityId": "0xa3018c495490251ccf52cd24d9622a9cf01dc6e690ce1abb9f882e391f505bd9",
+    "accountKey": "0x5b49e643532ffa56a667824edd35144221368e72c70a3f38a7c072fdb9e86244a3018c495490251ccf52cd24d9622a9cf01dc6e690ce1abb9f882e391f505bd9",
+    "tokenMintTransactionHash": null,
+    "depositTransactionHash": "0x08d40b9e8ee394e1594fe390616d0e9ff48b172fce75a6da92810212c7a7775d",
+    "settlementTransactionHash": "0x5f0a324e2bc589edae65dccb2aed56da34550bc323c81063aede85cfa9020e65",
+    "collateralFundingTransactionHash": "0xccc20373805f96ea579127b0a30921c295d4abd9c72b41ad8c19f0b648f3167b",
+    "fundedCollateral": "850",
+    "unsecuredClaim": "0",
+    "collectedUnsecured": "0",
+    "remainingDebt": "0",
+    "debtCreditor": null,
+    "debtIndex": null,
+    "finalCollateral": "0",
+    "disputeStartTransactionHash": "0x541da3c715fc51a93f4f72fd734d6fbf81144eff17618bb9a5831208ec75ab8a",
+    "disputeFinalizeTransactionHash": "0x36826bc71b7f08363a85435dc78eea54975e5bc2b438c378f549b74796bc2e4e",
+    "withdrawalTransactionHash": "0x69e0648bb51bc6fb0ffd867f62820df489050f8505d66520cbf8a8497b88ea1c",
+    "disputeWindowSeconds": 10,
+    "ownerReserve": "850",
+    "counterpartyReserve": "100"
+  }
+}

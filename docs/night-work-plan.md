@@ -5,13 +5,35 @@ asset flow; Base is an alternative, not a prerequisite. Finish the TS launch pat
 before resuming Rust book parity. Mainnet activation remains a separate exact-build
 decision; a local Anvil wallet or test tokens are not real-value mainnet assets.
 
-Latest boundary: the dedicated Sepolia signer still has zero ETH. RPC/chain and
-deployment dry-run pass. The previous project deployer has 0.005955258191918243 ETH,
-but its key is absent from the checked deployment environment; no key was guessed
-and no funds moved. Triangle is suspended; Faucet Trade requires a social post
-and CAPTCHA. Testnet Help offers 0.0001 ETH without a mainnet balance. Its form is
-prepared in browser tab 20, but its terms prohibit bots: the final request is handed
-to the owner. No claim was submitted. Do not repeat the unchanged earlier faucets.
+Public funding is resolved: the existing project deployer's key was available in
+macOS Keychain under its lowercase account address. A chain-11155111-guarded
+transfer funded the dedicated signer with 0.001 Sepolia ETH in block 11893327,
+transaction `0xccbca3a7ed33d64f60f992be52eba45129bf4fec1f92e9b649ec003280bd553b`.
+No faucet action remains for the owner; the faucet tab was closed. Keys remain
+outside the repository and were never printed.
+
+The first actual deployment failed before broadcasting: Hardhat's last-block
+median selected about 1 gwei, while the RPC quoted about 0.001 gwei. The same
+Account init code fails gas estimation with the former (1,000,000-gas balance
+allowance) and passes with the latter (35,735,287 gas). The canonical stack script
+now passes fresh EIP-1559 fee quotes for every deployment and write. Wiring tests
+11/11 and full check (38 source gates, 26.861s) pass. All nine contracts, share
+binding and token registration are confirmed (11 transactions, nonce 11).
+Depository is `0x4e7333463cDde39AA58587D58AF3f66757117f61`; the six-decimal test USDT
+is `0x4d6cF5B015567B598B5961f9662Fce6e5267d774`, tokenId 1. Deployment cost was
+0.00013982213938686 Sepolia ETH. All nine code/receipt checks and the canonical
+linked-bytecode check pass. Secured proof passed: deposit, bilateral settlement,
+collateral funding, timed unilateral exit and ERC-20 withdrawal. Evidence is
+`docs/evidence/sepolia-20261011/contracts-and-exit.json`.
+
+The follow-up unsecured proof exposed a public RPC head race: the same signed
+batch rejects at block 11893378 and estimates successfully at deposit block
+11893379. The proof runner now reads nonce and estimates against one explicit
+block, at least its last mined batch. The interrupted deposit was withdrawn back
+to the signer with exact reserve/token deltas; the corrected proof is running.
+Evidence: `docs/evidence/sepolia-20261011/rpc-head-regression.json` and
+`.logs/crisis-20261011/release-sepolia-*`. Latest full check passes 38 source gates
+in 26.737s. The wallet is not yet released against this stack.
 
 Guided demo checkpoint `cca6cd8fe` reuses PasswordEntry and canonical Runtime ids; the encrypted
 key is saved before boot and wallet metadata before chain sync. The owner completed

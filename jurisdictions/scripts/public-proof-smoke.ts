@@ -106,10 +106,15 @@ const gasOverrides = async (
   return { gasLimit: (estimated * 12n + 9n) / 10n };
 };
 
+let lastBatchBlock = 0;
 const sendBatch = async (
   batch: JBatch,
 ): Promise<ethers.TransactionReceipt> => {
-  const currentNonce = await depository.entityNonces(ownerEntityId);
+  // A public RPC may load-balance across heads. Read the nonce and estimate at
+  // one block, never earlier than our last mined batch: otherwise a confirmed
+  // deposit can be followed by an E2 estimate against the preceding state.
+  const blockTag = ethers.toQuantity(Math.max(lastBatchBlock, await provider.getBlockNumber()));
+  const currentNonce = await depository.entityNonces(ownerEntityId, { blockTag });
   const signed = prepareSignedBatch(
     batch,
     ownerEntityId,
@@ -118,9 +123,12 @@ const sendBatch = async (
     jurisdiction.contracts.depository,
     currentNonce,
   );
-  const overrides = await gasOverrides(
-    () => depository.processBatch.estimateGas(signed.encodedBatch, signed.hankoData, signed.nextNonce),
-  );
+  const data = depository.interface.encodeFunctionData('processBatch', [
+    signed.encodedBatch, signed.hankoData, signed.nextNonce,
+  ]);
+  const overrides = await gasOverrides(async () => BigInt(await provider.send('eth_estimateGas', [
+    { from: wallet.address, to: jurisdiction.contracts.depository, data }, blockTag,
+  ])));
   const transaction = await depository.processBatch(
     signed.encodedBatch,
     signed.hankoData,
@@ -129,6 +137,7 @@ const sendBatch = async (
   );
   const receipt = await transaction.wait();
   if (!receipt || receipt.status !== 1) throw new Error(`PUBLIC_PROOF_BATCH_FAILED:${transaction.hash}`);
+  lastBatchBlock = receipt.blockNumber;
   return receipt;
 };
 
