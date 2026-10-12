@@ -105,8 +105,8 @@ function parseArgs(): {
   if (recording !== undefined) parsed.recording = recording;
   const hubEngine = getFlag('hub-engine');
   if (args.some(arg => arg === '--hub-engine' || arg.startsWith('--hub-engine='))
-    && hubEngine !== 'ts' && hubEngine !== 'rust') {
-    throw new Error('SCENARIO_HUB_ENGINE_REQUIRED:ts|rust');
+    && (hubEngine === undefined || hubEngine === '')) {
+    throw new Error('SCENARIO_HUB_ENGINE_REQUIRED:ts');
   }
   if (hubEngine !== undefined) parsed.hubEngine = hubEngine;
   return parsed;
@@ -408,18 +408,13 @@ async function runParallelScenarios(mode: string, workersArg?: number, setName?:
 
 async function main() {
   if (process.argv.slice(2).some(argument => argument === '--help' || argument === '-h')) {
-    console.log('Usage: bun core/scenarios/run.ts [all|<scenario>] [--hub-engine=ts|rust] [--mode=browservm|rpc] [--rpc=URL] [--workers=N] [--trail=DIR|FILE] [--input-trace=FILE] [--recording=FILE] [--single]');
+    console.log('Usage: bun core/scenarios/run.ts [all|<scenario>] [--hub-engine=ts] [--mode=browservm|rpc] [--rpc=URL] [--workers=N] [--trail=DIR|FILE] [--input-trace=FILE] [--recording=FILE] [--single]');
     console.log(`\nAvailable scenarios: ${availableScenarioIds().join(', ')}`);
     return;
   }
   const { scenario, mode, rpc, workers, set, trail, inputTrace, recording, single, hubEngine } = parseArgs();
   if (hubEngine !== undefined) process.env['XLN_HLT_ENGINE'] = hubEngine;
-  const selectedHubEngine = canonicalHubEngine('H1');
-  // Other scenarios still call the in-process TS Runtime. An inherited Rust
-  // selector must never relabel their TS-only result as native coverage.
-  if (selectedHubEngine === 'rust' && scenario !== 'mm-mesh') {
-    throw new Error(`SCENARIO_NATIVE_H1_BOUNDARY_MISSING:${scenario ?? 'all'}`);
-  }
+  canonicalHubEngine('H1');
 
   const requestedMode = (mode || process.env['JADAPTER_MODE'] || 'rpc').toLowerCase();
   const runAll = !single && (!scenario || scenario === 'all');
@@ -435,7 +430,7 @@ async function main() {
   }
 
   if (!scenario) {
-    console.log('Usage: bun core/scenarios/run.ts [all|<scenario>] [--hub-engine=ts|rust] [--mode=browservm|rpc] [--rpc=URL] [--workers=N] [--trail=DIR|FILE] [--input-trace=FILE] [--recording=FILE]');
+    console.log('Usage: bun core/scenarios/run.ts [all|<scenario>] [--hub-engine=ts] [--mode=browservm|rpc] [--rpc=URL] [--workers=N] [--trail=DIR|FILE] [--input-trace=FILE] [--recording=FILE]');
     console.log(`\nAvailable scenarios: ${availableScenarioIds().join(', ')}`);
     process.exitCode = 1;
     return;

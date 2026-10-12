@@ -90,10 +90,6 @@ import {
 import { applyAccountInput } from '../../../account/consensus';
 import { requireAccountDeltaTransformerAddress } from '../../../account/consensus/helpers';
 import { resolveInboundAccount } from '../../tx/handlers/account/inbound-account';
-import {
-  noteAuthorityAccountProposal,
-  noteAuthorityAccountProposalResult,
-} from '../../../rscore/authority-wave';
 import { createAccountConsensusContext } from '../../account/account-consensus-context';
 import { getEntityFrameTxByteBudgetError } from '../frame';
 import { invalidateEntityAccountCommitment } from '../state-root';
@@ -577,21 +573,6 @@ const proposeAccountFrameCandidate = async (
   const authorityPrepared = context.accountConsensusContext.accountAuthorityExecutionScope
     ?.hasPreparedAccountProposal?.(accountKey) === true;
   if (!authorityPrepared && !accountHasProposableMempool(account, state)) return undefined;
-  // The clock a proposal is built with belongs to this Entity, not to the
-  // Runtime frame: a wave carries one clock, so which unit that wave covers
-  // depends on whether an Entity ever uses two inside one Runtime frame.
-  const authorityProposal = noteAuthorityAccountProposal(
-    context.accountConsensusContext.accountAuthorityFrameId,
-    state.entityId,
-    accountKey,
-    state.timestamp,
-    state.lastFinalizedJHeight,
-    crossJOpeningProposalTxs === undefined || (
-      crossJOpeningProposalTxs.length === account.mempool.length
-      && crossJOpeningProposalTxs.every((tx, index) =>
-        safeStringify(tx) === safeStringify(account.mempool[index]))
-    ),
-  );
   const proposal = await proposeAccountFrame(
     context.accountConsensusContext,
     account,
@@ -599,7 +580,6 @@ const proposeAccountFrameCandidate = async (
     state.lastFinalizedJHeight,
     crossJOpeningProposalTxs,
   );
-  noteAuthorityAccountProposalResult(authorityProposal, proposal);
   if ('accountChanged' in proposal && proposal.accountChanged) {
     recordFrameAccountChange(storageChanges, state.entityId, accountKey);
   }

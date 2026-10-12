@@ -18,8 +18,8 @@ bun build core/api/public/browser.ts --target=browser --outfile="$OUT" --minify 
   --external net --external tls --external os --external util \
   --external node:module
 
-echo "[build-runtime] bundling core/rscore/ts-worker/worker.ts -> $WORKER_OUT"
-bun build core/rscore/ts-worker/worker.ts --target=browser --outfile="$WORKER_OUT" --minify \
+echo "[build-runtime] bundling core/runtime/workers/account/worker.ts -> $WORKER_OUT"
+bun build core/runtime/workers/account/worker.ts --target=browser --outfile="$WORKER_OUT" --minify \
   --define 'process.env.NODE_ENV="production"' \
   --external http --external https --external zlib \
   --external fs --external path \

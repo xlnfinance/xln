@@ -1,0 +1,175 @@
+{
+  "schemaVersion": 1,
+  "title": "Public Sepolia P6 stale-state defense, external tower finalization and cold recovery",
+  "status": "partial-p6-chain-tower-local-recovery-pass-deployed-hub-failed",
+  "mainnetReady": false,
+  "sourceBinding": {
+    "clientSha": "d388464dbeb3cd3cdca7c9e5b33302aa36dcc33e",
+    "clientCleanBefore": true,
+    "clientCleanAfter": true,
+    "clientBasis": "Root orchestration; the integrity export embeds the client SHA. Evidence packaging occurs afterward and is not the execution commit.",
+    "deployedSourceSha": "7c3f63f9841f4e8b61ac5eee5dbe4f9710b10621",
+    "deployedBasis": "Parent-reported deployed runtime/tower source, corroborated by the failure excerpt. The deployed hub failed processing this run; the current client SHA was not deployed.",
+    "sourceDeploymentPerformed": false,
+    "verifierSourceFiles": [{"path":"jurisdictions/scripts/public-p6-chain.ts","sha256":"969cbc1cca38b14ad06e2238a31faabf83170b2698a199d737fbbc0a475b4d5f"},{"path":"jurisdictions/scripts/public-p6-runtime.ts","sha256":"93ac9202d8621d1079cf18f1a057eab8c522bf3d66e48186cd5e6a50a7c42087"}]
+  },
+  "appointment": {
+    "failedArtifact": "appointment-resume",
+    "initialHttpStatus": 400,
+    "initialError": "WATCHTOWER_RPC_URL_NOT_ALLOWED:https://sepolia.xln.finance/rpc",
+    "acceptedArtifact": "appointment-accepted",
+    "httpStatusAfterConfigFix": 200,
+    "sequence": 3,
+    "bundleHash": "0xc435e38b52f1a62c0f555d3de3bb0b43a92763a0fe5231de55bfd4ba46f6d5aa",
+    "appointedAtBlock": 11897513,
+    "walletRuntimeHeight": 141,
+    "ownerNonce": 1,
+    "scope": "The same pending appointment was retried after configuration repair. Only its public receipt/hash metadata is archived; no bundle or private pending/prepared file."
+  },
+  "towerLaunchChange": {
+    "path": "/var/lib/xln/sepolia-20261011/start-watchtower.sh",
+    "scope": "Launch RPC allowlist only; no source redeploy.",
+    "beforeSha256": "4a18d2e635fd567b5d73c7f5fedbd6c837a2e6624e1f9665a26b4d99c1d05841",
+    "afterSha256": "3c844fb418c42b9e11f07213858ff614bc998cb82cb85bc3b7d8edad2da6580e",
+    "before": "Publicnode only",
+    "after": "Publicnode plus https://sepolia.xln.finance/rpc",
+    "backupSuffix": ".before-p6-rpc-20261012",
+    "backupMode": "0600",
+    "validation": "Root reports bash -n and the exact allowlist after PM2 restart passed.",
+    "evidenceClass": "Parent-reported remote tool output; no independently captured remote validation log is included."
+  },
+  "startFalseNegative": {
+    "artifact": "attack",
+    "error": "PUBLIC_P6_START_NOT_OBSERVED",
+    "processExitCode": 1,
+    "receiptArtifact": "start-receipt",
+    "recoveredArtifact": "start-recovered",
+    "receiptStatus": 1,
+    "startTransactionHash": "0xaa5551b66dd87094c6e0094091eda48053f2f203418f2e43a4d8c3547fc2fb7a",
+    "accountReadArtifact": "start-account-read",
+    "accountReadBlock": 11897517,
+    "accountReadsAgree": true,
+    "disputeHash": "0xc08d0941fc94b55b63ba03cea495af0a5c1102ab34474eea1ff01d92aba6573b",
+    "meaning": "The original start transaction succeeded. Read-only receipt/account evidence recovered the observation; the failed command was not treated as an on-chain revert.",
+    "financialTransactionResubmitted": false,
+    "resubmissionBasis": "Parent execution report and the single original start hash retained throughout."
+  },
+  "chain": {
+    "chainId": 11155111,
+    "depository": "0x4e7333463cDde39AA58587D58AF3f66757117f61",
+    "entityId": "0xd0aa872e92c2d6c5dc913ab4ee3600b1b144c097d898d29b23bb7aa63b881909",
+    "counterpartyId": "0x2d08d3bb8f4102fb07fecef0b59f052139c99aa996239ebfc55baac82ac54dd6",
+    "tokenId": 1,
+    "units": "Raw token units; no fiat/decimal conversion.",
+    "startTimestamp": "1791791580",
+    "timeoutTimestamp": "1791791940",
+    "leftResponseSeconds": "180",
+    "rightResponseSeconds": "180",
+    "realClock": "Public Sepolia block timestamps; no local time warp in this run."
+  },
+  "receipts": [
+    {"kind":"start","hash":"0xaa5551b66dd87094c6e0094091eda48053f2f203418f2e43a4d8c3547fc2fb7a","block":11897517,"gasUsed":"1161420","status":1},
+    {"kind":"counter","hash":"0x9b16736ee06cfb9ec57415ca374ec0819e628a640b839d09533960130d389548","block":11897542,"gasUsed":"460487","from":"0x50C7fB1565988EB94bca5c525C4E5431A48cF9A4","status":1,"statusEvidence":"Observer rejects missing/failed receipts or a sender other than the configured tower."},
+    {"kind":"finalize","hash":"0xa1312911658e70ff62f7f3dc5ed9a4d292ac8fde9efc25fbea865eb9c007abf1","block":11897550,"gasUsed":"250134","from":"0x50C7fB1565988EB94bca5c525C4E5431A48cF9A4","status":1,"statusEvidence":"Observer rejects missing/failed receipts or a sender other than the configured tower."}
+  ],
+  "finalChainObservation": {
+    "artifact": "observe-3",
+    "verified": true,
+    "block": 11897551,
+    "timestamp": 1791791988,
+    "accountNonce": "3",
+    "reserveRaw": "200000000",
+    "collateralRaw": "0",
+    "tower": "0x50C7fB1565988EB94bca5c525C4E5431A48cF9A4",
+    "verification": "Pinned-block reads plus counter/final events matching the prepared latest proof hash and peer nonce; both transaction receipts must have status 1 and tower sender. The actual private prepared proof bundle is excluded."
+  },
+  "coldRestore": {
+    "artifact": "final-cold-restore",
+    "processExitCode": 0,
+    "runtimeHeight": 142,
+    "postStateHash": "0xd3572f1f125cbb96b6c22f89099ee4262578481671b42be21d8f81efaeb51bd9",
+    "reserveRaw": "200000000",
+    "collateralRaw": "0",
+    "activeDispute": false,
+    "accountPendingFrame": false,
+    "accountMempoolLength": 0,
+    "certifiedAndContiguousHeight": 11897553,
+    "scannedThroughHeight": 11897553,
+    "semanticCursor": "11897392",
+    "watchStartBlock": 11897393,
+    "scope": "Independent offline reconstruction after recovery; these are persisted-state observations, not just the final live sample."
+  },
+  "integrity": {
+    "artifact": "integrity",
+    "ok": true,
+    "checkedFrames": 127,
+    "latestHeight": 142,
+    "runtimeId": "0x6eae5b64f1887d60ccc2fde8bceaf3b281edf296",
+    "source": "Root exported only allowlisted public result fields from the private recovered.json; the source private file was not opened or copied by this packager.",
+    "scope": "127 stored frames passed storage integrity checks through latestHeight 142; this is not a full external security audit or a separate replay gate."
+  },
+  "transportTail": {
+    "artifact": "recover",
+    "undeliverableOutbox": 1,
+    "targetRuntime": "0xbe7597d3532df7293b0f0ff82ee0c30fb2fd2737",
+    "websocketError": "wss://sepolia.xln.finance/ws: Expected 101 status code",
+    "pendingNetworkAfter": 1,
+    "limitation": "Financial finalization and local client cold recovery passed, but the deployed hub failed and the whole runtime/network was not quiescent. Account pendingFrame=false is not an empty global outbox. The separate deployed-hub excerpt records the production outage; no causal explanation of every WS error is assumed."
+  },
+  "localCheck": {
+    "artifact": "receipt-error-check",
+    "command": "bun run check",
+    "sourceGates": 38,
+    "outerParallelGates": 3,
+    "scope": "Local check on client source; not full CI or a full browser E2E suite."
+  },
+  "remainingGates": [
+    "Resolve deployed hub event-processing failures and verify recovery on the intended deployed candidate",
+    "Owner exception for frozen fixture imports",
+    "Full CI on the intended merge candidate",
+    "Transport/outbox tail resolution",
+    "Release package and owner signing"
+  ],
+  "secretReview": {
+    "copiedLogs": 13,
+    "allowlistedIntegrityExports": 1,
+    "sensitiveAssignmentCandidates": 0,
+    "includedPublicSeedField": "DisputeStarted.watchSeed is already public on-chain event data, not a wallet/mesh signing seed.",
+    "excluded": "Private pending/prepared files, appointment bundle contents, signing/mesh seeds, private keys, raw WAL and profile directories.",
+    "inspection": "Targeted content review plus sensitive-assignment/path scan; no general secret-detection guarantee."
+  },
+  "limitations": [
+    "One concrete chain/tower/local-wallet P6 execution passed on the stated client/server/config combination, while the deployed hub failed. Neither entire production P6 nor mainnet readiness is established.",
+    "No new financial transaction was submitted by packaging; observations preserve both original operational failures.",
+    "Diagnostic commands reference ignored harnesses and private inputs intentionally excluded from the archive; they are provenance, not a standalone public reproducer.",
+    "Receipt/account-read inline commands absent from logs remain command:null; none was invented."
+  ],
+  "artifacts": [
+    {"id":"appointment-resume","file":"public-p6-d388464db-appointment-resume.log.gz","sha256":"b70835ac35b03c137aad1f0c39e4876aeff1de7a0d0b3abb2cca1df4793f6e28","bytes":597,"rawSha256":"18223ec0332f14216dec238a04a658aa66847147e8b8de676767f13097adcedd","rawBytes":1216,"command":"bun tools/stand-lock.ts run --reason \"p6-resume-appointment\" --timeout-ms \"60000\" -- bun \".logs/crisis-20261011/resume-public-p6-appointment.ts\""},
+    {"id":"appointment-accepted","file":"public-p6-d388464db-appointment-accepted.log.gz","sha256":"f15a67c5a5cf2d03825d3dcaacb3048a1260e6035b223225709d31d9e9e9382f","bytes":367,"rawSha256":"ec4b38a1834acf2fd7fc4c115b46154b2a867671cb5d30c593df4743bccdd21a","rawBytes":542,"command":"bun tools/stand-lock.ts run --reason \"p6-retry-exact-appointment-after-config-fix\" --timeout-ms \"60000\" -- bun \".logs/crisis-20261011/upload-pending-p6-appointment.ts\""},
+    {"id":"attack","file":"public-p6-d388464db-attack.log.gz","sha256":"d6858ce2cae650a47046dfb9042d6e59ef885df18069394f5d92efaceed50eaa","bytes":499,"rawSha256":"6356da90d9b5d1734b30f6916e294629ca9cea9b6ef751330c95c8aad659cb70","rawBytes":898,"command":"bun tools/stand-lock.ts run --reason \"public-p6-stale-state-start\" --timeout-ms \"180000\" -- bun \".logs/crisis-20261011/run-public-p6.ts\" attack"},
+    {"id":"start-receipt","file":"public-p6-d388464db-start-receipt.log.gz","sha256":"4c49821abe3f9f21dbc68c97a8545e9d4445affd85b9288e9b971ae584f4b450","bytes":639,"rawSha256":"9dc82e96a48c2794d608ca863bf58e18aeccff06629a733ee27d190da3e473d2","rawBytes":1381,"command":null},
+    {"id":"start-account-read","file":"public-p6-d388464db-start-account-read.log.gz","sha256":"7d20ca897245b7ed7368dbbc555c4fc7e69f6507f6b2bf34a074868c24ac03d9","bytes":581,"rawSha256":"95df2ee460ae691eed2dae8253917e6c8ba066158494f20b722374347d4c774f","rawBytes":2874,"command":null},
+    {"id":"start-recovered","file":"public-p6-d388464db-start-recovered.log.gz","sha256":"1f0d4e9614d7d5f6687371e8b30dc1948f820eb76cbc1f5d733c960fb5a201a5","bytes":204,"rawSha256":"8659e3428171ff70fef08e81a67b18d675f2187c49264ec42b48d661f2bd7ab7","rawBytes":268,"command":null},
+    {"id":"observe-1","file":"public-p6-d388464db-observe-1.log.gz","sha256":"e6ff56f2c0345dae3b8b7f86bea00c8cd33d7fcccea8ec9ea5d6ebbb64c451c3","bytes":260,"rawSha256":"b78a679b31bf224f8604d76b6cf8091a35cce2f6a306e8522ccda8fb3e58ae48","rawBytes":437,"command":"bun tools/stand-lock.ts run --reason \"public-p6-external-tower-observation\" --timeout-ms \"60000\" -- bun \".logs/crisis-20261011/run-public-p6.ts\" observe"},
+    {"id":"observe-2","file":"public-p6-d388464db-observe-2.log.gz","sha256":"f129a16d3db4021cbbaf349ee00db1e481fa9f16b1743a967d56dee8f1a85aa7","bytes":376,"rawSha256":"d0c1f85b02e5161bcf9ba94765e073725ddd183847951aa7d73bac5759d29a9e","rawBytes":642,"command":"bun tools/stand-lock.ts run --reason \"public-p6-last-resort-window\" --timeout-ms \"60000\" -- bun \".logs/crisis-20261011/run-public-p6.ts\" observe"},
+    {"id":"observe-3","file":"public-p6-d388464db-observe-3.log.gz","sha256":"457b09dc47742f89c785ce43d82e656ab8be5657618d54d4a8ea61a007d19dd0","bytes":445,"rawSha256":"48b69ffcbd5dea692cbf5071ecd7d70de952965b08d80662d35429d5c764bdd4","rawBytes":854,"command":"bun tools/stand-lock.ts run --reason \"public-p6-finalization-observation\" --timeout-ms \"60000\" -- bun \".logs/crisis-20261011/run-public-p6.ts\" observe"},
+    {"id":"recover","file":"public-p6-d388464db-recover.log.gz","sha256":"c0348926de38f3a1cd20db327fb234d32b09c295f8e328ec6f82d2ae0ed16b8b","bytes":2830,"rawSha256":"d8367f799d3cc5a9f051bc4a7f45a0eef65d4c5000afca328764745d9f6fb004","rawBytes":26894,"command":"bun tools/stand-lock.ts run --reason \"public-p6-runtime-recovery\" --timeout-ms \"180000\" -- bun \".logs/crisis-20261011/run-public-p6.ts\" recover"},
+    {"id":"final-cold-restore","file":"public-p6-d388464db-final-cold-restore.log.gz","sha256":"0a88c0ad5571f241656df91192f0dd17de570bdb9c29cc0812e2567edf00cf57","bytes":590,"rawSha256":"b1cda38c200cd078aa5c4f4da4f5a77f64d7f4fee845274624622b05460cf148","rawBytes":993,"command":"bun tools/stand-lock.ts run --reason \"p6-final-cold-restore\" --timeout-ms \"60000\" -- bun \".logs/canonical-review-20261012/diagnose-p6-restored-cursor.ts\""},
+    {"id":"receipt-error-check","file":"public-p6-d388464db-receipt-error-check.log.gz","sha256":"b06e13591b36f90822088b30336519987f86074c858c736bcad48a9a2cdc6e0c","bytes":14884,"rawSha256":"397bed1e752aa8e46b90112cbb2efd65b32c57e130841b166fbc74acafbd04af","rawBytes":116961,"command":"bun run check:short && bun run check:long"},
+    {"id":"integrity","file":"public-p6-d388464db-integrity.json","sha256":"205074a2134fcf8011ab6554f09a13e3186bd7b334a47af4d93e4eb4c21a83c2","bytes":369,"command":null},
+    {"id":"deployed-hub-failure","file":"public-p6-d388464db-deployed-hub-failure.log.gz","sha256":"efc1c50ceb4315286e0130cbc3d724c976223081f28da2e0d4b1a7b486655b08","bytes":735,"rawSha256":"8168a0d25f7a623f62700a5fe01c26897395eb171a1acd581939f49cdfa19c71","rawBytes":1870,"command":null,"source":"Root-captured remote hub/orchestrator crash excerpt; no private diagnostic receipt file was copied."}
+  ],
+  "deployedHubFailure": {
+    "artifact": "deployed-hub-failure",
+    "sourceSha": "7c3f63f9841f4e8b61ac5eee5dbe4f9710b10621",
+    "productionP6Passed": false,
+    "deployedHubRecoveryPassed": false,
+    "firstFailure": {"utc":"2026-10-12T07:58:26","block":11897542,"step":"processEventBatch:11897542","error":"DataCloneError: The object can not be cloned."},
+    "finalizationFailure": {"utc":"2026-10-12T08:01:03","block":11897550,"transactionHash":"0xa1312911658e70ff62f7f3dc5ed9a4d292ac8fde9efc25fbea865eb9c007abf1","error":"J_EVENT_LOG_DECODE_FAILED / J_DISPUTE_FINALIZATION_EVIDENCE_NOT_FOUND"},
+    "failStop": {"utc":"2026-10-12T08:01:04","child":"H1","identicalFailureCount":3,"action":"fail-stop"},
+    "laterHealth": {"observedUtc":"2026-10-12T08:11","publicRpcHttpStatus":502,"pm2Hub":"xln-sepolia stopped","pm2Tower":"online","evidence":"Parent-reported health/PM2 tool observation; not embedded in the archived crash excerpt."},
+    "scope": "Chain receipts, tower counter/finalization, and local d388 wallet recovery remain verified. Recovery of the deployed 7c hub fails, so the entire public production P6 path is NOT green.",
+    "intervention": "No subsequent source promotion or restart is asserted by this evidence update."
+  }
+}

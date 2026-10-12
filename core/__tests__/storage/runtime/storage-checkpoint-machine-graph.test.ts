@@ -164,6 +164,9 @@ test('canonical frames materialize the Runtime-machine graph only at a barrier',
     expect(env.persistenceLastMaterializedHeight).toBe(4);
     expect(await runtimeMachineKeys()).toEqual(nextKeys);
     expect(await getRuntimeWalDb(env).get(adjacentSentinelKey)).toEqual(adjacentSentinelValue);
+    // The range-deletion sentinel is deliberately in the adjacent retired
+    // namespace; remove it before certifying this as a TS-only WAL.
+    await getRuntimeWalDb(env).del(adjacentSentinelKey);
     expect((await readStorageFramePayloads(getRuntimeWalDb(env), materialized)).runtimeMachine)
       .toBeUndefined();
     await expect(readStorageFramePayloads(
@@ -237,18 +240,6 @@ test('a non-quiescent due frame cannot advance the checkpoint cursor', async () 
       snapshotPeriodFrames: 100,
     },
   };
-  let checkpointsPrepared = 0;
-  const materializedCompletions: boolean[] = [];
-  const accountAuthority = {
-    prepareCheckpoint: async () => {
-      checkpointsPrepared += 1;
-      return [];
-    },
-    validateCheckpointMaterialization: async () => {},
-    afterWalCommit: async (materialized: boolean) => {
-      materializedCompletions.push(materialized);
-    },
-  };
 
   try {
     env.state.height = 1;
@@ -273,10 +264,8 @@ test('a non-quiescent due frame cannot advance the checkpoint cursor', async () 
       { runtimeTxs: [], entityInputs: [] },
       [],
       new Map(),
-      accountAuthority,
     );
-    expect(checkpointsPrepared).toBe(0);
-    expect(materializedCompletions).toEqual([false]);
+    expect((await readStorageFrameRecord(getRuntimeWalDb(env), 3))?.materializedState).toBe(false);
     expect(env.persistenceLastMaterializedHeight).toBe(1);
     expect(await readStorageHead(getRuntimeWalDb(env))).toMatchObject({
       latestHeight: 3,
@@ -291,10 +280,8 @@ test('a non-quiescent due frame cannot advance the checkpoint cursor', async () 
       { runtimeTxs: [], entityInputs: [] },
       [],
       new Map(),
-      accountAuthority,
     );
-    expect(checkpointsPrepared).toBe(1);
-    expect(materializedCompletions).toEqual([false, true]);
+    expect((await readStorageFrameRecord(getRuntimeWalDb(env), 4))?.materializedState).toBe(true);
     expect(env.persistenceLastMaterializedHeight).toBe(4);
     expect(await readStorageHead(getRuntimeWalDb(env))).toMatchObject({
       latestHeight: 4,

@@ -1,0 +1,67 @@
+{
+  "conclusion": "success",
+  "createdAt": "2026-10-12T04:02:45Z",
+  "databaseId": 38202183279,
+  "headSha": "8d7f1e7428e95c52bb4244b90418909e311d3aa9",
+  "jobs": [
+    {
+      "completedAt": "2026-10-12T04:05:07Z",
+      "conclusion": "success",
+      "name": "Contracts",
+      "startedAt": "2026-10-12T04:02:49Z",
+      "status": "completed",
+      "url": "https://github.com/xlnfinance/xln/actions/runs/38202183279/job/114657773232"
+    },
+    {
+      "completedAt": "2026-10-12T04:03:43Z",
+      "conclusion": "success",
+      "name": "React Wallet Types",
+      "startedAt": "2026-10-12T04:02:49Z",
+      "status": "completed",
+      "url": "https://github.com/xlnfinance/xln/actions/runs/38202183279/job/114657773339"
+    },
+    {
+      "completedAt": "2026-10-12T04:19:00Z",
+      "conclusion": "success",
+      "name": "Unit Tests",
+      "startedAt": "2026-10-12T04:02:48Z",
+      "status": "completed",
+      "url": "https://github.com/xlnfinance/xln/actions/runs/38202183279/job/114657773340"
+    },
+    {
+      "completedAt": "2026-10-12T04:04:27Z",
+      "conclusion": "success",
+      "name": "Frontend Build",
+      "startedAt": "2026-10-12T04:02:49Z",
+      "status": "completed",
+      "url": "https://github.com/xlnfinance/xln/actions/runs/38202183279/job/114657773348"
+    },
+    {
+      "completedAt": "2026-10-12T04:05:57Z",
+      "conclusion": "success",
+      "name": "Runtime Checks",
+      "startedAt": "2026-10-12T04:02:49Z",
+      "status": "completed",
+      "url": "https://github.com/xlnfinance/xln/actions/runs/38202183279/job/114657773420"
+    },
+    {
+      "completedAt": "2026-10-12T04:03:53Z",
+      "conclusion": "success",
+      "name": "Scenario lock-ahb",
+      "startedAt": "2026-10-12T04:02:49Z",
+      "status": "completed",
+      "url": "https://github.com/xlnfinance/xln/actions/runs/38202183279/job/114657773437"
+    },
+    {
+      "completedAt": "2026-10-12T04:27:47Z",
+      "conclusion": "success",
+      "name": "E2E Tests",
+      "startedAt": "2026-10-12T04:06:00Z",
+      "status": "completed",
+      "url": "https://github.com/xlnfinance/xln/actions/runs/38202183279/job/114658428873"
+    }
+  ],
+  "status": "completed",
+  "updatedAt": "2026-10-12T04:27:48Z",
+  "url": "https://github.com/xlnfinance/xln/actions/runs/38202183279"
+}

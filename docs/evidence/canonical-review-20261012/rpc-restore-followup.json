@@ -1,0 +1,115 @@
+{
+  "scope": "TS Ethereum RPC catch-up and React tower restore; Rust/lending unchanged",
+  "fixes": [
+    {
+      "commit": "019944e3d16b2a2d838adfc2754d05f172fbcfc9",
+      "behavior": "RPC pressure uses the existing shrinking poll window; no authenticated range is skipped. Production source diff is -3 lines net."
+    },
+    {
+      "commit": "0ff079f41f282e1e2204443f42e774c329c3632d",
+      "behavior": "Restore expectations bind to the snapshot actually selected by discovery; canonical roots, Accounts, reload, overwrite rejection and payment remain asserted."
+    }
+  ],
+  "verification": [
+    {
+      "sourceSha": "50281daaa45cac71ca68dd5e408184290b3b7616",
+      "cleanBefore": true,
+      "cleanAfter": true,
+      "standLocked": true,
+      "command": "bun run stand:run --reason rpc-pressure-clean-sha --timeout-ms 60000 -- bun test core/__tests__/jurisdiction/watchers/j-watcher-backlog-drain.test.ts core/__tests__/jurisdiction/watchers/j-watcher-poll-policy.test.ts core/__tests__/jurisdiction/adapter/jadapter-watcher-ingress.test.ts core/__tests__/jurisdiction/rpc/rpc-batch-timeout.test.ts",
+      "passed": 60,
+      "failed": 0,
+      "assertions": 284,
+      "wallSeconds": 13.79
+    },
+    {
+      "sourceSha": "0ff079f41f282e1e2204443f42e774c329c3632d",
+      "cleanBefore": true,
+      "cleanAfter": true,
+      "standLocked": true,
+      "command": "XLN_LOCAL_PROD_SMOKE_WALLET_TESTS=e2e-tower-restore.spec.ts bun run stand:run --reason tower-restore-selected-snapshot --timeout-ms 180000 -- bun run prod:smoke:local",
+      "passed": 1,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "browserDurationMs": 23284.267,
+      "selection": {
+        "initialCoverageHeight": 17,
+        "selectedHeight": 17,
+        "bundleHash": "0x855647bf836e5656381a0b6dbe0508b9a3dfdbb99e433135f7007c7dbc23c1d2"
+      }
+    },
+    {
+      "sourceSha": "0ff079f41f282e1e2204443f42e774c329c3632d",
+      "cleanBefore": true,
+      "cleanAfter": true,
+      "command": "bun run check",
+      "sourceGates": 38,
+      "exitCode": 0
+    },
+    {
+      "sourceSha": "999396327630ea3ebe6d92046d5330ad0eebc31e",
+      "cleanBefore": true,
+      "cleanAfter": true,
+      "command": "bun run check",
+      "sourceGates": 38,
+      "exitCode": 0
+    }
+  ],
+  "regressionReproduction": {
+    "releaseEvidence": false,
+    "reason": "Diagnostic run used new test with the unchanged pre-fix controller in a dirty tree.",
+    "expectedWindow": 512,
+    "actualWindow": 2048,
+    "result": "failed at exact header-range comparison after real HTTP 429 and timeout"
+  },
+  "priorCI": {
+    "runs": [
+      38197082078,
+      38198105230,
+      38198345234
+    ],
+    "conclusion": "failure",
+    "failedTest": "e2e-tower-restore.spec.ts",
+    "cause": "Expected frame13 or15 was below the actual restored snapshot baseline; both PR failures predate the fix."
+  },
+  "publicP6": {
+    "sourceSha": "50281daaa45cac71ca68dd5e408184290b3b7616",
+    "cleanBefore": true,
+    "cleanAfter": true,
+    "standLocked": true,
+    "result": "failed",
+    "error": "PUBLIC_P6_WAIT_FAILED:reserve-funded",
+    "rpc": "https://sepolia.xln.finance/rpc",
+    "rpcFailures": [
+      "RPC_BATCH_TIMEOUT:5000"
+    ],
+    "fundingRequests": 0,
+    "confirmedTestReserve": "200000000",
+    "tokenDecimals": 6,
+    "attackSubmitted": false,
+    "limitation": "Public RPC catch-up did not reach the funding event within 60 seconds. This is not public P6 acceptance."
+  },
+  "logs": [
+    {
+      "path": "docs/evidence/canonical-review-20261012/rpc-pressure-50281daaa.log.gz",
+      "sha256": "37c7139fc6b6232c7b6a2c7e42baa812281baf72e1620b9b13c97fb45f9393cb"
+    },
+    {
+      "path": "docs/evidence/canonical-review-20261012/tower-restore-0ff079f41.log.gz",
+      "sha256": "1d283778b26343d5ba681e5959e2d1e5f87f61965bb6f97a76de96719cf3ee4f"
+    },
+    {
+      "path": "docs/evidence/canonical-review-20261012/check-0ff079f41.log.gz",
+      "sha256": "dff8dd0a34f1956e1eda85cde5c00721e9e62f71cb3b4f1252b0c7f6e45ec659"
+    },
+    {
+      "path": "docs/evidence/canonical-review-20261012/check-999396327.log.gz",
+      "sha256": "d36b3fd35d1011c7c8296a49500641a99180bf5ee4bd6fa3c6009a1ddd18a6d3"
+    },
+    {
+      "path": "docs/evidence/canonical-review-20261012/public-p6-50281daaa.log.gz",
+      "sha256": "1a497441e065723cf6078acd4c9175e60bae167c43997c3e9acc8f0df46e17e6"
+    }
+  ]
+}

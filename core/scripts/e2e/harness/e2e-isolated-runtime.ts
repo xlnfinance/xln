@@ -4,7 +4,6 @@ import { existsSync, readFileSync, statSync } from 'node:fs';
 import { freemem, loadavg, totalmem } from 'node:os';
 import { join, resolve } from 'node:path';
 import { compareStableText } from '../../../protocol/serialization';
-import { canonicalHubEngine } from '../../../orchestrator/process/hub-engine-plan';
 import { sanitizeChildProcessEnv } from '../../../api/server/child-process-env';
 import type {
   QaCodeFingerprint,
@@ -50,27 +49,7 @@ export type E2EShardPaths = {
   browserEventsPath: string;
 };
 
-export type E2ENativeExecutable = { path: string; sha256: string };
-
-/** Capture the exact configured launch executable after build, not an inferred source identity. */
-export const captureE2ENativeExecutable = (
-  env: Readonly<Record<string, string | undefined>> = process.env,
-): E2ENativeExecutable | null => {
-  if (canonicalHubEngine('H1', env) !== 'rust') return null;
-  const path = resolve(env['XLN_RSCORE_BINARY'] || 'rscore/target/release/xlnrs');
-  return { path, sha256: createHash('sha256').update(readFileSync(path)).digest('hex') };
-};
-
-export const assertE2ENativeExecutableStable = (expected: E2ENativeExecutable | null | undefined): void => {
-  if (!expected) return;
-  const actual = createHash('sha256').update(readFileSync(expected.path)).digest('hex');
-  if (actual !== expected.sha256) {
-    throw new Error(`E2E_NATIVE_EXECUTABLE_DRIFT:path=${expected.path}:expected=${expected.sha256}:actual=${actual}`);
-  }
-};
-
 export type E2EBuildArtifacts = {
-  nativeExecutable?: E2ENativeExecutable | null;
   cacheRoot: string;
   publicDir: string;
   runtimeBundlePath: string;
@@ -159,12 +138,14 @@ export const isE2EBuildInputPath = (file: string): boolean => {
 
 const E2E_GENERATED_OUTPUTS = new Set([
   'frontend/static/runtime.js',
+  'frontend/static/account-worker.js',
   'ui/public/runtime.js',
+  'ui/public/account-worker.js',
 ]);
 
 export const isE2ECodeInputPath = (file: string): boolean => {
   const path = file.replaceAll('\\', '/').replace(/^\.\//, '');
-  // These tracked bundles are outputs, not candidate authority. Dev watchers may
+  // These generated bundles are outputs, not candidate authority. Dev watchers may
   // rebuild them while an isolated run uses its own immutable runtime bundle.
   return !E2E_GENERATED_OUTPUTS.has(path);
 };

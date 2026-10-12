@@ -7,9 +7,7 @@ import { getLiveJAdapter, getLiveJAdapterEntries } from '../j-submit/live-jadapt
 
 const watcherLog = createStructuredLogger('runtime.jadapter-watcher');
 
-const getProviderUrl = (adapter: JAdapter, replica: JReplica): string => {
-  const configured = replica.rpcs?.find(rpc => typeof rpc === 'string' && rpc.trim().length > 0);
-  if (configured) return configured.trim();
+const getProviderUrl = (adapter: JAdapter): string => {
   const provider = adapter.provider as Provider & {
     _getConnection?: () => { url?: string };
   };
@@ -29,7 +27,7 @@ const getWatcherKey = (replica: JReplica, adapter: JAdapter): string => {
   if (adapter.mode === 'browservm') {
     return `browservm:${chainId}:${depository || replica.name}`;
   }
-  return `rpc:${chainId}:${getProviderUrl(adapter, replica).toLowerCase()}:${depository || replica.name}`;
+  return `rpc:${chainId}:${getProviderUrl(adapter).toLowerCase()}:${depository || replica.name}`;
 };
 
 export const startJurisdictionWatchers = (env: RuntimeReplica): void => {

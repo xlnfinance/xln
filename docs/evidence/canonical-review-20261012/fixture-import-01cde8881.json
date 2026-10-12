@@ -1,0 +1,58 @@
+{
+  "sourceSha": "01cde8881008a6fdd93584cd3ef387918621553f",
+  "cleanSource": true,
+  "ownerAuthorization": "Single TS worker import in rscore/fixtures/entity-resident-group-e/group-e.ts; broader Rust freeze remains.",
+  "commands": [
+    "bun test core/__tests__/payments/settlement/",
+    "bun test core/__tests__/operations/health/prod-startup-wiring-part-2.test.ts core/__tests__/testing/scenarios/scenario-engine-selection.test.ts",
+    "bun run check"
+  ],
+  "tests": 157,
+  "failures": 0,
+  "assertions": 1565,
+  "sourceGates": 38,
+  "sourcePhaseMs": 28518,
+  "artifacts": [
+    {
+      "name": "settlement",
+      "file": "fixture-import-01cde8881-settlement.log.gz",
+      "tests": 97,
+      "assertions": 528,
+      "durationMs": 2670,
+      "exitCode": 0,
+      "bytes": 4628,
+      "sha256": "39d50fd0ae1bc0069e274db0794cef8cd9ea3eaba0aba48c5598959481a13ae5",
+      "rawBytes": 16282,
+      "rawSha256": "07e2fa91ae87fc8cbf0b6256c342e1d514a5535ea84da015e7d4b9ac27059b87"
+    },
+    {
+      "name": "former-ci-red",
+      "file": "fixture-import-01cde8881-former-ci-red.log.gz",
+      "tests": 60,
+      "assertions": 1037,
+      "durationMs": 859,
+      "exitCode": 0,
+      "bytes": 2350,
+      "sha256": "4592179c22456467c3ad467df3f9a787a8e81a5e65457b6b4ff6a966a55dfec5",
+      "rawBytes": 7151,
+      "rawSha256": "01eef2725791a89875a18d44c627aa3a39ce2acca786e6228bffa0571283f757"
+    },
+    {
+      "name": "check",
+      "file": "fixture-import-01cde8881-check.log.gz",
+      "tests": null,
+      "assertions": null,
+      "durationMs": null,
+      "exitCode": 0,
+      "bytes": 15360,
+      "sha256": "23404be76e0da79c5f2368dcfe213db5bffba92e9139f3b45835a5aa60659fff",
+      "rawBytes": 116963,
+      "rawSha256": "fda65459f4fe8d3cc38347639f61373a253dd8a6c5292270eeb33b045c2f8091"
+    }
+  ],
+  "limitations": [
+    "No new Rust execution or implementation changes.",
+    "No new deployment or public-chain transaction.",
+    "Full required PR CI must run on the pushed candidate."
+  ]
+}

@@ -2,14 +2,15 @@ import type { RuntimeReplica } from '../../../runtime/types';
 import type { JAdapter } from '../../../jurisdiction/adapter';
 import { DEV_CHAIN_IDS } from '../../../jurisdiction/adapter';
 import { createStructuredLogger } from '../../../support/logger';
+import { getPerfMs } from '../../../support/time';
 import { getEntityReplicaById } from '../entities/lookup';
 import { withRuntimeCommittedRead } from '../../../runtime/frame/lifecycle/writer-lock';
 import { createBoundedLock } from '../../../support/bounded-lock';
 
 const faucetLog = createStructuredLogger('server.faucet');
 
-// One reserve request at a time; each holds the lock through up to ~45 s of
-// chain waits, so the queue and the wait for it are bounded.
+// One reserve request at a time; chain confirmation is separately bounded,
+// and the queue and the wait to acquire it are bounded here.
 export const reserveFaucetLock = createBoundedLock({
   name: 'reserve-faucet',
   maxWaiters: 8,
@@ -38,8 +39,8 @@ const pollUntil = async (
   pollMs: number,
   timeoutMs: number,
 ): Promise<boolean> => {
-  const started = Date.now();
-  while (Date.now() - started < timeoutMs) {
+  const started = getPerfMs();
+  while (getPerfMs() - started < timeoutMs) {
     if (await predicate()) return true;
     await new Promise(resolve => setTimeout(resolve, pollMs));
   }
@@ -90,10 +91,10 @@ export const waitForReserveUpdate = async (
   entityId: string,
   tokenId: number,
   expectedMin: bigint,
-  timeoutMs = 10000,
+  timeoutMs: number,
 ): Promise<bigint | null> => {
-  const started = Date.now();
-  while (Date.now() - started < timeoutMs) {
+  const started = getPerfMs();
+  while (getPerfMs() - started < timeoutMs) {
     try {
       const current = await adapter.getReserves(entityId, tokenId);
       if (current >= expectedMin) return current;

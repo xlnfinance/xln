@@ -13,7 +13,7 @@
  * request per client. The engine is OPTIONAL: nothing in the runtime imports
  * this module unless the rscore flag wiring asks for it.
  */
-import { RSCORE_CUTOVER_VERIFY } from './engine-leaf/verify';
+import { RSCORE_CUTOVER_VERIFY } from '../entity/state/engine-leaf/verify';
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { once } from 'node:events';
 import { createHash } from 'node:crypto';
@@ -135,14 +135,6 @@ export const RSCORE_OP = {
   bootstrapEntity: 27,
   entityRound: 28,
 } as const;
-
-/**
- * Bytes crossing the process boundary, counted for measurement only.
- *
- * The engine's own work is cheap; what a reply costs to serialize, ship and
- * decode is not, and that cost is invisible unless something counts it.
- */
-export const rscoreTransportBytes = { sent: 0, received: 0 };
 
 const MESSAGE_KIND_REQUEST = 0;
 const MESSAGE_KIND_OK = 1;
@@ -373,7 +365,6 @@ export class RscoreProcessClient {
 
   #onData(chunk: Buffer): void {
     if (this.#dead || chunk.length === 0) return;
-    rscoreTransportBytes.received += chunk.length;
     // Requests are serialized and install their sole waiter before writing.
     // Therefore any stdout byte observed without that waiter is unsolicited,
     // even when it is only a fragment too short to contain a frame header.
@@ -493,7 +484,6 @@ export class RscoreProcessClient {
     });
     let backpressured: boolean;
     try {
-      rscoreTransportBytes.sent += framed.length;
       backpressured = !this.#child.stdin.write(framed);
     } catch (cause) {
       const error = cause instanceof Error ? cause : new Error(String(cause));

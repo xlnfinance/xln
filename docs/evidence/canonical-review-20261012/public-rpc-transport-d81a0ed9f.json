@@ -1,0 +1,80 @@
+{
+  "schemaVersion": 1,
+  "sourceSha": "d81a0ed9f376e3f5faa8e8fbbcfffd97fa753641",
+  "status": "transport-diagnostic-public-p6-blocked",
+  "releaseReady": false,
+  "sourceBinding": {
+    "cleanBefore": true,
+    "cleanAfter": true,
+    "basis": "Root recorded clean committed source; the log files do not embed SHA or clean-tree snapshots."
+  },
+  "routeComparison": {
+    "samplesPerRoute": 1,
+    "headersPerProbe": 128,
+    "fromBlock": 11893967,
+    "toBlock": 11894094,
+    "sameBoundaryHashes": true,
+    "watchedLogsReturnedPerProbe": 0,
+    "results": [
+      {
+        "rpc": "https://sepolia.xln.finance/rpc",
+        "exitCode": 0,
+        "processWallMs": 3813
+      },
+      {
+        "rpc": "https://ethereum-sepolia-rpc.publicnode.com",
+        "exitCode": 0,
+        "processWallMs": 2124
+      }
+    ],
+    "interpretation": "Both authenticated 128-block probes succeeded. Process duration includes child startup. Sequential single samples with uncontrolled provider load do not establish throughput or causal latency improvement."
+  },
+  "directCatchup": {
+    "rpc": "https://ethereum-sepolia-rpc.publicnode.com/",
+    "processExitCode": 0,
+    "exitEvidence": "Root process completion; captured log ends watcher.stopped.",
+    "fromBlock": 11893391,
+    "lastObservedCursor": 11894330,
+    "authenticatedBlocksScanned": 940,
+    "lastObservedElapsedMs": 155118,
+    "lastObservedRuntimeHeight": 40,
+    "lastObservedReserve": "0",
+    "postShutdownFinancialReread": false,
+    "p6Passed": false,
+    "remainingError": "RPC_BATCH_HTTP_429",
+    "lastErrorStep": "verifyCanonicalTip:11894330",
+    "interpretation": "The direct route also throttled. Exit 0 records bounded diagnostic completion; the last sampled reserve is zero and P6 remains unproven. Values are not post-cleanup persisted state."
+  },
+  "commands": {
+    "routes": "bun tools/stand-lock.ts run --reason \"p6-rpc-route-comparison\" --timeout-ms \"60000\" -- bun -e \"const results=[]; for(const rpc of [\\\"https://sepolia.xln.finance/rpc\\\",\\\"https://ethereum-sepolia-rpc.publicnode.com\\\"]){const started=performance.now();const child=Bun.spawn([\\\"bun\\\",\\\".logs/crisis-20261011/probe-public-rpc-rejection.ts\\\"],{env:{...process.env,P6_PROBE_RPC_URL:rpc},stdout:\\\"inherit\\\",stderr:\\\"inherit\\\"}); results.push({rpc,exitCode:await child.exited,ms:Math.round(performance.now()-started)});} console.log(JSON.stringify({comparison:results}));process.exit(results.some(result=>result.exitCode!==0)?1:0);\"",
+    "directCatchup": "bun tools/stand-lock.ts run --reason \"public-p6-canonical-direct-catchup\" --timeout-ms \"180000\" -- bun \".logs/crisis-20261011/trace-public-p6-catchup.ts\""
+  },
+  "secretReview": {
+    "filesReviewed": 2,
+    "sensitiveAssignmentCandidates": 0,
+    "urls": "Public RPC endpoints only.",
+    "excluded": "No private WAL, database, profile, seed or key was copied.",
+    "limitation": "Targeted content inspection and assignment-pattern scan are not an exhaustive secret-detection guarantee."
+  },
+  "limitations": [
+    "Ignored diagnostic scripts and the private restored-runtime profile are excluded; logs are observed evidence, not a standalone reproducer.",
+    "No new source, contract, browser, CI or financial recovery correctness claim is made.",
+    "Do not compare scan counts across separate candidate runs as controlled performance evidence."
+  ],
+  "artifacts": [
+    {
+      "file": "public-rpc-transport-d81a0ed9f-routes.log.gz",
+      "sha256": "bacf5ac0cf005153084b7319ac0fbc7450ebb5cd74ebf45f3d41613090bd5082",
+      "bytes": 1056,
+      "uncompressedSha256": "ebc7ff6e9d707122e6a07db2b168249a0ac6f1b45d0e20423a72d24a0cdaef17",
+      "uncompressedBytes": 3533
+    },
+    {
+      "file": "public-rpc-transport-d81a0ed9f-direct-catchup.log.gz",
+      "sha256": "a3df24fe9758236390274f1eb4a9086ed8bfab0c58a5513a5fa3a706ee029156",
+      "bytes": 1569,
+      "uncompressedSha256": "3abffa5a3616b8ed86898b1315fa63ade3625235c133b3925e4b824b098228d1",
+      "uncompressedBytes": 14797
+    }
+  ]
+}

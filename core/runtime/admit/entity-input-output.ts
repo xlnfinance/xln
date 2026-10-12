@@ -33,10 +33,6 @@ import { captureCommittedEntityParityEvidence } from '../observability/parity-ev
 import { hasProposableAccount } from '../../entity/consensus/account/work-index';
 import { getEntityLeaderState } from '../../entity/consensus/leader';
 import type { EntityReplica, EntityState } from '../../entity/types';
-import {
-  acceptAuthorityEntityStage,
-  discardAuthorityEntityStage,
-} from '../../rscore/authority-driver.ts';
 
 const runtimeCrossJLog = createStructuredLogger('runtime.cross_j');
 
@@ -386,11 +382,9 @@ const applyLocalCrossJCommand = async (
     return dropRejected(error.rejectionCode);
   }
   if (result.outcome.kind === 'rejected') {
-    await discardAuthorityEntityStage(env, result.authorityStage);
     return dropRejected(result.outcome.code);
   }
   if (result.outcome.kind !== 'committed') {
-    await discardAuthorityEntityStage(env, result.authorityStage);
     throw new Error(
       `RUNTIME_CROSS_J_LOCAL_EVENT_NOT_COMMITTED:entity=${input.entityId}:` +
         `round=${round}:outcome=${result.outcome.kind}:detail=${result.outcome.reason}`,
@@ -432,7 +426,6 @@ export const drainImmediateCrossJurisdictionOutputs = async (
     const startedAt = getPerfMs();
     const result = await applyLocalCrossJCommand(env, options, context, command, input, replica, replicaKey, round);
     if (!result) continue;
-    await acceptAuthorityEntityStage(env, result.authorityStage);
     // Proposal construction reads public infrastructure before a quorum may
     // commit. Journal that exact context now so replay can rebuild the same
     // live proposal; committed frames naturally reuse the same keyed value.

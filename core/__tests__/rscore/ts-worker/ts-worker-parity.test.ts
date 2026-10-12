@@ -19,9 +19,9 @@ import {
 } from '../../helpers/cross-j';
 import type { AccountInput, AccountReplica, AccountTx } from '../../../types/account';
 import type { JReplica } from '../../../types/jurisdiction-runtime';
-import { TsAccountWorkerAuthority, TsAccountWorkerCoordinator } from '../../../rscore/ts-worker';
-import { tsAccountLogicalShard } from '../../../rscore/ts-worker/sharding';
-import { createWorkerConsensusContext, type TsAccountWorkerState } from '../../../rscore/ts-worker/worker-state';
+import { TsAccountWorkerAuthority, TsAccountWorkerCoordinator } from '../../../runtime/workers/account';
+import { tsAccountLogicalShard } from '../../../runtime/workers/account/sharding';
+import { createWorkerConsensusContext, type TsAccountWorkerState } from '../../../runtime/workers/account/worker-state';
 import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../../../account/crypto';
 import { encodeBoard, hashBoard } from '../../../entity/factory';
 import { signEntityHashes } from '../../../hanko/signing';
@@ -606,20 +606,17 @@ describe('TS Account worker engine parity with canonical sequential transitions'
         entityHeight: 1,
         accountForWrite: candidateId => getEntityAccountForWrite(state.accounts, candidateId),
         admissions: [{
-          collectorFrameId: OWNER,
           account,
           input: { kind: 'enqueue', txs: [paymentTx(accountId, 1n)] },
           entityTimestamp: state.timestamp,
           finalizedJHeight: state.lastFinalizedJHeight,
         }],
         proposals: [{
-          collectorFrameId: OWNER,
           account,
           timestamp: state.timestamp,
           jHeight: state.lastFinalizedJHeight,
           entityTimestamp: state.timestamp,
           finalizedJHeight: state.lastFinalizedJHeight,
-          selectionIsWholeMempool: true,
         }],
         envelopeUpdates: [],
         materializeAccountIds: [],

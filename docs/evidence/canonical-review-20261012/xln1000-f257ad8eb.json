@@ -1,0 +1,1295 @@
+{
+  "tool": "xln1000/2",
+  "sha": "f257ad8eb4dc171fded9cd0c0be13516ec1f99e2",
+  "commitTime": "2026-10-12T03:35:25.000Z",
+  "total": 80.8,
+  "ceilingTotal": 332.2,
+  "inputs": {
+    "tree": "f257ad8eb4dc171fded9cd0c0be13516ec1f99e2",
+    "ledger": null,
+    "ci": null,
+    "worktreeNegativeEvidence": []
+  },
+  "axes": [
+    {
+      "id": "R",
+      "name": "Reclaimability",
+      "weight": 200,
+      "score": 0,
+      "ceiling": 134,
+      "gap": 200
+    },
+    {
+      "id": "J",
+      "name": "Journey reality",
+      "weight": 150,
+      "score": 0,
+      "ceiling": 71.5,
+      "gap": 150
+    },
+    {
+      "id": "X",
+      "name": "Exit economics",
+      "weight": 120,
+      "score": 0,
+      "ceiling": 45.9,
+      "gap": 120
+    },
+    {
+      "id": "H",
+      "name": "Evidence honesty",
+      "weight": 120,
+      "score": 15.5,
+      "ceiling": 15.5,
+      "gap": 104.5
+    },
+    {
+      "id": "K",
+      "name": "Kernel size and clarity",
+      "weight": 100,
+      "score": 21.9,
+      "ceiling": 21.9,
+      "gap": 78.1
+    },
+    {
+      "id": "S",
+      "name": "Single canonical path",
+      "weight": 90,
+      "score": 29.6,
+      "ceiling": 29.6,
+      "gap": 60.4
+    },
+    {
+      "id": "F",
+      "name": "Feedback latency",
+      "weight": 90,
+      "score": 0,
+      "ceiling": 0,
+      "gap": 90
+    },
+    {
+      "id": "P",
+      "name": "Process weight",
+      "weight": 50,
+      "score": 13.7,
+      "ceiling": 13.7,
+      "gap": 36.3
+    },
+    {
+      "id": "D",
+      "name": "Public-J reality",
+      "weight": 40,
+      "score": 0,
+      "ceiling": 0,
+      "gap": 40
+    },
+    {
+      "id": "M",
+      "name": "MML edges (unaffiliated)",
+      "weight": 40,
+      "score": 0,
+      "ceiling": 0,
+      "gap": 40
+    }
+  ],
+  "vetoes": [],
+  "gaps": [
+    {
+      "axis": "F",
+      "item": "feedback latency (unknown: no local ledger; pass --ledger)",
+      "points": 90,
+      "deferred": false
+    },
+    {
+      "axis": "X",
+      "item": "after fresh gas evidence: cheaper worst-case exit (worst $347.12)",
+      "points": 53.4,
+      "deferred": false
+    },
+    {
+      "axis": "X",
+      "item": "refresh stale exit gas evidence",
+      "points": 45.9,
+      "deferred": false
+    },
+    {
+      "axis": "M",
+      "item": "outstanding obligations between unaffiliated entities (data source TBD)",
+      "points": 40,
+      "deferred": false
+    },
+    {
+      "axis": "H",
+      "item": "clean QA runs with a known SHA (unknown without --ledger)",
+      "points": 36,
+      "deferred": false
+    },
+    {
+      "axis": "R",
+      "item": "credit_beyond_collateral (d=0.5, e=0)",
+      "points": 32,
+      "deferred": false
+    },
+    {
+      "axis": "K",
+      "item": "shrink the kernel closure toward 50k code lines",
+      "points": 29.5,
+      "deferred": false
+    },
+    {
+      "axis": "K",
+      "item": "remove kernel imports of infrastructure (137) and tooling (21)",
+      "points": 25,
+      "deferred": false
+    },
+    {
+      "axis": "H",
+      "item": "green build-and-test (unknown without --ci)",
+      "points": 24,
+      "deferred": false
+    },
+    {
+      "axis": "J",
+      "item": "dispute_reclaim_counterparty_owes (L0; no React spec; the Svelte debt-ledger spec drives txs via enqueueEntityTxs)",
+      "points": 24,
+      "deferred": false
+    },
+    {
+      "axis": "S",
+      "item": "deduplicate helpers (350 extra definitions)",
+      "points": 23.6,
+      "deferred": false
+    },
+    {
+      "axis": "P",
+      "item": "process prose 92.1 lines per kernel kLOC (target 20)",
+      "points": 23.2,
+      "deferred": false
+    },
+    {
+      "axis": "X",
+      "item": "after fresh gas evidence: exit capacity (18668 worst exits/day on ethereum-sepolia)",
+      "points": 20.7,
+      "deferred": false
+    },
+    {
+      "axis": "R",
+      "item": "collateral_share (d=1, e=0)",
+      "points": 20,
+      "deferred": false
+    },
+    {
+      "axis": "R",
+      "item": "latest_signed_offdelta (d=1, e=0)",
+      "points": 20,
+      "deferred": false
+    },
+    {
+      "axis": "R",
+      "item": "offline_party_defended (d=0.5, e=0)",
+      "points": 20,
+      "deferred": false
+    },
+    {
+      "axis": "R",
+      "item": "stale_state_countered (d=1, e=0)",
+      "points": 20,
+      "deferred": false
+    },
+    {
+      "axis": "J",
+      "item": "direct_credit_account_unaffiliated (L0; no spec opens a non-hub entity<->entity credit account)",
+      "points": 18,
+      "deferred": false
+    },
+    {
+      "axis": "J",
+      "item": "offline_wallet_tower_defends (L0; never run from a browser appointment)",
+      "points": 18,
+      "deferred": false
+    },
+    {
+      "axis": "H",
+      "item": "durable evidence refs in docs (132 vs 365 /tmp or .logs)",
+      "points": 17.6,
+      "deferred": false
+    },
+    {
+      "axis": "D",
+      "item": "HEAD bytecode deployed on Sepolia (bytecode hash + tx hashes)",
+      "points": 16,
+      "deferred": false
+    },
+    {
+      "axis": "D",
+      "item": "real-time dispute on a public J (no clock fast-forward)",
+      "points": 16,
+      "deferred": false
+    },
+    {
+      "axis": "R",
+      "item": "cross_j_value (d=0.5, e=0)",
+      "points": 16,
+      "deferred": true
+    },
+    {
+      "axis": "R",
+      "item": "htlc_lock (d=1, e=0)",
+      "points": 16,
+      "deferred": false
+    },
+    {
+      "axis": "R",
+      "item": "lending_terms (d=0, e=0)",
+      "points": 16,
+      "deferred": true
+    },
+    {
+      "axis": "K",
+      "item": "cut long-function excess (20129 lines)",
+      "points": 15.6,
+      "deferred": false
+    },
+    {
+      "axis": "J",
+      "item": "dispute_reclaim_own_collateral (L0; passes only with evm_setNextBlockTimestamp + page.clock)",
+      "points": 15,
+      "deferred": false
+    },
+    {
+      "axis": "J",
+      "item": "pay_and_receive (L0; local chain only)",
+      "points": 15,
+      "deferred": false
+    },
+    {
+      "axis": "J",
+      "item": "recover_on_fresh_device (L0; BrainVault fresh-profile recovery unproven)",
+      "points": 15,
+      "deferred": false
+    },
+    {
+      "axis": "H",
+      "item": "SHA-bound evidence JSON (63/165)",
+      "points": 14.8,
+      "deferred": false
+    },
+    {
+      "axis": "P",
+      "item": "npm scripts 266 (target 40)",
+      "points": 13,
+      "deferred": false
+    },
+    {
+      "axis": "H",
+      "item": "QA ledger integrity (unknown without --ledger)",
+      "points": 12,
+      "deferred": false
+    },
+    {
+      "axis": "J",
+      "item": "onboard_and_fund (L0; local chain only)",
+      "points": 12,
+      "deferred": false
+    },
+    {
+      "axis": "R",
+      "item": "custom_clause (d=0, e=0)",
+      "points": 12,
+      "deferred": false
+    },
+    {
+      "axis": "R",
+      "item": "same_j_swap (d=1, e=0)",
+      "points": 12,
+      "deferred": false
+    },
+    {
+      "axis": "S",
+      "item": "one account/entity execution engine (counted: TS in-thread (core/account+entity) [canonical], TS worker (core/rscore/ts-worker) [active], Rust (rscore/crates engine+entity-kernel+runtime+batch) [frozen])",
+      "points": 10.5,
+      "deferred": false
+    },
+    {
+      "axis": "S",
+      "item": "one consumer wallet UI (counted: Svelte wallet (frontend/src/lib/components/Entity) [frozen], React wallet (ui/src) [canonical], SwiftUI (frontend/ios) [deferred])",
+      "points": 10.5,
+      "deferred": false
+    },
+    {
+      "axis": "J",
+      "item": "cooperative_settle_withdraw (L0; local chain only)",
+      "points": 9,
+      "deferred": false
+    },
+    {
+      "axis": "D",
+      "item": "Ethereum mainnet canary",
+      "points": 8,
+      "deferred": false
+    },
+    {
+      "axis": "R",
+      "item": "adversarial_growth_bounded (d=1, e=0)",
+      "points": 8,
+      "deferred": false
+    },
+    {
+      "axis": "R",
+      "item": "inflight_settlement (d=0.5, e=0)",
+      "points": 8,
+      "deferred": false
+    },
+    {
+      "axis": "K",
+      "item": "cut casts and non-null assertions in the closure",
+      "points": 7.9,
+      "deferred": false
+    },
+    {
+      "axis": "S",
+      "item": "one jurisdiction adapter (counted: rpc (core/jurisdiction/adapter/rpc) [canonical], browservm (core/jurisdiction/adapter/browservm) [active])",
+      "points": 7.9,
+      "deferred": false
+    },
+    {
+      "axis": "S",
+      "item": "one runtime-adapter API server (counted: TS (core/api/runtime-adapter) [canonical], Rust (rscore/crates/process/src/runtime_adapter) [frozen])",
+      "points": 7.9,
+      "deferred": false
+    },
+    {
+      "axis": "J",
+      "item": "swap_cross_j (L0; cross-J deferred; spec skipped without XLN_RDB_ROOT)",
+      "points": 7.5,
+      "deferred": true
+    },
+    {
+      "axis": "J",
+      "item": "swap_same_j (L0; local chain only)",
+      "points": 7.5,
+      "deferred": false
+    },
+    {
+      "axis": "J",
+      "item": "company_multisig (L0; companies deferred)",
+      "points": 4.5,
+      "deferred": true
+    },
+    {
+      "axis": "J",
+      "item": "lend_and_repay (L0; lending deferred; terms not reclaimable)",
+      "points": 4.5,
+      "deferred": true
+    }
+  ],
+  "detail": {
+    "R": {
+      "sub": {
+        "collateral_share": 0,
+        "latest_signed_offdelta": 0,
+        "stale_state_countered": 0,
+        "offline_party_defended": 0,
+        "credit_beyond_collateral": 0,
+        "htlc_lock": 0,
+        "same_j_swap": 0,
+        "cross_j_value": 0,
+        "lending_terms": 0,
+        "custom_clause": 0,
+        "inflight_settlement": 0,
+        "adversarial_growth_bounded": 0
+      },
+      "raw": {
+        "designMax": 134,
+        "ciInput": false,
+        "rows": [
+          {
+            "id": "collateral_share",
+            "w": 10,
+            "design": 1,
+            "why": "Depository.sol:939-981 split",
+            "deferred": false,
+            "tests": [
+              {
+                "test": "requires timeout for unilateral dispute finalization and bumps account nonce once",
+                "status": "UNKNOWN"
+              },
+              {
+                "test": "test_disputeStartThenTimeoutFinalizeByStarter",
+                "status": "UNKNOWN"
+              },
+              {
+                "test": "test_wideOffsetResetAfterSplitCollateralFinalization",
+                "status": "UNKNOWN"
+              }
+            ],
+            "evidence": 0,
+            "ceiling": 1
+          },
+          {
+            "id": "latest_signed_offdelta",
+            "w": 10,
+            "design": 1,
+            "why": "Account.sol:1053-1098; unACKed frames lost by design",
+            "deferred": false,
+            "tests": [
+              {
+                "test": "lets only the non-starter finalize a newer jointly signed counter-proof",
+                "status": "UNKNOWN"
+              },
+              {
+                "test": "cannot claim twice: a second finalization of the same dispute reverts",
+                "status": "UNKNOWN"
+              },
+              {
+                "test": "reverts caller gas starvation without consuming the active dispute",
+                "status": "UNKNOWN"
+              }
+            ],
+            "evidence": 0,
+            "ceiling": 1
+          },
+          {
+            "id": "stale_state_countered",
+            "w": 10,
+            "design": 1,
+            "why": "counter-dispute higher nonce / LEFT tie-break (Account.sol:1426-1507)",
+            "deferred": false,
+            "tests": [
+              {
+                "test": "orders mutually signed same-nonce branches by LEFT proposer",
+                "status": "UNKNOWN"
+              },
+              {
+                "test": "rejects a RIGHT same-nonce branch when the initial proposer was LEFT",
+                "status": "UNKNOWN"
+              },
+              {
+                "test": "blocks early finalization on both the timeout path and the counterparty-signed path",
+                "status": "UNKNOWN"
+              }
+            ],
+            "evidence": 0,
+            "ceiling": 1
+          },
+          {
+            "id": "offline_party_defended",
+            "w": 10,
+            "design": 0.5,
+            "why": "tower = counter only, operator-run, unfunded key (start-watchtower.sh:43-47)",
+            "deferred": false,
+            "tests": [
+              {
+                "test": "allows a designated tower to submit a delayed last-resort counter-dispute",
+                "status": "UNKNOWN"
+              },
+              {
+                "test": "rejects watchtower counter-dispute from the wrong tower or without a newer signed proof",
+                "status": "UNKNOWN"
+              },
+              {
+                "test": "core/__tests__/security/watchtower/watchtower-rpc-last-resort.test.ts",
+                "status": "UNKNOWN"
+              }
+            ],
+            "evidence": 0,
+            "ceiling": 1
+          },
+          {
+            "id": "credit_beyond_collateral",
+            "w": 16,
+            "design": 0.5,
+            "why": "same-token same-Depository reserve, then FIFO no-interest debt (Depository.sol:984-1008)",
+            "deferred": false,
+            "tests": [
+              {
+                "test": "test_disputeCreatesDebtWhenReserveIsShort",
+                "status": "UNKNOWN"
+              },
+              {
+                "test": "locks outstanding debt before reserve outflows and pays FIFO debt in bounded chunks",
+                "status": "UNKNOWN"
+              },
+              {
+                "test": "finalizes every dispute with exact debt independent of token supply",
+                "status": "UNKNOWN"
+              }
+            ],
+            "evidence": 0,
+            "ceiling": 1
+          },
+          {
+            "id": "htlc_lock",
+            "w": 8,
+            "design": 1,
+            "why": "DeltaTransformer.sol:258-290",
+            "deferred": false,
+            "tests": [
+              {
+                "test": "uses timestamp deadlines for payment secrets from arguments and on-chain reveals",
+                "status": "UNKNOWN"
+              },
+              {
+                "test": "test_lateSecretsDoNotApplyEitherFullWidthHtlc",
+                "status": "UNKNOWN"
+              }
+            ],
+            "evidence": 0,
+            "ceiling": 1
+          },
+          {
+            "id": "same_j_swap",
+            "w": 6,
+            "design": 1,
+            "why": "DeltaTransformer.sol:190-212",
+            "deferred": false,
+            "tests": [
+              {
+                "test": "decodes swap fill ratios from uint16 calldata arguments",
+                "status": "UNKNOWN"
+              },
+              {
+                "test": "test_fullUint256SwapPartialFillPreservesExactOppositeLegs",
+                "status": "UNKNOWN"
+              }
+            ],
+            "evidence": 0,
+            "ceiling": 1
+          },
+          {
+            "id": "cross_j_value",
+            "w": 8,
+            "design": 0.5,
+            "why": "pulls need disputes on both Js, both operators online; tower has no pull support",
+            "deferred": true,
+            "tests": [
+              {
+                "test": "waits the signed window for a newer Pull proof and settles only registry evidence",
+                "status": "UNKNOWN"
+              },
+              {
+                "test": "settles pulls only from role-windowed records of this dispute",
+                "status": "UNKNOWN"
+              }
+            ],
+            "evidence": 0,
+            "ceiling": 1
+          },
+          {
+            "id": "lending_terms",
+            "w": 8,
+            "design": 0,
+            "why": "loan terms only in EntityState.lending; lending_fund is a plain payment (lending.ts:76-107)",
+            "deferred": true,
+            "tests": [],
+            "evidence": 0,
+            "ceiling": 0
+          },
+          {
+            "id": "custom_clause",
+            "w": 6,
+            "design": 0,
+            "why": "admission returns MAX_SAFE_INTEGER (dispute-gas-budget.ts:22); failing clause blocks account",
+            "deferred": false,
+            "tests": [
+              {
+                "test": "keeps the dispute active when any signed transformer cannot execute exactly",
+                "status": "UNKNOWN"
+              }
+            ],
+            "evidence": 0,
+            "ceiling": 1
+          },
+          {
+            "id": "inflight_settlement",
+            "w": 4,
+            "design": 0.5,
+            "why": "higher-nonce settlement stays executable; WIP reserves rows",
+            "deferred": false,
+            "tests": [
+              {
+                "test": "rejects historical cooperative signatures as a dispute bypass",
+                "status": "UNKNOWN"
+              },
+              {
+                "test": "blocks cooperative settlement and C2R while a dispute is active",
+                "status": "UNKNOWN"
+              }
+            ],
+            "evidence": 0,
+            "ceiling": 1
+          },
+          {
+            "id": "adversarial_growth_bounded",
+            "w": 4,
+            "design": 1,
+            "why": "unsolicited-asset guard test present at this SHA",
+            "deferred": false,
+            "tests": [
+              {
+                "test": "test_unsolicitedCompanySharesCannotEnlargeExitProof",
+                "status": "UNKNOWN"
+              }
+            ],
+            "evidence": 0,
+            "ceiling": 1
+          }
+        ]
+      }
+    },
+    "J": {
+      "sub": {
+        "onboard_and_fund": 0,
+        "pay_and_receive": 0,
+        "direct_credit_account_unaffiliated": 0,
+        "dispute_reclaim_own_collateral": 0,
+        "dispute_reclaim_counterparty_owes": 0,
+        "offline_wallet_tower_defends": 0,
+        "recover_on_fresh_device": 0,
+        "cooperative_settle_withdraw": 0,
+        "swap_same_j": 0,
+        "swap_cross_j": 0,
+        "lend_and_repay": 0,
+        "company_multisig": 0
+      },
+      "raw": {
+        "productPaths": [
+          "core",
+          "ui/src",
+          "jurisdictions/contracts"
+        ],
+        "ledgerInput": false,
+        "rows": [
+          {
+            "id": "onboard_and_fund",
+            "w": 8,
+            "specs": [
+              "ui/tests/e2e-home-faucet.spec.ts"
+            ],
+            "headless": [],
+            "reviewLevel": 2,
+            "deferred": false,
+            "note": "local chain only",
+            "level": 0,
+            "cleanPassSha": null,
+            "specsViaVisibleUi": 1
+          },
+          {
+            "id": "pay_and_receive",
+            "w": 10,
+            "specs": [
+              "ui/tests/e2e-payment.spec.ts"
+            ],
+            "headless": [
+              "core/scenarios/consensus/lock-ahb.ts"
+            ],
+            "reviewLevel": 2,
+            "deferred": false,
+            "note": "local chain only",
+            "level": 0,
+            "cleanPassSha": null,
+            "specsViaVisibleUi": 1
+          },
+          {
+            "id": "direct_credit_account_unaffiliated",
+            "w": 12,
+            "specs": [],
+            "headless": [],
+            "reviewLevel": 0,
+            "deferred": false,
+            "note": "no spec opens a non-hub entity<->entity credit account",
+            "level": 0,
+            "cleanPassSha": null,
+            "specsViaVisibleUi": 0
+          },
+          {
+            "id": "dispute_reclaim_own_collateral",
+            "w": 10,
+            "specs": [
+              "ui/tests/e2e-dispute-finality.spec.ts"
+            ],
+            "headless": [
+              "core/scenarios/disputes/lifecycle.ts"
+            ],
+            "reviewLevel": 2,
+            "deferred": false,
+            "note": "passes only with evm_setNextBlockTimestamp + page.clock",
+            "level": 0,
+            "cleanPassSha": null,
+            "specsViaVisibleUi": 1
+          },
+          {
+            "id": "dispute_reclaim_counterparty_owes",
+            "w": 16,
+            "specs": [],
+            "headless": [],
+            "reviewLevel": 1,
+            "deferred": false,
+            "note": "no React spec; the Svelte debt-ledger spec drives txs via enqueueEntityTxs",
+            "level": 0,
+            "cleanPassSha": null,
+            "specsViaVisibleUi": 0
+          },
+          {
+            "id": "offline_wallet_tower_defends",
+            "w": 12,
+            "specs": [],
+            "headless": [
+              "core/__tests__/security/watchtower/watchtower-rpc-last-resort.test.ts"
+            ],
+            "reviewLevel": 1,
+            "deferred": false,
+            "note": "never run from a browser appointment",
+            "level": 0,
+            "cleanPassSha": null,
+            "specsViaVisibleUi": 0
+          },
+          {
+            "id": "recover_on_fresh_device",
+            "w": 10,
+            "specs": [
+              "ui/tests/e2e-tower-restore.spec.ts"
+            ],
+            "headless": [],
+            "reviewLevel": 2,
+            "deferred": false,
+            "note": "BrainVault fresh-profile recovery unproven",
+            "level": 0,
+            "cleanPassSha": null,
+            "specsViaVisibleUi": 1
+          },
+          {
+            "id": "cooperative_settle_withdraw",
+            "w": 6,
+            "specs": [
+              "ui/tests/e2e-move.spec.ts"
+            ],
+            "headless": [],
+            "reviewLevel": 2,
+            "deferred": false,
+            "note": "local chain only",
+            "level": 0,
+            "cleanPassSha": null,
+            "specsViaVisibleUi": 1
+          },
+          {
+            "id": "swap_same_j",
+            "w": 5,
+            "specs": [
+              "ui/tests/e2e-swap.spec.ts"
+            ],
+            "headless": [],
+            "reviewLevel": 2,
+            "deferred": false,
+            "note": "local chain only",
+            "level": 0,
+            "cleanPassSha": null,
+            "specsViaVisibleUi": 1
+          },
+          {
+            "id": "swap_cross_j",
+            "w": 5,
+            "specs": [
+              "ui/tests/e2e-cross-swap.spec.ts"
+            ],
+            "headless": [
+              "core/scenarios/cross-j"
+            ],
+            "reviewLevel": 1,
+            "deferred": true,
+            "note": "cross-J deferred; spec skipped without XLN_RDB_ROOT",
+            "level": 0,
+            "cleanPassSha": null,
+            "specsViaVisibleUi": 1
+          },
+          {
+            "id": "lend_and_repay",
+            "w": 3,
+            "specs": [
+              "ui/tests/e2e-lending.spec.ts"
+            ],
+            "headless": [],
+            "reviewLevel": 2,
+            "deferred": true,
+            "note": "lending deferred; terms not reclaimable",
+            "level": 0,
+            "cleanPassSha": null,
+            "specsViaVisibleUi": 1
+          },
+          {
+            "id": "company_multisig",
+            "w": 3,
+            "specs": [
+              "ui/tests/e2e-tutorial-company.spec.ts"
+            ],
+            "headless": [],
+            "reviewLevel": 2,
+            "deferred": true,
+            "note": "companies deferred",
+            "level": 0,
+            "cleanPassSha": null,
+            "specsViaVisibleUi": 1
+          }
+        ]
+      }
+    },
+    "X": {
+      "sub": {
+        "executable": 1,
+        "cost": 0.36487975916906,
+        "capacity": 0.42369801418227776,
+        "evidenceCurrent": 0
+      },
+      "raw": {
+        "reference": {
+          "gwei": 10,
+          "ethUsd": 3000,
+          "jurisdiction": "ethereum-sepolia",
+          "blockGasLimit": 60000000,
+          "jShare": 0.5,
+          "maxExitShareOfAccount": 0.01
+        },
+        "budget": {
+          "file": "docs/evidence/xlnc-20261010/dispute-budget-contracts.json",
+          "binding": "82e34b604e3a328ed994390ee3ad01233d4095b9",
+          "current": false
+        },
+        "worstPath": {
+          "name": "test_budget5m_maxStarterMmFrontier",
+          "gas": 8165222
+        },
+        "maxStart": 3405480,
+        "worstGasWithCounter": 11570702,
+        "typicalGas": 1750724,
+        "maxPhase": 4450683,
+        "transactionBudget": 5000000,
+        "usdPerGas": 0.00003,
+        "worstUsd": 347.12,
+        "minAccountUsdAt1pct": 34712.1,
+        "exitsPerDay": 18668,
+        "cost": 0.36487975916906,
+        "capacity": 0.42369801418227776,
+        "typicalUsd": 52.52,
+        "negativeEvidence": [
+          {
+            "file": "docs/evidence/xlnc-20261010/mixed-exit-current.json",
+            "source": "tree",
+            "sourceSha": "a00835725",
+            "known": true,
+            "sameContracts": false,
+            "open": false,
+            "gas": 17388717
+          }
+        ]
+      }
+    },
+    "H": {
+      "sub": {
+        "cleanRuns": 0,
+        "shaBoundEvidence": 0.38181818181818183,
+        "durableRefs": 0.2655935613682093,
+        "ciGreen": 0,
+        "ledgerIntegrity": 0
+      },
+      "raw": {
+        "evidenceJson": 165,
+        "shaBound": 63,
+        "ephemeralRefs": 365,
+        "durableRefs": 132,
+        "windowRuns": 0,
+        "cleanRuns": 0,
+        "futureDatedRuns": [],
+        "cleanWindowDays": 30,
+        "ciRecent": null
+      }
+    },
+    "K": {
+      "sub": {
+        "size": 0.15633077619919386,
+        "long": 0.3749961187597419,
+        "types": 0.47216507557994597,
+        "isolation": 0
+      },
+      "raw": {
+        "declaredKernelLoc": 95315,
+        "closureKernelLoc": 161031,
+        "declaredFiles": 539,
+        "closureFiles": 816,
+        "closureByTop": {
+          "core/entity": 41902,
+          "core/jurisdiction": 21750,
+          "core/runtime": 19820,
+          "core/storage": 19680,
+          "core/account": 17631,
+          "core/rscore": 11691,
+          "core/protocol": 7921,
+          "core/network": 4961,
+          "core/types": 3183,
+          "core/swapbook": 2643,
+          "core/extensions": 2250,
+          "core/hanko": 2130,
+          "core/support": 1730,
+          "core/paybook": 1181,
+          "core/lendbook": 761,
+          "core/api": 634,
+          "core/qa": 533,
+          "core/pathfinding": 424,
+          "core/config": 206
+        },
+        "edgesOutOfKernel": 468,
+        "infraEdges": 137,
+        "toolingEdges": 21,
+        "edgeTargets": {
+          "core/support": 276,
+          "core/runtime": 62,
+          "core/config": 55,
+          "core/paybook": 22,
+          "core/rscore": 18,
+          "core/lendbook": 13,
+          "core/network": 10,
+          "core/storage": 7,
+          "core/qa": 3,
+          "core/jurisdiction": 2
+        },
+        "toolingEdgeSample": [
+          {
+            "from": "core/account/consensus/frame/commit-transition.ts",
+            "to": "core/rscore/authority-wave.ts"
+          },
+          {
+            "from": "core/account/consensus/incoming/ack-commit.ts",
+            "to": "core/rscore/authority-wave.ts"
+          },
+          {
+            "from": "core/account/consensus/index.ts",
+            "to": "core/rscore/authority-wave.ts"
+          },
+          {
+            "from": "core/entity/consensus/frame/application.ts",
+            "to": "core/rscore/authority-wave.ts"
+          },
+          {
+            "from": "core/entity/consensus/state-root.ts",
+            "to": "core/rscore/engine-leaf/leaf-registry.ts"
+          },
+          {
+            "from": "core/entity/state/persistent-account-map.ts",
+            "to": "core/rscore/engine-leaf/leaf-registry.ts"
+          },
+          {
+            "from": "core/entity/tx/handlers/account/index.ts",
+            "to": "core/rscore/authority-wave.ts"
+          },
+          {
+            "from": "core/entity/tx/handlers/account/lifecycle/open-account.ts",
+            "to": "core/rscore/authority-wave.ts"
+          },
+          {
+            "from": "core/runtime/admit/entity-input-output.ts",
+            "to": "core/rscore/authority-driver.ts"
+          },
+          {
+            "from": "core/runtime/admit/entity-input-replica.ts",
+            "to": "core/rscore/authority-driver.ts"
+          },
+          {
+            "from": "core/runtime/admit/entity-input-replica.ts",
+            "to": "core/rscore/authority-wave.ts"
+          },
+          {
+            "from": "core/runtime/admit/entity-input-replica.ts",
+            "to": "core/rscore/authority/entity-stage.ts"
+          }
+        ],
+        "solidityLoc": 6665,
+        "functions": 9964,
+        "over60": 377,
+        "excess": 20129,
+        "longest": {
+          "codeLines": 150,
+          "at": "core/rscore/shadow-wire.ts:685 shadowOutputRows"
+        },
+        "casts": 815,
+        "nonNull": 536,
+        "packages": [
+          "@ethereumjs/block",
+          "@ethereumjs/common",
+          "@ethereumjs/mpt",
+          "@ethereumjs/rlp",
+          "@ethereumjs/tx",
+          "@ethereumjs/util",
+          "@ethereumjs/vm",
+          "@noble/ciphers",
+          "@noble/curves",
+          "@noble/hashes",
+          "@noble/secp256k1",
+          "bip39",
+          "buffer",
+          "ethers",
+          "fs",
+          "hash-wasm",
+          "level",
+          "msgpackr",
+          "path",
+          "tronweb",
+          "ws"
+        ],
+        "excessRatio": 0.125,
+        "typeDebtPerK": 8.39
+      }
+    },
+    "S": {
+      "sub": {
+        "roles": 0.41666666666666663,
+        "helpers": 0.125
+      },
+      "raw": {
+        "roles": [
+          {
+            "role": "account/entity execution engine",
+            "rows": [
+              {
+                "label": "TS in-thread (core/account+entity)",
+                "status": "canonical",
+                "lines": 62620
+              },
+              {
+                "label": "TS worker (core/rscore/ts-worker)",
+                "status": "active",
+                "lines": 3857
+              },
+              {
+                "label": "Rust (rscore/crates engine+entity-kernel+runtime+batch)",
+                "status": "frozen",
+                "lines": 199773
+              }
+            ],
+            "count": 3,
+            "counted": [
+              "TS in-thread (core/account+entity) [canonical]",
+              "TS worker (core/rscore/ts-worker) [active]",
+              "Rust (rscore/crates engine+entity-kernel+runtime+batch) [frozen]"
+            ]
+          },
+          {
+            "role": "consumer wallet UI",
+            "rows": [
+              {
+                "label": "Svelte wallet (frontend/src/lib/components/Entity)",
+                "status": "frozen",
+                "lines": 43531
+              },
+              {
+                "label": "React wallet (ui/src)",
+                "status": "canonical",
+                "lines": 19634
+              },
+              {
+                "label": "SwiftUI (frontend/ios)",
+                "status": "deferred",
+                "lines": 2309
+              }
+            ],
+            "count": 3,
+            "counted": [
+              "Svelte wallet (frontend/src/lib/components/Entity) [frozen]",
+              "React wallet (ui/src) [canonical]",
+              "SwiftUI (frontend/ios) [deferred]"
+            ]
+          },
+          {
+            "role": "jurisdiction adapter",
+            "rows": [
+              {
+                "label": "rpc (core/jurisdiction/adapter/rpc)",
+                "status": "canonical",
+                "lines": 5328
+              },
+              {
+                "label": "browservm (core/jurisdiction/adapter/browservm)",
+                "status": "active",
+                "lines": 4350
+              }
+            ],
+            "count": 2,
+            "counted": [
+              "rpc (core/jurisdiction/adapter/rpc) [canonical]",
+              "browservm (core/jurisdiction/adapter/browservm) [active]"
+            ]
+          },
+          {
+            "role": "runtime-adapter API server",
+            "rows": [
+              {
+                "label": "TS (core/api/runtime-adapter)",
+                "status": "canonical",
+                "lines": 6775
+              },
+              {
+                "label": "Rust (rscore/crates/process/src/runtime_adapter)",
+                "status": "frozen",
+                "lines": 5292
+              }
+            ],
+            "count": 2,
+            "counted": [
+              "TS (core/api/runtime-adapter) [canonical]",
+              "Rust (rscore/crates/process/src/runtime_adapter) [frozen]"
+            ]
+          }
+        ],
+        "duplicateTopLevelNames": 204,
+        "duplicateExcessDefs": 350,
+        "topDuplicates": [
+          {
+            "name": "normalizeEntityId",
+            "defs": 15
+          },
+          {
+            "name": "isRecord",
+            "defs": 13
+          },
+          {
+            "name": "record",
+            "defs": 12
+          },
+          {
+            "name": "normalizeEntityRef",
+            "defs": 10
+          },
+          {
+            "name": "exactKeys",
+            "defs": 9
+          },
+          {
+            "name": "fail",
+            "defs": 9
+          },
+          {
+            "name": "normalize",
+            "defs": 9
+          },
+          {
+            "name": "normalizeAddress",
+            "defs": 7
+          },
+          {
+            "name": "sleep",
+            "defs": 7
+          },
+          {
+            "name": "bytes32",
+            "defs": 6
+          },
+          {
+            "name": "errorMessage",
+            "defs": 6
+          },
+          {
+            "name": "normalizeId",
+            "defs": 6
+          },
+          {
+            "name": "normalizeRuntimeId",
+            "defs": 6
+          },
+          {
+            "name": "requireAddress",
+            "defs": 6
+          },
+          {
+            "name": "requireString",
+            "defs": 6
+          }
+        ]
+      }
+    },
+    "F": {
+      "sub": {
+        "latency": 0
+      },
+      "raw": {
+        "ledgerInput": false
+      }
+    },
+    "P": {
+      "sub": {
+        "prose": 0.33673976876476064,
+        "scripts": 0.13076923076923078
+      },
+      "raw": {
+        "processLines": 14832,
+        "processFiles": 62,
+        "perKernelK": 92.1,
+        "npmScripts": 266,
+        "top": [
+          [
+            "audits/registry.json",
+            3546
+          ],
+          [
+            "docs/fints.md",
+            978
+          ],
+          [
+            "docs/ios-native-plan.md",
+            889
+          ],
+          [
+            "prompts/debates-megaprompt.md",
+            796
+          ],
+          [
+            "docs/audit-protocol.md",
+            547
+          ],
+          [
+            "docs/audit/2026-09-04-wallet-ui-core-findings.md",
+            469
+          ],
+          [
+            "docs/night-work-plan.md",
+            441
+          ],
+          [
+            "docs/debug.md",
+            368
+          ],
+          [
+            "audits/evidence/baseline-458082a0c.json",
+            343
+          ],
+          [
+            "docs/tron-native-test-plan.md",
+            316
+          ]
+        ]
+      }
+    },
+    "D": {
+      "sub": {
+        "headBytecodeOnPublicJ": 0,
+        "realTimeDisputeOnPublicJ": 0,
+        "mainnet": 0
+      },
+      "raw": {
+        "publicActive": [],
+        "publicPending": [
+          "ethereum-sepolia",
+          "tron-nile"
+        ],
+        "collector": "TBD"
+      }
+    },
+    "M": {
+      "sub": {
+        "usdDays": 0
+      },
+      "raw": {
+        "unaffiliatedUsdDays": 0,
+        "dataSource": "TBD: needs an indexer collector plus an affiliation registry",
+        "counted": "outstanding |delta| between unaffiliated entities; never volume, limits or hub hops"
+      }
+    }
+  }
+}

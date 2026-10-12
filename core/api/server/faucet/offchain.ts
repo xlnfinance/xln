@@ -4,6 +4,7 @@ import { safeStringify } from '../../../protocol/serialization';
 import type { Profile } from '../../../entity/profile';
 import { normalizeRuntimeKey, pushDebugEvent, type RelayStore } from '../../../network/relay/store';
 import { createStructuredLogger, shortId } from '../../../support/logger';
+import { getPerfMs } from '../../../support/time';
 import { encodeRebalancePolicyMemo } from '../../../extensions/rebalance/policy';
 import { resolveEntityProposerId } from '../../../runtime/delivery/entity-output-signer';
 import { getErrorMessage, isEntityId32 } from '../utils';
@@ -326,7 +327,7 @@ const successResponse = (
   admission: FaucetAccountAdmission,
   requestStartedAt: number,
 ): Response => {
-  const serverDurationMs = Date.now() - requestStartedAt;
+  const serverDurationMs = getPerfMs() - requestStartedAt;
   faucetLog.info('offchain.accepted', { requestId: request.requestId, durationMs: serverDurationMs });
   return new Response(safeStringify({
     success: true,
@@ -347,7 +348,7 @@ const successResponse = (
 export const handleOffchainFaucet = async (
   input: OffchainFaucetHandlerInput,
 ): Promise<Response> => {
-  const requestStartedAt = Date.now();
+  const requestStartedAt = getPerfMs();
   try {
     if (!input.env) {
       return fail(input.headers, 503, {

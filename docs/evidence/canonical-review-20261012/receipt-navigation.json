@@ -1,0 +1,91 @@
+{
+  "sourceSha": "ca96f041d3d5cd521d12f318629149c0655f9fde",
+  "cleanBeforeAndAfterExecution": true,
+  "failure": {
+    "ciRun": "https://github.com/xlnfinance/xln/actions/runs/38200202391",
+    "sourceSha": "999396327630ea3ebe6d92046d5330ad0eebc31e",
+    "test": "ui/tests/e2e-payment.spec.ts:260",
+    "group": {
+      "passed": 3,
+      "failed": 1,
+      "notRun": 1
+    },
+    "trace": [
+      {
+        "snapshot": "after@call@502",
+        "timeMs": 45265.104,
+        "url": "/activity",
+        "actualScreen": "Home",
+        "focused": "Recent activity row button"
+      },
+      {
+        "snapshot": "after@call@504",
+        "timeMs": 45281.701,
+        "actualScreen": "Activity",
+        "state": "Loading stored history; no movement selected"
+      }
+    ],
+    "cause": "URL changed before Activity mounted. Shared activity-row locator selected Home; Enter preceded the Activity commit."
+  },
+  "change": "Wait for Activity-only activity-search before focusing its history row; all keyboard/resize/modal assertions remain.",
+  "checks": {
+    "browser": {
+      "command": "XLN_LOCAL_PROD_SMOKE_WALLET_TESTS=e2e-payment.spec.ts XLN_LOCAL_PROD_SMOKE_WALLET_GREP='payment receipts and recovery dialogs' bun run stand:run --reason react-receipt-navigation --timeout-ms 180000 -- bun run prod:smoke:local",
+      "standLockHeld": true,
+      "stats": {
+        "startTime": "2026-10-12T03:54:06.413Z",
+        "duration": 10053.063999999998,
+        "expected": 1,
+        "skipped": 0,
+        "unexpected": 0,
+        "flaky": 0
+      }
+    },
+    "source": {
+      "command": "bun run check",
+      "sourceGatesPassed": 38,
+      "status": "passed"
+    },
+    "jurisdictionShard": {
+      "sourceSha": "f48eca1abb38fd726ffc4d9ec65fa3f6309bb938",
+      "cleanBeforeAndAfterExecution": true,
+      "command": "bun run stand:run --reason reproduce-jurisdiction-ci-shard --timeout-ms 180000 -- bun test core/__tests__/jurisdiction",
+      "passed": 444,
+      "failed": 0,
+      "files": 70,
+      "assertions": 2181,
+      "durationMs": 55620,
+      "backlogDurationMs": 12296.81,
+      "standLockHeld": true
+    }
+  },
+  "remainingFailure": {
+    "ciRun": "https://github.com/xlnfinance/xln/actions/runs/38200437268",
+    "sourceSha": "f257ad8eb4dc171fded9cd0c0be13516ec1f99e2",
+    "test": "j-watcher-backlog-drain",
+    "result": "Per-test timeout after 60000.39ms; 443 passed, 1 failed in CI jurisdiction shard.",
+    "rootCause": "Not established; local entire shard passed. Unbounded gate.entered can hide an early transient poll completion. Improve phase diagnosis without increasing timeout or weakening assertions."
+  },
+  "artifacts": [
+    {
+      "path": "receipt-navigation-browser.log.gz",
+      "sha256": "e9982f5ca4d0760eef6a99d47ed7effb44a7d2c9221cb4fdfe6e3d1013424db8",
+      "uncompressedSha256": "109ba3a6149240d9a4c860166108ca4a1927bd425e93f16f0bf7b46b1c6f096c"
+    },
+    {
+      "path": "receipt-navigation-check.log.gz",
+      "sha256": "3bc84d9c70620e0d94ca631281f4323cf4c8f82e688d764aa515ed68de997f03",
+      "uncompressedSha256": "164088e1d18be18bb59721af10bfb3eee0089c52e113cdcfb80380f02cc899a5"
+    },
+    {
+      "path": "jurisdiction-shard-f48eca1a.log.gz",
+      "sha256": "505b789fcce8d5747797e39826f8c2da2052824a8d30433043d5c0711a9261b1",
+      "uncompressedSha256": "b4372a6486ba8bdeaeda606bd34b48677c0d2268524a3c65a42e70b6da9f2fbd"
+    }
+  ],
+  "limitations": [
+    "Focused browser test does not prove all E2E are green.",
+    "Local shard pass does not discharge the CI timeout.",
+    "No public-chain P6 success is asserted."
+  ]
+}

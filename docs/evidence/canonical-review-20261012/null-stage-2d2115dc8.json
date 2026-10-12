@@ -1,0 +1,117 @@
+{
+  "schemaVersion": 1,
+  "title": "Retire unused Entity stage bookkeeping; clean replay and scoped public recovery diagnostics",
+  "sourceSha": "2d2115dc8cd2694cad4672d49ba7b08482098de2",
+  "status": "local-gates-passed-deployed-hub-still-blocked",
+  "releaseReady": false,
+  "sourceBinding": {
+    "cleanBefore": true,
+    "cleanAfter": true,
+    "basis": "Root reports clean source before/after final gates. All replay gate sections and public decode/stopped-hub results independently embed this SHA and clean status.",
+    "packagingCommit": "Later parent-owned commit; not the source execution SHA."
+  },
+  "retirementCoreDelta": {
+    "productionFiles": 5,
+    "productionNetPhysicalLines": -155,
+    "regressionLines": 126,
+    "netPhysicalLines": -29,
+    "scope": "Only the five core retirement paths and their regression; not the entire commit, which also includes public receipt-fixture/docs/evidence changes."
+  },
+  "validation": [
+    {"kind":"related-units","artifact":"related","passed":34,"failed":0,"assertions":1249,"files":5,"seconds":2.62,"reproductionCommand":"bun test core/__tests__/rscore/authority/authority-proposal-readonly.test.ts core/__tests__/rscore/authority/authority-activation.test.ts core/__tests__/rscore/authority/authority-stage-failure.test.ts core/__tests__/runtime/commit/runtime-frame-atomicity.test.ts core/__tests__/cross-j/swap/cross-jurisdiction-swap-part-1.test.ts","commandBasis":"Reconstructed from the five executed file headings; exact parent invocation is not embedded in this log."},
+    {"kind":"real-public-receipt-decode","artifact":"public-event-decode","verified":true,"chainId":11155111,"rpcRequests":4,"receiptResults":[{"block":11897542,"canonicalEventCloneable":true,"counterentity":"0x2d08d3bb8f4102fb07fecef0b59f052139c99aa996239ebfc55baac82ac54dd6","event":"CounterDisputeRegistered","gasUsed":{"__xlnType":"BigInt","value":"460487"},"kind":"counter","logIndex":148,"materializedProofBodyCloneable":true,"nonce":"3","proofbodyHash":"0xd91d94eae5607186d80d31c2441cebb24d9211c23f0026a0a5935263e9ffc3a2","proposerIsLeft":true,"proxyCloneRejected":true,"sender":"0xd0aa872e92c2d6c5dc913ab4ee3600b1b144c097d898d29b23bb7aa63b881909","transactionHash":"0x9b16736ee06cfb9ec57415ca374ec0819e628a640b839d09533960130d389548"},{"block":11897550,"canonicalEventCloneable":true,"counterentity":"0x2d08d3bb8f4102fb07fecef0b59f052139c99aa996239ebfc55baac82ac54dd6","effectiveSignature":"0x","event":"DisputeFinalized","gasUsed":{"__xlnType":"BigInt","value":"250134"},"kind":"final","logIndex":317,"materializedProofBodyCloneable":true,"nonce":"3","proofbodyHash":"0xd91d94eae5607186d80d31c2441cebb24d9211c23f0026a0a5935263e9ffc3a2","proxyCloneRejected":true,"repeatedSignatureRejected":true,"sender":"0xd0aa872e92c2d6c5dc913ab4ee3600b1b144c097d898d29b23bb7aa63b881909","transactionHash":"0xa1312911658e70ff62f7f3dc5ed9a4d292ac8fde9efc25fbea865eb9c007abf1"}],"scope":"ABI receipt/calldata decoding and cloneability; not a full Runtime replay or receipt-root proof"},
+    {"kind":"start-receipt-fragment","artifact":"start-receipt","passed":7,"checks":["mined receipt matches submitted calldata","missing event","duplicate event","wrong emitter","nonce mismatch","hash mismatch","proposer mismatch"],"receipt":"0xaa5551b66dd87094c6e0094091eda48053f2f203418f2e43a4d8c3547fc2fb7a","block":11897517,"rpc":"https://ethereum-sepolia-rpc.publicnode.com","rpcCalls":2,"transactionsSent":0,"scope":"Exact production fixture validation fragment, not a new financial transaction."},
+    {"kind":"immutable-production-wal","artifacts":["parity","ts-w1","ts-w4","ts-w8"],"workers":[{"workers":1,"deliveredPayments":2600,"equivalent":true,"finalHeight":719,"finalPendingOutbox":1,"frameVerified":true,"frames":708,"matchedEconomicSwaps":1040,"outboxEnvelopes":9580,"runtimeEntityInputs":9731},{"workers":4,"deliveredPayments":2600,"equivalent":true,"finalHeight":719,"finalPendingOutbox":1,"frameVerified":true,"frames":708,"matchedEconomicSwaps":1040,"outboxEnvelopes":9580,"runtimeEntityInputs":9731},{"workers":8,"deliveredPayments":2600,"equivalent":true,"finalHeight":719,"finalPendingOutbox":1,"frameVerified":true,"frames":708,"matchedEconomicSwaps":1040,"outboxEnvelopes":9580,"runtimeEntityInputs":9731}],"scope":"Ordered per-frame root/output parity against the original recording. No live TPS claim."},
+    {"kind":"react-payment","artifacts":["browser","browser-report","bootstrap"],"command":"XLN_LOCAL_PROD_SMOKE_WALLET_TESTS=e2e-payment.spec.ts bun tools/stand-lock.ts run --reason canonical-null-stage-react-payment --timeout-ms \"180000\" -- bun run prod:smoke:local","envBasis":"Root supplied required environment; log prints the inner stand command.","expected":3,"unexpected":0,"skipped":0,"flaky":0,"errors":0,"playwrightDurationMs":26788.528,"scope":"Three payment cases including committed receipt reload. Duration excludes stand bootstrap; not all wallet flows."},
+    {"kind":"check","artifact":"check","command":"bun run check","sourceGates":38,"outerParallelGates":3}
+  ],
+  "sourceProofs": [
+    {"path":"core/jurisdiction/adapter/rpc-public.ts","sha256":"5110d3692fafe9e0a54138348f49dea3bbde36de9113461be774a94ae35579d2"},
+    {"path":"jurisdictions/scripts/public-p6-chain.ts","sha256":"880a50f3e32660f20d4ca5b1c1eead172a5297ff333a6a6483cdcc63bcce9261","fragment":"const starts = receipt.logs .. const report = {","fragmentSha256":"212b274e0a829a79daf2d4d580fff379a5c867223a8a4749764b6170af387fcb"},
+    {"path":".logs/canonical-review-20261012/verify-public-p6-event-decode.ts","sha256":"a65113a93b82aab334dafad5c1a04ab22ed78c3e44035fb5c707b67458211721","copied":false},
+    {"path":".logs/canonical-review-20261012/verify-p6-start-receipt.ts","sha256":"29683b2e401dc58e3890ca73668fa4a9b732f60dfd1aafa041ad30d9b22ec93f","copied":false}
+  ],
+  "immutableRecording": {
+    "originManifest": "ts-worker-evidence.json",
+    "originManifestSha256": "1f69687e7596fa51c85467229262771c1ff0188932ee6ca0ca2d8977ade49f19",
+    "sourceSha": "f163415ebaede96c86830299492ceb6a228b5b5f",
+    "manifestHash": "0x2fa25a4c4851b371122b58652af7664528999706c8ddcf18fc98673482ced8b1",
+    "sourceBinding": {"algorithm":"sha256","runtimeSeedHash":"0x1f2d1148378133726d0f93beb52bcccc9bdcda1121e521920b3057dc241ed01e","walTreeHash":"0x4ca7a3253d266836539c650ccc6d690f4889b03939f6cd605ffa67fc3a3c21ca"},
+    "frames": 708,
+    "firstHeight": 12,
+    "lastHeight": 719,
+    "finalPendingOutboxPerWorker": 1,
+    "limitation": "Hashes bind the same existing recording. Raw WAL/seed/checkpoint files are excluded; a remaining outbox entry is not quiescence."
+  },
+  "stoppedHubRestore": {
+    "artifact": "stopped-hub",
+    "sourceSha": "2d2115dc8cd2694cad4672d49ba7b08482098de2",
+    "sourceTreeClean": true,
+    "backupSource": "7c3f63f9841f4e8b61ac5eee5dbe4f9710b10621",
+    "backupSha256": "9316ce1c4ca0998b082bd78266b8b0cb6f88ef7f990436c6d65a4748bf2fe0e3",
+    "runtimeHeight": 4474,
+    "postStateHash": "0xe9561698ad135b8a468deb921b756768e920bcff217f90da16e96883ecf119ca",
+    "integrity": {"checkedFrames":128,"latestHeight":4474,"ok":true,"runtimeId":"0xbe7597d3532df7293b0f0ff82ee0c30fb2fd2737"},
+    "lastFinalizedJHeight": 11897541,
+    "p6AccountActiveDispute": true,
+    "networkStarted": false,
+    "transactionsSent": 0,
+    "scope": "Cold copy replay stops before counter block 11897542, so the active dispute is expected. It does not prove authenticated catch-up, deployed-hub recovery or source promotion."
+  },
+  "diagnostics": {
+    "artifact": "diagnostics",
+    "missingInventory": "The first offline diagnostic omitted signer inventory and failed MISSING_SIGNER_KEY. It is retained as a harness failure with original-log SHA256; no key values or helper code are published.",
+    "public502": "Original public RPC 502 is preserved as an error extract. Direct receipt reads do not prove the deployed public route recovered.",
+    "redaction": "Only repeated stacks and HTML response body omitted; original log hashes retained."
+  },
+  "kernel": {
+    "artifact": "kernel",
+    "closureCodeLines": 160413,
+    "closureFiles": 816,
+    "baselineCodeLines": 161062,
+    "baselineFiles": 816,
+    "reductionFromBaseline": 649,
+    "coreRscoreEdges": 11,
+    "previousCoreRscoreEdges": 13,
+    "coreQaEdges": 0,
+    "overallReadinessScore": null
+  },
+  "deploymentAndRemainingGates": {
+    "deployedSourceSha": "7c3f63f9841f4e8b61ac5eee5dbe4f9710b10621",
+    "deployedHub": "Still stopped; public /rpc 502 remains the recorded state.",
+    "sourcePromotion": false,
+    "missingGate": "Authenticated counter/finalization catch-up on the stopped hub and recovery of the public service.",
+    "frozenFixtureImports": "Two frozen fixture import repairs await the owner exception.",
+    "ci": "Parent-reported PR73 on older 72c38fa4 was 6/7; no CI pass for this SHA is claimed.",
+    "otherGates": ["Transport/outbox tail","Release package and owner signing"]
+  },
+  "secretReview": {
+    "copiedCompressedReports": 12,
+    "sanitizedDiagnosticExtracts": 2,
+    "actualSeedOrPrivateKeyAssignmentsFound": 0,
+    "excluded": "Private source backup archive, profile directories, WAL/checkpoints, raw seeds, signer inventory and diagnostic helper source.",
+    "hashes": "Runtime seed hash and original WAL-tree hash are commitment values, not raw seed or WAL material.",
+    "limitation": "Targeted output inspection and assignment-pattern scan; not a general secret-detection guarantee."
+  },
+  "limitations": [
+    "Local gates passing does not repair or promote the deployed hub.",
+    "Retirement physical LOC and static kernel closure LOC use different measures and are not additive savings.",
+    "No Rust execution, paid/external audit, live TPS, whole-product E2E or mainnet readiness claim."
+  ],
+  "artifacts": [
+    {"id":"related","file":"null-stage-2d2115dc8-related.log.gz","sha256":"1cbc6bfa8a59df6d74dad8a76bc0e1b4e9356537b65af7ba8ad8892f1477ada7","bytes":2709,"rawSha256":"616abd52883c68137f4a79aea8287676f910412496bd46c8ccd6dea0c85c9471","rawBytes":9889,"command":null},
+    {"id":"public-event-decode","file":"null-stage-2d2115dc8-public-event-decode.json.gz","sha256":"3f8b3e85da5e4fa991ba9b21b6576f3bd3c0e167de023017305b624e79451829","bytes":898,"rawSha256":"5eea51659859f0c7cbc7859b86619a212a77094d6f45c4ef57515c990799dbcb","rawBytes":2109,"command":null},
+    {"id":"start-receipt","file":"null-stage-2d2115dc8-start-receipt.json.gz","sha256":"93d4735dc564683e3972f87ebb037bd3c0cfffff8751f35eb9c61505b3e8c2ed","bytes":349,"rawSha256":"e4099fb804df864f693dcd6d2bf50809c26fa25e192856187c7d2300c131b76b","rawBytes":494,"command":null},
+    {"id":"stopped-hub","file":"null-stage-2d2115dc8-stopped-hub.log.gz","sha256":"67c9b7bbf3a29d13830c104b9525fbc9252b5976ed4fad2c4fb4c189b7d473ac","bytes":777,"rawSha256":"e6274d26f8f7ced684d0316d2974ecf59718067f80cf88b329a04f413451a480","rawBytes":1369,"command":"bun tools/stand-lock.ts run --reason \"public-p6-stopped-hub-replay\" --timeout-ms \"60000\" -- bun \".logs/canonical-review-20261012/verify-stopped-hub-replay.ts\""},
+    {"id":"parity","file":"null-stage-2d2115dc8-parity.log.gz","sha256":"52e453e679d7fefdba60c7457b6640ed89a2acd374f87b0c89ab6ee84484c17c","bytes":489,"rawSha256":"b3d825bb3090bf07d0b4c28df05bb0f0e0a8fe27321febeb5f08a9da1953b1cf","rawBytes":1324,"command":"bun tools/stand-lock.ts run --reason canonical-null-stage-replay --timeout-ms \"180000\" -- bun core/scripts/operations/hlt/replay/commands/run-mixed-ts-rust-parity.ts --ts-only --recording .logs/hlt-evidence/ts-worker-projections/recording-manifest.json --ts-report-dir \".logs/canonical-review-20261012/null-stage-parity-2d2115dc8\""},
+    {"id":"ts-w1","file":"null-stage-2d2115dc8-ts-w1.json.gz","sha256":"a075880ff2cc63fe34ee162c20aa8b285cfe5d716e1baae0100267b573c747b0","bytes":148339,"rawSha256":"e13de8f726a7c7543833d6ba4c92a03954ebd9e073cc555fa507a62dd5462ee9","rawBytes":608134,"command":null},
+    {"id":"ts-w4","file":"null-stage-2d2115dc8-ts-w4.json.gz","sha256":"999143b7798b4bc721c9ed4c938448544c716e0bdbc90c6f80b3badd4d646cd7","bytes":148339,"rawSha256":"61d632b03c76b520327bc54f6303bc4edcb03f6b54ed679bc66bddcb26047df4","rawBytes":608134,"command":null},
+    {"id":"ts-w8","file":"null-stage-2d2115dc8-ts-w8.json.gz","sha256":"8d23ae43412600585a29234bf2fd2af92884f06c4fc9b38008304e05498e8ec5","bytes":148338,"rawSha256":"e7874d12176915e516c99150be9b991f85b0017f5a41e4fc4aa0b8cf718c61c1","rawBytes":608134,"command":null},
+    {"id":"browser","file":"null-stage-2d2115dc8-browser.log.gz","sha256":"541d0d5580464a19ca950d62e0befa876480a71478e813b54a5a1e218f571afb","bytes":2082,"rawSha256":"689468a0cb58247bc740075ae805b96f1e8fd5a951ea5a87d2682eb95446cbc5","rawBytes":27534,"command":"bun tools/stand-lock.ts run --reason canonical-null-stage-react-payment --timeout-ms \"180000\" -- bun run prod:smoke:local"},
+    {"id":"browser-report","file":"null-stage-2d2115dc8-browser-report.json.gz","sha256":"0c5219ed8af7ee5a4ab82163b782e8d89e61248266775636050eefb9d150f033","bytes":2422,"rawSha256":"6edc9b18611268c2bb7ae17b5ff1c66b376987e68e10a18bfa4f7b2027414fed","rawBytes":10323,"command":null},
+    {"id":"bootstrap","file":"null-stage-2d2115dc8-bootstrap.json.gz","sha256":"a3d97f5abe9326027e9f91b5dc10fa8da6777959187db85ef88aa42897405eea","bytes":2157,"rawSha256":"434ad30f29debb70d99447754923158037ebfc52855b8caa0be95c78eaabd20f","rawBytes":35957,"command":null},
+    {"id":"check","file":"null-stage-2d2115dc8-check.log.gz","sha256":"ce623a9e1fce1e87ed9b89f9f2abb69338b76c09e5b871ec516e3965fc10535a","bytes":14883,"rawSha256":"36c15a535d485dc4ae71ba2920658df739a8fed2c20d38b8d7485c51b9b4bad6","rawBytes":116965,"command":"bun run check:short && bun run check:long"},
+    {"id":"kernel","file":"null-stage-2d2115dc8-kernel.json","sha256":"fdbb6993756c1930d9b92c5517a0baf1dd695b2f22ba412a0130d3635ea69301","bytes":3868,"command":null},
+    {"id":"diagnostics","file":"null-stage-2d2115dc8-diagnostics.json","sha256":"27fbcd456e018af3b1133cbc60a7ac33d61bc0c7198c7b1ad801634d703bac30","bytes":1448,"command":null}
+  ]
+}

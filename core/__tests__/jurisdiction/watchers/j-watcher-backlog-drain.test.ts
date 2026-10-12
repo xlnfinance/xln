@@ -6,10 +6,12 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ethers } from 'ethers';
 
-import { createEmptyEnv } from '../../../runtime';
+import { createEmptyEnv, processRuntime } from '../../../runtime';
+import { safeStringify } from '../../../protocol/serialization';
 import { deriveSignerAddressSync, getSignerPrivateKey } from '../../../account/crypto';
 import { encodeSingleSignerBoard, generateLazyEntityId, hashBoard } from '../../../entity/factory';
 import { createJAdapter, createXlnJsonRpcProvider, type JAdapter } from '../../../jurisdiction/adapter';
+import { getWatcherStartBlock } from '../../../jurisdiction/adapter/watcher';
 import { createJReplica, createJurisdictionConfig } from '../../../scenarios/harness/boot';
 import {
   getCertifiedBoardNodeStore,
@@ -55,6 +57,8 @@ type RpcGateControl = {
 type RpcGateProxy = {
   rpcUrl: string;
   armBlockNumberGate(): RpcGateControl;
+  armHeaderBatchGate(status?: 429): RpcGateControl;
+  takeHeaderBlocks(): number[];
   close(): Promise<void>;
 };
 
@@ -124,22 +128,55 @@ const startAnvil = async (): Promise<ManagedAnvil> => {
 };
 
 const startRpcGateProxy = (upstreamUrl: string): RpcGateProxy => {
-  let gateArmed = false;
+  let armedGate: { target: 'block-number' | 'headers'; status?: 429 } | null = null;
   let enteredResolve: (() => void) | null = null;
   let releasePromise: Promise<void> | null = null;
   let releaseResolve: (() => void) | null = null;
+  const headerBlocks: number[] = [];
+  const armGate = (target: 'block-number' | 'headers', status?: 429): RpcGateControl => {
+    if (armedGate || releasePromise) throw new Error('J_WATCHER_RPC_GATE_ALREADY_ARMED');
+    armedGate = { target, ...(status === undefined ? {} : { status }) };
+    const entered = new Promise<void>((resolve) => { enteredResolve = resolve; });
+    releasePromise = new Promise<void>((resolve) => { releaseResolve = resolve; });
+    return {
+      entered,
+      release() {
+        const resolve = releaseResolve;
+        if (!resolve) throw new Error('J_WATCHER_RPC_GATE_NOT_ARMED');
+        armedGate = null;
+        releaseResolve = null;
+        releasePromise = null;
+        enteredResolve = null;
+        resolve();
+      },
+    };
+  };
   const server = Bun.serve({
     hostname: '127.0.0.1',
     port: 0,
     async fetch(request) {
       const body = await request.text();
-      const payload = JSON.parse(body) as { method?: string } | Array<{ method?: string }>;
+      type RpcCall = { method?: string; params?: unknown[] };
+      const payload = JSON.parse(body) as RpcCall | RpcCall[];
       const methods = Array.isArray(payload) ? payload.map((entry) => entry.method) : [payload.method];
-      if (gateArmed && methods.includes('eth_blockNumber')) {
-        gateArmed = false;
+      const headerBatch = Array.isArray(payload) && payload.length > 1 &&
+        payload.every((entry) => entry.method === 'eth_getBlockByNumber');
+      if (headerBatch) {
+        for (const entry of payload) {
+          const height = entry.params?.[0];
+          if (typeof height !== 'string' || !/^0x[0-9a-f]+$/i.test(height)) {
+            throw new Error('J_WATCHER_RPC_HEADER_HEIGHT_INVALID');
+          }
+          headerBlocks.push(Number(BigInt(height)));
+        }
+      }
+      const gate = armedGate;
+      if (gate && (gate.target === 'headers' ? headerBatch : methods.includes('eth_blockNumber'))) {
+        armedGate = null;
         enteredResolve?.();
         if (!releasePromise) throw new Error('J_WATCHER_RPC_GATE_RELEASE_MISSING');
         await releasePromise;
+        if (gate.status === 429) return new Response('Too Many Requests', { status: 429 });
       }
       return await fetch(upstreamUrl, {
         method: 'POST',
@@ -150,23 +187,9 @@ const startRpcGateProxy = (upstreamUrl: string): RpcGateProxy => {
   });
   return {
     rpcUrl: `http://127.0.0.1:${server.port}`,
-    armBlockNumberGate(): RpcGateControl {
-      if (gateArmed || releasePromise) throw new Error('J_WATCHER_RPC_GATE_ALREADY_ARMED');
-      gateArmed = true;
-      const entered = new Promise<void>((resolve) => { enteredResolve = resolve; });
-      releasePromise = new Promise<void>((resolve) => { releaseResolve = resolve; });
-      return {
-        entered,
-        release() {
-          const resolve = releaseResolve;
-          if (!resolve) throw new Error('J_WATCHER_RPC_GATE_NOT_ARMED');
-          releaseResolve = null;
-          releasePromise = null;
-          enteredResolve = null;
-          resolve();
-        },
-      };
-    },
+    armBlockNumberGate: () => armGate('block-number'),
+    armHeaderBatchGate: (status) => armGate('headers', status),
+    takeHeaderBlocks: () => headerBlocks.splice(0),
     async close(): Promise<void> {
       await server.stop(true);
     },
@@ -213,7 +236,7 @@ describe('RPC J-watcher backlog drain', () => {
   test('delivers an authenticated event beyond two 2048-block pages before returning', async () => {
     managedAnvil = await startAnvil();
     rpcProxy = startRpcGateProxy(managedAnvil.rpcUrl);
-    adapter = await createJAdapter({ mode: 'rpc', chainId: CHAIN_ID, rpcUrl: rpcProxy.rpcUrl });
+    adapter = await createJAdapter({ mode: 'rpc', chainId: CHAIN_ID, rpcUrl: rpcProxy.rpcUrl, watchPollMs: 100 });
     await adapter.deployStack();
 
     const env = createEmptyEnv(RUNTIME_SEED);
@@ -277,6 +300,96 @@ describe('RPC J-watcher backlog drain', () => {
     const reserveEvent = receiptEvents.find((event) => event.name === 'ReserveUpdated');
     expect(Number(reserveEvent?.blockNumber ?? 0)).toBeGreaterThan(2 * 2048);
 
+    const pollWatcher = adapter.pollNow?.bind(adapter);
+    const readScanProgress = adapter.getWatcherScanProgress?.bind(adapter);
+    if (!pollWatcher || !readScanProgress) throw new Error('J_WATCHER_BACKLOG_POLL_API_MISSING');
+    const isWatching = adapter.isWatching.bind(adapter);
+    const takeHeaderBlocks = rpcProxy.takeHeaderBlocks;
+    const waitForGate = async (stage: string, gate: RpcGateControl, poll?: Promise<void>): Promise<void> => {
+      let timer: ReturnType<typeof setTimeout>;
+      const deadline = new Promise<{ status: 'timed-out' }>(resolve => {
+        timer = setTimeout(() => resolve({ status: 'timed-out' }), 5_000);
+      });
+      const result = await Promise.race([
+        gate.entered.then(() => ({ status: 'entered' } as const)),
+        ...(poll ? [poll.then(
+          () => ({ status: 'resolved' } as const),
+          (error: unknown) => ({ status: 'rejected', error } as const),
+        )] : []),
+        deadline,
+      ]).finally(() => clearTimeout(timer));
+      if (result.status === 'entered') return;
+      gate.release();
+      throw new Error(`J_WATCHER_BACKLOG_GATE_NOT_REACHED:${stage}:${safeStringify({
+        poll: result.status,
+        scan: readScanProgress(),
+        isWatching: isWatching(),
+        headerBlocks: takeHeaderBlocks(),
+      })}`, result.status === 'rejected' ? { cause: result.error } : undefined);
+    };
+    const fromBlock = getWatcherStartBlock(env, adapter.addresses.depository, CHAIN_ID);
+    const failureState = () => structuredClone({
+      scan: readScanProgress(),
+      jurisdictionHeight: env.state.jReplicas.get(jurisdictionName)?.blockNumber,
+      finalizedHeight: env.state.eReplicas.get(`${entityId}:${SIGNER_ID}`)?.state.lastFinalizedJHeight,
+      reserve: env.state.eReplicas.get(`${entityId}:${SIGNER_ID}`)?.state.reserves.get(TOKEN_ID),
+      mempool: env.runtimeMempool,
+    });
+    const beforeFailures = failureState();
+    rpcProxy.takeHeaderBlocks();
+    const rateLimitGate = rpcProxy.armHeaderBatchGate(429);
+    const rateLimitedPoll = pollWatcher();
+    await waitForGate('rate-limit', rateLimitGate, rateLimitedPoll);
+    rateLimitGate.release();
+    await rateLimitedPoll;
+    expect(failureState()).toEqual(beforeFailures);
+    expect(adapter.isWatching()).toBe(true);
+    expect(rpcProxy.takeHeaderBlocks()).toHaveLength(128);
+
+    const timeoutGate = rpcProxy.armHeaderBatchGate();
+    const retryStartedAt = performance.now();
+    const timedOutPoll = pollWatcher();
+    const joinedTimedOutPoll = pollWatcher();
+    await waitForGate('timeout', timeoutGate, timedOutPoll);
+    try {
+      // A manual drain shares transport cooldown with the automatic timer.
+      // The real proxy must not receive another header request immediately after 429.
+      expect(performance.now() - retryStartedAt).toBeGreaterThanOrEqual(900);
+      // Let the real HTTP batch deadline abort the held request; no fake clock.
+      await Promise.all([timedOutPoll, joinedTimedOutPoll]);
+    } finally {
+      timeoutGate.release();
+    }
+    expect(failureState()).toEqual(beforeFailures);
+    expect(adapter.isWatching()).toBe(true);
+    expect(rpcProxy.takeHeaderBlocks()).toHaveLength(128);
+
+    // Both transient failures must shrink the actual poll: 2048 -> 1024 -> 512.
+    // Every successful response is forwarded from Anvil, including the fence.
+    await pollWatcher();
+    const readHeights = [...new Set(rpcProxy.takeHeaderBlocks())].sort((left, right) => left - right);
+    const anchorHeight = Math.max(1, fromBlock - 1);
+    expect(readHeights).toEqual(Array.from(
+      { length: fromBlock + 512 - anchorHeight },
+      (_, index) => anchorHeight + index,
+    ));
+    expect(readScanProgress().scannedThroughHeight).toBe(fromBlock + 511);
+
+    const successfulRetryAt = performance.now();
+    // Commit the first real observed range so the next poll can advance.
+    // One success must not restore the larger burst while pressure remains.
+    await processRuntime(env);
+    const retainedPressureGate = rpcProxy.armBlockNumberGate();
+    const retainedPressurePoll = pollWatcher();
+    await waitForGate('retained-pressure', retainedPressureGate, retainedPressurePoll);
+    try {
+      expect(performance.now() - successfulRetryAt).toBeGreaterThanOrEqual(1_400);
+    } finally {
+      retainedPressureGate.release();
+    }
+    await retainedPressurePoll;
+    expect(readScanProgress().scannedThroughHeight).toBe(fromBlock + 1023);
+
     await processJEvents(env);
 
     const replica = env.state.eReplicas.get(`${entityId}:${SIGNER_ID}`);
@@ -330,6 +443,21 @@ describe('RPC J-watcher backlog drain', () => {
     expect(restored.state.eReplicas.get(`${entityId}:${SIGNER_ID}`)?.jHistory?.scannedThroughHeight)
       .toBe(irrelevantLogHeight);
 
+    // Restoring a real authenticated suffix must not download it again. The
+    // certified anchor and local frontier still need a live canonical audit.
+    await adapter.stopWatchingAndWait();
+    restored.scenarioMode = true;
+    adapter.startWatching(restored);
+    rpcProxy.takeHeaderBlocks();
+    await pollWatcher();
+    const restartHeaders = [...new Set(rpcProxy.takeHeaderBlocks())].sort((left, right) => left - right);
+    expect(restartHeaders).toContain(durableSemanticHeight);
+    expect(restartHeaders).toContain(irrelevantLogHeight);
+    expect(restartHeaders).not.toContain(authenticatedEmptyTail);
+    expect(readScanProgress().scannedThroughHeight).toBe(irrelevantLogHeight);
+    await adapter.stopWatchingAndWait();
+    adapter.startWatching(env);
+
     const lateSignerPrivateKey = getSignerPrivateKey(env, LATE_SIGNER_ID);
     const lateSignerAddress = new ethers.Wallet(ethers.hexlify(lateSignerPrivateKey)).address;
     const lateEntityId = generateLazyEntityId([lateSignerAddress], 1n).toLowerCase();
@@ -369,7 +497,7 @@ describe('RPC J-watcher backlog drain', () => {
     const shutdownGate = rpcProxy.armBlockNumberGate();
     const inFlightPoll = adapter.pollNow?.();
     if (!inFlightPoll) throw new Error('J_WATCHER_BACKLOG_POLL_API_MISSING');
-    await shutdownGate.entered;
+    await waitForGate('shutdown', shutdownGate, inFlightPoll);
     let shutdownComplete = false;
     const shutdown = adapter.stopWatchingAndWait().then(() => { shutdownComplete = true; });
     await Bun.sleep(25);
@@ -378,5 +506,42 @@ describe('RPC J-watcher backlog drain', () => {
     await shutdown;
     await inFlightPoll;
     expect(adapter.isWatching()).toBe(false);
+
+    // Exercise the actual automatic timer on the same real transport. The
+    // manual call below only joins a request already held by the proxy.
+    env.scenarioMode = false;
+    const automaticFailureGate = rpcProxy.armHeaderBatchGate(429);
+    adapter.startWatching(env);
+    await waitForGate('automatic-first-poll', automaticFailureGate);
+    const automaticFailure = pollWatcher();
+    automaticFailureGate.release();
+    await automaticFailure;
+    const automaticRetryGate = rpcProxy.armHeaderBatchGate(429);
+    const automaticRetryAt = performance.now();
+    await waitForGate('automatic-retry', automaticRetryGate);
+    const automaticRetry = pollWatcher();
+    try {
+      expect(performance.now() - automaticRetryAt).toBeGreaterThanOrEqual(900);
+    } finally {
+      automaticRetryGate.release();
+    }
+    await automaticRetry;
+
+    const cancelledGate = rpcProxy.armBlockNumberGate();
+    let requestedWhileCooling = false;
+    void cancelledGate.entered.then(() => { requestedWhileCooling = true; });
+    const coolingPoll = pollWatcher();
+    const joinedCoolingPoll = pollWatcher();
+    await Bun.sleep(25);
+    const stopStartedAt = performance.now();
+    try {
+      await adapter.stopWatchingAndWait();
+      await Promise.all([coolingPoll, joinedCoolingPoll]);
+      expect(performance.now() - stopStartedAt).toBeLessThan(500);
+      expect(requestedWhileCooling).toBe(false);
+      expect(adapter.isWatching()).toBe(false);
+    } finally {
+      cancelledGate.release();
+    }
   }, 60_000);
 });

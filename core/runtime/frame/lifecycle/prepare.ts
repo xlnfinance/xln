@@ -5,7 +5,7 @@ import {
 import {
   causalTraceContainsWork,
   summarizeRuntimeAccountCausality,
-} from '../../../qa/account-causal-trace';
+} from '../../observability/account-causal-trace';
 import type { RuntimeReplica, RuntimeInput } from '../../types';
 import { applyEntityHeightDurabilityBarrier } from '../../mempool/entity-height-barrier';
 import { runtimeJInputFramePrefixLength } from '../../mempool/input-validation';

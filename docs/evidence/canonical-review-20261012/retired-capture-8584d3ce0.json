@@ -1,0 +1,108 @@
+{
+  "schemaVersion": 1,
+  "title": "Remove unread retired authority capture bookkeeping",
+  "sourceSha": "8584d3ce0af99290c1fd226831dad8f03cf530f3",
+  "status": "focused-and-check-passed",
+  "releaseReady": false,
+  "sourceBinding": {
+    "cleanBefore": true,
+    "cleanAfter": true,
+    "basis": "Root recorded clean committed source before/after focused tests and check. Logs do not embed source SHA; the metric embeds its tree SHA.",
+    "sourceFiles": [
+      {
+        "path": "core/rscore/authority-driver.ts",
+        "sha256": "323a5495d5ca4cf1b7afb6db741b32956d862dceae2199ea9c1f4595271f07c6"
+      },
+      {
+        "path": "core/runtime/frame/intake/reducer.ts",
+        "sha256": "3f5b66feac23fdfd22661296e1910814700a7b052dacabed401f3e1513d4d250"
+      }
+    ],
+    "packaging": "A later evidence commit does not change the execution SHA."
+  },
+  "change": {
+    "productionPaths": [
+      "core/rscore/authority-driver.ts",
+      "core/runtime/frame/intake/reducer.ts"
+    ],
+    "productionInsertions": 2,
+    "productionDeletions": 51,
+    "productionNetPhysicalLines": -49,
+    "separateTodoInsertions": 19,
+    "separateTodoDeletions": 16,
+    "behavior": "Remove unread captured/arrival cursor bookkeeping and unused candidate fields; remove its disabled TS frame-capture call.",
+    "staticBasis": "The capture path was disabled in working TS before reaching the call; no financial formulas or new path were added."
+  },
+  "validation": {
+    "focused": {
+      "artifact": "focused",
+      "passed": 45,
+      "failed": 0,
+      "assertions": 1204,
+      "files": 4,
+      "seconds": 1.55,
+      "reproductionCommand": "bun test core/__tests__/rscore/authority/authority-wave.test.ts core/__tests__/rscore/authority/authority-activation.test.ts core/__tests__/rscore/authority/authority-account-input-wire.test.ts core/__tests__/runtime/commit/runtime-frame-atomicity.test.ts",
+      "commandBasis": "Exact parent invocation on the clean source SHA; stdout/stderr captured in the retained focused log."
+    },
+    "check": {
+      "artifact": "check",
+      "command": "bun run check",
+      "sourceGates": 38,
+      "outerParallelGates": 3
+    }
+  },
+  "staticReview": {
+    "result": "No issues reported",
+    "basis": "Parent reports an independent internal static review of this deletion.",
+    "externalAssurance": false
+  },
+  "kernel": {
+    "artifact": "kernel",
+    "closureCodeLines": 160368,
+    "closureFiles": 816,
+    "reductionFromBaseline": 694,
+    "reductionFromPrevious": 45,
+    "coreRscoreEdges": 11,
+    "coreRscoreCodeLines": 8306,
+    "coreQaEdges": 0,
+    "overallReadinessScore": null
+  },
+  "limits": [
+    "No WAL replay, browser run, public-chain operation or source deployment was performed for this narrow deletion.",
+    "Prior 2d2115dc8 replay/browser evidence is not relabelled as evidence for this SHA.",
+    "This package does not establish full CI, public-hub recovery or mainnet readiness."
+  ],
+  "secretReview": {
+    "copiedLogs": 2,
+    "derivedMetricFiles": 1,
+    "sensitiveAssignmentCandidates": 0,
+    "excluded": "Keys, seeds, private profiles, raw WAL and helper source.",
+    "scope": "Targeted content review and assignment scan, not a comprehensive secret audit."
+  },
+  "artifacts": [
+    {
+      "id": "focused",
+      "file": "retired-capture-8584d3ce0-focused.log.gz",
+      "sha256": "abd0a5efb89eedec2fa1ec6a9016cc90d2b4a0b6948cd1d0f275342b889345df",
+      "rawSha256": "99a0576571d1226525beb773ff593894952c9e10e574f6b6b38d030309f673dd",
+      "bytes": 2272,
+      "rawBytes": 7827
+    },
+    {
+      "id": "check",
+      "file": "retired-capture-8584d3ce0-check.log.gz",
+      "sha256": "fa7a9a30155ef666987220bd984ce6b520051f737ff8868af5087acaf92628f7",
+      "rawSha256": "43f68134c3ea2536cc189e0cbce2948e37cf12cc3de00f002f07cdbddcf33ac3",
+      "bytes": 15172,
+      "rawBytes": 117667
+    },
+    {
+      "id": "kernel",
+      "file": "retired-capture-8584d3ce0-kernel.json.gz",
+      "sha256": "e085fb7bde36eea2a5c95f3bc23dd711124bc1322215d67fcb9ea019fdf684f8",
+      "rawSha256": "2d0b743c8770c8b8e7e13b15e33aa5479c9b2975c80a9ea9bbe172e34eb3b0b0",
+      "bytes": 569,
+      "rawBytes": 1074
+    }
+  ]
+}

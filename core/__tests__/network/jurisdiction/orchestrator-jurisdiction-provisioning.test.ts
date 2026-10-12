@@ -28,6 +28,49 @@ import { stopProcess, type ManagedChildProcess } from '../../../scripts/e2e/harn
 const CHAIN_ID = 31_337;
 const CHAIN_ID_2 = 31_338;
 
+test('RPC chain id rejects malformed or unsafe quantities before selecting a jurisdiction', async () => {
+  const invalid = [
+    '0x7a69junk',
+    '31337.5',
+    31337.5,
+    '0x20000000000001',
+    '9007199254740993',
+    9007199254740992,
+    ['31337'],
+    true,
+    null,
+    '',
+    ' ',
+    ' 31337 ',
+    '3e4',
+    '0x',
+    '0',
+    '0x0',
+    '-1',
+  ];
+  for (const result of invalid) {
+    const payload = encodeURIComponent(safeStringify({ jsonrpc: '2.0', id: 1, result }));
+    await expect(
+      deployRpc2JurisdictionStack({
+        shardJurisdictionsPath: '/unused',
+        rpc2Url: `data:application/json,${payload}`,
+      }),
+    ).rejects.toThrow('RPC_CHAIN_ID_INVALID');
+  }
+});
+
+test('RPC chain id accepts exact positive safe integers before selecting a jurisdiction', async () => {
+  for (const result of ['0x7a69', '31337', 31337, '0x1fffffffffffff', '9007199254740991']) {
+    const payload = encodeURIComponent(safeStringify({ jsonrpc: '2.0', id: 1, result }));
+    await expect(
+      deployRpc2JurisdictionStack({
+        shardJurisdictionsPath: '/unused',
+        rpc2Url: `data:application/json,${payload}`,
+      }),
+    ).rejects.toThrow('RPC2_PRIMARY_JURISDICTION_UNRESOLVED');
+  }
+});
+
 test('ephemeral shards never import unrelated public RPC jurisdictions', () => {
   const config: OrchestratorJurisdictionsConfig = {
     shardJurisdictionsPath: '/unused',

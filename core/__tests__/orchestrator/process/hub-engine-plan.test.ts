@@ -39,20 +39,40 @@ test('native two-jurisdiction bootstrap requires primary hub mesh and every MM o
   expect(planNativeHubBootstrapPeers(primary.entityId, [secondary, primary], hubs, [])).toEqual(peers.filter(peer => peer.isHub));
 });
 
-test('the explicit plan engine selects H1 while H2/H3 remain TypeScript', () => {
+test('default and explicit TS selection keep every hub on TypeScript', () => {
   expect(['H1', 'H2', 'H3'].map(name => canonicalHubEngine(name, { XLN_HLT_ENGINE: 'ts' }))).toEqual([
     'typescript',
     'typescript',
     'typescript',
   ]);
-  expect(['H1', 'H2', 'H3'].map(name => canonicalHubEngine(name, { XLN_HLT_ENGINE: 'rust' }))).toEqual([
-    'rust',
+  expect(['H1', 'H2', 'H3'].map(name => canonicalHubEngine(name, {}))).toEqual([
+    'typescript',
     'typescript',
     'typescript',
   ]);
   expect(canonicalHubEngine('H1', {})).toBe('typescript');
-  expect(() => canonicalHubEngine('H1', { XLN_HLT_ENGINE: 'native' })).toThrow('HUB_ENGINE_SELECTOR_INVALID:native');
+  expect(canonicalHubEngine('H1', {
+    XLN_RSCORE_AUTHORITY: '0',
+    XLN_RSCORE_SHADOW: '0',
+    XLN_HUB_RSCORE_AUTHORITY_H2: '0',
+    XLN_RSCORE_AUTHORITY_RECORD: '0',
+    XLN_TS_ACCOUNT_WORKERS: '4',
+  })).toBe('typescript');
+  expect(() => canonicalHubEngine('H1', { XLN_HLT_ENGINE: 'native' })).toThrow('RUNTIME_ACCOUNT_ENGINE_INVALID:native');
   expect(() => canonicalHubEngine('MM')).toThrow('HUB_ENGINE_NAME_INVALID:MM');
+});
+
+test('TS-only launch rejects retired engine activation before configuration', () => {
+  expect(() => canonicalHubEngine('H1', { XLN_HLT_ENGINE: 'rust' }))
+    .toThrow('RUNTIME_ACCOUNT_ENGINE_RETIRED:XLN_HLT_ENGINE:typescript-only');
+  for (const key of [
+    'XLN_RSCORE_AUTHORITY', 'XLN_RSCORE_SHADOW', 'XLN_RSCORE_AUTHORITY_RECORD',
+    'XLN_RSCORE_AUTHORITY_REPLAY', 'XLN_RSCORE_AUTHORITY_IMPORT', 'XLN_RSCORE_ENTITY_AUTHORITY',
+    'XLN_HUB_RSCORE_AUTHORITY_H2',
+  ]) {
+    expect(() => canonicalHubEngine('H1', { [key]: '1' }))
+      .toThrow(`RUNTIME_ACCOUNT_ENGINE_RETIRED:${key}:typescript-only`);
+  }
 });
 
 test('mesh supervisor dispatches canonical per-hub process kinds', () => {
@@ -67,6 +87,10 @@ test('mesh supervisor dispatches canonical per-hub process kinds', () => {
   expect(hubSpawner).toContain("{ executable: 'bun', processArgs, rustIdentity: null }");
   expect(supervisor).toContain("? 'rscore/target/release/xlnrs'");
   expect(hubSpawner).toContain('stdio: invocation.rustIdentity');
+  const spawnEntry = hubSpawner.slice(hubSpawner.indexOf('export const createHubSpawner'));
+  expect(spawnEntry.indexOf('canonicalHubEngine(child.name)'))
+    .toBeLessThan(spawnEntry.indexOf('await deps.reapStaleHubProcess(child)'));
+  expect(spawnEntry).toContain('HUB_ENGINE_SELECTION_MISMATCH:');
   expect(supervisor).toContain('driveH1Bootstrap(h1, shouldStartMarketMaker)');
   expect(supervisor).toContain("if (h1.engine === 'rust') {");
   expect(supervisor).toContain('child.lastInfo?.hubEntities?.some(entity => entity.entityId)');
@@ -78,22 +102,12 @@ test('mesh supervisor dispatches canonical per-hub process kinds', () => {
   expect(hubSpawner).toMatch(/const routes = \[\s*\.\.\.hubRoutes,\s*\.\.\.supportRoutes/);
 });
 
-test('dev verifies native bytes only when the explicit engine selects Rust H1', () => {
+test('dev validates the TS-only selector before setup without a native build preflight', () => {
   const launcher = readFileSync(join(import.meta.dir, '../../../../scripts/dev/run-dev.ts'), 'utf8');
-  const preflight = readFileSync(
-    join(import.meta.dir, '../../../../scripts/dev/checks/check-rscore-runtime-freshness.ts'),
-    'utf8',
-  );
-  const freshness = launcher.indexOf('check-rscore-runtime-freshness.ts');
-  const prepare = launcher.indexOf('scripts/dev/prepare-start.sh');
-  expect(freshness).toBeGreaterThan(-1);
-  expect(prepare).toBeGreaterThan(freshness);
-  expect(preflight).toContain('const BUILD_TIMEOUT_MS = 30_000');
-  expect(preflight).toContain("if (selectedEngine === 'rust')");
-  expect(preflight).toContain('if (stopping) return stopping');
-  expect(preflight).toContain('await buildNativeH1()');
-  expect(preflight).toContain('utimesSync(runtimeBinary');
-  expect(preflight).toContain('assertRustHubBinaryFresh(repositoryRoot)');
+  const startup = launcher.slice(launcher.indexOf('const runDev ='));
+  expect(startup.indexOf("canonicalHubEngine('H1')")).toBeGreaterThan(-1);
+  expect(startup.indexOf("canonicalHubEngine('H1')")).toBeLessThan(startup.indexOf('parseInvocation()'));
+  expect(launcher).not.toContain('check-rscore-runtime-freshness.ts');
 });
 
 test('live Rust H1 smoke rejects a stale production binary', () => {

@@ -371,7 +371,7 @@ encoders with intentionally different behavior:
 
 | Encoder | `undefined` object field | Map behavior | Main use |
 |---|---|---|---|
-| `encodeCanonicalConsensusValue` | preserved as a tagged value; differs from missing | canonical, type-sensitive | Entity/frame consensus hashes |
+| `encodeCanonicalConsensusBytes` | rejected, including nested values | sorted by canonical key bytes, then value bytes on ties | Entity/frame consensus hashes |
 | tagged JSON / `safeStringify` | omitted | tagged and sorted; undefined entries omitted | logs, APIs, portable JSON |
 | Account canonical RLP | omitted | committed through canonical map roots | Account state roots |
 | canonical msgpack WAL | preserved | sorted by canonical key bytes | durable Runtime history |

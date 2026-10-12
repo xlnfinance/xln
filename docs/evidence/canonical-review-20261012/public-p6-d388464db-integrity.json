@@ -1,0 +1,18 @@
+{
+  "sourceSha": "d388464dbeb3cd3cdca7c9e5b33302aa36dcc33e",
+  "height": 142,
+  "reserve": {
+    "__xlnType": "BigInt",
+    "value": "200000000"
+  },
+  "collateral": {
+    "__xlnType": "BigInt",
+    "value": "0"
+  },
+  "integrity": {
+    "checkedFrames": 127,
+    "latestHeight": 142,
+    "ok": true,
+    "runtimeId": "0x6eae5b64f1887d60ccc2fde8bceaf3b281edf296"
+  }
+}

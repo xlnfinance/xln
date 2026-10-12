@@ -1,0 +1,62 @@
+{
+  "schema": "xln-source-evidence/v1",
+  "sourceSha": "f56e65bea91c76b03a1c8d77cdd3c283393c2246",
+  "status": "compiled-ui-artifact-first-failure",
+  "eligible": false,
+  "sourceBinding": {
+    "harnessSourceSha": "f56e65bea91c76b03a1c8d77cdd3c283393c2246",
+    "compiledArtifactSourceSha": "d4502ec942233aa7c989f9875e4cafa354d0f4a7",
+    "cleanBeforeAndAfter": true,
+    "cleanlinessBasis": "Parent verified exact clean source before and after the run; packaging is later and ignored only.",
+    "sourceDelta": "git diff d450..f56 contains only wallet-gate.ts, e2e-production-wallet.spec.ts and documentation/evidence/todo; no production Runtime or UI source change.",
+    "preparedManifestSha256": "f85b6f7352e08b8ded70dc09478bdeffe418cfff33d016ff048b8385704fdb79"
+  },
+  "execution": {
+    "command": "XLN_LOCAL_PROD_SMOKE_WALLET_ARTIFACT_DIR=/Users/zigota/xln/.logs/canonical-review-20261012/prepared-d450-ui XLN_LOCAL_PROD_SMOKE_DIR=.logs/canonical-review-20261012/exact-ui-artifact-f56e65bea XLN_LOCAL_PROD_SMOKE_WALLET_TESTS=e2e-production-wallet.spec.ts bun run stand:run --reason exact-ui-artifact --timeout-ms 180000 -- bun run prod:smoke:local",
+    "commandBasis": "Environment and selection from parent handoff; outer stand wrapper recorded at the first log line.",
+    "exitCode": 1,
+    "standLockHeld": true,
+    "stats": {"startTime":"2026-10-12T10:30:51.900Z","duration":5456.527,"expected":0,"skipped":0,"unexpected":1,"flaky":0},
+    "topLevelErrors": 1,
+    "financialUserFlowExecuted": false,
+    "financialFlowScope": "Test imported the wallet, then stopped at the debug-global assertion before funding/move/payment/reload steps. Local stand bootstrap still ran; this does not claim no Anvil setup transactions."
+  },
+  "firstFailure": {
+    "test": "production wallet imports, funds 100, moves reserve, pays 25 and preserves identity on reload @functional",
+    "file": "ui/tests/e2e-production-wallet.spec.ts",
+    "line": 43,
+    "column": 57,
+    "assertion": "'__xln' in window",
+    "expected": false,
+    "actual": true,
+    "phase": "Immediately after wallet import",
+    "outerError": "WALLET_GATE_PROCESS_FAILED:browser:1:null",
+    "scope": "Observed boundary failure only; no production root-cause classification or fix verification in this package."
+  },
+  "artifactBinding": {
+    "servedOrigin": "http://127.0.0.1:20002",
+    "artifactDir": "/Users/zigota/xln/.logs/canonical-review-20261012/prepared-d450-ui",
+    "httpEntrypoints": [{"bytes":1888,"path":"index.html","sha256":"6adec4639dbf5d20fba5420af7b978ed5b7393f1d13119fdd8d4ac925ae2e4f3","matchesPreparedArchive":true},{"bytes":5900796,"path":"runtime.js","sha256":"2fde0e9f8e3ea794523b8ca1d3138faa74f3c8c5d8fe2a1fe75196b85589738f","matchesPreparedArchive":true},{"bytes":2042516,"path":"account-worker.js","sha256":"7ba541168b687c4deb25ca5e9f44b914fbe0e62aa13924ae097ef377ac2a1201","matchesPreparedArchive":true}],
+    "fullArchiveFileVerification": {"files":11,"basis":"Parent independently compared all prepared archive files; packager independently matched the three HTTP-entrypoint hashes in wallet-artifact.json to the original d450 manifest."}
+  },
+  "artifacts": [
+    {"id":"stand","file":"exact-ui-artifact-f56e65bea-stand.log.gz","sha256":"e06f82ce5043b5b47307a435eda692ab6fc64064fe92e8672cb82b0c4e3c5dd4","bytes":2166,"rawSha256":"9700c968a4b14f50c835dac0001b5de417875525886f49b359f1dd02081038c9","rawBytes":23949},
+    {"id":"browser","file":"exact-ui-artifact-f56e65bea-browser.log.gz","sha256":"86290ec63ec136ed7413a65195ad7ce920ed31fe7e5ec1f2e3dd0f3984ac8fde","bytes":822,"rawSha256":"dad18fda9bfd8687aeb7a75004e6c0534f586845bc287c0c681c0b3f89da070e","rawBytes":3272,"originalSha256":"a187b56b5b60e19422ebd2d8d4ad1e36c373ca6c59ac0ffff1ef6a8d29eb63dc","originalBytes":3963,"projection":"Attachment/trace filesystem path lines replaced; failure assertion preserved."},
+    {"id":"results","file":"exact-ui-artifact-f56e65bea-results.json.gz","sha256":"d6499c66308aad225031dd82480849e7fb3a96b470ec9b457755e09747e33445","bytes":1840,"rawSha256":"3185b1f003eae9eccd1451e4f70ace03e6123c8f81914bfcda7542db7ce019f6","rawBytes":7093,"originalSha256":"7f315eb5fc10c5d89c7de5b9ba414dafc021bbd6be2cebec6ef1fe8be793878b","originalBytes":7787,"projection":"Attachment bodies/paths and artifact output directories omitted; test results and errors preserved."},
+    {"id":"artifact","file":"exact-ui-artifact-f56e65bea-artifact.json.gz","sha256":"c603ff87ef1af011021e0b76221cf1327879d5c4571872fafbf4c39f9b97f5b4","bytes":360,"rawSha256":"9ff3533710ad70df355f0eced5eabb5574889c63ad430a0127d92bf323d05b57","rawBytes":592}
+  ],
+  "limitations": [
+    "This run exercised the already compiled d450 UI through the artifact preview path, not Vite source serving.",
+    "One test failed before its financial assertions; no successful compiled-wallet payment/reload evidence is claimed.",
+    "Local Anvil stack only; no public deployment, service restart, real-asset transfer or whole P6/CI acceptance.",
+    "Existing frozen-fixture, exact-candidate CI and deployed-H1/rollback requirements remain open.",
+    "Original screenshot/video/error-context/trace payloads and paths, private profiles, wallet backups, keys, DB and WAL are not included."
+  ],
+  "integrity": {
+    "algorithm": "sha256",
+    "list": "exact-ui-artifact-f56e65bea-sha256.txt",
+    "gzipRoundtrip": "All four selected public payloads matched byte-for-byte after gzip decompression.",
+    "secretReview": "No selected raw credential/seed fields or credential-value patterns found. Attachment paths and payloads were omitted.",
+    "attachmentsOmitted": 4
+  }
+}

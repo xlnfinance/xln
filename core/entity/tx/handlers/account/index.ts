@@ -22,7 +22,6 @@ import {
   type PreparedAccountConsensusRun,
 } from './input-phases';
 import { applyAccountInput } from '../../../../account/consensus';
-import { requireAccountDeltaTransformerAddress } from '../../../../account/consensus/helpers';
 import {
   buildAccountHandlerResult,
   type AccountHandlerResult,
@@ -32,10 +31,6 @@ import { safeStringify } from '../../../../protocol/serialization';
 import { countOp } from '../../../../support/performance/op-counters';
 import { MalformedEntityFrameInputError } from '../../processing/invariant-errors';
 import { traceAccountApplyHop } from '../../../../support/performance/account-delivery-trace';
-import {
-  authorityRecordEnabled,
-  noteAuthorityAccountCreate,
-} from '../../../../rscore/authority-wave';
 import { normalizeEntityRef } from '../../account-key';
 
 export { frozenAccountInputLogLevel } from './frozen-input';
@@ -145,18 +140,13 @@ const logIncomingAccountInput = (
   });
 };
 
-type PreparedInboundResolution = ReturnType<typeof resolveInboundAccount> & Readonly<{
-  /** Rust already consumed the H=0 genesis and returned the authenticated H=1 replica. */
-  preparedByAuthority: boolean;
-}>;
-
 const resolvePreparedInboundAccount = (
   state: EntityState,
   input: AccountInput,
   accountConsensusContext: AccountConsensusContext,
   hasAck: boolean,
   hasProposal: boolean,
-): PreparedInboundResolution => {
+): ReturnType<typeof resolveInboundAccount> => {
   try {
     const authorityScope = accountConsensusContext.accountAuthorityExecutionScope;
     const preparedGenesis = authorityScope?.preparedInboundGenesis?.(
@@ -168,19 +158,15 @@ const resolvePreparedInboundAccount = (
         account: preparedGenesis,
         counterpartyId: normalizeEntityRef(input.fromEntityId),
         createdAccount: true,
-        preparedByAuthority: true,
       };
     }
-    return {
-      ...resolveInboundAccount(
+    return resolveInboundAccount(
       state,
       input,
       hasAck,
       hasProposal,
       authorityScope?.hasPreparedAccountInput?.(input.fromEntityId, input) === true,
-      ),
-      preparedByAuthority: false,
-    };
+    );
   } catch (error) {
     if (!(error instanceof AccountInputEvidenceError)) throw error;
     const dump = safeStringify({
@@ -226,19 +212,7 @@ const prepareAccountInputToEntity = (
     Boolean(incomingAck),
     Boolean(incomingProposal),
   );
-  const { account, counterpartyId, createdAccount, preparedByAuthority } = resolution;
-  if (createdAccount && !preparedByAuthority && authorityRecordEnabled()) {
-    // The inbound H=0 replica is complete here but has not consumed the peer's
-    // H=1 input yet. Create must occupy the immediately preceding wave slot;
-    // seeding the post-input replica would hide the very transition Rust owns.
-    noteAuthorityAccountCreate(
-      accountConsensusContext.accountAuthorityFrameId,
-      state.entityId,
-      counterpartyId,
-      account,
-      requireAccountDeltaTransformerAddress(accountConsensusContext, account.state),
-    );
-  }
+  const { account, counterpartyId, createdAccount } = resolution;
   checkpointProfile('accountResolve');
   if (rejectFrozenAccountInput(state, account, input, counterpartyId)) {
     return { kind: 'terminal', result: buildAccountHandlerResult(state, effects) };

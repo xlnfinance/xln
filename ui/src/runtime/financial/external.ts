@@ -159,7 +159,7 @@ export async function requestFaucet(
 				tokenId: input.tokenId,
 				tokenSymbol: input.tokenSymbol,
 				amount: input.amount,
-			});
+			}, 90_000);
 			return;
 		case 'offchain':
 			if (!input.hubEntityId) throw new Error('Pick the hub that funds the account');

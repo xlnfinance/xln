@@ -1,3 +1,4 @@
+import { assertTypeScriptStorageNamespaces } from './integrity/native-authority';
 import { computeCanonicalRuntimeStateHash } from '../canonical-hash';
 import { computeStorageFrameHash } from '../hashes';
 import { computeStorageReplicaMetaDigest } from '../replica/replica-meta-digest';
@@ -163,7 +164,10 @@ export const verifyStorageTailIntegrity = async (
   options: { tailFrames?: number } = {},
 ): Promise<{ latestHeight: number; checkedFrames: number }> => {
   const head = await readStorageHead(db);
-  if (!head || head.latestHeight <= 0) return { latestHeight: 0, checkedFrames: 0 };
+  if (!head || head.latestHeight <= 0) {
+    await assertTypeScriptStorageNamespaces(db);
+    return { latestHeight: 0, checkedFrames: 0 };
+  }
   const latestHeight = Math.max(0, Math.floor(Number(head.latestHeight)));
   await verifyLiveStorageIntegrity(db);
   await verifyStorageSnapshotIntegrity(db, head);
@@ -243,6 +247,7 @@ export const verifyStorageTailIntegrity = async (
       );
     }
   }
+  await assertTypeScriptStorageNamespaces(db);
   return { latestHeight, checkedFrames };
 };
 import { Buffer } from '../../support/platform-crypto';

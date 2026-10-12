@@ -200,7 +200,7 @@ export const decodeHubCoreRecord = (value: unknown): Record<string, unknown> => 
   requireExactBoundaryKeys(core, [
     'entityId', 'entityEncryptionPublicKey', 'height', 'timestamp', 'profile', 'config',
     'nonces', 'proposals', 'reserves', 'lastFinalizedJHeight',
-    'paybook',
+    'paybook', 'debtTotals',
   ], [
     'signerId', 'isProposer', 'prevFrameHash', 'externalWallet',
     'deferredAccountProposals', 'jBatchState', 'outDebtsByToken',
@@ -251,7 +251,7 @@ export const decodePageItems = (value: unknown, code: string): unknown[] => {
 const ACCOUNT_VIEW_REQUIRED = [
   'state', 'status', 'mempool', 'mempoolCount', 'currentFrame', 'currentHeight',
   'rollbackCount', 'proofHeader',
-  'pendingWithdrawals', 'shadow',
+  'pendingWithdrawals', 'shadow', 'lendingRisk',
 ] as const;
 const ACCOUNT_VIEW_OPTIONAL = [
   'pendingFrame', 'pendingAccountInput', 'lastOutboundAckFrame',

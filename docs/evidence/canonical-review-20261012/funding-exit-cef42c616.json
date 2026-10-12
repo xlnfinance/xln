@@ -1,0 +1,359 @@
+{
+  "schema": "xln-current-contract-funding-exit-evidence-v1",
+  "sourceSha": "cef42c616b04b61d6839981a42a99a4dcdd13f24",
+  "cleanBefore": true,
+  "cleanAfter": true,
+  "standLocked": true,
+  "passed": 25,
+  "failed": 0,
+  "skipped": 0,
+  "fuzzRuns": 512,
+  "budgetPerOperation": 5000000,
+  "gasMeasurement": "Conservative per-operation gas, excluding fixture setup; fuzz printed values are samples, not maxima. Each invocation asserts the operation bound.",
+  "largestPrintedGasByOperation": {
+    "start": 3912360,
+    "finalize": 4453117,
+    "reveal": 1002252,
+    "counter": 795560
+  },
+  "bytecodeTemplates": [
+    {
+      "bytes": 22791,
+      "contract": "Account",
+      "librarySlots": 0,
+      "linkedTemplateKeccak256": "0xea0c98258bd0131b3e43deebe4c87c41a12f8616104c82cf6da5abbe1534652e"
+    },
+    {
+      "bytes": 4609,
+      "contract": "DepositoryBounds",
+      "librarySlots": 0,
+      "linkedTemplateKeccak256": "0x8a462bc56dc291d25e118de0d0fbb9120896477bfdeb1b09470d4a8592cb477f"
+    },
+    {
+      "bytes": 1589,
+      "contract": "HashLadderRegistry",
+      "librarySlots": 0,
+      "linkedTemplateKeccak256": "0xc31ae09e256651a7da58ed97dd991fdcd82001696e50062cb96ff946ba29b7f2"
+    },
+    {
+      "bytes": 2055,
+      "contract": "NftCustody",
+      "librarySlots": 0,
+      "linkedTemplateKeccak256": "0xaa94e286ac5f3156f565adb7727deb4386df1c7fbfac5cb989215aa6a734b282"
+    },
+    {
+      "bytes": 5251,
+      "contract": "HankoVerifier",
+      "librarySlots": 0,
+      "linkedTemplateKeccak256": "0x02413ad800e58e168089146dd8b10a7e36316bfbe35a201f1e6f02c12a2ed717"
+    },
+    {
+      "bytes": 19013,
+      "contract": "EntityProvider",
+      "librarySlots": 2,
+      "linkedTemplateKeccak256": "0x5b976ef7587fb2856b3592bf6eb8dcff06631e5c10ad2e5e588f2964a3bfef23"
+    },
+    {
+      "bytes": 22185,
+      "contract": "Depository",
+      "librarySlots": 30,
+      "linkedTemplateKeccak256": "0x9bb8a8d1d6f6ffb98c5d48266823b4b3c181af0d94c9a69d1bb0d5bb8c1a4ca9"
+    },
+    {
+      "bytes": 8326,
+      "contract": "DeltaTransformer",
+      "librarySlots": 0,
+      "linkedTemplateKeccak256": "0xf0b6c12143a14da9143b650dbb23895da3b01482dc352c2bb90b5ef76cf01b98"
+    }
+  ],
+  "cases": [
+    {
+      "name": "test_fundingTopupExitAndReopenLeft()",
+      "conservativeGasByOperation": {}
+    },
+    {
+      "name": "test_fundingTopupExitAndReopenRight()",
+      "conservativeGasByOperation": {}
+    },
+    {
+      "name": "test_unsolicitedCompanySharesCannotEnlargeExitProof()",
+      "conservativeGasByOperation": {
+        "start": 665697,
+        "finalize": 928658
+      }
+    },
+    {
+      "name": "testFuzz_budget5m_combinedStockFrontier(uint8,uint8,uint8,uint8)",
+      "conservativeGasByOperation": {
+        "start": 3278760,
+        "reveal": 191043,
+        "finalize": 3404200
+      }
+    },
+    {
+      "name": "test_budget5m_coldDebts22()",
+      "conservativeGasByOperation": {
+        "start": 543321,
+        "finalize": 3087202
+      }
+    },
+    {
+      "name": "test_budget5m_fullWidthSavings18MaxStarter()",
+      "conservativeGasByOperation": {
+        "start": 3418280,
+        "finalize": 3552680
+      }
+    },
+    {
+      "name": "test_budget5m_irrelevantSecrets()",
+      "conservativeGasByOperation": {
+        "start": 2997160,
+        "finalize": 4453117
+      }
+    },
+    {
+      "name": "test_budget5m_maxStarterMmFrontier()",
+      "conservativeGasByOperation": {
+        "start": 3423400,
+        "reveal": 851958,
+        "finalize": 3925229
+      }
+    },
+    {
+      "name": "test_budget5m_maxStarterTenDebts()",
+      "conservativeGasByOperation": {
+        "start": 2807720,
+        "finalize": 3482802
+      }
+    },
+    {
+      "name": "test_budget5m_mixed32()",
+      "conservativeGasByOperation": {
+        "start": 694062,
+        "finalize": 1181849
+      }
+    },
+    {
+      "name": "test_budget5m_mixedWithRevealedPulls()",
+      "conservativeGasByOperation": {
+        "start": 709674,
+        "reveal": 696346,
+        "finalize": 1387255
+      }
+    },
+    {
+      "name": "test_budget5m_mmFrontier()",
+      "conservativeGasByOperation": {
+        "start": 947367,
+        "reveal": 851958,
+        "finalize": 2263413
+      }
+    },
+    {
+      "name": "test_budget5m_partialPulls18()",
+      "conservativeGasByOperation": {
+        "start": 947367,
+        "reveal": 1002252,
+        "finalize": 2263413
+      }
+    },
+    {
+      "name": "test_budget5m_payments32()",
+      "conservativeGasByOperation": {
+        "start": 694050,
+        "finalize": 1214143
+      }
+    },
+    {
+      "name": "test_budget5m_revealedPulls18()",
+      "conservativeGasByOperation": {
+        "start": 616772,
+        "reveal": 851958,
+        "finalize": 1008774
+      }
+    },
+    {
+      "name": "test_budget5m_savings80MaxStarter()",
+      "conservativeGasByOperation": {
+        "start": 3912360,
+        "finalize": 3930280
+      }
+    },
+    {
+      "name": "test_budget5m_savingsMixedMaxStarter()",
+      "conservativeGasByOperation": {
+        "start": 3364520,
+        "reveal": 463028,
+        "finalize": 3402920
+      }
+    },
+    {
+      "name": "test_budget5m_swaps32()",
+      "conservativeGasByOperation": {
+        "start": 694062,
+        "finalize": 1069591
+      }
+    },
+    {
+      "name": "test_budget5m_wideColdDebts22()",
+      "conservativeGasByOperation": {
+        "start": 543321,
+        "finalize": 3962802
+      }
+    },
+    {
+      "name": "testFuzz_budget5m_counterStockFrontier(uint8,uint8,uint8,uint8)",
+      "conservativeGasByOperation": {
+        "start": 2773160,
+        "counter": 686286,
+        "finalize": 3460520
+      }
+    },
+    {
+      "name": "test_budget5m_counterMmFrontierMaxStarter()",
+      "conservativeGasByOperation": {
+        "start": 2773160,
+        "counter": 795560,
+        "reveal": 834878,
+        "finalize": 3934015
+      }
+    },
+    {
+      "name": "test_budget5m_counterPayments32MaxStarter()",
+      "conservativeGasByOperation": {
+        "start": 2773160,
+        "counter": 451109,
+        "finalize": 3648911
+      }
+    },
+    {
+      "name": "test_budget5m_counterSingleToken()",
+      "conservativeGasByOperation": {
+        "start": 469203,
+        "counter": 287970,
+        "finalize": 430496
+      }
+    },
+    {
+      "name": "test_budget5m_counterWideColdDebts22()",
+      "conservativeGasByOperation": {
+        "start": 469203,
+        "counter": 381973,
+        "finalize": 3954400
+      }
+    },
+    {
+      "name": "test_budget5m_minimalSingleToken()",
+      "conservativeGasByOperation": {
+        "start": 449300,
+        "finalize": 399142
+      }
+    }
+  ],
+  "limitations": [
+    "Local Foundry with time warp; does not replace public-chain real-clock P6.",
+    "This is the covered contract envelope, not a proof over unbounded arbitrary inputs.",
+    "No external transaction, new funding or deployment occurred.",
+    "512 finite fuzz invocations across two tests are not exhaustive proof; printed fuzz gas samples are not fuzz maxima.",
+    "No new public bytecode verification, public-chain transaction, deployment or funding occurred.",
+    "This package is not Sepolia real-clock P6, browser end-to-end proof, full CI success or mainnet readiness."
+  ],
+  "evidenceScope": "Local current-artifact funding lifecycle and bounded signed dispute execution; not mainnet release approval.",
+  "sourceBinding": {
+    "sourceSha": "cef42c616b04b61d6839981a42a99a4dcdd13f24",
+    "cleanBefore": true,
+    "cleanAfter": true,
+    "standLocked": true,
+    "basis": "Parent recorded clean source and stand ownership; input summary preserves these observations. Log files do not independently embed the source SHA.",
+    "inputSummarySha256": "98ece855fdd3682dc97b0a32cf980932f3500052b6512beacd914007b5b1f8f3",
+    "pinnedSourceFileSha256": {
+      "jurisdictions/test/foundry/stress/FundingExit.t.sol": "aeaec7e563cbe01385966c337ba16ba4f58d2c4bdc3f42e46932db9b6c7ecea8",
+      "jurisdictions/test/foundry/stress/DisputeGasAdmission.t.sol": "2d47682d0ddd98c242767db760a0bcce3654871c8911e09f67be3915fa9f141e",
+      "jurisdictions/test/foundry/stress/DisputeIngressGas.t.sol": "f15fa67c0b6d6481b17845d35277af15609f24d0dd46e78b00b55a82d433008d",
+      "jurisdictions/test/foundry/stress/DisputeCounterGas.t.sol": "821a344db4da78da6c667fe49e810e3eb9309f98971f95e09710e3ba2bee0bd8",
+      "core/scripts/checks/contracts/check-exit-gas-bytecode.ts": "887f6bf29b860dbc0a9e232aa4701085dcdf8d2b8603f11bfaa8d3a9f8f6499a",
+      "jurisdictions/foundry.toml": "014d82a78ba960c96c8c3fbdd605a95b9c6f5581c06b741b84becc9cd316394e"
+    }
+  },
+  "commands": {
+    "gas": {
+      "command": "bun tools/stand-lock.ts run --reason \"current-contract-funding-exit-cef42c616\" --timeout-ms \"60000\" -- forge test --root jurisdictions --match-contract \"Dispute(GasAdmission|IngressGas|CounterGas)Test|FundingExitTest\" --fuzz-seed \"0x20261012\" -vv",
+      "source": "Exact first line of gas log.",
+      "wallBudgetMs": 60000
+    },
+    "bytecode": {
+      "command": "bun core/scripts/checks/contracts/check-exit-gas-bytecode.ts",
+      "source": "Existing checker identified by EXIT_GAS_PRODUCTION_BYTECODE_OK; checker source pinned above."
+    }
+  },
+  "fuzzCoverage": {
+    "tests": 2,
+    "invocationsPerTest": 256,
+    "totalInvocations": 512,
+    "seed": "0x20261012",
+    "seedClassification": "Public reproducibility parameter, not a signer secret."
+  },
+  "fundingLifecycle": {
+    "tests": [
+      "test_fundingTopupExitAndReopenLeft()",
+      "test_fundingTopupExitAndReopenRight()"
+    ],
+    "unit": "ERC20 token base units in the Foundry fixture",
+    "steps": [
+      "Deposit 300 to the funder reserve and 40 to a third-party reserve using actual ERC20 custody and signed batches.",
+      "Prepare the counterparty-signed one-asset exit proof; fund via R2C 100, unilateral top-up 50, and third-party top-up 40. Assert collateral = 190.",
+      "With the counterparty offline after signing, the funder starts and finalizes a timed dispute for a signed payment of 60. Assert funder reserve = 280, counterparty reserve = 60, collateral = 0.",
+      "Prepare a fresh signed proof with nonce 4, fund 10 after complete exit, and complete a second unilateral dispute exit.",
+      "Redeem 280 ERC20 from reserve to the funder wallet. Assert wallet receipt = 280 and Depository custody = 60 for the peer reserve."
+    ],
+    "interpretation": "Demonstrates first funding, unilateral and third-party top-ups, complete exit, reopen and external redemption for both lexicographic sides with signed evidence. No unsecured repayment guarantee is inferred."
+  },
+  "gasInterpretation": {
+    "assertion": "Every covered _submitBudget invocation asserts conservative gas strictly below 5,000,000 and restricts execution gas after calldata overhead.",
+    "measurement": "Includes 21,000 intrinsic gas plus conservative all-nonzero calldata cost; also applies the EIP-7623 calldata floor. Fixture setup is excluded.",
+    "aggregation": "Budget applies separately to start, counter, reveal and finalize, not to their sum or the total Foundry test gas.",
+    "printedValues": "largestPrintedGasByOperation is the largest printed sample for each operation, not an observed maximum over all fuzz invocations.",
+    "fundingDeposit": "The ERC20-to-reserve deposit helper is tested semantically but has no separately printed operation gas measurement. R2C, exit and reserve redemption use _submitBudget."
+  },
+  "bytecodeInterpretation": {
+    "compared": "Foundry deployed-bytecode artifacts versus production Hardhat deployed-bytecode artifacts for 8 contracts.",
+    "libraryHandling": "Compiler-declared link-slot positions must match; only those 20-byte slots are zeroed before exact template comparison and Keccak256 hashing.",
+    "limitation": "Template hashes are not deployed-address bytecode hashes. This run does not query public-chain runtime code or verify concrete public library addresses.",
+    "compilerProfile": {
+      "solc": "0.8.36",
+      "optimizerRuns": 1,
+      "viaIR": true,
+      "evmVersion": "osaka",
+      "bytecodeHash": "none",
+      "cborMetadata": false
+    },
+    "compileObservation": "Foundry log reports no changed files and compilation skipped; the bytecode checker compares the artifacts used."
+  },
+  "secretReview": {
+    "inputFiles": 3,
+    "secretAssignmentsDetected": 0,
+    "allowedReferences": [
+      "public Foundry fuzz seed",
+      "irrelevantSecrets test name"
+    ],
+    "included": "Measurement summary and two text logs only. No signer profiles, private keys, raw databases or recovery bundles."
+  },
+  "artifacts": [
+    {
+      "path": "funding-exit-cef42c616-bytecode.log.gz",
+      "sha256": "de16586662fe50ed2ddfe57692c7f6e397e55443b92ec433dc8b94b1f2fe8c07",
+      "bytes": 595,
+      "uncompressedSha256": "bcce45dabd988338b8b0d9d74adef8836a70a79bbebfea6a025339d004a9183d",
+      "uncompressedBytes": 1280,
+      "sourcePath": ".logs/canonical-review-20261012/exit-bytecode-cef42c616.log"
+    },
+    {
+      "path": "funding-exit-cef42c616-gas.log.gz",
+      "sha256": "817d9c7992b88c9a7fa02121aee5232221d22878bc631b0eb153a8acdcef13a2",
+      "bytes": 1342,
+      "uncompressedSha256": "e47475271a5291618589d6e06756d79d42b67317f62400f3dd3f130017b51c83",
+      "uncompressedBytes": 5269,
+      "sourcePath": ".logs/canonical-review-20261012/exit-gas-cef42c616.log"
+    }
+  ]
+}

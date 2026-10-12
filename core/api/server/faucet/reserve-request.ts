@@ -3,6 +3,7 @@ import type { RuntimeInput, RuntimeReplica } from '../../../runtime/types';
 import type { JAdapter } from '../../../jurisdiction/adapter';
 import { safeStringify } from '../../../protocol/serialization';
 import { createStructuredLogger, shortId } from '../../../support/logger';
+import { getPerfMs } from '../../../support/time';
 import { resolveEntityProposerId } from '../../../runtime/delivery/entity-output-signer';
 import { formatTimingMs, isEntityId32 } from '../utils';
 import { faucetFailureBody } from './failure';
@@ -169,7 +170,7 @@ const admitRequest = async (
     ...token,
     ...localAdmission,
     previousUserReserve,
-    startedAt: Date.now(),
+    startedAt: getPerfMs(),
   };
 };
 
@@ -233,11 +234,15 @@ const confirmReserve = async (
   request: AdmittedReserveRequest,
 ): Promise<Response> => {
   const expectedMin = request.previousUserReserve + request.amountWei;
+  // Native inclusion and the watcher's receipt can take several blocks. Share
+  // one bounded minute: ten seconds expired before an ordinary Sepolia block.
+  const deadline = getPerfMs() + 60_000;
   const updated = await waitForReserveUpdate(
     deps.adapter,
     request.userEntityId,
     request.tokenId,
     expectedMin,
+    Math.max(0, deadline - getPerfMs()),
   );
   if (updated === null) {
     return failure(deps.headers, 504, 'FAUCET_RESERVE_UPDATE_TIMEOUT',
@@ -248,6 +253,7 @@ const confirmReserve = async (
     request.userEntityId,
     request.tokenId,
     expectedMin,
+    Math.max(0, deadline - getPerfMs()),
   );
   if (!event) {
     return failure(deps.headers, 500, 'FAUCET_RESERVE_EVENT_MISSING', 'RESERVE_EVENT_MISSING', {
@@ -260,7 +266,7 @@ const confirmReserve = async (
   }
   faucetLog.info('reserve.accepted', {
     requestId: request.requestId,
-    totalMs: formatTimingMs(Date.now() - request.startedAt),
+    totalMs: formatTimingMs(getPerfMs() - request.startedAt),
     updatedReserve: updated.toString(),
   });
   return new Response(safeStringify({

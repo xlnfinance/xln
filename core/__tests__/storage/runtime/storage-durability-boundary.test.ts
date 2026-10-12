@@ -10,13 +10,9 @@ test('frame commit fsyncs authoritative WAL before updating the rebuildable cach
   const authoritative = commit.indexOf(
     'await writeAuthoritativeWalBatch(batches);',
   );
-  const accountAuthority = commit.indexOf(
-    'await options.accountAuthority?.afterWalCommit(prepared.shouldMaterialize);',
-    authoritative,
-  );
   const boundary = commit.indexOf(
     "'after-authoritative-commit'",
-    accountAuthority,
+    authoritative,
   );
   const cache = commit.indexOf(
     'writeBatch(batches.currentBatch, { sync: false })',
@@ -26,7 +22,6 @@ test('frame commit fsyncs authoritative WAL before updating the rebuildable cach
   expect(commitStart).toBeGreaterThanOrEqual(0);
   expect(commitEnd).toBeGreaterThan(commitStart);
   expect(authoritative).toBeGreaterThanOrEqual(0);
-  expect(accountAuthority).toBeGreaterThan(authoritative);
-  expect(boundary).toBeGreaterThan(accountAuthority);
+  expect(boundary).toBeGreaterThan(authoritative);
   expect(cache).toBeGreaterThan(boundary);
 });

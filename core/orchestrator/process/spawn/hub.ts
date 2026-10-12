@@ -26,7 +26,7 @@ import {
 } from '../child-recovery-policy';
 import { attachManagedChildFatalIpc, type ManagedChildFatalReport } from '../managed-child-fatal-ipc';
 import { buildHubChildProcessEnv, buildHubEngineArgs, resolveHubRuntimeFrameDelayMs } from '../hub-runtime-env';
-import { buildRustHubProcessPlan, parseRustHubStatus } from '../hub-engine-plan';
+import { buildRustHubProcessPlan, canonicalHubEngine, parseRustHubStatus } from '../hub-engine-plan';
 import { buildRustHubGenesisConfig } from '../rust-hub-genesis';
 import { createManagedRuntimeLeaseManager } from '../managed-runtime-leases';
 
@@ -280,6 +280,8 @@ const attachHubProcess = (
 export const createHubSpawner =
   (deps: HubSpawnerDeps) =>
   async (child: HubChild): Promise<void> => {
+    const engine = canonicalHubEngine(child.name);
+    if (child.engine !== engine) throw new Error(`HUB_ENGINE_SELECTION_MISMATCH:${child.name}:${child.engine}`);
     await deps.reapStaleHubProcess(child);
     mkdirSync(child.dbPath, { recursive: true });
     if (child.restartTimer) clearTimeout(child.restartTimer);

@@ -36,7 +36,6 @@ import {
 } from './hub/market-client';
 import { handleMarketCapRequest } from './hub/market-cap-http';
 import { assertMinDiskFree, buildDiskSummary, getStorageHealth, getStorageHealthSnapshotSync } from '../support/storage-monitor';
-import { maybeHandleQaRequest } from '../qa/api';
 import { serveStaticApp } from '../api/server/static-assets';
 import { enforceFaucetPolicy } from '../api/server/faucet/policy';
 import { handleWatchtowerProxy } from '../api/server/rpc/watchtower-proxy';
@@ -1842,9 +1841,6 @@ const server = Bun.serve<OrchestratorWebSocket['data']>({
       headers,
     );
     if (runtimeImportResponse) return runtimeImportResponse;
-
-    const qaResponse = await maybeHandleQaRequest(request, pathname, headers, { operatorAuthorized });
-    if (qaResponse) return qaResponse;
 
     if (pathname === '/api/hubs') {
       await pollAllHubHealth();

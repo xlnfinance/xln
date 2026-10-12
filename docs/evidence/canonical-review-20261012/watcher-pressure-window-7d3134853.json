@@ -1,0 +1,405 @@
+{
+  "schemaVersion": 1,
+  "title": "Retain watcher scan windows while RPC pressure remains",
+  "status": "local-proof-public-p6-blocked",
+  "sourceSha": "7d31348533a5b9694d3fb67ecc8b287ad72c3532",
+  "releaseReady": false,
+  "previousCandidate": {
+    "sourceSha": "1d780ff75b5e61ce6d0f34651945738200469486",
+    "manifest": "watcher-cooldown-1d780ff75.json",
+    "manifestSha256": "8bbf6fcbacd9f6013ca6a00aa1e8bfc4fcec9e25b15f23e4311e6d222d8f7fa8",
+    "note": "Separate source binding retained; previous height/reserve values corrected to last observed, with no post-shutdown reread."
+  },
+  "sourceBinding": {
+    "sourceFiles": [
+      {
+        "path": "core/jurisdiction/adapter/rpc/watcher/rpc-watcher-poll.ts",
+        "sha256": "93ea18b47bb004008be36bb192db2dd8126dd1cbc7078fb36125a8a6b86beed4"
+      },
+      {
+        "path": "core/__tests__/jurisdiction/watchers/j-watcher-backlog-drain.test.ts",
+        "sha256": "6324d26d87ccaa8f55a82379abb2c07afe0fcadd976035cdb36f291993f541ae"
+      }
+    ],
+    "cleanBefore": true,
+    "cleanAfter": true,
+    "evidence": "Root reports committed tests, check and completed public catch-up ran with clean source. The logs do not embed a source SHA/clean-tree snapshot; source filenames are independently hashed from this Git commit.",
+    "commandForIndependentSourceCheck": "git rev-parse HEAD && git status --porcelain=v1",
+    "scope": "These statements bind the parent-run candidate, not later dirty workspace states or the uncommitted red/green diagnostics.",
+    "cleanAfterEvidence": "Root verified clean source after the same-SHA browser smoke, contract verification and lock-ahb; this is parent orchestration evidence, not a field embedded in each log."
+  },
+  "change": {
+    "productionFiles": 1,
+    "productionInsertions": 4,
+    "productionDeletions": 1,
+    "productionNetLines": 3,
+    "testFiles": 1,
+    "totalInsertions": 10,
+    "totalDeletions": 3,
+    "totalNetLines": 7,
+    "behavior": "Successful committed scan progress grows maxBlocksPerPoll only when the existing rpcCooldown.backoffMs is zero. Persistent pressure retains the smaller range.",
+    "financialMathChanged": false,
+    "newPressureStateAdded": false
+  },
+  "harnessCorrection": {
+    "artifactId": "harness-first-red",
+    "evidenceClass": "test-instrumentation error, not a production defect",
+    "command": "bun tools/stand-lock.ts run --reason watcher-pressure-window-red --timeout-ms \"60000\" -- bun test core/__tests__/jurisdiction/watchers/j-watcher-backlog-drain.test.ts",
+    "expectedHeaderCount": 128,
+    "receivedHeaderCount": 129,
+    "reason": "The initial header-count assertion also captured a single-header request. This failed before exercising the intended pressure-window invariant and is not counted as the production regression."
+  },
+  "firstProductionFailure": {
+    "artifactId": "production-red",
+    "command": "bun tools/stand-lock.ts run --reason watcher-pressure-window-red-corrected --timeout-ms \"60000\" -- bun test core/__tests__/jurisdiction/watchers/j-watcher-backlog-drain.test.ts",
+    "sourceSha": null,
+    "cleanTree": null,
+    "evidenceClass": "working-tree diagnostic, not release evidence",
+    "test": "RPC J-watcher backlog drain > delivers an authenticated event beyond two 2048-block pages before returning",
+    "expectedScannedThroughHeight": 1024,
+    "receivedScannedThroughHeight": 1536,
+    "passed": 0,
+    "failed": 1,
+    "assertions": 12,
+    "suiteSeconds": 16.29,
+    "interpretation": "After committing the first observed range, retained pressure still let a successful poll grow the next scan range; the real adapter scanned farther than the bounded pressure window."
+  },
+  "firstGreen": {
+    "artifactId": "first-green",
+    "command": "bun tools/stand-lock.ts run --reason watcher-pressure-window-green --timeout-ms \"60000\" -- bun test core/__tests__/jurisdiction/watchers/j-watcher-backlog-drain.test.ts",
+    "sourceSha": null,
+    "cleanTree": false,
+    "evidenceClass": "dirty diagnostic superseded by committed related suite",
+    "passed": 1,
+    "failed": 0,
+    "assertions": 35,
+    "suiteSeconds": 24.44
+  },
+  "committedChecks": [
+    {
+      "artifactId": "related",
+      "sourceSha": "7d31348533a5b9694d3fb67ecc8b287ad72c3532",
+      "command": "bun tools/stand-lock.ts run --reason watcher-pressure-window-committed --timeout-ms \"60000\" -- bun test core/__tests__/jurisdiction/watchers core/__tests__/jurisdiction/adapter/jadapter-watcher-ingress.test.ts core/__tests__/jurisdiction/rpc/rpc-watcher-dispute-calldata.test.ts",
+      "status": "pass",
+      "passed": 104,
+      "failed": 0,
+      "assertions": 947,
+      "files": 12,
+      "suiteSeconds": 30.13,
+      "standLock": "Canonical stand wrapper shown in first log line."
+    },
+    {
+      "artifactId": "check",
+      "sourceSha": "7d31348533a5b9694d3fb67ecc8b287ad72c3532",
+      "command": "bun run check",
+      "loggedEntryCommand": "bun run check:short && bun run check:long",
+      "status": "pass",
+      "sourceGates": 38,
+      "outerParallelGates": 3
+    }
+  ],
+  "publicCatchup": {
+    "artifactId": "public-catchup",
+    "sourceSha": "7d31348533a5b9694d3fb67ecc8b287ad72c3532",
+    "command": "bun tools/stand-lock.ts run --reason \"public-p6-retained-window-catchup\" --timeout-ms \"180000\" -- bun \".logs/crisis-20261011/trace-public-p6-catchup.ts\"",
+    "status": "completed-but-p6-blocked",
+    "processExitCode": 0,
+    "wallSecondsApproximately": 160,
+    "exitAndWallEvidence": "Root process result; final log sample is at 155126ms followed by watcher.stopped.",
+    "cursorBefore": 11893390,
+    "lastObservedCursor": 11894438,
+    "authenticatedBlocksScanned": 1048,
+    "runtimeHeightOnRestore": 18,
+    "lastObservedRuntimeHeight": 36,
+    "lastObservedReserve": "0",
+    "lastObservedElapsedMs": 155126,
+    "postShutdownFinancialReread": false,
+    "postShutdownPersistedStateVerified": false,
+    "remainingError": "RPC_BATCH_HTTP_429",
+    "sampleErrors": [
+      {
+        "chainId": 11155111,
+        "code": "J_WATCH_RPC",
+        "consecutiveFailures": 1,
+        "error": {
+          "message": "RPC_BATCH_HTTP_429",
+          "name": "RpcTransportUnavailableError"
+        },
+        "event": "j_watch_transient_rpc_unavailable",
+        "fromBlock": 11893391,
+        "lastSyncedBlock": 11893390,
+        "level": "info",
+        "message": "RPC_BATCH_HTTP_429",
+        "rpcUrl": "https://sepolia.xln.finance/rpc",
+        "step": "authenticatedReceipts",
+        "toBlock": 11895438
+      },
+      {
+        "chainId": 11155111,
+        "code": "J_WATCH_RPC",
+        "consecutiveFailures": 1,
+        "error": {
+          "message": "RPC_BATCH_HTTP_429",
+          "name": "RpcTransportUnavailableError"
+        },
+        "event": "j_watch_transient_rpc_unavailable",
+        "fromBlock": 11894431,
+        "lastSyncedBlock": 11894430,
+        "level": "info",
+        "message": "RPC_BATCH_HTTP_429",
+        "rpcUrl": "https://sepolia.xln.finance/rpc",
+        "step": "authenticatedReceipts",
+        "toBlock": 11894438
+      }
+    ],
+    "financialOutcome": "No P6 defense/finalization/recovery success is established. Reserve remains zero in the last observation.",
+    "comparisonLimitation": "1048 versus 640 scanned blocks is an observation, not causal throughput evidence; provider quota/load and restored-runtime starting state are uncontrolled.",
+    "reproductionLimit": "Diagnostic harness and private restored-runtime profile are excluded; archive is observed evidence, not a standalone P6 reproducer."
+  },
+  "kernelMetrics": {
+    "artifactId": "kernel",
+    "closureCodeLines": 160552,
+    "closureFiles": 816,
+    "baselineSourceSha": "b07da2b8762d3398683f3f2c481ee65a8caedc41",
+    "baselineClosureCodeLines": 161062,
+    "netCodeLineReduction": 510,
+    "ledger": null,
+    "ci": null,
+    "overallReadinessScore": null,
+    "limitation": "Tree-only collector; reduction spans the baseline-to-current branch, not this patch alone."
+  },
+  "browserSmoke": {
+    "status": "pass",
+    "sourceSha": "7d31348533a5b9694d3fb67ecc8b287ad72c3532",
+    "cleanBefore": true,
+    "cleanAfter": true,
+    "artifacts": [
+      "browser",
+      "browser-report"
+    ],
+    "command": "bun tools/stand-lock.ts run --reason watcher-pressure-wallet-path --timeout-ms \"180000\" -- bun run prod:smoke:local",
+    "expected": 3,
+    "unexpected": 0,
+    "skipped": 0,
+    "flaky": 0,
+    "errors": 0,
+    "playwrightDurationMs": 27730.718,
+    "durationLimitation": "27.731s is the Playwright report duration. It excludes stand setup, network bootstrap and other smoke phases.",
+    "testTitles": [
+      "payment receipts and recovery dialogs keep keyboard focus inside and restore it on close",
+      "invalid amounts and recipients cannot admit a payment or retain a revoked quote",
+      "pays the merchant through the hub and shows the committed receipt"
+    ],
+    "includesPaymentReload": true,
+    "reloadSource": "ui/tests/e2e-payment.spec.ts:172",
+    "evidenceScope": "Three real React payment smoke cases on the local production stand, including committed receipt persistence across reload. This does not prove every wallet flow or public P6."
+  },
+  "packageInspection": {
+    "filesInspected": 11,
+    "sensitiveAssignmentPatternCandidates": 0,
+    "excluded": "Private runtime DB, keys, mesh seeds, raw WAL and profile files.",
+    "limitation": "Targeted content inspection/pattern scan is not a comprehensive secret-detection guarantee.",
+    "observedUrls": "Public Sepolia RPC and one local browser jurisdiction endpoint; no authenticated URLs identified."
+  },
+  "artifacts": [
+    {
+      "id": "harness-first-red",
+      "file": "watcher-pressure-window-7d3134853-harness-first-red.log.gz",
+      "sha256": "647ee4d8d4a370f83a50757e0ef08d64217d43227e9aba125c5ce2e8fe1822a3",
+      "bytes": 874,
+      "uncompressedSha256": "83a658691ce15960bd9ae94f40ab1843883ad093643cec8336450e6e0aeef352",
+      "uncompressedBytes": 1703,
+      "originalLog": ".logs/canonical-review-20261012/watcher-pressure-window-first-red.log"
+    },
+    {
+      "id": "production-red",
+      "file": "watcher-pressure-window-7d3134853-production-red.log.gz",
+      "sha256": "60e929d82a4a127a7861404427f1ff3a955323510fafa722dd1afb16dbc48e4e",
+      "bytes": 1082,
+      "uncompressedSha256": "31321b8618c07ae65b5a9dfc49ef33acb70c7cc2ae7cf393a53a0c591ccad1c4",
+      "uncompressedBytes": 2040,
+      "originalLog": ".logs/canonical-review-20261012/watcher-pressure-window-corrected-red.log"
+    },
+    {
+      "id": "first-green",
+      "file": "watcher-pressure-window-7d3134853-first-green.log.gz",
+      "sha256": "55f629d2c3d3d1a039a8642de1509b60fd7c1da9cf6edc3c42c1452d2b83e9fd",
+      "bytes": 1017,
+      "uncompressedSha256": "05c507bf729818865ae0b71828d6fde9cfac75401a5ae06cde75bc11ed85f200",
+      "uncompressedBytes": 2704,
+      "originalLog": ".logs/canonical-review-20261012/watcher-pressure-window-first-green.log"
+    },
+    {
+      "id": "related",
+      "file": "watcher-pressure-window-7d3134853-related.log.gz",
+      "sha256": "c080425951bb9be3a501eb7fe2672af2e416ad4e94eea1b39ec160e8c738338d",
+      "bytes": 6667,
+      "uncompressedSha256": "def0444bd2c519a79537bf0bb0f83a733af0a13f2a27f78151266f1c6feb1a97",
+      "uncompressedBytes": 34855,
+      "originalLog": ".logs/canonical-review-20261012/watcher-pressure-window-related-7d3134853.log"
+    },
+    {
+      "id": "check",
+      "file": "watcher-pressure-window-7d3134853-check.log.gz",
+      "sha256": "24a57d4b8dc58c18e7d170716a6293e2d9df467edfb4b1ff1fc9ab9ba2d8775b",
+      "bytes": 14882,
+      "uncompressedSha256": "aab4bae1148f684312a1a830e260a5e414458a5cd386ae77a7b3c762427e503c",
+      "uncompressedBytes": 116965,
+      "originalLog": ".logs/canonical-review-20261012/watcher-pressure-window-check-7d3134853.log"
+    },
+    {
+      "id": "public-catchup",
+      "file": "watcher-pressure-window-7d3134853-public-catchup.log.gz",
+      "sha256": "a8205d803518bc5082bf4b1687dbec53584bed31f97dde950881ccfe70bcf16a",
+      "bytes": 1549,
+      "uncompressedSha256": "a4462c64bac3b1004d858447a8c6bee5c6b9e854fd15dd0df567d6231b52d87d",
+      "uncompressedBytes": 14176,
+      "originalLog": ".logs/canonical-review-20261012/p6-pressure-window-catchup-7d3134853.log"
+    },
+    {
+      "id": "kernel",
+      "file": "watcher-pressure-window-7d3134853-kernel.json",
+      "sha256": "98f1f227fb5d1dc19500f465659e2c4cb32710d9e970113fae4f001f300dd7dd",
+      "bytes": 8657
+    },
+    {
+      "id": "browser",
+      "file": "watcher-pressure-window-7d3134853-browser.log.gz",
+      "sha256": "a9a1203c82bd8fa884b9fb9cda73903ac86a2708b4f51399d9083a7d26425068",
+      "bytes": 2020,
+      "uncompressedSha256": "6ecab43cc90143829cc3337eca7e6c5aea5d8f4ab5354daddf128554f266eb72",
+      "uncompressedBytes": 23730,
+      "originalLog": ".logs/canonical-review-20261012/watcher-pressure-browser-7d3134853.log"
+    },
+    {
+      "id": "browser-report",
+      "file": "watcher-pressure-window-7d3134853-browser-report.json.gz",
+      "sha256": "63a99f758abcffd5f6318896a314451cb2b68f09a6a0462b55d8ca48db1d19e3",
+      "bytes": 2429,
+      "uncompressedSha256": "151e48943eda03235b7dd595adc9a5f5ba11faf1154fe741a7ac42d17b5812b4",
+      "uncompressedBytes": 10323,
+      "originalLog": ".logs/canonical-review-20261012/watcher-pressure-browser-7d3134853.json"
+    },
+    {
+      "id": "exit-bytecode",
+      "file": "watcher-pressure-window-7d3134853-exit-bytecode.log.gz",
+      "sha256": "0dc1ab1a0317a0e643546bc71abc324b09f4f6c5c1a84eda34fdb515a755d767",
+      "bytes": 595,
+      "uncompressedSha256": "bcce45dabd988338b8b0d9d74adef8836a70a79bbebfea6a025339d004a9183d",
+      "uncompressedBytes": 1280,
+      "originalLog": ".logs/canonical-review-20261012/exit-bytecode-7d3134853.log"
+    },
+    {
+      "id": "exit-gas",
+      "file": "watcher-pressure-window-7d3134853-exit-gas.log.gz",
+      "sha256": "880f80e8eac1fdddcd4a46ad54947430d86dce9dac898aa5d4f5bb013fa08074",
+      "bytes": 1336,
+      "uncompressedSha256": "5a313a352fa59f23ceaa2b720f551cc6dbf1e3549b6ac4e856b1ea47b9ea1b83",
+      "uncompressedBytes": 5261,
+      "originalLog": ".logs/canonical-review-20261012/exit-gas-7d3134853.log"
+    },
+    {
+      "id": "lock-ahb",
+      "file": "watcher-pressure-window-7d3134853-lock-ahb.log.gz",
+      "sha256": "e79a231eb113cda91d1cbd67c73fd276c55389908a17b338c0723c1f6462c189",
+      "bytes": 7688,
+      "uncompressedSha256": "d8d2aec7689c325241b46c44243e73d29a8e2831b744eff6fe4851fabf132656",
+      "uncompressedBytes": 65667,
+      "originalLog": ".logs/canonical-review-20261012/lock-ahb-7d3134853.log"
+    }
+  ],
+  "limitations": [
+    "Public 429 persists; exit 0 is normal bounded observation completion, not a P6 pass.",
+    "Last observed values are not final persisted-state claims.",
+    "Public stack proof belongs to source 1d780ff75; no new public bytecode read is claimed for this source.",
+    "No CI, mainnet readiness, public dispute transaction or recovery guarantee follows from local checks.",
+    "Local gates passed on 7d3134853; this package does not establish CI or public P6 completion. Root owns the subsequent commit and PR checks."
+  ],
+  "nextAction": "Use the last observed public RPC failure as the next release boundary; do not treat local green gates as a P6 pass.",
+  "localGateAlignment": {
+    "sourceSha": "7d31348533a5b9694d3fb67ecc8b287ad72c3532",
+    "fundingExit": {
+      "status": "pass",
+      "artifactId": "exit-gas",
+      "command": "bun tools/stand-lock.ts run --reason \"same-sha-funding-exit-7d3134853\" --timeout-ms \"60000\" -- forge test --root jurisdictions --match-contract \"Dispute(GasAdmission|IngressGas|CounterGas)Test|FundingExitTest\" --fuzz-seed \"0x20261012\" -vv",
+      "passed": 25,
+      "failed": 0,
+      "skipped": 0,
+      "suites": 4,
+      "forgeSuiteDurationMs": 331.56,
+      "fuzzRuns": 512,
+      "fuzzTests": 2,
+      "runsPerFuzzTest": 256,
+      "strictPerOperationBudgetGas": 5000000,
+      "largestPrintedGasByOperation": {
+        "start": 3912360,
+        "finalize": 4453117,
+        "reveal": 1002252,
+        "counter": 795560
+      },
+      "gasLimitations": "Printed gas values are named-case samples, not measured maxima across fuzz runs. The budget applies to each measured operation, not the sum or entire Foundry test gas. Local Foundry time manipulation is not a public real-time dispute.",
+      "priorDetailedLifecycle": {
+        "file": "funding-exit-cef42c616.json",
+        "sha256": "49da3897d5f72bc3723ebe3e0a8558e326728de53b207834fcd704b9331ed3af"
+      }
+    },
+    "bytecode": {
+      "status": "pass",
+      "artifactId": "exit-bytecode",
+      "command": "bun core/scripts/checks/contracts/check-exit-gas-bytecode.ts",
+      "commandEvidence": "Canonical checker invocation supplied by root; log records the eight template results.",
+      "contracts": 8,
+      "limitation": "Hardhat/Foundry compiler templates are compared with compiler-declared library slots normalized. This does not replace public deployed runtime verification or approved immutable/operator bindings."
+    },
+    "lockAhb": {
+      "status": "pass",
+      "artifactId": "lock-ahb",
+      "command": "bun tools/stand-lock.ts run --reason \"same-sha-lock-ahb-7d3134853\" --timeout-ms \"180000\" -- bun core/scenarios/run.ts lock-ahb \"--mode=browservm\"",
+      "frames": 85,
+      "processExitCode": 0,
+      "exitEvidence": "Root process result and lock-ahb COMPLETE in captured log.",
+      "scope": "Local canonical TS browservm scenario, not a public-chain P6 proof."
+    },
+    "unchangedSource": {
+      "fromSha": "cef42c616b04b61d6839981a42a99a4dcdd13f24",
+      "toSha": "7d31348533a5b9694d3fb67ecc8b287ad72c3532",
+      "sourceFiles": [
+        {
+          "path": "jurisdictions/test/foundry/stress/FundingExit.t.sol",
+          "sha256": "aeaec7e563cbe01385966c337ba16ba4f58d2c4bdc3f42e46932db9b6c7ecea8",
+          "unchangedFromCef42c616": true
+        },
+        {
+          "path": "jurisdictions/test/foundry/stress/DisputeGasAdmission.t.sol",
+          "sha256": "2d47682d0ddd98c242767db760a0bcce3654871c8911e09f67be3915fa9f141e",
+          "unchangedFromCef42c616": true
+        },
+        {
+          "path": "jurisdictions/test/foundry/stress/DisputeIngressGas.t.sol",
+          "sha256": "f15fa67c0b6d6481b17845d35277af15609f24d0dd46e78b00b55a82d433008d",
+          "unchangedFromCef42c616": true
+        },
+        {
+          "path": "jurisdictions/test/foundry/stress/DisputeCounterGas.t.sol",
+          "sha256": "821a344db4da78da6c667fe49e810e3eb9309f98971f95e09710e3ba2bee0bd8",
+          "unchangedFromCef42c616": true
+        },
+        {
+          "path": "core/scripts/checks/contracts/check-exit-gas-bytecode.ts",
+          "sha256": "887f6bf29b860dbc0a9e232aa4701085dcdf8d2b8603f11bfaa8d3a9f8f6499a",
+          "unchangedFromCef42c616": true
+        },
+        {
+          "path": "jurisdictions/foundry.toml",
+          "sha256": "014d82a78ba960c96c8c3fbdd605a95b9c6f5581c06b741b84becc9cd316394e",
+          "unchangedFromCef42c616": true
+        }
+      ],
+      "contractAndStaticArtifactDirectories": [
+        "jurisdictions/contracts",
+        "frontend/static/contracts"
+      ],
+      "comparison": "git diff --name-only reports no changes in listed source/test/checker/config inputs and contract/static artifact directories."
+    }
+  }
+}

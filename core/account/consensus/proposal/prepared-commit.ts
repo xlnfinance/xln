@@ -2,7 +2,6 @@ import type { AccountOutput, AccountReplica, AccountState, AccountTx } from '../
 import { RecencyMemo } from '../../../support/collections/recency-memo';
 import { peekAccountStateRoot } from '../../commitment/state-root';
 import { ACCOUNT_LIVE_ENVELOPE } from '../../state/candidate-overlay';
-import type { ApplyAccountTxOk } from '../../tx/apply-types';
 
 /**
  * The transition a proposer validated while building its frame is the exact
@@ -21,7 +20,6 @@ export type PreparedProposalCommit = Readonly<{
   state: AccountState;
   accountStateRoot: string;
   candidateEffects: readonly AccountOutput[];
-  txResults: readonly ApplyAccountTxOk[];
   timedOutHashlocks: readonly string[];
 }>;
 

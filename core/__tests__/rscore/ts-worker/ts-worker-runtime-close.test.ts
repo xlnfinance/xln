@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 import { closeRuntimeDb, createEmptyEnv } from '../../../runtime';
-import { TsAccountWorkerAuthority } from '../../../rscore/ts-worker';
+import { TsAccountWorkerAuthority } from '../../../runtime/workers/account';
 import { createJReplica } from '../../../scenarios/harness/boot';
 import { entity, makeAccount, makeJurisdiction, makeState, openWritableEntityAccounts } from '../../helpers/cross-j';
 

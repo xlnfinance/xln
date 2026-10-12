@@ -88,6 +88,7 @@ const hubCore = (routes: ReadonlyMap<string, unknown>) => ({
   reserves: new Map(),
   lastFinalizedJHeight: 0,
   paybook: { entries: new Map(), feesEarned: 0n },
+  debtTotals: { incoming: new Map(), outgoing: new Map() },
   crossJurisdictionSwaps: routes,
 });
 

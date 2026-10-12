@@ -1,0 +1,102 @@
+{
+  "sourceSha": "005f5cd5ba69bbe44a9941e9a5b3a933ad8f90c2",
+  "cleanBeforeAndAfter": true,
+  "sourceChangesSinceCheck": false,
+  "checks": {
+    "unit": {
+      "passed": 90,
+      "failed": 0,
+      "assertions": 867,
+      "files": 7,
+      "command": "bun test core/__tests__/runtime/transport/runtime-output-routing.test.ts core/__tests__/runtime/transport/prepared-output-graph.test.ts core/__tests__/storage/recovery/portable/cross-j-output-replay-route.test.ts core/__tests__/dev-startup-hardening.test.ts core/__tests__/testing/tooling/script-entrypoints.test.ts ui/src/runtime/financial/move-balance.test.ts ui/src/runtime/financial/balance.test.ts"
+    },
+    "source": {
+      "command": "bun run check",
+      "sourceGatesPassed": 38,
+      "status": "passed"
+    },
+    "browser": {
+      "command": "XLN_LOCAL_PROD_SMOKE_WALLET_TESTS=e2e-move.spec.ts,e2e-reserve-funding.spec.ts bun run stand:run --reason canonical-move-outbox --timeout-ms 180000 -- bun run prod:smoke:local",
+      "standLockHeld": true,
+      "stats": {
+        "startTime": "2026-10-12T02:53:03.531Z",
+        "duration": 52060.843,
+        "expected": 3,
+        "skipped": 0,
+        "unexpected": 0,
+        "flaky": 0
+      },
+      "tests": [
+        {
+          "title": "Move LEFT refuses an unfunded reserve, then conserves 100 USDC through real on-chain collateral",
+          "status": "expected",
+          "results": [
+            {
+              "status": "passed",
+              "durationMs": 10939
+            }
+          ]
+        },
+        {
+          "title": "Move RIGHT refuses an unfunded reserve, then conserves 100 USDC through real on-chain collateral",
+          "status": "expected",
+          "results": [
+            {
+              "status": "passed",
+              "durationMs": 10096
+            }
+          ]
+        },
+        {
+          "title": "reserve funding waits for a real block beyond the old server and browser deadlines",
+          "status": "expected",
+          "results": [
+            {
+              "status": "passed",
+              "durationMs": 29897
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "delta": {
+    "nonTestSourceAdded": 21,
+    "nonTestSourceDeleted": 115,
+    "nonTestNetLines": -94,
+    "regressionTestLinesAdded": 82,
+    "totalCodeNetLines": -12
+  },
+  "limitations": [
+    "Not a full E2E or unit suite run.",
+    "Local Anvil browser stand; not public Sepolia P6.",
+    "Static peer review is not independent external security assurance.",
+    "Shared-tree diagnostic red Move regression preceded the committed fix."
+  ],
+  "reviews": [
+    {
+      "area": "outbox/dev-script",
+      "sourceSha": "005f5cd5ba69bbe44a9941e9a5b3a933ad8f90c2",
+      "findings": 0,
+      "method": "independent static review"
+    },
+    {
+      "area": "move-debt",
+      "sourceSha": "005f5cd5ba69bbe44a9941e9a5b3a933ad8f90c2",
+      "findings": 0,
+      "method": "independent static review"
+    }
+  ],
+  "artifacts": [
+    {
+      "path": "unit.log.gz",
+      "sha256": "b8fc1f160ef092814232ab5a2003e930f7b2330383dd91a6360a68511ff4caf3",
+      "uncompressedSha256": "cf914d3dc0b2a3ce1c5925c71485f2fdc814bdede15bc8fea8bff3bb2d096e25"
+    },
+    {
+      "path": "check.log.gz",
+      "sha256": "cfac4fa396bd4bd7d454deae0d3f8c85c95f833dda9f74f88e095e27375ca150",
+      "uncompressedSha256": "eb7c0adb97fbb60171d0edd8273075c2a4b0833f45fce46df33612af2020cd75"
+    }
+  ]
+}

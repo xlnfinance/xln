@@ -151,4 +151,3 @@ export {
   isLeftEntity,
   createProviderScopedEntityId,
 } from '../../entity/id';
-export { formatRuntime, formatEntity, formatAccount } from '../../qa/runtime-ascii';

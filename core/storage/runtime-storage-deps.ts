@@ -3,7 +3,6 @@ import type { Level } from 'level';
 import type { RuntimeReplica } from '../runtime/types';
 import type { PersistedFrameJournal } from './types';
 import type { StorageDbRole } from './runtime-dbs';
-import type { RscoreExactCheckpoint } from '../rscore/checkpoint/checkpoint-wire';
 import type { RecoveryReplayOptions } from './recovery/journal';
 
 type RuntimeModule = typeof import('../runtime');
@@ -37,11 +36,4 @@ export type RuntimeStorageApiDeps =
       frames: PersistedFrameJournal[],
       options?: RecoveryReplayOptions,
     ): Promise<void>;
-    restoreAccountAuthorityExact(
-      env: RuntimeReplica,
-      checkpoints: readonly RscoreExactCheckpoint[],
-    ): Promise<void>;
-    discardAccountAuthority(env: RuntimeReplica): Promise<void>;
-    setAccountAuthoritySuppressed(env: RuntimeReplica, suppressed: boolean): void;
-    accountAuthorityConfigured(): boolean;
   };

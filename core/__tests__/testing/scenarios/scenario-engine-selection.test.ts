@@ -12,7 +12,7 @@ test('a Rust selector cannot turn an in-process TS scenario into native evidence
     const result = run(args, 'rust');
     expect(result.error).toBeUndefined();
     expect(result.status).toBe(1);
-    expect(result.stderr).toContain(`SCENARIO_NATIVE_H1_BOUNDARY_MISSING:${args[0]}`);
+    expect(result.stderr).toContain('RUNTIME_ACCOUNT_ENGINE_RETIRED:XLN_HLT_ENGINE:typescript-only');
     expect(result.stdout).not.toContain('Creating entities');
   }
 });
@@ -20,13 +20,16 @@ test('a Rust selector cannot turn an in-process TS scenario into native evidence
 test('explicit engine selection overrides inherited engine and fails before launch', () => {
   const result = run(['multi-sig', '--single', '--hub-engine=rust']);
   expect(result.status).toBe(1);
-  expect(result.stderr).toContain('SCENARIO_NATIVE_H1_BOUNDARY_MISSING:multi-sig');
+  expect(result.stderr).toContain('RUNTIME_ACCOUNT_ENGINE_RETIRED:XLN_HLT_ENGINE:typescript-only');
+  expect(result.stdout).not.toContain('Creating entities');
 });
 
 test('an empty or unknown explicit engine cannot silently select TypeScript', () => {
   for (const flag of ['--hub-engine=', '--hub-engine', '--hub-engine=native']) {
     const result = run(['mm-mesh', flag]);
     expect(result.status).toBe(1);
-    expect(result.stderr).toContain('SCENARIO_HUB_ENGINE_REQUIRED:ts|rust');
+    expect(result.stderr).toContain(flag === '--hub-engine=native'
+      ? 'RUNTIME_ACCOUNT_ENGINE_INVALID:native'
+      : 'SCENARIO_HUB_ENGINE_REQUIRED:ts');
   }
 });

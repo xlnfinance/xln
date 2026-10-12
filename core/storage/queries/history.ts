@@ -1,3 +1,4 @@
+import { assertTypeScriptStorageFrame } from '../read/integrity/native-authority';
 import {
   buildRuntimeActivityEvents,
   dedupeRuntimeActivityEvents,
@@ -35,21 +36,24 @@ export const buildRecoveryJournalFromStorageFrame = (
   frame: RuntimeFrame,
   payloads: RuntimeFramePayloads,
   logs: FrameLogEntry[] = [],
-): PersistedFrameJournal => ({
-  height: frame.height,
-  timestamp: frame.timestamp,
-  replicaMetaDigest: frame.replicaMetaDigest,
-  postStateHash: frame.postStateHash,
-  materializedState: frame.materializedState,
-  runtimeInput: frame.runtimeInput,
-  runtimeOutputCount: frame.runtimeOutputCount,
-  runtimeOutputsDigest: frame.runtimeOutputsDigest,
-  entityContexts: structuredClone(payloads.entityContexts),
-  ...(payloads.runtimeOutputs?.length ? { runtimeOutputs: payloads.runtimeOutputs } : {}),
-  ...(payloads.runtimeMachine ? { runtimeMachine: payloads.runtimeMachine } : {}),
-  ...(frame.canonicalStateHash ? { canonicalStateHash: frame.canonicalStateHash } : {}),
-  logs,
-});
+): PersistedFrameJournal => {
+  assertTypeScriptStorageFrame(frame);
+  return {
+    height: frame.height,
+    timestamp: frame.timestamp,
+    replicaMetaDigest: frame.replicaMetaDigest,
+    postStateHash: frame.postStateHash,
+    materializedState: frame.materializedState,
+    runtimeInput: frame.runtimeInput,
+    runtimeOutputCount: frame.runtimeOutputCount,
+    runtimeOutputsDigest: frame.runtimeOutputsDigest,
+    entityContexts: structuredClone(payloads.entityContexts),
+    ...(payloads.runtimeOutputs?.length ? { runtimeOutputs: payloads.runtimeOutputs } : {}),
+    ...(payloads.runtimeMachine ? { runtimeMachine: payloads.runtimeMachine } : {}),
+    ...(frame.canonicalStateHash ? { canonicalStateHash: frame.canonicalStateHash } : {}),
+    logs,
+  };
+};
 
 export type PersistedRuntimeActivityPage = {
   ok: true;

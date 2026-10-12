@@ -1,0 +1,14 @@
+bun test v1.4.0 (34cbb9a40)
+
+core/__tests__/payments/settlement/settlement-execute-atomicity.test.ts:
+
+# Unhandled error between tests
+-------------------------------
+error: Cannot find module '../../../core/rscore/ts-worker/provider' from '/Users/zigota/xln/rscore/fixtures/entity-resident-group-e/group-e.ts'
+-------------------------------
+
+
+ 0 pass
+ 1 fail
+ 1 error
+Ran 1 test across 1 file. [319.00ms]

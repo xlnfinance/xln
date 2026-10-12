@@ -1,3 +1,4 @@
+import { assertTypeScriptAccountExecution } from '../config/account-execution';
 import { createStructuredLogger } from '../../support/logger';
 import type { TrustedJurisdictionRpcBinding } from './j-adapter-restore';
 import type { RuntimeReplica } from '../types';
@@ -21,7 +22,6 @@ export type RuntimeLiveRestoreDeps = {
     trustedJurisdictionRpcBindings?: readonly TrustedJurisdictionRpcBinding[],
   ): Promise<void>;
   registerCommittedSingleSignerWallets(env: RuntimeReplica): void;
-  discardAccountAuthority(env: RuntimeReplica): Promise<void>;
 };
 
 export const loadLiveRuntimeFromDB = async (
@@ -30,13 +30,13 @@ export const loadLiveRuntimeFromDB = async (
   runtimeSeed?: string | null,
   options?: RuntimeLoadOptions,
 ): Promise<RuntimeReplica | null> => {
-  let env: RuntimeReplica | null = null;
+  assertTypeScriptAccountExecution();
   try {
     const snapshotHeight = Number.isFinite(options?.fromSnapshotHeight)
       ? Math.floor(Number(options?.fromSnapshotHeight))
       : undefined;
     const restored = await deps.loadByReplay(runtimeId, runtimeSeed, snapshotHeight, {});
-    env = restored?.env ?? null;
+    const env = restored?.env ?? null;
     if (!env) return null;
 
     await deps.rehydrate(env, options?.trustedJurisdictionRpcBindings);
@@ -45,7 +45,6 @@ export const loadLiveRuntimeFromDB = async (
     // writer when recipients become ready; no separate recovery queue exists.
     return env;
   } catch (error) {
-    if (env) await deps.discardAccountAuthority(env);
     const message = error instanceof Error
       ? `${error.name}: ${error.message}`
       : String(error);

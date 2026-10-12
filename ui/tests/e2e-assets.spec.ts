@@ -1,7 +1,10 @@
 import { expect, test, type Page } from '@playwright/test';
+import { parseEther } from 'ethers';
 import type { RuntimeAdapterViewFrame, RuntimeReplica, XLNModule } from '../../core/api/public/runtime-module';
 import type { RuntimeAdapter } from '../../core/api/runtime-adapter/types';
 import { enterStack } from './stack';
+import { privateChain } from './dispute-chain';
+import { requireBoundaryRecord } from '../../core/protocol/boundary-validation';
 
 type FaucetKind = 'erc20' | 'gas' | 'reserve' | 'offchain';
 type DebugWindow = Window & {
@@ -56,6 +59,7 @@ const readAssets = (page: Page) =>
     if (typeof usdc !== 'bigint' || typeof external.nativeBalance !== 'bigint')
       throw new Error('Assets raw balance unavailable');
     return {
+      signerId,
       external: usdc.toString(),
       native: external.nativeBalance.toString(),
       reserve: (active.core.reserves.get(1) ?? 0n).toString(),
@@ -76,12 +80,13 @@ async function clickFaucet(page: Page, kind: FaucetKind, status = 200) {
   expect(response.status(), await response.text()).toBe(status);
   // A successful incoming payment can exhaust its own capacity; the gas control still proves shared busy is cleared.
   await expect(page.getByTestId('faucet-gas')).toBeEnabled({ timeout: 15_000 });
+  return response;
 }
 
 test(
   'Assets faucets fund four real balances once and require explicit incoming credit consent',
   { tag: '@functional' },
-  async ({ page }, testInfo) => {
+  async ({ page, baseURL }, testInfo) => {
     test.setTimeout(50_000);
     const pageErrors: string[] = [];
     const requests: Record<FaucetKind, string[]> = { erc20: [], gas: [], reserve: [], offchain: [] };
@@ -91,7 +96,16 @@ test(
       const match = new URL(request.url()).pathname.match(/^\/api\/faucet\/(erc20|gas|reserve|offchain)$/);
       if (!match?.[1]) return;
       const body: unknown = request.postDataJSON();
-      if (!body || typeof body !== 'object' || !('amount' in body)) throw new Error('Faucet request amount missing');
+      if (!body || typeof body !== 'object') throw new Error('Faucet request body missing');
+      if (match[1] === 'gas') {
+        // The server chooses the gas grant; its exact credited amount is
+        // checked against the real native balance below, not invented here.
+        expect(body).not.toHaveProperty('amount');
+        if (!('userAddress' in body) || typeof body.userAddress !== 'string') throw new Error('Gas recipient missing');
+        requests.gas.push(body.userAddress);
+        return;
+      }
+      if (!('amount' in body)) throw new Error('Faucet request amount missing');
       requests[match[1] as FaucetKind].push(String(body.amount));
     });
     await enterStack(page);
@@ -140,10 +154,29 @@ test(
     // The token mint can top up gas itself; measure the explicit gas request from the subsequent chain snapshot.
     const beforeGas = await readAssets(page);
     await expect(page.getByTestId('faucet-amount')).toHaveValue('100');
-    await clickFaucet(page, 'gas');
+    const gasResponse = await clickFaucet(page, 'gas');
+    const gasReceipt = requireBoundaryRecord(await gasResponse.json(), 'GAS_RECEIPT_INVALID');
+    expect(gasReceipt).toMatchObject({ success: true, type: 'gas', userAddress: initial.signerId });
+    const gasAmount = gasReceipt['amount'];
+    const txHash = gasReceipt['txHash'];
+    if (typeof gasAmount !== 'string' || typeof txHash !== 'string' || !/^0x[0-9a-f]{64}$/i.test(txHash))
+      throw new Error('Gas grant amount or transaction hash missing');
+    const gasAdded = parseEther(gasAmount);
+    expect(gasAdded).toBeGreaterThan(0n);
+    expect(gasAdded).toBeLessThanOrEqual(parseEther('0.1'));
+    const provider = privateChain(baseURL);
+    try {
+      const transaction = await provider.getTransaction(txHash);
+      if (!transaction) throw new Error('Gas grant transaction missing');
+      expect(transaction.to?.toLowerCase()).toBe(initial.signerId.toLowerCase());
+      expect(transaction.value).toBe(gasAdded);
+      expect((await provider.getTransactionReceipt(txHash))?.status).toBe(1);
+    } finally {
+      provider.destroy();
+    }
     await expect
       .poll(async () => (await readAssets(page)).native, { timeout: 15_000 })
-      .toBe((BigInt(beforeGas.native) + 100_000_000_000_000_000n).toString());
+      .toBe((BigInt(beforeGas.native) + gasAdded).toString());
     await expect(page.getByTestId('faucet-amount')).toHaveValue('100');
 
     const beforeReserve = await readAssets(page);
@@ -182,9 +215,9 @@ test(
       await expect(page.getByTestId(balance)).toBeVisible();
       await expect(page.getByTestId(balance)).toHaveText('100.00 USDC');
     }
-    expect(requests).toEqual({ erc20: ['101', '100'], gas: ['0.1'], reserve: ['100'], offchain: ['100'] });
+    expect(requests).toEqual({ erc20: ['101', '100'], gas: [initial.signerId], reserve: ['100'], offchain: ['100'] });
     console.log(
-      `FAUCETS_CONFIRMED external=${funded.external} reserve=${funded.reserve} account=${funded.owned} gasAdded=100000000000000000 requests=5 successful=4`,
+      `FAUCETS_CONFIRMED external=${funded.external} reserve=${funded.reserve} account=${funded.owned} gasAdded=${gasAdded} requests=5 successful=4`,
     );
     await page.screenshot({ path: testInfo.outputPath('faucet-funded.png'), fullPage: true });
     expect(pageErrors).toEqual([]);

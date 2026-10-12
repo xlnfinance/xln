@@ -159,19 +159,42 @@ const ciPreE2eSteps: GateStep[] = [
 // its real contracts and an isolated state directory retained as CI evidence.
 const walletE2eSteps: GateStep[] = (
   [
-    ['React payment and admission E2E', 'e2e-payment.spec.ts,e2e-lending-availability.spec.ts', 'payment'],
+    [
+      'React payment and admission E2E',
+      'e2e-payment.spec.ts,e2e-lending-availability.spec.ts,e2e-reserve-funding.spec.ts',
+      'payment',
+    ],
     ['React dispute E2E', 'e2e-dispute-finality.spec.ts', 'dispute'],
     ['React offline protection E2E', 'e2e-dispute-protection.spec.ts', 'protection'],
     ['React recovery E2E', 'e2e-tower-restore.spec.ts,e2e-file-restore.spec.ts,e2e-sovereignty.spec.ts', 'recovery'],
   ] as const
-).map(([name, tests, directory]) => ({
-  name,
-  command:
-    `XLN_LOCAL_PROD_SMOKE_DIR=.logs/gates/react-${directory} ` +
-    `XLN_LOCAL_PROD_SMOKE_WALLET_TESTS=${tests} ` +
-    `bun run stand:run --reason react-${directory} --timeout-ms 240000 -- bun run prod:smoke:local`,
-  timeoutMs: 300_000,
-}));
+)
+  .map<GateStep>(([name, tests, directory]) => ({
+    name,
+    command:
+      `XLN_LOCAL_PROD_SMOKE_DIR=.logs/gates/react-${directory} ` +
+      `XLN_LOCAL_PROD_SMOKE_WALLET_TESTS=${tests} ` +
+      `bun run stand:run --reason react-${directory} --timeout-ms 240000 -- bun run prod:smoke:local`,
+    timeoutMs: 300_000,
+  }))
+  .concat([
+    {
+      name: 'React production build',
+      command:
+        'NODE_ENV=production XLN_UI_BASE=/ XLN_UI_STACK_ORIGIN= ' +
+        'bun run stand:run --reason react-production-build --timeout-ms 240000 -- bun run --cwd "$PWD/ui" build',
+      timeoutMs: 300_000,
+    },
+    {
+      name: 'React production artifact E2E',
+      command:
+        'XLN_LOCAL_PROD_SMOKE_WALLET_ARTIFACT_DIR="$PWD/ui/dist" ' +
+        'XLN_LOCAL_PROD_SMOKE_DIR=.logs/gates/react-production ' +
+        'XLN_LOCAL_PROD_SMOKE_WALLET_TESTS=e2e-production-wallet.spec.ts ' +
+        'bun run stand:run --reason react-production --timeout-ms 240000 -- bun run prod:smoke:local',
+      timeoutMs: 300_000,
+    },
+  ]);
 
 const ciSteps: GateStep[] = [...ciPreE2eSteps, ...walletE2eSteps];
 

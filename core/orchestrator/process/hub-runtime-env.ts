@@ -2,6 +2,7 @@ import { resolve } from 'node:path';
 import { buildManagedRuntimeChildSecretEnv } from '../../support/process/child-secrets';
 import { buildRuntimeChildGcEnv } from '../../support/process/runtime-gc-env';
 import { resolveRuntimeMinFrameDelayMs } from '../../runtime/config/frame-cadence';
+import { canonicalHubEngine } from './hub-engine-plan';
 
 const RUNTIME_FRAME_DELAY_KEY = 'XLN_RUNTIME_MIN_FRAME_DELAY_MS';
 
@@ -66,6 +67,7 @@ export const buildHubChildProcessEnv = (
   options: HubChildProcessEnvOptions,
 ): NodeJS.ProcessEnv => {
   const source = options.sourceEnv ?? process.env;
+  canonicalHubEngine(options.hubName, source);
   const child: NodeJS.ProcessEnv = {
     ...buildManagedRuntimeChildSecretEnv(source),
     ...buildRuntimeChildGcEnv(source),
@@ -95,18 +97,6 @@ export const buildHubChildProcessEnv = (
     delete child['XLN_RUNTIME_SNAPSHOT_EXPORT_PATH'];
     delete child['XLN_STORAGE_MATERIALIZE_PERIOD_FRAMES'];
     delete child['XLN_STORAGE_CANONICAL_HASH_PERIOD_FRAMES'];
-  }
-  if (source[`XLN_HUB_RSCORE_AUTHORITY_${options.hubName.toUpperCase()}`] === '1') {
-    child['XLN_RSCORE_AUTHORITY'] = '1';
-    if (source['XLN_RSCORE_BINARY']) {
-      child['XLN_RSCORE_BINARY'] = source['XLN_RSCORE_BINARY'];
-    }
-    if (source['XLN_RSCORE_AUTHORITY_WORKERS']) {
-      child['XLN_RSCORE_AUTHORITY_WORKERS'] = source['XLN_RSCORE_AUTHORITY_WORKERS'];
-    }
-    if (source['XLN_RSCORE_AUTHORITY_RECORD']) {
-      child['XLN_RSCORE_AUTHORITY_RECORD'] = source['XLN_RSCORE_AUTHORITY_RECORD'];
-    }
   }
   if (
     options.hubName.toUpperCase() === 'H1' &&

@@ -25,7 +25,7 @@ watch_bundle() {
 
 watch_bundle core/api/public/browser.ts frontend/static/runtime.js &
 runtime_watch_pid=$!
-watch_bundle core/rscore/ts-worker/worker.ts frontend/static/account-worker.js &
+watch_bundle core/runtime/workers/account/worker.ts frontend/static/account-worker.js &
 account_watch_pid=$!
 
 stop_watchers() {

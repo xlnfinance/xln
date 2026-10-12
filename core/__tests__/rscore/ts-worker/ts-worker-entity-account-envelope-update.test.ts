@@ -12,7 +12,7 @@ import {
 } from '../../../entity/tx/state-effects/board-rotation-hanko-refresh';
 import type { EntityState } from '../../../entity/types';
 import { createEmptyEnv } from '../../../runtime';
-import { TsAccountWorkerAuthority } from '../../../rscore/ts-worker';
+import { TsAccountWorkerAuthority } from '../../../runtime/workers/account';
 import { createJReplica } from '../../../scenarios/harness/boot';
 import {
   entity,

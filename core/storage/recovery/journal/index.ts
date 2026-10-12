@@ -34,8 +34,6 @@ import type { RuntimeInputApplyResult } from '../../../runtime/frame/apply';
 import type { RuntimeOutputRoutingDeps } from '../../../runtime/delivery/topology/output-routing';
 import type { PersistedFrameJournal } from '../../types';
 import type { FrameLogEntry } from '../../../types/logging';
-import {
-} from '../../wal/snapshot';
 import { createStructuredLogger } from '../../../support/logger';
 import {
   assertRecoveryOutboxMatches,
@@ -45,12 +43,6 @@ import {
 } from './verification';
 import { assertCrossJLocalCohorts } from '../../../runtime/delivery/topology/cross-j-topology';
 import { timePerfPhase } from '../../../support/performance/profile';
-import {
-  failStopAuthorityFrame,
-  finalizeAuthorityFrameAfterWal,
-  assertAuthorityFrameSettled,
-} from '../../../rscore/authority-driver';
-
 const APPLY_ALLOWED = Symbol.for('xln.runtime.env.apply.allowed');
 const REPLAY_MODE = Symbol.for('xln.runtime.env.replay.mode');
 const runtimeLog = createStructuredLogger('runtime');
@@ -195,11 +187,6 @@ const replayOneFrame = async (
     // the persisted frame passes every equivalence check, then clear it.
     recordCommittedRuntimeEntityMetrics(env, height, committedEvents);
     clearRuntimeFrameEvents(env);
-    // The authoritative engine takes the same frame the journal just proved.
-    // Replay has no WAL write of its own to wait for: the journal is already
-    // durable, so only TS-side frame bookkeeping is released here.
-    await assertAuthorityFrameSettled(env);
-    await finalizeAuthorityFrameAfterWal(env, frame.materializedState === true);
     // Replay has no live storage commit to release these per-frame marks.
     // Keep the cumulative overlay for checkpoint materialization, but never
     // let verified history become the next live frame's change list.
@@ -212,9 +199,6 @@ const replayOneFrame = async (
     });
     throw error;
   } finally {
-    // A frame that threw after Account mutation cannot keep this process: the
-    // durable journal remains the sole recovery truth.
-    await failStopAuthorityFrame(env);
     if (env.infrastructure) delete env.infrastructure.replayEntityContexts;
     clearReplayOutputSignerHints(env);
     clearReplayOutputRuntimeRoutes(env);

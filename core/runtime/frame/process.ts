@@ -26,15 +26,6 @@ import {
   flushPendingAuditEvents,
   readRuntimeFrameEvents,
 } from '../observability/env-events';
-import {
-  failStopAuthorityFrame,
-  authorityDriverEnabled,
-  finalizeAuthorityFrameAfterWal,
-  discardAuthorityRuntime,
-  prepareAuthorityCheckpoint,
-  assertAuthorityFrameSettled,
-  validateAuthorityCheckpointMaterialization,
-} from '../../rscore/authority-driver';
 import { recordCommittedRuntimeEntityMetrics } from '../observability/entity-metrics';
 import { acquireRuntimeFrameWriter, assertRuntimeWriterAcceptingIngress } from './lifecycle/writer-lock';
 import { createFrameExecutionState, type FrameExecutionState } from './intake/execution-state';
@@ -58,7 +49,6 @@ import { runCommittedRuntimeEffects } from './lifecycle/post-commit';
 import { finishRuntimeFrame, handleRuntimeFrameFailure } from './lifecycle/finish';
 import type { RuntimeInputReducer } from './intake/reducer';
 import { getLiveJAdapterEntries } from '../j-submit/live-jadapters';
-import type { RscoreExactCheckpoint } from '../../rscore/checkpoint/checkpoint-wire';
 
 const runtimeLog = createStructuredLogger('runtime');
 
@@ -407,17 +397,6 @@ const commitRuntimeFrame = async (
       options.appliedInput,
       candidateEnv.pendingNetworkOutputs,
       frame.entityContexts,
-      ...(authorityDriverEnabled(candidateEnv)
-        ? [{
-            prepareCheckpoint: () => prepareAuthorityCheckpoint(candidateEnv),
-            validateCheckpointMaterialization: (
-              checkpoints: readonly RscoreExactCheckpoint[],
-            ) =>
-              validateAuthorityCheckpointMaterialization(candidateEnv, checkpoints),
-            afterWalCommit: (materialized: boolean) =>
-              finalizeAuthorityFrameAfterWal(candidateEnv, materialized),
-          }]
-        : []),
     );
     profile.metrics.storageMs = outcome.persistencePerfMs;
     if (outcome.persistencePerfMs) {
@@ -436,26 +415,6 @@ const commitRuntimeFrame = async (
     );
   } catch (error) {
     if (error instanceof deps.storage.RuntimeFrameStorageError) {
-      if (error.publicationBlocked) {
-        if (error.commitStatus !== 'committed') {
-          throw new AggregateError(
-            [error],
-            'RSCORE_AUTHORITY_PUBLICATION_BLOCKED_WITHOUT_DURABLE_WAL',
-          );
-        }
-        await discardAuthorityRuntime(candidateEnv);
-        clearPendingAuditEvents(candidateEnv);
-        frame.failureHandled = true;
-        frame.commitDisposition = 'committed';
-        haltRuntimeRequiresOperator(liveEnv, error);
-        throw error;
-      }
-      if (
-        (error.commitStatus === 'unknown' || error.commitStatus === 'conflict') &&
-        !error.operationStillRunning
-      ) {
-        await discardAuthorityRuntime(candidateEnv);
-      }
       await handleRuntimeFrameStorageFailure(
         error.commitStatus,
         error,
@@ -511,16 +470,6 @@ const applyRuntimeFrameCandidate = async (
       setApplyAllowed: deps.setApplyAllowed,
     },
   );
-};
-
-const closeEmptyAuthorityFrameWithoutWal = async (
-  env: RuntimeReplica,
-  frameAdvanced: boolean,
-): Promise<void> => {
-  if (frameAdvanced) return;
-  // An empty Runtime transition has no durable record and therefore cannot
-  // commit any Account candidate, even if a future collector bug opens one.
-  await failStopAuthorityFrame(env);
 };
 
 const planAppliedRuntimeOutputs = (
@@ -619,9 +568,6 @@ const applyAndCommitRuntimeFrame = async (
     candidate.quietRuntimeLogs,
     deps,
   );
-  // Rust keeps a persistent base pointer; durable failure remains fail-stop.
-  candidate.state.runtimeFramePhase = 'authority.settle';
-  await assertAuthorityFrameSettled(env);
   candidate.state.runtimeFramePhase = 'commit.prepare';
   const frameAdvanced = prepareRuntimeFrameCommit(
     env,
@@ -640,11 +586,8 @@ const applyAndCommitRuntimeFrame = async (
     quietLogs: candidate.quietRuntimeLogs,
   }, deps);
   if (commit.staleWriterStopped) {
-    await failStopAuthorityFrame(env);
     return { ...commit, rejectedIngress: applied.rejectedIngress };
   }
-  candidate.state.runtimeFramePhase = 'commit.empty-close';
-  await closeEmptyAuthorityFrameWithoutWal(env, frameAdvanced);
 
   candidate.state.runtimeFramePhase = 'effects.post-commit';
   await runCommittedRuntimeEffects(
@@ -724,16 +667,6 @@ const processRuntimeFrameOnce = async (
     applyRejectedIngressPolicy(committed.rejectedIngress);
     return env;
   } catch (error) {
-    if (frame.commitDisposition === 'undurable') {
-      try {
-        await failStopAuthorityFrame(liveEnv);
-      } catch (abortError) {
-        error = new AggregateError(
-          [error, abortError],
-          'RSCORE_AUTHORITY_PRE_WAL_ABORT_FAILED',
-        );
-      }
-    }
     const failure = await handleRuntimeFrameFailure(error, liveEnv, frame, {
       isStorageError: candidate => candidate instanceof deps.storage.RuntimeFrameStorageError,
       isDiscardedInputError: candidate => candidate instanceof deps.loop.RuntimeInputDiscardedError,

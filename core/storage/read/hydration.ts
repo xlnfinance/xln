@@ -1,4 +1,4 @@
-import { engineAccountValueHash } from '../../rscore/engine-leaf/leaf-cache';
+import { engineAccountValueHash } from '../../entity/state/engine-leaf/leaf-cache';
 import { rebuildOrderbookPairIndex, type BookState, type OrderbookExtState } from '../../swapbook';
 import type { AccountReplica } from '../../types/account';
 import type { EntityState } from '../../entity/types';

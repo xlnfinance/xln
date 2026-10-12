@@ -484,7 +484,7 @@ export type BrowserVMState = import('../jurisdiction/adapter/browservm/browservm
  * secret, wall clock, or retry machinery. A RuntimeFrame commits this State;
  * RuntimeReplica owns the machinery that builds and durably publishes it.
  */
-export interface RuntimeState {
+interface RuntimeState {
   eReplicas: Map<string, EntityReplica>;  // Entity replicas (E-layer state machines)
   jReplicas: Map<string, JReplica>;       // Jurisdiction replicas (J-layer EVM state)
   height: number;
@@ -507,6 +507,8 @@ interface RuntimeInfrastructure {
    * force every hash/snapshot path to remember an exclusion list.
    */
   liveJAdapters?: Map<string, import('../jurisdiction/adapter/types').JAdapter>;
+  /** Process-local transport overrides by jurisdiction identity; retained when adapters are recreated. */
+  trustedJurisdictionRpcUrls?: ReadonlyMap<string, string>;
   lifecyclePhase?: 'booting' | 'running' | 'quiescing' | 'stopped' | 'halted';
   /** Explicit operator-facing terminal status; never part of committed RuntimeState. */
   operatorStatus?: 'HALTED_REQUIRES_OPERATOR';
@@ -730,21 +732,12 @@ export interface RuntimeReplica {
   state: RuntimeState;
   runtimeSeed?: string | undefined; // BrainVault seed backing this runtime (plaintext, dev mode)
   runtimeId?: string | undefined; // Runtime identity (usually signer1 address)
-  /** Active rscore recorder frame; ephemeral envelope data, never consensus state. */
-  accountAuthorityFrameId?: string | null | undefined;
-  /** Detached/read-only replicas never arm or mutate authority sessions. */
-  accountAuthoritySuppressed?: boolean | undefined;
   /** Canonical Account authority is installed before the first Runtime frame. */
   accountAuthorityExecutionMode?: 'cutover' | undefined;
   /** Process-local Account executor; never part of Runtime state or WAL. */
-  accountAuthorityEntityStageProvider?: import('../rscore/authority/entity-stage').AccountAuthorityEntityStageProvider | undefined;
+  accountAuthorityEntityStageProvider?: import('../entity/consensus/account/execution-stage').AccountAuthorityEntityStageProvider | undefined;
   /** Active for one EntityInput and always cleared before returning to Runtime. */
   accountAuthorityEntityStage?: import('../entity/runtime-context').AccountAuthorityEntityStageCapability | undefined;
-  /**
-   * Ephemeral checkpoint cadence for the active Runtime frame. Rust consumes
-   * it on the outbound Account visit; it is never consensus state or WAL.
-   */
-  accountAuthorityCheckpointDue?: boolean | undefined;
   /**
    * Last durable Runtime graph materialization known by this live replica.
    * This is a storage cursor, not consensus state; recovery derives it from

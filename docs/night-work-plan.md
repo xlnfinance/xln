@@ -2,74 +2,259 @@
 
 Owner scope: TS + React + Ethereum same-J; Rust and lending remain frozen.
 Foreign Rust stash `438bf1a6ddd8679bba0b63bdef11dd1fd1f45e90` is untouched.
-Keep frozen-core even with zero protected files. No WIP commits.
+Keep frozen-core, PRs with seven required green jobs, no WIP commits.
 
-- Current SHA: PR #70 source follows `f2796d39f` on `codex/rc-wallet-recovery`;
-  runtime code still matches the React-verified d519. The gate list fix and public
-  Sepolia evidence are committed. The next change installs the React dependencies
-  needed by the unit job's real launcher tests.
-  https://github.com/xlnfinance/xln/pull/70
-  Owner approved PRs with mandatory green CI on 2026-10-12. Main protection is
-  enabled: all seven build-and-test jobs, strict up-to-date checks, required PR,
-  administrators included, no force pushes/deletions. This replaces direct-main-only.
-  Owner approved the two protected decoder files; both uchg flags are restored.
-- Last green: all four private production React groups on clean source d519:
-  payment 4/4, P4/P5 2/2, P6 1/1, recovery 3/3; zero skips, failures or retries.
-  P6: offline wallet defended, 100 USDC paid, owner EOA nonce unchanged;
-  gas start 387024, counter 193785, finalize 191265. File recovery rejects
-  corruption/overwrite, restores signed Account roots/balances and exits 100 USDC.
-  Related units 155/155, 441985 assertions; launcher fixtures 28/28, 166 assertions.
-  `bun run check` passed 38 source gates (30.670s); React production build passed.
-  Every recorded run started and ended with a clean tree and held the stand lock
-  where required. P5 deliberately exhausts hub reserves: keep P6 in its separate
-  release stand, rather than combining those tests against one funded hub.
-  Public green: P4/P5 on clean 976b126fa and current Sepolia bytecode,
-  with real clocks. P4 returns all 85 test USDT collateral, gas start 933174 /
-  finalize 241109. P5 pays 95 of a 110 test USDT claim and records 15 debt,
-  gas start 933994 / finalize 767286. Both waited 24 chain seconds against a
-  signed 10-second window, then separately proved a 5 test USDT external withdrawal.
-  Existing public hub cold backup restored on clean f2796d39f into an isolated
-  local directory: runtime height 676, one Account, 128 retained WAL frames
-  verified. The production server was untouched and no Runtime loop was started.
-- First red resolved: P6 exposed three distinct production faults. The watcher
-  retained a signature cleared by Depository's final event, then passed ethers
-  Result proxies into durable state, then CounterDisputeRegistered changed an
-  Account without notifying its resident worker. Fixes reuse the existing ABI
-  materializer, ProofBody validator and replaceDisputeLifecycle envelope update.
-  A real Entity-frame regression reproduces the root mismatch before the fix and
-  now matches inline/W1/W4 roots. No Rust or rscore files changed.
-  Main CI 38189132378 finished 6/7 green including all E2E; unit failures were
-  two shallow Linux /tmp fixtures. Both now use owned data children, preserving
-  the production reset guard. Local launcher/preflight checks are green.
-  PR CI 38192080486 finished five jobs green and two red; E2E stopped before browsers because
-  release-gate-order.test.ts still expected the old three groups. The focused
-  regression reproduced both failures; its expected list now requires all four
-  groups including P6 and file recovery. Focused checks 10/10 and the complete
-  release-integrity command pass (63 tests plus the package smoke).
-  Both remaining unit failures reached `DEV_DEPENDENCIES_MISSING:ui`: the unit
-  job installed root/frontend dependencies but its real launcher also starts
-  React. Add the same frozen-lockfile ui install already used by the other jobs;
-  preserve the launcher preflight and financial assertions.
-- Artifacts: clean evidence docs/evidence/rc-20261012/react-d51910eee.json
-  includes the ten cases, Account recovery snapshots, receipts, gas and log hashes.
-  The obsolete hash/signature-only export and its test decoder are removed;
-  actual encrypted restore plus on-chain exit replaces that coverage.
-  Public receipts, block timestamps and gas are in
-  docs/evidence/rc-20261012/sepolia-976b126fa.json. The public wallet/hub/tower
-  still run 7c3f63f98; the 976b126fa UI archive is prepared but not deployed.
-  Cold restore: docs/evidence/rc-20261012/cold-restore-f2796d39f.json.
-- Next: `bun run check`, commit owned paths and update PR #70. After green CI,
-  take a fresh current-state backup and prepare the synchronized public
-  wallet/hub/tower rollout before fresh P6.
-- Remaining final gates: ten consecutive green main runs; production Rust/QA
-  isolation; current-source public Sepolia P4-P6 with real clocks; external tower
-  coverage; exact-build owner-reviewed release package. Owner correction:
-  no new freeze at dispute start, FIFO, one debt per debtor/creditor/token,
-  party-selected dispute windows. These are settled requirements, not pending
-  owner questions. No starter bond or governance change in this candidate;
-  verify historical-board proof expiry against signed windows separately.
-  Public alpha remains
-  7c3f63f9841f4e8b61ac5eee5dbe4f9710b10621. No mainnet readiness claimed.
+
+Current checkpoint, 2026-10-12 20:01 UTC: PR #73 at d29c84c66 passed five of
+seven required jobs. E2E stopped at the incomplete recovery fixture (634/635
+core tests); Unit Tests found the same missing WAL frame plus missing debtTotals
+and a memory iterator ignoring its key range. All three test fixtures are now
+corrected without production changes or weaker assertions. Recovery uses the
+real WAL/current DB and checks nodes before HEAD publication. Related tests:
+30/30, 124 assertions, 2.40s. Next: full check, push this correction, then await
+exact-head CI before activating Sepolia. No owner question remains.
+
+Release preparation on clean d29c84c66: archived React payment/reload 1/1;
+current deployed contract templates match; copied stopped H1 caught up to
+R4475/J11897669 with 128/128 integrity frames, P6 dispute cleared, collateral
+zero, no RPC writes. The caught-up DB restores identically with current code
+and staged rollback 5e6d08a16. Both code/UI releases are prepared on the server;
+services were not changed and the public backend remains unavailable. Preserve
+funded state and tower RPC allowlist. After green CI: maintenance, cold backup,
+exact candidate start, financial state check, then public wallet drill.
+
+Method review: stop treating an imported test fixture as a valid persisted
+Runtime. The first red command now runs with a real stored frame; the existing
+validator stays strict. No new audit/metric/gate; source checks precede one new
+CI run. Three bounded local reproductions identified all observed CI failures.
+
+- Owner authorized the one active TS fixture import correction on October 12.
+  The stale worker path is replaced by the canonical Runtime worker path;
+  clean 01cde8881 passes all 97 settlement tests (528 assertions, 2.67s),
+  60 tests covering former CI failures (1,037 assertions, 859ms), and full
+  `bun run check` (38 source gates, source phase 28.518s).
+  Evidence: docs/evidence/canonical-review-20261012/fixture-import-01cde8881.json.
+  Next: update PR #73 and resolve its first required CI failure.
+  Continue to Sepolia rollout/recovery after green CI. No other `rscore/` edit
+  is authorized; the earlier pending-permission entries below are historical.
+
+- Latest owner-report review: clean 9fa2a4bf6 passes full `bun run check`
+  (38 source gates, React types, Svelte build/types) and both real React faucet
+  journeys (2/2, no skips/flakes/errors). The unchanged production implementation
+  passed 102 targeted tests / 587 assertions on clean 5e648e71c; the real RPC
+  integration passed 11/11 / 74 assertions on clean 089f198b5. Invalid debug
+  limits and malformed/unsafe RPC chain IDs now reject at their source. The
+  existing J-prefix authority guard returns its checked weight without another
+  lookup or non-null assertion; its remote-DoS claim did not reproduce. Map
+  sorting already occurs in the canonical codec. Faucet elapsed waits now use
+  the monotonic clock; reducer time and consensus bytes are unchanged. Existing
+  coordinate brands/negative checks remain; no unit-confusion failure was shown.
+  The browser test now binds adaptive gas grants to the mined transfer and
+  exact wallet balance; delayed reserve funding waits 22 real seconds for a
+  block and credits 1 USDC through one request. Three preceding browser failures
+  remain recorded, including an unavailable test import introduced and fixed
+  during this review. Evidence: docs/evidence/canonical-review-20261012/critical-boundaries-9fa2a4bf6.json.
+  Rust/lending/contract files are unchanged. No push, public transaction or
+  deployment; the frozen active fixture import below still blocks release CI.
+- Current branch: codex/ts-worker-boundary. Earlier clean b225f8ac4 passes 38 source
+  gates, React types, 40 related tests / 766 assertions and UI-only dev
+  funding/payment/reload (1/1). Its production code equals the compiled
+  5e6d08a16 wallet proof below; later changes only wire CI and retain evidence.
+  Financial-core retirement source fc4f267db
+  retires the native authority driver/storage hooks, rejects native WAL before
+  TS projection/writes and retains exact TS crash/commit/outbox semantics.
+  All six bounded checks pass: 155 targeted tests / 1,893 assertions, 38 source
+  gates, the same 708-frame W1/W4/W8 replay, React payment/reload 3/3, stopped
+  H1 cold restore R4474 / 128 retained integrity frames, and static closure.
+  This cut removes 1,384 production lines, 43 test lines and 47 script lines;
+  nine doc lines added, net 1,465 fewer physical lines. Prior clean 942385253
+  retires the live authority recorder and observers: 1,615 fewer physical
+  production lines, 872 fewer retired-feature test lines and one replay-CLI line.
+  All five checks pass: 147/147 related tests (1,906 assertions), 38 source gates,
+  the same 708-frame WAL exact on W1/W4/W8, React payment/reload 3/3 with no
+  skips/flakes/errors, and measured closure. Each replay retains one outbox
+  item; not TPS. H0 financial assertions remain in canonical Account tests.
+  No new public-chain operation or deployment occurred. Earlier clean 8584d3ce0
+  has 45/45 tests and 38 gates for the 49-line unread-bookkeeping deletion.
+  Prior financial source 2d2115dc8: all six checks passed — 34/34 related
+  tests (1,249 assertions), 38 source gates, 708-frame mixed WAL exact on
+  W1/W4/W8, 3/3 React payment/reload, actual Sepolia event decoding, and the
+  stopped hub's cold replay (R4474, 128 retained frames). WAL replay retains
+  one final outbox item; no TPS claim. Cold replay stops before counter block
+  11897542, does not start network effects, and is not deployed catch-up.
+  Earlier clean 88f14ce5f has 104/104 watcher tests (951 assertions);
+  7d3134853 has lock-ahb (85 frames), 25/25 funding/exit cases, 512 fuzz
+  invocations and eight matching compiler templates. Keep original SHA binding.
+- First required-TS red, corrected at 11:19 UTC on clean 67a2a1dca:
+  settlement-execute-atomicity.test.ts cannot resolve the relocated TS worker
+  through rscore/fixtures/entity-resident-group-e/group-e.ts:3. The test fails
+  during import (319ms, zero assertions executed). Required CI already excludes
+  core/__tests__/rscore/, so the separate cross-J parity failure is outside this
+  release job. Narrow the pending owner exception to this one active fixture
+  import; do not copy its full Runtime setup, add an alias or weaken assertions.
+  Prepared patch: docs/evidence/canonical-review-20261012/ts-worker-active-fixture-import.patch.
+  Original clean-source output: docs/evidence/canonical-review-20261012/settlement-fixture-import-67a2a1dca.log.
+  Do not push this known-red candidate.
+- PR #73 still points to 72c38fa4b: six of seven required pull_request jobs
+  passed, Unit Tests failed four cases. Those four are fixed locally; fresh
+  eligible CI is still required after the fixture blocker. Main remains
+  86d2a515; no merge or public deployment occurred during this cut.
+- Artifacts: docs/evidence/canonical-review-20261012/native-retirement-fc4f267db.json
+  binds the latest six checks and the still-red frozen-fixture import test.
+  record-retirement-942385253.json retains the preceding collector deletion. Earlier
+  retired-capture-8584d3ce0.json binds its narrow deletion. The preceding
+  null-stage-2d2115dc8.json binds its replay/browser/receipt/recovery results.
+  The prior ts-worker-evidence.json retains the 498-frame historical WAL
+  failure at frame 12 on both pre-move baseline and candidate. Moving 3,857
+  worker lines is ownership correction, not deletion. Private WAL/seeds stay private.
+- Next single command after the one active fixture import is authorized and replaced:
+  `bun test core/__tests__/payments/settlement/settlement-execute-atomicity.test.ts`
+  Then related active TS consumers, exact-candidate source/browser/scenario checks
+  and push HEAD:codex/production-qa-boundary for PR #73 required CI.
+- Release preparation on clean d4502ec94 is complete locally: real React
+  production build, existing Git bundle/UI archive layout, 11/11 archived UI
+  files verified, and another full check (38 source gates). A fresh private
+  stopped-H1 copy caught up through real Sepolia J11898153 and cold-restored
+  exactly at R4476: P6 Account dispute cleared, its collateral zero, 128/128 retained frames,
+  identical root/outbox, zero pending network/J/registration queues. The strict
+  RPC gateway forwarded 185 read requests and zero transactions. No public
+  service restarted; this closes isolated catch-up, not deployed P6 or CI.
+  The unactivated bundle/manifest is in `.logs/canonical-review-20261012/`;
+  durable proof: docs/evidence/canonical-review-20261012/release-preparation-d4502ec94.json.
+  Sepolia deployment is already authorized; no new blanket approval is needed.
+  It still requires eligible CI and compatible rollout/rollback evidence.
+- Prepared-archive validation found and fixed a real React dependency defect:
+  d450 production UI exposed shared debug commands on localhost. The canonical
+  debug owner now requires a development build. Clean 5e6d08a16 production
+  archive passed UI-only import, 100-unit funding/move, payment of 25 and
+  identity/balance recovery after reload (1/1, zero errors/skips/flakes).
+  All 11 extracted files and three served entrypoints match their hashes;
+  Runtime/worker bytes are unchanged. This supersedes the d450 UI archive,
+  not its isolated H1 recovery proof. Evidence: exact-ui-artifact-5e6d08a16.json
+  in docs/evidence/canonical-review-20261012/. The existing CI/release runner
+  now includes production build plus this same artifact test; CI has not run.
+- Latest coherent deletion: native driver, native storage completion/restore
+  callbacks and unused byte counters/candidate helper. Retired selectors have
+  one fail-fast guard; old native persisted frames retain their original hash
+  domain before explicit rejection. TS workers/checkpoints/WAL remain. The
+  standalone offline importer retains one pure session identity helper/codecs.
+  Independent review found no blocker. No root rscore/ or lending edits.
+- Public P6 on clean d388464db: original funding resumed without repeating
+  payment or funding. Recovered exact signed states at Runtime 140/141; tower
+  upload initially rejected its wallet RPC URL. A one-line explicit allowlist
+  correction accepted the same appointment; no source deployment occurred.
+  Real-clock stale start used 1,161,420 gas, external tower counter 460,487,
+  finalization 250,134. Local recovery and a second cold replay agree at R142:
+  reserve 200 Test USDT, collateral zero, no active dispute/pending Account frame.
+  Retained storage integrity checks 127 frames, not full genesis history.
+  Evidence: docs/evidence/canonical-review-20261012/public-p6-d388464db.json.
+  This is NOT whole deployed-system P6 acceptance: old 7c3f63f98 H1 failed on
+  the counter (ethers Result cannot be cloned), then finalization evidence,
+  and stopped after three repeats at 08:01 UTC. Public RPC returns 502;
+  tower remains online. Both decoder fixes already exist in d51910eee.
+  Stopped H1 DB/WAL is preserved privately; current-source replay and the two
+  real receipts now pass. Prepare an exact eligible build; do not resend transactions.
+  Local recovery retained one undeliverable outbox message while H1 was down.
+- Current static kernel closure: 150,930 code lines in 796 files, down 10,132
+  from the initial review and 7,950 from 942385253. QA/core/rscore direct edges
+  and reachable lines are zero. Offline codecs/import tooling remain outside
+  this closure. Necessary recovery fixes are included in the net measurement;
+  no aggregate readiness score is asserted without CI/ledger inputs.
+- Remaining release gates: required PR CI; ten consecutive green main runs;
+  deployed hub recovery and full public P6;
+  start/finalize/reveal coverage; owner-reviewed release
+  package. No dispute-start freeze, FIFO, one debt per debtor/creditor/token
+  and party-selected windows remain settled. No governance/bond redesign.
+
+Method review, 19:18 UTC: two supplied boundary defects reproduced and fixed;
+do not equate a static suspicious expression with an exploitable halt or change
+working consensus bytes. The final check source phase took 26.993s; selected
+units 3.91s, RPC integration 2.20s, browser cases 38.580s excluding stand startup.
+The first two browser failures exposed outdated gas request/amount assumptions;
+the third was an unavailable import introduced in the test repair. Before the
+next heavy run, load the spec with the exact UI Playwright CLI used by the
+existing runner, and inspect current API/policy semantics before changing an
+assertion. The final test checks transaction, recipient, receipt and exact
+credited balance. No new gate/framework; the non-null debt allowance decreased
+616 to 615. Next single step remains the narrow authorized fixture import repair
+and settlement-execute-atomicity command above, then required PR CI.
+
+Method review, 11:19 UTC: re-read the actual required CI discovery instead of
+repeating the frozen parity failure. One active TS settlement test, not both
+frozen fixtures, blocks that boundary. Its clean-67a2a1dca failure took 319ms;
+no heavy stand or broad suite was repeated. The existing Account reviewer found
+no equivalent TS fixture: direct Entity/Account helpers omit signed Runtime
+admission, final EntityFrame capture or routed outbox evidence. Recreating the
+full setup would duplicate about 180 lines for a one-line import repair. Keep
+all financial assertions and the frozen tree intact pending the narrower
+exception. No code was deleted and no new financial invariant was proved in
+this review. Next: apply that single authorized import repair and run the active
+settlement command above. The old two-line patch remains historical, not the
+requested release scope.
+
+Method review, 08:45 UTC: the previous half-hour closed a bounded deletion
+with 45/45 tests and 38 source gates, but no additional public-release gate.
+The hub is still stopped and the two frozen fixture imports remain unresolved.
+Next change in method: bundle connected retired-driver seams into one coherent
+candidate, then replay that candidate once; avoid a full evidence cycle per
+small unread field. Preserve TS workers/checkpoints and reject retired selectors
+explicitly. This is not permission to remove financial assertions or relabel
+old evidence. The earlier operational lesson remains: `/healthz` served static
+HTML; verify `/api/health` and bounded RPC, preserve the stopped DB, and never
+repeat funding to hide a deployment-version gap. Discover paths before reading.
+First result of that method change, 09:04 UTC: one coherent recorder removal
+closed all five bounded checks and removed 1,615 production lines; the public
+release blocker remains open. Continue evaluating the method over the next block,
+not a claim of improved mainnet readiness.
+Method review, 09:18 UTC: coherent retirement closed 5/5 candidate checks and
+reduced the measured kernel closure by 1,488 lines from the preceding slice.
+The next storage cut first reproduced silent acceptance of a real native DB row.
+Keep that failing production boundary as the deletion's regression, preserve
+original frame-hash verification before rejection, and inspect actual namespace
+ownership before removing codecs used by offline exports. Two disjoint owners
+handle runtime and storage; root removes the retired driver. Review the stable
+diff before one exact-candidate proof cycle. No public-release gate closed in
+this block. Outcome, 09:37 UTC: one driver/storage cut closed all six bounded
+checks and removed another 7,950 reachable kernel lines. The first full check
+caught folder width: use the existing integrity directory for integrity guards,
+and run the small structural gate before the immutable proof cycle. No gate
+was relaxed. The known frozen-fixture/public-deployment blockers remain.
+Method review, 09:51 UTC: stop expanding deletions until the actual H1 release
+boundary is exercised. Reuse existing source-bundle/UI packaging instead of
+expanding the unrelated native-products manifest. Check produced files: one Bun
+argument order printed help with exit zero and was rejected as build evidence.
+Use the canonical read-only RPC allowlist, since watchOnly does not prevent
+prepared transaction rebroadcast. Outcome, 10:02 UTC: all three preparation
+steps pass (build, package, isolated real-RPC catch-up plus cold restore).
+The first harness run stopped before the loop on URL normalization; reusing the
+adapter's existing normalizer fixed the helper without production changes.
+No public activation, new payment or CI gate was claimed. Resume at the frozen
+fixture exception and required PR CI, not another cosmetic refactor.
+Method review, 10:27 UTC (scheduled 10:21): clean 090c79158 passed all six
+local financial/browser groups: 11 named React cases, lock-ahb (85 frames),
+25 funding/exit tests with 512 fuzz invocations, eight bytecode templates and
+38 source gates. The browser runner still served Vite dev, so these results
+cannot certify the prepared UI archive. Reuse that runner with an explicit
+artifact directory and the existing UI-only production test; verify served
+hashes and absence of debug hooks. Exercise the actual archive before adding
+CI wiring or another abstraction. This changes the next action, not release
+eligibility. The frozen-import/required-CI blocker is unchanged.
+Next scheduled method review: 10:51 UTC.
+Outcome, 10:47 UTC: the actual archive first failed on a shared debug owner,
+then passed after one canonical condition. Production and dev both preserve
+the UI-only funding/payment/reload flow; the existing CI runner now tests
+production bytes. Its first type error was fixed by the existing GateStep
+type, without weakening a gate. This bounded set is green; the frozen-fixture
+test remains red. Its exception has blocked three consecutive goal turns. Further
+release work requires that answer; do not replace it with cosmetic churn.
+Latest check evidence: docs/evidence/canonical-review-20261012/compiled-ui-ci-b225f8ac4.json.
+Existing 30-minute heartbeat `xln-30` remains active. No external-model budget
+was spent or renewed. Earlier method evidence remains in the linked manifests:
+provider quota -> bounded first failure; existing authenticated history -> no
+refetch; workflow_dispatch success -> not required PR checks; tower upload
+failure -> original appointment recovery rather than repeated payments.
+
+## Historical evidence and superseded scope
 
 Owner priority, 2026-10-11 17:28 UTC: ship a public Sepolia deployment and usable
 asset flow; Base is an alternative, not a prerequisite. Finish the TS launch path

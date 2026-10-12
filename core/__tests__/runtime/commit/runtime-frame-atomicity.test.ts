@@ -231,6 +231,33 @@ const closeTestEnv = async (env: RuntimeReplica): Promise<void> => {
 };
 
 describe('runtime frame atomicity', () => {
+  test('frame stepping stops before draining input or advancing committed state and WAL', async () => {
+    const env = createEmptyEnv(`frame stepping ${TEST_RUN_ID}`);
+    env.runtimeConfig = { ...env.runtimeConfig, storage: { ...env.runtimeConfig?.storage, enabled: true } };
+    env.scenarioMode = true;
+    env.quietRuntimeLogs = true;
+    installJurisdiction(env);
+    cleanupNamespaces.push(env.dbNamespace!);
+    try {
+      enqueueRuntimeInput(env, { runtimeTxs: [localImportReplicaTx(env, 'a')], entityInputs: [] });
+      await processRuntime(env);
+      const before = encodeBuffer(buildDurableRuntimeMachineSnapshot(env));
+      const head = await readStorageHead(getRuntimeWalDb(env));
+      expect(head).not.toBeNull();
+      env.stopAtFrame = env.state.height;
+      enqueueRuntimeInput(env, { runtimeTxs: [importReplicaTx('b')], entityInputs: [] });
+      const queued = safeStringify(exactQueuedInput(env));
+
+      await expect(processRuntime(env)).rejects.toThrow(`FRAME_STEP: Stopped at frame ${env.stopAtFrame}`);
+
+      expect(encodeBuffer(buildDurableRuntimeMachineSnapshot(env))).toEqual(before);
+      expect(safeStringify(exactQueuedInput(env))).toBe(queued);
+      expect(await readStorageHead(getRuntimeWalDb(env))).toEqual(head);
+    } finally {
+      await closeTestEnv(env);
+    }
+  });
+
   test('conflicting remote precommits cannot halt adjacent honest Runtime work', async () => {
     process.env['XLN_REJECT_FAIL_FAST'] = '0';
     const env = createEmptyEnv(`precommit conflict ${TEST_RUN_ID}`);

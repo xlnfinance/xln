@@ -3,11 +3,10 @@
 Owner direction, 2026-10-11: autonomously prepare a usable mainnet candidate,
 reduce unnecessary code and follow the release scope in [AGENTS.md](../AGENTS.md):
 TypeScript, React and Ethereum same-J, first Sepolia and then a mainnet canary.
-Rust is frozen except for the later owner-authorized three-book refactor and its
-financial parity; Svelte changes are limited to landing/static copy and build health.
-Lending is included by the owner's later October 11 instruction. Cross-J, other
-launch chains, companies, native clients and custody are deferred. This supersedes
-the October 10 multi-chain, two-wallet plan.
+The current scope and freeze decisions live in [owner-profile.md](owner-profile.md#agreed-release).
+Rust and production lending remain frozen; Svelte changes are limited to
+landing/static copy and build health. The October 12 request authorizes a
+repository-wide TS/Rust refactoring review, not a second launch engine.
 
 Owner request, 2026-10-11: diagnose the development trajectory, improve the
 repository and make this loop learn from results. The [crisis review](crisis-review-20261011.md)
@@ -27,7 +26,9 @@ See the [mainnet bar](mainnet.md).
 Prepare code, local testnet resets, evidence and releases without repeated owner
 questions. The owner retains seeds and signs mainnet deployment transactions;
 production starts only after approval of the exact build. This authorization
-creates no new spending grant, external-model review or unattended schedule.
+creates no new spending grant or external-model review. The owner's October 12
+request separately authorizes subagent review and a 30-minute method-review
+heartbeat in the current chat; it does not renew historical monetary budgets.
 External audit is optional; internal review is not independent audit evidence.
 Ask only for an unresolved material protocol/authority choice, never routine
 implementation. Frozen-core approval remains owner-only.
@@ -55,6 +56,27 @@ implementation. Frozen-core approval remains owner-only.
    manifest, genesis/network configuration, deployment transactions, operator
    permissions, backup/restore drill, monitoring and rollback instructions.
    Verify the package locally before requesting approval of that concrete build.
+
+## Reducing the human audit surface
+
+Use the existing XLN-1000 kernel dependency closure and canonical-path analysis;
+do not introduce another quality score. Report reachable production code,
+semantic implementations per responsibility, and the actual source delta
+separately. Moving a file, deleting an oracle or hiding a frozen directory does
+not establish a smaller financial implementation.
+
+For each deletion, name the surviving owner, all callers, differing authority
+or input assumptions, and the smallest counterexample that must still pass.
+One counterexample outranks a clone detector's match. Keep independent test
+oracles and separate Runtime/Entity/Account trust boundaries. Wallets consume
+exact runtime aggregates; bounded detail pages are never financial totals.
+
+Inventory every requested file, then separate mechanical indexing, focused
+semantic reading and executed evidence. Parallel reviewers own disjoint source
+sets at one SHA; only one implementer changes each area. Review a stable diff
+before broad verification. The [October 12 review](canonical-refactoring-20261012.md)
+records the first full inventory and concrete proposals; `todo.md` remains the
+only live queue. Do not make completing that inventory a new release gate.
 
 ## Evidence ladder
 

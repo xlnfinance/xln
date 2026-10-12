@@ -5,7 +5,7 @@ import {
   type RelayDebugIncidentState,
   type RelayStore,
 } from './store';
-import { requireBoundaryRecord } from '../../protocol/boundary-validation';
+import { requireBoundaryRecord, requireBoundaryUint } from '../../protocol/boundary-validation';
 
 export type RelayDebugHttpInput = {
   request: Request;
@@ -52,7 +52,15 @@ const ingestOriginAllowed = (request: Request): boolean => {
 };
 
 const handleEvents = (input: RelayDebugHttpInput): Response => {
-  const last = Math.max(1, Math.min(5000, Number(input.url.searchParams.get('last') || '200')));
+  let last: number;
+  try {
+    last = Math.max(
+      1,
+      Math.min(5000, requireBoundaryUint(input.url.searchParams.get('last') ?? '200', 'DEBUG_EVENTS_LAST_INVALID')),
+    );
+  } catch {
+    return json(input, { ok: false, error: 'DEBUG_EVENTS_LAST_INVALID' }, 400);
+  }
   const event = input.url.searchParams.get('event') || undefined;
   const runtimeId = input.url.searchParams.get('runtimeId') || undefined;
   const from = input.url.searchParams.get('from') || undefined;

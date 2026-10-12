@@ -1,0 +1,62 @@
+{
+  "schema": "xln-source-evidence/v1",
+  "sourceSha": "9423852536ae7cc4fa4c14765169691761b52228",
+  "status": "local-source-gates-passed-release-gates-incomplete",
+  "sourceBinding": {
+    "executionSourceSha": "9423852536ae7cc4fa4c14765169691761b52228",
+    "cleanBeforeAndAfter": "Parent orchestration verified clean source before and after all runs; replay reports independently record gitDirtyFiles=0.",
+    "packaging": "These durable files are added after execution; their eventual commit is not the tested source SHA."
+  },
+  "change": {
+    "scope": "Retire the obsolete opt-in live authority-wave recorder and orphan wire helpers; preserve canonical WAL recording and financial H0 assertions.",
+    "files": 34,
+    "physicalLines": {"total":{"added":229,"deleted":2717,"net":-2488},"productionExcludingTestsAndScripts":{"added":123,"deleted":1738,"net":-1615},"tests":{"added":104,"deleted":976,"net":-872},"replayCli":{"added":2,"deleted":3,"net":-1}},
+    "specificDeletions": {"collectorPhysicalLines":1215,"orphanWireHelperPhysicalLines":201},
+    "basis": "Source-change counts and H0 preservation reported by parent review; closure metrics independently captured in the kernel artifact."
+  },
+  "checks": [
+    {"id":"focused","command":"bun test core/__tests__/account/consensus/account-duplicate-ack-reuse.test.ts core/__tests__/account/consensus/account-external-finality-input.test.ts core/__tests__/account/consensus/account-input-rejection.test.ts core/__tests__/entity/account/entity-account-resource-bounds.test.ts core/__tests__/operations/hlt/hlt-authority-evidence.test.ts core/__tests__/rscore/authority/authority-activation.test.ts core/__tests__/orchestrator/process/hub-engine-plan.test.ts core/__tests__/rscore/ts-worker/ts-worker-installation.test.ts core/__tests__/rscore/authority/authority-stage-failure.test.ts core/__tests__/rscore/ts-worker/ts-worker-failed-htlc-followup.test.ts core/__tests__/rscore/ts-worker/ts-worker-parity.test.ts core/__tests__/runtime/commit/runtime-frame-atomicity.test.ts core/__tests__/cross-j/swap/cross-jurisdiction-swap-part-1.test.ts core/__tests__/rscore/tx-wire.test.ts core/__tests__/rscore/wave-decode.test.ts core/__tests__/rscore/wave-outputs.test.ts","commandBasis":"Exact parent invocation on clean source 942385253; output retained in focused log.","passed":147,"failed":0,"assertions":1906,"files":16,"durationSeconds":10.52},
+    {"id":"check","command":"bun run check","sourceGatesPassed":38,"sourceGatePhaseSeconds":27.875,"result":"PARALLEL_CHECKS_OK gates=38; enclosing check completed successfully","durationScope":"27.875s is check:src, not total bun run check wall time."},
+    {"id":"parity","command":"bun tools/stand-lock.ts run --reason canonical-record-retirement-replay --timeout-ms \"180000\" -- bun core/scripts/operations/hlt/replay/commands/run-mixed-ts-rust-parity.ts --ts-only --recording .logs/hlt-evidence/ts-worker-projections/recording-manifest.json --ts-report-dir \".logs/canonical-review-20261012/record-retirement-parity-942385253\"","standLock":"Held by canonical stand wrapper; all replay reports carry the same non-secret ownership token.","results":[{"workers":1,"frames":708,"frameVerified":true,"equivalent":true,"finalHeight":719,"finalPendingOutbox":1,"gitDirtyFiles":0},{"workers":4,"frames":708,"frameVerified":true,"equivalent":true,"finalHeight":719,"finalPendingOutbox":1,"gitDirtyFiles":0},{"workers":8,"frames":708,"frameVerified":true,"equivalent":true,"finalHeight":719,"finalPendingOutbox":1,"gitDirtyFiles":0}]},
+    {"id":"browser","command":"XLN_LOCAL_PROD_SMOKE_WALLET_TESTS=e2e-payment.spec.ts bun run stand:run --reason canonical-record-retirement-react-payment --timeout-ms 180000 -- bun run prod:smoke:local","commandBasis":"Stand invocation is captured in browser log; required wallet-test selection environment is recorded from parent workflow. Bare prod:smoke:local is startup-only.","standLock":"Held for the entire browser stand, reported by parent and wrapper invocation.","expected":3,"unexpected":0,"skipped":0,"flaky":0,"errors":0,"durationMs":27574.853,"durationScope":"Playwright duration, excluding stand setup."}
+  ],
+  "recording": {
+    "sourceSha": "f163415ebaede96c86830299492ceb6a228b5b5f",
+    "originalProof": "ts-worker-evidence.json",
+    "manifestHash": "0x2fa25a4c4851b371122b58652af7664528999706c8ddcf18fc98673482ced8b1",
+    "sourceBinding": {"algorithm":"sha256","runtimeSeedHash":"0x1f2d1148378133726d0f93beb52bcccc9bdcda1121e521920b3057dc241ed01e","walTreeHash":"0x4ca7a3253d266836539c650ccc6d690f4889b03939f6cd605ffa67fc3a3c21ca"},
+    "frames": 708,
+    "heights": [12,719],
+    "runtimes": 130,
+    "committedPayments": 2600,
+    "committedSwaps": 1040,
+    "cancelledOffers": 520,
+    "claim": "Replay at current source uses the same immutable production recording; it is not a fresh recording or live throughput measurement."
+  },
+  "limitations": [
+    "Removed tests exercised the retired feature. Their deletion is not an improvement in pass rate or proof of expanded semantic coverage.",
+    "One pending final outbox remains in each replay, as in the original recording; no full-drain or TPS claim.",
+    "Browser proof covers exactly three e2e-payment.spec.ts cases, including committed payment and recovery-related UI behavior; not all wallet scenarios.",
+    "No new public deployment, chain transaction, storage-policy change or deployed-hub recovery proof in this cohort.",
+    "Two frozen rscore fixture imports remain a known failing boundary pending the owner exception; they were not repaired or counted green here.",
+    "PR and CI status are unchanged by this evidence package. No exact-head full CI or mainnet-readiness claim."
+  ],
+  "artifacts": [
+    {"id":"focused","file":"record-retirement-942385253-focused.log.gz","sha256":"425c709ec5a1c5022ed7ea57290d848dda8ed7ec038f3d676dea421e7e97f7f2","bytes":8072,"rawSha256":"7f8f22726f966b04c6b5ce3803e0d65670d3b108a1c20ebf4caa9f586cff9d87","rawBytes":29914},
+    {"id":"check","file":"record-retirement-942385253-check.log.gz","sha256":"aac2eabe962eded1cc68b2c0c590f482195e024ebd99ad11d39f485acbaddc7c","bytes":15187,"rawSha256":"ed0ce7f31bca6f77658fec6634cb9d3817acc6adccdd8f72b1dc2a2ee61fd9c3","rawBytes":117669},
+    {"id":"browserLog","file":"record-retirement-942385253-browser.log.gz","sha256":"71da529f81020393d3c122553a8d097d4d8052910bbe8cfab9824a60d670ee1a","bytes":2075,"rawSha256":"5de08b90b4a4f62f220ec0b0b171b3070131b9412231dd067dbbc740a31dd47c","rawBytes":23737},
+    {"id":"browserReport","file":"record-retirement-942385253-browser.json.gz","sha256":"56cecdeb86d92425094d2f704be4b8fb8a328ea9f7842110e72b9865d4a1488e","bytes":2425,"rawSha256":"e60093786d7fd9837a1de37aa4ba4626f0253fffffd602213da00083375857e4","rawBytes":10323},
+    {"id":"bootstrap","file":"record-retirement-942385253-bootstrap.json.gz","sha256":"9fd7c7dc485efabc7e623d0da0a6022d59e93e97eccba967f7c0ce09c0da77ab","bytes":2019,"rawSha256":"f01acd4917919af013305bcab0972097300d744fb21db7d1a8c773b3df770859","rawBytes":29455},
+    {"id":"parityLog","file":"record-retirement-942385253-parity.log.gz","sha256":"7d8720367c7cbcfc77ecc388e9d99ec4aeacfb0f7a7437f890dce8475e9b4126","bytes":490,"rawSha256":"5ede111a8e0d145b2a5853c2f308cd5cf25e2c6d7e1e7af484ca9452d35590e6","rawBytes":1345},
+    {"id":"tsW1","file":"record-retirement-942385253-ts-w1.json.gz","sha256":"55190d12a907ffb173b546f1437c31d4b40d99278a77557c5095994b3ba0dbb1","bytes":148340,"rawSha256":"3876be171f39e3f5ffc862669623bfea417167aeb244c4e9f9f19d20be5568c5","rawBytes":608134},
+    {"id":"tsW4","file":"record-retirement-942385253-ts-w4.json.gz","sha256":"ec82f2e9cd256152a6c8f444923bbd885db2d0f1b9cfbfe446eb86a2af138972","bytes":148341,"rawSha256":"082b05f3ff2ec8355f83c28d3be5a33f70d60c5271e1580a12e9a15f3e0872d1","rawBytes":608134},
+    {"id":"tsW8","file":"record-retirement-942385253-ts-w8.json.gz","sha256":"ee737f4c8b6420e37865732b3366899b2c59c45ae8e0d703434fae08dc84027b","bytes":148341,"rawSha256":"d54dc1dfc1629f157eff8ae011be2a22c6f5ed606bc17fdf3e9dbd5cc4b21923","rawBytes":608134},
+    {"id":"kernel","file":"record-retirement-942385253-kernel.json","sha256":"0fadf67857019085c333146d891c8a0dcfc295edf1c96dd353b26bc6a43636dd","bytes":1344}
+  ],
+  "integrity": {
+    "algorithm": "sha256",
+    "list": "record-retirement-942385253-sha256.txt",
+    "gzip": "Each compressed file round-tripped byte-for-byte before writing.",
+    "secretReview": "Selected logs and JSON had no raw private-key, seed, mnemonic, password, authorization or API-key fields/credential patterns. runtimeSeedHash is only a commitment; standLockToken is a local run-ownership token. No private WAL, profile, DB, keys or raw source inventories are copied."
+  }
+}

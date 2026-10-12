@@ -385,6 +385,8 @@ describe('isolated E2E runner resources', () => {
     expect(isE2ECodeInputPath('core/runtime.ts')).toBe(true);
     expect(isE2ECodeInputPath('frontend/src/app.ts')).toBe(true);
     expect(isE2ECodeInputPath('frontend/static/runtime.js')).toBe(false);
+    expect(isE2ECodeInputPath('frontend/static/account-worker.js')).toBe(false);
     expect(isE2ECodeInputPath('ui/public/runtime.js')).toBe(false);
+    expect(isE2ECodeInputPath('ui/public/account-worker.js')).toBe(false);
   });
 });

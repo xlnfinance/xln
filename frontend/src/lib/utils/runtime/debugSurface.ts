@@ -9,7 +9,7 @@ type XlnDebugWindow = Window & {
 const LOCAL_DEBUG_HOSTS = new Set(['localhost', '127.0.0.1', '::1']);
 
 export function isLocalDebugSurfaceAllowed(): boolean {
-  if (typeof window === 'undefined') return false;
+  if (typeof window === 'undefined' || !import.meta.env.DEV) return false;
   return LOCAL_DEBUG_HOSTS.has(window.location.hostname);
 }
 
@@ -26,11 +26,7 @@ function ensureDebugRoot(): Record<string, unknown> {
   return root;
 }
 
-export function registerDebugSurface<T>(
-  name: string,
-  factory: () => T,
-  options: DebugSurfaceOptions = {},
-): void {
+export function registerDebugSurface<T>(name: string, factory: () => T, options: DebugSurfaceOptions = {}): void {
   if (!isLocalDebugSurfaceAllowed()) return;
   const root = ensureDebugRoot();
   Object.defineProperty(root, name, {

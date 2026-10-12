@@ -4,8 +4,8 @@ import { requireAccountDeltaTransformerAddress } from '../../../account/consensu
 import { createAccountConsensusContext } from '../../../entity/account/account-consensus-context';
 import { getEntityAccountForWrite } from '../../../entity/state/persistent-account-map';
 import { resolveInboundAccount } from '../../../entity/tx/handlers/account/inbound-account';
-import { runAccountAuthorityEntityStage } from '../../../rscore/authority/entity-stage';
-import { TsAccountWorkerAuthority } from '../../../rscore/ts-worker';
+import { runAccountAuthorityEntityStage } from '../../../entity/consensus/account/execution-stage';
+import { TsAccountWorkerAuthority } from '../../../runtime/workers/account';
 import { createEmptyEnv } from '../../../runtime';
 import { createJReplica } from '../../../scenarios/harness/boot';
 import { MAX_POLICY_VERSION } from '../../../account/tx/admission-policy';
@@ -68,7 +68,7 @@ test('an inadmissible tx keeps both the worker apply and discard errors in the l
         entityTimestamp: state.timestamp, finalizedJHeight: 0,
       });
       await stage.executeEntityBooks({ entityState: state, slots: [] });
-      await stage.executeAccountInput({ collectorFrameId: owner, account,
+      await stage.executeAccountInput({ account,
         input: { kind: 'enqueue', txs: [structuredClone(INADMISSIBLE_TX)] },
         entityTimestamp: state.timestamp, finalizedJHeight: 0 });
       await stage.prepareEntityAccountOutbound({ entityState: state, entityHeight: 1,

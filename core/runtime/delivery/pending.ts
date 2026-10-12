@@ -380,33 +380,34 @@ export const resolveGossipBoardSignerIds = (env: RuntimeReplica, entityId: strin
 };
 const gossipBoardSignerMemo = new Map<string, { routeHash: string; runtimeSignature: string; signerIds: string[] }>();
 
-export const buildPendingNetworkOutputs = (
+export const dedupeEntityOutputs = (
   outputs: RoutedEntityInput[],
-  graph: PreparedOutputGraph = createPreparedOutputGraph(),
+  graph: PreparedOutputGraph,
 ): RoutedEntityInput[] => {
   const deduped = new Map<string, RoutedEntityInput>();
-  const mutableMergeTargets = new Set<RoutedEntityInput>();
   for (const output of outputs.flatMap(candidate => graph.split(candidate))) {
     const key = graph.prepare(output).routeKey;
     const existing = deduped.get(key);
     if (existing) {
-      const target = mutableMergeTargets.has(existing) ? existing : copyRoutedOutputForMerge(existing);
-      if (target !== existing) {
-        deduped.set(key, target);
-        mutableMergeTargets.add(target);
-      }
-      mergeRoutedEntityOutput(target, output);
-      graph.invalidate(target);
+      // Every Map value is our own merge shell; never mutate the input envelope.
+      mergeRoutedEntityOutput(existing, output);
+      graph.invalidate(existing);
     } else {
       const target = copyRoutedOutputForMerge(output);
       graph.adopt(output, target);
-      mutableMergeTargets.add(target);
       deduped.set(key, target);
     }
   }
   // Map preserves the first accepted position. Dedup merges into that slot;
   // neither payload kind nor destination may rewrite committed outbox order.
-  const pending = [...deduped.values()];
+  return [...deduped.values()];
+};
+
+export const buildPendingNetworkOutputs = (
+  outputs: RoutedEntityInput[],
+  graph: PreparedOutputGraph = createPreparedOutputGraph(),
+): RoutedEntityInput[] => {
+  const pending = dedupeEntityOutputs(outputs, graph);
   // Slots are per target and kind, so this counts distinct waiting peers: a
   // Hub with that many offline counterparties reaches it organically. The
   // outputs are committed; retaining them is the only correct outcome (Rust

@@ -330,7 +330,7 @@ const normalizeJPrefixAttestation = (state: EntityState, raw: JPrefixAttestation
   };
 };
 
-const assertBoardSigner = (config: ConsensusConfig, validatorId: string): void => {
+const requireBoardSignerShares = (config: ConsensusConfig, validatorId: string): bigint => {
   const matches = config.validators.filter(candidate => normalizeText(candidate) === validatorId);
   if (matches.length !== 1) throw new Error(`J_PREFIX_UNKNOWN_OR_DUPLICATE_VALIDATOR:${validatorId}`);
   const shares = Object.entries(config.shares)
@@ -339,6 +339,7 @@ const assertBoardSigner = (config: ConsensusConfig, validatorId: string): void =
   if (shares.length !== 1 || typeof shares[0] !== 'bigint' || shares[0] <= 0n) {
     throw new Error(`J_PREFIX_INVALID_VALIDATOR_SHARES:${validatorId}`);
   }
+  return shares[0];
 };
 
 export type JPrefixAttestationTemporalDisposition = 'stale' | 'current' | 'future';
@@ -431,7 +432,7 @@ const verifyJPrefixAttestation = (
   raw: JPrefixAttestation,
 ): JPrefixAttestation => {
   const attestation = normalizeJPrefixAttestation(state, raw);
-  assertBoardSigner(state.config, attestation.validatorId);
+  requireBoardSignerShares(state.config, attestation.validatorId);
   const { signature, ...unsigned } = attestation;
   if (!verifyAccountSignature(env, attestation.validatorId, hashJPrefixAttestation(unsigned), signature)) {
     throw new Error(`J_PREFIX_SIGNATURE_REJECTED:${attestation.validatorId}`);
@@ -461,7 +462,7 @@ export const buildLocalJPrefixAttestation = (
     ...claim,
     headers: buildValidatorJPrefixHeaders(replica.state, history, claim.scannedThroughHeight),
   };
-  assertBoardSigner(replica.state.config, unsigned.validatorId);
+  requireBoardSignerShares(replica.state.config, unsigned.validatorId);
   return { ...unsigned, signature: signAccountFrame(env, unsigned.validatorId, hashJPrefixAttestation(unsigned)) };
 };
 
@@ -547,9 +548,7 @@ const calculateJPrefixQuorumPower = (config: ConsensusConfig, rawSigners: readon
     const signer = normalizeText(rawSigner);
     if (signers.has(signer)) throw new Error(`J_PREFIX_DUPLICATE_SIGNER:${rawSigner}`);
     signers.add(signer);
-    assertBoardSigner(config, signer);
-    const shares = Object.entries(config.shares).find(([candidate]) => normalizeText(candidate) === signer)![1];
-    total += shares;
+    total += requireBoardSignerShares(config, signer);
   }
   return total;
 };
@@ -622,7 +621,7 @@ export const selectHighestWeightedCommonJPrefix = (
     const attestation = normalizeJPrefixAttestation(state, rawAttestation);
     if (key !== attestation.validatorId) throw new Error(`J_PREFIX_MAP_SIGNER_MISMATCH:${rawKey}`);
     if (normalized.has(key)) throw new Error(`J_PREFIX_DUPLICATE_SIGNER:${rawKey}`);
-    assertBoardSigner(state.config, key);
+    requireBoardSignerShares(state.config, key);
     normalized.set(key, attestation);
   }
   // A height certifies only if signers whose tips reach it hold the threshold.

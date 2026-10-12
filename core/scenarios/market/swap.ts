@@ -47,7 +47,7 @@ import { createTestEntityImportRuntimeTx } from '../../qa/entity-creation-fixtur
 import {
   summarizeRuntimeAccountCausality,
   type EntityInputCausalTrace,
-} from '../../qa/account-causal-trace';
+} from '../../runtime/observability/account-causal-trace';
 import { getPerfMs } from '../../support/time';
 
 let _process: ((env: RuntimeReplica, inputs?: EntityInput[], delay?: number, single?: boolean) => Promise<RuntimeReplica>) | null = null;

@@ -10,6 +10,11 @@ Owner decision, 2026-10-12: changes go through pull requests with required green
 CI and branch protection, replacing the previous direct-main-only rule. Use
 `codex/` branches; commit only owned paths and keep unrelated parked work intact.
 
+Owner exception, 2026-10-12: repair the single TypeScript worker import in
+`rscore/fixtures/entity-resident-group-e/group-e.ts`, then bring PR #73 through
+required green CI and continue the authorized Sepolia release. This permits
+only that import correction under `rscore/`; the Rust freeze remains in force.
+
 Owner instruction, 2026-10-11: prefer the simpler, more reliable general mechanism
 that covers several use cases. Minimize code; delete redundant paths when retained
 financial semantics and recovery are proved. A superset is explicit product terms
@@ -24,6 +29,14 @@ unfinished alternate paths. Beauty means legible authority and proved behavior,
 not identical empty wrappers, a line-count target or an unsupported claim of
 perfection. This is a standing review standard, not evidence that the code has
 already achieved it.
+
+Owner request, 2026-10-12: review all TS/Rust source with subagents to reduce the
+code a human auditor must read. Use disjoint immutable scopes, retain one
+implementation per financial responsibility, and prove each deletion. This
+authorizes the current review team and a 30-minute method-review heartbeat;
+it does not reopen frozen Rust/lending implementation or external-model budgets.
+See the [bounded first pass](canonical-refactoring-20261012.md), which separates
+mechanical inventory, focused semantic reading and executed verification.
 
 Owner direction, 2026-10-11: use Japanese-inspired continuous improvement,
 error prevention and restrained product design. Apply these through the existing

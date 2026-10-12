@@ -8,7 +8,7 @@ import { computeJurisdictionsNetworkVersion } from '../../jurisdiction/adapter/k
 import { decodeJurisdictionTransport } from '../../jurisdiction/adapter/kernel/jurisdiction-loader';
 import { DEV_CHAIN_IDS } from '../../jurisdiction/adapter/chain-ids';
 import { normalizeLoopbackUrl, toPublicRpcUrl } from '../../network/p2p/loopback-url';
-import { requireBoundaryRecord } from '../../protocol/boundary-validation';
+import { requireBoundaryRecord, requireBoundaryUint } from '../../protocol/boundary-validation';
 import {
   assertCanonicalRpcContractStack,
   findRpcContractDeploymentBlock,
@@ -366,12 +366,15 @@ const readRpcChainId = async (rpcUrl: string): Promise<number> => {
   if (!response.ok) {
     throw new Error(`RPC_CHAIN_ID_HTTP_${response.status}`);
   }
-  const payload = await response.json() as { result?: unknown; error?: { message?: string } };
+  const payload = (await response.json()) as { result?: unknown; error?: { message?: string } };
   if (payload.error) throw new Error(`RPC_CHAIN_ID_ERROR:${payload.error.message || 'unknown'}`);
-  const result = String(payload.result || '').trim();
-  const chainId = result.startsWith('0x') ? Number.parseInt(result.slice(2), 16) : Number(result);
-  if (!Number.isFinite(chainId) || chainId <= 0) throw new Error(`RPC_CHAIN_ID_INVALID:${result || 'empty'}`);
-  return Math.floor(chainId);
+  const result = payload.result;
+  const chainId = requireBoundaryUint(
+    typeof result === 'string' && /^0x[0-9a-f]+$/i.test(result) ? BigInt(result) : result,
+    'RPC_CHAIN_ID_INVALID',
+  );
+  if (chainId === 0) throw new Error('RPC_CHAIN_ID_INVALID:0');
+  return chainId;
 };
 
 const requireCompleteRpcContracts = (

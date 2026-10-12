@@ -45,6 +45,7 @@ import {
 } from '../../../swapbook';
 import { projectBookPricePageTree } from '../../../swapbook/pages/page';
 import { getBookSideLevels } from '../../../swapbook/core';
+import { createOrderbookExtState } from '../../../swapbook/types';
 import {
   assertSwapNetAuthorization,
   deriveSwapNetAuthorization,
@@ -78,7 +79,13 @@ import {
 } from '../../../entity/tx/handlers/account/orderbook/helpers';
 import { getSwapPairPolicyByBaseQuote } from '../../../account/utils';
 import { admitOrderbookAccountTxBatch } from '../../../entity/consensus/account/orderbook-account-admission';
-import { makeAccount as makeCanonicalAccount } from '../../helpers/cross-j';
+import { makeAccount as makeCanonicalAccount, makeJurisdiction, makeState, putTestAccountDelta } from '../../helpers/cross-j';
+import {
+  compactAccountDocForView,
+  compactEntityCoreForRemote,
+  singleAccountViewPage,
+} from '../../../api/runtime-adapter/read/compact-view';
+import { projectEntityCoreDoc } from '../../../storage/read/projections';
 import { createAccountConsensusContext } from '../../../entity/account/account-consensus-context';
 import { createEmptyEnv } from '../../../runtime';
 import type { AccountTx } from '../../../types/account';
@@ -217,25 +224,33 @@ describe('production swap load evidence', () => {
       height: 1, timestamp: 1, jHeight: 0, accountTxs: [], prevFrameHash: 'genesis',
       accountStateRoot: root('a'), stateHash: root('b'),
     };
-    const item = {
-      state: {
-        leftEntity, rightEntity, domain: {}, watchSeed: '', deltas: new Map([[1, delta]]),
-        locks: new Map(), swapOffers: new Map(), leftPendingJClaims: {}, rightPendingJClaims: {},
-        lastFinalizedJHeight: 0, disputeConfig: { leftResponseSeconds: 10, rightResponseSeconds: 20 },
-        jNonce: 0, requestedRebalance: new Map(), requestedRebalanceFeeState: new Map(),
-      },
-      status: 'active', mempool: [], mempoolCount: 3, currentFrame: {}, currentHeight: 0,
-      rollbackCount: 0, proofHeader: {},
-      pendingWithdrawals: new Map(), shadow: {},
-      pendingFrame,
-    };
-    const page = {
-      items: [item], nextCursor: null, prevCursor: null, firstCursor: rightEntity,
-      lastCursor: rightEntity, pageIndex: 0, pageCount: 1, totalItems: 1, limit: 1,
-    };
+    const account = makeCanonicalAccount(leftEntity, rightEntity);
+    putTestAccountDelta(account, delta);
+    account.state.disputeConfig.rightResponseSeconds = 20;
+    account.pendingFrame = pendingFrame;
+    account.mempool = Array.from({ length: 3 }, (_, index) => ({
+      type: 'swap_resolve', data: { offerId: `pending-${index}`, fillRatio: 0, cancelRemainder: true },
+    }));
+    const item = compactAccountDocForView(account);
+    const page = singleAccountViewPage(rightEntity, item, 1);
     const decoded = decodeAccountPage(page);
     expect(decoded?.state.deltas.get(1)?.rightCreditLimit).toBe(20n);
     expect(decoded?.state.disputeConfig).toEqual({ leftResponseSeconds: 10, rightResponseSeconds: 20 });
+    expect(item.mempool).toEqual([]);
+    expect(item.mempoolCount).toBe(3);
+    expect(item.lendingRisk.has(1)).toBe(true);
+    const { lendingRisk: _lendingRisk, ...withoutRisk } = item;
+    expect(() => decodeAccountPage({ ...page, items: [withoutRisk] }))
+      .toThrow('PRODUCTION_SWAP_LOAD_ACCOUNT_FIELDS_INVALID:missing=lendingRisk');
+    expect(() => decodeAccountPage({ ...page, items: [{ ...item, futureField: true }] }))
+      .toThrow('PRODUCTION_SWAP_LOAD_ACCOUNT_FIELDS_INVALID:missing=none:extra=futureField');
+    const { disputeConfig: _disputeConfig, ...withoutDisputeConfig } = item.state;
+    expect(() => decodeAccountPage({ ...page, items: [{ ...item, state: withoutDisputeConfig }] }))
+      .toThrow('PRODUCTION_SWAP_LOAD_ACCOUNT_STATE_FIELDS_INVALID:missing=disputeConfig');
+    expect(() => decodeAccountPage({ ...page, items: [{ ...item, state: { ...item.state, futureField: true } }] }))
+      .toThrow('PRODUCTION_SWAP_LOAD_ACCOUNT_STATE_FIELDS_INVALID:missing=none:extra=futureField');
+    expect(() => decodeAccountPage({ ...page, futureField: true }))
+      .toThrow('PRODUCTION_SWAP_LOAD_ACCOUNT_PAGE_INVALID_FIELDS:missing=none:extra=futureField');
     // The compact API omits queued transactions while retaining their count.
     for (const mempoolCount of [-1, 0.5, '3', undefined]) {
       expect(() => decodeAccountPage({
@@ -938,22 +953,22 @@ describe('production swap load evidence', () => {
   });
 
   test('committed Hub profile is the only minimum-trade authority', () => {
-    const core = {
-      entityId: `0x${'11'.repeat(32)}`, entityEncryptionPublicKey: '0x01',
-      height: 4, timestamp: 5, profile: {}, config: {}, nonces: new Map(),
-      proposals: new Map(), reserves: new Map(), lastFinalizedJHeight: 0,
-      paybook: { entries: new Map(), feesEarned: 0n },
-      orderbookHubProfile: {
-        entityId: `0x${'11'.repeat(32)}`, name: 'H1',
-        spreadDistribution: {
-          makerBps: 0, takerBps: 10_000, hubBps: 0,
-          makerReferrerBps: 0, takerReferrerBps: 0,
-        },
-        referenceTokenId: 1, usdQuoteAuthorityEntityId: `0x${'11'.repeat(32)}`,
-        minTradeSize: 10_000_001n, supportedPairs: ['1/2'],
+    const entityId = `0x${'11'.repeat(32)}`;
+    const state = makeState(entityId, `0x${'55'.repeat(20)}`, makeJurisdiction('local', 31_337, 'dd', 'ee'));
+    state.orderbookExt = createOrderbookExtState({
+      entityId, name: 'H1',
+      spreadDistribution: {
+        makerBps: 0, takerBps: 10_000, hubBps: 0,
+        makerReferrerBps: 0, takerReferrerBps: 0,
       },
-    };
+      referenceTokenId: 1, usdQuoteAuthorityEntityId: entityId,
+      minTradeSize: 10_000_001n, supportedPairs: ['1/2'],
+    });
+    const core = compactEntityCoreForRemote(projectEntityCoreDoc(state));
     expect(decodeHubMinTradeSize(core)).toBe(10_000_001n);
+    const { debtTotals: _debtTotals, ...withoutDebtTotals } = core;
+    expect(() => decodeHubMinTradeSize(withoutDebtTotals))
+      .toThrow('PRODUCTION_SWAP_LOAD_HUB_CORE_FIELDS_INVALID');
     expect(() => decodeHubMinTradeSize({ ...core, futureField: true }))
       .toThrow('PRODUCTION_SWAP_LOAD_HUB_CORE_FIELDS_INVALID');
   });

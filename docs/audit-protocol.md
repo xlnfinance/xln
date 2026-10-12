@@ -5,7 +5,8 @@ Scope: architecture, implementation, security, reliability, performance, UX,
 operations, and release readiness in any codebase.
 
 Execution policy comes from the project's `AGENTS.md`; in xln, follow
-[the agent workflow](agent-workflow.md) on `main`, one implementer per area.
+[the agent workflow](agent-workflow.md) and current [owner decisions](owner-profile.md),
+using PRs with required green CI and one implementer per area.
 This audit protocol is used when its audit/release scope is requested. It does
 not authorize external model calls or insert an audit before the first required
 production artifact. Reviewer opinions never substitute for its evidence gates.
@@ -270,8 +271,9 @@ Roles are separated:
 1. **Mapper:** defines ownership, dependency cone, invariants, and gaps.
 2. **Auditor A:** receives a narrow blind prompt and produces candidate root
    causes with reproduction evidence.
-3. **Auditor B:** uses another model family and independently audits the same
-   immutable scope without seeing A’s conclusions.
+3. **Auditor B, when requested:** independently audits the same immutable scope
+   without seeing A's conclusions. External models require current authorization;
+   a model-family quorum is not a default release requirement.
 4. **Adjudicator:** traces real reachability and rejects findings that ignore the
    system’s state, nonce, authority, or consensus model.
 5. **Fixer:** implements the confirmed root cause in its exclusively owned area,
@@ -279,13 +281,13 @@ Roles are separated:
 6. **Verifier:** independently reruns the counterexample, L1, L2, and owning
    broad gate on the final candidate SHA.
 
-Use available concurrency for disjoint areas. In xln, writers share `main` with
-exclusive file ownership; the integrator resolves overlaps and owns commits.
+Use authorized concurrency for disjoint areas. In xln, writers use exclusive
+file ownership; the integrator owns the candidate branch and its PR.
 
-Canonical staffing for one release epoch:
+Staffing for one release epoch:
 
 - exactly one implementer owns each area; one integrator owns the candidate;
-- zero to three read-only auditors inspect bounded scopes in parallel;
+- read-only reviewers inspect bounded scopes only when authorized;
 - auditors work from an immutable SHA whenever a verdict can affect a gate;
 - no auditor commits, rebases, merges, or fixes inside the writer worktree;
 - reviewers start after their area's diff is stable; writers stop before a
@@ -396,7 +398,7 @@ Merge requires:
 - current fingerprints for touched modules;
 - L1 and L2 for changed critical invariants;
 - no confirmed P0/P1;
-- owner approval for semantic P2, consensus, cryptography, or contracts;
+- owner decision for a new unresolved protocol or authority choice;
 - independent review when confidence began below 95%;
 - repository-wide check green on the exact candidate.
 
@@ -406,7 +408,7 @@ Release requires:
 - funds, determinism, persistence, and authority invariants at 100%;
 - P0/P1 = 0;
 - every open P2 explicitly accepted with owner and expiry;
-- independent delta-audit on the exact release SHA;
+- internal review of the exact release diff; external review only when requested;
 - release, topology, restart, package, and user-path evidence green.
 
 Public contract deployment additionally requires 100% current coverage for
@@ -415,16 +417,16 @@ and deployment-binding invariant. A locally green build is necessary evidence,
 not permission to deploy; historical public deployments remain unchanged until
 the exact candidate satisfies this gate.
 
-Uncapped production/mainnet requires 100% coverage for all critical invariants
-and mandatory paths, a full independent audit on the exact SHA, soak evidence,
-and zero unresolved high-impact candidates.
+For xln, the current [release scope](owner-profile.md#agreed-release) and
+[evidence coverage](improvement-loop.md) govern launch. Mainnet still requires
+current public-chain exits, recovery, operational evidence, no unresolved
+high-impact defects, and approval of the exact release package. The owner
+withdrew mandatory external auditor signoff; internal review must not be
+presented as external assurance.
 
-The separate ideal gate is stricter than release: every mapped module must have
-100% coverage, 100% derived quality, no open finding of any severity, and a
-current review floor of 990/1000 across at least three reviewers and two model
-families. Scores are never averaged; the minimum current score governs. This
-ideal gate is pursued only after the named product release gate is already
-green; it cannot keep an MVP in permanent audit churn.
+The existing `audit:gate:ideal` profile is an optional historical diagnostic,
+not a promise of perfection or an additional launch gate. Reviewer scores and
+model-family agreement cannot establish correctness or substitute for evidence.
 
 ## 13. Canonical storage model
 
@@ -493,7 +495,7 @@ The protocol is working when a new engineer can answer, from generated data:
 One release epoch has one scope, one writer, and one immutable candidate:
 
 1. Declare the product paths being released and the modules explicitly deferred.
-2. Work on current `main` with exclusive area ownership; preserve unrelated
+2. Work on a candidate branch with exclusive area ownership; preserve unrelated
    user work in place. Only the integrator commits after writers stop.
 3. Run read-only investigations in parallel. Adjudicate P0/P1 twice before
    editing when the root cause or ownership boundary is uncertain.
@@ -513,7 +515,7 @@ One release epoch has one scope, one writer, and one immutable candidate:
    finding. Any semantic fix creates a new candidate and invalidates affected
    tests and quorum.
 8. On the final unchanged candidate, run browser/F12 evidence for frontend or
-   browser-runtime changes and the owning L3 gate, then checkpoint `main`. A gate failure returns
+   browser-runtime changes and the owning L3 gate, then submit the PR with required green CI. A gate failure returns
    to the smallest reproducing L1/L2; never rerun an unchanged broad gate.
 9. Preserve the candidate SHA and evidence. Never remove another owner's
    workspace or branch as housekeeping.

@@ -19,8 +19,6 @@ import {
   publishAccountOverlay,
 } from '../../state/candidate-overlay';
 import { applyAccountTx } from '../../tx/apply';
-import type { ApplyAccountTxOk } from '../../tx/apply-types';
-import { noteAuthorityCommittedOutputs } from '../../../rscore/authority-wave';
 import type { AccountConsensusContext } from '../context';
 import type { HtlcEnforcementClock } from '../../htlc-deadline';
 import { assertLiveCommitMatchesFrame } from '../incoming/commit-root';
@@ -59,7 +57,6 @@ export const commitAccountFrameTransition = async (
   const draft = accountTransitionView(owner);
   const candidateEffects: AccountOutput[] = [];
   const timedOutHashlocks: string[] = [];
-  const txResults: ApplyAccountTxOk[] = [];
   const jHeight = frame.jHeight ?? account.state.lastFinalizedJHeight ?? 0;
 
   try {
@@ -82,7 +79,6 @@ export const commitAccountFrameTransition = async (
             `Frame ${frame.height} commit failed: ${tx.type} - ${result.rejection.message}`,
           );
         }
-        txResults.push(result);
         candidateEffects.push(...(result.candidateEffects ?? []));
         if (result.outcome === 'htlc_error') timedOutHashlocks.push(result.hashlock);
       }
@@ -103,12 +99,6 @@ export const commitAccountFrameTransition = async (
         committed.accountStateRoot,
       );
     });
-    noteAuthorityCommittedOutputs(
-      options.context.accountAuthorityFrameId,
-      account.proofHeader.fromEntity,
-      account.proofHeader.toEntity,
-      txResults,
-    );
     return Object.freeze({
       accountStateRoot: committed.accountStateRoot,
       candidateEffects: Object.freeze(candidateEffects),

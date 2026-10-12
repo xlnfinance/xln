@@ -9,7 +9,7 @@ import { generateLazyEntityId } from '../../../../../entity/factory';
 import { computeEntityAccountValueHash } from '../../../../../entity/consensus/state-root';
 import { PersistentEntityAccountMap } from '../../../../../entity/state/persistent-account-map';
 import { toRuntimeMachineRootHash } from '../../../../../protocol/hashes';
-import { authoritySessionIdentityFor } from '../../../../../rscore/authority-driver';
+import { authoritySessionIdentityFor } from '../../../../../rscore/process/session-identity';
 import {
   RSCORE_PROCESS_ABI_VERSION,
   RSCORE_PROCESS_PROFILE,

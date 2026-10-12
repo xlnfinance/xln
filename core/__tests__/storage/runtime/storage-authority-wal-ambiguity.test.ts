@@ -88,30 +88,6 @@ const installNextWalWriteFault = (
   return restore;
 };
 
-const saveSecondFrameWithAuthority = async (
-  env: RuntimeReplica,
-  afterWalCommit: (materialized: boolean) => Promise<void>,
-): Promise<unknown> => {
-  env.state.height = 2;
-  env.state.timestamp = 2_000;
-  try {
-    await saveEnvToDB(
-      env,
-      { runtimeTxs: [], entityInputs: [] },
-      [],
-      new Map(),
-      {
-        prepareCheckpoint: async () => [],
-        validateCheckpointMaterialization: async () => {},
-        afterWalCommit,
-      },
-    );
-  } catch (error) {
-    return error;
-  }
-  return null;
-};
-
 afterEach(async () => {
   for (const env of opened.splice(0)) {
     await closeRuntimeDb(env);
@@ -120,8 +96,8 @@ afterEach(async () => {
   }
 });
 
-describe('Rust authority at an ambiguous WAL write boundary', () => {
-  test('proves an apply-then-reject frame without Rust from exact identity', async () => {
+describe('Runtime identity at an ambiguous WAL write boundary', () => {
+  test('proves an apply-then-reject frame from exact identity', async () => {
     const env = await createSavedRuntime('plain apply then reject');
     env.state.height = 2;
     env.state.timestamp = 2_000;
@@ -147,64 +123,18 @@ describe('Rust authority at an ambiguous WAL write boundary', () => {
     expect((await readStorageHead(getRuntimeWalDb(env)))?.latestHeight).toBe(2);
   });
 
-  test('completes Rust exactly once when the WAL applies then rejects', async () => {
-    const env = await createSavedRuntime('authority apply then reject');
-    let commits = 0;
-    const restoreBatch = installNextWalWriteFault(env, 'apply-then-reject');
-    const failure = await saveSecondFrameWithAuthority(env, async () => {
-      commits += 1;
-    });
-    restoreBatch();
-
-    expect(failure).toBeInstanceOf(Error);
-    if (!(failure instanceof Error)) throw new Error('TEST_EXPECTED_STORAGE_FAILURE');
-    expect(failure.message).toContain('RUNTIME_FRAME_STORAGE_COMMITTED');
-    expect(failure).toHaveProperty('commitStatus', 'committed');
-    expect(failure).toHaveProperty('publicationBlocked', false);
-    expect(commits).toBe(1);
-    expect(await readStorageFrameRecord(getRuntimeWalDb(env), 2)).not.toBeNull();
-    expect((await readStorageHead(getRuntimeWalDb(env)))?.latestHeight).toBe(2);
-  });
-
-  test('does not complete Rust when the WAL rejects before applying', async () => {
-    const env = await createSavedRuntime('authority reject before apply');
-    let commits = 0;
+  test('proves a rejected write did not commit from the unchanged WAL head', async () => {
+    const env = await createSavedRuntime('reject before apply');
+    env.state.height = 2;
+    env.state.timestamp = 2_000;
     const restoreBatch = installNextWalWriteFault(env, 'reject-before-apply');
-    const failure = await saveSecondFrameWithAuthority(env, async () => {
-      commits += 1;
-    });
-    restoreBatch();
-
-    expect(failure).toBeInstanceOf(Error);
-    if (!(failure instanceof Error)) throw new Error('TEST_EXPECTED_STORAGE_FAILURE');
-    expect(failure.message).toContain('RUNTIME_FRAME_STORAGE_NOT-COMMITTED');
-    expect(failure).toHaveProperty('commitStatus', 'not-committed');
-    expect(failure).toHaveProperty('publicationBlocked', false);
-    expect(commits).toBe(0);
-    expect(await readStorageFrameRecord(getRuntimeWalDb(env), 2)).toBeNull();
-    expect((await readStorageHead(getRuntimeWalDb(env)))?.latestHeight).toBe(1);
-  });
-
-  test('blocks publication when Rust completion fails after proven WAL commit', async () => {
-    const env = await createSavedRuntime('authority completion rejects');
-    let commits = 0;
-    const restoreBatch = installNextWalWriteFault(env, 'apply-then-reject');
-    const failure = await saveSecondFrameWithAuthority(env, async () => {
-      commits += 1;
-      throw new Error('TEST_RUST_COMMIT_REJECTED');
-    });
-    restoreBatch();
-
-    expect(failure).toBeInstanceOf(Error);
-    if (!(failure instanceof Error)) throw new Error('TEST_EXPECTED_STORAGE_FAILURE');
-    expect(failure.message).toContain(
-      'RUNTIME_FRAME_STORAGE_COMMITTED:RSCORE_AUTHORITY_AFTER_WAL_FAILED',
-    );
-    expect(failure.message).toContain('TEST_WAL_APPLY_THEN_REJECT');
-    expect(failure.message).toContain('TEST_RUST_COMMIT_REJECTED');
-    expect(failure).toHaveProperty('commitStatus', 'committed');
-    expect(failure).toHaveProperty('publicationBlocked', true);
-    expect(commits).toBe(1);
-    expect(await readStorageFrameRecord(getRuntimeWalDb(env), 2)).not.toBeNull();
+    try {
+      await expect(saveEnvToDB(env, { runtimeTxs: [], entityInputs: [] }, [], new Map()))
+        .rejects.toMatchObject({ commitStatus: 'not-committed' });
+      expect(await readStorageFrameRecord(getRuntimeWalDb(env), 2)).toBeNull();
+      expect((await readStorageHead(getRuntimeWalDb(env)))?.latestHeight).toBe(1);
+    } finally {
+      restoreBatch();
+    }
   });
 });

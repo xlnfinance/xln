@@ -10,14 +10,11 @@ import type { JReplica } from '../../types/jurisdiction-runtime';
 import type { AccountJClaimNodeStore } from '../../types/finance/account-j-claims';
 
 /**
- * The authoritative engine's seat inside Account consensus.
+ * Entity-owned TypeScript worker delegation inside Account consensus.
  *
- * In observation mode it only counts what TypeScript is about to execute. In
- * cutover it executes instead: `executeAccountInput` and
- * `executeAccountProposal` return the transition's result and leave the live
- * replica already holding the engine's post-state, so the TypeScript
- * transition below them never runs. `null` means the scope declined this
- * operation and TypeScript remains the executor.
+ * A prepared worker result installs its post-state on the live replica, so
+ * Account consensus consumes that result without executing the transition
+ * again. `null` leaves execution with the local TypeScript transition.
  */
 export type AccountAuthorityExecutionScope = Readonly<{
   hasPreparedAccountProposal?(accountId: string): boolean;
@@ -45,7 +42,6 @@ export type AccountAuthorityExecutionScope = Readonly<{
 }>;
 
 export type AccountAuthorityInputRequest = Readonly<{
-  collectorFrameId: string;
   account: AccountReplica;
   input: AccountInput | AccountTxBatch;
   entityTimestamp: number;
@@ -54,13 +50,11 @@ export type AccountAuthorityInputRequest = Readonly<{
 
 
 export type AccountAuthorityProposalRequest = Readonly<{
-  collectorFrameId: string;
   account: AccountReplica;
   timestamp: number;
   jHeight: number;
   entityTimestamp: number;
   finalizedJHeight: number;
-  selectionIsWholeMempool: boolean;
   selectedMempoolTxs?: readonly AccountTx[];
 }>;
 
@@ -73,15 +67,7 @@ export type AccountAuthorityProposalRequest = Readonly<{
  */
 export type AccountConsensusContext = Readonly<{
   runtimeTimestamp: number;
-  /**
-   * The Runtime this context belongs to. One process hosts many, so anything
-   * that accumulates per Runtime frame has to be told which one rather than
-   * inferring it from whichever frame opened last.
-   */
-  runtimeId?: string;
-  /** Ephemeral parent-frame identity; null explicitly suppresses observation. */
-  accountAuthorityFrameId?: string | null;
-  /** Ephemeral pre-TypeScript authority hook; absent on the canonical TS path. */
+  /** Ephemeral Entity stage supplying prepared TypeScript worker results. */
   accountAuthorityExecutionScope?: AccountAuthorityExecutionScope;
   /**
    * The clock of the Entity frame this Account work belongs to. Account inputs

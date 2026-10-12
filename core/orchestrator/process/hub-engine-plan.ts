@@ -1,3 +1,4 @@
+import { assertTypeScriptAccountExecution } from '../../runtime/config/account-execution';
 import { existsSync, readdirSync, statSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
@@ -32,13 +33,8 @@ export const canonicalHubEngine = (
   if (!/^H[1-9][0-9]*$/.test(normalized)) {
     throw new Error(`HUB_ENGINE_NAME_INVALID:${hubName}`);
   }
-  const selected = String(env['XLN_HLT_ENGINE'] || 'ts').trim();
-  if (selected !== 'ts' && selected !== 'rust') {
-    throw new Error(`HUB_ENGINE_SELECTOR_INVALID:${selected}`);
-  }
-  // H1 is a role, not an implementation. The explicit workload selector owns
-  // its production engine; the remaining mesh hubs are TypeScript processes.
-  return normalized === 'H1' && selected === 'rust' ? 'rust' : 'typescript';
+  assertTypeScriptAccountExecution(env);
+  return 'typescript';
 };
 
 export type RustHubProcessConfig = Readonly<{
@@ -67,7 +63,7 @@ export type RustHubProcessPlan = Readonly<{
   nativeDb: string;
 }>;
 
-export const RSCORE_RUNTIME_BUILD_COMMAND =
+const RSCORE_RUNTIME_BUILD_COMMAND =
   'cargo --config rscore/.cargo/config.toml build --release --locked --manifest-path rscore/Cargo.toml -p xln-rscore-process --bin xlnrs';
 
 const newestRustBuildInputMs = (path: string): number => {

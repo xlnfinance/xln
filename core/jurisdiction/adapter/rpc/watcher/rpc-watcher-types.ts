@@ -79,7 +79,9 @@ export type RpcWatcherSession = {
   lastCanonicalAuditAtMs: number;
   transientFailures: number;
   lastTransientLogAtMs: number;
-  /** Shrinks while the Runtime mempool pushes back, grows back after success. */
+  /** Process-local transport pressure shared by scheduled and explicit polls. */
+  rpcCooldown: { backoffMs: number; untilMs: number; releaseWait: (() => void) | null };
+  /** Shrinks under RPC or Runtime mempool pressure, grows after success. */
   maxBlocksPerPoll: number;
   txCounter: EventBatchCounter;
   readWatchedErc20Tokens(): Promise<WatchedErc20Token[]>;

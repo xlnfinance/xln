@@ -55,7 +55,7 @@ describe('release gate ordering', () => {
       const browserCommands = commands.filter(command => command.startsWith('XLN_LOCAL_PROD_SMOKE_DIR='));
       expect(result.exitCode).toBe(0);
       expect(browserCommands.map(command => command.match(/XLN_LOCAL_PROD_SMOKE_WALLET_TESTS=(\S+)/)?.[1])).toEqual([
-        'e2e-payment.spec.ts,e2e-lending-availability.spec.ts',
+        'e2e-payment.spec.ts,e2e-lending-availability.spec.ts,e2e-reserve-funding.spec.ts',
         'e2e-dispute-finality.spec.ts',
         'e2e-dispute-protection.spec.ts',
         'e2e-tower-restore.spec.ts,e2e-file-restore.spec.ts,e2e-sovereignty.spec.ts',

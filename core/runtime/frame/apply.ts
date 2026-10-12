@@ -2,7 +2,7 @@ import { createStructuredLogger } from '../../support/logger';
 import {
   causalTraceContainsWork,
   summarizeRuntimeAccountCausality,
-} from '../../qa/account-causal-trace';
+} from '../observability/account-causal-trace';
 import type { RuntimeReplica, RoutedEntityInput, RuntimeInput, RuntimeTx } from '../types';
 import type { JInput } from '../../jurisdiction/machine/input';
 import { getPerfMs } from '../../support/time';

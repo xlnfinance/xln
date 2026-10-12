@@ -1,0 +1,428 @@
+{
+  "schema": "xln-release-preparation/v1",
+  "sourceSha": "d4502ec942233aa7c989f9875e4cafa354d0f4a7",
+  "status": "local-artifact-and-isolated-hub-catchup-passed-not-eligible-for-promotion",
+  "sourceBinding": {
+    "cleanBeforeAndAfterExecution": true,
+    "laterEvidenceCommitIsNotTestedSource": true,
+    "runtimeSourceUnchangedFrom": "fc4f267db6dbff4f25bc2d8040a9ce0464f22d75"
+  },
+  "releasePackage": {
+    "schema": "xln-prepared-sepolia-candidate/v1",
+    "sourceSha": "d4502ec942233aa7c989f9875e4cafa354d0f4a7",
+    "sourceTreeCleanBeforeAndAfter": true,
+    "eligible": false,
+    "status": "prepared-local-only-not-activated",
+    "scope": {
+      "engine": "ts",
+      "wallet": "ui-react",
+      "jurisdiction": "ethereum-sepolia",
+      "chainId": 11155111,
+      "financialScope": "same-J",
+      "publicOrigin": "https://sepolia.xln.finance",
+      "uiBase": "/"
+    },
+    "build": {
+      "commandCaptured": "bun tools/stand-lock.ts run --reason immutable-sepolia-react-candidate --timeout-ms \"180000\" -- bun run --cwd /Users/zigota/xln/ui build",
+      "environmentFromParentWorkflow": {
+        "NODE_ENV": "production",
+        "XLN_UI_BASE": "/",
+        "XLN_UI_STACK_ORIGIN": ""
+      },
+      "exitCode": 0,
+      "completionBasis": "Parent session2300 exit0 plus captured Vite artifact output and verified nonempty entrypoint files.",
+      "log": {
+        "path": "release-ui-build-d4502ec94.log",
+        "sha256": "d420f12eb6f551b4f2fac81ce5181892ebde66806c7f8fcaa9189807e1a6820c",
+        "bytes": 5220
+      },
+      "invalidEarlierInvocation": "bun --cwd ui run build printed usage with exit0; it is explicitly not build evidence."
+    },
+    "artifacts": [
+      {
+        "file": "release-d4502ec94.bundle",
+        "bytes": 1937312,
+        "sha256": "0fd680192d909312c7286f66290cedbb71af7fea7984e8e2b1d80f4d520aebdd",
+        "kind": "source-git-delta",
+        "prerequisite": "7c3f63f9841f4e8b61ac5eee5dbe4f9710b10621"
+      },
+      {
+        "file": "release-d4502ec94-ui.tar.gz",
+        "bytes": 3186107,
+        "sha256": "1033598bdc062140a191cf6505ec4623e85cb9c76581c8e1c2c434c4975b99a5",
+        "kind": "react-wallet-static",
+        "extractInto": "<candidate>/ui/dist",
+        "entryCount": 13,
+        "fileCount": 11
+      }
+    ],
+    "uiFiles": [
+      {
+        "path": "account-worker.js",
+        "bytes": 2042516,
+        "sha256": "7ba541168b687c4deb25ca5e9f44b914fbe0e62aa13924ae097ef377ac2a1201"
+      },
+      {
+        "path": "assets/browser-CfPhK2IQ.js",
+        "bytes": 41097,
+        "sha256": "39037dd00221d4ace7a0207a8250dfa15dde5ed8c73a0cba348996553666a297"
+      },
+      {
+        "path": "assets/index-C9Tn8rLa.css",
+        "bytes": 48885,
+        "sha256": "c64d5c15cac204ace88ec560517ba30c7bf7597ed9d34644dc9fac96c4b57b67"
+      },
+      {
+        "path": "assets/index-DA2TZpBD.js",
+        "bytes": 2033184,
+        "sha256": "696bb1b60b3c7e9608aec905fd22b8930a1987e0c44f77ef53ca995f4f6011b9"
+      },
+      {
+        "path": "assets/index.esm-Dup_VHWH.js",
+        "bytes": 216520,
+        "sha256": "c3a093b52611b886dac01190c1dc4dfb9910fc306e6607255c881fe2e997244b"
+      },
+      {
+        "path": "assets/push-wake-sw-TrIUAo0y.js",
+        "bytes": 1354,
+        "sha256": "8f1dec2bd00adb400e2f6789d58e9850cd0e9db8db2bafd3cfd2e843aeb1d179"
+      },
+      {
+        "path": "favicon-small.svg",
+        "bytes": 326,
+        "sha256": "2e110fadbf9a6a89d33b0bedb2478bc35fc24990be4ebf1ddaf45951b002116a"
+      },
+      {
+        "path": "icon.svg",
+        "bytes": 436,
+        "sha256": "01a60df0147912d4f8bf4891601112eba4bba89478f4da25d4c6836b5c0a7358"
+      },
+      {
+        "path": "index.html",
+        "bytes": 1888,
+        "sha256": "6adec4639dbf5d20fba5420af7b978ed5b7393f1d13119fdd8d4ac925ae2e4f3"
+      },
+      {
+        "path": "manifest.webmanifest",
+        "bytes": 337,
+        "sha256": "aaae645e049b075e9be36e48c948406873ad922f66dab780fd6ad2c6b5e90064"
+      },
+      {
+        "path": "runtime.js",
+        "bytes": 5900796,
+        "sha256": "2fde0e9f8e3ea794523b8ca1d3138faa74f3c8c5d8fe2a1fe75196b85589738f"
+      }
+    ],
+    "verification": {
+      "gitBundle": "git bundle verify succeeded; advertised HEAD equals candidate and sole prerequisite equals old deployed7c.",
+      "tar": "All 13 entries were safe and unique; all 11 regular files matched ui/dist byte count and SHA256 when streamed back out of the archive.",
+      "sourceGitHashAlgorithm": "sha1",
+      "artifactHashAlgorithm": "sha256",
+      "artifactReproducibility": "Existing archive format preserves filesystem timestamps. These specific bytes are frozen by SHA256; no cross-build byte-reproducibility claim."
+    },
+    "preparationConsumer": {
+      "reference": ".logs/crisis-20261011/prepare-sepolia-demand.sh",
+      "layout": "Clone existing release Git repository, fetch bundle HEAD, checkout exact candidate, retain root Linux node_modules, extract UI tar into ui/dist.",
+      "runtime": "Existing Bun1.4.0 Linux executes TypeScript source; no runtime binary or OS dependencies are bundled.",
+      "dependencies": "Root bun.lock unchanged from7c; package.json only changes a bootstrap-test command. UI events3.3.0 dependency is already included in the built assets. Existing Linux root node_modules must remain available; no macOS node_modules are copied.",
+      "backend": ["/api/jurisdictions", "/api/hubs", "/rpc", "/relay WebSocket"],
+      "state": "Use existing external state and secret slots; no state, secret, DB, private backup or host configuration is included."
+    },
+    "evidenceReferences": [
+      {
+        "path": "docs/evidence/canonical-review-20261012/native-retirement-fc4f267db.json",
+        "sha256": "47f23c7e17de76129548bac0f14d2a5cda421c3e0c70dea6c9c2dddb7010f550"
+      },
+      {
+        "path": "docs/evidence/sepolia-20261011/contracts-and-exit.json",
+        "sha256": "dd120b9667f0e82d329b17cec33288aab739f88547923ab5bbade6e4493ff744"
+      },
+      {
+        "path": "docs/evidence/canonical-review-20261012/public-p6-d388464db.json",
+        "sha256": "f6253cbf3a334afdebd743f1bc90c716de0550e6d242571c9d0551c2657d1a66"
+      }
+    ],
+    "rollback": {
+      "referenceSourceSha": "7c3f63f9841f4e8b61ac5eee5dbe4f9710b10621",
+      "referenceState": "Old deployed H1 is stopped; retained as source/config reference, not a proven healthy or storage-compatible rollback target.",
+      "coldRestoreEvidence": "docs/evidence/canonical-review-20261012/native-retirement-fc4f267db.json",
+      "coldRestoreLimit": "Local recovery R4474/integrity128 ends before counterblock11897542; not deployed catch-up."
+    },
+    "activationBlocks": [
+      "Exact candidate CI has not passed; existing PR is red/blocked.",
+      "Two frozen fixture imports remain unresolved.",
+      "Public H1 remains stopped per parent latest status; static UI cannot substitute for its APIs.",
+      "Autonomous Sepolia deployment is already authorized; promotion waits for required green CI, verified H1 recovery and a state-compatible rollback. Mainnet package/sign-off remains owner-controlled."
+    ],
+    "changesPerformed": [
+      "Created local Git bundle and UI tar with checksums.",
+      "No deployment, push, source edit, service action, financial transaction or activation."
+    ],
+    "contractBinding": {
+      "status": "historical-onchain-probe-with-local-artifact-hash-comparison",
+      "reference": "docs/evidence/canonical-review-20261012/watcher-cooldown-1d780ff75.json",
+      "referenceSha256": "8bbf6fcbacd9f6013ca6a00aa1e8bfc4fcec9e25b15f23e4311e6d222d8f7fa8",
+      "historicalProbeSource": "1d780ff75b5e61ce6d0f34651945738200469486",
+      "historicalProbeTime": "2026-10-12T06:22:30.447Z",
+      "sourceAndArtifactDiff": "No changes in jurisdictions/contracts, frontend/static/contracts or jurisdictions/typechain-types between7c3 andd450.",
+      "localArtifactHashes": [
+        {
+          "path": "core/orchestrator/bootstrap/contract-readiness.ts",
+          "sha256": "b12e4a3e2d03a3e9a7cd95b812b10a45c0ab59c5bc77ed3a8ab798918bb0cbbc",
+          "matchesHistoricalProbe": true
+        },
+        {
+          "path": "jurisdictions/jurisdictions.json",
+          "sha256": "eab02be9cb65a42776ae1e84995b573f6a2447f63c6ca3df115fe54e4c4ec2af",
+          "matchesHistoricalProbe": true
+        },
+        {
+          "path": "frontend/static/contracts/Account.json",
+          "sha256": "3ca5fe7fe38d64c7f9b93efe272875f8a795a4291d1d010b25bd56e999c281ad",
+          "matchesHistoricalProbe": true
+        },
+        {
+          "path": "frontend/static/contracts/Depository.json",
+          "sha256": "775b056ec3a034edd282ffdfac1c93ca8cc56069dc400675051659f658516460",
+          "matchesHistoricalProbe": true
+        },
+        {
+          "path": "frontend/static/contracts/DepositoryBounds.json",
+          "sha256": "5c1dbb4c035dbfb8339713f68c88c70d7b246f063910c6ba8aa57e1c4fd1041f",
+          "matchesHistoricalProbe": true
+        },
+        {
+          "path": "frontend/static/contracts/EntityProvider.json",
+          "sha256": "7d259bb3eaa13018d4d2ddd045a8a3e43c8c6f3ee1a4e843a7611f6657b14fb0",
+          "matchesHistoricalProbe": true
+        },
+        {
+          "path": "frontend/static/contracts/DeltaTransformer.json",
+          "sha256": "d1e166ed5744a31a279ec22a871b356cf4fc4778edaf3f0b34c722d02c6287d8",
+          "matchesHistoricalProbe": true
+        },
+        {
+          "path": "frontend/static/contracts/HankoVerifier.json",
+          "sha256": "13098bfe9cfb11931a9b40d686de06f993ef298b34bceb98750ae0a8e9033059",
+          "matchesHistoricalProbe": true
+        },
+        {
+          "path": "frontend/static/contracts/HashLadderRegistry.json",
+          "sha256": "308d1e4df0dce8c7b28a8eff439aa8c4ec1294e65e5d4e8472c01f0d5d95f9e4",
+          "matchesHistoricalProbe": true
+        },
+        {
+          "path": "frontend/static/contracts/NftCustody.json",
+          "sha256": "266f68bfa147aed1f85c949dd7149bab85f542de8c5d9264554ae7b379f9ac7a",
+          "matchesHistoricalProbe": true
+        }
+      ],
+      "matchingHashCount": 10,
+      "totalHashCount": 10,
+      "liveProbeAtCandidate": false,
+      "limitation": "Historical chain verification is referenced, not rerun. Matching local compiler/artifact/checker/config hashes preserve the historical binding; no fresh current-network verification or compiler execution is asserted."
+    }
+  },
+  "preparedManifestRawSha256": "f85b6f7352e08b8ded70dc09478bdeffe418cfff33d016ff048b8385704fdb79",
+  "localArtifactDirectory": ".logs/canonical-review-20261012/",
+  "checks": {
+    "buildExitCode": 0,
+    "checkExitCode": 0,
+    "sourceGates": 38,
+    "sourceGatePhaseMs": 26650,
+    "checkCommand": "bun run check",
+    "buildAndArchiveEntrypointsVerified": 3,
+    "archivedUiFilesVerified": 11,
+    "prerequisite": "7c3f63f9841f4e8b61ac5eee5dbe4f9710b10621",
+    "bundleAndUiArchiveUploaded": false
+  },
+  "catchup": {
+    "command": "bun run stand:run --reason stopped-hub-real-rpc-catchup --timeout-ms 180000 -- bun .logs/canonical-review-20261012/verify-stopped-hub-catchup.ts",
+    "exitCode": 0,
+    "standLockHeld": true,
+    "standFreeAfterExit": true,
+    "helper": {
+      "path": ".logs/canonical-review-20261012/verify-stopped-hub-catchup.ts",
+      "sha256": "2b25c438a332c1cca4e0502fc6e56153577b85d6a0553e1bca9c128f52d98f21",
+      "retainedPrivately": true,
+      "scope": "Thin transport-isolation harness using canonical cold/live restore, loop, watcher, RPC allowlist and close APIs. No fake financial events or disabled hooks."
+    },
+    "backupSha256": "9316ce1c4ca0998b082bd78266b8b0cb6f88ef7f990436c6d65a4748bf2fe0e3",
+    "upstream": "https://ethereum-sepolia-rpc.publicnode.com/",
+    "preflight": [
+      {
+        "height": 4474,
+        "inspectOnly": true,
+        "networkStarted": false,
+        "pending": {
+          "entitySubmit": [
+            {
+              "batchHash": "0x7f5bc0234574eab6dcefa9b52d2a9b89f94d6d5b833d53aac8d8f8c3723e6332",
+              "entityId": "0x2d08d3bb8f4102fb07fecef0b59f052139c99aa996239ebfc55baac82ac54dd6",
+              "lastResultOutcome": "transientFailure",
+              "submitAttempts": 1,
+              "txHash": "0x528ec776a05d08c11030525a0e130f268e3860e3ccd622e5ea1f239f947e1c53"
+            }
+          ],
+          "jOutbox": [],
+          "jurisdictionImports": 0,
+          "networkOutbox": 0,
+          "pendingRegistrations": 0
+        },
+        "postStateHash": "0xe9561698ad135b8a468deb921b756768e920bcff217f90da16e96883ecf119ca",
+        "runtimeId": "0xbe7597d3532df7293b0f0ff82ee0c30fb2fd2737",
+        "sourceSha": "d4502ec942233aa7c989f9875e4cafa354d0f4a7",
+        "stage": "cold-preflight"
+      },
+      {
+        "inspectOnly": true,
+        "requests": {
+          "allowed": 0,
+          "forbidden": 0,
+          "upstreamErrors": 0
+        },
+        "resourcesClosed": true,
+        "stage": "completed"
+      }
+    ],
+    "firstAttempt": {
+      "exitCode": 1,
+      "failure": {
+        "error": "HUB_CATCHUP_RPC_ESCAPE\n+ actual - expected\n\n+ 'http://localhost:62498/'\n- 'http://127.0.0.1:62498'\n          ^\n",
+        "height": 4474,
+        "pending": {
+          "entitySubmit": [
+            {
+              "batchHash": "0x7f5bc0234574eab6dcefa9b52d2a9b89f94d6d5b833d53aac8d8f8c3723e6332",
+              "entityId": "0x2d08d3bb8f4102fb07fecef0b59f052139c99aa996239ebfc55baac82ac54dd6",
+              "lastResultOutcome": "transientFailure",
+              "submitAttempts": 1,
+              "txHash": "0x528ec776a05d08c11030525a0e130f268e3860e3ccd622e5ea1f239f947e1c53"
+            }
+          ],
+          "jOutbox": [],
+          "jurisdictionImports": 0,
+          "networkOutbox": 0,
+          "pendingRegistrations": 0
+        },
+        "requests": {
+          "allowed": 79,
+          "forbidden": 0,
+          "upstreamErrors": 0
+        },
+        "stage": "failed"
+      },
+      "classification": "Harness exact URL assertion failed before Runtime loop; canonical adapter normalizes 127.0.0.1 to localhost with a trailing slash. Helper now uses that existing normalizer. No production change."
+    },
+    "successfulAttempt": [
+      {
+        "height": 4474,
+        "pending": {
+          "entitySubmit": [
+            {
+              "batchHash": "0x7f5bc0234574eab6dcefa9b52d2a9b89f94d6d5b833d53aac8d8f8c3723e6332",
+              "entityId": "0x2d08d3bb8f4102fb07fecef0b59f052139c99aa996239ebfc55baac82ac54dd6",
+              "lastResultOutcome": "transientFailure",
+              "submitAttempts": 1,
+              "txHash": "0x528ec776a05d08c11030525a0e130f268e3860e3ccd622e5ea1f239f947e1c53"
+            }
+          ],
+          "jOutbox": [],
+          "jurisdictionImports": 0,
+          "networkOutbox": 0,
+          "pendingRegistrations": 0
+        },
+        "requests": {
+          "allowed": 79,
+          "forbidden": 0,
+          "upstreamErrors": 0
+        },
+        "stage": "live-preflight"
+      },
+      {
+        "activeDispute": false,
+        "collateral": {
+          "__xlnType": "BigInt",
+          "value": "0"
+        },
+        "elapsedMs": 18406,
+        "height": 4476,
+        "integrity": {
+          "checkedFrames": 128,
+          "latestHeight": 4476,
+          "ok": true,
+          "runtimeId": "0xbe7597d3532df7293b0f0ff82ee0c30fb2fd2737"
+        },
+        "jHeight": 11898153,
+        "pending": {
+          "entitySubmit": [
+            {
+              "batchHash": "0x7f5bc0234574eab6dcefa9b52d2a9b89f94d6d5b833d53aac8d8f8c3723e6332",
+              "entityId": "0x2d08d3bb8f4102fb07fecef0b59f052139c99aa996239ebfc55baac82ac54dd6",
+              "lastResultOutcome": "transientFailure",
+              "submitAttempts": 1,
+              "txHash": "0x528ec776a05d08c11030525a0e130f268e3860e3ccd622e5ea1f239f947e1c53"
+            }
+          ],
+          "jOutbox": [],
+          "jurisdictionImports": 0,
+          "networkOutbox": 0,
+          "pendingRegistrations": 0
+        },
+        "postStateHash": "0xc6890f447fedd97940ead3805d64fe110d0ac251cfe960f30926c6335050edaf",
+        "publicP2PStarted": false,
+        "requests": {
+          "allowed": 185,
+          "forbidden": 0,
+          "upstreamErrors": 0
+        },
+        "sourceSha": "d4502ec942233aa7c989f9875e4cafa354d0f4a7",
+        "stage": "verified-cold-restore",
+        "transactionsForwarded": 0
+      },
+      {
+        "inspectOnly": false,
+        "requests": {
+          "allowed": 185,
+          "forbidden": 0,
+          "upstreamErrors": 0
+        },
+        "resourcesClosed": true,
+        "stage": "completed"
+      }
+    ],
+    "scope": "A fresh private copy of stopped H1 read actual Sepolia blocks through a strict read-only RPC gateway. No public P2P, importJ, raw broadcast, fake transport or source backup mutation. Current code caught up beyond counter11897542/final11897550, cleared dispute/collateral, then preserved the exact root and complete outbox digest on another cold replay.",
+    "privateFullLogSha256": "ca7de74d30e53b8e607a8e16062f97f918d994f7f79f424eca751b6c2a5f778b",
+    "limits": "Not a deployed H1 restart, live peer-delivery test, new P6 transaction sequence, fresh exit-gas maximum, or independently asserted on-chain reserve/debt oracle. Pre-existing transient jSubmitState remains visible; pending J/network/registration queues are zero."
+  },
+  "artifacts": [
+    {
+      "id": "build",
+      "file": "release-preparation-d4502ec94-build.log.gz",
+      "sha256": "c3bebb3b020fbff7e0109779140fb421d8aa0935ec64f54ba08f44ae45b9b84a",
+      "bytes": 1373,
+      "rawSha256": "d420f12eb6f551b4f2fac81ce5181892ebde66806c7f8fcaa9189807e1a6820c",
+      "rawBytes": 5220
+    },
+    {
+      "id": "check",
+      "file": "release-preparation-d4502ec94-check.log.gz",
+      "sha256": "80250349980e111f8ff0dd237a4b238edaa5ff9d6e58725a04abbcc887163e11",
+      "bytes": 15373,
+      "rawSha256": "c96e7f01d419573b1ee87e81341504d7c9019021d3797ffeeca9db666187383f",
+      "rawBytes": 117669
+    }
+  ],
+  "methodology": {
+    "reviewedAt": "2026-10-12T09:51:00Z",
+    "resultAt": "2026-10-12T10:02:37Z",
+    "decision": "Stop extending cosmetic deletions. Build the existing React artifact, use existing source-bundle/UI packaging, and test the stopped H1 at its real failing event boundary. Treat exit0 plus help as failure; check the produced artifact. Reuse canonical RPC policy and URL normalization.",
+    "nextReviewAt": "2026-10-12T10:21:00Z"
+  },
+  "remaining": [
+    "Two explicitly frozen TS fixture imports await owner exception; no skip or alias.",
+    "Required exact-candidate PR CI and ten consecutive green main runs.",
+    "Eligible Sepolia deployment, deployed H1 recovery and complete public P6; compatible rollback proof.",
+    "Remaining start/finalize/reveal and exact-build mainnet package/sign-off."
+  ]
+}

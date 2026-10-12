@@ -51,6 +51,7 @@ import type {
 import { assertMinDiskFree } from '../../../support/storage-monitor';
 import { compareStableText } from '../../../protocol/serialization';
 import { sanitizeChildProcessEnv } from '../../../api/server/child-process-env';
+import { canonicalHubEngine } from '../../../orchestrator/process/hub-engine-plan';
 import {
   createIncrementalRuntimeFatalLogScanner,
   findRuntimeFatalLogLines,
@@ -103,8 +104,6 @@ export {
 } from '../harness/e2e-run-report';
 import {
   assertE2ECodeFingerprintStable,
-  captureE2ENativeExecutable,
-  assertE2ENativeExecutableStable,
   computeCodeFingerprint,
   computeRepositorySourceDriftProbe,
   createAsyncLimiter,
@@ -1964,7 +1963,6 @@ const runShard = async (
     throwIfAborted();
 
     const apiStart = Date.now();
-    assertE2ENativeExecutableStable(buildArtifacts.nativeExecutable);
     api = spawn(
       'bun',
       [
@@ -2011,7 +2009,6 @@ const runShard = async (
         stdio: ['ignore', 'pipe', 'pipe'],
         env: sanitizeChildProcessEnv({
           ...process.env,
-          ...(buildArtifacts.nativeExecutable ? { XLN_RSCORE_BINARY: buildArtifacts.nativeExecutable.path } : {}),
           USE_ANVIL: 'true',
           ANVIL_RPC: rpcUrl,
           ANVIL_RPC2: rpc2Url,
@@ -2439,6 +2436,7 @@ async function main(): Promise<void> {
     console.log(ISOLATED_E2E_RUNNER_USAGE);
     return;
   }
+  canonicalHubEngine('H1');
   const args = parseArgs();
   const exactRequestedTarget = args.pwFiles.length === 1 && /^.+\.spec\.ts::.+$/.test(args.pwFiles[0] ?? '');
   if (!exactRequestedTarget) assertBroadRunHasNoUnresolvedReruns(undefined, { kind: 'e2e' });
@@ -2507,10 +2505,6 @@ async function main(): Promise<void> {
       process.exit(1);
     }
 
-    buildArtifacts.nativeExecutable = captureE2ENativeExecutable();
-    if (buildArtifacts.nativeExecutable) {
-      console.log(`Native executable: ${buildArtifacts.nativeExecutable.path} sha256=${buildArtifacts.nativeExecutable.sha256}`);
-    }
     const startedAt = Date.now();
     const sourceFiles = args.pwFiles.length > 0 ? args.pwFiles : listPlaywrightSpecFiles(args.includeAllSpecs);
     let expandedTargets = attachPlaywrightMetadata(expandPlaywrightTargets(sourceFiles), sourceFiles, args);
@@ -2685,7 +2679,6 @@ async function main(): Promise<void> {
     } finally {
       for (const lease of workerPortLeases) lease.release();
     }
-    assertE2ENativeExecutableStable(buildArtifacts.nativeExecutable);
     codeDriftGuard.assertStable(true);
     const endCodeFingerprint = computeCodeFingerprint();
     assertE2ECodeFingerprintStable(codeFingerprint.codeHash, endCodeFingerprint.codeHash);
@@ -2701,7 +2694,6 @@ async function main(): Promise<void> {
       startedAt,
       codeFingerprint,
       failureState.primaryFailure,
-      buildArtifacts.nativeExecutable,
     );
     publishQaRunIfConfigured(logsDir);
 

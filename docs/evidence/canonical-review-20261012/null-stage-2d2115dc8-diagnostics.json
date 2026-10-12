@@ -1,0 +1,20 @@
+{
+  "missingInventory": {
+    "sourceLog": "p6-stopped-hub-replay-missing-inventory.log",
+    "sourceSha256": "3a5af011919480219869dba30cece4e7b91cdd5d6a901d951f7dcdbbe04dbff6",
+    "command": "bun tools/stand-lock.ts run --reason \"public-p6-stopped-hub-replay\" --timeout-ms \"60000\" -- bun \".logs/canonical-review-20261012/verify-stopped-hub-replay.ts\"",
+    "processExitCode": 1,
+    "error": "RUNTIME_ENTITY_INPUT_APPLY_FAILED:entity=0x2d08d3bb8f4102fb07fecef0b59f052139c99aa996239ebfc55baac82ac54dd6:signer=0x0027cd455279b210e198971070ef4694be8db3f5:txs=none:proposal=no:cause=MISSING_SIGNER_KEY: no registered private key for signer 0x0027cd455279b210e198971070ef4694be8db3f5. Prewarm local signer EOAs from env.runtimeSeed before signing.",
+    "classification": "Diagnostic harness omitted signer inventory; not a new financial transition defect. No key value is included.",
+    "omitted": "Repeated stacks and signing-inventory details."
+  },
+  "publicRpc502": {
+    "sourceLog": "p6-receipt-validation-public-rpc-502.log",
+    "sourceSha256": "c72a674a39b3a1f1c3fa23553dc647b0b7db4cf7921d1d19302c0ac9736c8ea3",
+    "rpc": "https://sepolia.xln.finance/rpc",
+    "status": 502,
+    "error": "server response 502 Bad Gateway",
+    "classification": "Deployed public route unavailable; later direct-read validation does not prove this route recovered.",
+    "omitted": "Repeated ethers/network-detection stack and HTML error body."
+  }
+}

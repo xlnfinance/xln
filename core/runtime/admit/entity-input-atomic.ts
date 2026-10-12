@@ -21,7 +21,6 @@ import {
   collectCommittedAccountFrames,
   collectStagedEntityInput,
   publishStagedEntityNodeChanges,
-  settleStagedAuthority,
   stageExternalEntityInput,
   type StagedEntityInput,
 } from './entity-input-staging.ts';
@@ -202,27 +201,6 @@ const applyRetainedNonAtomicInputs = async (
   }
 };
 
-const discardAtomicAuthorityStages = async (
-  env: RuntimeReplica,
-  staged: readonly StagedEntityInput[],
-  cause?: unknown,
-): Promise<void> => {
-  const failures: unknown[] = [];
-  for (const entry of staged) {
-    try {
-      await settleStagedAuthority(env, entry, false);
-    } catch (error) {
-      failures.push(error);
-    }
-  }
-  if (failures.length > 0) {
-    throw new AggregateError(
-      cause === undefined ? failures : [cause, ...failures],
-      'RUNTIME_ATOMIC_AUTHORITY_ROLLBACK_FAILED',
-    );
-  }
-};
-
 const assertAtomicPairEligibility = (
   pair: readonly [RoutedEntityInput, RoutedEntityInput],
 ): void => {
@@ -245,7 +223,6 @@ const publishCommittedAtomicPair = async (
   for (const entry of staged) {
     commitEntityFrameCandidateState(entry.result.nextReplica.state);
   }
-  for (const entry of staged) await settleStagedAuthority(env, entry, true);
   for (const entry of staged) collectStagedEntityInput(env, entry, options, context);
   publishStagedEntityNodeChanges(env, staged);
 };
@@ -263,14 +240,13 @@ export const applyAtomicEntityInputPair = async (
     firstInputIndex,
     firstInputIndex + 1,
   ];
-  const partial: StagedEntityInput[] = [];
   let staged: [StagedEntityInput, StagedEntityInput];
   try {
     const requiredIndexes: [number, number] = [
       requiredAtomicAccountInputIndex(pair[0]),
       requiredAtomicAccountInputIndex(pair[1]),
     ];
-    partial.push(await stageExternalEntityInput(
+    const firstStage = await stageExternalEntityInput(
       env,
       pair[0],
       indexes[0],
@@ -278,8 +254,8 @@ export const applyAtomicEntityInputPair = async (
       false,
       false,
       requiredIndexes[0],
-    ));
-    partial.push(await stageExternalEntityInput(
+    );
+    const secondStage = await stageExternalEntityInput(
       env,
       pair[1],
       indexes[1],
@@ -287,14 +263,9 @@ export const applyAtomicEntityInputPair = async (
       false,
       false,
       requiredIndexes[1],
-    ));
-    const [firstStage, secondStage] = partial;
-    if (firstStage === undefined || secondStage === undefined) {
-      throw new Error('RUNTIME_ATOMIC_AUTHORITY_STAGE_ARITY');
-    }
+    );
     staged = [firstStage, secondStage];
   } catch (error) {
-    await discardAtomicAuthorityStages(env, partial, error);
     const rejection = atomicPairProtocolRejection(error);
     if (!rejection || options.isReplay) throw error;
     recordAtomicPairRejection(
@@ -309,7 +280,6 @@ export const applyAtomicEntityInputPair = async (
   }
 
   if (!staged.every(stagedAtomicLegCommitted)) {
-    await discardAtomicAuthorityStages(env, staged);
     if (options.isReplay) {
       throw new Error('RUNTIME_REPLAY_CROSS_J_ACCOUNT_PAIR_NOT_COMMITTED');
     }

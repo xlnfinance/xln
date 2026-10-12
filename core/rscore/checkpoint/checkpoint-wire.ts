@@ -112,23 +112,3 @@ export const decodeRscoreCheckpointChanges = (value: unknown): RscoreCheckpointC
   }
   return { commitToken, restoreToken, accounts, removed };
 };
-
-/** Candidate identity that the checkpoint must durably describe. */
-export const assertRscoreCheckpointCandidate = (
-  checkpoint: RscoreCheckpointChanges,
-  expected: Readonly<{ revision: number | bigint; accountsRoot: string; accountCount: number }>,
-): void => {
-  const checkpointRoot = `0x${Buffer.from(checkpoint.restoreToken[2]).toString('hex')}`;
-  if (
-    BigInt(checkpoint.restoreToken[1]) !== BigInt(expected.revision) ||
-    checkpointRoot.toLowerCase() !== expected.accountsRoot.toLowerCase() ||
-    checkpoint.restoreToken[4] !== expected.accountCount
-  ) {
-    throw new Error(
-      `RSCORE_CHECKPOINT_CANDIDATE_MISMATCH:` +
-      `revision=${String(checkpoint.restoreToken[1])}/${String(expected.revision)}:` +
-      `root=${checkpointRoot.toLowerCase()}/${expected.accountsRoot.toLowerCase()}:` +
-      `count=${String(checkpoint.restoreToken[4])}/${String(expected.accountCount)}`,
-    );
-  }
-};

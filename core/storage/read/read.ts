@@ -1,3 +1,4 @@
+import { assertTypeScriptStorageFrame } from './integrity/native-authority';
 import type { BookState } from '../../swapbook';
 import type { EntityState } from '../../entity/types';
 import type { RuntimeReplica } from '../../runtime/types';
@@ -337,6 +338,7 @@ export const readStorageFrameRecord = async (
   if (frame && frame.height !== targetHeight) {
     throw new Error(`STORAGE_FRAME_KEY_HEIGHT_MISMATCH:key=${targetHeight}:value=${frame.height}`);
   }
+  if (frame) assertTypeScriptStorageFrame(frame);
   return frame;
 };
 

@@ -1,4 +1,5 @@
-import type { RuntimeReplica, RuntimeState } from '../types';
+import type { RuntimeReplica } from '../types';
+import { ensureRuntimeInfrastructure } from '../envelope/replica-envelope';
 import type { JReplica } from '../../types/jurisdiction-runtime';
 import type { BrowserVMProvider, JAdapter, JAdapterConfig } from '../../jurisdiction/adapter/types';
 import { createJAdapterWithRetry } from '../../jurisdiction/adapter/kernel/retry';
@@ -20,7 +21,7 @@ export type TrustedJurisdictionRpcBinding = {
 };
 
 export const applyTrustedJurisdictionRpcBindings = (
-  state: Pick<RuntimeState, 'jReplicas'>,
+  env: RuntimeReplica,
   bindings: readonly TrustedJurisdictionRpcBinding[],
 ): void => {
   const rpcByJurisdictionRef = new Map<string, string>();
@@ -37,15 +38,9 @@ export const applyTrustedJurisdictionRpcBindings = (
     rpcByJurisdictionRef.set(jurisdictionRef, rpcUrl);
   }
 
-  for (const replica of state.jReplicas.values()) {
-    const hasExternalRpc = replica.rpcs?.some((rpc) => {
-      const value = String(rpc || '').trim().toLowerCase();
-      return value.length > 0 && !value.startsWith('browservm:');
-    });
-    if (!hasExternalRpc) continue;
-    const rpcUrl = rpcByJurisdictionRef.get(getJurisdictionIdentityRef(replica).toLowerCase());
-    if (rpcUrl) replica.rpcs = [rpcUrl];
-  }
+  // RPC selection is a live capability. Changing JReplica.rpcs after replay
+  // would commit an unlogged state change in the next frame and break restart.
+  ensureRuntimeInfrastructure(env).trustedJurisdictionRpcUrls = rpcByJurisdictionRef;
 };
 
 export const normalizeRestoredJReplicas = (env: RuntimeReplica): void => {
@@ -167,7 +162,8 @@ export const ensureLiveJAdapterForReplica = async (
 
   if (hasRpcs) {
     if (!rpcUrl) return null;
-    adapterConfig.rpcUrl = rpcUrl;
+    adapterConfig.rpcUrl = env.infrastructure?.trustedJurisdictionRpcUrls
+      ?.get(getJurisdictionIdentityRef(jReplica).toLowerCase()) ?? rpcUrl;
     adapterConfig.fromReplica = jReplica;
     if (Number.isSafeInteger(jReplica.blockDelayMs) && jReplica.blockDelayMs > 0) {
       adapterConfig.watchPollMs = jReplica.blockDelayMs;
@@ -221,7 +217,7 @@ export const rehydrateRestoredRuntimeInfra = async (
   },
 ): Promise<void> => {
   normalizeRestoredJReplicas(env);
-  applyTrustedJurisdictionRpcBindings(env.state, options.trustedJurisdictionRpcBindings ?? []);
+  applyTrustedJurisdictionRpcBindings(env, options.trustedJurisdictionRpcBindings ?? []);
   try {
     await options.loadGossipProfiles(env);
   } catch (error) {

@@ -30,15 +30,16 @@ different payloads, different failure modes, and different user promises.
 
 - Upload mode: `delayed_last_resort`.
 - Lookup key: `deriveRuntimeRecoveryActionLookupKey(runtimeId, runtimeSeed,
-  entityId, counterentity)`.
+entityId, counterentity)`.
 - Payload: latest counter-dispute appointment for one watched account pair.
 - Encryption: `encryptedRemedy` is AES-GCM encrypted with the account
   `watchSeed`.
 - Decryption trigger: the tower learns `watchSeed` only from a J-layer
   `DisputeStarted` event.
-- Tower action: only `watchtowerCounterDispute(...)` with a strictly newer
-  proof inside the last-resort window.
-- Tower cannot start disputes, same-proof finalize, or spend user funds.
+- Tower action: `watchtowerCounterDispute(...)` with a winning signed proof
+  inside the last-resort window; the same entry point finalizes after timeout.
+  At equal nonce, the signed LEFT proposal wins over the RIGHT proposal.
+- This appointment cannot start a dispute or spend user funds.
 
 ## Privacy Contract
 
@@ -138,6 +139,12 @@ Defaults:
 - default allowed RPC URLs: localhost `8545/8546` plus
   `https://xln.finance/rpc` through `/rpc8`
 
+Deployment must allowlist the exact RPC URL advertised to wallets. A tower
+using a public upstream still rejects appointments naming an unlisted proxy.
+Sepolia includes `https://sepolia.xln.finance/rpc` explicitly; verify upload
+acceptance as well as tower health. The [public P6 evidence](evidence/canonical-review-20261012/public-p6-d388464db.json)
+records the rejected upload and the bounded configuration correction.
+
 ## Restore Behavior
 
 Restore is backup-only from the user's perspective:
@@ -160,14 +167,15 @@ For each latest delayed-last-resort appointment:
 
 1. Normalize and allowlist the RPC URL.
 2. Read current block and on-chain account state.
-3. Skip if no active dispute, outside the last-resort window, or on-chain nonce
-   is already at least the appointment proof nonce.
+3. Skip if no active dispute or before the last-resort window. Require a higher
+   signed nonce, or an equal-nonce LEFT proposal overriding the active RIGHT.
 4. Find the matching `DisputeStarted` log for watched entity/counterentity.
 5. Use the event `watchSeed` to decrypt `encryptedRemedy`.
 6. Verify appointment sequence, proof nonce, proof body hash, chain id,
    depository, watched entity, counterentity, tower address, and final
    proofbody `watchSeed`.
-7. Submit `watchtowerCounterDispute(...)`.
+7. Submit `watchtowerCounterDispute(...)` to counter before timeout or finalize
+   after timeout; an already registered counter is not resubmitted before expiry.
 8. Store an action receipt with `submitted`, `skipped`, or `error`.
 
 The contract must enforce the last-resort delay. Tower policy alone is not a
@@ -185,7 +193,8 @@ security boundary.
   revealed `watchSeed`.
 - Latest appointment selection prefers higher `appointmentSequence`, then
   higher `proofNonce`, then newer bundle metadata.
-- A same-proof or early tower action must revert on-chain.
+- An early or non-winning counter must revert on-chain. After timeout, the
+  winning registered proof can finalize through the same entry point.
 - A stale dispute inside the last-resort window should produce exactly one
   counter-dispute submission path and a signed action receipt.
 

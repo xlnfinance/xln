@@ -1,4 +1,4 @@
-import type { EntityInputCausalTrace } from '../../qa/account-causal-trace';
+import type { EntityInputCausalTrace } from '../observability/account-causal-trace';
 import { cumulativeMarksToPhases, snapshotPerfPhases } from '../../support/performance/profile';
 import { isRuntimePerfProfileEnabled, readRuntimePerfSlowMs } from '../../support/performance/runtime-flags';
 import { createStructuredLogger } from '../../support/logger';
