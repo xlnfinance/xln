@@ -1,0 +1,157 @@
+{
+  "accounts": [
+    {
+      "deltas": [
+        [
+          1,
+          {
+            "collateral": {
+              "__xlnType": "BigInt",
+              "value": "25000000"
+            },
+            "leftAllowance": {
+              "__xlnType": "BigInt",
+              "value": "0"
+            },
+            "leftCreditLimit": {
+              "__xlnType": "BigInt",
+              "value": "0"
+            },
+            "leftHold": {
+              "__xlnType": "BigInt",
+              "value": "0"
+            },
+            "offdelta": {
+              "__xlnType": "BigInt",
+              "value": "25000000"
+            },
+            "ondelta": {
+              "__xlnType": "BigInt",
+              "value": "0"
+            },
+            "rightAllowance": {
+              "__xlnType": "BigInt",
+              "value": "0"
+            },
+            "rightCreditLimit": {
+              "__xlnType": "BigInt",
+              "value": "0"
+            },
+            "rightHold": {
+              "__xlnType": "BigInt",
+              "value": "0"
+            },
+            "tokenId": 1
+          }
+        ],
+        [
+          2,
+          {
+            "collateral": {
+              "__xlnType": "BigInt",
+              "value": "0"
+            },
+            "leftAllowance": {
+              "__xlnType": "BigInt",
+              "value": "0"
+            },
+            "leftCreditLimit": {
+              "__xlnType": "BigInt",
+              "value": "0"
+            },
+            "leftHold": {
+              "__xlnType": "BigInt",
+              "value": "0"
+            },
+            "offdelta": {
+              "__xlnType": "BigInt",
+              "value": "0"
+            },
+            "ondelta": {
+              "__xlnType": "BigInt",
+              "value": "0"
+            },
+            "rightAllowance": {
+              "__xlnType": "BigInt",
+              "value": "0"
+            },
+            "rightCreditLimit": {
+              "__xlnType": "BigInt",
+              "value": "0"
+            },
+            "rightHold": {
+              "__xlnType": "BigInt",
+              "value": "0"
+            },
+            "tokenId": 2
+          }
+        ],
+        [
+          3,
+          {
+            "collateral": {
+              "__xlnType": "BigInt",
+              "value": "0"
+            },
+            "leftAllowance": {
+              "__xlnType": "BigInt",
+              "value": "0"
+            },
+            "leftCreditLimit": {
+              "__xlnType": "BigInt",
+              "value": "0"
+            },
+            "leftHold": {
+              "__xlnType": "BigInt",
+              "value": "0"
+            },
+            "offdelta": {
+              "__xlnType": "BigInt",
+              "value": "0"
+            },
+            "ondelta": {
+              "__xlnType": "BigInt",
+              "value": "0"
+            },
+            "rightAllowance": {
+              "__xlnType": "BigInt",
+              "value": "0"
+            },
+            "rightCreditLimit": {
+              "__xlnType": "BigInt",
+              "value": "0"
+            },
+            "rightHold": {
+              "__xlnType": "BigInt",
+              "value": "0"
+            },
+            "tokenId": 3
+          }
+        ]
+      ],
+      "entityId": "0x2d08d3bb8f4102fb07fecef0b59f052139c99aa996239ebfc55baac82ac54dd6",
+      "height": 11,
+      "leftEntity": "0x2d08d3bb8f4102fb07fecef0b59f052139c99aa996239ebfc55baac82ac54dd6",
+      "mempool": 0,
+      "pending": false,
+      "rightEntity": "0x319d897d61ff0780e002ea25b0e418aa8bb49f5b9dcac9a76075372027977bb3"
+    }
+  ],
+  "backupSha256": "53ab403956318e9bf026abfb72e819cec670770dd3ffd8357c8bb1f984026c52",
+  "backupSource": "7c3f63f9841f4e8b61ac5eee5dbe4f9710b10621",
+  "height": 676,
+  "integrity": {
+    "checkedFrames": 128,
+    "latestHeight": 676,
+    "ok": true,
+    "runtimeId": "0xbe7597d3532df7293b0f0ff82ee0c30fb2fd2737"
+  },
+  "runtimeId": "0xbe7597d3532df7293b0f0ff82ee0c30fb2fd2737",
+  "sourceSha": "f2796d39fe9daca200dbf8ea9a6fff441f2785f1",
+  "recordedAt": "2026-10-12T01:46:08.764331+00:00",
+  "sourceTreeCleanBeforeAndAfter": true,
+  "exclusiveStandLock": true,
+  "runtimeLoopStarted": false,
+  "scope": "Existing public hub cold backup restored into an isolated private local directory with current TS code; production server and source backup untouched. Integrity checks cover the retained 128 frames, not the current live server tip.",
+  "logSha256": "b8a5530f24e3fec47b198a7e6eaa2ab1b7f77e64a681692a9a1141471da91c11"
+}

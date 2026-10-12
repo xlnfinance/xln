@@ -213,10 +213,11 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-bun-
 
-      - name: Install root and frontend dependencies
+      - name: Install root, frontend and React wallet dependencies
         run: |
           bun install --frozen-lockfile
           (cd frontend && bun install --frozen-lockfile)
+          (cd ui && bun install --frozen-lockfile)
 
       - name: Install contracts dependencies
         run: |
