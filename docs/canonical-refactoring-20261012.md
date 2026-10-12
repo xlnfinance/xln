@@ -63,6 +63,27 @@ diff reviews reported no actionable findings. These do not cover every Move
 route, every E2E, or public Sepolia P6.
 [Commands, results and retained logs](evidence/canonical-review-20261012/verification.json).
 
+### Follow-up: one overload policy and exact restore evidence
+
+The public Sepolia watcher repeatedly restarted a 2,048-block range after RPC
+429/timeouts. Its existing shrinking-window policy handled only Runtime mempool
+pressure. The same branch now handles both, removing three production lines net.
+A real Anvil forwarding proxy reproduces 429 and a real HTTP timeout: the old
+controller retries 2,048 blocks, while the fixed controller reads 512 and then
+delivers the original event beyond 4,700 blocks without skipping history.
+
+Three CI runs exposed the same restore-test race: the tower replaced a displayed
+snapshot before discovery, but the test still requested the older frame from a
+newer restored baseline. The test now binds its exact root and Account comparison
+to the selected snapshot. No importer, retention or financial assertion changed.
+
+Clean source `50281daaa`: 60/60 focused RPC tests, 284 assertions. The selected
+snapshot browser journey passed 1/1 on `0ff079f41`; its full check and the base-PR
+candidate `999396327` both passed 38 source gates. Public P6 remains unproved:
+RPC catch-up timed out before reaching the already-funded reserve. No extra
+funding or stale-state attack was submitted by those retries.
+[Exact commands, source bindings and retained logs](evidence/canonical-review-20261012/rpc-restore-followup.json).
+
 ## Target ownership and deletion sequence
 
 The live queue stays in [todo.md](../todo.md). This table is the reviewed design,

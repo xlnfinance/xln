@@ -4,42 +4,46 @@ Owner scope: TS + React + Ethereum same-J; Rust and lending remain frozen.
 Foreign Rust stash `438bf1a6ddd8679bba0b63bdef11dd1fd1f45e90` is untouched.
 Keep frozen-core, PRs with seven required green jobs, no WIP commits.
 
-- Current source: canonical-refactor candidate `005f5cd5ba69bbe44a9941e9a5b3a933ad8f90c2`
-  on `codex/canonical-audit-surface`, based on PR #71 (`b07da2b8762d3398683f3f2c481ee65a8caedc41`).
-  PR #70 passed all seven CI jobs (run 38194922745) and merged into main as
-  `86d2a515c255f33e1d40cfad8c379320e02ea2ff`. Its main CI is a separate result.
-- Last green: clean candidate `005f5cd5b`: 90 focused units / 867 assertions,
-  full `bun run check` / 38 source gates, real locked browser stand 3/3 with
-  no skips or flakes (Move LEFT, Move RIGHT, 22-second delayed reserve funding).
-  Static diff reviewers found no actionable issues. These are focused checks,
-  not a claim that all scenarios or public P6 passed.
-- First red: no remaining failure in that patch. The reproduced Move debt-total
-  error (500 shown instead of 450) is fixed by consuming the exact runtime sum.
-  Public P6 is still unproved. Its funded profile is already at 100 test USDT
-  reserve with no collateral: use the resumable harness, do not fund it again.
-- Artifacts: `docs/canonical-refactoring-20261012.md` and
-  `docs/evidence/canonical-review-20261012/` record 4,051/4,051 mechanically
-  indexed source files, focused regions in 236 files, and the tested patch.
-  Public P4/P5 and cold restore remain in `docs/evidence/rc-20261012/`.
-  Public alpha still runs `7c3f63f9841f4e8b61ac5eee5dbe4f9710b10621`.
-- Next: publish the reviewed refactor PR and finish PR #71 CI. Next structural
-  deletion is production QA imports/mounts, preserving scenario diagnostics;
-  keep the public P6 rollout moving as the release priority. Rust-only decoder
-  and codec proposals stay read-only. Live ordering remains in `todo.md`.
+- Current source: `9f1f517b0e2fe306c6adfafe664712b0535bf5ef` on
+  `codex/canonical-audit-surface`; its tree equals verified `50281daaa`.
+  PR #71 now carries the tower-restore test fix at `999396327`; PR #72 is
+  stacked on it. Main remains `86d2a515`. Neither PR is approved for merge
+  until all required CI jobs pass on its exact candidate.
+- Last green: 60/60 focused RPC tests / 284 assertions on clean `50281daaa`,
+  including real Anvil 429, timeout, unchanged failed-read state and exact
+  512-block retry before full backlog completion. Restore browser 1/1 on clean
+  `0ff079f41`, no skips/flakes; full check / 38 source gates there and on
+  `999396327`. The original refactor retains 90 units and three browser journeys.
+- First red: public P6 `PUBLIC_P6_WAIT_FAILED:reserve-funded` on `50281daaa`.
+  Public RPC catch-up still times out. Dedicated profile
+  `sepolia-p6-20261012b` has 200 test USDT confirmed in reserve, zero collateral,
+  no prepared appointment or attack. Do not fund again. Adaptive polling preserved
+  the first authenticated range through block 11893390; later retries retain it.
+  Main CI 38197082078 and old PR runs 38198105230/38198345234 all failed the same
+  tower-restore expectation race; the selected-snapshot fix is now submitted.
+- Artifacts: `docs/evidence/canonical-review-20261012/` records the original
+  eight-scope review and `rpc-restore-followup.json` with clean-source tests,
+  browser/check logs and the explicitly failed public P6 run. Public P4/P5 and
+  cold restore remain in `docs/evidence/rc-20261012/`. The live public alpha
+  still runs `7c3f63f9841f4e8b61ac5eee5dbe4f9710b10621`.
+- Next single action: inspect exact-candidate CI for PR #71, then PR #72.
+  For public P6, identify the slow RPC method/range before another identical
+  retry; never skip chain history or manufacture ingress. Production QA removal
+  is the next structural cut after this release boundary. Rust proposals stay read-only.
 - Remaining gates: ten consecutive green main CI runs; production Rust/QA
   isolation; public P6 with current code and real clocks; external tower
   start/finalize/reveal coverage; exact owner-reviewed mainnet release package.
-  No new dispute-start freeze, FIFO, one debt per debtor/creditor/token and
+  No extra dispute-start freeze, FIFO, one debt per debtor/creditor/token and
   party-selected windows remain settled. No starter bond/governance redesign.
 
-Method review, 2026-10-12 03:00 UTC: one completed patch removes 94 non-test
-source lines net and fixes one reproduced economic display divergence; 90 units
-and three browser journeys prove the chosen boundary. Eight read-only scopes
-completed; do not respawn a whole team for each small change. Prefer duplicated
-financial authority with a failing counterexample over similar helper text.
-The folder-width ratchet correctly required lowering its recorded debt after
-one file was deleted. Thirty-minute review heartbeat `xln-30` is active in this
-chat; unchanged results stay quiet. No external-model budget was spent or renewed.
+Method review, 2026-10-12: use the existing real-chain fixture to inject transport
+pressure instead of adding another watcher or retry abstraction. A red run on the
+old controller and a clean-source green run establish the change. Bind browser
+restore expectations to the snapshot selected by discovery, not a moving display.
+The attempted public retries did not complete P6; retain their exact failure and
+stop repeating unchanged requests. Before any external retry, read chain state
+and preserve submission intent. The 30-minute review heartbeat `xln-30` remains
+active; no external-model budget was spent or renewed.
 
 ## Historical evidence and superseded scope
 
