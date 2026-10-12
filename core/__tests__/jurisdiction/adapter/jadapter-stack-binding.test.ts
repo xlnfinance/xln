@@ -18,6 +18,12 @@ import { foundationRegisterExternalToken } from '../../../jurisdiction/adapter/o
 import { createEmptyEnv } from '../../../runtime';
 import { createTokenCatalogController } from '../../../api/server/catalog/tokens';
 import type { JReplica } from '../../../types/jurisdiction-runtime';
+import { attachValidatedJurisdictionAdapter } from '../../../orchestrator/hub/node/hub-jurisdiction-binding';
+import { applyTrustedJurisdictionRpcBindings } from '../../../runtime/recovery/j-adapter-restore';
+import { getJurisdictionIdentityRef } from '../../../jurisdiction/machine/jurisdiction-runtime';
+import { getLiveJAdapter } from '../../../runtime/j-submit/live-jadapters';
+import { buildReplayVerifiableRuntimePostStateView } from '../../../storage/wal/snapshot';
+import { computeRuntimePostStateComponentDigests } from '../../../storage/hashes';
 
 const CHAIN_ID = 31_337;
 
@@ -161,15 +167,85 @@ test('RPC fromReplica rejects a live EntityProvider not bound to the Depository'
 
 test('RPC fromReplica proves the exact EntityProvider deployment block', async () => {
   const anvil = await startAnvil();
+  const calls: Array<{ method: string; params: unknown[] }> = [];
+  const proxy = Bun.serve({
+    hostname: '127.0.0.1',
+    port: 0,
+    async fetch(request) {
+      const body = await request.text();
+      const payload = JSON.parse(body) as typeof calls | (typeof calls)[number];
+      calls.push(...(Array.isArray(payload) ? payload : [payload]));
+      return fetch(anvil.rpcUrl, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body,
+      });
+    },
+  });
+  const rpcUrl = `http://127.0.0.1:${proxy.port}`;
   let deployed: JAdapter | null = null;
+  let restored: JAdapter | null = null;
   try {
     deployed = await createJAdapter({ mode: 'rpc', chainId: CHAIN_ID, rpcUrl: anvil.rpcUrl });
     await deployed.deployStack();
+    restored = await createJAdapter({
+      mode: 'rpc',
+      chainId: CHAIN_ID,
+      rpcUrl,
+      fromReplica: replicaForAddresses(deployed, deployed.addresses.entityProvider),
+    });
+    const restoredAdapter = restored;
+    expect(restored.addresses).toEqual(deployed.addresses);
+    expect(restored.entityProviderDeploymentBlock).toBe(deployed.entityProviderDeploymentBlock);
+    expect(calls.filter(call => call.method === 'eth_getBlockReceipts').map(call => call.params))
+      .toEqual([[ethers.toQuantity(deployed.entityProviderDeploymentBlock)]]);
+    expect(calls.filter(call => call.method === 'eth_getTransactionReceipt')).toHaveLength(0);
+    const env = createEmptyEnv('hub-trusted-rpc-attachment');
+    const name = 'restored-stack';
+    const replica: JReplica = {
+      ...replicaForAddresses(deployed, deployed.addresses.entityProvider),
+      name,
+      blockNumber: 0n,
+      stateRoot: null,
+      mempool: [],
+      blockDelayMs: 0,
+      lastBlockTimestamp: 0,
+      position: { x: 0, y: 0, z: 0 },
+      rpcs: [anvil.rpcUrl],
+    };
+    env.state.jReplicas.set(name, replica);
+    const before = computeRuntimePostStateComponentDigests(buildReplayVerifiableRuntimePostStateView(env));
+    expect(() => attachValidatedJurisdictionAdapter(env, restoredAdapter, rpcUrl))
+      .toThrow('HUB_JADAPTER_IDENTITY_MISMATCH');
+    expect(getLiveJAdapter(env, name)).toBeUndefined();
+    applyTrustedJurisdictionRpcBindings(env, [{
+      jurisdictionRef: getJurisdictionIdentityRef({ ...replica, chainId: CHAIN_ID + 1 }), rpcUrl,
+    }]);
+    expect(() => attachValidatedJurisdictionAdapter(env, restoredAdapter, rpcUrl))
+      .toThrow('HUB_JADAPTER_IDENTITY_MISMATCH');
+    applyTrustedJurisdictionRpcBindings(env, [{ jurisdictionRef: getJurisdictionIdentityRef(replica), rpcUrl }]);
+    attachValidatedJurisdictionAdapter(env, restored, rpcUrl);
+    expect(getLiveJAdapter(env, name)).toBe(restored);
+    expect(replica.rpcs).toEqual([anvil.rpcUrl]);
+    expect(computeRuntimePostStateComponentDigests(buildReplayVerifiableRuntimePostStateView(env))).toEqual(before);
+    env.state.jReplicas.set(name, { ...replica, chainId: CHAIN_ID + 1 });
+    expect(() => attachValidatedJurisdictionAdapter(env, restoredAdapter, anvil.rpcUrl))
+      .toThrow('HUB_JADAPTER_IDENTITY_MISMATCH');
+    for (const contract of ['account', 'depository', 'entityProvider', 'deltaTransformer'] as const) {
+      const changed = { ...replica, contracts: { ...replica.contracts, [contract]: `0x${'11'.repeat(20)}` } };
+      env.state.jReplicas.set(name, changed);
+      applyTrustedJurisdictionRpcBindings(env, [{ jurisdictionRef: getJurisdictionIdentityRef(changed), rpcUrl }]);
+      expect(() => attachValidatedJurisdictionAdapter(env, restoredAdapter, rpcUrl))
+        .toThrow('J_STACK_CONNECTED_ADDRESS_MISMATCH');
+      expect(getLiveJAdapter(env, name)).toBe(restored);
+    }
+    env.state.jReplicas.set(name, replica);
+    calls.length = 0;
     const claimedLaterBlock = deployed.entityProviderDeploymentBlock + 1;
     const result = await createJAdapter({
       mode: 'rpc',
       chainId: CHAIN_ID,
-      rpcUrl: anvil.rpcUrl,
+      rpcUrl,
       fromReplica: replicaForAddresses(
         deployed,
         deployed.addresses.entityProvider,
@@ -184,8 +260,13 @@ test('RPC fromReplica proves the exact EntityProvider deployment block', async (
     expect(result instanceof Error ? result.message : '').toContain(
       `RPC_ENTITY_PROVIDER_DEPLOYMENT_RECEIPT_MISSING:${claimedLaterBlock}`,
     );
+    expect(calls.filter(call => call.method === 'eth_getBlockReceipts').map(call => call.params))
+      .toEqual([[ethers.toQuantity(claimedLaterBlock)]]);
+    expect(calls.filter(call => call.method === 'eth_getTransactionReceipt')).toHaveLength(0);
   } finally {
+    await restored?.close();
     await deployed?.close();
+    await proxy.stop(true);
     await stopAnvil(anvil);
   }
 }, 120_000);

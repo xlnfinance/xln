@@ -232,11 +232,12 @@ export const BLOCKCHAIN = {
   // chain failover and therefore may stay deliberately cold.
   J_WATCHER_POLL_INTERVAL_MS: 5_000,
 
-  /** Bound catch-up work while amortizing history copies and WAL commits.
-   * Every header and the post-receipt fence remain checked; RPC batches stay
-   * capped independently at 128 calls by the receipt reader.
+  /** Admit authenticated catch-up progress before a public RPC range stalls.
+   * A 2048-block receipt window can exceed the 60s drain deadline without
+   * throttling. Smaller windows retain every header and the reorg fence;
+   * RPC batches stay capped independently at 128 calls by the receipt reader.
    */
-  J_WATCHER_MAX_BLOCKS_PER_POLL: 2048,
+  J_WATCHER_MAX_BLOCKS_PER_POLL: 256,
 
   /** Maximum gas price willing to pay (in gwei) */
   MAX_GAS_PRICE_GWEI: 300,

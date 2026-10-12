@@ -5,28 +5,34 @@ Foreign Rust stash `438bf1a6ddd8679bba0b63bdef11dd1fd1f45e90` is untouched.
 Keep frozen-core, PRs with seven required green jobs, no WIP commits.
 
 
-Current checkpoint, 2026-10-12 20:34 UTC: PR #73 passed all seven required
-CI jobs on clean 336cdbe32 and merged as d1eb4f2d7. The private Sepolia rollout
-restored actual H1 state through R4477/J11898053, with coreOk=true. Startup did
-not finish: it requires the original 2,000,000 USDT bootstrap target after the
-valid P6 exit left 1,999,800 USDT. Public ingress remains in maintenance and
-both services stopped; preserve current WAL and the original cold backup.
-No new owner decision is required.
+Current checkpoint, 2026-10-12 21:44 UTC: public Sepolia remains on clean
+9956bc7fd (PR #74 green 7/7, merged as c36c30996). H1 and tower are healthy;
+P6 remains finalized with zero collateral. No new funding or payment was sent.
+PR #75 at cc1b9600c removes 71 serial deployment-receipt reads and reuses the
+canonical 60-second stall tracker for wallet catch-up. Clean checks: 16 tests /
+45 assertions, 38 source gates, compiled production UI.
 
-The stopped deployed H1 copy cold-restores through the pinned 336cdbe32 source:
-128/128 integrity frames, reconstructed root verified, P6 dispute cleared and
-collateral zero. No network adapters or transaction submission in this check.
-Evidence: docs/evidence/canonical-review-20261012/release-336cdbe32.json.
-This proves deployed financial recovery, not public wallet availability.
+The owner requested an immediate usable deployment and has no dedicated RPC.
+Free ethPandaOps passes authenticated 128-block server reading: 56 receipt proofs,
+7.460 seconds, no 429. Two actual production boundaries remain before promotion:
+1. Switching operator RPC hits HUB_JADAPTER_IDENTITY_MISMATCH: the final hub
+   attachment guard compares persisted RPC to the approved live override.
+   Configuration rollback succeeded in 77 seconds without rewinding WAL. Reuse
+   the exact-stack trusted transport binding already used by canonical restore.
+2. Browser catch-up with real ethPandaOps reaches 74%, then a 2048-block receipt
+   window exceeds 60 seconds without a completed authenticated admission. Bound
+   the existing window to 256; preserve every header, receipt root, reorg fence
+   and the stall deadline. No new progress oracle or skipped history.
+Evidence: docs/evidence/canonical-review-20261012/wallet-catchup-cc1b9600c.json.
 
-Method review: green local dev funding does not prove public-chain restart
-after withdrawals. Follow the first deployed boundary: operational reserves
-must gate service readiness, while initial dev funding targets remain explicit
-bootstrap diagnostics. Do not replenish the 200 USDT to hide the defect or
-weaken storage/empty-reserve checks. The minimal TS startup/import fix passes 72 related tests and 1,055 assertions.
-Static review confirms dev H2/H3 funding and zero-reserve rejection remain.
-Next: check the committed candidate and real compiled-wallet/bootstrap path,
-then require a new PR with exact-head green CI before public activation.
+Method review: local green is not public boot. Test actual RPC latency and final
+adapter attachment before calling a config switch safe. No repeated provider
+search: ethPandaOps works; fix the two demonstrated local boundaries. Restore
+headroom by sparsifying inactive 2344d2a93 checkout; Git objects and untracked
+files remain recoverable, current 9956 source/data and rollback remain intact.
+Next single step: exact-candidate real Anvil regressions and browser catch-up,
+then full check, update PR #75, mandatory 7 green jobs and public 100 USDT → 25 USDT
+payment→reload. No owner decision is pending. Rust/lending/contracts unchanged.
 
 - Owner authorized the one active TS fixture import correction on October 12.
   The stale worker path is replaced by the canonical Runtime worker path;

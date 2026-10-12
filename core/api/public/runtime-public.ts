@@ -132,7 +132,7 @@ export type {
 export { createJAdapter } from '../../jurisdiction/adapter';
 export type { JAdapter, JAdapterConfig, JAdapterMode, JEvent } from '../../jurisdiction/adapter';
 export { applyJEventsToEnv, buildJEventsRuntimeInput } from '../../jurisdiction/adapter/watcher';
-export { getJWatcherDrainStatus, isJWatcherDrainComplete } from '../../jurisdiction/adapter/operations/backlog-drain-status';
+export { getJWatcherDrainStatus, isJWatcherDrainComplete, observeJWatcherDrainProgress, getJWatcherDrainProgressKey } from '../../jurisdiction/adapter/operations/backlog-drain-status';
 export {
   getActiveJAdapter,
   getEntityJAdapter,

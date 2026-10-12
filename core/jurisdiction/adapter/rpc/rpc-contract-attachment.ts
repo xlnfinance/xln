@@ -10,6 +10,7 @@ import type { RpcContractStackState } from './rpc-contract-stack';
 import { rpcLog } from '../rpc-public';
 import { firstAddress } from '../rpc-utils';
 import type { JAdapterAddresses, JAdapterConfig } from '../types';
+import { parseReceiptQuantity } from '../../machine/receipt-codec';
 
 export const readRpcReplicaAddresses = (config: JAdapterConfig): JAdapterAddresses => {
   const replica = config.fromReplica;
@@ -34,41 +35,32 @@ const assertEntityProviderDeploymentOrigin = async (
   // state tries. Requiring archive state here made a valid durable replica
   // impossible to restore even though the immutable creation evidence still
   // existed. Current bytecode is verified separately by readiness binding.
-  let block: unknown;
+  let receipts: unknown;
   try {
-    block = await provider.send('eth_getBlockByNumber', [ethers.toQuantity(deploymentBlock), true]);
+    receipts = await provider.send('eth_getBlockReceipts', [ethers.toQuantity(deploymentBlock)]);
   } catch (error) {
     throw new Error(
       `RPC_ENTITY_PROVIDER_DEPLOYMENT_ORIGIN_UNAVAILABLE:${deploymentBlock}`,
       { cause: error },
     );
   }
-  if (typeof block !== 'object' || block === null) {
+  if (receipts === null) {
     throw new Error(`RPC_ENTITY_PROVIDER_DEPLOYMENT_BLOCK_MISSING:${deploymentBlock}`);
   }
-  const transactions = (block as { transactions?: unknown }).transactions;
-  if (!Array.isArray(transactions)) {
+  if (!Array.isArray(receipts)) {
     throw new Error(`RPC_ENTITY_PROVIDER_DEPLOYMENT_BLOCK_INVALID:${deploymentBlock}`);
   }
   const normalizedAddress = address.toLowerCase();
-  for (const transaction of transactions) {
-    const hash = typeof transaction === 'string'
-      ? transaction
-      : typeof transaction === 'object' && transaction !== null
-        ? (transaction as { hash?: unknown }).hash
-        : undefined;
-    if (typeof hash !== 'string') continue;
-    const receipt = await provider.send('eth_getTransactionReceipt', [hash]) as {
-      blockNumber?: unknown;
-      contractAddress?: unknown;
-      status?: unknown;
-    } | null;
+  for (const raw of receipts) {
+    if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
+      throw new Error(`RPC_ENTITY_PROVIDER_DEPLOYMENT_RECEIPT_INVALID:${deploymentBlock}`);
+    }
+    const receipt = raw as Record<string, unknown>;
     if (
-      receipt !== null &&
-      typeof receipt.contractAddress === 'string' &&
-      receipt.contractAddress.toLowerCase() === normalizedAddress &&
-      Number(BigInt(String(receipt.blockNumber))) === deploymentBlock &&
-      BigInt(String(receipt.status)) === 1n
+      typeof receipt['contractAddress'] === 'string' &&
+      receipt['contractAddress'].toLowerCase() === normalizedAddress &&
+      parseReceiptQuantity(receipt['blockNumber'], 'DEPLOYMENT_BLOCK_NUMBER') === BigInt(deploymentBlock) &&
+      parseReceiptQuantity(receipt['status'], 'DEPLOYMENT_STATUS') === 1n
     ) {
       return;
     }

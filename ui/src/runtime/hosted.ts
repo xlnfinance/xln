@@ -45,26 +45,54 @@ const USDC = 1;
  * Authenticated empty headers need not create financial frames, but pending
  * financial events and certified prefixes must finish before admission opens.
  */
-async function waitForChainScan(xln: Awaited<ReturnType<typeof getXLN>>, env: RuntimeReplica, entityId: string, signerId: string, timeoutMs: number, onProgress?: (step: string) => void): Promise<void> {
-	const jadapter = xln.getEntityJAdapter(env, entityId, signerId);
-	if (!jadapter?.getCurrentBlockNumber || !jadapter.getFinalityDepth) throw new Error(`J_WATCHER_DRAIN_API_MISSING:${entityId}`);
-	const head = Number(await jadapter.getCurrentBlockNumber());
-	const depth = Number(jadapter.getFinalityDepth());
-	if (!Number.isSafeInteger(head) || head < 0 || !Number.isSafeInteger(depth) || depth < 0) throw new Error(`J_WATCHER_TARGET_INVALID:${head}:${depth}`);
-	const target = { adapter: jadapter, targetBlock: Math.max(0, head - depth) };
-	const startedAt = Date.now();
-	try {
-		await waitFor(() => {
-			const status = xln.getJWatcherDrainStatus(env, target);
-			onProgress?.(`Syncing with the chain · ${Math.min(100, Math.floor(status.authenticatedThrough * 100 / Math.max(1, status.targetBlock)))}%`);
-			return xln.isJWatcherDrainComplete(status);
-		}, 'chain scan', timeoutMs, 250);
-	} finally {
-		console.info('[hosted] chain scan', {
-			...xln.getJWatcherDrainStatus(env, target),
-			elapsedMs: Date.now() - startedAt,
-		});
-	}
+async function waitForChainScan(
+  xln: Awaited<ReturnType<typeof getXLN>>,
+  env: RuntimeReplica,
+  entityId: string,
+  signerId: string,
+  timeoutMs: number,
+  onProgress?: (step: string) => void,
+): Promise<void> {
+  const jadapter = xln.getEntityJAdapter(env, entityId, signerId);
+  if (!jadapter?.getCurrentBlockNumber || !jadapter.getFinalityDepth)
+    throw new Error(`J_WATCHER_DRAIN_API_MISSING:${entityId}`);
+  const head = Number(await jadapter.getCurrentBlockNumber());
+  const depth = Number(jadapter.getFinalityDepth());
+  if (!Number.isSafeInteger(head) || head < 0 || !Number.isSafeInteger(depth) || depth < 0)
+    throw new Error(`J_WATCHER_TARGET_INVALID:${head}:${depth}`);
+  const target = { adapter: jadapter, targetBlock: Math.max(0, head - depth) };
+  const startedAt = performance.now();
+  const baseline = xln.getJWatcherDrainStatus(env, target).committedCursor;
+  let progress: ReturnType<typeof xln.observeJWatcherDrainProgress> | null = null;
+  try {
+    // The canonical progress tracker owns the stall deadline; waitFor retains
+    // the Runtime halt check without imposing a second absolute deadline.
+    await waitFor(
+      () => {
+        const status = xln.getJWatcherDrainStatus(env, target);
+        const complete = xln.isJWatcherDrainComplete(status);
+        if (!complete)
+          progress = xln.observeJWatcherDrainProgress(
+            progress,
+            xln.getJWatcherDrainProgressKey(status),
+            performance.now(),
+            timeoutMs,
+          );
+        onProgress?.(
+          `Syncing with the chain · ${Math.max(0, Math.min(100, Math.floor(((status.authenticatedThrough - baseline) * 100) / Math.max(1, status.targetBlock - baseline))))}%`,
+        );
+        return complete;
+      },
+      'chain scan',
+      Number.POSITIVE_INFINITY,
+      250,
+    );
+  } finally {
+    console.info('[hosted] chain scan', {
+      ...xln.getJWatcherDrainStatus(env, target),
+      elapsedMs: performance.now() - startedAt,
+    });
+  }
 }
 
 export function findReplicaState(env: RuntimeReplica, entityId: string) {
@@ -190,7 +218,7 @@ export type HostedVaultOptions = {
 	selfLabel: string;
 	stack: Stack;
 	recovery?: RuntimeRecoveryCandidate;
-	/** Mobile first-run history verification can exceed a minute; admission stays gated. */
+	/** Maximum time without authenticated scan progress; admission stays gated. */
 	chainScanTimeoutMs?: number;
 	onStep?: (step: string) => void;
 };

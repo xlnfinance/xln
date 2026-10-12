@@ -1,0 +1,228 @@
+{
+  "sourceSha": "9956bc7fd426bcdef84b3e87ee794f2f6d90c8d1",
+  "sourceCleanDuringChecks": true,
+  "pr": "https://github.com/xlnfinance/xln/pull/74",
+  "ciRun": "https://github.com/xlnfinance/xln/actions/runs/38305815937",
+  "ciStatus": "success",
+  "publicActivated": true,
+  "mainnetReady": false,
+  "unit": {
+    "passed": 72,
+    "failed": 0,
+    "assertions": 1055
+  },
+  "check": {
+    "exitCode": 0,
+    "sourceGates": 38,
+    "sourceDurationMs": 26678
+  },
+  "compiledWallet": {
+    "passed": 1,
+    "skipped": 0,
+    "uiSourceSha": "d29c84c6676fbbc814eb6f8535483fe502b7aa43",
+    "browserSourcesUnchanged": true,
+    "flows": [
+      "import",
+      "fund100",
+      "moveReserve",
+      "pay25",
+      "reload"
+    ],
+    "scope": "local Anvil same-J three-hub production stand"
+  },
+  "privateSepolia": {
+    "sourceSha": "9956bc7fd426bcdef84b3e87ee794f2f6d90c8d1",
+    "coreOk": true,
+    "systemOk": true,
+    "degraded": [],
+    "reserve": "1999800000000",
+    "bootstrapTarget": "2000000000000",
+    "targetMet": false,
+    "tokenDecimals": 6,
+    "backupSha256": "f1740d00e4c15e54cb529ec486ab302471a851693073e01944d974c1cbfe9fdc",
+    "coldRestarts": 2
+  },
+  "deployedH1ColdRestore": {
+    "sourceSha": "9956bc7fd426bcdef84b3e87ee794f2f6d90c8d1",
+    "sourceClean": true,
+    "inputArchiveSha256": "b8a6d67dcbc3bd2d3b8435f89ebe9c57168c1f75e47de2596162005aead2898c",
+    "inputFiles": 30,
+    "inputTreeDigest": "721a7165cc0cb8c06e0a4a64af6718e50888d9a673a8f1c46593ceb8be578aa1",
+    "rollbackSha": "5e6d08a16d6354354ced0868aa8e1a8a85ae6121",
+    "rollbackArchiveSha256": "d07823f61c99a2d3728eb2e30ee2f3dc4e3bce1d109b1e78876af4a1987a4ff3",
+    "independentProcesses": 2,
+    "independentDbCopies": 2,
+    "activeDispute": false,
+    "collateral": "0",
+    "entityRoots": [
+      {
+        "cellCount": 1,
+        "entityId": "0x2d08d3bb8f4102fb07fecef0b59f052139c99aa996239ebfc55baac82ac54dd6",
+        "hash": "0x65a3a0c5e68a33be04f29e7948ddf64f12373153245b1047f5f6a0edbd977d93"
+      }
+    ],
+    "frameHash": "0x1604639a0ee0b697686dd13e397834d39d76e9cd2a639be80634a89c83a3d2be",
+    "height": 4478,
+    "integrity": {
+      "checkedFrames": 128,
+      "latestHeight": 4478,
+      "ok": true,
+      "runtimeId": "0xbe7597d3532df7293b0f0ff82ee0c30fb2fd2737"
+    },
+    "jHeight": 11898053,
+    "networkStarted": false,
+    "outboxDigest": "266dafbe80edea90779bf070cbc40af84ed384bb312bd25fc2b26e69756ed25b",
+    "pending": {
+      "entitySubmit": [
+        {
+          "batchHash": "0x7f5bc0234574eab6dcefa9b52d2a9b89f94d6d5b833d53aac8d8f8c3723e6332",
+          "entityId": "0x2d08d3bb8f4102fb07fecef0b59f052139c99aa996239ebfc55baac82ac54dd6",
+          "lastResultOutcome": "transientFailure",
+          "submitAttempts": 1,
+          "txHash": "0x528ec776a05d08c11030525a0e130f268e3860e3ccd622e5ea1f239f947e1c53"
+        }
+      ],
+      "jOutbox": [],
+      "jurisdictionImports": 0,
+      "networkOutbox": 0,
+      "pendingRegistrations": 0
+    },
+    "postStateHash": "0xfb3ffcc1dcac2503e3a2c4e4db96033cc294ab90e7f41216dca36a6e265a36bd",
+    "runtimeId": "0xbe7597d3532df7293b0f0ff82ee0c30fb2fd2737",
+    "transactionsSent": 0,
+    "verification": {
+      "actualCanonicalStateHash": "",
+      "actualStateHash": "0xfb3ffcc1dcac2503e3a2c4e4db96033cc294ab90e7f41216dca36a6e265a36bd",
+      "expectedCanonicalStateHash": "",
+      "expectedStateHash": "0xfb3ffcc1dcac2503e3a2c4e4db96033cc294ab90e7f41216dca36a6e265a36bd",
+      "ok": true
+    },
+    "rollbackScope": "Data compatibility only; earlier source still has the reserve-readiness defect."
+  },
+  "fundingExit": {
+    "passed": 25,
+    "failed": 0,
+    "skipped": 0,
+    "standLocked": true,
+    "maxPrintedConservativeGas": {
+      "start": 3912360,
+      "finalize": 4453117,
+      "reveal": 1002252,
+      "counter": 795560
+    },
+    "limitPerOperation": 5000000,
+    "compilerTemplatesMatch": 8,
+    "note": "Fuzz printed values are samples, not global maxima; every invocation asserts the operation bound."
+  },
+  "artifacts": [
+    {
+      "file": "reserve-readiness-9956bc7fd-related.log.gz",
+      "rawSha256": "0029095ba195e7679ffd418cc2e952e97b1a540724c2eb8cb17cd66839878e21",
+      "sha256": "6e1b97126fa7cd64e1e14dfdeb5ccbdccab3f4273eb4b8b8b3b087a6c4c7b76e"
+    },
+    {
+      "file": "reserve-readiness-9956bc7fd-catalog.log.gz",
+      "rawSha256": "c4e5b528bdbfac98f61140fabe95296b56f2fb2eb1650efa4fb8fdea48c94bb6",
+      "sha256": "ae2e6fbee1c7e8519d63a094b9c91822107f222eb1a7e29eb9bd8a4389914b95"
+    },
+    {
+      "file": "reserve-readiness-9956bc7fd-check.log.gz",
+      "rawSha256": "ed6a9195cf4ba46882a8c039ecaa93acb0c466b570e75868f77a6d99827fa689",
+      "sha256": "82b948f2749c3a26969307f8fedd28890057ba295fb9a1c815c40ae75959dba8"
+    },
+    {
+      "file": "reserve-readiness-9956bc7fd-wallet.log.gz",
+      "rawSha256": "6d40a94aa348e93cc04a960f4ef3d6f8625dc99c9260300eda3fe21fc61fe0b2",
+      "sha256": "b709078c04533616d164ac02f74e9ca8fc8e9533cfe7f570295deb737765c8aa"
+    },
+    {
+      "file": "release-9956bc7fd-private-start.log.gz",
+      "rawSha256": "2464ba632b4c467da5b2fdc13875d7000a76db0f29df6858a462e49851827831",
+      "sha256": "672bee0dc0668b630990096f89e0255c804351075fb5c11fb8e16f4c946b01fe"
+    },
+    {
+      "file": "release-9956bc7fd-capture.log.gz",
+      "rawSha256": "e69daaaa8911fd048d63d589e6909cd7ff46f4771ddb9e3556b2f73d489868d2",
+      "sha256": "f8db74c468c3cf0931386f9552a8e050d39afd61aa098ef814737df46e018beb"
+    },
+    {
+      "file": "deployed-h1-9956-verified.log.gz",
+      "rawSha256": "23ec653ef97c458c8520ec8c6266ee9b4f402637a8e5532c640151f0d101e621",
+      "sha256": "cae318909764d7b141ff893ec136fd110a801245fa940567ba45b73d0a7cd4df"
+    },
+    {
+      "file": "funding-exit-9956bc7fd.log.gz",
+      "rawSha256": "257d70d074378f1dcc511d72749f672f0571cac5b01427217bcf90a59d5f6f93",
+      "sha256": "783cf4a73152f653dfe98b38af939fcb6ee4a00a1c903a03c3e3ca5f857f0b78"
+    },
+    {
+      "file": "exit-bytecode-9956bc7fd.log.gz",
+      "rawSha256": "bcce45dabd988338b8b0d9d74adef8836a70a79bbebfea6a025339d004a9183d",
+      "sha256": "de16586662fe50ed2ddfe57692c7f6e397e55443b92ec433dc8b94b1f2fe8c07"
+    },
+    {
+      "file": "release-9956bc7fd-ci.json.gz",
+      "rawSha256": "d21be1037044a79b5b334e8eba11faa6893c4d2bd3462339b7c4cd88f287e5af",
+      "sha256": "71319ff55f3c1ba017ffc430d81da80bd0a806efd397ae2347483b4514b15b82"
+    },
+    {
+      "file": "release-9956bc7fd-public-open.log.gz",
+      "rawSha256": "729dfa19517b6746f2f933c40f31b03282147d9b8b374ee609cc4d0bc4fc152b",
+      "sha256": "3e97337a50704bf79f813978eb76244eace9b8d95549ef00e133baf8aba022f4"
+    },
+    {
+      "file": "release-9956bc7fd-public-open-retry.log.gz",
+      "rawSha256": "8684299545c05fe9b5aaf681d82b07297f112825c2cca2af017a842065f59b27",
+      "sha256": "9d1eba96baecbf151764fd9f59a1aaefea72c9d9dfc6cc21bab52e462fcd2604"
+    },
+    {
+      "file": "public-wallet-9956bc7fd-run.log.gz",
+      "rawSha256": "c9f1a4e395167a3fa8daaafdb1c46f74531f15afa76ebca630ac1f2c09e3cc20",
+      "sha256": "8a1478d2083f45506b00bea58bd0ea8f953144bf9d1b75d925250a514e33874c"
+    },
+    {
+      "file": "public-wallet-9956bc7fd-diagnosis.log.gz",
+      "rawSha256": "b332a55771806bf43934d7ed3ae49e37b5bcea688b859eb592995a8d1ee07c2c",
+      "sha256": "d57ceed3a48ce9bc0c7d2d1f5d70440cd62a86729994eaf899fbc939a0d75f2c"
+    },
+    {
+      "file": "public-wallet-9956bc7fd-rpc-diagnosis.log.gz",
+      "rawSha256": "6958797f7d5d5b1fc200c83258228d3b40c3d5667e25b786b7397598ccee3c37",
+      "sha256": "bc237841433b55cbb2c10e9c37a553e613691f6ba9b4a49956868a971f161bf0"
+    }
+  ],
+  "requiredJobsPassed": 7,
+  "mergeSha": "c36c30996beba9638a0ef515d91a0c7e6f3a0ba4",
+  "publicAssets": {
+    "kind": "PUBLIC_ASSETS_VERIFIED",
+    "sourceSha": "9956bc7fd426bcdef84b3e87ee794f2f6d90c8d1",
+    "uiSourceSha": "d29c84c6676fbbc814eb6f8535483fe502b7aa43",
+    "origin": "https://sepolia.xln.finance",
+    "files": [
+      "index.html",
+      "runtime.js",
+      "account-worker.js",
+      "icon.svg",
+      "favicon-small.svg",
+      "manifest.webmanifest",
+      "assets/push-wake-sw-TrIUAo0y.js",
+      "assets/index.esm-Dup_VHWH.js",
+      "assets/browser-CfPhK2IQ.js",
+      "assets/index-C9Tn8rLa.css",
+      "assets/index-CL6bpV8V.js"
+    ],
+    "systemOk": true,
+    "coreOk": true
+  },
+  "publicWallet": {
+    "passed": false,
+    "error": "TIMEOUT: chain scan",
+    "fundingRequests": 0,
+    "paymentRequests": 0,
+    "targetBlock": 11901499,
+    "authenticatedThrough": 11893614,
+    "observedRpcError": "RPC_BATCH_HTTP_429",
+    "elapsedMs": 60119,
+    "demoReady": false
+  }
+}
