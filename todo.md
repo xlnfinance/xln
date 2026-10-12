@@ -13,7 +13,10 @@ TS, React and Ethereum same-J; Rust and production lending are frozen.
 PR #70 is merged after seven green jobs. The funded Sepolia P6 profile is
 preserved; the public alpha has not yet been updated to the new candidate.
 
-1. Land the verified debt-total/outbox/dead-entrypoint refactor through required
+1. Fix the reproduced P6 frame-14 recovery failure: trusted RPC selection must
+   not mutate committed JReplica state. Prove two successive restores, then
+   recover the affected profile explicitly while retaining its original WAL.
+   Land the verified debt-total/outbox/dead-entrypoint refactor through required
    green CI. [Review and measured first patch](docs/canonical-refactoring-20261012.md)
    retain all eight areas' proposals without making a second live queue.
 2. Complete PR #71's reserve-confirmation rollout and public P6 with genuine

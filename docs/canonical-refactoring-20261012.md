@@ -119,6 +119,22 @@ all assertions and the 60-second limit. That diagnostic change on clean `8d7f1e7
 passed its focused case, all 444 jurisdiction tests, and 38 source checks.
 [Diagnostic scope and retained logs](evidence/canonical-review-20261012/watcher-gate-diagnostics.json).
 
+The next public P6 attempt found an earlier boundary than RPC throughput:
+recovery failed at Runtime frame 14. On clean `c4566fd81`, replay through frame
+13 succeeds. Changing only the restored `JReplica.rpcs` from its committed
+publicnode URL to the configured public proxy reproduces frame 14's exact
+recorded hash. The restore binding had changed committed state outside WAL.
+The original funded database and its forensic copy remain unchanged.
+[Exact hashes and retained diagnostic](evidence/canonical-review-20261012/p6-replay-rpc-diagnosis.json).
+
+This changes the immediate order: keep RPC selection in live infrastructure,
+prove two successive restores with exact Runtime roots, then explicitly recover
+the affected profile before resuming P6. Excluding the field from hashes or
+silently patching replay would hide the original failure. At the 04:15 UTC method
+review, the useful change was to test recovery before another network retry;
+the first offline reproduction took 0.535 seconds. The release gap is reopened,
+not closed by identifying its cause.
+
 ## Target ownership and deletion sequence
 
 The live queue stays in [todo.md](../todo.md). This table is the reviewed design,

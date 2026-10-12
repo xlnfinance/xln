@@ -4,8 +4,8 @@ Owner scope: TS + React + Ethereum same-J; Rust and lending remain frozen.
 Foreign Rust stash `438bf1a6ddd8679bba0b63bdef11dd1fd1f45e90` is untouched.
 Keep frozen-core, PRs with seven required green jobs, no WIP commits.
 
-- Current source: `bbd33b1bbff2b14b130c27b153915818fbcf0c35` on
-  `codex/production-qa-boundary` (PR #73), merging PR #72 at `8d7f1e742`.
+- Current base source: `c4566fd81f668e36b3c03dd2faffb7db0313e5fc` on
+  `codex/restore-rpc-transport`, based on PR #73, merging PR #72 at `8d7f1e742`.
   PR #71 now carries the Activity readiness test fix at `ca96f041d`; PR #72 is
   stacked on it. Main remains `86d2a515`. No PR is approved for merge
   until all required CI jobs pass on its exact candidate.
@@ -21,8 +21,14 @@ Keep frozen-core, PRs with seven required green jobs, no WIP commits.
   512-block retry before full backlog completion. Restore browser 1/1 on clean
   `0ff079f41`, no skips/flakes; full check / 38 source gates there and on
   `999396327`. The original refactor retains 90 units and three browser journeys.
-- First red: public P6 `PUBLIC_P6_WAIT_FAILED:reserve-funded` on `50281daaa`.
-  Public RPC catch-up still times out. Dedicated profile
+- First red: public P6 now fails earlier, on WAL recovery at frame 14:
+  `RECOVERY_JOURNAL_POST_STATE_HASH_MISMATCH`. Clean `c4566fd81` replays through
+  frame 13; changing only JReplica.rpcs from the committed publicnode URL to
+  the trusted public proxy yields the exact recorded frame-14 hash. The trusted
+  restore binding mutated committed state outside WAL. The diagnostic used a
+  disposable copy; the original DB and forensic copy remain unchanged.
+  The earlier `PUBLIC_P6_WAIT_FAILED:reserve-funded` on `50281daaa` and RPC
+  catch-up limits remain unresolved behind this recovery failure. Dedicated profile
   `sepolia-p6-20261012b` has 200 test USDT confirmed in reserve, zero collateral,
   no prepared appointment or attack. Do not fund again. Adaptive polling preserved
   the first authenticated range through block 11893390; later retries retain it.
@@ -40,8 +46,12 @@ Keep frozen-core, PRs with seven required green jobs, no WIP commits.
   Public P4/P5 and
   cold restore remain in `docs/evidence/rc-20261012/`. The live public alpha
   still runs `7c3f63f9841f4e8b61ac5eee5dbe4f9710b10621`.
-- Next single action: inspect exact-candidate CI for PR #71 (`ca96f041d`) and
-  PR #72 (`8d7f1e742`). Keep QA PR #73 stacked until the base is green; its old
+- Next single action: verify the transport-only RPC binding fix with the existing
+  real-chain crash fixture and two successive restores. Then perform an explicit
+  offline recovery on a fresh destination, retaining original WAL and exact root
+  evidence. No replay-verification bypass or hash exclusion. Keep checking
+  exact-candidate CI for PR #71 (`ca96f041d`) and PR #72 (`8d7f1e742`).
+  Keep QA PR #73 stacked until the base is green; its old
   run 38201516918 was cancelled after the parent changed. Revalidate the final
   QA candidate rather than repeatedly running stale stacked combinations.
   For public P6, identify the slow RPC method/range before another identical
@@ -61,6 +71,12 @@ The attempted public retries did not complete P6; retain their exact failure and
 stop repeating unchanged requests. Before any external retry, read chain state
 and preserve submission intent. The 30-minute review heartbeat `xln-30` remains
   active; no external-model budget was spent or renewed.
+
+Method review, 04:15 UTC: recovery now precedes RPC tuning. The offline prefix
+replay isolated the first divergence in 0.535 seconds, with 0 release gaps closed
+and 1 reopened. Keep this narrower observation rather than repeat a 60-second
+network wait on an unrecoverable profile. The next block must prove the fix and
+recovery; diagnosis alone is not acceptance.
 
 ## Historical evidence and superseded scope
 

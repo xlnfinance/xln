@@ -7,11 +7,15 @@ import {
   loadEnvFromDB,
   processRuntime,
   enqueueRuntimeInput,
+  readPersistedStorageFrameRecord,
 } from '../../../runtime';
 import { deriveSignerAddressSync } from '../../../account/crypto';
 import { getNextJSubmitRetryTimestamp } from '../../../runtime/j-submit/j-submit-scheduler';
 import { ENTITY_J_SUBMIT_RETRY_MS } from '../../../entity/consensus/leader';
 import { computeCanonicalEntityHash } from '../../../storage/canonical-hash';
+import { verifyPersistedFrameState } from '../../../storage/recovery/verify';
+import { getJurisdictionIdentityRef } from '../../../jurisdiction/machine/jurisdiction-runtime';
+import { ensureLiveJAdapterForReplica } from '../../../runtime/recovery/j-adapter-restore';
 import {
   bootScenario,
   fundEntities,
@@ -23,6 +27,7 @@ import type { RuntimeReplica, JAdapter } from '../../../runtime/types';
 import {
   getLiveJAdapter,
   getLiveJAdapterEntries,
+  detachLiveJAdapter,
 } from '../../../runtime/j-submit/live-jadapters';
 
 type Phase = 'crash' | 'recover' | 'pending-crash' | 'pending-recover' | 'accepted-crash' | 'prepared-crash' | 'prepared-recover';
@@ -30,6 +35,7 @@ type Phase = 'crash' | 'recover' | 'pending-crash' | 'pending-recover' | 'accept
 type CrashProof = {
   runtimeId: string;
   jurisdictionName: string;
+  jurisdictionRef: string;
   senderId: string;
   receiverId: string;
   batchHash: string;
@@ -226,6 +232,7 @@ const runCrashPhase = async (): Promise<never> => {
     const proof: CrashProof = {
       runtimeId,
       jurisdictionName: jurisdiction.name,
+      jurisdictionRef: getJurisdictionIdentityRef(jReplica),
       senderId: sender.id,
       receiverId: receiver.id,
       batchHash: sentBatch.batchHash,
@@ -259,17 +266,36 @@ const runCrashPhase = async (): Promise<never> => {
   return fail('crash-boundary-not-reached');
 };
 
+const verifyCommittedRuntimeRoot = async (env: RuntimeReplica): Promise<string> => {
+  const frame = await readPersistedStorageFrameRecord(env, env.state.height);
+  if (!frame) fail('runtime-frame-missing');
+  const verification = verifyPersistedFrameState(env, frame);
+  assertEqual(verification.actualStateHash, verification.expectedStateHash, 'runtime-post-state-root');
+  assertEqual(verification.actualCanonicalStateHash, verification.expectedCanonicalStateHash, 'runtime-canonical-root');
+  return verification.actualStateHash;
+};
+
 const runRecoverPhase = async (): Promise<void> => {
   const proof = JSON.parse(await Bun.file(proofPath).text()) as CrashProof;
   assertEqual(proof.runtimeId, runtimeId, 'proof-runtime-id');
-  const restored = await loadEnvFromDB(runtimeId, seed);
+  const alternateRpc = new URL(rpcUrl);
+  alternateRpc.hostname = 'localhost';
+  alternateRpc.search = '?trusted-restore=1';
+  const trustedRpcUrl = alternateRpc.toString();
+  const restoreOptions = {
+    trustedJurisdictionRpcBindings: [{ jurisdictionRef: proof.jurisdictionRef, rpcUrl: trustedRpcUrl }],
+  };
+  const restored = await loadEnvFromDB(runtimeId, seed, restoreOptions);
   if (!restored) fail('restore-returned-null');
+  await verifyCommittedRuntimeRoot(restored);
+  assertEqual(restored.state.jReplicas.get(proof.jurisdictionName)?.rpcs?.join(','), rpcUrl, 'first-restore-preserves-rpcs');
   restored.scenarioMode = true;
   restored.quietRuntimeLogs = true;
   const replica = findReplica(restored, proof.senderId);
   const adapter = getLiveJAdapter(restored, proof.jurisdictionName);
   if (!adapter) fail(`restored-rpc-adapter-missing:${proof.jurisdictionName}`);
   assertEqual(adapter.mode, 'rpc', 'restored-adapter-mode');
+  assertEqual((adapter.provider as ethers.JsonRpcProvider)._getConnection().url, trustedRpcUrl, 'first-restore-live-rpc');
   adapter.setQuietLogs?.(true);
 
   const pendingBefore = restored.infrastructure?.pendingCommittedJOutbox ?? [];
@@ -294,6 +320,7 @@ const runRecoverPhase = async (): Promise<void> => {
   );
   const reconciledReplica = findReplica(restored, proof.senderId);
   const canonicalHash = computeCanonicalEntityHash(reconciledReplica).hash;
+  const runtimeHash = await verifyCommittedRuntimeRoot(restored);
   const finalRuntimeHeight = restored.state.height;
   const finalEntityHeight = reconciledReplica.state.height;
   const finalTimestamp = restored.state.timestamp;
@@ -314,13 +341,22 @@ const runRecoverPhase = async (): Promise<void> => {
   );
   await closeEnv(restored);
 
-  const reopened = await loadEnvFromDB(runtimeId, seed);
+  const reopened = await loadEnvFromDB(runtimeId, seed, restoreOptions);
   if (!reopened) fail('second-reopen-returned-null');
+  assertEqual(await verifyCommittedRuntimeRoot(reopened), runtimeHash, 'runtime-root-after-second-reopen');
+  assertEqual(reopened.state.jReplicas.get(proof.jurisdictionName)?.rpcs?.join(','), rpcUrl, 'second-restore-preserves-rpcs');
   reopened.scenarioMode = true;
   reopened.quietRuntimeLogs = true;
   const reopenedReplica = findReplica(reopened, proof.senderId);
-  const reopenedAdapter = getLiveJAdapter(reopened, proof.jurisdictionName);
+  const initialAdapter = getLiveJAdapter(reopened, proof.jurisdictionName);
+  if (!initialAdapter) fail('second-reopen-adapter-missing');
+  await initialAdapter.close();
+  (initialAdapter.provider as ethers.JsonRpcProvider).destroy();
+  detachLiveJAdapter(reopened, proof.jurisdictionName, initialAdapter);
+  const reopenedAdapter = await ensureLiveJAdapterForReplica(reopened, proof.jurisdictionName);
   if (!reopenedAdapter) fail('second-reopen-adapter-missing');
+  assertEqual((reopenedAdapter.provider as ethers.JsonRpcProvider)._getConnection().url, trustedRpcUrl, 'recreated-live-rpc');
+  assertEqual(await verifyCommittedRuntimeRoot(reopened), runtimeHash, 'recreated-adapter-preserves-runtime-root');
   reopenedAdapter.setQuietLogs?.(true);
   assertEqual(reopened.state.height, finalRuntimeHeight, 'runtime-head-after-second-reopen');
   assertEqual(reopenedReplica.state.height, finalEntityHeight, 'entity-head-after-second-reopen');
@@ -350,6 +386,9 @@ const runRecoverPhase = async (): Promise<void> => {
     finalRuntimeHeight,
     finalEntityHeight,
     canonicalHash,
+    runtimeHash,
+    trustedRpcUrl,
+    committedRpcUrl: reopened.state.jReplicas.get(proof.jurisdictionName)?.rpcs?.[0],
     chainNonce: (await reopenedAdapter.getEntityNonce(proof.senderId)).toString(),
     senderReserve: (await reopenedAdapter.getReserves(proof.senderId, 1)).toString(),
     receiverReserve: (await reopenedAdapter.getReserves(proof.receiverId, 1)).toString(),

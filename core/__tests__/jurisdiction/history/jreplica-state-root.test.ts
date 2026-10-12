@@ -3,8 +3,10 @@ import { describe, expect, test } from 'bun:test';
 import type { JReplica } from '../../../types/jurisdiction-runtime';
 import {
   buildCanonicalJReplicaSnapshot,
+  buildReplayVerifiableRuntimePostStateView,
   normalizePersistedSnapshotInPlace,
 } from '../../../storage/wal/snapshot';
+import { computeRuntimePostStateComponentDigests } from '../../../storage/hashes';
 import {
   applyTrustedJurisdictionRpcBindings,
   ensureLiveJAdapterForReplica,
@@ -127,7 +129,7 @@ describe('JReplica stateRoot semantics', () => {
       .toThrow('RUNTIME_MACHINE_J_BLOCK_NUMBER_INVALID');
   });
 
-  test('trusted stack binding rebases only the matching restored RPC transport', () => {
+  test('trusted stack binding changes live transport without changing committed Runtime components', () => {
     const matching = makeJReplica({
       name: 'matching',
       chainId: 31_337,
@@ -140,20 +142,22 @@ describe('JReplica stateRoot semantics', () => {
       depositoryAddress: `0x${'22'.repeat(20)}`,
       rpcs: ['http://127.0.0.1:19700'],
     });
-    const env = {
-      state: { jReplicas: new Map([
-        ['matching', matching],
-        ['other-stack', otherStack],
-      ]) },
-    } as Parameters<typeof applyTrustedJurisdictionRpcBindings>[0];
+    const env = createEmptyEnv('trusted-rpc-transport');
+    env.state.jReplicas = new Map([['matching', matching], ['other-stack', otherStack]]);
+    const before = computeRuntimePostStateComponentDigests(buildReplayVerifiableRuntimePostStateView(env));
 
-    applyTrustedJurisdictionRpcBindings(env.state, [{
+    applyTrustedJurisdictionRpcBindings(env, [{
       jurisdictionRef: getJurisdictionIdentityRef(matching),
       rpcUrl: 'http://127.0.0.1:19800',
     }]);
 
-    expect(matching.rpcs).toEqual(['http://127.0.0.1:19800']);
+    expect(matching.rpcs).toEqual(['http://127.0.0.1:19700']);
     expect(otherStack.rpcs).toEqual(['http://127.0.0.1:19700']);
+    expect(computeRuntimePostStateComponentDigests(buildReplayVerifiableRuntimePostStateView(env))).toEqual(before);
+    expect(env.infrastructure.trustedJurisdictionRpcUrls?.get(getJurisdictionIdentityRef(matching).toLowerCase()))
+      .toBe('http://127.0.0.1:19800');
+    expect(env.infrastructure.trustedJurisdictionRpcUrls?.has(getJurisdictionIdentityRef(otherStack).toLowerCase()))
+      .toBe(false);
   });
 
   test('conflicting trusted RPC bindings for one stack fail loud', () => {
@@ -167,7 +171,7 @@ describe('JReplica stateRoot semantics', () => {
     } as Parameters<typeof applyTrustedJurisdictionRpcBindings>[0];
     const jurisdictionRef = getJurisdictionIdentityRef(replica);
 
-    expect(() => applyTrustedJurisdictionRpcBindings(env.state, [
+    expect(() => applyTrustedJurisdictionRpcBindings(env, [
       { jurisdictionRef, rpcUrl: 'http://127.0.0.1:19800' },
       { jurisdictionRef, rpcUrl: 'http://127.0.0.1:19900' },
     ])).toThrow('RESTORE_JURISDICTION_RPC_BINDING_CONFLICT');

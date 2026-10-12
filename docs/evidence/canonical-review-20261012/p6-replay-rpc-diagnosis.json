@@ -1,0 +1,33 @@
+{
+  "sourceSha": "c4566fd81f668e36b3c03dd2faffb7db0313e5fc",
+  "cleanBeforeAndAfterExecution": true,
+  "status": "reproduced-production-recovery-failure-not-repaired",
+  "scope": "Offline diagnostic against a private scratch copy of the funded Sepolia P6 profile; original database and forensic copy unchanged.",
+  "verifiedPrefixHeight": 13,
+  "firstDivergentHeight": 14,
+  "runtimeTxTypes": ["observeJRange"],
+  "recordedPostStateHash": "0x844244c6ec989f61017925d70514e3cda15fe0e15d35544153b2db3db090812b",
+  "unchangedReplayPostStateHash": "0x30c6845a258536cc57a83949be24e1826b2963c8eab87e1ea89a63220cee17c9",
+  "isolatedDifference": {
+    "path": "JReplica.rpcs",
+    "recordedImportValue": ["https://ethereum-sepolia-rpc.publicnode.com/"],
+    "unjournaledRestoreValue": ["https://sepolia.xln.finance/rpc"],
+    "onlyThisChangeReproducesRecordedPostStateHash": true,
+    "unchangedComponents": ["infrastructure", "runtimeId"]
+  },
+  "mechanism": "Trusted RPC binding mutates committed JReplica.rpcs after WAL replay. The next committed observeJRange hashes the changed field without a corresponding Runtime input.",
+  "standLockHeld": true,
+  "elapsedSeconds": 0.535,
+  "limitations": [
+    "Root equality isolates the missing transport mutation; this diagnostic does not repair or waive verification of any recorded frame.",
+    "Future transport-only binding alone cannot recover an already affected database.",
+    "No new funding, collateral or dispute transaction was submitted."
+  ],
+  "artifacts": [
+    {
+      "path": "p6-replay-rpc-diagnosis.log.gz",
+      "sha256": "9450ad4c6bf4cbf9e4ff51041b747dfbdda73e5a300ab7ae484ea5f7a9dc80e1",
+      "uncompressedSha256": "83937f2cb672de4341e133402a42fbc3e13d6b6d7572d01c0ba5491438a26e3a"
+    }
+  ]
+}

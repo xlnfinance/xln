@@ -507,6 +507,8 @@ interface RuntimeInfrastructure {
    * force every hash/snapshot path to remember an exclusion list.
    */
   liveJAdapters?: Map<string, import('../jurisdiction/adapter/types').JAdapter>;
+  /** Process-local transport overrides by jurisdiction identity; retained when adapters are recreated. */
+  trustedJurisdictionRpcUrls?: ReadonlyMap<string, string>;
   lifecyclePhase?: 'booting' | 'running' | 'quiescing' | 'stopped' | 'halted';
   /** Explicit operator-facing terminal status; never part of committed RuntimeState. */
   operatorStatus?: 'HALTED_REQUIRES_OPERATOR';

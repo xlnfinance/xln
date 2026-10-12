@@ -48,6 +48,9 @@ type RecoveryProof = {
   finalRuntimeHeight: number;
   finalEntityHeight: number;
   canonicalHash: string;
+  runtimeHash: string;
+  trustedRpcUrl: string;
+  committedRpcUrl: string;
   chainNonce: string;
   senderReserve: string;
   receiverReserve: string;
@@ -201,6 +204,9 @@ test('applies a mined processBatch JEvent after the runtime is SIGKILLed before 
     expect(recoveryProof.finalRuntimeHeight).toBeGreaterThan(0);
     expect(recoveryProof.finalEntityHeight).toBeGreaterThan(0);
     expect(recoveryProof.canonicalHash).toMatch(/^0x[0-9a-f]{64}$/);
+    expect(recoveryProof.runtimeHash).toMatch(/^0x[0-9a-f]{64}$/);
+    expect(recoveryProof.trustedRpcUrl).not.toBe(anvil.rpcUrl);
+    expect(recoveryProof.committedRpcUrl).toBe(anvil.rpcUrl);
     expect(recoveryProof.chainNonce).toBe('1');
     expect(recoveryProof.senderReserve).toBe('90');
     expect(recoveryProof.receiverReserve).toBe('10');
