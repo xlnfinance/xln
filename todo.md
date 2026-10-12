@@ -6,14 +6,26 @@ product backlog; long-term work belongs in `docs/roadmap.md`.
 September 30 implementation and verification: [J/E/A continuation](docs/jea-continuation.md).
 The 138-target E2E snapshot and green full check are dated evidence, not mainnet acceptance.
 
-## Current execution order — 2026-10-11
+## Current execution order — 2026-10-12
 
-Owner release scope (`AGENTS.md` RELEASE SCOPE) overrides the history below: TypeScript is
-the only engine (`rscore/` frozen at tag `rscore-freeze-f1464e84e`), React `ui/` is the only
-wallet, Ethereum same-J goes first (Sepolia, then a mainnet canary). TRON, XLNC, Base,
-cross-J as a headline, companies/IPO, iOS/Electron/extension and
-custody are deferred. The owner signs mainnet transactions and approves the exact
-production build.
+The current [owner profile](docs/owner-profile.md#agreed-release) owns scope:
+TS, React and Ethereum same-J; Rust and production lending are frozen.
+PR #70 is merged after seven green jobs. The funded Sepolia P6 profile is
+preserved; the public alpha has not yet been updated to the new candidate.
+
+1. Land the verified debt-total/outbox/dead-entrypoint refactor through required
+   green CI. [Review and measured first patch](docs/canonical-refactoring-20261012.md)
+   retain all eight areas' proposals without making a second live queue.
+2. Complete PR #71's reserve-confirmation rollout and public P6 with genuine
+   old/new signatures, external tower, real clocks and fresh recovery.
+3. Remove production QA mounts/imports, then retired Rust execution hooks while
+   retaining active TS workers; prove exact roots, positional outbox and recovery.
+4. Consolidate duplicated wallet route/depth policy and strict Brainvault worker
+   admission, each behind its smallest actual failure and browser proof.
+5. Finish current exit-gas, operational and exact-build mainnet evidence. Rust
+   decoder/proof-codec refactors remain proposals until the freeze is reopened.
+
+## Historical pre-freeze lending work — not current release scope
 
 Latest October 11 owner update: create/manage the Sepolia signer, obtain test ETH
 and deploy current contracts autonomously. Mainnet participation is open; no

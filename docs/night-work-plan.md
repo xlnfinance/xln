@@ -2,45 +2,46 @@
 
 Owner scope: TS + React + Ethereum same-J; Rust and lending remain frozen.
 Foreign Rust stash `438bf1a6ddd8679bba0b63bdef11dd1fd1f45e90` is untouched.
-Keep frozen-core, PRs with mandatory green CI, no WIP commits. Main protection
-requires all seven build-and-test jobs with strict up-to-date checks.
+Keep frozen-core, PRs with seven required green jobs, no WIP commits.
 
-- Current source: PR #70 candidate `0fa6079fe9d669b08430534bec3eeb4b7f9e218c`.
-  Its production code matches the clean d519 React proof. PR:
-  https://github.com/xlnfinance/xln/pull/70
-  Separate branch `codex/public-sepolia-p6` adds only the real public P6 harness
-  and this handoff, so it does not interrupt PR #70's running CI.
-- Last green: CI 38193239508 on clean checkout 69c4adf27 finished E2E green:
-  React payment 4/4, P4/P5 2/2, offline tower P6 1/1, recovery 3/3;
-  zero skipped, unexpected or flaky cases. Six of seven jobs passed.
-  Public Sepolia P4/P5 on 976b126fa use the current bytecode and real clocks:
-  P4 returns 85 test USDT; P5 pays 95 of a 110 claim and records 15 debt.
-  Cold hub restore on f2796d39f verified 128 retained WAL frames at height 676.
-  The private P6 clock was advanced; it is not public acceptance evidence.
-- First red: 5135 CI unit tests passed and one real launcher test timed out
-  waiting for three hubs at 30 seconds. Candidate 0fa6079fe allows 90 seconds
-  for startup inside its existing 180-second stand, with a 120-second test
-  budget and failure-log tails. State/block preservation assertions remain.
-  Local focused check passed 1/1 with five assertions in 22 seconds;
-  `bun run check` passed all 38 source gates. CI 38194922745 is running.
-- Artifacts: docs/evidence/rc-20261012/react-d51910eee.json,
-  sepolia-976b126fa.json and cold-restore-f2796d39f.json. CI React reports are
-  in run 38193239508, artifact 11723130887 (e2e-test-results).
-  Public alpha still runs 7c3f63f9841f4e8b61ac5eee5dbe4f9710b10621.
-  Candidate 69c4adf27 assets are prepared on the server, not activated.
-  Update the deployment candidate to the actual green SHA before rollout.
-- Next: finish the public P6 harness typecheck/source check and commit its owned
-  paths. Prepare a fresh test Account with real signed old/new states, appoint
-  the existing external tower and stop its Runtime. After PR #70 is green,
-  take a fresh cold backup, update wallet/hub/tower together, then start the
-  stale-state dispute, wait real Sepolia blocks and recover the same Runtime.
+- Current source: canonical-refactor candidate `005f5cd5ba69bbe44a9941e9a5b3a933ad8f90c2`
+  on `codex/canonical-audit-surface`, based on PR #71 (`b07da2b8762d3398683f3f2c481ee65a8caedc41`).
+  PR #70 passed all seven CI jobs (run 38194922745) and merged into main as
+  `86d2a515c255f33e1d40cfad8c379320e02ea2ff`. Its main CI is a separate result.
+- Last green: clean candidate `005f5cd5b`: 90 focused units / 867 assertions,
+  full `bun run check` / 38 source gates, real locked browser stand 3/3 with
+  no skips or flakes (Move LEFT, Move RIGHT, 22-second delayed reserve funding).
+  Static diff reviewers found no actionable issues. These are focused checks,
+  not a claim that all scenarios or public P6 passed.
+- First red: no remaining failure in that patch. The reproduced Move debt-total
+  error (500 shown instead of 450) is fixed by consuming the exact runtime sum.
+  Public P6 is still unproved. Its funded profile is already at 100 test USDT
+  reserve with no collateral: use the resumable harness, do not fund it again.
+- Artifacts: `docs/canonical-refactoring-20261012.md` and
+  `docs/evidence/canonical-review-20261012/` record 4,051/4,051 mechanically
+  indexed source files, focused regions in 236 files, and the tested patch.
+  Public P4/P5 and cold restore remain in `docs/evidence/rc-20261012/`.
+  Public alpha still runs `7c3f63f9841f4e8b61ac5eee5dbe4f9710b10621`.
+- Next: publish the reviewed refactor PR and finish PR #71 CI. Next structural
+  deletion is production QA imports/mounts, preserving scenario diagnostics;
+  keep the public P6 rollout moving as the release priority. Rust-only decoder
+  and codec proposals stay read-only. Live ordering remains in `todo.md`.
 - Remaining gates: ten consecutive green main CI runs; production Rust/QA
   isolation; public P6 with current code and real clocks; external tower
   start/finalize/reveal coverage; exact owner-reviewed mainnet release package.
-  Owner decisions are settled: no additional freeze at dispute start, FIFO,
-  one debt per debtor/creditor/token, party-selected signed dispute windows.
-  No starter bond or governance change in this candidate. Check the existing
-  seven-day historical-board proof grace separately. No mainnet readiness claim.
+  No new dispute-start freeze, FIFO, one debt per debtor/creditor/token and
+  party-selected windows remain settled. No starter bond/governance redesign.
+
+Method review, 2026-10-12 03:00 UTC: one completed patch removes 94 non-test
+source lines net and fixes one reproduced economic display divergence; 90 units
+and three browser journeys prove the chosen boundary. Eight read-only scopes
+completed; do not respawn a whole team for each small change. Prefer duplicated
+financial authority with a failing counterexample over similar helper text.
+The folder-width ratchet correctly required lowering its recorded debt after
+one file was deleted. Thirty-minute review heartbeat `xln-30` is active in this
+chat; unchanged results stay quiet. No external-model budget was spent or renewed.
+
+## Historical evidence and superseded scope
 
 Owner priority, 2026-10-11 17:28 UTC: ship a public Sepolia deployment and usable
 asset flow; Base is an alternative, not a prerequisite. Finish the TS launch path

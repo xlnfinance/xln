@@ -1,0 +1,312 @@
+{
+  "sourceSha": "b07da2b8762d3398683f3f2c481ee65a8caedc41",
+  "command": "bun run xln1000 --json",
+  "inputs": {
+    "tree": "b07da2b8762d3398683f3f2c481ee65a8caedc41",
+    "ledger": null,
+    "ci": null,
+    "worktreeNegativeEvidence": []
+  },
+  "kernel": {
+    "sub": {
+      "size": 0.15619192330141046,
+      "long": 0.3750232829593573,
+      "types": 0.4722804173015893,
+      "isolation": 0
+    },
+    "raw": {
+      "declaredKernelLoc": 95315,
+      "closureKernelLoc": 161062,
+      "declaredFiles": 539,
+      "closureFiles": 816,
+      "closureByTop": {
+        "core/entity": 41902,
+        "core/jurisdiction": 21753,
+        "core/runtime": 19848,
+        "core/storage": 19680,
+        "core/account": 17631,
+        "core/rscore": 11691,
+        "core/protocol": 7921,
+        "core/network": 4961,
+        "core/types": 3183,
+        "core/swapbook": 2643,
+        "core/extensions": 2250,
+        "core/hanko": 2130,
+        "core/support": 1730,
+        "core/paybook": 1181,
+        "core/lendbook": 761,
+        "core/api": 634,
+        "core/qa": 533,
+        "core/pathfinding": 424,
+        "core/config": 206
+      },
+      "edgesOutOfKernel": 468,
+      "infraEdges": 137,
+      "toolingEdges": 21,
+      "edgeTargets": {
+        "core/support": 276,
+        "core/runtime": 62,
+        "core/config": 55,
+        "core/paybook": 22,
+        "core/rscore": 18,
+        "core/lendbook": 13,
+        "core/network": 10,
+        "core/storage": 7,
+        "core/qa": 3,
+        "core/jurisdiction": 2
+      },
+      "toolingEdgeSample": [
+        {
+          "from": "core/account/consensus/frame/commit-transition.ts",
+          "to": "core/rscore/authority-wave.ts"
+        },
+        {
+          "from": "core/account/consensus/incoming/ack-commit.ts",
+          "to": "core/rscore/authority-wave.ts"
+        },
+        {
+          "from": "core/account/consensus/index.ts",
+          "to": "core/rscore/authority-wave.ts"
+        },
+        {
+          "from": "core/entity/consensus/frame/application.ts",
+          "to": "core/rscore/authority-wave.ts"
+        },
+        {
+          "from": "core/entity/consensus/state-root.ts",
+          "to": "core/rscore/engine-leaf/leaf-registry.ts"
+        },
+        {
+          "from": "core/entity/state/persistent-account-map.ts",
+          "to": "core/rscore/engine-leaf/leaf-registry.ts"
+        },
+        {
+          "from": "core/entity/tx/handlers/account/index.ts",
+          "to": "core/rscore/authority-wave.ts"
+        },
+        {
+          "from": "core/entity/tx/handlers/account/lifecycle/open-account.ts",
+          "to": "core/rscore/authority-wave.ts"
+        },
+        {
+          "from": "core/runtime/admit/entity-input-output.ts",
+          "to": "core/rscore/authority-driver.ts"
+        },
+        {
+          "from": "core/runtime/admit/entity-input-replica.ts",
+          "to": "core/rscore/authority-driver.ts"
+        },
+        {
+          "from": "core/runtime/admit/entity-input-replica.ts",
+          "to": "core/rscore/authority-wave.ts"
+        },
+        {
+          "from": "core/runtime/admit/entity-input-replica.ts",
+          "to": "core/rscore/authority/entity-stage.ts"
+        }
+      ],
+      "solidityLoc": 6665,
+      "functions": 9965,
+      "over60": 377,
+      "excess": 20132,
+      "longest": {
+        "codeLines": 150,
+        "at": "core/rscore/shadow-wire.ts:685 shadowOutputRows"
+      },
+      "casts": 815,
+      "nonNull": 536,
+      "packages": [
+        "@ethereumjs/block",
+        "@ethereumjs/common",
+        "@ethereumjs/mpt",
+        "@ethereumjs/rlp",
+        "@ethereumjs/tx",
+        "@ethereumjs/util",
+        "@ethereumjs/vm",
+        "@noble/ciphers",
+        "@noble/curves",
+        "@noble/hashes",
+        "@noble/secp256k1",
+        "bip39",
+        "buffer",
+        "ethers",
+        "fs",
+        "hash-wasm",
+        "level",
+        "msgpackr",
+        "path",
+        "tronweb",
+        "ws"
+      ],
+      "excessRatio": 0.125,
+      "typeDebtPerK": 8.39
+    }
+  },
+  "singlePath": {
+    "sub": {
+      "roles": 0.41666666666666663,
+      "helpers": 0.125
+    },
+    "raw": {
+      "roles": [
+        {
+          "role": "account/entity execution engine",
+          "rows": [
+            {
+              "label": "TS in-thread (core/account+entity)",
+              "status": "canonical",
+              "lines": 62620
+            },
+            {
+              "label": "TS worker (core/rscore/ts-worker)",
+              "status": "active",
+              "lines": 3857
+            },
+            {
+              "label": "Rust (rscore/crates engine+entity-kernel+runtime+batch)",
+              "status": "frozen",
+              "lines": 199773
+            }
+          ],
+          "count": 3,
+          "counted": [
+            "TS in-thread (core/account+entity) [canonical]",
+            "TS worker (core/rscore/ts-worker) [active]",
+            "Rust (rscore/crates engine+entity-kernel+runtime+batch) [frozen]"
+          ]
+        },
+        {
+          "role": "consumer wallet UI",
+          "rows": [
+            {
+              "label": "Svelte wallet (frontend/src/lib/components/Entity)",
+              "status": "frozen",
+              "lines": 43531
+            },
+            {
+              "label": "React wallet (ui/src)",
+              "status": "canonical",
+              "lines": 19640
+            },
+            {
+              "label": "SwiftUI (frontend/ios)",
+              "status": "deferred",
+              "lines": 2309
+            }
+          ],
+          "count": 3,
+          "counted": [
+            "Svelte wallet (frontend/src/lib/components/Entity) [frozen]",
+            "React wallet (ui/src) [canonical]",
+            "SwiftUI (frontend/ios) [deferred]"
+          ]
+        },
+        {
+          "role": "jurisdiction adapter",
+          "rows": [
+            {
+              "label": "rpc (core/jurisdiction/adapter/rpc)",
+              "status": "canonical",
+              "lines": 5331
+            },
+            {
+              "label": "browservm (core/jurisdiction/adapter/browservm)",
+              "status": "active",
+              "lines": 4350
+            }
+          ],
+          "count": 2,
+          "counted": [
+            "rpc (core/jurisdiction/adapter/rpc) [canonical]",
+            "browservm (core/jurisdiction/adapter/browservm) [active]"
+          ]
+        },
+        {
+          "role": "runtime-adapter API server",
+          "rows": [
+            {
+              "label": "TS (core/api/runtime-adapter)",
+              "status": "canonical",
+              "lines": 6775
+            },
+            {
+              "label": "Rust (rscore/crates/process/src/runtime_adapter)",
+              "status": "frozen",
+              "lines": 5292
+            }
+          ],
+          "count": 2,
+          "counted": [
+            "TS (core/api/runtime-adapter) [canonical]",
+            "Rust (rscore/crates/process/src/runtime_adapter) [frozen]"
+          ]
+        }
+      ],
+      "duplicateTopLevelNames": 204,
+      "duplicateExcessDefs": 350,
+      "topDuplicates": [
+        {
+          "name": "normalizeEntityId",
+          "defs": 15
+        },
+        {
+          "name": "isRecord",
+          "defs": 13
+        },
+        {
+          "name": "record",
+          "defs": 12
+        },
+        {
+          "name": "normalizeEntityRef",
+          "defs": 10
+        },
+        {
+          "name": "exactKeys",
+          "defs": 9
+        },
+        {
+          "name": "fail",
+          "defs": 9
+        },
+        {
+          "name": "normalize",
+          "defs": 9
+        },
+        {
+          "name": "normalizeAddress",
+          "defs": 7
+        },
+        {
+          "name": "sleep",
+          "defs": 7
+        },
+        {
+          "name": "bytes32",
+          "defs": 6
+        },
+        {
+          "name": "errorMessage",
+          "defs": 6
+        },
+        {
+          "name": "normalizeId",
+          "defs": 6
+        },
+        {
+          "name": "normalizeRuntimeId",
+          "defs": 6
+        },
+        {
+          "name": "requireAddress",
+          "defs": 6
+        },
+        {
+          "name": "requireString",
+          "defs": 6
+        }
+      ]
+    }
+  },
+  "note": "Tree-only input; the overall total is not a release-readiness claim."
+}
