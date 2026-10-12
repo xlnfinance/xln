@@ -7,6 +7,7 @@ import { join } from 'node:path';
 import { ethers } from 'ethers';
 
 import { createEmptyEnv } from '../../../runtime';
+import { safeStringify } from '../../../protocol/serialization';
 import { deriveSignerAddressSync, getSignerPrivateKey } from '../../../account/crypto';
 import { encodeSingleSignerBoard, generateLazyEntityId, hashBoard } from '../../../entity/factory';
 import { createJAdapter, createXlnJsonRpcProvider, type JAdapter } from '../../../jurisdiction/adapter';
@@ -142,6 +143,7 @@ const startRpcGateProxy = (upstreamUrl: string): RpcGateProxy => {
       release() {
         const resolve = releaseResolve;
         if (!resolve) throw new Error('J_WATCHER_RPC_GATE_NOT_ARMED');
+        armedGate = null;
         releaseResolve = null;
         releasePromise = null;
         enteredResolve = null;
@@ -301,6 +303,25 @@ describe('RPC J-watcher backlog drain', () => {
     const pollWatcher = adapter.pollNow?.bind(adapter);
     const readScanProgress = adapter.getWatcherScanProgress?.bind(adapter);
     if (!pollWatcher || !readScanProgress) throw new Error('J_WATCHER_BACKLOG_POLL_API_MISSING');
+    const isWatching = adapter.isWatching.bind(adapter);
+    const takeHeaderBlocks = rpcProxy.takeHeaderBlocks;
+    const waitForGate = async (stage: string, gate: RpcGateControl, poll: Promise<void>): Promise<void> => {
+      const result = await Promise.race([
+        gate.entered.then(() => ({ status: 'entered' } as const)),
+        poll.then(
+          () => ({ status: 'resolved' } as const),
+          (error: unknown) => ({ status: 'rejected', error } as const),
+        ),
+      ]);
+      if (result.status === 'entered') return;
+      gate.release();
+      throw new Error(`J_WATCHER_BACKLOG_GATE_NOT_REACHED:${stage}:${safeStringify({
+        poll: result.status,
+        scan: readScanProgress(),
+        isWatching: isWatching(),
+        headerBlocks: takeHeaderBlocks(),
+      })}`, result.status === 'rejected' ? { cause: result.error } : undefined);
+    };
     const fromBlock = getWatcherStartBlock(env, adapter.addresses.depository, CHAIN_ID);
     const failureState = () => structuredClone({
       scan: readScanProgress(),
@@ -313,7 +334,7 @@ describe('RPC J-watcher backlog drain', () => {
     rpcProxy.takeHeaderBlocks();
     const rateLimitGate = rpcProxy.armHeaderBatchGate(429);
     const rateLimitedPoll = pollWatcher();
-    await rateLimitGate.entered;
+    await waitForGate('rate-limit', rateLimitGate, rateLimitedPoll);
     rateLimitGate.release();
     await rateLimitedPoll;
     expect(failureState()).toEqual(beforeFailures);
@@ -322,8 +343,8 @@ describe('RPC J-watcher backlog drain', () => {
 
     const timeoutGate = rpcProxy.armHeaderBatchGate();
     const timedOutPoll = pollWatcher();
+    await waitForGate('timeout', timeoutGate, timedOutPoll);
     try {
-      await timeoutGate.entered;
       // Let the real HTTP batch deadline abort the held request; no fake clock.
       await timedOutPoll;
     } finally {
@@ -436,7 +457,7 @@ describe('RPC J-watcher backlog drain', () => {
     const shutdownGate = rpcProxy.armBlockNumberGate();
     const inFlightPoll = adapter.pollNow?.();
     if (!inFlightPoll) throw new Error('J_WATCHER_BACKLOG_POLL_API_MISSING');
-    await shutdownGate.entered;
+    await waitForGate('shutdown', shutdownGate, inFlightPoll);
     let shutdownComplete = false;
     const shutdown = adapter.stopWatchingAndWait().then(() => { shutdownComplete = true; });
     await Bun.sleep(25);
