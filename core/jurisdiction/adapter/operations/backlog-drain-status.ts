@@ -1,3 +1,4 @@
+import { safeStringify } from '../../../protocol/serialization';
 import type { EntityReplica } from '../../../entity/types';
 import type { RuntimeReplica } from '../../../runtime/types';
 import type { JReplica } from '../../../types/jurisdiction-runtime';
@@ -6,6 +7,31 @@ import {
   findWatcherJurisdictionReplica,
   isEntityReplicaRelevantToWatcher,
 } from '../watcher/observe/watcher-replica';
+
+const J_WATCHER_DRAIN_STALL_TIMEOUT_MS = 60_000;
+export type JWatcherDrainProgress = {
+  fingerprint: string;
+  lastProgressAt: number;
+  retrying: boolean;
+};
+
+export const observeJWatcherDrainProgress = (
+  previous: JWatcherDrainProgress | null,
+  fingerprint: string,
+  nowMs: number,
+  timeoutMs = J_WATCHER_DRAIN_STALL_TIMEOUT_MS,
+): JWatcherDrainProgress => {
+  if (!previous || previous.fingerprint !== fingerprint) {
+    return { fingerprint, lastProgressAt: nowMs, retrying: false };
+  }
+  const idleMs = nowMs - previous.lastProgressAt;
+  if (idleMs >= timeoutMs) {
+    throw new Error(
+      `J_WATCHER_DRAIN_STALLED:idleMs=${idleMs}:timeoutMs=${timeoutMs}:${fingerprint}`,
+    );
+  }
+  return { ...previous, retrying: true };
+};
 
 export type CapturedJWatcherTarget = {
   adapter: JAdapter;
@@ -25,6 +51,22 @@ export type JWatcherDrainStatus = {
     entityFinalizedThrough: number;
     pendingDueFinality: boolean;
   }>;
+};
+
+/** Newer chain traffic cannot reset the deadline for a captured financial target. */
+export const getJWatcherDrainProgressKey = (status: JWatcherDrainStatus): string => {
+  const through = (height: number): number => Math.min(height, status.targetBlock);
+  return safeStringify([
+    through(status.committedCursor),
+    through(status.authenticatedThrough),
+    status.replicas.map(replica => [
+      replica.key,
+      through(replica.localScannedThrough),
+      through(replica.authenticatedThrough),
+      through(replica.entityFinalizedThrough),
+      replica.pendingDueFinality,
+    ]),
+  ]);
 };
 
 export const requireSafeBlock = (value: unknown, label: string): number => {

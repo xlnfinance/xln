@@ -2,10 +2,11 @@ import { describe, expect, test } from 'bun:test';
 
 import {
   isJWatcherDrainComplete,
+  observeJWatcherDrainProgress,
+  getJWatcherDrainProgressKey,
   needsJWatcherPoll,
   type JWatcherDrainStatus,
 } from '../../../jurisdiction/adapter/operations/backlog-drain-status';
-import { observeJWatcherDrainProgress } from '../../../jurisdiction/adapter/operations/backlog-drain';
 
 const status = (overrides: Partial<JWatcherDrainStatus> = {}): JWatcherDrainStatus => ({
   chainId: 31337,
@@ -143,6 +144,31 @@ describe('scenario J-watcher drain planning', () => {
     });
     expect(() => observeJWatcherDrainProgress(first, 'cursor=338', 121_000, 120_000))
       .toThrow('J_WATCHER_DRAIN_STALLED:idleMs=120000:timeoutMs=120000:cursor=338');
+  });
+
+  test('new blocks cannot hide stalled finalization of a captured target', () => {
+    const initial = status();
+    const progress = observeJWatcherDrainProgress(null, getJWatcherDrainProgressKey(initial), 0);
+    const newer = status({
+      authenticatedThrough: 200,
+      replicas: initial.replicas.map(replica => ({
+        ...replica, localScannedThrough: 200, authenticatedThrough: 200,
+      })),
+    });
+    expect(isJWatcherDrainComplete(newer)).toBe(false);
+    expect(getJWatcherDrainProgressKey(newer)).toBe(progress.fingerprint);
+    expect(() => observeJWatcherDrainProgress(progress, getJWatcherDrainProgressKey(newer), 60_000))
+      .toThrow('J_WATCHER_DRAIN_STALLED:idleMs=60000');
+  });
+
+  test('keeps a progressing catch-up alive beyond its first minute, then rejects a stall', () => {
+    let progress = observeJWatcherDrainProgress(null, 'cursor=0', 0);
+    for (let height = 1; height <= 10; height += 1) {
+      progress = observeJWatcherDrainProgress(progress, `cursor=${height}`, height * 30_000);
+    }
+    expect(progress.lastProgressAt).toBe(300_000);
+    expect(() => observeJWatcherDrainProgress(progress, 'cursor=10', 360_000))
+      .toThrow('J_WATCHER_DRAIN_STALLED:idleMs=60000:timeoutMs=60000:cursor=10');
   });
 
   test('resets the stall deadline whenever the drain fingerprint advances', () => {

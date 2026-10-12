@@ -161,15 +161,44 @@ test('RPC fromReplica rejects a live EntityProvider not bound to the Depository'
 
 test('RPC fromReplica proves the exact EntityProvider deployment block', async () => {
   const anvil = await startAnvil();
+  const calls: Array<{ method: string; params: unknown[] }> = [];
+  const proxy = Bun.serve({
+    hostname: '127.0.0.1',
+    port: 0,
+    async fetch(request) {
+      const body = await request.text();
+      const payload = JSON.parse(body) as typeof calls | (typeof calls)[number];
+      calls.push(...(Array.isArray(payload) ? payload : [payload]));
+      return fetch(anvil.rpcUrl, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body,
+      });
+    },
+  });
+  const rpcUrl = `http://127.0.0.1:${proxy.port}`;
   let deployed: JAdapter | null = null;
+  let restored: JAdapter | null = null;
   try {
     deployed = await createJAdapter({ mode: 'rpc', chainId: CHAIN_ID, rpcUrl: anvil.rpcUrl });
     await deployed.deployStack();
+    restored = await createJAdapter({
+      mode: 'rpc',
+      chainId: CHAIN_ID,
+      rpcUrl,
+      fromReplica: replicaForAddresses(deployed, deployed.addresses.entityProvider),
+    });
+    expect(restored.addresses).toEqual(deployed.addresses);
+    expect(restored.entityProviderDeploymentBlock).toBe(deployed.entityProviderDeploymentBlock);
+    expect(calls.filter(call => call.method === 'eth_getBlockReceipts').map(call => call.params))
+      .toEqual([[ethers.toQuantity(deployed.entityProviderDeploymentBlock)]]);
+    expect(calls.filter(call => call.method === 'eth_getTransactionReceipt')).toHaveLength(0);
+    calls.length = 0;
     const claimedLaterBlock = deployed.entityProviderDeploymentBlock + 1;
     const result = await createJAdapter({
       mode: 'rpc',
       chainId: CHAIN_ID,
-      rpcUrl: anvil.rpcUrl,
+      rpcUrl,
       fromReplica: replicaForAddresses(
         deployed,
         deployed.addresses.entityProvider,
@@ -184,8 +213,13 @@ test('RPC fromReplica proves the exact EntityProvider deployment block', async (
     expect(result instanceof Error ? result.message : '').toContain(
       `RPC_ENTITY_PROVIDER_DEPLOYMENT_RECEIPT_MISSING:${claimedLaterBlock}`,
     );
+    expect(calls.filter(call => call.method === 'eth_getBlockReceipts').map(call => call.params))
+      .toEqual([[ethers.toQuantity(claimedLaterBlock)]]);
+    expect(calls.filter(call => call.method === 'eth_getTransactionReceipt')).toHaveLength(0);
   } finally {
+    await restored?.close();
     await deployed?.close();
+    await proxy.stop(true);
     await stopAnvil(anvil);
   }
 }, 120_000);

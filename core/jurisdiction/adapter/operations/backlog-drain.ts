@@ -8,6 +8,9 @@ import { getLiveJAdapterEntries } from '../../../runtime/j-submit/live-jadapters
 
 import {
   getJWatcherDrainStatus,
+  getJWatcherDrainProgressKey,
+  observeJWatcherDrainProgress,
+  type JWatcherDrainProgress,
   isJWatcherDrainComplete,
   needsJWatcherPoll,
   relevantReplicas,
@@ -17,32 +20,7 @@ import {
   type JWatcherDrainStatus,
 } from './backlog-drain-status';
 
-const J_WATCHER_DRAIN_STALL_TIMEOUT_MS = 60_000;
 const J_WATCHER_DRAIN_RETRY_DELAY_MS = 100;
-
-export type JWatcherDrainProgress = {
-  fingerprint: string;
-  lastProgressAt: number;
-  retrying: boolean;
-};
-
-export const observeJWatcherDrainProgress = (
-  previous: JWatcherDrainProgress | null,
-  fingerprint: string,
-  nowMs: number,
-  timeoutMs = J_WATCHER_DRAIN_STALL_TIMEOUT_MS,
-): JWatcherDrainProgress => {
-  if (!previous || previous.fingerprint !== fingerprint) {
-    return { fingerprint, lastProgressAt: nowMs, retrying: false };
-  }
-  const idleMs = nowMs - previous.lastProgressAt;
-  if (idleMs >= timeoutMs) {
-    throw new Error(
-      `J_WATCHER_DRAIN_STALLED:idleMs=${idleMs}:timeoutMs=${timeoutMs}:${fingerprint}`,
-    );
-  }
-  return { ...previous, retrying: true };
-};
 
 type ProcessRuntimeFrame = (env: RuntimeReplica, inputs?: EntityInput[]) => Promise<RuntimeReplica>;
 
@@ -123,7 +101,7 @@ const getDrainFingerprint = (
   targets: CapturedJWatcherTarget[],
   statuses: JWatcherDrainStatus[],
 ): string => safeStringify({
-  statuses,
+  statuses: statuses.map(getJWatcherDrainProgressKey),
   queuedJInputs: (env.runtimeMempool?.entityInputs ?? [])
     .filter((input) =>
       input.entityTxs?.some((tx) => tx.type === 'j_event') ||

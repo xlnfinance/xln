@@ -5,28 +5,42 @@ Foreign Rust stash `438bf1a6ddd8679bba0b63bdef11dd1fd1f45e90` is untouched.
 Keep frozen-core, PRs with seven required green jobs, no WIP commits.
 
 
-Current checkpoint, 2026-10-12 20:34 UTC: PR #73 passed all seven required
-CI jobs on clean 336cdbe32 and merged as d1eb4f2d7. The private Sepolia rollout
-restored actual H1 state through R4477/J11898053, with coreOk=true. Startup did
-not finish: it requires the original 2,000,000 USDT bootstrap target after the
-valid P6 exit left 1,999,800 USDT. Public ingress remains in maintenance and
-both services stopped; preserve current WAL and the original cold backup.
-No new owner decision is required.
+Current checkpoint, 2026-10-12 21:18 UTC: PR #74 passed all seven required
+CI jobs on clean 9956bc7fd and merged as c36c30996. Sepolia now runs that
+candidate with healthy H1 and external tower, preserving the deployed WAL.
+The reserve-readiness defect is fixed without replenishing the valid 200 USDT
+P6 payout. All 11 public UI artifacts match the verified archive. Current
+funding/exit checks pass 25/25; candidate checks pass 72 units / 1,055 assertions,
+38 source gates and the compiled local funding/payment/reload journey.
+Deployed cold restore verifies 128/128 frames, P6 inactive and collateral zero.
+The older-source comparison proves data compatibility, not a healthy rollback
+service: that earlier source retains the startup-target defect.
 
-The stopped deployed H1 copy cold-restores through the pinned 336cdbe32 source:
-128/128 integrity frames, reconstructed root verified, P6 dispute cleared and
-collateral zero. No network adapters or transaction submission in this check.
-Evidence: docs/evidence/canonical-review-20261012/release-336cdbe32.json.
-This proves deployed financial recovery, not public wallet availability.
+Public demo is NOT ready: first wallet import and saved-profile unlock both
+fail at the UI's absolute 60-second chain-scan deadline. A measured unlock
+advanced 128 authenticated blocks while PublicNode returned 429; the frozen
+chain target is roughly 8,000 blocks after deployment. No test funding or
+payment has been sent. Safe evidence and failed/public activation logs:
+docs/evidence/canonical-review-20261012/release-9956bc7fd.json.
 
-Method review: green local dev funding does not prove public-chain restart
-after withdrawals. Follow the first deployed boundary: operational reserves
-must gate service readiness, while initial dev funding targets remain explicit
-bootstrap diagnostics. Do not replenish the 200 USDT to hide the defect or
-weaken storage/empty-reserve checks. The minimal TS startup/import fix passes 72 related tests and 1,055 assertions.
-Static review confirms dev H2/H3 funding and zero-reserve rejection remain.
-Next: check the committed candidate and real compiled-wallet/bootstrap path,
-then require a new PR with exact-head green CI before public activation.
+Method review: stop repeating broad local suites after an unchanged public
+failure. Observe the browser's actual RPC methods and authenticated cursor.
+The measured next boot used 71 individual deployment-receipt reads before
+catch-up, and the UI discards healthy progress after one minute. Reuse the
+existing canonical stall tracker and one complete block-receipts read; preserve
+both header authentication passes, exact deployment origin and financial
+admission gating. Do not add funds, skip history or invent another gate.
+The shared-progress regression passes 11 tests / 20 assertions; UI types pass.
+A review counterexample now clamps progress to the captured target: new blocks
+cannot hide stuck financial finality. Exact-origin Anvil tests pass 2/2 with
+15 assertions, one block-receipts call and zero per-transaction receipt calls.
+The compiled candidate preview on real Sepolia kept syncing beyond one minute
+and reached 14% in 150 seconds; upstream 429 still prevents a quick first boot.
+The owner has no dedicated RPC and requested autonomous endpoint research.
+No funding/payment was submitted in that preview; it is diagnostic evidence.
+Next: verify those two narrow fixes against the real wallet/chain boundary,
+then exact-candidate check, PR with seven green jobs and public payment/reload.
+No owner question is pending. Rust, lending and contracts remain unchanged.
 
 - Owner authorized the one active TS fixture import correction on October 12.
   The stale worker path is replaced by the canonical Runtime worker path;
