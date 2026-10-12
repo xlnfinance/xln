@@ -38,108 +38,44 @@ Keep frozen-core, PRs with seven required green jobs, no WIP commits.
 - Next bounded deletion: always-null retired Entity-stage handles, about 120
   lines and two kernel imports. Add the missing two-leg signed Account reject
   regression first; preserve live TS workers, WAL/checkpoints and recording.
-- Public P6: fixed restored watchers re-fetching 1,064 authenticated blocks.
-  Existing contiguous history now starts the session; canonical anchor/frontier
-  audits and Entity-certified semantic cursors remain authoritative. The same
-  profile reached reserve 200, then submitted R2C 100 successfully: transaction
-  0x1a186ce331ad64d4999914eb1a568d16796883d29d2ec40c706527d276e08638,
-  block 11897335, gas 344201. Preparation timed out awaiting local observation,
-  but subsequent catch-up exited zero and offline replay independently confirms
-  reserve 100 / collateral 100 at Runtime 138. Account frames 3 and 4 contain
-  only this funding claim; no pending frame or mempool. Do not fund again.
-  The earlier catch-up exit 124 remains failed evidence, not a green run.
-  Clean 7748e1ec0 resumed the existing funding and signed both payments:
-  stale state at Runtime 140, latest state at 141. It then failed parsing an
-  absent tower receipt; HTTP status/body were obscured. No dispute submitted.
-  Recover the original proofs via read-only WAL replay at those exact heights,
-  inspect the existing tower receipt before any re-upload, and continue only
-  appointment preparation. Never rerun the two payments. Failure evidence:
-  docs/evidence/canonical-review-20261012/p6-prepare-7748e1ec0.json.
-  Evidence: docs/evidence/canonical-review-20261012/restored-frontier-88f14ce5f.json.
-  Live alpha remains 7c3f63f98; the client evidence does not change deployment.
+- Public P6 on clean d388464db: original funding resumed without repeating
+  payment or funding. Recovered exact signed states at Runtime 140/141; tower
+  upload initially rejected its wallet RPC URL. A one-line explicit allowlist
+  correction accepted the same appointment; no source deployment occurred.
+  Real-clock stale start used 1,161,420 gas, external tower counter 460,487,
+  finalization 250,134. Local recovery and a second cold replay agree at R142:
+  reserve 200 Test USDT, collateral zero, no active dispute/pending Account frame.
+  Retained storage integrity checks 127 frames, not full genesis history.
+  Evidence: docs/evidence/canonical-review-20261012/public-p6-d388464db.json.
+  This is NOT whole deployed-system P6 acceptance: old 7c3f63f98 H1 failed on
+  the counter (ethers Result cannot be cloned), then finalization evidence,
+  and stopped after three repeats at 08:01 UTC. Public RPC returns 502;
+  tower remains online. Both decoder fixes already exist in d51910eee.
+  Preserve stopped H1 DB/WAL, prove current-source replay plus the two real
+  receipts, then prepare an exact eligible build. Do not resend transactions.
+  Local recovery retained one undeliverable outbox message while H1 was down.
 - Current static kernel closure is 160,563 code lines in 816 files, down 499
   from the review baseline. QA imports remain zero; core/rscore imports remain 13. RPC pressure and restored-frontier fixes add 38 physical production lines
   net; necessary recovery behavior is not claimed as deletion. Rust/lending unchanged.
 - Remaining release gates: required PR CI; ten consecutive green main runs;
-  no kernel-to-rscore imports; public P6 with external tower and real clocks;
+  no kernel-to-rscore imports; deployed hub recovery and full public P6;
   start/finalize/reveal coverage; owner-reviewed release
   package. No dispute-start freeze, FIFO, one debt per debtor/creditor/token
   and party-selected windows remain settled. No governance/bond redesign.
 
-Method review, 04:45 UTC: the recovery gap is closed, but a longer unchanged
-network retry did not close P6. Capture the first bounded raw failure before
-another long run; the raw response identified the provider quota. Continue the
-independent TS launcher cut instead of rotating unverified providers or repeating
-the same catch-up. Evidence: `docs/evidence/canonical-review-20261012/p6-rpc-quota.json`.
-Existing 30-minute heartbeat `xln-30` remains active; no external-model budget was
-spent or renewed.
-
-Process correction, 05:05 UTC: seven successful workflow_dispatch jobs were
-real test evidence but GitHub left PR-required checks empty and blocked merge.
-Its documented event restriction explains the mismatch. Update the existing
-main-targeted PR normally so synchronize starts pull_request CI; do not rerun
-manual dispatch or weaken branch protection. Consolidating the tested launcher
-now avoids publishing another PR stack whose non-main base does not trigger CI.
-
-Method review, 05:15 UTC: the launcher deletion reached a clean-source payment
-artifact before the next ownership move. Required CI now runs through the proper
-pull_request event. Keep one implementer on the worker move and start review only
-after writes stop. Compare an existing bound WAL before recording another one;
-report path relocation separately from deleted logic and reachable audit size.
-Discover candidate paths before opening them: repeated guessed-path failures
-added no evidence. Rust implementations and their parked changes remain frozen.
-
-Method review, 05:45 UTC: the old 498-frame transcript fails at the same frame
-and with identical hashes on both the baseline and worker candidate. Preserve
-that failure; a fresh clean-source recording now replays all 708 frames exactly
-in TS W1/W4/W8. HLT fixtures now use the real projection emitters, which exposed
-two stale decoder schemas before the recording could succeed. A browser build
-also rewrites a tracked generated worker bundle: resolve its build ownership and
-repeat the clean-source browser/scenario proof before publishing this cut.
-Do not count moved code as deletion or generated artifacts as independent source.
-The next deletion proposal is bounded to always-null retired stage handles;
-finish this candidate's evidence and eligible PR CI before expanding its scope.
-No external-model budget was spent or renewed.
-
-Method review, 06:15 UTC: current-contract funding and unilateral exit passed
-25/25 local cases on clean `cef42c616`, including both Account sides, full exit,
-reopening and 512 fuzz invocations. Eight production compiler templates match.
-The separate public P6 boundary remains RPC pressure: a real forwarding proxy
-reproduces a second request only 9.535 ms after a 429. Window shrink alone does
-not control request rate. Keep one shared, cancellable transport cooldown for
-manual and scheduled polling; prove that regression before another public run.
-Do not keep retrying public catch-up or broaden the next deletion while this
-candidate is under verification. The frozen fixture import exception remains
-pending, so no push or merge is justified. No external-model budget was used.
-
-Method review, 06:45 UTC: both transport regressions now have real first-red
-and green evidence, and five local checks pass on one clean SHA. Two bounded
-public attempts still stop before the funding event; neither is P6 acceptance.
-Change the next diagnostic, not the timeout: compare the identical authenticated
-128-block range through the existing public proxy and its configured PublicNode
-upstream before another wallet cold start. A one-off success proves availability
-only. This isolates transport contention without changing consensus, providers
-or history. Preserve the pending fixture exception and avoid expanding the
-refactor while required CI cannot run on the complete candidate.
-
-Method review, 07:15 UTC: compare durable authenticated history with the restart
-cursor before blaming network capacity. The real restore regression reproduced
-duplicate reads; its small fix let the public profile reach its funding. Do not
-call an observed balance a passing run before process exit and an independent
-restore. A diagnostic timeout exposed its missing DB cleanup; use the existing
-canonical cleanup rather than add a production shutdown path. Browser evidence
-must retain its enabling environment, not just the default startup command.
-Keep the funded P6 stage; resume only from exact signed history and receipt.
-No external-model budget was spent or renewed.
-
-Method review, 07:45 UTC: the restored-frontier fix closed public funding
-catch-up; the funded-stage resume then produced both signed payment states.
-Tower receipt handling is the new first failure. Its response was obscured by
-an early shape check, so acceptance is unknown. Change the next action from
-rerunning preparation to recovering exact committed proofs and reading the
-existing receipt before another upload. This preserves the original payments
-without a new protocol journal. Source check, related tests and three browser
-journeys passed; no P6 or CI completion is claimed. No external-model spend.
+Method review, 08:15 UTC: separate chain success, local recovery and deployed
+hub health. P6 receipts and cold restore passed, but the old hub failed on the
+same events; a static `/healthz` 200 was not service health. Use `/api/health`
+and a bounded RPC request. Preserve the stopped DB and process the exact mined
+receipts before rollout; do not repeat funding or clock waits. The next deletion
+is supported by a real two-leg rollback regression, not an import count alone.
+Keep read-only summaries bounded: discover paths before reading, use JSON
+selectors and never grep generated source inventories as ordinary logs.
+Existing 30-minute heartbeat `xln-30` remains active. No external-model budget
+was spent or renewed. Earlier method evidence remains in the linked manifests:
+provider quota -> bounded first failure; existing authenticated history -> no
+refetch; workflow_dispatch success -> not required PR checks; tower upload
+failure -> original appointment recovery rather than repeated payments.
 
 ## Historical evidence and superseded scope
 

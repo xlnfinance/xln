@@ -109,8 +109,6 @@ type Session = {
 
 type OpenFrame = {
   session: Session;
-  /** The Entity input whose Rust path-copy candidate is currently open. */
-  entityInput: AuthorityEntityStageHandle | null;
   /** Where the Rust engine stood after its most recent response. */
   latest: Readonly<{ revision: number; accountsRoot: string }> | null;
   /** Account forest selected by accepted Entity inputs in this Runtime frame. */
@@ -122,12 +120,6 @@ type OpenFrame = {
   /** Produced during inbound and consumed during outbound without another IPC. */
   entityRound: RscoreEntityRound | null;
 };
-
-/** Names the Entity input and the parent root from which it started. */
-export type AuthorityEntityStageHandle = Readonly<{
-  ownerEntityId: string;
-  baseAccountsRoot: string;
-}>;
 
 type AuthorityCheckpointStorageInput = Readonly<{
   ownerEntityId: string;
@@ -563,7 +555,6 @@ export const armAuthorityWave = async (
     );
     return {
       session,
-      entityInput: null,
       latest: null,
       acceptedAccountsRoot,
       candidateAccounts: new Set(session.residentAccounts),
@@ -718,40 +709,6 @@ export const restoreAuthorityExact = async (
   arrivalCursors.delete(env);
 };
 
-const candidateForOwner = (
-  env: RuntimeReplica,
-  ownerEntityId: string,
-): OpenFrame | undefined => (pending.get(env) ?? [])
-  .find(frame => frame.session.ownerEntityId === ownerEntityId);
-
-/** The Entity input whose Rust path-copy candidate is currently open. */
-export const authorityEntityStageHandle = (
-  env: RuntimeReplica,
-  ownerEntityId: string,
-): AuthorityEntityStageHandle | null =>
-  candidateForOwner(env, ownerEntityId.trim().toLowerCase())?.entityInput ?? null;
-
-/** Close the Entity bookkeeping marker; Rust already owns the new state. */
-export const acceptAuthorityEntityStage = async (
-  env: RuntimeReplica,
-  handle: AuthorityEntityStageHandle | null,
-): Promise<void> => {
-  if (handle === null) return;
-  const frame = requireOpenEntityInput(env, handle);
-  if (frame.latest === null) {
-    return halt('ENTITY_INPUT_ACCEPT_WITHOUT_ENGINE_RESULT', {
-      owner: handle.ownerEntityId,
-    });
-  }
-  frame.acceptedAccountsRoot = frame.latest.accountsRoot.toLowerCase();
-  // Membership changes become authoritative only with the parent Entity
-  // input that published them. Inbound may have created H=1 inside Rust
-  // earlier, but a rejected Entity input must not advance this accepted set.
-  frame.session.residentAccounts = new Set(frame.candidateAccounts);
-  frame.entityInput = null;
-  frame.entityRound = null;
-};
-
 const killAuthorityRuntime = (env: RuntimeReplica): void => {
   for (const session of sessionMap(env, false)?.values() ?? []) {
     if (session === 'disabled') continue;
@@ -765,31 +722,6 @@ const killAuthorityRuntime = (env: RuntimeReplica): void => {
   delete env.accountAuthorityCheckpointDue;
 };
 
-/** Leave the held candidate for root reconciliation on the next useful call. */
-export const discardAuthorityEntityStage = async (
-  env: RuntimeReplica,
-  handle: AuthorityEntityStageHandle | null,
-): Promise<void> => {
-  if (handle === null) return;
-  const frame = requireOpenEntityInput(env, handle);
-  frame.acceptedAccountsRoot = handle.baseAccountsRoot;
-  frame.candidateAccounts = new Set(frame.session.residentAccounts);
-  frame.entityInput = null;
-  frame.entityRound = null;
-  report.discardedEntityInputs += 1;
-};
-
-const requireOpenEntityInput = (
-  env: RuntimeReplica,
-  handle: AuthorityEntityStageHandle,
-): OpenFrame => {
-  const frame = candidateForOwner(env, handle.ownerEntityId);
-  if (frame === undefined || frame.entityInput !== handle) {
-    return halt('ENTITY_INPUT_HANDLE_STALE', { owner: handle.ownerEntityId });
-  }
-  return frame;
-};
-
 /** Nothing to seal: the accounts already moved in their owning subsystem. */
 export const assertAuthorityFrameSettled = async (env: RuntimeReplica): Promise<void> => {
   if (!authorityDriverEnabled(env)) return;
@@ -798,13 +730,6 @@ export const assertAuthorityFrameSettled = async (env: RuntimeReplica): Promise<
   if (frames.length === 0) {
     report.emptyFrames += 1;
     return;
-  }
-  for (const frame of frames) {
-    if (frame.entityInput !== null) {
-      return halt('AUTHORITY_FRAME_ENTITY_INPUT_OPEN', {
-        owner: frame.session.ownerEntityId,
-      });
-    }
   }
 };
 
@@ -869,9 +794,6 @@ export const prepareAuthorityCheckpoint = async (
   const inputs: AuthorityCheckpointStorageInput[] = [];
   for (const candidate of [...candidates]
     .sort((left, right) => left.session.ownerEntityId.localeCompare(right.session.ownerEntityId))) {
-    if (candidate.entityInput !== null) {
-      return halt('CHECKPOINT_ENTITY_INPUT_OPEN', { owner: candidate.session.ownerEntityId });
-    }
     let checkpoint = candidate.checkpoints.get(candidate.acceptedAccountsRoot);
     if (checkpoint === undefined) {
       // An idle barrier has no Entity round to piggyback on, so it uses the
@@ -1053,9 +975,6 @@ export const finalizeAuthorityFrameAfterWal = async (
   const ordered = [...candidates]
     .sort((left, right) => left.session.ownerEntityId.localeCompare(right.session.ownerEntityId));
   for (const candidate of ordered) {
-    if (candidate.entityInput !== null) {
-      return halt('COMMIT_ENTITY_INPUT_OPEN', { owner: candidate.session.ownerEntityId });
-    }
     const typescriptRoot = accountMapRoot(
       accountsOf(env, candidate.session.ownerEntityId),
       candidate.session.ownerEntityId,
@@ -1086,7 +1005,6 @@ export const failStopAuthorityFrame = async (env: RuntimeReplica): Promise<void>
   if (candidates === undefined) return;
   const mutated = candidates.filter(candidate =>
     candidate.latest !== null ||
-    candidate.entityInput !== null ||
     candidate.checkpoints.size > 0,
   );
   if (mutated.length > 0) {

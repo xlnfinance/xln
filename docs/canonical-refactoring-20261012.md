@@ -109,28 +109,26 @@ The candidate is **not ready to merge**:
   pass; Unit Tests fail four cases already fixed locally. Fresh eligible CI
   requires closing the fixture failure first. A successful manual workflow
   dispatch does not satisfy required PR checks; protection remains unchanged.
-- Public P6 funding now reached durable Runtime state: reserve 100 and
-  collateral 100 Test USDT at Runtime height 138, independently restored from
-  a private DB copy. The R2C receipt succeeded in block 11897335 using 344,201
-  gas. Account frames 3 and 4 contain only that authenticated funding claim.
-  Preparation timed out before observing the receipt; resume must prove this
-  stage before continuing, never repeat funding. The earlier catch-up timeout
-  (exit 124) is retained separately. No stale dispute or tower exit is claimed.
-  On `7748e1ec0`, funding-only resume passed and both payment states were signed
-  at Runtime 140/141. Preparation then failed on an absent tower receipt.
-  [Failure evidence](evidence/canonical-review-20261012/p6-prepare-7748e1ec0.json)
-  requires recovering the original proofs and inspecting the tower before retry.
-- No public deployment or mainnet acceptance follows from the local checks.
-  The live alpha remains `7c3f63f98`; current P6, ten consecutive green main
-  runs and the owner-reviewed release package remain open.
+- [Public P6 on clean d388464db](evidence/canonical-review-20261012/public-p6-d388464db.json)
+  proves real-clock external counter/finalization and local cold recovery:
+  R142, reserve 200 Test USDT, collateral zero, no active dispute or pending
+  Account frame; 127 retained frames pass integrity. Start/counter/finalize
+  gas is 1,161,420 / 460,487 / 250,134. Original funding and payments were
+  preserved through two harness failures; only the tower RPC allowlist changed.
+- The deployed hub remains older `7c3f63f98` and **failed** on those same tower
+  events, then stopped. Current code contains both decoder fixes, but full
+  public-system P6 and deployed recovery are not passed. Local recovery retains
+  one undeliverable outbox message. Required CI, ten consecutive green main
+  runs and the owner-reviewed mainnet release package remain open.
 
-The next bounded deletion is the always-null retired Entity-stage handle and
-its accept/discard bookkeeping: approximately 120 physical lines and two kernel
-imports, not yet removed. Preserve real TS candidates, checkpoints and recording.
-First prove two signed Account legs through existing `applyMergedEntityInputs`:
-valid first leg, invalid second signature, two rejects, both original roots,
-empty outboxes, then an intact retry matching a clean control. Existing sibling
-cascade tests do not prove this exact rollback case.
+The next patch removes the always-null retired Entity-stage handle, its
+accept/discard bookkeeping and the now-unused partial-stage array. Real TS
+candidates, checkpoints and recording remain. The signed two-leg regression
+passes before and after: the first valid leg is visited, the second signature
+rejects, both full Entity/Account snapshots remain unchanged, no outboxes are
+published, and an intact retry matches the clean control. The expanded focused
+suite passes 34 tests / 1,249 assertions; these are development checks pending
+clean-SHA replay and source-gate evidence.
 
 ## Target ownership and deletion sequence
 

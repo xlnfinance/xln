@@ -8,6 +8,11 @@ import { applyEntityTx } from '../../../entity/tx/apply';
 import { applyAccountTxToMutableReplica as applyAccountTx } from '../../../account/tx/apply';
 
 import { proposeAccountFrame } from '../../../account/consensus/proposal/propose';
+import { applyAccountInput } from '../../../account/consensus';
+import { createAccountConsensusContext } from '../../../entity/account/account-consensus-context';
+import { computeCanonicalEntityConsensusStateHash } from '../../../entity/consensus/state-root';
+import { TsAccountWorkerAuthority } from '../../../runtime/workers/account';
+import { createTestJReplica } from '../../helpers/j-replica';
 
 import { accountInputAck, accountInputProposal } from '../../../account/consensus/flush';
 
@@ -290,6 +295,127 @@ const certifyNamedSignerProfile = (
 };
 
 describe('cross-jurisdiction hashledger swap', () => {
+  test('atomic Account pair rejection preserves both siblings and intact retry equals control', async () => {
+    const seed = 'atomic-signed-account-pair';
+    const fixture = async () => {
+      const env = createEmptyEnv(seed);
+      env.state.timestamp = 10_000;
+      env.quietRuntimeLogs = true;
+      const jurisdiction = makeJurisdiction('AtomicPair', 31337, 'd1', 'd2');
+      env.state.jReplicas.set(jurisdiction.name, createTestJReplica({
+        name: jurisdiction.name, chainId: jurisdiction.chainId, rpcs: [],
+        contracts: {
+          depository: jurisdiction.depositoryAddress,
+          entityProvider: jurisdiction.entityProviderAddress,
+          account: addr('98'), deltaTransformer: addr('99'),
+        },
+      }));
+      const senderSigner = registerTestSigner(env, seed, 'sender');
+      const sender = generateLazyEntityId([senderSigner], 1n).toLowerCase();
+      const context = createAccountConsensusContext(env);
+      const inputs: RoutedEntityInput[] = [];
+      for (const label of ['first', 'second']) {
+        const signerId = registerTestSigner(env, seed, label);
+        const entityId = generateLazyEntityId([signerId], 1n).toLowerCase();
+        const state = makeState(entityId, signerId, jurisdiction, sender);
+        addReplica(env, state, signerId);
+        const account = makeAccount(sender, entityId, jurisdiction);
+        const admitted = await applyAccountInput(context, account, {
+          kind: 'enqueue',
+          txs: [{ type: 'direct_payment', data: {
+            tokenId: 1, amount: 10n, route: [entityId], deliveryMode: 'direct',
+            fromEntityId: sender, toEntityId: entityId,
+          } }],
+        });
+        if (!admitted.ok) throw new Error('ATOMIC_PAIR_PAYMENT_ADMISSION_FAILED');
+        const proposed = await proposeAccountFrame(context, account, env.state.timestamp, 0);
+        if (!proposed.ok || proposed.outcome !== 'proposed' || proposed.accountInput.kind !== 'ack_frame') {
+          throw new Error('ATOMIC_PAIR_PROPOSAL_MISSING');
+        }
+        const input = proposed.accountInput;
+        const hashes = proposed.hashesToSign ?? [];
+        const hankos = await signEntityHashes(env, sender, senderSigner, hashes.map(row => row.hash));
+        const signatures = new Map(hashes.map((row, index) => [row.hash, hankos[index]]));
+        const frameHanko = signatures.get(input.proposal.frame.stateHash);
+        if (!frameHanko) throw new Error('ATOMIC_PAIR_FRAME_HANKO_MISSING');
+        input.proposal.frameHanko = frameHanko;
+        if (input.proposal.disputeHanko) {
+          const hanko = signatures.get(input.proposal.disputeHanko.hash);
+          if (!hanko) throw new Error('ATOMIC_PAIR_DISPUTE_HANKO_MISSING');
+          input.proposal.disputeHanko.hanko = hanko;
+        }
+        // This is the Runtime's post-admission boundary: the pair marker is
+        // already assigned, while Account signatures still verify in order.
+        inputs.push({
+          entityId,
+          signerId,
+          from: addr('f0'),
+          sourceRuntimeFrame: { height: 1, timestamp: env.state.timestamp },
+          atomicCrossJurisdictionPair: { phase: 'proposal', pairKey: seed },
+          entityTxs: [{ type: 'accountInput', data: input }],
+        });
+      }
+      installTestGenesisLineage(env);
+      const authority = new TsAccountWorkerAuthority(env, 1);
+      env.accountAuthorityExecutionMode = 'cutover';
+      env.accountAuthorityEntityStageProvider = authority.provider;
+      const snapshot = () => safeStringify([...env.state.eReplicas.values()]
+        .map(replica => ({
+          entityRoot: computeCanonicalEntityConsensusStateHash(replica.state),
+          accountsRoot: replica.state.accounts.rootHash(),
+          replica: buildCanonicalEntityReplicaSnapshot(replica),
+        })));
+      return { env, inputs, authority, snapshot, sender };
+    };
+    const victim = await fixture();
+    const control = await fixture();
+    try {
+      const before = victim.snapshot();
+      expect(before).toBe(control.snapshot());
+      const invalid = structuredClone(victim.inputs);
+      const first = invalid[0]?.entityTxs[0];
+      const second = invalid[1]?.entityTxs[0];
+      if (first?.type !== 'accountInput' || first.data.kind !== 'ack_frame'
+        || second?.type !== 'accountInput' || second.data.kind !== 'ack_frame') {
+        throw new Error('ATOMIC_PAIR_SIGNED_INPUTS_MISSING');
+      }
+      // A correctly encoded signature for the other Account must not certify
+      // this Account's hash. The valid first candidate must remain unpublished.
+      second.data.proposal.frameHanko = first.data.proposal.frameHanko;
+      const visited: string[] = [];
+      const rejected = await applyMergedEntityInputs(victim.env, invalid, [], {
+        isReplay: false,
+        routingDeps: makeLocalCrossJRoutingDeps(),
+        beforeEntityApply: entityId => { visited.push(entityId); },
+      });
+      expect(visited).toEqual(victim.inputs.map(input => input.entityId));
+      expect(rejected.inputOutcomes.map(row => [row.inputIndex, row.outcome.kind])).toEqual([
+        [0, 'rejected'], [1, 'rejected'],
+      ]);
+      expect(rejected.rejectedAtomicPairs).toHaveLength(1);
+      expect(rejected.entityOutbox).toEqual([]);
+      expect(rejected.jOutbox).toEqual([]);
+      expect(victim.snapshot()).toBe(before);
+
+      const options = { isReplay: false, routingDeps: makeLocalCrossJRoutingDeps() };
+      const retry = await applyMergedEntityInputs(victim.env, structuredClone(victim.inputs), [], options);
+      const clean = await applyMergedEntityInputs(control.env, structuredClone(control.inputs), [], options);
+      expect(retry.rejectedAtomicPairs).toEqual([]);
+      expect(retry.inputOutcomes.map(row => row.outcome.kind)).toEqual(['committed', 'committed']);
+      expect(victim.snapshot()).not.toBe(before);
+      expect(victim.snapshot()).toBe(control.snapshot());
+      expect(safeStringify(retry.entityOutbox)).toBe(safeStringify(clean.entityOutbox));
+      expect(safeStringify(retry.jOutbox)).toBe(safeStringify(clean.jOutbox));
+      expect(retry.entityOutbox).toHaveLength(2);
+      for (const replica of victim.env.state.eReplicas.values()) {
+        expect(replica.state.accounts.get(victim.sender)?.currentHeight).toBe(1);
+      }
+    } finally {
+      await victim.authority.close();
+      await control.authority.close();
+    }
+  });
+
   const makeTargetDisputeRouteSelectionFixture = (scenario: string) => {
     const env = createEmptyEnv(scenario);
     env.scenarioMode = true;

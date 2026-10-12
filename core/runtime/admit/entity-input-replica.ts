@@ -16,11 +16,7 @@ import {
   isCommittedEntityInput,
   RuntimeEntityInputApplyError,
 } from './entity-input-contract.ts';
-import {
-  authorityRuntimeSuppressed,
-  authorityEntityStageHandle,
-  type AuthorityEntityStageHandle,
-} from '../../rscore/authority-driver.ts';
+import { authorityRuntimeSuppressed } from '../../rscore/authority-driver.ts';
 import {
   authorityRecordEnabled,
   runAuthorityFrameScope,
@@ -49,8 +45,6 @@ export type AppliedEntityReplicaInput = {
     ReturnType<typeof applyEntityInput>
   >['accountJClaimNodeChanges'];
   entityContext: Awaited<ReturnType<typeof applyEntityInput>>['entityContext'];
-  /** Open Rust savepoint; the Runtime caller owns its terminal decision. */
-  authorityStage: AuthorityEntityStageHandle | null;
 };
 
 const didCommitEntityFrame = (
@@ -178,7 +172,6 @@ const resolveReplicaAuthorityStage = (
   deferProposal: boolean,
   requiredEntityTxIndex: number | undefined,
 ): Readonly<{
-  driverEnabled: boolean;
   migrationRecordingEnabled: boolean;
   options: AccountAuthorityEntityStageOptions | null;
 }> => {
@@ -186,7 +179,6 @@ const resolveReplicaAuthorityStage = (
   const migrationRecordingEnabled = authorityRecordEnabled(driverEnabled)
     && !authorityRuntimeSuppressed(env);
   return {
-    driverEnabled,
     migrationRecordingEnabled,
     options: resolveAccountAuthorityEntityStageOptions(
       env,
@@ -327,11 +319,6 @@ export const applyEntityInputToReplica = async (
         entityInput,
         actualSignerId,
       );
-      // The engine opened its savepoint while executing this input, if the
-      // input moved any account at all. Nothing is staged after the fact.
-      const authorityStage = authority.driverEnabled
-        ? authorityEntityStageHandle(env, entityReplica.entityId)
-        : null;
       return {
         outcome: applied.outcome,
         appliedInput,
@@ -347,7 +334,6 @@ export const applyEntityInputToReplica = async (
         storageChanges: applied.storageChanges,
         accountJClaimNodeChanges: applied.accountJClaimNodeChanges,
         entityContext: applied.entityContext,
-        authorityStage,
       };
     },
   );

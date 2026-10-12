@@ -97,7 +97,11 @@ try {
     const current = await contract._accounts(accountKey, { blockTag: block.number });
     const collateral = await contract._collaterals(accountKey, 1, { blockTag: block.number });
     const reserve = await contract._reserves(entityId, 1, { blockTag: block.number });
-    if (current.disputeHash !== ZeroHash || collateral.collateral !== 100_000_000n || reserve !== expectedReserve - 100_000_000n)
+    if (
+      current.disputeHash !== ZeroHash ||
+      collateral.collateral !== 100_000_000n ||
+      reserve !== expectedReserve - 100_000_000n
+    )
       throw Error('PUBLIC_P6_INITIAL_CHAIN_STATE_CHANGED');
     const signed = prepareSignedBatch(
       batch,
@@ -139,14 +143,36 @@ try {
     await save({ ...before, status: 'submitted', startHash: tx.hash });
     const receipt = await tx.wait(1, 60_000);
     if (!receipt || receipt.status !== 1) throw Error('PUBLIC_P6_START_FAILED');
-    const started = await contract._accounts(accountKey, { blockTag: receipt.blockNumber });
-    const startBlock = await provider.getBlock(receipt.blockNumber);
-    if (!startBlock || started.disputeHash === ZeroHash) throw Error('PUBLIC_P6_START_NOT_OBSERVED');
+    // The successful receipt is the start witness. Separate state/block RPC
+    // reads can lag it and must not turn an executed start into a retry.
+    const starts = receipt.logs
+      .filter(log => log.address.toLowerCase() === addresses.depository.toLowerCase())
+      .map(log => contract.interface.parseLog(log))
+      .filter(event => event?.name === 'DisputeStarted');
+    const started = starts[0];
+    const submitted = batch.disputeStarts[0]!;
+    if (
+      starts.length !== 1 ||
+      !started ||
+      started.args.sender.toLowerCase() !== hubId ||
+      started.args.counterentity.toLowerCase() !== entityId ||
+      started.args.nonce !== BigInt(submitted.nonce) ||
+      started.args.proofbodyHash !== submitted.proofbodyHash ||
+      started.args.proposerIsLeft !== submitted.proposerIsLeft ||
+      started.args.watchSeed !== submitted.watchSeed ||
+      started.args.starterInitialArguments !== submitted.starterInitialArguments ||
+      started.args.starterCounterArguments !== submitted.starterCounterArguments ||
+      started.args.starterCounterProofCommitment !== submitted.starterCounterProofCommitment
+    )
+      throw Error('PUBLIC_P6_START_RECEIPT_MISMATCH');
+    const timestamp = Number(started.args.disputeStartTimestamp);
+    if (!Number.isSafeInteger(timestamp) || timestamp <= 0 || started.args.disputeTimeout < BigInt(timestamp))
+      throw Error('PUBLIC_P6_START_TIME_INVALID');
     const report = {
       ...before,
       status: 'waiting-for-tower',
-      start: { hash: tx.hash, gasUsed: receipt.gasUsed, block: receipt.blockNumber, timestamp: startBlock.timestamp },
-      timeout: started.disputeTimeout,
+      start: { hash: tx.hash, gasUsed: receipt.gasUsed, block: receipt.blockNumber, timestamp },
+      timeout: started.args.disputeTimeout,
     };
     await save(report);
     console.log(safeStringify(report));
