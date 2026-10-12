@@ -44,7 +44,9 @@ const contracts = {
   deltaTransformer: address('deltaTransformer'),
 };
 const rpc = configured.rpc;
-if (configured.chainId !== 11155111 || typeof rpc !== 'string') throw Error('PUBLIC_P6_SEPOLIA_REQUIRED');
+const name = configured.name;
+if (configured.chainId !== 11155111 || typeof rpc !== 'string' || typeof name !== 'string')
+  throw Error('PUBLIC_P6_SEPOLIA_REQUIRED');
 const url = 'https://sepolia.xln.finance';
 const hub = '0x2d08d3bb8f4102fb07fecef0b59f052139c99aa996239ebfc55baac82ac54dd6';
 const signer = HDNodeWallet.fromPhrase(seed);
@@ -124,7 +126,6 @@ try {
       console.error('PUBLIC_P6_RUNTIME_FATAL', failure.message);
     },
   });
-  const name = 'ethereum-sepolia';
   if (!env.state.jReplicas.has(name)) {
     const deploymentBlock = configured.entityProviderDeploymentBlock;
     if (typeof deploymentBlock !== 'number' || !Number.isSafeInteger(deploymentBlock))
