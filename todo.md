@@ -14,8 +14,10 @@ PR #70 is merged after seven green jobs. The funded Sepolia P6 profile is
 preserved; the public alpha has not yet been updated to the new candidate.
 
 1. Land the verified transport-only RPC binding and checkpoint recovery together
-   with the debt-total/outbox/dead-entrypoint refactor through required
-   green CI. [Review and measured first patch](docs/canonical-refactoring-20261012.md)
+   with the debt-total/outbox/dead-entrypoint refactor and TS-only launcher through
+   required pull_request CI. Seven green manual-dispatch jobs are test evidence,
+   but GitHub does not count them as PR-required checks.
+   [Review and measured first patch](docs/canonical-refactoring-20261012.md)
    retain all eight areas' proposals without making a second live queue.
 2. Complete reserve-confirmation rollout and public P6 from the recovered profile:
    the raw PublicNode response confirms a quota limit; a 160-second uninterrupted

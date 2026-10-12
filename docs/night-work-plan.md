@@ -5,12 +5,14 @@ Foreign Rust stash `438bf1a6ddd8679bba0b63bdef11dd1fd1f45e90` is untouched.
 Keep frozen-core, PRs with seven required green jobs, no WIP commits.
 
 - Verified source: `f774dbb7009e92521d5a7f5bfb836be5109f3506` on
-  `codex/ts-only-launcher`. Its predecessor `c6215ccd3` remains the immutable
-  combined PR #73 candidate against main; do not change that running CI head.
+  `codex/ts-only-launcher`, with passing evidence-only follow-up `ed1a4034e`.
+  Its predecessor `c6215ccd3` passed all seven jobs in run 38204500382, but
+  that workflow_dispatch event does not satisfy GitHub's required PR checks.
   PR #71 at `ca96f041d` and PR #72 at `8d7f1e742` now both have all seven
-  CI jobs green, including E2E. Main remains `86d2a515`. Consolidate the final
-  candidate in PR #73 against main and require its own seven green jobs before
-  merge; predecessor greens are evidence, not a waiver of final CI.
+  CI jobs green, including E2E. Main remains `86d2a515`. Consolidate the verified
+  launcher into PR #73 against main and let its synchronize event run eligible
+  pull_request checks; require all seven before merge. Do not use manual
+  workflow_dispatch as a substitute for PR-required checks.
 - Last green: clean `f774dbb70`: launcher 52/52 tests, 427 assertions; full check,
   38 source gates; real production startup and 3/3 React payment journeys,
   zero skipped/flaky. One existing selector rejects retired engines before setup;
@@ -43,8 +45,9 @@ Keep frozen-core, PRs with seven required green jobs, no WIP commits.
   seed remains in the original profile. Never publish the seed, signed private
   recording or raw DB. Public P4/P5 and prior cold restore are in
   `docs/evidence/rc-20261012/`. Live alpha still runs `7c3f63f98`.
-- Next single command: publish the separate verified launcher PR after its
-  evidence commit and check. Finish PR #73's own CI before merging it. The next
+- Next single command after the final evidence commit/check:
+  `git push origin HEAD:codex/production-qa-boundary`.
+  Finish PR #73's eligible pull_request CI before merging it. The next
   source cut moves active TS workers and their actual owners out of `core/rscore`,
   without compatibility aliases; preserve WAL roots and positional outputs.
   Public P6 needs an adequate RPC source and then actual
@@ -62,6 +65,13 @@ independent TS launcher cut instead of rotating unverified providers or repeatin
 the same catch-up. Evidence: `docs/evidence/canonical-review-20261012/p6-rpc-quota.json`.
 Existing 30-minute heartbeat `xln-30` remains active; no external-model budget was
 spent or renewed.
+
+Process correction, 05:05 UTC: seven successful workflow_dispatch jobs were
+real test evidence but GitHub left PR-required checks empty and blocked merge.
+Its documented event restriction explains the mismatch. Update the existing
+main-targeted PR normally so synchronize starts pull_request CI; do not rerun
+manual dispatch or weaken branch protection. Consolidating the tested launcher
+now avoids publishing another PR stack whose non-main base does not trigger CI.
 
 ## Historical evidence and superseded scope
 

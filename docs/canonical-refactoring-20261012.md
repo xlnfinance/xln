@@ -178,6 +178,13 @@ launches; **38 source gates**; and **3/3 real React payment journeys**, zero ski
 or flakes, through three TS Hubs. The payment journey verifies reload recovery.
 [Clean-source commands, browser results and retained logs](evidence/canonical-review-20261012/ts-only-launcher.json).
 
+Combined predecessor `c6215ccd3` passed all seven CI jobs, including E2E, in
+[run 38204500382](evidence/canonical-review-20261012/ci-38204500382-final.json).
+It was a manual workflow_dispatch run. GitHub does not evaluate those jobs as
+required PR checks, so merge remains blocked; the next combined candidate must
+run through the ordinary pull_request event. This is a CI invocation correction,
+not a test failure or permission to bypass branch protection.
+
 ## Target ownership and deletion sequence
 
 The live queue stays in [todo.md](../todo.md). This table is the reviewed design,
