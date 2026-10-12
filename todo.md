@@ -21,10 +21,13 @@ the counter and finalization. Preserve the stopped DB and the funded wallet.
    manual-dispatch jobs do not satisfy required PR checks. Preserve strict protection.
 2. Promote an eligible reviewed Sepolia build and prove the existing hub catches
    up through counter block 11897542 and final block 11897550 without resending
-   money. Current local code handles both real receipts; a cold copy of the hub
-   restores at R4474, before those events. Local wallet recovery holds 200 Test
-   USDT in reserve, zero collateral and no active dispute. This is not deployed
-   recovery. [Public proof and failure](docs/evidence/canonical-review-20261012/public-p6-d388464db.json).
+   money. Clean d4502ec94 now catches up a private stopped-H1 copy through real
+   Sepolia J11898153 and cold-restores at R4476: exact root/outbox, 128 retained
+   frames, P6 Account dispute cleared and its collateral zero. No chain writes or public service
+   changes occurred. The React/source package is prepared but ineligible while
+   CI is red. [Local preparation proof](docs/evidence/canonical-review-20261012/release-preparation-d4502ec94.json).
+   Local wallet recovery separately holds 200 Test USDT in reserve; neither
+   local result substitutes for deployed recovery.
 3. Consolidate duplicated wallet route/depth policy and strict Brainvault worker
    admission, each behind its smallest actual failure and browser proof.
 4. Finish current exit-gas, operational and exact-build mainnet evidence. Rust

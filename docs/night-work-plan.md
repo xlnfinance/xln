@@ -51,6 +51,18 @@ Keep frozen-core, PRs with seven required green jobs, no WIP commits.
   `bun test core/__tests__/rscore/parity/cross-j-opening-lifecycle.test.ts`
   Then the group-E consumers, exact-candidate source/browser/scenario checks
   and push HEAD:codex/production-qa-boundary for PR #73 required CI.
+- Release preparation on clean d4502ec94 is complete locally: real React
+  production build, existing Git bundle/UI archive layout, 11/11 archived UI
+  files verified, and another full check (38 source gates). A fresh private
+  stopped-H1 copy caught up through real Sepolia J11898153 and cold-restored
+  exactly at R4476: P6 Account dispute cleared, its collateral zero, 128/128 retained frames,
+  identical root/outbox, zero pending network/J/registration queues. The strict
+  RPC gateway forwarded 185 read requests and zero transactions. No public
+  service restarted; this closes isolated catch-up, not deployed P6 or CI.
+  The unactivated bundle/manifest is in `.logs/canonical-review-20261012/`;
+  durable proof: docs/evidence/canonical-review-20261012/release-preparation-d4502ec94.json.
+  Sepolia deployment is already authorized; no new blanket approval is needed.
+  It still requires eligible CI and compatible rollout/rollback evidence.
 - Latest coherent deletion: native driver, native storage completion/restore
   callbacks and unused byte counters/candidate helper. Retired selectors have
   one fail-fast guard; old native persisted frames retain their original hash
@@ -111,7 +123,18 @@ checks and removed another 7,950 reachable kernel lines. The first full check
 caught folder width: use the existing integrity directory for integrity guards,
 and run the small structural gate before the immutable proof cycle. No gate
 was relaxed. The known frozen-fixture/public-deployment blockers remain.
-Next scheduled method review: 09:48 UTC.
+Method review, 09:51 UTC: stop expanding deletions until the actual H1 release
+boundary is exercised. Reuse existing source-bundle/UI packaging instead of
+expanding the unrelated native-products manifest. Check produced files: one Bun
+argument order printed help with exit zero and was rejected as build evidence.
+Use the canonical read-only RPC allowlist, since watchOnly does not prevent
+prepared transaction rebroadcast. Outcome, 10:02 UTC: all three preparation
+steps pass (build, package, isolated real-RPC catch-up plus cold restore).
+The first harness run stopped before the loop on URL normalization; reusing the
+adapter's existing normalizer fixed the helper without production changes.
+No public activation, new payment or CI gate was claimed. Resume at the frozen
+fixture exception and required PR CI, not another cosmetic refactor.
+Next scheduled method review: 10:21 UTC.
 Existing 30-minute heartbeat `xln-30` remains active. No external-model budget
 was spent or renewed. Earlier method evidence remains in the linked manifests:
 provider quota -> bounded first failure; existing authenticated history -> no

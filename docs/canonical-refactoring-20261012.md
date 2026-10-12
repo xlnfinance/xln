@@ -208,6 +208,19 @@ and mainnet acceptance remain open.
 
 ## Target ownership and deletion sequence
 
+Release preparation subsequently passed on clean `d4502ec94`, with identical
+Runtime/UI source to `fc4f267db`: production React build, existing Git bundle
+and UI archive (11/11 files checked), and 38 source gates. A fresh private copy
+of the stopped H1 read actual Sepolia through a strict read-only RPC gateway,
+processed the already-mined counter/finalization and cold-restored at **R4476 /
+J11898153**. Its exact root and complete outbox digest survived restart;
+**128/128 retained frames**, P6 Account dispute cleared and its collateral zero,
+and zero pending network/J/registration queues. The gateway forwarded **185 reads and zero
+transactions**; public P2P and services remained untouched. This is isolated
+catch-up, not deployed recovery or full public P6. The candidate remains
+ineligible while frozen fixture imports and required CI are unresolved.
+[Build, package, first harness failure and recovery evidence](evidence/canonical-review-20261012/release-preparation-d4502ec94.json).
+
 The live queue stays in [todo.md](../todo.md). This table is the reviewed design,
 not another backlog or an instruction to run all changes together.
 
