@@ -233,7 +233,7 @@ afterAll(async () => {
 });
 
 describe('RPC J-watcher backlog drain', () => {
-  test('delivers an authenticated event beyond two 2048-block pages before returning', async () => {
+  test('delivers an authenticated event beyond 4096 historical blocks before returning', async () => {
     managedAnvil = await startAnvil();
     rpcProxy = startRpcGateProxy(managedAnvil.rpcUrl);
     adapter = await createJAdapter({ mode: 'rpc', chainId: CHAIN_ID, rpcUrl: rpcProxy.rpcUrl, watchPollMs: 100 });
@@ -364,16 +364,16 @@ describe('RPC J-watcher backlog drain', () => {
     expect(adapter.isWatching()).toBe(true);
     expect(rpcProxy.takeHeaderBlocks()).toHaveLength(128);
 
-    // Both transient failures must shrink the actual poll: 2048 -> 1024 -> 512.
+    // Both transient failures must shrink the actual poll: 256 -> 128 -> 64.
     // Every successful response is forwarded from Anvil, including the fence.
     await pollWatcher();
     const readHeights = [...new Set(rpcProxy.takeHeaderBlocks())].sort((left, right) => left - right);
     const anchorHeight = Math.max(1, fromBlock - 1);
     expect(readHeights).toEqual(Array.from(
-      { length: fromBlock + 512 - anchorHeight },
+      { length: fromBlock + 64 - anchorHeight },
       (_, index) => anchorHeight + index,
     ));
-    expect(readScanProgress().scannedThroughHeight).toBe(fromBlock + 511);
+    expect(readScanProgress().scannedThroughHeight).toBe(fromBlock + 63);
 
     const successfulRetryAt = performance.now();
     // Commit the first real observed range so the next poll can advance.
@@ -388,7 +388,7 @@ describe('RPC J-watcher backlog drain', () => {
       retainedPressureGate.release();
     }
     await retainedPressurePoll;
-    expect(readScanProgress().scannedThroughHeight).toBe(fromBlock + 1023);
+    expect(readScanProgress().scannedThroughHeight).toBe(fromBlock + 127);
 
     await processJEvents(env);
 

@@ -1,0 +1,63 @@
+{
+  "sourceSha": "cc1b9600c4e8d3c9fa7499afaa6f904176cf621c",
+  "sourceCleanAtBuildAndChecks": true,
+  "checks": {
+    "focusedTests": 16,
+    "assertions": 45,
+    "sourceGates": 38,
+    "uiBuild": true
+  },
+  "providerProbe": {
+    "url": "https://rpc.sepolia.ethpandaops.io",
+    "serverSourceSha": "9956bc7fd426bcdef84b3e87ee794f2f6d90c8d1",
+    "headers": 128,
+    "receiptProofs": 56,
+    "elapsedMs": 7460
+  },
+  "publicConfigSwitch": {
+    "passed": false,
+    "firstFailure": "HUB_JADAPTER_IDENTITY_MISMATCH: persisted RPC differs from approved live transport",
+    "rollback": "healthy original config after77seconds; accepted WAL not rewound"
+  },
+  "candidateBrowser": {
+    "passed": false,
+    "staticArtifactSource": "cc1b9600c4e8d3c9fa7499afaa6f904176cf621c",
+    "serverSource": "9956bc7fd426bcdef84b3e87ee794f2f6d90c8d1",
+    "transport": "Unmodified JSON-RPC requests transparently forwarded to live ethPandaOps; not a public deployment pass",
+    "firstFailure": "J_WATCHER_DRAIN_STALLED: a 2048-block authenticated receipt window exceeded60seconds before admission",
+    "lastVisibleProgressPercent": 74,
+    "fundingRequests": 0,
+    "payments": 0
+  },
+  "mainnetReady": false,
+  "proof": [
+    {
+      "path": "wallet-catchup-free-sepolia-ethpandaops-probe.json.gz",
+      "sha256": "a9c525ff49fc93e1fd20194d36d3b616bc0aaf35a6a0c0d3dd2f2115c3a52d86"
+    },
+    {
+      "path": "wallet-catchup-free-sepolia-ethpandaops-server-authenticated.log.gz",
+      "sha256": "e82c425d22fe6e3d621ae733799c7fbb665e997b238a580133342fbeb9dede91"
+    },
+    {
+      "path": "wallet-catchup-sepolia-rpc-switch.log.gz",
+      "sha256": "c177b6df0500692a47119e8e8d7dfb8d5cc1736511e1b11575ca7885db1e1bd5"
+    },
+    {
+      "path": "wallet-catchup-wallet-cc1b9600c-provider-preview.log.gz",
+      "sha256": "4175a9b73459c7bea7eb791d441da98dd3bc24db725ef4134148a2e2f51e6583"
+    },
+    {
+      "path": "wallet-catchup-wallet-catchup-clean-l1-l2.log.gz",
+      "sha256": "4d2088b62e20eb8fdefd7aade944f5c40529fad10120d1f79371b6a524ee2750"
+    },
+    {
+      "path": "wallet-catchup-wallet-catchup-check-final.log.gz",
+      "sha256": "0ce77c4e729fbda3666095259a64854a3ae623a838578940404e42aa102fd676"
+    },
+    {
+      "path": "wallet-catchup-wallet-catchup-clean-build.log.gz",
+      "sha256": "4bf3eaea5905d4f474d3ff6c2fd18590d424c8c49d4f14507b639cc15f9ea527"
+    }
+  ]
+}

@@ -376,8 +376,8 @@ describe('JAdapter watcher ingress', () => {
 
   test('RPC watcher bounds historical catch-up without skipping the safe tip', () => {
     expect(resolveWatcherPollToBlock(1, 10_000, 256)).toBe(256);
-    expect(resolveWatcherPollToBlock(1, 190_000)).toBe(2048);
-    expect(resolveWatcherPollToBlock(2049, 190_000)).toBe(4096);
+    expect(resolveWatcherPollToBlock(1, 190_000)).toBe(256);
+    expect(resolveWatcherPollToBlock(257, 190_000)).toBe(512);
     expect(resolveWatcherPollToBlock(189_900, 190_000)).toBe(190_000);
     expect(resolveWatcherPollToBlock(257, 10_000, 256)).toBe(512);
     expect(resolveWatcherPollToBlock(9_900, 10_000, 256)).toBe(10_000);
@@ -401,10 +401,10 @@ describe('JAdapter watcher ingress', () => {
     }
     expect(isRuntimeMempoolCapacityError(capacity)).toBe(true);
     expect(isRuntimeMempoolCapacityError(new Error('J_WATCHER_POLL', { cause: capacity }))).toBe(true);
-    expect(nextWatcherPollWindow(2048, false)).toBe(1024);
+    expect(nextWatcherPollWindow(256, false)).toBe(128);
     expect(nextWatcherPollWindow(1, false)).toBe(1);
-    expect(nextWatcherPollWindow(1024, true)).toBe(2048);
-    expect(nextWatcherPollWindow(2048, true)).toBe(2048);
+    expect(nextWatcherPollWindow(128, true)).toBe(256);
+    expect(nextWatcherPollWindow(256, true)).toBe(256);
   });
 
   test('j-event ingress rejects during persistence quiesce before cursor or dedup mutation', () => {

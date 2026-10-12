@@ -49,14 +49,17 @@ export const hasLiveJAdapterForJurisdiction = (env: RuntimeReplica, jurisdiction
   Boolean(getLiveJAdapter(env, resolveJReplicaForJurisdictionName(env, jurisdictionName)?.name ?? ''));
 
 const assertHubJAdapterBinding = (
+  env: RuntimeReplica,
   name: string,
   replica: JReplica,
   jadapter: JAdapter,
   rpcUrl: string,
 ): void => {
-  const expectedRpc = replica.rpcs?.length === 1
-    ? new URL(replica.rpcs[0]!).toString()
-    : '';
+  // Restore selects transport by exact stack without rewriting committed rpcs.
+  const boundRpc = env.infrastructure?.trustedJurisdictionRpcUrls
+    ?.get(getJurisdictionIdentityRef(replica).toLowerCase()) ??
+    (replica.rpcs?.length === 1 ? replica.rpcs[0]! : '');
+  const expectedRpc = boundRpc ? new URL(boundRpc).toString() : '';
   const actualRpc = new URL(rpcUrl).toString();
   const actualChainId = requireJurisdictionChainId(jadapter.chainId, 'HUB_JADAPTER_CHAIN_ID_INVALID');
   if (Number(replica.chainId) !== actualChainId || expectedRpc !== actualRpc) {
@@ -81,7 +84,7 @@ export const attachValidatedJurisdictionAdapter = (env: RuntimeReplica, jadapter
   if (!activeName) throw new Error('HUB_JURISDICTION_REPLICA_MISSING:active');
   const replica = env.state.jReplicas?.get(activeName);
   if (!replica) throw new Error(`HUB_JURISDICTION_REPLICA_MISSING:${activeName}`);
-  assertHubJAdapterBinding(activeName, replica, jadapter, rpcUrl);
+  assertHubJAdapterBinding(env, activeName, replica, jadapter, rpcUrl);
   attachLiveJAdapter(env, activeName, jadapter);
 };
 
