@@ -49,7 +49,7 @@ test('RPC chain id rejects malformed or unsafe quantities before selecting a jur
     '-1',
   ];
   for (const result of invalid) {
-    const payload = encodeURIComponent(JSON.stringify({ jsonrpc: '2.0', id: 1, result }));
+    const payload = encodeURIComponent(safeStringify({ jsonrpc: '2.0', id: 1, result }));
     await expect(
       deployRpc2JurisdictionStack({
         shardJurisdictionsPath: '/unused',
@@ -61,7 +61,7 @@ test('RPC chain id rejects malformed or unsafe quantities before selecting a jur
 
 test('RPC chain id accepts exact positive safe integers before selecting a jurisdiction', async () => {
   for (const result of ['0x7a69', '31337', 31337, '0x1fffffffffffff', '9007199254740991']) {
-    const payload = encodeURIComponent(JSON.stringify({ jsonrpc: '2.0', id: 1, result }));
+    const payload = encodeURIComponent(safeStringify({ jsonrpc: '2.0', id: 1, result }));
     await expect(
       deployRpc2JurisdictionStack({
         shardJurisdictionsPath: '/unused',
