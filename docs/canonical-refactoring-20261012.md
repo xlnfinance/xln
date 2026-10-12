@@ -135,6 +135,29 @@ review, the useful change was to test recovery before another network retry;
 the first offline reproduction took 0.535 seconds. The release gap is reopened,
 not closed by identifying its cause.
 
+That prospective fix is verified on clean `042026fe0`: **20/20 tests, 82
+assertions**, all four real RPC SIGKILL boundaries and **38 source gates**.
+The existing regression now checks the Runtime root after the first restore,
+a new committed event, a second restore and adapter recreation. Production code
+shrinks four lines net; the unconsumed RuntimeState export is now private.
+No snapshot field or hash-verification exception was added.
+
+The affected private profile passed all five offline stages: a wrong RPC value
+is rejected; the evidenced value allows ordinary verification of original
+frames 14–16; the existing signed-bundle importer creates a separate checkpoint;
+two cold restores preserve financial roots, Account envelopes and both outboxes.
+The original WAL is archived unchanged. This deliberately creates a new frame
+chain; its checkpoint hash is not represented as the original WAL hash.
+[Proof, archive digests, script and retained logs](evidence/canonical-review-20261012/rpc-transport-recovery.json).
+
+Live startup from that checkpoint succeeds. Public RPC 429/timeouts then limit
+the next 60-second trace to 576 authenticated blocks, before the funding event;
+no financial transaction is submitted. That is the next unresolved boundary.
+Both predecessor PR candidates now have seven successful CI jobs, including E2E:
+[PR 71 run](evidence/canonical-review-20261012/ci-38201621912-final.json) and
+[PR 72 run](evidence/canonical-review-20261012/ci-38202183279-final.json).
+The final combined candidate still needs its own required CI.
+
 ## Target ownership and deletion sequence
 
 The live queue stays in [todo.md](../todo.md). This table is the reviewed design,

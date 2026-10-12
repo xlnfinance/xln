@@ -1,0 +1,95 @@
+{
+  "sourceSha": "042026fe09d855e9a3126e2f44be662cc5af3144",
+  "cleanBeforeAndAfterExecution": true,
+  "change": "Trusted jurisdiction RPC overrides now belong to process-local Runtime infrastructure. Committed JReplica.rpcs, state hashing and replay verification remain unchanged. Adapter recreation retains the selected endpoint; watcher dedup uses the actual provider connection.",
+  "productionDelta": {
+    "files": 3,
+    "linesAdded": 14,
+    "linesRemoved": 18,
+    "netLines": -4,
+    "removedUnusedExport": "RuntimeState"
+  },
+  "checks": [
+    {
+      "command": "bun run stand:run --reason restore-rpc-final-candidate --timeout-ms 60000 -- bun test core/__tests__/jurisdiction/history/jreplica-state-root.test.ts core/__tests__/jurisdiction/watchers/jwatcher-singleton.test.ts core/__tests__/jurisdiction/submission/recovery/j-submit-real-rpc-crash-recovery.test.ts",
+      "passed": 20,
+      "failed": 0,
+      "assertions": 82,
+      "seconds": 16.02,
+      "standLockHeld": true
+    },
+    {
+      "command": "bun run check",
+      "status": "passed",
+      "sourceGatesPassed": 38
+    },
+    {
+      "case": "Same financial state after trusted RPC rebinding, a real committed event, second restore and adapter recreation",
+      "status": "passed"
+    },
+    {
+      "case": "All four existing real RPC SIGKILL boundaries",
+      "status": "passed"
+    },
+    {
+      "case": "Funded P6 profile offline recovery",
+      "status": "passed",
+      "stages": 5,
+      "coldRestores": 2,
+      "manifest": "p6-frame14-rebase.json"
+    }
+  ],
+  "oldCodeRegression": "The unchanged-committed-rpcs assertion failed on the old implementation before the fix.",
+  "review": {
+    "independentStaticReview": "No actionable finding",
+    "limitations": "Working diff review; not a security audit. New alias-dedup combination is not separately exercised."
+  },
+  "liveFollowup": {
+    "status": "restored-but-funding-event-not-yet-observed",
+    "windowSeconds": 60,
+    "authenticatedBlocks": 576,
+    "lastScannedBlock": 11893966,
+    "startBlock": 11893391,
+    "runtimeHeight": 16,
+    "reserveObserved": "0",
+    "rpcFailures": ["HTTP 429", "RPC_BATCH_TIMEOUT:5000"],
+    "financialTransactionsSubmitted": 0
+  },
+  "limitations": [
+    "The offline repair intentionally creates a new checkpoint chain. Original WAL bytes remain separately archived; it is not an in-place rewrite or a claim of unchanged frame hashes.",
+    "Signed bundle, seed and private database are not published. Only roots, counts, script and sanitized diagnostic logs are retained here.",
+    "Current public P6, final-candidate CI/browser checks and mainnet release acceptance remain open."
+  ],
+  "artifacts": [
+    {
+      "path": "rpc-transport-tests.log.gz",
+      "sha256": "c7581afad2d1df749428b803fc17fdbf0409deef6968c05f4c32cfaf6b1e12c8",
+      "uncompressedSha256": "dc0b515e549eb6da60af44ae7c68265a348bef4ebe21ff0d01d369528da81d30"
+    },
+    {
+      "path": "rpc-transport-check.log.gz",
+      "sha256": "f257f51a59c9916492bc45b02513ae85996634bc646806ee163fdb3ef48b64ba",
+      "uncompressedSha256": "82005e30818f894d8e9a6368cf75265512289bf25024bc1ff417bb251771127f"
+    },
+    {
+      "path": "rpc-transport-old-regression.log.gz",
+      "sha256": "b5d48d3b1cf98a3789cea9d96708322445862cd0a5ddc012ea0596581ff23558",
+      "uncompressedSha256": "6a93a96b4c9074332ba28b2009582fe097f6f6fa8d1a45b167d4e6d382c7e9ff"
+    },
+    {
+      "path": "p6-offline-frame14-rebase.log.gz",
+      "sha256": "42d0403bbcb12e69fbf748333e66e2a191bdf036f57c869b5428353f5d780f5e",
+      "uncompressedSha256": "6dfb1262013e096c50f156a2653750b02c752894b33481c7efc90c7be9fd3a7a"
+    },
+    {
+      "path": "p6-repaired-live-catchup.log.gz",
+      "sha256": "a2093acbdb70af08a0e2f72eebe026f237033ad9a0f88c740096a9c6d141083d",
+      "uncompressedSha256": "18445a11fcbd864d052cfa21b36a68ee9433e6a80e0b629af8ec9fa54221a044"
+    },
+    {
+      "path": "p6-frame14-offline-script.txt.gz",
+      "sha256": "b6d7980de3a37326e9bda43c51401e7c2c8b4dbd2f21d1d7ade6a638b010db84",
+      "uncompressedSha256": "7780f96b0e82c18e06b47507780fa4e19a784e5c54ff2c764385e2f94c8052bd"
+    }
+  ]
+}

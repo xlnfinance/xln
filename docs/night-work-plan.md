@@ -4,79 +4,55 @@ Owner scope: TS + React + Ethereum same-J; Rust and lending remain frozen.
 Foreign Rust stash `438bf1a6ddd8679bba0b63bdef11dd1fd1f45e90` is untouched.
 Keep frozen-core, PRs with seven required green jobs, no WIP commits.
 
-- Current base source: `c4566fd81f668e36b3c03dd2faffb7db0313e5fc` on
-  `codex/restore-rpc-transport`, based on PR #73, merging PR #72 at `8d7f1e742`.
-  PR #71 now carries the Activity readiness test fix at `ca96f041d`; PR #72 is
-  stacked on it. Main remains `86d2a515`. No PR is approved for merge
-  until all required CI jobs pass on its exact candidate.
-- Last green: clean `8d7f1e742`: focused backlog 1/1, full jurisdiction shard
-  444/444 / 2,181 assertions, and check / 38 source gates. Receipt focus browser
-  1/1 and check / 38 on clean `ca96f041d`. QA separation on clean `34fec4412`:
-  53/53 units / 1,912 assertions,
-  full check / 38 source gates, React payment and reload 1/1 with no skips/flakes,
-  live QA route 404. `lock-ahb` passed 85 frames on `2b2c1081c`; subsequent change
-  only made formatter helpers private. Kernel closure shrank 454 code lines;
-  direct kernel QA imports are zero. Earlier: 60/60 RPC tests on clean `50281daaa`,
-  including real Anvil 429, timeout, unchanged failed-read state and exact
-  512-block retry before full backlog completion. Restore browser 1/1 on clean
-  `0ff079f41`, no skips/flakes; full check / 38 source gates there and on
-  `999396327`. The original refactor retains 90 units and three browser journeys.
-- First red: public P6 now fails earlier, on WAL recovery at frame 14:
-  `RECOVERY_JOURNAL_POST_STATE_HASH_MISMATCH`. Clean `c4566fd81` replays through
-  frame 13; changing only JReplica.rpcs from the committed publicnode URL to
-  the trusted public proxy yields the exact recorded frame-14 hash. The trusted
-  restore binding mutated committed state outside WAL. The diagnostic used a
-  disposable copy; the original DB and forensic copy remain unchanged.
-  The earlier `PUBLIC_P6_WAIT_FAILED:reserve-funded` on `50281daaa` and RPC
-  catch-up limits remain unresolved behind this recovery failure. Dedicated profile
-  `sepolia-p6-20261012b` has 200 test USDT confirmed in reserve, zero collateral,
-  no prepared appointment or attack. Do not fund again. Adaptive polling preserved
-  the first authenticated range through block 11893390; later retries retain it.
-  Main CI 38197082078 and old PR runs 38198105230/38198345234 all failed the same
-  tower-restore expectation race; the selected-snapshot fix is now submitted.
-  PR #71 run 38200202391's receipt-focus fixture navigation race is fixed.
-  PR #72 run 38200437268 finished 6/7 green including E2E, with only the backlog
-  unit test exceeding 60 seconds. Its exact failing phase is unknown. Explicit
-  gate/poll race diagnostics now preserve stage and state; this is not a claim
-  that the CI-only timeout is fixed. The next run must supply that evidence.
-- Artifacts: `docs/evidence/canonical-review-20261012/` records the original
-  eight-scope review and `rpc-restore-followup.json` with clean-source tests,
-  browser/check logs and the explicitly failed public P6 run. `qa-boundary.json`
-  binds the production QA cut to clean source, kernel measurements and tests.
-  Public P4/P5 and
-  cold restore remain in `docs/evidence/rc-20261012/`. The live public alpha
-  still runs `7c3f63f9841f4e8b61ac5eee5dbe4f9710b10621`.
-- Next single action: verify the transport-only RPC binding fix with the existing
-  real-chain crash fixture and two successive restores. Then perform an explicit
-  offline recovery on a fresh destination, retaining original WAL and exact root
-  evidence. No replay-verification bypass or hash exclusion. Keep checking
-  exact-candidate CI for PR #71 (`ca96f041d`) and PR #72 (`8d7f1e742`).
-  Keep QA PR #73 stacked until the base is green; its old
-  run 38201516918 was cancelled after the parent changed. Revalidate the final
-  QA candidate rather than repeatedly running stale stacked combinations.
-  For public P6, identify the slow RPC method/range before another identical
-  retry; never skip chain history or manufacture ingress. The next structural
-  cut separates active TS workers from retired Rust hooks. Rust proposals stay read-only.
-- Remaining gates: ten consecutive green main CI runs; production Rust/QA
-  isolation; public P6 with current code and real clocks; external tower
-  start/finalize/reveal coverage; exact owner-reviewed mainnet release package.
+- Verified source: `042026fe09d855e9a3126e2f44be662cc5af3144` on
+  `codex/restore-rpc-transport`, descended from QA PR #73 at `c4566fd81`.
+  PR #71 at `ca96f041d` and PR #72 at `8d7f1e742` now both have all seven
+  CI jobs green, including E2E. Main remains `86d2a515`. Consolidate the final
+  candidate in PR #73 against main and require its own seven green jobs before
+  merge; predecessor greens are evidence, not a waiver of final CI.
+- Last green: clean `042026fe0`: 20/20 tests, 82 assertions, all four real RPC
+  SIGKILL boundaries; full check, 38 source gates. Trusted RPC binding now uses
+  live infrastructure without changing committed JReplica state. Production
+  code shrinks four lines net. The existing test proves exact roots after first
+  restore, a new committed event, second restore and adapter recreation.
+  Five offline recovery stages also passed: wrong RPC rejected, original frames
+  14–16 verified, signed checkpoint import and two cold restores. Financial
+  roots, Account envelopes and both outboxes agree. Original WAL bytes remain
+  unchanged in separate archives; the repaired DB explicitly starts a new
+  checkpoint chain, with a different frame hash.
+- First unresolved boundary: public P6 catch-up. Live startup of the repaired
+  profile succeeds, but RPC 429/timeouts prevent observing the existing 200 test
+  USDT reserve in the 60-second trace. The watcher re-authenticated 576 blocks
+  through 11893966, already present in the original durable jHistory. Its cold
+  start uses the earlier certified Entity/J cursor 11893390, so Runtime height16
+  staying unchanged is expected. Do not repeat this short cold-start loop or
+  interpret it as lost WAL evidence. No new funding or dispute was submitted.
+- Artifacts: `docs/evidence/canonical-review-20261012/rpc-transport-recovery.json`
+  binds tests, check, incident script, archive digests and live trace to clean
+  source. `p6-frame14-rebase.json` records the explicit checkpoint boundary.
+  Private recovered profile: `~/.config/xln/sepolia-p6-20261012b-rebased-frame14-20261012`;
+  seed remains in the original profile. Never publish the seed, signed private
+  recording or raw DB. Public P4/P5 and prior cold restore are in
+  `docs/evidence/rc-20261012/`. Live alpha still runs `7c3f63f98`.
+- Next single command: run the existing catch-up trace on the repaired profile
+  for 160 seconds within the 180-second stand budget, keeping one Runtime alive.
+  Verify progress above 11893966 and then reserve observation. Preserve the
+  authenticated read path; do not tune production RPC policy before this test.
+  Finish final-candidate PR CI in parallel, then public P6 with actual signatures,
+  external tower, real clocks and a further cold restore.
+- Remaining final gates: ten consecutive green main CI runs; active TS worker
+  isolation from retired Rust tooling; public P6; external tower start/finalize/
+  reveal coverage; current exit-gas and owner-reviewed mainnet release package.
   No extra dispute-start freeze, FIFO, one debt per debtor/creditor/token and
   party-selected windows remain settled. No starter bond/governance redesign.
 
-Method review, 2026-10-12: use the existing real-chain fixture to inject transport
-pressure instead of adding another watcher or retry abstraction. A red run on the
-old controller and a clean-source green run establish the change. Bind browser
-restore expectations to the snapshot selected by discovery, not a moving display.
-The attempted public retries did not complete P6; retain their exact failure and
-stop repeating unchanged requests. Before any external retry, read chain state
-and preserve submission intent. The 30-minute review heartbeat `xln-30` remains
-  active; no external-model budget was spent or renewed.
-
-Method review, 04:15 UTC: recovery now precedes RPC tuning. The offline prefix
-replay isolated the first divergence in 0.535 seconds, with 0 release gaps closed
-and 1 reopened. Keep this narrower observation rather than repeat a 60-second
-network wait on an unrecoverable profile. The next block must prove the fix and
-recovery; diagnosis alone is not acceptance.
+Method review, 04:15 UTC: recovery precedes RPC tuning. An offline prefix replay
+isolated the first divergence in 0.535 seconds. The next block closed the
+reproduced recovery gap with ordinary hash verification and explicit checkpoint
+provenance. The short live retry then established that startup re-reads an already
+durable tail. Keep one bounded live session for catch-up rather than repeatedly
+restarting it. Existing 30-minute heartbeat `xln-30` remains active; no external
+model budget was spent or renewed.
 
 ## Historical evidence and superseded scope
 

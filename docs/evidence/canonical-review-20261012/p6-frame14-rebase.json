@@ -1,0 +1,60 @@
+{
+  "sourceSha": "042026fe09d855e9a3126e2f44be662cc5af3144",
+  "scriptSha256": "7780f96b0e82c18e06b47507780fa4e19a784e5c54ff2c764385e2f94c8052bd",
+  "archives": {
+    "original": {
+      "digest": "c3ddedae12fd95c45b67e462ae48d47f7b3ad76a93794ceb82d802c95cfa9ca7",
+      "files": 30,
+      "bytes": 72922
+    },
+    "forensic": {
+      "digest": "c3ddedae12fd95c45b67e462ae48d47f7b3ad76a93794ceb82d802c95cfa9ca7",
+      "files": 30,
+      "bytes": 72922
+    }
+  },
+  "verifiedPrefixHeight": 13,
+  "correctedBeforeHeight": 14,
+  "originalFrame14PostStateHash": "0x844244c6ec989f61017925d70514e3cda15fe0e15d35544153b2db3db090812b",
+  "wrongRpcRejected": true,
+  "verifiedSuffixFrames": 3,
+  "originalTip": {
+    "height": 16,
+    "frameHash": "0xb3e49c1497a6ef7104a8b21f1b959676676cab2bf114c60b9bccb3b7af2b0044",
+    "prevFrameHash": "0x76b0ffc632632c34867079d748c8f282311b296423343774e0747e0c0508fb46",
+    "postStateHash": "0x5e981726fb8c40e59f6267d73be72b9e3f68ab56cb46fd84c91a8f35cfc0482e",
+    "replicaMetaDigest": "0x16c1fe1970863f9b293c662caaf76a84df881c6fa6c76f2900794884ad946fd3",
+    "runtimeOutputCount": 0,
+    "runtimeOutputsDigest": "0x56cc30822c85fae6a34ca5bd7047a22371f2bc0101275dc7240013b675347827"
+  },
+  "newCheckpoint": {
+    "height": 16,
+    "frameHash": "0x8e209d1b87f216dd0c0e74537ee6c3fcadc7a6c05662a4626388bc0de58b77c1",
+    "prevFrameHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+    "postStateHash": "0xf79c8aef62fb541bd9517e25eefe9e093fafab22932f4d4a7185593aecf72451",
+    "canonicalStateHash": "0xa409745cd4a33ee521224c11d2e54db1925fd1a0b4b025d39a47c8cb8c8c9b93",
+    "runtimeOutputCount": 0,
+    "runtimeOutputsDigest": "0x56cc30822c85fae6a34ca5bd7047a22371f2bc0101275dc7240013b675347827"
+  },
+  "newCheckpointChain": true,
+  "originalChainPreservedInNewDb": false,
+  "originalWalPreservedInSeparateArchive": true,
+  "coldRestores": 2,
+  "financialRootsAndOutbox": {
+    "height": 16,
+    "timestamp": 1791771973393,
+    "runtimeRoot": "0xa409745cd4a33ee521224c11d2e54db1925fd1a0b4b025d39a47c8cb8c8c9b93",
+    "runtimeMachineHash": "c25d0047a45763e83f890e8bb3acf2e7159fa0b32b1544892669593ed6f13b73",
+    "entityCount": 1,
+    "entityRootsHash": "91d314c73cb0bfd7d280ee12ac47cdc198631b9ed44ca146fd79f8c5ced9bb80",
+    "accountCount": 1,
+    "accountRootsAndEnvelopesHash": "7c3009697feaecf444d236a6a66a784b5c52768dce19437c512e14f59d9d71ad",
+    "networkOutbox": {
+      "count": 0,
+      "digest": "0x56cc30822c85fae6a34ca5bd7047a22371f2bc0101275dc7240013b675347827"
+    },
+    "networkEnvelopeHash": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+    "pendingCommittedJOutboxCount": 0,
+    "pendingCommittedJOutboxHash": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+  }
+}
