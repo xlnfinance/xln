@@ -2,74 +2,45 @@
 
 Owner scope: TS + React + Ethereum same-J; Rust and lending remain frozen.
 Foreign Rust stash `438bf1a6ddd8679bba0b63bdef11dd1fd1f45e90` is untouched.
-Keep frozen-core even with zero protected files. No WIP commits.
+Keep frozen-core, PRs with mandatory green CI, no WIP commits. Main protection
+requires all seven build-and-test jobs with strict up-to-date checks.
 
-- Current SHA: PR #70 source follows `f2796d39f` on `codex/rc-wallet-recovery`;
-  runtime code still matches the React-verified d519. The gate list fix and public
-  Sepolia evidence are committed. The next change installs the React dependencies
-  needed by the unit job's real launcher tests.
+- Current source: PR #70 candidate `0fa6079fe9d669b08430534bec3eeb4b7f9e218c`.
+  Its production code matches the clean d519 React proof. PR:
   https://github.com/xlnfinance/xln/pull/70
-  Owner approved PRs with mandatory green CI on 2026-10-12. Main protection is
-  enabled: all seven build-and-test jobs, strict up-to-date checks, required PR,
-  administrators included, no force pushes/deletions. This replaces direct-main-only.
-  Owner approved the two protected decoder files; both uchg flags are restored.
-- Last green: all four private production React groups on clean source d519:
-  payment 4/4, P4/P5 2/2, P6 1/1, recovery 3/3; zero skips, failures or retries.
-  P6: offline wallet defended, 100 USDC paid, owner EOA nonce unchanged;
-  gas start 387024, counter 193785, finalize 191265. File recovery rejects
-  corruption/overwrite, restores signed Account roots/balances and exits 100 USDC.
-  Related units 155/155, 441985 assertions; launcher fixtures 28/28, 166 assertions.
-  `bun run check` passed 38 source gates (30.670s); React production build passed.
-  Every recorded run started and ended with a clean tree and held the stand lock
-  where required. P5 deliberately exhausts hub reserves: keep P6 in its separate
-  release stand, rather than combining those tests against one funded hub.
-  Public green: P4/P5 on clean 976b126fa and current Sepolia bytecode,
-  with real clocks. P4 returns all 85 test USDT collateral, gas start 933174 /
-  finalize 241109. P5 pays 95 of a 110 test USDT claim and records 15 debt,
-  gas start 933994 / finalize 767286. Both waited 24 chain seconds against a
-  signed 10-second window, then separately proved a 5 test USDT external withdrawal.
-  Existing public hub cold backup restored on clean f2796d39f into an isolated
-  local directory: runtime height 676, one Account, 128 retained WAL frames
-  verified. The production server was untouched and no Runtime loop was started.
-- First red resolved: P6 exposed three distinct production faults. The watcher
-  retained a signature cleared by Depository's final event, then passed ethers
-  Result proxies into durable state, then CounterDisputeRegistered changed an
-  Account without notifying its resident worker. Fixes reuse the existing ABI
-  materializer, ProofBody validator and replaceDisputeLifecycle envelope update.
-  A real Entity-frame regression reproduces the root mismatch before the fix and
-  now matches inline/W1/W4 roots. No Rust or rscore files changed.
-  Main CI 38189132378 finished 6/7 green including all E2E; unit failures were
-  two shallow Linux /tmp fixtures. Both now use owned data children, preserving
-  the production reset guard. Local launcher/preflight checks are green.
-  PR CI 38192080486 finished five jobs green and two red; E2E stopped before browsers because
-  release-gate-order.test.ts still expected the old three groups. The focused
-  regression reproduced both failures; its expected list now requires all four
-  groups including P6 and file recovery. Focused checks 10/10 and the complete
-  release-integrity command pass (63 tests plus the package smoke).
-  Both remaining unit failures reached `DEV_DEPENDENCIES_MISSING:ui`: the unit
-  job installed root/frontend dependencies but its real launcher also starts
-  React. Add the same frozen-lockfile ui install already used by the other jobs;
-  preserve the launcher preflight and financial assertions.
-- Artifacts: clean evidence docs/evidence/rc-20261012/react-d51910eee.json
-  includes the ten cases, Account recovery snapshots, receipts, gas and log hashes.
-  The obsolete hash/signature-only export and its test decoder are removed;
-  actual encrypted restore plus on-chain exit replaces that coverage.
-  Public receipts, block timestamps and gas are in
-  docs/evidence/rc-20261012/sepolia-976b126fa.json. The public wallet/hub/tower
-  still run 7c3f63f98; the 976b126fa UI archive is prepared but not deployed.
-  Cold restore: docs/evidence/rc-20261012/cold-restore-f2796d39f.json.
-- Next: `bun run check`, commit owned paths and update PR #70. After green CI,
-  take a fresh current-state backup and prepare the synchronized public
-  wallet/hub/tower rollout before fresh P6.
-- Remaining final gates: ten consecutive green main runs; production Rust/QA
-  isolation; current-source public Sepolia P4-P6 with real clocks; external tower
-  coverage; exact-build owner-reviewed release package. Owner correction:
-  no new freeze at dispute start, FIFO, one debt per debtor/creditor/token,
-  party-selected dispute windows. These are settled requirements, not pending
-  owner questions. No starter bond or governance change in this candidate;
-  verify historical-board proof expiry against signed windows separately.
-  Public alpha remains
-  7c3f63f9841f4e8b61ac5eee5dbe4f9710b10621. No mainnet readiness claimed.
+  Separate branch `codex/public-sepolia-p6` adds only the real public P6 harness
+  and this handoff, so it does not interrupt PR #70's running CI.
+- Last green: CI 38193239508 on clean checkout 69c4adf27 finished E2E green:
+  React payment 4/4, P4/P5 2/2, offline tower P6 1/1, recovery 3/3;
+  zero skipped, unexpected or flaky cases. Six of seven jobs passed.
+  Public Sepolia P4/P5 on 976b126fa use the current bytecode and real clocks:
+  P4 returns 85 test USDT; P5 pays 95 of a 110 claim and records 15 debt.
+  Cold hub restore on f2796d39f verified 128 retained WAL frames at height 676.
+  The private P6 clock was advanced; it is not public acceptance evidence.
+- First red: 5135 CI unit tests passed and one real launcher test timed out
+  waiting for three hubs at 30 seconds. Candidate 0fa6079fe allows 90 seconds
+  for startup inside its existing 180-second stand, with a 120-second test
+  budget and failure-log tails. State/block preservation assertions remain.
+  Local focused check passed 1/1 with five assertions in 22 seconds;
+  `bun run check` passed all 38 source gates. CI 38194922745 is running.
+- Artifacts: docs/evidence/rc-20261012/react-d51910eee.json,
+  sepolia-976b126fa.json and cold-restore-f2796d39f.json. CI React reports are
+  in run 38193239508, artifact 11723130887 (e2e-test-results).
+  Public alpha still runs 7c3f63f9841f4e8b61ac5eee5dbe4f9710b10621.
+  Candidate 69c4adf27 assets are prepared on the server, not activated.
+  Update the deployment candidate to the actual green SHA before rollout.
+- Next: finish the public P6 harness typecheck/source check and commit its owned
+  paths. Prepare a fresh test Account with real signed old/new states, appoint
+  the existing external tower and stop its Runtime. After PR #70 is green,
+  take a fresh cold backup, update wallet/hub/tower together, then start the
+  stale-state dispute, wait real Sepolia blocks and recover the same Runtime.
+- Remaining gates: ten consecutive green main CI runs; production Rust/QA
+  isolation; public P6 with current code and real clocks; external tower
+  start/finalize/reveal coverage; exact owner-reviewed mainnet release package.
+  Owner decisions are settled: no additional freeze at dispute start, FIFO,
+  one debt per debtor/creditor/token, party-selected signed dispute windows.
+  No starter bond or governance change in this candidate. Check the existing
+  seven-day historical-board proof grace separately. No mainnet readiness claim.
 
 Owner priority, 2026-10-11 17:28 UTC: ship a public Sepolia deployment and usable
 asset flow; Base is an alternative, not a prerequisite. Finish the TS launch path
