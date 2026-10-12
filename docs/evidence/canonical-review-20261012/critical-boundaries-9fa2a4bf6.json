@@ -1,0 +1,271 @@
+{
+  "schemaVersion": 1,
+  "checkedAtUtc": "2026-10-12T19:18:47.466Z",
+  "sourceSha": "9fa2a4bf6c7be9480f1a2f222188fc7237c22c98",
+  "sourceTreeCleanDuringChecks": true,
+  "scope": "Review and fix six owner-supplied findings. No mainnet acceptance, public deployment or full E2E coverage claim.",
+  "productionSourceSha": "5e648e71cb950976639b986df0fda4c47da42e65",
+  "subsequentDelta": "After 5e648e71c only tests and the decreasing non-null debt allowance changed. Financial implementation, codec, state schema and contracts are unchanged by these subsequent commits.",
+  "findings": [
+    {
+      "id": 1,
+      "status": "remote DoS not reproduced; redundant lookup removed",
+      "detail": "Existing unique board membership and unique positive bigint shares guard ran before the asserted lookup. Incoming invalid attestations already return typed rejection. The same guard now returns the validated weight. Five new vectors cover off-board/duplicate signers, valid follow-up, and missing/zero/case-duplicate local shares; local configuration corruption remains an explicit invariant failure."
+    },
+    {
+      "id": 2,
+      "status": "not reproduced; no codec change",
+      "detail": "Strict canonical MessagePack recursively sorts Map key bytes with value bytes as a tie-break. Positional array order is preserved. Review indexed 44 encoder calls in 19 production caller files, plus equality/compare callers. Existing Map/root/golden tests pass. FinTS was corrected to name the actual encoder and its rejection of undefined."
+    },
+    {
+      "id": 3,
+      "status": "faucet infrastructure timing corrected; replay divergence not reproduced",
+      "detail": "Thirteen elapsed/deadline Date.now calls in four faucet files now use getPerfMs. No reducer timestamps, WAL inputs, UTC authentication deadlines or wall-clock diagnostic timestamps were changed. The delayed real-block journey verifies the bounded wait without advancing chain time."
+    },
+    {
+      "id": 4,
+      "status": "no demonstrated coordinate confusion",
+      "detail": "Protocol units and decoder-minted EntityHeight/UnixMs views already exist; negative type checks pass. J-prefix heights are normalized as non-negative safe integers and checked against the exact Entity/J context. targetEntityHeight denotes Entity height, not J height. Full propagation through committed number schemas was not introduced (FinTS 5.3)."
+    },
+    {
+      "id": 5,
+      "status": "confirmed and fixed",
+      "detail": "last=NaN previously returned the entire 201-event test timeline. Malformed/fractional/unsafe inputs now return HTTP400 via the existing uint decoder; default200, clamp1..5000 and event order remain."
+    },
+    {
+      "id": 6,
+      "status": "confirmed and fixed",
+      "detail": "0x7a69junk previously parsed as31337; fractions were floored and unsafe integers rounded. Full hex is parsed as BigInt and checked by the existing safe uint boundary before conversion. Invalid IDs fail before jurisdiction selection/deployment; supported safe numeric IDs remain."
+    }
+  ],
+  "checks": [
+    {
+      "id": "targeted-unit",
+      "sourceSha": "5e648e71cb950976639b986df0fda4c47da42e65",
+      "sourceTreeClean": true,
+      "passed": 102,
+      "failed": 0,
+      "assertions": 587,
+      "durationMs": 3910,
+      "artifact": "critical-5e648e71c-unit.log.gz",
+      "command": "bun test core/__tests__/jurisdiction/history/j-prefix-consensus.test.ts core/__tests__/network/relay/relay-debug-http.test.ts core/__tests__/api/product/reserve-faucet.test.ts core/__tests__/api/product/offchain-faucet-admission.test.ts core/__tests__/api/product/faucet-policy.test.ts core/__tests__/protocol/serialization/binary-codec-bytes-form.test.ts core/__tests__/protocol/codec/consensus-msgpack-rust-parity.test.ts core/__tests__/runtime/observability/runtime-state-diff.test.ts core/__tests__/storage/runtime/storage-canonical-hash.test.ts core/__tests__/entity/consensus/invariants/entity-consensus-state-root.test.ts"
+    },
+    {
+      "id": "rpc-integration",
+      "sourceSha": "089f198b50e180623812ddd2935d2c6a81622732",
+      "sourceTreeClean": true,
+      "passed": 11,
+      "failed": 0,
+      "assertions": 74,
+      "durationMs": 2200,
+      "standLockHeld": true,
+      "artifact": "critical-089f198b5-rpc.log.gz",
+      "command": "bun run stand:run --reason critical-rpc-boundaries --timeout-ms 60000 -- bun test core/__tests__/network/jurisdiction/orchestrator-jurisdiction-provisioning.test.ts"
+    },
+    {
+      "id": "full-check",
+      "sourceSha": "9fa2a4bf6c7be9480f1a2f222188fc7237c22c98",
+      "sourceTreeClean": true,
+      "exitCode": 0,
+      "sourceGates": 38,
+      "sourcePhaseMs": 26993,
+      "reactTypes": true,
+      "svelteBuildAndTypes": true,
+      "fintsNegativeTypes": true,
+      "artifact": "critical-9fa2a4bf6-check.log.gz",
+      "command": "bun run check"
+    },
+    {
+      "id": "react-faucets",
+      "sourceSha": "9fa2a4bf6c7be9480f1a2f222188fc7237c22c98",
+      "sourceTreeClean": true,
+      "standLockHeld": true,
+      "runtimeBundleRebuilt": true,
+      "artifact": "critical-9fa2a4bf6-browser.log.gz",
+      "command": "XLN_LOCAL_PROD_SMOKE_DIR=.logs/canonical-review-20261012/critical-9fa2a4bf6-wallet XLN_LOCAL_PROD_SMOKE_WALLET_TESTS=e2e-assets.spec.ts,e2e-reserve-funding.spec.ts bun run stand:run --reason critical-faucet-react --timeout-ms 180000 -- bun run prod:smoke:local",
+      "result": {
+        "sourceSha": "9fa2a4bf6c7be9480f1a2f222188fc7237c22c98",
+        "stats": {
+          "startTime": "2026-10-12T19:16:15.815Z",
+          "duration": 38580.473,
+          "expected": 2,
+          "skipped": 0,
+          "unexpected": 0,
+          "flaky": 0
+        },
+        "errors": [],
+        "cases": [
+          {
+            "file": "e2e-assets.spec.ts",
+            "title": "Assets faucets fund four real balances once and require explicit incoming credit consent",
+            "status": "expected",
+            "results": [
+              {
+                "status": "passed",
+                "durationMs": 8183
+              }
+            ]
+          },
+          {
+            "file": "e2e-reserve-funding.spec.ts",
+            "title": "reserve funding waits for a real block beyond the old server and browser deadlines",
+            "status": "expected",
+            "results": [
+              {
+                "status": "passed",
+                "durationMs": 29357
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ],
+  "economicEvidence": {
+    "assetBalancesUsdcAtomic": {
+      "external": "100000000",
+      "reserve": "100000000",
+      "account": "100000000"
+    },
+    "gasGrantWei": "10071447500000000",
+    "gasChecked": "Response amount equals mined transaction value, recipient equals wallet, receipt status1, exact before/after native balance; amount positive and within configured default cap0.1ETH.",
+    "successfulFaucetRequests": 4,
+    "explicitRejectedOverCapRequests": 1,
+    "delayedReserve": {
+      "unminedWallMs": 22000,
+      "requestCount": 1,
+      "creditedUsdcAtomic": "1000000"
+    }
+  },
+  "preservedBrowserFailures": [
+    {
+      "sourceSha": "089f198b50e180623812ddd2935d2c6a81622732",
+      "stats": {
+        "startTime": "2026-10-12T19:09:21.000Z",
+        "duration": 8242.758,
+        "expected": 0,
+        "skipped": 1,
+        "unexpected": 1,
+        "flaky": 0
+      },
+      "errors": [
+        "Testing stopped early after 1 maximum allowed failures."
+      ],
+      "cases": [
+        {
+          "file": "e2e-assets.spec.ts",
+          "title": "Assets faucets fund four real balances once and require explicit incoming credit consent",
+          "status": "unexpected",
+          "results": [
+            {
+              "status": "failed",
+              "durationMs": 7127,
+              "error": "Error: Faucet request amount missing"
+            }
+          ]
+        },
+        {
+          "file": "e2e-reserve-funding.spec.ts",
+          "title": "reserve funding waits for a real block beyond the old server and browser deadlines",
+          "status": "skipped",
+          "results": []
+        }
+      ]
+    },
+    {
+      "sourceSha": "18bb44a0837113c950128b6abd8ee531220e4e75",
+      "stats": {
+        "startTime": "2026-10-12T19:11:17.738Z",
+        "duration": 22501.636,
+        "expected": 0,
+        "skipped": 1,
+        "unexpected": 1,
+        "flaky": 0
+      },
+      "errors": [
+        "Testing stopped early after 1 maximum allowed failures."
+      ],
+      "cases": [
+        {
+          "file": "e2e-assets.spec.ts",
+          "title": "Assets faucets fund four real balances once and require explicit incoming credit consent",
+          "status": "unexpected",
+          "results": [
+            {
+              "status": "failed",
+              "durationMs": 21671,
+              "error": "Error: expect(received).toBe(expected) // Object.is equality\n\nExpected: \"110093287060000000\"\nReceived: \"20164734560000000\"\n\nCall Log:\n- Timeout 15000ms exceeded while waiting on the predicate"
+            }
+          ]
+        },
+        {
+          "file": "e2e-reserve-funding.spec.ts",
+          "title": "reserve funding waits for a real block beyond the old server and browser deadlines",
+          "status": "skipped",
+          "results": []
+        }
+      ]
+    },
+    {
+      "sourceSha": "b47bab73bd456a3c51aca661bcea10bef17c846f",
+      "stats": {
+        "startTime": "2026-10-12T19:13:59.607Z",
+        "duration": 60.42599999999999,
+        "expected": 0,
+        "skipped": 0,
+        "unexpected": 0,
+        "flaky": 0
+      },
+      "errors": [
+        "SyntaxError: Export named 'requireBoundaryString' not found in module '/Users/zigota/xln/core/protocol/boundary-validation.ts'."
+      ],
+      "cases": []
+    }
+  ],
+  "checkFailure": "Initial full check rejected the removed non-null assertion until the exact allowed debt dropped616→615, and rejected two newly added JSON.stringify test calls. Fixed by decreasing the allowance and using existing safeStringify; no debt allowance was increased.",
+  "methodCorrection": "Inspect the current API response and financial policy before updating an obsolete E2E assertion. Before booting a heavy stand, load specs with the same ui/node_modules/playwright/cli.js used by wallet-gate; the root CLI is a different installation. No new gate or wrapper introduced.",
+  "limitations": [
+    "Not a whole-repository security audit.",
+    "No newly demonstrated P0 or Map consensus divergence.",
+    "No public-chain transaction or deployment.",
+    "Prior active settlement fixture import under frozen rscore remains unresolved; no push or CI-green claim.",
+    "Old public H1 recovery/release gates remain open."
+  ],
+  "artifacts": [
+    {
+      "file": "critical-5e648e71c-unit.log.gz",
+      "bytes": 5506,
+      "sha256": "65de554ba2d70fe4197eef686844bf8e284623589e85c8bc0057adc5ee706031",
+      "rawBytes": 16964,
+      "rawSha256": "aa5e18f5b3ebc1b99b88c1a78ab93ddef10ccf592d569f2c3f52d88bda8ba827"
+    },
+    {
+      "file": "critical-089f198b5-rpc.log.gz",
+      "bytes": 1295,
+      "sha256": "a2ab7e56ab8ea252ca348487fa4e6aa1870e29c449577869e64579f42d534f6d",
+      "rawBytes": 6735,
+      "rawSha256": "1bf0cac8a57f8db8dec306a92aaf77e71878bad7c6b6495aa0e63503f8d3e578"
+    },
+    {
+      "file": "critical-9fa2a4bf6-check.log.gz",
+      "bytes": 15200,
+      "sha256": "e802f5ea80f200f5a9ea198f0fa33e232102a5a1674090251824d184c204f898",
+      "rawBytes": 117669,
+      "rawSha256": "167b0b1af1e50e3443626298cb794542943186f567d15b406b835bd4a61cd392"
+    },
+    {
+      "file": "critical-9fa2a4bf6-browser.log.gz",
+      "bytes": 442,
+      "sha256": "8600b2865a748715c2925c3be34adc6e6a3db2c2ad164c2dc3738fa89a33ded3",
+      "rawBytes": 681,
+      "rawSha256": "924c5a13871e7e422ff18ae89f59f12f35b117f70b3c8dc4ed903bf0098cb61f"
+    },
+    {
+      "file": "critical-map-callers-ccdcb12f9.txt.gz",
+      "bytes": 1810,
+      "sha256": "943ee72b152e90ef42b7f5e281b7e1f8dec7339a7bd2c44474c869b60ba4db68",
+      "rawBytes": 8010,
+      "rawSha256": "352f29ae396dfe3ddc0a9098e690b2c0cd7967fc21e18039c11adf7a7292292e"
+    }
+  ]
+}

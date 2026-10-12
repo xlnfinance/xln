@@ -4,7 +4,25 @@ Owner scope: TS + React + Ethereum same-J; Rust and lending remain frozen.
 Foreign Rust stash `438bf1a6ddd8679bba0b63bdef11dd1fd1f45e90` is untouched.
 Keep frozen-core, PRs with seven required green jobs, no WIP commits.
 
-- Current branch: codex/ts-worker-boundary. Clean b225f8ac4 passes 38 source
+- Latest owner-report review: clean 9fa2a4bf6 passes full `bun run check`
+  (38 source gates, React types, Svelte build/types) and both real React faucet
+  journeys (2/2, no skips/flakes/errors). The unchanged production implementation
+  passed 102 targeted tests / 587 assertions on clean 5e648e71c; the real RPC
+  integration passed 11/11 / 74 assertions on clean 089f198b5. Invalid debug
+  limits and malformed/unsafe RPC chain IDs now reject at their source. The
+  existing J-prefix authority guard returns its checked weight without another
+  lookup or non-null assertion; its remote-DoS claim did not reproduce. Map
+  sorting already occurs in the canonical codec. Faucet elapsed waits now use
+  the monotonic clock; reducer time and consensus bytes are unchanged. Existing
+  coordinate brands/negative checks remain; no unit-confusion failure was shown.
+  The browser test now binds adaptive gas grants to the mined transfer and
+  exact wallet balance; delayed reserve funding waits 22 real seconds for a
+  block and credits 1 USDC through one request. Three preceding browser failures
+  remain recorded, including an unavailable test import introduced and fixed
+  during this review. Evidence: docs/evidence/canonical-review-20261012/critical-boundaries-9fa2a4bf6.json.
+  Rust/lending/contract files are unchanged. No push, public transaction or
+  deployment; the frozen active fixture import below still blocks release CI.
+- Current branch: codex/ts-worker-boundary. Earlier clean b225f8ac4 passes 38 source
   gates, React types, 40 related tests / 766 assertions and UI-only dev
   funding/payment/reload (1/1). Its production code equals the compiled
   5e6d08a16 wallet proof below; later changes only wire CI and retain evidence.
@@ -113,6 +131,19 @@ Keep frozen-core, PRs with seven required green jobs, no WIP commits.
   start/finalize/reveal coverage; owner-reviewed release
   package. No dispute-start freeze, FIFO, one debt per debtor/creditor/token
   and party-selected windows remain settled. No governance/bond redesign.
+
+Method review, 19:18 UTC: two supplied boundary defects reproduced and fixed;
+do not equate a static suspicious expression with an exploitable halt or change
+working consensus bytes. The final check source phase took 26.993s; selected
+units 3.91s, RPC integration 2.20s, browser cases 38.580s excluding stand startup.
+The first two browser failures exposed outdated gas request/amount assumptions;
+the third was an unavailable import introduced in the test repair. Before the
+next heavy run, load the spec with the exact UI Playwright CLI used by the
+existing runner, and inspect current API/policy semantics before changing an
+assertion. The final test checks transaction, recipient, receipt and exact
+credited balance. No new gate/framework; the non-null debt allowance decreased
+616 to 615. Next single step remains the narrow authorized fixture import repair
+and settlement-execute-atomicity command above, then required PR CI.
 
 Method review, 11:19 UTC: re-read the actual required CI discovery instead of
 repeating the frozen parity failure. One active TS settlement test, not both

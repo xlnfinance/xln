@@ -45,6 +45,14 @@ lines, 10,132 below the initial review, with no QA or core/rscore edges. This do
 not close the active frozen-fixture dependency or public deployment gap above.
 [Review and exact evidence](docs/canonical-refactoring-20261012.md).
 
+Owner-supplied critical-findings review is complete on clean `9fa2a4bf6`:
+strict debug-limit/RPC-chain-ID admission, one checked quorum-weight lookup and
+monotonic faucet waits. Relevant source tests: 102/102; RPC integration: 11/11;
+real React faucets/delayed funding: 2/2; full `bun run check` passed. Claimed
+remote J-prefix halt and Map divergence did not reproduce. Earlier failed
+browser runs are retained in the [SHA-bound evidence](docs/evidence/canonical-review-20261012/critical-boundaries-9fa2a4bf6.json).
+This does not resolve the frozen-fixture or deployment blockers above.
+
 ## Historical pre-freeze lending work — not current release scope
 
 Latest October 11 owner update: create/manage the Sepolia signer, obtain test ETH
