@@ -7,7 +7,9 @@ import { HDNodeWallet, JsonRpcProvider, getBytes, isAddress } from 'ethers';
 import type { EntityTx, RuntimeInput } from '../../core/api/public/runtime-module';
 import { withRuntimeCommittedRead } from '../../core/runtime/frame/lifecycle/writer-lock';
 import { accountNetBalance } from '../../frontend/src/lib/utils/ui/accountBalance';
-import { safeStringify } from '../../core/protocol/serialization';
+import { safeParse, safeStringify } from '../../core/protocol/serialization';
+import { requireBigInt } from '../../core/protocol/boundary/boundary-primitives';
+import { Depository__factory } from '../typechain-types';
 import { assertCanonicalRpcContractStack } from '../../core/orchestrator/bootstrap/contract-readiness';
 
 const mode = process.argv[2];
@@ -55,6 +57,7 @@ const entityId = xln.generateLazyEntityId([signerId], 1n).toLowerCase();
 xln.registerSignerKey(seed, signerId, getBytes(signer.privateKey));
 const env = await xln.main(seed, { numericSignerPrewarmCount: 1 });
 const provider = new JsonRpcProvider(rpc, 11155111, { cacheTimeout: -1 });
+const depository = Depository__factory.connect(contracts.depository, provider);
 const state = () => [...env.state.eReplicas.values()].find(value => value.entityId === entityId)?.state;
 const account = () => {
   const value = state()?.accounts.get(hub);
@@ -188,14 +191,16 @@ try {
   await wait('relay-connected', () => xln.getP2P(env)?.isConnected() === true);
   await xln.ensureGossipProfiles(env, [hub]);
   await wait(
-    'chain-caught-up',
+    'runtime-restored',
     () => env.infrastructure?.lifecyclePhase === 'running' && env.infrastructure.entityInputsReady !== false,
   );
   if (mode === 'recover') {
+    const prepared = object(safeParse(readFileSync(`${directory}/prepared.json`, 'utf8')));
+    const expectedReserve = requireBigInt(prepared['expectedReserve'], 'PUBLIC_P6_EXPECTED_RESERVE');
     await wait(
       'tower-finalization-observed',
       () =>
-        (state()?.reserves.get(1) ?? 0n) === 100_000_000n &&
+        (state()?.reserves.get(1) ?? 0n) === expectedReserve &&
         account().state.deltas.get(1)?.collateral === 0n &&
         !account().activeDispute,
     );
@@ -233,13 +238,20 @@ try {
       throw Error('PUBLIC_P6_PREPARE_REQUIRES_EMPTY_ACCOUNT');
     if ((await provider.getBalance(signerId)) === 0n)
       await post('/api/faucet/gas', { userAddress: signerId, jurisdiction: name });
-    // An HTTP timeout does not undo a mined funding transaction. Recovery has
-    // already caught up the canonical WAL before deciding whether to fund.
-    const reserve = state()!.reserves.get(1) ?? 0n;
-    if (reserve === 0n)
+    // WAL replay does not imply the J watcher has caught up. Read the contract
+    // before funding; then require the real watcher to commit that balance.
+    // A failed HTTP response must never cause this fixture to fund twice.
+    const observedReserve = await depository._reserves(entityId, 1);
+    const expectedReserve = observedReserve === 0n ? 100_000_000n : observedReserve;
+    if (expectedReserve < 100_000_000n) throw Error('PUBLIC_P6_EXISTING_RESERVE_TOO_SMALL');
+    if (observedReserve === 0n) {
+      const intent = `${directory}/funding-requested.json`;
+      if (await Bun.file(intent).exists()) throw Error('PUBLIC_P6_FUNDING_PENDING_INSPECT_CHAIN');
+      await Bun.write(intent, safeStringify({ sourceSha, entityId, amount: 100_000_000n }));
       await post('/api/faucet/reserve', { userEntityId: entityId, tokenId: 1, tokenSymbol: 'USDT', amount: '100' });
-    else if (reserve !== 100_000_000n) throw Error('PUBLIC_P6_UNEXPECTED_EXISTING_RESERVE');
-    await wait('reserve-funded', () => state()?.reserves.get(1) === 100_000_000n);
+    }
+    console.log(safeStringify({ stage: 'reserve-chain-baseline', reserve: expectedReserve }));
+    await wait('reserve-funded', () => state()?.reserves.get(1) === expectedReserve);
     entity([
       { type: 'r2c', data: { counterpartyId: hub, tokenId: 1, amount: 100_000_000n } },
       { type: 'j_broadcast', data: {} },
@@ -353,6 +365,7 @@ try {
           latest,
           peerNonce: account().counterpartyDisputeProofNonce,
           ownerNonce,
+          expectedReserve,
           tower: health.signerAddress,
           receipt,
           height: env.state.height,

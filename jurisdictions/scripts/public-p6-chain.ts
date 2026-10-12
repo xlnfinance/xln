@@ -15,6 +15,7 @@ import {
   requireBoundaryInteger,
   requireString,
   requireBoolean,
+  requireBigInt,
 } from '../../core/protocol/boundary/boundary-primitives';
 import { safeParse, safeStringify } from '../../core/protocol/serialization';
 import { Depository__factory } from '../../jurisdictions/typechain-types';
@@ -38,6 +39,8 @@ const hubId = hash(prepared['hub'], 32);
 const owner = hash(prepared['signerId'], 20);
 const tower = hash(prepared['tower'], 20);
 const ownerNonce = requireBoundaryInteger(prepared['ownerNonce'], 'PUBLIC_P6_OWNER_NONCE');
+const expectedReserve = requireBigInt(prepared['expectedReserve'], 'PUBLIC_P6_EXPECTED_RESERVE');
+if (expectedReserve < 100_000_000n) throw Error('PUBLIC_P6_EXPECTED_RESERVE_TOO_SMALL');
 const rpc = text(prepared['rpc']);
 const contracts = requireBoundaryRecord(prepared['contracts'], 'PUBLIC_P6_CONTRACTS');
 const addresses = {
@@ -93,7 +96,8 @@ try {
     if (!block) throw Error('PUBLIC_P6_BLOCK_MISSING');
     const current = await contract._accounts(accountKey, { blockTag: block.number });
     const collateral = await contract._collaterals(accountKey, 1, { blockTag: block.number });
-    if (current.disputeHash !== ZeroHash || collateral.collateral !== 100_000_000n)
+    const reserve = await contract._reserves(entityId, 1, { blockTag: block.number });
+    if (current.disputeHash !== ZeroHash || collateral.collateral !== 100_000_000n || reserve !== expectedReserve - 100_000_000n)
       throw Error('PUBLIC_P6_INITIAL_CHAIN_STATE_CHANGED');
     const signed = prepareSignedBatch(
       batch,
@@ -122,6 +126,7 @@ try {
       owner,
       tower,
       ownerNonce,
+      expectedReserve,
       accountKey,
       latestHash,
       peerNonce,
@@ -187,7 +192,7 @@ try {
       counter &&
       final &&
       collateral.collateral === 0n &&
-      reserve === 100_000_000n &&
+      reserve === expectedReserve &&
       account.disputeHash === ZeroHash &&
       account.nonce === BigInt(peerNonce),
     );
