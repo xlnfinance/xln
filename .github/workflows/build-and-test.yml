@@ -411,6 +411,7 @@ jobs:
             .logs/gates/*.log
             .logs/gates/react-*/wallet-browser.log
             .logs/gates/react-*/wallet-results.json
+            .logs/gates/react-*/wallet-artifact.json
             .logs/gates/react-*/wallet-artifacts/
             .logs/e2e-parallel/
             test-results/

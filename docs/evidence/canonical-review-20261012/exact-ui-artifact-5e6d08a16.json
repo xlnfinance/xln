@@ -1,0 +1,183 @@
+{
+  "schema": "xln-source-evidence/v1",
+  "sourceSha": "5e6d08a16d6354354ced0868aa8e1a8a85ae6121",
+  "status": "compiled-production-ui-passed-promotion-ineligible",
+  "eligible": false,
+  "sourceBinding": {
+    "cleanBeforeAndAfterExecution": true,
+    "basis": "Parent checked clean committed source before build and after the completed browser stand. CI wiring and evidence edits occurred afterwards; those are not this tested source."
+  },
+  "firstFailure": {
+    "evidence": "exact-ui-artifact-f56e65bea.json",
+    "sourceSha": "f56e65bea91c76b03a1c8d77cdd3c283393c2246",
+    "artifactSourceSha": "d4502ec942233aa7c989f9875e4cafa354d0f4a7",
+    "result": "Compiled production archive exposed __xln on loopback via shared runtimeCommandBus/debugSurface; failure occurred after wallet import, before funding."
+  },
+  "fix": {
+    "path": "frontend/src/lib/utils/runtime/debugSurface.ts",
+    "invariant": "The existing shared TS debug owner permits registration only in a development build on a local host. Browser absence is checked first for Bun/SSR. This is a React production dependency; no Svelte wallet feature or financial engine changed."
+  },
+  "releasePackage": {
+    "sourceSha": "5e6d08a16d6354354ced0868aa8e1a8a85ae6121",
+    "sourceTreeCleanBeforeAndAfter": true,
+    "eligible": false,
+    "scope": "Compiled React UI archive; source bundle and deployed recovery remain separate",
+    "build": {
+      "command": "NODE_ENV=production XLN_UI_BASE=/ XLN_UI_STACK_ORIGIN= bun run stand:run --reason corrected-production-wallet-artifact --timeout-ms 180000 -- bun run --cwd /Users/zigota/xln/ui build",
+      "exitCode": 0,
+      "standLockHeld": true,
+      "logSha256": "86243eb628e34d9907b39354780b2b609a546eec006e91d1f81b5fd0385573d8"
+    },
+    "artifacts": [
+      {
+        "file": "release-5e6d08a16-ui.tar.gz",
+        "bytes": 3187744,
+        "sha256": "176b03dc804f8959c2e2034afbef1be5630a92c2cd58b596df7c5ac8c24a6237",
+        "kind": "react-wallet-static",
+        "extractInto": "<candidate>/ui/dist"
+      }
+    ],
+    "uiFiles": [
+      {
+        "path": "account-worker.js",
+        "bytes": 2042516,
+        "sha256": "7ba541168b687c4deb25ca5e9f44b914fbe0e62aa13924ae097ef377ac2a1201"
+      },
+      {
+        "path": "assets/browser-CfPhK2IQ.js",
+        "bytes": 41097,
+        "sha256": "39037dd00221d4ace7a0207a8250dfa15dde5ed8c73a0cba348996553666a297"
+      },
+      {
+        "path": "assets/index-C9Tn8rLa.css",
+        "bytes": 48885,
+        "sha256": "c64d5c15cac204ace88ec560517ba30c7bf7597ed9d34644dc9fac96c4b57b67"
+      },
+      {
+        "path": "assets/index-CL6bpV8V.js",
+        "bytes": 2033080,
+        "sha256": "f94d7f3bc48567d716924943e55f7b4a2c1a8602daae6b5b7a3fb007ba118f10"
+      },
+      {
+        "path": "assets/index.esm-Dup_VHWH.js",
+        "bytes": 216520,
+        "sha256": "c3a093b52611b886dac01190c1dc4dfb9910fc306e6607255c881fe2e997244b"
+      },
+      {
+        "path": "assets/push-wake-sw-TrIUAo0y.js",
+        "bytes": 1354,
+        "sha256": "8f1dec2bd00adb400e2f6789d58e9850cd0e9db8db2bafd3cfd2e843aeb1d179"
+      },
+      {
+        "path": "favicon-small.svg",
+        "bytes": 326,
+        "sha256": "2e110fadbf9a6a89d33b0bedb2478bc35fc24990be4ebf1ddaf45951b002116a"
+      },
+      {
+        "path": "icon.svg",
+        "bytes": 436,
+        "sha256": "01a60df0147912d4f8bf4891601112eba4bba89478f4da25d4c6836b5c0a7358"
+      },
+      {
+        "path": "index.html",
+        "bytes": 1888,
+        "sha256": "863e37b48ee79f881d706b36ac3995abee327e0fdaa7828fd7e2ce85c5c02aec"
+      },
+      {
+        "path": "manifest.webmanifest",
+        "bytes": 337,
+        "sha256": "aaae645e049b075e9be36e48c948406873ad922f66dab780fd6ad2c6b5e90064"
+      },
+      {
+        "path": "runtime.js",
+        "bytes": 5900796,
+        "sha256": "2fde0e9f8e3ea794523b8ca1d3138faa74f3c8c5d8fe2a1fe75196b85589738f"
+      }
+    ],
+    "verification": {
+      "extractedFiles": 11,
+      "exactHashes": true
+    }
+  },
+  "preparedManifestSha256": "0d6290769525d19995ba5a84c0ee00d2612b894285e680b2986a26e83533563a",
+  "execution": {
+    "command": "XLN_LOCAL_PROD_SMOKE_WALLET_ARTIFACT_DIR=/Users/zigota/xln/.logs/canonical-review-20261012/prepared-5e6d08a16-ui XLN_LOCAL_PROD_SMOKE_DIR=.logs/canonical-review-20261012/exact-ui-artifact-5e6d08a16 XLN_LOCAL_PROD_SMOKE_WALLET_TESTS=e2e-production-wallet.spec.ts bun run stand:run --reason corrected-ui-artifact --timeout-ms 180000 -- bun run prod:smoke:local",
+    "exitCode": 0,
+    "standLockHeld": true,
+    "standFreeAfterExit": true,
+    "stats": {
+      "startTime": "2026-10-12T10:36:49.263Z",
+      "duration": 16197.769,
+      "expected": 1,
+      "skipped": 0,
+      "unexpected": 0,
+      "flaky": 0
+    },
+    "errors": 0,
+    "servedFiles": [
+      {
+        "bytes": 1888,
+        "path": "index.html",
+        "sha256": "863e37b48ee79f881d706b36ac3995abee327e0fdaa7828fd7e2ce85c5c02aec"
+      },
+      {
+        "bytes": 5900796,
+        "path": "runtime.js",
+        "sha256": "2fde0e9f8e3ea794523b8ca1d3138faa74f3c8c5d8fe2a1fe75196b85589738f"
+      },
+      {
+        "bytes": 2042516,
+        "path": "account-worker.js",
+        "sha256": "7ba541168b687c4deb25ca5e9f44b914fbe0e62aa13924ae097ef377ac2a1201"
+      }
+    ],
+    "servedManifestSha256": "3b911ade19a9bc1573ea9c7ee439f9d233d9c0020457f8b295462006e13d70e0",
+    "financialEvidence": "entity=0x049e47cb21e780dafbafd60da840755c70ffc508b2b2bb02fa19592f03deee3e\nhub=0xaae4221b725a62c0e2d18d47f7f9f562245d5807abc59d6f87a43077cdd4372d\npaid=25.00 USDC\nfeeUnits=25\naccount=75.00 USDC\nreserve=0.00 USDC\nproof=0x5e7e86ef89214a5c5eb7b41ec96e3d4ca1597050bacf38ba0010e3d88d42e5de · tap to copy\nreload=identity-and-balances-preserved"
+  },
+  "reportProjection": {
+    "originalSha256": "69c0199cba1230a02fa5c24d0c7449d77b8fbdd9764032368567396a69a0c786",
+    "originalBytes": 4360,
+    "transformation": "Preserve stats, case names/results and the public financial evidence attachment. Omit all config, other attachment bodies/paths, browser profile and trace."
+  },
+  "artifacts": [
+    {
+      "id": "build",
+      "file": "exact-ui-artifact-5e6d08a16-build.log.gz",
+      "bytes": 1369,
+      "sha256": "37a9f2e6bba5c03c867bfc98dbe6945e6319e3a3de0fec89eeb0e541921f7916",
+      "rawBytes": 5223,
+      "rawSha256": "86243eb628e34d9907b39354780b2b609a546eec006e91d1f81b5fd0385573d8"
+    },
+    {
+      "id": "stand",
+      "file": "exact-ui-artifact-5e6d08a16-stand.log.gz",
+      "bytes": 2058,
+      "sha256": "06d4e6efce6a166b5d833bc90cf5df9de758da7281308ae59a47bc17b000a0b7",
+      "rawBytes": 23749,
+      "rawSha256": "a72993f5975cc7f8225afd6c53ba96429e850938336091eb29a52d12d47a1e40"
+    },
+    {
+      "id": "browser",
+      "file": "exact-ui-artifact-5e6d08a16-browser.log.gz",
+      "bytes": 305,
+      "sha256": "a6877b62a9e7ba93136a4bcf6b03e7c119a937d8c0b64a64bdf9aaf3004ca906",
+      "rawBytes": 401,
+      "rawSha256": "52a086f3218d8d91642baadd000bb42e178bd9d6364bdee2fffe50a67ffa198d"
+    },
+    {
+      "id": "results",
+      "file": "exact-ui-artifact-5e6d08a16-results.json.gz",
+      "bytes": 522,
+      "sha256": "44c30949de9d901ad1dee0aea698bee6abfecd965e46dd70c708338085235d07",
+      "rawBytes": 918,
+      "rawSha256": "dcf23846bdf5cbe6305f9e488280ed3544c25c0b5dcf3c00b5de6dd6d5eca5fe"
+    }
+  ],
+  "limitations": [
+    "Local real-contract Anvil stack, not a new public-chain transfer or deployed H1 recovery.",
+    "Payment balances are asserted at displayed two-decimal precision; quote amounts and fee use integer units.",
+    "Only the named production UI funding/payment/reload test is covered; no complete E2E, fresh mainnet acceptance or current required CI claim.",
+    "Runtime/account-worker byte hashes equal the earlier d450 artifact; no financial Runtime or contract source changed.",
+    "The old d450 source-bundle preparation is separate; its UI archive is superseded by this corrected archive. No public activation occurred."
+  ]
+}

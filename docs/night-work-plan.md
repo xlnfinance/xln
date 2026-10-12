@@ -63,6 +63,16 @@ Keep frozen-core, PRs with seven required green jobs, no WIP commits.
   durable proof: docs/evidence/canonical-review-20261012/release-preparation-d4502ec94.json.
   Sepolia deployment is already authorized; no new blanket approval is needed.
   It still requires eligible CI and compatible rollout/rollback evidence.
+- Prepared-archive validation found and fixed a real React dependency defect:
+  d450 production UI exposed shared debug commands on localhost. The canonical
+  debug owner now requires a development build. Clean 5e6d08a16 production
+  archive passed UI-only import, 100-unit funding/move, payment of 25 and
+  identity/balance recovery after reload (1/1, zero errors/skips/flakes).
+  All 11 extracted files and three served entrypoints match their hashes;
+  Runtime/worker bytes are unchanged. This supersedes the d450 UI archive,
+  not its isolated H1 recovery proof. Evidence: exact-ui-artifact-5e6d08a16.json
+  in docs/evidence/canonical-review-20261012/. The existing CI/release runner
+  now includes production build plus this same artifact test; CI has not run.
 - Latest coherent deletion: native driver, native storage completion/restore
   callbacks and unused byte counters/candidate helper. Retired selectors have
   one fail-fast guard; old native persisted frames retain their original hash

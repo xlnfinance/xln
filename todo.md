@@ -28,10 +28,11 @@ the counter and finalization. Preserve the stopped DB and the funded wallet.
    CI is red. [Local preparation proof](docs/evidence/canonical-review-20261012/release-preparation-d4502ec94.json).
    Local wallet recovery separately holds 200 Test USDT in reserve; neither
    local result substitutes for deployed recovery.
-3. Consolidate duplicated wallet route/depth policy and strict Brainvault worker
-   admission only after the prepared production UI archive passes its existing
-   UI-only funding/payment/reload test. Clean 090c79158 passes 11 named React
-   tests through Vite dev, not that archive; do not conflate the two.
+3. Require the corrected production UI artifact gate in CI. Clean 5e6d08a16
+   passes UI-only funding/payment/reload on its compiled archive (1/1); the
+   earlier d450 UI exposed debug commands on localhost and is superseded.
+   The same existing CI/release runner now builds and tests production files.
+   Defer route/depth-policy and Brainvault consolidation until required CI.
 4. Finish current exit-gas, operational and exact-build mainnet evidence. Rust
    decoder/proof-codec refactors remain proposals until the freeze is reopened.
 

@@ -231,6 +231,17 @@ and Vite dev with a production Runtime bundle; they do not certify the compiled
 UI archive or real-clock Sepolia acceptance.
 [Commands, limits and compact evidence](evidence/canonical-review-20261012/rc-090c79158.json).
 
+Testing the prepared archive then found an actual production-only gap: the
+shared command debug owner allowed localhost solely by hostname, despite the
+React adapter's own development guard. The first failure is retained; one
+development-build condition fixes that existing owner without a second path.
+Clean `5e6d08a16` rebuilt the UI and passed the unchanged UI-only funding,
+payment and reload test (**1/1**, zero errors/skips/flakes; no `__xln` or dev
+client). All 11 archived files and three HTTP entrypoints match; Runtime and
+worker bytes are unchanged. The corrected archive supersedes d450's UI only.
+The existing CI/release runner now includes this production artifact test.
+[First failure, correction and production proof](evidence/canonical-review-20261012/exact-ui-artifact-5e6d08a16.json).
+
 The live queue stays in [todo.md](../todo.md). This table is the reviewed design,
 not another backlog or an instruction to run all changes together.
 
