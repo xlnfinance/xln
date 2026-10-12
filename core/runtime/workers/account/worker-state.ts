@@ -201,7 +201,6 @@ export const createWorkerConsensusContext = (
   certifiedBoards: ReadonlyMap<string, TsAccountWorkerCertifiedBoard> = new Map(),
 ): AccountConsensusContext => ({
   runtimeTimestamp: timestamp,
-  accountAuthorityFrameId: null,
   entityClock: { timestamp, finalizedJHeight },
   quietLogs: true,
   jReplicas: worker.jReplicas,

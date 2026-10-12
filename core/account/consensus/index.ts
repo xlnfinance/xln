@@ -3,12 +3,6 @@
  * off-chain account, then bubble committed effects back to the entity runtime.
  */
 
-import {
-  noteAuthorityAccountInputResult,
-  noteAuthorityCommittedOutputs,
-  noteAuthorityEntityClock,
-  noteRawAccountInput,
-} from '../../rscore/authority-wave';
 import type {
   AccountReplica,
   AccountDisputeHanko,
@@ -113,7 +107,6 @@ type IncomingFrameValidation = {
   clonedMachine: AccountReplica;
   proofResult: ReturnType<typeof buildAccountProofBodyFromJurisdictions>;
   candidateEffects: AccountOutput[];
-  txResults: ApplyAccountTxOk[];
   accountJClaimNodeChanges?: AccountJClaimNodeChanges;
   processEvents: string[];
   revealedSecrets: AccountRevealedSecret[];
@@ -251,7 +244,6 @@ const replayIncomingFrameOnClone = async (
     swapCancelRequests: [],
     swapOffersCancelled: [],
     candidateEffects: [],
-    txResults: [],
     timedOutHashlocks: [],
   };
   for (const accountTx of receivedFrame.accountTxs) {
@@ -297,7 +289,6 @@ const replayIncomingFrameOnClone = async (
       accountLog.debug('receiver.tx.processed', { type: accountTx.type, success: true });
     }
     replay.processEvents.push(...result.events);
-    replay.txResults.push(result);
     replay.candidateEffects.push(...(result.candidateEffects ?? []));
     collectIncomingOkOutcome(result, replay, input.fromEntityId);
   }
@@ -445,7 +436,6 @@ async function validateIncomingFrameOnDraft(
 }
 
 async function commitIncomingFrameOnRealState(
-  accountAuthorityFrameId: string | null | undefined,
   account: AccountReplica,
   input: AccountInput,
   receivedFrame: AccountFrame,
@@ -478,7 +468,6 @@ async function commitIncomingFrameOnRealState(
   if (account.state !== validation.clonedMachine.state) {
     throw new Error('ACCOUNT_OVERLAY_PUBLISH_STATE_IDENTITY_MISMATCH');
   }
-  noteAuthorityCommittedOutputs(accountAuthorityFrameId, ourEntityId, cpForCommitLog, validation.txResults);
   timedOutHashlocks.push(...validation.timedOutHashlocks);
   candidateEffects.push(...validation.candidateEffects);
   if (validation.accountJClaimNodeChanges) {
@@ -845,7 +834,6 @@ async function handleIncomingAccountFrame(
   }
 
   await commitIncomingFrameOnRealState(
-    context.accountAuthorityFrameId,
     account,
     input,
     preflight.receivedFrame,
@@ -1102,10 +1090,9 @@ export async function applyAccountInput(
 ): Promise<HandleAccountInputResult> {
   const authorityScope = context.accountAuthorityExecutionScope;
   if (authorityScope !== undefined) {
-    // Cutover answers here and the transition below never runs: the engine
-    // executed it and the replica already holds its post-state.
+    // Prepared worker results already install their post-state on the replica;
+    // consuming one must not execute its transition again below.
     const delegated = await authorityScope.executeAccountInput({
-      collectorFrameId: String(context.accountAuthorityFrameId ?? ''),
       account,
       input,
       entityTimestamp: providedSecurityContext?.entityTimestamp
@@ -1121,21 +1108,14 @@ export async function applyAccountInput(
       account.proofHeader.toEntity,
     );
   }
-  // The authoritative engine is handed the same raw inputs, in this order,
-  // before TypeScript executes them (no-op unless recording is on).
-  const recorded = noteRawAccountInput(context.accountAuthorityFrameId, account, input);
-  const result = await (async (): Promise<HandleAccountInputResult> => {
-    if (input.kind === 'enqueue') {
-      return applyAccountEnqueue(account, input, context.jClaimNodeStore);
-    }
-    const envelopeError = getAccountInputEnvelopeError(account.state, input);
-    if (envelopeError) {
-      return rejectAccountInput(envelopeError.code, envelopeError.reason, []);
-    }
-    return applyAccountConsensusInput(context, account, input, providedSecurityContext);
-  })();
-  noteAuthorityAccountInputResult(recorded, result);
-  return result;
+  if (input.kind === 'enqueue') {
+    return applyAccountEnqueue(account, input, context.jClaimNodeStore);
+  }
+  const envelopeError = getAccountInputEnvelopeError(account.state, input);
+  if (envelopeError) {
+    return rejectAccountInput(envelopeError.code, envelopeError.reason, []);
+  }
+  return applyAccountConsensusInput(context, account, input, providedSecurityContext);
 }
 
 const rejectMalformedAccountHanko = (
@@ -1155,15 +1135,6 @@ const applyAccountConsensusInput = async (
   providedSecurityContext: AccountInputSecurityContext | undefined,
 ): Promise<HandleAccountInputResult> => {
   const securityContext = resolveAccountInputSecurityContext(context, account, providedSecurityContext);
-  // The receiver's enforcement clock, which is the Entity's and not the
-  // frame's: the same question as the proposal clock, from the other side.
-  noteAuthorityEntityClock(
-    context.accountAuthorityFrameId,
-    account.proofHeader?.fromEntity ?? '',
-    'enforce',
-    securityContext.entityTimestamp,
-    securityContext.finalizedJHeight,
-  );
   if (input.kind === 'dispute') {
     const events: string[] = [];
     const shapeRejection = rejectMalformedAccountHanko(input, events);

@@ -55,7 +55,7 @@ test('default and explicit TS selection keep every hub on TypeScript', () => {
     XLN_RSCORE_AUTHORITY: '0',
     XLN_RSCORE_SHADOW: '0',
     XLN_HUB_RSCORE_AUTHORITY_H2: '0',
-    XLN_RSCORE_AUTHORITY_RECORD: '1',
+    XLN_RSCORE_AUTHORITY_RECORD: '0',
     XLN_TS_ACCOUNT_WORKERS: '4',
   })).toBe('typescript');
   expect(() => canonicalHubEngine('H1', { XLN_HLT_ENGINE: 'native' })).toThrow('HUB_ENGINE_SELECTOR_INVALID:native');
@@ -65,7 +65,7 @@ test('default and explicit TS selection keep every hub on TypeScript', () => {
 test('TS-only launch rejects retired engine activation before configuration', () => {
   expect(() => canonicalHubEngine('H1', { XLN_HLT_ENGINE: 'rust' }))
     .toThrow('HUB_ENGINE_RETIRED:XLN_HLT_ENGINE:typescript-only');
-  for (const key of ['XLN_RSCORE_AUTHORITY', 'XLN_RSCORE_SHADOW', 'XLN_HUB_RSCORE_AUTHORITY_H2']) {
+  for (const key of ['XLN_RSCORE_AUTHORITY', 'XLN_RSCORE_SHADOW', 'XLN_RSCORE_AUTHORITY_RECORD', 'XLN_HUB_RSCORE_AUTHORITY_H2']) {
     expect(() => canonicalHubEngine('H1', { [key]: '1' }))
       .toThrow(`HUB_ENGINE_RETIRED:${key}:typescript-only`);
   }

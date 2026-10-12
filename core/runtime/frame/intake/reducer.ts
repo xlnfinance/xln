@@ -1,14 +1,9 @@
-import { authorityDriverEnabled } from '../../config/account-execution';
 import { hasVerifiedEntityCommitPrecertificate } from '../../../entity/consensus/commit/precheck';
 import { mergeEntityInputs } from '../../../entity/consensus';
 import { retireAppliedLocalOutputs } from '../../delivery/local-outbox';
 import { admitEntityTxProfiles } from '../../admit/entity-tx-profile';
 import { cumulativeMarksToPhases } from '../../../support/performance/profile';
-import {
-  authorityRecordEnabled,
-  runAuthorityFrameScope,
-} from '../../../rscore/authority-wave';
-import { armAuthorityWave, authorityRuntimeSuppressed } from '../../../rscore/authority-driver';
+import { armAuthorityWave } from '../../../rscore/authority-driver';
 import { installTsAccountWorkerAuthority } from '../../workers/account/provider';
 import { createStructuredLogger } from '../../../support/logger';
 import type { RuntimeReplica, RoutedEntityInput, RuntimeInput, RuntimeTx } from '../../types';
@@ -267,44 +262,39 @@ const applyRuntimeInputPhases = async (
   isReplay: boolean,
   ingress: PreparedRuntimeIngress,
 ): Promise<{ result: AppliedRuntimeInput; profiledRuntimeTxs: RuntimeTx[] }> => {
-  const authorityFrameId = env.runtimeId ?? '';
-  const recordingEnabled = authorityRecordEnabled(authorityDriverEnabled(env))
-    && !authorityRuntimeSuppressed(env);
-  return runAuthorityFrameScope(env, authorityFrameId, recordingEnabled, async () => {
-    // Before anything of this frame is applied: the authoritative engine has
-    // to start where TypeScript starts, not where it ends up.
-    installTsAccountWorkerAuthority(env);
-    markRuntimeApplyPhase(env, 'apply.authority-arm');
-    await armAuthorityWave(
-      env,
-      ingress.runtimeTxs.some(tx => tx.type === 'checkpointBarrier'),
-    );
-    markRuntimeApplyPhase(env, 'apply.merge');
-    const admitted = admitEntityTxProfiles(ingress.entityInputs);
-    const cohortIsolatedInputs = markPotentialAtomicCrossJInputPairs(admitted.inputs);
-    const mergedInputs = mergeEntityInputs(cohortIsolatedInputs, input =>
-      hasVerifiedEntityCommitPrecertificate(env, input));
-    profile.mark('validateMerge');
-    const { prepared, batch } = await applyRuntimeEntityBatch(
-      env,
-      ingress,
-      mergedInputs,
-      isReplay,
-      deps,
-      profile,
-    );
-    batch.rejectedIngress = [...admitted.rejected, ...batch.rejectedIngress];
-    const result = finalizeRuntimeInputApply(
-      env,
-      runtimeInput,
-      ingress,
-      prepared,
-      batch,
-      profile,
-      isReplay,
-    );
-    return { result, profiledRuntimeTxs: ingress.runtimeTxs };
-  });
+  // Before anything of this frame is applied: the authoritative engine has
+  // to start where TypeScript starts, not where it ends up.
+  installTsAccountWorkerAuthority(env);
+  markRuntimeApplyPhase(env, 'apply.authority-arm');
+  await armAuthorityWave(
+    env,
+    ingress.runtimeTxs.some(tx => tx.type === 'checkpointBarrier'),
+  );
+  markRuntimeApplyPhase(env, 'apply.merge');
+  const admitted = admitEntityTxProfiles(ingress.entityInputs);
+  const cohortIsolatedInputs = markPotentialAtomicCrossJInputPairs(admitted.inputs);
+  const mergedInputs = mergeEntityInputs(cohortIsolatedInputs, input =>
+    hasVerifiedEntityCommitPrecertificate(env, input));
+  profile.mark('validateMerge');
+  const { prepared, batch } = await applyRuntimeEntityBatch(
+    env,
+    ingress,
+    mergedInputs,
+    isReplay,
+    deps,
+    profile,
+  );
+  batch.rejectedIngress = [...admitted.rejected, ...batch.rejectedIngress];
+  const result = finalizeRuntimeInputApply(
+    env,
+    runtimeInput,
+    ingress,
+    prepared,
+    batch,
+    profile,
+    isReplay,
+  );
+  return { result, profiledRuntimeTxs: ingress.runtimeTxs };
 };
 
 export const createRuntimeInputReducer = (

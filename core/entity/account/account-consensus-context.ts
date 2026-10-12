@@ -50,10 +50,6 @@ export const createAccountConsensusContext = (
   observerState?: import('../types').EntityState,
 ): AccountConsensusContext => ({
   runtimeTimestamp: env.state.timestamp,
-  ...(env.runtimeId === undefined ? {} : { runtimeId: env.runtimeId }),
-  ...(env.accountAuthorityFrameId === undefined
-    ? {}
-    : { accountAuthorityFrameId: env.accountAuthorityFrameId }),
   ...(env.accountAuthorityEntityStage === undefined
     ? {}
     : { accountAuthorityExecutionScope: env.accountAuthorityEntityStage }),

@@ -104,20 +104,17 @@ describe('TS Account worker genuine HTLC proposal rejection', () => {
       accountForWrite: (accountId: string) => getEntityAccountForWrite(state.accounts, accountId),
       creates: [],
       admissions: [{
-        collectorFrameId: owner,
         account: downstreamAccount,
         input: { kind: 'enqueue', txs: [expiredLock] },
         entityTimestamp: state.timestamp,
         finalizedJHeight: 100,
       }],
       proposals: [{
-        collectorFrameId: owner,
         account: downstreamAccount,
         timestamp: state.timestamp,
         jHeight: 100,
         entityTimestamp: state.timestamp,
         finalizedJHeight: 100,
-        selectionIsWholeMempool: true,
       }],
       envelopeUpdates: [],
       materializeAccountIds: [],
@@ -225,11 +222,11 @@ describe('TS worker cross-j opening cohort', () => {
       const result = await authority.provider.executeAccountOutboundBatch({ ...common,
         entityState: state, entityHeight: 1, accountForWrite: id => getEntityAccountForWrite(state.accounts, id),
         admissions: [{ account, txs }, { account: downstreamAccount, txs: [expired] }].map(row => ({
-          collectorFrameId: state.entityId, account: row.account, input: { kind: 'enqueue' as const, txs: row.txs },
+          account: row.account, input: { kind: 'enqueue' as const, txs: row.txs },
           entityTimestamp: 1_000, finalizedJHeight: 0 })),
-        proposals: [account, downstreamAccount].map(account => ({ collectorFrameId: state.entityId,
+        proposals: [account, downstreamAccount].map(account => ({
           account, timestamp: 1_000, jHeight: 0, entityTimestamp: 1_000, finalizedJHeight: 0,
-          selectionIsWholeMempool: true })), envelopeUpdates: [], materializeAccountIds: [] });
+        })), envelopeUpdates: [], materializeAccountIds: [] });
       expect(result.generatedAdmissions).toHaveLength(1);
       expect(result.proposals.map(row => row.accountId)).toEqual([downstream]);
       expect(account.pendingFrame).toBeUndefined();
@@ -255,10 +252,10 @@ describe('TS worker cross-j opening cohort', () => {
           const result = await authority.provider.executeAccountOutboundBatch({ ...common,
             entityState: state, entityHeight: 1,
             accountForWrite: id => getEntityAccountForWrite(state.accounts, id),
-            admissions: [{ collectorFrameId: state.entityId, account,
+            admissions: [{ account,
               input: { kind: 'enqueue', txs }, entityTimestamp: 1_000, finalizedJHeight: 0 }],
-            proposals: [{ collectorFrameId: state.entityId, account, timestamp: 1_000,
-              jHeight: 0, entityTimestamp: 1_000, finalizedJHeight: 0, selectionIsWholeMempool: true }],
+            proposals: [{ account, timestamp: 1_000,
+              jHeight: 0, entityTimestamp: 1_000, finalizedJHeight: 0 }],
             envelopeUpdates: [], materializeAccountIds: [] });
           if (!reciprocal) {
             expect(result.proposals).toHaveLength(0);

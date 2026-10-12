@@ -1,10 +1,9 @@
 #!/usr/bin/env bun
-import { authorityDriverEnabled } from '../../../../runtime/config/account-execution';
+import { assertAccountRecorderDisabled, authorityDriverEnabled } from '../../../../runtime/config/account-execution';
 
 /** Replay phase: restore one H1 checkpoint and deterministically execute its WAL tail. */
 
 import { startIdleShutdownWatch } from '../../../../support/process/idle-shutdown';
-import { printAuthorityRecordReport } from '../../../../rscore/authority-wave';
 import {
   accountAuthorityExecutionLedger,
   printAccountAuthorityExecutionLedger,
@@ -89,6 +88,7 @@ import {
   type TsAccountWorkerTelemetry,
 } from '../../../../runtime/workers/account';
 
+assertAccountRecorderDisabled();
 configureCryptoPoolEntry(new URL('../../../../protocol/crypto/crypto-pool.ts', import.meta.url));
 
 type ReplayMode = 'max' | 'fixed' | 'sweep';
@@ -804,7 +804,6 @@ const report = {
 };
 writeFileSync(outputPath, `${safeStringify(report, 2)}\n`, { mode: 0o600 });
 console.log(`HLT_REPLAY_REPORT path=${outputPath}`);
-printAuthorityRecordReport();
 printAuthorityDriverReport();
 printAccountAuthorityExecutionLedger();
 console.error(`RSCORE_TRANSPORT ${safeStringify(rscoreTransportBytes)}`);

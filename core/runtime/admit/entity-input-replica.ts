@@ -1,4 +1,3 @@
-import { authorityDriverEnabled } from '../config/account-execution';
 import { applyEntityInput } from '../../entity/consensus/index.ts';
 import type { EntityInputOutcome } from '../../entity/consensus/index.ts';
 import type { EntityOutput, EntityInput, EntityReplica } from '../../entity/types.ts';
@@ -16,11 +15,6 @@ import {
   isCommittedEntityInput,
   RuntimeEntityInputApplyError,
 } from './entity-input-contract.ts';
-import { authorityRuntimeSuppressed } from '../../rscore/authority-driver.ts';
-import {
-  authorityRecordEnabled,
-  runAuthorityFrameScope,
-} from '../../rscore/authority-wave.ts';
 import {
   runAccountAuthorityEntityStage,
   resolveAccountAuthorityEntityStageOptions,
@@ -163,37 +157,6 @@ const logEntityInputProfile = (
   });
 };
 
-const resolveReplicaAuthorityStage = (
-  env: RuntimeReplica,
-  ownerEntityId: string,
-  ownerSignerId: string,
-  occurrence: AccountAuthorityEntityOccurrence | undefined,
-  trustedLocalRuntimeProtocol: 'cross-j' | 'account-work' | undefined,
-  deferProposal: boolean,
-  requiredEntityTxIndex: number | undefined,
-): Readonly<{
-  migrationRecordingEnabled: boolean;
-  options: AccountAuthorityEntityStageOptions | null;
-}> => {
-  const driverEnabled = authorityDriverEnabled(env);
-  const migrationRecordingEnabled = authorityRecordEnabled(driverEnabled)
-    && !authorityRuntimeSuppressed(env);
-  return {
-    migrationRecordingEnabled,
-    options: resolveAccountAuthorityEntityStageOptions(
-      env,
-      {
-        ownerEntityId,
-        ownerSignerId,
-        ...(occurrence === undefined ? {} : { occurrence }),
-        ...(trustedLocalRuntimeProtocol === undefined ? {} : { trustedLocalRuntimeProtocol }),
-        deferProposal,
-        ...(requiredEntityTxIndex === undefined ? {} : { requiredEntityTxIndex }),
-      },
-    ),
-  };
-};
-
 const executeNormalizedEntityInput = async (
   env: RuntimeReplica,
   entityReplica: EntityReplica,
@@ -270,71 +233,62 @@ export const applyEntityInputToReplica = async (
 ): Promise<AppliedEntityReplicaInput> => {
   const normalizedInput = normalizeRoutedEntityInput(replicaKey, entityInput, actualSignerId, isReplay);
 
-  const authority = resolveReplicaAuthorityStage(
+  const authorityOptions = resolveAccountAuthorityEntityStageOptions(env, {
+    ownerEntityId: entityReplica.entityId,
+    ownerSignerId: entityReplica.signerId,
+    ...(authorityOccurrence === undefined ? {} : { occurrence: authorityOccurrence }),
+    ...(trustedLocalRuntimeProtocol === undefined ? {} : { trustedLocalRuntimeProtocol }),
+    deferProposal,
+    ...(requiredEntityTxIndex === undefined ? {} : { requiredEntityTxIndex }),
+  });
+  const applyStartedAt = getPerfMs();
+  if (env.infrastructure) env.infrastructure.runtimeFramePhase = 'apply.entity.transition';
+  const applied = await executeNormalizedEntityInput(
     env,
-    entityReplica.entityId,
-    entityReplica.signerId,
-    authorityOccurrence,
+    entityReplica,
+    normalizedInput,
+    entityInput,
+    authorityOptions,
+    promoteCandidateState,
     trustedLocalRuntimeProtocol,
     deferProposal,
     requiredEntityTxIndex,
   );
-  const runtimeId = String(env.runtimeId ?? '');
-  return runAuthorityFrameScope(
-    env,
-    runtimeId,
-    authority.migrationRecordingEnabled,
-    async () => {
-      const applyStartedAt = getPerfMs();
-      if (env.infrastructure) env.infrastructure.runtimeFramePhase = 'apply.entity.transition';
-      const applied = await executeNormalizedEntityInput(
-        env,
-        entityReplica,
-        normalizedInput,
-        entityInput,
-        authority.options,
-        promoteCandidateState,
-        trustedLocalRuntimeProtocol,
-        deferProposal,
-        requiredEntityTxIndex,
-      );
-      const applyEntityInputMs = Math.round(getPerfMs() - applyStartedAt);
+  const applyEntityInputMs = Math.round(getPerfMs() - applyStartedAt);
 
-      const committed = isCommittedEntityInput(applied.outcome);
-      const nextReplica: EntityReplica = committed
-        ? { ...applied.workingReplica, state: applied.newState }
-        : entityReplica;
-      const routeOutputsStartedAt = getPerfMs();
-      if (env.infrastructure) env.infrastructure.runtimeFramePhase = 'apply.entity.route-outputs';
-      const outputs = await routeEntityOutputs(
-        env,
-        nextReplica,
-        applied.outputs,
-        replicaKey,
-      );
-      const routeOutputsMs = Math.round(getPerfMs() - routeOutputsStartedAt);
-      logEntityInputProfile(replicaKey, applied.outputs.length, applyEntityInputMs, routeOutputsMs);
-      const appliedInput = preserveAppliedRoutedProvenance(
-        applied.canonicalAppliedInput ?? normalizedInput,
-        entityInput,
-        actualSignerId,
-      );
-      return {
-        outcome: applied.outcome,
-        appliedInput,
-        entityFrameCommitted: didCommitEntityFrame(
-          entityReplica,
-          nextReplica,
-          applied.outcome,
-        ),
-        nextReplica,
-        outputs,
-        jOutputs: applied.jOutputs || [],
-        candidateEffects: applied.candidateEffects,
-        storageChanges: applied.storageChanges,
-        accountJClaimNodeChanges: applied.accountJClaimNodeChanges,
-        entityContext: applied.entityContext,
-      };
-    },
+  const committed = isCommittedEntityInput(applied.outcome);
+  const nextReplica: EntityReplica = committed
+    ? { ...applied.workingReplica, state: applied.newState }
+    : entityReplica;
+  const routeOutputsStartedAt = getPerfMs();
+  if (env.infrastructure) env.infrastructure.runtimeFramePhase = 'apply.entity.route-outputs';
+  const outputs = await routeEntityOutputs(
+    env,
+    nextReplica,
+    applied.outputs,
+    replicaKey,
   );
+  const routeOutputsMs = Math.round(getPerfMs() - routeOutputsStartedAt);
+  logEntityInputProfile(replicaKey, applied.outputs.length, applyEntityInputMs, routeOutputsMs);
+  const appliedInput = preserveAppliedRoutedProvenance(
+    applied.canonicalAppliedInput ?? normalizedInput,
+    entityInput,
+    actualSignerId,
+  );
+  return {
+    outcome: applied.outcome,
+    appliedInput,
+    entityFrameCommitted: didCommitEntityFrame(
+      entityReplica,
+      nextReplica,
+      applied.outcome,
+    ),
+    nextReplica,
+    outputs,
+    jOutputs: applied.jOutputs || [],
+    candidateEffects: applied.candidateEffects,
+    storageChanges: applied.storageChanges,
+    accountJClaimNodeChanges: applied.accountJClaimNodeChanges,
+    entityContext: applied.entityContext,
+  };
 };

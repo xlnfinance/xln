@@ -30,3 +30,10 @@ export const authorityDriverEnabled = (env?: AuthorityRuntimeScope): boolean => 
   }
   return runtimeId === target;
 };
+
+/** The removed live collector must never silently report an empty recording. */
+export const assertAccountRecorderDisabled = (): void => {
+  if (readRuntimeEnv('XLN_RSCORE_AUTHORITY_RECORD') === '1') {
+    throw new Error('RUNTIME_RSCORE_RECORD_RETIRED:use immutable Runtime WAL recording and replay');
+  }
+};

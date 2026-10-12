@@ -333,7 +333,6 @@ class AccountAuthorityEntityStageImpl implements AccountAuthorityEntityStage {
         // speculatively execute an arrival which its parent will never consume.
         if (!acceptsExternalAccountInput(existing)) return [];
         return [{
-          collectorFrameId: String(request.ownerEntityId),
           accountId,
           account: existing,
           input: arrival.input,
@@ -351,7 +350,6 @@ class AccountAuthorityEntityStageImpl implements AccountAuthorityEntityStage {
       }
       newAccounts.set(accountId, created.account);
       return [{
-        collectorFrameId: String(request.ownerEntityId),
         accountId,
         account: created.account,
         input: arrival.input,
@@ -436,13 +434,11 @@ class AccountAuthorityEntityStageImpl implements AccountAuthorityEntityStage {
       const account = request.accounts.get(accountId);
       if (account === undefined) throw new Error(`ACCOUNT_AUTHORITY_PROPOSAL_ACCOUNT_MISSING:${accountId}`);
       return {
-        collectorFrameId: this.ownerEntityId,
         account,
         timestamp: request.timestamp,
         jHeight: request.jHeight,
         entityTimestamp: request.timestamp,
         finalizedJHeight: request.jHeight,
-        selectionIsWholeMempool: true,
       };
     });
     const run = this.options.provider.executeAccountOutboundBatch;

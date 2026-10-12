@@ -68,7 +68,7 @@ test('an inadmissible tx keeps both the worker apply and discard errors in the l
         entityTimestamp: state.timestamp, finalizedJHeight: 0,
       });
       await stage.executeEntityBooks({ entityState: state, slots: [] });
-      await stage.executeAccountInput({ collectorFrameId: owner, account,
+      await stage.executeAccountInput({ account,
         input: { kind: 'enqueue', txs: [structuredClone(INADMISSIBLE_TX)] },
         entityTimestamp: state.timestamp, finalizedJHeight: 0 });
       await stage.prepareEntityAccountOutbound({ entityState: state, entityHeight: 1,

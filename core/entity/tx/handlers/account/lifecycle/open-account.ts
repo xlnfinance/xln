@@ -24,15 +24,10 @@ import {
   sameAccountStateDomain,
 } from '../../../../../account/commitment/state-root';
 import { applyAccountInput } from '../../../../../account/consensus';
-import { requireAccountDeltaTransformerAddress } from '../../../../../account/consensus/helpers';
 import { createEmptyAccountJClaimAccumulator } from '../../../../../account/j-claims/j-claim-accumulator';
 import { MAX_PROFILE_ADVERTISED_ACCOUNTS } from '../../../../profile/profile-descriptor';
 import { buildHubRebalancePolicyTx } from './admin';
 import { canonicalAccountDisputeConfig } from '../../../../../account/config/dispute-config';
-import {
-  authorityRecordEnabled,
-  noteAuthorityAccountCreate,
-} from '../../../../../rscore/authority-wave';
 
 type OpenAccountEntityTx = Extract<EntityTx, { type: 'openAccount' }>;
 
@@ -156,8 +151,8 @@ const seedOpenAccountPolicies = async (
     .filter(id => Number.isFinite(id) && id > 0);
   if (tx.data.rebalancePolicy) assertRequestedRebalancePolicy(tokenId, tx.data.rebalancePolicy);
   // The policy is part of the Entity account leaf even though it is outside
-  // AccountStateRoot. Install the final H=0 envelope before recording Create;
-  // admissions below may only change the mempool after that exact snapshot.
+  // AccountStateRoot. Install the complete H=0 envelope before admissions below
+  // populate the mempool for the first signed frame.
   for (const policyTokenId of tokenIds) {
     const policy = tx.data.rebalancePolicy && policyTokenId === tokenId
       ? tx.data.rebalancePolicy
@@ -166,15 +161,6 @@ const seedOpenAccountPolicies = async (
       account.shadow.rebalance.policy,
       'rebalanceShadowPolicy',
     ).updated(policyTokenId, { ...policy });
-  }
-  if (authorityRecordEnabled()) {
-    noteAuthorityAccountCreate(
-      accountConsensusContext.accountAuthorityFrameId,
-      state.entityId,
-      counterpartyId,
-      account,
-      requireAccountDeltaTransformerAddress(accountConsensusContext, account.state),
-    );
   }
   const initialAccountTxs = [
     ...tokenIds.map(deltaTokenId => ({

@@ -29,7 +29,6 @@ import type {
   RebalanceFeePolicySnapshot,
 } from '../types/finance/rebalance';
 import type { AccountStateCollection, AccountStateMapNamespace } from '../account/state/persistent-state-map';
-import type { ApplyAccountTxOk } from '../account/tx/apply-types';
 import type { RscoreWireValue } from './client';
 import { jEventClaimWire } from './process/j-claim-wire';
 
@@ -124,28 +123,7 @@ const ENGINE_DERIVED_LEAF_FIELDS: ReadonlySet<string> = new Set(['accountStateRo
  * proposal, ACK and rollback state needed to continue after cutover; none of
  * that scheduling state is authenticated by the Entity root.
  */
-/**
- * One operation of a wave, in the order the authority performed it.
- *
- * Admissions and Account inputs interleave inside a single Runtime frame, and the
- * order is load-bearing: a proposal that loses a height collision returns its
- * transactions to the front of the queue and drops the ones already there, so
- * whether our own admission had landed yet decides what survives.
- */
-export const waveAdmitOp = (
-  operationIndex: number,
-  accountId: string,
-  txs: RscoreWireValue[],
-): RscoreWireValue =>
-  [0, operationIndex, hexToWireBytes(accountId, 32, 'RSCORE_WAVE_ACCOUNT_ID'), txs];
 
-export const waveInputOp = (row: RscoreWireValue): RscoreWireValue => [1, row];
-
-/** Create a financially empty Account inside the abortable Rust candidate. */
-export const waveCreateOp = (
-  operationIndex: number,
-  seed: RscoreWireValue,
-): RscoreWireValue => [2, operationIndex, seed];
 
 export const accountEnvelopeWire = (account: AccountReplica): RscoreWireValue => {
   const projected = projectEntityAccountLeaf(account);
@@ -534,28 +512,6 @@ const accountFrameWire = (frame: AccountFrame): RscoreWireValue => [
   hexToWireBytes(frame.accountStateRoot, 32, 'SHADOW_FRAME_STATE_ROOT'),
 ];
 
-/**
- * One received peer frame, exactly as the signed AccountInput carried it.
- *
- * Consensus snapshots bind `stateHash` beside their frame because the engine
- * independently restores that binding. A Account input is different: its frame
- * itself carries `stateHash`; dropping it would make Rust judge reconstructed
- * data instead of the canonical input.
- */
-export const accountInputFrameWire = (frame: AccountFrame): RscoreWireValue => [
-  frame.height,
-  frame.timestamp,
-  frame.jHeight,
-  frame.accountTxs.map(tx => {
-    const wire = accountTxWire(tx);
-    if (wire === null) throw new Error(`RSCORE_AUTHORITY_FRAME_TX_UNSUPPORTED:${tx.type}`);
-    return wire;
-  }),
-  frame.prevFrameHash,
-  hexToWireBytes(frame.accountStateRoot, 32, 'AUTHORITY_FRAME_STATE_ROOT'),
-  hexToWireBytes(frame.stateHash, 32, 'AUTHORITY_FRAME_STATE_HASH'),
-];
-
 const hankoWireBytes = (value: string): Uint8Array => {
   const clean = value.startsWith('0x') ? value.slice(2) : value;
   if (clean.length === 0 || clean.length % 2 !== 0 || !/^[0-9a-fA-F]+$/.test(clean)) {
@@ -675,163 +631,6 @@ export type ShadowOutputRow =
       amount: string,
       reason: string | null,
     ];
-
-/**
- * Canonical projection of everything one successful tx made observable
- * outside AccountState. HTLC identity and financial fields come exclusively
- * from the applied result, which captured the stored lock before deleting it;
- * reconstructing them from the submitted tx would hide a broken transition.
- */
-export const shadowOutputRows = (result: ApplyAccountTxOk): ShadowOutputRow[] => {
-  const rows: ShadowOutputRow[] = [];
-  const effects = result.candidateEffects ?? [];
-  // Every candidate effect, in order: skipping an unknown kind would compare a
-  // shorter list against the engine's and call the frame a match.
-  for (let index = 0; index < effects.length; index += 1) {
-    const output = effects[index];
-    if (output === undefined) throw new Error(`SHADOW_OUTPUT_INDEX_MISSING:${index}`);
-    switch (output.kind) {
-      case 'directPaymentForward':
-        rows.push([
-          'forward',
-          output.tokenId,
-          output.amount.toString(),
-          [...output.route],
-          output.description ?? null,
-          output.deliveryMode,
-          output.trustedGatewayEntityId,
-        ]);
-        break;
-      case 'swapOfferUpsert': {
-        const offer = output.offer;
-        rows.push([
-          'offerUpsert',
-          offer.offerId,
-          offer.leftEntity,
-          offer.rightEntity,
-          offer.giveTokenId,
-          offer.giveTokenDecimals,
-          offer.giveAmount.toString(),
-          offer.wantTokenId,
-          offer.wantTokenDecimals,
-          offer.wantAmount.toString(),
-          offer.maxFee.toString(),
-          offer.minNetReceive.toString(),
-          offer.priceTicks.toString(),
-          offer.timeInForce === undefined ? null : offer.timeInForce,
-          offer.makerIsLeft ? 0 : 1,
-          offer.createdHeight,
-          offer.quantizedGive.toString(),
-          offer.quantizedWant.toString(),
-          offer.crossJurisdiction === undefined
-            ? null
-            : canonicalValueWire(offer.crossJurisdiction),
-        ]);
-        break;
-      }
-      case 'swapOfferRemove':
-        rows.push(['offerRemove', output.offerId]);
-        break;
-      case 'swapCancelRequest':
-        rows.push(['cancelRequest', output.offerId]);
-        break;
-      case 'runtimeEvent': {
-        if (output.eventName === 'request_collateral_committed') {
-          const {
-            entityId,
-            accountId,
-            tokenId,
-            requestedAmount,
-            prepaidFee,
-            requestedAt,
-          } = output.data;
-          if (
-            typeof entityId !== 'string'
-            || typeof accountId !== 'string'
-            || typeof tokenId !== 'number'
-            || !Number.isSafeInteger(tokenId)
-            || typeof requestedAmount !== 'string'
-            || !/^\d+$/.test(requestedAmount)
-            || typeof prepaidFee !== 'string'
-            || !/^\d+$/.test(prepaidFee)
-            || typeof requestedAt !== 'number'
-            || !Number.isSafeInteger(requestedAt)
-          ) {
-            throw new Error('SHADOW_OUTPUT_REQUEST_COLLATERAL_COMMITTED_INVALID');
-          }
-          rows.push([
-            'requestCollateralCommitted',
-            entityId,
-            accountId,
-            tokenId,
-            requestedAmount,
-            prepaidFee,
-            requestedAt,
-          ]);
-          break;
-        }
-        if (output.eventName !== 'account_settled_finalized_bilateral') {
-          throw new Error(`SHADOW_OUTPUT_RUNTIME_EVENT_UNSUPPORTED:${output.eventName}`);
-        }
-        const { tokenId, jHeight, collateral, ondelta } = output.data;
-        if (
-          typeof tokenId !== 'number'
-          || !Number.isSafeInteger(tokenId)
-          || typeof jHeight !== 'number'
-          || !Number.isSafeInteger(jHeight)
-          || typeof collateral !== 'string'
-          || !/^-?\d+$/.test(collateral)
-          || typeof ondelta !== 'string'
-          || !/^-?\d+$/.test(ondelta)
-        ) {
-          throw new Error('SHADOW_OUTPUT_ACCOUNT_SETTLED_INVALID');
-        }
-        const debug = effects[index + 1];
-        if (
-          debug?.kind !== 'debug'
-          || debug.payload['code'] !== 'REB_STEP'
-          || debug.payload['step'] !== 5
-          || debug.payload['status'] !== 'ok'
-          || debug.payload['event'] !== output.eventName
-          || debug.payload['tokenId'] !== tokenId
-          || debug.payload['jHeight'] !== jHeight
-          || debug.payload['collateral'] !== collateral
-          || debug.payload['ondelta'] !== ondelta
-        ) {
-          throw new Error('SHADOW_OUTPUT_ACCOUNT_SETTLED_DEBUG_MISMATCH');
-        }
-        rows.push(['accountSettledFinalized', tokenId, jHeight, collateral, ondelta]);
-        index += 1;
-        break;
-      }
-      case 'debug':
-        throw new Error('SHADOW_OUTPUT_ORPHAN_DEBUG');
-      default:
-        throw new Error('SHADOW_OUTPUT_KIND_UNSUPPORTED');
-    }
-  }
-  if (result.outcome === 'htlc_secret') {
-    rows.push([
-      'secret',
-      result.lockId,
-      result.hashlock,
-      result.secret,
-      result.tokenId,
-      result.amount.toString(),
-    ]);
-  }
-  if (result.outcome === 'htlc_error') {
-    rows.push([
-      'error',
-      result.lockId,
-      result.hashlock,
-      result.tokenId,
-      result.amount.toString(),
-      result.reason ?? null,
-    ]);
-  }
-  return rows;
-};
 
 /** Absent stays absent on the wire: several resolve checks distinguish it from zero. */
 const optionalAmount = (value: bigint | undefined): string | null =>

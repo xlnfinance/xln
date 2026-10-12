@@ -91,8 +91,6 @@ export interface EntityRuntimeContext {
   };
   runtimeSeed?: string | undefined;
   runtimeId?: string | undefined;
-  /** Ephemeral Runtime-envelope identity, never committed Entity state. */
-  accountAuthorityFrameId?: string | null | undefined;
   /** Active only during one EntityInput; never State, WAL, or recovery data. */
   accountAuthorityEntityStage?: AccountAuthorityEntityStageCapability | undefined;
   activeJurisdiction?: string | undefined;

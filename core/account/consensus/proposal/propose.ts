@@ -11,7 +11,6 @@ import {
   rememberPreparedProposalCommit,
 } from './prepared-commit';
 import type { AccountFrame, AccountOutput, AccountReplica, AccountTx } from '../../../types/account';
-import type { ApplyAccountTxOk } from '../../tx/apply-types';
 import type { AccountConsensusContext } from '../context';
 import { removeCommittedTxsFromMempool } from '../../../protocol/state/tx-multiset';
 import { getPerfMs } from '../../../support/time';
@@ -111,7 +110,6 @@ const rememberProposalForAck = (
   newFrame: AccountFrame,
   validation: {
     candidateEffects: AccountOutput[];
-    txResults: ApplyAccountTxOk[];
     timedOutHashlocks: string[];
   },
 ): void => {
@@ -124,7 +122,6 @@ const rememberProposalForAck = (
     state: candidate.state,
     accountStateRoot: newFrame.accountStateRoot,
     candidateEffects: validation.candidateEffects,
-    txResults: validation.txResults,
     timedOutHashlocks: validation.timedOutHashlocks,
   });
 };
@@ -139,14 +136,11 @@ const executeAuthoritativeProposal = async (
   const authorityScope = context.accountAuthorityExecutionScope;
   if (authorityScope === undefined) return null;
   const delegated = await authorityScope.executeAccountProposal({
-    collectorFrameId: String(context.accountAuthorityFrameId ?? ''),
     account,
     timestamp: entityFrameTimestamp,
     jHeight: entityJHeight ?? account.state.lastFinalizedJHeight ?? 0,
     entityTimestamp: entityFrameTimestamp,
     finalizedJHeight: entityJHeight ?? account.state.lastFinalizedJHeight ?? 0,
-    selectionIsWholeMempool: selectedMempoolTxs === undefined
-      || selectedMempoolTxs.length === account.mempool.length,
     ...(selectedMempoolTxs === undefined ? {} : { selectedMempoolTxs }),
   });
   if (delegated !== null) return delegated;

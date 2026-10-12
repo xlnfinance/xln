@@ -42,7 +42,10 @@ export const canonicalHubEngine = (
   const retiredFlag = Object.keys(env).find(
     key =>
       env[key] === '1' &&
-      (key === 'XLN_RSCORE_AUTHORITY' || key === 'XLN_RSCORE_SHADOW' || key.startsWith('XLN_HUB_RSCORE_AUTHORITY_')),
+      (key === 'XLN_RSCORE_AUTHORITY' ||
+        key === 'XLN_RSCORE_SHADOW' ||
+        key === 'XLN_RSCORE_AUTHORITY_RECORD' ||
+        key.startsWith('XLN_HUB_RSCORE_AUTHORITY_')),
   );
   if (retiredFlag) throw new Error(`HUB_ENGINE_RETIRED:${retiredFlag}:typescript-only`);
   return 'typescript';

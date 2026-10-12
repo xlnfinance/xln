@@ -15,7 +15,6 @@ import type { AccountCommittedFrame, HandleAccountInputResult } from '../types';
 import { accountInputApplied, rejectAccountInput } from '../result';
 import { commitAccountFrameTransition } from '../frame/commit-transition';
 import { preparedCommitKey, takePreparedProposalCommit } from '../proposal/prepared-commit';
-import { noteAuthorityCommittedOutputs } from '../../../rscore/authority-wave';
 import { publishAccountOverlay } from '../../state/candidate-overlay';
 import { assertLiveCommitMatchesFrame } from './commit-root';
 import { countOp } from '../../../support/performance/op-counters';
@@ -292,14 +291,6 @@ const applyPendingFrameTransactions = async (
     candidateEffects.push(...prepared.candidateEffects);
     timedOutHashlocks.push(...prepared.timedOutHashlocks);
     countOp('account.ack.preparedCommit');
-    // Prepared ACK commits bypass commitAccountFrameTransition, so capture
-    // their ordered outputs at this same committed boundary.
-    noteAuthorityCommittedOutputs(
-      context.accountAuthorityFrameId,
-      account.proofHeader.fromEntity,
-      account.proofHeader.toEntity,
-      prepared.txResults,
-    );
     return;
   }
   const committed = await commitAccountFrameTransition({

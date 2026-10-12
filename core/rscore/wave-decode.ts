@@ -103,9 +103,8 @@ type WaveProposal = {
  * a shifted field travel as a route or an amount, so every variant is read by
  * name and re-encoded from the same model for the parity digest.
  *
- * Parity target: `account_output` in crates/process/src/wire_encode.rs, and
- * `shadowOutputRows` in shadow-wire.ts, which is the TypeScript projection
- * these are compared against.
+ * Wire target: `account_output` in crates/process/src/wire_encode.rs.
+ * The codec corpus checks variant fields, exact arity and re-encoded bytes.
  */
 export type WaveOutput =
   | {
@@ -888,9 +887,8 @@ export const decodeWaveOutputForTests = (value: unknown): WaveOutput => decodeOu
 export const waveOutputWireForTests = (output: WaveOutput): RscoreWireValue => outputWire(output);
 
 /**
- * The same output as the row `shadowOutputRows` builds from the TypeScript
- * transition, so the driver compares two projections of the same shape rather
- * than eyeballing two different ones.
+ * Named output fields projected into the diagnostic corpus row format.
+ * Production Runtime parity compares its canonical event/effect digests.
  */
 export const waveOutputRow = (output: WaveOutput): ShadowOutputRow => {
   switch (output.kind) {

@@ -80,9 +80,6 @@ const entityAuthorityDriverEnabled = (env?: AuthorityRuntimeScope): boolean =>
   authorityDriverEnabled(env)
   && process.env['XLN_RSCORE_ENTITY_AUTHORITY'] === '1';
 
-export const authorityRuntimeSuppressed = (env: RuntimeReplica): boolean =>
-  env.accountAuthoritySuppressed === true;
-
 export const setAuthorityRuntimeSuppressed = (
   env: RuntimeReplica,
   suppressed: boolean,
@@ -990,7 +987,6 @@ export const printAuthorityDriverReport = (): void => {
 
 export const discardAuthorityRuntime = async (env: RuntimeReplica): Promise<void> => {
   killAuthorityRuntime(env);
-  delete env.accountAuthorityFrameId;
 };
 
 export const shutdownAuthorityDriver = async (): Promise<void> => {

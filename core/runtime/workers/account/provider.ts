@@ -1,4 +1,4 @@
-import { authorityDriverEnabled } from '../../config/account-execution';
+import { assertAccountRecorderDisabled, authorityDriverEnabled } from '../../config/account-execution';
 import type { HandleAccountInputResult, ProposeAccountFrameResult } from '../../../account/consensus/types';
 import { replaceAccountReplica } from '../../../account/state/candidate-overlay';
 import { rememberEngineAccountLeaf } from '../../../entity/state/engine-leaf/leaf-registry';
@@ -771,6 +771,7 @@ export const canonicalTsAccountWorkerCount = (): number => {
 
 /** Install the sole TypeScript H1 Account executor before its first frame. */
 export const installTsAccountWorkerAuthority = (env: RuntimeReplica): void => {
+  assertAccountRecorderDisabled();
   const processValue = Reflect.get(globalThis, 'process') as { env?: Record<string, string | undefined> } | undefined;
   // Embedded Rust execution was removed. Arming its checkpoint hooks beside
   // TS workers would commit Accounts Rust never executed. Reject activation

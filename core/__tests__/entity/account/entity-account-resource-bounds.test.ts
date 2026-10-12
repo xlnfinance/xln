@@ -150,6 +150,41 @@ test('storage boundary rejects malformed committed orderbook pair dimensions', (
     .toThrow('STORAGE_ENTITY_DOC_INVALID_ORDERBOOK_PAIR_DIMENSIONS_baseTokenDecimals');
 });
 
+test('local opening keeps H0 unsigned and admits tokens after seeding the Account policy', async () => {
+  const env = createEmptyEnv('local-account-genesis');
+  env.quietRuntimeLogs = true;
+  const policy = { r2cRequestSoftLimit: 20n, hardLimit: 40n, maxAcceptableFee: 1n };
+  const result = await handleOpenAccountEntityTx(makeState(), {
+    type: 'openAccount',
+    data: {
+      targetEntityId: counterpartyId,
+      watchSeed,
+      accountDomain: {
+        chainId: jurisdiction.chainId,
+        depositoryAddress: jurisdiction.depositoryAddress,
+      },
+      disputeConfig: { leftResponseSeconds: 10, rightResponseSeconds: 10 },
+      rebalancePolicy: policy,
+    },
+  }, createAccountConsensusContext(env));
+  const account = result.newState.accounts.get(counterpartyId);
+  if (!account) throw new Error('TEST_LOCAL_ACCOUNT_MISSING');
+  expect(account.currentHeight).toBe(0);
+  expect(account.currentFrame.height).toBe(0);
+  expect(account.currentFrame.stateHash).toBe('');
+  expect(account.currentFrame.accountTxs).toEqual([]);
+  expect(account.currentFrame.accountStateRoot).toBe(computeAccountStateRoot(account.state));
+  expect(account.state.deltas.size).toBe(0);
+  expect(account.publicPinned).toBe(true);
+  expect(account.shadow.rebalance.policy.get(1)).toEqual(policy);
+  expect([...account.shadow.rebalance.policy.keys()].sort()).toEqual([1, 2, 3]);
+  expect(account.mempool).toEqual([
+    { type: 'add_delta', data: { tokenId: 1 } },
+    { type: 'add_delta', data: { tokenId: 3 } },
+    { type: 'add_delta', data: { tokenId: 2 } },
+  ]);
+});
+
 test('ordinary openAccount cannot replace a permanently disputed Account', async () => {
   const state = makeState();
   const finalized = makeAccount();
@@ -362,6 +397,19 @@ test('only an accepted signed genesis can reserve an Account slot', async () => 
   invalidInput.proposal.frameHanko = frameHanko!;
 
   const accountConsensusContext = createAccountConsensusContext(env);
+  const malformedHankoInput = structuredClone(hankoAttachedProposal);
+  malformedHankoInput.proposal.frameHanko = `0x${'55'.repeat(64)}`;
+  await expect(applyAccountInputToEntity(
+    targetState,
+    malformedHankoInput,
+    env,
+    accountConsensusContext,
+  )).rejects.toMatchObject({
+    name: 'MalformedEntityFrameInputError',
+    rejection: expect.stringContaining('ACCOUNT_INPUT_INPUT_REJECTED:ACCOUNT_INPUT_FRAME_HANKO_INVALID'),
+  });
+  expect(targetState.accounts.size).toBe(0);
+
   await applyAccountInputToEntity(
     targetState,
     invalidInput,

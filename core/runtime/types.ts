@@ -732,8 +732,6 @@ export interface RuntimeReplica {
   state: RuntimeState;
   runtimeSeed?: string | undefined; // BrainVault seed backing this runtime (plaintext, dev mode)
   runtimeId?: string | undefined; // Runtime identity (usually signer1 address)
-  /** Active rscore recorder frame; ephemeral envelope data, never consensus state. */
-  accountAuthorityFrameId?: string | null | undefined;
   /** Detached/read-only replicas never arm or mutate authority sessions. */
   accountAuthoritySuppressed?: boolean | undefined;
   /** Canonical Account authority is installed before the first Runtime frame. */
