@@ -251,6 +251,7 @@ test('payment receipts and recovery dialogs keep keyboard focus inside and resto
   await page.keyboard.press('Escape');
   await expect(payment).toHaveCount(0);
   await page.getByTestId('nav-activity').first().click();
+  await expect(page.getByTestId('activity-search')).toBeVisible();
   const movement = page.getByTestId('activity-row').filter({ hasText: 'Sent' }).first().getByRole('button');
   await movement.focus();
   await page.keyboard.press('Enter');
