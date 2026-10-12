@@ -1,67 +1,64 @@
-import { authorityDriverEnabled } from '../../../runtime/config/account-execution';
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import {
-  authoritySessionIdentityFor,
-} from '../../../rscore/authority-driver';
-import { createEmptyEnv } from '../../../runtime';
+import { authoritySessionIdentityFor } from '../../../rscore/process/session-identity';
+import { createEmptyEnv, loadEnvFromDB } from '../../../runtime';
 import { installTsAccountWorkerAuthority } from '../../../runtime/workers/account/provider';
 
 const H1 = `0x${'11'.repeat(20)}`;
 const LANE = `0x${'22'.repeat(20)}`;
 const OWNER_A = `0x${'33'.repeat(32)}`;
 const OWNER_B = `0x${'44'.repeat(32)}`;
-const previousAuthority = process.env['XLN_RSCORE_AUTHORITY'];
-const previousTarget = process.env['XLN_RSCORE_AUTHORITY_RUNTIME_ID'];
-const previousRecord = process.env['XLN_RSCORE_AUTHORITY_RECORD'];
-const previousShadow = process.env['XLN_RSCORE_SHADOW'];
+const retiredFlags = [
+  'XLN_RSCORE_AUTHORITY', 'XLN_RSCORE_SHADOW', 'XLN_RSCORE_AUTHORITY_RECORD',
+  'XLN_RSCORE_AUTHORITY_REPLAY', 'XLN_RSCORE_AUTHORITY_IMPORT', 'XLN_RSCORE_ENTITY_AUTHORITY',
+  'XLN_HUB_RSCORE_AUTHORITY_H2',
+];
+const configurationKeys = [...retiredFlags, 'XLN_RSCORE_AUTHORITY_RUNTIME_ID', 'XLN_HLT_ENGINE'];
+const previous = new Map(configurationKeys.map(key => [key, process.env[key]]));
 
 beforeEach(() => {
-  process.env['XLN_RSCORE_AUTHORITY'] = '1';
-  delete process.env['XLN_RSCORE_AUTHORITY_RUNTIME_ID'];
-  delete process.env['XLN_RSCORE_AUTHORITY_RECORD'];
-  delete process.env['XLN_RSCORE_SHADOW'];
+  for (const key of configurationKeys) delete process.env[key];
 });
 
 afterEach(() => {
-  if (previousAuthority === undefined) delete process.env['XLN_RSCORE_AUTHORITY'];
-  else process.env['XLN_RSCORE_AUTHORITY'] = previousAuthority;
-  if (previousTarget === undefined) delete process.env['XLN_RSCORE_AUTHORITY_RUNTIME_ID'];
-  else process.env['XLN_RSCORE_AUTHORITY_RUNTIME_ID'] = previousTarget;
-  if (previousRecord === undefined) delete process.env['XLN_RSCORE_AUTHORITY_RECORD'];
-  else process.env['XLN_RSCORE_AUTHORITY_RECORD'] = previousRecord;
-  if (previousShadow === undefined) delete process.env['XLN_RSCORE_SHADOW'];
-  else process.env['XLN_RSCORE_SHADOW'] = previousShadow;
+  for (const [key, value] of previous) {
+    if (value === undefined) delete process.env[key];
+    else process.env[key] = value;
+  }
 });
 
-describe('rscore authority Runtime scope', () => {
-  test('retired embedded authority cannot install an executor or reach its first Account WAL commit', () => {
+describe('TS-only Account execution', () => {
+  test.each(retiredFlags)('rejects retired selector %s before replica creation or installed executor reuse', key => {
     const env = createEmptyEnv(null, 0);
-    expect(() => installTsAccountWorkerAuthority(env)).toThrow(
-      'RUNTIME_EMBEDDED_RSCORE_AUTHORITY_RETIRED:use native xlnrs',
-    );
+    env.runtimeId = LANE;
+    env.accountAuthorityExecutionMode = 'cutover';
+    // A stale host object cannot revive the retired suppression bypass.
+    Object.assign(env, { accountAuthoritySuppressed: true });
+    process.env['XLN_RSCORE_AUTHORITY_RUNTIME_ID'] = H1;
+    process.env[key] = '1';
+    const code = `RUNTIME_ACCOUNT_ENGINE_RETIRED:${key}:typescript-only`;
+    expect(() => createEmptyEnv(null, 0)).toThrow(code);
+    expect(() => installTsAccountWorkerAuthority(env)).toThrow(code);
     expect(env.state.height).toBe(0);
+    expect(env.state.eReplicas.size).toBe(0);
     expect(env.accountAuthorityEntityStageProvider).toBeUndefined();
+    expect(env.accountAuthorityExecutionMode).toBe('cutover');
   });
 
-  test('retired recorder rejects before installing either a fresh or configured executor', () => {
-    delete process.env['XLN_RSCORE_AUTHORITY'];
-    process.env['XLN_RSCORE_AUTHORITY_RECORD'] = '1';
-    for (const configured of [false, true]) {
-      const env = createEmptyEnv(null, 0);
-      if (configured) env.accountAuthorityExecutionMode = 'cutover';
-      expect(() => installTsAccountWorkerAuthority(env)).toThrow('RUNTIME_RSCORE_RECORD_RETIRED');
-      expect(env.state.height).toBe(0);
-      expect(env.state.eReplicas.size).toBe(0);
-      expect(env.accountAuthorityEntityStageProvider).toBeUndefined();
-      expect(env.accountAuthorityExecutionMode).toBe(configured ? 'cutover' : undefined);
-    }
+  test('rejects native-only replay selector even without the authority switch', () => {
+    const env = createEmptyEnv(null, 0);
+    env.accountAuthorityExecutionMode = 'cutover';
+    process.env['XLN_RSCORE_AUTHORITY_REPLAY'] = '1';
+    expect(() => installTsAccountWorkerAuthority(env)).toThrow(
+      'RUNTIME_ACCOUNT_ENGINE_RETIRED:XLN_RSCORE_AUTHORITY_REPLAY:typescript-only',
+    );
   });
 
-  test('an absent or disabled recorder permits the installed TS executor', () => {
-    delete process.env['XLN_RSCORE_AUTHORITY'];
-    for (const configured of [undefined, '0']) {
-      if (configured === undefined) delete process.env['XLN_RSCORE_AUTHORITY_RECORD'];
-      else process.env['XLN_RSCORE_AUTHORITY_RECORD'] = configured;
+  test('absent or disabled selectors permit the TS executor', () => {
+    for (const disabled of [undefined, '0']) {
+      for (const key of retiredFlags) {
+        if (disabled === undefined) delete process.env[key];
+        else process.env[key] = disabled;
+      }
       const env = createEmptyEnv(null, 0);
       env.accountAuthorityExecutionMode = 'cutover';
       expect(() => installTsAccountWorkerAuthority(env)).not.toThrow();
@@ -70,68 +67,31 @@ describe('rscore authority Runtime scope', () => {
     }
   });
 
-  test('retired recorder cannot be hidden by Runtime targeting or read-only suppression', () => {
-    process.env['XLN_RSCORE_AUTHORITY_RUNTIME_ID'] = H1;
-    process.env['XLN_RSCORE_AUTHORITY_RECORD'] = '1';
-    const env = createEmptyEnv(null, 0);
-    env.runtimeId = LANE;
-    env.accountAuthoritySuppressed = true;
-    expect(() => installTsAccountWorkerAuthority(env)).toThrow('RUNTIME_RSCORE_RECORD_RETIRED');
-    expect(env.accountAuthorityExecutionMode).toBeUndefined();
-  });
-
-  test('replay rejects retired recorder before parsing or opening a recording', async () => {
-    const child = Bun.spawn([process.execPath, new URL(
-      '../../../scripts/operations/hlt/replay/replay-hub-recording.ts', import.meta.url,
-    ).pathname], {
-      env: { ...process.env, XLN_RSCORE_AUTHORITY: '0', XLN_RSCORE_AUTHORITY_RECORD: '1' },
-      stdout: 'pipe', stderr: 'pipe',
-    });
-    const [exitCode, output, errors] = await Promise.all([
-      child.exited, new Response(child.stdout).text(), new Response(child.stderr).text(),
-    ]);
-    expect(exitCode).not.toBe(0);
-    expect(errors).toContain('RUNTIME_RSCORE_RECORD_RETIRED');
-    expect(errors).not.toContain('HLT_REPLAY_ARGUMENT_REQUIRED');
-    expect(output).not.toContain('HLT_REPLAY_REPORT');
-  });
-
-  test('retired shadow configuration cannot silently run a TS-only comparison', () => {
-    delete process.env['XLN_RSCORE_AUTHORITY'];
-    process.env['XLN_RSCORE_SHADOW'] = '1';
-    const env = createEmptyEnv(null, 0);
-
-    expect(() => installTsAccountWorkerAuthority(env)).toThrow(
-      'RUNTIME_RSCORE_SHADOW_RETIRED:use immutable Runtime WAL replay',
+  test('live restore rejects retired configuration before opening storage', async () => {
+    process.env['XLN_RSCORE_AUTHORITY'] = '1';
+    await expect(loadEnvFromDB('not-a-runtime-id')).rejects.toThrow(
+      'RUNTIME_ACCOUNT_ENGINE_RETIRED:XLN_RSCORE_AUTHORITY:typescript-only',
     );
-    expect(env.state.height).toBe(0);
-    expect(env.accountAuthorityEntityStageProvider).toBeUndefined();
   });
 
-  test('an unscoped single-Runtime process keeps authority enabled', () => {
-    expect(authorityDriverEnabled({ runtimeId: H1 })).toBe(true);
-  });
-
-  test('a packed host enables only the named H1 Runtime', () => {
-    process.env['XLN_RSCORE_AUTHORITY_RUNTIME_ID'] = H1;
-    expect(authorityDriverEnabled({ runtimeId: H1 })).toBe(true);
-    expect(authorityDriverEnabled({ runtimeId: LANE })).toBe(false);
-  });
-
-  test('suppression still wins for exact read-only recovery', () => {
-    process.env['XLN_RSCORE_AUTHORITY_RUNTIME_ID'] = H1;
-    expect(
-      authorityDriverEnabled({
-        runtimeId: H1,
-        accountAuthoritySuppressed: true,
-      }),
-    ).toBe(false);
-  });
-
-  test('a malformed target is rejected before any Runtime is driven', () => {
-    process.env['XLN_RSCORE_AUTHORITY_RUNTIME_ID'] = 'H1';
-    expect(() => authorityDriverEnabled({ runtimeId: H1 })).toThrow('RSCORE_AUTHORITY_RUNTIME_ID_INVALID:H1');
-  });
+  test.each(['XLN_RSCORE_AUTHORITY_REPLAY', '--require-rust-account-authority'])(
+    'replay rejects %s before parsing or opening a recording', async selector => {
+      const args = selector.startsWith('--') ? [selector] : [];
+      const child = Bun.spawn([process.execPath, new URL(
+        '../../../scripts/operations/hlt/replay/replay-hub-recording.ts', import.meta.url,
+      ).pathname, ...args], {
+        env: { ...process.env, ...(args.length === 0 ? { [selector]: '1' } : {}) },
+        stdout: 'pipe', stderr: 'pipe',
+      });
+      const [exitCode, output, errors] = await Promise.all([
+        child.exited, new Response(child.stdout).text(), new Response(child.stderr).text(),
+      ]);
+      expect(exitCode).not.toBe(0);
+      expect(errors).toContain(`RUNTIME_ACCOUNT_ENGINE_RETIRED:${selector}:typescript-only`);
+      expect(errors).not.toContain('HLT_REPLAY_ARGUMENT_REQUIRED');
+      expect(output).not.toContain('HLT_REPLAY_REPORT');
+    },
+  );
 
   test('process transcript identity is stable and bound to Runtime plus owner', () => {
     const first = authoritySessionIdentityFor(H1, OWNER_A);

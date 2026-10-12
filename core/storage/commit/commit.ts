@@ -20,15 +20,12 @@ import type {
 import type { EntityInfraContext } from '../../types/entity/infra-context';
 import { verifyPersistedFrameState } from '../recovery/verify';
 import {
-  AccountAuthorityWalCommitError,
-  AccountAuthorityPreWalError,
   computeStorageFrameHash,
   readStorageFrameRecord,
   readStorageHead,
   saveRuntimeFrameToStorage,
   type RuntimeFrame,
   type StorageAuthoritativeFrameIdentity,
-  type StorageFrameSaveOptions,
 } from '..';
 import { withRetainedStorageWriterLock } from '../runtime-dbs';
 import type { RuntimeFrameCommitStatus } from './commit-status';
@@ -73,7 +70,6 @@ const buildStorageOuterPerf = (
 });
 
 class RuntimeFrameStorageError extends Error {
-  readonly publicationBlocked: boolean;
   readonly operationStillRunning: boolean;
 
   constructor(
@@ -85,7 +81,6 @@ class RuntimeFrameStorageError extends Error {
       cause,
     });
     this.name = 'RuntimeFrameStorageError';
-    this.publicationBlocked = cause instanceof AccountAuthorityWalCommitError;
     this.operationStillRunning = cause instanceof RuntimeStorageWriteTimeoutError;
     if (cause instanceof Error && cause.stack && this.stack) {
       this.stack = `${this.stack}\nCaused by: ${cause.stack}`;
@@ -103,11 +98,7 @@ export const classifyRuntimeFrameCommitProof = (
   const inputMatches =
     safeStringify(frame.runtimeInput) === safeStringify(expected.runtimeInput);
   const stateMatches = frame.postStateHash === expected.postStateHash;
-  const checkpointMatches =
-    safeStringify(frame.accountAuthorityCheckpoints ?? []) ===
-    safeStringify(expected.accountAuthorityCheckpoints);
-  return storedHashMatches && plannedHashMatches && inputMatches &&
-    stateMatches && checkpointMatches
+  return storedHashMatches && plannedHashMatches && inputMatches && stateMatches
     ? 'committed'
     : 'conflict';
 };
@@ -136,10 +127,6 @@ const resolveAuthoritativeFrameCommitStatus = async (
   return 'unknown';
 };
 
-type AccountAuthoritySave = NonNullable<
-  StorageFrameSaveOptions['accountAuthority']
->;
-
 type RuntimeStorageSaveResult = Awaited<
   ReturnType<typeof saveRuntimeFrameToStorage>
 >;
@@ -149,10 +136,8 @@ type RuntimeStorageSaveOutcome = {
   persistencePerfMs?: RuntimeStorageSaveResult['persistencePerfMs'];
 };
 
-type AuthoritySaveState = {
+type FrameSaveState = {
   identity?: StorageAuthoritativeFrameIdentity;
-  completion?: Promise<void>;
-  completionMaterialized?: boolean;
 };
 
 const createStorageOuterPerfMarks = (
@@ -166,32 +151,14 @@ const createStorageOuterPerfMarks = (
   lockReleasedAt: 0,
 });
 
-const completeAccountAuthorityOnce = (
-  accountAuthority: AccountAuthoritySave | undefined,
-  authorityState: AuthoritySaveState,
-  materialized: boolean,
-): Promise<void> => {
-  if (!accountAuthority) return Promise.resolve();
-  if (
-    authorityState.completionMaterialized !== undefined &&
-    authorityState.completionMaterialized !== materialized
-  ) {
-    throw new Error('STORAGE_AUTHORITY_COMPLETION_MATERIALIZATION_CONFLICT');
-  }
-  authorityState.completionMaterialized = materialized;
-  authorityState.completion ??= Promise.resolve()
-    .then(() => accountAuthority.afterWalCommit(materialized));
-  return authorityState.completion;
-};
-
 const recordAuthoritativeFrameIdentity = (
-  authorityState: AuthoritySaveState,
+  frameState: FrameSaveState,
   identity: StorageAuthoritativeFrameIdentity,
 ): void => {
-  if (authorityState.identity) {
+  if (frameState.identity) {
     throw new Error('STORAGE_AUTHORITATIVE_FRAME_PREPARED_TWICE');
   }
-  authorityState.identity = identity;
+  frameState.identity = identity;
 };
 
 type PersistRuntimeEnvironmentOptions = {
@@ -201,8 +168,7 @@ type PersistRuntimeEnvironmentOptions = {
   currentFrameOutputs: RoutedEntityInput[] | undefined;
   entityContexts: Map<string, EntityInfraContext>;
   outerMarks: StorageOuterPerfMarks;
-  authorityState: AuthoritySaveState;
-  accountAuthority: AccountAuthoritySave | undefined;
+  frameState: FrameSaveState;
 };
 
 const persistRuntimeEnvironment = async (
@@ -215,14 +181,12 @@ const persistRuntimeEnvironment = async (
     currentFrameOutputs,
     entityContexts,
     outerMarks,
-    authorityState,
-    accountAuthority,
+    frameState,
   } = options;
   // An ephemeral Runtime has no storage namespace to serialize. Bypass the
   // durable writer lock as well as LevelDB; otherwise each RAM-only HLT user
   // creates writer-lock release files despite correctly skipping state/WAL.
   if (env.runtimeConfig?.storage?.enabled === false) {
-    if (accountAuthority) throw new AccountAuthorityPreWalError('STORAGE_DISABLED');
     return { materialized: false, materializedOverlayKeys: [] };
   }
   return withStorageWriteDeadline(env, markStorageProgress => {
@@ -251,18 +215,7 @@ const persistRuntimeEnvironment = async (
         onPersistenceBoundary: boundary =>
           markStorageProgress(`boundary:${boundary}`),
         onAuthoritativeFramePrepared: identity =>
-          recordAuthoritativeFrameIdentity(authorityState, identity),
-        ...(accountAuthority
-          ? {
-              accountAuthority: {
-                prepareCheckpoint: accountAuthority.prepareCheckpoint,
-                validateCheckpointMaterialization:
-                  accountAuthority.validateCheckpointMaterialization,
-                afterWalCommit: materialized =>
-                  completeAccountAuthorityOnce(accountAuthority, authorityState, materialized),
-              },
-            }
-          : {}),
+          recordAuthoritativeFrameIdentity(frameState, identity),
       });
       outerMarks.coreDoneAt = getPerfMs();
       return result;
@@ -298,65 +251,18 @@ const resolveCommitStatusAfterFailure = async (
   }
 };
 
-const completeAuthorityAfterProvenCommit = async (
-  error: unknown,
-  accountAuthority: AccountAuthoritySave,
-  authorityState: AuthoritySaveState,
-): Promise<void> => {
-  try {
-    if (authorityState.identity === undefined) {
-      throw new Error('STORAGE_COMMITTED_AUTHORITY_IDENTITY_MISSING');
-    }
-    await completeAccountAuthorityOnce(
-      accountAuthority,
-      authorityState,
-      authorityState.identity.materialized,
-    );
-  } catch (authorityError) {
-    const writeFailure = asError(error);
-    const completionFailure = asError(authorityError);
-    throw new RuntimeFrameStorageError(
-      'committed',
-      new AccountAuthorityWalCommitError(new AggregateError(
-        [writeFailure, completionFailure],
-        `STORAGE_WAL_COMMITTED_BUT_AUTHORITY_COMPLETION_FAILED:` +
-          `write=${writeFailure.name}:${writeFailure.message}:` +
-          `authority=${completionFailure.name}:${completionFailure.message}`,
-      )),
-    );
-  }
-};
-
 const throwRuntimeStorageFailure = async (
   deps: RuntimeStorageApiDeps,
   env: RuntimeReplica,
   error: unknown,
-  authorityState: AuthoritySaveState,
-  accountAuthority: AccountAuthoritySave | undefined,
+  frameState: FrameSaveState,
 ): Promise<never> => {
-  if (error instanceof AccountAuthorityWalCommitError) {
-    throw new RuntimeFrameStorageError('committed', error);
-  }
-  if (error instanceof AccountAuthorityPreWalError) {
-    throw new RuntimeFrameStorageError('not-committed', error);
-  }
   const commitStatus = await resolveCommitStatusAfterFailure(
     deps,
     env,
-    authorityState.identity,
+    frameState.identity,
     error,
   );
-  if (
-    commitStatus === 'committed' &&
-    accountAuthority &&
-    authorityState.completion === undefined
-  ) {
-    await completeAuthorityAfterProvenCommit(
-      error,
-      accountAuthority,
-      authorityState,
-    );
-  }
   throw new RuntimeFrameStorageError(commitStatus, error);
 };
 
@@ -396,14 +302,13 @@ const saveRuntimeEnvironment = async (
   currentFrameInput: RuntimeInput | undefined,
   currentFrameOutputs: RoutedEntityInput[] | undefined,
   entityContexts: Map<string, EntityInfraContext>,
-  accountAuthority?: AccountAuthoritySave,
 ): Promise<RuntimeStorageSaveOutcome> => {
   const outerStartedAt = getPerfMs();
   if (readRuntimeMetadata(env, ENV_REPLAY_MODE_KEY) === true) {
     throw new Error('REPLAY_INVARIANT_FAILED: saveEnvToDB called during replay');
   }
   const outerMarks = createStorageOuterPerfMarks(outerStartedAt);
-  const authorityState: AuthoritySaveState = {};
+  const frameState: FrameSaveState = {};
   let saveResult: RuntimeStorageSaveResult;
   try {
     saveResult = await persistRuntimeEnvironment({
@@ -413,16 +318,14 @@ const saveRuntimeEnvironment = async (
       currentFrameOutputs,
       entityContexts,
       outerMarks,
-      authorityState,
-      accountAuthority,
+      frameState,
     });
   } catch (error) {
     return await throwRuntimeStorageFailure(
       deps,
       env,
       error,
-      authorityState,
-      accountAuthority,
+      frameState,
     );
   }
   return finalizeRuntimeStorageSave(
@@ -447,7 +350,6 @@ export const createRuntimeStorageCommitApi = (
     currentFrameInput: RuntimeInput | undefined,
     currentFrameOutputs: RoutedEntityInput[] | undefined,
     entityContexts: Map<string, EntityInfraContext>,
-    accountAuthority?: AccountAuthoritySave,
   ) =>
     saveRuntimeEnvironment(
       deps,
@@ -455,6 +357,5 @@ export const createRuntimeStorageCommitApi = (
       currentFrameInput,
       currentFrameOutputs,
       entityContexts,
-      accountAuthority,
     ),
 });

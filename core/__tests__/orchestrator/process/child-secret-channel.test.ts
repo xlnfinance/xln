@@ -128,7 +128,7 @@ describe('orchestrator child secret channel', () => {
     expect(hubEnv['XLN_MESH_RESET_TOKEN']).toBeUndefined();
     for (const key of ['XLN_RSCORE_AUTHORITY', 'XLN_RSCORE_SHADOW', 'XLN_HUB_RSCORE_AUTHORITY_H2']) {
       expect(() => buildHubChildProcessEnv({ ...hubOptions, sourceEnv: { ...sourceEnv, [key]: '1' } }))
-        .toThrow(`HUB_ENGINE_RETIRED:${key}:typescript-only`);
+        .toThrow(`RUNTIME_ACCOUNT_ENGINE_RETIRED:${key}:typescript-only`);
     }
   });
 

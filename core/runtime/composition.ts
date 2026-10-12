@@ -1,4 +1,3 @@
-import { authorityDriverEnabled } from './config/account-execution';
 export { getLiveJAdapter, getLiveJAdapterEntries } from './j-submit/live-jadapters';
 
 // The testnet exposes one canonical runtime contract. Breaking changes replace
@@ -42,11 +41,6 @@ import {
   notifyRuntimeFrameCommitted,
   notifyRuntimeStateChanged,
 } from './frame/notifications';
-import {
-  discardAuthorityRuntime,
-  restoreAuthorityExact,
-  setAuthorityRuntimeSuppressed,
-} from '../rscore/authority-driver';
 
 export { admitAtomicCrossJAccountInputs };
 export { quoteHtlcPaymentRoute } from '../pathfinding/htlc-quote';
@@ -237,8 +231,6 @@ const runtimeRecoveryApi = createRuntimeRecoveryApi({
   startJurisdictionWatchers,
   getRuntimeOutputRoutingDeps,
   applyRuntimeInput,
-  accountAuthorityConfigured: () => authorityDriverEnabled(),
-  setAccountAuthoritySuppressed: setAuthorityRuntimeSuppressed,
 });
 
 export const restoreEnvFromCheckpointSnapshot = runtimeRecoveryApi.restoreEnvFromCheckpointSnapshot;
@@ -260,10 +252,6 @@ const runtimeStorageApi = createRuntimeStorageApi({
   waitForPromiseBeforeTimeout,
   createEmptyEnv,
   replayRecoveryFrameJournals,
-  restoreAccountAuthorityExact: restoreAuthorityExact,
-  discardAccountAuthority: discardAuthorityRuntime,
-  setAccountAuthoritySuppressed: setAuthorityRuntimeSuppressed,
-  accountAuthorityConfigured: () => authorityDriverEnabled(),
 });
 
 processRuntimeImpl = createRuntimeProcessor({
@@ -349,7 +337,6 @@ export const loadEnvFromDB = async (
       ...(trustedJurisdictionRpcBindings ? { trustedJurisdictionRpcBindings } : {}),
   }),
   registerCommittedSingleSignerWallets,
-  discardAccountAuthority: discardAuthorityRuntime,
 }, runtimeId, runtimeSeed, options);
 
 export const importRuntimeRecoveryRecording = (

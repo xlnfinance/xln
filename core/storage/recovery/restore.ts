@@ -14,7 +14,7 @@ import {
 import { rehydrateRestoredRuntimeInfra } from '../../runtime/recovery/j-adapter-restore';
 import { assertBrowserVMJurisdiction } from '../../jurisdiction/adapter/browservm/browservm-registry';
 import { replayPersistedRuntimeJournals, type RecoveryReplayOptions } from './journal';
-import { authorityReplayEnabled } from '../../rscore/authority-driver';
+import { assertTypeScriptAccountExecution } from '../../runtime/config/account-execution';
 import type { RuntimeReplica, RoutedEntityInput, RuntimeTx } from '../../runtime/types';
 import type { PersistedFrameJournal } from '../types';
 import type { RuntimeRecoveryBundleV1 } from './bundle/types';
@@ -51,8 +51,6 @@ export type RuntimeRecoveryDeps = Pick<
   infraGossipDbAccess: Parameters<typeof loadGossipProfilesFromInfraDb>[1];
   getRuntimeOutputRoutingDeps(): RuntimeOutputRoutingDeps;
   applyRuntimeInput: RuntimeModule['applyRuntimeInput'];
-  accountAuthorityConfigured(): boolean;
-  setAccountAuthoritySuppressed(env: RuntimeReplica, suppressed: boolean): void;
 };
 
 export const createRuntimeRecoveryApi = (deps: RuntimeRecoveryDeps) => {
@@ -70,8 +68,6 @@ export const createRuntimeRecoveryApi = (deps: RuntimeRecoveryDeps) => {
     startJurisdictionWatchers,
     getRuntimeOutputRoutingDeps,
     applyRuntimeInput,
-    accountAuthorityConfigured,
-    setAccountAuthoritySuppressed,
   } = deps;
 
   // Decodes and verifies the checkpoint in memory. It opens no database and
@@ -80,9 +76,7 @@ export const createRuntimeRecoveryApi = (deps: RuntimeRecoveryDeps) => {
     snapshot: Record<string, unknown>,
     options: CheckpointRestoreOptions,
   ): Promise<DecodedCheckpointSnapshot> => {
-    if (accountAuthorityConfigured() && options.readOnly !== true) {
-      throw new Error('RSCORE_PORTABLE_RESTORE_EXACT_CHECKPOINT_REQUIRED');
-    }
+    assertTypeScriptAccountExecution();
     const decoded = await decodeCheckpointSnapshot(
       { createEmptyEnv },
       snapshot,
@@ -91,10 +85,6 @@ export const createRuntimeRecoveryApi = (deps: RuntimeRecoveryDeps) => {
     const { env, gossipProfiles } = decoded;
     env.persistenceLastMaterializedHeight = env.state.height;
     if (options.readOnly === true) {
-      // A read-only restore never writes, so the engine it starts can never
-      // become durable. That is why the benchmark replay may opt in explicitly;
-      // silence stays the default.
-      if (!authorityReplayEnabled()) setAccountAuthoritySuppressed(env, true);
       registerCommittedSingleSignerWallets(env);
       if (!env.gossip?.setProfiles) throw new Error('RECOVERY_GOSSIP_HYDRATION_UNAVAILABLE');
       env.gossip.setProfiles(gossipProfiles);
@@ -170,9 +160,7 @@ export const createRuntimeRecoveryApi = (deps: RuntimeRecoveryDeps) => {
     env: RuntimeReplica,
     options: PersistRestoredRuntimeOptions = {},
   ): Promise<void> => {
-    if (accountAuthorityConfigured()) {
-      throw new Error('RSCORE_PORTABLE_PERSIST_EXACT_CHECKPOINT_REQUIRED');
-    }
+    assertTypeScriptAccountExecution();
     return persistRestoredRuntimeState({
       getStorageDb,
       getRuntimeWalDb,

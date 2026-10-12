@@ -58,16 +58,20 @@ test('default and explicit TS selection keep every hub on TypeScript', () => {
     XLN_RSCORE_AUTHORITY_RECORD: '0',
     XLN_TS_ACCOUNT_WORKERS: '4',
   })).toBe('typescript');
-  expect(() => canonicalHubEngine('H1', { XLN_HLT_ENGINE: 'native' })).toThrow('HUB_ENGINE_SELECTOR_INVALID:native');
+  expect(() => canonicalHubEngine('H1', { XLN_HLT_ENGINE: 'native' })).toThrow('RUNTIME_ACCOUNT_ENGINE_INVALID:native');
   expect(() => canonicalHubEngine('MM')).toThrow('HUB_ENGINE_NAME_INVALID:MM');
 });
 
 test('TS-only launch rejects retired engine activation before configuration', () => {
   expect(() => canonicalHubEngine('H1', { XLN_HLT_ENGINE: 'rust' }))
-    .toThrow('HUB_ENGINE_RETIRED:XLN_HLT_ENGINE:typescript-only');
-  for (const key of ['XLN_RSCORE_AUTHORITY', 'XLN_RSCORE_SHADOW', 'XLN_RSCORE_AUTHORITY_RECORD', 'XLN_HUB_RSCORE_AUTHORITY_H2']) {
+    .toThrow('RUNTIME_ACCOUNT_ENGINE_RETIRED:XLN_HLT_ENGINE:typescript-only');
+  for (const key of [
+    'XLN_RSCORE_AUTHORITY', 'XLN_RSCORE_SHADOW', 'XLN_RSCORE_AUTHORITY_RECORD',
+    'XLN_RSCORE_AUTHORITY_REPLAY', 'XLN_RSCORE_AUTHORITY_IMPORT', 'XLN_RSCORE_ENTITY_AUTHORITY',
+    'XLN_HUB_RSCORE_AUTHORITY_H2',
+  ]) {
     expect(() => canonicalHubEngine('H1', { [key]: '1' }))
-      .toThrow(`HUB_ENGINE_RETIRED:${key}:typescript-only`);
+      .toThrow(`RUNTIME_ACCOUNT_ENGINE_RETIRED:${key}:typescript-only`);
   }
 });
 

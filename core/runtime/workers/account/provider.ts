@@ -1,4 +1,4 @@
-import { assertAccountRecorderDisabled, authorityDriverEnabled } from '../../config/account-execution';
+import { assertTypeScriptAccountExecution } from '../../config/account-execution';
 import type { HandleAccountInputResult, ProposeAccountFrameResult } from '../../../account/consensus/types';
 import { replaceAccountReplica } from '../../../account/state/candidate-overlay';
 import { rememberEngineAccountLeaf } from '../../../entity/state/engine-leaf/leaf-registry';
@@ -771,18 +771,8 @@ export const canonicalTsAccountWorkerCount = (): number => {
 
 /** Install the sole TypeScript H1 Account executor before its first frame. */
 export const installTsAccountWorkerAuthority = (env: RuntimeReplica): void => {
-  assertAccountRecorderDisabled();
+  assertTypeScriptAccountExecution();
   const processValue = Reflect.get(globalThis, 'process') as { env?: Record<string, string | undefined> } | undefined;
-  // Embedded Rust execution was removed. Arming its checkpoint hooks beside
-  // TS workers would commit Accounts Rust never executed. Reject activation
-  // before either executor or WAL advances; read-only inspection stays valid
-  // because its Runtime explicitly suppresses Account authority.
-  if (authorityDriverEnabled(env)) {
-    throw new Error('RUNTIME_EMBEDDED_RSCORE_AUTHORITY_RETIRED:use native xlnrs');
-  }
-  if (processValue?.env?.['XLN_RSCORE_SHADOW'] === '1') {
-    throw new Error('RUNTIME_RSCORE_SHADOW_RETIRED:use immutable Runtime WAL replay');
-  }
   if (env.accountAuthorityExecutionMode !== undefined) return;
   // Sovereign user Runtime hosts already shard whole Runtime instances across
   // OS workers. Spawning another Account worker pool per Runtime multiplies a

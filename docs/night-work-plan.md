@@ -88,7 +88,16 @@ repeat funding to hide a deployment-version gap. Discover paths before reading.
 First result of that method change, 09:04 UTC: one coherent recorder removal
 closed all five bounded checks and removed 1,615 production lines; the public
 release blocker remains open. Continue evaluating the method over the next block,
-not a claim of improved mainnet readiness. Next scheduled review: 09:15 UTC.
+not a claim of improved mainnet readiness.
+Method review, 09:18 UTC: coherent retirement closed 5/5 candidate checks and
+reduced the measured kernel closure by 1,488 lines from the preceding slice.
+The next storage cut first reproduced silent acceptance of a real native DB row.
+Keep that failing production boundary as the deletion's regression, preserve
+original frame-hash verification before rejection, and inspect actual namespace
+ownership before removing codecs used by offline exports. Two disjoint owners
+handle runtime and storage; root removes the retired driver. Review the stable
+diff before one exact-candidate proof cycle. No public-release gate closed in
+this block. Next scheduled method review: 09:48 UTC.
 Existing 30-minute heartbeat `xln-30` remains active. No external-model budget
 was spent or renewed. Earlier method evidence remains in the linked manifests:
 provider quota -> bounded first failure; existing authenticated history -> no

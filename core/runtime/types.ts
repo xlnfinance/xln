@@ -732,19 +732,12 @@ export interface RuntimeReplica {
   state: RuntimeState;
   runtimeSeed?: string | undefined; // BrainVault seed backing this runtime (plaintext, dev mode)
   runtimeId?: string | undefined; // Runtime identity (usually signer1 address)
-  /** Detached/read-only replicas never arm or mutate authority sessions. */
-  accountAuthoritySuppressed?: boolean | undefined;
   /** Canonical Account authority is installed before the first Runtime frame. */
   accountAuthorityExecutionMode?: 'cutover' | undefined;
   /** Process-local Account executor; never part of Runtime state or WAL. */
   accountAuthorityEntityStageProvider?: import('../entity/consensus/account/execution-stage').AccountAuthorityEntityStageProvider | undefined;
   /** Active for one EntityInput and always cleared before returning to Runtime. */
   accountAuthorityEntityStage?: import('../entity/runtime-context').AccountAuthorityEntityStageCapability | undefined;
-  /**
-   * Ephemeral checkpoint cadence for the active Runtime frame. Rust consumes
-   * it on the outbound Account visit; it is never consensus state or WAL.
-   */
-  accountAuthorityCheckpointDue?: boolean | undefined;
   /**
    * Last durable Runtime graph materialization known by this live replica.
    * This is a storage cursor, not consensus state; recovery derives it from

@@ -1,3 +1,4 @@
+import { assertTypeScriptAccountExecution } from '../../runtime/config/account-execution';
 import { existsSync, readdirSync, statSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
@@ -32,22 +33,7 @@ export const canonicalHubEngine = (
   if (!/^H[1-9][0-9]*$/.test(normalized)) {
     throw new Error(`HUB_ENGINE_NAME_INVALID:${hubName}`);
   }
-  const selected = String(env['XLN_HLT_ENGINE'] || 'ts').trim();
-  if (selected === 'rust') {
-    throw new Error('HUB_ENGINE_RETIRED:XLN_HLT_ENGINE:typescript-only');
-  }
-  if (selected !== 'ts') {
-    throw new Error(`HUB_ENGINE_SELECTOR_INVALID:${selected}`);
-  }
-  const retiredFlag = Object.keys(env).find(
-    key =>
-      env[key] === '1' &&
-      (key === 'XLN_RSCORE_AUTHORITY' ||
-        key === 'XLN_RSCORE_SHADOW' ||
-        key === 'XLN_RSCORE_AUTHORITY_RECORD' ||
-        key.startsWith('XLN_HUB_RSCORE_AUTHORITY_')),
-  );
-  if (retiredFlag) throw new Error(`HUB_ENGINE_RETIRED:${retiredFlag}:typescript-only`);
+  assertTypeScriptAccountExecution(env);
   return 'typescript';
 };
 

@@ -55,7 +55,7 @@ test('ordinary E2E rejects retired engines before arguments, cleanup or build', 
     expect(result.error).toBeUndefined();
     expect(result.status).toBe(1);
     expect(result.stderr).toContain(
-      engine === 'rust' ? 'HUB_ENGINE_RETIRED:XLN_HLT_ENGINE:typescript-only' : 'E2E_BASE_PORT_OVERRIDE_FORBIDDEN',
+      engine === 'rust' ? 'RUNTIME_ACCOUNT_ENGINE_RETIRED:XLN_HLT_ENGINE:typescript-only' : 'E2E_BASE_PORT_OVERRIDE_FORBIDDEN',
     );
     expect(result.stdout).not.toContain('E2E Parallel Runner');
   }

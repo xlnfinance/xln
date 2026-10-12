@@ -1,3 +1,4 @@
+import { assertTypeScriptAccountExecution } from '../config/account-execution';
 import { getSignerPrivateKeyIfAvailable, prewarmSignerKeyCache } from '../../account/crypto';
 import { createStructuredLogger } from '../../support/logger';
 import { extractEntityId, extractSignerId } from '../../protocol/identity';
@@ -40,6 +41,7 @@ export const createRuntimeStateApi = (deps: RuntimeStateCreateDeps) => {
     seed?: Uint8Array | string | null,
     numericSignerPrewarmCount = 20,
   ): RuntimeReplica => {
+    assertTypeScriptAccountExecution();
     const normalizedSeed = Array.isArray(seed) ? new Uint8Array(seed) : seed;
     const seedText =
       normalizedSeed !== undefined && normalizedSeed !== null

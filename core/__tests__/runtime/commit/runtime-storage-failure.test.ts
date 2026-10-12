@@ -76,13 +76,12 @@ const prepareCommitProof = (
       frameHash: frame.frameHash,
       postStateHash,
       runtimeInput,
-      accountAuthorityCheckpoints: [],
     },
   };
 };
 
 describe('Runtime WAL storage failure boundary', () => {
-  test('requires exact frame, Runtime root, input, and Rust checkpoint refs', () => {
+  test('requires exact frame, Runtime root, and input', () => {
     const { frame, identity } = prepareCommitProof();
     expect(classifyRuntimeFrameCommitProof(
       { ...frame, frameHash: undefined },
@@ -103,18 +102,6 @@ describe('Runtime WAL storage failure boundary', () => {
     expect(classifyRuntimeFrameCommitProof(frame, {
       ...identity,
       frameHash: `0x${'33'.repeat(32)}`,
-    })).toBe('conflict');
-    expect(classifyRuntimeFrameCommitProof(frame, {
-      ...identity,
-      accountAuthorityCheckpoints: [{
-        ownerEntityId: `0x${'44'.repeat(32)}`,
-        protocolFingerprint: `0x${'55'.repeat(32)}`,
-        baseRevision: '1',
-        revision: '1',
-        accountsRoot: `0x${'66'.repeat(32)}`,
-        signerDigest: `0x${'77'.repeat(32)}`,
-        accountCount: 1,
-      }],
     })).toBe('conflict');
   });
 

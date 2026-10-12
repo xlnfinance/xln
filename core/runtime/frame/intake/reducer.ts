@@ -3,7 +3,6 @@ import { mergeEntityInputs } from '../../../entity/consensus';
 import { retireAppliedLocalOutputs } from '../../delivery/local-outbox';
 import { admitEntityTxProfiles } from '../../admit/entity-tx-profile';
 import { cumulativeMarksToPhases } from '../../../support/performance/profile';
-import { armAuthorityWave } from '../../../rscore/authority-driver';
 import { installTsAccountWorkerAuthority } from '../../workers/account/provider';
 import { createStructuredLogger } from '../../../support/logger';
 import type { RuntimeReplica, RoutedEntityInput, RuntimeInput, RuntimeTx } from '../../types';
@@ -262,14 +261,8 @@ const applyRuntimeInputPhases = async (
   isReplay: boolean,
   ingress: PreparedRuntimeIngress,
 ): Promise<{ result: AppliedRuntimeInput; profiledRuntimeTxs: RuntimeTx[] }> => {
-  // Before anything of this frame is applied: the authoritative engine has
-  // to start where TypeScript starts, not where it ends up.
+  // Install the TS executor before any frame input is applied.
   installTsAccountWorkerAuthority(env);
-  markRuntimeApplyPhase(env, 'apply.authority-arm');
-  await armAuthorityWave(
-    env,
-    ingress.runtimeTxs.some(tx => tx.type === 'checkpointBarrier'),
-  );
   markRuntimeApplyPhase(env, 'apply.merge');
   const admitted = admitEntityTxProfiles(ingress.entityInputs);
   const cohortIsolatedInputs = markPotentialAtomicCrossJInputPairs(admitted.inputs);

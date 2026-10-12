@@ -1,3 +1,4 @@
+import { assertTypeScriptAccountExecution } from '../config/account-execution';
 import {
   deriveSignerAddressSync,
   deriveSignerKeySync,
@@ -93,6 +94,7 @@ export const bootstrapRuntime = async (
   runtimeSeedOverride?: string | null,
   options?: RuntimeCreationOptions,
 ): Promise<RuntimeReplica> => {
+  assertTypeScriptAccountExecution();
   const runtimeSeed = runtimeSeedOverride ?? null;
   const numericSignerPrewarmCount = options?.numericSignerPrewarmCount;
   if (

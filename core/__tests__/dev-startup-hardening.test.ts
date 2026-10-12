@@ -236,7 +236,7 @@ test('dev rejects retired engine activation before setup in every launch mode', 
         env: { ...selectors, [key]: value, XLN_PORT_BASE: '17800', XLN_DEV_DATA_ROOT: root },
       });
       expect(result.code).not.toBe(0);
-      expect(result.stderr).toContain(`HUB_ENGINE_RETIRED:${key}:typescript-only`);
+      expect(result.stderr).toContain(`RUNTIME_ACCOUNT_ENGINE_RETIRED:${key}:typescript-only`);
       expect(result.stdout).not.toContain('[dev] verifying native H1:');
       expect(existsSync(root)).toBeFalse();
     }

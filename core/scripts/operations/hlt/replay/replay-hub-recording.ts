@@ -1,5 +1,5 @@
 #!/usr/bin/env bun
-import { assertAccountRecorderDisabled, authorityDriverEnabled } from '../../../../runtime/config/account-execution';
+import { assertTypeScriptAccountExecution } from '../../../../runtime/config/account-execution';
 
 /** Replay phase: restore one H1 checkpoint and deterministically execute its WAL tail. */
 
@@ -8,11 +8,6 @@ import {
   accountAuthorityExecutionLedger,
   printAccountAuthorityExecutionLedger,
 } from '../../../../entity/consensus/account/execution-stage';
-import { rscoreTransportBytes } from '../../../../rscore/client';
-import {
-  printAuthorityDriverReport,
-  shutdownAuthorityDriver,
-} from '../../../../rscore/authority-driver';
 import { configureCryptoPoolEntry } from '../../../../protocol/crypto/crypto-pool';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -88,7 +83,10 @@ import {
   type TsAccountWorkerTelemetry,
 } from '../../../../runtime/workers/account';
 
-assertAccountRecorderDisabled();
+assertTypeScriptAccountExecution();
+if (process.argv.includes('--require-rust-account-authority')) {
+  throw new Error('RUNTIME_ACCOUNT_ENGINE_RETIRED:--require-rust-account-authority:typescript-only');
+}
 configureCryptoPoolEntry(new URL('../../../../protocol/crypto/crypto-pool.ts', import.meta.url));
 
 type ReplayMode = 'max' | 'fixed' | 'sweep';
@@ -330,25 +328,17 @@ if (
 const recoveryVerifyEnabled = !process.argv.includes('--no-verify');
 const completeAuthorityEvidenceRequired = process.argv.includes('--require-complete-authority-evidence');
 const parityEvidence = process.argv.includes('--parity-evidence');
-const rustAccountAuthorityRequired = process.argv.includes('--require-rust-account-authority');
 const tsAccountWorkersRaw = optionalArgument('ts-account-workers');
 const tsAccountWorkers = tsAccountWorkersRaw === null ? null : Number(tsAccountWorkersRaw);
 if (tsAccountWorkers !== null && (
   !Number.isSafeInteger(tsAccountWorkers) || tsAccountWorkers < 1 || tsAccountWorkers > 64
 )) throw new Error(`HLT_REPLAY_TS_ACCOUNT_WORKERS_INVALID:${tsAccountWorkersRaw}`);
-if (tsAccountWorkers !== null && rustAccountAuthorityRequired) {
-  throw new Error('HLT_REPLAY_ACCOUNT_AUTHORITY_EXCLUSIVE');
-}
 if (parityEvidence && (mode !== 'max' || !recoveryVerifyEnabled)) {
   throw new Error('HLT_REPLAY_PARITY_EVIDENCE_REQUIRES_MAX_VERIFIED');
 }
 await installGlobalOpCounters('hlt-replay');
 const artifact = await loadHltHubRecording(recordingPath, walPath);
-const replayTsAccountWorkers = tsAccountWorkers ?? (
-  authorityDriverEnabled({ runtimeId: artifact.recording.runtimeId })
-    ? null
-    : canonicalTsAccountWorkerCount()
-);
+const replayTsAccountWorkers = tsAccountWorkers ?? canonicalTsAccountWorkerCount();
 if (completeAuthorityEvidenceRequired) assertCompleteHltAuthorityEvidence(artifact.authorityEvidence);
 const snapshot = artifact.recording.bundles.find(bundle => (bundle.kind ?? 'snapshot') === 'snapshot');
 const tail = artifact.recording.bundles.find(bundle => bundle.kind === 'journal_tail');
@@ -457,23 +447,9 @@ const runTrial = async (offeredEntityInputsPerSecond: number): Promise<ReplayTri
     targetHeight: artifact.recording.baseHeight,
     readOnly: true,
   });
-  const tsWorkerAuthority = replayTsAccountWorkers === null
-    ? null
-    : new TsAccountWorkerAuthority(env, replayTsAccountWorkers);
-  if (tsWorkerAuthority !== null) {
-    env.accountAuthorityExecutionMode = 'cutover';
-    env.accountAuthorityEntityStageProvider = tsWorkerAuthority.provider;
-  }
-  const authoritySelectedForRuntime = authorityDriverEnabled({ runtimeId: env.runtimeId });
-  if (rustAccountAuthorityRequired && !authoritySelectedForRuntime) {
-    throw new Error('HLT_REPLAY_RSCORE_AUTHORITY_REQUIRED');
-  }
-  if (authoritySelectedForRuntime && env.accountAuthoritySuppressed === true) {
-    throw new Error(
-      'HLT_REPLAY_RSCORE_AUTHORITY_REPLAY_REQUIRED:' +
-      'set XLN_RSCORE_AUTHORITY_REPLAY=1 to execute Account transitions in Rust',
-    );
-  }
+  const tsWorkerAuthority = new TsAccountWorkerAuthority(env, replayTsAccountWorkers);
+  env.accountAuthorityExecutionMode = 'cutover';
+  env.accountAuthorityEntityStageProvider = tsWorkerAuthority.provider;
   // Max replay measures the deterministic machine, not terminal rendering.
   // Runtime logs are an envelope-side external effect and are intentionally
   // excluded alongside sockets and durable writes.
@@ -647,34 +623,16 @@ const runTrial = async (offeredEntityInputsPerSecond: number): Promise<ReplayTri
     const economic = subtractEconomicCounters(readEconomicCounters(env), economicBaseline);
     const authorityExecution = accountAuthorityExecutionLedger();
     if (
-      authoritySelectedForRuntime
-      && economic.deliveredPayments + economic.matchedEconomicSwaps > 0
-      && authorityExecution.authoritativeOperations === 0
-    ) {
-      throw new Error('HLT_REPLAY_RSCORE_UNARMED_ZERO_AUTHORITY_OPERATIONS');
-    }
-    if (
-      rustAccountAuthorityRequired &&
-      (authorityExecution.authoritativeOperations < 1 ||
-        authorityExecution.typescriptApplyAccountInput !== 0 ||
-        authorityExecution.typescriptProposeAccountFrame !== 0)
-    ) {
-      throw new Error(
-        `HLT_REPLAY_RSCORE_NOT_EXCLUSIVE:${safeStringify(authorityExecution)}`,
-      );
-    }
-    if (
-      tsWorkerAuthority !== null
-      && (authorityExecution.authoritativeOperations < 1
+      authorityExecution.authoritativeOperations < 1
         || authorityExecution.typescriptApplyAccountInput !== 0
-        || authorityExecution.typescriptProposeAccountFrame !== 0)
+        || authorityExecution.typescriptProposeAccountFrame !== 0
     ) {
       throw new Error(
         `HLT_REPLAY_TS_WORKER_NOT_EXCLUSIVE:${safeStringify(authorityExecution)}`,
       );
     }
     const operations = diffOpCounters(operationsBefore);
-    const accountWorkerTelemetry = await tsWorkerAuthority?.telemetry();
+    const accountWorkerTelemetry = await tsWorkerAuthority.telemetry();
     return {
       offeredEntityInputsPerSecond: offeredEntityInputsPerSecond > 0 ? offeredEntityInputsPerSecond : null,
       frames: artifact.totals.runtimeFrames,
@@ -706,13 +664,13 @@ const runTrial = async (offeredEntityInputsPerSecond: number): Promise<ReplayTri
       ...(frameProfileEnabled ? { frameProfile } : {}),
       operations,
       perf: snapshotPerfPhases(),
-      ...(accountWorkerTelemetry === undefined ? {} : { accountWorkerTelemetry }),
+      accountWorkerTelemetry,
       ...(parityEvidence
         ? { parityExpectations: { entityFrameEvents, entityEffects, localContinuations } }
         : {}),
     };
   } finally {
-    await tsWorkerAuthority?.close();
+    await tsWorkerAuthority.close();
     await closeRuntimeDb(env);
     await closeInfraDb(env);
   }
@@ -794,9 +752,7 @@ const report = {
       })()
     : artifact.authorityEvidence.expectations,
   mode,
-  accountAuthority: replayTsAccountWorkers === null
-    ? 'rust'
-    : `typescript-workers:${replayTsAccountWorkers}`,
+  accountAuthority: `typescript-workers:${replayTsAccountWorkers}`,
   ...(artifact.source.workload === 'payments'
     ? { paymentWork: summarizePaymentWork(frames, trials[0]?.deliveredPayments ?? 0) }
     : {}),
@@ -804,9 +760,6 @@ const report = {
 };
 writeFileSync(outputPath, `${safeStringify(report, 2)}\n`, { mode: 0o600 });
 console.log(`HLT_REPLAY_REPORT path=${outputPath}`);
-printAuthorityDriverReport();
 printAccountAuthorityExecutionLedger();
-console.error(`RSCORE_TRANSPORT ${safeStringify(rscoreTransportBytes)}`);
-await shutdownAuthorityDriver();
 const opCountersPath = dumpOpCounters('hlt-replay', 'complete');
 if (opCountersPath) console.log(`HLT_REPLAY_OP_COUNTERS path=${opCountersPath}`);
