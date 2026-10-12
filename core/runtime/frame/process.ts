@@ -1,9 +1,9 @@
-import { authorityDriverEnabled } from '../config/account-execution';
 /**
  * Canonical Runtime frame transaction: validate, mutate an isolated candidate,
  * commit the authoritative WAL, publish live state, then run external effects.
  * Key entrypoint: applyAndCommitRuntimeFrame. Human-audit importance: 100/100.
  */
+import { authorityDriverEnabled } from '../config/account-execution';
 import { recordOpEvent, runWithOpScopes } from '../../support/performance/op-counters';
 import { TIMING } from '../../config/constants';
 import { requireBoundaryInteger } from '../../protocol/boundary-validation';
