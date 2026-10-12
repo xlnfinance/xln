@@ -1529,7 +1529,17 @@ if (import.meta.main) {
     console.log(`⏸️  Frame stepping: Will stop at frame ${stopAtFrame}\n`);
   }
 
-  await lockAhb(env);
+  try {
+    await lockAhb(env);
+  } catch (error) {
+    if (error instanceof Error && error.message.startsWith('FRAME_STEP:')) {
+      console.log(`\n⏸️  FRAME STEPPING: Stopped at frame ${env.state.height}`);
+      console.log('═'.repeat(80));
+      console.log(formatRuntime(env, { maxAccounts: 10, maxLocks: 20, maxSwaps: 20 }));
+      console.log('═'.repeat(80) + '\n');
+    }
+    throw error;
+  }
 
   console.log('\n✅ HTLC AHB scenario complete!');
   console.log(`📊 Total frames: ${env.state.height}`);

@@ -1,7 +1,7 @@
-import { accountInputAck, accountInputProposal } from '../account/consensus/flush';
-import { getEffectiveEntityInputTxs } from '../entity/consensus/output/envelope';
-import type { AccountInput, AccountTx } from '../types/account';
-import type { EntityInput } from '../entity/types';
+import { accountInputAck, accountInputProposal } from '../../account/consensus/flush';
+import { getEffectiveEntityInputTxs } from '../../entity/consensus/output/envelope';
+import type { AccountInput, AccountTx } from '../../types/account';
+import type { EntityInput } from '../../entity/types';
 
 type AccountTxCausalTrace = {
   type: AccountTx['type'];

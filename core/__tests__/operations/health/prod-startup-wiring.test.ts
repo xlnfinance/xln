@@ -57,6 +57,20 @@ const extractSourceBlock = (source: string, marker: string, nextMarker: string):
 };
 
 describe('production startup wiring', () => {
+  test('production servers and Runtime entrypoints do not load QA tooling', () => {
+    for (const path of [
+      'core/api/server/index.ts',
+      'core/orchestrator/orchestrator.ts',
+      'core/api/public/runtime-public.ts',
+      'core/runtime/frame/apply.ts',
+      'core/runtime/frame/lifecycle/prepare.ts',
+      'core/runtime/frame/lifecycle/start.ts',
+      'core/runtime/frame/process-profile.ts',
+    ]) {
+      expect(readFileSync(join(repoRoot, path), 'utf8'), path).not.toContain('/qa/');
+    }
+  });
+
   test('every production Runtime host exposes one canonical admin control resolver', () => {
     const sources = [
       'core/api/server/network/rpc-ws.ts',

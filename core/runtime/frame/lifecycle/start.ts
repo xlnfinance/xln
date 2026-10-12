@@ -20,12 +20,6 @@ export type RuntimeFrameStart = {
 
 const stopAtDebugFrame = async (env: RuntimeReplica): Promise<void> => {
   if (env.stopAtFrame === undefined || env.state.height < env.stopAtFrame) return;
-  console.log(`\n⏸️  FRAME STEPPING: Stopped at frame ${env.state.height}`);
-  console.log('═'.repeat(80));
-  const { formatRuntime } = await import('../../../qa/runtime-ascii');
-  console.log(formatRuntime(env, { maxAccounts: 10, maxLocks: 20, maxSwaps: 20 }));
-  console.log('═'.repeat(80) + '\n');
-  console.log('💾 State captured - use jq on /tmp/{scenario}-runtime.json for deep queries');
   throw new Error(`FRAME_STEP: Stopped at frame ${env.state.height} for debugging`);
 };
 

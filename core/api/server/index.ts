@@ -33,7 +33,6 @@ import { readFileSync } from 'node:fs';
 import { safeStringify, serializeTaggedJson } from '../../protocol/serialization';
 import type { RuntimeReplica } from '../../runtime/types';
 import { createExternalWalletApi } from '../public/external-wallet-api';
-import { maybeHandleQaRequest } from '../../qa/api';
 import { createJAdapter, createXlnJsonRpcProvider, type JAdapter } from '../../jurisdiction/adapter';
 import type { JAdapterConfig } from '../../jurisdiction/adapter/types';
 import { createMarketMakerServerState, resetMarketMakerServerState } from './health/market-maker';
@@ -549,9 +548,6 @@ const maybeHandleRuntimeInfoApi = async (
       operatorAuthorized,
     );
   }
-
-  const qaResponse = await maybeHandleQaRequest(req, pathname, headers, { operatorAuthorized });
-  if (qaResponse) return qaResponse;
 
   if (pathname === '/api/hubs') {
     return new Response(safeStringify(buildHubDiscoveryPayload({ env, relayStore })), { headers });

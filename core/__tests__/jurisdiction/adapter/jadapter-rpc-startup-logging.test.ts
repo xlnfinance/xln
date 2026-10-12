@@ -82,13 +82,7 @@ test('runtime dev startup status logs stay structured', () => {
   expect(runtimeLoop).toContain("throw new Error('RUNTIME_DB_CLOSE_LOOP_DRAIN_TIMEOUT')");
   expect(runtimeLoop).toContain("throwSettledErrors(shutdown, 'RUNTIME_DB_CLOSE_QUIESCE_FAILED')");
   expect(runtimeFailure).toContain("failureLog.error('error'");
-  expect(runtimeConsoleLines).toEqual([
-    "console.log(`\\n⏸️  FRAME STEPPING: Stopped at frame ${env.state.height}`);",
-    "console.log('═'.repeat(80));",
-    'console.log(formatRuntime(env, { maxAccounts: 10, maxLocks: 20, maxSwaps: 20 }));',
-    "console.log('═'.repeat(80) + '\\n');",
-    "console.log('💾 State captured - use jq on /tmp/{scenario}-runtime.json for deep queries');",
-  ]);
+  expect(runtimeConsoleLines).toEqual([]);
 
   expect(hubNode).not.toContain('RPC contracts have no code; deploying fresh stack instead of using stale addresses:');
   expect(hubNode).toContain("nodeLog.error('jurisdiction_contracts.code_missing'");
