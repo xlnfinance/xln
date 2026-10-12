@@ -249,9 +249,13 @@ export const runWatcherPoll = async (request: PollRequest): Promise<void> => {
   if (waitForPendingHistory(request)) return;
   const committedCursor = commitScannedWatcherCursor(session, services);
   if (fromBlock > safeToBlock) {
-    // Recovery can restore a certified cursor beyond the volatile scan counter.
-    // The canonical audit above checked its chain evidence; no new range is due.
-    rememberScanProgress(session, services, Math.min(committedCursor, safeToBlock));
+    // The canonical audit validated the restored local frontier. Report that
+    // scan without promoting the Entity-certified semantic cursor.
+    rememberScanProgress(
+      session,
+      services,
+      Math.min(Math.max(session.lastSyncedBlock, committedCursor), safeToBlock),
+    );
     return;
   }
   const toBlock = Math.min(

@@ -443,6 +443,21 @@ describe('RPC J-watcher backlog drain', () => {
     expect(restored.state.eReplicas.get(`${entityId}:${SIGNER_ID}`)?.jHistory?.scannedThroughHeight)
       .toBe(irrelevantLogHeight);
 
+    // Restoring a real authenticated suffix must not download it again. The
+    // certified anchor and local frontier still need a live canonical audit.
+    await adapter.stopWatchingAndWait();
+    restored.scenarioMode = true;
+    adapter.startWatching(restored);
+    rpcProxy.takeHeaderBlocks();
+    await pollWatcher();
+    const restartHeaders = [...new Set(rpcProxy.takeHeaderBlocks())].sort((left, right) => left - right);
+    expect(restartHeaders).toContain(durableSemanticHeight);
+    expect(restartHeaders).toContain(irrelevantLogHeight);
+    expect(restartHeaders).not.toContain(authenticatedEmptyTail);
+    expect(readScanProgress().scannedThroughHeight).toBe(irrelevantLogHeight);
+    await adapter.stopWatchingAndWait();
+    adapter.startWatching(env);
+
     const lateSignerPrivateKey = getSignerPrivateKey(env, LATE_SIGNER_ID);
     const lateSignerAddress = new ethers.Wallet(ethers.hexlify(lateSignerPrivateKey)).address;
     const lateEntityId = generateLazyEntityId([lateSignerAddress], 1n).toLowerCase();

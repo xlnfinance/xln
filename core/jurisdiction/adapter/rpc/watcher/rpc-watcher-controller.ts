@@ -9,7 +9,8 @@ import {
   watcherErrorMessage,
 } from '../rpc-boundary';
 import { rpcLog } from '../../rpc-public';
-import { getWatcherStartBlock } from '../../watcher';
+import { getMinimumScannedSignerJHeight, getWatcherStartBlock } from '../../watcher';
+import { requireWatcherJurisdictionReplica } from '../../watcher/observe/watcher-replica';
 import { runWatcherPoll } from './rpc-watcher-poll';
 import { createWatchedErc20TokenReader } from '../../rpc-watcher-inputs';
 import type {
@@ -51,6 +52,10 @@ const createWatcherSession = (
     services.depositoryAddress,
     services.chainId,
   );
+  const localScan = getMinimumScannedSignerJHeight(
+    env,
+    requireWatcherJurisdictionReplica(env, services.depositoryAddress, services.chainId, 'session-start'),
+  );
   let session: RpcWatcherSession;
   const readWatchedErc20Tokens = createWatchedErc20TokenReader(
     services.getDepository(),
@@ -63,7 +68,9 @@ const createWatcherSession = (
     manualPolling: env.scenarioMode === true,
     confirmationDepth: services.resolveFinalityDepth(env.scenarioMode === true),
     pollMs: resolveRpcWatcherPollMs(services.watchPollMs),
-    lastSyncedBlock: Math.max(0, startBlock - 1),
+    // Reuse the common authenticated suffix after restore; the first poll
+    // audits its canonical anchor/frontier before applying or reporting it.
+    lastSyncedBlock: Math.max(0, startBlock - 1, localScan ?? 0),
     scanProgress: { scannedThroughHeight: 0, replicaScannedThrough: {} },
     pendingBlocks: new Map(),
     pendingHistoryRange: null,

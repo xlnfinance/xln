@@ -42,242 +42,80 @@ This is the relevant starting point for audit size, not the million-line physica
 repository total. [Baseline and collector inputs](evidence/canonical-review-20261012/baseline.json)
 are retained; ledger and CI were disabled, so no overall readiness score is asserted.
 
-## First patch: fewer implementations, one reproduced financial bug fixed
+## Implemented ownership changes
 
-| Change                                  | Retained owner                                    | Evidence                                                                                                                                |
-| --------------------------------------- | ------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
-| Remove Move's second outgoing-debt scan | Exact runtime `debtTotals.outgoing`               | 21 claims of 50 against 1,500 reserve: old UI reported 500; correct result 450. The 21st token was omitted entirely by bounded details. |
-| Remove duplicate output coalescing      | `runtime/delivery/pending.ts:dedupeEntityOutputs` | Routing and durable pending outputs share the same merge; accepted order, input copying and equivocation rejection remain.              |
-| Delete unused readiness executable      | `scripts/dev/readiness/wait-dev-backend-ready.ts` | Retired copy differed only in its relative import; all tracked callers already use the retained path.                                   |
+| Removed duplication or wrong owner                                          | Canonical owner and preserved behavior                                                                                                                                | Evidence                                                                                               |
+| --------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| Move's second outgoing-debt scan                                            | Runtime `debtTotals.outgoing`; 21 claims of 50 against 1,500 reserve correctly leave 450, including tokens omitted by bounded details                                 | [First patch](evidence/canonical-review-20261012/verification.json)                                    |
+| Duplicate output coalescing and unused readiness executable                 | Existing ordered output merge and retained readiness runner; equivocation still rejects                                                                               | [First patch](evidence/canonical-review-20261012/verification.json)                                    |
+| Runtime imports of QA and both production QA HTTP mounts                    | Runtime owns pure tracing; scenario CLI owns ASCII; tooling retains QA handler                                                                                        | [QA boundary](evidence/canonical-review-20261012/qa-boundary.json)                                     |
+| Ordinary launcher Rust selectors, authority propagation and build preflight | TS-only production launch rejects retired selectors before process preparation                                                                                        | [Launcher](evidence/canonical-review-20261012/ts-only-launcher.json)                                   |
+| Active TS workers and Entity stages under `core/rscore`                     | Runtime owns 14 worker modules; Entity owns execution stage, inbound arrivals and leaf cache; no compatibility alias                                                  | [Worker boundary](evidence/canonical-review-20261012/ts-worker-evidence.json)                          |
+| RPC binding mutating committed state on restore                             | Live infrastructure owns configured RPC selection; restored Runtime roots remain exact                                                                                | [Two cold restores and profile repair](evidence/canonical-review-20261012/rpc-transport-recovery.json) |
+| Independent handling of watcher overload                                    | Existing window reduction handles mempool/RPC pressure; one cancellable cooldown controls manual and automatic polling; retained pressure prevents immediate regrowth | [Real proxy regressions](evidence/canonical-review-20261012/watcher-pressure-window-7d3134853.json)    |
 
-Measured diff: **94 non-test source lines removed net**, 82 regression-test
-lines added; **12 source lines removed net including tests**. The folder-width
-ratchet tightens from 12 to 11 after the file deletion. No financial assertion
-or required scenario was removed.
+The last static measurement (`7d3134853`) is **160,552 kernel-closure code lines in
+816 files**, versus **161,062 / 816** at the review baseline: **510 fewer
+reachable code lines**. Direct QA imports are **0**; direct `core/rscore` imports
+are still **13**, reaching 8,418 lines. This is not yet a Rust-free kernel.
+[Exact collector output](evidence/canonical-review-20261012/watcher-pressure-window-7d3134853-kernel.json).
 
-On the clean committed candidate: **90/90 focused tests, 867 assertions**;
-`bun run check` passed, including all **38 source gates**. The locked real local
-browser stand passed **3/3, zero skipped/flaky**: Move LEFT, Move RIGHT, and
-reserve funding with 22 real seconds without mining. Two independent static
-diff reviews reported no actionable findings. These do not cover every Move
-route, every E2E, or public Sepolia P6.
-[Commands, results and retained logs](evidence/canonical-review-20261012/verification.json).
+Moving 3,857 worker lines corrects ownership and is not deletion. The QA handler
+was disconnected, not deleted. The two RPC-pressure fixes add 27 physical
+production lines net. Closure and physical-line deltas are different measures;
+no overall XLN-1000 readiness score is asserted without CI and ledger inputs.
 
-### Follow-up: one overload policy and exact restore evidence
+## Current verified boundary and remaining failures
 
-The public Sepolia watcher repeatedly restarted a 2,048-block range after RPC
-429/timeouts. Its existing shrinking-window policy handled only Runtime mempool
-pressure. The same branch now handles both, removing three production lines net.
-A real Anvil forwarding proxy reproduces 429 and a real HTTP timeout: the old
-controller retries 2,048 blocks, while the fixed controller reads 512 and then
-delivers the original event beyond 4,700 blocks without skipping history.
+On clean financial source `7d31348533a5b9694d3fb67ecc8b287ad72c3532`:
 
-Three CI runs exposed the same restore-test race: the tower replaced a displayed
-snapshot before discovery, but the test still requested the older frame from a
-newer restored baseline. The test now binds its exact root and Account comparison
-to the selected snapshot. No importer, retention or financial assertion changed.
+| Check                             | Result                                                      |
+| --------------------------------- | ----------------------------------------------------------- |
+| Related watcher tests             | 104/104; 947 assertions                                     |
+| Full `bun run check`              | 38 source gates                                             |
+| Real React payment and reload     | 3/3; zero skips or flakes                                   |
+| `lock-ahb`                        | 85 frames                                                   |
+| Current-contract funding and exit | 25/25; 512 fuzz invocations; eight compiler templates match |
 
-Clean source `50281daaa`: 60/60 focused RPC tests, 284 assertions. The selected
-snapshot browser journey passed 1/1 on `0ff079f41`; its full check and the base-PR
-candidate `999396327` both passed 38 source gates. Public P6 remains unproved:
-RPC catch-up timed out before reaching the already-funded reserve. No extra
-funding or stale-state attack was submitted by those retries.
-[Exact commands, source bindings and retained logs](evidence/canonical-review-20261012/rpc-restore-followup.json).
+[Commands and retained logs](evidence/canonical-review-20261012/watcher-pressure-window-7d3134853.json).
+The gas cap is per operation, not the sum of a whole dispute. Largest printed
+finalization is 4,453,117 gas; one-token start/finalize samples are
+449,300 / 399,142. Printed fuzz samples are not claimed maxima. Local time warp
+does not replace public real-clock evidence.
 
-### Implemented: production no longer depends on QA
+On the preceding worker source `f163415eb`, a real mixed production WAL has
+708 frames, 2,600 delivered payments and 1,040 matched swaps across 130 user
+Runtimes. TS W1/W4/W8 reproduce every root and ordered output; checkpoint and
+full recovery pass. Each replay retains one final outbox item: this is neither
+a fully drained stand nor qualifying TPS. The historical 498-frame transcript
+fails identically at height 12 on both baseline and candidate. Both results
+remain in the [worker evidence](evidence/canonical-review-20261012/ts-worker-evidence.json).
 
-Pure Account causal tracing now belongs to Runtime observability. The scenario
-CLI owns ASCII formatting, including the existing frame-step stop. Both production
-HTTP entry points no longer mount the QA API; its tooling implementation remains.
-No financial transition, trace content or debug-stop timing changed.
+The candidate is **not ready to merge**:
 
-On clean `34fec4412`: 53/53 focused tests with 1,912 assertions, full check with
-38 source gates, and one real React payment/reload journey passed with zero skips
-or flakes. The live orchestrator returned 404 for `/api/qa/health`. The unchanged
-financial path passed `lock-ahb`, 85 frames, on preceding `2b2c1081c`.
+- Two frozen TS fixtures still import the relocated worker's old path. The
+  [exact two-line patch](evidence/canonical-review-20261012/ts-worker-frozen-imports.patch)
+  awaits the owner's narrow exception to the explicit no-write rule for `rscore/`.
+  No alias or skipped assertion hides this failure.
+- PR #73 remains on older `72c38fa4b`: six of seven required pull-request jobs
+  pass; Unit Tests fail four cases already fixed locally. Fresh eligible CI
+  requires closing the fixture failure first. A successful manual workflow
+  dispatch does not satisfy required PR checks; protection remains unchanged.
+- Public P6 has not reached the already-funded reserve. Proxy and direct
+  upstream both return 429. The direct trace authenticates 940 blocks and last
+  observes Runtime height 40, reserve 0; no dispute is submitted. Single-range
+  successes prove availability only. [Transport evidence](evidence/canonical-review-20261012/public-rpc-transport-d81a0ed9f.json).
+- No public deployment or mainnet acceptance follows from the local checks.
+  The live alpha remains `7c3f63f98`; current P6, ten consecutive green main
+  runs and the owner-reviewed release package remain open.
 
-The existing collector measures kernel closure **161,031 → 160,577 code lines**
-and **816 → 815 files**. Reachable QA code falls **533 → 0**, with **3 → 0**
-direct kernel imports. The net closure reduction is 454 lines because the pure
-trace remains reachable under its actual owner. This is a static kernel closure,
-not the whole server bundle; the 1,412-line QA handler was disconnected, not deleted.
-All 18 remaining tooling edges point to `core/rscore`, whose reachable 11,691
-code lines include active TS code that cannot simply be removed.
-[Exact measurements, commands and retained logs](evidence/canonical-review-20261012/qa-boundary.json).
-
-The next CI failure separated browser readiness from financial behavior: a
-shared history-row locator focused Home after the URL changed but before Activity
-mounted. One existing Activity-only readiness assertion fixes the test; the real
-keyboard/resize journey and 38 source checks passed on clean `ca96f041d`.
-[Retained trace diagnosis and execution evidence](evidence/canonical-review-20261012/receipt-navigation.json).
-
-CI run 38200437268 on `f257ad8eb` passed its E2E job and five other jobs, but its
-jurisdiction unit shard timed out in the backlog fixture. A full local shard
-passed 444/444 on `f48eca1a`; the CI-only cause remains unresolved. Gate handshakes
-now fail explicitly if a poll completes before the expected request, preserving
-all assertions and the 60-second limit. That diagnostic change on clean `8d7f1e742`
-passed its focused case, all 444 jurisdiction tests, and 38 source checks.
-[Diagnostic scope and retained logs](evidence/canonical-review-20261012/watcher-gate-diagnostics.json).
-
-The next public P6 attempt found an earlier boundary than RPC throughput:
-recovery failed at Runtime frame 14. On clean `c4566fd81`, replay through frame
-13 succeeds. Changing only the restored `JReplica.rpcs` from its committed
-publicnode URL to the configured public proxy reproduces frame 14's exact
-recorded hash. The restore binding had changed committed state outside WAL.
-The original funded database and its forensic copy remain unchanged.
-[Exact hashes and retained diagnostic](evidence/canonical-review-20261012/p6-replay-rpc-diagnosis.json).
-
-This changes the immediate order: keep RPC selection in live infrastructure,
-prove two successive restores with exact Runtime roots, then explicitly recover
-the affected profile before resuming P6. Excluding the field from hashes or
-silently patching replay would hide the original failure. At the 04:15 UTC method
-review, the useful change was to test recovery before another network retry;
-the first offline reproduction took 0.535 seconds. The release gap is reopened,
-not closed by identifying its cause.
-
-That prospective fix is verified on clean `042026fe0`: **20/20 tests, 82
-assertions**, all four real RPC SIGKILL boundaries and **38 source gates**.
-The existing regression now checks the Runtime root after the first restore,
-a new committed event, a second restore and adapter recreation. Production code
-shrinks four lines net; the unconsumed RuntimeState export is now private.
-No snapshot field or hash-verification exception was added.
-
-The affected private profile passed all five offline stages: a wrong RPC value
-is rejected; the evidenced value allows ordinary verification of original
-frames 14–16; the existing signed-bundle importer creates a separate checkpoint;
-two cold restores preserve financial roots, Account envelopes and both outboxes.
-The original WAL is archived unchanged. This deliberately creates a new frame
-chain; its checkpoint hash is not represented as the original WAL hash.
-[Proof, archive digests, script and retained logs](evidence/canonical-review-20261012/rpc-transport-recovery.json).
-
-Live startup from that checkpoint succeeds. Public RPC 429/timeouts then limit
-the next 60-second trace to 576 authenticated blocks, before the funding event;
-no financial transaction is submitted. That is the next unresolved boundary.
-Both predecessor PR candidates now have seven successful CI jobs, including E2E:
-[PR 71 run](evidence/canonical-review-20261012/ci-38201621912-final.json) and
-[PR 72 run](evidence/canonical-review-20261012/ci-38202183279-final.json).
-The final combined candidate still needs its own required CI.
-
-The uninterrupted 160-second P6 follow-up still did not reach the existing reserve.
-A bounded raw-response capture identifies PublicNode's HTTP 429 / -32005 quota
-error. Neither of two alternative public providers passed basic availability;
-configuration is unchanged. The 04:45 UTC method review replaces repeated long
-retries with first-error capture and resumes the independent TS launcher cut.
-[Retained evidence and availability limits](evidence/canonical-review-20261012/p6-rpc-quota.json).
-
-### Implemented: ordinary launch has one engine
-
-On clean `f774dbb70`, the existing selector rejects Rust, embedded authority and
-shadow activation before dev preparation, process cleanup or Hub spawn. The
-68-line Rust build preflight and authority propagation are deleted. Native
-diagnostic helpers remain; active TS worker isolation is a separate unfinished cut.
-
-Measured source delta: **69 non-test lines removed net**, **25 including tests**.
-Verification: **52/52 tests, 427 assertions**, including twelve real rejected dev
-launches; **38 source gates**; and **3/3 real React payment journeys**, zero skips
-or flakes, through three TS Hubs. The payment journey verifies reload recovery.
-[Clean-source commands, browser results and retained logs](evidence/canonical-review-20261012/ts-only-launcher.json).
-
-Combined predecessor `c6215ccd3` passed all seven CI jobs, including E2E, in
-[run 38204500382](evidence/canonical-review-20261012/ci-38204500382-final.json).
-It was a manual workflow_dispatch run. GitHub does not evaluate those jobs as
-required PR checks, so merge remains blocked; the next combined candidate must
-run through the ordinary pull_request event. This is a CI invocation correction,
-not a test failure or permission to bypass branch protection.
-
-### Implemented: TS workers belong to the Runtime
-
-Fourteen active TS worker modules now live under `core/runtime/workers/account`.
-The Entity execution stage, inbound arrivals and leaf cache live with their
-Entity owners. All active production callers use these paths directly; no
-compatibility barrel or second executor was added. This moves 3,857 physical
-worker lines; it does not delete them. Six newly visible oversized functions
-were split into bounded execution phases without changing positional ordering.
-
-The existing collector measures kernel closure **160,573 -> 160,531 code lines**
-and direct kernel imports into `core/rscore` **18 -> 13**. The closure has 816
-files, one more than before this cut. Remaining reachable `core/rscore` code is
-8,418 lines: driver, recorder and checkpoint ownership still require work.
-This is a modest ownership improvement, not a Rust-free kernel.
-
-On clean `f163415eb`, the real production stand recorded **708 Runtime frames**,
-2,600 delivered payments and 1,040 matched swaps across 130 user Runtimes.
-TS W1/W4/W8 each replayed all 708 frames with identical roots and ordered
-effects; checkpoint and full recovery both passed. One final outbox item
-remains in each replay report, so this is not evidence of a fully drained stand
-or qualifying live TPS. Focused tests passed **234/234, 158,704 assertions**;
-the full check passed all 38 source gates.
-
-The older 498-frame transcript fails at height 12 with the same output-hash
-mismatch on both the baseline and candidate. That negative evidence remains;
-the fresh recording does not establish historical compatibility. Two stale HLT
-decoder schemas were fixed by requiring fields already emitted by the real
-RuntimeAdapter projectors. Tests now consume those real projectors; strict
-missing/unknown-field rejection remains, with no lending implementation change.
-
-The browser build exposed a tracked generated worker bundle. It is now ignored
-and rebuilt through the existing generator, like the runtime bundle; source
-and isolated build-artifact hashes remain enforced. Clean `e6fd12883` passed
-three payment journeys. After removing unrelated formatting changes, clean
-`d723e5827` passed the full check and `lock-ahb` (85 frames). These are separate
-source bindings, not a claim that every release gate passed on one SHA.
-
-The cut is **not ready to merge**. A focused lifecycle test cannot resolve the
-old worker path from two TS fixture files inside owner-frozen `rscore/`.
-The exact two-line import repair is awaiting the owner's narrow exception;
-neither Rust implementation nor frozen fixtures have been changed. PR #73's
-older head has six of seven required CI jobs green; its four known failures
-were repaired locally, but this new fixture failure must be closed before push.
-[Source bindings, failures, measurements and retained evidence](evidence/canonical-review-20261012/ts-worker-evidence.json).
-
-The next bounded deletion removes always-null retired Entity-stage handles
-and accept/discard bookkeeping, approximately 120 physical lines and two
-kernel imports. Preserve the live TS execution stage and checkpoint tooling.
-Before that deletion, add the missing real two-leg atomic rejection regression:
-valid first signed Account input, invalid second signature, both original roots
-and empty outboxes, then an intact retry. Existing sibling-cascade tests do not
-prove this specific rollback case.
-
-### Verified transport follow-up
-
-The first RPC window reduction did not control request frequency. A real
-forwarding proxy reproduces a retry only 9.535 ms after a 429. One cancellable,
-monotonic cooldown now belongs to the existing watcher single-flight path,
-shared by automatic and manual polling. A second regression shows the next
-successful window expanding despite retained pressure: scanned height 1,536
-instead of 1,024. The same pressure state now gates that existing window growth.
-No second scheduler, committed field or financial formula was introduced.
-
-On clean `7d3134853`, **104/104 related tests**, **947 assertions**, **38 source
-gates**, **3/3 real React payment journeys**, **lock-ahb with 85 frames**, and
-**25/25 funding/exit cases with 512 fuzz invocations** pass on the same SHA.
-The eight Foundry/production compiler templates match. The preceding clean
-`1d780ff75` also verified the public contract stack against its current linked
-artifacts and checked Depository bindings; the reads were not block-pinned.
-
-The local gas bound is per operation, not the sum of a whole dispute. Largest
-printed finalization is 4,453,117 gas; the minimum one-token start/finalize
-samples are 449,300 / 399,142. Printed fuzz samples are not claimed maxima.
-Local time warp does not replace public real-clock evidence.
-
-Public P6 is still incomplete. Two bounded traces retain 429 failures; the
-second scans 1,048 blocks and last observes Runtime height 36 with reserve 0.
-It does not reach the funding event or submit a dispute. Those sampled values
-are not represented as post-shutdown state or a controlled throughput comparison.
-The next direct-upstream trace also encounters 429: 940 authenticated blocks,
-last observed Runtime height 40 and reserve 0. Switching routes has not solved
-catch-up. A single successful identical-range probe per route proves availability
-only. [Transport evidence](evidence/canonical-review-20261012/public-rpc-transport-d81a0ed9f.json)
-retains both results. The next offline diagnostic compares restored authenticated
-history with the watcher's old semantic start cursor before another network run.
-The frozen TS fixture import exception and required PR CI also remain open.
-[Exact source bindings, commands, failures and retained logs](evidence/canonical-review-20261012/watcher-pressure-window-7d3134853.json).
-
-The existing static collector now measures **160,552 kernel-closure code lines
-in 816 files**, versus **161,062 / 816** at the review baseline: **510 fewer
-reachable code lines**. QA imports stay at zero and `core/rscore` imports at 13.
-These RPC fixes add 27 physical production lines net; the fresh closure includes
-that cost. No overall XLN-1000 readiness score is asserted without CI and ledger.
+The next bounded deletion is the always-null retired Entity-stage handle and
+its accept/discard bookkeeping: approximately 120 physical lines and two kernel
+imports, not yet removed. Preserve real TS candidates, checkpoints and recording.
+First prove two signed Account legs through existing `applyMergedEntityInputs`:
+valid first leg, invalid second signature, two rejects, both original roots,
+empty outboxes, then an intact retry matching a clean control. Existing sibling
+cascade tests do not prove this exact rollback case.
 
 ## Target ownership and deletion sequence
 
