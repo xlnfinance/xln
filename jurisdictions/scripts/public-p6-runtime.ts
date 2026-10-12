@@ -11,6 +11,7 @@ import { safeParse, safeStringify } from '../../core/protocol/serialization';
 import { requireBigInt } from '../../core/protocol/boundary/boundary-primitives';
 import { Depository__factory } from '../typechain-types';
 import { assertCanonicalRpcContractStack } from '../../core/orchestrator/bootstrap/contract-readiness';
+import { getJurisdictionIdentityRef } from '../../core/jurisdiction/machine/jurisdiction-runtime';
 
 const mode = process.argv[2];
 if (mode !== 'prepare' && mode !== 'recover') throw Error('PUBLIC_P6_MODE_REQUIRED');
@@ -45,17 +46,22 @@ const contracts = {
   depository: address('depository'),
   deltaTransformer: address('deltaTransformer'),
 };
-const rpc = configured.rpc;
 const name = configured.name;
-if (configured.chainId !== 11155111 || typeof rpc !== 'string' || typeof name !== 'string')
+if (configured.chainId !== 11155111 || typeof name !== 'string')
   throw Error('PUBLIC_P6_SEPOLIA_REQUIRED');
 const url = 'https://sepolia.xln.finance';
+const rpc = `${url}/rpc`;
 const hub = '0x2d08d3bb8f4102fb07fecef0b59f052139c99aa996239ebfc55baac82ac54dd6';
 const signer = HDNodeWallet.fromPhrase(seed);
 const signerId = signer.address.toLowerCase();
 const entityId = xln.generateLazyEntityId([signerId], 1n).toLowerCase();
 xln.registerSignerKey(seed, signerId, getBytes(signer.privateKey));
-const env = await xln.main(seed, { numericSignerPrewarmCount: 1 });
+const env = await xln.main(seed, {
+  numericSignerPrewarmCount: 1,
+  trustedJurisdictionRpcBindings: [{
+    jurisdictionRef: getJurisdictionIdentityRef({ chainId: 11155111, contracts }), rpcUrl: rpc,
+  }],
+});
 const provider = new JsonRpcProvider(rpc, 11155111, { cacheTimeout: -1 });
 const depository = Depository__factory.connect(contracts.depository, provider);
 const state = () => [...env.state.eReplicas.values()].find(value => value.entityId === entityId)?.state;
