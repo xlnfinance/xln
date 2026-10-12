@@ -4,20 +4,23 @@ Owner scope: TS + React + Ethereum same-J; Rust and lending remain frozen.
 Foreign Rust stash `438bf1a6ddd8679bba0b63bdef11dd1fd1f45e90` is untouched.
 Keep frozen-core even with zero protected files. No WIP commits.
 
-- Current SHA: recovery candidate follows `4cf06cde8` on `codex/rc-wallet-recovery`.
+- Current SHA: verified source `d51910eeea249b56db4bf63d9157cbf2cd3be201`
+  on `codex/rc-wallet-recovery`; the following commit records evidence and owner
+  corrections only.
   Owner approved PRs with mandatory green CI on 2026-10-12. Main protection is
   enabled: all seven build-and-test jobs, strict up-to-date checks, required PR,
   administrators included, no force pushes/deletions. This replaces direct-main-only.
   Owner approved the two protected decoder files; both uchg flags are restored.
-- Last green: P6 private production E2E 1/1, 21.080s, zero skips/retries:
-  offline wallet, stale signed proof countered by an appointed tower, full 100 USDC
-  payout, owner EOA nonce unchanged, returning wallet and hub healthy. Gas:
-  start 387016, counter 193797, finalize 191275. File recovery E2E 1/1, 29.311s:
-  corrupted backup rejected, exact Accounts restored, overwrite rejected, 100 USDC
-  unilateral exit and reload. Related dispute units 98/98 with 440965 assertions;
-  startup wiring 57/57 with 1020 assertions; launcher fixtures 28/28 with 166
-  assertions; check passed all 38 source gates (27.152s). These precommit runs
-  are diagnostics until repeated on a clean committed SHA.
+- Last green: all four private production React groups on clean source d519:
+  payment 4/4, P4/P5 2/2, P6 1/1, recovery 3/3; zero skips, failures or retries.
+  P6: offline wallet defended, 100 USDC paid, owner EOA nonce unchanged;
+  gas start 387024, counter 193785, finalize 191265. File recovery rejects
+  corruption/overwrite, restores signed Account roots/balances and exits 100 USDC.
+  Related units 155/155, 441985 assertions; launcher fixtures 28/28, 166 assertions.
+  `bun run check` passed 38 source gates (30.670s); React production build passed.
+  Every recorded run started and ended with a clean tree and held the stand lock
+  where required. P5 deliberately exhausts hub reserves: keep P6 in its separate
+  release stand, rather than combining those tests against one funded hub.
 - First red resolved: P6 exposed three distinct production faults. The watcher
   retained a signature cleared by Depository's final event, then passed ethers
   Result proxies into durable state, then CounterDisputeRegistered changed an
@@ -28,21 +31,20 @@ Keep frozen-core even with zero protected files. No WIP commits.
   Main CI 38189132378 finished 6/7 green including all E2E; unit failures were
   two shallow Linux /tmp fixtures. Both now use owned data children, preserving
   the production reset guard. Local launcher/preflight checks are green.
-- Artifacts: prior clean evidence docs/evidence/rc-20261012/react-20f5e1bd5.json.
-  Current diagnostic directories: .logs/crisis-20261011/p6-counter-envelope,
-  file-restore-clock, linux-launcher-fixtures.log, recovery-dispute-units.log,
-  recovery-candidate-check.log; focused before/after in p6-counter-worker-*.log.
+- Artifacts: clean evidence docs/evidence/rc-20261012/react-d51910eee.json
+  includes the ten cases, Account recovery snapshots, receipts, gas and log hashes.
   The obsolete hash/signature-only export and its test decoder are removed;
   actual encrypted restore plus on-chain exit replaces that coverage.
-- Next: complete the updated sovereignty/recovery test, commit owned paths,
-  repeat the React financial/recovery groups on a clean SHA, save evidence,
-  push the branch and create/attach a PR. Do not claim precommit test evidence
-  meets the clean-SHA release rule.
+- Next: `bun run check`, commit the owned evidence/documentation paths, push
+  the branch, create/attach a PR and inspect its required Linux CI checks.
 - Remaining final gates: ten consecutive green main runs; production Rust/QA
   isolation; current-source public Sepolia P4-P6 with real clocks; external tower
-  coverage; gas-measured owner choices for reserve earmarking, insolvency order,
-  debt aggregation, starter bonds and dispute/governance windows; exact-build
-  owner-reviewed release package. Public alpha remains
+  coverage; exact-build owner-reviewed release package. Owner correction:
+  no new freeze at dispute start, FIFO, one debt per debtor/creditor/token,
+  party-selected dispute windows. These are settled requirements, not pending
+  owner questions. No starter bond or governance change in this candidate;
+  verify historical-board proof expiry against signed windows separately.
+  Public alpha remains
   7c3f63f9841f4e8b61ac5eee5dbe4f9710b10621. No mainnet readiness claimed.
 
 Owner priority, 2026-10-11 17:28 UTC: ship a public Sepolia deployment and usable

@@ -95,9 +95,19 @@ to MML; counting accounts or gross turnover does not replace GDP attribution.
   current unit tests, one launch engine and no production imports of Rust or QA.
 - Mainnet needs current-bytecode Sepolia P4/P5/P6 exit receipts, measured exit
   gas, wallet evidence import, external tower coverage and the exact release
-  package approved by Egor. Reserve pledges, stale-state penalties, debt-slot
-  redesign, exposure-based windows, Foundation grace and insolvency allocation
-  require measured alternatives and an owner decision before implementation.
+  package approved by Egor.
+- Owner correction, 2026-10-12: starting a dispute must not freeze or earmark
+  additional funds. Account collateral is already locked; do not add a pledge
+  over the debtor's free reserve at dispute start. FIFO is settled canon, not
+  a pending FIFO-versus-pro-rata decision. Preserve one debt obligation per
+  debtor, creditor and token; verify the existing representation before
+  proposing another debt mechanism. The parties choose their signed dispute
+  windows; do not impose a new exposure-based schedule without authorization.
+  These are requirements to implement and verify, not questions to repeat.
+  The owner did not approve a starter bond or a governance change. Keep both
+  out of this candidate. Check the existing seven-day historical-board proof
+  grace against party-selected windows before presenting a concrete defect;
+  it is distinct from the Foundation authority's activation delay.
 
 Acceptance criteria already exist in [improvement-loop.md](improvement-loop.md)
 and [mainnet-acceptance-gate.md](mainnet-acceptance-gate.md). The owner's requested
