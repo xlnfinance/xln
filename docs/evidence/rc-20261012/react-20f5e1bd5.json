@@ -1,0 +1,721 @@
+{
+  "recordedAt": "2026-10-12T00:44:44.528Z",
+  "sourceSha": "20f5e1bd5956dc20aa88fdc56e017b85a636e9f5",
+  "sourceTreeCleanBeforeAndAfter": true,
+  "scope": "TS React on the private Anvil production stand with a controlled dispute clock; not public Sepolia or mainnet acceptance.",
+  "change": "Sheet explicitly returns focus to its connected opener on close; the existing keyboard-focus regression is unchanged.",
+  "priorCi": {
+    "sourceSha": "a4da1f59e9691f16ff3a81464417c4f6b3f7da2f",
+    "url": "https://github.com/xlnfinance/xln/actions/runs/38187198039",
+    "conclusion": "failure",
+    "successfulJobs": 6,
+    "unitJob": "success",
+    "firstFailure": "React payment E2E expected the Activity opener to regain focus after closing the Receipt dialog."
+  },
+  "commands": [
+    "XLN_LOCAL_PROD_SMOKE_DIR=.logs/crisis-20261011/react-20f5e1bd5-clean XLN_LOCAL_PROD_SMOKE_WALLET_TESTS=e2e-payment.spec.ts,e2e-lending-availability.spec.ts,e2e-dispute-finality.spec.ts,e2e-tower-restore.spec.ts bun run stand:run --reason react-20f5e1bd5-clean --timeout-ms 180000 -- bun run prod:smoke:local",
+    "bun run check",
+    "bun run --cwd ui build"
+  ],
+  "checks": {
+    "browser": {
+      "startTime": "2026-10-12T00:40:01.246Z",
+      "duration": 103836.917,
+      "expected": 7,
+      "skipped": 0,
+      "unexpected": 0,
+      "flaky": 0
+    },
+    "fullRunnerExitCode": 0,
+    "exclusiveStandLock": true,
+    "sourceGates": 38,
+    "sourceCheckDurationMs": 26270,
+    "checkExitCode": 0,
+    "productionUiBuild": "passed"
+  },
+  "cases": [
+    {
+      "name": "P4 UI dispute prevents early finalization, then releases exactly 100 USDC after its signed window",
+      "file": "e2e-dispute-finality.spec.ts",
+      "status": "passed",
+      "durationMs": 18476,
+      "attachments": [
+        {
+          "name": "early-finalize-prevention",
+          "evidence": {
+            "acceptedWal": {
+              "deadlineWakes": [
+                {
+                  "dueAt": 1791765615007,
+                  "frameHash": "0xbba970db778772a48625eaf20da277ac9e8bd85c9e101f89b7a247638b77ffe2",
+                  "height": 32,
+                  "timestamp": 1791765615008
+                }
+              ],
+              "finalizeInputs": [],
+              "submissions": []
+            },
+            "rejected": {
+              "accountHeight": 4,
+              "accountRoot": "0x59905b470386878e2739092bfa18fbf0de396afe9e9252c800a428ce6d2be190",
+              "batch": {
+                "finalizations": 0,
+                "operations": 0,
+                "sent": false
+              },
+              "collateral": "100000000",
+              "depository": "0xa513e6e4b8f2a923d98304ec87f64353c4d5c853",
+              "dispute": {
+                "batchNonce": 2,
+                "disputeStartTimestamp": 1791765612,
+                "disputeTimeout": 1791855612,
+                "finalizeQueued": false,
+                "initialNonce": 2,
+                "initialProofbodyHash": "0xf6d0eb382432f47cb67d1eb8c4d4fd497ced0f7f34ae3369238f8314207f98cf",
+                "initialProposerIsLeft": true,
+                "jNonce": 2,
+                "observedBlockNumber": 46,
+                "observedOnChain": true,
+                "startedByLeft": true,
+                "starterCounterProofCommitment": "0x0000000000000000000000000000000000000000000000000000000000000000"
+              },
+              "disputeConfig": {
+                "leftResponseSeconds": 86400,
+                "rightResponseSeconds": 3600
+              },
+              "entityId": "0x5d4f98a59003f2acd9e49f11452f627a668ce59a1b5036ed10ff01138771d4b7",
+              "height": 32,
+              "incomingDebt": "0",
+              "jNonce": 2,
+              "lastFinalizedJHeight": 46,
+              "mempool": 0,
+              "offdelta": "0",
+              "ondelta": "100000000",
+              "ownValue": "100000000",
+              "pending": false,
+              "reserve": "0",
+              "sentBatch": null,
+              "signerId": "0x855dc2139edbef6452b3bf0e8633333ae27faa63",
+              "status": "disputed",
+              "timestamp": 1791765615008
+            },
+            "started": {
+              "accountHeight": 4,
+              "accountRoot": "0x59905b470386878e2739092bfa18fbf0de396afe9e9252c800a428ce6d2be190",
+              "batch": {
+                "finalizations": 0,
+                "operations": 0,
+                "sent": false
+              },
+              "collateral": "100000000",
+              "depository": "0xa513e6e4b8f2a923d98304ec87f64353c4d5c853",
+              "dispute": {
+                "batchNonce": 2,
+                "disputeStartTimestamp": 1791765612,
+                "disputeTimeout": 1791855612,
+                "finalizeQueued": false,
+                "initialNonce": 2,
+                "initialProofbodyHash": "0xf6d0eb382432f47cb67d1eb8c4d4fd497ced0f7f34ae3369238f8314207f98cf",
+                "initialProposerIsLeft": true,
+                "jNonce": 2,
+                "observedBlockNumber": 46,
+                "observedOnChain": true,
+                "startedByLeft": true,
+                "starterCounterProofCommitment": "0x0000000000000000000000000000000000000000000000000000000000000000"
+              },
+              "disputeConfig": {
+                "leftResponseSeconds": 86400,
+                "rightResponseSeconds": 3600
+              },
+              "entityId": "0x5d4f98a59003f2acd9e49f11452f627a668ce59a1b5036ed10ff01138771d4b7",
+              "height": 31,
+              "incomingDebt": "0",
+              "jNonce": 2,
+              "lastFinalizedJHeight": 46,
+              "mempool": 0,
+              "offdelta": "0",
+              "ondelta": "100000000",
+              "ownValue": "100000000",
+              "pending": false,
+              "reserve": "0",
+              "sentBatch": null,
+              "signerId": "0x855dc2139edbef6452b3bf0e8633333ae27faa63",
+              "status": "disputed",
+              "timestamp": 1791765614007
+            },
+            "startedChain": {
+              "collateral": "100000000",
+              "disputeHash": "0xb7857dfa4f192baadbeddb0471f77c45c3fce42c8f40d52f882920f205c4c7a3",
+              "nonce": "2",
+              "ondelta": "100000000",
+              "peerReserve": "1999900000000",
+              "reserve": "0",
+              "timeout": 1791855612
+            }
+          }
+        },
+        {
+          "name": "dispute-finality",
+          "evidence": {
+            "accepted": {
+              "deadlineWakes": [
+                {
+                  "dueAt": 1791765616008,
+                  "frameHash": "0x0739c0836b89320ac080b49fe7792ed7ecd78cd6a61417829ca5a546d74ec0ec",
+                  "height": 33,
+                  "timestamp": 1791765616375
+                },
+                {
+                  "dueAt": 1791765617375,
+                  "frameHash": "0xa7f6b8fcd9307ed0ba0fc7cdb743a1eddb1ac87dfce01e17512bfffc8c6f2906",
+                  "height": 34,
+                  "timestamp": 1791855613000
+                }
+              ],
+              "finalizeInputs": [],
+              "submissions": [
+                {
+                  "attemptId": "0x765ce77fb09569efa8c90aed7b0f4e424f7bd92336ee42c1c84610cf7587a670",
+                  "batchHash": "0xc9ecef017330d82e7a23b2f6aae03b25ece2bd4cdc2abf72637bfbc8cf41d865",
+                  "entityNonce": 3,
+                  "height": 37,
+                  "timestamp": 1791855613000,
+                  "txHash": "0xbaadb02bf321b0ddd7ae54c10230ef9566cd1f7b27d0c40615433f41c9962f6b"
+                }
+              ]
+            },
+            "afterClock": {
+              "date": 1791855613000,
+              "host": 1791855613000
+            },
+            "beforeClock": {
+              "date": 1791765616375,
+              "host": 1791765616375
+            },
+            "deadlineBlock": {
+              "hash": "0x0a17df51172ecac34ef6ceafadbab5f7a8626f0a3d09dcc6a6054e349b838198",
+              "number": 47,
+              "timestamp": 1791855613
+            },
+            "finalChain": {
+              "collateral": "0",
+              "disputeHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+              "nonce": "3",
+              "ondelta": "0",
+              "peerReserve": "1999900000000",
+              "reserve": "100000000",
+              "timeout": 0
+            },
+            "finalTx": "0xbaadb02bf321b0ddd7ae54c10230ef9566cd1f7b27d0c40615433f41c9962f6b",
+            "finished": {
+              "accountHeight": 4,
+              "accountRoot": "0x59905b470386878e2739092bfa18fbf0de396afe9e9252c800a428ce6d2be190",
+              "batch": {
+                "finalizations": 0,
+                "operations": 0,
+                "sent": false
+              },
+              "collateral": "0",
+              "depository": "0xa513e6e4b8f2a923d98304ec87f64353c4d5c853",
+              "dispute": null,
+              "disputeConfig": {
+                "leftResponseSeconds": 86400,
+                "rightResponseSeconds": 3600
+              },
+              "entityId": "0x5d4f98a59003f2acd9e49f11452f627a668ce59a1b5036ed10ff01138771d4b7",
+              "height": 38,
+              "incomingDebt": "0",
+              "jNonce": 3,
+              "lastFinalizedJHeight": 48,
+              "mempool": 0,
+              "offdelta": "0",
+              "ondelta": "0",
+              "ownValue": "0",
+              "pending": false,
+              "reserve": "100000000",
+              "sentBatch": null,
+              "signerId": "0x855dc2139edbef6452b3bf0e8633333ae27faa63",
+              "status": "disputed",
+              "timestamp": 1791855613000
+            },
+            "funded": {
+              "accountHeight": 4,
+              "accountRoot": "0x59905b470386878e2739092bfa18fbf0de396afe9e9252c800a428ce6d2be190",
+              "batch": {
+                "finalizations": 0,
+                "operations": 0,
+                "sent": false
+              },
+              "collateral": "100000000",
+              "depository": "0xa513e6e4b8f2a923d98304ec87f64353c4d5c853",
+              "dispute": null,
+              "disputeConfig": {
+                "leftResponseSeconds": 86400,
+                "rightResponseSeconds": 3600
+              },
+              "entityId": "0x5d4f98a59003f2acd9e49f11452f627a668ce59a1b5036ed10ff01138771d4b7",
+              "height": 23,
+              "incomingDebt": "0",
+              "jNonce": 0,
+              "lastFinalizedJHeight": 44,
+              "mempool": 0,
+              "offdelta": "0",
+              "ondelta": "100000000",
+              "ownValue": "100000000",
+              "pending": false,
+              "reserve": "0",
+              "sentBatch": null,
+              "signerId": "0x855dc2139edbef6452b3bf0e8633333ae27faa63",
+              "status": "active",
+              "timestamp": 1791765610459
+            },
+            "fundedChain": {
+              "collateral": "100000000",
+              "disputeHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+              "nonce": "0",
+              "ondelta": "100000000",
+              "peerReserve": "1999900000000",
+              "reserve": "0",
+              "timeout": 0
+            },
+            "mode": "canonical-auto-after-ui-start-and-early-prevention",
+            "sourceBatch": {
+              "batchHash": "0xc9ecef017330d82e7a23b2f6aae03b25ece2bd4cdc2abf72637bfbc8cf41d865",
+              "entityNonce": 3
+            },
+            "startTx": "0x70f679dec1ba03277ac87eecead2210597fac1b369e62a26cf4d2955ecb80b4d",
+            "started": {
+              "accountHeight": 4,
+              "accountRoot": "0x59905b470386878e2739092bfa18fbf0de396afe9e9252c800a428ce6d2be190",
+              "batch": {
+                "finalizations": 0,
+                "operations": 0,
+                "sent": false
+              },
+              "collateral": "100000000",
+              "depository": "0xa513e6e4b8f2a923d98304ec87f64353c4d5c853",
+              "dispute": {
+                "batchNonce": 2,
+                "disputeStartTimestamp": 1791765612,
+                "disputeTimeout": 1791855612,
+                "finalizeQueued": false,
+                "initialNonce": 2,
+                "initialProofbodyHash": "0xf6d0eb382432f47cb67d1eb8c4d4fd497ced0f7f34ae3369238f8314207f98cf",
+                "initialProposerIsLeft": true,
+                "jNonce": 2,
+                "observedBlockNumber": 46,
+                "observedOnChain": true,
+                "startedByLeft": true,
+                "starterCounterProofCommitment": "0x0000000000000000000000000000000000000000000000000000000000000000"
+              },
+              "disputeConfig": {
+                "leftResponseSeconds": 86400,
+                "rightResponseSeconds": 3600
+              },
+              "entityId": "0x5d4f98a59003f2acd9e49f11452f627a668ce59a1b5036ed10ff01138771d4b7",
+              "height": 31,
+              "incomingDebt": "0",
+              "jNonce": 2,
+              "lastFinalizedJHeight": 46,
+              "mempool": 0,
+              "offdelta": "0",
+              "ondelta": "100000000",
+              "ownValue": "100000000",
+              "pending": false,
+              "reserve": "0",
+              "sentBatch": null,
+              "signerId": "0x855dc2139edbef6452b3bf0e8633333ae27faa63",
+              "status": "disputed",
+              "timestamp": 1791765614007
+            }
+          }
+        },
+        {
+          "name": "withdrawn-dispute-proceeds",
+          "evidence": {
+            "after": {
+              "__xlnType": "BigInt",
+              "value": "100000000"
+            },
+            "before": {
+              "__xlnType": "BigInt",
+              "value": "0"
+            },
+            "signerId": "0x855dc2139edbef6452b3bf0e8633333ae27faa63"
+          }
+        }
+      ]
+    },
+    {
+      "name": "P5 UI dispute pays 200 of a 250 USDC claim and preserves 50 USDC of unsecured debt",
+      "file": "e2e-dispute-finality.spec.ts",
+      "status": "passed",
+      "durationMs": 25230,
+      "attachments": [
+        {
+          "name": "early-finalize-prevention",
+          "evidence": {
+            "acceptedWal": {
+              "deadlineWakes": [
+                {
+                  "dueAt": 1791765636505,
+                  "frameHash": "0x44ab0a127241aaf7d5d194a4e4076043ffd64af5f3dd13f2417972b378d87b0c",
+                  "height": 40,
+                  "timestamp": 1791765636507
+                },
+                {
+                  "dueAt": 1791765637507,
+                  "frameHash": "0xae976f4bedb1324991bfd4eaf3dfd8eea2895c904cfb16417296ea9b662ecf14",
+                  "height": 41,
+                  "timestamp": 1791765637508
+                }
+              ],
+              "finalizeInputs": [],
+              "submissions": []
+            },
+            "rejected": {
+              "accountHeight": 8,
+              "accountRoot": "0xe5866d6d98841de0040224b04f2e8f72b3ddd66a1483d4fddfcfb573e4414389",
+              "batch": {
+                "finalizations": 0,
+                "operations": 0,
+                "sent": false
+              },
+              "collateral": "100000000",
+              "depository": "0xa513e6e4b8f2a923d98304ec87f64353c4d5c853",
+              "dispute": {
+                "batchNonce": 2,
+                "disputeStartTimestamp": 1791855633,
+                "disputeTimeout": 1791945633,
+                "finalizeQueued": false,
+                "initialNonce": 7,
+                "initialProofbodyHash": "0xad5cbcf7d52f87846e78e74086bf25d3086f61c91b9df0e92598e517c7b91ff0",
+                "initialProposerIsLeft": false,
+                "jNonce": 7,
+                "observedBlockNumber": 56,
+                "observedOnChain": true,
+                "startedByLeft": true,
+                "starterCounterProofCommitment": "0x0000000000000000000000000000000000000000000000000000000000000000"
+              },
+              "disputeConfig": {
+                "leftResponseSeconds": 86400,
+                "rightResponseSeconds": 3600
+              },
+              "entityId": "0x408b2e2cded2f496fa8b08d1172ac59e2dc4baeb96f3e17a6a8609e2dfec580c",
+              "height": 40,
+              "incomingDebt": "0",
+              "jNonce": 7,
+              "lastFinalizedJHeight": 56,
+              "mempool": 0,
+              "offdelta": "150000000",
+              "ondelta": "100000000",
+              "ownValue": "250000000",
+              "pending": false,
+              "reserve": "0",
+              "sentBatch": null,
+              "signerId": "0xc7d0fd2f9104638e99d1ae5a90611c48f36e495d",
+              "status": "disputed",
+              "timestamp": 1791765636507
+            },
+            "started": {
+              "accountHeight": 8,
+              "accountRoot": "0xe5866d6d98841de0040224b04f2e8f72b3ddd66a1483d4fddfcfb573e4414389",
+              "batch": {
+                "finalizations": 0,
+                "operations": 0,
+                "sent": false
+              },
+              "collateral": "100000000",
+              "depository": "0xa513e6e4b8f2a923d98304ec87f64353c4d5c853",
+              "dispute": {
+                "batchNonce": 2,
+                "disputeStartTimestamp": 1791855633,
+                "disputeTimeout": 1791945633,
+                "finalizeQueued": false,
+                "initialNonce": 7,
+                "initialProofbodyHash": "0xad5cbcf7d52f87846e78e74086bf25d3086f61c91b9df0e92598e517c7b91ff0",
+                "initialProposerIsLeft": false,
+                "jNonce": 7,
+                "observedBlockNumber": 56,
+                "observedOnChain": true,
+                "startedByLeft": true,
+                "starterCounterProofCommitment": "0x0000000000000000000000000000000000000000000000000000000000000000"
+              },
+              "disputeConfig": {
+                "leftResponseSeconds": 86400,
+                "rightResponseSeconds": 3600
+              },
+              "entityId": "0x408b2e2cded2f496fa8b08d1172ac59e2dc4baeb96f3e17a6a8609e2dfec580c",
+              "height": 38,
+              "incomingDebt": "0",
+              "jNonce": 7,
+              "lastFinalizedJHeight": 56,
+              "mempool": 0,
+              "offdelta": "150000000",
+              "ondelta": "100000000",
+              "ownValue": "250000000",
+              "pending": false,
+              "reserve": "0",
+              "sentBatch": null,
+              "signerId": "0xc7d0fd2f9104638e99d1ae5a90611c48f36e495d",
+              "status": "disputed",
+              "timestamp": 1791765635505
+            },
+            "startedChain": {
+              "collateral": "100000000",
+              "disputeHash": "0xb7481ade68096a45c7861fd1ee4e0b18e874e015f991c01ae64205318d68addf",
+              "nonce": "7",
+              "ondelta": "100000000",
+              "peerReserve": "100000000",
+              "reserve": "0",
+              "timeout": 1791945633
+            }
+          }
+        },
+        {
+          "name": "dispute-finality",
+          "evidence": {
+            "accepted": {
+              "deadlineWakes": [
+                {
+                  "dueAt": 1791765637507,
+                  "frameHash": "0xae976f4bedb1324991bfd4eaf3dfd8eea2895c904cfb16417296ea9b662ecf14",
+                  "height": 41,
+                  "timestamp": 1791765637508
+                },
+                {
+                  "dueAt": 1791765638508,
+                  "frameHash": "0xafa6e5cf65136560d79aef86978b30bb10917b32c310abf637365225166bd0b5",
+                  "height": 42,
+                  "timestamp": 1791765638578
+                },
+                {
+                  "dueAt": 1791765639578,
+                  "frameHash": "0xa4bda89018d086c71982e109a20e8da63214e53c008b59938499d87abbca0776",
+                  "height": 43,
+                  "timestamp": 1791945634000
+                }
+              ],
+              "finalizeInputs": [],
+              "submissions": [
+                {
+                  "attemptId": "0xeb3709f667927b3827a7d2d722a59f29993cc258fa8820a7e8af3c348933bae6",
+                  "batchHash": "0xb8385a52f0c2384a076dd298736e60b999e00898a0d464bf209b7b91284e9d14",
+                  "entityNonce": 3,
+                  "height": 46,
+                  "timestamp": 1791945634000,
+                  "txHash": "0x42bfbf6947e7e0b5af87c26056f284fdfc9a350bc801c68cf99811f3e6553990"
+                }
+              ]
+            },
+            "afterClock": {
+              "date": 1791945634000,
+              "host": 1791945634000
+            },
+            "beforeClock": {
+              "date": 1791765638578,
+              "host": 1791765638578
+            },
+            "deadlineBlock": {
+              "hash": "0x19bcb11bc58b4ecd3617400d9ebec00e0f3061255522459e0217f2324ce27d4d",
+              "number": 57,
+              "timestamp": 1791945634
+            },
+            "finalChain": {
+              "collateral": "0",
+              "disputeHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+              "nonce": "8",
+              "ondelta": "0",
+              "peerReserve": "0",
+              "reserve": "200000000",
+              "timeout": 0
+            },
+            "finalTx": "0x42bfbf6947e7e0b5af87c26056f284fdfc9a350bc801c68cf99811f3e6553990",
+            "finished": {
+              "accountHeight": 8,
+              "accountRoot": "0xe5866d6d98841de0040224b04f2e8f72b3ddd66a1483d4fddfcfb573e4414389",
+              "batch": {
+                "finalizations": 0,
+                "operations": 0,
+                "sent": false
+              },
+              "collateral": "0",
+              "depository": "0xa513e6e4b8f2a923d98304ec87f64353c4d5c853",
+              "dispute": null,
+              "disputeConfig": {
+                "leftResponseSeconds": 86400,
+                "rightResponseSeconds": 3600
+              },
+              "entityId": "0x408b2e2cded2f496fa8b08d1172ac59e2dc4baeb96f3e17a6a8609e2dfec580c",
+              "height": 46,
+              "incomingDebt": "50000000",
+              "jNonce": 8,
+              "lastFinalizedJHeight": 58,
+              "mempool": 0,
+              "offdelta": "0",
+              "ondelta": "0",
+              "ownValue": "0",
+              "pending": false,
+              "reserve": "200000000",
+              "sentBatch": null,
+              "signerId": "0xc7d0fd2f9104638e99d1ae5a90611c48f36e495d",
+              "status": "disputed",
+              "timestamp": 1791945634000
+            },
+            "funded": {
+              "accountHeight": 8,
+              "accountRoot": "0xe5866d6d98841de0040224b04f2e8f72b3ddd66a1483d4fddfcfb573e4414389",
+              "batch": {
+                "finalizations": 0,
+                "operations": 0,
+                "sent": false
+              },
+              "collateral": "100000000",
+              "depository": "0xa513e6e4b8f2a923d98304ec87f64353c4d5c853",
+              "dispute": null,
+              "disputeConfig": {
+                "leftResponseSeconds": 86400,
+                "rightResponseSeconds": 3600
+              },
+              "entityId": "0x408b2e2cded2f496fa8b08d1172ac59e2dc4baeb96f3e17a6a8609e2dfec580c",
+              "height": 30,
+              "incomingDebt": "0",
+              "jNonce": 0,
+              "lastFinalizedJHeight": 54,
+              "mempool": 0,
+              "offdelta": "150000000",
+              "ondelta": "100000000",
+              "ownValue": "250000000",
+              "pending": false,
+              "reserve": "0",
+              "sentBatch": null,
+              "signerId": "0xc7d0fd2f9104638e99d1ae5a90611c48f36e495d",
+              "status": "active",
+              "timestamp": 1791765632421
+            },
+            "fundedChain": {
+              "collateral": "100000000",
+              "disputeHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+              "nonce": "0",
+              "ondelta": "100000000",
+              "peerReserve": "100000000",
+              "reserve": "0",
+              "timeout": 0
+            },
+            "mode": "canonical-auto-after-ui-start-and-early-prevention",
+            "sourceBatch": {
+              "batchHash": "0xb8385a52f0c2384a076dd298736e60b999e00898a0d464bf209b7b91284e9d14",
+              "entityNonce": 3
+            },
+            "startTx": "0x85a6a669a3cf13074522788e6cd6805c19ab320d05d3bc789930586ddae6ca76",
+            "started": {
+              "accountHeight": 8,
+              "accountRoot": "0xe5866d6d98841de0040224b04f2e8f72b3ddd66a1483d4fddfcfb573e4414389",
+              "batch": {
+                "finalizations": 0,
+                "operations": 0,
+                "sent": false
+              },
+              "collateral": "100000000",
+              "depository": "0xa513e6e4b8f2a923d98304ec87f64353c4d5c853",
+              "dispute": {
+                "batchNonce": 2,
+                "disputeStartTimestamp": 1791855633,
+                "disputeTimeout": 1791945633,
+                "finalizeQueued": false,
+                "initialNonce": 7,
+                "initialProofbodyHash": "0xad5cbcf7d52f87846e78e74086bf25d3086f61c91b9df0e92598e517c7b91ff0",
+                "initialProposerIsLeft": false,
+                "jNonce": 7,
+                "observedBlockNumber": 56,
+                "observedOnChain": true,
+                "startedByLeft": true,
+                "starterCounterProofCommitment": "0x0000000000000000000000000000000000000000000000000000000000000000"
+              },
+              "disputeConfig": {
+                "leftResponseSeconds": 86400,
+                "rightResponseSeconds": 3600
+              },
+              "entityId": "0x408b2e2cded2f496fa8b08d1172ac59e2dc4baeb96f3e17a6a8609e2dfec580c",
+              "height": 38,
+              "incomingDebt": "0",
+              "jNonce": 7,
+              "lastFinalizedJHeight": 56,
+              "mempool": 0,
+              "offdelta": "150000000",
+              "ondelta": "100000000",
+              "ownValue": "250000000",
+              "pending": false,
+              "reserve": "0",
+              "sentBatch": null,
+              "signerId": "0xc7d0fd2f9104638e99d1ae5a90611c48f36e495d",
+              "status": "disputed",
+              "timestamp": 1791765635505
+            }
+          }
+        },
+        {
+          "name": "withdrawn-dispute-proceeds",
+          "evidence": {
+            "after": {
+              "__xlnType": "BigInt",
+              "value": "200000000"
+            },
+            "before": {
+              "__xlnType": "BigInt",
+              "value": "0"
+            },
+            "signerId": "0xc7d0fd2f9104638e99d1ae5a90611c48f36e495d"
+          }
+        }
+      ]
+    },
+    {
+      "name": "deferred lending disables new commands and leaves the wallet able to pay",
+      "file": "e2e-lending-availability.spec.ts",
+      "status": "passed",
+      "durationMs": 9623,
+      "attachments": []
+    },
+    {
+      "name": "payment receipts and recovery dialogs keep keyboard focus inside and restore it on close",
+      "file": "e2e-payment.spec.ts",
+      "status": "passed",
+      "durationMs": 8523,
+      "attachments": []
+    },
+    {
+      "name": "invalid amounts and recipients cannot admit a payment or retain a revoked quote",
+      "file": "e2e-payment.spec.ts",
+      "status": "passed",
+      "durationMs": 6466,
+      "attachments": []
+    },
+    {
+      "name": "pays the merchant through the hub and shows the committed receipt",
+      "file": "e2e-payment.spec.ts",
+      "status": "passed",
+      "durationMs": 11622,
+      "attachments": []
+    },
+    {
+      "name": "tower backup restores funded Account proofs, refuses overwrite and continues payments",
+      "file": "e2e-tower-restore.spec.ts",
+      "status": "passed",
+      "durationMs": 22644,
+      "attachments": []
+    }
+  ],
+  "logHashes": {
+    ".logs/crisis-20261011/react-20f5e1bd5-clean/wallet-results.json": "0b946ec4fd250d0d0b36d55f8fa2feaa5057ba8b0f8a1b38bccf3eb770e8d641",
+    ".logs/crisis-20261011/react-20f5e1bd5-clean.log": "b14f460e996811cd187764a1f460b0ab0a73320a54fc81cb6e72aa52e9f21ba3",
+    ".logs/crisis-20261011/react-20f5e1bd5-check.log": "4159f616a1f2d7ed45e6dba6d38e92bff6db1922f9aaf4f994bc39137ba36114",
+    ".logs/crisis-20261011/react-20f5e1bd5-build.log": "ec51a41cf737fbdb18ecaae847acfa2825c191289dc1a01669663669789d9326"
+  },
+  "limits": [
+    "The original CI focus failure was observed on Linux; local isolated blur passed even without the patch. Fresh CI must verify the fix on that platform.",
+    "P6 remains uncommitted and red at finalization evidence decoding, pending owner permission to modify two immutable files.",
+    "File recovery UI is unfinished and parked, not included in this candidate.",
+    "The ten-run green CI streak, branch protection, fresh public Sepolia P4-P6 and owner-reviewed release package remain open."
+  ]
+}
