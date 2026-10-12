@@ -5,34 +5,31 @@ Foreign Rust stash `438bf1a6ddd8679bba0b63bdef11dd1fd1f45e90` is untouched.
 Keep frozen-core, PRs with seven required green jobs, no WIP commits.
 
 
-Current checkpoint, 2026-10-12 21:44 UTC: public Sepolia remains on clean
-9956bc7fd (PR #74 green 7/7, merged as c36c30996). H1 and tower are healthy;
-P6 remains finalized with zero collateral. No new funding or payment was sent.
-PR #75 at cc1b9600c removes 71 serial deployment-receipt reads and reuses the
-canonical 60-second stall tracker for wallet catch-up. Clean checks: 16 tests /
-45 assertions, 38 source gates, compiled production UI.
+Current checkpoint, 2026-10-12 22:20 UTC: public Sepolia is running clean
+e4db444ee (PR #75 green 7/7, merged as 5f764adfa). All 11 served UI files match
+the built manifest. H1 and tower are healthy; P6 remains finalized, collateral
+zero. No contract change or WAL rewind. Free ethPandaOps is now configured in
+the hub, published jurisdiction and tower allowlist. Promotion took 35 seconds.
 
-The owner requested an immediate usable deployment and has no dedicated RPC.
-Free ethPandaOps passes authenticated 128-block server reading: 56 receipt proofs,
-7.460 seconds, no 429. Two actual production boundaries remain before promotion:
-1. Switching operator RPC hits HUB_JADAPTER_IDENTITY_MISMATCH: the final hub
-   attachment guard compares persisted RPC to the approved live override.
-   Configuration rollback succeeded in 77 seconds without rewinding WAL. Reuse
-   the exact-stack trusted transport binding already used by canonical restore.
-2. Browser catch-up with real ethPandaOps reaches 74%, then a 2048-block receipt
-   window exceeds 60 seconds without a completed authenticated admission. Bound
-   the existing window to 256; preserve every header, receipt root, reorg fence
-   and the stall deadline. No new progress oracle or skipped history.
-Evidence: docs/evidence/canonical-review-20261012/wallet-catchup-cc1b9600c.json.
+The actual public React journey is verified: one 100 test USDT faucet claim,
+one 25 USDT payment to H1, 75 USDT remaining, then two successful reopen/reload
+checks and a rendered Home screenshot. No response interception or debug API;
+zero JavaScript errors. These faucet claims are unsecured test balances, not
+mainnet or collateral evidence. The first reload exposed nginx /assets → 403;
+remove its directory probe, then resume the same funded profile without
+repeating money movements. The deployed fix passed five public route checks.
 
-Method review: local green is not public boot. Test actual RPC latency and final
-adapter attachment before calling a config switch safe. No repeated provider
-search: ethPandaOps works; fix the two demonstrated local boundaries. Restore
-headroom by sparsifying inactive 2344d2a93 checkout; Git objects and untracked
-files remain recoverable, current 9956 source/data and rollback remain intact.
-Next single step: exact-candidate real Anvil regressions and browser catch-up,
-then full check, update PR #75, mandatory 7 green jobs and public 100 USDT → 25 USDT
-payment→reload. No owner decision is pending. Rust/lending/contracts unchanged.
+Clean e4 local evidence: 66 tests / 337 assertions, 38 source gates, production
+UI build. Required CI passed 7/7. Evidence and failed-first-reload details:
+docs/evidence/canonical-review-20261012/release-e4db444ee.json.
+
+Method review: private preview proved boot but missed the real reverse proxy.
+A public pay→nested-route reload caught the remaining operational defect.
+Keep the first failed evidence and resume exactly after accepted financial
+actions; do not rerun funding. No new protocol code, metrics or owner question.
+Next single step: commit the evidence and matching nginx deployment-template
+correction through a follow-up PR; retain deployed e4 while remaining mainnet
+acceptance evidence is reviewed. Rust, lending and contract code unchanged.
 
 - Owner authorized the one active TS fixture import correction on October 12.
   The stale worker path is replaced by the canonical Runtime worker path;

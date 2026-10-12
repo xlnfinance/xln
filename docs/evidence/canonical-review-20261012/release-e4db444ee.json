@@ -1,0 +1,197 @@
+{
+  "sourceSha": "e4db444ee98abf9cc567b8f9bd431d97c1414b95",
+  "sourceCleanAtBuildChecksAndPublicJourney": true,
+  "origin": "https://sepolia.xln.finance",
+  "chainId": 11155111,
+  "status": "public-sepolia-payment-and-recovery-verified",
+  "mainnetReady": false,
+  "pr": {
+    "headRefOid": "e4db444ee98abf9cc567b8f9bd431d97c1414b95",
+    "mergeCommit": {
+      "oid": "5f764adfa3e06fd77809f19ade28abc680aa0595"
+    },
+    "mergedAt": "2026-10-12T22:13:47Z",
+    "state": "MERGED",
+    "url": "https://github.com/xlnfinance/xln/pull/75"
+  },
+  "ci": {
+    "run": "https://github.com/xlnfinance/xln/actions/runs/38312702314",
+    "requiredJobsPassed": 7,
+    "requiredJobsTotal": 7
+  },
+  "local": {
+    "focusedTests": 66,
+    "assertions": 337,
+    "sourceGates": 38,
+    "uiBuild": true
+  },
+  "deployment": {
+    "seconds": 35,
+    "publicUiFilesVerified": 11,
+    "provider": "https://rpc.sepolia.ethpandaops.io",
+    "coldBackup": "/var/lib/xln/sepolia-20261011/backups/release-e4db444ee-20261012T221353Z",
+    "walRewound": false,
+    "contractsChanged": false,
+    "p6": "Still finalized: collateral=0, activeDispute=false; read-only verification at block 11901815"
+  },
+  "publicJourney": {
+    "transport": "Actual public UI, API and RPC; no response or request routing interception",
+    "fundingRequests": 1,
+    "funded": "100.00 test USDT",
+    "payments": 1,
+    "recipient": "H1",
+    "paid": "25.00 test USDT",
+    "balance": "75.00 test USDT",
+    "initialFailure": "Funding, payment and remaining balance passed. Reload /assets returned nginx 403 because try_files included a directory probe.",
+    "fix": "Removed $uri/ from nginx SPA try_files. Five real public routes return the exact index.html.",
+    "resumedWithoutRepeatingFinancialActions": true,
+    "recoveryChecks": 2,
+    "javascriptErrors": 0,
+    "homeScreenshot": "public-wallet-e4db444ee.png",
+    "fundingSecurity": "Faucet creates an unsecured test claim; this is not collateral or mainnet-money evidence."
+  },
+  "operatorConfig": {
+    "nginxSha256": "64d5d0e5c40e1f1c0e4173f7664c46644c35d30a8843ba65cb6afc676e160540"
+  },
+  "proof": {
+    "path": "release-e4db444ee-proof.tar.gz",
+    "sha256": "26493227216a680c1d3aee88dd3ea9d97f795c5270d608f5ff768f268de344db",
+    "files": [
+      {
+        "path": "wallet-e4db444ee-focused.log",
+        "bytes": 17493,
+        "sha256": "3b0f0e3c4f7f1876bc49b2627ded20ddf2fa154cb5290bd70fb0b148222eb1ce"
+      },
+      {
+        "path": "wallet-e4db444ee-check.log",
+        "bytes": 117669,
+        "sha256": "751e0f486c821196680b2f3c3aa7801ba479509bd9a967b15c116dd9e86f7fd1"
+      },
+      {
+        "path": "wallet-e4db444ee-build.log",
+        "bytes": 5081,
+        "sha256": "1d3d5646d256d879642f3a435796b3bc6c7f88ee3cef609a9fde68648af0206c"
+      },
+      {
+        "path": "wallet-e4db444ee-provider-preview.log",
+        "bytes": 2166,
+        "sha256": "1ede7b03fb86a263c4949b58207801a184641e726ed2c401e7e4a29dd8781298"
+      },
+      {
+        "path": "wallet-e4db444ee-fresh-preview.log",
+        "bytes": 3986,
+        "sha256": "425addf238a61b2a67bfdee3211e8d926bcb0646fd10ed07853bef65aab37187"
+      },
+      {
+        "path": "release-e4db444ee-ci.json",
+        "bytes": 19460,
+        "sha256": "ff7fa6b3b8a2eb0caeabcb585422cfe26c83eba8d063faa42ade6dc95110cb7e"
+      },
+      {
+        "path": "release-e4db444ee-pr.json",
+        "bytes": 224,
+        "sha256": "e7092b34806c46956b1a01cb866765c6174e0854decb23572106cfdee19864c2"
+      },
+      {
+        "path": "release-e4db444ee-manifest.json",
+        "bytes": 2295,
+        "sha256": "546da8eded377670ede0fd2746b0794948d931a6f12e562e9c2ad2ebf541093c"
+      },
+      {
+        "path": "release-e4db444ee-stage.log",
+        "bytes": 122,
+        "sha256": "16a387ad8345e063553d8b05c0abb61170f4f7b6345d851ab4b13ea71c73ce5c"
+      },
+      {
+        "path": "release-e4db444ee-promote.log",
+        "bytes": 799,
+        "sha256": "4a376ea04a32e2032dd2bcdbbba4e74e28913f62af5875b9cf0abc5c53265d5b"
+      },
+      {
+        "path": "release-e4db444ee-public-assets.json",
+        "bytes": 561,
+        "sha256": "59e258bede2a7648c263ae11675928697afc66892e3d19e5f18e63f7a1581647"
+      },
+      {
+        "path": "release-e4db444ee-spa-routes.log",
+        "bytes": 337,
+        "sha256": "84f17c4547be00af940eaaeca082aa5acd1dce435012cf0f5ea0396c86886736"
+      },
+      {
+        "path": "public-wallet-e4db444ee.log",
+        "bytes": 510,
+        "sha256": "6fdf983c377b1fd7dbf5b762484054912a503c1e17d9670a7010b1f3880e0f63"
+      },
+      {
+        "path": "public-wallet-e4db444ee-recover.log",
+        "bytes": 496,
+        "sha256": "219e8ab07662f20408d92d8bb3be47b4531029d3d7b615851c3e5b335c502c5e"
+      },
+      {
+        "path": "public-wallet-e4db444ee-view.log",
+        "bytes": 224,
+        "sha256": "b57778b58ae4788b6a940b33c7c98f8077a3e1ad993648d8eb91ddd73c8fffb0"
+      },
+      {
+        "path": "public-wallet-e4db444ee.ts",
+        "bytes": 5102,
+        "sha256": "8129f10175c0d31c910d26e6e20a39511352755e284fc41879e5adbf75583026"
+      },
+      {
+        "path": "public-wallet-e4db444ee-recover.ts",
+        "bytes": 2940,
+        "sha256": "915e09285e9c9d780e7cb4a50087fcbbe05e1163c387ebfb32b4511754a46c66"
+      },
+      {
+        "path": "public-wallet-e4db444ee-view.ts",
+        "bytes": 1255,
+        "sha256": "2cbcd2fc83f793955d7b411c20200ba874dc323be91303efeb24c38cd6116560"
+      },
+      {
+        "path": "public-wallet-e4db444ee.png",
+        "bytes": 345643,
+        "sha256": "6d2fac315ac686be4419df6e9810a121c9714ebdab6c823098f754b98e18cc1e"
+      },
+      {
+        "path": "release-e4db444ee-server/after-config.sha256",
+        "bytes": 446,
+        "sha256": "b089210768b59a84a35c51149a61e96838eb2fad199a5136abfbdcb414ad9ab3"
+      },
+      {
+        "path": "release-e4db444ee-server/candidate-health.json",
+        "bytes": 11590,
+        "sha256": "706c246611da16b8de045fbb2018c58bad09eb989aedf1197216a94d97daf8a9"
+      },
+      {
+        "path": "release-e4db444ee-server/candidate-p6-chain.json",
+        "bytes": 160,
+        "sha256": "6838ff498d0205ea4c6458703ad739cbbddd61ebba6dccc44fbad061bfd01b1b"
+      },
+      {
+        "path": "release-e4db444ee-server/candidate-p6-local.json",
+        "bytes": 1147,
+        "sha256": "b5a79671273f70a5e538b54793321e034b301fe0d56c0419a3b867971010abce"
+      },
+      {
+        "path": "release-e4db444ee-server/candidate-tower.json",
+        "bytes": 603,
+        "sha256": "e9947b4fe63db3bc2ee15a46731272aff99b760d02c61ef5d39223f4c291a031"
+      },
+      {
+        "path": "release-e4db444ee-server/nginx.conf",
+        "bytes": 2193,
+        "sha256": "64d5d0e5c40e1f1c0e4173f7664c46644c35d30a8843ba65cb6afc676e160540"
+      },
+      {
+        "path": "release-e4db444ee-server/public-health.json",
+        "bytes": 4323,
+        "sha256": "ad11a713cd1dd6bb2d6102b88dde5ae1a8e733757dd44c190a9d7fbc3948633c"
+      },
+      {
+        "path": "release-e4db444ee-server/state.sha256",
+        "bytes": 149,
+        "sha256": "31b173fa821d81d208984c4334001997e90121e959d88b798cb85f56ad05e2d4"
+      }
+    ]
+  }
+}

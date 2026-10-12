@@ -48,7 +48,7 @@ nginx (once, inside the 443 server block, before "location /"):
     location = /ui { return 301 /ui/; }
     location ^~ /ui/ {
         alias $UI_TREE/ui/dist/;
-        try_files \$uri \$uri/ /ui/index.html;
+        try_files \$uri /ui/index.html;
         add_header Content-Security-Policy "frame-ancestors 'self'" always;
         location ~* /ui/assets/ { expires 1y; add_header Cache-Control "public, immutable"; }
         location ~* /ui/(runtime|account-worker)\.js$ { add_header Cache-Control "no-store, must-revalidate"; }
