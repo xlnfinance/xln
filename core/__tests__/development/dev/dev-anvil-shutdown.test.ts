@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { safeStringify } from '../../../protocol/serialization';
@@ -48,7 +48,9 @@ try {
 // Run under stand:run: this deliberately exercises the production launcher,
 // supervisor and both real Anvil chains, including group-signal forwarding.
 test('launcher shutdown preserves Anvil code and the exact mined block across reload', async () => {
-  const data = mkdtempSync(join(tmpdir(), 'xln-anvil-shutdown-regression-'));
+  const temporary = mkdtempSync(join(tmpdir(), 'xln-anvil-shutdown-regression-'));
+  const data = join(temporary, 'data');
+  mkdirSync(data);
   const launcher = Bun.spawn(['bun', '-e', launcherSource], {
     cwd: repo, stdout: Bun.file(join(data, 'launcher.log')), stderr: Bun.file(join(data, 'launcher-error.log')),
     env: { ...process.env, NODE_ENV: 'production', XLN_DEV_DATA_ROOT: data, XLN_DEV_LOG_DIR: join(data, 'logs'),
@@ -59,7 +61,9 @@ test('launcher shutdown preserves Anvil code and the exact mined block across re
   let passed = false;
   try {
     await waitReady(async () => {
-      if (launcher.exitCode !== null) throw new Error(`LAUNCHER_EXITED:${launcher.exitCode}:${data}`);
+      if (launcher.exitCode !== null) {
+        throw new Error(`LAUNCHER_EXITED:${launcher.exitCode}:${data}:${await Bun.file(join(data, 'launcher-error.log')).text()}`);
+      }
       // A pre-existing dev server can be healthy while our launcher fails its
       // singleton lease. Never mutate that unrelated chain as test evidence.
       if (!(await Bun.file(join(data, 'launcher.log')).text()).includes('DEV_BOOTING ')) return false;
@@ -94,7 +98,7 @@ test('launcher shutdown preserves Anvil code and the exact mined block across re
     if (launcher.exitCode === null) launcher.kill('SIGTERM');
     await launcher.exited;
     if (restored) { if (restored.exitCode === null) restored.kill('SIGTERM'); await restored.exited; }
-    if (passed) rmSync(data, { recursive: true, force: true });
+    if (passed) rmSync(temporary, { recursive: true, force: true });
     else console.error(`ANVIL_SHUTDOWN_FAILURE_EVIDENCE:${data}`);
   }
 }, 55_000);

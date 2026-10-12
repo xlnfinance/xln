@@ -2,10 +2,8 @@
  * What makes this wallet sovereign, as facts the runtime can prove: where the
  * keys are, which frames both sides signed, what a counterparty could walk
  * away with, and how long each side has to answer a dispute. Everything here
- * is read from the account documents; the evidence bundle is the same hankos
- * a dispute would put on-chain.
+ * is read from the account documents.
  */
-import type { RuntimeAdapterViewFrame } from '@xln/core/api/public/runtime-module';
 import type { AccountView } from '../views';
 import { usdOf } from './prices';
 
@@ -70,53 +68,4 @@ export function formatDuration(seconds: number): string {
 	if (seconds % 3_600 === 0) return `${seconds / 3_600} h`;
 	if (seconds % 60 === 0) return `${seconds / 60} min`;
 	return `${seconds} s`;
-}
-
-/**
- * The portable proof of every account: frame hashes and both parties' hankos,
- * plus the dispute-proof hankos. Enough to start a dispute from any runtime.
- */
-export function evidenceBundle(frame: RuntimeAdapterViewFrame | null, accounts: AccountView[], entityId: string): Record<string, unknown> {
-	const core = frame?.activeEntity?.core;
-	return {
-		format: 'xln-wallet-evidence/1',
-		exportedAt: new Date().toISOString(),
-		entityId,
-		runtimeHeight: frame?.height ?? 0,
-		entityHeight: core?.height ?? 0,
-		jurisdiction: core?.config?.jurisdiction
-			? { name: core.config.jurisdiction.name, depositoryAddress: core.config.jurisdiction.depositoryAddress, entityProviderAddress: core.config.jurisdiction.entityProviderAddress }
-			: null,
-		accounts: accounts.map(account => {
-			const doc = account.doc;
-			const frameDoc = doc.currentFrame;
-			return {
-				counterpartyId: account.counterpartyId,
-				leftEntity: doc.state?.leftEntity,
-				rightEntity: doc.state?.rightEntity,
-				height: frameDoc?.height ?? 0,
-				frameHash: frameDoc?.stateHash ?? null,
-				accountStateRoot: frameDoc?.accountStateRoot ?? null,
-				prevFrameHash: frameDoc?.prevFrameHash ?? null,
-				jHeight: frameDoc?.jHeight ?? null,
-				ourFrameHanko: doc.currentFrameHanko ?? null,
-				theirFrameHanko: doc.counterpartyFrameHanko ?? null,
-				disputeProof: {
-					ourHanko: doc.currentDisputeProofHanko ?? null,
-					ourNonce: doc.currentDisputeProofNonce ?? null,
-					ourBodyHash: doc.currentDisputeProofBodyHash ?? null,
-					theirHanko: doc.counterpartyDisputeProofHanko ?? null,
-					theirNonce: doc.counterpartyDisputeProofNonce ?? null,
-					theirBodyHash: doc.counterpartyDisputeProofBodyHash ?? null,
-				},
-				disputeConfig: doc.state?.disputeConfig ?? null,
-				status: doc.status ?? 'active',
-			};
-		}),
-	};
-}
-
-/** JSON with bigints as strings, ready for a Blob download. */
-export function serializeEvidence(bundle: Record<string, unknown>): string {
-	return JSON.stringify(bundle, (_key, value: unknown) => (typeof value === 'bigint' ? value.toString() : value), 2);
 }

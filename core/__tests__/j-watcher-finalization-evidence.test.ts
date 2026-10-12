@@ -53,7 +53,7 @@ describe('J watcher DisputeFinalized calldata evidence', () => {
       [bytes32('11'), params, 25n, 3n, '0x0304'],
     );
 
-    expect(decodeDisputeFinalizationEvidenceCalldata(calldata)).toEqual([expectedEvidence]);
+    expect(decodeDisputeFinalizationEvidenceCalldata(calldata)).toEqual([{ ...expectedEvidence, sig: '0x' }]);
   });
 
   test('keeps the processBatch finalization path byte-for-byte equivalent', () => {

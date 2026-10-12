@@ -1,14 +1,16 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Bar } from '../components/Bars';
 import { CopyId } from '../components/CopyId';
 import { Icon } from '../components/Icons';
 import { Watchtower } from '../components/Watchtower';
-import { getAdapter } from '../runtime/adapter';
+import { getAdapter, getEmbeddedEnv } from '../runtime/adapter';
 import { useApp } from '../runtime/store';
 import { formatUsd, shortId, timeAgo } from '../runtime/format';
 import { useWallet } from '../runtime/views';
-import { accountSafety, evidenceBundle, formatDuration, serializeEvidence } from '../runtime/financial/sovereignty';
+import { accountSafety, formatDuration } from '../runtime/financial/sovereignty';
+import { encryptTip } from '../runtime/recovery';
+import { getXLN } from '../runtime/xln-loader';
 
 /**
  * The certainty screen. Not balances: who holds the keys, which state is
@@ -20,6 +22,9 @@ export function Sovereignty() {
 	const entityId = useApp(s => s.activeEntityId);
 	const vaults = useApp(s => s.vaults);
 	const activeVaultId = useApp(s => s.activeVaultId);
+	const sessionSeeds = useApp(s => s.sessionSeeds);
+	const [exporting, setExporting] = useState(false);
+	const [exportError, setExportError] = useState<string | null>(null);
 	const toast = useApp(s => s.toast);
 	const wallet = useWallet(entityId);
 	const vault = vaults.find(entry => entry.id === activeVaultId) ?? null;
@@ -43,16 +48,25 @@ export function Sovereignty() {
 					? `Held by the runtime at ${vault.remote?.wsUrl ?? '—'}. This device only reads and, with an admin key, instructs.`
 					: 'A throwaway tour phrase on the live network. Test money only.';
 
-	const exportEvidence = (): void => {
-		const text = serializeEvidence(evidenceBundle(wallet.frame, wallet.accounts, wallet.entityId));
-		const blob = new Blob([text], { type: 'application/json' });
-		const url = URL.createObjectURL(blob);
-		const anchor = document.createElement('a');
-		anchor.href = url;
-		anchor.download = `xln-evidence-${wallet.entityId.slice(2, 10)}-${wallet.frameHeight}.json`;
-		anchor.click();
-		setTimeout(() => URL.revokeObjectURL(url), 1_000);
-		toast('Evidence bundle saved');
+	const seed = activeVaultId ? sessionSeeds[activeVaultId] : undefined;
+	const exportEvidence = async (): Promise<void> => {
+		setExportError(null);
+		setExporting(true);
+		try {
+			const env = getEmbeddedEnv();
+			if (!env || !seed) throw new Error('Unlock this wallet on this device to save a backup.');
+			const bundle = await encryptTip(await getXLN(), env, seed);
+			if (!bundle) throw new Error('There is no committed wallet state to back up yet.');
+			const url = URL.createObjectURL(new Blob([JSON.stringify({ bundle })], { type: 'application/json' }));
+			const anchor = document.createElement('a');
+			anchor.href = url;
+			anchor.download = `xln-recovery-${wallet.entityId.slice(2, 10)}.json`;
+			anchor.click();
+			setTimeout(() => URL.revokeObjectURL(url), 1_000);
+			toast('Encrypted backup saved');
+		} catch (error) {
+			setExportError(error instanceof Error ? error.message : String(error));
+		} finally { setExporting(false); }
 	};
 
 	return (
@@ -165,19 +179,20 @@ export function Sovereignty() {
 							<p className="note" style={{ marginTop: 10 }} data-testid="evidence-preview">
 								Inside: {safety.length} {safety.length === 1 ? 'account' : 'accounts'} ·{' '}
 								{safety.map(entry => `${entry.label} at frame #${entry.frameHeight}${entry.frameCosigned ? ', co-signed' : ''}`).join(' · ')} · both parties&apos;
-								signatures and dispute proofs, as JSON. Nothing in it lets anyone spend.
+								signatures and Account states in an encrypted recovery snapshot.
 							</p>
 						) : null}
 						<button type="button" className="btn quiet" style={{ marginTop: 12, marginRight: 8 }} onClick={() => window.print()} data-testid="sovereignty-print" title="This page as a printed report or PDF, for a board or an auditor">
 							Print report / PDF
 						</button>
-						<button type="button" className="btn" style={{ marginTop: 12 }} onClick={exportEvidence} disabled={safety.length === 0} data-testid="evidence-export">
+						<button type="button" className="btn" style={{ marginTop: 12 }} onClick={exportEvidence} disabled={exporting || !seed || !getEmbeddedEnv()} data-testid="evidence-export">
 							<Icon name="shield" size={15} />
-							Save evidence bundle
+							{exporting ? 'Saving backup…' : 'Save encrypted backup'}
 						</button>
 						<p className="note" style={{ marginTop: 8 }}>
-							Frame hashes and both parties' signatures for every account. Keep it off this device; any runtime can open a dispute from it.
+							Keep a current copy off this device. Restore it with your recovery phrase on a fresh browser profile to recover signed accounts and enforce their claims.
 						</p>
+						{exportError && <p role="alert" className="note">{exportError}</p>}
 					</div>
 				</div>
 				<div className="aside">

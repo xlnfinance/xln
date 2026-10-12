@@ -15,7 +15,8 @@ import { Depository__factory } from '../../../jurisdictions/typechain-types/inde
 
 import { BLOCKCHAIN } from '../../config/constants';
 import { createStructuredLogger } from '../../support/logger';
-import { decodeJBatch, type JBatch } from '../machine/batch';
+import { decodeJBatch, materializeAbiValue, type JBatch } from '../machine/batch';
+import { validateProofBody } from '../machine/batch-validation';
 import { PROOF_BODY_ABI } from '../../protocol/dispute/proof-body';
 import type { DisputeFinalizationEvidence } from '../../types/jurisdiction-events';
 import { type AuthenticatedReceiptRange, type ReceiptReadProfile } from './receipt-root';
@@ -145,7 +146,12 @@ export const decodeDisputeProofBodyEvidenceCalldata = (
       if (typeof proof !== 'object' || proof === null) {
         throw new Error('J_DISPUTE_PROOFBODY_WATCHTOWER_PROOF_INVALID');
       }
-      const finalProofbody = Reflect.get(proof, 'finalProofbody') as TxDisputeProofBodyEvidence['proofbody'];
+      // ethers Result is a proxy, not cloneable committed state. Use the same
+      // ABI materialization and proof validation as processBatch before ingress.
+      const finalProofbody = validateProofBody(
+        materializeAbiValue(DISPUTE_PROOF_BODY_PARAM, Reflect.get(proof, 'finalProofbody'), 'watchtower.proofbody'),
+        'J_DISPUTE_PROOFBODY_WATCHTOWER',
+      ) as TxDisputeProofBodyEvidence['proofbody'];
       const evidence = {
         counterentity: toFinalizationHex(Reflect.get(proof, 'counterentity')),
         nonce: toFinalizationDecimal(Reflect.get(proof, 'finalNonce')),
@@ -236,7 +242,10 @@ export const decodeDisputeFinalizationEvidenceCalldata = (data: string): TxFinal
           leftArguments: startedByLeft ? starterArguments : otherArguments,
           rightArguments: startedByLeft ? otherArguments : starterArguments,
           startedByLeft,
-          sig: toFinalizationHex(Reflect.get(proof, 'sig')),
+          // Depository authorizes the selected counter, then clears this repeated
+          // inner signature before emitting its finalization evidence commitment.
+          // Match the executed parameters; retaining calldata.sig halts every watcher.
+          sig: '0x',
         },
       ];
     }

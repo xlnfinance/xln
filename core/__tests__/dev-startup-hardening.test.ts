@@ -342,8 +342,10 @@ test('full dev preparation preserves state when a required port belongs to anoth
     port: 0,
     fetch: () => new Response('foreign-listener-alive'),
   });
-  const root = mkdtempSync(join(tmpdir(), 'xln-dev-prepare-preflight-'));
-  tempRoots.push(root);
+  const temporary = mkdtempSync(join(tmpdir(), 'xln-dev-prepare-preflight-'));
+  tempRoots.push(temporary);
+  // Linux /tmp is shallow; use an owned child accepted by the reset guard.
+  const root = join(temporary, 'data');
   const rdbSentinel = join(root, 'rdb', 'sentinel');
   const jdbSentinel = join(root, 'jdb', 'sentinel');
   mkdirSync(join(root, 'rdb'), { recursive: true });

@@ -6,6 +6,10 @@ release. Newer owner instructions and the project's technical rules prevail.
 These are working preferences, not a psychological assessment or permission
 for unlimited actions.
 
+Owner decision, 2026-10-12: changes go through pull requests with required green
+CI and branch protection, replacing the previous direct-main-only rule. Use
+`codex/` branches; commit only owned paths and keep unrelated parked work intact.
+
 Owner instruction, 2026-10-11: prefer the simpler, more reliable general mechanism
 that covers several use cases. Minimize code; delete redundant paths when retained
 financial semantics and recovery are proved. A superset is explicit product terms

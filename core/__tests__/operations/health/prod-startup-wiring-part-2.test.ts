@@ -1146,7 +1146,9 @@ describe('production startup wiring', () => {
     expect(releaseGate.indexOf("'bootstrap soundcheck'")).toBeLessThan(releaseGate.indexOf("'React payment and admission E2E'"));
     expect(releaseGate).toContain('e2e-payment.spec.ts,e2e-lending-availability.spec.ts');
     expect(releaseGate).toContain('e2e-dispute-finality.spec.ts');
+    expect(releaseGate).toContain('e2e-dispute-protection.spec.ts');
     expect(releaseGate).toContain('e2e-tower-restore.spec.ts');
+    expect(releaseGate).toContain('e2e-file-restore.spec.ts');
     expect(releaseGate).not.toContain("command: 'bun run test:e2e:fast'");
     expect(releaseGate).not.toContain("command: 'bun run test:e2e:full'");
     expect(releaseGate).toContain('cleanupTestArtifactsBeforeRun({ reason: `release-gate:${profile}` })');

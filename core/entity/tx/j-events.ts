@@ -1031,6 +1031,14 @@ const selectObservedCounterDispute = (
       );
   if (recoveryPlan) active.crossJurisdictionRecovery = recoveryPlan.recovery;
   else delete active.crossJurisdictionRecovery;
+  // Counter selection is Entity-owned envelope state. Send the same update to
+  // the resident Account before its root is sealed, including when no tx is queued.
+  applyEntityAccountEnvelopeUpdate(context.env, resolved.counterpartyId, account, {
+    type: 'replaceDisputeLifecycle',
+    status: account.status,
+    ...(account.disputePrepare ? { disputePrepare: account.disputePrepare } : {}),
+    activeDispute: active,
+  });
   return { account, proofbody: selectedProofbody };
 };
 
