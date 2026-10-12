@@ -1,0 +1,117 @@
+{
+  "recordedAt": "2026-10-12T00:13:38.711Z",
+  "sourceSha": "10acbf85806b832d86f2f6e2291147393fd48a02",
+  "sourceTreeCleanBeforeAndAfter": true,
+  "scope": "Two test-harness corrections; no runtime, contract or financial semantics changed.",
+  "changes": [
+    "Observe each native crypto worker close before waiting for all siblings to become ready. Keep the no-top-level-await liveness assertion and all 16 native worker signature checks.",
+    "Give the real-store import/replay/reopen regression 15 seconds rather than 5 seconds; preserve every hash, recovery and nonempty-destination assertion."
+  ],
+  "verification": [
+    {
+      "command": "bun run check",
+      "exitCode": 0,
+      "logSha256": "dd4cfe8cdf5ff17bed47881aebbb0059a7947e97ca57750b1de8d4c977209c66",
+      "summary": [
+        "PARALLEL_CHECKS_OK gates=2",
+        "Ran 15 tests for test/foundry/Depository.invariants.t.sol:DepositoryInvariants",
+        " 18 pass",
+        " 0 fail",
+        " 95 expect() calls",
+        "Ran 18 tests across 3 files. [1015.00ms]",
+        " 4 pass",
+        " 0 fail",
+        " 522 expect() calls",
+        "Ran 4 tests across 1 file. [11.00ms]",
+        " 3 pass",
+        " 0 fail",
+        " 5 expect() calls",
+        "Ran 3 tests across 1 file. [7.00ms]",
+        "PARALLEL_CHECKS_OK gates=2",
+        " 16 pass",
+        " 0 fail",
+        " 182 expect() calls",
+        "Ran 16 tests across 3 files. [13.78s]",
+        " 7 pass",
+        " 0 fail",
+        " 86 expect() calls",
+        "Ran 7 tests across 1 file. [1211.00ms]",
+        "PARALLEL_CHECKS_OK gates=38",
+        "PASS check:src 25675ms",
+        "PARALLEL_CHECKS_OK gates=3"
+      ]
+    },
+    {
+      "command": "bun test core/__tests__/protocol",
+      "exitCode": 0,
+      "logSha256": "2095781a1886900d3bf37b1cd68b51b116b49cbee2b885e316be4776e646b436",
+      "summary": [
+        " 71 pass",
+        " 0 fail",
+        " 4840 expect() calls",
+        "Ran 71 tests across 14 files. [2.24s]"
+      ]
+    },
+    {
+      "command": "bun test core/__tests__/storage/recovery",
+      "exitCode": 0,
+      "logSha256": "71943b1961425f096d651479db89f9e44caf25537f0dd8885a33d746b702144d",
+      "summary": [
+        " 65 pass",
+        " 0 fail",
+        " 310 expect() calls",
+        "Ran 65 tests across 17 files. [24.90s]"
+      ]
+    }
+  ],
+  "previousCi": {
+    "sourceSha": "e6e7cb847b6275e14fb119c04eff8b3e23fea830",
+    "url": "https://github.com/xlnfinance/xln/actions/runs/38185673486",
+    "status": "completed",
+    "conclusion": "failure",
+    "successfulJobs": [
+      "Frontend Build",
+      "Scenario lock-ahb",
+      "Contracts",
+      "React Wallet Types",
+      "Runtime Checks",
+      "E2E Tests"
+    ],
+    "failedJob": "Unit Tests",
+    "failedShards": [
+      "core/__tests__/protocol",
+      "core/__tests__/storage"
+    ],
+    "reproducedCiFailures": [
+      "Native worker lifecycle child exited 0 without the completion marker.",
+      "Atomic recovery recording import exceeded 5000ms, after which cleanup raced the still-running replay."
+    ],
+    "react": {
+      "passed": 7,
+      "skipped": 0,
+      "groups": [
+        {
+          "name": "payment and admission",
+          "passed": 4,
+          "fullStandSeconds": 108.8
+        },
+        {
+          "name": "dispute P4/P5",
+          "passed": 2,
+          "fullStandSeconds": 116
+        },
+        {
+          "name": "recovery",
+          "passed": 1,
+          "fullStandSeconds": 90.9
+        }
+      ]
+    }
+  },
+  "limits": [
+    "The corrected candidate still requires GitHub CI; no consecutive green whole-workflow runs are claimed.",
+    "The new uncommitted P6 test remains red at watchtower finalization evidence decoding; its fix awaits owner approval to change two macOS-immutable files.",
+    "Eight existing CI unit exclusions remain; selected green tests do not prove zero failing units repository-wide.",
+    "This artifact is not public Sepolia P4-P6 acceptance or a mainnet release authorization."
+  ]
+}
