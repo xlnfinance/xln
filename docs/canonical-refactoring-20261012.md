@@ -241,6 +241,10 @@ client). All 11 archived files and three HTTP entrypoints match; Runtime and
 worker bytes are unchanged. The corrected archive supersedes d450's UI only.
 The existing CI/release runner now includes this production artifact test.
 [First failure, correction and production proof](evidence/canonical-review-20261012/exact-ui-artifact-5e6d08a16.json).
+The CI integration was then checked on clean `b225f8ac4`: 38 source gates,
+React types, 40 related unit tests / 766 assertions, and the same UI-only
+flow in dev mode (1/1). Production sources are unchanged from `5e6d08a16`.
+[Final integration evidence](evidence/canonical-review-20261012/compiled-ui-ci-b225f8ac4.json).
 
 The live queue stays in [todo.md](../todo.md). This table is the reviewed design,
 not another backlog or an instruction to run all changes together.

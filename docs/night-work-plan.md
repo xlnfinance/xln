@@ -4,7 +4,11 @@ Owner scope: TS + React + Ethereum same-J; Rust and lending remain frozen.
 Foreign Rust stash `438bf1a6ddd8679bba0b63bdef11dd1fd1f45e90` is untouched.
 Keep frozen-core, PRs with seven required green jobs, no WIP commits.
 
-- Current branch: codex/ts-worker-boundary. Latest clean source fc4f267db
+- Current branch: codex/ts-worker-boundary. Clean b225f8ac4 passes 38 source
+  gates, React types, 40 related tests / 766 assertions and UI-only dev
+  funding/payment/reload (1/1). Its production code equals the compiled
+  5e6d08a16 wallet proof below; later changes only wire CI and retain evidence.
+  Financial-core retirement source fc4f267db
   retires the native authority driver/storage hooks, rejects native WAL before
   TS projection/writes and retains exact TS crash/commit/outbox semantics.
   All six bounded checks pass: 155 targeted tests / 1,893 assertions, 38 source
@@ -154,6 +158,14 @@ hashes and absence of debug hooks. Exercise the actual archive before adding
 CI wiring or another abstraction. This changes the next action, not release
 eligibility. The frozen-import/required-CI blocker is unchanged.
 Next scheduled method review: 10:51 UTC.
+Outcome, 10:47 UTC: the actual archive first failed on a shared debug owner,
+then passed after one canonical condition. Production and dev both preserve
+the UI-only funding/payment/reload flow; the existing CI runner now tests
+production bytes. Its first type error was fixed by the existing GateStep
+type, without weakening a gate. This bounded set is green; the frozen-fixture
+test remains red. Its exception has blocked three consecutive goal turns. Further
+release work requires that answer; do not replace it with cosmetic churn.
+Latest check evidence: docs/evidence/canonical-review-20261012/compiled-ui-ci-b225f8ac4.json.
 Existing 30-minute heartbeat `xln-30` remains active. No external-model budget
 was spent or renewed. Earlier method evidence remains in the linked manifests:
 provider quota -> bounded first failure; existing authenticated history -> no

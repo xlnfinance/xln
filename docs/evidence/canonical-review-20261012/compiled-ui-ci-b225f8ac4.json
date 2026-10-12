@@ -1,0 +1,119 @@
+{
+  "schema": "xln-source-evidence/v1",
+  "sourceSha": "b225f8ac410923a113dd862ce0cac205f58eb4e6",
+  "cleanBeforeAndAfterExecution": true,
+  "status": "compiled-ui-gate-integrated-required-pr-ci-still-blocked",
+  "checks": {
+    "check": {
+      "command": "bun run check",
+      "exitCode": 0,
+      "sourceGates": 38,
+      "sourceGatePhaseMs": 26693
+    },
+    "uiTypes": {
+      "command": "bun run --cwd /Users/zigota/xln/ui check",
+      "exitCode": 0
+    },
+    "focused": {
+      "command": "bun test core/__tests__/operations/health/prod-startup-wiring.test.ts core/__tests__/operations/release/mainnet-preflight-gate.test.ts",
+      "exitCode": 0,
+      "tests": 40,
+      "assertions": 766
+    },
+    "devBrowser": {
+      "command": "XLN_LOCAL_PROD_SMOKE_DIR=.logs/canonical-review-20261012/public-ui-dev-b225f8ac4 XLN_LOCAL_PROD_SMOKE_WALLET_TESTS=e2e-production-wallet.spec.ts bun run stand:run --reason public-wallet-dev-regression --timeout-ms 180000 -- bun run prod:smoke:local",
+      "exitCode": 0,
+      "standLockHeld": true,
+      "stats": {
+        "startTime": "2026-10-12T10:44:46.001Z",
+        "duration": 17243.060999999998,
+        "expected": 1,
+        "skipped": 0,
+        "unexpected": 0,
+        "flaky": 0
+      },
+      "errors": 0,
+      "scope": "Same UI-only import/fund/move/pay/reload flow in Vite development mode; confirms mode assertions without skipping the financial flow."
+    }
+  },
+  "productionProof": "exact-ui-artifact-5e6d08a16.json",
+  "sourceDeltaFromProductionProof": "Only release-runner, workflow and docs/evidence changed; no React/shared-wallet/Runtime/contract production source change.",
+  "intermediateFailure": {
+    "sourceSha": "a2f89b4c4361a2f54082514eb69784abcf185d43",
+    "checkExitCode": 1,
+    "error": "TS2769: concat inferred four literal step names, rejecting two new production steps.",
+    "fix": "Map explicitly returns the existing GateStep type; no type cast or assertion weakened.",
+    "logSha256": "d31179b03c8a8df0d1aa316f9b7dece2e30944cde94cb2f27d7c84a9d0aa3dc6"
+  },
+  "prObservation": {
+    "number": 73,
+    "head": "72c38fa4b9868f8be52416f5b157504e061719db",
+    "state": "OPEN",
+    "mergeStateStatus": "BLOCKED",
+    "success": 6,
+    "failure": 1,
+    "failedJob": "Unit Tests",
+    "scope": "Read-only GitHub CLI result; no push or new CI run.",
+    "observedDate": "2026-10-12"
+  },
+  "artifacts": [
+    {
+      "id": "check",
+      "file": "compiled-ui-ci-b225f8ac4-check.log.gz",
+      "bytes": 15201,
+      "sha256": "927dbd00f9d49a578f0d80b2dd40f845d72a93796970de214c4dbd06021f399e",
+      "rawBytes": 116964,
+      "rawSha256": "d78e256259a973ef93243a64f3888f93f24302cf7c18435f80c72edfa2ed59cf"
+    },
+    {
+      "id": "focused",
+      "file": "compiled-ui-ci-b225f8ac4-focused.log.gz",
+      "bytes": 1647,
+      "sha256": "7bfb6eb2caa61c27ef4034b72eeb8b548e1986eb96e9d368c77ed254e2b365f8",
+      "rawBytes": 4681,
+      "rawSha256": "c1be491f0a8153f6c776045cf001d613ce5438411850e375a07cce3cea18f3bc"
+    },
+    {
+      "id": "ui-types",
+      "file": "compiled-ui-ci-b225f8ac4-ui-types.log.gz",
+      "bytes": 49,
+      "sha256": "ef4fe67f117a1e0c4bb62ee2d23cc0994765403412c20d1089d98be8428c1bc9",
+      "rawBytes": 32,
+      "rawSha256": "70685b4df7789c854b9e1ceab7d78a6d0f9a0831c11eb0010b7b5fdbe0e50c39"
+    },
+    {
+      "id": "dev-stand",
+      "file": "compiled-ui-ci-b225f8ac4-dev-stand.log.gz",
+      "bytes": 2041,
+      "sha256": "a2a30239e33dcf3be867ccf304bcf24c9ffc34a8bd511423352fc70d29b278ba",
+      "rawBytes": 23718,
+      "rawSha256": "e66c4708a952b1543c44db6bd6f0bf03ddee6070458d79b9680ab9bce780654a"
+    },
+    {
+      "id": "dev-browser",
+      "file": "compiled-ui-ci-b225f8ac4-dev-browser.log.gz",
+      "bytes": 305,
+      "sha256": "633a59f08f08358dbb0dc22ddc1a16add022b9c210a5830b1379609e4ebf0360",
+      "rawBytes": 401,
+      "rawSha256": "585ef5a4fba2baad7397d5202e4a3ebe5a918323991381469d0b88470810f0de"
+    },
+    {
+      "id": "dev-results",
+      "file": "compiled-ui-ci-b225f8ac4-dev-results.json.gz",
+      "bytes": 289,
+      "sha256": "6428c2f1a0f2d858ec9f0e74594c79051ffabc33a3badd248a9c2de200a1eafc",
+      "rawBytes": 557,
+      "rawSha256": "4c8ea47fdcd811f9701aa7d5014682f9da7a4efa6ed4b3a7f44f53f7c32c6338"
+    }
+  ],
+  "originalDevReport": {
+    "sha256": "87a3eb17a4cb869d91582ebb1ec601071c169426d999e0db42f8df5b760965fa",
+    "bytes": 4361,
+    "projection": "Only stats, case names/results and errors retained; no attachment bodies/paths, config, wallet profile or trace."
+  },
+  "limitations": [
+    "Forty related unit tests and named browser flows only; not full unit/E2E coverage.",
+    "Two old imports under explicitly frozen rscore/ still await owner exception. No aliases or skips added.",
+    "No deployed service recovery, new public-chain transaction, current PR-green or mainnet-readiness claim."
+  ]
+}
