@@ -268,7 +268,6 @@ export const deriveAggregatedSystemStatus = (input: {
     input.marketMakerOk ? null : 'marketMaker',
     input.custodyOk ? null : 'custody',
     input.bootstrapReservesOk ? null : 'bootstrapReserves',
-    input.bootstrapReserveTargetsMet ? null : 'bootstrapReserveTargets',
   ].filter((value): value is string => Boolean(value));
   return { coreOk, systemOk, degraded };
 };

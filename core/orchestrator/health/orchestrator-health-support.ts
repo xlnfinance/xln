@@ -67,7 +67,6 @@ export const createHealthRecomputer = (
     crossOk ? null : 'marketMakerCross',
     health.custody.ok ? null : 'custody',
     health.bootstrapReserves.ok ? null : 'bootstrapReserves',
-    health.bootstrapReserves.targetMet ? null : 'bootstrapReserveTargets',
   ].filter((value): value is string => Boolean(value));
   if (!marketMaker.ok && sameChainOk && !crossOk) {
     warnCrossOnly({

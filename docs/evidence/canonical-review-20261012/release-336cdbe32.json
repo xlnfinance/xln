@@ -1,0 +1,125 @@
+{
+  "sourceSha": "336cdbe322b34335fb2a2c8ce499cf9633eecdfc",
+  "sourceCleanDuringChecks": true,
+  "sourceChangesSinceD29": [
+    "core/__tests__/operations/hlt/hlt-cross.test.ts",
+    "core/__tests__/storage/recovery/storage-crash-recovery.test.ts",
+    "core/__tests__/storage/schema/storage-schema-version.test.ts",
+    "docs/night-work-plan.md"
+  ],
+  "unit": {
+    "passed": 30,
+    "failed": 0,
+    "assertions": 124
+  },
+  "check": {
+    "exitCode": 0,
+    "sourceGates": 38,
+    "sourceDurationMs": 26439
+  },
+  "collision": {
+    "exitCode": 0,
+    "pendingFrames": 0
+  },
+  "ciRun": "https://github.com/xlnfinance/xln/actions/runs/38301405194",
+  "ciStatus": "success",
+  "stagedUiFiles": 11,
+  "mainnetReady": false,
+  "artifacts": [
+    {
+      "file": "ci-fixtures-336cdbe32-related.log.gz",
+      "rawSha256": "3d1cdf80442897ee33c8ce66d066bd07f61ac7350ba264c10a13014098aed21d",
+      "sha256": "b8edbf8054ea6da302d7215329d4d03db386628fbc5636712df8fa2374967217"
+    },
+    {
+      "file": "ci-fixtures-336cdbe32-check.log.gz",
+      "rawSha256": "8ecde4c29897a3b3dcbc0403de9650b0f37d3be0524f73e13f08f490a2f04802",
+      "sha256": "8a79cd281c4967031cf5572b81049929f76b13d4663cc2d4f9439c8cb6020535"
+    },
+    {
+      "file": "ci-336cdbe32-collision.log.gz",
+      "rawSha256": "8c9bbe73b9d739a6f367c410bfbeea31e055d70b7d09b0eb2bfd1f91d2f22650",
+      "sha256": "bc37f0935e7cad1f2c339c075f2930e7b34eab68e0c2d84633266e7d4828ff37"
+    },
+    {
+      "file": "release-336cdbe32-stage.log.gz",
+      "rawSha256": "330155d71809e51b0c448dc7c9b23083cd6f2657320d31dabb2e8b9f8611cc20",
+      "sha256": "6c0a74bf51c96d692f027efaabdde1201a91abe31b45d4af54464ed5efdab5aa"
+    },
+    {
+      "file": "release-336cdbe32-disk-cleanup.log.gz",
+      "rawSha256": "23a6288284bc87d68ccf9c225beebd5196a58ddad985ca7348a1c9382841a730",
+      "sha256": "735409cff155f6db7ccb615292d8969374a70035428a5fe6ac45f9577c53bf13"
+    },
+    {
+      "file": "release-336cdbe32-p6-chain.log.gz",
+      "rawSha256": "8b81b28c0e9b368ea023b7dfade5bd60799b2078a05cf26c96f44f9d6a512165",
+      "sha256": "ad0855771ee183ecee13772621e6cdf2c27c1677cba44df7d237f59468372ed7"
+    }
+  ],
+  "ciRequiredJobsPassed": 7,
+  "ciRequiredJobsTotal": 7,
+  "mergedSha": "d1eb4f2d7f0505a7d02f6c1404868e221958a6a4",
+  "mergedAt": "2026-10-12T20:27:25Z",
+  "publicActivated": false,
+  "rollout": {
+    "startedPrivately": true,
+    "healthPassed": false,
+    "coreOk": true,
+    "systemOk": false,
+    "failure": "bootstrap waited for the original 2000000 USDT reserve after a valid 200 USDT P6 exit; actual reserve 1999800 USDT remains operational",
+    "maintenance": true,
+    "mainStopped": true,
+    "towerStopped": true,
+    "originalColdBackupSha256": "c93a00210c2b3eeb80192ba67c81db33e681bd86108b6c247213de22aefb1187",
+    "deployedH1ArchiveSha256": "b1c9122bea50a041fbdc647ca9c25c5b0e3fe3e3847bd5f866826a50835722cd"
+  },
+  "deployedH1ColdRestore": {
+    "activeDispute": false,
+    "collateral": "0",
+    "entityRoots": [
+      {
+        "cellCount": 1,
+        "entityId": "0x2d08d3bb8f4102fb07fecef0b59f052139c99aa996239ebfc55baac82ac54dd6",
+        "hash": "0x65a3a0c5e68a33be04f29e7948ddf64f12373153245b1047f5f6a0edbd977d93"
+      }
+    ],
+    "frameHash": "0xfd39f988f1d2ce9d2189cfa7ccf073ad433ca967c8b5b257d79b104e061c4997",
+    "height": 4477,
+    "integrity": {
+      "checkedFrames": 128,
+      "latestHeight": 4477,
+      "ok": true,
+      "runtimeId": "0xbe7597d3532df7293b0f0ff82ee0c30fb2fd2737"
+    },
+    "jHeight": 11898053,
+    "networkStarted": false,
+    "outboxDigest": "266dafbe80edea90779bf070cbc40af84ed384bb312bd25fc2b26e69756ed25b",
+    "pending": {
+      "entitySubmit": [
+        {
+          "batchHash": "0x7f5bc0234574eab6dcefa9b52d2a9b89f94d6d5b833d53aac8d8f8c3723e6332",
+          "entityId": "0x2d08d3bb8f4102fb07fecef0b59f052139c99aa996239ebfc55baac82ac54dd6",
+          "lastResultOutcome": "transientFailure",
+          "submitAttempts": 1,
+          "txHash": "0x528ec776a05d08c11030525a0e130f268e3860e3ccd622e5ea1f239f947e1c53"
+        }
+      ],
+      "jOutbox": [],
+      "jurisdictionImports": 0,
+      "networkOutbox": 0,
+      "pendingRegistrations": 0
+    },
+    "postStateHash": "0xef891607bdad16cff03a912fc4ff2b12188e87e6b6ec2cfb6ba7a8ae756dc3f6",
+    "runtimeId": "0xbe7597d3532df7293b0f0ff82ee0c30fb2fd2737",
+    "transactionsSent": 0,
+    "verification": {
+      "actualCanonicalStateHash": "",
+      "actualStateHash": "0xef891607bdad16cff03a912fc4ff2b12188e87e6b6ec2cfb6ba7a8ae756dc3f6",
+      "expectedCanonicalStateHash": "",
+      "expectedStateHash": "0xef891607bdad16cff03a912fc4ff2b12188e87e6b6ec2cfb6ba7a8ae756dc3f6",
+      "ok": true
+    },
+    "verificationSourceArchiveSha256": "f826a61e656ea81d04f6d236ae280c879892beb378763f89e94707619f47b848"
+  }
+}

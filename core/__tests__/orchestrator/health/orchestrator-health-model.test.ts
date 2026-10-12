@@ -1,6 +1,7 @@
 import { expect, test } from 'bun:test';
 
 import { deriveHubRuntimeHealth, deriveResetHealthOk } from '../../../orchestrator/health/health-model';
+import { deriveAggregatedSystemStatus } from '../../../orchestrator/health/aggregated-health-projections';
 import {
   createHealthRecomputer,
   resolveCurrentCapabilityHealth,
@@ -60,6 +61,25 @@ test('orchestrator health latches a reset failure until a fresh reset clears it'
   expect(deriveResetHealthOk({ inProgress: false, lastError: null })).toBe(true);
 });
 
+test('operational reserves keep live health ready below bootstrap targets, but empty reserves do not', () => {
+  const ready = {
+    storageOk: true,
+    hubsOnline: true,
+    hubMeshOk: true,
+    resetOk: true,
+    marketMakerOk: true,
+    custodyOk: true,
+    bootstrapReservesOk: true,
+    bootstrapReserveTargetsMet: false,
+  };
+  expect(deriveAggregatedSystemStatus(ready)).toEqual({ coreOk: true, systemOk: true, degraded: [] });
+  expect(deriveAggregatedSystemStatus({ ...ready, bootstrapReservesOk: false })).toEqual({
+    coreOk: true,
+    systemOk: false,
+    degraded: ['bootstrapReserves'],
+  });
+});
+
 test('a disabled market maker does not degrade recomputed health', () => {
   const recompute = createHealthRecomputer(() => {});
   const health = {
@@ -69,7 +89,7 @@ test('a disabled market maker does not degrade recomputed health', () => {
     hubs: [{ online: true }],
     hubMesh: { ok: true },
     custody: { ok: true },
-    bootstrapReserves: { ok: true, targetMet: true },
+    bootstrapReserves: { ok: true, targetMet: false },
   } as unknown as AggregatedHealth;
   const disabledMarketMaker = {
     enabled: false,
@@ -82,6 +102,11 @@ test('a disabled market maker does not degrade recomputed health', () => {
   expect(disabled.systemOk).toBe(true);
   expect(disabled.degraded).toEqual([]);
   expect(disabled.failures).toEqual([]);
+  expect(disabled.bootstrapReserves.targetMet).toBe(false);
+
+  const empty = recompute({ ...health, bootstrapReserves: { ...health.bootstrapReserves, ok: false } }, disabledMarketMaker);
+  expect(empty.systemOk).toBe(false);
+  expect(empty.degraded).toEqual(['bootstrapReserves']);
 
   const enabled = recompute(health, { ...disabledMarketMaker, enabled: true });
   expect(enabled.degraded).toEqual(['marketMakerSameChain', 'marketMakerCross']);

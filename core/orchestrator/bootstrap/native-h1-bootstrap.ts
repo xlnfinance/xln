@@ -406,10 +406,15 @@ const fundH1OwnedBootstrapReserves = async (
   }
 };
 
-const waitForTsH1LocalReserves = async (deps: NativeH1BootstrapDeps, h1: HubChild): Promise<void> => {
+const waitForTsH1LocalReserves = async (
+  deps: NativeH1BootstrapDeps,
+  h1: HubChild,
+  requireTarget: boolean,
+): Promise<void> => {
   const { resetState } = deps;
   while (resetState.inProgress && h1.proc && h1.exitCode === null && h1.exitSignal === null) {
-    if (h1.lastHealth?.bootstrapReserves?.targetMet === true) return;
+    const reserves = h1.lastHealth?.bootstrapReserves;
+    if (reserves?.ok === true && (!requireTarget || reserves.targetMet === true)) return;
     await scheduler.wait(25);
   }
   throw new Error('TS_H1_LOCAL_RESERVE_BOOTSTRAP_STOPPED');
@@ -436,7 +441,11 @@ const driveH1Bootstrap = async (
     await publishNativeHubProfile(deps, h1);
     logNativeH1Bootstrap('bootstrap_policy_committed', { elapsedMs: Date.now() - bootstrapStartedAt, entityId });
   } else {
-    await waitForTsH1LocalReserves(deps, h1);
+    const devChain = canDeployHubDefaultTokens(resolveMeshJurisdictionConfig(deps.args.rpcUrl).chainId);
+    await waitForTsH1LocalReserves(deps, h1, devChain);
+    // Public reserves can decrease after a valid exit. Only dev chains fund
+    // synthetic targets, including the H2/H3 owners that cannot mint locally.
+    if (!devChain) return;
   }
   await fundH1OwnedBootstrapReserves(deps, entityId, signerId);
   logNativeH1Bootstrap('bootstrap_reserves_funded', { elapsedMs: Date.now() - bootstrapStartedAt, entityId });

@@ -84,6 +84,5 @@ export const resolveRuntimeImportReadiness = (
   }
   if (health.custody?.enabled === true && health.custody.ok !== true) return fail('custody-not-ready');
   if (health.bootstrapReserves?.ok !== true) return fail('bootstrap-reserves-not-ready');
-  if (health.bootstrapReserves.targetMet !== true) return fail('bootstrap-reserve-targets-not-ready');
   return { ok: true };
 };
