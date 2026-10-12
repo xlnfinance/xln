@@ -1,6 +1,6 @@
 import { generateLazyEntityId } from '../../../core/entity/factory';
 import { createEmptyEnv } from '../../../core/runtime';
-import { TsAccountWorkerAuthority } from '../../../core/rscore/ts-worker/provider';
+import { TsAccountWorkerAuthority } from '../../../core/runtime/workers/account/provider';
 import { applyCertifiedEntityHeadPlan, buildCertifiedEntityHeadPlan } from '../../../core/storage/replica/entity-head';
 import type { EntityTx } from '../../../core/types/entity-tx';
 import type { RuntimeReplica } from '../../../core/runtime/types';

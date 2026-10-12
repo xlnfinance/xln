@@ -4,6 +4,15 @@ Owner scope: TS + React + Ethereum same-J; Rust and lending remain frozen.
 Foreign Rust stash `438bf1a6ddd8679bba0b63bdef11dd1fd1f45e90` is untouched.
 Keep frozen-core, PRs with seven required green jobs, no WIP commits.
 
+- Owner authorized the one active TS fixture import correction on October 12.
+  The stale worker path is replaced by the canonical Runtime worker path;
+  settlement-execute-atomicity now passes 2/2 with 31 assertions (1.355s).
+  This first run was on the uncommitted patch, not release evidence. Next:
+  commit this bounded correction, run related settlement tests and `bun run check`
+  on the clean SHA, then update PR #73 and resolve its first required CI failure.
+  Continue to Sepolia rollout/recovery after green CI. No other `rscore/` edit
+  is authorized; the earlier pending-permission entries below are historical.
+
 - Latest owner-report review: clean 9fa2a4bf6 passes full `bun run check`
   (38 source gates, React types, Svelte build/types) and both real React faucet
   journeys (2/2, no skips/flakes/errors). The unchanged production implementation

@@ -10,6 +10,11 @@ Owner decision, 2026-10-12: changes go through pull requests with required green
 CI and branch protection, replacing the previous direct-main-only rule. Use
 `codex/` branches; commit only owned paths and keep unrelated parked work intact.
 
+Owner exception, 2026-10-12: repair the single TypeScript worker import in
+`rscore/fixtures/entity-resident-group-e/group-e.ts`, then bring PR #73 through
+required green CI and continue the authorized Sepolia release. This permits
+only that import correction under `rscore/`; the Rust freeze remains in force.
+
 Owner instruction, 2026-10-11: prefer the simpler, more reliable general mechanism
 that covers several use cases. Minimize code; delete redundant paths when retained
 financial semantics and recovery are proved. A superset is explicit product terms
