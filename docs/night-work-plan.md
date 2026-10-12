@@ -4,8 +4,11 @@ Owner scope: TS + React + Ethereum same-J; Rust and lending remain frozen.
 Foreign Rust stash `438bf1a6ddd8679bba0b63bdef11dd1fd1f45e90` is untouched.
 Keep frozen-core, PRs with seven required green jobs, no WIP commits.
 
-- Current branch: codex/ts-worker-boundary. Last verified financial source
-  2d2115dc8: all six checks for the bounded deletion passed — 34/34 related
+- Current branch: codex/ts-worker-boundary. Latest clean source 8584d3ce0
+  removes 49 physical production lines of unread authority bookkeeping;
+  independent static review, 45/45 related tests (1,204 assertions) and all
+  38 source gates pass. No fresh WAL/browser/chain run for this narrow deletion.
+  Prior financial source 2d2115dc8: all six checks passed — 34/34 related
   tests (1,249 assertions), 38 source gates, 708-frame mixed WAL exact on
   W1/W4/W8, 3/3 React payment/reload, actual Sepolia event decoding, and the
   stopped hub's cold replay (R4474, 128 retained frames). WAL replay retains
@@ -24,8 +27,9 @@ Keep frozen-core, PRs with seven required green jobs, no WIP commits.
   passed, Unit Tests failed four cases. Those four are fixed locally; fresh
   eligible CI is still required after the fixture blocker. Main remains
   86d2a515; no merge or public deployment occurred during this cut.
-- Artifacts: docs/evidence/canonical-review-20261012/null-stage-2d2115dc8.json
-  binds the latest commands, logs, replay, browser results and closure metrics.
+- Artifacts: docs/evidence/canonical-review-20261012/retired-capture-8584d3ce0.json
+  binds the latest focused checks and closure metrics. The preceding
+  null-stage-2d2115dc8.json binds its replay/browser/receipt/recovery results.
   The prior ts-worker-evidence.json retains the 498-frame historical WAL
   failure at frame 12 on both pre-move baseline and candidate. Moving 3,857
   worker lines is ownership correction, not deletion. Private WAL/seeds stay private.
@@ -53,7 +57,7 @@ Keep frozen-core, PRs with seven required green jobs, no WIP commits.
   Stopped H1 DB/WAL is preserved privately; current-source replay and the two
   real receipts now pass. Prepare an exact eligible build; do not resend transactions.
   Local recovery retained one undeliverable outbox message while H1 was down.
-- Current static kernel closure: 160,413 code lines in 816 files, down 649
+- Current static kernel closure: 160,368 code lines in 816 files, down 694
   from the review baseline; QA imports zero, core/rscore imports 11. Necessary
   recovery fixes are included in this net measurement; no aggregate score is
   asserted without CI and ledger inputs. Rust/lending remain frozen.
@@ -63,14 +67,16 @@ Keep frozen-core, PRs with seven required green jobs, no WIP commits.
   package. No dispute-start freeze, FIFO, one debt per debtor/creditor/token
   and party-selected windows remain settled. No governance/bond redesign.
 
-Method review, 08:15 UTC: separate chain success, local recovery and deployed
-hub health. P6 receipts and cold restore passed, but the old hub failed on the
-same events; a static `/healthz` 200 was not service health. Use `/api/health`
-and a bounded RPC request. Preserve the stopped DB and process the exact mined
-receipts before rollout; do not repeat funding or clock waits. The next deletion
-is supported by a real two-leg rollback regression, not an import count alone.
-Keep read-only summaries bounded: discover paths before reading, use JSON
-selectors and never grep generated source inventories as ordinary logs.
+Method review, 08:45 UTC: the previous half-hour closed a bounded deletion
+with 45/45 tests and 38 source gates, but no additional public-release gate.
+The hub is still stopped and the two frozen fixture imports remain unresolved.
+Next change in method: bundle connected retired-driver seams into one coherent
+candidate, then replay that candidate once; avoid a full evidence cycle per
+small unread field. Preserve TS workers/checkpoints and reject retired selectors
+explicitly. This is not permission to remove financial assertions or relabel
+old evidence. The earlier operational lesson remains: `/healthz` served static
+HTML; verify `/api/health` and bounded RPC, preserve the stopped DB, and never
+repeat funding to hide a deployment-version gap. Discover paths before reading.
 Existing 30-minute heartbeat `xln-30` remains active. No external-model budget
 was spent or renewed. Earlier method evidence remains in the linked manifests:
 provider quota -> bounded first failure; existing authenticated history -> no

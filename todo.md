@@ -27,7 +27,7 @@ the counter and finalization. Preserve the stopped DB and the funded wallet.
    recovery. [Public proof and failure](docs/evidence/canonical-review-20261012/public-p6-d388464db.json).
 3. Continue deleting retired Runtime hooks while preserving TS workers,
    checkpoints and canonical WAL recording. The verified cleanup has removed
-   649 reachable kernel code lines; direct `core/rscore` dependencies remain 11.
+   694 reachable kernel code lines; direct `core/rscore` dependencies remain 11.
    [Review, tests and ownership](docs/canonical-refactoring-20261012.md) retain
    the eight reviewers' proposals without creating a second live queue.
 4. Consolidate duplicated wallet route/depth policy and strict Brainvault worker

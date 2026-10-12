@@ -55,11 +55,11 @@ are retained; ledger and CI were disabled, so no overall readiness score is asse
 | Independent handling of watcher overload                                    | Existing window reduction handles mempool/RPC pressure; one cancellable cooldown controls manual and automatic polling; retained pressure prevents immediate regrowth | [Real proxy regressions](evidence/canonical-review-20261012/watcher-pressure-window-7d3134853.json)          |
 | Watcher re-fetching authenticated history after restore                     | Start from existing contiguous history, audit its canonical anchor/frontier, retain Entity-certified semantic progress                                                | [Restore regression and public funding](evidence/canonical-review-20261012/restored-frontier-88f14ce5f.json) |
 
-The last static measurement (`2d2115dc8`) is **160,413 kernel-closure code lines in
-816 files**, versus **161,062 / 816** at the review baseline: **649 fewer
+The last static measurement (`8584d3ce0`) is **160,368 kernel-closure code lines in
+816 files**, versus **161,062 / 816** at the review baseline: **694 fewer
 reachable code lines**. Direct QA imports are **0**; direct `core/rscore` imports
-are **11**, down from 13 before the null-stage deletion, reaching 8,339 lines.
-This is not yet a Rust-free kernel. [Exact collector and verification](evidence/canonical-review-20261012/null-stage-2d2115dc8.json).
+are **11**, down from 13 before the null-stage deletion, reaching 8,306 lines.
+This is not yet a Rust-free kernel. [Exact collector and verification](evidence/canonical-review-20261012/retired-capture-8584d3ce0.json).
 
 Moving 3,857 worker lines corrects ownership and is not deletion. The QA handler
 was disconnected, not deleted. The two RPC-pressure fixes add 27 physical
@@ -145,6 +145,14 @@ All six checks for this bounded patch passed on that clean source:
   deployed catch-up, and its Account correctly still records the active dispute.
 
 [Immutable commands, results and limitations](evidence/canonical-review-20261012/null-stage-2d2115dc8.json).
+The next clean source `8584d3ce0af99290c1fd226831dad8f03cf530f3` removes
+unread capture/cursor maps and three write-only driver fields: **49 physical
+production lines deleted net**, including import formatting. Independent static
+review found no blocker; 45 related tests / 1,204 assertions and all 38 source
+gates pass. Recorder scope, arm, checkpoint validation and WAL fail-stop remain.
+The prior WAL, browser and chain results above retain their original SHA: they
+were not rerun for this bounded deletion.
+
 The next release action is to resolve the two frozen TS fixture imports and run
 required PR CI before promoting a reviewed build. Do not restart the known-broken
 old hub or repeat the financial transactions to hide a deployment-version gap.
