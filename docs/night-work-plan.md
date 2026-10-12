@@ -4,7 +4,14 @@ Owner scope: TS + React + Ethereum same-J; Rust and lending remain frozen.
 Foreign Rust stash `438bf1a6ddd8679bba0b63bdef11dd1fd1f45e90` is untouched.
 Keep frozen-core, PRs with seven required green jobs, no WIP commits.
 
-- Current branch: codex/ts-worker-boundary. Latest clean source 942385253
+- Current branch: codex/ts-worker-boundary. Latest clean source fc4f267db
+  retires the native authority driver/storage hooks, rejects native WAL before
+  TS projection/writes and retains exact TS crash/commit/outbox semantics.
+  All six bounded checks pass: 155 targeted tests / 1,893 assertions, 38 source
+  gates, the same 708-frame W1/W4/W8 replay, React payment/reload 3/3, stopped
+  H1 cold restore R4474 / 128 retained integrity frames, and static closure.
+  This cut removes 1,384 production lines, 43 test lines and 47 script lines;
+  nine doc lines added, net 1,465 fewer physical lines. Prior clean 942385253
   retires the live authority recorder and observers: 1,615 fewer physical
   production lines, 872 fewer retired-feature test lines and one replay-CLI line.
   All five checks pass: 147/147 related tests (1,906 assertions), 38 source gates,
@@ -32,8 +39,9 @@ Keep frozen-core, PRs with seven required green jobs, no WIP commits.
   passed, Unit Tests failed four cases. Those four are fixed locally; fresh
   eligible CI is still required after the fixture blocker. Main remains
   86d2a515; no merge or public deployment occurred during this cut.
-- Artifacts: docs/evidence/canonical-review-20261012/record-retirement-942385253.json
-  binds the latest tests, replay, browser and closure measurement. Earlier
+- Artifacts: docs/evidence/canonical-review-20261012/native-retirement-fc4f267db.json
+  binds the latest six checks and the still-red frozen-fixture import test.
+  record-retirement-942385253.json retains the preceding collector deletion. Earlier
   retired-capture-8584d3ce0.json binds its narrow deletion. The preceding
   null-stage-2d2115dc8.json binds its replay/browser/receipt/recovery results.
   The prior ts-worker-evidence.json retains the 498-frame historical WAL
@@ -43,10 +51,12 @@ Keep frozen-core, PRs with seven required green jobs, no WIP commits.
   `bun test core/__tests__/rscore/parity/cross-j-opening-lifecycle.test.ts`
   Then the group-E consumers, exact-candidate source/browser/scenario checks
   and push HEAD:codex/production-qa-boundary for PR #73 required CI.
-- Latest coherent deletion: live RECORD collector, observer result arrays and
-  write-only context fields. Retired RECORD=1 rejects before launch/replay/work;
-  TS workers, prepared caches, occurrence ordering and canonical WAL recording
-  remain. Independent review found no blocker. No root rscore/ or lending edits.
+- Latest coherent deletion: native driver, native storage completion/restore
+  callbacks and unused byte counters/candidate helper. Retired selectors have
+  one fail-fast guard; old native persisted frames retain their original hash
+  domain before explicit rejection. TS workers/checkpoints/WAL remain. The
+  standalone offline importer retains one pure session identity helper/codecs.
+  Independent review found no blocker. No root rscore/ or lending edits.
 - Public P6 on clean d388464db: original funding resumed without repeating
   payment or funding. Recovered exact signed states at Runtime 140/141; tower
   upload initially rejected its wallet RPC URL. A one-line explicit allowlist
@@ -63,14 +73,13 @@ Keep frozen-core, PRs with seven required green jobs, no WIP commits.
   Stopped H1 DB/WAL is preserved privately; current-source replay and the two
   real receipts now pass. Prepare an exact eligible build; do not resend transactions.
   Local recovery retained one undeliverable outbox message while H1 was down.
-- Current static kernel closure: 158,880 code lines in 815 files, down 2,182
-  from the review baseline; QA imports zero, core/rscore imports 2. Native
-  storage/recovery dependencies remain transitive: preserve TS crash proof and
-  export while preparing a coherent retirement and explicit old-data rejection.
-  Necessary recovery fixes are included in this net measurement; no aggregate score is
-  asserted without CI and ledger inputs. Rust/lending remain frozen.
+- Current static kernel closure: 150,930 code lines in 796 files, down 10,132
+  from the initial review and 7,950 from 942385253. QA/core/rscore direct edges
+  and reachable lines are zero. Offline codecs/import tooling remain outside
+  this closure. Necessary recovery fixes are included in the net measurement;
+  no aggregate readiness score is asserted without CI/ledger inputs.
 - Remaining release gates: required PR CI; ten consecutive green main runs;
-  no kernel-to-rscore imports; deployed hub recovery and full public P6;
+  deployed hub recovery and full public P6;
   start/finalize/reveal coverage; owner-reviewed release
   package. No dispute-start freeze, FIFO, one debt per debtor/creditor/token
   and party-selected windows remain settled. No governance/bond redesign.
@@ -97,7 +106,12 @@ original frame-hash verification before rejection, and inspect actual namespace
 ownership before removing codecs used by offline exports. Two disjoint owners
 handle runtime and storage; root removes the retired driver. Review the stable
 diff before one exact-candidate proof cycle. No public-release gate closed in
-this block. Next scheduled method review: 09:48 UTC.
+this block. Outcome, 09:37 UTC: one driver/storage cut closed all six bounded
+checks and removed another 7,950 reachable kernel lines. The first full check
+caught folder width: use the existing integrity directory for integrity guards,
+and run the small structural gate before the immutable proof cycle. No gate
+was relaxed. The known frozen-fixture/public-deployment blockers remain.
+Next scheduled method review: 09:48 UTC.
 Existing 30-minute heartbeat `xln-30` remains active. No external-model budget
 was spent or renewed. Earlier method evidence remains in the linked manifests:
 provider quota -> bounded first failure; existing authenticated history -> no

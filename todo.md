@@ -25,17 +25,17 @@ the counter and finalization. Preserve the stopped DB and the funded wallet.
    restores at R4474, before those events. Local wallet recovery holds 200 Test
    USDT in reserve, zero collateral and no active dispute. This is not deployed
    recovery. [Public proof and failure](docs/evidence/canonical-review-20261012/public-p6-d388464db.json).
-3. Retire the remaining native driver/storage seam while preserving TS workers,
-   crash proof, checkpoint export and canonical WAL recording. The live RECORD
-   collector is deleted and its flag explicitly rejected. Verified cleanup has
-   removed 2,182 reachable kernel code lines; direct `core/rscore` edges remain 2,
-   with additional transitive storage dependencies still present.
-   [Review, tests and ownership](docs/canonical-refactoring-20261012.md) retain
-   the eight reviewers' proposals without creating a second live queue.
-4. Consolidate duplicated wallet route/depth policy and strict Brainvault worker
+3. Consolidate duplicated wallet route/depth policy and strict Brainvault worker
    admission, each behind its smallest actual failure and browser proof.
-5. Finish current exit-gas, operational and exact-build mainnet evidence. Rust
+4. Finish current exit-gas, operational and exact-build mainnet evidence. Rust
    decoder/proof-codec refactors remain proposals until the freeze is reopened.
+
+Completed refactoring boundary on clean `fc4f267db`: native driver/storage hooks
+retired, obsolete native persisted data explicitly rejected, TS workers/WAL/crash
+proof/export retained. All six bounded checks pass; kernel closure is 150,930
+lines, 10,132 below the initial review, with no QA or core/rscore edges. This does
+not close the two frozen fixture imports or public deployment gap above.
+[Review and exact evidence](docs/canonical-refactoring-20261012.md).
 
 ## Historical pre-freeze lending work — not current release scope
 

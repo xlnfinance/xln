@@ -1,0 +1,75 @@
+{
+  "schema": "xln-source-evidence/v1",
+  "sourceSha": "fc4f267db6dbff4f25bc2d8040a9ce0464f22d75",
+  "status": "local-source-checks-passed-known-frozen-fixture-failure",
+  "sourceBinding": {
+    "baseSha": "912fffd8a14ae71fbb0c4c946472ea512cafd0d2",
+    "cleanBeforeAndAfter": "Parent verified clean source throughout the proof runs; replay and cold-restore outputs independently carry the exact SHA and clean status.",
+    "commandMetadataRawSha256": "be32deb2353830ca32fa25c1ef7298fe3813cc24fc88de78d12c169614965471",
+    "packaging": "Execution SHA is immutable; the later commit containing this package is not the tested source SHA."
+  },
+  "change": {
+    "scope": "Retire native runtime authority and durable native recovery branches from canonical TS production. Preserve rejection of retired inputs and standalone offline codecs.",
+    "physicalLines": {"production":{"files":24,"added":148,"deleted":1532,"net":-1384},"tests":{"files":14,"added":331,"deleted":374,"net":-43},"scripts":{"files":2,"added":16,"deleted":63,"net":-47},"docs":{"files":1,"added":10,"deleted":1,"net":9},"total":{"files":41,"added":505,"deleted":1970,"net":-1465}},
+    "countBasis": "git diff --numstat 912fffd8a..fc4f267db; tests classified before scripts; docs separated. Physical reductions must not be added to import-closure reductions."
+  },
+  "checks": [
+    {"id":"focused","command":"bun test core/__tests__/rscore/authority/authority-activation.test.ts core/__tests__/orchestrator/process/hub-engine-plan.test.ts core/__tests__/rscore/ts-worker/ts-worker-installation.test.ts core/__tests__/runtime/commit/runtime-frame-atomicity.test.ts core/__tests__/runtime/commit/runtime-storage-failure.test.ts core/__tests__/cross-j/swap/cross-jurisdiction-swap-part-1.test.ts core/__tests__/rscore/authority/authority-stage-failure.test.ts core/__tests__/rscore/ts-worker/ts-worker-parity.test.ts core/__tests__/storage/recovery/native-storage-retirement.test.ts core/__tests__/storage/runtime/storage-authority-wal-ambiguity.test.ts core/__tests__/storage/runtime/storage-checkpoint-machine-graph.test.ts core/__tests__/storage/runtime/storage-durability-boundary.test.ts core/__tests__/storage/recovery/portable/concrete-checkpoint-owners.test.ts core/__tests__/storage/recovery/recovery-outbox-equivalence.test.ts core/__tests__/runtime/checkpoint-barrier.test.ts core/__tests__/rscore/checkpoint-wire.test.ts core/__tests__/storage/history/storage-frame-journal-retention.test.ts","passed":149,"failed":0,"assertions":1813,"files":17,"durationSeconds":17.31},
+    {"id":"entrypoints","command":"bun test core/__tests__/dev-startup-hardening.test.ts core/__tests__/testing/scenarios/scenario-engine-selection.test.ts core/__tests__/testing/runner/e2e-source-provenance.test.ts core/__tests__/orchestrator/process/child-secret-channel.test.ts --test-name-pattern 'retired engine|Rust selector|explicit engine|managed children never inherit'","passed":6,"failed":0,"assertions":80,"files":4,"filteredOut":34,"durationSeconds":2.15,"selection":"Explicit name-filtered boundary regression, not the whole four-file suite."},
+    {"id":"combinedUnits","passed":155,"assertions":1893,"note":"Sum of the two preceding executed groups; removed native-feature tests are not a pass-rate gain."},
+    {"id":"check","command":"bun run check","sourceGatesPassed":38,"sourceGatePhaseSeconds":25.584,"result":"PARALLEL_CHECKS_OK gates=38; enclosing check completed successfully","durationScope":"check:src phase only, not entire check wall time."},
+    {"id":"parity","command":"bun run stand:run --reason canonical-native-retirement-replay --timeout-ms 180000 -- bun core/scripts/operations/hlt/replay/commands/run-mixed-ts-rust-parity.ts --ts-only --recording .logs/hlt-evidence/ts-worker-projections/recording-manifest.json --ts-report-dir .logs/canonical-review-20261012/native-retirement-parity-fc4f267db","standLock":"Held by canonical wrapper; reports share one local ownership token.","results":[{"workers":1,"frames":708,"frameVerified":true,"equivalent":true,"finalHeight":719,"finalPendingOutbox":1,"gitDirtyFiles":0},{"workers":4,"frames":708,"frameVerified":true,"equivalent":true,"finalHeight":719,"finalPendingOutbox":1,"gitDirtyFiles":0},{"workers":8,"frames":708,"frameVerified":true,"equivalent":true,"finalHeight":719,"finalPendingOutbox":1,"gitDirtyFiles":0}]},
+    {"id":"browser","command":"XLN_LOCAL_PROD_SMOKE_WALLET_TESTS=e2e-payment.spec.ts XLN_LOCAL_PROD_SMOKE_METRICS_JSON=/Users/zigota/xln/.logs/canonical-review-20261012/native-retirement-bootstrap-fc4f267db.json bun run stand:run --reason canonical-native-retirement-react-payment --timeout-ms 180000 -- bun run prod:smoke:local","standLock":"Held for the complete browser stand, as reported by parent and wrapper invocation.","expected":3,"unexpected":0,"skipped":0,"flaky":0,"errors":0,"durationMs":26308.449,"durationScope":"Playwright only; stand preparation excluded.","note":"Explicit e2e-payment.spec.ts environment is required; default prod:smoke:local alone is startup-only."},
+    {"id":"coldRestore","command":"bun run stand:run --reason canonical-native-retirement-stopped-hub-restore --timeout-ms 180000 -- bun .logs/canonical-review-20261012/verify-stopped-hub-replay.ts","height":4474,"integrity":{"checkedFrames":128,"latestHeight":4474,"ok":true,"runtimeId":"0xbe7597d3532df7293b0f0ff82ee0c30fb2fd2737"},"postStateHash":"0xe9561698ad135b8a468deb921b756768e920bcff217f90da16e96883ecf119ca","lastFinalizedJHeight":11897541,"activeDispute":true,"networkStarted":false,"transactionsSent":0,"backupSourceSha":"7c3f63f9841f4e8b61ac5eee5dbe4f9710b10621","backupSha256":"9316ce1c4ca0998b082bd78266b8b0cb6f88ef7f990436c6d65a4748bf2fe0e3","helper":{"path":".logs/canonical-review-20261012/verify-stopped-hub-replay.ts","sha256":"b318f09a096198abc6fbbfaa3b77369b3647646e133fb3f265e368b9d39b8c72","unchanged":"Parent reports the same helper; current bytes hashed while packaging. Helper and private inputs are not copied."},"scope":"Offline cold restore ends at finalized J block 11897541, before counter block 11897542. Active dispute is expected; this is not deployed catch-up."}
+  ],
+  "recording": {
+    "originalProof": "ts-worker-evidence.json",
+    "sourceSha": "f163415ebaede96c86830299492ceb6a228b5b5f",
+    "manifestHash": "0x2fa25a4c4851b371122b58652af7664528999706c8ddcf18fc98673482ced8b1",
+    "sourceBinding": {"algorithm":"sha256","runtimeSeedHash":"0x1f2d1148378133726d0f93beb52bcccc9bdcda1121e521920b3057dc241ed01e","walTreeHash":"0x4ca7a3253d266836539c650ccc6d690f4889b03939f6cd605ffa67fc3a3c21ca"},
+    "frames": 708,
+    "heights": [12,719],
+    "runtimes": 130,
+    "committedPayments": 2600,
+    "committedSwaps": 1040,
+    "cancelledOffers": 520,
+    "note": "Same immutable production WAL; new exact replays at current SHA, not a fresh recording or TPS measurement."
+  },
+  "knownFailure": {
+    "command": "bun test core/__tests__/rscore/parity/cross-j-opening-lifecycle.test.ts",
+    "passed": 0,
+    "failed": 1,
+    "errors": 1,
+    "error": "Cannot find module '../../../core/rscore/ts-worker/provider'",
+    "from": "rscore/fixtures/cross-j-opening/lifecycle.ts",
+    "scope": "Current test-load failure in frozen fixture; not suppressed or counted green. The broader pair of frozen fixture imports remains unresolved."
+  },
+  "limitations": [
+    "Offline codecs and frozen Rust files remain; production import-closure isolation is not deletion of every Rust-related TS path.",
+    "Each exact replay ends with one pending outbox as in the original recording; no full-drain or live TPS claim.",
+    "Browser evidence covers three payment/recovery-UI cases, not every wallet feature or mainnet recovery scenario.",
+    "No new deployment, chain transactions or proof that the stopped deployed hub has caught up. Prior public P6 chain/tower/local-wallet proof remains separately scoped.",
+    "Current frozen-fixture failure remains. No exact-head whole CI pass or release-readiness claim."
+  ],
+  "artifacts": [
+    {"id":"focused","file":"native-retirement-fc4f267db-focused.log.gz","sha256":"e8678b283cf2d25889522979904a853fe3bc191f52e6d51664f22d692bac81dd","bytes":8758,"rawSha256":"6017ff75d273fe72820f64523ef17f7b9aa1ee39fec8540d8f79100fcbb69d8e","rawBytes":35211},
+    {"id":"entrypoints","file":"native-retirement-fc4f267db-entrypoints.log.gz","sha256":"c7af45be1ebfe678e00b5c336b32fabfaa2ff8bebd68e2930fe13856c701a870","bytes":505,"rawSha256":"b504d59fe4a76ca5147bf8b165460f54ab0dad5c8ba84cd8f06b1a7e12793232","rawBytes":942},
+    {"id":"check","file":"native-retirement-fc4f267db-check.log.gz","sha256":"13590913c7ccd9a2b08cbb71474476f04af1e6c6540fb5b4d6e578daf4b2941e","bytes":15193,"rawSha256":"7175dabc923b6c0a687cbc0455cf408a788ee0b15b9a367c9611e7e9978c00b9","rawBytes":117669},
+    {"id":"browser","file":"native-retirement-fc4f267db-browser.log.gz","sha256":"d3b5d5700cf7b5c639b2119674c12126798100c32743333c7c621fda99be16f3","bytes":2067,"rawSha256":"080f31b65b5100977aca52430714d0d8b89a7cbce5351016716f6c9574445aba","rawBytes":23737},
+    {"id":"parity","file":"native-retirement-fc4f267db-parity.log.gz","sha256":"439d61dd45360d3276e3697bf085580510271b22637b4ab3de2e5959e684be9c","bytes":496,"rawSha256":"1354b69765b91eddfeb4038f5e01db27eba79cc304ebc6987364baab649fa57b","rawBytes":1345},
+    {"id":"stopped-hub","file":"native-retirement-fc4f267db-stopped-hub.log.gz","sha256":"d3915a086ee4009a6110485d05d1cdd70411bb82f934a102ef37ed9c04ada4f5","bytes":782,"rawSha256":"1779f6fb6986f0c347b19741ea913aa2f7df4e9e9bf276e79a50cc0211fc7d7d","rawBytes":1387},
+    {"id":"known-red","file":"native-retirement-fc4f267db-known-red.log.gz","sha256":"f58bf3a9a0f12ccbf15ac334ed3788f2f54f6529cc6bca067e6035dc7cf20fe9","bytes":249,"rawSha256":"cbe9cd550143202212d8c537ee8de2ef042ebc84f004599b5fb955ce5c071d16","rawBytes":392},
+    {"id":"browserReport","file":"native-retirement-fc4f267db-browser.json.gz","sha256":"1188cbb0c61d225092299dba1f317117ef4d36c9f2f42620dfeb35090c69f11b","bytes":2427,"rawSha256":"58ab5593685f3bb9445c65f2c542ff2d2565572c953a34552760e9fb7ee21baa","rawBytes":10323},
+    {"id":"bootstrap","file":"native-retirement-fc4f267db-bootstrap.json.gz","sha256":"613cd323e28e90eea85a612d491a462830b8b55c5fb50777f24e301af2e11d89","bytes":2010,"rawSha256":"409582f1c40d6cef8524298436eac83eb95cb3769a1ec65407a6cf29e55bccc2","rawBytes":29455},
+    {"id":"tsW1","file":"native-retirement-fc4f267db-ts-w1.json.gz","sha256":"2c6e6cff7c44d9ab75a240822c6a132872a42f1c12565f6d8584fee59849b2e8","bytes":148340,"rawSha256":"e33731bdfa4c87a8bf58de6738e24be79d4544fb5fb662c657da1fdddb121ec4","rawBytes":608134},
+    {"id":"tsW4","file":"native-retirement-fc4f267db-ts-w4.json.gz","sha256":"ce1dd366ba6ddc3e14021ba0eab9a1b5c9ea7bff6af35c84c3dde00910500a56","bytes":148340,"rawSha256":"6d4e877de4311cdf37b3c60c3a53d184c2c74e19df87945a7427e2b7455ac448","rawBytes":608134},
+    {"id":"tsW8","file":"native-retirement-fc4f267db-ts-w8.json.gz","sha256":"952a2381e131436ca026b2d09cf32d270ba937d3ea00b57c3ec6646072455842","bytes":148340,"rawSha256":"deadce9f17bc3441e8013edab852651e4542f5d7fb470996be4896e73b2e972b","rawBytes":608134},
+    {"id":"kernel","file":"native-retirement-fc4f267db-kernel.json","sha256":"88450219a34645f2cd793a40d1ed3311b0dab984a6e27df389c80da35bbf6637","bytes":1579}
+  ],
+  "integrity": {
+    "algorithm": "sha256",
+    "list": "native-retirement-fc4f267db-sha256.txt",
+    "gzip": "All compressed outputs round-tripped byte-for-byte; compressed and raw checksums are recorded.",
+    "secretReview": "Selected logs/results contain no raw seed, private key, mnemonic, password, authorization or API-key fields/credential patterns. runtimeSeedHash is a public commitment; standLockToken is local ownership metadata. No private WAL, keys, DB, profile, backup archive or seed-reading helper is packaged."
+  }
+}

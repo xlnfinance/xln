@@ -55,12 +55,14 @@ are retained; ledger and CI were disabled, so no overall readiness score is asse
 | Independent handling of watcher overload                                    | Existing window reduction handles mempool/RPC pressure; one cancellable cooldown controls manual and automatic polling; retained pressure prevents immediate regrowth | [Real proxy regressions](evidence/canonical-review-20261012/watcher-pressure-window-7d3134853.json)          |
 | Watcher re-fetching authenticated history after restore                     | Start from existing contiguous history, audit its canonical anchor/frontier, retain Entity-certified semantic progress                                                | [Restore regression and public funding](evidence/canonical-review-20261012/restored-frontier-88f14ce5f.json) |
 
-The last static measurement (`942385253`) is **158,880 kernel-closure code lines in
-815 files**, versus **161,062 / 816** at the review baseline: **2,182 fewer
-reachable code lines**. Direct QA imports are **0**; direct `core/rscore` imports
-are **2**, down from 11 before the recorder retirement, reaching 6,998 lines.
-Storage/recovery still imports the native driver transitively; this is not yet
-a Rust-free kernel. [Exact collector and verification](evidence/canonical-review-20261012/record-retirement-942385253.json).
+The latest clean source `fc4f267db6dbff4f25bc2d8040a9ce0464f22d75` measures
+**150,930 kernel-closure code lines in 796 files**, versus **161,062 / 816**
+at the review baseline: **10,132 fewer reachable code lines**. Both QA and
+`core/rscore` have **zero direct edges and zero reachable code lines** in this
+static closure. The preceding `942385253` measured 158,880 / 815; this cut
+removes another 7,950 reachable lines. Offline import/export codecs remain
+outside that closure; this is not their deletion or whole-repository coverage.
+[Exact collector and verification](evidence/canonical-review-20261012/native-retirement-fc4f267db.json).
 
 Moving 3,857 worker lines corrects ownership and is not deletion. The QA handler
 was disconnected, not deleted. The two RPC-pressure fixes add 27 physical
@@ -175,10 +177,34 @@ The next release action is to resolve the two frozen TS fixture imports and run
 required PR CI before promoting a reviewed build. Do not restart the known-broken
 old hub or repeat the financial transactions to hide a deployment-version gap.
 
-The next code boundary is the two remaining native driver calls plus their
-storage/recovery consumers. Preserve TS WAL crash classification and checkpoint
-export; retiring old native persistence requires rejection before projecting
-away its refs. Removing only the two imports would not eliminate that dependency.
+Clean source `fc4f267db` removes the 999-line native authority driver and its
+Runtime/storage callbacks. Native execution selectors reject before startup,
+restore or replay. Persisted native namespaces and native frame metadata reject
+before writes or TS journal projection; original frame hashes are checked
+without stripping metadata. One real LevelDB regression first reproduced the
+previous silent acceptance; eleven cases now cover live/read-only restore,
+missing heads, append/replacement, tampering and unavailable key iteration.
+TS WAL crash classification, fsync/publication order, checkpoint barriers and
+outbox verification remain. The deterministic process identity helper survives
+once for the explicit offline importer; shared codecs stay intact.
+
+This cut removes **1,384 physical production lines**, **43 test lines** and
+**47 script lines**, with nine documentation lines added: **1,465 fewer lines
+net across 41 files**. Removed native-callback tests do not improve a pass-rate
+denominator. Independent review of driver, Runtime and Storage found no blocker.
+The first full check caught a folder-width violation; the guard moved into the
+existing `read/integrity` owner without relaxing the gate.
+
+All six bounded checks pass on the clean committed `fc4f267db`: **155 targeted
+tests / 1,893 assertions** (149 full-file tests plus six selected entrypoint
+tests), **38 source gates**, **708-frame W1/W4/W8 replay**, **3/3 React
+payment/reload** (zero skips/flakes/errors), private stopped-H1 cold restore to
+**R4474 / 128 retained integrity frames**, and the static closure measurement.
+The cold restore retains the exact previous root and stops at J11897541,
+before the tower counter; no network effects or transactions ran. Replay still
+retains one outbox item. These are neither live TPS nor deployed catch-up.
+The frozen-fixture import test was rerun on this SHA and still fails; full CI
+and mainnet acceptance remain open.
 
 ## Target ownership and deletion sequence
 

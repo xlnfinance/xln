@@ -1,0 +1,53 @@
+{
+  "schema": "xln-kernel-closure-evidence/v1",
+  "sourceSha": "fc4f267db6dbff4f25bc2d8040a9ce0464f22d75",
+  "collector": {
+    "command": "bun run xln1000 measure --out .logs/canonical-review-20261012/native-retirement-kernel-fc4f267db.json",
+    "rawReportSha256": "c777e6f603fb971b61f0af362c178d14cbcf5a80cb7b76ee31398aae1a8d9181",
+    "inputs": {
+      "tree": "fc4f267db6dbff4f25bc2d8040a9ce0464f22d75",
+      "ledger": null,
+      "ci": null,
+      "worktreeNegativeEvidence": []
+    }
+  },
+  "declared": {
+    "codeLoc": 95835,
+    "files": 545
+  },
+  "reachable": {
+    "codeLoc": 150930,
+    "files": 796,
+    "rscoreDirectEdges": 0,
+    "rscoreCodeLoc": 0,
+    "qaDirectEdges": 0,
+    "qaCodeLoc": 0
+  },
+  "comparison": {
+    "baseline": {
+      "sha": "b07da2b8762d3398683f3f2c481ee65a8caedc41",
+      "codeLoc": 161062,
+      "files": 816
+    },
+    "previous": {
+      "sha": "9423852536ae7cc4fa4c14765169691761b52228",
+      "codeLoc": 158880,
+      "files": 815,
+      "rscoreDirectEdges": 2,
+      "rscoreCodeLoc": 6998
+    },
+    "deltaBaseline": {
+      "codeLoc": -10132,
+      "files": -20
+    },
+    "deltaPrevious": {
+      "codeLoc": -7950,
+      "files": -19
+    }
+  },
+  "limits": [
+    "Static import closure for declared production roots; not total repository physical LOC or runtime-execution coverage.",
+    "Offline Rust diagnostic/import codecs remain present outside this closure. Zero reachable rscore edges does not mean those codecs were deleted.",
+    "Tree-only measurement; ledger and CI inputs are null. No overall readiness score."
+  ]
+}
