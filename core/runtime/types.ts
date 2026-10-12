@@ -484,7 +484,7 @@ export type BrowserVMState = import('../jurisdiction/adapter/browservm/browservm
  * secret, wall clock, or retry machinery. A RuntimeFrame commits this State;
  * RuntimeReplica owns the machinery that builds and durably publishes it.
  */
-export interface RuntimeState {
+interface RuntimeState {
   eReplicas: Map<string, EntityReplica>;  // Entity replicas (E-layer state machines)
   jReplicas: Map<string, JReplica>;       // Jurisdiction replicas (J-layer EVM state)
   height: number;
