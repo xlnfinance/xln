@@ -169,7 +169,7 @@ const walletE2eSteps: GateStep[] = (
     ['React recovery E2E', 'e2e-tower-restore.spec.ts,e2e-file-restore.spec.ts,e2e-sovereignty.spec.ts', 'recovery'],
   ] as const
 )
-  .map(([name, tests, directory]) => ({
+  .map<GateStep>(([name, tests, directory]) => ({
     name,
     command:
       `XLN_LOCAL_PROD_SMOKE_DIR=.logs/gates/react-${directory} ` +
