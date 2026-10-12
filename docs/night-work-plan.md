@@ -4,10 +4,15 @@ Owner scope: TS + React + Ethereum same-J; Rust and lending remain frozen.
 Foreign Rust stash `438bf1a6ddd8679bba0b63bdef11dd1fd1f45e90` is untouched.
 Keep frozen-core, PRs with seven required green jobs, no WIP commits.
 
-- Current branch: codex/ts-worker-boundary. Latest clean source 8584d3ce0
-  removes 49 physical production lines of unread authority bookkeeping;
-  independent static review, 45/45 related tests (1,204 assertions) and all
-  38 source gates pass. No fresh WAL/browser/chain run for this narrow deletion.
+- Current branch: codex/ts-worker-boundary. Latest clean source 942385253
+  retires the live authority recorder and observers: 1,615 fewer physical
+  production lines, 872 fewer retired-feature test lines and one replay-CLI line.
+  All five checks pass: 147/147 related tests (1,906 assertions), 38 source gates,
+  the same 708-frame WAL exact on W1/W4/W8, React payment/reload 3/3 with no
+  skips/flakes/errors, and measured closure. Each replay retains one outbox
+  item; not TPS. H0 financial assertions remain in canonical Account tests.
+  No new public-chain operation or deployment occurred. Earlier clean 8584d3ce0
+  has 45/45 tests and 38 gates for the 49-line unread-bookkeeping deletion.
   Prior financial source 2d2115dc8: all six checks passed — 34/34 related
   tests (1,249 assertions), 38 source gates, 708-frame mixed WAL exact on
   W1/W4/W8, 3/3 React payment/reload, actual Sepolia event decoding, and the
@@ -27,8 +32,9 @@ Keep frozen-core, PRs with seven required green jobs, no WIP commits.
   passed, Unit Tests failed four cases. Those four are fixed locally; fresh
   eligible CI is still required after the fixture blocker. Main remains
   86d2a515; no merge or public deployment occurred during this cut.
-- Artifacts: docs/evidence/canonical-review-20261012/retired-capture-8584d3ce0.json
-  binds the latest focused checks and closure metrics. The preceding
+- Artifacts: docs/evidence/canonical-review-20261012/record-retirement-942385253.json
+  binds the latest tests, replay, browser and closure measurement. Earlier
+  retired-capture-8584d3ce0.json binds its narrow deletion. The preceding
   null-stage-2d2115dc8.json binds its replay/browser/receipt/recovery results.
   The prior ts-worker-evidence.json retains the 498-frame historical WAL
   failure at frame 12 on both pre-move baseline and candidate. Moving 3,857
@@ -37,10 +43,10 @@ Keep frozen-core, PRs with seven required green jobs, no WIP commits.
   `bun test core/__tests__/rscore/parity/cross-j-opening-lifecycle.test.ts`
   Then the group-E consumers, exact-candidate source/browser/scenario checks
   and push HEAD:codex/production-qa-boundary for PR #73 required CI.
-- Latest deletion completed: null retired Entity-stage bookkeeping, 155
-  physical production lines; the real two-leg rollback regression adds 126.
-  Independent review found no blocker. Live TS workers, WAL/checkpoints and
-  recording remain; no root rscore/ or lending edits.
+- Latest coherent deletion: live RECORD collector, observer result arrays and
+  write-only context fields. Retired RECORD=1 rejects before launch/replay/work;
+  TS workers, prepared caches, occurrence ordering and canonical WAL recording
+  remain. Independent review found no blocker. No root rscore/ or lending edits.
 - Public P6 on clean d388464db: original funding resumed without repeating
   payment or funding. Recovered exact signed states at Runtime 140/141; tower
   upload initially rejected its wallet RPC URL. A one-line explicit allowlist
@@ -57,9 +63,11 @@ Keep frozen-core, PRs with seven required green jobs, no WIP commits.
   Stopped H1 DB/WAL is preserved privately; current-source replay and the two
   real receipts now pass. Prepare an exact eligible build; do not resend transactions.
   Local recovery retained one undeliverable outbox message while H1 was down.
-- Current static kernel closure: 160,368 code lines in 816 files, down 694
-  from the review baseline; QA imports zero, core/rscore imports 11. Necessary
-  recovery fixes are included in this net measurement; no aggregate score is
+- Current static kernel closure: 158,880 code lines in 815 files, down 2,182
+  from the review baseline; QA imports zero, core/rscore imports 2. Native
+  storage/recovery dependencies remain transitive: preserve TS crash proof and
+  export while preparing a coherent retirement and explicit old-data rejection.
+  Necessary recovery fixes are included in this net measurement; no aggregate score is
   asserted without CI and ledger inputs. Rust/lending remain frozen.
 - Remaining release gates: required PR CI; ten consecutive green main runs;
   no kernel-to-rscore imports; deployed hub recovery and full public P6;
@@ -77,6 +85,10 @@ explicitly. This is not permission to remove financial assertions or relabel
 old evidence. The earlier operational lesson remains: `/healthz` served static
 HTML; verify `/api/health` and bounded RPC, preserve the stopped DB, and never
 repeat funding to hide a deployment-version gap. Discover paths before reading.
+First result of that method change, 09:04 UTC: one coherent recorder removal
+closed all five bounded checks and removed 1,615 production lines; the public
+release blocker remains open. Continue evaluating the method over the next block,
+not a claim of improved mainnet readiness. Next scheduled review: 09:15 UTC.
 Existing 30-minute heartbeat `xln-30` remains active. No external-model budget
 was spent or renewed. Earlier method evidence remains in the linked manifests:
 provider quota -> bounded first failure; existing authenticated history -> no

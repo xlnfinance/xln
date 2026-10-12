@@ -25,9 +25,11 @@ the counter and finalization. Preserve the stopped DB and the funded wallet.
    restores at R4474, before those events. Local wallet recovery holds 200 Test
    USDT in reserve, zero collateral and no active dispute. This is not deployed
    recovery. [Public proof and failure](docs/evidence/canonical-review-20261012/public-p6-d388464db.json).
-3. Continue deleting retired Runtime hooks while preserving TS workers,
-   checkpoints and canonical WAL recording. The verified cleanup has removed
-   694 reachable kernel code lines; direct `core/rscore` dependencies remain 11.
+3. Retire the remaining native driver/storage seam while preserving TS workers,
+   crash proof, checkpoint export and canonical WAL recording. The live RECORD
+   collector is deleted and its flag explicitly rejected. Verified cleanup has
+   removed 2,182 reachable kernel code lines; direct `core/rscore` edges remain 2,
+   with additional transitive storage dependencies still present.
    [Review, tests and ownership](docs/canonical-refactoring-20261012.md) retain
    the eight reviewers' proposals without creating a second live queue.
 4. Consolidate duplicated wallet route/depth policy and strict Brainvault worker

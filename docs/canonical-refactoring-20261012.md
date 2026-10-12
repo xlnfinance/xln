@@ -55,11 +55,12 @@ are retained; ledger and CI were disabled, so no overall readiness score is asse
 | Independent handling of watcher overload                                    | Existing window reduction handles mempool/RPC pressure; one cancellable cooldown controls manual and automatic polling; retained pressure prevents immediate regrowth | [Real proxy regressions](evidence/canonical-review-20261012/watcher-pressure-window-7d3134853.json)          |
 | Watcher re-fetching authenticated history after restore                     | Start from existing contiguous history, audit its canonical anchor/frontier, retain Entity-certified semantic progress                                                | [Restore regression and public funding](evidence/canonical-review-20261012/restored-frontier-88f14ce5f.json) |
 
-The last static measurement (`8584d3ce0`) is **160,368 kernel-closure code lines in
-816 files**, versus **161,062 / 816** at the review baseline: **694 fewer
+The last static measurement (`942385253`) is **158,880 kernel-closure code lines in
+815 files**, versus **161,062 / 816** at the review baseline: **2,182 fewer
 reachable code lines**. Direct QA imports are **0**; direct `core/rscore` imports
-are **11**, down from 13 before the null-stage deletion, reaching 8,306 lines.
-This is not yet a Rust-free kernel. [Exact collector and verification](evidence/canonical-review-20261012/retired-capture-8584d3ce0.json).
+are **2**, down from 11 before the recorder retirement, reaching 6,998 lines.
+Storage/recovery still imports the native driver transitively; this is not yet
+a Rust-free kernel. [Exact collector and verification](evidence/canonical-review-20261012/record-retirement-942385253.json).
 
 Moving 3,857 worker lines corrects ownership and is not deletion. The QA handler
 was disconnected, not deleted. The two RPC-pressure fixes add 27 physical
@@ -153,9 +154,31 @@ gates pass. Recorder scope, arm, checkpoint validation and WAL fail-stop remain.
 The prior WAL, browser and chain results above retain their original SHA: they
 were not rerun for this bounded deletion.
 
+Clean source `9423852536ae7cc4fa4c14765169691761b52228` removes the entire
+1,215-line live authority recorder, its Account/Entity/Runtime hooks and 201
+lines of orphan wire builders. Canonical WAL recording remains. `RECORD=1`
+now rejects explicitly at launch, executor installation and replay entry.
+Prepared commit caches, selected transactions, occurrence/input positions,
+effects, roots and storage formats are unchanged. The real H0 assertions moved
+to the existing Account-resource tests; only retired collector tests disappeared.
+
+The complete cut is **1,615 fewer physical production lines**, **872 fewer test
+lines** and one fewer replay-CLI line, across 34 files. Deleted tests do not
+improve a pass-rate denominator. Independent static review found no blocker.
+All five checks pass on the clean committed source: **147/147 tests / 1,906
+assertions**, all **38 source gates**, the same **708-frame WAL on W1/W4/W8**,
+**3/3 React payment/reload** with zero skips/flakes/errors, and the measured
+closure above. Each WAL replay still retains one outbox item; no TPS, fresh
+public-chain result or deployed-hub recovery is claimed.
+
 The next release action is to resolve the two frozen TS fixture imports and run
 required PR CI before promoting a reviewed build. Do not restart the known-broken
 old hub or repeat the financial transactions to hide a deployment-version gap.
+
+The next code boundary is the two remaining native driver calls plus their
+storage/recovery consumers. Preserve TS WAL crash classification and checkpoint
+export; retiring old native persistence requires rejection before projecting
+away its refs. Removing only the two imports would not eliminate that dependency.
 
 ## Target ownership and deletion sequence
 

@@ -1,0 +1,41 @@
+{
+  "schema": "xln-kernel-closure-evidence/v1",
+  "sourceSha": "9423852536ae7cc4fa4c14765169691761b52228",
+  "collector": {
+    "command": "bun run xln1000 measure --out .logs/canonical-review-20261012/record-retirement-kernel-942385253.json",
+    "rawReportSha256": "031f8d51fdb9fbc970c3743e97c68a86ec1930077fe12aeedd80e561b36e94e6",
+    "inputs": {
+      "tree": "9423852536ae7cc4fa4c14765169691761b52228",
+      "ledger": null,
+      "ci": null,
+      "worktreeNegativeEvidence": []
+    }
+  },
+  "closure": {
+    "codeLoc": 158880,
+    "files": 815,
+    "rscoreCodeLoc": 6998,
+    "rscoreDirectEdges": 2,
+    "qaCodeLoc": 0,
+    "qaDirectEdges": 0
+  },
+  "comparison": {
+    "baseline": {
+      "sha": "b07da2b8762d3398683f3f2c481ee65a8caedc41",
+      "codeLoc": 161062,
+      "files": 816
+    },
+    "previous": {
+      "sha": "8584d3ce0af99290c1fd226831dad8f03cf530f3",
+      "codeLoc": 160368,
+      "files": 816
+    },
+    "codeLocDeltaBaseline": -2182,
+    "codeLocDeltaPrevious": -1488
+  },
+  "limitations": [
+    "Static production import closure; not total repository physical lines or runtime execution coverage.",
+    "Tree-only collector; ledger and CI were not supplied. No overall readiness score is reported.",
+    "Two core/rscore edges and 6998 reachable code lines remain; this is not zero Rust-tooling reachability."
+  ]
+}
