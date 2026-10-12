@@ -30,10 +30,6 @@ import { getSignerPrivateKeyIfAvailable } from '../account/crypto';
 import { generateLazyEntityId } from '../entity/factory';
 import { getEntityReplicaById } from '../entity/replica/replica-lookup';
 import {
-  buildAuthorityWave,
-  type AuthorityWave,
-} from './authority-wave';
-import {
   accountConsensusWire,
   accountEnvelopeWire,
   accountSeedWire,
@@ -64,7 +60,6 @@ import type { RuntimeReplica } from '../runtime/types';
 import { buffersEqual, safeStringify } from '../protocol/serialization';
 import { DEFAULT_MATERIALIZE_PERIOD_FRAMES } from '../storage/keys';
 import { entityOwnedSectionDigests, entitySnapshotWire } from './entity/snapshot-wire';
-import { type RscoreEntityRound } from './entity/round-wire';
 
 const authorityLog = createStructuredLogger('rscore.authority');
 
@@ -101,8 +96,6 @@ type Session = {
   ownerEntityId: string;
   /** Membership held by the resident engine at its accepted Account root. */
   residentAccounts: Set<string>;
-  /** Exact Entity state is installed beside the resident Account forest. */
-  entityResident: boolean;
   /** Fresh empty base returned by Rust; retained only until its first WAL commit. */
   bootstrapCheckpoint: RscoreCheckpointChanges | null;
 };
@@ -113,12 +106,8 @@ type OpenFrame = {
   latest: Readonly<{ revision: number; accountsRoot: string }> | null;
   /** Account forest selected by accepted Entity inputs in this Runtime frame. */
   acceptedAccountsRoot: string;
-  /** Membership at Rust's currently held base/candidate head. */
-  candidateAccounts: Set<string>;
   /** Repeatable exports keyed by the exact candidate root they describe. */
   checkpoints: Map<string, RscoreCheckpointChanges>;
-  /** Produced during inbound and consumed during outbound without another IPC. */
-  entityRound: RscoreEntityRound | null;
 };
 
 type AuthorityCheckpointStorageInput = Readonly<{
@@ -134,11 +123,8 @@ type AuthorityCheckpointStorageInput = Readonly<{
  */
 const sessions = new Map<RuntimeReplica, Map<string, Session | 'disabled'>>();
 const allSessions = new Set<Session>();
-const captured = new Map<RuntimeReplica, AuthorityWave>();
 /** Candidates open in each Entity's engine, by Runtime. */
 const pending = new Map<RuntimeReplica, OpenFrame[]>();
-/** Original Account-operation arrival cursor for the active Runtime frame. */
-const arrivalCursors = new Map<RuntimeReplica, number>();
 
 const report = {
   waves: 0,
@@ -167,16 +153,6 @@ const halt = (code: string, detail: Record<string, unknown>): never => {
   authorityLog.error('authority.halt', { code, ...detail });
   console.error(`RSCORE_AUTHORITY_HALT ${code} ${safeStringify(detail)}`);
   throw new Error(`RSCORE_AUTHORITY_HALT:${code}`);
-};
-
-/**
- * Take the frame the collector holds before the reducer closes it. Called on
- * the Runtime frame boundary; the wave is prepared later, outside the mutation
- * the collector was watching.
- */
-export const captureAuthorityWave = (env: RuntimeReplica, frameId: string): void => {
-  if (!authorityDriverEnabled(env)) return;
-  captured.set(env, buildAuthorityWave(frameId));
 };
 
 function sessionMap(
@@ -347,7 +323,6 @@ const openAuthoritySession = async (
     client,
     ownerEntityId,
     residentAccounts: new Set(),
-    entityResident: false,
     bootstrapCheckpoint: null,
   };
 };
@@ -442,7 +417,6 @@ const bootstrapResidentEntity = async (
       actual: loaded.ownedSections,
     });
   }
-  session.entityResident = true;
 };
 
 const armSession = async (env: RuntimeReplica, ownerEntityId: string): Promise<Session | 'disabled'> => {
@@ -557,15 +531,12 @@ export const armAuthorityWave = async (
       session,
       latest: null,
       acceptedAccountsRoot,
-      candidateAccounts: new Set(session.residentAccounts),
       checkpoints: session.bootstrapCheckpoint === null
         ? new Map()
         : new Map([[acceptedAccountsRoot, session.bootstrapCheckpoint]]),
-      entityRound: null,
     } satisfies OpenFrame;
   });
   pending.set(env, candidates);
-  arrivalCursors.set(env, 0);
 };
 
 const exactCheckpointRoot = (checkpoint: RscoreExactCheckpoint): string =>
@@ -704,9 +675,7 @@ export const restoreAuthorityExact = async (
     allSessions.add(entry.session);
   }
   sessions.set(env, installed);
-  captured.delete(env);
   pending.delete(env);
-  arrivalCursors.delete(env);
 };
 
 const killAuthorityRuntime = (env: RuntimeReplica): void => {
@@ -716,9 +685,7 @@ const killAuthorityRuntime = (env: RuntimeReplica): void => {
     allSessions.delete(session);
   }
   sessions.delete(env);
-  captured.delete(env);
   pending.delete(env);
-  arrivalCursors.delete(env);
   delete env.accountAuthorityCheckpointDue;
 };
 
@@ -994,7 +961,6 @@ export const finalizeAuthorityFrameAfterWal = async (
     }
   }
   pending.delete(env);
-  arrivalCursors.delete(env);
   delete env.accountAuthorityCheckpointDue;
 };
 
@@ -1014,7 +980,6 @@ export const failStopAuthorityFrame = async (env: RuntimeReplica): Promise<void>
     halt('WAL_FAILED_AFTER_ACCOUNT_MUTATION', { owners });
   }
   pending.delete(env);
-  arrivalCursors.delete(env);
   delete env.accountAuthorityCheckpointDue;
 };
 
@@ -1034,7 +999,5 @@ export const shutdownAuthorityDriver = async (): Promise<void> => {
   }
   allSessions.clear();
   sessions.clear();
-  captured.clear();
   pending.clear();
-  arrivalCursors.clear();
 };

@@ -8,11 +8,7 @@ import {
   authorityRecordEnabled,
   runAuthorityFrameScope,
 } from '../../../rscore/authority-wave';
-import {
-  armAuthorityWave,
-  authorityRuntimeSuppressed,
-  captureAuthorityWave,
-} from '../../../rscore/authority-driver';
+import { armAuthorityWave, authorityRuntimeSuppressed } from '../../../rscore/authority-driver';
 import { installTsAccountWorkerAuthority } from '../../workers/account/provider';
 import { createStructuredLogger } from '../../../support/logger';
 import type { RuntimeReplica, RoutedEntityInput, RuntimeInput, RuntimeTx } from '../../types';
@@ -274,7 +270,7 @@ const applyRuntimeInputPhases = async (
   const authorityFrameId = env.runtimeId ?? '';
   const recordingEnabled = authorityRecordEnabled(authorityDriverEnabled(env))
     && !authorityRuntimeSuppressed(env);
-  return runAuthorityFrameScope(env, authorityFrameId, recordingEnabled, async scopedFrameId => {
+  return runAuthorityFrameScope(env, authorityFrameId, recordingEnabled, async () => {
     // Before anything of this frame is applied: the authoritative engine has
     // to start where TypeScript starts, not where it ends up.
     installTsAccountWorkerAuthority(env);
@@ -307,14 +303,6 @@ const applyRuntimeInputPhases = async (
       profile,
       isReplay,
     );
-    markRuntimeApplyPhase(env, 'apply.authority-capture');
-    // The authoritative engine is handed this frame after the Runtime's own
-    // record of it is durable, which is outside this function — so the raw
-    // wave is taken here, while the collector still holds it.
-    if (authorityDriverEnabled(env)) {
-      if (scopedFrameId === null) throw new Error('RSCORE_AUTHORITY_FRAME_SCOPE_MISSING');
-      captureAuthorityWave(env, scopedFrameId);
-    }
     return { result, profiledRuntimeTxs: ingress.runtimeTxs };
   });
 };

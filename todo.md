@@ -10,23 +10,26 @@ The 138-target E2E snapshot and green full check are dated evidence, not mainnet
 
 The current [owner profile](docs/owner-profile.md#agreed-release) owns scope:
 TS, React and Ethereum same-J; Rust and production lending are frozen.
-PR #70 is merged after seven green jobs. The funded Sepolia P6 profile is
-preserved; the public alpha has not yet been updated to the new candidate.
+PR #70 is merged. PR #73 remains blocked on required CI; the current cleanup
+branch has not been pushed over its older head. The public alpha still runs
+`7c3f63f98`: its hub stopped on the P6 tower events; the external tower completed
+the counter and finalization. Preserve the stopped DB and the funded wallet.
 
-1. Land the verified transport-only RPC binding and checkpoint recovery together
-   with the debt-total/outbox/dead-entrypoint refactor and TS-only launcher through
-   required pull_request CI. Seven green manual-dispatch jobs are test evidence,
-   but GitHub does not count them as PR-required checks.
-   [Review and measured first patch](docs/canonical-refactoring-20261012.md)
-   retain all eight areas' proposals without making a second live queue.
-2. Complete reserve-confirmation rollout and public P6 from the recovered profile:
-   the raw PublicNode response confirms a quota limit; a 160-second uninterrupted
-   run still did not observe existing funding. Preserve authenticated history and avoid duplicate funding. Use genuine
-   old/new signatures, external tower, real clocks and fresh recovery.
-3. Land the verified production QA separation in combined PR #73 (454 fewer
-   reachable kernel code lines) and TS-only launcher follow-up (69 fewer non-test
-   lines, 52 unit and 3 browser tests green). Remove retired runtime hooks while retaining active TS
-   workers; prove exact roots, positional outbox and recovery.
+1. Resolve the two TS fixture imports under frozen `rscore/` using the prepared
+   two-line patch only after the requested owner exception. Then run the
+   affected settlement/opening tests and required pull_request CI. Seven green
+   manual-dispatch jobs do not satisfy required PR checks. Preserve strict protection.
+2. Promote an eligible reviewed Sepolia build and prove the existing hub catches
+   up through counter block 11897542 and final block 11897550 without resending
+   money. Current local code handles both real receipts; a cold copy of the hub
+   restores at R4474, before those events. Local wallet recovery holds 200 Test
+   USDT in reserve, zero collateral and no active dispute. This is not deployed
+   recovery. [Public proof and failure](docs/evidence/canonical-review-20261012/public-p6-d388464db.json).
+3. Continue deleting retired Runtime hooks while preserving TS workers,
+   checkpoints and canonical WAL recording. The verified cleanup has removed
+   649 reachable kernel code lines; direct `core/rscore` dependencies remain 11.
+   [Review, tests and ownership](docs/canonical-refactoring-20261012.md) retain
+   the eight reviewers' proposals without creating a second live queue.
 4. Consolidate duplicated wallet route/depth policy and strict Brainvault worker
    admission, each behind its smallest actual failure and browser proof.
 5. Finish current exit-gas, operational and exact-build mainnet evidence. Rust
