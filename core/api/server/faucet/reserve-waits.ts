@@ -8,8 +8,8 @@ import { createBoundedLock } from '../../../support/bounded-lock';
 
 const faucetLog = createStructuredLogger('server.faucet');
 
-// One reserve request at a time; each holds the lock through up to ~45 s of
-// chain waits, so the queue and the wait for it are bounded.
+// One reserve request at a time; chain confirmation is separately bounded,
+// and the queue and the wait to acquire it are bounded here.
 export const reserveFaucetLock = createBoundedLock({
   name: 'reserve-faucet',
   maxWaiters: 8,
@@ -90,7 +90,7 @@ export const waitForReserveUpdate = async (
   entityId: string,
   tokenId: number,
   expectedMin: bigint,
-  timeoutMs = 10000,
+  timeoutMs: number,
 ): Promise<bigint | null> => {
   const started = Date.now();
   while (Date.now() - started < timeoutMs) {

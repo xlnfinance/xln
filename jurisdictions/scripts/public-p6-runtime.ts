@@ -105,7 +105,7 @@ const post = async (path: string, body: unknown) => {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: safeStringify(body),
-    signal: AbortSignal.timeout(30_000),
+    signal: AbortSignal.timeout(90_000),
   });
   if (!response.ok) throw Error(`PUBLIC_P6_HTTP_FAILED:${path}:${response.status}:${await response.text()}`);
 };
@@ -117,8 +117,8 @@ const stop = async () => {
 try {
   if ((await provider.getNetwork()).chainId !== 11155111n) throw Error('PUBLIC_P6_WRONG_CHAIN');
   await assertCanonicalRpcContractStack(rpc, contracts, 'PUBLIC_P6', 10_000);
-  if (mode === 'prepare' && (env.state.height !== 0 || (await Bun.file(`${directory}/prepared.json`).exists())))
-    throw Error('PUBLIC_P6_PREPARE_REQUIRES_FRESH_RUNTIME');
+  if (mode === 'prepare' && (await Bun.file(`${directory}/prepared.json`).exists()))
+    throw Error('PUBLIC_P6_PREPARE_ALREADY_COMPLETE');
   if (mode === 'recover' && !state()) throw Error('PUBLIC_P6_RECOVERY_STATE_MISSING');
   env.quietRuntimeLogs = true;
   xln.startRuntimeLoop(env, {
@@ -216,20 +216,29 @@ try {
       ),
     );
   } else {
-    entity([
-      {
-        type: 'openAccount',
-        data: {
-          targetEntityId: hub,
-          creditAmount: 0n,
-          tokenId: 1,
-          disputeConfig: { leftResponseSeconds: 180, rightResponseSeconds: 180 },
+    if (!state()?.accounts.has(hub))
+      entity([
+        {
+          type: 'openAccount',
+          data: {
+            targetEntityId: hub,
+            creditAmount: 0n,
+            tokenId: 1,
+            disputeConfig: { leftResponseSeconds: 180, rightResponseSeconds: 180 },
+          },
         },
-      },
-    ]);
+      ]);
     await wait('account-open', () => Boolean(state()?.accounts.get(hub)?.currentFrame) && !account().pendingFrame);
-    await post('/api/faucet/gas', { userAddress: signerId, jurisdiction: name });
-    await post('/api/faucet/reserve', { userEntityId: entityId, tokenId: 1, tokenSymbol: 'USDT', amount: '100' });
+    if (balance() !== 0n || account().state.deltas.get(1)!.collateral !== 0n || account().activeDispute)
+      throw Error('PUBLIC_P6_PREPARE_REQUIRES_EMPTY_ACCOUNT');
+    if ((await provider.getBalance(signerId)) === 0n)
+      await post('/api/faucet/gas', { userAddress: signerId, jurisdiction: name });
+    // An HTTP timeout does not undo a mined funding transaction. Recovery has
+    // already caught up the canonical WAL before deciding whether to fund.
+    const reserve = state()!.reserves.get(1) ?? 0n;
+    if (reserve === 0n)
+      await post('/api/faucet/reserve', { userEntityId: entityId, tokenId: 1, tokenSymbol: 'USDT', amount: '100' });
+    else if (reserve !== 100_000_000n) throw Error('PUBLIC_P6_UNEXPECTED_EXISTING_RESERVE');
     await wait('reserve-funded', () => state()?.reserves.get(1) === 100_000_000n);
     entity([
       { type: 'r2c', data: { counterpartyId: hub, tokenId: 1, amount: 100_000_000n } },

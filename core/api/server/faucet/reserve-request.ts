@@ -233,11 +233,15 @@ const confirmReserve = async (
   request: AdmittedReserveRequest,
 ): Promise<Response> => {
   const expectedMin = request.previousUserReserve + request.amountWei;
+  // Native inclusion and the watcher's receipt can take several blocks. Share
+  // one bounded minute: ten seconds expired before an ordinary Sepolia block.
+  const deadline = Date.now() + 60_000;
   const updated = await waitForReserveUpdate(
     deps.adapter,
     request.userEntityId,
     request.tokenId,
     expectedMin,
+    Math.max(0, deadline - Date.now()),
   );
   if (updated === null) {
     return failure(deps.headers, 504, 'FAUCET_RESERVE_UPDATE_TIMEOUT',
@@ -248,6 +252,7 @@ const confirmReserve = async (
     request.userEntityId,
     request.tokenId,
     expectedMin,
+    Math.max(0, deadline - Date.now()),
   );
   if (!event) {
     return failure(deps.headers, 500, 'FAUCET_RESERVE_EVENT_MISSING', 'RESERVE_EVENT_MISSING', {
