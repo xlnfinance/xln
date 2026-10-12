@@ -83,14 +83,17 @@ test('native secp256k1 references belong to each worker VM across repeated start
     try {
       for (let wave = 0; wave < 8; wave++) {
         const workers = [];
+        const closed = [];
         await Promise.all(Array.from({ length: 2 }, () => new Promise((resolve, reject) => {
           const worker = new Worker(url); workers.push(worker);
+          // A worker can finish before its sibling reports ready. Observe its
+          // close immediately, not after Promise.all has lost that event.
+          closed.push(new Promise(resolve => worker.addEventListener('close', resolve, { once: true })));
           worker.onmessage = resolve; worker.onerror = reject;
         })));
         if (exercise() !== expected) throw Error('NATIVE_SIGNATURE_CHANGED');
-        await Promise.all(workers.map(worker => new Promise(resolve => {
-          worker.addEventListener('close', resolve, { once: true }); worker.terminate();
-        })));
+        for (const worker of workers) worker.terminate();
+        await Promise.all(closed);
         if (exercise() !== expected) throw Error('NATIVE_SIGNATURE_CHANGED_AFTER_CLOSE');
       }
     } finally { URL.revokeObjectURL(url); }

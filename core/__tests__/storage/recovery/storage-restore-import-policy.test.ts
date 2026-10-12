@@ -200,7 +200,9 @@ describe('restored checkpoint conflict policy', () => {
     expect(computeCanonicalStateHashFromEnv(materialized!)).toBe(checkpointHash);
     await closeRecoveryEnv(materialized!);
     await expect(importRuntimeRecoveryRecording(recording, seed)).rejects.toThrow('RECOVERY_IMPORT_DESTINATION_NOT_EMPTY');
-  });
+    // This case imports, replays and reopens real stores three times. A 5s
+    // timeout on CI ran afterEach while the still-live replay was using them.
+  }, 15_000);
 
   test.each(['before-publish', 'after-publish'] as const)('recording interruption at %s exposes no partial tip', async boundary => {
     const seed = `restore publication ${boundary} ${process.pid}`;
