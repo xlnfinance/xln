@@ -84,6 +84,27 @@ RPC catch-up timed out before reaching the already-funded reserve. No extra
 funding or stale-state attack was submitted by those retries.
 [Exact commands, source bindings and retained logs](evidence/canonical-review-20261012/rpc-restore-followup.json).
 
+### Implemented: production no longer depends on QA
+
+Pure Account causal tracing now belongs to Runtime observability. The scenario
+CLI owns ASCII formatting, including the existing frame-step stop. Both production
+HTTP entry points no longer mount the QA API; its tooling implementation remains.
+No financial transition, trace content or debug-stop timing changed.
+
+On clean `34fec4412`: 53/53 focused tests with 1,912 assertions, full check with
+38 source gates, and one real React payment/reload journey passed with zero skips
+or flakes. The live orchestrator returned 404 for `/api/qa/health`. The unchanged
+financial path passed `lock-ahb`, 85 frames, on preceding `2b2c1081c`.
+
+The existing collector measures kernel closure **161,031 → 160,577 code lines**
+and **816 → 815 files**. Reachable QA code falls **533 → 0**, with **3 → 0**
+direct kernel imports. The net closure reduction is 454 lines because the pure
+trace remains reachable under its actual owner. This is a static kernel closure,
+not the whole server bundle; the 1,412-line QA handler was disconnected, not deleted.
+All 18 remaining tooling edges point to `core/rscore`, whose reachable 11,691
+code lines include active TS code that cannot simply be removed.
+[Exact measurements, commands and retained logs](evidence/canonical-review-20261012/qa-boundary.json).
+
 ## Target ownership and deletion sequence
 
 The live queue stays in [todo.md](../todo.md). This table is the reviewed design,
@@ -107,9 +128,9 @@ lines in 14 files** inside `core/rscore`; deleting that directory would break TS
 The TS driver is 1,154 lines, but retained diagnostic/checkpoint consumers must
 be traced before claiming those lines removable.
 
-Two production hosts mount the same **1,412-line QA API** and its dependencies.
-Removing the mounts reduces reachability; it does not delete 1,412 repository
-lines. Likewise moving the 96-line causal trace corrects ownership, not size.
+The reviewed baseline mounted the same **1,412-line QA API** in two production
+hosts. That removal is now implemented and measured above. Moving the causal
+trace corrects ownership, not size.
 
 ## Boundaries that must not be flattened
 

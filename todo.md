@@ -18,8 +18,9 @@ preserved; the public alpha has not yet been updated to the new candidate.
    retain all eight areas' proposals without making a second live queue.
 2. Complete PR #71's reserve-confirmation rollout and public P6 with genuine
    old/new signatures, external tower, real clocks and fresh recovery.
-3. Remove production QA mounts/imports, then retired Rust execution hooks while
-   retaining active TS workers; prove exact roots, positional outbox and recovery.
+3. Land the verified production QA separation (454 fewer reachable kernel code
+   lines), then remove retired Rust execution hooks while retaining active TS
+   workers; prove exact roots, positional outbox and recovery.
 4. Consolidate duplicated wallet route/depth policy and strict Brainvault worker
    admission, each behind its smallest actual failure and browser proof.
 5. Finish current exit-gas, operational and exact-build mainnet evidence. Rust

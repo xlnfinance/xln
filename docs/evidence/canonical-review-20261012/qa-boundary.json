@@ -1,0 +1,167 @@
+{
+  "sourceSha": "34fec44123ca495ad6730f8b4c8c05263b0c4d0a",
+  "baseSha": "f257ad8eb4dc171fded9cd0c0be13516ec1f99e2",
+  "cleanBeforeAndAfterExecution": true,
+  "checks": {
+    "unit": {
+      "command": "bun test core/__tests__/account/tooling/account-causal-trace.test.ts core/__tests__/jurisdiction/adapter/jadapter-rpc-startup-logging.test.ts core/__tests__/operations/health/prod-startup-wiring.test.ts core/__tests__/runtime/commit/runtime-frame-atomicity.test.ts",
+      "passed": 53,
+      "failed": 0,
+      "assertions": 1912,
+      "files": 4
+    },
+    "source": {
+      "command": "bun run check",
+      "sourceGatesPassed": 38,
+      "status": "passed"
+    },
+    "browser": {
+      "command": "XLN_LOCAL_PROD_SMOKE_WALLET_TESTS=e2e-payment.spec.ts XLN_LOCAL_PROD_SMOKE_WALLET_GREP='pays the merchant through the hub' bun run stand:run --reason qa-boundary-react-payment --timeout-ms 180000 -- bun run prod:smoke:local",
+      "standLockHeld": true,
+      "stats": {
+        "startTime": "2026-10-12T03:48:27.513Z",
+        "duration": 12864.254,
+        "expected": 1,
+        "skipped": 0,
+        "unexpected": 0,
+        "flaky": 0
+      },
+      "journey": "Fund 100 USDC, pay 25 via hub, exact committed receipt/debit, duplicate-click protection, activity, reload state",
+      "runtimeBuild": "built by the existing browser gate on this candidate"
+    },
+    "qaHttp": {
+      "method": "GET",
+      "path": "/api/qa/health",
+      "server": "local production orchestrator at 127.0.0.1:20004",
+      "status": 404,
+      "body": {
+        "error": "Not found"
+      },
+      "limitation": "HTTP probe covered orchestrator mount; server/index removal is covered statically."
+    },
+    "lockAhb": {
+      "sourceSha": "2b2c1081c1965fc72a53b898873d16867fa5f733",
+      "cleanBeforeAndAfterExecution": true,
+      "command": "XLN_RUNTIME_SEED=qa-boundary-2b2c1081c-20261012 bun run stand:run --reason qa-boundary-lock-ahb --timeout-ms 180000 -- bun core/scenarios/run.ts lock-ahb --mode=browservm",
+      "frames": 85,
+      "status": "passed",
+      "standLockHeld": true,
+      "laterChange": "Only unused helper export visibility and usage comment in QA formatter; financial runtime/scenario unchanged."
+    }
+  },
+  "measurement": {
+    "tool": "xln1000/2",
+    "treeOnly": true,
+    "beforeSha": "f257ad8eb4dc171fded9cd0c0be13516ec1f99e2",
+    "afterSha": "34fec44123ca495ad6730f8b4c8c05263b0c4d0a",
+    "changes": {
+      "declaredKernelLoc": {
+        "before": 95315,
+        "after": 95309,
+        "change": -6
+      },
+      "closureKernelLoc": {
+        "before": 161031,
+        "after": 160577,
+        "change": -454
+      },
+      "declaredFiles": {
+        "before": 539,
+        "after": 539,
+        "change": 0
+      },
+      "closureFiles": {
+        "before": 816,
+        "after": 815,
+        "change": -1
+      },
+      "toolingEdges": {
+        "before": 21,
+        "after": 18,
+        "change": -3
+      },
+      "infraEdges": {
+        "before": 137,
+        "after": 136,
+        "change": -1
+      },
+      "edgesOutOfKernel": {
+        "before": 468,
+        "after": 467,
+        "change": -1
+      },
+      "functions": {
+        "before": 9964,
+        "after": 9949,
+        "change": -15
+      },
+      "over60": {
+        "before": 377,
+        "after": 374,
+        "change": -3
+      },
+      "qaClosureCodeLoc": {
+        "before": 533,
+        "after": 0,
+        "change": -533
+      },
+      "directKernelQaEdges": {
+        "before": 3,
+        "after": 0,
+        "change": -3
+      }
+    },
+    "remainingRscore": {
+      "codeLoc": 11691,
+      "directKernelEdges": 18
+    },
+    "limitations": [
+      "K is closure of declared kernel roots under core/, not every production server/browser entry point.",
+      "Only production TS/TSX is in the AST map; tests and d.ts are excluded.",
+      "Statically resolvable relative value imports and literal dynamic imports are followed; external packages and computed dynamic imports are not expanded.",
+      "CodeLOC counts lines touched by non-trivia TypeScript tokens, not physical lines, bytes, runtime performance or audit safety.",
+      "No ledger/CI lookup, tests, browser check or clean-worktree release attestation was performed."
+    ]
+  },
+  "staticReview": {
+    "sourceSha": "2b2c1081c1965fc72a53b898873d16867fa5f733",
+    "findings": 0,
+    "method": "independent bounded static diff review; not a security audit"
+  },
+  "limitations": [
+    "Not the full unit/E2E suite or a mainnet acceptance claim.",
+    "Local Anvil payment and BrowserVM scenario, not public Sepolia P6.",
+    "QA handler source remains for tooling; removing two server mounts does not delete its 1,412 physical lines.",
+    "Rust and lending source remain frozen; active TS worker code in core/rscore is not removed."
+  ],
+  "artifacts": [
+    {
+      "path": "qa-boundary-check-34fec4412.log.gz",
+      "sha256": "5b973db6861cd433607e18107f4a7cdbe4006153357c01c1632b7452634a384b",
+      "uncompressedSha256": "13edf0cddb0922a9e6e4628c55e351ac40a81fed414cbd9189dbc203f8a6e7bb"
+    },
+    {
+      "path": "qa-boundary-units-34fec4412.log.gz",
+      "sha256": "91cc1477fb9a701a577a0657e125d8f74227549da0ea04f91b9ad8f73e72bf41",
+      "uncompressedSha256": "2072316be76001f856d7b139f6db8c8882db5c64f5feae2b8660e91eb2116963"
+    },
+    {
+      "path": "qa-boundary-lock-ahb.log.gz",
+      "sha256": "997a239aac834c10f11a1ec8f791c505a3901a2a1dbbca3a3da6c2ab1c219615",
+      "uncompressedSha256": "ea53938d88726bccdba8e98fa442927e984e4eda58e21c9388a759a99ecf01c7"
+    },
+    {
+      "path": "qa-boundary-browser-34fec4412.log.gz",
+      "sha256": "04cbe56cfef2fc87f9c7eb43ab72ab0400b7d31d88235b65a192ba947dfe4b91",
+      "uncompressedSha256": "116ea316bf7c4cb34696f19ff3cc28927de2668a89bd899961a613e36a33c754"
+    },
+    {
+      "path": "xln1000-f257ad8eb.json",
+      "sha256": "cc04265d001ba19e80970b2ef505849a9f630675486f595e1b9ce89689c103ba"
+    },
+    {
+      "path": "xln1000-34fec4412.json",
+      "sha256": "0f3b88c8bd7e22150c71404b3cdde691c448fc1736412ef4b50139e216c2c574"
+    }
+  ]
+}
