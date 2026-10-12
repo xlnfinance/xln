@@ -236,7 +236,7 @@ describe('RPC J-watcher backlog drain', () => {
   test('delivers an authenticated event beyond two 2048-block pages before returning', async () => {
     managedAnvil = await startAnvil();
     rpcProxy = startRpcGateProxy(managedAnvil.rpcUrl);
-    adapter = await createJAdapter({ mode: 'rpc', chainId: CHAIN_ID, rpcUrl: rpcProxy.rpcUrl });
+    adapter = await createJAdapter({ mode: 'rpc', chainId: CHAIN_ID, rpcUrl: rpcProxy.rpcUrl, watchPollMs: 100 });
     await adapter.deployStack();
 
     const env = createEmptyEnv(RUNTIME_SEED);
@@ -305,14 +305,19 @@ describe('RPC J-watcher backlog drain', () => {
     if (!pollWatcher || !readScanProgress) throw new Error('J_WATCHER_BACKLOG_POLL_API_MISSING');
     const isWatching = adapter.isWatching.bind(adapter);
     const takeHeaderBlocks = rpcProxy.takeHeaderBlocks;
-    const waitForGate = async (stage: string, gate: RpcGateControl, poll: Promise<void>): Promise<void> => {
+    const waitForGate = async (stage: string, gate: RpcGateControl, poll?: Promise<void>): Promise<void> => {
+      let timer: ReturnType<typeof setTimeout>;
+      const deadline = new Promise<{ status: 'timed-out' }>(resolve => {
+        timer = setTimeout(() => resolve({ status: 'timed-out' }), 5_000);
+      });
       const result = await Promise.race([
         gate.entered.then(() => ({ status: 'entered' } as const)),
-        poll.then(
+        ...(poll ? [poll.then(
           () => ({ status: 'resolved' } as const),
           (error: unknown) => ({ status: 'rejected', error } as const),
-        ),
-      ]);
+        )] : []),
+        deadline,
+      ]).finally(() => clearTimeout(timer));
       if (result.status === 'entered') return;
       gate.release();
       throw new Error(`J_WATCHER_BACKLOG_GATE_NOT_REACHED:${stage}:${safeStringify({
@@ -342,11 +347,16 @@ describe('RPC J-watcher backlog drain', () => {
     expect(rpcProxy.takeHeaderBlocks()).toHaveLength(128);
 
     const timeoutGate = rpcProxy.armHeaderBatchGate();
+    const retryStartedAt = performance.now();
     const timedOutPoll = pollWatcher();
+    const joinedTimedOutPoll = pollWatcher();
     await waitForGate('timeout', timeoutGate, timedOutPoll);
     try {
+      // A manual drain shares transport cooldown with the automatic timer.
+      // The real proxy must not receive another header request immediately after 429.
+      expect(performance.now() - retryStartedAt).toBeGreaterThanOrEqual(900);
       // Let the real HTTP batch deadline abort the held request; no fake clock.
-      await timedOutPoll;
+      await Promise.all([timedOutPoll, joinedTimedOutPoll]);
     } finally {
       timeoutGate.release();
     }
@@ -364,6 +374,17 @@ describe('RPC J-watcher backlog drain', () => {
       (_, index) => anchorHeight + index,
     ));
     expect(readScanProgress().scannedThroughHeight).toBe(fromBlock + 511);
+
+    const retainedPressureGate = rpcProxy.armBlockNumberGate();
+    const successfulRetryAt = performance.now();
+    const retainedPressurePoll = pollWatcher();
+    await waitForGate('retained-pressure', retainedPressureGate, retainedPressurePoll);
+    try {
+      expect(performance.now() - successfulRetryAt).toBeGreaterThanOrEqual(1_400);
+    } finally {
+      retainedPressureGate.release();
+    }
+    await retainedPressurePoll;
 
     await processJEvents(env);
 
@@ -466,5 +487,42 @@ describe('RPC J-watcher backlog drain', () => {
     await shutdown;
     await inFlightPoll;
     expect(adapter.isWatching()).toBe(false);
+
+    // Exercise the actual automatic timer on the same real transport. The
+    // manual call below only joins a request already held by the proxy.
+    env.scenarioMode = false;
+    const automaticFailureGate = rpcProxy.armHeaderBatchGate(429);
+    adapter.startWatching(env);
+    await waitForGate('automatic-first-poll', automaticFailureGate);
+    const automaticFailure = pollWatcher();
+    automaticFailureGate.release();
+    await automaticFailure;
+    const automaticRetryGate = rpcProxy.armHeaderBatchGate(429);
+    const automaticRetryAt = performance.now();
+    await waitForGate('automatic-retry', automaticRetryGate);
+    const automaticRetry = pollWatcher();
+    try {
+      expect(performance.now() - automaticRetryAt).toBeGreaterThanOrEqual(900);
+    } finally {
+      automaticRetryGate.release();
+    }
+    await automaticRetry;
+
+    const cancelledGate = rpcProxy.armBlockNumberGate();
+    let requestedWhileCooling = false;
+    void cancelledGate.entered.then(() => { requestedWhileCooling = true; });
+    const coolingPoll = pollWatcher();
+    const joinedCoolingPoll = pollWatcher();
+    await Bun.sleep(25);
+    const stopStartedAt = performance.now();
+    try {
+      await adapter.stopWatchingAndWait();
+      await Promise.all([coolingPoll, joinedCoolingPoll]);
+      expect(performance.now() - stopStartedAt).toBeLessThan(500);
+      expect(requestedWhileCooling).toBe(false);
+      expect(adapter.isWatching()).toBe(false);
+    } finally {
+      cancelledGate.release();
+    }
   }, 60_000);
 });

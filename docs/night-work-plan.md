@@ -82,6 +82,17 @@ The next deletion proposal is bounded to always-null retired stage handles;
 finish this candidate's evidence and eligible PR CI before expanding its scope.
 No external-model budget was spent or renewed.
 
+Method review, 06:15 UTC: current-contract funding and unilateral exit passed
+25/25 local cases on clean `cef42c616`, including both Account sides, full exit,
+reopening and 512 fuzz invocations. Eight production compiler templates match.
+The separate public P6 boundary remains RPC pressure: a real forwarding proxy
+reproduces a second request only 9.535 ms after a 429. Window shrink alone does
+not control request rate. Keep one shared, cancellable transport cooldown for
+manual and scheduled polling; prove that regression before another public run.
+Do not keep retrying public catch-up or broaden the next deletion while this
+candidate is under verification. The frozen fixture import exception remains
+pending, so no push or merge is justified. No external-model budget was used.
+
 ## Historical evidence and superseded scope
 
 Owner priority, 2026-10-11 17:28 UTC: ship a public Sepolia deployment and usable

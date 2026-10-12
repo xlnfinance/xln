@@ -79,6 +79,8 @@ export type RpcWatcherSession = {
   lastCanonicalAuditAtMs: number;
   transientFailures: number;
   lastTransientLogAtMs: number;
+  /** Process-local transport pressure shared by scheduled and explicit polls. */
+  rpcCooldown: { backoffMs: number; untilMs: number; releaseWait: (() => void) | null };
   /** Shrinks under RPC or Runtime mempool pressure, grows after success. */
   maxBlocksPerPoll: number;
   txCounter: EventBatchCounter;

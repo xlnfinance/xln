@@ -1,7 +1,7 @@
 import { BLOCKCHAIN } from '../../../../config/constants';
 import type { RuntimeReplica } from '../../../../runtime/types';
 import { isRuntimeMempoolCapacityError } from '../../../../runtime/mempool/input-queue';
-import { nextWatcherPollWindow } from '../../watcher/observe/watcher-poll-policy';
+import { nextWatcherPollWindow, nextWatcherRpcBackoffMs } from '../../watcher/observe/watcher-poll-policy';
 import { isDebugEventEmitter } from '../../rpc-utils';
 import {
   haltProcessForFatalWatcherError,
@@ -74,6 +74,7 @@ const createWatcherSession = (
     lastCanonicalAuditAtMs: 0,
     transientFailures: 0,
     lastTransientLogAtMs: 0,
+    rpcCooldown: { backoffMs: 0, untilMs: 0, releaseWait: null },
     maxBlocksPerPoll: BLOCKCHAIN.J_WATCHER_MAX_BLOCKS_PER_POLL,
     txCounter: { value: 0, _seenLogs: { set: new Set<string>(), order: [] } },
     readWatchedErc20Tokens,
@@ -154,11 +155,15 @@ const handlePollFailure = (
     });
     return;
   }
-  if (isRuntimeMempoolCapacityError(error) || services.isTransientRpcUnavailable(error)) {
+  const transportUnavailable = services.isTransientRpcUnavailable(error);
+  if (isRuntimeMempoolCapacityError(error) || transportUnavailable) {
     // Bound both ingress and transport pressure with the same window. A
     // throttled 2048-block read otherwise retries its entire prefix forever;
     // no cursor advances until a complete authenticated window is admitted.
     session.maxBlocksPerPoll = nextWatcherPollWindow(session.maxBlocksPerPoll, false);
+    if (transportUnavailable) {
+      session.rpcCooldown.backoffMs = nextWatcherRpcBackoffMs(session.rpcCooldown.backoffMs, false);
+    }
     handleTransientFailure(services, session, trace, message, error);
     return;
   }
@@ -174,10 +179,21 @@ const handlePollFailure = (
   haltProcessForFatalWatcherError(fatalPayload);
 };
 
-const pollOnce = (
-  state: RpcWatcherControllerState,
-  services: RpcWatcherServices,
-): Promise<void> => {
+const waitForRpcCooldown = (session: RpcWatcherSession): Promise<void> => {
+  const delayMs = session.rpcCooldown.untilMs - performance.now();
+  if (delayMs <= 0) return Promise.resolve();
+  return new Promise(resolve => {
+    const release = (): void => {
+      clearTimeout(timer);
+      session.rpcCooldown.releaseWait = null;
+      resolve();
+    };
+    const timer = setTimeout(release, delayMs);
+    session.rpcCooldown.releaseWait = release;
+  });
+};
+
+const pollOnce = (state: RpcWatcherControllerState, services: RpcWatcherServices): Promise<void> => {
   const session = state.session;
   if (!session) return Promise.resolve();
   if (state.inFlight) return state.inFlight;
@@ -186,17 +202,27 @@ const pollOnce = (
     fromBlock: null,
     toBlock: null,
   };
-  const isCancelled = (): boolean =>
-    state.session !== session || state.generation !== session.generation;
-  const poll = runWatcherPoll({
-    session,
-    services,
-    trace,
-    isCancelled,
-    emitDebug: payload => emitWatcherDebug(session, payload),
-  })
+  const isCancelled = (): boolean => state.session !== session || state.generation !== session.generation;
+  // The single flight includes this wait; explicit pollNow drains cannot
+  // bypass transport pressure or start another read while a retry is sleeping.
+  const poll = waitForRpcCooldown(session)
+    .then(async () => {
+      if (isCancelled()) return;
+      const before = session.lastSyncedBlock;
+      await runWatcherPoll({
+        session,
+        services,
+        trace,
+        isCancelled,
+        emitDebug: payload => emitWatcherDebug(session, payload),
+      });
+      if (!isCancelled() && session.lastSyncedBlock > before) {
+        session.rpcCooldown.backoffMs = nextWatcherRpcBackoffMs(session.rpcCooldown.backoffMs, true);
+      }
+    })
     .catch(error => handlePollFailure(state, services, session, trace, error))
     .finally(() => {
+      session.rpcCooldown.untilMs = performance.now() + session.rpcCooldown.backoffMs;
       state.inFlight = null;
     });
   state.inFlight = poll;
@@ -204,19 +230,8 @@ const pollOnce = (
 };
 
 /**
- * Drive the poll loop, fast while catching up and idle at the tip.
- *
- * One poll reads at most `J_WATCHER_MAX_BLOCKS_PER_POLL` blocks. Waiting the
- * full interval between those windows makes the initial scan take
- * `blocksBehind / windowSize * pollMs`, which on a chain of any age is longer
- * than a wallet is willing to wait to open: at 256 blocks a window and five
- * seconds between them, a chain 70,000 blocks along needs twenty-odd minutes
- * before the first screen can be drawn.
- *
- * So the next poll is scheduled immediately whenever the previous one actually
- * advanced the synced height, and at the normal interval as soon as it did not.
- * A watcher that stops making progress therefore falls straight back to idle
- * pacing instead of spinning against the node.
+ * Healthy catch-up stays immediate; idle polls use the configured interval.
+ * pollOnce owns transport cooldown for this timer and explicit callers alike.
  */
 const scheduleNextPoll = (
   state: RpcWatcherControllerState,
@@ -303,6 +318,7 @@ export const createRpcWatcherController = (
       if (session?.interval) clearTimeout(session.interval);
       if (session) {
         session.interval = null;
+        session.rpcCooldown.releaseWait?.();
         state.lastScanProgress = session.scanProgress;
       }
       rpcLog.info('watcher.stopped', { chainId: services.chainId });
