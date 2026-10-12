@@ -165,6 +165,19 @@ configuration is unchanged. The 04:45 UTC method review replaces repeated long
 retries with first-error capture and resumes the independent TS launcher cut.
 [Retained evidence and availability limits](evidence/canonical-review-20261012/p6-rpc-quota.json).
 
+### Implemented: ordinary launch has one engine
+
+On clean `f774dbb70`, the existing selector rejects Rust, embedded authority and
+shadow activation before dev preparation, process cleanup or Hub spawn. The
+68-line Rust build preflight and authority propagation are deleted. Native
+diagnostic helpers remain; active TS worker isolation is a separate unfinished cut.
+
+Measured source delta: **69 non-test lines removed net**, **25 including tests**.
+Verification: **52/52 tests, 427 assertions**, including twelve real rejected dev
+launches; **38 source gates**; and **3/3 real React payment journeys**, zero skips
+or flakes, through three TS Hubs. The payment journey verifies reload recovery.
+[Clean-source commands, browser results and retained logs](evidence/canonical-review-20261012/ts-only-launcher.json).
+
 ## Target ownership and deletion sequence
 
 The live queue stays in [todo.md](../todo.md). This table is the reviewed design,

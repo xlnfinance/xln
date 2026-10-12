@@ -4,14 +4,18 @@ Owner scope: TS + React + Ethereum same-J; Rust and lending remain frozen.
 Foreign Rust stash `438bf1a6ddd8679bba0b63bdef11dd1fd1f45e90` is untouched.
 Keep frozen-core, PRs with seven required green jobs, no WIP commits.
 
-- Verified source: `c6215ccd3a0c2100038c1ef6ca24dc708384e6c8` in combined
-  PR #73 against main. The next isolated launcher cut is on
-  `codex/ts-only-launcher`; do not change the running final-candidate CI head.
+- Verified source: `f774dbb7009e92521d5a7f5bfb836be5109f3506` on
+  `codex/ts-only-launcher`. Its predecessor `c6215ccd3` remains the immutable
+  combined PR #73 candidate against main; do not change that running CI head.
   PR #71 at `ca96f041d` and PR #72 at `8d7f1e742` now both have all seven
   CI jobs green, including E2E. Main remains `86d2a515`. Consolidate the final
   candidate in PR #73 against main and require its own seven green jobs before
   merge; predecessor greens are evidence, not a waiver of final CI.
-- Last green: clean `042026fe0`: 20/20 tests, 82 assertions, all four real RPC
+- Last green: clean `f774dbb70`: launcher 52/52 tests, 427 assertions; full check,
+  38 source gates; real production startup and 3/3 React payment journeys,
+  zero skipped/flaky. One existing selector rejects retired engines before setup;
+  deleting their build preflight and propagation removes 69 non-test lines net.
+  Prior clean `042026fe0`: 20/20 tests, 82 assertions, all four real RPC
   SIGKILL boundaries; full check, 38 source gates. Trusted RPC binding now uses
   live infrastructure without changing committed JReplica state. Production
   code shrinks four lines net. The existing test proves exact roots after first
@@ -39,10 +43,11 @@ Keep frozen-core, PRs with seven required green jobs, no WIP commits.
   seed remains in the original profile. Never publish the seed, signed private
   recording or raw DB. Public P4/P5 and prior cold restore are in
   `docs/evidence/rc-20261012/`. Live alpha still runs `7c3f63f98`.
-- Next single command: run the focused launcher regression after its stable
-  TS-only patch. Remove the retired Rust build preflight and authority propagation;
-  use the existing selector to reject retired engines before setup. Finish PR #73's
-  own CI before merging it. Public P6 needs an adequate RPC source and then actual
+- Next single command: publish the separate verified launcher PR after its
+  evidence commit and check. Finish PR #73's own CI before merging it. The next
+  source cut moves active TS workers and their actual owners out of `core/rscore`,
+  without compatibility aliases; preserve WAL roots and positional outputs.
+  Public P6 needs an adequate RPC source and then actual
   signatures, external tower, real clocks and a further cold restore.
 - Remaining final gates: ten consecutive green main CI runs; active TS worker
   isolation from retired Rust tooling; public P6; external tower start/finalize/

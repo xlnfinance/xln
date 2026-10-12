@@ -1,0 +1,114 @@
+{
+  "sourceSha": "f774dbb7009e92521d5a7f5bfb836be5109f3506",
+  "cleanBefore": true,
+  "cleanAfter": true,
+  "scope": "Ordinary TS development and Hub startup; no Rust/lending implementation or financial transition changes.",
+  "change": "Existing canonicalHubEngine rejects retired Rust/authority/shadow activation before setup, cleanup, or spawn. Deleted Rust build preflight and child authority propagation. Internal native diagnostic helpers remain.",
+  "codeDelta": {
+    "nonTestLinesNet": -69,
+    "includingTestsNet": -25,
+    "files": 8
+  },
+  "firstRed": {
+    "releaseEvidence": false,
+    "baseSha": "c6215ccd3a0c2100038c1ef6ca24dc708384e6c8",
+    "reason": "New negative assertion against unchanged selector returned rust instead of throwing; working tree contained the regression."
+  },
+  "verification": [
+    {
+      "command": "bun test core/__tests__/orchestrator/process/hub-engine-plan.test.ts core/__tests__/orchestrator/process/child-secret-channel.test.ts core/__tests__/orchestrator/bootstrap/hub-ready-snapshot-fence.test.ts core/__tests__/dev-startup-hardening.test.ts",
+      "passed": 52,
+      "failed": 0,
+      "assertions": 427,
+      "wallSeconds": 4.59,
+      "realNegativeDevLaunches": 12
+    },
+    {
+      "command": "bun run check",
+      "sourceGates": 38,
+      "exitCode": 0
+    },
+    {
+      "command": "XLN_LOCAL_PROD_SMOKE_WALLET_TESTS=e2e-payment.spec.ts bun run stand:run --reason ts-only-launcher-production-path --timeout-ms 180000 -- bun run prod:smoke:local",
+      "standLocked": true,
+      "exitCode": 0,
+      "tsHubs": 3,
+      "systemReadyMs": 18569,
+      "browserStats": {
+        "startTime": "2026-10-12T04:59:29.648Z",
+        "duration": 26704.531,
+        "expected": 3,
+        "skipped": 0,
+        "unexpected": 0,
+        "flaky": 0
+      },
+      "cases": [
+        {
+          "title": "payment receipts and recovery dialogs keep keyboard focus inside and restore it on close",
+          "status": "expected",
+          "results": [
+            {
+              "status": "passed",
+              "duration": 7326,
+              "errors": []
+            }
+          ]
+        },
+        {
+          "title": "invalid amounts and recipients cannot admit a payment or retain a revoked quote",
+          "status": "expected",
+          "results": [
+            {
+              "status": "passed",
+              "duration": 6889,
+              "errors": []
+            }
+          ]
+        },
+        {
+          "title": "pays the merchant through the hub and shows the committed receipt",
+          "status": "expected",
+          "results": [
+            {
+              "status": "passed",
+              "duration": 11533,
+              "errors": []
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "staticReview": {
+    "independentAgent": true,
+    "scope": "stable working diff; no separate execution",
+    "actionableFindings": 0
+  },
+  "limitations": [
+    "Full required PR CI remains necessary.",
+    "Native helpers and active workers remain in the static import graph; this is not zero Rust-related imports.",
+    "Public P6 remains blocked by public RPC availability; this local Anvil journey is not public-chain acceptance."
+  ],
+  "logs": [
+    {
+      "path": "docs/evidence/canonical-review-20261012/ts-only-launcher-tests.log.gz",
+      "sha256": "8bd326907ffd2a5a427b2d2c341d7d8e85619de08919c5c54678b2f439f50d47"
+    },
+    {
+      "path": "docs/evidence/canonical-review-20261012/ts-only-launcher-check.log.gz",
+      "sha256": "aff2e6eb536a41d88e8daf11d60ad99385398680ec01e931271480b6ec1a3195"
+    },
+    {
+      "path": "docs/evidence/canonical-review-20261012/ts-only-launcher-production.log.gz",
+      "sha256": "bc253a5d58282a2a375baf88ca49261cf9774935f288fb5bc890564f8f94617b"
+    },
+    {
+      "path": "docs/evidence/canonical-review-20261012/ts-only-launcher-first-red.log.gz",
+      "sha256": "94b97befbed399390f027f105d27e67f7f590c1247c3ef6609d1a108f9787dcc"
+    },
+    {
+      "path": "docs/evidence/canonical-review-20261012/ts-only-launcher-wallet-results.log.gz",
+      "sha256": "ad72923e7751746960d31e5a59cc1e0d3826038a433f5a079971a58bc845cf41"
+    }
+  ]
+}

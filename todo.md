@@ -22,8 +22,8 @@ preserved; the public alpha has not yet been updated to the new candidate.
    run still did not observe existing funding. Preserve authenticated history and avoid duplicate funding. Use genuine
    old/new signatures, external tower, real clocks and fresh recovery.
 3. Land the verified production QA separation in combined PR #73 (454 fewer
-   reachable kernel code lines), then reject retired Rust launch selectors before
-   setup and delete their build preflight. Remove retired runtime hooks while retaining active TS
+   reachable kernel code lines) and TS-only launcher follow-up (69 fewer non-test
+   lines, 52 unit and 3 browser tests green). Remove retired runtime hooks while retaining active TS
    workers; prove exact roots, positional outbox and recovery.
 4. Consolidate duplicated wallet route/depth policy and strict Brainvault worker
    admission, each behind its smallest actual failure and browser proof.
