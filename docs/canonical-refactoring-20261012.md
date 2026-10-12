@@ -19,16 +19,16 @@ formats were inventoried and relevant dependencies inspected selectively.
 Focused semantic reading covered regions in **236 assigned files**. The other
 3,815 files were mechanically screened; their correctness is not attested.
 
-| Area | Indexed files | Files with focused semantic reads |
-| --- | ---: | ---: |
-| Runtime, storage, transport | 698 | 24 |
-| Entity and books | 357 | 34 |
-| Account, protocol, Hanko | 301 | 43 |
-| Jurisdiction, API, tower | 565 | 17 |
-| Rust and TS bridge | 661 | 23 |
-| React, frozen Svelte, browser tests | 794 | 33 |
-| Tooling, QA, release | 462 | 23 |
-| Brainvault, native, custody, proofs, archive | 213 | 39 |
+| Area                                         | Indexed files | Files with focused semantic reads |
+| -------------------------------------------- | ------------: | --------------------------------: |
+| Runtime, storage, transport                  |           698 |                                24 |
+| Entity and books                             |           357 |                                34 |
+| Account, protocol, Hanko                     |           301 |                                43 |
+| Jurisdiction, API, tower                     |           565 |                                17 |
+| Rust and TS bridge                           |           661 |                                23 |
+| React, frozen Svelte, browser tests          |           794 |                                33 |
+| Tooling, QA, release                         |           462 |                                23 |
+| Brainvault, native, custody, proofs, archive |           213 |                                39 |
 
 The [per-file ledger](evidence/canonical-review-20261012/coverage.json) distinguishes
 review depth. [Detailed findings](evidence/canonical-review-20261012/findings.json)
@@ -44,11 +44,11 @@ are retained; ledger and CI were disabled, so no overall readiness score is asse
 
 ## First patch: fewer implementations, one reproduced financial bug fixed
 
-| Change | Retained owner | Evidence |
-| --- | --- | --- |
-| Remove Move's second outgoing-debt scan | Exact runtime `debtTotals.outgoing` | 21 claims of 50 against 1,500 reserve: old UI reported 500; correct result 450. The 21st token was omitted entirely by bounded details. |
-| Remove duplicate output coalescing | `runtime/delivery/pending.ts:dedupeEntityOutputs` | Routing and durable pending outputs share the same merge; accepted order, input copying and equivocation rejection remain. |
-| Delete unused readiness executable | `scripts/dev/readiness/wait-dev-backend-ready.ts` | Retired copy differed only in its relative import; all tracked callers already use the retained path. |
+| Change                                  | Retained owner                                    | Evidence                                                                                                                                |
+| --------------------------------------- | ------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| Remove Move's second outgoing-debt scan | Exact runtime `debtTotals.outgoing`               | 21 claims of 50 against 1,500 reserve: old UI reported 500; correct result 450. The 21st token was omitted entirely by bounded details. |
+| Remove duplicate output coalescing      | `runtime/delivery/pending.ts:dedupeEntityOutputs` | Routing and durable pending outputs share the same merge; accepted order, input copying and equivocation rejection remain.              |
+| Delete unused readiness executable      | `scripts/dev/readiness/wait-dev-backend-ready.ts` | Retired copy differed only in its relative import; all tracked callers already use the retained path.                                   |
 
 Measured diff: **94 non-test source lines removed net**, 82 regression-test
 lines added; **12 source lines removed net including tests**. The folder-width
@@ -238,21 +238,56 @@ valid first signed Account input, invalid second signature, both original roots
 and empty outboxes, then an intact retry. Existing sibling-cascade tests do not
 prove this specific rollback case.
 
+### Verified transport follow-up
+
+The first RPC window reduction did not control request frequency. A real
+forwarding proxy reproduces a retry only 9.535 ms after a 429. One cancellable,
+monotonic cooldown now belongs to the existing watcher single-flight path,
+shared by automatic and manual polling. A second regression shows the next
+successful window expanding despite retained pressure: scanned height 1,536
+instead of 1,024. The same pressure state now gates that existing window growth.
+No second scheduler, committed field or financial formula was introduced.
+
+On clean `7d3134853`, **104/104 related tests**, **947 assertions**, **38 source
+gates**, **3/3 real React payment journeys**, **lock-ahb with 85 frames**, and
+**25/25 funding/exit cases with 512 fuzz invocations** pass on the same SHA.
+The eight Foundry/production compiler templates match. The preceding clean
+`1d780ff75` also verified the public contract stack against its current linked
+artifacts and checked Depository bindings; the reads were not block-pinned.
+
+The local gas bound is per operation, not the sum of a whole dispute. Largest
+printed finalization is 4,453,117 gas; the minimum one-token start/finalize
+samples are 449,300 / 399,142. Printed fuzz samples are not claimed maxima.
+Local time warp does not replace public real-clock evidence.
+
+Public P6 is still incomplete. Two bounded traces retain 429 failures; the
+second scans 1,048 blocks and last observes Runtime height 36 with reserve 0.
+It does not reach the funding event or submit a dispute. Those sampled values
+are not represented as post-shutdown state or a controlled throughput comparison.
+The frozen TS fixture import exception and required PR CI also remain open.
+[Exact source bindings, commands, failures and retained logs](evidence/canonical-review-20261012/watcher-pressure-window-7d3134853.json).
+
+The existing static collector now measures **160,552 kernel-closure code lines
+in 816 files**, versus **161,062 / 816** at the review baseline: **510 fewer
+reachable code lines**. QA imports stay at zero and `core/rscore` imports at 13.
+These RPC fixes add 27 physical production lines net; the fresh closure includes
+that cost. No overall XLN-1000 readiness score is asserted without CI and ledger.
+
 ## Target ownership and deletion sequence
 
 The live queue stays in [todo.md](../todo.md). This table is the reviewed design,
 not another backlog or an instruction to run all changes together.
 
-| Boundary | Canonical form | What goes away | Required proof before removal |
-| --- | --- | --- | --- |
-| Production versus QA | Runtime owns pure causal trace; scenario CLI owns formatting; money servers expose only their production API | Both QA HTTP mounts; both Runtime paths to the 465-line ASCII formatter | Real startup/payment, pre-intake debug stop, preserved scenario diagnostics, measured import closure |
-| TS execution | Account transition owns money; Runtime workers distribute the same transition | Retired Rust authority selectors/hooks; active TS code moves out of `core/rscore` with no alias | Reject retired launcher selectors before spawn; same WAL roots and ordered outputs inline/W1/W4, recovery and checkpoints |
-| Wallet reads | One browser-safe runtime route query; exact runtime Book/debt aggregates | Embedded route-policy copy, Account-page depth reconstruction, local swap scale/orientation and batch counter copies | Missing-profile/relay refresh, read-lease ordering, depth beyond detail limits, real pay/swap journeys |
-| Proof encoding | One low-level ProofBody codec per language; builder, JBatch and tower consume it | Four TS production hash owners; Rust manual-versus-ethabi duplication | Exact Solidity ABI bytes, Int512 extrema, uint256 widths, transformer order; avoid batch→builder import cycle |
-| Identity recovery | Existing strict Brainvault shard collector owns result admission | React lax hex/result acceptance and duplicated hosted validator | Wrong spec/request/index, duplicates, abort and malformed result rejection before wallet creation; browser/native mnemonic agreement |
-| Matcher | One production matcher; canonical commitment hash | `debugRebuildProjectionOnly` mode enabled only by two tests; weak diagnostic `computeBookHash` | Same matching/settlement/reject economics; keep actual preview semantics and useful failure diagnostics |
-| Release execution | Existing release runner owns suites; preflight owns deployment-specific evidence | Deferred lending blocker, repeated suite/process runners, Svelte source-marker surrogate | Current production typed rejection, full required React journeys, exit/recovery/owner signoff preserved |
-| Rust restore, after freeze reopens | Existing batch/checkpoint boundary owns one Account ABI decoder | Process/restore AccountTx and checkpoint decoder copies | Error-context adapters, nil-versus-empty-tuple boundaries, malformed vectors and exact TS/Rust WAL comparison |
+| Boundary                           | Canonical form                                                                                               | What goes away                                                                                                       | Required proof before removal                                                                                                        |
+| ---------------------------------- | ------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| Production versus QA               | Runtime owns pure causal trace; scenario CLI owns formatting; money servers expose only their production API | Both QA HTTP mounts; both Runtime paths to the 465-line ASCII formatter                                              | Real startup/payment, pre-intake debug stop, preserved scenario diagnostics, measured import closure                                 |
+| TS execution                       | Account transition owns money; Runtime workers distribute the same transition                                | Retired Rust authority selectors/hooks; active TS code moves out of `core/rscore` with no alias                      | Reject retired launcher selectors before spawn; same WAL roots and ordered outputs inline/W1/W4, recovery and checkpoints            |
+| Wallet reads                       | One browser-safe runtime route query; exact runtime Book/debt aggregates                                     | Embedded route-policy copy, Account-page depth reconstruction, local swap scale/orientation and batch counter copies | Missing-profile/relay refresh, read-lease ordering, depth beyond detail limits, real pay/swap journeys                               |
+| Proof encoding                     | One low-level ProofBody codec per language; builder, JBatch and tower consume it                             | Four TS production hash owners; Rust manual-versus-ethabi duplication                                                | Exact Solidity ABI bytes, Int512 extrema, uint256 widths, transformer order; avoid batch→builder import cycle                        |
+| Identity recovery                  | Existing strict Brainvault shard collector owns result admission                                             | React lax hex/result acceptance and duplicated hosted validator                                                      | Wrong spec/request/index, duplicates, abort and malformed result rejection before wallet creation; browser/native mnemonic agreement |
+| Matcher                            | One production matcher; canonical commitment hash                                                            | `debugRebuildProjectionOnly` mode enabled only by two tests; weak diagnostic `computeBookHash`                       | Same matching/settlement/reject economics; keep actual preview semantics and useful failure diagnostics                              |
+| Release execution                  | Existing release runner owns suites; preflight owns deployment-specific evidence                             | Deferred lending blocker, repeated suite/process runners, Svelte source-marker surrogate                             | Current production typed rejection, full required React journeys, exit/recovery/owner signoff preserved                              |
+| Rust restore, after freeze reopens | Existing batch/checkpoint boundary owns one Account ABI decoder                                              | Process/restore AccountTx and checkpoint decoder copies                                                              | Error-context adapters, nil-versus-empty-tuple boundaries, malformed vectors and exact TS/Rust WAL comparison                        |
 
 The Rust Account/checkpoint candidate could remove **500–900 lines**; the Rust
 proof codec **70–130**. These are estimates before implementation, not measured

@@ -10,11 +10,11 @@ Keep frozen-core, PRs with seven required green jobs, no WIP commits.
   replay all frames exactly. This is functional evidence, not live TPS; each
   replay ends with one pending outbox item. Historical 498-frame replay still
   fails identically at height 12 on the pre-move baseline and candidate.
-- Last green: clean d723e5827, full check (38 source gates) and lock-ahb
-  (85 frames). Clean e6fd12883 passed 3/3 React payment journeys; d723 only
-  restores unrelated formatting while retaining generated-output exclusions.
-  Generated account-worker.js is now untracked and rebuilt through the existing
-  generator. Rust and lending implementations remain unchanged.
+- Last green: clean 7d3134853, full check (38 source gates), 104/104 related
+  watcher tests (947 assertions), 3/3 real React payment journeys with no skips
+  or flakes, lock-ahb (85 frames), and 25/25 funding/exit cases with 512 fuzz
+  invocations. Eight production compiler templates match. All five local
+  checks share this SHA; public P6 and full CI remain incomplete.
 - First red: cross-j-opening-lifecycle.test.ts cannot resolve the relocated
   TS worker from rscore/fixtures/cross-j-opening/lifecycle.ts. The same old
   import exists in rscore/fixtures/entity-resident-group-e/group-e.ts. Owner
@@ -31,7 +31,7 @@ Keep frozen-core, PRs with seven required green jobs, no WIP commits.
   lines, 815 -> 816 files, direct core/rscore imports 18 -> 13. The moved
   3857 worker lines are not deleted code. Private WAL/seeds are not published.
 - Next single command after the two authorized import replacements:
-  bun test core/__tests__/rscore/parity/cross-j-opening-lifecycle.test.ts
+  bun test core/**tests**/rscore/parity/cross-j-opening-lifecycle.test.ts
   Then the group-E consumers, exact-candidate source/browser/scenario checks
   and push HEAD:codex/production-qa-boundary for PR #73 required CI.
 - Next bounded deletion: always-null retired Entity-stage handles, about 120
@@ -39,11 +39,20 @@ Keep frozen-core, PRs with seven required green jobs, no WIP commits.
   regression first; preserve live TS workers, WAL/checkpoints and recording.
 - Public P6 remains independent and unresolved: the funded profile recovers
   correctly after explicit checkpoint rebase, but PublicNode returns HTTP 429
-  and -32005 during catch-up. No further funding or dispute was submitted.
+  and -32005 during catch-up. Shared cancellable cooldown fixes the reproduced
+  9.535 ms retry; retained pressure also prevents immediate window regrowth.
+  The latest 160-second trace scans 1,048 authenticated blocks. Its last
+  observation is Runtime height 36, reserve 0; that is not a post-shutdown
+  financial read. No further funding or dispute was submitted.
   Live alpha remains 7c3f63f98. Do not repeat unchanged short cold-start loops.
+  Next diagnosis compares the existing proxy and its canonical upstream;
+  verify any transport change before using it, with no history shortcut.
+- Current static kernel closure is 160,552 code lines in 816 files, down 510
+  from the review baseline. QA imports remain zero; core/rscore imports remain 13. RPC fixes add 27 physical production lines net; this is necessary new
+  pressure control, not claimed code deletion. Rust and lending are unchanged.
 - Remaining release gates: required PR CI; ten consecutive green main runs;
   no kernel-to-rscore imports; public P6 with external tower and real clocks;
-  start/finalize/reveal coverage; current exit gas; owner-reviewed release
+  start/finalize/reveal coverage; owner-reviewed release
   package. No dispute-start freeze, FIFO, one debt per debtor/creditor/token
   and party-selected windows remain settled. No governance/bond redesign.
 
@@ -92,6 +101,16 @@ manual and scheduled polling; prove that regression before another public run.
 Do not keep retrying public catch-up or broaden the next deletion while this
 candidate is under verification. The frozen fixture import exception remains
 pending, so no push or merge is justified. No external-model budget was used.
+
+Method review, 06:45 UTC: both transport regressions now have real first-red
+and green evidence, and five local checks pass on one clean SHA. Two bounded
+public attempts still stop before the funding event; neither is P6 acceptance.
+Change the next diagnostic, not the timeout: compare the identical authenticated
+128-block range through the existing public proxy and its configured PublicNode
+upstream before another wallet cold start. A one-off success proves availability
+only. This isolates transport contention without changing consensus, providers
+or history. Preserve the pending fixture exception and avoid expanding the
+refactor while required CI cannot run on the complete candidate.
 
 ## Historical evidence and superseded scope
 

@@ -1,0 +1,354 @@
+{
+  "schemaVersion": 1,
+  "title": "Shared watcher RPC cooldown: local regression proof and blocked public catch-up",
+  "status": "local-proof-public-p6-blocked",
+  "sourceSha": "1d780ff75b5e61ce6d0f34651945738200469486",
+  "releaseReady": false,
+  "sourceBinding": {
+    "sourceFiles": [
+      {
+        "path": "core/jurisdiction/adapter/rpc/watcher/rpc-watcher-controller.ts",
+        "sha256": "bfab546bb7a37d55e5bf38bc7a392cc0973338c4b347fd7f4ab02ad9b96cd477"
+      },
+      {
+        "path": "core/jurisdiction/adapter/rpc/watcher/rpc-watcher-types.ts",
+        "sha256": "61901e2e685e00b5ebacc46f006ca75e8fe8aa1c71c7c8f4a3835efdc87e44e9"
+      },
+      {
+        "path": "core/jurisdiction/adapter/watcher/observe/watcher-poll-policy.ts",
+        "sha256": "5b2247e2521d4c11dcfa73127447f3e3d9e09138d0b61acaec4bfce003c375bc"
+      },
+      {
+        "path": "core/__tests__/jurisdiction/watchers/j-watcher-backlog-drain.test.ts",
+        "sha256": "60b17ff8949d635bc7cb61dffa4a7115304f1debca17251897ad5d444f433b59"
+      },
+      {
+        "path": "core/__tests__/jurisdiction/watchers/j-watcher-poll-policy.test.ts",
+        "sha256": "c2116815295b892b130a7c6b13dfa57467347785282573c79886a638385b9900"
+      }
+    ],
+    "verification": "Logs are bound to this committed SHA by root orchestration; most test logs do not embed a source SHA or clean-tree snapshot.",
+    "cleanBefore": true,
+    "cleanAfter": true,
+    "cleanlinessEvidence": "Root reported clean source for committed check, related tests and public catch-up; packaging agent independently observed HEAD 1d780ff75 and empty git status before packaging. Public-stack log embeds sourceSha and cleanBefore only.",
+    "commandForIndependentSourceCheck": "git rev-parse HEAD && git status --porcelain=v1",
+    "sourceCheckLimit": "No claim that a later working tree or any uncommitted first-red/first-green run was clean. Logs are archived under docs/evidence; the root commit containing this package provides its durable publication boundary."
+  },
+  "change": {
+    "productionFiles": 3,
+    "insertions": 52,
+    "deletions": 28,
+    "netLines": 24,
+    "scope": "Process-local RPC transport scheduling. No financial transition, money math, contract or lending implementation changes.",
+    "behavior": [
+      "Manual pollNow and scheduled polls share one in-flight poll and one cancellable cooldown.",
+      "Transient transport failure increases the delay from at least 1000ms, doubling up to 30000ms. Successful committed cursor progress decays the delay by 25%.",
+      "Stopping the watcher releases a cooldown wait; session/generation checks prevent retired sessions from reading again.",
+      "Healthy catch-up remains immediate and idle polling keeps its configured interval."
+    ]
+  },
+  "firstFailure": {
+    "artifactId": "first-red",
+    "command": "bun tools/stand-lock.ts run --reason watcher-rpc-cooldown-red --timeout-ms \"60000\" -- bun test core/__tests__/jurisdiction/watchers/j-watcher-backlog-drain.test.ts",
+    "sourceSha": null,
+    "cleanTree": null,
+    "evidenceClass": "working-tree diagnostic, not release evidence",
+    "test": "RPC J-watcher backlog drain > delivers an authenticated event beyond two 2048-block pages before returning",
+    "expectedRetryDelayMsAtLeast": 900,
+    "observedRetryDelayMs": 9.535292000000481,
+    "passed": 0,
+    "failed": 1,
+    "assertions": 5,
+    "suiteSeconds": 6.47,
+    "interpretation": "A new poll retried almost immediately after a real forwarding proxy returned 429. The 9.535ms measurement is retry delay, not total test runtime."
+  },
+  "firstGreen": {
+    "artifactId": "first-green",
+    "command": "bun tools/stand-lock.ts run --reason watcher-rpc-cooldown-green --timeout-ms \"60000\" -- bun test core/__tests__/jurisdiction/watchers/j-watcher-backlog-drain.test.ts",
+    "sourceSha": null,
+    "cleanTree": false,
+    "evidenceClass": "dirty working-tree diagnostic superseded by committed related suite",
+    "passed": 1,
+    "failed": 0,
+    "assertions": 34,
+    "suiteSeconds": 25.93
+  },
+  "committedChecks": [
+    {
+      "artifactId": "related",
+      "sourceSha": "1d780ff75b5e61ce6d0f34651945738200469486",
+      "command": "bun tools/stand-lock.ts run --reason watcher-rpc-cooldown-committed --timeout-ms \"60000\" -- bun test core/__tests__/jurisdiction/watchers core/__tests__/jurisdiction/adapter/jadapter-watcher-ingress.test.ts core/__tests__/jurisdiction/rpc/rpc-watcher-dispute-calldata.test.ts",
+      "status": "pass",
+      "passed": 104,
+      "failed": 0,
+      "assertions": 946,
+      "files": 12,
+      "suiteSeconds": 29.92,
+      "standLock": "Command uses canonical stand-lock wrapper; execution was performed by root."
+    },
+    {
+      "artifactId": "check",
+      "sourceSha": "1d780ff75b5e61ce6d0f34651945738200469486",
+      "command": "bun run check",
+      "loggedEntryCommand": "bun run check:short && bun run check:long",
+      "status": "pass",
+      "sourceGates": 38,
+      "outerParallelGates": 3
+    }
+  ],
+  "publicStack": {
+    "artifactId": "public-stack",
+    "status": "pass-read-only",
+    "command": null,
+    "commandLimitation": "Description records the parent-confirmed operation, not a reconstructed executable command or a command embedded in raw output.",
+    "canonicalVerifier": "core/orchestrator/bootstrap/contract-readiness.ts:assertCanonicalRpcContractStack",
+    "sourceSha": "1d780ff75b5e61ce6d0f34651945738200469486",
+    "cleanBefore": true,
+    "time": "2026-10-12T06:22:30.447Z",
+    "rpc": "https://sepolia.xln.finance/rpc",
+    "canonicalStackVerified": true,
+    "codeHashes": [
+      {
+        "name": "account",
+        "address": "0x1a1C16E886385A4720952b0D2b3845A258d559a9",
+        "runtimeKeccak256": "0x4b23f853f902325ca5b231fcc5fcaae9fde7a89eded60ee092cc5f03f5d62647"
+      },
+      {
+        "name": "depository",
+        "address": "0x4e7333463cDde39AA58587D58AF3f66757117f61",
+        "runtimeKeccak256": "0x70a5b9b30932d6add71c24a56ad624ede560d53ea01b3b8870ddd0b525ddfe33"
+      },
+      {
+        "name": "entityProvider",
+        "address": "0xa4f82fcB80D6198Fb64F75D7B8242643Ca3c960C",
+        "runtimeKeccak256": "0x39d53eecbc11d78aec8c2b96c40c8e53e1fcde5b8bad03d8538a41707b28d3ff"
+      },
+      {
+        "name": "deltaTransformer",
+        "address": "0x3189d71877F2CE96922FC88d0e9E56f6078A7D04",
+        "runtimeKeccak256": "0xf0b6c12143a14da9143b650dbb23895da3b01482dc352c2bb90b5ef76cf01b98"
+      }
+    ],
+    "limitation": "Canonical checker binds compiler link and immutable slots; reads use latest, not one pinned block. No financial transaction.",
+    "cleanAfter": null,
+    "financialTransactions": 0,
+    "commandDescription": {
+      "provenance": "Reconstructed description supplied by root; literal invocation is retained in the parent tool call, not embedded in this log.",
+      "executable": "bun -e",
+      "sequence": [
+        "Import assertCanonicalRpcContractStack from ./core/orchestrator/bootstrap/contract-readiness and JsonRpcProvider, keccak256 from ethers.",
+        "Reject nonempty git status --porcelain and capture git rev-parse HEAD.",
+        "Load jurisdictions['ethereum-sepolia'] from jurisdictions/jurisdictions.json; use https://sepolia.xln.finance/rpc.",
+        "Verify provider chainId equals 11155111n.",
+        "Await assertCanonicalRpcContractStack(rpc, j.contracts, 'CURRENT_P6_STACK', 5000).",
+        "Use Promise.all getCode at latest and keccak256 for account, depository, entityProvider and deltaTransformer; emit JSON source/cleanBefore/codeHashes.",
+        "Destroy the provider in finally."
+      ]
+    },
+    "compilerEvidence": [
+      {
+        "path": "core/orchestrator/bootstrap/contract-readiness.ts",
+        "sha256": "b12e4a3e2d03a3e9a7cd95b812b10a45c0ab59c5bc77ed3a8ab798918bb0cbbc",
+        "bytes": 18688,
+        "unchangedFromSourceParent": true
+      },
+      {
+        "path": "jurisdictions/jurisdictions.json",
+        "sha256": "eab02be9cb65a42776ae1e84995b573f6a2447f63c6ca3df115fe54e4c4ec2af",
+        "bytes": 7564,
+        "unchangedFromSourceParent": true
+      },
+      {
+        "path": "frontend/static/contracts/Account.json",
+        "sha256": "3ca5fe7fe38d64c7f9b93efe272875f8a795a4291d1d010b25bd56e999c281ad",
+        "bytes": 118558,
+        "unchangedFromSourceParent": true
+      },
+      {
+        "path": "frontend/static/contracts/Depository.json",
+        "sha256": "775b056ec3a034edd282ffdfac1c93ca8cc56069dc400675051659f658516460",
+        "bytes": 134068,
+        "unchangedFromSourceParent": true
+      },
+      {
+        "path": "frontend/static/contracts/DepositoryBounds.json",
+        "sha256": "5c1dbb4c035dbfb8339713f68c88c70d7b246f063910c6ba8aa57e1c4fd1041f",
+        "bytes": 44122,
+        "unchangedFromSourceParent": true
+      },
+      {
+        "path": "frontend/static/contracts/EntityProvider.json",
+        "sha256": "7d259bb3eaa13018d4d2ddd045a8a3e43c8c6f3ee1a4e843a7611f6657b14fb0",
+        "bytes": 135436,
+        "unchangedFromSourceParent": true
+      },
+      {
+        "path": "frontend/static/contracts/DeltaTransformer.json",
+        "sha256": "d1e166ed5744a31a279ec22a871b356cf4fc4778edaf3f0b34c722d02c6287d8",
+        "bytes": 46023,
+        "unchangedFromSourceParent": true
+      },
+      {
+        "path": "frontend/static/contracts/HankoVerifier.json",
+        "sha256": "13098bfe9cfb11931a9b40d686de06f993ef298b34bceb98750ae0a8e9033059",
+        "bytes": 23200,
+        "unchangedFromSourceParent": true
+      },
+      {
+        "path": "frontend/static/contracts/HashLadderRegistry.json",
+        "sha256": "308d1e4df0dce8c7b28a8eff439aa8c4ec1294e65e5d4e8472c01f0d5d95f9e4",
+        "bytes": 8634,
+        "unchangedFromSourceParent": true
+      },
+      {
+        "path": "frontend/static/contracts/NftCustody.json",
+        "sha256": "266f68bfa147aed1f85c949dd7149bab85f542de8c5d9264554ae7b379f9ac7a",
+        "bytes": 8862,
+        "unchangedFromSourceParent": true
+      }
+    ],
+    "bytecodeProofLimit": "Checker pins executable bytes after compiler-declared linking and immutable materialization. Linked library code is checked; Account/HashLadderRegistry/NftCustody self-address slots are bound; Depository ENTITY_PROVIDER and DELTA_TRANSFORMER getters are compared to configured addresses. Other compiler-declared immutable address values are checked for valid nonzero words and consistency but are not all pinned to independently approved owner/admin identities. This is not deployment-receipt, operator-rights or single-block verification."
+  },
+  "publicCatchup": {
+    "artifactId": "public-catchup",
+    "sourceSha": "1d780ff75b5e61ce6d0f34651945738200469486",
+    "command": "bun tools/stand-lock.ts run --reason \"public-p6-cooldown-catchup\" --timeout-ms \"180000\" -- bun \".logs/crisis-20261011/trace-public-p6-catchup.ts\"",
+    "status": "completed-but-p6-blocked",
+    "processExitCode": 0,
+    "wallSecondsApproximately": 160,
+    "exitAndWallEvidence": "Root process completion; final log sample is at 155202ms followed by watcher.stopped.",
+    "cursorBefore": 11893390,
+    "authenticatedBlocksScanned": 640,
+    "runtimeHeightBefore": 17,
+    "reserveBefore": "0",
+    "financialTransactions": 0,
+    "financialTransactionsEvidence": "Root reported no transactions during this read-only restored-runtime catch-up.",
+    "remainingError": "RPC_BATCH_HTTP_429",
+    "observedWindowSequence": [
+      {
+        "outcome": "success",
+        "fromBlock": 11893519,
+        "toBlock": 11893774,
+        "windowBlocks": 256,
+        "evidence": "j_watch_batch"
+      },
+      {
+        "outcome": "429",
+        "fromBlock": 11893775,
+        "toBlock": 11894286,
+        "windowBlocks": 512,
+        "evidence": "j_watch_transient_rpc_unavailable"
+      },
+      {
+        "outcome": "cursor-progress",
+        "fromBlock": 11893775,
+        "toBlock": 11894030,
+        "windowBlocks": 256,
+        "evidence": "progress.scannedThroughHeight advanced to 11894030"
+      },
+      {
+        "outcome": "429",
+        "fromBlock": 11894031,
+        "toBlock": 11894542,
+        "windowBlocks": 512,
+        "evidence": "j_watch_transient_rpc_unavailable"
+      },
+      {
+        "outcome": "429",
+        "fromBlock": 11894031,
+        "toBlock": 11894286,
+        "windowBlocks": 256,
+        "evidence": "final logged j_watch_transient_rpc_unavailable"
+      }
+    ],
+    "interpretation": "The cooldown fixed the local immediate-retry regression but did not unblock this public catch-up. After a successful 256-block scan, the range expanded to 512 and received 429 again; the final logged 256-block attempt also received 429.",
+    "comparisonLimitation": "No causal speedup claim against the prior 576-block attempt. Provider load, quota state and timing are uncontrolled.",
+    "reproductionLimit": "The command uses an ignored diagnostic harness and an existing private restored-runtime profile. Those inputs are intentionally excluded; this archive records the observed run, not a standalone public P6 reproduction.",
+    "lastObservedRuntimeHeight": 17,
+    "lastObservedReserve": "0",
+    "lastObservedCursor": 11894030,
+    "lastObservedElapsedMs": 155202,
+    "postShutdownFinancialReread": false,
+    "postShutdownPersistedStateVerified": false,
+    "observationLimitation": "Height 17, reserve 0 and cursor 11894030 are the last sampled values before cleanup, not a post-shutdown profile reread. The next candidate startup restored height 18; this is consistent with cleanup/drain progress, but its cause was not independently established."
+  },
+  "staticReview": {
+    "reviewer": "canonical_adjacent",
+    "type": "internal agent static review",
+    "reportedFindings": 0,
+    "evidence": "Parent-reported review result",
+    "independentExternalAssurance": false
+  },
+  "packageInspection": {
+    "filesInspected": 6,
+    "sensitiveAssignmentPatternCandidates": 0,
+    "observedUrls": "Public sepolia.xln.finance RPC and public build-tool documentation URLs only.",
+    "included": "Text test/check logs and public addresses, contract hashes and catch-up progress.",
+    "excluded": "Private runtime DB, keys, mesh seeds, raw WAL and profile files.",
+    "limitation": "Targeted content inspection and sensitive-assignment pattern scan are not a general secret-detection guarantee."
+  },
+  "artifacts": [
+    {
+      "id": "check",
+      "file": "watcher-cooldown-1d780ff75-check.log.gz",
+      "sha256": "69bfb3d62152589cf1c506720474cb5a61e852577d0abb03f6691521a6aae36b",
+      "bytes": 14892,
+      "uncompressedSha256": "ce6656cd7d0371d04b22cd42ef0128c5d995b3400ce5a2d2de243d58dfcda6a7",
+      "uncompressedBytes": 116960,
+      "originalLog": ".logs/canonical-review-20261012/watcher-rpc-cooldown-check-1d780ff75.log"
+    },
+    {
+      "id": "related",
+      "file": "watcher-cooldown-1d780ff75-related.log.gz",
+      "sha256": "f8d6d2494f3807cafe5cc59098ffbd1f82afda5ab532db080282a55e58359b76",
+      "bytes": 6652,
+      "uncompressedSha256": "d784b700c220c78ad8a1905b3ff8f8346a661da3a2cad19eee4df76ccb3d3bcb",
+      "uncompressedBytes": 34832,
+      "originalLog": ".logs/canonical-review-20261012/watcher-rpc-cooldown-related-1d780ff75.log"
+    },
+    {
+      "id": "first-red",
+      "file": "watcher-cooldown-1d780ff75-first-red.log.gz",
+      "sha256": "8804f74bcfb7ce70d62fa384ca9b4e2017155172c456d98ea3e540a33336286f",
+      "bytes": 942,
+      "uncompressedSha256": "3a28c3bc75d92b0ed99ceaa50c612ad8ac2f64bb6cc996224a253af262f473c5",
+      "uncompressedBytes": 1793,
+      "originalLog": ".logs/canonical-review-20261012/watcher-rpc-cooldown-first-red.log"
+    },
+    {
+      "id": "first-green",
+      "file": "watcher-cooldown-1d780ff75-first-green.log.gz",
+      "sha256": "9ea3c7743f82f218fa7e94da15f10ec5fb6557f8bb7a1fbe02aa48f0e2a6b995",
+      "bytes": 1016,
+      "uncompressedSha256": "346b4b34c864dbf1d693deff741b80f841559fa8002fd8e951de02450fcddc4e",
+      "uncompressedBytes": 2699,
+      "originalLog": ".logs/canonical-review-20261012/watcher-rpc-cooldown-first-green.log"
+    },
+    {
+      "id": "public-stack",
+      "file": "watcher-cooldown-1d780ff75-public-stack.log.gz",
+      "sha256": "ce40a96f039c70f7272f8cf532396c09dff736dd806417ed505a7ecdb54979b5",
+      "bytes": 659,
+      "uncompressedSha256": "3eafa93d8f1373ea3622501a7ebd86054f05b8ebe67d01b7ab993ab3af4e0a1c",
+      "uncompressedBytes": 1170,
+      "originalLog": ".logs/canonical-review-20261012/public-stack-1d780ff75.log"
+    },
+    {
+      "id": "public-catchup",
+      "file": "watcher-cooldown-1d780ff75-public-catchup.log.gz",
+      "sha256": "90180cae1d3c03d1e4959bcd53e3fca43214887c7281f243e5a5359e4c9f9e48",
+      "bytes": 1367,
+      "uncompressedSha256": "5e807af634193a8bc01c5354d88aabbabf354968c6dc59d3e93ebafa81e85082",
+      "uncompressedBytes": 13118,
+      "originalLog": ".logs/canonical-review-20261012/p6-cooldown-catchup-1d780ff75.log"
+    }
+  ],
+  "limitations": [
+    "Local green tests and check do not constitute public P6 or mainnet readiness.",
+    "Exit code 0 means the bounded observation finished. Last observed reserve was zero, public RPC pressure remained, and no post-shutdown persisted-state reread was performed.",
+    "Bytecode reads use latest rather than a single pinned block; no financial transaction was performed by the stack check.",
+    "This package covers source 1d780ff75 only. Any subsequent window-expansion change must carry a separate SHA and verification.",
+    "No CI result, public dispute transaction, stale-state defense, finalization, or recovery success is claimed here."
+  ],
+  "nextAction": "Root will narrow window expansion using the existing pressure signal, prove its first regression and bind the next candidate separately."
+}
