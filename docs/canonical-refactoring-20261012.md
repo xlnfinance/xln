@@ -264,6 +264,12 @@ Public P6 is still incomplete. Two bounded traces retain 429 failures; the
 second scans 1,048 blocks and last observes Runtime height 36 with reserve 0.
 It does not reach the funding event or submit a dispute. Those sampled values
 are not represented as post-shutdown state or a controlled throughput comparison.
+The next direct-upstream trace also encounters 429: 940 authenticated blocks,
+last observed Runtime height 40 and reserve 0. Switching routes has not solved
+catch-up. A single successful identical-range probe per route proves availability
+only. [Transport evidence](evidence/canonical-review-20261012/public-rpc-transport-d81a0ed9f.json)
+retains both results. The next offline diagnostic compares restored authenticated
+history with the watcher's old semantic start cursor before another network run.
 The frozen TS fixture import exception and required PR CI also remain open.
 [Exact source bindings, commands, failures and retained logs](evidence/canonical-review-20261012/watcher-pressure-window-7d3134853.json).
 

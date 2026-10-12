@@ -31,7 +31,7 @@ Keep frozen-core, PRs with seven required green jobs, no WIP commits.
   lines, 815 -> 816 files, direct core/rscore imports 18 -> 13. The moved
   3857 worker lines are not deleted code. Private WAL/seeds are not published.
 - Next single command after the two authorized import replacements:
-  bun test core/**tests**/rscore/parity/cross-j-opening-lifecycle.test.ts
+  `bun test core/__tests__/rscore/parity/cross-j-opening-lifecycle.test.ts`
   Then the group-E consumers, exact-candidate source/browser/scenario checks
   and push HEAD:codex/production-qa-boundary for PR #73 required CI.
 - Next bounded deletion: always-null retired Entity-stage handles, about 120
@@ -41,12 +41,17 @@ Keep frozen-core, PRs with seven required green jobs, no WIP commits.
   correctly after explicit checkpoint rebase, but PublicNode returns HTTP 429
   and -32005 during catch-up. Shared cancellable cooldown fixes the reproduced
   9.535 ms retry; retained pressure also prevents immediate window regrowth.
-  The latest 160-second trace scans 1,048 authenticated blocks. Its last
-  observation is Runtime height 36, reserve 0; that is not a post-shutdown
-  financial read. No further funding or dispute was submitted.
+  The proxy trace scans 1,048 authenticated blocks. A subsequent direct-upstream
+  trace scans 940 blocks and last observes Runtime height 40, reserve 0; these
+  are not post-shutdown financial reads. Both routes still return 429.
+  No further funding or dispute was submitted.
   Live alpha remains 7c3f63f98. Do not repeat unchanged short cold-start loops.
-  Next diagnosis compares the existing proxy and its canonical upstream;
-  verify any transport change before using it, with no history shortcut.
+  An identical 128-block authenticated range succeeds once through each route
+  (proxy 3,813 ms, direct 2,124 ms); this does not establish sustained capacity.
+  Next diagnosis is offline: compare restored authenticated jHistory with the
+  watcher start cursor. The direct trace repeatedly reads the prior trace's
+  range without advancing Runtime height. Do not infer persistence from that
+  observation alone or skip history without verifying the restored boundary.
 - Current static kernel closure is 160,552 code lines in 816 files, down 510
   from the review baseline. QA imports remain zero; core/rscore imports remain 13. RPC fixes add 27 physical production lines net; this is necessary new
   pressure control, not claimed code deletion. Rust and lending are unchanged.
