@@ -154,14 +154,11 @@ const handlePollFailure = (
     });
     return;
   }
-  if (isRuntimeMempoolCapacityError(error)) {
-    // A catch-up window can carry more runtime txs than the mempool holds.
-    // Retry a smaller window once frames drain; never exit the process.
+  if (isRuntimeMempoolCapacityError(error) || services.isTransientRpcUnavailable(error)) {
+    // Bound both ingress and transport pressure with the same window. A
+    // throttled 2048-block read otherwise retries its entire prefix forever;
+    // no cursor advances until a complete authenticated window is admitted.
     session.maxBlocksPerPoll = nextWatcherPollWindow(session.maxBlocksPerPoll, false);
-    handleTransientFailure(services, session, trace, message, error);
-    return;
-  }
-  if (services.isTransientRpcUnavailable(error)) {
     handleTransientFailure(services, session, trace, message, error);
     return;
   }

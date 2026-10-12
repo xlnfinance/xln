@@ -18,8 +18,8 @@ export const shouldAuditCanonicalWatcherState = (input: {
   input.nowMs - input.lastAuditAtMs >= J_WATCHER_IDLE_CANONICAL_AUDIT_MS;
 
 /**
- * The poll window halves while the Runtime mempool pushes back on a window's
- * input and doubles back after each committed window.
+ * The poll window halves under RPC or Runtime mempool pressure and doubles
+ * back only after a complete authenticated window is admitted.
  */
 export const nextWatcherPollWindow = (current: number, committed: boolean): number =>
   committed
