@@ -1,38 +1,75 @@
 # Current xln execution handoff
 
-Owner correction, 2026-10-12: launch TS + React + Ethereum same-J. Lending
-admission is deferred again; do not develop lending or Rust. The unfinished
-Rust/parity edits are preserved in stash
-`438bf1a6ddd8679bba0b63bdef11dd1fd1f45e90` (verify the stash subject before restore).
-Keep the empty frozen-core mechanism for later use; its current protected-file
-count is zero, not security coverage. This correction supersedes earlier scope
-statements below; earlier deployment results remain historical evidence.
+Owner scope: TS + React + Ethereum same-J; Rust and lending remain frozen.
+Foreign Rust stash `438bf1a6ddd8679bba0b63bdef11dd1fd1f45e90` is untouched.
+Keep frozen-core even with zero protected files. No WIP commits.
 
-- Current verified source SHA: `40be495da3d41079596e5e32135d65e051c6cee4`.
-  React now pins its browser EventEmitter dependency and resolves it explicitly;
-  the CI-only blank page came from an undeclared local package. The P5 browser
-  path checks a 250-USDC claim, 200 paid, 50 preserved as debt, external withdrawal
-  and reload. The remaining payout copy no longer promises unsecured repayment.
-- Last green: clean-source React E2E 7/7, zero skips/retries, 106.061 seconds,
-  with an empty Vite cache and the full production-smoke runner under the stand
-  lock. On that same clean SHA, production UI build and `bun run check` passed
-  (38 source gates, 29.856 seconds). This is private-Anvil evidence with a
-  controlled dispute clock, not fresh public Sepolia receipts.
-- First red: completed main CI `38183661319` on `bd6877606` passed 6/7 jobs.
-  Only E2E failed: abstract-level received an undefined EventEmitter before
-  React mounted. The current candidate fixes the missing package/alias;
-  CI must still confirm it. No consecutive green CI run is claimed.
-- Artifact: `docs/evidence/rc-20261012/react-p5-40be495da.json` records case
-  outcomes, actual dispute amounts, commands and log hashes. Earlier
-  `ts-react-exit-e3b624173.json` retains clean-source lock-ahb and production
-  compiler-template gas evidence; jurisdictions is unchanged since that SHA.
-  The public alpha remains on `7c3f63f9841f4e8b61ac5eee5dbe4f9710b10621`.
-- Next command: `git push origin main`; inspect the resulting build-and-test
-  run before promoting the candidate. Continue with React P6 after the first
-  CI failure is resolved; no broad refactor is on the critical path.
-- Remaining final gates: ten consecutive green main CI runs and branch protection;
-  remove production Rust/QA imports; complete React P6 and proof import; refresh
-  Sepolia P4/P5/P6 receipts; owner-reviewed release package. P5 React is covered.
+- Current SHA: PR #70 source follows `f2796d39f` on `codex/rc-wallet-recovery`;
+  runtime code still matches the React-verified d519. The gate list fix and public
+  Sepolia evidence are committed. The next change installs the React dependencies
+  needed by the unit job's real launcher tests.
+  https://github.com/xlnfinance/xln/pull/70
+  Owner approved PRs with mandatory green CI on 2026-10-12. Main protection is
+  enabled: all seven build-and-test jobs, strict up-to-date checks, required PR,
+  administrators included, no force pushes/deletions. This replaces direct-main-only.
+  Owner approved the two protected decoder files; both uchg flags are restored.
+- Last green: all four private production React groups on clean source d519:
+  payment 4/4, P4/P5 2/2, P6 1/1, recovery 3/3; zero skips, failures or retries.
+  P6: offline wallet defended, 100 USDC paid, owner EOA nonce unchanged;
+  gas start 387024, counter 193785, finalize 191265. File recovery rejects
+  corruption/overwrite, restores signed Account roots/balances and exits 100 USDC.
+  Related units 155/155, 441985 assertions; launcher fixtures 28/28, 166 assertions.
+  `bun run check` passed 38 source gates (30.670s); React production build passed.
+  Every recorded run started and ended with a clean tree and held the stand lock
+  where required. P5 deliberately exhausts hub reserves: keep P6 in its separate
+  release stand, rather than combining those tests against one funded hub.
+  Public green: P4/P5 on clean 976b126fa and current Sepolia bytecode,
+  with real clocks. P4 returns all 85 test USDT collateral, gas start 933174 /
+  finalize 241109. P5 pays 95 of a 110 test USDT claim and records 15 debt,
+  gas start 933994 / finalize 767286. Both waited 24 chain seconds against a
+  signed 10-second window, then separately proved a 5 test USDT external withdrawal.
+  Existing public hub cold backup restored on clean f2796d39f into an isolated
+  local directory: runtime height 676, one Account, 128 retained WAL frames
+  verified. The production server was untouched and no Runtime loop was started.
+- First red resolved: P6 exposed three distinct production faults. The watcher
+  retained a signature cleared by Depository's final event, then passed ethers
+  Result proxies into durable state, then CounterDisputeRegistered changed an
+  Account without notifying its resident worker. Fixes reuse the existing ABI
+  materializer, ProofBody validator and replaceDisputeLifecycle envelope update.
+  A real Entity-frame regression reproduces the root mismatch before the fix and
+  now matches inline/W1/W4 roots. No Rust or rscore files changed.
+  Main CI 38189132378 finished 6/7 green including all E2E; unit failures were
+  two shallow Linux /tmp fixtures. Both now use owned data children, preserving
+  the production reset guard. Local launcher/preflight checks are green.
+  PR CI 38192080486 finished five jobs green and two red; E2E stopped before browsers because
+  release-gate-order.test.ts still expected the old three groups. The focused
+  regression reproduced both failures; its expected list now requires all four
+  groups including P6 and file recovery. Focused checks 10/10 and the complete
+  release-integrity command pass (63 tests plus the package smoke).
+  Both remaining unit failures reached `DEV_DEPENDENCIES_MISSING:ui`: the unit
+  job installed root/frontend dependencies but its real launcher also starts
+  React. Add the same frozen-lockfile ui install already used by the other jobs;
+  preserve the launcher preflight and financial assertions.
+- Artifacts: clean evidence docs/evidence/rc-20261012/react-d51910eee.json
+  includes the ten cases, Account recovery snapshots, receipts, gas and log hashes.
+  The obsolete hash/signature-only export and its test decoder are removed;
+  actual encrypted restore plus on-chain exit replaces that coverage.
+  Public receipts, block timestamps and gas are in
+  docs/evidence/rc-20261012/sepolia-976b126fa.json. The public wallet/hub/tower
+  still run 7c3f63f98; the 976b126fa UI archive is prepared but not deployed.
+  Cold restore: docs/evidence/rc-20261012/cold-restore-f2796d39f.json.
+- Next: `bun run check`, commit owned paths and update PR #70. After green CI,
+  take a fresh current-state backup and prepare the synchronized public
+  wallet/hub/tower rollout before fresh P6.
+- Remaining final gates: ten consecutive green main runs; production Rust/QA
+  isolation; current-source public Sepolia P4-P6 with real clocks; external tower
+  coverage; exact-build owner-reviewed release package. Owner correction:
+  no new freeze at dispute start, FIFO, one debt per debtor/creditor/token,
+  party-selected dispute windows. These are settled requirements, not pending
+  owner questions. No starter bond or governance change in this candidate;
+  verify historical-board proof expiry against signed windows separately.
+  Public alpha remains
+  7c3f63f9841f4e8b61ac5eee5dbe4f9710b10621. No mainnet readiness claimed.
 
 Owner priority, 2026-10-11 17:28 UTC: ship a public Sepolia deployment and usable
 asset flow; Base is an alternative, not a prerequisite. Finish the TS launch path

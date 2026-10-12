@@ -8,6 +8,12 @@ import { hasLocalWalletData } from './local-wallet-data';
 
 export type { RuntimeRecoveryCandidate };
 
+export async function discoverFileRestore(seed: string, file: File): Promise<RuntimeRecoveryCandidate> {
+	await requireFreshDevice(runtimeIdForSeed(seed).toLowerCase());
+	const xln = await getXLN();
+	return xln.parseRuntimeRecoveryCandidateFile(seed, await file.text(), { sourceLabel: file.name, crypto: xln });
+}
+
 export async function discoverTowerRestore(seed: string, address: string, signal?: AbortSignal): Promise<RuntimeRecoveryCandidate> {
 	signal?.throwIfAborted();
 	await requireFreshDevice(runtimeIdForSeed(seed).toLowerCase());

@@ -8,7 +8,7 @@ import { Icon } from '../components/Icons';
 import { Logo } from '../components/Logo';
 import { GateWelcome } from '../components/GateWelcome';
 import { RestoreChoice } from '../components/RestoreChoice';
-import { discoverTowerRestore } from '../runtime/restore';
+import { discoverFileRestore, discoverTowerRestore } from '../runtime/restore';
 import { defaultTowerUrl, normalizeTowerUrl, saveRecovery } from '../runtime/recovery';
 import { useApp } from '../runtime/store';
 import { bootHostedVault, detectStack, type Stack } from '../runtime/hosted';
@@ -52,6 +52,8 @@ export function Gate() {
 	const [customShards, setCustomShards] = useState('');
 	const [phrase, setPhrase] = useState('');
 	const [restore, setRestore] = useState(false);
+	const [restoreSource, setRestoreSource] = useState<'tower' | 'file'>('tower');
+	const [restoreFile, setRestoreFile] = useState<File | null>(null);
 	const [towerUrl, setTowerUrl] = useState(defaultTowerUrl);
 	const [backupEnabled, setBackupEnabled] = useState(() => Boolean(defaultTowerUrl()));
 	const [wsUrl, setWsUrl] = useState('wss://xln.finance/rpc');
@@ -86,10 +88,14 @@ export function Gate() {
 	const recoveryFor = async (seed: string) => {
 		if (!restore) return undefined;
 		setBusyStep('Finding and verifying your encrypted backup');
+		if (restoreSource === 'file') {
+			if (!restoreFile) throw new Error('Choose your encrypted backup file.');
+			return discoverFileRestore(seed, restoreFile);
+		}
 		return discoverTowerRestore(seed, towerUrl);
 	};
 	const rememberTower = (vaultId: string): void => {
-		if (restore || backupEnabled) saveRecovery(vaultId, { mode: 'tower', towers: [normalizeTowerUrl(towerUrl)] });
+		if ((restore && restoreSource === 'tower') || backupEnabled) saveRecovery(vaultId, { mode: 'tower', towers: [normalizeTowerUrl(towerUrl)] });
 	};
 
 	const NO_STACK = 'No xln network answers at this address. Open the wallet from a running stack (bun run dev, or xln.finance/ui).';
@@ -114,7 +120,7 @@ export function Gate() {
 	const createVault = (): void => {
 		if (!work) return;
 		void run(async () => {
-			if (backupEnabled || restore) normalizeTowerUrl(towerUrl);
+			if (backupEnabled || (restore && restoreSource === 'tower')) normalizeTowerUrl(towerUrl);
 			setBusyStep('Deriving your vault');
 			deriveAbort.current = new AbortController();
 			let result;
@@ -346,7 +352,7 @@ export function Gate() {
 						<p className="note">Dispute protection is offered on the home screen after your first account is signed. Check the tower’s response status; storing a backup does not mean it will answer disputes.</p>
 						{!defaultTowerUrl() && <p className="note">This local testnet has no default tower. Add a running local service to enable backups.</p>}
 					</details>
-					<RestoreChoice enabled={restore} address={towerUrl} onToggle={setRestore} onAddress={setTowerUrl} />
+					<RestoreChoice enabled={restore} address={towerUrl} onToggle={setRestore} onAddress={setTowerUrl} source={restoreSource} onSource={setRestoreSource} onFile={setRestoreFile} />
 					<div className="gate-form-actions">
 						<button type="button" className="btn quiet" onClick={() => setMode('landing')}>
 							Back
@@ -370,7 +376,7 @@ export function Gate() {
 						<span className="field-label">Recovery phrase</span>
 						<textarea className="input boxed" rows={3} value={phrase} onChange={e => setPhrase(e.target.value)} placeholder="words separated by spaces" autoFocus />
 					</label>
-					<RestoreChoice enabled={restore} address={towerUrl} onToggle={setRestore} onAddress={setTowerUrl} />
+					<RestoreChoice enabled={restore} address={towerUrl} onToggle={setRestore} onAddress={setTowerUrl} source={restoreSource} onSource={setRestoreSource} onFile={setRestoreFile} />
 					<div className="gate-form-actions">
 						<button type="button" className="btn quiet" onClick={() => setMode('landing')}>
 							Back

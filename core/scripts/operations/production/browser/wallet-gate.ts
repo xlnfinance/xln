@@ -2,6 +2,7 @@ import { decodeRuntimeManifestEntries } from '../../hlt/boundary/worker-boundary
 import type { ChildProcess } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { JsonRpcProvider, Wallet, parseEther } from 'ethers';
 import { requireBoundaryInteger, requireBoundaryRecord } from '../../../../protocol/boundary-validation';
 
 type WalletGate = {
@@ -92,11 +93,25 @@ export const runWalletBrowserGate = async (input: WalletGate): Promise<void> => 
   const report = join(input.workDir, 'wallet-results.json');
   const towerPort = input.rpcPort + 3;
   const towerOrigin = `http://127.0.0.1:${towerPort}`;
+  const rpcUrl = `http://127.0.0.1:${input.rpcPort}`;
+  const provider = new JsonRpcProvider(rpcUrl);
+  const towerSigner = Wallet.createRandom();
+  try {
+    if ((await provider.getNetwork()).chainId !== 31337n) throw new Error('WALLET_TOWER_PRIVATE_CHAIN_REQUIRED');
+    const funder = await provider.getSigner(0);
+    await (await funder.sendTransaction({ to: towerSigner.address, value: parseEther('1') })).wait();
+  } finally {
+    provider.destroy();
+  }
   const tower = input.start('wallet-tower', process.execPath, [
     join(input.repoRoot, 'core/watchtower/standalone-server.ts'),
     '--host', '127.0.0.1', '--port', String(towerPort),
     '--db', join(input.workDir, 'watchtower'), '--quota-bytes', '4194304', '--max-bundles', '3',
-  ], {});
+    '--enable-last-resort-agent', '--sweep-interval-ms', '1000',
+  ], {
+    XLN_WATCHTOWER_PRIVATE_KEY: towerSigner.privateKey,
+    XLN_WATCHTOWER_ALLOWED_RPC_URLS: [rpcUrl, `${origin}/rpc`, `http://127.0.0.1:${input.apiPort}/rpc`].join(','),
+  });
   await waitForService(tower, `${towerOrigin}/api/tower/healthz`);
   const env = {
     NODE_ENV: 'development',

@@ -520,7 +520,7 @@ export function encodeJBatch(batch: JBatch): string {
  * authority: every consensus-facing object key comes from the pinned ABI, while
  * positional Result values remain an untrusted transport representation.
  */
-const materializeAbiValue = (param: ethers.ParamType, value: unknown, context: string): unknown => {
+export const materializeAbiValue = (param: ethers.ParamType, value: unknown, context: string): unknown => {
   if (param.baseType === 'array') {
     const itemParam = param.arrayChildren;
     if (!itemParam || !Array.isArray(value)) {

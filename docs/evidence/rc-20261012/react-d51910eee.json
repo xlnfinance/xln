@@ -1,0 +1,502 @@
+{
+  "recordedAt": "2026-10-12T01:27:36.997582+00:00",
+  "sourceSha": "d51910eeea249b56db4bf63d9157cbf2cd3be201",
+  "sourceTreeCleanBeforeAndAfter": true,
+  "scope": "TS React on private Anvil production stands with controlled dispute clocks. Public Sepolia and mainnet acceptance remain separate.",
+  "changes": [
+    "Decode delegated finalization using its effective signature and the existing validated ABI materializer.",
+    "Mirror observed counters through the canonical Account envelope update so inline, W1 and W4 commit equal Entity roots.",
+    "Restore encrypted signed wallet state from a file on a fresh profile and execute its collateral exit.",
+    "Use owned data children in Linux launcher fixtures without weakening production reset protection."
+  ],
+  "checks": {
+    "react": {
+      "passed": 10,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "groups": [
+        {
+          "name": "payment",
+          "sourceTreeCleanBeforeAndAfter": true,
+          "fullRunnerExitCode": 0,
+          "exclusiveStandLock": true,
+          "stats": {
+            "startTime": "2026-10-12T01:23:54.399Z",
+            "duration": 37036.552,
+            "expected": 4,
+            "skipped": 0,
+            "unexpected": 0,
+            "flaky": 0
+          },
+          "command": "XLN_LOCAL_PROD_SMOKE_DIR=.logs/crisis-20261011/d519-payment-clean XLN_LOCAL_PROD_SMOKE_WALLET_TESTS=e2e-payment.spec.ts,e2e-lending-availability.spec.ts bun run stand:run --reason d519-payment-clean --timeout-ms 180000 -- bun run prod:smoke:local"
+        },
+        {
+          "name": "finality",
+          "sourceTreeCleanBeforeAndAfter": true,
+          "fullRunnerExitCode": 0,
+          "exclusiveStandLock": true,
+          "stats": {
+            "startTime": "2026-10-12T01:22:38.861Z",
+            "duration": 45039.234,
+            "expected": 2,
+            "skipped": 0,
+            "unexpected": 0,
+            "flaky": 0
+          },
+          "command": "XLN_LOCAL_PROD_SMOKE_DIR=.logs/crisis-20261011/d519-finality-clean XLN_LOCAL_PROD_SMOKE_WALLET_TESTS=e2e-dispute-finality.spec.ts bun run stand:run --reason d519-finality-clean --timeout-ms 180000 -- bun run prod:smoke:local"
+        },
+        {
+          "name": "protection",
+          "sourceTreeCleanBeforeAndAfter": true,
+          "fullRunnerExitCode": 0,
+          "exclusiveStandLock": true,
+          "stats": {
+            "startTime": "2026-10-12T01:18:49.476Z",
+            "duration": 20138.654,
+            "expected": 1,
+            "skipped": 0,
+            "unexpected": 0,
+            "flaky": 0
+          },
+          "command": "XLN_LOCAL_PROD_SMOKE_DIR=.logs/crisis-20261011/d519-protection-clean XLN_LOCAL_PROD_SMOKE_WALLET_TESTS=e2e-dispute-protection.spec.ts bun run stand:run --reason d519-protection-clean --timeout-ms 180000 -- bun run prod:smoke:local"
+        },
+        {
+          "name": "recovery",
+          "sourceTreeCleanBeforeAndAfter": true,
+          "fullRunnerExitCode": 0,
+          "exclusiveStandLock": true,
+          "stats": {
+            "startTime": "2026-10-12T01:25:09.553Z",
+            "duration": 60706.589,
+            "expected": 3,
+            "skipped": 0,
+            "unexpected": 0,
+            "flaky": 0
+          },
+          "command": "XLN_LOCAL_PROD_SMOKE_DIR=.logs/crisis-20261011/d519-recovery-clean XLN_LOCAL_PROD_SMOKE_WALLET_TESTS=e2e-tower-restore.spec.ts,e2e-file-restore.spec.ts,e2e-sovereignty.spec.ts bun run stand:run --reason d519-recovery-clean --timeout-ms 180000 -- bun run prod:smoke:local"
+        }
+      ]
+    },
+    "relatedUnits": {
+      "passed": 155,
+      "failed": 0,
+      "assertions": 441985,
+      "files": 12,
+      "durationMs": 1600
+    },
+    "launcher": {
+      "command": "bun run stand:run --reason d519-launcher-clean --timeout-ms 60000 -- bun test core/__tests__/dev-startup-hardening.test.ts core/__tests__/development/dev/dev-anvil-shutdown.test.ts",
+      "passed": 28,
+      "failed": 0,
+      "assertions": 166,
+      "durationMs": 23060,
+      "sourceTreeCleanBeforeAndAfter": true
+    },
+    "sourceCheck": {
+      "command": "bun run check",
+      "exitCode": 0,
+      "sourceGates": 38,
+      "sourceDurationMs": 30670
+    },
+    "productionUiBuild": {
+      "command": "bun run --cwd ui build",
+      "exitCode": 0
+    }
+  },
+  "cases": [
+    {
+      "name": "deferred lending disables new commands and leaves the wallet able to pay",
+      "file": "e2e-lending-availability.spec.ts",
+      "status": "passed",
+      "durationMs": 9414,
+      "evidence": {}
+    },
+    {
+      "name": "payment receipts and recovery dialogs keep keyboard focus inside and restore it on close",
+      "file": "e2e-payment.spec.ts",
+      "status": "passed",
+      "durationMs": 8790,
+      "evidence": {}
+    },
+    {
+      "name": "invalid amounts and recipients cannot admit a payment or retain a revoked quote",
+      "file": "e2e-payment.spec.ts",
+      "status": "passed",
+      "durationMs": 6446,
+      "evidence": {}
+    },
+    {
+      "name": "pays the merchant through the hub and shows the committed receipt",
+      "file": "e2e-payment.spec.ts",
+      "status": "passed",
+      "durationMs": 11724,
+      "evidence": {}
+    },
+    {
+      "name": "P4 UI dispute prevents early finalization, then releases exactly 100 USDC after its signed window",
+      "file": "e2e-dispute-finality.spec.ts",
+      "status": "passed",
+      "durationMs": 18655,
+      "evidence": {
+        "early-finalize-prevention": {
+          "finalizeInputs": [],
+          "submissions": [],
+          "collateral": "100000000"
+        },
+        "dispute-finality": {
+          "mode": "canonical-auto-after-ui-start-and-early-prevention",
+          "startTx": "0x4c1a6f949cca9fbcb92c39e60b3de3f12d215750e0ffb352f82ae2584f5dae1a",
+          "finalTx": "0x56e61546ef9028037cbd59da44efc3e700b7b62a05878393e0fe339e107f037e",
+          "finalChain": {
+            "collateral": "0",
+            "disputeHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "nonce": "3",
+            "ondelta": "0",
+            "peerReserve": "1999900000000",
+            "reserve": "100000000",
+            "timeout": 0
+          },
+          "accountAfter": {
+            "reserve": "100000000",
+            "collateral": "0",
+            "incomingDebt": "0",
+            "ownValue": "0",
+            "pending": false,
+            "mempool": 0
+          }
+        },
+        "withdrawn-dispute-proceeds": {
+          "after": "100000000",
+          "before": "0",
+          "signerId": "0x1e5feddf82f905e230ba6c62a650668a6ce0c1bb"
+        }
+      }
+    },
+    {
+      "name": "P5 UI dispute pays 200 of a 250 USDC claim and preserves 50 USDC of unsecured debt",
+      "file": "e2e-dispute-finality.spec.ts",
+      "status": "passed",
+      "durationMs": 25433,
+      "evidence": {
+        "early-finalize-prevention": {
+          "finalizeInputs": [],
+          "submissions": [],
+          "collateral": "100000000"
+        },
+        "dispute-finality": {
+          "mode": "canonical-auto-after-ui-start-and-early-prevention",
+          "startTx": "0x50c5ce03cf0578d98011599fbf70fd636471b8a9fdc5a03693b34870b4711bb2",
+          "finalTx": "0x5f8835ec727d37662e3dc8fd51236d049fc75dc9694b550c91d9b623b2189966",
+          "finalChain": {
+            "collateral": "0",
+            "disputeHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "nonce": "8",
+            "ondelta": "0",
+            "peerReserve": "0",
+            "reserve": "200000000",
+            "timeout": 0
+          },
+          "accountAfter": {
+            "reserve": "200000000",
+            "collateral": "0",
+            "incomingDebt": "50000000",
+            "ownValue": "0",
+            "pending": false,
+            "mempool": 0
+          }
+        },
+        "withdrawn-dispute-proceeds": {
+          "after": "200000000",
+          "before": "0",
+          "signerId": "0x3adf043ae2322c10f1129b1b4358c439c1e1e288"
+        }
+      }
+    },
+    {
+      "name": "P6 appointed tower counters a stale signed state while the React wallet is offline and finalizes its full collateral",
+      "file": "e2e-dispute-protection.spec.ts",
+      "status": "passed",
+      "durationMs": 19408,
+      "evidence": {
+        "p6-offline-defence": {
+          "counter": {
+            "gas": "193785",
+            "hash": "0x16cdc6aa68d5ac5e343a51c983b162a9620968050d7092df811fa70a296a5da2"
+          },
+          "final": {
+            "collateral": "0",
+            "disputeHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "nonce": "8",
+            "ondelta": "0",
+            "peerReserve": "1999900000000",
+            "reserve": "100000000",
+            "timeout": 0
+          },
+          "finalize": {
+            "gas": "191265",
+            "hash": "0x53cc01ce2849f590acd7e0a6ce5f2f5d899ea7effe45f18760a6768b0aae38ce"
+          },
+          "newNonce": 8,
+          "oldNonce": 7,
+          "ownerNonce": 0,
+          "start": {
+            "gas": "387024",
+            "hash": "0xace06150a07dce6b347ab4ce16a8635b1e061ae9cbaf6c45e02ea3b0ed31d868"
+          },
+          "tower": "0x22521fbe7363361c89ae24a96887b67e86f9f853"
+        }
+      }
+    },
+    {
+      "name": "a downloaded backup rejects corruption, restores signed Accounts and exits collateral on a fresh device",
+      "file": "e2e-file-restore.spec.ts",
+      "status": "passed",
+      "durationMs": 28223,
+      "evidence": {
+        "file-restore-exit": {
+          "runtimeId": "0xad71458bb0474a6e6c111be311064fdd4c56ca47",
+          "originalAccounts": [
+            {
+              "leftEntity": "0xcfeecfbcf470b8a55c478cacd63e2a9515ec74b270f77a25b084f2aeec87e61f",
+              "rightEntity": "0xd5e20522d8b80cb44a4cc175dde0b2f63aaa8b6a1cc1e378054ddb2d5a46b4b9",
+              "height": 4,
+              "root": "0xf9366509339dc18fa80f49d6b04b2441a6fb4fcba3c3e2442933bdbf24aa2157",
+              "pending": false,
+              "mempool": 0,
+              "balances": [
+                {
+                  "tokenId": 1,
+                  "collateral": "100000000",
+                  "ondelta": "100000000",
+                  "offdelta": "0",
+                  "leftCreditLimit": "0",
+                  "rightCreditLimit": "0"
+                },
+                {
+                  "tokenId": 2,
+                  "collateral": "0",
+                  "ondelta": "0",
+                  "offdelta": "0",
+                  "leftCreditLimit": "0",
+                  "rightCreditLimit": "0"
+                },
+                {
+                  "tokenId": 3,
+                  "collateral": "0",
+                  "ondelta": "0",
+                  "offdelta": "0",
+                  "leftCreditLimit": "0",
+                  "rightCreditLimit": "0"
+                }
+              ]
+            }
+          ],
+          "restoredAccounts": [
+            {
+              "leftEntity": "0xcfeecfbcf470b8a55c478cacd63e2a9515ec74b270f77a25b084f2aeec87e61f",
+              "rightEntity": "0xd5e20522d8b80cb44a4cc175dde0b2f63aaa8b6a1cc1e378054ddb2d5a46b4b9",
+              "height": 4,
+              "root": "0xf9366509339dc18fa80f49d6b04b2441a6fb4fcba3c3e2442933bdbf24aa2157",
+              "pending": false,
+              "mempool": 0,
+              "balances": [
+                {
+                  "tokenId": 1,
+                  "collateral": "100000000",
+                  "ondelta": "100000000",
+                  "offdelta": "0",
+                  "leftCreditLimit": "0",
+                  "rightCreditLimit": "0"
+                },
+                {
+                  "tokenId": 2,
+                  "collateral": "0",
+                  "ondelta": "0",
+                  "offdelta": "0",
+                  "leftCreditLimit": "0",
+                  "rightCreditLimit": "0"
+                },
+                {
+                  "tokenId": 3,
+                  "collateral": "0",
+                  "ondelta": "0",
+                  "offdelta": "0",
+                  "leftCreditLimit": "0",
+                  "rightCreditLimit": "0"
+                }
+              ]
+            }
+          ],
+          "startTransaction": "0xd65f206e84695e5615e8ee799a51bec0d892c202e8ebaa3c9bef40eac0926521",
+          "startGas": "386940",
+          "finalTransaction": "0xa5255091f4011844814937c0c7b4728a4f3a207455115aab9070725edd3619b5",
+          "finalGas": "228726",
+          "finalChain": {
+            "reserve": "100000000",
+            "peerReserve": "1999900000000",
+            "collateral": "0",
+            "ondelta": "0",
+            "nonce": "3",
+            "disputeHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "timeout": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "shows signed Account protection and tower receipts, then opens Desk and Pay through the palette",
+      "file": "e2e-sovereignty.spec.ts",
+      "status": "passed",
+      "durationMs": 8542,
+      "evidence": {
+        "tower-protection-receipt": {
+          "runtimeId": "0xbe6a71950af79ff49efb2f3da5e98789e44fb0f5",
+          "height": 17,
+          "sequence": 1,
+          "appointmentSequence": 4,
+          "towerId": "watchtower",
+          "bundleHash": "0x85509d1aacda7931d9d6d2dfb14fbdae040f08bf6c808d80bf79275a6defd046",
+          "towerSignature": "0x3104c47a764e836b1a7fb4bc10f9a3775d61f86344b28c2a9357dbf42817e6af643ede4135f83755af73da8d9c70b23a49937d1efd9c95c67a5a831580911e611c",
+          "quotaOk": true
+        }
+      }
+    },
+    {
+      "name": "tower backup restores funded Account proofs, refuses overwrite and continues payments",
+      "file": "e2e-tower-restore.spec.ts",
+      "status": "passed",
+      "durationMs": 22982,
+      "evidence": {
+        "source-accounts": {
+          "accounts": [
+            {
+              "leftEntity": "0xd5e20522d8b80cb44a4cc175dde0b2f63aaa8b6a1cc1e378054ddb2d5a46b4b9",
+              "rightEntity": "0xe5d19d10b95c81421b35d4c58c645971b4586f03f934f5602ab10f3e24a6e6ab",
+              "height": 4,
+              "root": "0xd6e5fb47243b65b8a9ecbc25e74a3d1bfbb6ab358d577da6387bea8171ad535c",
+              "pending": false,
+              "mempool": 0,
+              "balances": [
+                {
+                  "tokenId": 1,
+                  "collateral": "0",
+                  "ondelta": "0",
+                  "offdelta": "-100000000",
+                  "leftCreditLimit": "110000000",
+                  "rightCreditLimit": "0"
+                },
+                {
+                  "tokenId": 2,
+                  "collateral": "0",
+                  "ondelta": "0",
+                  "offdelta": "0",
+                  "leftCreditLimit": "0",
+                  "rightCreditLimit": "0"
+                },
+                {
+                  "tokenId": 3,
+                  "collateral": "0",
+                  "ondelta": "0",
+                  "offdelta": "0",
+                  "leftCreditLimit": "0",
+                  "rightCreditLimit": "0"
+                }
+              ]
+            }
+          ]
+        },
+        "restored-accounts": {
+          "accounts": [
+            {
+              "leftEntity": "0xd5e20522d8b80cb44a4cc175dde0b2f63aaa8b6a1cc1e378054ddb2d5a46b4b9",
+              "rightEntity": "0xe5d19d10b95c81421b35d4c58c645971b4586f03f934f5602ab10f3e24a6e6ab",
+              "height": 4,
+              "root": "0xd6e5fb47243b65b8a9ecbc25e74a3d1bfbb6ab358d577da6387bea8171ad535c",
+              "pending": false,
+              "mempool": 0,
+              "balances": [
+                {
+                  "tokenId": 1,
+                  "collateral": "0",
+                  "ondelta": "0",
+                  "offdelta": "-100000000",
+                  "leftCreditLimit": "110000000",
+                  "rightCreditLimit": "0"
+                },
+                {
+                  "tokenId": 2,
+                  "collateral": "0",
+                  "ondelta": "0",
+                  "offdelta": "0",
+                  "leftCreditLimit": "0",
+                  "rightCreditLimit": "0"
+                },
+                {
+                  "tokenId": 3,
+                  "collateral": "0",
+                  "ondelta": "0",
+                  "offdelta": "0",
+                  "leftCreditLimit": "0",
+                  "rightCreditLimit": "0"
+                }
+              ]
+            }
+          ]
+        },
+        "post-restore-payment": {
+          "restoredMoney": {
+            "owned": "100000000",
+            "root": "0xd6e5fb47243b65b8a9ecbc25e74a3d1bfbb6ab358d577da6387bea8171ad535c",
+            "height": 4,
+            "pending": false,
+            "mempool": 0
+          },
+          "payment": {
+            "amount": "1000000",
+            "senderAmount": "1000001",
+            "fee": "1",
+            "hashlock": "0x28f6f7d29727056bcd0df3c6761f2f77cc7cff0b6eaff472ef268d9f94b31237"
+          }
+        }
+      }
+    }
+  ],
+  "mainBranchProtection": {
+    "verifiedAt": "2026-10-12T01:27:36.997754+00:00",
+    "requiredContexts": [
+      "Contracts",
+      "Runtime Checks",
+      "Frontend Build",
+      "React Wallet Types",
+      "Unit Tests",
+      "Scenario lock-ahb",
+      "E2E Tests"
+    ],
+    "strict": true,
+    "requiredPullRequest": true,
+    "enforceAdmins": true,
+    "forcePushes": false,
+    "deletions": false
+  },
+  "logHashes": {
+    ".logs/crisis-20261011/d519-payment-clean/wallet-results.json": "54c137ac809c671378345a9510c3131b3e33bf54ae96ae49e21650ffb25582ea",
+    ".logs/crisis-20261011/d519-payment-clean.log": "f9e089909fa0df4f47cdc2950a476f6b7b6dcd0088b2dea26d6bffe5a5b1a950",
+    ".logs/crisis-20261011/d519-finality-clean/wallet-results.json": "1af08af2ef61ca6a15efbd4a0c140d84264bc1bad70df5426293db0ebabf15ae",
+    ".logs/crisis-20261011/d519-finality-clean.log": "1ae64d25a02b90f65dbc4cd12a0878bf944138f11340b257c7f098fac1c730d5",
+    ".logs/crisis-20261011/d519-protection-clean/wallet-results.json": "ead73106217881a6274e6e01dcfacf2cd7ab300d48860c98dcc15537e55b1e4b",
+    ".logs/crisis-20261011/d519-protection-clean.log": "749e494dc9c13528b159bd4738579823c7eed1e81d21fdc19ab4f718675a2647",
+    ".logs/crisis-20261011/d519-recovery-clean/wallet-results.json": "88e5bda4b7a6aae508bf65e3e922a094587d3a886ec3fc69df0fd2ddeaadbd17",
+    ".logs/crisis-20261011/d519-recovery-clean.log": "178b8a2855bcd0001aee4be8e9c6fda77befbc450543b01d06cdbac7ffa386c5",
+    ".logs/crisis-20261011/d519-check.log": "790507003f1b6a153bc83b97d7806903d497f86beadd956a4f9a4567427ab680",
+    ".logs/crisis-20261011/d519-ui-build.log": "b802c27f1523713c1bb5241844f578012fd74f336da86b285b788bf44af0a40c",
+    ".logs/crisis-20261011/d519-units.log": "6bac69fa20f820b7a6fb0d77f8b58d043b2d288f5413a89a806fd1298823e8be",
+    ".logs/crisis-20261011/d519-launcher-clean.log": "b514958dce3d3e01f6950c19ae58b5014759e34be68088bdfc7b9ee1e25990a8"
+  },
+  "limits": [
+    "Private Anvil clocks were advanced; these receipts do not satisfy the real-clock public Sepolia gate.",
+    "The initial combined P4/P5/P6 run failed because P5 intentionally exhausted the hub reserve. The four independently initialized release groups above all passed; no financial assertion or faucet check was weakened.",
+    "The last main CI run 38189132378 was 6/7 green; Linux verification of the launcher fixture repairs must come from fresh PR CI. Ten consecutive green main runs remain unproved.",
+    "Current-bytecode public Sepolia P4/P5/P6, full exit gas bounds, external tower coverage and the owner-reviewed release package remain open."
+  ]
+}

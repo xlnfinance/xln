@@ -164,7 +164,8 @@ Do not duplicate or weaken it.
 
 ## GIT AND SHARED WORKSPACE
 
-- Work and push on `main` only. No branch/worktree unless the owner explicitly requests it.
+- Owner decision 2026-10-12: work on `codex/` branches and merge through PRs with mandatory green CI.
+  This replaces direct-main-only. Do not bypass branch protection; worktrees still require owner request.
 - Preserve unrelated user changes. Failed verification is not a release-ready commit.
 - No `wip:` commits on main. Commit only owned paths with `git commit -- <paths>`.
 - Before a shared-tree commit, stop concurrent writers, run formatting and `git diff --check`.
